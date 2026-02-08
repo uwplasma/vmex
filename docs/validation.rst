@@ -364,6 +364,9 @@ Current fixed-boundary solve status (n3are)
   RMS to avoid immediate overflow/NaN updates.
 - ``vmecpp_iter`` now applies force updates in VMEC++-style ``(m,n>=0)``
   storage before mapping into vmec_jax's signed-helical state layout.
+- ``vmecpp_iter`` now computes VMEC++ ``fNorm1`` from ``rzNorm`` (sum of squares
+  of decomposed R/Z Fourier coefficients in ``(m,n>=0)`` storage), using a
+  vectorized implementation to avoid Python-loop overhead in iteration logs.
 - Iteration logs now include ``dt_eff`` and ``update_rms`` in addition to
   ``fsqr/fsqz/fsql`` and preconditioned ``fsqr1/fsqz1/fsql1`` to help locate
   the first unstable update step.
