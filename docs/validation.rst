@@ -461,6 +461,11 @@ Notes:
 - VMEC++ uses OpenMP internally; if you see crashes or oversubscription issues,
   try setting ``OMP_NUM_THREADS=1`` and pass ``--max-threads 1`` to the helper
   script.
+- For benchmarking, prefer a normal wheel install of VMEC++ (e.g. ``pip install vmecpp``).
+  Editable installs from a local clone can rebuild on import and distort timing.
+- On macOS, if building VMEC++ from source and CMake/LLVM reports missing SDK
+  headers (e.g. ``unistd.h``), force AppleClang via ``CC=/usr/bin/clang
+  CXX=/usr/bin/clang++``.
 
 Note
 ----
