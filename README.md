@@ -61,7 +61,11 @@ Default cases (inputs live under `examples/data/`):
 
 Notes:
 - `vmec_jax` runtime excludes JAX compilation time (per-case warmup run).
+- For `vmec2000` and `vmecpp`, the script overrides multi-grid iteration controls so the *total*
+  iteration budget matches `--iters` (it distributes the budget across multi-grid steps).
 - Residual traces use VMEC-style `fsq_total` quantities and are not normalized to O(1).
+- VMEC++ benchmarking assumes an installed wheel (`pip install vmecpp` or a non-editable install from source).
+  Editable installs of VMEC++ can rebuild on import and will distort timings.
 
 <table>
   <tr>
