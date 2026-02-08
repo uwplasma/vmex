@@ -264,10 +264,25 @@ def main() -> int:
         rel = abs(j - c) / max(abs(c), 1e-30)
         print(f"  rz_norm_from_f_norm1: jax={j:.6e} vmecpp={c:.6e} rel={rel:.3e}")
 
+    mode_diag_exponent = 1.0
+    mpol = int(cfg.mpol)
+    nrange = int(cfg.ntor) + 1
+    nfp = float(cfg.nfp)
+    w_mode_mn = (1.0 + (np.arange(mpol)[:, None] ** 2 + (np.arange(nrange)[None, :] * nfp) ** 2)) ** (
+        -mode_diag_exponent
+    )
+
+    # VMEC++ reports the VMEC++-preconditioned forces without applying the
+    # optional mode-diagonal weights used in the update loop. Compare both.
+    frzl_pre = diag_jax["frzl_pre"]
     for name in ("frcc", "fzsc", "flsc"):
-        j = np.asarray(diag_jax[f"{name}_u"])
-        c = np.asarray(diag_cpp[name])
-        _maybe_print_array_diff(name, j, c)
+        j_pre = np.asarray(getattr(frzl_pre, name))
+        c_pre = np.asarray(diag_cpp[name])
+        _maybe_print_array_diff(f"{name} (precond)", j_pre, c_pre)
+
+        j_w = np.asarray(diag_jax[f"{name}_u"])
+        c_w = c_pre * w_mode_mn[None, :, :]
+        _maybe_print_array_diff(f"{name} (mode-weighted)", j_w, c_w)
 
     for name, key in (
         ("frcc_u", "frcc_mode_rms"),
@@ -284,12 +299,18 @@ def main() -> int:
 
     summarize_many(
         [
+            ("jax_frcc_pre", np.asarray(frzl_pre.frcc)),
             ("jax_frcc_u", diag_jax["frcc_u"]),
             ("cpp_frcc", diag_cpp["frcc"]),
+            ("cpp_frcc_mode_weighted", np.asarray(diag_cpp["frcc"]) * w_mode_mn[None, :, :]),
+            ("jax_fzsc_pre", np.asarray(frzl_pre.fzsc)),
             ("jax_fzsc_u", diag_jax["fzsc_u"]),
             ("cpp_fzsc", diag_cpp["fzsc"]),
+            ("cpp_fzsc_mode_weighted", np.asarray(diag_cpp["fzsc"]) * w_mode_mn[None, :, :]),
+            ("jax_flsc_pre", np.asarray(frzl_pre.flsc)),
             ("jax_flsc_u", diag_jax["flsc_u"]),
             ("cpp_flsc", diag_cpp["flsc"]),
+            ("cpp_flsc_mode_weighted", np.asarray(diag_cpp["flsc"]) * w_mode_mn[None, :, :]),
         ],
         indent="  ",
     )
