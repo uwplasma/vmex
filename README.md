@@ -50,7 +50,7 @@ These figures compare a *fixed iteration budget* across `vmec2000` (Fortran via 
 `vmecpp`, and `vmec_jax` on 4 bundled inputs (2 axisymmetric, 2 3D). Reproduce via:
 
 ```bash
-python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 20
+python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 10
 ```
 
 Default cases (inputs live under `examples/data/`):
@@ -58,6 +58,10 @@ Default cases (inputs live under `examples/data/`):
 - `vmecpp_solovev`
 - `cth_like_fixed_bdy`
 - `nfp4_QH_warm_start`
+
+Notes:
+- `vmec_jax` runtime excludes JAX compilation time (per-case warmup run).
+- Residual traces use VMEC-style `fsq_total` quantities and are not normalized to O(1).
 
 <table>
   <tr>

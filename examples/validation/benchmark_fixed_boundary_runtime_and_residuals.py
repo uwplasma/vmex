@@ -51,6 +51,20 @@ def _maybe_import(name: str):
 def _run_vmec_jax(*, input_path: Path, case: str, iters: int) -> RunTrace:
     import vmec_jax.api as vj
 
+    # Warm up to exclude JAX compilation from timed region. Compilation cost is
+    # shape-dependent, so we warm up per-case.
+    # Note: some parts of the stack stage/jit by `max_iter`, so warm up with the
+    # same iteration count.
+    warm = vj.run_fixed_boundary(input_path, solver="vmecpp_iter", max_iter=int(iters), verbose=False)
+    try:
+        warm_res = warm.result
+        if warm_res is not None and hasattr(warm_res, "fsqr2_history"):
+            h = getattr(warm_res, "fsqr2_history")
+            if len(h) > 0:
+                _ = float(np.asarray(h)[-1])
+    except Exception:
+        pass
+
     t0 = time.perf_counter()
     run = vj.run_fixed_boundary(input_path, solver="vmecpp_iter", max_iter=int(iters), verbose=False)
     dt = time.perf_counter() - t0
@@ -73,12 +87,17 @@ def _run_vmecpp(*, input_path: Path, case: str, iters: int, max_threads: int) ->
 
     inp = vmecpp.VmecInput.from_file(str(input_path))
     # Force a fixed iteration budget and return outputs even if not converged.
-    # In VMEC++'s VMEC-style iteration, `fsqt` length is typically 2*niter_array[0].
     inp.return_outputs_even_if_not_converged = True
-    n_half = int(np.ceil(iters / 2))
     # Use a plain Python list here. Some vmecpp builds are sensitive to numpy dtype/shape
     # when assigning Eigen-backed arrays via pybind11.
-    inp.niter_array = [n_half, n_half]
+    #
+    # VMEC++'s `fsqt` length can differ across iteration styles/configs, so we
+    # over-request iterations and slice `fsqt[:iters]` below.
+    inp.niter_array = [int(iters), int(iters)]
+    try:
+        inp.ftol_array = [0.0, 0.0]
+    except Exception:
+        pass
 
     t0 = time.perf_counter()
     out = vmecpp.run(inp, verbose=False, max_threads=int(max_threads))
@@ -244,7 +263,7 @@ def main() -> None:
         default=["circular_tokamak", "vmecpp_solovev", "cth_like_fixed_bdy", "nfp4_QH_warm_start"],
     )
     # Keep the default small; this script is for README figures, not profiling.
-    p.add_argument("--iters", type=int, default=20, help="Fixed iteration budget for all backends.")
+    p.add_argument("--iters", type=int, default=10, help="Fixed iteration budget for all backends.")
     p.add_argument("--max-threads", type=int, default=1, help="VMEC++ max_threads.")
     p.add_argument("--outdir", default="examples/outputs/bench_fixed_boundary", help="Output directory root.")
     args = p.parse_args()
