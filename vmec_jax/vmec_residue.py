@@ -217,6 +217,7 @@ def vmec_rz_norm_from_state(
     static,
     s: Any | None = None,
     apply_scalxc: bool = True,
+    apply_basis_norm: bool = True,
     ns_min: int | None = None,
     ns_max: int | None = None,
 ) -> Any:
@@ -290,6 +291,18 @@ def vmec_rz_norm_from_state(
     rcc, rss = _signed_cos_to_mn(state.Rcos)
     zsc, zcs = _signed_sin_to_mn(state.Zsin)
 
+    if bool(apply_basis_norm):
+        m_idx = jnp.arange(mpol)[:, None]
+        n_idx = jnp.arange(nrange)[None, :]
+        mscale = jnp.where(m_idx == 0, 1.0, jnp.sqrt(2.0)).astype(rcc.dtype)
+        nscale = jnp.where(n_idx == 0, 1.0, jnp.sqrt(2.0)).astype(rcc.dtype)
+        basis_norm = 1.0 / (mscale * nscale)
+        basis_norm = basis_norm[None, :, :]
+        rcc = rcc * basis_norm
+        rss = rss * basis_norm
+        zsc = zsc * basis_norm
+        zcs = zcs * basis_norm
+
     if bool(apply_scalxc):
         if s is None:
             s = jnp.asarray(static.s)
@@ -338,6 +351,7 @@ def vmec_rz_decompose_signed(
     static: VmecStatic,
     *,
     apply_scalxc: bool = False,
+    apply_basis_norm: bool = False,
     s: jnp.ndarray | None = None,
 ):
     """Return (rcc, rss, zsc, zcs) in signed (m,n>=0) storage.
@@ -407,6 +421,18 @@ def vmec_rz_decompose_signed(
 
     rcc, rss = _signed_cos_to_mn(state.Rcos)
     zsc, zcs = _signed_sin_to_mn(state.Zsin)
+
+    if bool(apply_basis_norm):
+        m_idx = jnp.arange(mpol)[:, None]
+        n_idx = jnp.arange(nrange)[None, :]
+        mscale = jnp.where(m_idx == 0, 1.0, jnp.sqrt(2.0)).astype(rcc.dtype)
+        nscale = jnp.where(n_idx == 0, 1.0, jnp.sqrt(2.0)).astype(rcc.dtype)
+        basis_norm = 1.0 / (mscale * nscale)
+        basis_norm = basis_norm[None, :, :]
+        rcc = rcc * basis_norm
+        rss = rss * basis_norm
+        zsc = zsc * basis_norm
+        zcs = zcs * basis_norm
 
     if bool(apply_scalxc):
         if s is None:
