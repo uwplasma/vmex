@@ -538,8 +538,10 @@ def vmec_forces_rz_from_wout(
     # Constraint force pipeline: compute gcon from ztemp via alias and apply
     # the constraint force kernels to B-terms (forces.f "CONSTRAINT FORCE").
     # ---------------------------------------------------------------------
-    if indata is not None:
-        constraint_tcon0 = float(indata.get_float("TCON0", 0.0))
+    # VMEC default: `tcon0 = 1` (see `readin.f`).
+    # If caller passed an explicit value, do not override it from `indata`.
+    if indata is not None and constraint_tcon0 is None:
+        constraint_tcon0 = float(indata.get_float("TCON0", 1.0))
     con = _constraint_kernels_from_state(
         state=state,
         static=static,
@@ -857,8 +859,10 @@ def vmec_forces_rz_from_wout_reference_fields(
     bc_obj.blmn_even = blmn_even
     bc_obj.blmn_odd = blmn_odd
 
-    if indata is not None:
-        constraint_tcon0 = float(indata.get_float("TCON0", 0.0))
+    # VMEC default: `tcon0 = 1` (see `readin.f`).
+    # If caller passed an explicit value, do not override it from `indata`.
+    if indata is not None and constraint_tcon0 is None:
+        constraint_tcon0 = float(indata.get_float("TCON0", 1.0))
     con = _constraint_kernels_from_state(
         state=state,
         static=static,

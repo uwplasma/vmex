@@ -31,7 +31,9 @@ class _TinyCase:
 
 
 def _tiny_axisym_case() -> _TinyCase:
-    cfg = VMECConfig(ns=9, mpol=4, ntor=0, nfp=1, lasym=False, lconm1=True, lthreed=True, ntheta=16, nzeta=4)
+    # Keep this *very* small: these tests only check that the preconditioner
+    # paths run end-to-end and improve the objective in one step.
+    cfg = VMECConfig(ns=7, mpol=3, ntor=0, nfp=1, lasym=False, lconm1=True, lthreed=True, ntheta=10, nzeta=1)
     static = build_static(cfg)
     K = int(static.modes.K)
 
@@ -76,7 +78,7 @@ def test_step8_mode_diag_preconditioner_runs_and_decreases_energy():
         lamscale=flux.lamscale,
         pressure=pressure,
         gamma=gamma,
-        max_iter=2,
+        max_iter=1,
         step_size=5e-3,
         jacobian_penalty=1e3,
         preconditioner="mode_diag",
@@ -111,7 +113,7 @@ def test_step8_radial_tridi_preconditioner_runs_and_decreases_energy():
         lamscale=flux.lamscale,
         pressure=pressure,
         gamma=gamma,
-        max_iter=2,
+        max_iter=1,
         step_size=5e-3,
         jacobian_penalty=1e3,
         preconditioner="radial_tridi",

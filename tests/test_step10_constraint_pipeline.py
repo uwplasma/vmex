@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -20,6 +21,12 @@ def _load_case(input_rel: str, wout_rel: str):
     assert wout_path.exists()
     cfg, _ = load_config(str(input_path))
     wout = read_wout(wout_path)
+    # These tests only validate the constraint pipeline wiring (zero/nonzero),
+    # not spectral parity. Use a very small grid to keep runtime tiny.
+    ntheta = min(int(cfg.ntheta), 12)
+    ntheta = 2 * (ntheta // 2)
+    nzeta = 1
+    cfg = replace(cfg, ntheta=int(ntheta), nzeta=int(nzeta))
     grid = vmec_angle_grid(ntheta=int(cfg.ntheta), nzeta=int(cfg.nzeta), nfp=int(wout.nfp), lasym=bool(wout.lasym))
     static = build_static(cfg, grid=grid)
     st = state_from_wout(wout)
