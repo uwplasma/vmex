@@ -2010,7 +2010,6 @@ def solve_fixed_boundary_vmecpp_iter(
         raise ValueError("step_size must be positive")
 
     signgs = int(signgs)
-    idx00 = _mode00_index(static.modes)
     vmecpp_reference_mode = bool(vmecpp_reference_mode)
     if use_vmecpp_restart_triggers is None:
         # VMEC++ restart triggers are generally stabilizing. Keep them on by
@@ -2040,6 +2039,21 @@ def solve_fixed_boundary_vmecpp_iter(
     from .vmec_jacobian import vmec_half_mesh_jacobian_from_state
     from .vmec_tomnsp import TomnspsRZL, vmec_angle_grid, vmec_trig_tables
 
+    # VMEC++ (and VMEC2000) evaluate the force kernels on VMEC's internal
+    # angle grid. In particular, when `lasym=False`, VMEC uses a reduced theta
+    # grid (stellarator symmetry) for the force pipeline. Rebuild `static`
+    # using `vmec_angle_grid(...)` so the force terms do not mix full-grid and
+    # VMEC-grid arrays (which triggers broadcasting errors and parity drift).
+    cfg = static.cfg
+    grid_vmec = vmec_angle_grid(
+        ntheta=int(cfg.ntheta),
+        nzeta=int(cfg.nzeta),
+        nfp=int(cfg.nfp),
+        lasym=bool(cfg.lasym),
+    )
+    static = build_static(cfg, grid=grid_vmec)
+
+    idx00 = _mode00_index(static.modes)
     s = jnp.asarray(static.s)
     flux = flux_profiles_from_indata(indata, s, signgs=signgs)
     chipf_wout = half_mesh_avg_from_full_mesh(jnp.asarray(flux.chipf))
@@ -2206,34 +2220,24 @@ def solve_fixed_boundary_vmecpp_iter(
         return sm, sp
 
     def _vmecpp_lambda_preconditioner(bc):
-        from .vmecpp_preconditioner import vmecpp_lambda_preconditioner
+        from .vmecpp_preconditioner_jax import vmecpp_lambda_preconditioner
 
         return vmecpp_lambda_preconditioner(
             bc=bc,
             trig=trig,
-            s=np.asarray(s, dtype=float),
+            s=s,
             cfg=cfg,
         )
 
     def _vmecpp_rz_preconditioner(frzl_in: TomnspsRZL, bc, k):
-        from .vmecpp_preconditioner import vmecpp_rz_preconditioner
+        from .vmecpp_preconditioner_jax import vmecpp_rz_preconditioner
 
         return vmecpp_rz_preconditioner(
             frzl_in=frzl_in,
             bc=bc,
             k=k,
             trig=trig,
-            s=np.asarray(s, dtype=float),
-            cfg=cfg,
-        )
-        from .vmecpp_preconditioner import vmecpp_rz_preconditioner
-
-        return vmecpp_rz_preconditioner(
-            frzl_in=frzl_in,
-            bc=bc,
-            k=k,
-            trig=trig,
-            s=np.asarray(s, dtype=float),
+            s=s,
             cfg=cfg,
         )
 
@@ -2288,7 +2292,7 @@ def solve_fixed_boundary_vmecpp_iter(
         fsqz = norms.r1 * norms.fnorm * gcz2
         fsql = norms.fnormL * gcl2
         rz_scale, l_scale = _metric_surface_precond_from_bcovar(k.bc)
-        return frzl, fsqr, fsqz, fsql, rz_scale, l_scale
+        return k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale
 
     mpol = int(static.cfg.mpol)
     ntor = int(static.cfg.ntor)
@@ -2496,7 +2500,9 @@ def solve_fixed_boundary_vmecpp_iter(
         include_edge_history.append(int(bool(include_edge)))
         zero_m1_history.append(int(float(np.asarray(zero_m1)) > 0.5))
 
-        frzl, fsqr, fsqz, fsql, rz_scale, l_scale = _compute_forces(state, include_edge=include_edge, zero_m1=zero_m1)
+        k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale = _compute_forces(
+            state, include_edge=include_edge, zero_m1=zero_m1
+        )
         fsqr_f = float(np.asarray(fsqr))
         fsqz_f = float(np.asarray(fsqz))
         fsql_f = float(np.asarray(fsql))
@@ -2519,13 +2525,35 @@ def solve_fixed_boundary_vmecpp_iter(
                 )
             break
 
-        # Precondition forces (radial smoother).
-        frcc = _apply_radial_tridi(frzl.frcc * rz_scale[:, None, None], precond_radial_alpha)
-        frss = _apply_radial_tridi(frzl.frss * rz_scale[:, None, None], precond_radial_alpha) if frzl.frss is not None else None
-        fzsc = _apply_radial_tridi(frzl.fzsc * rz_scale[:, None, None], precond_radial_alpha)
-        fzcs = _apply_radial_tridi(frzl.fzcs * rz_scale[:, None, None], precond_radial_alpha) if frzl.fzcs is not None else None
-        flsc = _apply_radial_tridi(frzl.flsc * l_scale[:, None, None], precond_lambda_alpha)
-        flcs = _apply_radial_tridi(frzl.flcs * l_scale[:, None, None], precond_lambda_alpha) if frzl.flcs is not None else None
+        # Precondition forces (VMEC++ axisymmetric preconditioner when available).
+        if (not bool(cfg.lthreed)) and (not bool(cfg.lasym)):
+            lam_prec = _vmecpp_lambda_preconditioner(k.bc)
+            frzl_rz = _vmecpp_rz_preconditioner(frzl, k.bc, k)
+            frcc = jnp.asarray(frzl_rz.frcc)
+            frss = frzl_rz.frss
+            fzsc = jnp.asarray(frzl_rz.fzsc)
+            fzcs = frzl_rz.fzcs
+            flsc = jnp.asarray(frzl_rz.flsc) * jnp.asarray(lam_prec)
+            flcs = None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * jnp.asarray(lam_prec))
+        else:
+            frcc = _apply_radial_tridi(frzl.frcc * rz_scale[:, None, None], precond_radial_alpha)
+            frss = (
+                _apply_radial_tridi(frzl.frss * rz_scale[:, None, None], precond_radial_alpha)
+                if frzl.frss is not None
+                else None
+            )
+            fzsc = _apply_radial_tridi(frzl.fzsc * rz_scale[:, None, None], precond_radial_alpha)
+            fzcs = (
+                _apply_radial_tridi(frzl.fzcs * rz_scale[:, None, None], precond_radial_alpha)
+                if frzl.fzcs is not None
+                else None
+            )
+            flsc = _apply_radial_tridi(frzl.flsc * l_scale[:, None, None], precond_lambda_alpha)
+            flcs = (
+                _apply_radial_tridi(frzl.flcs * l_scale[:, None, None], precond_lambda_alpha)
+                if frzl.flcs is not None
+                else None
+            )
 
         frzl_pre = TomnspsRZL(
             frcc=frcc,
@@ -2573,7 +2601,7 @@ def solve_fixed_boundary_vmecpp_iter(
                     Lcos=state.Lcos,
                     Lsin=jnp.asarray(state.Lsin) + sign * dL_dir,
                 )
-                _, fsqr_t, fsqz_t, fsql_t, _, _ = _compute_forces(
+                _, _, fsqr_t, fsqz_t, fsql_t, _, _ = _compute_forces(
                     st_try,
                     include_edge=True,
                     zero_m1=zero_m1,
@@ -2827,7 +2855,7 @@ def solve_fixed_boundary_vmecpp_iter(
                 enforce_lambda_axis=False,
                 idx00=idx00,
             )
-            _, fsqr_t, fsqz_t, fsql_t, _, _ = _compute_forces(
+            _, _, fsqr_t, fsqz_t, fsql_t, _, _ = _compute_forces(
                 state_try,
                 include_edge=include_edge,
                 zero_m1=zero_m1,
@@ -2863,7 +2891,7 @@ def solve_fixed_boundary_vmecpp_iter(
                         enforce_lambda_axis=False,
                         idx00=idx00,
                     )
-                    _, fsqr_t, fsqz_t, fsql_t, _, _ = _compute_forces(
+                    _, _, fsqr_t, fsqz_t, fsql_t, _, _ = _compute_forces(
                         state_try,
                         include_edge=include_edge,
                         zero_m1=zero_m1,
@@ -2934,7 +2962,7 @@ def solve_fixed_boundary_vmecpp_iter(
                         enforce_lambda_axis=False,
                         idx00=idx00,
                     )
-                    _, fsqr_d, fsqz_d, fsql_d, _, _ = _compute_forces(
+                    _, _, fsqr_d, fsqz_d, fsql_d, _, _ = _compute_forces(
                         state_dir,
                         include_edge=include_edge,
                         zero_m1=zero_m1,
@@ -3078,7 +3106,7 @@ def solve_fixed_boundary_vmecpp_iter(
                     enforce_lambda_axis=False,
                     idx00=idx00,
                 )
-                _, fsqr_t, fsqz_t, fsql_t, _, _ = _compute_forces(
+                _, _, fsqr_t, fsqz_t, fsql_t, _, _ = _compute_forces(
                     state_try,
                     include_edge=include_edge,
                     zero_m1=zero_m1,
