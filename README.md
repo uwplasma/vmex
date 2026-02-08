@@ -43,6 +43,22 @@ python examples/showcase_axisym_input_to_wout.py --case shaped_tokamak_pressure 
   </tr>
 </table>
 
+## Fixed-Boundary Benchmark (Runtime + Residual Traces)
+
+These figures compare a *fixed iteration budget* across `vmec2000` (Fortran via `vmec` Python extension),
+`vmecpp`, and `vmec_jax` on 4 bundled inputs (2 axisymmetric, 2 3D). Reproduce via:
+
+```bash
+python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 20
+```
+
+<table>
+  <tr>
+    <td><img src="docs/_static/figures/bench_fixed_boundary_runtime.png" width="420" /></td>
+    <td><img src="docs/_static/figures/bench_fixed_boundary_residual.png" width="420" /></td>
+  </tr>
+</table>
+
 ## Fixed-Boundary Pipeline (VMEC2000/VMEC++ Numerics)
 
 The fixed-boundary iteration in VMEC is not "one kernel"; it is a pipeline of discrete conventions.
