@@ -9,6 +9,7 @@ This script is intentionally fast by default:
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 from pathlib import Path
 
 import numpy as np
@@ -32,6 +33,11 @@ def main() -> None:
     p.add_argument("--solve", action="store_true", help="Also run a vmec_jax fixed-boundary solve per case.")
     p.add_argument("--solver", default="vmecpp_iter", help="Solver to use when `--solve` is enabled.")
     p.add_argument("--max-iter", type=int, default=10, help="Max iterations when `--solve` is enabled.")
+    p.add_argument(
+        "--jit",
+        action="store_true",
+        help="Enable JAX JIT for this script (may incur multi-minute compile on first run).",
+    )
     p.add_argument(
         "--all",
         action="store_true",
@@ -58,71 +64,80 @@ def main() -> None:
     print("[vmec_jax] step10 getfsq parity (reference wout states)")
     print(f"[vmec_jax] cases={cases}")
     print("[vmec_jax] note: this script does not solve unless `--solve` is set")
+    if not args.jit:
+        print("[vmec_jax] note: running with JIT disabled for fast parity checks")
 
     data_dir = root / "examples" / "data"
 
-    for case in cases:
-        input_path = data_dir / f"input.{case}"
-        wout_path = data_dir / f"wout_{case}_reference.nc"
-        if not wout_path.exists():
-            wout_path = data_dir / f"wout_{case}.nc"
-        if not wout_path.exists():
-            print(f"[skip] {case}: no bundled reference wout")
-            continue
+    try:
+        import jax
+    except Exception:
+        jax = None
 
-        cfg, indata = load_config(str(input_path))
-        grid = vmec_angle_grid(
-            ntheta=int(cfg.ntheta),
-            nzeta=int(cfg.nzeta),
-            nfp=int(cfg.nfp),
-            lasym=bool(cfg.lasym),
-        )
-        static = build_static(cfg, grid=grid)
-        wout = read_wout(wout_path)
-        state = state_from_wout(wout)
+    ctx = (jax.disable_jit() if (jax is not None and not args.jit) else nullcontext())
+    with ctx:
+        for case in cases:
+            input_path = data_dir / f"input.{case}"
+            wout_path = data_dir / f"wout_{case}_reference.nc"
+            if not wout_path.exists():
+                wout_path = data_dir / f"wout_{case}.nc"
+            if not wout_path.exists():
+                print(f"[skip] {case}: no bundled reference wout")
+                continue
 
-        g = eval_geom(state, static)
-        signgs = signgs_from_sqrtg(np.asarray(g.sqrtg), axis_index=1)
-
-        fsqr, fsqz, fsql = vj.step10_fsq_from_state(
-            state=state,
-            static=static,
-            indata=indata,
-            signgs=int(signgs),
-            use_vmec_synthesis=True,
-        )
-        fsqr_ref = float(getattr(wout, "fsqr", np.nan))
-        fsqz_ref = float(getattr(wout, "fsqz", np.nan))
-        fsql_ref = float(getattr(wout, "fsql", np.nan))
-
-        def _rel_err(x: float, y: float) -> float:
-            denom = max(1e-16, abs(y))
-            return abs(x - y) / denom
-
-        print(
-            f"[{case}] fsqr={fsqr:.6e} (ref {fsqr_ref:.6e}, rel {_rel_err(fsqr, fsqr_ref):.3e}) "
-            f"fsqz={fsqz:.6e} (ref {fsqz_ref:.6e}, rel {_rel_err(fsqz, fsqz_ref):.3e}) "
-            f"fsql={fsql:.6e} (ref {fsql_ref:.6e}, rel {_rel_err(fsql, fsql_ref):.3e})"
-        )
-
-        if args.solve:
-            run = vj.run_fixed_boundary(
-                input_path,
-                solver=str(args.solver),
-                max_iter=int(args.max_iter),
-                verbose=True,
+            cfg, indata = load_config(str(input_path))
+            grid = vmec_angle_grid(
+                ntheta=int(cfg.ntheta),
+                nzeta=int(cfg.nzeta),
+                nfp=int(cfg.nfp),
+                lasym=bool(cfg.lasym),
             )
-            fsqr_s, fsqz_s, fsql_s = vj.step10_fsq_from_state(
-                state=run.state,
-                static=run.static,
-                indata=run.indata,
-                signgs=int(run.signgs),
+            static = build_static(cfg, grid=grid)
+            wout = read_wout(wout_path)
+            state = state_from_wout(wout)
+
+            g = eval_geom(state, static)
+            signgs = signgs_from_sqrtg(np.asarray(g.sqrtg), axis_index=1)
+
+            fsqr, fsqz, fsql = vj.step10_fsq_from_state(
+                state=state,
+                static=static,
+                indata=indata,
+                signgs=int(signgs),
                 use_vmec_synthesis=True,
             )
+            fsqr_ref = float(getattr(wout, "fsqr", np.nan))
+            fsqz_ref = float(getattr(wout, "fsqz", np.nan))
+            fsql_ref = float(getattr(wout, "fsql", np.nan))
+
+            def _rel_err(x: float, y: float) -> float:
+                denom = max(1e-16, abs(y))
+                return abs(x - y) / denom
+
             print(
-                f"[{case}] (vmec_jax solve) fsqr={fsqr_s:.6e} fsqz={fsqz_s:.6e} fsql={fsql_s:.6e} "
-                f"(solver={args.solver}, max_iter={args.max_iter})"
+                f"[{case}] fsqr={fsqr:.6e} (ref {fsqr_ref:.6e}, rel {_rel_err(fsqr, fsqr_ref):.3e}) "
+                f"fsqz={fsqz:.6e} (ref {fsqz_ref:.6e}, rel {_rel_err(fsqz, fsqz_ref):.3e}) "
+                f"fsql={fsql:.6e} (ref {fsql_ref:.6e}, rel {_rel_err(fsql, fsql_ref):.3e})"
             )
+
+            if args.solve:
+                run = vj.run_fixed_boundary(
+                    input_path,
+                    solver=str(args.solver),
+                    max_iter=int(args.max_iter),
+                    verbose=True,
+                )
+                fsqr_s, fsqz_s, fsql_s = vj.step10_fsq_from_state(
+                    state=run.state,
+                    static=run.static,
+                    indata=run.indata,
+                    signgs=int(run.signgs),
+                    use_vmec_synthesis=True,
+                )
+                print(
+                    f"[{case}] (vmec_jax solve) fsqr={fsqr_s:.6e} fsqz={fsqz_s:.6e} fsql={fsql_s:.6e} "
+                    f"(solver={args.solver}, max_iter={args.max_iter})"
+                )
 
 
 if __name__ == "__main__":
