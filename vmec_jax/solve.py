@@ -1677,6 +1677,13 @@ def solve_fixed_boundary_gn_vmec_residual(
         dtype=jnp.asarray(state0.Rcos).dtype,
     )
 
+    # VMEC++ evolves the *decomposed* (scalxc-scaled) Fourier coefficients. Our
+    # `VMECState` stores physical coefficients, so convert decomposed-space
+    # velocities/forces back to physical-space coefficient updates by dividing
+    # by scalxc(m,s) before applying updates to `state`.
+    scalxc = vmec_scalxc_from_s(s=s, mpol=int(static.cfg.mpol))  # (ns, mpol)
+    scalxc_mn = scalxc[:, :, None]  # (ns, mpol, ntor+1)
+
     edge_Rcos = jnp.asarray(state0.Rcos)[-1, :]
     edge_Rsin = jnp.asarray(state0.Rsin)[-1, :]
     edge_Zcos = jnp.asarray(state0.Zcos)[-1, :]
@@ -2092,6 +2099,14 @@ def solve_fixed_boundary_vmecpp_iter(
         dtype=jnp.asarray(state0.Rcos).dtype,
     )
 
+    # VMEC++ evolves the *decomposed* (scalxc-scaled) Fourier coefficients.
+    # Our `VMECState` stores physical coefficients. Since all preconditioned
+    # forces/velocities here are in decomposed coefficient space, convert back
+    # to physical-space coefficient updates by dividing by scalxc(m,s) when
+    # mapping (m,n>=0) arrays into signed-helical state storage.
+    scalxc = vmec_scalxc_from_s(s=s, mpol=int(static.cfg.mpol))  # (ns, mpol)
+    scalxc_mn = scalxc[:, :, None]  # (ns, mpol, ntor+1)
+
     edge_Rcos = jnp.asarray(state0.Rcos)[-1, :]
     edge_Rsin = jnp.asarray(state0.Rsin)[-1, :]
     edge_Zcos = jnp.asarray(state0.Zcos)[-1, :]
@@ -2376,11 +2391,21 @@ def solve_fixed_boundary_vmecpp_iter(
             out = out.at[:, kn_idx[has_kn]].set(neg[:, has_kn])
         return out
 
-    def _rz_norm_vmecpp(state: VMECState) -> Any:
-        """VMEC++ rzNorm (include_offset=False) in (m,n>=0) storage.
+    def _mn_cos_to_signed_physical(cc, ss):
+        # Inputs are in decomposed (scalxc-scaled) coefficient space.
+        return _mn_cos_to_signed(jnp.asarray(cc) / scalxc_mn, jnp.asarray(ss) / scalxc_mn)
 
-        VMEC++ computes fNorm1 as 1/rzNorm where rzNorm is the sum of squares of
-        decomposed R/Z Fourier coefficients in (m,n>=0) storage.
+    def _mn_sin_to_signed_physical(sc, cs):
+        # Inputs are in decomposed (scalxc-scaled) coefficient space.
+        return _mn_sin_to_signed(jnp.asarray(sc) / scalxc_mn, jnp.asarray(cs) / scalxc_mn)
+
+    def _rz_norm_vmecpp(state: VMECState) -> Any:
+        """VMEC++ rzNorm (include_offset=false) in (m,n>=0) storage.
+
+        In VMEC++, fNorm1 is computed as 1/rzNorm where rzNorm is a plain
+        sum-of-squares over geometry Fourier coefficients in (m,n>=0) storage,
+        excluding the R(0,0) offset term. For parity with VMEC++'s serial
+        implementation, do not apply `scalxc` here.
         """
         rpos = jnp.asarray(state.Rcos)[:, kp_idx]
         zpos = jnp.asarray(state.Zsin)[:, kp_idx]
@@ -2399,20 +2424,14 @@ def solve_fixed_boundary_vmecpp_iter(
         mscale = jnp.where(m_idx == 0, 1.0, jnp.sqrt(2.0)).astype(rcc.dtype)
         nscale = jnp.where(n_idx == 0, 1.0, jnp.sqrt(2.0)).astype(rcc.dtype)
         basis_norm = (1.0 / (mscale * nscale))[None, :]
-        scalxc = vmec_scalxc_from_s(s=s, mpol=mpol).astype(rcc.dtype)  # (ns, mpol)
-        scalxc_m = scalxc[:, m_idx]  # (ns, Kp)
-
-        rcc = rcc * basis_norm * scalxc_m
-        zsc = zsc * basis_norm * scalxc_m
+        rcc = rcc * basis_norm
+        zsc = zsc * basis_norm
         if bool(getattr(static.cfg, "lthreed", True)):
-            rss = rss * basis_norm * scalxc_m
-            zcs = zcs * basis_norm * scalxc_m
+            rss = rss * basis_norm
+            zcs = zcs * basis_norm
 
-        # VMEC++ defines fNorm1 using `nsMinHere = r_.nsMinF`, which excludes the
-        # axis to avoid double-counting overlap in the radial partitioning and to
-        # mimic legacy PARVMEC behavior.
-        ns_min_here = 1 if int(jnp.asarray(rcc).shape[0]) > 1 else 0
-        sl = slice(ns_min_here, None)
+        # VMEC++ uses `nsMinHere = r_.nsMinF`. For the serial path this is 0.
+        sl = slice(0, None)
 
         include_rcc = ((m_idx > 0) | (n_idx > 0))[None, :].astype(rcc.dtype)
         rz_norm = jnp.sum(zsc[sl] * zsc[sl]) + jnp.sum(include_rcc * (rcc[sl] * rcc[sl]))
@@ -2632,9 +2651,9 @@ def solve_fixed_boundary_vmecpp_iter(
             # Use a probe step that is large enough to be numerically decisive,
             # but still small relative to typical VMEC++ pseudo-time updates.
             dt_probe = min(1e-2, 0.1 * float(time_step))
-            dR_dir = dt_probe * _mn_cos_to_signed(frcc_u, frss_u)
-            dZ_dir = dt_probe * _mn_sin_to_signed(fzsc_u, fzcs_u)
-            dL_dir = dt_probe * _mn_sin_to_signed(flsc_u, flcs_u)
+            dR_dir = dt_probe * _mn_cos_to_signed_physical(frcc_u, frss_u)
+            dZ_dir = dt_probe * _mn_sin_to_signed_physical(fzsc_u, fzcs_u)
+            dL_dir = dt_probe * _mn_sin_to_signed_physical(flsc_u, flcs_u)
 
             def _trial(sign: float) -> float:
                 st_try = VMECState(
@@ -2885,9 +2904,9 @@ def solve_fixed_boundary_vmecpp_iter(
                     )
                 )
 
-            dR = dt_eff * _mn_cos_to_signed(vRcc, vRss)
-            dZ = dt_eff * _mn_sin_to_signed(vZsc, vZcs)
-            dL = dt_eff * _mn_sin_to_signed(vLsc, vLcs)
+            dR = dt_eff * _mn_cos_to_signed_physical(vRcc, vRss)
+            dZ = dt_eff * _mn_sin_to_signed_physical(vZsc, vZcs)
+            dL = dt_eff * _mn_sin_to_signed_physical(vLsc, vLcs)
             state_try = VMECState(
                 layout=state.layout,
                 Rcos=jnp.asarray(state.Rcos) + dR,

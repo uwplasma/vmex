@@ -57,8 +57,8 @@ def test_constraint_pipeline_nonzero_tcon0_produces_gcon():
     pytest.importorskip("netCDF4")
 
     static, st, wout = _load_case(
-        "examples/data/input.li383_low_res",
-        "examples/data/wout_li383_low_res_reference.nc",
+        "examples/data/input.circular_tokamak",
+        "examples/data/wout_circular_tokamak_reference.nc",
     )
 
     k = vmec_forces_rz_from_wout_reference_fields(

@@ -30,7 +30,6 @@ _ROW_RE = re.compile(
     r"(?P<DELT>[-+0-9.eE]+)\s*\|"
 )
 
-
 def _run_vmecpp_rows(input_file: Path, *, niter: int) -> list[IterRow]:
     try:
         import vmecpp  # noqa: F401
@@ -138,4 +137,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

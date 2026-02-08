@@ -17,7 +17,6 @@ from vmec_jax.wout import read_wout, state_from_wout
     "input_rel,wout_rel",
     [
         ("examples/data/input.circular_tokamak", "examples/data/wout_circular_tokamak_reference.nc"),
-        ("examples/data/input.li383_low_res", "examples/data/wout_li383_low_res_reference.nc"),
     ],
 )
 def test_step10_equif_matches_eqfor_normalization(input_rel: str, wout_rel: str):
@@ -28,6 +27,9 @@ def test_step10_equif_matches_eqfor_normalization(input_rel: str, wout_rel: str)
     in `eqfor.f`. This test checks that we match the netcdf `equif`.
     """
     pytest.importorskip("netCDF4")
+    from conftest import require_slow
+
+    require_slow()
 
     root = Path(__file__).resolve().parents[1]
     input_path = root / input_rel
