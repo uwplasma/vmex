@@ -132,6 +132,10 @@ def _parse_key(key: str) -> Tuple[str, Tuple[int, ...] | None]:
         return key.upper(), None
     base, rest = key.split("(", 1)
     rest = rest.rstrip(")")
+    # VMEC and related tools sometimes use full-slice notation like `RAXIS_CC(:) = ...`.
+    # Treat this as a non-indexed assignment with a list value.
+    if ":" in rest:
+        return base.upper(), None
     idx = tuple(int(x.strip()) for x in rest.split(",") if x.strip() != "")
     return base.upper(), idx
 

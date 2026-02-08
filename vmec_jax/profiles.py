@@ -86,6 +86,34 @@ def _pcurr_power_series_ip(ac, x):
     return x * y
 
 
+def _two_power(b, x):
+    """VMEC `two_power` profile: b0 * (1 - x**b1)**b2."""
+    b = jnp.asarray(b)
+    x = jnp.asarray(x)
+    b0 = b[0]
+    b1 = b[1]
+    b2 = b[2]
+    core = jnp.maximum(1.0 - x**b1, 0.0)
+    return b0 * core**b2
+
+
+# Fixed-order Gauss-Legendre quadrature on [-1, 1], used to integrate I'(x) -> I(x).
+_GL_N = 16
+_GL_X, _GL_W = np.polynomial.legendre.leggauss(_GL_N)
+_GL_X = jnp.asarray(_GL_X)
+_GL_W = jnp.asarray(_GL_W)
+
+
+def _pcurr_two_power_ip(ac, x):
+    """VMEC `two_power` pcurr: parameterize I'(x) by `two_power`, return I(x)=∫ I'(t) dt."""
+    ac = jnp.asarray(ac)
+    x = jnp.asarray(x)
+    # Map [-1, 1] -> [0, x]: t_i = 0.5 * x * (xi + 1)
+    t = 0.5 * x[..., None] * (_GL_X[None, :] + 1.0)
+    ip = _two_power(ac, t)
+    return 0.5 * x * jnp.sum(_GL_W[None, :] * ip, axis=-1)
+
+
 @dataclass(frozen=True)
 class ProfileInputs:
     """Profile-related inputs extracted from &INDATA."""
@@ -174,13 +202,20 @@ def eval_profiles(cfg: ProfileInputs | InData, s_grid) -> Dict[str, Any]:
     out: Dict[str, Any] = {"ncurr": int(cfg.ncurr)}
 
     # --- Pressure (pmass) ---
-    if cfg.pmass_type != "power_series":
-        raise NotImplementedError(f"pmass_type={cfg.pmass_type!r} not implemented (only 'power_series')")
-    # VMEC pmass() returns mu0 * pres_scale * poly(x).
-    p_pa = cfg.pres_scale * _power_series(cfg.am, x)
+    if cfg.pmass_type == "power_series":
+        p_pa = cfg.pres_scale * _power_series(cfg.am, x)
+    elif cfg.pmass_type == "two_power":
+        p_pa = cfg.pres_scale * _two_power(cfg.am, x)
+    else:
+        raise NotImplementedError(
+            f"pmass_type={cfg.pmass_type!r} not implemented (only 'power_series' and 'two_power')"
+        )
     if cfg.spres_ped < 1.0:
         x_ped = jnp.minimum(jnp.abs(jnp.asarray(cfg.spres_ped) * cfg.bloat), 1.0)
-        p_ped = cfg.pres_scale * _power_series(cfg.am, x_ped)
+        if cfg.pmass_type == "power_series":
+            p_ped = cfg.pres_scale * _power_series(cfg.am, x_ped)
+        else:
+            p_ped = cfg.pres_scale * _two_power(cfg.am, x_ped)
         p_pa = jnp.where(s > cfg.spres_ped, p_ped, p_pa)
     out["pressure_pa"] = p_pa
     out["pressure"] = (MU0 * p_pa).astype(p_pa.dtype)
@@ -196,8 +231,13 @@ def eval_profiles(cfg: ProfileInputs | InData, s_grid) -> Dict[str, Any]:
 
     # --- Toroidal current function (pcurr) ---
     if cfg.ac is not None and int(jnp.size(cfg.ac)) > 0:
-        if cfg.pcurr_type != "power_series":
-            raise NotImplementedError(f"pcurr_type={cfg.pcurr_type!r} not implemented (only 'power_series')")
-        out["current"] = _pcurr_power_series_ip(cfg.ac, x)
+        if cfg.pcurr_type == "power_series":
+            out["current"] = _pcurr_power_series_ip(cfg.ac, x)
+        elif cfg.pcurr_type == "two_power":
+            out["current"] = _pcurr_two_power_ip(cfg.ac, x)
+        else:
+            raise NotImplementedError(
+                f"pcurr_type={cfg.pcurr_type!r} not implemented (only 'power_series' and 'two_power')"
+            )
 
     return out
