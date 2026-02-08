@@ -30,7 +30,7 @@ python examples/showcase_axisym_input_to_wout.py
 These figures were generated from the bundled `shaped_tokamak_pressure` case using:
 
 ```bash
-python examples/showcase_axisym_input_to_wout.py --case shaped_tokamak_pressure --max-iter 5
+python examples/showcase_axisym_input_to_wout.py --case shaped_tokamak_pressure --max-iter 5 --emit-readme-figures
 ```
 
 <table>

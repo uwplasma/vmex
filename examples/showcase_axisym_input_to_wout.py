@@ -89,9 +89,13 @@ def _write_plots(*, outdir: Path, run: vj.FixedBoundaryRun, wout_new, wout_ref, 
 
     B_ref = None
     if wout_ref is not None:
-        from vmec_jax.plotting import bmag_from_wout_physical
-
-        B_ref = np.asarray(bmag_from_wout_physical(wout_ref, theta=theta, phi=phi, s_index=s_index_lcfs))
+        # For comparisons, use the same state-based pathway for both reference and
+        # new wout, since vmec_jax solver outputs do not yet populate Nyquist
+        # `bmnc/bmns` in `wout_*.nc`.
+        st_ref = vj.state_from_wout(wout_ref)
+        B_ref = vj.bmag_from_state_physical(
+            st_ref, run.static, indata=indata, theta=theta, phi=phi, s_index=s_index_lcfs
+        )
 
     fig, ax = plt.subplots(1, 2 if B_ref is not None else 1, figsize=(10, 4), constrained_layout=True)
     ax = np.atleast_1d(ax)
@@ -149,6 +153,11 @@ def main() -> None:
     p.add_argument("--max-iter", type=int, default=30)
     p.add_argument("--no-solve", action="store_true", help="Use initial guess only.")
     p.add_argument("--outdir", default=None, help="Defaults to examples/outputs/showcase/<case>/")
+    p.add_argument(
+        "--emit-readme-figures",
+        action="store_true",
+        help="Also copy key plots into docs/_static/figures for README embedding.",
+    )
     args = p.parse_args()
 
     examples_dir = Path(__file__).resolve().parent
@@ -192,6 +201,15 @@ def main() -> None:
 
         _write_plots(outdir=outdir, run=run, wout_new=wout_new, wout_ref=wout_ref, indata=indata)
         print(f"[vmec_jax] wrote plots under: {outdir}")
+
+        if args.emit_readme_figures and not args.suite:
+            root = examples_dir.parent
+            fig_dir = root / "docs" / "_static" / "figures"
+            fig_dir.mkdir(parents=True, exist_ok=True)
+            (fig_dir / f"showcase_{case}_surfaces.png").write_bytes((outdir / "surfaces_nested_phi0.png").read_bytes())
+            (fig_dir / f"showcase_{case}_bmag_lcfs.png").write_bytes((outdir / "bmag_lcfs.png").read_bytes())
+            (fig_dir / f"showcase_{case}_lcfs_3d_bmag.png").write_bytes((outdir / "lcfs_3d_bmag.png").read_bytes())
+            print(f"[vmec_jax] updated README figures under: {fig_dir}")
 
     if args.suite and suite_rows:
         print("[vmec_jax] axisymmetric suite summary (fsq_total)")
