@@ -1993,6 +1993,8 @@ def solve_fixed_boundary_vmecpp_iter(
     mode_diag_exponent: float = 1.0,
     auto_flip_force: bool = True,
     vmecpp_strict_update: bool = True,
+    vmecpp_limit_dt_from_force: bool = False,
+    vmecpp_limit_update_rms: bool = False,
     vmecpp_reference_mode: bool = False,
     use_vmecpp_restart_triggers: bool | None = None,
     use_direct_fallback: bool | None = None,
@@ -2019,6 +2021,8 @@ def solve_fixed_boundary_vmecpp_iter(
         use_direct_fallback = False
     use_vmecpp_restart_triggers = bool(use_vmecpp_restart_triggers)
     use_direct_fallback = bool(use_direct_fallback)
+    vmecpp_limit_dt_from_force = bool(vmecpp_limit_dt_from_force)
+    vmecpp_limit_update_rms = bool(vmecpp_limit_update_rms)
 
     from .energy import flux_profiles_from_indata
     from .field import half_mesh_avg_from_full_mesh
@@ -2263,20 +2267,25 @@ def solve_fixed_boundary_vmecpp_iter(
         frzl = vmec_zero_m1_zforce(frzl=frzl, enabled=zero_m1)
         frzl = vmec_apply_scalxc_to_tomnsps(frzl=frzl, s=s)
 
-        frzl = TomnspsRZL(
-            frcc=_zero_edge_rz(frzl.frcc),
-            frss=_zero_edge_rz(frzl.frss),
-            fzsc=_zero_edge_rz(frzl.fzsc),
-            fzcs=_zero_edge_rz(frzl.fzcs),
-            flsc=frzl.flsc,
-            flcs=frzl.flcs,
-            frsc=_zero_edge_rz(getattr(frzl, "frsc", None)),
-            frcs=_zero_edge_rz(getattr(frzl, "frcs", None)),
-            fzcc=_zero_edge_rz(getattr(frzl, "fzcc", None)),
-            fzss=_zero_edge_rz(getattr(frzl, "fzss", None)),
-            flcc=getattr(frzl, "flcc", None),
-            flss=getattr(frzl, "flss", None),
-        )
+        # VMEC++ computes invariant residuals with an `includeEdgeRZForces` flag.
+        # Mimic that by optionally removing the LCFS contribution from the R/Z
+        # force arrays before forming gcr2/gcz2 (the lambda channel always keeps
+        # its full-domain residual in VMEC++).
+        if not bool(include_edge):
+            frzl = TomnspsRZL(
+                frcc=_zero_edge_rz(frzl.frcc),
+                frss=_zero_edge_rz(frzl.frss),
+                fzsc=_zero_edge_rz(frzl.fzsc),
+                fzcs=_zero_edge_rz(frzl.fzcs),
+                flsc=frzl.flsc,
+                flcs=frzl.flcs,
+                frsc=_zero_edge_rz(getattr(frzl, "frsc", None)),
+                frcs=_zero_edge_rz(getattr(frzl, "frcs", None)),
+                fzcc=_zero_edge_rz(getattr(frzl, "fzcc", None)),
+                fzss=_zero_edge_rz(getattr(frzl, "fzss", None)),
+                flcc=getattr(frzl, "flcc", None),
+                flss=getattr(frzl, "flss", None),
+            )
 
         gcr2, gcz2, gcl2 = vmec_gcx2_from_tomnsps(
             frzl=frzl,
@@ -2485,32 +2494,17 @@ def solve_fixed_boundary_vmecpp_iter(
     huge_force_restart_count = 0
     huge_force_restart_budget = 2
 
-    def _edge_force_trigger(it: int, w_hist: list[float], fsqr_hist: list[float], fsqz_hist: list[float]) -> bool:
-        """Heuristic for VMEC++-style edge-force inclusion.
-
-        VMEC++ includes edge-force contributions early, and can keep them on when
-        the residual drops rapidly between iterations. This helps avoid getting
-        trapped in an over-aggressive interior-only update path.
-        """
-        if it == 0:
-            return True
-        # Keep edge terms active through the initial transient.
-        if it < 8:
-            return True
-        if len(w_hist) >= 3:
-            w0 = max(float(w_hist[-3]), 1e-30)
-            w1 = max(float(w_hist[-2]), 1e-30)
-            w2 = max(float(w_hist[-1]), 1e-30)
-            # Re-enable only for sustained fast drops to avoid on/off chatter.
-            if (w1 / w0 < 0.7) and (w2 / w1 < 0.7):
-                return True
-        if len(fsqr_hist) > 0:
-            if float(fsqr_hist[-1]) + float(fsqz_hist[-1]) < 1e-6:
-                return True
-        return False
+    # VMEC++ `includeEdgeRZForces` uses the *previous* iteration's residual
+    # (flow-control initializes forces to 1.0 in iter==1). Track that explicitly.
+    prev_rz_fsq = 2.0
 
     def _safe_dt_from_force(*, dt_nominal: float, frcc, frss, fzsc, fzcs, flsc, flcs) -> float:
-        """Limit dt so coefficient updates stay bounded during early iterations."""
+        """Optional limiter for dt based on force magnitude.
+
+        VMEC++ uses `time_step` directly (with restart-trigger adjustments) and
+        does not apply a force-based dt limiter. Keep this behavior off by
+        default for parity; enable only as a stability crutch during debugging.
+        """
         frcc = jnp.asarray(frcc)
         frss = jnp.asarray(frss) if frss is not None else jnp.zeros_like(frcc)
         fzsc = jnp.asarray(fzsc)
@@ -2533,7 +2527,7 @@ def solve_fixed_boundary_vmecpp_iter(
             1.0 if (iter_since_restart < 2) or (len(fsqz2_history) and fsqz2_history[-1] < 1e-6) else 0.0,
             dtype=jnp.asarray(state.Rcos).dtype,
         )
-        include_edge = bool(it < 50) and _edge_force_trigger(it, w_history, fsqr2_history, fsqz2_history)
+        include_edge = bool(iter_since_restart < 50) and (float(prev_rz_fsq) < 1e-6)
         include_edge_history.append(int(bool(include_edge)))
         zero_m1_history.append(int(float(np.asarray(zero_m1)) > 0.5))
 
@@ -2543,6 +2537,7 @@ def solve_fixed_boundary_vmecpp_iter(
         fsqr_f = float(np.asarray(fsqr))
         fsqz_f = float(np.asarray(fsqz))
         fsql_f = float(np.asarray(fsql))
+        prev_rz_fsq = fsqr_f + fsqz_f
 
         w_history.append(fsqr_f + fsqz_f + fsql_f)
         fsqr2_history.append(fsqr_f)
@@ -2811,15 +2806,17 @@ def solve_fixed_boundary_vmecpp_iter(
             # iteration in (m, n>=0) storage, no line-search accept/reject.
             w_curr = fsqr_f + fsqz_f + fsql_f
             state_backup = state
-            dt_eff = _safe_dt_from_force(
-                dt_nominal=time_step,
-                frcc=frcc_u,
-                frss=frss_u,
-                fzsc=fzsc_u,
-                fzcs=fzcs_u,
-                flsc=flsc_u,
-                flcs=flcs_u,
-            )
+            dt_eff = float(time_step)
+            if bool(vmecpp_limit_dt_from_force):
+                dt_eff = _safe_dt_from_force(
+                    dt_nominal=time_step,
+                    frcc=frcc_u,
+                    frss=frss_u,
+                    fzsc=fzsc_u,
+                    fzcs=fzcs_u,
+                    flsc=flsc_u,
+                    flcs=flcs_u,
+                )
 
             # VMEC++ semantics: v <- fac*(b1*v + dt*F), x <- x + dt*v.
             # Do not drop the dt factor in the force term; otherwise updates
@@ -2847,7 +2844,7 @@ def solve_fixed_boundary_vmecpp_iter(
                     )
                 )
             )
-            if np.isfinite(update_rms) and (update_rms > max_update_rms):
+            if bool(vmecpp_limit_update_rms) and np.isfinite(update_rms) and (update_rms > max_update_rms):
                 scl = max_update_rms / max(update_rms, 1e-30)
                 vRcc = vRcc * scl
                 vRss = vRss * scl
