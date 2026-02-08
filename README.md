@@ -42,6 +42,7 @@ python examples/showcase_axisym_input_to_wout.py --case shaped_tokamak_pressure 
     <td colspan="2"><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_lcfs_3d_bmag.png" width="860" /></td>
   </tr>
 </table>
+<!-- end snapshot table -->
 
 ## Fixed-Boundary Benchmark (Runtime + Residual Traces)
 
@@ -52,12 +53,19 @@ These figures compare a *fixed iteration budget* across `vmec2000` (Fortran via 
 python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 20
 ```
 
+Default cases (inputs live under `examples/data/`):
+- `circular_tokamak`
+- `vmecpp_solovev`
+- `cth_like_fixed_bdy`
+- `nfp4_QH_warm_start`
+
 <table>
   <tr>
     <td><img src="docs/_static/figures/bench_fixed_boundary_runtime.png" width="420" /></td>
     <td><img src="docs/_static/figures/bench_fixed_boundary_residual.png" width="420" /></td>
   </tr>
 </table>
+<!-- end benchmark table -->
 
 ## Fixed-Boundary Pipeline (VMEC2000/VMEC++ Numerics)
 
