@@ -3405,7 +3405,7 @@ def vmecpp_first_step_diagnostics(
             trig=trig,
             s=np.asarray(s, dtype=float),
             cfg=cfg,
-            damping_factor=1.0,
+            damping_factor=2.0,
         )
 
     def _vmecpp_rz_preconditioner(frzl_in: TomnspsRZL, bc, k):
