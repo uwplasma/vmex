@@ -2031,7 +2031,6 @@ def solve_fixed_boundary_vmecpp_iter(
         vmec_apply_scalxc_to_tomnsps,
         vmec_force_norms_from_bcovar_dynamic,
         vmec_gcx2_from_tomnsps,
-        vmec_rz_norm_from_state,
         vmec_scalxc_from_s,
         vmec_wint_from_trig,
         vmec_zero_m1_zforce,
@@ -2366,6 +2365,44 @@ def solve_fixed_boundary_vmecpp_iter(
             out = out.at[:, kn_idx[has_kn]].set(neg[:, has_kn])
         return out
 
+    def _rz_norm_vmecpp(state: VMECState) -> Any:
+        """VMEC++ rzNorm (include_offset=False) in (m,n>=0) storage.
+
+        VMEC++ computes fNorm1 as 1/rzNorm where rzNorm is the sum of squares of
+        decomposed R/Z Fourier coefficients in (m,n>=0) storage.
+        """
+        rpos = jnp.asarray(state.Rcos)[:, kp_idx]
+        zpos = jnp.asarray(state.Zsin)[:, kp_idx]
+        rneg = jnp.zeros_like(rpos)
+        zneg = jnp.zeros_like(zpos)
+        if has_kn_any:
+            rneg = rneg.at[:, has_kn].set(jnp.asarray(state.Rcos)[:, kn_idx[has_kn]])
+            zneg = zneg.at[:, has_kn].set(jnp.asarray(state.Zsin)[:, kn_idx[has_kn]])
+
+        rcc = rpos + rneg
+        zsc = zpos + zneg
+        is_n0 = (n_idx == 0)[None, :]
+        rss = jnp.where(is_n0, 0.0, rpos - rneg)
+        zcs = jnp.where(is_n0, 0.0, zneg - zpos)
+
+        mscale = jnp.where(m_idx == 0, 1.0, jnp.sqrt(2.0)).astype(rcc.dtype)
+        nscale = jnp.where(n_idx == 0, 1.0, jnp.sqrt(2.0)).astype(rcc.dtype)
+        basis_norm = (1.0 / (mscale * nscale))[None, :]
+        scalxc = vmec_scalxc_from_s(s=s, mpol=mpol).astype(rcc.dtype)  # (ns, mpol)
+        scalxc_m = scalxc[:, m_idx]  # (ns, Kp)
+
+        rcc = rcc * basis_norm * scalxc_m
+        zsc = zsc * basis_norm * scalxc_m
+        if bool(getattr(static.cfg, "lthreed", True)):
+            rss = rss * basis_norm * scalxc_m
+            zcs = zcs * basis_norm * scalxc_m
+
+        include_rcc = ((m_idx > 0) | (n_idx > 0))[None, :].astype(rcc.dtype)
+        rz_norm = jnp.sum(zsc * zsc) + jnp.sum(include_rcc * (rcc * rcc))
+        if bool(getattr(static.cfg, "lthreed", True)):
+            rz_norm = rz_norm + jnp.sum(rss * rss) + jnp.sum(zcs * zcs)
+        return rz_norm
+
     def _mode_diag_weights_mn(dtype):
         m = jnp.arange(mpol, dtype=jnp.float64)
         n = jnp.arange(nrange, dtype=jnp.float64) * nfp
@@ -2627,7 +2664,7 @@ def solve_fixed_boundary_vmecpp_iter(
             apply_scalxc=False,
             s=s,
         )
-        rz_norm = vmec_rz_norm_from_state(state=state, static=static, apply_scalxc=False)
+        rz_norm = _rz_norm_vmecpp(state)
         f_norm1 = jnp.where(rz_norm != 0.0, 1.0 / rz_norm, jnp.asarray(float("inf"), dtype=rz_norm.dtype))
         delta_s = jnp.asarray(s[1] - s[0], dtype=rz_norm.dtype)
         fsqr1 = gcr2_p * f_norm1

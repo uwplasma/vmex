@@ -317,6 +317,11 @@ def vmec_bcovar_half_mesh_from_wout(
     lam_u = _half_mesh_from_even_odd(parity.Lt_even, Lu1, s=s)
     lam_v = _half_mesh_from_even_odd(parity.Lp_even, Lv1, s=s)
 
+    # NOTE: `lam_u/lam_v` are used downstream in VMEC's magnetic-field and
+    # force pipeline, but the (guu,guv,gvv) metric elements used for bsub*
+    # parity are those constructed above from (Ru,Zu,Rv,Zv) and the cylindrical
+    # +R^2 term.
+
     # ---------------------------------------------------------------------
     # Contravariant B components (bsupu, bsupv) on the half mesh.
     # ---------------------------------------------------------------------
