@@ -48,6 +48,28 @@ def _maybe_import(name: str):
         return None
 
 
+def _distribute_iters(*, iters: int, nstep: int) -> list[int]:
+    """Distribute a fixed total iteration budget across multigrid steps.
+
+    VMEC++ and VMEC2000 both have per-multigrid-step iteration limits. For a fair
+    "fixed budget" comparison, we distribute the *total* budget across steps so
+    that sum(niter_array) == iters.
+    """
+
+    iters = int(iters)
+    nstep = int(nstep)
+    if iters <= 0:
+        return [0]
+    if nstep <= 1:
+        return [iters]
+    base, rem = divmod(iters, nstep)
+    if base == 0:
+        # If the user asks for fewer total iterations than there are steps,
+        # collapse to a single step rather than setting any step to 0.
+        return [iters]
+    return [base + (1 if i < rem else 0) for i in range(nstep)]
+
+
 def _run_vmec_jax(*, input_path: Path, case: str, iters: int) -> RunTrace:
     import vmec_jax.api as vj
 
@@ -88,14 +110,14 @@ def _run_vmecpp(*, input_path: Path, case: str, iters: int, max_threads: int) ->
     inp = vmecpp.VmecInput.from_file(str(input_path))
     # Force a fixed iteration budget and return outputs even if not converged.
     inp.return_outputs_even_if_not_converged = True
-    # Use a plain Python list here. Some vmecpp builds are sensitive to numpy dtype/shape
-    # when assigning Eigen-backed arrays via pybind11.
+    # Use a plain Python list here. Some vmecpp builds are sensitive to numpy
+    # dtype/shape when assigning Eigen-backed arrays via pybind11.
     #
-    # VMEC++'s `fsqt` length can differ across iteration styles/configs, so we
-    # over-request iterations and slice `fsqt[:iters]` below.
-    inp.niter_array = [int(iters), int(iters)]
+    # `niter_array` (and `ftol_array`) must match the number of multigrid steps.
+    nstep = len(getattr(inp, "ns_array", [])) or len(getattr(inp, "niter_array", [])) or 1
+    inp.niter_array = _distribute_iters(iters=int(iters), nstep=int(nstep))
     try:
-        inp.ftol_array = [0.0, 0.0]
+        inp.ftol_array = [0.0] * len(inp.niter_array)
     except Exception:
         pass
 
@@ -152,8 +174,25 @@ def _run_vmec2000(*, input_path: Path, case: str, iters: int, workdir: Path) -> 
         _ = time.perf_counter() - t_read
 
         # Override iteration controls for a fixed budget.
-        vmec.vmec_input.niter = int(iters)
-        vmec.vmec_input.ftol = 0.0
+        vi = vmec.vmec_input
+        try:
+            nstep = int(getattr(vi, "nstep"))
+        except Exception:
+            nstep = 1
+        niter_steps = _distribute_iters(iters=int(iters), nstep=int(nstep))
+        try:
+            vi.niter_array[: len(niter_steps)] = np.asarray(niter_steps, dtype=np.int32)
+        except Exception:
+            pass
+        try:
+            vi.ftol_array[: len(niter_steps)] = 0.0
+        except Exception:
+            pass
+        try:
+            vi.niter = int(iters)
+            vi.ftol = 0.0
+        except Exception:
+            pass
 
         # Stage 2: timestep + output (no re-read).
         ictrl[:] = 0
@@ -212,7 +251,8 @@ def _plot_runtime(*, traces: list[RunTrace], outpath: Path) -> None:
         ax.bar(x + (i - 1) * width, data[b], width=width, label=b)
     ax.set_xticks(x)
     ax.set_xticklabels(cases, rotation=15, ha="right")
-    ax.set_ylabel("seconds (wall)")
+    ax.set_yscale("log")
+    ax.set_ylabel("seconds (wall, log scale)")
     ax.set_title("Fixed-boundary runtime for a fixed iteration budget")
     ax.legend(ncols=3, frameon=False)
     outpath.parent.mkdir(parents=True, exist_ok=True)
