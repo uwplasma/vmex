@@ -3426,117 +3426,25 @@ def vmecpp_first_step_diagnostics(
         return sm, sp
 
     def _vmecpp_lambda_preconditioner(bc):
-        from .vmecpp_preconditioner import vmecpp_lambda_preconditioner
+        from .vmecpp_preconditioner_jax import vmecpp_lambda_preconditioner
 
         return vmecpp_lambda_preconditioner(
             bc=bc,
             trig=trig,
-            s=np.asarray(s, dtype=float),
+            s=s,
             cfg=cfg,
-            damping_factor=2.0,
         )
 
     def _vmecpp_rz_preconditioner(frzl_in: TomnspsRZL, bc, k):
-        from .vmecpp_preconditioner import vmecpp_rz_preconditioner
+        from .vmecpp_preconditioner_jax import vmecpp_rz_preconditioner
 
         return vmecpp_rz_preconditioner(
             frzl_in=frzl_in,
             bc=bc,
             k=k,
             trig=trig,
-            s=np.asarray(s, dtype=float),
+            s=s,
             cfg=cfg,
-        )
-        arm, ard, brm, brd, cxd = compute_precond_matrix(
-            np.asarray(bc.jac.zs, dtype=float),
-            np.asarray(bc.jac.zu12, dtype=float),
-            np.asarray(k.pzu_even, dtype=float),
-            np.asarray(k.pzu_odd, dtype=float),
-            np.asarray(k.pz1_odd, dtype=float),
-        )
-        azm, azd, bzm, bzd, _ = compute_precond_matrix(
-            np.asarray(bc.jac.rs, dtype=float),
-            np.asarray(bc.jac.ru12, dtype=float),
-            np.asarray(k.pru_even, dtype=float),
-            np.asarray(k.pru_odd, dtype=float),
-            np.asarray(k.pr1_odd, dtype=float),
-        )
-
-        mpol = int(cfg.mpol)
-        nrange = int(cfg.ntor) + 1
-        ar = np.zeros((ns, mpol, nrange), dtype=float)
-        br = np.zeros_like(ar)
-        dr = np.zeros_like(ar)
-        az = np.zeros_like(ar)
-        bz = np.zeros_like(ar)
-        dz = np.zeros_like(ar)
-        for m in range(mpol):
-            m_par = m % 2
-            for n in range(nrange):
-                for jf in range(ns):
-                    if jf >= (1 if m > 0 else 0):
-                        if jf < ns - 1:
-                            ar[jf, m, n] = -(arm[jf, m_par] + brm[jf, m_par] * m * m)
-                            az[jf, m, n] = -(azm[jf, m_par] + bzm[jf, m_par] * m * m)
-                        dr[jf, m, n] = -(
-                            ard[jf, m_par] + brd[jf, m_par] * m * m + cxd[jf] * (n * cfg.nfp) ** 2
-                        )
-                        dz[jf, m, n] = -(
-                            azd[jf, m_par] + bzd[jf, m_par] * m * m + cxd[jf] * (n * cfg.nfp) ** 2
-                        )
-                        if jf > 0:
-                            br[jf, m, n] = -(
-                                arm[jf - 1, m_par] + brm[jf - 1, m_par] * m * m
-                            )
-                            bz[jf, m, n] = -(
-                                azm[jf - 1, m_par] + bzm[jf - 1, m_par] * m * m
-                            )
-                        if jf == 1 and m == 1:
-                            dr[jf, m, n] += br[jf, m, n]
-                            dz[jf, m, n] += bz[jf, m, n]
-
-        def solve_tridiagonal(a, b, c, rhs, jmin):
-            out = rhs.copy()
-            n = rhs.shape[0]
-            if jmin >= n:
-                return out
-            a = a.astype(float).copy()
-            b = b.astype(float).copy()
-            c = c.astype(float).copy()
-            d = rhs.astype(float).copy()
-            for i in range(jmin + 1, n):
-                denom = b[i - 1] if b[i - 1] != 0.0 else 1.0e-12
-                w = a[i] / denom
-                b[i] = b[i] - w * c[i - 1]
-                d[i] = d[i] - w * d[i - 1]
-            out[n - 1] = d[n - 1] / b[n - 1]
-            for i in range(n - 2, jmin - 1, -1):
-                out[i] = (d[i] - c[i] * out[i + 1]) / b[i]
-            return out
-
-        frcc_u = np.array(frzl_in.frcc, dtype=float, copy=True)
-        frcc_u.setflags(write=True)
-        fzsc_u = np.array(frzl_in.fzsc, dtype=float, copy=True)
-        fzsc_u.setflags(write=True)
-        for m in range(mpol):
-            jmin = 1 if m > 0 else 0
-            for n in range(nrange):
-                frcc_u[:, m, n] = solve_tridiagonal(ar[:, m, n], dr[:, m, n], br[:, m, n], frcc_u[:, m, n], jmin)
-                fzsc_u[:, m, n] = solve_tridiagonal(az[:, m, n], dz[:, m, n], bz[:, m, n], fzsc_u[:, m, n], jmin)
-
-        return TomnspsRZL(
-            frcc=frcc_u,
-            frss=frzl_in.frss,
-            fzsc=fzsc_u,
-            fzcs=frzl_in.fzcs,
-            flsc=frzl_in.flsc,
-            flcs=frzl_in.flcs,
-            frsc=getattr(frzl_in, "frsc", None),
-            frcs=getattr(frzl_in, "frcs", None),
-            fzcc=getattr(frzl_in, "fzcc", None),
-            fzss=getattr(frzl_in, "fzss", None),
-            flcc=getattr(frzl_in, "flcc", None),
-            flss=getattr(frzl_in, "flss", None),
         )
 
     def _compute_forces(state: VMECState):
