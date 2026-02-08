@@ -25,7 +25,7 @@ def test_step6_fixed_boundary_solve_decreases_energy():
     pytest.importorskip("jax")
 
     # Keep runtime very small: minimal axisymmetric config and one GD step.
-    cfg = VMECConfig(ns=5, mpol=3, ntor=0, nfp=1, lasym=False, lconm1=True, lthreed=True, ntheta=8, nzeta=2)
+    cfg = VMECConfig(ns=5, mpol=3, ntor=0, nfp=1, lasym=False, lconm1=True, lthreed=True, ntheta=8, nzeta=1)
     static = build_static(cfg)
     K = int(static.modes.K)
     Rcos = np.zeros((K,), dtype=float)
