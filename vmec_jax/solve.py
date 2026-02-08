@@ -1993,6 +1993,7 @@ def solve_fixed_boundary_vmecpp_iter(
     mode_diag_exponent: float = 1.0,
     auto_flip_force: bool = True,
     vmecpp_strict_update: bool = True,
+    vmecpp_backtracking: bool = False,
     vmecpp_limit_dt_from_force: bool = False,
     vmecpp_limit_update_rms: bool = False,
     vmecpp_reference_mode: bool = False,
@@ -2023,6 +2024,7 @@ def solve_fixed_boundary_vmecpp_iter(
     use_direct_fallback = bool(use_direct_fallback)
     vmecpp_limit_dt_from_force = bool(vmecpp_limit_dt_from_force)
     vmecpp_limit_update_rms = bool(vmecpp_limit_update_rms)
+    vmecpp_backtracking = bool(vmecpp_backtracking)
 
     from .energy import flux_profiles_from_indata
     from .field import half_mesh_avg_from_full_mesh
@@ -2406,10 +2408,16 @@ def solve_fixed_boundary_vmecpp_iter(
             rss = rss * basis_norm * scalxc_m
             zcs = zcs * basis_norm * scalxc_m
 
+        # VMEC++ defines fNorm1 using `nsMinHere = r_.nsMinF`, which excludes the
+        # axis to avoid double-counting overlap in the radial partitioning and to
+        # mimic legacy PARVMEC behavior.
+        ns_min_here = 1 if int(jnp.asarray(rcc).shape[0]) > 1 else 0
+        sl = slice(ns_min_here, None)
+
         include_rcc = ((m_idx > 0) | (n_idx > 0))[None, :].astype(rcc.dtype)
-        rz_norm = jnp.sum(zsc * zsc) + jnp.sum(include_rcc * (rcc * rcc))
+        rz_norm = jnp.sum(zsc[sl] * zsc[sl]) + jnp.sum(include_rcc * (rcc[sl] * rcc[sl]))
         if bool(getattr(static.cfg, "lthreed", True)):
-            rz_norm = rz_norm + jnp.sum(rss * rss) + jnp.sum(zcs * zcs)
+            rz_norm = rz_norm + jnp.sum(rss[sl] * rss[sl]) + jnp.sum(zcs[sl] * zcs[sl])
         return rz_norm
 
     def _mode_diag_weights_mn(dtype):
@@ -2440,6 +2448,11 @@ def solve_fixed_boundary_vmecpp_iter(
     fsqz1_history = []
     fsql1_history = []
     fsq1_history = []
+    rz_norm_history: list[float] = []
+    f_norm1_history: list[float] = []
+    gcr2_p_history: list[float] = []
+    gcz2_p_history: list[float] = []
+    gcl2_p_history: list[float] = []
     step_status_history: list[str] = []
     restart_reason_history: list[str] = []
     pre_restart_reason_history: list[str] = []
@@ -2668,6 +2681,11 @@ def solve_fixed_boundary_vmecpp_iter(
         fsqr1_f = float(np.asarray(fsqr1))
         fsqz1_f = float(np.asarray(fsqz1))
         fsql1_f = float(np.asarray(fsql1))
+        rz_norm_history.append(float(np.asarray(rz_norm)))
+        f_norm1_history.append(float(np.asarray(f_norm1)))
+        gcr2_p_history.append(float(np.asarray(gcr2_p)))
+        gcz2_p_history.append(float(np.asarray(gcz2_p)))
+        gcl2_p_history.append(float(np.asarray(gcl2_p)))
         fsq1 = fsqr1_f + fsqz1_f + fsql1_f
         fsq1_history.append(fsq1)
         fsqr1_history.append(fsqr1_f)
@@ -2902,7 +2920,7 @@ def solve_fixed_boundary_vmecpp_iter(
             # bounded backtracking on the position update (not the force
             # evaluation) to prevent systematic residual growth.
             alpha = 1.0
-            accept_ratio = 1.001
+            accept_ratio = 1.001 if vmecpp_backtracking else float("inf")
             if np.isfinite(w_try) and (w_try > accept_ratio * max(w_curr, 1e-30)):
                 for _ in range(8):
                     alpha *= 0.5
@@ -3248,6 +3266,11 @@ def solve_fixed_boundary_vmecpp_iter(
         "fsqr1_history": np.asarray(fsqr1_history, dtype=float),
         "fsqz1_history": np.asarray(fsqz1_history, dtype=float),
         "fsql1_history": np.asarray(fsql1_history, dtype=float),
+        "rz_norm_history": np.asarray(rz_norm_history, dtype=float),
+        "f_norm1_history": np.asarray(f_norm1_history, dtype=float),
+        "gcr2_p_history": np.asarray(gcr2_p_history, dtype=float),
+        "gcz2_p_history": np.asarray(gcz2_p_history, dtype=float),
+        "gcl2_p_history": np.asarray(gcl2_p_history, dtype=float),
     }
     return SolveVmecResidualResult(
         state=state,
