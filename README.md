@@ -45,7 +45,7 @@ python examples/showcase_axisym_input_to_wout.py --case shaped_tokamak_pressure 
 
 ## Fixed-Boundary Pipeline (VMEC2000/VMEC++ Numerics)
 
-The fixed-boundary iteration in VMEC is not “one kernel”; it is a pipeline of discrete conventions.
+The fixed-boundary iteration in VMEC is not "one kernel"; it is a pipeline of discrete conventions.
 The high-ROI parity strategy in `vmec_jax` is to validate each stage against VMEC outputs before iterating.
 
 1. Parse input: `VmecConfig`, `INDATA` (boundary, profiles, resolution, symmetry flags).
@@ -56,12 +56,12 @@ The high-ROI parity strategy in `vmec_jax` is to validate each stage against VME
 6. Half-mesh Jacobian-like fields: `sqrtg`, `r12`, `ru12`, `zu12`, `rs`, `zs`, `tau`.
 7. Half-mesh metric elements: `guu`, `guv`, `gvv` (including cylindrical `R^2` in `gvv`).
 8. Flux functions and lambda scaling: `phipf`, `chipf -> chips`, `lamscale`, `overg`.
-9. Contravariant magnetic field: `bsupu`, `bsupv` (VMEC’s staggered, flux-corrected conventions).
+9. Contravariant magnetic field: `bsupu`, `bsupv` (VMEC's staggered, flux-corrected conventions).
 10. Covariant magnetic field: `bsubu`, `bsubv` via metric products.
 11. Magnetic + pressure scalar: `bsq = 0.5*|B|^2 + p`.
 12. Constraint-force plumbing: `tcon`, `alias` (m=1 rotation, constraint mixing).
 13. Spectral force blocks: `tomnsps` transforms, mode-by-mode forces.
-14. Residual scalars: `fsqr`, `fsqz`, `fsql` (“Step-10 / getfsq” scalars).
+14. Residual scalars: `fsqr`, `fsqz`, `fsql` ("Step-10 / getfsq" scalars).
 15. Preconditioners and update loop: radial and lambda preconditioners, `dt_eff`, edge-force inclusion triggers.
 16. Convergence and output: write `wout_*.nc` (geometry, fields, scalars, diagnostics).
 
@@ -127,7 +127,7 @@ metrics. See `docs/validation.rst` for details and troubleshooting notes.
 
 ## Installation
 
-Create an environment with Python ≥ 3.10.
+Create an environment with Python >= 3.10.
 
 Regular users (non-editable install):
 
@@ -181,7 +181,7 @@ python examples/tutorial/00_parse_and_boundary.py examples/data/input.circular_t
 ## Examples
 
 Examples are organized into:
-- `examples/showcase_axisym_input_to_wout.py`: minimal “input -> wout + plots + parity” entrypoint.
+- `examples/showcase_axisym_input_to_wout.py`: minimal "input -> wout + plots + parity" entrypoint.
 - `examples/tutorial/`: minimal low-level kernel demos.
 - `examples/validation/`: parity checks vs bundled `wout_*.nc`.
 - `examples/visualization/`: plotting + VTK export.
