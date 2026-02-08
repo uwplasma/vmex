@@ -160,24 +160,24 @@ def vmec_zero_m1_zforce(
     frzl: TomnspsRZL,
     enabled: bool = True,
 ) -> TomnspsRZL:
-    """Zero the m=1 Z-force coefficients (VMEC++ early-iteration safeguard)."""
+    """Apply VMEC++ `zeroZForceForM1` to tomnsps force blocks.
+
+    VMEC++ zeros only the Z-force blocks that would otherwise drive the
+    m=1 constrained Z Fourier coefficients away from zero:
+    - `fzcs` when `lthreed=True`
+    - `fzcc` when `lasym=True`
+
+    It does *not* zero `fzsc`.
+    """
     enabled = jnp.asarray(enabled)
     mask = enabled.astype(jnp.asarray(frzl.fzsc).dtype)
     mpol = int(jnp.asarray(frzl.fzsc).shape[1])
     if mpol <= 1:
         return frzl
 
-    fzsc = frzl.fzsc
     fzcs = frzl.fzcs
     fzcc = getattr(frzl, "fzcc", None)
 
-    fzsc = jnp.asarray(fzsc)
-    fzsc_new = fzsc[:, 1, :] * (1.0 - mask)
-    if hasattr(fzsc, "at"):
-        fzsc = fzsc.at[:, 1, :].set(fzsc_new)
-    else:  # numpy fallback
-        fzsc = fzsc.copy()
-        fzsc[:, 1, :] = np.asarray(fzsc_new)
     if fzcs is not None:
         fzcs = jnp.asarray(fzcs)
         fzcs_new = fzcs[:, 1, :] * (1.0 - mask)
@@ -198,7 +198,7 @@ def vmec_zero_m1_zforce(
     return TomnspsRZL(
         frcc=frzl.frcc,
         frss=frzl.frss,
-        fzsc=fzsc,
+        fzsc=frzl.fzsc,
         fzcs=fzcs,
         flsc=frzl.flsc,
         flcs=frzl.flcs,
