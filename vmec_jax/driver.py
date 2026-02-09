@@ -19,6 +19,7 @@ from .energy import flux_profiles_from_indata
 from .field import signgs_from_sqrtg
 from .geom import eval_geom
 from .init_guess import initial_guess_from_boundary
+from .multigrid import interp_vmec_state
 from .profiles import eval_profiles
 from .solve import solve_fixed_boundary_gd, solve_fixed_boundary_lbfgs
 from .static import VMECStatic, build_static
@@ -245,6 +246,8 @@ def run_fixed_boundary(
     vmecpp_reference_mode: bool = False,
     vmecpp_use_restart_triggers: bool | None = None,
     vmecpp_use_direct_fallback: bool | None = None,
+    multigrid: bool | None = None,
+    multigrid_use_input_niter: bool = False,
     verbose: bool = True,
     grid=None,
     ns_override: int | None = None,
@@ -255,7 +258,8 @@ def run_fixed_boundary(
     ----------
     solver:
         ``"gd"`` (gradient descent), ``"lbfgs"``, ``"vmec_lbfgs"``,
-        ``"vmec_gn"`` (VMEC residual objective), or ``"vmecpp_iter"``.
+        ``"vmec_gn"`` (VMEC residual objective), ``"vmecpp_iter"``, or
+        ``"vmec2000_iter"`` (VMEC-style multigrid iteration).
     use_initial_guess:
         If True, skip the solve and return the initialized state.
     ns_override:
@@ -270,7 +274,7 @@ def run_fixed_boundary(
     if ns_override is not None:
         cfg = replace(cfg, ns=int(ns_override))
     solver_lower = str(solver).lower()
-    if grid is None and solver_lower in ("vmec_lbfgs", "vmec_gn", "vmecpp_iter"):
+    if grid is None and solver_lower in ("vmec_lbfgs", "vmec_gn", "vmecpp_iter", "vmec2000_iter"):
         from .vmec_tomnsp import vmec_angle_grid
 
         grid = vmec_angle_grid(
@@ -279,12 +283,31 @@ def run_fixed_boundary(
             nfp=int(cfg.nfp),
             lasym=bool(cfg.lasym),
         )
-    static = build_static(cfg, grid=grid)
-    bdy = boundary_from_indata(indata, static.modes)
-    st0 = initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
+    multigrid_use_input_niter = bool(multigrid_use_input_niter)
+    if multigrid is None:
+        multigrid = solver_lower == "vmec2000_iter"
+    multigrid = bool(multigrid) and (ns_override is None)
 
-    g0 = eval_geom(st0, static)
+    # Build the initial state on either the final grid (single-grid solvers and
+    # use_initial_guess) or on the first multigrid stage for VMEC-style solves.
+    ns_stages = [int(cfg.ns)]
+    if multigrid:
+        ns_array = indata.get("NS_ARRAY", None)
+        if isinstance(ns_array, list) and ns_array:
+            ns_stages = [int(v) for v in ns_array]
+        elif isinstance(ns_array, (tuple, np.ndarray)) and len(ns_array):
+            ns_stages = [int(v) for v in ns_array]
+
+    # Stage-0 (coarsest) static + initial guess drives signgs selection.
+    cfg0 = replace(cfg, ns=int(ns_stages[0]))
+    static0 = build_static(cfg0, grid=grid)
+    bdy = boundary_from_indata(indata, static0.modes)
+    st0_coarse = initial_guess_from_boundary(static0, bdy, indata, vmec_project=vmec_project)
+
+    g0 = eval_geom(st0_coarse, static0)
     signgs = signgs_from_sqrtg(np.asarray(g0.sqrtg), axis_index=1)
+
+    static = build_static(cfg, grid=grid)
 
     flux = flux_profiles_from_indata(indata, static.s, signgs=signgs)
     # VMEC evaluates pressure/iota/current profiles on the radial half mesh.
@@ -298,7 +321,7 @@ def run_fixed_boundary(
     gamma = indata.get_float("GAMMA", 0.0)
 
     if step_size is _STEP_SIZE_SENTINEL or step_size is None:
-        if solver_lower == "vmecpp_iter":
+        if solver_lower in ("vmecpp_iter", "vmec2000_iter"):
             step_size_val = float(indata.get_float("DELT", 5e-3))
         else:
             step_size_val = 5e-3
@@ -314,6 +337,8 @@ def run_fixed_boundary(
             print(f"[vmec_jax] max_iter={max_iter} step_size={step_size_val} history_size={history_size}")
 
     if use_initial_guess:
+        static = build_static(cfg, grid=grid)
+        st0 = initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
         return FixedBoundaryRun(
             cfg=cfg,
             indata=indata,
@@ -327,6 +352,8 @@ def run_fixed_boundary(
 
     solver = solver_lower
     if solver == "gd":
+        static = build_static(cfg, grid=grid)
+        st0 = initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
         res = solve_fixed_boundary_gd(
             st0,
             static,
@@ -343,6 +370,8 @@ def run_fixed_boundary(
             verbose=bool(verbose),
         )
     elif solver == "lbfgs":
+        static = build_static(cfg, grid=grid)
+        st0 = initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
         res = solve_fixed_boundary_lbfgs(
             st0,
             static,
@@ -360,6 +389,8 @@ def run_fixed_boundary(
         )
     elif solver == "vmec_lbfgs":
         from .solve import solve_fixed_boundary_lbfgs_vmec_residual
+        static = build_static(cfg, grid=grid)
+        st0 = initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
 
         res = solve_fixed_boundary_lbfgs_vmec_residual(
             st0,
@@ -377,6 +408,8 @@ def run_fixed_boundary(
         )
     elif solver == "vmec_gn":
         from .solve import solve_fixed_boundary_gn_vmec_residual
+        static = build_static(cfg, grid=grid)
+        st0 = initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
 
         res = solve_fixed_boundary_gn_vmec_residual(
             st0,
@@ -393,6 +426,8 @@ def run_fixed_boundary(
         )
     elif solver == "vmecpp_iter":
         from .solve import solve_fixed_boundary_vmecpp_iter
+        static = build_static(cfg, grid=grid)
+        st0 = initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
 
         res = solve_fixed_boundary_vmecpp_iter(
             st0,
@@ -410,9 +445,172 @@ def run_fixed_boundary(
             use_direct_fallback=vmecpp_use_direct_fallback,
             verbose=bool(verbose),
         )
+    elif solver == "vmec2000_iter":
+        from .solve import SolveVmecResidualResult, solve_fixed_boundary_vmecpp_iter
+
+        def _distribute_iters(*, iters: int, nstep: int) -> list[int]:
+            iters = int(iters)
+            nstep = int(nstep)
+            if iters <= 0:
+                return [0]
+            if nstep <= 1:
+                return [iters]
+            base, rem = divmod(iters, nstep)
+            if base == 0:
+                return [iters]
+            return [base + (1 if i < rem else 0) for i in range(nstep)]
+
+        # Stage controls.
+        nstep = len(ns_stages)
+        if multigrid_use_input_niter:
+            niter_array = indata.get("NITER_ARRAY", None)
+            ftol_array = indata.get("FTOL_ARRAY", None)
+            niter_stages = (
+                [int(v) for v in niter_array] if isinstance(niter_array, list) and len(niter_array) == nstep else None
+            )
+            ftol_stages = (
+                [float(v) for v in ftol_array] if isinstance(ftol_array, list) and len(ftol_array) == nstep else None
+            )
+            if niter_stages is None:
+                niter_stages = _distribute_iters(iters=int(max_iter), nstep=int(nstep))
+            else:
+                # Respect the caller's `max_iter` as a total budget, but keep at
+                # least 1 iteration per stage when possible (so staging still
+                # happens in short debugging runs).
+                budget = int(max_iter)
+                if budget < nstep:
+                    # Too few iterations to meaningfully stage; collapse to the
+                    # final grid only.
+                    ns_stages = [int(ns_stages[-1])]
+                    nstep = 1
+                    niter_stages = [int(max(budget, 1))]
+                    if ftol_stages is not None:
+                        ftol_stages = [float(ftol_stages[-1])]
+                else:
+                    base = [1] * nstep
+                    remaining = budget - nstep
+                    caps = [max(0, int(n) - 1) for n in niter_stages]
+                    out = base[:]
+                    for i in range(nstep):
+                        if remaining <= 0:
+                            break
+                        take = min(caps[i], remaining)
+                        out[i] += take
+                        remaining -= take
+                    if remaining > 0:
+                        out[-1] += remaining
+                    niter_stages = out
+            if ftol_stages is None:
+                ftol_stages = [float(indata.get_float("FTOL", 1e-10))] * nstep
+        else:
+            niter_stages = _distribute_iters(iters=int(max_iter), nstep=int(nstep))
+            ftol_stages = [float(indata.get_float("FTOL", 1e-10))] * nstep
+
+        # Run coarse -> fine stages with VMEC `interp.f` interpolation.
+        stage_results: list[SolveVmecResidualResult] = []
+        stage_offsets: list[int] = []
+
+        state = st0_coarse
+        static_prev = static0
+        for i, (ns_i, niter_i, ftol_i) in enumerate(zip(ns_stages, niter_stages, ftol_stages)):
+            cfg_i = replace(cfg, ns=int(ns_i))
+            static_i = build_static(cfg_i, grid=grid)
+            if i > 0:
+                state = interp_vmec_state(state, m=static_prev.modes.m, ns_new=int(ns_i))
+                static_prev = static_i
+
+            if verbose:
+                print(f"[vmec_jax] multigrid stage {i+1}/{nstep}: ns={ns_i} niter={niter_i} ftol={ftol_i:.2e}")
+
+            stage_offsets.append(sum(int(np.asarray(r.w_history).size) for r in stage_results))
+            stage_results.append(
+                solve_fixed_boundary_vmecpp_iter(
+                    state,
+                    static_i,
+                    indata=indata,
+                    signgs=signgs,
+                    ftol=float(ftol_i),
+                    max_iter=int(niter_i),
+                    step_size=float(step_size_val),
+                    include_constraint_force=True,
+                    apply_m1_constraints=True,
+                    precond_radial_alpha=0.5,
+                    precond_lambda_alpha=0.5,
+                    mode_diag_exponent=0.0,
+                    auto_flip_force=True,
+                    divide_by_scalxc_for_update=False,
+                    lambda_update_scale=float(2.0 * np.pi * float(signgs)),
+                    vmecpp_strict_update=True,
+                    vmecpp_backtracking=False,
+                    vmecpp_reference_mode=False,
+                    use_vmecpp_restart_triggers=False,
+                    use_direct_fallback=False,
+                    verbose=bool(verbose),
+                )
+            )
+            state = stage_results[-1].state
+            static_prev = static_i
+
+        # Merge per-stage histories into one VMEC-style trace object.
+        def _cat(attr: str) -> np.ndarray:
+            parts = [np.asarray(getattr(r, attr)) for r in stage_results if getattr(r, attr) is not None]
+            return np.concatenate(parts, axis=0) if parts else np.zeros((0,), dtype=float)
+
+        diag = dict(stage_results[-1].diagnostics)
+        diag["multigrid_ns_stages"] = np.asarray(ns_stages, dtype=int)
+        diag["multigrid_niter_stages"] = np.asarray(niter_stages, dtype=int)
+        diag["multigrid_ftol_stages"] = np.asarray(ftol_stages, dtype=float)
+        diag["multigrid_stage_offsets"] = np.asarray(stage_offsets, dtype=int)
+
+        # Concatenate the common history keys that are useful for parity debugging.
+        for k in (
+            "step_status_history",
+            "restart_reason_history",
+            "pre_restart_reason_history",
+            "time_step_history",
+            "res0_history",
+            "fsq_prev_history",
+            "bad_growth_streak_history",
+            "iter1_history",
+            "include_edge_history",
+            "zero_m1_history",
+            "dt_eff_history",
+            "update_rms_history",
+            "w_curr_history",
+            "w_try_history",
+            "w_try_ratio_history",
+            "restart_path_history",
+            "min_tau_history",
+            "max_tau_history",
+            "bad_jacobian_history",
+            "fsq1_history",
+            "fsqr1_history",
+            "fsqz1_history",
+            "fsql1_history",
+            "rz_norm_history",
+            "f_norm1_history",
+            "gcr2_p_history",
+            "gcz2_p_history",
+            "gcl2_p_history",
+        ):
+            if any(k in r.diagnostics for r in stage_results):
+                diag[k] = np.concatenate([np.asarray(r.diagnostics.get(k, np.zeros((0,), dtype=float))) for r in stage_results])
+
+        res = SolveVmecResidualResult(
+            state=state,
+            n_iter=int(sum(int(r.n_iter) + 1 for r in stage_results) - 1),
+            w_history=_cat("w_history"),
+            fsqr2_history=_cat("fsqr2_history"),
+            fsqz2_history=_cat("fsqz2_history"),
+            fsql2_history=_cat("fsql2_history"),
+            grad_rms_history=_cat("grad_rms_history"),
+            step_history=_cat("step_history"),
+            diagnostics=diag,
+        )
+        static = build_static(cfg, grid=grid)
     else:
         raise ValueError(
-            f"Unknown solver: {solver!r} (expected 'gd', 'lbfgs', 'vmec_lbfgs', 'vmec_gn', or 'vmecpp_iter')"
+            f"Unknown solver: {solver!r} (expected 'gd', 'lbfgs', 'vmec_lbfgs', 'vmec_gn', 'vmecpp_iter', or 'vmec2000_iter')"
         )
 
     if verbose:
