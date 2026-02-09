@@ -1,5 +1,5 @@
 &INDATA
-! VMEC++ example (axisymmetric) adapted for a fast fixed-boundary demo.
+! Axisymmetric example adapted for a fast fixed-boundary demo.
 DELT = 0.9
 LASYM = F
 NFP = 1

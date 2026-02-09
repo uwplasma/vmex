@@ -8,7 +8,7 @@ Instead it uses:
 - precomputed trig tables (`cosmu/sinmu`, `cosnv/sinnv`) and their derivative
   companions (`cosmum/sinmum`, `cosnvn/sinnvn`).
 
-This module implements the *core* pieces needed for Step-10 parity:
+This module implements the *core* pieces needed for parity diagnostics:
 
 - `vmec_trig_tables(...)`  : build VMEC-style trig and weight tables
 - `tomnsps_rzl(...)`       : real-space -> Fourier-space force transform
@@ -730,8 +730,8 @@ def tomnspa_rzl(
     # VMEC `tomnspa` note (tomnsp_mod.f): the antisymmetric transform is
     # performed on a restricted theta interval after `symforce`. For the
     # 3D+lasym lambda blocks, VMEC's conventions imply an additional √2 scaling
-    # compared to the symmetric (`tomnsps`) lambda blocks. This improves Step-10
-    # `fsql` parity on lasym+3D reference equilibria.
+    # compared to the symmetric (`tomnsps`) lambda blocks. This improves `fsql`
+    # parity on lasym+3D reference equilibria.
     if bool(lthreed):
         s2 = jnp.asarray(np.sqrt(2.0), dtype=jnp.asarray(flcc).dtype)
         flcc = flcc * s2

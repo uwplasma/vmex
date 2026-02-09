@@ -54,7 +54,7 @@ def _alias_ref_symmetric(*, ztemp, trig, ntor: int, mpol: int, signgs: int, tcon
     return gcon
 
 
-def test_step10_alias_gcon_symmetric_matches_reference_loops():
+def test_alias_gcon_symmetric_matches_reference_loops():
     rng = np.random.default_rng(0)
     ntheta = 10
     nzeta = 8
@@ -161,7 +161,7 @@ def _alias_ref_lasym(*, ztemp, trig, ntor: int, mpol: int, signgs: int, tcon):
 
 
 @pytest.mark.skip(reason="lasym parity deferred while focusing on symmetric configurations")
-def test_step10_alias_gcon_lasym_matches_reference_loops():
+def test_alias_gcon_lasym_matches_reference_loops():
     rng = np.random.default_rng(0)
     ntheta = 10
     nzeta = 7

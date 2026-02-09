@@ -1,4 +1,4 @@
-"""Energy functionals (step-4).
+"""Energy functionals.
 
 This module provides a minimal, differentiable magnetic energy functional,
 intended as the first objective for a fixed-boundary solver.
@@ -27,7 +27,7 @@ from .profiles import eval_profiles
 
 @dataclass(frozen=True)
 class FluxProfiles:
-    """Simple 1D flux functions for step-4."""
+    """Simple 1D flux functions."""
 
     phipf: Any  # (ns,)
     chipf: Any  # (ns,)

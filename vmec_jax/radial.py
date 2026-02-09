@@ -2,7 +2,7 @@
 
 VMEC uses a normalized radial-like coordinate ``s`` in [0, 1].
 
-For step-2 we need radial derivatives of the *Fourier coefficients* that are
+We need radial derivatives of the *Fourier coefficients* that are
 stored on an ``(ns, K)`` grid. We deliberately start with a simple and robust
 finite-difference operator that is:
 

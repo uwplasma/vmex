@@ -1,4 +1,4 @@
-"""Force/residual diagnostics (step-10).
+"""Force/residual diagnostics.
 
 VMEC reports scalar residual measures (e.g. ``fsqr/fsqz/fsql``) that track
 how close a state is to satisfying the equilibrium Euler-Lagrange equations.

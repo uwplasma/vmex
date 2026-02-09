@@ -17,11 +17,11 @@ from vmec_jax.wout import read_wout
         "examples/data/wout_li383_low_res_reference.nc",
     ],
 )
-def test_step10_chips_from_chipf_matches_iotas_phips_when_ncurr0(wout_rel: str):
+def test_chips_from_chipf_matches_iotas_phips_when_ncurr0(wout_rel: str):
     """In VMEC (ncurr=0), chips(js) = iotas(js)*phips(js) and chipf is a radial average.
 
     `wout_*.nc` stores chipf with a `2π*signgs` factor, and vmec_jax uses that
-    same convention for Step-10 parity work.
+    same convention for scalar residual parity work.
     """
     pytest.importorskip("netCDF4")
     if not has_jax():

@@ -1,8 +1,8 @@
-"""Step-10 `getfsq` scalar parity report for bundled reference `wout` files.
+"""`getfsq` scalar parity report for bundled reference `wout` files.
 
 This script is intentionally fast by default:
 - It does not run a fixed-boundary solve unless `--solve` is provided.
-- It evaluates the Step-10 pipeline on the *reference* VMEC state from `wout`,
+- It evaluates the reference pipeline on the *reference* VMEC state from `wout`,
   so kernel mismatches show up without solver noise.
 """
 
@@ -28,10 +28,10 @@ def main() -> None:
     p.add_argument(
         "--solve-metric",
         action="store_true",
-        help="Alias for the default behavior (compute Step-10 scalars on reference wouts; no solve).",
+        help="Alias for the default behavior (compute scalars on reference wouts; no solve).",
     )
     p.add_argument("--solve", action="store_true", help="Also run a vmec_jax fixed-boundary solve per case.")
-    p.add_argument("--solver", default="vmecpp_iter", help="Solver to use when `--solve` is enabled.")
+    p.add_argument("--solver", default="vmec2000_iter", help="Solver to use when `--solve` is enabled.")
     p.add_argument("--max-iter", type=int, default=10, help="Max iterations when `--solve` is enabled.")
     p.add_argument(
         "--jit",
@@ -52,7 +52,7 @@ def main() -> None:
     cases = [
         "circular_tokamak",
         "shaped_tokamak_pressure",
-        "vmecpp_solovev",
+        "solovev",
     ]
     if args.all:
         # Keep this list small: this is a kernel parity script, not a benchmark.
@@ -61,7 +61,7 @@ def main() -> None:
             "n3are_R7.75B5.7_lowres",
         ]
 
-    print("[vmec_jax] step10 getfsq parity (reference wout states)")
+    print("[vmec_jax] getfsq parity (reference wout states)")
     print(f"[vmec_jax] cases={cases}")
     print("[vmec_jax] note: this script does not solve unless `--solve` is set")
     if not args.jit:
@@ -99,7 +99,7 @@ def main() -> None:
             g = eval_geom(state, static)
             signgs = signgs_from_sqrtg(np.asarray(g.sqrtg), axis_index=1)
 
-            fsqr, fsqz, fsql = vj.step10_fsq_from_state(
+            fsqr, fsqz, fsql = vj.residual_scalars_from_state(
                 state=state,
                 static=static,
                 indata=indata,
@@ -127,7 +127,7 @@ def main() -> None:
                     max_iter=int(args.max_iter),
                     verbose=True,
                 )
-                fsqr_s, fsqz_s, fsql_s = vj.step10_fsq_from_state(
+                fsqr_s, fsqz_s, fsql_s = vj.residual_scalars_from_state(
                     state=run.state,
                     static=run.static,
                     indata=run.indata,

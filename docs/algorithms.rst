@@ -53,8 +53,8 @@ Future work:
 - FFT-based transforms **only after parity** (must reproduce VMEC scaling,
   endpoint weights, and ``ntheta1/2/3`` conventions exactly).
 
-Step-1/2 geometry pipeline
---------------------------
+Geometry pipeline
+-----------------
 
 The geometry kernel is the foundation of most downstream physics:
 
@@ -69,8 +69,8 @@ The geometry kernel is the foundation of most downstream physics:
 
 The goal is that each step is differentiable and jittable.
 
-Step-3 profiles and volume integrals
-------------------------------------
+Profiles and volume integrals
+-----------------------------
 
 Profiles
 ~~~~~~~~
@@ -100,8 +100,8 @@ Given ``sqrtg(s,theta,zeta)`` we compute:
 
 This is implemented in ``vmec_jax/integrals.py``.
 
-Step-4 field and energy
------------------------
+Field and energy
+----------------
 
 We compute contravariant field components ``(bsupu, bsupv)`` using:
 
@@ -112,8 +112,8 @@ We compute contravariant field components ``(bsupu, bsupv)`` using:
 We validate against ``wout`` Nyquist Fourier coefficients for ``sqrtg`` and
 ``bsup*`` and integrate to obtain ``wb``.
 
-Step-10 parity building blocks: forces, transforms, and constraints
-------------------------------------------------------------------------
+Residual and constraint building blocks
+--------------------------------------
 
 VMEC's reported force residual scalars (``fsqr``, ``fsqz``, ``fsql``) are
 computed from *Fourier-space* force arrays produced by a specific sequence of
@@ -216,7 +216,7 @@ VMEC’s robust fixed-boundary convergence relies on:
 - a **Garabedian-style preconditioned descent / time-stepper** with adaptive
   damping.
 
-These pieces are described in VMEC2000/VMEC++ sources (``precondn``,
+These pieces are described in VMEC2000 sources (``precondn``,
 ``bcovar``, and the time-step loop), and are required for VMEC-quality
 fixed-boundary convergence on 3D cases. In ``vmec-jax`` we implement these
 pieces in a JAX-friendly way (``lax.scan`` over ``s`` and matrix-free
@@ -235,8 +235,8 @@ with a conservative heuristic fallback that matches VMEC's scaling structure
 exercise the full ``alias`` / constraint-force pathway under ``jit``; it is not
 yet expected to be perfect parity with VMEC's full preconditioner machinery.
 
-Step-5 lambda solve (inner solve)
----------------------------------
+Lambda-only solve (inner solve)
+-------------------------------
 
 Holding ``(R,Z)`` fixed, we minimize ``wb`` with respect to lambda coefficients.
 This is a useful subproblem and is part of VMEC’s nonlinear solve.
@@ -253,7 +253,7 @@ Experimental VMEC-residual solvers (not yet VMEC2000-parity)
 ------------------------------------------------------------
 
 For end-to-end work we also provide *experimental* solvers that minimize a
-VMEC-style residual objective built from the Step-10 parity kernels:
+VMEC-style residual objective built from parity kernels:
 
 .. math::
 
@@ -301,7 +301,7 @@ These solvers are primarily intended as a *development harness* for parity work.
 They are **not** yet guaranteed to converge to the VMEC2000 equilibrium from an
 arbitrary initial guess, because:
 
-- the Step-10 force kernels were originally ported for *output parity on a converged equilibrium*,
+- the force kernels were originally ported for *output parity on a converged equilibrium*,
   and are still being hardened for use as a general-purpose nonlinear solver objective;
 - VMEC's full nonlinear iteration includes additional iteration-dependent logic,
   preconditioners, and axis/constraint details that are not fully reproduced yet.
@@ -312,8 +312,8 @@ arbitrary initial guess, because:
 In other words: decreasing :math:`W_{\mathrm{res}}` is a useful milestone and a
 regression target, but it is not yet equivalent to "match VMEC2000 coefficients".
 
-Step-6/7 fixed-boundary solve (early stage)
--------------------------------------------
+Fixed-boundary solve (early stage)
+---------------------------------
 
 We extend the optimization variables to include all Fourier coefficients:
 

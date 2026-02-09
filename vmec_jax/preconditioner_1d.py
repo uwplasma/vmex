@@ -1,4 +1,4 @@
-"""VMEC++ preconditioner helpers (axisymmetric parity path)."""
+"""VMEC2000 1D (radial) preconditioner helpers (axisymmetric path)."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ def _sm_sp_from_s(s: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return _sm_sp_from_profiles(sqrt_sf, sqrt_sh)
 
 
-def vmecpp_wint_from_config(*, cfg) -> np.ndarray:
+def wint_from_config(*, cfg) -> np.ndarray:
     ntheta = int(cfg.ntheta)
     nzeta = int(cfg.nzeta)
     lasym = bool(cfg.lasym)
@@ -78,7 +78,7 @@ def vmecpp_wint_from_config(*, cfg) -> np.ndarray:
     return w_int
 
 
-def vmecpp_lambda_preconditioner(
+def lambda_preconditioner(
     *,
     bc,
     trig,
@@ -86,7 +86,7 @@ def vmecpp_lambda_preconditioner(
     cfg,
     damping_factor: float = 2.0,
 ) -> np.ndarray:
-    """Compute VMEC++ lambda preconditioner (n>=0 storage)."""
+    """Compute VMEC lambda preconditioner (n>=0 storage)."""
     guu = np.asarray(bc.guu, dtype=float)
     guv = np.asarray(bc.guv, dtype=float)
     gvv = np.asarray(bc.gvv, dtype=float)
@@ -101,7 +101,7 @@ def vmecpp_lambda_preconditioner(
     ns_half = int(guu_h.shape[0])
     ntheta = int(guu.shape[1])
     nzeta = int(guu.shape[2])
-    w_int = vmecpp_wint_from_config(cfg=cfg)
+    w_int = wint_from_config(cfg=cfg)
 
     # half-grid accumulation (shifted by +1)
     b_lambda = np.zeros((ns_full + 1,), dtype=float)
@@ -248,8 +248,8 @@ def _compute_preconditioning_matrix(
     return axm, axd, bxm, bxd, cxd
 
 
-def _tridiagonal_solve_vmecpp(a: np.ndarray, d: np.ndarray, b: np.ndarray, rhs: np.ndarray, jmin: int, jmax: int) -> np.ndarray:
-    """VMEC++-style Thomas solve with jmin/jmax bounds."""
+def _tridiagonal_solve(a: np.ndarray, d: np.ndarray, b: np.ndarray, rhs: np.ndarray, jmin: int, jmax: int) -> np.ndarray:
+    """Thomas solve with jmin/jmax bounds."""
     out = rhs.copy()
     n = int(rhs.shape[0])
     if jmax <= jmin or n == 0:
@@ -284,7 +284,7 @@ def _tridiagonal_solve_vmecpp(a: np.ndarray, d: np.ndarray, b: np.ndarray, rhs: 
     return out
 
 
-def vmecpp_rz_preconditioner_matrices(
+def rz_preconditioner_matrices(
     *,
     bc,
     k,
@@ -292,13 +292,13 @@ def vmecpp_rz_preconditioner_matrices(
     s: np.ndarray,
     cfg,
 ) -> tuple[dict[str, np.ndarray], np.ndarray, int]:
-    """Return VMEC++-style R/Z preconditioner matrices and jmin."""
+    """Return R/Z preconditioner matrices and jmin."""
     if bool(cfg.lthreed) or bool(cfg.lasym):
-        raise ValueError("vmecpp_rz_preconditioner_matrices only supports axisym.")
+        raise ValueError("rz_preconditioner_matrices only supports axisym.")
     s_arr = np.asarray(s, dtype=float)
     ns = int(s_arr.shape[0])
     ns_f = max(ns - 1, 1)
-    w_int = vmecpp_wint_from_config(cfg=cfg)
+    w_int = wint_from_config(cfg=cfg)
     r12 = np.asarray(bc.jac.r12, dtype=float)[1:]
     tau = np.asarray(bc.jac.tau, dtype=float)[1:]
     total_pressure = np.asarray(bc.bsq, dtype=float)[1:]
@@ -375,7 +375,7 @@ def vmecpp_rz_preconditioner_matrices(
     return mats, jmin, ns_f
 
 
-def vmecpp_rz_preconditioner(
+def rz_preconditioner(
     *,
     frzl_in: TomnspsRZL,
     bc,
@@ -384,10 +384,10 @@ def vmecpp_rz_preconditioner(
     s: np.ndarray,
     cfg,
 ) -> TomnspsRZL:
-    """Apply VMEC++ R/Z radial preconditioner (axisymmetric only)."""
+    """Apply R/Z radial preconditioner (axisymmetric only)."""
     if bool(cfg.lthreed) or bool(cfg.lasym):
         return frzl_in
-    mats, jmin, jmax = vmecpp_rz_preconditioner_matrices(
+    mats, jmin, jmax = rz_preconditioner_matrices(
         bc=bc,
         k=k,
         trig=trig,
@@ -408,10 +408,10 @@ def vmecpp_rz_preconditioner(
     for m in range(mpol):
         for n in range(nrange):
             jmin_mn = int(jmin[m, n])
-            frcc_u[:jmax, m, n] = _tridiagonal_solve_vmecpp(
+            frcc_u[:jmax, m, n] = _tridiagonal_solve(
                 ar[:, m, n], dr[:, m, n], br[:, m, n], frcc_u[:jmax, m, n], jmin_mn, jmax
             )
-            fzsc_u[:jmax, m, n] = _tridiagonal_solve_vmecpp(
+            fzsc_u[:jmax, m, n] = _tridiagonal_solve(
                 az[:, m, n], dz[:, m, n], bz[:, m, n], fzsc_u[:jmax, m, n], jmin_mn, jmax
             )
 

@@ -1,4 +1,4 @@
-"""VMEC force/residue kernels (Step-10 parity work).
+"""VMEC force/residue kernels for parity work.
 
 This module implements a direct, array-based port of VMEC2000's ``forces`` core
 for the **R/Z** equations, operating on:
@@ -154,6 +154,7 @@ def _constraint_kernels_from_state(
     pzu_0,
     pzu_1,
     constraint_tcon0: float | None,
+    tcon_override: Any | None = None,
     trig: VmecTrigTables | None = None,
 ) -> VmecConstraintKernels:
     """Compute VMEC constraint-force kernels from state/parity fields.
@@ -164,7 +165,7 @@ def _constraint_kernels_from_state(
     ns = int(s.shape[0])
     dtype = jnp.asarray(state.Rcos).dtype
 
-    if constraint_tcon0 is None or float(constraint_tcon0) == 0.0:
+    if (constraint_tcon0 is None or float(constraint_tcon0) == 0.0) and (tcon_override is None):
         z = jnp.zeros_like(pru_0)
         tcon = jnp.zeros((ns,), dtype=dtype)
         return VmecConstraintKernels(
@@ -223,31 +224,34 @@ def _constraint_kernels_from_state(
             dtype=jnp.asarray(ztemp).dtype,
         )
 
-    # VMEC computes the constraint strength `tcon(js)` in `bcovar.f` using
-    # diagonal preconditioner pieces and flux-surface norms.
-    tcon = tcon_from_bcovar_precondn_diag(
-        tcon0=float(constraint_tcon0),
-        trig=trig,
-        s=s,
-        signgs=int(wout.signgs),
-        lasym=bool(wout.lasym),
-        bsq=bc.bsq,
-        r12=bc.jac.r12,
-        sqrtg=bc.jac.sqrtg,
-        ru12=bc.jac.ru12,
-        zu12=bc.jac.zu12,
-        ru0=ru0,
-        zu0=zu0,
-    )
-    # Fallback to a conservative constant profile if ill-conditioned.
-    finite = jnp.all(jnp.isfinite(tcon))
-    tcon_heur = tcon_from_tcon0_heuristic(
-        tcon0=float(constraint_tcon0),
-        s=s,
-        trig=trig,
-        lasym=bool(wout.lasym),
-    )
-    tcon = jnp.where(finite, tcon, tcon_heur)
+    if tcon_override is None:
+        # VMEC computes the constraint strength `tcon(js)` in `bcovar.f` using
+        # diagonal preconditioner pieces and flux-surface norms.
+        tcon = tcon_from_bcovar_precondn_diag(
+            tcon0=float(constraint_tcon0),
+            trig=trig,
+            s=s,
+            signgs=int(wout.signgs),
+            lasym=bool(wout.lasym),
+            bsq=bc.bsq,
+            r12=bc.jac.r12,
+            sqrtg=bc.jac.sqrtg,
+            ru12=bc.jac.ru12,
+            zu12=bc.jac.zu12,
+            ru0=ru0,
+            zu0=zu0,
+        )
+        # Fallback to a conservative constant profile if ill-conditioned.
+        finite = jnp.all(jnp.isfinite(tcon))
+        tcon_heur = tcon_from_tcon0_heuristic(
+            tcon0=float(constraint_tcon0),
+            s=s,
+            trig=trig,
+            lasym=bool(wout.lasym),
+        )
+        tcon = jnp.where(finite, tcon, tcon_heur)
+    else:
+        tcon = jnp.asarray(tcon_override, dtype=dtype)
 
     gcon = alias_gcon(
         ztemp=ztemp,
@@ -308,6 +312,7 @@ def vmec_forces_rz_from_wout(
     wout,
     indata=None,
     constraint_tcon0: float | None = None,
+    constraint_tcon: Any | None = None,
     use_wout_bsup: bool = False,
     use_vmec_synthesis: bool = False,
     trig: VmecTrigTables | None = None,
@@ -873,6 +878,7 @@ def vmec_forces_rz_from_wout_reference_fields(
         pzu_0=pzu_0,
         pzu_1=pzu_1,
         constraint_tcon0=constraint_tcon0,
+        tcon_override=None,
     )
 
     brmn_e = brmn_e + con.rcon_force
@@ -1198,7 +1204,7 @@ def vmec_residual_internal_from_kernels(
 
     # VMEC `lforbal` modifies the (m=1,n=0) symmetric forces to satisfy the
     # flux-surface-averaged force balance exactly. This primarily affects
-    # the Step-10 scalars `fsqr/fsqz`. See `VMEC2000/Sources/General/tomnsp_mod.f`.
+    # the scalar residuals `fsqr/fsqz`. See `VMEC2000/Sources/General/tomnsp_mod.f`.
     if bool(apply_lforbal):
         from .vmec_lforbal import apply_lforbal_to_tomnsps, lforbal_factors_from_state
 

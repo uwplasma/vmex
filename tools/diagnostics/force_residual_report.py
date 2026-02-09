@@ -1,4 +1,4 @@
-"""Advanced example: force residual diagnostics (Step-10 target).
+"""Advanced example: force residual diagnostics.
 
 This script computes vmec_jax's current *force-like* residual scalars derived
 from the total-objective gradient and prints them alongside VMEC2000's
@@ -109,4 +109,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

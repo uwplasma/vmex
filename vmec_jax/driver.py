@@ -51,7 +51,7 @@ class FixedBoundaryRun:
     signgs: int
 
 
-def step10_fsq_from_state(
+def residual_scalars_from_state(
     *,
     state,
     static,
@@ -61,7 +61,7 @@ def step10_fsq_from_state(
 ):
     """Compute VMEC-style invariant residual scalars (fsqr/fsqz/fsql) from a state.
 
-    This uses the Step-10 pipeline:
+    This uses the residual pipeline:
       bcovar -> forces -> tomnsps -> getfsq
 
     and is intentionally input-only: flux profiles and pressure are derived from
@@ -146,7 +146,7 @@ def write_wout_from_fixed_boundary_run(
     path.parent.mkdir(parents=True, exist_ok=True)
 
     if include_fsq:
-        fsqr, fsqz, fsql = step10_fsq_from_state(
+        fsqr, fsqz, fsql = residual_scalars_from_state(
             state=run.state, static=run.static, indata=run.indata, signgs=int(run.signgs), use_vmec_synthesis=True
         )
     else:
@@ -243,9 +243,8 @@ def run_fixed_boundary(
     gn_cg_maxiter: int = 80,
     use_initial_guess: bool = False,
     vmec_project: bool = True,
-    vmecpp_reference_mode: bool = False,
-    vmecpp_use_restart_triggers: bool | None = None,
-    vmecpp_use_direct_fallback: bool | None = None,
+    use_restart_triggers: bool | None = None,
+    use_direct_fallback: bool | None = None,
     multigrid: bool | None = None,
     multigrid_use_input_niter: bool = False,
     verbose: bool = True,
@@ -258,7 +257,7 @@ def run_fixed_boundary(
     ----------
     solver:
         ``"gd"`` (gradient descent), ``"lbfgs"``, ``"vmec_lbfgs"``,
-        ``"vmec_gn"`` (VMEC residual objective), ``"vmecpp_iter"``, or
+        ``"vmec_gn"`` (VMEC residual objective), or
         ``"vmec2000_iter"`` (VMEC-style multigrid iteration).
     use_initial_guess:
         If True, skip the solve and return the initialized state.
@@ -274,7 +273,7 @@ def run_fixed_boundary(
     if ns_override is not None:
         cfg = replace(cfg, ns=int(ns_override))
     solver_lower = str(solver).lower()
-    if grid is None and solver_lower in ("vmec_lbfgs", "vmec_gn", "vmecpp_iter", "vmec2000_iter"):
+    if grid is None and solver_lower in ("vmec_lbfgs", "vmec_gn", "vmec2000_iter"):
         from .vmec_tomnsp import vmec_angle_grid
 
         grid = vmec_angle_grid(
@@ -321,7 +320,7 @@ def run_fixed_boundary(
     gamma = indata.get_float("GAMMA", 0.0)
 
     if step_size is _STEP_SIZE_SENTINEL or step_size is None:
-        if solver_lower in ("vmecpp_iter", "vmec2000_iter"):
+        if solver_lower in ("vmec2000_iter",):
             step_size_val = float(indata.get_float("DELT", 5e-3))
         else:
             step_size_val = 5e-3
@@ -424,29 +423,8 @@ def run_fixed_boundary(
             jit_kernels=True,
             verbose=bool(verbose),
         )
-    elif solver == "vmecpp_iter":
-        from .solve import solve_fixed_boundary_vmecpp_iter
-        static = build_static(cfg, grid=grid)
-        st0 = initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
-
-        res = solve_fixed_boundary_vmecpp_iter(
-            st0,
-            static,
-            indata=indata,
-            signgs=signgs,
-            max_iter=int(max_iter),
-            step_size=float(step_size_val),
-            include_constraint_force=True,
-            apply_m1_constraints=True,
-            precond_radial_alpha=0.5,
-            precond_lambda_alpha=0.5,
-            vmecpp_reference_mode=bool(vmecpp_reference_mode),
-            use_vmecpp_restart_triggers=vmecpp_use_restart_triggers,
-            use_direct_fallback=vmecpp_use_direct_fallback,
-            verbose=bool(verbose),
-        )
     elif solver == "vmec2000_iter":
-        from .solve import SolveVmecResidualResult, solve_fixed_boundary_vmecpp_iter
+        from .solve import SolveVmecResidualResult, solve_fixed_boundary_residual_iter
 
         def _distribute_iters(*, iters: int, nstep: int) -> list[int]:
             iters = int(iters)
@@ -524,7 +502,7 @@ def run_fixed_boundary(
 
             stage_offsets.append(sum(int(np.asarray(r.w_history).size) for r in stage_results))
             stage_results.append(
-                solve_fixed_boundary_vmecpp_iter(
+                solve_fixed_boundary_residual_iter(
                     state,
                     static_i,
                     indata=indata,
@@ -541,10 +519,11 @@ def run_fixed_boundary(
                     divide_by_scalxc_for_update=False,
                     lambda_update_scale=float(2.0 * np.pi * float(signgs)),
                     enforce_vmec_lambda_axis=True,
-                    vmecpp_strict_update=True,
-                    vmecpp_backtracking=False,
-                    vmecpp_reference_mode=False,
-                    use_vmecpp_restart_triggers=False,
+                    vmec2000_control=True,
+                    strict_update=True,
+                    backtracking=False,
+                    reference_mode=False,
+                    use_restart_triggers=bool(use_restart_triggers) if use_restart_triggers is not None else False,
                     use_direct_fallback=False,
                     verbose=bool(verbose),
                 )
@@ -573,6 +552,7 @@ def run_fixed_boundary(
             "fsq_prev_history",
             "bad_growth_streak_history",
             "iter1_history",
+            "bcovar_update_history",
             "include_edge_history",
             "zero_m1_history",
             "dt_eff_history",
@@ -595,7 +575,9 @@ def run_fixed_boundary(
             "gcl2_p_history",
         ):
             if any(k in r.diagnostics for r in stage_results):
-                diag[k] = np.concatenate([np.asarray(r.diagnostics.get(k, np.zeros((0,), dtype=float))) for r in stage_results])
+                diag[k] = np.concatenate(
+                    [np.asarray(r.diagnostics.get(k, np.zeros((0,), dtype=float))) for r in stage_results]
+                )
 
         res = SolveVmecResidualResult(
             state=state,
@@ -611,7 +593,7 @@ def run_fixed_boundary(
         static = build_static(cfg, grid=grid)
     else:
         raise ValueError(
-            f"Unknown solver: {solver!r} (expected 'gd', 'lbfgs', 'vmec_lbfgs', 'vmec_gn', 'vmecpp_iter', or 'vmec2000_iter')"
+            f"Unknown solver: {solver!r} (expected 'gd', 'lbfgs', 'vmec_lbfgs', 'vmec_gn', or 'vmec2000_iter')"
         )
 
     if verbose:

@@ -1,4 +1,4 @@
-"""VMEC profile evaluation (step-3).
+"""VMEC profile evaluation.
 
 This module implements a small subset of VMEC2000's profile logic as found in
 `profile_functions.f`, starting with the common `power_series` parameterization.
