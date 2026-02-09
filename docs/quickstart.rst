@@ -23,7 +23,7 @@ nonlinear solve), run::
   python examples/validation/pipeline_parity_summary.py
 
 Scalar residual parity (``fsqr/fsqz/fsql``) on reference states
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To compare scalar residuals reconstructed from a reference state against
 ``wout.fsqr/fsqz/fsql``::

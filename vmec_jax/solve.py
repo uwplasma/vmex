@@ -15,6 +15,8 @@ implementation uses gradient descent with a simple backtracking line search.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
@@ -60,6 +62,66 @@ class SolveVmecResidualResult:
     grad_rms_history: np.ndarray
     step_history: np.ndarray
     diagnostics: Dict[str, Any]
+
+
+def _parse_iter_list(val: str) -> set[int] | None:
+    if not val:
+        return None
+    out: set[int] = set()
+    for chunk in val.replace(" ", "").split(","):
+        if not chunk:
+            continue
+        if "-" in chunk:
+            a, b = chunk.split("-", 1)
+            try:
+                lo = int(a)
+                hi = int(b)
+            except ValueError:
+                continue
+            if hi < lo:
+                lo, hi = hi, lo
+            out.update(range(lo, hi + 1))
+        else:
+            try:
+                out.add(int(chunk))
+            except ValueError:
+                continue
+    return out if out else None
+
+
+def _maybe_dump_tomnsps(*, frzl, static, iter_idx: int, label: str = "raw") -> None:
+    env = os.getenv("VMEC_JAX_DUMP_TOMNSPS", "")
+    if not env or env == "0":
+        return
+    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
+    if iters is not None and int(iter_idx) not in iters:
+        return
+    outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    path = outdir / f"tomnsps_{label}_iter{int(iter_idx)}.npz"
+
+    def _arr(x):
+        return np.asarray(x) if x is not None else np.zeros((0,), dtype=float)
+
+    np.savez(
+        path,
+        frcc=_arr(frzl.frcc),
+        frss=_arr(getattr(frzl, "frss", None)),
+        fzsc=_arr(frzl.fzsc),
+        fzcs=_arr(getattr(frzl, "fzcs", None)),
+        flsc=_arr(frzl.flsc),
+        flcs=_arr(getattr(frzl, "flcs", None)),
+        frsc=_arr(getattr(frzl, "frsc", None)),
+        frcs=_arr(getattr(frzl, "frcs", None)),
+        fzcc=_arr(getattr(frzl, "fzcc", None)),
+        fzss=_arr(getattr(frzl, "fzss", None)),
+        flcc=_arr(getattr(frzl, "flcc", None)),
+        flss=_arr(getattr(frzl, "flss", None)),
+        ns=int(static.cfg.ns),
+        mpol=int(static.cfg.mpol),
+        ntor=int(static.cfg.ntor),
+        lasym=bool(static.cfg.lasym),
+    )
 
 
 def _mode00_index(modes) -> Optional[int]:
@@ -2315,6 +2377,7 @@ def solve_fixed_boundary_residual_iter(
         norms_override: Any | None = None,
         rz_scale_override: Any | None = None,
         l_scale_override: Any | None = None,
+        iter_idx: int | None = None,
     ):
         k = vmec_forces_rz_from_wout(
             state=state,
@@ -2334,6 +2397,8 @@ def solve_fixed_boundary_residual_iter(
             trig=trig,
             apply_lforbal=False,
         )
+        if iter_idx is not None:
+            _maybe_dump_tomnsps(frzl=frzl, static=static, iter_idx=int(iter_idx), label="raw")
         if bool(apply_m1_constraints):
             frzl = vmec_apply_m1_constraints(frzl=frzl, lconm1=bool(getattr(static.cfg, "lconm1", True)))
         frzl = vmec_zero_m1_zforce(frzl=frzl, enabled=zero_m1)
@@ -2698,6 +2763,7 @@ def solve_fixed_boundary_residual_iter(
             norms_override=norms_override,
             rz_scale_override=rz_scale_override,
             l_scale_override=l_scale_override,
+            iter_idx=iter2,
         )
         if bool(vmec2000_control) and bool(need_bcovar_update):
             if constraint_tcon0 is None or float(constraint_tcon0) == 0.0:
