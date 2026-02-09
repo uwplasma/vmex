@@ -1,4 +1,4 @@
-"""VMEC `lforbal` (m=1,n=0 force-balance) correction for Step-10 parity work.
+"""VMEC `lforbal` (m=1,n=0 force-balance) correction for parity work.
 
 VMEC2000 optionally enforces the flux-surface-averaged force balance equation
 *exactly* for the (m=1,n=0) Fourier components of the symmetric R/Z forces
@@ -18,8 +18,8 @@ same correction in vmec_jax parity checks.
 
 Scope
 -----
-This is currently used for Step-10 scalar parity (fsqr/fsqz) against bundled
-VMEC2000 `wout_*.nc` files. It is not yet used in a full time-stepper.
+This is currently used for scalar parity (fsqr/fsqz) against bundled VMEC2000
+`wout_*.nc` files. It is not yet used in a full time-stepper.
 """
 
 from __future__ import annotations

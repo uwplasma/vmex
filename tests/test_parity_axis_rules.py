@@ -5,7 +5,7 @@ import numpy as np
 from vmec_jax.vmec_parity import internal_odd_from_physical, internal_odd_from_physical_vmec_m1
 
 
-def test_step10_internal_odd_axis_rules_copy_vs_zero():
+def test_internal_odd_axis_rules_copy_vs_zero():
     # 3-point radial grid, representing js=1 (axis), js=2, js=3.
     s = np.asarray([0.0, 0.25, 1.0], dtype=float)
     sh = np.sqrt(s)
@@ -27,7 +27,7 @@ def test_step10_internal_odd_axis_rules_copy_vs_zero():
     assert np.allclose(out_zero[0], 0.0)
 
 
-def test_step10_internal_odd_vmec_m1_rule_splits_m1_vs_mge2():
+def test_internal_odd_vmec_m1_rule_splits_m1_vs_mge2():
     s = np.asarray([0.0, 0.25, 1.0], dtype=float)
     sh = np.sqrt(s)
 
@@ -45,4 +45,3 @@ def test_step10_internal_odd_vmec_m1_rule_splits_m1_vs_mge2():
     assert np.allclose(out[1:], (odd_m1_int[1:] + odd_rest_int[1:])[:, None, None])
     # Axis: only the m=1 internal value is extrapolated.
     assert np.allclose(out[0], odd_m1_int[1])
-

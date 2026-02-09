@@ -50,7 +50,7 @@ def _rel_rms(a: np.ndarray, b: np.ndarray) -> float:
 
 
 @pytest.mark.parametrize("case_name,input_rel,wout_rel", _CASES)
-def test_step10_bsup_from_geom_matches_wout_on_outer_surfaces(case_name: str, input_rel: str, wout_rel: str):
+def test_bsup_from_geom_matches_wout_on_outer_surfaces(case_name: str, input_rel: str, wout_rel: str):
     pytest.importorskip("netCDF4")
 
     root = Path(__file__).resolve().parents[1]

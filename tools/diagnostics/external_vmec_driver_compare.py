@@ -1,16 +1,15 @@
-"""Run VMEC2000 or VMEC++ via Python and compare against bundled references.
+"""Run VMEC2000 via Python and compare against bundled references.
 
 This script is meant for local validation when external codes are installed.
 It can:
-- run VMEC2000 (python wrapper) or VMEC++ (vmecpp) for a chosen input,
+- run VMEC2000 (python wrapper) for a chosen input,
 - save the resulting wout file,
 - compare key wout fields to the bundled VMEC2000 reference,
 - optionally compute b-field parity metrics using vmec_jax kernels,
 - optionally compare real-space metric pieces (eval_fourier vs VMEC synthesis).
 
-Requires (depending on backend):
+Requires:
 - vmec2000: vmec python extension + mpi4py + netCDF4
-- vmecpp: vmecpp + netCDF4
 """
 
 from __future__ import annotations
@@ -241,20 +240,6 @@ def _run_vmec2000(input_path: Path, tmp_dir: Path) -> Path:
         os.chdir(cwd)
 
 
-def _run_vmecpp(input_path: Path, tmp_dir: Path, max_threads: int | None, verbose: bool) -> Path:
-    try:
-        import vmecpp  # type: ignore
-    except Exception as exc:
-        raise RuntimeError(f"vmecpp import failed: {exc}") from exc
-
-    vmec_input = vmecpp.VmecInput.from_file(input_path)
-    output = vmecpp.run(vmec_input, max_threads=max_threads, verbose=verbose)
-
-    wout_path = tmp_dir / f"wout_{input_path.name.replace('input.', '')}_vmecpp.nc"
-    output.wout.save(str(wout_path))
-    return wout_path
-
-
 def _compare_wout(wout_path: Path, ref_path: Path) -> dict[str, float]:
     diffs: dict[str, float] = {}
     f1 = _load_netcdf(wout_path)
@@ -273,7 +258,6 @@ def _compare_wout(wout_path: Path, ref_path: Path) -> dict[str, float]:
 
 def _parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--backend", choices=["vmec2000", "vmecpp"], default="vmecpp")
     p.add_argument("--input", type=str, default="", help="Path to input.* file")
     p.add_argument(
         "--case",
@@ -282,8 +266,6 @@ def _parse_args():
         help="Case name under examples/data (input.<case>)",
     )
     p.add_argument("--reference", type=str, default="", help="Reference wout_*.nc to compare")
-    p.add_argument("--max-threads", type=int, default=None, help="Max threads for VMEC++")
-    p.add_argument("--verbose", action="store_true", help="Enable VMEC++ verbose output")
     p.add_argument("--no-bfield-parity", action="store_true", help="Skip vmec_jax b-field parity checks")
     p.add_argument(
         "--metrics",
@@ -315,13 +297,11 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
-        if args.backend == "vmec2000":
-            wout_path = _run_vmec2000(input_path, tmp_dir)
-        else:
-            wout_path = _run_vmecpp(input_path, tmp_dir, args.max_threads, args.verbose)
+        wout_path = _run_vmec2000(input_path, tmp_dir)
+        backend = "vmec2000"
 
         summary: dict[str, object] = {
-            "backend": args.backend,
+            "backend": backend,
             "input": str(input_path),
             "wout": str(wout_path),
         }
@@ -335,7 +315,7 @@ def main() -> None:
         if args.metrics:
             summary["metric_parity"] = _metric_parity_vmec_grid(input_path, wout_path)
 
-        out_json = outdir / f"external_{args.backend}_{input_path.name.replace('input.', '')}.json"
+        out_json = outdir / f"external_{backend}_{input_path.name.replace('input.', '')}.json"
         out_json.write_text(json.dumps(summary, indent=2))
         print(f"Wrote {out_json}")
 

@@ -31,7 +31,7 @@ def test_chips_from_wout_chipf_detects_half_mesh_vmec2000_style():
     assert err_to_half < err_to_full
 
 
-def test_chips_from_wout_chipf_detects_full_mesh_vmecpp_style():
+def test_chips_from_wout_chipf_detects_full_mesh_style():
     # Synthetic case: chipf follows full-mesh iotas*phipf much closer than iotaf*phipf.
     ns = 8
     s = np.linspace(0.0, 1.0, ns)

@@ -1,11 +1,11 @@
-"""Implicit differentiation utilities (step-9).
+"""Implicit differentiation utilities.
 
 This module provides *custom VJP* wrappers for equilibrium sub-solves so that
 outer objectives can differentiate through equilibrium states without
 backpropagating through many optimization iterations.
 
-Initial scope (step-9)
-======================
+Initial scope
+=============
 
 Implicit differentiation for the **lambda-only** fixed-geometry solve.
 
@@ -282,7 +282,7 @@ def solve_fixed_boundary_state_implicit(
 ) -> VMECState:
     """Fixed-boundary solve with a custom VJP using implicit differentiation.
 
-    This is a step-9 building block: it returns an equilibrium state while
+    This is a building block: it returns an equilibrium state while
     exposing *implicit* gradients w.r.t. the 1D profiles/fluxes.
 
     Differentiable inputs (by design)

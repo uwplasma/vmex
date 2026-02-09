@@ -64,8 +64,8 @@ def _run_vmec2000_case(*, vmec, input_path: Path, tmp_path: Path, fcomm: int, ba
 
 
 @pytest.mark.vmec2000
-def test_vmec2000_step10_scalars_match_vmec_jax_for_circular_tokamak(tmp_path: Path):
-    """Integration parity: VMEC2000 run -> wout.fsq* vs vmec_jax Step-10 scalars.
+def test_vmec2000_scalars_match_vmec_jax_for_circular_tokamak(tmp_path: Path):
+    """Integration parity: VMEC2000 run -> wout.fsq* vs vmec_jax scalars.
 
     This is skipped by default since running VMEC2000 in CI requires a Fortran+MPI
     toolchain and can be slow. Enable with:

@@ -1,9 +1,5 @@
 """Geometry evaluation on the (s,theta,zeta) grid.
 
-Step-1 goal:
-    Fourier coefficients -> R,Z,lambda on a full tensor grid
-    plus their angular derivatives.
-
 This corresponds to VMEC's `totzsp*` stages (Fourier synthesis) and provides the
 raw arrays needed for downstream metric/Jacobian and force-balance calculations.
 
@@ -16,9 +12,6 @@ differentiable VMEC port:
 - Keep everything vectorized over the radial index `s`.
 - Keep the basis precomputed and passed in as a PyTree so `jax.jit` works.
 - Return plain JAX arrays (or numpy arrays if JAX isn't available).
-
-Later steps will add metric/Jacobian and field quantities on top of these
-outputs.
 """
 
 from __future__ import annotations

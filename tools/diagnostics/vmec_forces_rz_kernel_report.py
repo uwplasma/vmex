@@ -92,7 +92,7 @@ def main():
     out = root / "examples/outputs"
     out.mkdir(exist_ok=True)
     np.savez(
-        out / "step10_forces_rz_kernel_report.npz",
+        out / "forces_rz_kernel_report.npz",
         s=np.asarray(static.s),
         frcc=np.asarray(frzl.frcc),
         frss=np.asarray(frzl.frss) if frzl.frss is not None else np.zeros((0,)),
@@ -111,7 +111,7 @@ def main():
         gcon=np.asarray(k.gcon),
         tcon=np.asarray(k.tcon) if k.tcon is not None else np.zeros((0,)),
     )
-    print(f"Wrote {out / 'step10_forces_rz_kernel_report.npz'}")
+    print(f"Wrote {out / 'forces_rz_kernel_report.npz'}")
 
 
 if __name__ == "__main__":

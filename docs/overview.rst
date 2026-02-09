@@ -4,97 +4,55 @@ Overview
 What is VMEC?
 -------------
 
-VMEC (Variational Moments Equilibrium Code) computes 3D ideal-MHD equilibria in
+VMEC (Variational Moments Equilibrium Code) computes ideal-MHD equilibria in
 toroidal geometry by representing flux surfaces with Fourier series and solving
 a fixed-boundary equilibrium problem. The canonical public reference
 implementation is **VMEC2000** (Fortran).
 
-VMEC is widely used in stellarator/heliotron physics and in tokamak applications
-where 3D features matter (e.g. ripple, RMPs, 3D shaping).
-
 What is vmec-jax?
 -----------------
 
-``vmec-jax`` is a from-scratch Python package that ports the core VMEC ideas to
-JAX:
+``vmec-jax`` is a from-scratch Python package that ports VMEC2000’s fixed-boundary
+pipeline to JAX:
 
 - vectorized numerical kernels (``jax.numpy`` + ``jit``),
-- automatic differentiation for gradients w.r.t. Fourier coefficients and inputs,
-- a stepwise porting strategy with regression tests.
-
-The goal is to enable fast prototyping of equilibrium solvers, robust
-integration into optimization loops, and differentiable “physics-in-the-loop”
-workflows.
-
-.. figure:: _static/step10_pipeline.svg
-   :alt: VMEC Step-10 parity pipeline diagram
-   :align: center
-
-   The Step-10 parity pipeline used for regressions against VMEC2000 (fixed-boundary).
-
-.. figure:: _static/figures/lcfs_cross_sections.png
-   :alt: VMEC LCFS cross-sections
-   :align: center
-   :width: 90%
-
-   Example output: last-closed flux surface (LCFS) cross-sections at several
-   toroidal slices within one field period.
+- end-to-end differentiation through equilibrium objectives and solvers,
+- parity-first development against VMEC2000 ``wout_*.nc`` reference outputs.
 
 The recommended end-to-end entrypoint is the axisymmetric showcase script:
 ``examples/showcase_axisym_input_to_wout.py``. It runs bundled inputs, writes
 new ``wout_*.nc`` files, produces VMEC-style plots, and prints a small parity
-summary against the bundled VMEC2000 reference ``wout`` files.
+summary against bundled VMEC2000 reference ``wout`` files.
 
-.. figure:: _static/figures/bmag_parity_error.png
-   :alt: |B| parity error figure
+.. figure:: _static/figures/showcase_shaped_tokamak_pressure_surfaces.png
+   :alt: Nested flux surfaces (phi=0)
    :align: center
    :width: 90%
 
-   Example output: relative error in reconstructed ``|B|`` compared to the
-   bundled VMEC2000 ``wout`` reference (a typical Step-10 parity diagnostic).
-
-.. figure:: _static/figures/energy_convergence.png
-   :alt: Fixed-boundary solver convergence
-   :align: center
-   :width: 75%
-
-   Example output: fixed-boundary solver energy convergence on a small case
-   (illustrative; solver parity vs VMEC2000 is still in progress).
+   Example output: nested flux-surface cross-sections at ``phi=0`` for the
+   bundled ``shaped_tokamak_pressure`` case.
 
 Scope (current)
 ---------------
 
-This repo is validated through step 7 of the port plan:
+The current parity target is **fixed-boundary, axisymmetric** VMEC2000:
 
-- Step 0–2: geometry kernels up through metric/Jacobian (``sqrt(g)``).
-- Step 3: input profiles + volume integrals.
-- Step 4: contravariant magnetic field and magnetic energy (``wb``) matching ``wout``.
-- Step 5: lambda-only solve (R/Z fixed).
-- Step 6: basic fixed-boundary solve (R/Z/lambda) with monotone energy decrease.
-- Step 7: an L-BFGS fixed-boundary solve variant (no external deps).
+- ``ntor = 0`` and ``nfp = 1`` (axisymmetric), with ``lasym = False``.
+- Fixed boundary only (free boundary deferred).
 
-The solver is *not yet VMEC-quality* (i.e. not a drop-in replacement for
-VMEC2000): we still need VMEC’s full force-balance residual and its
-preconditioners for robust fast convergence.
+Many low-level kernels are also exercised on bundled 3D reference ``wout`` files,
+but end-to-end nonlinear solve parity for 3D cases is intentionally deferred.
 
 Initial guess
 -------------
 
-vmec_jax initializes the Fourier coefficients with VMEC-style regularity:
-``rho = sqrt(s)`` scaling for ``m>0`` modes and a linear blend between axis
-and boundary for ``m=0`` R coefficients when axis inputs are provided. This
-matches the VMEC2000/VMEC++ convention and improves stability of early
-iterations in fixed-boundary solves.
+``vmec_jax`` initializes Fourier coefficients with VMEC-style axis regularity:
+``rho = sqrt(s)`` scaling for ``m>0`` modes and a linear blend between axis and
+boundary for ``m=0`` coefficients when axis inputs are provided.
 
-When axis inputs are not provided, vmec_jax now performs a VMEC++-style
-axis recomputation: it searches each toroidal plane for the axis position
-that maximizes the minimum Jacobian proxy, using VMEC's reduced theta grid
-and normalization tables. This provides a much more robust initial axis
-guess and reduces geometric pathologies in early iterations.
-
-For diagnostics, vmec_jax also exposes a VMEC-style real-space pipeline
-(`vmec_realspace_geom_from_state` + `vmec_half_mesh_jacobian_from_state`)
-that mirrors VMEC's odd-m representation and half-mesh Jacobian formulas.
+When axis inputs are not provided, ``vmec_jax`` can recompute an axis guess by
+searching each toroidal plane for an axis position that maximizes a minimum
+Jacobian proxy on VMEC’s reduced theta grid.
 
 Design principles
 -----------------
@@ -105,29 +63,21 @@ Minimal dependencies
 Core runtime:
 
 - ``numpy`` (required)
-- ``jax`` + ``jaxlib`` (optional, but required for differentiation and performance)
+- ``jax`` + ``jaxlib`` (optional, required for differentiation and performance)
 
 Optional:
 
-- ``netCDF4`` for reading ``wout_*.nc`` regression data.
-
-Clear JIT boundaries
-~~~~~~~~~~~~~~~~~~~~
-
-In JAX, compilation dominates runtime for “small” problems. We therefore:
-
-- make frequently-used containers into PyTrees (``VMECState``, ``HelicalBasis``, ``Geom``),
-- keep static precomputations in ``VMECStatic``,
-- provide solver toggles (``jit_grad``) to trade compile latency vs per-iteration speed.
+- ``netCDF4`` for reading/writing ``wout_*.nc`` regression data.
 
 Regression-first development
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-We treat VMEC2000 ``wout_*.nc`` files as ground truth for intermediate quantities:
+Bundled VMEC2000 ``wout_*.nc`` files are treated as ground truth for:
 
 - Fourier mode ordering and normalization,
-- ``sqrt(g)`` (Nyquist expansion) and B-field coefficients,
-- scalar integrals like ``wb`` and total volume.
+- Nyquist ``sqrt(g)`` and B-field coefficients,
+- scalar integrals like ``wb`` and total volume,
+- scalar residual measures (``fsqr/fsqz/fsql``).
 
-Once intermediate parity is achieved, tolerances can be tightened and work can
-move “upstream” toward forces and the full nonlinear solve.
+Nonlinear iteration parity is tracked separately from kernel parity on reference
+states (which is solver-free and therefore isolates conventions).

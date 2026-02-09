@@ -1,10 +1,10 @@
 """High-level configuration extracted from VMEC input (&INDATA).
 
-For step-0 we only extract what we need for geometry/basis:
+For now we only extract what we need for geometry/basis:
 - mpol, ntor, ns, nfp, lasym
 - ntheta/nzeta defaults (VMEC conventions)
 
-Later steps will extend this config to include profiles, iteration controls, etc.
+This config can be extended to include profiles, iteration controls, etc.
 """
 
 from __future__ import annotations
