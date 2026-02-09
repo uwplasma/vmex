@@ -36,10 +36,15 @@ def main() -> None:
     p.add_argument(
         "--cases",
         nargs="*",
-        default=["circular_tokamak", "shaped_tokamak_pressure", "vmecpp_solovev", "li383_low_res"],
+        default=["circular_tokamak", "shaped_tokamak_pressure", "vmecpp_solovev"],
     )
-    p.add_argument("--solver", default="vmecpp_iter")
-    p.add_argument("--max-iter", type=int, default=5)
+    p.add_argument("--solver", default="vmec2000_iter")
+    p.add_argument("--max-iter", type=int, default=30)
+    p.add_argument(
+        "--use-input-niter",
+        action="store_true",
+        help="For vmec2000_iter: respect NITER_ARRAY/FTOL_ARRAY staging (still capped by --max-iter).",
+    )
     p.add_argument(
         "--verbose",
         action="store_true",
@@ -71,6 +76,7 @@ def main() -> None:
             input_path,
             solver=str(args.solver),
             max_iter=int(args.max_iter),
+            multigrid_use_input_niter=bool(args.use_input_niter),
             verbose=bool(args.verbose),
         )
         fsqr, fsqz, fsql = vj.step10_fsq_from_state(
@@ -118,4 +124,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
