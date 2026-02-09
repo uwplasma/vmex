@@ -1176,7 +1176,6 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
     signgs = int(signgs)
 
     from .energy import flux_profiles_from_indata
-    from .field import half_mesh_avg_from_full_mesh
     from .static import build_static
     from .vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
     from .vmec_residue import (
@@ -1189,7 +1188,7 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
     s = jnp.asarray(static.s)
 
     flux = flux_profiles_from_indata(indata, s, signgs=signgs)
-    chipf_wout = half_mesh_avg_from_full_mesh(jnp.asarray(flux.chipf))
+    chipf_wout = jnp.asarray(flux.chipf)
 
     phips = jnp.asarray(flux.phips)
     if phips.shape[0] >= 1:
@@ -1640,7 +1639,6 @@ def solve_fixed_boundary_gn_vmec_residual(
     idx00 = _mode00_index(static.modes)
 
     from .energy import flux_profiles_from_indata
-    from .field import half_mesh_avg_from_full_mesh
     from .static import build_static
     from .vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
     from .vmec_residue import (
@@ -1658,7 +1656,7 @@ def solve_fixed_boundary_gn_vmec_residual(
 
     s = jnp.asarray(static.s)
     flux = flux_profiles_from_indata(indata, s, signgs=signgs)
-    chipf_wout = half_mesh_avg_from_full_mesh(jnp.asarray(flux.chipf))
+    chipf_wout = jnp.asarray(flux.chipf)
 
     phips = jnp.asarray(flux.phips)
     if phips.shape[0] >= 1:
@@ -2054,7 +2052,6 @@ def solve_fixed_boundary_residual_iter(
     strict_update = bool(strict_update)
 
     from .energy import flux_profiles_from_indata
-    from .field import half_mesh_avg_from_full_mesh
     from .energy import magnetic_wb_from_state
     from .static import build_static
     from .vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
@@ -2117,7 +2114,7 @@ def solve_fixed_boundary_residual_iter(
         )
     s = jnp.asarray(static.s)
     flux = flux_profiles_from_indata(indata, s, signgs=signgs)
-    chipf_wout = half_mesh_avg_from_full_mesh(jnp.asarray(flux.chipf))
+    chipf_wout = jnp.asarray(flux.chipf)
 
     phips = jnp.asarray(flux.phips)
     if phips.shape[0] >= 1:
@@ -2538,11 +2535,18 @@ def solve_fixed_boundary_residual_iter(
     state = _apply_vmec_lambda_axis_rules(state)
 
     ftol = float(indata.get_float("FTOL", 1e-10)) if ftol is None else float(ftol)
+    gamma = float(indata.get_float("GAMMA", 0.0))
+    if abs(gamma - 1.0) < 1e-14:
+        raise ValueError("GAMMA=1 makes wp/(gamma-1) singular (VMEC objective undefined)")
 
     w_history = []
     fsqr2_history = []
     fsqz2_history = []
     fsql2_history = []
+    r00_history: list[float] = []
+    wb_history: list[float] = []
+    wp_history: list[float] = []
+    w_vmec_history: list[float] = []
     fsqr1_history = []
     fsqz1_history = []
     fsql1_history = []
@@ -2725,6 +2729,16 @@ def solve_fixed_boundary_residual_iter(
         fsqr2_history.append(fsqr_f)
         fsqz2_history.append(fsqz_f)
         fsql2_history.append(fsql_f)
+        r00_history.append(float(np.asarray(jnp.asarray(k.pr1_even)[0, 0, 0])))
+        # `norms_used` may be cached (VMEC2000 `ns4=25` behavior). VMEC's
+        # printed WMHD uses the *current* wb/wp from `funct3d`, not cached
+        # norm scalars. Recompute wb/wp from the current bcovar state here.
+        norms_w = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
+        wb_f = float(np.asarray(norms_w.wb))
+        wp_f = float(np.asarray(norms_w.wp))
+        wb_history.append(wb_f)
+        wp_history.append(wp_f)
+        w_vmec_history.append((wb_f + wp_f / (gamma - 1.0)) * float(TWOPI * TWOPI))
 
         if verbose:
             print(
@@ -3490,6 +3504,7 @@ def solve_fixed_boundary_residual_iter(
 
     diag: Dict[str, Any] = {
         "ftol": ftol,
+        "gamma": gamma,
         "step_size": float(step_size),
         "precond_radial_alpha": float(precond_radial_alpha),
         "precond_lambda_alpha": float(precond_lambda_alpha),
@@ -3522,6 +3537,10 @@ def solve_fixed_boundary_residual_iter(
         "min_tau_history": np.asarray(min_tau_history, dtype=float),
         "max_tau_history": np.asarray(max_tau_history, dtype=float),
         "bad_jacobian_history": np.asarray(bad_jacobian_history, dtype=int),
+        "r00_history": np.asarray(r00_history, dtype=float),
+        "wb_history": np.asarray(wb_history, dtype=float),
+        "wp_history": np.asarray(wp_history, dtype=float),
+        "w_vmec_history": np.asarray(w_vmec_history, dtype=float),
         "fsq1_history": np.asarray(fsq1_history, dtype=float),
         "fsqr1_history": np.asarray(fsqr1_history, dtype=float),
         "fsqz1_history": np.asarray(fsqz1_history, dtype=float),
@@ -3571,7 +3590,6 @@ def first_step_diagnostics(
         raise ImportError("first_step_diagnostics requires JAX (jax + jaxlib)")
 
     from .energy import flux_profiles_from_indata
-    from .field import half_mesh_avg_from_full_mesh
     from .static import build_static
     from .vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
     from .vmec_residue import (
@@ -3597,7 +3615,7 @@ def first_step_diagnostics(
     static_vmec = build_static(cfg, grid=grid_vmec)
     s = jnp.asarray(static_vmec.s)
     flux = flux_profiles_from_indata(indata, s, signgs=signgs)
-    chipf_wout = half_mesh_avg_from_full_mesh(jnp.asarray(flux.chipf))
+    chipf_wout = jnp.asarray(flux.chipf)
     phips = jnp.asarray(flux.phips)
     if phips.shape[0] >= 1:
         phips = phips.at[0].set(0.0)
