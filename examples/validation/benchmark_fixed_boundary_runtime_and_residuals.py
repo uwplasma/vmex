@@ -77,7 +77,13 @@ def _run_vmec_jax(*, input_path: Path, case: str, iters: int) -> RunTrace:
     # shape-dependent, so we warm up per-case.
     # Note: some parts of the stack stage/jit by `max_iter`, so warm up with the
     # same iteration count.
-    warm = vj.run_fixed_boundary(input_path, solver="vmec2000_iter", max_iter=int(iters), verbose=False)
+    warm = vj.run_fixed_boundary(
+        input_path,
+        solver="vmec2000_iter",
+        max_iter=int(iters),
+        multigrid_use_input_niter=True,
+        verbose=False,
+    )
     try:
         warm_res = warm.result
         if warm_res is not None and hasattr(warm_res, "fsqr2_history"):
@@ -88,7 +94,13 @@ def _run_vmec_jax(*, input_path: Path, case: str, iters: int) -> RunTrace:
         pass
 
     t0 = time.perf_counter()
-    run = vj.run_fixed_boundary(input_path, solver="vmec2000_iter", max_iter=int(iters), verbose=False)
+    run = vj.run_fixed_boundary(
+        input_path,
+        solver="vmec2000_iter",
+        max_iter=int(iters),
+        multigrid_use_input_niter=True,
+        verbose=False,
+    )
     dt = time.perf_counter() - t0
 
     # solve_fixed_boundary_residual_iter stores invariant residuals as fsq histories.
@@ -274,10 +286,15 @@ def main() -> None:
         "--cases",
         nargs="*",
         # Keep defaults small; this script is for README figures, not profiling.
-        default=["circular_tokamak", "solovev", "cth_like_fixed_bdy", "nfp4_QH_warm_start"],
+        default=["circular_tokamak", "shaped_tokamak_pressure", "solovev", "purely_toroidal_field"],
     )
     # Keep the default small; this script is for README figures, not profiling.
-    p.add_argument("--iters", type=int, default=10, help="Fixed iteration budget for all backends.")
+    p.add_argument("--iters", type=int, default=60, help="Fixed iteration budget for all backends.")
+    p.add_argument(
+        "--run-vmec2000",
+        action="store_true",
+        help="Also run the external vmec2000 Python extension (if installed).",
+    )
     p.add_argument("--outdir", default="examples/outputs/bench_fixed_boundary", help="Output directory root.")
     args = p.parse_args()
 
@@ -299,14 +316,15 @@ def main() -> None:
 
         # External backends are optional and may not be installed.
         # Keep the overall script robust: skip a backend rather than failing the run.
-        try:
-            tvm = _run_vmec2000(
-                input_path=input_path, case=case, iters=int(args.iters), workdir=outdir / "vmec2000" / case
-            )
-        except Exception:
-            tvm = None
-        if tvm is not None:
-            traces.append(tvm)
+        if bool(args.run_vmec2000):
+            try:
+                tvm = _run_vmec2000(
+                    input_path=input_path, case=case, iters=int(args.iters), workdir=outdir / "vmec2000" / case
+                )
+            except Exception:
+                tvm = None
+            if tvm is not None:
+                traces.append(tvm)
 
     # Write machine-readable data for later reuse.
     payload: dict[str, Any] = {"iters": int(args.iters), "cases": list(args.cases), "traces": []}

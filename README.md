@@ -90,10 +90,16 @@ python examples/validation/end_to_end_solve_parity_summary.py --use-input-niter 
 
 ## Benchmark (runtime + residual traces)
 
-This script compares a *fixed iteration budget* across `vmec2000` (Fortran via the `vmec` Python extension, when installed) and `vmec_jax`:
+This script compares a *fixed iteration budget* across `vmec_jax` and (optionally) `vmec2000` via the `vmec` Python extension:
 
 ```bash
 python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 60
+```
+
+To also run the external VMEC2000 backend (if installed):
+
+```bash
+python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 60 --run-vmec2000
 ```
 
 <table>

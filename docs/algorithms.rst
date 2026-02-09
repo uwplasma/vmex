@@ -113,7 +113,7 @@ We validate against ``wout`` Nyquist Fourier coefficients for ``sqrtg`` and
 ``bsup*`` and integrate to obtain ``wb``.
 
 Residual and constraint building blocks
---------------------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 VMEC's reported force residual scalars (``fsqr``, ``fsqz``, ``fsql``) are
 computed from *Fourier-space* force arrays produced by a specific sequence of
@@ -313,7 +313,7 @@ In other words: decreasing :math:`W_{\mathrm{res}}` is a useful milestone and a
 regression target, but it is not yet equivalent to "match VMEC2000 coefficients".
 
 Fixed-boundary solve (early stage)
---------------------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 We extend the optimization variables to include all Fourier coefficients:
 
