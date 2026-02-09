@@ -1645,6 +1645,7 @@ def solve_fixed_boundary_gn_vmec_residual(
         vmec_apply_m1_constraints,
         vmec_apply_scalxc_to_tomnsps,
         vmec_force_norms_from_bcovar_dynamic,
+        vmec_scalxc_from_s,
         vmec_zero_m1_zforce,
     )
     from .vmec_tomnsp import TomnspsRZL, vmec_angle_grid, vmec_trig_tables
