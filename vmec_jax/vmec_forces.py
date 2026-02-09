@@ -348,14 +348,12 @@ def vmec_forces_rz_from_wout(
     )
     if need_indata_fill:
         from .energy import flux_profiles_from_indata
-        from .field import half_mesh_avg_from_full_mesh
         from .profiles import eval_profiles
 
         signgs = int(getattr(wout, "signgs", 1))
         flux = flux_profiles_from_indata(indata, s, signgs=signgs)
 
-        # VMEC stores `chipf` on the radial half mesh in wout files.
-        chipf_half = half_mesh_avg_from_full_mesh(flux.chipf)
+        chipf_wout = jnp.asarray(flux.chipf)
 
         # Pressure profile is defined on the VMEC half mesh.
         if int(s.shape[0]) < 2:
@@ -382,7 +380,7 @@ def vmec_forces_rz_from_wout(
             {
                 "phipf": flux.phipf,
                 "phips": flux.phips,
-                "chipf": chipf_half,
+                "chipf": chipf_wout,
                 "signgs": int(signgs),
             },
         )

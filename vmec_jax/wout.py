@@ -363,7 +363,7 @@ def wout_minimal_from_fixed_boundary(
     """
     from .energy import flux_profiles_from_indata
     from .profiles import eval_profiles
-    from .field import half_mesh_avg_from_full_mesh, full_mesh_from_half_mesh_avg
+    from .field import full_mesh_from_half_mesh_avg
 
     cfg = static.cfg
     ns = int(cfg.ns)
@@ -381,7 +381,7 @@ def wout_minimal_from_fixed_boundary(
     # Flux and profiles on VMEC half mesh.
     s = np.asarray(static.s)
     flux = flux_profiles_from_indata(indata, s, signgs=int(signgs))
-    chipf_wout = np.asarray(half_mesh_avg_from_full_mesh(np.asarray(flux.chipf)))
+    chipf_wout = np.asarray(flux.chipf)
 
     if ns < 2:
         s_half = s
@@ -390,8 +390,13 @@ def wout_minimal_from_fixed_boundary(
     prof = eval_profiles(indata, s_half)
     pres = np.asarray(prof.get("pressure", np.zeros((ns,), dtype=float)))
     presf = np.asarray(full_mesh_from_half_mesh_avg(pres))
-    iotaf = np.asarray(prof.get("iota", np.zeros((ns,), dtype=float)))
-    iotas = np.asarray(full_mesh_from_half_mesh_avg(iotaf))
+    iotas = np.asarray(prof.get("iota", np.zeros((ns,), dtype=float)))
+    if iotas.size:
+        iotas = iotas.copy()
+        iotas[0] = 0.0
+    from .energy import _iotaf_from_iotas
+
+    iotaf = np.asarray(_iotaf_from_iotas(iotas, lrfp=bool(indata.get_bool("LRFP", False))))
 
     # Geometry coefficients on the full mesh.
     rmnc = np.asarray(state.Rcos, dtype=float)

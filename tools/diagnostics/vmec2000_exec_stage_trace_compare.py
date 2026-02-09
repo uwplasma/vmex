@@ -47,17 +47,15 @@ class Vmec2000Threed1Row:
     """One row of the threed1 force-iteration table."""
 
     it: int
-    FSQR: float
-    FSQZ: float
-    FSQL: float
     fsqr: float
     fsqz: float
     fsql: float
-    delt: float | None = None
-    rax: float | None = None
-    wmhd: float | None = None
-    beta: float | None = None
-    mbar: float | None = None
+    fsqr1: float
+    fsqz1: float
+    fsql1: float
+    delt0r: float | None = None
+    r00: float | None = None
+    w: float | None = None
 
 
 @dataclass(frozen=True)
@@ -156,19 +154,21 @@ def _parse_vmec2000_threed1(path: Path) -> list[Vmec2000Threed1Stage]:
 
         # Typical format:
         #   ITER FSQR FSQZ FSQL fsqr fsqz fsql DELT RAX WMHD BETA <M>
+        #
+        # In `printout.f` this corresponds to:
+        #   (fsqr, fsqz, fsql, fsqr1, fsqz1, fsql1, delt0r, r00, w, betav, avm)
+        # i.e. the lowercase `fsq*` headers are the *preconditioned* scalars.
         r = Vmec2000Threed1Row(
             it=it,
-            FSQR=_f(toks[1]),
-            FSQZ=_f(toks[2]),
-            FSQL=_f(toks[3]),
-            fsqr=_f(toks[4]),
-            fsqz=_f(toks[5]),
-            fsql=_f(toks[6]),
-            delt=_f(toks[7]) if len(toks) > 7 else None,
-            rax=_f(toks[8]) if len(toks) > 8 else None,
-            wmhd=_f(toks[9]) if len(toks) > 9 else None,
-            beta=_f(toks[10]) if len(toks) > 10 else None,
-            mbar=_f(toks[11]) if len(toks) > 11 else None,
+            fsqr=_f(toks[1]),
+            fsqz=_f(toks[2]),
+            fsql=_f(toks[3]),
+            fsqr1=_f(toks[4]),
+            fsqz1=_f(toks[5]),
+            fsql1=_f(toks[6]),
+            delt0r=_f(toks[7]) if len(toks) > 7 else None,
+            r00=_f(toks[8]) if len(toks) > 8 else None,
+            w=_f(toks[9]) if len(toks) > 9 else None,
         )
         rows.append(r)
 
@@ -182,6 +182,22 @@ def _rel_rms(x: np.ndarray, y: np.ndarray, *, eps: float = 1e-16) -> float:
     num = float(np.sqrt(np.mean((x - y) ** 2)))
     den = float(np.sqrt(np.mean(y**2)))
     return num / max(eps, den)
+
+
+def _max_abs_rel_err(vmec_vals: np.ndarray, jax_vals: np.ndarray, *, eps: float = 1e-30) -> tuple[float, float, int]:
+    vmec_vals = np.asarray(vmec_vals, dtype=float)
+    jax_vals = np.asarray(jax_vals, dtype=float)
+    diff = np.abs(vmec_vals - jax_vals)
+    if diff.size == 0:
+        return float("nan"), float("nan"), -1
+    mask = np.isfinite(diff)
+    if not bool(np.any(mask)):
+        return float("nan"), float("nan"), -1
+    i = int(np.argmax(np.where(mask, diff, -np.inf)))
+    max_abs = float(diff[i])
+    denom = max(eps, float(abs(vmec_vals[i])))
+    max_rel = float(max_abs / denom)
+    return max_abs, max_rel, i
 
 
 def _patch_indata(text: str, *, updates: dict[str, str]) -> str:
@@ -358,17 +374,29 @@ def main() -> None:
     fsqz1 = np.asarray(diag.get("fsqz1_history", np.zeros((0,), dtype=float)), dtype=float)
     fsql1 = np.asarray(diag.get("fsql1_history", np.zeros((0,), dtype=float)), dtype=float)
     delt = np.asarray(diag.get("time_step_history", np.zeros((0,), dtype=float)), dtype=float)
+    r00 = np.asarray(diag.get("r00_history", np.zeros((0,), dtype=float)), dtype=float)
+    w = np.asarray(diag.get("w_vmec_history", np.zeros((0,), dtype=float)), dtype=float)
 
     print()
     if use_threed1:
         print("Stage/iter comparison (VMEC2000 threed1 vs vmec_jax histories):")
         print(
-            "  stage  it    FSQR(vmec)   FSQR(jax)    FSQZ(vmec)   FSQZ(jax)    FSQL(vmec)   FSQL(jax)  "
-            "  fsqr(vmec)   fsqr(jax)    fsqz(vmec)   fsqz(jax)    fsql(vmec)   fsql(jax)    DELT(vmec)  DELT(jax)"
+            "  stage  it    fsqr(vmec)   fsqr(jax)    fsqz(vmec)   fsqz(jax)    fsql(vmec)   fsql(jax)  "
+            "  fsqr1(vmec)  fsqr1(jax)   fsqz1(vmec)  fsqz1(jax)   fsql1(vmec)  fsql1(jax)   "
+            "  delt0r(vmec) delt0r(jax)   r00(vmec)     r00(jax)        w(vmec)       w(jax)"
         )
     else:
         print("Stage/iter comparison (VMEC2000 stdout rows vs vmec_jax histories):")
         print("  stage  it    fsqr(vmec)   fsqr(jax)    fsqz(vmec)   fsqz(jax)    fsql(vmec)   fsql(jax)")
+
+    # Collect matched-row values for a summary diff report.
+    diff_rows: list[tuple[int, int]] = []  # (stage, iter)
+    diff_cols_vmec: dict[str, list[float]] = {}
+    diff_cols_jax: dict[str, list[float]] = {}
+    if use_threed1:
+        for name in ("fsqr", "fsqz", "fsql", "fsqr1", "fsqz1", "fsql1", "delt0r", "r00", "w"):
+            diff_cols_vmec[name] = []
+            diff_cols_jax[name] = []
 
     for stage_i, st in enumerate(vmec_stages):
         if stage_i >= offsets.size or stage_i >= ns_stages.size:
@@ -376,20 +404,41 @@ def main() -> None:
         off = int(offsets[stage_i])
         for row in st.rows:
             j = off + max(int(row.it) - 1, 0)
-            if j < 0 or j >= max(fsqr.size, fsqr1.size, delt.size):
+            if j < 0 or j >= max(fsqr.size, fsqr1.size, delt.size, r00.size, w.size):
                 continue
             if use_threed1:
                 assert isinstance(row, Vmec2000Threed1Row)
                 print(
                     f"  {stage_i+1:>3d} {row.it:>4d}  "
-                    f"{row.FSQR:>11.3e} {fsqr[j] if j < fsqr.size else float('nan'):>11.3e}  "
-                    f"{row.FSQZ:>11.3e} {fsqz[j] if j < fsqz.size else float('nan'):>11.3e}  "
-                    f"{row.FSQL:>11.3e} {fsql[j] if j < fsql.size else float('nan'):>11.3e}  "
-                    f"{row.fsqr:>11.3e} {fsqr1[j] if j < fsqr1.size else float('nan'):>11.3e}  "
-                    f"{row.fsqz:>11.3e} {fsqz1[j] if j < fsqz1.size else float('nan'):>11.3e}  "
-                    f"{row.fsql:>11.3e} {fsql1[j] if j < fsql1.size else float('nan'):>11.3e}  "
-                    f"{(row.delt if row.delt is not None else float('nan')):>11.3e} {delt[j] if j < delt.size else float('nan'):>11.3e}"
+                    f"{row.fsqr:>11.3e} {fsqr[j] if j < fsqr.size else float('nan'):>11.3e}  "
+                    f"{row.fsqz:>11.3e} {fsqz[j] if j < fsqz.size else float('nan'):>11.3e}  "
+                    f"{row.fsql:>11.3e} {fsql[j] if j < fsql.size else float('nan'):>11.3e}  "
+                    f"{row.fsqr1:>11.3e} {fsqr1[j] if j < fsqr1.size else float('nan'):>11.3e}  "
+                    f"{row.fsqz1:>11.3e} {fsqz1[j] if j < fsqz1.size else float('nan'):>11.3e}  "
+                    f"{row.fsql1:>11.3e} {fsql1[j] if j < fsql1.size else float('nan'):>11.3e}  "
+                    f"{(row.delt0r if row.delt0r is not None else float('nan')):>11.3e} {delt[j] if j < delt.size else float('nan'):>11.3e}  "
+                    f"{(row.r00 if row.r00 is not None else float('nan')):>11.3e} {r00[j] if j < r00.size else float('nan'):>11.3e}  "
+                    f"{(row.w if row.w is not None else float('nan')):>11.3e} {w[j] if j < w.size else float('nan'):>11.3e}"
                 )
+                diff_rows.append((int(stage_i + 1), int(row.it)))
+                diff_cols_vmec["fsqr"].append(float(row.fsqr))
+                diff_cols_jax["fsqr"].append(float(fsqr[j]))
+                diff_cols_vmec["fsqz"].append(float(row.fsqz))
+                diff_cols_jax["fsqz"].append(float(fsqz[j]))
+                diff_cols_vmec["fsql"].append(float(row.fsql))
+                diff_cols_jax["fsql"].append(float(fsql[j]))
+                diff_cols_vmec["fsqr1"].append(float(row.fsqr1))
+                diff_cols_jax["fsqr1"].append(float(fsqr1[j] if j < fsqr1.size else float("nan")))
+                diff_cols_vmec["fsqz1"].append(float(row.fsqz1))
+                diff_cols_jax["fsqz1"].append(float(fsqz1[j] if j < fsqz1.size else float("nan")))
+                diff_cols_vmec["fsql1"].append(float(row.fsql1))
+                diff_cols_jax["fsql1"].append(float(fsql1[j] if j < fsql1.size else float("nan")))
+                diff_cols_vmec["delt0r"].append(float(row.delt0r if row.delt0r is not None else float("nan")))
+                diff_cols_jax["delt0r"].append(float(delt[j] if j < delt.size else float("nan")))
+                diff_cols_vmec["r00"].append(float(row.r00 if row.r00 is not None else float("nan")))
+                diff_cols_jax["r00"].append(float(r00[j] if j < r00.size else float("nan")))
+                diff_cols_vmec["w"].append(float(row.w if row.w is not None else float("nan")))
+                diff_cols_jax["w"].append(float(w[j] if j < w.size else float("nan")))
             else:
                 assert isinstance(row, Vmec2000PrintedRow)
                 print(
@@ -398,6 +447,20 @@ def main() -> None:
                     f"{row.fsqz:>11.3e} {fsqz[j]:>11.3e}  "
                     f"{row.fsql:>11.3e} {fsql[j]:>11.3e}"
                 )
+
+    if use_threed1 and diff_rows:
+        print()
+        print("Diff summary (max abs / max rel vs VMEC2000 threed1):")
+        for name in ("fsqr", "fsqz", "fsql", "fsqr1", "fsqz1", "fsql1", "delt0r", "r00", "w"):
+            v = np.asarray(diff_cols_vmec[name], dtype=float)
+            jv = np.asarray(diff_cols_jax[name], dtype=float)
+            max_abs, max_rel, idx = _max_abs_rel_err(v, jv)
+            if idx >= 0:
+                st_i, it_i = diff_rows[idx]
+                where = f"(stage={st_i}, iter={it_i})"
+            else:
+                where = ""
+            print(f"  {name:>6s}: {max_abs:>11.3e} / {max_rel:>11.3e}  {where}")
 
     if wout is not None:
         rmnc_err = _rel_rms(np.asarray(run.state.Rcos), np.asarray(wout.rmnc))

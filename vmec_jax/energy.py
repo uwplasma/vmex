@@ -71,6 +71,53 @@ def _poly_no_const_deriv(coeffs_1based, x):
     return y
 
 
+def _iotaf_from_iotas(iotas, *, lrfp: bool) -> Any:
+    """VMEC `add_fluxes` smoothing: build full-mesh `iotaf` from half-mesh `iotas`.
+
+    See `VMEC2000/Sources/General/add_fluxes.f90` (non-RFP and RFP branches).
+    """
+    iotas = jnp.asarray(iotas)
+    ns = int(iotas.shape[0])
+    if ns <= 1:
+        return iotas
+    if ns == 2:
+        # Not enough points for VMEC's 3-point axis closure. Fall back to a
+        # constant extension from the first half-mesh value.
+        return jnp.asarray([iotas[1], iotas[1]], dtype=iotas.dtype)
+
+    out = jnp.zeros((ns,), dtype=iotas.dtype)
+    if bool(lrfp):
+        # Harmonic-mean variant used in RFP mode.
+        eps = jnp.asarray(1e-30, dtype=iotas.dtype)
+
+        def _safe_inv(x):
+            return jnp.where(jnp.abs(x) > eps, 1.0 / x, 0.0)
+
+        inv2 = _safe_inv(iotas[1])
+        inv3 = _safe_inv(iotas[2])
+        denom0 = 1.5 * inv2 - 0.5 * inv3
+        out0 = jnp.where(jnp.abs(denom0) > eps, 1.0 / denom0, 0.0)
+
+        invn = _safe_inv(iotas[-1])
+        invn1 = _safe_inv(iotas[-2])
+        denomN = 1.5 * invn - 0.5 * invn1
+        outN = jnp.where(jnp.abs(denomN) > eps, 1.0 / denomN, 0.0)
+
+        inv_a = _safe_inv(iotas[1:-1])
+        inv_b = _safe_inv(iotas[2:])
+        out_mid = jnp.where(jnp.abs(inv_a + inv_b) > eps, 2.0 / (inv_a + inv_b), 0.0)
+    else:
+        # Arithmetic-average variant (standard VMEC).
+        out0 = 1.5 * iotas[1] - 0.5 * iotas[2]
+        outN = 1.5 * iotas[-1] - 0.5 * iotas[-2]
+        out_mid = 0.5 * (iotas[1:-1] + iotas[2:])
+
+    out = out.at[0].set(out0)
+    out = out.at[1:-1].set(out_mid)
+    out = out.at[-1].set(outN)
+    return out
+
+
 def flux_profiles_from_indata(indata: InData, s, *, signgs: int) -> FluxProfiles:
     """Construct simple flux profiles (phipf/chipf) from &INDATA.
 
@@ -95,13 +142,9 @@ def flux_profiles_from_indata(indata: InData, s, *, signgs: int) -> FluxProfiles
     torflux_deriv = _poly_no_const_deriv(aphi_arr, s) / norm
     phipf = phiedge * torflux_deriv * jnp.ones((ns,), dtype=s.dtype)
 
-    # VMEC evaluates input profiles on a length-`ns` radial grid. For profiles
-    # like iota, VMEC's internally used "full-mesh" iotas array corresponds to
-    # midpoint-like locations:
-    #   s_half = [s(1), 0.5*(s(2)+s(1)), ..., 0.5*(s(ns)+s(ns-1))]
-    # and VMEC then derives the exported half-mesh `iotaf` via a radial
-    # averaging map. In this repo we want the *full-mesh* `chips` used by
-    # `add_fluxes`, so we treat the evaluated iota on `s_half` as iotas.
+    # Iota is defined on the VMEC half mesh (iotas) and VMEC forms the full-mesh
+    # `iotaf` via a simple averaging map in `add_fluxes`. The `wout`-style
+    # `chipf` stored in the reference files satisfies `chipf = iotaf * phipf`.
     if ns < 2:
         s_half = s
     else:
@@ -109,13 +152,12 @@ def flux_profiles_from_indata(indata: InData, s, *, signgs: int) -> FluxProfiles
 
     prof = eval_profiles(indata, s_half)
     iotas = prof.get("iota", jnp.zeros_like(s_half))
-    # VMEC convention: iotas(1) is unused and stored as 0 in wout.
     if int(jnp.size(iotas)) > 0:
         iotas = iotas.at[0].set(jnp.zeros_like(iotas[0]))
-    # VMEC adds the full-mesh `chips(js)=iotas(js)*phipf(js)` to bsupu via
-    # `add_fluxes`. In our `bsup_from_*` formulas this enters as the physical
-    # quantity (2π*signgs)*chips = iotas*phipf.
-    chipf = iotas * phipf
+
+    lrfp = bool(indata.get_bool("LRFP", False))
+    iotaf = _iotaf_from_iotas(iotas, lrfp=lrfp)
+    chipf = iotaf * phipf
 
     phips = (signgs * phipf) / TWOPI
     if int(jnp.size(phips)) > 0:
