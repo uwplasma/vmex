@@ -85,7 +85,7 @@ python examples/validation/getfsq_parity_cases.py --solve-metric
 Reproduce the short end-to-end solve snapshot:
 
 ```bash
-python examples/validation/end_to_end_solve_parity_summary.py --use-input-niter
+python examples/validation/end_to_end_solve_parity_summary.py --use-input-niter --max-iter 60
 ```
 
 ## Benchmark (runtime + residual traces)
