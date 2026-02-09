@@ -2,7 +2,7 @@ Quickstart
 ==========
 
 Run the minimal showcase (recommended)
--------------------------------------
+----------------------------------------
 
 The simplest way to get started is the axisymmetric showcase. It runs a small
 suite of bundled inputs, writes a ``wout_*.nc`` for each, produces plots, and
@@ -15,7 +15,7 @@ Run the test suite::
   pytest -q
 
 Kernel parity on reference states (solver-free)
-----------------------------------------------
+-------------------------------------------------
 
 To validate intermediate pipeline quantities on *reference* ``wout`` states (no
 nonlinear solve), run::
@@ -23,7 +23,7 @@ nonlinear solve), run::
   python examples/validation/pipeline_parity_summary.py
 
 Scalar residual parity (``fsqr/fsqz/fsql``) on reference states
---------------------------------------------------------------
+-----------------------------------------------------------------
 
 To compare scalar residuals reconstructed from a reference state against
 ``wout.fsqr/fsqz/fsql``::
