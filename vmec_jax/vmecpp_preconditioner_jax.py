@@ -435,25 +435,29 @@ def _tridi_solve_batched_jmin0(a, d, b, rhs) -> Any:
     return x_out
 
 
-def vmecpp_rz_preconditioner(
+def vmecpp_rz_preconditioner_apply(
     *,
     frzl_in: TomnspsRZL,
-    bc,
-    k,
-    trig,
-    s,
+    mats: dict[str, Any],
+    jmax: int,
     cfg,
 ) -> TomnspsRZL:
-    """Apply the VMEC++ axisymmetric R/Z radial preconditioner in JAX."""
+    """Apply cached VMEC++ axisymmetric R/Z preconditioner matrices.
+
+    This is the matrix-application half of :func:`vmecpp_rz_preconditioner`,
+    split out so callers (e.g. VMEC2000-style cached preconditioners) can
+    reuse matrices across iterations without recomputing them.
+    """
     if bool(cfg.lthreed) or bool(cfg.lasym):
         return frzl_in
-    mats, _jmin, jmax = vmecpp_rz_preconditioner_matrices(bc=bc, k=k, trig=trig, s=s, cfg=cfg)
+
     ar = mats["ar"]
     br = mats["br"]
     dr = mats["dr"]
     az = mats["az"]
     bz = mats["bz"]
     dz = mats["dz"]
+
     mpol = int(cfg.mpol)
     nrange = int(cfg.ntor) + 1
 
@@ -461,6 +465,7 @@ def vmecpp_rz_preconditioner(
     fzsc = jnp.asarray(frzl_in.fzsc)
     frcc_u = frcc
     fzsc_u = fzsc
+    jmax = int(jmax)
     if jmax > 0:
         rhs_r = frcc[:jmax]
         rhs_z = fzsc[:jmax]
@@ -507,3 +512,19 @@ def vmecpp_rz_preconditioner(
         flcc=getattr(frzl_in, "flcc", None),
         flss=getattr(frzl_in, "flss", None),
     )
+
+
+def vmecpp_rz_preconditioner(
+    *,
+    frzl_in: TomnspsRZL,
+    bc,
+    k,
+    trig,
+    s,
+    cfg,
+) -> TomnspsRZL:
+    """Apply the VMEC++ axisymmetric R/Z radial preconditioner in JAX."""
+    if bool(cfg.lthreed) or bool(cfg.lasym):
+        return frzl_in
+    mats, _jmin, jmax = vmecpp_rz_preconditioner_matrices(bc=bc, k=k, trig=trig, s=s, cfg=cfg)
+    return vmecpp_rz_preconditioner_apply(frzl_in=frzl_in, mats=mats, jmax=jmax, cfg=cfg)

@@ -2003,6 +2003,7 @@ def solve_fixed_boundary_vmecpp_iter(
     divide_by_scalxc_for_update: bool = True,
     lambda_update_scale: float = 1.0,
     enforce_vmec_lambda_axis: bool = False,
+    vmec2000_control: bool = False,
     vmecpp_strict_update: bool = True,
     vmecpp_backtracking: bool = False,
     vmecpp_limit_dt_from_force: bool = False,
@@ -2026,6 +2027,7 @@ def solve_fixed_boundary_vmecpp_iter(
     signgs = int(signgs)
     lambda_update_scale = float(lambda_update_scale)
     enforce_vmec_lambda_axis = bool(enforce_vmec_lambda_axis)
+    vmec2000_control = bool(vmec2000_control)
     vmecpp_reference_mode = bool(vmecpp_reference_mode)
     if use_vmecpp_restart_triggers is None:
         # VMEC++ restart triggers are generally stabilizing. Keep them on by
@@ -2296,13 +2298,23 @@ def solve_fixed_boundary_vmecpp_iter(
             cfg=cfg,
         )
 
-    def _compute_forces(state: VMECState, *, include_edge: bool, zero_m1: Any):
+    def _compute_forces(
+        state: VMECState,
+        *,
+        include_edge: bool,
+        zero_m1: Any,
+        constraint_tcon: Any | None = None,
+        norms_override: Any | None = None,
+        rz_scale_override: Any | None = None,
+        l_scale_override: Any | None = None,
+    ):
         k = vmec_forces_rz_from_wout(
             state=state,
             static=static,
             wout=wout_like,
             indata=None,
             constraint_tcon0=constraint_tcon0,
+            constraint_tcon=constraint_tcon,
             use_vmec_synthesis=True,
             trig=trig,
         )
@@ -2347,12 +2359,19 @@ def solve_fixed_boundary_vmecpp_iter(
             apply_scalxc=False,
             s=s,
         )
-        norms = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
+        if norms_override is None:
+            norms = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
+        else:
+            norms = norms_override
         fsqr = norms.r1 * norms.fnorm * gcr2
         fsqz = norms.r1 * norms.fnorm * gcz2
         fsql = norms.fnormL * gcl2
-        rz_scale, l_scale = _metric_surface_precond_from_bcovar(k.bc)
-        return k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale
+        if (rz_scale_override is None) or (l_scale_override is None):
+            rz_scale, l_scale = _metric_surface_precond_from_bcovar(k.bc)
+        else:
+            rz_scale = jnp.asarray(rz_scale_override, dtype=jnp.asarray(frzl.frcc).dtype)
+            l_scale = jnp.asarray(l_scale_override, dtype=jnp.asarray(frzl.frcc).dtype)
+        return k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale, norms
 
     mpol = int(static.cfg.mpol)
     ntor = int(static.cfg.ntor)
@@ -2580,10 +2599,29 @@ def solve_fixed_boundary_vmecpp_iter(
     restart_badprog_factor = 1.03
     huge_force_restart_count = 0
     huge_force_restart_budget = 2
+    res1 = -1.0
+    vmec2000_fact = 1.0e4
 
     # VMEC++ `includeEdgeRZForces` uses the *previous* iteration's residual
     # (flow-control initializes forces to 1.0 in iter==1). Track that explicitly.
     prev_rz_fsq = 2.0
+
+    # VMEC2000 caches 1D preconditioner/norm/tcon updates every `ns4` iterations
+    # (vmec_params.f: ns4=25), reusing the cached values between refreshes.
+    # This materially affects the nonlinear iteration trace because the
+    # Garabedian time-step control depends on ratios of the *preconditioned*
+    # residual scalars.
+    vmec2000_cache_valid = False
+    cache_tcon = None
+    cache_norms = None
+    cache_rz_scale = None
+    cache_l_scale = None
+    cache_rz_norm = None
+    cache_f_norm1 = None
+    cache_vmecpp_rz_mats = None
+    cache_vmecpp_rz_jmax = None
+    cache_vmecpp_lam_prec = None
+    bcovar_update_history: list[int] = []
 
     def _safe_dt_from_force(*, dt_nominal: float, frcc, frss, fzsc, fzcs, flsc, flcs) -> float:
         """Optional limiter for dt based on force magnitude.
@@ -2610,17 +2648,67 @@ def solve_fixed_boundary_vmecpp_iter(
     for it in range(max_iter):
         iter2 = it + 1
         iter_since_restart = iter2 - iter1
-        zero_m1 = jnp.asarray(
-            1.0 if (iter_since_restart < 2) or (len(fsqz2_history) and fsqz2_history[-1] < 1e-6) else 0.0,
-            dtype=jnp.asarray(state.Rcos).dtype,
-        )
+        pre_restart_reason = "none"
+        if vmec2000_control:
+            # VMEC2000 `constrain_m1` logic (residue.f90):
+            #   zero gcz(m=1) if (fsqz_prev < 1e-6) OR (iter2 < 2) OR (ictrl_prec2d != 0).
+            # For fixed-boundary parity we only need the first two conditions.
+            fsqz_prev = float(fsqz2_history[-1]) if fsqz2_history else 1.0
+            zero_m1 = 1.0 if (iter2 < 2) or (fsqz_prev < 1.0e-6) else 0.0
+        else:
+            # VMEC++ heuristic (more conservative early in a restart window).
+            zero_m1 = 1.0 if (iter_since_restart < 2) or (len(fsqz2_history) and fsqz2_history[-1] < 1e-6) else 0.0
+        zero_m1 = jnp.asarray(zero_m1, dtype=jnp.asarray(state.Rcos).dtype)
         include_edge = bool(iter_since_restart < 50) and (float(prev_rz_fsq) < 1e-6)
         include_edge_history.append(int(bool(include_edge)))
         zero_m1_history.append(int(float(np.asarray(zero_m1)) > 0.5))
 
-        k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale = _compute_forces(
-            state, include_edge=include_edge, zero_m1=zero_m1
+        need_bcovar_update = bool(vmec2000_control) and (
+            (not bool(vmec2000_cache_valid)) or ((iter2 - iter1) % k_preconditioner_update_interval == 0)
         )
+        bcovar_update_history.append(int(bool(need_bcovar_update)))
+
+        constraint_tcon = None
+        norms_override = None
+        rz_scale_override = None
+        l_scale_override = None
+        if bool(vmec2000_control) and bool(vmec2000_cache_valid) and (not bool(need_bcovar_update)):
+            constraint_tcon = cache_tcon
+            norms_override = cache_norms
+            rz_scale_override = cache_rz_scale
+            l_scale_override = cache_l_scale
+
+        k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale, norms_used = _compute_forces(
+            state,
+            include_edge=include_edge,
+            zero_m1=zero_m1,
+            constraint_tcon=constraint_tcon,
+            norms_override=norms_override,
+            rz_scale_override=rz_scale_override,
+            l_scale_override=l_scale_override,
+        )
+        if bool(vmec2000_control) and bool(need_bcovar_update):
+            if constraint_tcon0 is None or float(constraint_tcon0) == 0.0:
+                cache_tcon = None
+            else:
+                cache_tcon = getattr(k, "tcon", None)
+            cache_norms = norms_used
+            cache_rz_scale = rz_scale
+            cache_l_scale = l_scale
+            cache_rz_norm = _rz_norm_vmecpp(state)
+            cache_f_norm1 = jnp.where(
+                jnp.asarray(cache_rz_norm) != 0.0,
+                1.0 / jnp.asarray(cache_rz_norm),
+                jnp.asarray(float("inf"), dtype=jnp.asarray(cache_rz_norm).dtype),
+            )
+            if (not bool(cfg.lthreed)) and (not bool(cfg.lasym)):
+                from .vmecpp_preconditioner_jax import vmecpp_rz_preconditioner_matrices
+
+                cache_vmecpp_lam_prec = _vmecpp_lambda_preconditioner(k.bc)
+                mats, _jmin, jmax = vmecpp_rz_preconditioner_matrices(bc=k.bc, k=k, trig=trig, s=s, cfg=cfg)
+                cache_vmecpp_rz_mats = mats
+                cache_vmecpp_rz_jmax = int(jmax)
+            vmec2000_cache_valid = True
         fsqr_f = float(np.asarray(fsqr))
         fsqz_f = float(np.asarray(fsqz))
         fsql_f = float(np.asarray(fsql))
@@ -2646,8 +2734,25 @@ def solve_fixed_boundary_vmecpp_iter(
 
         # Precondition forces (VMEC++ axisymmetric preconditioner when available).
         if (not bool(cfg.lthreed)) and (not bool(cfg.lasym)):
-            lam_prec = _vmecpp_lambda_preconditioner(k.bc)
-            frzl_rz = _vmecpp_rz_preconditioner(frzl, k.bc, k)
+            if (
+                bool(vmec2000_control)
+                and bool(vmec2000_cache_valid)
+                and (cache_vmecpp_lam_prec is not None)
+                and (cache_vmecpp_rz_mats is not None)
+                and (cache_vmecpp_rz_jmax is not None)
+            ):
+                from .vmecpp_preconditioner_jax import vmecpp_rz_preconditioner_apply
+
+                lam_prec = cache_vmecpp_lam_prec
+                frzl_rz = vmecpp_rz_preconditioner_apply(
+                    frzl_in=frzl,
+                    mats=cache_vmecpp_rz_mats,
+                    jmax=int(cache_vmecpp_rz_jmax),
+                    cfg=cfg,
+                )
+            else:
+                lam_prec = _vmecpp_lambda_preconditioner(k.bc)
+                frzl_rz = _vmecpp_rz_preconditioner(frzl, k.bc, k)
             frcc = jnp.asarray(frzl_rz.frcc)
             frss = frzl_rz.frss
             fzsc = jnp.asarray(frzl_rz.fzsc)
@@ -2728,7 +2833,7 @@ def solve_fixed_boundary_vmecpp_iter(
                     Lcos=state.Lcos,
                     Lsin=jnp.asarray(state.Lsin) + sign * dL_dir,
                 )
-                _, _, fsqr_t, fsqz_t, fsql_t, _, _ = _compute_forces(
+                _, _, fsqr_t, fsqz_t, fsql_t, _, _, _ = _compute_forces(
                     st_try,
                     include_edge=True,
                     zero_m1=zero_m1,
@@ -2754,27 +2859,90 @@ def solve_fixed_boundary_vmecpp_iter(
             apply_scalxc=False,
             s=s,
         )
-        rz_norm = _rz_norm_vmecpp(state)
-        f_norm1 = jnp.where(rz_norm != 0.0, 1.0 / rz_norm, jnp.asarray(float("inf"), dtype=rz_norm.dtype))
-        delta_s = jnp.asarray(s[1] - s[0], dtype=rz_norm.dtype)
+        if bool(vmec2000_control) and bool(vmec2000_cache_valid) and (cache_rz_norm is not None) and (cache_f_norm1 is not None):
+            rz_norm = jnp.asarray(cache_rz_norm)
+            f_norm1 = jnp.asarray(cache_f_norm1)
+        else:
+            rz_norm = _rz_norm_vmecpp(state)
+            f_norm1 = jnp.where(rz_norm != 0.0, 1.0 / rz_norm, jnp.asarray(float("inf"), dtype=rz_norm.dtype))
+        delta_s = jnp.asarray(s[1] - s[0], dtype=jnp.asarray(rz_norm).dtype)
         fsqr1 = gcr2_p * f_norm1
         fsqz1 = gcz2_p * f_norm1
-        fsql1 = gcl2_p * delta_s
+        if bool(vmec2000_control):
+            # VMEC2000 `residue.f90` defines the preconditioned lambda scalar as
+            #   fsql1 = hs * sum_{js=2..ns}( (pfaclam*gcl)**2 )
+            # i.e. exclude the axis surface (js=1).
+            gcl2_no_axis = jnp.sum(jnp.asarray(frzl_pre.flsc)[1:] ** 2)
+            if frzl_pre.flcs is not None:
+                gcl2_no_axis = gcl2_no_axis + jnp.sum(jnp.asarray(frzl_pre.flcs)[1:] ** 2)
+            if getattr(frzl_pre, "flcc", None) is not None:
+                gcl2_no_axis = gcl2_no_axis + jnp.sum(jnp.asarray(frzl_pre.flcc)[1:] ** 2)
+            if getattr(frzl_pre, "flss", None) is not None:
+                gcl2_no_axis = gcl2_no_axis + jnp.sum(jnp.asarray(frzl_pre.flss)[1:] ** 2)
+            fsql1 = gcl2_no_axis * delta_s
+        else:
+            fsql1 = gcl2_p * delta_s
         fsqr1_f = float(np.asarray(fsqr1))
         fsqz1_f = float(np.asarray(fsqz1))
         fsql1_f = float(np.asarray(fsql1))
+        fsq1 = fsqr1_f + fsqz1_f + fsql1_f
         rz_norm_history.append(float(np.asarray(rz_norm)))
         f_norm1_history.append(float(np.asarray(f_norm1)))
         gcr2_p_history.append(float(np.asarray(gcr2_p)))
         gcz2_p_history.append(float(np.asarray(gcz2_p)))
         gcl2_p_history.append(float(np.asarray(gcl2_p)))
-        fsq1 = fsqr1_f + fsqz1_f + fsql1_f
         fsq1_history.append(fsq1)
         fsqr1_history.append(fsqr1_f)
         fsqz1_history.append(fsqz1_f)
         fsql1_history.append(fsql1_f)
 
-        # VMEC++ time-step control trackers.
+        # VMEC-style time-step control: VMEC2000's `TimeStepControl` + `restart_iter`.
+        if bool(vmec2000_control):
+            fsq0 = fsqr_f + fsqz_f + fsql_f  # physical
+            fsq = fsq1  # preconditioned
+            if (iter2 == iter1) or (res0 < 0.0) or (res1 < 0.0):
+                res0 = fsq
+                res1 = fsq0
+                state_checkpoint = state
+            res0 = min(res0, fsq)
+            res1 = min(res1, fsq0)
+            if (fsq <= res0) and (fsq0 <= res1):
+                state_checkpoint = state
+            if ((iter2 - iter1) > 10) and ((fsq > vmec2000_fact * max(res0, 1e-30)) or (fsq0 > vmec2000_fact * max(res1, 1e-30))):
+                pre_restart_reason = "time_control"
+                state = state_checkpoint
+                vRcc = jnp.zeros_like(vRcc)
+                vRss = jnp.zeros_like(vRss)
+                vZsc = jnp.zeros_like(vZsc)
+                vZcs = jnp.zeros_like(vZcs)
+                vLsc = jnp.zeros_like(vLsc)
+                vLcs = jnp.zeros_like(vLcs)
+                time_step = max(time_step / restart_badprog_factor, 1e-12)
+                bad_resets += 1
+                iter1 = iter2
+                bad_growth_streak = 0
+                fsq_prev = fsq1
+                step_status = "restart_time_control"
+                restart_reason = "time_control"
+                step_history.append(0.0)
+                dt_eff_history.append(0.0)
+                update_rms_history.append(0.0)
+                w_curr_history.append(float(fsqr_f + fsqz_f + fsql_f))
+                w_try_history.append(float("nan"))
+                w_try_ratio_history.append(float("nan"))
+                restart_path_history.append("vmec2000_time_control")
+                step_status_history.append(step_status)
+                restart_reason_history.append(restart_reason)
+                pre_restart_reason_history.append(pre_restart_reason)
+                time_step_history.append(float(time_step))
+                res0_history.append(float(res0))
+                fsq_prev_history.append(float(fsq_prev))
+                bad_growth_streak_history.append(int(bad_growth_streak))
+                iter1_history.append(int(iter1))
+                grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
+                continue
+
+        # --- VMEC++ time-step control trackers + optional restart triggers ---
         fsq = fsqr_f + fsqz_f + fsql_f
         fsq_res = fsq if bool(vmecpp_reference_mode) else fsq1
         if (iter2 == iter1) or (res0 < 0.0):
@@ -2784,7 +2952,7 @@ def solve_fixed_boundary_vmecpp_iter(
 
         # VMEC++ stores a "good" checkpoint once residual has improved for many
         # iterations since the last restart marker.
-        if (fsq1 <= res0_old) and ((iter2 - iter1) > 10):
+        if (not bool(vmec2000_control)) and (fsq1 <= res0_old) and ((iter2 - iter1) > 10):
             state_checkpoint = state
 
         # VMEC++ restart triggers (bad progress / bad Jacobian proxy).
@@ -2807,7 +2975,6 @@ def solve_fixed_boundary_vmecpp_iter(
             min_tau_history.append(float("nan"))
             max_tau_history.append(float("nan"))
             bad_jacobian_history.append(0)
-        pre_restart_reason = "none"
         if fsq_res > 100.0 * max(res0, 1e-30):
             bad_growth_streak += 1
         else:
@@ -2990,7 +3157,7 @@ def solve_fixed_boundary_vmecpp_iter(
                 idx00=idx00,
             )
             state_try = _apply_vmec_lambda_axis_rules(state_try)
-            _, _, fsqr_t, fsqz_t, fsql_t, _, _ = _compute_forces(
+            _, _, fsqr_t, fsqz_t, fsql_t, _, _, _ = _compute_forces(
                 state_try,
                 include_edge=include_edge,
                 zero_m1=zero_m1,
@@ -3027,7 +3194,7 @@ def solve_fixed_boundary_vmecpp_iter(
                         idx00=idx00,
                     )
                     state_try = _apply_vmec_lambda_axis_rules(state_try)
-                    _, _, fsqr_t, fsqz_t, fsql_t, _, _ = _compute_forces(
+                    _, _, fsqr_t, fsqz_t, fsql_t, _, _, _ = _compute_forces(
                         state_try,
                         include_edge=include_edge,
                         zero_m1=zero_m1,
@@ -3099,7 +3266,7 @@ def solve_fixed_boundary_vmecpp_iter(
                         idx00=idx00,
                     )
                     state_dir = _apply_vmec_lambda_axis_rules(state_dir)
-                    _, _, fsqr_d, fsqz_d, fsql_d, _, _ = _compute_forces(
+                    _, _, fsqr_d, fsqz_d, fsql_d, _, _, _ = _compute_forces(
                         state_dir,
                         include_edge=include_edge,
                         zero_m1=zero_m1,
@@ -3244,7 +3411,7 @@ def solve_fixed_boundary_vmecpp_iter(
                     idx00=idx00,
                 )
                 state_try = _apply_vmec_lambda_axis_rules(state_try)
-                _, _, fsqr_t, fsqz_t, fsql_t, _, _ = _compute_forces(
+                _, _, fsqr_t, fsqz_t, fsql_t, _, _, _ = _compute_forces(
                     state_try,
                     include_edge=include_edge,
                     zero_m1=zero_m1,
@@ -3337,6 +3504,7 @@ def solve_fixed_boundary_vmecpp_iter(
         "fsq_prev_history": np.asarray(fsq_prev_history, dtype=float),
         "bad_growth_streak_history": np.asarray(bad_growth_streak_history, dtype=int),
         "iter1_history": np.asarray(iter1_history, dtype=int),
+        "bcovar_update_history": np.asarray(bcovar_update_history, dtype=int),
         "include_edge_history": np.asarray(include_edge_history, dtype=int),
         "zero_m1_history": np.asarray(zero_m1_history, dtype=int),
         "dt_eff_history": np.asarray(dt_eff_history, dtype=float),

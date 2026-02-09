@@ -541,6 +541,7 @@ def run_fixed_boundary(
                     divide_by_scalxc_for_update=False,
                     lambda_update_scale=float(2.0 * np.pi * float(signgs)),
                     enforce_vmec_lambda_axis=True,
+                    vmec2000_control=True,
                     vmecpp_strict_update=True,
                     vmecpp_backtracking=False,
                     vmecpp_reference_mode=False,
@@ -573,6 +574,7 @@ def run_fixed_boundary(
             "fsq_prev_history",
             "bad_growth_streak_history",
             "iter1_history",
+            "bcovar_update_history",
             "include_edge_history",
             "zero_m1_history",
             "dt_eff_history",
@@ -595,7 +597,9 @@ def run_fixed_boundary(
             "gcl2_p_history",
         ):
             if any(k in r.diagnostics for r in stage_results):
-                diag[k] = np.concatenate([np.asarray(r.diagnostics.get(k, np.zeros((0,), dtype=float))) for r in stage_results])
+                diag[k] = np.concatenate(
+                    [np.asarray(r.diagnostics.get(k, np.zeros((0,), dtype=float))) for r in stage_results]
+                )
 
         res = SolveVmecResidualResult(
             state=state,
