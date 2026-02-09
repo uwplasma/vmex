@@ -27,13 +27,16 @@ pytest -q
 Generated from the bundled `shaped_tokamak_pressure` case:
 
 ```bash
-python examples/showcase_axisym_input_to_wout.py --case shaped_tokamak_pressure --max-iter 5 --emit-readme-figures
+python examples/showcase_axisym_input_to_wout.py --case shaped_tokamak_pressure --max-iter 60 --use-input-niter --emit-readme-figures
 ```
 
 <table>
   <tr>
     <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_surfaces.png" width="420" /></td>
     <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_bmag_lcfs.png" width="420" /></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_residual.png" width="860" /></td>
   </tr>
   <tr>
     <td colspan="2"><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_lcfs_3d_bmag.png" width="860" /></td>

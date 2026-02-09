@@ -140,6 +140,38 @@ def _write_plots(*, outdir: Path, run: vj.FixedBoundaryRun, wout_new, wout_ref, 
     fig.savefig(outdir / "lcfs_3d_bmag.png", dpi=180)
     plt.close(fig)
 
+    # 4) Residual / objective trace (when available).
+    w_hist = None
+    stage_offsets = None
+    try:
+        w_hist = np.asarray(getattr(getattr(run, "result", None), "w_history", None))
+    except Exception:
+        w_hist = None
+    try:
+        diag = getattr(getattr(run, "result", None), "diagnostics", {}) or {}
+        stage_offsets = np.asarray(diag.get("multigrid_stage_offsets", None)) if isinstance(diag, dict) else None
+    except Exception:
+        stage_offsets = None
+
+    if w_hist is not None and w_hist.size:
+        fig, ax = plt.subplots(1, 1, figsize=(8, 3.5), constrained_layout=True)
+        x = np.arange(w_hist.size, dtype=float)
+        ax.semilogy(x, np.maximum(w_hist, 1e-300), lw=1.6, label="vmec_jax (solver metric)")
+        if wout_ref is not None:
+            fsq_ref = float(wout_ref.fsqr + wout_ref.fsqz + wout_ref.fsql)
+            if np.isfinite(fsq_ref) and fsq_ref > 0.0:
+                ax.axhline(fsq_ref, color="k", ls="--", lw=1.0, alpha=0.6, label="VMEC2000 fsq_total")
+        if stage_offsets is not None and stage_offsets.size:
+            for off in stage_offsets[1:]:
+                ax.axvline(float(off), color="k", lw=0.8, alpha=0.15)
+        ax.set_xlabel("iteration")
+        ax.set_ylabel("fsq_total")
+        ax.set_title("Nonlinear solve trace (vmec2000_iter)")
+        ax.grid(True, which="both", alpha=0.25)
+        ax.legend(loc="best", fontsize=9)
+        fig.savefig(outdir / "residual_trace.png", dpi=180)
+        plt.close(fig)
+
 
 def main() -> None:
     p = argparse.ArgumentParser()
@@ -154,10 +186,11 @@ def main() -> None:
         default="vmec2000_iter",
         choices=["vmec2000_iter", "vmec_gn", "gd", "lbfgs"],
     )
-    p.add_argument("--max-iter", type=int, default=30)
+    p.add_argument("--max-iter", type=int, default=60)
     p.add_argument(
         "--use-input-niter",
-        action="store_true",
+        default=True,
+        action=argparse.BooleanOptionalAction,
         help="For vmec2000_iter: respect NITER_ARRAY/FTOL_ARRAY staging (still capped by --max-iter).",
     )
     p.add_argument("--no-solve", action="store_true", help="Use initial guess only.")
@@ -219,6 +252,9 @@ def main() -> None:
             (fig_dir / f"showcase_{case}_surfaces.png").write_bytes((outdir / "surfaces_nested_phi0.png").read_bytes())
             (fig_dir / f"showcase_{case}_bmag_lcfs.png").write_bytes((outdir / "bmag_lcfs.png").read_bytes())
             (fig_dir / f"showcase_{case}_lcfs_3d_bmag.png").write_bytes((outdir / "lcfs_3d_bmag.png").read_bytes())
+            residual_path = outdir / "residual_trace.png"
+            if residual_path.exists():
+                (fig_dir / f"showcase_{case}_residual.png").write_bytes(residual_path.read_bytes())
             print(f"[vmec_jax] updated README figures under: {fig_dir}")
 
     if args.suite and suite_rows:

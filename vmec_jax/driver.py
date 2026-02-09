@@ -469,7 +469,13 @@ def run_fixed_boundary(
                     remaining = budget - nstep
                     caps = [max(0, int(n) - 1) for n in niter_stages]
                     out = base[:]
-                    for i in range(nstep):
+
+                    # When the total budget is smaller than the sum of the
+                    # input's NITER_ARRAY, prioritize iterations on the final
+                    # (finest) grid. This keeps short debugging runs focused
+                    # on the physically relevant resolution instead of spending
+                    # nearly the entire budget on coarse stages.
+                    for i in range(nstep - 1, -1, -1):
                         if remaining <= 0:
                             break
                         take = min(caps[i], remaining)
