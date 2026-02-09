@@ -1,4 +1,4 @@
-"""VMEC `residue/getfsq`-style scalar residuals (Step-10 parity work).
+"""VMEC `residue/getfsq`-style scalar residuals for parity work.
 
 VMEC2000 reports scalar force residual measures:
 
@@ -10,8 +10,8 @@ Internally these are computed from Fourier-space force arrays produced by
 ``tomnsps`` and normalized by the force norms ``fnorm`` and ``fnormL``
 computed in ``bcovar``.
 
-This module implements the *scalar* pieces needed for Step-10 output-parity
-tests against bundled VMEC2000 ``wout`` files.
+This module implements the *scalar* pieces needed for output-parity tests
+against bundled VMEC2000 ``wout`` files.
 """
 
 from __future__ import annotations
@@ -89,9 +89,9 @@ def _constrain_m1_pair(*, gcr: Any, gcz: Any, lconm1: bool) -> tuple[Any, Any]:
     (gcr+gcz, gcr-gcz)/sqrt(2) and then setting the second component to zero
     once close to convergence.
 
-    For Step-10 parity work we apply the rotation when `lconm1=True` and always
-    zero the constrained component (this matches the converged-equilibrium
-    regime used for regression against bundled `wout_*.nc` files).
+    For parity work we apply the rotation when `lconm1=True` and always zero the
+    constrained component (this matches the converged-equilibrium regime used
+    for regression against bundled `wout_*.nc` files).
     """
     gcr = jnp.asarray(gcr)
     gcz = jnp.asarray(gcz)
@@ -160,10 +160,10 @@ def vmec_zero_m1_zforce(
     frzl: TomnspsRZL,
     enabled: bool = True,
 ) -> TomnspsRZL:
-    """Apply VMEC++ `zeroZForceForM1` to tomnsps force blocks.
+    """Zero the m=1 Z-force blocks used by the axis constraint.
 
-    VMEC++ zeros only the Z-force blocks that would otherwise drive the
-    m=1 constrained Z Fourier coefficients away from zero:
+    This zeros only the Z-force blocks that would otherwise drive the m=1
+    constrained Z Fourier coefficients away from zero:
     - `fzcs` when `lthreed=True`
     - `fzcc` when `lasym=True`
 
@@ -221,11 +221,12 @@ def vmec_rz_norm_from_state(
     ns_min: int | None = None,
     ns_max: int | None = None,
 ) -> Any:
-    """Compute VMEC++-style rzNorm from Fourier coefficients (n>=0 storage).
+    """Compute rzNorm from Fourier coefficients (n>=0 storage convention).
 
-    VMEC++ defines fNorm1 as 1 / rzNorm, where rzNorm is the sum of squares of
-    R/Z Fourier coefficients stored with n>=0. This helper mirrors that storage
-    convention by masking out n<0 modes from vmec_jax's signed mode table.
+    The reference norm uses ``fNorm1 = 1 / rzNorm``, where ``rzNorm`` is the sum
+    of squares of R/Z Fourier coefficients stored with n>=0. This helper mirrors
+    that storage convention by masking out n<0 modes from vmec_jax's signed mode
+    table.
     """
     mpol = int(static.cfg.mpol)
     ntor = int(static.cfg.ntor)

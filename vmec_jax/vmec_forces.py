@@ -1,4 +1,4 @@
-"""VMEC force/residue kernels (Step-10 parity work).
+"""VMEC force/residue kernels for parity work.
 
 This module implements a direct, array-based port of VMEC2000's ``forces`` core
 for the **R/Z** equations, operating on:
@@ -1204,7 +1204,7 @@ def vmec_residual_internal_from_kernels(
 
     # VMEC `lforbal` modifies the (m=1,n=0) symmetric forces to satisfy the
     # flux-surface-averaged force balance exactly. This primarily affects
-    # the Step-10 scalars `fsqr/fsqz`. See `VMEC2000/Sources/General/tomnsp_mod.f`.
+    # the scalar residuals `fsqr/fsqz`. See `VMEC2000/Sources/General/tomnsp_mod.f`.
     if bool(apply_lforbal):
         from .vmec_lforbal import apply_lforbal_to_tomnsps, lforbal_factors_from_state
 

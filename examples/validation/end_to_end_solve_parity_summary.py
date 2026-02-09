@@ -36,7 +36,7 @@ def main() -> None:
     p.add_argument(
         "--cases",
         nargs="*",
-        default=["circular_tokamak", "shaped_tokamak_pressure", "vmecpp_solovev"],
+        default=["circular_tokamak", "shaped_tokamak_pressure", "solovev"],
     )
     p.add_argument("--solver", default="vmec2000_iter")
     p.add_argument("--max-iter", type=int, default=30)
@@ -79,7 +79,7 @@ def main() -> None:
             multigrid_use_input_niter=bool(args.use_input_niter),
             verbose=bool(args.verbose),
         )
-        fsqr, fsqz, fsql = vj.step10_fsq_from_state(
+        fsqr, fsqz, fsql = vj.residual_scalars_from_state(
             state=run.state,
             static=run.static,
             indata=run.indata,
@@ -117,7 +117,7 @@ def main() -> None:
     print()
     print("Notes:")
     print("- This is an end-to-end *solver* snapshot. It is not expected to match VMEC2000 yet on all cases.")
-    print("- `fsq_total(new)` is computed via vmec_jax Step-10 kernels on the final iterate.")
+    print("- `fsq_total(new)` is computed via vmec_jax scalar residual kernels on the final iterate.")
     print("- `rmnc/zmns relRMS` compare Fourier coefficients directly (main modes).")
     print("- `ftol` is read from the input namelist (`FTOL`).")
 

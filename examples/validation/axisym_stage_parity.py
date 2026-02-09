@@ -5,7 +5,7 @@ Purpose
 When fixed-boundary parity is off, it is hard to tell whether the first mismatch
 is coming from geometry, `bsup`, `bsub`, or later residual-scalar conventions.
 
-This script runs the VMEC-style Step-10 pipeline on a *reference* VMEC state
+This script runs the VMEC-style fixed-boundary residual pipeline on a *reference* VMEC state
 (loaded from `wout`) and reports parity metrics at each stage, plus it computes
 `getfsq` scalars both with:
   - vmec_jax-computed `bcovar` fields, and
@@ -52,7 +52,7 @@ def _half_mesh_coeffs(a: np.ndarray) -> np.ndarray:
     return out
 
 
-def _step10_fsq_on_state(*, state, static, indata, wout, trig, use_wout_bsup: bool):
+def _fsq_on_state(*, state, static, indata, wout, trig, use_wout_bsup: bool):
     k = vmec_forces_rz_from_wout(
         state=state,
         static=static,
@@ -191,8 +191,8 @@ def main() -> None:
     err_bsub_v = _rel_rms(np.asarray(bc.bsubv)[js0:], bsubv_ref[js0:])
 
     # Stage 4: getfsq scalars (computed two ways).
-    fsq_calc = _step10_fsq_on_state(state=st, static=static, indata=indata, wout=wout, trig=trig, use_wout_bsup=False)
-    fsq_ref_fields = _step10_fsq_on_state(state=st, static=static, indata=indata, wout=wout, trig=trig, use_wout_bsup=True)
+    fsq_calc = _fsq_on_state(state=st, static=static, indata=indata, wout=wout, trig=trig, use_wout_bsup=False)
+    fsq_ref_fields = _fsq_on_state(state=st, static=static, indata=indata, wout=wout, trig=trig, use_wout_bsup=True)
     fsq_wout = (float(wout.fsqr), float(wout.fsqz), float(wout.fsql))
 
     def _fmt3(x):

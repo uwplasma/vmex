@@ -1,4 +1,4 @@
-"""VMEC-style real-space synthesis (Step-10 parity utilities).
+"""VMEC-style real-space synthesis for parity utilities.
 
 This module provides a VMEC-compatible inverse transform on the VMEC internal
 angle grid using the trig/weight tables from ``fixaray``. It is intended for

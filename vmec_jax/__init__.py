@@ -1,14 +1,4 @@
-"""vmec_jax: a JAX port of VMEC2000 (work in progress).
-
-Step-0 contains:
-- VMEC &INDATA parser
-- mode table + angle grids
-- helical Fourier basis evaluation
-- boundary evaluation
-- state packing/unpacking (radial x modes)
-
-The full equilibrium solver will be built incrementally in later steps.
-"""
+"""vmec_jax: a JAX port of VMEC2000 (work in progress)."""
 
 from . import api
 from .namelist import read_indata, InData
@@ -55,7 +45,7 @@ from .driver import (
     load_wout,
     run_fixed_boundary,
     save_npz,
-    step10_fsq_from_state,
+    residual_scalars_from_state,
     write_wout_from_fixed_boundary_run,
 )
 from .state import VMECState, pack_state, unpack_state
@@ -83,7 +73,7 @@ from .solve import (
     solve_fixed_boundary_lbfgs,
     solve_fixed_boundary_lbfgs_vmec_residual,
     solve_fixed_boundary_gn_vmec_residual,
-    solve_fixed_boundary_vmecpp_iter,
+    solve_fixed_boundary_residual_iter,
     solve_lambda_gd,
 )
 from .residuals import ForceResiduals, force_residuals_from_state
@@ -136,7 +126,7 @@ __all__ = [
     "load_wout",
     "run_fixed_boundary",
     "save_npz",
-    "step10_fsq_from_state",
+    "residual_scalars_from_state",
     "write_wout_from_fixed_boundary_run",
     "VMECState",
     "pack_state",
@@ -177,7 +167,7 @@ __all__ = [
     "solve_fixed_boundary_lbfgs",
     "solve_fixed_boundary_lbfgs_vmec_residual",
     "solve_fixed_boundary_gn_vmec_residual",
-    "solve_fixed_boundary_vmecpp_iter",
+    "solve_fixed_boundary_residual_iter",
     "ForceResiduals",
     "force_residuals_from_state",
 ]

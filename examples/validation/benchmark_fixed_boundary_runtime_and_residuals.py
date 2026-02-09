@@ -1,12 +1,12 @@
 """Benchmark fixed-boundary iteration runtime + residual traces (external backends).
 
 Generates two README-friendly figures:
-- runtime comparison (vmec2000 vs vmecpp vs vmec_jax) for 4 bundled inputs
+- runtime comparison (vmec2000 vs vmec_jax) for bundled inputs
 - residual evolution over iterations for those inputs
 
 Notes:
-- This script depends on external backends (`vmec`, `vmecpp`). If they are not
-  installed, the corresponding curves/bars are omitted.
+- This script depends on an external backend (`vmec`). If it is not installed,
+  the corresponding curves/bars are omitted.
 - This is a benchmarking/communication script, not a regression test.
 """
 
@@ -51,7 +51,7 @@ def _maybe_import(name: str):
 def _distribute_iters(*, iters: int, nstep: int) -> list[int]:
     """Distribute a fixed total iteration budget across multigrid steps.
 
-    VMEC++ and VMEC2000 both have per-multigrid-step iteration limits. For a fair
+    VMEC2000 has per-multigrid-step iteration limits. For a fair
     "fixed budget" comparison, we distribute the *total* budget across steps so
     that sum(niter_array) == iters.
     """
@@ -77,7 +77,7 @@ def _run_vmec_jax(*, input_path: Path, case: str, iters: int) -> RunTrace:
     # shape-dependent, so we warm up per-case.
     # Note: some parts of the stack stage/jit by `max_iter`, so warm up with the
     # same iteration count.
-    warm = vj.run_fixed_boundary(input_path, solver="vmecpp_iter", max_iter=int(iters), verbose=False)
+    warm = vj.run_fixed_boundary(input_path, solver="vmec2000_iter", max_iter=int(iters), verbose=False)
     try:
         warm_res = warm.result
         if warm_res is not None and hasattr(warm_res, "fsqr2_history"):
@@ -88,48 +88,18 @@ def _run_vmec_jax(*, input_path: Path, case: str, iters: int) -> RunTrace:
         pass
 
     t0 = time.perf_counter()
-    run = vj.run_fixed_boundary(input_path, solver="vmecpp_iter", max_iter=int(iters), verbose=False)
+    run = vj.run_fixed_boundary(input_path, solver="vmec2000_iter", max_iter=int(iters), verbose=False)
     dt = time.perf_counter() - t0
 
-    # solve_fixed_boundary_vmecpp_iter stores invariant residuals as fsq histories.
+    # solve_fixed_boundary_residual_iter stores invariant residuals as fsq histories.
     res = run.result
     if res is None or not hasattr(res, "fsqr2_history"):
-        raise RuntimeError("vmec_jax run did not return vmecpp_iter residual histories")
+        raise RuntimeError("vmec_jax run did not return residual histories")
     fsq = np.asarray(res.fsqr2_history) + np.asarray(res.fsqz2_history) + np.asarray(res.fsql2_history)
     fsq = fsq[:iters]
     if fsq.size < iters:
         fsq = np.pad(fsq, (0, iters - fsq.size), constant_values=np.nan)
     return RunTrace(backend="vmec_jax", case=case, iters=iters, seconds=float(dt), fsq_total=fsq)
-
-
-def _run_vmecpp(*, input_path: Path, case: str, iters: int, max_threads: int) -> RunTrace | None:
-    vmecpp = _maybe_import("vmecpp")
-    if vmecpp is None:
-        return None
-
-    inp = vmecpp.VmecInput.from_file(str(input_path))
-    # Force a fixed iteration budget and return outputs even if not converged.
-    inp.return_outputs_even_if_not_converged = True
-    # Use a plain Python list here. Some vmecpp builds are sensitive to numpy
-    # dtype/shape when assigning Eigen-backed arrays via pybind11.
-    #
-    # `niter_array` (and `ftol_array`) must match the number of multigrid steps.
-    nstep = len(getattr(inp, "ns_array", [])) or len(getattr(inp, "niter_array", [])) or 1
-    inp.niter_array = _distribute_iters(iters=int(iters), nstep=int(nstep))
-    try:
-        inp.ftol_array = [0.0] * len(inp.niter_array)
-    except Exception:
-        pass
-
-    t0 = time.perf_counter()
-    out = vmecpp.run(inp, verbose=False, max_threads=int(max_threads))
-    dt = time.perf_counter() - t0
-
-    fsq = np.asarray(out.wout.fsqt, dtype=float)
-    fsq = fsq[:iters]
-    if fsq.size < iters:
-        fsq = np.pad(fsq, (0, iters - fsq.size), constant_values=np.nan)
-    return RunTrace(backend="vmecpp", case=case, iters=iters, seconds=float(dt), fsq_total=fsq)
 
 
 def _vmec_expected_wout_name(input_path: Path) -> str:
@@ -237,7 +207,9 @@ def _run_vmec2000(*, input_path: Path, case: str, iters: int, workdir: Path) -> 
 def _plot_runtime(*, traces: list[RunTrace], outpath: Path) -> None:
     plt = _import_matplotlib()
     cases = sorted({t.case for t in traces})
-    backends = ["vmec2000", "vmecpp", "vmec_jax"]
+    preferred = ["vmec2000", "vmec_jax"]
+    present = sorted({t.backend for t in traces}, key=lambda b: (preferred.index(b) if b in preferred else 999, b))
+    backends = [b for b in preferred if b in present] + [b for b in present if b not in preferred]
     data = {b: [] for b in backends}
     for case in cases:
         for b in backends:
@@ -245,10 +217,10 @@ def _plot_runtime(*, traces: list[RunTrace], outpath: Path) -> None:
             data[b].append(t.seconds if t is not None else np.nan)
 
     x = np.arange(len(cases))
-    width = 0.25
+    width = 0.8 / max(1, len(backends))
     fig, ax = plt.subplots(figsize=(10, 3.8), constrained_layout=True)
     for i, b in enumerate(backends):
-        ax.bar(x + (i - 1) * width, data[b], width=width, label=b)
+        ax.bar(x + (i - (len(backends) - 1) / 2.0) * width, data[b], width=width, label=b)
     ax.set_xticks(x)
     ax.set_xticklabels(cases, rotation=15, ha="right")
     ax.set_yscale("log")
@@ -263,7 +235,9 @@ def _plot_runtime(*, traces: list[RunTrace], outpath: Path) -> None:
 def _plot_residuals(*, traces: list[RunTrace], outpath: Path) -> None:
     plt = _import_matplotlib()
     cases = sorted({t.case for t in traces})
-    backends = ["vmec2000", "vmecpp", "vmec_jax"]
+    preferred = ["vmec2000", "vmec_jax"]
+    present = sorted({t.backend for t in traces}, key=lambda b: (preferred.index(b) if b in preferred else 999, b))
+    backends = [b for b in preferred if b in present] + [b for b in present if b not in preferred]
     n = len(cases)
     ncols = 2
     nrows = int(np.ceil(n / ncols))
@@ -288,7 +262,7 @@ def _plot_residuals(*, traces: list[RunTrace], outpath: Path) -> None:
         axes[j // ncols, j % ncols].axis("off")
     handles, labels = axes[0, 0].get_legend_handles_labels()
     if handles:
-        fig.legend(handles, labels, ncols=3, frameon=False, loc="upper center")
+        fig.legend(handles, labels, ncols=min(3, len(handles)), frameon=False, loc="upper center")
     outpath.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(outpath, dpi=180)
     plt.close(fig)
@@ -299,12 +273,11 @@ def main() -> None:
     p.add_argument(
         "--cases",
         nargs="*",
-        # Keep defaults to inputs known to run in vmecpp+vmec2000 wrappers.
-        default=["circular_tokamak", "vmecpp_solovev", "cth_like_fixed_bdy", "nfp4_QH_warm_start"],
+        # Keep defaults small; this script is for README figures, not profiling.
+        default=["circular_tokamak", "solovev", "cth_like_fixed_bdy", "nfp4_QH_warm_start"],
     )
     # Keep the default small; this script is for README figures, not profiling.
     p.add_argument("--iters", type=int, default=10, help="Fixed iteration budget for all backends.")
-    p.add_argument("--max-threads", type=int, default=1, help="VMEC++ max_threads.")
     p.add_argument("--outdir", default="examples/outputs/bench_fixed_boundary", help="Output directory root.")
     args = p.parse_args()
 
@@ -326,15 +299,6 @@ def main() -> None:
 
         # External backends are optional and may not be installed.
         # Keep the overall script robust: skip a backend rather than failing the run.
-        try:
-            tpp = _run_vmecpp(
-                input_path=input_path, case=case, iters=int(args.iters), max_threads=int(args.max_threads)
-            )
-        except Exception:
-            tpp = None
-        if tpp is not None:
-            traces.append(tpp)
-
         try:
             tvm = _run_vmec2000(
                 input_path=input_path, case=case, iters=int(args.iters), workdir=outdir / "vmec2000" / case

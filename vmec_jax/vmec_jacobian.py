@@ -15,9 +15,9 @@ VMEC then constructs several derivatives and the Jacobian on the **radial half
 mesh** with explicit correction terms arising from ``d/ds sqrt(s)``.
 
 The direct Cartesian cross-product Jacobian in :mod:`vmec_jax.geom` is fine for
-early steps, but does not match VMEC's discrete half-mesh convention used for
+many uses, but does not match VMEC's discrete half-mesh convention used for
 Nyquist ``wout`` fields like ``gmnc/gmns``. This module exists specifically for
-Step-10 parity work.
+parity work.
 """
 
 from __future__ import annotations

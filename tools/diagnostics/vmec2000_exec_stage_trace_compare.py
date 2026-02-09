@@ -184,12 +184,68 @@ def _rel_rms(x: np.ndarray, y: np.ndarray, *, eps: float = 1e-16) -> float:
     return num / max(eps, den)
 
 
+def _patch_indata(text: str, *, updates: dict[str, str]) -> str:
+    """Patch simple `&INDATA` assignments in a VMEC namelist.
+
+    This is intentionally minimal: it replaces (or inserts) key/value assignments
+    in the `&INDATA` block so diagnostics can force e.g. `NSTEP=1` and short
+    iteration counts.
+    """
+    lines = text.splitlines()
+    in_block = False
+    end_idx = None
+    found = {k.upper(): False for k in updates}
+
+    key_re = {k.upper(): re.compile(rf"^(\s*){re.escape(k)}\s*=", flags=re.IGNORECASE) for k in updates}
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.upper().startswith("&INDATA"):
+            in_block = True
+            continue
+        if in_block and stripped.startswith("/"):
+            end_idx = i
+            break
+        if not in_block:
+            continue
+
+        for k_up, pat in key_re.items():
+            if pat.match(line):
+                indent = pat.match(line).group(1)
+                lines[i] = f"{indent}{k_up} = {updates[k_up]}"
+                found[k_up] = True
+
+    if end_idx is None:
+        return text
+
+    # Insert missing assignments just before the "/" terminator.
+    insert_lines = []
+    for k_up, v in updates.items():
+        if not found[k_up.upper()]:
+            insert_lines.append(f"  {k_up.upper()} = {v}")
+    if insert_lines:
+        lines = lines[:end_idx] + insert_lines + lines[end_idx:]
+    return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--case", default="circular_tokamak")
     p.add_argument("--input", type=str, default=None, help="Path to input.* (overrides --case).")
     p.add_argument("--vmec2000", type=str, default=None, help="Path to xvmec2000 executable.")
     p.add_argument("--max-iter", type=int, default=2, help="Total iteration budget for vmec_jax.")
+    p.add_argument(
+        "--vmec-nstep",
+        type=int,
+        default=1,
+        help="Override VMEC2000 `NSTEP` (printout cadence). Use 1 for per-iteration threed1 traces.",
+    )
+    p.add_argument(
+        "--single-ns",
+        type=int,
+        default=None,
+        help="If set, force both VMEC2000 and vmec_jax to run a single grid at this ns (no multigrid).",
+    )
     p.add_argument(
         "--use-input-niter",
         action="store_true",
@@ -213,12 +269,33 @@ def main() -> None:
     if not vmec2000_exe.exists():
         raise SystemExit(f"Missing VMEC2000 executable: {vmec2000_exe}")
 
+    # Load indata once so we can reuse `FTOL` etc for diagnostic patches.
+    _cfg_in, _indata_in = vj.load_input(input_path)
+    ftol_default = float(_indata_in.get_float("FTOL", 1e-10))
+
     # --- Run VMEC2000 executable in an isolated workdir ---
     threed1_stages: list[Vmec2000Threed1Stage] | None = None
     with tempfile.TemporaryDirectory(prefix="vmec2000_exec_") as td:
         workdir = Path(td)
-        shutil.copy2(input_path, workdir / input_path.name)
-        cmd = [str(vmec2000_exe), input_path.name]
+        input_local = workdir / input_path.name
+        shutil.copy2(input_path, input_local)
+
+        # Force per-iteration printout cadence by patching `NSTEP`.
+        indata_text = input_local.read_text()
+        updates = {"NSTEP": str(int(args.vmec_nstep))}
+
+        # Optional single-grid debug mode for tighter iteration parity.
+        if args.single_ns is not None:
+            ns = int(args.single_ns)
+            updates |= {
+                "NS_ARRAY": f"{ns}",
+                "NITER_ARRAY": f"{int(args.max_iter)}",
+                "FTOL_ARRAY": f"{ftol_default:.16e}",
+                "NITER": f"{int(args.max_iter)}",
+            }
+
+        input_local.write_text(_patch_indata(indata_text, updates=updates))
+        cmd = [str(vmec2000_exe), input_local.name]
         proc = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True, check=False)
         stdout = proc.stdout + "\n" + proc.stderr
 
@@ -252,6 +329,7 @@ def main() -> None:
             max_iter=int(args.max_iter),
             multigrid_use_input_niter=bool(args.use_input_niter),
             verbose=False,
+            ns_override=int(args.single_ns) if args.single_ns is not None else None,
         )
 
     # --- Report ---
@@ -325,7 +403,7 @@ def main() -> None:
         rmnc_err = _rel_rms(np.asarray(run.state.Rcos), np.asarray(wout.rmnc))
         zmns_err = _rel_rms(np.asarray(run.state.Zsin), np.asarray(wout.zmns))
         fsq_ref = float(wout.fsqr + wout.fsqz + wout.fsql)
-        fsqr_new, fsqz_new, fsql_new = vj.step10_fsq_from_state(
+        fsqr_new, fsqz_new, fsql_new = vj.residual_scalars_from_state(
             state=run.state,
             static=run.static,
             indata=run.indata,
@@ -335,7 +413,7 @@ def main() -> None:
         fsq_new = float(fsqr_new + fsqz_new + fsql_new)
         print()
         print("End-state comparison vs VMEC2000 wout:")
-        print(f"  fsq_total: vmec={fsq_ref:.3e}  jax(step10)={fsq_new:.3e}")
+        print(f"  fsq_total: vmec={fsq_ref:.3e}  jax={fsq_new:.3e}")
         print(f"  rmnc relRMS={rmnc_err:.3e}  zmns relRMS={zmns_err:.3e}")
 
 

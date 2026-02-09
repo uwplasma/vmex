@@ -1,6 +1,6 @@
 """Intermediate example: implicit differentiation through the lambda-only solve.
 
-This script demonstrates a Step-9 capability: differentiating an outer scalar
+This script demonstrates differentiating an outer scalar
 objective through an equilibrium sub-solve **without** backpropagating through
 many optimizer iterations.
 

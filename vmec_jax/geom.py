@@ -1,7 +1,6 @@
 """Geometry and metric/Jacobian utilities.
 
-Step-2 extends the step-1 coordinate kernel (R,Z,lambda on an (s,theta,zeta)
-grid) with:
+This extends the coordinate kernel (R,Z,lambda on an (s,theta,zeta) grid) with:
 
 * radial derivatives (via finite differences on coefficient arrays)
 * a cylindrical -> Cartesian embedding using the *physical* toroidal angle

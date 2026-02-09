@@ -27,7 +27,7 @@ def _rel_err(a: float, b: float) -> float:
 
 
 @pytest.mark.parametrize("case_name,input_rel,wout_rel", _CASES)
-def test_step10_force_norms_dynamic_matches_wout_scalars(case_name: str, input_rel: str, wout_rel: str):
+def test_force_norms_dynamic_matches_wout_scalars(case_name: str, input_rel: str, wout_rel: str):
     """Dynamic force norms match the wout-derived VMEC conventions on the internal grid."""
     pytest.importorskip("netCDF4")
 
@@ -41,7 +41,7 @@ def test_step10_force_norms_dynamic_matches_wout_scalars(case_name: str, input_r
     wout = read_wout(wout_path)
     st = state_from_wout(wout)
 
-    # VMEC internal (theta,zeta) grid / trig tables used for Step-10 parity.
+    # VMEC internal (theta,zeta) grid / trig tables used for scalar residual parity.
     grid = vmec_angle_grid(ntheta=int(cfg.ntheta), nzeta=int(cfg.nzeta), nfp=int(wout.nfp), lasym=bool(wout.lasym))
     static = build_static(cfg, grid=grid)
     trig = vmec_trig_tables(

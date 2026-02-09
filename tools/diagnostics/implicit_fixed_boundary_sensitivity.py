@@ -1,6 +1,6 @@
 """Advanced example: implicit differentiation through the full fixed-boundary solve.
 
-This script demonstrates Step-9 implicit differentiation for the fixed-boundary
+This script demonstrates implicit differentiation for the fixed-boundary
 equilibrium solve over (R, Z, lambda). It computes the sensitivity of a purely
 geometric quantity (total volume) w.r.t. a scale factor applied to ``chipf``
 (equivalently, scaling iota for current-free cases).

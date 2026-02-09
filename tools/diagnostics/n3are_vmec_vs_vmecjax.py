@@ -146,10 +146,7 @@ def main() -> None:
 
     step_size = args.step_size
     if step_size is None:
-        if str(args.solver).lower() == "vmecpp_iter":
-            step_size = 1.0
-        else:
-            step_size = 1e-5
+        step_size = 1.0 if str(args.solver).lower().endswith("_iter") else 1e-5
 
     run = run_fixed_boundary(
         Path(args.input),

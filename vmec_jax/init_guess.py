@@ -1,13 +1,13 @@
-"""Initial guess construction for step-1.
+"""Initial guess construction.
 
 VMEC has a fairly elaborate procedure to build an initial nested set of
 surfaces from the boundary (and/or axis) Fourier coefficients.
 
-For step-1 we implement a *regularity-aware* but intentionally simple guess that
+This module implements a *regularity-aware* but intentionally simple guess that
 is good enough to exercise the full (s,theta,zeta) geometry kernel:
 
 - For m>0 harmonics, scale boundary coefficients like rho**m with rho = sqrt(s)
-  to enforce regularity at the magnetic axis (matches VMEC/VMEC++).
+  to enforce regularity at the magnetic axis.
 - For m=0 harmonics, scale with s and, if axis coefficients are provided,
   linearly blend between the axis and the boundary.
 - lambda coefficients are initialized to zero.
@@ -40,7 +40,7 @@ from .vmec_tomnsp import vmec_trig_tables
 def _read_axis_coeffs(indata: InData) -> dict[str, float | list[float]]:
     """Read axis arrays if present.
 
-    VMEC supports axis series in a few naming conventions. For step-1 we only
+    VMEC supports axis series in a few naming conventions. For now we only
     look for the common modern VMEC names:
 
     - RAXIS_CC, RAXIS_CS
@@ -242,7 +242,7 @@ def _recompute_axis_from_boundary(
     signgs: int,
     n_grid: int = 101,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """VMEC++-style axis recompute to maximize min Jacobian in each toroidal plane."""
+    """Axis recompute heuristic to maximize min signed Jacobian per toroidal plane."""
     cfg = static.cfg
     boundary_recompute = _undo_m1_constraint_for_recompute(static, boundary)
 
@@ -360,7 +360,7 @@ def _recompute_axis_from_boundary(
     dZ_dtheta_half[:ntheta3, :] = dZ_dtheta_half_red
 
     if not cfg.lasym:
-        # VMEC++ mirror: only interior points are reflected.
+        # Mirror: only interior points are reflected.
         # C++ equivalent:
         #   for l in [1, nThetaReduced-2]:
         #     l_reversed = (nThetaEven - l) % nThetaEven
@@ -402,8 +402,8 @@ def _recompute_axis_from_boundary(
 
         tau0 = dR_dtheta_half[:, k] * dZ_ds_half - dZ_dtheta_half[:, k] * dR_ds_half
 
-        # VMEC++ initializes this to 0.0, so axis updates are only accepted
-        # when they improve the minimum signed Jacobian above zero.
+        # Initialize to 0.0 so axis updates are only accepted when they improve
+        # the minimum signed Jacobian above zero.
         min_tau_best = 0.0
 
         for iz in range(n_grid):
@@ -503,7 +503,7 @@ def initial_guess_from_boundary(
     Zcos_b = jnp.asarray(boundary_use.Z_cos, dtype=dtype)[None, :]
     Zsin_b = jnp.asarray(boundary_use.Z_sin, dtype=dtype)[None, :]
 
-    # Regularity scaling: use rho**m with rho = sqrt(s) for m>0 (VMEC/VMEC++).
+    # Regularity scaling: use rho**m with rho = sqrt(s) for m>0.
     # For m=0, keep Rcos constant unless we blend with axis; other components
     # use s to ensure regularity at the axis.
     rho = jnp.sqrt(s)
@@ -515,7 +515,7 @@ def initial_guess_from_boundary(
     Zsin = scale_other * Zsin_b
 
     # If user supplied a non-trivial axis spec, blend m=0 coefficients between
-    # axis and boundary (linear in s), matching VMEC/VMEC++ conventions.
+    # axis and boundary (linear in s).
     if indata is not None:
         ax = _read_axis_coeffs(indata)
         raxis_cc = _axis_array(ax.get("RAXIS_CC", None), cfg.ntor, dtype=dtype)
@@ -566,7 +566,7 @@ def initial_guess_from_boundary(
 
             # If axis coefficients are supplied via legacy shorthand keys
             # (RAXIS/ZAXIS), default to recompute unless explicitly disabled.
-            # This mirrors VMEC++ behavior more robustly on stellarator cases.
+            # This default is more robust on stellarator cases.
             legacy_axis_names = (indata.get("RAXIS", None) is not None) or (indata.get("ZAXIS", None) is not None)
             lrecompute_default = bool(legacy_axis_names)
 

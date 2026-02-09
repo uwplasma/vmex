@@ -21,7 +21,7 @@ def _rel_rms(a: np.ndarray, b: np.ndarray) -> float:
     return num / den if den != 0.0 else float("inf")
 
 
-def test_step10_vmec_bcovar_halfmesh_smoke_circular_tokamak():
+def test_vmec_bcovar_halfmesh_smoke_circular_tokamak():
     """Smoke test: bcovar half-mesh kernels run and reproduce vp reasonably."""
     pytest.importorskip("netCDF4")
 
