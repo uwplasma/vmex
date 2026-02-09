@@ -19,7 +19,7 @@ from vmec_jax.wout import read_wout, state_from_wout
         ("circular_tokamak", "examples/data/input.circular_tokamak", "examples/data/wout_circular_tokamak_reference.nc"),
     ],
 )
-def test_step10_getfsq_block_sums_reconstruct_scalars(case_name: str, input_rel: str, wout_rel: str):
+def test_getfsq_block_sums_reconstruct_scalars(case_name: str, input_rel: str, wout_rel: str):
     """Internal consistency: per-block sums-of-squares reconstruct fsq scalars exactly."""
     pytest.importorskip("netCDF4")
 

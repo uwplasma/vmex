@@ -1,4 +1,4 @@
-"""Magnetic field representation utilities (step-4).
+"""Magnetic field representation utilities.
 
 This module implements the contravariant magnetic-field components used by VMEC:
 
@@ -250,9 +250,10 @@ def chips_from_wout_chipf(
 ):
     """Resolve full-mesh ``chips`` from a ``wout``-style ``chipf`` array.
 
-    VMEC2000 and VMEC++ may expose different mesh conventions for ``chipf``:
-    - VMEC2000 reference files commonly store half-mesh ``chipf ~= iotaf*phipf``.
-    - VMEC++ files expose full-mesh ``chipf ~= iotas*phipf``.
+    Different ``wout`` writers may expose different mesh conventions for
+    ``chipf``:
+    - Many reference files store half-mesh ``chipf ~= iotaf*phipf``.
+    - Some files expose full-mesh ``chipf ~= iotas*phipf``.
 
     This helper auto-detects the convention when both ``iotaf`` and ``iotas`` are
     available, and returns a full-mesh ``chips`` suitable for `add_fluxes` logic.
@@ -272,7 +273,7 @@ def chips_from_wout_chipf(
         #
         # A previous heuristic required the full-mesh interpretation to be
         # "much better" (2x margin). That proved too conservative for some
-        # VMEC++ outputs where full-mesh `chipf` is only moderately closer to
+        # outputs where full-mesh `chipf` is only moderately closer to
         # `iotas*phipf` than to `iotaf*phipf`.
         use_full = rel_full < rel_half
         chips_half = chips_from_chipf(chipf)

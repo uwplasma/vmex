@@ -1,4 +1,4 @@
-"""VMEC parity helper kernels (Step-10).
+"""VMEC parity helper kernels.
 
 This module provides small kernels that reproduce specific VMEC discrete
 conventions used in the reference ``wout_*.nc`` outputs, as needed for parity

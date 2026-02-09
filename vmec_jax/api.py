@@ -17,7 +17,7 @@ from .driver import (
     load_input,
     load_wout,
     run_fixed_boundary,
-    step10_fsq_from_state,
+    residual_scalars_from_state,
     write_wout_from_fixed_boundary_run,
 )
 from .plotting import (
@@ -39,7 +39,7 @@ __all__ = [
     "load_input",
     "load_wout",
     "run_fixed_boundary",
-    "step10_fsq_from_state",
+    "residual_scalars_from_state",
     "write_wout_from_fixed_boundary_run",
     # Plotting helpers
     "bmag_from_state_physical",

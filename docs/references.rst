@@ -16,6 +16,3 @@ Background and canonical references for VMEC and related equilibrium methods:
 
 4. VMEC2000 source distribution and ``wout`` file format documentation (as
    shipped with VMEC/LIBSTELL).
-
-5. J. Schilling, “The Numerics of VMEC++” (2025). (VMEC++ algorithmic notes
-   and implementation details.)

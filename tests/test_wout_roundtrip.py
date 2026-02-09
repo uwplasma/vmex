@@ -15,7 +15,7 @@ _CASES = [
 
 
 @pytest.mark.parametrize("wout_rel", _CASES)
-def test_step10_wout_roundtrip_read_write_read(tmp_path: Path, wout_rel: str):
+def test_wout_roundtrip_read_write_read(tmp_path: Path, wout_rel: str):
     pytest.importorskip("netCDF4")
 
     root = Path(__file__).resolve().parents[1]

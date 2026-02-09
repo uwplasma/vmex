@@ -1,4 +1,4 @@
-"""Angle and radial integrals (step-3).
+"""Angle and radial integrals.
 
 This module computes simple derived quantities from geometric outputs, notably
 the volume profile from the Jacobian ``sqrtg``.

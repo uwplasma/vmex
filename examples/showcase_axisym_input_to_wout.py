@@ -149,8 +149,17 @@ def main() -> None:
         action="store_true",
         help="Run the 3 bundled axisymmetric cases and print a parity summary.",
     )
-    p.add_argument("--solver", default="vmecpp_iter", choices=["vmecpp_iter", "vmec_gn", "gd", "lbfgs"])
+    p.add_argument(
+        "--solver",
+        default="vmec2000_iter",
+        choices=["vmec2000_iter", "vmec_gn", "gd", "lbfgs"],
+    )
     p.add_argument("--max-iter", type=int, default=30)
+    p.add_argument(
+        "--use-input-niter",
+        action="store_true",
+        help="For vmec2000_iter: respect NITER_ARRAY/FTOL_ARRAY staging (still capped by --max-iter).",
+    )
     p.add_argument("--no-solve", action="store_true", help="Use initial guess only.")
     p.add_argument("--outdir", default=None, help="Defaults to examples/outputs/showcase/<case>/")
     p.add_argument(
@@ -164,7 +173,7 @@ def main() -> None:
     data_dir = examples_dir / "data"
 
     if args.suite:
-        cases = ["circular_tokamak", "shaped_tokamak_pressure", "vmecpp_solovev"]
+        cases = ["circular_tokamak", "shaped_tokamak_pressure", "solovev"]
         out_root = Path(args.outdir) if args.outdir else (examples_dir / "outputs" / "showcase" / "axisym_suite")
     else:
         cases = [str(args.case)]
@@ -185,6 +194,7 @@ def main() -> None:
             input_path,
             solver=str(args.solver),
             max_iter=int(args.max_iter),
+            multigrid_use_input_niter=bool(args.use_input_niter),
             use_initial_guess=bool(args.no_solve),
             verbose=True,
         )

@@ -96,7 +96,7 @@ def _case_parity(*, input_path: Path, wout_path: Path, jit: bool) -> dict[str, f
         bmag_new = np.sqrt(np.maximum(0.0, b2_new))
         bsq_new = np.asarray(bc.bsq)
 
-        fsqr_new, fsqz_new, fsql_new = vj.step10_fsq_from_state(
+        fsqr_new, fsqz_new, fsql_new = vj.residual_scalars_from_state(
             state=state,
             static=static,
             indata=indata,
@@ -127,7 +127,7 @@ def main() -> None:
     p.add_argument(
         "--cases",
         nargs="*",
-        default=["circular_tokamak", "shaped_tokamak_pressure", "vmecpp_solovev", "li383_low_res"],
+        default=["circular_tokamak", "shaped_tokamak_pressure", "solovev", "li383_low_res"],
         help="Case names from examples/data as input.<case> and wout_<case>_reference.nc.",
     )
     p.add_argument(
@@ -172,10 +172,10 @@ def main() -> None:
         "bsubv": "bsubv",
         "absB": "abs(B)",
         "bsq": "bsq = 0.5*B^2 + p",
-        "fsqr": "fsqr (step10)",
-        "fsqz": "fsqz (step10)",
-        "fsql": "fsql (step10)",
-        "fsq_total": "fsq_total (step10)",
+        "fsqr": "fsqr",
+        "fsqz": "fsqz",
+        "fsql": "fsql",
+        "fsq_total": "fsq_total",
     }
     for m in metrics:
         vals = " | ".join(_format(v) for v in rows[m])
@@ -184,10 +184,9 @@ def main() -> None:
     print()
     print("Notes:")
     print("- Array rows are relative RMS on the VMEC angle grid.")
-    print("- Step-10 scalar rows compare vmec_jax step10 kernels against `wout.fsqr/fsqz/fsql`.")
+    print("- Scalar rows compare vmec_jax kernels against `wout.fsqr/fsqz/fsql`.")
     print("- This script does not run a nonlinear fixed-boundary solve.")
 
 
 if __name__ == "__main__":
     main()
-
