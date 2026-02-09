@@ -27,7 +27,7 @@ pytest -q
 Generated from the bundled `shaped_tokamak_pressure` case:
 
 ```bash
-python examples/showcase_axisym_input_to_wout.py --case shaped_tokamak_pressure --max-iter 60 --use-input-niter --emit-readme-figures
+python examples/showcase_axisym_input_to_wout.py --case shaped_tokamak_pressure --max-iter 120 --use-input-niter --emit-readme-figures
 ```
 
 <table>
@@ -93,7 +93,7 @@ python examples/validation/end_to_end_solve_parity_summary.py --use-input-niter 
 This script compares a *fixed iteration budget* across `vmec2000` (Fortran via the `vmec` Python extension, when installed) and `vmec_jax`:
 
 ```bash
-python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 10
+python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 30
 ```
 
 <table>
