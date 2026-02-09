@@ -72,6 +72,7 @@ instance/
 docs/_build/
 docs/api/generated/
 examples/outputs/
+outputs/
 
 # PyBuilder
 .pybuilder/
