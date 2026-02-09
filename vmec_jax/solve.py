@@ -2002,6 +2002,7 @@ def solve_fixed_boundary_vmecpp_iter(
     auto_flip_force: bool = True,
     divide_by_scalxc_for_update: bool = True,
     lambda_update_scale: float = 1.0,
+    enforce_vmec_lambda_axis: bool = False,
     vmecpp_strict_update: bool = True,
     vmecpp_backtracking: bool = False,
     vmecpp_limit_dt_from_force: bool = False,
@@ -2024,6 +2025,7 @@ def solve_fixed_boundary_vmecpp_iter(
 
     signgs = int(signgs)
     lambda_update_scale = float(lambda_update_scale)
+    enforce_vmec_lambda_axis = bool(enforce_vmec_lambda_axis)
     vmecpp_reference_mode = bool(vmecpp_reference_mode)
     if use_vmecpp_restart_triggers is None:
         # VMEC++ restart triggers are generally stabilizing. Keep them on by
@@ -2070,6 +2072,36 @@ def solve_fixed_boundary_vmecpp_iter(
     static = build_static(cfg, grid=grid_vmec)
 
     idx00 = _mode00_index(static.modes)
+    m_modes = jnp.asarray(static.modes.m)
+    lambda_axis_mask = jnp.asarray((m_modes == 0) | (m_modes == 1)).astype(jnp.asarray(state0.Rcos).dtype)
+
+    def _apply_vmec_lambda_axis_rules(st: VMECState) -> VMECState:
+        """VMEC axis convention for lambda coefficients (jlam/jmin1).
+
+        VMEC's `scalxc` odd-m representation uses special axis closures. For the
+        lambda field, VMEC keeps the m=0 and m=1 modes finite on axis by
+        extrapolating the internal odd field to js=1, which corresponds (under
+        the `scalxc` axis fixup) to copying coefficients from js=1 to js=0. All
+        higher-m modes are forced to 0 on axis.
+        """
+        if not enforce_vmec_lambda_axis:
+            return st
+        Lcos = jnp.asarray(st.Lcos)
+        Lsin = jnp.asarray(st.Lsin)
+        if int(Lcos.shape[0]) < 2:
+            return st
+        Lcos = Lcos.at[0, :].set(Lcos[1, :] * lambda_axis_mask)
+        Lsin = Lsin.at[0, :].set(Lsin[1, :] * lambda_axis_mask)
+        Lcos, Lsin = _enforce_lambda_gauge(Lcos, Lsin, idx00=idx00)
+        return VMECState(
+            layout=st.layout,
+            Rcos=st.Rcos,
+            Rsin=st.Rsin,
+            Zcos=st.Zcos,
+            Zsin=st.Zsin,
+            Lcos=Lcos,
+            Lsin=Lsin,
+        )
     s = jnp.asarray(static.s)
     flux = flux_profiles_from_indata(indata, s, signgs=signgs)
     chipf_wout = half_mesh_avg_from_full_mesh(jnp.asarray(flux.chipf))
@@ -2478,6 +2510,7 @@ def solve_fixed_boundary_vmecpp_iter(
         enforce_lambda_axis=False,
         idx00=idx00,
     )
+    state = _apply_vmec_lambda_axis_rules(state)
 
     ftol = float(indata.get_float("FTOL", 1e-10)) if ftol is None else float(ftol)
 
@@ -2956,6 +2989,7 @@ def solve_fixed_boundary_vmecpp_iter(
                 enforce_lambda_axis=False,
                 idx00=idx00,
             )
+            state_try = _apply_vmec_lambda_axis_rules(state_try)
             _, _, fsqr_t, fsqz_t, fsql_t, _, _ = _compute_forces(
                 state_try,
                 include_edge=include_edge,
@@ -2992,6 +3026,7 @@ def solve_fixed_boundary_vmecpp_iter(
                         enforce_lambda_axis=False,
                         idx00=idx00,
                     )
+                    state_try = _apply_vmec_lambda_axis_rules(state_try)
                     _, _, fsqr_t, fsqz_t, fsql_t, _, _ = _compute_forces(
                         state_try,
                         include_edge=include_edge,
@@ -3063,6 +3098,7 @@ def solve_fixed_boundary_vmecpp_iter(
                         enforce_lambda_axis=False,
                         idx00=idx00,
                     )
+                    state_dir = _apply_vmec_lambda_axis_rules(state_dir)
                     _, _, fsqr_d, fsqz_d, fsql_d, _, _ = _compute_forces(
                         state_dir,
                         include_edge=include_edge,
@@ -3207,6 +3243,7 @@ def solve_fixed_boundary_vmecpp_iter(
                     enforce_lambda_axis=False,
                     idx00=idx00,
                 )
+                state_try = _apply_vmec_lambda_axis_rules(state_try)
                 _, _, fsqr_t, fsqz_t, fsql_t, _, _ = _compute_forces(
                     state_try,
                     include_edge=include_edge,

@@ -540,6 +540,7 @@ def run_fixed_boundary(
                     auto_flip_force=True,
                     divide_by_scalxc_for_update=False,
                     lambda_update_scale=float(2.0 * np.pi * float(signgs)),
+                    enforce_vmec_lambda_axis=True,
                     vmecpp_strict_update=True,
                     vmecpp_backtracking=False,
                     vmecpp_reference_mode=False,
