@@ -1,4 +1,4 @@
-"""VMEC constraint pipeline pieces (`alias` / `gcon`) for Step-10 parity work.
+"""VMEC constraint pipeline pieces (`alias` / `gcon`) for parity work.
 
 VMEC uses a "constraint force" to maintain polar regularity and enforce internal
 relationships near the magnetic axis. In the VMEC2000 fixed-boundary pipeline:

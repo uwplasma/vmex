@@ -27,7 +27,7 @@ def _rel_err(a: float, b: float) -> float:
         ("li383_low_res", "examples/data/input.li383_low_res", "examples/data/wout_li383_low_res_reference.nc"),
     ],
 )
-def test_step10_wb_wp_integrals_match_wout(case_name: str, input_rel: str, wout_rel: str):
+def test_wb_wp_integrals_match_wout(case_name: str, input_rel: str, wout_rel: str):
     """Energy/pressure integrals match VMEC2000 `wout` scalars on the internal grid."""
     pytest.importorskip("netCDF4")
 

@@ -1,7 +1,7 @@
-"""VMEC-style half-mesh metric + B-covariant ingredients (Step-10).
+"""VMEC-style half-mesh metric + B-covariant ingredients.
 
-This module ports the *core* algebra from VMEC2000's ``bcovar`` for the
-fixed-boundary, no-preconditioner parity stage:
+This module ports the *core* algebra from VMEC2000's ``bcovar`` for
+fixed-boundary parity work:
 
 - Build half-mesh metric elements ``g_uu, g_uv, g_vv`` using VMEC's even/odd-m
   decomposition and half-mesh staggering.
@@ -11,7 +11,7 @@ fixed-boundary, no-preconditioner parity stage:
 - Provide force-kernel inputs used by VMEC's ``forces`` routine.
 
 The implementation here is intentionally limited to what's needed for validated
-step-wise parity work. Use ``use_vmec_synthesis=True`` to switch the internal
+parity work. Use ``use_vmec_synthesis=True`` to switch the internal
 R/Z/L synthesis to VMEC's symmetry-reduced theta grid (ntheta2/ntheta3) using
 the ``fixaray`` trig tables.
 """

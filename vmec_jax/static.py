@@ -1,6 +1,6 @@
 """Static (compile-time) data for vmec_jax.
 
-Step-1 introduces a small "static" container that groups together data that
+This module defines a small "static" container that groups together data that
 should be precomputed once per equilibrium problem and then reused inside
 `jax.jit`'d kernels:
 
@@ -41,8 +41,8 @@ def build_static(cfg: VMECConfig, *, grid: AngleGrid | None = None) -> VMECStati
     Parameters
     ----------
     grid:
-        Optional override for the angular grid. This is used by Step-10 parity
-        kernels that must match VMEC's internal `ntheta1/2/3` conventions rather
+        Optional override for the angular grid. This is used by parity kernels
+        that must match VMEC's internal `ntheta1/2/3` conventions rather
         than the default `[0,2π)` endpoint-free grid.
     """
     modes = vmec_mode_table(cfg.mpol, cfg.ntor)
@@ -50,7 +50,7 @@ def build_static(cfg: VMECConfig, *, grid: AngleGrid | None = None) -> VMECStati
         grid = make_angle_grid(cfg.ntheta, cfg.nzeta, cfg.nfp, endpoint=False)
     basis = build_helical_basis(modes, grid)
     # Radial coordinate s = (i)/(ns-1). VMEC uses "s" = normalized toroidal flux.
-    # For step-1 we only need a monotone [0,1] grid.
+    # Use a monotone [0,1] grid.
     if cfg.ns < 2:
         s = jnp.asarray([0.0])
     else:

@@ -1,10 +1,10 @@
-"""Step-5 solvers (fixed-boundary, early stages).
+"""Fixed-boundary solvers.
 
 The first solver milestone is a robust "inner solve" for the VMEC ``lambda`` field
 with R/Z held fixed. This is useful for:
 
 - validating the magnetic energy objective against VMEC2000 `wout` files,
-- building toward a full fixed-boundary equilibrium solve in later steps.
+- building toward a full fixed-boundary equilibrium solve.
 
 Notes
 -----
@@ -203,7 +203,7 @@ def _mask_grad_for_constraints(
     gZcos = gZcos.at[0, :].set(gZcos[0, :] * mask_m0)
     gZsin = gZsin.at[0, :].set(gZsin[0, :] * mask_m0)
 
-    # Lambda: optionally fix the axis row (older step-5 behavior).
+    # Lambda: optionally fix the axis row.
     if bool(mask_lambda_axis):
         gLcos = gLcos.at[0, :].set(0.0)
         gLsin = gLsin.at[0, :].set(0.0)
@@ -1120,7 +1120,7 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
 ) -> SolveVmecResidualResult:
     """Fixed-boundary solve by minimizing a VMEC-style force-residual objective.
 
-    The objective follows the Step-10 parity pipeline
+    The objective follows the parity pipeline
     ``bcovar -> forces -> tomnsps -> sum-of-squares of Fourier residual blocks``,
     using VMEC's ``getfsq`` conventions (post-``tomnsps`` ``scalxc`` scaling,
     optional converged-iteration m=1 constraints, and R/Z edge exclusion).
@@ -1582,7 +1582,7 @@ def solve_fixed_boundary_gn_vmec_residual(
 
     The residual vector uses the same conventions as `vmec_jax.vmec_residue`
     (post-`tomnsps` `scalxc` scaling, optional m=1 constraints, and R/Z edge
-    exclusion) so the objective is consistent with Step-10 scalar definitions.
+    exclusion) so the objective is consistent with the scalar residual definitions.
     """
     if not has_jax():
         raise ImportError("solve_fixed_boundary_gn_vmec_residual requires JAX (jax + jaxlib)")
@@ -1677,7 +1677,7 @@ def solve_fixed_boundary_gn_vmec_residual(
         dtype=jnp.asarray(state0.Rcos).dtype,
     )
 
-    # VMEC++ evolves the *decomposed* (scalxc-scaled) Fourier coefficients. Our
+    # VMEC evolves the *decomposed* (scalxc-scaled) Fourier coefficients. Our
     # `VMECState` stores physical coefficients, so convert decomposed-space
     # velocities/forces back to physical-space coefficient updates by dividing
     # by scalxc(m,s) before applying updates to `state`.
@@ -1984,7 +1984,7 @@ def solve_fixed_boundary_gn_vmec_residual(
     )
 
 
-def solve_fixed_boundary_vmecpp_iter(
+def solve_fixed_boundary_residual_iter(
     state0: VMECState,
     static,
     *,
@@ -2004,18 +2004,18 @@ def solve_fixed_boundary_vmecpp_iter(
     lambda_update_scale: float = 1.0,
     enforce_vmec_lambda_axis: bool = False,
     vmec2000_control: bool = False,
-    vmecpp_strict_update: bool = True,
-    vmecpp_backtracking: bool = False,
-    vmecpp_limit_dt_from_force: bool = False,
-    vmecpp_limit_update_rms: bool = False,
-    vmecpp_reference_mode: bool = False,
-    use_vmecpp_restart_triggers: bool | None = None,
+    strict_update: bool = True,
+    backtracking: bool = False,
+    limit_dt_from_force: bool = False,
+    limit_update_rms: bool = False,
+    reference_mode: bool = False,
+    use_restart_triggers: bool | None = None,
     use_direct_fallback: bool | None = None,
     verbose: bool = True,
 ) -> SolveVmecResidualResult:
-    """VMEC++-style fixed-point update loop using preconditioned force residuals."""
+    """VMEC-style fixed-point update loop using preconditioned force residuals."""
     if not has_jax():
-        raise ImportError("solve_fixed_boundary_vmecpp_iter requires JAX (jax + jaxlib)")
+        raise ImportError("solve_fixed_boundary_residual_iter requires JAX (jax + jaxlib)")
 
     max_iter = int(max_iter)
     if max_iter < 1:
@@ -2028,18 +2028,19 @@ def solve_fixed_boundary_vmecpp_iter(
     lambda_update_scale = float(lambda_update_scale)
     enforce_vmec_lambda_axis = bool(enforce_vmec_lambda_axis)
     vmec2000_control = bool(vmec2000_control)
-    vmecpp_reference_mode = bool(vmecpp_reference_mode)
-    if use_vmecpp_restart_triggers is None:
-        # VMEC++ restart triggers are generally stabilizing. Keep them on by
-        # default so the fixed-point update loop is robust during parity work.
-        use_vmecpp_restart_triggers = True
+    reference_mode = bool(reference_mode)
+    if use_restart_triggers is None:
+        # Restart triggers are generally stabilizing. Keep them on by default
+        # so the fixed-point update loop is robust during parity work.
+        use_restart_triggers = True
     if use_direct_fallback is None:
         use_direct_fallback = False
-    use_vmecpp_restart_triggers = bool(use_vmecpp_restart_triggers)
+    use_restart_triggers = bool(use_restart_triggers)
     use_direct_fallback = bool(use_direct_fallback)
-    vmecpp_limit_dt_from_force = bool(vmecpp_limit_dt_from_force)
-    vmecpp_limit_update_rms = bool(vmecpp_limit_update_rms)
-    vmecpp_backtracking = bool(vmecpp_backtracking)
+    limit_dt_from_force = bool(limit_dt_from_force)
+    limit_update_rms = bool(limit_update_rms)
+    backtracking = bool(backtracking)
+    strict_update = bool(strict_update)
 
     from .energy import flux_profiles_from_indata
     from .field import half_mesh_avg_from_full_mesh
@@ -2059,7 +2060,7 @@ def solve_fixed_boundary_vmecpp_iter(
     from .vmec_jacobian import vmec_half_mesh_jacobian_from_state
     from .vmec_tomnsp import TomnspsRZL, vmec_angle_grid, vmec_trig_tables
 
-    # VMEC++ (and VMEC2000) evaluate the force kernels on VMEC's internal
+    # VMEC2000 evaluates the force kernels on VMEC's internal
     # angle grid. In particular, when `lasym=False`, VMEC uses a reduced theta
     # grid (stellarator symmetry) for the force pipeline. Rebuild `static`
     # using `vmec_angle_grid(...)` so the force terms do not mix full-grid and
@@ -2164,10 +2165,10 @@ def solve_fixed_boundary_vmecpp_iter(
     def _apply_radial_tridi(a, alpha: float):
         if alpha <= 0.0:
             return a
-        return _tridi_smooth_dirichlet_vmecpp(jnp.asarray(a), alpha=alpha)
+        return _tridi_smooth_dirichlet(jnp.asarray(a), alpha=alpha)
 
-    def _tridi_smooth_dirichlet_vmecpp(rhs, *, alpha: float):
-        """Dirichlet tridiagonal smoother along s for VMEC++ fixed-point updates."""
+    def _tridi_smooth_dirichlet(rhs, *, alpha: float):
+        """Dirichlet tridiagonal smoother along s for fixed-point updates."""
         rhs = jnp.asarray(rhs)
         if rhs.ndim == 2:
             rhs2 = rhs
@@ -2223,7 +2224,7 @@ def solve_fixed_boundary_vmecpp_iter(
         return out
 
     def _metric_surface_precond_from_bcovar(bc):
-        """Approximate VMEC++ radial preconditioner scaling from bcovar metrics."""
+        """Approximate radial preconditioner scaling from bcovar metrics."""
         guu = jnp.asarray(bc.guu)
         r12 = jnp.asarray(bc.jac.r12)
         bsubu = jnp.asarray(bc.bsubu)
@@ -2276,20 +2277,20 @@ def solve_fixed_boundary_vmecpp_iter(
         sp[1] = sm[2] if ns >= 2 else 0.0
         return sm, sp
 
-    def _vmecpp_lambda_preconditioner(bc):
-        from .vmecpp_preconditioner_jax import vmecpp_lambda_preconditioner
+    def _lambda_preconditioner(bc):
+        from .preconditioner_1d_jax import lambda_preconditioner
 
-        return vmecpp_lambda_preconditioner(
+        return lambda_preconditioner(
             bc=bc,
             trig=trig,
             s=s,
             cfg=cfg,
         )
 
-    def _vmecpp_rz_preconditioner(frzl_in: TomnspsRZL, bc, k):
-        from .vmecpp_preconditioner_jax import vmecpp_rz_preconditioner
+    def _rz_preconditioner(frzl_in: TomnspsRZL, bc, k):
+        from .preconditioner_1d_jax import rz_preconditioner
 
-        return vmecpp_rz_preconditioner(
+        return rz_preconditioner(
             frzl_in=frzl_in,
             bc=bc,
             k=k,
@@ -2331,10 +2332,8 @@ def solve_fixed_boundary_vmecpp_iter(
         frzl = vmec_zero_m1_zforce(frzl=frzl, enabled=zero_m1)
         frzl = vmec_apply_scalxc_to_tomnsps(frzl=frzl, s=s)
 
-        # VMEC++ computes invariant residuals with an `includeEdgeRZForces` flag.
-        # Mimic that by optionally removing the LCFS contribution from the R/Z
-        # force arrays before forming gcr2/gcz2 (the lambda channel always keeps
-        # its full-domain residual in VMEC++).
+        # Optionally remove the LCFS contribution from the R/Z force arrays
+        # before forming gcr2/gcz2 (lambda always uses the full-domain residual).
         if not bool(include_edge):
             frzl = TomnspsRZL(
                 frcc=_zero_edge_rz(frzl.frcc),
@@ -2472,13 +2471,12 @@ def solve_fixed_boundary_vmecpp_iter(
         cs = jnp.asarray(cs) / scalxc_mn if cs is not None else None
         return _mn_sin_to_signed(sc, cs)
 
-    def _rz_norm_vmecpp(state: VMECState) -> Any:
-        """VMEC++ rzNorm (include_offset=false) in (m,n>=0) storage.
+    def _rz_norm(state: VMECState) -> Any:
+        """R/Z norm (exclude R(0,0) offset) in (m,n>=0) storage.
 
-        In VMEC++, fNorm1 is computed as 1/rzNorm where rzNorm is a plain
-        sum-of-squares over geometry Fourier coefficients in (m,n>=0) storage,
-        excluding the R(0,0) offset term. For parity with VMEC++'s serial
-        implementation, do not apply `scalxc` here.
+        This is a plain sum-of-squares over geometry Fourier coefficients in
+        (m,n>=0) storage, excluding the R(0,0) offset term. For parity with the
+        reference executable's norm conventions, do not apply `scalxc` here.
         """
         rpos = jnp.asarray(state.Rcos)[:, kp_idx]
         zpos = jnp.asarray(state.Zsin)[:, kp_idx]
@@ -2503,7 +2501,6 @@ def solve_fixed_boundary_vmecpp_iter(
             rss = rss * basis_norm
             zcs = zcs * basis_norm
 
-        # VMEC++ uses `nsMinHere = r_.nsMinF`. For the serial path this is 0.
         sl = slice(0, None)
 
         include_rcc = ((m_idx > 0) | (n_idx > 0))[None, :].astype(rcc.dtype)
@@ -2568,7 +2565,7 @@ def solve_fixed_boundary_vmecpp_iter(
     grad_rms_history = []
     step_history = []
 
-    # VMEC++-style time-stepping (conjugate-gradient-like) state.
+    # Conjugate-gradient-like time-stepping state.
     time_step = float(step_size)
     k_ndamp = 10
     inv_tau = [0.15 / time_step] * k_ndamp
@@ -2582,7 +2579,7 @@ def solve_fixed_boundary_vmecpp_iter(
     flip_sign = float(initial_flip_sign)
     max_coeff_delta_rms = 1e-5
     max_update_rms = 5e-3
-    if bool(vmecpp_reference_mode):
+    if bool(reference_mode):
         max_coeff_delta_rms = 5e-6
         max_update_rms = 1e-3
     ijacob = 0
@@ -2592,9 +2589,9 @@ def solve_fixed_boundary_vmecpp_iter(
     k_preconditioner_update_interval = 25
     state_checkpoint = state
     bad_growth_streak = 0
-    # VMEC++ RestartIteration factors (vmec.cc):
-    # - BAD_JACOBIAN: delt0r *= 0.9
-    # - BAD_PROGRESS: delt0r /= 1.03
+    # Restart trigger factors:
+    # - bad_jacobian: time_step *= 0.9
+    # - bad_progress: time_step /= 1.03
     restart_badjac_factor = 0.9
     restart_badprog_factor = 1.03
     huge_force_restart_count = 0
@@ -2602,8 +2599,8 @@ def solve_fixed_boundary_vmecpp_iter(
     res1 = -1.0
     vmec2000_fact = 1.0e4
 
-    # VMEC++ `includeEdgeRZForces` uses the *previous* iteration's residual
-    # (flow-control initializes forces to 1.0 in iter==1). Track that explicitly.
+    # Edge-force gating uses the *previous* iteration's residual (the first
+    # iteration initializes forces to 1.0). Track that explicitly.
     prev_rz_fsq = 2.0
 
     # VMEC2000 caches 1D preconditioner/norm/tcon updates every `ns4` iterations
@@ -2618,17 +2615,18 @@ def solve_fixed_boundary_vmecpp_iter(
     cache_l_scale = None
     cache_rz_norm = None
     cache_f_norm1 = None
-    cache_vmecpp_rz_mats = None
-    cache_vmecpp_rz_jmax = None
-    cache_vmecpp_lam_prec = None
+    cache_prec_rz_mats = None
+    cache_prec_rz_jmax = None
+    cache_prec_lam_prec = None
     bcovar_update_history: list[int] = []
 
     def _safe_dt_from_force(*, dt_nominal: float, frcc, frss, fzsc, fzcs, flsc, flcs) -> float:
         """Optional limiter for dt based on force magnitude.
 
-        VMEC++ uses `time_step` directly (with restart-trigger adjustments) and
-        does not apply a force-based dt limiter. Keep this behavior off by
-        default for parity; enable only as a stability crutch during debugging.
+        The reference iteration uses `time_step` directly (with restart-trigger
+        adjustments) and does not apply a force-based dt limiter. Keep this
+        behavior off by default for parity; enable only as a stability crutch
+        during debugging.
         """
         frcc = jnp.asarray(frcc)
         frss = jnp.asarray(frss) if frss is not None else jnp.zeros_like(frcc)
@@ -2656,7 +2654,7 @@ def solve_fixed_boundary_vmecpp_iter(
             fsqz_prev = float(fsqz2_history[-1]) if fsqz2_history else 1.0
             zero_m1 = 1.0 if (iter2 < 2) or (fsqz_prev < 1.0e-6) else 0.0
         else:
-            # VMEC++ heuristic (more conservative early in a restart window).
+            # A conservative heuristic early in a restart window.
             zero_m1 = 1.0 if (iter_since_restart < 2) or (len(fsqz2_history) and fsqz2_history[-1] < 1e-6) else 0.0
         zero_m1 = jnp.asarray(zero_m1, dtype=jnp.asarray(state.Rcos).dtype)
         include_edge = bool(iter_since_restart < 50) and (float(prev_rz_fsq) < 1e-6)
@@ -2695,19 +2693,19 @@ def solve_fixed_boundary_vmecpp_iter(
             cache_norms = norms_used
             cache_rz_scale = rz_scale
             cache_l_scale = l_scale
-            cache_rz_norm = _rz_norm_vmecpp(state)
+            cache_rz_norm = _rz_norm(state)
             cache_f_norm1 = jnp.where(
                 jnp.asarray(cache_rz_norm) != 0.0,
                 1.0 / jnp.asarray(cache_rz_norm),
                 jnp.asarray(float("inf"), dtype=jnp.asarray(cache_rz_norm).dtype),
             )
             if (not bool(cfg.lthreed)) and (not bool(cfg.lasym)):
-                from .vmecpp_preconditioner_jax import vmecpp_rz_preconditioner_matrices
+                from .preconditioner_1d_jax import rz_preconditioner_matrices
 
-                cache_vmecpp_lam_prec = _vmecpp_lambda_preconditioner(k.bc)
-                mats, _jmin, jmax = vmecpp_rz_preconditioner_matrices(bc=k.bc, k=k, trig=trig, s=s, cfg=cfg)
-                cache_vmecpp_rz_mats = mats
-                cache_vmecpp_rz_jmax = int(jmax)
+                cache_prec_lam_prec = _lambda_preconditioner(k.bc)
+                mats, _jmin, jmax = rz_preconditioner_matrices(bc=k.bc, k=k, trig=trig, s=s, cfg=cfg)
+                cache_prec_rz_mats = mats
+                cache_prec_rz_jmax = int(jmax)
             vmec2000_cache_valid = True
         fsqr_f = float(np.asarray(fsqr))
         fsqz_f = float(np.asarray(fsqz))
@@ -2721,38 +2719,38 @@ def solve_fixed_boundary_vmecpp_iter(
 
         if verbose:
             print(
-                f"[solve_fixed_boundary_vmecpp_iter] iter={it:03d} fsqr={fsqr_f:.3e} fsqz={fsqz_f:.3e} fsql={fsql_f:.3e} include_edge={include_edge}"
-            )
-        # VMEC++ terminates on invariant residuals (fsqr/fsqz/fsql), not fsq1.
+                    f"[solve_fixed_boundary_residual_iter] iter={it:03d} fsqr={fsqr_f:.3e} fsqz={fsqz_f:.3e} fsql={fsql_f:.3e} include_edge={include_edge}"
+                )
+        # Terminate on invariant residuals (fsqr/fsqz/fsql), not fsq1.
         if (fsqr_f <= ftol) and (fsqz_f <= ftol) and (fsql_f <= ftol):
             if verbose:
                 print(
-                    f"[solve_fixed_boundary_vmecpp_iter] converged: "
+                    f"[solve_fixed_boundary_residual_iter] converged: "
                     f"fsqr={fsqr_f:.3e} fsqz={fsqz_f:.3e} fsql={fsql_f:.3e} <= ftol={ftol:.3e}"
                 )
             break
 
-        # Precondition forces (VMEC++ axisymmetric preconditioner when available).
+        # Precondition forces (axisymmetric preconditioner when available).
         if (not bool(cfg.lthreed)) and (not bool(cfg.lasym)):
             if (
                 bool(vmec2000_control)
                 and bool(vmec2000_cache_valid)
-                and (cache_vmecpp_lam_prec is not None)
-                and (cache_vmecpp_rz_mats is not None)
-                and (cache_vmecpp_rz_jmax is not None)
+                and (cache_prec_lam_prec is not None)
+                and (cache_prec_rz_mats is not None)
+                and (cache_prec_rz_jmax is not None)
             ):
-                from .vmecpp_preconditioner_jax import vmecpp_rz_preconditioner_apply
+                from .preconditioner_1d_jax import rz_preconditioner_apply
 
-                lam_prec = cache_vmecpp_lam_prec
-                frzl_rz = vmecpp_rz_preconditioner_apply(
+                lam_prec = cache_prec_lam_prec
+                frzl_rz = rz_preconditioner_apply(
                     frzl_in=frzl,
-                    mats=cache_vmecpp_rz_mats,
-                    jmax=int(cache_vmecpp_rz_jmax),
+                    mats=cache_prec_rz_mats,
+                    jmax=int(cache_prec_rz_jmax),
                     cfg=cfg,
                 )
             else:
-                lam_prec = _vmecpp_lambda_preconditioner(k.bc)
-                frzl_rz = _vmecpp_rz_preconditioner(frzl, k.bc, k)
+                lam_prec = _lambda_preconditioner(k.bc)
+                frzl_rz = _rz_preconditioner(frzl, k.bc, k)
             frcc = jnp.asarray(frzl_rz.frcc)
             frss = frzl_rz.frss
             fzsc = jnp.asarray(frzl_rz.fzsc)
@@ -2794,7 +2792,7 @@ def solve_fixed_boundary_vmecpp_iter(
             flss=getattr(frzl, "flss", None),
         )
 
-        # Mode-diagonal preconditioning in VMEC++ (m, n>=0) storage.
+        # Mode-diagonal preconditioning in (m, n>=0) storage.
         w_mode_mn = _mode_diag_weights_mn(jnp.asarray(frcc).dtype)
         frcc_u = frcc * w_mode_mn[None, :, :]
         frss_u = (frss if frss is not None else jnp.zeros_like(frcc_u)) * w_mode_mn[None, :, :]
@@ -2817,7 +2815,7 @@ def solve_fixed_boundary_vmecpp_iter(
             # reliable proxy for VMEC's preconditioned convergence metrics.
             w_curr = float(fsqr_f + fsqz_f + fsql_f)
             # Use a probe step that is large enough to be numerically decisive,
-            # but still small relative to typical VMEC++ pseudo-time updates.
+            # but still small relative to typical pseudo-time updates.
             dt_probe = min(1e-2, 0.1 * float(time_step))
             dR_dir = dt_probe * _mn_cos_to_signed_physical(frcc_u, frss_u)
             dZ_dir = dt_probe * _mn_sin_to_signed_physical(fzsc_u, fzcs_u)
@@ -2846,11 +2844,11 @@ def solve_fixed_boundary_vmecpp_iter(
                 flip_sign = -1.0
                 if verbose:
                     print(
-                        "[solve_fixed_boundary_vmecpp_iter] flipping force sign "
+                        "[solve_fixed_boundary_residual_iter] flipping force sign "
                         f"(w_curr={w_curr:.3e} w_pos={w_pos:.3e} w_neg={w_neg:.3e})"
                     )
 
-        # VMEC++-style damping for the fixed-point update.
+        # Damping for the fixed-point update.
         gcr2_p, gcz2_p, gcl2_p = vmec_gcx2_from_tomnsps(
             frzl=frzl_pre,
             lconm1=bool(getattr(static.cfg, "lconm1", True)),
@@ -2863,7 +2861,7 @@ def solve_fixed_boundary_vmecpp_iter(
             rz_norm = jnp.asarray(cache_rz_norm)
             f_norm1 = jnp.asarray(cache_f_norm1)
         else:
-            rz_norm = _rz_norm_vmecpp(state)
+            rz_norm = _rz_norm(state)
             f_norm1 = jnp.where(rz_norm != 0.0, 1.0 / rz_norm, jnp.asarray(float("inf"), dtype=rz_norm.dtype))
         delta_s = jnp.asarray(s[1] - s[0], dtype=jnp.asarray(rz_norm).dtype)
         fsqr1 = gcr2_p * f_norm1
@@ -2942,22 +2940,22 @@ def solve_fixed_boundary_vmecpp_iter(
                 grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
                 continue
 
-        # --- VMEC++ time-step control trackers + optional restart triggers ---
+        # --- time-step control trackers + optional restart triggers ---
         fsq = fsqr_f + fsqz_f + fsql_f
-        fsq_res = fsq if bool(vmecpp_reference_mode) else fsq1
+        fsq_res = fsq if bool(reference_mode) else fsq1
         if (iter2 == iter1) or (res0 < 0.0):
             res0 = fsq_res
         res0_old = res0
         res0 = min(res0, fsq_res)
 
-        # VMEC++ stores a "good" checkpoint once residual has improved for many
+        # Store a "good" checkpoint once residual has improved for many
         # iterations since the last restart marker.
         if (not bool(vmec2000_control)) and (fsq1 <= res0_old) and ((iter2 - iter1) > 10):
             state_checkpoint = state
 
-        # VMEC++ restart triggers (bad progress / bad Jacobian proxy).
+        # Restart triggers (bad progress / bad Jacobian proxy).
         bad_jacobian = False
-        if bool(vmecpp_reference_mode) and bool(getattr(static.cfg, "lthreed", True)):
+        if bool(reference_mode) and bool(getattr(static.cfg, "lthreed", True)):
             jac = vmec_half_mesh_jacobian_from_state(state=state, modes=static.modes, trig=trig, s=s)
             tau = np.asarray(jac.tau)
             if tau.size:
@@ -2981,10 +2979,8 @@ def solve_fixed_boundary_vmecpp_iter(
             bad_growth_streak = 0
 
         huge_initial_forces = False
-        if bool(vmecpp_reference_mode):
-            # VMEC++ behavior (vmec.cc):
-            # - BAD_JACOBIAN if fsq > 100 * res0 and iter2 > iter1
-            # - BAD_PROGRESS if iter2 progression is large and fsqr+fsqz > 1e-2
+        if bool(reference_mode):
+            # Conservative restart logic used in the reference-mode trace.
             if bad_jacobian:
                 pre_restart_reason = "bad_jacobian"
             elif (iter2 > iter1) and (fsq > 100.0 * max(res0, 1e-30)):
@@ -3006,7 +3002,7 @@ def solve_fixed_boundary_vmecpp_iter(
             ):
                 pre_restart_reason = "bad_progress"
 
-        if use_vmecpp_restart_triggers and pre_restart_reason != "none":
+        if use_restart_triggers and pre_restart_reason != "none":
             state = state_checkpoint
             vRcc = jnp.zeros_like(vRcc)
             vRss = jnp.zeros_like(vRss)
@@ -3049,7 +3045,7 @@ def solve_fixed_boundary_vmecpp_iter(
             grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
             if verbose:
                 print(
-                    f"[solve_fixed_boundary_vmecpp_iter] iter={it:03d} "
+                    f"[solve_fixed_boundary_residual_iter] iter={it:03d} "
                     f"dt_eff=0.000e+00 update_rms=0.000e+00 "
                     f"fsqr1={fsqr1_f:.3e} fsqz1={fsqz1_f:.3e} fsql1={fsql1_f:.3e} "
                     f"step_status={step_status}"
@@ -3068,13 +3064,13 @@ def solve_fixed_boundary_vmecpp_iter(
         b1 = 1.0 - dtau
         fac = 1.0 / (1.0 + dtau)
 
-        if bool(vmecpp_strict_update):
-            # VMEC++ update semantics: one preconditioned momentum update per
+        if bool(strict_update):
+            # Strict update semantics: one preconditioned momentum update per
             # iteration in (m, n>=0) storage, no line-search accept/reject.
             w_curr = fsqr_f + fsqz_f + fsql_f
             state_backup = state
             dt_eff = float(time_step)
-            if bool(vmecpp_limit_dt_from_force):
+            if bool(limit_dt_from_force):
                 dt_eff = _safe_dt_from_force(
                     dt_nominal=time_step,
                     frcc=frcc_u,
@@ -3085,7 +3081,7 @@ def solve_fixed_boundary_vmecpp_iter(
                     flcs=flcs_u,
                 )
 
-            # VMEC++ semantics: v <- fac*(b1*v + dt*F), x <- x + dt*v.
+            # Momentum semantics: v <- fac*(b1*v + dt*F), x <- x + dt*v.
             # Do not drop the dt factor in the force term; otherwise updates
             # scale like O(dt) instead of O(dt^2) and can immediately blow up.
             force_scale = float(dt_eff)
@@ -3111,7 +3107,7 @@ def solve_fixed_boundary_vmecpp_iter(
                     )
                 )
             )
-            if bool(vmecpp_limit_update_rms) and np.isfinite(update_rms) and (update_rms > max_update_rms):
+            if bool(limit_update_rms) and np.isfinite(update_rms) and (update_rms > max_update_rms):
                 scl = max_update_rms / max(update_rms, 1e-30)
                 vRcc = vRcc * scl
                 vRss = vRss * scl
@@ -3165,12 +3161,13 @@ def solve_fixed_boundary_vmecpp_iter(
             w_try = float(np.asarray(fsqr_t + fsqz_t + fsql_t))
             w_try_ratio = w_try / max(w_curr, 1e-30) if np.isfinite(w_try) else float("inf")
 
-            # VMEC++ is typically stable under its restart triggers, but our
-            # parity-path preconditioners are still evolving. Add a small,
+            # The reference iteration is typically stable under its restart
+            # triggers, but our parity-path preconditioners are still evolving.
+            # Add a small,
             # bounded backtracking on the position update (not the force
             # evaluation) to prevent systematic residual growth.
             alpha = 1.0
-            accept_ratio = 1.001 if vmecpp_backtracking else float("inf")
+            accept_ratio = 1.001 if backtracking else float("inf")
             if np.isfinite(w_try) and (w_try > accept_ratio * max(w_curr, 1e-30)):
                 for _ in range(8):
                     alpha *= 0.5
@@ -3299,7 +3296,7 @@ def solve_fixed_boundary_vmecpp_iter(
                             )
                         )
                     else:
-                        # VMEC++ RestartIteration-style rollback + zero velocity.
+                        # Roll back state and zero velocity.
                         state = state_backup
                         vRcc = jnp.zeros_like(vRcc)
                         vRss = jnp.zeros_like(vRss)
@@ -3323,7 +3320,7 @@ def solve_fixed_boundary_vmecpp_iter(
                             restart_reason = "bad_progress"
                             step_status = "restart_bad_progress"
                             restart_path = "catastrophic_growth"
-                        # VMEC++ adjusts delt0r at reset milestones.
+                        # Adjust time_step at reset milestones.
                         if ijacob in (25, 50):
                             scale = 0.98 if ijacob < 50 else 0.96
                             time_step = max(scale * float(step_size), 1e-12)
@@ -3331,7 +3328,7 @@ def solve_fixed_boundary_vmecpp_iter(
                         iter1 = iter2
                         update_rms = 0.0
                 else:
-                    # VMEC++ RestartIteration-style rollback + zero velocity.
+                    # Roll back state and zero velocity.
                     state = state_backup
                     vRcc = jnp.zeros_like(vRcc)
                     vRss = jnp.zeros_like(vRss)
@@ -3354,7 +3351,7 @@ def solve_fixed_boundary_vmecpp_iter(
                         restart_reason = "bad_progress"
                         step_status = "restart_bad_progress"
                         restart_path = "catastrophic_growth"
-                    # VMEC++ adjusts delt0r at reset milestones.
+                    # Adjust time_step at reset milestones.
                     if ijacob in (25, 50):
                         scale = 0.98 if ijacob < 50 else 0.96
                         time_step = max(scale * float(step_size), 1e-12)
@@ -3467,7 +3464,7 @@ def solve_fixed_boundary_vmecpp_iter(
         update_rms_history.append(float(update_rms))
         if verbose:
             print(
-                f"[solve_fixed_boundary_vmecpp_iter] iter={it:03d} "
+                f"[solve_fixed_boundary_residual_iter] iter={it:03d} "
                 f"dt_eff={dt_eff:.3e} update_rms={update_rms:.3e} "
                 f"fsqr1={fsqr1_f:.3e} fsqz1={fsqz1_f:.3e} fsql1={fsql1_f:.3e} "
                 f"step_status={step_status}"
@@ -3487,9 +3484,9 @@ def solve_fixed_boundary_vmecpp_iter(
         "step_size": float(step_size),
         "precond_radial_alpha": float(precond_radial_alpha),
         "precond_lambda_alpha": float(precond_lambda_alpha),
-        "vmecpp_strict_update": bool(vmecpp_strict_update),
-        "vmecpp_reference_mode": bool(vmecpp_reference_mode),
-        "use_vmecpp_restart_triggers": bool(use_vmecpp_restart_triggers),
+        "strict_update": bool(strict_update),
+        "reference_mode": bool(reference_mode),
+        "use_restart_triggers": bool(use_restart_triggers),
         "use_direct_fallback": bool(use_direct_fallback),
         "max_update_rms": float(max_update_rms),
         "ijacob": int(ijacob),
@@ -3539,7 +3536,7 @@ def solve_fixed_boundary_vmecpp_iter(
     )
 
 
-def vmecpp_first_step_diagnostics(
+def first_step_diagnostics(
     state0: VMECState,
     static,
     *,
@@ -3553,16 +3550,16 @@ def vmecpp_first_step_diagnostics(
     mode_diag_exponent: float = 1.0,
     include_edge: bool = True,
     zero_m1: bool = True,
-    use_vmecpp_precond: bool = False,
+    use_axisymmetric_preconditioner: bool = False,
 ) -> Dict[str, Any]:
-    """Return a VMEC++-style first-step diagnostic bundle.
+    """Return a first-step diagnostic bundle (single force/precondition/update eval).
 
     This computes the initial forces, preconditioned residuals, time-step
     scalings, and the resulting first-step coefficient updates without
     running an iterative solve.
     """
     if not has_jax():
-        raise ImportError("vmecpp_first_step_diagnostics requires JAX (jax + jaxlib)")
+        raise ImportError("first_step_diagnostics requires JAX (jax + jaxlib)")
 
     from .energy import flux_profiles_from_indata
     from .field import half_mesh_avg_from_full_mesh
@@ -3621,8 +3618,7 @@ def vmecpp_first_step_diagnostics(
         dtype=jnp.asarray(state0.Rcos).dtype,
     )
     if not bool(wout_like.lasym):
-        # VMEC++ zeroes m=1 Z-force only when lasym=True. For lasym=False,
-        # keep Z-force intact in the first-step diagnostic.
+        # For lasym=False keep Z-force intact in the first-step diagnostic.
         zero_m1 = False
 
     constraint_tcon0: float | None = None
@@ -3736,20 +3732,20 @@ def vmecpp_first_step_diagnostics(
         sp[1] = sm[2] if ns >= 2 else 0.0
         return sm, sp
 
-    def _vmecpp_lambda_preconditioner(bc):
-        from .vmecpp_preconditioner_jax import vmecpp_lambda_preconditioner
+    def _lambda_preconditioner(bc):
+        from .preconditioner_1d_jax import lambda_preconditioner
 
-        return vmecpp_lambda_preconditioner(
+        return lambda_preconditioner(
             bc=bc,
             trig=trig,
             s=s,
             cfg=cfg,
         )
 
-    def _vmecpp_rz_preconditioner(frzl_in: TomnspsRZL, bc, k):
-        from .vmecpp_preconditioner_jax import vmecpp_rz_preconditioner
+    def _rz_preconditioner(frzl_in: TomnspsRZL, bc, k):
+        from .preconditioner_1d_jax import rz_preconditioner
 
-        return vmecpp_rz_preconditioner(
+        return rz_preconditioner(
             frzl_in=frzl_in,
             bc=bc,
             k=k,
@@ -3824,9 +3820,9 @@ def vmecpp_first_step_diagnostics(
     k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale, g_raw = _compute_forces(state0)
     gcr2_raw, gcz2_raw, gcl2_raw = g_raw
 
-    if bool(use_vmecpp_precond) and (not bool(cfg.lthreed)) and (not bool(cfg.lasym)):
-        lam_prec = _vmecpp_lambda_preconditioner(k.bc)
-        frzl_pre = _vmecpp_rz_preconditioner(frzl, k.bc, k)
+    if bool(use_axisymmetric_preconditioner) and (not bool(cfg.lthreed)) and (not bool(cfg.lasym)):
+        lam_prec = _lambda_preconditioner(k.bc)
+        frzl_pre = _rz_preconditioner(frzl, k.bc, k)
         frcc = jnp.asarray(frzl_pre.frcc)
         frss = frzl_pre.frss
         fzsc = jnp.asarray(frzl_pre.fzsc)

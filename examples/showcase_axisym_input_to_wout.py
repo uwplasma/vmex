@@ -152,7 +152,7 @@ def main() -> None:
     p.add_argument(
         "--solver",
         default="vmec2000_iter",
-        choices=["vmec2000_iter", "vmecpp_iter", "vmec_gn", "gd", "lbfgs"],
+        choices=["vmec2000_iter", "vmec_gn", "gd", "lbfgs"],
     )
     p.add_argument("--max-iter", type=int, default=30)
     p.add_argument(
@@ -173,7 +173,7 @@ def main() -> None:
     data_dir = examples_dir / "data"
 
     if args.suite:
-        cases = ["circular_tokamak", "shaped_tokamak_pressure", "vmecpp_solovev"]
+        cases = ["circular_tokamak", "shaped_tokamak_pressure", "solovev"]
         out_root = Path(args.outdir) if args.outdir else (examples_dir / "outputs" / "showcase" / "axisym_suite")
     else:
         cases = [str(args.case)]

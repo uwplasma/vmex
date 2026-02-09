@@ -1,7 +1,8 @@
-"""JAX ports of VMEC++ preconditioner operators (axisymmetric path).
+"""JAX ports of VMEC2000 1D (radial) preconditioner operators (axisymmetric path).
 
-This module mirrors the reference NumPy implementation in :mod:`vmec_jax.vmecpp_preconditioner`,
-but uses JAX arrays/ops so the fixed-point update loop stays JIT-able and differentiable.
+This module mirrors the reference NumPy implementation in
+:mod:`vmec_jax.preconditioner_1d`, but uses JAX arrays/ops so the fixed-point
+update loop stays JIT-able and differentiable.
 """
 
 from __future__ import annotations
@@ -44,7 +45,7 @@ def _sm_sp_from_profiles(sqrt_sf, sqrt_sh) -> tuple[Any, Any]:
     return sm, sp
 
 
-def _vmecpp_wint_from_config(*, cfg, dtype) -> Any:
+def _wint_from_config(*, cfg, dtype) -> Any:
     ntheta = int(cfg.ntheta)
     nzeta = int(cfg.nzeta)
     lasym = bool(cfg.lasym)
@@ -65,7 +66,7 @@ def _vmecpp_wint_from_config(*, cfg, dtype) -> Any:
     return w_int
 
 
-def vmecpp_lambda_preconditioner(
+def lambda_preconditioner(
     *,
     bc,
     trig,
@@ -73,7 +74,7 @@ def vmecpp_lambda_preconditioner(
     cfg,
     damping_factor: float = 2.0,
 ) -> Any:
-    """Compute the VMEC++ lambda preconditioner (n>=0 storage) in JAX.
+    """Compute the VMEC lambda preconditioner (n>=0 storage) in JAX.
 
     Parameters
     ----------
@@ -88,7 +89,7 @@ def vmecpp_lambda_preconditioner(
     cfg:
         VMEC configuration (mpol/ntor/nfp/ntheta/nzeta/lasym/lthreed).
     damping_factor:
-        VMEC++ uses 2.0 in fixed-boundary mode.
+        Damping used in the diagonal lambda preconditioner.
     """
     del trig
     s = jnp.asarray(s)
@@ -109,7 +110,7 @@ def vmecpp_lambda_preconditioner(
     guv_h = guv[1:]
     gvv_h = gvv[1:]
     gsqrt_h = gsqrt[1:]
-    w_int = _vmecpp_wint_from_config(cfg=cfg, dtype=dtype)
+    w_int = _wint_from_config(cfg=cfg, dtype=dtype)
 
     w3 = w_int[None, :, None]
     gsqrt_safe = jnp.where(gsqrt_h != 0.0, gsqrt_h, 1.0)
@@ -130,7 +131,7 @@ def vmecpp_lambda_preconditioner(
     c_lambda = c_lambda.at[0].set(c_lambda[1])
     d_lambda = d_lambda.at[0].set(d_lambda[1])
 
-    # Average onto the forces full-grid (jf=1..ns_full-1); leave boundary unset (VMEC++).
+    # Average onto the forces full-grid (jf=1..ns_full-1); leave boundary unset.
     b_full = jnp.zeros((ns_full,), dtype=dtype)
     c_full = jnp.zeros((ns_full,), dtype=dtype)
     d_full = jnp.zeros((ns_full,), dtype=dtype)
@@ -185,7 +186,7 @@ def _compute_preconditioning_matrix(
     delta_s: Any,
     ns_full: int | None = None,
 ) -> tuple[Any, Any, Any, Any, Any]:
-    """JAX port of VMEC++ `compute_preconditioning_matrix` (axisymmetric)."""
+    """JAX port of VMEC `precondn` matrix assembly (axisymmetric subset)."""
     xs = jnp.asarray(xs)
     xu12 = jnp.asarray(xu12)
     xu_e = jnp.asarray(xu_e)
@@ -276,7 +277,7 @@ def _compute_preconditioning_matrix(
     return axm, axd, bxm, bxd, cxd
 
 
-def vmecpp_rz_preconditioner_matrices(
+def rz_preconditioner_matrices(
     *,
     bc,
     k,
@@ -284,15 +285,15 @@ def vmecpp_rz_preconditioner_matrices(
     s,
     cfg,
 ) -> tuple[dict[str, Any], Any, int]:
-    """Return VMEC++-style axisymmetric R/Z preconditioner matrices (JAX)."""
+    """Return axisymmetric R/Z preconditioner matrices (JAX)."""
     del trig
     if bool(cfg.lthreed) or bool(cfg.lasym):
-        raise ValueError("vmecpp_rz_preconditioner_matrices only supports axisym.")
+        raise ValueError("rz_preconditioner_matrices only supports axisym.")
     s = jnp.asarray(s)
     ns = int(s.shape[0])
     ns_f = max(ns - 1, 1)
     dtype = jnp.asarray(bc.guu).dtype
-    w_int = _vmecpp_wint_from_config(cfg=cfg, dtype=dtype)
+    w_int = _wint_from_config(cfg=cfg, dtype=dtype)
 
     r12 = jnp.asarray(bc.jac.r12, dtype=dtype)[1:]
     tau = jnp.asarray(bc.jac.tau, dtype=dtype)[1:]
@@ -369,7 +370,7 @@ def vmecpp_rz_preconditioner_matrices(
         br = br.at[1:].set(-(arm_m[:-1, :, None] + brm_m[:-1, :, None] * m2))
         bz = bz.at[1:].set(-(azm_m[:-1, :, None] + bzm_m[:-1, :, None] * m2))
 
-    # VMEC++ sets matrices to 0 for jf < jmin(m,n).
+    # Set matrices to 0 for jf < jmin(m,n).
     if ns_f > 0 and mpol > 1:
         ar = ar.at[0, 1:, :].set(0.0)
         az = az.at[0, 1:, :].set(0.0)
@@ -388,7 +389,7 @@ def vmecpp_rz_preconditioner_matrices(
 
 
 def _tridi_solve_batched_jmin0(a, d, b, rhs) -> Any:
-    """Batched Thomas solve for a/d/b with jmin=0 (axisymmetric VMEC++)."""
+    """Batched Thomas solve for a/d/b with jmin=0 (axisymmetric)."""
     a = jnp.asarray(a)
     d = jnp.asarray(d)
     b = jnp.asarray(b)
@@ -435,16 +436,16 @@ def _tridi_solve_batched_jmin0(a, d, b, rhs) -> Any:
     return x_out
 
 
-def vmecpp_rz_preconditioner_apply(
+def rz_preconditioner_apply(
     *,
     frzl_in: TomnspsRZL,
     mats: dict[str, Any],
     jmax: int,
     cfg,
 ) -> TomnspsRZL:
-    """Apply cached VMEC++ axisymmetric R/Z preconditioner matrices.
+    """Apply cached axisymmetric R/Z preconditioner matrices.
 
-    This is the matrix-application half of :func:`vmecpp_rz_preconditioner`,
+    This is the matrix-application half of :func:`rz_preconditioner`,
     split out so callers (e.g. VMEC2000-style cached preconditioners) can
     reuse matrices across iterations without recomputing them.
     """
@@ -514,7 +515,7 @@ def vmecpp_rz_preconditioner_apply(
     )
 
 
-def vmecpp_rz_preconditioner(
+def rz_preconditioner(
     *,
     frzl_in: TomnspsRZL,
     bc,
@@ -523,8 +524,8 @@ def vmecpp_rz_preconditioner(
     s,
     cfg,
 ) -> TomnspsRZL:
-    """Apply the VMEC++ axisymmetric R/Z radial preconditioner in JAX."""
+    """Apply the axisymmetric R/Z radial preconditioner in JAX."""
     if bool(cfg.lthreed) or bool(cfg.lasym):
         return frzl_in
-    mats, _jmin, jmax = vmecpp_rz_preconditioner_matrices(bc=bc, k=k, trig=trig, s=s, cfg=cfg)
-    return vmecpp_rz_preconditioner_apply(frzl_in=frzl_in, mats=mats, jmax=jmax, cfg=cfg)
+    mats, _jmin, jmax = rz_preconditioner_matrices(bc=bc, k=k, trig=trig, s=s, cfg=cfg)
+    return rz_preconditioner_apply(frzl_in=frzl_in, mats=mats, jmax=jmax, cfg=cfg)

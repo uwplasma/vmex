@@ -98,7 +98,7 @@ def _bool_from_nc(x: Any) -> bool:
 
 
 def read_wout(path: str | Path) -> WoutData:
-    """Read a subset of `wout_*.nc` needed for step-4 regressions."""
+    """Read a subset of `wout_*.nc` needed for regression comparisons."""
     path = Path(path)
     try:
         import netCDF4  # type: ignore

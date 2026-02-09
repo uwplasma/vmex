@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# Step-10 parity regression: VMEC-style forces/tomnsps/getfsq.
+# Scalar residual parity regression: VMEC-style forces/tomnsps/getfsq.
 
 from pathlib import Path
 
@@ -25,11 +25,11 @@ from vmec_jax.wout import read_wout, state_from_wout
     "case_name,input_rel,wout_rel,rtol_rz,rtol_l",
     [
         # Keep CI fast: one axisymmetric reference case is enough to catch
-        # convention regressions in the Step-10 scalar pipeline.
+        # convention regressions in the scalar residual pipeline.
         ("circular_tokamak", "examples/data/input.circular_tokamak", "examples/data/wout_circular_tokamak_reference.nc", 1e-3, 1e-4),
     ],
 )
-def test_step10_getfsq_parity_against_wout(case_name: str, input_rel: str, wout_rel: str, rtol_rz: float, rtol_l: float):
+def test_getfsq_parity_against_wout(case_name: str, input_rel: str, wout_rel: str, rtol_rz: float, rtol_l: float):
     pytest.importorskip("netCDF4")
 
     root = Path(__file__).resolve().parents[1]

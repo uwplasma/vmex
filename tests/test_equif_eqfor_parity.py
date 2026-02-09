@@ -19,7 +19,7 @@ from vmec_jax.wout import read_wout, state_from_wout
         ("examples/data/input.circular_tokamak", "examples/data/wout_circular_tokamak_reference.nc"),
     ],
 )
-def test_step10_equif_matches_eqfor_normalization(input_rel: str, wout_rel: str):
+def test_equif_matches_eqfor_normalization(input_rel: str, wout_rel: str):
     """Reproduce VMEC2000 `eqfor.f` normalization for the `equif` diagnostic.
 
     `vmec_jax.vmec_lforbal.equif_from_bcovar` computes the *raw* `equif` from
