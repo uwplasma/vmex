@@ -1990,6 +1990,7 @@ def solve_fixed_boundary_vmecpp_iter(
     *,
     indata,
     signgs: int,
+    ftol: float | None = None,
     max_iter: int = 50,
     step_size: float = 1.0,
     initial_flip_sign: float = 1.0,
@@ -1999,6 +2000,8 @@ def solve_fixed_boundary_vmecpp_iter(
     precond_lambda_alpha: float = 0.5,
     mode_diag_exponent: float = 1.0,
     auto_flip_force: bool = True,
+    divide_by_scalxc_for_update: bool = True,
+    lambda_update_scale: float = 1.0,
     vmecpp_strict_update: bool = True,
     vmecpp_backtracking: bool = False,
     vmecpp_limit_dt_from_force: bool = False,
@@ -2020,6 +2023,7 @@ def solve_fixed_boundary_vmecpp_iter(
         raise ValueError("step_size must be positive")
 
     signgs = int(signgs)
+    lambda_update_scale = float(lambda_update_scale)
     vmecpp_reference_mode = bool(vmecpp_reference_mode)
     if use_vmecpp_restart_triggers is None:
         # VMEC++ restart triggers are generally stabilizing. Keep them on by
@@ -2098,14 +2102,13 @@ def solve_fixed_boundary_vmecpp_iter(
         lasym=bool(wout_like.lasym),
         dtype=jnp.asarray(state0.Rcos).dtype,
     )
+    lambda_update_scale_j = jnp.asarray(lambda_update_scale, dtype=jnp.asarray(state0.Rcos).dtype)
 
-    # VMEC++ evolves the *decomposed* (scalxc-scaled) Fourier coefficients.
-    # Our `VMECState` stores physical coefficients. Since all preconditioned
-    # forces/velocities here are in decomposed coefficient space, convert back
-    # to physical-space coefficient updates by dividing by scalxc(m,s) when
-    # mapping (m,n>=0) arrays into signed-helical state storage.
-    scalxc = vmec_scalxc_from_s(s=s, mpol=int(static.cfg.mpol))  # (ns, mpol)
-    scalxc_mn = scalxc[:, :, None]  # (ns, mpol, ntor+1)
+    # VMEC stores physical Fourier coefficients in `xc`, but uses a `scalxc`
+    # factor to represent odd-m modes internally in 1/sqrt(s) form. The force
+    # pipeline applies `scalxc` after `tomnsps` (see `funct3d.f: gc = gc*scalxc`)
+    # so the residual/preconditioner updates operate in the same physical
+    # coefficient space as `VMECState`.
 
     edge_Rcos = jnp.asarray(state0.Rcos)[-1, :]
     edge_Rsin = jnp.asarray(state0.Rsin)[-1, :]
@@ -2358,6 +2361,19 @@ def solve_fixed_boundary_vmecpp_iter(
     has_kn = jnp.asarray(has_kn_np)
     has_kn_any = bool(np.any(has_kn_np))
 
+    # VMEC internal Fourier coefficients live in a basis scaled by fixaray's
+    # (mscale, nscale) factors. VMEC's external (wout/physical) coefficients are:
+    #   A_ext = (mscale(m) * nscale(|n|)) * A_int
+    # See `VMEC2000/Sources/General/convert.f`.
+    #
+    # The VMEC residual pipeline (`tomnsps` -> `residue` -> `evolve`) operates on
+    # the *internal* coefficients. Since `VMECState` stores physical coefficients,
+    # we must apply this scale when mapping VMEC-style (m, n>=0) blocks back into
+    # signed physical coefficient vectors for updates.
+    mscale = jnp.asarray(trig.mscale, dtype=jnp.asarray(state0.Rcos).dtype)
+    nscale = jnp.asarray(trig.nscale, dtype=jnp.asarray(state0.Rcos).dtype)
+    mode_scale_mn = (mscale[m_idx] * nscale[n_idx]).astype(jnp.asarray(state0.Rcos).dtype)  # (P,)
+
     def _mn_cos_to_signed(cc, ss):
         cc = jnp.asarray(cc)
         ss = jnp.asarray(ss) if ss is not None else jnp.zeros_like(cc)
@@ -2367,11 +2383,11 @@ def solve_fixed_boundary_vmecpp_iter(
         ss_mn = ss[:, m_idx, n_idx]
         is_axis_m = (m_idx == 0)[None, :]
         is_n0 = (n_idx == 0)[None, :]
-        pos = jnp.where(is_axis_m | is_n0, cc_mn, 0.5 * (cc_mn + ss_mn))
+        pos = jnp.where(is_axis_m | is_n0, cc_mn, 0.5 * (cc_mn + ss_mn)) * mode_scale_mn[None, :]
         out = jnp.zeros((cc.shape[0], ncoeff), dtype=cc.dtype)
         out = out.at[:, kp_idx].set(pos)
         if has_kn_any:
-            neg = 0.5 * (cc_mn + (-ss_mn))
+            neg = 0.5 * (cc_mn + (-ss_mn)) * mode_scale_mn[None, :]
             out = out.at[:, kn_idx[has_kn]].set(neg[:, has_kn])
         return out
 
@@ -2383,21 +2399,27 @@ def solve_fixed_boundary_vmecpp_iter(
         sc_mn = sc[:, m_idx, n_idx]
         cs_mn = cs[:, m_idx, n_idx]
         is_n0 = (n_idx == 0)[None, :]
-        pos = jnp.where(is_n0, sc_mn, 0.5 * (sc_mn - cs_mn))
+        pos = jnp.where(is_n0, sc_mn, 0.5 * (sc_mn - cs_mn)) * mode_scale_mn[None, :]
         out = jnp.zeros((sc.shape[0], ncoeff), dtype=sc.dtype)
         out = out.at[:, kp_idx].set(pos)
         if has_kn_any:
-            neg = 0.5 * (sc_mn + cs_mn)
+            neg = 0.5 * (sc_mn + cs_mn) * mode_scale_mn[None, :]
             out = out.at[:, kn_idx[has_kn]].set(neg[:, has_kn])
         return out
 
+    scalxc_mn = vmec_scalxc_from_s(s=s, mpol=int(static.cfg.mpol)).astype(jnp.asarray(state0.Rcos).dtype)[:, :, None]
+    if not bool(divide_by_scalxc_for_update):
+        scalxc_mn = jnp.ones_like(scalxc_mn)
+
     def _mn_cos_to_signed_physical(cc, ss):
-        # Inputs are in decomposed (scalxc-scaled) coefficient space.
-        return _mn_cos_to_signed(jnp.asarray(cc) / scalxc_mn, jnp.asarray(ss) / scalxc_mn)
+        cc = jnp.asarray(cc) / scalxc_mn
+        ss = jnp.asarray(ss) / scalxc_mn if ss is not None else None
+        return _mn_cos_to_signed(cc, ss)
 
     def _mn_sin_to_signed_physical(sc, cs):
-        # Inputs are in decomposed (scalxc-scaled) coefficient space.
-        return _mn_sin_to_signed(jnp.asarray(sc) / scalxc_mn, jnp.asarray(cs) / scalxc_mn)
+        sc = jnp.asarray(sc) / scalxc_mn
+        cs = jnp.asarray(cs) / scalxc_mn if cs is not None else None
+        return _mn_sin_to_signed(sc, cs)
 
     def _rz_norm_vmecpp(state: VMECState) -> Any:
         """VMEC++ rzNorm (include_offset=false) in (m,n>=0) storage.
@@ -2457,7 +2479,7 @@ def solve_fixed_boundary_vmecpp_iter(
         idx00=idx00,
     )
 
-    ftol = float(indata.get_float("FTOL", 1e-10))
+    ftol = float(indata.get_float("FTOL", 1e-10)) if ftol is None else float(ftol)
 
     w_history = []
     fsqr2_history = []
@@ -2642,6 +2664,14 @@ def solve_fixed_boundary_vmecpp_iter(
         fzcs_u = (fzcs if fzcs is not None else jnp.zeros_like(fzsc_u)) * w_mode_mn[None, :, :]
         flsc_u = flsc * w_mode_mn[None, :, :]
         flcs_u = (flcs if flcs is not None else jnp.zeros_like(flsc_u)) * w_mode_mn[None, :, :]
+
+        # VMEC's lambda coefficients can be expressed in multiple scaling
+        # conventions (e.g. restart vs. `wout` vs. internal). Allow parity drivers
+        # to apply a constant scale to the lambda residual channel before mapping
+        # it into coefficient updates.
+        if lambda_update_scale != 1.0:
+            flsc_u = flsc_u * lambda_update_scale_j
+            flcs_u = flcs_u * lambda_update_scale_j
 
         if auto_flip_force and it == 0:
             # Choose force direction by a tiny trial step on the VMEC residual
