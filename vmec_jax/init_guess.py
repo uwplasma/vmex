@@ -1,20 +1,15 @@
 """Initial guess construction.
 
-VMEC has a fairly elaborate procedure to build an initial nested set of
-surfaces from the boundary (and/or axis) Fourier coefficients.
+VMEC builds its initial nested flux surfaces in `profil3d`, starting from
+boundary Fourier coefficients and (optionally) axis curves. The logic is:
 
-This module implements a *regularity-aware* but intentionally simple guess that
-is good enough to exercise the full (s,theta,zeta) geometry kernel:
+- For m>0 harmonics, scale boundary coefficients like rho**m with rho = sqrt(s).
+- For m=0 harmonics, blend linearly between axis and boundary values in s.
+- Lambda coefficients start at zero.
 
-- For m>0 harmonics, scale boundary coefficients like rho**m with rho = sqrt(s)
-  to enforce regularity at the magnetic axis.
-- For m=0 harmonics, scale with s and, if axis coefficients are provided,
-  linearly blend between the axis and the boundary.
-- lambda coefficients are initialized to zero.
-
-This guess is not intended to match VMEC's exact internal initial guess yet.
-It is a stable, differentiable starting point that we can later improve while
-keeping the geometry/transform kernels unchanged.
+This module mirrors the `profil3d` behavior in VMEC2000 (external coefficient
+convention, i.e. wout-like), while keeping the code path differentiable and
+compatible with the rest of the JAX pipeline.
 """
 
 from __future__ import annotations
@@ -232,36 +227,62 @@ def _undo_m1_constraint_for_recompute(static: VMECStatic, boundary: BoundaryCoef
     return BoundaryCoeffs(R_cos=R_cos, R_sin=R_sin, Z_cos=Z_cos, Z_sin=Z_sin)
 
 
-def _blend_axis_m0(
+def _blend_axis_m0_full(
     *,
     static: VMECStatic,
     s,
     Rcos,
+    Rsin,
+    Zcos,
     Zsin,
     Rcos_b,
+    Rsin_b,
+    Zcos_b,
     Zsin_b,
     raxis_cc,
+    raxis_cs,
+    zaxis_cc,
     zaxis_cs,
 ):
-    """Blend m=0 modes between axis and boundary (VMEC convention)."""
+    """Blend m=0 modes between axis and boundary (profil3d convention)."""
     m0_mask = static.modes.m == 0
+    blend = s
     for n in range(static.cfg.ntor + 1):
         k_candidates = jnp.where(m0_mask & (static.modes.n == n))[0]
         if k_candidates.size == 0:
             continue
         k = int(k_candidates[0])
-        blend = s
-        new_R = (1.0 - blend) * raxis_cc[n] + blend * Rcos_b[0, k]
-        new_Z = (1.0 - blend) * zaxis_cs[n] + blend * Zsin_b[0, k]
+
+        # profil3d axis sign conventions:
+        #   rcc -> +raxis_cc
+        #   rcs -> -raxis_cs
+        #   zcc -> +zaxis_cc
+        #   zcs -> -zaxis_cs
+        ax_Rcos = raxis_cc[n]
+        ax_Rsin = -raxis_cs[n]
+        ax_Zcos = zaxis_cc[n]
+        ax_Zsin = -zaxis_cs[n]
+
+        new_Rcos = (1.0 - blend) * ax_Rcos + blend * Rcos_b[0, k]
+        new_Rsin = (1.0 - blend) * ax_Rsin + blend * Rsin_b[0, k]
+        new_Zcos = (1.0 - blend) * ax_Zcos + blend * Zcos_b[0, k]
+        new_Zsin = (1.0 - blend) * ax_Zsin + blend * Zsin_b[0, k]
+
         if has_jax():
-            Rcos = Rcos.at[:, k].set(new_R)
-            Zsin = Zsin.at[:, k].set(new_Z)
+            Rcos = Rcos.at[:, k].set(new_Rcos)
+            Rsin = Rsin.at[:, k].set(new_Rsin)
+            Zcos = Zcos.at[:, k].set(new_Zcos)
+            Zsin = Zsin.at[:, k].set(new_Zsin)
         else:
             Rcos = jnp.array(Rcos)
+            Rsin = jnp.array(Rsin)
+            Zcos = jnp.array(Zcos)
             Zsin = jnp.array(Zsin)
-            Rcos[:, k] = new_R
-            Zsin[:, k] = new_Z
-    return Rcos, Zsin
+            Rcos[:, k] = new_Rcos
+            Rsin[:, k] = new_Rsin
+            Zcos[:, k] = new_Zcos
+            Zsin[:, k] = new_Zsin
+    return Rcos, Rsin, Zcos, Zsin
 
 
 def _recompute_axis_from_boundary(
@@ -537,9 +558,7 @@ def initial_guess_from_boundary(
     Zcos_b = jnp.asarray(boundary_use.Z_cos, dtype=dtype)[None, :]
     Zsin_b = jnp.asarray(boundary_use.Z_sin, dtype=dtype)[None, :]
 
-    # Regularity scaling: use rho**m with rho = sqrt(s) for m>0.
-    # For m=0, keep Rcos constant unless we blend with axis; other components
-    # use s to ensure regularity at the axis.
+    # Regularity scaling (profil3d): rho**m for m>0, s for m=0 (before axis blend).
     rho = jnp.sqrt(s)
     scale_r = jnp.where(m[None, :] > 0, rho[:, None] ** m[None, :], 1.0)
     scale_other = jnp.where(m[None, :] > 0, rho[:, None] ** m[None, :], s[:, None])
@@ -553,11 +572,17 @@ def initial_guess_from_boundary(
     if indata is not None:
         ax = _read_axis_coeffs(indata)
         raxis_cc = _axis_array(ax.get("RAXIS_CC", None), cfg.ntor, dtype=dtype)
+        raxis_cs = _axis_array(ax.get("RAXIS_CS", None), cfg.ntor, dtype=dtype)
+        zaxis_cc = _axis_array(ax.get("ZAXIS_CC", None), cfg.ntor, dtype=dtype)
         zaxis_cs = _axis_array(ax.get("ZAXIS_CS", None), cfg.ntor, dtype=dtype)
 
         # If axis arrays are all zero or missing, fall back to boundary-based axis.
         have_axis = False
         if raxis_cc is not None and np.any(np.asarray(raxis_cc) != 0.0):
+            have_axis = True
+        if raxis_cs is not None and np.any(np.asarray(raxis_cs) != 0.0):
+            have_axis = True
+        if zaxis_cc is not None and np.any(np.asarray(zaxis_cc) != 0.0):
             have_axis = True
         if zaxis_cs is not None and np.any(np.asarray(zaxis_cs) != 0.0):
             have_axis = True
@@ -565,6 +590,8 @@ def initial_guess_from_boundary(
 
         if not have_axis:
             raxis_cc, zaxis_cs = _guess_axis_from_boundary(static, boundary_use)
+            raxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+            zaxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
             signgs_guess = 1 if np.median(areas) >= 0.0 else -1
             raxis_np = np.asarray(raxis_cc)
             zaxis_np = np.asarray(zaxis_cs)
@@ -584,17 +611,27 @@ def initial_guess_from_boundary(
         if have_axis:
             if raxis_cc is None:
                 raxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+            if raxis_cs is None:
+                raxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+            if zaxis_cc is None:
+                zaxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
             if zaxis_cs is None:
                 zaxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
 
-            Rcos, Zsin = _blend_axis_m0(
+            Rcos, Rsin, Zcos, Zsin = _blend_axis_m0_full(
                 static=static,
                 s=s,
                 Rcos=Rcos,
+                Rsin=Rsin,
+                Zcos=Zcos,
                 Zsin=Zsin,
                 Rcos_b=Rcos_b,
+                Rsin_b=Rsin_b,
+                Zcos_b=Zcos_b,
                 Zsin_b=Zsin_b,
                 raxis_cc=raxis_cc,
+                raxis_cs=raxis_cs,
+                zaxis_cc=zaxis_cc,
                 zaxis_cs=zaxis_cs,
             )
 
@@ -613,14 +650,20 @@ def initial_guess_from_boundary(
                     )
                 raxis_cc = jnp.asarray(new_raxis_cc, dtype=dtype)
                 zaxis_cs = jnp.asarray(new_zaxis_cs, dtype=dtype)
-                Rcos, Zsin = _blend_axis_m0(
+                Rcos, Rsin, Zcos, Zsin = _blend_axis_m0_full(
                     static=static,
                     s=s,
                     Rcos=Rcos,
+                    Rsin=Rsin,
+                    Zcos=Zcos,
                     Zsin=Zsin,
                     Rcos_b=Rcos_b,
+                    Rsin_b=Rsin_b,
+                    Zcos_b=Zcos_b,
                     Zsin_b=Zsin_b,
                     raxis_cc=raxis_cc,
+                    raxis_cs=raxis_cs,
+                    zaxis_cc=zaxis_cc,
                     zaxis_cs=zaxis_cs,
                 )
 
