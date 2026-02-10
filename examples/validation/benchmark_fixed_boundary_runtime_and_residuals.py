@@ -70,28 +70,37 @@ def _distribute_iters(*, iters: int, nstep: int) -> list[int]:
     return [base + (1 if i < rem else 0) for i in range(nstep)]
 
 
-def _run_vmec_jax(*, input_path: Path, case: str, iters: int) -> RunTrace:
+def _run_vmec_jax(
+    *,
+    input_path: Path,
+    case: str,
+    iters: int,
+    ns_override: int | None,
+    warmup: bool,
+) -> RunTrace:
     import vmec_jax.api as vj
 
     # Warm up to exclude JAX compilation from timed region. Compilation cost is
     # shape-dependent, so we warm up per-case.
     # Note: some parts of the stack stage/jit by `max_iter`, so warm up with the
     # same iteration count.
-    warm = vj.run_fixed_boundary(
-        input_path,
-        solver="vmec2000_iter",
-        max_iter=int(iters),
-        multigrid_use_input_niter=True,
-        verbose=False,
-    )
-    try:
-        warm_res = warm.result
-        if warm_res is not None and hasattr(warm_res, "fsqr2_history"):
-            h = getattr(warm_res, "fsqr2_history")
-            if len(h) > 0:
-                _ = float(np.asarray(h)[-1])
-    except Exception:
-        pass
+    if warmup:
+        warm = vj.run_fixed_boundary(
+            input_path,
+            solver="vmec2000_iter",
+            max_iter=int(iters),
+            multigrid_use_input_niter=True,
+            verbose=False,
+            ns_override=ns_override,
+        )
+        try:
+            warm_res = warm.result
+            if warm_res is not None and hasattr(warm_res, "fsqr2_history"):
+                h = getattr(warm_res, "fsqr2_history")
+                if len(h) > 0:
+                    _ = float(np.asarray(h)[-1])
+        except Exception:
+            pass
 
     t0 = time.perf_counter()
     run = vj.run_fixed_boundary(
@@ -100,6 +109,7 @@ def _run_vmec_jax(*, input_path: Path, case: str, iters: int) -> RunTrace:
         max_iter=int(iters),
         multigrid_use_input_niter=True,
         verbose=False,
+        ns_override=ns_override,
     )
     dt = time.perf_counter() - t0
 
@@ -291,11 +301,32 @@ def main() -> None:
     # Keep the default small; this script is for README figures, not profiling.
     p.add_argument("--iters", type=int, default=60, help="Fixed iteration budget for all backends.")
     p.add_argument(
+        "--ns-override",
+        type=int,
+        default=None,
+        help="Override ns for vmec_jax (vmec2000 backend uses input resolution).",
+    )
+    p.add_argument(
+        "--disable-jit",
+        action="store_true",
+        help="Disable JAX JIT (reduces compilation overhead for quick runs).",
+    )
+    p.add_argument(
+        "--no-warmup",
+        action="store_true",
+        help="Skip the warmup run (reduces runtime for quick checks).",
+    )
+    p.add_argument(
         "--run-vmec2000",
         action="store_true",
         help="Also run the external vmec2000 Python extension (if installed).",
     )
     p.add_argument("--outdir", default="examples/outputs/bench_fixed_boundary", help="Output directory root.")
+    p.add_argument(
+        "--fast",
+        action="store_true",
+        help="Quick sanity run (reduces cases/iters and uses a smaller ns for vmec_jax).",
+    )
     args = p.parse_args()
 
     root = Path(__file__).resolve().parents[2]
@@ -306,13 +337,33 @@ def main() -> None:
     # Make matplotlib cache writable and deterministic-ish.
     os.environ.setdefault("MPLCONFIGDIR", str(outdir / "_mplcache"))
 
+    cases = list(args.cases)
+    if bool(args.fast):
+        if cases == ["circular_tokamak", "shaped_tokamak_pressure", "solovev", "purely_toroidal_field"]:
+            cases = ["circular_tokamak"]
+        if args.iters == 60:
+            args.iters = 20
+        if args.ns_override is None:
+            args.ns_override = 9
+
+    if bool(args.disable_jit):
+        os.environ.setdefault("JAX_DISABLE_JIT", "1")
+
     traces: list[RunTrace] = []
-    for case in args.cases:
+    for case in cases:
         input_path = data_dir / f"input.{case}"
         if not input_path.exists():
             raise FileNotFoundError(f"Missing bundled input: {input_path}")
 
-        traces.append(_run_vmec_jax(input_path=input_path, case=case, iters=int(args.iters)))
+        traces.append(
+            _run_vmec_jax(
+                input_path=input_path,
+                case=case,
+                iters=int(args.iters),
+                ns_override=args.ns_override,
+                warmup=not bool(args.no_warmup),
+            )
+        )
 
         # External backends are optional and may not be installed.
         # Keep the overall script robust: skip a backend rather than failing the run.
@@ -327,7 +378,12 @@ def main() -> None:
                 traces.append(tvm)
 
     # Write machine-readable data for later reuse.
-    payload: dict[str, Any] = {"iters": int(args.iters), "cases": list(args.cases), "traces": []}
+    payload: dict[str, Any] = {
+        "iters": int(args.iters),
+        "cases": list(cases),
+        "ns_override": args.ns_override,
+        "traces": [],
+    }
     for t in traces:
         payload["traces"].append(
             {

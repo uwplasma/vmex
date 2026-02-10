@@ -36,7 +36,9 @@ End-to-end solve snapshot
 To run a short fixed-boundary solve and compare a few end-to-end outputs against
 bundled references::
 
-  python examples/validation/end_to_end_solve_parity_summary.py --use-input-niter --max-iter 60
+  python examples/validation/end_to_end_solve_parity_summary.py --use-input-niter --fast
+
+Drop ``--fast`` and increase ``--max-iter`` for a full parity snapshot (longer runtime).
 
 External VMEC2000 run (optional)
 --------------------------------

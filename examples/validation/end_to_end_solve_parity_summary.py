@@ -41,6 +41,12 @@ def main() -> None:
     p.add_argument("--solver", default="vmec2000_iter")
     p.add_argument("--max-iter", type=int, default=30)
     p.add_argument(
+        "--ns-override",
+        type=int,
+        default=None,
+        help="Override the radial resolution (ns). If set, rmnc/zmns parity is skipped.",
+    )
+    p.add_argument(
         "--use-input-niter",
         action="store_true",
         help="For vmec2000_iter: respect NITER_ARRAY/FTOL_ARRAY staging (still capped by --max-iter).",
@@ -50,12 +56,24 @@ def main() -> None:
         action="store_true",
         help="Enable vmec_jax solver iteration prints.",
     )
+    p.add_argument(
+        "--fast",
+        action="store_true",
+        help="Quick sanity run (reduces cases and iterations; not a parity report).",
+    )
     args = p.parse_args()
 
     root = Path(__file__).resolve().parents[2]
     data_dir = root / "examples" / "data"
 
     cases = [str(c) for c in args.cases]
+    if bool(args.fast):
+        if args.cases == ["circular_tokamak", "shaped_tokamak_pressure", "solovev"]:
+            cases = ["circular_tokamak"]
+        if args.max_iter == 30:
+            args.max_iter = 10
+        if args.ns_override is None:
+            args.ns_override = 9
 
     print("| Case | input | ns | mpol | ntor | nfp | solver | max_iter | ftol | fsq_total(ref) | fsq_total(new) | rmnc relRMS | zmns relRMS |")
     print("|---|---|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|")
@@ -78,6 +96,7 @@ def main() -> None:
             max_iter=int(args.max_iter),
             multigrid_use_input_niter=bool(args.use_input_niter),
             verbose=bool(args.verbose),
+            ns_override=args.ns_override,
         )
         fsqr, fsqz, fsql = vj.residual_scalars_from_state(
             state=run.state,
@@ -89,8 +108,12 @@ def main() -> None:
         fsq_new = float(fsqr + fsqz + fsql)
         fsq_ref = float(wref.fsqr + wref.fsqz + wref.fsql)
 
-        rmnc_err = _rel_rms(np.asarray(run.state.Rcos), np.asarray(wref.rmnc))
-        zmns_err = _rel_rms(np.asarray(run.state.Zsin), np.asarray(wref.zmns))
+        if args.ns_override is None:
+            rmnc_err = _rel_rms(np.asarray(run.state.Rcos), np.asarray(wref.rmnc))
+            zmns_err = _rel_rms(np.asarray(run.state.Zsin), np.asarray(wref.zmns))
+        else:
+            rmnc_err = np.nan
+            zmns_err = np.nan
 
         print(
             "| "
@@ -119,7 +142,11 @@ def main() -> None:
     print("- This is an end-to-end *solver* snapshot. It is not expected to match VMEC2000 yet on all cases.")
     print("- `fsq_total(new)` is computed via vmec_jax scalar residual kernels on the final iterate.")
     print("- `rmnc/zmns relRMS` compare Fourier coefficients directly (main modes).")
+    if args.ns_override is not None:
+        print("- `ns_override` is set: rmnc/zmns parity is skipped.")
     print("- `ftol` is read from the input namelist (`FTOL`).")
+    if bool(args.fast):
+        print("- `--fast` enables a quick sanity run; it is not a parity report.")
 
 
 if __name__ == "__main__":

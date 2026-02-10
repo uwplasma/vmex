@@ -27,7 +27,7 @@ pytest -q
 Generated from the bundled `shaped_tokamak_pressure` case:
 
 ```bash
-python examples/showcase_axisym_input_to_wout.py --case shaped_tokamak_pressure --max-iter 240 --use-input-niter --emit-readme-figures
+python examples/showcase_axisym_input_to_wout.py --case shaped_tokamak_pressure --max-iter 240 --use-input-niter --emit-readme-figures --no-verbose
 ```
 
 <table>
@@ -85,22 +85,26 @@ python examples/validation/getfsq_parity_cases.py --solve-metric
 Reproduce the short end-to-end solve snapshot:
 
 ```bash
-python examples/validation/end_to_end_solve_parity_summary.py --use-input-niter --max-iter 60
+python examples/validation/end_to_end_solve_parity_summary.py --use-input-niter --fast
 ```
+
+This is a quick sanity run (reduced cases and resolution). For a full parity snapshot, drop `--fast` and increase `--max-iter`, but expect longer runtimes.
 
 ## Benchmark (runtime + residual traces)
 
 This script compares a *fixed iteration budget* across `vmec_jax` and (optionally) `vmec2000` via the `vmec` Python extension:
 
 ```bash
-python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 60
+python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 5 --cases circular_tokamak --ns-override 9 --disable-jit --no-warmup
 ```
 
 To also run the external VMEC2000 backend (if installed):
 
 ```bash
-python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 60 --run-vmec2000
+python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 5 --cases circular_tokamak --ns-override 9 --disable-jit --no-warmup --run-vmec2000
 ```
+
+The quick settings above keep runs under ~30s; increase `--iters` and `--cases` (and drop `--disable-jit/--no-warmup`) for higher-fidelity traces.
 
 <table>
   <tr>

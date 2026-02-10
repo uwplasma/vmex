@@ -51,11 +51,13 @@ All of the following scripts are designed to run quickly on bundled data:
 
 - End-to-end solve snapshot (short solve, compares a few end-to-end outputs)::
 
-    python examples/validation/end_to_end_solve_parity_summary.py --use-input-niter
+    python examples/validation/end_to_end_solve_parity_summary.py --use-input-niter --fast
 
 - Runtime + residual benchmark for a fixed iteration budget (optional, communication-oriented)::
 
-    python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 10
+    python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 5 --cases circular_tokamak --ns-override 9 --disable-jit --no-warmup
+
+The quick flags above keep runs under ~30s. Drop ``--fast``/``--disable-jit``/``--no-warmup`` and increase ``--iters``/``--cases`` for higher-fidelity traces.
 
 External VMEC2000 runs (optional)
 ---------------------------------

@@ -52,8 +52,9 @@ def _maybe_bmag_from_wout_physical(wout, *, theta: np.ndarray, phi: np.ndarray, 
 def _write_plots(*, outdir: Path, run: vj.FixedBoundaryRun, wout_new, wout_ref, indata) -> None:
     plt = _import_matplotlib()
 
-    theta = vj.closed_theta_grid(256)
-    phi = np.linspace(0.0, 2.0 * np.pi, 256, endpoint=False)
+    # Keep showcase plots reasonably fast; these are illustrative, not high-res exports.
+    theta = vj.closed_theta_grid(128)
+    phi = np.linspace(0.0, 2.0 * np.pi, 128, endpoint=False)
     ns = int(wout_new.ns)
     s_index_lcfs = ns - 1
     s_indices = np.linspace(0, s_index_lcfs, 9).round().astype(int)
@@ -121,8 +122,8 @@ def _write_plots(*, outdir: Path, run: vj.FixedBoundaryRun, wout_new, wout_ref, 
     plt.close(fig)
 
     # 3) 3D LCFS surface colored by |B| (new wout).
-    th3 = vj.closed_theta_grid(120)
-    ph3 = np.linspace(0.0, 2.0 * np.pi, 120, endpoint=False)
+    th3 = vj.closed_theta_grid(80)
+    ph3 = np.linspace(0.0, 2.0 * np.pi, 80, endpoint=False)
     Rlcfs, Zlcfs = vj.surface_rz_from_wout_physical(wout_new, theta=th3, phi=ph3, s_index=s_index_lcfs, nyq=False)
     Blcfs = _maybe_bmag_from_wout_physical(wout_new, theta=th3, phi=ph3, s_index=s_index_lcfs)
     if Blcfs is None:
