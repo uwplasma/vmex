@@ -195,6 +195,12 @@ def main() -> None:
     )
     p.add_argument("--max-iter", type=int, default=120)
     p.add_argument(
+        "--verbose",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+        help="Print per-iteration solver trace (can be very verbose).",
+    )
+    p.add_argument(
         "--use-input-niter",
         default=True,
         action=argparse.BooleanOptionalAction,
@@ -236,7 +242,7 @@ def main() -> None:
             max_iter=int(args.max_iter),
             multigrid_use_input_niter=bool(args.use_input_niter),
             use_initial_guess=bool(args.no_solve),
-            verbose=True,
+            verbose=bool(args.verbose),
         )
         out_wout_path = outdir / f"wout_{case}_vmec_jax.nc"
         wout_new = vj.write_wout_from_fixed_boundary_run(out_wout_path, run, include_fsq=True)
