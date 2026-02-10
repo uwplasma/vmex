@@ -88,6 +88,30 @@ class WoutData:
     fsqt: np.ndarray  # force trace vs iteration (if present)
     equif: np.ndarray  # (ns,) flux-surface-averaged force balance (if present)
 
+    # additional wout fields used by vmecPlot2 and diagnostics
+    phi: np.ndarray  # (ns,) toroidal flux
+    buco: np.ndarray  # (ns,)
+    bvco: np.ndarray  # (ns,)
+    jcuru: np.ndarray  # (ns,)
+    jcurv: np.ndarray  # (ns,)
+    raxis_cc: np.ndarray  # (ntor+1,)
+    zaxis_cs: np.ndarray  # (ntor+1,)
+    raxis_cs: np.ndarray  # (ntor+1,)
+    zaxis_cc: np.ndarray  # (ntor+1,)
+    Aminor_p: float
+    Rmajor_p: float
+    aspect: float
+    betatotal: float
+    betapol: float
+    betator: float
+    betaxis: float
+    ctor: float
+    DMerc: np.ndarray  # (ns,)
+    ac: np.ndarray  # (nac,)
+    ac_aux_s: np.ndarray  # (ndfmax,)
+    ac_aux_f: np.ndarray  # (ndfmax,)
+    pcurr_type: str
+
 
 def _bool_from_nc(x: Any) -> bool:
     # VMEC stores *_logical__ as 0/1 integers in netcdf.
@@ -166,6 +190,58 @@ def read_wout(path: str | Path) -> WoutData:
         fsqt = np.asarray(ds.variables.get("fsqt", np.zeros((0,), dtype=float))[:])
         equif = np.asarray(ds.variables.get("equif", np.zeros((ns,), dtype=float))[:])
 
+        # Additional fields used by vmecPlot2 and diagnostics.
+        if "phi" in ds.variables:
+            phi = np.asarray(ds.variables["phi"][:])
+        else:
+            from .integrals import cumrect_s_halfmesh
+
+            if ns < 2:
+                s = np.zeros((ns,), dtype=float)
+            else:
+                s = np.linspace(0.0, 1.0, ns, dtype=float)
+            phi = np.asarray(cumrect_s_halfmesh(phipf, s))
+
+        buco = np.asarray(ds.variables.get("buco", np.zeros((ns,), dtype=float))[:])
+        bvco = np.asarray(ds.variables.get("bvco", np.zeros((ns,), dtype=float))[:])
+        jcuru = np.asarray(ds.variables.get("jcuru", np.zeros((ns,), dtype=float))[:])
+        jcurv = np.asarray(ds.variables.get("jcurv", np.zeros((ns,), dtype=float))[:])
+
+        raxis_cc = np.asarray(ds.variables.get("raxis_cc", np.zeros((ntor + 1,), dtype=float))[:])
+        zaxis_cs = np.asarray(ds.variables.get("zaxis_cs", np.zeros((ntor + 1,), dtype=float))[:])
+        raxis_cs = np.asarray(ds.variables.get("raxis_cs", np.zeros_like(raxis_cc))[:])
+        zaxis_cc = np.asarray(ds.variables.get("zaxis_cc", np.zeros_like(zaxis_cs))[:])
+
+        Aminor_p = float(ds.variables.get("Aminor_p", 0.0)[:]) if "Aminor_p" in ds.variables else 0.0
+        Rmajor_p = float(ds.variables.get("Rmajor_p", 0.0)[:]) if "Rmajor_p" in ds.variables else 0.0
+        aspect = float(ds.variables.get("aspect", 0.0)[:]) if "aspect" in ds.variables else 0.0
+        betatotal = float(ds.variables.get("betatotal", 0.0)[:]) if "betatotal" in ds.variables else 0.0
+        betapol = float(ds.variables.get("betapol", 0.0)[:]) if "betapol" in ds.variables else 0.0
+        betator = float(ds.variables.get("betator", 0.0)[:]) if "betator" in ds.variables else 0.0
+        betaxis = float(ds.variables.get("betaxis", 0.0)[:]) if "betaxis" in ds.variables else 0.0
+        ctor = float(ds.variables.get("ctor", 0.0)[:]) if "ctor" in ds.variables else 0.0
+
+        DMerc = np.asarray(ds.variables.get("DMerc", np.zeros((ns,), dtype=float))[:])
+
+        ac = np.asarray(ds.variables.get("ac", np.zeros((0,), dtype=float))[:])
+        ac_aux_s = np.asarray(ds.variables.get("ac_aux_s", -np.ones((101,), dtype=float))[:])
+        ac_aux_f = np.asarray(ds.variables.get("ac_aux_f", np.zeros((101,), dtype=float))[:])
+
+        pcurr_type = ""
+        if "pcurr_type" in ds.variables:
+            raw = np.asarray(ds.variables["pcurr_type"][:])
+            if raw.dtype.kind in ("S", "U"):
+                if raw.ndim == 0:
+                    pcurr_type = str(raw)
+                else:
+                    pcurr_type = b"".join(raw.astype("S1")).decode("utf-8", "ignore")
+            else:
+                try:
+                    pcurr_type = "".join(raw.tolist())
+                except Exception:
+                    pcurr_type = str(raw)
+            pcurr_type = pcurr_type.rstrip()
+
     return WoutData(
         path=path,
         ns=ns,
@@ -213,6 +289,28 @@ def read_wout(path: str | Path) -> WoutData:
         fsql=fsql,
         fsqt=fsqt,
         equif=equif,
+        phi=phi,
+        buco=buco,
+        bvco=bvco,
+        jcuru=jcuru,
+        jcurv=jcurv,
+        raxis_cc=raxis_cc,
+        zaxis_cs=zaxis_cs,
+        raxis_cs=raxis_cs,
+        zaxis_cc=zaxis_cc,
+        Aminor_p=Aminor_p,
+        Rmajor_p=Rmajor_p,
+        aspect=aspect,
+        betatotal=betatotal,
+        betapol=betapol,
+        betator=betator,
+        betaxis=betaxis,
+        ctor=ctor,
+        DMerc=DMerc,
+        ac=ac,
+        ac_aux_s=ac_aux_s,
+        ac_aux_f=ac_aux_f,
+        pcurr_type=pcurr_type,
     )
 
 
@@ -244,17 +342,33 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
     mnmax = int(np.asarray(wout.xm).size)
     mnmax_nyq = int(np.asarray(wout.xm_nyq).size)
     nstore = int(np.asarray(wout.fsqt).size)
+    n_tor = int(wout.ntor) + 1
+    ac = np.asarray(getattr(wout, "ac", np.zeros((0,), dtype=float)))
+    if ac.size == 0:
+        ac = np.zeros((1,), dtype=float)
+    ac_aux_s = np.asarray(getattr(wout, "ac_aux_s", -np.ones((101,), dtype=float)))
+    ac_aux_f = np.asarray(getattr(wout, "ac_aux_f", np.zeros((101,), dtype=float)))
+    if ac_aux_s.size == 0:
+        ac_aux_s = -np.ones((1,), dtype=float)
+    if ac_aux_f.size == 0:
+        ac_aux_f = np.zeros((1,), dtype=float)
+    ndfmax = int(ac_aux_s.size)
+    preset = int(ac.size)
 
     # Convert pressures back to VMEC netcdf convention (Pa).
     pres_pa = np.asarray(wout.pres) / MU0
     presf_pa = np.asarray(wout.presf) / MU0
 
     # Use VMEC-like dimension names for better interoperability with external tools.
-    with netCDF4.Dataset(path, mode="w", format="NETCDF4") as ds:
+    with netCDF4.Dataset(path, mode="w", format="NETCDF3_CLASSIC") as ds:
         ds.createDimension("radius", ns)
         ds.createDimension("mn_mode", mnmax)
         ds.createDimension("mn_mode_nyq", mnmax_nyq)
         ds.createDimension("nstore_seq", nstore)
+        ds.createDimension("n_tor", n_tor)
+        ds.createDimension("ndfmax", ndfmax)
+        ds.createDimension("preset", preset)
+        ds.createDimension("dim_00020", 20)
 
         def _var_i(name: str, dims: tuple[str, ...], data: np.ndarray) -> None:
             v = ds.createVariable(name, "i4", dims)
@@ -300,6 +414,7 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
         _var_f("phips", ("radius",), np.asarray(wout.phips))
         _var_f("iotaf", ("radius",), np.asarray(wout.iotaf))
         _var_f("iotas", ("radius",), np.asarray(wout.iotas))
+        _var_f("phi", ("radius",), np.asarray(getattr(wout, "phi", np.zeros((ns,), dtype=float))))
 
         # Nyquist Fourier fields.
         _var_f("gmnc", ("radius", "mn_mode_nyq"), np.asarray(wout.gmnc))
@@ -322,9 +437,38 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
         _var_f("pres", ("radius",), np.asarray(pres_pa))
         _var_f("presf", ("radius",), np.asarray(presf_pa))
         _var_f("equif", ("radius",), np.asarray(getattr(wout, "equif", np.zeros((ns,), dtype=float))))
+        _var_f("buco", ("radius",), np.asarray(getattr(wout, "buco", np.zeros((ns,), dtype=float))))
+        _var_f("bvco", ("radius",), np.asarray(getattr(wout, "bvco", np.zeros((ns,), dtype=float))))
+        _var_f("jcuru", ("radius",), np.asarray(getattr(wout, "jcuru", np.zeros((ns,), dtype=float))))
+        _var_f("jcurv", ("radius",), np.asarray(getattr(wout, "jcurv", np.zeros((ns,), dtype=float))))
+        _var_f("DMerc", ("radius",), np.asarray(getattr(wout, "DMerc", np.zeros((ns,), dtype=float))))
 
         # Iteration trace (optional).
         _var_f("fsqt", ("nstore_seq",), np.asarray(wout.fsqt))
+
+        # Axis coefficients and geometric scalars.
+        _var_f("raxis_cc", ("n_tor",), np.asarray(getattr(wout, "raxis_cc", np.zeros((n_tor,), dtype=float))))
+        _var_f("zaxis_cs", ("n_tor",), np.asarray(getattr(wout, "zaxis_cs", np.zeros((n_tor,), dtype=float))))
+        _var_f("raxis_cs", ("n_tor",), np.asarray(getattr(wout, "raxis_cs", np.zeros((n_tor,), dtype=float))))
+        _var_f("zaxis_cc", ("n_tor",), np.asarray(getattr(wout, "zaxis_cc", np.zeros((n_tor,), dtype=float))))
+
+        _var_f("Aminor_p", (), np.asarray(float(getattr(wout, "Aminor_p", 0.0))))
+        _var_f("Rmajor_p", (), np.asarray(float(getattr(wout, "Rmajor_p", 0.0))))
+        _var_f("aspect", (), np.asarray(float(getattr(wout, "aspect", 0.0))))
+        _var_f("betatotal", (), np.asarray(float(getattr(wout, "betatotal", 0.0))))
+        _var_f("betapol", (), np.asarray(float(getattr(wout, "betapol", 0.0))))
+        _var_f("betator", (), np.asarray(float(getattr(wout, "betator", 0.0))))
+        _var_f("betaxis", (), np.asarray(float(getattr(wout, "betaxis", 0.0))))
+        _var_f("ctor", (), np.asarray(float(getattr(wout, "ctor", 0.0))))
+
+        _var_f("ac_aux_s", ("ndfmax",), np.asarray(ac_aux_s))
+        _var_f("ac_aux_f", ("ndfmax",), np.asarray(ac_aux_f))
+        _var_f("ac", ("preset",), np.asarray(ac))
+
+        pcurr = str(getattr(wout, "pcurr_type", "") or "")
+        pcurr = (pcurr[:20]).ljust(20)
+        v = ds.createVariable("pcurr_type", "S1", ("dim_00020",))
+        v[:] = np.asarray(list(pcurr), dtype="S1")
 
 
 def assert_main_modes_match_wout(*, wout: WoutData) -> None:
@@ -364,6 +508,13 @@ def wout_minimal_from_fixed_boundary(
     from .energy import flux_profiles_from_indata
     from .profiles import eval_profiles
     from .field import full_mesh_from_half_mesh_avg
+    from .integrals import cumrect_s_halfmesh
+    from .vmec_tomnsp import vmec_trig_tables
+    from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
+    from .vmec_realspace import vmec_realspace_analysis
+    from .vmec_residue import vmec_force_norms_from_bcovar_dynamic
+    from .vmec_lforbal import equif_from_bcovar, currents_from_bcovar
+    from .plotting import surface_rz_from_state_physical
 
     cfg = static.cfg
     ns = int(cfg.ns)
@@ -410,6 +561,146 @@ def wout_minimal_from_fixed_boundary(
     z2 = np.zeros((ns, mnmax_nyq), dtype=float)
     z1 = np.zeros((ns,), dtype=float)
 
+    # Toroidal flux (VMEC `phi`) via the half-mesh rectangle rule.
+    phi = np.asarray(cumrect_s_halfmesh(np.asarray(flux.phipf), s))
+
+    # Axis coefficients from m=0 modes on the magnetic axis.
+    raxis_cc = np.zeros((ntor + 1,), dtype=float)
+    raxis_cs = np.zeros_like(raxis_cc)
+    zaxis_cs = np.zeros_like(raxis_cc)
+    zaxis_cc = np.zeros_like(raxis_cc)
+    m_arr = np.asarray(main_modes.m, dtype=int)
+    n_arr = np.asarray(main_modes.n, dtype=int)
+    for nval in range(ntor + 1):
+        mask = (m_arr == 0) & (n_arr == nval)
+        if np.any(mask):
+            idx = int(np.where(mask)[0][0])
+            raxis_cc[nval] = float(rmnc[0, idx])
+            raxis_cs[nval] = float(rmns[0, idx])
+            zaxis_cs[nval] = float(zmns[0, idx])
+            zaxis_cc[nval] = float(zmnc[0, idx])
+
+    # Simple geometric measures for plotting (VMEC-style Aminor/Rmajor).
+    if ns >= 1:
+        theta_dense = np.linspace(0.0, 2.0 * np.pi, 512, endpoint=False)
+        Rb, Zb = surface_rz_from_state_physical(
+            state,
+            static.modes,
+            theta=theta_dense,
+            phi=np.asarray([0.0]),
+            s_index=int(ns - 1),
+            nfp=int(nfp),
+        )
+        Rb = np.asarray(Rb)[:, 0]
+        Rmin = float(np.min(Rb))
+        Rmax = float(np.max(Rb))
+        Aminor_p = 0.5 * (Rmax - Rmin)
+        Rmajor_p = 0.5 * (Rmax + Rmin)
+        aspect = Rmajor_p / Aminor_p if Aminor_p != 0.0 else 0.0
+    else:
+        Aminor_p = 0.0
+        Rmajor_p = 0.0
+        aspect = 0.0
+
+    # Build VMEC parity grids for Nyquist outputs.
+    mmax = int(np.max(main_modes.m)) if int(main_modes.K) > 0 else 0
+    nmax = int(np.max(np.abs(main_modes.n))) if int(main_modes.K) > 0 else 0
+    trig = vmec_trig_tables(
+        ntheta=int(cfg.ntheta),
+        nzeta=int(cfg.nzeta),
+        nfp=int(nfp),
+        mmax=int(mmax),
+        nmax=int(nmax),
+        lasym=bool(lasym),
+        dtype=np.asarray(state.Rcos).dtype,
+    )
+
+    class _WoutLike:
+        __slots__ = ("phipf", "phips", "chipf", "iotaf", "iotas", "signgs", "nfp", "mpol", "ntor", "lasym")
+
+        def __init__(self):
+            self.phipf = np.asarray(flux.phipf)
+            self.phips = np.asarray(flux.phips)
+            self.chipf = np.asarray(chipf_wout)
+            self.iotaf = np.asarray(iotaf)
+            self.iotas = np.asarray(iotas)
+            self.signgs = int(signgs)
+            self.nfp = int(nfp)
+            self.mpol = int(mpol)
+            self.ntor = int(ntor)
+            self.lasym = bool(lasym)
+
+    wout_like = _WoutLike()
+    bc = vmec_bcovar_half_mesh_from_wout(
+        state=state,
+        static=static,
+        wout=wout_like,
+        pres=pres,
+        use_wout_bsup=False,
+        use_wout_bsub_for_lambda=False,
+        use_wout_bmag_for_bsq=False,
+        use_vmec_synthesis=True,
+        trig=trig,
+    )
+
+    # Derived 1D profiles and scalars.
+    norms = vmec_force_norms_from_bcovar_dynamic(bc=bc, trig=trig, s=s, signgs=int(signgs))
+    vp = np.asarray(norms.vp, dtype=float)
+    wb = float(np.asarray(norms.wb))
+    wp = float(np.asarray(norms.wp))
+    volume = float(np.asarray(norms.volume))
+    volume_p = volume * float(4.0 * np.pi**2)
+    betatotal = (wp / wb) if wb != 0.0 else 0.0
+
+    buco, bvco, jcuru, jcurv = currents_from_bcovar(bc=bc, trig=trig, wout=wout_like, s=s)
+    equif = equif_from_bcovar(bc=bc, trig=trig, wout=wout_like, s=s)
+
+    # Nyquist Fourier coefficients for fields stored in wout.
+    if bool(lasym):
+        gmnc = z2.copy()
+        gmns = z2.copy()
+        bsupumnc = z2.copy()
+        bsupumns = z2.copy()
+        bsupvmnc = z2.copy()
+        bsupvmns = z2.copy()
+        bsubumnc = z2.copy()
+        bsubumns = z2.copy()
+        bsubvmnc = z2.copy()
+        bsubvmns = z2.copy()
+        bmnc = z2.copy()
+        bmns = z2.copy()
+    else:
+        gmnc, gmns = vmec_realspace_analysis(f=np.asarray(bc.jac.sqrtg), modes=nyq_modes, trig=trig, parity="both")
+        bsupumnc, bsupumns = vmec_realspace_analysis(f=np.asarray(bc.bsupu), modes=nyq_modes, trig=trig, parity="both")
+        bsupvmnc, bsupvmns = vmec_realspace_analysis(f=np.asarray(bc.bsupv), modes=nyq_modes, trig=trig, parity="both")
+        bsubumnc, bsubumns = vmec_realspace_analysis(f=np.asarray(bc.bsubu), modes=nyq_modes, trig=trig, parity="both")
+        bsubvmnc, bsubvmns = vmec_realspace_analysis(f=np.asarray(bc.bsubv), modes=nyq_modes, trig=trig, parity="both")
+
+        pres_h = np.asarray(pres, dtype=float)[:, None, None]
+        bmag = np.sqrt(np.maximum(2.0 * (np.asarray(bc.bsq) - pres_h), 0.0))
+        bmnc, bmns = vmec_realspace_analysis(f=bmag, modes=nyq_modes, trig=trig, parity="both")
+
+    # Current profile metadata for vmecPlot2.
+    pcurr_type = indata.get("PCURR_TYPE", None)
+    if pcurr_type is None:
+        pcurr_type = "power_series"
+    pcurr_type = str(pcurr_type)
+
+    ac_raw = indata.get("AC", [])
+    if isinstance(ac_raw, (int, float, np.floating)):
+        ac = np.asarray([float(ac_raw)], dtype=float)
+    elif isinstance(ac_raw, list):
+        ac = np.asarray([float(v) for v in ac_raw], dtype=float)
+    else:
+        ac = np.asarray([], dtype=float)
+    if ac.size == 0:
+        ac = np.zeros((1,), dtype=float)
+
+    ndfmax = 101
+    ac_aux_s = -np.ones((ndfmax,), dtype=float)
+    ac_aux_f = np.zeros((ndfmax,), dtype=float)
+    DMerc = np.zeros((ns,), dtype=float)
+
     return WoutData(
         path=Path(path),
         ns=ns,
@@ -433,30 +724,52 @@ def wout_minimal_from_fixed_boundary(
         phips=np.asarray(flux.phips, dtype=float),
         iotaf=np.asarray(iotaf, dtype=float),
         iotas=np.asarray(iotas, dtype=float),
-        gmnc=z2,
-        gmns=z2.copy(),
-        bsupumnc=z2.copy(),
-        bsupumns=z2.copy(),
-        bsupvmnc=z2.copy(),
-        bsupvmns=z2.copy(),
-        bsubumnc=z2.copy(),
-        bsubumns=z2.copy(),
-        bsubvmnc=z2.copy(),
-        bsubvmns=z2.copy(),
-        bmnc=z2.copy(),
-        bmns=z2.copy(),
-        wb=0.0,
-        volume_p=0.0,
+        gmnc=np.asarray(gmnc, dtype=float),
+        gmns=np.asarray(gmns, dtype=float),
+        bsupumnc=np.asarray(bsupumnc, dtype=float),
+        bsupumns=np.asarray(bsupumns, dtype=float),
+        bsupvmnc=np.asarray(bsupvmnc, dtype=float),
+        bsupvmns=np.asarray(bsupvmns, dtype=float),
+        bsubumnc=np.asarray(bsubumnc, dtype=float),
+        bsubumns=np.asarray(bsubumns, dtype=float),
+        bsubvmnc=np.asarray(bsubvmnc, dtype=float),
+        bsubvmns=np.asarray(bsubvmns, dtype=float),
+        bmnc=np.asarray(bmnc, dtype=float),
+        bmns=np.asarray(bmns, dtype=float),
+        wb=float(wb),
+        volume_p=float(volume_p),
         gamma=float(getattr(indata, "get_float", lambda *_: 0.0)("GAMMA", 0.0)),
-        wp=0.0,
-        vp=z1,
+        wp=float(wp),
+        vp=np.asarray(vp, dtype=float),
         pres=np.asarray(pres, dtype=float),
         presf=np.asarray(presf, dtype=float),
         fsqr=float(fsqr),
         fsqz=float(fsqz),
         fsql=float(fsql),
         fsqt=np.zeros((0,), dtype=float),
-        equif=z1.copy(),
+        equif=np.asarray(equif, dtype=float),
+        phi=np.asarray(phi, dtype=float),
+        buco=np.asarray(buco, dtype=float),
+        bvco=np.asarray(bvco, dtype=float),
+        jcuru=np.asarray(jcuru, dtype=float),
+        jcurv=np.asarray(jcurv, dtype=float),
+        raxis_cc=np.asarray(raxis_cc, dtype=float),
+        zaxis_cs=np.asarray(zaxis_cs, dtype=float),
+        raxis_cs=np.asarray(raxis_cs, dtype=float),
+        zaxis_cc=np.asarray(zaxis_cc, dtype=float),
+        Aminor_p=float(Aminor_p),
+        Rmajor_p=float(Rmajor_p),
+        aspect=float(aspect),
+        betatotal=float(betatotal),
+        betapol=0.0,
+        betator=0.0,
+        betaxis=0.0,
+        ctor=0.0,
+        DMerc=np.asarray(DMerc, dtype=float),
+        ac=np.asarray(ac, dtype=float),
+        ac_aux_s=np.asarray(ac_aux_s, dtype=float),
+        ac_aux_f=np.asarray(ac_aux_f, dtype=float),
+        pcurr_type=str(pcurr_type),
     )
 
 
