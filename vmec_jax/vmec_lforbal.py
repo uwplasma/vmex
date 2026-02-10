@@ -33,6 +33,7 @@ from ._compat import jnp
 from .vmec_tomnsp import VmecTrigTables
 
 TWOPI = 2.0 * np.pi
+MU0 = 4e-7 * np.pi
 
 
 @dataclass(frozen=True)
@@ -124,6 +125,9 @@ def currents_from_bcovar(*, bc, trig: VmecTrigTables, wout, s: Any) -> tuple[jnp
     bvco_fwd = jnp.concatenate([bvco[1:], jnp.zeros((1,), dtype=bvco.dtype)], axis=0)
     jcurv = signgs * ohs * (buco_fwd - buco)
     jcuru = -signgs * ohs * (bvco_fwd - bvco)
+    # VMEC stores jcur* in physical units; bcovar uses mu0-scaled fields, so undo mu0.
+    jcurv = jcurv / MU0
+    jcuru = jcuru / MU0
     return buco, bvco, jcuru, jcurv
 
 

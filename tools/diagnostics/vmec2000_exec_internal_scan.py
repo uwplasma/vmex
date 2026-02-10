@@ -65,6 +65,48 @@ def _compare_block(name: str, vmec_vals: np.ndarray, jax_vals: np.ndarray, *, rt
     return ok
 
 
+def _parse_tomnsp_kernels(path: Path):
+    ns = None
+    ntheta3 = None
+    nzeta = None
+    rows = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("ns="):
+                ns = int(line.split("=", 1)[1])
+                continue
+            if line.startswith("ntheta3="):
+                ntheta3 = int(line.split("=", 1)[1])
+                continue
+            if line.startswith("nzeta="):
+                nzeta = int(line.split("=", 1)[1])
+                continue
+            if line.startswith("columns:"):
+                continue
+            rows.append(line)
+    if ns is None or ntheta3 is None or nzeta is None:
+        raise ValueError(f"Missing header in tomnsps kernels dump: {path}")
+
+    shape = (ns, ntheta3, nzeta, 2)
+    blmn = np.zeros(shape, dtype=float)
+    clmn = np.zeros(shape, dtype=float)
+
+    for line in rows:
+        toks = line.split()
+        if len(toks) < 14:
+            continue
+        js = int(toks[0]) - 1
+        lt = int(toks[1]) - 1
+        lz = int(toks[2]) - 1
+        mpar = int(toks[3])
+        blmn[js, lt, lz, mpar] = float(toks[12].replace("D", "E").replace("d", "E"))
+        clmn[js, lt, lz, mpar] = float(toks[13].replace("D", "E").replace("d", "E"))
+
+    return blmn, clmn
+
 def _patch_indata(text: str, *, updates: dict[str, str]) -> str:
     lines = text.splitlines()
     in_block = False
@@ -178,6 +220,7 @@ def main() -> None:
 
             env = {
                 "VMEC_DUMP_TOMNSPS": "1",
+                "VMEC_DUMP_TOMNSPS_KERNELS": "1",
                 "VMEC_DUMP_ITER": str(int(it)),
                 "VMEC_DUMP_GC": "1",
                 "VMEC_DUMP_GC_ITER": str(int(it)),
@@ -213,6 +256,7 @@ def main() -> None:
             jax_dump_dir.mkdir(parents=True, exist_ok=True)
             env_jax = {
                 "VMEC_JAX_DUMP_TOMNSPS": "1",
+                "VMEC_JAX_DUMP_FORCE_KERNELS": "1",
                 "VMEC_JAX_DUMP_ITER": str(int(it)),
                 "VMEC_JAX_DUMP_DIR": str(jax_dump_dir),
                 "VMEC_JAX_DUMP_GC": "1",
@@ -245,6 +289,17 @@ def main() -> None:
                     rtol=float(args.rtol),
                     atol=float(args.atol),
                 )
+
+            vmec_kernels_path = workdir / f"tomnsps_kernels_iter{int(it)}.dat"
+            jax_kernels_path = jax_dump_dir / f"force_kernels_raw_iter{int(it)}.npz"
+            if vmec_kernels_path.exists() and jax_kernels_path.exists():
+                vmec_blmn, vmec_clmn = _parse_tomnsp_kernels(vmec_kernels_path)
+                jax_kernels = np.load(jax_kernels_path)
+                jax_blmn = np.stack([jax_kernels["blmn_e"], jax_kernels["blmn_o"]], axis=-1)
+                jax_clmn = np.stack([jax_kernels["clmn_e"], jax_kernels["clmn_o"]], axis=-1)
+                print(" tomnsps kernels:", flush=True)
+                ok &= _compare_block("blmn", vmec_blmn, jax_blmn, rtol=float(args.rtol), atol=float(args.atol))
+                ok &= _compare_block("clmn", vmec_clmn, jax_clmn, rtol=float(args.rtol), atol=float(args.atol))
 
             for stage in stages:
                 jax_gc_path = jax_dump_dir / f"gc_{stage}_iter{int(it)}.npz"

@@ -106,8 +106,9 @@ the legacy VMEC plotting script:
 
 Current observed mismatches (circular_tokamak, 5-iter snapshot):
 
-- ``bmnc`` and LCFS |B| plots differ at the ~5e-2 relative level.
-- ``buco``/``bvco`` are within a few percent, but **``jcuru``/``jcurv`` are off by ~1e6** (scaling mismatch).
+- ``bmnc`` and LCFS ``|B|`` plots differ at the ~5e-2 relative level.
+- ``buco``/``bvco`` are within a few percent; **``jcuru``/``jcurv`` scaling is now
+  corrected** (remaining differences are tied to earlier-force parity).
 - ``betapol``, ``betator``, ``betaxis``, ``ctor``, and ``DMerc`` are present but
   still placeholders in ``vmec_jax`` (zeros) until the VMEC2000 diagnostics path
   is fully ported.
@@ -115,7 +116,8 @@ Current observed mismatches (circular_tokamak, 5-iter snapshot):
 On ``shaped_tokamak_pressure`` (20-iter snapshot), the dominant gaps are:
 
 - ``bmnc`` ~1e-2 relative, ``buco`` ~3e-3, ``bvco`` ~6e-4 (good agreement).
-- ``jcuru``/``jcurv`` scaling remains off by ~1e6.
+- ``jcuru``/``jcurv`` scaling is corrected; residual differences track the same
+  lambda/force-kernel mismatches seen in the internal scan.
 - ``pres/presf`` differ at the ~0.24 relative level (profile staging mismatch).
 - ``rmnc/zmns`` differ at the ~1e-2 level (geometry still drifting in the nonlinear loop).
 
@@ -137,5 +139,8 @@ Current blockers worth tracking:
 
 - ``lasym=True`` axisymmetric case (``input.up_down_asymmetric_tokamak``) shows large bcovar/force-kernel mismatches at iter 1.
 - ``purely_toroidal_field`` multigrid trace matches early iterations but the ``r00``/``WMHD`` diagnostics become non-finite at later iterations in ``vmec_jax``.
-- Axisymmetric internal scans now match VMEC2000 for R/Z force blocks, but the first mismatch appears in the lambda block (``flsc/gcl``) at iter 1; this is the current top blocker for nonlinear trace parity. Recent change: ``lvv`` now uses ``phipog=1/sqrtg`` (no ``2π`` factor), reducing the mismatch from ~6x to ~0.36 relative; remaining scaling still under investigation.
+- Axisymmetric internal scans now match VMEC2000 for R/Z force blocks, but the first mismatch appears in the lambda block at iter 1:
+  ``flsc`` (~0.36 rel), ``gcl`` (~0.50 rel), and the lambda-force kernel ``blmn`` (~0.68 rel). This is the current top
+  blocker for nonlinear trace parity. Recent change: ``lvv`` now uses ``phipog=1/sqrtg`` (no ``2π`` factor), which
+  reduced the mismatch from ~6x; remaining scaling still under investigation.
 - Axisymmetric nonlinear traces still diverge from VMEC2000 after the first few iterations on some cases (e.g. ``shaped_tokamak_pressure``); the next focus is matching the lambda-force path and VMEC2000 time-step/preconditioner updates exactly.
