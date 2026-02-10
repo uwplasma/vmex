@@ -142,6 +142,58 @@ def tcon_from_bcovar_precondn_diag(
     if ns < 2:
         return jnp.zeros((ns,), dtype=jnp.asarray(trig.cosmu).dtype)
 
+    ard1, azd1 = precondn_diag_axd1_from_bcovar(
+        trig=trig,
+        s=s,
+        bsq=bsq,
+        r12=r12,
+        sqrtg=sqrtg,
+        ru12=ru12,
+        zu12=zu12,
+    )
+    return tcon_from_cached_precondn_diag(
+        tcon0=tcon0,
+        trig=trig,
+        s=s,
+        lasym=lasym,
+        ard1=ard1,
+        azd1=azd1,
+        ru0=ru0,
+        zu0=zu0,
+    )
+
+
+def precondn_diag_axd1_from_bcovar(
+    *,
+    trig: VmecTrigTables,
+    s,
+    bsq,
+    r12,
+    sqrtg,
+    ru12,
+    zu12,
+) -> tuple[Any, Any]:
+    """Compute VMEC `precondn` diagonal outputs axd(:,1) for R/Z-like calls.
+
+    Returns
+    -------
+    ard1, azd1:
+        1D arrays (ns,) corresponding to VMEC's `ard(js,1)` and `azd(js,1)`.
+
+    Notes
+    -----
+    In VMEC, `precondn(_par)` is only recomputed every `ns4` iterations
+    (`vmec_params.f: ns4=25`). Between refreshes, `ard/azd` remain constant even
+    though `bcovar` updates `tcon(js)` each iteration using the cached `ard/azd`
+    and the *current* `ru0/zu0` norms. Parity drivers should cache the returned
+    arrays accordingly.
+    """
+    s = jnp.asarray(s)
+    ns = int(s.shape[0])
+    if ns < 2:
+        z = jnp.zeros((ns,), dtype=jnp.asarray(trig.cosmu).dtype)
+        return z, z
+
     hs = jnp.asarray(s[1] - s[0], dtype=jnp.asarray(trig.cosmu).dtype)
     ohs = jnp.where(hs != 0, 1.0 / hs, jnp.asarray(0.0, dtype=hs.dtype))
 
@@ -158,47 +210,190 @@ def tcon_from_bcovar_precondn_diag(
     sqrtg = jnp.asarray(sqrtg)
     ru12 = jnp.asarray(ru12)
     zu12 = jnp.asarray(zu12)
-    ru0 = jnp.asarray(ru0)
-    zu0 = jnp.asarray(zu0)
 
     # Avoid division by zero in ptau.
     gs = jnp.where(sqrtg != 0, sqrtg, jnp.ones_like(sqrtg))
     ptau = (pfactor * (r12 * r12) * bsq * wint3) / gs
 
-    # ax(js,1) for each surface js (precondn.f). We compute it for js>=2 and
-    # set js=1 (axis) to 0 as in VMEC.
-    ax_r = jnp.sum(ptau * ((zu12 * ohs) ** 2), axis=(1, 2))  # corresponds to ard(js,1)
-    ax_z = jnp.sum(ptau * ((ru12 * ohs) ** 2), axis=(1, 2))  # corresponds to azd(js,1)
+    ax_r = jnp.sum(ptau * ((zu12 * ohs) ** 2), axis=(1, 2))  # Z-like call => `ard(js,1)`
+    ax_z = jnp.sum(ptau * ((ru12 * ohs) ** 2), axis=(1, 2))  # R-like call => `azd(js,1)`
     ax_r = ax_r.at[0].set(0.0)
     ax_z = ax_z.at[0].set(0.0)
 
-    # axd(js,1) = ax(js,1) + ax(js+1,1), with ax(ns+1)=0.
     ard1 = ax_r + jnp.concatenate([ax_r[1:], jnp.zeros((1,), dtype=ax_r.dtype)], axis=0)
     azd1 = ax_z + jnp.concatenate([ax_z[1:], jnp.zeros((1,), dtype=ax_z.dtype)], axis=0)
+    return ard1, azd1
 
-    # Flux-surface norms of (ru0, zu0).
+
+def tcon_from_cached_precondn_diag(
+    *,
+    tcon0: float,
+    trig: VmecTrigTables,
+    s,
+    lasym: bool,
+    ard1,
+    azd1,
+    ru0,
+    zu0,
+) -> Any:
+    """Compute `tcon(js)` from cached `precondn` diagonal outputs and current `ru0/zu0` norms."""
+    s = jnp.asarray(s)
+    ns = int(s.shape[0])
+    if ns < 2:
+        return jnp.zeros((ns,), dtype=jnp.asarray(trig.cosmu).dtype)
+
+    hs = jnp.asarray(s[1] - s[0], dtype=jnp.asarray(trig.cosmu).dtype)
+
+    w_theta = jnp.asarray(trig.cosmui3[:, 0]) / jnp.asarray(trig.mscale[0])
+    wint = w_theta[:, None] * jnp.ones((int(trig.cosnv.shape[0]),), dtype=w_theta.dtype)[None, :]
+    wint3 = wint[None, :, :]
+
+    ard1 = jnp.asarray(ard1)
+    azd1 = jnp.asarray(azd1)
+    ru0 = jnp.asarray(ru0)
+    zu0 = jnp.asarray(zu0)
+
     arnorm = jnp.sum((ru0 * ru0) * wint3, axis=(1, 2))
     aznorm = jnp.sum((zu0 * zu0) * wint3, axis=(1, 2))
-    # Avoid zero division.
     arnorm = jnp.where(arnorm != 0, arnorm, jnp.ones_like(arnorm))
     aznorm = jnp.where(aznorm != 0, aznorm, jnp.ones_like(aznorm))
 
-    # bcovar.f scaling for tcon_mul (with clamped tcon0).
     tcon0 = float(tcon0)
     tcon0 = min(abs(tcon0), 1.0)
     ns_f = float(ns)
     tcon_mul = tcon0 * (1.0 + ns_f * (1.0 / 60.0 + ns_f / (200.0 * 120.0)))
     tcon_mul = tcon_mul / ((4.0 * (float(trig.r0scale) ** 2)) ** 2)
 
+    # VMEC sets `tcon(:) = tcon0` before overwriting interior surfaces with the
+    # preconditioner-based scale. The axis value is not used by the constraint
+    # operator, but matching it is helpful for parity dumps.
+    tcon0_clamped = min(abs(float(tcon0)), 1.0)
     tcon = jnp.zeros((ns,), dtype=jnp.asarray(trig.cosmu).dtype)
+    tcon = tcon.at[0].set(jnp.asarray(tcon0_clamped, dtype=tcon.dtype))
     if ns >= 3:
-        js = jnp.arange(ns, dtype=jnp.int32) + 1  # Fortran-like 1..ns
+        js = jnp.arange(ns, dtype=jnp.int32) + 1
         mask = (js >= 2) & (js <= (ns - 1))
         ratio_r = jnp.abs(ard1) / arnorm
         ratio_z = jnp.abs(azd1) / aznorm
         core = jnp.minimum(ratio_r, ratio_z) * (jnp.asarray(tcon_mul, dtype=hs.dtype) * (32.0 * hs) ** 2)
         tcon = jnp.where(mask.astype(core.dtype), core, tcon)
-        # tcon(ns) = 0.5*tcon(ns-1)
+        tcon = tcon.at[-1].set(0.5 * tcon[-2])
+
+    # VMEC's lasym-specific halving is commented out in current STELLOPT sources.
+    _ = lasym
+    return tcon
+
+
+def tcon_from_precondn_axisym(
+    *,
+    tcon0: float,
+    bc,
+    k,
+    cfg,
+    s,
+    trig: VmecTrigTables,
+    ru0,
+    zu0,
+) -> Any:
+    """Compute `tcon(js)` from a VMEC-style axisymmetric preconditioner diagonal.
+
+    This uses the same `precondn` diagonal elements (`ard/azd`) that VMEC
+    feeds into the `tcon` scaling in `bcovar.f`. It is restricted to the
+    axisymmetric, stellarator-symmetric path.
+    """
+    if bool(cfg.lthreed) or bool(cfg.lasym):
+        raise ValueError("tcon_from_precondn_axisym only supports axisym.")
+
+    s = jnp.asarray(s)
+    ns = int(s.shape[0])
+    if ns < 2:
+        return jnp.zeros((ns,), dtype=jnp.asarray(trig.cosmu).dtype)
+
+    dtype = jnp.asarray(trig.cosmu).dtype
+    hs = jnp.asarray(s[1] - s[0], dtype=dtype)
+
+    # Import preconditioner helpers lazily to avoid circular imports.
+    from . import preconditioner_1d_jax as _p1d
+
+    w_int = _p1d._wint_from_config(cfg=cfg, dtype=dtype)
+    sqrt_sf, sqrt_sh = _p1d._sqrt_profiles_from_ns(ns, dtype=dtype)
+    sm, sp = _p1d._sm_sp_from_profiles(sqrt_sf, sqrt_sh)
+    delta_s = jnp.where(ns >= 2, s[1] - s[0], jnp.asarray(1.0, dtype=dtype))
+
+    r12 = jnp.asarray(bc.jac.r12, dtype=dtype)[1:]
+    tau = jnp.asarray(bc.jac.tau, dtype=dtype)[1:]
+    total_pressure = jnp.asarray(bc.bsq, dtype=dtype)[1:]
+    bsupv = jnp.asarray(bc.bsupv, dtype=dtype)[1:]
+    sqrtg = jnp.asarray(bc.jac.sqrtg, dtype=dtype)[1:]
+
+    # R-like preconditioner (uses Z-derivatives).
+    _axm_r, axd_r, _bxm_r, _bxd_r, _cxd_r = _p1d._compute_preconditioning_matrix(
+        xs=jnp.asarray(bc.jac.zs, dtype=dtype)[1:],
+        xu12=jnp.asarray(bc.jac.zu12, dtype=dtype)[1:],
+        xu_e=jnp.asarray(k.pzu_even, dtype=dtype),
+        xu_o=jnp.asarray(k.pzu_odd, dtype=dtype),
+        x1_o=jnp.asarray(k.pz1_odd, dtype=dtype),
+        r12=r12,
+        total_pressure=total_pressure,
+        tau=tau,
+        bsupv=bsupv,
+        sqrtg=sqrtg,
+        w_int=w_int,
+        sqrt_sh=sqrt_sh,
+        sm=sm,
+        sp=sp,
+        delta_s=delta_s,
+        ns_full=ns,
+    )
+    # Z-like preconditioner (uses R-derivatives).
+    _axm_z, axd_z, _bxm_z, _bxd_z, _cxd_z = _p1d._compute_preconditioning_matrix(
+        xs=jnp.asarray(bc.jac.rs, dtype=dtype)[1:],
+        xu12=jnp.asarray(bc.jac.ru12, dtype=dtype)[1:],
+        xu_e=jnp.asarray(k.pru_even, dtype=dtype),
+        xu_o=jnp.asarray(k.pru_odd, dtype=dtype),
+        x1_o=jnp.asarray(k.pr1_odd, dtype=dtype),
+        r12=r12,
+        total_pressure=total_pressure,
+        tau=tau,
+        bsupv=bsupv,
+        sqrtg=sqrtg,
+        w_int=w_int,
+        sqrt_sh=sqrt_sh,
+        sm=sm,
+        sp=sp,
+        delta_s=delta_s,
+        ns_full=ns,
+    )
+
+    # Use the m-parity=0 diagonal (Fortran index 1).
+    ard1 = jnp.asarray(axd_r[:, 0], dtype=dtype)
+    azd1 = jnp.asarray(axd_z[:, 0], dtype=dtype)
+
+    # Flux-surface norms of ru0/zu0 (bcovar.f).
+    w_theta = jnp.asarray(trig.cosmui3[:, 0], dtype=dtype) / jnp.asarray(trig.mscale[0], dtype=dtype)
+    wint = w_theta[:, None] * jnp.ones((int(trig.cosnv.shape[0]),), dtype=dtype)[None, :]
+    wint3 = wint[None, :, :]
+    ru0 = jnp.asarray(ru0, dtype=dtype)
+    zu0 = jnp.asarray(zu0, dtype=dtype)
+    arnorm = jnp.sum((ru0 * ru0) * wint3, axis=(1, 2))
+    aznorm = jnp.sum((zu0 * zu0) * wint3, axis=(1, 2))
+    arnorm = jnp.where(arnorm != 0.0, arnorm, jnp.ones_like(arnorm))
+    aznorm = jnp.where(aznorm != 0.0, aznorm, jnp.ones_like(aznorm))
+
+    # bcovar.f scaling for tcon_mul (with clamped tcon0).
+    tcon0 = min(abs(float(tcon0)), 1.0)
+    ns_f = float(ns)
+    tcon_mul = tcon0 * (1.0 + ns_f * (1.0 / 60.0 + ns_f / (200.0 * 120.0)))
+    tcon_mul = tcon_mul / ((4.0 * (float(trig.r0scale) ** 2)) ** 2)
+
+    tcon = jnp.zeros((ns,), dtype=dtype)
+    if ns >= 3:
+        js = jnp.arange(ns, dtype=jnp.int32)
+        mask = (js >= 1) & (js <= (ns - 2))
+        ratio_r = jnp.abs(ard1) / arnorm
+        ratio_z = jnp.abs(azd1) / aznorm
+        core = jnp.minimum(ratio_r, ratio_z) * (jnp.asarray(tcon_mul, dtype=dtype) * (32.0 * hs) ** 2)
+        tcon = jnp.where(mask.astype(dtype), core, tcon)
         tcon = tcon.at[-1].set(0.5 * tcon[-2])
     return tcon
 
