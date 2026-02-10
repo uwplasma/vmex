@@ -521,6 +521,7 @@ def vmec_forces_rz_from_wout(
             },
         )
 
+    phips = wout_eff.phips
     bc = vmec_bcovar_half_mesh_from_wout(
         state=state,
         static=static,
@@ -556,8 +557,6 @@ def vmec_forces_rz_from_wout(
     Zu1 = _odd_internal_vmec(coeff_cos=state.Zcos, coeff_sin=state.Zsin, eval_fn=eval_fourier_dtheta)
     Rv1 = _odd_internal_vmec(coeff_cos=state.Rcos, coeff_sin=state.Rsin, eval_fn=eval_fourier_dzeta_phys)
     Zv1 = _odd_internal_vmec(coeff_cos=state.Zcos, coeff_sin=state.Zsin, eval_fn=eval_fourier_dzeta_phys)
-    Lu1 = _odd_internal_vmec(coeff_cos=state.Lcos, coeff_sin=state.Lsin, eval_fn=eval_fourier_dtheta)
-    Lv1 = _odd_internal_vmec(coeff_cos=state.Lcos, coeff_sin=state.Lsin, eval_fn=eval_fourier_dzeta_phys)
     Lu1 = _odd_internal_vmec(coeff_cos=state.Lcos, coeff_sin=state.Lsin, eval_fn=eval_fourier_dtheta)
     Lv1 = _odd_internal_vmec(coeff_cos=state.Lcos, coeff_sin=state.Lsin, eval_fn=eval_fourier_dzeta_phys)
 
@@ -671,7 +670,7 @@ def vmec_forces_rz_from_wout(
         crmn_o = guvs_i * pru_0 + gvvs_i * prv_0 + gvv_s * prv_1 + guv_s * pru_1
         czmn_o = guvs_i * pzu_0 + gvvs_i * pzv_0 + gvv_s * pzv_1 + guv_s * pzu_1
     else:
-        lamscale = jnp.asarray(lamscale_from_phips(wout_eff.phips, s))
+        lamscale = jnp.asarray(lamscale_from_phips(phips, s))
         if lamscale.ndim == 0:
             lamscale = jnp.full_like(s, lamscale)
         lamscale = lamscale[:, None, None]
@@ -785,6 +784,8 @@ def vmec_forces_rz_from_wout_reference_fields(
     Zu1 = _odd_internal_vmec(coeff_cos=state.Zcos, coeff_sin=state.Zsin, eval_fn=eval_fourier_dtheta)
     Rv1 = _odd_internal_vmec(coeff_cos=state.Rcos, coeff_sin=state.Rsin, eval_fn=eval_fourier_dzeta_phys)
     Zv1 = _odd_internal_vmec(coeff_cos=state.Zcos, coeff_sin=state.Zsin, eval_fn=eval_fourier_dzeta_phys)
+    Lu1 = _odd_internal_vmec(coeff_cos=state.Lcos, coeff_sin=state.Lsin, eval_fn=eval_fourier_dtheta)
+    Lv1 = _odd_internal_vmec(coeff_cos=state.Lcos, coeff_sin=state.Lsin, eval_fn=eval_fourier_dzeta_phys)
 
     pr1_0, pr1_1 = jnp.asarray(parity.R_even), jnp.asarray(R1)
     pz1_0, pz1_1 = jnp.asarray(parity.Z_even), jnp.asarray(Z1)
@@ -819,6 +820,7 @@ def vmec_forces_rz_from_wout_reference_fields(
     bsubu = jnp.asarray(eval_fourier(wout.bsubumnc, wout.bsubumns, basis_nyq))
     bsubv = jnp.asarray(eval_fourier(wout.bsubvmnc, wout.bsubvmns, basis_nyq))
     bmag = jnp.asarray(eval_fourier(wout.bmnc, wout.bmns, basis_nyq))
+    phips = wout.phips
 
     # bsq = |B|^2/2 + p (half mesh).
     pres_h = jnp.asarray(wout.pres)[:, None, None]
@@ -948,7 +950,7 @@ def vmec_forces_rz_from_wout_reference_fields(
         crmn_o = guvs_i * pru_0 + gvvs_i * prv_0 + gvv_s * prv_1 + guv_s * pru_1
         czmn_o = guvs_i * pzu_0 + gvvs_i * pzv_0 + gvv_s * pzv_1 + guv_s * pzu_1
     else:
-        lamscale = jnp.asarray(lamscale_from_phips(wout_eff.phips, s))
+        lamscale = jnp.asarray(lamscale_from_phips(phips, s))
         if lamscale.ndim == 0:
             lamscale = jnp.full_like(s, lamscale)
         lamscale = lamscale[:, None, None]
@@ -959,7 +961,7 @@ def vmec_forces_rz_from_wout_reference_fields(
 
     # Build lambda-force kernels (blmn/clmn) using the VMEC formulas but with
     # reference-field inputs.
-    lamscale = lamscale_from_phips(wout_eff.phips, s)
+    lamscale = lamscale_from_phips(phips, s)
 
     # For reference-field parity we form the lambda-force kernels from the
     # stored wout bsubu/bsubv fields by averaging to the full mesh. This avoids

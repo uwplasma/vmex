@@ -338,6 +338,7 @@ def main() -> None:
         if not input_path.exists():
             raise FileNotFoundError(f"Missing bundled input: {input_path}")
 
+        print(f"[bench] vmec_jax case={case} iters={args.iters} ns_override={args.ns_override}", flush=True)
         traces.append(
             _run_vmec_jax(
                 input_path=input_path,
@@ -352,6 +353,10 @@ def main() -> None:
         # External backends are optional and may not be installed.
         # Keep the overall script robust: skip a backend rather than failing the run.
         if bool(args.run_vmec2000):
+            print(
+                f"[bench] vmec2000 case={case} iters={args.iters} ns_override={args.vmec2000_ns_override}",
+                flush=True,
+            )
             exec_path = Path(args.vmec2000_exec).expanduser() if args.vmec2000_exec else None
             try:
                 tvm = _run_vmec2000_exec(
