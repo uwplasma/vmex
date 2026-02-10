@@ -1,8 +1,8 @@
-"""Compare VMEC2000 tomnsps dumps against vmec_jax internal tomnsps arrays.
+"""Compare VMEC2000 tomnsps-kernel dumps against vmec_jax force kernels.
 
-This tool runs the VMEC2000 executable with a tomnsps dump enabled and compares
-the dumped internal Fourier force blocks against vmec_jax's tomnsps output
-for the same iteration.
+This tool runs the VMEC2000 executable with a tomnsps *kernel* dump enabled and
+compares the dumped real-space kernel blocks against vmec_jax's force-kernel
+arrays for the same iteration.
 """
 
 from __future__ import annotations
@@ -23,22 +23,26 @@ import vmec_jax.api as vj
 
 
 @dataclass(frozen=True)
-class TomnspsDump:
+class KernelDump:
     ns: int
-    mpol1: int
-    ntor: int
-    frcc: np.ndarray
-    frss: np.ndarray
-    fzsc: np.ndarray
-    fzcs: np.ndarray
-    flsc: np.ndarray
-    flcs: np.ndarray
+    ntheta3: int
+    nzeta: int
+    armn: np.ndarray
+    brmn: np.ndarray
+    crmn: np.ndarray
+    azmn: np.ndarray
+    bzmn: np.ndarray
+    czmn: np.ndarray
+    arcon: np.ndarray
+    azcon: np.ndarray
+    blmn: np.ndarray
+    clmn: np.ndarray
 
 
-def _parse_dump(path: Path) -> TomnspsDump:
+def _parse_kernel_dump(path: Path) -> KernelDump:
     ns = None
-    mpol1 = None
-    ntor = None
+    ntheta3 = None
+    nzeta = None
     rows = []
     with path.open("r", encoding="utf-8") as f:
         for line in f:
@@ -48,77 +52,78 @@ def _parse_dump(path: Path) -> TomnspsDump:
             if line.startswith("ns="):
                 ns = int(line.split("=", 1)[1])
                 continue
-            if line.startswith("mpol1="):
-                mpol1 = int(line.split("=", 1)[1])
+            if line.startswith("ntheta3="):
+                ntheta3 = int(line.split("=", 1)[1])
                 continue
-            if line.startswith("ntor="):
-                ntor = int(line.split("=", 1)[1])
+            if line.startswith("nzeta="):
+                nzeta = int(line.split("=", 1)[1])
                 continue
             if line.startswith("columns:"):
                 continue
             rows.append(line)
-    if ns is None or mpol1 is None or ntor is None:
-        raise ValueError(f"Missing header in tomnsps dump: {path}")
+    if ns is None or ntheta3 is None or nzeta is None:
+        raise ValueError(f"Missing header in kernel dump: {path}")
 
-    shape = (ns, mpol1 + 1, ntor + 1)
-    frcc = np.zeros(shape, dtype=float)
-    frss = np.zeros(shape, dtype=float)
-    fzsc = np.zeros(shape, dtype=float)
-    fzcs = np.zeros(shape, dtype=float)
-    flsc = np.zeros(shape, dtype=float)
-    flcs = np.zeros(shape, dtype=float)
+    shape = (ns, ntheta3, nzeta, 2)
+    def _zeros():
+        return np.zeros(shape, dtype=float)
+
+    armn = _zeros()
+    brmn = _zeros()
+    crmn = _zeros()
+    azmn = _zeros()
+    bzmn = _zeros()
+    czmn = _zeros()
+    arcon = _zeros()
+    azcon = _zeros()
+    blmn = _zeros()
+    clmn = _zeros()
 
     for line in rows:
         toks = line.split()
-        if len(toks) < 9:
+        # 4 integer columns + 10 float columns = 14 tokens total.
+        if len(toks) < 14:
             continue
         js = int(toks[0]) - 1
-        m = int(toks[1])
-        n = int(toks[2])
-        frcc[js, m, n] = float(toks[3].replace("D", "E").replace("d", "E"))
-        frss[js, m, n] = float(toks[4].replace("D", "E").replace("d", "E"))
-        fzsc[js, m, n] = float(toks[5].replace("D", "E").replace("d", "E"))
-        fzcs[js, m, n] = float(toks[6].replace("D", "E").replace("d", "E"))
-        flsc[js, m, n] = float(toks[7].replace("D", "E").replace("d", "E"))
-        flcs[js, m, n] = float(toks[8].replace("D", "E").replace("d", "E"))
+        lt = int(toks[1]) - 1
+        lz = int(toks[2]) - 1
+        mp = int(toks[3])
+        vals = [float(t.replace("D", "E").replace("d", "E")) for t in toks[4:14]]
+        armn[js, lt, lz, mp] = vals[0]
+        brmn[js, lt, lz, mp] = vals[1]
+        crmn[js, lt, lz, mp] = vals[2]
+        azmn[js, lt, lz, mp] = vals[3]
+        bzmn[js, lt, lz, mp] = vals[4]
+        czmn[js, lt, lz, mp] = vals[5]
+        arcon[js, lt, lz, mp] = vals[6]
+        azcon[js, lt, lz, mp] = vals[7]
+        blmn[js, lt, lz, mp] = vals[8]
+        clmn[js, lt, lz, mp] = vals[9]
 
-    return TomnspsDump(
+    return KernelDump(
         ns=int(ns),
-        mpol1=int(mpol1),
-        ntor=int(ntor),
-        frcc=frcc,
-        frss=frss,
-        fzsc=fzsc,
-        fzcs=fzcs,
-        flsc=flsc,
-        flcs=flcs,
+        ntheta3=int(ntheta3),
+        nzeta=int(nzeta),
+        armn=armn,
+        brmn=brmn,
+        crmn=crmn,
+        azmn=azmn,
+        bzmn=bzmn,
+        czmn=czmn,
+        arcon=arcon,
+        azcon=azcon,
+        blmn=blmn,
+        clmn=clmn,
     )
 
 
-def _max_abs_rel(vmec_vals: np.ndarray, jax_vals: np.ndarray, *, eps: float = 1e-30) -> tuple[float, float]:
-    vmec_vals = np.asarray(vmec_vals, dtype=float)
-    jax_vals = np.asarray(jax_vals, dtype=float)
-    diff = np.abs(vmec_vals - jax_vals)
-    if diff.size == 0:
-        return float("nan"), float("nan")
-    idx = int(np.argmax(diff))
-    max_abs = float(diff.flat[idx])
-    denom = max(eps, float(abs(vmec_vals.flat[idx])))
-    return max_abs, max_abs / denom
-
-
-def _max_diff_report(
-    vmec_vals: np.ndarray, jax_vals: np.ndarray, *, eps: float = 1e-30
-) -> tuple[float, float, tuple[int, ...], float, float]:
+def _max_diff_report(vmec_vals: np.ndarray, jax_vals: np.ndarray, *, eps: float = 1e-30):
     vmec_vals = np.asarray(vmec_vals, dtype=float)
     jax_vals = np.asarray(jax_vals, dtype=float)
     diff = np.abs(vmec_vals - jax_vals)
     if diff.size == 0:
         return float("nan"), float("nan"), (), float("nan"), float("nan")
-    mask = np.isfinite(diff)
-    if not bool(np.any(mask)):
-        return float("nan"), float("nan"), (), float("nan"), float("nan")
-    idx_flat = int(np.argmax(np.where(mask, diff, -np.inf)))
+    idx_flat = int(np.argmax(diff))
     idx = tuple(int(i) for i in np.unravel_index(idx_flat, diff.shape))
     max_abs = float(diff[idx])
     vmec_v = float(vmec_vals[idx])
@@ -205,7 +210,7 @@ def main() -> None:
     _cfg_in, _indata_in = vj.load_input(input_path)
     ftol_default = float(_indata_in.get_float("FTOL", 1e-10))
 
-    with tempfile.TemporaryDirectory(prefix="vmec2000_tomnsp_") as td:
+    with tempfile.TemporaryDirectory(prefix="vmec2000_kernel_") as td:
         workdir = Path(td)
         input_local = workdir / input_path.name
         shutil.copy2(input_path, input_local)
@@ -223,24 +228,24 @@ def main() -> None:
         input_local.write_text(_patch_indata(input_local.read_text(), updates=updates))
 
         env = {
-            "VMEC_DUMP_TOMNSPS": "1",
+            "VMEC_DUMP_TOMNSPS_KERNELS": "1",
             "VMEC_DUMP_ITER": str(int(args.iter)),
             "VMEC_DUMP_DIR": str(workdir),
         }
         cmd = [str(vmec2000_exe), input_local.name]
         subprocess.run(cmd, cwd=workdir, env={**os.environ, **env}, check=False, capture_output=True, text=True)
 
-        vmec_dump_path = workdir / f"tomnsps_iter{int(args.iter)}.dat"
+        vmec_dump_path = workdir / f"tomnsps_kernels_iter{int(args.iter)}.dat"
         if not vmec_dump_path.exists():
-            raise SystemExit(f"VMEC2000 dump not found: {vmec_dump_path}")
-        vmec_dump = _parse_dump(vmec_dump_path)
+            raise SystemExit(f"VMEC2000 kernel dump not found: {vmec_dump_path}")
+        vmec_dump = _parse_kernel_dump(vmec_dump_path)
 
-        # Run vmec_jax with tomnsps dump enabled.
+        # Run vmec_jax with force-kernel dump enabled.
         jax_dump_dir = workdir / "jax"
         jax_dump_dir.mkdir(parents=True, exist_ok=True)
         with _env(
             {
-                "VMEC_JAX_DUMP_TOMNSPS": "1",
+                "VMEC_JAX_DUMP_FORCE_KERNELS": "1",
                 "VMEC_JAX_DUMP_ITER": str(int(args.iter)),
                 "VMEC_JAX_DUMP_DIR": str(jax_dump_dir),
             }
@@ -254,41 +259,52 @@ def main() -> None:
                 verbose=False,
             )
 
-        jax_dump_path = jax_dump_dir / f"tomnsps_raw_iter{int(args.iter)}.npz"
+        jax_dump_path = jax_dump_dir / f"force_kernels_raw_iter{int(args.iter)}.npz"
         if not jax_dump_path.exists():
-            raise SystemExit(f"vmec_jax dump not found: {jax_dump_path}")
+            raise SystemExit(f"vmec_jax kernel dump not found: {jax_dump_path}")
         jax_dump = np.load(jax_dump_path)
 
         def _arr(name: str, fallback: np.ndarray) -> np.ndarray:
             arr = jax_dump.get(name, fallback)
             return np.asarray(arr, dtype=float)
 
-        frcc = _arr("frcc", np.zeros_like(vmec_dump.frcc))
-        frss = _arr("frss", np.zeros_like(vmec_dump.frss))
-        fzsc = _arr("fzsc", np.zeros_like(vmec_dump.fzsc))
-        fzcs = _arr("fzcs", np.zeros_like(vmec_dump.fzcs))
-        flsc = _arr("flsc", np.zeros_like(vmec_dump.flsc))
-        flcs = _arr("flcs", np.zeros_like(vmec_dump.flcs))
-
-        print("tomnsps dump comparison (vmec2000 vs vmec_jax)")
-        for name, v, j in [
-            ("frcc", vmec_dump.frcc, frcc),
-            ("frss", vmec_dump.frss, frss),
-            ("fzsc", vmec_dump.fzsc, fzsc),
-            ("fzcs", vmec_dump.fzcs, fzcs),
-            ("flsc", vmec_dump.flsc, flsc),
-            ("flcs", vmec_dump.flcs, flcs),
-        ]:
+        def _compare(name: str, v: np.ndarray, j: np.ndarray) -> None:
             max_abs, max_rel, idx, vmec_v, jax_v = _max_diff_report(v, j)
             if len(idx) == 3:
-                js, m, n = idx
-                loc = f"(js={js+1}, m={m}, n={n})"
+                js, lt, lz = idx
+                loc = f"(js={js+1}, lt={lt+1}, lz={lz+1})"
             else:
                 loc = f"{idx}"
             print(
-                f"  {name:4s}: max_abs={max_abs:.3e}  max_rel={max_rel:.3e}  at {loc}  "
+                f"  {name:6s}: max_abs={max_abs:.3e}  max_rel={max_rel:.3e}  at {loc}  "
                 f"vmec={vmec_v:.8e}  jax={jax_v:.8e}"
             )
+
+        print("tomnsps kernel comparison (vmec2000 vs vmec_jax)")
+        pairs = [
+            ("armn_e", vmec_dump.armn[:, :, :, 0], _arr("armn_e", np.zeros_like(vmec_dump.armn[:, :, :, 0]))),
+            ("armn_o", vmec_dump.armn[:, :, :, 1], _arr("armn_o", np.zeros_like(vmec_dump.armn[:, :, :, 1]))),
+            ("brmn_e", vmec_dump.brmn[:, :, :, 0], _arr("brmn_e", np.zeros_like(vmec_dump.brmn[:, :, :, 0]))),
+            ("brmn_o", vmec_dump.brmn[:, :, :, 1], _arr("brmn_o", np.zeros_like(vmec_dump.brmn[:, :, :, 1]))),
+            ("crmn_e", vmec_dump.crmn[:, :, :, 0], _arr("crmn_e", np.zeros_like(vmec_dump.crmn[:, :, :, 0]))),
+            ("crmn_o", vmec_dump.crmn[:, :, :, 1], _arr("crmn_o", np.zeros_like(vmec_dump.crmn[:, :, :, 1]))),
+            ("azmn_e", vmec_dump.azmn[:, :, :, 0], _arr("azmn_e", np.zeros_like(vmec_dump.azmn[:, :, :, 0]))),
+            ("azmn_o", vmec_dump.azmn[:, :, :, 1], _arr("azmn_o", np.zeros_like(vmec_dump.azmn[:, :, :, 1]))),
+            ("bzmn_e", vmec_dump.bzmn[:, :, :, 0], _arr("bzmn_e", np.zeros_like(vmec_dump.bzmn[:, :, :, 0]))),
+            ("bzmn_o", vmec_dump.bzmn[:, :, :, 1], _arr("bzmn_o", np.zeros_like(vmec_dump.bzmn[:, :, :, 1]))),
+            ("czmn_e", vmec_dump.czmn[:, :, :, 0], _arr("czmn_e", np.zeros_like(vmec_dump.czmn[:, :, :, 0]))),
+            ("czmn_o", vmec_dump.czmn[:, :, :, 1], _arr("czmn_o", np.zeros_like(vmec_dump.czmn[:, :, :, 1]))),
+            ("arcon_e", vmec_dump.arcon[:, :, :, 0], _arr("arcon_e", np.zeros_like(vmec_dump.arcon[:, :, :, 0]))),
+            ("arcon_o", vmec_dump.arcon[:, :, :, 1], _arr("arcon_o", np.zeros_like(vmec_dump.arcon[:, :, :, 1]))),
+            ("azcon_e", vmec_dump.azcon[:, :, :, 0], _arr("azcon_e", np.zeros_like(vmec_dump.azcon[:, :, :, 0]))),
+            ("azcon_o", vmec_dump.azcon[:, :, :, 1], _arr("azcon_o", np.zeros_like(vmec_dump.azcon[:, :, :, 1]))),
+            ("blmn_e", vmec_dump.blmn[:, :, :, 0], _arr("blmn_e", np.zeros_like(vmec_dump.blmn[:, :, :, 0]))),
+            ("blmn_o", vmec_dump.blmn[:, :, :, 1], _arr("blmn_o", np.zeros_like(vmec_dump.blmn[:, :, :, 1]))),
+            ("clmn_e", vmec_dump.clmn[:, :, :, 0], _arr("clmn_e", np.zeros_like(vmec_dump.clmn[:, :, :, 0]))),
+            ("clmn_o", vmec_dump.clmn[:, :, :, 1], _arr("clmn_o", np.zeros_like(vmec_dump.clmn[:, :, :, 1]))),
+        ]
+        for name, v, j in pairs:
+            _compare(name, v, j)
 
 
 if __name__ == "__main__":

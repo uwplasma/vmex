@@ -124,6 +124,59 @@ def _maybe_dump_tomnsps(*, frzl, static, iter_idx: int, label: str = "raw") -> N
     )
 
 
+def _maybe_dump_force_kernels(*, k, static, iter_idx: int, label: str = "raw") -> None:
+    env = os.getenv("VMEC_JAX_DUMP_FORCE_KERNELS", "")
+    if not env or env == "0":
+        return
+    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
+    if iters is not None and int(iter_idx) not in iters:
+        return
+    outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    path = outdir / f"force_kernels_{label}_iter{int(iter_idx)}.npz"
+
+    def _arr(x):
+        return np.asarray(x) if x is not None else np.zeros((0,), dtype=float)
+
+    np.savez(
+        path,
+        armn_e=_arr(getattr(k, "armn_e", None)),
+        armn_o=_arr(getattr(k, "armn_o", None)),
+        brmn_e=_arr(getattr(k, "brmn_e", None)),
+        brmn_o=_arr(getattr(k, "brmn_o", None)),
+        crmn_e=_arr(getattr(k, "crmn_e", None)),
+        crmn_o=_arr(getattr(k, "crmn_o", None)),
+        azmn_e=_arr(getattr(k, "azmn_e", None)),
+        azmn_o=_arr(getattr(k, "azmn_o", None)),
+        bzmn_e=_arr(getattr(k, "bzmn_e", None)),
+        bzmn_o=_arr(getattr(k, "bzmn_o", None)),
+        czmn_e=_arr(getattr(k, "czmn_e", None)),
+        czmn_o=_arr(getattr(k, "czmn_o", None)),
+        arcon_e=_arr(getattr(k, "arcon_e", None)),
+        arcon_o=_arr(getattr(k, "arcon_o", None)),
+        azcon_e=_arr(getattr(k, "azcon_e", None)),
+        azcon_o=_arr(getattr(k, "azcon_o", None)),
+        gcon=_arr(getattr(k, "gcon", None)),
+        tcon=_arr(getattr(k, "tcon", None)),
+        blmn_e=_arr(getattr(getattr(k, "bc", None), "blmn_even", None)),
+        blmn_o=_arr(getattr(getattr(k, "bc", None), "blmn_odd", None)),
+        clmn_e=_arr(getattr(getattr(k, "bc", None), "clmn_even", None)),
+        clmn_o=_arr(getattr(getattr(k, "bc", None), "clmn_odd", None)),
+        pr1_even=_arr(getattr(k, "pr1_even", None)),
+        pr1_odd=_arr(getattr(k, "pr1_odd", None)),
+        pz1_even=_arr(getattr(k, "pz1_even", None)),
+        pz1_odd=_arr(getattr(k, "pz1_odd", None)),
+        pru_even=_arr(getattr(k, "pru_even", None)),
+        pru_odd=_arr(getattr(k, "pru_odd", None)),
+        pzu_even=_arr(getattr(k, "pzu_even", None)),
+        pzu_odd=_arr(getattr(k, "pzu_odd", None)),
+        ns=int(static.cfg.ns),
+        ntheta=int(static.cfg.ntheta),
+        nzeta=int(static.cfg.nzeta),
+        lasym=bool(static.cfg.lasym),
+    )
+
+
 def _gc_from_frzl(*, frzl, cfg):
     frcc = np.asarray(frzl.frcc)
     ns, mpol, nrange = frcc.shape
@@ -2460,6 +2513,7 @@ def solve_fixed_boundary_residual_iter(
         *,
         include_edge: bool,
         zero_m1: Any,
+        constraint_precond_diag: tuple[Any, Any] | None = None,
         constraint_tcon: Any | None = None,
         norms_override: Any | None = None,
         rz_scale_override: Any | None = None,
@@ -2473,9 +2527,13 @@ def solve_fixed_boundary_residual_iter(
             indata=None,
             constraint_tcon0=constraint_tcon0,
             constraint_tcon=constraint_tcon,
+            constraint_precond_diag=constraint_precond_diag,
             use_vmec_synthesis=True,
             trig=trig,
+            iter_idx=iter_idx,
         )
+        if iter_idx is not None:
+            _maybe_dump_force_kernels(k=k, static=static, iter_idx=int(iter_idx), label="raw")
         frzl = vmec_residual_internal_from_kernels(
             k,
             cfg_ntheta=int(static.cfg.ntheta),
@@ -2777,6 +2835,7 @@ def solve_fixed_boundary_residual_iter(
     # Garabedian time-step control depends on ratios of the *preconditioned*
     # residual scalars.
     vmec2000_cache_valid = False
+    cache_precond_diag = None
     cache_tcon = None
     cache_norms = None
     cache_rz_scale = None
@@ -2834,12 +2893,14 @@ def solve_fixed_boundary_residual_iter(
         )
         bcovar_update_history.append(int(bool(need_bcovar_update)))
 
-        constraint_tcon = None
+        constraint_precond_diag = None
+        constraint_tcon_override = None
         norms_override = None
         rz_scale_override = None
         l_scale_override = None
         if bool(vmec2000_control) and bool(vmec2000_cache_valid) and (not bool(need_bcovar_update)):
-            constraint_tcon = cache_tcon
+            constraint_precond_diag = cache_precond_diag
+            constraint_tcon_override = cache_tcon
             norms_override = cache_norms
             rz_scale_override = cache_rz_scale
             l_scale_override = cache_l_scale
@@ -2848,7 +2909,8 @@ def solve_fixed_boundary_residual_iter(
             state,
             include_edge=include_edge,
             zero_m1=zero_m1,
-            constraint_tcon=constraint_tcon,
+            constraint_precond_diag=constraint_precond_diag,
+            constraint_tcon=constraint_tcon_override,
             norms_override=norms_override,
             rz_scale_override=rz_scale_override,
             l_scale_override=l_scale_override,
@@ -2856,9 +2918,22 @@ def solve_fixed_boundary_residual_iter(
         )
         if bool(vmec2000_control) and bool(need_bcovar_update):
             if constraint_tcon0 is None or float(constraint_tcon0) == 0.0:
-                cache_tcon = None
+                cache_precond_diag = None
+                cache_tcon = jnp.zeros((int(s.shape[0]),), dtype=jnp.asarray(state.Rcos).dtype)
             else:
-                cache_tcon = getattr(k, "tcon", None)
+                from .vmec_constraints import precondn_diag_axd1_from_bcovar
+
+                ard1, azd1 = precondn_diag_axd1_from_bcovar(
+                    trig=trig,
+                    s=s,
+                    bsq=k.bc.bsq,
+                    r12=k.bc.jac.r12,
+                    sqrtg=k.bc.jac.sqrtg,
+                    ru12=k.bc.jac.ru12,
+                    zu12=k.bc.jac.zu12,
+                )
+                cache_precond_diag = (ard1, azd1)
+                cache_tcon = jnp.asarray(k.tcon)
             cache_norms = norms_used
             cache_rz_scale = rz_scale
             cache_l_scale = l_scale

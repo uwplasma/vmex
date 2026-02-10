@@ -205,6 +205,12 @@ For fixed-boundary parity, ``vmec-jax`` computes the constraint multiplier
 ``bcovar.f`` formula), with a conservative heuristic fallback when the
 flux-surface norms are ill-conditioned.
 
+Note: in VMEC2000, ``tcon(js)`` is **not** recomputed every nonlinear iteration.
+It is refreshed only when VMEC refreshes the 1D preconditioner blocks
+(``vmec_params.f: ns4=25``) and is reused verbatim between refreshes. This
+caching affects the per-iteration trace and must be mirrored for exact
+iteration-by-iteration parity.
+
 Radial preconditioner and time-stepper (VMEC-quality solve)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -229,11 +235,11 @@ linear solves) and expose them in the fixed-boundary solver path.
    Schematic of VMEC's ``alias``/``gcon`` constraint-force pathway as implemented in ``vmec-jax``.
 
 At present, ``tcon(js)`` is computed from a JAX port of the diagonal
-``precondn`` contribution used by VMEC's ``bcovar.f`` for the constraint scaling,
-with a conservative heuristic fallback that matches VMEC's scaling structure
-(``tcon0`` dependence and the :math:`(32\,hs)^2` factor). This is sufficient to
-exercise the full ``alias`` / constraint-force pathway under ``jit``; it is not
-yet expected to be perfect parity with VMEC's full preconditioner machinery.
+``precondn`` contribution used by VMEC's ``bcovar.f`` for the constraint scaling
+on the axisymmetric path, with a conservative heuristic fallback on 3D/asymmetric
+cases (matching VMEC's ``tcon0`` dependence and the :math:`(32\,hs)^2` factor).
+This is sufficient to exercise the full ``alias`` / constraint-force pathway
+under ``jit`` while we continue parity work on the full preconditioner machinery.
 
 Lambda-only solve (inner solve)
 -------------------------------

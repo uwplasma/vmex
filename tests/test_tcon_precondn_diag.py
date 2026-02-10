@@ -80,9 +80,10 @@ def test_tcon_from_bcovar_precondn_diag_matches_reference_formula():
     tcon_mul = tcon_mul / ((4.0 * (float(trig.r0scale) ** 2)) ** 2)
 
     ref = np.zeros((ns,), dtype=float)
+    # VMEC sets `tcon(1)=tcon0` (clamped) before overwriting the interior.
+    ref[0] = tcon0_clamped
     for js in range(1, ns - 1):
         ref[js] = min(abs(ard1[js]) / arnorm[js], abs(azd1[js]) / aznorm[js]) * (tcon_mul * (32.0 * hs) ** 2)
     ref[-1] = 0.5 * ref[-2]
 
     assert np.allclose(out_np, ref, rtol=2e-12, atol=2e-12)
-
