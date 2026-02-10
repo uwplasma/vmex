@@ -116,8 +116,5 @@ def test_bsup_from_geom_matches_wout_on_outer_surfaces(case_name: str, input_rel
 
     # These tolerances are intentionally loose while axis/half-mesh conventions
     # are refined. Outer surfaces already show good parity for most cases.
-    if err_u >= 0.4 or err_v >= 0.3:
-        pytest.xfail(
-            "bsup parity pending full-mesh/half-mesh averaging alignment with VMEC; "
-            f"err_u={err_u:.3g}, err_v={err_v:.3g}"
-        )
+    assert err_u < 0.4
+    assert err_v < 0.3

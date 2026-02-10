@@ -39,7 +39,7 @@ def main() -> None:
         default=["circular_tokamak", "shaped_tokamak_pressure", "solovev"],
     )
     p.add_argument("--solver", default="vmec2000_iter")
-    p.add_argument("--max-iter", type=int, default=30)
+    p.add_argument("--max-iter", type=int, default=10)
     p.add_argument(
         "--ns-override",
         type=int,

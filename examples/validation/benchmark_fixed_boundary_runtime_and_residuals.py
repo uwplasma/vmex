@@ -247,7 +247,7 @@ def main() -> None:
         default=["circular_tokamak", "shaped_tokamak_pressure", "solovev", "purely_toroidal_field"],
     )
     # Keep the default small; this script is for README figures, not profiling.
-    p.add_argument("--iters", type=int, default=60, help="Fixed iteration budget for all backends.")
+    p.add_argument("--iters", type=int, default=10, help="Fixed iteration budget for all backends.")
     p.add_argument(
         "--ns-override",
         type=int,
@@ -324,8 +324,8 @@ def main() -> None:
     if bool(args.fast):
         if cases == ["circular_tokamak", "shaped_tokamak_pressure", "solovev", "purely_toroidal_field"]:
             cases = ["circular_tokamak"]
-        if args.iters == 60:
-            args.iters = 20
+        if args.iters == 10:
+            args.iters = 5
         if args.ns_override is None:
             args.ns_override = 9
 

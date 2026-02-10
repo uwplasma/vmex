@@ -31,7 +31,10 @@ def test_step5_solve_lambda_decreases_wb_toward_wout(load_case_li383_low_res):
 
     # VMEC's lambda in wout is scaled; recover lamscale from phips.
     lamscale = float(np.asarray(lamscale_from_phips(wout.phips, static.s)))
-    chips = np.asarray(chips_from_chipf(wout.chipf))
+    scale = float(wout.signgs) * float(2.0 * np.pi)
+    phipf_int = np.asarray(wout.phipf) / scale
+    chipf_int = np.asarray(wout.chipf) / scale
+    chips = np.asarray(chips_from_chipf(chipf_int))
 
     # Build an initial state with identical geometry but lambda=0.
     st0 = st_ref.__class__(
@@ -47,7 +50,7 @@ def test_step5_solve_lambda_decreases_wb_toward_wout(load_case_li383_low_res):
     res = solve_lambda_gd(
         st0,
         static,
-        phipf=wout.phipf,
+        phipf=phipf_int,
         chipf=chips,
         signgs=wout.signgs,
         lamscale=lamscale,
@@ -69,7 +72,7 @@ def test_step5_solve_lambda_decreases_wb_toward_wout(load_case_li383_low_res):
         sqrtg=sqrtg_ref,
         lam_u=lam_u,
         lam_v=lam_v,
-        phipf=wout.phipf,
+        phipf=phipf_int,
         chipf=chips,
         signgs=wout.signgs,
         lamscale=lamscale,

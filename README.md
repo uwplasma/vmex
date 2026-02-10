@@ -57,8 +57,8 @@ JAX_DISABLE_JIT=1 python examples/showcase_axisym_input_to_wout.py \
 
 Interpretation of the snapshot figures:
 
-- The residual trace overlay is a **per-iteration VMEC2000 executable trace** (dashed) from `threed1.*`. The vmec_jax curve is still not monotone on this case at 20 iterations, indicating remaining mismatches in the VMEC-style update loop (see the internal force-block scan notes below for the current culprit).
-- The LCFS `|B|` panel compares *state-based* evaluation for both VMEC2000 and vmec_jax. Differences here reflect end-to-end solve mismatch rather than plotting; the current focus is lambda-force and time-step/preconditioner parity.
+- The residual trace overlay is a **per-iteration VMEC2000 executable trace** (dashed) from `threed1.*`. With the latest lambda scaling fixes, vmec_jax no longer blows up in the first 10 iterations on this case, but the curves still separate after the first couple of steps.
+- The LCFS `|B|` panel now uses **vmecPlot2-style grids** (theta/zeta resolution and toroidal-angle conventions) for both VMEC2000 and vmec_jax. Differences here reflect end-to-end solve mismatch rather than plotting.
 
 ## Parity status (VMEC2000)
 
@@ -96,14 +96,14 @@ Interpretation:
 
 Iteration trace parity (VMEC2000 executable, reduced grid):
 
-- Single-grid axisym cases (``circular_tokamak``, ``solovev``, ``shaped_tokamak_pressure``) match ``fsq*`` and preconditioned scalars to ~1e-3 relative at iter 1 (e.g., ``fsqz`` differs at the 1e-3 level in ``circular_tokamak``); later iterations diverge as the lambda-force mismatch compounds.
+- Single-grid axisym cases (``circular_tokamak``, ``solovev``, ``shaped_tokamak_pressure``) match ``fsq*`` and preconditioned scalars to ~1e-3 relative at iter 1. After the first couple of steps, differences grow but remain bounded (no blow-up) while we align the update loop.
 - ``purely_toroidal_field`` multigrid trace matches through stage 4 iter 6, but ``r00``/``w`` diagnostics become ``NaN`` from iter 7 onward (state divergence still under investigation).
 - ``up_down_asymmetric_tokamak`` (``lasym=True``) shows large bcovar/force-kernel mismatches at iter 1; nonlinear trace diverges. This is the current top lasym parity blocker.
 
 Notes on the snapshot figures:
 
 - The residual trace overlay now uses the **VMEC2000 executable** (`xvmec2000`) per-iteration `threed1.*` table (dashed line). If the executable is not available, the plot falls back to a flat reference line at final `fsq_total`.
-- The `|B|` LCFS panel uses the *same* state-based evaluation path for VMEC2000 and vmec_jax. Differences here reflect end-to-end solve mismatch (not a plotting artifact). We are currently chasing initial-guess and preconditioner parity to close this gap.
+- The `|B|` LCFS panel uses the *same* vmecPlot2-style evaluation path for VMEC2000 and vmec_jax. Differences here reflect end-to-end solve mismatch (not a plotting artifact). We are currently chasing initial-guess and preconditioner parity to close this gap.
 
 Reproduce scalar residual parity (`fsqr/fsqz/fsql`) on reference states:
 

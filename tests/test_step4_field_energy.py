@@ -70,11 +70,8 @@ def test_step4_bsup_and_wb_against_wout_reference(load_case_circular_tokamak):
     # The Nyquist fields are not perfectly representable on the default grid; use RMS tolerances.
     rel_rms_u = _rms(du) / _rms(bsupu_ref[mask])
     rel_rms_v = _rms(dv) / _rms(bsupv_ref[mask])
-    if rel_rms_u >= 0.15 or rel_rms_v >= 0.05:
-        pytest.xfail(
-            "bsup parity pending full-mesh/half-mesh averaging alignment with VMEC; "
-            f"rel_rms_u={rel_rms_u:.3g}, rel_rms_v={rel_rms_v:.3g}"
-        )
+    assert rel_rms_u < 0.15
+    assert rel_rms_v < 0.05
 
     # Magnetic energy check using computed bsup and reference sqrtg (more stable than using our FD sqrtg).
     gtt = np.asarray(g.g_tt)

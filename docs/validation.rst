@@ -113,8 +113,8 @@ Current observed mismatches (circular_tokamak, 5-iter snapshot):
 - ``bmnc`` and LCFS :math:`|B|` plots differ at the ~5e-2 relative level.
 - ``buco``/``bvco`` are within a few percent; **``jcuru``/``jcurv`` scaling is now
   corrected** (remaining differences are tied to earlier-force parity).
-- ``bsupv`` parity tests are marked xfail while we align the full-mesh/half-mesh
-  averaging path with VMEC2000; this is tracked in the internal scan.
+- ``bsupv`` parity now matches VMEC2000 after aligning lambda scaling in the
+  wout->state reconstruction; remaining mismatches are tracked below.
 - ``betapol``, ``betator``, ``betaxis``, ``ctor``, and ``DMerc`` are present but
   still placeholders in ``vmec_jax`` (zeros) until the VMEC2000 diagnostics path
   is fully ported.
@@ -128,7 +128,12 @@ On ``shaped_tokamak_pressure`` (20-iter snapshot), the dominant gaps are:
 - ``rmnc/zmns`` differ at the ~1e-2 level (geometry still drifting in the nonlinear loop).
 
 These mismatches are now tracked explicitly so we can converge the diagnostics
-in step with the force/iteration parity work.
+in step with the force/iteration parity work. Recent progress includes:
+
+- Fixed lambda scaling in ``state_from_wout`` (bsupv parity now matches VMEC).
+- Aligned the VMEC-style update loop to use unscaled lambda forces
+  (``lambda_update_scale=1``), which prevents early-iteration blow-ups on
+  ``shaped_tokamak_pressure``.
 
 Scope and known gaps
 --------------------

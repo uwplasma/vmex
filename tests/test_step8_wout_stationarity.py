@@ -84,8 +84,4 @@ def test_step8_wout_state_is_nearly_stationary_for_total_energy():
     ss = float(sum(np.sum(a * a) for a in g_arrs))
     nn = int(sum(a.size for a in g_arrs))
     grad_rms = float(np.sqrt(ss / nn))
-    if grad_rms >= 1e-2:
-        pytest.xfail(
-            "stationarity parity pending bsup/full-mesh alignment with VMEC; "
-            f"grad_rms={grad_rms:.3g}"
-        )
+    assert grad_rms < 1e-2

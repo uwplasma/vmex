@@ -821,10 +821,15 @@ def state_from_wout(wout: WoutData) -> VMECState:
     else:
         s = np.linspace(0.0, 1.0, ns, dtype=float)
     lamscale = float(np.asarray(lamscale_from_phips(wout.phips, s)))
+    # VMEC's `wout` stores phipf scaled by 2π*signgs. Internally, lambda scaling
+    # uses the unscaled phipf (= phipf_internal). Align the reconstruction with
+    # bcovar's bsupv formula by undoing the 2π*signgs factor here.
+    scale = float(2.0 * np.pi * float(getattr(wout, "signgs", 1)))
+    phipf_internal = np.asarray(wout.phipf, dtype=float) / scale if scale != 0.0 else np.asarray(wout.phipf, dtype=float)
     if lamscale == 0.0:
         lam_scale = np.zeros((ns,), dtype=float)
     else:
-        lam_scale = np.asarray(wout.phipf, dtype=float) / lamscale  # (ns,)
+        lam_scale = phipf_internal / lamscale  # (ns,)
 
     # VMEC writes lambda in a backward-compatible *half-mesh* convention (wrout.f),
     # which is not the internal full-mesh representation used by `totzsps`/`bcovar`.
@@ -910,8 +915,8 @@ def state_from_wout(wout: WoutData) -> VMECState:
             lam_full = lam_full / float(lamscale)
         return lam_full
 
-    lmns_full = _lambda_full_from_wout(lam_wout=np.asarray(wout.lmns), m_modes=np.asarray(wout.xm), phipf=np.asarray(wout.phipf), lamscale=lamscale)
-    lmnc_full = _lambda_full_from_wout(lam_wout=np.asarray(wout.lmnc), m_modes=np.asarray(wout.xm), phipf=np.asarray(wout.phipf), lamscale=lamscale)
+    lmns_full = _lambda_full_from_wout(lam_wout=np.asarray(wout.lmns), m_modes=np.asarray(wout.xm), phipf=np.asarray(phipf_internal), lamscale=lamscale)
+    lmnc_full = _lambda_full_from_wout(lam_wout=np.asarray(wout.lmnc), m_modes=np.asarray(wout.xm), phipf=np.asarray(phipf_internal), lamscale=lamscale)
 
     return VMECState(
         layout=layout,
