@@ -521,7 +521,7 @@ def run_fixed_boundary(
                     precond_radial_alpha=0.5,
                     precond_lambda_alpha=0.5,
                     mode_diag_exponent=0.0,
-                    auto_flip_force=True,
+                    auto_flip_force=False,
                     divide_by_scalxc_for_update=False,
                     lambda_update_scale=float(2.0 * np.pi * float(signgs)),
                     enforce_vmec_lambda_axis=True,
@@ -529,7 +529,7 @@ def run_fixed_boundary(
                     strict_update=True,
                     backtracking=False,
                     reference_mode=False,
-                    use_restart_triggers=bool(use_restart_triggers) if use_restart_triggers is not None else False,
+                    use_restart_triggers=True if use_restart_triggers is None else bool(use_restart_triggers),
                     use_direct_fallback=False,
                     verbose=bool(verbose),
                 )

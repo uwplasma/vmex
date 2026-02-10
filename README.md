@@ -32,8 +32,7 @@ JAX_DISABLE_JIT=1 python examples/showcase_axisym_input_to_wout.py \
   --max-iter 20 \
   --use-input-niter \
   --emit-readme-figures \
-  --no-verbose \
-  --vmec2000-timeout 20
+  --vmec2000-timeout 60
 ```
 
 <table>
@@ -51,8 +50,8 @@ JAX_DISABLE_JIT=1 python examples/showcase_axisym_input_to_wout.py \
 
 Interpretation of the snapshot figures:
 
-- The residual trace overlay is a **per-iteration VMEC2000 executable trace** (dashed) from `threed1.*`. The vmec_jax curve is still not monotone on this case at 20 iterations, indicating remaining mismatches in the VMEC-style update loop.
-- The LCFS `|B|` panel compares *state-based* evaluation for both VMEC2000 and vmec_jax. Differences here are expected until the nonlinear iteration matches VMEC2000 more closely (initial-guess and preconditioner parity are the current focus).
+- The residual trace overlay is a **per-iteration VMEC2000 executable trace** (dashed) from `threed1.*`. The vmec_jax curve is still not monotone on this case at 20 iterations, indicating remaining mismatches in the VMEC-style update loop (see the internal force-block scan notes below for the current culprit).
+- The LCFS `|B|` panel compares *state-based* evaluation for both VMEC2000 and vmec_jax. Differences here reflect end-to-end solve mismatch rather than plotting; the current focus is lambda-force and time-step/preconditioner parity.
 
 ## Parity status (VMEC2000)
 
@@ -85,12 +84,12 @@ Current kernel-parity snapshot (solver-free, bundled reference states):
 
 Interpretation:
 - Axisymmetric cases are at floating-point parity for geometry, ``bsup*``, and ``abs(B)``.
-- Axisymmetric tomnsps kernel dumps now match VMEC2000 (including ``crmn_e`` and ``czmn_o`` in PARVMEC, which are scaled inside ``forces_par``).
+- Axisymmetric tomnsps/gc blocks match VMEC2000 for the R/Z channels; the first mismatch appears in the lambda block (``flsc/gcl``) at iter 1 in the internal scan.
 - Remaining known gap: 3D ``bsub*`` (and the resulting scalar residuals) on some ``nfp>1`` cases.
 
 Iteration trace parity (VMEC2000 executable, reduced grid):
 
-- Single-grid axisym cases (``circular_tokamak``, ``solovev``, ``shaped_tokamak_pressure``) match ``fsq*`` and preconditioned scalars to ~1e-3 relative over 20 iterations at ``ns=13``.
+- Single-grid axisym cases (``circular_tokamak``, ``solovev``, ``shaped_tokamak_pressure``) match ``fsq*`` and preconditioned scalars to ~1e-3 relative at iter 1 (e.g., ``fsqz`` differs at the 1e-3 level in ``circular_tokamak``); later iterations diverge as the lambda-force mismatch compounds.
 - ``purely_toroidal_field`` multigrid trace matches through stage 4 iter 6, but ``r00``/``w`` diagnostics become ``NaN`` from iter 7 onward (state divergence still under investigation).
 - ``up_down_asymmetric_tokamak`` (``lasym=True``) shows large bcovar/force-kernel mismatches at iter 1; nonlinear trace diverges. This is the current top lasym parity blocker.
 
@@ -151,6 +150,12 @@ python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case circular_to
 ```
 
 This uses a reduced grid to stay under ~1 minute; increase `--max-iter`/`--single-ns` for deeper parity checks.
+
+To scan internal force-block parity (tomnsps + gc) and stop at the first mismatch:
+
+```bash
+python tools/diagnostics/vmec2000_exec_internal_scan.py --case circular_tokamak --single-ns 17 --iter-start 1 --iter-stop 5
+```
 
 ## Installation
 
