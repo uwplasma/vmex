@@ -15,6 +15,7 @@ import tempfile
 import numpy as np
 
 import vmec_jax.api as vj
+from vmec_jax.vmec2000_exec import find_vmec2000_exec, flatten_threed1, run_xvmec2000, threed1_fsq_total
 
 
 def _import_matplotlib():
@@ -49,7 +50,15 @@ def _maybe_bmag_from_wout_physical(wout, *, theta: np.ndarray, phi: np.ndarray, 
     return np.asarray(bmag_from_wout_physical(wout, theta=theta, phi=phi, s_index=int(s_index)))
 
 
-def _write_plots(*, outdir: Path, run: vj.FixedBoundaryRun, wout_new, wout_ref, indata) -> None:
+def _write_plots(
+    *,
+    outdir: Path,
+    run: vj.FixedBoundaryRun,
+    wout_new,
+    wout_ref,
+    indata,
+    vmec2000_fsq_total: np.ndarray | None,
+) -> None:
     plt = _import_matplotlib()
 
     # Keep showcase plots reasonably fast; these are illustrative, not high-res exports.
@@ -110,14 +119,17 @@ def _write_plots(*, outdir: Path, run: vj.FixedBoundaryRun, wout_new, wout_ref, 
     ax = np.atleast_1d(ax)
     vmin = float(np.min(B_new if B_ref is None else np.minimum(B_new, B_ref)))
     vmax = float(np.max(B_new if B_ref is None else np.maximum(B_new, B_ref)))
-    ax[-1].imshow(B_new, origin="lower", aspect="auto", vmin=vmin, vmax=vmax)
+    im_new = ax[-1].imshow(B_new, origin="lower", aspect="auto", vmin=vmin, vmax=vmax)
     ax[-1].set_title("vmec_jax |B| (LCFS)")
     if B_ref is not None:
-        ax[0].imshow(B_ref, origin="lower", aspect="auto", vmin=vmin, vmax=vmax)
+        im_ref = ax[0].imshow(B_ref, origin="lower", aspect="auto", vmin=vmin, vmax=vmax)
         ax[0].set_title("VMEC2000 |B| (LCFS)")
     for a in ax:
         a.set_xlabel("phi index")
         a.set_ylabel("theta index")
+    if B_ref is not None:
+        fig.colorbar(im_ref, ax=ax[0], shrink=0.85, pad=0.02)
+    fig.colorbar(im_new, ax=ax[-1], shrink=0.85, pad=0.02)
     fig.savefig(outdir / "bmag_lcfs.png", dpi=180)
     plt.close(fig)
 
@@ -165,7 +177,13 @@ def _write_plots(*, outdir: Path, run: vj.FixedBoundaryRun, wout_new, wout_ref, 
         fig, ax = plt.subplots(1, 1, figsize=(8, 3.5), constrained_layout=True)
         x = np.arange(w_hist.size, dtype=float)
         ax.semilogy(x, np.maximum(w_hist, 1e-300), lw=1.6, label="vmec_jax (solver metric)")
-        if wout_ref is not None:
+        if vmec2000_fsq_total is not None and vmec2000_fsq_total.size > 0:
+            vmec_trace = vmec2000_fsq_total
+            if vmec_trace.size > w_hist.size:
+                vmec_trace = vmec_trace[: w_hist.size]
+            x_vm = np.arange(vmec_trace.size, dtype=float)
+            ax.semilogy(x_vm, np.maximum(vmec_trace, 1e-300), lw=1.2, ls="--", label="VMEC2000 fsq_total")
+        elif wout_ref is not None:
             fsq_ref = float(wout_ref.fsqr + wout_ref.fsqz + wout_ref.fsql)
             if np.isfinite(fsq_ref) and fsq_ref > 0.0:
                 ax.axhline(fsq_ref, color="k", ls="--", lw=1.0, alpha=0.6, label="VMEC2000 fsq_total")
@@ -214,6 +232,23 @@ def main() -> None:
         action="store_true",
         help="Also copy key plots into docs/_static/figures for README embedding.",
     )
+    p.add_argument(
+        "--vmec2000-timeout",
+        type=float,
+        default=60.0,
+        help="Timeout (s) for external VMEC2000 trace runs.",
+    )
+    p.add_argument(
+        "--vmec2000-nstep",
+        type=int,
+        default=1,
+        help="Override VMEC2000 NSTEP (printout cadence) for trace plots.",
+    )
+    p.add_argument(
+        "--no-vmec2000-trace",
+        action="store_true",
+        help="Skip external VMEC2000 trace runs (residual plot uses final fsq only).",
+    )
     args = p.parse_args()
 
     examples_dir = Path(__file__).resolve().parent
@@ -256,7 +291,28 @@ def main() -> None:
             suite_rows.append((case, fsq_ref, fsq_new))
             print(f"[vmec_jax] fsq_total: ref={fsq_ref:.3e} new={fsq_new:.3e}")
 
-        _write_plots(outdir=outdir, run=run, wout_new=wout_new, wout_ref=wout_ref, indata=indata)
+        vmec2000_trace = None
+        if (not args.no_vmec2000_trace) and (find_vmec2000_exec() is not None):
+            try:
+                exec_res = run_xvmec2000(
+                    input_path=input_path,
+                    timeout_s=float(args.vmec2000_timeout),
+                    indata_updates={"NSTEP": str(int(args.vmec2000_nstep))},
+                )
+                vmec2000_trace = threed1_fsq_total(flatten_threed1(exec_res.stages))
+                if vmec2000_trace.size > 0:
+                    print(f"[vmec2000] trace entries: {vmec2000_trace.size}")
+            except Exception as exc:
+                print(f"[vmec2000] trace failed: {exc}")
+
+        _write_plots(
+            outdir=outdir,
+            run=run,
+            wout_new=wout_new,
+            wout_ref=wout_ref,
+            indata=indata,
+            vmec2000_fsq_total=vmec2000_trace,
+        )
         print(f"[vmec_jax] wrote plots under: {outdir}")
 
         if args.emit_readme_figures and not args.suite:

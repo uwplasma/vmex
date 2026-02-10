@@ -57,7 +57,11 @@ All of the following scripts are designed to run quickly on bundled data:
 
     python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 5 --cases circular_tokamak --ns-override 9 --disable-jit --no-warmup
 
-The quick flags above keep runs under ~30s. Drop ``--fast``/``--disable-jit``/``--no-warmup`` and increase ``--iters``/``--cases`` for higher-fidelity traces.
+  To include the VMEC2000 executable (if built)::
+
+    python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 5 --cases circular_tokamak --ns-override 9 --disable-jit --no-warmup --run-vmec2000 --vmec2000-ns-override 9
+
+The quick flags above keep runs under ~60s. Drop ``--disable-jit``/``--no-warmup`` and increase ``--iters``/``--cases`` for higher-fidelity traces.
 
 External VMEC2000 runs (optional)
 ---------------------------------
@@ -90,3 +94,4 @@ Current blockers worth tracking:
 
 - ``lasym=True`` axisymmetric case (``input.up_down_asymmetric_tokamak``) shows large bcovar/force-kernel mismatches at iter 1.
 - ``purely_toroidal_field`` multigrid trace matches early iterations but the ``r00``/``WMHD`` diagnostics become non-finite at later iterations in ``vmec_jax``.
+- Axisymmetric nonlinear traces still diverge from VMEC2000 after the first few iterations on some cases (e.g. ``shaped_tokamak_pressure``); the next focus is matching the initial guess and VMEC2000 time-step/preconditioner updates exactly.

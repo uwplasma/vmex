@@ -5,8 +5,8 @@ Generates two README-friendly figures:
 - residual evolution over iterations for those inputs
 
 Notes:
-- This script depends on an external backend (`vmec`). If it is not installed,
-  the corresponding curves/bars are omitted.
+- This script can run the VMEC2000 executable (`xvmec2000`) for comparisons.
+  If it is not available, the corresponding curves/bars are omitted.
 - This is a benchmarking/communication script, not a regression test.
 """
 
@@ -15,12 +15,20 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+from vmec_jax.vmec2000_exec import (
+    find_vmec2000_exec,
+    flatten_threed1,
+    run_xvmec2000,
+    threed1_fsq_total,
+)
 
 
 @dataclass(frozen=True)
@@ -39,13 +47,6 @@ def _import_matplotlib():
     import matplotlib.pyplot as plt
 
     return plt
-
-
-def _maybe_import(name: str):
-    try:
-        return __import__(name)
-    except Exception:
-        return None
 
 
 def _distribute_iters(*, iters: int, nstep: int) -> list[int]:
@@ -77,6 +78,7 @@ def _run_vmec_jax(
     iters: int,
     ns_override: int | None,
     warmup: bool,
+    use_input_niter: bool,
 ) -> RunTrace:
     import vmec_jax.api as vj
 
@@ -89,7 +91,7 @@ def _run_vmec_jax(
             input_path,
             solver="vmec2000_iter",
             max_iter=int(iters),
-            multigrid_use_input_niter=True,
+            multigrid_use_input_niter=bool(use_input_niter),
             verbose=False,
             ns_override=ns_override,
         )
@@ -107,7 +109,7 @@ def _run_vmec_jax(
         input_path,
         solver="vmec2000_iter",
         max_iter=int(iters),
-        multigrid_use_input_niter=True,
+        multigrid_use_input_niter=bool(use_input_niter),
         verbose=False,
         ns_override=ns_override,
     )
@@ -124,106 +126,52 @@ def _run_vmec_jax(
     return RunTrace(backend="vmec_jax", case=case, iters=iters, seconds=float(dt), fsq_total=fsq)
 
 
-def _vmec_expected_wout_name(input_path: Path) -> str:
-    # input.<name> -> wout_<name>.nc (VMEC convention)
-    name = input_path.name
-    if name.startswith("input."):
-        name = name[len("input.") :]
-    return f"wout_{name}.nc"
-
-
-def _run_vmec2000(*, input_path: Path, case: str, iters: int, workdir: Path) -> RunTrace | None:
-    vmec = _maybe_import("vmec")
-    if vmec is None:
+def _run_vmec2000_exec(
+    *,
+    input_path: Path,
+    case: str,
+    iters: int,
+    workdir: Path,
+    exec_path: Path | None,
+    timeout_s: float,
+    nstep: int,
+    use_input_niter: bool,
+    ns_override: int | None,
+) -> RunTrace | None:
+    exec_path = exec_path or find_vmec2000_exec()
+    if exec_path is None:
         return None
 
-    # vmec.runvmec uses an MPI communicator; keep it local.
-    try:
-        from mpi4py import MPI  # type: ignore
-    except Exception:
-        return None
-
-    restart_flag = 1
-    readin_flag = 2
-    timestep_flag = 4
-    output_flag = 8
-
-    ictrl = np.zeros(5, dtype=np.int32)
-    reset_file = ""
-    fcomm = MPI.COMM_SELF.py2f()
-
-    wout_name = _vmec_expected_wout_name(input_path)
-
-    old_cwd = Path.cwd()
-    workdir.mkdir(parents=True, exist_ok=True)
-    os.chdir(workdir)
-    try:
-        # Stage 1: read input only.
-        ictrl[:] = 0
-        ictrl[0] = restart_flag + readin_flag
-        t_read = time.perf_counter()
-        vmec.runvmec(ictrl, str(input_path), False, fcomm, reset_file)
-        _ = time.perf_counter() - t_read
-
-        # Override iteration controls for a fixed budget.
-        vi = vmec.vmec_input
-        try:
-            nstep = int(getattr(vi, "nstep"))
-        except Exception:
-            nstep = 1
+    indata_updates: dict[str, str] = {"NSTEP": str(int(nstep))}
+    if ns_override is not None:
+        indata_updates["NS"] = str(int(ns_override))
+        indata_updates["NS_ARRAY"] = str(int(ns_override))
+    if not use_input_niter:
         niter_steps = _distribute_iters(iters=int(iters), nstep=int(nstep))
-        try:
-            vi.niter_array[: len(niter_steps)] = np.asarray(niter_steps, dtype=np.int32)
-        except Exception:
-            pass
-        try:
-            vi.ftol_array[: len(niter_steps)] = 0.0
-        except Exception:
-            pass
-        try:
-            vi.niter = int(iters)
-            vi.ftol = 0.0
-        except Exception:
-            pass
+        indata_updates["NITER"] = str(int(iters))
+        indata_updates["NITER_ARRAY"] = ",".join(str(int(x)) for x in niter_steps)
+        indata_updates["FTOL"] = "0.0"
+        indata_updates["FTOL_ARRAY"] = ",".join("0.0" for _ in niter_steps)
 
-        # Stage 2: timestep + output (no re-read).
-        ictrl[:] = 0
-        ictrl[0] = restart_flag + timestep_flag + output_flag
-        t0 = time.perf_counter()
-        vmec.runvmec(ictrl, str(input_path), False, fcomm, reset_file)
-        dt = time.perf_counter() - t0
+    try:
+        result = run_xvmec2000(
+            input_path=input_path,
+            exec_path=exec_path,
+            workdir=workdir,
+            timeout_s=float(timeout_s),
+            indata_updates=indata_updates,
+            keep_workdir=True,
+        )
+    except subprocess.TimeoutExpired:
+        return None
 
-        # Read residual trace from wout.
-        from vmec_jax.wout import read_wout
-
-        wout_path = Path(wout_name)
-        if not wout_path.exists():
-            # Some builds write wout_<name> (no .nc) or wout.<name>.nc; probe a few.
-            probes = [
-                Path(wout_name.replace(".nc", "")),
-                Path("wout." + wout_name[len("wout_") :]),
-            ]
-            for p in probes:
-                if p.exists():
-                    wout_path = p
-                    break
-        wout = read_wout(wout_path)
-        fsq = np.asarray(getattr(wout, "fsqt", np.zeros((0,), dtype=float)), dtype=float)
-        if fsq.size == 0:
-            # Fall back: use final invariant sum only.
-            fsq = np.full((iters,), float(wout.fsqr + wout.fsqz + wout.fsql), dtype=float)
-        else:
-            fsq = fsq[:iters]
-            if fsq.size < iters:
-                fsq = np.pad(fsq, (0, iters - fsq.size), constant_values=np.nan)
-
-        return RunTrace(backend="vmec2000", case=case, iters=iters, seconds=float(dt), fsq_total=fsq)
-    finally:
-        try:
-            vmec.cleanup(True)
-        except Exception:
-            pass
-        os.chdir(old_cwd)
+    rows = flatten_threed1(result.stages)
+    fsq = threed1_fsq_total(rows)
+    if fsq.size == 0:
+        return None
+    if (not use_input_niter) and (fsq.size < iters):
+        fsq = np.pad(fsq, (0, iters - fsq.size), constant_values=np.nan)
+    return RunTrace(backend="vmec2000", case=case, iters=int(fsq.size), seconds=float(result.runtime_s), fsq_total=fsq)
 
 
 def _plot_runtime(*, traces: list[RunTrace], outpath: Path) -> None:
@@ -319,7 +267,42 @@ def main() -> None:
     p.add_argument(
         "--run-vmec2000",
         action="store_true",
-        help="Also run the external vmec2000 Python extension (if installed).",
+        help="Also run the VMEC2000 executable (xvmec2000) for comparisons.",
+    )
+    p.add_argument(
+        "--vmec2000-exec",
+        default=None,
+        help="Path to xvmec2000 (overrides VMEC2000_EXEC env).",
+    )
+    p.add_argument(
+        "--vmec2000-timeout",
+        type=float,
+        default=60.0,
+        help="Timeout (s) for each VMEC2000 executable run.",
+    )
+    p.add_argument(
+        "--vmec2000-nstep",
+        type=int,
+        default=1,
+        help="Override VMEC2000 NSTEP (printout cadence).",
+    )
+    p.add_argument(
+        "--vmec2000-ns-override",
+        type=int,
+        default=None,
+        help="Override VMEC2000 NS/NS_ARRAY (single-grid) for faster runs.",
+    )
+    p.add_argument(
+        "--vmec2000-use-input-niter",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Use input NITER_ARRAY/FTOL_ARRAY (skip fixed-budget override).",
+    )
+    p.add_argument(
+        "--jax-use-input-niter",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Use input NITER_ARRAY/FTOL_ARRAY for vmec_jax staging.",
     )
     p.add_argument("--outdir", default="examples/outputs/bench_fixed_boundary", help="Output directory root.")
     p.add_argument(
@@ -362,15 +345,25 @@ def main() -> None:
                 iters=int(args.iters),
                 ns_override=args.ns_override,
                 warmup=not bool(args.no_warmup),
+                use_input_niter=bool(args.jax_use_input_niter),
             )
         )
 
         # External backends are optional and may not be installed.
         # Keep the overall script robust: skip a backend rather than failing the run.
         if bool(args.run_vmec2000):
+            exec_path = Path(args.vmec2000_exec).expanduser() if args.vmec2000_exec else None
             try:
-                tvm = _run_vmec2000(
-                    input_path=input_path, case=case, iters=int(args.iters), workdir=outdir / "vmec2000" / case
+                tvm = _run_vmec2000_exec(
+                    input_path=input_path,
+                    case=case,
+                    iters=int(args.iters),
+                    workdir=outdir / "vmec2000" / case,
+                    exec_path=exec_path,
+                    timeout_s=float(args.vmec2000_timeout),
+                    nstep=int(args.vmec2000_nstep),
+                    use_input_niter=bool(args.vmec2000_use_input_niter),
+                    ns_override=args.vmec2000_ns_override,
                 )
             except Exception:
                 tvm = None

@@ -24,10 +24,16 @@ pytest -q
 
 ## Snapshot figures
 
-Generated from the bundled `shaped_tokamak_pressure` case:
+Generated from the bundled `shaped_tokamak_pressure` case (short run to stay under ~1 minute):
 
 ```bash
-python examples/showcase_axisym_input_to_wout.py --case shaped_tokamak_pressure --max-iter 240 --use-input-niter --emit-readme-figures --no-verbose
+JAX_DISABLE_JIT=1 python examples/showcase_axisym_input_to_wout.py \
+  --case shaped_tokamak_pressure \
+  --max-iter 20 \
+  --use-input-niter \
+  --emit-readme-figures \
+  --no-verbose \
+  --vmec2000-timeout 20
 ```
 
 <table>
@@ -42,6 +48,11 @@ python examples/showcase_axisym_input_to_wout.py --case shaped_tokamak_pressure 
     <td colspan="2"><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_lcfs_3d_bmag.png" width="860" /></td>
   </tr>
 </table>
+
+Interpretation of the snapshot figures:
+
+- The residual trace overlay is a **per-iteration VMEC2000 executable trace** (dashed) from `threed1.*`. The vmec_jax curve is still not monotone on this case at 20 iterations, indicating remaining mismatches in the VMEC-style update loop.
+- The LCFS `|B|` panel compares *state-based* evaluation for both VMEC2000 and vmec_jax. Differences here are expected until the nonlinear iteration matches VMEC2000 more closely (initial-guess and preconditioner parity are the current focus).
 
 ## Parity status (VMEC2000)
 
@@ -83,6 +94,11 @@ Iteration trace parity (VMEC2000 executable, reduced grid):
 - ``purely_toroidal_field`` multigrid trace matches through stage 4 iter 6, but ``r00``/``w`` diagnostics become ``NaN`` from iter 7 onward (state divergence still under investigation).
 - ``up_down_asymmetric_tokamak`` (``lasym=True``) shows large bcovar/force-kernel mismatches at iter 1; nonlinear trace diverges. This is the current top lasym parity blocker.
 
+Notes on the snapshot figures:
+
+- The residual trace overlay now uses the **VMEC2000 executable** (`xvmec2000`) per-iteration `threed1.*` table (dashed line). If the executable is not available, the plot falls back to a flat reference line at final `fsq_total`.
+- The `|B|` LCFS panel uses the *same* state-based evaluation path for VMEC2000 and vmec_jax. Differences here reflect end-to-end solve mismatch (not a plotting artifact). We are currently chasing initial-guess and preconditioner parity to close this gap.
+
 Reproduce scalar residual parity (`fsqr/fsqz/fsql`) on reference states:
 
 ```bash
@@ -99,19 +115,19 @@ This is a quick sanity run (reduced cases and resolution). For a full parity sna
 
 ## Benchmark (runtime + residual traces)
 
-This script compares a *fixed iteration budget* across `vmec_jax` and (optionally) `vmec2000` via the `vmec` Python extension:
+This script compares a *fixed iteration budget* across `vmec_jax` and (optionally) the **VMEC2000 executable** (`xvmec2000`):
 
 ```bash
 python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 5 --cases circular_tokamak --ns-override 9 --disable-jit --no-warmup
 ```
 
-To also run the external VMEC2000 backend (if installed):
+To also run the external VMEC2000 executable (if built):
 
 ```bash
-python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 5 --cases circular_tokamak --ns-override 9 --disable-jit --no-warmup --run-vmec2000
+python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 5 --cases circular_tokamak --ns-override 9 --disable-jit --no-warmup --run-vmec2000 --vmec2000-ns-override 9
 ```
 
-The quick settings above keep runs under ~30s; increase `--iters` and `--cases` (and drop `--disable-jit/--no-warmup`) for higher-fidelity traces.
+The quick settings above keep runs under ~60s. Drop `--disable-jit/--no-warmup` for performance-oriented timing.
 
 <table>
   <tr>
