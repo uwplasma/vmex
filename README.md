@@ -121,6 +121,14 @@ If you have the VMEC2000 Python extension installed (`vmec` + `mpi4py` + `netCDF
 python tools/diagnostics/external_vmec_driver_compare.py --case circular_tokamak
 ```
 
+For per-iteration trace parity against the VMEC2000 executable (single grid, quick run):
+
+```bash
+python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case circular_tokamak --max-iter 20 --vmec-nstep 1 --single-ns 17
+```
+
+This uses a reduced grid to stay under ~1 minute; increase `--max-iter`/`--single-ns` for deeper parity checks.
+
 ## Installation
 
 Create an environment with Python >= 3.10.
