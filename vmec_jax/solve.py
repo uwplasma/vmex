@@ -2258,6 +2258,13 @@ def solve_fixed_boundary_residual_iter(
     from .energy import flux_profiles_from_indata
     from .energy import magnetic_wb_from_state
     from .static import build_static
+    from .boundary import boundary_from_indata
+    from .init_guess import (
+        _boundary_cross_section_areas,
+        _recompute_axis_from_boundary,
+        _read_axis_coeffs,
+        initial_guess_from_boundary,
+    )
     from .vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
     from .vmec_residue import (
         vmec_apply_m1_constraints,
@@ -2289,6 +2296,11 @@ def solve_fixed_boundary_residual_iter(
     m_modes = jnp.asarray(static.modes.m)
     lambda_axis_mask = jnp.asarray((m_modes == 0) | (m_modes == 1)).astype(jnp.asarray(state0.Rcos).dtype)
 
+    # Boundary + axis recompute helpers (for VMEC-style bad-Jacobian reset).
+    boundary_for_axis = boundary_from_indata(indata, static.modes) if indata is not None else None
+    axis_reset_done = False
+    lmove_axis = True if indata is None else bool(indata.get_bool("LMOVE_AXIS", True))
+
     def _apply_vmec_lambda_axis_rules(st: VMECState) -> VMECState:
         """VMEC axis convention for lambda coefficients (jlam/jmin1).
 
@@ -2316,6 +2328,42 @@ def solve_fixed_boundary_residual_iter(
             Lcos=Lcos,
             Lsin=Lsin,
         )
+
+    def _reset_axis_from_boundary(st: VMECState) -> VMECState:
+        if boundary_for_axis is None:
+            return st
+        axis_vals = _read_axis_coeffs(indata)
+        raxis_cc = np.asarray(axis_vals.get("RAXIS_CC", 0.0), dtype=float)
+        zaxis_cs = np.asarray(axis_vals.get("ZAXIS_CS", 0.0), dtype=float)
+        if raxis_cc.ndim == 0:
+            raxis_cc = np.asarray([float(raxis_cc)], dtype=float)
+        if zaxis_cs.ndim == 0:
+            zaxis_cs = np.asarray([float(zaxis_cs)], dtype=float)
+        ntor = int(static.cfg.ntor)
+        if raxis_cc.size < ntor + 1:
+            raxis_cc = np.pad(raxis_cc, (0, ntor + 1 - raxis_cc.size))
+        if zaxis_cs.size < ntor + 1:
+            zaxis_cs = np.pad(zaxis_cs, (0, ntor + 1 - zaxis_cs.size))
+        raxis_cc, zaxis_cs = _recompute_axis_from_boundary(
+            static,
+            boundary_for_axis,
+            raxis_cc=raxis_cc,
+            zaxis_cs=zaxis_cs,
+            signgs=int(signgs),
+        )
+        scalars = dict(indata.scalars)
+        scalars["RAXIS_CC"] = [float(v) for v in np.ravel(raxis_cc)]
+        scalars["RAXIS_CS"] = [0.0 for _ in range(int(static.cfg.ntor) + 1)]
+        scalars["ZAXIS_CC"] = [0.0 for _ in range(int(static.cfg.ntor) + 1)]
+        scalars["ZAXIS_CS"] = [float(v) for v in np.ravel(zaxis_cs)]
+        indata_reset = type(indata)(scalars=scalars, indexed=indata.indexed)
+        st = initial_guess_from_boundary(
+            static,
+            boundary_for_axis,
+            indata_reset,
+            dtype=jnp.asarray(st.Rcos).dtype,
+        )
+        return _apply_vmec_lambda_axis_rules(st)
     s = jnp.asarray(static.s)
     flux = flux_profiles_from_indata(indata, s, signgs=signgs)
     chipf_wout = jnp.asarray(flux.chipf)
@@ -2630,6 +2678,7 @@ def solve_fixed_boundary_residual_iter(
     has_kn_np = kn_idx_np >= 0
     has_kn = jnp.asarray(has_kn_np)
     has_kn_any = bool(np.any(has_kn_np))
+    m0_mask = np.asarray(static.modes.m) == 0
 
     # VMEC internal Fourier coefficients live in a basis scaled by fixaray's
     # (mscale, nscale) factors. VMEC's external (wout/physical) coefficients are:
@@ -2848,6 +2897,52 @@ def solve_fixed_boundary_residual_iter(
     cache_prec_lam_prec = None
     bcovar_update_history: list[int] = []
 
+    if bool(vmec2000_control) and (boundary_for_axis is not None) and (not axis_reset_done):
+        bad_jacobian_init = False
+        jac = vmec_half_mesh_jacobian_from_state(state=state, modes=static.modes, trig=trig, s=s)
+        tau = np.asarray(jac.tau)
+        if tau.size:
+            min_tau_init = float(np.min(tau))
+            max_tau_init = float(np.max(tau))
+            bad_jacobian_init = (min_tau_init * max_tau_init) < 0.0
+        huge_initial_forces = False
+        if lmove_axis:
+            zero_m1_init = jnp.asarray(1.0, dtype=jnp.asarray(state.Rcos).dtype)
+            _, _, fsqr_init, fsqz_init, fsql_init, _, _, _ = _compute_forces(
+                state,
+                include_edge=False,
+                zero_m1=zero_m1_init,
+                iter_idx=1,
+            )
+            fsq_init = float(np.asarray(fsqr_init + fsqz_init + fsql_init))
+            huge_initial_forces = (not np.isfinite(fsq_init)) or (fsq_init > 1.0e2)
+        if bad_jacobian_init or huge_initial_forces:
+            state = _reset_axis_from_boundary(state)
+            state_checkpoint = state
+            vRcc = jnp.zeros_like(vRcc)
+            vRss = jnp.zeros_like(vRcc)
+            vZsc = jnp.zeros_like(vRcc)
+            vZcs = jnp.zeros_like(vRcc)
+            vLsc = jnp.zeros_like(vRcc)
+            vLcs = jnp.zeros_like(vRcc)
+            time_step = float(step_size)
+            ijacob = 1
+            axis_reset_done = True
+            res0 = -1.0
+            res1 = -1.0
+            prev_rz_fsq = 2.0
+            vmec2000_cache_valid = False
+            cache_precond_diag = None
+            cache_tcon = None
+            cache_norms = None
+            cache_rz_scale = None
+            cache_l_scale = None
+            cache_rz_norm = None
+            cache_f_norm1 = None
+            cache_prec_rz_mats = None
+            cache_prec_rz_jmax = None
+            cache_prec_lam_prec = None
+
     def _safe_dt_from_force(*, dt_nominal: float, frcc, frss, fzsc, fzcs, flsc, flcs) -> float:
         """Optional limiter for dt based on force magnitude.
 
@@ -2961,7 +3056,8 @@ def solve_fixed_boundary_residual_iter(
         fsqr2_history.append(fsqr_f)
         fsqz2_history.append(fsqz_f)
         fsql2_history.append(fsql_f)
-        r00_history.append(float(np.asarray(jnp.asarray(k.pr1_even)[0, 0, 0])))
+        r00_val = float(np.sum(np.asarray(state.Rcos)[0, m0_mask]))
+        r00_history.append(r00_val)
         # `norms_used` may be cached (VMEC2000 `ns4=25` behavior). VMEC's
         # printed WMHD uses the *current* wb/wp from `funct3d`, not cached
         # norm scalars. Recompute wb/wp from the current bcovar state here.
@@ -3211,7 +3307,7 @@ def solve_fixed_boundary_residual_iter(
 
         # Restart triggers (bad progress / bad Jacobian proxy).
         bad_jacobian = False
-        if bool(reference_mode) and bool(getattr(static.cfg, "lthreed", True)):
+        if bool(reference_mode) or bool(vmec2000_control):
             jac = vmec_half_mesh_jacobian_from_state(state=state, modes=static.modes, trig=trig, s=s)
             tau = np.asarray(jac.tau)
             if tau.size:
@@ -3229,12 +3325,16 @@ def solve_fixed_boundary_residual_iter(
             min_tau_history.append(float("nan"))
             max_tau_history.append(float("nan"))
             bad_jacobian_history.append(0)
+
+        huge_initial_forces = False
+        if iter2 == 1 and lmove_axis:
+            fsq_init = float(fsq)
+            huge_initial_forces = (not np.isfinite(fsq_init)) or (fsq_init > 1.0e2)
         if fsq_res > 100.0 * max(res0, 1e-30):
             bad_growth_streak += 1
         else:
             bad_growth_streak = 0
 
-        huge_initial_forces = False
         if bool(reference_mode):
             # Conservative restart logic used in the reference-mode trace.
             if bad_jacobian:
