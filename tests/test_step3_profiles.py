@@ -50,16 +50,22 @@ def test_power_series_profiles_against_manual():
 def test_volume_total_matches_vmec2000_wout_reference(load_case_circular_tokamak):
     netCDF4 = pytest.importorskip("netCDF4")
 
-    cfg, _indata, static, _bdy, st0 = load_case_circular_tokamak
+    cfg, _indata, static, _bdy, _st0 = load_case_circular_tokamak
 
-    g = eval_geom(st0, static)
+    from vmec_jax.api import state_from_wout
+    from vmec_jax.wout import read_wout
+
+    wout_path = Path(__file__).resolve().parents[1] / "examples" / "data" / "wout_circular_tokamak_reference.nc"
+    wout = read_wout(wout_path)
+    st_ref = state_from_wout(wout)
+
+    g = eval_geom(st_ref, static)
     dvds = dvds_from_sqrtg(g.sqrtg, static.grid.theta, static.grid.zeta, cfg.nfp)
     V = cumtrapz_s(dvds, static.s)
 
     V_total = float(np.asarray(V[-1])) * float(cfg.nfp)  # full torus
 
-    wout = Path(__file__).resolve().parents[1] / "examples" / "data" / "wout_circular_tokamak_reference.nc"
-    with netCDF4.Dataset(wout) as ds:
+    with netCDF4.Dataset(wout_path) as ds:
         V_ref = float(ds.variables["volume_p"][:])
 
     # Coarse grids + finite-difference Rs give a modest error; start loose and tighten later.

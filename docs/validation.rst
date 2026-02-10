@@ -79,6 +79,14 @@ Per-iteration trace parity (VMEC2000 executable, reduced grid):
 
 This uses a reduced grid to stay under ~1 minute; increase ``--max-iter`` or ``--single-ns`` for deeper parity checks.
 
+Internal force-block parity scan (tomnsps + gc, executable):
+
+::
+
+  python tools/diagnostics/vmec2000_exec_internal_scan.py --case circular_tokamak --single-ns 17 --iter-start 1 --iter-stop 5
+
+This dumps internal force blocks per iteration and stops at the first mismatch beyond tolerance.
+
 Scope and known gaps
 --------------------
 
@@ -94,4 +102,5 @@ Current blockers worth tracking:
 
 - ``lasym=True`` axisymmetric case (``input.up_down_asymmetric_tokamak``) shows large bcovar/force-kernel mismatches at iter 1.
 - ``purely_toroidal_field`` multigrid trace matches early iterations but the ``r00``/``WMHD`` diagnostics become non-finite at later iterations in ``vmec_jax``.
-- Axisymmetric nonlinear traces still diverge from VMEC2000 after the first few iterations on some cases (e.g. ``shaped_tokamak_pressure``); the next focus is matching the initial guess and VMEC2000 time-step/preconditioner updates exactly.
+- Axisymmetric internal scans now match VMEC2000 for R/Z force blocks, but the first mismatch appears in the lambda block (``flsc/gcl``) at iter 1; this is the current top blocker for nonlinear trace parity.
+- Axisymmetric nonlinear traces still diverge from VMEC2000 after the first few iterations on some cases (e.g. ``shaped_tokamak_pressure``); the next focus is matching the lambda-force path and VMEC2000 time-step/preconditioner updates exactly.

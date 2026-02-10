@@ -337,6 +337,29 @@ def main() -> None:
         action="store_true",
         help="Use VMEC input NITER_ARRAY/FTOL_ARRAY staging (still capped by --max-iter).",
     )
+    p.add_argument(
+        "--delt-source",
+        choices=("time_step", "dt_eff"),
+        default="time_step",
+        help="Which vmec_jax series to compare against VMEC2000 DELT.",
+    )
+    p.add_argument(
+        "--rtol",
+        type=float,
+        default=1e-3,
+        help="Relative tolerance for fail-fast mismatch detection.",
+    )
+    p.add_argument(
+        "--atol",
+        type=float,
+        default=1e-12,
+        help="Absolute tolerance for fail-fast mismatch detection.",
+    )
+    p.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="Exit nonzero at the first mismatch beyond tolerances.",
+    )
     args = p.parse_args()
 
     root = Path(__file__).resolve().parents[2]
@@ -462,7 +485,10 @@ def main() -> None:
     fsqr1 = np.asarray(diag.get("fsqr1_history", np.zeros((0,), dtype=float)), dtype=float)
     fsqz1 = np.asarray(diag.get("fsqz1_history", np.zeros((0,), dtype=float)), dtype=float)
     fsql1 = np.asarray(diag.get("fsql1_history", np.zeros((0,), dtype=float)), dtype=float)
-    delt = np.asarray(diag.get("time_step_history", np.zeros((0,), dtype=float)), dtype=float)
+    if args.delt_source == "dt_eff":
+        delt = np.asarray(diag.get("dt_eff_history", np.zeros((0,), dtype=float)), dtype=float)
+    else:
+        delt = np.asarray(diag.get("time_step_history", np.zeros((0,), dtype=float)), dtype=float)
     r00 = np.asarray(diag.get("r00_history", np.zeros((0,), dtype=float)), dtype=float)
     w = np.asarray(diag.get("w_vmec_history", np.zeros((0,), dtype=float)), dtype=float)
 
@@ -486,6 +512,11 @@ def main() -> None:
         for name in ("fsqr", "fsqz", "fsql", "fsqr1", "fsqz1", "fsql1", "delt0r", "r00", "w"):
             diff_cols_vmec[name] = []
             diff_cols_jax[name] = []
+
+    def _matches(vmec_val: float, jax_val: float) -> bool:
+        if not (np.isfinite(vmec_val) and np.isfinite(jax_val)):
+            return False
+        return abs(vmec_val - jax_val) <= max(float(args.atol), float(args.rtol) * abs(vmec_val))
 
     for stage_i, st in enumerate(vmec_stages):
         if stage_i >= offsets.size or stage_i >= ns_stages.size:
@@ -528,6 +559,27 @@ def main() -> None:
                 diff_cols_jax["r00"].append(float(r00[j] if j < r00.size else float("nan")))
                 diff_cols_vmec["w"].append(float(row.w if row.w is not None else float("nan")))
                 diff_cols_jax["w"].append(float(w[j] if j < w.size else float("nan")))
+
+                if bool(args.fail_fast):
+                    pairs = [
+                        ("fsqr", float(row.fsqr), float(fsqr[j] if j < fsqr.size else float("nan"))),
+                        ("fsqz", float(row.fsqz), float(fsqz[j] if j < fsqz.size else float("nan"))),
+                        ("fsql", float(row.fsql), float(fsql[j] if j < fsql.size else float("nan"))),
+                        ("fsqr1", float(row.fsqr1), float(fsqr1[j] if j < fsqr1.size else float("nan"))),
+                        ("fsqz1", float(row.fsqz1), float(fsqz1[j] if j < fsqz1.size else float("nan"))),
+                        ("fsql1", float(row.fsql1), float(fsql1[j] if j < fsql1.size else float("nan"))),
+                        ("delt0r", float(row.delt0r if row.delt0r is not None else float("nan")), float(delt[j] if j < delt.size else float("nan"))),
+                        ("r00", float(row.r00 if row.r00 is not None else float("nan")), float(r00[j] if j < r00.size else float("nan"))),
+                        ("wmhd", float(row.w if row.w is not None else float("nan")), float(w[j] if j < w.size else float("nan"))),
+                    ]
+                    for name, v, jv in pairs:
+                        if not _matches(v, jv):
+                            print()
+                            print("First mismatch beyond tolerance:")
+                            print(f"  stage={stage_i+1} iter={row.it} field={name}")
+                            print(f"  vmec2000={v:.6e}  vmec_jax={jv:.6e}")
+                            print(f"  tol: rtol={args.rtol:.3e} atol={args.atol:.3e}")
+                            raise SystemExit(2)
             else:
                 assert isinstance(row, Vmec2000PrintedRow)
                 print(

@@ -212,10 +212,10 @@ def main() -> None:
         default="vmec2000_iter",
         choices=["vmec2000_iter", "vmec_gn", "gd", "lbfgs"],
     )
-    p.add_argument("--max-iter", type=int, default=120)
+    p.add_argument("--max-iter", type=int, default=30)
     p.add_argument(
         "--verbose",
-        default=False,
+        default=True,
         action=argparse.BooleanOptionalAction,
         help="Print per-iteration solver trace (can be very verbose).",
     )
@@ -272,6 +272,7 @@ def main() -> None:
         outdir.mkdir(parents=True, exist_ok=True)
 
         cfg, indata = vj.load_input(input_path)
+        print(f"[vmec_jax] running case={case} solver={args.solver} max_iter={args.max_iter}", flush=True)
         run = vj.run_fixed_boundary(
             input_path,
             solver=str(args.solver),
@@ -294,6 +295,7 @@ def main() -> None:
         vmec2000_trace = None
         if (not args.no_vmec2000_trace) and (find_vmec2000_exec() is not None):
             try:
+                print(f"[vmec2000] running xvmec2000 (timeout={args.vmec2000_timeout}s)", flush=True)
                 exec_res = run_xvmec2000(
                     input_path=input_path,
                     timeout_s=float(args.vmec2000_timeout),
