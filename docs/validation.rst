@@ -85,3 +85,8 @@ explicitly deferred for now include:
 - ``lasym=True`` (up-down / non-stellarator-symmetric),
 - non-axisymmetric end-to-end nonlinear solve parity (``ntor>0`` and/or ``nfp>1``),
 - parallelization and multi-device execution.
+
+Current blockers worth tracking:
+
+- ``lasym=True`` axisymmetric case (``input.up_down_asymmetric_tokamak``) shows large bcovar/force-kernel mismatches at iter 1.
+- ``purely_toroidal_field`` multigrid trace matches early iterations but the ``r00``/``WMHD`` diagnostics become non-finite at later iterations in ``vmec_jax``.

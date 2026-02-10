@@ -326,7 +326,7 @@ In other words: decreasing :math:`W_{\mathrm{res}}` is a useful milestone and a
 regression target, but it is not yet equivalent to "match VMEC2000 coefficients".
 
 Fixed-boundary solve (early stage)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 We extend the optimization variables to include all Fourier coefficients:
 

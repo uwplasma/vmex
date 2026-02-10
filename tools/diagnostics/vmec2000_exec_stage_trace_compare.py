@@ -244,6 +244,76 @@ def _patch_indata(text: str, *, updates: dict[str, str]) -> str:
     return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
 
 
+def _distribute_iters(*, iters: int, nstep: int) -> list[int]:
+    iters = int(iters)
+    nstep = int(nstep)
+    if iters <= 0:
+        return [0]
+    if nstep <= 1:
+        return [iters]
+    base, rem = divmod(iters, nstep)
+    if base == 0:
+        return [iters]
+    return [base + (1 if i < rem else 0) for i in range(nstep)]
+
+
+def _resolve_stage_controls(*, cfg, indata, max_iter: int, use_input_niter: bool) -> tuple[list[int], list[int], list[float]]:
+    ns_array = indata.get("NS_ARRAY", None)
+    if isinstance(ns_array, list) and ns_array:
+        ns_stages = [int(v) for v in ns_array]
+    else:
+        ns_stages = [int(getattr(cfg, "ns", 0)) or int(indata.get_int("NS", 0)) or 0]
+    ns_stages = [int(v) for v in ns_stages if int(v) > 0]
+    if not ns_stages:
+        raise ValueError("Failed to resolve NS_ARRAY stages for VMEC2000 parity run.")
+
+    nstep = len(ns_stages)
+    ftol_default = float(indata.get_float("FTOL", 1e-10))
+
+    if use_input_niter:
+        niter_array = indata.get("NITER_ARRAY", None)
+        ftol_array = indata.get("FTOL_ARRAY", None)
+        niter_stages = (
+            [int(v) for v in niter_array] if isinstance(niter_array, list) and len(niter_array) == nstep else None
+        )
+        ftol_stages = (
+            [float(v) for v in ftol_array] if isinstance(ftol_array, list) and len(ftol_array) == nstep else None
+        )
+        if niter_stages is None:
+            niter_stages = _distribute_iters(iters=int(max_iter), nstep=int(nstep))
+        else:
+            budget = int(max_iter)
+            if budget < nstep:
+                # Too few iterations to stage; collapse to the final grid.
+                ns_stages = [int(ns_stages[-1])]
+                nstep = 1
+                niter_stages = [int(max(budget, 1))]
+                if ftol_stages is not None:
+                    ftol_stages = [float(ftol_stages[-1])]
+            else:
+                base = [1] * nstep
+                remaining = budget - nstep
+                caps = [max(0, int(n) - 1) for n in niter_stages]
+                out = base[:]
+                for i in range(nstep - 1, -1, -1):
+                    if remaining <= 0:
+                        break
+                    take = min(caps[i], remaining)
+                    out[i] += take
+                    remaining -= take
+                if remaining > 0:
+                    out[-1] += remaining
+                niter_stages = out
+        if ftol_stages is None:
+            ftol_stages = [ftol_default] * nstep
+    else:
+        niter_stages = _distribute_iters(iters=int(max_iter), nstep=int(nstep))
+        ftol_stages = [ftol_default] * nstep
+
+    nrun = min(len(ns_stages), len(niter_stages), len(ftol_stages))
+    return ns_stages[:nrun], niter_stages[:nrun], ftol_stages[:nrun]
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--case", default="circular_tokamak")
@@ -289,6 +359,18 @@ def main() -> None:
     _cfg_in, _indata_in = vj.load_input(input_path)
     ftol_default = float(_indata_in.get_float("FTOL", 1e-10))
 
+    # Resolve stage controls to match vmec_jax staging.
+    ns_stages_eff: list[int] | None = None
+    niter_stages_eff: list[int] | None = None
+    ftol_stages_eff: list[float] | None = None
+    if args.single_ns is None:
+        ns_stages_eff, niter_stages_eff, ftol_stages_eff = _resolve_stage_controls(
+            cfg=_cfg_in,
+            indata=_indata_in,
+            max_iter=int(args.max_iter),
+            use_input_niter=bool(args.use_input_niter),
+        )
+
     # --- Run VMEC2000 executable in an isolated workdir ---
     threed1_stages: list[Vmec2000Threed1Stage] | None = None
     with tempfile.TemporaryDirectory(prefix="vmec2000_exec_") as td:
@@ -308,6 +390,13 @@ def main() -> None:
                 "NITER_ARRAY": f"{int(args.max_iter)}",
                 "FTOL_ARRAY": f"{ftol_default:.16e}",
                 "NITER": f"{int(args.max_iter)}",
+            }
+        elif ns_stages_eff and niter_stages_eff and ftol_stages_eff:
+            updates |= {
+                "NS_ARRAY": "  ".join(str(int(v)) for v in ns_stages_eff),
+                "NITER_ARRAY": "  ".join(str(int(v)) for v in niter_stages_eff),
+                "FTOL_ARRAY": "  ".join(f"{float(v):.16e}" for v in ftol_stages_eff),
+                "NITER": f"{int(sum(niter_stages_eff))}",
             }
 
         input_local.write_text(_patch_indata(indata_text, updates=updates))

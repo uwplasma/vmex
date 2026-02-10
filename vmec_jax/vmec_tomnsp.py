@@ -134,13 +134,13 @@ def vmec_trig_tables(
     cosmu = np.zeros((ntheta3, mmax + 1), dtype=float)
     sinmu = np.zeros_like(cosmu)
     for i in range(ntheta3):
-        if i == (ntheta2 - 1):
-            # Special case theta = pi (i == ntheta2 in Fortran).
+        if (not lasym) and i == (ntheta2 - 1):
+            # Special case theta = pi (i == ntheta2 in Fortran) on the reduced grid.
             signs = np.where((m.astype(int) % 2) == 0, 1.0, -1.0)
             cosmu[i, :] = signs * mscale
             sinmu[i, :] = 0.0
-        elif i >= ntheta2:
-            # Force symmetry for indices over ntheta2.
+        elif (not lasym) and i >= ntheta2:
+            # Force symmetry for indices over ntheta2 (lasym=False only).
             ir = 2 * ntheta2 - i - 2
             cosmu[i, :] = cosmu[ir, :]
             sinmu[i, :] = -sinmu[ir, :]

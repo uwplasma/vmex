@@ -591,23 +591,15 @@ def initial_guess_from_boundary(
         axis_from_indata = bool(have_axis)
 
         if not have_axis:
-            raxis_cc, zaxis_cs = _guess_axis_from_boundary(static, boundary_use)
-            raxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
-            zaxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
-            signgs_guess = 1 if np.median(areas) >= 0.0 else -1
-            raxis_np = np.asarray(raxis_cc)
-            zaxis_np = np.asarray(zaxis_cs)
-            for _ in range(3):
-                raxis_np, zaxis_np = _recompute_axis_from_boundary(
-                    static,
-                    boundary_use,
-                    raxis_cc=raxis_np,
-                    zaxis_cs=zaxis_np,
-                    signgs=signgs_guess,
-                )
-            raxis_cc, zaxis_cs = raxis_np, zaxis_np
-            raxis_cc = raxis_cc.astype(dtype)
-            zaxis_cs = zaxis_cs.astype(dtype)
+            if indata is None:
+                raxis_cc, zaxis_cs = _guess_axis_from_boundary(static, boundary_use)
+                raxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+                zaxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+            else:
+                raxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+                raxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+                zaxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+                zaxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
             have_axis = True
 
         if have_axis:

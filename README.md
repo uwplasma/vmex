@@ -77,6 +77,12 @@ Interpretation:
 - Axisymmetric tomnsps kernel dumps now match VMEC2000 (including ``crmn_e`` and ``czmn_o`` in PARVMEC, which are scaled inside ``forces_par``).
 - Remaining known gap: 3D ``bsub*`` (and the resulting scalar residuals) on some ``nfp>1`` cases.
 
+Iteration trace parity (VMEC2000 executable, reduced grid):
+
+- Single-grid axisym cases (``circular_tokamak``, ``solovev``, ``shaped_tokamak_pressure``) match ``fsq*`` and preconditioned scalars to ~1e-3 relative over 20 iterations at ``ns=13``.
+- ``purely_toroidal_field`` multigrid trace matches through stage 4 iter 6, but ``r00``/``w`` diagnostics become ``NaN`` from iter 7 onward (state divergence still under investigation).
+- ``up_down_asymmetric_tokamak`` (``lasym=True``) shows large bcovar/force-kernel mismatches at iter 1; nonlinear trace diverges. This is the current top lasym parity blocker.
+
 Reproduce scalar residual parity (`fsqr/fsqz/fsql`) on reference states:
 
 ```bash
