@@ -137,6 +137,13 @@ Force kernel combination (tomnsps)
 VMEC forms real-space "kernel" arrays and combines them into Fourier-space force
 arrays via ``tomnsps``. Conceptually, the residuals have the form:
 
+In PARVMEC, two axisymmetric kernel fields are mutated inside ``forces_par``:
+``crmn_e`` is scaled by ``pshalf`` and ``czmn_o`` is overwritten with the
+``lu_o`` work array (``dshalfds * lu_e`` plus the forward-half accumulation).
+These fields are *not* used in the axisymmetric ``tomnsps`` path
+(``lthreed=False``), but they are dumped for parity diagnostics, so
+``vmec_jax`` mirrors this behavior.
+
 .. math::
 
    F_R &= A_R - \partial_u B_R + \partial_v C_R, \\
@@ -319,7 +326,7 @@ In other words: decreasing :math:`W_{\mathrm{res}}` is a useful milestone and a
 regression target, but it is not yet equivalent to "match VMEC2000 coefficients".
 
 Fixed-boundary solve (early stage)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 We extend the optimization variables to include all Fourier coefficients:
 

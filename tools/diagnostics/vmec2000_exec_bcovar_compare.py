@@ -39,6 +39,8 @@ class BcovarFieldDump:
     bsubu: np.ndarray
     bsubv: np.ndarray
     bsq: np.ndarray
+    r12: np.ndarray | None = None
+    tau: np.ndarray | None = None
 
 
 def _parse_bcovar_fields_dump(path: Path) -> BcovarFieldDump:
@@ -79,22 +81,27 @@ def _parse_bcovar_fields_dump(path: Path) -> BcovarFieldDump:
     bsubu = _z()
     bsubv = _z()
     bsq = _z()
+    r12 = _z()
+    tau = _z()
 
     for line in rows:
         toks = line.split()
-        # 3 ints + 6 floats = 9 tokens.
+        # 3 ints + 6 floats = 9 tokens (optional +2 for r12/tau).
         if len(toks) < 9:
             continue
         js = int(toks[0]) - 1
         lt = int(toks[1]) - 1
         lz = int(toks[2]) - 1
-        vals = [float(t.replace("D", "E").replace("d", "E")) for t in toks[3:9]]
+        vals = [float(t.replace("D", "E").replace("d", "E")) for t in toks[3:]]
         phipog[js, lt, lz] = vals[0]
         bsupu[js, lt, lz] = vals[1]
         bsupv[js, lt, lz] = vals[2]
         bsubu[js, lt, lz] = vals[3]
         bsubv[js, lt, lz] = vals[4]
         bsq[js, lt, lz] = vals[5]
+        if len(vals) >= 8:
+            r12[js, lt, lz] = vals[6]
+            tau[js, lt, lz] = vals[7]
 
     return BcovarFieldDump(
         ns=int(ns),
@@ -106,6 +113,8 @@ def _parse_bcovar_fields_dump(path: Path) -> BcovarFieldDump:
         bsubu=bsubu,
         bsubv=bsubv,
         bsq=bsq,
+        r12=r12 if np.any(r12) else None,
+        tau=tau if np.any(tau) else None,
     )
 
 
@@ -269,14 +278,22 @@ def main() -> None:
             return np.asarray(jax[name], dtype=float)
 
         print("bcovar field parity (vmec2000 vs vmec_jax)")
-        for name, v, j in (
+        pairs = [
             ("phipog", vmec_fields.phipog, _arr("phipog_vmec")),
             ("bsupu", vmec_fields.bsupu, _arr("bsupu")),
             ("bsupv", vmec_fields.bsupv, _arr("bsupv")),
             ("bsubu", vmec_fields.bsubu, _arr("bsubu")),
             ("bsubv", vmec_fields.bsubv, _arr("bsubv")),
             ("bsq", vmec_fields.bsq, _arr("bsq")),
-        ):
+        ]
+        if vmec_fields.r12 is not None and vmec_fields.tau is not None:
+            pairs.extend(
+                [
+                    ("r12", vmec_fields.r12, _arr("r12")),
+                    ("tau", vmec_fields.tau, _arr("tau")),
+                ]
+            )
+        for name, v, j in pairs:
             max_abs, max_rel, idx, vmec_v, jax_v = _max_diff_report(v, j)
             js, lt, lz = idx
             loc = f"(js={js+1}, lt={lt+1}, lz={lz+1})"
@@ -286,14 +303,22 @@ def main() -> None:
             )
 
         print("bcovar field parity (exclude axis js=1)")
-        for name, v, j in (
+        pairs = [
             ("phipog", vmec_fields.phipog, _arr("phipog_vmec")),
             ("bsupu", vmec_fields.bsupu, _arr("bsupu")),
             ("bsupv", vmec_fields.bsupv, _arr("bsupv")),
             ("bsubu", vmec_fields.bsubu, _arr("bsubu")),
             ("bsubv", vmec_fields.bsubv, _arr("bsubv")),
             ("bsq", vmec_fields.bsq, _arr("bsq")),
-        ):
+        ]
+        if vmec_fields.r12 is not None and vmec_fields.tau is not None:
+            pairs.extend(
+                [
+                    ("r12", vmec_fields.r12, _arr("r12")),
+                    ("tau", vmec_fields.tau, _arr("tau")),
+                ]
+            )
+        for name, v, j in pairs:
             max_abs, max_rel, idx, vmec_v, jax_v = _max_diff_report_mask_axis(v, j)
             js, lt, lz = idx
             loc = f"(js={js+2}, lt={lt+1}, lz={lz+1})"
@@ -308,4 +333,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

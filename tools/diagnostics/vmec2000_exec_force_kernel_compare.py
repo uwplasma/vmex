@@ -39,6 +39,77 @@ class KernelDump:
     clmn: np.ndarray
 
 
+def _parse_bcovar_fields_dump(path: Path):
+    ns = None
+    ntheta3 = None
+    nzeta = None
+    rows: list[str] = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("ns="):
+                ns = int(line.split("=", 1)[1])
+                continue
+            if line.startswith("ntheta3="):
+                ntheta3 = int(line.split("=", 1)[1])
+                continue
+            if line.startswith("nzeta="):
+                nzeta = int(line.split("=", 1)[1])
+                continue
+            if line.startswith("columns:"):
+                continue
+            if line.startswith("phipog") or line.startswith("bsubu"):
+                continue
+            rows.append(line)
+    if ns is None or ntheta3 is None or nzeta is None:
+        raise ValueError(f"Missing header fields in bcovar dump: {path}")
+
+    shape = (int(ns), int(ntheta3), int(nzeta))
+
+    def _z():
+        return np.zeros(shape, dtype=float)
+
+    phipog = _z()
+    bsupu = _z()
+    bsupv = _z()
+    bsubu = _z()
+    bsubv = _z()
+    bsq = _z()
+    r12 = _z()
+    tau = _z()
+
+    for line in rows:
+        toks = line.split()
+        if len(toks) < 9:
+            continue
+        js = int(toks[0]) - 1
+        lt = int(toks[1]) - 1
+        lz = int(toks[2]) - 1
+        vals = [float(t.replace("D", "E").replace("d", "E")) for t in toks[3:]]
+        phipog[js, lt, lz] = vals[0]
+        bsupu[js, lt, lz] = vals[1]
+        bsupv[js, lt, lz] = vals[2]
+        bsubu[js, lt, lz] = vals[3]
+        bsubv[js, lt, lz] = vals[4]
+        bsq[js, lt, lz] = vals[5]
+        if len(vals) >= 8:
+            r12[js, lt, lz] = vals[6]
+            tau[js, lt, lz] = vals[7]
+
+    return {
+        "phipog": phipog,
+        "bsupu": bsupu,
+        "bsupv": bsupv,
+        "bsubu": bsubu,
+        "bsubv": bsubv,
+        "bsq": bsq,
+        "r12": r12 if np.any(r12) else None,
+        "tau": tau if np.any(tau) else None,
+    }
+
+
 def _parse_kernel_dump(path: Path) -> KernelDump:
     ns = None
     ntheta3 = None
@@ -229,6 +300,7 @@ def main() -> None:
 
         env = {
             "VMEC_DUMP_TOMNSPS_KERNELS": "1",
+            "VMEC_DUMP_BCOVAR": "1",
             "VMEC_DUMP_ITER": str(int(args.iter)),
             "VMEC_DUMP_DIR": str(workdir),
         }
@@ -239,6 +311,11 @@ def main() -> None:
         if not vmec_dump_path.exists():
             raise SystemExit(f"VMEC2000 kernel dump not found: {vmec_dump_path}")
         vmec_dump = _parse_kernel_dump(vmec_dump_path)
+
+        vmec_bcovar_path = workdir / f"bcovar_fields_iter{int(args.iter)}.dat"
+        vmec_bcovar = None
+        if vmec_bcovar_path.exists():
+            vmec_bcovar = _parse_bcovar_fields_dump(vmec_bcovar_path)
 
         # Run vmec_jax with force-kernel dump enabled.
         jax_dump_dir = workdir / "jax"
@@ -305,6 +382,37 @@ def main() -> None:
         ]
         for name, v, j in pairs:
             _compare(name, v, j)
+
+        if vmec_bcovar is not None and vmec_bcovar.get("r12") is not None and vmec_bcovar.get("tau") is not None:
+            bsq = vmec_bcovar["bsq"]
+            r12 = vmec_bcovar["r12"]
+            tau = vmec_bcovar["tau"]
+            ns = int(bsq.shape[0])
+            if ns < 2:
+                pshalf = np.sqrt(np.maximum(np.linspace(0.0, 1.0, ns), 0.0))
+            else:
+                s = np.linspace(0.0, 1.0, ns)
+                sh = 0.5 * (s[1:] + s[:-1])
+                pshalf = np.sqrt(np.maximum(np.concatenate([sh[:1], sh], axis=0), 0.0))
+            pshalf = pshalf[:, None, None]
+            crmn_ref = bsq * tau * pshalf
+            czmn_ref = bsq * r12
+
+            def _compare_vmec_ref(name: str, v: np.ndarray, ref: np.ndarray) -> None:
+                max_abs, max_rel, idx, vmec_v, ref_v = _max_diff_report(v, ref)
+                if len(idx) == 3:
+                    js, lt, lz = idx
+                    loc = f"(js={js+1}, lt={lt+1}, lz={lz+1})"
+                else:
+                    loc = f"{idx}"
+                print(
+                    f"  {name:6s}: max_abs={max_abs:.3e}  max_rel={max_rel:.3e}  at {loc}  "
+                    f"vmec={vmec_v:.8e}  ref={ref_v:.8e}"
+                )
+
+            print("vmec2000 kernel vs bcovar-derived reference")
+            _compare_vmec_ref("crmn_e", vmec_dump.crmn[:, :, :, 0], crmn_ref)
+            _compare_vmec_ref("czmn_e", vmec_dump.czmn[:, :, :, 0], czmn_ref)
 
 
 if __name__ == "__main__":

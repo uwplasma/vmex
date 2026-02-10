@@ -510,6 +510,11 @@ def vmec_bcovar_half_mesh_from_wout(
     psqrts = jnp.sqrt(jnp.maximum(s, 0.0))[:, None, None]
     clmn_even = jnp.zeros_like(bsubu_e)
     blmn_even = jnp.zeros_like(bsubv_e)
+    if ns >= 1:
+        # VMEC leaves the axis entries unscaled (the -lamscale factor is applied
+        # only for js>=2). Preserve the raw axis values to match tomnsps dumps.
+        clmn_even = clmn_even.at[0].set(bsubu_e[0])
+        blmn_even = blmn_even.at[0].set(bsubv_e[0])
     if ns >= 2:
         clmn_even = clmn_even.at[1:].set(-lamscale * bsubu_e[1:])
         blmn_even = blmn_even.at[1:].set(-lamscale * bsubv_e[1:])
