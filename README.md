@@ -16,6 +16,13 @@ Run the end-to-end showcase (recommended):
 python examples/showcase_axisym_input_to_wout.py --suite
 ```
 
+Legacy `vmecPlot2.py` compatibility (NetCDF3 `wout` output):
+
+```bash
+python examples/showcase_axisym_input_to_wout.py --case circular_tokamak --max-iter 5 --no-vmec2000-trace
+python vmecPlot2.py examples/outputs/showcase/circular_tokamak/wout_circular_tokamak_vmec_jax.nc /tmp/vmecplot2_jax
+```
+
 Run tests:
 
 ```bash

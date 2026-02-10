@@ -457,8 +457,9 @@ def vmec_bcovar_half_mesh_from_wout(
     lu1 = lamscale * Lu1
 
     # lvv on half mesh: phipog * gvv (bcovar.f uses phipog == 1/sqrtg).
-    # For parity with `wout`-scaled fluxes we reuse `overg` here.
-    lvv = overg * gvv
+    # NOTE: phipog does **not** include the 2π scaling used in `overg`.
+    phipog = jnp.where(jac.sqrtg != 0, 1.0 / jac.sqrtg, 0.0)
+    lvv = phipog * gvv
 
     if bool(use_wout_bsub_for_lambda):
         # Reference parity mode: use averaged wout bsub* directly.

@@ -94,12 +94,13 @@ def _pwint_from_trig(trig: VmecTrigTables, *, nzeta: int, dtype) -> jnp.ndarray:
     return w_theta[:, None] * jnp.ones((int(nzeta),), dtype=dtype)[None, :]
 
 
-def equif_from_bcovar(*, bc, trig: VmecTrigTables, wout, s: Any) -> jnp.ndarray:
-    """Compute VMEC's `equif(js)` profile from bsubu/bsubv averages (fbal.f)."""
+def currents_from_bcovar(*, bc, trig: VmecTrigTables, wout, s: Any) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    """Compute buco/bvco and discrete currents from bcovar fields (VMEC fbal)."""
     s = jnp.asarray(s)
     ns = int(s.shape[0])
     if ns < 2:
-        return jnp.zeros((ns,), dtype=jnp.float64)
+        z = jnp.zeros((ns,), dtype=jnp.float64)
+        return z, z, z, z
 
     hs = s[1] - s[0]
     ohs = jnp.where(hs != 0, 1.0 / hs, 0.0).astype(jnp.float64)
@@ -123,6 +124,19 @@ def equif_from_bcovar(*, bc, trig: VmecTrigTables, wout, s: Any) -> jnp.ndarray:
     bvco_fwd = jnp.concatenate([bvco[1:], jnp.zeros((1,), dtype=bvco.dtype)], axis=0)
     jcurv = signgs * ohs * (buco_fwd - buco)
     jcuru = -signgs * ohs * (bvco_fwd - bvco)
+    return buco, bvco, jcuru, jcurv
+
+
+def equif_from_bcovar(*, bc, trig: VmecTrigTables, wout, s: Any) -> jnp.ndarray:
+    """Compute VMEC's `equif(js)` profile from bsubu/bsubv averages (fbal.f)."""
+    s = jnp.asarray(s)
+    ns = int(s.shape[0])
+    if ns < 2:
+        return jnp.zeros((ns,), dtype=jnp.float64)
+
+    hs = s[1] - s[0]
+    ohs = jnp.where(hs != 0, 1.0 / hs, 0.0).astype(jnp.float64)
+    buco, bvco, jcuru, jcurv = currents_from_bcovar(bc=bc, trig=trig, wout=wout, s=s)
 
     vp = jnp.asarray(getattr(wout, "vp", np.zeros((ns,), dtype=float)), dtype=jnp.float64)
     vpphi = 0.5 * (jnp.concatenate([vp[1:], vp[-1:]], axis=0) + vp)
