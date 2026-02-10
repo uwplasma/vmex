@@ -122,10 +122,10 @@ def flux_profiles_from_indata(indata: InData, s, *, signgs: int) -> FluxProfiles
     """Construct simple flux profiles (phipf/chipf) from &INDATA.
 
     This is a deliberately minimal port:
-    - toroidal flux uses `PHIEDGE` and optional polynomial `APHI` (default: aphi=[1]).
-    - poloidal flux derivative is derived from iota when available (ncurr=0 cases).
-      For ncurr=1 (current-driven), `chipf` is not determined from the input alone;
-      we currently set it to 0 unless iota is provided.
+    - toroidal flux uses `PHIEDGE` and polynomial `APHI` (default: aphi=[1]),
+      following `magnetic_fluxes.f:torflux_deriv` and `profil1d.f`.
+    - poloidal flux derivative follows `magnetic_fluxes.f:polflux_deriv`,
+      i.e. `piota(tf)*torflux_deriv(s)` for non-RFP (RFP uses polflux_deriv=1).
     """
     s = jnp.asarray(s)
     ns = int(s.shape[0])
@@ -136,32 +136,55 @@ def flux_profiles_from_indata(indata: InData, s, *, signgs: int) -> FluxProfiles
     if not aphi:
         aphi = [1.0]
     aphi_arr = jnp.asarray(aphi, dtype=s.dtype)
-    norm = _poly_no_const(aphi_arr, jnp.asarray(1.0, dtype=s.dtype))
-    norm = jnp.where(norm != 0, norm, jnp.asarray(1.0, dtype=s.dtype))
 
-    torflux_deriv = _poly_no_const_deriv(aphi_arr, s) / norm
-    phipf = phiedge * torflux_deriv * jnp.ones((ns,), dtype=s.dtype)
+    lrfp = bool(indata.get_bool("LRFP", False))
 
-    # Iota is defined on the VMEC half mesh (iotas) and VMEC forms the full-mesh
-    # `iotaf` via a simple averaging map in `add_fluxes`. The `wout`-style
-    # `chipf` stored in the reference files satisfies `chipf = iotaf * phipf`.
+    def _torflux_deriv(x):
+        if lrfp:
+            # For RFP, torflux_deriv = polflux_deriv / piota, and polflux_deriv = 1.
+            prof = eval_profiles(indata, x)
+            iota_x = prof.get("iota", jnp.zeros_like(x))
+            iota_x = jnp.where(iota_x != 0, iota_x, jnp.asarray(float("inf"), dtype=iota_x.dtype))
+            return 1.0 / iota_x
+        return _poly_no_const_deriv(aphi_arr, x)
+
+    def _torflux(x):
+        # VMEC integrates torflux_deriv with a fixed 101-point trapezoid.
+        x = jnp.asarray(x)
+        if x.ndim == 0:
+            x = x[None]
+        h = jnp.asarray(1e-2, dtype=x.dtype) * x
+        grid = jnp.arange(101, dtype=x.dtype)[None, :]
+        xi = h[:, None] * grid
+        vals = _torflux_deriv(xi)
+        trap = jnp.sum(vals, axis=1) - 0.5 * (vals[:, 0] + vals[:, -1])
+        return h * trap
+
+    def _polflux_deriv(x):
+        if lrfp:
+            return jnp.ones_like(x)
+        tf = _torflux(x)
+        tf = jnp.minimum(tf, jnp.asarray(1.0, dtype=tf.dtype))
+        prof = eval_profiles(indata, tf)
+        iota_tf = prof.get("iota", jnp.zeros_like(tf))
+        return iota_tf * _torflux_deriv(x)
+
+    # VMEC: torflux_edge = signgs*phiedge/(2π) normalized by torflux(1).
+    torflux_edge = jnp.asarray(signgs, dtype=s.dtype) * jnp.asarray(phiedge, dtype=s.dtype) / jnp.asarray(TWOPI, dtype=s.dtype)
+    torflux_1 = _torflux(jnp.asarray(1.0, dtype=s.dtype))
+    torflux_edge = jnp.where(torflux_1 != 0, torflux_edge / torflux_1, torflux_edge)
+
+    # Full mesh.
+    phipf = torflux_edge * _torflux_deriv(s)
+    chipf = torflux_edge * _polflux_deriv(s)
+
+    # Half mesh (VMEC: phips/chips).
     if ns < 2:
         s_half = s
     else:
         s_half = jnp.concatenate([s[:1], 0.5 * (s[1:] + s[:-1])], axis=0)
-
-    prof = eval_profiles(indata, s_half)
-    iotas = prof.get("iota", jnp.zeros_like(s_half))
-    if int(jnp.size(iotas)) > 0:
-        iotas = iotas.at[0].set(jnp.zeros_like(iotas[0]))
-
-    lrfp = bool(indata.get_bool("LRFP", False))
-    iotaf = _iotaf_from_iotas(iotas, lrfp=lrfp)
-    chipf = iotaf * phipf
-
-    phips = (signgs * phipf) / TWOPI
-    if int(jnp.size(phips)) > 0:
-        phips = phips.at[0].set(jnp.zeros_like(phips[0]))
+    phips = torflux_edge * _torflux_deriv(s_half)
+    phips = phips.at[0].set(jnp.zeros_like(phips[0]))
     lamscale = lamscale_from_phips(phips, s)
     return FluxProfiles(phipf=phipf, chipf=chipf, phips=phips, signgs=int(signgs), lamscale=lamscale)
 

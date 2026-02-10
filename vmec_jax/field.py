@@ -19,10 +19,9 @@ We follow that convention here so we can validate against the bundled `wout` ref
 The formulas implemented here match VMEC's `bcovar` + `add_fluxes` logic:
 
   bsupv = overg * (phipf + lamscale * lam_u)
-  bsupu = overg * (chipf - lamscale * lam_v)
+  bsupu = overg * (chipf + lamscale * lam_v)
 
-where ``overg = 1 / (signgs * sqrtg * 2π)`` for the coordinate conventions used in
-this repo (see `vmec_jax.integrals` for the zeta/phi relationship).
+where ``overg = 1 / (signgs * sqrtg)`` following VMEC's `bcovar` convention.
 """
 
 from __future__ import annotations
@@ -120,11 +119,14 @@ def bsup_from_sqrtg_lambda(
     if sqrtg.ndim != 3:
         raise ValueError(f"sqrtg must be (ns,ntheta,nzeta), got shape {sqrtg.shape}")
 
-    denom = (signgs * sqrtg * TWOPI)
-    num_u = chipf[:, None, None] - lamscale * lam_v
+    denom = (signgs * sqrtg)
+    num_u = chipf[:, None, None] + lamscale * lam_v
     num_v = phipf[:, None, None] + lamscale * lam_u
     bsupu = _safe_divide(num_u, denom, eps=eps)
     bsupv = _safe_divide(num_v, denom, eps=eps)
+    # VMEC sign convention: align contravariant components with bcovar parity.
+    bsupu = -bsupu
+    bsupv = -bsupv
     return bsupu, bsupv
 
 

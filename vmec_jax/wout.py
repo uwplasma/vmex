@@ -561,8 +561,10 @@ def wout_minimal_from_fixed_boundary(
     z2 = np.zeros((ns, mnmax_nyq), dtype=float)
     z1 = np.zeros((ns,), dtype=float)
 
-    # Toroidal flux (VMEC `phi`) via the half-mesh rectangle rule.
-    phi = np.asarray(cumrect_s_halfmesh(np.asarray(flux.phipf), s))
+    # Toroidal flux (VMEC `phi`) in physical units.
+    phipf_out = np.asarray(flux.phipf, dtype=float) * float(2.0 * np.pi * signgs)
+    chipf_out = np.asarray(chipf_wout, dtype=float) * float(2.0 * np.pi * signgs)
+    phi = np.asarray(cumrect_s_halfmesh(phipf_out, s))
 
     # Axis coefficients from m=0 modes on the magnetic axis.
     raxis_cc = np.zeros((ntor + 1,), dtype=float)
@@ -616,7 +618,19 @@ def wout_minimal_from_fixed_boundary(
     )
 
     class _WoutLike:
-        __slots__ = ("phipf", "phips", "chipf", "iotaf", "iotas", "signgs", "nfp", "mpol", "ntor", "lasym")
+        __slots__ = (
+            "phipf",
+            "phips",
+            "chipf",
+            "iotaf",
+            "iotas",
+            "signgs",
+            "nfp",
+            "mpol",
+            "ntor",
+            "lasym",
+            "flux_is_internal",
+        )
 
         def __init__(self):
             self.phipf = np.asarray(flux.phipf)
@@ -629,6 +643,7 @@ def wout_minimal_from_fixed_boundary(
             self.mpol = int(mpol)
             self.ntor = int(ntor)
             self.lasym = bool(lasym)
+            self.flux_is_internal = True
 
     wout_like = _WoutLike()
     bc = vmec_bcovar_half_mesh_from_wout(
@@ -719,8 +734,8 @@ def wout_minimal_from_fixed_boundary(
         zmns=zmns,
         lmnc=lmnc,
         lmns=lmns,
-        phipf=np.asarray(flux.phipf, dtype=float),
-        chipf=np.asarray(chipf_wout, dtype=float),
+        phipf=phipf_out,
+        chipf=chipf_out,
         phips=np.asarray(flux.phips, dtype=float),
         iotaf=np.asarray(iotaf, dtype=float),
         iotas=np.asarray(iotas, dtype=float),

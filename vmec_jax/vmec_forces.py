@@ -1012,6 +1012,10 @@ def vmec_forces_rz_from_wout_reference_fields(
     bc_obj.clmn_odd = clmn_odd
     bc_obj.blmn_even = blmn_even
     bc_obj.blmn_odd = blmn_odd
+    bc_obj.bsubu_e = bsubu_e
+    bc_obj.bsubv_e = bsubv_e
+    bc_obj.bsubu_e_scaled = clmn_even
+    bc_obj.bsubv_e_scaled = blmn_even
 
     # VMEC default: `tcon0 = 1` (see `readin.f`).
     # If caller passed an explicit value, do not override it from `indata`.

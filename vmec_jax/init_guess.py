@@ -554,11 +554,29 @@ def initial_guess_from_boundary(
         boundary_use = _flip_boundary_theta(static, boundary_use)
     boundary_use = _apply_m1_constraint(static, boundary_use)
 
-    # Base: broadcast boundary vectors to (ns,K)
-    Rcos_b = jnp.asarray(boundary_use.R_cos, dtype=dtype)[None, :]
-    Rsin_b = jnp.asarray(boundary_use.R_sin, dtype=dtype)[None, :]
-    Zcos_b = jnp.asarray(boundary_use.Z_cos, dtype=dtype)[None, :]
-    Zsin_b = jnp.asarray(boundary_use.Z_sin, dtype=dtype)[None, :]
+
+    # VMEC internal scaling: divide coefficients by mscale*nscale.
+    trig = vmec_trig_tables(
+        ntheta=cfg.ntheta,
+        nzeta=cfg.nzeta,
+        nfp=cfg.nfp,
+        mmax=cfg.mpol - 1,
+        nmax=cfg.ntor,
+        lasym=cfg.lasym,
+        dtype=dtype,
+    )
+    m_idx = jnp.asarray(static.modes.m, dtype=jnp.int32)
+    n_idx = jnp.asarray(static.modes.n, dtype=jnp.int32)
+    n1 = jnp.abs(n_idx)
+    mscale = jnp.asarray(trig.mscale, dtype=dtype)
+    nscale = jnp.asarray(trig.nscale, dtype=dtype)
+    mode_scale = (1.0 / (mscale[m_idx] * nscale[n1])).astype(dtype)  # internal scale
+
+    # Base: broadcast boundary vectors to (ns,K) in internal convention.
+    Rcos_b = (jnp.asarray(boundary_use.R_cos, dtype=dtype) * mode_scale)[None, :]
+    Rsin_b = (jnp.asarray(boundary_use.R_sin, dtype=dtype) * mode_scale)[None, :]
+    Zcos_b = (jnp.asarray(boundary_use.Z_cos, dtype=dtype) * mode_scale)[None, :]
+    Zsin_b = (jnp.asarray(boundary_use.Z_sin, dtype=dtype) * mode_scale)[None, :]
 
     # Regularity scaling (profil3d): rho**m for m>0, s for m=0 (before axis blend).
     rho = jnp.sqrt(s)
@@ -577,6 +595,19 @@ def initial_guess_from_boundary(
         raxis_cs = _axis_array(ax.get("RAXIS_CS", None), cfg.ntor, dtype=dtype)
         zaxis_cc = _axis_array(ax.get("ZAXIS_CC", None), cfg.ntor, dtype=dtype)
         zaxis_cs = _axis_array(ax.get("ZAXIS_CS", None), cfg.ntor, dtype=dtype)
+
+        # Convert axis coefficients to VMEC internal scaling (1/(mscale*nscale)).
+        n_arr = jnp.arange(cfg.ntor + 1, dtype=jnp.int32)
+        nscale_axis = jnp.asarray(trig.nscale, dtype=dtype)
+        axis_scale = (1.0 / nscale_axis[n_arr]).astype(dtype)
+        if raxis_cc is not None:
+            raxis_cc = raxis_cc * axis_scale
+        if raxis_cs is not None:
+            raxis_cs = raxis_cs * axis_scale
+        if zaxis_cc is not None:
+            zaxis_cc = zaxis_cc * axis_scale
+        if zaxis_cs is not None:
+            zaxis_cs = zaxis_cs * axis_scale
 
         # If axis arrays are all zero or missing, fall back to boundary-based axis.
         have_axis = False
@@ -661,20 +692,18 @@ def initial_guess_from_boundary(
                     zaxis_cs=zaxis_cs,
                 )
 
+    # Convert back to physical (wout) convention before returning.
+    mode_scale_inv = jnp.where(mode_scale != 0, 1.0 / mode_scale, 0.0).astype(dtype)
+    Rcos = Rcos * mode_scale_inv[None, :]
+    Rsin = Rsin * mode_scale_inv[None, :]
+    Zcos = Zcos * mode_scale_inv[None, :]
+    Zsin = Zsin * mode_scale_inv[None, :]
+
     if vmec_project:
         if cfg.lasym:
             # Defer asymmetric support for the VMEC-grid projection.
             vmec_project = False
         else:
-            trig = vmec_trig_tables(
-                ntheta=cfg.ntheta,
-                nzeta=cfg.nzeta,
-                nfp=cfg.nfp,
-                mmax=cfg.mpol - 1,
-                nmax=cfg.ntor,
-                lasym=cfg.lasym,
-                dtype=dtype,
-            )
             R_real = vmec_realspace_synthesis(coeff_cos=Rcos, coeff_sin=Rsin, modes=static.modes, trig=trig)
             Z_real = vmec_realspace_synthesis(coeff_cos=Zcos, coeff_sin=Zsin, modes=static.modes, trig=trig)
             Rcos, Rsin = vmec_realspace_analysis(f=R_real, modes=static.modes, trig=trig, parity="cos")

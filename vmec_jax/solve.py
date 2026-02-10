@@ -162,6 +162,33 @@ def _maybe_dump_force_kernels(*, k, static, iter_idx: int, label: str = "raw") -
         blmn_o=_arr(getattr(getattr(k, "bc", None), "blmn_odd", None)),
         clmn_e=_arr(getattr(getattr(k, "bc", None), "clmn_even", None)),
         clmn_o=_arr(getattr(getattr(k, "bc", None), "clmn_odd", None)),
+        bsubu_e=_arr(getattr(getattr(k, "bc", None), "bsubu_e", None)),
+        bsubv_e=_arr(getattr(getattr(k, "bc", None), "bsubv_e", None)),
+        bsubu=_arr(getattr(getattr(k, "bc", None), "bsubu", None)),
+        bsubv=_arr(getattr(getattr(k, "bc", None), "bsubv", None)),
+        bsupu=_arr(getattr(getattr(k, "bc", None), "bsupu", None)),
+        bsupv=_arr(getattr(getattr(k, "bc", None), "bsupv", None)),
+        bsubu_e_scaled=_arr(
+            getattr(getattr(k, "bc", None), "bsubu_e_scaled", None)
+            if getattr(getattr(k, "bc", None), "bsubu_e_scaled", None) is not None
+            else getattr(getattr(k, "bc", None), "clmn_even", None)
+        ),
+        bsubv_e_scaled=_arr(
+            getattr(getattr(k, "bc", None), "bsubv_e_scaled", None)
+            if getattr(getattr(k, "bc", None), "bsubv_e_scaled", None) is not None
+            else getattr(getattr(k, "bc", None), "blmn_even", None)
+        ),
+        bsubu_tmp=_arr(getattr(getattr(k, "bc", None), "bsubu_tmp", None)),
+        bsubv_preblend=_arr(getattr(getattr(k, "bc", None), "bsubv_preblend", None)),
+        bsubv_avg=_arr(getattr(getattr(k, "bc", None), "bsubv_avg", None)),
+        lamscale=_arr(getattr(getattr(k, "bc", None), "lamscale", None)),
+        lu0_full=_arr(getattr(getattr(k, "bc", None), "lu0_full", None)),
+        lu0_force=_arr(getattr(getattr(k, "bc", None), "lu0_force", None)),
+        lu1_full=_arr(getattr(getattr(k, "bc", None), "lu1_full", None)),
+        lvv=_arr(getattr(getattr(k, "bc", None), "lvv", None)),
+        lvv_sh=_arr(getattr(getattr(k, "bc", None), "lvv_sh", None)),
+        phip_full=_arr(getattr(getattr(k, "bc", None), "phip_full", None)),
+        phip_internal=_arr(getattr(getattr(k, "bc", None), "phip_internal", None)),
         pr1_even=_arr(getattr(k, "pr1_even", None)),
         pr1_odd=_arr(getattr(k, "pr1_odd", None)),
         pz1_even=_arr(getattr(k, "pz1_even", None)),
@@ -1293,6 +1320,7 @@ class _WoutLikeVmecForces:
     phips: Any  # (ns,)
     chipf: Any  # (ns,)  (VMEC `wout` half-mesh averaged convention)
     pres: Any  # (ns,)  (half mesh, VMEC internal units mu0*Pa)
+    flux_is_internal: bool = True
 
 
 def _s_half_from_full_mesh_s(s):

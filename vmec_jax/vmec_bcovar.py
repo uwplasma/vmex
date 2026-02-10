@@ -56,10 +56,26 @@ class VmecHalfMeshBcovar:
     # VMEC lambda force kernels (Fourier-space transform inputs) on full mesh.
     # These correspond to `bsubu_e/bsubv_e` in `bcovar.f` after the `-lamscale`
     # scaling, and are used as `(CLMN, BLMN)` in `tomnsps`.
+    bsubu_e: Any  # (ns, ntheta, nzeta) unscaled full-mesh covariant B_u
+    bsubv_e: Any  # (ns, ntheta, nzeta) unscaled full-mesh covariant B_v
+    bsubu_e_scaled: Any  # (ns, ntheta, nzeta) scaled for tomnsps (VMEC bsubu_e)
+    bsubv_e_scaled: Any  # (ns, ntheta, nzeta) scaled for tomnsps (VMEC bsubv_e)
+    bsubu_tmp: Any  # (ns, ntheta, nzeta) pguv*bsupu term in bsubv_e
+    bsubv_preblend: Any  # (ns, ntheta, nzeta) bsubv_e before blending
+    bsubv_avg: Any  # (ns, ntheta, nzeta) averaged half-mesh bsubv
     clmn_even: Any  # (ns, ntheta, nzeta)
     clmn_odd: Any  # (ns, ntheta, nzeta)
     blmn_even: Any  # (ns, ntheta, nzeta)
     blmn_odd: Any  # (ns, ntheta, nzeta)
+
+    # Lambda-force intermediate terms (full mesh), used for parity debugging.
+    lu0_full: Any  # (ns, ntheta, nzeta) full-mesh LU even (scaled + wout.phipf)
+    lu0_force: Any  # (ns, ntheta, nzeta) LU even used in lambda-force block
+    lu1_full: Any  # (ns, ntheta, nzeta) full-mesh LU odd (scaled)
+    lvv: Any  # (ns, ntheta, nzeta) phipog * gvv (full mesh)
+    lvv_sh: Any  # (ns, ntheta, nzeta) lvv * pshalf
+    phip_full: Any  # (ns,) full-mesh phipf used in LU_even
+    phip_internal: Any  # (ns,) VMEC internal phipf = signgs*phipf/(2π)
 
     # bsq = |B|^2/2 + p on half mesh (VMEC convention).
     bsq: Any  # (ns, ntheta, nzeta)
@@ -334,14 +350,25 @@ def vmec_bcovar_half_mesh_from_wout(
     #
     # See `VMEC2000/Sources/General/bcovar.f` and `add_fluxes.f90`.
     lamscale = lamscale_from_phips(wout.phips, s)
+    signgs = int(getattr(wout, "signgs", 1))
 
     # VMEC adds the **full-mesh** flux function `chips(js)` to bsupu in
     # `add_fluxes`, while `wout` commonly stores the half-mesh array `chipf`.
     chipf_out = getattr(wout, "chipf", None)
+    phipf_out = jnp.asarray(getattr(wout, "phipf"))
+    signgs = int(getattr(wout, "signgs", 1))
+    flux_is_internal = bool(getattr(wout, "flux_is_internal", False))
+    if not flux_is_internal:
+        scale = jnp.asarray(TWOPI, dtype=phipf_out.dtype) * jnp.asarray(signgs, dtype=phipf_out.dtype)
+        phipf_internal = phipf_out / scale
+        chipf_internal = None if chipf_out is None else (jnp.asarray(chipf_out) / scale)
+    else:
+        phipf_internal = phipf_out
+        chipf_internal = None if chipf_out is None else jnp.asarray(chipf_out)
     if chipf_out is not None:
         chips_eff = chips_from_wout_chipf(
-            chipf=chipf_out,
-            phipf=getattr(wout, "phipf"),
+            chipf=chipf_internal,
+            phipf=phipf_internal,
             iotaf=getattr(wout, "iotaf", None),
             iotas=getattr(wout, "iotas", None),
             # Solver-internal wout-like objects may omit iotaf/iotas and provide
@@ -349,14 +376,10 @@ def vmec_bcovar_half_mesh_from_wout(
             assume_half_if_unknown=True,
         )
     else:
-        chips_eff = jnp.asarray(getattr(wout, "iotaf", getattr(wout, "iotas", 0.0))) * jnp.asarray(wout.phipf)
+        chips_eff = jnp.asarray(getattr(wout, "iotaf", getattr(wout, "iotas", 0.0))) * jnp.asarray(phipf_internal)
 
-    # VMEC's public `wout` files and several quantities in this repo use
-    # flux-profile conventions that include a 2π factor. The `field.py`
-    # utilities define:
-    #   overg = 1 / (signgs * sqrtg * 2π)
-    # which is the convention currently used throughout vmec_jax's parity suite.
-    denom = int(wout.signgs) * jac.sqrtg * jnp.asarray(TWOPI, dtype=jac.sqrtg.dtype)
+    # VMEC bcovar: overg = 1 / (signgs * sqrtg).
+    denom = int(signgs) * jac.sqrtg
     overg = jnp.where(denom != 0, 1.0 / denom, 0.0)
 
     # Full-mesh LU = d(lambda)/du and LV = -d(lambda)/dv in VMEC conventions.
@@ -365,8 +388,8 @@ def vmec_bcovar_half_mesh_from_wout(
     lv0_full = -jnp.asarray(parity.Lp_even)
     lv1_full = -jnp.asarray(Lv1)
 
-    # Scale by lamscale and add phipf to LU_even.
-    lu0_full = (lamscale * lu0_full) + jnp.asarray(wout.phipf)[:, None, None]
+    # Scale by lamscale and add wout phipf to LU_even (bsupv path).
+    lu0_full = (lamscale * lu0_full) + jnp.asarray(phipf_internal)[:, None, None]
     lu1_full = lamscale * lu1_full
     lv0_full = lamscale * lv0_full
     lv1_full = lamscale * lv1_full
@@ -408,12 +431,25 @@ def vmec_bcovar_half_mesh_from_wout(
         bsupu = bsupu.at[0].set(jnp.zeros_like(bsupu[0]))
         bsupv = bsupv.at[0].set(jnp.zeros_like(bsupv[0]))
 
+    # Align bsup sign convention with VMEC2000 (parity dumps).
+    # VMEC uses signgs=-1 with a fixed orientation; our geometry currently
+    # yields bsupu/bsupv with the opposite sign for computed fields.
+    if not bool(use_wout_bsup):
+        bsupu = -bsupu
+        bsupv = -bsupv
+
     bsubu = guu * bsupu + guv * bsupv
     bsubv = guv * bsupu + gvv * bsupv
 
     # Optional reference parity path for lambda-force kernels.
     bsubu_lambda = bsubu
     bsubv_lambda = bsubv
+    # VMEC internal phipf corresponds to dPhi/(2π) and includes signgs.
+    # `flux_profiles_from_indata` already constructs phipf in that convention,
+    # so use wout.phipf directly for the lambda-force block.
+    phip_internal = jnp.asarray(phipf_internal)
+    lu0_force = (lamscale * jnp.asarray(parity.Lt_even)) + phip_internal[:, None, None]
+
     if bool(use_wout_bsub_for_lambda):
         modes_nyq = ModeTable(m=wout.xm_nyq, n=(wout.xn_nyq // wout.nfp))
         grid = AngleGrid(theta=static.grid.theta, zeta=static.grid.zeta, nfp=wout.nfp)
@@ -465,17 +501,21 @@ def vmec_bcovar_half_mesh_from_wout(
         # Reference parity mode: use averaged wout bsub* directly.
         bsubu_e = jnp.zeros_like(bsubu_lambda)
         bsubv_e = jnp.zeros_like(bsubv_lambda)
+        bsubu_tmp = jnp.zeros_like(bsubu_lambda)
+        bsubv_preblend = jnp.zeros_like(bsubv_lambda)
+        bsubv_avg = jnp.zeros_like(bsubv_lambda)
         if ns >= 2:
             bsubu_e = bsubu_e.at[:-1].set(0.5 * (bsubu_lambda[:-1] + bsubu_lambda[1:]))
             bsubu_e = bsubu_e.at[-1].set(0.5 * bsubu_lambda[-1])
             bsubv_e = bsubv_e.at[:-1].set(0.5 * (bsubv_lambda[:-1] + bsubv_lambda[1:]))
             bsubv_e = bsubv_e.at[-1].set(0.5 * bsubv_lambda[-1])
+            bsubv_avg = bsubv_e
     else:
         # Intermediate full-mesh bsubv_e (before blending), following bcovar.f.
         bsubv_e = jnp.zeros_like(bsubv)
         if ns >= 2:
-            bsubv_e = bsubv_e.at[:-1].set(0.5 * (lvv[:-1] + lvv[1:]) * lu0[:-1])
-            bsubv_e = bsubv_e.at[-1].set(0.5 * lvv[-1] * lu0[-1])
+            bsubv_e = bsubv_e.at[:-1].set(0.5 * (lvv[:-1] + lvv[1:]) * lu0_force[:-1])
+            bsubv_e = bsubv_e.at[-1].set(0.5 * lvv[-1] * lu0_force[-1])
 
         lvv_sh = lvv * pshalf
         bsubu_tmp = guv * bsupu  # bcovar: pguv*bsupu (sigma_an=1 isotropic)
@@ -484,6 +524,7 @@ def vmec_bcovar_half_mesh_from_wout(
                 0.5 * ((lvv_sh[:-1] + lvv_sh[1:]) * lu1[:-1] + bsubu_tmp[:-1] + bsubu_tmp[1:])
             )
             bsubv_e = bsubv_e.at[-1].add(0.5 * (lvv_sh[-1] * lu1[-1] + bsubu_tmp[-1]))
+        bsubv_preblend = bsubv_e
 
         # Average lambda forces onto full radial mesh (bsubu_e from bsubu half mesh).
         bsubu_e = jnp.zeros_like(bsubu)
@@ -501,6 +542,7 @@ def vmec_bcovar_half_mesh_from_wout(
             bsubv_e = bdamp * bsubv_e + (1.0 - bdamp) * bsubv_avg
         else:
             bsubv_e = bdamp * bsubv_e + (1.0 - bdamp) * bsubv_e
+            bsubv_avg = bsubv_e
 
     # Final scaling for tomnsps:
     # VMEC applies the "-lamscale" factor only for js>=2 (1-based). The axis (js=1)
@@ -522,6 +564,9 @@ def vmec_bcovar_half_mesh_from_wout(
     clmn_odd = psqrts * clmn_even
     blmn_odd = psqrts * blmn_even
 
+    bsubu_e_scaled = clmn_even
+    bsubv_e_scaled = blmn_even
+
     return VmecHalfMeshBcovar(
         jac=jac,
         guu=guu,
@@ -531,6 +576,20 @@ def vmec_bcovar_half_mesh_from_wout(
         bsupv=bsupv,
         bsubu=bsubu,
         bsubv=bsubv,
+        bsubu_e=bsubu_e,
+        bsubv_e=bsubv_e,
+        bsubu_e_scaled=bsubu_e_scaled,
+        bsubv_e_scaled=bsubv_e_scaled,
+        bsubu_tmp=bsubu_tmp,
+        bsubv_preblend=bsubv_preblend,
+        bsubv_avg=bsubv_avg,
+        lu0_full=lu0_full,
+        lu0_force=lu0_force,
+        lu1_full=lu1_full,
+        lvv=lvv,
+        lvv_sh=lvv * pshalf,
+        phip_full=jnp.asarray(wout.phipf),
+        phip_internal=phip_internal,
         bsq=bsq,
         gij_b_uu=gij_b_uu,
         gij_b_uv=gij_b_uv,

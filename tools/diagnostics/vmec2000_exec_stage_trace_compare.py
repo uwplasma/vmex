@@ -357,8 +357,9 @@ def main() -> None:
     )
     p.add_argument(
         "--fail-fast",
-        action="store_true",
-        help="Exit nonzero at the first mismatch beyond tolerances.",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Exit nonzero at the first mismatch beyond tolerances (default: True).",
     )
     args = p.parse_args()
 
@@ -517,6 +518,24 @@ def main() -> None:
         if not (np.isfinite(vmec_val) and np.isfinite(jax_val)):
             return False
         return abs(vmec_val - jax_val) <= max(float(args.atol), float(args.rtol) * abs(vmec_val))
+
+    # Stage transition parity (ns + offsets).
+    if offsets.size and ns_stages.size:
+        vmec_ns = np.asarray([int(st.ns) for st in vmec_stages], dtype=int)
+        vmec_niter = np.asarray([int(st.niter) for st in vmec_stages], dtype=int)
+        vmec_offsets = np.concatenate([[0], np.cumsum(vmec_niter[:-1])]).astype(int) if vmec_niter.size else np.zeros((0,), dtype=int)
+
+        ns_ok = bool(vmec_ns.size == ns_stages.size) and bool(np.all(vmec_ns == ns_stages[: vmec_ns.size]))
+        off_ok = bool(vmec_offsets.size == offsets.size) and bool(np.all(vmec_offsets == offsets[: vmec_offsets.size]))
+        if not ns_ok or not off_ok:
+            print()
+            print("Stage transition mismatch:")
+            if not ns_ok:
+                print(f"  vmec ns_stages={vmec_ns.tolist()}  jax ns_stages={ns_stages.tolist()}")
+            if not off_ok:
+                print(f"  vmec offsets={vmec_offsets.tolist()}  jax offsets={offsets.tolist()}")
+            if bool(args.fail_fast):
+                raise SystemExit(2)
 
     for stage_i, st in enumerate(vmec_stages):
         if stage_i >= offsets.size or stage_i >= ns_stages.size:

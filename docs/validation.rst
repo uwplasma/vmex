@@ -104,11 +104,17 @@ the legacy VMEC plotting script:
   python vmecPlot2.py examples/outputs/showcase/circular_tokamak/wout_circular_tokamak_vmec_jax.nc /tmp/vmecplot2_jax
   python vmecPlot2.py examples/data/wout_circular_tokamak_reference.nc /tmp/vmecplot2_ref
 
+The in-repo showcase plots now use the same VMECPlot2-style grids (theta/zeta
+resolution and toroidal angle conventions) so figure-to-figure comparisons are
+faithful to the legacy script.
+
 Current observed mismatches (circular_tokamak, 5-iter snapshot):
 
-- ``bmnc`` and LCFS ``|B|`` plots differ at the ~5e-2 relative level.
+- ``bmnc`` and LCFS :math:`|B|` plots differ at the ~5e-2 relative level.
 - ``buco``/``bvco`` are within a few percent; **``jcuru``/``jcurv`` scaling is now
   corrected** (remaining differences are tied to earlier-force parity).
+- ``bsupv`` parity tests are marked xfail while we align the full-mesh/half-mesh
+  averaging path with VMEC2000; this is tracked in the internal scan.
 - ``betapol``, ``betator``, ``betaxis``, ``ctor``, and ``DMerc`` are present but
   still placeholders in ``vmec_jax`` (zeros) until the VMEC2000 diagnostics path
   is fully ported.

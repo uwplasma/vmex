@@ -16,7 +16,6 @@ import numpy as np
 from .boundary import boundary_from_indata
 from .config import VMECConfig, load_config
 from .energy import flux_profiles_from_indata
-from .field import signgs_from_sqrtg
 from .geom import eval_geom
 from .init_guess import initial_guess_from_boundary
 from .multigrid import interp_vmec_state
@@ -297,14 +296,17 @@ def run_fixed_boundary(
         elif isinstance(ns_array, (tuple, np.ndarray)) and len(ns_array):
             ns_stages = [int(v) for v in ns_array]
 
-    # Stage-0 (coarsest) static + initial guess drives signgs selection.
+    # Stage-0 (coarsest) static + initial guess for VMEC sign convention.
     cfg0 = replace(cfg, ns=int(ns_stages[0]))
     static0 = build_static(cfg0, grid=grid)
     bdy = boundary_from_indata(indata, static0.modes)
     st0_coarse = initial_guess_from_boundary(static0, bdy, indata, vmec_project=vmec_project)
 
-    g0 = eval_geom(st0_coarse, static0)
-    signgs = signgs_from_sqrtg(np.asarray(g0.sqrtg), axis_index=1)
+    # VMEC readin.f sets signgs = -1 and flips theta if needed. Follow that
+    # convention unless explicitly overridden in the input file.
+    signgs = int(indata.get_int("SIGNGS", -1))
+    if signgs not in (-1, 1):
+        signgs = -1
 
     static = build_static(cfg, grid=grid)
 

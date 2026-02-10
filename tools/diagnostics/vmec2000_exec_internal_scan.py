@@ -107,6 +107,188 @@ def _parse_tomnsp_kernels(path: Path):
 
     return blmn, clmn
 
+
+def _parse_bsube(path: Path):
+    ns = None
+    ntheta3 = None
+    nzeta = None
+    lamscale = None
+    rows = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("ns="):
+                ns = int(line.split("=", 1)[1])
+                continue
+            if line.startswith("ntheta3="):
+                ntheta3 = int(line.split("=", 1)[1])
+                continue
+            if line.startswith("nzeta="):
+                nzeta = int(line.split("=", 1)[1])
+                continue
+            if line.startswith("lamscale="):
+                try:
+                    lamscale = float(line.split("=", 1)[1])
+                except ValueError:
+                    lamscale = None
+                continue
+            if line.startswith("columns:"):
+                continue
+            rows.append(line)
+    if ns is None or ntheta3 is None or nzeta is None:
+        raise ValueError(f"Missing header in bsube dump: {path}")
+
+    shape = (ns, ntheta3, nzeta)
+    bsubu_e = np.zeros(shape, dtype=float)
+    bsubv_e = np.zeros(shape, dtype=float)
+
+    for line in rows:
+        toks = line.split()
+        if len(toks) < 5:
+            continue
+        js = int(toks[0]) - 1
+        lt = int(toks[1]) - 1
+        lz = int(toks[2]) - 1
+        bsubu_e[js, lt, lz] = float(toks[3].replace("D", "E").replace("d", "E"))
+        bsubv_e[js, lt, lz] = float(toks[4].replace("D", "E").replace("d", "E"))
+
+    return bsubu_e, bsubv_e, lamscale
+
+
+def _parse_bsubh(path: Path):
+    ns = None
+    ntheta3 = None
+    nzeta = None
+    rows = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("ns="):
+                ns = int(line.split("=", 1)[1])
+                continue
+            if line.startswith("ntheta3="):
+                ntheta3 = int(line.split("=", 1)[1])
+                continue
+            if line.startswith("nzeta="):
+                nzeta = int(line.split("=", 1)[1])
+                continue
+            if line.startswith("columns:"):
+                continue
+            rows.append(line)
+    if ns is None or ntheta3 is None or nzeta is None:
+        raise ValueError(f"Missing header in bsubh dump: {path}")
+
+    shape = (ns, ntheta3, nzeta)
+    bsubu_h = np.zeros(shape, dtype=float)
+    bsubv_h = np.zeros(shape, dtype=float)
+
+    for line in rows:
+        toks = line.split()
+        if len(toks) < 5:
+            continue
+        js = int(toks[0]) - 1
+        lt = int(toks[1]) - 1
+        lz = int(toks[2]) - 1
+        bsubu_h[js, lt, lz] = float(toks[3].replace("D", "E").replace("d", "E"))
+        bsubv_h[js, lt, lz] = float(toks[4].replace("D", "E").replace("d", "E"))
+
+    return bsubu_h, bsubv_h
+
+
+def _parse_bsup(path: Path):
+    ns = None
+    ntheta3 = None
+    nzeta = None
+    rows = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("ns="):
+                ns = int(line.split("=", 1)[1])
+                continue
+            if line.startswith("ntheta3="):
+                ntheta3 = int(line.split("=", 1)[1])
+                continue
+            if line.startswith("nzeta="):
+                nzeta = int(line.split("=", 1)[1])
+                continue
+            if line.startswith("columns:"):
+                continue
+            rows.append(line)
+    if ns is None or ntheta3 is None or nzeta is None:
+        raise ValueError(f"Missing header in bsup dump: {path}")
+
+    shape = (ns, ntheta3, nzeta)
+    bsupu = np.zeros(shape, dtype=float)
+    bsupv = np.zeros(shape, dtype=float)
+    for line in rows:
+        toks = line.split()
+        if len(toks) < 5:
+            continue
+        js = int(toks[0]) - 1
+        lt = int(toks[1]) - 1
+        lz = int(toks[2]) - 1
+        bsupu[js, lt, lz] = float(toks[3].replace("D", "E").replace("d", "E"))
+        bsupv[js, lt, lz] = float(toks[4].replace("D", "E").replace("d", "E"))
+    return bsupu, bsupv
+
+
+def _parse_bsube_terms(path: Path):
+    ns = None
+    ntheta3 = None
+    nzeta = None
+    rows = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("ns="):
+                ns = int(line.split("=", 1)[1])
+                continue
+            if line.startswith("ntheta3="):
+                ntheta3 = int(line.split("=", 1)[1])
+                continue
+            if line.startswith("nzeta="):
+                nzeta = int(line.split("=", 1)[1])
+                continue
+            if line.startswith("columns:"):
+                continue
+            rows.append(line)
+    if ns is None or ntheta3 is None or nzeta is None:
+        raise ValueError(f"Missing header in bsube terms dump: {path}")
+
+    shape = (ns, ntheta3, nzeta)
+    lvv_sh = np.zeros(shape, dtype=float)
+    lu0 = np.zeros(shape, dtype=float)
+    lu1 = np.zeros(shape, dtype=float)
+    phipf = np.zeros(shape, dtype=float)
+    bsubu_tmp = np.zeros(shape, dtype=float)
+    bsubv_pre = np.zeros(shape, dtype=float)
+
+    for line in rows:
+        toks = line.split()
+        if len(toks) < 7:
+            continue
+        js = int(toks[0]) - 1
+        lt = int(toks[1]) - 1
+        lz = int(toks[2]) - 1
+        lvv_sh[js, lt, lz] = float(toks[3].replace("D", "E").replace("d", "E"))
+        lu0[js, lt, lz] = float(toks[4].replace("D", "E").replace("d", "E"))
+        lu1[js, lt, lz] = float(toks[5].replace("D", "E").replace("d", "E"))
+        phipf[js, lt, lz] = float(toks[6].replace("D", "E").replace("d", "E"))
+        if len(toks) >= 9:
+            bsubu_tmp[js, lt, lz] = float(toks[7].replace("D", "E").replace("d", "E"))
+            bsubv_pre[js, lt, lz] = float(toks[8].replace("D", "E").replace("d", "E"))
+
+    return lvv_sh, lu0, lu1, phipf, bsubu_tmp, bsubv_pre
+
 def _patch_indata(text: str, *, updates: dict[str, str]) -> str:
     lines = text.splitlines()
     in_block = False
@@ -221,6 +403,10 @@ def main() -> None:
             env = {
                 "VMEC_DUMP_TOMNSPS": "1",
                 "VMEC_DUMP_TOMNSPS_KERNELS": "1",
+                "VMEC_DUMP_BSUBE": "1",
+                "VMEC_DUMP_BSUBE_TERMS": "1",
+                "VMEC_DUMP_BSUBH": "1",
+                "VMEC_DUMP_BSUP": "1",
                 "VMEC_DUMP_ITER": str(int(it)),
                 "VMEC_DUMP_GC": "1",
                 "VMEC_DUMP_GC_ITER": str(int(it)),
@@ -300,6 +486,79 @@ def main() -> None:
                 print(" tomnsps kernels:", flush=True)
                 ok &= _compare_block("blmn", vmec_blmn, jax_blmn, rtol=float(args.rtol), atol=float(args.atol))
                 ok &= _compare_block("clmn", vmec_clmn, jax_clmn, rtol=float(args.rtol), atol=float(args.atol))
+
+            vmec_bsube_path = workdir / f"bsube_iter{int(it)}.dat"
+            if vmec_bsube_path.exists() and jax_kernels_path.exists():
+                vmec_bsubu_e, vmec_bsubv_e, vmec_lamscale = _parse_bsube(vmec_bsube_path)
+                jax_kernels = np.load(jax_kernels_path)
+                jax_bsubu = np.asarray(jax_kernels.get("bsubu_e_scaled", np.zeros((0,), dtype=float)))
+                jax_bsubv = np.asarray(jax_kernels.get("bsubv_e_scaled", np.zeros((0,), dtype=float)))
+                print(" bsube (scaled):", flush=True)
+                ok &= _compare_block("bsubu_e", vmec_bsubu_e, jax_bsubu, rtol=float(args.rtol), atol=float(args.atol))
+                ok &= _compare_block("bsubv_e", vmec_bsubv_e, jax_bsubv, rtol=float(args.rtol), atol=float(args.atol))
+                if vmec_lamscale is not None and "lamscale" in jax_kernels:
+                    jax_lamscale = float(np.asarray(jax_kernels["lamscale"]))
+                    ok &= _compare_block(
+                        "lamscale",
+                        np.asarray([vmec_lamscale], dtype=float),
+                        np.asarray([jax_lamscale], dtype=float),
+                        rtol=float(args.rtol),
+                        atol=float(args.atol),
+                    )
+
+            vmec_bsubh_path = workdir / f"bsubh_iter{int(it)}.dat"
+            if vmec_bsubh_path.exists() and jax_kernels_path.exists():
+                vmec_bsubu_h, vmec_bsubv_h = _parse_bsubh(vmec_bsubh_path)
+                jax_kernels = np.load(jax_kernels_path)
+                jax_bsubu = np.asarray(jax_kernels.get("bsubu", np.zeros((0,), dtype=float)))
+                jax_bsubv = np.asarray(jax_kernels.get("bsubv", np.zeros((0,), dtype=float)))
+                print(" bsubh (half mesh):", flush=True)
+                ok &= _compare_block("bsubu_h", vmec_bsubu_h, jax_bsubu, rtol=float(args.rtol), atol=float(args.atol))
+                ok &= _compare_block("bsubv_h", vmec_bsubv_h, jax_bsubv, rtol=float(args.rtol), atol=float(args.atol))
+
+            vmec_bsup_path = workdir / f"bsup_iter{int(it)}.dat"
+            if vmec_bsup_path.exists() and jax_kernels_path.exists():
+                vmec_bsupu, vmec_bsupv = _parse_bsup(vmec_bsup_path)
+                jax_kernels = np.load(jax_kernels_path)
+                jax_bsupu = np.asarray(jax_kernels.get("bsupu", np.zeros((0,), dtype=float)))
+                jax_bsupv = np.asarray(jax_kernels.get("bsupv", np.zeros((0,), dtype=float)))
+                print(" bsup (half mesh):", flush=True)
+                ok &= _compare_block("bsupu", vmec_bsupu, jax_bsupu, rtol=float(args.rtol), atol=float(args.atol))
+                ok &= _compare_block("bsupv", vmec_bsupv, jax_bsupv, rtol=float(args.rtol), atol=float(args.atol))
+
+            vmec_terms_path = workdir / f"bsube_terms_iter{int(it)}.dat"
+            if vmec_terms_path.exists() and jax_kernels_path.exists():
+                vmec_lvv_sh, vmec_lu0, vmec_lu1, vmec_phipf, vmec_bsubu_tmp, vmec_bsubv_pre = _parse_bsube_terms(
+                    vmec_terms_path
+                )
+                jax_kernels = np.load(jax_kernels_path)
+                jax_lvv_sh = np.asarray(jax_kernels.get("lvv_sh", np.zeros((0,), dtype=float)))
+                if "lu0_force" in jax_kernels and np.asarray(jax_kernels["lu0_force"]).size:
+                    jax_lu0 = np.asarray(jax_kernels["lu0_force"], dtype=float)
+                    lu0_label = "lu0_force"
+                else:
+                    jax_lu0 = np.asarray(jax_kernels.get("lu0_full", np.zeros((0,), dtype=float)))
+                    lu0_label = "lu0_full"
+                jax_lu1 = np.asarray(jax_kernels.get("lu1_full", np.zeros((0,), dtype=float)))
+                jax_bsubu_tmp = np.asarray(jax_kernels.get("bsubu_tmp", np.zeros((0,), dtype=float)))
+                jax_bsubv_pre = np.asarray(jax_kernels.get("bsubv_preblend", np.zeros((0,), dtype=float)))
+                if "phip_internal" in jax_kernels and np.asarray(jax_kernels["phip_internal"]).size:
+                    jax_phipf = np.asarray(jax_kernels["phip_internal"], dtype=float)
+                    phip_label = "phip_internal"
+                else:
+                    jax_phipf = np.asarray(jax_kernels.get("phip_full", np.zeros((0,), dtype=float)))
+                    phip_label = "phip_full"
+                if jax_phipf.ndim == 1 and vmec_phipf.ndim == 3 and jax_phipf.size == vmec_phipf.shape[0]:
+                    jax_phipf = jax_phipf[:, None, None] * np.ones_like(vmec_phipf)
+                print(" bsube terms:", flush=True)
+                ok &= _compare_block("lvv_sh", vmec_lvv_sh, jax_lvv_sh, rtol=float(args.rtol), atol=float(args.atol))
+                ok &= _compare_block(lu0_label, vmec_lu0, jax_lu0, rtol=float(args.rtol), atol=float(args.atol))
+                ok &= _compare_block("lu1", vmec_lu1, jax_lu1, rtol=float(args.rtol), atol=float(args.atol))
+                ok &= _compare_block(phip_label, vmec_phipf, jax_phipf, rtol=float(args.rtol), atol=float(args.atol))
+                if vmec_bsubu_tmp.size and jax_bsubu_tmp.size:
+                    ok &= _compare_block("bsubu_tmp", vmec_bsubu_tmp, jax_bsubu_tmp, rtol=float(args.rtol), atol=float(args.atol))
+                if vmec_bsubv_pre.size and jax_bsubv_pre.size:
+                    ok &= _compare_block("bsubv_pre", vmec_bsubv_pre, jax_bsubv_pre, rtol=float(args.rtol), atol=float(args.atol))
 
             for stage in stages:
                 jax_gc_path = jax_dump_dir / f"gc_{stage}_iter{int(it)}.npz"

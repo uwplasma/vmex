@@ -14,7 +14,7 @@ import tempfile
 
 import numpy as np
 
-import vmec_jax.api as vj
+import vmec_jax as vj
 from vmec_jax.vmec2000_exec import find_vmec2000_exec, flatten_threed1, run_xvmec2000, threed1_fsq_total
 
 
@@ -61,7 +61,7 @@ def _write_plots(
 ) -> None:
     plt = _import_matplotlib()
 
-    # Keep showcase plots reasonably fast; these are illustrative, not high-res exports.
+    # Keep showcase plots reasonably fast and match vmecPlot2 conventions.
     theta = vj.closed_theta_grid(128)
     phi = np.linspace(0.0, 2.0 * np.pi, 128, endpoint=False)
     ns = int(wout_new.ns)
@@ -72,14 +72,11 @@ def _write_plots(
     fig, ax = plt.subplots(1, 2 if wout_ref is not None else 1, figsize=(10, 4), constrained_layout=True)
     ax = np.atleast_1d(ax)
     for si in s_indices:
-        Rn, Zn = vj.surface_rz_from_wout_physical(
-            wout_new, theta=theta, phi=np.asarray([0.0]), s_index=int(si), nyq=False
-        )
+        # Use vmecPlot2-style toroidal slices for surfaces.
+        _, _zeta_surf, Rn, Zn = vj.vmecplot2_surface_grid(wout_new, s_index=int(si))
         ax[-1].plot(Rn[:, 0], Zn[:, 0], lw=1.2)
         if wout_ref is not None:
-            Rr, Zr = vj.surface_rz_from_wout_physical(
-                wout_ref, theta=theta, phi=np.asarray([0.0]), s_index=int(si), nyq=False
-            )
+            _, _zeta_surf, Rr, Zr = vj.vmecplot2_surface_grid(wout_ref, s_index=int(si))
             ax[0].plot(Rr[:, 0], Zr[:, 0], lw=1.2)
     if wout_ref is not None:
         ax[0].set_title("VMEC2000 (reference)")
@@ -93,40 +90,25 @@ def _write_plots(
     fig.savefig(outdir / "surfaces_nested_phi0.png", dpi=180)
     plt.close(fig)
 
-    # 2) |B| on LCFS.
-    #
-    # For reference VMEC wouts, prefer Nyquist `bmnc/bmns` evaluation (matches vmecPlot2).
-    # For solver-produced minimal wouts, fall back to state-based evaluation if Nyquist
-    # coefficients are not written yet.
-    B_new = _maybe_bmag_from_wout_physical(wout_new, theta=theta, phi=phi, s_index=s_index_lcfs)
-    if B_new is None:
-        st_new = vj.state_from_wout(wout_new)
-        B_new = vj.bmag_from_state_physical(
-            st_new, run.static, indata=indata, theta=theta, phi=phi, s_index=s_index_lcfs
-        )
-
+    # 2) |B| on LCFS using vmecPlot2-compatible grids.
+    theta_b, zeta_b, B_new = vj.vmecplot2_bmag_grid(wout_new, s_index=s_index_lcfs)
     B_ref = None
     if wout_ref is not None:
-        # For comparisons, use the same state-based pathway for both reference and
-        # new wout, since vmec_jax solver outputs do not yet populate Nyquist
-        # `bmnc/bmns` in `wout_*.nc`.
-        st_ref = vj.state_from_wout(wout_ref)
-        B_ref = vj.bmag_from_state_physical(
-            st_ref, run.static, indata=indata, theta=theta, phi=phi, s_index=s_index_lcfs
-        )
+        _, _, B_ref = vj.vmecplot2_bmag_grid(wout_ref, s_index=s_index_lcfs)
 
     fig, ax = plt.subplots(1, 2 if B_ref is not None else 1, figsize=(10, 4), constrained_layout=True)
     ax = np.atleast_1d(ax)
+    zeta2d, theta2d = np.meshgrid(zeta_b, theta_b)
     vmin = float(np.min(B_new if B_ref is None else np.minimum(B_new, B_ref)))
     vmax = float(np.max(B_new if B_ref is None else np.maximum(B_new, B_ref)))
-    im_new = ax[-1].imshow(B_new, origin="lower", aspect="auto", vmin=vmin, vmax=vmax)
+    im_new = ax[-1].contourf(zeta2d, theta2d, B_new, levels=20, vmin=vmin, vmax=vmax)
     ax[-1].set_title("vmec_jax |B| (LCFS)")
     if B_ref is not None:
-        im_ref = ax[0].imshow(B_ref, origin="lower", aspect="auto", vmin=vmin, vmax=vmax)
+        im_ref = ax[0].contourf(zeta2d, theta2d, B_ref, levels=20, vmin=vmin, vmax=vmax)
         ax[0].set_title("VMEC2000 |B| (LCFS)")
     for a in ax:
-        a.set_xlabel("phi index")
-        a.set_ylabel("theta index")
+        a.set_xlabel("zeta")
+        a.set_ylabel("theta")
     if B_ref is not None:
         fig.colorbar(im_ref, ax=ax[0], shrink=0.85, pad=0.02)
     fig.colorbar(im_new, ax=ax[-1], shrink=0.85, pad=0.02)
@@ -212,7 +194,7 @@ def main() -> None:
         default="vmec2000_iter",
         choices=["vmec2000_iter", "vmec_gn", "gd", "lbfgs"],
     )
-    p.add_argument("--max-iter", type=int, default=30)
+    p.add_argument("--max-iter", type=int, default=10)
     p.add_argument(
         "--verbose",
         default=True,
@@ -284,7 +266,7 @@ def main() -> None:
         out_wout_path = outdir / f"wout_{case}_vmec_jax.nc"
         wout_new = vj.write_wout_from_fixed_boundary_run(out_wout_path, run, include_fsq=True)
 
-        wout_ref = vj.read_wout(ref_wout_path) if ref_wout_path.exists() else None
+        wout_ref = vj.load_wout(ref_wout_path) if ref_wout_path.exists() else None
         print(f"[vmec_jax] wrote wout: {out_wout_path}")
         if wout_ref is not None:
             fsq_ref = float(wout_ref.fsqr + wout_ref.fsqz + wout_ref.fsql)

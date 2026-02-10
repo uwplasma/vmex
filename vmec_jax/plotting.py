@@ -353,6 +353,41 @@ def bmag_from_wout_physical(
     return B
 
 
+def vmecplot2_bmag_grid(
+    wout,
+    *,
+    s_index: int,
+    ntheta: int = 30,
+    nzeta: int = 65,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return (theta, zeta, |B|) on a grid matching vmecPlot2.py defaults.
+
+    vmecPlot2 uses physical toroidal angle zeta in [0, 2π) for |B| contours and
+    evaluates Nyquist bmnc/bmns with phase = m*theta - xn*zeta.
+    """
+    theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta))
+    zeta = np.linspace(0.0, 2.0 * np.pi, int(nzeta))
+    B = bmag_from_wout_physical(wout, theta=theta, phi=zeta, s_index=int(s_index))
+    return theta, zeta, np.asarray(B)
+
+
+def vmecplot2_surface_grid(
+    wout,
+    *,
+    s_index: int,
+    ntheta: int = 200,
+    nzeta: int = 8,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return (theta, zeta, R, Z) grids matching vmecPlot2.py surface defaults.
+
+    vmecPlot2 evaluates surfaces over one field period: zeta in [0, 2π/nfp).
+    """
+    theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta))
+    zeta = np.linspace(0.0, 2.0 * np.pi / float(wout.nfp), int(nzeta), endpoint=False)
+    R, Z = surface_rz_from_wout_physical(wout, theta=theta, phi=zeta, s_index=int(s_index), nyq=False)
+    return theta, zeta, np.asarray(R), np.asarray(Z)
+
+
 def axis_rz_from_wout(wout, *, zeta: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Axis curve from wout Fourier coefficients."""
     zeta = np.asarray(zeta)
