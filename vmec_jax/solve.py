@@ -1424,7 +1424,8 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
 
     constraint_tcon0: float | None = None
     if bool(include_constraint_force):
-        constraint_tcon0 = float(indata.get_float("TCON0", 0.0))
+        # VMEC2000 default is `TCON0=1` (readin.f).
+        constraint_tcon0 = float(indata.get_float("TCON0", 1.0))
 
     def _fsq2_terms_and_jacmin(state: VMECState, zero_m1_zforce: Any):
         k = vmec_forces_rz_from_wout(
@@ -1835,7 +1836,7 @@ def solve_fixed_boundary_gn_vmec_residual(
 
     constraint_tcon0: float | None = None
     if bool(include_constraint_force):
-        constraint_tcon0 = float(indata.get_float("TCON0", 0.0))
+        constraint_tcon0 = float(indata.get_float("TCON0", 1.0))
 
     signgs = int(signgs)
     idx00 = _mode00_index(static.modes)
@@ -2361,7 +2362,7 @@ def solve_fixed_boundary_residual_iter(
 
     constraint_tcon0: float | None = None
     if bool(include_constraint_force):
-        constraint_tcon0 = float(indata.get_float("TCON0", 0.0))
+        constraint_tcon0 = float(indata.get_float("TCON0", 1.0))
 
     def _zero_edge_rz(a):
         a = None if a is None else jnp.asarray(a)
@@ -3880,7 +3881,7 @@ def first_step_diagnostics(
 
     constraint_tcon0: float | None = None
     if bool(include_constraint_force):
-        constraint_tcon0 = float(indata.get_float("TCON0", 0.0))
+        constraint_tcon0 = float(indata.get_float("TCON0", 1.0))
 
     def _zero_edge_rz(a):
         a = None if a is None else jnp.asarray(a)
