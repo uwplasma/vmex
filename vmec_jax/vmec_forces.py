@@ -676,7 +676,7 @@ def vmec_forces_rz_from_wout(
             lamscale = jnp.full_like(s, lamscale)
         lamscale = lamscale[:, None, None]
         crmn_e = jnp.asarray(lv_es)
-        czmn_e = jnp.asarray(bc.lu_e)
+        czmn_e = jnp.asarray(lu_e)
         crmn_o = -lamscale * jnp.asarray(Lv1)
         czmn_o = jnp.asarray(lu_o)
 
@@ -953,7 +953,7 @@ def vmec_forces_rz_from_wout_reference_fields(
             lamscale = jnp.full_like(s, lamscale)
         lamscale = lamscale[:, None, None]
         crmn_e = jnp.asarray(lv_es)
-        czmn_e = jnp.asarray(bc.lu_e)
+        czmn_e = jnp.asarray(lu_e)
         crmn_o = -lamscale * jnp.asarray(Lv1)
         czmn_o = jnp.asarray(lu_o)
 
