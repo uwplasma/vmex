@@ -74,6 +74,7 @@ Current kernel-parity snapshot (solver-free, bundled reference states):
 
 Interpretation:
 - Axisymmetric cases are at floating-point parity for geometry, ``bsup*``, and ``abs(B)``.
+- Axisymmetric tomnsps kernel dumps now match VMEC2000 (including ``crmn_e`` and ``czmn_o`` in PARVMEC, which are scaled inside ``forces_par``).
 - Remaining known gap: 3D ``bsub*`` (and the resulting scalar residuals) on some ``nfp>1`` cases.
 
 Reproduce scalar residual parity (`fsqr/fsqz/fsql`) on reference states:

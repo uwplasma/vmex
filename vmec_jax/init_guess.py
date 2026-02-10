@@ -547,7 +547,9 @@ def initial_guess_from_boundary(
     areas = _boundary_cross_section_areas(static, boundary_use)
     lflip = _vmec_lflip_from_boundary(static, boundary_use)
     if lflip is None:
-        lflip = bool(np.median(areas) < 0.0)
+        # VMEC only flips when the m=1 rtest*ztest diagnostic is decisive.
+        # If ambiguous, keep the input orientation.
+        lflip = False
     if bool(lflip):
         boundary_use = _flip_boundary_theta(static, boundary_use)
     boundary_use = _apply_m1_constraint(static, boundary_use)
