@@ -556,6 +556,10 @@ def vmec_forces_rz_from_wout(
     Zu1 = _odd_internal_vmec(coeff_cos=state.Zcos, coeff_sin=state.Zsin, eval_fn=eval_fourier_dtheta)
     Rv1 = _odd_internal_vmec(coeff_cos=state.Rcos, coeff_sin=state.Rsin, eval_fn=eval_fourier_dzeta_phys)
     Zv1 = _odd_internal_vmec(coeff_cos=state.Zcos, coeff_sin=state.Zsin, eval_fn=eval_fourier_dzeta_phys)
+    Lu1 = _odd_internal_vmec(coeff_cos=state.Lcos, coeff_sin=state.Lsin, eval_fn=eval_fourier_dtheta)
+    Lv1 = _odd_internal_vmec(coeff_cos=state.Lcos, coeff_sin=state.Lsin, eval_fn=eval_fourier_dzeta_phys)
+    Lu1 = _odd_internal_vmec(coeff_cos=state.Lcos, coeff_sin=state.Lsin, eval_fn=eval_fourier_dtheta)
+    Lv1 = _odd_internal_vmec(coeff_cos=state.Lcos, coeff_sin=state.Lsin, eval_fn=eval_fourier_dzeta_phys)
 
     pr1_0, pr1_1 = jnp.asarray(parity.R_even), jnp.asarray(R1)
     pz1_0, pz1_1 = jnp.asarray(parity.Z_even), jnp.asarray(Z1)
@@ -651,7 +655,7 @@ def vmec_forces_rz_from_wout(
     brmn_o = brmn_o + pz1_1 * lu_o - (guu_s * pru_1 + guus_i * pru_0)
     bzmn_o = bzmn_o - (pr1_1 * lu_o + guu_s * pzu_1 + guus_i * pzu_0)
 
-    # 3D kernels (C terms); handle axisymmetric cases by returning zeros.
+    # 3D kernels (C terms). For axisym, VMEC leaves crmn/czmn holding bsup/bphi.
     lthreed = bool(np.any(np.asarray(static.modes.n) != 0))
     if lthreed:
         brmn_e = brmn_e - (guv_i * prv_0 + guvs_i * prv_1)
@@ -667,11 +671,14 @@ def vmec_forces_rz_from_wout(
         crmn_o = guvs_i * pru_0 + gvvs_i * prv_0 + gvv_s * prv_1 + guv_s * pru_1
         czmn_o = guvs_i * pzu_0 + gvvs_i * pzv_0 + gvv_s * pzv_1 + guv_s * pzu_1
     else:
-        z = jnp.zeros_like(armn_e)
-        crmn_e = z
-        crmn_o = z
-        czmn_e = z
-        czmn_o = z
+        lamscale = jnp.asarray(lamscale_from_phips(wout_eff.phips, s))
+        if lamscale.ndim == 0:
+            lamscale = jnp.full_like(s, lamscale)
+        lamscale = lamscale[:, None, None]
+        crmn_e = jnp.asarray(lv_es)
+        czmn_e = jnp.asarray(bc.lu_e)
+        crmn_o = -lamscale * jnp.asarray(Lv1)
+        czmn_o = jnp.asarray(lu_o)
 
     # ---------------------------------------------------------------------
     # Constraint force pipeline: compute gcon from ztemp via alias and apply
@@ -941,15 +948,18 @@ def vmec_forces_rz_from_wout_reference_fields(
         crmn_o = guvs_i * pru_0 + gvvs_i * prv_0 + gvv_s * prv_1 + guv_s * pru_1
         czmn_o = guvs_i * pzu_0 + gvvs_i * pzv_0 + gvv_s * pzv_1 + guv_s * pzu_1
     else:
-        z = jnp.zeros_like(armn_e)
-        crmn_e = z
-        crmn_o = z
-        czmn_e = z
-        czmn_o = z
+        lamscale = jnp.asarray(lamscale_from_phips(wout_eff.phips, s))
+        if lamscale.ndim == 0:
+            lamscale = jnp.full_like(s, lamscale)
+        lamscale = lamscale[:, None, None]
+        crmn_e = jnp.asarray(lv_es)
+        czmn_e = jnp.asarray(bc.lu_e)
+        crmn_o = -lamscale * jnp.asarray(Lv1)
+        czmn_o = jnp.asarray(lu_o)
 
     # Build lambda-force kernels (blmn/clmn) using the VMEC formulas but with
     # reference-field inputs.
-    lamscale = lamscale_from_phips(wout.phips, s)
+    lamscale = lamscale_from_phips(wout_eff.phips, s)
 
     # For reference-field parity we form the lambda-force kernels from the
     # stored wout bsubu/bsubv fields by averaging to the full mesh. This avoids
