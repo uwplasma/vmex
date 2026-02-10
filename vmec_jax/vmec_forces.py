@@ -28,7 +28,14 @@ from .field import lamscale_from_phips
 from .grids import AngleGrid
 from .modes import ModeTable
 from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
-from .vmec_constraints import alias_gcon, tcon_from_bcovar_precondn_diag, tcon_from_tcon0_heuristic
+from .vmec_constraints import (
+    alias_gcon,
+    precondn_diag_axd1_from_bcovar,
+    tcon_from_bcovar_precondn_diag,
+    tcon_from_cached_precondn_diag,
+    tcon_from_precondn_axisym,
+    tcon_from_tcon0_heuristic,
+)
 from .vmec_tomnsp import TomnspsRZL, VmecTrigTables, tomnsps_rzl, tomnspa_rzl, vmec_angle_grid, vmec_trig_tables
 from .vmec_parity import internal_odd_from_physical_vmec_m1, split_rzl_even_odd_m
 
@@ -92,6 +99,34 @@ class VmecConstraintKernels:
     azcon_o: Any  # (ns, ntheta, nzeta)
     gcon: Any  # (ns, ntheta, nzeta)
     tcon: Any  # (ns,)
+    ard1: Any  # (ns,)
+    azd1: Any  # (ns,)
+
+
+def _parse_iter_list(val: str) -> set[int] | None:
+    """Parse a comma-separated list of ints/ranges like '1,2,5-7'."""
+    if not val:
+        return None
+    out: set[int] = set()
+    for chunk in val.replace(" ", "").split(","):
+        if not chunk:
+            continue
+        if "-" in chunk:
+            a, b = chunk.split("-", 1)
+            try:
+                lo = int(a)
+                hi = int(b)
+            except ValueError:
+                continue
+            if hi < lo:
+                lo, hi = hi, lo
+            out.update(range(lo, hi + 1))
+        else:
+            try:
+                out.add(int(chunk))
+            except ValueError:
+                continue
+    return out if out else None
 
 
 def _pshalf_from_s(s: Any) -> Any:
@@ -155,7 +190,9 @@ def _constraint_kernels_from_state(
     pzu_1,
     constraint_tcon0: float | None,
     tcon_override: Any | None = None,
+    precond_diag_override: tuple[Any, Any] | None = None,
     trig: VmecTrigTables | None = None,
+    iter_idx: int | None = None,
 ) -> VmecConstraintKernels:
     """Compute VMEC constraint-force kernels from state/parity fields.
 
@@ -168,6 +205,7 @@ def _constraint_kernels_from_state(
     if (constraint_tcon0 is None or float(constraint_tcon0) == 0.0) and (tcon_override is None):
         z = jnp.zeros_like(pru_0)
         tcon = jnp.zeros((ns,), dtype=dtype)
+        z1 = jnp.zeros((ns,), dtype=dtype)
         return VmecConstraintKernels(
             rcon_force=z,
             zcon_force=z,
@@ -177,6 +215,8 @@ def _constraint_kernels_from_state(
             azcon_o=z,
             gcon=z,
             tcon=tcon,
+            ard1=z1,
+            azd1=z1,
         )
 
     # xmpq(m,1) = m*(m-1).
@@ -225,19 +265,29 @@ def _constraint_kernels_from_state(
         )
 
     if tcon_override is None:
-        # VMEC computes the constraint strength `tcon(js)` in `bcovar.f` using
-        # diagonal preconditioner pieces and flux-surface norms.
-        tcon = tcon_from_bcovar_precondn_diag(
+        if precond_diag_override is None:
+            ard1, azd1 = precondn_diag_axd1_from_bcovar(
+                trig=trig,
+                s=s,
+                bsq=bc.bsq,
+                r12=bc.jac.r12,
+                sqrtg=bc.jac.sqrtg,
+                ru12=bc.jac.ru12,
+                zu12=bc.jac.zu12,
+            )
+        else:
+            ard1, azd1 = precond_diag_override
+
+        # VMEC2000 updates `tcon(js)` only when refreshing the 1D preconditioner
+        # blocks (ns4=25). Between refreshes, `tcon` is reused verbatim. Parity
+        # drivers may therefore pass `tcon_override` on non-refresh iterations.
+        tcon = tcon_from_cached_precondn_diag(
             tcon0=float(constraint_tcon0),
             trig=trig,
             s=s,
-            signgs=int(wout.signgs),
             lasym=bool(wout.lasym),
-            bsq=bc.bsq,
-            r12=bc.jac.r12,
-            sqrtg=bc.jac.sqrtg,
-            ru12=bc.jac.ru12,
-            zu12=bc.jac.zu12,
+            ard1=ard1,
+            azd1=azd1,
             ru0=ru0,
             zu0=zu0,
         )
@@ -252,6 +302,11 @@ def _constraint_kernels_from_state(
         tcon = jnp.where(finite, tcon, tcon_heur)
     else:
         tcon = jnp.asarray(tcon_override, dtype=dtype)
+        if precond_diag_override is None:
+            ard1 = jnp.zeros((ns,), dtype=dtype)
+            azd1 = jnp.zeros((ns,), dtype=dtype)
+        else:
+            ard1, azd1 = precond_diag_override
 
     gcon = alias_gcon(
         ztemp=ztemp,
@@ -262,6 +317,83 @@ def _constraint_kernels_from_state(
         tcon=tcon,
         lasym=bool(wout.lasym),
     )
+
+    # Optional debug dump of the constraint pipeline for parity work.
+    import os
+    from pathlib import Path
+
+    env = os.getenv("VMEC_JAX_DUMP_CONSTRAINTS", "")
+    if env and env != "0" and iter_idx is not None:
+        iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
+        if iters is None or int(iter_idx) in iters:
+            outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+            outdir.mkdir(parents=True, exist_ok=True)
+            path = outdir / f"constraints_raw_iter{int(iter_idx)}.npz"
+            np.savez(
+                path,
+                gcon=np.asarray(gcon),
+                ztemp=np.asarray(ztemp),
+                ru0=np.asarray(ru0),
+                zu0=np.asarray(zu0),
+                rcon0=np.asarray(rcon0),
+                zcon0=np.asarray(zcon0),
+                rcon=np.asarray(rcon_phys),
+                zcon=np.asarray(zcon_phys),
+                tcon=np.asarray(tcon),
+                ard1=np.asarray(ard1),
+                azd1=np.asarray(azd1),
+                ns=int(ns),
+                ntheta3=int(trig.ntheta3),
+                nzeta=int(trig.cosnv.shape[0]),
+            )
+
+    env_bcovar = os.getenv("VMEC_JAX_DUMP_BCOVAR", "")
+    if env_bcovar and env_bcovar != "0" and iter_idx is not None:
+        iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
+        if iters is None or int(iter_idx) in iters:
+            outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+            outdir.mkdir(parents=True, exist_ok=True)
+            path = outdir / f"bcovar_raw_iter{int(iter_idx)}.npz"
+
+            sqrtg = np.asarray(bc.jac.sqrtg, dtype=float)
+            twopi = float(2.0 * np.pi)
+            denom = float(int(wout.signgs)) * sqrtg * twopi
+            overg = np.where(denom != 0.0, 1.0 / denom, 0.0)
+            phipog_vmec = np.where(sqrtg != 0.0, 1.0 / sqrtg, 0.0)
+
+            w_theta = np.asarray(trig.cosmui3[:, 0], dtype=float) / float(np.asarray(trig.mscale[0]))
+            wint2 = w_theta[:, None] * np.ones((int(np.asarray(trig.cosnv).shape[0]),), dtype=float)[None, :]
+            wint3 = np.broadcast_to(wint2[None, :, :], sqrtg.shape).copy()
+            if wint3.shape[0] > 0:
+                wint3[0, :, :] = 0.0
+
+            bsupu = np.asarray(bc.bsupu, dtype=float)
+            bsupv = np.asarray(bc.bsupv, dtype=float)
+            bsubu = np.asarray(bc.bsubu, dtype=float)
+            bsubv = np.asarray(bc.bsubv, dtype=float)
+            b2 = (bsupu * bsubu) + (bsupv * bsubv)
+            bsq = np.asarray(bc.bsq, dtype=float)
+
+            np.savez(
+                path,
+                r12=np.asarray(bc.jac.r12, dtype=float),
+                sqrtg=sqrtg,
+                tau=np.asarray(bc.jac.tau, dtype=float),
+                ru12=np.asarray(bc.jac.ru12, dtype=float),
+                zu12=np.asarray(bc.jac.zu12, dtype=float),
+                bsupu=bsupu,
+                bsupv=bsupv,
+                bsubu=bsubu,
+                bsubv=bsubv,
+                b2=b2,
+                bsq=bsq,
+                overg=overg,
+                phipog_vmec=phipog_vmec,
+                wint=wint3,
+                ns=int(ns),
+                ntheta3=int(trig.ntheta3),
+                nzeta=int(trig.cosnv.shape[0]),
+            )
 
     rcon_force = (rcon_phys - rcon0) * gcon
     zcon_force = (zcon_phys - zcon0) * gcon
@@ -280,6 +412,8 @@ def _constraint_kernels_from_state(
         azcon_o=azcon_o,
         gcon=gcon,
         tcon=tcon,
+        ard1=ard1,
+        azd1=azd1,
     )
 
 
@@ -313,9 +447,11 @@ def vmec_forces_rz_from_wout(
     indata=None,
     constraint_tcon0: float | None = None,
     constraint_tcon: Any | None = None,
+    constraint_precond_diag: tuple[Any, Any] | None = None,
     use_wout_bsup: bool = False,
     use_vmec_synthesis: bool = False,
     trig: VmecTrigTables | None = None,
+    iter_idx: int | None = None,
 ) -> VmecRZForceKernels:
     """Compute VMEC R/Z force kernels (armn/brmn/...) from a `wout` equilibrium.
 
@@ -555,7 +691,10 @@ def vmec_forces_rz_from_wout(
         pzu_0=pzu_0,
         pzu_1=pzu_1,
         constraint_tcon0=constraint_tcon0,
+        tcon_override=constraint_tcon,
+        precond_diag_override=constraint_precond_diag,
         trig=trig,
+        iter_idx=iter_idx,
     )
 
     brmn_e = brmn_e + con.rcon_force

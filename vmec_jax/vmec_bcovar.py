@@ -351,8 +351,11 @@ def vmec_bcovar_half_mesh_from_wout(
     else:
         chips_eff = jnp.asarray(getattr(wout, "iotaf", getattr(wout, "iotas", 0.0))) * jnp.asarray(wout.phipf)
 
-    # Keep the existing vmec_jax normalization for overg to preserve the tested
-    # energy/volume scaling used elsewhere in the parity suite.
+    # VMEC's public `wout` files and several quantities in this repo use
+    # flux-profile conventions that include a 2π factor. The `field.py`
+    # utilities define:
+    #   overg = 1 / (signgs * sqrtg * 2π)
+    # which is the convention currently used throughout vmec_jax's parity suite.
     denom = int(wout.signgs) * jac.sqrtg * jnp.asarray(TWOPI, dtype=jac.sqrtg.dtype)
     overg = jnp.where(denom != 0, 1.0 / denom, 0.0)
 

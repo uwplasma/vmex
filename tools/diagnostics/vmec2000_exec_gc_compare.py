@@ -100,6 +100,27 @@ def _max_abs_rel(vmec_vals: np.ndarray, jax_vals: np.ndarray, *, eps: float = 1e
     return max_abs, max_abs / denom
 
 
+def _max_diff_report(
+    vmec_vals: np.ndarray, jax_vals: np.ndarray, *, eps: float = 1e-30
+) -> tuple[float, float, tuple[int, ...], float, float]:
+    vmec_vals = np.asarray(vmec_vals, dtype=float)
+    jax_vals = np.asarray(jax_vals, dtype=float)
+    diff = np.abs(vmec_vals - jax_vals)
+    if diff.size == 0:
+        return float("nan"), float("nan"), (), float("nan"), float("nan")
+    mask = np.isfinite(diff)
+    if not bool(np.any(mask)):
+        return float("nan"), float("nan"), (), float("nan"), float("nan")
+    idx_flat = int(np.argmax(np.where(mask, diff, -np.inf)))
+    idx = tuple(int(i) for i in np.unravel_index(idx_flat, diff.shape))
+    max_abs = float(diff[idx])
+    vmec_v = float(vmec_vals[idx])
+    jax_v = float(jax_vals[idx])
+    denom = max(eps, abs(vmec_v))
+    max_rel = float(max_abs / denom)
+    return max_abs, max_rel, idx, vmec_v, jax_v
+
+
 def _patch_indata(text: str, *, updates: dict[str, str]) -> str:
     lines = text.splitlines()
     in_block = False
@@ -269,8 +290,16 @@ def main() -> None:
                 ("gcz", v_gcz, j_gcz),
                 ("gcl", v_gcl, j_gcl),
             ]:
-                max_abs, max_rel = _max_abs_rel(v, j)
-                print(f"  {name:3s}: max_abs={max_abs:.3e}  max_rel={max_rel:.3e}")
+                max_abs, max_rel, idx, vmec_v, jax_v = _max_diff_report(v, j)
+                if len(idx) == 4:
+                    js, m, n, t = idx
+                    loc = f"(js={js+1}, m={m}, n={n}, t={t+1})"
+                else:
+                    loc = f"{idx}"
+                print(
+                    f"  {name:3s}: max_abs={max_abs:.3e}  max_rel={max_rel:.3e}  at {loc}  "
+                    f"vmec={vmec_v:.8e}  jax={jax_v:.8e}"
+                )
 
 
 if __name__ == "__main__":
