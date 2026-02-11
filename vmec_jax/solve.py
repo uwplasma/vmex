@@ -2572,6 +2572,7 @@ def solve_fixed_boundary_residual_iter(
     mscale = jnp.asarray(trig.mscale)
     nscale = jnp.asarray(trig.nscale)
     r00_scale = 1.0 / (mscale[m_idx] * nscale[jnp.abs(n_idx)])
+    idx00 = _mode00_index(static.modes)
     lambda_update_scale_j = jnp.asarray(lambda_update_scale, dtype=jnp.asarray(state0.Rcos).dtype)
 
     # VMEC stores physical Fourier coefficients in `xc`, but uses a `scalxc`
@@ -3253,8 +3254,11 @@ def solve_fixed_boundary_residual_iter(
         fsqz2_history.append(fsqz_f)
         fsql2_history.append(fsql_f)
         # VMEC printout uses r00 = r1(1,0): axis R at theta=0, zeta=0.
-        # Reproduce VMEC's internal scaling (mscale/nscale) for this evaluation.
-        r00_val = float(np.asarray(state.Rcos)[0] @ r00_scale)
+        # Use the (m,n)=(0,0) coefficient only (optionally scaled).
+        if idx00 is None:
+            r00_val = float("nan")
+        else:
+            r00_val = float(np.asarray(state.Rcos)[0, idx00] * r00_scale[idx00])
         r00_history.append(r00_val)
         # `norms_used` may be cached (VMEC2000 `ns4=25` behavior). VMEC's
         # printed WMHD uses the *current* wb/wp from `funct3d`, not cached

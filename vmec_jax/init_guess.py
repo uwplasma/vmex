@@ -20,6 +20,7 @@ import numpy as np
 
 from ._compat import jnp, has_jax
 from .boundary import BoundaryCoeffs
+from .grids import make_angle_grid
 from .fourier import build_helical_basis, eval_fourier, eval_fourier_dtheta
 from .namelist import InData
 from .state import StateLayout, VMECState
@@ -85,7 +86,12 @@ def _guess_axis_from_boundary(static: VMECStatic, boundary: BoundaryCoeffs):
     to the midpoint of the (R,Z) bounding box of the LCFS cross-section, then
     Fourier-fit the resulting axis curve in zeta.
     """
-    grid = static.grid
+    # Use a higher-resolution evaluation grid than the solver grid so the
+    # mid-point estimate is consistent with VMEC's axis guess even on coarse
+    # multigrid stages.
+    ntheta_axis = max(256, int(static.cfg.ntheta) * 8)
+    nzeta_axis = max(8, int(static.cfg.nzeta))
+    grid = make_angle_grid(ntheta=ntheta_axis, nzeta=nzeta_axis, nfp=int(static.cfg.nfp))
     basis = build_helical_basis(static.modes, grid)
     Rb = np.asarray(eval_fourier(jnp.asarray(boundary.R_cos), jnp.asarray(boundary.R_sin), basis))
     Zb = np.asarray(eval_fourier(jnp.asarray(boundary.Z_cos), jnp.asarray(boundary.Z_sin), basis))
