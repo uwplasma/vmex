@@ -2396,6 +2396,7 @@ def solve_fixed_boundary_residual_iter(
     use_restart_triggers: bool | None = None,
     use_direct_fallback: bool | None = None,
     verbose: bool = True,
+    resume_state: dict | None = None,
 ) -> SolveVmecResidualResult:
     """VMEC-style fixed-point update loop using preconditioned force residuals."""
     if not has_jax():
@@ -2469,7 +2470,7 @@ def solve_fixed_boundary_residual_iter(
 
     # Boundary + axis recompute helpers (for VMEC-style bad-Jacobian reset).
     boundary_for_axis = boundary_from_indata(indata, static.modes) if indata is not None else None
-    axis_reset_done = False
+    axis_reset_done = bool(resume_state is not None)
     lmove_axis = True if indata is None else bool(indata.get_bool("LMOVE_AXIS", True))
 
     def _apply_vmec_lambda_axis_rules(st: VMECState) -> VMECState:
@@ -3093,6 +3094,43 @@ def solve_fixed_boundary_residual_iter(
     cache_prec_rz_jmax = None
     cache_prec_lam_prec = None
     bcovar_update_history: list[int] = []
+    iter_offset = 0
+
+    if resume_state is not None:
+        iter_offset = int(resume_state.get("iter_offset", iter_offset))
+        time_step = float(resume_state.get("time_step", time_step))
+        inv_tau = list(resume_state.get("inv_tau", inv_tau))
+        fsq_prev = float(resume_state.get("fsq_prev", fsq_prev))
+        flip_sign = float(resume_state.get("flip_sign", flip_sign))
+        iter1 = int(resume_state.get("iter1", iter1))
+        ijacob = int(resume_state.get("ijacob", ijacob))
+        bad_resets = int(resume_state.get("bad_resets", bad_resets))
+        res0 = float(resume_state.get("res0", res0))
+        res1 = float(resume_state.get("res1", res1))
+        prev_rz_fsq = float(resume_state.get("prev_rz_fsq", prev_rz_fsq))
+        bad_growth_streak = int(resume_state.get("bad_growth_streak", bad_growth_streak))
+        huge_force_restart_count = int(resume_state.get("huge_force_restart_count", huge_force_restart_count))
+
+        if "vRcc" in resume_state:
+            vRcc = jnp.asarray(resume_state["vRcc"])
+            vRss = jnp.asarray(resume_state.get("vRss", vRss))
+            vZsc = jnp.asarray(resume_state.get("vZsc", vZsc))
+            vZcs = jnp.asarray(resume_state.get("vZcs", vZcs))
+            vLsc = jnp.asarray(resume_state.get("vLsc", vLsc))
+            vLcs = jnp.asarray(resume_state.get("vLcs", vLcs))
+
+        state_checkpoint = resume_state.get("state_checkpoint", state)
+        vmec2000_cache_valid = bool(resume_state.get("vmec2000_cache_valid", vmec2000_cache_valid))
+        cache_precond_diag = resume_state.get("cache_precond_diag", cache_precond_diag)
+        cache_tcon = resume_state.get("cache_tcon", cache_tcon)
+        cache_norms = resume_state.get("cache_norms", cache_norms)
+        cache_rz_scale = resume_state.get("cache_rz_scale", cache_rz_scale)
+        cache_l_scale = resume_state.get("cache_l_scale", cache_l_scale)
+        cache_rz_norm = resume_state.get("cache_rz_norm", cache_rz_norm)
+        cache_f_norm1 = resume_state.get("cache_f_norm1", cache_f_norm1)
+        cache_prec_rz_mats = resume_state.get("cache_prec_rz_mats", cache_prec_rz_mats)
+        cache_prec_rz_jmax = resume_state.get("cache_prec_rz_jmax", cache_prec_rz_jmax)
+        cache_prec_lam_prec = resume_state.get("cache_prec_lam_prec", cache_prec_lam_prec)
 
     if bool(vmec2000_control) and (boundary_for_axis is not None) and (not axis_reset_done):
         bad_jacobian_init = False
@@ -3163,8 +3201,10 @@ def solve_fixed_boundary_residual_iter(
         dt_eff = min(float(dt_nominal), float(dt_lim))
         return max(dt_eff, 1e-12)
 
+    last_iter2 = 0
     for it in range(max_iter):
-        iter2 = it + 1
+        iter2 = it + 1 + int(iter_offset)
+        last_iter2 = iter2
         iter_since_restart = iter2 - iter1
         pre_restart_reason = "none"
         if vmec2000_control:
@@ -4096,6 +4136,39 @@ def solve_fixed_boundary_residual_iter(
         "gcr2_p_history": np.asarray(gcr2_p_history, dtype=float),
         "gcz2_p_history": np.asarray(gcz2_p_history, dtype=float),
         "gcl2_p_history": np.asarray(gcl2_p_history, dtype=float),
+    }
+    diag["resume_state"] = {
+        "time_step": float(time_step),
+        "inv_tau": list(inv_tau),
+        "fsq_prev": float(fsq_prev),
+        "flip_sign": float(flip_sign),
+        "iter1": int(iter1),
+        "iter_offset": int(last_iter2),
+        "ijacob": int(ijacob),
+        "bad_resets": int(bad_resets),
+        "res0": float(res0),
+        "res1": float(res1),
+        "prev_rz_fsq": float(prev_rz_fsq),
+        "bad_growth_streak": int(bad_growth_streak),
+        "huge_force_restart_count": int(huge_force_restart_count),
+        "vRcc": np.asarray(vRcc),
+        "vRss": np.asarray(vRss),
+        "vZsc": np.asarray(vZsc),
+        "vZcs": np.asarray(vZcs),
+        "vLsc": np.asarray(vLsc),
+        "vLcs": np.asarray(vLcs),
+        "state_checkpoint": state_checkpoint,
+        "vmec2000_cache_valid": bool(vmec2000_cache_valid),
+        "cache_precond_diag": cache_precond_diag,
+        "cache_tcon": cache_tcon,
+        "cache_norms": cache_norms,
+        "cache_rz_scale": cache_rz_scale,
+        "cache_l_scale": cache_l_scale,
+        "cache_rz_norm": cache_rz_norm,
+        "cache_f_norm1": cache_f_norm1,
+        "cache_prec_rz_mats": cache_prec_rz_mats,
+        "cache_prec_rz_jmax": cache_prec_rz_jmax,
+        "cache_prec_lam_prec": cache_prec_lam_prec,
     }
     return SolveVmecResidualResult(
         state=state,
