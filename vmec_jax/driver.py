@@ -263,6 +263,8 @@ def run_fixed_boundary(
     verbose: bool = True,
     grid=None,
     ns_override: int | None = None,
+    restart_state: any | None = None,
+    restart_wout_path: str | Path | None = None,
 ):
     """Run a fixed-boundary vmec_jax solve with minimal boilerplate.
 
@@ -276,6 +278,13 @@ def run_fixed_boundary(
         If True, skip the solve and return the initialized state.
     ns_override:
         If provided, overrides the radial resolution (ns) used to build the state.
+    restart_state:
+        If provided, use this VMECState as the initial condition instead of
+        building a new boundary-based guess. This disables multigrid staging.
+    restart_wout_path:
+        If provided, load the `wout_*.nc` file and use its state as the initial
+        condition (same effect as `restart_state`). This disables multigrid
+        staging.
     vmec_project:
         If True (default), re-project the initial guess through the VMEC
         internal grid/weights before returning or solving.
@@ -283,7 +292,20 @@ def run_fixed_boundary(
         If True (default), print VMEC-style iteration progress and a summary.
     """
     cfg, indata = load_config(str(input_path))
-    if ns_override is not None:
+    restart_state_eff = restart_state
+    restart_wout = None
+    if restart_wout_path is not None:
+        restart_wout = read_wout(Path(restart_wout_path))
+        restart_state_eff = state_from_wout(restart_wout)
+
+    if restart_state_eff is not None:
+        restart_ns = int(restart_state_eff.layout.ns)
+        if ns_override is not None and int(ns_override) != restart_ns:
+            raise ValueError(
+                f"restart_state ns={restart_ns} does not match ns_override={ns_override}"
+            )
+        cfg = replace(cfg, ns=int(restart_ns))
+    elif ns_override is not None:
         cfg = replace(cfg, ns=int(ns_override))
     solver_lower = str(solver).lower()
     if grid is None and solver_lower in ("vmec_lbfgs", "vmec_gn", "vmec2000_iter"):
@@ -298,6 +320,8 @@ def run_fixed_boundary(
     multigrid_use_input_niter = bool(multigrid_use_input_niter)
     if multigrid is None:
         multigrid = solver_lower == "vmec2000_iter"
+    if restart_state_eff is not None:
+        multigrid = False
     multigrid = bool(multigrid) and (ns_override is None)
 
     # Build the initial state on either the final grid (single-grid solvers and
@@ -310,13 +334,16 @@ def run_fixed_boundary(
         elif isinstance(ns_array, (tuple, np.ndarray)) and len(ns_array):
             ns_stages = [int(v) for v in ns_array]
 
-    # Stage-0 (coarsest) static + initial guess for VMEC sign convention.
-    cfg0 = replace(cfg, ns=int(ns_stages[0]))
-    static0 = build_static(cfg0, grid=grid)
-    # VMEC initializes the first (coarsest) stage directly from the boundary;
-    # finer stages are seeded via interp.f from the previous solve state.
-    bdy = boundary_from_indata(indata, static0.modes)
-    st0_coarse = initial_guess_from_boundary(static0, bdy, indata, vmec_project=vmec_project)
+    # Build boundary + initial guess if we are not restarting.
+    st0_coarse = None
+    static0 = None
+    if restart_state_eff is None:
+        cfg0 = replace(cfg, ns=int(ns_stages[0]))
+        static0 = build_static(cfg0, grid=grid)
+        # VMEC initializes the first (coarsest) stage directly from the boundary;
+        # finer stages are seeded via interp.f from the previous solve state.
+        bdy = boundary_from_indata(indata, static0.modes)
+        st0_coarse = initial_guess_from_boundary(static0, bdy, indata, vmec_project=vmec_project)
 
     # VMEC readin.f sets signgs = -1 and flips theta if needed. Follow that
     # convention unless explicitly overridden in the input file.
@@ -325,6 +352,10 @@ def run_fixed_boundary(
         signgs = -1
 
     static = build_static(cfg, grid=grid)
+    if restart_state_eff is None:
+        bdy = boundary_from_indata(indata, static.modes)
+    else:
+        bdy = boundary_from_indata(indata, static.modes)
 
     flux = flux_profiles_from_indata(indata, static.s, signgs=signgs)
     # VMEC evaluates pressure/iota/current profiles on the radial half mesh.
@@ -355,7 +386,10 @@ def run_fixed_boundary(
 
     if use_initial_guess:
         static = build_static(cfg, grid=grid)
-        st0 = initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
+        if restart_state_eff is not None:
+            st0 = restart_state_eff
+        else:
+            st0 = initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
         return FixedBoundaryRun(
             cfg=cfg,
             indata=indata,
@@ -370,7 +404,7 @@ def run_fixed_boundary(
     solver = solver_lower
     if solver == "gd":
         static = build_static(cfg, grid=grid)
-        st0 = initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
+        st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
         res = solve_fixed_boundary_gd(
             st0,
             static,
@@ -388,7 +422,7 @@ def run_fixed_boundary(
         )
     elif solver == "lbfgs":
         static = build_static(cfg, grid=grid)
-        st0 = initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
+        st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
         res = solve_fixed_boundary_lbfgs(
             st0,
             static,
@@ -407,7 +441,7 @@ def run_fixed_boundary(
     elif solver == "vmec_lbfgs":
         from .solve import solve_fixed_boundary_lbfgs_vmec_residual
         static = build_static(cfg, grid=grid)
-        st0 = initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
+        st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
 
         res = solve_fixed_boundary_lbfgs_vmec_residual(
             st0,
@@ -426,7 +460,7 @@ def run_fixed_boundary(
     elif solver == "vmec_gn":
         from .solve import solve_fixed_boundary_gn_vmec_residual
         static = build_static(cfg, grid=grid)
-        st0 = initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
+        st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
 
         res = solve_fixed_boundary_gn_vmec_residual(
             st0,
@@ -512,8 +546,8 @@ def run_fixed_boundary(
         stage_results: list[SolveVmecResidualResult] = []
         stage_offsets: list[int] = []
 
-        state = st0_coarse
-        static_prev = static0
+        state = restart_state_eff if restart_state_eff is not None else st0_coarse
+        static_prev = static0 if static0 is not None else static
         for i, (ns_i, niter_i, ftol_i) in enumerate(zip(ns_stages, niter_stages, ftol_stages)):
             cfg_i = replace(cfg, ns=int(ns_i))
             static_i = build_static(cfg_i, grid=grid)
