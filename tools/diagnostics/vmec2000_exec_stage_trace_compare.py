@@ -820,6 +820,30 @@ def _max_abs_rel_err(vmec_vals: np.ndarray, jax_vals: np.ndarray, *, eps: float 
     return max_abs, max_rel, i
 
 
+def _decode_tomnsps_index(idx: int, shape: tuple[int, int, int]) -> str:
+    ns, mpol1p1, ntorp1 = shape
+    if idx < 0 or ns <= 0 or mpol1p1 <= 0 or ntorp1 <= 0:
+        return "idx decode unavailable"
+    js = idx // (mpol1p1 * ntorp1)
+    rem = idx % (mpol1p1 * ntorp1)
+    m = rem // ntorp1
+    n = rem % ntorp1
+    return f"js={js+1} m={m} n={n}"
+
+
+def _decode_gc_index(idx: int, shape: tuple[int, int, int, int]) -> str:
+    ns, ntorp1, mpol1p1, ntmax = shape
+    if idx < 0 or ns <= 0 or ntorp1 <= 0 or mpol1p1 <= 0 or ntmax <= 0:
+        return "idx decode unavailable"
+    js = idx // (ntorp1 * mpol1p1 * ntmax)
+    rem = idx % (ntorp1 * mpol1p1 * ntmax)
+    n = rem // (mpol1p1 * ntmax)
+    rem2 = rem % (mpol1p1 * ntmax)
+    m = rem2 // ntmax
+    t = rem2 % ntmax
+    return f"js={js+1} n={n} m={m} t={t+1}"
+
+
 def _patch_indata(text: str, *, updates: dict[str, str]) -> str:
     """Patch simple `&INDATA` assignments in a VMEC namelist.
 
@@ -1538,6 +1562,100 @@ def main() -> None:
                     tol = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(v))))
                     if max_abs > tol:
                         raise SystemExit(2)
+
+    # Lambda-path audit: flsc/gcl vs blmn/clmn at the first mismatch index.
+    if (vmec_tomnsps and jax_tomnsps) or (vmec_gc and jax_gc) or (vmec_kernels and jax_kernels):
+        print()
+        print("lambda-path audit (first mismatch across flsc/gcl/blmn/clmn):")
+
+        def _first_block_mismatch(block_name: str) -> tuple[int, int, float, float] | None:
+            common = sorted(set(vmec_tomnsps.keys()) & set(jax_tomnsps.keys()))
+            for it in common:
+                vm = np.asarray(vmec_tomnsps[it][block_name]).ravel()
+                jx = np.asarray(jax_tomnsps[it].get(block_name, np.zeros_like(vmec_tomnsps[it][block_name]))).ravel()
+                max_abs, max_rel, idx = _max_abs_rel_err(vm, jx)
+                tol = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm))))
+                if max_abs > tol:
+                    return it, idx, max_abs, max_rel
+            return None
+
+        def _first_gc_mismatch() -> tuple[int, int, float, float] | None:
+            vm_raw = {it: vals[2] for (stage, it), vals in vmec_gc.items() if stage == "raw"}
+            jx_raw = {it: vals[2] for (stage, it), vals in jax_gc.items() if stage == "raw"}
+            common = sorted(set(vm_raw.keys()) & set(jx_raw.keys()))
+            for it in common:
+                vm = np.asarray(vm_raw[it]).ravel()
+                jx = np.asarray(jx_raw[it]).ravel()
+                max_abs, max_rel, idx = _max_abs_rel_err(vm, jx)
+                tol = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm))))
+                if max_abs > tol:
+                    return it, idx, max_abs, max_rel
+            return None
+
+        def _first_kernel_mismatch(name: str) -> tuple[int, int, float, float] | None:
+            common = sorted(set(vmec_kernels.keys()) & set(jax_kernels.keys()))
+            for it in common:
+                vm = np.asarray(vmec_kernels[it][name]).ravel()
+                jx = np.asarray(jax_kernels[it].get(name, np.zeros_like(vmec_kernels[it][name]))).ravel()
+                max_abs, max_rel, idx = _max_abs_rel_err(vm, jx)
+                tol = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm))))
+                if max_abs > tol:
+                    return it, idx, max_abs, max_rel
+            return None
+
+        flsc_m = _first_block_mismatch("flsc") if (vmec_tomnsps and jax_tomnsps) else None
+        gcl_m = _first_gc_mismatch() if (vmec_gc and jax_gc) else None
+        blmn_m = _first_kernel_mismatch("blmn") if (vmec_kernels and jax_kernels) else None
+        clmn_m = _first_kernel_mismatch("clmn") if (vmec_kernels and jax_kernels) else None
+
+        it_candidates = [m[0] for m in (flsc_m, gcl_m, blmn_m, clmn_m) if m is not None]
+        if it_candidates:
+            it0 = int(min(it_candidates))
+        else:
+            # No mismatch above tolerance: pick the earliest common iteration for reporting.
+            its = []
+            if vmec_tomnsps and jax_tomnsps:
+                its += list(set(vmec_tomnsps.keys()) & set(jax_tomnsps.keys()))
+            if vmec_gc and jax_gc:
+                its += list({it for (stage, it) in vmec_gc.keys() if stage == "raw"} & {it for (stage, it) in jax_gc.keys() if stage == "raw"})
+            if vmec_kernels and jax_kernels:
+                its += list(set(vmec_kernels.keys()) & set(jax_kernels.keys()))
+            it0 = int(min(its)) if its else -1
+
+        if it0 < 0:
+            print("  No overlapping dumps found for lambda-path audit.")
+        else:
+            if vmec_tomnsps and jax_tomnsps:
+                vm = np.asarray(vmec_tomnsps[it0]["flsc"])
+                jx = np.asarray(jax_tomnsps[it0].get("flsc", np.zeros_like(vm)))
+                max_abs, max_rel, idx = _max_abs_rel_err(vm.ravel(), jx.ravel())
+                decode = _decode_tomnsps_index(idx, vm.shape)
+                print(f"  iter {it0:03d} flsc: max_abs={max_abs:.3e} max_rel={max_rel:.3e} idx={decode}")
+            if vmec_gc and jax_gc:
+                vm_raw = {it: vals[2] for (stage, it), vals in vmec_gc.items() if stage == "raw"}
+                jx_raw = {it: vals[2] for (stage, it), vals in jax_gc.items() if stage == "raw"}
+                if it0 in vm_raw and it0 in jx_raw:
+                    vm = np.asarray(vm_raw[it0])
+                    jx = np.asarray(jx_raw[it0])
+                    max_abs, max_rel, idx = _max_abs_rel_err(vm.ravel(), jx.ravel())
+                    decode = _decode_gc_index(idx, vm.shape)
+                    print(f"  iter {it0:03d} gcl(raw): max_abs={max_abs:.3e} max_rel={max_rel:.3e} idx={decode}")
+            if vmec_kernels and jax_kernels:
+                for name in ("blmn", "clmn"):
+                    vm = np.asarray(vmec_kernels[it0][name])
+                    jx = np.asarray(jax_kernels[it0].get(name, np.zeros_like(vm)))
+                    max_abs, max_rel, idx = _max_abs_rel_err(vm.ravel(), jx.ravel())
+                    # Decode kernel index as (js, lt, lz, mpar) used in prior printout
+                    ns, ntheta3, nzeta, mpar = vm.shape
+                    js = idx // (ntheta3 * nzeta * mpar)
+                    rem = idx % (ntheta3 * nzeta * mpar)
+                    lt = rem // (nzeta * mpar)
+                    rem2 = rem % (nzeta * mpar)
+                    lz = rem2 // mpar
+                    mp = rem2 % mpar
+                    print(
+                        f"  iter {it0:03d} {name}: max_abs={max_abs:.3e} max_rel={max_rel:.3e} idx=js={js} lt={lt} lz={lz} mpar={mp}"
+                    )
 
     if vmec_gc or jax_gc:
         print()
