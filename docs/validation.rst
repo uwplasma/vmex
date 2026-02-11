@@ -75,9 +75,11 @@ Per-iteration trace parity (VMEC2000 executable, reduced grid):
 
 ::
 
-  python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case circular_tokamak --max-iter 20 --vmec-nstep 1 --single-ns 17
+  python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case circular_tokamak --max-iter 10 --vmec-nstep 1 --single-ns 17
 
 This uses a reduced grid to stay under ~1 minute; increase ``--max-iter`` or ``--single-ns`` for deeper parity checks.
+The comparator now consumes VMEC2000 scalar/force dumps to match full-precision
+``fsq*`` values and cross-checks ``include_edge``/``zero_m1`` gating.
 The trace comparator also dumps VMEC2000 ``tomnsps_kernels`` and vmec_jax
 ``force_kernels`` to compare ``blmn/clmn`` (lambda-force full-mesh inputs) with
 per-index reporting of the first mismatch.
