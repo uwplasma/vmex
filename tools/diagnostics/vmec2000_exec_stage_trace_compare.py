@@ -75,6 +75,8 @@ _RE_XC = re.compile(r"xc_.*_ns(\d+)_iter(\d+)\.dat$")
 _RE_BSUBE = re.compile(r"bsube_iter(\d+)\.dat$")
 _RE_GC = re.compile(r"gc_(raw|precond)_iter(\d+)\.dat$")
 _RE_TOMNSPS = re.compile(r"tomnsps_(raw|precond)?_?iter(\d+)\.dat$")
+_RE_TOMNSPS_KERNELS = re.compile(r"tomnsps_kernels_iter(\d+)\.dat$")
+_RE_FORCE_KERNELS = re.compile(r"force_kernels_(raw|precond)?_?iter(\d+)\.npz$")
 
 
 def _parse_vmec2000_stdout(text: str) -> list[Vmec2000PrintedStage]:
@@ -379,6 +381,54 @@ def _parse_vmec_tomnsps_dump(path: Path) -> dict[str, np.ndarray]:
     }
 
 
+def _parse_vmec_tomnsps_kernels_dump(path: Path) -> dict[str, np.ndarray]:
+    """Parse VMEC2000 tomnsps kernels dump -> dict of (ns, ntheta3, nzeta, 2) arrays."""
+    ns = None
+    ntheta3 = None
+    nzeta = None
+    rows: list[tuple[int, int, int, int, list[float]]] = []
+    for line in path.read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("ns="):
+            ns = int(line.split("=", 1)[-1])
+            continue
+        if line.startswith("ntheta3="):
+            ntheta3 = int(line.split("=", 1)[-1])
+            continue
+        if line.startswith("nzeta="):
+            nzeta = int(line.split("=", 1)[-1])
+            continue
+        if line.startswith("columns:"):
+            continue
+        toks = line.split()
+        if len(toks) < 14:
+            continue
+        try:
+            js = int(toks[0])
+            lt = int(toks[1])
+            lz = int(toks[2])
+            mpar = int(toks[3])
+        except ValueError:
+            continue
+        vals = [float(t.replace("D", "E").replace("d", "E")) for t in toks[4:14]]
+        rows.append((js, lt, lz, mpar, vals))
+
+    if ns is None or ntheta3 is None or nzeta is None:
+        raise ValueError(f"Malformed tomnsps_kernels dump: {path}")
+
+    shape = (ns, ntheta3, nzeta, 2)
+    names = ("armn", "brmn", "crmn", "azmn", "bzmn", "czmn", "arcon", "azcon", "blmn", "clmn")
+    out = {name: np.zeros(shape, dtype=float) for name in names}
+    for js, lt, lz, mpar, vals in rows:
+        if not (0 <= mpar <= 1):
+            continue
+        idx = (js - 1, lt - 1, lz - 1, mpar)
+        for name, v in zip(names, vals, strict=True):
+            out[name][idx] = v
+    return out
+
+
 def _collect_vmec_tomnsps_dumps(path: Path) -> dict[int, dict[str, np.ndarray]]:
     out: dict[int, dict[str, np.ndarray]] = {}
     if not path.exists():
@@ -389,6 +439,19 @@ def _collect_vmec_tomnsps_dumps(path: Path) -> dict[int, dict[str, np.ndarray]]:
             continue
         it = int(m.group(2))
         out[it] = _parse_vmec_tomnsps_dump(p)
+    return out
+
+
+def _collect_vmec_tomnsps_kernels_dumps(path: Path) -> dict[int, dict[str, np.ndarray]]:
+    out: dict[int, dict[str, np.ndarray]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("tomnsps_kernels_iter*.dat")):
+        m = _RE_TOMNSPS_KERNELS.search(p.name)
+        if not m:
+            continue
+        it = int(m.group(1))
+        out[it] = _parse_vmec_tomnsps_kernels_dump(p)
     return out
 
 
@@ -416,6 +479,58 @@ def _collect_jax_tomnsps_dumps(path: Path) -> dict[int, dict[str, np.ndarray]]:
             "fzcs": _block("fzcs"),
             "flsc": _block("flsc"),
             "flcs": _block("flcs"),
+        }
+    return out
+
+
+def _collect_jax_force_kernels(path: Path) -> dict[int, dict[str, np.ndarray]]:
+    out: dict[int, dict[str, np.ndarray]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("force_kernels_raw_iter*.npz")):
+        m = _RE_FORCE_KERNELS.search(p.name)
+        if not m:
+            continue
+        it = int(m.group(2))
+        data = np.load(p)
+        ns = int(np.asarray(data.get("ns", 0)))
+        nzeta = int(np.asarray(data.get("nzeta", 0)))
+        default_shape = None
+        for key in ("armn_e", "brmn_e", "azmn_e", "blmn_e", "clmn_e"):
+            if key in data and np.asarray(data[key]).size > 0:
+                default_shape = tuple(np.asarray(data[key]).shape)
+                break
+        if default_shape is None:
+            ntheta = int(np.asarray(data.get("ntheta", 0)))
+            default_shape = (ns, ntheta, nzeta)
+
+        def _get(name: str) -> np.ndarray:
+            if name not in data:
+                return np.zeros(default_shape, dtype=float)
+            arr = np.asarray(data[name])
+            if arr.size == 0:
+                return np.zeros(default_shape, dtype=float)
+            if arr.shape != default_shape:
+                if arr.size == int(np.prod(default_shape)):
+                    return arr.reshape(default_shape)
+            return arr
+
+        def _parity(even_name: str, odd_name: str) -> np.ndarray:
+            even = _get(even_name)
+            odd = _get(odd_name)
+            return np.stack([even, odd], axis=-1)
+
+        out[it] = {
+            "armn": _parity("armn_e", "armn_o"),
+            "brmn": _parity("brmn_e", "brmn_o"),
+            "crmn": _parity("crmn_e", "crmn_o"),
+            "azmn": _parity("azmn_e", "azmn_o"),
+            "bzmn": _parity("bzmn_e", "bzmn_o"),
+            "czmn": _parity("czmn_e", "czmn_o"),
+            "arcon": _parity("arcon_e", "arcon_o"),
+            "azcon": _parity("azcon_e", "azcon_o"),
+            "blmn": _parity("blmn_e", "blmn_o"),
+            "clmn": _parity("clmn_e", "clmn_o"),
         }
     return out
 
@@ -494,6 +609,14 @@ def _compare_vectors(
     ok = max_abs <= max(float(atol), float(rtol) * abs(vmec_vec[i]))
     msg = f"{label}: max_abs={max_abs:.3e} max_rel={max_rel:.3e} idx={i}"
     return ok, msg, i
+
+
+def _format_kernel_index(idx: int, *, shape: tuple[int, int, int, int]) -> str:
+    try:
+        js, lt, lz, mpar = np.unravel_index(idx, shape)
+    except Exception:
+        return f"idx={idx}"
+    return f"js={js+1} lt={lt+1} lz={lz+1} mpar={mpar}"
 
 
 def _decode_xc_index(idx: int, *, ns: int, mpol: int, ntor: int, lthreed: bool) -> str:
@@ -781,6 +904,7 @@ def main() -> None:
         vmec_env["VMEC_DUMP_DIR"] = str(vmec_dump_dir)
         vmec_env["VMEC_DUMP_BSUBE"] = "1"
         vmec_env["VMEC_DUMP_TOMNSPS"] = "1"
+        vmec_env["VMEC_DUMP_TOMNSPS_KERNELS"] = "1"
         vmec_env["VMEC_DUMP_GC"] = "1"
         vmec_env["VMEC_DUMP_GC_STAGE"] = "both"
         vmec_env["VMEC_DUMP_GC_DIR"] = str(vmec_dump_dir)
@@ -817,6 +941,7 @@ def main() -> None:
         os.environ["VMEC_JAX_DUMP_DIR"] = str(jax_dump_dir)
         os.environ["VMEC_JAX_DUMP_BSUBE"] = "1"
         os.environ["VMEC_JAX_DUMP_TOMNSPS"] = "1"
+        os.environ["VMEC_JAX_DUMP_FORCE_KERNELS"] = "1"
         os.environ["VMEC_JAX_DUMP_GC"] = "1"
         os.environ["VMEC_JAX_DUMP_GC_STAGE"] = "both"
         os.environ["VMEC_JAX_DUMP_GC_DIR"] = str(jax_dump_dir)
@@ -842,6 +967,8 @@ def main() -> None:
         jax_gc = _collect_jax_gc_dumps(jax_dump_dir)
         vmec_tomnsps = _collect_vmec_tomnsps_dumps(vmec_dump_dir)
         jax_tomnsps = _collect_jax_tomnsps_dumps(jax_dump_dir)
+        vmec_kernels = _collect_vmec_tomnsps_kernels_dumps(vmec_dump_dir)
+        jax_kernels = _collect_jax_force_kernels(jax_dump_dir)
 
     # --- Report ---
     use_threed1 = bool(threed1_stages)
@@ -877,6 +1004,23 @@ def main() -> None:
         delt = np.asarray(diag.get("time_step_history", np.zeros((0,), dtype=float)), dtype=float)
     r00 = np.asarray(diag.get("r00_history", np.zeros((0,), dtype=float)), dtype=float)
     w = np.asarray(diag.get("w_vmec_history", np.zeros((0,), dtype=float)), dtype=float)
+
+    if isinstance(diag, dict) and diag:
+        bcovar_hist = np.asarray(diag.get("bcovar_update_history", np.zeros((0,), dtype=int)), dtype=int)
+        restart_hist = np.asarray(diag.get("restart_path_history", np.zeros((0,), dtype=object)), dtype=object)
+        time_hist = np.asarray(diag.get("time_step_history", np.zeros((0,), dtype=float)), dtype=float)
+        if bcovar_hist.size or restart_hist.size:
+            nshow = int(min(10, max(bcovar_hist.size, restart_hist.size, time_hist.size)))
+            def _fmt(arr):
+                return ", ".join(str(v) for v in arr[:nshow])
+            print()
+            print("vmec_jax cadence (first 10 iters):")
+            if time_hist.size:
+                print(f"  time_step_history: [{_fmt(time_hist)}]")
+            if bcovar_hist.size:
+                print(f"  bcovar_update_history: [{_fmt(bcovar_hist)}]")
+            if restart_hist.size:
+                print(f"  restart_path_history: [{_fmt(restart_hist)}]")
 
     print()
     if use_threed1:
@@ -1093,6 +1237,28 @@ def main() -> None:
                 tol_v = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_bsubv))))
                 if max_abs_u > tol_u or max_abs_v > tol_v:
                     raise SystemExit(2)
+
+    if vmec_kernels or jax_kernels:
+        print()
+        print("tomnsps kernels parity (VMEC2000 vs vmec_jax force kernels):")
+        common = sorted(set(vmec_kernels.keys()) & set(jax_kernels.keys()))
+        if not common:
+            print("  No overlapping tomnsps_kernels/force_kernels dump iterations found.")
+        for it in common:
+            vm = vmec_kernels[it]
+            jx = jax_kernels[it]
+            for name in ("blmn", "clmn"):
+                v = np.asarray(vm[name]).ravel()
+                j = np.asarray(jx.get(name, np.zeros_like(vm[name]))).ravel()
+                max_abs, max_rel, idx = _max_abs_rel_err(v, j)
+                msg = f"  iter {it:03d} {name}: max_abs={max_abs:.3e} max_rel={max_rel:.3e}"
+                if idx >= 0:
+                    msg += f" idx={_format_kernel_index(int(idx), shape=vm[name].shape)}"
+                print(msg)
+                if bool(args.fail_fast):
+                    tol = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(v))))
+                    if max_abs > tol:
+                        raise SystemExit(2)
 
     if vmec_tomnsps or jax_tomnsps:
         print()

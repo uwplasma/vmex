@@ -583,6 +583,7 @@ def vmec_force_norms_from_bcovar_dynamic(
     b2 = (bsupu * bsubu) + (bsupv * bsubv)
     wblocal = jnp.sum(w_ang[None, :, :] * jac * (0.5 * b2), axis=(1, 2))
     wb = hs * jnp.sum(wblocal[1:])  # js=2..ns
+    wb = jnp.abs(wb)
 
     # Pressure scalar wp. Pressure is flux-surface function, but bcovar stores
     # bsq = |B|^2/2 + pres on the half mesh, so we can reconstruct pres robustly.

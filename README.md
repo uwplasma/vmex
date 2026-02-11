@@ -91,13 +91,13 @@ Current kernel-parity snapshot (solver-free, bundled reference states):
 
 Interpretation:
 - Axisymmetric cases are at floating-point parity for geometry, ``bsup*``, and ``abs(B)``.
-- Axisymmetric tomnsps/gc blocks match VMEC2000 for the R/Z channels; the first mismatch appears in the lambda block (``flsc/gcl``) at iter 1 in the internal scan.
+- Axisymmetric tomnsps/gc blocks (including lambda-force ``blmn/clmn``) match VMEC2000 to ~1e-11 abs on reduced grids; residual scalars still differ at the ~1e-3–1e-2 relative level.
 - The VMEC-style update loop now uses scalxc-weighted forces, so ``xc``/``v`` dumps match VMEC2000 at iter 1 in reduced-grid parity runs.
 - Remaining known gap: 3D ``bsub*`` (and the resulting scalar residuals) on some ``nfp>1`` cases.
 
 Iteration trace parity (VMEC2000 executable, reduced grid):
 
-- Single-grid axisym cases (``circular_tokamak``, ``solovev``, ``shaped_tokamak_pressure``) match ``fsq*`` and preconditioned scalars to ~1e-3 relative at iter 1, and the ``xc``/``v`` dumps now agree at machine precision. After the first couple of steps, differences grow but remain bounded (no blow-up) while we align the lambda-force path and restart cadence.
+- Single-grid axisym cases (``circular_tokamak``, ``solovev``, ``shaped_tokamak_pressure``) match ``fsq*`` and preconditioned scalars to ~1e-3–4e-3 relative over the first 5–10 iterations, and the ``xc``/``v`` dumps now agree at machine precision. The timestep stays fixed at 0.9 and bcovar refresh only triggers on the first iteration, matching the VMEC cadence (ns4=25) for these short runs.
 - ``purely_toroidal_field`` multigrid trace matches through stage 4 iter 6, but ``r00``/``w`` diagnostics become ``NaN`` from iter 7 onward (state divergence still under investigation).
 - ``up_down_asymmetric_tokamak`` (``lasym=True``) shows large bcovar/force-kernel mismatches at iter 1; nonlinear trace diverges. This is the current top lasym parity blocker.
 

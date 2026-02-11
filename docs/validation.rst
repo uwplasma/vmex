@@ -78,6 +78,9 @@ Per-iteration trace parity (VMEC2000 executable, reduced grid):
   python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case circular_tokamak --max-iter 20 --vmec-nstep 1 --single-ns 17
 
 This uses a reduced grid to stay under ~1 minute; increase ``--max-iter`` or ``--single-ns`` for deeper parity checks.
+The trace comparator also dumps VMEC2000 ``tomnsps_kernels`` and vmec_jax
+``force_kernels`` to compare ``blmn/clmn`` (lambda-force full-mesh inputs) with
+per-index reporting of the first mismatch.
 
 Internal force-block parity scan (tomnsps + gc, executable):
 
@@ -110,6 +113,9 @@ faithful to the legacy script.
 
 Current observed mismatches (circular_tokamak, 5-iter snapshot):
 
+- ``fsqr/fsqz/fsql`` residuals agree at the ~2-4e-3 relative level over 5-10
+  iterations; parity tighter than this will require matching normalization and
+  restart/timestep edge cases beyond the current axisymmetric baseline.
 - ``bmnc`` and LCFS :math:`\\lvert B \\rvert` plots differ at the ~5e-2 relative level.
 - ``buco``/``bvco`` are within a few percent; **``jcuru``/``jcurv`` scaling is now
   corrected** (remaining differences are tied to earlier-force parity).
