@@ -844,6 +844,16 @@ def _decode_gc_index(idx: int, shape: tuple[int, int, int, int]) -> str:
     return f"js={js+1} n={n} m={m} t={t+1}"
 
 
+def _rms(x: np.ndarray, *, eps: float = 1e-30) -> float:
+    x = np.asarray(x, dtype=float).ravel()
+    if x.size == 0:
+        return 0.0
+    val = float(np.sqrt(np.mean(x * x)))
+    if not np.isfinite(val):
+        return 0.0
+    return max(val, eps)
+
+
 def _patch_indata(text: str, *, updates: dict[str, str]) -> str:
     """Patch simple `&INDATA` assignments in a VMEC namelist.
 
@@ -1556,12 +1566,48 @@ def main() -> None:
             for name in ("frcc", "frss", "fzsc", "fzcs", "flsc", "flcs"):
                 v = np.asarray(vm[name]).ravel()
                 j = np.asarray(jx.get(name, np.zeros_like(vm[name]))).ravel()
-                max_abs, max_rel, _ = _max_abs_rel_err(v, j)
+                max_abs, max_rel, idx = _max_abs_rel_err(v, j)
                 print(f"  iter {it:03d} {name}: max_abs={max_abs:.3e} max_rel={max_rel:.3e}")
                 if bool(args.fail_fast):
                     tol = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(v))))
                     if max_abs > tol:
+                        if name == "flsc":
+                            decode = _decode_tomnsps_index(idx, vm[name].shape)
+                            print(f"    flsc mismatch idx={decode}")
                         raise SystemExit(2)
+
+    # Tighten lambda raw blocks: normalize against RMS and fail-fast with decoded indices.
+    if vmec_tomnsps and jax_tomnsps and vmec_gc and jax_gc:
+        print()
+        print("lambda raw-block normalization (flsc/gcl):")
+        common = sorted(set(vmec_tomnsps.keys()) & set(jax_tomnsps.keys()))
+        raw_gcl_vm = {it: vals[2] for (stage, it), vals in vmec_gc.items() if stage == "raw"}
+        raw_gcl_jx = {it: vals[2] for (stage, it), vals in jax_gc.items() if stage == "raw"}
+        common_gcl = sorted(set(raw_gcl_vm.keys()) & set(raw_gcl_jx.keys()))
+        for it in common:
+            vm_fl = np.asarray(vmec_tomnsps[it]["flsc"])
+            jx_fl = np.asarray(jax_tomnsps[it].get("flsc", np.zeros_like(vm_fl)))
+            max_abs, _max_rel, idx = _max_abs_rel_err(vm_fl.ravel(), jx_fl.ravel())
+            denom = _rms(vm_fl)
+            norm_err = max_abs / denom if denom > 0 else float("nan")
+            decode = _decode_tomnsps_index(idx, vm_fl.shape)
+            print(f"  iter {it:03d} flsc: rms={denom:.3e} max_abs={max_abs:.3e} norm_err={norm_err:.3e} idx={decode}")
+            if bool(args.fail_fast):
+                tol = max(float(args.atol), float(args.rtol) * denom)
+                if max_abs > tol:
+                    raise SystemExit(2)
+        for it in common_gcl:
+            vm_gcl = np.asarray(raw_gcl_vm[it])
+            jx_gcl = np.asarray(raw_gcl_jx[it])
+            max_abs, _max_rel, idx = _max_abs_rel_err(vm_gcl.ravel(), jx_gcl.ravel())
+            denom = _rms(vm_gcl)
+            norm_err = max_abs / denom if denom > 0 else float("nan")
+            decode = _decode_gc_index(idx, vm_gcl.shape)
+            print(f"  iter {it:03d} gcl(raw): rms={denom:.3e} max_abs={max_abs:.3e} norm_err={norm_err:.3e} idx={decode}")
+            if bool(args.fail_fast):
+                tol = max(float(args.atol), float(args.rtol) * denom)
+                if max_abs > tol:
+                    raise SystemExit(2)
 
     # Lambda-path audit: flsc/gcl vs blmn/clmn at the first mismatch index.
     if (vmec_tomnsps and jax_tomnsps) or (vmec_gc and jax_gc) or (vmec_kernels and jax_kernels):
