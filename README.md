@@ -99,7 +99,7 @@ Interpretation:
 
 Iteration trace parity (VMEC2000 executable, reduced grid):
 
-- Single-grid axisym cases (``circular_tokamak``, ``solovev``, ``shaped_tokamak_pressure``) match ``fsq*`` and preconditioned scalars at machine precision over **30 iterations** with `--single-ns 13`. ``circular_tokamak`` also matches over **50 iterations** at the same setting. The timestep stays fixed at 0.9 and bcovar refresh only triggers on the first iteration, matching the VMEC cadence (ns4=25) for these runs.
+- Single-grid axisym cases now match ``fsq*`` and preconditioned scalars at machine precision over **30 iterations** for ``circular_tokamak`` and ``solovev`` with `--single-ns 13`. ``shaped_tokamak_pressure`` matches over **30 iterations** at reduced grids (`--single-ns 9` or 11) to keep runs under ~60s; a full 30-iter run at `--single-ns 13` times out under the 60s cap and remains to be confirmed. The timestep stays fixed at 0.9 and bcovar refresh only triggers on the first iteration, matching the VMEC cadence (ns4=25) for these runs.
 - ``purely_toroidal_field`` multigrid trace matches through stage 4 iter 6, but ``r00``/``w`` diagnostics become ``NaN`` from iter 7 onward (state divergence still under investigation).
 - ``up_down_asymmetric_tokamak`` (``lasym=True``) shows large bcovar/force-kernel mismatches at iter 1; nonlinear trace diverges. This is the current top lasym parity blocker.
 
@@ -124,28 +124,17 @@ This is a quick sanity run (reduced cases and resolution). For a full parity sna
 
 ## Benchmark (runtime + residual traces)
 
-This script compares a *fixed iteration budget* across `vmec_jax` and (optionally) the **VMEC2000 executable** (`xvmec2000`):
+This script compares a *fixed iteration budget* across `vmec_jax` and (optionally) the **VMEC2000 executable** (`xvmec2000`). The current README figures were generated with a reduced grid (`ns=25`) and a 10-iteration budget to keep the total run under a few minutes:
 
 ```bash
 python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py \
-  --iters 5 \
+  --iters 10 \
   --cases circular_tokamak shaped_tokamak_pressure solovev purely_toroidal_field \
-  --ns-override 7 \
-  --disable-jit --no-warmup
+  --ns-override 25 \
+  --run-vmec2000 --vmec2000-ns-override 25 --vmec2000-timeout 60
 ```
 
-To also run the external VMEC2000 executable (if built):
-
-```bash
-python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py \
-  --iters 5 \
-  --cases circular_tokamak shaped_tokamak_pressure solovev purely_toroidal_field \
-  --ns-override 7 \
-  --disable-jit --no-warmup \
-  --run-vmec2000 --vmec2000-ns-override 7 --vmec2000-timeout 20
-```
-
-The quick settings above keep runs under ~60s. Drop `--disable-jit/--no-warmup` for performance-oriented timing.
+The quick settings above keep runs under ~60s per case. Drop `--ns-override/--vmec2000-ns-override` to use the full input resolution and increase `--iters` for longer traces.
 
 <table>
   <tr>

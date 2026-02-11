@@ -16,6 +16,7 @@ vmec-jax documentation
    installation
    quickstart
    theory
+   vmec_wiki_primer
    algorithms
    validation
    performance
@@ -28,4 +29,3 @@ vmec-jax documentation
    :caption: API reference
 
    api/index
-

@@ -124,14 +124,16 @@ faithful to the legacy script.
 
 Current observed mismatches (updated parity status):
 
-- **Single-grid axisym parity** (`--single-ns 13`) now matches VMEC2000 at machine
+- **Single-grid axisym parity** (`--single-ns 13`) matches VMEC2000 at machine
   precision for ``fsq*`` and preconditioned scalars over **30 iterations** on
-  ``circular_tokamak``, ``solovev``, and ``shaped_tokamak_pressure``. The same
-  setting matches **50 iterations** on ``circular_tokamak``. These runs use the
+  ``circular_tokamak`` and ``solovev``. ``shaped_tokamak_pressure`` matches over
+  **30 iterations** at reduced grids (`--single-ns 9` or 11) to stay under the
+  60s cap; a 30-iter run at `--single-ns 13` is still pending. These runs use the
   VMEC2000 executable trace with `NSTEP=1` and a single-grid `NITER_ARRAY`.
-- **Multigrid parity** (full `NS` from input) still diverges after the first few
-  iterations on some cases (e.g., ``shaped_tokamak_pressure``). The next focus
-  is matching VMEC2000’s multigrid cadence and restart triggers exactly.
+- **Multigrid parity** (full `NS` from input, `--use-input-niter`) now matches
+  per-iteration traces on ``circular_tokamak`` and ``shaped_tokamak_pressure``
+  for a 10-iteration cap after the axis-guess + history fixes; longer multigrid
+  runs are still being validated.
 - ``betapol``, ``betator``, ``betaxis``, ``ctor``, and ``DMerc`` are present but
   still placeholders in ``vmec_jax`` (zeros) until the VMEC2000 diagnostics path
   is fully ported.
@@ -151,8 +153,4 @@ Current blockers worth tracking:
 
 - ``lasym=True`` axisymmetric case (``input.up_down_asymmetric_tokamak``) shows large bcovar/force-kernel mismatches at iter 1.
 - ``purely_toroidal_field`` multigrid trace matches early iterations but the ``r00``/``WMHD`` diagnostics become non-finite at later iterations in ``vmec_jax``.
-- Axisymmetric internal scans now match VMEC2000 for R/Z force blocks, but the first mismatch appears in the lambda block at iter 1:
-  ``flsc`` (~0.36 rel), ``gcl`` (~0.50 rel), and the lambda-force kernel ``blmn`` (~0.68 rel). This is the current top
-  blocker for nonlinear trace parity. Recent change: ``lvv`` now uses ``phipog=1/sqrtg`` (no ``2π`` factor), which
-  reduced the mismatch from ~6x; remaining scaling still under investigation.
-- Axisymmetric nonlinear traces still diverge from VMEC2000 after the first few iterations on some cases (e.g. ``shaped_tokamak_pressure``); the next focus is matching the lambda-force path and VMEC2000 time-step/preconditioner updates exactly.
+- Lambda-path internal parity (``flsc``/``gcl`` and ``blmn``/``clmn``) is being re-audited with full dumps; reduced-grid exec traces match, but full dump alignment is still pending before declaring end-to-end lambda parity.
