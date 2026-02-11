@@ -67,7 +67,7 @@ Most users should start from the small public API in ``vmec_jax.api``::
   run = vj.run_fixed_boundary(
       "examples/data/input.shaped_tokamak_pressure",
       solver="vmec2000_iter",
-      max_iter=30,
+      max_iter=10,
       verbose=True,
   )
   wout = vj.write_wout_from_fixed_boundary_run(

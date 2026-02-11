@@ -53,22 +53,21 @@ All of the following scripts are designed to run quickly on bundled data:
 
     python examples/validation/end_to_end_solve_parity_summary.py --use-input-niter --fast
 
-- Runtime + residual benchmark for a fixed iteration budget (optional, communication-oriented)::
+- Runtime + residual benchmark for a fixed iteration budget (communication-oriented)::
 
     python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py \
-      --iters 5 \
+      --iters 20 \
       --cases circular_tokamak shaped_tokamak_pressure solovev purely_toroidal_field \
-      --ns-override 7 \
-      --disable-jit --no-warmup
+      --ns-override 17
 
   To include the VMEC2000 executable (if built)::
 
     python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py \
-      --iters 5 \
+      --iters 20 \
       --cases circular_tokamak shaped_tokamak_pressure solovev purely_toroidal_field \
-      --ns-override 7 \
-      --disable-jit --no-warmup \
-      --run-vmec2000 --vmec2000-ns-override 7 --vmec2000-timeout 20
+      --ns-override 17 \
+      --run-vmec2000 --vmec2000-ns-override 17 --vmec2000-timeout 60 \
+      --no-vmec2000-use-input-niter
 
 The quick flags above keep runs under ~60s. Drop ``--disable-jit``/``--no-warmup`` and increase ``--iters``/``--cases`` for higher-fidelity traces.
 
@@ -87,6 +86,10 @@ Per-iteration trace parity (VMEC2000 executable, reduced grid):
   python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case circular_tokamak --max-iter 10 --vmec-nstep 1 --single-ns 17
 
 This uses a reduced grid to stay under ~1 minute; increase ``--max-iter`` or ``--single-ns`` for deeper parity checks.
+For longer traces under the timeout cap you can split the vmec_jax run::
+
+  python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case circular_tokamak --max-iter 30 --split-iter 15 --single-ns 13 --vmec-nstep 1 --vmec-timeout 60
+
 The comparator now consumes VMEC2000 scalar/force dumps to match full-precision
 ``fsq*`` values and cross-checks ``include_edge``/``zero_m1`` gating.
 The trace comparator also dumps VMEC2000 ``tomnsps_kernels`` and vmec_jax
@@ -125,15 +128,15 @@ faithful to the legacy script.
 Current observed mismatches (updated parity status):
 
 - **Single-grid axisym parity** (`--single-ns 13`) matches VMEC2000 at machine
-  precision for ``fsq*`` and preconditioned scalars over **30 iterations** on
-  ``circular_tokamak`` and ``solovev``. ``shaped_tokamak_pressure`` matches over
-  **30 iterations** at reduced grids (`--single-ns 9` or 11) to stay under the
-  60s cap; a 30-iter run at `--single-ns 13` is still pending. These runs use the
-  VMEC2000 executable trace with `NSTEP=1` and a single-grid `NITER_ARRAY`.
+  precision for the first **15 iterations** on ``circular_tokamak`` and
+  ``shaped_tokamak_pressure``. When split into two 15-iter phases (warm start),
+  the restart resets time-step/momentum state and the first mismatch appears at
+  iteration 16. Continuous 30-iter parity at ``--single-ns 13`` remains pending
+  under the 60s cap.
 - **Multigrid parity** (full `NS` from input, `--use-input-niter`) now matches
   per-iteration traces on ``circular_tokamak`` and ``shaped_tokamak_pressure``
-  for a 10-iteration cap after the axis-guess + history fixes; longer multigrid
-  runs are still being validated.
+  for a 10-iteration cap; 20-iter multigrid traces are now generated for the
+  benchmark figures (reduced ns for runtime).
 - ``betapol``, ``betator``, ``betaxis``, ``ctor``, and ``DMerc`` are present but
   still placeholders in ``vmec_jax`` (zeros) until the VMEC2000 diagnostics path
   is fully ported.
@@ -153,4 +156,6 @@ Current blockers worth tracking:
 
 - ``lasym=True`` axisymmetric case (``input.up_down_asymmetric_tokamak``) shows large bcovar/force-kernel mismatches at iter 1.
 - ``purely_toroidal_field`` multigrid trace matches early iterations but the ``r00``/``WMHD`` diagnostics become non-finite at later iterations in ``vmec_jax``.
-- Lambda-path internal parity (``flsc``/``gcl`` and ``blmn``/``clmn``) is being re-audited with full dumps; reduced-grid exec traces match, but full dump alignment is still pending before declaring end-to-end lambda parity.
+- Lambda-path internal parity (``flsc``/``gcl`` and ``blmn``/``clmn``) matches VMEC2000
+  to ~1e-10 abs on reduced grids with full dumps; remaining work is to validate the
+  same at higher resolution.

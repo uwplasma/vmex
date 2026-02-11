@@ -31,15 +31,15 @@ pytest -q
 
 ## Snapshot figures
 
-Generated from the bundled `shaped_tokamak_pressure` case (short run to stay under ~1 minute):
+Generated from the bundled `shaped_tokamak_pressure` case (short multigrid run to stay under ~1 minute):
 
 ```bash
-JAX_DISABLE_JIT=1 python examples/showcase_axisym_input_to_wout.py \
+python examples/showcase_axisym_input_to_wout.py \
   --case shaped_tokamak_pressure \
   --max-iter 10 \
-  --single-ns 13 \
   --emit-readme-figures \
-  --vmec2000-timeout 60
+  --vmec2000-timeout 60 \
+  --vmec2000-nstep 1
 ```
 
 <table>
@@ -59,8 +59,8 @@ JAX_DISABLE_JIT=1 python examples/showcase_axisym_input_to_wout.py \
 
 Interpretation of the snapshot figures:
 
-- The residual trace overlay is a **per-iteration VMEC2000 executable trace** (dashed) from `threed1.*`. With `--single-ns 13`, the trace matches vmec_jax over the first 10 iterations at ~1e-3 rtol (typically much tighter); this is the current best-known parity setting for fast, reproducible runs.
-- The LCFS `|B|` panel now uses **vmecPlot2-style grids** (theta/zeta resolution and toroidal-angle conventions) for both VMEC2000 and vmec_jax. With the single-grid parity run the LCFS heatmaps match; remaining differences show up in multigrid runs and are not a plotting artifact.
+- The residual trace overlay is a **per-iteration VMEC2000 executable trace** (dashed) from `threed1.*`. The multigrid run (ns=13→25→51, total 10 iterations) matches vmec_jax at ~1e-3 rtol and typically much tighter.
+- The LCFS `|B|` panel now uses **vmecPlot2-style grids** (theta/zeta resolution and toroidal-angle conventions) for both VMEC2000 and vmec_jax. Differences here reflect solver parity, not plotting.
 
 ## Parity status (VMEC2000)
 
@@ -99,7 +99,7 @@ Interpretation:
 
 Iteration trace parity (VMEC2000 executable, reduced grid):
 
-- Single-grid axisym cases now match ``fsq*`` and preconditioned scalars at machine precision over **30 iterations** for ``circular_tokamak`` and ``solovev`` with `--single-ns 13`. ``shaped_tokamak_pressure`` matches over **30 iterations** at reduced grids (`--single-ns 9` or 11) to keep runs under ~60s; a full 30-iter run at `--single-ns 13` times out under the 60s cap and remains to be confirmed. The timestep stays fixed at 0.9 and bcovar refresh only triggers on the first iteration, matching the VMEC cadence (ns4=25) for these runs.
+- Single-grid axisym cases match ``fsq*`` and preconditioned scalars at machine precision for the first **15 iterations** at `--single-ns 13`. When split into two 15-iter phases with warm starts, the restart resets the time-step/momentum state, and the first mismatch appears at iteration 16. Full continuous 30-iter parity at `--single-ns 13` remains pending under the 60s cap.
 - ``purely_toroidal_field`` multigrid trace matches through stage 4 iter 6, but ``r00``/``w`` diagnostics become ``NaN`` from iter 7 onward (state divergence still under investigation).
 - ``up_down_asymmetric_tokamak`` (``lasym=True``) shows large bcovar/force-kernel mismatches at iter 1; nonlinear trace diverges. This is the current top lasym parity blocker.
 
@@ -124,14 +124,15 @@ This is a quick sanity run (reduced cases and resolution). For a full parity sna
 
 ## Benchmark (runtime + residual traces)
 
-This script compares a *fixed iteration budget* across `vmec_jax` and (optionally) the **VMEC2000 executable** (`xvmec2000`). The current README figures were generated with a reduced grid (`ns=25`) and a 10-iteration budget to keep the total run under a few minutes:
+This script compares a *fixed iteration budget* across `vmec_jax` and (optionally) the **VMEC2000 executable** (`xvmec2000`). The current README figures were generated with a reduced grid (`ns=17`) and a 20-iteration budget to keep the total run under a few minutes:
 
 ```bash
 python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py \
-  --iters 10 \
+  --iters 20 \
   --cases circular_tokamak shaped_tokamak_pressure solovev purely_toroidal_field \
-  --ns-override 25 \
-  --run-vmec2000 --vmec2000-ns-override 25 --vmec2000-timeout 60
+  --ns-override 17 \
+  --run-vmec2000 --vmec2000-ns-override 17 --vmec2000-timeout 60 \
+  --no-vmec2000-use-input-niter
 ```
 
 The quick settings above keep runs under ~60s per case. Drop `--ns-override/--vmec2000-ns-override` to use the full input resolution and increase `--iters` for longer traces.
