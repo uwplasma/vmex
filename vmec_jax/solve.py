@@ -233,6 +233,27 @@ def _maybe_dump_scalars(*, norms, iter_idx: int) -> None:
         )
 
 
+def _maybe_dump_gcx2(*, gcr2, gcz2, gcl2, iter_idx: int, include_edge: bool) -> None:
+    env = os.getenv("VMEC_JAX_DUMP_GCX2", "")
+    if not env or env == "0":
+        return
+    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
+    if iters is not None and int(iter_idx) not in iters:
+        return
+    outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    path = outdir / f"gcx2_iter{int(iter_idx)}.dat"
+    with path.open("w") as f:
+        f.write("# gcx2 dump (post-scalxc, post-m1)\n")
+        f.write("columns: iter include_edge gcr2 gcz2 gcl2\n")
+        f.write(
+            f"{int(iter_idx):6d} {int(bool(include_edge)):3d}"
+            f"{float(np.asarray(gcr2)):24.16e}"
+            f"{float(np.asarray(gcz2)):24.16e}"
+            f"{float(np.asarray(gcl2)):24.16e}\n"
+        )
+
+
 def _gc_from_frzl(*, frzl, cfg):
     frcc = np.asarray(frzl.frcc)
     ns, mpol, nrange = frcc.shape
@@ -2775,6 +2796,14 @@ def solve_fixed_boundary_residual_iter(
             apply_scalxc=False,
             s=s,
         )
+        if iter_idx is not None:
+            _maybe_dump_gcx2(
+                gcr2=gcr2,
+                gcz2=gcz2,
+                gcl2=gcl2,
+                iter_idx=int(iter_idx),
+                include_edge=bool(include_edge),
+            )
         if norms_override is None:
             norms = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
         else:

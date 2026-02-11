@@ -78,6 +78,8 @@ _RE_TOMNSPS = re.compile(r"tomnsps_(raw|precond)?_?iter(\d+)\.dat$")
 _RE_TOMNSPS_KERNELS = re.compile(r"tomnsps_kernels_iter(\d+)\.dat$")
 _RE_FORCE_KERNELS = re.compile(r"force_kernels_(raw|precond)?_?iter(\d+)\.npz$")
 _RE_SCALARS = re.compile(r"scalars_iter(\d+)\.dat$")
+_RE_GCX2 = re.compile(r"gcx2_iter(\d+)\.dat$")
+_RE_FSQ1 = re.compile(r"fsq1_iter(\d+)\.dat$")
 
 
 def _parse_vmec2000_stdout(text: str) -> list[Vmec2000PrintedStage]:
@@ -578,6 +580,111 @@ def _collect_scalars_dumps(path: Path) -> dict[int, dict[str, float]]:
     return out
 
 
+def _parse_gcx2_dump(path: Path) -> dict[str, float]:
+    data: dict[str, float] = {}
+    for line in path.read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("columns:"):
+            continue
+        toks = line.split()
+        if len(toks) < 5:
+            continue
+        if not toks[0].lstrip("+-").isdigit():
+            continue
+        data["iter"] = float(toks[0])
+        data["include_edge"] = float(toks[1])
+        data["gcr2"] = float(toks[2].replace("D", "E").replace("d", "E"))
+        data["gcz2"] = float(toks[3].replace("D", "E").replace("d", "E"))
+        data["gcl2"] = float(toks[4].replace("D", "E").replace("d", "E"))
+        break
+    if not data:
+        raise ValueError(f"Malformed gcx2 dump: {path}")
+    return data
+
+
+def _collect_gcx2_dumps(path: Path) -> dict[int, dict[str, float]]:
+    out: dict[int, dict[str, float]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("gcx2_iter*.dat")):
+        m = _RE_GCX2.search(p.name)
+        if not m:
+            continue
+        it = int(m.group(1))
+        out[it] = _parse_gcx2_dump(p)
+    return out
+
+
+def _parse_fsq1_dump(path: Path) -> dict[str, float]:
+    data: dict[str, float] = {}
+    for line in path.read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("columns:"):
+            continue
+        toks = line.split()
+        if len(toks) < 4:
+            continue
+        if not toks[0].lstrip("+-").isdigit():
+            continue
+        data["iter"] = float(toks[0])
+        data["fsqr1"] = float(toks[1].replace("D", "E").replace("d", "E"))
+        data["fsqz1"] = float(toks[2].replace("D", "E").replace("d", "E"))
+        data["fsql1"] = float(toks[3].replace("D", "E").replace("d", "E"))
+        break
+    if not data:
+        raise ValueError(f"Malformed fsq1 dump: {path}")
+    return data
+
+
+def _collect_fsq1_dumps(path: Path) -> dict[int, dict[str, float]]:
+    out: dict[int, dict[str, float]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("fsq1_iter*.dat")):
+        m = _RE_FSQ1.search(p.name)
+        if not m:
+            continue
+        it = int(m.group(1))
+        out[it] = _parse_fsq1_dump(p)
+    return out
+
+
+def _compute_fsq_from_dumps(
+    *,
+    scalars: dict[int, dict[str, float]],
+    gcx2: dict[int, dict[str, float]],
+    r1: float,
+) -> dict[int, dict[str, float]]:
+    out: dict[int, dict[str, float]] = {}
+    if not scalars or not gcx2:
+        return out
+    scalar_items = sorted(scalars.items())
+    scalar_iters = [it for it, _ in scalar_items]
+    sc_idx = 0
+    current_sc: dict[str, float] | None = None
+    for it in sorted(gcx2.keys()):
+        while sc_idx < len(scalar_iters) and scalar_iters[sc_idx] <= it:
+            current_sc = scalar_items[sc_idx][1]
+            sc_idx += 1
+        if current_sc is None:
+            continue
+        sc = current_sc
+        gc = gcx2[it]
+        fnorm = float(sc.get("fnorm", float("nan")))
+        fnormL = float(sc.get("fnormL", float("nan")))
+        gcr2 = float(gc.get("gcr2", float("nan")))
+        gcz2 = float(gc.get("gcz2", float("nan")))
+        gcl2 = float(gc.get("gcl2", float("nan")))
+        out[it] = {
+            "fsqr": r1 * fnorm * gcr2,
+            "fsqz": r1 * fnorm * gcz2,
+            "fsql": fnormL * gcl2,
+        }
+    return out
+
+
 def _parse_bsube_dump(path: Path) -> tuple[np.ndarray, np.ndarray]:
     ns = None
     ntheta = None
@@ -875,6 +982,9 @@ def main() -> None:
         help="Exit nonzero at the first mismatch beyond tolerances (default: True).",
     )
     args = p.parse_args()
+    vmec_fsq_dump: dict[int, dict[str, float]] = {}
+    jax_fsq_dump: dict[int, dict[str, float]] = {}
+    vmec_fsq1: dict[int, dict[str, float]] = {}
 
     root = Path(__file__).resolve().parents[2]
     if args.input is None:
@@ -949,6 +1059,8 @@ def main() -> None:
         vmec_env["VMEC_DUMP_TOMNSPS"] = "1"
         vmec_env["VMEC_DUMP_TOMNSPS_KERNELS"] = "1"
         vmec_env["VMEC_DUMP_SCALARS"] = "1"
+        vmec_env["VMEC_DUMP_GCX2"] = "1"
+        vmec_env["VMEC_DUMP_FSQ1"] = "1"
         vmec_env["VMEC_DUMP_GC"] = "1"
         vmec_env["VMEC_DUMP_GC_STAGE"] = "both"
         vmec_env["VMEC_DUMP_GC_DIR"] = str(vmec_dump_dir)
@@ -987,6 +1099,7 @@ def main() -> None:
         os.environ["VMEC_JAX_DUMP_TOMNSPS"] = "1"
         os.environ["VMEC_JAX_DUMP_FORCE_KERNELS"] = "1"
         os.environ["VMEC_JAX_DUMP_SCALARS"] = "1"
+        os.environ["VMEC_JAX_DUMP_GCX2"] = "1"
         os.environ["VMEC_JAX_DUMP_GC"] = "1"
         os.environ["VMEC_JAX_DUMP_GC_STAGE"] = "both"
         os.environ["VMEC_JAX_DUMP_GC_DIR"] = str(jax_dump_dir)
@@ -1016,6 +1129,16 @@ def main() -> None:
         jax_kernels = _collect_jax_force_kernels(jax_dump_dir)
         vmec_scalars = _collect_scalars_dumps(vmec_dump_dir)
         jax_scalars = _collect_scalars_dumps(jax_dump_dir)
+        vmec_gcx2 = _collect_gcx2_dumps(vmec_dump_dir)
+        jax_gcx2 = _collect_gcx2_dumps(jax_dump_dir)
+        vmec_fsq1 = _collect_fsq1_dumps(vmec_dump_dir)
+        if getattr(run, "static", None) is not None and getattr(run.static, "trig", None) is not None:
+            r0scale = float(run.static.trig.r0scale)
+        else:
+            r0scale = 1.0
+        r1 = 1.0 / (2.0 * r0scale) ** 2
+        vmec_fsq_dump = _compute_fsq_from_dumps(scalars=vmec_scalars, gcx2=vmec_gcx2, r1=r1)
+        jax_fsq_dump = _compute_fsq_from_dumps(scalars=jax_scalars, gcx2=jax_gcx2, r1=r1)
 
     # --- Report ---
     use_threed1 = bool(threed1_stages)
@@ -1071,7 +1194,10 @@ def main() -> None:
 
     print()
     if use_threed1:
-        print("Stage/iter comparison (VMEC2000 threed1 vs vmec_jax histories):")
+        if vmec_fsq_dump:
+            print("Stage/iter comparison (VMEC2000 fsq dumps + threed1 scalars vs vmec_jax histories):")
+        else:
+            print("Stage/iter comparison (VMEC2000 threed1 vs vmec_jax histories):")
         print(
             "  stage  it    fsqr(vmec)   fsqr(jax)    fsqz(vmec)   fsqz(jax)    fsql(vmec)   fsql(jax)  "
             "  fsqr1(vmec)  fsqr1(jax)   fsqz1(vmec)  fsqz1(jax)   fsql1(vmec)  fsql1(jax)   "
@@ -1119,30 +1245,47 @@ def main() -> None:
                 continue
             if use_threed1:
                 assert isinstance(row, Vmec2000Threed1Row)
+                vmec_fsqr = float(row.fsqr)
+                vmec_fsqz = float(row.fsqz)
+                vmec_fsql = float(row.fsql)
+                vmec_fsqr1 = float(row.fsqr1)
+                vmec_fsqz1 = float(row.fsqz1)
+                vmec_fsql1 = float(row.fsql1)
+                global_it = int(vmec_offsets[stage_i]) + int(row.it)
+                if vmec_fsq_dump and global_it in vmec_fsq_dump:
+                    dump_vals = vmec_fsq_dump[global_it]
+                    vmec_fsqr = float(dump_vals.get("fsqr", vmec_fsqr))
+                    vmec_fsqz = float(dump_vals.get("fsqz", vmec_fsqz))
+                    vmec_fsql = float(dump_vals.get("fsql", vmec_fsql))
+                if vmec_fsq1 and global_it in vmec_fsq1:
+                    dump_vals = vmec_fsq1[global_it]
+                    vmec_fsqr1 = float(dump_vals.get("fsqr1", vmec_fsqr1))
+                    vmec_fsqz1 = float(dump_vals.get("fsqz1", vmec_fsqz1))
+                    vmec_fsql1 = float(dump_vals.get("fsql1", vmec_fsql1))
                 print(
                     f"  {stage_i+1:>3d} {row.it:>4d}  "
-                    f"{row.fsqr:>11.3e} {fsqr[j] if j < fsqr.size else float('nan'):>11.3e}  "
-                    f"{row.fsqz:>11.3e} {fsqz[j] if j < fsqz.size else float('nan'):>11.3e}  "
-                    f"{row.fsql:>11.3e} {fsql[j] if j < fsql.size else float('nan'):>11.3e}  "
-                    f"{row.fsqr1:>11.3e} {fsqr1[j] if j < fsqr1.size else float('nan'):>11.3e}  "
-                    f"{row.fsqz1:>11.3e} {fsqz1[j] if j < fsqz1.size else float('nan'):>11.3e}  "
-                    f"{row.fsql1:>11.3e} {fsql1[j] if j < fsql1.size else float('nan'):>11.3e}  "
+                    f"{vmec_fsqr:>11.3e} {fsqr[j] if j < fsqr.size else float('nan'):>11.3e}  "
+                    f"{vmec_fsqz:>11.3e} {fsqz[j] if j < fsqz.size else float('nan'):>11.3e}  "
+                    f"{vmec_fsql:>11.3e} {fsql[j] if j < fsql.size else float('nan'):>11.3e}  "
+                    f"{vmec_fsqr1:>11.3e} {fsqr1[j] if j < fsqr1.size else float('nan'):>11.3e}  "
+                    f"{vmec_fsqz1:>11.3e} {fsqz1[j] if j < fsqz1.size else float('nan'):>11.3e}  "
+                    f"{vmec_fsql1:>11.3e} {fsql1[j] if j < fsql1.size else float('nan'):>11.3e}  "
                     f"{(row.delt0r if row.delt0r is not None else float('nan')):>11.3e} {delt[j] if j < delt.size else float('nan'):>11.3e}  "
                     f"{(row.r00 if row.r00 is not None else float('nan')):>11.3e} {r00[j] if j < r00.size else float('nan'):>11.3e}  "
                     f"{(row.w if row.w is not None else float('nan')):>11.3e} {w[j] if j < w.size else float('nan'):>11.3e}"
                 )
                 diff_rows.append((int(stage_i + 1), int(row.it)))
-                diff_cols_vmec["fsqr"].append(float(row.fsqr))
+                diff_cols_vmec["fsqr"].append(vmec_fsqr)
                 diff_cols_jax["fsqr"].append(float(fsqr[j]))
-                diff_cols_vmec["fsqz"].append(float(row.fsqz))
+                diff_cols_vmec["fsqz"].append(vmec_fsqz)
                 diff_cols_jax["fsqz"].append(float(fsqz[j]))
-                diff_cols_vmec["fsql"].append(float(row.fsql))
+                diff_cols_vmec["fsql"].append(vmec_fsql)
                 diff_cols_jax["fsql"].append(float(fsql[j]))
-                diff_cols_vmec["fsqr1"].append(float(row.fsqr1))
+                diff_cols_vmec["fsqr1"].append(vmec_fsqr1)
                 diff_cols_jax["fsqr1"].append(float(fsqr1[j] if j < fsqr1.size else float("nan")))
-                diff_cols_vmec["fsqz1"].append(float(row.fsqz1))
+                diff_cols_vmec["fsqz1"].append(vmec_fsqz1)
                 diff_cols_jax["fsqz1"].append(float(fsqz1[j] if j < fsqz1.size else float("nan")))
-                diff_cols_vmec["fsql1"].append(float(row.fsql1))
+                diff_cols_vmec["fsql1"].append(vmec_fsql1)
                 diff_cols_jax["fsql1"].append(float(fsql1[j] if j < fsql1.size else float("nan")))
                 diff_cols_vmec["delt0r"].append(float(row.delt0r if row.delt0r is not None else float("nan")))
                 diff_cols_jax["delt0r"].append(float(delt[j] if j < delt.size else float("nan")))
@@ -1153,12 +1296,12 @@ def main() -> None:
 
                 if bool(args.fail_fast):
                     pairs = [
-                        ("fsqr", float(row.fsqr), float(fsqr[j] if j < fsqr.size else float("nan"))),
-                        ("fsqz", float(row.fsqz), float(fsqz[j] if j < fsqz.size else float("nan"))),
-                        ("fsql", float(row.fsql), float(fsql[j] if j < fsql.size else float("nan"))),
-                        ("fsqr1", float(row.fsqr1), float(fsqr1[j] if j < fsqr1.size else float("nan"))),
-                        ("fsqz1", float(row.fsqz1), float(fsqz1[j] if j < fsqz1.size else float("nan"))),
-                        ("fsql1", float(row.fsql1), float(fsql1[j] if j < fsql1.size else float("nan"))),
+                        ("fsqr", vmec_fsqr, float(fsqr[j] if j < fsqr.size else float("nan"))),
+                        ("fsqz", vmec_fsqz, float(fsqz[j] if j < fsqz.size else float("nan"))),
+                        ("fsql", vmec_fsql, float(fsql[j] if j < fsql.size else float("nan"))),
+                        ("fsqr1", vmec_fsqr1, float(fsqr1[j] if j < fsqr1.size else float("nan"))),
+                        ("fsqz1", vmec_fsqz1, float(fsqz1[j] if j < fsqz1.size else float("nan"))),
+                        ("fsql1", vmec_fsql1, float(fsql1[j] if j < fsql1.size else float("nan"))),
                         ("delt0r", float(row.delt0r if row.delt0r is not None else float("nan")), float(delt[j] if j < delt.size else float("nan"))),
                         ("r00", float(row.r00 if row.r00 is not None else float("nan")), float(r00[j] if j < r00.size else float("nan"))),
                         ("wmhd", float(row.w if row.w is not None else float("nan")), float(w[j] if j < w.size else float("nan"))),
@@ -1182,7 +1325,10 @@ def main() -> None:
 
     if use_threed1 and diff_rows:
         print()
-        print("Diff summary (max abs / max rel vs VMEC2000 threed1):")
+        if vmec_fsq_dump:
+            print("Diff summary (max abs / max rel vs VMEC2000 fsq dumps + threed1):")
+        else:
+            print("Diff summary (max abs / max rel vs VMEC2000 threed1):")
         for name in ("fsqr", "fsqz", "fsql", "fsqr1", "fsqz1", "fsql1", "delt0r", "r00", "w"):
             v = np.asarray(diff_cols_vmec[name], dtype=float)
             jv = np.asarray(diff_cols_jax[name], dtype=float)
@@ -1295,6 +1441,26 @@ def main() -> None:
             vm = vmec_scalars[it]
             jx = jax_scalars[it]
             for name in ("wb", "wp", "volume", "r2", "fnorm", "fnormL"):
+                v = float(vm.get(name, float("nan")))
+                j = float(jx.get(name, float("nan")))
+                max_abs = abs(v - j)
+                max_rel = max_abs / max(abs(v), float(args.atol)) if np.isfinite(v) else float("nan")
+                print(f"  iter {it:03d} {name}: vmec={v:.6e} jax={j:.6e} abs={max_abs:.3e} rel={max_rel:.3e}")
+                if bool(args.fail_fast):
+                    tol = max(float(args.atol), float(args.rtol) * abs(v))
+                    if max_abs > tol:
+                        raise SystemExit(2)
+
+    if vmec_gcx2 or jax_gcx2:
+        print()
+        print("gcx2 parity (post-scalxc/m1 sums):")
+        common = sorted(set(vmec_gcx2.keys()) & set(jax_gcx2.keys()))
+        if not common:
+            print("  No overlapping gcx2 dump iterations found.")
+        for it in common:
+            vm = vmec_gcx2[it]
+            jx = jax_gcx2[it]
+            for name in ("gcr2", "gcz2", "gcl2"):
                 v = float(vm.get(name, float("nan")))
                 j = float(jx.get(name, float("nan")))
                 max_abs = abs(v - j)
