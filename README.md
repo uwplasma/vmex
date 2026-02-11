@@ -106,7 +106,7 @@ Iteration trace parity (VMEC2000 executable, reduced grid):
 Notes on the snapshot figures:
 
 - The residual trace overlay uses the **VMEC2000 executable** (`xvmec2000`) per-iteration `threed1.*` table (dashed line). If the executable is not available, the plot falls back to a flat reference line at final `fsq_total`.
-- The `|B|` LCFS panel uses the *same* vmecPlot2-style evaluation path for VMEC2000 and vmec_jax. Differences here reflect end-to-end solve mismatch (not a plotting artifact). For best parity, use the single-grid (`--single-ns 13`) snapshot.
+- The `|B|` LCFS panel uses the *same* vmecPlot2-style evaluation path for VMEC2000 and vmec_jax. Differences here reflect end-to-end solve mismatch (not a plotting artifact). For a fast single-grid parity check, use `--single-ns 13`.
 
 Reproduce scalar residual parity (`fsqr/fsqz/fsql`) on reference states:
 
