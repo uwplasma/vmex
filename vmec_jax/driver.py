@@ -145,9 +145,23 @@ def write_wout_from_fixed_boundary_run(
     path.parent.mkdir(parents=True, exist_ok=True)
 
     if include_fsq:
-        fsqr, fsqz, fsql = residual_scalars_from_state(
-            state=run.state, static=run.static, indata=run.indata, signgs=int(run.signgs), use_vmec_synthesis=True
-        )
+        fsqr = fsqz = fsql = None
+        res = getattr(run, "result", None)
+        if res is not None:
+            fsqr_hist = getattr(res, "fsqr2_history", None)
+            fsqz_hist = getattr(res, "fsqz2_history", None)
+            fsql_hist = getattr(res, "fsql2_history", None)
+            if fsqr_hist is not None and fsqz_hist is not None and fsql_hist is not None:
+                try:
+                    fsqr = float(np.asarray(fsqr_hist)[-1])
+                    fsqz = float(np.asarray(fsqz_hist)[-1])
+                    fsql = float(np.asarray(fsql_hist)[-1])
+                except Exception:
+                    fsqr = fsqz = fsql = None
+        if fsqr is None or fsqz is None or fsql is None:
+            fsqr, fsqz, fsql = residual_scalars_from_state(
+                state=run.state, static=run.static, indata=run.indata, signgs=int(run.signgs), use_vmec_synthesis=True
+            )
     else:
         fsqr = fsqz = fsql = 0.0
 
