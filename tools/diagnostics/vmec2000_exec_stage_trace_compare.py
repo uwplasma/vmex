@@ -77,6 +77,7 @@ _RE_GC = re.compile(r"gc_(raw|precond)_iter(\d+)\.dat$")
 _RE_TOMNSPS = re.compile(r"tomnsps_(raw|precond)?_?iter(\d+)\.dat$")
 _RE_TOMNSPS_KERNELS = re.compile(r"tomnsps_kernels_iter(\d+)\.dat$")
 _RE_FORCE_KERNELS = re.compile(r"force_kernels_(raw|precond)?_?iter(\d+)\.npz$")
+_RE_SCALARS = re.compile(r"scalars_iter(\d+)\.dat$")
 
 
 def _parse_vmec2000_stdout(text: str) -> list[Vmec2000PrintedStage]:
@@ -535,6 +536,48 @@ def _collect_jax_force_kernels(path: Path) -> dict[int, dict[str, np.ndarray]]:
     return out
 
 
+def _parse_scalars_dump(path: Path) -> dict[str, float]:
+    vals: list[float] = []
+    for line in path.read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("cols:"):
+            continue
+        toks = line.split()
+        if not toks:
+            continue
+        if toks[0].lstrip("+-").isdigit():
+            for t in toks[1:]:
+                vals.append(float(t.replace("D", "E").replace("d", "E")))
+            break
+    if len(vals) < 6:
+        raise ValueError(f"Malformed scalars dump: {path}")
+    # Order: wb wp volume r2 fnorm fnorm1 fnormL
+    out = {
+        "wb": float(vals[0]),
+        "wp": float(vals[1]),
+        "volume": float(vals[2]),
+        "r2": float(vals[3]),
+        "fnorm": float(vals[4]),
+        "fnorm1": float(vals[5]) if len(vals) > 5 else float("nan"),
+        "fnormL": float(vals[6]) if len(vals) > 6 else float("nan"),
+    }
+    return out
+
+
+def _collect_scalars_dumps(path: Path) -> dict[int, dict[str, float]]:
+    out: dict[int, dict[str, float]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("scalars_iter*.dat")):
+        m = _RE_SCALARS.search(p.name)
+        if not m:
+            continue
+        it = int(m.group(1))
+        out[it] = _parse_scalars_dump(p)
+    return out
+
+
 def _parse_bsube_dump(path: Path) -> tuple[np.ndarray, np.ndarray]:
     ns = None
     ntheta = None
@@ -905,6 +948,7 @@ def main() -> None:
         vmec_env["VMEC_DUMP_BSUBE"] = "1"
         vmec_env["VMEC_DUMP_TOMNSPS"] = "1"
         vmec_env["VMEC_DUMP_TOMNSPS_KERNELS"] = "1"
+        vmec_env["VMEC_DUMP_SCALARS"] = "1"
         vmec_env["VMEC_DUMP_GC"] = "1"
         vmec_env["VMEC_DUMP_GC_STAGE"] = "both"
         vmec_env["VMEC_DUMP_GC_DIR"] = str(vmec_dump_dir)
@@ -942,6 +986,7 @@ def main() -> None:
         os.environ["VMEC_JAX_DUMP_BSUBE"] = "1"
         os.environ["VMEC_JAX_DUMP_TOMNSPS"] = "1"
         os.environ["VMEC_JAX_DUMP_FORCE_KERNELS"] = "1"
+        os.environ["VMEC_JAX_DUMP_SCALARS"] = "1"
         os.environ["VMEC_JAX_DUMP_GC"] = "1"
         os.environ["VMEC_JAX_DUMP_GC_STAGE"] = "both"
         os.environ["VMEC_JAX_DUMP_GC_DIR"] = str(jax_dump_dir)
@@ -969,6 +1014,8 @@ def main() -> None:
         jax_tomnsps = _collect_jax_tomnsps_dumps(jax_dump_dir)
         vmec_kernels = _collect_vmec_tomnsps_kernels_dumps(vmec_dump_dir)
         jax_kernels = _collect_jax_force_kernels(jax_dump_dir)
+        vmec_scalars = _collect_scalars_dumps(vmec_dump_dir)
+        jax_scalars = _collect_scalars_dumps(jax_dump_dir)
 
     # --- Report ---
     use_threed1 = bool(threed1_stages)
@@ -1237,6 +1284,26 @@ def main() -> None:
                 tol_v = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_bsubv))))
                 if max_abs_u > tol_u or max_abs_v > tol_v:
                     raise SystemExit(2)
+
+    if vmec_scalars or jax_scalars:
+        print()
+        print("bcovar scalar parity (wb/wp/volume/r2/fnorm/fnormL):")
+        common = sorted(set(vmec_scalars.keys()) & set(jax_scalars.keys()))
+        if not common:
+            print("  No overlapping scalars dump iterations found.")
+        for it in common:
+            vm = vmec_scalars[it]
+            jx = jax_scalars[it]
+            for name in ("wb", "wp", "volume", "r2", "fnorm", "fnormL"):
+                v = float(vm.get(name, float("nan")))
+                j = float(jx.get(name, float("nan")))
+                max_abs = abs(v - j)
+                max_rel = max_abs / max(abs(v), float(args.atol)) if np.isfinite(v) else float("nan")
+                print(f"  iter {it:03d} {name}: vmec={v:.6e} jax={j:.6e} abs={max_abs:.3e} rel={max_rel:.3e}")
+                if bool(args.fail_fast):
+                    tol = max(float(args.atol), float(args.rtol) * abs(v))
+                    if max_abs > tol:
+                        raise SystemExit(2)
 
     if vmec_kernels or jax_kernels:
         print()

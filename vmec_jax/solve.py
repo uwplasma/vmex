@@ -204,6 +204,35 @@ def _maybe_dump_force_kernels(*, k, static, iter_idx: int, label: str = "raw") -
     )
 
 
+def _maybe_dump_scalars(*, norms, iter_idx: int) -> None:
+    env = os.getenv("VMEC_JAX_DUMP_SCALARS", "")
+    if not env or env == "0":
+        return
+    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
+    if iters is not None and int(iter_idx) not in iters:
+        return
+    outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    path = outdir / f"scalars_iter{int(iter_idx)}.dat"
+
+    wb = float(np.asarray(getattr(norms, "wb", np.nan)))
+    wp = float(np.asarray(getattr(norms, "wp", np.nan)))
+    volume = float(np.asarray(getattr(norms, "volume", np.nan)))
+    r2 = float(np.asarray(getattr(norms, "r2", np.nan)))
+    fnorm = float(np.asarray(getattr(norms, "fnorm", np.nan)))
+    fnormL = float(np.asarray(getattr(norms, "fnormL", np.nan)))
+    fnorm1 = float("nan")
+    with path.open("w") as f:
+        f.write("# bcovar scalars dump\n")
+        f.write("cols: iter wb wp vol r2 fnorm\n")
+        f.write("      fn1 fnL\n")
+        f.write(
+            f"{int(iter_idx):6d}"
+            f"{wb:24.16e}{wp:24.16e}{volume:24.16e}{r2:24.16e}"
+            f"{fnorm:24.16e}{fnorm1:24.16e}{fnormL:24.16e}\n"
+        )
+
+
 def _gc_from_frzl(*, frzl, cfg):
     frcc = np.asarray(frzl.frcc)
     ns, mpol, nrange = frcc.shape
@@ -2750,6 +2779,8 @@ def solve_fixed_boundary_residual_iter(
             norms = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
         else:
             norms = norms_override
+        if iter_idx is not None:
+            _maybe_dump_scalars(norms=norms, iter_idx=int(iter_idx))
         fsqr = norms.r1 * norms.fnorm * gcr2
         fsqz = norms.r1 * norms.fnorm * gcz2
         fsql = norms.fnormL * gcl2
