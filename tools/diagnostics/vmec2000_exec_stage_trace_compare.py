@@ -72,6 +72,9 @@ _RE_STAGE = re.compile(
 )
 _RE_ROW = re.compile(r"^\s*(\d+)\s+([0-9.DdEe+-]+)\s+([0-9.DdEe+-]+)\s+([0-9.DdEe+-]+)\s+")
 _RE_XC = re.compile(r"xc_.*_ns(\d+)_iter(\d+)\.dat$")
+_RE_BSUBE = re.compile(r"bsube_iter(\d+)\.dat$")
+_RE_GC = re.compile(r"gc_(raw|precond)_iter(\d+)\.dat$")
+_RE_TOMNSPS = re.compile(r"tomnsps_(raw|precond)?_?iter(\d+)\.dat$")
 
 
 def _parse_vmec2000_stdout(text: str) -> list[Vmec2000PrintedStage]:
@@ -231,6 +234,243 @@ def _collect_jax_xc_dumps(path: Path) -> dict[tuple[int, int], tuple[np.ndarray,
         else:
             raise KeyError(f"Missing v/xcdot in {p}")
         out[(ns, it)] = (np.asarray(data["xc"]), v)
+    return out
+
+
+def _parse_vmec_gc_dump(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Parse VMEC2000 gc dump (text) -> (gcr, gcz, gcl) with shape (ns, ntor+1, mpol1+1, ntmax)."""
+    ns = mpol1 = ntor = ntmax = None
+    rows: list[tuple[int, int, int, int, float, float, float]] = []
+    for line in path.read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("ns="):
+            ns = int(line.split("=", 1)[-1])
+            continue
+        if line.startswith("mpol1="):
+            mpol1 = int(line.split("=", 1)[-1])
+            continue
+        if line.startswith("ntor="):
+            ntor = int(line.split("=", 1)[-1])
+            continue
+        if line.startswith("ntmax="):
+            ntmax = int(line.split("=", 1)[-1])
+            continue
+        if line.startswith("columns:"):
+            continue
+        toks = line.split()
+        if len(toks) < 7:
+            continue
+        try:
+            js = int(toks[0])
+            m = int(toks[1])
+            n = int(toks[2])
+            t = int(toks[3])
+        except ValueError:
+            continue
+        gcr = float(toks[4].replace("D", "E").replace("d", "E"))
+        gcz = float(toks[5].replace("D", "E").replace("d", "E"))
+        gcl = float(toks[6].replace("D", "E").replace("d", "E"))
+        rows.append((js, m, n, t, gcr, gcz, gcl))
+
+    if ns is None or mpol1 is None or ntor is None or ntmax is None:
+        raise ValueError(f"Malformed gc dump: {path}")
+
+    gcr = np.zeros((ns, ntor + 1, mpol1 + 1, ntmax), dtype=float)
+    gcz = np.zeros_like(gcr)
+    gcl = np.zeros_like(gcr)
+    for js, m, n, t, vcr, vcz, vcl in rows:
+        gcr[js - 1, n, m, t - 1] = vcr
+        gcz[js - 1, n, m, t - 1] = vcz
+        gcl[js - 1, n, m, t - 1] = vcl
+    return gcr, gcz, gcl
+
+
+def _collect_vmec_gc_dumps(path: Path) -> dict[tuple[str, int], tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    out: dict[tuple[str, int], tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("gc_*_iter*.dat")):
+        m = _RE_GC.search(p.name)
+        if not m:
+            continue
+        stage = m.group(1)
+        it = int(m.group(2))
+        out[(stage, it)] = _parse_vmec_gc_dump(p)
+    return out
+
+
+def _collect_jax_gc_dumps(path: Path) -> dict[tuple[str, int], tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    out: dict[tuple[str, int], tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("gc_*_iter*.npz")):
+        m = _RE_GC.search(p.name.replace(".npz", ".dat"))
+        if not m:
+            continue
+        stage = m.group(1)
+        it = int(m.group(2))
+        data = np.load(p)
+        gcr = np.asarray(data["gcr"])
+        gcz = np.asarray(data["gcz"])
+        gcl = np.asarray(data["gcl"])
+        if gcr.ndim == 4:
+            gcr = np.transpose(gcr, (0, 2, 1, 3))
+            gcz = np.transpose(gcz, (0, 2, 1, 3))
+            gcl = np.transpose(gcl, (0, 2, 1, 3))
+        out[(stage, it)] = (gcr, gcz, gcl)
+    return out
+
+
+def _parse_vmec_tomnsps_dump(path: Path) -> dict[str, np.ndarray]:
+    """Parse VMEC2000 tomnsps dump (text) -> dict of blocks (ns, mpol1+1, ntor+1)."""
+    ns = mpol1 = ntor = None
+    rows: list[tuple[int, int, int, float, float, float, float, float, float]] = []
+    for line in path.read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("ns="):
+            ns = int(line.split("=", 1)[-1])
+            continue
+        if line.startswith("mpol1="):
+            mpol1 = int(line.split("=", 1)[-1])
+            continue
+        if line.startswith("ntor="):
+            ntor = int(line.split("=", 1)[-1])
+            continue
+        if line.startswith("columns:"):
+            continue
+        toks = line.split()
+        if len(toks) < 9:
+            continue
+        try:
+            js = int(toks[0])
+            m = int(toks[1])
+            n = int(toks[2])
+        except ValueError:
+            continue
+        vals = [float(t.replace("D", "E").replace("d", "E")) for t in toks[3:9]]
+        rows.append((js, m, n, *vals))
+
+    if ns is None or mpol1 is None or ntor is None:
+        raise ValueError(f"Malformed tomnsps dump: {path}")
+
+    shape = (ns, mpol1 + 1, ntor + 1)
+    frcc = np.zeros(shape, dtype=float)
+    frss = np.zeros(shape, dtype=float)
+    fzsc = np.zeros(shape, dtype=float)
+    fzcs = np.zeros(shape, dtype=float)
+    flsc = np.zeros(shape, dtype=float)
+    flcs = np.zeros(shape, dtype=float)
+    for js, m, n, v_frcc, v_frss, v_fzsc, v_fzcs, v_flsc, v_flcs in rows:
+        frcc[js - 1, m, n] = v_frcc
+        frss[js - 1, m, n] = v_frss
+        fzsc[js - 1, m, n] = v_fzsc
+        fzcs[js - 1, m, n] = v_fzcs
+        flsc[js - 1, m, n] = v_flsc
+        flcs[js - 1, m, n] = v_flcs
+    return {
+        "frcc": frcc,
+        "frss": frss,
+        "fzsc": fzsc,
+        "fzcs": fzcs,
+        "flsc": flsc,
+        "flcs": flcs,
+    }
+
+
+def _collect_vmec_tomnsps_dumps(path: Path) -> dict[int, dict[str, np.ndarray]]:
+    out: dict[int, dict[str, np.ndarray]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("tomnsps_iter*.dat")):
+        m = _RE_TOMNSPS.search(p.name)
+        if not m:
+            continue
+        it = int(m.group(2))
+        out[it] = _parse_vmec_tomnsps_dump(p)
+    return out
+
+
+def _collect_jax_tomnsps_dumps(path: Path) -> dict[int, dict[str, np.ndarray]]:
+    out: dict[int, dict[str, np.ndarray]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("tomnsps_raw_iter*.npz")):
+        m = _RE_TOMNSPS.search(p.name.replace(".npz", ".dat"))
+        if not m:
+            continue
+        it = int(m.group(2))
+        data = np.load(p)
+        frcc = np.asarray(data["frcc"])
+        shape = frcc.shape
+        def _block(name: str) -> np.ndarray:
+            arr = np.asarray(data[name])
+            if arr.size == 0:
+                return np.zeros(shape, dtype=frcc.dtype)
+            return arr
+        out[it] = {
+            "frcc": frcc,
+            "frss": _block("frss"),
+            "fzsc": _block("fzsc"),
+            "fzcs": _block("fzcs"),
+            "flsc": _block("flsc"),
+            "flcs": _block("flcs"),
+        }
+    return out
+
+
+def _parse_bsube_dump(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    ns = None
+    ntheta = None
+    nzeta = None
+    data: list[tuple[int, int, int, float, float]] = []
+    for line in path.read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("ns="):
+            ns = int(line.split("=", 1)[-1].strip())
+            continue
+        if line.startswith("ntheta3="):
+            ntheta = int(line.split("=", 1)[-1].strip())
+            continue
+        if line.startswith("nzeta="):
+            nzeta = int(line.split("=", 1)[-1].strip())
+            continue
+        if line.startswith("columns:"):
+            continue
+        toks = line.split()
+        if len(toks) < 5:
+            continue
+        try:
+            js = int(toks[0]) - 1
+            lt = int(toks[1]) - 1
+            lz = int(toks[2]) - 1
+        except ValueError:
+            continue
+        bsubu = float(toks[3].replace("D", "E").replace("d", "E"))
+        bsubv = float(toks[4].replace("D", "E").replace("d", "E"))
+        data.append((js, lt, lz, bsubu, bsubv))
+    if ns is None or ntheta is None or nzeta is None:
+        raise ValueError(f"Missing header fields in {path}")
+    bsubu_arr = np.zeros((ns, ntheta, nzeta), dtype=float)
+    bsubv_arr = np.zeros_like(bsubu_arr)
+    for js, lt, lz, bsubu, bsubv in data:
+        bsubu_arr[js, lt, lz] = bsubu
+        bsubv_arr[js, lt, lz] = bsubv
+    return bsubu_arr, bsubv_arr
+
+
+def _collect_bsube_dumps(path: Path) -> dict[int, tuple[np.ndarray, np.ndarray]]:
+    out: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("bsube_iter*.dat")):
+        m = _RE_BSUBE.search(p.name)
+        if not m:
+            continue
+        it = int(m.group(1))
+        out[it] = _parse_bsube_dump(p)
     return out
 
 
@@ -539,6 +779,11 @@ def main() -> None:
         vmec_env = os.environ.copy()
         vmec_env["VMEC_DUMP_XC"] = "1"
         vmec_env["VMEC_DUMP_DIR"] = str(vmec_dump_dir)
+        vmec_env["VMEC_DUMP_BSUBE"] = "1"
+        vmec_env["VMEC_DUMP_TOMNSPS"] = "1"
+        vmec_env["VMEC_DUMP_GC"] = "1"
+        vmec_env["VMEC_DUMP_GC_STAGE"] = "both"
+        vmec_env["VMEC_DUMP_GC_DIR"] = str(vmec_dump_dir)
         vmec_env.pop("VMEC_DUMP_XC_ITER", None)
         proc = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True, check=False, env=vmec_env)
         stdout = proc.stdout + "\n" + proc.stderr
@@ -570,6 +815,11 @@ def main() -> None:
         jax_env_backup = os.environ.copy()
         os.environ["VMEC_JAX_DUMP_XC"] = "1"
         os.environ["VMEC_JAX_DUMP_DIR"] = str(jax_dump_dir)
+        os.environ["VMEC_JAX_DUMP_BSUBE"] = "1"
+        os.environ["VMEC_JAX_DUMP_TOMNSPS"] = "1"
+        os.environ["VMEC_JAX_DUMP_GC"] = "1"
+        os.environ["VMEC_JAX_DUMP_GC_STAGE"] = "both"
+        os.environ["VMEC_JAX_DUMP_GC_DIR"] = str(jax_dump_dir)
         os.environ.pop("VMEC_JAX_DUMP_ITER", None)
         try:
             run = vj.run_fixed_boundary(
@@ -586,6 +836,12 @@ def main() -> None:
 
         vmec_xc = _collect_vmec_xc_dumps(vmec_dump_dir)
         jax_xc = _collect_jax_xc_dumps(jax_dump_dir)
+        vmec_bsube = _collect_bsube_dumps(vmec_dump_dir)
+        jax_bsube = _collect_bsube_dumps(jax_dump_dir)
+        vmec_gc = _collect_vmec_gc_dumps(vmec_dump_dir)
+        jax_gc = _collect_jax_gc_dumps(jax_dump_dir)
+        vmec_tomnsps = _collect_vmec_tomnsps_dumps(vmec_dump_dir)
+        jax_tomnsps = _collect_jax_tomnsps_dumps(jax_dump_dir)
 
     # --- Report ---
     use_threed1 = bool(threed1_stages)
@@ -816,6 +1072,70 @@ def main() -> None:
                 print(f"    v decode: {dec_v}")
             if bool(args.fail_fast) and (not ok_xc or not ok_v):
                 raise SystemExit(2)
+
+    if vmec_bsube or jax_bsube:
+        print()
+        print("bsube parity (VMEC2000 bcovar vs vmec_jax bcovar):")
+        common = sorted(set(vmec_bsube.keys()) & set(jax_bsube.keys()))
+        if not common:
+            print("  No overlapping bsube dump iterations found.")
+        for it in common:
+            vm_bsubu, vm_bsubv = vmec_bsube[it]
+            jx_bsubu, jx_bsubv = jax_bsube[it]
+            max_abs_u, max_rel_u, _ = _max_abs_rel_err(vm_bsubu.ravel(), jx_bsubu.ravel())
+            max_abs_v, max_rel_v, _ = _max_abs_rel_err(vm_bsubv.ravel(), jx_bsubv.ravel())
+            print(
+                f"  iter {it:03d}: bsubu max_abs={max_abs_u:.3e} max_rel={max_rel_u:.3e};"
+                f" bsubv max_abs={max_abs_v:.3e} max_rel={max_rel_v:.3e}"
+            )
+            if bool(args.fail_fast):
+                tol_u = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_bsubu))))
+                tol_v = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_bsubv))))
+                if max_abs_u > tol_u or max_abs_v > tol_v:
+                    raise SystemExit(2)
+
+    if vmec_tomnsps or jax_tomnsps:
+        print()
+        print("tomnsps parity (VMEC2000 vs vmec_jax raw blocks):")
+        common = sorted(set(vmec_tomnsps.keys()) & set(jax_tomnsps.keys()))
+        if not common:
+            print("  No overlapping tomnsps dump iterations found.")
+        for it in common:
+            vm = vmec_tomnsps[it]
+            jx = jax_tomnsps[it]
+            for name in ("frcc", "frss", "fzsc", "fzcs", "flsc", "flcs"):
+                v = np.asarray(vm[name]).ravel()
+                j = np.asarray(jx.get(name, np.zeros_like(vm[name]))).ravel()
+                max_abs, max_rel, _ = _max_abs_rel_err(v, j)
+                print(f"  iter {it:03d} {name}: max_abs={max_abs:.3e} max_rel={max_rel:.3e}")
+                if bool(args.fail_fast):
+                    tol = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(v))))
+                    if max_abs > tol:
+                        raise SystemExit(2)
+
+    if vmec_gc or jax_gc:
+        print()
+        print("gc parity (VMEC2000 residue vs vmec_jax gc dumps):")
+        common = sorted(set(vmec_gc.keys()) & set(jax_gc.keys()))
+        if not common:
+            print("  No overlapping gc dump iterations found.")
+        for stage, it in common:
+            vm_gcr, vm_gcz, vm_gcl = vmec_gc[(stage, it)]
+            jx_gcr, jx_gcz, jx_gcl = jax_gc[(stage, it)]
+            max_abs_r, max_rel_r, _ = _max_abs_rel_err(vm_gcr.ravel(), jx_gcr.ravel())
+            max_abs_z, max_rel_z, _ = _max_abs_rel_err(vm_gcz.ravel(), jx_gcz.ravel())
+            max_abs_l, max_rel_l, _ = _max_abs_rel_err(vm_gcl.ravel(), jx_gcl.ravel())
+            print(
+                f"  {stage} iter {it:03d}: gcr max_abs={max_abs_r:.3e} max_rel={max_rel_r:.3e};"
+                f" gcz max_abs={max_abs_z:.3e} max_rel={max_rel_z:.3e};"
+                f" gcl max_abs={max_abs_l:.3e} max_rel={max_rel_l:.3e}"
+            )
+            if bool(args.fail_fast):
+                tol_r = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_gcr))))
+                tol_z = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_gcz))))
+                tol_l = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_gcl))))
+                if max_abs_r > tol_r or max_abs_z > tol_z or max_abs_l > tol_l:
+                    raise SystemExit(2)
 
     if wout is not None:
         rmnc_err = _rel_rms(np.asarray(run.state.Rcos), np.asarray(wout.rmnc))

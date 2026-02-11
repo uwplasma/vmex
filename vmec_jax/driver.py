@@ -524,7 +524,7 @@ def run_fixed_boundary(
                     precond_lambda_alpha=0.5,
                     mode_diag_exponent=0.0,
                     auto_flip_force=False,
-                    divide_by_scalxc_for_update=True,
+                    divide_by_scalxc_for_update=False,
                     lambda_update_scale=1.0,
                     enforce_vmec_lambda_axis=True,
                     vmec2000_control=True,
