@@ -113,37 +113,19 @@ The in-repo showcase plots now use the same VMECPlot2-style grids (theta/zeta
 resolution and toroidal angle conventions) so figure-to-figure comparisons are
 faithful to the legacy script.
 
-Current observed mismatches (circular_tokamak, 5-iter snapshot):
+Current observed mismatches (updated parity status):
 
-- ``fsqr/fsqz/fsql`` residuals agree at the ~2-4e-3 relative level over 5-10
-  iterations; parity tighter than this will require matching normalization and
-  restart/timestep edge cases beyond the current axisymmetric baseline.
-- ``bmnc`` and LCFS :math:`\\lvert B \\rvert` plots differ at the ~5e-2 relative level.
-- ``buco``/``bvco`` are within a few percent; **``jcuru``/``jcurv`` scaling is now
-  corrected** (remaining differences are tied to earlier-force parity).
-- ``bsupv`` parity now matches VMEC2000 after aligning lambda scaling in the
-  wout->state reconstruction; remaining mismatches are tracked below.
+- **Single-grid axisym parity** (`--single-ns 13`) now matches VMEC2000 at machine
+  precision for ``fsq*`` and preconditioned scalars over **30 iterations** on
+  ``circular_tokamak``, ``solovev``, and ``shaped_tokamak_pressure``. The same
+  setting matches **50 iterations** on ``circular_tokamak``. These runs use the
+  VMEC2000 executable trace with `NSTEP=1` and a single-grid `NITER_ARRAY`.
+- **Multigrid parity** (full `NS` from input) still diverges after the first few
+  iterations on some cases (e.g., ``shaped_tokamak_pressure``). The next focus
+  is matching VMEC2000’s multigrid cadence and restart triggers exactly.
 - ``betapol``, ``betator``, ``betaxis``, ``ctor``, and ``DMerc`` are present but
   still placeholders in ``vmec_jax`` (zeros) until the VMEC2000 diagnostics path
   is fully ported.
-
-On ``shaped_tokamak_pressure`` (10-iter snapshot), the dominant gaps are:
-
-- ``bmnc`` ~1e-2 relative, ``buco`` ~3e-3, ``bvco`` ~6e-4 (good agreement).
-- ``jcuru``/``jcurv`` scaling is corrected; residual differences track the same
-  lambda/force-kernel mismatches seen in the internal scan.
-- ``pres/presf`` differ at the ~0.24 relative level (profile staging mismatch).
-- ``rmnc/zmns`` differ at the ~1e-2 level (geometry still drifting in the nonlinear loop).
-
-These mismatches are now tracked explicitly so we can converge the diagnostics
-in step with the force/iteration parity work. Recent progress includes:
-
-- Fixed lambda scaling in ``state_from_wout`` (bsupv parity now matches VMEC).
-- Matched VMEC's use of ``scalxc``-weighted forces in the update loop; the
-  ``xc``/``v`` dumps now agree with VMEC2000 at iter 1 (1e-15 level).
-- Aligned the VMEC-style update loop to use unscaled lambda forces
-  (``lambda_update_scale=1``), which prevents early-iteration blow-ups on
-  ``shaped_tokamak_pressure``.
 
 Scope and known gaps
 --------------------

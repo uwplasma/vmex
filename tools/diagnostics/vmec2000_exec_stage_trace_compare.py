@@ -1015,6 +1015,21 @@ def main() -> None:
         default=True,
         help="Exit nonzero at the first mismatch beyond tolerances (default: True).",
     )
+    p.add_argument(
+        "--dump-level",
+        choices=("full", "lite"),
+        default="full",
+        help=(
+            "Control VMEC2000 dump verbosity. "
+            "'full' enables all dumps; 'lite' keeps scalar/trace dumps only."
+        ),
+    )
+    p.add_argument(
+        "--vmec-timeout",
+        type=float,
+        default=None,
+        help="Timeout (seconds) for the VMEC2000 run. Default: no timeout.",
+    )
     args = p.parse_args()
     vmec_fsq_dump: dict[int, dict[str, float]] = {}
     jax_fsq_dump: dict[int, dict[str, float]] = {}
@@ -1087,19 +1102,31 @@ def main() -> None:
         input_local.write_text(_patch_indata(indata_text, updates=updates))
         cmd = [str(vmec2000_exe), input_local.name]
         vmec_env = os.environ.copy()
-        vmec_env["VMEC_DUMP_XC"] = "1"
         vmec_env["VMEC_DUMP_DIR"] = str(vmec_dump_dir)
-        vmec_env["VMEC_DUMP_BSUBE"] = "1"
-        vmec_env["VMEC_DUMP_TOMNSPS"] = "1"
-        vmec_env["VMEC_DUMP_TOMNSPS_KERNELS"] = "1"
         vmec_env["VMEC_DUMP_SCALARS"] = "1"
         vmec_env["VMEC_DUMP_GCX2"] = "1"
         vmec_env["VMEC_DUMP_FSQ1"] = "1"
-        vmec_env["VMEC_DUMP_GC"] = "1"
-        vmec_env["VMEC_DUMP_GC_STAGE"] = "both"
-        vmec_env["VMEC_DUMP_GC_DIR"] = str(vmec_dump_dir)
+        if args.dump_level == "full":
+            vmec_env["VMEC_DUMP_XC"] = "1"
+            vmec_env["VMEC_DUMP_BSUBE"] = "1"
+            vmec_env["VMEC_DUMP_TOMNSPS"] = "1"
+            vmec_env["VMEC_DUMP_TOMNSPS_KERNELS"] = "1"
+            vmec_env["VMEC_DUMP_GC"] = "1"
+            vmec_env["VMEC_DUMP_GC_STAGE"] = "both"
+            vmec_env["VMEC_DUMP_GC_DIR"] = str(vmec_dump_dir)
         vmec_env.pop("VMEC_DUMP_XC_ITER", None)
-        proc = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True, check=False, env=vmec_env)
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=workdir,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=vmec_env,
+                timeout=args.vmec_timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise SystemExit(f"VMEC2000 run timed out after {args.vmec_timeout}s") from exc
         stdout = proc.stdout + "\n" + proc.stderr
 
         stages = _parse_vmec2000_stdout(stdout)
