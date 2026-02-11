@@ -55,11 +55,20 @@ All of the following scripts are designed to run quickly on bundled data:
 
 - Runtime + residual benchmark for a fixed iteration budget (optional, communication-oriented)::
 
-    python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 5 --cases circular_tokamak --ns-override 9 --disable-jit --no-warmup
+    python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py \
+      --iters 5 \
+      --cases circular_tokamak shaped_tokamak_pressure solovev purely_toroidal_field \
+      --ns-override 7 \
+      --disable-jit --no-warmup
 
   To include the VMEC2000 executable (if built)::
 
-    python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 5 --cases circular_tokamak --ns-override 9 --disable-jit --no-warmup --run-vmec2000 --vmec2000-ns-override 9
+    python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py \
+      --iters 5 \
+      --cases circular_tokamak shaped_tokamak_pressure solovev purely_toroidal_field \
+      --ns-override 7 \
+      --disable-jit --no-warmup \
+      --run-vmec2000 --vmec2000-ns-override 7 --vmec2000-timeout 20
 
 The quick flags above keep runs under ~60s. Drop ``--disable-jit``/``--no-warmup`` and increase ``--iters``/``--cases`` for higher-fidelity traces.
 

@@ -44,14 +44,16 @@ JAX_DISABLE_JIT=1 python examples/showcase_axisym_input_to_wout.py \
 
 <table>
   <tr>
-    <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_surfaces.png" width="420" /></td>
-    <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_bmag_lcfs.png" width="420" /></td>
+    <td colspan="2"><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_surfaces.png" width="860" /></td>
   </tr>
   <tr>
-    <td colspan="2"><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_residual.png" width="860" /></td>
+    <td colspan="2"><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_bmag_lcfs.png" width="860" /></td>
   </tr>
   <tr>
     <td colspan="2"><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_lcfs_3d_bmag.png" width="860" /></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_residual.png" width="860" /></td>
   </tr>
 </table>
 
@@ -125,13 +127,22 @@ This is a quick sanity run (reduced cases and resolution). For a full parity sna
 This script compares a *fixed iteration budget* across `vmec_jax` and (optionally) the **VMEC2000 executable** (`xvmec2000`):
 
 ```bash
-python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 5 --cases circular_tokamak --ns-override 9 --disable-jit --no-warmup
+python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py \
+  --iters 5 \
+  --cases circular_tokamak shaped_tokamak_pressure solovev purely_toroidal_field \
+  --ns-override 7 \
+  --disable-jit --no-warmup
 ```
 
 To also run the external VMEC2000 executable (if built):
 
 ```bash
-python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py --iters 5 --cases circular_tokamak --ns-override 9 --disable-jit --no-warmup --run-vmec2000 --vmec2000-ns-override 9
+python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py \
+  --iters 5 \
+  --cases circular_tokamak shaped_tokamak_pressure solovev purely_toroidal_field \
+  --ns-override 7 \
+  --disable-jit --no-warmup \
+  --run-vmec2000 --vmec2000-ns-override 7 --vmec2000-timeout 20
 ```
 
 The quick settings above keep runs under ~60s. Drop `--disable-jit/--no-warmup` for performance-oriented timing.
@@ -140,6 +151,7 @@ The quick settings above keep runs under ~60s. Drop `--disable-jit/--no-warmup` 
   <tr>
     <td><img src="docs/_static/figures/bench_fixed_boundary_runtime.png" width="420" /></td>
     <td><img src="docs/_static/figures/bench_fixed_boundary_residual.png" width="420" /></td>
+    <td><img src="docs/_static/figures/bench_fixed_boundary_objective.png" width="420" /></td>
   </tr>
 </table>
 

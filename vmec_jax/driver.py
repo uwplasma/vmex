@@ -313,6 +313,8 @@ def run_fixed_boundary(
     # Stage-0 (coarsest) static + initial guess for VMEC sign convention.
     cfg0 = replace(cfg, ns=int(ns_stages[0]))
     static0 = build_static(cfg0, grid=grid)
+    # VMEC initializes the first (coarsest) stage directly from the boundary;
+    # finer stages are seeded via interp.f from the previous solve state.
     bdy = boundary_from_indata(indata, static0.modes)
     st0_coarse = initial_guess_from_boundary(static0, bdy, indata, vmec_project=vmec_project)
 

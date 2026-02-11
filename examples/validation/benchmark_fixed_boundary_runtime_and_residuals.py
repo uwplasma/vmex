@@ -238,6 +238,37 @@ def _plot_residuals(*, traces: list[RunTrace], outpath: Path) -> None:
     plt.close(fig)
 
 
+def _plot_objective(*, traces: list[RunTrace], outpath: Path) -> None:
+    plt = _import_matplotlib()
+    cases = sorted({t.case for t in traces})
+    preferred = ["vmec2000", "vmec_jax"]
+    present = sorted({t.backend for t in traces}, key=lambda b: (preferred.index(b) if b in preferred else 999, b))
+    backends = [b for b in preferred if b in present] + [b for b in present if b not in preferred]
+    data = {b: [] for b in backends}
+    for case in cases:
+        for b in backends:
+            t = next((x for x in traces if x.case == case and x.backend == b), None)
+            if t is None or t.fsq_total.size == 0:
+                data[b].append(np.nan)
+            else:
+                data[b].append(float(t.fsq_total[min(len(t.fsq_total), t.iters) - 1]))
+
+    x = np.arange(len(cases))
+    width = 0.8 / max(1, len(backends))
+    fig, ax = plt.subplots(figsize=(10, 3.8), constrained_layout=True)
+    for i, b in enumerate(backends):
+        ax.bar(x + (i - (len(backends) - 1) / 2.0) * width, data[b], width=width, label=b)
+    ax.set_xticks(x)
+    ax.set_xticklabels(cases, rotation=15, ha="right")
+    ax.set_yscale("log")
+    ax.set_ylabel("fsq_total (final, log scale)")
+    ax.set_title("Fixed-boundary objective after a fixed iteration budget")
+    ax.legend(ncols=3, frameon=False)
+    outpath.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(outpath, dpi=180)
+    plt.close(fig)
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument(
@@ -396,17 +427,21 @@ def main() -> None:
 
     fig_runtime = outdir / "bench_fixed_boundary_runtime.png"
     fig_resid = outdir / "bench_fixed_boundary_residual.png"
+    fig_obj = outdir / "bench_fixed_boundary_objective.png"
     _plot_runtime(traces=traces, outpath=fig_runtime)
     _plot_residuals(traces=traces, outpath=fig_resid)
+    _plot_objective(traces=traces, outpath=fig_obj)
 
     # Copy into docs for README embedding.
     docs_fig_dir = root / "docs" / "_static" / "figures"
     docs_fig_dir.mkdir(parents=True, exist_ok=True)
     (docs_fig_dir / fig_runtime.name).write_bytes(fig_runtime.read_bytes())
     (docs_fig_dir / fig_resid.name).write_bytes(fig_resid.read_bytes())
+    (docs_fig_dir / fig_obj.name).write_bytes(fig_obj.read_bytes())
 
     print(f"[bench] wrote: {fig_runtime}")
     print(f"[bench] wrote: {fig_resid}")
+    print(f"[bench] wrote: {fig_obj}")
     print(f"[bench] wrote: {outdir / 'bench_fixed_boundary.json'}")
 
 

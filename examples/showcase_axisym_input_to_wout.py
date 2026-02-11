@@ -100,52 +100,94 @@ def _write_plots(
     ax = np.atleast_1d(ax)
     zeta2d, theta2d = np.meshgrid(zeta_b, theta_b)
     b_levels = 20
-    if B_ref is not None:
-        b_min = float(np.min([B_ref.min(), B_new.min()]))
-        b_max = float(np.max([B_ref.max(), B_new.max()]))
-        levels = np.linspace(b_min, b_max, b_levels)
-        im_new = ax[-1].contourf(zeta2d, theta2d, B_new, levels=levels)
-    else:
-        im_new = ax[-1].contourf(zeta2d, theta2d, B_new, levels=b_levels)
+    im_new = ax[-1].contourf(zeta2d, theta2d, B_new, levels=b_levels)
     ax[-1].set_title("vmec_jax |B| (LCFS)")
+    im_ref = None
     if B_ref is not None:
-        im_ref = ax[0].contourf(zeta2d, theta2d, B_ref, levels=levels)
+        im_ref = ax[0].contourf(zeta2d, theta2d, B_ref, levels=b_levels)
         ax[0].set_title("VMEC2000 |B| (LCFS)")
+
+    def _fieldline(a, iota_val: float) -> None:
+        if iota_val > 0:
+            a.plot([0, zeta_b.max()], [0, zeta_b.max() * iota_val], "k")
+        else:
+            a.plot([0, zeta_b.max()], [-zeta_b.max() * iota_val, 0], "k")
+
     iota_new = float(np.asarray(wout_new.iotaf)[s_index_lcfs]) if hasattr(wout_new, "iotaf") else 0.0
-    for a in ax:
+    iota_ref = iota_new
+    if wout_ref is not None and hasattr(wout_ref, "iotaf"):
+        iota_ref = float(np.asarray(wout_ref.iotaf)[s_index_lcfs])
+    for i, a in enumerate(ax):
         a.set_xlabel("zeta")
         a.set_ylabel("theta")
-        if iota_new > 0:
-            a.plot([0, zeta_b.max()], [0, zeta_b.max() * iota_new], "k")
-        else:
-            a.plot([0, zeta_b.max()], [-zeta_b.max() * iota_new, 0], "k")
+        _fieldline(a, iota_ref if (im_ref is not None and i == 0) else iota_new)
         a.set_xlim([0, 2 * np.pi])
         a.set_ylim([0, 2 * np.pi])
-    if B_ref is not None:
+    if im_ref is not None:
         fig.colorbar(im_ref, ax=ax[0], shrink=0.85, pad=0.02)
     fig.colorbar(im_new, ax=ax[-1], shrink=0.85, pad=0.02)
     fig.savefig(outdir / "bmag_lcfs.png", dpi=180)
     plt.close(fig)
 
-    # 3) 3D LCFS surface colored by |B| (new wout, vmecPlot2 defaults).
+    # 3) 3D LCFS surface colored by |B| (vmecPlot2 defaults).
     th3, ph3, Rlcfs, Zlcfs, Blcfs = vj.vmecplot2_lcfs_3d_grid(wout_new, s_index=s_index_lcfs)
     X = Rlcfs * np.cos(ph3[None, :])
     Y = Rlcfs * np.sin(ph3[None, :])
-    B_rescaled = (Blcfs - Blcfs.min()) / max(float(np.ptp(Blcfs)), 1e-12)
-    fig = plt.figure(figsize=(6, 5))
-    fig.patch.set_facecolor("white")
-    ax3 = fig.add_subplot(111, projection="3d")
-    ax3.plot_surface(
-        X,
-        Y,
-        Zlcfs,
-        facecolors=plt.cm.jet(B_rescaled),
-        rstride=1,
-        cstride=1,
-        antialiased=False,
-        shade=True,
-    )
-    ax3.auto_scale_xyz([X.min(), X.max()], [X.min(), X.max()], [X.min(), X.max()])
+    B_ref_3d = None
+    if wout_ref is not None:
+        _th3r, ph3r, Rr, Zr, Br = vj.vmecplot2_lcfs_3d_grid(wout_ref, s_index=s_index_lcfs)
+        Xr = Rr * np.cos(ph3r[None, :])
+        Yr = Rr * np.sin(ph3r[None, :])
+        B_ref_3d = (Xr, Yr, Zr, Br)
+
+    if B_ref_3d is not None:
+        fig = plt.figure(figsize=(10, 5))
+        fig.patch.set_facecolor("white")
+        ax3_ref = fig.add_subplot(1, 2, 1, projection="3d")
+        ax3_new = fig.add_subplot(1, 2, 2, projection="3d")
+        Xr, Yr, Zr, Br = B_ref_3d
+        Br_rescaled = (Br - Br.min()) / max(float(Br.max() - Br.min()), 1e-12)
+        ax3_ref.plot_surface(
+            Xr,
+            Yr,
+            Zr,
+            facecolors=plt.cm.jet(Br_rescaled),
+            rstride=1,
+            cstride=1,
+            antialiased=False,
+            shade=False,
+        )
+        ax3_ref.auto_scale_xyz([Xr.min(), Xr.max()], [Xr.min(), Xr.max()], [Xr.min(), Xr.max()])
+        ax3_ref.set_title("VMEC2000 LCFS |B|")
+        Bl_rescaled = (Blcfs - Blcfs.min()) / max(float(Blcfs.max() - Blcfs.min()), 1e-12)
+        ax3_new.plot_surface(
+            X,
+            Y,
+            Zlcfs,
+            facecolors=plt.cm.jet(Bl_rescaled),
+            rstride=1,
+            cstride=1,
+            antialiased=False,
+            shade=False,
+        )
+        ax3_new.auto_scale_xyz([X.min(), X.max()], [X.min(), X.max()], [X.min(), X.max()])
+        ax3_new.set_title("vmec_jax LCFS |B|")
+    else:
+        fig = plt.figure(figsize=(6, 5))
+        fig.patch.set_facecolor("white")
+        ax3 = fig.add_subplot(111, projection="3d")
+        Bl_rescaled = (Blcfs - Blcfs.min()) / max(float(Blcfs.max() - Blcfs.min()), 1e-12)
+        ax3.plot_surface(
+            X,
+            Y,
+            Zlcfs,
+            facecolors=plt.cm.jet(Bl_rescaled),
+            rstride=1,
+            cstride=1,
+            antialiased=False,
+            shade=False,
+        )
+        ax3.auto_scale_xyz([X.min(), X.max()], [X.min(), X.max()], [X.min(), X.max()])
     fig.tight_layout()
     fig.savefig(outdir / "lcfs_3d_bmag.png", dpi=180)
     plt.close(fig)

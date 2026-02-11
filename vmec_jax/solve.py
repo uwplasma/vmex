@@ -98,7 +98,8 @@ def _maybe_dump_tomnsps(*, frzl, static, iter_idx: int, label: str = "raw") -> N
         return
     outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
-    path = outdir / f"tomnsps_{label}_iter{int(iter_idx)}.npz"
+    ns = int(static.cfg.ns)
+    path = outdir / f"tomnsps_{label}_ns{ns}_iter{int(iter_idx)}.npz"
 
     def _arr(x):
         return np.asarray(x) if x is not None else np.zeros((0,), dtype=float)
@@ -133,7 +134,8 @@ def _maybe_dump_force_kernels(*, k, static, iter_idx: int, label: str = "raw") -
         return
     outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
-    path = outdir / f"force_kernels_{label}_iter{int(iter_idx)}.npz"
+    ns = int(static.cfg.ns)
+    path = outdir / f"force_kernels_{label}_ns{ns}_iter{int(iter_idx)}.npz"
 
     def _arr(x):
         return np.asarray(x) if x is not None else np.zeros((0,), dtype=float)
@@ -204,7 +206,7 @@ def _maybe_dump_force_kernels(*, k, static, iter_idx: int, label: str = "raw") -
     )
 
 
-def _maybe_dump_scalars(*, norms, iter_idx: int) -> None:
+def _maybe_dump_scalars(*, norms, iter_idx: int, ns: int) -> None:
     env = os.getenv("VMEC_JAX_DUMP_SCALARS", "")
     if not env or env == "0":
         return
@@ -213,7 +215,7 @@ def _maybe_dump_scalars(*, norms, iter_idx: int) -> None:
         return
     outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
-    path = outdir / f"scalars_iter{int(iter_idx)}.dat"
+    path = outdir / f"scalars_ns{int(ns)}_iter{int(iter_idx)}.dat"
 
     wb = float(np.asarray(getattr(norms, "wb", np.nan)))
     wp = float(np.asarray(getattr(norms, "wp", np.nan)))
@@ -233,7 +235,7 @@ def _maybe_dump_scalars(*, norms, iter_idx: int) -> None:
         )
 
 
-def _maybe_dump_gcx2(*, gcr2, gcz2, gcl2, iter_idx: int, include_edge: bool) -> None:
+def _maybe_dump_gcx2(*, gcr2, gcz2, gcl2, iter_idx: int, include_edge: bool, ns: int) -> None:
     env = os.getenv("VMEC_JAX_DUMP_GCX2", "")
     if not env or env == "0":
         return
@@ -242,7 +244,7 @@ def _maybe_dump_gcx2(*, gcr2, gcz2, gcl2, iter_idx: int, include_edge: bool) -> 
         return
     outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
-    path = outdir / f"gcx2_iter{int(iter_idx)}.dat"
+    path = outdir / f"gcx2_ns{int(ns)}_iter{int(iter_idx)}.dat"
     with path.open("w") as f:
         f.write("# gcx2 dump (post-scalxc, post-m1)\n")
         f.write("columns: iter include_edge gcr2 gcz2 gcl2\n")
@@ -326,7 +328,8 @@ def _maybe_dump_gc(*, frzl, static, iter_idx: int, label: str) -> None:
 
     outdir = Path(os.getenv("VMEC_JAX_DUMP_GC_DIR", ".")).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
-    path = outdir / f"gc_{label}_iter{int(iter_idx)}.npz"
+    ns = int(static.cfg.ns)
+    path = outdir / f"gc_{label}_ns{ns}_iter{int(iter_idx)}.npz"
     gcr, gcz, gcl = _gc_from_frzl(frzl=frzl, cfg=static.cfg)
     np.savez(
         path,
@@ -350,7 +353,8 @@ def _maybe_dump_bsube(*, bc, static, iter_idx: int) -> None:
         return
     outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
-    path = outdir / f"bsube_iter{int(iter_idx)}.dat"
+    ns = int(static.cfg.ns)
+    path = outdir / f"bsube_ns{ns}_iter{int(iter_idx)}.dat"
 
     bsubu = np.asarray(bc.bsubu_e_scaled)
     bsubv = np.asarray(bc.bsubv_e_scaled)
@@ -1587,7 +1591,6 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
         lasym=bool(wout_like.lasym),
         dtype=jnp.asarray(state0.Rcos).dtype,
     )
-
     objective_scale_f = float(objective_scale) if objective_scale is not None else None
 
     constraint_tcon0: float | None = None
@@ -2563,6 +2566,12 @@ def solve_fixed_boundary_residual_iter(
         lasym=bool(wout_like.lasym),
         dtype=jnp.asarray(state0.Rcos).dtype,
     )
+    modes = static.modes
+    m_idx = jnp.asarray(modes.m, dtype=jnp.int32)
+    n_idx = jnp.asarray(modes.n, dtype=jnp.int32)
+    mscale = jnp.asarray(trig.mscale)
+    nscale = jnp.asarray(trig.nscale)
+    r00_scale = 1.0 / (mscale[m_idx] * nscale[jnp.abs(n_idx)])
     lambda_update_scale_j = jnp.asarray(lambda_update_scale, dtype=jnp.asarray(state0.Rcos).dtype)
 
     # VMEC stores physical Fourier coefficients in `xc`, but uses a `scalxc`
@@ -2803,13 +2812,14 @@ def solve_fixed_boundary_residual_iter(
                 gcl2=gcl2,
                 iter_idx=int(iter_idx),
                 include_edge=bool(include_edge),
+                ns=int(static.cfg.ns),
             )
         if norms_override is None:
             norms = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
         else:
             norms = norms_override
         if iter_idx is not None:
-            _maybe_dump_scalars(norms=norms, iter_idx=int(iter_idx))
+            _maybe_dump_scalars(norms=norms, iter_idx=int(iter_idx), ns=int(static.cfg.ns))
         fsqr = norms.r1 * norms.fnorm * gcr2
         fsqz = norms.r1 * norms.fnorm * gcz2
         fsql = norms.fnormL * gcl2
@@ -3242,7 +3252,9 @@ def solve_fixed_boundary_residual_iter(
         fsqr2_history.append(fsqr_f)
         fsqz2_history.append(fsqz_f)
         fsql2_history.append(fsql_f)
-        r00_val = float(np.sum(np.asarray(state.Rcos)[0, m0_mask]))
+        # VMEC printout uses r00 = r1(1,0): axis R at theta=0, zeta=0.
+        # Reproduce VMEC's internal scaling (mscale/nscale) for this evaluation.
+        r00_val = float(np.asarray(state.Rcos)[0] @ r00_scale)
         r00_history.append(r00_val)
         # `norms_used` may be cached (VMEC2000 `ns4=25` behavior). VMEC's
         # printed WMHD uses the *current* wb/wp from `funct3d`, not cached

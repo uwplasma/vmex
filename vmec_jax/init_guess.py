@@ -622,16 +622,14 @@ def initial_guess_from_boundary(
         axis_from_indata = bool(have_axis)
 
         if not have_axis:
-            if indata is None:
-                raxis_cc, zaxis_cs = _guess_axis_from_boundary(static, boundary_use)
-                raxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
-                zaxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
-            else:
-                raxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
-                raxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
-                zaxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
-                zaxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+            # VMEC treats zero/omitted axis arrays as "unspecified" and
+            # infers the axis from the boundary. Mirror that behavior so the
+            # first-stage (coarse) initialization matches vmec2000.
+            raxis_cc, zaxis_cs = _guess_axis_from_boundary(static, boundary_use)
+            raxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+            zaxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
             have_axis = True
+            axis_from_indata = False
 
         if have_axis:
             if raxis_cc is None:
