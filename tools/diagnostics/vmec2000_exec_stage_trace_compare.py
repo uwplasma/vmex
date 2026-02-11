@@ -674,9 +674,15 @@ def _offset_dump_keys(dumps: dict, *, offset: int) -> dict:
     return out
 
 
-def _merge_dump_dicts(d1: dict, d2: dict, *, offset: int) -> dict:
+def _merge_dump_dicts(d1: dict, d2: dict, *, offset: int, overwrite: bool = True) -> dict:
     out = dict(d1)
-    out.update(_offset_dump_keys(d2, offset=offset))
+    d2_shifted = _offset_dump_keys(d2, offset=offset)
+    if overwrite:
+        out.update(d2_shifted)
+    else:
+        for key, value in d2_shifted.items():
+            if key not in out:
+                out[key] = value
     return out
 
 
@@ -1276,7 +1282,7 @@ def main() -> None:
         wout = read_wout(wout_path) if wout_path.exists() else None
 
         # --- Run vmec_jax with VMEC-style multigrid staging ---
-        def _run_vmec_jax(*, dump_dir: Path, max_iter: int, restart_state=None, multigrid: bool | None = None):
+        def _run_vmec_jax(*, dump_dir: Path, max_iter: int, restart_state=None, restart_solver_state=None, multigrid: bool | None = None):
             jax_env_backup = os.environ.copy()
             os.environ["VMEC_JAX_DUMP_DIR"] = str(dump_dir)
             os.environ["VMEC_JAX_DUMP_SCALARS"] = "1"
@@ -1300,12 +1306,14 @@ def main() -> None:
                     verbose=False,
                     ns_override=int(args.single_ns) if args.single_ns is not None else None,
                     restart_state=restart_state,
+                    restart_solver_state=restart_solver_state,
                 )
             finally:
                 os.environ.clear()
                 os.environ.update(jax_env_backup)
 
         split_iter = int(args.split_iter)
+        resume_state = None
         use_split = split_iter > 0 and split_iter < int(args.max_iter)
         run2 = None
         if use_split:
@@ -1314,6 +1322,8 @@ def main() -> None:
             jax_dump_dir1.mkdir(parents=True, exist_ok=True)
             jax_dump_dir2.mkdir(parents=True, exist_ok=True)
             run1 = _run_vmec_jax(dump_dir=jax_dump_dir1, max_iter=int(split_iter), restart_state=None, multigrid=None)
+            if run1.result is not None:
+                resume_state = run1.result.diagnostics.get("resume_state")
             offset_iter = int(np.asarray(run1.result.w_history).size) if run1.result is not None else int(split_iter)
             remaining = int(args.max_iter) - int(offset_iter)
             if remaining > 0:
@@ -1321,6 +1331,7 @@ def main() -> None:
                     dump_dir=jax_dump_dir2,
                     max_iter=int(remaining),
                     restart_state=run1.state,
+                    restart_solver_state=resume_state,
                     multigrid=False,
                 )
             run = run1 if run2 is None else vj.FixedBoundaryRun(
@@ -1337,6 +1348,13 @@ def main() -> None:
             run = _run_vmec_jax(dump_dir=jax_dump_dir, max_iter=int(args.max_iter))
 
         vmec_xc = _collect_vmec_xc_dumps(vmec_dump_dir)
+        dump_offset = int(np.asarray(run1.result.w_history).size) if (use_split and run1 is not None and run1.result is not None) else int(split_iter)
+        dump_overwrite = True
+        if use_split and run2 is not None and resume_state is not None:
+            resume_offset = int(resume_state.get("iter_offset", 0))
+            if resume_offset > 0:
+                dump_offset = 0
+                dump_overwrite = False
         if use_split:
             jax_dump_dir_active = jax_dump_dir1
         else:
@@ -1345,7 +1363,8 @@ def main() -> None:
             jax_xc = _merge_dump_dicts(
                 _collect_jax_xc_dumps(jax_dump_dir1),
                 _collect_jax_xc_dumps(jax_dump_dir2),
-                offset=int(np.asarray(run1.result.w_history).size) if run1.result is not None else int(split_iter),
+                offset=dump_offset,
+                overwrite=dump_overwrite,
             )
         else:
             jax_xc = _collect_jax_xc_dumps(jax_dump_dir_active)
@@ -1354,7 +1373,8 @@ def main() -> None:
             jax_bsube = _merge_dump_dicts(
                 _collect_bsube_dumps(jax_dump_dir1),
                 _collect_bsube_dumps(jax_dump_dir2),
-                offset=int(np.asarray(run1.result.w_history).size) if run1.result is not None else int(split_iter),
+                offset=dump_offset,
+                overwrite=dump_overwrite,
             )
         else:
             jax_bsube = _collect_bsube_dumps(jax_dump_dir_active)
@@ -1363,7 +1383,8 @@ def main() -> None:
             jax_gc = _merge_dump_dicts(
                 _collect_jax_gc_dumps(jax_dump_dir1),
                 _collect_jax_gc_dumps(jax_dump_dir2),
-                offset=int(np.asarray(run1.result.w_history).size) if run1.result is not None else int(split_iter),
+                offset=dump_offset,
+                overwrite=dump_overwrite,
             )
         else:
             jax_gc = _collect_jax_gc_dumps(jax_dump_dir_active)
@@ -1372,7 +1393,8 @@ def main() -> None:
             jax_tomnsps = _merge_dump_dicts(
                 _collect_jax_tomnsps_dumps(jax_dump_dir1),
                 _collect_jax_tomnsps_dumps(jax_dump_dir2),
-                offset=int(np.asarray(run1.result.w_history).size) if run1.result is not None else int(split_iter),
+                offset=dump_offset,
+                overwrite=dump_overwrite,
             )
         else:
             jax_tomnsps = _collect_jax_tomnsps_dumps(jax_dump_dir_active)
@@ -1381,7 +1403,8 @@ def main() -> None:
             jax_kernels = _merge_dump_dicts(
                 _collect_jax_force_kernels(jax_dump_dir1),
                 _collect_jax_force_kernels(jax_dump_dir2),
-                offset=int(np.asarray(run1.result.w_history).size) if run1.result is not None else int(split_iter),
+                offset=dump_offset,
+                overwrite=dump_overwrite,
             )
         else:
             jax_kernels = _collect_jax_force_kernels(jax_dump_dir_active)
@@ -1390,7 +1413,8 @@ def main() -> None:
             jax_scalars = _merge_dump_dicts(
                 _collect_scalars_dumps(jax_dump_dir1),
                 _collect_scalars_dumps(jax_dump_dir2),
-                offset=int(np.asarray(run1.result.w_history).size) if run1.result is not None else int(split_iter),
+                offset=dump_offset,
+                overwrite=dump_overwrite,
             )
         else:
             jax_scalars = _collect_scalars_dumps(jax_dump_dir_active)
@@ -1399,7 +1423,8 @@ def main() -> None:
             jax_gcx2 = _merge_dump_dicts(
                 _collect_gcx2_dumps(jax_dump_dir1),
                 _collect_gcx2_dumps(jax_dump_dir2),
-                offset=int(np.asarray(run1.result.w_history).size) if run1.result is not None else int(split_iter),
+                offset=dump_offset,
+                overwrite=dump_overwrite,
             )
         else:
             jax_gcx2 = _collect_gcx2_dumps(jax_dump_dir_active)

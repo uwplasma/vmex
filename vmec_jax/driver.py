@@ -265,6 +265,7 @@ def run_fixed_boundary(
     ns_override: int | None = None,
     restart_state: any | None = None,
     restart_wout_path: str | Path | None = None,
+    restart_solver_state: dict | None = None,
 ):
     """Run a fixed-boundary vmec_jax solve with minimal boilerplate.
 
@@ -284,6 +285,11 @@ def run_fixed_boundary(
     restart_wout_path:
         If provided, load the `wout_*.nc` file and use its state as the initial
         condition (same effect as `restart_state`). This disables multigrid
+        staging.
+    restart_solver_state:
+        Optional solver-state dictionary returned by ``solve_fixed_boundary_residual_iter``
+        (``diagnostics["resume_state"]``). When supplied with ``solver="vmec2000_iter"``,
+        the time-step/momentum/preconditioner cache is resumed. This disables multigrid
         staging.
     vmec_project:
         If True (default), re-project the initial guess through the VMEC
@@ -321,6 +327,8 @@ def run_fixed_boundary(
     if multigrid is None:
         multigrid = solver_lower == "vmec2000_iter"
     if restart_state_eff is not None:
+        multigrid = False
+    if restart_solver_state is not None:
         multigrid = False
     multigrid = bool(multigrid) and (ns_override is None)
 
@@ -583,6 +591,7 @@ def run_fixed_boundary(
                     reference_mode=False,
                     use_restart_triggers=True if use_restart_triggers is None else bool(use_restart_triggers),
                     use_direct_fallback=False,
+                    resume_state=restart_solver_state,
                     verbose=bool(verbose),
                 )
             )
