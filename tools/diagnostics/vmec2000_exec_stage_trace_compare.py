@@ -25,6 +25,7 @@ from typing import TypeVar
 import numpy as np
 
 import vmec_jax.api as vj
+from vmec_jax.solve import SolveVmecResidualResult
 from vmec_jax.wout import read_wout
 
 
@@ -659,6 +660,70 @@ def _collect_fsq1_dumps(path: Path) -> dict[tuple[int | None, int], dict[str, fl
     return out
 
 
+def _offset_dump_keys(dumps: dict, *, offset: int) -> dict:
+    """Offset iteration index in dump dict keys by `offset`."""
+    if offset == 0:
+        return dumps
+    out: dict = {}
+    for key, val in dumps.items():
+        if not isinstance(key, tuple) or len(key) == 0:
+            out[key] = val
+            continue
+        *prefix, it = key
+        out[(*prefix, int(it) + int(offset))] = val
+    return out
+
+
+def _merge_dump_dicts(d1: dict, d2: dict, *, offset: int) -> dict:
+    out = dict(d1)
+    out.update(_offset_dump_keys(d2, offset=offset))
+    return out
+
+
+def _merge_vmec_results(res_a: SolveVmecResidualResult | None, res_b: SolveVmecResidualResult | None) -> SolveVmecResidualResult | None:
+    if res_a is None:
+        return res_b
+    if res_b is None:
+        return res_a
+
+    def _cat(a, b):
+        if a is None and b is None:
+            return np.zeros((0,), dtype=float)
+        a_arr = np.asarray(a) if a is not None else np.zeros((0,), dtype=float)
+        b_arr = np.asarray(b) if b is not None else np.zeros((0,), dtype=float)
+        if a_arr.ndim == 0:
+            a_arr = a_arr.reshape((1,))
+        if b_arr.ndim == 0:
+            b_arr = b_arr.reshape((1,))
+        return np.concatenate([a_arr, b_arr], axis=0)
+
+    diag = {}
+    keys = set(res_a.diagnostics.keys()) | set(res_b.diagnostics.keys())
+    for k in keys:
+        v1 = res_a.diagnostics.get(k)
+        v2 = res_b.diagnostics.get(k)
+        if k.startswith("multigrid_"):
+            diag[k] = v2 if v2 is not None else v1
+            continue
+        if isinstance(v1, (list, tuple, np.ndarray)) or isinstance(v2, (list, tuple, np.ndarray)):
+            diag[k] = _cat(v1, v2)
+        else:
+            diag[k] = v2 if v2 is not None else v1
+
+    w_history = _cat(res_a.w_history, res_b.w_history)
+    return SolveVmecResidualResult(
+        state=res_b.state,
+        n_iter=int(len(w_history) - 1),
+        w_history=w_history,
+        fsqr2_history=_cat(res_a.fsqr2_history, res_b.fsqr2_history),
+        fsqz2_history=_cat(res_a.fsqz2_history, res_b.fsqz2_history),
+        fsql2_history=_cat(res_a.fsql2_history, res_b.fsql2_history),
+        grad_rms_history=_cat(res_a.grad_rms_history, res_b.grad_rms_history),
+        step_history=_cat(res_a.step_history, res_b.step_history),
+        diagnostics=diag,
+    )
+
+
 def _compute_fsq_from_dumps(
     *,
     scalars: dict[tuple[int | None, int], dict[str, float]],
@@ -1021,6 +1086,12 @@ def main() -> None:
     p.add_argument("--vmec2000", type=str, default=None, help="Path to xvmec2000 executable.")
     p.add_argument("--max-iter", type=int, default=2, help="Total iteration budget for vmec_jax.")
     p.add_argument(
+        "--split-iter",
+        type=int,
+        default=0,
+        help="If >0, run vmec_jax in two phases (split_iter + remaining) with warm start.",
+    )
+    p.add_argument(
         "--vmec-nstep",
         type=int,
         default=1,
@@ -1205,45 +1276,133 @@ def main() -> None:
         wout = read_wout(wout_path) if wout_path.exists() else None
 
         # --- Run vmec_jax with VMEC-style multigrid staging ---
-        jax_env_backup = os.environ.copy()
-        os.environ["VMEC_JAX_DUMP_XC"] = "1"
-        os.environ["VMEC_JAX_DUMP_DIR"] = str(jax_dump_dir)
-        os.environ["VMEC_JAX_DUMP_BSUBE"] = "1"
-        os.environ["VMEC_JAX_DUMP_TOMNSPS"] = "1"
-        os.environ["VMEC_JAX_DUMP_FORCE_KERNELS"] = "1"
-        os.environ["VMEC_JAX_DUMP_SCALARS"] = "1"
-        os.environ["VMEC_JAX_DUMP_GCX2"] = "1"
-        os.environ["VMEC_JAX_DUMP_GC"] = "1"
-        os.environ["VMEC_JAX_DUMP_GC_STAGE"] = "both"
-        os.environ["VMEC_JAX_DUMP_GC_DIR"] = str(jax_dump_dir)
-        os.environ.pop("VMEC_JAX_DUMP_ITER", None)
-        try:
-            run = vj.run_fixed_boundary(
-                input_path,
-                solver="vmec2000_iter",
-                max_iter=int(args.max_iter),
-                multigrid_use_input_niter=bool(args.use_input_niter),
-                verbose=False,
-                ns_override=int(args.single_ns) if args.single_ns is not None else None,
+        def _run_vmec_jax(*, dump_dir: Path, max_iter: int, restart_state=None, multigrid: bool | None = None):
+            jax_env_backup = os.environ.copy()
+            os.environ["VMEC_JAX_DUMP_DIR"] = str(dump_dir)
+            os.environ["VMEC_JAX_DUMP_SCALARS"] = "1"
+            os.environ["VMEC_JAX_DUMP_GCX2"] = "1"
+            if args.dump_level == "full":
+                os.environ["VMEC_JAX_DUMP_XC"] = "1"
+                os.environ["VMEC_JAX_DUMP_BSUBE"] = "1"
+                os.environ["VMEC_JAX_DUMP_TOMNSPS"] = "1"
+                os.environ["VMEC_JAX_DUMP_FORCE_KERNELS"] = "1"
+                os.environ["VMEC_JAX_DUMP_GC"] = "1"
+                os.environ["VMEC_JAX_DUMP_GC_STAGE"] = "both"
+                os.environ["VMEC_JAX_DUMP_GC_DIR"] = str(dump_dir)
+            os.environ.pop("VMEC_JAX_DUMP_ITER", None)
+            try:
+                return vj.run_fixed_boundary(
+                    input_path,
+                    solver="vmec2000_iter",
+                    max_iter=int(max_iter),
+                    multigrid_use_input_niter=bool(args.use_input_niter),
+                    multigrid=multigrid,
+                    verbose=False,
+                    ns_override=int(args.single_ns) if args.single_ns is not None else None,
+                    restart_state=restart_state,
+                )
+            finally:
+                os.environ.clear()
+                os.environ.update(jax_env_backup)
+
+        split_iter = int(args.split_iter)
+        use_split = split_iter > 0 and split_iter < int(args.max_iter)
+        run2 = None
+        if use_split:
+            jax_dump_dir1 = jax_dump_dir / "phase1"
+            jax_dump_dir2 = jax_dump_dir / "phase2"
+            jax_dump_dir1.mkdir(parents=True, exist_ok=True)
+            jax_dump_dir2.mkdir(parents=True, exist_ok=True)
+            run1 = _run_vmec_jax(dump_dir=jax_dump_dir1, max_iter=int(split_iter), restart_state=None, multigrid=None)
+            offset_iter = int(np.asarray(run1.result.w_history).size) if run1.result is not None else int(split_iter)
+            remaining = int(args.max_iter) - int(offset_iter)
+            if remaining > 0:
+                run2 = _run_vmec_jax(
+                    dump_dir=jax_dump_dir2,
+                    max_iter=int(remaining),
+                    restart_state=run1.state,
+                    multigrid=False,
+                )
+            run = run1 if run2 is None else vj.FixedBoundaryRun(
+                cfg=run2.cfg,
+                indata=run2.indata,
+                static=run2.static,
+                state=run2.state,
+                result=_merge_vmec_results(run1.result, run2.result),
+                flux=run2.flux,
+                profiles=run2.profiles,
+                signgs=run2.signgs,
             )
-        finally:
-            os.environ.clear()
-            os.environ.update(jax_env_backup)
+        else:
+            run = _run_vmec_jax(dump_dir=jax_dump_dir, max_iter=int(args.max_iter))
 
         vmec_xc = _collect_vmec_xc_dumps(vmec_dump_dir)
-        jax_xc = _collect_jax_xc_dumps(jax_dump_dir)
+        if use_split:
+            jax_dump_dir_active = jax_dump_dir1
+        else:
+            jax_dump_dir_active = jax_dump_dir
+        if use_split and run2 is not None:
+            jax_xc = _merge_dump_dicts(
+                _collect_jax_xc_dumps(jax_dump_dir1),
+                _collect_jax_xc_dumps(jax_dump_dir2),
+                offset=int(np.asarray(run1.result.w_history).size) if run1.result is not None else int(split_iter),
+            )
+        else:
+            jax_xc = _collect_jax_xc_dumps(jax_dump_dir_active)
         vmec_bsube = _collect_bsube_dumps(vmec_dump_dir)
-        jax_bsube = _collect_bsube_dumps(jax_dump_dir)
+        if use_split and run2 is not None:
+            jax_bsube = _merge_dump_dicts(
+                _collect_bsube_dumps(jax_dump_dir1),
+                _collect_bsube_dumps(jax_dump_dir2),
+                offset=int(np.asarray(run1.result.w_history).size) if run1.result is not None else int(split_iter),
+            )
+        else:
+            jax_bsube = _collect_bsube_dumps(jax_dump_dir_active)
         vmec_gc = _collect_vmec_gc_dumps(vmec_dump_dir)
-        jax_gc = _collect_jax_gc_dumps(jax_dump_dir)
+        if use_split and run2 is not None:
+            jax_gc = _merge_dump_dicts(
+                _collect_jax_gc_dumps(jax_dump_dir1),
+                _collect_jax_gc_dumps(jax_dump_dir2),
+                offset=int(np.asarray(run1.result.w_history).size) if run1.result is not None else int(split_iter),
+            )
+        else:
+            jax_gc = _collect_jax_gc_dumps(jax_dump_dir_active)
         vmec_tomnsps = _collect_vmec_tomnsps_dumps(vmec_dump_dir)
-        jax_tomnsps = _collect_jax_tomnsps_dumps(jax_dump_dir)
+        if use_split and run2 is not None:
+            jax_tomnsps = _merge_dump_dicts(
+                _collect_jax_tomnsps_dumps(jax_dump_dir1),
+                _collect_jax_tomnsps_dumps(jax_dump_dir2),
+                offset=int(np.asarray(run1.result.w_history).size) if run1.result is not None else int(split_iter),
+            )
+        else:
+            jax_tomnsps = _collect_jax_tomnsps_dumps(jax_dump_dir_active)
         vmec_kernels = _collect_vmec_tomnsps_kernels_dumps(vmec_dump_dir)
-        jax_kernels = _collect_jax_force_kernels(jax_dump_dir)
+        if use_split and run2 is not None:
+            jax_kernels = _merge_dump_dicts(
+                _collect_jax_force_kernels(jax_dump_dir1),
+                _collect_jax_force_kernels(jax_dump_dir2),
+                offset=int(np.asarray(run1.result.w_history).size) if run1.result is not None else int(split_iter),
+            )
+        else:
+            jax_kernels = _collect_jax_force_kernels(jax_dump_dir_active)
         vmec_scalars = _collect_scalars_dumps(vmec_dump_dir)
-        jax_scalars = _collect_scalars_dumps(jax_dump_dir)
+        if use_split and run2 is not None:
+            jax_scalars = _merge_dump_dicts(
+                _collect_scalars_dumps(jax_dump_dir1),
+                _collect_scalars_dumps(jax_dump_dir2),
+                offset=int(np.asarray(run1.result.w_history).size) if run1.result is not None else int(split_iter),
+            )
+        else:
+            jax_scalars = _collect_scalars_dumps(jax_dump_dir_active)
         vmec_gcx2 = _collect_gcx2_dumps(vmec_dump_dir)
-        jax_gcx2 = _collect_gcx2_dumps(jax_dump_dir)
+        if use_split and run2 is not None:
+            jax_gcx2 = _merge_dump_dicts(
+                _collect_gcx2_dumps(jax_dump_dir1),
+                _collect_gcx2_dumps(jax_dump_dir2),
+                offset=int(np.asarray(run1.result.w_history).size) if run1.result is not None else int(split_iter),
+            )
+        else:
+            jax_gcx2 = _collect_gcx2_dumps(jax_dump_dir_active)
         vmec_fsq1 = _collect_fsq1_dumps(vmec_dump_dir)
         if getattr(run, "static", None) is not None and getattr(run.static, "trig", None) is not None:
             r0scale = float(run.static.trig.r0scale)
