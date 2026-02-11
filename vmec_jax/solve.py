@@ -291,6 +291,37 @@ def _maybe_dump_gc(*, frzl, static, iter_idx: int, label: str) -> None:
     )
 
 
+def _maybe_dump_bsube(*, bc, static, iter_idx: int) -> None:
+    env = os.getenv("VMEC_JAX_DUMP_BSUBE", "")
+    if not env or env == "0":
+        return
+    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
+    if iters is not None and int(iter_idx) not in iters:
+        return
+    outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    path = outdir / f"bsube_iter{int(iter_idx)}.dat"
+
+    bsubu = np.asarray(bc.bsubu_e_scaled)
+    bsubv = np.asarray(bc.bsubv_e_scaled)
+    ns, ntheta, nzeta = bsubu.shape
+
+    with path.open("w", encoding="utf-8") as f:
+        f.write("# bcovar bsube dump (scaled)\n")
+        f.write(f"ns={ns}\n")
+        f.write(f"ntheta3={ntheta}\n")
+        f.write(f"nzeta={nzeta}\n")
+        f.write(f"lamscale={float(np.asarray(bc.lamscale)):.16e}\n")
+        f.write("columns: js lt lz bsubu_e bsubv_e\n")
+        for lt in range(ntheta):
+            for lz in range(nzeta):
+                for js in range(ns):
+                    f.write(
+                        f"{js + 1:6d}{lt + 1:6d}{lz + 1:6d}"
+                        f"{bsubu[js, lt, lz]:24.16e}{bsubv[js, lt, lz]:24.16e}\n"
+                    )
+
+
 def _maybe_dump_xc(
     *,
     state: VMECState,
@@ -2668,6 +2699,8 @@ def solve_fixed_boundary_residual_iter(
             trig=trig,
             iter_idx=iter_idx,
         )
+        if iter_idx is not None:
+            _maybe_dump_bsube(bc=k.bc, static=static, iter_idx=int(iter_idx))
         if iter_idx is not None:
             _maybe_dump_force_kernels(k=k, static=static, iter_idx=int(iter_idx), label="raw")
         frzl = vmec_residual_internal_from_kernels(

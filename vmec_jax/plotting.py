@@ -360,9 +360,9 @@ def vmecplot2_bmag_grid(
     ntheta: int = 30,
     nzeta: int = 65,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return (theta, zeta, |B|) on a grid matching vmecPlot2.py defaults.
+    """Return (theta, zeta, B) on a grid matching vmecPlot2.py defaults.
 
-    vmecPlot2 uses physical toroidal angle zeta in [0, 2π) for |B| contours and
+    vmecPlot2 uses physical toroidal angle zeta in [0, 2π) for B-magnitude contours and
     evaluates Nyquist bmnc/bmns with phase = m*theta - xn*zeta.
     """
     theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta))
@@ -395,7 +395,7 @@ def vmecplot2_lcfs_3d_grid(
     ntheta: int = 80,
     nzeta: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Return (theta, phi, R, Z, |B|) grids matching vmecPlot2.py 3D defaults."""
+    """Return (theta, phi, R, Z, B) grids matching vmecPlot2.py 3D defaults."""
     if nzeta is None:
         nzeta = int(150 * int(wout.nfp))
     theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta))

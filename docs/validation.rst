@@ -119,7 +119,7 @@ Current observed mismatches (circular_tokamak, 5-iter snapshot):
   still placeholders in ``vmec_jax`` (zeros) until the VMEC2000 diagnostics path
   is fully ported.
 
-On ``shaped_tokamak_pressure`` (20-iter snapshot), the dominant gaps are:
+On ``shaped_tokamak_pressure`` (10-iter snapshot), the dominant gaps are:
 
 - ``bmnc`` ~1e-2 relative, ``buco`` ~3e-3, ``bvco`` ~6e-4 (good agreement).
 - ``jcuru``/``jcurv`` scaling is corrected; residual differences track the same
@@ -131,6 +131,8 @@ These mismatches are now tracked explicitly so we can converge the diagnostics
 in step with the force/iteration parity work. Recent progress includes:
 
 - Fixed lambda scaling in ``state_from_wout`` (bsupv parity now matches VMEC).
+- Matched VMEC's use of ``scalxc``-weighted forces in the update loop; the
+  ``xc``/``v`` dumps now agree with VMEC2000 at iter 1 (1e-15 level).
 - Aligned the VMEC-style update loop to use unscaled lambda forces
   (``lambda_update_scale=1``), which prevents early-iteration blow-ups on
   ``shaped_tokamak_pressure``.
