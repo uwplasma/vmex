@@ -1174,6 +1174,8 @@ def main() -> None:
         delt = np.asarray(diag.get("time_step_history", np.zeros((0,), dtype=float)), dtype=float)
     r00 = np.asarray(diag.get("r00_history", np.zeros((0,), dtype=float)), dtype=float)
     w = np.asarray(diag.get("w_vmec_history", np.zeros((0,), dtype=float)), dtype=float)
+    include_edge_hist = np.asarray(diag.get("include_edge_history", np.zeros((0,), dtype=int)), dtype=int)
+    zero_m1_hist = np.asarray(diag.get("zero_m1_history", np.zeros((0,), dtype=int)), dtype=int)
 
     if isinstance(diag, dict) and diag:
         bcovar_hist = np.asarray(diag.get("bcovar_update_history", np.zeros((0,), dtype=int)), dtype=int)
@@ -1470,6 +1472,31 @@ def main() -> None:
                     tol = max(float(args.atol), float(args.rtol) * abs(v))
                     if max_abs > tol:
                         raise SystemExit(2)
+
+    if vmec_gcx2 and (include_edge_hist.size or zero_m1_hist.size):
+        print()
+        print("gating parity (include_edge / zero_m1):")
+        for it in sorted(vmec_gcx2.keys()):
+            idx = it - 1
+            if idx < 0:
+                continue
+            if include_edge_hist.size:
+                vm_edge = int(round(float(vmec_gcx2[it].get("include_edge", 0.0))))
+                jx_edge = int(include_edge_hist[idx]) if idx < include_edge_hist.size else -1
+                print(f"  iter {it:03d} include_edge: vmec={vm_edge} jax={jx_edge}")
+                if bool(args.fail_fast) and (jx_edge >= 0) and (vm_edge != jx_edge):
+                    raise SystemExit(2)
+            if zero_m1_hist.size and vmec_fsq_dump:
+                if it < 2:
+                    vm_zero_m1 = 1
+                else:
+                    prev = vmec_fsq_dump.get(it - 1, {})
+                    fsqz_prev = float(prev.get("fsqz", 0.0))
+                    vm_zero_m1 = 1 if fsqz_prev < 1.0e-6 else 0
+                jx_zero_m1 = int(zero_m1_hist[idx]) if idx < zero_m1_hist.size else -1
+                print(f"  iter {it:03d} zero_m1: vmec={vm_zero_m1} jax={jx_zero_m1}")
+                if bool(args.fail_fast) and (jx_zero_m1 >= 0) and (vm_zero_m1 != jx_zero_m1):
+                    raise SystemExit(2)
 
     if vmec_kernels or jax_kernels:
         print()
