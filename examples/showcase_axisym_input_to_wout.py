@@ -203,6 +203,12 @@ def main() -> None:
     )
     p.add_argument("--max-iter", type=int, default=10)
     p.add_argument(
+        "--single-ns",
+        type=int,
+        default=None,
+        help="Run a single-grid parity pass at this NS (overrides NS_ARRAY/NITER_ARRAY).",
+    )
+    p.add_argument(
         "--verbose",
         default=True,
         action=argparse.BooleanOptionalAction,
@@ -261,20 +267,24 @@ def main() -> None:
         outdir.mkdir(parents=True, exist_ok=True)
 
         cfg, indata = vj.load_input(input_path)
+        use_input_niter = bool(args.use_input_niter) if args.single_ns is None else False
+        ns_override = int(args.single_ns) if args.single_ns is not None else None
         print(f"[vmec_jax] running case={case} solver={args.solver} max_iter={args.max_iter}", flush=True)
         run = vj.run_fixed_boundary(
             input_path,
             solver=str(args.solver),
             max_iter=int(args.max_iter),
-            multigrid_use_input_niter=bool(args.use_input_niter),
+            multigrid_use_input_niter=use_input_niter,
             use_initial_guess=bool(args.no_solve),
             verbose=bool(args.verbose),
+            ns_override=ns_override,
         )
         out_wout_path = outdir / f"wout_{case}_vmec_jax.nc"
         vj.write_wout_from_fixed_boundary_run(out_wout_path, run, include_fsq=True)
         wout_new = vj.load_wout(out_wout_path)
 
-        wout_ref = vj.load_wout(ref_wout_path) if ref_wout_path.exists() else None
+        wout_ref = vj.load_wout(ref_wout_path) if (args.single_ns is None and ref_wout_path.exists()) else None
+        wout_ref_exec = None
         print(f"[vmec_jax] wrote wout: {out_wout_path}")
         if wout_ref is not None:
             fsq_ref = float(wout_ref.fsqr + wout_ref.fsqz + wout_ref.fsql)
@@ -286,14 +296,32 @@ def main() -> None:
         if (not args.no_vmec2000_trace) and (find_vmec2000_exec() is not None):
             try:
                 print(f"[vmec2000] running xvmec2000 (timeout={args.vmec2000_timeout}s)", flush=True)
+                indata_updates = {"NSTEP": str(int(args.vmec2000_nstep))}
+                if args.single_ns is not None:
+                    ftol = float(indata.get_float("FTOL", 1e-10))
+                    ns = int(args.single_ns)
+                    indata_updates |= {
+                        "NS_ARRAY": f"{ns}",
+                        "NITER_ARRAY": f"{int(args.max_iter)}",
+                        "FTOL_ARRAY": f"{ftol:.16e}",
+                        "NITER": f"{int(args.max_iter)}",
+                    }
                 exec_res = run_xvmec2000(
                     input_path=input_path,
                     timeout_s=float(args.vmec2000_timeout),
-                    indata_updates={"NSTEP": str(int(args.vmec2000_nstep))},
+                    indata_updates=indata_updates,
+                    keep_workdir=True,
                 )
                 vmec2000_trace = threed1_fsq_total(flatten_threed1(exec_res.stages))
                 if vmec2000_trace.size > 0:
                     print(f"[vmec2000] trace entries: {vmec2000_trace.size}")
+                if args.single_ns is not None:
+                    wout_candidates = sorted(exec_res.workdir.glob("wout_*"))
+                    if wout_candidates:
+                        try:
+                            wout_ref_exec = vj.load_wout(wout_candidates[0])
+                        except Exception as exc:
+                            print(f"[vmec2000] wout load failed: {exc}")
             except Exception as exc:
                 print(f"[vmec2000] trace failed: {exc}")
 
@@ -301,7 +329,7 @@ def main() -> None:
             outdir=outdir,
             run=run,
             wout_new=wout_new,
-            wout_ref=wout_ref,
+            wout_ref=wout_ref_exec if wout_ref_exec is not None else wout_ref,
             indata=indata,
             vmec2000_fsq_total=vmec2000_trace,
         )
