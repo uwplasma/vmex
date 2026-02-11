@@ -99,10 +99,17 @@ def _write_plots(
     fig, ax = plt.subplots(1, 2 if B_ref is not None else 1, figsize=(10, 4), constrained_layout=True)
     ax = np.atleast_1d(ax)
     zeta2d, theta2d = np.meshgrid(zeta_b, theta_b)
-    im_new = ax[-1].contourf(zeta2d, theta2d, B_new, levels=20)
+    b_levels = 20
+    if B_ref is not None:
+        b_min = float(np.min([B_ref.min(), B_new.min()]))
+        b_max = float(np.max([B_ref.max(), B_new.max()]))
+        levels = np.linspace(b_min, b_max, b_levels)
+        im_new = ax[-1].contourf(zeta2d, theta2d, B_new, levels=levels)
+    else:
+        im_new = ax[-1].contourf(zeta2d, theta2d, B_new, levels=b_levels)
     ax[-1].set_title("vmec_jax |B| (LCFS)")
     if B_ref is not None:
-        im_ref = ax[0].contourf(zeta2d, theta2d, B_ref, levels=20)
+        im_ref = ax[0].contourf(zeta2d, theta2d, B_ref, levels=levels)
         ax[0].set_title("VMEC2000 |B| (LCFS)")
     iota_new = float(np.asarray(wout_new.iotaf)[s_index_lcfs]) if hasattr(wout_new, "iotaf") else 0.0
     for a in ax:

@@ -334,6 +334,8 @@ def bmag_from_wout(
     basis = _basis_from_wout(wout, theta, zeta, nyq=True, physical=False)
     bmnc = np.asarray(wout.bmnc)
     bmns = np.asarray(getattr(wout, "bmns", np.zeros_like(bmnc)))
+    if not bool(getattr(wout, "lasym", False)):
+        bmns = np.zeros_like(bmnc)
     B = np.asarray(eval_fourier(bmnc[s_index], bmns[s_index], basis))
     return B
 
@@ -349,6 +351,8 @@ def bmag_from_wout_physical(
     basis = _basis_from_wout(wout, theta, phi, nyq=True, physical=True)
     bmnc = np.asarray(wout.bmnc)
     bmns = np.asarray(getattr(wout, "bmns", np.zeros_like(bmnc)))
+    if not bool(getattr(wout, "lasym", False)):
+        bmns = np.zeros_like(bmnc)
     B = np.asarray(eval_fourier(bmnc[s_index], bmns[s_index], basis))
     return B
 
@@ -360,14 +364,18 @@ def vmecplot2_bmag_grid(
     ntheta: int = 30,
     nzeta: int = 65,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return (theta, zeta, B) on a grid matching vmecPlot2.py defaults.
-
-    vmecPlot2 uses physical toroidal angle zeta in [0, 2π) for B-magnitude contours and
-    evaluates Nyquist bmnc/bmns with phase = m*theta - xn*zeta.
-    """
+    """Return (theta, zeta, B) on a grid matching vmecPlot2.py defaults."""
     theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta))
     zeta = np.linspace(0.0, 2.0 * np.pi, int(nzeta))
-    B = bmag_from_wout_physical(wout, theta=theta, phi=zeta, s_index=int(s_index))
+    zeta2d, theta2d = np.meshgrid(zeta, theta)
+    xm_nyq = np.asarray(wout.xm_nyq, dtype=float)
+    xn_nyq = np.asarray(wout.xn_nyq, dtype=float)
+    bmnc = np.asarray(wout.bmnc, dtype=float)[int(s_index)]
+    bmns = np.asarray(getattr(wout, "bmns", np.zeros_like(wout.bmnc)), dtype=float)[int(s_index)]
+    if not bool(getattr(wout, "lasym", False)):
+        bmns = np.zeros_like(bmns)
+    angle = xm_nyq[:, None, None] * theta2d[None, :, :] - xn_nyq[:, None, None] * zeta2d[None, :, :]
+    B = np.tensordot(bmnc, np.cos(angle), axes=(0, 0)) + np.tensordot(bmns, np.sin(angle), axes=(0, 0))
     return theta, zeta, np.asarray(B)
 
 
@@ -378,13 +386,19 @@ def vmecplot2_surface_grid(
     ntheta: int = 200,
     nzeta: int = 8,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Return (theta, zeta, R, Z) grids matching vmecPlot2.py surface defaults.
-
-    vmecPlot2 evaluates surfaces over one field period: zeta in [0, 2π/nfp).
-    """
+    """Return (theta, zeta, R, Z) grids matching vmecPlot2.py surface defaults."""
     theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta))
     zeta = np.linspace(0.0, 2.0 * np.pi / float(wout.nfp), int(nzeta), endpoint=False)
-    R, Z = surface_rz_from_wout_physical(wout, theta=theta, phi=zeta, s_index=int(s_index), nyq=False)
+    zeta2d, theta2d = np.meshgrid(zeta, theta)
+    xm = np.asarray(wout.xm, dtype=float)
+    xn = np.asarray(wout.xn, dtype=float)
+    rmnc = np.asarray(wout.rmnc, dtype=float)[int(s_index)]
+    rmns = np.asarray(getattr(wout, "rmns", np.zeros_like(wout.rmnc)), dtype=float)[int(s_index)]
+    zmns = np.asarray(wout.zmns, dtype=float)[int(s_index)]
+    zmnc = np.asarray(getattr(wout, "zmnc", np.zeros_like(wout.zmns)), dtype=float)[int(s_index)]
+    angle = xm[:, None, None] * theta2d[None, :, :] - xn[:, None, None] * zeta2d[None, :, :]
+    R = np.tensordot(rmnc, np.cos(angle), axes=(0, 0)) + np.tensordot(rmns, np.sin(angle), axes=(0, 0))
+    Z = np.tensordot(zmns, np.sin(angle), axes=(0, 0)) + np.tensordot(zmnc, np.cos(angle), axes=(0, 0))
     return theta, zeta, np.asarray(R), np.asarray(Z)
 
 
@@ -400,8 +414,26 @@ def vmecplot2_lcfs_3d_grid(
         nzeta = int(150 * int(wout.nfp))
     theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta))
     phi = np.linspace(0.0, 2.0 * np.pi, int(nzeta))
-    R, Z = surface_rz_from_wout_physical(wout, theta=theta, phi=phi, s_index=int(s_index), nyq=False)
-    B = bmag_from_wout_physical(wout, theta=theta, phi=phi, s_index=int(s_index))
+    phi2d, theta2d = np.meshgrid(phi, theta)
+    xm = np.asarray(wout.xm, dtype=float)
+    xn = np.asarray(wout.xn, dtype=float)
+    xm_nyq = np.asarray(wout.xm_nyq, dtype=float)
+    xn_nyq = np.asarray(wout.xn_nyq, dtype=float)
+    rmnc = np.asarray(wout.rmnc, dtype=float)[int(s_index)]
+    rmns = np.asarray(getattr(wout, "rmns", np.zeros_like(wout.rmnc)), dtype=float)[int(s_index)]
+    zmns = np.asarray(wout.zmns, dtype=float)[int(s_index)]
+    zmnc = np.asarray(getattr(wout, "zmnc", np.zeros_like(wout.zmns)), dtype=float)[int(s_index)]
+    bmnc = np.asarray(wout.bmnc, dtype=float)[int(s_index)]
+    bmns = np.asarray(getattr(wout, "bmns", np.zeros_like(wout.bmnc)), dtype=float)[int(s_index)]
+    if not bool(getattr(wout, "lasym", False)):
+        bmns = np.zeros_like(bmns)
+
+    angle = xm[:, None, None] * theta2d[None, :, :] - xn[:, None, None] * phi2d[None, :, :]
+    R = np.tensordot(rmnc, np.cos(angle), axes=(0, 0)) + np.tensordot(rmns, np.sin(angle), axes=(0, 0))
+    Z = np.tensordot(zmns, np.sin(angle), axes=(0, 0)) + np.tensordot(zmnc, np.cos(angle), axes=(0, 0))
+
+    angle_b = xm_nyq[:, None, None] * theta2d[None, :, :] - xn_nyq[:, None, None] * phi2d[None, :, :]
+    B = np.tensordot(bmnc, np.cos(angle_b), axes=(0, 0)) + np.tensordot(bmns, np.sin(angle_b), axes=(0, 0))
     return theta, phi, np.asarray(R), np.asarray(Z), np.asarray(B)
 
 
