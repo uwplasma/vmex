@@ -95,8 +95,8 @@ Interpretation:
 - Axisymmetric cases are at floating-point parity for geometry, ``bsup*``, and ``abs(B)``.
 - Axisymmetric tomnsps/gc blocks (including lambda-force ``blmn/clmn``) match VMEC2000 to ~1e-11 abs on reduced grids; scalar residuals now match VMEC2000 at machine precision in single-grid parity runs.
 - The VMEC-style update loop uses scalxc-weighted forces, and ``xc``/``v`` dumps match VMEC2000 at iter 1 in reduced-grid parity runs.
-- Non-axisymmetric ``nfp4_QH_warm_start`` now matches VMEC2000 through 50 iterations in the multigrid path (`--use-input-niter`) at `rtol=1e-3`; single-grid (`--single-ns 16`) and tomnsps/gc kernel dump comparisons are tighter than the pass criterion.
-- Remaining known gap: extend this non-axis parity from early iterations/single-grid to full multigrid end-to-end solves.
+- Non-axisymmetric parity hardening is now wired into a batch comparator (`tools/diagnostics/nonaxis_parity_batch.py`) over Simsopt `input.*` files. Current status: first-iteration mismatches are reduced on some low-res cases (for example, `input.n3are_R7.75B5.7_lowres` improved from O(1e2) to O(1e1) on `fsqr`), but QA/QH families still diverge at iter 1 and remain the top blocker.
+- Remaining known gap: close the non-axis iter-1 mismatch (especially QA/QH) before extending to long multigrid traces.
 
 Iteration trace parity (VMEC2000 executable, reduced grid):
 
@@ -159,8 +159,7 @@ For per-iteration trace parity against the VMEC2000 executable (single grid, qui
 ```bash
 python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case circular_tokamak --max-iter 30 --vmec-nstep 1 --single-ns 13 --dump-level lite --vmec-timeout 60
 python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case nfp4_QH_warm_start --max-iter 10 --single-ns 16 --vmec-timeout 60 --rtol 1e-3
-python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case nfp4_QH_warm_start --max-iter 20 --use-input-niter --vmec-timeout 60 --rtol 1e-3
-python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case nfp4_QH_warm_start --max-iter 50 --use-input-niter --vmec-timeout 60 --rtol 1e-3
+python tools/diagnostics/nonaxis_parity_batch.py --max-cases 8 --single-ns 13 --max-iter 1 --vmec-timeout 60
 ```
 
 This uses a reduced grid to stay under ~1 minute; increase `--max-iter`/`--single-ns` for deeper parity checks.

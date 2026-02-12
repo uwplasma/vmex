@@ -499,6 +499,165 @@ def _recompute_axis_from_boundary(
     return new_raxis_c, new_zaxis_s
 
 
+def _recompute_axis_from_state_vmec(
+    static: VMECStatic,
+    *,
+    pr1_even,
+    pr1_odd,
+    pz1_even,
+    pz1_odd,
+    pru_even,
+    pru_odd,
+    pzu_even,
+    pzu_odd,
+    signgs: int,
+    n_grid: int = 61,
+    trig=None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Port VMEC `guess_axis` from current parity fields.
+
+    This mirrors `VMEC2000/Sources/Initialization_Cleanup/guess_axis.f`
+    on the VMEC internal theta grid (`ntheta3`), including:
+      - LCFS + mid-surface Jacobian proxy scan,
+      - stellarator-symmetry extension over full theta when `lasym=False`,
+      - per-zeta max-min Jacobian search on a `n_grid x n_grid` box,
+      - Fourier reconstruction of axis coefficients with `nscale`.
+    """
+    cfg = static.cfg
+    if trig is None:
+        trig = vmec_trig_tables(
+            ntheta=cfg.ntheta,
+            nzeta=cfg.nzeta,
+            nfp=cfg.nfp,
+            mmax=cfg.mpol - 1,
+            nmax=cfg.ntor,
+            lasym=cfg.lasym,
+        )
+    ntheta1, ntheta2, ntheta3 = int(trig.ntheta1), int(trig.ntheta2), int(trig.ntheta3)
+    ns = int(cfg.ns)
+    nzeta = int(cfg.nzeta)
+    if ns < 2:
+        raise ValueError("axis recompute requires ns >= 2")
+
+    pr1_even = np.asarray(pr1_even, dtype=float)
+    pr1_odd = np.asarray(pr1_odd, dtype=float)
+    pz1_even = np.asarray(pz1_even, dtype=float)
+    pz1_odd = np.asarray(pz1_odd, dtype=float)
+    pru_even = np.asarray(pru_even, dtype=float)
+    pru_odd = np.asarray(pru_odd, dtype=float)
+    pzu_even = np.asarray(pzu_even, dtype=float)
+    pzu_odd = np.asarray(pzu_odd, dtype=float)
+
+    if pr1_even.ndim != 3 or pr1_even.shape[0] != ns:
+        raise ValueError(f"Unexpected pr1_even shape {pr1_even.shape}; expected (ns, ntheta, nzeta)")
+    if pr1_even.shape[2] != nzeta:
+        raise ValueError(f"Unexpected pr1_even zeta size {pr1_even.shape[2]} != {nzeta}")
+    ntheta_red = int(pr1_even.shape[1])
+    if ntheta_red < ntheta3:
+        raise ValueError(f"Unexpected reduced theta size {ntheta_red} < ntheta3={ntheta3}")
+
+    hs = float(np.asarray(static.s)[1] - np.asarray(static.s)[0])
+    sqrts = np.sqrt(np.maximum(np.asarray(static.s, dtype=float), 0.0))
+    ns12 = (ns + 1) // 2 - 1
+    ds = float((ns - 1 - ns12) * hs)
+
+    ru0 = pru_even + sqrts[:, None, None] * pru_odd
+    zu0 = pzu_even + sqrts[:, None, None] * pzu_odd
+
+    r1b_red = pr1_even[ns - 1, :ntheta3, :] + pr1_odd[ns - 1, :ntheta3, :]
+    z1b_red = pz1_even[ns - 1, :ntheta3, :] + pz1_odd[ns - 1, :ntheta3, :]
+    r12_red = pr1_even[ns12, :ntheta3, :] + sqrts[ns12] * pr1_odd[ns12, :ntheta3, :]
+    z12_red = pz1_even[ns12, :ntheta3, :] + sqrts[ns12] * pz1_odd[ns12, :ntheta3, :]
+    ru12_red = 0.5 * (ru0[ns - 1, :ntheta3, :] + ru0[ns12, :ntheta3, :])
+    zu12_red = 0.5 * (zu0[ns - 1, :ntheta3, :] + zu0[ns12, :ntheta3, :])
+
+    r1b = np.zeros((ntheta1, nzeta), dtype=float)
+    z1b = np.zeros((ntheta1, nzeta), dtype=float)
+    r12 = np.zeros((ntheta1, nzeta), dtype=float)
+    z12 = np.zeros((ntheta1, nzeta), dtype=float)
+    ru12 = np.zeros((ntheta1, nzeta), dtype=float)
+    zu12 = np.zeros((ntheta1, nzeta), dtype=float)
+
+    r1b[:ntheta3, :] = r1b_red
+    z1b[:ntheta3, :] = z1b_red
+    r12[:ntheta3, :] = r12_red
+    z12[:ntheta3, :] = z12_red
+    ru12[:ntheta3, :] = ru12_red
+    zu12[:ntheta3, :] = zu12_red
+
+    if not bool(cfg.lasym):
+        for iv in range(nzeta):
+            ivminus = (nzeta - iv) % nzeta
+            for iu in range(ntheta2, ntheta1):
+                iu_r = ntheta1 - iu
+                r1b[iu, iv] = r1b_red[iu_r, ivminus]
+                z1b[iu, iv] = -z1b_red[iu_r, ivminus]
+                r12[iu, iv] = r12_red[iu_r, ivminus]
+                z12[iu, iv] = -z12_red[iu_r, ivminus]
+                ru12[iu, iv] = -ru12_red[iu_r, ivminus]
+                zu12[iu, iv] = zu12_red[iu_r, ivminus]
+
+    rcom = np.zeros((nzeta,), dtype=float)
+    zcom = np.zeros((nzeta,), dtype=float)
+    axis_r0 = pr1_even[0, 0, :]
+    axis_z0 = pz1_even[0, 0, :]
+
+    for iv in range(nzeta):
+        if (not bool(cfg.lasym)) and (iv > nzeta // 2):
+            src = nzeta - iv
+            rcom[iv] = rcom[src]
+            zcom[iv] = -zcom[src]
+            continue
+
+        rmin = float(np.min(r1b[:, iv]))
+        rmax = float(np.max(r1b[:, iv]))
+        zmin = float(np.min(z1b[:, iv]))
+        zmax = float(np.max(z1b[:, iv]))
+        rbest = 0.5 * (rmax + rmin)
+        zbest = 0.5 * (zmax + zmin)
+
+        rs = (r1b[:, iv] - r12[:, iv]) / ds + axis_r0[iv]
+        zs = (z1b[:, iv] - z12[:, iv]) / ds + axis_z0[iv]
+        tau0 = ru12[:, iv] * zs - zu12[:, iv] * rs
+
+        mintau = 0.0
+        for iz in range(n_grid):
+            zlim = zmin + (zmax - zmin) * float(iz) / float(max(n_grid - 1, 1))
+            if (not bool(cfg.lasym)) and (iv == 0 or iv == nzeta // 2):
+                zlim = 0.0
+                if iz > 0:
+                    break
+            for ir in range(n_grid):
+                rlim = rmin + (rmax - rmin) * float(ir) / float(max(n_grid - 1, 1))
+                tau = int(signgs) * (tau0 - ru12[:, iv] * zlim + zu12[:, iv] * rlim)
+                mintemp = float(np.min(tau))
+                if mintemp > mintau:
+                    mintau = mintemp
+                    rbest = rlim
+                    zbest = zlim
+                elif mintemp == mintau:
+                    if abs(zbest) > abs(zlim):
+                        zbest = zlim
+
+        rcom[iv] = rbest
+        zcom[iv] = zbest
+
+    cosnv = np.asarray(trig.cosnv, dtype=float)
+    sinnv = np.asarray(trig.sinnv, dtype=float)
+    nscale = np.asarray(trig.nscale, dtype=float)
+    dzeta = 2.0 / float(nzeta)
+    raxis_cc = dzeta * (cosnv.T @ rcom) / nscale
+    zaxis_cs = -dzeta * (sinnv.T @ zcom) / nscale
+    raxis_cs = -dzeta * (sinnv.T @ rcom) / nscale
+    zaxis_cc = dzeta * (cosnv.T @ zcom) / nscale
+    raxis_cc[0] *= 0.5
+    zaxis_cc[0] *= 0.5
+    if (nzeta % 2 == 0) and (nzeta // 2 <= int(cfg.ntor)):
+        raxis_cc[nzeta // 2] *= 0.5
+        zaxis_cc[nzeta // 2] *= 0.5
+    return raxis_cc, raxis_cs, zaxis_cc, zaxis_cs
+
+
 def initial_guess_from_boundary(
     static: VMECStatic,
     boundary: BoundaryCoeffs,
@@ -506,6 +665,7 @@ def initial_guess_from_boundary(
     *,
     dtype=None,
     vmec_project: bool = False,
+    infer_axis_if_missing: bool = True,
 ) -> VMECState:
     """Build a VMECState initial guess from boundary coefficients.
 
@@ -628,14 +788,26 @@ def initial_guess_from_boundary(
         axis_from_indata = bool(have_axis)
 
         if not have_axis:
-            # VMEC treats zero/omitted axis arrays as "unspecified" and
-            # infers the axis from the boundary. Mirror that behavior so the
-            # first-stage (coarse) initialization matches vmec2000.
-            raxis_cc, zaxis_cs = _guess_axis_from_boundary(static, boundary_use)
-            raxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
-            zaxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+            if bool(infer_axis_if_missing):
+                # Heuristic fallback for non-VMEC workflows: infer the axis
+                # from boundary geometry.
+                raxis_cc, zaxis_cs = _guess_axis_from_boundary(static, boundary_use)
+                # `_guess_axis_from_boundary` returns physical (wout-like) axis
+                # coefficients; convert to VMEC internal scaling before blending.
+                raxis_cc = jnp.asarray(raxis_cc, dtype=dtype) * axis_scale
+                zaxis_cs = jnp.asarray(zaxis_cs, dtype=dtype) * axis_scale
+                raxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+                zaxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+                axis_from_indata = False
+            else:
+                # VMEC parity path: keep the explicit zero axis and let
+                # `guess_axis`-style reset logic handle bad-Jacobian starts.
+                raxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+                raxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+                zaxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+                zaxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+                axis_from_indata = True
             have_axis = True
-            axis_from_indata = False
 
         if have_axis:
             if raxis_cc is None:

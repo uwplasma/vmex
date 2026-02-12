@@ -314,6 +314,7 @@ def run_fixed_boundary(
     elif ns_override is not None:
         cfg = replace(cfg, ns=int(ns_override))
     solver_lower = str(solver).lower()
+    axis_infer_missing = solver_lower != "vmec2000_iter"
     if grid is None and solver_lower in ("vmec_lbfgs", "vmec_gn", "vmec2000_iter"):
         from .vmec_tomnsp import vmec_angle_grid
 
@@ -351,7 +352,13 @@ def run_fixed_boundary(
         # VMEC initializes the first (coarsest) stage directly from the boundary;
         # finer stages are seeded via interp.f from the previous solve state.
         bdy = boundary_from_indata(indata, static0.modes)
-        st0_coarse = initial_guess_from_boundary(static0, bdy, indata, vmec_project=vmec_project)
+        st0_coarse = initial_guess_from_boundary(
+            static0,
+            bdy,
+            indata,
+            vmec_project=vmec_project,
+            infer_axis_if_missing=axis_infer_missing,
+        )
 
     # VMEC readin.f sets signgs = -1 and flips theta if needed. Follow that
     # convention unless explicitly overridden in the input file.
@@ -397,7 +404,13 @@ def run_fixed_boundary(
         if restart_state_eff is not None:
             st0 = restart_state_eff
         else:
-            st0 = initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
+            st0 = initial_guess_from_boundary(
+                static,
+                bdy,
+                indata,
+                vmec_project=vmec_project,
+                infer_axis_if_missing=axis_infer_missing,
+            )
         return FixedBoundaryRun(
             cfg=cfg,
             indata=indata,
@@ -412,7 +425,13 @@ def run_fixed_boundary(
     solver = solver_lower
     if solver == "gd":
         static = build_static(cfg, grid=grid)
-        st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
+        st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(
+            static,
+            bdy,
+            indata,
+            vmec_project=vmec_project,
+            infer_axis_if_missing=axis_infer_missing,
+        )
         res = solve_fixed_boundary_gd(
             st0,
             static,
@@ -430,7 +449,13 @@ def run_fixed_boundary(
         )
     elif solver == "lbfgs":
         static = build_static(cfg, grid=grid)
-        st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
+        st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(
+            static,
+            bdy,
+            indata,
+            vmec_project=vmec_project,
+            infer_axis_if_missing=axis_infer_missing,
+        )
         res = solve_fixed_boundary_lbfgs(
             st0,
             static,
@@ -449,7 +474,13 @@ def run_fixed_boundary(
     elif solver == "vmec_lbfgs":
         from .solve import solve_fixed_boundary_lbfgs_vmec_residual
         static = build_static(cfg, grid=grid)
-        st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
+        st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(
+            static,
+            bdy,
+            indata,
+            vmec_project=vmec_project,
+            infer_axis_if_missing=axis_infer_missing,
+        )
 
         res = solve_fixed_boundary_lbfgs_vmec_residual(
             st0,
@@ -468,7 +499,13 @@ def run_fixed_boundary(
     elif solver == "vmec_gn":
         from .solve import solve_fixed_boundary_gn_vmec_residual
         static = build_static(cfg, grid=grid)
-        st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(static, bdy, indata, vmec_project=vmec_project)
+        st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(
+            static,
+            bdy,
+            indata,
+            vmec_project=vmec_project,
+            infer_axis_if_missing=axis_infer_missing,
+        )
 
         res = solve_fixed_boundary_gn_vmec_residual(
             st0,

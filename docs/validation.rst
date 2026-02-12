@@ -85,8 +85,7 @@ Per-iteration trace parity (VMEC2000 executable, reduced grid):
 
   python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case circular_tokamak --max-iter 10 --vmec-nstep 1 --single-ns 17
   python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case nfp4_QH_warm_start --max-iter 10 --single-ns 16 --vmec-timeout 60 --rtol 1e-3
-  python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case nfp4_QH_warm_start --max-iter 20 --use-input-niter --vmec-timeout 60 --rtol 1e-3
-  python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case nfp4_QH_warm_start --max-iter 50 --use-input-niter --vmec-timeout 60 --rtol 1e-3
+  python tools/diagnostics/nonaxis_parity_batch.py --max-cases 8 --single-ns 13 --max-iter 1 --vmec-timeout 60
 
 This uses a reduced grid to stay under ~1 minute; increase ``--max-iter`` or ``--single-ns`` for deeper parity checks.
 For longer traces under the timeout cap you can split the vmec_jax run::
@@ -140,12 +139,11 @@ Current observed mismatches (updated parity status):
   per-iteration traces on ``circular_tokamak`` and ``shaped_tokamak_pressure``
   for a 10-iteration cap; 20-iter multigrid traces are now generated for the
   benchmark figures (reduced ns for runtime).
-- **Non-axisymmetric parity** now reproduces VMEC2000 on
-  ``nfp4_QH_warm_start`` through 50 iterations in the multigrid path
-  (``--use-input-niter``) at ``rtol=1e-3``; single-grid ``--single-ns 16``
-  trace and tomnsps/gc raw-block comparisons are tighter than this threshold.
-  This includes lambda-path ``flsc/gcl`` and ``blmn/clmn`` after applying
-  VMEC's lambda axis closure in ``bcovar``.
+- **Non-axisymmetric parity** is now exercised on multiple Simsopt inputs via
+  ``nonaxis_parity_batch.py``. Current first-iteration status:
+  ``input.li383_low_res`` and ``input.n3are_R7.75B5.7_lowres`` improved to
+  O(1)–O(1e1) scalar mismatch on ``fsqr`` at ``--single-ns 13``, while QA/QH
+  families still show large iter-1 divergence and remain the top blocker.
 - ``betapol``, ``betator``, ``betaxis``, ``ctor``, and ``DMerc`` are present but
   still placeholders in ``vmec_jax`` (zeros) until the VMEC2000 diagnostics path
   is fully ported.
