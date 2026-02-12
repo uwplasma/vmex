@@ -96,8 +96,8 @@ Interpretation:
 - Axisymmetric tomnsps/gc blocks (including lambda-force ``blmn/clmn``) match VMEC2000 to ~1e-11 abs on reduced grids; scalar residuals now match VMEC2000 at machine precision in single-grid parity runs.
 - The VMEC-style update loop uses scalxc-weighted forces, and ``xc``/``v`` dumps match VMEC2000 at iter 1 in reduced-grid parity runs.
 - The default benchmark path (10 iterations, ``ns=13``) now overlays VMEC2000 and vmec_jax traces for all 4 axisymmetric cases (`circular_tokamak`, `purely_toroidal_field`, `shaped_tokamak_pressure`, `solovev`).
-- Non-axisymmetric parity hardening is now wired into a batch comparator (`tools/diagnostics/nonaxis_parity_batch.py`) over Simsopt `input.*` files. Current status: first-iteration mismatches are reduced on some low-res cases (for example, `input.n3are_R7.75B5.7_lowres` improved from O(1e2) to O(1e1) on `fsqr`), but QA/QH families still diverge at iter 1 and remain the top blocker.
-- Remaining known gap: close the non-axis iter-1 mismatch (especially QA/QH) before extending to long multigrid traces.
+- Non-axisymmetric parity hardening is now wired into a batch comparator (`tools/diagnostics/nonaxis_parity_batch.py`) over Simsopt `input.*` files. Current status: reduced-grid iter-1 parity now passes across the default Simsopt batch; on full-grid QA/QH, the first hard mismatch moved downstream (e.g. QA low-res now matches through stage 3 iter 2 and first diverges at stage 3 iter 3).
+- Remaining known gap: close the full-grid non-axis mismatch after the first few nonlinear iterations (especially QA/QH) before extending to long multigrid traces.
 
 Iteration trace parity (VMEC2000 executable, reduced grid):
 

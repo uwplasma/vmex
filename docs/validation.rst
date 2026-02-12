@@ -141,9 +141,10 @@ Current observed mismatches (updated parity status):
   ``shaped_tokamak_pressure``, ``solovev``) on reduced ``ns=13`` grids.
 - **Non-axisymmetric parity** is now exercised on multiple Simsopt inputs via
   ``nonaxis_parity_batch.py``. Current first-iteration status:
-  ``input.li383_low_res`` and ``input.n3are_R7.75B5.7_lowres`` improved to
-  O(1)–O(1e1) scalar mismatch on ``fsqr`` at ``--single-ns 13``, while QA/QH
-  families still show large iter-1 divergence and remain the top blocker.
+  reduced-grid iter-1 parity now passes across the default Simsopt batch.
+  On full grids, QA/QH still diverge after the first few iterations (for
+  example, QA low-res now matches through stage 3 iter 2 and first diverges at
+  stage 3 iter 3).
 - ``betapol``, ``betator``, ``betaxis``, ``ctor``, and ``DMerc`` are present but
   still placeholders in ``vmec_jax`` (zeros) until the VMEC2000 diagnostics path
   is fully ported.

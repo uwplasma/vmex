@@ -3494,6 +3494,7 @@ def solve_fixed_boundary_residual_iter(
         last_iter2 = iter2
         iter_since_restart = iter2 - iter1
         pre_restart_reason = "none"
+        time_step_report = float(time_step)
         if vmec2000_control:
             # VMEC2000 `constrain_m1` logic (residue.f90):
             #   zero gcz(m=1) if (fsqz_prev < 1e-6) OR (iter2 < 2) OR (ictrl_prec2d != 0).
@@ -4107,6 +4108,18 @@ def solve_fixed_boundary_residual_iter(
             )
             w_try = float(np.asarray(fsqr_t + fsqz_t + fsql_t))
             w_try_ratio = w_try / max(w_curr, 1e-30) if np.isfinite(w_try) else float("inf")
+            probe_bad_jacobian = False
+            if bool(vmec2000_control) and (float(np.asarray(zero_m1)) > 0.5):
+                _, _, fsqr_probe, fsqz_probe, fsql_probe, _, _, _ = _compute_forces(
+                    state_try,
+                    include_edge=include_edge,
+                    zero_m1=jnp.asarray(0.0, dtype=zero_m1.dtype),
+                )
+                w_probe = float(np.asarray(fsqr_probe + fsqz_probe + fsql_probe))
+                if (not np.isfinite(w_probe)) or (w_probe > 1.0e2 * max(w_curr, 1e-30)):
+                    probe_bad_jacobian = True
+                    w_try = float("inf")
+                    w_try_ratio = float("inf")
 
             # The reference iteration is typically stable under its restart
             # triggers, but our parity-path preconditioners are still evolving.
@@ -4257,7 +4270,7 @@ def solve_fixed_boundary_residual_iter(
                         # stuck at the same limit.
                         max_coeff_delta_rms = max(0.5 * max_coeff_delta_rms, 1e-12)
                         max_update_rms = max(0.8 * max_update_rms, 1e-6)
-                        if not np.isfinite(w_try):
+                        if bool(probe_bad_jacobian) or (not np.isfinite(w_try)):
                             time_step = max(restart_badjac_factor * time_step, 1e-12)
                             ijacob += 1
                             restart_reason = "bad_jacobian"
@@ -4290,7 +4303,7 @@ def solve_fixed_boundary_residual_iter(
                     # growth; otherwise dt_eff can remain stuck at the same limit.
                     max_coeff_delta_rms = max(0.5 * max_coeff_delta_rms, 1e-12)
                     max_update_rms = max(0.8 * max_update_rms, 1e-6)
-                    if not np.isfinite(w_try):
+                    if bool(probe_bad_jacobian) or (not np.isfinite(w_try)):
                         time_step = max(restart_badjac_factor * time_step, 1e-12)
                         ijacob += 1
                         restart_reason = "bad_jacobian"
@@ -4436,7 +4449,7 @@ def solve_fixed_boundary_residual_iter(
                     fsqr1=fsqr1_f,
                     fsqz1=fsqz1_f,
                     fsql1=fsql1_f,
-                    delt0r=float(time_step),
+                    delt0r=float(time_step_report),
                     r00=float(r00_val),
                     w_mhd=float(w_vmec_history[-1]),
                 )
@@ -4451,7 +4464,7 @@ def solve_fixed_boundary_residual_iter(
         step_status_history.append(step_status)
         restart_reason_history.append(restart_reason)
         pre_restart_reason_history.append(pre_restart_reason)
-        time_step_history.append(float(time_step))
+        time_step_history.append(float(time_step_report))
         res0_history.append(float(res0))
         fsq_prev_history.append(float(fsq_prev))
         bad_growth_streak_history.append(int(bad_growth_streak))
