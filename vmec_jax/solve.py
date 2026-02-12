@@ -1464,6 +1464,9 @@ class _WoutLikeVmecForces:
     phips: Any  # (ns,)
     chipf: Any  # (ns,)  (VMEC `wout` half-mesh averaged convention)
     pres: Any  # (ns,)  (half mesh, VMEC internal units mu0*Pa)
+    ncurr: int = 0
+    lcurrent: bool = True
+    icurv: Any | None = None  # (ns,) integrated toroidal current profile
     flux_is_internal: bool = True
 
 
@@ -1480,6 +1483,36 @@ def _pressure_half_mesh_from_indata(*, indata, s_full):
     s_half = _s_half_from_full_mesh_s(s_full)
     prof = eval_profiles(indata, s_half)
     return jnp.asarray(prof.get("pressure", jnp.zeros_like(s_half)))
+
+
+def _icurv_full_mesh_from_indata(*, indata, s_full, signgs: int):
+    from .profiles import eval_profiles
+
+    s_full = jnp.asarray(s_full)
+    ncurr = int(indata.get_int("NCURR", 0))
+    if ncurr != 1:
+        return jnp.zeros_like(s_full)
+
+    curtor = float(indata.get_float("CURTOR", 0.0))
+    if abs(curtor) <= np.finfo(float).eps:
+        return jnp.zeros_like(s_full)
+
+    prof = eval_profiles(indata, s_full)
+    icurv_raw = jnp.asarray(prof.get("current", jnp.zeros_like(s_full)))
+    if int(icurv_raw.shape[0]) != int(s_full.shape[0]):
+        icurv_raw = jnp.zeros_like(s_full)
+
+    pedge = float(np.asarray(icurv_raw[-1])) if int(icurv_raw.shape[0]) > 0 else 0.0
+    if abs(pedge) <= abs(np.finfo(float).eps * curtor):
+        return jnp.zeros_like(s_full)
+
+    mu0 = 4e-7 * np.pi
+    currv = mu0 * curtor
+    scale = float(signgs) * currv / (2.0 * np.pi * pedge)
+    icurv = jnp.asarray(scale, dtype=icurv_raw.dtype) * icurv_raw
+    if int(icurv.shape[0]) > 0:
+        icurv = icurv.at[0].set(0.0)
+    return icurv
 
 
 def solve_fixed_boundary_lbfgs_vmec_residual(
@@ -1569,6 +1602,8 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
         phips = phips.at[0].set(0.0)
 
     pres = _pressure_half_mesh_from_indata(indata=indata, s_full=s)
+    ncurr = int(indata.get_int("NCURR", 0))
+    icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=signgs)
 
     wout_like = _WoutLikeVmecForces(
         nfp=int(static.cfg.nfp),
@@ -1580,6 +1615,9 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
         phips=phips,
         chipf=chipf_wout,
         pres=pres,
+        ncurr=ncurr,
+        lcurrent=True,
+        icurv=icurv,
     )
 
     trig = vmec_trig_tables(
@@ -2038,6 +2076,8 @@ def solve_fixed_boundary_gn_vmec_residual(
         phips = phips.at[0].set(0.0)
 
     pres = _pressure_half_mesh_from_indata(indata=indata, s_full=s)
+    ncurr = int(indata.get_int("NCURR", 0))
+    icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=signgs)
 
     wout_like = _WoutLikeVmecForces(
         nfp=int(static.cfg.nfp),
@@ -2049,6 +2089,9 @@ def solve_fixed_boundary_gn_vmec_residual(
         phips=phips,
         chipf=chipf_wout,
         pres=pres,
+        ncurr=ncurr,
+        lcurrent=True,
+        icurv=icurv,
     )
 
     trig = vmec_trig_tables(
@@ -2434,6 +2477,7 @@ def solve_fixed_boundary_residual_iter(
     from .init_guess import (
         _boundary_cross_section_areas,
         _recompute_axis_from_boundary,
+        _recompute_axis_from_state_vmec,
         _read_axis_coeffs,
         initial_guess_from_boundary,
     )
@@ -2462,7 +2506,21 @@ def solve_fixed_boundary_residual_iter(
         nfp=int(cfg.nfp),
         lasym=bool(cfg.lasym),
     )
-    static = build_static(cfg, grid=grid_vmec)
+    reuse_static = False
+    try:
+        theta_curr = np.asarray(static.grid.theta)
+        zeta_curr = np.asarray(static.grid.zeta)
+        reuse_static = (
+            int(static.grid.nfp) == int(grid_vmec.nfp)
+            and theta_curr.shape == np.asarray(grid_vmec.theta).shape
+            and zeta_curr.shape == np.asarray(grid_vmec.zeta).shape
+            and np.allclose(theta_curr, np.asarray(grid_vmec.theta))
+            and np.allclose(zeta_curr, np.asarray(grid_vmec.zeta))
+        )
+    except Exception:
+        reuse_static = False
+    if not reuse_static:
+        static = build_static(cfg, grid=grid_vmec)
 
     idx00 = _mode00_index(static.modes)
     m_modes = jnp.asarray(static.modes.m)
@@ -2501,38 +2559,135 @@ def solve_fixed_boundary_residual_iter(
             Lsin=Lsin,
         )
 
-    def _reset_axis_from_boundary(st: VMECState) -> VMECState:
+    def _reset_axis_from_boundary(st: VMECState, *, k_guess=None) -> VMECState:
         if boundary_for_axis is None:
             return st
-        axis_vals = _read_axis_coeffs(indata)
-        raxis_cc = np.asarray(axis_vals.get("RAXIS_CC", 0.0), dtype=float)
-        zaxis_cs = np.asarray(axis_vals.get("ZAXIS_CS", 0.0), dtype=float)
-        if raxis_cc.ndim == 0:
-            raxis_cc = np.asarray([float(raxis_cc)], dtype=float)
-        if zaxis_cs.ndim == 0:
-            zaxis_cs = np.asarray([float(zaxis_cs)], dtype=float)
         ntor = int(static.cfg.ntor)
-        if raxis_cc.size < ntor + 1:
-            raxis_cc = np.pad(raxis_cc, (0, ntor + 1 - raxis_cc.size))
-        if zaxis_cs.size < ntor + 1:
-            zaxis_cs = np.pad(zaxis_cs, (0, ntor + 1 - zaxis_cs.size))
-        raxis_cc, zaxis_cs = _recompute_axis_from_boundary(
-            static,
-            boundary_for_axis,
-            raxis_cc=raxis_cc,
-            zaxis_cs=zaxis_cs,
-            signgs=int(signgs),
-        )
-        scalars = dict(indata.scalars)
-        scalars["RAXIS_CC"] = [float(v) for v in np.ravel(raxis_cc)]
-        scalars["RAXIS_CS"] = [0.0 for _ in range(int(static.cfg.ntor) + 1)]
-        scalars["ZAXIS_CC"] = [0.0 for _ in range(int(static.cfg.ntor) + 1)]
-        scalars["ZAXIS_CS"] = [float(v) for v in np.ravel(zaxis_cs)]
-        indata_reset = type(indata)(scalars=scalars, indexed=indata.indexed)
-        st = initial_guess_from_boundary(
-            static,
-            boundary_for_axis,
-            indata_reset,
+        raxis_cc = np.zeros((ntor + 1,), dtype=float)
+        raxis_cs = np.zeros((ntor + 1,), dtype=float)
+        zaxis_cc = np.zeros((ntor + 1,), dtype=float)
+        zaxis_cs = np.zeros((ntor + 1,), dtype=float)
+
+        used_state_guess = False
+        if k_guess is not None:
+            try:
+                raxis_cc, raxis_cs, zaxis_cc, zaxis_cs = _recompute_axis_from_state_vmec(
+                    static,
+                    pr1_even=k_guess.pr1_even,
+                    pr1_odd=k_guess.pr1_odd,
+                    pz1_even=k_guess.pz1_even,
+                    pz1_odd=k_guess.pz1_odd,
+                    pru_even=k_guess.pru_even,
+                    pru_odd=k_guess.pru_odd,
+                    pzu_even=k_guess.pzu_even,
+                    pzu_odd=k_guess.pzu_odd,
+                    signgs=int(signgs),
+                    trig=trig,
+                )
+                used_state_guess = True
+            except Exception:
+                used_state_guess = False
+
+        def _state_from_axis_coeffs(
+            rcc: np.ndarray,
+            rcs: np.ndarray,
+            zcc: np.ndarray,
+            zcs: np.ndarray,
+            *,
+            dtype,
+        ) -> VMECState:
+            scalars_local = dict(indata.scalars)
+            scalars_local["RAXIS_CC"] = [float(v) for v in np.ravel(rcc)]
+            scalars_local["RAXIS_CS"] = [float(v) for v in np.ravel(rcs)]
+            scalars_local["ZAXIS_CC"] = [float(v) for v in np.ravel(zcc)]
+            scalars_local["ZAXIS_CS"] = [float(v) for v in np.ravel(zcs)]
+            indata_local = type(indata)(scalars=scalars_local, indexed=indata.indexed)
+            return initial_guess_from_boundary(
+                static,
+                boundary_for_axis,
+                indata_local,
+                dtype=dtype,
+                infer_axis_if_missing=False,
+            )
+
+        # One refinement pass on the VMEC state-based axis estimate stabilizes
+        # non-axis starts where the first guess is still too far off.
+        if used_state_guess:
+            try:
+                st_tmp = _state_from_axis_coeffs(
+                    raxis_cc,
+                    raxis_cs,
+                    zaxis_cc,
+                    zaxis_cs,
+                    dtype=jnp.asarray(st.Rcos).dtype,
+                )
+                k_tmp, _, _, _, _, _, _, _ = _compute_forces(
+                    st_tmp,
+                    include_edge=False,
+                    zero_m1=jnp.asarray(1.0, dtype=jnp.asarray(st.Rcos).dtype),
+                    iter_idx=None,
+                )
+                raxis_cc, raxis_cs, zaxis_cc, zaxis_cs = _recompute_axis_from_state_vmec(
+                    static,
+                    pr1_even=k_tmp.pr1_even,
+                    pr1_odd=k_tmp.pr1_odd,
+                    pz1_even=k_tmp.pz1_even,
+                    pz1_odd=k_tmp.pz1_odd,
+                    pru_even=k_tmp.pru_even,
+                    pru_odd=k_tmp.pru_odd,
+                    pzu_even=k_tmp.pzu_even,
+                    pzu_odd=k_tmp.pzu_odd,
+                    signgs=int(signgs),
+                    trig=trig,
+                )
+            except Exception:
+                pass
+
+        if not used_state_guess:
+            axis_vals = _read_axis_coeffs(indata)
+            raxis_cc = np.asarray(axis_vals.get("RAXIS_CC", 0.0), dtype=float)
+            zaxis_cs = np.asarray(axis_vals.get("ZAXIS_CS", 0.0), dtype=float)
+            if raxis_cc.ndim == 0:
+                raxis_cc = np.asarray([float(raxis_cc)], dtype=float)
+            if zaxis_cs.ndim == 0:
+                zaxis_cs = np.asarray([float(zaxis_cs)], dtype=float)
+            if raxis_cc.size < ntor + 1:
+                raxis_cc = np.pad(raxis_cc, (0, ntor + 1 - raxis_cc.size))
+            if zaxis_cs.size < ntor + 1:
+                zaxis_cs = np.pad(zaxis_cs, (0, ntor + 1 - zaxis_cs.size))
+            raxis_cc, zaxis_cs = _recompute_axis_from_boundary(
+                static,
+                boundary_for_axis,
+                raxis_cc=raxis_cc,
+                zaxis_cs=zaxis_cs,
+                signgs=int(signgs),
+            )
+
+        axis_dump_dir = os.environ.get("VMEC_JAX_DUMP_AXIS_DIR", "").strip()
+        if axis_dump_dir:
+            try:
+                p = Path(axis_dump_dir).expanduser().resolve()
+                p.mkdir(parents=True, exist_ok=True)
+                out = p / f"axis_reset_ns{int(static.cfg.ns)}.dat"
+                with out.open("w", encoding="utf-8") as f:
+                    f.write(f"# used_state_guess={int(used_state_guess)}\n")
+                    f.write("n raxis_cc raxis_cs zaxis_cc zaxis_cs\n")
+                    for n in range(int(static.cfg.ntor) + 1):
+                        f.write(
+                            f"{n:4d} "
+                            f"{float(raxis_cc[n]): .16e} "
+                            f"{float(raxis_cs[n]): .16e} "
+                            f"{float(zaxis_cc[n]): .16e} "
+                            f"{float(zaxis_cs[n]): .16e}\n"
+                        )
+            except Exception:
+                pass
+
+        st = _state_from_axis_coeffs(
+            raxis_cc,
+            raxis_cs,
+            zaxis_cc,
+            zaxis_cs,
             dtype=jnp.asarray(st.Rcos).dtype,
         )
         return _apply_vmec_lambda_axis_rules(st)
@@ -2545,6 +2700,8 @@ def solve_fixed_boundary_residual_iter(
         phips = phips.at[0].set(0.0)
 
     pres = _pressure_half_mesh_from_indata(indata=indata, s_full=s)
+    ncurr = int(indata.get_int("NCURR", 0))
+    icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=signgs)
 
     wout_like = _WoutLikeVmecForces(
         nfp=int(static.cfg.nfp),
@@ -2556,6 +2713,9 @@ def solve_fixed_boundary_residual_iter(
         phips=phips,
         chipf=chipf_wout,
         pres=pres,
+        ncurr=ncurr,
+        lcurrent=True,
+        icurv=icurv,
     )
 
     trig = vmec_trig_tables(
@@ -2572,7 +2732,6 @@ def solve_fixed_boundary_residual_iter(
     n_idx = jnp.asarray(modes.n, dtype=jnp.int32)
     mscale = jnp.asarray(trig.mscale)
     nscale = jnp.asarray(trig.nscale)
-    r00_scale = 1.0 / (mscale[m_idx] * nscale[jnp.abs(n_idx)])
     idx00 = _mode00_index(static.modes)
     lambda_update_scale_j = jnp.asarray(lambda_update_scale, dtype=jnp.asarray(state0.Rcos).dtype)
 
@@ -2910,13 +3069,42 @@ def solve_fixed_boundary_residual_iter(
         sc_mn = sc[:, m_idx, n_idx]
         cs_mn = cs[:, m_idx, n_idx]
         is_n0 = (n_idx == 0)[None, :]
-        pos = jnp.where(is_n0, sc_mn, 0.5 * (sc_mn - cs_mn)) * mode_scale_mn[None, :]
+        is_m0 = (m_idx == 0)[None, :]
+        has_kn_mask = has_kn[None, :]
+        # Modes without a negative-n partner (notably m=0,n>0 in VMEC mode
+        # tables) are single-DOF in signed storage. For these, use VMEC's
+        # canonical m=0 convention sc=0, cs=-A  =>  A=-cs.
+        pos_pair = jnp.where(is_n0, sc_mn, 0.5 * (sc_mn - cs_mn))
+        pos_single = jnp.where(is_m0, -cs_mn, sc_mn)
+        pos = jnp.where((~is_n0) & (~has_kn_mask), pos_single, pos_pair) * mode_scale_mn[None, :]
         out = jnp.zeros((sc.shape[0], ncoeff), dtype=sc.dtype)
         out = out.at[:, kp_idx].set(pos)
         if has_kn_any:
             neg = 0.5 * (sc_mn + cs_mn) * mode_scale_mn[None, :]
             out = out.at[:, kn_idx[has_kn]].set(neg[:, has_kn])
         return out
+
+    use_m1_pair_convert = bool(getattr(static.cfg, "lthreed", True)) and bool(getattr(static.cfg, "lconm1", True)) and int(static.cfg.mpol) > 1
+
+    def _m1_internal_to_physical_pair(rss, zcs):
+        """Convert VMEC internal m=1 (rss,zcs) pair to physical coefficients."""
+        if rss is None and zcs is None:
+            return None, None
+        if rss is None:
+            zcs_arr = jnp.asarray(zcs)
+            rss_arr = jnp.zeros_like(zcs_arr)
+        else:
+            rss_arr = jnp.asarray(rss)
+        if zcs is None:
+            zcs_arr = jnp.zeros_like(rss_arr)
+        else:
+            zcs_arr = jnp.asarray(zcs)
+        if not use_m1_pair_convert:
+            return rss_arr, zcs_arr
+        tmp = rss_arr[:, 1, :]
+        rss_arr = rss_arr.at[:, 1, :].set(tmp + zcs_arr[:, 1, :])
+        zcs_arr = zcs_arr.at[:, 1, :].set(tmp - zcs_arr[:, 1, :])
+        return rss_arr, zcs_arr
 
     scalxc_mn = vmec_scalxc_from_s(s=s, mpol=int(static.cfg.mpol)).astype(jnp.asarray(state0.Rcos).dtype)[:, :, None]
     if not bool(divide_by_scalxc_for_update):
@@ -2953,11 +3141,21 @@ def solve_fixed_boundary_residual_iter(
             rneg = rneg.at[:, has_kn].set(jnp.asarray(state.Rcos)[:, kn_idx[has_kn]])
             zneg = zneg.at[:, has_kn].set(jnp.asarray(state.Zsin)[:, kn_idx[has_kn]])
 
-        rcc = rpos + rneg
-        zsc = zpos + zneg
+        has_kn_mask = has_kn[None, :]
+        is_m0 = (m_idx == 0)[None, :]
+        rcc = rpos + jnp.where(has_kn_mask, rneg, 0.0)
+        zsc = jnp.where(has_kn_mask, zpos + zneg, zpos)
         is_n0 = (n_idx == 0)[None, :]
-        rss = jnp.where(is_n0, 0.0, rpos - rneg)
-        zcs = jnp.where(is_n0, 0.0, zneg - zpos)
+        # VMEC m=0 uses only (rcc, zcs) for n>0; rss and zsc are canonicalized
+        # to zero in internal storage.
+        rss = jnp.where(is_n0 | is_m0, 0.0, jnp.where(has_kn_mask, rpos - rneg, 0.0))
+        zsc = jnp.where((~is_n0) & is_m0, 0.0, zsc)
+        zcs = jnp.where(is_n0, 0.0, jnp.where(has_kn_mask, zneg - zpos, -zpos))
+        if use_m1_pair_convert:
+            is_m1 = (m_idx == 1)[None, :]
+            rss_old = rss
+            rss = jnp.where(is_m1, 0.5 * (rss_old + zcs), rss_old)
+            zcs = jnp.where(is_m1, 0.5 * (rss_old - zcs), zcs)
 
         mscale = jnp.where(m_idx == 0, 1.0, jnp.sqrt(2.0)).astype(rcc.dtype)
         nscale = jnp.where(n_idx == 0, 1.0, jnp.sqrt(2.0)).astype(rcc.dtype)
@@ -2968,7 +3166,9 @@ def solve_fixed_boundary_residual_iter(
             rss = rss * basis_norm
             zcs = zcs * basis_norm
 
-        sl = slice(0, None)
+        # VMEC `bcovar.f` builds `fnorm1` from l=2..ns (1-based), i.e. it
+        # excludes the magnetic-axis surface but includes the edge.
+        sl = slice(1, None)
 
         include_rcc = ((m_idx > 0) | (n_idx > 0))[None, :].astype(rcc.dtype)
         rz_norm = jnp.sum(zsc[sl] * zsc[sl]) + jnp.sum(include_rcc * (rcc[sl] * rcc[sl]))
@@ -3134,6 +3334,7 @@ def solve_fixed_boundary_residual_iter(
 
     if bool(vmec2000_control) and (boundary_for_axis is not None) and (not axis_reset_done):
         bad_jacobian_init = False
+        k_init = None
         jac = vmec_half_mesh_jacobian_from_state(state=state, modes=static.modes, trig=trig, s=s)
         tau = np.asarray(jac.tau)
         if tau.size:
@@ -3143,7 +3344,7 @@ def solve_fixed_boundary_residual_iter(
         huge_initial_forces = False
         if lmove_axis:
             zero_m1_init = jnp.asarray(1.0, dtype=jnp.asarray(state.Rcos).dtype)
-            _, _, fsqr_init, fsqz_init, fsql_init, _, _, _ = _compute_forces(
+            k_init, _, fsqr_init, fsqz_init, fsql_init, _, _, _ = _compute_forces(
                 state,
                 include_edge=False,
                 zero_m1=zero_m1_init,
@@ -3152,7 +3353,7 @@ def solve_fixed_boundary_residual_iter(
             fsq_init = float(np.asarray(fsqr_init + fsqz_init + fsql_init))
             huge_initial_forces = (not np.isfinite(fsq_init)) or (fsq_init > 1.0e2)
         if bad_jacobian_init or huge_initial_forces:
-            state = _reset_axis_from_boundary(state)
+            state = _reset_axis_from_boundary(state, k_guess=k_init)
             state_checkpoint = state
             vRcc = jnp.zeros_like(vRcc)
             vRss = jnp.zeros_like(vRcc)
@@ -3200,6 +3401,57 @@ def solve_fixed_boundary_residual_iter(
         dt_lim = np.sqrt(max_coeff_delta_rms / max(rms_f, 1e-30))
         dt_eff = min(float(dt_nominal), float(dt_lim))
         return max(dt_eff, 1e-12)
+
+    def _apply_vmec_scale_m1_precond_rhs(frzl_in: TomnspsRZL, mats: dict[str, Any]) -> TomnspsRZL:
+        """Apply VMEC `scale_m1_par` factors before the radial preconditioner solve."""
+        if (not bool(getattr(cfg, "lconm1", True))) or (int(cfg.mpol) <= 1):
+            return frzl_in
+        dr = jnp.asarray(mats["dr"])
+        dz = jnp.asarray(mats["dz"])
+        if dr.shape[0] == 0:
+            return frzl_in
+        sr = -dr[:, 1, 0]
+        sz = -dz[:, 1, 0]
+        denom = sr + sz
+        fac_r = jnp.where(denom != 0.0, sr / denom, jnp.ones_like(sr))
+        fac_z = jnp.where(denom != 0.0, sz / denom, jnp.ones_like(sz))
+
+        ns_full = int(jnp.asarray(frzl_in.frcc).shape[0])
+        nsolve = min(ns_full, int(sr.shape[0]))
+        fac_r_full = jnp.ones((ns_full,), dtype=jnp.asarray(frzl_in.frcc).dtype).at[:nsolve].set(fac_r[:nsolve])
+        fac_z_full = jnp.ones((ns_full,), dtype=jnp.asarray(frzl_in.fzsc).dtype).at[:nsolve].set(fac_z[:nsolve])
+
+        frss = frzl_in.frss
+        fzcs = frzl_in.fzcs
+        frsc = getattr(frzl_in, "frsc", None)
+        fzcc = getattr(frzl_in, "fzcc", None)
+        if frss is not None:
+            frss = jnp.asarray(frss)
+            frss = frss.at[:, 1, :].set(frss[:, 1, :] * fac_r_full[:, None])
+        if fzcs is not None:
+            fzcs = jnp.asarray(fzcs)
+            fzcs = fzcs.at[:, 1, :].set(fzcs[:, 1, :] * fac_z_full[:, None])
+        if frsc is not None:
+            frsc = jnp.asarray(frsc)
+            frsc = frsc.at[:, 1, :].set(frsc[:, 1, :] * fac_r_full[:, None])
+        if fzcc is not None:
+            fzcc = jnp.asarray(fzcc)
+            fzcc = fzcc.at[:, 1, :].set(fzcc[:, 1, :] * fac_z_full[:, None])
+
+        return TomnspsRZL(
+            frcc=frzl_in.frcc,
+            frss=frss,
+            fzsc=frzl_in.fzsc,
+            fzcs=fzcs,
+            flsc=frzl_in.flsc,
+            flcs=frzl_in.flcs,
+            frsc=frsc,
+            frcs=getattr(frzl_in, "frcs", None),
+            fzcc=fzcc,
+            fzss=getattr(frzl_in, "fzss", None),
+            flcc=getattr(frzl_in, "flcc", None),
+            flss=getattr(frzl_in, "flss", None),
+        )
 
     last_iter2 = 0
     for it in range(max_iter):
@@ -3276,7 +3528,7 @@ def solve_fixed_boundary_residual_iter(
                 1.0 / jnp.asarray(cache_rz_norm),
                 jnp.asarray(float("inf"), dtype=jnp.asarray(cache_rz_norm).dtype),
             )
-            if (not bool(cfg.lthreed)) and (not bool(cfg.lasym)):
+            if not bool(cfg.lasym):
                 from .preconditioner_1d_jax import rz_preconditioner_matrices
 
                 cache_prec_lam_prec = _lambda_preconditioner(k.bc)
@@ -3294,11 +3546,11 @@ def solve_fixed_boundary_residual_iter(
         fsqz2_history.append(fsqz_f)
         fsql2_history.append(fsql_f)
         # VMEC printout uses r00 = r1(1,0): axis R at theta=0, zeta=0.
-        # Use the (m,n)=(0,0) coefficient only (optionally scaled).
-        if idx00 is None:
+        # For 3D, this includes *all* m=0 cosine harmonics at zeta=0.
+        if not np.any(m0_mask):
             r00_val = float("nan")
         else:
-            r00_val = float(np.asarray(state.Rcos)[0, idx00] * r00_scale[idx00])
+            r00_val = float(np.sum(np.asarray(state.Rcos)[0, m0_mask]))
         r00_history.append(r00_val)
         # `norms_used` may be cached (VMEC2000 `ns4=25` behavior). VMEC's
         # printed WMHD uses the *current* wb/wp from `funct3d`, not cached
@@ -3323,27 +3575,38 @@ def solve_fixed_boundary_residual_iter(
                 )
             break
 
-        # Precondition forces (axisymmetric preconditioner when available).
-        if (not bool(cfg.lthreed)) and (not bool(cfg.lasym)):
+        # Precondition forces.
+        if bool(vmec2000_control) and (not bool(cfg.lasym)):
+            from .preconditioner_1d_jax import rz_preconditioner_apply, rz_preconditioner_matrices
+
             if (
-                bool(vmec2000_control)
-                and bool(vmec2000_cache_valid)
+                bool(vmec2000_cache_valid)
                 and (cache_prec_lam_prec is not None)
                 and (cache_prec_rz_mats is not None)
                 and (cache_prec_rz_jmax is not None)
             ):
-                from .preconditioner_1d_jax import rz_preconditioner_apply
-
                 lam_prec = cache_prec_lam_prec
-                frzl_rz = rz_preconditioner_apply(
-                    frzl_in=frzl,
-                    mats=cache_prec_rz_mats,
-                    jmax=int(cache_prec_rz_jmax),
-                    cfg=cfg,
-                )
+                mats = cache_prec_rz_mats
+                jmax = int(cache_prec_rz_jmax)
             else:
                 lam_prec = _lambda_preconditioner(k.bc)
-                frzl_rz = _rz_preconditioner(frzl, k.bc, k)
+                mats, _jmin, jmax = rz_preconditioner_matrices(bc=k.bc, k=k, trig=trig, s=s, cfg=cfg)
+            frzl_rhs = _apply_vmec_scale_m1_precond_rhs(frzl, mats)
+            frzl_rz = rz_preconditioner_apply(
+                frzl_in=frzl_rhs,
+                mats=mats,
+                jmax=jmax,
+                cfg=cfg,
+            )
+            frcc = jnp.asarray(frzl_rz.frcc)
+            frss = frzl_rz.frss
+            fzsc = jnp.asarray(frzl_rz.fzsc)
+            fzcs = frzl_rz.fzcs
+            flsc = jnp.asarray(frzl_rz.flsc) * jnp.asarray(lam_prec)
+            flcs = None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * jnp.asarray(lam_prec))
+        elif (not bool(cfg.lthreed)) and (not bool(cfg.lasym)):
+            lam_prec = _lambda_preconditioner(k.bc)
+            frzl_rz = _rz_preconditioner(frzl, k.bc, k)
             frcc = jnp.asarray(frzl_rz.frcc)
             frss = frzl_rz.frss
             fzsc = jnp.asarray(frzl_rz.fzsc)
@@ -3411,8 +3674,9 @@ def solve_fixed_boundary_residual_iter(
             # Use a probe step that is large enough to be numerically decisive,
             # but still small relative to typical pseudo-time updates.
             dt_probe = min(1e-2, 0.1 * float(time_step))
-            dR_dir = dt_probe * _mn_cos_to_signed_physical(frcc_u, frss_u)
-            dZ_dir = dt_probe * _mn_sin_to_signed_physical(fzsc_u, fzcs_u)
+            frss_u_phys, fzcs_u_phys = _m1_internal_to_physical_pair(frss_u, fzcs_u)
+            dR_dir = dt_probe * _mn_cos_to_signed_physical(frcc_u, frss_u_phys)
+            dZ_dir = dt_probe * _mn_sin_to_signed_physical(fzsc_u, fzcs_u_phys)
             dL_dir = dt_probe * _mn_sin_to_signed_physical_lambda(flsc_u, flcs_u)
 
             def _trial(sign: float) -> float:
@@ -3728,8 +3992,9 @@ def solve_fixed_boundary_residual_iter(
                     )
                 )
 
-            dR = dt_eff * _mn_cos_to_signed_physical(vRcc, vRss)
-            dZ = dt_eff * _mn_sin_to_signed_physical(vZsc, vZcs)
+            vRss_phys, vZcs_phys = _m1_internal_to_physical_pair(vRss, vZcs)
+            dR = dt_eff * _mn_cos_to_signed_physical(vRcc, vRss_phys)
+            dZ = dt_eff * _mn_sin_to_signed_physical(vZsc, vZcs_phys)
             dL = dt_eff * _mn_sin_to_signed_physical_lambda(vLsc, vLcs)
             state_try = VMECState(
                 layout=state.layout,
@@ -3838,8 +4103,9 @@ def solve_fixed_boundary_residual_iter(
                     if np.isfinite(force_rms) and force_rms > 0.0:
                         dt_cap = max_update_rms / max(force_rms, 1e-30)
                         dt_direct = max(min(dt_direct, float(dt_cap)), 1e-12)
-                    dR_dir = dt_direct * _mn_cos_to_signed(flip_sign * frcc_u, flip_sign * frss_u)
-                    dZ_dir = dt_direct * _mn_sin_to_signed(flip_sign * fzsc_u, flip_sign * fzcs_u)
+                    frss_u_phys, fzcs_u_phys = _m1_internal_to_physical_pair(flip_sign * frss_u, flip_sign * fzcs_u)
+                    dR_dir = dt_direct * _mn_cos_to_signed(flip_sign * frcc_u, frss_u_phys)
+                    dZ_dir = dt_direct * _mn_sin_to_signed(flip_sign * fzsc_u, fzcs_u_phys)
                     dL_dir = dt_direct * _mn_sin_to_signed(flip_sign * flsc_u, flip_sign * flcs_u)
                     state_dir = VMECState(
                         layout=state.layout,
@@ -3982,8 +4248,9 @@ def solve_fixed_boundary_residual_iter(
                 vLsc_try = fac * (b1 * vLsc + dt_try * (flip_sign * jnp.asarray(flsc_u)))
                 vLcs_try = fac * (b1 * vLcs + dt_try * (flip_sign * jnp.asarray(flcs_u)))
 
-                dR_try = dt_try * _mn_cos_to_signed(vRcc_try, vRss_try)
-                dZ_try = dt_try * _mn_sin_to_signed(vZsc_try, vZcs_try)
+                vRss_try_phys, vZcs_try_phys = _m1_internal_to_physical_pair(vRss_try, vZcs_try)
+                dR_try = dt_try * _mn_cos_to_signed(vRcc_try, vRss_try_phys)
+                dZ_try = dt_try * _mn_sin_to_signed(vZsc_try, vZcs_try_phys)
                 dL_try = dt_try * _mn_sin_to_signed(vLsc_try, vLcs_try)
 
                 state_try = VMECState(
@@ -4239,6 +4506,8 @@ def first_step_diagnostics(
     if phips.shape[0] >= 1:
         phips = phips.at[0].set(0.0)
     pres = _pressure_half_mesh_from_indata(indata=indata, s_full=s)
+    ncurr = int(indata.get_int("NCURR", 0))
+    icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=signgs)
 
     wout_like = _WoutLikeVmecForces(
         nfp=int(cfg.nfp),
@@ -4250,6 +4519,9 @@ def first_step_diagnostics(
         phips=phips,
         chipf=chipf_wout,
         pres=pres,
+        ncurr=ncurr,
+        lcurrent=True,
+        icurv=icurv,
     )
 
     trig = vmec_trig_tables(
