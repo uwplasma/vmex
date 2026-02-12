@@ -1507,12 +1507,17 @@ def _icurv_full_mesh_from_indata(*, indata, s_full, signgs: int):
     if abs(curtor) <= np.finfo(float).eps:
         return jnp.zeros_like(s_full)
 
-    prof = eval_profiles(indata, s_full)
-    icurv_raw = jnp.asarray(prof.get("current", jnp.zeros_like(s_full)))
+    # VMEC stores icurv on the half mesh (same indexing as phips/chips/iotas),
+    # evaluated at s = (i-1.5)*hs for i>=2. Mirror that here.
+    s_half = _s_half_from_full_mesh_s(s_full)
+    prof = eval_profiles(indata, s_half)
+    icurv_raw = jnp.asarray(prof.get("current", jnp.zeros_like(s_half)))
     if int(icurv_raw.shape[0]) != int(s_full.shape[0]):
-        icurv_raw = jnp.zeros_like(s_full)
+        icurv_raw = jnp.zeros_like(s_half)
 
-    pedge = float(np.asarray(icurv_raw[-1])) if int(icurv_raw.shape[0]) > 0 else 0.0
+    # VMEC scales by pcurr(1) (edge), not the last half-mesh value.
+    pedge_prof = eval_profiles(indata, jnp.asarray([1.0], dtype=s_full.dtype))
+    pedge = float(np.asarray(pedge_prof.get("current", jnp.asarray([0.0], dtype=s_full.dtype)))[0])
     if abs(pedge) <= abs(np.finfo(float).eps * curtor):
         return jnp.zeros_like(s_full)
 
