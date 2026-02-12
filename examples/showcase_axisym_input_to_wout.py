@@ -247,7 +247,7 @@ def main() -> None:
     p.add_argument(
         "--single-ns",
         type=int,
-        default=None,
+        default=13,
         help="Run a single-grid parity pass at this NS (overrides NS_ARRAY/NITER_ARRAY).",
     )
     p.add_argument(
@@ -327,12 +327,12 @@ def main() -> None:
 
         wout_ref = vj.load_wout(ref_wout_path) if (args.single_ns is None and ref_wout_path.exists()) else None
         wout_ref_exec = None
-        print(f"[vmec_jax] wrote wout: {out_wout_path}")
+        print(f"[vmec_jax] wrote wout: {out_wout_path}", flush=True)
         if wout_ref is not None:
             fsq_ref = float(wout_ref.fsqr + wout_ref.fsqz + wout_ref.fsql)
             fsq_new = float(wout_new.fsqr + wout_new.fsqz + wout_new.fsql)
             suite_rows.append((case, fsq_ref, fsq_new))
-            print(f"[vmec_jax] fsq_total: ref={fsq_ref:.3e} new={fsq_new:.3e}")
+            print(f"[vmec_jax] fsq_total: ref={fsq_ref:.3e} new={fsq_new:.3e}", flush=True)
 
         vmec2000_trace = None
         if (not args.no_vmec2000_trace) and (find_vmec2000_exec() is not None):
@@ -356,16 +356,16 @@ def main() -> None:
                 )
                 vmec2000_trace = threed1_fsq_total(flatten_threed1(exec_res.stages))
                 if vmec2000_trace.size > 0:
-                    print(f"[vmec2000] trace entries: {vmec2000_trace.size}")
+                    print(f"[vmec2000] trace entries: {vmec2000_trace.size}", flush=True)
                 if args.single_ns is not None:
                     wout_candidates = sorted(exec_res.workdir.glob("wout_*"))
                     if wout_candidates:
                         try:
                             wout_ref_exec = vj.load_wout(wout_candidates[0])
                         except Exception as exc:
-                            print(f"[vmec2000] wout load failed: {exc}")
+                            print(f"[vmec2000] wout load failed: {exc}", flush=True)
             except Exception as exc:
-                print(f"[vmec2000] trace failed: {exc}")
+                print(f"[vmec2000] trace failed: {exc}", flush=True)
 
         _write_plots(
             outdir=outdir,
@@ -375,7 +375,7 @@ def main() -> None:
             indata=indata,
             vmec2000_fsq_total=vmec2000_trace,
         )
-        print(f"[vmec_jax] wrote plots under: {outdir}")
+        print(f"[vmec_jax] wrote plots under: {outdir}", flush=True)
 
         if args.emit_readme_figures and not args.suite:
             root = examples_dir.parent
@@ -387,12 +387,12 @@ def main() -> None:
             residual_path = outdir / "residual_trace.png"
             if residual_path.exists():
                 (fig_dir / f"showcase_{case}_residual.png").write_bytes(residual_path.read_bytes())
-            print(f"[vmec_jax] updated README figures under: {fig_dir}")
+            print(f"[vmec_jax] updated README figures under: {fig_dir}", flush=True)
 
     if args.suite and suite_rows:
-        print("[vmec_jax] axisymmetric suite summary (fsq_total)")
+        print("[vmec_jax] axisymmetric suite summary (fsq_total)", flush=True)
         for case, fsq_ref, fsq_new in suite_rows:
-            print(f"  {case:24s} ref={fsq_ref:.3e} new={fsq_new:.3e}")
+            print(f"  {case:24s} ref={fsq_ref:.3e} new={fsq_new:.3e}", flush=True)
 
 
 if __name__ == "__main__":

@@ -82,16 +82,17 @@ class VmecFsqSums:
 
 
 def _constrain_m1_pair(*, gcr: Any, gcz: Any, lconm1: bool) -> tuple[Any, Any]:
-    """VMEC's `constrain_m1` transform for the m=1 polar constraint.
+    """VMEC's `constrain_m1` basis transform for the m=1 polar constraint.
 
     In `VMEC2000/Sources/General/residue.f90:constrain_m1_par`, VMEC optionally
     applies a polar constraint by rotating the (R,Z) force pair into
     (gcr+gcz, gcr-gcz)/sqrt(2) and then setting the second component to zero
     once close to convergence.
 
-    For parity work we apply the rotation when `lconm1=True` and always zero the
-    constrained component (this matches the converged-equilibrium regime used
-    for regression against bundled `wout_*.nc` files).
+    This helper applies only the basis rotation. In VMEC, the conditional
+    zeroing of the constrained component is controlled separately by
+    ``iter2/fsqz/ictrl_prec2d`` logic in ``residue.f90``; mirror that behavior
+    via :func:`vmec_zero_m1_zforce`.
     """
     gcr = jnp.asarray(gcr)
     gcz = jnp.asarray(gcz)
@@ -100,7 +101,6 @@ def _constrain_m1_pair(*, gcr: Any, gcz: Any, lconm1: bool) -> tuple[Any, Any]:
         tmp = gcr
         gcr = osqrt2 * (gcr + gcz)
         gcz = osqrt2 * (tmp - gcz)
-    gcz = jnp.zeros_like(gcz)
     return gcr, gcz
 
 
@@ -262,7 +262,7 @@ def vmec_rz_norm_from_state(
                     neg = jnp.zeros_like(pos)
                 rcc = rcc.at[:, m_i, n_i].set(pos + neg)
                 rss_val = pos - neg
-                if n_i == 0:
+                if n_i == 0 or m_i == 0:
                     rss_val = jnp.zeros_like(pos)
                 rss = rss.at[:, m_i, n_i].set(rss_val)
         return rcc, rss
@@ -282,15 +282,32 @@ def vmec_rz_norm_from_state(
                     neg = a[:, kn]
                 else:
                     neg = jnp.zeros_like(pos)
-                sc = sc.at[:, m_i, n_i].set(pos + neg)
+                sc_val = pos + neg
                 cs_val = neg - pos
                 if n_i == 0:
                     cs_val = jnp.zeros_like(pos)
+                elif m_i == 0:
+                    sc_val = jnp.zeros_like(pos)
+                sc = sc.at[:, m_i, n_i].set(sc_val)
                 cs = cs.at[:, m_i, n_i].set(cs_val)
         return sc, cs
 
     rcc, rss = _signed_cos_to_mn(state.Rcos)
     zsc, zcs = _signed_sin_to_mn(state.Zsin)
+
+    if bool(getattr(static.cfg, "lthreed", True)) and bool(getattr(static.cfg, "lconm1", True)) and mpol > 1:
+        rss_m1 = rss[:, 1, :]
+        zcs_m1 = zcs[:, 1, :]
+        rss_new = 0.5 * (rss_m1 + zcs_m1)
+        zcs_new = 0.5 * (rss_m1 - zcs_m1)
+        if hasattr(rss, "at"):
+            rss = rss.at[:, 1, :].set(rss_new)
+            zcs = zcs.at[:, 1, :].set(zcs_new)
+        else:
+            rss = np.asarray(rss).copy()
+            zcs = np.asarray(zcs).copy()
+            rss[:, 1, :] = np.asarray(rss_new)
+            zcs[:, 1, :] = np.asarray(zcs_new)
 
     if bool(apply_basis_norm):
         m_idx = jnp.arange(mpol)[:, None]
@@ -393,7 +410,7 @@ def vmec_rz_decompose_signed(
                     neg = jnp.zeros_like(pos)
                 rcc = rcc.at[:, m_i, n_i].set(pos + neg)
                 rss_val = pos - neg
-                if n_i == 0:
+                if n_i == 0 or m_i == 0:
                     rss_val = jnp.zeros_like(pos)
                 rss = rss.at[:, m_i, n_i].set(rss_val)
         return rcc, rss
@@ -413,15 +430,32 @@ def vmec_rz_decompose_signed(
                     neg = a[:, kn]
                 else:
                     neg = jnp.zeros_like(pos)
-                sc = sc.at[:, m_i, n_i].set(pos + neg)
+                sc_val = pos + neg
                 cs_val = neg - pos
                 if n_i == 0:
                     cs_val = jnp.zeros_like(pos)
+                elif m_i == 0:
+                    sc_val = jnp.zeros_like(pos)
+                sc = sc.at[:, m_i, n_i].set(sc_val)
                 cs = cs.at[:, m_i, n_i].set(cs_val)
         return sc, cs
 
     rcc, rss = _signed_cos_to_mn(state.Rcos)
     zsc, zcs = _signed_sin_to_mn(state.Zsin)
+
+    if bool(getattr(static.cfg, "lthreed", True)) and bool(getattr(static.cfg, "lconm1", True)) and mpol > 1:
+        rss_m1 = rss[:, 1, :]
+        zcs_m1 = zcs[:, 1, :]
+        rss_new = 0.5 * (rss_m1 + zcs_m1)
+        zcs_new = 0.5 * (rss_m1 - zcs_m1)
+        if hasattr(rss, "at"):
+            rss = rss.at[:, 1, :].set(rss_new)
+            zcs = zcs.at[:, 1, :].set(zcs_new)
+        else:
+            rss = np.asarray(rss).copy()
+            zcs = np.asarray(zcs).copy()
+            rss[:, 1, :] = np.asarray(rss_new)
+            zcs[:, 1, :] = np.asarray(zcs_new)
 
     if bool(apply_basis_norm):
         m_idx = jnp.arange(mpol)[:, None]

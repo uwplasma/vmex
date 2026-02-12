@@ -300,6 +300,7 @@ def main() -> None:
 
         env = {
             "VMEC_DUMP_TOMNSPS_KERNELS": "1",
+            "VMEC_DUMP_TOMNSPS": "1",
             "VMEC_DUMP_BCOVAR": "1",
             "VMEC_DUMP_ITER": str(int(args.iter)),
             "VMEC_DUMP_DIR": str(workdir),
@@ -309,7 +310,11 @@ def main() -> None:
 
         vmec_dump_path = workdir / f"tomnsps_kernels_iter{int(args.iter)}.dat"
         if not vmec_dump_path.exists():
-            raise SystemExit(f"VMEC2000 kernel dump not found: {vmec_dump_path}")
+            candidates = sorted(workdir.glob(f"tomnsps_kernels_ns*_iter{int(args.iter)}.dat"))
+            if candidates:
+                vmec_dump_path = candidates[-1]
+            else:
+                raise SystemExit(f"VMEC2000 kernel dump not found: {vmec_dump_path}")
         vmec_dump = _parse_kernel_dump(vmec_dump_path)
 
         vmec_bcovar_path = workdir / f"bcovar_fields_iter{int(args.iter)}.dat"
@@ -338,7 +343,11 @@ def main() -> None:
 
         jax_dump_path = jax_dump_dir / f"force_kernels_raw_iter{int(args.iter)}.npz"
         if not jax_dump_path.exists():
-            raise SystemExit(f"vmec_jax kernel dump not found: {jax_dump_path}")
+            candidates = sorted(jax_dump_dir.glob(f"force_kernels_raw_ns*_iter{int(args.iter)}.npz"))
+            if candidates:
+                jax_dump_path = candidates[-1]
+            else:
+                raise SystemExit(f"vmec_jax kernel dump not found: {jax_dump_path}")
         jax_dump = np.load(jax_dump_path)
 
         def _arr(name: str, fallback: np.ndarray) -> np.ndarray:

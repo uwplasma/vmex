@@ -6,7 +6,9 @@ Run the minimal showcase (recommended)
 
 The simplest way to get started is the axisymmetric showcase. It runs a small
 suite of bundled inputs, writes a ``wout_*.nc`` for each, produces plots, and
-prints a parity summary against bundled VMEC2000 reference ``wout`` files::
+prints a parity summary against bundled VMEC2000 reference ``wout`` files.
+By default the showcase uses a parity-first single-grid run (``--single-ns 13``)
+and VMEC2000-style per-iteration table output::
 
   python examples/showcase_axisym_input_to_wout.py --suite
 
@@ -66,7 +68,6 @@ Most users should start from the small public API in ``vmec_jax.api``::
 
   run = vj.run_fixed_boundary(
       "examples/data/input.shaped_tokamak_pressure",
-      solver="vmec2000_iter",
       max_iter=10,
       verbose=True,
   )

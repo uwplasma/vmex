@@ -246,7 +246,7 @@ _STEP_SIZE_SENTINEL = object()
 def run_fixed_boundary(
     input_path: str | Path,
     *,
-    solver: str = "gd",
+    solver: str = "vmec2000_iter",
     max_iter: int = 10,
     step_size: float | object = _STEP_SIZE_SENTINEL,
     history_size: int = 10,
@@ -259,7 +259,7 @@ def run_fixed_boundary(
     use_restart_triggers: bool | None = None,
     use_direct_fallback: bool | None = None,
     multigrid: bool | None = None,
-    multigrid_use_input_niter: bool = False,
+    multigrid_use_input_niter: bool = True,
     verbose: bool = True,
     grid=None,
     ns_override: int | None = None,
@@ -272,9 +272,9 @@ def run_fixed_boundary(
     Parameters
     ----------
     solver:
-        ``"gd"`` (gradient descent), ``"lbfgs"``, ``"vmec_lbfgs"``,
-        ``"vmec_gn"`` (VMEC residual objective), or
-        ``"vmec2000_iter"`` (VMEC-style multigrid iteration).
+        ``"vmec2000_iter"`` (VMEC-style multigrid iteration; default),
+        ``"gd"`` (gradient descent), ``"lbfgs"``, ``"vmec_lbfgs"``, or
+        ``"vmec_gn"`` (VMEC residual objective).
     use_initial_guess:
         If True, skip the solve and return the initialized state.
     ns_override:
@@ -391,13 +391,13 @@ def run_fixed_boundary(
     else:
         step_size_val = float(step_size)
 
-    if verbose:
+    if verbose and (solver_lower != "vmec2000_iter" or use_initial_guess):
         mode = "initial guess" if use_initial_guess else f"{solver} solve"
-        print(f"[vmec_jax] fixed-boundary run ({mode})")
-        print(f"[vmec_jax] input={input_path}")
-        print(f"[vmec_jax] ns={cfg.ns} mpol={cfg.mpol} ntor={cfg.ntor} nfp={cfg.nfp}")
+        print(f"[vmec_jax] fixed-boundary run ({mode})", flush=True)
+        print(f"[vmec_jax] input={input_path}", flush=True)
+        print(f"[vmec_jax] ns={cfg.ns} mpol={cfg.mpol} ntor={cfg.ntor} nfp={cfg.nfp}", flush=True)
         if not use_initial_guess:
-            print(f"[vmec_jax] max_iter={max_iter} step_size={step_size_val} history_size={history_size}")
+            print(f"[vmec_jax] max_iter={max_iter} step_size={step_size_val} history_size={history_size}", flush=True)
 
     if use_initial_guess:
         static = build_static(cfg, grid=grid)
@@ -601,7 +601,16 @@ def run_fixed_boundary(
                 static_prev = static_i
 
             if verbose:
-                print(f"[vmec_jax] multigrid stage {i+1}/{nstep}: ns={ns_i} niter={niter_i} ftol={ftol_i:.2e}")
+                nmodes_i = int(np.asarray(static_i.modes.m).size)
+                print(
+                    f" NS = {int(ns_i):4d}  NO. FOURIER MODES = {nmodes_i:4d}  "
+                    f"FTOLV = {float(ftol_i):.2E}  NITER = {int(niter_i):4d}",
+                    flush=True,
+                )
+                print(
+                    " ITER        FSQR        FSQZ        FSQL        fsqr        fsqz        fsql        DELT      RAX(v=0)         WMHD",
+                    flush=True,
+                )
 
             stage_offsets.append(sum(int(np.asarray(r.w_history).size) for r in stage_results))
             stage_results.append(
@@ -630,6 +639,7 @@ def run_fixed_boundary(
                     use_direct_fallback=False,
                     resume_state=restart_solver_state,
                     verbose=bool(verbose),
+                    verbose_vmec2000_table=bool(verbose),
                 )
             )
             state = stage_results[-1].state

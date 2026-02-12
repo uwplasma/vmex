@@ -144,7 +144,6 @@ def _run_vmec2000_exec(
 
     indata_updates: dict[str, str] = {"NSTEP": str(int(nstep))}
     if ns_override is not None:
-        indata_updates["NS"] = str(int(ns_override))
         indata_updates["NS_ARRAY"] = str(int(ns_override))
     if not use_input_niter:
         niter_steps = _distribute_iters(iters=int(iters), nstep=int(nstep))
@@ -213,6 +212,10 @@ def _plot_residuals(*, traces: list[RunTrace], outpath: Path) -> None:
     nrows = int(np.ceil(n / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=(10, 3.6 * nrows), constrained_layout=True)
     axes = np.atleast_1d(axes).reshape(nrows, ncols)
+    style = {
+        "vmec2000": dict(ls="--", lw=1.8, marker="o", ms=3.0, alpha=0.9, zorder=3),
+        "vmec_jax": dict(ls="-", lw=1.6, marker=None, ms=0.0, alpha=0.9, zorder=2),
+    }
     for idx, case in enumerate(cases):
         ax = axes[idx // ncols, idx % ncols]
         for b in backends:
@@ -221,7 +224,8 @@ def _plot_residuals(*, traces: list[RunTrace], outpath: Path) -> None:
                 continue
             y = np.asarray(t.fsq_total, dtype=float)
             x = np.arange(1, y.size + 1)
-            ax.plot(x, y, lw=1.5, label=b)
+            st = style.get(b, {})
+            ax.plot(x, y, label=b, **st)
         ax.set_yscale("log")
         ax.set_xlabel("iteration")
         ax.set_ylabel("fsq_total")
@@ -282,7 +286,7 @@ def main() -> None:
     p.add_argument(
         "--ns-override",
         type=int,
-        default=None,
+        default=13,
         help="Override ns for vmec_jax (vmec2000 backend uses input resolution).",
     )
     p.add_argument(
@@ -320,18 +324,18 @@ def main() -> None:
     p.add_argument(
         "--vmec2000-ns-override",
         type=int,
-        default=None,
-        help="Override VMEC2000 NS/NS_ARRAY (single-grid) for faster runs.",
+        default=13,
+        help="Override VMEC2000 NS/NS_ARRAY (single-grid) for parity-focused traces.",
     )
     p.add_argument(
         "--vmec2000-use-input-niter",
-        default=True,
+        default=False,
         action=argparse.BooleanOptionalAction,
         help="Use input NITER_ARRAY/FTOL_ARRAY (skip fixed-budget override).",
     )
     p.add_argument(
         "--jax-use-input-niter",
-        default=True,
+        default=False,
         action=argparse.BooleanOptionalAction,
         help="Use input NITER_ARRAY/FTOL_ARRAY for vmec_jax staging.",
     )
@@ -405,6 +409,11 @@ def main() -> None:
                 tvm = None
             if tvm is not None:
                 traces.append(tvm)
+            else:
+                raise RuntimeError(
+                    f"VMEC2000 trace missing for case={case!r}. "
+                    "Re-run with a larger --vmec2000-timeout or reduced --vmec2000-ns-override."
+                )
 
     # Write machine-readable data for later reuse.
     payload: dict[str, Any] = {

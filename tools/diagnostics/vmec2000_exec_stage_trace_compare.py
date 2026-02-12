@@ -908,7 +908,9 @@ def _decode_xc_index(idx: int, *, ns: int, mpol: int, ntor: int, lthreed: bool) 
     if ntmax == 1:
         comps = ("rcc", "zsc", "lsc")
     else:
-        comps = ("rcc", "zsc", "lsc", "rss", "zcs", "lcs")
+        # VMEC serial packed layout (symmetric 3D):
+        # [rcc, rss, zsc, zcs, lsc, lcs]
+        comps = ("rcc", "rss", "zsc", "zcs", "lsc", "lcs")
     comp = comps[ntype] if 0 <= ntype < len(comps) else f"ntype={ntype}"
     return f"{comp}: m={m} n={n} js={js + 1} (ns={ns})"
 
@@ -1709,6 +1711,24 @@ def main() -> None:
                     dec_v = "idx decode unavailable"
                 print(f"    xc decode: {dec_xc}")
                 print(f"    v decode: {dec_v}")
+                if idx_xc is not None and int(idx_xc) >= 0 and int(idx_xc) < vm_xc.size and int(idx_xc) < jx_xc.size:
+                    iv = int(idx_xc)
+                    v_vm = float(vm_xc[iv])
+                    v_jx = float(jx_xc[iv])
+                    dv = abs(v_vm - v_jx)
+                    rv = dv / max(abs(v_vm), float(args.atol))
+                    print(
+                        f"    xc values: vmec={v_vm:.16e} jax={v_jx:.16e} abs={dv:.3e} rel={rv:.3e}"
+                    )
+                if idx_v is not None and int(idx_v) >= 0 and int(idx_v) < vm_v.size and int(idx_v) < jx_v.size:
+                    iv = int(idx_v)
+                    v_vm = float(vm_v[iv])
+                    v_jx = float(jx_v[iv])
+                    dv = abs(v_vm - v_jx)
+                    rv = dv / max(abs(v_vm), float(args.atol))
+                    print(
+                        f"    v values:  vmec={v_vm:.16e} jax={v_jx:.16e} abs={dv:.3e} rel={rv:.3e}"
+                    )
             if bool(args.fail_fast) and (not ok_xc or not ok_v):
                 raise SystemExit(2)
 
@@ -2043,9 +2063,9 @@ def main() -> None:
                     continue
                 vm_gcr, vm_gcz, vm_gcl = vm_stage[(ns_val, it)]
                 jx_gcr, jx_gcz, jx_gcl = jx_vals
-                max_abs_r, max_rel_r, _ = _max_abs_rel_err(vm_gcr.ravel(), jx_gcr.ravel())
-                max_abs_z, max_rel_z, _ = _max_abs_rel_err(vm_gcz.ravel(), jx_gcz.ravel())
-                max_abs_l, max_rel_l, _ = _max_abs_rel_err(vm_gcl.ravel(), jx_gcl.ravel())
+                max_abs_r, max_rel_r, idx_r = _max_abs_rel_err(vm_gcr.ravel(), jx_gcr.ravel())
+                max_abs_z, max_rel_z, idx_z = _max_abs_rel_err(vm_gcz.ravel(), jx_gcz.ravel())
+                max_abs_l, max_rel_l, idx_l = _max_abs_rel_err(vm_gcl.ravel(), jx_gcl.ravel())
                 ns_print = ns_val if ns_val is not None else ns_jx
                 ns_tag = f"ns={ns_print} " if ns_print is not None else ""
                 print(
@@ -2053,6 +2073,27 @@ def main() -> None:
                     f" gcz max_abs={max_abs_z:.3e} max_rel={max_rel_z:.3e};"
                     f" gcl max_abs={max_abs_l:.3e} max_rel={max_rel_l:.3e}"
                 )
+                if (max_abs_r > 0.0) and np.isfinite(max_abs_r):
+                    dec = _decode_gc_index(int(idx_r), vm_gcr.shape)
+                    iv = int(idx_r)
+                    print(
+                        f"    gcr idx={dec} vmec={float(vm_gcr.ravel()[iv]):.16e} "
+                        f"jax={float(jx_gcr.ravel()[iv]):.16e}"
+                    )
+                if (max_abs_z > 0.0) and np.isfinite(max_abs_z):
+                    dec = _decode_gc_index(int(idx_z), vm_gcz.shape)
+                    iv = int(idx_z)
+                    print(
+                        f"    gcz idx={dec} vmec={float(vm_gcz.ravel()[iv]):.16e} "
+                        f"jax={float(jx_gcz.ravel()[iv]):.16e}"
+                    )
+                if (max_abs_l > 0.0) and np.isfinite(max_abs_l):
+                    dec = _decode_gc_index(int(idx_l), vm_gcl.shape)
+                    iv = int(idx_l)
+                    print(
+                        f"    gcl idx={dec} vmec={float(vm_gcl.ravel()[iv]):.16e} "
+                        f"jax={float(jx_gcl.ravel()[iv]):.16e}"
+                    )
                 if bool(args.fail_fast):
                     tol_r = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_gcr))))
                     tol_z = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_gcz))))

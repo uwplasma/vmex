@@ -8,6 +8,7 @@
   MPOL =  12
   NTOR =  0
   NITER = 1000
+  FTOL =  1e-14
   
   NS_ARRAY    =     13     25     51
   FTOL_ARRAY  =  1e-14  1e-14  1e-14

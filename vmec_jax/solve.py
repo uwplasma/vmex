@@ -2449,6 +2449,7 @@ def solve_fixed_boundary_residual_iter(
     use_restart_triggers: bool | None = None,
     use_direct_fallback: bool | None = None,
     verbose: bool = True,
+    verbose_vmec2000_table: bool = True,
     resume_state: dict | None = None,
 ) -> SolveVmecResidualResult:
     """VMEC-style fixed-point update loop using preconditioned force residuals."""
@@ -2475,6 +2476,7 @@ def solve_fixed_boundary_residual_iter(
         use_direct_fallback = False
     use_restart_triggers = bool(use_restart_triggers)
     use_direct_fallback = bool(use_direct_fallback)
+    verbose_vmec2000_table = bool(verbose_vmec2000_table)
     limit_dt_from_force = bool(limit_dt_from_force)
     limit_update_rms = bool(limit_update_rms)
     backtracking = bool(backtracking)
@@ -3287,6 +3289,29 @@ def solve_fixed_boundary_residual_iter(
     # iteration initializes forces to 1.0). Track that explicitly.
     prev_rz_fsq = 2.0
 
+    def _print_vmec2000_iter_row(
+        *,
+        iter_idx: int,
+        fsqr: float,
+        fsqz: float,
+        fsql: float,
+        fsqr1: float,
+        fsqz1: float,
+        fsql1: float,
+        delt0r: float,
+        r00: float,
+        w_mhd: float,
+    ) -> None:
+        if not (bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table)):
+            return
+        print(
+            f"{int(iter_idx):5d} "
+            f"{float(fsqr):11.3E} {float(fsqz):11.3E} {float(fsql):11.3E} "
+            f"{float(fsqr1):11.3E} {float(fsqz1):11.3E} {float(fsql1):11.3E} "
+            f"{float(delt0r):11.3E} {float(r00):13.6E} {float(w_mhd):13.6E}",
+            flush=True,
+        )
+
     # VMEC2000 caches 1D preconditioner/norm/tcon updates every `ns4` iterations
     # (vmec_params.f: ns4=25), reusing the cached values between refreshes.
     # This materially affects the nonlinear iteration trace because the
@@ -3572,16 +3597,19 @@ def solve_fixed_boundary_residual_iter(
         wp_history.append(wp_f)
         w_vmec_history.append((wb_f + wp_f / (gamma - 1.0)) * float(TWOPI * TWOPI))
 
-        if verbose:
+        if verbose and (not (bool(vmec2000_control) and bool(verbose_vmec2000_table))):
             print(
-                    f"[solve_fixed_boundary_residual_iter] iter={it:03d} fsqr={fsqr_f:.3e} fsqz={fsqz_f:.3e} fsql={fsql_f:.3e} include_edge={include_edge}"
-                )
+                f"[solve_fixed_boundary_residual_iter] iter={it:03d} fsqr={fsqr_f:.3e} fsqz={fsqz_f:.3e} "
+                f"fsql={fsql_f:.3e} include_edge={include_edge}",
+                flush=True,
+            )
         # Terminate on invariant residuals (fsqr/fsqz/fsql), not fsq1.
         if (fsqr_f <= ftol) and (fsqz_f <= ftol) and (fsql_f <= ftol):
             if verbose:
                 print(
                     f"[solve_fixed_boundary_residual_iter] converged: "
-                    f"fsqr={fsqr_f:.3e} fsqz={fsqz_f:.3e} fsql={fsql_f:.3e} <= ftol={ftol:.3e}"
+                    f"fsqr={fsqr_f:.3e} fsqz={fsqz_f:.3e} fsql={fsql_f:.3e} <= ftol={ftol:.3e}",
+                    flush=True,
                 )
             break
 
@@ -3947,12 +3975,27 @@ def solve_fixed_boundary_residual_iter(
             iter1_history.append(int(iter1))
             grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
             if verbose:
-                print(
-                    f"[solve_fixed_boundary_residual_iter] iter={it:03d} "
-                    f"dt_eff=0.000e+00 update_rms=0.000e+00 "
-                    f"fsqr1={fsqr1_f:.3e} fsqz1={fsqz1_f:.3e} fsql1={fsql1_f:.3e} "
-                    f"step_status={step_status}"
-                )
+                if bool(vmec2000_control) and bool(verbose_vmec2000_table):
+                    _print_vmec2000_iter_row(
+                        iter_idx=int(iter2),
+                        fsqr=fsqr_f,
+                        fsqz=fsqz_f,
+                        fsql=fsql_f,
+                        fsqr1=fsqr1_f,
+                        fsqz1=fsqz1_f,
+                        fsql1=fsql1_f,
+                        delt0r=float(time_step_iter),
+                        r00=float(r00_val),
+                        w_mhd=float(w_vmec_history[-1]),
+                    )
+                else:
+                    print(
+                        f"[solve_fixed_boundary_residual_iter] iter={it:03d} "
+                        f"dt_eff=0.000e+00 update_rms=0.000e+00 "
+                        f"fsqr1={fsqr1_f:.3e} fsqz1={fsqz1_f:.3e} fsql1={fsql1_f:.3e} "
+                        f"step_status={step_status}",
+                        flush=True,
+                    )
             continue
 
         if iter2 == iter1:
@@ -4384,12 +4427,27 @@ def solve_fixed_boundary_residual_iter(
         dt_eff_history.append(float(dt_eff))
         update_rms_history.append(float(update_rms))
         if verbose:
-            print(
-                f"[solve_fixed_boundary_residual_iter] iter={it:03d} "
-                f"dt_eff={dt_eff:.3e} update_rms={update_rms:.3e} "
-                f"fsqr1={fsqr1_f:.3e} fsqz1={fsqz1_f:.3e} fsql1={fsql1_f:.3e} "
-                f"step_status={step_status}"
-            )
+            if bool(vmec2000_control) and bool(verbose_vmec2000_table):
+                _print_vmec2000_iter_row(
+                    iter_idx=int(iter2),
+                    fsqr=fsqr_f,
+                    fsqz=fsqz_f,
+                    fsql=fsql_f,
+                    fsqr1=fsqr1_f,
+                    fsqz1=fsqz1_f,
+                    fsql1=fsql1_f,
+                    delt0r=float(time_step),
+                    r00=float(r00_val),
+                    w_mhd=float(w_vmec_history[-1]),
+                )
+            else:
+                print(
+                    f"[solve_fixed_boundary_residual_iter] iter={it:03d} "
+                    f"dt_eff={dt_eff:.3e} update_rms={update_rms:.3e} "
+                    f"fsqr1={fsqr1_f:.3e} fsqz1={fsqz1_f:.3e} fsql1={fsql1_f:.3e} "
+                    f"step_status={step_status}",
+                    flush=True,
+                )
         step_status_history.append(step_status)
         restart_reason_history.append(restart_reason)
         pre_restart_reason_history.append(pre_restart_reason)

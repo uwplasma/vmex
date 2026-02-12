@@ -56,11 +56,11 @@ All of the following scripts are designed to run quickly on bundled data:
 - Runtime + residual benchmark for a fixed iteration budget (communication-oriented)::
 
     python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py \
-      --iters 20 \
+      --iters 10 \
       --cases circular_tokamak shaped_tokamak_pressure solovev purely_toroidal_field \
-      --ns-override 17
+      --run-vmec2000 --vmec2000-timeout 60
 
-  To include the VMEC2000 executable (if built)::
+  To run at higher resolution::
 
     python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py \
       --iters 20 \
@@ -69,7 +69,7 @@ All of the following scripts are designed to run quickly on bundled data:
       --run-vmec2000 --vmec2000-ns-override 17 --vmec2000-timeout 60 \
       --no-vmec2000-use-input-niter
 
-The quick flags above keep runs under ~60s. Drop ``--disable-jit``/``--no-warmup`` and increase ``--iters``/``--cases`` for higher-fidelity traces.
+The parity-first defaults keep runs under ~60s per case. Increase ``--iters`` and/or ``--ns-override`` for longer traces.
 
 External VMEC2000 runs (optional)
 ---------------------------------
@@ -83,7 +83,7 @@ Per-iteration trace parity (VMEC2000 executable, reduced grid):
 
 ::
 
-  python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case circular_tokamak --max-iter 10 --vmec-nstep 1 --single-ns 17
+  python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case circular_tokamak --max-iter 10 --vmec-nstep 1 --single-ns 13
   python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case nfp4_QH_warm_start --max-iter 10 --single-ns 16 --vmec-timeout 60 --rtol 1e-3
   python tools/diagnostics/nonaxis_parity_batch.py --max-cases 8 --single-ns 13 --max-iter 1 --vmec-timeout 60
 
@@ -102,7 +102,7 @@ Internal force-block parity scan (tomnsps + gc, executable):
 
 ::
 
-  python tools/diagnostics/vmec2000_exec_internal_scan.py --case circular_tokamak --single-ns 17 --iter-start 1 --iter-stop 5
+  python tools/diagnostics/vmec2000_exec_internal_scan.py --case circular_tokamak --single-ns 13 --iter-start 1 --iter-stop 5
 
 This dumps internal force blocks per iteration and stops at the first mismatch beyond tolerance.
 
@@ -136,9 +136,9 @@ Current observed mismatches (updated parity status):
   iteration 16. Continuous 30-iter parity at ``--single-ns 13`` remains pending
   under the 60s cap.
 - **Multigrid parity** (full `NS` from input, `--use-input-niter`) now matches
-  per-iteration traces on ``circular_tokamak`` and ``shaped_tokamak_pressure``
-  for a 10-iteration cap; 20-iter multigrid traces are now generated for the
-  benchmark figures (reduced ns for runtime).
+  per-iteration traces for the 4 axisymmetric benchmark cases at a 10-iteration
+  cap (``circular_tokamak``, ``purely_toroidal_field``,
+  ``shaped_tokamak_pressure``, ``solovev``) on reduced ``ns=13`` grids.
 - **Non-axisymmetric parity** is now exercised on multiple Simsopt inputs via
   ``nonaxis_parity_batch.py``. Current first-iteration status:
   ``input.li383_low_res`` and ``input.n3are_R7.75B5.7_lowres`` improved to
@@ -163,7 +163,6 @@ explicitly deferred for now include:
 Current blockers worth tracking:
 
 - ``lasym=True`` axisymmetric case (``input.up_down_asymmetric_tokamak``) shows large bcovar/force-kernel mismatches at iter 1.
-- ``purely_toroidal_field`` multigrid trace matches early iterations but the ``r00``/``WMHD`` diagnostics become non-finite at later iterations in ``vmec_jax``.
 - Lambda-path internal parity (``flsc``/``gcl`` and ``blmn``/``clmn``) matches VMEC2000
   to ~1e-10 abs on reduced grids with full dumps; remaining work is to validate the
   same at higher resolution.

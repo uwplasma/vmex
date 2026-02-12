@@ -11,6 +11,7 @@
   NTOR =  0
   NS_ARRAY =    16
   NITER =  1000
+  FTOL =  1e-14
   NSTEP =  200
   NVACSKIP =  3
   GAMMA =   0.00000000E+00
