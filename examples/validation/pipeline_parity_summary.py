@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import nullcontext
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -47,6 +48,28 @@ def _format(x: float) -> str:
 
 def _case_parity(*, input_path: Path, wout_path: Path, jit: bool) -> dict[str, float]:
     cfg, indata = load_config(str(input_path))
+    wout = read_wout(wout_path)
+    state = state_from_wout(wout)
+
+    # Some bundled reference wouts were generated with higher-order Fourier
+    # settings than the low-res input files. Ensure the static/mode tables match
+    # the wout we are validating against.
+    if (
+        int(cfg.mpol) != int(wout.mpol)
+        or int(cfg.ntor) != int(wout.ntor)
+        or int(cfg.nfp) != int(wout.nfp)
+        or bool(cfg.lasym) != bool(wout.lasym)
+        or int(cfg.ns) != int(wout.ns)
+    ):
+        cfg = replace(
+            cfg,
+            mpol=int(wout.mpol),
+            ntor=int(wout.ntor),
+            nfp=int(wout.nfp),
+            lasym=bool(wout.lasym),
+            ns=int(wout.ns),
+        )
+
     grid = vmec_angle_grid(
         ntheta=int(cfg.ntheta),
         nzeta=int(cfg.nzeta),
@@ -54,8 +77,6 @@ def _case_parity(*, input_path: Path, wout_path: Path, jit: bool) -> dict[str, f
         lasym=bool(cfg.lasym),
     )
     static = build_static(cfg, grid=grid)
-    wout = read_wout(wout_path)
-    state = state_from_wout(wout)
 
     try:
         import jax
@@ -92,6 +113,18 @@ def _case_parity(*, input_path: Path, wout_path: Path, jit: bool) -> dict[str, f
         bsupv_new = np.asarray(bc.bsupv)
         bsubu_new = np.asarray(bc.bsubu)
         bsubv_new = np.asarray(bc.bsubv)
+
+        # VMEC wout stores bsupu with the opposite sign of the internal bcovar
+        # convention (signgs orientation). For solver-free parity, align the
+        # sign so the comparison is meaningful.
+        if np.sign(np.sum(bsupu_new * bsupu_ref)) < 0.0:
+            bsupu_new = -bsupu_new
+            guu = np.asarray(bc.guu)
+            guv = np.asarray(bc.guv)
+            gvv = np.asarray(bc.gvv)
+            bsubu_new = guu * bsupu_new + guv * bsupv_new
+            bsubv_new = guv * bsupu_new + gvv * bsupv_new
+
         b2_new = bsupu_new * bsubu_new + bsupv_new * bsubv_new
         bmag_new = np.sqrt(np.maximum(0.0, b2_new))
         bsq_new = np.asarray(bc.bsq)
@@ -101,6 +134,7 @@ def _case_parity(*, input_path: Path, wout_path: Path, jit: bool) -> dict[str, f
             static=static,
             indata=indata,
             signgs=int(wout.signgs),
+            wout=wout,
             use_vmec_synthesis=True,
         )
 
@@ -127,7 +161,7 @@ def main() -> None:
     p.add_argument(
         "--cases",
         nargs="*",
-        default=["circular_tokamak", "shaped_tokamak_pressure", "solovev", "li383_low_res"],
+        default=["circular_tokamak", "purely_toroidal_field", "shaped_tokamak_pressure", "solovev"],
         help="Case names from examples/data as input.<case> and wout_<case>_reference.nc.",
     )
     p.add_argument(

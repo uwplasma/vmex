@@ -3222,6 +3222,7 @@ def solve_fixed_boundary_residual_iter(
     fsqz2_history = []
     fsql2_history = []
     r00_history: list[float] = []
+    z00_history: list[float] = []
     wb_history: list[float] = []
     wp_history: list[float] = []
     w_vmec_history: list[float] = []
@@ -3306,16 +3307,27 @@ def solve_fixed_boundary_residual_iter(
         delt0r: float,
         r00: float,
         w_mhd: float,
+        z00: float | None = None,
     ) -> None:
         if not (bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table)):
             return
-        print(
-            f"{int(iter_idx):5d} "
-            f"{float(fsqr):11.3E} {float(fsqz):11.3E} {float(fsql):11.3E} "
-            f"{float(fsqr1):11.3E} {float(fsqz1):11.3E} {float(fsql1):11.3E} "
-            f"{float(delt0r):11.3E} {float(r00):13.6E} {float(w_mhd):13.6E}",
-            flush=True,
-        )
+        if bool(cfg.lasym):
+            z_val = float("nan") if z00 is None else float(z00)
+            # VMEC screen format (lasym, fixed-boundary): i5,3e10.2,2e11.3,e10.2,e12.4
+            print(
+                f"{int(iter_idx):5d}"
+                f"{float(fsqr):10.2E}{float(fsqz):10.2E}{float(fsql):10.2E}"
+                f"{float(r00):11.3E}{z_val:11.3E}{float(delt0r):10.2E}{float(w_mhd):12.4E}",
+                flush=True,
+            )
+        else:
+            # VMEC screen format (fixed-boundary): i5,3e10.2,e11.3,e10.2,e12.4
+            print(
+                f"{int(iter_idx):5d}"
+                f"{float(fsqr):10.2E}{float(fsqz):10.2E}{float(fsql):10.2E}"
+                f"{float(r00):11.3E}{float(delt0r):10.2E}{float(w_mhd):12.4E}",
+                flush=True,
+            )
 
     # VMEC2000 caches 1D preconditioner/norm/tcon updates every `ns4` iterations
     # (vmec_params.f: ns4=25), reusing the cached values between refreshes.
@@ -3590,9 +3602,15 @@ def solve_fixed_boundary_residual_iter(
         # For 3D, this includes *all* m=0 cosine harmonics at zeta=0.
         if not np.any(m0_mask):
             r00_val = float("nan")
+            z00_val = float("nan")
         else:
             r00_val = float(np.sum(np.asarray(state.Rcos)[0, m0_mask]))
+            if bool(cfg.lasym):
+                z00_val = float(np.sum(np.asarray(state.Zcos)[0, m0_mask]))
+            else:
+                z00_val = 0.0
         r00_history.append(r00_val)
+        z00_history.append(z00_val)
         # `norms_used` may be cached (VMEC2000 `ns4=25` behavior). VMEC's
         # printed WMHD uses the *current* wb/wp from `funct3d`, not cached
         # norm scalars. Recompute wb/wp from the current bcovar state here.
@@ -3611,7 +3629,7 @@ def solve_fixed_boundary_residual_iter(
             )
         # Terminate on invariant residuals (fsqr/fsqz/fsql), not fsq1.
         if (fsqr_f <= ftol) and (fsqz_f <= ftol) and (fsql_f <= ftol):
-            if verbose:
+            if verbose and not (bool(vmec2000_control) and bool(verbose_vmec2000_table)):
                 print(
                     f"[solve_fixed_boundary_residual_iter] converged: "
                     f"fsqr={fsqr_f:.3e} fsqz={fsqz_f:.3e} fsql={fsql_f:.3e} <= ftol={ftol:.3e}",
@@ -3744,7 +3762,7 @@ def solve_fixed_boundary_residual_iter(
             w_neg = _trial(-1.0)
             if np.isfinite(w_neg) and np.isfinite(w_pos) and (w_neg < w_pos):
                 flip_sign = -1.0
-                if verbose:
+                if verbose and not (bool(vmec2000_control) and bool(verbose_vmec2000_table)):
                     print(
                         "[solve_fixed_boundary_residual_iter] flipping force sign "
                         f"(w_curr={w_curr:.3e} w_pos={w_pos:.3e} w_neg={w_neg:.3e})"
@@ -3993,6 +4011,7 @@ def solve_fixed_boundary_residual_iter(
                         delt0r=float(time_step_iter),
                         r00=float(r00_val),
                         w_mhd=float(w_vmec_history[-1]),
+                        z00=float(z00_val),
                     )
                 else:
                     print(
@@ -4457,6 +4476,7 @@ def solve_fixed_boundary_residual_iter(
                     delt0r=float(time_step_report),
                     r00=float(r00_val),
                     w_mhd=float(w_vmec_history[-1]),
+                    z00=float(z00_val),
                 )
             else:
                 print(
@@ -4512,6 +4532,7 @@ def solve_fixed_boundary_residual_iter(
         "max_tau_history": np.asarray(max_tau_history, dtype=float),
         "bad_jacobian_history": np.asarray(bad_jacobian_history, dtype=int),
         "r00_history": np.asarray(r00_history, dtype=float),
+        "z00_history": np.asarray(z00_history, dtype=float),
         "wb_history": np.asarray(wb_history, dtype=float),
         "wp_history": np.asarray(wp_history, dtype=float),
         "w_vmec_history": np.asarray(w_vmec_history, dtype=float),

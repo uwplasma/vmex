@@ -56,6 +56,7 @@ def residual_scalars_from_state(
     static,
     indata,
     signgs: int,
+    wout=None,
     use_vmec_synthesis: bool = True,
 ):
     """Compute VMEC-style invariant residual scalars (fsqr/fsqz/fsql) from a state.
@@ -80,13 +81,15 @@ def residual_scalars_from_state(
             self.lasym = bool(lasym)
             self.signgs = int(signgs)
 
-    wout_like = _WoutLike(
-        nfp=int(static.cfg.nfp),
-        mpol=int(static.cfg.mpol),
-        ntor=int(static.cfg.ntor),
-        lasym=bool(static.cfg.lasym),
-        signgs=int(signgs),
-    )
+    wout_like = wout
+    if wout_like is None:
+        wout_like = _WoutLike(
+            nfp=int(static.cfg.nfp),
+            mpol=int(static.cfg.mpol),
+            ntor=int(static.cfg.ntor),
+            lasym=bool(static.cfg.lasym),
+            signgs=int(signgs),
+        )
 
     trig = vmec_trig_tables(
         ntheta=int(static.cfg.ntheta),
@@ -603,14 +606,20 @@ def run_fixed_boundary(
             if verbose:
                 nmodes_i = int(np.asarray(static_i.modes.m).size)
                 print(
-                    f" NS = {int(ns_i):4d}  NO. FOURIER MODES = {nmodes_i:4d}  "
-                    f"FTOLV = {float(ftol_i):.2E}  NITER = {int(niter_i):4d}",
+                    f"  NS = {int(ns_i):4d} NO. FOURIER MODES = {nmodes_i:4d} "
+                    f"FTOLV = {float(ftol_i):10.3E} NITER = {int(niter_i):6d}",
                     flush=True,
                 )
-                print(
-                    " ITER        FSQR        FSQZ        FSQL        fsqr        fsqz        fsql        DELT      RAX(v=0)         WMHD",
-                    flush=True,
-                )
+                if bool(cfg.lasym):
+                    print(
+                        "  ITER    FSQR      FSQZ      FSQL    RAX(v=0)  ZAX(v=0)    DELT       WMHD",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        "  ITER    FSQR      FSQZ      FSQL    RAX(v=0)    DELT       WMHD",
+                        flush=True,
+                    )
 
             stage_offsets.append(sum(int(np.asarray(r.w_history).size) for r in stage_results))
             stage_results.append(
@@ -683,6 +692,7 @@ def run_fixed_boundary(
             "fsqz1_history",
             "fsql1_history",
             "r00_history",
+            "z00_history",
             "wb_history",
             "wp_history",
             "w_vmec_history",
@@ -714,7 +724,7 @@ def run_fixed_boundary(
             f"Unknown solver: {solver!r} (expected 'gd', 'lbfgs', 'vmec_lbfgs', 'vmec_gn', or 'vmec2000_iter')"
         )
 
-    if verbose:
+    if verbose and solver_lower != "vmec2000_iter":
         n_iter = int(getattr(res, "n_iter", -1))
         w_final = float(res.w_history[-1]) if getattr(res, "w_history", None) is not None else float("nan")
         grad_final = float(res.grad_rms_history[-1]) if getattr(res, "grad_rms_history", None) is not None else float("nan")
