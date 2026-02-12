@@ -1512,6 +1512,8 @@ def main() -> None:
     diff_rows: list[tuple[int, int]] = []  # (stage, iter)
     diff_cols_vmec: dict[str, list[float]] = {}
     diff_cols_jax: dict[str, list[float]] = {}
+    first_mismatch: dict[str, object] | None = None
+    stop_after_mismatch = False
     if use_threed1:
         for name in ("fsqr", "fsqz", "fsql", "fsqr1", "fsqz1", "fsql1", "delt0r", "r00", "w"):
             diff_cols_vmec[name] = []
@@ -1533,7 +1535,7 @@ def main() -> None:
                 print(f"  vmec ns_stages={vmec_ns.tolist()}  jax ns_stages={ns_stages.tolist()}")
             if not off_ok:
                 print(f"  vmec offsets={vmec_offsets.tolist()}  jax offsets={offsets.tolist()}")
-            if bool(args.fail_fast):
+            if bool(args.fail_fast) and first_mismatch is None:
                 raise SystemExit(2)
 
     for stage_i, st in enumerate(vmec_stages):
@@ -1598,7 +1600,7 @@ def main() -> None:
                 diff_cols_vmec["w"].append(float(row.w if row.w is not None else float("nan")))
                 diff_cols_jax["w"].append(float(w[j] if j < w.size else float("nan")))
 
-                if bool(args.fail_fast):
+                if bool(args.fail_fast) and first_mismatch is None:
                     pairs = [
                         ("fsqr", vmec_fsqr, float(fsqr[j] if j < fsqr.size else float("nan"))),
                         ("fsqz", vmec_fsqz, float(fsqz[j] if j < fsqz.size else float("nan"))),
@@ -1612,12 +1614,17 @@ def main() -> None:
                     ]
                     for name, v, jv in pairs:
                         if not _matches(v, jv):
-                            print()
-                            print("First mismatch beyond tolerance:")
-                            print(f"  stage={stage_i+1} iter={row.it} field={name}")
-                            print(f"  vmec2000={v:.6e}  vmec_jax={jv:.6e}")
-                            print(f"  tol: rtol={args.rtol:.3e} atol={args.atol:.3e}")
-                            raise SystemExit(2)
+                            first_mismatch = {
+                                "stage": int(stage_i + 1),
+                                "iter": int(row.it),
+                                "field": str(name),
+                                "vmec": float(v),
+                                "jax": float(jv),
+                            }
+                            stop_after_mismatch = True
+                            break
+                    if stop_after_mismatch:
+                        break
             else:
                 assert isinstance(row, Vmec2000PrintedRow)
                 print(
@@ -1626,6 +1633,19 @@ def main() -> None:
                     f"{row.fsqz:>11.3e} {fsqz[j]:>11.3e}  "
                     f"{row.fsql:>11.3e} {fsql[j]:>11.3e}"
                 )
+            if stop_after_mismatch:
+                break
+        if stop_after_mismatch:
+            break
+
+    if first_mismatch is not None:
+        print()
+        print("First mismatch beyond tolerance:")
+        print(
+            f"  stage={first_mismatch['stage']} iter={first_mismatch['iter']} field={first_mismatch['field']}"
+        )
+        print(f"  vmec2000={first_mismatch['vmec']:.6e}  vmec_jax={first_mismatch['jax']:.6e}")
+        print(f"  tol: rtol={args.rtol:.3e} atol={args.atol:.3e}")
 
     if use_threed1 and diff_rows:
         print()
@@ -1729,7 +1749,7 @@ def main() -> None:
                     print(
                         f"    v values:  vmec={v_vm:.16e} jax={v_jx:.16e} abs={dv:.3e} rel={rv:.3e}"
                     )
-            if bool(args.fail_fast) and (not ok_xc or not ok_v):
+            if bool(args.fail_fast) and first_mismatch is None and (not ok_xc or not ok_v):
                 raise SystemExit(2)
 
     if vmec_bsube or jax_bsube:
@@ -1752,7 +1772,7 @@ def main() -> None:
                 f"  {ns_tag}iter {it:03d}: bsubu max_abs={max_abs_u:.3e} max_rel={max_rel_u:.3e};"
                 f" bsubv max_abs={max_abs_v:.3e} max_rel={max_rel_v:.3e}"
             )
-            if bool(args.fail_fast):
+            if bool(args.fail_fast) and first_mismatch is None:
                 tol_u = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_bsubu))))
                 tol_v = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_bsubv))))
                 if max_abs_u > tol_u or max_abs_v > tol_v:
@@ -1777,7 +1797,7 @@ def main() -> None:
                 max_abs = abs(v - j)
                 max_rel = max_abs / max(abs(v), float(args.atol)) if np.isfinite(v) else float("nan")
                 print(f"  {ns_tag}iter {it:03d} {name}: vmec={v:.6e} jax={j:.6e} abs={max_abs:.3e} rel={max_rel:.3e}")
-                if bool(args.fail_fast):
+                if bool(args.fail_fast) and first_mismatch is None:
                     tol = max(float(args.atol), float(args.rtol) * abs(v))
                     if max_abs > tol:
                         raise SystemExit(2)
@@ -1801,7 +1821,7 @@ def main() -> None:
                 max_abs = abs(v - j)
                 max_rel = max_abs / max(abs(v), float(args.atol)) if np.isfinite(v) else float("nan")
                 print(f"  {ns_tag}iter {it:03d} {name}: vmec={v:.6e} jax={j:.6e} abs={max_abs:.3e} rel={max_rel:.3e}")
-                if bool(args.fail_fast):
+                if bool(args.fail_fast) and first_mismatch is None:
                     tol = max(float(args.atol), float(args.rtol) * abs(v))
                     if max_abs > tol:
                         raise SystemExit(2)
@@ -1821,7 +1841,7 @@ def main() -> None:
                 vm_edge = int(round(float(vmec_gcx2[(ns_val, it)].get("include_edge", 0.0))))
                 jx_edge = int(include_edge_hist[idx]) if idx < include_edge_hist.size else -1
                 print(f"  ns={ns_val} iter {it:03d} include_edge: vmec={vm_edge} jax={jx_edge}")
-                if bool(args.fail_fast) and (jx_edge >= 0) and (vm_edge != jx_edge):
+                if bool(args.fail_fast) and first_mismatch is None and (jx_edge >= 0) and (vm_edge != jx_edge):
                     raise SystemExit(2)
             if zero_m1_hist.size and vmec_fsq_dump:
                 if it < 2:
@@ -1832,7 +1852,7 @@ def main() -> None:
                     vm_zero_m1 = 1 if fsqz_prev < 1.0e-6 else 0
                 jx_zero_m1 = int(zero_m1_hist[idx]) if idx < zero_m1_hist.size else -1
                 print(f"  ns={ns_val} iter {it:03d} zero_m1: vmec={vm_zero_m1} jax={jx_zero_m1}")
-                if bool(args.fail_fast) and (jx_zero_m1 >= 0) and (vm_zero_m1 != jx_zero_m1):
+                if bool(args.fail_fast) and first_mismatch is None and (jx_zero_m1 >= 0) and (vm_zero_m1 != jx_zero_m1):
                     raise SystemExit(2)
 
     if vmec_kernels or jax_kernels:
@@ -1856,7 +1876,7 @@ def main() -> None:
                 if idx >= 0:
                     msg += f" idx={_format_kernel_index(int(idx), shape=vm[name].shape)}"
                 print(msg)
-                if bool(args.fail_fast):
+                if bool(args.fail_fast) and first_mismatch is None:
                     tol = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(v))))
                     if max_abs > tol:
                         raise SystemExit(2)
@@ -1879,7 +1899,7 @@ def main() -> None:
                 j = np.asarray(jx.get(name, np.zeros_like(vm[name]))).ravel()
                 max_abs, max_rel, idx = _max_abs_rel_err(v, j)
                 print(f"  {ns_tag}iter {it:03d} {name}: max_abs={max_abs:.3e} max_rel={max_rel:.3e}")
-                if bool(args.fail_fast):
+                if bool(args.fail_fast) and first_mismatch is None:
                     tol = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(v))))
                     if max_abs > tol:
                         if name == "flsc":
@@ -1908,7 +1928,7 @@ def main() -> None:
             ns_print = ns_val if ns_val is not None else ns_jx
             ns_tag = f"ns={ns_print} " if ns_print is not None else ""
             print(f"  {ns_tag}iter {it:03d} flsc: rms={denom:.3e} max_abs={max_abs:.3e} norm_err={norm_err:.3e} idx={decode}")
-            if bool(args.fail_fast):
+            if bool(args.fail_fast) and first_mismatch is None:
                 tol = max(float(args.atol), float(args.rtol) * denom)
                 if max_abs > tol:
                     raise SystemExit(2)
@@ -1924,7 +1944,7 @@ def main() -> None:
             ns_print = ns_val if ns_val is not None else ns_jx
             ns_tag = f"ns={ns_print} " if ns_print is not None else ""
             print(f"  {ns_tag}iter {it:03d} gcl(raw): rms={denom:.3e} max_abs={max_abs:.3e} norm_err={norm_err:.3e} idx={decode}")
-            if bool(args.fail_fast):
+            if bool(args.fail_fast) and first_mismatch is None:
                 tol = max(float(args.atol), float(args.rtol) * denom)
                 if max_abs > tol:
                     raise SystemExit(2)
@@ -2094,7 +2114,7 @@ def main() -> None:
                         f"    gcl idx={dec} vmec={float(vm_gcl.ravel()[iv]):.16e} "
                         f"jax={float(jx_gcl.ravel()[iv]):.16e}"
                     )
-                if bool(args.fail_fast):
+                if bool(args.fail_fast) and first_mismatch is None:
                     tol_r = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_gcr))))
                     tol_z = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_gcz))))
                     tol_l = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_gcl))))
@@ -2129,6 +2149,9 @@ def main() -> None:
         print("End-state comparison vs VMEC2000 wout:")
         print(f"  fsq_total: vmec={fsq_ref:.3e}  jax={fsq_new:.3e}")
         print(f"  rmnc relRMS={rmnc_err:.3e}  zmns relRMS={zmns_err:.3e}")
+
+    if bool(args.fail_fast) and first_mismatch is not None:
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

@@ -540,7 +540,19 @@ def wout_minimal_from_fixed_boundary(
         s_half = np.concatenate([s[:1], 0.5 * (s[1:] + s[:-1])], axis=0)
     prof = eval_profiles(indata, s_half)
     pres = np.asarray(prof.get("pressure", np.zeros((ns,), dtype=float)))
-    presf = np.asarray(full_mesh_from_half_mesh_avg(pres))
+    if pres.size:
+        pres = pres.copy()
+        pres[0] = 0.0
+    if ns < 2:
+        presf = pres.copy()
+    else:
+        presf = np.zeros_like(pres)
+        if ns >= 3:
+            presf[0] = 1.5 * pres[1] - 0.5 * pres[2]
+        else:
+            presf[0] = pres[1]
+        presf[1:-1] = 0.5 * (pres[1:-1] + pres[2:])
+        presf[-1] = 1.5 * pres[-1] - 0.5 * pres[-2]
     iotas = np.asarray(prof.get("iota", np.zeros((ns,), dtype=float)))
     if iotas.size:
         iotas = iotas.copy()
@@ -554,15 +566,16 @@ def wout_minimal_from_fixed_boundary(
     rmns = np.asarray(state.Rsin, dtype=float)
     zmnc = np.asarray(state.Zcos, dtype=float)
     zmns = np.asarray(state.Zsin, dtype=float)
-    lmnc = np.asarray(state.Lcos, dtype=float)
-    lmns = np.asarray(state.Lsin, dtype=float)
+    lmnc_internal = np.asarray(state.Lcos, dtype=float)
+    lmns_internal = np.asarray(state.Lsin, dtype=float)
 
     mnmax_nyq = int(nyq_modes.K)
     z2 = np.zeros((ns, mnmax_nyq), dtype=float)
     z1 = np.zeros((ns,), dtype=float)
 
     # Toroidal flux (VMEC `phi`) in physical units.
-    phipf_out = np.asarray(flux.phipf, dtype=float) * float(2.0 * np.pi * signgs)
+    phipf_internal = np.asarray(flux.phipf, dtype=float)
+    phipf_out = phipf_internal * float(2.0 * np.pi * signgs)
     chipf_out = np.asarray(chipf_wout, dtype=float) * float(2.0 * np.pi * signgs)
     phi = np.asarray(cumrect_s_halfmesh(phipf_out, s))
 
@@ -605,10 +618,11 @@ def wout_minimal_from_fixed_boundary(
         aspect = 0.0
 
     # Build VMEC parity grids for Nyquist outputs.
-    mmax = int(np.max(main_modes.m)) if int(main_modes.K) > 0 else 0
-    nmax = int(np.max(np.abs(main_modes.n))) if int(main_modes.K) > 0 else 0
+    mmax = int(np.max(nyq_modes.m)) if int(nyq_modes.K) > 0 else 0
+    nmax = int(np.max(np.abs(nyq_modes.n))) if int(nyq_modes.K) > 0 else 0
+    ntheta_base = int(cfg.ntheta)
     trig = vmec_trig_tables(
-        ntheta=int(cfg.ntheta),
+        ntheta=int(ntheta_base),
         nzeta=int(cfg.nzeta),
         nfp=int(nfp),
         mmax=int(mmax),
@@ -667,10 +681,16 @@ def wout_minimal_from_fixed_boundary(
     volume_p = volume * float(4.0 * np.pi**2)
     betatotal = (wp / wb) if wb != 0.0 else 0.0
 
-    buco, bvco, jcuru, jcurv = currents_from_bcovar(bc=bc, trig=trig, wout=wout_like, s=s)
-    equif = equif_from_bcovar(bc=bc, trig=trig, wout=wout_like, s=s)
+    # buco/bvco/jcur* will be computed after aligning bsubu sign for wout output.
+    buco = bvco = jcuru = jcurv = None
+    equif = None
 
     # Nyquist Fourier coefficients for fields stored in wout.
+    bsupu_out = np.asarray(bc.bsupu)
+    bsupv_out = np.asarray(bc.bsupv)
+    bsubu_out = np.asarray(bc.bsubu)
+    bsubv_out = np.asarray(bc.bsubv)
+
     if bool(lasym):
         gmnc = z2.copy()
         gmns = z2.copy()
@@ -685,15 +705,45 @@ def wout_minimal_from_fixed_boundary(
         bmnc = z2.copy()
         bmns = z2.copy()
     else:
-        gmnc, gmns = vmec_realspace_analysis(f=np.asarray(bc.jac.sqrtg), modes=nyq_modes, trig=trig, parity="both")
-        bsupumnc, bsupumns = vmec_realspace_analysis(f=np.asarray(bc.bsupu), modes=nyq_modes, trig=trig, parity="both")
-        bsupvmnc, bsupvmns = vmec_realspace_analysis(f=np.asarray(bc.bsupv), modes=nyq_modes, trig=trig, parity="both")
-        bsubumnc, bsubumns = vmec_realspace_analysis(f=np.asarray(bc.bsubu), modes=nyq_modes, trig=trig, parity="both")
-        bsubvmnc, bsubvmns = vmec_realspace_analysis(f=np.asarray(bc.bsubv), modes=nyq_modes, trig=trig, parity="both")
+        parity = "both" if bool(lasym) else "cos"
+        gmnc, gmns = vmec_realspace_analysis(f=np.asarray(bc.jac.sqrtg), modes=nyq_modes, trig=trig, parity=parity)
+        bsupu_out = -np.asarray(bc.bsupu)
+        bsupv_out = np.asarray(bc.bsupv)
+        bsubu_out = np.asarray(bc.guu) * bsupu_out + np.asarray(bc.guv) * bsupv_out
+        bsubv_out = np.asarray(bc.guv) * bsupu_out + np.asarray(bc.gvv) * bsupv_out
+        bsupumnc, bsupumns = vmec_realspace_analysis(f=bsupu_out, modes=nyq_modes, trig=trig, parity=parity)
+        bsupvmnc, bsupvmns = vmec_realspace_analysis(f=bsupv_out, modes=nyq_modes, trig=trig, parity=parity)
+        bsubumnc, bsubumns = vmec_realspace_analysis(f=bsubu_out, modes=nyq_modes, trig=trig, parity=parity)
+        bsubvmnc, bsubvmns = vmec_realspace_analysis(f=bsubv_out, modes=nyq_modes, trig=trig, parity=parity)
 
         pres_h = np.asarray(pres, dtype=float)[:, None, None]
         bmag = np.sqrt(np.maximum(2.0 * (np.asarray(bc.bsq) - pres_h), 0.0))
-        bmnc, bmns = vmec_realspace_analysis(f=bmag, modes=nyq_modes, trig=trig, parity="both")
+        bmnc, bmns = vmec_realspace_analysis(f=bmag, modes=nyq_modes, trig=trig, parity=parity)
+
+    # buco/bvco/jcur* and equif use the sign-aligned bsubu/bsubv for wout output.
+    from types import SimpleNamespace
+
+    bc_curr = SimpleNamespace(bsubu=bsubu_out, bsubv=bsubv_out)
+    buco, bvco, jcuru, jcurv = currents_from_bcovar(bc=bc_curr, trig=trig, wout=wout_like, s=s)
+    # Replace jcuru/jcurv with VMEC eqfor-style endpoint extrapolation.
+    if ns >= 3:
+        hs = float(s[1] - s[0])
+        ohs = 1.0 / hs if hs != 0.0 else 0.0
+        signgs_f = float(signgs)
+        jcuru = np.zeros_like(buco)
+        jcurv = np.zeros_like(buco)
+        for js in range(1, ns - 1):
+            jcurv[js] = signgs_f * ohs * (buco[js + 1] - buco[js])
+            jcuru[js] = -signgs_f * ohs * (bvco[js + 1] - bvco[js])
+        jcuru[0] = 2.0 * jcuru[1] - jcuru[2]
+        jcuru[-1] = 2.0 * jcuru[-2] - jcuru[-3]
+        jcurv[0] = 2.0 * jcurv[1] - jcurv[2]
+        jcurv[-1] = 2.0 * jcurv[-2] - jcurv[-3]
+        from .vmec_lforbal import MU0
+
+        jcuru = jcuru / MU0
+        jcurv = jcurv / MU0
+    equif = equif_from_bcovar(bc=bc_curr, trig=trig, wout=wout_like, s=s)
 
     # Current profile metadata for vmecPlot2.
     pcurr_type = indata.get("PCURR_TYPE", None)
@@ -715,6 +765,73 @@ def wout_minimal_from_fixed_boundary(
     ac_aux_s = -np.ones((ndfmax,), dtype=float)
     ac_aux_f = np.zeros((ndfmax,), dtype=float)
     DMerc = np.zeros((ns,), dtype=float)
+
+    # Convert internal lambda coefficients to VMEC wout convention.
+    from .field import lamscale_from_phips
+
+    lamscale = float(np.asarray(lamscale_from_phips(flux.phips, s)))
+
+    def _lambda_wout_from_full(*, lam_full: np.ndarray, m_modes: np.ndarray) -> np.ndarray:
+        lam_full = np.asarray(lam_full, dtype=float)
+        if lam_full.ndim != 2 or lam_full.shape[0] != ns:
+            raise ValueError("Expected lam_full with shape (ns, K)")
+        m_modes = np.asarray(m_modes, dtype=int)
+        if m_modes.ndim != 1 or m_modes.shape[0] != lam_full.shape[1]:
+            raise ValueError("Expected m_modes with shape (K,)")
+
+        if lamscale == 0.0:
+            lam_ext = np.zeros_like(lam_full)
+        else:
+            phipf_safe = np.where(phipf_internal == 0.0, 1.0, phipf_internal)
+            lam_ext = lam_full * (lamscale / phipf_safe[:, None])
+
+        if ns < 2:
+            return np.zeros_like(lam_ext)
+
+        hs = float(s[1] - s[0])
+        sqrts_f = np.zeros((ns + 1,), dtype=float)
+        shalf_f = np.zeros((ns + 1,), dtype=float)
+        for i in range(1, ns + 1):
+            sqrts_f[i] = np.sqrt(max(hs * float(i - 1), 0.0))
+            shalf_f[i] = np.sqrt(hs * abs(float(i) - 1.5))
+        sqrts_f[ns] = 1.0
+
+        sm_f = np.zeros((ns + 1,), dtype=float)
+        sp_f = np.zeros((ns + 1,), dtype=float)
+        for i in range(2, ns + 1):
+            sm_f[i] = shalf_f[i] / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
+            if i < ns:
+                sp_f[i] = shalf_f[i + 1] / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
+            else:
+                sp_f[i] = 1.0 / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
+        sm_f[1] = 0.0
+        sp_f[0] = 0.0
+        sp_f[1] = sm_f[2] if ns >= 2 else 0.0
+
+        lam_half = lam_ext.copy()
+        mask_m_le1 = m_modes <= 1
+        if np.any(mask_m_le1):
+            lam_half[0, mask_m_le1] = lam_half[1, mask_m_le1]
+
+        even_mask = (m_modes % 2) == 0
+        odd_mask = ~even_mask
+        for js_idx in range(ns - 1, 0, -1):
+            if np.any(even_mask):
+                lam_half[js_idx, even_mask] = 0.5 * (
+                    lam_half[js_idx, even_mask] + lam_half[js_idx - 1, even_mask]
+                )
+            if np.any(odd_mask):
+                sm_val = sm_f[js_idx + 1]
+                sp_val = sp_f[js_idx]
+                lam_half[js_idx, odd_mask] = 0.5 * (
+                    sm_val * lam_half[js_idx, odd_mask] + sp_val * lam_half[js_idx - 1, odd_mask]
+                )
+
+        lam_half[0, :] = 0.0
+        return lam_half
+
+    lmns = _lambda_wout_from_full(lam_full=lmns_internal, m_modes=np.asarray(main_modes.m, dtype=int))
+    lmnc = _lambda_wout_from_full(lam_full=lmnc_internal, m_modes=np.asarray(main_modes.m, dtype=int))
 
     return WoutData(
         path=Path(path),
