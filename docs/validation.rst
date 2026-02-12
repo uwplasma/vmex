@@ -84,6 +84,7 @@ Per-iteration trace parity (VMEC2000 executable, reduced grid):
 ::
 
   python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case circular_tokamak --max-iter 10 --vmec-nstep 1 --single-ns 17
+  python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case nfp4_QH_warm_start --max-iter 10 --single-ns 16 --vmec-timeout 60 --rtol 1e-3
 
 This uses a reduced grid to stay under ~1 minute; increase ``--max-iter`` or ``--single-ns`` for deeper parity checks.
 For longer traces under the timeout cap you can split the vmec_jax run::
@@ -137,6 +138,11 @@ Current observed mismatches (updated parity status):
   per-iteration traces on ``circular_tokamak`` and ``shaped_tokamak_pressure``
   for a 10-iteration cap; 20-iter multigrid traces are now generated for the
   benchmark figures (reduced ns for runtime).
+- **Non-axisymmetric early-iteration parity** now reproduces VMEC2000 on
+  ``nfp4_QH_warm_start`` for the first 10 iterations (`--single-ns 16`):
+  per-iteration ``fsq*`` traces, ``xc/v`` updates, and tomnsps/gc raw blocks
+  (including lambda-path ``flsc/gcl`` and ``blmn/clmn``) match within the
+  configured tolerance after applying VMEC's lambda axis closure in ``bcovar``.
 - ``betapol``, ``betator``, ``betaxis``, ``ctor``, and ``DMerc`` are present but
   still placeholders in ``vmec_jax`` (zeros) until the VMEC2000 diagnostics path
   is fully ported.
@@ -149,7 +155,8 @@ explicitly deferred for now include:
 
 - free boundary,
 - ``lasym=True`` (up-down / non-stellarator-symmetric),
-- non-axisymmetric end-to-end nonlinear solve parity (``ntor>0`` and/or ``nfp>1``),
+- non-axisymmetric full multigrid end-to-end nonlinear solve parity
+  (``ntor>0`` and/or ``nfp>1``),
 - parallelization and multi-device execution.
 
 Current blockers worth tracking:
