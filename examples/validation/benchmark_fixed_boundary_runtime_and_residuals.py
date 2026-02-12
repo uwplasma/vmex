@@ -213,7 +213,16 @@ def _plot_residuals(*, traces: list[RunTrace], outpath: Path) -> None:
     fig, axes = plt.subplots(nrows, ncols, figsize=(10, 3.6 * nrows), constrained_layout=True)
     axes = np.atleast_1d(axes).reshape(nrows, ncols)
     style = {
-        "vmec2000": dict(ls="--", lw=1.8, marker="o", ms=3.0, alpha=0.9, zorder=3),
+        "vmec2000": dict(
+            ls="--",
+            lw=1.8,
+            marker="o",
+            ms=3.0,
+            mfc="none",
+            mew=0.8,
+            alpha=0.9,
+            zorder=3,
+        ),
         "vmec_jax": dict(ls="-", lw=1.6, marker=None, ms=0.0, alpha=0.9, zorder=2),
     }
     for idx, case in enumerate(cases):
@@ -301,8 +310,9 @@ def main() -> None:
     )
     p.add_argument(
         "--run-vmec2000",
-        action="store_true",
-        help="Also run the VMEC2000 executable (xvmec2000) for comparisons.",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Run the VMEC2000 executable (xvmec2000) for comparisons when available.",
     )
     p.add_argument(
         "--vmec2000-exec",
@@ -368,6 +378,10 @@ def main() -> None:
         os.environ.setdefault("JAX_DISABLE_JIT", "1")
 
     traces: list[RunTrace] = []
+    exec_path = Path(args.vmec2000_exec).expanduser() if args.vmec2000_exec else find_vmec2000_exec()
+    if bool(args.run_vmec2000) and exec_path is None:
+        print("[bench] VMEC2000 executable not found; skipping VMEC2000 traces.", flush=True)
+        args.run_vmec2000 = False
     for case in cases:
         input_path = data_dir / f"input.{case}"
         if not input_path.exists():
@@ -392,7 +406,6 @@ def main() -> None:
                 f"[bench] vmec2000 case={case} iters={args.iters} ns_override={args.vmec2000_ns_override}",
                 flush=True,
             )
-            exec_path = Path(args.vmec2000_exec).expanduser() if args.vmec2000_exec else None
             try:
                 tvm = _run_vmec2000_exec(
                     input_path=input_path,

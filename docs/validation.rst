@@ -130,21 +130,18 @@ faithful to the legacy script.
 Current observed mismatches (updated parity status):
 
 - **Single-grid axisym parity** (`--single-ns 13`) matches VMEC2000 at machine
-  precision for the first **15 iterations** on ``circular_tokamak`` and
-  ``shaped_tokamak_pressure``. When split into two 15-iter phases (warm start),
-  the restart resets time-step/momentum state and the first mismatch appears at
-  iteration 16. Continuous 30-iter parity at ``--single-ns 13`` remains pending
-  under the 60s cap.
-- **Multigrid parity** (full `NS` from input, `--use-input-niter`) now matches
-  per-iteration traces for the 4 axisymmetric benchmark cases at a 10-iteration
-  cap (``circular_tokamak``, ``purely_toroidal_field``,
-  ``shaped_tokamak_pressure``, ``solovev``) on reduced ``ns=13`` grids.
+  precision for the first **10 iterations** on the 4-axisymmetric benchmark
+  suite (``circular_tokamak``, ``purely_toroidal_field``,
+  ``shaped_tokamak_pressure``, ``solovev``).
+- **Multigrid parity** (full `NS` from input, `--use-input-niter`) is validated
+  for the 10-iteration benchmark overlay on reduced grids; extending full-grid
+  multigrid traces beyond 10 iterations is still in progress.
 - **Non-axisymmetric parity** is now exercised on multiple Simsopt inputs via
   ``nonaxis_parity_batch.py``. Current first-iteration status:
   reduced-grid iter-1 parity now passes across the default Simsopt batch.
-  On full grids, QA/QH still diverge after the first few iterations (for
-  example, QA low-res now matches through stage 3 iter 2 and first diverges at
-  stage 3 iter 3).
+  On full grids, QA still fails at stage 1 iter 1, while QH (``nfp4_QH_warm_start``)
+  and the 3D low-res benchmarks (``li383_low_res``, ``n3are_R7.75B5.7_lowres``)
+  now match through the 10-iteration multigrid trace within the 1e-3 tolerance.
 - ``betapol``, ``betator``, ``betaxis``, ``ctor``, and ``DMerc`` are present but
   still placeholders in ``vmec_jax`` (zeros) until the VMEC2000 diagnostics path
   is fully ported.
