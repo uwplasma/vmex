@@ -1,4 +1,4 @@
-"""JAX ports of VMEC2000 1D (radial) preconditioner operators (axisymmetric path).
+"""JAX ports of VMEC2000 1D (radial) preconditioner operators.
 
 This module mirrors the reference NumPy implementation in
 :mod:`vmec_jax.preconditioner_1d`, but uses JAX arrays/ops so the fixed-point
@@ -285,10 +285,10 @@ def rz_preconditioner_matrices(
     s,
     cfg,
 ) -> tuple[dict[str, Any], Any, int]:
-    """Return axisymmetric R/Z preconditioner matrices (JAX)."""
+    """Return VMEC R/Z radial preconditioner matrices (JAX, fixed-boundary)."""
     del trig
-    if bool(cfg.lthreed) or bool(cfg.lasym):
-        raise ValueError("rz_preconditioner_matrices only supports axisym.")
+    if bool(cfg.lasym):
+        raise ValueError("rz_preconditioner_matrices does not yet support lasym.")
     s = jnp.asarray(s)
     ns = int(s.shape[0])
     ns_f = max(ns - 1, 1)
@@ -443,13 +443,13 @@ def rz_preconditioner_apply(
     jmax: int,
     cfg,
 ) -> TomnspsRZL:
-    """Apply cached axisymmetric R/Z preconditioner matrices.
+    """Apply cached VMEC R/Z preconditioner matrices.
 
     This is the matrix-application half of :func:`rz_preconditioner`,
     split out so callers (e.g. VMEC2000-style cached preconditioners) can
     reuse matrices across iterations without recomputing them.
     """
-    if bool(cfg.lthreed) or bool(cfg.lasym):
+    if bool(cfg.lasym):
         return frzl_in
 
     ar = mats["ar"]
@@ -463,19 +463,43 @@ def rz_preconditioner_apply(
     nrange = int(cfg.ntor) + 1
 
     frcc = jnp.asarray(frzl_in.frcc)
+    frss = None if frzl_in.frss is None else jnp.asarray(frzl_in.frss)
     fzsc = jnp.asarray(frzl_in.fzsc)
+    fzcs = None if frzl_in.fzcs is None else jnp.asarray(frzl_in.fzcs)
+    frsc = None if getattr(frzl_in, "frsc", None) is None else jnp.asarray(getattr(frzl_in, "frsc"))
+    fzcc = None if getattr(frzl_in, "fzcc", None) is None else jnp.asarray(getattr(frzl_in, "fzcc"))
     frcc_u = frcc
+    frss_u = frss
     fzsc_u = fzsc
+    fzcs_u = fzcs
+    frsc_u = frsc
+    fzcc_u = fzcc
     jmax = int(jmax)
     if jmax > 0:
         rhs_r = frcc[:jmax]
         rhs_z = fzsc[:jmax]
+        rhs_rs = frss[:jmax] if frss is not None else None
+        rhs_zc = fzcs[:jmax] if fzcs is not None else None
+        rhs_rsc = frsc[:jmax] if frsc is not None else None
+        rhs_zcc = fzcc[:jmax] if fzcc is not None else None
 
         # m=0 group (jmin=0)
         sol_r0 = _tridi_solve_batched_jmin0(ar[:, 0, :], dr[:, 0, :], br[:, 0, :], rhs_r[:, 0, :])
         sol_z0 = _tridi_solve_batched_jmin0(az[:, 0, :], dz[:, 0, :], bz[:, 0, :], rhs_z[:, 0, :])
         frcc_u = frcc_u.at[:jmax, 0, :].set(sol_r0)
         fzsc_u = fzsc_u.at[:jmax, 0, :].set(sol_z0)
+        if rhs_rs is not None and frss_u is not None:
+            sol_rs0 = _tridi_solve_batched_jmin0(ar[:, 0, :], dr[:, 0, :], br[:, 0, :], rhs_rs[:, 0, :])
+            frss_u = frss_u.at[:jmax, 0, :].set(sol_rs0)
+        if rhs_zc is not None and fzcs_u is not None:
+            sol_zc0 = _tridi_solve_batched_jmin0(az[:, 0, :], dz[:, 0, :], bz[:, 0, :], rhs_zc[:, 0, :])
+            fzcs_u = fzcs_u.at[:jmax, 0, :].set(sol_zc0)
+        if rhs_rsc is not None and frsc_u is not None:
+            sol_rsc0 = _tridi_solve_batched_jmin0(ar[:, 0, :], dr[:, 0, :], br[:, 0, :], rhs_rsc[:, 0, :])
+            frsc_u = frsc_u.at[:jmax, 0, :].set(sol_rsc0)
+        if rhs_zcc is not None and fzcc_u is not None:
+            sol_zcc0 = _tridi_solve_batched_jmin0(az[:, 0, :], dz[:, 0, :], bz[:, 0, :], rhs_zcc[:, 0, :])
+            fzcc_u = fzcc_u.at[:jmax, 0, :].set(sol_zcc0)
 
         # m>0 group (jmin=1)
         if mpol > 1 and jmax > 1:
@@ -498,17 +522,57 @@ def rz_preconditioner_apply(
                 fzsc_u = fzsc_u.at[:jmax, m, :].set(
                     jnp.concatenate([jnp.zeros((1, nrange), dtype=fzsc.dtype), sol_zm], axis=0)
                 )
+                if rhs_rs is not None and frss_u is not None:
+                    sol_rsm = _tridi_solve_batched_jmin0(
+                        ar[1:, m, :],
+                        dr[1:, m, :],
+                        br[1:, m, :],
+                        rhs_rs[1:, m, :],
+                    )
+                    frss_u = frss_u.at[:jmax, m, :].set(
+                        jnp.concatenate([jnp.zeros((1, nrange), dtype=frss.dtype), sol_rsm], axis=0)
+                    )
+                if rhs_zc is not None and fzcs_u is not None:
+                    sol_zcm = _tridi_solve_batched_jmin0(
+                        az[1:, m, :],
+                        dz[1:, m, :],
+                        bz[1:, m, :],
+                        rhs_zc[1:, m, :],
+                    )
+                    fzcs_u = fzcs_u.at[:jmax, m, :].set(
+                        jnp.concatenate([jnp.zeros((1, nrange), dtype=fzcs.dtype), sol_zcm], axis=0)
+                    )
+                if rhs_rsc is not None and frsc_u is not None:
+                    sol_rscm = _tridi_solve_batched_jmin0(
+                        ar[1:, m, :],
+                        dr[1:, m, :],
+                        br[1:, m, :],
+                        rhs_rsc[1:, m, :],
+                    )
+                    frsc_u = frsc_u.at[:jmax, m, :].set(
+                        jnp.concatenate([jnp.zeros((1, nrange), dtype=frsc.dtype), sol_rscm], axis=0)
+                    )
+                if rhs_zcc is not None and fzcc_u is not None:
+                    sol_zccm = _tridi_solve_batched_jmin0(
+                        az[1:, m, :],
+                        dz[1:, m, :],
+                        bz[1:, m, :],
+                        rhs_zcc[1:, m, :],
+                    )
+                    fzcc_u = fzcc_u.at[:jmax, m, :].set(
+                        jnp.concatenate([jnp.zeros((1, nrange), dtype=fzcc.dtype), sol_zccm], axis=0)
+                    )
 
     return TomnspsRZL(
         frcc=frcc_u,
-        frss=frzl_in.frss,
+        frss=frss_u,
         fzsc=fzsc_u,
-        fzcs=frzl_in.fzcs,
+        fzcs=fzcs_u,
         flsc=frzl_in.flsc,
         flcs=frzl_in.flcs,
-        frsc=getattr(frzl_in, "frsc", None),
+        frsc=frsc_u,
         frcs=getattr(frzl_in, "frcs", None),
-        fzcc=getattr(frzl_in, "fzcc", None),
+        fzcc=fzcc_u,
         fzss=getattr(frzl_in, "fzss", None),
         flcc=getattr(frzl_in, "flcc", None),
         flss=getattr(frzl_in, "flss", None),
@@ -524,8 +588,8 @@ def rz_preconditioner(
     s,
     cfg,
 ) -> TomnspsRZL:
-    """Apply the axisymmetric R/Z radial preconditioner in JAX."""
-    if bool(cfg.lthreed) or bool(cfg.lasym):
+    """Apply the VMEC R/Z radial preconditioner in JAX."""
+    if bool(cfg.lasym):
         return frzl_in
     mats, _jmin, jmax = rz_preconditioner_matrices(bc=bc, k=k, trig=trig, s=s, cfg=cfg)
     return rz_preconditioner_apply(frzl_in=frzl_in, mats=mats, jmax=jmax, cfg=cfg)

@@ -8,6 +8,7 @@ NTOR =  0
 NZETA = 36,
 
 NS_ARRAY = 15,
+FTOL = 1e-14,
 FTOL_ARRAY = 1e-14,
 NITER_array = 25000,
 

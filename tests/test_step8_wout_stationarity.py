@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import numpy as np
 import pytest
 
@@ -21,8 +22,24 @@ def test_step8_wout_state_is_nearly_stationary_for_total_energy():
     enable_x64(True)
 
     cfg, _indata = load_config("examples/data/input.li383_low_res")
-    static = build_static(cfg)
     wout = read_wout("examples/data/wout_li383_low_res_reference.nc")
+    ntheta = max(int(cfg.ntheta), 4 * int(wout.mpol) + 16)
+    ntheta = 2 * (ntheta // 2)
+    nzeta = max(int(cfg.nzeta), 4 * int(wout.ntor) + 16)
+    if int(wout.ntor) == 0:
+        nzeta = 1
+    cfg = replace(
+        cfg,
+        ns=int(wout.ns),
+        nfp=int(wout.nfp),
+        mpol=int(wout.mpol),
+        ntor=int(wout.ntor),
+        lasym=bool(wout.lasym),
+        lthreed=bool(int(wout.ntor) > 0),
+        ntheta=int(ntheta),
+        nzeta=int(nzeta),
+    )
+    static = build_static(cfg)
     st = state_from_wout(wout)
 
     # Sanity: VMEC's own reported force residuals are tiny for the reference equilibrium.

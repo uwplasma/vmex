@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -11,17 +12,35 @@ from vmec_jax.geom import eval_geom
 from vmec_jax.grids import AngleGrid
 from vmec_jax.modes import ModeTable
 from vmec_jax.solve import solve_lambda_gd
+from vmec_jax.static import build_static
 from vmec_jax.wout import read_wout, state_from_wout
 
 
 def test_step5_solve_lambda_decreases_wb_toward_wout(load_case_li383_low_res):
     pytest.importorskip("netCDF4")
 
-    cfg, _indata, static, _bdy, _st0 = load_case_li383_low_res
+    cfg, _indata, _static_unused, _bdy, _st0 = load_case_li383_low_res
 
     wout_path = Path(__file__).resolve().parents[1] / "examples" / "data" / "wout_li383_low_res_reference.nc"
     wout = read_wout(wout_path)
     st_ref = state_from_wout(wout)
+    ntheta = max(int(cfg.ntheta), 4 * int(wout.mpol) + 16)
+    ntheta = 2 * (ntheta // 2)
+    nzeta = max(int(cfg.nzeta), 4 * int(wout.ntor) + 16)
+    if int(wout.ntor) == 0:
+        nzeta = 1
+    cfg = replace(
+        cfg,
+        ns=int(wout.ns),
+        nfp=int(wout.nfp),
+        mpol=int(wout.mpol),
+        ntor=int(wout.ntor),
+        lasym=bool(wout.lasym),
+        lthreed=bool(int(wout.ntor) > 0),
+        ntheta=int(ntheta),
+        nzeta=int(nzeta),
+    )
+    static = build_static(cfg)
 
     # Nyquist basis for reference sqrtg.
     modes_nyq = ModeTable(m=wout.xm_nyq, n=(wout.xn_nyq // wout.nfp))

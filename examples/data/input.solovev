@@ -17,6 +17,7 @@ NTOR =  0
 NS_ARRAY    =  11
 NITER_ARRAY =  500
 FTOL_ARRAY  = 1e-14
+FTOL        = 1e-14
 AM = 0.125 -0.125
 AI = 1
 RAXIS_CC = 4

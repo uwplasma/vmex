@@ -163,7 +163,7 @@ def _signed_to_mn_cos(coeffs: Any, *, modes, mpol: int, ntor: int) -> tuple[np.n
             kn = idx_neg[m_i, n_i]
             neg = coeffs[:, kn] if kn >= 0 else 0.0
             rcc[:, m_i, n_i] = pos + neg
-            if n_i == 0:
+            if n_i == 0 or m_i == 0:
                 rss[:, m_i, n_i] = 0.0
             else:
                 rss[:, m_i, n_i] = pos - neg
@@ -196,11 +196,14 @@ def _signed_to_mn_sin(coeffs: Any, *, modes, mpol: int, ntor: int) -> tuple[np.n
             pos = coeffs[:, kp]
             kn = idx_neg[m_i, n_i]
             neg = coeffs[:, kn] if kn >= 0 else 0.0
-            zsc[:, m_i, n_i] = pos + neg
+            zsc_val = pos + neg
             if n_i == 0:
                 zcs[:, m_i, n_i] = 0.0
             else:
                 zcs[:, m_i, n_i] = neg - pos
+                if m_i == 0:
+                    zsc_val = 0.0
+            zsc[:, m_i, n_i] = zsc_val
     return zsc, zcs
 
 
@@ -220,6 +223,15 @@ def vmec_internal_mn_from_state(state: Any, static: Any, *, apply_basis_norm: bo
     rcc, rss = _signed_to_mn_cos(state.Rcos, modes=static.modes, mpol=mpol, ntor=ntor)
     zsc, zcs = _signed_to_mn_sin(state.Zsin, modes=static.modes, mpol=mpol, ntor=ntor)
     lsc, lcs = _signed_to_mn_sin(state.Lsin, modes=static.modes, mpol=mpol, ntor=ntor)
+
+    # VMEC stores m=1 (rss,zcs) in an internal constrained basis when lconm1:
+    #   rss_int = 0.5*(rss_phys + zcs_phys)
+    #   zcs_int = 0.5*(rss_phys - zcs_phys)
+    if bool(getattr(cfg, "lthreed", True)) and bool(getattr(cfg, "lconm1", True)) and mpol > 1:
+        rss_m1 = rss[:, 1, :].copy()
+        zcs_m1 = zcs[:, 1, :].copy()
+        rss[:, 1, :] = 0.5 * (rss_m1 + zcs_m1)
+        zcs[:, 1, :] = 0.5 * (rss_m1 - zcs_m1)
 
     if apply_basis_norm:
         rcc = rcc * basis_norm[None, :, :]
@@ -271,13 +283,15 @@ def vmec_xc_from_mn_blocks(
         return a.reshape((ns, mnsize)).T.reshape(-1)
 
     xc = np.zeros((3 * ntmax * mns,), dtype=rcc.dtype)
-    # ntype=1 (cos-cos / sin-cos)
-    xc[0 * mns : 1 * mns] = _flat(rcc)
-    xc[1 * mns : 2 * mns] = _flat(zsc)
-    xc[2 * mns : 3 * mns] = _flat(lsc)
-    if ntmax > 1:
-        off = 3 * mns
-        xc[off + 0 * mns : off + 1 * mns] = _flat(rss)
-        xc[off + 1 * mns : off + 2 * mns] = _flat(zcs)
-        xc[off + 2 * mns : off + 3 * mns] = _flat(lcs)
+    if ntmax == 1:
+        blocks = (rcc, zsc, lsc)
+    elif ntmax == 2:
+        # VMEC serial layout uses variable-major blocks:
+        # [R(ntype=1..ntmax), Z(ntype=1..ntmax), L(ntype=1..ntmax)].
+        # For symmetric 3D (ntmax=2): [rcc, rss, zsc, zcs, lsc, lcs].
+        blocks = (rcc, rss, zsc, zcs, lsc, lcs)
+    else:
+        raise NotImplementedError("xc packing not implemented for ntmax > 2")
+    for i, blk in enumerate(blocks):
+        xc[i * mns : (i + 1) * mns] = _flat(blk)
     return xc

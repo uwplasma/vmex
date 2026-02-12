@@ -213,6 +213,17 @@ def vmec_bcovar_half_mesh_from_wout(
     """
     s = jnp.asarray(static.s)
     ns = int(s.shape[0])
+    # VMEC `totzsps` converts the m=1 (rss,zcs) internal pair to physical
+    # coefficients before real-space synthesis when `lconm1` is enabled.
+    # Apply the same conversion in signed storage for geometry parity.
+    rsin_geom = jnp.asarray(state.Rsin)
+    zcos_geom = jnp.asarray(state.Zcos)
+    if bool(getattr(static.cfg, "lthreed", True)) and bool(getattr(static.cfg, "lconm1", True)) and int(getattr(static.cfg, "mpol", 0)) > 1:
+        m_modes = np.asarray(static.modes.m, dtype=int)
+        mask_m1 = jnp.asarray(m_modes == 1, dtype=rsin_geom.dtype)[None, :]
+        rss_old = rsin_geom
+        rsin_geom = jnp.where(mask_m1 != 0, rss_old + zcos_geom, rss_old)
+        zcos_geom = jnp.where(mask_m1 != 0, rss_old - zcos_geom, zcos_geom)
     Lcos_force = jnp.asarray(state.Lcos)
     Lsin_force = _apply_vmec_lambda_axis_closure(
         Lsin=state.Lsin,
@@ -224,8 +235,8 @@ def vmec_bcovar_half_mesh_from_wout(
 
     state_parity = SimpleNamespace(
         Rcos=state.Rcos,
-        Rsin=state.Rsin,
-        Zcos=state.Zcos,
+        Rsin=rsin_geom,
+        Zcos=zcos_geom,
         Zsin=state.Zsin,
         Lcos=Lcos_force,
         Lsin=Lsin_force,

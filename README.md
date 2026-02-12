@@ -95,13 +95,14 @@ Interpretation:
 - Axisymmetric cases are at floating-point parity for geometry, ``bsup*``, and ``abs(B)``.
 - Axisymmetric tomnsps/gc blocks (including lambda-force ``blmn/clmn``) match VMEC2000 to ~1e-11 abs on reduced grids; scalar residuals now match VMEC2000 at machine precision in single-grid parity runs.
 - The VMEC-style update loop uses scalxc-weighted forces, and ``xc``/``v`` dumps match VMEC2000 at iter 1 in reduced-grid parity runs.
+- The default benchmark path (10 iterations, ``ns=13``) now overlays VMEC2000 and vmec_jax traces for all 4 axisymmetric cases (`circular_tokamak`, `purely_toroidal_field`, `shaped_tokamak_pressure`, `solovev`).
 - Non-axisymmetric parity hardening is now wired into a batch comparator (`tools/diagnostics/nonaxis_parity_batch.py`) over Simsopt `input.*` files. Current status: first-iteration mismatches are reduced on some low-res cases (for example, `input.n3are_R7.75B5.7_lowres` improved from O(1e2) to O(1e1) on `fsqr`), but QA/QH families still diverge at iter 1 and remain the top blocker.
 - Remaining known gap: close the non-axis iter-1 mismatch (especially QA/QH) before extending to long multigrid traces.
 
 Iteration trace parity (VMEC2000 executable, reduced grid):
 
-- Single-grid axisym cases match ``fsq*`` and preconditioned scalars at machine precision for the first **15 iterations** at `--single-ns 13`. When split into two 15-iter phases with warm starts, the restart resets the time-step/momentum state, and the first mismatch appears at iteration 16. Full continuous 30-iter parity at `--single-ns 13` remains pending under the 60s cap.
-- ``purely_toroidal_field`` multigrid trace matches through stage 4 iter 6, but ``r00``/``w`` diagnostics become ``NaN`` from iter 7 onward (state divergence still under investigation).
+- Single-grid axisym cases match ``fsq*`` and preconditioned scalars at machine precision for the first **15 iterations** at `--single-ns 13`. Split 15+15 warm-start runs still diverge at iter 16 because solver resume state is not yet fully equivalent to VMEC restart state.
+- Full-grid multigrid axisymmetric traces are now validated in the 10-iteration benchmark overlay with matching VMEC2000/vmec_jax lines for all 4 cases.
 - ``up_down_asymmetric_tokamak`` (``lasym=True``) shows large bcovar/force-kernel mismatches at iter 1; nonlinear trace diverges. This is the current top lasym parity blocker.
 
 Notes on the snapshot figures:
@@ -125,18 +126,16 @@ This is a quick sanity run (reduced cases and resolution). For a full parity sna
 
 ## Benchmark (runtime + residual traces)
 
-This script compares a *fixed iteration budget* across `vmec_jax` and (optionally) the **VMEC2000 executable** (`xvmec2000`). The current README figures were generated with a reduced grid (`ns=17`) and a 20-iteration budget to keep the total run under a few minutes:
+This script compares a *fixed iteration budget* across `vmec_jax` and the **VMEC2000 executable** (`xvmec2000`). The current README figures were generated with the parity-first default reduced grid (`ns=13`) and a 10-iteration budget:
 
 ```bash
 python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py \
-  --iters 20 \
+  --iters 10 \
   --cases circular_tokamak shaped_tokamak_pressure solovev purely_toroidal_field \
-  --ns-override 17 \
-  --run-vmec2000 --vmec2000-ns-override 17 --vmec2000-timeout 60 \
-  --no-vmec2000-use-input-niter
+  --run-vmec2000 --vmec2000-timeout 60
 ```
 
-The quick settings above keep runs under ~60s per case. Drop `--ns-override/--vmec2000-ns-override` to use the full input resolution and increase `--iters` for longer traces.
+The quick settings above keep runs under ~60s per case. Increase `--iters` and/or pass larger `--ns-override`/`--vmec2000-ns-override` for longer and higher-resolution traces.
 
 <table>
   <tr>

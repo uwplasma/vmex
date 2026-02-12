@@ -42,6 +42,18 @@ def _hi_res_cfg(cfg, *, mpol: int, ntor: int):
     return replace(cfg, ntheta=int(ntheta), nzeta=int(nzeta))
 
 
+def _cfg_aligned_to_wout(cfg, wout):
+    return replace(
+        cfg,
+        ns=int(wout.ns),
+        nfp=int(wout.nfp),
+        mpol=int(wout.mpol),
+        ntor=int(wout.ntor),
+        lasym=bool(wout.lasym),
+        lthreed=bool(int(wout.ntor) > 0),
+    )
+
+
 def _half_mesh_coeffs(a: np.ndarray) -> np.ndarray:
     out = np.zeros_like(a)
     if a.shape[0] > 1:
@@ -61,6 +73,7 @@ def test_volume_from_wout_nyquist_matches_volume_p(case_name: str, input_rel: st
 
     cfg, _indata = load_config(str(input_path))
     wout = read_wout(wout_path)
+    cfg = _cfg_aligned_to_wout(cfg, wout)
     cfg_hi = _hi_res_cfg(cfg, mpol=wout.mpol, ntor=wout.ntor)
     static = build_static(cfg_hi)
 
@@ -96,6 +109,7 @@ def test_step4_wb_against_wout_reference(case_name: str, input_rel: str, wout_re
 
     cfg, _indata = load_config(str(input_path))
     wout = read_wout(wout_path)
+    cfg = _cfg_aligned_to_wout(cfg, wout)
     cfg_hi = _hi_res_cfg(cfg, mpol=wout.mpol, ntor=wout.ntor)
     static = build_static(cfg_hi)
     st = state_from_wout(wout)
