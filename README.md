@@ -16,6 +16,9 @@ Run the end-to-end showcase (recommended):
 python examples/showcase_axisym_input_to_wout.py --suite
 ```
 
+By default the solver prints the VMEC2000-style per-iteration **screen** table
+(FSQR/FSQZ/FSQL, RAX, DELT, WMHD). Pass ``--no-verbose`` to silence it.
+
 Legacy `vmecPlot2.py` compatibility (NetCDF3 `wout` output):
 
 ```bash
@@ -31,7 +34,7 @@ pytest -q
 
 ## Snapshot figures
 
-Generated from the bundled `shaped_tokamak_pressure` case (short multigrid run to stay under ~1 minute):
+Generated from the bundled `shaped_tokamak_pressure` case (short single-grid parity run to stay under ~1 minute):
 
 ```bash
 python examples/showcase_axisym_input_to_wout.py \
@@ -59,7 +62,7 @@ python examples/showcase_axisym_input_to_wout.py \
 
 Interpretation of the snapshot figures:
 
-- The residual trace overlay is a **per-iteration VMEC2000 executable trace** (dashed) from `threed1.*`. The multigrid run (ns=13→25→51, total 10 iterations) matches vmec_jax at ~1e-3 rtol and typically much tighter.
+- The residual trace overlay is a **per-iteration VMEC2000 executable trace** (dashed) from `threed1.*`. The default single-grid run (`ns=13`, 10 iterations) overlays VMEC2000 and vmec_jax within ~1e-3 rtol (often tighter).
 - The LCFS `|B|` panel now uses **vmecPlot2-style grids** (theta/zeta resolution and toroidal-angle conventions) for both VMEC2000 and vmec_jax. Differences here reflect solver parity, not plotting.
 
 ## Parity status (VMEC2000)
@@ -77,32 +80,32 @@ python examples/validation/pipeline_parity_summary.py
 
 Current kernel-parity snapshot (solver-free, bundled reference states):
 
-| Variable | circular_tokamak | shaped_tokamak_pressure | solovev | li383_low_res |
+| Variable | circular_tokamak | purely_toroidal_field | shaped_tokamak_pressure | solovev |
 |---| :--: | :--: | :--: | :--: |
-| sqrtg | 3.10e-15 | 1.24e-14 | 2.19e-15 | 2.10e-14 |
-| bsupu | 2.46e-15 | 1.13e-14 | 2.18e-15 | 2.25e-14 |
-| bsupv | 3.06e-15 | 1.32e-14 | 2.27e-15 | 2.09e-14 |
-| bsubu | 7.20e-07 | 4.57e-05 | 2.41e-05 | 7.55e-02 |
-| bsubv | 1.24e-05 | 2.59e-05 | 3.11e-05 | 1.13e-02 |
-| abs(B) | 3.09e-15 | 1.25e-14 | 2.20e-15 | 2.16e-14 |
-| bsq = 0.5*B^2 + p | 6.17e-15 | 2.64e-14 | 4.57e-15 | 4.23e-14 |
-| fsqr | 4.05e-09 | 3.51e-08 | 3.64e-07 | 4.34e+03 |
-| fsqz | 5.78e-10 | 2.73e-08 | 2.69e-07 | 8.31e+03 |
-| fsql | 1.93e-10 | 6.14e-11 | 6.42e-07 | 1.11e+05 |
-| fsq_total | 4.82e-09 | 7.88e-09 | 2.56e-07 | 6.70e+03 |
+| sqrtg | 3.10e-15 | 2.18e-14 | 1.24e-14 | 2.19e-15 |
+| bsupu | 2.45e-15 | 2.57e-14 | 1.13e-14 | 2.17e-15 |
+| bsupv | 3.08e-15 | 2.68e-14 | 1.32e-14 | 2.23e-15 |
+| bsubu | 7.20e-07 | 1.27e-03 | 4.57e-05 | 2.41e-05 |
+| bsubv | 1.24e-05 | 3.65e-06 | 2.59e-05 | 3.11e-05 |
+| abs(B) | 3.09e-15 | 2.47e-14 | 1.25e-14 | 2.16e-15 |
+| bsq = 0.5*B^2 + p | 6.20e-15 | 5.36e-14 | 2.64e-14 | 4.49e-15 |
+| fsqr | 5.63e-09 | 1.42e-04 | 3.36e-08 | 3.64e-07 |
+| fsqz | 1.15e-10 | 2.45e-04 | 2.67e-08 | 2.69e-07 |
+| fsql | 2.17e-10 | 7.97e-09 | 6.21e-11 | 6.42e-07 |
+| fsq_total | 5.73e-09 | 6.73e-05 | 6.90e-09 | 2.56e-07 |
 
 Interpretation:
 - Axisymmetric cases are at floating-point parity for geometry, ``bsup*``, and ``abs(B)``.
-- Axisymmetric tomnsps/gc blocks (including lambda-force ``blmn/clmn``) match VMEC2000 to ~1e-11 abs on reduced grids; scalar residuals now match VMEC2000 at machine precision in single-grid parity runs.
+- Axisymmetric tomnsps/gc blocks (including lambda-force ``blmn/clmn``) match VMEC2000 to ~1e-11 abs on reduced grids; scalar residuals now match VMEC2000 at ~1e-7 or better on the standard suite, with the purely-toroidal-field case still the largest scalar residual gap (~1e-4).
 - The VMEC-style update loop uses scalxc-weighted forces, and ``xc``/``v`` dumps match VMEC2000 at iter 1 in reduced-grid parity runs.
 - The default benchmark path (10 iterations, ``ns=13``) now overlays VMEC2000 and vmec_jax traces for all 4 axisymmetric cases (`circular_tokamak`, `purely_toroidal_field`, `shaped_tokamak_pressure`, `solovev`).
-- Non-axisymmetric parity hardening is now wired into a batch comparator (`tools/diagnostics/nonaxis_parity_batch.py`) over Simsopt `input.*` files. Current status: reduced-grid iter-1 parity now passes across the default Simsopt batch; on full-grid QA/QH, the first hard mismatch moved downstream (e.g. QA low-res now matches through stage 3 iter 2 and first diverges at stage 3 iter 3).
-- Remaining known gap: close the full-grid non-axis mismatch after the first few nonlinear iterations (especially QA/QH) before extending to long multigrid traces.
+- Non-axisymmetric parity hardening is wired into a batch comparator (`tools/diagnostics/nonaxis_parity_batch.py`) over Simsopt `input.*` files. Current status: reduced-grid iter-1 parity passes across the default Simsopt batch; full-grid QA still fails at stage 1 iter 1, while full-grid QH (`nfp4_QH_warm_start`) and the 3D low-res benchmarks (`li383_low_res`, `n3are_R7.75B5.7_lowres`) now match through the 10-iteration multigrid trace within the 1e-3 tolerance.
+- Remaining known gap: close the full-grid non-axis mismatch after the early nonlinear iterations (especially QA/QH) before extending to long multigrid traces.
 
 Iteration trace parity (VMEC2000 executable, reduced grid):
 
-- Single-grid axisym cases match ``fsq*`` and preconditioned scalars at machine precision for the first **15 iterations** at `--single-ns 13`. Split 15+15 warm-start runs still diverge at iter 16 because solver resume state is not yet fully equivalent to VMEC restart state.
-- Full-grid multigrid axisymmetric traces are now validated in the 10-iteration benchmark overlay with matching VMEC2000/vmec_jax lines for all 4 cases.
+- Single-grid axisym cases match ``fsq*`` and preconditioned scalars at machine precision for the first **10 iterations** at `--single-ns 13`.
+- Full-grid multigrid axisymmetric traces are validated in the 10-iteration benchmark overlay with matching VMEC2000/vmec_jax lines for all 4 cases.
 - ``up_down_asymmetric_tokamak`` (``lasym=True``) shows large bcovar/force-kernel mismatches at iter 1; nonlinear trace diverges. This is the current top lasym parity blocker.
 
 Notes on the snapshot figures:
