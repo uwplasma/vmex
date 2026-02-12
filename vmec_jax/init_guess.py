@@ -259,15 +259,19 @@ def _blend_axis_m0_full(
             continue
         k = int(k_candidates[0])
 
-        # profil3d axis sign conventions:
-        #   rcc -> +raxis_cc
-        #   rcs -> -raxis_cs
-        #   zcc -> +zaxis_cc
-        #   zcs -> -zaxis_cs
+        # Axis conventions mapped to vmec_jax helical storage:
+        # - VMEC's internal `rcs/zcs` carry a minus sign from `raxis_cs/zaxis_cs`
+        #   in `profil3d`, but vmec_jax stores helical sin-phase coefficients
+        #   (sin(mθ-nζ)); for m=0 this introduces another minus sign.
+        # - Net mapping in signed/helical storage:
+        #     Rcos(m=0,n) <- +raxis_cc
+        #     Rsin(m=0,n) <- +raxis_cs
+        #     Zcos(m=0,n) <- +zaxis_cc
+        #     Zsin(m=0,n) <- +zaxis_cs
         ax_Rcos = raxis_cc[n]
-        ax_Rsin = -raxis_cs[n]
+        ax_Rsin = raxis_cs[n]
         ax_Zcos = zaxis_cc[n]
-        ax_Zsin = -zaxis_cs[n]
+        ax_Zsin = zaxis_cs[n]
 
         new_Rcos = (1.0 - blend) * ax_Rcos + blend * Rcos_b[0, k]
         new_Rsin = (1.0 - blend) * ax_Rsin + blend * Rsin_b[0, k]

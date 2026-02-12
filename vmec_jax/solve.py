@@ -170,6 +170,16 @@ def _maybe_dump_force_kernels(*, k, static, iter_idx: int, label: str = "raw") -
         bsubv=_arr(getattr(getattr(k, "bc", None), "bsubv", None)),
         bsupu=_arr(getattr(getattr(k, "bc", None), "bsupu", None)),
         bsupv=_arr(getattr(getattr(k, "bc", None), "bsupv", None)),
+        guu_metric=_arr(getattr(getattr(k, "bc", None), "guu", None)),
+        guv_metric=_arr(getattr(getattr(k, "bc", None), "guv", None)),
+        gvv_metric=_arr(getattr(getattr(k, "bc", None), "gvv", None)),
+        sqrtg=_arr(getattr(getattr(getattr(k, "bc", None), "jac", None), "sqrtg", None)),
+        r12=_arr(getattr(getattr(getattr(k, "bc", None), "jac", None), "r12", None)),
+        tau=_arr(getattr(getattr(getattr(k, "bc", None), "jac", None), "tau", None)),
+        ru12=_arr(getattr(getattr(getattr(k, "bc", None), "jac", None), "ru12", None)),
+        zu12=_arr(getattr(getattr(getattr(k, "bc", None), "jac", None), "zu12", None)),
+        rs=_arr(getattr(getattr(getattr(k, "bc", None), "jac", None), "rs", None)),
+        zs=_arr(getattr(getattr(getattr(k, "bc", None), "jac", None), "zs", None)),
         bsubu_e_scaled=_arr(
             getattr(getattr(k, "bc", None), "bsubu_e_scaled", None)
             if getattr(getattr(k, "bc", None), "bsubu_e_scaled", None) is not None
@@ -3778,6 +3788,7 @@ def solve_fixed_boundary_residual_iter(
                 iter1 = iter2
                 bad_growth_streak = 0
                 fsq_prev = fsq1
+                inv_tau = [0.15 / time_step] * k_ndamp
                 step_status = "restart_time_control"
                 restart_reason = "time_control"
                 step_history.append(0.0)
@@ -3853,6 +3864,21 @@ def solve_fixed_boundary_residual_iter(
                 and ((fsqr_f + fsqz_f) > 1.0e-2)
             ):
                 pre_restart_reason = "bad_progress"
+        elif bool(vmec2000_control):
+            # VMEC cadence: avoid restarting on every sign-change proxy event.
+            # In practice, VMEC2000 resets when the force state blows up; use the
+            # same effective trigger here (absolute fsq growth) and keep the
+            # previous delayed bad-growth fallback.
+            if (iter2 > iter1) and (fsq > 1.0e2):
+                pre_restart_reason = "bad_jacobian"
+            elif (iter2 > (iter1 + 8)) and (bad_growth_streak >= 2):
+                pre_restart_reason = "bad_jacobian"
+            elif (
+                (iter2 - iter1) > (k_preconditioner_update_interval // 2)
+                and (iter2 > 2 * k_preconditioner_update_interval)
+                and ((fsqr_f + fsqz_f) > 1.0e-2)
+            ):
+                pre_restart_reason = "bad_progress"
         else:
             if (iter2 > (iter1 + 8)) and (bad_growth_streak >= 2):
                 pre_restart_reason = "bad_jacobian"
@@ -3865,6 +3891,7 @@ def solve_fixed_boundary_residual_iter(
                 pre_restart_reason = "bad_progress"
 
         if use_restart_triggers and pre_restart_reason != "none":
+            time_step_iter = float(time_step)
             state = state_checkpoint
             vRcc = jnp.zeros_like(vRcc)
             vRss = jnp.zeros_like(vRss)
@@ -3889,6 +3916,20 @@ def solve_fixed_boundary_residual_iter(
             bad_resets += 1
             iter1 = iter2
             bad_growth_streak = 0
+            fsq_prev = fsq1
+            inv_tau = [0.15 / time_step] * k_ndamp
+            if bool(vmec2000_control):
+                vmec2000_cache_valid = False
+                cache_precond_diag = None
+                cache_tcon = None
+                cache_norms = None
+                cache_rz_scale = None
+                cache_l_scale = None
+                cache_rz_norm = None
+                cache_f_norm1 = None
+                cache_prec_rz_mats = None
+                cache_prec_rz_jmax = None
+                cache_prec_lam_prec = None
             step_history.append(0.0)
             dt_eff_history.append(0.0)
             update_rms_history.append(0.0)
@@ -3899,7 +3940,7 @@ def solve_fixed_boundary_residual_iter(
             step_status_history.append(step_status)
             restart_reason_history.append(pre_restart_reason)
             pre_restart_reason_history.append(pre_restart_reason)
-            time_step_history.append(float(time_step))
+            time_step_history.append(time_step_iter)
             res0_history.append(float(res0))
             fsq_prev_history.append(float(fsq_prev))
             bad_growth_streak_history.append(int(bad_growth_streak))
@@ -4190,6 +4231,8 @@ def solve_fixed_boundary_residual_iter(
                             time_step = max(scale * float(step_size), 1e-12)
                         bad_resets += 1
                         iter1 = iter2
+                        fsq_prev = fsq1
+                        inv_tau = [0.15 / time_step] * k_ndamp
                         update_rms = 0.0
                 else:
                     # Roll back state and zero velocity.
@@ -4221,6 +4264,8 @@ def solve_fixed_boundary_residual_iter(
                         time_step = max(scale * float(step_size), 1e-12)
                     bad_resets += 1
                     iter1 = iter2
+                    fsq_prev = fsq1
+                    inv_tau = [0.15 / time_step] * k_ndamp
                     update_rms = 0.0
             step_history.append(float(dt_eff))
             w_curr_history.append(float(w_curr))
