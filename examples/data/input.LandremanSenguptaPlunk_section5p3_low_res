@@ -8,11 +8,11 @@
   NSTEP = 200
   TCON0 =    2.000000000000E+000
 !  NS_ARRAY =           25       51
-!  FTOL_ARRAY =    1.0E-12  1.0E-12
+!  FTOL_ARRAY =    1e-14  1e-14
 !  NITER_ARRAY =      2000    10000
 
   NS_ARRAY =        11        25
-  FTOL_ARRAY =  1.0e-8   1.0E-11
+  FTOL_ARRAY =  1e-14   1e-14
   NITER_ARRAY =    300      1000
   
   PRECON_TYPE = 'NONE'
@@ -21,7 +21,7 @@
   LASYM = T
   NFP = 0003
   MPOL = 0005 ! 6
-  NTOR = 0004 ! 6
+  NTOR =  0! 6
   PHIEDGE =    3.141592653590E-002
 !----- Free Boundary Parameters -----
   LFREEB = F

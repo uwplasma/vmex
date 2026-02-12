@@ -150,8 +150,8 @@ def _run_vmec2000_exec(
         niter_steps = _distribute_iters(iters=int(iters), nstep=int(nstep))
         indata_updates["NITER"] = str(int(iters))
         indata_updates["NITER_ARRAY"] = ",".join(str(int(x)) for x in niter_steps)
-        indata_updates["FTOL"] = "0.0"
-        indata_updates["FTOL_ARRAY"] = ",".join("0.0" for _ in niter_steps)
+        indata_updates["FTOL"] = "1e-14"
+        indata_updates["FTOL_ARRAY"] = ",".join("1e-14" for _ in niter_steps)
 
     try:
         result = run_xvmec2000(
