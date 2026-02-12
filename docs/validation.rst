@@ -86,6 +86,7 @@ Per-iteration trace parity (VMEC2000 executable, reduced grid):
   python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case circular_tokamak --max-iter 10 --vmec-nstep 1 --single-ns 17
   python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case nfp4_QH_warm_start --max-iter 10 --single-ns 16 --vmec-timeout 60 --rtol 1e-3
   python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case nfp4_QH_warm_start --max-iter 20 --use-input-niter --vmec-timeout 60 --rtol 1e-3
+  python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case nfp4_QH_warm_start --max-iter 50 --use-input-niter --vmec-timeout 60 --rtol 1e-3
 
 This uses a reduced grid to stay under ~1 minute; increase ``--max-iter`` or ``--single-ns`` for deeper parity checks.
 For longer traces under the timeout cap you can split the vmec_jax run::
@@ -139,12 +140,12 @@ Current observed mismatches (updated parity status):
   per-iteration traces on ``circular_tokamak`` and ``shaped_tokamak_pressure``
   for a 10-iteration cap; 20-iter multigrid traces are now generated for the
   benchmark figures (reduced ns for runtime).
-- **Non-axisymmetric early-iteration parity** now reproduces VMEC2000 on
-  ``nfp4_QH_warm_start`` through 20 iterations (single-grid ``--single-ns 16``
-  and multigrid ``--use-input-niter`` runs): per-iteration ``fsq*`` traces,
-  ``xc/v`` updates, and tomnsps/gc raw blocks (including lambda-path
-  ``flsc/gcl`` and ``blmn/clmn``) match within the configured tolerance after
-  applying VMEC's lambda axis closure in ``bcovar``.
+- **Non-axisymmetric parity** now reproduces VMEC2000 on
+  ``nfp4_QH_warm_start`` through 50 iterations in the multigrid path
+  (``--use-input-niter``) at ``rtol=1e-3``; single-grid ``--single-ns 16``
+  trace and tomnsps/gc raw-block comparisons are tighter than this threshold.
+  This includes lambda-path ``flsc/gcl`` and ``blmn/clmn`` after applying
+  VMEC's lambda axis closure in ``bcovar``.
 - ``betapol``, ``betator``, ``betaxis``, ``ctor``, and ``DMerc`` are present but
   still placeholders in ``vmec_jax`` (zeros) until the VMEC2000 diagnostics path
   is fully ported.
