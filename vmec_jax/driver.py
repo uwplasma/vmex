@@ -300,6 +300,13 @@ def run_fixed_boundary(
     verbose:
         If True (default), print VMEC-style iteration progress and a summary.
     """
+    # Default to 64-bit for VMEC parity; users can opt out via JAX_ENABLE_X64=0.
+    try:
+        from ._compat import enable_x64
+
+        enable_x64(True)
+    except Exception:
+        pass
     cfg, indata = load_config(str(input_path))
     restart_state_eff = restart_state
     restart_wout = None
@@ -600,7 +607,14 @@ def run_fixed_boundary(
             cfg_i = replace(cfg, ns=int(ns_i))
             static_i = build_static(cfg_i, grid=grid)
             if i > 0:
-                state = interp_vmec_state(state, m=static_prev.modes.m, ns_new=int(ns_i))
+                state = interp_vmec_state(
+                    state,
+                    m=static_prev.modes.m,
+                    n=static_prev.modes.n,
+                    lthreed=bool(static_prev.cfg.lthreed),
+                    lconm1=bool(getattr(static_prev.cfg, "lconm1", True)),
+                    ns_new=int(ns_i),
+                )
                 static_prev = static_i
 
             if verbose:
