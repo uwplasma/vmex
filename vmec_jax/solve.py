@@ -2540,8 +2540,9 @@ def solve_fixed_boundary_residual_iter(
         static = build_static(cfg, grid=grid_vmec)
 
     idx00 = _mode00_index(static.modes)
-    m_modes = jnp.asarray(static.modes.m)
-    lambda_axis_mask = jnp.zeros_like(m_modes, dtype=jnp.asarray(state0.Rcos).dtype)
+    m_modes = np.asarray(static.modes.m, dtype=int)
+    n_modes = np.asarray(static.modes.n, dtype=int)
+    lambda_axis_copy_mask = jnp.asarray((m_modes == 0) & (n_modes > 0), dtype=jnp.asarray(state0.Rcos).dtype)
 
     # Boundary + axis recompute helpers (for VMEC-style bad-Jacobian reset).
     boundary_for_axis = boundary_from_indata(indata, static.modes) if indata is not None else None
@@ -2549,22 +2550,16 @@ def solve_fixed_boundary_residual_iter(
     lmove_axis = True if indata is None else bool(indata.get_bool("LMOVE_AXIS", True))
 
     def _apply_vmec_lambda_axis_rules(st: VMECState) -> VMECState:
-        """VMEC axis convention for lambda coefficients (jlam/jmin1).
-
-        VMEC's `scalxc` odd-m representation uses special axis closures. For the
-        lambda field, VMEC keeps the m=0 and m=1 modes finite on axis by
-        extrapolating the internal odd field to js=1, which corresponds (under
-        the `scalxc` axis fixup) to copying coefficients from js=1 to js=0. All
-        higher-m modes are forced to 0 on axis.
-        """
+        """VMEC symmetric-3D lambda axis closure (`totzsps`/`totzsp_mod`)."""
         if not enforce_vmec_lambda_axis:
             return st
         Lcos = jnp.asarray(st.Lcos)
         Lsin = jnp.asarray(st.Lsin)
         if int(Lcos.shape[0]) < 2:
             return st
-        Lcos = Lcos.at[0, :].set(Lcos[0, :] * lambda_axis_mask)
-        Lsin = Lsin.at[0, :].set(Lsin[0, :] * lambda_axis_mask)
+        if bool(getattr(static.cfg, "lthreed", False)) and int(getattr(static.cfg, "ntor", 0)) > 0:
+            axis_lsin = jnp.where(lambda_axis_copy_mask != 0, Lsin[1, :], Lsin[0, :])
+            Lsin = Lsin.at[0, :].set(axis_lsin)
         Lcos, Lsin = _enforce_lambda_gauge(Lcos, Lsin, idx00=idx00)
         return VMECState(
             layout=st.layout,
@@ -3200,6 +3195,14 @@ def solve_fixed_boundary_residual_iter(
         w = (1.0 + k2) ** (-float(mode_diag_exponent))
         return w.astype(dtype)
 
+    # Precompute per-iteration constants once.
+    w_mode_mn = _mode_diag_weights_mn(jnp.asarray(state0.Rcos).dtype)
+    delta_s = (
+        jnp.asarray(s[1] - s[0], dtype=jnp.asarray(state0.Rcos).dtype)
+        if int(jnp.asarray(s).shape[0]) > 1
+        else jnp.asarray(1.0, dtype=jnp.asarray(state0.Rcos).dtype)
+    )
+
     state = _enforce_fixed_boundary_and_axis(
         state0,
         static,
@@ -3712,7 +3715,6 @@ def solve_fixed_boundary_residual_iter(
         _maybe_dump_gc(frzl=frzl_pre, static=static, iter_idx=int(iter2), label="precond")
 
         # Mode-diagonal preconditioning in (m, n>=0) storage.
-        w_mode_mn = _mode_diag_weights_mn(jnp.asarray(frcc).dtype)
         frcc_u = frcc * w_mode_mn[None, :, :]
         frss_u = (frss if frss is not None else jnp.zeros_like(frcc_u)) * w_mode_mn[None, :, :]
         fzsc_u = fzsc * w_mode_mn[None, :, :]
@@ -3783,21 +3785,18 @@ def solve_fixed_boundary_residual_iter(
         else:
             rz_norm = _rz_norm(state)
             f_norm1 = jnp.where(rz_norm != 0.0, 1.0 / rz_norm, jnp.asarray(float("inf"), dtype=rz_norm.dtype))
-        delta_s = jnp.asarray(s[1] - s[0], dtype=jnp.asarray(rz_norm).dtype)
         fsqr1 = gcr2_p * f_norm1
         fsqz1 = gcz2_p * f_norm1
         if bool(vmec2000_control):
-            # VMEC2000 `residue.f90` defines the preconditioned lambda scalar as
-            #   fsql1 = hs * sum_{js=2..ns}( (pfaclam*gcl)**2 )
-            # i.e. exclude the axis surface (js=1).
-            gcl2_no_axis = jnp.sum(jnp.asarray(frzl_pre.flsc)[1:] ** 2)
+            # VMEC2000 `residue.f90`: fsql1 = hs * SUM( (faclam*gcl)**2 ) over all js.
+            gcl2_full = jnp.sum(jnp.asarray(frzl_pre.flsc) ** 2)
             if frzl_pre.flcs is not None:
-                gcl2_no_axis = gcl2_no_axis + jnp.sum(jnp.asarray(frzl_pre.flcs)[1:] ** 2)
+                gcl2_full = gcl2_full + jnp.sum(jnp.asarray(frzl_pre.flcs) ** 2)
             if getattr(frzl_pre, "flcc", None) is not None:
-                gcl2_no_axis = gcl2_no_axis + jnp.sum(jnp.asarray(frzl_pre.flcc)[1:] ** 2)
+                gcl2_full = gcl2_full + jnp.sum(jnp.asarray(frzl_pre.flcc) ** 2)
             if getattr(frzl_pre, "flss", None) is not None:
-                gcl2_no_axis = gcl2_no_axis + jnp.sum(jnp.asarray(frzl_pre.flss)[1:] ** 2)
-            fsql1 = gcl2_no_axis * delta_s
+                gcl2_full = gcl2_full + jnp.sum(jnp.asarray(frzl_pre.flss) ** 2)
+            fsql1 = gcl2_full * delta_s
         else:
             fsql1 = gcl2_p * delta_s
         fsqr1_f = float(np.asarray(fsqr1))
@@ -3882,7 +3881,7 @@ def solve_fixed_boundary_residual_iter(
             if tau.size:
                 min_tau = float(np.min(tau))
                 max_tau = float(np.max(tau))
-                bad_jacobian = (iter2 > 1) and (int(zero_m1) == 0) and ((min_tau * max_tau) < 0.0)
+                bad_jacobian = (min_tau * max_tau) < 0.0
                 min_tau_history.append(min_tau)
                 max_tau_history.append(max_tau)
                 bad_jacobian_history.append(int(bad_jacobian))
@@ -3906,7 +3905,7 @@ def solve_fixed_boundary_residual_iter(
 
         if bool(reference_mode):
             # Conservative restart logic used in the reference-mode trace.
-            if bad_jacobian:
+            if bad_jacobian and (fsq > 1.0e1):
                 pre_restart_reason = "bad_jacobian"
             elif (iter2 > iter1) and (fsq > 100.0 * max(res0, 1e-30)):
                 pre_restart_reason = "bad_jacobian"
@@ -3921,7 +3920,9 @@ def solve_fixed_boundary_residual_iter(
             # In practice, VMEC2000 resets when the force state blows up; use the
             # same effective trigger here (absolute fsq growth) and keep the
             # previous delayed bad-growth fallback.
-            if (iter2 > iter1) and (fsq > 1.0e2):
+            if bad_jacobian and (fsq > 1.0e1):
+                pre_restart_reason = "bad_jacobian"
+            elif (iter2 > iter1) and (fsq > 1.0e2):
                 pre_restart_reason = "bad_jacobian"
             elif (iter2 > (iter1 + 8)) and (bad_growth_streak >= 2):
                 pre_restart_reason = "bad_jacobian"
@@ -4314,6 +4315,18 @@ def solve_fixed_boundary_residual_iter(
                         fsq_prev = fsq1
                         inv_tau = [0.15 / time_step] * k_ndamp
                         update_rms = 0.0
+                        if bool(vmec2000_control):
+                            vmec2000_cache_valid = False
+                            cache_precond_diag = None
+                            cache_tcon = None
+                            cache_norms = None
+                            cache_rz_scale = None
+                            cache_l_scale = None
+                            cache_rz_norm = None
+                            cache_f_norm1 = None
+                            cache_prec_rz_mats = None
+                            cache_prec_rz_jmax = None
+                            cache_prec_lam_prec = None
                 else:
                     # Roll back state and zero velocity.
                     state = state_backup
@@ -4347,6 +4360,18 @@ def solve_fixed_boundary_residual_iter(
                     fsq_prev = fsq1
                     inv_tau = [0.15 / time_step] * k_ndamp
                     update_rms = 0.0
+                    if bool(vmec2000_control):
+                        vmec2000_cache_valid = False
+                        cache_precond_diag = None
+                        cache_tcon = None
+                        cache_norms = None
+                        cache_rz_scale = None
+                        cache_l_scale = None
+                        cache_rz_norm = None
+                        cache_f_norm1 = None
+                        cache_prec_rz_mats = None
+                        cache_prec_rz_jmax = None
+                        cache_prec_lam_prec = None
             step_history.append(float(dt_eff))
             w_curr_history.append(float(w_curr))
             w_try_history.append(float(w_try))
