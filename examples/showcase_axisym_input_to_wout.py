@@ -64,19 +64,23 @@ def _write_plots(
     # Keep showcase plots reasonably fast and match vmecPlot2 conventions.
     theta = vj.closed_theta_grid(128)
     phi = np.linspace(0.0, 2.0 * np.pi, 128, endpoint=False)
-    ns = int(wout_new.ns)
-    s_index_lcfs = ns - 1
-    s_indices = np.linspace(0, s_index_lcfs, 9).round().astype(int)
+    ns_new = int(wout_new.ns)
+    s_index_lcfs_new = ns_new - 1
+    s_index_lcfs_ref = int(wout_ref.ns) - 1 if wout_ref is not None else None
+    s_fracs = np.linspace(0.0, 1.0, 9)
 
     # 1) Nested flux surfaces (phi=0) from reference and new wout.
     fig, ax = plt.subplots(1, 2 if wout_ref is not None else 1, figsize=(10, 4), constrained_layout=True)
     ax = np.atleast_1d(ax)
-    for si in s_indices:
+    for sf in s_fracs:
+        si_new = int(round(float(sf) * float(max(ns_new - 1, 0))))
         # Use vmecPlot2-style toroidal slices for surfaces.
-        _, _zeta_surf, Rn, Zn = vj.vmecplot2_surface_grid(wout_new, s_index=int(si))
+        _, _zeta_surf, Rn, Zn = vj.vmecplot2_surface_grid(wout_new, s_index=si_new)
         ax[-1].plot(Rn[:, 0], Zn[:, 0], lw=1.2)
         if wout_ref is not None:
-            _, _zeta_surf, Rr, Zr = vj.vmecplot2_surface_grid(wout_ref, s_index=int(si))
+            ns_ref = int(wout_ref.ns)
+            si_ref = int(round(float(sf) * float(max(ns_ref - 1, 0))))
+            _, _zeta_surf, Rr, Zr = vj.vmecplot2_surface_grid(wout_ref, s_index=si_ref)
             ax[0].plot(Rr[:, 0], Zr[:, 0], lw=1.2)
     if wout_ref is not None:
         ax[0].set_title("VMEC2000 (reference)")
@@ -91,10 +95,10 @@ def _write_plots(
     plt.close(fig)
 
     # 2) |B| on LCFS using vmecPlot2-compatible grids.
-    theta_b, zeta_b, B_new = vj.vmecplot2_bmag_grid(wout_new, s_index=s_index_lcfs)
+    theta_b, zeta_b, B_new = vj.vmecplot2_bmag_grid(wout_new, s_index=s_index_lcfs_new)
     B_ref = None
     if wout_ref is not None:
-        _, _, B_ref = vj.vmecplot2_bmag_grid(wout_ref, s_index=s_index_lcfs)
+        _, _, B_ref = vj.vmecplot2_bmag_grid(wout_ref, s_index=int(s_index_lcfs_ref))
 
     fig, ax = plt.subplots(1, 2 if B_ref is not None else 1, figsize=(10, 4), constrained_layout=True)
     ax = np.atleast_1d(ax)
@@ -113,10 +117,10 @@ def _write_plots(
         else:
             a.plot([0, zeta_b.max()], [-zeta_b.max() * iota_val, 0], "k")
 
-    iota_new = float(np.asarray(wout_new.iotaf)[s_index_lcfs]) if hasattr(wout_new, "iotaf") else 0.0
+    iota_new = float(np.asarray(wout_new.iotaf)[s_index_lcfs_new]) if hasattr(wout_new, "iotaf") else 0.0
     iota_ref = iota_new
     if wout_ref is not None and hasattr(wout_ref, "iotaf"):
-        iota_ref = float(np.asarray(wout_ref.iotaf)[s_index_lcfs])
+        iota_ref = float(np.asarray(wout_ref.iotaf)[int(s_index_lcfs_ref)])
     for i, a in enumerate(ax):
         a.set_xlabel("zeta")
         a.set_ylabel("theta")
@@ -130,12 +134,12 @@ def _write_plots(
     plt.close(fig)
 
     # 3) 3D LCFS surface colored by |B| (vmecPlot2 defaults).
-    th3, ph3, Rlcfs, Zlcfs, Blcfs = vj.vmecplot2_lcfs_3d_grid(wout_new, s_index=s_index_lcfs)
+    th3, ph3, Rlcfs, Zlcfs, Blcfs = vj.vmecplot2_lcfs_3d_grid(wout_new, s_index=s_index_lcfs_new)
     X = Rlcfs * np.cos(ph3[None, :])
     Y = Rlcfs * np.sin(ph3[None, :])
     B_ref_3d = None
     if wout_ref is not None:
-        _th3r, ph3r, Rr, Zr, Br = vj.vmecplot2_lcfs_3d_grid(wout_ref, s_index=s_index_lcfs)
+        _th3r, ph3r, Rr, Zr, Br = vj.vmecplot2_lcfs_3d_grid(wout_ref, s_index=int(s_index_lcfs_ref))
         Xr = Rr * np.cos(ph3r[None, :])
         Yr = Rr * np.sin(ph3r[None, :])
         B_ref_3d = (Xr, Yr, Zr, Br)

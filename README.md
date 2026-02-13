@@ -32,9 +32,14 @@ Run tests:
 pytest -q
 ```
 
+Note: `vmec_jax` enables JAX 64-bit in the fixed-boundary driver for parity. Set `JAX_ENABLE_X64=0` to prioritize speed.
+
 ## Snapshot figures
 
-Generated from the bundled `shaped_tokamak_pressure` case (short single-grid parity run to stay under ~1 minute):
+Generated from:
+
+- Tokamak: bundled `shaped_tokamak_pressure` case (single-grid parity run).
+- Stellarator: bundled `n3are_R7.75B5.7_lowres` side-by-side VMEC2000/vmec_jax diagnostics.
 
 ```bash
 python examples/showcase_axisym_input_to_wout.py \
@@ -43,17 +48,24 @@ python examples/showcase_axisym_input_to_wout.py \
   --emit-readme-figures \
   --vmec2000-timeout 60 \
   --vmec2000-nstep 1
+
+python tools/diagnostics/n3are_vmec_vs_vmecjax.py \
+  --solve --solver vmec2000_iter --max-iter 10 \
+  --outdir docs/_static/figures
 ```
 
 <table>
   <tr>
-    <td colspan="2"><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_surfaces.png" width="860" /></td>
+    <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_surfaces.png" width="420" /></td>
+    <td><img src="docs/_static/figures/n3are_compare_cross_sections.png" width="420" /></td>
   </tr>
   <tr>
-    <td colspan="2"><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_bmag_lcfs.png" width="860" /></td>
+    <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_bmag_lcfs.png" width="420" /></td>
+    <td><img src="docs/_static/figures/n3are_compare_bmag_surface.png" width="420" /></td>
   </tr>
   <tr>
-    <td colspan="2"><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_lcfs_3d_bmag.png" width="860" /></td>
+    <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_lcfs_3d_bmag.png" width="420" /></td>
+    <td><img src="docs/_static/figures/n3are_compare_3d.png" width="420" /></td>
   </tr>
   <tr>
     <td colspan="2"><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_residual.png" width="860" /></td>
@@ -99,8 +111,9 @@ Interpretation:
 - Axisymmetric tomnsps/gc blocks (including lambda-force ``blmn/clmn``) match VMEC2000 to ~1e-11 abs on reduced grids; scalar residuals now match VMEC2000 at ~1e-7 or better on the standard suite, with the purely-toroidal-field case still the largest scalar residual gap (~1e-4).
 - The VMEC-style update loop uses scalxc-weighted forces, and ``xc``/``v`` dumps match VMEC2000 at iter 1 in reduced-grid parity runs.
 - The default benchmark path (10 iterations, ``ns=13``) now overlays VMEC2000 and vmec_jax traces for all 4 axisymmetric cases (`circular_tokamak`, `purely_toroidal_field`, `shaped_tokamak_pressure`, `solovev`).
-- Non-axisymmetric parity hardening is wired into a batch comparator (`tools/diagnostics/nonaxis_parity_batch.py`) over Simsopt `input.*` files. Current status: reduced-grid iter-1 parity passes across the default Simsopt batch; full-grid QA still fails at stage 1 iter 1, while full-grid QH (`nfp4_QH_warm_start`) and the 3D low-res benchmarks (`li383_low_res`, `n3are_R7.75B5.7_lowres`) now match through the 10-iteration multigrid trace within the 1e-3 tolerance.
-- Remaining known gap: close the full-grid non-axis mismatch after the early nonlinear iterations (especially QA/QH) before extending to long multigrid traces.
+- Non-axisymmetric parity hardening is wired into a batch comparator (`tools/diagnostics/nonaxis_parity_batch.py`) over Simsopt `input.*` files.
+- Latest full-grid multigrid status at `rtol=1e-3`, `max_iter=10`: `li383_low_res` passes trace parity. `LandremanPaul2021_QA_lowres` first mismatch is `fsql1` at stage 2 iter 1 (~0.7%); `LandremanPaul2021_QH_reactorScale_lowres` first mismatch is `fsqr` at stage 2 iter 1; `n3are_R7.75B5.7_lowres` first mismatch is `fsqr` at stage 1 iter 4.
+- Remaining known gap: close QA/QH/n3are early-iteration nonlinear mismatches (lambda-force/gc/tomnsps path) before extending long multigrid traces.
 
 Iteration trace parity (VMEC2000 executable, reduced grid):
 
