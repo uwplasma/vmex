@@ -51,6 +51,9 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# Virtual environments
+.venv*/
+
 # Translations
 *.mo
 *.pot
@@ -73,6 +76,7 @@ docs/_build/
 docs/api/generated/
 examples/outputs/
 outputs/
+tmp/
 
 # PyBuilder
 .pybuilder/
