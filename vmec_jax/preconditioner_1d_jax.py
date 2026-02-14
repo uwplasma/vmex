@@ -436,6 +436,11 @@ def _tridi_solve_batched_jmin0(a, d, b, rhs) -> Any:
     d = jnp.asarray(d)
     b = jnp.asarray(b)
     rhs = jnp.asarray(rhs)
+    if rhs.ndim > d.ndim:
+        expand = (1,) * (rhs.ndim - d.ndim)
+        a = a.reshape(a.shape + expand)
+        d = d.reshape(d.shape + expand)
+        b = b.reshape(b.shape + expand)
     n = int(rhs.shape[0])
     if n == 0:
         return rhs
@@ -526,84 +531,78 @@ def rz_preconditioner_apply(
         rhs_zcc = fzcc[:jmax] if fzcc is not None else None
 
         # m=0 group (jmin=0)
-        sol_r0 = _tridi_solve_batched_jmin0(ar[:, 0, :], dr[:, 0, :], br[:, 0, :], rhs_r[:, 0, :])
-        sol_z0 = _tridi_solve_batched_jmin0(az[:, 0, :], dz[:, 0, :], bz[:, 0, :], rhs_z[:, 0, :])
-        frcc_u = frcc_u.at[:jmax, 0, :].set(sol_r0)
-        fzsc_u = fzsc_u.at[:jmax, 0, :].set(sol_z0)
+        r_fields = []
+        if rhs_r is not None:
+            r_fields.append(("frcc", rhs_r))
         if rhs_rs is not None and frss_u is not None:
-            sol_rs0 = _tridi_solve_batched_jmin0(ar[:, 0, :], dr[:, 0, :], br[:, 0, :], rhs_rs[:, 0, :])
-            frss_u = frss_u.at[:jmax, 0, :].set(sol_rs0)
-        if rhs_zc is not None and fzcs_u is not None:
-            sol_zc0 = _tridi_solve_batched_jmin0(az[:, 0, :], dz[:, 0, :], bz[:, 0, :], rhs_zc[:, 0, :])
-            fzcs_u = fzcs_u.at[:jmax, 0, :].set(sol_zc0)
+            r_fields.append(("frss", rhs_rs))
         if rhs_rsc is not None and frsc_u is not None:
-            sol_rsc0 = _tridi_solve_batched_jmin0(ar[:, 0, :], dr[:, 0, :], br[:, 0, :], rhs_rsc[:, 0, :])
-            frsc_u = frsc_u.at[:jmax, 0, :].set(sol_rsc0)
-        if rhs_zcc is not None and fzcc_u is not None:
-            sol_zcc0 = _tridi_solve_batched_jmin0(az[:, 0, :], dz[:, 0, :], bz[:, 0, :], rhs_zcc[:, 0, :])
-            fzcc_u = fzcc_u.at[:jmax, 0, :].set(sol_zcc0)
+            r_fields.append(("frsc", rhs_rsc))
+        if r_fields:
+            rhs_r0_stack = jnp.stack([rhs[:, 0, :] for _name, rhs in r_fields], axis=-1)
+            sol_r0_stack = _tridi_solve_batched_jmin0(ar[:, 0, :], dr[:, 0, :], br[:, 0, :], rhs_r0_stack)
+            for idx, (name, _rhs) in enumerate(r_fields):
+                sol = sol_r0_stack[..., idx]
+                if name == "frcc":
+                    frcc_u = frcc_u.at[:jmax, 0, :].set(sol)
+                elif name == "frss":
+                    frss_u = frss_u.at[:jmax, 0, :].set(sol)
+                elif name == "frsc":
+                    frsc_u = frsc_u.at[:jmax, 0, :].set(sol)
 
-        # m>0 group (jmin=1)
+        z_fields = []
+        if rhs_z is not None:
+            z_fields.append(("fzsc", rhs_z))
+        if rhs_zc is not None and fzcs_u is not None:
+            z_fields.append(("fzcs", rhs_zc))
+        if rhs_zcc is not None and fzcc_u is not None:
+            z_fields.append(("fzcc", rhs_zcc))
+        if z_fields:
+            rhs_z0_stack = jnp.stack([rhs[:, 0, :] for _name, rhs in z_fields], axis=-1)
+            sol_z0_stack = _tridi_solve_batched_jmin0(az[:, 0, :], dz[:, 0, :], bz[:, 0, :], rhs_z0_stack)
+            for idx, (name, _rhs) in enumerate(z_fields):
+                sol = sol_z0_stack[..., idx]
+                if name == "fzsc":
+                    fzsc_u = fzsc_u.at[:jmax, 0, :].set(sol)
+                elif name == "fzcs":
+                    fzcs_u = fzcs_u.at[:jmax, 0, :].set(sol)
+                elif name == "fzcc":
+                    fzcc_u = fzcc_u.at[:jmax, 0, :].set(sol)
+
+        # m>0 group (jmin=1) in a single batched solve across m and n.
         if mpol > 1 and jmax > 1:
-            for m in range(1, mpol):
-                sol_rm = _tridi_solve_batched_jmin0(
-                    ar[1:, m, :],
-                    dr[1:, m, :],
-                    br[1:, m, :],
-                    rhs_r[1:, m, :],
-                )
-                sol_zm = _tridi_solve_batched_jmin0(
-                    az[1:, m, :],
-                    dz[1:, m, :],
-                    bz[1:, m, :],
-                    rhs_z[1:, m, :],
-                )
-                frcc_u = frcc_u.at[:jmax, m, :].set(
-                    jnp.concatenate([jnp.zeros((1, nrange), dtype=frcc.dtype), sol_rm], axis=0)
-                )
-                fzsc_u = fzsc_u.at[:jmax, m, :].set(
-                    jnp.concatenate([jnp.zeros((1, nrange), dtype=fzsc.dtype), sol_zm], axis=0)
-                )
-                if rhs_rs is not None and frss_u is not None:
-                    sol_rsm = _tridi_solve_batched_jmin0(
-                        ar[1:, m, :],
-                        dr[1:, m, :],
-                        br[1:, m, :],
-                        rhs_rs[1:, m, :],
-                    )
-                    frss_u = frss_u.at[:jmax, m, :].set(
-                        jnp.concatenate([jnp.zeros((1, nrange), dtype=frss.dtype), sol_rsm], axis=0)
-                    )
-                if rhs_zc is not None and fzcs_u is not None:
-                    sol_zcm = _tridi_solve_batched_jmin0(
-                        az[1:, m, :],
-                        dz[1:, m, :],
-                        bz[1:, m, :],
-                        rhs_zc[1:, m, :],
-                    )
-                    fzcs_u = fzcs_u.at[:jmax, m, :].set(
-                        jnp.concatenate([jnp.zeros((1, nrange), dtype=fzcs.dtype), sol_zcm], axis=0)
-                    )
-                if rhs_rsc is not None and frsc_u is not None:
-                    sol_rscm = _tridi_solve_batched_jmin0(
-                        ar[1:, m, :],
-                        dr[1:, m, :],
-                        br[1:, m, :],
-                        rhs_rsc[1:, m, :],
-                    )
-                    frsc_u = frsc_u.at[:jmax, m, :].set(
-                        jnp.concatenate([jnp.zeros((1, nrange), dtype=frsc.dtype), sol_rscm], axis=0)
-                    )
-                if rhs_zcc is not None and fzcc_u is not None:
-                    sol_zccm = _tridi_solve_batched_jmin0(
-                        az[1:, m, :],
-                        dz[1:, m, :],
-                        bz[1:, m, :],
-                        rhs_zcc[1:, m, :],
-                    )
-                    fzcc_u = fzcc_u.at[:jmax, m, :].set(
-                        jnp.concatenate([jnp.zeros((1, nrange), dtype=fzcc.dtype), sol_zccm], axis=0)
-                    )
+            a_r = ar[1:jmax, 1:, :]
+            d_r = dr[1:jmax, 1:, :]
+            b_r = br[1:jmax, 1:, :]
+            a_z = az[1:jmax, 1:, :]
+            d_z = dz[1:jmax, 1:, :]
+            b_z = bz[1:jmax, 1:, :]
+            if r_fields:
+                rhs_rm_stack = jnp.stack([rhs[1:, 1:, :] for _name, rhs in r_fields], axis=-1)
+                sol_rm = _tridi_solve_batched_jmin0(a_r, d_r, b_r, rhs_rm_stack)
+                pad_r = jnp.zeros((1, mpol - 1, nrange, sol_rm.shape[-1]), dtype=sol_rm.dtype)
+                sol_rm_full = jnp.concatenate([pad_r, sol_rm], axis=0)
+                for idx, (name, _rhs) in enumerate(r_fields):
+                    sol = sol_rm_full[..., idx]
+                    if name == "frcc":
+                        frcc_u = frcc_u.at[:jmax, 1:, :].set(sol)
+                    elif name == "frss":
+                        frss_u = frss_u.at[:jmax, 1:, :].set(sol)
+                    elif name == "frsc":
+                        frsc_u = frsc_u.at[:jmax, 1:, :].set(sol)
+            if z_fields:
+                rhs_zm_stack = jnp.stack([rhs[1:, 1:, :] for _name, rhs in z_fields], axis=-1)
+                sol_zm = _tridi_solve_batched_jmin0(a_z, d_z, b_z, rhs_zm_stack)
+                pad_z = jnp.zeros((1, mpol - 1, nrange, sol_zm.shape[-1]), dtype=sol_zm.dtype)
+                sol_zm_full = jnp.concatenate([pad_z, sol_zm], axis=0)
+                for idx, (name, _rhs) in enumerate(z_fields):
+                    sol = sol_zm_full[..., idx]
+                    if name == "fzsc":
+                        fzsc_u = fzsc_u.at[:jmax, 1:, :].set(sol)
+                    elif name == "fzcs":
+                        fzcs_u = fzcs_u.at[:jmax, 1:, :].set(sol)
+                    elif name == "fzcc":
+                        fzcc_u = fzcc_u.at[:jmax, 1:, :].set(sol)
 
     return TomnspsRZL(
         frcc=frcc_u,
