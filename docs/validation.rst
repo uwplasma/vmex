@@ -35,6 +35,7 @@ The test suite in ``tests/`` focuses on:
 - regression comparisons against bundled ``wout`` files for selected quantities,
 - scalar residual parity (``fsqr/fsqz/fsql``) on reference ``wout`` states,
 - end-to-end smoke tests for the fixed-boundary solvers on small axisymmetric cases.
+- optional VMEC2000 executable parity (QA signgs1) when ``VMEC2000_INTEGRATION=1`` is set.
 
 Recommended validation scripts
 ------------------------------
@@ -133,18 +134,72 @@ Current observed mismatches (updated parity status):
   precision for the first **10 iterations** on the 4-axisymmetric benchmark
   suite (``circular_tokamak``, ``purely_toroidal_field``,
   ``shaped_tokamak_pressure``, ``solovev``).
-- **Multigrid parity** (full `NS` from input, `--use-input-niter`) is validated
-  for the 10-iteration benchmark overlay on reduced grids; extending full-grid
-  multigrid traces beyond 10 iterations is still in progress.
-- **Non-axisymmetric parity** is now exercised on multiple Simsopt inputs via
-  ``nonaxis_parity_batch.py``. Current first-iteration status:
-  reduced-grid iter-1 parity now passes across the default Simsopt batch.
-  On full grids, QA still fails at stage 1 iter 1, while QH (``nfp4_QH_warm_start``)
-  and the 3D low-res benchmarks (``li383_low_res``, ``n3are_R7.75B5.7_lowres``)
-  now match through the 10-iteration multigrid trace within the 1e-3 tolerance.
+- **Full-grid multigrid parity** (`--use-input-niter`, `max_iter=10`) using the
+  VMEC2000 executable comparator:
+  ``input.qa_signgs1`` (QA, NFP=2, NTOR=6) and
+  ``LandremanPaul2021_QH_reactorScale_lowres`` pass per-iteration trace parity
+  through stage 1 iter 1 and stage 2 iters 1-9. The following cases fail at
+  **stage 1 iter 1**: ``LandremanPaul2021_QA_lowres``, ``li383_low_res``,
+  ``n3are_R7.75B5.7_lowres``.
 - ``betapol``, ``betator``, ``betaxis``, ``ctor``, and ``DMerc`` are present but
   still placeholders in ``vmec_jax`` (zeros) until the VMEC2000 diagnostics path
   is fully ported.
+
+Full-grid parity snapshot (VMEC2000 exec comparator, `rtol=1e-3`, `max_iter=10`):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 16 36 16 14 16 10 22
+
+   * - Case
+     - Input
+     - Stages (ns, niter)
+     - Status
+     - fsq_total (VMEC/JAX)
+     - runtime_s
+     - Notes
+   * - circular_tokamak
+     - ``examples/data/input.circular_tokamak``
+     - ``[(10,5),(17,5)]``
+     - PASS
+     - ``2.765e-02 / 2.765e-02``
+     - 24.8
+     - Axisymmetric control
+   * - QA signgs1
+     - ``/Users/rogeriojorge/local/test/input.qa_signgs1``
+     - ``[(16,1),(50,9)]``
+     - PASS
+     - ``5.267e-01 / 5.267e-01``
+     - 44.5
+     - Wout parity: ``rmnc`` relRMS ~8.8e-2, ``zmns`` relRMS ~3.2e-1
+   * - LandremanPaul2021_QA_lowres
+     - ``simsopt/tests/test_files/input.LandremanPaul2021_QA_lowres``
+     - ``[(16,1),(50,1),(75,8)]``
+     - FAIL (stage1 iter1)
+     - ``1.630e+00 / 9.245e+01``
+     - 66.7
+     - fsq mismatch at iter 1
+   * - LandremanPaul2021_QH_reactorScale_lowres
+     - ``simsopt/tests/test_files/input.LandremanPaul2021_QH_reactorScale_lowres``
+     - ``[(12,1),(50,9)]``
+     - PASS
+     - ``5.591e+00 / 5.591e+00``
+     - 56.8
+     - Wout parity: ``rmnc`` relRMS ~7.8e-2, ``zmns`` relRMS ~3.1e-1
+   * - li383_low_res
+     - ``simsopt/tests/test_files/input.li383_low_res``
+     - ``[(16,10)]``
+     - FAIL (stage1 iter1)
+     - ``1.489e-01 / 3.726e-01``
+     - 23.9
+     - fsq mismatch at iter 1
+   * - n3are_R7.75B5.7_lowres
+     - ``simsopt/tests/test_files/input.n3are_R7.75B5.7_lowres``
+     - ``[(16,4),(49,3),(100,3)]``
+     - FAIL (stage1 iter1)
+     - ``3.192e+01 / 1.085e+13``
+     - 65.3
+     - fsq blow-up at iter 1
 
 Scope and known gaps
 --------------------

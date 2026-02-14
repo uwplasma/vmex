@@ -2,11 +2,22 @@
 
 Laptop-friendly, end-to-end differentiable (JAX) rewrite of **VMEC2000**, focusing on **fixed-boundary** first.
 
+<table>
+  <tr>
+    <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_lcfs_3d_bmag.png" width="420" /></td>
+    <td><img src="docs/_static/figures/n3are_compare_3d.png" width="420" /></td>
+  </tr>
+  <tr>
+    <td align="center">Tokamak (shaped_tokamak_pressure)</td>
+    <td align="center">Stellarator (n3are_R7.75B5.7_lowres)</td>
+  </tr>
+</table>
+
 ## Scope (current)
 
 - Fixed boundary only (free boundary deferred).
-- Axisymmetric focus for end-to-end parity: `ntor=0`, `nfp=1`, `lasym=False`.
-- Non-axisymmetric and `lasym=True` full end-to-end parity are still in progress. Current non-axis work is focused on first-guess/early-iteration kernel and trace parity.
+- Axisymmetric end-to-end parity is stable (`ntor=0`, `nfp=1`, `lasym=False`).
+- Non-axisymmetric parity: QA/QH stage-1 + stage-2 trace parity (10 iters, `rtol=1e-3`) is now passing; remaining 3D cases still in progress.
 
 ## Quickstart
 
@@ -32,7 +43,14 @@ Run tests:
 pytest -q
 ```
 
+VMEC2000 integration parity (requires the VMEC2000 executable):
+
+```bash
+VMEC2000_INTEGRATION=1 pytest -k vmec2000_exec_qa_regression
+```
+
 Note: `vmec_jax` enables JAX 64-bit in the fixed-boundary driver for parity. Set `JAX_ENABLE_X64=0` to prioritize speed.
+For faster fixed-boundary solves in Python, pass `jit_forces=True` to `run_fixed_boundary(...)` (force/residual pipeline is JIT-compiled). Debug dump env vars automatically disable this.
 
 ## Snapshot figures
 
@@ -112,8 +130,23 @@ Interpretation:
 - The VMEC-style update loop uses scalxc-weighted forces, and ``xc``/``v`` dumps match VMEC2000 at iter 1 in reduced-grid parity runs.
 - The default benchmark path (10 iterations, ``ns=13``) now overlays VMEC2000 and vmec_jax traces for all 4 axisymmetric cases (`circular_tokamak`, `purely_toroidal_field`, `shaped_tokamak_pressure`, `solovev`).
 - Non-axisymmetric parity hardening is wired into a batch comparator (`tools/diagnostics/nonaxis_parity_batch.py`) over Simsopt `input.*` files.
-- Latest full-grid multigrid status at `rtol=1e-3`, `max_iter=10`: `li383_low_res` passes trace parity. `LandremanPaul2021_QA_lowres` first mismatch is `fsql1` at stage 2 iter 1 (~0.7%); `LandremanPaul2021_QH_reactorScale_lowres` first mismatch is `fsqr` at stage 2 iter 1; `n3are_R7.75B5.7_lowres` first mismatch is `fsqr` at stage 1 iter 4.
-- Remaining known gap: close QA/QH/n3are early-iteration nonlinear mismatches (lambda-force/gc/tomnsps path) before extending long multigrid traces.
+- Latest full-grid multigrid status at `rtol=1e-3`, `max_iter=10` (VMEC2000 exec comparator):
+  - **Pass:** `input.qa_signgs1` (QA, NFP=2, NTOR=6) matches per-iteration trace through stage 1 (ns=16) iter 1 and stage 2 (ns=50) iters 1-9.
+  - **Pass:** `LandremanPaul2021_QH_reactorScale_lowres` matches per-iteration trace through stage 1 (ns=12) iter 1 and stage 2 (ns=50) iters 1-9.
+  - **Fail (stage 1 iter 1):** `LandremanPaul2021_QA_lowres`, `li383_low_res`, `n3are_R7.75B5.7_lowres`.
+  - **Axisymmetric control:** `circular_tokamak` passes multigrid trace parity (ns=10/17, 10 iters).
+- Remaining known gap: close QA_lowres/n3are/li383 early-iteration nonlinear mismatches (lambda-force/gc/tomnsps path) before extending long multigrid traces.
+
+Full-grid parity snapshot (VMEC2000 exec comparator, `rtol=1e-3`, `max_iter=10`):
+
+| Case | Input | Stages (ns, niter) | Status | fsq_total (VMEC/JAX) | runtime_s | Notes |
+|---|---|---|---|---|---|---|
+| circular_tokamak | `examples/data/input.circular_tokamak` | `[(10,5),(17,5)]` | PASS | `2.765e-02 / 2.765e-02` | 24.8 | Axisymmetric control |
+| QA signgs1 | `/Users/rogeriojorge/local/test/input.qa_signgs1` | `[(16,1),(50,9)]` | PASS | `5.267e-01 / 5.267e-01` | 44.5 | Full dumps clean; wout parity `rmnc` relRMS ~8.8e-2, `zmns` relRMS ~3.2e-1 |
+| LandremanPaul2021_QA_lowres | `simsopt/tests/test_files/input.LandremanPaul2021_QA_lowres` | `[(16,1),(50,1),(75,8)]` | FAIL (stage1 iter1) | `1.630e+00 / 9.245e+01` | 66.7 | fsq mismatch at iter 1 |
+| LandremanPaul2021_QH_reactorScale_lowres | `simsopt/tests/test_files/input.LandremanPaul2021_QH_reactorScale_lowres` | `[(12,1),(50,9)]` | PASS | `5.591e+00 / 5.591e+00` | 56.8 | Wout parity: `rmnc` relRMS ~7.8e-2, `zmns` relRMS ~3.1e-1 |
+| li383_low_res | `simsopt/tests/test_files/input.li383_low_res` | `[(16,10)]` | FAIL (stage1 iter1) | `1.489e-01 / 3.726e-01` | 23.9 | fsq mismatch at iter 1 |
+| n3are_R7.75B5.7_lowres | `simsopt/tests/test_files/input.n3are_R7.75B5.7_lowres` | `[(16,4),(49,3),(100,3)]` | FAIL (stage1 iter1) | `3.192e+01 / 1.085e+13` | 65.3 | fsq blow-up at iter 1 |
 
 Iteration trace parity (VMEC2000 executable, reduced grid):
 
