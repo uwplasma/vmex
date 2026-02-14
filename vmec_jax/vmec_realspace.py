@@ -513,54 +513,35 @@ def vmec_realspace_geom_from_state(
             lasym=lasym,
             lconm1=lconm1,
         )
-    R = vmec_realspace_synthesis(
-        coeff_cos=Rcos,
-        coeff_sin=Rsin,
+    coeff_cos_stack = jnp.stack([Rcos, Zcos], axis=0)
+    coeff_sin_stack = jnp.stack([Rsin, Zsin], axis=0)
+    rz = vmec_realspace_synthesis(
+        coeff_cos=coeff_cos_stack,
+        coeff_sin=coeff_sin_stack,
         modes=modes,
         trig=trig,
         coeffs_internal=True,
         apply_scalxc=True,
     )
-    Z = vmec_realspace_synthesis(
-        coeff_cos=Zcos,
-        coeff_sin=Zsin,
+    rz_t = vmec_realspace_synthesis_dtheta(
+        coeff_cos=coeff_cos_stack,
+        coeff_sin=coeff_sin_stack,
         modes=modes,
         trig=trig,
         coeffs_internal=True,
         apply_scalxc=True,
     )
-    Ru = vmec_realspace_synthesis_dtheta(
-        coeff_cos=Rcos,
-        coeff_sin=Rsin,
+    rz_p = vmec_realspace_synthesis_dzeta_phys(
+        coeff_cos=coeff_cos_stack,
+        coeff_sin=coeff_sin_stack,
         modes=modes,
         trig=trig,
         coeffs_internal=True,
         apply_scalxc=True,
     )
-    Zu = vmec_realspace_synthesis_dtheta(
-        coeff_cos=Zcos,
-        coeff_sin=Zsin,
-        modes=modes,
-        trig=trig,
-        coeffs_internal=True,
-        apply_scalxc=True,
-    )
-    Rv = vmec_realspace_synthesis_dzeta_phys(
-        coeff_cos=Rcos,
-        coeff_sin=Rsin,
-        modes=modes,
-        trig=trig,
-        coeffs_internal=True,
-        apply_scalxc=True,
-    )
-    Zv = vmec_realspace_synthesis_dzeta_phys(
-        coeff_cos=Zcos,
-        coeff_sin=Zsin,
-        modes=modes,
-        trig=trig,
-        coeffs_internal=True,
-        apply_scalxc=True,
-    )
+    R, Z = rz[0], rz[1]
+    Ru, Zu = rz_t[0], rz_t[1]
+    Rv, Zv = rz_p[0], rz_p[1]
     if hasattr(state, "Lcos") and hasattr(state, "Lsin"):
         Lu = vmec_realspace_synthesis_dtheta(
             coeff_cos=state.Lcos,
