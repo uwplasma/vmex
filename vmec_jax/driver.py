@@ -690,6 +690,7 @@ def run_fixed_boundary(
                     )
 
             stage_offsets.append(sum(int(np.asarray(r.w_history).size) for r in stage_results))
+            scan_mode = bool(use_scan)
             stage_results.append(
                 solve_fixed_boundary_residual_iter(
                     state,
@@ -708,11 +709,11 @@ def run_fixed_boundary(
                     divide_by_scalxc_for_update=False,
                     lambda_update_scale=1.0,
                     enforce_vmec_lambda_axis=True,
-                    vmec2000_control=True,
-                    strict_update=True,
+                    vmec2000_control=not scan_mode,
+                    strict_update=False if scan_mode else True,
                     backtracking=False,
                     reference_mode=False,
-                    use_restart_triggers=True if use_restart_triggers is None else bool(use_restart_triggers),
+                    use_restart_triggers=False if scan_mode else (True if use_restart_triggers is None else bool(use_restart_triggers)),
                     use_direct_fallback=False,
                     resume_state=restart_solver_state,
                     verbose=bool(verbose),
