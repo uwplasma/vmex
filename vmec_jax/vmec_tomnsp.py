@@ -27,6 +27,8 @@ from typing import Any
 
 import numpy as np
 
+from jax import tree_util
+
 from ._compat import jnp
 from .grids import AngleGrid
 
@@ -78,6 +80,9 @@ def vmec_theta_sizes(ntheta: int, *, lasym: bool) -> tuple[int, int, int]:
     return int(ntheta1), int(ntheta2), int(ntheta3)
 
 
+_TRIG_CACHE: dict[tuple[int, int, int, int, int, bool, str], VmecTrigTables] = {}
+
+
 def vmec_trig_tables(
     *,
     ntheta: int,
@@ -87,6 +92,7 @@ def vmec_trig_tables(
     nmax: int,
     lasym: bool,
     dtype=jnp.float64,
+    cache: bool = True,
 ) -> VmecTrigTables:
     """Build VMEC-style trig and weight tables.
 
@@ -105,6 +111,15 @@ def vmec_trig_tables(
         raise ValueError("nfp must be positive")
     if mmax < 0 or nmax < 0:
         raise ValueError("mmax/nmax must be nonnegative")
+    if cache:
+        try:
+            dtype_key = str(np.dtype(dtype))
+        except Exception:
+            dtype_key = str(dtype)
+        cache_key = (ntheta, nzeta, nfp, mmax, nmax, bool(lasym), dtype_key)
+        cached = _TRIG_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
 
     # dnorm normalization in fixaray (always on reduced interval [0, pi]).
     dnorm = 1.0 / (nzeta * (ntheta2 - 1))
@@ -184,7 +199,7 @@ def vmec_trig_tables(
     sinnvn = -sinnv * (n[None, :] * float(nfp))
 
     # Convert to backend arrays.
-    return VmecTrigTables(
+    tables = VmecTrigTables(
         ntheta1=ntheta1,
         ntheta2=ntheta2,
         ntheta3=ntheta3,
@@ -208,9 +223,15 @@ def vmec_trig_tables(
         cosnvn=jnp.asarray(cosnvn, dtype=dtype),
         sinnvn=jnp.asarray(sinnvn, dtype=dtype),
     )
+    if cache:
+        _TRIG_CACHE[cache_key] = tables
+    return tables
 
 
-def vmec_angle_grid(*, ntheta: int, nzeta: int, nfp: int, lasym: bool) -> AngleGrid:
+_GRID_CACHE: dict[tuple[int, int, int, bool], AngleGrid] = {}
+
+
+def vmec_angle_grid(*, ntheta: int, nzeta: int, nfp: int, lasym: bool, cache: bool = True) -> AngleGrid:
     """Build the VMEC internal (theta,zeta) grid implied by `read_indata.f`.
 
     - If `lasym=False`, VMEC uses `ntheta3=ntheta2` points covering `[0,π]`
@@ -224,6 +245,11 @@ def vmec_angle_grid(*, ntheta: int, nzeta: int, nfp: int, lasym: bool) -> AngleG
     nzeta = int(nzeta)
     if nzeta <= 0:
         nzeta = 1
+    cache_key = (int(ntheta), int(nzeta), int(nfp), bool(lasym))
+    if cache:
+        cached = _GRID_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
     if lasym:
         i = np.arange(ntheta3, dtype=float)
         theta = (2.0 * np.pi) * i / float(ntheta1)
@@ -232,9 +258,13 @@ def vmec_angle_grid(*, ntheta: int, nzeta: int, nfp: int, lasym: bool) -> AngleG
         theta = (2.0 * np.pi) * i / float(ntheta1)  # includes pi at i=ntheta2-1
     j = np.arange(nzeta, dtype=float)
     zeta = (2.0 * np.pi) * j / float(nzeta)
-    return AngleGrid(theta=theta.astype(float), zeta=zeta.astype(float), nfp=int(nfp))
+    grid = AngleGrid(theta=theta.astype(float), zeta=zeta.astype(float), nfp=int(nfp))
+    if cache:
+        _GRID_CACHE[cache_key] = grid
+    return grid
 
 
+@tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class TomnspsRZL:
     """Fourier-space force arrays in VMEC's internal (n,m) packing (subset)."""
@@ -262,6 +292,27 @@ class TomnspsRZL:
     fzss: Any | None = None  # (ns, mpol, ntor+1)
     flcc: Any | None = None  # (ns, mpol, ntor+1)
     flss: Any | None = None  # (ns, mpol, ntor+1)
+
+    def tree_flatten(self):
+        children = (
+            self.frcc,
+            self.frss,
+            self.fzsc,
+            self.fzcs,
+            self.flsc,
+            self.flcs,
+            self.frsc,
+            self.frcs,
+            self.fzcc,
+            self.fzss,
+            self.flcc,
+            self.flss,
+        )
+        return children, None
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        return cls(*children)
 
 
 def _select_mparity(a_even, a_odd, m: np.ndarray):
