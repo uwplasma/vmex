@@ -202,10 +202,16 @@ def internal_odd_from_physical_vmec_jlam(
 
 def _mn_index_maps(modes) -> tuple[int, int, np.ndarray, np.ndarray]:
     """Build (m,n>=0) index maps for signed coefficients."""
+    key = _mn_index_cache_key(modes)
+    cached = _MN_INDEX_CACHE.get(key)
+    if cached is not None:
+        return cached
     m_arr = np.asarray(modes.m, dtype=int)
     n_arr = np.asarray(modes.n, dtype=int)
     if m_arr.size == 0:
-        return 0, 0, np.zeros((0, 0), dtype=int), np.zeros((0, 0), dtype=int)
+        out = (0, 0, np.zeros((0, 0), dtype=int), np.zeros((0, 0), dtype=int))
+        _MN_INDEX_CACHE[key] = out
+        return out
     mpol = int(m_arr.max()) + 1
     ntor = int(np.abs(n_arr).max())
     nrange = ntor + 1
@@ -216,101 +222,142 @@ def _mn_index_maps(modes) -> tuple[int, int, np.ndarray, np.ndarray]:
             idx_pos[int(m_k), int(n_k)] = int(k)
         else:
             idx_neg[int(m_k), int(-n_k)] = int(k)
-    return mpol, ntor, idx_pos, idx_neg
+    out = (mpol, ntor, idx_pos, idx_neg)
+    _MN_INDEX_CACHE[key] = out
+    return out
 
 
 def _signed_to_mn_cos(coeffs, idx_pos, idx_neg):
     coeffs = jnp.asarray(coeffs)
+    idx_pos = jnp.asarray(idx_pos, dtype=jnp.int32)
+    idx_neg = jnp.asarray(idx_neg, dtype=jnp.int32)
     ns = int(coeffs.shape[0])
     mpol, nrange = idx_pos.shape
-    rcc = jnp.zeros((ns, mpol, nrange), dtype=coeffs.dtype)
-    rss = jnp.zeros_like(rcc)
-    for m_i in range(mpol):
-        for n_i in range(nrange):
-            kp = int(idx_pos[m_i, n_i])
-            if kp < 0:
-                continue
-            pos = coeffs[:, kp]
-            kn = int(idx_neg[m_i, n_i])
-            neg = coeffs[:, kn] if kn >= 0 else jnp.zeros_like(pos)
-            rcc = rcc.at[:, m_i, n_i].set(pos + neg)
-            rss_val = pos - neg
-            if n_i == 0 or m_i == 0:
-                rss_val = jnp.zeros_like(pos)
-            rss = rss.at[:, m_i, n_i].set(rss_val)
+    if mpol == 0 or nrange == 0:
+        z = jnp.zeros((ns, mpol, nrange), dtype=coeffs.dtype)
+        return z, z
+
+    mask_pos = idx_pos >= 0
+    mask_neg = idx_neg >= 0
+    idx_pos_safe = jnp.where(mask_pos, idx_pos, 0)
+    idx_neg_safe = jnp.where(mask_neg, idx_neg, 0)
+
+    pos = coeffs[:, idx_pos_safe] * mask_pos.astype(coeffs.dtype)
+    neg = coeffs[:, idx_neg_safe] * mask_neg.astype(coeffs.dtype)
+
+    rcc = pos + neg
+    rss = pos - neg
+
+    m = jnp.arange(mpol, dtype=jnp.int32)[:, None]
+    n = jnp.arange(nrange, dtype=jnp.int32)[None, :]
+    zero_mask = (m == 0) | (n == 0)
+    rss = jnp.where(zero_mask[None, :, :], jnp.zeros_like(rss), rss)
     return rcc, rss
 
 
 def _signed_to_mn_sin(coeffs, idx_pos, idx_neg):
     coeffs = jnp.asarray(coeffs)
+    idx_pos = jnp.asarray(idx_pos, dtype=jnp.int32)
+    idx_neg = jnp.asarray(idx_neg, dtype=jnp.int32)
     ns = int(coeffs.shape[0])
     mpol, nrange = idx_pos.shape
-    sc = jnp.zeros((ns, mpol, nrange), dtype=coeffs.dtype)
-    cs = jnp.zeros_like(sc)
-    for m_i in range(mpol):
-        for n_i in range(nrange):
-            kp = int(idx_pos[m_i, n_i])
-            if kp < 0:
-                continue
-            pos = coeffs[:, kp]
-            kn = int(idx_neg[m_i, n_i])
-            neg = coeffs[:, kn] if kn >= 0 else jnp.zeros_like(pos)
-            sc_val = pos + neg
-            cs_val = neg - pos
-            if n_i == 0:
-                cs_val = jnp.zeros_like(pos)
-            elif m_i == 0:
-                sc_val = jnp.zeros_like(pos)
-            sc = sc.at[:, m_i, n_i].set(sc_val)
-            cs = cs.at[:, m_i, n_i].set(cs_val)
+    if mpol == 0 or nrange == 0:
+        z = jnp.zeros((ns, mpol, nrange), dtype=coeffs.dtype)
+        return z, z
+
+    mask_pos = idx_pos >= 0
+    mask_neg = idx_neg >= 0
+    idx_pos_safe = jnp.where(mask_pos, idx_pos, 0)
+    idx_neg_safe = jnp.where(mask_neg, idx_neg, 0)
+
+    pos = coeffs[:, idx_pos_safe] * mask_pos.astype(coeffs.dtype)
+    neg = coeffs[:, idx_neg_safe] * mask_neg.astype(coeffs.dtype)
+
+    sc = pos + neg
+    cs = neg - pos
+
+    m = jnp.arange(mpol, dtype=jnp.int32)[:, None]
+    n = jnp.arange(nrange, dtype=jnp.int32)[None, :]
+    n0 = n == 0
+    m0 = m == 0
+    cs = jnp.where(n0[None, :, :], jnp.zeros_like(cs), cs)
+    sc = jnp.where(m0[None, :, :] & (~n0[None, :, :]), jnp.zeros_like(sc), sc)
     return sc, cs
 
 
 def _mn_cos_to_signed(rcc, rss, idx_pos, idx_neg, ncoeff: int):
     rcc = jnp.asarray(rcc)
     rss = jnp.asarray(rss)
+    idx_pos = jnp.asarray(idx_pos, dtype=jnp.int32)
+    idx_neg = jnp.asarray(idx_neg, dtype=jnp.int32)
     ns = int(rcc.shape[0])
-    mpol, nrange = idx_pos.shape
     out = jnp.zeros((ns, ncoeff), dtype=rcc.dtype)
-    for m_i in range(mpol):
-        for n_i in range(nrange):
-            kp = int(idx_pos[m_i, n_i])
-            if kp < 0:
-                continue
-            if n_i == 0 or m_i == 0:
-                pos = rcc[:, m_i, n_i]
-            else:
-                pos = 0.5 * (rcc[:, m_i, n_i] + rss[:, m_i, n_i])
-            out = out.at[:, kp].set(pos)
-            kn = int(idx_neg[m_i, n_i])
-            if kn >= 0:
-                neg = 0.5 * (rcc[:, m_i, n_i] - rss[:, m_i, n_i])
-                out = out.at[:, kn].set(neg)
+    if ncoeff == 0:
+        return out
+
+    mpol, nrange = idx_pos.shape
+    m = jnp.arange(mpol, dtype=jnp.int32)[:, None]
+    n = jnp.arange(nrange, dtype=jnp.int32)[None, :]
+    m0 = m == 0
+    n0 = n == 0
+
+    pos = 0.5 * (rcc + rss)
+    pos = jnp.where((m0 | n0)[None, :, :], rcc, pos)
+    neg = 0.5 * (rcc - rss)
+
+    idx_pos_flat = idx_pos.reshape(-1)
+    idx_neg_flat = idx_neg.reshape(-1)
+    mask_pos = idx_pos_flat >= 0
+    mask_neg = idx_neg_flat >= 0
+    idx_pos_safe = jnp.where(mask_pos, idx_pos_flat, 0)
+    idx_neg_safe = jnp.where(mask_neg, idx_neg_flat, 0)
+
+    pos_flat = pos.reshape(ns, -1) * mask_pos.astype(rcc.dtype)[None, :]
+    neg_flat = neg.reshape(ns, -1) * mask_neg.astype(rcc.dtype)[None, :]
+
+    out = out.at[:, idx_pos_safe].add(pos_flat)
+    out = out.at[:, idx_neg_safe].add(neg_flat)
     return out
 
 
 def _mn_sin_to_signed(sc, cs, idx_pos, idx_neg, ncoeff: int):
     sc = jnp.asarray(sc)
     cs = jnp.asarray(cs)
+    idx_pos = jnp.asarray(idx_pos, dtype=jnp.int32)
+    idx_neg = jnp.asarray(idx_neg, dtype=jnp.int32)
     ns = int(sc.shape[0])
-    mpol, nrange = idx_pos.shape
     out = jnp.zeros((ns, ncoeff), dtype=sc.dtype)
-    for m_i in range(mpol):
-        for n_i in range(nrange):
-            kp = int(idx_pos[m_i, n_i])
-            if kp < 0:
-                continue
-            kn = int(idx_neg[m_i, n_i])
-            if n_i == 0:
-                pos = sc[:, m_i, n_i]
-            elif kn >= 0:
-                pos = 0.5 * (sc[:, m_i, n_i] - cs[:, m_i, n_i])
-            else:
-                pos = -cs[:, m_i, n_i] if m_i == 0 else sc[:, m_i, n_i]
-            out = out.at[:, kp].set(pos)
-            if kn >= 0:
-                neg = 0.5 * (sc[:, m_i, n_i] + cs[:, m_i, n_i])
-                out = out.at[:, kn].set(neg)
+    if ncoeff == 0:
+        return out
+
+    mpol, nrange = idx_pos.shape
+    m = jnp.arange(mpol, dtype=jnp.int32)[:, None]
+    n = jnp.arange(nrange, dtype=jnp.int32)[None, :]
+    m0 = m == 0
+    n0 = n == 0
+
+    pos = 0.5 * (sc - cs)
+    pos = jnp.where(n0[None, :, :], sc, pos)
+
+    mask_neg = idx_neg >= 0
+    mask_no_neg = (~mask_neg) & (~n0)
+    pos = jnp.where(mask_no_neg[None, :, :] & m0[None, :, :], -cs, pos)
+    pos = jnp.where(mask_no_neg[None, :, :] & (~m0[None, :, :]), sc, pos)
+
+    neg = 0.5 * (sc + cs)
+
+    idx_pos_flat = idx_pos.reshape(-1)
+    idx_neg_flat = idx_neg.reshape(-1)
+    mask_pos_flat = idx_pos_flat >= 0
+    mask_neg_flat = idx_neg_flat >= 0
+    idx_pos_safe = jnp.where(mask_pos_flat, idx_pos_flat, 0)
+    idx_neg_safe = jnp.where(mask_neg_flat, idx_neg_flat, 0)
+
+    pos_flat = pos.reshape(ns, -1) * mask_pos_flat.astype(sc.dtype)[None, :]
+    neg_flat = neg.reshape(ns, -1) * mask_neg_flat.astype(sc.dtype)[None, :]
+
+    out = out.at[:, idx_pos_safe].add(pos_flat)
+    out = out.at[:, idx_neg_safe].add(neg_flat)
     return out
 
 
@@ -422,3 +469,17 @@ def vmec_m1_physical_to_internal_signed(
         Zcos_out = _mn_cos_to_signed(zcc, zss, idx_pos, idx_neg, ncoeff=ncoeff)
 
     return Rcos_out, Zsin_out, Rsin_out, Zcos_out
+_MN_INDEX_CACHE: dict[tuple, tuple[int, int, np.ndarray, np.ndarray]] = {}
+
+
+def _mn_index_cache_key(modes) -> tuple:
+    m_arr = np.asarray(modes.m)
+    n_arr = np.asarray(modes.n)
+    return (
+        m_arr.shape,
+        n_arr.shape,
+        str(m_arr.dtype),
+        str(n_arr.dtype),
+        m_arr.tobytes(),
+        n_arr.tobytes(),
+    )

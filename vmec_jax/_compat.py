@@ -37,7 +37,13 @@ def _try_import_jax() -> Tuple[Any, Any, Callable[[Callable[..., Any]], Callable
         return jax, jnp, jax.jit
     except Exception:
         # numpy fallback: no autodiff, no jit
-        return None, _np, (lambda f: f)
+        def _jit(f=None, **_kwargs):
+            if f is None:
+                def _wrap(fn):
+                    return fn
+                return _wrap
+            return f
+        return None, _np, _jit
 
 
 jax, jnp, jit = _try_import_jax()

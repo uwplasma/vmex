@@ -187,3 +187,165 @@ def write_vtp_polyline(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(xml)
     return path
+
+
+def _resolve_wout_path(input_path: Path, wout_path: str | Path | None) -> Path:
+    if wout_path is not None:
+        return _as_path(wout_path)
+    name = input_path.name
+    if name.startswith("input."):
+        case = name.split("input.", 1)[1]
+    else:
+        case = input_path.stem
+    candidates = [
+        input_path.parent / f"wout_{case}_reference.nc",
+        input_path.parent / f"wout_{case}.nc",
+    ]
+    for cand in candidates:
+        if cand.exists():
+            return cand
+    raise FileNotFoundError(
+        "wout file not found. Pass --wout or place a matching wout_*.nc next to the input."
+    )
+
+
+def export_vtk_surface_and_fieldline(
+    *,
+    input_path: str | Path,
+    wout_path: str | Path | None = None,
+    outdir: str | Path = "vtk_out",
+    s_index: int = -1,
+    hi_res: bool = False,
+    export_volume: bool = False,
+) -> dict[str, Path]:
+    """Export one surface + a fieldline trace to VTK for ParaView.
+
+    This helper reads a VMEC `wout_*.nc` and writes:
+    - `surface_b.vts`: structured grid with Bx/By/Bz/Bmag on a surface
+    - `fieldline.vtp`: a single fieldline polyline on that surface
+
+    If `export_volume=True`, a coarse volume grid `volume.vts` is also written
+    (with Bmag only).
+    """
+    from dataclasses import replace
+
+    from .config import load_config
+    from .field import b2_from_bsup, b_cartesian_from_bsup, bsup_from_geom, lamscale_from_phips
+    from .fieldlines import trace_fieldline_on_surface
+    from .geom import eval_geom
+    from .grids import make_angle_grid
+    from .static import build_static
+    from .wout import read_wout, state_from_wout
+
+    input_path = _as_path(input_path)
+    wout_path = _resolve_wout_path(input_path, wout_path)
+    outdir = _as_path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    cfg, _indata = load_config(str(input_path))
+    ntheta = int(cfg.ntheta)
+    nzeta = int(cfg.nzeta)
+    if hi_res:
+        ntheta = max(ntheta * 2, 128)
+        nzeta = max(nzeta * 2, 128)
+    if ntheta != cfg.ntheta or nzeta != cfg.nzeta:
+        cfg = replace(cfg, ntheta=ntheta, nzeta=nzeta)
+
+    grid = make_angle_grid(ntheta, nzeta, cfg.nfp, endpoint=False)
+    static = build_static(cfg, grid=grid)
+
+    wout = read_wout(wout_path)
+    state = state_from_wout(wout)
+
+    geom = eval_geom(state, static)
+    lamscale = lamscale_from_phips(wout.phips, static.s)
+    bsupu, bsupv = bsup_from_geom(
+        geom,
+        phipf=wout.phipf,
+        chipf=wout.chipf,
+        nfp=int(wout.nfp),
+        signgs=int(wout.signgs),
+        lamscale=lamscale,
+    )
+
+    b2 = b2_from_bsup(geom, bsupu, bsupv)
+    bmag = np.sqrt(np.asarray(b2))
+    bcart = np.asarray(b_cartesian_from_bsup(geom, bsupu, bsupv, zeta=static.grid.zeta, nfp=int(wout.nfp)))
+
+    ns = int(wout.ns)
+    s_idx = int(s_index)
+    if s_idx < 0:
+        s_idx = ns + s_idx
+    if s_idx < 0 or s_idx >= ns:
+        raise ValueError(f"s_index={s_index} out of range for ns={ns}")
+
+    zeta = np.asarray(static.grid.zeta)
+    phi = zeta / float(max(1, int(wout.nfp)))
+    cosphi = np.cos(phi)[None, :]
+    sinphi = np.sin(phi)[None, :]
+
+    R = np.asarray(geom.R)[s_idx]
+    Z = np.asarray(geom.Z)[s_idx]
+    x = R * cosphi
+    y = R * sinphi
+    z = Z
+
+    bsurf = bcart[s_idx]
+    bmag_s = bmag[s_idx]
+
+    surface_path = outdir / "surface_b.vts"
+    write_vts_structured_grid(
+        surface_path,
+        x=x,
+        y=y,
+        z=z,
+        point_data={
+            "Bx": bsurf[..., 0],
+            "By": bsurf[..., 1],
+            "Bz": bsurf[..., 2],
+            "Bmag": bmag_s,
+        },
+    )
+
+    n_steps = 2000 if hi_res else 800
+    dphi = 2.0 * np.pi / float(n_steps - 1)
+    fieldline = trace_fieldline_on_surface(
+        R=R,
+        Z=Z,
+        bsupu=np.asarray(bsupu)[s_idx],
+        bsupv=np.asarray(bsupv)[s_idx],
+        Bmag=bmag_s,
+        nfp=int(wout.nfp),
+        theta0=0.0,
+        phi0=0.0,
+        n_steps=n_steps,
+        dphi=dphi,
+    )
+    fieldline_path = outdir / "fieldline.vtp"
+    write_vtp_polyline(
+        fieldline_path,
+        points=np.stack([fieldline.x, fieldline.y, fieldline.z], axis=-1),
+        point_data={"Bmag": fieldline.Bmag},
+    )
+
+    paths = {"surface": surface_path, "fieldline": fieldline_path}
+
+    if export_volume:
+        Rvol = np.asarray(geom.R)
+        Zvol = np.asarray(geom.Z)
+        cosphi3 = np.cos(phi)[None, None, :]
+        sinphi3 = np.sin(phi)[None, None, :]
+        xvol = Rvol * cosphi3
+        yvol = Rvol * sinphi3
+        zvol = Zvol
+        volume_path = outdir / "volume.vts"
+        write_vts_structured_grid(
+            volume_path,
+            x=xvol,
+            y=yvol,
+            z=zvol,
+            point_data={"Bmag": bmag},
+        )
+        paths["volume"] = volume_path
+
+    return paths
