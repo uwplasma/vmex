@@ -29,6 +29,23 @@ from .vmec_tomnsp import TomnspsRZL, VmecTrigTables
 
 _WINT_CACHE: dict[tuple[int, int], jnp.ndarray] = {}
 _PWINT_CACHE: dict[tuple[int, int, int], jnp.ndarray] = {}
+_SCALXC_CACHE: dict[tuple, jnp.ndarray] = {}
+
+
+def _cache_allowed() -> bool:
+    if not has_jax():
+        return True
+    try:
+        from jax import core
+
+        return bool(core.trace_ctx.is_top_level())
+    except Exception:
+        return False
+
+
+def _scalxc_cache_key(*, s: Any, mpol: int) -> tuple:
+    s_np = np.asarray(s)
+    return (str(s_np.dtype), s_np.shape, s_np.tobytes(), int(mpol))
 
 
 def _wint_cache_key(trig: VmecTrigTables, *, nzeta: int) -> tuple[int, int]:
@@ -699,7 +716,7 @@ def vmec_force_norms_from_bcovar_dynamic(
     return VmecForceNormsDynamic(fnorm=fnorm, fnormL=fnormL, r1=r1, r2=r2, volume=volume, wb=wb, wp=wp, vp=vp)
 
 
-def vmec_scalxc_from_s(*, s: Any, mpol: int) -> jnp.ndarray:
+def vmec_scalxc_from_s(*, s: Any, mpol: int, cache: bool = True) -> jnp.ndarray:
     """Reproduce VMEC's `scalxc(js,m)` factors used to scale forces before `residue`.
 
     In `profil3d.f`, VMEC defines `scalxc` to convert odd-m Fourier coefficients
@@ -719,6 +736,12 @@ def vmec_scalxc_from_s(*, s: Any, mpol: int) -> jnp.ndarray:
     mpol:
         Number of poloidal modes (m = 0..mpol-1).
     """
+    if cache and _cache_allowed():
+        key = _scalxc_cache_key(s=s, mpol=mpol)
+        cached = _SCALXC_CACHE.get(key)
+        if cached is not None:
+            return cached
+
     s = jnp.asarray(s)
     ns = int(s.shape[0])
     mpol = int(mpol)
@@ -735,6 +758,8 @@ def vmec_scalxc_from_s(*, s: Any, mpol: int) -> jnp.ndarray:
     m = jnp.arange(mpol, dtype=jnp.int32)
     is_odd = (m % 2) == 1
     out = jnp.where(is_odd[None, :], scal_odd[:, None], jnp.ones((ns, mpol), dtype=sqrts.dtype))
+    if cache and _cache_allowed():
+        _SCALXC_CACHE[key] = out
     return out
 
 
