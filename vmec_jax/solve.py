@@ -3829,8 +3829,7 @@ def solve_fixed_boundary_residual_iter(
 
         cached_run = _SCAN_RUNNER_CACHE.get(scan_cache_key)
         if cached_run is None:
-            if jit_forces:
-                _run_scan = jit(_run_scan)
+            _run_scan = jit(_run_scan)
             _SCAN_RUNNER_CACHE[scan_cache_key] = _run_scan
         else:
             _run_scan = cached_run

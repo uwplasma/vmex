@@ -27,6 +27,8 @@ Scan-mode iteration (fast path)
 For pure-performance runs (no VMEC2000 control logic), pass ``use_scan=True`` to
 ``run_fixed_boundary``. This moves the outer iteration loop into ``jax.lax.scan``
 and eliminates most Python control-flow + host/device syncs.
+Alternatively, use solver ``vmec2000_iter_fast`` (alias ``vmec2000_scan``), which
+enables scan mode automatically.
 
 Important:
 
