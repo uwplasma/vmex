@@ -42,6 +42,7 @@ from .vmec_parity import (
 )
 from .vmec_realspace import vmec_realspace_synthesis, vmec_realspace_synthesis_dtheta, vmec_realspace_synthesis_dzeta_phys
 from .vmec_tomnsp import VmecTrigTables, vmec_trig_tables
+from .vmec_residue import vmec_pwint_from_trig
 from .nyquist import nyquist_basis_from_wout
 
 
@@ -686,10 +687,7 @@ def vmec_bcovar_half_mesh_from_wout(
         # `sign_flip_to_vmec` is True, so use VMEC-oriented fields here.
         bsupu_vmec = -bsupu if sign_flip_to_vmec else bsupu
         bsupv_vmec = -bsupv if sign_flip_to_vmec else bsupv
-        w_theta = jnp.asarray(trig.cosmui3[:, 0], dtype=bsupu.dtype) / jnp.asarray(trig.mscale[0], dtype=bsupu.dtype)
-        w_ang = w_theta[:, None] * jnp.ones((int(overg.shape[2]),), dtype=bsupu.dtype)[None, :]
-        pwint = jnp.broadcast_to(w_ang[None, :, :], overg.shape)
-        pwint = pwint.at[0].set(jnp.zeros_like(pwint[0]))
+        pwint = vmec_pwint_from_trig(trig, ns=int(overg.shape[0]), nzeta=int(overg.shape[2])).astype(bsupu.dtype)
 
         top = jnp.asarray(icurv, dtype=bsupu.dtype) - jnp.sum(
             pwint * ((guu * bsupu_vmec) + (guv * bsupv_vmec)),
