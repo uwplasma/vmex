@@ -11,6 +11,7 @@ For the JAX port we keep explicit (m, n) pairs and apply nfp scaling when needed
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Tuple
 
 import numpy as np
@@ -26,13 +27,8 @@ class ModeTable:
         return int(self.m.size)
 
 
-def vmec_mode_table(mpol: int, ntor: int) -> ModeTable:
-    """Create VMEC-like (m,n) pairs.
-
-    Includes all (m,n) with m=0..mpol-1 and n in [-ntor..ntor], but for m=0 uses n>=0.
-
-    This matches the xm/xn tables built in VMEC's `fixaray.f` (see nmin0 logic).
-    """
+@lru_cache(maxsize=64)
+def _vmec_mode_table_cached(mpol: int, ntor: int) -> ModeTable:
     mpol = int(abs(mpol))
     ntor = int(abs(ntor))
 
@@ -46,7 +42,18 @@ def vmec_mode_table(mpol: int, ntor: int) -> ModeTable:
     return ModeTable(m=np.asarray(ms, dtype=int), n=np.asarray(ns, dtype=int))
 
 
-def nyquist_mode_table(mpol: int, ntor: int) -> ModeTable:
+def vmec_mode_table(mpol: int, ntor: int) -> ModeTable:
+    """Create VMEC-like (m,n) pairs.
+
+    Includes all (m,n) with m=0..mpol-1 and n in [-ntor..ntor], but for m=0 uses n>=0.
+
+    This matches the xm/xn tables built in VMEC's `fixaray.f` (see nmin0 logic).
+    """
+    return _vmec_mode_table_cached(int(abs(mpol)), int(abs(ntor)))
+
+
+@lru_cache(maxsize=64)
+def _nyquist_mode_table_cached(mpol: int, ntor: int) -> ModeTable:
     """Create a VMEC-style Nyquist mode table.
 
     VMEC's Nyquist grids extend the Fourier bandwidth by a small padding. Empirically
@@ -71,6 +78,10 @@ def nyquist_mode_table(mpol: int, ntor: int) -> ModeTable:
             ms.append(m)
             ns.append(n)
     return ModeTable(m=np.asarray(ms, dtype=int), n=np.asarray(ns, dtype=int))
+
+
+def nyquist_mode_table(mpol: int, ntor: int) -> ModeTable:
+    return _nyquist_mode_table_cached(int(abs(mpol)), int(abs(ntor)))
 
 
 def default_grid_sizes(mpol: int, ntor: int, ntheta: int = 0, nzeta: int = 0) -> Tuple[int, int]:
