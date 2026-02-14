@@ -43,6 +43,15 @@ Run tests:
 pytest -q
 ```
 
+Profiling (fixed-boundary iterations):
+
+```bash
+python tools/diagnostics/profile_fixed_boundary.py --input examples/data/input.ITERModel --iters 3 --use-scan
+python tools/diagnostics/profile_fixed_boundary.py --input examples/data/input.ITERModel --iters 3 --use-scan --simple-profile
+```
+
+The first command attempts a TensorBoard trace (requires a compatible TensorFlow install). Use `--simple-profile` to fall back to a timing-only run without TensorBoard.
+
 VMEC2000 integration parity (requires the VMEC2000 executable):
 
 ```bash
