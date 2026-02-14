@@ -229,11 +229,17 @@ def vmec_half_mesh_jacobian_from_state(
     s,
     lconm1: bool = True,
     lthreed: bool = True,
+    mask_even: Any | None = None,
+    mask_odd: Any | None = None,
 ) -> VmecHalfMeshJacobian:
     """Compute VMEC half-mesh Jacobian directly from Fourier coefficients."""
-    m = jnp.asarray(modes.m)
-    mask_even = (m % 2) == 0
-    mask_odd = jnp.logical_not(mask_even)
+    if mask_even is None or mask_odd is None:
+        m = jnp.asarray(modes.m)
+        mask_even = (m % 2) == 0
+        mask_odd = jnp.logical_not(mask_even)
+    else:
+        mask_even = jnp.asarray(mask_even)
+        mask_odd = jnp.asarray(mask_odd)
 
     Rcos = jnp.asarray(state.Rcos)
     Rsin = jnp.asarray(state.Rsin)

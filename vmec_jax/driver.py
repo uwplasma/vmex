@@ -474,6 +474,8 @@ def run_fixed_boundary(
     if solver in ("vmec2000_iter_fast", "vmec2000_scan"):
         use_scan = True
         solver = "vmec2000_iter"
+    if os.getenv("VMEC_JAX_USE_SCAN", "") not in ("", "0"):
+        use_scan = True
     if solver == "gd":
         static = build_static(cfg, grid=grid)
         st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(

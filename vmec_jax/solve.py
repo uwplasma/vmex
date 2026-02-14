@@ -3992,6 +3992,8 @@ def solve_fixed_boundary_residual_iter(
             s=s,
             lconm1=bool(getattr(static.cfg, "lconm1", True)),
             lthreed=bool(getattr(static.cfg, "lthreed", True)),
+            mask_even=getattr(static, "m_is_even", None),
+            mask_odd=getattr(static, "m_is_odd", None),
         )
         tau = np.asarray(jac.tau)
         if tau.size:
@@ -4631,6 +4633,8 @@ def solve_fixed_boundary_residual_iter(
                     s=s,
                     lconm1=bool(getattr(static.cfg, "lconm1", True)),
                     lthreed=bool(getattr(static.cfg, "lthreed", True)),
+                    mask_even=getattr(static, "m_is_even", None),
+                    mask_odd=getattr(static, "m_is_odd", None),
                 )
                 tau = np.asarray(jac.tau)
                 if tau.size:
