@@ -22,6 +22,8 @@ from .plotting import (
     bmag_from_wout_physical,
     bmag_from_state_physical,
     bmag_from_state_vmec_realspace,
+    bsup_from_wout,
+    bsub_from_wout,
     closed_theta_grid,
     fix_matplotlib_3d,
     profiles_from_wout,
@@ -36,6 +38,10 @@ from .plotting import (
     vmecplot2_cross_section_indices,
     vmecplot2_lcfs_3d_grid,
     vmecplot2_surface_grid,
+    write_axisym_overview,
+    write_bmag_parity_figures,
+    write_bsub_parity_figures,
+    write_bsup_parity_figures,
     zeta_grid,
     zeta_grid_field_period,
 )
@@ -58,8 +64,8 @@ from .coords import Coords, eval_coords
 from .geom import Geom, eval_geom
 from .profiles import ProfileInputs, profiles_from_indata, eval_profiles
 from .integrals import dvds_from_sqrtg, cumtrapz_s, volume_from_sqrtg
-from .field import bsup_from_geom, bsup_from_sqrtg_lambda, b2_from_bsup
-from .energy import magnetic_wb_from_state
+from .field import bsup_from_geom, bsup_from_sqrtg_lambda, b2_from_bsup, signgs_from_sqrtg
+from .energy import magnetic_wb_from_state, flux_profiles_from_indata
 from .diagnostics import Summary, print_jacobian_stats, print_summary, summarize_array, summarize_many
 from .vmec_jacobian import vmec_half_mesh_jacobian_from_state
 from .vmec_realspace import vmec_realspace_analysis, vmec_realspace_geom_from_state
@@ -80,6 +86,7 @@ from .solve import (
     solve_lambda_gd,
 )
 from .residuals import ForceResiduals, force_residuals_from_state
+from .visualization import export_vtk_surface_and_fieldline
 
 __all__ = [
     "api",
@@ -108,6 +115,8 @@ __all__ = [
     "bmag_from_wout_physical",
     "bmag_from_state_physical",
     "bmag_from_state_vmec_realspace",
+    "bsup_from_wout",
+    "bsub_from_wout",
     "closed_theta_grid",
     "fix_matplotlib_3d",
     "profiles_from_wout",
@@ -122,6 +131,10 @@ __all__ = [
     "vmecplot2_cross_section_indices",
     "vmecplot2_lcfs_3d_grid",
     "vmecplot2_surface_grid",
+    "write_axisym_overview",
+    "write_bmag_parity_figures",
+    "write_bsub_parity_figures",
+    "write_bsup_parity_figures",
     "zeta_grid",
     "zeta_grid_field_period",
     "ExampleData",
@@ -150,6 +163,8 @@ __all__ = [
     "dvds_from_sqrtg",
     "cumtrapz_s",
     "volume_from_sqrtg",
+    "signgs_from_sqrtg",
+    "flux_profiles_from_indata",
     "bsup_from_geom",
     "bsup_from_sqrtg_lambda",
     "b2_from_bsup",
@@ -176,4 +191,5 @@ __all__ = [
     "solve_fixed_boundary_residual_iter",
     "ForceResiduals",
     "force_residuals_from_state",
+    "export_vtk_surface_and_fieldline",
 ]

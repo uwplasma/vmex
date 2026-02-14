@@ -13,6 +13,7 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("input")
     p.add_argument("--out", default="boundary_demo.npz")
+    p.add_argument("--verbose", action="store_true")
     args = p.parse_args()
 
     cfg, indata = vj.load_config(args.input)
@@ -24,9 +25,11 @@ def main() -> None:
     Z = np.asarray(vj.eval_fourier(bdy.Z_cos, bdy.Z_sin, basis))
 
     np.savez(args.out, theta=grid.theta, zeta=grid.zeta, R=R, Z=Z, m=modes.m, n=modes.n)
+    if args.verbose:
+        print(f"[vmec_jax] ntheta={cfg.ntheta} nzeta={cfg.nzeta} nfp={cfg.nfp}")
+        print(f"[vmec_jax] mpol={cfg.mpol} ntor={cfg.ntor} modes={modes.m.size}")
     print(f"[vmec_jax] wrote {args.out}")
 
 
 if __name__ == "__main__":
     main()
-
