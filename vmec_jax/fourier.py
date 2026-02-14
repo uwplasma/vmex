@@ -105,21 +105,22 @@ class HelicalBasis:
 
     cos_phase: any  # (K, ntheta, nzeta)
     sin_phase: any  # (K, ntheta, nzeta)
+    phase_stack: any | None  # (2K, ntheta, nzeta) or None
     m: any  # (K,)
     n: any  # (K,)
     nfp: int
 
     def tree_flatten(self):
         # Arrays are dynamic leaves; nfp is static auxiliary data.
-        children = (self.cos_phase, self.sin_phase, self.m, self.n)
+        children = (self.cos_phase, self.sin_phase, self.phase_stack, self.m, self.n)
         aux = (int(self.nfp),)
         return children, aux
 
     @classmethod
     def tree_unflatten(cls, aux, children):
         (nfp,) = aux
-        cos_phase, sin_phase, m, n = children
-        return cls(cos_phase=cos_phase, sin_phase=sin_phase, m=m, n=n, nfp=int(nfp))
+        cos_phase, sin_phase, phase_stack, m, n = children
+        return cls(cos_phase=cos_phase, sin_phase=sin_phase, phase_stack=phase_stack, m=m, n=n, nfp=int(nfp))
 
 
 def build_helical_basis(modes: ModeTable, grid: AngleGrid, *, cache: bool = True) -> HelicalBasis:
@@ -142,9 +143,13 @@ def build_helical_basis(modes: ModeTable, grid: AngleGrid, *, cache: bool = True
 
     # phase[K, ntheta, nzeta] via broadcasting
     phase = m[:, None, None] * theta[None, :, None] - n[:, None, None] * zeta[None, None, :]
+    cos_phase = jnp.cos(phase)
+    sin_phase = jnp.sin(phase)
+    phase_stack = jnp.concatenate([cos_phase, sin_phase], axis=0)
     basis = HelicalBasis(
-        cos_phase=jnp.cos(phase),
-        sin_phase=jnp.sin(phase),
+        cos_phase=cos_phase,
+        sin_phase=sin_phase,
+        phase_stack=phase_stack,
         m=m,
         n=n,
         nfp=grid.nfp,
@@ -186,6 +191,10 @@ def eval_fourier(
         coeff_sin = coeff_sin * scale
 
     # Einsum works in both numpy and jax.numpy
+    phase_stack = getattr(basis, "phase_stack", None)
+    if phase_stack is not None:
+        coeff = jnp.concatenate([coeff_cos, coeff_sin], axis=-1)
+        return jnp.einsum("...k,kij->...ij", coeff, phase_stack)
     return jnp.einsum("...k,kij->...ij", coeff_cos, basis.cos_phase) + jnp.einsum(
         "...k,kij->...ij", coeff_sin, basis.sin_phase
     )
@@ -203,6 +212,10 @@ def eval_fourier_dtheta(coeff_cos, coeff_sin, basis: HelicalBasis, *, coeffs_int
 
     m = basis.m
     # d/dtheta cos = -m sin; d/dtheta sin = +m cos
+    phase_stack = getattr(basis, "phase_stack", None)
+    if phase_stack is not None:
+        coeff = jnp.concatenate([coeff_sin * m, coeff_cos * (-m)], axis=-1)
+        return jnp.einsum("...k,kij->...ij", coeff, phase_stack)
     return jnp.einsum("...k,kij->...ij", coeff_cos * (-m), basis.sin_phase) + jnp.einsum(
         "...k,kij->...ij", coeff_sin * m, basis.cos_phase
     )
@@ -227,6 +240,10 @@ def eval_fourier_dzeta_phys(coeff_cos, coeff_sin, basis: HelicalBasis, *, coeffs
 
     n_phys = basis.n * basis.nfp
     # d/dzeta cos = +n sin; d/dzeta sin = -n cos  (because phase has -n*zeta)
+    phase_stack = getattr(basis, "phase_stack", None)
+    if phase_stack is not None:
+        coeff = jnp.concatenate([coeff_sin * (-n_phys), coeff_cos * n_phys], axis=-1)
+        return jnp.einsum("...k,kij->...ij", coeff, phase_stack)
     return jnp.einsum("...k,kij->...ij", coeff_cos * n_phys, basis.sin_phase) + jnp.einsum(
         "...k,kij->...ij", coeff_sin * (-n_phys), basis.cos_phase
     )

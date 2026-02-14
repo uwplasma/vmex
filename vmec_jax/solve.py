@@ -31,6 +31,7 @@ from .state import VMECState, pack_state, unpack_state
 
 
 _SCAN_RUNNER_CACHE: dict[tuple, Any] = {}
+_COMPUTE_FORCES_CACHE: dict[tuple, Any] = {}
 
 
 def _hash_array_bytes(a: Any) -> str:
@@ -3101,6 +3102,39 @@ def solve_fixed_boundary_residual_iter(
     if bool(include_constraint_force):
         constraint_tcon0 = float(indata.get_float("TCON0", 1.0))
 
+    static_key = (
+        int(static.cfg.mpol),
+        int(static.cfg.ntor),
+        int(static.cfg.ntheta),
+        int(static.cfg.nzeta),
+        int(static.cfg.nfp),
+        int(static.cfg.ns),
+        bool(static.cfg.lasym),
+        _hash_array_bytes(static.modes.m),
+        _hash_array_bytes(static.modes.n),
+        _hash_array_bytes(static.grid.theta),
+        _hash_array_bytes(static.grid.zeta),
+    )
+    wout_key = (
+        int(wout_like.nfp),
+        int(wout_like.mpol),
+        int(wout_like.ntor),
+        bool(wout_like.lasym),
+        int(wout_like.signgs),
+        _hash_array_bytes(wout_like.phipf),
+        _hash_array_bytes(wout_like.phips),
+        _hash_array_bytes(wout_like.chipf),
+        _hash_array_bytes(wout_like.pres),
+        _hash_array_bytes(wout_like.icurv) if getattr(wout_like, "icurv", None) is not None else None,
+        float(constraint_tcon0) if constraint_tcon0 is not None else None,
+    )
+    edge_key = (
+        _hash_array_bytes(edge_Rcos),
+        _hash_array_bytes(edge_Rsin),
+        _hash_array_bytes(edge_Zcos),
+        _hash_array_bytes(edge_Zsin),
+    )
+
     def _zero_edge_rz(a):
         a = None if a is None else jnp.asarray(a)
         if a is None:
@@ -3359,6 +3393,13 @@ def solve_fixed_boundary_residual_iter(
         return k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale, norms
 
     _compute_forces_impl = _compute_forces
+    compute_cache_key = (
+        "compute_forces_v1",
+        static_key,
+        wout_key,
+        int(signgs),
+        bool(apply_m1_constraints),
+    )
     if jit_forces:
         def _compute_forces_nodump(
             state: VMECState,
@@ -3384,7 +3425,11 @@ def solve_fixed_boundary_residual_iter(
                 iter_idx=None,
             )
 
-        _compute_forces = jit(_compute_forces_nodump)
+        cached = _COMPUTE_FORCES_CACHE.get(compute_cache_key)
+        if cached is None:
+            cached = jit(_compute_forces_nodump)
+            _COMPUTE_FORCES_CACHE[compute_cache_key] = cached
+        _compute_forces = cached
 
     def _iter_idx_for_dump(it: int | None) -> int | None:
         return None if jit_forces else it
@@ -3621,38 +3666,6 @@ def solve_fixed_boundary_residual_iter(
         include_edge_scan = False
         _compute_forces_scan = _compute_forces_impl if jit_forces else _compute_forces
 
-        static_key = (
-            int(static.cfg.mpol),
-            int(static.cfg.ntor),
-            int(static.cfg.ntheta),
-            int(static.cfg.nzeta),
-            int(static.cfg.nfp),
-            int(static.cfg.ns),
-            bool(static.cfg.lasym),
-            _hash_array_bytes(static.modes.m),
-            _hash_array_bytes(static.modes.n),
-            _hash_array_bytes(static.grid.theta),
-            _hash_array_bytes(static.grid.zeta),
-        )
-        wout_key = (
-            int(wout_like.nfp),
-            int(wout_like.mpol),
-            int(wout_like.ntor),
-            bool(wout_like.lasym),
-            int(wout_like.signgs),
-            _hash_array_bytes(wout_like.phipf),
-            _hash_array_bytes(wout_like.phips),
-            _hash_array_bytes(wout_like.chipf),
-            _hash_array_bytes(wout_like.pres),
-            _hash_array_bytes(wout_like.icurv) if getattr(wout_like, "icurv", None) is not None else None,
-            float(constraint_tcon0) if constraint_tcon0 is not None else None,
-        )
-        edge_key = (
-            _hash_array_bytes(edge_Rcos),
-            _hash_array_bytes(edge_Rsin),
-            _hash_array_bytes(edge_Zcos),
-            _hash_array_bytes(edge_Zsin),
-        )
         scan_cache_key = (
             "scan_v1",
             static_key,
