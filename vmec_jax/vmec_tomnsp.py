@@ -478,67 +478,50 @@ def tomnsps_rzl(
     # Theta integration: compute work arrays for even-parity and odd-parity pieces.
     # Each is (ns, mpol, nzeta).
     # work1 indices follow tomnsp_mod.f numbering but we compute only needed combos.
+    armn = jnp.stack([armn_even, armn_odd], axis=0)
+    brmn = jnp.stack([brmn_even, brmn_odd], axis=0)
+    crmn = jnp.stack([crmn_even, crmn_odd], axis=0)
+    azmn = jnp.stack([azmn_even, azmn_odd], axis=0)
+    bzmn = jnp.stack([bzmn_even, bzmn_odd], axis=0)
+    czmn = jnp.stack([czmn_even, czmn_odd], axis=0)
+    blmn = jnp.stack([blmn_even, blmn_odd], axis=0)
+    clmn = jnp.stack([clmn_even, clmn_odd], axis=0)
+    arcon = jnp.stack([arcon_even, arcon_odd], axis=0)
+    azcon = jnp.stack([azcon_even, azcon_odd], axis=0)
+
+    def _theta_einsum(arr, mat):
+        return jnp.einsum("psik,im->psmk", arr, mat)
+
     # R:
-    w1_e = (
-        jnp.einsum("sik,im->smk", armn_even, cosmui)
-        + jnp.einsum("sik,im->smk", brmn_even, sinmumi)
-        + xmpq1 * jnp.einsum("sik,im->smk", arcon_even, cosmui)
-    )
-    w1_o = (
-        jnp.einsum("sik,im->smk", armn_odd, cosmui)
-        + jnp.einsum("sik,im->smk", brmn_odd, sinmumi)
-        + xmpq1 * jnp.einsum("sik,im->smk", arcon_odd, cosmui)
-    )
-    w2_e = -jnp.einsum("sik,im->smk", crmn_even, cosmui)
-    w2_o = -jnp.einsum("sik,im->smk", crmn_odd, cosmui)
-    w3_e = (
-        jnp.einsum("sik,im->smk", armn_even, sinmui)
-        + jnp.einsum("sik,im->smk", brmn_even, cosmumi)
-        + xmpq1 * jnp.einsum("sik,im->smk", arcon_even, sinmui)
-    )
-    w3_o = (
-        jnp.einsum("sik,im->smk", armn_odd, sinmui)
-        + jnp.einsum("sik,im->smk", brmn_odd, cosmumi)
-        + xmpq1 * jnp.einsum("sik,im->smk", arcon_odd, sinmui)
-    )
-    w4_e = -jnp.einsum("sik,im->smk", crmn_even, sinmui)
-    w4_o = -jnp.einsum("sik,im->smk", crmn_odd, sinmui)
+    w1 = _theta_einsum(armn, cosmui) + _theta_einsum(brmn, sinmumi) + xmpq1 * _theta_einsum(arcon, cosmui)
+    w2 = -_theta_einsum(crmn, cosmui)
+    w3 = _theta_einsum(armn, sinmui) + _theta_einsum(brmn, cosmumi) + xmpq1 * _theta_einsum(arcon, sinmui)
+    w4 = -_theta_einsum(crmn, sinmui)
 
     # Z:
-    w7_e = (
-        jnp.einsum("sik,im->smk", azmn_even, sinmui)
-        + jnp.einsum("sik,im->smk", bzmn_even, cosmumi)
-        + xmpq1 * jnp.einsum("sik,im->smk", azcon_even, sinmui)
-    )
-    w7_o = (
-        jnp.einsum("sik,im->smk", azmn_odd, sinmui)
-        + jnp.einsum("sik,im->smk", bzmn_odd, cosmumi)
-        + xmpq1 * jnp.einsum("sik,im->smk", azcon_odd, sinmui)
-    )
-    w8_e = -jnp.einsum("sik,im->smk", czmn_even, sinmui)
-    w8_o = -jnp.einsum("sik,im->smk", czmn_odd, sinmui)
-    w5_e = (
-        jnp.einsum("sik,im->smk", azmn_even, cosmui)
-        + jnp.einsum("sik,im->smk", bzmn_even, sinmumi)
-        + xmpq1 * jnp.einsum("sik,im->smk", azcon_even, cosmui)
-    )
-    w5_o = (
-        jnp.einsum("sik,im->smk", azmn_odd, cosmui)
-        + jnp.einsum("sik,im->smk", bzmn_odd, sinmumi)
-        + xmpq1 * jnp.einsum("sik,im->smk", azcon_odd, cosmui)
-    )
-    w6_e = -jnp.einsum("sik,im->smk", czmn_even, cosmui)
-    w6_o = -jnp.einsum("sik,im->smk", czmn_odd, cosmui)
+    w7 = _theta_einsum(azmn, sinmui) + _theta_einsum(bzmn, cosmumi) + xmpq1 * _theta_einsum(azcon, sinmui)
+    w8 = -_theta_einsum(czmn, sinmui)
+    w5 = _theta_einsum(azmn, cosmui) + _theta_einsum(bzmn, sinmumi) + xmpq1 * _theta_einsum(azcon, cosmui)
+    w6 = -_theta_einsum(czmn, cosmui)
 
     # Lambda:
-    w11_e = jnp.einsum("sik,im->smk", blmn_even, cosmumi)
-    w11_o = jnp.einsum("sik,im->smk", blmn_odd, cosmumi)
-    w12_e = -jnp.einsum("sik,im->smk", clmn_even, sinmui)
-    w12_o = -jnp.einsum("sik,im->smk", clmn_odd, sinmui)
-    w9_e = jnp.einsum("sik,im->smk", blmn_even, sinmumi)
-    w9_o = jnp.einsum("sik,im->smk", blmn_odd, sinmumi)
-    w10_e = -jnp.einsum("sik,im->smk", clmn_even, cosmui)
-    w10_o = -jnp.einsum("sik,im->smk", clmn_odd, cosmui)
+    w11 = _theta_einsum(blmn, cosmumi)
+    w12 = -_theta_einsum(clmn, sinmui)
+    w9 = _theta_einsum(blmn, sinmumi)
+    w10 = -_theta_einsum(clmn, cosmui)
+
+    w1_e, w1_o = w1[0], w1[1]
+    w2_e, w2_o = w2[0], w2[1]
+    w3_e, w3_o = w3[0], w3[1]
+    w4_e, w4_o = w4[0], w4[1]
+    w5_e, w5_o = w5[0], w5[1]
+    w6_e, w6_o = w6[0], w6[1]
+    w7_e, w7_o = w7[0], w7[1]
+    w8_e, w8_o = w8[0], w8[1]
+    w9_e, w9_o = w9[0], w9[1]
+    w10_e, w10_o = w10[0], w10[1]
+    w11_e, w11_o = w11[0], w11[1]
+    w12_e, w12_o = w12[0], w12[1]
 
     # Select parity per m (mparity = mod(m,2)).
     mask_even = _mparity_mask(mpol, dtype=jnp.asarray(armn_even).dtype)
@@ -713,28 +696,23 @@ def tomnspa_rzl(
     #   work1(3): frsc cosnv
     #   work1(5): fzcc cosnv
     #   work1(9): flcc cosnv
-    w3_e = (
-        jnp.einsum("sik,im->smk", armn_even, sinmui)
-        + jnp.einsum("sik,im->smk", brmn_even, cosmumi)
-        + xmpq1 * jnp.einsum("sik,im->smk", arcon_even, sinmui)
-    )
-    w3_o = (
-        jnp.einsum("sik,im->smk", armn_odd, sinmui)
-        + jnp.einsum("sik,im->smk", brmn_odd, cosmumi)
-        + xmpq1 * jnp.einsum("sik,im->smk", arcon_odd, sinmui)
-    )
-    w5_e = (
-        jnp.einsum("sik,im->smk", azmn_even, cosmui)
-        + jnp.einsum("sik,im->smk", bzmn_even, sinmumi)
-        + xmpq1 * jnp.einsum("sik,im->smk", azcon_even, cosmui)
-    )
-    w5_o = (
-        jnp.einsum("sik,im->smk", azmn_odd, cosmui)
-        + jnp.einsum("sik,im->smk", bzmn_odd, sinmumi)
-        + xmpq1 * jnp.einsum("sik,im->smk", azcon_odd, cosmui)
-    )
-    w9_e = jnp.einsum("sik,im->smk", blmn_even, sinmumi)
-    w9_o = jnp.einsum("sik,im->smk", blmn_odd, sinmumi)
+    armn = jnp.stack([armn_even, armn_odd], axis=0)
+    brmn = jnp.stack([brmn_even, brmn_odd], axis=0)
+    crmn = jnp.stack([crmn_even, crmn_odd], axis=0)
+    azmn = jnp.stack([azmn_even, azmn_odd], axis=0)
+    bzmn = jnp.stack([bzmn_even, bzmn_odd], axis=0)
+    czmn = jnp.stack([czmn_even, czmn_odd], axis=0)
+    blmn = jnp.stack([blmn_even, blmn_odd], axis=0)
+    clmn = jnp.stack([clmn_even, clmn_odd], axis=0)
+    arcon = jnp.stack([arcon_even, arcon_odd], axis=0)
+    azcon = jnp.stack([azcon_even, azcon_odd], axis=0)
+
+    def _theta_einsum(arr, mat):
+        return jnp.einsum("psik,im->psmk", arr, mat)
+
+    w3 = _theta_einsum(armn, sinmui) + _theta_einsum(brmn, cosmumi) + xmpq1 * _theta_einsum(arcon, sinmui)
+    w5 = _theta_einsum(azmn, cosmui) + _theta_einsum(bzmn, sinmumi) + xmpq1 * _theta_einsum(azcon, cosmui)
+    w9 = _theta_einsum(blmn, sinmumi)
 
     # 3D-only:
     #   work1(1/2): frcs (sinnv/cosnvn)
@@ -743,36 +721,28 @@ def tomnspa_rzl(
     #   work1(7/8): fzss (sinnv/cosnvn)
     #   work1(10): flcc sinnvn
     #   work1(11/12): flss (sinnv/cosnvn)
-    w1_e = jnp.einsum("sik,im->smk", armn_even, cosmui) + jnp.einsum("sik,im->smk", brmn_even, sinmumi) + xmpq1 * jnp.einsum(
-        "sik,im->smk", arcon_even, cosmui
-    )
-    w1_o = jnp.einsum("sik,im->smk", armn_odd, cosmui) + jnp.einsum("sik,im->smk", brmn_odd, sinmumi) + xmpq1 * jnp.einsum(
-        "sik,im->smk", arcon_odd, cosmui
-    )
-    w2_e = -jnp.einsum("sik,im->smk", crmn_even, cosmui)
-    w2_o = -jnp.einsum("sik,im->smk", crmn_odd, cosmui)
-    w4_e = -jnp.einsum("sik,im->smk", crmn_even, sinmui)
-    w4_o = -jnp.einsum("sik,im->smk", crmn_odd, sinmui)
-    w6_e = -jnp.einsum("sik,im->smk", czmn_even, cosmui)
-    w6_o = -jnp.einsum("sik,im->smk", czmn_odd, cosmui)
-    w7_e = (
-        jnp.einsum("sik,im->smk", azmn_even, sinmui)
-        + jnp.einsum("sik,im->smk", bzmn_even, cosmumi)
-        + xmpq1 * jnp.einsum("sik,im->smk", azcon_even, sinmui)
-    )
-    w7_o = (
-        jnp.einsum("sik,im->smk", azmn_odd, sinmui)
-        + jnp.einsum("sik,im->smk", bzmn_odd, cosmumi)
-        + xmpq1 * jnp.einsum("sik,im->smk", azcon_odd, sinmui)
-    )
-    w8_e = -jnp.einsum("sik,im->smk", czmn_even, sinmui)
-    w8_o = -jnp.einsum("sik,im->smk", czmn_odd, sinmui)
-    w10_e = -jnp.einsum("sik,im->smk", clmn_even, cosmui)
-    w10_o = -jnp.einsum("sik,im->smk", clmn_odd, cosmui)
-    w11_e = jnp.einsum("sik,im->smk", blmn_even, cosmumi)
-    w11_o = jnp.einsum("sik,im->smk", blmn_odd, cosmumi)
-    w12_e = -jnp.einsum("sik,im->smk", clmn_even, sinmui)
-    w12_o = -jnp.einsum("sik,im->smk", clmn_odd, sinmui)
+    w1 = _theta_einsum(armn, cosmui) + _theta_einsum(brmn, sinmumi) + xmpq1 * _theta_einsum(arcon, cosmui)
+    w2 = -_theta_einsum(crmn, cosmui)
+    w4 = -_theta_einsum(crmn, sinmui)
+    w6 = -_theta_einsum(czmn, cosmui)
+    w7 = _theta_einsum(azmn, sinmui) + _theta_einsum(bzmn, cosmumi) + xmpq1 * _theta_einsum(azcon, sinmui)
+    w8 = -_theta_einsum(czmn, sinmui)
+    w10 = -_theta_einsum(clmn, cosmui)
+    w11 = _theta_einsum(blmn, cosmumi)
+    w12 = -_theta_einsum(clmn, sinmui)
+
+    w1_e, w1_o = w1[0], w1[1]
+    w2_e, w2_o = w2[0], w2[1]
+    w3_e, w3_o = w3[0], w3[1]
+    w4_e, w4_o = w4[0], w4[1]
+    w5_e, w5_o = w5[0], w5[1]
+    w6_e, w6_o = w6[0], w6[1]
+    w7_e, w7_o = w7[0], w7[1]
+    w8_e, w8_o = w8[0], w8[1]
+    w9_e, w9_o = w9[0], w9[1]
+    w10_e, w10_o = w10[0], w10[1]
+    w11_e, w11_o = w11[0], w11[1]
+    w12_e, w12_o = w12[0], w12[1]
 
     mask_even = _mparity_mask(mpol, dtype=jnp.asarray(armn_even).dtype)
     w1 = _select_mparity(w1_e, w1_o, mask_even)
