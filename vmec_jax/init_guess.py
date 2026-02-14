@@ -799,14 +799,20 @@ def initial_guess_from_boundary(
                 )
 
                 m_modes = np.asarray(static.modes.m, dtype=int)
-                mask_even = (m_modes % 2) == 0
-                mask_m1 = m_modes == 1
-                mask_odd_rest = (m_modes % 2 == 1) & (m_modes != 1)
+                mask_even = jnp.asarray((m_modes % 2) == 0, dtype=dtype)
+                mask_m1 = jnp.asarray(m_modes == 1, dtype=dtype)
+                mask_odd_rest = jnp.asarray((m_modes % 2 == 1) & (m_modes != 1), dtype=dtype)
 
-                def _eval_pair(cos, sin, mask):
+                coeff_cos_stack = jnp.stack([Rcos_phys, Zcos_phys], axis=0)
+                coeff_sin_stack = jnp.stack([Rsin_phys, Zsin_phys], axis=0)
+                mask_stack = jnp.stack([mask_even, mask_m1, mask_odd_rest], axis=0)
+
+                def _eval_stack(mask_stack):
+                    coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
+                    coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
                     return vmec_realspace_synthesis(
-                        coeff_cos=cos * mask,
-                        coeff_sin=sin * mask,
+                        coeff_cos=coeff_cos,
+                        coeff_sin=coeff_sin,
                         modes=static.modes,
                         trig=trig,
                         coeffs_internal=True,
@@ -814,10 +820,12 @@ def initial_guess_from_boundary(
                         s=s,
                     )
 
-                def _eval_pair_dtheta(cos, sin, mask):
+                def _eval_stack_dtheta(mask_stack):
+                    coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
+                    coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
                     return vmec_realspace_synthesis_dtheta(
-                        coeff_cos=cos * mask,
-                        coeff_sin=sin * mask,
+                        coeff_cos=coeff_cos,
+                        coeff_sin=coeff_sin,
                         modes=static.modes,
                         trig=trig,
                         coeffs_internal=True,
@@ -825,20 +833,22 @@ def initial_guess_from_boundary(
                         s=s,
                     )
 
-                pr1_even = _eval_pair(Rcos_phys, Rsin_phys, mask_even)
-                pz1_even = _eval_pair(Zcos_phys, Zsin_phys, mask_even)
-                pru_even = _eval_pair_dtheta(Rcos_phys, Rsin_phys, mask_even)
-                pzu_even = _eval_pair_dtheta(Zcos_phys, Zsin_phys, mask_even)
+                stack = _eval_stack(mask_stack)
+                stack_t = _eval_stack_dtheta(mask_stack)
 
-                pr1_m1 = _eval_pair(Rcos_phys, Rsin_phys, mask_m1)
-                pz1_m1 = _eval_pair(Zcos_phys, Zsin_phys, mask_m1)
-                pru_m1 = _eval_pair_dtheta(Rcos_phys, Rsin_phys, mask_m1)
-                pzu_m1 = _eval_pair_dtheta(Zcos_phys, Zsin_phys, mask_m1)
+                pr1_even = stack[0][0]
+                pz1_even = stack[0][1]
+                pr1_m1 = stack[1][0]
+                pz1_m1 = stack[1][1]
+                pr1_rest = stack[2][0]
+                pz1_rest = stack[2][1]
 
-                pr1_rest = _eval_pair(Rcos_phys, Rsin_phys, mask_odd_rest)
-                pz1_rest = _eval_pair(Zcos_phys, Zsin_phys, mask_odd_rest)
-                pru_rest = _eval_pair_dtheta(Rcos_phys, Rsin_phys, mask_odd_rest)
-                pzu_rest = _eval_pair_dtheta(Zcos_phys, Zsin_phys, mask_odd_rest)
+                pru_even = stack_t[0][0]
+                pzu_even = stack_t[0][1]
+                pru_m1 = stack_t[1][0]
+                pzu_m1 = stack_t[1][1]
+                pru_rest = stack_t[2][0]
+                pzu_rest = stack_t[2][1]
 
                 pr1_odd = internal_odd_from_physical_vmec_m1(
                     odd_m1_phys=pr1_m1,
