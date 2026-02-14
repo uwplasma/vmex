@@ -3502,15 +3502,13 @@ def solve_fixed_boundary_residual_iter(
     nfp = float(static.cfg.nfp)
     ncoeff = int(jnp.asarray(state0.Rcos).shape[1])
 
-    idx_pos = -np.ones((mpol, nrange), dtype=np.int32)
-    idx_neg = -np.ones((mpol, nrange), dtype=np.int32)
-    for k, (m_k, n_k) in enumerate(zip(m_modes, n_modes)):
-        m_i = int(m_k)
-        n_i = int(n_k)
-        if n_i >= 0:
-            idx_pos[m_i, n_i] = int(k)
-        else:
-            idx_neg[m_i, -n_i] = int(k)
+    from .vmec_parity import _mn_index_maps as _mn_index_maps_cached
+    from .vmec_parity import _mn_cos_to_signed as _mn_cos_to_signed_block
+    from .vmec_parity import _mn_sin_to_signed as _mn_sin_to_signed_block
+
+    _mpol_map, _ntor_map, idx_pos_np, idx_neg_np = _mn_index_maps_cached(static.modes)
+    idx_pos = np.asarray(idx_pos_np, dtype=np.int32)
+    idx_neg = np.asarray(idx_neg_np, dtype=np.int32)
 
     m_idx_list = []
     n_idx_list = []
@@ -3536,51 +3534,15 @@ def solve_fixed_boundary_residual_iter(
     has_kn_any = bool(np.any(has_kn_np))
     m0_mask = np.asarray(getattr(static, "m_is_m0", None) if getattr(static, "m_is_m0", None) is not None else (np.asarray(static.modes.m) == 0))
 
-    # VMEC evolves *internal* coefficients (normalized by mscale/nscale). The
-    # solver state stores these internal coefficients as well, so no additional
-    # mscale/nscale factor is applied when mapping (m,n>=0) blocks back into
-    # signed storage for updates.
-    mode_scale_mn = jnp.ones((int(m_idx.shape[0]),), dtype=jnp.asarray(state0.Rcos).dtype)
-
     def _mn_cos_to_signed(cc, ss):
         cc = jnp.asarray(cc)
         ss = jnp.asarray(ss) if ss is not None else jnp.zeros_like(cc)
-        if cc.ndim != 3:
-            raise ValueError(f"expected (ns, mpol, nrange), got {cc.shape}")
-        cc_mn = cc[:, m_idx, n_idx]
-        ss_mn = ss[:, m_idx, n_idx]
-        is_axis_m = (m_idx == 0)[None, :]
-        is_n0 = (n_idx == 0)[None, :]
-        pos = jnp.where(is_axis_m | is_n0, cc_mn, 0.5 * (cc_mn + ss_mn)) * mode_scale_mn[None, :]
-        out = jnp.zeros((cc.shape[0], ncoeff), dtype=cc.dtype)
-        out = out.at[:, kp_idx].set(pos)
-        if has_kn_any:
-            neg = 0.5 * (cc_mn + (-ss_mn)) * mode_scale_mn[None, :]
-            out = out.at[:, kn_idx[has_kn]].set(neg[:, has_kn])
-        return out
+        return _mn_cos_to_signed_block(cc, ss, idx_pos, idx_neg, ncoeff)
 
     def _mn_sin_to_signed(sc, cs):
         sc = jnp.asarray(sc)
         cs = jnp.asarray(cs) if cs is not None else jnp.zeros_like(sc)
-        if sc.ndim != 3:
-            raise ValueError(f"expected (ns, mpol, nrange), got {sc.shape}")
-        sc_mn = sc[:, m_idx, n_idx]
-        cs_mn = cs[:, m_idx, n_idx]
-        is_n0 = (n_idx == 0)[None, :]
-        is_m0 = (m_idx == 0)[None, :]
-        has_kn_mask = has_kn[None, :]
-        # Modes without a negative-n partner (notably m=0,n>0 in VMEC mode
-        # tables) are single-DOF in signed storage. For these, use VMEC's
-        # canonical m=0 convention sc=0, cs=-A  =>  A=-cs.
-        pos_pair = jnp.where(is_n0, sc_mn, 0.5 * (sc_mn - cs_mn))
-        pos_single = jnp.where(is_m0, -cs_mn, sc_mn)
-        pos = jnp.where((~is_n0) & (~has_kn_mask), pos_single, pos_pair) * mode_scale_mn[None, :]
-        out = jnp.zeros((sc.shape[0], ncoeff), dtype=sc.dtype)
-        out = out.at[:, kp_idx].set(pos)
-        if has_kn_any:
-            neg = 0.5 * (sc_mn + cs_mn) * mode_scale_mn[None, :]
-            out = out.at[:, kn_idx[has_kn]].set(neg[:, has_kn])
-        return out
+        return _mn_sin_to_signed_block(sc, cs, idx_pos, idx_neg, ncoeff)
 
     use_m1_pair_convert = bool(getattr(static.cfg, "lthreed", True)) and bool(getattr(static.cfg, "lconm1", True)) and int(static.cfg.mpol) > 1
 
