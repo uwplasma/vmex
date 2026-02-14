@@ -21,6 +21,20 @@ On CPU, compilation can dominate runtime for moderate problem sizes. ``vmec-jax`
 Solver functions accept ``jit_grad=True`` to trade longer compile time for faster
 iterations.
 
+Scan-mode iteration (fast path)
+-------------------------------
+
+For pure-performance runs (no VMEC2000 control logic), pass ``use_scan=True`` to
+``run_fixed_boundary``. This moves the outer iteration loop into ``jax.lax.scan``
+and eliminates most Python control-flow + host/device syncs.
+
+Important:
+
+- ``use_scan=True`` disables VMEC2000 control features (restart triggers, strict
+  update logic, and VMEC-style preconditioner caches). Use it for speed, not
+  per-iteration parity.
+- Debug dump env vars are incompatible with scan mode.
+
 Static precomputation
 ---------------------
 
