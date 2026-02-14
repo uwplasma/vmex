@@ -541,18 +541,25 @@ def tomnsps_rzl(
     lthreed = bool(ntor > 0)
 
     # Zeta integration. Result arrays are (ns, mpol, ntor+1).
-    frcc = jnp.einsum("smk,kn->smn", w1, cosnv)
-    fzsc = jnp.einsum("smk,kn->smn", w7, cosnv)
-    flsc = jnp.einsum("smk,kn->smn", w11, cosnv)
+    w_cosnv = jnp.stack([w1, w7, w11], axis=0)
+    out_cosnv = jnp.einsum("psmk,kn->psmn", w_cosnv, cosnv)
+    frcc, fzsc, flsc = out_cosnv[0], out_cosnv[1], out_cosnv[2]
 
     if lthreed:
-        frcc = frcc + jnp.einsum("smk,kn->smn", w2, sinnvn)
-        fzsc = fzsc + jnp.einsum("smk,kn->smn", w8, sinnvn)
-        flsc = flsc + jnp.einsum("smk,kn->smn", w12, sinnvn)
+        w_sinnvn = jnp.stack([w2, w8, w12], axis=0)
+        out_sinnvn = jnp.einsum("psmk,kn->psmn", w_sinnvn, sinnvn)
+        frcc = frcc + out_sinnvn[0]
+        fzsc = fzsc + out_sinnvn[1]
+        flsc = flsc + out_sinnvn[2]
 
-        frss = jnp.einsum("smk,kn->smn", w3, sinnv) + jnp.einsum("smk,kn->smn", w4, cosnvn)
-        fzcs = jnp.einsum("smk,kn->smn", w5, sinnv) + jnp.einsum("smk,kn->smn", w6, cosnvn)
-        flcs = jnp.einsum("smk,kn->smn", w9, sinnv) + jnp.einsum("smk,kn->smn", w10, cosnvn)
+        w_sinnv = jnp.stack([w3, w5, w9], axis=0)
+        w_cosnvn = jnp.stack([w4, w6, w10], axis=0)
+        out_sinnv = jnp.einsum("psmk,kn->psmn", w_sinnv, sinnv)
+        out_cosnvn = jnp.einsum("psmk,kn->psmn", w_cosnvn, cosnvn)
+
+        frss = out_sinnv[0] + out_cosnvn[0]
+        fzcs = out_sinnv[1] + out_cosnvn[1]
+        flcs = out_sinnv[2] + out_cosnvn[2]
     else:
         frss = None
         fzcs = None
@@ -761,18 +768,25 @@ def tomnspa_rzl(
     lthreed = bool(ntor > 0)
 
     # Zeta integration.
-    frsc = jnp.einsum("smk,kn->smn", w3, cosnv)
-    fzcc = jnp.einsum("smk,kn->smn", w5, cosnv)
-    flcc = jnp.einsum("smk,kn->smn", w9, cosnv)
+    w_cosnv = jnp.stack([w3, w5, w9], axis=0)
+    out_cosnv = jnp.einsum("psmk,kn->psmn", w_cosnv, cosnv)
+    frsc, fzcc, flcc = out_cosnv[0], out_cosnv[1], out_cosnv[2]
 
     if lthreed:
-        frsc = frsc + jnp.einsum("smk,kn->smn", w4, sinnvn)
-        fzcc = fzcc + jnp.einsum("smk,kn->smn", w6, sinnvn)
-        flcc = flcc + jnp.einsum("smk,kn->smn", w10, sinnvn)
+        w_sinnvn = jnp.stack([w4, w6, w10], axis=0)
+        out_sinnvn = jnp.einsum("psmk,kn->psmn", w_sinnvn, sinnvn)
+        frsc = frsc + out_sinnvn[0]
+        fzcc = fzcc + out_sinnvn[1]
+        flcc = flcc + out_sinnvn[2]
 
-        frcs = jnp.einsum("smk,kn->smn", w1, sinnv) + jnp.einsum("smk,kn->smn", w2, cosnvn)
-        fzss = jnp.einsum("smk,kn->smn", w7, sinnv) + jnp.einsum("smk,kn->smn", w8, cosnvn)
-        flss = jnp.einsum("smk,kn->smn", w11, sinnv) + jnp.einsum("smk,kn->smn", w12, cosnvn)
+        w_sinnv = jnp.stack([w1, w7, w11], axis=0)
+        w_cosnvn = jnp.stack([w2, w8, w12], axis=0)
+        out_sinnv = jnp.einsum("psmk,kn->psmn", w_sinnv, sinnv)
+        out_cosnvn = jnp.einsum("psmk,kn->psmn", w_cosnvn, cosnvn)
+
+        frcs = out_sinnv[0] + out_cosnvn[0]
+        fzss = out_sinnv[1] + out_cosnvn[1]
+        flss = out_sinnv[2] + out_cosnvn[2]
     else:
         frcs = None
         fzss = None
