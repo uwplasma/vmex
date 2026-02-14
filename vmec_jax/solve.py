@@ -15,6 +15,7 @@ implementation uses gradient descent with a simple backtracking line search.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -27,6 +28,18 @@ from .fourier import eval_fourier_dtheta, eval_fourier_dzeta_phys
 from .geom import eval_geom
 from .grids import angle_steps
 from .state import VMECState, pack_state, unpack_state
+
+
+_SCAN_RUNNER_CACHE: dict[tuple, Any] = {}
+
+
+def _hash_array_bytes(a: Any) -> str:
+    arr = np.asarray(a)
+    h = hashlib.blake2b(digest_size=16)
+    h.update(arr.tobytes())
+    h.update(str(arr.shape).encode())
+    h.update(str(arr.dtype).encode())
+    return h.hexdigest()
 
 
 @dataclass(frozen=True)
@@ -1914,6 +1927,7 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
     if bool(include_constraint_force):
         # VMEC2000 default is `TCON0=1` (readin.f).
         constraint_tcon0 = float(indata.get_float("TCON0", 1.0))
+    mask_pack = getattr(static, "tomnsps_masks", None)
 
     def _fsq2_terms_and_jacmin(state: VMECState, zero_m1_zforce: Any):
         k = vmec_forces_rz_from_wout(
@@ -1932,6 +1946,8 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
             wout=wout_like,
             trig=trig,
             apply_lforbal=False,
+            include_edge=False,
+            masks=mask_pack,
         )
         rzl = vmec_zero_m1_zforce(frzl=rzl, enabled=zero_m1_zforce)
         gcr2, gcz2, gcl2 = vmec_gcx2_from_tomnsps(
@@ -2009,6 +2025,8 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
                 wout=wout_like,
                 trig=trig,
                 apply_lforbal=False,
+                include_edge=False,
+                masks=mask_pack,
             )
             rzl = vmec_zero_m1_zforce(frzl=rzl, enabled=zero_m1_zforce)
             gcr2, gcz2, gcl2 = vmec_gcx2_from_tomnsps(
@@ -2419,6 +2437,8 @@ def solve_fixed_boundary_gn_vmec_residual(
             return a
         return a.at[-1].set(jnp.zeros_like(a[-1]))
 
+    mask_pack = getattr(static, "tomnsps_masks", None)
+
     def _residual_blocks(state: VMECState, zero_m1_zforce: Any):
         k = vmec_forces_rz_from_wout(
             state=state,
@@ -2436,6 +2456,8 @@ def solve_fixed_boundary_gn_vmec_residual(
             wout=wout_like,
             trig=trig,
             apply_lforbal=False,
+            include_edge=False,
+            masks=mask_pack,
         )
         frzl = rzl
         if bool(apply_m1_constraints):
@@ -3256,6 +3278,9 @@ def solve_fixed_boundary_residual_iter(
             _maybe_dump_lulv(bc=k.bc, static=static, iter_idx=int(iter_idx), state=state, trig=trig)
         if iter_idx is not None:
             _maybe_dump_force_kernels(k=k, static=static, iter_idx=int(iter_idx), label="raw")
+        mask_pack = None
+        if getattr(static, "tomnsps_masks", None) is not None:
+            mask_pack = static.tomnsps_masks_edge if bool(include_edge) else static.tomnsps_masks
         frzl = vmec_residual_internal_from_kernels(
             k,
             cfg_ntheta=int(static.cfg.ntheta),
@@ -3263,6 +3288,8 @@ def solve_fixed_boundary_residual_iter(
             wout=wout_like,
             trig=trig,
             apply_lforbal=False,
+            include_edge=bool(include_edge),
+            masks=mask_pack,
         )
         if iter_idx is not None:
             _maybe_dump_tomnsps(frzl=frzl, static=static, iter_idx=int(iter_idx), label="raw")
@@ -3275,27 +3302,34 @@ def solve_fixed_boundary_residual_iter(
 
         # Optionally remove the LCFS contribution from the R/Z force arrays
         # before forming gcr2/gcz2 (lambda always uses the full-domain residual).
-        if not bool(include_edge):
-            frzl = TomnspsRZL(
-                frcc=_zero_edge_rz(frzl.frcc),
-                frss=_zero_edge_rz(frzl.frss),
-                fzsc=_zero_edge_rz(frzl.fzsc),
-                fzcs=_zero_edge_rz(frzl.fzcs),
-                flsc=frzl.flsc,
-                flcs=frzl.flcs,
-                frsc=_zero_edge_rz(getattr(frzl, "frsc", None)),
-                frcs=_zero_edge_rz(getattr(frzl, "frcs", None)),
-                fzcc=_zero_edge_rz(getattr(frzl, "fzcc", None)),
-                fzss=_zero_edge_rz(getattr(frzl, "fzss", None)),
-                flcc=getattr(frzl, "flcc", None),
-                flss=getattr(frzl, "flss", None),
+        def _mask_edge(frzl_in: TomnspsRZL) -> TomnspsRZL:
+            return TomnspsRZL(
+                frcc=_zero_edge_rz(frzl_in.frcc),
+                frss=_zero_edge_rz(frzl_in.frss),
+                fzsc=_zero_edge_rz(frzl_in.fzsc),
+                fzcs=_zero_edge_rz(frzl_in.fzcs),
+                flsc=frzl_in.flsc,
+                flcs=frzl_in.flcs,
+                frsc=_zero_edge_rz(getattr(frzl_in, "frsc", None)),
+                frcs=_zero_edge_rz(getattr(frzl_in, "frcs", None)),
+                fzcc=_zero_edge_rz(getattr(frzl_in, "fzcc", None)),
+                fzss=_zero_edge_rz(getattr(frzl_in, "fzss", None)),
+                flcc=getattr(frzl_in, "flcc", None),
+                flss=getattr(frzl_in, "flss", None),
             )
+
+        if has_jax():
+            include_edge_j = jnp.asarray(include_edge)
+            frzl = jax.lax.cond(include_edge_j, lambda x: x, _mask_edge, frzl)
+        else:
+            if not bool(include_edge):
+                frzl = _mask_edge(frzl)
 
         gcr2, gcz2, gcl2 = vmec_gcx2_from_tomnsps(
             frzl=frzl,
             lconm1=bool(getattr(static.cfg, "lconm1", True)),
             apply_m1_constraints=False,
-            include_edge=bool(include_edge),
+            include_edge=include_edge,
             apply_scalxc=False,
             s=s,
         )
@@ -3305,7 +3339,7 @@ def solve_fixed_boundary_residual_iter(
                 gcz2=gcz2,
                 gcl2=gcl2,
                 iter_idx=int(iter_idx),
-                include_edge=bool(include_edge),
+                include_edge=bool(np.asarray(include_edge)),
                 ns=int(static.cfg.ns),
             )
         if norms_override is None:
@@ -3350,7 +3384,7 @@ def solve_fixed_boundary_residual_iter(
                 iter_idx=None,
             )
 
-        _compute_forces = jit(_compute_forces_nodump, static_argnames=("include_edge",))
+        _compute_forces = jit(_compute_forces_nodump)
 
     def _iter_idx_for_dump(it: int | None) -> int | None:
         return None if jit_forces else it
@@ -3518,6 +3552,25 @@ def solve_fixed_boundary_residual_iter(
         rz_norm = jnp.sum(zsc[sl] * zsc[sl]) + jnp.sum(include_rcc * (rcc[sl] * rcc[sl]))
         if bool(getattr(static.cfg, "lthreed", True)):
             rz_norm = rz_norm + jnp.sum(rss[sl] * rss[sl]) + jnp.sum(zcs[sl] * zcs[sl])
+        if bool(getattr(static.cfg, "lasym", False)):
+            # Asymmetric terms: include Rsin/Zcos internal components.
+            rs_pos = jnp.asarray(state.Rsin)[:, kp_idx]
+            zc_pos = jnp.asarray(state.Zcos)[:, kp_idx]
+            rs_neg = jnp.zeros_like(rs_pos)
+            zc_neg = jnp.zeros_like(zc_pos)
+            if has_kn_any:
+                rs_neg = rs_neg.at[:, has_kn].set(jnp.asarray(state.Rsin)[:, kn_idx[has_kn]])
+                zc_neg = zc_neg.at[:, has_kn].set(jnp.asarray(state.Zcos)[:, kn_idx[has_kn]])
+
+            # Internal sin/cos blocks from signed coefficients.
+            rsc = jnp.where(has_kn_mask, rs_pos + rs_neg, jnp.where(is_n0, rs_pos, jnp.where(is_m0, 0.0, rs_pos)))
+            rcs = jnp.where(has_kn_mask, rs_neg - rs_pos, jnp.where(is_n0, 0.0, jnp.where(is_m0, -rs_pos, 0.0)))
+
+            zcc = zc_pos + jnp.where(has_kn_mask, zc_neg, 0.0)
+            zss = jnp.where(is_n0 | is_m0, 0.0, jnp.where(has_kn_mask, zc_pos - zc_neg, 0.0))
+
+            rz_norm = rz_norm + jnp.sum(rsc[sl] * rsc[sl]) + jnp.sum(rcs[sl] * rcs[sl])
+            rz_norm = rz_norm + jnp.sum(zcc[sl] * zcc[sl]) + jnp.sum(zss[sl] * zss[sl])
         return rz_norm
 
     def _mode_diag_weights_mn(dtype):
@@ -3566,13 +3619,61 @@ def solve_fixed_boundary_residual_iter(
         flip_sign_j = jnp.asarray(float(initial_flip_sign), dtype=dtype)
 
         include_edge_scan = False
+        _compute_forces_scan = _compute_forces_impl if jit_forces else _compute_forces
+
+        static_key = (
+            int(static.cfg.mpol),
+            int(static.cfg.ntor),
+            int(static.cfg.ntheta),
+            int(static.cfg.nzeta),
+            int(static.cfg.nfp),
+            int(static.cfg.ns),
+            bool(static.cfg.lasym),
+            _hash_array_bytes(static.modes.m),
+            _hash_array_bytes(static.modes.n),
+            _hash_array_bytes(static.grid.theta),
+            _hash_array_bytes(static.grid.zeta),
+        )
+        wout_key = (
+            int(wout_like.nfp),
+            int(wout_like.mpol),
+            int(wout_like.ntor),
+            bool(wout_like.lasym),
+            int(wout_like.signgs),
+            _hash_array_bytes(wout_like.phipf),
+            _hash_array_bytes(wout_like.phips),
+            _hash_array_bytes(wout_like.chipf),
+            _hash_array_bytes(wout_like.pres),
+            _hash_array_bytes(wout_like.icurv) if getattr(wout_like, "icurv", None) is not None else None,
+            float(constraint_tcon0) if constraint_tcon0 is not None else None,
+        )
+        edge_key = (
+            _hash_array_bytes(edge_Rcos),
+            _hash_array_bytes(edge_Rsin),
+            _hash_array_bytes(edge_Zcos),
+            _hash_array_bytes(edge_Zsin),
+        )
+        scan_cache_key = (
+            "scan_v1",
+            static_key,
+            wout_key,
+            edge_key,
+            int(max_iter),
+            float(step_size),
+            float(initial_flip_sign),
+            float(lambda_update_scale),
+            float(precond_radial_alpha),
+            float(precond_lambda_alpha),
+            bool(apply_m1_constraints),
+            bool(jit_forces),
+        )
 
         def _scan_step(state, it):
             it = jnp.asarray(it, dtype=jnp.int32)
             iter_since_restart = it + 1
             zero_m1 = jnp.where(iter_since_restart < 2, jnp.asarray(1.0, dtype=dtype), jnp.asarray(0.0, dtype=dtype))
 
-            k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale, _norms = _compute_forces(
+            k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale, _norms = _compute_forces_scan(
                 state,
                 include_edge=include_edge_scan,
                 zero_m1=zero_m1,
@@ -3651,8 +3752,13 @@ def solve_fixed_boundary_residual_iter(
         def _run_scan(state_init):
             return jax.lax.scan(_scan_step, state_init, jnp.arange(max_iter, dtype=jnp.int32))
 
-        if jit_forces:
-            _run_scan = jit(_run_scan)
+        cached_run = _SCAN_RUNNER_CACHE.get(scan_cache_key)
+        if cached_run is None:
+            if jit_forces:
+                _run_scan = jit(_run_scan)
+            _SCAN_RUNNER_CACHE[scan_cache_key] = _run_scan
+        else:
+            _run_scan = cached_run
 
         state_final, hist = _run_scan(state)
         fsqr_hist, fsqz_hist, fsql_hist = hist
@@ -4060,9 +4166,10 @@ def solve_fixed_boundary_residual_iter(
                 rz_scale_override = cache_rz_scale
                 l_scale_override = cache_l_scale
     
+            include_edge_j = jnp.asarray(include_edge, dtype=jnp.bool_)
             k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale, norms_used = _compute_forces(
                 state,
-                include_edge=include_edge,
+                include_edge=include_edge_j,
                 zero_m1=zero_m1,
                 constraint_precond_diag=constraint_precond_diag,
                 constraint_tcon=constraint_tcon_override,
@@ -4165,7 +4272,7 @@ def solve_fixed_boundary_residual_iter(
     
             # Precondition forces.
             frzl_lam_pre = None
-            if bool(vmec2000_control) and (not bool(cfg.lasym)):
+            if bool(vmec2000_control) and bool(cfg.lthreed):
                 from .preconditioner_1d_jax import rz_preconditioner_apply, rz_preconditioner_matrices
     
                 need_lam_prec = os.getenv("VMEC_JAX_DUMP_LAM", "") not in ("", "0")
@@ -4216,7 +4323,7 @@ def solve_fixed_boundary_residual_iter(
                 fzcs = frzl_rz.fzcs
                 flsc = jnp.asarray(frzl_rz.flsc) * jnp.asarray(lam_prec)
                 flcs = None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * jnp.asarray(lam_prec))
-            elif (not bool(cfg.lthreed)) and (not bool(cfg.lasym)):
+            elif not bool(cfg.lthreed):
                 need_lam_prec = os.getenv("VMEC_JAX_DUMP_LAM", "") not in ("", "0")
                 need_lamcal = os.getenv("VMEC_JAX_DUMP_LAMCAL", "") not in ("", "0")
                 need_prec_refresh = (not bool(vmec2000_cache_valid)) or (cache_prec_lam_prec is None) or bool(need_bcovar_update)
@@ -5465,6 +5572,8 @@ def first_step_diagnostics(
             cfg=cfg,
         )
 
+    mask_pack = getattr(static_vmec, "tomnsps_masks", None)
+
     def _compute_forces(state: VMECState):
         k = vmec_forces_rz_from_wout(
             state=state,
@@ -5482,6 +5591,8 @@ def first_step_diagnostics(
             wout=wout_like,
             trig=trig,
             apply_lforbal=False,
+            include_edge=False,
+            masks=mask_pack,
         )
         frzl = vmec_apply_scalxc_to_tomnsps(frzl=frzl, s=s)
         frzl_raw = frzl

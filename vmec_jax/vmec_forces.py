@@ -19,12 +19,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
+from contextlib import contextmanager
 
 import numpy as np
 
 from jax import tree_util
 
-from ._compat import jnp
+from ._compat import jnp, has_jax, jax
 from .fourier import project_to_modes
 from .fourier import eval_fourier, eval_fourier_dtheta, eval_fourier_dzeta_phys
 from .field import lamscale_from_phips
@@ -38,7 +39,15 @@ from .vmec_constraints import (
     tcon_from_precondn_axisym,
     tcon_from_tcon0_heuristic,
 )
-from .vmec_tomnsp import TomnspsRZL, VmecTrigTables, tomnsps_rzl, tomnspa_rzl, vmec_angle_grid, vmec_trig_tables
+from .vmec_tomnsp import (
+    TomnspsMasks,
+    TomnspsRZL,
+    VmecTrigTables,
+    tomnsps_rzl,
+    tomnspa_rzl,
+    vmec_angle_grid,
+    vmec_trig_tables,
+)
 from .nyquist import nyquist_basis_from_wout
 from .vmec_parity import (
     internal_odd_from_physical_vmec_jlam,
@@ -51,6 +60,18 @@ from .vmec_realspace import (
     vmec_realspace_synthesis_dtheta,
     vmec_realspace_synthesis_dzeta_phys,
 )
+
+
+@contextmanager
+def _named_scope(name: str):
+    if has_jax():
+        try:
+            with jax.named_scope(name):
+                yield
+            return
+        except Exception:
+            pass
+    yield
 
 
 @tree_util.register_pytree_node_class
@@ -672,41 +693,44 @@ def vmec_forces_rz_from_wout(
         def _eval_stack(mask_stack):
             coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
             coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
-            return vmec_realspace_synthesis(
-                coeff_cos=coeff_cos,
-                coeff_sin=coeff_sin,
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=True,
-                apply_scalxc=True,
-                s=s,
-            )
+            with _named_scope("vmec_realspace_synthesis"):
+                return vmec_realspace_synthesis(
+                    coeff_cos=coeff_cos,
+                    coeff_sin=coeff_sin,
+                    modes=static.modes,
+                    trig=trig,
+                    coeffs_internal=True,
+                    apply_scalxc=True,
+                    s=s,
+                )
 
         def _eval_stack_dtheta(mask_stack):
             coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
             coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
-            return vmec_realspace_synthesis_dtheta(
-                coeff_cos=coeff_cos,
-                coeff_sin=coeff_sin,
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=True,
-                apply_scalxc=True,
-                s=s,
-            )
+            with _named_scope("vmec_realspace_synthesis_dtheta"):
+                return vmec_realspace_synthesis_dtheta(
+                    coeff_cos=coeff_cos,
+                    coeff_sin=coeff_sin,
+                    modes=static.modes,
+                    trig=trig,
+                    coeffs_internal=True,
+                    apply_scalxc=True,
+                    s=s,
+                )
 
         def _eval_stack_dzeta(mask_stack):
             coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
             coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
-            return vmec_realspace_synthesis_dzeta_phys(
-                coeff_cos=coeff_cos,
-                coeff_sin=coeff_sin,
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=True,
-                apply_scalxc=True,
-                s=s,
-            )
+            with _named_scope("vmec_realspace_synthesis_dzeta"):
+                return vmec_realspace_synthesis_dzeta_phys(
+                    coeff_cos=coeff_cos,
+                    coeff_sin=coeff_sin,
+                    modes=static.modes,
+                    trig=trig,
+                    coeffs_internal=True,
+                    apply_scalxc=True,
+                    s=s,
+                )
 
         mask_stack = jnp.stack([mask_even, mask_m1, mask_odd_rest], axis=0)
         stack = _eval_stack(mask_stack)
@@ -1054,7 +1078,10 @@ def vmec_forces_rz_from_wout_reference_fields(
     )
 
     # Evaluate stored wout Nyquist fields on our angular grid.
-    grid = AngleGrid(theta=np.asarray(static.grid.theta), zeta=np.asarray(static.grid.zeta), nfp=int(wout.nfp))
+    if int(getattr(static.grid, "nfp", 0)) == int(wout.nfp):
+        grid = static.grid
+    else:
+        grid = AngleGrid(theta=np.asarray(static.grid.theta), zeta=np.asarray(static.grid.zeta), nfp=int(wout.nfp))
     basis_nyq = nyquist_basis_from_wout(wout=wout, grid=grid)
 
     sqrtg = jnp.asarray(eval_fourier(wout.gmnc, wout.gmns, basis_nyq))
@@ -1414,6 +1441,7 @@ def vmec_residual_internal_from_kernels(
     trig: VmecTrigTables | None = None,
     apply_lforbal: bool = False,
     include_edge: bool = False,
+    masks: TomnspsMasks | None = None,
 ) -> VmecInternalResidualRZL:
     """Compute internal residual coefficient arrays using VMEC's `tomnsps` conventions."""
     if trig is None:
@@ -1485,6 +1513,8 @@ def vmec_residual_internal_from_kernels(
             jnp.concatenate([a_asym_half, pad], axis=1),
         )
 
+    mask_pack = masks
+
     if lasym:
         # Decompose each kernel before calling tomnsps/tomnspa.
         armn_e_s, armn_e_a = _symforce_split_one(k.armn_e, trig=trig, kind="ars")
@@ -1511,91 +1541,98 @@ def vmec_residual_internal_from_kernels(
         azcon_e_s, azcon_e_a = _symforce_split_one(k.azcon_e, trig=trig, kind="zcs")
         azcon_o_s, azcon_o_a = _symforce_split_one(k.azcon_o, trig=trig, kind="zcs")
 
-        out_sym = tomnsps_rzl(
-            armn_even=armn_e_s,
-            armn_odd=armn_o_s,
-            brmn_even=brmn_e_s,
-            brmn_odd=brmn_o_s,
-            crmn_even=crmn_e_s,
-            crmn_odd=crmn_o_s,
-            azmn_even=azmn_e_s,
-            azmn_odd=azmn_o_s,
-            bzmn_even=bzmn_e_s,
-            bzmn_odd=bzmn_o_s,
-            czmn_even=czmn_e_s,
-            czmn_odd=czmn_o_s,
-            blmn_even=blmn_e_s,
-            blmn_odd=blmn_o_s,
-            clmn_even=clmn_e_s,
-            clmn_odd=clmn_o_s,
-            arcon_even=arcon_e_s,
-            arcon_odd=arcon_o_s,
-            azcon_even=azcon_e_s,
-            azcon_odd=azcon_o_s,
-            mpol=int(wout.mpol),
-            ntor=int(wout.ntor),
-            nfp=int(wout.nfp),
-            lasym=True,
-            trig=trig,
-            include_edge=bool(include_edge),
-        )
+        with _named_scope("tomnsps_rzl"):
+            out_sym = tomnsps_rzl(
+                armn_even=armn_e_s,
+                armn_odd=armn_o_s,
+                brmn_even=brmn_e_s,
+                brmn_odd=brmn_o_s,
+                crmn_even=crmn_e_s,
+                crmn_odd=crmn_o_s,
+                azmn_even=azmn_e_s,
+                azmn_odd=azmn_o_s,
+                bzmn_even=bzmn_e_s,
+                bzmn_odd=bzmn_o_s,
+                czmn_even=czmn_e_s,
+                czmn_odd=czmn_o_s,
+                blmn_even=blmn_e_s,
+                blmn_odd=blmn_o_s,
+                clmn_even=clmn_e_s,
+                clmn_odd=clmn_o_s,
+                arcon_even=arcon_e_s,
+                arcon_odd=arcon_o_s,
+                azcon_even=azcon_e_s,
+                azcon_odd=azcon_o_s,
+                mpol=int(wout.mpol),
+                ntor=int(wout.ntor),
+                nfp=int(wout.nfp),
+                lasym=True,
+                trig=trig,
+                include_edge=bool(include_edge),
+                masks=mask_pack,
+            )
 
-        out_asym = tomnspa_rzl(
-            armn_even=armn_e_a,
-            armn_odd=armn_o_a,
-            brmn_even=brmn_e_a,
-            brmn_odd=brmn_o_a,
-            crmn_even=crmn_e_a,
-            crmn_odd=crmn_o_a,
-            azmn_even=azmn_e_a,
-            azmn_odd=azmn_o_a,
-            bzmn_even=bzmn_e_a,
-            bzmn_odd=bzmn_o_a,
-            czmn_even=czmn_e_a,
-            czmn_odd=czmn_o_a,
-            blmn_even=blmn_e_a,
-            blmn_odd=blmn_o_a,
-            clmn_even=clmn_e_a,
-            clmn_odd=clmn_o_a,
-            arcon_even=arcon_e_a,
-            arcon_odd=arcon_o_a,
-            azcon_even=azcon_e_a,
-            azcon_odd=azcon_o_a,
-            mpol=int(wout.mpol),
-            ntor=int(wout.ntor),
-            nfp=int(wout.nfp),
-            lasym=True,
-            trig=trig,
-        )
+        with _named_scope("tomnspa_rzl"):
+            out_asym = tomnspa_rzl(
+                armn_even=armn_e_a,
+                armn_odd=armn_o_a,
+                brmn_even=brmn_e_a,
+                brmn_odd=brmn_o_a,
+                crmn_even=crmn_e_a,
+                crmn_odd=crmn_o_a,
+                azmn_even=azmn_e_a,
+                azmn_odd=azmn_o_a,
+                bzmn_even=bzmn_e_a,
+                bzmn_odd=bzmn_o_a,
+                czmn_even=czmn_e_a,
+                czmn_odd=czmn_o_a,
+                blmn_even=blmn_e_a,
+                blmn_odd=blmn_o_a,
+                clmn_even=clmn_e_a,
+                clmn_odd=clmn_o_a,
+                arcon_even=arcon_e_a,
+                arcon_odd=arcon_o_a,
+                azcon_even=azcon_e_a,
+                azcon_odd=azcon_o_a,
+                mpol=int(wout.mpol),
+                ntor=int(wout.ntor),
+                nfp=int(wout.nfp),
+                lasym=True,
+                trig=trig,
+                include_edge=bool(include_edge),
+                masks=mask_pack,
+            )
     else:
-        out_sym = tomnsps_rzl(
-            armn_even=k.armn_e,
-            armn_odd=k.armn_o,
-            brmn_even=k.brmn_e,
-            brmn_odd=k.brmn_o,
-            crmn_even=k.crmn_e,
-            crmn_odd=k.crmn_o,
-            azmn_even=k.azmn_e,
-            azmn_odd=k.azmn_o,
-            bzmn_even=k.bzmn_e,
-            bzmn_odd=k.bzmn_o,
-            czmn_even=k.czmn_e,
-            czmn_odd=k.czmn_o,
-            blmn_even=blmn_even,
-            blmn_odd=blmn_odd,
-            clmn_even=clmn_even,
-            clmn_odd=clmn_odd,
-            arcon_even=k.arcon_e,
-            arcon_odd=k.arcon_o,
-            azcon_even=k.azcon_e,
-            azcon_odd=k.azcon_o,
-            mpol=int(wout.mpol),
-            ntor=int(wout.ntor),
-            nfp=int(wout.nfp),
-            lasym=False,
-            trig=trig,
-            include_edge=bool(include_edge),
-        )
+        with _named_scope("tomnsps_rzl"):
+            out_sym = tomnsps_rzl(
+                armn_even=k.armn_e,
+                armn_odd=k.armn_o,
+                brmn_even=k.brmn_e,
+                brmn_odd=k.brmn_o,
+                crmn_even=k.crmn_e,
+                crmn_odd=k.crmn_o,
+                azmn_even=k.azmn_e,
+                azmn_odd=k.azmn_o,
+                bzmn_even=k.bzmn_e,
+                bzmn_odd=k.bzmn_o,
+                czmn_even=k.czmn_e,
+                czmn_odd=k.czmn_o,
+                blmn_even=blmn_even,
+                blmn_odd=blmn_odd,
+                clmn_even=clmn_even,
+                clmn_odd=clmn_odd,
+                arcon_even=k.arcon_e,
+                arcon_odd=k.arcon_o,
+                azcon_even=k.azcon_e,
+                azcon_odd=k.azcon_o,
+                mpol=int(wout.mpol),
+                ntor=int(wout.ntor),
+                nfp=int(wout.nfp),
+                lasym=False,
+                trig=trig,
+                include_edge=bool(include_edge),
+                masks=mask_pack,
+            )
         out_asym = None
 
     # VMEC `lforbal` modifies the (m=1,n=0) symmetric forces to satisfy the
