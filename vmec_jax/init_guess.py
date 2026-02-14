@@ -19,12 +19,17 @@ from dataclasses import dataclass
 import numpy as np
 
 from ._compat import jnp, has_jax
-from .boundary import BoundaryCoeffs
+from .boundary import (
+    BoundaryCoeffs,
+    boundary_apply_vmec_m1_constraint,
+    boundary_undo_vmec_m1_constraint,
+)
 from .grids import make_angle_grid
 from .fourier import build_helical_basis, eval_fourier, eval_fourier_dtheta
 from .namelist import InData
 from .state import StateLayout, VMECState
 from .static import VMECStatic
+from .vmec_parity import internal_odd_from_physical_vmec_m1, vmec_m1_internal_to_physical_signed
 from .vmec_realspace import (
     vmec_realspace_analysis,
     vmec_realspace_synthesis,
@@ -107,7 +112,8 @@ def _guess_axis_from_boundary(static: VMECStatic, boundary: BoundaryCoeffs):
     delta = 2.0 / float(zeta.size)
     raxis_c = delta * (cos_nz @ R_axis)
     raxis_c[0] *= 0.5
-    zaxis_s = delta * (sin_nz @ Z_axis)
+    # VMEC convention: zaxis_cs uses a negative sine projection.
+    zaxis_s = -delta * (sin_nz @ Z_axis)
     return jnp.asarray(raxis_c), jnp.asarray(zaxis_s)
 
 
@@ -188,49 +194,31 @@ def _flip_boundary_theta(static: VMECStatic, boundary: BoundaryCoeffs) -> Bounda
 
 
 def _apply_m1_constraint(static: VMECStatic, boundary: BoundaryCoeffs) -> BoundaryCoeffs:
-    """Apply VMEC m=1 constraint to boundary coefficients (symmetric runs)."""
+    """Apply VMEC m=1 constraint to boundary coefficients (internal basis)."""
     if not bool(getattr(static.cfg, "lconm1", True)):
         return boundary
-    if int(static.cfg.ntor) == 0:
+    if int(static.cfg.ntor) == 0 and (not bool(static.cfg.lasym)):
         return boundary
-
-    R_cos = np.asarray(boundary.R_cos).copy()
-    R_sin = np.asarray(boundary.R_sin).copy()
-    Z_cos = np.asarray(boundary.Z_cos).copy()
-    Z_sin = np.asarray(boundary.Z_sin).copy()
-
-    for k, m in enumerate(static.modes.m):
-        if int(m) != 1:
-            continue
-        rbs = R_sin[k]
-        zbc = Z_cos[k]
-        R_sin[k] = 0.5 * (rbs + zbc)
-        Z_cos[k] = 0.5 * (rbs - zbc)
-
-    return BoundaryCoeffs(R_cos=R_cos, R_sin=R_sin, Z_cos=Z_cos, Z_sin=Z_sin)
+    return boundary_apply_vmec_m1_constraint(
+        boundary,
+        static.modes,
+        lthreed=int(static.cfg.ntor) > 0,
+        lasym=bool(static.cfg.lasym),
+    )
 
 
 def _undo_m1_constraint_for_recompute(static: VMECStatic, boundary: BoundaryCoeffs) -> BoundaryCoeffs:
     """Undo VMEC's m=1 constraint for the boundary (used in axis recompute)."""
     if not bool(getattr(static.cfg, "lconm1", True)):
         return boundary
-    if int(static.cfg.ntor) == 0:
+    if int(static.cfg.ntor) == 0 and (not bool(static.cfg.lasym)):
         return boundary
-
-    R_cos = np.asarray(boundary.R_cos).copy()
-    R_sin = np.asarray(boundary.R_sin).copy()
-    Z_cos = np.asarray(boundary.Z_cos).copy()
-    Z_sin = np.asarray(boundary.Z_sin).copy()
-
-    for k, m in enumerate(static.modes.m):
-        if int(m) != 1:
-            continue
-        rbs = R_sin[k]
-        zbc = Z_cos[k]
-        R_sin[k] = rbs + zbc
-        Z_cos[k] = rbs - zbc
-
-    return BoundaryCoeffs(R_cos=R_cos, R_sin=R_sin, Z_cos=Z_cos, Z_sin=Z_sin)
+    return boundary_undo_vmec_m1_constraint(
+        boundary,
+        static.modes,
+        lthreed=int(static.cfg.ntor) > 0,
+        lasym=bool(static.cfg.lasym),
+    )
 
 
 def _blend_axis_m0_full(
@@ -793,15 +781,104 @@ def initial_guess_from_boundary(
 
         if not have_axis:
             if bool(infer_axis_if_missing):
-                # Heuristic fallback for non-VMEC workflows: infer the axis
-                # from boundary geometry.
-                raxis_cc, zaxis_cs = _guess_axis_from_boundary(static, boundary_use)
-                # `_guess_axis_from_boundary` returns physical (wout-like) axis
-                # coefficients; convert to VMEC internal scaling before blending.
+                # VMEC-style axis guess (guess_axis) from the current parity fields.
+                # Use the same VMEC trig tables and internal scaling as the solver.
+                # VMEC sets signgs = -1 in readin and flips the boundary if needed.
+                signgs_guess = -1
+
+                # Undo the m=1 internal constraint before real-space synthesis.
+                Rcos_phys, Zsin_phys, Rsin_phys, Zcos_phys = vmec_m1_internal_to_physical_signed(
+                    Rcos=Rcos,
+                    Zsin=Zsin,
+                    Rsin=Rsin,
+                    Zcos=Zcos,
+                    modes=static.modes,
+                    lthreed=bool(cfg.ntor > 0),
+                    lasym=bool(cfg.lasym),
+                    lconm1=bool(getattr(cfg, "lconm1", True)),
+                )
+
+                m_modes = np.asarray(static.modes.m, dtype=int)
+                mask_even = (m_modes % 2) == 0
+                mask_m1 = m_modes == 1
+                mask_odd_rest = (m_modes % 2 == 1) & (m_modes != 1)
+
+                def _eval_pair(cos, sin, mask):
+                    return vmec_realspace_synthesis(
+                        coeff_cos=cos * mask,
+                        coeff_sin=sin * mask,
+                        modes=static.modes,
+                        trig=trig,
+                        coeffs_internal=True,
+                        apply_scalxc=False,
+                        s=s,
+                    )
+
+                def _eval_pair_dtheta(cos, sin, mask):
+                    return vmec_realspace_synthesis_dtheta(
+                        coeff_cos=cos * mask,
+                        coeff_sin=sin * mask,
+                        modes=static.modes,
+                        trig=trig,
+                        coeffs_internal=True,
+                        apply_scalxc=False,
+                        s=s,
+                    )
+
+                pr1_even = _eval_pair(Rcos_phys, Rsin_phys, mask_even)
+                pz1_even = _eval_pair(Zcos_phys, Zsin_phys, mask_even)
+                pru_even = _eval_pair_dtheta(Rcos_phys, Rsin_phys, mask_even)
+                pzu_even = _eval_pair_dtheta(Zcos_phys, Zsin_phys, mask_even)
+
+                pr1_m1 = _eval_pair(Rcos_phys, Rsin_phys, mask_m1)
+                pz1_m1 = _eval_pair(Zcos_phys, Zsin_phys, mask_m1)
+                pru_m1 = _eval_pair_dtheta(Rcos_phys, Rsin_phys, mask_m1)
+                pzu_m1 = _eval_pair_dtheta(Zcos_phys, Zsin_phys, mask_m1)
+
+                pr1_rest = _eval_pair(Rcos_phys, Rsin_phys, mask_odd_rest)
+                pz1_rest = _eval_pair(Zcos_phys, Zsin_phys, mask_odd_rest)
+                pru_rest = _eval_pair_dtheta(Rcos_phys, Rsin_phys, mask_odd_rest)
+                pzu_rest = _eval_pair_dtheta(Zcos_phys, Zsin_phys, mask_odd_rest)
+
+                pr1_odd = internal_odd_from_physical_vmec_m1(
+                    odd_m1_phys=pr1_m1,
+                    odd_mge2_phys=pr1_rest,
+                    s=s,
+                )
+                pz1_odd = internal_odd_from_physical_vmec_m1(
+                    odd_m1_phys=pz1_m1,
+                    odd_mge2_phys=pz1_rest,
+                    s=s,
+                )
+                pru_odd = internal_odd_from_physical_vmec_m1(
+                    odd_m1_phys=pru_m1,
+                    odd_mge2_phys=pru_rest,
+                    s=s,
+                )
+                pzu_odd = internal_odd_from_physical_vmec_m1(
+                    odd_m1_phys=pzu_m1,
+                    odd_mge2_phys=pzu_rest,
+                    s=s,
+                )
+
+                raxis_cc, raxis_cs, zaxis_cc, zaxis_cs = _recompute_axis_from_state_vmec(
+                    static,
+                    pr1_even=pr1_even,
+                    pr1_odd=pr1_odd,
+                    pz1_even=pz1_even,
+                    pz1_odd=pz1_odd,
+                    pru_even=pru_even,
+                    pru_odd=pru_odd,
+                    pzu_even=pzu_even,
+                    pzu_odd=pzu_odd,
+                    signgs=signgs_guess,
+                    trig=trig,
+                )
+
                 raxis_cc = jnp.asarray(raxis_cc, dtype=dtype) * axis_scale
+                raxis_cs = jnp.asarray(raxis_cs, dtype=dtype) * axis_scale
+                zaxis_cc = jnp.asarray(zaxis_cc, dtype=dtype) * axis_scale
                 zaxis_cs = jnp.asarray(zaxis_cs, dtype=dtype) * axis_scale
-                raxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
-                zaxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
                 axis_from_indata = False
             else:
                 # VMEC parity path: keep the explicit zero axis and let
@@ -842,7 +919,7 @@ def initial_guess_from_boundary(
 
             # VMEC only recomputes the axis when explicitly requested.
             if axis_from_indata and bool(indata.get_bool("LRECOMPUTE", False)):
-                signgs_guess = 1 if np.median(areas) >= 0.0 else -1
+                signgs_guess = -1
                 new_raxis_cc = np.asarray(raxis_cc)
                 new_zaxis_cs = np.asarray(zaxis_cs)
                 for _ in range(3):
@@ -853,8 +930,8 @@ def initial_guess_from_boundary(
                         zaxis_cs=new_zaxis_cs,
                         signgs=signgs_guess,
                     )
-                raxis_cc = jnp.asarray(new_raxis_cc, dtype=dtype)
-                zaxis_cs = jnp.asarray(new_zaxis_cs, dtype=dtype)
+                raxis_cc = jnp.asarray(new_raxis_cc, dtype=dtype) * axis_scale
+                zaxis_cs = jnp.asarray(new_zaxis_cs, dtype=dtype) * axis_scale
                 Rcos, Rsin, Zcos, Zsin = _blend_axis_m0_full(
                     static=static,
                     s=s,
@@ -872,26 +949,35 @@ def initial_guess_from_boundary(
                     zaxis_cs=zaxis_cs,
                 )
 
-    # Convert back to physical (wout) convention before returning.
-    mode_scale_inv = jnp.where(mode_scale != 0, 1.0 / mode_scale, 0.0).astype(dtype)
-    Rcos = Rcos * mode_scale_inv[None, :]
-    Rsin = Rsin * mode_scale_inv[None, :]
-    Zcos = Zcos * mode_scale_inv[None, :]
-    Zsin = Zsin * mode_scale_inv[None, :]
+    # Keep coefficients in VMEC's internal basis (mscale/nscale removed).
 
     if vmec_project:
         if cfg.lasym:
             # Defer asymmetric support for the VMEC-grid projection.
             vmec_project = False
         else:
-            R_real = vmec_realspace_synthesis(coeff_cos=Rcos, coeff_sin=Rsin, modes=static.modes, trig=trig)
-            Z_real = vmec_realspace_synthesis(coeff_cos=Zcos, coeff_sin=Zsin, modes=static.modes, trig=trig)
+            R_real = vmec_realspace_synthesis(
+                coeff_cos=Rcos,
+                coeff_sin=Rsin,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+            )
+            Z_real = vmec_realspace_synthesis(
+                coeff_cos=Zcos,
+                coeff_sin=Zsin,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+            )
             Rcos, Rsin = vmec_realspace_analysis(f=R_real, modes=static.modes, trig=trig, parity="cos")
             Zcos, Zsin = vmec_realspace_analysis(f=Z_real, modes=static.modes, trig=trig, parity="sin")
-            Rcos = Rcos.astype(dtype)
-            Rsin = Rsin.astype(dtype)
-            Zcos = Zcos.astype(dtype)
-            Zsin = Zsin.astype(dtype)
+            # vmec_realspace_analysis returns external (physical) coefficients;
+            # convert back to VMEC internal scaling.
+            Rcos = (Rcos * mode_scale[None, :]).astype(dtype)
+            Rsin = (Rsin * mode_scale[None, :]).astype(dtype)
+            Zcos = (Zcos * mode_scale[None, :]).astype(dtype)
+            Zsin = (Zsin * mode_scale[None, :]).astype(dtype)
 
     Lcos = jnp.zeros((cfg.ns, K), dtype=dtype)
     Lsin = jnp.zeros((cfg.ns, K), dtype=dtype)

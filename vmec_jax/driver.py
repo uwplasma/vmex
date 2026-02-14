@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
+import os
 from typing import Optional
 
 import numpy as np
@@ -264,12 +265,41 @@ def run_fixed_boundary(
     multigrid: bool | None = None,
     multigrid_use_input_niter: bool = True,
     verbose: bool = True,
+    jit_forces: bool = False,
     grid=None,
     ns_override: int | None = None,
     restart_state: any | None = None,
     restart_wout_path: str | Path | None = None,
     restart_solver_state: dict | None = None,
 ):
+    def _maybe_dump_xc_init(*, state, static, label: str) -> None:
+        env = os.getenv("VMEC_JAX_DUMP_XC_INIT", "")
+        if not env or env == "0":
+            return
+        outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+        outdir.mkdir(parents=True, exist_ok=True)
+        ns = int(static.cfg.ns)
+        suffix = f"_{label}" if label else ""
+        path = outdir / f"xc_init{suffix}_ns{ns}.dat"
+        from .diagnostics import vmec_internal_mn_from_state, vmec_xc_from_mn_blocks
+
+        blocks = vmec_internal_mn_from_state(state, static, apply_basis_norm=False, apply_m1_constraint=False)
+        xc = vmec_xc_from_mn_blocks(
+            rcc=blocks["rcc"],
+            rss=blocks["rss"],
+            zsc=blocks["zsc"],
+            zcs=blocks["zcs"],
+            lsc=blocks["lsc"],
+            lcs=blocks["lcs"],
+            cfg=static.cfg,
+        )
+        xcdot = np.zeros_like(xc)
+        with path.open("w") as f:
+            f.write("# xc/xcdot dump (init guess)\n")
+            f.write(f"neqs={xc.size}\n")
+            f.write("columns: i xc xcdot\n")
+            for i, (x, xd) in enumerate(zip(xc, xcdot), start=1):
+                f.write(f"{i:8d}{x:24.16e}{xd:24.16e}\n")
     """Run a fixed-boundary vmec_jax solve with minimal boilerplate.
 
     Parameters
@@ -324,7 +354,9 @@ def run_fixed_boundary(
     elif ns_override is not None:
         cfg = replace(cfg, ns=int(ns_override))
     solver_lower = str(solver).lower()
-    axis_infer_missing = solver_lower != "vmec2000_iter"
+    # VMEC uses `guess_axis` to build a usable initial axis when the input
+    # axis arrays are missing/zero. Keep this enabled for vmec2000_iter parity.
+    axis_infer_missing = True
     if grid is None and solver_lower in ("vmec_lbfgs", "vmec_gn", "vmec2000_iter"):
         from .vmec_tomnsp import vmec_angle_grid
 
@@ -369,12 +401,16 @@ def run_fixed_boundary(
             vmec_project=vmec_project,
             infer_axis_if_missing=axis_infer_missing,
         )
+        _maybe_dump_xc_init(state=st0_coarse, static=static0, label="stage0")
 
-    # VMEC readin.f sets signgs = -1 and flips theta if needed. Follow that
-    # convention unless explicitly overridden in the input file.
-    signgs = int(indata.get_int("SIGNGS", -1))
-    if signgs not in (-1, 1):
+    # VMEC readin.f hard-codes signgs = -1 (then flips theta if needed).
+    # For VMEC2000-iter parity, ignore input SIGNGS and match VMEC behavior.
+    if solver_lower == "vmec2000_iter":
         signgs = -1
+    else:
+        signgs = int(indata.get_int("SIGNGS", -1))
+        if signgs not in (-1, 1):
+            signgs = -1
 
     static = build_static(cfg, grid=grid)
     if restart_state_eff is None:
@@ -421,6 +457,7 @@ def run_fixed_boundary(
                 vmec_project=vmec_project,
                 infer_axis_if_missing=axis_infer_missing,
             )
+            _maybe_dump_xc_init(state=st0, static=static, label="init")
         return FixedBoundaryRun(
             cfg=cfg,
             indata=indata,
@@ -597,6 +634,22 @@ def run_fixed_boundary(
             niter_stages = _distribute_iters(iters=int(max_iter), nstep=int(nstep))
             ftol_stages = [float(indata.get_float("FTOL", 1e-10))] * nstep
 
+        # If the staging plan collapsed to the final grid, rebuild the initial
+        # guess so its radial resolution matches the (now single) stage.
+        if restart_state_eff is None and static0 is not None:
+            ns0 = int(ns_stages[0])
+            if int(static0.cfg.ns) != ns0:
+                cfg0 = replace(cfg, ns=ns0)
+                static0 = build_static(cfg0, grid=grid)
+                bdy0 = boundary_from_indata(indata, static0.modes)
+                st0_coarse = initial_guess_from_boundary(
+                    static0,
+                    bdy0,
+                    indata,
+                    vmec_project=vmec_project,
+                    infer_axis_if_missing=axis_infer_missing,
+                )
+
         # Run coarse -> fine stages with VMEC `interp.f` interpolation.
         stage_results: list[SolveVmecResidualResult] = []
         stage_offsets: list[int] = []
@@ -663,6 +716,7 @@ def run_fixed_boundary(
                     resume_state=restart_solver_state,
                     verbose=bool(verbose),
                     verbose_vmec2000_table=bool(verbose),
+                    jit_forces=bool(jit_forces),
                 )
             )
             state = stage_results[-1].state
