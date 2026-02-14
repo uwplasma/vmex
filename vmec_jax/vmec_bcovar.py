@@ -326,10 +326,13 @@ def vmec_bcovar_half_mesh_from_wout(
                 dtype=jnp.asarray(state.Rcos).dtype,
             )
 
-        def _eval_pair(cos, sin, mask):
+        coeff_cos_stack = jnp.stack([state_parity.Rcos, state_parity.Zcos, state_parity.Lcos], axis=0)
+        coeff_sin_stack = jnp.stack([state_parity.Rsin, state_parity.Zsin, state_parity.Lsin], axis=0)
+
+        def _eval_stack(mask):
             return vmec_realspace_synthesis(
-                coeff_cos=cos * mask,
-                coeff_sin=sin * mask,
+                coeff_cos=coeff_cos_stack * mask,
+                coeff_sin=coeff_sin_stack * mask,
                 modes=static.modes,
                 trig=trig,
                 coeffs_internal=True,
@@ -337,10 +340,10 @@ def vmec_bcovar_half_mesh_from_wout(
                 s=s,
             )
 
-        def _eval_pair_dtheta(cos, sin, mask):
+        def _eval_stack_dtheta(mask):
             return vmec_realspace_synthesis_dtheta(
-                coeff_cos=cos * mask,
-                coeff_sin=sin * mask,
+                coeff_cos=coeff_cos_stack * mask,
+                coeff_sin=coeff_sin_stack * mask,
                 modes=static.modes,
                 trig=trig,
                 coeffs_internal=True,
@@ -348,10 +351,10 @@ def vmec_bcovar_half_mesh_from_wout(
                 s=s,
             )
 
-        def _eval_pair_dzeta(cos, sin, mask):
+        def _eval_stack_dzeta(mask):
             return vmec_realspace_synthesis_dzeta_phys(
-                coeff_cos=cos * mask,
-                coeff_sin=sin * mask,
+                coeff_cos=coeff_cos_stack * mask,
+                coeff_sin=coeff_sin_stack * mask,
                 modes=static.modes,
                 trig=trig,
                 coeffs_internal=True,
@@ -367,25 +370,32 @@ def vmec_bcovar_half_mesh_from_wout(
             mask_even = jnp.asarray(static.m_is_even, dtype=dtype)
         mask_odd = (1.0 - mask_even).astype(dtype)
 
+        even = _eval_stack(mask_even)
+        odd = _eval_stack(mask_odd)
+        even_t = _eval_stack_dtheta(mask_even)
+        odd_t = _eval_stack_dtheta(mask_odd)
+        even_p = _eval_stack_dzeta(mask_even)
+        odd_p = _eval_stack_dzeta(mask_odd)
+
         parity = ParityRZL(
-            R_even=_eval_pair(state_parity.Rcos, state_parity.Rsin, mask_even),
-            R_odd=_eval_pair(state_parity.Rcos, state_parity.Rsin, mask_odd),
-            Z_even=_eval_pair(state_parity.Zcos, state_parity.Zsin, mask_even),
-            Z_odd=_eval_pair(state_parity.Zcos, state_parity.Zsin, mask_odd),
-            L_even=_eval_pair(state_parity.Lcos, state_parity.Lsin, mask_even),
-            L_odd=_eval_pair(state_parity.Lcos, state_parity.Lsin, mask_odd),
-            Rt_even=_eval_pair_dtheta(state_parity.Rcos, state_parity.Rsin, mask_even),
-            Rt_odd=_eval_pair_dtheta(state_parity.Rcos, state_parity.Rsin, mask_odd),
-            Zt_even=_eval_pair_dtheta(state_parity.Zcos, state_parity.Zsin, mask_even),
-            Zt_odd=_eval_pair_dtheta(state_parity.Zcos, state_parity.Zsin, mask_odd),
-            Lt_even=_eval_pair_dtheta(state_parity.Lcos, state_parity.Lsin, mask_even),
-            Lt_odd=_eval_pair_dtheta(state_parity.Lcos, state_parity.Lsin, mask_odd),
-            Rp_even=_eval_pair_dzeta(state_parity.Rcos, state_parity.Rsin, mask_even),
-            Rp_odd=_eval_pair_dzeta(state_parity.Rcos, state_parity.Rsin, mask_odd),
-            Zp_even=_eval_pair_dzeta(state_parity.Zcos, state_parity.Zsin, mask_even),
-            Zp_odd=_eval_pair_dzeta(state_parity.Zcos, state_parity.Zsin, mask_odd),
-            Lp_even=_eval_pair_dzeta(state_parity.Lcos, state_parity.Lsin, mask_even),
-            Lp_odd=_eval_pair_dzeta(state_parity.Lcos, state_parity.Lsin, mask_odd),
+            R_even=even[0],
+            R_odd=odd[0],
+            Z_even=even[1],
+            Z_odd=odd[1],
+            L_even=even[2],
+            L_odd=odd[2],
+            Rt_even=even_t[0],
+            Rt_odd=odd_t[0],
+            Zt_even=even_t[1],
+            Zt_odd=odd_t[1],
+            Lt_even=even_t[2],
+            Lt_odd=odd_t[2],
+            Rp_even=even_p[0],
+            Rp_odd=odd_p[0],
+            Zp_even=even_p[1],
+            Zp_odd=odd_p[1],
+            Lp_even=even_p[2],
+            Lp_odd=odd_p[2],
         )
     else:
         # Split real-space fields into even/odd-m subsets, then convert odd physical

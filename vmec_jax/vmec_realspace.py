@@ -188,25 +188,27 @@ def vmec_realspace_synthesis(
     m = jnp.asarray(m_np).astype(jnp.int32)
     n = jnp.asarray(modes.n).astype(jnp.int32)
 
-    if coeff_cos.ndim != 2 or coeff_sin.ndim != 2:
-        raise ValueError("Expected coeff arrays with shape (ns, K)")
+    if coeff_cos.ndim < 2 or coeff_sin.ndim < 2:
+        raise ValueError("Expected coeff arrays with shape (..., ns, K)")
     if coeff_cos.shape != coeff_sin.shape:
         raise ValueError("coeff_cos and coeff_sin must have the same shape")
     if coeff_cos.shape[1] != m.shape[0]:
-        raise ValueError("Mode count mismatch between coefficients and modes")
+        if coeff_cos.shape[-1] != m.shape[0]:
+            raise ValueError("Mode count mismatch between coefficients and modes")
 
     # VMEC internal scaling: coefficients are stored divided by mscale*nscale.
     if bool(coeffs_internal):
         scale = jnp.ones((m.shape[0],), dtype=coeff_cos.dtype)
     else:
         scale = _vmec_mode_scaling(m=m, n=n, trig=trig).astype(coeff_cos.dtype)
-    coeff_cos = coeff_cos * scale[None, :]
-    coeff_sin = coeff_sin * scale[None, :]
+    scale_shape = (1,) * (coeff_cos.ndim - 1) + (m.shape[0],)
+    coeff_cos = coeff_cos * scale.reshape(scale_shape)
+    coeff_sin = coeff_sin * scale.reshape(scale_shape)
 
     # Optional odd-m scaling hook (kept for experiments); VMEC does not apply
     # scalxc during geometry synthesis, so this should remain False for parity.
     if bool(apply_scalxc):
-        ns = int(coeff_cos.shape[0])
+        ns = int(coeff_cos.shape[-2])
         if s is None:
             if ns < 2:
                 s = jnp.asarray([0.0], dtype=coeff_cos.dtype)
@@ -215,13 +217,14 @@ def vmec_realspace_synthesis(
         mpol = int(np.max(m_np)) + 1
         scalxc = vmec_scalxc_from_s(s=jnp.asarray(s), mpol=mpol).astype(coeff_cos.dtype)
         scalxc_mn = scalxc[:, m]
-        coeff_cos = coeff_cos * scalxc_mn
-        coeff_sin = coeff_sin * scalxc_mn
+        scalxc_shape = (1,) * (coeff_cos.ndim - 2) + scalxc_mn.shape
+        coeff_cos = coeff_cos * scalxc_mn.reshape(scalxc_shape)
+        coeff_sin = coeff_sin * scalxc_mn.reshape(scalxc_shape)
 
     cos_phase, sin_phase = _vmec_phase_tables_cached(modes=modes, trig=trig, cache=True)
 
     # Sum over modes.
-    f = jnp.einsum("sk,kij->sij", coeff_cos, cos_phase) + jnp.einsum("sk,kij->sij", coeff_sin, sin_phase)
+    f = jnp.einsum("...k,kij->...ij", coeff_cos, cos_phase) + jnp.einsum("...k,kij->...ij", coeff_sin, sin_phase)
     return f
 
 
@@ -341,22 +344,23 @@ def vmec_realspace_synthesis_dtheta(
     m = jnp.asarray(m_np).astype(jnp.int32)
     n = jnp.asarray(modes.n).astype(jnp.int32)
 
-    if coeff_cos.ndim != 2 or coeff_sin.ndim != 2:
-        raise ValueError("Expected coeff arrays with shape (ns, K)")
+    if coeff_cos.ndim < 2 or coeff_sin.ndim < 2:
+        raise ValueError("Expected coeff arrays with shape (..., ns, K)")
     if coeff_cos.shape != coeff_sin.shape:
         raise ValueError("coeff_cos and coeff_sin must have the same shape")
-    if coeff_cos.shape[1] != m.shape[0]:
+    if coeff_cos.shape[-1] != m.shape[0]:
         raise ValueError("Mode count mismatch between coefficients and modes")
 
     if bool(coeffs_internal):
         scale = jnp.ones((m.shape[0],), dtype=coeff_cos.dtype)
     else:
         scale = _vmec_mode_scaling(m=m, n=n, trig=trig).astype(coeff_cos.dtype)
-    coeff_cos = coeff_cos * scale[None, :]
-    coeff_sin = coeff_sin * scale[None, :]
+    scale_shape = (1,) * (coeff_cos.ndim - 1) + (m.shape[0],)
+    coeff_cos = coeff_cos * scale.reshape(scale_shape)
+    coeff_sin = coeff_sin * scale.reshape(scale_shape)
 
     if bool(apply_scalxc):
-        ns = int(coeff_cos.shape[0])
+        ns = int(coeff_cos.shape[-2])
         if s is None:
             if ns < 2:
                 s = jnp.asarray([0.0], dtype=coeff_cos.dtype)
@@ -365,11 +369,14 @@ def vmec_realspace_synthesis_dtheta(
         mpol = int(np.max(m_np)) + 1
         scalxc = vmec_scalxc_from_s(s=jnp.asarray(s), mpol=mpol).astype(coeff_cos.dtype)
         scalxc_mn = scalxc[:, m]
-        coeff_cos = coeff_cos * scalxc_mn
-        coeff_sin = coeff_sin * scalxc_mn
+        scalxc_shape = (1,) * (coeff_cos.ndim - 2) + scalxc_mn.shape
+        coeff_cos = coeff_cos * scalxc_mn.reshape(scalxc_shape)
+        coeff_sin = coeff_sin * scalxc_mn.reshape(scalxc_shape)
 
     dcos_phase, dsin_phase = _vmec_phase_tables_dtheta_cached(modes=modes, trig=trig, cache=True)
-    f = jnp.einsum("sk,kij->sij", coeff_cos, dcos_phase) + jnp.einsum("sk,kij->sij", coeff_sin, dsin_phase)
+    f = jnp.einsum("...k,kij->...ij", coeff_cos, dcos_phase) + jnp.einsum(
+        "...k,kij->...ij", coeff_sin, dsin_phase
+    )
     return f
 
 
@@ -390,22 +397,23 @@ def vmec_realspace_synthesis_dzeta_phys(
     m = jnp.asarray(m_np).astype(jnp.int32)
     n = jnp.asarray(modes.n).astype(jnp.int32)
 
-    if coeff_cos.ndim != 2 or coeff_sin.ndim != 2:
-        raise ValueError("Expected coeff arrays with shape (ns, K)")
+    if coeff_cos.ndim < 2 or coeff_sin.ndim < 2:
+        raise ValueError("Expected coeff arrays with shape (..., ns, K)")
     if coeff_cos.shape != coeff_sin.shape:
         raise ValueError("coeff_cos and coeff_sin must have the same shape")
-    if coeff_cos.shape[1] != m.shape[0]:
+    if coeff_cos.shape[-1] != m.shape[0]:
         raise ValueError("Mode count mismatch between coefficients and modes")
 
     if bool(coeffs_internal):
         scale = jnp.ones((m.shape[0],), dtype=coeff_cos.dtype)
     else:
         scale = _vmec_mode_scaling(m=m, n=n, trig=trig).astype(coeff_cos.dtype)
-    coeff_cos = coeff_cos * scale[None, :]
-    coeff_sin = coeff_sin * scale[None, :]
+    scale_shape = (1,) * (coeff_cos.ndim - 1) + (m.shape[0],)
+    coeff_cos = coeff_cos * scale.reshape(scale_shape)
+    coeff_sin = coeff_sin * scale.reshape(scale_shape)
 
     if bool(apply_scalxc):
-        ns = int(coeff_cos.shape[0])
+        ns = int(coeff_cos.shape[-2])
         if s is None:
             if ns < 2:
                 s = jnp.asarray([0.0], dtype=coeff_cos.dtype)
@@ -414,11 +422,14 @@ def vmec_realspace_synthesis_dzeta_phys(
         mpol = int(np.max(m_np)) + 1
         scalxc = vmec_scalxc_from_s(s=jnp.asarray(s), mpol=mpol).astype(coeff_cos.dtype)
         scalxc_mn = scalxc[:, m]
-        coeff_cos = coeff_cos * scalxc_mn
-        coeff_sin = coeff_sin * scalxc_mn
+        scalxc_shape = (1,) * (coeff_cos.ndim - 2) + scalxc_mn.shape
+        coeff_cos = coeff_cos * scalxc_mn.reshape(scalxc_shape)
+        coeff_sin = coeff_sin * scalxc_mn.reshape(scalxc_shape)
 
     dcos_phase, dsin_phase = _vmec_phase_tables_dzeta_cached(modes=modes, trig=trig, cache=True)
-    f = jnp.einsum("sk,kij->sij", coeff_cos, dcos_phase) + jnp.einsum("sk,kij->sij", coeff_sin, dsin_phase)
+    f = jnp.einsum("...k,kij->...ij", coeff_cos, dcos_phase) + jnp.einsum(
+        "...k,kij->...ij", coeff_sin, dsin_phase
+    )
     return f
 
 

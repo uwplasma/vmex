@@ -660,10 +660,13 @@ def vmec_forces_rz_from_wout(
                 dtype=dtype,
             )
 
-        def _eval_pair(coeff_cos, coeff_sin, mask):
+        coeff_cos_stack = jnp.stack([state_geom.Rcos, state_geom.Zcos, state_geom.Lcos], axis=0)
+        coeff_sin_stack = jnp.stack([state_geom.Rsin, state_geom.Zsin, state_geom.Lsin], axis=0)
+
+        def _eval_stack(mask):
             return vmec_realspace_synthesis(
-                coeff_cos=coeff_cos * mask,
-                coeff_sin=coeff_sin * mask,
+                coeff_cos=coeff_cos_stack * mask,
+                coeff_sin=coeff_sin_stack * mask,
                 modes=static.modes,
                 trig=trig,
                 coeffs_internal=True,
@@ -671,10 +674,10 @@ def vmec_forces_rz_from_wout(
                 s=s,
             )
 
-        def _eval_pair_dtheta(coeff_cos, coeff_sin, mask):
+        def _eval_stack_dtheta(mask):
             return vmec_realspace_synthesis_dtheta(
-                coeff_cos=coeff_cos * mask,
-                coeff_sin=coeff_sin * mask,
+                coeff_cos=coeff_cos_stack * mask,
+                coeff_sin=coeff_sin_stack * mask,
                 modes=static.modes,
                 trig=trig,
                 coeffs_internal=True,
@@ -682,10 +685,10 @@ def vmec_forces_rz_from_wout(
                 s=s,
             )
 
-        def _eval_pair_dzeta(coeff_cos, coeff_sin, mask):
+        def _eval_stack_dzeta(mask):
             return vmec_realspace_synthesis_dzeta_phys(
-                coeff_cos=coeff_cos * mask,
-                coeff_sin=coeff_sin * mask,
+                coeff_cos=coeff_cos_stack * mask,
+                coeff_sin=coeff_sin_stack * mask,
                 modes=static.modes,
                 trig=trig,
                 coeffs_internal=True,
@@ -693,51 +696,50 @@ def vmec_forces_rz_from_wout(
                 s=s,
             )
 
-        def _odd_internal_vmec(*, coeff_cos, coeff_sin, eval_fn, odd_is_internal: bool):
-            phys_m1 = eval_fn(coeff_cos, coeff_sin, mask_m1)
-            phys_rest = eval_fn(coeff_cos, coeff_sin, mask_odd_rest)
+        even = _eval_stack(mask_even)
+        even_t = _eval_stack_dtheta(mask_even)
+        even_p = _eval_stack_dzeta(mask_even)
+
+        pr1_0 = even[0]
+        pz1_0 = even[1]
+        pru_0 = even_t[0]
+        pzu_0 = even_t[1]
+        prv_0 = even_p[0]
+        pzv_0 = even_p[1]
+
+        phys_m1 = _eval_stack(mask_m1)
+        phys_rest = _eval_stack(mask_odd_rest)
+        phys_m1_t = _eval_stack_dtheta(mask_m1)
+        phys_rest_t = _eval_stack_dtheta(mask_odd_rest)
+        phys_m1_p = _eval_stack_dzeta(mask_m1)
+        phys_rest_p = _eval_stack_dzeta(mask_odd_rest)
+
+        def _odd_internal_from_phys(phys_m1, phys_rest, odd_is_internal: bool):
             if odd_is_internal:
                 out = phys_m1 + phys_rest
                 if out.shape[0] >= 2:
                     out = out.at[0].set(phys_m1[1])
                 return out
-            return internal_odd_from_physical_vmec_m1(
-                odd_m1_phys=phys_m1,
-                odd_mge2_phys=phys_rest,
-                s=s,
-            )
+            return internal_odd_from_physical_vmec_m1(odd_m1_phys=phys_m1, odd_mge2_phys=phys_rest, s=s)
 
-        def _odd_internal_vmec_lambda(*, coeff_cos, coeff_sin, eval_fn, odd_is_internal: bool):
-            phys_m1 = eval_fn(coeff_cos, coeff_sin, mask_m1)
-            phys_rest = eval_fn(coeff_cos, coeff_sin, mask_odd_rest)
+        def _odd_internal_from_phys_lambda(phys_m1, phys_rest, odd_is_internal: bool):
             if odd_is_internal:
                 out = phys_m1 + phys_rest
                 if out.shape[0] >= 2:
                     out = out.at[0].set(phys_m1[1])
                 return out
-            return internal_odd_from_physical_vmec_jlam(
-                odd_m1_phys=phys_m1,
-                odd_mge2_phys=phys_rest,
-                s=s,
-            )
-
-        pr1_0 = _eval_pair(state_geom.Rcos, state_geom.Rsin, mask_even)
-        pz1_0 = _eval_pair(state_geom.Zcos, state_geom.Zsin, mask_even)
-        pru_0 = _eval_pair_dtheta(state_geom.Rcos, state_geom.Rsin, mask_even)
-        pzu_0 = _eval_pair_dtheta(state_geom.Zcos, state_geom.Zsin, mask_even)
-        prv_0 = _eval_pair_dzeta(state_geom.Rcos, state_geom.Rsin, mask_even)
-        pzv_0 = _eval_pair_dzeta(state_geom.Zcos, state_geom.Zsin, mask_even)
+            return internal_odd_from_physical_vmec_jlam(odd_m1_phys=phys_m1, odd_mge2_phys=phys_rest, s=s)
 
         odd_is_internal = True
-        pr1_1 = _odd_internal_vmec(coeff_cos=state_geom.Rcos, coeff_sin=state_geom.Rsin, eval_fn=_eval_pair, odd_is_internal=odd_is_internal)
-        pz1_1 = _odd_internal_vmec(coeff_cos=state_geom.Zcos, coeff_sin=state_geom.Zsin, eval_fn=_eval_pair, odd_is_internal=odd_is_internal)
-        pru_1 = _odd_internal_vmec(coeff_cos=state_geom.Rcos, coeff_sin=state_geom.Rsin, eval_fn=_eval_pair_dtheta, odd_is_internal=odd_is_internal)
-        pzu_1 = _odd_internal_vmec(coeff_cos=state_geom.Zcos, coeff_sin=state_geom.Zsin, eval_fn=_eval_pair_dtheta, odd_is_internal=odd_is_internal)
-        prv_1 = _odd_internal_vmec(coeff_cos=state_geom.Rcos, coeff_sin=state_geom.Rsin, eval_fn=_eval_pair_dzeta, odd_is_internal=odd_is_internal)
-        pzv_1 = _odd_internal_vmec(coeff_cos=state_geom.Zcos, coeff_sin=state_geom.Zsin, eval_fn=_eval_pair_dzeta, odd_is_internal=odd_is_internal)
+        pr1_1 = _odd_internal_from_phys(phys_m1[0], phys_rest[0], odd_is_internal)
+        pz1_1 = _odd_internal_from_phys(phys_m1[1], phys_rest[1], odd_is_internal)
+        pru_1 = _odd_internal_from_phys(phys_m1_t[0], phys_rest_t[0], odd_is_internal)
+        pzu_1 = _odd_internal_from_phys(phys_m1_t[1], phys_rest_t[1], odd_is_internal)
+        prv_1 = _odd_internal_from_phys(phys_m1_p[0], phys_rest_p[0], odd_is_internal)
+        pzv_1 = _odd_internal_from_phys(phys_m1_p[1], phys_rest_p[1], odd_is_internal)
 
-        Lu1 = _odd_internal_vmec_lambda(coeff_cos=state_geom.Lcos, coeff_sin=state_geom.Lsin, eval_fn=_eval_pair_dtheta, odd_is_internal=odd_is_internal)
-        Lv1 = _odd_internal_vmec_lambda(coeff_cos=state_geom.Lcos, coeff_sin=state_geom.Lsin, eval_fn=_eval_pair_dzeta, odd_is_internal=odd_is_internal)
+        Lu1 = _odd_internal_from_phys_lambda(phys_m1_t[2], phys_rest_t[2], odd_is_internal)
+        Lv1 = _odd_internal_from_phys_lambda(phys_m1_p[2], phys_rest_p[2], odd_is_internal)
     else:
         parity = split_rzl_even_odd_m(state, static.basis, static.modes.m)
 
