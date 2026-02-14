@@ -639,12 +639,18 @@ def vmec_forces_rz_from_wout(
     # Real-space parity fields for R/Z and angular derivatives.
     # Keep this synthesis path consistent with `bcovar` for non-axisymmetric runs
     # to avoid mixed conventions between VMEC trig tables and direct evaluation.
-    m_modes = np.asarray(static.modes.m, dtype=int)
     dtype = jnp.asarray(state.Rcos).dtype
-    mask_m1 = jnp.asarray(m_modes == 1, dtype=dtype)
-    mask_odd_rest = jnp.asarray((m_modes % 2 == 1) & (m_modes != 1), dtype=dtype)
-    mask_odd = jnp.asarray((m_modes % 2) == 1, dtype=dtype)
-    mask_even = jnp.asarray((m_modes % 2) == 0, dtype=dtype)
+    if getattr(static, "m_is_m1", None) is None:
+        m_modes = np.asarray(static.modes.m, dtype=int)
+        mask_m1 = jnp.asarray(m_modes == 1, dtype=dtype)
+        mask_odd_rest = jnp.asarray((m_modes % 2 == 1) & (m_modes != 1), dtype=dtype)
+        mask_odd = jnp.asarray((m_modes % 2) == 1, dtype=dtype)
+        mask_even = jnp.asarray((m_modes % 2) == 0, dtype=dtype)
+    else:
+        mask_m1 = jnp.asarray(static.m_is_m1, dtype=dtype)
+        mask_odd_rest = jnp.asarray(static.m_is_odd_rest, dtype=dtype)
+        mask_odd = jnp.asarray(static.m_is_odd, dtype=dtype)
+        mask_even = jnp.asarray(static.m_is_even, dtype=dtype)
 
     if use_vmec_synthesis:
         if trig is None:
