@@ -21,8 +21,22 @@ from typing import Any
 
 import numpy as np
 
+from jax import tree_util
+
 from ._compat import jnp
 from .vmec_tomnsp import TomnspsRZL, VmecTrigTables
+
+
+_WINT_CACHE: dict[tuple[int, int], jnp.ndarray] = {}
+_PWINT_CACHE: dict[tuple[int, int, int], jnp.ndarray] = {}
+
+
+def _wint_cache_key(trig: VmecTrigTables, *, nzeta: int) -> tuple[int, int]:
+    return (id(trig), int(nzeta))
+
+
+def _pwint_cache_key(trig: VmecTrigTables, *, ns: int, nzeta: int) -> tuple[int, int, int]:
+    return (id(trig), int(ns), int(nzeta))
 
 
 @dataclass(frozen=True)
@@ -34,6 +48,7 @@ class VmecForceNorms:
     r1: float  # 1/(2*r0scale)^2
 
 
+@tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class VmecForceNormsDynamic:
     """VMEC normalization constants computed directly from bcovar fields (JAX-traceable).
@@ -51,6 +66,14 @@ class VmecForceNormsDynamic:
     wb: Any
     wp: Any
     vp: Any  # (ns,)
+
+    def tree_flatten(self):
+        children = (self.fnorm, self.fnormL, self.r1, self.r2, self.volume, self.wb, self.wp, self.vp)
+        return children, None
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        return cls(*children)
 
 
 @dataclass(frozen=True)
@@ -491,8 +514,14 @@ def vmec_wint_from_trig(trig: VmecTrigTables, *, nzeta: int) -> jnp.ndarray:
     replicated across zeta. Surface-dependent masking (e.g. `pwint(:,1)=0` on
     the axis) is handled by :func:`vmec_pwint_from_trig`.
     """
+    key = _wint_cache_key(trig, nzeta=int(nzeta))
+    cached = _WINT_CACHE.get(key)
+    if cached is not None:
+        return cached
     w_theta = jnp.asarray(trig.cosmui3[:, 0]) / jnp.asarray(trig.mscale[0])
-    return w_theta[:, None] * jnp.ones((int(nzeta),), dtype=w_theta.dtype)[None, :]
+    w_ang = w_theta[:, None] * jnp.ones((int(nzeta),), dtype=w_theta.dtype)[None, :]
+    _WINT_CACHE[key] = w_ang
+    return w_ang
 
 
 def vmec_pwint_from_trig(trig: VmecTrigTables, *, ns: int, nzeta: int) -> jnp.ndarray:
@@ -505,9 +534,14 @@ def vmec_pwint_from_trig(trig: VmecTrigTables, *, ns: int, nzeta: int) -> jnp.nd
     ns = int(ns)
     if ns < 1:
         raise ValueError("ns must be >= 1")
+    key = _pwint_cache_key(trig, ns=int(ns), nzeta=int(nzeta))
+    cached = _PWINT_CACHE.get(key)
+    if cached is not None:
+        return cached
     w_ang = vmec_wint_from_trig(trig, nzeta=int(nzeta))  # (ntheta3,nzeta)
     pwint = jnp.broadcast_to(w_ang[None, :, :], (ns,) + w_ang.shape)
     pwint = pwint.at[0].set(jnp.zeros_like(w_ang))
+    _PWINT_CACHE[key] = pwint
     return pwint
 
 
