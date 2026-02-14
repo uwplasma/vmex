@@ -266,6 +266,7 @@ def run_fixed_boundary(
     multigrid_use_input_niter: bool = True,
     verbose: bool = True,
     jit_forces: bool = True,
+    use_scan: bool = False,
     grid=None,
     ns_override: int | None = None,
     restart_state: any | None = None,
@@ -717,6 +718,7 @@ def run_fixed_boundary(
                     verbose=bool(verbose),
                     verbose_vmec2000_table=bool(verbose),
                     jit_forces=bool(jit_forces),
+                    use_scan=bool(use_scan),
                 )
             )
             state = stage_results[-1].state

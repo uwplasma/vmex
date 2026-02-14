@@ -8,12 +8,25 @@ from __future__ import annotations
 
 import numpy as np
 
+from ._compat import has_jax
+
 from .fourier import HelicalBasis, build_helical_basis
 from .grids import AngleGrid
 from .modes import ModeTable
 
 _NYQ_MODE_CACHE: dict[tuple[bytes, bytes], ModeTable] = {}
 _NYQ_BASIS_CACHE: dict[tuple[bytes, bytes, bytes, bytes, int], HelicalBasis] = {}
+
+
+def _cache_allowed() -> bool:
+    if not has_jax():
+        return True
+    try:
+        from jax import core
+
+        return bool(core.trace_ctx.is_top_level())
+    except Exception:
+        return False
 
 
 def nyquist_mode_table(*, xm_nyq, xn_nyq, nfp: int) -> ModeTable:
@@ -24,11 +37,13 @@ def nyquist_mode_table(*, xm_nyq, xn_nyq, nfp: int) -> ModeTable:
     if nfp != 0:
         n = (n // nfp).astype(int, copy=False)
     key = (m.tobytes(), n.tobytes())
-    cached = _NYQ_MODE_CACHE.get(key)
-    if cached is not None:
-        return cached
+    if _cache_allowed():
+        cached = _NYQ_MODE_CACHE.get(key)
+        if cached is not None:
+            return cached
     modes = ModeTable(m=m, n=n)
-    _NYQ_MODE_CACHE[key] = modes
+    if _cache_allowed():
+        _NYQ_MODE_CACHE[key] = modes
     return modes
 
 
@@ -38,9 +53,11 @@ def nyquist_basis_from_wout(*, wout, grid: AngleGrid) -> HelicalBasis:
     theta = np.asarray(grid.theta)
     zeta = np.asarray(grid.zeta)
     key = (modes.m.tobytes(), modes.n.tobytes(), theta.tobytes(), zeta.tobytes(), int(grid.nfp))
-    cached = _NYQ_BASIS_CACHE.get(key)
-    if cached is not None:
-        return cached
+    if _cache_allowed():
+        cached = _NYQ_BASIS_CACHE.get(key)
+        if cached is not None:
+            return cached
     basis = build_helical_basis(modes, grid, cache=True)
-    _NYQ_BASIS_CACHE[key] = basis
+    if _cache_allowed():
+        _NYQ_BASIS_CACHE[key] = basis
     return basis
