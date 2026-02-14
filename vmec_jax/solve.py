@@ -4299,33 +4299,38 @@ def solve_fixed_boundary_residual_iter(
             fsql2_history.append(fsql_f)
             # VMEC printout uses r00 = r1(1,0): axis R at theta=0, zeta=0,
             # evaluated in real space after scalxc (see funct3d.f).
+            need_scalar = bool(verbose) or (bool(vmec2000_control) and bool(verbose_vmec2000_table))
             try:
-                r00_val = float(np.asarray(k.pr1_even)[0, 0, 0])
+                r00_j = jnp.asarray(k.pr1_even)[0, 0, 0]
                 if bool(cfg.lasym):
-                    z00_val = float(np.asarray(k.pz1_even)[0, 0, 0])
+                    z00_j = jnp.asarray(k.pz1_even)[0, 0, 0]
                 else:
-                    z00_val = 0.0
+                    z00_j = jnp.asarray(0.0, dtype=jnp.asarray(r00_j).dtype)
             except Exception:
                 if not np.any(m0_mask):
-                    r00_val = float("nan")
-                    z00_val = float("nan")
+                    r00_j = jnp.asarray(float("nan"))
+                    z00_j = jnp.asarray(float("nan"))
                 else:
-                    r00_val = float(np.sum(np.asarray(state.Rcos)[0, m0_mask]))
+                    r00_j = jnp.sum(jnp.asarray(state.Rcos)[0, m0_mask])
                     if bool(cfg.lasym):
-                        z00_val = float(np.sum(np.asarray(state.Zcos)[0, m0_mask]))
+                        z00_j = jnp.sum(jnp.asarray(state.Zcos)[0, m0_mask])
                     else:
-                        z00_val = 0.0
+                        z00_j = jnp.asarray(0.0, dtype=jnp.asarray(r00_j).dtype)
+            r00_val = float(np.asarray(r00_j)) if need_scalar else r00_j
+            z00_val = float(np.asarray(z00_j)) if need_scalar else z00_j
             r00_history.append(r00_val)
             z00_history.append(z00_val)
             # `norms_used` may be cached (VMEC2000 `ns4=25` behavior). VMEC's
             # printed WMHD uses the *current* wb/wp from `funct3d`, not cached
             # norm scalars. Recompute wb/wp from the current bcovar state here.
             norms_w = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
-            wb_f = float(np.asarray(norms_w.wb))
-            wp_f = float(np.asarray(norms_w.wp))
-            wb_history.append(wb_f)
-            wp_history.append(wp_f)
-            w_vmec_history.append((wb_f + wp_f / (gamma - 1.0)) * float(TWOPI * TWOPI))
+            wb_j = jnp.asarray(norms_w.wb)
+            wp_j = jnp.asarray(norms_w.wp)
+            wb_val = float(np.asarray(wb_j)) if need_scalar else wb_j
+            wp_val = float(np.asarray(wp_j)) if need_scalar else wp_j
+            wb_history.append(wb_val)
+            wp_history.append(wp_val)
+            w_vmec_history.append((wb_val + wp_val / (gamma - 1.0)) * float(TWOPI * TWOPI))
     
             if verbose and (not (bool(vmec2000_control) and bool(verbose_vmec2000_table))):
                 print(
