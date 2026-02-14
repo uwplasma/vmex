@@ -315,9 +315,23 @@ class TomnspsRZL:
         return cls(*children)
 
 
-def _select_mparity(a_even, a_odd, m: np.ndarray):
-    mask_even = jnp.asarray((m % 2) == 0, dtype=jnp.asarray(a_even).dtype)  # (mpol,)
-    return mask_even[None, :, None] * a_even + (1.0 - mask_even[None, :, None]) * a_odd
+_MPARITY_CACHE: dict[tuple[int, str], jnp.ndarray] = {}
+
+
+def _mparity_mask(mpol: int, *, dtype) -> jnp.ndarray:
+    key = (int(mpol), str(np.dtype(dtype)))
+    cached = _MPARITY_CACHE.get(key)
+    if cached is not None:
+        return cached
+    m = jnp.arange(int(mpol))
+    mask_even = jnp.asarray((m % 2) == 0, dtype=dtype)
+    _MPARITY_CACHE[key] = mask_even
+    return mask_even
+
+
+def _select_mparity(a_even, a_odd, mask_even: jnp.ndarray):
+    mask = mask_even[None, :, None]
+    return mask * a_even + (1.0 - mask) * a_odd
 
 
 def tomnsps_rzl(
@@ -513,18 +527,19 @@ def tomnsps_rzl(
     w10_o = -jnp.einsum("sik,im->smk", clmn_odd, cosmui)
 
     # Select parity per m (mparity = mod(m,2)).
-    w1 = _select_mparity(w1_e, w1_o, m)
-    w2 = _select_mparity(w2_e, w2_o, m)
-    w3 = _select_mparity(w3_e, w3_o, m)
-    w4 = _select_mparity(w4_e, w4_o, m)
-    w5 = _select_mparity(w5_e, w5_o, m)
-    w6 = _select_mparity(w6_e, w6_o, m)
-    w7 = _select_mparity(w7_e, w7_o, m)
-    w8 = _select_mparity(w8_e, w8_o, m)
-    w9 = _select_mparity(w9_e, w9_o, m)
-    w10 = _select_mparity(w10_e, w10_o, m)
-    w11 = _select_mparity(w11_e, w11_o, m)
-    w12 = _select_mparity(w12_e, w12_o, m)
+    mask_even = _mparity_mask(mpol, dtype=jnp.asarray(armn_even).dtype)
+    w1 = _select_mparity(w1_e, w1_o, mask_even)
+    w2 = _select_mparity(w2_e, w2_o, mask_even)
+    w3 = _select_mparity(w3_e, w3_o, mask_even)
+    w4 = _select_mparity(w4_e, w4_o, mask_even)
+    w5 = _select_mparity(w5_e, w5_o, mask_even)
+    w6 = _select_mparity(w6_e, w6_o, mask_even)
+    w7 = _select_mparity(w7_e, w7_o, mask_even)
+    w8 = _select_mparity(w8_e, w8_o, mask_even)
+    w9 = _select_mparity(w9_e, w9_o, mask_even)
+    w10 = _select_mparity(w10_e, w10_o, mask_even)
+    w11 = _select_mparity(w11_e, w11_o, mask_even)
+    w12 = _select_mparity(w12_e, w12_o, mask_even)
 
     lthreed = bool(ntor > 0)
 
@@ -745,18 +760,19 @@ def tomnspa_rzl(
     w12_e = -jnp.einsum("sik,im->smk", clmn_even, sinmui)
     w12_o = -jnp.einsum("sik,im->smk", clmn_odd, sinmui)
 
-    w1 = _select_mparity(w1_e, w1_o, m)
-    w2 = _select_mparity(w2_e, w2_o, m)
-    w3 = _select_mparity(w3_e, w3_o, m)
-    w4 = _select_mparity(w4_e, w4_o, m)
-    w5 = _select_mparity(w5_e, w5_o, m)
-    w6 = _select_mparity(w6_e, w6_o, m)
-    w7 = _select_mparity(w7_e, w7_o, m)
-    w8 = _select_mparity(w8_e, w8_o, m)
-    w9 = _select_mparity(w9_e, w9_o, m)
-    w10 = _select_mparity(w10_e, w10_o, m)
-    w11 = _select_mparity(w11_e, w11_o, m)
-    w12 = _select_mparity(w12_e, w12_o, m)
+    mask_even = _mparity_mask(mpol, dtype=jnp.asarray(armn_even).dtype)
+    w1 = _select_mparity(w1_e, w1_o, mask_even)
+    w2 = _select_mparity(w2_e, w2_o, mask_even)
+    w3 = _select_mparity(w3_e, w3_o, mask_even)
+    w4 = _select_mparity(w4_e, w4_o, mask_even)
+    w5 = _select_mparity(w5_e, w5_o, mask_even)
+    w6 = _select_mparity(w6_e, w6_o, mask_even)
+    w7 = _select_mparity(w7_e, w7_o, mask_even)
+    w8 = _select_mparity(w8_e, w8_o, mask_even)
+    w9 = _select_mparity(w9_e, w9_o, mask_even)
+    w10 = _select_mparity(w10_e, w10_o, mask_even)
+    w11 = _select_mparity(w11_e, w11_o, mask_even)
+    w12 = _select_mparity(w12_e, w12_o, mask_even)
 
     lthreed = bool(ntor > 0)
 
