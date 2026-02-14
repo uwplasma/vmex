@@ -329,10 +329,12 @@ def vmec_bcovar_half_mesh_from_wout(
         coeff_cos_stack = jnp.stack([state_parity.Rcos, state_parity.Zcos, state_parity.Lcos], axis=0)
         coeff_sin_stack = jnp.stack([state_parity.Rsin, state_parity.Zsin, state_parity.Lsin], axis=0)
 
-        def _eval_stack(mask):
+        def _eval_stack(mask_stack):
+            coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
+            coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
             return vmec_realspace_synthesis(
-                coeff_cos=coeff_cos_stack * mask,
-                coeff_sin=coeff_sin_stack * mask,
+                coeff_cos=coeff_cos,
+                coeff_sin=coeff_sin,
                 modes=static.modes,
                 trig=trig,
                 coeffs_internal=True,
@@ -340,10 +342,12 @@ def vmec_bcovar_half_mesh_from_wout(
                 s=s,
             )
 
-        def _eval_stack_dtheta(mask):
+        def _eval_stack_dtheta(mask_stack):
+            coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
+            coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
             return vmec_realspace_synthesis_dtheta(
-                coeff_cos=coeff_cos_stack * mask,
-                coeff_sin=coeff_sin_stack * mask,
+                coeff_cos=coeff_cos,
+                coeff_sin=coeff_sin,
                 modes=static.modes,
                 trig=trig,
                 coeffs_internal=True,
@@ -351,10 +355,12 @@ def vmec_bcovar_half_mesh_from_wout(
                 s=s,
             )
 
-        def _eval_stack_dzeta(mask):
+        def _eval_stack_dzeta(mask_stack):
+            coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
+            coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
             return vmec_realspace_synthesis_dzeta_phys(
-                coeff_cos=coeff_cos_stack * mask,
-                coeff_sin=coeff_sin_stack * mask,
+                coeff_cos=coeff_cos,
+                coeff_sin=coeff_sin,
                 modes=static.modes,
                 trig=trig,
                 coeffs_internal=True,
@@ -370,12 +376,18 @@ def vmec_bcovar_half_mesh_from_wout(
             mask_even = jnp.asarray(static.m_is_even, dtype=dtype)
         mask_odd = (1.0 - mask_even).astype(dtype)
 
-        even = _eval_stack(mask_even)
-        odd = _eval_stack(mask_odd)
-        even_t = _eval_stack_dtheta(mask_even)
-        odd_t = _eval_stack_dtheta(mask_odd)
-        even_p = _eval_stack_dzeta(mask_even)
-        odd_p = _eval_stack_dzeta(mask_odd)
+        mask_stack = jnp.stack([mask_even, mask_odd], axis=0)
+
+        even_odd = _eval_stack(mask_stack)
+        even_odd_t = _eval_stack_dtheta(mask_stack)
+        even_odd_p = _eval_stack_dzeta(mask_stack)
+
+        even = even_odd[0]
+        odd = even_odd[1]
+        even_t = even_odd_t[0]
+        odd_t = even_odd_t[1]
+        even_p = even_odd_p[0]
+        odd_p = even_odd_p[1]
 
         parity = ParityRZL(
             R_even=even[0],

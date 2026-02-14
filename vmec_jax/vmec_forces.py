@@ -663,10 +663,12 @@ def vmec_forces_rz_from_wout(
         coeff_cos_stack = jnp.stack([state_geom.Rcos, state_geom.Zcos, state_geom.Lcos], axis=0)
         coeff_sin_stack = jnp.stack([state_geom.Rsin, state_geom.Zsin, state_geom.Lsin], axis=0)
 
-        def _eval_stack(mask):
+        def _eval_stack(mask_stack):
+            coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
+            coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
             return vmec_realspace_synthesis(
-                coeff_cos=coeff_cos_stack * mask,
-                coeff_sin=coeff_sin_stack * mask,
+                coeff_cos=coeff_cos,
+                coeff_sin=coeff_sin,
                 modes=static.modes,
                 trig=trig,
                 coeffs_internal=True,
@@ -674,10 +676,12 @@ def vmec_forces_rz_from_wout(
                 s=s,
             )
 
-        def _eval_stack_dtheta(mask):
+        def _eval_stack_dtheta(mask_stack):
+            coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
+            coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
             return vmec_realspace_synthesis_dtheta(
-                coeff_cos=coeff_cos_stack * mask,
-                coeff_sin=coeff_sin_stack * mask,
+                coeff_cos=coeff_cos,
+                coeff_sin=coeff_sin,
                 modes=static.modes,
                 trig=trig,
                 coeffs_internal=True,
@@ -685,10 +689,12 @@ def vmec_forces_rz_from_wout(
                 s=s,
             )
 
-        def _eval_stack_dzeta(mask):
+        def _eval_stack_dzeta(mask_stack):
+            coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
+            coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
             return vmec_realspace_synthesis_dzeta_phys(
-                coeff_cos=coeff_cos_stack * mask,
-                coeff_sin=coeff_sin_stack * mask,
+                coeff_cos=coeff_cos,
+                coeff_sin=coeff_sin,
                 modes=static.modes,
                 trig=trig,
                 coeffs_internal=True,
@@ -696,9 +702,14 @@ def vmec_forces_rz_from_wout(
                 s=s,
             )
 
-        even = _eval_stack(mask_even)
-        even_t = _eval_stack_dtheta(mask_even)
-        even_p = _eval_stack_dzeta(mask_even)
+        mask_stack = jnp.stack([mask_even, mask_m1, mask_odd_rest], axis=0)
+        stack = _eval_stack(mask_stack)
+        stack_t = _eval_stack_dtheta(mask_stack)
+        stack_p = _eval_stack_dzeta(mask_stack)
+
+        even = stack[0]
+        even_t = stack_t[0]
+        even_p = stack_p[0]
 
         pr1_0 = even[0]
         pz1_0 = even[1]
@@ -707,12 +718,12 @@ def vmec_forces_rz_from_wout(
         prv_0 = even_p[0]
         pzv_0 = even_p[1]
 
-        phys_m1 = _eval_stack(mask_m1)
-        phys_rest = _eval_stack(mask_odd_rest)
-        phys_m1_t = _eval_stack_dtheta(mask_m1)
-        phys_rest_t = _eval_stack_dtheta(mask_odd_rest)
-        phys_m1_p = _eval_stack_dzeta(mask_m1)
-        phys_rest_p = _eval_stack_dzeta(mask_odd_rest)
+        phys_m1 = stack[1]
+        phys_rest = stack[2]
+        phys_m1_t = stack_t[1]
+        phys_rest_t = stack_t[2]
+        phys_m1_p = stack_p[1]
+        phys_rest_p = stack_p[2]
 
         def _odd_internal_from_phys(phys_m1, phys_rest, odd_is_internal: bool):
             if odd_is_internal:
