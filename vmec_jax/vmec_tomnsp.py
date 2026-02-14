@@ -72,6 +72,18 @@ class VmecTrigTables:
     sinnvn: Any
 
 
+@dataclass(frozen=True)
+class TomnspsMasks:
+    """Precomputed parity/evolution masks for tomnsps/tomnspa."""
+
+    ns: int
+    mpol: int
+    include_edge: bool
+    mask_even: Any  # (mpol,)
+    mask_rz: Any  # (ns, mpol, 1)
+    mask_l: Any  # (ns, mpol, 1)
+
+
 def vmec_theta_sizes(ntheta: int, *, lasym: bool) -> tuple[int, int, int]:
     """Reproduce VMEC `read_indata.f` theta sizes."""
     ntheta = int(ntheta)
@@ -231,6 +243,8 @@ def vmec_trig_tables(
 
 _GRID_CACHE: dict[tuple[int, int, int, bool], AngleGrid] = {}
 
+_TOMNSPS_MASK_CACHE: dict[tuple[int, int, bool, str], TomnspsMasks] = {}
+
 
 def vmec_angle_grid(*, ntheta: int, nzeta: int, nfp: int, lasym: bool, cache: bool = True) -> AngleGrid:
     """Build the VMEC internal (theta,zeta) grid implied by `read_indata.f`.
@@ -348,6 +362,55 @@ def _select_mparity(a_even, a_odd, mask_even: jnp.ndarray):
     return mask * a_even + (1.0 - mask) * a_odd
 
 
+def tomnsps_masks(
+    *,
+    ns: int,
+    mpol: int,
+    include_edge: bool,
+    dtype=jnp.float64,
+    cache: bool = True,
+) -> TomnspsMasks:
+    """Precompute parity/evolution masks for tomnsps/tomnspa."""
+    ns = int(ns)
+    mpol = int(mpol)
+    include_edge = bool(include_edge)
+    if ns < 1:
+        raise ValueError("ns must be positive")
+    if mpol < 1:
+        raise ValueError("mpol must be positive")
+    try:
+        dtype_key = str(np.dtype(dtype))
+    except Exception:
+        dtype_key = str(dtype)
+    cache_key = (ns, mpol, include_edge, dtype_key)
+    if cache and _cache_allowed():
+        cached = _TOMNSPS_MASK_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
+    mask_even = _mparity_mask(mpol, dtype=dtype)
+    js_fortran = jnp.arange(ns, dtype=jnp.int32) + 1  # 1..ns
+    m_fortran = jnp.arange(mpol, dtype=jnp.int32)  # 0..mpol-1
+    jmin2 = jnp.where(m_fortran == 0, 1, 2)[None, :]
+    jlam = jnp.full((1, mpol), 2, dtype=jnp.int32)
+    jsmax_rz = int(ns if include_edge else (ns - 1))
+    mask_rz = (js_fortran[:, None] >= jmin2) & (js_fortran[:, None] <= jsmax_rz)
+    mask_l = js_fortran[:, None] >= jlam
+    mask_rz = mask_rz.astype(jnp.asarray(mask_even).dtype)[:, :, None]
+    mask_l = mask_l.astype(jnp.asarray(mask_even).dtype)[:, :, None]
+    masks = TomnspsMasks(
+        ns=ns,
+        mpol=mpol,
+        include_edge=include_edge,
+        mask_even=mask_even,
+        mask_rz=mask_rz,
+        mask_l=mask_l,
+    )
+    if cache and _cache_allowed():
+        _TOMNSPS_MASK_CACHE[cache_key] = masks
+    return masks
+
+
 def tomnsps_rzl(
     *,
     armn_even,
@@ -376,6 +439,7 @@ def tomnsps_rzl(
     lasym: bool,
     trig: VmecTrigTables,
     include_edge: bool = False,
+    masks: TomnspsMasks | None = None,
 ) -> TomnspsRZL:
     """VMEC real-space -> Fourier-space force transform (core of `tomnsps`).
 
@@ -539,7 +603,12 @@ def tomnsps_rzl(
     w12_e, w12_o = w12[0], w12[1]
 
     # Select parity per m (mparity = mod(m,2)).
-    mask_even = _mparity_mask(mpol, dtype=jnp.asarray(armn_even).dtype)
+    mask_even = None
+    if masks is not None:
+        if (int(masks.ns) == int(ns)) and (int(masks.mpol) == int(mpol)) and (bool(masks.include_edge) == bool(include_edge)):
+            mask_even = jnp.asarray(masks.mask_even, dtype=jnp.asarray(armn_even).dtype)
+    if mask_even is None:
+        mask_even = _mparity_mask(mpol, dtype=jnp.asarray(armn_even).dtype)
     w1 = _select_mparity(w1_e, w1_o, mask_even)
     w2 = _select_mparity(w2_e, w2_o, mask_even)
     w3 = _select_mparity(w3_e, w3_o, mask_even)
@@ -583,19 +652,23 @@ def tomnsps_rzl(
     # Apply VMEC's radial evolution masks (jmin2/jlam + fixed-boundary edge).
     # For parity work we use the default vmec_params values:
     #   jmin2(m=0)=1, jmin2(m>=1)=2; jlam(m)=2.
-    js_fortran = jnp.arange(ns, dtype=jnp.int32) + 1  # 1..ns
-    m_fortran = jnp.arange(mpol, dtype=jnp.int32)  # 0..mpol-1
-    jmin2 = jnp.where(m_fortran == 0, 1, 2)[None, :]  # (1, mpol)
-    jlam = jnp.full((1, mpol), 2, dtype=jmin2.dtype)
+    if masks is not None and (int(masks.ns) == int(ns)) and (int(masks.mpol) == int(mpol)) and (bool(masks.include_edge) == bool(include_edge)):
+        mask_rz = jnp.asarray(masks.mask_rz, dtype=jnp.asarray(frcc).dtype)
+        mask_l = jnp.asarray(masks.mask_l, dtype=jnp.asarray(flsc).dtype)
+    else:
+        js_fortran = jnp.arange(ns, dtype=jnp.int32) + 1  # 1..ns
+        m_fortran = jnp.arange(mpol, dtype=jnp.int32)  # 0..mpol-1
+        jmin2 = jnp.where(m_fortran == 0, 1, 2)[None, :]  # (1, mpol)
+        jlam = jnp.full((1, mpol), 2, dtype=jmin2.dtype)
 
-    # Fixed-boundary convention: R/Z not evolved on the boundary surface (js=ns).
-    # `include_edge=True` reproduces the `jedge=1` branch in `getfsq` diagnostics.
-    jsmax_rz = int(ns if include_edge else (ns - 1))
-    mask_rz = (js_fortran[:, None] >= jmin2) & (js_fortran[:, None] <= jsmax_rz)
-    mask_l = js_fortran[:, None] >= jlam
+        # Fixed-boundary convention: R/Z not evolved on the boundary surface (js=ns).
+        # `include_edge=True` reproduces the `jedge=1` branch in `getfsq` diagnostics.
+        jsmax_rz = int(ns if include_edge else (ns - 1))
+        mask_rz = (js_fortran[:, None] >= jmin2) & (js_fortran[:, None] <= jsmax_rz)
+        mask_l = js_fortran[:, None] >= jlam
 
-    mask_rz = mask_rz.astype(jnp.asarray(frcc).dtype)[:, :, None]
-    mask_l = mask_l.astype(jnp.asarray(flsc).dtype)[:, :, None]
+        mask_rz = mask_rz.astype(jnp.asarray(frcc).dtype)[:, :, None]
+        mask_l = mask_l.astype(jnp.asarray(flsc).dtype)[:, :, None]
     frcc = frcc * mask_rz
     fzsc = fzsc * mask_rz
     if frss is not None:
@@ -636,6 +709,8 @@ def tomnspa_rzl(
     nfp: int,
     lasym: bool,
     trig: VmecTrigTables,
+    include_edge: bool = False,
+    masks: TomnspsMasks | None = None,
 ) -> TomnspsRZL:
     """VMEC `tomnspa` asymmetric force transform (real-space -> Fourier-space).
 
@@ -834,16 +909,20 @@ def tomnspa_rzl(
             flss = flss * s2
 
     # Apply radial evolution masks (same as tomnsps): fixed-boundary edge.
-    js_fortran = jnp.arange(ns, dtype=jnp.int32) + 1  # 1..ns
-    m_fortran = jnp.arange(mpol, dtype=jnp.int32)  # 0..mpol-1
-    jmin2 = jnp.where(m_fortran == 0, 1, 2)[None, :]  # (1, mpol)
-    jlam = jnp.full((1, mpol), 2, dtype=jmin2.dtype)
+    if masks is not None and (int(masks.ns) == int(ns)) and (int(masks.mpol) == int(mpol)) and (bool(masks.include_edge) == bool(include_edge)):
+        mask_rz = jnp.asarray(masks.mask_rz, dtype=jnp.asarray(frsc).dtype)
+        mask_l = jnp.asarray(masks.mask_l, dtype=jnp.asarray(flcc).dtype)
+    else:
+        js_fortran = jnp.arange(ns, dtype=jnp.int32) + 1  # 1..ns
+        m_fortran = jnp.arange(mpol, dtype=jnp.int32)  # 0..mpol-1
+        jmin2 = jnp.where(m_fortran == 0, 1, 2)[None, :]  # (1, mpol)
+        jlam = jnp.full((1, mpol), 2, dtype=jmin2.dtype)
 
-    jsmax_rz = int(ns - 1)
-    mask_rz = (js_fortran[:, None] >= jmin2) & (js_fortran[:, None] <= jsmax_rz)
-    mask_l = js_fortran[:, None] >= jlam
-    mask_rz = mask_rz.astype(jnp.asarray(frsc).dtype)[:, :, None]
-    mask_l = mask_l.astype(jnp.asarray(flcc).dtype)[:, :, None]
+        jsmax_rz = int(ns if include_edge else (ns - 1))
+        mask_rz = (js_fortran[:, None] >= jmin2) & (js_fortran[:, None] <= jsmax_rz)
+        mask_l = js_fortran[:, None] >= jlam
+        mask_rz = mask_rz.astype(jnp.asarray(frsc).dtype)[:, :, None]
+        mask_l = mask_l.astype(jnp.asarray(flcc).dtype)[:, :, None]
 
     frsc = frsc * mask_rz
     fzcc = fzcc * mask_rz

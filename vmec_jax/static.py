@@ -35,6 +35,8 @@ class VMECStatic:
     basis: HelicalBasis
     s: any  # (ns,) radial coordinate in [0,1]
     trig_vmec: any | None = None  # cached VMEC trig tables (fixaray parity)
+    tomnsps_masks: any | None = None
+    tomnsps_masks_edge: any | None = None
     # Cached mode arrays/masks for performance.
     m_np: np.ndarray | None = None
     n_np: np.ndarray | None = None
@@ -66,8 +68,10 @@ def build_static(cfg: VMECConfig, *, grid: AngleGrid | None = None) -> VMECStati
         s = jnp.asarray([0.0])
     else:
         s = jnp.linspace(0.0, 1.0, cfg.ns)
+    tomnsps_masks = None
+    tomnsps_masks_edge = None
     try:
-        from .vmec_tomnsp import vmec_trig_tables
+        from .vmec_tomnsp import vmec_trig_tables, tomnsps_masks as _tomnsps_masks
 
         trig_vmec = vmec_trig_tables(
             ntheta=int(cfg.ntheta),
@@ -79,8 +83,24 @@ def build_static(cfg: VMECConfig, *, grid: AngleGrid | None = None) -> VMECStati
             dtype=jnp.asarray(s).dtype,
             cache=True,
         )
+        tomnsps_masks = _tomnsps_masks(
+            ns=int(cfg.ns),
+            mpol=int(cfg.mpol),
+            include_edge=False,
+            dtype=jnp.asarray(s).dtype,
+            cache=True,
+        )
+        tomnsps_masks_edge = _tomnsps_masks(
+            ns=int(cfg.ns),
+            mpol=int(cfg.mpol),
+            include_edge=True,
+            dtype=jnp.asarray(s).dtype,
+            cache=True,
+        )
     except Exception:
         trig_vmec = None
+        tomnsps_masks = None
+        tomnsps_masks_edge = None
     m_np = np.asarray(modes.m, dtype=int)
     n_np = np.asarray(modes.n, dtype=int)
     m_is_even = (m_np % 2) == 0
@@ -96,6 +116,8 @@ def build_static(cfg: VMECConfig, *, grid: AngleGrid | None = None) -> VMECStati
         basis=basis,
         s=s,
         trig_vmec=trig_vmec,
+        tomnsps_masks=tomnsps_masks,
+        tomnsps_masks_edge=tomnsps_masks_edge,
         m_np=m_np,
         n_np=n_np,
         m_is_even=m_is_even,
