@@ -27,11 +27,15 @@ from typing import Any
 
 import numpy as np
 
+from jax import tree_util
+
 from ._compat import jnp
 from .vmec_realspace import vmec_realspace_synthesis, vmec_realspace_synthesis_dtheta
+from .vmec_parity import vmec_m1_internal_to_physical_signed
 from .vmec_tomnsp import VmecTrigTables
 
 
+@tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class VmecHalfMeshJacobian:
     """Half-mesh Jacobian outputs (VMEC conventions)."""
@@ -48,6 +52,14 @@ class VmecHalfMeshJacobian:
     tau: Any  # (ns, ntheta, nzeta)
     # sqrt(g) on half mesh.
     sqrtg: Any  # (ns, ntheta, nzeta)
+
+    def tree_flatten(self):
+        children = (self.r12, self.rs, self.zs, self.ru12, self.zu12, self.tau, self.sqrtg)
+        return children, None
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        return cls(*children)
 
 
 def _safe_divide(x, y, *, eps: float = 1e-14):
@@ -215,6 +227,8 @@ def vmec_half_mesh_jacobian_from_state(
     modes,
     trig: VmecTrigTables,
     s,
+    lconm1: bool = True,
+    lthreed: bool = True,
 ) -> VmecHalfMeshJacobian:
     """Compute VMEC half-mesh Jacobian directly from Fourier coefficients."""
     m = jnp.asarray(modes.m)
@@ -226,27 +240,64 @@ def vmec_half_mesh_jacobian_from_state(
     Zcos = jnp.asarray(state.Zcos)
     Zsin = jnp.asarray(state.Zsin)
 
-    Rcos_even = jnp.where(mask_even[None, :], Rcos, 0.0)
-    Rsin_even = jnp.where(mask_even[None, :], Rsin, 0.0)
-    Rcos_odd = jnp.where(mask_odd[None, :], Rcos, 0.0)
-    Rsin_odd = jnp.where(mask_odd[None, :], Rsin, 0.0)
+    # VMEC stores internal coefficients; undo the m=1 internal constraint before
+    # synthesis.
+    Rcos_int, Zsin_int, Rsin_int, Zcos_int = vmec_m1_internal_to_physical_signed(
+        Rcos=Rcos,
+        Zsin=Zsin,
+        Rsin=Rsin,
+        Zcos=Zcos,
+        modes=modes,
+        lthreed=bool(lthreed),
+        lasym=False,
+        lconm1=bool(lconm1),
+    )
+    Rcos = jnp.asarray(Rcos_int)
+    Rsin = jnp.asarray(Rsin_int)
+    Zcos = jnp.asarray(Zcos_int)
+    Zsin = jnp.asarray(Zsin_int)
 
-    Zcos_even = jnp.where(mask_even[None, :], Zcos, 0.0)
-    Zsin_even = jnp.where(mask_even[None, :], Zsin, 0.0)
-    Zcos_odd = jnp.where(mask_odd[None, :], Zcos, 0.0)
-    Zsin_odd = jnp.where(mask_odd[None, :], Zsin, 0.0)
+    mask_even_f = jnp.asarray(mask_even, dtype=Rcos.dtype)
+    mask_odd_f = jnp.asarray(mask_odd, dtype=Rcos.dtype)
 
-    pr1_even = vmec_realspace_synthesis(coeff_cos=Rcos_even, coeff_sin=Rsin_even, modes=modes, trig=trig)
-    pr1_odd = vmec_realspace_synthesis(coeff_cos=Rcos_odd, coeff_sin=Rsin_odd, modes=modes, trig=trig)
+    coeff_cos_stack = jnp.stack([Rcos, Zcos], axis=0)
+    coeff_sin_stack = jnp.stack([Rsin, Zsin], axis=0)
 
-    pz1_even = vmec_realspace_synthesis(coeff_cos=Zcos_even, coeff_sin=Zsin_even, modes=modes, trig=trig)
-    pz1_odd = vmec_realspace_synthesis(coeff_cos=Zcos_odd, coeff_sin=Zsin_odd, modes=modes, trig=trig)
+    def _eval_stack(mask):
+        return vmec_realspace_synthesis(
+            coeff_cos=coeff_cos_stack * mask,
+            coeff_sin=coeff_sin_stack * mask,
+            modes=modes,
+            trig=trig,
+            coeffs_internal=True,
+            apply_scalxc=True,
+            s=s,
+        )
 
-    pru_even = vmec_realspace_synthesis_dtheta(coeff_cos=Rcos_even, coeff_sin=Rsin_even, modes=modes, trig=trig)
-    pru_odd = vmec_realspace_synthesis_dtheta(coeff_cos=Rcos_odd, coeff_sin=Rsin_odd, modes=modes, trig=trig)
+    def _eval_stack_dtheta(mask):
+        return vmec_realspace_synthesis_dtheta(
+            coeff_cos=coeff_cos_stack * mask,
+            coeff_sin=coeff_sin_stack * mask,
+            modes=modes,
+            trig=trig,
+            coeffs_internal=True,
+            apply_scalxc=True,
+            s=s,
+        )
 
-    pzu_even = vmec_realspace_synthesis_dtheta(coeff_cos=Zcos_even, coeff_sin=Zsin_even, modes=modes, trig=trig)
-    pzu_odd = vmec_realspace_synthesis_dtheta(coeff_cos=Zcos_odd, coeff_sin=Zsin_odd, modes=modes, trig=trig)
+    even = _eval_stack(mask_even_f)
+    odd = _eval_stack(mask_odd_f)
+    even_t = _eval_stack_dtheta(mask_even_f)
+    odd_t = _eval_stack_dtheta(mask_odd_f)
+
+    pr1_even = even[0]
+    pr1_odd = odd[0]
+    pz1_even = even[1]
+    pz1_odd = odd[1]
+    pru_even = even_t[0]
+    pru_odd = odd_t[0]
+    pzu_even = even_t[1]
+    pzu_odd = odd_t[1]
 
     return jacobian_half_mesh_from_parity(
         pr1_even=pr1_even,
