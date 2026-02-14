@@ -723,6 +723,16 @@ def vmec_bcovar_half_mesh_from_wout(
     bsupu = bsupu + chip_term
 
     basis_nyq = None
+    grid_nyq = None
+
+    def _nyq_grid():
+        nonlocal grid_nyq
+        if grid_nyq is None:
+            if int(getattr(static.grid, "nfp", 0)) == int(wout.nfp):
+                grid_nyq = static.grid
+            else:
+                grid_nyq = AngleGrid(theta=static.grid.theta, zeta=static.grid.zeta, nfp=wout.nfp)
+        return grid_nyq
     if bool(use_wout_bsup):
         # Replace with wout-stored Nyquist bsup (reference parity path).
         # Nyquist `wout` field coefficients (`bsup*`, `bsub*`, `bm*`) follow the
@@ -731,8 +741,7 @@ def vmec_bcovar_half_mesh_from_wout(
         #
         # Using VMEC synthesis tables for these reference fields introduces a
         # small but systematic mismatch in the parity path for nfp>1 cases.
-        grid = AngleGrid(theta=static.grid.theta, zeta=static.grid.zeta, nfp=wout.nfp)
-        basis_nyq = nyquist_basis_from_wout(wout=wout, grid=grid)
+        basis_nyq = nyquist_basis_from_wout(wout=wout, grid=_nyq_grid())
         bsupu = jnp.asarray(eval_fourier(wout.bsupumnc, wout.bsupumns, basis_nyq))
         bsupv = jnp.asarray(eval_fourier(wout.bsupvmnc, wout.bsupvmns, basis_nyq))
 
@@ -754,16 +763,14 @@ def vmec_bcovar_half_mesh_from_wout(
     lu0_force = (lamscale * jnp.asarray(parity.Lt_even)) + phip_internal[:, None, None]
 
     if bool(use_wout_bsub_for_lambda):
-        grid = AngleGrid(theta=static.grid.theta, zeta=static.grid.zeta, nfp=wout.nfp)
-        basis_nyq = nyquist_basis_from_wout(wout=wout, grid=grid)
+        basis_nyq = nyquist_basis_from_wout(wout=wout, grid=_nyq_grid())
         bsubu_lambda = jnp.asarray(eval_fourier(wout.bsubumnc, wout.bsubumns, basis_nyq))
         bsubv_lambda = jnp.asarray(eval_fourier(wout.bsubvmnc, wout.bsubvmns, basis_nyq))
 
     b2 = bsupu * bsubu + bsupv * bsubv
     if bool(use_wout_bmag_for_bsq):
         if basis_nyq is None:
-            grid = AngleGrid(theta=static.grid.theta, zeta=static.grid.zeta, nfp=wout.nfp)
-            basis_nyq = nyquist_basis_from_wout(wout=wout, grid=grid)
+            basis_nyq = nyquist_basis_from_wout(wout=wout, grid=_nyq_grid())
         bmag_ref = jnp.asarray(eval_fourier(wout.bmnc, wout.bmns, basis_nyq))
         b2 = bmag_ref * bmag_ref
     pres_h = jnp.asarray(wout.pres if pres is None else pres)[:, None, None]
