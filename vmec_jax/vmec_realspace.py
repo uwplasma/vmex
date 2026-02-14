@@ -197,13 +197,11 @@ def vmec_realspace_synthesis(
             raise ValueError("Mode count mismatch between coefficients and modes")
 
     # VMEC internal scaling: coefficients are stored divided by mscale*nscale.
-    if bool(coeffs_internal):
-        scale = jnp.ones((m.shape[0],), dtype=coeff_cos.dtype)
-    else:
+    if not bool(coeffs_internal):
         scale = _vmec_mode_scaling(m=m, n=n, trig=trig).astype(coeff_cos.dtype)
-    scale_shape = (1,) * (coeff_cos.ndim - 1) + (m.shape[0],)
-    coeff_cos = coeff_cos * scale.reshape(scale_shape)
-    coeff_sin = coeff_sin * scale.reshape(scale_shape)
+        scale_shape = (1,) * (coeff_cos.ndim - 1) + (m.shape[0],)
+        coeff_cos = coeff_cos * scale.reshape(scale_shape)
+        coeff_sin = coeff_sin * scale.reshape(scale_shape)
 
     # Optional odd-m scaling hook (kept for experiments); VMEC does not apply
     # scalxc during geometry synthesis, so this should remain False for parity.
@@ -351,13 +349,11 @@ def vmec_realspace_synthesis_dtheta(
     if coeff_cos.shape[-1] != m.shape[0]:
         raise ValueError("Mode count mismatch between coefficients and modes")
 
-    if bool(coeffs_internal):
-        scale = jnp.ones((m.shape[0],), dtype=coeff_cos.dtype)
-    else:
+    if not bool(coeffs_internal):
         scale = _vmec_mode_scaling(m=m, n=n, trig=trig).astype(coeff_cos.dtype)
-    scale_shape = (1,) * (coeff_cos.ndim - 1) + (m.shape[0],)
-    coeff_cos = coeff_cos * scale.reshape(scale_shape)
-    coeff_sin = coeff_sin * scale.reshape(scale_shape)
+        scale_shape = (1,) * (coeff_cos.ndim - 1) + (m.shape[0],)
+        coeff_cos = coeff_cos * scale.reshape(scale_shape)
+        coeff_sin = coeff_sin * scale.reshape(scale_shape)
 
     if bool(apply_scalxc):
         ns = int(coeff_cos.shape[-2])
@@ -404,13 +400,11 @@ def vmec_realspace_synthesis_dzeta_phys(
     if coeff_cos.shape[-1] != m.shape[0]:
         raise ValueError("Mode count mismatch between coefficients and modes")
 
-    if bool(coeffs_internal):
-        scale = jnp.ones((m.shape[0],), dtype=coeff_cos.dtype)
-    else:
+    if not bool(coeffs_internal):
         scale = _vmec_mode_scaling(m=m, n=n, trig=trig).astype(coeff_cos.dtype)
-    scale_shape = (1,) * (coeff_cos.ndim - 1) + (m.shape[0],)
-    coeff_cos = coeff_cos * scale.reshape(scale_shape)
-    coeff_sin = coeff_sin * scale.reshape(scale_shape)
+        scale_shape = (1,) * (coeff_cos.ndim - 1) + (m.shape[0],)
+        coeff_cos = coeff_cos * scale.reshape(scale_shape)
+        coeff_sin = coeff_sin * scale.reshape(scale_shape)
 
     if bool(apply_scalxc):
         ns = int(coeff_cos.shape[-2])
