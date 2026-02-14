@@ -3489,7 +3489,7 @@ def solve_fixed_boundary_residual_iter(
 
         cached = _COMPUTE_FORCES_CACHE.get(compute_cache_key)
         if cached is None:
-            cached = jit(_compute_forces_nodump)
+            cached = jit(_compute_forces_nodump, static_argnames=("include_edge",))
             _COMPUTE_FORCES_CACHE[compute_cache_key] = cached
         _compute_forces = cached
 
@@ -4241,10 +4241,9 @@ def solve_fixed_boundary_residual_iter(
                 rz_scale_override = cache_rz_scale
                 l_scale_override = cache_l_scale
     
-            include_edge_j = jnp.asarray(include_edge, dtype=jnp.bool_)
             k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale, norms_used = _compute_forces(
                 state,
-                include_edge=include_edge_j,
+                include_edge=bool(include_edge),
                 zero_m1=zero_m1,
                 constraint_precond_diag=constraint_precond_diag,
                 constraint_tcon=constraint_tcon_override,
