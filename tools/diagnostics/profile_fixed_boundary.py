@@ -19,9 +19,11 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--iters", type=int, default=3, help="Number of iterations to run")
     p.add_argument("--outdir", type=str, default="tmp/jax_profile", help="Profiler trace output directory")
     p.add_argument("--no-warmup", action="store_true", help="Disable warmup run")
+    p.add_argument("--simple-profile", action="store_true", help="Use a timing-only profiler (no TensorBoard trace)")
     p.add_argument("--jit-forces", action="store_true", help="Enable jit_forces (default)")
     p.add_argument("--no-jit-forces", action="store_true", help="Disable jit_forces")
     p.add_argument("--use-input-niter", action="store_true", help="Use NITER from input for staging")
+    p.add_argument("--use-scan", action="store_true", help="Run the lax.scan iteration path")
     return p.parse_args()
 
 
@@ -49,6 +51,7 @@ def main() -> int:
             multigrid_use_input_niter=bool(args.use_input_niter),
             verbose=False,
             jit_forces=bool(jit_forces),
+            use_scan=bool(args.use_scan),
         )
         try:
             res = warm.result
@@ -57,11 +60,35 @@ def main() -> int:
         except Exception:
             pass
 
-    try:
-        jax.profiler.start_trace(str(outdir))
-    except Exception as exc:
-        print(f"[profile_fixed_boundary] profiler start failed: {exc}")
-        return 1
+    use_simple = bool(args.simple_profile)
+    if not use_simple:
+        try:
+            jax.profiler.start_trace(str(outdir))
+        except Exception as exc:
+            print(f"[profile_fixed_boundary] profiler start failed: {exc}")
+            print("[profile_fixed_boundary] falling back to timing-only profile (no trace).")
+            use_simple = True
+
+    if use_simple:
+        import time
+
+        t0 = time.perf_counter()
+        run = vj.run_fixed_boundary(
+            args.input,
+            solver="vmec2000_iter",
+            max_iter=int(args.iters),
+            multigrid_use_input_niter=bool(args.use_input_niter),
+            verbose=False,
+            jit_forces=bool(jit_forces),
+            use_scan=bool(args.use_scan),
+        )
+        res = run.result
+        if res is not None and hasattr(res, "fsqr2_history"):
+            _ = float(np.asarray(res.fsqr2_history)[-1])
+        t1 = time.perf_counter()
+        print(f"[profile_fixed_boundary] total wall time: {t1 - t0:.3f}s")
+        return 0
+
     run = vj.run_fixed_boundary(
         args.input,
         solver="vmec2000_iter",
@@ -69,6 +96,7 @@ def main() -> int:
         multigrid_use_input_niter=bool(args.use_input_niter),
         verbose=False,
         jit_forces=bool(jit_forces),
+        use_scan=bool(args.use_scan),
     )
     try:
         res = run.result
