@@ -263,10 +263,12 @@ def vmec_half_mesh_jacobian_from_state(
     coeff_cos_stack = jnp.stack([Rcos, Zcos], axis=0)
     coeff_sin_stack = jnp.stack([Rsin, Zsin], axis=0)
 
-    def _eval_stack(mask):
+    def _eval_stack(mask_stack):
+        coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
+        coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
         return vmec_realspace_synthesis(
-            coeff_cos=coeff_cos_stack * mask,
-            coeff_sin=coeff_sin_stack * mask,
+            coeff_cos=coeff_cos,
+            coeff_sin=coeff_sin,
             modes=modes,
             trig=trig,
             coeffs_internal=True,
@@ -274,10 +276,12 @@ def vmec_half_mesh_jacobian_from_state(
             s=s,
         )
 
-    def _eval_stack_dtheta(mask):
+    def _eval_stack_dtheta(mask_stack):
+        coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
+        coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
         return vmec_realspace_synthesis_dtheta(
-            coeff_cos=coeff_cos_stack * mask,
-            coeff_sin=coeff_sin_stack * mask,
+            coeff_cos=coeff_cos,
+            coeff_sin=coeff_sin,
             modes=modes,
             trig=trig,
             coeffs_internal=True,
@@ -285,10 +289,14 @@ def vmec_half_mesh_jacobian_from_state(
             s=s,
         )
 
-    even = _eval_stack(mask_even_f)
-    odd = _eval_stack(mask_odd_f)
-    even_t = _eval_stack_dtheta(mask_even_f)
-    odd_t = _eval_stack_dtheta(mask_odd_f)
+    mask_stack = jnp.stack([mask_even_f, mask_odd_f], axis=0)
+    stack = _eval_stack(mask_stack)
+    stack_t = _eval_stack_dtheta(mask_stack)
+
+    even = stack[0]
+    odd = stack[1]
+    even_t = stack_t[0]
+    odd_t = stack_t[1]
 
     pr1_even = even[0]
     pr1_odd = odd[0]
