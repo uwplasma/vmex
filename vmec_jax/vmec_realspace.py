@@ -22,6 +22,9 @@ from .vmec_parity import vmec_m1_internal_to_physical_signed
 _PHASE_CACHE: dict[tuple[int, int], tuple[Any, Any]] = {}
 _PHASE_DTHETA_CACHE: dict[tuple[int, int], tuple[Any, Any]] = {}
 _PHASE_DZETA_CACHE: dict[tuple[int, int], tuple[Any, Any]] = {}
+_PHASE_STACK_CACHE: dict[tuple[int, int], Any] = {}
+_PHASE_DTHETA_STACK_CACHE: dict[tuple[int, int], Any] = {}
+_PHASE_DZETA_STACK_CACHE: dict[tuple[int, int], Any] = {}
 
 
 def _phase_cache_key(modes: ModeTable, trig: VmecTrigTables) -> tuple[int, int]:
@@ -82,6 +85,19 @@ def _vmec_phase_tables_cached(*, modes: ModeTable, trig: VmecTrigTables, cache: 
     return cos_phase, sin_phase
 
 
+def _vmec_phase_tables_stacked_cached(*, modes: ModeTable, trig: VmecTrigTables, cache: bool = True):
+    if cache and _cache_allowed():
+        key = _phase_cache_key(modes, trig)
+        cached = _PHASE_STACK_CACHE.get(key)
+        if cached is not None:
+            return cached
+    cos_phase, sin_phase = _vmec_phase_tables_cached(modes=modes, trig=trig, cache=cache)
+    phase = jnp.concatenate([cos_phase, sin_phase], axis=0)
+    if cache and _cache_allowed():
+        _PHASE_STACK_CACHE[key] = phase
+    return phase
+
+
 def _vmec_phase_tables_dtheta(*, m: Any, n: Any, trig: VmecTrigTables):
     m = jnp.asarray(m).astype(jnp.int32)
     n = jnp.asarray(n).astype(jnp.int32)
@@ -119,6 +135,19 @@ def _vmec_phase_tables_dtheta_cached(*, modes: ModeTable, trig: VmecTrigTables, 
     return dcos_phase, dsin_phase
 
 
+def _vmec_phase_tables_dtheta_stacked_cached(*, modes: ModeTable, trig: VmecTrigTables, cache: bool = True):
+    if cache and _cache_allowed():
+        key = _phase_cache_key(modes, trig)
+        cached = _PHASE_DTHETA_STACK_CACHE.get(key)
+        if cached is not None:
+            return cached
+    dcos_phase, dsin_phase = _vmec_phase_tables_dtheta_cached(modes=modes, trig=trig, cache=cache)
+    phase = jnp.concatenate([dcos_phase, dsin_phase], axis=0)
+    if cache and _cache_allowed():
+        _PHASE_DTHETA_STACK_CACHE[key] = phase
+    return phase
+
+
 def _vmec_phase_tables_dzeta(*, m: Any, n: Any, trig: VmecTrigTables):
     m = jnp.asarray(m).astype(jnp.int32)
     n = jnp.asarray(n).astype(jnp.int32)
@@ -152,6 +181,19 @@ def _vmec_phase_tables_dzeta_cached(*, modes: ModeTable, trig: VmecTrigTables, c
     return dcos_phase, dsin_phase
 
 
+def _vmec_phase_tables_dzeta_stacked_cached(*, modes: ModeTable, trig: VmecTrigTables, cache: bool = True):
+    if cache and _cache_allowed():
+        key = _phase_cache_key(modes, trig)
+        cached = _PHASE_DZETA_STACK_CACHE.get(key)
+        if cached is not None:
+            return cached
+    dcos_phase, dsin_phase = _vmec_phase_tables_dzeta_cached(modes=modes, trig=trig, cache=cache)
+    phase = jnp.concatenate([dcos_phase, dsin_phase], axis=0)
+    if cache and _cache_allowed():
+        _PHASE_DZETA_STACK_CACHE[key] = phase
+    return phase
+
+
 def vmec_realspace_synthesis(
     *,
     coeff_cos: Any,
@@ -161,6 +203,7 @@ def vmec_realspace_synthesis(
     coeffs_internal: bool = False,
     apply_scalxc: bool = False,
     s: Any | None = None,
+    use_stacked_dot: bool = True,
 ) -> Any:
     """Synthesize a real-space field on the VMEC internal grid.
 
@@ -220,10 +263,15 @@ def vmec_realspace_synthesis(
         coeff_cos = coeff_cos * scalxc_mn.reshape(scalxc_shape)
         coeff_sin = coeff_sin * scalxc_mn.reshape(scalxc_shape)
 
-    cos_phase, sin_phase = _vmec_phase_tables_cached(modes=modes, trig=trig, cache=True)
-
-    # Sum over modes.
-    f = jnp.einsum("...k,kij->...ij", coeff_cos, cos_phase) + jnp.einsum("...k,kij->...ij", coeff_sin, sin_phase)
+    if bool(use_stacked_dot):
+        phase = _vmec_phase_tables_stacked_cached(modes=modes, trig=trig, cache=True)
+        coeff = jnp.concatenate([coeff_cos, coeff_sin], axis=-1)
+        f = jnp.einsum("...k,kij->...ij", coeff, phase)
+    else:
+        cos_phase, sin_phase = _vmec_phase_tables_cached(modes=modes, trig=trig, cache=True)
+        f = jnp.einsum("...k,kij->...ij", coeff_cos, cos_phase) + jnp.einsum(
+            "...k,kij->...ij", coeff_sin, sin_phase
+        )
     return f
 
 
@@ -335,6 +383,7 @@ def vmec_realspace_synthesis_dtheta(
     coeffs_internal: bool = False,
     apply_scalxc: bool = False,
     s: Any | None = None,
+    use_stacked_dot: bool = True,
 ) -> Any:
     """Theta derivative of the VMEC real-space synthesis."""
     coeff_cos = jnp.asarray(coeff_cos)
@@ -370,10 +419,15 @@ def vmec_realspace_synthesis_dtheta(
         coeff_cos = coeff_cos * scalxc_mn.reshape(scalxc_shape)
         coeff_sin = coeff_sin * scalxc_mn.reshape(scalxc_shape)
 
-    dcos_phase, dsin_phase = _vmec_phase_tables_dtheta_cached(modes=modes, trig=trig, cache=True)
-    f = jnp.einsum("...k,kij->...ij", coeff_cos, dcos_phase) + jnp.einsum(
-        "...k,kij->...ij", coeff_sin, dsin_phase
-    )
+    if bool(use_stacked_dot):
+        phase = _vmec_phase_tables_dtheta_stacked_cached(modes=modes, trig=trig, cache=True)
+        coeff = jnp.concatenate([coeff_cos, coeff_sin], axis=-1)
+        f = jnp.einsum("...k,kij->...ij", coeff, phase)
+    else:
+        dcos_phase, dsin_phase = _vmec_phase_tables_dtheta_cached(modes=modes, trig=trig, cache=True)
+        f = jnp.einsum("...k,kij->...ij", coeff_cos, dcos_phase) + jnp.einsum(
+            "...k,kij->...ij", coeff_sin, dsin_phase
+        )
     return f
 
 
@@ -386,6 +440,7 @@ def vmec_realspace_synthesis_dzeta_phys(
     coeffs_internal: bool = False,
     apply_scalxc: bool = False,
     s: Any | None = None,
+    use_stacked_dot: bool = True,
 ) -> Any:
     """Zeta(physical) derivative of the VMEC real-space synthesis."""
     coeff_cos = jnp.asarray(coeff_cos)
@@ -421,10 +476,15 @@ def vmec_realspace_synthesis_dzeta_phys(
         coeff_cos = coeff_cos * scalxc_mn.reshape(scalxc_shape)
         coeff_sin = coeff_sin * scalxc_mn.reshape(scalxc_shape)
 
-    dcos_phase, dsin_phase = _vmec_phase_tables_dzeta_cached(modes=modes, trig=trig, cache=True)
-    f = jnp.einsum("...k,kij->...ij", coeff_cos, dcos_phase) + jnp.einsum(
-        "...k,kij->...ij", coeff_sin, dsin_phase
-    )
+    if bool(use_stacked_dot):
+        phase = _vmec_phase_tables_dzeta_stacked_cached(modes=modes, trig=trig, cache=True)
+        coeff = jnp.concatenate([coeff_cos, coeff_sin], axis=-1)
+        f = jnp.einsum("...k,kij->...ij", coeff, phase)
+    else:
+        dcos_phase, dsin_phase = _vmec_phase_tables_dzeta_cached(modes=modes, trig=trig, cache=True)
+        f = jnp.einsum("...k,kij->...ij", coeff_cos, dcos_phase) + jnp.einsum(
+            "...k,kij->...ij", coeff_sin, dsin_phase
+        )
     return f
 
 
