@@ -247,7 +247,7 @@ def main() -> None:
         default="vmec2000_iter",
         choices=["vmec2000_iter", "vmec_gn", "gd", "lbfgs"],
     )
-    p.add_argument("--max-iter", type=int, default=10)
+    p.add_argument("--max-iter", type=int, default=50)
     p.add_argument(
         "--single-ns",
         type=int,

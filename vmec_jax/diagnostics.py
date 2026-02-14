@@ -207,7 +207,13 @@ def _signed_to_mn_sin(coeffs: Any, *, modes, mpol: int, ntor: int) -> tuple[np.n
     return zsc, zcs
 
 
-def vmec_internal_mn_from_state(state: Any, static: Any, *, apply_basis_norm: bool = True) -> dict[str, np.ndarray]:
+def vmec_internal_mn_from_state(
+    state: Any,
+    static: Any,
+    *,
+    apply_basis_norm: bool = True,
+    apply_m1_constraint: bool = False,
+) -> dict[str, np.ndarray]:
     """Return VMEC (m,n>=0) coefficient blocks from a signed-coefficient state.
 
     The returned arrays are in VMEC's internal basis (mscale/nscale removed)
@@ -227,7 +233,7 @@ def vmec_internal_mn_from_state(state: Any, static: Any, *, apply_basis_norm: bo
     # VMEC stores m=1 (rss,zcs) in an internal constrained basis when lconm1:
     #   rss_int = 0.5*(rss_phys + zcs_phys)
     #   zcs_int = 0.5*(rss_phys - zcs_phys)
-    if bool(getattr(cfg, "lthreed", True)) and bool(getattr(cfg, "lconm1", True)) and mpol > 1:
+    if apply_m1_constraint and bool(getattr(cfg, "lthreed", True)) and bool(getattr(cfg, "lconm1", True)) and mpol > 1:
         rss_m1 = rss[:, 1, :].copy()
         zcs_m1 = zcs[:, 1, :].copy()
         rss[:, 1, :] = 0.5 * (rss_m1 + zcs_m1)

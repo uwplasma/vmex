@@ -367,3 +367,58 @@ def vmec_m1_internal_to_physical_signed(
         Zcos_out = _mn_cos_to_signed(zcc, zss, idx_pos, idx_neg, ncoeff=ncoeff)
 
     return Rcos_out, Zsin_out, Rsin_out, Zcos_out
+
+
+def vmec_m1_physical_to_internal_signed(
+    *,
+    Rcos,
+    Zsin,
+    Rsin,
+    Zcos,
+    modes,
+    lthreed: bool,
+    lasym: bool,
+    lconm1: bool,
+):
+    """Apply VMEC's m=1 internal constraint in signed coefficient storage.
+
+    This is the inverse of :func:`vmec_m1_internal_to_physical_signed`, mapping
+    physical (output) rss/zcs (and rsc/zcc) pairs back to the constrained
+    internal representation:
+
+        rss_int = 0.5 * (rss_phys + zcs_phys)
+        zcs_int = 0.5 * (rss_phys - zcs_phys)
+    """
+    if not bool(lconm1) or (not bool(lthreed) and not bool(lasym)):
+        return Rcos, Zsin, Rsin, Zcos
+    mpol, _ntor, idx_pos, idx_neg = _mn_index_maps(modes)
+    if mpol <= 1:
+        return Rcos, Zsin, Rsin, Zcos
+    ncoeff = int(jnp.asarray(Rcos).shape[1])
+
+    Rcos_out = Rcos
+    Zsin_out = Zsin
+    Rsin_out = Rsin
+    Zcos_out = Zcos
+
+    if bool(lthreed):
+        rcc, rss = _signed_to_mn_cos(Rcos, idx_pos, idx_neg)
+        zsc, zcs = _signed_to_mn_sin(Zsin, idx_pos, idx_neg)
+        rss_m1 = rss[:, 1, :]
+        zcs_m1 = zcs[:, 1, :]
+        rss = rss.at[:, 1, :].set(0.5 * (rss_m1 + zcs_m1))
+        zcs = zcs.at[:, 1, :].set(0.5 * (rss_m1 - zcs_m1))
+        Rcos_out = _mn_cos_to_signed(rcc, rss, idx_pos, idx_neg, ncoeff=ncoeff)
+        Zsin_out = _mn_sin_to_signed(zsc, zcs, idx_pos, idx_neg, ncoeff=ncoeff)
+
+    if bool(lasym):
+        rsc, rcs = _signed_to_mn_sin(Rsin, idx_pos, idx_neg)
+        zcc, zss = _signed_to_mn_cos(Zcos, idx_pos, idx_neg)
+        rsc_m1 = rsc[:, 1, :]
+        zcc_m1 = zcc[:, 1, :]
+        rsc = rsc.at[:, 1, :].set(0.5 * (rsc_m1 + zcc_m1))
+        zcc = zcc.at[:, 1, :].set(0.5 * (rsc_m1 - zcc_m1))
+        Rsin_out = _mn_sin_to_signed(rsc, rcs, idx_pos, idx_neg, ncoeff=ncoeff)
+        Zcos_out = _mn_cos_to_signed(zcc, zss, idx_pos, idx_neg, ncoeff=ncoeff)
+
+    return Rcos_out, Zsin_out, Rsin_out, Zcos_out

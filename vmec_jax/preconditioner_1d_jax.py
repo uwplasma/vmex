@@ -73,6 +73,8 @@ def lambda_preconditioner(
     s,
     cfg,
     damping_factor: float = 2.0,
+    return_faclam: bool = False,
+    return_debug: bool = False,
 ) -> Any:
     """Compute the VMEC lambda preconditioner (n>=0 storage) in JAX.
 
@@ -91,7 +93,7 @@ def lambda_preconditioner(
     damping_factor:
         Damping used in the diagonal lambda preconditioner.
     """
-    del trig
+    r0scale = float(getattr(trig, "r0scale", 1.0)) if trig is not None else 1.0
     s = jnp.asarray(s)
     dtype = s.dtype
 
@@ -104,44 +106,59 @@ def lambda_preconditioner(
     mpol = int(cfg.mpol)
     nrange = int(cfg.ntor) + 1
     if ns_full < 2:
-        return jnp.zeros((ns_full, mpol, nrange), dtype=dtype)
+        out = jnp.zeros((ns_full, mpol, nrange), dtype=dtype)
+        if return_debug:
+            debug = {
+                "blam_pre": jnp.zeros((ns_full,), dtype=dtype),
+                "clam_pre": jnp.zeros((ns_full,), dtype=dtype),
+                "dlam_pre": jnp.zeros((ns_full,), dtype=dtype),
+                "blam_post": jnp.zeros((ns_full,), dtype=dtype),
+                "clam_post": jnp.zeros((ns_full,), dtype=dtype),
+                "dlam_post": jnp.zeros((ns_full,), dtype=dtype),
+            }
+            if return_faclam:
+                return out, jnp.zeros_like(out), debug
+            return out, debug
+        return (out, jnp.zeros_like(out)) if return_faclam else out
 
-    guu_h = guu[1:]
-    guv_h = guv[1:]
-    gvv_h = gvv[1:]
-    gsqrt_h = gsqrt[1:]
     w_int = _wint_from_config(cfg=cfg, dtype=dtype)
 
     w3 = w_int[None, :, None]
-    gsqrt_safe = jnp.where(gsqrt_h != 0.0, gsqrt_h, 1.0)
-    b_h = jnp.sum(guu_h / gsqrt_safe * w3, axis=(1, 2))
-    c_h = jnp.sum(gvv_h / gsqrt_safe * w3, axis=(1, 2))
+    gsqrt_safe = jnp.where(gsqrt != 0.0, gsqrt, 1.0)
+    b_pre = jnp.sum(guu / gsqrt_safe * w3, axis=(1, 2))
+    c_pre = jnp.sum(gvv / gsqrt_safe * w3, axis=(1, 2))
     if bool(cfg.lthreed):
-        d_h = jnp.sum(guv_h / gsqrt_safe * w3, axis=(1, 2))
+        d_pre = jnp.sum(guv / gsqrt_safe * w3, axis=(1, 2))
     else:
-        d_h = jnp.zeros_like(b_h)
+        d_pre = jnp.zeros_like(b_pre)
 
-    # Shift by +1 (half-grid contributions live between full-grid points).
-    b_lambda = jnp.zeros((ns_full + 1,), dtype=dtype).at[1:ns_full].set(b_h)
-    c_lambda = jnp.zeros((ns_full + 1,), dtype=dtype).at[1:ns_full].set(c_h)
-    d_lambda = jnp.zeros((ns_full + 1,), dtype=dtype).at[1:ns_full].set(d_h)
-
-    # Constant extrapolation toward axis.
-    b_lambda = b_lambda.at[0].set(b_lambda[1])
-    c_lambda = c_lambda.at[0].set(c_lambda[1])
-    d_lambda = d_lambda.at[0].set(d_lambda[1])
-
-    # Average onto the forces full-grid (jf=1..ns_full-1); leave boundary unset.
-    b_full = jnp.zeros((ns_full,), dtype=dtype)
-    c_full = jnp.zeros((ns_full,), dtype=dtype)
-    d_full = jnp.zeros((ns_full,), dtype=dtype)
     if ns_full >= 2:
-        b_full = b_full.at[1:].set(0.5 * (b_lambda[2 : ns_full + 1] + b_lambda[1:ns_full]))
-        c_full = c_full.at[1:].set(0.5 * (c_lambda[2 : ns_full + 1] + c_lambda[1:ns_full]))
-        d_full = d_full.at[1:].set(0.5 * (d_lambda[2 : ns_full + 1] + d_lambda[1:ns_full]))
+        b_pre = b_pre.at[0].set(b_pre[1])
+        c_pre = c_pre.at[0].set(c_pre[1])
+        d_pre = d_pre.at[0].set(d_pre[1])
+
+    b_post = b_pre
+    c_post = c_pre
+    d_post = d_pre
+    if ns_full >= 2:
+        b_next = jnp.concatenate([b_pre[2:], jnp.zeros((1,), dtype=dtype)])
+        c_next = jnp.concatenate([c_pre[2:], jnp.zeros((1,), dtype=dtype)])
+        d_next = jnp.concatenate([d_pre[2:], jnp.zeros((1,), dtype=dtype)])
+        b_post = b_post.at[1:].set(0.5 * (b_pre[1:] + b_next))
+        c_post = c_post.at[1:].set(0.5 * (c_pre[1:] + c_next))
+        d_post = d_post.at[1:].set(0.5 * (d_pre[1:] + d_next))
+
+    blam_pre = b_pre
+    clam_pre = c_pre
+    dlam_pre = d_pre
+    blam_post = b_post
+    clam_post = c_post
+    dlam_post = d_post
 
     lamscale = jnp.asarray(bc.lamscale, dtype=dtype)
-    p_factor = jnp.asarray(float(damping_factor), dtype=dtype) / (4.0 * lamscale * lamscale)
+    p_factor = jnp.asarray(float(damping_factor), dtype=dtype) / (
+        4.0 * (float(r0scale) ** 2) * lamscale * lamscale
+    )
 
     sqrt_sf, _sqrt_sh = _sqrt_profiles_from_ns(ns_full, dtype=dtype)
     sqrt_sf = sqrt_sf.at[-1].set(1.0)
@@ -154,16 +171,41 @@ def lambda_preconditioner(
     tmn = 2.0 * m[:, None] * n[None, :] * nfp
     pwr = jnp.minimum(tmm / (16.0 * 16.0), 8.0)
 
-    bF = b_full[:, None, None]
-    cF = c_full[:, None, None]
-    dF = d_full[:, None, None]
-    faclam = (tnn[None, None, :] * bF) + (tmn[None, :, :] * jnp.copysign(dF, bF)) + (tmm[None, :, None] * cF)
-    faclam = jnp.where(faclam == 0.0, -1.0e-10, faclam)
+    bF = b_post[:, None, None]
+    cF = c_post[:, None, None]
+    dF = d_post[:, None, None]
+    faclam_raw = (tnn[None, None, :] * bF) + (tmn[None, :, :] * jnp.copysign(dF, bF)) + (tmm[None, :, None] * cF)
+    faclam_raw = jnp.where(faclam_raw == 0.0, -1.0e-10, faclam_raw)
 
     sqrt_pow = (sqrt_sf[:, None, None]) ** (pwr[None, :, None])
-    lam_prec = p_factor * sqrt_pow / faclam
-    lam_prec = lam_prec.at[:, 0, 0].set(0.0)
-    lam_prec = lam_prec.at[0].set(jnp.zeros((mpol, nrange), dtype=dtype))
+    lam_prec = p_factor * sqrt_pow / faclam_raw
+
+    # VMEC special-case m=n=0 preconditioner (chip/iota channel).
+    b_safe = jnp.where(b_post != 0.0, b_post, jnp.asarray(-1.0e-10, dtype=dtype))
+    p_factor00 = p_factor * (lamscale * lamscale)
+    lam_prec = lam_prec.at[:, 0, 0].set(p_factor00 / b_safe)
+
+    # VMEC jlam(m)=2 => js=1 (0-based index 0) is zero for all m,n except (0,0).
+    if ns_full > 0:
+        axis_mask = jnp.zeros((mpol, nrange), dtype=dtype).at[0, 0].set(1.0)
+        lam_prec = lam_prec.at[0].set(lam_prec[0] * axis_mask)
+
+    if return_debug:
+        debug = {
+            "blam_pre": blam_pre,
+            "clam_pre": clam_pre,
+            "dlam_pre": dlam_pre,
+            "blam_post": blam_post,
+            "clam_post": clam_post,
+            "dlam_post": dlam_post,
+        }
+        if return_faclam:
+            # VMEC dumps faclam as the preconditioner (not the raw denominator).
+            return lam_prec, lam_prec, debug
+        return lam_prec, debug
+    if return_faclam:
+        # VMEC dumps faclam as the preconditioner (not the raw denominator).
+        return lam_prec, lam_prec
     return lam_prec
 
 

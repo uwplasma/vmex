@@ -41,15 +41,16 @@ def test_initial_guess_scaling_and_axis_blend():
     s = np.asarray(static.s)
     rho = np.sqrt(s)
 
-    # m>0 scaling uses rho**m
-    assert st0.Rcos[1, k10] == pytest.approx(rho[1] * 2.0)
-    assert st0.Rcos[1, k20] == pytest.approx((rho[1] ** 2) * 3.0)
+    # m>0 scaling uses rho**m with VMEC internal mode scaling (mscale=nscale=sqrt(2) for m>0, n!=0).
+    mscale = np.sqrt(2.0)
+    assert st0.Rcos[1, k10] == pytest.approx(rho[1] * 2.0 / mscale)
+    assert st0.Rcos[1, k20] == pytest.approx((rho[1] ** 2) * 3.0 / mscale)
 
     # m=0 Rcos blends between axis and boundary
     assert st0.Rcos[0, k00] == pytest.approx(5.0)
     assert st0.Rcos[-1, k00] == pytest.approx(10.0)
     assert st0.Rcos[2, k00] == pytest.approx(7.5)
 
-    # m=0 non-Rcos components scale with s for regularity
+    # m=0 Rsin is suppressed for lasym=False (stellarator symmetry).
     assert st0.Rsin[0, k00] == pytest.approx(0.0)
-    assert st0.Rsin[-1, k00] == pytest.approx(4.0)
+    assert st0.Rsin[-1, k00] == pytest.approx(0.0)

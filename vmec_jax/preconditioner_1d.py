@@ -85,73 +85,115 @@ def lambda_preconditioner(
     s: np.ndarray,
     cfg,
     damping_factor: float = 2.0,
+    return_faclam: bool = False,
+    return_debug: bool = False,
 ) -> np.ndarray:
     """Compute VMEC lambda preconditioner (n>=0 storage)."""
+    r0scale = float(getattr(trig, "r0scale", 1.0)) if trig is not None else 1.0
     guu = np.asarray(bc.guu, dtype=float)
     guv = np.asarray(bc.guv, dtype=float)
     gvv = np.asarray(bc.gvv, dtype=float)
     gsqrt = np.asarray(bc.jac.sqrtg, dtype=float)
     ns_full = int(guu.shape[0])
     if ns_full < 2:
-        return np.zeros((ns_full, int(cfg.mpol), int(cfg.ntor) + 1), dtype=float)
-    guu_h = guu[1:]
-    guv_h = guv[1:]
-    gvv_h = gvv[1:]
-    gsqrt_h = gsqrt[1:]
-    ns_half = int(guu_h.shape[0])
+        out = np.zeros((ns_full, int(cfg.mpol), int(cfg.ntor) + 1), dtype=float)
+        if return_debug:
+            debug = {
+                "blam_pre": np.zeros((ns_full,), dtype=float),
+                "clam_pre": np.zeros((ns_full,), dtype=float),
+                "dlam_pre": np.zeros((ns_full,), dtype=float),
+                "blam_post": np.zeros((ns_full,), dtype=float),
+                "clam_post": np.zeros((ns_full,), dtype=float),
+                "dlam_post": np.zeros((ns_full,), dtype=float),
+            }
+            if return_faclam:
+                return out, np.zeros_like(out), debug
+            return out, debug
+        return (out, np.zeros_like(out)) if return_faclam else out
     ntheta = int(guu.shape[1])
     nzeta = int(guu.shape[2])
     w_int = wint_from_config(cfg=cfg)
 
-    # half-grid accumulation (shifted by +1)
-    b_lambda = np.zeros((ns_full + 1,), dtype=float)
-    d_lambda = np.zeros((ns_full + 1,), dtype=float)
-    c_lambda = np.zeros((ns_full + 1,), dtype=float)
-    gsqrt_safe = np.where(gsqrt_h != 0.0, gsqrt_h, 1.0)
-    for jh in range(ns_half):
-        for kl in range(ntheta * nzeta):
-            l = kl % ntheta
-            k = kl // ntheta
-            b_lambda[jh + 1] += guu_h[jh, l, k] / gsqrt_safe[jh, l, k] * w_int[l]
-            c_lambda[jh + 1] += gvv_h[jh, l, k] / gsqrt_safe[jh, l, k] * w_int[l]
-            if bool(cfg.lthreed):
-                d_lambda[jh + 1] += guv_h[jh, l, k] / gsqrt_safe[jh, l, k] * w_int[l]
+    gsqrt_safe = np.where(gsqrt != 0.0, gsqrt, 1.0)
+    b_pre = np.sum(guu / gsqrt_safe * w_int[None, :, None], axis=(1, 2))
+    c_pre = np.sum(gvv / gsqrt_safe * w_int[None, :, None], axis=(1, 2))
+    if bool(cfg.lthreed):
+        d_pre = np.sum(guv / gsqrt_safe * w_int[None, :, None], axis=(1, 2))
+    else:
+        d_pre = np.zeros_like(b_pre)
 
-    # constant extrapolation toward axis
-    b_lambda[0] = b_lambda[1]
-    d_lambda[0] = d_lambda[1]
-    c_lambda[0] = c_lambda[1]
+    if ns_full >= 2:
+        b_pre[0] = b_pre[1]
+        c_pre[0] = c_pre[1]
+        d_pre[0] = d_pre[1]
 
-    # average onto full grid
-    b_full = np.zeros((ns_full,), dtype=float)
-    d_full = np.zeros((ns_full,), dtype=float)
-    c_full = np.zeros((ns_full,), dtype=float)
-    for jf in range(1, ns_full):
-        b_full[jf] = 0.5 * (b_lambda[jf + 1] + b_lambda[jf])
-        d_full[jf] = 0.5 * (d_lambda[jf + 1] + d_lambda[jf])
-        c_full[jf] = 0.5 * (c_lambda[jf + 1] + c_lambda[jf])
+    b_post = b_pre.copy()
+    c_post = c_pre.copy()
+    d_post = d_pre.copy()
+    if ns_full >= 2:
+        b_next = np.concatenate([b_pre[2:], np.zeros((1,), dtype=float)])
+        c_next = np.concatenate([c_pre[2:], np.zeros((1,), dtype=float)])
+        d_next = np.concatenate([d_pre[2:], np.zeros((1,), dtype=float)])
+        b_post[1:] = 0.5 * (b_pre[1:] + b_next)
+        c_post[1:] = 0.5 * (c_pre[1:] + c_next)
+        d_post[1:] = 0.5 * (d_pre[1:] + d_next)
+
+    blam_pre = b_pre.copy()
+    clam_pre = c_pre.copy()
+    dlam_pre = d_pre.copy()
+    blam_post = b_post.copy()
+    clam_post = c_post.copy()
+    dlam_post = d_post.copy()
 
     mpol = int(cfg.mpol)
     nrange = int(cfg.ntor) + 1
-    p_factor = float(damping_factor) / (4.0 * float(bc.lamscale) * float(bc.lamscale))
+    p_factor = float(damping_factor) / (
+        4.0 * (float(r0scale) ** 2) * float(bc.lamscale) * float(bc.lamscale)
+    )
     sqrt_sf, _ = _sqrt_profiles_from_s(s)
     if sqrt_sf.size > 0:
         sqrt_sf[-1] = 1.0
 
     lam_prec = np.zeros((ns_full, mpol, nrange), dtype=float)
+    faclam_out = np.zeros_like(lam_prec) if return_faclam else None
     for jf in range(1, ns_full):
         for n in range(nrange):
             tnn = (n * cfg.nfp) ** 2
             for m in range(mpol):
-                if m == 0 and n == 0:
-                    continue
                 tmm = m * m
                 pwr = min(tmm / (16.0 * 16.0), 8.0)
                 tmn = 2.0 * m * n * cfg.nfp
-                faclam = tnn * b_full[jf] + tmn * np.copysign(d_full[jf], b_full[jf]) + tmm * c_full[jf]
+                faclam = tnn * b_post[jf] + tmn * np.copysign(d_post[jf], b_post[jf]) + tmm * c_post[jf]
                 if faclam == 0.0:
                     faclam = -1.0e-10
                 lam_prec[jf, m, n] = p_factor / faclam * (sqrt_sf[jf] ** pwr)
+    # VMEC special-case m=n=0 preconditioner (chip/iota channel).
+    b_safe = np.where(b_post != 0.0, b_post, -1.0e-10)
+    p_factor00 = p_factor * (float(bc.lamscale) ** 2)
+    lam_prec[:, 0, 0] = p_factor00 / b_safe
+
+    # VMEC jlam(m)=2 => js=1 (0-based index 0) is zero for all m,n except (0,0).
+    if ns_full > 0:
+        axis_mask = np.zeros((mpol, nrange), dtype=float)
+        axis_mask[0, 0] = 1.0
+        lam_prec[0] = lam_prec[0] * axis_mask
+
+    if faclam_out is not None:
+        faclam_out[:] = lam_prec
+    if return_debug:
+        debug = {
+            "blam_pre": blam_pre,
+            "clam_pre": clam_pre,
+            "dlam_pre": dlam_pre,
+            "blam_post": blam_post,
+            "clam_post": clam_post,
+            "dlam_post": dlam_post,
+        }
+        if return_faclam:
+            return lam_prec, faclam_out, debug
+        return lam_prec, debug
+    if return_faclam:
+        return lam_prec, faclam_out
     return lam_prec
 
 

@@ -15,6 +15,7 @@ import numpy as np
 from .modes import vmec_mode_table
 from .modes import nyquist_mode_table
 from .state import StateLayout, VMECState
+from .vmec_parity import vmec_m1_internal_to_physical_signed, vmec_m1_physical_to_internal_signed
 
 
 MU0 = 4e-7 * np.pi  # N/A^2
@@ -561,13 +562,32 @@ def wout_minimal_from_fixed_boundary(
 
     iotaf = np.asarray(_iotaf_from_iotas(iotas, lrfp=bool(indata.get_bool("LRFP", False))))
 
-    # Geometry coefficients on the full mesh.
-    rmnc = np.asarray(state.Rcos, dtype=float)
-    rmns = np.asarray(state.Rsin, dtype=float)
-    zmnc = np.asarray(state.Zcos, dtype=float)
-    zmns = np.asarray(state.Zsin, dtype=float)
+    # Geometry coefficients on the full mesh (convert internal -> external).
+    m_arr = np.asarray(main_modes.m, dtype=int)
+    n_arr = np.asarray(main_modes.n, dtype=int)
+    sqrt2 = np.sqrt(2.0)
+    mscale = np.where(m_arr == 0, 1.0, sqrt2)
+    nscale = np.where(np.abs(n_arr) == 0, 1.0, sqrt2)
+    mode_scale = (mscale * nscale)[None, :]
+    lconm1 = bool(getattr(cfg, "lconm1", True))
+    Rcos_use, Zsin_use, Rsin_use, Zcos_use = vmec_m1_internal_to_physical_signed(
+        Rcos=np.asarray(state.Rcos, dtype=float),
+        Zsin=np.asarray(state.Zsin, dtype=float),
+        Rsin=np.asarray(state.Rsin, dtype=float),
+        Zcos=np.asarray(state.Zcos, dtype=float),
+        modes=main_modes,
+        lthreed=bool(ntor > 0),
+        lasym=bool(lasym),
+        lconm1=bool(lconm1),
+    )
+    rmnc = np.asarray(Rcos_use, dtype=float) * mode_scale
+    rmns = np.asarray(Rsin_use, dtype=float) * mode_scale
+    zmnc = np.asarray(Zcos_use, dtype=float) * mode_scale
+    zmns = np.asarray(Zsin_use, dtype=float) * mode_scale
     lmnc_internal = np.asarray(state.Lcos, dtype=float)
     lmns_internal = np.asarray(state.Lsin, dtype=float)
+    lmnc_internal = lmnc_internal * mode_scale
+    lmns_internal = lmns_internal * mode_scale
 
     mnmax_nyq = int(nyq_modes.K)
     z2 = np.zeros((ns, mnmax_nyq), dtype=float)
@@ -584,8 +604,6 @@ def wout_minimal_from_fixed_boundary(
     raxis_cs = np.zeros_like(raxis_cc)
     zaxis_cs = np.zeros_like(raxis_cc)
     zaxis_cc = np.zeros_like(raxis_cc)
-    m_arr = np.asarray(main_modes.m, dtype=int)
-    n_arr = np.asarray(main_modes.n, dtype=int)
     for nval in range(ntor + 1):
         mask = (m_arr == 0) & (n_arr == nval)
         if np.any(mask):
@@ -707,10 +725,10 @@ def wout_minimal_from_fixed_boundary(
     else:
         parity = "both" if bool(lasym) else "cos"
         gmnc, gmns = vmec_realspace_analysis(f=np.asarray(bc.jac.sqrtg), modes=nyq_modes, trig=trig, parity=parity)
-        bsupu_out = -np.asarray(bc.bsupu)
+        bsupu_out = np.asarray(bc.bsupu)
         bsupv_out = np.asarray(bc.bsupv)
-        bsubu_out = np.asarray(bc.guu) * bsupu_out + np.asarray(bc.guv) * bsupv_out
-        bsubv_out = np.asarray(bc.guv) * bsupu_out + np.asarray(bc.gvv) * bsupv_out
+        bsubu_out = np.asarray(bc.bsubu)
+        bsubv_out = np.asarray(bc.bsubv)
         bsupumnc, bsupumns = vmec_realspace_analysis(f=bsupu_out, modes=nyq_modes, trig=trig, parity=parity)
         bsupvmnc, bsupvmns = vmec_realspace_analysis(f=bsupv_out, modes=nyq_modes, trig=trig, parity=parity)
         bsubumnc, bsubumns = vmec_realspace_analysis(f=bsubu_out, modes=nyq_modes, trig=trig, parity=parity)
@@ -1032,15 +1050,52 @@ def state_from_wout(wout: WoutData) -> VMECState:
             lam_full = lam_full / float(lamscale)
         return lam_full
 
-    lmns_full = _lambda_full_from_wout(lam_wout=np.asarray(wout.lmns), m_modes=np.asarray(wout.xm), phipf=np.asarray(phipf_internal), lamscale=lamscale)
-    lmnc_full = _lambda_full_from_wout(lam_wout=np.asarray(wout.lmnc), m_modes=np.asarray(wout.xm), phipf=np.asarray(phipf_internal), lamscale=lamscale)
+    lmns_full = _lambda_full_from_wout(
+        lam_wout=np.asarray(wout.lmns),
+        m_modes=np.asarray(wout.xm),
+        phipf=np.asarray(phipf_internal),
+        lamscale=lamscale,
+    )
+    lmnc_full = _lambda_full_from_wout(
+        lam_wout=np.asarray(wout.lmnc),
+        m_modes=np.asarray(wout.xm),
+        phipf=np.asarray(phipf_internal),
+        lamscale=lamscale,
+    )
+
+    m_arr = np.asarray(wout.xm, dtype=int)
+    n_arr = (np.asarray(wout.xn, dtype=int) // int(wout.nfp)).astype(int)
+    sqrt2 = np.sqrt(2.0)
+    mscale = np.where(m_arr == 0, 1.0, sqrt2)
+    nscale = np.where(np.abs(n_arr) == 0, 1.0, sqrt2)
+    mode_scale = (1.0 / (mscale * nscale))[None, :]
+
+    Rcos = np.asarray(wout.rmnc) * mode_scale
+    Rsin = np.asarray(wout.rmns) * mode_scale
+    Zcos = np.asarray(wout.zmnc) * mode_scale
+    Zsin = np.asarray(wout.zmns) * mode_scale
+
+    modes = vmec_mode_table(wout.mpol, wout.ntor)
+    lthreed = bool(int(wout.ntor) > 0)
+    lasym = bool(wout.lasym)
+    lconm1 = bool(lthreed or lasym)
+    Rcos, Zsin, Rsin, Zcos = vmec_m1_physical_to_internal_signed(
+        Rcos=Rcos,
+        Zsin=Zsin,
+        Rsin=Rsin,
+        Zcos=Zcos,
+        modes=modes,
+        lthreed=lthreed,
+        lasym=lasym,
+        lconm1=lconm1,
+    )
 
     return VMECState(
         layout=layout,
-        Rcos=wout.rmnc,
-        Rsin=wout.rmns,
-        Zcos=wout.zmnc,
-        Zsin=wout.zmns,
-        Lcos=lmnc_full,
-        Lsin=lmns_full,
+        Rcos=Rcos,
+        Rsin=Rsin,
+        Zcos=Zcos,
+        Zsin=Zsin,
+        Lcos=np.asarray(lmnc_full) * mode_scale,
+        Lsin=np.asarray(lmns_full) * mode_scale,
     )

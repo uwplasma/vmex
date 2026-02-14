@@ -671,8 +671,8 @@ def vmec_bcovar_half_mesh_from_wout(
     if int(icurv.shape[0]) != ns:
         icurv = jnp.zeros((ns,), dtype=phipf_internal.dtype)
 
-    # VMEC bcovar: overg = 1 / (signgs * sqrtg).
-    denom = int(signgs) * jac.sqrtg
+    # VMEC bcovar: overg = 1 / sqrtg (phipog in bcovar.f).
+    denom = jac.sqrtg
     overg = jnp.where(denom != 0, 1.0 / denom, 0.0)
 
     # Full-mesh LU = d(lambda)/du and LV = -d(lambda)/dv in VMEC conventions.
@@ -701,18 +701,12 @@ def vmec_bcovar_half_mesh_from_wout(
         bsupv = bsupv.at[1:].set(0.5 * overg[1:] * (avg_lu0 + pshalf[1:] * avg_lu1))
         bsupu = bsupu.at[1:].set(0.5 * overg[1:] * (avg_lv0 + pshalf[1:] * avg_lv1))
 
-    sign_flip_to_vmec = not bool(use_wout_bsup)
-
     if (ncurr == 1) and lcurrent and (ns >= 2):
         # VMEC's add_fluxes computes chips using bsup in VMEC orientation.
-        # Our bsupu/bsupv will be sign-flipped at the end when
-        # `sign_flip_to_vmec` is True, so use VMEC-oriented fields here.
-        bsupu_vmec = -bsupu if sign_flip_to_vmec else bsupu
-        bsupv_vmec = -bsupv if sign_flip_to_vmec else bsupv
         pwint = vmec_pwint_from_trig(trig, ns=int(overg.shape[0]), nzeta=int(overg.shape[2])).astype(bsupu.dtype)
 
         top = jnp.asarray(icurv, dtype=bsupu.dtype) - jnp.sum(
-            pwint * ((guu * bsupu_vmec) + (guv * bsupv_vmec)),
+            pwint * ((guu * bsupu) + (guv * bsupv)),
             axis=(1, 2),
         )
         bot = jnp.sum(pwint * (overg * guu), axis=(1, 2))
@@ -725,14 +719,8 @@ def vmec_bcovar_half_mesh_from_wout(
 
     # `add_fluxes`: VMEC updates `bsupu` in VMEC orientation:
     #   bsupu <- bsupu + chips*overg.
-    # Our computed fields are sign-aligned to VMEC after this block when
-    # `sign_flip_to_vmec` is True, so apply the chip term with the opposite sign
-    # before that final alignment.
     chip_term = jnp.asarray(chips_eff)[:, None, None] * overg
-    if sign_flip_to_vmec:
-        bsupu = bsupu - chip_term
-    else:
-        bsupu = bsupu + chip_term
+    bsupu = bsupu + chip_term
 
     basis_nyq = None
     if bool(use_wout_bsup):
@@ -752,13 +740,6 @@ def vmec_bcovar_half_mesh_from_wout(
     if ns >= 1:
         bsupu = bsupu.at[0].set(jnp.zeros_like(bsupu[0]))
         bsupv = bsupv.at[0].set(jnp.zeros_like(bsupv[0]))
-
-    # Align bsup sign convention with VMEC2000 (parity dumps).
-    # VMEC uses signgs=-1 with a fixed orientation; our geometry currently
-    # yields bsupu/bsupv with the opposite sign for computed fields.
-    if sign_flip_to_vmec:
-        bsupu = -bsupu
-        bsupv = -bsupv
 
     bsubu = guu * bsupu + guv * bsupv
     bsubv = guv * bsupu + gvv * bsupv
@@ -805,7 +786,7 @@ def vmec_bcovar_half_mesh_from_wout(
     #
     # Inputs:
     # - LU (full mesh, parity-split): LU = phipf + lamscale*dλ/du
-    # - lvv (half mesh): lvv = (g_vv / (signgs*sqrtg*2π))
+    # - lvv (half mesh): lvv = g_vv / sqrtg (bcovar.f phipog * gvv)
     # - bsubu/bsubv (half mesh): covariant B components
 
     # Full-mesh LU parity pieces (odd is VMEC-internal 1/sqrt(s) representation).

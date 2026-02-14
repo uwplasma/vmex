@@ -163,8 +163,8 @@ def solve_lambda_state_implicit(
     signgs_i = int(signgs)
 
     def _wb_from_L(Lcos, Lsin, phipf, chipf, lamscale):
-        lam_u = eval_fourier_dtheta(Lcos, Lsin, static.basis)
-        lam_v = eval_fourier_dzeta_phys(Lcos, Lsin, static.basis) / nfp
+        lam_u = eval_fourier_dtheta(Lcos, Lsin, static.basis, coeffs_internal=True)
+        lam_v = eval_fourier_dzeta_phys(Lcos, Lsin, static.basis, coeffs_internal=True) / nfp
         bsupu, bsupv = bsup_from_sqrtg_lambda(
             sqrtg=sqrtg_use,
             lam_u=lam_u,

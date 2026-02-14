@@ -172,10 +172,8 @@ def interp_vmec_state(
             else:
                 idx_neg[int(mk), int(-nk)] = int(k)
 
-        mscale = np.where(np.arange(mpol) == 0, 1.0, np.sqrt(2.0))
-        nscale = np.where(np.arange(nrange) == 0, 1.0, np.sqrt(2.0))
-        basis_norm = (1.0 / (mscale[:, None] * nscale[None, :])).astype(np.asarray(state_old.Rcos).dtype)
-        mode_scale = (1.0 / basis_norm).astype(np.asarray(state_old.Rcos).dtype)
+        basis_norm = np.ones((mpol, nrange), dtype=np.asarray(state_old.Rcos).dtype)
+        mode_scale = np.ones_like(basis_norm)
 
         def _signed_to_mn_cos(coeffs: Any) -> tuple[np.ndarray, np.ndarray]:
             coeffs_np = np.asarray(coeffs)
