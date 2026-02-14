@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from ._compat import jnp
+from ._compat import jnp, has_jax
 from .modes import ModeTable
 from .vmec_residue import vmec_scalxc_from_s
 from .vmec_tomnsp import VmecTrigTables
@@ -25,6 +25,17 @@ _PHASE_DZETA_CACHE: dict[tuple[int, int], tuple[Any, Any]] = {}
 
 def _phase_cache_key(modes: ModeTable, trig: VmecTrigTables) -> tuple[int, int]:
     return (id(modes), id(trig))
+
+
+def _cache_allowed() -> bool:
+    if not has_jax():
+        return True
+    try:
+        from jax import core
+
+        return bool(core.trace_ctx.is_top_level())
+    except Exception:
+        return False
 
 
 def _vmec_mode_scaling(*, m: Any, n: Any, trig: VmecTrigTables) -> Any:
@@ -59,13 +70,13 @@ def _vmec_phase_tables(*, m: Any, n: Any, trig: VmecTrigTables):
 
 
 def _vmec_phase_tables_cached(*, modes: ModeTable, trig: VmecTrigTables, cache: bool = True):
-    if cache:
+    if cache and _cache_allowed():
         key = _phase_cache_key(modes, trig)
         cached = _PHASE_CACHE.get(key)
         if cached is not None:
             return cached
     cos_phase, sin_phase = _vmec_phase_tables(m=modes.m, n=modes.n, trig=trig)
-    if cache:
+    if cache and _cache_allowed():
         _PHASE_CACHE[key] = (cos_phase, sin_phase)
     return cos_phase, sin_phase
 
@@ -96,13 +107,13 @@ def _vmec_phase_tables_dtheta(*, m: Any, n: Any, trig: VmecTrigTables):
 
 
 def _vmec_phase_tables_dtheta_cached(*, modes: ModeTable, trig: VmecTrigTables, cache: bool = True):
-    if cache:
+    if cache and _cache_allowed():
         key = _phase_cache_key(modes, trig)
         cached = _PHASE_DTHETA_CACHE.get(key)
         if cached is not None:
             return cached
     dcos_phase, dsin_phase = _vmec_phase_tables_dtheta(m=modes.m, n=modes.n, trig=trig)
-    if cache:
+    if cache and _cache_allowed():
         _PHASE_DTHETA_CACHE[key] = (dcos_phase, dsin_phase)
     return dcos_phase, dsin_phase
 
@@ -129,13 +140,13 @@ def _vmec_phase_tables_dzeta(*, m: Any, n: Any, trig: VmecTrigTables):
 
 
 def _vmec_phase_tables_dzeta_cached(*, modes: ModeTable, trig: VmecTrigTables, cache: bool = True):
-    if cache:
+    if cache and _cache_allowed():
         key = _phase_cache_key(modes, trig)
         cached = _PHASE_DZETA_CACHE.get(key)
         if cached is not None:
             return cached
     dcos_phase, dsin_phase = _vmec_phase_tables_dzeta(m=modes.m, n=modes.n, trig=trig)
-    if cache:
+    if cache and _cache_allowed():
         _PHASE_DZETA_CACHE[key] = (dcos_phase, dsin_phase)
     return dcos_phase, dsin_phase
 

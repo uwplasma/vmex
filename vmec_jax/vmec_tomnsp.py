@@ -31,6 +31,7 @@ from jax import tree_util
 
 from ._compat import jnp
 from .grids import AngleGrid
+from ._compat import has_jax
 
 
 @dataclass(frozen=True)
@@ -318,14 +319,27 @@ class TomnspsRZL:
 _MPARITY_CACHE: dict[tuple[int, str], jnp.ndarray] = {}
 
 
+def _cache_allowed() -> bool:
+    if not has_jax():
+        return True
+    try:
+        from jax import core
+
+        return bool(core.trace_ctx.is_top_level())
+    except Exception:
+        return False
+
+
 def _mparity_mask(mpol: int, *, dtype) -> jnp.ndarray:
     key = (int(mpol), str(np.dtype(dtype)))
-    cached = _MPARITY_CACHE.get(key)
-    if cached is not None:
-        return cached
+    if _cache_allowed():
+        cached = _MPARITY_CACHE.get(key)
+        if cached is not None:
+            return cached
     m = jnp.arange(int(mpol))
     mask_even = jnp.asarray((m % 2) == 0, dtype=dtype)
-    _MPARITY_CACHE[key] = mask_even
+    if _cache_allowed():
+        _MPARITY_CACHE[key] = mask_even
     return mask_even
 
 

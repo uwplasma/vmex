@@ -23,7 +23,7 @@ import numpy as np
 
 from jax import tree_util
 
-from ._compat import jnp
+from ._compat import jnp, has_jax
 from .vmec_tomnsp import TomnspsRZL, VmecTrigTables
 
 
@@ -37,6 +37,17 @@ def _wint_cache_key(trig: VmecTrigTables, *, nzeta: int) -> tuple[int, int]:
 
 def _pwint_cache_key(trig: VmecTrigTables, *, ns: int, nzeta: int) -> tuple[int, int, int]:
     return (id(trig), int(ns), int(nzeta))
+
+
+def _cache_allowed() -> bool:
+    if not has_jax():
+        return True
+    try:
+        from jax import core
+
+        return bool(core.trace_ctx.is_top_level())
+    except Exception:
+        return False
 
 
 @dataclass(frozen=True)
@@ -515,12 +526,14 @@ def vmec_wint_from_trig(trig: VmecTrigTables, *, nzeta: int) -> jnp.ndarray:
     the axis) is handled by :func:`vmec_pwint_from_trig`.
     """
     key = _wint_cache_key(trig, nzeta=int(nzeta))
-    cached = _WINT_CACHE.get(key)
-    if cached is not None:
-        return cached
+    if _cache_allowed():
+        cached = _WINT_CACHE.get(key)
+        if cached is not None:
+            return cached
     w_theta = jnp.asarray(trig.cosmui3[:, 0]) / jnp.asarray(trig.mscale[0])
     w_ang = w_theta[:, None] * jnp.ones((int(nzeta),), dtype=w_theta.dtype)[None, :]
-    _WINT_CACHE[key] = w_ang
+    if _cache_allowed():
+        _WINT_CACHE[key] = w_ang
     return w_ang
 
 
@@ -535,13 +548,15 @@ def vmec_pwint_from_trig(trig: VmecTrigTables, *, ns: int, nzeta: int) -> jnp.nd
     if ns < 1:
         raise ValueError("ns must be >= 1")
     key = _pwint_cache_key(trig, ns=int(ns), nzeta=int(nzeta))
-    cached = _PWINT_CACHE.get(key)
-    if cached is not None:
-        return cached
+    if _cache_allowed():
+        cached = _PWINT_CACHE.get(key)
+        if cached is not None:
+            return cached
     w_ang = vmec_wint_from_trig(trig, nzeta=int(nzeta))  # (ntheta3,nzeta)
     pwint = jnp.broadcast_to(w_ang[None, :, :], (ns,) + w_ang.shape)
     pwint = pwint.at[0].set(jnp.zeros_like(w_ang))
-    _PWINT_CACHE[key] = pwint
+    if _cache_allowed():
+        _PWINT_CACHE[key] = pwint
     return pwint
 
 
