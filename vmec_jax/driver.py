@@ -471,6 +471,9 @@ def run_fixed_boundary(
         )
 
     solver = solver_lower
+    if solver in ("vmec2000_iter_fast", "vmec2000_scan"):
+        use_scan = True
+        solver = "vmec2000_iter"
     if solver == "gd":
         static = build_static(cfg, grid=grid)
         st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(
