@@ -3650,9 +3650,14 @@ def solve_fixed_boundary_residual_iter(
             return (state_new, prev_rz_new), (fsqr, fsqz, fsql)
 
         prev_rz0 = jnp.asarray(2.0, dtype=dtype)
-        (state_final, _prev_rz), hist = jax.lax.scan(
-            _scan_step, (state, prev_rz0), jnp.arange(max_iter, dtype=jnp.int32)
-        )
+
+        def _run_scan(state_init, prev_rz_init):
+            return jax.lax.scan(_scan_step, (state_init, prev_rz_init), jnp.arange(max_iter, dtype=jnp.int32))
+
+        if jit_forces:
+            _run_scan = jit(_run_scan)
+
+        (state_final, _prev_rz), hist = _run_scan(state, prev_rz0)
         fsqr_hist, fsqz_hist, fsql_hist = hist
         w_hist = fsqr_hist + fsqz_hist + fsql_hist
         return SolveVmecResidualResult(
