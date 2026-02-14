@@ -44,6 +44,11 @@ def main() -> None:
     k10 = int(np.where((np.asarray(modes.m) == 1) & (np.asarray(modes.n) == 0))[0][0])
     idx = jnp.asarray([k00, k10], dtype=int)
 
+    # signgs is a fixed convention; infer it once from the unperturbed guess.
+    st0 = vj.initial_guess_from_boundary(static, boundary0, indata, vmec_project=False)
+    g0 = vj.eval_geom(st0, static)
+    signgs0 = vj.signgs_from_sqrtg(np.asarray(g0.sqrtg), axis_index=1)
+
     def objective(params):
         # params = [dRBC(0,0), dRBC(0,1), dZBS(0,1)]
         dR00, dR10, dZ10 = params
@@ -52,8 +57,7 @@ def main() -> None:
         bdy = vj.BoundaryCoeffs(R_cos=Rcos, R_sin=jnp.asarray(boundary0.R_sin), Z_cos=jnp.asarray(boundary0.Z_cos), Z_sin=Zsin)
 
         st0 = vj.initial_guess_from_boundary(static, bdy, indata, vmec_project=False)
-        g0 = vj.eval_geom(st0, static)
-        signgs = vj.signgs_from_sqrtg(np.asarray(g0.sqrtg), axis_index=1)
+        signgs = signgs0
         flux = vj.flux_profiles_from_indata(indata, static.s, signgs=signgs)
         pressure = jnp.zeros_like(jnp.asarray(static.s))
 
@@ -71,12 +75,26 @@ def main() -> None:
             step_size=float(args.step_size),
             jacobian_penalty=1e3,
             jit_grad=False,
+            differentiable=True,
+            stop_grad_in_update=True,
             verbose=False,
         )
 
         theta = vj.closed_theta_grid(128)
         phi = jnp.linspace(0.0, 2.0 * np.pi, 128, endpoint=False)
-        B = vj.bmag_from_state_physical(res.state, static, indata=indata, theta=theta, phi=phi, s_index=int(cfg.ns) - 1)
+        B = vj.bmag_from_state_physical(
+            res.state,
+            static,
+            indata=indata,
+            theta=theta,
+            phi=phi,
+            s_index=int(cfg.ns) - 1,
+            signgs=signgs0,
+            phipf=flux.phipf,
+            chipf=flux.chipf,
+            lamscale=flux.lamscale,
+            bmag_floor=1e-12,
+        )
         return jnp.mean(B)
 
     params0 = jnp.zeros((3,), dtype=jnp.float64)
@@ -87,4 +105,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

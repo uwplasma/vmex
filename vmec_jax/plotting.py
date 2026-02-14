@@ -9,21 +9,27 @@ matplotlib) can be layered on top.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 
 import numpy as np
 
+from ._compat import has_jax, jnp
 from .fourier import build_helical_basis, eval_fourier
-from .geom import _eval_geom_jit
+from .geom import _eval_geom_jit, eval_geom
 from .grids import AngleGrid
 from .modes import ModeTable
-from .field import b2_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda, lamscale_from_phips
+from .field import b2_from_bsup, bsub_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda, lamscale_from_phips
 from .vmec_jacobian import vmec_half_mesh_jacobian_from_state
 from .vmec_realspace import vmec_realspace_geom_from_state
 from .vmec_tomnsp import vmec_trig_tables
 from .vmec_parity import vmec_m1_internal_to_physical_signed
 from .energy import flux_profiles_from_indata
 from .field import signgs_from_sqrtg
+from .config import load_config
+from .static import build_static
+from .driver import example_paths
+from .wout import read_wout, state_from_wout
 
 
 @dataclass(frozen=True)
@@ -33,6 +39,16 @@ class SurfaceData:
     R: np.ndarray
     Z: np.ndarray
     B: np.ndarray | None = None
+
+
+def _is_tracer(x) -> bool:
+    if not has_jax():
+        return False
+    try:
+        import jax
+    except Exception:
+        return False
+    return isinstance(x, jax.core.Tracer)
 
 
 def fix_matplotlib_3d(ax):
@@ -74,6 +90,48 @@ def _basis_from_wout(wout, theta: np.ndarray, zeta: np.ndarray, *, nyq: bool, ph
     grid = AngleGrid(theta=theta, zeta=zeta, nfp=int(wout.nfp))
     basis = build_helical_basis(modes, grid)
     return basis
+
+
+def bsup_from_wout(
+    wout,
+    *,
+    theta: np.ndarray,
+    zeta: np.ndarray,
+    s_index: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return contravariant components (bsupu, bsupv) on a surface from wout Nyquist data."""
+    basis = _basis_from_wout(wout, theta, zeta, nyq=True, physical=False)
+    bsupumnc = np.asarray(wout.bsupumnc)
+    bsupumns = np.asarray(getattr(wout, "bsupumns", np.zeros_like(bsupumnc)))
+    bsupvmnc = np.asarray(wout.bsupvmnc)
+    bsupvmns = np.asarray(getattr(wout, "bsupvmns", np.zeros_like(bsupvmnc)))
+    if not bool(getattr(wout, "lasym", False)):
+        bsupumns = np.zeros_like(bsupumnc)
+        bsupvmns = np.zeros_like(bsupvmnc)
+    bsupu = np.asarray(eval_fourier(bsupumnc[s_index], bsupumns[s_index], basis))
+    bsupv = np.asarray(eval_fourier(bsupvmnc[s_index], bsupvmns[s_index], basis))
+    return bsupu, bsupv
+
+
+def bsub_from_wout(
+    wout,
+    *,
+    theta: np.ndarray,
+    zeta: np.ndarray,
+    s_index: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return covariant components (bsubu, bsubv) on a surface from wout Nyquist data."""
+    basis = _basis_from_wout(wout, theta, zeta, nyq=True, physical=False)
+    bsubumnc = np.asarray(wout.bsubumnc)
+    bsubumns = np.asarray(getattr(wout, "bsubumns", np.zeros_like(bsubumnc)))
+    bsubvmnc = np.asarray(wout.bsubvmnc)
+    bsubvmns = np.asarray(getattr(wout, "bsubvmns", np.zeros_like(bsubvmnc)))
+    if not bool(getattr(wout, "lasym", False)):
+        bsubumns = np.zeros_like(bsubumnc)
+        bsubvmns = np.zeros_like(bsubvmnc)
+    bsubu = np.asarray(eval_fourier(bsubumnc[s_index], bsubumns[s_index], basis))
+    bsubv = np.asarray(eval_fourier(bsubvmnc[s_index], bsubvmns[s_index], basis))
+    return bsubu, bsubv
 
 
 def surface_rz_from_wout(
@@ -202,6 +260,7 @@ def bmag_from_state_physical(
     chipf: np.ndarray | None = None,
     lamscale: float | None = None,
     sqrtg_floor: float | None = None,
+    bmag_floor: float | None = None,
     eps: float = 1e-14,
 ) -> np.ndarray:
     """Compute B magnitude on a surface using physical toroidal angle phi.
@@ -210,30 +269,36 @@ def bmag_from_state_physical(
     -----
     - If ``phipf/chipf`` are provided, they override ``indata``-derived profiles.
     - If ``indata`` is None and no flux profiles are provided, this raises.
+    - ``bmag_floor`` adds a small positive value inside the sqrt for smoother gradients.
     """
     nfp = int(static.cfg.nfp)
-    zeta = np.asarray(phi) * float(nfp)
-    grid = AngleGrid(theta=np.asarray(theta), zeta=zeta, nfp=nfp)
+    theta_use = jnp.asarray(theta)
+    phi_use = jnp.asarray(phi)
+    zeta = phi_use * float(nfp)
+    grid = AngleGrid(theta=theta_use, zeta=zeta, nfp=nfp)
     basis = build_helical_basis(static.modes, grid)
     geom = _eval_geom_jit(state, basis, static.s, grid.zeta)
     if signgs is None:
+        if _is_tracer(geom.sqrtg):
+            raise ValueError("signgs must be provided when tracing bmag_from_state_physical")
         signgs = signgs_from_sqrtg(geom.sqrtg)
+    signgs = int(signgs)
 
     if phipf is None or chipf is None:
         if indata is None:
             raise ValueError("indata must be provided when phipf/chipf are not supplied")
         flux = flux_profiles_from_indata(indata, static.s, signgs=signgs)
-        phipf_use = flux.phipf
-        chipf_use = flux.chipf
-        lamscale_use = flux.lamscale
+        phipf_use = jnp.asarray(flux.phipf)
+        chipf_use = jnp.asarray(flux.chipf)
+        lamscale_use = jnp.asarray(flux.lamscale)
     else:
-        phipf_use = np.asarray(phipf)
-        chipf_use = np.asarray(chipf)
+        phipf_use = jnp.asarray(phipf)
+        chipf_use = jnp.asarray(chipf)
         if lamscale is None:
-            phips = (signgs * np.asarray(phipf_use)) / (2.0 * np.pi)
-            lamscale_use = float(np.asarray(lamscale_from_phips(phips, static.s)))
+            phips = (signgs * phipf_use) / (2.0 * np.pi)
+            lamscale_use = lamscale_from_phips(phips, static.s)
         else:
-            lamscale_use = float(lamscale)
+            lamscale_use = jnp.asarray(lamscale)
 
     if sqrtg_floor is None:
         bsupu, bsupv = bsup_from_geom(
@@ -246,8 +311,8 @@ def bmag_from_state_physical(
             eps=eps,
         )
     else:
-        sqrtg = np.asarray(geom.sqrtg)
-        sqrtg_use = np.sign(sqrtg) * np.maximum(np.abs(sqrtg), float(sqrtg_floor))
+        sqrtg = jnp.asarray(geom.sqrtg)
+        sqrtg_use = jnp.sign(sqrtg) * jnp.maximum(jnp.abs(sqrtg), jnp.asarray(sqrtg_floor))
         bsupu, bsupv = bsup_from_sqrtg_lambda(
             sqrtg=sqrtg_use,
             lam_u=geom.L_theta,
@@ -259,8 +324,14 @@ def bmag_from_state_physical(
             eps=eps,
         )
     B2 = b2_from_bsup(geom, bsupu, bsupv)
-    B = np.sqrt(np.maximum(np.asarray(B2), 0.0))
-    return B[s_index]
+    B2 = jnp.maximum(jnp.asarray(B2), 0.0)
+    if bmag_floor is not None:
+        B2 = B2 + jnp.asarray(bmag_floor)
+    B = jnp.sqrt(B2)
+    out = B[s_index]
+    if _is_tracer(out):
+        return out
+    return np.asarray(out)
 
 
 def bmag_from_state_vmec_realspace(
@@ -576,3 +647,239 @@ def surface_stack(
     zeta = np.asarray(list(zeta_list), dtype=float)
     R, Z = surface_rz_from_wout(wout, theta=theta, zeta=zeta, s_index=s_index, nyq=False)
     return R, Z
+
+
+def _import_matplotlib():
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg", force=True)
+        import matplotlib.pyplot as plt
+
+        return plt
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError("matplotlib is required for this plotting helper") from exc
+
+
+def _case_from_input_path(input_path: str | Path) -> str:
+    name = Path(input_path).name
+    if name.startswith("input."):
+        return name.split("input.", 1)[1]
+    return Path(name).stem
+
+
+def _default_example_outdir(subdir: str, case: str, outdir: str | Path | None) -> Path:
+    if outdir is not None:
+        return Path(outdir)
+    root = Path(__file__).resolve().parents[1]
+    return root / "examples" / "outputs" / subdir / case
+
+
+def _extent_from_grids(theta: np.ndarray, zeta: np.ndarray) -> tuple[float, float, float, float]:
+    z0 = float(np.min(zeta))
+    z1 = float(np.max(zeta))
+    t0 = float(np.min(theta))
+    t1 = float(np.max(theta))
+    if z0 == z1:
+        z0 -= 0.5
+        z1 += 0.5
+    if t0 == t1:
+        t0 -= 0.5
+        t1 += 0.5
+    return (z0, z1, t0, t1)
+
+
+def write_axisym_overview(case: str, *, outdir: str | Path | None = None) -> Path:
+    """Write a quick axisymmetric overview plot from bundled reference wout."""
+    plt = _import_matplotlib()
+    input_path, wout_path = example_paths(case)
+    if wout_path is None:
+        raise FileNotFoundError(f"Reference wout not found for case={case!r}")
+    wout = read_wout(wout_path)
+    s_index = int(wout.ns) - 1
+
+    theta = closed_theta_grid(256)
+    zeta = np.asarray([0.0], dtype=float)
+
+    R, Z = surface_rz_from_wout(wout, theta=theta, zeta=zeta, s_index=s_index, nyq=False)
+    B = bmag_from_wout(wout, theta=theta, zeta=zeta, s_index=s_index)
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4), constrained_layout=True)
+    axes[0].plot(R[:, 0], Z[:, 0], lw=1.5)
+    axes[0].set_aspect("equal", adjustable="box")
+    axes[0].set_xlabel("R")
+    axes[0].set_ylabel("Z")
+    axes[0].set_title(f"{case} cross-section")
+
+    axes[1].plot(theta, B[:, 0], lw=1.2)
+    axes[1].set_xlabel("theta")
+    axes[1].set_ylabel("|B|")
+    axes[1].set_title("|B| on LCFS")
+
+    outdir = _default_example_outdir("overview", case, outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    outpath = outdir / f"{case}_overview.png"
+    fig.savefig(outpath, dpi=150)
+    plt.close(fig)
+    return outpath
+
+
+def write_bmag_parity_figures(
+    *,
+    input_path: str | Path,
+    wout_path: str | Path,
+    outdir: str | Path | None = None,
+    s_index: int | None = None,
+) -> Path:
+    """Write |B| parity figures comparing wout vs vmec_jax realspace synthesis."""
+    plt = _import_matplotlib()
+    cfg, indata = load_config(str(input_path))
+    wout = read_wout(wout_path)
+    static = build_static(cfg)
+    state = state_from_wout(wout)
+    s_idx = int(wout.ns) - 1 if s_index is None else int(s_index)
+    theta = np.asarray(static.grid.theta)
+    zeta = np.asarray(static.grid.zeta)
+
+    B_ref = bmag_from_wout(wout, theta=theta, zeta=zeta, s_index=s_idx)
+    phi = zeta / float(max(1, int(static.cfg.nfp)))
+    B_jax = bmag_from_state_physical(
+        state,
+        static,
+        indata=indata,
+        theta=theta,
+        phi=phi,
+        s_index=s_idx,
+        signgs=int(getattr(wout, "signgs", 1)),
+        phipf=np.asarray(wout.phipf),
+        chipf=np.asarray(wout.chipf),
+    )
+    diff = B_jax - B_ref
+
+    extent = _extent_from_grids(theta, zeta)
+    fig, axes = plt.subplots(1, 3, figsize=(12, 4), constrained_layout=True)
+    for ax, data, title in zip(axes, [B_ref, B_jax, diff], ["wout", "vmec_jax", "diff"]):
+        im = ax.imshow(data, origin="lower", aspect="auto", extent=extent)
+        ax.set_title(title)
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    case = _case_from_input_path(input_path)
+    fig.suptitle(f"|B| parity ({case})")
+
+    outdir = _default_example_outdir("bmag_parity", case, outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    outpath = outdir / "bmag_parity.png"
+    fig.savefig(outpath, dpi=150)
+    plt.close(fig)
+    return outpath
+
+
+def write_bsup_parity_figures(
+    *,
+    input_path: str | Path,
+    wout_path: str | Path,
+    outdir: str | Path | None = None,
+    s_index: int | None = None,
+) -> Path:
+    """Write (bsupu, bsupv) parity figures comparing wout vs vmec_jax geometry."""
+    plt = _import_matplotlib()
+    cfg, _indata = load_config(str(input_path))
+    wout = read_wout(wout_path)
+    static = build_static(cfg)
+    state = state_from_wout(wout)
+    s_idx = int(wout.ns) - 1 if s_index is None else int(s_index)
+    theta = np.asarray(static.grid.theta)
+    zeta = np.asarray(static.grid.zeta)
+
+    bsupu_ref, bsupv_ref = bsup_from_wout(wout, theta=theta, zeta=zeta, s_index=s_idx)
+
+    geom = eval_geom(state, static)
+    lamscale = float(np.asarray(lamscale_from_phips(np.asarray(wout.phips), np.asarray(static.s))))
+    bsupu_full, bsupv_full = bsup_from_geom(
+        geom,
+        phipf=np.asarray(wout.phipf),
+        chipf=np.asarray(wout.chipf),
+        nfp=int(static.cfg.nfp),
+        signgs=int(getattr(wout, "signgs", 1)),
+        lamscale=lamscale,
+    )
+    bsupu_jax = np.asarray(bsupu_full)[s_idx]
+    bsupv_jax = np.asarray(bsupv_full)[s_idx]
+
+    case = _case_from_input_path(input_path)
+    outdir = _default_example_outdir("bsup_parity", case, outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    extent = _extent_from_grids(theta, zeta)
+    fig, axes = plt.subplots(2, 3, figsize=(12, 7), constrained_layout=True)
+    for row, (ref, jax, label) in enumerate(
+        [(bsupu_ref, bsupu_jax, "bsupu"), (bsupv_ref, bsupv_jax, "bsupv")]
+    ):
+        diff = jax - ref
+        for col, (data, title) in enumerate([(ref, "wout"), (jax, "vmec_jax"), (diff, "diff")]):
+            ax = axes[row, col]
+            im = ax.imshow(data, origin="lower", aspect="auto", extent=extent)
+            ax.set_title(f"{label} {title}")
+            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    fig.suptitle(f"bsup parity ({case})")
+    outpath = outdir / "bsup_parity.png"
+    fig.savefig(outpath, dpi=150)
+    plt.close(fig)
+    return outpath
+
+
+def write_bsub_parity_figures(
+    *,
+    input_path: str | Path,
+    wout_path: str | Path,
+    outdir: str | Path | None = None,
+    s_index: int | None = None,
+) -> Path:
+    """Write (bsubu, bsubv) parity figures comparing wout vs vmec_jax geometry."""
+    plt = _import_matplotlib()
+    cfg, _indata = load_config(str(input_path))
+    wout = read_wout(wout_path)
+    static = build_static(cfg)
+    state = state_from_wout(wout)
+    s_idx = int(wout.ns) - 1 if s_index is None else int(s_index)
+    theta = np.asarray(static.grid.theta)
+    zeta = np.asarray(static.grid.zeta)
+
+    bsubu_ref, bsubv_ref = bsub_from_wout(wout, theta=theta, zeta=zeta, s_index=s_idx)
+
+    geom = eval_geom(state, static)
+    lamscale = float(np.asarray(lamscale_from_phips(np.asarray(wout.phips), np.asarray(static.s))))
+    bsupu_full, bsupv_full = bsup_from_geom(
+        geom,
+        phipf=np.asarray(wout.phipf),
+        chipf=np.asarray(wout.chipf),
+        nfp=int(static.cfg.nfp),
+        signgs=int(getattr(wout, "signgs", 1)),
+        lamscale=lamscale,
+    )
+    bsubu_full, bsubv_full = bsub_from_bsup(geom, bsupu_full, bsupv_full)
+    bsubu_jax = np.asarray(bsubu_full)[s_idx]
+    bsubv_jax = np.asarray(bsubv_full)[s_idx]
+
+    case = _case_from_input_path(input_path)
+    outdir = _default_example_outdir("bsub_parity", case, outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    extent = _extent_from_grids(theta, zeta)
+    fig, axes = plt.subplots(2, 3, figsize=(12, 7), constrained_layout=True)
+    for row, (ref, jax, label) in enumerate(
+        [(bsubu_ref, bsubu_jax, "bsubu"), (bsubv_ref, bsubv_jax, "bsubv")]
+    ):
+        diff = jax - ref
+        for col, (data, title) in enumerate([(ref, "wout"), (jax, "vmec_jax"), (diff, "diff")]):
+            ax = axes[row, col]
+            im = ax.imshow(data, origin="lower", aspect="auto", extent=extent)
+            ax.set_title(f"{label} {title}")
+            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    fig.suptitle(f"bsub parity ({case})")
+    outpath = outdir / "bsub_parity.png"
+    fig.savefig(outpath, dpi=150)
+    plt.close(fig)
+    return outpath

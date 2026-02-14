@@ -117,18 +117,24 @@ def _guess_axis_from_boundary(static: VMECStatic, boundary: BoundaryCoeffs):
     return jnp.asarray(raxis_c), jnp.asarray(zaxis_s)
 
 
-def _boundary_cross_section_areas(static: VMECStatic, boundary: BoundaryCoeffs) -> np.ndarray:
+def _boundary_cross_section_areas(static: VMECStatic, boundary: BoundaryCoeffs):
     basis = build_helical_basis(static.modes, static.grid)
-    Rb = np.asarray(eval_fourier(jnp.asarray(boundary.R_cos), jnp.asarray(boundary.R_sin), basis))
-    Zb = np.asarray(eval_fourier(jnp.asarray(boundary.Z_cos), jnp.asarray(boundary.Z_sin), basis))
-    areas = []
-    for k in range(Rb.shape[1]):
-        R = Rb[:, k]
-        Z = Zb[:, k]
-        # signed polygon area, periodic closure
-        area = 0.5 * np.sum(R * np.roll(Z, -1) - np.roll(R, -1) * Z)
-        areas.append(area)
-    return np.asarray(areas)
+    Rb = eval_fourier(jnp.asarray(boundary.R_cos), jnp.asarray(boundary.R_sin), basis)
+    Zb = eval_fourier(jnp.asarray(boundary.Z_cos), jnp.asarray(boundary.Z_sin), basis)
+    # signed polygon area, periodic closure, vectorized over zeta planes
+    dA = Rb * jnp.roll(Zb, -1, axis=0) - jnp.roll(Rb, -1, axis=0) * Zb
+    return 0.5 * jnp.sum(dA, axis=0)
+
+
+def _boundary_is_traced(boundary: BoundaryCoeffs) -> bool:
+    if not has_jax():
+        return False
+    try:
+        import jax
+    except Exception:
+        return False
+    tracer = jax.core.Tracer
+    return isinstance(boundary.R_cos, tracer) or isinstance(boundary.R_sin, tracer) or isinstance(boundary.Z_cos, tracer) or isinstance(boundary.Z_sin, tracer)
 
 
 def _vmec_lflip_from_boundary(static: VMECStatic, boundary: BoundaryCoeffs) -> bool | None:
@@ -154,6 +160,17 @@ def _vmec_lflip_from_boundary(static: VMECStatic, boundary: BoundaryCoeffs) -> b
     if rtest == 0.0 or ztest == 0.0:
         return None
     return (rtest * ztest) < 0.0
+
+
+def _vmec_lflip_from_boundary_jax(static: VMECStatic, boundary: BoundaryCoeffs):
+    m_np = np.asarray(static.modes.m, dtype=int)
+    if not np.any(m_np == 1):
+        return jnp.asarray(False)
+    mask = jnp.asarray(m_np == 1)
+    rtest = jnp.sum(jnp.asarray(boundary.R_cos)[mask])
+    ztest = jnp.sum(jnp.asarray(boundary.Z_sin)[mask])
+    is_ambig = jnp.logical_or(rtest == 0.0, ztest == 0.0)
+    return jnp.where(is_ambig, False, rtest * ztest < 0.0)
 
 
 def _flip_boundary_theta(static: VMECStatic, boundary: BoundaryCoeffs) -> BoundaryCoeffs:
@@ -191,6 +208,38 @@ def _flip_boundary_theta(static: VMECStatic, boundary: BoundaryCoeffs) -> Bounda
         Z_sin_new[k] = fac_sin * Z_sin[k2]
 
     return BoundaryCoeffs(R_cos=R_cos_new, R_sin=R_sin_new, Z_cos=Z_cos_new, Z_sin=Z_sin_new)
+
+
+def _flip_boundary_theta_arrays(static: VMECStatic, R_cos, R_sin, Z_cos, Z_sin):
+    m_np = np.asarray(static.modes.m, dtype=int)
+    n_np = np.asarray(static.modes.n, dtype=int)
+    key_to_k = {(int(mm), int(nn)): k for k, (mm, nn) in enumerate(zip(m_np, n_np))}
+    K = int(m_np.size)
+    k2 = np.full((K,), -1, dtype=int)
+    fac_cos = np.ones((K,), dtype=float)
+    fac_sin = np.ones((K,), dtype=float)
+    for k, (mm, nn) in enumerate(zip(m_np, n_np)):
+        m_i = int(mm)
+        if m_i == 0:
+            continue
+        k2_idx = key_to_k.get((m_i, -int(nn)))
+        if k2_idx is None:
+            continue
+        k2[k] = int(k2_idx)
+        fac_cos[k] = -1.0 if (m_i % 2 == 1) else 1.0
+        fac_sin[k] = -fac_cos[k]
+
+    k2_j = jnp.asarray(k2)
+    fac_cos_j = jnp.asarray(fac_cos, dtype=R_cos.dtype)
+    fac_sin_j = jnp.asarray(fac_sin, dtype=R_sin.dtype)
+    mask = k2_j >= 0
+    k2_safe = jnp.where(mask, k2_j, 0)
+
+    R_cos_flip = jnp.where(mask, fac_cos_j * R_cos[k2_safe], R_cos)
+    R_sin_flip = jnp.where(mask, fac_sin_j * R_sin[k2_safe], R_sin)
+    Z_cos_flip = jnp.where(mask, fac_cos_j * Z_cos[k2_safe], Z_cos)
+    Z_sin_flip = jnp.where(mask, fac_sin_j * Z_sin[k2_safe], Z_sin)
+    return R_cos_flip, R_sin_flip, Z_cos_flip, Z_sin_flip
 
 
 def _apply_m1_constraint(static: VMECStatic, boundary: BoundaryCoeffs) -> BoundaryCoeffs:
@@ -679,6 +728,10 @@ def initial_guess_from_boundary(
         This matches the VMEC grid/weighting used in parity diagnostics.
     """
     cfg = static.cfg
+    if infer_axis_if_missing and _boundary_is_traced(boundary):
+        # Axis inference uses numpy-heavy logic; disable when tracing to keep
+        # the path differentiable. Provide explicit axis coefficients if needed.
+        infer_axis_if_missing = False
     K = static.modes.K
     layout = StateLayout(ns=cfg.ns, K=K, lasym=cfg.lasym)
 
@@ -702,14 +755,29 @@ def initial_guess_from_boundary(
             dtype = _np.float64
 
     boundary_use = boundary
-    areas = _boundary_cross_section_areas(static, boundary_use)
-    lflip = _vmec_lflip_from_boundary(static, boundary_use)
-    if lflip is None:
-        # VMEC only flips when the m=1 rtest*ztest diagnostic is decisive.
-        # If ambiguous, keep the input orientation.
-        lflip = False
-    if bool(lflip):
-        boundary_use = _flip_boundary_theta(static, boundary_use)
+    if _boundary_is_traced(boundary_use):
+        lflip = _vmec_lflip_from_boundary_jax(static, boundary_use)
+        R_cos_flip, R_sin_flip, Z_cos_flip, Z_sin_flip = _flip_boundary_theta_arrays(
+            static,
+            jnp.asarray(boundary_use.R_cos),
+            jnp.asarray(boundary_use.R_sin),
+            jnp.asarray(boundary_use.Z_cos),
+            jnp.asarray(boundary_use.Z_sin),
+        )
+        boundary_use = BoundaryCoeffs(
+            R_cos=jnp.where(lflip, R_cos_flip, jnp.asarray(boundary_use.R_cos)),
+            R_sin=jnp.where(lflip, R_sin_flip, jnp.asarray(boundary_use.R_sin)),
+            Z_cos=jnp.where(lflip, Z_cos_flip, jnp.asarray(boundary_use.Z_cos)),
+            Z_sin=jnp.where(lflip, Z_sin_flip, jnp.asarray(boundary_use.Z_sin)),
+        )
+    else:
+        lflip = _vmec_lflip_from_boundary(static, boundary_use)
+        if lflip is None:
+            # VMEC only flips when the m=1 rtest*ztest diagnostic is decisive.
+            # If ambiguous, keep the input orientation.
+            lflip = False
+        if bool(lflip):
+            boundary_use = _flip_boundary_theta(static, boundary_use)
     boundary_use = _apply_m1_constraint(static, boundary_use)
 
 

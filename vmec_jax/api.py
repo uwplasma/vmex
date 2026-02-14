@@ -20,16 +20,28 @@ from .driver import (
     residual_scalars_from_state,
     write_wout_from_fixed_boundary_run,
 )
+from .field import signgs_from_sqrtg
+from .energy import flux_profiles_from_indata
 from .plotting import (
     bmag_from_state_physical,
+    bmag_from_wout,
     closed_theta_grid,
     fix_matplotlib_3d,
     profiles_from_wout,
     surface_rz_from_wout_physical,
     surface_stack,
+    vmecplot2_bmag_grid,
+    vmecplot2_cross_section_indices,
+    vmecplot2_lcfs_3d_grid,
+    vmecplot2_surface_grid,
+    write_axisym_overview,
+    write_bmag_parity_figures,
+    write_bsub_parity_figures,
+    write_bsup_parity_figures,
     zeta_grid,
     zeta_grid_field_period,
 )
+from .visualization import export_vtk_surface_and_fieldline
 from .wout import read_wout, state_from_wout
 
 __all__ = [
@@ -43,13 +55,27 @@ __all__ = [
     "write_wout_from_fixed_boundary_run",
     # Plotting helpers
     "bmag_from_state_physical",
+    "bmag_from_wout",
     "closed_theta_grid",
     "fix_matplotlib_3d",
     "profiles_from_wout",
     "surface_rz_from_wout_physical",
     "surface_stack",
+    "vmecplot2_bmag_grid",
+    "vmecplot2_cross_section_indices",
+    "vmecplot2_lcfs_3d_grid",
+    "vmecplot2_surface_grid",
+    "write_axisym_overview",
+    "write_bmag_parity_figures",
+    "write_bsub_parity_figures",
+    "write_bsup_parity_figures",
     "zeta_grid",
     "zeta_grid_field_period",
+    # Field helpers
+    "signgs_from_sqrtg",
+    "flux_profiles_from_indata",
+    # Visualization helpers
+    "export_vtk_surface_and_fieldline",
     # Low-friction wout access for plotting
     "read_wout",
     "state_from_wout",
