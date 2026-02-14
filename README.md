@@ -50,7 +50,7 @@ VMEC2000_INTEGRATION=1 pytest -k vmec2000_exec_qa_regression
 ```
 
 Note: `vmec_jax` enables JAX 64-bit in the fixed-boundary driver for parity. Set `JAX_ENABLE_X64=0` to prioritize speed.
-For faster fixed-boundary solves in Python, pass `jit_forces=True` to `run_fixed_boundary(...)` (force/residual pipeline is JIT-compiled). Debug dump env vars automatically disable this.
+For faster fixed-boundary solves in Python, the force/residual pipeline is JIT-compiled by default. Pass `jit_forces=False` to `run_fixed_boundary(...)` to disable it. Debug dump env vars automatically disable JIT.
 
 ## Snapshot figures
 

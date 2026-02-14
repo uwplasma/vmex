@@ -354,6 +354,156 @@ def _maybe_dump_gc(*, frzl, static, iter_idx: int, label: str) -> None:
     )
 
 
+def _maybe_dump_lam_prec(*, lam_prec, faclam, static, iter_idx: int) -> None:
+    env = os.getenv("VMEC_JAX_DUMP_LAM", "")
+    if not env or env == "0":
+        return
+    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_LAM_ITER", ""))
+    if iters is None:
+        iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
+    if iters is not None and int(iter_idx) not in iters:
+        return
+    outdir = os.getenv("VMEC_JAX_DUMP_LAM_DIR", "")
+    if not outdir:
+        outdir = os.getenv("VMEC_JAX_DUMP_DIR", ".")
+    outdir = Path(outdir).expanduser().resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    ns = int(static.cfg.ns)
+    path = outdir / f"lam_prec_ns{ns}_iter{int(iter_idx)}.npz"
+    lthreed = bool(static.cfg.lthreed)
+    lasym = bool(static.cfg.lasym)
+    ntmax = 4 if (lasym and lthreed) else (2 if lthreed else 1)
+    lam_arr = np.asarray(lam_prec)
+    if lam_arr.ndim != 3:
+        raise ValueError(f"lam_prec expected 3D (ns,mpol,ntor+1), got {lam_arr.shape}")
+    # VMEC dumps use (ns, n, m, t) with t=1..ntmax.
+    pfaclam = np.zeros((ns, lam_arr.shape[2], lam_arr.shape[1], ntmax), dtype=lam_arr.dtype)
+    pfaclam[:, :, :, 0] = np.transpose(lam_arr, (0, 2, 1))
+    if ntmax > 1:
+        pfaclam[:, :, :, 1:ntmax] = pfaclam[:, :, :, :1]
+        # VMEC updates (m,n)=(0,0) only for t=1, leaving t>1 at zero.
+        pfaclam[:, 0, 0, 1:ntmax] = 0.0
+    data = {
+        "pfaclam": pfaclam,
+        "ns": ns,
+        "mpol": int(static.cfg.mpol),
+        "ntor": int(static.cfg.ntor),
+        "lthreed": lthreed,
+        "lasym": lasym,
+    }
+    if faclam is not None:
+        fac_arr = np.asarray(faclam)
+        faclam_out = np.zeros_like(pfaclam)
+        if fac_arr.shape == lam_arr.shape:
+            faclam_out[:, :, :, 0] = np.transpose(fac_arr, (0, 2, 1))
+            if ntmax > 1:
+                faclam_out[:, :, :, 1:ntmax] = faclam_out[:, :, :, :1]
+                faclam_out[:, 0, 0, 1:ntmax] = 0.0
+        else:
+            faclam_out = fac_arr
+        data["faclam"] = faclam_out
+    np.savez(path, **data)
+
+
+def _maybe_dump_lam_fsql1(*, fsql1_pre, fsql1_post, static, iter_idx: int) -> None:
+    env = os.getenv("VMEC_JAX_DUMP_LAM", "")
+    if not env or env == "0":
+        return
+    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_LAM_ITER", ""))
+    if iters is None:
+        iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
+    if iters is not None and int(iter_idx) not in iters:
+        return
+    outdir = os.getenv("VMEC_JAX_DUMP_LAM_DIR", "")
+    if not outdir:
+        outdir = os.getenv("VMEC_JAX_DUMP_DIR", ".")
+    outdir = Path(outdir).expanduser().resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    ns = int(static.cfg.ns)
+    path = outdir / f"lam_fsql1_ns{ns}_iter{int(iter_idx)}.dat"
+    with path.open("w", encoding="utf-8") as f:
+        f.write("# lambda fsql1 dump (pre/post faclam)\n")
+        f.write("columns: iter fsql1_pre fsql1_post\n")
+        f.write(f"{int(iter_idx):6d} {float(np.asarray(fsql1_pre)):24.16e} {float(np.asarray(fsql1_post)):24.16e}\n")
+
+
+def _maybe_dump_lamcal(*, lam_debug: dict[str, np.ndarray], static, iter_idx: int) -> None:
+    env = os.getenv("VMEC_JAX_DUMP_LAMCAL", "")
+    if not env or env == "0":
+        return
+    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
+    if iters is not None and int(iter_idx) not in iters:
+        return
+    outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    ns = int(static.cfg.ns)
+    path = outdir / f"lamcal_ns{ns}_iter{int(iter_idx)}.npz"
+    np.savez(
+        path,
+        blam_pre=np.asarray(lam_debug.get("blam_pre")),
+        clam_pre=np.asarray(lam_debug.get("clam_pre")),
+        dlam_pre=np.asarray(lam_debug.get("dlam_pre")),
+        blam_post=np.asarray(lam_debug.get("blam_post")),
+        clam_post=np.asarray(lam_debug.get("clam_post")),
+        dlam_post=np.asarray(lam_debug.get("dlam_post")),
+    )
+
+
+def _maybe_dump_lam_gcl(
+    *,
+    frzl_pre,
+    frzl_post,
+    static,
+    iter_idx: int,
+    delta_s,
+) -> None:
+    env = os.getenv("VMEC_JAX_DUMP_LAM", "")
+    if not env or env == "0":
+        return
+    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_LAM_ITER", ""))
+    if iters is None:
+        iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
+    if iters is not None and int(iter_idx) not in iters:
+        return
+    outdir = os.getenv("VMEC_JAX_DUMP_LAM_DIR", "")
+    if not outdir:
+        outdir = os.getenv("VMEC_JAX_DUMP_DIR", ".")
+    outdir = Path(outdir).expanduser().resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    ns = int(static.cfg.ns)
+    path = outdir / f"lam_gcl_ns{ns}_iter{int(iter_idx)}.npz"
+
+    _gcr_pre, _gcz_pre, gcl_pre = _gc_from_frzl(frzl=frzl_pre, cfg=static.cfg)
+    _gcr_post, _gcz_post, gcl_post = _gc_from_frzl(frzl=frzl_post, cfg=static.cfg)
+
+    gcl_pre = np.asarray(gcl_pre)
+    gcl_post = np.asarray(gcl_post)
+    delta_s_f = float(np.asarray(delta_s))
+    fsql1_pre = float(np.sum(gcl_pre * gcl_pre) * delta_s_f)
+    fsql1_post = float(np.sum(gcl_post * gcl_post) * delta_s_f)
+
+    _maybe_dump_lam_fsql1(
+        fsql1_pre=fsql1_pre,
+        fsql1_post=fsql1_post,
+        static=static,
+        iter_idx=int(iter_idx),
+    )
+
+    np.savez(
+        path,
+        gcl_pre=gcl_pre,
+        gcl_post=gcl_post,
+        fsql1_pre=fsql1_pre,
+        fsql1_post=fsql1_post,
+        delta_s=delta_s_f,
+        ns=int(static.cfg.ns),
+        mpol=int(static.cfg.mpol),
+        ntor=int(static.cfg.ntor),
+        lthreed=bool(static.cfg.lthreed),
+        lasym=bool(static.cfg.lasym),
+    )
+
+
 def _maybe_dump_bsube(*, bc, static, iter_idx: int) -> None:
     env = os.getenv("VMEC_JAX_DUMP_BSUBE", "")
     if not env or env == "0":
@@ -386,6 +536,121 @@ def _maybe_dump_bsube(*, bc, static, iter_idx: int) -> None:
                     )
 
 
+def _maybe_dump_bsube_terms(*, bc, static, iter_idx: int) -> None:
+    env = os.getenv("VMEC_JAX_DUMP_BSUBE_TERMS", "")
+    if not env or env == "0":
+        return
+    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
+    if iters is not None and int(iter_idx) not in iters:
+        return
+    outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    ns = int(static.cfg.ns)
+    path = outdir / f"bsube_terms_ns{ns}_iter{int(iter_idx)}.dat"
+
+    lvv_sh = np.asarray(getattr(bc, "lvv_sh"))
+    lu0 = np.asarray(getattr(bc, "lu0_force"))
+    lu1 = np.asarray(getattr(bc, "lu1_full"))
+    phip = np.asarray(getattr(bc, "phip_internal"))
+    bsubu_tmp = np.asarray(getattr(bc, "bsubu_tmp"))
+    bsubv_pre = np.asarray(getattr(bc, "bsubv_preblend"))
+
+    ns, ntheta, nzeta = lvv_sh.shape
+    with path.open("w", encoding="utf-8") as f:
+        f.write("# bcovar bsube terms dump\n")
+        f.write(f"ns={ns}\n")
+        f.write(f"ntheta3={ntheta}\n")
+        f.write(f"nzeta={nzeta}\n")
+        f.write("columns: js lt lz lvv_sh lu0 lu1 phipf bsubu_tmp bsubv_pre\n")
+        for lt in range(ntheta):
+            for lz in range(nzeta):
+                for js in range(ns):
+                    f.write(
+                        f"{js + 1:6d}{lt + 1:6d}{lz + 1:6d}"
+                        f"{lvv_sh[js, lt, lz]:24.16e}{lu0[js, lt, lz]:24.16e}{lu1[js, lt, lz]:24.16e}"
+                        f"{phip[js]:24.16e}{bsubu_tmp[js, lt, lz]:24.16e}{bsubv_pre[js, lt, lz]:24.16e}\n"
+                    )
+
+
+def _maybe_dump_lulv(
+    *,
+    bc,
+    static,
+    iter_idx: int,
+    state: VMECState | None = None,
+    trig: VmecTrigTables | None = None,
+) -> None:
+    env = os.getenv("VMEC_JAX_DUMP_LULV", "")
+    if not env or env == "0":
+        return
+    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
+    if iters is not None and int(iter_idx) not in iters:
+        return
+    outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    ns = int(static.cfg.ns)
+    path = outdir / f"lulv_ns{ns}_iter{int(iter_idx)}.npz"
+    data = {
+        "lu0_full": np.asarray(getattr(bc, "lu0_full")),
+        "lu1_full": np.asarray(getattr(bc, "lu1_full")),
+        "lv0_full": np.asarray(getattr(bc, "lv0_full")),
+        "lv1_full": np.asarray(getattr(bc, "lv1_full")),
+    }
+    if state is not None:
+        data["Lcos"] = np.asarray(state.Lcos)
+        data["Lsin"] = np.asarray(state.Lsin)
+        data["m_modes"] = np.asarray(static.modes.m, dtype=int)
+        data["n_modes"] = np.asarray(static.modes.n, dtype=int)
+        if trig is not None:
+            # Debug lambda odd-m synthesis inputs (physical odd pieces).
+            from .vmec_realspace import vmec_realspace_synthesis_dtheta, vmec_realspace_synthesis_dzeta_phys
+
+            m_modes = np.asarray(static.modes.m, dtype=int)
+            mask_m1 = (m_modes == 1).astype(np.asarray(state.Lsin).dtype)
+            mask_odd_rest = ((m_modes % 2 == 1) & (m_modes != 1)).astype(np.asarray(state.Lsin).dtype)
+            lu_m1 = vmec_realspace_synthesis_dtheta(
+                coeff_cos=jnp.asarray(state.Lcos) * mask_m1,
+                coeff_sin=jnp.asarray(state.Lsin) * mask_m1,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=True,
+                s=static.s,
+            )
+            lu_rest = vmec_realspace_synthesis_dtheta(
+                coeff_cos=jnp.asarray(state.Lcos) * mask_odd_rest,
+                coeff_sin=jnp.asarray(state.Lsin) * mask_odd_rest,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=True,
+                s=static.s,
+            )
+            lv_m1 = vmec_realspace_synthesis_dzeta_phys(
+                coeff_cos=jnp.asarray(state.Lcos) * mask_m1,
+                coeff_sin=jnp.asarray(state.Lsin) * mask_m1,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=True,
+                s=static.s,
+            )
+            lv_rest = vmec_realspace_synthesis_dzeta_phys(
+                coeff_cos=jnp.asarray(state.Lcos) * mask_odd_rest,
+                coeff_sin=jnp.asarray(state.Lsin) * mask_odd_rest,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=True,
+                s=static.s,
+            )
+            data["lu_phys_m1"] = np.asarray(lu_m1)
+            data["lu_phys_rest"] = np.asarray(lu_rest)
+            data["lv_phys_m1"] = np.asarray(lv_m1)
+            data["lv_phys_rest"] = np.asarray(lv_rest)
+    np.savez(path, **data)
+
+
 def _maybe_dump_xc(
     *,
     state: VMECState,
@@ -408,11 +673,9 @@ def _maybe_dump_xc(
     outdir.mkdir(parents=True, exist_ok=True)
     ns_val = int(static.cfg.ns)
     path = outdir / f"xc_ns{ns_val}_iter{int(iter_idx)}.npz"
-    from .diagnostics import vmec_internal_mn_from_state, vmec_xc_from_mn_blocks, _vmec_basis_norm
+    from .diagnostics import vmec_internal_mn_from_state, vmec_xc_from_mn_blocks
 
-    blocks = vmec_internal_mn_from_state(state, static, apply_basis_norm=False)
-    basis_scale = _vmec_basis_norm(mpol=int(static.cfg.mpol), ntor=int(static.cfg.ntor))
-    blocks = {k: v * basis_scale[None, :, :] for k, v in blocks.items()}
+    blocks = vmec_internal_mn_from_state(state, static, apply_basis_norm=False, apply_m1_constraint=False)
     xc = vmec_xc_from_mn_blocks(
         rcc=blocks["rcc"],
         rss=blocks["rss"],
@@ -422,14 +685,13 @@ def _maybe_dump_xc(
         lcs=blocks["lcs"],
         cfg=static.cfg,
     )
-    basis_scale_v = np.ones_like(basis_scale)
     xcdot = vmec_xc_from_mn_blocks(
-        rcc=np.asarray(vRcc) * basis_scale_v[None, :, :],
-        rss=np.asarray(vRss) * basis_scale_v[None, :, :],
-        zsc=np.asarray(vZsc) * basis_scale_v[None, :, :],
-        zcs=np.asarray(vZcs) * basis_scale_v[None, :, :],
-        lsc=np.asarray(vLsc) * basis_scale_v[None, :, :],
-        lcs=np.asarray(vLcs) * basis_scale_v[None, :, :],
+        rcc=np.asarray(vRcc),
+        rss=np.asarray(vRss),
+        zsc=np.asarray(vZsc),
+        zcs=np.asarray(vZcs),
+        lsc=np.asarray(vLsc),
+        lcs=np.asarray(vLcs),
         cfg=static.cfg,
     )
     np.savez(
@@ -836,8 +1098,8 @@ def solve_lambda_gd(
     weight = ds * dtheta * dzeta
 
     def _wb_from_L(Lcos, Lsin):
-        lam_u = eval_fourier_dtheta(Lcos, Lsin, static.basis)
-        lam_v = eval_fourier_dzeta_phys(Lcos, Lsin, static.basis) / nfp
+        lam_u = eval_fourier_dtheta(Lcos, Lsin, static.basis, coeffs_internal=True)
+        lam_v = eval_fourier_dzeta_phys(Lcos, Lsin, static.basis, coeffs_internal=True) / nfp
         bsupu, bsupv = bsup_from_sqrtg_lambda(
             sqrtg=sqrtg_use,
             lam_u=lam_u,
@@ -1635,15 +1897,17 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
         icurv=icurv,
     )
 
-    trig = vmec_trig_tables(
-        ntheta=int(static.cfg.ntheta),
-        nzeta=int(static.cfg.nzeta),
-        nfp=int(wout_like.nfp),
-        mmax=int(wout_like.mpol) - 1,
-        nmax=int(wout_like.ntor),
-        lasym=bool(wout_like.lasym),
-        dtype=jnp.asarray(state0.Rcos).dtype,
-    )
+    trig = getattr(static, "trig_vmec", None)
+    if trig is None:
+        trig = vmec_trig_tables(
+            ntheta=int(static.cfg.ntheta),
+            nzeta=int(static.cfg.nzeta),
+            nfp=int(wout_like.nfp),
+            mmax=int(wout_like.mpol) - 1,
+            nmax=int(wout_like.ntor),
+            lasym=bool(wout_like.lasym),
+            dtype=jnp.asarray(state0.Rcos).dtype,
+        )
     objective_scale_f = float(objective_scale) if objective_scale is not None else None
 
     constraint_tcon0: float | None = None
@@ -2109,20 +2373,21 @@ def solve_fixed_boundary_gn_vmec_residual(
         icurv=icurv,
     )
 
-    trig = vmec_trig_tables(
-        ntheta=int(static.cfg.ntheta),
-        nzeta=int(static.cfg.nzeta),
-        nfp=int(wout_like.nfp),
-        mmax=int(wout_like.mpol) - 1,
-        nmax=int(wout_like.ntor),
-        lasym=bool(wout_like.lasym),
-        dtype=jnp.asarray(state0.Rcos).dtype,
-    )
+    trig = getattr(static, "trig_vmec", None)
+    if trig is None:
+        trig = vmec_trig_tables(
+            ntheta=int(static.cfg.ntheta),
+            nzeta=int(static.cfg.nzeta),
+            nfp=int(wout_like.nfp),
+            mmax=int(wout_like.mpol) - 1,
+            nmax=int(wout_like.ntor),
+            lasym=bool(wout_like.lasym),
+            dtype=jnp.asarray(state0.Rcos).dtype,
+        )
 
-    # VMEC evolves the *decomposed* (scalxc-scaled) Fourier coefficients. Our
-    # `VMECState` stores physical coefficients, so convert decomposed-space
-    # velocities/forces back to physical-space coefficient updates by dividing
-    # by scalxc(m,s) before applying updates to `state`.
+    # VMEC updates the *unscaled* coefficients using scalxc-weighted residuals.
+    # By default we keep that behavior (no division by scalxc). The optional
+    # `divide_by_scalxc_for_update` hook exists for experiments only.
     scalxc = vmec_scalxc_from_s(s=s, mpol=int(static.cfg.mpol))  # (ns, mpol)
     scalxc_mn = scalxc[:, :, None]  # (ns, mpol, ntor+1)
 
@@ -2132,7 +2397,7 @@ def solve_fixed_boundary_gn_vmec_residual(
     edge_Zsin = jnp.asarray(state0.Zsin)[-1, :]
 
     def _project_step(d: VMECState) -> VMECState:
-        return _mask_grad_for_constraints(d, static, idx00=idx00, mask_lambda_axis=False)
+        return _mask_grad_for_constraints(d, static, idx00=idx00, mask_lambda_axis=True)
 
     def _enforce_state(st: VMECState) -> VMECState:
         return _enforce_fixed_boundary_and_axis(
@@ -2142,7 +2407,7 @@ def solve_fixed_boundary_gn_vmec_residual(
             edge_Rsin=edge_Rsin,
             edge_Zcos=edge_Zcos,
             edge_Zsin=edge_Zsin,
-            enforce_lambda_axis=False,
+            enforce_lambda_axis=True,
             idx00=idx00,
         )
 
@@ -2440,9 +2705,9 @@ def solve_fixed_boundary_residual_iter(
     apply_m1_constraints: bool = True,
     precond_radial_alpha: float = 0.5,
     precond_lambda_alpha: float = 0.5,
-    mode_diag_exponent: float = 1.0,
+    mode_diag_exponent: float = 0.0,
     auto_flip_force: bool = True,
-    divide_by_scalxc_for_update: bool = True,
+    divide_by_scalxc_for_update: bool = False,
     lambda_update_scale: float = 1.0,
     enforce_vmec_lambda_axis: bool = False,
     vmec2000_control: bool = False,
@@ -2455,6 +2720,7 @@ def solve_fixed_boundary_residual_iter(
     use_direct_fallback: bool | None = None,
     verbose: bool = True,
     verbose_vmec2000_table: bool = True,
+    jit_forces: bool = True,
     resume_state: dict | None = None,
 ) -> SolveVmecResidualResult:
     """VMEC-style fixed-point update loop using preconditioned force residuals."""
@@ -2482,10 +2748,34 @@ def solve_fixed_boundary_residual_iter(
     use_restart_triggers = bool(use_restart_triggers)
     use_direct_fallback = bool(use_direct_fallback)
     verbose_vmec2000_table = bool(verbose_vmec2000_table)
+    jit_forces = bool(jit_forces)
     limit_dt_from_force = bool(limit_dt_from_force)
     limit_update_rms = bool(limit_update_rms)
     backtracking = bool(backtracking)
     strict_update = bool(strict_update)
+    dump_envs = (
+        "VMEC_JAX_DUMP_DIR",
+        "VMEC_JAX_DUMP_TOMNSPS",
+        "VMEC_JAX_DUMP_TOMNSPS_KERNELS",
+        "VMEC_JAX_DUMP_FORCE_KERNELS",
+        "VMEC_JAX_DUMP_GC",
+        "VMEC_JAX_DUMP_GCX2",
+        "VMEC_JAX_DUMP_SCALARS",
+        "VMEC_JAX_DUMP_BSUBE",
+        "VMEC_JAX_DUMP_BSUBE_TERMS",
+        "VMEC_JAX_DUMP_LULV",
+        "VMEC_JAX_DUMP_XC",
+        "VMEC_JAX_DUMP_LAM",
+        "VMEC_JAX_DUMP_LAMCAL",
+        "VMEC_JAX_DUMP_LAM_FSQL1",
+        "VMEC_JAX_DUMP_LAM_GCL",
+        "VMEC_JAX_DUMP_FSQ1",
+    )
+    dumps_enabled = any(os.getenv(name, "") not in ("", "0") for name in dump_envs)
+    if dumps_enabled and jit_forces:
+        if verbose:
+            print("[solve_fixed_boundary_residual_iter] jit_forces disabled (debug dumps enabled)")
+        jit_forces = False
 
     from .energy import flux_profiles_from_indata
     from .energy import magnetic_wb_from_state
@@ -2540,26 +2830,33 @@ def solve_fixed_boundary_residual_iter(
         static = build_static(cfg, grid=grid_vmec)
 
     idx00 = _mode00_index(static.modes)
-    m_modes = np.asarray(static.modes.m, dtype=int)
-    n_modes = np.asarray(static.modes.n, dtype=int)
-    lambda_axis_copy_mask = jnp.asarray((m_modes == 0) & (n_modes > 0), dtype=jnp.asarray(state0.Rcos).dtype)
+    m_modes = np.asarray(getattr(static, "m_np", None) if getattr(static, "m_np", None) is not None else static.modes.m, dtype=int)
+    n_modes = np.asarray(getattr(static, "n_np", None) if getattr(static, "n_np", None) is not None else static.modes.n, dtype=int)
+    axis_copy_mask_np = (
+        np.asarray(getattr(static, "lambda_axis_copy_mask", None), dtype=bool)
+        if getattr(static, "lambda_axis_copy_mask", None) is not None
+        else (m_modes == 0) & (n_modes > 0)
+    )
+    lambda_axis_copy_mask = jnp.asarray(axis_copy_mask_np, dtype=jnp.asarray(state0.Rcos).dtype)
 
     # Boundary + axis recompute helpers (for VMEC-style bad-Jacobian reset).
-    boundary_for_axis = boundary_from_indata(indata, static.modes) if indata is not None else None
+    boundary_for_axis = (
+        boundary_from_indata(indata, static.modes, apply_m1_constraint=True) if indata is not None else None
+    )
     axis_reset_done = bool(resume_state is not None)
     lmove_axis = True if indata is None else bool(indata.get_bool("LMOVE_AXIS", True))
 
     def _apply_vmec_lambda_axis_rules(st: VMECState) -> VMECState:
-        """VMEC symmetric-3D lambda axis closure (`totzsps`/`totzsp_mod`)."""
+        """Enforce VMEC lambda gauge without mutating stored axis coefficients.
+
+        VMEC applies the m=0 lambda axis-closure during real-space synthesis
+        (totzsps) but does not overwrite the stored `xc` coefficients. Keep
+        the state axis row intact and only enforce the (m,n)=(0,0) gauge here.
+        """
         if not enforce_vmec_lambda_axis:
             return st
         Lcos = jnp.asarray(st.Lcos)
         Lsin = jnp.asarray(st.Lsin)
-        if int(Lcos.shape[0]) < 2:
-            return st
-        if bool(getattr(static.cfg, "lthreed", False)) and int(getattr(static.cfg, "ntor", 0)) > 0:
-            axis_lsin = jnp.where(lambda_axis_copy_mask != 0, Lsin[1, :], Lsin[0, :])
-            Lsin = Lsin.at[0, :].set(axis_lsin)
         Lcos, Lsin = _enforce_lambda_gauge(Lcos, Lsin, idx00=idx00)
         return VMECState(
             layout=st.layout,
@@ -2695,14 +2992,32 @@ def solve_fixed_boundary_residual_iter(
             except Exception:
                 pass
 
-        st = _state_from_axis_coeffs(
+        st_axis = _state_from_axis_coeffs(
             raxis_cc,
             raxis_cs,
             zaxis_cc,
             zaxis_cs,
             dtype=jnp.asarray(st.Rcos).dtype,
         )
-        return _apply_vmec_lambda_axis_rules(st)
+        # Preserve non-axis coefficients (including lambda) when resetting axis.
+        if getattr(static, "m_is_m0", None) is None:
+            mask_m0 = jnp.asarray(np.asarray(static.modes.m, dtype=int) == 0, dtype=jnp.asarray(st.Rcos).dtype)
+        else:
+            mask_m0 = jnp.asarray(static.m_is_m0, dtype=jnp.asarray(st.Rcos).dtype)
+        Rcos = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Rcos), jnp.asarray(st.Rcos))
+        Rsin = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Rsin), jnp.asarray(st.Rsin))
+        Zcos = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Zcos), jnp.asarray(st.Zcos))
+        Zsin = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Zsin), jnp.asarray(st.Zsin))
+        st_out = VMECState(
+            layout=st.layout,
+            Rcos=Rcos,
+            Rsin=Rsin,
+            Zcos=Zcos,
+            Zsin=Zsin,
+            Lcos=st.Lcos,
+            Lsin=st.Lsin,
+        )
+        return _apply_vmec_lambda_axis_rules(st_out)
     s = jnp.asarray(static.s)
     flux = flux_profiles_from_indata(indata, s, signgs=signgs)
     chipf_wout = jnp.asarray(flux.chipf)
@@ -2747,11 +3062,11 @@ def solve_fixed_boundary_residual_iter(
     idx00 = _mode00_index(static.modes)
     lambda_update_scale_j = jnp.asarray(lambda_update_scale, dtype=jnp.asarray(state0.Rcos).dtype)
 
-    # VMEC stores physical Fourier coefficients in `xc`, but uses a `scalxc`
-    # factor to represent odd-m modes internally in 1/sqrt(s) form. The force
-    # pipeline applies `scalxc` after `tomnsps` (see `funct3d.f: gc = gc*scalxc`)
-    # so the residual/preconditioner updates operate in the same physical
-    # coefficient space as `VMECState`.
+    # VMEC stores Fourier coefficients in an internal (mscale/nscale) basis and
+    # uses `scalxc` to represent odd-m modes in 1/sqrt(s) form. The force pipeline
+    # applies `scalxc` after `tomnsps` (see `funct3d.f: gc = gc*scalxc`) so the
+    # residual/preconditioner updates operate in the same internal coefficient
+    # space as `VMECState`.
 
     edge_Rcos = jnp.asarray(state0.Rcos)[-1, :]
     edge_Rsin = jnp.asarray(state0.Rsin)[-1, :]
@@ -2885,7 +3200,7 @@ def solve_fixed_boundary_residual_iter(
         sp[1] = sm[2] if ns >= 2 else 0.0
         return sm, sp
 
-    def _lambda_preconditioner(bc):
+    def _lambda_preconditioner(bc, *, return_faclam: bool = False, return_debug: bool = False):
         from .preconditioner_1d_jax import lambda_preconditioner
 
         return lambda_preconditioner(
@@ -2893,6 +3208,8 @@ def solve_fixed_boundary_residual_iter(
             trig=trig,
             s=s,
             cfg=cfg,
+            return_faclam=return_faclam,
+            return_debug=return_debug,
         )
 
     def _rz_preconditioner(frzl_in: TomnspsRZL, bc, k):
@@ -2933,6 +3250,8 @@ def solve_fixed_boundary_residual_iter(
         )
         if iter_idx is not None:
             _maybe_dump_bsube(bc=k.bc, static=static, iter_idx=int(iter_idx))
+            _maybe_dump_bsube_terms(bc=k.bc, static=static, iter_idx=int(iter_idx))
+            _maybe_dump_lulv(bc=k.bc, static=static, iter_idx=int(iter_idx), state=state, trig=trig)
         if iter_idx is not None:
             _maybe_dump_force_kernels(k=k, static=static, iter_idx=int(iter_idx), label="raw")
         frzl = vmec_residual_internal_from_kernels(
@@ -3003,6 +3322,37 @@ def solve_fixed_boundary_residual_iter(
             l_scale = jnp.asarray(l_scale_override, dtype=jnp.asarray(frzl.frcc).dtype)
         return k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale, norms
 
+    _compute_forces_impl = _compute_forces
+    if jit_forces:
+        def _compute_forces_nodump(
+            state: VMECState,
+            *,
+            include_edge: bool,
+            zero_m1: Any,
+            constraint_precond_diag: tuple[Any, Any] | None = None,
+            constraint_tcon: Any | None = None,
+            norms_override: Any | None = None,
+            rz_scale_override: Any | None = None,
+            l_scale_override: Any | None = None,
+            iter_idx: int | None = None,
+        ):
+            return _compute_forces_impl(
+                state,
+                include_edge=include_edge,
+                zero_m1=zero_m1,
+                constraint_precond_diag=constraint_precond_diag,
+                constraint_tcon=constraint_tcon,
+                norms_override=norms_override,
+                rz_scale_override=rz_scale_override,
+                l_scale_override=l_scale_override,
+                iter_idx=None,
+            )
+
+        _compute_forces = jit(_compute_forces_nodump, static_argnames=("include_edge",))
+
+    def _iter_idx_for_dump(it: int | None) -> int | None:
+        return None if jit_forces else it
+
     mpol = int(static.cfg.mpol)
     ntor = int(static.cfg.ntor)
     nrange = ntor + 1
@@ -3011,7 +3361,7 @@ def solve_fixed_boundary_residual_iter(
 
     idx_pos = -np.ones((mpol, nrange), dtype=np.int32)
     idx_neg = -np.ones((mpol, nrange), dtype=np.int32)
-    for k, (m_k, n_k) in enumerate(zip(np.asarray(static.modes.m), np.asarray(static.modes.n))):
+    for k, (m_k, n_k) in enumerate(zip(m_modes, n_modes)):
         m_i = int(m_k)
         n_i = int(n_k)
         if n_i >= 0:
@@ -3041,20 +3391,13 @@ def solve_fixed_boundary_residual_iter(
     has_kn_np = kn_idx_np >= 0
     has_kn = jnp.asarray(has_kn_np)
     has_kn_any = bool(np.any(has_kn_np))
-    m0_mask = np.asarray(static.modes.m) == 0
+    m0_mask = np.asarray(getattr(static, "m_is_m0", None) if getattr(static, "m_is_m0", None) is not None else (np.asarray(static.modes.m) == 0))
 
-    # VMEC internal Fourier coefficients live in a basis scaled by fixaray's
-    # (mscale, nscale) factors. VMEC's external (wout/physical) coefficients are:
-    #   A_ext = (mscale(m) * nscale(|n|)) * A_int
-    # See `VMEC2000/Sources/General/convert.f`.
-    #
-    # The VMEC residual pipeline (`tomnsps` -> `residue` -> `evolve`) operates on
-    # the *internal* coefficients. Since `VMECState` stores physical coefficients,
-    # we must apply this scale when mapping VMEC-style (m, n>=0) blocks back into
-    # signed physical coefficient vectors for updates.
-    mscale = jnp.asarray(trig.mscale, dtype=jnp.asarray(state0.Rcos).dtype)
-    nscale = jnp.asarray(trig.nscale, dtype=jnp.asarray(state0.Rcos).dtype)
-    mode_scale_mn = (mscale[m_idx] * nscale[n_idx]).astype(jnp.asarray(state0.Rcos).dtype)  # (P,)
+    # VMEC evolves *internal* coefficients (normalized by mscale/nscale). The
+    # solver state stores these internal coefficients as well, so no additional
+    # mscale/nscale factor is applied when mapping (m,n>=0) blocks back into
+    # signed storage for updates.
+    mode_scale_mn = jnp.ones((int(m_idx.shape[0]),), dtype=jnp.asarray(state0.Rcos).dtype)
 
     def _mn_cos_to_signed(cc, ss):
         cc = jnp.asarray(cc)
@@ -3133,9 +3476,9 @@ def solve_fixed_boundary_residual_iter(
         return _mn_sin_to_signed(sc, cs)
 
     def _mn_sin_to_signed_physical_lambda(sc, cs):
-        """Lambda updates use VMEC's scalxc-weighted coefficients directly."""
-        sc = jnp.asarray(sc)
-        cs = jnp.asarray(cs) if cs is not None else None
+        """Map lambda updates onto signed physical coefficients (VMEC scalxc)."""
+        sc = jnp.asarray(sc) / scalxc_mn
+        cs = jnp.asarray(cs) / scalxc_mn if cs is not None else None
         return _mn_sin_to_signed(sc, cs)
 
     def _rz_norm(state: VMECState) -> Any:
@@ -3163,23 +3506,10 @@ def solve_fixed_boundary_residual_iter(
         rss = jnp.where(is_n0 | is_m0, 0.0, jnp.where(has_kn_mask, rpos - rneg, 0.0))
         zsc = jnp.where((~is_n0) & is_m0, 0.0, zsc)
         zcs = jnp.where(is_n0, 0.0, jnp.where(has_kn_mask, zneg - zpos, -zpos))
-        if use_m1_pair_convert:
-            is_m1 = (m_idx == 1)[None, :]
-            rss_old = rss
-            rss = jnp.where(is_m1, 0.5 * (rss_old + zcs), rss_old)
-            zcs = jnp.where(is_m1, 0.5 * (rss_old - zcs), zcs)
+        # Note: VMEC builds fnorm1 directly from the internal xc vector without
+        # applying m=1 constraints or mscale/nscale basis normalization.
 
-        mscale = jnp.where(m_idx == 0, 1.0, jnp.sqrt(2.0)).astype(rcc.dtype)
-        nscale = jnp.where(n_idx == 0, 1.0, jnp.sqrt(2.0)).astype(rcc.dtype)
-        basis_norm = (1.0 / (mscale * nscale))[None, :]
-        rcc = rcc * basis_norm
-        zsc = zsc * basis_norm
-        if bool(getattr(static.cfg, "lthreed", True)):
-            rss = rss * basis_norm
-            zcs = zcs * basis_norm
-
-        # VMEC `bcovar.f` builds `fnorm1` from l=2..ns (1-based), i.e. it
-        # excludes the magnetic-axis surface but includes the edge.
+        # VMEC `bcovar_par` accumulates fnorm1 over l=2..ns (excludes axis).
         sl = slice(1, None)
 
         include_rcc = ((m_idx > 0) | (n_idx > 0))[None, :].astype(rcc.dtype)
@@ -3210,7 +3540,7 @@ def solve_fixed_boundary_residual_iter(
         edge_Rsin=edge_Rsin,
         edge_Zcos=edge_Zcos,
         edge_Zsin=edge_Zsin,
-        enforce_lambda_axis=False,
+        enforce_lambda_axis=True,
         idx00=idx00,
     )
     state = _apply_vmec_lambda_axis_rules(state)
@@ -3348,6 +3678,8 @@ def solve_fixed_boundary_residual_iter(
     cache_prec_rz_mats = None
     cache_prec_rz_jmax = None
     cache_prec_lam_prec = None
+    cache_prec_faclam = None
+    cache_prec_lam_debug = None
     bcovar_update_history: list[int] = []
     iter_offset = 0
 
@@ -3386,15 +3718,25 @@ def solve_fixed_boundary_residual_iter(
         cache_prec_rz_mats = resume_state.get("cache_prec_rz_mats", cache_prec_rz_mats)
         cache_prec_rz_jmax = resume_state.get("cache_prec_rz_jmax", cache_prec_rz_jmax)
         cache_prec_lam_prec = resume_state.get("cache_prec_lam_prec", cache_prec_lam_prec)
+        cache_prec_faclam = resume_state.get("cache_prec_faclam", cache_prec_faclam)
+        cache_prec_lam_debug = resume_state.get("cache_prec_lam_debug", cache_prec_lam_debug)
 
     if bool(vmec2000_control) and (boundary_for_axis is not None) and (not axis_reset_done):
         bad_jacobian_init = False
         k_init = None
-        jac = vmec_half_mesh_jacobian_from_state(state=state, modes=static.modes, trig=trig, s=s)
+        jac = vmec_half_mesh_jacobian_from_state(
+            state=state,
+            modes=static.modes,
+            trig=trig,
+            s=s,
+            lconm1=bool(getattr(static.cfg, "lconm1", True)),
+            lthreed=bool(getattr(static.cfg, "lthreed", True)),
+        )
         tau = np.asarray(jac.tau)
         if tau.size:
-            min_tau_init = float(np.min(tau))
-            max_tau_init = float(np.max(tau))
+            tau_use = tau[1:] if tau.shape[0] > 1 else tau
+            min_tau_init = float(np.min(tau_use))
+            max_tau_init = float(np.max(tau_use))
             bad_jacobian_init = (min_tau_init * max_tau_init) < 0.0
         huge_initial_forces = False
         if lmove_axis:
@@ -3403,7 +3745,7 @@ def solve_fixed_boundary_residual_iter(
                 state,
                 include_edge=False,
                 zero_m1=zero_m1_init,
-                iter_idx=1,
+                iter_idx=_iter_idx_for_dump(1),
             )
             fsq_init = float(np.asarray(fsqr_init + fsqz_init + fsql_init))
             huge_initial_forces = (not np.isfinite(fsq_init)) or (fsq_init > 1.0e2)
@@ -3433,6 +3775,8 @@ def solve_fixed_boundary_residual_iter(
             cache_prec_rz_mats = None
             cache_prec_rz_jmax = None
             cache_prec_lam_prec = None
+            cache_prec_faclam = None
+            cache_prec_lam_debug = None
 
     def _safe_dt_from_force(*, dt_nominal: float, frcc, frss, fzsc, fzcs, flsc, flcs) -> float:
         """Optional limiter for dt based on force magnitude.
@@ -3508,325 +3852,583 @@ def solve_fixed_boundary_residual_iter(
             flss=getattr(frzl_in, "flss", None),
         )
 
+    def _pop_iteration_histories() -> None:
+        def _pop(hist):
+            if hist:
+                hist.pop()
+
+        for h in (
+            include_edge_history,
+            zero_m1_history,
+            bcovar_update_history,
+            w_history,
+            fsqr2_history,
+            fsqz2_history,
+            fsql2_history,
+            r00_history,
+            z00_history,
+            wb_history,
+            wp_history,
+            w_vmec_history,
+            rz_norm_history,
+            f_norm1_history,
+            gcr2_p_history,
+            gcz2_p_history,
+            gcl2_p_history,
+            fsq1_history,
+            fsqr1_history,
+            fsqz1_history,
+            fsql1_history,
+            min_tau_history,
+            max_tau_history,
+            bad_jacobian_history,
+            step_history,
+            dt_eff_history,
+            update_rms_history,
+            w_curr_history,
+            w_try_history,
+            w_try_ratio_history,
+            restart_path_history,
+            step_status_history,
+            restart_reason_history,
+            pre_restart_reason_history,
+            time_step_history,
+            res0_history,
+            fsq_prev_history,
+            bad_growth_streak_history,
+            iter1_history,
+            grad_rms_history,
+        ):
+            _pop(h)
+
     last_iter2 = 0
     for it in range(max_iter):
         iter2 = it + 1 + int(iter_offset)
         last_iter2 = iter2
-        iter_since_restart = iter2 - iter1
-        pre_restart_reason = "none"
-        time_step_report = float(time_step)
-        if vmec2000_control:
-            # VMEC2000 `constrain_m1` logic (residue.f90):
-            #   zero gcz(m=1) if (fsqz_prev < 1e-6) OR (iter2 < 2) OR (ictrl_prec2d != 0).
-            # For fixed-boundary parity we only need the first two conditions.
-            fsqz_prev = float(fsqz2_history[-1]) if fsqz2_history else 1.0
-            zero_m1 = 1.0 if (iter2 < 2) or (fsqz_prev < 1.0e-6) else 0.0
-        else:
-            # A conservative heuristic early in a restart window.
-            zero_m1 = 1.0 if (iter_since_restart < 2) or (len(fsqz2_history) and fsqz2_history[-1] < 1e-6) else 0.0
-        zero_m1 = jnp.asarray(zero_m1, dtype=jnp.asarray(state.Rcos).dtype)
-        include_edge = bool(iter_since_restart < 50) and (float(prev_rz_fsq) < 1e-6)
-        include_edge_history.append(int(bool(include_edge)))
-        zero_m1_history.append(int(float(np.asarray(zero_m1)) > 0.5))
-
-        need_bcovar_update = bool(vmec2000_control) and (
-            (not bool(vmec2000_cache_valid)) or ((iter2 - iter1) % k_preconditioner_update_interval == 0)
-        )
-        bcovar_update_history.append(int(bool(need_bcovar_update)))
-
-        constraint_precond_diag = None
-        constraint_tcon_override = None
-        norms_override = None
-        rz_scale_override = None
-        l_scale_override = None
-        if bool(vmec2000_control) and bool(vmec2000_cache_valid) and (not bool(need_bcovar_update)):
-            constraint_precond_diag = cache_precond_diag
-            constraint_tcon_override = cache_tcon
-            norms_override = cache_norms
-            rz_scale_override = cache_rz_scale
-            l_scale_override = cache_l_scale
-
-        k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale, norms_used = _compute_forces(
-            state,
-            include_edge=include_edge,
-            zero_m1=zero_m1,
-            constraint_precond_diag=constraint_precond_diag,
-            constraint_tcon=constraint_tcon_override,
-            norms_override=norms_override,
-            rz_scale_override=rz_scale_override,
-            l_scale_override=l_scale_override,
-            iter_idx=iter2,
-        )
-        if bool(vmec2000_control) and bool(need_bcovar_update):
-            if constraint_tcon0 is None or float(constraint_tcon0) == 0.0:
-                cache_precond_diag = None
-                cache_tcon = jnp.zeros((int(s.shape[0]),), dtype=jnp.asarray(state.Rcos).dtype)
+        converged = False
+        while True:
+            iter_since_restart = iter2 - iter1
+            pre_restart_reason = "none"
+            time_step_report = float(time_step)
+            if vmec2000_control:
+                # VMEC2000 `constrain_m1` logic (residue.f90):
+                #   zero gcz(m=1) if (fsqz_prev < 1e-6) OR (iter2 < 2) OR (ictrl_prec2d != 0).
+                # For fixed-boundary parity we only need the first two conditions.
+                fsqz_prev = float(fsqz2_history[-1]) if fsqz2_history else 1.0
+                zero_m1 = 1.0 if (iter2 < 2) or (fsqz_prev < 1.0e-6) else 0.0
             else:
-                from .vmec_constraints import precondn_diag_axd1_from_bcovar
-
-                ard1, azd1 = precondn_diag_axd1_from_bcovar(
-                    trig=trig,
-                    s=s,
-                    bsq=k.bc.bsq,
-                    r12=k.bc.jac.r12,
-                    sqrtg=k.bc.jac.sqrtg,
-                    ru12=k.bc.jac.ru12,
-                    zu12=k.bc.jac.zu12,
+                # A conservative heuristic early in a restart window.
+                zero_m1 = 1.0 if (iter_since_restart < 2) or (len(fsqz2_history) and fsqz2_history[-1] < 1e-6) else 0.0
+            zero_m1 = jnp.asarray(zero_m1, dtype=jnp.asarray(state.Rcos).dtype)
+            include_edge = bool(iter_since_restart < 50) and (float(prev_rz_fsq) < 1e-6)
+            include_edge_history.append(int(bool(include_edge)))
+            zero_m1_history.append(int(float(np.asarray(zero_m1)) > 0.5))
+    
+            need_bcovar_update = bool(vmec2000_control) and (
+                (not bool(vmec2000_cache_valid)) or ((iter2 - iter1) % k_preconditioner_update_interval == 0)
+            )
+            bcovar_update_history.append(int(bool(need_bcovar_update)))
+    
+            constraint_precond_diag = None
+            constraint_tcon_override = None
+            norms_override = None
+            rz_scale_override = None
+            l_scale_override = None
+            if bool(vmec2000_control) and bool(vmec2000_cache_valid) and (not bool(need_bcovar_update)):
+                constraint_precond_diag = cache_precond_diag
+                constraint_tcon_override = cache_tcon
+                norms_override = cache_norms
+                rz_scale_override = cache_rz_scale
+                l_scale_override = cache_l_scale
+    
+            k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale, norms_used = _compute_forces(
+                state,
+                include_edge=include_edge,
+                zero_m1=zero_m1,
+                constraint_precond_diag=constraint_precond_diag,
+                constraint_tcon=constraint_tcon_override,
+                norms_override=norms_override,
+                rz_scale_override=rz_scale_override,
+                l_scale_override=l_scale_override,
+                iter_idx=_iter_idx_for_dump(iter2),
+            )
+            if bool(vmec2000_control) and bool(need_bcovar_update):
+                if constraint_tcon0 is None or float(constraint_tcon0) == 0.0:
+                    cache_precond_diag = None
+                    cache_tcon = jnp.zeros((int(s.shape[0]),), dtype=jnp.asarray(state.Rcos).dtype)
+                else:
+                    from .vmec_constraints import precondn_diag_axd1_from_bcovar
+    
+                    ard1, azd1 = precondn_diag_axd1_from_bcovar(
+                        trig=trig,
+                        s=s,
+                        bsq=k.bc.bsq,
+                        r12=k.bc.jac.r12,
+                        sqrtg=k.bc.jac.sqrtg,
+                        ru12=k.bc.jac.ru12,
+                        zu12=k.bc.jac.zu12,
+                    )
+                    cache_precond_diag = (ard1, azd1)
+                    cache_tcon = jnp.asarray(k.tcon)
+                cache_norms = norms_used
+                cache_rz_scale = rz_scale
+                cache_l_scale = l_scale
+                cache_rz_norm = _rz_norm(state)
+                cache_f_norm1 = jnp.where(
+                    jnp.asarray(cache_rz_norm) != 0.0,
+                    1.0 / jnp.asarray(cache_rz_norm),
+                    jnp.asarray(float("inf"), dtype=jnp.asarray(cache_rz_norm).dtype),
                 )
-                cache_precond_diag = (ard1, azd1)
-                cache_tcon = jnp.asarray(k.tcon)
-            cache_norms = norms_used
-            cache_rz_scale = rz_scale
-            cache_l_scale = l_scale
-            cache_rz_norm = _rz_norm(state)
-            cache_f_norm1 = jnp.where(
-                jnp.asarray(cache_rz_norm) != 0.0,
-                1.0 / jnp.asarray(cache_rz_norm),
-                jnp.asarray(float("inf"), dtype=jnp.asarray(cache_rz_norm).dtype),
-            )
-            if not bool(cfg.lasym):
-                from .preconditioner_1d_jax import rz_preconditioner_matrices
-
-                cache_prec_lam_prec = _lambda_preconditioner(k.bc)
-                mats, _jmin, jmax = rz_preconditioner_matrices(bc=k.bc, k=k, trig=trig, s=s, cfg=cfg)
-                cache_prec_rz_mats = mats
-                cache_prec_rz_jmax = int(jmax)
-            vmec2000_cache_valid = True
-        fsqr_f = float(np.asarray(fsqr))
-        fsqz_f = float(np.asarray(fsqz))
-        fsql_f = float(np.asarray(fsql))
-        prev_rz_fsq = fsqr_f + fsqz_f
-
-        w_history.append(fsqr_f + fsqz_f + fsql_f)
-        fsqr2_history.append(fsqr_f)
-        fsqz2_history.append(fsqz_f)
-        fsql2_history.append(fsql_f)
-        # VMEC printout uses r00 = r1(1,0): axis R at theta=0, zeta=0.
-        # For 3D, this includes *all* m=0 cosine harmonics at zeta=0.
-        if not np.any(m0_mask):
-            r00_val = float("nan")
-            z00_val = float("nan")
-        else:
-            r00_val = float(np.sum(np.asarray(state.Rcos)[0, m0_mask]))
-            if bool(cfg.lasym):
-                z00_val = float(np.sum(np.asarray(state.Zcos)[0, m0_mask]))
-            else:
-                z00_val = 0.0
-        r00_history.append(r00_val)
-        z00_history.append(z00_val)
-        # `norms_used` may be cached (VMEC2000 `ns4=25` behavior). VMEC's
-        # printed WMHD uses the *current* wb/wp from `funct3d`, not cached
-        # norm scalars. Recompute wb/wp from the current bcovar state here.
-        norms_w = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
-        wb_f = float(np.asarray(norms_w.wb))
-        wp_f = float(np.asarray(norms_w.wp))
-        wb_history.append(wb_f)
-        wp_history.append(wp_f)
-        w_vmec_history.append((wb_f + wp_f / (gamma - 1.0)) * float(TWOPI * TWOPI))
-
-        if verbose and (not (bool(vmec2000_control) and bool(verbose_vmec2000_table))):
-            print(
-                f"[solve_fixed_boundary_residual_iter] iter={it:03d} fsqr={fsqr_f:.3e} fsqz={fsqz_f:.3e} "
-                f"fsql={fsql_f:.3e} include_edge={include_edge}",
-                flush=True,
-            )
-        # Terminate on invariant residuals (fsqr/fsqz/fsql), not fsq1.
-        if (fsqr_f <= ftol) and (fsqz_f <= ftol) and (fsql_f <= ftol):
-            if verbose and not (bool(vmec2000_control) and bool(verbose_vmec2000_table)):
+                if not bool(cfg.lasym):
+                    from .preconditioner_1d_jax import rz_preconditioner_matrices
+    
+                    cache_prec_lam_prec = _lambda_preconditioner(k.bc)
+                    mats, _jmin, jmax = rz_preconditioner_matrices(bc=k.bc, k=k, trig=trig, s=s, cfg=cfg)
+                    cache_prec_rz_mats = mats
+                    cache_prec_rz_jmax = int(jmax)
+                vmec2000_cache_valid = True
+            fsqr_f = float(np.asarray(fsqr))
+            fsqz_f = float(np.asarray(fsqz))
+            fsql_f = float(np.asarray(fsql))
+            prev_rz_fsq_before = prev_rz_fsq
+            prev_rz_fsq = fsqr_f + fsqz_f
+    
+            w_history.append(fsqr_f + fsqz_f + fsql_f)
+            fsqr2_history.append(fsqr_f)
+            fsqz2_history.append(fsqz_f)
+            fsql2_history.append(fsql_f)
+            # VMEC printout uses r00 = r1(1,0): axis R at theta=0, zeta=0,
+            # evaluated in real space after scalxc (see funct3d.f).
+            try:
+                r00_val = float(np.asarray(k.pr1_even)[0, 0, 0])
+                if bool(cfg.lasym):
+                    z00_val = float(np.asarray(k.pz1_even)[0, 0, 0])
+                else:
+                    z00_val = 0.0
+            except Exception:
+                if not np.any(m0_mask):
+                    r00_val = float("nan")
+                    z00_val = float("nan")
+                else:
+                    r00_val = float(np.sum(np.asarray(state.Rcos)[0, m0_mask]))
+                    if bool(cfg.lasym):
+                        z00_val = float(np.sum(np.asarray(state.Zcos)[0, m0_mask]))
+                    else:
+                        z00_val = 0.0
+            r00_history.append(r00_val)
+            z00_history.append(z00_val)
+            # `norms_used` may be cached (VMEC2000 `ns4=25` behavior). VMEC's
+            # printed WMHD uses the *current* wb/wp from `funct3d`, not cached
+            # norm scalars. Recompute wb/wp from the current bcovar state here.
+            norms_w = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
+            wb_f = float(np.asarray(norms_w.wb))
+            wp_f = float(np.asarray(norms_w.wp))
+            wb_history.append(wb_f)
+            wp_history.append(wp_f)
+            w_vmec_history.append((wb_f + wp_f / (gamma - 1.0)) * float(TWOPI * TWOPI))
+    
+            if verbose and (not (bool(vmec2000_control) and bool(verbose_vmec2000_table))):
                 print(
-                    f"[solve_fixed_boundary_residual_iter] converged: "
-                    f"fsqr={fsqr_f:.3e} fsqz={fsqz_f:.3e} fsql={fsql_f:.3e} <= ftol={ftol:.3e}",
+                    f"[solve_fixed_boundary_residual_iter] iter={it:03d} fsqr={fsqr_f:.3e} fsqz={fsqz_f:.3e} "
+                    f"fsql={fsql_f:.3e} include_edge={include_edge}",
                     flush=True,
                 )
-            break
-
-        # Precondition forces.
-        if bool(vmec2000_control) and (not bool(cfg.lasym)):
-            from .preconditioner_1d_jax import rz_preconditioner_apply, rz_preconditioner_matrices
-
-            if (
-                bool(vmec2000_cache_valid)
-                and (cache_prec_lam_prec is not None)
-                and (cache_prec_rz_mats is not None)
-                and (cache_prec_rz_jmax is not None)
-            ):
-                lam_prec = cache_prec_lam_prec
-                mats = cache_prec_rz_mats
-                jmax = int(cache_prec_rz_jmax)
-            else:
-                lam_prec = _lambda_preconditioner(k.bc)
-                mats, _jmin, jmax = rz_preconditioner_matrices(bc=k.bc, k=k, trig=trig, s=s, cfg=cfg)
-            frzl_rhs = _apply_vmec_scale_m1_precond_rhs(frzl, mats)
-            frzl_rz = rz_preconditioner_apply(
-                frzl_in=frzl_rhs,
-                mats=mats,
-                jmax=jmax,
-                cfg=cfg,
-            )
-            frcc = jnp.asarray(frzl_rz.frcc)
-            frss = frzl_rz.frss
-            fzsc = jnp.asarray(frzl_rz.fzsc)
-            fzcs = frzl_rz.fzcs
-            flsc = jnp.asarray(frzl_rz.flsc) * jnp.asarray(lam_prec)
-            flcs = None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * jnp.asarray(lam_prec))
-        elif (not bool(cfg.lthreed)) and (not bool(cfg.lasym)):
-            lam_prec = _lambda_preconditioner(k.bc)
-            frzl_rz = _rz_preconditioner(frzl, k.bc, k)
-            frcc = jnp.asarray(frzl_rz.frcc)
-            frss = frzl_rz.frss
-            fzsc = jnp.asarray(frzl_rz.fzsc)
-            fzcs = frzl_rz.fzcs
-            flsc = jnp.asarray(frzl_rz.flsc) * jnp.asarray(lam_prec)
-            flcs = None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * jnp.asarray(lam_prec))
-        else:
-            frcc = _apply_radial_tridi(frzl.frcc * rz_scale[:, None, None], precond_radial_alpha)
-            frss = (
-                _apply_radial_tridi(frzl.frss * rz_scale[:, None, None], precond_radial_alpha)
-                if frzl.frss is not None
-                else None
-            )
-            fzsc = _apply_radial_tridi(frzl.fzsc * rz_scale[:, None, None], precond_radial_alpha)
-            fzcs = (
-                _apply_radial_tridi(frzl.fzcs * rz_scale[:, None, None], precond_radial_alpha)
-                if frzl.fzcs is not None
-                else None
-            )
-            flsc = _apply_radial_tridi(frzl.flsc * l_scale[:, None, None], precond_lambda_alpha)
-            flcs = (
-                _apply_radial_tridi(frzl.flcs * l_scale[:, None, None], precond_lambda_alpha)
-                if frzl.flcs is not None
-                else None
-            )
-
-        frzl_pre = TomnspsRZL(
-            frcc=frcc,
-            frss=frss,
-            fzsc=fzsc,
-            fzcs=fzcs,
-            flsc=flsc,
-            flcs=flcs,
-            frsc=getattr(frzl, "frsc", None),
-            frcs=getattr(frzl, "frcs", None),
-            fzcc=getattr(frzl, "fzcc", None),
-            fzss=getattr(frzl, "fzss", None),
-            flcc=getattr(frzl, "flcc", None),
-            flss=getattr(frzl, "flss", None),
-        )
-        _maybe_dump_gc(frzl=frzl_pre, static=static, iter_idx=int(iter2), label="precond")
-
-        # Mode-diagonal preconditioning in (m, n>=0) storage.
-        frcc_u = frcc * w_mode_mn[None, :, :]
-        frss_u = (frss if frss is not None else jnp.zeros_like(frcc_u)) * w_mode_mn[None, :, :]
-        fzsc_u = fzsc * w_mode_mn[None, :, :]
-        fzcs_u = (fzcs if fzcs is not None else jnp.zeros_like(fzsc_u)) * w_mode_mn[None, :, :]
-        flsc_u = flsc * w_mode_mn[None, :, :]
-        flcs_u = (flcs if flcs is not None else jnp.zeros_like(flsc_u)) * w_mode_mn[None, :, :]
-
-        # VMEC's lambda coefficients can be expressed in multiple scaling
-        # conventions (e.g. restart vs. `wout` vs. internal). Allow parity drivers
-        # to apply a constant scale to the lambda residual channel before mapping
-        # it into coefficient updates.
-        if lambda_update_scale != 1.0:
-            flsc_u = flsc_u * lambda_update_scale_j
-            flcs_u = flcs_u * lambda_update_scale_j
-
-        if auto_flip_force and it == 0:
-            # Choose force direction by a tiny trial step on the VMEC residual
-            # (fsqr+fsqz+fsql), not magnetic energy. Energy monotonicity is not a
-            # reliable proxy for VMEC's preconditioned convergence metrics.
-            w_curr = float(fsqr_f + fsqz_f + fsql_f)
-            # Use a probe step that is large enough to be numerically decisive,
-            # but still small relative to typical pseudo-time updates.
-            dt_probe = min(1e-2, 0.1 * float(time_step))
-            frss_u_phys, fzcs_u_phys = _m1_internal_to_physical_pair(frss_u, fzcs_u)
-            dR_dir = dt_probe * _mn_cos_to_signed_physical(frcc_u, frss_u_phys)
-            dZ_dir = dt_probe * _mn_sin_to_signed_physical(fzsc_u, fzcs_u_phys)
-            dL_dir = dt_probe * _mn_sin_to_signed_physical_lambda(flsc_u, flcs_u)
-
-            def _trial(sign: float) -> float:
-                st_try = VMECState(
-                    layout=state.layout,
-                    Rcos=jnp.asarray(state.Rcos) + sign * dR_dir,
-                    Rsin=state.Rsin,
-                    Zcos=state.Zcos,
-                    Zsin=jnp.asarray(state.Zsin) + sign * dZ_dir,
-                    Lcos=state.Lcos,
-                    Lsin=jnp.asarray(state.Lsin) + sign * dL_dir,
-                )
-                _, _, fsqr_t, fsqz_t, fsql_t, _, _, _ = _compute_forces(
-                    st_try,
-                    include_edge=True,
-                    zero_m1=zero_m1,
-                )
-                return float(np.asarray(fsqr_t + fsqz_t + fsql_t))
-
-            w_pos = _trial(+1.0)
-            w_neg = _trial(-1.0)
-            if np.isfinite(w_neg) and np.isfinite(w_pos) and (w_neg < w_pos):
-                flip_sign = -1.0
+            # Terminate on invariant residuals (fsqr/fsqz/fsql), not fsq1.
+            if (fsqr_f <= ftol) and (fsqz_f <= ftol) and (fsql_f <= ftol):
                 if verbose and not (bool(vmec2000_control) and bool(verbose_vmec2000_table)):
                     print(
-                        "[solve_fixed_boundary_residual_iter] flipping force sign "
-                        f"(w_curr={w_curr:.3e} w_pos={w_pos:.3e} w_neg={w_neg:.3e})"
+                        f"[solve_fixed_boundary_residual_iter] converged: "
+                        f"fsqr={fsqr_f:.3e} fsqz={fsqz_f:.3e} fsql={fsql_f:.3e} <= ftol={ftol:.3e}",
+                        flush=True,
                     )
-
-        # Damping for the fixed-point update.
-        gcr2_p, gcz2_p, gcl2_p = vmec_gcx2_from_tomnsps(
-            frzl=frzl_pre,
-            lconm1=bool(getattr(static.cfg, "lconm1", True)),
-            apply_m1_constraints=False,
-            include_edge=True,
-            apply_scalxc=False,
-            s=s,
-        )
-        if bool(vmec2000_control) and bool(vmec2000_cache_valid) and (cache_rz_norm is not None) and (cache_f_norm1 is not None):
-            rz_norm = jnp.asarray(cache_rz_norm)
-            f_norm1 = jnp.asarray(cache_f_norm1)
-        else:
-            rz_norm = _rz_norm(state)
-            f_norm1 = jnp.where(rz_norm != 0.0, 1.0 / rz_norm, jnp.asarray(float("inf"), dtype=rz_norm.dtype))
-        fsqr1 = gcr2_p * f_norm1
-        fsqz1 = gcz2_p * f_norm1
-        if bool(vmec2000_control):
-            # VMEC2000 `residue.f90`: fsql1 = hs * SUM( (faclam*gcl)**2 ) over all js.
-            gcl2_full = jnp.sum(jnp.asarray(frzl_pre.flsc) ** 2)
-            if frzl_pre.flcs is not None:
-                gcl2_full = gcl2_full + jnp.sum(jnp.asarray(frzl_pre.flcs) ** 2)
-            if getattr(frzl_pre, "flcc", None) is not None:
-                gcl2_full = gcl2_full + jnp.sum(jnp.asarray(frzl_pre.flcc) ** 2)
-            if getattr(frzl_pre, "flss", None) is not None:
-                gcl2_full = gcl2_full + jnp.sum(jnp.asarray(frzl_pre.flss) ** 2)
-            fsql1 = gcl2_full * delta_s
-        else:
-            fsql1 = gcl2_p * delta_s
-        fsqr1_f = float(np.asarray(fsqr1))
-        fsqz1_f = float(np.asarray(fsqz1))
-        fsql1_f = float(np.asarray(fsql1))
-        fsq1 = fsqr1_f + fsqz1_f + fsql1_f
-        rz_norm_history.append(float(np.asarray(rz_norm)))
-        f_norm1_history.append(float(np.asarray(f_norm1)))
-        gcr2_p_history.append(float(np.asarray(gcr2_p)))
-        gcz2_p_history.append(float(np.asarray(gcz2_p)))
-        gcl2_p_history.append(float(np.asarray(gcl2_p)))
-        fsq1_history.append(fsq1)
-        fsqr1_history.append(fsqr1_f)
-        fsqz1_history.append(fsqz1_f)
-        fsql1_history.append(fsql1_f)
-
-        # VMEC-style time-step control: VMEC2000's `TimeStepControl` + `restart_iter`.
-        if bool(vmec2000_control):
-            fsq0 = fsqr_f + fsqz_f + fsql_f  # physical
-            fsq = fsq1  # preconditioned
-            if (iter2 == iter1) or (res0 < 0.0) or (res1 < 0.0):
-                res0 = fsq
-                res1 = fsq0
+                converged = True
+                break
+    
+            # Precondition forces.
+            frzl_lam_pre = None
+            if bool(vmec2000_control) and (not bool(cfg.lasym)):
+                from .preconditioner_1d_jax import rz_preconditioner_apply, rz_preconditioner_matrices
+    
+                need_lam_prec = os.getenv("VMEC_JAX_DUMP_LAM", "") not in ("", "0")
+                need_lamcal = os.getenv("VMEC_JAX_DUMP_LAMCAL", "") not in ("", "0")
+                need_prec_refresh = (not bool(vmec2000_cache_valid)) or (cache_prec_lam_prec is None) or (cache_prec_rz_mats is None) or (cache_prec_rz_jmax is None) or bool(need_bcovar_update)
+                if need_prec_refresh:
+                    if need_lamcal:
+                        if need_lam_prec:
+                            lam_prec, faclam_dump, lam_debug = _lambda_preconditioner(
+                                k.bc, return_faclam=True, return_debug=True
+                            )
+                        else:
+                            lam_prec, lam_debug = _lambda_preconditioner(k.bc, return_debug=True)
+                            faclam_dump = None
+                    else:
+                        if need_lam_prec:
+                            lam_prec, faclam_dump = _lambda_preconditioner(k.bc, return_faclam=True)
+                        else:
+                            lam_prec = _lambda_preconditioner(k.bc)
+                            faclam_dump = None
+                        lam_debug = None
+                    mats, _jmin, jmax = rz_preconditioner_matrices(bc=k.bc, k=k, trig=trig, s=s, cfg=cfg)
+                    cache_prec_lam_prec = lam_prec
+                    cache_prec_faclam = faclam_dump
+                    cache_prec_lam_debug = lam_debug
+                    cache_prec_rz_mats = mats
+                    cache_prec_rz_jmax = int(jmax)
+                else:
+                    lam_prec = cache_prec_lam_prec
+                    mats = cache_prec_rz_mats
+                    jmax = int(cache_prec_rz_jmax)
+                    faclam_dump = cache_prec_faclam if need_lam_prec else None
+                    lam_debug = cache_prec_lam_debug if need_lamcal else None
+                _maybe_dump_lam_prec(lam_prec=lam_prec, faclam=faclam_dump, static=static, iter_idx=int(iter2))
+                if lam_debug is not None:
+                    _maybe_dump_lamcal(lam_debug=lam_debug, static=static, iter_idx=int(iter2))
+                frzl_rhs = _apply_vmec_scale_m1_precond_rhs(frzl, mats)
+                frzl_rz = rz_preconditioner_apply(
+                    frzl_in=frzl_rhs,
+                    mats=mats,
+                    jmax=jmax,
+                    cfg=cfg,
+                )
+                frzl_lam_pre = frzl_rz
+                frcc = jnp.asarray(frzl_rz.frcc)
+                frss = frzl_rz.frss
+                fzsc = jnp.asarray(frzl_rz.fzsc)
+                fzcs = frzl_rz.fzcs
+                flsc = jnp.asarray(frzl_rz.flsc) * jnp.asarray(lam_prec)
+                flcs = None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * jnp.asarray(lam_prec))
+            elif (not bool(cfg.lthreed)) and (not bool(cfg.lasym)):
+                need_lam_prec = os.getenv("VMEC_JAX_DUMP_LAM", "") not in ("", "0")
+                need_lamcal = os.getenv("VMEC_JAX_DUMP_LAMCAL", "") not in ("", "0")
+                need_prec_refresh = (not bool(vmec2000_cache_valid)) or (cache_prec_lam_prec is None) or bool(need_bcovar_update)
+                if need_prec_refresh:
+                    if need_lamcal:
+                        if need_lam_prec:
+                            lam_prec, faclam_dump, lam_debug = _lambda_preconditioner(
+                                k.bc, return_faclam=True, return_debug=True
+                            )
+                        else:
+                            lam_prec, lam_debug = _lambda_preconditioner(k.bc, return_debug=True)
+                            faclam_dump = None
+                    else:
+                        if need_lam_prec:
+                            lam_prec, faclam_dump = _lambda_preconditioner(k.bc, return_faclam=True)
+                        else:
+                            lam_prec = _lambda_preconditioner(k.bc)
+                            faclam_dump = None
+                        lam_debug = None
+                    cache_prec_lam_prec = lam_prec
+                    cache_prec_faclam = faclam_dump
+                    cache_prec_lam_debug = lam_debug
+                else:
+                    lam_prec = cache_prec_lam_prec
+                    faclam_dump = cache_prec_faclam if need_lam_prec else None
+                    lam_debug = cache_prec_lam_debug if need_lamcal else None
+                _maybe_dump_lam_prec(lam_prec=lam_prec, faclam=faclam_dump, static=static, iter_idx=int(iter2))
+                if lam_debug is not None:
+                    _maybe_dump_lamcal(lam_debug=lam_debug, static=static, iter_idx=int(iter2))
+                frzl_rz = _rz_preconditioner(frzl, k.bc, k)
+                frzl_lam_pre = frzl_rz
+                frcc = jnp.asarray(frzl_rz.frcc)
+                frss = frzl_rz.frss
+                fzsc = jnp.asarray(frzl_rz.fzsc)
+                fzcs = frzl_rz.fzcs
+                flsc = jnp.asarray(frzl_rz.flsc) * jnp.asarray(lam_prec)
+                flcs = None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * jnp.asarray(lam_prec))
+            else:
+                frcc = _apply_radial_tridi(frzl.frcc * rz_scale[:, None, None], precond_radial_alpha)
+                frss = (
+                    _apply_radial_tridi(frzl.frss * rz_scale[:, None, None], precond_radial_alpha)
+                    if frzl.frss is not None
+                    else None
+                )
+                fzsc = _apply_radial_tridi(frzl.fzsc * rz_scale[:, None, None], precond_radial_alpha)
+                fzcs = (
+                    _apply_radial_tridi(frzl.fzcs * rz_scale[:, None, None], precond_radial_alpha)
+                    if frzl.fzcs is not None
+                    else None
+                )
+                flsc = _apply_radial_tridi(frzl.flsc * l_scale[:, None, None], precond_lambda_alpha)
+                flcs = (
+                    _apply_radial_tridi(frzl.flcs * l_scale[:, None, None], precond_lambda_alpha)
+                    if frzl.flcs is not None
+                    else None
+                )
+    
+            frzl_pre = TomnspsRZL(
+                frcc=frcc,
+                frss=frss,
+                fzsc=fzsc,
+                fzcs=fzcs,
+                flsc=flsc,
+                flcs=flcs,
+                frsc=getattr(frzl, "frsc", None),
+                frcs=getattr(frzl, "frcs", None),
+                fzcc=getattr(frzl, "fzcc", None),
+                fzss=getattr(frzl, "fzss", None),
+                flcc=getattr(frzl, "flcc", None),
+                flss=getattr(frzl, "flss", None),
+            )
+            if frzl_lam_pre is not None:
+                _maybe_dump_lam_gcl(
+                    frzl_pre=frzl_lam_pre,
+                    frzl_post=frzl_pre,
+                    static=static,
+                    iter_idx=int(iter2),
+                    delta_s=delta_s,
+                )
+            _maybe_dump_gc(frzl=frzl_pre, static=static, iter_idx=int(iter2), label="precond")
+    
+            # Mode-diagonal preconditioning in (m, n>=0) storage.
+            frcc_u = frcc * w_mode_mn[None, :, :]
+            frss_u = (frss if frss is not None else jnp.zeros_like(frcc_u)) * w_mode_mn[None, :, :]
+            fzsc_u = fzsc * w_mode_mn[None, :, :]
+            fzcs_u = (fzcs if fzcs is not None else jnp.zeros_like(fzsc_u)) * w_mode_mn[None, :, :]
+            flsc_u = flsc * w_mode_mn[None, :, :]
+            flcs_u = (flcs if flcs is not None else jnp.zeros_like(flsc_u)) * w_mode_mn[None, :, :]
+    
+            # VMEC's lambda coefficients can be expressed in multiple scaling
+            # conventions (e.g. restart vs. `wout` vs. internal). Allow parity drivers
+            # to apply a constant scale to the lambda residual channel before mapping
+            # it into coefficient updates.
+            if lambda_update_scale != 1.0:
+                flsc_u = flsc_u * lambda_update_scale_j
+                flcs_u = flcs_u * lambda_update_scale_j
+    
+            if auto_flip_force and it == 0:
+                # Choose force direction by a tiny trial step on the VMEC residual
+                # (fsqr+fsqz+fsql), not magnetic energy. Energy monotonicity is not a
+                # reliable proxy for VMEC's preconditioned convergence metrics.
+                w_curr = float(fsqr_f + fsqz_f + fsql_f)
+                # Use a probe step that is large enough to be numerically decisive,
+                # but still small relative to typical pseudo-time updates.
+                dt_probe = min(1e-2, 0.1 * float(time_step))
+                dR_dir = dt_probe * _mn_cos_to_signed_physical(frcc_u, frss_u)
+                dZ_dir = dt_probe * _mn_sin_to_signed_physical(fzsc_u, fzcs_u)
+                dL_dir = dt_probe * _mn_sin_to_signed_physical_lambda(flsc_u, flcs_u)
+    
+                def _trial(sign: float) -> float:
+                    st_try = VMECState(
+                        layout=state.layout,
+                        Rcos=jnp.asarray(state.Rcos) + sign * dR_dir,
+                        Rsin=state.Rsin,
+                        Zcos=state.Zcos,
+                        Zsin=jnp.asarray(state.Zsin) + sign * dZ_dir,
+                        Lcos=state.Lcos,
+                        Lsin=jnp.asarray(state.Lsin) + sign * dL_dir,
+                    )
+                    _, _, fsqr_t, fsqz_t, fsql_t, _, _, _ = _compute_forces(
+                        st_try,
+                        include_edge=True,
+                        zero_m1=zero_m1,
+                    )
+                    return float(np.asarray(fsqr_t + fsqz_t + fsql_t))
+    
+                w_pos = _trial(+1.0)
+                w_neg = _trial(-1.0)
+                if np.isfinite(w_neg) and np.isfinite(w_pos) and (w_neg < w_pos):
+                    flip_sign = -1.0
+                    if verbose and not (bool(vmec2000_control) and bool(verbose_vmec2000_table)):
+                        print(
+                            "[solve_fixed_boundary_residual_iter] flipping force sign "
+                            f"(w_curr={w_curr:.3e} w_pos={w_pos:.3e} w_neg={w_neg:.3e})"
+                        )
+    
+            # Damping for the fixed-point update.
+            gcr2_p, gcz2_p, gcl2_p = vmec_gcx2_from_tomnsps(
+                frzl=frzl_pre,
+                lconm1=bool(getattr(static.cfg, "lconm1", True)),
+                apply_m1_constraints=False,
+                include_edge=True,
+                apply_scalxc=False,
+                s=s,
+            )
+            if bool(vmec2000_control) and bool(vmec2000_cache_valid) and (cache_rz_norm is not None) and (cache_f_norm1 is not None):
+                rz_norm = jnp.asarray(cache_rz_norm)
+                f_norm1 = jnp.asarray(cache_f_norm1)
+            else:
+                rz_norm = _rz_norm(state)
+                f_norm1 = jnp.where(rz_norm != 0.0, 1.0 / rz_norm, jnp.asarray(float("inf"), dtype=rz_norm.dtype))
+            fsqr1 = gcr2_p * f_norm1
+            fsqz1 = gcz2_p * f_norm1
+            if bool(vmec2000_control):
+                # VMEC2000 `residue.f90`: fsql1 = hs * SUM( (faclam*gcl)**2 ) over all js.
+                gcl2_full = jnp.sum(jnp.asarray(frzl_pre.flsc) ** 2)
+                if frzl_pre.flcs is not None:
+                    gcl2_full = gcl2_full + jnp.sum(jnp.asarray(frzl_pre.flcs) ** 2)
+                if getattr(frzl_pre, "flcc", None) is not None:
+                    gcl2_full = gcl2_full + jnp.sum(jnp.asarray(frzl_pre.flcc) ** 2)
+                if getattr(frzl_pre, "flss", None) is not None:
+                    gcl2_full = gcl2_full + jnp.sum(jnp.asarray(frzl_pre.flss) ** 2)
+                fsql1 = gcl2_full * delta_s
+            else:
+                fsql1 = gcl2_p * delta_s
+            if os.getenv("VMEC_JAX_DUMP_LAM", "") not in ("", "0") and frzl_lam_pre is None:
+                gcr2_raw, gcz2_raw, gcl2_raw = vmec_gcx2_from_tomnsps(
+                    frzl=frzl,
+                    lconm1=bool(getattr(static.cfg, "lconm1", True)),
+                    apply_m1_constraints=False,
+                    include_edge=True,
+                    apply_scalxc=False,
+                    s=s,
+                )
+                fsql1_pre = gcl2_raw * delta_s
+                _maybe_dump_lam_fsql1(
+                    fsql1_pre=fsql1_pre,
+                    fsql1_post=fsql1,
+                    static=static,
+                    iter_idx=int(iter2),
+                )
+            fsqr1_f = float(np.asarray(fsqr1))
+            fsqz1_f = float(np.asarray(fsqz1))
+            fsql1_f = float(np.asarray(fsql1))
+            fsq1 = fsqr1_f + fsqz1_f + fsql1_f
+            rz_norm_history.append(float(np.asarray(rz_norm)))
+            f_norm1_history.append(float(np.asarray(f_norm1)))
+            gcr2_p_history.append(float(np.asarray(gcr2_p)))
+            gcz2_p_history.append(float(np.asarray(gcz2_p)))
+            gcl2_p_history.append(float(np.asarray(gcl2_p)))
+            fsq1_history.append(fsq1)
+            fsqr1_history.append(fsqr1_f)
+            fsqz1_history.append(fsqz1_f)
+            fsql1_history.append(fsql1_f)
+    
+            # VMEC-style time-step control: VMEC2000's `TimeStepControl` + `restart_iter`.
+            if bool(vmec2000_control):
+                fsq0 = fsqr_f + fsqz_f + fsql_f  # physical
+                fsq = fsq1  # preconditioned
+                if (iter2 == iter1) or (res0 < 0.0) or (res1 < 0.0):
+                    res0 = fsq
+                    res1 = fsq0
+                    state_checkpoint = state
+                res0 = min(res0, fsq)
+                res1 = min(res1, fsq0)
+                if (fsq <= res0) and (fsq0 <= res1):
+                    state_checkpoint = state
+                if ((iter2 - iter1) > 10) and ((fsq > vmec2000_fact * max(res0, 1e-30)) or (fsq0 > vmec2000_fact * max(res1, 1e-30))):
+                    pre_restart_reason = "time_control"
+                    state = state_checkpoint
+                    vRcc = jnp.zeros_like(vRcc)
+                    vRss = jnp.zeros_like(vRss)
+                    vZsc = jnp.zeros_like(vZsc)
+                    vZcs = jnp.zeros_like(vZcs)
+                    vLsc = jnp.zeros_like(vLsc)
+                    vLcs = jnp.zeros_like(vLcs)
+                    time_step = max(time_step / restart_badprog_factor, 1e-12)
+                    bad_resets += 1
+                    iter1 = iter2
+                    bad_growth_streak = 0
+                    fsq_prev = fsq1
+                    inv_tau = [0.15 / time_step] * k_ndamp
+                    step_status = "restart_time_control"
+                    restart_reason = "time_control"
+                    step_history.append(0.0)
+                    dt_eff_history.append(0.0)
+                    update_rms_history.append(0.0)
+                    w_curr_history.append(float(fsqr_f + fsqz_f + fsql_f))
+                    w_try_history.append(float("nan"))
+                    w_try_ratio_history.append(float("nan"))
+                    restart_path_history.append("vmec2000_time_control")
+                    step_status_history.append(step_status)
+                    restart_reason_history.append(restart_reason)
+                    pre_restart_reason_history.append(pre_restart_reason)
+                    time_step_history.append(float(time_step))
+                    res0_history.append(float(res0))
+                    fsq_prev_history.append(float(fsq_prev))
+                    bad_growth_streak_history.append(int(bad_growth_streak))
+                    iter1_history.append(int(iter1))
+                    grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
+                    _pop_iteration_histories()
+                    prev_rz_fsq = prev_rz_fsq_before
+                    continue
+    
+            # --- time-step control trackers + optional restart triggers ---
+            fsq = fsqr_f + fsqz_f + fsql_f
+            fsq_res = fsq if bool(reference_mode) else fsq1
+            if (iter2 == iter1) or (res0 < 0.0):
+                res0 = fsq_res
+            res0_old = res0
+            res0 = min(res0, fsq_res)
+    
+            # Store a "good" checkpoint once residual has improved for many
+            # iterations since the last restart marker.
+            if (not bool(vmec2000_control)) and (fsq1 <= res0_old) and ((iter2 - iter1) > 10):
                 state_checkpoint = state
-            res0 = min(res0, fsq)
-            res1 = min(res1, fsq0)
-            if (fsq <= res0) and (fsq0 <= res1):
-                state_checkpoint = state
-            if ((iter2 - iter1) > 10) and ((fsq > vmec2000_fact * max(res0, 1e-30)) or (fsq0 > vmec2000_fact * max(res1, 1e-30))):
-                pre_restart_reason = "time_control"
+    
+            # Restart triggers (bad progress / bad Jacobian proxy).
+            bad_jacobian = False
+            if bool(reference_mode) or bool(vmec2000_control):
+                jac = vmec_half_mesh_jacobian_from_state(
+                    state=state,
+                    modes=static.modes,
+                    trig=trig,
+                    s=s,
+                    lconm1=bool(getattr(static.cfg, "lconm1", True)),
+                    lthreed=bool(getattr(static.cfg, "lthreed", True)),
+                )
+                tau = np.asarray(jac.tau)
+                if tau.size:
+                    tau_use = tau[1:] if tau.shape[0] > 1 else tau
+                    min_tau = float(np.min(tau_use))
+                    max_tau = float(np.max(tau_use))
+                    bad_jacobian = (min_tau * max_tau) < 0.0
+                    min_tau_history.append(min_tau)
+                    max_tau_history.append(max_tau)
+                    bad_jacobian_history.append(int(bad_jacobian))
+                else:
+                    min_tau_history.append(float("nan"))
+                    max_tau_history.append(float("nan"))
+                    bad_jacobian_history.append(0)
+            else:
+                min_tau_history.append(float("nan"))
+                max_tau_history.append(float("nan"))
+                bad_jacobian_history.append(0)
+    
+            huge_initial_forces = False
+            if iter2 == 1 and lmove_axis:
+                fsq_init = float(fsq)
+                huge_initial_forces = (not np.isfinite(fsq_init)) or (fsq_init > 1.0e2)
+            if fsq_res > 100.0 * max(res0, 1e-30):
+                bad_growth_streak += 1
+            else:
+                bad_growth_streak = 0
+    
+            if bool(reference_mode):
+                # Conservative restart logic used in the reference-mode trace.
+                if bad_jacobian and (fsq > 1.0e1):
+                    pre_restart_reason = "bad_jacobian"
+                elif (iter2 > iter1) and (fsq > 100.0 * max(res0, 1e-30)):
+                    pre_restart_reason = "bad_jacobian"
+                elif (
+                    (iter2 - iter1) > (k_preconditioner_update_interval // 2)
+                    and (iter2 > 2 * k_preconditioner_update_interval)
+                    and ((fsqr_f + fsqz_f) > 1.0e-2)
+                ):
+                    pre_restart_reason = "bad_progress"
+            elif bool(vmec2000_control):
+                # VMEC cadence: restart immediately on a Jacobian sign change
+                # (irst=2 path in jacobian.f + TimeStepControl).
+                if bad_jacobian and (iter2 > iter1):
+                    pre_restart_reason = "bad_jacobian"
+            else:
+                if (iter2 > (iter1 + 8)) and (bad_growth_streak >= 2):
+                    pre_restart_reason = "bad_jacobian"
+                elif (
+                    (iter2 - iter1) > (k_preconditioner_update_interval // 2)
+                    and (iter2 > 2 * k_preconditioner_update_interval)
+                    and (fsq1 > 5.0 * max(res0, 1e-30))
+                    and (fsq1 > 0.95 * max(fsq_prev, 1e-30))
+                ):
+                    pre_restart_reason = "bad_progress"
+    
+            if use_restart_triggers and pre_restart_reason != "none":
+                state_before_restart = state
+                vRcc_before = vRcc
+                vRss_before = vRss
+                vZsc_before = vZsc
+                vZcs_before = vZcs
+                vLsc_before = vLsc
+                vLcs_before = vLcs
                 state = state_checkpoint
                 vRcc = jnp.zeros_like(vRcc)
                 vRss = jnp.zeros_like(vRss)
@@ -3834,196 +4436,97 @@ def solve_fixed_boundary_residual_iter(
                 vZcs = jnp.zeros_like(vZcs)
                 vLsc = jnp.zeros_like(vLsc)
                 vLcs = jnp.zeros_like(vLcs)
-                time_step = max(time_step / restart_badprog_factor, 1e-12)
+                if pre_restart_reason == "bad_jacobian":
+                    time_step = max(restart_badjac_factor * time_step, 1e-12)
+                    ijacob += 1
+                    step_status = "restart_bad_jacobian"
+                else:
+                    time_step = max(time_step / restart_badprog_factor, 1e-12)
+                    step_status = "restart_bad_progress"
+                if bool(huge_initial_forces) and (pre_restart_reason == "bad_jacobian"):
+                    huge_force_restart_count += 1
+                else:
+                    huge_force_restart_count = 0
+                if ijacob in (25, 50):
+                    scale = 0.98 if ijacob < 50 else 0.96
+                    time_step = max(scale * float(step_size), 1e-12)
+                time_step_iter = float(time_step)
                 bad_resets += 1
                 iter1 = iter2
                 bad_growth_streak = 0
                 fsq_prev = fsq1
                 inv_tau = [0.15 / time_step] * k_ndamp
-                step_status = "restart_time_control"
-                restart_reason = "time_control"
+                if bool(vmec2000_control):
+                    vmec2000_cache_valid = False
+                    cache_precond_diag = None
+                    cache_tcon = None
+                    cache_norms = None
+                    cache_rz_scale = None
+                    cache_l_scale = None
+                    cache_rz_norm = None
+                    cache_f_norm1 = None
+                    cache_prec_rz_mats = None
+                    cache_prec_rz_jmax = None
+                    cache_prec_lam_prec = None
+                    cache_prec_faclam = None
+                    cache_prec_lam_debug = None
                 step_history.append(0.0)
                 dt_eff_history.append(0.0)
                 update_rms_history.append(0.0)
                 w_curr_history.append(float(fsqr_f + fsqz_f + fsql_f))
                 w_try_history.append(float("nan"))
                 w_try_ratio_history.append(float("nan"))
-                restart_path_history.append("vmec2000_time_control")
+                restart_path_history.append("pre_restart_trigger")
                 step_status_history.append(step_status)
-                restart_reason_history.append(restart_reason)
+                restart_reason_history.append(pre_restart_reason)
                 pre_restart_reason_history.append(pre_restart_reason)
-                time_step_history.append(float(time_step))
+                time_step_history.append(time_step_iter)
                 res0_history.append(float(res0))
                 fsq_prev_history.append(float(fsq_prev))
                 bad_growth_streak_history.append(int(bad_growth_streak))
                 iter1_history.append(int(iter1))
                 grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
+                if verbose:
+                    if bool(vmec2000_control) and bool(verbose_vmec2000_table):
+                        _print_vmec2000_iter_row(
+                            iter_idx=int(iter2),
+                            fsqr=fsqr_f,
+                            fsqz=fsqz_f,
+                            fsql=fsql_f,
+                            fsqr1=fsqr1_f,
+                            fsqz1=fsqz1_f,
+                            fsql1=fsql1_f,
+                            delt0r=float(time_step_iter),
+                            r00=float(r00_val),
+                            w_mhd=float(w_vmec_history[-1]),
+                            z00=float(z00_val),
+                        )
+                    else:
+                        print(
+                            f"[solve_fixed_boundary_residual_iter] iter={it:03d} "
+                            f"dt_eff=0.000e+00 update_rms=0.000e+00 "
+                            f"fsqr1={fsqr1_f:.3e} fsqz1={fsqz1_f:.3e} fsql1={fsql1_f:.3e} "
+                            f"step_status={step_status}",
+                            flush=True,
+                        )
+                _maybe_dump_xc(
+                    state=state_before_restart,
+                    vRcc=vRcc_before,
+                    vRss=vRss_before,
+                    vZsc=vZsc_before,
+                    vZcs=vZcs_before,
+                    vLsc=vLsc_before,
+                    vLcs=vLcs_before,
+                    static=static,
+                    iter_idx=int(iter2),
+                )
+                _pop_iteration_histories()
+                prev_rz_fsq = prev_rz_fsq_before
                 continue
-
-        # --- time-step control trackers + optional restart triggers ---
-        fsq = fsqr_f + fsqz_f + fsql_f
-        fsq_res = fsq if bool(reference_mode) else fsq1
-        if (iter2 == iter1) or (res0 < 0.0):
-            res0 = fsq_res
-        res0_old = res0
-        res0 = min(res0, fsq_res)
-
-        # Store a "good" checkpoint once residual has improved for many
-        # iterations since the last restart marker.
-        if (not bool(vmec2000_control)) and (fsq1 <= res0_old) and ((iter2 - iter1) > 10):
-            state_checkpoint = state
-
-        # Restart triggers (bad progress / bad Jacobian proxy).
-        bad_jacobian = False
-        if bool(reference_mode) or bool(vmec2000_control):
-            jac = vmec_half_mesh_jacobian_from_state(state=state, modes=static.modes, trig=trig, s=s)
-            tau = np.asarray(jac.tau)
-            if tau.size:
-                min_tau = float(np.min(tau))
-                max_tau = float(np.max(tau))
-                bad_jacobian = (min_tau * max_tau) < 0.0
-                min_tau_history.append(min_tau)
-                max_tau_history.append(max_tau)
-                bad_jacobian_history.append(int(bad_jacobian))
-            else:
-                min_tau_history.append(float("nan"))
-                max_tau_history.append(float("nan"))
-                bad_jacobian_history.append(0)
-        else:
-            min_tau_history.append(float("nan"))
-            max_tau_history.append(float("nan"))
-            bad_jacobian_history.append(0)
-
-        huge_initial_forces = False
-        if iter2 == 1 and lmove_axis:
-            fsq_init = float(fsq)
-            huge_initial_forces = (not np.isfinite(fsq_init)) or (fsq_init > 1.0e2)
-        if fsq_res > 100.0 * max(res0, 1e-30):
-            bad_growth_streak += 1
-        else:
-            bad_growth_streak = 0
-
-        if bool(reference_mode):
-            # Conservative restart logic used in the reference-mode trace.
-            if bad_jacobian and (fsq > 1.0e1):
-                pre_restart_reason = "bad_jacobian"
-            elif (iter2 > iter1) and (fsq > 100.0 * max(res0, 1e-30)):
-                pre_restart_reason = "bad_jacobian"
-            elif (
-                (iter2 - iter1) > (k_preconditioner_update_interval // 2)
-                and (iter2 > 2 * k_preconditioner_update_interval)
-                and ((fsqr_f + fsqz_f) > 1.0e-2)
-            ):
-                pre_restart_reason = "bad_progress"
-        elif bool(vmec2000_control):
-            # VMEC cadence: avoid restarting on every sign-change proxy event.
-            # In practice, VMEC2000 resets when the force state blows up; use the
-            # same effective trigger here (absolute fsq growth) and keep the
-            # previous delayed bad-growth fallback.
-            if bad_jacobian and (fsq > 1.0e1):
-                pre_restart_reason = "bad_jacobian"
-            elif (iter2 > iter1) and (fsq > 1.0e2):
-                pre_restart_reason = "bad_jacobian"
-            elif (iter2 > (iter1 + 8)) and (bad_growth_streak >= 2):
-                pre_restart_reason = "bad_jacobian"
-            elif (
-                (iter2 - iter1) > (k_preconditioner_update_interval // 2)
-                and (iter2 > 2 * k_preconditioner_update_interval)
-                and ((fsqr_f + fsqz_f) > 1.0e-2)
-            ):
-                pre_restart_reason = "bad_progress"
-        else:
-            if (iter2 > (iter1 + 8)) and (bad_growth_streak >= 2):
-                pre_restart_reason = "bad_jacobian"
-            elif (
-                (iter2 - iter1) > (k_preconditioner_update_interval // 2)
-                and (iter2 > 2 * k_preconditioner_update_interval)
-                and (fsq1 > 5.0 * max(res0, 1e-30))
-                and (fsq1 > 0.95 * max(fsq_prev, 1e-30))
-            ):
-                pre_restart_reason = "bad_progress"
-
-        if use_restart_triggers and pre_restart_reason != "none":
-            time_step_iter = float(time_step)
-            state = state_checkpoint
-            vRcc = jnp.zeros_like(vRcc)
-            vRss = jnp.zeros_like(vRss)
-            vZsc = jnp.zeros_like(vZsc)
-            vZcs = jnp.zeros_like(vZcs)
-            vLsc = jnp.zeros_like(vLsc)
-            vLcs = jnp.zeros_like(vLcs)
-            if pre_restart_reason == "bad_jacobian":
-                time_step = max(restart_badjac_factor * time_step, 1e-12)
-                ijacob += 1
-                step_status = "restart_bad_jacobian"
-            else:
-                time_step = max(time_step / restart_badprog_factor, 1e-12)
-                step_status = "restart_bad_progress"
-            if bool(huge_initial_forces) and (pre_restart_reason == "bad_jacobian"):
-                huge_force_restart_count += 1
-            else:
-                huge_force_restart_count = 0
-            if ijacob in (25, 50):
-                scale = 0.98 if ijacob < 50 else 0.96
-                time_step = max(scale * float(step_size), 1e-12)
-            bad_resets += 1
-            iter1 = iter2
-            bad_growth_streak = 0
-            fsq_prev = fsq1
-            inv_tau = [0.15 / time_step] * k_ndamp
-            if bool(vmec2000_control):
-                vmec2000_cache_valid = False
-                cache_precond_diag = None
-                cache_tcon = None
-                cache_norms = None
-                cache_rz_scale = None
-                cache_l_scale = None
-                cache_rz_norm = None
-                cache_f_norm1 = None
-                cache_prec_rz_mats = None
-                cache_prec_rz_jmax = None
-                cache_prec_lam_prec = None
-            step_history.append(0.0)
-            dt_eff_history.append(0.0)
-            update_rms_history.append(0.0)
-            w_curr_history.append(float(fsqr_f + fsqz_f + fsql_f))
-            w_try_history.append(float("nan"))
-            w_try_ratio_history.append(float("nan"))
-            restart_path_history.append("pre_restart_trigger")
-            step_status_history.append(step_status)
-            restart_reason_history.append(pre_restart_reason)
-            pre_restart_reason_history.append(pre_restart_reason)
-            time_step_history.append(time_step_iter)
-            res0_history.append(float(res0))
-            fsq_prev_history.append(float(fsq_prev))
-            bad_growth_streak_history.append(int(bad_growth_streak))
-            iter1_history.append(int(iter1))
-            grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
-            if verbose:
-                if bool(vmec2000_control) and bool(verbose_vmec2000_table):
-                    _print_vmec2000_iter_row(
-                        iter_idx=int(iter2),
-                        fsqr=fsqr_f,
-                        fsqz=fsqz_f,
-                        fsql=fsql_f,
-                        fsqr1=fsqr1_f,
-                        fsqz1=fsqz1_f,
-                        fsql1=fsql1_f,
-                        delt0r=float(time_step_iter),
-                        r00=float(r00_val),
-                        w_mhd=float(w_vmec_history[-1]),
-                        z00=float(z00_val),
-                    )
-                else:
-                    print(
-                        f"[solve_fixed_boundary_residual_iter] iter={it:03d} "
-                        f"dt_eff=0.000e+00 update_rms=0.000e+00 "
-                        f"fsqr1={fsqr1_f:.3e} fsqz1={fsqz1_f:.3e} fsql1={fsql1_f:.3e} "
-                        f"step_status={step_status}",
-                        flush=True,
-                    )
-            continue
-
+    
+            break
+        if converged:
+            break
         if iter2 == iter1:
             inv_tau = [0.15 / time_step] * k_ndamp
         else:
@@ -4102,9 +4605,8 @@ def solve_fixed_boundary_residual_iter(
                     )
                 )
 
-            vRss_phys, vZcs_phys = _m1_internal_to_physical_pair(vRss, vZcs)
-            dR = dt_eff * _mn_cos_to_signed_physical(vRcc, vRss_phys)
-            dZ = dt_eff * _mn_sin_to_signed_physical(vZsc, vZcs_phys)
+            dR = dt_eff * _mn_cos_to_signed_physical(vRcc, vRss)
+            dZ = dt_eff * _mn_sin_to_signed_physical(vZsc, vZcs)
             dL = dt_eff * _mn_sin_to_signed_physical_lambda(vLsc, vLcs)
             state_try = VMECState(
                 layout=state.layout,
@@ -4122,7 +4624,7 @@ def solve_fixed_boundary_residual_iter(
                 edge_Rsin=edge_Rsin,
                 edge_Zcos=edge_Zcos,
                 edge_Zsin=edge_Zsin,
-                enforce_lambda_axis=False,
+                enforce_lambda_axis=True,
                 idx00=idx00,
             )
             state_try = _apply_vmec_lambda_axis_rules(state_try)
@@ -4134,7 +4636,7 @@ def solve_fixed_boundary_residual_iter(
             w_try = float(np.asarray(fsqr_t + fsqz_t + fsql_t))
             w_try_ratio = w_try / max(w_curr, 1e-30) if np.isfinite(w_try) else float("inf")
             probe_bad_jacobian = False
-            if bool(vmec2000_control) and (float(np.asarray(zero_m1)) > 0.5):
+            if bool(reference_mode) and (float(np.asarray(zero_m1)) > 0.5):
                 _, _, fsqr_probe, fsqz_probe, fsql_probe, _, _, _ = _compute_forces(
                     state_try,
                     include_edge=include_edge,
@@ -4172,7 +4674,7 @@ def solve_fixed_boundary_residual_iter(
                         edge_Rsin=edge_Rsin,
                         edge_Zcos=edge_Zcos,
                         edge_Zsin=edge_Zsin,
-                        enforce_lambda_axis=False,
+                        enforce_lambda_axis=True,
                         idx00=idx00,
                     )
                     state_try = _apply_vmec_lambda_axis_rules(state_try)
@@ -4225,9 +4727,8 @@ def solve_fixed_boundary_residual_iter(
                     if np.isfinite(force_rms) and force_rms > 0.0:
                         dt_cap = max_update_rms / max(force_rms, 1e-30)
                         dt_direct = max(min(dt_direct, float(dt_cap)), 1e-12)
-                    frss_u_phys, fzcs_u_phys = _m1_internal_to_physical_pair(flip_sign * frss_u, flip_sign * fzcs_u)
-                    dR_dir = dt_direct * _mn_cos_to_signed(flip_sign * frcc_u, frss_u_phys)
-                    dZ_dir = dt_direct * _mn_sin_to_signed(flip_sign * fzsc_u, fzcs_u_phys)
+                    dR_dir = dt_direct * _mn_cos_to_signed(flip_sign * frcc_u, flip_sign * frss_u)
+                    dZ_dir = dt_direct * _mn_sin_to_signed(flip_sign * fzsc_u, flip_sign * fzcs_u)
                     dL_dir = dt_direct * _mn_sin_to_signed(flip_sign * flsc_u, flip_sign * flcs_u)
                     state_dir = VMECState(
                         layout=state.layout,
@@ -4245,7 +4746,7 @@ def solve_fixed_boundary_residual_iter(
                         edge_Rsin=edge_Rsin,
                         edge_Zcos=edge_Zcos,
                         edge_Zsin=edge_Zsin,
-                        enforce_lambda_axis=False,
+                        enforce_lambda_axis=True,
                         idx00=idx00,
                     )
                     state_dir = _apply_vmec_lambda_axis_rules(state_dir)
@@ -4327,6 +4828,8 @@ def solve_fixed_boundary_residual_iter(
                             cache_prec_rz_mats = None
                             cache_prec_rz_jmax = None
                             cache_prec_lam_prec = None
+                            cache_prec_faclam = None
+                            cache_prec_lam_debug = None
                 else:
                     # Roll back state and zero velocity.
                     state = state_backup
@@ -4372,6 +4875,8 @@ def solve_fixed_boundary_residual_iter(
                         cache_prec_rz_mats = None
                         cache_prec_rz_jmax = None
                         cache_prec_lam_prec = None
+                        cache_prec_faclam = None
+                        cache_prec_lam_debug = None
             step_history.append(float(dt_eff))
             w_curr_history.append(float(w_curr))
             w_try_history.append(float(w_try))
@@ -4398,9 +4903,8 @@ def solve_fixed_boundary_residual_iter(
                 vLsc_try = fac * (b1 * vLsc + dt_try * (flip_sign * jnp.asarray(flsc_u)))
                 vLcs_try = fac * (b1 * vLcs + dt_try * (flip_sign * jnp.asarray(flcs_u)))
 
-                vRss_try_phys, vZcs_try_phys = _m1_internal_to_physical_pair(vRss_try, vZcs_try)
-                dR_try = dt_try * _mn_cos_to_signed(vRcc_try, vRss_try_phys)
-                dZ_try = dt_try * _mn_sin_to_signed(vZsc_try, vZcs_try_phys)
+                dR_try = dt_try * _mn_cos_to_signed(vRcc_try, vRss_try)
+                dZ_try = dt_try * _mn_sin_to_signed(vZsc_try, vZcs_try)
                 dL_try = dt_try * _mn_sin_to_signed(vLsc_try, vLcs_try)
 
                 state_try = VMECState(
@@ -4419,7 +4923,7 @@ def solve_fixed_boundary_residual_iter(
                     edge_Rsin=edge_Rsin,
                     edge_Zcos=edge_Zcos,
                     edge_Zsin=edge_Zsin,
-                    enforce_lambda_axis=False,
+                    enforce_lambda_axis=True,
                     idx00=idx00,
                 )
                 state_try = _apply_vmec_lambda_axis_rules(state_try)
@@ -4603,6 +5107,8 @@ def solve_fixed_boundary_residual_iter(
         "cache_prec_rz_mats": cache_prec_rz_mats,
         "cache_prec_rz_jmax": cache_prec_rz_jmax,
         "cache_prec_lam_prec": cache_prec_lam_prec,
+        "cache_prec_faclam": cache_prec_faclam,
+        "cache_prec_lam_debug": cache_prec_lam_debug,
     }
     return SolveVmecResidualResult(
         state=state,
@@ -4691,15 +5197,17 @@ def first_step_diagnostics(
         icurv=icurv,
     )
 
-    trig = vmec_trig_tables(
-        ntheta=int(cfg.ntheta),
-        nzeta=int(cfg.nzeta),
-        nfp=int(wout_like.nfp),
-        mmax=int(wout_like.mpol) - 1,
-        nmax=int(wout_like.ntor),
-        lasym=bool(wout_like.lasym),
-        dtype=jnp.asarray(state0.Rcos).dtype,
-    )
+    trig = getattr(static_vmec, "trig_vmec", None)
+    if trig is None:
+        trig = vmec_trig_tables(
+            ntheta=int(cfg.ntheta),
+            nzeta=int(cfg.nzeta),
+            nfp=int(wout_like.nfp),
+            mmax=int(wout_like.mpol) - 1,
+            nmax=int(wout_like.ntor),
+            lasym=bool(wout_like.lasym),
+            dtype=jnp.asarray(state0.Rcos).dtype,
+        )
     if not bool(wout_like.lasym):
         # For lasym=False keep Z-force intact in the first-step diagnostic.
         zero_m1 = False
@@ -4815,7 +5323,7 @@ def first_step_diagnostics(
         sp[1] = sm[2] if ns >= 2 else 0.0
         return sm, sp
 
-    def _lambda_preconditioner(bc):
+    def _lambda_preconditioner(bc, *, return_faclam: bool = False):
         from .preconditioner_1d_jax import lambda_preconditioner
 
         return lambda_preconditioner(
@@ -4823,6 +5331,7 @@ def first_step_diagnostics(
             trig=trig,
             s=s,
             cfg=cfg,
+            return_faclam=return_faclam,
         )
 
     def _rz_preconditioner(frzl_in: TomnspsRZL, bc, k):

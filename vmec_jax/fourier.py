@@ -21,6 +21,7 @@ otherwise NumPy.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 from typing import Tuple
 
 import numpy as np
@@ -28,6 +29,29 @@ import numpy as np
 from ._compat import jnp, jit, has_jax
 from .modes import ModeTable
 from .grids import AngleGrid
+
+
+_HELICAL_BASIS_CACHE: dict[tuple, "HelicalBasis"] = {}
+
+
+def _basis_cache_key(modes: ModeTable, grid: AngleGrid) -> tuple:
+    m = np.asarray(modes.m)
+    n = np.asarray(modes.n)
+    theta = np.asarray(grid.theta)
+    zeta = np.asarray(grid.zeta)
+    return (
+        int(grid.nfp),
+        str(m.dtype),
+        str(n.dtype),
+        m.tobytes(),
+        n.tobytes(),
+        str(theta.dtype),
+        str(zeta.dtype),
+        theta.shape,
+        zeta.shape,
+        theta.tobytes(),
+        zeta.tobytes(),
+    )
 
 # Make HelicalBasis a JAX PyTree so it can be passed through jitted functions.
 # Registration is made idempotent to avoid duplicate-registration errors
@@ -87,13 +111,19 @@ class HelicalBasis:
         return cls(cos_phase=cos_phase, sin_phase=sin_phase, m=m, n=n, nfp=int(nfp))
 
 
-def build_helical_basis(modes: ModeTable, grid: AngleGrid) -> HelicalBasis:
+def build_helical_basis(modes: ModeTable, grid: AngleGrid, *, cache: bool = True) -> HelicalBasis:
     """Precompute cos/sin(phase) tensors.
 
     Notes:
     - This is O(K*ntheta*nzeta) memory; fine for VMEC defaults (low mpol, ntor) on a laptop.
     - Later we can switch to factored/FFT-based transforms once parity is validated.
     """
+    if cache:
+        key = _basis_cache_key(modes, grid)
+        cached = _HELICAL_BASIS_CACHE.get(key)
+        if cached is not None:
+            return cached
+
     m = jnp.asarray(modes.m)
     n = jnp.asarray(modes.n)
     theta = jnp.asarray(grid.theta)
@@ -101,20 +131,35 @@ def build_helical_basis(modes: ModeTable, grid: AngleGrid) -> HelicalBasis:
 
     # phase[K, ntheta, nzeta] via broadcasting
     phase = m[:, None, None] * theta[None, :, None] - n[:, None, None] * zeta[None, None, :]
-    return HelicalBasis(
+    basis = HelicalBasis(
         cos_phase=jnp.cos(phase),
         sin_phase=jnp.sin(phase),
         m=m,
         n=n,
         nfp=grid.nfp,
     )
+    if cache:
+        _HELICAL_BASIS_CACHE[key] = basis
+    return basis
 
 
-@jit
+def _internal_mode_scale(m, n, *, dtype):
+    """Return mscale*nscale factors (VMEC internal -> physical)."""
+    m = jnp.asarray(m)
+    n = jnp.asarray(n)
+    sqrt2 = jnp.sqrt(jnp.asarray(2.0, dtype=dtype))
+    mscale = jnp.where(m == 0, jnp.asarray(1.0, dtype=dtype), sqrt2)
+    nscale = jnp.where(jnp.abs(n) == 0, jnp.asarray(1.0, dtype=dtype), sqrt2)
+    return mscale * nscale
+
+
+@partial(jit, static_argnames=("coeffs_internal",))
 def eval_fourier(
     coeff_cos,
     coeff_sin,
     basis: HelicalBasis,
+    *,
+    coeffs_internal: bool = False,
 ):
     """Evaluate f(theta,zeta) = Σ_k [c_k cos(phase_k) + s_k sin(phase_k)].
 
@@ -122,15 +167,29 @@ def eval_fourier(
 
     Returns: shape (..., ntheta, nzeta)
     """
+    coeff_cos = jnp.asarray(coeff_cos)
+    coeff_sin = jnp.asarray(coeff_sin)
+    if coeffs_internal:
+        scale = _internal_mode_scale(basis.m, basis.n, dtype=coeff_cos.dtype)
+        coeff_cos = coeff_cos * scale
+        coeff_sin = coeff_sin * scale
+
     # Einsum works in both numpy and jax.numpy
     return jnp.einsum("...k,kij->...ij", coeff_cos, basis.cos_phase) + jnp.einsum(
         "...k,kij->...ij", coeff_sin, basis.sin_phase
     )
 
 
-@jit
-def eval_fourier_dtheta(coeff_cos, coeff_sin, basis: HelicalBasis):
+@partial(jit, static_argnames=("coeffs_internal",))
+def eval_fourier_dtheta(coeff_cos, coeff_sin, basis: HelicalBasis, *, coeffs_internal: bool = False):
     """∂/∂theta of the helical Fourier series."""
+    coeff_cos = jnp.asarray(coeff_cos)
+    coeff_sin = jnp.asarray(coeff_sin)
+    if coeffs_internal:
+        scale = _internal_mode_scale(basis.m, basis.n, dtype=coeff_cos.dtype)
+        coeff_cos = coeff_cos * scale
+        coeff_sin = coeff_sin * scale
+
     m = basis.m
     # d/dtheta cos = -m sin; d/dtheta sin = +m cos
     return jnp.einsum("...k,kij->...ij", coeff_cos * (-m), basis.sin_phase) + jnp.einsum(
@@ -138,8 +197,8 @@ def eval_fourier_dtheta(coeff_cos, coeff_sin, basis: HelicalBasis):
     )
 
 
-@jit
-def eval_fourier_dzeta_phys(coeff_cos, coeff_sin, basis: HelicalBasis):
+@partial(jit, static_argnames=("coeffs_internal",))
+def eval_fourier_dzeta_phys(coeff_cos, coeff_sin, basis: HelicalBasis, *, coeffs_internal: bool = False):
     """∂/∂phi_phys where phi_phys is the physical toroidal angle.
 
     VMEC uses zeta on one field period, so phi_phys = zeta / NFP and
@@ -148,6 +207,13 @@ def eval_fourier_dzeta_phys(coeff_cos, coeff_sin, basis: HelicalBasis):
     In the helical phase m*theta - n*zeta, ∂/∂zeta introduces factor (+n).
     Therefore ∂/∂phi_phys introduces factor (+n*NFP).
     """
+    coeff_cos = jnp.asarray(coeff_cos)
+    coeff_sin = jnp.asarray(coeff_sin)
+    if coeffs_internal:
+        scale = _internal_mode_scale(basis.m, basis.n, dtype=coeff_cos.dtype)
+        coeff_cos = coeff_cos * scale
+        coeff_sin = coeff_sin * scale
+
     n_phys = basis.n * basis.nfp
     # d/dzeta cos = +n sin; d/dzeta sin = -n cos  (because phase has -n*zeta)
     return jnp.einsum("...k,kij->...ij", coeff_cos * n_phys, basis.sin_phase) + jnp.einsum(

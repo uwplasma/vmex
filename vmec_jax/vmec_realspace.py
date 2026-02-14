@@ -10,9 +10,21 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
+
 from ._compat import jnp
 from .modes import ModeTable
+from .vmec_residue import vmec_scalxc_from_s
 from .vmec_tomnsp import VmecTrigTables
+
+
+_PHASE_CACHE: dict[tuple[int, int], tuple[Any, Any]] = {}
+_PHASE_DTHETA_CACHE: dict[tuple[int, int], tuple[Any, Any]] = {}
+_PHASE_DZETA_CACHE: dict[tuple[int, int], tuple[Any, Any]] = {}
+
+
+def _phase_cache_key(modes: ModeTable, trig: VmecTrigTables) -> tuple[int, int]:
+    return (id(modes), id(trig))
 
 
 def _vmec_mode_scaling(*, m: Any, n: Any, trig: VmecTrigTables) -> Any:
@@ -46,6 +58,18 @@ def _vmec_phase_tables(*, m: Any, n: Any, trig: VmecTrigTables):
     return cos_phase, sin_phase
 
 
+def _vmec_phase_tables_cached(*, modes: ModeTable, trig: VmecTrigTables, cache: bool = True):
+    if cache:
+        key = _phase_cache_key(modes, trig)
+        cached = _PHASE_CACHE.get(key)
+        if cached is not None:
+            return cached
+    cos_phase, sin_phase = _vmec_phase_tables(m=modes.m, n=modes.n, trig=trig)
+    if cache:
+        _PHASE_CACHE[key] = (cos_phase, sin_phase)
+    return cos_phase, sin_phase
+
+
 def _vmec_phase_tables_dtheta(*, m: Any, n: Any, trig: VmecTrigTables):
     m = jnp.asarray(m).astype(jnp.int32)
     n = jnp.asarray(n).astype(jnp.int32)
@@ -71,6 +95,18 @@ def _vmec_phase_tables_dtheta(*, m: Any, n: Any, trig: VmecTrigTables):
     return dcos_phase, dsin_phase
 
 
+def _vmec_phase_tables_dtheta_cached(*, modes: ModeTable, trig: VmecTrigTables, cache: bool = True):
+    if cache:
+        key = _phase_cache_key(modes, trig)
+        cached = _PHASE_DTHETA_CACHE.get(key)
+        if cached is not None:
+            return cached
+    dcos_phase, dsin_phase = _vmec_phase_tables_dtheta(m=modes.m, n=modes.n, trig=trig)
+    if cache:
+        _PHASE_DTHETA_CACHE[key] = (dcos_phase, dsin_phase)
+    return dcos_phase, dsin_phase
+
+
 def _vmec_phase_tables_dzeta(*, m: Any, n: Any, trig: VmecTrigTables):
     m = jnp.asarray(m).astype(jnp.int32)
     n = jnp.asarray(n).astype(jnp.int32)
@@ -92,19 +128,34 @@ def _vmec_phase_tables_dzeta(*, m: Any, n: Any, trig: VmecTrigTables):
     return dcos_phase, dsin_phase
 
 
+def _vmec_phase_tables_dzeta_cached(*, modes: ModeTable, trig: VmecTrigTables, cache: bool = True):
+    if cache:
+        key = _phase_cache_key(modes, trig)
+        cached = _PHASE_DZETA_CACHE.get(key)
+        if cached is not None:
+            return cached
+    dcos_phase, dsin_phase = _vmec_phase_tables_dzeta(m=modes.m, n=modes.n, trig=trig)
+    if cache:
+        _PHASE_DZETA_CACHE[key] = (dcos_phase, dsin_phase)
+    return dcos_phase, dsin_phase
+
+
 def vmec_realspace_synthesis(
     *,
     coeff_cos: Any,
     coeff_sin: Any,
     modes: ModeTable,
     trig: VmecTrigTables,
+    coeffs_internal: bool = False,
+    apply_scalxc: bool = False,
+    s: Any | None = None,
 ) -> Any:
     """Synthesize a real-space field on the VMEC internal grid.
 
     This implements the same trigonometric synthesis as VMEC's ``totzsp``
     using the precomputed ``fixaray`` tables. The input coefficients are
-    assumed to be in the **wout/physical** convention, so we apply the
-    VMEC scaling (divide by ``mscale*nscale``) internally.
+    assumed to be in the **wout/physical** convention by default. Set
+    ``coeffs_internal=True`` when passing VMEC *internal* coefficients.
 
     Parameters
     ----------
@@ -122,7 +173,8 @@ def vmec_realspace_synthesis(
     """
     coeff_cos = jnp.asarray(coeff_cos)
     coeff_sin = jnp.asarray(coeff_sin)
-    m = jnp.asarray(modes.m).astype(jnp.int32)
+    m_np = np.asarray(modes.m)
+    m = jnp.asarray(m_np).astype(jnp.int32)
     n = jnp.asarray(modes.n).astype(jnp.int32)
 
     if coeff_cos.ndim != 2 or coeff_sin.ndim != 2:
@@ -133,11 +185,29 @@ def vmec_realspace_synthesis(
         raise ValueError("Mode count mismatch between coefficients and modes")
 
     # VMEC internal scaling: coefficients are stored divided by mscale*nscale.
-    scale = _vmec_mode_scaling(m=m, n=n, trig=trig).astype(coeff_cos.dtype)
+    if bool(coeffs_internal):
+        scale = jnp.ones((m.shape[0],), dtype=coeff_cos.dtype)
+    else:
+        scale = _vmec_mode_scaling(m=m, n=n, trig=trig).astype(coeff_cos.dtype)
     coeff_cos = coeff_cos * scale[None, :]
     coeff_sin = coeff_sin * scale[None, :]
 
-    cos_phase, sin_phase = _vmec_phase_tables(m=m, n=n, trig=trig)
+    # Optional odd-m scaling hook (kept for experiments); VMEC does not apply
+    # scalxc during geometry synthesis, so this should remain False for parity.
+    if bool(apply_scalxc):
+        ns = int(coeff_cos.shape[0])
+        if s is None:
+            if ns < 2:
+                s = jnp.asarray([0.0], dtype=coeff_cos.dtype)
+            else:
+                s = jnp.linspace(0.0, 1.0, ns, dtype=coeff_cos.dtype)
+        mpol = int(np.max(m_np)) + 1
+        scalxc = vmec_scalxc_from_s(s=jnp.asarray(s), mpol=mpol).astype(coeff_cos.dtype)
+        scalxc_mn = scalxc[:, m]
+        coeff_cos = coeff_cos * scalxc_mn
+        coeff_sin = coeff_sin * scalxc_mn
+
+    cos_phase, sin_phase = _vmec_phase_tables_cached(modes=modes, trig=trig, cache=True)
 
     # Sum over modes.
     f = jnp.einsum("sk,kij->sij", coeff_cos, cos_phase) + jnp.einsum("sk,kij->sij", coeff_sin, sin_phase)
@@ -180,7 +250,8 @@ def vmec_realspace_analysis(
         Fourier coefficients in the **wout/physical** convention, shape (ns, K).
     """
     f = jnp.asarray(f)
-    m = jnp.asarray(modes.m).astype(jnp.int32)
+    m_np = np.asarray(modes.m)
+    m = jnp.asarray(m_np).astype(jnp.int32)
     n = jnp.asarray(modes.n).astype(jnp.int32)
 
     if f.ndim != 3:
@@ -208,7 +279,7 @@ def vmec_realspace_analysis(
         w[nt2 - 1] = 0.5 * dnorm
     f_w = f * w[None, :, None]
 
-    cos_phase, sin_phase = _vmec_phase_tables(m=m, n=n, trig=trig)
+    cos_phase, sin_phase = _vmec_phase_tables_cached(modes=modes, trig=trig, cache=True)
     cos_phase = cos_phase[:, :nt2, :]
     sin_phase = sin_phase[:, :nt2, :]
 
@@ -248,11 +319,15 @@ def vmec_realspace_synthesis_dtheta(
     coeff_sin: Any,
     modes: ModeTable,
     trig: VmecTrigTables,
+    coeffs_internal: bool = False,
+    apply_scalxc: bool = False,
+    s: Any | None = None,
 ) -> Any:
     """Theta derivative of the VMEC real-space synthesis."""
     coeff_cos = jnp.asarray(coeff_cos)
     coeff_sin = jnp.asarray(coeff_sin)
-    m = jnp.asarray(modes.m).astype(jnp.int32)
+    m_np = np.asarray(modes.m)
+    m = jnp.asarray(m_np).astype(jnp.int32)
     n = jnp.asarray(modes.n).astype(jnp.int32)
 
     if coeff_cos.ndim != 2 or coeff_sin.ndim != 2:
@@ -262,11 +337,27 @@ def vmec_realspace_synthesis_dtheta(
     if coeff_cos.shape[1] != m.shape[0]:
         raise ValueError("Mode count mismatch between coefficients and modes")
 
-    scale = _vmec_mode_scaling(m=m, n=n, trig=trig).astype(coeff_cos.dtype)
+    if bool(coeffs_internal):
+        scale = jnp.ones((m.shape[0],), dtype=coeff_cos.dtype)
+    else:
+        scale = _vmec_mode_scaling(m=m, n=n, trig=trig).astype(coeff_cos.dtype)
     coeff_cos = coeff_cos * scale[None, :]
     coeff_sin = coeff_sin * scale[None, :]
 
-    dcos_phase, dsin_phase = _vmec_phase_tables_dtheta(m=m, n=n, trig=trig)
+    if bool(apply_scalxc):
+        ns = int(coeff_cos.shape[0])
+        if s is None:
+            if ns < 2:
+                s = jnp.asarray([0.0], dtype=coeff_cos.dtype)
+            else:
+                s = jnp.linspace(0.0, 1.0, ns, dtype=coeff_cos.dtype)
+        mpol = int(np.max(m_np)) + 1
+        scalxc = vmec_scalxc_from_s(s=jnp.asarray(s), mpol=mpol).astype(coeff_cos.dtype)
+        scalxc_mn = scalxc[:, m]
+        coeff_cos = coeff_cos * scalxc_mn
+        coeff_sin = coeff_sin * scalxc_mn
+
+    dcos_phase, dsin_phase = _vmec_phase_tables_dtheta_cached(modes=modes, trig=trig, cache=True)
     f = jnp.einsum("sk,kij->sij", coeff_cos, dcos_phase) + jnp.einsum("sk,kij->sij", coeff_sin, dsin_phase)
     return f
 
@@ -277,11 +368,15 @@ def vmec_realspace_synthesis_dzeta_phys(
     coeff_sin: Any,
     modes: ModeTable,
     trig: VmecTrigTables,
+    coeffs_internal: bool = False,
+    apply_scalxc: bool = False,
+    s: Any | None = None,
 ) -> Any:
     """Zeta(physical) derivative of the VMEC real-space synthesis."""
     coeff_cos = jnp.asarray(coeff_cos)
     coeff_sin = jnp.asarray(coeff_sin)
-    m = jnp.asarray(modes.m).astype(jnp.int32)
+    m_np = np.asarray(modes.m)
+    m = jnp.asarray(m_np).astype(jnp.int32)
     n = jnp.asarray(modes.n).astype(jnp.int32)
 
     if coeff_cos.ndim != 2 or coeff_sin.ndim != 2:
@@ -291,11 +386,27 @@ def vmec_realspace_synthesis_dzeta_phys(
     if coeff_cos.shape[1] != m.shape[0]:
         raise ValueError("Mode count mismatch between coefficients and modes")
 
-    scale = _vmec_mode_scaling(m=m, n=n, trig=trig).astype(coeff_cos.dtype)
+    if bool(coeffs_internal):
+        scale = jnp.ones((m.shape[0],), dtype=coeff_cos.dtype)
+    else:
+        scale = _vmec_mode_scaling(m=m, n=n, trig=trig).astype(coeff_cos.dtype)
     coeff_cos = coeff_cos * scale[None, :]
     coeff_sin = coeff_sin * scale[None, :]
 
-    dcos_phase, dsin_phase = _vmec_phase_tables_dzeta(m=m, n=n, trig=trig)
+    if bool(apply_scalxc):
+        ns = int(coeff_cos.shape[0])
+        if s is None:
+            if ns < 2:
+                s = jnp.asarray([0.0], dtype=coeff_cos.dtype)
+            else:
+                s = jnp.linspace(0.0, 1.0, ns, dtype=coeff_cos.dtype)
+        mpol = int(np.max(m_np)) + 1
+        scalxc = vmec_scalxc_from_s(s=jnp.asarray(s), mpol=mpol).astype(coeff_cos.dtype)
+        scalxc_mn = scalxc[:, m]
+        coeff_cos = coeff_cos * scalxc_mn
+        coeff_sin = coeff_sin * scalxc_mn
+
+    dcos_phase, dsin_phase = _vmec_phase_tables_dzeta_cached(modes=modes, trig=trig, cache=True)
     f = jnp.einsum("sk,kij->sij", coeff_cos, dcos_phase) + jnp.einsum("sk,kij->sij", coeff_sin, dsin_phase)
     return f
 
@@ -307,15 +418,71 @@ def vmec_realspace_geom_from_state(
     trig: VmecTrigTables,
 ) -> dict[str, Any]:
     """Compute VMEC real-space geometry fields on the internal grid."""
-    R = vmec_realspace_synthesis(coeff_cos=state.Rcos, coeff_sin=state.Rsin, modes=modes, trig=trig)
-    Z = vmec_realspace_synthesis(coeff_cos=state.Zcos, coeff_sin=state.Zsin, modes=modes, trig=trig)
-    Ru = vmec_realspace_synthesis_dtheta(coeff_cos=state.Rcos, coeff_sin=state.Rsin, modes=modes, trig=trig)
-    Zu = vmec_realspace_synthesis_dtheta(coeff_cos=state.Zcos, coeff_sin=state.Zsin, modes=modes, trig=trig)
-    Rv = vmec_realspace_synthesis_dzeta_phys(coeff_cos=state.Rcos, coeff_sin=state.Rsin, modes=modes, trig=trig)
-    Zv = vmec_realspace_synthesis_dzeta_phys(coeff_cos=state.Zcos, coeff_sin=state.Zsin, modes=modes, trig=trig)
+    R = vmec_realspace_synthesis(
+        coeff_cos=state.Rcos,
+        coeff_sin=state.Rsin,
+        modes=modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+    )
+    Z = vmec_realspace_synthesis(
+        coeff_cos=state.Zcos,
+        coeff_sin=state.Zsin,
+        modes=modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+    )
+    Ru = vmec_realspace_synthesis_dtheta(
+        coeff_cos=state.Rcos,
+        coeff_sin=state.Rsin,
+        modes=modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+    )
+    Zu = vmec_realspace_synthesis_dtheta(
+        coeff_cos=state.Zcos,
+        coeff_sin=state.Zsin,
+        modes=modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+    )
+    Rv = vmec_realspace_synthesis_dzeta_phys(
+        coeff_cos=state.Rcos,
+        coeff_sin=state.Rsin,
+        modes=modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+    )
+    Zv = vmec_realspace_synthesis_dzeta_phys(
+        coeff_cos=state.Zcos,
+        coeff_sin=state.Zsin,
+        modes=modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+    )
     if hasattr(state, "Lcos") and hasattr(state, "Lsin"):
-        Lu = vmec_realspace_synthesis_dtheta(coeff_cos=state.Lcos, coeff_sin=state.Lsin, modes=modes, trig=trig)
-        Lv = vmec_realspace_synthesis_dzeta_phys(coeff_cos=state.Lcos, coeff_sin=state.Lsin, modes=modes, trig=trig)
+        Lu = vmec_realspace_synthesis_dtheta(
+            coeff_cos=state.Lcos,
+            coeff_sin=state.Lsin,
+            modes=modes,
+            trig=trig,
+            coeffs_internal=True,
+            apply_scalxc=True,
+        )
+        Lv = vmec_realspace_synthesis_dzeta_phys(
+            coeff_cos=state.Lcos,
+            coeff_sin=state.Lsin,
+            modes=modes,
+            trig=trig,
+            coeffs_internal=True,
+            apply_scalxc=True,
+        )
     else:
         Lu = None
         Lv = None

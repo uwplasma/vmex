@@ -24,6 +24,8 @@ from typing import Any
 
 import numpy as np
 
+from jax import tree_util
+
 from ._compat import jnp
 from .field import TWOPI
 from .field import lamscale_from_phips
@@ -32,11 +34,18 @@ from .vmec_jacobian import VmecHalfMeshJacobian, jacobian_half_mesh_from_parity
 from .fourier import build_helical_basis, eval_fourier, eval_fourier_dtheta, eval_fourier_dzeta_phys
 from .grids import AngleGrid
 from .modes import ModeTable
-from .vmec_parity import ParityRZL, internal_odd_from_physical_vmec_m1, split_rzl_even_odd_m
+from .vmec_parity import (
+    ParityRZL,
+    internal_odd_from_physical_vmec_jlam,
+    internal_odd_from_physical_vmec_m1,
+    split_rzl_even_odd_m,
+    vmec_m1_internal_to_physical_signed,
+)
 from .vmec_realspace import vmec_realspace_synthesis, vmec_realspace_synthesis_dtheta, vmec_realspace_synthesis_dzeta_phys
 from .vmec_tomnsp import VmecTrigTables, vmec_trig_tables
 
 
+@tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class VmecHalfMeshBcovar:
     """Half-mesh quantities used downstream by VMEC force/residue kernels."""
@@ -73,6 +82,8 @@ class VmecHalfMeshBcovar:
     lu0_full: Any  # (ns, ntheta, nzeta) full-mesh LU even (scaled + wout.phipf)
     lu0_force: Any  # (ns, ntheta, nzeta) LU even used in lambda-force block
     lu1_full: Any  # (ns, ntheta, nzeta) full-mesh LU odd (scaled)
+    lv0_full: Any  # (ns, ntheta, nzeta) full-mesh LV even (scaled)
+    lv1_full: Any  # (ns, ntheta, nzeta) full-mesh LV odd (scaled)
     lvv: Any  # (ns, ntheta, nzeta) phipog * gvv (full mesh)
     lvv_sh: Any  # (ns, ntheta, nzeta) lvv * pshalf
     phip_full: Any  # (ns,) full-mesh phipf used in LU_even
@@ -94,6 +105,52 @@ class VmecHalfMeshBcovar:
 
     # Scalar lambda scaling factor.
     lamscale: Any
+
+    def tree_flatten(self):
+        children = (
+            self.jac,
+            self.guu,
+            self.guv,
+            self.gvv,
+            self.bsupu,
+            self.bsupv,
+            self.bsubu,
+            self.bsubv,
+            self.bsubu_e,
+            self.bsubv_e,
+            self.bsubu_e_scaled,
+            self.bsubv_e_scaled,
+            self.bsubu_tmp,
+            self.bsubv_preblend,
+            self.bsubv_avg,
+            self.clmn_even,
+            self.clmn_odd,
+            self.blmn_even,
+            self.blmn_odd,
+            self.lu0_full,
+            self.lu0_force,
+            self.lu1_full,
+            self.lv0_full,
+            self.lv1_full,
+            self.lvv,
+            self.lvv_sh,
+            self.phip_full,
+            self.phip_internal,
+            self.bsq,
+            self.gij_b_uu,
+            self.gij_b_uv,
+            self.gij_b_vv,
+            self.lu_e,
+            self.lv_e,
+            self.lam_u,
+            self.lam_v,
+            self.lamscale,
+        )
+        return children, None
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        return cls(*children)
 
 
 def _pshalf_from_s(s: Any) -> Any:
@@ -145,6 +202,7 @@ def _apply_vmec_lambda_axis_closure(
     Lsin: Any,
     m_modes: Any,
     n_modes: Any,
+    axis_copy_mask: np.ndarray | None = None,
     lthreed: bool,
     ntor: int,
 ) -> Any:
@@ -159,9 +217,12 @@ def _apply_vmec_lambda_axis_closure(
     if (not bool(lthreed)) or int(ntor) <= 0 or ns < 2:
         return Lsin
 
-    m_modes_np = np.asarray(m_modes, dtype=int)
-    n_modes_np = np.asarray(n_modes, dtype=int)
-    axis_copy_mask_np = (m_modes_np == 0) & (n_modes_np > 0)
+    if axis_copy_mask is None:
+        m_modes_np = np.asarray(m_modes, dtype=int)
+        n_modes_np = np.asarray(n_modes, dtype=int)
+        axis_copy_mask_np = (m_modes_np == 0) & (n_modes_np > 0)
+    else:
+        axis_copy_mask_np = np.asarray(axis_copy_mask, dtype=bool)
     if not np.any(axis_copy_mask_np):
         return Lsin
 
@@ -213,31 +274,39 @@ def vmec_bcovar_half_mesh_from_wout(
     """
     s = jnp.asarray(static.s)
     ns = int(s.shape[0])
-    # VMEC `totzsps` converts the m=1 (rss,zcs) internal pair to physical
-    # coefficients before real-space synthesis when `lconm1` is enabled.
-    # Apply the same conversion in signed storage for geometry parity.
-    rsin_geom = jnp.asarray(state.Rsin)
-    zcos_geom = jnp.asarray(state.Zcos)
-    if bool(getattr(static.cfg, "lthreed", True)) and bool(getattr(static.cfg, "lconm1", True)) and int(getattr(static.cfg, "mpol", 0)) > 1:
-        m_modes = np.asarray(static.modes.m, dtype=int)
-        mask_m1 = jnp.asarray(m_modes == 1, dtype=rsin_geom.dtype)[None, :]
-        rss_old = rsin_geom
-        rsin_geom = jnp.where(mask_m1 != 0, rss_old + zcos_geom, rss_old)
-        zcos_geom = jnp.where(mask_m1 != 0, rss_old - zcos_geom, zcos_geom)
+    # VMEC stores internal coefficients. Undo the m=1 internal constraint for
+    # R/Z before real-space synthesis.
+    Rcos_int, Zsin_int, Rsin_int, Zcos_int = vmec_m1_internal_to_physical_signed(
+        Rcos=state.Rcos,
+        Zsin=state.Zsin,
+        Rsin=state.Rsin,
+        Zcos=state.Zcos,
+        modes=static.modes,
+        lthreed=bool(getattr(static.cfg, "lthreed", True)),
+        lasym=bool(getattr(static.cfg, "lasym", False)),
+        lconm1=bool(getattr(static.cfg, "lconm1", True)),
+    )
+
+    Rcos_geom = jnp.asarray(Rcos_int)
+    Rsin_geom = jnp.asarray(Rsin_int)
+    Zcos_geom = jnp.asarray(Zcos_int)
+    Zsin_geom = jnp.asarray(Zsin_int)
     Lcos_force = jnp.asarray(state.Lcos)
     Lsin_force = _apply_vmec_lambda_axis_closure(
         Lsin=state.Lsin,
         m_modes=static.modes.m,
         n_modes=static.modes.n,
+        axis_copy_mask=getattr(static, "lambda_axis_copy_mask", None),
         lthreed=bool(getattr(static.cfg, "lthreed", False)),
         ntor=int(getattr(static.cfg, "ntor", 0)),
     )
+    Lsin_force = jnp.asarray(Lsin_force)
 
     state_parity = SimpleNamespace(
-        Rcos=state.Rcos,
-        Rsin=rsin_geom,
-        Zcos=zcos_geom,
-        Zsin=state.Zsin,
+        Rcos=Rcos_geom,
+        Rsin=Rsin_geom,
+        Zcos=Zcos_geom,
+        Zsin=Zsin_geom,
         Lcos=Lcos_force,
         Lsin=Lsin_force,
     )
@@ -257,17 +326,44 @@ def vmec_bcovar_half_mesh_from_wout(
             )
 
         def _eval_pair(cos, sin, mask):
-            return vmec_realspace_synthesis(coeff_cos=cos * mask, coeff_sin=sin * mask, modes=static.modes, trig=trig)
+            return vmec_realspace_synthesis(
+                coeff_cos=cos * mask,
+                coeff_sin=sin * mask,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=False,
+                s=s,
+            )
 
         def _eval_pair_dtheta(cos, sin, mask):
-            return vmec_realspace_synthesis_dtheta(coeff_cos=cos * mask, coeff_sin=sin * mask, modes=static.modes, trig=trig)
+            return vmec_realspace_synthesis_dtheta(
+                coeff_cos=cos * mask,
+                coeff_sin=sin * mask,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=False,
+                s=s,
+            )
 
         def _eval_pair_dzeta(cos, sin, mask):
-            return vmec_realspace_synthesis_dzeta_phys(coeff_cos=cos * mask, coeff_sin=sin * mask, modes=static.modes, trig=trig)
+            return vmec_realspace_synthesis_dzeta_phys(
+                coeff_cos=cos * mask,
+                coeff_sin=sin * mask,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=False,
+                s=s,
+            )
 
-        m = np.asarray(static.modes.m, dtype=int)
         dtype = jnp.asarray(state.Rcos).dtype
-        mask_even = jnp.asarray((m % 2) == 0).astype(dtype)
+        if getattr(static, "m_is_even", None) is None:
+            m = np.asarray(static.modes.m, dtype=int)
+            mask_even = jnp.asarray((m % 2) == 0).astype(dtype)
+        else:
+            mask_even = jnp.asarray(static.m_is_even, dtype=dtype)
         mask_odd = (1.0 - mask_even).astype(dtype)
 
         parity = ParityRZL(
@@ -298,64 +394,172 @@ def vmec_bcovar_half_mesh_from_wout(
     # VMEC axis convention (vmec_params.f: jmin1):
     # - m=1 odd-m internal fields are extrapolated to the axis (copy js=2),
     # - odd-m with m>=3 are zero on the axis.
-    m_modes = np.asarray(static.modes.m, dtype=int)
     dtype = jnp.asarray(state.Rcos).dtype
-    mask_m1 = jnp.asarray(m_modes == 1, dtype=dtype)
-    mask_odd_rest = jnp.asarray((m_modes % 2 == 1) & (m_modes != 1), dtype=dtype)
+    if getattr(static, "m_is_m1", None) is None:
+        m_modes = np.asarray(static.modes.m, dtype=int)
+        mask_m1 = jnp.asarray(m_modes == 1, dtype=dtype)
+        mask_odd_rest = jnp.asarray((m_modes % 2 == 1) & (m_modes != 1), dtype=dtype)
+        mask_odd = jnp.asarray(m_modes % 2 == 1, dtype=dtype)
+    else:
+        mask_m1 = jnp.asarray(static.m_is_m1, dtype=dtype)
+        mask_odd_rest = jnp.asarray(static.m_is_odd_rest, dtype=dtype)
+        mask_odd = jnp.asarray(static.m_is_odd, dtype=dtype)
 
-    def _odd_internal_vmec(*, coeff_cos, coeff_sin, eval_fn):
+    def _odd_internal_vmec(*, coeff_cos, coeff_sin, eval_fn, odd_is_internal: bool):
         if use_vmec_synthesis:
             phys_m1 = eval_fn(coeff_cos * mask_m1, coeff_sin * mask_m1)
             phys_rest = eval_fn(coeff_cos * mask_odd_rest, coeff_sin * mask_odd_rest)
         else:
-            phys_m1 = eval_fn(coeff_cos * mask_m1, coeff_sin * mask_m1, static.basis)
-            phys_rest = eval_fn(coeff_cos * mask_odd_rest, coeff_sin * mask_odd_rest, static.basis)
+            phys_m1 = eval_fn(coeff_cos * mask_m1, coeff_sin * mask_m1, static.basis, coeffs_internal=True)
+            phys_rest = eval_fn(coeff_cos * mask_odd_rest, coeff_sin * mask_odd_rest, static.basis, coeffs_internal=True)
+        if odd_is_internal:
+            out = phys_m1 + phys_rest
+            if out.shape[0] >= 2:
+                out = out.at[0].set(phys_m1[1])
+            return out
         return internal_odd_from_physical_vmec_m1(odd_m1_phys=phys_m1, odd_mge2_phys=phys_rest, s=s)
 
+    def _odd_internal_vmec_lambda(*, coeff_cos, coeff_sin, eval_fn, odd_is_internal: bool):
+        if use_vmec_synthesis:
+            phys_m1 = eval_fn(coeff_cos * mask_m1, coeff_sin * mask_m1)
+            phys_rest = eval_fn(coeff_cos * mask_odd_rest, coeff_sin * mask_odd_rest)
+        else:
+            phys_m1 = eval_fn(coeff_cos * mask_m1, coeff_sin * mask_m1, static.basis, coeffs_internal=True)
+            phys_rest = eval_fn(coeff_cos * mask_odd_rest, coeff_sin * mask_odd_rest, static.basis, coeffs_internal=True)
+        if odd_is_internal:
+            out = phys_m1 + phys_rest
+            if out.shape[0] >= 2:
+                out = out.at[0].set(phys_m1[1])
+            return out
+        return internal_odd_from_physical_vmec_jlam(odd_m1_phys=phys_m1, odd_mge2_phys=phys_rest, s=s)
+
     if use_vmec_synthesis:
-        R1 = _odd_internal_vmec(coeff_cos=state_parity.Rcos, coeff_sin=state_parity.Rsin, eval_fn=lambda c, s: vmec_realspace_synthesis(coeff_cos=c, coeff_sin=s, modes=static.modes, trig=trig))
-        Z1 = _odd_internal_vmec(coeff_cos=state_parity.Zcos, coeff_sin=state_parity.Zsin, eval_fn=lambda c, s: vmec_realspace_synthesis(coeff_cos=c, coeff_sin=s, modes=static.modes, trig=trig))
+        s_grid = s
+        odd_is_internal = True
+        R1 = _odd_internal_vmec(
+            coeff_cos=state_parity.Rcos,
+            coeff_sin=state_parity.Rsin,
+            eval_fn=lambda c, s_: vmec_realspace_synthesis(
+                coeff_cos=c,
+                coeff_sin=s_,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=True,
+                s=s_grid,
+            ),
+            odd_is_internal=odd_is_internal,
+        )
+        Z1 = _odd_internal_vmec(
+            coeff_cos=state_parity.Zcos,
+            coeff_sin=state_parity.Zsin,
+            eval_fn=lambda c, s_: vmec_realspace_synthesis(
+                coeff_cos=c,
+                coeff_sin=s_,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=True,
+                s=s_grid,
+            ),
+            odd_is_internal=odd_is_internal,
+        )
         Ru1 = _odd_internal_vmec(
             coeff_cos=state_parity.Rcos,
             coeff_sin=state_parity.Rsin,
-            eval_fn=lambda c, s: vmec_realspace_synthesis_dtheta(coeff_cos=c, coeff_sin=s, modes=static.modes, trig=trig),
+            eval_fn=lambda c, s_: vmec_realspace_synthesis_dtheta(
+                coeff_cos=c,
+                coeff_sin=s_,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=True,
+                s=s_grid,
+            ),
+            odd_is_internal=odd_is_internal,
         )
         Zu1 = _odd_internal_vmec(
             coeff_cos=state_parity.Zcos,
             coeff_sin=state_parity.Zsin,
-            eval_fn=lambda c, s: vmec_realspace_synthesis_dtheta(coeff_cos=c, coeff_sin=s, modes=static.modes, trig=trig),
+            eval_fn=lambda c, s_: vmec_realspace_synthesis_dtheta(
+                coeff_cos=c,
+                coeff_sin=s_,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=True,
+                s=s_grid,
+            ),
+            odd_is_internal=odd_is_internal,
         )
         Rv1 = _odd_internal_vmec(
             coeff_cos=state_parity.Rcos,
             coeff_sin=state_parity.Rsin,
-            eval_fn=lambda c, s: vmec_realspace_synthesis_dzeta_phys(coeff_cos=c, coeff_sin=s, modes=static.modes, trig=trig),
+            eval_fn=lambda c, s_: vmec_realspace_synthesis_dzeta_phys(
+                coeff_cos=c,
+                coeff_sin=s_,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=True,
+                s=s_grid,
+            ),
+            odd_is_internal=odd_is_internal,
         )
         Zv1 = _odd_internal_vmec(
             coeff_cos=state_parity.Zcos,
             coeff_sin=state_parity.Zsin,
-            eval_fn=lambda c, s: vmec_realspace_synthesis_dzeta_phys(coeff_cos=c, coeff_sin=s, modes=static.modes, trig=trig),
+            eval_fn=lambda c, s_: vmec_realspace_synthesis_dzeta_phys(
+                coeff_cos=c,
+                coeff_sin=s_,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=True,
+                s=s_grid,
+            ),
+            odd_is_internal=odd_is_internal,
         )
 
-        Lu1 = _odd_internal_vmec(
+        Lu1 = _odd_internal_vmec_lambda(
             coeff_cos=state_parity.Lcos,
             coeff_sin=state_parity.Lsin,
-            eval_fn=lambda c, s: vmec_realspace_synthesis_dtheta(coeff_cos=c, coeff_sin=s, modes=static.modes, trig=trig),
+            eval_fn=lambda c, s_: vmec_realspace_synthesis_dtheta(
+                coeff_cos=c,
+                coeff_sin=s_,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=True,
+                s=s_grid,
+            ),
+            odd_is_internal=odd_is_internal,
         )
-        Lv1 = _odd_internal_vmec(
+        Lv1 = _odd_internal_vmec_lambda(
             coeff_cos=state_parity.Lcos,
             coeff_sin=state_parity.Lsin,
-            eval_fn=lambda c, s: vmec_realspace_synthesis_dzeta_phys(coeff_cos=c, coeff_sin=s, modes=static.modes, trig=trig),
+            eval_fn=lambda c, s_: vmec_realspace_synthesis_dzeta_phys(
+                coeff_cos=c,
+                coeff_sin=s_,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=True,
+                s=s_grid,
+            ),
+            odd_is_internal=odd_is_internal,
         )
     else:
-        R1 = _odd_internal_vmec(coeff_cos=state_parity.Rcos, coeff_sin=state_parity.Rsin, eval_fn=eval_fourier)
-        Z1 = _odd_internal_vmec(coeff_cos=state_parity.Zcos, coeff_sin=state_parity.Zsin, eval_fn=eval_fourier)
-        Ru1 = _odd_internal_vmec(coeff_cos=state_parity.Rcos, coeff_sin=state_parity.Rsin, eval_fn=eval_fourier_dtheta)
-        Zu1 = _odd_internal_vmec(coeff_cos=state_parity.Zcos, coeff_sin=state_parity.Zsin, eval_fn=eval_fourier_dtheta)
-        Rv1 = _odd_internal_vmec(coeff_cos=state_parity.Rcos, coeff_sin=state_parity.Rsin, eval_fn=eval_fourier_dzeta_phys)
-        Zv1 = _odd_internal_vmec(coeff_cos=state_parity.Zcos, coeff_sin=state_parity.Zsin, eval_fn=eval_fourier_dzeta_phys)
+        odd_is_internal = False
+        R1 = _odd_internal_vmec(coeff_cos=state_parity.Rcos, coeff_sin=state_parity.Rsin, eval_fn=eval_fourier, odd_is_internal=odd_is_internal)
+        Z1 = _odd_internal_vmec(coeff_cos=state_parity.Zcos, coeff_sin=state_parity.Zsin, eval_fn=eval_fourier, odd_is_internal=odd_is_internal)
+        Ru1 = _odd_internal_vmec(coeff_cos=state_parity.Rcos, coeff_sin=state_parity.Rsin, eval_fn=eval_fourier_dtheta, odd_is_internal=odd_is_internal)
+        Zu1 = _odd_internal_vmec(coeff_cos=state_parity.Zcos, coeff_sin=state_parity.Zsin, eval_fn=eval_fourier_dtheta, odd_is_internal=odd_is_internal)
+        Rv1 = _odd_internal_vmec(coeff_cos=state_parity.Rcos, coeff_sin=state_parity.Rsin, eval_fn=eval_fourier_dzeta_phys, odd_is_internal=odd_is_internal)
+        Zv1 = _odd_internal_vmec(coeff_cos=state_parity.Zcos, coeff_sin=state_parity.Zsin, eval_fn=eval_fourier_dzeta_phys, odd_is_internal=odd_is_internal)
 
-        Lu1 = _odd_internal_vmec(coeff_cos=state_parity.Lcos, coeff_sin=state_parity.Lsin, eval_fn=eval_fourier_dtheta)
-        Lv1 = _odd_internal_vmec(coeff_cos=state_parity.Lcos, coeff_sin=state_parity.Lsin, eval_fn=eval_fourier_dzeta_phys)
+        Lu1 = _odd_internal_vmec_lambda(coeff_cos=state_parity.Lcos, coeff_sin=state_parity.Lsin, eval_fn=eval_fourier_dtheta, odd_is_internal=odd_is_internal)
+        Lv1 = _odd_internal_vmec_lambda(coeff_cos=state_parity.Lcos, coeff_sin=state_parity.Lsin, eval_fn=eval_fourier_dzeta_phys, odd_is_internal=odd_is_internal)
 
     # Half-mesh Jacobian quantities from VMEC's discrete formula.
     jac = jacobian_half_mesh_from_parity(
@@ -369,7 +573,6 @@ def vmec_bcovar_half_mesh_from_wout(
         pzu_odd=Zu1,
         s=s,
     )
-
     # Metric elements on full mesh split into even/odd (internal) pieces, then
     # staggered to the half mesh using VMEC's pshalf convention.
     guu_e, guu_o = _metric_even_odd(a0=parity.Rt_even, a1=Ru1, b0=parity.Zt_even, b1=Zu1, s=s)
@@ -387,6 +590,9 @@ def vmec_bcovar_half_mesh_from_wout(
     guu = _half_mesh_from_even_odd(guu_e, guu_o, s=s)
     guv = _half_mesh_from_even_odd(guv_e, guv_o, s=s)
     gvv = _half_mesh_from_even_odd(gvv_e, gvv_o, s=s) + _half_mesh_from_even_odd(R2_e, R2_o, s=s)
+    if ns >= 1:
+        guv = guv.at[0].set(jnp.zeros_like(guv[0]))
+        gvv = gvv.at[0].set(jnp.zeros_like(gvv[0]))
 
     # Lambda derivatives on half mesh (scaled lambda).
     lam_u = _half_mesh_from_even_odd(parity.Lt_even, Lu1, s=s)
@@ -586,12 +792,15 @@ def vmec_bcovar_half_mesh_from_wout(
     # - bsubu/bsubv (half mesh): covariant B components
 
     # Full-mesh LU parity pieces (odd is VMEC-internal 1/sqrt(s) representation).
-    lu0 = (lamscale * parity.Lt_even) + jnp.asarray(wout.phipf)[:, None, None]
+    # VMEC uses the internal phipf (= signgs*phipf/(2π)) in the LU definition.
+    lu0 = (lamscale * parity.Lt_even) + jnp.asarray(phipf_internal)[:, None, None]
     lu1 = lamscale * Lu1
 
     # lvv on half mesh: phipog * gvv (bcovar.f uses phipog == 1/sqrtg).
     # NOTE: phipog does **not** include the 2π scaling used in `overg`.
     phipog = jnp.where(jac.sqrtg != 0, 1.0 / jac.sqrtg, 0.0)
+    if ns >= 1:
+        phipog = phipog.at[0].set(jnp.zeros_like(phipog[0]))
     lvv = phipog * gvv
 
     if bool(use_wout_bsub_for_lambda):
@@ -683,6 +892,8 @@ def vmec_bcovar_half_mesh_from_wout(
         lu0_full=lu0_full,
         lu0_force=lu0_force,
         lu1_full=lu1_full,
+        lv0_full=lv0_full,
+        lv1_full=lv1_full,
         lvv=lvv,
         lvv_sh=lvv * pshalf,
         phip_full=jnp.asarray(wout.phipf),

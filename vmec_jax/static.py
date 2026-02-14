@@ -16,6 +16,7 @@ easier to write fast, end-to-end differentiable kernels later.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import numpy as np
 
 from ._compat import jnp
 from .config import VMECConfig
@@ -33,6 +34,16 @@ class VMECStatic:
     grid: AngleGrid
     basis: HelicalBasis
     s: any  # (ns,) radial coordinate in [0,1]
+    trig_vmec: any | None = None  # cached VMEC trig tables (fixaray parity)
+    # Cached mode arrays/masks for performance.
+    m_np: np.ndarray | None = None
+    n_np: np.ndarray | None = None
+    m_is_even: np.ndarray | None = None
+    m_is_odd: np.ndarray | None = None
+    m_is_m0: np.ndarray | None = None
+    m_is_m1: np.ndarray | None = None
+    m_is_odd_rest: np.ndarray | None = None
+    lambda_axis_copy_mask: np.ndarray | None = None
 
 
 def build_static(cfg: VMECConfig, *, grid: AngleGrid | None = None) -> VMECStatic:
@@ -55,4 +66,42 @@ def build_static(cfg: VMECConfig, *, grid: AngleGrid | None = None) -> VMECStati
         s = jnp.asarray([0.0])
     else:
         s = jnp.linspace(0.0, 1.0, cfg.ns)
-    return VMECStatic(cfg=cfg, modes=modes, grid=grid, basis=basis, s=s)
+    try:
+        from .vmec_tomnsp import vmec_trig_tables
+
+        trig_vmec = vmec_trig_tables(
+            ntheta=int(cfg.ntheta),
+            nzeta=int(cfg.nzeta),
+            nfp=int(cfg.nfp),
+            mmax=int(cfg.mpol) - 1,
+            nmax=int(cfg.ntor),
+            lasym=bool(cfg.lasym),
+            dtype=jnp.asarray(s).dtype,
+            cache=True,
+        )
+    except Exception:
+        trig_vmec = None
+    m_np = np.asarray(modes.m, dtype=int)
+    n_np = np.asarray(modes.n, dtype=int)
+    m_is_even = (m_np % 2) == 0
+    m_is_odd = ~m_is_even
+    m_is_m0 = m_np == 0
+    m_is_m1 = m_np == 1
+    m_is_odd_rest = (m_np % 2 == 1) & (m_np != 1)
+    lambda_axis_copy_mask = (m_np == 0) & (n_np > 0)
+    return VMECStatic(
+        cfg=cfg,
+        modes=modes,
+        grid=grid,
+        basis=basis,
+        s=s,
+        trig_vmec=trig_vmec,
+        m_np=m_np,
+        n_np=n_np,
+        m_is_even=m_is_even,
+        m_is_odd=m_is_odd,
+        m_is_m0=m_is_m0,
+        m_is_m1=m_is_m1,
+        m_is_odd_rest=m_is_odd_rest,
+        lambda_axis_copy_mask=lambda_axis_copy_mask,
+    )

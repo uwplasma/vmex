@@ -265,7 +265,7 @@ def run_fixed_boundary(
     multigrid: bool | None = None,
     multigrid_use_input_niter: bool = True,
     verbose: bool = True,
-    jit_forces: bool = False,
+    jit_forces: bool = True,
     grid=None,
     ns_override: int | None = None,
     restart_state: any | None = None,
