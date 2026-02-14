@@ -430,6 +430,7 @@ def rz_preconditioner_matrices(
     return mats, jmin, int(ns_f)
 
 
+@jax.jit
 def _tridi_solve_batched_jmin0(a, d, b, rhs) -> Any:
     """Batched Thomas solve for a/d/b with jmin=0 (axisymmetric)."""
     a = jnp.asarray(a)
