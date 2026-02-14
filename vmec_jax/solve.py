@@ -3565,16 +3565,16 @@ def solve_fixed_boundary_residual_iter(
         time_step_j = jnp.asarray(float(step_size), dtype=dtype)
         flip_sign_j = jnp.asarray(float(initial_flip_sign), dtype=dtype)
 
-        def _scan_step(carry, it):
-            state, prev_rz = carry
+        include_edge_scan = False
+
+        def _scan_step(state, it):
             it = jnp.asarray(it, dtype=jnp.int32)
             iter_since_restart = it + 1
             zero_m1 = jnp.where(iter_since_restart < 2, jnp.asarray(1.0, dtype=dtype), jnp.asarray(0.0, dtype=dtype))
-            include_edge = (iter_since_restart < 50) & (prev_rz < 1.0e-6)
 
             k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale, _norms = _compute_forces(
                 state,
-                include_edge=include_edge,
+                include_edge=include_edge_scan,
                 zero_m1=zero_m1,
                 iter_idx=None,
             )
@@ -3646,18 +3646,15 @@ def solve_fixed_boundary_residual_iter(
             )
             state_new = _apply_vmec_lambda_axis_rules(state_new)
 
-            prev_rz_new = fsqr + fsqz
-            return (state_new, prev_rz_new), (fsqr, fsqz, fsql)
+            return state_new, (fsqr, fsqz, fsql)
 
-        prev_rz0 = jnp.asarray(2.0, dtype=dtype)
-
-        def _run_scan(state_init, prev_rz_init):
-            return jax.lax.scan(_scan_step, (state_init, prev_rz_init), jnp.arange(max_iter, dtype=jnp.int32))
+        def _run_scan(state_init):
+            return jax.lax.scan(_scan_step, state_init, jnp.arange(max_iter, dtype=jnp.int32))
 
         if jit_forces:
             _run_scan = jit(_run_scan)
 
-        (state_final, _prev_rz), hist = _run_scan(state, prev_rz0)
+        state_final, hist = _run_scan(state)
         fsqr_hist, fsqz_hist, fsql_hist = hist
         w_hist = fsqr_hist + fsqz_hist + fsql_hist
         return SolveVmecResidualResult(
