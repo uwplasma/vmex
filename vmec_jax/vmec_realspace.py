@@ -513,8 +513,13 @@ def vmec_realspace_geom_from_state(
             lasym=lasym,
             lconm1=lconm1,
         )
-    coeff_cos_stack = jnp.stack([Rcos, Zcos], axis=0)
-    coeff_sin_stack = jnp.stack([Rsin, Zsin], axis=0)
+    has_lambda = hasattr(state, "Lcos") and hasattr(state, "Lsin")
+    if has_lambda:
+        coeff_cos_stack = jnp.stack([Rcos, Zcos, jnp.asarray(state.Lcos)], axis=0)
+        coeff_sin_stack = jnp.stack([Rsin, Zsin, jnp.asarray(state.Lsin)], axis=0)
+    else:
+        coeff_cos_stack = jnp.stack([Rcos, Zcos], axis=0)
+        coeff_sin_stack = jnp.stack([Rsin, Zsin], axis=0)
     rz = vmec_realspace_synthesis(
         coeff_cos=coeff_cos_stack,
         coeff_sin=coeff_sin_stack,
@@ -542,23 +547,9 @@ def vmec_realspace_geom_from_state(
     R, Z = rz[0], rz[1]
     Ru, Zu = rz_t[0], rz_t[1]
     Rv, Zv = rz_p[0], rz_p[1]
-    if hasattr(state, "Lcos") and hasattr(state, "Lsin"):
-        Lu = vmec_realspace_synthesis_dtheta(
-            coeff_cos=state.Lcos,
-            coeff_sin=state.Lsin,
-            modes=modes,
-            trig=trig,
-            coeffs_internal=True,
-            apply_scalxc=True,
-        )
-        Lv = vmec_realspace_synthesis_dzeta_phys(
-            coeff_cos=state.Lcos,
-            coeff_sin=state.Lsin,
-            modes=modes,
-            trig=trig,
-            coeffs_internal=True,
-            apply_scalxc=True,
-        )
+    if has_lambda:
+        Lu = rz_t[2]
+        Lv = rz_p[2]
     else:
         Lu = None
         Lv = None
