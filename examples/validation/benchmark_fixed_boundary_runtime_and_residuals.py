@@ -79,6 +79,7 @@ def _run_vmec_jax(
     ns_override: int | None,
     warmup: bool,
     use_input_niter: bool,
+    jit_forces: bool,
 ) -> RunTrace:
     import vmec_jax.api as vj
 
@@ -94,6 +95,7 @@ def _run_vmec_jax(
             multigrid_use_input_niter=bool(use_input_niter),
             verbose=False,
             ns_override=ns_override,
+            jit_forces=bool(jit_forces),
         )
         try:
             warm_res = warm.result
@@ -112,6 +114,7 @@ def _run_vmec_jax(
         multigrid_use_input_niter=bool(use_input_niter),
         verbose=False,
         ns_override=ns_override,
+        jit_forces=bool(jit_forces),
     )
     dt = time.perf_counter() - t0
 
@@ -304,6 +307,12 @@ def main() -> None:
         help="Disable JAX JIT (reduces compilation overhead for quick runs).",
     )
     p.add_argument(
+        "--jit-forces",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="JIT the force/residual pipeline in vmec_jax (best for performance).",
+    )
+    p.add_argument(
         "--no-warmup",
         action="store_true",
         help="Skip the warmup run (reduces runtime for quick checks).",
@@ -396,6 +405,7 @@ def main() -> None:
                 ns_override=args.ns_override,
                 warmup=not bool(args.no_warmup),
                 use_input_niter=bool(args.jax_use_input_niter),
+                jit_forces=bool(args.jit_forces),
             )
         )
 
