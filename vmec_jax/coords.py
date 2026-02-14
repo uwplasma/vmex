@@ -115,17 +115,17 @@ def eval_coords(state: VMECState, basis: HelicalBasis) -> Coords:
     Coords
         All arrays are (ns, ntheta, nzeta) and are compatible with JAX autodiff.
     """
-    R = eval_fourier(state.Rcos, state.Rsin, basis)
-    Z = eval_fourier(state.Zcos, state.Zsin, basis)
-    L = eval_fourier(state.Lcos, state.Lsin, basis)
+    R = eval_fourier(state.Rcos, state.Rsin, basis, coeffs_internal=True)
+    Z = eval_fourier(state.Zcos, state.Zsin, basis, coeffs_internal=True)
+    L = eval_fourier(state.Lcos, state.Lsin, basis, coeffs_internal=True)
 
-    R_theta = eval_fourier_dtheta(state.Rcos, state.Rsin, basis)
-    Z_theta = eval_fourier_dtheta(state.Zcos, state.Zsin, basis)
-    L_theta = eval_fourier_dtheta(state.Lcos, state.Lsin, basis)
+    R_theta = eval_fourier_dtheta(state.Rcos, state.Rsin, basis, coeffs_internal=True)
+    Z_theta = eval_fourier_dtheta(state.Zcos, state.Zsin, basis, coeffs_internal=True)
+    L_theta = eval_fourier_dtheta(state.Lcos, state.Lsin, basis, coeffs_internal=True)
 
-    R_phi = eval_fourier_dzeta_phys(state.Rcos, state.Rsin, basis)
-    Z_phi = eval_fourier_dzeta_phys(state.Zcos, state.Zsin, basis)
-    L_phi = eval_fourier_dzeta_phys(state.Lcos, state.Lsin, basis)
+    R_phi = eval_fourier_dzeta_phys(state.Rcos, state.Rsin, basis, coeffs_internal=True)
+    Z_phi = eval_fourier_dzeta_phys(state.Zcos, state.Zsin, basis, coeffs_internal=True)
+    L_phi = eval_fourier_dzeta_phys(state.Lcos, state.Lsin, basis, coeffs_internal=True)
 
     return Coords(
         R=R,

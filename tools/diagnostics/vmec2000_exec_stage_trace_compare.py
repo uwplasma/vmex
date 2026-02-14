@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
@@ -74,7 +75,11 @@ _RE_STAGE = re.compile(
 )
 _RE_ROW = re.compile(r"^\s*(\d+)\s+([0-9.DdEe+-]+)\s+([0-9.DdEe+-]+)\s+([0-9.DdEe+-]+)\s+")
 _RE_XC = re.compile(r"xc_.*_ns(\d+)_iter(\d+)\.dat$")
+_RE_XC_INIT = re.compile(r"xc_init(?:_([A-Za-z0-9]+))?_ns(\d+)\.dat$")
 _RE_BSUBE = re.compile(r"bsube_(?:ns(\d+)_)?iter(\d+)\.dat$")
+_RE_BSUBE_TERMS = re.compile(r"bsube_terms_(?:ns(\d+)_)?iter(\d+)\.dat$")
+_RE_JACOBIAN_TERMS = re.compile(r"jacobian_terms_iter(\d+)\.dat$")
+_RE_LULV = re.compile(r"lulv_(?:ns(\d+)_)?iter(\d+)\.(?:dat|npz)$")
 _RE_GC = re.compile(r"gc_(raw|precond)_?(?:ns(\d+)_)?iter(\d+)\.dat$")
 _RE_TOMNSPS = re.compile(r"tomnsps_(raw|precond)?_?(?:ns(\d+)_)?iter(\d+)\.dat$")
 _RE_TOMNSPS_KERNELS = re.compile(r"tomnsps_kernels_(?:ns(\d+)_)?iter(\d+)\.dat$")
@@ -82,6 +87,11 @@ _RE_FORCE_KERNELS = re.compile(r"force_kernels_(raw|precond)?_?(?:ns(\d+)_)?iter
 _RE_SCALARS = re.compile(r"scalars_(?:ns(\d+)_)?iter(\d+)\.dat$")
 _RE_GCX2 = re.compile(r"gcx2_(?:ns(\d+)_)?iter(\d+)\.dat$")
 _RE_FSQ1 = re.compile(r"fsq1_(?:ns(\d+)_)?iter(\d+)\.dat$")
+_RE_LAM = re.compile(r"lam_(?:ns(\d+)_)?iter(\d+)\.dat$")
+_RE_LAM_FSQ1 = re.compile(r"lam_fsql1_(?:ns(\d+)_)?iter(\d+)\.dat$")
+_RE_LAM_GCL = re.compile(r"lam_gcl_(?:ns(\d+)_)?iter(\d+)\.npz$")
+_RE_LAMCAL_PRE = re.compile(r"lamcal_pre_(?:ns(\d+)_)?iter(\d+)\.dat$")
+_RE_LAMCAL_POST = re.compile(r"lamcal_post_(?:ns(\d+)_)?iter(\d+)\.dat$")
 
 
 def _parse_ns_iter(match, *, ns_group: int, iter_group: int) -> tuple[int | None, int]:
@@ -195,6 +205,16 @@ def _parse_vmec2000_threed1(path: Path) -> list[Vmec2000Threed1Stage]:
     return stages
 
 
+@contextmanager
+def _workdir_context(path: Path | None):
+    if path is None:
+        with tempfile.TemporaryDirectory(prefix="vmec2000_exec_") as td:
+            yield Path(td)
+    else:
+        path.mkdir(parents=True, exist_ok=True)
+        yield path
+
+
 def _parse_vmec_xc_dump(path: Path) -> tuple[np.ndarray, np.ndarray]:
     """Parse VMEC2000 xc/xcdot dump (text) -> (xc, v)."""
     xc_vals: list[float] = []
@@ -248,6 +268,21 @@ def _collect_jax_xc_dumps(path: Path) -> dict[tuple[int, int], tuple[np.ndarray,
         else:
             raise KeyError(f"Missing v/xcdot in {p}")
         out[(ns, it)] = (np.asarray(data["xc"]), v)
+    return out
+
+
+def _collect_jax_xc_init_dumps(path: Path) -> dict[tuple[int, str], tuple[np.ndarray, np.ndarray]]:
+    """Collect JAX initial-guess xc dumps keyed by (ns, label)."""
+    out: dict[tuple[int, str], tuple[np.ndarray, np.ndarray]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("xc_init*_ns*.dat")):
+        m = _RE_XC_INIT.match(p.name)
+        if not m:
+            continue
+        label = (m.group(1) or "").strip()
+        ns = int(m.group(2))
+        out[(ns, label)] = _parse_vmec_xc_dump(p)
     return out
 
 
@@ -333,6 +368,139 @@ def _collect_jax_gc_dumps(path: Path) -> dict[tuple[str, int | None, int], tuple
             gcz = np.transpose(gcz, (0, 2, 1, 3))
             gcl = np.transpose(gcl, (0, 2, 1, 3))
         out[(stage, ns_val, it)] = (gcr, gcz, gcl)
+    return out
+
+
+def _parse_vmec_lam_dump(path: Path) -> dict[str, np.ndarray]:
+    """Parse VMEC2000 lambda preconditioner dump (pfaclam/faclam)."""
+    ns = mpol1 = ntor = ntmax = None
+    rows: list[tuple[int, int, int, int, float, float]] = []
+    for line in path.read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("ns="):
+            ns = int(line.split("=", 1)[-1])
+            continue
+        if line.startswith("mpol1="):
+            mpol1 = int(line.split("=", 1)[-1])
+            continue
+        if line.startswith("ntor="):
+            ntor = int(line.split("=", 1)[-1])
+            continue
+        if line.startswith("ntmax="):
+            ntmax = int(line.split("=", 1)[-1])
+            continue
+        if line.startswith("columns:"):
+            continue
+        toks = line.split()
+        if len(toks) < 5:
+            continue
+        try:
+            js = int(toks[0])
+            m = int(toks[1])
+            n = int(toks[2])
+            t = int(toks[3])
+        except ValueError:
+            continue
+        pfac = float(toks[4].replace("D", "E").replace("d", "E"))
+        fac = float(toks[5].replace("D", "E").replace("d", "E")) if len(toks) > 5 else float("nan")
+        rows.append((js, m, n, t, pfac, fac))
+
+    if ns is None or mpol1 is None or ntor is None or ntmax is None:
+        raise ValueError(f"Malformed lam dump: {path}")
+
+    pfaclam = np.zeros((ns, ntor + 1, mpol1 + 1, ntmax), dtype=float)
+    faclam = np.zeros_like(pfaclam)
+    for js, m, n, t, pfac, fac in rows:
+        pfaclam[js - 1, n, m, t - 1] = pfac
+        if np.isfinite(fac):
+            faclam[js - 1, n, m, t - 1] = fac
+    data = {"pfaclam": pfaclam}
+    if np.any(np.isfinite(faclam)):
+        data["faclam"] = faclam
+    return data
+
+
+def _collect_vmec_lam_dumps(path: Path) -> dict[tuple[int | None, int], dict[str, np.ndarray]]:
+    out: dict[tuple[int | None, int], dict[str, np.ndarray]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("lam_*_iter*.dat")):
+        m = _RE_LAM.search(p.name)
+        if not m:
+            continue
+        ns_val, it = _parse_ns_iter(m, ns_group=1, iter_group=2)
+        out[(ns_val, it)] = _parse_vmec_lam_dump(p)
+    return out
+
+
+def _collect_jax_lam_dumps(path: Path) -> dict[tuple[int | None, int], dict[str, np.ndarray]]:
+    out: dict[tuple[int | None, int], dict[str, np.ndarray]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("lam_prec_ns*_iter*.npz")):
+        m = re.search(r"lam_prec_ns(\d+)_iter(\d+)\.npz$", p.name)
+        if not m:
+            continue
+        ns_val = int(m.group(1))
+        it = int(m.group(2))
+        data = np.load(p)
+        pfaclam = np.asarray(data["pfaclam"])
+        faclam = data["faclam"] if "faclam" in data else None
+        out[(ns_val, it)] = {"pfaclam": pfaclam, "faclam": faclam}
+    return out
+
+
+def _parse_lam_fsql1_dump(path: Path) -> dict[str, float]:
+    data: dict[str, float] = {}
+    for line in path.read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("columns:"):
+            continue
+        toks = line.split()
+        if len(toks) < 3:
+            continue
+        if not toks[0].lstrip("+-").isdigit():
+            continue
+        data["iter"] = float(toks[0])
+        data["fsql1_pre"] = float(toks[1].replace("D", "E").replace("d", "E"))
+        data["fsql1_post"] = float(toks[2].replace("D", "E").replace("d", "E"))
+        break
+    if not data:
+        raise ValueError(f"Malformed lam_fsql1 dump: {path}")
+    return data
+
+
+def _collect_lam_fsql1_dumps(path: Path) -> dict[tuple[int | None, int], dict[str, float]]:
+    out: dict[tuple[int | None, int], dict[str, float]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("lam_fsql1_*_iter*.dat")):
+        m = _RE_LAM_FSQ1.search(p.name)
+        if not m:
+            continue
+        ns_val, it = _parse_ns_iter(m, ns_group=1, iter_group=2)
+        out[(ns_val, it)] = _parse_lam_fsql1_dump(p)
+    return out
+
+
+def _collect_lam_gcl_dumps(path: Path) -> dict[tuple[int | None, int], dict[str, np.ndarray]]:
+    out: dict[tuple[int | None, int], dict[str, np.ndarray]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("lam_gcl_*_iter*.npz")):
+        m = _RE_LAM_GCL.search(p.name)
+        if not m:
+            continue
+        ns_val, it = _parse_ns_iter(m, ns_group=1, iter_group=2)
+        data = np.load(p)
+        out[(ns_val, it)] = {
+            "gcl_pre": np.asarray(data["gcl_pre"]),
+            "gcl_post": np.asarray(data["gcl_post"]),
+            "fsql1_pre": float(np.asarray(data.get("fsql1_pre", np.nan))),
+            "fsql1_post": float(np.asarray(data.get("fsql1_post", np.nan))),
+        }
     return out
 
 
@@ -543,6 +711,21 @@ def _collect_jax_force_kernels(path: Path) -> dict[tuple[int | None, int], dict[
             "azcon": _parity("azcon_e", "azcon_o"),
             "blmn": _parity("blmn_e", "blmn_o"),
             "clmn": _parity("clmn_e", "clmn_o"),
+            "ru12": _get("ru12"),
+            "zs": _get("zs"),
+            "zu12": _get("zu12"),
+            "rs": _get("rs"),
+            "r12": _get("r12"),
+            "tau": _get("tau"),
+            "sqrtg": _get("sqrtg"),
+            "pru_even": _get("pru_even"),
+            "pru_odd": _get("pru_odd"),
+            "pz1_even": _get("pz1_even"),
+            "pz1_odd": _get("pz1_odd"),
+            "pzu_even": _get("pzu_even"),
+            "pzu_odd": _get("pzu_odd"),
+            "pr1_even": _get("pr1_even"),
+            "pr1_odd": _get("pr1_odd"),
         }
     return out
 
@@ -816,6 +999,158 @@ def _parse_bsube_dump(path: Path) -> tuple[np.ndarray, np.ndarray]:
     return bsubu_arr, bsubv_arr
 
 
+def _parse_bsube_terms_dump(path: Path) -> tuple[dict[str, np.ndarray], int]:
+    ns = ntheta = nzeta = None
+    rows: list[tuple[int, int, int, float, float, float, float, float, float]] = []
+    for line in path.read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("ns="):
+            ns = int(line.split("=", 1)[-1].strip())
+            continue
+        if line.startswith("ntheta3="):
+            ntheta = int(line.split("=", 1)[-1].strip())
+            continue
+        if line.startswith("nzeta="):
+            nzeta = int(line.split("=", 1)[-1].strip())
+            continue
+        if line.startswith("columns:"):
+            continue
+        toks = line.split()
+        if len(toks) < 9:
+            continue
+        try:
+            js = int(toks[0]) - 1
+            lt = int(toks[1]) - 1
+            lz = int(toks[2]) - 1
+        except ValueError:
+            continue
+        vals = [float(tok.replace("D", "E").replace("d", "E")) for tok in toks[3:9]]
+        rows.append((js, lt, lz, *vals))
+    if ns is None or ntheta is None or nzeta is None:
+        raise ValueError(f"Missing header fields in {path}")
+    lvv_sh = np.zeros((ns, ntheta, nzeta), dtype=float)
+    lu0 = np.zeros_like(lvv_sh)
+    lu1 = np.zeros_like(lvv_sh)
+    phipf = np.zeros_like(lvv_sh)
+    bsubu_tmp = np.zeros_like(lvv_sh)
+    bsubv_pre = np.zeros_like(lvv_sh)
+    for js, lt, lz, v_lvv, v_lu0, v_lu1, v_phip, v_bu, v_bv in rows:
+        lvv_sh[js, lt, lz] = v_lvv
+        lu0[js, lt, lz] = v_lu0
+        lu1[js, lt, lz] = v_lu1
+        phipf[js, lt, lz] = v_phip
+        bsubu_tmp[js, lt, lz] = v_bu
+        bsubv_pre[js, lt, lz] = v_bv
+    return (
+        {
+            "lvv_sh": lvv_sh,
+            "lu0": lu0,
+            "lu1": lu1,
+            "phipf": phipf,
+            "bsubu_tmp": bsubu_tmp,
+            "bsubv_pre": bsubv_pre,
+        },
+        int(ns),
+    )
+
+
+def _parse_lulv_vmec_dump(path: Path) -> dict[str, np.ndarray]:
+    ns = ntheta = nzeta = None
+    rows: list[tuple[int, int, int, float, float, float, float]] = []
+    for line in path.read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("ns="):
+            ns = int(line.split("=", 1)[-1].strip())
+            continue
+        if line.startswith("ntheta3="):
+            ntheta = int(line.split("=", 1)[-1].strip())
+            continue
+        if line.startswith("nzeta="):
+            nzeta = int(line.split("=", 1)[-1].strip())
+            continue
+        if line.startswith("columns:"):
+            continue
+        toks = line.split()
+        if len(toks) < 7:
+            continue
+        try:
+            js = int(toks[0]) - 1
+            lt = int(toks[1]) - 1
+            lz = int(toks[2]) - 1
+        except ValueError:
+            continue
+        vals = [float(tok.replace("D", "E").replace("d", "E")) for tok in toks[3:7]]
+        rows.append((js, lt, lz, *vals))
+    if ns is None or ntheta is None or nzeta is None:
+        raise ValueError(f"Missing header fields in {path}")
+    lu0 = np.zeros((ns, ntheta, nzeta), dtype=float)
+    lu1 = np.zeros_like(lu0)
+    lv0 = np.zeros_like(lu0)
+    lv1 = np.zeros_like(lu0)
+    for js, lt, lz, v_lu0, v_lu1, v_lv0, v_lv1 in rows:
+        lu0[js, lt, lz] = v_lu0
+        lu1[js, lt, lz] = v_lu1
+        lv0[js, lt, lz] = v_lv0
+        lv1[js, lt, lz] = v_lv1
+    return {"lu0": lu0, "lu1": lu1, "lv0": lv0, "lv1": lv1}
+
+
+def _parse_lulv_jax_dump(path: Path) -> dict[str, np.ndarray]:
+    data = np.load(path)
+    return {
+        "lu0": np.asarray(data["lu0_full"]),
+        "lu1": np.asarray(data["lu1_full"]),
+        "lv0": np.asarray(data["lv0_full"]),
+        "lv1": np.asarray(data["lv1_full"]),
+    }
+
+
+def _parse_lamcal_vmec_dump(path: Path) -> dict[str, np.ndarray]:
+    ns = None
+    rows: list[tuple[int, float, float, float]] = []
+    for line in path.read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("ns="):
+            ns = int(line.split("=", 1)[-1].strip())
+            continue
+        if line.startswith("columns:"):
+            continue
+        toks = line.split()
+        if len(toks) < 4:
+            continue
+        try:
+            js = int(toks[0]) - 1
+        except ValueError:
+            continue
+        vals = [float(tok.replace("D", "E").replace("d", "E")) for tok in toks[1:4]]
+        rows.append((js, *vals))
+    if ns is None:
+        raise ValueError(f"Missing header fields in {path}")
+    blam = np.zeros((ns,), dtype=float)
+    clam = np.zeros_like(blam)
+    dlam = np.zeros_like(blam)
+    for js, v_b, v_c, v_d in rows:
+        blam[js] = v_b
+        clam[js] = v_c
+        dlam[js] = v_d
+    return {"blam": blam, "clam": clam, "dlam": dlam}
+
+
+def _parse_lamcal_jax_dump(path: Path) -> dict[str, np.ndarray]:
+    data = np.load(path)
+    return {
+        "blam_pre": np.asarray(data["blam_pre"]),
+        "clam_pre": np.asarray(data["clam_pre"]),
+        "dlam_pre": np.asarray(data["dlam_pre"]),
+        "blam_post": np.asarray(data["blam_post"]),
+        "clam_post": np.asarray(data["clam_post"]),
+        "dlam_post": np.asarray(data["dlam_post"]),
+    }
+
+
 def _collect_bsube_dumps(path: Path) -> dict[tuple[int | None, int], tuple[np.ndarray, np.ndarray]]:
     out: dict[tuple[int | None, int], tuple[np.ndarray, np.ndarray]] = {}
     if not path.exists():
@@ -826,6 +1161,197 @@ def _collect_bsube_dumps(path: Path) -> dict[tuple[int | None, int], tuple[np.nd
             continue
         ns_val, it = _parse_ns_iter(m, ns_group=1, iter_group=2)
         out[(ns_val, it)] = _parse_bsube_dump(p)
+    return out
+
+
+def _parse_jacobian_terms_dump(path: Path) -> dict[str, np.ndarray]:
+    ns = ntheta = nzeta = None
+    lines = path.read_text().splitlines()
+    ru12 = zs = zu12 = rs = r12 = tau = None
+    pru_e = pru_o = pz1_e = pz1_o = pzu_e = pzu_o = pr1_e = pr1_o = None
+    pshalf = None
+    for line in lines:
+        if not line or line[0] == "#":
+            continue
+        if line.startswith("ns="):
+            ns = int(line.split("=", 1)[-1].strip())
+            continue
+        if line.startswith("ntheta3="):
+            ntheta = int(line.split("=", 1)[-1].strip())
+            continue
+        if line.startswith("nzeta="):
+            nzeta = int(line.split("=", 1)[-1].strip())
+            continue
+        if line.startswith(("ns=", "ntheta", "nzeta", "columns")):
+            continue
+        parts = line.split()
+        if len(parts) < 3 + 23:
+            continue
+        if ns is None or ntheta is None or nzeta is None:
+            continue
+        if ru12 is None:
+            ru12 = np.zeros((ns, ntheta, nzeta))
+            zs = np.zeros_like(ru12)
+            zu12 = np.zeros_like(ru12)
+            rs = np.zeros_like(ru12)
+            r12 = np.zeros_like(ru12)
+            tau = np.zeros_like(ru12)
+            pru_e = np.zeros_like(ru12)
+            pru_o = np.zeros_like(ru12)
+            pz1_e = np.zeros_like(ru12)
+            pz1_o = np.zeros_like(ru12)
+            pzu_e = np.zeros_like(ru12)
+            pzu_o = np.zeros_like(ru12)
+            pr1_e = np.zeros_like(ru12)
+            pr1_o = np.zeros_like(ru12)
+            pshalf = np.zeros_like(ru12)
+        js = int(parts[0]) - 1
+        lt = int(parts[1]) - 1
+        lz = int(parts[2]) - 1
+        # Column order from jacobian.f dump:
+        # js lt lz pshalf
+        # pru_e pru_o pru_e_m1 pru_o_m1
+        # pz1_e pz1_o pz1_e_m1 pz1_o_m1
+        # pzu_e pzu_o pzu_e_m1 pzu_o_m1
+        # pr1_e pr1_o pr1_e_m1 pr1_o_m1
+        # ru12 pzs pzu12 prs pr12 ptau
+        base = 3
+        pshalf[js, lt, lz] = float(parts[base + 0])
+        pru_e[js, lt, lz] = float(parts[base + 1])
+        pru_o[js, lt, lz] = float(parts[base + 2])
+        pz1_e[js, lt, lz] = float(parts[base + 5])
+        pz1_o[js, lt, lz] = float(parts[base + 6])
+        pzu_e[js, lt, lz] = float(parts[base + 9])
+        pzu_o[js, lt, lz] = float(parts[base + 10])
+        pr1_e[js, lt, lz] = float(parts[base + 13])
+        pr1_o[js, lt, lz] = float(parts[base + 14])
+        base2 = base + 1 + 4 + 4 + 4 + 4
+        ru12[js, lt, lz] = float(parts[base2 + 0])
+        zs[js, lt, lz] = float(parts[base2 + 1])
+        zu12[js, lt, lz] = float(parts[base2 + 2])
+        rs[js, lt, lz] = float(parts[base2 + 3])
+        r12[js, lt, lz] = float(parts[base2 + 4])
+        tau[js, lt, lz] = float(parts[base2 + 5])
+    if ns is None or ntheta is None or nzeta is None:
+        raise ValueError(f"Missing header fields in {path}")
+    if ru12 is None:
+        ru12 = np.zeros((ns, ntheta, nzeta))
+        zs = np.zeros_like(ru12)
+        zu12 = np.zeros_like(ru12)
+        rs = np.zeros_like(ru12)
+        r12 = np.zeros_like(ru12)
+        tau = np.zeros_like(ru12)
+        pru_e = np.zeros_like(ru12)
+        pru_o = np.zeros_like(ru12)
+        pz1_e = np.zeros_like(ru12)
+        pz1_o = np.zeros_like(ru12)
+        pzu_e = np.zeros_like(ru12)
+        pzu_o = np.zeros_like(ru12)
+        pr1_e = np.zeros_like(ru12)
+        pr1_o = np.zeros_like(ru12)
+        pshalf = np.zeros_like(ru12)
+    return {
+        "pshalf": pshalf,
+        "pru_e": pru_e,
+        "pru_o": pru_o,
+        "pz1_e": pz1_e,
+        "pz1_o": pz1_o,
+        "pzu_e": pzu_e,
+        "pzu_o": pzu_o,
+        "pr1_e": pr1_e,
+        "pr1_o": pr1_o,
+        "ru12": ru12,
+        "zs": zs,
+        "zu12": zu12,
+        "rs": rs,
+        "r12": r12,
+        "tau": tau,
+    }
+
+
+def _collect_bsube_terms_dumps(path: Path) -> dict[tuple[int | None, int], dict[str, np.ndarray]]:
+    out: dict[tuple[int | None, int], dict[str, np.ndarray]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("bsube_terms*_iter*.dat")):
+        m = _RE_BSUBE_TERMS.search(p.name)
+        if not m:
+            continue
+        ns_val, it = _parse_ns_iter(m, ns_group=1, iter_group=2)
+        data, ns_header = _parse_bsube_terms_dump(p)
+        if ns_val is None:
+            ns_val = ns_header
+        out[(ns_val, it)] = data
+    return out
+
+
+def _collect_jacobian_terms_dumps(path: Path) -> dict[int, dict[str, np.ndarray]]:
+    out: dict[int, dict[str, np.ndarray]] = {}
+    for p in sorted(path.glob("jacobian_terms_iter*.dat")):
+        m = _RE_JACOBIAN_TERMS.match(p.name)
+        if m:
+            it = int(m.group(1))
+            out[it] = _parse_jacobian_terms_dump(p)
+    return out
+
+
+def _collect_lulv_vmec_dumps(path: Path) -> dict[tuple[int | None, int], dict[str, np.ndarray]]:
+    out: dict[tuple[int | None, int], dict[str, np.ndarray]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("lulv*_iter*.dat")):
+        m = _RE_LULV.search(p.name)
+        if not m:
+            continue
+        ns_val, it = _parse_ns_iter(m, ns_group=1, iter_group=2)
+        out[(ns_val, it)] = _parse_lulv_vmec_dump(p)
+    return out
+
+
+def _collect_lulv_jax_dumps(path: Path) -> dict[tuple[int | None, int], dict[str, np.ndarray]]:
+    out: dict[tuple[int | None, int], dict[str, np.ndarray]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("lulv_ns*_iter*.npz")):
+        m = _RE_LULV.search(p.name)
+        if not m:
+            continue
+        ns_val, it = _parse_ns_iter(m, ns_group=1, iter_group=2)
+        out[(ns_val, it)] = _parse_lulv_jax_dump(p)
+    return out
+
+
+def _collect_lamcal_vmec_dumps(path: Path) -> dict[tuple[int | None, int], dict[str, dict[str, np.ndarray]]]:
+    out: dict[tuple[int | None, int], dict[str, dict[str, np.ndarray]]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("lamcal_pre*_iter*.dat")):
+        m = _RE_LAMCAL_PRE.search(p.name)
+        if not m:
+            continue
+        ns_val, it = _parse_ns_iter(m, ns_group=1, iter_group=2)
+        out[(ns_val, it)] = {"pre": _parse_lamcal_vmec_dump(p)}
+    for p in sorted(path.glob("lamcal_post*_iter*.dat")):
+        m = _RE_LAMCAL_POST.search(p.name)
+        if not m:
+            continue
+        ns_val, it = _parse_ns_iter(m, ns_group=1, iter_group=2)
+        entry = out.setdefault((ns_val, it), {})
+        entry["post"] = _parse_lamcal_vmec_dump(p)
+    return out
+
+
+def _collect_lamcal_jax_dumps(path: Path) -> dict[tuple[int | None, int], dict[str, np.ndarray]]:
+    out: dict[tuple[int | None, int], dict[str, np.ndarray]] = {}
+    if not path.exists():
+        return out
+    for p in sorted(path.glob("lamcal_ns*_iter*.npz")):
+        m = re.search(r"lamcal_ns(\d+)_iter(\d+)\.npz$", p.name)
+        if not m:
+            continue
+        ns_val = int(m.group(1))
+        it = int(m.group(2))
+        out[(ns_val, it)] = _parse_lamcal_jax_dump(p)
     return out
 
 
@@ -971,6 +1497,34 @@ def _rms(x: np.ndarray, *, eps: float = 1e-30) -> float:
     if not np.isfinite(val):
         return 0.0
     return max(val, eps)
+
+
+def _fsql1_from_gcl(gcl: np.ndarray, delta_s: float) -> float:
+    gcl = np.asarray(gcl, dtype=float)
+    if gcl.size == 0:
+        return 0.0
+    gcl_use = gcl[1:] if gcl.shape[0] > 1 else gcl
+    return float(delta_s) * float(np.sum(gcl_use * gcl_use))
+
+
+def _align_lam_arrays(vm: np.ndarray, jx: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    vm = np.asarray(vm, dtype=float)
+    jx = np.asarray(jx, dtype=float)
+    if jx.ndim == 3:
+        # (ns, m, n) -> (ns, n, m, 1)
+        jx = np.transpose(jx, (0, 2, 1))[:, :, :, None]
+    if jx.ndim == 4 and vm.ndim == 4:
+        if jx.shape[3] == 1 and vm.shape[3] > 1:
+            jx = np.repeat(jx, vm.shape[3], axis=3)
+    if vm.ndim != 4 or jx.ndim != 4:
+        return vm, jx
+    ns_min = min(vm.shape[0], jx.shape[0])
+    n_min = min(vm.shape[1], jx.shape[1])
+    m_min = min(vm.shape[2], jx.shape[2])
+    t_min = min(vm.shape[3], jx.shape[3])
+    vm = vm[:ns_min, :n_min, :m_min, :t_min]
+    jx = jx[:ns_min, :n_min, :m_min, :t_min]
+    return vm, jx
 
 
 def _patch_indata(text: str, *, updates: dict[str, str]) -> str:
@@ -1161,6 +1715,12 @@ def main() -> None:
         default=None,
         help="Timeout (seconds) for the VMEC2000 run. Default: no timeout.",
     )
+    p.add_argument(
+        "--workdir",
+        type=str,
+        default=None,
+        help="Optional work directory for VMEC2000/vmec_jax runs (preserves dumps).",
+    )
     args = p.parse_args()
     vmec_fsq_dump: dict[tuple[int | None, int], dict[str, float]] = {}
     jax_fsq_dump: dict[tuple[int | None, int], dict[str, float]] = {}
@@ -1200,8 +1760,8 @@ def main() -> None:
 
     # --- Run VMEC2000 executable in an isolated workdir ---
     threed1_stages: list[Vmec2000Threed1Stage] | None = None
-    with tempfile.TemporaryDirectory(prefix="vmec2000_exec_") as td:
-        workdir = Path(td)
+    workdir_arg = Path(args.workdir).expanduser().resolve() if args.workdir is not None else None
+    with _workdir_context(workdir_arg) as workdir:
         input_local = workdir / input_path.name
         shutil.copy2(input_path, input_local)
         vmec_dump_dir = workdir / "vmec_dumps"
@@ -1240,11 +1800,18 @@ def main() -> None:
         if args.dump_level == "full":
             vmec_env["VMEC_DUMP_XC"] = "1"
             vmec_env["VMEC_DUMP_BSUBE"] = "1"
+            vmec_env["VMEC_DUMP_BSUBE_TERMS"] = "1"
+            vmec_env["VMEC_DUMP_BSUP"] = "1"
+            vmec_env["VMEC_DUMP_BSUBH"] = "1"
+            vmec_env["VMEC_DUMP_JACOBIAN_TERMS"] = "1"
+            vmec_env["VMEC_DUMP_LULV"] = "1"
+            vmec_env["VMEC_DUMP_LAMCAL"] = "1"
             vmec_env["VMEC_DUMP_TOMNSPS"] = "1"
             vmec_env["VMEC_DUMP_TOMNSPS_KERNELS"] = "1"
-            vmec_env["VMEC_DUMP_GC"] = "1"
-            vmec_env["VMEC_DUMP_GC_STAGE"] = "both"
-            vmec_env["VMEC_DUMP_GC_DIR"] = str(vmec_dump_dir)
+        vmec_env["VMEC_DUMP_GC"] = "1"
+        vmec_env["VMEC_DUMP_GC_STAGE"] = "both"
+        vmec_env["VMEC_DUMP_GC_DIR"] = str(vmec_dump_dir)
+        vmec_env["VMEC_DUMP_LAM"] = "1"
         vmec_env.pop("VMEC_DUMP_XC_ITER", None)
         try:
             proc = subprocess.run(
@@ -1291,12 +1858,17 @@ def main() -> None:
             os.environ["VMEC_JAX_DUMP_GCX2"] = "1"
             if args.dump_level == "full":
                 os.environ["VMEC_JAX_DUMP_XC"] = "1"
+                os.environ["VMEC_JAX_DUMP_XC_INIT"] = "1"
                 os.environ["VMEC_JAX_DUMP_BSUBE"] = "1"
+                os.environ["VMEC_JAX_DUMP_BSUBE_TERMS"] = "1"
+                os.environ["VMEC_JAX_DUMP_LULV"] = "1"
+                os.environ["VMEC_JAX_DUMP_LAMCAL"] = "1"
                 os.environ["VMEC_JAX_DUMP_TOMNSPS"] = "1"
                 os.environ["VMEC_JAX_DUMP_FORCE_KERNELS"] = "1"
                 os.environ["VMEC_JAX_DUMP_GC"] = "1"
                 os.environ["VMEC_JAX_DUMP_GC_STAGE"] = "both"
                 os.environ["VMEC_JAX_DUMP_GC_DIR"] = str(dump_dir)
+                os.environ["VMEC_JAX_DUMP_LAM"] = "1"
             os.environ.pop("VMEC_JAX_DUMP_ITER", None)
             try:
                 return vj.run_fixed_boundary(
@@ -1370,7 +1942,15 @@ def main() -> None:
             )
         else:
             jax_xc = _collect_jax_xc_dumps(jax_dump_dir_active)
+        if use_split and run2 is not None:
+            jax_xc_init = {**_collect_jax_xc_init_dumps(jax_dump_dir1)}
+            for k, v in _collect_jax_xc_init_dumps(jax_dump_dir2).items():
+                jax_xc_init.setdefault(k, v)
+        else:
+            jax_xc_init = _collect_jax_xc_init_dumps(jax_dump_dir_active)
         vmec_bsube = _collect_bsube_dumps(vmec_dump_dir)
+        vmec_bsube_terms = _collect_bsube_terms_dumps(vmec_dump_dir)
+        vmec_jacobian_terms = _collect_jacobian_terms_dumps(vmec_dump_dir)
         if use_split and run2 is not None:
             jax_bsube = _merge_dump_dicts(
                 _collect_bsube_dumps(jax_dump_dir1),
@@ -1378,8 +1958,25 @@ def main() -> None:
                 offset=dump_offset,
                 overwrite=dump_overwrite,
             )
+            jax_bsube_terms = _merge_dump_dicts(
+                _collect_bsube_terms_dumps(jax_dump_dir1),
+                _collect_bsube_terms_dumps(jax_dump_dir2),
+                offset=dump_offset,
+                overwrite=dump_overwrite,
+            )
         else:
             jax_bsube = _collect_bsube_dumps(jax_dump_dir_active)
+            jax_bsube_terms = _collect_bsube_terms_dumps(jax_dump_dir_active)
+        vmec_lulv = _collect_lulv_vmec_dumps(vmec_dump_dir)
+        if use_split and run2 is not None:
+            jax_lulv = _merge_dump_dicts(
+                _collect_lulv_jax_dumps(jax_dump_dir1),
+                _collect_lulv_jax_dumps(jax_dump_dir2),
+                offset=dump_offset,
+                overwrite=dump_overwrite,
+            )
+        else:
+            jax_lulv = _collect_lulv_jax_dumps(jax_dump_dir_active)
         vmec_gc = _collect_vmec_gc_dumps(vmec_dump_dir)
         if use_split and run2 is not None:
             jax_gc = _merge_dump_dicts(
@@ -1410,6 +2007,41 @@ def main() -> None:
             )
         else:
             jax_kernels = _collect_jax_force_kernels(jax_dump_dir_active)
+        vmec_lam = _collect_vmec_lam_dumps(vmec_dump_dir)
+        vmec_lam_fsql1 = _collect_lam_fsql1_dumps(vmec_dump_dir)
+        if use_split and run2 is not None:
+            jax_lam = _merge_dump_dicts(
+                _collect_jax_lam_dumps(jax_dump_dir1),
+                _collect_jax_lam_dumps(jax_dump_dir2),
+                offset=dump_offset,
+                overwrite=dump_overwrite,
+            )
+            jax_lam_fsql1 = _merge_dump_dicts(
+                _collect_lam_fsql1_dumps(jax_dump_dir1),
+                _collect_lam_fsql1_dumps(jax_dump_dir2),
+                offset=dump_offset,
+                overwrite=dump_overwrite,
+            )
+            jax_lam_gcl = _merge_dump_dicts(
+                _collect_lam_gcl_dumps(jax_dump_dir1),
+                _collect_lam_gcl_dumps(jax_dump_dir2),
+                offset=dump_offset,
+                overwrite=dump_overwrite,
+            )
+        else:
+            jax_lam = _collect_jax_lam_dumps(jax_dump_dir_active)
+            jax_lam_fsql1 = _collect_lam_fsql1_dumps(jax_dump_dir_active)
+            jax_lam_gcl = _collect_lam_gcl_dumps(jax_dump_dir_active)
+        vmec_lamcal = _collect_lamcal_vmec_dumps(vmec_dump_dir)
+        if use_split and run2 is not None:
+            jax_lamcal = _merge_dump_dicts(
+                _collect_lamcal_jax_dumps(jax_dump_dir1),
+                _collect_lamcal_jax_dumps(jax_dump_dir2),
+                offset=dump_offset,
+                overwrite=dump_overwrite,
+            )
+        else:
+            jax_lamcal = _collect_lamcal_jax_dumps(jax_dump_dir_active)
         vmec_scalars = _collect_scalars_dumps(vmec_dump_dir)
         if use_split and run2 is not None:
             jax_scalars = _merge_dump_dicts(
@@ -1752,6 +2384,49 @@ def main() -> None:
             if bool(args.fail_fast) and first_mismatch is None and (not ok_xc or not ok_v):
                 raise SystemExit(2)
 
+    if "jax_xc_init" in locals() and jax_xc_init:
+        print()
+        print("xc_init parity (JAX initial guess vs VMEC iter1):")
+        cfg = run.cfg
+        for (ns_val, label), (jx_xc, jx_v) in sorted(jax_xc_init.items(), key=lambda kv: (kv[0][0], kv[0][1])):
+            vm = vmec_xc.get((int(ns_val), 1))
+            label_tag = f" {label}" if label else ""
+            if vm is None:
+                print(f"  ns={int(ns_val)}{label_tag}: VMEC iter1 xc dump not found")
+                continue
+            vm_xc, vm_v = vm
+            ok_xc, msg_xc, idx_xc = _compare_vectors(
+                label="xc",
+                vmec_vec=vm_xc,
+                jax_vec=jx_xc,
+                rtol=float(args.rtol),
+                atol=float(args.atol),
+            )
+            print(f"  ns={int(ns_val)}{label_tag}: {msg_xc}")
+            if not ok_xc:
+                try:
+                    dec_xc = _decode_xc_index(
+                        int(idx_xc),
+                        ns=int(ns_val),
+                        mpol=int(cfg.mpol),
+                        ntor=int(cfg.ntor),
+                        lthreed=bool(cfg.lthreed),
+                    )
+                except Exception:
+                    dec_xc = "idx decode unavailable"
+                print(f"    xc decode: {dec_xc}")
+                if idx_xc is not None and int(idx_xc) >= 0 and int(idx_xc) < vm_xc.size and int(idx_xc) < jx_xc.size:
+                    iv = int(idx_xc)
+                    v_vm = float(vm_xc[iv])
+                    v_jx = float(jx_xc[iv])
+                    dv = abs(v_vm - v_jx)
+                    rv = dv / max(abs(v_vm), float(args.atol))
+                    print(
+                        f"    xc values: vmec={v_vm:.16e} jax={v_jx:.16e} abs={dv:.3e} rel={rv:.3e}"
+                    )
+            # xc_init is a diagnostic proxy (JAX init vs VMEC iter1); do not
+            # fail-fast on this mismatch.
+
     if vmec_bsube or jax_bsube:
         print()
         print("bsube parity (VMEC2000 bcovar vs vmec_jax bcovar):")
@@ -1777,6 +2452,158 @@ def main() -> None:
                 tol_v = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_bsubv))))
                 if max_abs_u > tol_u or max_abs_v > tol_v:
                     raise SystemExit(2)
+
+    if "vmec_bsube_terms" in locals() and (vmec_bsube_terms or jax_bsube_terms):
+        print()
+        print("bsube terms parity (lvv_sh/lu0/lu1/phipf/bsubu_tmp/bsubv_pre):")
+        common = sorted(vmec_bsube_terms.keys(), key=lambda k: (k[0] is None, k[0] or -1, k[1]))
+        if not common:
+            print("  No overlapping bsube_terms dump iterations found.")
+        for ns_val, it in common:
+            ns_jx, jx_data = _resolve_other(jax_bsube_terms, ns=ns_val, it=it)
+            if jx_data is None:
+                continue
+            vm = vmec_bsube_terms[(ns_val, it)]
+            ns_print = ns_val if ns_val is not None else ns_jx
+            ns_tag = f"ns={ns_print} " if ns_print is not None else ""
+            for name in ("lvv_sh", "lu0", "lu1", "phipf", "bsubu_tmp", "bsubv_pre"):
+                vm_arr = np.asarray(vm.get(name))
+                jx_arr = np.asarray(jx_data.get(name))
+                if vm_arr.shape != jx_arr.shape:
+                    min_shape = tuple(min(a, b) for a, b in zip(vm_arr.shape, jx_arr.shape))
+                    vm_arr = vm_arr[tuple(slice(0, n) for n in min_shape)]
+                    jx_arr = jx_arr[tuple(slice(0, n) for n in min_shape)]
+                flat_vm = vm_arr.ravel()
+                flat_jx = jx_arr.ravel()
+                diff = np.abs(flat_vm - flat_jx)
+                idx = int(np.argmax(diff)) if diff.size else 0
+                max_abs = float(diff[idx]) if diff.size else float("nan")
+                max_rel = float(max_abs / max(np.abs(flat_vm[idx]), float(args.atol))) if diff.size else float("nan")
+                if vm_arr.ndim == 3:
+                    js_i, lt_i, lz_i = np.unravel_index(idx, vm_arr.shape)
+                    decode = f" idx=js={js_i+1} lt={lt_i+1} lz={lz_i+1}"
+                else:
+                    decode = f" idx={idx}"
+                print(
+                    f"  {ns_tag}iter {it:03d} {name}: max_abs={max_abs:.3e} max_rel={max_rel:.3e}{decode}"
+                )
+                if diff.size:
+                    v = float(flat_vm[idx])
+                    j = float(flat_jx[idx])
+                    print(f"    {name} values: vmec={v:.6e} jax={j:.6e}")
+                if bool(args.fail_fast) and first_mismatch is None:
+                    tol = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_arr))))
+                    if max_abs > tol:
+                        raise SystemExit(2)
+
+    if "vmec_jacobian_terms" in locals() and vmec_jacobian_terms and "jax_kernels" in locals() and jax_kernels:
+        print()
+        print("jacobian parity (even/odd inputs + ru12/zs/zu12/rs/r12/tau):")
+        common = sorted(vmec_jacobian_terms.keys())
+        if not common:
+            print("  No jacobian_terms dump iterations found.")
+        for it in common:
+            vm = vmec_jacobian_terms[it]
+            ns_vm = int(vm["ru12"].shape[0]) if vm.get("ru12") is not None else None
+            ns_jx, jx_data = _resolve_other(jax_kernels, ns=ns_vm, it=it)
+            if jx_data is None:
+                continue
+            ns_print = ns_vm if ns_vm is not None else ns_jx
+            ns_tag = f"ns={ns_print} " if ns_print is not None else ""
+            for name, jx_name in (
+                ("pru_e", "pru_even"),
+                ("pru_o", "pru_odd"),
+                ("pz1_e", "pz1_even"),
+                ("pz1_o", "pz1_odd"),
+                ("pzu_e", "pzu_even"),
+                ("pzu_o", "pzu_odd"),
+                ("pr1_e", "pr1_even"),
+                ("pr1_o", "pr1_odd"),
+            ):
+                vm_arr = np.asarray(vm.get(name))
+                jx_arr = np.asarray(jx_data.get(jx_name))
+                if vm_arr.shape[0] > 1:
+                    vm_arr = vm_arr[1:]
+                    jx_arr = jx_arr[1:]
+                if vm_arr.shape != jx_arr.shape:
+                    min_shape = tuple(min(a, b) for a, b in zip(vm_arr.shape, jx_arr.shape))
+                    vm_arr = vm_arr[tuple(slice(0, n) for n in min_shape)]
+                    jx_arr = jx_arr[tuple(slice(0, n) for n in min_shape)]
+                max_abs, max_rel, idx = _max_abs_rel_err(vm_arr.ravel(), jx_arr.ravel())
+                if vm_arr.ndim == 3:
+                    js_i, lt_i, lz_i = np.unravel_index(idx, vm_arr.shape)
+                    decode = f" idx=js={js_i+1} lt={lt_i+1} lz={lz_i+1}"
+                else:
+                    decode = f" idx={idx}"
+                print(
+                    f"  {ns_tag}iter {it:03d} {name}: max_abs={max_abs:.3e} max_rel={max_rel:.3e}{decode}"
+                )
+            for name in ("ru12", "zs", "zu12", "rs", "r12", "tau"):
+                vm_arr = np.asarray(vm.get(name))
+                jx_arr = np.asarray(jx_data.get(name))
+                if vm_arr.shape[0] > 1:
+                    vm_arr = vm_arr[1:]
+                    jx_arr = jx_arr[1:]
+                if vm_arr.shape != jx_arr.shape:
+                    min_shape = tuple(min(a, b) for a, b in zip(vm_arr.shape, jx_arr.shape))
+                    vm_arr = vm_arr[tuple(slice(0, n) for n in min_shape)]
+                    jx_arr = jx_arr[tuple(slice(0, n) for n in min_shape)]
+                max_abs, max_rel, idx = _max_abs_rel_err(vm_arr.ravel(), jx_arr.ravel())
+                if vm_arr.ndim == 3:
+                    js_i, lt_i, lz_i = np.unravel_index(idx, vm_arr.shape)
+                    decode = f" idx=js={js_i+1} lt={lt_i+1} lz={lz_i+1}"
+                else:
+                    decode = f" idx={idx}"
+                print(
+                    f"  {ns_tag}iter {it:03d} {name}: max_abs={max_abs:.3e} max_rel={max_rel:.3e}{decode}"
+                )
+                if bool(args.fail_fast) and first_mismatch is None:
+                    tol = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_arr))))
+                    if max_abs > tol:
+                        raise SystemExit(2)
+
+    if "vmec_lulv" in locals() and (vmec_lulv or jax_lulv):
+        print()
+        print("lu/lv parity (real-space LU/LV even/odd):")
+        common = sorted(vmec_lulv.keys(), key=lambda k: (k[0] is None, k[0] or -1, k[1]))
+        if not common:
+            print("  No overlapping lulv dump iterations found.")
+        for ns_val, it in common:
+            ns_jx, jx_data = _resolve_other(jax_lulv, ns=ns_val, it=it)
+            if jx_data is None:
+                continue
+            vm = vmec_lulv[(ns_val, it)]
+            ns_print = ns_val if ns_val is not None else ns_jx
+            ns_tag = f"ns={ns_print} " if ns_print is not None else ""
+            for name in ("lu0", "lu1", "lv0", "lv1"):
+                vm_arr = np.asarray(vm.get(name))
+                jx_arr = np.asarray(jx_data.get(name))
+                if vm_arr.shape != jx_arr.shape:
+                    min_shape = tuple(min(a, b) for a, b in zip(vm_arr.shape, jx_arr.shape))
+                    vm_arr = vm_arr[tuple(slice(0, n) for n in min_shape)]
+                    jx_arr = jx_arr[tuple(slice(0, n) for n in min_shape)]
+                flat_vm = vm_arr.ravel()
+                flat_jx = jx_arr.ravel()
+                diff = np.abs(flat_vm - flat_jx)
+                idx = int(np.argmax(diff)) if diff.size else 0
+                max_abs = float(diff[idx]) if diff.size else float("nan")
+                max_rel = float(max_abs / max(np.abs(flat_vm[idx]), float(args.atol))) if diff.size else float("nan")
+                if vm_arr.ndim == 3:
+                    js_i, lt_i, lz_i = np.unravel_index(idx, vm_arr.shape)
+                    decode = f" idx=js={js_i+1} lt={lt_i+1} lz={lz_i+1}"
+                else:
+                    decode = f" idx={idx}"
+                print(
+                    f"  {ns_tag}iter {it:03d} {name}: max_abs={max_abs:.3e} max_rel={max_rel:.3e}{decode}"
+                )
+                if diff.size:
+                    v = float(flat_vm[idx])
+                    j = float(flat_jx[idx])
+                    print(f"    {name} values: vmec={v:.6e} jax={j:.6e}")
+                if bool(args.fail_fast) and first_mismatch is None:
+                    tol = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_arr))))
+                    if max_abs > tol:
+                        raise SystemExit(2)
 
     if vmec_scalars or jax_scalars:
         print()
@@ -1948,6 +2775,203 @@ def main() -> None:
                 tol = max(float(args.atol), float(args.rtol) * denom)
                 if max_abs > tol:
                     raise SystemExit(2)
+
+    if (vmec_lam or jax_lam) and vmec_gc and jax_gc:
+        print()
+        print("lambda preconditioner parity (pfaclam/faclam):")
+        common = sorted(vmec_lam.keys(), key=lambda k: (k[0] is None, k[0] or -1, k[1]))
+        if not common:
+            print("  No overlapping lam dumps found.")
+        for ns_val, it in common:
+            ns_jx, jx_vals = _resolve_other(jax_lam, ns=ns_val, it=it)
+            if jx_vals is None:
+                continue
+            vm_vals = vmec_lam[(ns_val, it)]
+            pf_vm = np.asarray(vm_vals.get("pfaclam", np.zeros((0,), dtype=float)))
+            pf_jx = np.asarray(jx_vals.get("pfaclam", np.zeros((0,), dtype=float)))
+            pf_vm, pf_jx = _align_lam_arrays(pf_vm, pf_jx)
+            max_abs, max_rel, idx = _max_abs_rel_err(pf_vm.ravel(), pf_jx.ravel())
+            ns_print = ns_val if ns_val is not None else ns_jx
+            ns_tag = f"ns={ns_print} " if ns_print is not None else ""
+            msg = f"  {ns_tag}iter {it:03d} pfaclam: max_abs={max_abs:.3e} max_rel={max_rel:.3e}"
+            if idx >= 0 and pf_vm.ndim == 4:
+                msg += f" idx={_decode_gc_index(int(idx), pf_vm.shape)}"
+            print(msg)
+            if bool(args.fail_fast) and first_mismatch is None:
+                tol = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(pf_vm))))
+                if max_abs > tol:
+                    raise SystemExit(2)
+            fac_vm = vm_vals.get("faclam", None)
+            fac_jx = jx_vals.get("faclam", None)
+            if fac_vm is not None and fac_jx is not None:
+                fac_vm, fac_jx = _align_lam_arrays(np.asarray(fac_vm), np.asarray(fac_jx))
+                max_abs, max_rel, idx = _max_abs_rel_err(fac_vm.ravel(), fac_jx.ravel())
+                msg = f"  {ns_tag}iter {it:03d} faclam:  max_abs={max_abs:.3e} max_rel={max_rel:.3e}"
+                if idx >= 0 and fac_vm.ndim == 4:
+                    msg += f" idx={_decode_gc_index(int(idx), fac_vm.shape)}"
+                print(msg)
+
+    if "vmec_lamcal" in locals() and (vmec_lamcal or jax_lamcal):
+        print()
+        print("lamcal parity (blam/clam/dlam pre/post average):")
+        common = sorted(vmec_lamcal.keys(), key=lambda k: (k[0] is None, k[0] or -1, k[1]))
+        if not common:
+            print("  No overlapping lamcal dumps found.")
+        for ns_val, it in common:
+            ns_jx, jx_vals = _resolve_other(jax_lamcal, ns=ns_val, it=it)
+            if jx_vals is None:
+                continue
+            vm_vals = vmec_lamcal[(ns_val, it)]
+            ns_print = ns_val if ns_val is not None else ns_jx
+            ns_tag = f"ns={ns_print} " if ns_print is not None else ""
+            for stage_name, vm_key, jx_key in (
+                ("pre", "pre", ("blam_pre", "clam_pre", "dlam_pre")),
+                ("post", "post", ("blam_post", "clam_post", "dlam_post")),
+            ):
+                if vm_key not in vm_vals:
+                    continue
+                vm_stage = vm_vals[vm_key]
+                for comp, jx_name in zip(("blam", "clam", "dlam"), jx_key):
+                    vm_arr = np.asarray(vm_stage.get(comp))
+                    jx_arr = np.asarray(jx_vals.get(jx_name))
+                    if vm_arr.shape != jx_arr.shape:
+                        n = min(vm_arr.shape[0], jx_arr.shape[0])
+                        vm_arr = vm_arr[:n]
+                        jx_arr = jx_arr[:n]
+                    diff = np.abs(vm_arr - jx_arr)
+                    idx = int(np.argmax(diff)) if diff.size else 0
+                    max_abs = float(diff[idx]) if diff.size else float("nan")
+                    max_rel = float(max_abs / max(np.abs(vm_arr[idx]), float(args.atol))) if diff.size else float("nan")
+                    print(
+                        f"  {ns_tag}iter {it:03d} {stage_name} {comp}: max_abs={max_abs:.3e} "
+                        f"max_rel={max_rel:.3e} idx={idx+1}"
+                    )
+                    if diff.size:
+                        v = float(vm_arr[idx])
+                        j = float(jx_arr[idx])
+                        print(f"    {stage_name} {comp} values: vmec={v:.6e} jax={j:.6e}")
+                    if bool(args.fail_fast) and first_mismatch is None:
+                        tol = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_arr))))
+                        if max_abs > tol:
+                            raise SystemExit(2)
+
+    if vmec_gc and jax_gc:
+        print()
+        print("lambda fsql1 components (pre/post faclam):")
+        raw_vm = {(ns, it): vals[2] for (stage, ns, it), vals in vmec_gc.items() if stage == "raw"}
+        pre_vm = {(ns, it): vals[2] for (stage, ns, it), vals in vmec_gc.items() if stage == "precond"}
+        raw_jx = {(ns, it): vals[2] for (stage, ns, it), vals in jax_gc.items() if stage == "raw"}
+        pre_jx = {(ns, it): vals[2] for (stage, ns, it), vals in jax_gc.items() if stage == "precond"}
+        common = sorted(raw_vm.keys(), key=lambda k: (k[0] is None, k[0] or -1, k[1]))
+        for ns_val, it in common:
+            if (ns_val, it) not in pre_vm:
+                continue
+            ns_jx, jx_raw = _resolve_other(raw_jx, ns=ns_val, it=it)
+            _, jx_pre = _resolve_other(pre_jx, ns=ns_val, it=it)
+            if jx_raw is None or jx_pre is None:
+                continue
+            ns_print = ns_val if ns_val is not None else ns_jx
+            ns_use = int(ns_print) if ns_print is not None else int(np.asarray(jx_raw).shape[0])
+            delta_s = 1.0 / max(ns_use - 1, 1)
+            vm_pre = vmec_lam_fsql1.get((ns_val, it)) if "vmec_lam_fsql1" in locals() else None
+            jx_pre = jax_lam_fsql1.get((ns_val, it)) if "jax_lam_fsql1" in locals() else None
+            vm_preval = float(vm_pre["fsql1_pre"]) if vm_pre is not None else _fsql1_from_gcl(raw_vm[(ns_val, it)], delta_s)
+            vm_postval = float(vm_pre["fsql1_post"]) if vm_pre is not None else _fsql1_from_gcl(pre_vm[(ns_val, it)], delta_s)
+            jx_preval = float(jx_pre["fsql1_pre"]) if jx_pre is not None else _fsql1_from_gcl(jx_raw, delta_s)
+            jx_postval = float(jx_pre["fsql1_post"]) if jx_pre is not None else _fsql1_from_gcl(jx_pre, delta_s)
+            ns_tag = f"ns={ns_print} " if ns_print is not None else ""
+            pre_abs = abs(vm_preval - jx_preval)
+            post_abs = abs(vm_postval - jx_postval)
+            pre_rel = pre_abs / max(abs(vm_preval), float(args.atol), 1e-30)
+            post_rel = post_abs / max(abs(vm_postval), float(args.atol), 1e-30)
+            print(
+                f"  {ns_tag}iter {it:03d} fsql1_pre vmec={vm_preval:.3e} jax={jx_preval:.3e} rel={pre_rel:.3e} |"
+                f" fsql1_post vmec={vm_postval:.3e} jax={jx_postval:.3e} rel={post_rel:.3e}"
+            )
+            if bool(args.fail_fast) and first_mismatch is None:
+                tol = max(float(args.atol), float(args.rtol) * float(abs(vm_postval)))
+                if post_abs > tol:
+                    raise SystemExit(2)
+
+    if "jax_lam_gcl" in locals() and jax_lam_gcl and vmec_gc:
+        print()
+        print("lambda gcl per-mode (pre/post faclam):")
+        raw_vm = {(ns, it): vals[2] for (stage, ns, it), vals in vmec_gc.items() if stage == "raw"}
+        pre_vm = {(ns, it): vals[2] for (stage, ns, it), vals in vmec_gc.items() if stage == "precond"}
+        for (ns_val, it), jx_vals in sorted(jax_lam_gcl.items(), key=lambda k: (k[0][0] is None, k[0][0] or -1, k[0][1])):
+            vm_raw = raw_vm.get((ns_val, it))
+            vm_pre = pre_vm.get((ns_val, it))
+            if vm_raw is None or vm_pre is None:
+                continue
+            gcl_pre = np.asarray(jx_vals.get("gcl_pre", np.zeros_like(vm_raw)))
+            gcl_post = np.asarray(jx_vals.get("gcl_post", np.zeros_like(vm_pre)))
+            vm_raw = np.asarray(vm_raw)
+            vm_pre = np.asarray(vm_pre)
+            if gcl_pre.ndim == 4 and vm_raw.ndim == 4:
+                if gcl_pre.shape[1] == vm_raw.shape[2] and gcl_pre.shape[2] == vm_raw.shape[1]:
+                    gcl_pre = np.transpose(gcl_pre, (0, 2, 1, 3))
+            if gcl_post.ndim == 4 and vm_pre.ndim == 4:
+                if gcl_post.shape[1] == vm_pre.shape[2] and gcl_post.shape[2] == vm_pre.shape[1]:
+                    gcl_post = np.transpose(gcl_post, (0, 2, 1, 3))
+            if gcl_pre.shape != vm_raw.shape:
+                min_shape = tuple(min(a, b) for a, b in zip(gcl_pre.shape, vm_raw.shape))
+                gcl_pre = gcl_pre[tuple(slice(0, n) for n in min_shape)]
+                vm_raw = vm_raw[tuple(slice(0, n) for n in min_shape)]
+            if gcl_post.shape != vm_pre.shape:
+                min_shape = tuple(min(a, b) for a, b in zip(gcl_post.shape, vm_pre.shape))
+                gcl_post = gcl_post[tuple(slice(0, n) for n in min_shape)]
+                vm_pre = vm_pre[tuple(slice(0, n) for n in min_shape)]
+            pre_abs, pre_rel, pre_idx = _max_abs_rel_err(vm_raw.ravel(), gcl_pre.ravel())
+            post_abs, post_rel, post_idx = _max_abs_rel_err(vm_pre.ravel(), gcl_post.ravel())
+            ns_tag = f"ns={ns_val} " if ns_val is not None else ""
+            msg = (
+                f"  {ns_tag}iter {it:03d} gcl_pre: max_abs={pre_abs:.3e} max_rel={pre_rel:.3e}"
+                f" | gcl_post: max_abs={post_abs:.3e} max_rel={post_rel:.3e}"
+            )
+            if pre_idx >= 0 and vm_raw.ndim == 4:
+                msg += f" pre_idx={_decode_gc_index(int(pre_idx), vm_raw.shape)}"
+            if post_idx >= 0 and vm_pre.ndim == 4:
+                msg += f" post_idx={_decode_gc_index(int(post_idx), vm_pre.shape)}"
+            print(msg)
+            if bool(args.fail_fast) and first_mismatch is None:
+                tol = max(float(args.atol), float(args.rtol) * float(np.nanmax(np.abs(vm_pre))))
+                if post_abs > tol:
+                    raise SystemExit(2)
+
+    if (not vmec_lam or not jax_lam) and vmec_gc and jax_gc:
+        print()
+        print("lambda effective pfaclam ratio (gcl_pre/gcl_raw):")
+        raw_vm = {(ns, it): vals[2] for (stage, ns, it), vals in vmec_gc.items() if stage == "raw"}
+        pre_vm = {(ns, it): vals[2] for (stage, ns, it), vals in vmec_gc.items() if stage == "precond"}
+        raw_jx = {(ns, it): vals[2] for (stage, ns, it), vals in jax_gc.items() if stage == "raw"}
+        pre_jx = {(ns, it): vals[2] for (stage, ns, it), vals in jax_gc.items() if stage == "precond"}
+        common = sorted(raw_vm.keys(), key=lambda k: (k[0] is None, k[0] or -1, k[1]))
+        for ns_val, it in common:
+            if (ns_val, it) not in pre_vm:
+                continue
+            ns_jx, jx_raw = _resolve_other(raw_jx, ns=ns_val, it=it)
+            _, jx_pre = _resolve_other(pre_jx, ns=ns_val, it=it)
+            if jx_raw is None or jx_pre is None:
+                continue
+            vm_raw = np.asarray(raw_vm[(ns_val, it)], dtype=float)
+            vm_pre = np.asarray(pre_vm[(ns_val, it)], dtype=float)
+            jx_raw = np.asarray(jx_raw, dtype=float)
+            jx_pre = np.asarray(jx_pre, dtype=float)
+            eps_vm = max(1e-30, 1e-12 * float(np.nanmax(np.abs(vm_raw))))
+            eps_jx = max(1e-30, 1e-12 * float(np.nanmax(np.abs(jx_raw))))
+            mask_vm = np.abs(vm_raw) > eps_vm
+            mask_jx = np.abs(jx_raw) > eps_jx
+            pf_vm = np.zeros_like(vm_raw)
+            pf_jx = np.zeros_like(jx_raw)
+            pf_vm[mask_vm] = vm_pre[mask_vm] / vm_raw[mask_vm]
+            pf_jx[mask_jx] = jx_pre[mask_jx] / jx_raw[mask_jx]
+            max_abs, max_rel, idx = _max_abs_rel_err(pf_vm.ravel(), pf_jx.ravel())
+            ns_print = ns_val if ns_val is not None else ns_jx
+            ns_tag = f"ns={ns_print} " if ns_print is not None else ""
+            msg = f"  {ns_tag}iter {it:03d} pfaclam_eff: max_abs={max_abs:.3e} max_rel={max_rel:.3e}"
+            if idx >= 0 and pf_vm.ndim == 4:
+                msg += f" idx={_decode_gc_index(int(idx), pf_vm.shape)}"
+            print(msg)
 
     # Lambda-path audit: flsc/gcl vs blmn/clmn at the first mismatch index.
     if (vmec_tomnsps and jax_tomnsps) or (vmec_gc and jax_gc) or (vmec_kernels and jax_kernels):
@@ -2122,8 +3146,11 @@ def main() -> None:
                         raise SystemExit(2)
 
     if wout is not None:
-        rmnc_err = _rel_rms(np.asarray(run.state.Rcos), np.asarray(wout.rmnc))
-        zmns_err = _rel_rms(np.asarray(run.state.Zsin), np.asarray(wout.zmns))
+        from vmec_jax.wout import state_from_wout
+
+        wout_state = state_from_wout(wout)
+        rmnc_err = _rel_rms(np.asarray(run.state.Rcos), np.asarray(wout_state.Rcos))
+        zmns_err = _rel_rms(np.asarray(run.state.Zsin), np.asarray(wout_state.Zsin))
         fsq_ref = float(wout.fsqr + wout.fsqz + wout.fsql)
         fsq_new = None
         res = getattr(run, "result", None)

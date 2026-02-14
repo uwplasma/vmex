@@ -29,6 +29,8 @@ from dataclasses import dataclass
 
 from ._compat import jnp, jit, has_jax
 from .coords import eval_coords
+from .state import VMECState
+from .vmec_parity import vmec_m1_internal_to_physical_signed
 from .fourier import HelicalBasis, eval_fourier, eval_fourier_dtheta, eval_fourier_dzeta_phys
 from .radial import d_ds_coeffs
 
@@ -250,9 +252,9 @@ def _eval_geom_jit(state, basis: HelicalBasis, s_grid, zeta_grid):
     Lcos_s = d_ds_coeffs(state.Lcos, s_grid)
     Lsin_s = d_ds_coeffs(state.Lsin, s_grid)
 
-    Rs = eval_fourier(Rcos_s, Rsin_s, basis)
-    Zs = eval_fourier(Zcos_s, Zsin_s, basis)
-    Ls = eval_fourier(Lcos_s, Lsin_s, basis)
+    Rs = eval_fourier(Rcos_s, Rsin_s, basis, coeffs_internal=True)
+    Zs = eval_fourier(Zcos_s, Zsin_s, basis, coeffs_internal=True)
+    Ls = eval_fourier(Lcos_s, Lsin_s, basis, coeffs_internal=True)
 
     # Physical toroidal angle phi = zeta / NFP
     phi = zeta_grid / basis.nfp
@@ -306,4 +308,28 @@ def eval_geom(state, static):
 
     This is a light wrapper that keeps the user-facing signature nice.
     """
+    cfg = static.cfg
+    lconm1 = bool(getattr(cfg, "lconm1", True))
+    lthreed = bool(getattr(cfg, "lthreed", int(getattr(cfg, "ntor", 0)) > 0))
+    lasym = bool(getattr(cfg, "lasym", False))
+    if lconm1 and (lthreed or lasym) and int(getattr(cfg, "mpol", 0)) > 1:
+        Rcos, Zsin, Rsin, Zcos = vmec_m1_internal_to_physical_signed(
+            Rcos=state.Rcos,
+            Zsin=state.Zsin,
+            Rsin=state.Rsin,
+            Zcos=state.Zcos,
+            modes=static.modes,
+            lthreed=lthreed,
+            lasym=lasym,
+            lconm1=lconm1,
+        )
+        state = VMECState(
+            layout=state.layout,
+            Rcos=Rcos,
+            Rsin=Rsin,
+            Zcos=Zcos,
+            Zsin=Zsin,
+            Lcos=state.Lcos,
+            Lsin=state.Lsin,
+        )
     return _eval_geom_jit(state, static.basis, static.s, static.grid.zeta)

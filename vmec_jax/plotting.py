@@ -21,6 +21,7 @@ from .field import b2_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda, lamscal
 from .vmec_jacobian import vmec_half_mesh_jacobian_from_state
 from .vmec_realspace import vmec_realspace_geom_from_state
 from .vmec_tomnsp import vmec_trig_tables
+from .vmec_parity import vmec_m1_internal_to_physical_signed
 from .energy import flux_profiles_from_indata
 from .field import signgs_from_sqrtg
 
@@ -131,8 +132,26 @@ def surface_rz_from_state(
     """Return R,Z on a surface from a VMECState on a field-period grid."""
     grid = AngleGrid(theta=theta, zeta=zeta, nfp=int(nfp))
     basis = build_helical_basis(modes, grid)
-    R = np.asarray(eval_fourier(state.Rcos[s_index], state.Rsin[s_index], basis))
-    Z = np.asarray(eval_fourier(state.Zcos[s_index], state.Zsin[s_index], basis))
+    Rcos = np.asarray(state.Rcos)
+    Rsin = np.asarray(state.Rsin)
+    Zcos = np.asarray(state.Zcos)
+    Zsin = np.asarray(state.Zsin)
+    lthreed = bool(np.any(np.asarray(modes.n)))
+    lasym = bool(np.any(np.asarray(Rsin))) or bool(np.any(np.asarray(Zcos)))
+    lconm1 = bool(lthreed or lasym)
+    if lconm1 and int(np.max(np.asarray(modes.m))) > 0:
+        Rcos, Zsin, Rsin, Zcos = vmec_m1_internal_to_physical_signed(
+            Rcos=Rcos,
+            Zsin=Zsin,
+            Rsin=Rsin,
+            Zcos=Zcos,
+            modes=modes,
+            lthreed=lthreed,
+            lasym=lasym,
+            lconm1=lconm1,
+        )
+    R = np.asarray(eval_fourier(Rcos[s_index], Rsin[s_index], basis, coeffs_internal=True))
+    Z = np.asarray(eval_fourier(Zcos[s_index], Zsin[s_index], basis, coeffs_internal=True))
     return R, Z
 
 
@@ -291,6 +310,8 @@ def bmag_from_state_vmec_realspace(
         modes=static.modes,
         trig=trig,
         s=np.asarray(static.s),
+        lconm1=bool(getattr(static.cfg, "lconm1", True)),
+        lthreed=bool(getattr(static.cfg, "lthreed", True)),
     )
     sqrtg = np.asarray(jac.sqrtg)
     if sqrtg_floor is not None:

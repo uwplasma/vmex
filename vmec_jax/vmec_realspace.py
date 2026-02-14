@@ -16,6 +16,7 @@ from ._compat import jnp, has_jax
 from .modes import ModeTable
 from .vmec_residue import vmec_scalxc_from_s
 from .vmec_tomnsp import VmecTrigTables
+from .vmec_parity import vmec_m1_internal_to_physical_signed
 
 
 _PHASE_CACHE: dict[tuple[int, int], tuple[Any, Any]] = {}
@@ -434,49 +435,67 @@ def vmec_realspace_geom_from_state(
     trig: VmecTrigTables,
 ) -> dict[str, Any]:
     """Compute VMEC real-space geometry fields on the internal grid."""
+    Rcos = jnp.asarray(state.Rcos)
+    Rsin = jnp.asarray(state.Rsin)
+    Zcos = jnp.asarray(state.Zcos)
+    Zsin = jnp.asarray(state.Zsin)
+    lthreed = bool(np.any(np.asarray(modes.n)))
+    lasym = bool(np.any(np.asarray(Rsin))) or bool(np.any(np.asarray(Zcos)))
+    lconm1 = bool(lthreed or lasym)
+    if lconm1 and int(np.max(np.asarray(modes.m))) > 0:
+        Rcos, Zsin, Rsin, Zcos = vmec_m1_internal_to_physical_signed(
+            Rcos=Rcos,
+            Zsin=Zsin,
+            Rsin=Rsin,
+            Zcos=Zcos,
+            modes=modes,
+            lthreed=lthreed,
+            lasym=lasym,
+            lconm1=lconm1,
+        )
     R = vmec_realspace_synthesis(
-        coeff_cos=state.Rcos,
-        coeff_sin=state.Rsin,
+        coeff_cos=Rcos,
+        coeff_sin=Rsin,
         modes=modes,
         trig=trig,
         coeffs_internal=True,
         apply_scalxc=True,
     )
     Z = vmec_realspace_synthesis(
-        coeff_cos=state.Zcos,
-        coeff_sin=state.Zsin,
+        coeff_cos=Zcos,
+        coeff_sin=Zsin,
         modes=modes,
         trig=trig,
         coeffs_internal=True,
         apply_scalxc=True,
     )
     Ru = vmec_realspace_synthesis_dtheta(
-        coeff_cos=state.Rcos,
-        coeff_sin=state.Rsin,
+        coeff_cos=Rcos,
+        coeff_sin=Rsin,
         modes=modes,
         trig=trig,
         coeffs_internal=True,
         apply_scalxc=True,
     )
     Zu = vmec_realspace_synthesis_dtheta(
-        coeff_cos=state.Zcos,
-        coeff_sin=state.Zsin,
+        coeff_cos=Zcos,
+        coeff_sin=Zsin,
         modes=modes,
         trig=trig,
         coeffs_internal=True,
         apply_scalxc=True,
     )
     Rv = vmec_realspace_synthesis_dzeta_phys(
-        coeff_cos=state.Rcos,
-        coeff_sin=state.Rsin,
+        coeff_cos=Rcos,
+        coeff_sin=Rsin,
         modes=modes,
         trig=trig,
         coeffs_internal=True,
         apply_scalxc=True,
     )
     Zv = vmec_realspace_synthesis_dzeta_phys(
-        coeff_cos=state.Zcos,
-        coeff_sin=state.Zsin,
+        coeff_cos=Zcos,
+        coeff_sin=Zsin,
         modes=modes,
         trig=trig,
         coeffs_internal=True,
