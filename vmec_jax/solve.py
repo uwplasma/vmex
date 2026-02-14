@@ -2721,6 +2721,7 @@ def solve_fixed_boundary_residual_iter(
     verbose: bool = True,
     verbose_vmec2000_table: bool = True,
     jit_forces: bool = True,
+    use_scan: bool = False,
     resume_state: dict | None = None,
 ) -> SolveVmecResidualResult:
     """VMEC-style fixed-point update loop using preconditioned force residuals."""
@@ -2749,6 +2750,7 @@ def solve_fixed_boundary_residual_iter(
     use_direct_fallback = bool(use_direct_fallback)
     verbose_vmec2000_table = bool(verbose_vmec2000_table)
     jit_forces = bool(jit_forces)
+    use_scan = bool(use_scan)
     limit_dt_from_force = bool(limit_dt_from_force)
     limit_update_rms = bool(limit_update_rms)
     backtracking = bool(backtracking)
@@ -3549,6 +3551,121 @@ def solve_fixed_boundary_residual_iter(
     gamma = float(indata.get_float("GAMMA", 0.0))
     if abs(gamma - 1.0) < 1e-14:
         raise ValueError("GAMMA=1 makes wp/(gamma-1) singular (VMEC objective undefined)")
+
+    if use_scan:
+        if vmec2000_control or backtracking or use_restart_triggers or auto_flip_force or limit_dt_from_force or limit_update_rms or strict_update or use_direct_fallback or reference_mode:
+            raise ValueError(
+                "use_scan requires vmec2000_control=False, backtracking=False, "
+                "use_restart_triggers=False, auto_flip_force=False, "
+                "limit_dt_from_force=False, limit_update_rms=False, strict_update=False, "
+                "use_direct_fallback=False, reference_mode=False."
+            )
+
+        dtype = jnp.asarray(state0.Rcos).dtype
+        time_step_j = jnp.asarray(float(step_size), dtype=dtype)
+        flip_sign_j = jnp.asarray(float(initial_flip_sign), dtype=dtype)
+
+        def _scan_step(carry, it):
+            state, prev_rz = carry
+            it = jnp.asarray(it, dtype=jnp.int32)
+            iter_since_restart = it + 1
+            zero_m1 = jnp.where(iter_since_restart < 2, jnp.asarray(1.0, dtype=dtype), jnp.asarray(0.0, dtype=dtype))
+            include_edge = (iter_since_restart < 50) & (prev_rz < 1.0e-6)
+
+            k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale, _norms = _compute_forces(
+                state,
+                include_edge=include_edge,
+                zero_m1=zero_m1,
+                iter_idx=None,
+            )
+
+            frcc = _apply_radial_tridi(frzl.frcc * rz_scale[:, None, None], precond_radial_alpha)
+            frss = _apply_radial_tridi(
+                (frzl.frss if frzl.frss is not None else jnp.zeros_like(frzl.frcc)) * rz_scale[:, None, None],
+                precond_radial_alpha,
+            )
+            fzsc = _apply_radial_tridi(frzl.fzsc * rz_scale[:, None, None], precond_radial_alpha)
+            fzcs = _apply_radial_tridi(
+                (frzl.fzcs if frzl.fzcs is not None else jnp.zeros_like(frzl.fzsc)) * rz_scale[:, None, None],
+                precond_radial_alpha,
+            )
+            flsc = _apply_radial_tridi(frzl.flsc * l_scale[:, None, None], precond_lambda_alpha)
+            flcs = _apply_radial_tridi(
+                (frzl.flcs if frzl.flcs is not None else jnp.zeros_like(frzl.flsc)) * l_scale[:, None, None],
+                precond_lambda_alpha,
+            )
+
+            frzl_pre = TomnspsRZL(
+                frcc=frcc,
+                frss=frss,
+                fzsc=fzsc,
+                fzcs=fzcs,
+                flsc=flsc,
+                flcs=flcs,
+                frsc=getattr(frzl, "frsc", None),
+                frcs=getattr(frzl, "frcs", None),
+                fzcc=getattr(frzl, "fzcc", None),
+                fzss=getattr(frzl, "fzss", None),
+                flcc=getattr(frzl, "flcc", None),
+                flss=getattr(frzl, "flss", None),
+            )
+
+            frcc_u = frcc * w_mode_mn[None, :, :]
+            frss_u = frss * w_mode_mn[None, :, :]
+            fzsc_u = fzsc * w_mode_mn[None, :, :]
+            fzcs_u = fzcs * w_mode_mn[None, :, :]
+            flsc_u = flsc * w_mode_mn[None, :, :]
+            flcs_u = flcs * w_mode_mn[None, :, :]
+
+            if lambda_update_scale != 1.0:
+                flsc_u = flsc_u * lambda_update_scale_j
+                flcs_u = flcs_u * lambda_update_scale_j
+
+            dR = (time_step_j * flip_sign_j) * _mn_cos_to_signed_physical(frcc_u, frss_u)
+            dZ = (time_step_j * flip_sign_j) * _mn_sin_to_signed_physical(fzsc_u, fzcs_u)
+            dL = (time_step_j * flip_sign_j) * _mn_sin_to_signed_physical_lambda(flsc_u, flcs_u)
+
+            state_new = VMECState(
+                layout=state.layout,
+                Rcos=jnp.asarray(state.Rcos) + dR,
+                Rsin=state.Rsin,
+                Zcos=state.Zcos,
+                Zsin=jnp.asarray(state.Zsin) + dZ,
+                Lcos=state.Lcos,
+                Lsin=jnp.asarray(state.Lsin) + dL,
+            )
+            state_new = _enforce_fixed_boundary_and_axis(
+                state_new,
+                static,
+                edge_Rcos=edge_Rcos,
+                edge_Rsin=edge_Rsin,
+                edge_Zcos=edge_Zcos,
+                edge_Zsin=edge_Zsin,
+                enforce_lambda_axis=True,
+                idx00=idx00,
+            )
+            state_new = _apply_vmec_lambda_axis_rules(state_new)
+
+            prev_rz_new = fsqr + fsqz
+            return (state_new, prev_rz_new), (fsqr, fsqz, fsql)
+
+        prev_rz0 = jnp.asarray(2.0, dtype=dtype)
+        (state_final, _prev_rz), hist = jax.lax.scan(
+            _scan_step, (state, prev_rz0), jnp.arange(max_iter, dtype=jnp.int32)
+        )
+        fsqr_hist, fsqz_hist, fsql_hist = hist
+        w_hist = fsqr_hist + fsqz_hist + fsql_hist
+        return SolveVmecResidualResult(
+            state=state_final,
+            n_iter=int(max_iter),
+            w_history=np.asarray(w_hist),
+            fsqr2_history=np.asarray(fsqr_hist),
+            fsqz2_history=np.asarray(fsqz_hist),
+            fsql2_history=np.asarray(fsql_hist),
+            grad_rms_history=np.asarray([], dtype=float),
+            step_history=np.asarray([], dtype=float),
+            diagnostics={"use_scan": True},
+        )
 
     w_history = []
     fsqr2_history = []
@@ -5560,3 +5677,5 @@ def first_step_diagnostics(
         "dLcs": np.asarray(dLcs),
         "bcovar": k.bc,
     }
+    if use_scan and dumps_enabled:
+        raise ValueError("use_scan is incompatible with debug dumps (VMEC_JAX_DUMP_*).")

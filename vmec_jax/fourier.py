@@ -34,6 +34,17 @@ from .grids import AngleGrid
 _HELICAL_BASIS_CACHE: dict[tuple, "HelicalBasis"] = {}
 
 
+def _cache_allowed() -> bool:
+    if not has_jax():
+        return True
+    try:
+        from jax import core
+
+        return bool(core.trace_ctx.is_top_level())
+    except Exception:
+        return False
+
+
 def _basis_cache_key(modes: ModeTable, grid: AngleGrid) -> tuple:
     m = np.asarray(modes.m)
     n = np.asarray(modes.n)
@@ -118,7 +129,7 @@ def build_helical_basis(modes: ModeTable, grid: AngleGrid, *, cache: bool = True
     - This is O(K*ntheta*nzeta) memory; fine for VMEC defaults (low mpol, ntor) on a laptop.
     - Later we can switch to factored/FFT-based transforms once parity is validated.
     """
-    if cache:
+    if cache and _cache_allowed():
         key = _basis_cache_key(modes, grid)
         cached = _HELICAL_BASIS_CACHE.get(key)
         if cached is not None:
@@ -138,7 +149,7 @@ def build_helical_basis(modes: ModeTable, grid: AngleGrid, *, cache: bool = True
         n=n,
         nfp=grid.nfp,
     )
-    if cache:
+    if cache and _cache_allowed():
         _HELICAL_BASIS_CACHE[key] = basis
     return basis
 
