@@ -274,12 +274,22 @@ def run_fixed_boundary(
     restart_solver_state: dict | None = None,
 ):
     def _maybe_enable_compilation_cache() -> None:
+        if os.getenv("VMEC_JAX_DISABLE_COMPILATION_CACHE", "") not in ("", "0"):
+            return
         cache_dir = os.getenv("VMEC_JAX_COMPILATION_CACHE_DIR") or os.getenv("JAX_COMPILATION_CACHE_DIR")
+        if not cache_dir:
+            # Default to a user-writable cache to reduce first-run JIT latency
+            # on repeated executions (especially in examples/CI runs).
+            try:
+                cache_dir = str(Path.home() / ".cache" / "vmec_jax" / "jax_compilation_cache")
+            except Exception:
+                cache_dir = ""
         if not cache_dir:
             return
         try:
             from jax.experimental import compilation_cache
 
+            Path(cache_dir).mkdir(parents=True, exist_ok=True)
             compilation_cache.set_cache_dir(cache_dir)
         except Exception:
             return
