@@ -57,6 +57,23 @@ Use ``VMECStatic`` to avoid rebuilding:
 - Fourier basis tensors,
 - radial grid.
 
+VMEC phase-stack cache
+----------------------
+
+The VMEC real-space synthesis path builds full ``(m,n)`` phase tables from the
+``fixaray`` trig tables. This is correct but expensive to repeat inside the JIT
+kernel. ``VMECStatic`` now precomputes and caches stacked phase tensors for the
+VMEC grid (including ``dtheta``/``dzeta`` variants) and attaches them to the
+cached trig tables. The precompute uses NumPy on the host to avoid extra JAX
+compilation work. This reduces both runtime and compilation work because the
+kernel no longer rebuilds the phase tables from scratch every iteration.
+
+Control this behavior with:
+
+- ``VMEC_JAX_CACHE_VMEC_PHASE=1`` (default): precompute phase stacks in
+  ``build_static`` for fastest execution.
+- ``VMEC_JAX_CACHE_VMEC_PHASE=0``: skip the extra cached tensors to save memory.
+
 Avoid Python objects in jitted functions
 ----------------------------------------
 

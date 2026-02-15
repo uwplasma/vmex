@@ -71,6 +71,14 @@ class VmecTrigTables:
     cosnvn: Any
     sinnvn: Any
 
+    # Optional cached phase stacks for vmec_realspace synthesis.
+    # These are populated by VMECStatic when enabled.
+    phase_stack: Any | None = None
+    phase_dtheta_stack: Any | None = None
+    phase_dzeta_stack: Any | None = None
+    phase_stack_m: Any | None = None
+    phase_stack_n: Any | None = None
+
 
 @dataclass(frozen=True)
 class TomnspsMasks:
