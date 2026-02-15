@@ -3132,15 +3132,33 @@ def solve_fixed_boundary_residual_iter(
         icurv=icurv,
     )
 
-    trig = vmec_trig_tables(
-        ntheta=int(static.cfg.ntheta),
-        nzeta=int(static.cfg.nzeta),
-        nfp=int(wout_like.nfp),
-        mmax=int(wout_like.mpol) - 1,
-        nmax=int(wout_like.ntor),
-        lasym=bool(wout_like.lasym),
-        dtype=jnp.asarray(state0.Rcos).dtype,
-    )
+    trig = getattr(static, "trig_vmec", None)
+    if trig is None:
+        trig = vmec_trig_tables(
+            ntheta=int(static.cfg.ntheta),
+            nzeta=int(static.cfg.nzeta),
+            nfp=int(wout_like.nfp),
+            mmax=int(wout_like.mpol) - 1,
+            nmax=int(wout_like.ntor),
+            lasym=bool(wout_like.lasym),
+            dtype=jnp.asarray(state0.Rcos).dtype,
+        )
+    else:
+        if (
+            int(trig.ntheta1) != int(static.cfg.ntheta)
+            or int(trig.cosnv.shape[0]) != int(static.cfg.nzeta)
+            or int(trig.cosmu.shape[1]) != int(wout_like.mpol)
+            or int(trig.cosnv.shape[1]) != int(wout_like.ntor) + 1
+        ):
+            trig = vmec_trig_tables(
+                ntheta=int(static.cfg.ntheta),
+                nzeta=int(static.cfg.nzeta),
+                nfp=int(wout_like.nfp),
+                mmax=int(wout_like.mpol) - 1,
+                nmax=int(wout_like.ntor),
+                lasym=bool(wout_like.lasym),
+                dtype=jnp.asarray(state0.Rcos).dtype,
+            )
     modes = static.modes
     m_idx = jnp.asarray(modes.m, dtype=jnp.int32)
     n_idx = jnp.asarray(modes.n, dtype=jnp.int32)
