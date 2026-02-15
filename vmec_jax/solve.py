@@ -4656,7 +4656,44 @@ def solve_fixed_boundary_residual_iter(
             fsqr1_history.append(fsqr1_f)
             fsqz1_history.append(fsqz1_f)
             fsql1_history.append(fsql1_f)
-    
+
+            # Jacobian sign-change check (VMEC jacobian.f sets irst=2).
+            bad_jacobian = False
+            if bool(reference_mode) or bool(vmec2000_control):
+                jac = None
+                try:
+                    jac = getattr(getattr(k, "bc", None), "jac", None)
+                except Exception:
+                    jac = None
+                if jac is None:
+                    jac = vmec_half_mesh_jacobian_from_state(
+                        state=state,
+                        modes=static.modes,
+                        trig=trig,
+                        s=s,
+                        lconm1=bool(getattr(static.cfg, "lconm1", True)),
+                        lthreed=bool(getattr(static.cfg, "lthreed", True)),
+                        mask_even=getattr(static, "m_is_even", None),
+                        mask_odd=getattr(static, "m_is_odd", None),
+                    )
+                tau = np.asarray(jac.tau)
+                if tau.size:
+                    tau_use = tau[1:] if tau.shape[0] > 1 else tau
+                    min_tau = float(np.min(tau_use))
+                    max_tau = float(np.max(tau_use))
+                    bad_jacobian = (min_tau * max_tau) < 0.0
+                    min_tau_history.append(min_tau)
+                    max_tau_history.append(max_tau)
+                    bad_jacobian_history.append(int(bad_jacobian))
+                else:
+                    min_tau_history.append(float("nan"))
+                    max_tau_history.append(float("nan"))
+                    bad_jacobian_history.append(0)
+            else:
+                min_tau_history.append(float("nan"))
+                max_tau_history.append(float("nan"))
+                bad_jacobian_history.append(0)
+
             # VMEC-style time-step control: VMEC2000's `TimeStepControl` + `restart_iter`.
             if bool(vmec2000_control):
                 fsq0 = fsqr_f + fsqz_f + fsql_f  # physical
@@ -4671,7 +4708,9 @@ def solve_fixed_boundary_residual_iter(
                 res1 = min(res1, fsq0)
                 if (fsq <= res0) and (fsq0 <= res1):
                     state_checkpoint = state
-                if ((iter2 - iter1) > 10) and ((fsq > vmec2000_fact * max(res0, 1e-30)) or (fsq0 > vmec2000_fact * max(res1, 1e-30))):
+                if (not bad_jacobian) and ((iter2 - iter1) > 10) and (
+                    (fsq > vmec2000_fact * max(res0, 1e-30)) or (fsq0 > vmec2000_fact * max(res1, 1e-30))
+                ):
                     _maybe_dump_time_control(
                         iter_idx=int(iter2),
                         fsq=float(fsq),
@@ -4730,43 +4769,10 @@ def solve_fixed_boundary_residual_iter(
             # iterations since the last restart marker.
             if (not bool(vmec2000_control)) and (fsq1 <= res0_old) and ((iter2 - iter1) > 10):
                 state_checkpoint = state
-    
+
             # Restart triggers (bad progress / bad Jacobian proxy).
-            bad_jacobian = False
-            if bool(reference_mode) or bool(vmec2000_control):
-                jac = None
-                try:
-                    jac = getattr(getattr(k, "bc", None), "jac", None)
-                except Exception:
-                    jac = None
-                if jac is None:
-                    jac = vmec_half_mesh_jacobian_from_state(
-                        state=state,
-                        modes=static.modes,
-                        trig=trig,
-                        s=s,
-                        lconm1=bool(getattr(static.cfg, "lconm1", True)),
-                        lthreed=bool(getattr(static.cfg, "lthreed", True)),
-                        mask_even=getattr(static, "m_is_even", None),
-                        mask_odd=getattr(static, "m_is_odd", None),
-                    )
-                tau = np.asarray(jac.tau)
-                if tau.size:
-                    tau_use = tau[1:] if tau.shape[0] > 1 else tau
-                    min_tau = float(np.min(tau_use))
-                    max_tau = float(np.max(tau_use))
-                    bad_jacobian = (min_tau * max_tau) < 0.0
-                    min_tau_history.append(min_tau)
-                    max_tau_history.append(max_tau)
-                    bad_jacobian_history.append(int(bad_jacobian))
-                else:
-                    min_tau_history.append(float("nan"))
-                    max_tau_history.append(float("nan"))
-                    bad_jacobian_history.append(0)
-            else:
-                min_tau_history.append(float("nan"))
-                max_tau_history.append(float("nan"))
-                bad_jacobian_history.append(0)
+            # `bad_jacobian` computed above (before TimeStepControl) so that
+            # VMEC's irst=2 restart takes precedence over time-control restarts.
     
             huge_initial_forces = False
             if iter2 == 1 and lmove_axis:
