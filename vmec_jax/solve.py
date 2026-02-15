@@ -3527,17 +3527,17 @@ def solve_fixed_boundary_residual_iter(
     nfp = float(static.cfg.nfp)
     ncoeff = int(jnp.asarray(state0.Rcos).shape[1])
 
-    from .vmec_parity import _mn_index_maps as _mn_index_maps_cached
+    from .vmec_parity import signed_maps_from_modes
 
-    _mpol_map, _ntor_map, idx_pos_np, idx_neg_np = _mn_index_maps_cached(static.modes)
-    idx_pos = np.asarray(idx_pos_np, dtype=np.int32)
-    idx_neg = np.asarray(idx_neg_np, dtype=np.int32)
-    idx_pos_flat_np = idx_pos.reshape(-1)
-    idx_neg_flat_np = idx_neg.reshape(-1)
-    mask_pos_flat_np = idx_pos_flat_np >= 0
-    mask_neg_flat_np = idx_neg_flat_np >= 0
-    idx_pos_safe_np = np.where(mask_pos_flat_np, idx_pos_flat_np, 0)
-    idx_neg_safe_np = np.where(mask_neg_flat_np, idx_neg_flat_np, 0)
+    signed_maps = signed_maps_from_modes(static.modes)
+    idx_pos = np.asarray(signed_maps.idx_pos, dtype=np.int32)
+    idx_neg = np.asarray(signed_maps.idx_neg, dtype=np.int32)
+    idx_pos_flat_np = np.asarray(signed_maps.idx_pos_flat, dtype=np.int32)
+    idx_neg_flat_np = np.asarray(signed_maps.idx_neg_flat, dtype=np.int32)
+    mask_pos_flat_np = np.asarray(signed_maps.mask_pos_flat)
+    mask_neg_flat_np = np.asarray(signed_maps.mask_neg_flat)
+    idx_pos_safe_np = np.asarray(signed_maps.idx_pos_safe_flat, dtype=np.int32)
+    idx_neg_safe_np = np.asarray(signed_maps.idx_neg_safe_flat, dtype=np.int32)
 
     m_idx_list = []
     n_idx_list = []
@@ -3564,11 +3564,8 @@ def solve_fixed_boundary_residual_iter(
     m0_mask = np.asarray(getattr(static, "m_is_m0", None) if getattr(static, "m_is_m0", None) is not None else (np.asarray(static.modes.m) == 0))
     m0 = jnp.asarray((np.arange(mpol)[:, None] == 0))
     n0 = jnp.asarray((np.arange(nrange)[None, :] == 0))
-    from .vmec_parity import _build_signed_maps
     from .vmec_parity import _mn_cos_to_signed_cached as _mn_cos_to_signed_block
     from .vmec_parity import _mn_sin_to_signed_cached as _mn_sin_to_signed_block
-
-    signed_maps = _build_signed_maps(idx_pos, idx_neg)
 
     def _mn_cos_to_signed(cc, ss):
         cc = jnp.asarray(cc)
