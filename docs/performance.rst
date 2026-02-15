@@ -90,6 +90,21 @@ components (and separately for lambda) so the solver does fewer tridi solves per
 iteration. This reduces kernel count and Python overhead while preserving the
 VMEC update math.
 
+Vectorized multigrid conversion
+-------------------------------
+
+Multigrid staging now uses the vectorized signed↔(m,n) conversion helpers from
+``vmec_parity`` instead of Python loops. This trims host-side overhead during
+grid transitions, which shows up prominently in short profiling traces.
+
+Precomputed (m,n)→signed maps
+-----------------------------
+
+The fixed-boundary update now builds dense mapping matrices once per solve to
+convert ``(m,n>=0)`` force blocks into signed Fourier updates via matmul. This
+reduces scatter-heavy updates inside the iteration loop and keeps the JIT graph
+more regular.
+
 Avoid Python objects in jitted functions
 ----------------------------------------
 

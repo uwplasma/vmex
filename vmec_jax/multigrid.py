@@ -172,104 +172,38 @@ def interp_vmec_state(
             else:
                 idx_neg[int(mk), int(-nk)] = int(k)
 
-        basis_norm = np.ones((mpol, nrange), dtype=np.asarray(state_old.Rcos).dtype)
-        mode_scale = np.ones_like(basis_norm)
+        basis_norm = jnp.ones((mpol, nrange), dtype=jnp.asarray(state_old.Rcos).dtype)
+        from .vmec_parity import _signed_to_mn_cos as _signed_to_mn_cos_block
+        from .vmec_parity import _signed_to_mn_sin as _signed_to_mn_sin_block
+        from .vmec_parity import _mn_cos_to_signed as _mn_cos_to_signed_block
+        from .vmec_parity import _mn_sin_to_signed as _mn_sin_to_signed_block
 
-        def _signed_to_mn_cos(coeffs: Any) -> tuple[np.ndarray, np.ndarray]:
-            coeffs_np = np.asarray(coeffs)
-            rcc = np.zeros((ns_old, mpol, nrange), dtype=coeffs_np.dtype)
-            rss = np.zeros_like(rcc)
-            for mi in range(mpol):
-                for ni in range(nrange):
-                    kp = int(idx_pos[mi, ni])
-                    if kp < 0:
-                        continue
-                    pos = coeffs_np[:, kp]
-                    kn = int(idx_neg[mi, ni])
-                    neg = coeffs_np[:, kn] if kn >= 0 else 0.0
-                    rcc[:, mi, ni] = pos + neg
-                    if (ni == 0) or (mi == 0):
-                        rss[:, mi, ni] = 0.0
-                    else:
-                        rss[:, mi, ni] = pos - neg
-            return rcc, rss
+        def _signed_to_mn_cos(coeffs: Any):
+            return _signed_to_mn_cos_block(jnp.asarray(coeffs), idx_pos, idx_neg)
 
-        def _signed_to_mn_sin(coeffs: Any) -> tuple[np.ndarray, np.ndarray]:
-            coeffs_np = np.asarray(coeffs)
-            zsc = np.zeros((ns_old, mpol, nrange), dtype=coeffs_np.dtype)
-            zcs = np.zeros_like(zsc)
-            for mi in range(mpol):
-                for ni in range(nrange):
-                    kp = int(idx_pos[mi, ni])
-                    if kp < 0:
-                        continue
-                    pos = coeffs_np[:, kp]
-                    kn = int(idx_neg[mi, ni])
-                    neg = coeffs_np[:, kn] if kn >= 0 else 0.0
-                    zsc_val = pos + neg
-                    if ni == 0:
-                        zcs[:, mi, ni] = 0.0
-                    else:
-                        zcs[:, mi, ni] = neg - pos
-                        if mi == 0:
-                            zsc_val = 0.0
-                    zsc[:, mi, ni] = zsc_val
-            return zsc, zcs
+        def _signed_to_mn_sin(coeffs: Any):
+            return _signed_to_mn_sin_block(jnp.asarray(coeffs), idx_pos, idx_neg)
 
-        def _mn_cos_to_signed(rcc: np.ndarray, rss: np.ndarray) -> np.ndarray:
-            out = np.zeros((int(rcc.shape[0]), K), dtype=rcc.dtype)
-            for mi in range(mpol):
-                for ni in range(nrange):
-                    kp = int(idx_pos[mi, ni])
-                    if kp < 0:
-                        continue
-                    scale = mode_scale[mi, ni]
-                    if (mi == 0) or (ni == 0):
-                        pos = rcc[:, mi, ni] * scale
-                    else:
-                        pos = 0.5 * (rcc[:, mi, ni] + rss[:, mi, ni]) * scale
-                    out[:, kp] = pos
-                    kn = int(idx_neg[mi, ni])
-                    if kn >= 0:
-                        neg = 0.5 * (rcc[:, mi, ni] - rss[:, mi, ni]) * scale
-                        out[:, kn] = neg
-            return out
+        def _mn_cos_to_signed(rcc, rss):
+            return _mn_cos_to_signed_block(jnp.asarray(rcc), jnp.asarray(rss), idx_pos, idx_neg, ncoeff=K)
 
-        def _mn_sin_to_signed(zsc: np.ndarray, zcs: np.ndarray) -> np.ndarray:
-            out = np.zeros((int(zsc.shape[0]), K), dtype=zsc.dtype)
-            for mi in range(mpol):
-                for ni in range(nrange):
-                    kp = int(idx_pos[mi, ni])
-                    if kp < 0:
-                        continue
-                    scale = mode_scale[mi, ni]
-                    kn = int(idx_neg[mi, ni])
-                    if ni == 0:
-                        pos = zsc[:, mi, ni] * scale
-                    elif kn >= 0:
-                        pos = 0.5 * (zsc[:, mi, ni] - zcs[:, mi, ni]) * scale
-                    else:
-                        pos = (-zcs[:, mi, ni] if mi == 0 else zsc[:, mi, ni]) * scale
-                    out[:, kp] = pos
-                    if kn >= 0:
-                        neg = 0.5 * (zsc[:, mi, ni] + zcs[:, mi, ni]) * scale
-                        out[:, kn] = neg
-            return out
+        def _mn_sin_to_signed(zsc, zcs):
+            return _mn_sin_to_signed_block(jnp.asarray(zsc), jnp.asarray(zcs), idx_pos, idx_neg, ncoeff=K)
 
-        def _interp_block(block: np.ndarray) -> np.ndarray:
-            m_flat = np.repeat(np.arange(mpol, dtype=np.int32), nrange)
-            interp = interp_vmec_radial_coeffs(block.reshape(ns_old, -1), m=m_flat, ns_new=ns_new)
-            return np.asarray(interp).reshape(ns_new, mpol, nrange)
+        def _interp_block(block):
+            m_flat = jnp.repeat(jnp.arange(mpol, dtype=jnp.int32), nrange)
+            interp = interp_vmec_radial_coeffs(jnp.asarray(block).reshape(ns_old, -1), m=m_flat, ns_new=ns_new)
+            return interp.reshape(ns_new, mpol, nrange)
 
-        rcc, rss = _signed_to_mn_cos(np.asarray(state_old.Rcos))
-        zsc, zcs = _signed_to_mn_sin(np.asarray(state_old.Zsin))
-        lsc, lcs = _signed_to_mn_sin(np.asarray(state_old.Lsin))
+        rcc, rss = _signed_to_mn_cos(state_old.Rcos)
+        zsc, zcs = _signed_to_mn_sin(state_old.Zsin)
+        lsc, lcs = _signed_to_mn_sin(state_old.Lsin)
 
         if bool(lthreed) and bool(lconm1) and mpol > 1:
-            rss_m1 = rss[:, 1, :].copy()
-            zcs_m1 = zcs[:, 1, :].copy()
-            rss[:, 1, :] = 0.5 * (rss_m1 + zcs_m1)
-            zcs[:, 1, :] = 0.5 * (rss_m1 - zcs_m1)
+            rss_m1 = rss[:, 1, :]
+            zcs_m1 = zcs[:, 1, :]
+            rss = rss.at[:, 1, :].set(0.5 * (rss_m1 + zcs_m1))
+            zcs = zcs.at[:, 1, :].set(0.5 * (rss_m1 - zcs_m1))
 
         rcc = rcc * basis_norm[None, :, :]
         rss = rss * basis_norm[None, :, :]
@@ -278,18 +212,18 @@ def interp_vmec_state(
         lsc = lsc * basis_norm[None, :, :]
         lcs = lcs * basis_norm[None, :, :]
 
-        rcc_i = np.array(_interp_block(rcc), copy=True)
-        rss_i = np.array(_interp_block(rss), copy=True)
-        zsc_i = np.array(_interp_block(zsc), copy=True)
-        zcs_i = np.array(_interp_block(zcs), copy=True)
-        lsc_i = np.array(_interp_block(lsc), copy=True)
-        lcs_i = np.array(_interp_block(lcs), copy=True)
+        rcc_i = _interp_block(rcc)
+        rss_i = _interp_block(rss)
+        zsc_i = _interp_block(zsc)
+        zcs_i = _interp_block(zcs)
+        lsc_i = _interp_block(lsc)
+        lcs_i = _interp_block(lcs)
 
         if bool(lthreed) and bool(lconm1) and mpol > 1:
-            rss_m1 = rss_i[:, 1, :].copy()
-            zcs_m1 = zcs_i[:, 1, :].copy()
-            rss_i[:, 1, :] = rss_m1 + zcs_m1
-            zcs_i[:, 1, :] = rss_m1 - zcs_m1
+            rss_m1 = rss_i[:, 1, :]
+            zcs_m1 = zcs_i[:, 1, :]
+            rss_i = rss_i.at[:, 1, :].set(rss_m1 + zcs_m1)
+            zcs_i = zcs_i.at[:, 1, :].set(rss_m1 - zcs_m1)
 
         Rcos_new = _mn_cos_to_signed(rcc_i, rss_i)
         Zsin_new = _mn_sin_to_signed(zsc_i, zcs_i)
