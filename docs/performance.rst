@@ -94,8 +94,10 @@ Vectorized multigrid conversion
 -------------------------------
 
 Multigrid staging now uses the vectorized signed↔(m,n) conversion helpers from
-``vmec_parity`` instead of Python loops. This trims host-side overhead during
-grid transitions, which shows up prominently in short profiling traces.
+``vmec_parity`` instead of Python loops. In the current path the signed→(m,n)
+conversion uses precomputed dense maps (matmul) to avoid repeated gather-heavy
+indexing. This trims host-side overhead during grid transitions, which shows up
+prominently in short profiling traces.
 
 Multigrid interpolation caches
 ------------------------------
@@ -118,6 +120,13 @@ Batched sin conversions
 The scan update now batches the Z/L ``(m,n)`` sin-block conversions into a
 single matmul-based mapping, reducing kernel count compared to converting each
 field independently.
+
+Scatter-free boundary/axis enforcement
+--------------------------------------
+
+The fixed-boundary/axis enforcement step now uses concatenation instead of
+scatter updates for the edge and axis rows. This trims scatter-heavy kernels in
+the scan loop without changing the VMEC constraints.
 
 Avoid Python objects in jitted functions
 ----------------------------------------

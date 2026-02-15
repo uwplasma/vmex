@@ -217,16 +217,45 @@ def interp_vmec_state(
                 idx_neg[int(mk), int(-nk)] = int(k)
 
         basis_norm = jnp.ones((mpol, nrange), dtype=jnp.asarray(state_old.Rcos).dtype)
-        from .vmec_parity import _signed_to_mn_cos as _signed_to_mn_cos_block
-        from .vmec_parity import _signed_to_mn_sin as _signed_to_mn_sin_block
         from .vmec_parity import _mn_cos_to_signed as _mn_cos_to_signed_block
         from .vmec_parity import _mn_sin_to_signed as _mn_sin_to_signed_block
 
+        idx_pos_flat = idx_pos.reshape(-1)
+        idx_neg_flat = idx_neg.reshape(-1)
+        flat_idx = np.arange(mpol * nrange, dtype=np.int32)
+        pos_mask = idx_pos_flat >= 0
+        neg_mask = idx_neg_flat >= 0
+        map_pos_np = np.zeros((K, mpol * nrange), dtype=np.asarray(state_old.Rcos).dtype)
+        map_neg_np = np.zeros_like(map_pos_np)
+        map_pos_np[idx_pos_flat[pos_mask], flat_idx[pos_mask]] = 1.0
+        map_neg_np[idx_neg_flat[neg_mask], flat_idx[neg_mask]] = 1.0
+        map_pos = jnp.asarray(map_pos_np)
+        map_neg = jnp.asarray(map_neg_np)
+        m_idx = jnp.arange(mpol, dtype=jnp.int32)[:, None]
+        n_idx = jnp.arange(nrange, dtype=jnp.int32)[None, :]
+        rss_mask = (m_idx > 0) & (n_idx > 0)
+        n0_mask = n_idx == 0
+        m0_mask = m_idx == 0
+        sc_mask = ~(m0_mask & (~n0_mask))
+
         def _signed_to_mn_cos(coeffs: Any):
-            return _signed_to_mn_cos_block(jnp.asarray(coeffs), idx_pos, idx_neg)
+            coeffs = jnp.asarray(coeffs)
+            pos_flat = jnp.matmul(coeffs, map_pos)
+            neg_flat = jnp.matmul(coeffs, map_neg)
+            rcc = (pos_flat + neg_flat).reshape(ns_old, mpol, nrange)
+            rss = (pos_flat - neg_flat).reshape(ns_old, mpol, nrange)
+            rss = jnp.where(rss_mask[None, :, :], rss, 0.0)
+            return rcc, rss
 
         def _signed_to_mn_sin(coeffs: Any):
-            return _signed_to_mn_sin_block(jnp.asarray(coeffs), idx_pos, idx_neg)
+            coeffs = jnp.asarray(coeffs)
+            pos_flat = jnp.matmul(coeffs, map_pos)
+            neg_flat = jnp.matmul(coeffs, map_neg)
+            sc = (pos_flat + neg_flat).reshape(ns_old, mpol, nrange)
+            cs = (neg_flat - pos_flat).reshape(ns_old, mpol, nrange)
+            cs = jnp.where(n0_mask[None, :, :], 0.0, cs)
+            sc = jnp.where(sc_mask[None, :, :], sc, 0.0)
+            return sc, cs
 
         def _mn_cos_to_signed(rcc, rss):
             return _mn_cos_to_signed_block(jnp.asarray(rcc), jnp.asarray(rss), idx_pos, idx_neg, ncoeff=K)
