@@ -265,7 +265,7 @@ def run_fixed_boundary(
     multigrid: bool | None = None,
     multigrid_use_input_niter: bool = True,
     verbose: bool = True,
-    jit_forces: bool = True,
+    jit_forces: bool | str = "auto",
     use_scan: bool = False,
     grid=None,
     ns_override: int | None = None,
@@ -351,6 +351,9 @@ def run_fixed_boundary(
         internal grid/weights before returning or solving.
     verbose:
         If True (default), print VMEC-style iteration progress and a summary.
+    jit_forces:
+        If True, JIT the force kernels. If ``"auto"`` (default), disable JIT
+        for very small workloads to reduce first-iteration latency.
     """
     # Default to 64-bit for VMEC parity; users can opt out via JAX_ENABLE_X64=0.
     try:
@@ -684,6 +687,20 @@ def run_fixed_boundary(
 
         state = restart_state_eff if restart_state_eff is not None else st0_coarse
         static_prev = static0 if static0 is not None else static
+        def _resolve_jit_forces(flag: bool | str, static_i: VMECStatic) -> bool:
+            if isinstance(flag, str):
+                if flag.strip().lower() != "auto":
+                    return True
+                try:
+                    nmodes_i = int(np.asarray(static_i.modes.m).size)
+                    nrzt = int(static_i.cfg.ns) * int(static_i.cfg.ntheta) * int(static_i.cfg.nzeta)
+                    work = nmodes_i * nrzt
+                except Exception:
+                    return True
+                # Heuristic: avoid JIT for very small workloads to reduce first-iteration latency.
+                return bool(work >= 2_000_000)
+            return bool(flag)
+
         for i, (ns_i, niter_i, ftol_i) in enumerate(zip(ns_stages, niter_stages, ftol_stages)):
             cfg_i = replace(cfg, ns=int(ns_i))
             static_i = build_static(cfg_i, grid=grid)
@@ -718,6 +735,7 @@ def run_fixed_boundary(
 
             stage_offsets.append(sum(int(np.asarray(r.w_history).size) for r in stage_results))
             scan_mode = bool(use_scan)
+            jit_forces_eff = _resolve_jit_forces(jit_forces, static_i)
             stage_results.append(
                 solve_fixed_boundary_residual_iter(
                     state,
@@ -745,7 +763,7 @@ def run_fixed_boundary(
                     resume_state=restart_solver_state,
                     verbose=bool(verbose),
                     verbose_vmec2000_table=bool(verbose),
-                    jit_forces=bool(jit_forces),
+                    jit_forces=bool(jit_forces_eff),
                     use_scan=bool(use_scan),
                 )
             )
