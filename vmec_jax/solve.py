@@ -734,16 +734,10 @@ def _enforce_lambda_gauge(Lcos, Lsin, *, idx00: Optional[int]):
     """Fix the (m,n)=(0,0) gauge mode to 0 (it is a nullspace)."""
     if idx00 is None:
         return Lcos, Lsin
-    if hasattr(Lcos, "at"):
-        # JAX arrays support .at[] updates.
-        Lcos = Lcos.at[:, idx00].set(0.0)
-        Lsin = Lsin.at[:, idx00].set(0.0)
-        return Lcos, Lsin
-    # numpy fallback (not performance critical here)
-    Lcos = np.asarray(Lcos).copy()
-    Lsin = np.asarray(Lsin).copy()
-    Lcos[:, idx00] = 0.0
-    Lsin[:, idx00] = 0.0
+    mask = jnp.asarray(np.arange(int(jnp.asarray(Lcos).shape[1])) == int(idx00))
+    mask = mask[None, :]
+    Lcos = jnp.where(mask, jnp.asarray(0.0, dtype=jnp.asarray(Lcos).dtype), jnp.asarray(Lcos))
+    Lsin = jnp.where(mask, jnp.asarray(0.0, dtype=jnp.asarray(Lsin).dtype), jnp.asarray(Lsin))
     return Lcos, Lsin
 
 

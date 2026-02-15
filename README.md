@@ -70,6 +70,7 @@ Scan mode batches the Z/L sin-block conversions into one matmul-based mapping to
 Axis/edge enforcement now uses concatenation instead of scatter updates to keep the scan loop lighter.
 Initial-guess axis blending updates all m=0 columns in one vectorized step to reduce startup overhead.
 Mode scaling factors (1/(mscale*nscale)) are cached in `VMECStatic` to avoid repeated table gathers in the initial guess.
+Lambda gauge enforcement uses a boolean mask instead of scatter updates in the iteration loop.
 
 ## Snapshot figures
 

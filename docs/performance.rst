@@ -128,6 +128,12 @@ The fixed-boundary/axis enforcement step now uses concatenation instead of
 scatter updates for the edge and axis rows. This trims scatter-heavy kernels in
 the scan loop without changing the VMEC constraints.
 
+Lambda gauge masking
+--------------------
+
+The (m,n)=(0,0) lambda gauge constraint now uses a boolean mask instead of a
+scatter update, trimming another small scatter kernel from the iteration loop.
+
 Vectorized axis blending
 ------------------------
 
