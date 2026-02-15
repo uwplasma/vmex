@@ -82,6 +82,14 @@ JAX can persist compiled executables to disk. Enable it with
 ``JAX_COMPILATION_CACHE_DIR``) to drastically reduce *repeat* compile times
 across runs with the same shapes/static arguments.
 
+Batched radial smoothing
+------------------------
+
+The scan path now batches the radial tridiagonal smoother across the R/Z
+components (and separately for lambda) so the solver does fewer tridi solves per
+iteration. This reduces kernel count and Python overhead while preserving the
+VMEC update math.
+
 Avoid Python objects in jitted functions
 ----------------------------------------
 

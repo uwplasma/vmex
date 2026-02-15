@@ -951,15 +951,15 @@ def _apply_preconditioner(
         the endpoints while still coupling interior surfaces.
         """
         rhs = jnp.asarray(rhs)
+        if rhs.ndim < 2:
+            raise ValueError(f"expected (ns,...) with ndim>=2, got {rhs.shape}")
+        ns = int(rhs.shape[0])
         if rhs.ndim == 2:
             rhs2 = rhs
             orig_shape = None
-        elif rhs.ndim == 3:
-            ns = int(rhs.shape[0])
+        else:
             rhs2 = rhs.reshape(ns, -1)
             orig_shape = rhs.shape
-        else:
-            raise ValueError(f"expected (ns,K) or (ns,M,N), got {rhs.shape}")
         ns = int(rhs2.shape[0])
         if ns < 3:
             return rhs
@@ -3228,18 +3228,27 @@ def solve_fixed_boundary_residual_iter(
             return a
         return _tridi_smooth_dirichlet(jnp.asarray(a), alpha=alpha)
 
+    def _apply_radial_tridi_batched(arrs, alpha: float):
+        if alpha <= 0.0:
+            return tuple(arrs)
+        stack = jnp.stack(arrs, axis=0)  # (B, ns, ...)
+        stack = jnp.swapaxes(stack, 0, 1)  # (ns, B, ...)
+        smooth = _tridi_smooth_dirichlet(stack, alpha=alpha)
+        smooth = jnp.swapaxes(smooth, 0, 1)
+        return tuple(smooth[i] for i in range(int(smooth.shape[0])))
+
     def _tridi_smooth_dirichlet(rhs, *, alpha: float):
         """Dirichlet tridiagonal smoother along s for fixed-point updates."""
         rhs = jnp.asarray(rhs)
+        if rhs.ndim < 2:
+            raise ValueError(f"expected (ns,...) with ndim>=2, got {rhs.shape}")
+        ns = int(rhs.shape[0])
         if rhs.ndim == 2:
             rhs2 = rhs
             orig_shape = None
-        elif rhs.ndim == 3:
-            ns = int(rhs.shape[0])
+        else:
             rhs2 = rhs.reshape(ns, -1)
             orig_shape = rhs.shape
-        else:
-            raise ValueError(f"expected (ns,K) or (ns,M,N), got {rhs.shape}")
         ns = int(rhs2.shape[0])
         if ns < 3:
             return rhs
@@ -3735,19 +3744,23 @@ def solve_fixed_boundary_residual_iter(
                 iter_idx=None,
             )
 
-            frcc = _apply_radial_tridi(frzl.frcc * rz_scale[:, None, None], precond_radial_alpha)
-            frss = _apply_radial_tridi(
-                (frzl.frss if frzl.frss is not None else jnp.zeros_like(frzl.frcc)) * rz_scale[:, None, None],
+            frss_in = (frzl.frss if frzl.frss is not None else jnp.zeros_like(frzl.frcc)) * rz_scale[:, None, None]
+            fzcs_in = (frzl.fzcs if frzl.fzcs is not None else jnp.zeros_like(frzl.fzsc)) * rz_scale[:, None, None]
+            frcc, frss, fzsc, fzcs = _apply_radial_tridi_batched(
+                [
+                    frzl.frcc * rz_scale[:, None, None],
+                    frss_in,
+                    frzl.fzsc * rz_scale[:, None, None],
+                    fzcs_in,
+                ],
                 precond_radial_alpha,
             )
-            fzsc = _apply_radial_tridi(frzl.fzsc * rz_scale[:, None, None], precond_radial_alpha)
-            fzcs = _apply_radial_tridi(
-                (frzl.fzcs if frzl.fzcs is not None else jnp.zeros_like(frzl.fzsc)) * rz_scale[:, None, None],
-                precond_radial_alpha,
-            )
-            flsc = _apply_radial_tridi(frzl.flsc * l_scale[:, None, None], precond_lambda_alpha)
-            flcs = _apply_radial_tridi(
-                (frzl.flcs if frzl.flcs is not None else jnp.zeros_like(frzl.flsc)) * l_scale[:, None, None],
+            flcs_in = (frzl.flcs if frzl.flcs is not None else jnp.zeros_like(frzl.flsc)) * l_scale[:, None, None]
+            flsc, flcs = _apply_radial_tridi_batched(
+                [
+                    frzl.flsc * l_scale[:, None, None],
+                    flcs_in,
+                ],
                 precond_lambda_alpha,
             )
 
