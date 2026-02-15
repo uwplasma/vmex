@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -1500,8 +1501,10 @@ def _rms(x: np.ndarray, *, eps: float = 1e-30) -> float:
 
 
 def _fsql1_from_gcl(gcl: np.ndarray, delta_s: float) -> float:
+    if gcl is None:
+        return 0.0
     gcl = np.asarray(gcl, dtype=float)
-    if gcl.size == 0:
+    if gcl.size == 0 or gcl.ndim == 0:
         return 0.0
     gcl_use = gcl[1:] if gcl.shape[0] > 1 else gcl
     return float(delta_s) * float(np.sum(gcl_use * gcl_use))
@@ -1704,6 +1707,15 @@ def main() -> None:
         ),
     )
     p.add_argument(
+        "--dump-iter",
+        type=str,
+        default=None,
+        help=(
+            "Optional comma-separated iteration list/ranges to limit dumps "
+            "(passed through to VMEC_DUMP_ITER / VMEC_JAX_DUMP_ITER, e.g. '1,3-5')."
+        ),
+    )
+    p.add_argument(
         "--fsq-from-dumps",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -1812,7 +1824,13 @@ def main() -> None:
         vmec_env["VMEC_DUMP_GC_STAGE"] = "both"
         vmec_env["VMEC_DUMP_GC_DIR"] = str(vmec_dump_dir)
         vmec_env["VMEC_DUMP_LAM"] = "1"
-        vmec_env.pop("VMEC_DUMP_XC_ITER", None)
+        if args.dump_iter:
+            vmec_env["VMEC_DUMP_ITER"] = str(args.dump_iter)
+            vmec_env["VMEC_DUMP_XC_ITER"] = str(args.dump_iter)
+        else:
+            vmec_env.pop("VMEC_DUMP_ITER", None)
+            vmec_env.pop("VMEC_DUMP_XC_ITER", None)
+        t0_vmec = time.perf_counter()
         try:
             proc = subprocess.run(
                 cmd,
@@ -1825,6 +1843,7 @@ def main() -> None:
             )
         except subprocess.TimeoutExpired as exc:
             raise SystemExit(f"VMEC2000 run timed out after {args.vmec_timeout}s") from exc
+        vmec_time_s = time.perf_counter() - t0_vmec
         stdout = proc.stdout + "\n" + proc.stderr
 
         stages = _parse_vmec2000_stdout(stdout)
@@ -1869,7 +1888,10 @@ def main() -> None:
                 os.environ["VMEC_JAX_DUMP_GC_STAGE"] = "both"
                 os.environ["VMEC_JAX_DUMP_GC_DIR"] = str(dump_dir)
                 os.environ["VMEC_JAX_DUMP_LAM"] = "1"
-            os.environ.pop("VMEC_JAX_DUMP_ITER", None)
+            if args.dump_iter:
+                os.environ["VMEC_JAX_DUMP_ITER"] = str(args.dump_iter)
+            else:
+                os.environ.pop("VMEC_JAX_DUMP_ITER", None)
             try:
                 return vj.run_fixed_boundary(
                     input_path,
@@ -1890,17 +1912,21 @@ def main() -> None:
         resume_state = None
         use_split = split_iter > 0 and split_iter < int(args.max_iter)
         run2 = None
+        jax_time_s = 0.0
         if use_split:
             jax_dump_dir1 = jax_dump_dir / "phase1"
             jax_dump_dir2 = jax_dump_dir / "phase2"
             jax_dump_dir1.mkdir(parents=True, exist_ok=True)
             jax_dump_dir2.mkdir(parents=True, exist_ok=True)
+            t0_jax = time.perf_counter()
             run1 = _run_vmec_jax(dump_dir=jax_dump_dir1, max_iter=int(split_iter), restart_state=None, multigrid=None)
+            jax_time_s += time.perf_counter() - t0_jax
             if run1.result is not None:
                 resume_state = run1.result.diagnostics.get("resume_state")
             offset_iter = int(np.asarray(run1.result.w_history).size) if run1.result is not None else int(split_iter)
             remaining = int(args.max_iter) - int(offset_iter)
             if remaining > 0:
+                t0_jax = time.perf_counter()
                 run2 = _run_vmec_jax(
                     dump_dir=jax_dump_dir2,
                     max_iter=int(remaining),
@@ -1908,6 +1934,7 @@ def main() -> None:
                     restart_solver_state=resume_state,
                     multigrid=False,
                 )
+                jax_time_s += time.perf_counter() - t0_jax
             run = run1 if run2 is None else vj.FixedBoundaryRun(
                 cfg=run2.cfg,
                 indata=run2.indata,
@@ -1919,7 +1946,11 @@ def main() -> None:
                 signgs=run2.signgs,
             )
         else:
+            t0_jax = time.perf_counter()
             run = _run_vmec_jax(dump_dir=jax_dump_dir, max_iter=int(args.max_iter))
+            jax_time_s += time.perf_counter() - t0_jax
+
+        print(f"Runtime (wall): vmec2000={vmec_time_s:.3f}s  vmec_jax={jax_time_s:.3f}s")
 
         vmec_xc = _collect_vmec_xc_dumps(vmec_dump_dir)
         dump_offset = int(np.asarray(run1.result.w_history).size) if (use_split and run1 is not None and run1.result is not None) else int(split_iter)

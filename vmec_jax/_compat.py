@@ -37,7 +37,8 @@ def _try_import_jax() -> Tuple[Any, Any, Callable[[Callable[..., Any]], Callable
         return jax, jnp, jax.jit
     except Exception:
         # numpy fallback: no autodiff, no jit
-        def _jit(f=None, **_kwargs):
+        # Accept arbitrary args/kwargs so decorator usage with static_argnames works.
+        def _jit(f=None, *args, **_kwargs):
             if f is None:
                 def _wrap(fn):
                     return fn

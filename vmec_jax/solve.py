@@ -3564,58 +3564,35 @@ def solve_fixed_boundary_residual_iter(
     m0_mask = np.asarray(getattr(static, "m_is_m0", None) if getattr(static, "m_is_m0", None) is not None else (np.asarray(static.modes.m) == 0))
     m0 = jnp.asarray((np.arange(mpol)[:, None] == 0))
     n0 = jnp.asarray((np.arange(nrange)[None, :] == 0))
-    idx_pos_flat = jnp.asarray(idx_pos_safe_np, dtype=jnp.int32)
-    idx_neg_flat = jnp.asarray(idx_neg_safe_np, dtype=jnp.int32)
-    mask_pos_flat = jnp.asarray(mask_pos_flat_np, dtype=jnp.asarray(state0.Rcos).dtype)
-    mask_neg_flat = jnp.asarray(mask_neg_flat_np, dtype=jnp.asarray(state0.Rcos).dtype)
-    mask_no_neg = jnp.asarray((mask_neg_flat_np.reshape(mpol, nrange) == 0) & (~np.asarray(n0)), dtype=bool)
-    map_pos_np = np.zeros((mpol * nrange, ncoeff), dtype=np.asarray(state0.Rcos).dtype)
-    map_neg_np = np.zeros_like(map_pos_np)
-    for i in range(mpol * nrange):
-        if mask_pos_flat_np[i]:
-            map_pos_np[i, idx_pos_safe_np[i]] = 1.0
-        if mask_neg_flat_np[i]:
-            map_neg_np[i, idx_neg_safe_np[i]] = 1.0
-    map_pos = jnp.asarray(map_pos_np)
-    map_neg = jnp.asarray(map_neg_np)
+    from .vmec_parity import _mn_cos_to_signed as _mn_cos_to_signed_block
+    from .vmec_parity import _mn_sin_to_signed as _mn_sin_to_signed_block
 
     def _mn_cos_to_signed(cc, ss):
         cc = jnp.asarray(cc)
         ss = jnp.asarray(ss) if ss is not None else jnp.zeros_like(cc)
-        pos = 0.5 * (cc + ss)
-        pos = jnp.where((m0 | n0)[None, :, :], cc, pos)
-        neg = 0.5 * (cc - ss)
-        pos_flat = pos.reshape(int(cc.shape[0]), -1) * mask_pos_flat[None, :]
-        neg_flat = neg.reshape(int(cc.shape[0]), -1) * mask_neg_flat[None, :]
-        return jnp.matmul(pos_flat, map_pos) + jnp.matmul(neg_flat, map_neg)
+        return _mn_cos_to_signed_block(cc, ss, idx_pos, idx_neg, ncoeff=ncoeff)
 
     def _mn_sin_to_signed(sc, cs):
         sc = jnp.asarray(sc)
         cs = jnp.asarray(cs) if cs is not None else jnp.zeros_like(sc)
-        pos = 0.5 * (sc - cs)
-        pos = jnp.where(n0[None, :, :], sc, pos)
-        pos = jnp.where(mask_no_neg[None, :, :] & m0[None, :, :], -cs, pos)
-        pos = jnp.where(mask_no_neg[None, :, :] & (~m0[None, :, :]), sc, pos)
-        neg = 0.5 * (sc + cs)
-        pos_flat = pos.reshape(int(sc.shape[0]), -1) * mask_pos_flat[None, :]
-        neg_flat = neg.reshape(int(sc.shape[0]), -1) * mask_neg_flat[None, :]
-        return jnp.matmul(pos_flat, map_pos) + jnp.matmul(neg_flat, map_neg)
+        return _mn_sin_to_signed_block(sc, cs, idx_pos, idx_neg, ncoeff=ncoeff)
 
-    def _mn_sin_to_signed_batch(sc, cs):
-        sc = jnp.asarray(sc)
-        cs = jnp.asarray(cs) if cs is not None else jnp.zeros_like(sc)
-        # sc/cs: (B, ns, mpol, nrange)
-        pos = 0.5 * (sc - cs)
-        pos = jnp.where(n0[None, None, :, :], sc, pos)
-        pos = jnp.where(mask_no_neg[None, None, :, :] & m0[None, None, :, :], -cs, pos)
-        pos = jnp.where(mask_no_neg[None, None, :, :] & (~m0[None, None, :, :]), sc, pos)
-        neg = 0.5 * (sc + cs)
-        b = int(sc.shape[0])
-        ns = int(sc.shape[1])
-        pos_flat = pos.reshape(b * ns, -1) * mask_pos_flat[None, :]
-        neg_flat = neg.reshape(b * ns, -1) * mask_neg_flat[None, :]
-        out = jnp.matmul(pos_flat, map_pos) + jnp.matmul(neg_flat, map_neg)
-        return out.reshape(b, ns, ncoeff)
+    if has_jax():
+        def _mn_sin_to_signed_batch(sc, cs):
+            sc = jnp.asarray(sc)
+            cs = jnp.asarray(cs) if cs is not None else jnp.zeros_like(sc)
+            return jax.vmap(
+                lambda sc_i, cs_i: _mn_sin_to_signed_block(sc_i, cs_i, idx_pos, idx_neg, ncoeff=ncoeff)
+            )(sc, cs)
+    else:
+        def _mn_sin_to_signed_batch(sc, cs):
+            sc = jnp.asarray(sc)
+            cs = jnp.asarray(cs) if cs is not None else jnp.zeros_like(sc)
+            out = [
+                _mn_sin_to_signed_block(sc[i], cs[i], idx_pos, idx_neg, ncoeff=ncoeff)
+                for i in range(int(sc.shape[0]))
+            ]
+            return jnp.stack(out, axis=0)
 
     use_m1_pair_convert = bool(getattr(static.cfg, "lthreed", True)) and bool(getattr(static.cfg, "lconm1", True)) and int(static.cfg.mpol) > 1
 
@@ -4298,6 +4275,8 @@ def solve_fixed_boundary_residual_iter(
             l_scale_override = None
             if bool(vmec2000_control) and bool(vmec2000_cache_valid) and (not bool(need_bcovar_update)):
                 constraint_precond_diag = cache_precond_diag
+                # VMEC updates tcon only when refreshing the 1D preconditioner
+                # blocks; between refreshes it reuses the last tcon profile.
                 constraint_tcon_override = cache_tcon
                 norms_override = cache_norms
                 rz_scale_override = cache_rz_scale
@@ -4709,8 +4688,8 @@ def solve_fixed_boundary_residual_iter(
                     vZcs = jnp.zeros_like(vZcs)
                     vLsc = jnp.zeros_like(vLsc)
                     vLcs = jnp.zeros_like(vLcs)
-                    # VMEC2000 `restart_iter`: irst=3 (time-control) scales dt by 0.9.
-                    time_step = max(restart_badjac_factor * time_step, 1e-12)
+                    # VMEC2000 `restart_iter`: irst=3 (time-control) scales dt by 1/1.03.
+                    time_step = max(time_step / restart_badprog_factor, 1e-12)
                     bad_resets += 1
                     iter1 = iter2
                     bad_growth_streak = 0
