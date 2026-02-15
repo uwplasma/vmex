@@ -19,8 +19,23 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from ._compat import jnp
+from ._compat import jnp, has_jax
 from .state import StateLayout, VMECState
+
+
+_INTERP_CACHE: dict[tuple[int, int, str], tuple[Any, Any, Any]] = {}
+_SCALXC_CACHE: dict[tuple[int, bytes, str], Any] = {}
+
+
+def _cache_allowed() -> bool:
+    if not has_jax():
+        return True
+    try:
+        from jax import core
+
+        return bool(core.trace_ctx.is_top_level())
+    except Exception:
+        return False
 
 
 def _scalxc_vmec(*, ns: int, m: Any, dtype) -> Any:
@@ -37,6 +52,16 @@ def _scalxc_vmec(*, ns: int, m: Any, dtype) -> Any:
     """
     ns = int(ns)
     m = jnp.asarray(m)
+    cache_key = None
+    if _cache_allowed():
+        try:
+            m_bytes = np.asarray(m).tobytes()
+            cache_key = (ns, m_bytes, str(np.dtype(dtype)))
+            cached = _SCALXC_CACHE.get(cache_key)
+            if cached is not None:
+                return cached
+        except Exception:
+            cache_key = None
     if ns <= 0:
         return jnp.zeros((0, int(m.shape[0])), dtype=dtype)
 
@@ -49,7 +74,10 @@ def _scalxc_vmec(*, ns: int, m: Any, dtype) -> Any:
     scal_odd = 1.0 / jnp.maximum(sqrts, sq2)
 
     is_odd = ((m.astype(jnp.int32) % 2) == 1).astype(dtype)
-    return jnp.where(is_odd[None, :] > 0, scal_odd[:, None], jnp.ones((ns, int(m.shape[0])), dtype=dtype))
+    out = jnp.where(is_odd[None, :] > 0, scal_odd[:, None], jnp.ones((ns, int(m.shape[0])), dtype=dtype))
+    if cache_key is not None:
+        _SCALXC_CACHE[cache_key] = out
+    return out
 
 
 def interp_vmec_radial_coeffs(
@@ -97,16 +125,32 @@ def interp_vmec_radial_coeffs(
         x_scaled = jnp.concatenate([axis_row[None, :], x_scaled[1:]], axis=0)
 
     # Uniform-grid interpolation matching interp.f's js1/js2/xint construction.
-    j = jnp.arange(ns_new, dtype=jnp.int32)
-    num = j.astype(jnp.int64) * int(ns_old - 1)
-    den = int(ns_new - 1)
-    j1 = (num // den).astype(jnp.int32)
-    j2 = jnp.minimum(j1 + 1, int(ns_old - 1))
-
-    # xint = (sj - s1)/hsold with sj=j/(ns_new-1), s1=j1/(ns_old-1), hsold=1/(ns_old-1)
-    # => xint = j*(ns_old-1)/(ns_new-1) - j1
-    xint = (j.astype(dtype) * float(ns_old - 1) / float(ns_new - 1)) - j1.astype(dtype)
-    xint = jnp.clip(xint, 0.0, 1.0)
+    cache_key = None
+    if _cache_allowed():
+        try:
+            cache_key = (int(ns_old), int(ns_new), str(np.dtype(dtype)))
+            cached = _INTERP_CACHE.get(cache_key)
+            if cached is not None:
+                j1, j2, xint = cached
+            else:
+                j = jnp.arange(ns_new, dtype=jnp.int32)
+                num = j.astype(jnp.int64) * int(ns_old - 1)
+                den = int(ns_new - 1)
+                j1 = (num // den).astype(jnp.int32)
+                j2 = jnp.minimum(j1 + 1, int(ns_old - 1))
+                xint = (j.astype(dtype) * float(ns_old - 1) / float(ns_new - 1)) - j1.astype(dtype)
+                xint = jnp.clip(xint, 0.0, 1.0)
+                _INTERP_CACHE[cache_key] = (j1, j2, xint)
+        except Exception:
+            cache_key = None
+    if cache_key is None:
+        j = jnp.arange(ns_new, dtype=jnp.int32)
+        num = j.astype(jnp.int64) * int(ns_old - 1)
+        den = int(ns_new - 1)
+        j1 = (num // den).astype(jnp.int32)
+        j2 = jnp.minimum(j1 + 1, int(ns_old - 1))
+        xint = (j.astype(dtype) * float(ns_old - 1) / float(ns_new - 1)) - j1.astype(dtype)
+        xint = jnp.clip(xint, 0.0, 1.0)
 
     x1 = x_scaled[j1]
     x2 = x_scaled[j2]
