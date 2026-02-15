@@ -273,6 +273,17 @@ def run_fixed_boundary(
     restart_wout_path: str | Path | None = None,
     restart_solver_state: dict | None = None,
 ):
+    def _maybe_enable_compilation_cache() -> None:
+        cache_dir = os.getenv("VMEC_JAX_COMPILATION_CACHE_DIR") or os.getenv("JAX_COMPILATION_CACHE_DIR")
+        if not cache_dir:
+            return
+        try:
+            from jax.experimental import compilation_cache
+
+            compilation_cache.set_cache_dir(cache_dir)
+        except Exception:
+            return
+
     def _maybe_dump_xc_init(*, state, static, label: str) -> None:
         env = os.getenv("VMEC_JAX_DUMP_XC_INIT", "")
         if not env or env == "0":
@@ -338,6 +349,7 @@ def run_fixed_boundary(
         enable_x64(True)
     except Exception:
         pass
+    _maybe_enable_compilation_cache()
     cfg, indata = load_config(str(input_path))
     restart_state_eff = restart_state
     restart_wout = None
