@@ -27,9 +27,7 @@ from typing import Any
 
 import numpy as np
 
-from jax import tree_util
-
-from ._compat import jnp
+from ._compat import jnp, tree_util
 from .vmec_realspace import vmec_realspace_synthesis, vmec_realspace_synthesis_dtheta
 from .vmec_parity import vmec_m1_internal_to_physical_signed
 from .vmec_tomnsp import VmecTrigTables

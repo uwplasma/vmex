@@ -27,9 +27,7 @@ from typing import Any
 
 import numpy as np
 
-from jax import tree_util
-
-from ._compat import jnp
+from ._compat import jnp, tree_util
 from .grids import AngleGrid
 from ._compat import has_jax
 

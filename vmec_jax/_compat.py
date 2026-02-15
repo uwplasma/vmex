@@ -55,6 +55,18 @@ def _try_import_jax() -> Tuple[Any, Any, Callable[[Callable[..., Any]], Callable
 
 jax, jnp, jit = _try_import_jax()
 
+try:
+    if jax is None:
+        raise ImportError
+    from jax import tree_util as tree_util  # type: ignore
+except Exception:
+    class _TreeUtilFallback:
+        @staticmethod
+        def register_pytree_node_class(cls):
+            return cls
+
+    tree_util = _TreeUtilFallback()
+
 
 def has_jax() -> bool:
     return jax is not None
