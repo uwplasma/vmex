@@ -74,6 +74,14 @@ Control this behavior with:
   ``build_static`` for fastest execution.
 - ``VMEC_JAX_CACHE_VMEC_PHASE=0``: skip the extra cached tensors to save memory.
 
+Compilation cache
+-----------------
+
+JAX can persist compiled executables to disk. Enable it with
+``VMEC_JAX_COMPILATION_CACHE_DIR=/path/to/cache`` (or the upstream
+``JAX_COMPILATION_CACHE_DIR``) to drastically reduce *repeat* compile times
+across runs with the same shapes/static arguments.
+
 Avoid Python objects in jitted functions
 ----------------------------------------
 
