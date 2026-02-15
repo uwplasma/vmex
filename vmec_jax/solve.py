@@ -3570,6 +3570,7 @@ def solve_fixed_boundary_residual_iter(
     idx_neg_flat = jnp.asarray(idx_neg_safe_np, dtype=jnp.int32)
     mask_pos_flat = jnp.asarray(mask_pos_flat_np, dtype=jnp.asarray(state0.Rcos).dtype)
     mask_neg_flat = jnp.asarray(mask_neg_flat_np, dtype=jnp.asarray(state0.Rcos).dtype)
+    mask_no_neg = jnp.asarray((mask_neg_flat_np.reshape(mpol, nrange) == 0) & (~np.asarray(n0)), dtype=bool)
     map_pos_np = np.zeros((mpol * nrange, ncoeff), dtype=np.asarray(state0.Rcos).dtype)
     map_neg_np = np.zeros_like(map_pos_np)
     for i in range(mpol * nrange):
@@ -3595,13 +3596,28 @@ def solve_fixed_boundary_residual_iter(
         cs = jnp.asarray(cs) if cs is not None else jnp.zeros_like(sc)
         pos = 0.5 * (sc - cs)
         pos = jnp.where(n0[None, :, :], sc, pos)
-        mask_no_neg = (mask_neg_flat.reshape(mpol, nrange) == 0) & (~n0)
         pos = jnp.where(mask_no_neg[None, :, :] & m0[None, :, :], -cs, pos)
         pos = jnp.where(mask_no_neg[None, :, :] & (~m0[None, :, :]), sc, pos)
         neg = 0.5 * (sc + cs)
         pos_flat = pos.reshape(int(sc.shape[0]), -1) * mask_pos_flat[None, :]
         neg_flat = neg.reshape(int(sc.shape[0]), -1) * mask_neg_flat[None, :]
         return jnp.matmul(pos_flat, map_pos) + jnp.matmul(neg_flat, map_neg)
+
+    def _mn_sin_to_signed_batch(sc, cs):
+        sc = jnp.asarray(sc)
+        cs = jnp.asarray(cs) if cs is not None else jnp.zeros_like(sc)
+        # sc/cs: (B, ns, mpol, nrange)
+        pos = 0.5 * (sc - cs)
+        pos = jnp.where(n0[None, None, :, :], sc, pos)
+        pos = jnp.where(mask_no_neg[None, None, :, :] & m0[None, None, :, :], -cs, pos)
+        pos = jnp.where(mask_no_neg[None, None, :, :] & (~m0[None, None, :, :]), sc, pos)
+        neg = 0.5 * (sc + cs)
+        b = int(sc.shape[0])
+        ns = int(sc.shape[1])
+        pos_flat = pos.reshape(b * ns, -1) * mask_pos_flat[None, :]
+        neg_flat = neg.reshape(b * ns, -1) * mask_neg_flat[None, :]
+        out = jnp.matmul(pos_flat, map_pos) + jnp.matmul(neg_flat, map_neg)
+        return out.reshape(b, ns, ncoeff)
 
     use_m1_pair_convert = bool(getattr(static.cfg, "lthreed", True)) and bool(getattr(static.cfg, "lconm1", True)) and int(static.cfg.mpol) > 1
 
@@ -3823,8 +3839,12 @@ def solve_fixed_boundary_residual_iter(
                 flcs_u = flcs_u * lambda_update_scale_j
 
             dR = (time_step_j * flip_sign_j) * _mn_cos_to_signed_physical(frcc_u, frss_u)
-            dZ = (time_step_j * flip_sign_j) * _mn_sin_to_signed_physical(fzsc_u, fzcs_u)
-            dL = (time_step_j * flip_sign_j) * _mn_sin_to_signed_physical_lambda(flsc_u, flcs_u)
+            sin_updates = _mn_sin_to_signed_batch(
+                jnp.stack([fzsc_u, flsc_u], axis=0),
+                jnp.stack([fzcs_u, flcs_u], axis=0),
+            )
+            dZ = (time_step_j * flip_sign_j) * sin_updates[0]
+            dL = (time_step_j * flip_sign_j) * sin_updates[1]
 
             state_new = VMECState(
                 layout=state.layout,

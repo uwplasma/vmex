@@ -880,10 +880,15 @@ def initial_guess_from_boundary(
                     lconm1=bool(getattr(cfg, "lconm1", True)),
                 )
 
-                m_modes = np.asarray(static.modes.m, dtype=int)
-                mask_even = jnp.asarray((m_modes % 2) == 0, dtype=dtype)
-                mask_m1 = jnp.asarray(m_modes == 1, dtype=dtype)
-                mask_odd_rest = jnp.asarray((m_modes % 2 == 1) & (m_modes != 1), dtype=dtype)
+                if getattr(static, "m_is_even", None) is not None:
+                    mask_even = jnp.asarray(static.m_is_even, dtype=dtype)
+                    mask_m1 = jnp.asarray(static.m_is_m1, dtype=dtype)
+                    mask_odd_rest = jnp.asarray(static.m_is_odd_rest, dtype=dtype)
+                else:
+                    m_modes = np.asarray(static.modes.m, dtype=int)
+                    mask_even = jnp.asarray((m_modes % 2) == 0, dtype=dtype)
+                    mask_m1 = jnp.asarray(m_modes == 1, dtype=dtype)
+                    mask_odd_rest = jnp.asarray((m_modes % 2 == 1) & (m_modes != 1), dtype=dtype)
 
                 coeff_cos_stack = jnp.stack([Rcos_phys, Zcos_phys], axis=0)
                 coeff_sin_stack = jnp.stack([Rsin_phys, Zsin_phys], axis=0)

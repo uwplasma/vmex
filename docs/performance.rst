@@ -112,6 +112,13 @@ convert ``(m,n>=0)`` force blocks into signed Fourier updates via matmul. This
 reduces scatter-heavy updates inside the iteration loop and keeps the JIT graph
 more regular.
 
+Batched sin conversions
+-----------------------
+
+The scan update now batches the Z/L ``(m,n)`` sin-block conversions into a
+single matmul-based mapping, reducing kernel count compared to converting each
+field independently.
+
 Avoid Python objects in jitted functions
 ----------------------------------------
 

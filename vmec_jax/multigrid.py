@@ -234,8 +234,9 @@ def interp_vmec_state(
         def _mn_sin_to_signed(zsc, zcs):
             return _mn_sin_to_signed_block(jnp.asarray(zsc), jnp.asarray(zcs), idx_pos, idx_neg, ncoeff=K)
 
+        m_flat = jnp.repeat(jnp.arange(mpol, dtype=jnp.int32), nrange)
+
         def _interp_block(block):
-            m_flat = jnp.repeat(jnp.arange(mpol, dtype=jnp.int32), nrange)
             interp = interp_vmec_radial_coeffs(jnp.asarray(block).reshape(ns_old, -1), m=m_flat, ns_new=ns_new)
             return interp.reshape(ns_new, mpol, nrange)
 

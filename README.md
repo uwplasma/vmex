@@ -66,6 +66,7 @@ For faster fixed-boundary solves in Python, the force/residual pipeline is JIT-c
 For best performance, `VMECStatic` now precomputes VMEC real-space phase stacks. Set `VMEC_JAX_CACHE_VMEC_PHASE=0` to skip the extra cached tensors if you need to minimize memory.
 To reduce repeat JIT compilation time across runs, set `VMEC_JAX_COMPILATION_CACHE_DIR=/path/to/cache` (or `JAX_COMPILATION_CACHE_DIR`) to enable the JAX compilation cache.
 The fixed-boundary update also precomputes dense (m,n)->signed maps per solve to reduce scatter-heavy updates during iterations.
+Scan mode batches the Z/L sin-block conversions into one matmul-based mapping to reduce kernel count.
 
 ## Snapshot figures
 
