@@ -21,7 +21,15 @@ from typing import Any
 
 import numpy as np
 
-from jax import tree_util
+try:
+    from jax import tree_util  # type: ignore
+except Exception:  # pragma: no cover - docs/CI without jax
+    class _TreeUtilFallback:
+        @staticmethod
+        def register_pytree_node_class(cls):
+            return cls
+
+    tree_util = _TreeUtilFallback()
 
 from ._compat import jnp, has_jax
 from .vmec_tomnsp import TomnspsRZL, VmecTrigTables
