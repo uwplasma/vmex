@@ -25,7 +25,7 @@ from jax import tree_util
 
 from ._compat import jnp, has_jax
 from .vmec_tomnsp import TomnspsRZL, VmecTrigTables
-from .vmec_parity import _mn_index_maps, _signed_to_mn_cos, _signed_to_mn_sin
+from .vmec_parity import signed_maps_from_modes, _signed_to_mn_cos_cached, _signed_to_mn_sin_cached
 
 
 _WINT_CACHE: dict[tuple[int, int], jnp.ndarray] = {}
@@ -280,11 +280,12 @@ def vmec_rz_norm_from_state(
     that storage convention by masking out n<0 modes from vmec_jax's signed mode
     table.
     """
-    mpol, _ntor, idx_pos, idx_neg = _mn_index_maps(static.modes)
-    nrange = int(idx_pos.shape[1]) if mpol > 0 else 0
+    maps = signed_maps_from_modes(static.modes)
+    mpol = int(maps.mpol)
+    nrange = int(maps.nrange) if mpol > 0 else 0
 
-    rcc, rss = _signed_to_mn_cos(state.Rcos, idx_pos, idx_neg)
-    zsc, zcs = _signed_to_mn_sin(state.Zsin, idx_pos, idx_neg)
+    rcc, rss = _signed_to_mn_cos_cached(state.Rcos, maps=maps)
+    zsc, zcs = _signed_to_mn_sin_cached(state.Zsin, maps=maps)
 
     if bool(getattr(static.cfg, "lthreed", True)) and bool(getattr(static.cfg, "lconm1", True)) and mpol > 1:
         rss_m1 = rss[:, 1, :]
@@ -337,8 +338,8 @@ def vmec_rz_norm_from_state(
         rz_norm = rz_norm + jnp.sum(rss[sl] * rss[sl]) + jnp.sum(zcs[sl] * zcs[sl])
 
     if bool(getattr(static.cfg, "lasym", False)):
-        rsc, rcs = _signed_to_mn_sin(state.Rsin, idx_pos, idx_neg)
-        zcc, zss = _signed_to_mn_cos(state.Zcos, idx_pos, idx_neg)
+        rsc, rcs = _signed_to_mn_sin_cached(state.Rsin, maps=maps)
+        zcc, zss = _signed_to_mn_cos_cached(state.Zcos, maps=maps)
         if bool(apply_scalxc):
             if s is None:
                 s = jnp.asarray(static.s)
@@ -367,11 +368,12 @@ def vmec_rz_decompose_signed(
 
     This mirrors the mapping used inside `vmec_rz_norm_from_state`.
     """
-    mpol, _ntor, idx_pos, idx_neg = _mn_index_maps(static.modes)
-    nrange = int(idx_pos.shape[1]) if mpol > 0 else 0
+    maps = signed_maps_from_modes(static.modes)
+    mpol = int(maps.mpol)
+    nrange = int(maps.nrange) if mpol > 0 else 0
 
-    rcc, rss = _signed_to_mn_cos(state.Rcos, idx_pos, idx_neg)
-    zsc, zcs = _signed_to_mn_sin(state.Zsin, idx_pos, idx_neg)
+    rcc, rss = _signed_to_mn_cos_cached(state.Rcos, maps=maps)
+    zsc, zcs = _signed_to_mn_sin_cached(state.Zsin, maps=maps)
 
     if bool(getattr(static.cfg, "lthreed", True)) and bool(getattr(static.cfg, "lconm1", True)) and mpol > 1:
         rss_m1 = rss[:, 1, :]

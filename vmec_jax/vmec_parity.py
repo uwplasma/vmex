@@ -484,8 +484,8 @@ def vmec_m1_internal_to_physical_signed(
     """
     if not bool(lconm1) or (not bool(lthreed) and not bool(lasym)):
         return Rcos, Zsin, Rsin, Zcos
-    mpol, ntor, idx_pos, idx_neg = _mn_index_maps(modes)
-    if mpol <= 1:
+    maps = signed_maps_from_modes(modes)
+    if maps.mpol <= 1:
         return Rcos, Zsin, Rsin, Zcos
     ncoeff = int(jnp.asarray(Rcos).shape[1])
 
@@ -495,24 +495,24 @@ def vmec_m1_internal_to_physical_signed(
     Zcos_out = Zcos
 
     if bool(lthreed):
-        rcc, rss = _signed_to_mn_cos(Rcos, idx_pos, idx_neg)
-        zsc, zcs = _signed_to_mn_sin(Zsin, idx_pos, idx_neg)
+        rcc, rss = _signed_to_mn_cos_cached(Rcos, maps=maps)
+        zsc, zcs = _signed_to_mn_sin_cached(Zsin, maps=maps)
         rss_m1 = rss[:, 1, :]
         zcs_m1 = zcs[:, 1, :]
         rss = rss.at[:, 1, :].set(rss_m1 + zcs_m1)
         zcs = zcs.at[:, 1, :].set(rss_m1 - zcs_m1)
-        Rcos_out = _mn_cos_to_signed(rcc, rss, idx_pos, idx_neg, ncoeff=ncoeff)
-        Zsin_out = _mn_sin_to_signed(zsc, zcs, idx_pos, idx_neg, ncoeff=ncoeff)
+        Rcos_out = _mn_cos_to_signed_cached(rcc, rss, maps=maps, ncoeff=ncoeff)
+        Zsin_out = _mn_sin_to_signed_cached(zsc, zcs, maps=maps, ncoeff=ncoeff)
 
     if bool(lasym):
-        rsc, rcs = _signed_to_mn_sin(Rsin, idx_pos, idx_neg)
-        zcc, zss = _signed_to_mn_cos(Zcos, idx_pos, idx_neg)
+        rsc, rcs = _signed_to_mn_sin_cached(Rsin, maps=maps)
+        zcc, zss = _signed_to_mn_cos_cached(Zcos, maps=maps)
         rsc_m1 = rsc[:, 1, :]
         zcc_m1 = zcc[:, 1, :]
         rsc = rsc.at[:, 1, :].set(rsc_m1 + zcc_m1)
         zcc = zcc.at[:, 1, :].set(rsc_m1 - zcc_m1)
-        Rsin_out = _mn_sin_to_signed(rsc, rcs, idx_pos, idx_neg, ncoeff=ncoeff)
-        Zcos_out = _mn_cos_to_signed(zcc, zss, idx_pos, idx_neg, ncoeff=ncoeff)
+        Rsin_out = _mn_sin_to_signed_cached(rsc, rcs, maps=maps, ncoeff=ncoeff)
+        Zcos_out = _mn_cos_to_signed_cached(zcc, zss, maps=maps, ncoeff=ncoeff)
 
     return Rcos_out, Zsin_out, Rsin_out, Zcos_out
 
@@ -539,8 +539,8 @@ def vmec_m1_physical_to_internal_signed(
     """
     if not bool(lconm1) or (not bool(lthreed) and not bool(lasym)):
         return Rcos, Zsin, Rsin, Zcos
-    mpol, _ntor, idx_pos, idx_neg = _mn_index_maps(modes)
-    if mpol <= 1:
+    maps = signed_maps_from_modes(modes)
+    if maps.mpol <= 1:
         return Rcos, Zsin, Rsin, Zcos
     ncoeff = int(jnp.asarray(Rcos).shape[1])
 
@@ -550,24 +550,24 @@ def vmec_m1_physical_to_internal_signed(
     Zcos_out = Zcos
 
     if bool(lthreed):
-        rcc, rss = _signed_to_mn_cos(Rcos, idx_pos, idx_neg)
-        zsc, zcs = _signed_to_mn_sin(Zsin, idx_pos, idx_neg)
+        rcc, rss = _signed_to_mn_cos_cached(Rcos, maps=maps)
+        zsc, zcs = _signed_to_mn_sin_cached(Zsin, maps=maps)
         rss_m1 = rss[:, 1, :]
         zcs_m1 = zcs[:, 1, :]
         rss = rss.at[:, 1, :].set(0.5 * (rss_m1 + zcs_m1))
         zcs = zcs.at[:, 1, :].set(0.5 * (rss_m1 - zcs_m1))
-        Rcos_out = _mn_cos_to_signed(rcc, rss, idx_pos, idx_neg, ncoeff=ncoeff)
-        Zsin_out = _mn_sin_to_signed(zsc, zcs, idx_pos, idx_neg, ncoeff=ncoeff)
+        Rcos_out = _mn_cos_to_signed_cached(rcc, rss, maps=maps, ncoeff=ncoeff)
+        Zsin_out = _mn_sin_to_signed_cached(zsc, zcs, maps=maps, ncoeff=ncoeff)
 
     if bool(lasym):
-        rsc, rcs = _signed_to_mn_sin(Rsin, idx_pos, idx_neg)
-        zcc, zss = _signed_to_mn_cos(Zcos, idx_pos, idx_neg)
+        rsc, rcs = _signed_to_mn_sin_cached(Rsin, maps=maps)
+        zcc, zss = _signed_to_mn_cos_cached(Zcos, maps=maps)
         rsc_m1 = rsc[:, 1, :]
         zcc_m1 = zcc[:, 1, :]
         rsc = rsc.at[:, 1, :].set(0.5 * (rsc_m1 + zcc_m1))
         zcc = zcc.at[:, 1, :].set(0.5 * (rsc_m1 - zcc_m1))
-        Rsin_out = _mn_sin_to_signed(rsc, rcs, idx_pos, idx_neg, ncoeff=ncoeff)
-        Zcos_out = _mn_cos_to_signed(zcc, zss, idx_pos, idx_neg, ncoeff=ncoeff)
+        Rsin_out = _mn_sin_to_signed_cached(rsc, rcs, maps=maps, ncoeff=ncoeff)
+        Zcos_out = _mn_cos_to_signed_cached(zcc, zss, maps=maps, ncoeff=ncoeff)
 
     return Rcos_out, Zsin_out, Rsin_out, Zcos_out
 _MN_INDEX_CACHE: dict[tuple, tuple[int, int, np.ndarray, np.ndarray]] = {}

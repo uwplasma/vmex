@@ -19,6 +19,19 @@ import os
 import numpy as _np
 
 
+def _noop_jit(f=None, *args, **_kwargs):
+    """Fallback jit decorator when JAX is unavailable.
+
+    Accepts arbitrary args/kwargs so @partial(jit, static_argnames=...) works
+    in docs builds and numpy-only environments.
+    """
+    if f is None:
+        def _wrap(fn):
+            return fn
+        return _wrap
+    return f
+
+
 def _try_import_jax() -> Tuple[Any, Any, Callable[[Callable[..., Any]], Callable[..., Any]]]:
     try:
         # Enable x64 by default for VMEC parity unless the user opted out.
@@ -37,14 +50,7 @@ def _try_import_jax() -> Tuple[Any, Any, Callable[[Callable[..., Any]], Callable
         return jax, jnp, jax.jit
     except Exception:
         # numpy fallback: no autodiff, no jit
-        # Accept arbitrary args/kwargs so decorator usage with static_argnames works.
-        def _jit(f=None, *args, **_kwargs):
-            if f is None:
-                def _wrap(fn):
-                    return fn
-                return _wrap
-            return f
-        return None, _np, _jit
+        return None, _np, _noop_jit
 
 
 jax, jnp, jit = _try_import_jax()

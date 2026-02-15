@@ -204,27 +204,18 @@ def interp_vmec_state(
         m_np = np.asarray(m_arr, dtype=np.int32)
         n_np = n_arr_np
         ns_old = int(state_old.layout.ns)
-        mpol = int(np.max(m_np)) + 1
-        ntor = int(np.max(np.abs(n_np)))
-        nrange = ntor + 1
-
-        idx_pos = -np.ones((mpol, nrange), dtype=np.int32)
-        idx_neg = -np.ones((mpol, nrange), dtype=np.int32)
-        for k, (mk, nk) in enumerate(zip(m_np, n_np)):
-            if nk >= 0:
-                idx_pos[int(mk), int(nk)] = int(k)
-            else:
-                idx_neg[int(mk), int(-nk)] = int(k)
-
-        basis_norm = jnp.ones((mpol, nrange), dtype=jnp.asarray(state_old.Rcos).dtype)
+        from types import SimpleNamespace
         from .vmec_parity import (
-            _build_signed_maps,
+            signed_maps_from_modes,
             _mn_cos_to_signed_cached as _mn_cos_to_signed_cached,
             _mn_sin_to_signed_cached as _mn_sin_to_signed_cached,
             _signed_to_mn_cos_cached as _signed_to_mn_cos_cached,
             _signed_to_mn_sin_cached as _signed_to_mn_sin_cached,
         )
-        signed_maps = _build_signed_maps(idx_pos, idx_neg)
+        signed_maps = signed_maps_from_modes(SimpleNamespace(m=m_np, n=n_np))
+        mpol = int(signed_maps.mpol)
+        nrange = int(signed_maps.nrange)
+        basis_norm = jnp.ones((mpol, nrange), dtype=jnp.asarray(state_old.Rcos).dtype)
 
         def _signed_to_mn_cos(coeffs: Any):
             return _signed_to_mn_cos_cached(jnp.asarray(coeffs), maps=signed_maps)
