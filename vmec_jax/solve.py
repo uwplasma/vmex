@@ -779,21 +779,21 @@ def _enforce_fixed_boundary_and_axis(
     Lsin = jnp.asarray(state.Lsin)
 
     if enforce_edge:
-        Rcos = Rcos.at[-1, :].set(jnp.asarray(edge_Rcos))
-        Rsin = Rsin.at[-1, :].set(jnp.asarray(edge_Rsin))
-        Zcos = Zcos.at[-1, :].set(jnp.asarray(edge_Zcos))
-        Zsin = Zsin.at[-1, :].set(jnp.asarray(edge_Zsin))
+        Rcos = jnp.concatenate([Rcos[:-1, :], jnp.asarray(edge_Rcos)[None, :]], axis=0)
+        Rsin = jnp.concatenate([Rsin[:-1, :], jnp.asarray(edge_Rsin)[None, :]], axis=0)
+        Zcos = jnp.concatenate([Zcos[:-1, :], jnp.asarray(edge_Zcos)[None, :]], axis=0)
+        Zsin = jnp.concatenate([Zsin[:-1, :], jnp.asarray(edge_Zsin)[None, :]], axis=0)
 
     if enforce_axis:
         mask_m0 = _axis_m0_mask(static, dtype=Rcos.dtype)
-        Rcos = Rcos.at[0, :].set(Rcos[0, :] * mask_m0)
-        Rsin = Rsin.at[0, :].set(Rsin[0, :] * mask_m0)
-        Zcos = Zcos.at[0, :].set(Zcos[0, :] * mask_m0)
-        Zsin = Zsin.at[0, :].set(Zsin[0, :] * mask_m0)
+        Rcos = jnp.concatenate([Rcos[:1, :] * mask_m0[None, :], Rcos[1:, :]], axis=0)
+        Rsin = jnp.concatenate([Rsin[:1, :] * mask_m0[None, :], Rsin[1:, :]], axis=0)
+        Zcos = jnp.concatenate([Zcos[:1, :] * mask_m0[None, :], Zcos[1:, :]], axis=0)
+        Zsin = jnp.concatenate([Zsin[:1, :] * mask_m0[None, :], Zsin[1:, :]], axis=0)
 
     if enforce_lambda_axis:
-        Lcos = Lcos.at[0, :].set(0.0)
-        Lsin = Lsin.at[0, :].set(0.0)
+        Lcos = jnp.concatenate([jnp.zeros_like(Lcos[:1, :]), Lcos[1:, :]], axis=0)
+        Lsin = jnp.concatenate([jnp.zeros_like(Lsin[:1, :]), Lsin[1:, :]], axis=0)
 
     Lcos, Lsin = _enforce_lambda_gauge(Lcos, Lsin, idx00=idx00)
 
