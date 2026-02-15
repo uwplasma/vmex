@@ -3462,20 +3462,22 @@ def solve_fixed_boundary_residual_iter(
                 ns=int(static.cfg.ns),
             )
         if norms_override is None:
-            norms = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
+            norms_current = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
+            norms_used = norms_current
         else:
-            norms = norms_override
+            norms_current = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
+            norms_used = norms_override
         if iter_idx is not None:
-            _maybe_dump_scalars(norms=norms, iter_idx=int(iter_idx), ns=int(static.cfg.ns))
-        fsqr = norms.r1 * norms.fnorm * gcr2
-        fsqz = norms.r1 * norms.fnorm * gcz2
-        fsql = norms.fnormL * gcl2
+            _maybe_dump_scalars(norms=norms_current, iter_idx=int(iter_idx), ns=int(static.cfg.ns))
+        fsqr = norms_used.r1 * norms_used.fnorm * gcr2
+        fsqz = norms_used.r1 * norms_used.fnorm * gcz2
+        fsql = norms_used.fnormL * gcl2
         if (rz_scale_override is None) or (l_scale_override is None):
             rz_scale, l_scale = _metric_surface_precond_from_bcovar(k.bc)
         else:
             rz_scale = jnp.asarray(rz_scale_override, dtype=jnp.asarray(frzl.frcc).dtype)
             l_scale = jnp.asarray(l_scale_override, dtype=jnp.asarray(frzl.frcc).dtype)
-        return k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale, norms
+        return k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale, norms_used
 
     _compute_forces_impl = _compute_forces
     compute_cache_key = (
@@ -3913,6 +3915,7 @@ def solve_fixed_boundary_residual_iter(
     pre_restart_reason_history: list[str] = []
     time_step_history: list[float] = []
     res0_history: list[float] = []
+    res1_history: list[float] = []
     fsq_prev_history: list[float] = []
     bad_growth_streak_history: list[int] = []
     iter1_history: list[int] = []
@@ -4236,12 +4239,29 @@ def solve_fixed_boundary_residual_iter(
             pre_restart_reason_history,
             time_step_history,
             res0_history,
+            res1_history,
             fsq_prev_history,
             bad_growth_streak_history,
             iter1_history,
             grad_rms_history,
         ):
             _pop(h)
+
+    def _maybe_dump_time_control(*, iter_idx: int, fsq: float, fsq0: float, res0: float, res1: float, time_step: float) -> None:
+        if os.getenv("VMEC_JAX_DUMP_TIMECONTROL", "") in ("", "0"):
+            return
+        dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
+        if not dump_dir:
+            return
+        try:
+            path = Path(dump_dir) / "time_control.log"
+            with path.open("a", encoding="utf-8") as f:
+                f.write(
+                    f"iter={iter_idx} fsq={fsq:.6e} fsq0={fsq0:.6e} "
+                    f"res0={res0:.6e} res1={res1:.6e} time_step={time_step:.6e}\n"
+                )
+        except Exception:
+            return
 
     last_iter2 = 0
     for it in range(max_iter):
@@ -4643,7 +4663,9 @@ def solve_fixed_boundary_residual_iter(
             # VMEC-style time-step control: VMEC2000's `TimeStepControl` + `restart_iter`.
             if bool(vmec2000_control):
                 fsq0 = fsqr_f + fsqz_f + fsql_f  # physical
-                fsq = fsq1  # preconditioned
+                # VMEC's TimeStepControl uses the *previous* preconditioned
+                # residual (fsq) which is updated at the end of evolve.f.
+                fsq = fsq_prev if (iter2 > iter1) else fsq1
                 if (iter2 == iter1) or (res0 < 0.0) or (res1 < 0.0):
                     res0 = fsq
                     res1 = fsq0
@@ -4653,6 +4675,14 @@ def solve_fixed_boundary_residual_iter(
                 if (fsq <= res0) and (fsq0 <= res1):
                     state_checkpoint = state
                 if ((iter2 - iter1) > 10) and ((fsq > vmec2000_fact * max(res0, 1e-30)) or (fsq0 > vmec2000_fact * max(res1, 1e-30))):
+                    _maybe_dump_time_control(
+                        iter_idx=int(iter2),
+                        fsq=float(fsq),
+                        fsq0=float(fsq0),
+                        res0=float(res0),
+                        res1=float(res1),
+                        time_step=float(time_step),
+                    )
                     pre_restart_reason = "time_control"
                     state = state_checkpoint
                     vRcc = jnp.zeros_like(vRcc)
@@ -4661,7 +4691,8 @@ def solve_fixed_boundary_residual_iter(
                     vZcs = jnp.zeros_like(vZcs)
                     vLsc = jnp.zeros_like(vLsc)
                     vLcs = jnp.zeros_like(vLcs)
-                    time_step = max(time_step / restart_badprog_factor, 1e-12)
+                    # VMEC2000 `restart_iter`: irst=3 (time-control) scales dt by 0.9.
+                    time_step = max(restart_badjac_factor * time_step, 1e-12)
                     bad_resets += 1
                     iter1 = iter2
                     bad_growth_streak = 0
@@ -4681,6 +4712,7 @@ def solve_fixed_boundary_residual_iter(
                     pre_restart_reason_history.append(pre_restart_reason)
                     time_step_history.append(float(time_step))
                     res0_history.append(float(res0))
+                    res1_history.append(float(res1))
                     fsq_prev_history.append(float(fsq_prev))
                     bad_growth_streak_history.append(int(bad_growth_streak))
                     iter1_history.append(int(iter1))
@@ -4705,16 +4737,22 @@ def solve_fixed_boundary_residual_iter(
             # Restart triggers (bad progress / bad Jacobian proxy).
             bad_jacobian = False
             if bool(reference_mode) or bool(vmec2000_control):
-                jac = vmec_half_mesh_jacobian_from_state(
-                    state=state,
-                    modes=static.modes,
-                    trig=trig,
-                    s=s,
-                    lconm1=bool(getattr(static.cfg, "lconm1", True)),
-                    lthreed=bool(getattr(static.cfg, "lthreed", True)),
-                    mask_even=getattr(static, "m_is_even", None),
-                    mask_odd=getattr(static, "m_is_odd", None),
-                )
+                jac = None
+                try:
+                    jac = getattr(getattr(k, "bc", None), "jac", None)
+                except Exception:
+                    jac = None
+                if jac is None:
+                    jac = vmec_half_mesh_jacobian_from_state(
+                        state=state,
+                        modes=static.modes,
+                        trig=trig,
+                        s=s,
+                        lconm1=bool(getattr(static.cfg, "lconm1", True)),
+                        lthreed=bool(getattr(static.cfg, "lthreed", True)),
+                        mask_even=getattr(static, "m_is_even", None),
+                        mask_odd=getattr(static, "m_is_odd", None),
+                    )
                 tau = np.asarray(jac.tau)
                 if tau.size:
                     tau_use = tau[1:] if tau.shape[0] > 1 else tau
@@ -4831,6 +4869,7 @@ def solve_fixed_boundary_residual_iter(
                 pre_restart_reason_history.append(pre_restart_reason)
                 time_step_history.append(time_step_iter)
                 res0_history.append(float(res0))
+                res1_history.append(float(res1))
                 fsq_prev_history.append(float(fsq_prev))
                 bad_growth_streak_history.append(int(bad_growth_streak))
                 iter1_history.append(int(iter1))
@@ -5369,6 +5408,7 @@ def solve_fixed_boundary_residual_iter(
         pre_restart_reason_history.append(pre_restart_reason)
         time_step_history.append(float(time_step_report))
         res0_history.append(float(res0))
+        res1_history.append(float(res1))
         fsq_prev_history.append(float(fsq_prev))
         bad_growth_streak_history.append(int(bad_growth_streak))
         iter1_history.append(int(iter1))
@@ -5394,6 +5434,7 @@ def solve_fixed_boundary_residual_iter(
         "pre_restart_reason_history": np.asarray(pre_restart_reason_history, dtype=object),
         "time_step_history": np.asarray(time_step_history, dtype=float),
         "res0_history": np.asarray(res0_history, dtype=float),
+        "res1_history": np.asarray(res1_history, dtype=float),
         "fsq_prev_history": np.asarray(fsq_prev_history, dtype=float),
         "bad_growth_streak_history": np.asarray(bad_growth_streak_history, dtype=int),
         "iter1_history": np.asarray(iter1_history, dtype=int),

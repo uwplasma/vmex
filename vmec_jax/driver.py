@@ -760,6 +760,7 @@ def run_fixed_boundary(
             "pre_restart_reason_history",
             "time_step_history",
             "res0_history",
+            "res1_history",
             "fsq_prev_history",
             "bad_growth_streak_history",
             "iter1_history",
