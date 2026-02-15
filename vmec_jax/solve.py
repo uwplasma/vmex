@@ -3530,12 +3530,16 @@ def solve_fixed_boundary_residual_iter(
     ncoeff = int(jnp.asarray(state0.Rcos).shape[1])
 
     from .vmec_parity import _mn_index_maps as _mn_index_maps_cached
-    from .vmec_parity import _mn_cos_to_signed as _mn_cos_to_signed_block
-    from .vmec_parity import _mn_sin_to_signed as _mn_sin_to_signed_block
 
     _mpol_map, _ntor_map, idx_pos_np, idx_neg_np = _mn_index_maps_cached(static.modes)
     idx_pos = np.asarray(idx_pos_np, dtype=np.int32)
     idx_neg = np.asarray(idx_neg_np, dtype=np.int32)
+    idx_pos_flat_np = idx_pos.reshape(-1)
+    idx_neg_flat_np = idx_neg.reshape(-1)
+    mask_pos_flat_np = idx_pos_flat_np >= 0
+    mask_neg_flat_np = idx_neg_flat_np >= 0
+    idx_pos_safe_np = np.where(mask_pos_flat_np, idx_pos_flat_np, 0)
+    idx_neg_safe_np = np.where(mask_neg_flat_np, idx_neg_flat_np, 0)
 
     m_idx_list = []
     n_idx_list = []
@@ -3560,16 +3564,44 @@ def solve_fixed_boundary_residual_iter(
     has_kn = jnp.asarray(has_kn_np)
     has_kn_any = bool(np.any(has_kn_np))
     m0_mask = np.asarray(getattr(static, "m_is_m0", None) if getattr(static, "m_is_m0", None) is not None else (np.asarray(static.modes.m) == 0))
+    m0 = jnp.asarray((np.arange(mpol)[:, None] == 0))
+    n0 = jnp.asarray((np.arange(nrange)[None, :] == 0))
+    idx_pos_flat = jnp.asarray(idx_pos_safe_np, dtype=jnp.int32)
+    idx_neg_flat = jnp.asarray(idx_neg_safe_np, dtype=jnp.int32)
+    mask_pos_flat = jnp.asarray(mask_pos_flat_np, dtype=jnp.asarray(state0.Rcos).dtype)
+    mask_neg_flat = jnp.asarray(mask_neg_flat_np, dtype=jnp.asarray(state0.Rcos).dtype)
+    map_pos_np = np.zeros((mpol * nrange, ncoeff), dtype=np.asarray(state0.Rcos).dtype)
+    map_neg_np = np.zeros_like(map_pos_np)
+    for i in range(mpol * nrange):
+        if mask_pos_flat_np[i]:
+            map_pos_np[i, idx_pos_safe_np[i]] = 1.0
+        if mask_neg_flat_np[i]:
+            map_neg_np[i, idx_neg_safe_np[i]] = 1.0
+    map_pos = jnp.asarray(map_pos_np)
+    map_neg = jnp.asarray(map_neg_np)
 
     def _mn_cos_to_signed(cc, ss):
         cc = jnp.asarray(cc)
         ss = jnp.asarray(ss) if ss is not None else jnp.zeros_like(cc)
-        return _mn_cos_to_signed_block(cc, ss, idx_pos, idx_neg, ncoeff)
+        pos = 0.5 * (cc + ss)
+        pos = jnp.where((m0 | n0)[None, :, :], cc, pos)
+        neg = 0.5 * (cc - ss)
+        pos_flat = pos.reshape(int(cc.shape[0]), -1) * mask_pos_flat[None, :]
+        neg_flat = neg.reshape(int(cc.shape[0]), -1) * mask_neg_flat[None, :]
+        return jnp.matmul(pos_flat, map_pos) + jnp.matmul(neg_flat, map_neg)
 
     def _mn_sin_to_signed(sc, cs):
         sc = jnp.asarray(sc)
         cs = jnp.asarray(cs) if cs is not None else jnp.zeros_like(sc)
-        return _mn_sin_to_signed_block(sc, cs, idx_pos, idx_neg, ncoeff)
+        pos = 0.5 * (sc - cs)
+        pos = jnp.where(n0[None, :, :], sc, pos)
+        mask_no_neg = (mask_neg_flat.reshape(mpol, nrange) == 0) & (~n0)
+        pos = jnp.where(mask_no_neg[None, :, :] & m0[None, :, :], -cs, pos)
+        pos = jnp.where(mask_no_neg[None, :, :] & (~m0[None, :, :]), sc, pos)
+        neg = 0.5 * (sc + cs)
+        pos_flat = pos.reshape(int(sc.shape[0]), -1) * mask_pos_flat[None, :]
+        neg_flat = neg.reshape(int(sc.shape[0]), -1) * mask_neg_flat[None, :]
+        return jnp.matmul(pos_flat, map_pos) + jnp.matmul(neg_flat, map_neg)
 
     use_m1_pair_convert = bool(getattr(static.cfg, "lthreed", True)) and bool(getattr(static.cfg, "lconm1", True)) and int(static.cfg.mpol) > 1
 
@@ -3715,7 +3747,7 @@ def solve_fixed_boundary_residual_iter(
         flip_sign_j = jnp.asarray(float(initial_flip_sign), dtype=dtype)
 
         include_edge_scan = False
-        _compute_forces_scan = _compute_forces_impl if jit_forces else _compute_forces
+        _compute_forces_scan = _compute_forces if jit_forces else _compute_forces_impl
 
         scan_cache_key = (
             "scan_v1",
