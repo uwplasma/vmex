@@ -16,6 +16,7 @@ easier to write fast, end-to-end differentiable kernels later.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 import numpy as np
 
 from ._compat import jnp
@@ -70,6 +71,9 @@ def build_static(cfg: VMECConfig, *, grid: AngleGrid | None = None) -> VMECStati
         s = jnp.linspace(0.0, 1.0, cfg.ns)
     tomnsps_masks = None
     tomnsps_masks_edge = None
+    vmec_phase_stack = None
+    vmec_phase_dtheta_stack = None
+    vmec_phase_dzeta_stack = None
     try:
         from .vmec_tomnsp import vmec_trig_tables, tomnsps_masks as _tomnsps_masks
 
@@ -97,6 +101,49 @@ def build_static(cfg: VMECConfig, *, grid: AngleGrid | None = None) -> VMECStati
             dtype=jnp.asarray(s).dtype,
             cache=True,
         )
+        cache_phase = str(os.environ.get("VMEC_JAX_CACHE_VMEC_PHASE", "1")).lower() not in {"0", "false", "no"}
+        if cache_phase and trig_vmec is not None:
+            try:
+                m = np.asarray(modes.m, dtype=int)
+                n = np.asarray(modes.n, dtype=int)
+                n1 = np.abs(n)
+                sgn = np.where(n < 0, -1.0, 1.0)
+
+                cosmu = np.asarray(trig_vmec.cosmu)
+                sinmu = np.asarray(trig_vmec.sinmu)
+                cosnv = np.asarray(trig_vmec.cosnv)
+                sinnv = np.asarray(trig_vmec.sinnv)
+
+                cosmu_m = cosmu[:, m].T
+                sinmu_m = sinmu[:, m].T
+                cosnv_n = cosnv[:, n1].T
+                sinnv_n = sinnv[:, n1].T
+
+                cos_phase = cosmu_m[:, :, None] * cosnv_n[:, None, :] + sgn[:, None, None] * sinmu_m[:, :, None] * sinnv_n[:, None, :]
+                sin_phase = sinmu_m[:, :, None] * cosnv_n[:, None, :] - sgn[:, None, None] * cosmu_m[:, :, None] * sinnv_n[:, None, :]
+                vmec_phase_stack = jnp.asarray(np.concatenate([cos_phase, sin_phase], axis=0), dtype=jnp.asarray(trig_vmec.cosmu).dtype)
+
+                cosmum = np.asarray(trig_vmec.cosmum)
+                sinmum = np.asarray(trig_vmec.sinmum)
+                dcos_phase = sinmum[:, m].T[:, :, None] * cosnv_n[:, None, :] + sgn[:, None, None] * cosmum[:, m].T[:, :, None] * sinnv_n[:, None, :]
+                dsin_phase = cosmum[:, m].T[:, :, None] * cosnv_n[:, None, :] - sgn[:, None, None] * sinmum[:, m].T[:, :, None] * sinnv_n[:, None, :]
+                vmec_phase_dtheta_stack = jnp.asarray(np.concatenate([dcos_phase, dsin_phase], axis=0), dtype=jnp.asarray(trig_vmec.cosmu).dtype)
+
+                cosnvn = np.asarray(trig_vmec.cosnvn)
+                sinnvn = np.asarray(trig_vmec.sinnvn)
+                dzcos_phase = cosmu_m[:, :, None] * sinnvn[:, n1].T[:, None, :] + sgn[:, None, None] * sinmu_m[:, :, None] * cosnvn[:, n1].T[:, None, :]
+                dzsin_phase = sinmu_m[:, :, None] * sinnvn[:, n1].T[:, None, :] - sgn[:, None, None] * cosmu_m[:, :, None] * cosnvn[:, n1].T[:, None, :]
+                vmec_phase_dzeta_stack = jnp.asarray(np.concatenate([dzcos_phase, dzsin_phase], axis=0), dtype=jnp.asarray(trig_vmec.cosmu).dtype)
+
+                trig_vmec.phase_stack = vmec_phase_stack
+                trig_vmec.phase_dtheta_stack = vmec_phase_dtheta_stack
+                trig_vmec.phase_dzeta_stack = vmec_phase_dzeta_stack
+                trig_vmec.phase_stack_m = modes.m
+                trig_vmec.phase_stack_n = modes.n
+            except Exception:
+                vmec_phase_stack = None
+                vmec_phase_dtheta_stack = None
+                vmec_phase_dzeta_stack = None
     except Exception:
         trig_vmec = None
         tomnsps_masks = None
