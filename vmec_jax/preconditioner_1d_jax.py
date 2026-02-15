@@ -10,9 +10,7 @@ from __future__ import annotations
 from typing import Any
 from functools import partial
 
-import jax
-
-from ._compat import jnp
+from ._compat import jax, jnp, jit
 from .vmec_tomnsp import TomnspsRZL
 
 
@@ -431,7 +429,7 @@ def rz_preconditioner_matrices(
     return mats, jmin, int(ns_f)
 
 
-@jax.jit
+@jit
 def _tridi_solve_batched_jmin0(a, d, b, rhs) -> Any:
     """Batched Thomas solve for a/d/b with jmin=0 (axisymmetric)."""
     a = jnp.asarray(a)
@@ -485,7 +483,7 @@ def _tridi_solve_batched_jmin0(a, d, b, rhs) -> Any:
     return x_out
 
 
-@partial(jax.jit, static_argnames=("jmax",))
+@partial(jit, static_argnames=("jmax",))
 def _rz_preconditioner_apply_arrays(
     *,
     ar,
