@@ -24,9 +24,7 @@ from typing import Any
 
 import numpy as np
 
-from jax import tree_util
-
-from ._compat import jnp
+from ._compat import jnp, tree_util
 from .field import TWOPI
 from .field import lamscale_from_phips
 from .field import chips_from_wout_chipf

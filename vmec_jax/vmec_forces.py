@@ -23,9 +23,7 @@ from contextlib import contextmanager
 
 import numpy as np
 
-from jax import tree_util
-
-from ._compat import jnp, has_jax, jax
+from ._compat import jnp, has_jax, jax, tree_util
 from .fourier import project_to_modes
 from .fourier import eval_fourier, eval_fourier_dtheta, eval_fourier_dzeta_phys
 from .field import lamscale_from_phips
