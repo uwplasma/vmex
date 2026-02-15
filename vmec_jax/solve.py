@@ -4465,9 +4465,17 @@ def solve_fixed_boundary_residual_iter(
                 flsc = jnp.asarray(frzl_rz.flsc) * jnp.asarray(lam_prec)
                 flcs = None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * jnp.asarray(lam_prec))
             elif not bool(cfg.lthreed):
+                from .preconditioner_1d_jax import rz_preconditioner_apply, rz_preconditioner_matrices
+
                 need_lam_prec = os.getenv("VMEC_JAX_DUMP_LAM", "") not in ("", "0")
                 need_lamcal = os.getenv("VMEC_JAX_DUMP_LAMCAL", "") not in ("", "0")
-                need_prec_refresh = (not bool(vmec2000_cache_valid)) or (cache_prec_lam_prec is None) or bool(need_bcovar_update)
+                need_prec_refresh = (
+                    (not bool(vmec2000_cache_valid))
+                    or (cache_prec_lam_prec is None)
+                    or (cache_prec_rz_mats is None)
+                    or (cache_prec_rz_jmax is None)
+                    or bool(need_bcovar_update)
+                )
                 if need_prec_refresh:
                     if need_lamcal:
                         if need_lam_prec:
@@ -4484,17 +4492,27 @@ def solve_fixed_boundary_residual_iter(
                             lam_prec = _lambda_preconditioner(k.bc)
                             faclam_dump = None
                         lam_debug = None
+                    mats, _jmin, jmax = rz_preconditioner_matrices(bc=k.bc, k=k, trig=trig, s=s, cfg=cfg)
                     cache_prec_lam_prec = lam_prec
                     cache_prec_faclam = faclam_dump
                     cache_prec_lam_debug = lam_debug
+                    cache_prec_rz_mats = mats
+                    cache_prec_rz_jmax = int(jmax)
                 else:
                     lam_prec = cache_prec_lam_prec
+                    mats = cache_prec_rz_mats
+                    jmax = int(cache_prec_rz_jmax)
                     faclam_dump = cache_prec_faclam if need_lam_prec else None
                     lam_debug = cache_prec_lam_debug if need_lamcal else None
                 _maybe_dump_lam_prec(lam_prec=lam_prec, faclam=faclam_dump, static=static, iter_idx=int(iter2))
                 if lam_debug is not None:
                     _maybe_dump_lamcal(lam_debug=lam_debug, static=static, iter_idx=int(iter2))
-                frzl_rz = _rz_preconditioner(frzl, k.bc, k)
+                frzl_rz = rz_preconditioner_apply(
+                    frzl_in=frzl,
+                    mats=mats,
+                    jmax=jmax,
+                    cfg=cfg,
+                )
                 frzl_lam_pre = frzl_rz
                 frcc = jnp.asarray(frzl_rz.frcc)
                 frss = frzl_rz.frss
