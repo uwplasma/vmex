@@ -287,10 +287,15 @@ def run_fixed_boundary(
         if not cache_dir:
             return
         try:
-            from jax.experimental import compilation_cache
+            import jax
+            from jax.experimental.compilation_cache import compilation_cache
 
             Path(cache_dir).mkdir(parents=True, exist_ok=True)
             compilation_cache.set_cache_dir(cache_dir)
+            try:
+                jax.config.update("jax_enable_compilation_cache", True)
+            except Exception:
+                pass
         except Exception:
             return
 
@@ -678,7 +683,7 @@ def run_fixed_boundary(
         state = restart_state_eff
         static_prev = None
         static_final = None
-        def _resolve_jit_forces(flag: bool | str, static_i: VMECStatic) -> bool:
+        def _resolve_jit_forces(flag: bool | str, static_i: VMECStatic, niter_i: int) -> bool:
             if isinstance(flag, str):
                 if flag.strip().lower() != "auto":
                     return True
@@ -688,7 +693,10 @@ def run_fixed_boundary(
                     work = nmodes_i * nrzt
                 except Exception:
                     return True
-                # Heuristic: avoid JIT for very small workloads to reduce first-iteration latency.
+                # Heuristic: avoid JIT for very small workloads unless the stage
+                # will run long enough to amortize compilation cost.
+                if int(niter_i) >= 5:
+                    return True
                 return bool(work >= 2_000_000)
             return bool(flag)
 
@@ -738,7 +746,7 @@ def run_fixed_boundary(
 
             stage_offsets.append(sum(int(np.asarray(r.w_history).size) for r in stage_results))
             scan_mode = bool(use_scan)
-            jit_forces_eff = _resolve_jit_forces(jit_forces, static_i)
+            jit_forces_eff = _resolve_jit_forces(jit_forces, static_i, int(niter_i))
             solve_kwargs = dict(
                 indata=indata,
                 signgs=signgs,
