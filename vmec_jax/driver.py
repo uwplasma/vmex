@@ -720,17 +720,45 @@ def run_fixed_boundary(
 
             cfg_i = replace(cfg, ns=int(ns_i))
             static_i = build_static(cfg_i, grid=grid)
+            scan_mode = bool(use_scan)
+            jit_forces_eff = _resolve_jit_forces(jit_forces, static_i, int(niter_i))
+            jit_warmup_iters = 0
+            if bool(jit_forces_eff) and (not bool(scan_mode)):
+                try:
+                    jit_warmup_iters = max(0, int(os.getenv("VMEC_JAX_JIT_WARMUP_ITERS", "2")))
+                except Exception:
+                    jit_warmup_iters = 2
             if i == 0:
                 if state is None:
                     if boundary_coeffs is None:
                         raise ValueError("boundary_coeffs missing; cannot build initial guess")
-                    state = initial_guess_from_boundary(
-                        static_i,
-                        boundary_coeffs,
-                        indata,
-                        vmec_project=vmec_project,
-                        infer_axis_if_missing=axis_infer_missing,
-                    )
+                    if jit_warmup_iters > 0:
+                        try:
+                            import jax
+                            with jax.disable_jit():
+                                state = initial_guess_from_boundary(
+                                    static_i,
+                                    boundary_coeffs,
+                                    indata,
+                                    vmec_project=vmec_project,
+                                    infer_axis_if_missing=axis_infer_missing,
+                                )
+                        except Exception:
+                            state = initial_guess_from_boundary(
+                                static_i,
+                                boundary_coeffs,
+                                indata,
+                                vmec_project=vmec_project,
+                                infer_axis_if_missing=axis_infer_missing,
+                            )
+                    else:
+                        state = initial_guess_from_boundary(
+                            static_i,
+                            boundary_coeffs,
+                            indata,
+                            vmec_project=vmec_project,
+                            infer_axis_if_missing=axis_infer_missing,
+                        )
                     _maybe_dump_xc_init(state=state, static=static_i, label="stage0")
             else:
                 state = interp_vmec_state(
@@ -745,8 +773,6 @@ def run_fixed_boundary(
             static_final = static_i
 
             stage_offsets.append(sum(int(np.asarray(r.w_history).size) for r in stage_results))
-            scan_mode = bool(use_scan)
-            jit_forces_eff = _resolve_jit_forces(jit_forces, static_i, int(niter_i))
             solve_kwargs = dict(
                 indata=indata,
                 signgs=signgs,
@@ -772,6 +798,7 @@ def run_fixed_boundary(
                 verbose=bool(verbose),
                 verbose_vmec2000_table=bool(verbose),
                 use_scan=bool(use_scan),
+                jit_warmup_iters=int(jit_warmup_iters),
             )
             if not bool(jit_forces_eff):
                 try:
