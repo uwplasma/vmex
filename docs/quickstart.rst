@@ -16,6 +16,20 @@ Run the test suite::
 
   pytest -q
 
+CLI (VMEC2000-style executable)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Once installed (or when working from the repo), you can run vmec_jax like the
+VMEC2000 executable by pointing it to a single ``input.*`` file::
+
+  vmec_jax examples/data/input.circular_tokamak
+
+This writes ``wout_circular_tokamak.nc`` next to the input file and prints the
+VMEC2000-style per-iteration screen output by default. Use ``--quiet`` to
+silence the iteration table, and ``--outdir`` or ``--output`` to control where
+the ``wout_*.nc`` file is written. If you only want a short debug run, pass
+``--max-iter`` and ``--no-multigrid`` (single grid).
+
 Kernel parity on reference states (solver-free)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

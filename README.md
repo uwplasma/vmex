@@ -27,6 +27,17 @@ Run the end-to-end showcase (recommended):
 python examples/showcase_axisym_input_to_wout.py --suite
 ```
 
+CLI (VMEC2000-style executable):
+
+```bash
+vmec_jax examples/data/input.circular_tokamak
+```
+
+This writes `wout_circular_tokamak.nc` next to the input file and prints the
+VMEC2000-style screen table by default. Use `--quiet` to silence output, or
+`--outdir` / `--output` to control where the `wout_*.nc` file is written. For
+short debug runs, pass `--max-iter` and `--no-multigrid` (single grid).
+
 By default the solver prints the VMEC2000-style per-iteration **screen** table
 (FSQR/FSQZ/FSQL, RAX, DELT, WMHD). Pass ``--no-verbose`` to silence it.
 
