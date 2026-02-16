@@ -411,23 +411,13 @@ def run_fixed_boundary(
         elif isinstance(ns_array, (tuple, np.ndarray)) and len(ns_array):
             ns_stages = [int(v) for v in ns_array]
 
-    # Build boundary + initial guess if we are not restarting.
-    st0_coarse = None
-    static0 = None
+    # Precompute boundary coefficients without triggering JAX initialization.
+    boundary_coeffs = None
     if restart_state_eff is None:
-        cfg0 = replace(cfg, ns=int(ns_stages[0]))
-        static0 = build_static(cfg0, grid=grid)
-        # VMEC initializes the first (coarsest) stage directly from the boundary;
-        # finer stages are seeded via interp.f from the previous solve state.
-        bdy = boundary_from_indata(indata, static0.modes)
-        st0_coarse = initial_guess_from_boundary(
-            static0,
-            bdy,
-            indata,
-            vmec_project=vmec_project,
-            infer_axis_if_missing=axis_infer_missing,
-        )
-        _maybe_dump_xc_init(state=st0_coarse, static=static0, label="stage0")
+        from .modes import vmec_mode_table
+
+        boundary_modes = vmec_mode_table(cfg.mpol, cfg.ntor)
+        boundary_coeffs = boundary_from_indata(indata, boundary_modes)
 
     # VMEC readin.f hard-codes signgs = -1 (then flips theta if needed).
     # For VMEC2000-iter parity, ignore input SIGNGS and match VMEC behavior.
@@ -438,22 +428,33 @@ def run_fixed_boundary(
         if signgs not in (-1, 1):
             signgs = -1
 
-    static = build_static(cfg, grid=grid)
-    if restart_state_eff is None:
-        bdy = boundary_from_indata(indata, static.modes)
-    else:
-        bdy = boundary_from_indata(indata, static.modes)
-
-    flux = flux_profiles_from_indata(indata, static.s, signgs=signgs)
-    # VMEC evaluates pressure/iota/current profiles on the radial half mesh.
-    if int(cfg.ns) < 2:
-        s_half = np.asarray(static.s)
-    else:
-        s_full = np.asarray(static.s)
-        s_half = np.concatenate([s_full[:1], 0.5 * (s_full[1:] + s_full[:-1])], axis=0)
-    prof = eval_profiles(indata, s_half)
-    pressure = prof.get("pressure", np.zeros_like(np.asarray(static.s)))
     gamma = indata.get_float("GAMMA", 0.0)
+    static = None
+    bdy = None
+    flux = None
+    prof = None
+    pressure = None
+
+    def _profiles_from_static(static_in: VMECStatic):
+        flux_local = flux_profiles_from_indata(indata, static_in.s, signgs=signgs)
+        # VMEC evaluates pressure/iota/current profiles on the radial half mesh.
+        if int(cfg.ns) < 2:
+            s_half = np.asarray(static_in.s)
+        else:
+            s_full = np.asarray(static_in.s)
+            s_half = np.concatenate([s_full[:1], 0.5 * (s_full[1:] + s_full[:-1])], axis=0)
+        prof_local = eval_profiles(indata, s_half)
+        pressure_local = prof_local.get("pressure", np.zeros_like(np.asarray(static_in.s)))
+        return flux_local, prof_local, pressure_local
+
+    def _ensure_static_profiles() -> None:
+        nonlocal static, bdy, flux, prof, pressure
+        if static is None:
+            static = build_static(cfg, grid=grid)
+        if bdy is None:
+            bdy = boundary_from_indata(indata, static.modes)
+        if flux is None or prof is None or pressure is None:
+            flux, prof, pressure = _profiles_from_static(static)
 
     if step_size is _STEP_SIZE_SENTINEL or step_size is None:
         if solver_lower in ("vmec2000_iter",):
@@ -472,7 +473,8 @@ def run_fixed_boundary(
             print(f"[vmec_jax] max_iter={max_iter} step_size={step_size_val} history_size={history_size}", flush=True)
 
     if use_initial_guess:
-        static = build_static(cfg, grid=grid)
+        static = static_final if static_final is not None else build_static(cfg, grid=grid)
+        flux, prof, pressure = _profiles_from_static(static)
         if restart_state_eff is not None:
             st0 = restart_state_eff
         else:
@@ -502,7 +504,7 @@ def run_fixed_boundary(
     if os.getenv("VMEC_JAX_USE_SCAN", "") not in ("", "0"):
         use_scan = True
     if solver == "gd":
-        static = build_static(cfg, grid=grid)
+        _ensure_static_profiles()
         st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(
             static,
             bdy,
@@ -526,7 +528,7 @@ def run_fixed_boundary(
             verbose=bool(verbose),
         )
     elif solver == "lbfgs":
-        static = build_static(cfg, grid=grid)
+        _ensure_static_profiles()
         st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(
             static,
             bdy,
@@ -551,7 +553,7 @@ def run_fixed_boundary(
         )
     elif solver == "vmec_lbfgs":
         from .solve import solve_fixed_boundary_lbfgs_vmec_residual
-        static = build_static(cfg, grid=grid)
+        _ensure_static_profiles()
         st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(
             static,
             bdy,
@@ -576,7 +578,7 @@ def run_fixed_boundary(
         )
     elif solver == "vmec_gn":
         from .solve import solve_fixed_boundary_gn_vmec_residual
-        static = build_static(cfg, grid=grid)
+        _ensure_static_profiles()
         st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(
             static,
             bdy,
@@ -665,28 +667,17 @@ def run_fixed_boundary(
             niter_stages = _distribute_iters(iters=int(max_iter), nstep=int(nstep))
             ftol_stages = [float(indata.get_float("FTOL", 1e-10))] * nstep
 
-        # If the staging plan collapsed to the final grid, rebuild the initial
-        # guess so its radial resolution matches the (now single) stage.
-        if restart_state_eff is None and static0 is not None:
-            ns0 = int(ns_stages[0])
-            if int(static0.cfg.ns) != ns0:
-                cfg0 = replace(cfg, ns=ns0)
-                static0 = build_static(cfg0, grid=grid)
-                bdy0 = boundary_from_indata(indata, static0.modes)
-                st0_coarse = initial_guess_from_boundary(
-                    static0,
-                    bdy0,
-                    indata,
-                    vmec_project=vmec_project,
-                    infer_axis_if_missing=axis_infer_missing,
-                )
-
         # Run coarse -> fine stages with VMEC `interp.f` interpolation.
         stage_results: list[SolveVmecResidualResult] = []
         stage_offsets: list[int] = []
+        from .modes import vmec_mode_table
 
-        state = restart_state_eff if restart_state_eff is not None else st0_coarse
-        static_prev = static0 if static0 is not None else static
+        header_modes = vmec_mode_table(cfg.mpol, cfg.ntor)
+        nmodes_header = int(np.asarray(header_modes.m).size)
+
+        state = restart_state_eff
+        static_prev = None
+        static_final = None
         def _resolve_jit_forces(flag: bool | str, static_i: VMECStatic) -> bool:
             if isinstance(flag, str):
                 if flag.strip().lower() != "auto":
@@ -702,23 +693,9 @@ def run_fixed_boundary(
             return bool(flag)
 
         for i, (ns_i, niter_i, ftol_i) in enumerate(zip(ns_stages, niter_stages, ftol_stages)):
-            cfg_i = replace(cfg, ns=int(ns_i))
-            static_i = build_static(cfg_i, grid=grid)
-            if i > 0:
-                state = interp_vmec_state(
-                    state,
-                    m=static_prev.modes.m,
-                    n=static_prev.modes.n,
-                    lthreed=bool(static_prev.cfg.lthreed),
-                    lconm1=bool(getattr(static_prev.cfg, "lconm1", True)),
-                    ns_new=int(ns_i),
-                )
-                static_prev = static_i
-
             if verbose:
-                nmodes_i = int(np.asarray(static_i.modes.m).size)
                 print(
-                    f"  NS = {int(ns_i):4d} NO. FOURIER MODES = {nmodes_i:4d} "
+                    f"  NS = {int(ns_i):4d} NO. FOURIER MODES = {nmodes_header:4d} "
                     f"FTOLV = {float(ftol_i):10.3E} NITER = {int(niter_i):6d}",
                     flush=True,
                 )
@@ -733,40 +710,86 @@ def run_fixed_boundary(
                         flush=True,
                     )
 
+            cfg_i = replace(cfg, ns=int(ns_i))
+            static_i = build_static(cfg_i, grid=grid)
+            if i == 0:
+                if state is None:
+                    if boundary_coeffs is None:
+                        raise ValueError("boundary_coeffs missing; cannot build initial guess")
+                    state = initial_guess_from_boundary(
+                        static_i,
+                        boundary_coeffs,
+                        indata,
+                        vmec_project=vmec_project,
+                        infer_axis_if_missing=axis_infer_missing,
+                    )
+                    _maybe_dump_xc_init(state=state, static=static_i, label="stage0")
+            else:
+                state = interp_vmec_state(
+                    state,
+                    m=static_prev.modes.m,
+                    n=static_prev.modes.n,
+                    lthreed=bool(static_prev.cfg.lthreed),
+                    lconm1=bool(getattr(static_prev.cfg, "lconm1", True)),
+                    ns_new=int(ns_i),
+                )
+            static_prev = static_i
+            static_final = static_i
+
             stage_offsets.append(sum(int(np.asarray(r.w_history).size) for r in stage_results))
             scan_mode = bool(use_scan)
             jit_forces_eff = _resolve_jit_forces(jit_forces, static_i)
-            stage_results.append(
-                solve_fixed_boundary_residual_iter(
+            solve_kwargs = dict(
+                indata=indata,
+                signgs=signgs,
+                ftol=float(ftol_i),
+                max_iter=int(niter_i),
+                step_size=float(step_size_val),
+                include_constraint_force=True,
+                apply_m1_constraints=True,
+                precond_radial_alpha=0.5,
+                precond_lambda_alpha=0.5,
+                mode_diag_exponent=0.0,
+                auto_flip_force=False,
+                divide_by_scalxc_for_update=False,
+                lambda_update_scale=1.0,
+                enforce_vmec_lambda_axis=True,
+                vmec2000_control=not scan_mode,
+                strict_update=False if scan_mode else True,
+                backtracking=False,
+                reference_mode=False,
+                use_restart_triggers=False if scan_mode else (True if use_restart_triggers is None else bool(use_restart_triggers)),
+                use_direct_fallback=False,
+                resume_state=restart_solver_state,
+                verbose=bool(verbose),
+                verbose_vmec2000_table=bool(verbose),
+                use_scan=bool(use_scan),
+            )
+            if not bool(jit_forces_eff):
+                try:
+                    import jax
+                    with jax.disable_jit():
+                        res_i = solve_fixed_boundary_residual_iter(
+                            state,
+                            static_i,
+                            jit_forces=False,
+                            **solve_kwargs,
+                        )
+                except Exception:
+                    res_i = solve_fixed_boundary_residual_iter(
+                        state,
+                        static_i,
+                        jit_forces=False,
+                        **solve_kwargs,
+                    )
+            else:
+                res_i = solve_fixed_boundary_residual_iter(
                     state,
                     static_i,
-                    indata=indata,
-                    signgs=signgs,
-                    ftol=float(ftol_i),
-                    max_iter=int(niter_i),
-                    step_size=float(step_size_val),
-                    include_constraint_force=True,
-                    apply_m1_constraints=True,
-                    precond_radial_alpha=0.5,
-                    precond_lambda_alpha=0.5,
-                    mode_diag_exponent=0.0,
-                    auto_flip_force=False,
-                    divide_by_scalxc_for_update=False,
-                    lambda_update_scale=1.0,
-                    enforce_vmec_lambda_axis=True,
-                    vmec2000_control=not scan_mode,
-                    strict_update=False if scan_mode else True,
-                    backtracking=False,
-                    reference_mode=False,
-                    use_restart_triggers=False if scan_mode else (True if use_restart_triggers is None else bool(use_restart_triggers)),
-                    use_direct_fallback=False,
-                    resume_state=restart_solver_state,
-                    verbose=bool(verbose),
-                    verbose_vmec2000_table=bool(verbose),
-                    jit_forces=bool(jit_forces_eff),
-                    use_scan=bool(use_scan),
+                    jit_forces=True,
+                    **solve_kwargs,
                 )
-            )
+            stage_results.append(res_i)
             state = stage_results[-1].state
             static_prev = static_i
 
@@ -846,6 +869,11 @@ def run_fixed_boundary(
         w_final = float(res.w_history[-1]) if getattr(res, "w_history", None) is not None else float("nan")
         grad_final = float(res.grad_rms_history[-1]) if getattr(res, "grad_rms_history", None) is not None else float("nan")
         print(f"[vmec_jax] finished: n_iter={n_iter} w={w_final:.8e} grad_rms={grad_final:.3e}")
+
+    if flux is None or prof is None or pressure is None:
+        if static is None:
+            static = build_static(cfg, grid=grid)
+        flux, prof, pressure = _profiles_from_static(static)
 
     return FixedBoundaryRun(
         cfg=cfg,
