@@ -82,6 +82,22 @@ JAX can persist compiled executables to disk. Enable it with
 ``JAX_COMPILATION_CACHE_DIR``) to drastically reduce *repeat* compile times
 across runs with the same shapes/static arguments.
 
+CLI profiling (pre-iteration overhead)
+--------------------------------------
+
+To capture a JAX trace for the VMEC2000-style CLI path, set
+``VMEC_JAX_PROFILE_DIR`` before invoking ``vmec_jax``. The trace is written in
+TensorBoard/Chrome trace format::
+
+  VMEC_JAX_PROFILE_DIR=/tmp/vmec_jax_trace \\
+    vmec_jax examples/data/input.ITERModel --max-iter 3 --no-multigrid --no-use-input-niter --quiet
+
+Recent traces show that the pre-iteration time is dominated by JIT
+compilation/cache misses (``pjit cache_miss`` + backend compile) rather than
+the nonlinear iteration itself. This is expected for short runs on CPU.
+For repeated runs, the compilation cache (``VMEC_JAX_COMPILATION_CACHE_DIR``)
+can significantly reduce this overhead once the cache is warm.
+
 Batched radial smoothing
 ------------------------
 
