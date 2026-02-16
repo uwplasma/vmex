@@ -296,6 +296,16 @@ def run_fixed_boundary(
                 jax.config.update("jax_enable_compilation_cache", True)
             except Exception:
                 pass
+            try:
+                min_compile = os.getenv("VMEC_JAX_CACHE_MIN_COMPILE_TIME_SECS", "0")
+                jax.config.update("jax_persistent_cache_min_compile_time_secs", float(min_compile))
+                min_entry = os.getenv("VMEC_JAX_CACHE_MIN_ENTRY_SIZE_BYTES", "-1")
+                jax.config.update("jax_persistent_cache_min_entry_size_bytes", int(min_entry))
+                max_size = os.getenv("VMEC_JAX_COMPILATION_CACHE_MAX_SIZE", "")
+                if max_size:
+                    jax.config.update("jax_compilation_cache_max_size", int(max_size))
+            except Exception:
+                pass
         except Exception:
             return
 

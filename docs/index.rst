@@ -8,22 +8,29 @@ vmec-jax documentation
 - laptop-friendly performance (careful JIT boundaries, minimal allocations),
 - stepwise validation against VMEC2000 output (``wout_*.nc``).
 
-.. toctree::
-   :maxdepth: 2
-   :caption: User guide
+.. only:: not fast
 
-   overview
-   installation
-   quickstart
-   theory
-   equations
-   vmec_wiki_primer
-   algorithms
-   validation
-   performance
-   code_structure
-   contributing
-   references
+   .. toctree::
+      :maxdepth: 2
+      :caption: User guide
+
+      overview
+      installation
+      quickstart
+      theory
+      equations
+      vmec_wiki_primer
+      algorithms
+      validation
+      performance
+      code_structure
+      contributing
+      references
+
+.. only:: fast
+
+   Fast doc builds are enabled (``SPHINX_FAST=1``). The full user guide and API
+   reference are skipped to keep CI fast.
 
 .. only:: not fast
 

@@ -102,11 +102,37 @@ TensorBoard/Chrome trace format::
   VMEC_JAX_PROFILE_DIR=/tmp/vmec_jax_trace \\
     vmec_jax examples/data/input.ITERModel --max-iter 3 --no-multigrid --no-use-input-niter --quiet
 
+For tighter windows (e.g., pre-iteration or iter-1 only), set
+``VMEC_JAX_PROFILE_WINDOW=pre`` (or ``iter1`` / ``iterN``) and optionally start
+a profiler server for XProf inspection::
+
+  VMEC_JAX_PROFILE_DIR=/tmp/vmec_jax_trace \\
+  VMEC_JAX_PROFILE_WINDOW=pre \\
+  VMEC_JAX_PROFILE_SERVER=1 VMEC_JAX_PROFILE_SERVER_PORT=9999 \\
+    vmec_jax examples/data/input.ITERModel --max-iter 3 --no-multigrid --quiet
+
+With ``VMEC_JAX_PROFILE_SERVER=1`` you can also capture a tight window using
+``python -m jax.collect_profile`` from another terminal (see the JAX profiling
+guide for the exact invocation).
+
 Recent traces show that the pre-iteration time is dominated by JIT
 compilation/cache misses (``pjit cache_miss`` + backend compile) rather than
 the nonlinear iteration itself. This is expected for short runs on CPU.
 For repeated runs, the compilation cache (``VMEC_JAX_COMPILATION_CACHE_DIR``)
 can significantly reduce this overhead once the cache is warm.
+
+Persistent compilation cache tuning
+-----------------------------------
+
+JAX's persistent cache can be made more aggressive via ``vmec_jax`` environment
+variables:
+
+- ``VMEC_JAX_CACHE_MIN_COMPILE_TIME_SECS`` (default: 0)
+- ``VMEC_JAX_CACHE_MIN_ENTRY_SIZE_BYTES`` (default: -1)
+- ``VMEC_JAX_COMPILATION_CACHE_MAX_SIZE`` (optional)
+
+These map to JAX's persistent cache configuration and allow caching more (or
+fewer) compiled executables to reduce repeat-start latency for stable shapes.
 
 Batched radial smoothing
 ------------------------

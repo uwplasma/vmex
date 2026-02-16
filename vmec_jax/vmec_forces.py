@@ -299,43 +299,35 @@ def _constraint_kernels_from_state(
     mask_m1 = jnp.asarray(m_modes == 1, dtype=dtype)
     mask_odd_rest = jnp.asarray((m_modes % 2 == 1) & (m_modes != 1), dtype=dtype)
 
-    rcon_even = eval_fourier(
-        state.Rcos * xmpq1 * mask_even,
-        state.Rsin * xmpq1 * mask_even,
+    coeff_cos_stack = jnp.stack(
+        [
+            state.Rcos * xmpq1 * mask_even,
+            state.Zcos * xmpq1 * mask_even,
+            state.Rcos * xmpq1 * mask_m1,
+            state.Rcos * xmpq1 * mask_odd_rest,
+            state.Zcos * xmpq1 * mask_m1,
+            state.Zcos * xmpq1 * mask_odd_rest,
+        ],
+        axis=0,
+    )
+    coeff_sin_stack = jnp.stack(
+        [
+            state.Rsin * xmpq1 * mask_even,
+            state.Zsin * xmpq1 * mask_even,
+            state.Rsin * xmpq1 * mask_m1,
+            state.Rsin * xmpq1 * mask_odd_rest,
+            state.Zsin * xmpq1 * mask_m1,
+            state.Zsin * xmpq1 * mask_odd_rest,
+        ],
+        axis=0,
+    )
+    eval_stack = eval_fourier(
+        coeff_cos_stack,
+        coeff_sin_stack,
         static.basis,
         coeffs_internal=True,
     )
-    zcon_even = eval_fourier(
-        state.Zcos * xmpq1 * mask_even,
-        state.Zsin * xmpq1 * mask_even,
-        static.basis,
-        coeffs_internal=True,
-    )
-
-    rcon_odd_m1 = eval_fourier(
-        state.Rcos * xmpq1 * mask_m1,
-        state.Rsin * xmpq1 * mask_m1,
-        static.basis,
-        coeffs_internal=True,
-    )
-    rcon_odd_rest = eval_fourier(
-        state.Rcos * xmpq1 * mask_odd_rest,
-        state.Rsin * xmpq1 * mask_odd_rest,
-        static.basis,
-        coeffs_internal=True,
-    )
-    zcon_odd_m1 = eval_fourier(
-        state.Zcos * xmpq1 * mask_m1,
-        state.Zsin * xmpq1 * mask_m1,
-        static.basis,
-        coeffs_internal=True,
-    )
-    zcon_odd_rest = eval_fourier(
-        state.Zcos * xmpq1 * mask_odd_rest,
-        state.Zsin * xmpq1 * mask_odd_rest,
-        static.basis,
-        coeffs_internal=True,
-    )
+    rcon_even, zcon_even, rcon_odd_m1, rcon_odd_rest, zcon_odd_m1, zcon_odd_rest = eval_stack
 
     rcon_odd_int = internal_odd_from_physical_vmec_m1(odd_m1_phys=rcon_odd_m1, odd_mge2_phys=rcon_odd_rest, s=s)
     zcon_odd_int = internal_odd_from_physical_vmec_m1(odd_m1_phys=zcon_odd_m1, odd_mge2_phys=zcon_odd_rest, s=s)

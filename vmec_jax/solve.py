@@ -3789,14 +3789,14 @@ def solve_fixed_boundary_residual_iter(
     if abs(gamma - 1.0) < 1e-14:
         raise ValueError("GAMMA=1 makes wp/(gamma-1) singular (VMEC objective undefined)")
 
-    if use_scan:
-        if vmec2000_control or backtracking or use_restart_triggers or auto_flip_force or limit_dt_from_force or limit_update_rms or strict_update or use_direct_fallback or reference_mode:
-            raise ValueError(
-                "use_scan requires vmec2000_control=False, backtracking=False, "
-                "use_restart_triggers=False, auto_flip_force=False, "
-                "limit_dt_from_force=False, limit_update_rms=False, strict_update=False, "
-                "use_direct_fallback=False, reference_mode=False."
-            )
+        if use_scan:
+            if vmec2000_control or backtracking or use_restart_triggers or auto_flip_force or limit_dt_from_force or limit_update_rms or strict_update or use_direct_fallback or reference_mode:
+                raise ValueError(
+                    "use_scan requires vmec2000_control=False, backtracking=False, "
+                    "use_restart_triggers=False, auto_flip_force=False, "
+                    "limit_dt_from_force=False, limit_update_rms=False, strict_update=False, "
+                    "use_direct_fallback=False, reference_mode=False."
+                )
 
         dtype = jnp.asarray(state0.Rcos).dtype
         time_step_j = jnp.asarray(float(step_size), dtype=dtype)
@@ -3933,6 +3933,29 @@ def solve_fixed_boundary_residual_iter(
             step_history=np.asarray([], dtype=float),
             diagnostics={"use_scan": True},
         )
+
+    profile_window = os.getenv("VMEC_JAX_PROFILE_WINDOW", "").strip().lower()
+    profile_dir_env = os.getenv("VMEC_JAX_PROFILE_DIR", "").strip()
+    profile_started = False
+    profile_active = False
+    profile_start_iter = None
+    profile_dir = ""
+    if profile_window and profile_dir_env:
+        if profile_window in ("pre", "iter1", "1"):
+            profile_start_iter = 1
+        else:
+            window_str = profile_window
+            if window_str.startswith("iter"):
+                window_str = window_str[4:]
+            try:
+                profile_start_iter = max(1, int(window_str))
+            except Exception:
+                profile_start_iter = None
+        if profile_start_iter is not None:
+            profile_dir = str(Path(profile_dir_env) / f"window_{profile_window}")
+            profile_active = True
+    perfetto_env = os.getenv("VMEC_JAX_PROFILE_PERFETTO", "1")
+    profile_perfetto = perfetto_env.strip().lower() not in ("", "0", "false", "no")
 
     w_history = []
     fsqr2_history = []
@@ -4370,6 +4393,15 @@ def solve_fixed_boundary_residual_iter(
             constraint_tcon_override = cache_tcon if (use_cached_precond and cache_tcon is not None) else zero_tcon
             constraint_precond_active = jnp.asarray(use_cached_precond, dtype=bool)
             constraint_tcon_active = jnp.asarray(use_cached_precond, dtype=bool)
+
+            if profile_active and (not profile_started) and (profile_start_iter is not None) and (iter2 == profile_start_iter):
+                if has_jax():
+                    try:
+                        Path(profile_dir).mkdir(parents=True, exist_ok=True)
+                        jax.profiler.start_trace(profile_dir, create_perfetto_trace=profile_perfetto)
+                        profile_started = True
+                    except Exception:
+                        profile_active = False
 
             k, frzl, gcr2, gcz2, gcl2, rz_scale, l_scale, norms_current = _compute_forces_iter(
                 state,
@@ -5042,6 +5074,15 @@ def solve_fixed_boundary_residual_iter(
                 continue
     
             break
+        if profile_started and (profile_start_iter is not None) and (iter2 == profile_start_iter):
+            if has_jax():
+                try:
+                    jax.block_until_ready(state.Rcos)
+                    jax.profiler.stop_trace()
+                except Exception:
+                    pass
+            profile_started = False
+            profile_active = False
         if converged:
             break
         if iter2 == iter1:

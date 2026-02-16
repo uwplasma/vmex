@@ -108,7 +108,19 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     profile_dir = os.getenv("VMEC_JAX_PROFILE_DIR", "")
-    if profile_dir:
+    profile_window = os.getenv("VMEC_JAX_PROFILE_WINDOW", "")
+    profile_server = os.getenv("VMEC_JAX_PROFILE_SERVER", "")
+    server_handle = None
+    if profile_server and profile_server not in ("0", "false", "False"):
+        try:
+            import jax
+
+            port_env = os.getenv("VMEC_JAX_PROFILE_SERVER_PORT", "9999")
+            server_handle = jax.profiler.start_server(int(port_env))
+        except Exception:
+            server_handle = None
+
+    if profile_dir and not profile_window:
         try:
             import jax
 
@@ -134,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
             verbose=not bool(args.quiet),
             jit_forces=jit_forces,
         )
-        if profile_dir:
+        if profile_dir and not profile_window:
             try:
                 import jax
 
@@ -143,11 +155,18 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:
                 pass
     finally:
-        if profile_dir:
+        if profile_dir and not profile_window:
             try:
                 import jax
 
                 jax.profiler.stop_trace()
+            except Exception:
+                pass
+        if server_handle is not None:
+            try:
+                import jax
+
+                jax.profiler.stop_server()
             except Exception:
                 pass
 
