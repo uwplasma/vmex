@@ -430,6 +430,7 @@ def run_fixed_boundary(
 
     gamma = indata.get_float("GAMMA", 0.0)
     static = None
+    static_final = None
     bdy = None
     flux = None
     prof = None
@@ -473,8 +474,7 @@ def run_fixed_boundary(
             print(f"[vmec_jax] max_iter={max_iter} step_size={step_size_val} history_size={history_size}", flush=True)
 
     if use_initial_guess:
-        static = static_final if static_final is not None else build_static(cfg, grid=grid)
-        flux, prof, pressure = _profiles_from_static(static)
+        _ensure_static_profiles()
         if restart_state_eff is not None:
             st0 = restart_state_eff
         else:
