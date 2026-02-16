@@ -13,6 +13,7 @@ JAX is imported, unless the user has explicitly set ``JAX_ENABLE_X64``.
 from __future__ import annotations
 
 from typing import Any, Callable, Tuple
+import types
 
 import os
 
@@ -37,6 +38,10 @@ def _try_import_jax() -> Tuple[Any, Any, Callable[[Callable[..., Any]], Callable
         # Enable x64 by default for VMEC parity unless the user opted out.
         os.environ.setdefault("JAX_ENABLE_X64", "1")
         import jax
+
+        # If Sphinx (or other tooling) has inserted a mock, treat JAX as unavailable.
+        if not isinstance(jax, types.ModuleType):
+            raise ImportError("mocked jax module")
 
         # Also set via config. This must happen before importing `jax.numpy`
         # to reliably affect dtype defaults.
