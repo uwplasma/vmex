@@ -113,7 +113,12 @@ def main(argv: list[str] | None = None) -> int:
             import jax
 
             Path(profile_dir).mkdir(parents=True, exist_ok=True)
-            jax.profiler.start_trace(profile_dir)
+            perfetto_env = os.getenv("VMEC_JAX_PROFILE_PERFETTO", "1")
+            perfetto_trace = perfetto_env.strip().lower() not in ("", "0", "false", "no")
+            jax.profiler.start_trace(
+                profile_dir,
+                create_perfetto_trace=perfetto_trace,
+            )
         except Exception:
             profile_dir = ""
 
@@ -129,6 +134,14 @@ def main(argv: list[str] | None = None) -> int:
             verbose=not bool(args.quiet),
             jit_forces=jit_forces,
         )
+        if profile_dir:
+            try:
+                import jax
+
+                # Ensure pending device work is finished before stopping the trace.
+                jax.block_until_ready(run.state.Rcos)
+            except Exception:
+                pass
     finally:
         if profile_dir:
             try:
