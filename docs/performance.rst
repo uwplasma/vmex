@@ -94,7 +94,9 @@ CLI profiling (pre-iteration overhead)
 --------------------------------------
 
 To capture a JAX trace for the VMEC2000-style CLI path, set
-``VMEC_JAX_PROFILE_DIR`` before invoking ``vmec_jax``. The trace is written in
+``VMEC_JAX_PROFILE_DIR`` before invoking ``vmec_jax``. By default the CLI also
+emits a Perfetto-compatible trace (``perfetto_trace.json.gz``); disable that
+extra file by setting ``VMEC_JAX_PROFILE_PERFETTO=0``. The trace is written in
 TensorBoard/Chrome trace format::
 
   VMEC_JAX_PROFILE_DIR=/tmp/vmec_jax_trace \\
