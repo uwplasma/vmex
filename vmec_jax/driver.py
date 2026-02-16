@@ -478,18 +478,42 @@ def run_fixed_boundary(
         if not use_initial_guess:
             print(f"[vmec_jax] max_iter={max_iter} step_size={step_size_val} history_size={history_size}", flush=True)
 
+    def _initial_guess_with_optional_nojit(static_in, bdy_in, *, force_disable_jit: bool = False):
+        disable_env = os.getenv("VMEC_JAX_DISABLE_JIT_INIT", "") not in ("", "0")
+        if not (disable_env or force_disable_jit):
+            return initial_guess_from_boundary(
+                static_in,
+                bdy_in,
+                indata,
+                vmec_project=vmec_project,
+                infer_axis_if_missing=axis_infer_missing,
+            )
+        try:
+            import jax
+
+            with jax.disable_jit():
+                return initial_guess_from_boundary(
+                    static_in,
+                    bdy_in,
+                    indata,
+                    vmec_project=vmec_project,
+                    infer_axis_if_missing=axis_infer_missing,
+                )
+        except Exception:
+            return initial_guess_from_boundary(
+                static_in,
+                bdy_in,
+                indata,
+                vmec_project=vmec_project,
+                infer_axis_if_missing=axis_infer_missing,
+            )
+
     if use_initial_guess:
         _ensure_static_profiles()
         if restart_state_eff is not None:
             st0 = restart_state_eff
         else:
-            st0 = initial_guess_from_boundary(
-                static,
-                bdy,
-                indata,
-                vmec_project=vmec_project,
-                infer_axis_if_missing=axis_infer_missing,
-            )
+            st0 = _initial_guess_with_optional_nojit(static, bdy)
             _maybe_dump_xc_init(state=st0, static=static, label="init")
         return FixedBoundaryRun(
             cfg=cfg,
@@ -510,13 +534,7 @@ def run_fixed_boundary(
         use_scan = True
     if solver == "gd":
         _ensure_static_profiles()
-        st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(
-            static,
-            bdy,
-            indata,
-            vmec_project=vmec_project,
-            infer_axis_if_missing=axis_infer_missing,
-        )
+        st0 = restart_state_eff if restart_state_eff is not None else _initial_guess_with_optional_nojit(static, bdy)
         res = solve_fixed_boundary_gd(
             st0,
             static,
@@ -534,13 +552,7 @@ def run_fixed_boundary(
         )
     elif solver == "lbfgs":
         _ensure_static_profiles()
-        st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(
-            static,
-            bdy,
-            indata,
-            vmec_project=vmec_project,
-            infer_axis_if_missing=axis_infer_missing,
-        )
+        st0 = restart_state_eff if restart_state_eff is not None else _initial_guess_with_optional_nojit(static, bdy)
         res = solve_fixed_boundary_lbfgs(
             st0,
             static,
@@ -559,13 +571,7 @@ def run_fixed_boundary(
     elif solver == "vmec_lbfgs":
         from .solve import solve_fixed_boundary_lbfgs_vmec_residual
         _ensure_static_profiles()
-        st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(
-            static,
-            bdy,
-            indata,
-            vmec_project=vmec_project,
-            infer_axis_if_missing=axis_infer_missing,
-        )
+        st0 = restart_state_eff if restart_state_eff is not None else _initial_guess_with_optional_nojit(static, bdy)
 
         res = solve_fixed_boundary_lbfgs_vmec_residual(
             st0,
@@ -584,13 +590,7 @@ def run_fixed_boundary(
     elif solver == "vmec_gn":
         from .solve import solve_fixed_boundary_gn_vmec_residual
         _ensure_static_profiles()
-        st0 = restart_state_eff if restart_state_eff is not None else initial_guess_from_boundary(
-            static,
-            bdy,
-            indata,
-            vmec_project=vmec_project,
-            infer_axis_if_missing=axis_infer_missing,
-        )
+        st0 = restart_state_eff if restart_state_eff is not None else _initial_guess_with_optional_nojit(static, bdy)
 
         res = solve_fixed_boundary_gn_vmec_residual(
             st0,
@@ -732,33 +732,11 @@ def run_fixed_boundary(
                 if state is None:
                     if boundary_coeffs is None:
                         raise ValueError("boundary_coeffs missing; cannot build initial guess")
-                    if jit_warmup_iters > 0:
-                        try:
-                            import jax
-                            with jax.disable_jit():
-                                state = initial_guess_from_boundary(
-                                    static_i,
-                                    boundary_coeffs,
-                                    indata,
-                                    vmec_project=vmec_project,
-                                    infer_axis_if_missing=axis_infer_missing,
-                                )
-                        except Exception:
-                            state = initial_guess_from_boundary(
-                                static_i,
-                                boundary_coeffs,
-                                indata,
-                                vmec_project=vmec_project,
-                                infer_axis_if_missing=axis_infer_missing,
-                            )
-                    else:
-                        state = initial_guess_from_boundary(
-                            static_i,
-                            boundary_coeffs,
-                            indata,
-                            vmec_project=vmec_project,
-                            infer_axis_if_missing=axis_infer_missing,
-                        )
+                    state = _initial_guess_with_optional_nojit(
+                        static_i,
+                        boundary_coeffs,
+                        force_disable_jit=bool(jit_warmup_iters > 0),
+                    )
                     _maybe_dump_xc_init(state=state, static=static_i, label="stage0")
             else:
                 state = interp_vmec_state(
