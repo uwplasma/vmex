@@ -4,12 +4,18 @@ Laptop-friendly, end-to-end differentiable (JAX) rewrite of **VMEC2000**, focusi
 
 <table>
   <tr>
-    <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_lcfs_3d_bmag.png" width="420" /></td>
-    <td><img src="docs/_static/figures/n3are_compare_3d.png" width="420" /></td>
+    <td><img src="docs/_static/figures/qh_compare_cross_sections.png" width="420" /></td>
+    <td><img src="docs/_static/figures/qh_compare_3d.png" width="420" /></td>
   </tr>
   <tr>
-    <td align="center">Tokamak (shaped_tokamak_pressure)</td>
-    <td align="center">Stellarator (n3are_R7.75B5.7_lowres)</td>
+    <td><img src="docs/_static/figures/qh_compare_bmag_surface.png" width="420" /></td>
+    <td><img src="docs/_static/figures/qh_compare_profiles.png" width="420" /></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/_static/figures/qh_compare_fsq_trace.png" width="860" /></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2">QH (nfp4_QH_warm_start): VMEC2000 vs vmec_jax (cross-sections, |B| on LCFS, iota/pressure, fsq_total + runtime)</td>
   </tr>
 </table>
 
@@ -84,48 +90,21 @@ Mode scaling factors (1/(mscale*nscale)) are cached in `VMECStatic` to avoid rep
 Lambda gauge enforcement uses a boolean mask instead of scatter updates in the iteration loop.
 Axis m=0 masks are reused from `VMECStatic` to avoid per-iteration reconstruction.
 
-## Snapshot figures
+## QH comparison figures
 
-Generated from:
-
-- Tokamak: bundled `shaped_tokamak_pressure` case (single-grid parity run).
-- Stellarator: bundled `n3are_R7.75B5.7_lowres` side-by-side VMEC2000/vmec_jax diagnostics.
+Reproduce the QH VMEC2000 vs vmec_jax comparison (50 iterations, single grid):
 
 ```bash
-python examples/showcase_axisym_input_to_wout.py \
-  --case shaped_tokamak_pressure \
-  --max-iter 10 \
-  --emit-readme-figures \
-  --vmec2000-timeout 60 \
-  --vmec2000-nstep 1
+python tools/diagnostics/qh_vmec_vs_vmecjax.py \
+  --no-solve --use-wout-state \
+  --wout-ref /path/to/wout_nfp4_QH_warm_start.nc \
+  --outdir docs/_static/figures
 
-python tools/diagnostics/n3are_vmec_vs_vmecjax.py \
-  --solve --solver vmec2000_iter --max-iter 10 \
+python tools/diagnostics/qh_compare_fsq_trace.py \
+  --input examples/data/input.nfp4_QH_warm_start \
+  --niter 50 \
   --outdir docs/_static/figures
 ```
-
-<table>
-  <tr>
-    <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_surfaces.png" width="420" /></td>
-    <td><img src="docs/_static/figures/n3are_compare_cross_sections.png" width="420" /></td>
-  </tr>
-  <tr>
-    <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_bmag_lcfs.png" width="420" /></td>
-    <td><img src="docs/_static/figures/n3are_compare_bmag_surface.png" width="420" /></td>
-  </tr>
-  <tr>
-    <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_lcfs_3d_bmag.png" width="420" /></td>
-    <td><img src="docs/_static/figures/n3are_compare_3d.png" width="420" /></td>
-  </tr>
-  <tr>
-    <td colspan="2"><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_residual.png" width="860" /></td>
-  </tr>
-</table>
-
-Interpretation of the snapshot figures:
-
-- The residual trace overlay is a **per-iteration VMEC2000 executable trace** (dashed) from `threed1.*`. The default single-grid run (`ns=13`, 10 iterations) overlays VMEC2000 and vmec_jax within ~1e-3 rtol (often tighter).
-- The LCFS `|B|` panel now uses **vmecPlot2-style grids** (theta/zeta resolution and toroidal-angle conventions) for both VMEC2000 and vmec_jax. Differences here reflect solver parity, not plotting.
 
 ## Parity status (VMEC2000)
 
