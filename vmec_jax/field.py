@@ -89,6 +89,7 @@ def bsup_from_sqrtg_lambda(
     chipf,
     signgs: int,
     lamscale,
+    flux_is_internal: bool = True,
     eps: float = 1e-14,
 ):
     """Compute (bsupu, bsupv) from a Jacobian and lambda derivatives.
@@ -115,12 +116,21 @@ def bsup_from_sqrtg_lambda(
     chipf = jnp.asarray(chipf)
     signgs = int(signgs)
     lamscale = jnp.asarray(lamscale)
+    flux_is_internal = bool(flux_is_internal)
 
     if sqrtg.ndim != 3:
         raise ValueError(f"sqrtg must be (ns,ntheta,nzeta), got shape {sqrtg.shape}")
 
+    if not flux_is_internal:
+        scale = jnp.asarray(TWOPI * float(signgs), dtype=phipf.dtype)
+        phipf = phipf / scale
+        chipf = chipf / scale
+
     denom = (signgs * sqrtg)
-    num_u = chipf[:, None, None] + lamscale * lam_v
+    # VMEC defines LV = -d(lambda)/dv for the bsupu path (see bcovar/add_fluxes).
+    # The geometry kernels return d(lambda)/dphi_phys, so flip the sign here.
+    lam_v_eff = -lam_v
+    num_u = chipf[:, None, None] + lamscale * lam_v_eff
     num_v = phipf[:, None, None] + lamscale * lam_u
     bsupu = _safe_divide(num_u, denom, eps=eps)
     bsupv = _safe_divide(num_v, denom, eps=eps)
@@ -286,7 +296,17 @@ def chips_from_wout_chipf(
     return chipf
 
 
-def bsup_from_geom(geom, *, phipf, chipf, nfp: int, signgs: int, lamscale, eps: float = 1e-14):
+def bsup_from_geom(
+    geom,
+    *,
+    phipf,
+    chipf,
+    nfp: int,
+    signgs: int,
+    lamscale,
+    flux_is_internal: bool = True,
+    eps: float = 1e-14,
+):
     """Compute (bsupu, bsupv) from a :class:`~vmec_jax.geom.Geom`.
 
     Notes
@@ -308,6 +328,7 @@ def bsup_from_geom(geom, *, phipf, chipf, nfp: int, signgs: int, lamscale, eps: 
         chipf=chipf,
         signgs=signgs,
         lamscale=lamscale,
+        flux_is_internal=flux_is_internal,
         eps=eps,
     )
 

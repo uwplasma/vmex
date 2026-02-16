@@ -16,6 +16,7 @@ vmec-jax documentation
    installation
    quickstart
    theory
+   equations
    vmec_wiki_primer
    algorithms
    validation
