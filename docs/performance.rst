@@ -21,6 +21,14 @@ On CPU, compilation can dominate runtime for moderate problem sizes. ``vmec-jax`
 Solver functions accept ``jit_grad=True`` to trade longer compile time for faster
 iterations.
 
+To reduce initial compilation overhead during startup, you can disable JIT for
+the **initial guess** phase by setting::
+
+  export VMEC_JAX_DISABLE_JIT_INIT=1
+
+This keeps the solver kernel JIT-compiled, but avoids compiling the initial
+boundary->state projection path (useful for short runs or rapid profiling).
+
 Scan-mode iteration (fast path)
 -------------------------------
 
