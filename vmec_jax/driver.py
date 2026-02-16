@@ -728,9 +728,12 @@ def run_fixed_boundary(
             time_step = resume_state.get("time_step", None)
             if time_step is None:
                 return None
-            inv_tau = resume_state.get("inv_tau", None)
-            if inv_tau is None:
-                inv_tau = [0.15 / float(time_step)] * 10
+            # Clamp to the nominal DELT for stability when changing resolution.
+            try:
+                time_step = min(float(time_step), float(step_size_val))
+            except Exception:
+                time_step = float(time_step)
+            inv_tau = [0.15 / float(time_step)] * 10
             out = {
                 "time_step": float(time_step),
                 "inv_tau": list(inv_tau),
