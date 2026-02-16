@@ -133,6 +133,9 @@ variables:
 
 These map to JAX's persistent cache configuration and allow caching more (or
 fewer) compiled executables to reduce repeat-start latency for stable shapes.
+Enable cache-miss diagnostics by setting
+``VMEC_JAX_EXPLAIN_CACHE_MISSES=1``; JAX will log a short summary whenever a
+cache miss triggers a compilation.
 
 Batched radial smoothing
 ------------------------

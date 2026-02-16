@@ -304,6 +304,9 @@ def run_fixed_boundary(
                 max_size = os.getenv("VMEC_JAX_COMPILATION_CACHE_MAX_SIZE", "")
                 if max_size:
                     jax.config.update("jax_compilation_cache_max_size", int(max_size))
+                explain = os.getenv("VMEC_JAX_EXPLAIN_CACHE_MISSES", "")
+                if explain.strip().lower() not in ("", "0", "false", "no"):
+                    jax.config.update("jax_explain_cache_misses", True)
             except Exception:
                 pass
         except Exception:
@@ -416,15 +419,36 @@ def run_fixed_boundary(
         multigrid = False
     multigrid = bool(multigrid) and (ns_override is None)
 
+    def _as_list(value):
+        if isinstance(value, list):
+            return value
+        if isinstance(value, tuple):
+            return list(value)
+        try:
+            if isinstance(value, np.ndarray):
+                return list(value.tolist())
+        except Exception:
+            pass
+        return None
+
     # Build the initial state on either the final grid (single-grid solvers and
     # use_initial_guess) or on the first multigrid stage for VMEC-style solves.
     ns_stages = [int(cfg.ns)]
     if multigrid:
         ns_array = indata.get("NS_ARRAY", None)
-        if isinstance(ns_array, list) and ns_array:
-            ns_stages = [int(v) for v in ns_array]
-        elif isinstance(ns_array, (tuple, np.ndarray)) and len(ns_array):
-            ns_stages = [int(v) for v in ns_array]
+        ns_list = _as_list(ns_array)
+        if ns_list:
+            ns_stages = [int(v) for v in ns_list]
+
+    # When NITER_ARRAY is present and we are honoring input staging, treat it
+    # as the authoritative iteration count unless the caller overrides max_iter.
+    if multigrid and multigrid_use_input_niter:
+        niter_list = _as_list(indata.get("NITER_ARRAY", None))
+        if niter_list:
+            niter_sum = int(sum(int(v) for v in niter_list))
+            niter_default = int(indata.get_int("NITER", max_iter))
+            if int(max_iter) == niter_default:
+                max_iter = niter_sum
 
     # Precompute boundary coefficients without triggering JAX initialization.
     boundary_coeffs = None
@@ -635,12 +659,10 @@ def run_fixed_boundary(
         if multigrid_use_input_niter:
             niter_array = indata.get("NITER_ARRAY", None)
             ftol_array = indata.get("FTOL_ARRAY", None)
-            niter_stages = (
-                [int(v) for v in niter_array] if isinstance(niter_array, list) and len(niter_array) == nstep else None
-            )
-            ftol_stages = (
-                [float(v) for v in ftol_array] if isinstance(ftol_array, list) and len(ftol_array) == nstep else None
-            )
+            niter_list = _as_list(niter_array)
+            ftol_list = _as_list(ftol_array)
+            niter_stages = [int(v) for v in niter_list] if niter_list and len(niter_list) == nstep else None
+            ftol_stages = [float(v) for v in ftol_list] if ftol_list and len(ftol_list) == nstep else None
             if niter_stages is None:
                 niter_stages = _distribute_iters(iters=int(max_iter), nstep=int(nstep))
             else:
@@ -693,6 +715,31 @@ def run_fixed_boundary(
         state = restart_state_eff
         static_prev = None
         static_final = None
+        resume_state_stage = restart_solver_state
+        multigrid_resume = False
+        if multigrid:
+            env_resume = os.getenv("VMEC_JAX_MULTIGRID_RESUME", "1")
+            multigrid_resume = env_resume.strip().lower() not in ("", "0", "false", "no")
+
+        def _sanitize_resume_state_for_stage(resume_state):
+            if resume_state is None:
+                return None
+            # Keep only time-step/momentum scalars that are safe across ns changes.
+            time_step = resume_state.get("time_step", None)
+            if time_step is None:
+                return None
+            inv_tau = resume_state.get("inv_tau", None)
+            if inv_tau is None:
+                inv_tau = [0.15 / float(time_step)] * 10
+            out = {
+                "time_step": float(time_step),
+                "inv_tau": list(inv_tau),
+            }
+            if "flip_sign" in resume_state:
+                out["flip_sign"] = float(resume_state["flip_sign"])
+            out["iter_offset"] = 0
+            out["vmec2000_cache_valid"] = False
+            return out
         def _resolve_jit_forces(flag: bool | str, static_i: VMECStatic, niter_i: int) -> bool:
             if isinstance(flag, str):
                 if flag.strip().lower() != "auto":
@@ -782,7 +829,7 @@ def run_fixed_boundary(
                 reference_mode=False,
                 use_restart_triggers=False if scan_mode else (True if use_restart_triggers is None else bool(use_restart_triggers)),
                 use_direct_fallback=False,
-                resume_state=restart_solver_state,
+                resume_state=resume_state_stage,
                 verbose=bool(verbose),
                 verbose_vmec2000_table=bool(verbose),
                 use_scan=bool(use_scan),
@@ -813,6 +860,8 @@ def run_fixed_boundary(
                     **solve_kwargs,
                 )
             stage_results.append(res_i)
+            if multigrid_resume and i < (nstep - 1):
+                resume_state_stage = _sanitize_resume_state_for_stage(res_i.diagnostics.get("resume_state"))
             state = stage_results[-1].state
             static_prev = static_i
 

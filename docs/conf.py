@@ -46,8 +46,9 @@ def _truthy(value: str | None) -> bool:
 _FAST = _truthy(os.environ.get("SPHINX_FAST"))
 if _FAST:
     tags.add("fast")
-    # In fast mode build only the landing page to keep CI under minutes.
-    include_patterns = ["index.rst"]
+    # In fast mode build only a minimal landing page to keep CI under minutes.
+    master_doc = "index_fast"
+    include_patterns = ["index_fast.rst"]
     suppress_warnings = ["toc.not_readable", "toc.excluded"]
 
 autosummary_generate = not _FAST

@@ -4070,6 +4070,19 @@ def solve_fixed_boundary_residual_iter(
                 flush=True,
             )
 
+    nstep_screen = int(indata.get_int("NSTEP", 1)) if indata is not None else 1
+    if nstep_screen < 1:
+        nstep_screen = 1
+
+    def _should_print_vmec2000(iter_idx: int, max_iter: int) -> bool:
+        if not (bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table)):
+            return False
+        if iter_idx <= 1:
+            return True
+        if iter_idx >= max_iter:
+            return True
+        return (iter_idx % nstep_screen) == 0
+
     # VMEC2000 caches 1D preconditioner/norm/tcon updates every `ns4` iterations
     # (vmec_params.f: ns4=25), reusing the cached values between refreshes.
     # This materially affects the nonlinear iteration trace because the
@@ -5036,19 +5049,20 @@ def solve_fixed_boundary_residual_iter(
                 grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
                 if verbose:
                     if bool(vmec2000_control) and bool(verbose_vmec2000_table):
-                        _print_vmec2000_iter_row(
-                            iter_idx=int(iter2),
-                            fsqr=fsqr_f,
-                            fsqz=fsqz_f,
-                            fsql=fsql_f,
-                            fsqr1=fsqr1_f,
-                            fsqz1=fsqz1_f,
-                            fsql1=fsql1_f,
-                            delt0r=float(time_step_iter),
-                            r00=float(r00_val),
-                            w_mhd=float(w_vmec_history[-1]),
-                            z00=float(z00_val),
-                        )
+                        if _should_print_vmec2000(int(iter2), int(max_iter)):
+                            _print_vmec2000_iter_row(
+                                iter_idx=int(iter2),
+                                fsqr=fsqr_f,
+                                fsqz=fsqz_f,
+                                fsql=fsql_f,
+                                fsqr1=fsqr1_f,
+                                fsqz1=fsqz1_f,
+                                fsql1=fsql1_f,
+                                delt0r=float(time_step_iter),
+                                r00=float(r00_val),
+                                w_mhd=float(w_vmec_history[-1]),
+                                z00=float(z00_val),
+                            )
                     else:
                         print(
                             f"[solve_fixed_boundary_residual_iter] iter={it:03d} "
@@ -5607,19 +5621,20 @@ def solve_fixed_boundary_residual_iter(
         update_rms_history.append(float(update_rms))
         if verbose:
             if bool(vmec2000_control) and bool(verbose_vmec2000_table):
-                _print_vmec2000_iter_row(
-                    iter_idx=int(iter2),
-                    fsqr=fsqr_f,
-                    fsqz=fsqz_f,
-                    fsql=fsql_f,
-                    fsqr1=fsqr1_f,
-                    fsqz1=fsqz1_f,
-                    fsql1=fsql1_f,
-                    delt0r=float(time_step_report),
-                    r00=float(r00_val),
-                    w_mhd=float(w_vmec_history[-1]),
-                    z00=float(z00_val),
-                )
+                if _should_print_vmec2000(int(iter2), int(max_iter)):
+                    _print_vmec2000_iter_row(
+                        iter_idx=int(iter2),
+                        fsqr=fsqr_f,
+                        fsqz=fsqz_f,
+                        fsql=fsql_f,
+                        fsqr1=fsqr1_f,
+                        fsqz1=fsqz1_f,
+                        fsql1=fsql1_f,
+                        delt0r=float(time_step_report),
+                        r00=float(r00_val),
+                        w_mhd=float(w_vmec_history[-1]),
+                        z00=float(z00_val),
+                    )
             else:
                 print(
                     f"[solve_fixed_boundary_residual_iter] iter={it:03d} "

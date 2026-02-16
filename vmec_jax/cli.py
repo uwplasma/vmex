@@ -97,9 +97,28 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"failed to read &INDATA from {input_path}: {exc}")
         return 2
 
+    def _as_list(value):
+        if isinstance(value, list):
+            return value
+        if isinstance(value, tuple):
+            return list(value)
+        try:
+            import numpy as np
+
+            if isinstance(value, np.ndarray):
+                return list(value.tolist())
+        except Exception:
+            pass
+        return None
+
     max_iter = args.max_iter
     if max_iter is None:
-        max_iter = int(indata.get_int("NITER", 10))
+        niter_array = _as_list(indata.get("NITER_ARRAY", None))
+        ns_array = _as_list(indata.get("NS_ARRAY", None))
+        if bool(args.use_input_niter) and niter_array and (not ns_array or len(niter_array) == len(ns_array)):
+            max_iter = int(sum(int(v) for v in niter_array))
+        else:
+            max_iter = int(indata.get_int("NITER", 10))
 
     try:
         jit_forces = _parse_jit_forces(args.jit_forces)
