@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -106,17 +107,36 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(str(exc))
         return 2
 
-    run = run_fixed_boundary(
-        str(input_path),
-        solver=str(args.solver),
-        max_iter=int(max_iter),
-        step_size=args.step_size,
-        history_size=int(args.history_size),
-        multigrid=args.multigrid,
-        multigrid_use_input_niter=bool(args.use_input_niter),
-        verbose=not bool(args.quiet),
-        jit_forces=jit_forces,
-    )
+    profile_dir = os.getenv("VMEC_JAX_PROFILE_DIR", "")
+    if profile_dir:
+        try:
+            import jax
+
+            Path(profile_dir).mkdir(parents=True, exist_ok=True)
+            jax.profiler.start_trace(profile_dir)
+        except Exception:
+            profile_dir = ""
+
+    try:
+        run = run_fixed_boundary(
+            str(input_path),
+            solver=str(args.solver),
+            max_iter=int(max_iter),
+            step_size=args.step_size,
+            history_size=int(args.history_size),
+            multigrid=args.multigrid,
+            multigrid_use_input_niter=bool(args.use_input_niter),
+            verbose=not bool(args.quiet),
+            jit_forces=jit_forces,
+        )
+    finally:
+        if profile_dir:
+            try:
+                import jax
+
+                jax.profiler.stop_trace()
+            except Exception:
+                pass
 
     write_wout_from_fixed_boundary_run(wout_path, run, include_fsq=True)
     return 0
