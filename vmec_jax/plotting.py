@@ -259,6 +259,7 @@ def bmag_from_state_physical(
     phipf: np.ndarray | None = None,
     chipf: np.ndarray | None = None,
     lamscale: float | None = None,
+    flux_is_internal: bool | None = None,
     sqrtg_floor: float | None = None,
     bmag_floor: float | None = None,
     eps: float = 1e-14,
@@ -277,6 +278,34 @@ def bmag_from_state_physical(
     zeta = phi_use * float(nfp)
     grid = AngleGrid(theta=theta_use, zeta=zeta, nfp=nfp)
     basis = build_helical_basis(static.modes, grid)
+    # Mirror eval_geom's m=1 conversion when using custom grids.
+    cfg = static.cfg
+    lconm1 = bool(getattr(cfg, "lconm1", True))
+    lthreed = bool(getattr(cfg, "lthreed", int(getattr(cfg, "ntor", 0)) > 0))
+    lasym = bool(getattr(cfg, "lasym", False))
+    if lconm1 and (lthreed or lasym) and int(getattr(cfg, "mpol", 0)) > 1:
+        from .vmec_parity import vmec_m1_internal_to_physical_signed
+        from .state import VMECState
+
+        Rcos, Zsin, Rsin, Zcos = vmec_m1_internal_to_physical_signed(
+            Rcos=state.Rcos,
+            Zsin=state.Zsin,
+            Rsin=state.Rsin,
+            Zcos=state.Zcos,
+            modes=static.modes,
+            lthreed=lthreed,
+            lasym=lasym,
+            lconm1=lconm1,
+        )
+        state = VMECState(
+            layout=state.layout,
+            Rcos=Rcos,
+            Rsin=Rsin,
+            Zcos=Zcos,
+            Zsin=Zsin,
+            Lcos=state.Lcos,
+            Lsin=state.Lsin,
+        )
     geom = _eval_geom_jit(state, basis, static.s, grid.zeta)
     if signgs is None:
         if _is_tracer(geom.sqrtg):
@@ -291,6 +320,7 @@ def bmag_from_state_physical(
         phipf_use = jnp.asarray(flux.phipf)
         chipf_use = jnp.asarray(flux.chipf)
         lamscale_use = jnp.asarray(flux.lamscale)
+        flux_is_internal_use = True
     else:
         phipf_use = jnp.asarray(phipf)
         chipf_use = jnp.asarray(chipf)
@@ -299,6 +329,10 @@ def bmag_from_state_physical(
             lamscale_use = lamscale_from_phips(phips, static.s)
         else:
             lamscale_use = jnp.asarray(lamscale)
+        if flux_is_internal is None:
+            flux_is_internal_use = False
+        else:
+            flux_is_internal_use = bool(flux_is_internal)
 
     if sqrtg_floor is None:
         bsupu, bsupv = bsup_from_geom(
@@ -308,6 +342,7 @@ def bmag_from_state_physical(
             nfp=nfp,
             signgs=signgs,
             lamscale=lamscale_use,
+            flux_is_internal=flux_is_internal_use,
             eps=eps,
         )
     else:
@@ -321,6 +356,7 @@ def bmag_from_state_physical(
             chipf=chipf_use,
             signgs=signgs,
             lamscale=lamscale_use,
+            flux_is_internal=flux_is_internal_use,
             eps=eps,
         )
     B2 = b2_from_bsup(geom, bsupu, bsupv)
@@ -344,6 +380,7 @@ def bmag_from_state_vmec_realspace(
     phipf: np.ndarray | None = None,
     chipf: np.ndarray | None = None,
     lamscale: float | None = None,
+    flux_is_internal: bool | None = None,
     sqrtg_floor: float | None = None,
 ) -> np.ndarray:
     """Compute the magnetic field magnitude using VMEC real-space synthesis."""
@@ -367,6 +404,7 @@ def bmag_from_state_vmec_realspace(
         phipf_use = flux.phipf
         chipf_use = flux.chipf
         lamscale_use = flux.lamscale
+        flux_is_internal_use = True
     else:
         phipf_use = np.asarray(phipf)
         chipf_use = np.asarray(chipf)
@@ -375,6 +413,10 @@ def bmag_from_state_vmec_realspace(
             lamscale_use = float(np.asarray(lamscale_from_phips(phips, static.s)))
         else:
             lamscale_use = float(lamscale)
+        if flux_is_internal is None:
+            flux_is_internal_use = False
+        else:
+            flux_is_internal_use = bool(flux_is_internal)
 
     jac = vmec_half_mesh_jacobian_from_state(
         state=state,
@@ -398,6 +440,7 @@ def bmag_from_state_vmec_realspace(
         chipf=chipf_use,
         signgs=signgs,
         lamscale=lamscale_use,
+        flux_is_internal=flux_is_internal_use,
     )
 
     Ru = np.asarray(geom["Ru"])
@@ -753,6 +796,7 @@ def write_bmag_parity_figures(
         signgs=int(getattr(wout, "signgs", 1)),
         phipf=np.asarray(wout.phipf),
         chipf=np.asarray(wout.chipf),
+        flux_is_internal=False,
     )
     diff = B_jax - B_ref
 
@@ -802,6 +846,7 @@ def write_bsup_parity_figures(
         nfp=int(static.cfg.nfp),
         signgs=int(getattr(wout, "signgs", 1)),
         lamscale=lamscale,
+        flux_is_internal=False,
     )
     bsupu_jax = np.asarray(bsupu_full)[s_idx]
     bsupv_jax = np.asarray(bsupv_full)[s_idx]
@@ -857,6 +902,7 @@ def write_bsub_parity_figures(
         nfp=int(static.cfg.nfp),
         signgs=int(getattr(wout, "signgs", 1)),
         lamscale=lamscale,
+        flux_is_internal=False,
     )
     bsubu_full, bsubv_full = bsub_from_bsup(geom, bsupu_full, bsupv_full)
     bsubu_jax = np.asarray(bsubu_full)[s_idx]

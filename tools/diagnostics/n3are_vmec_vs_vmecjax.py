@@ -2,11 +2,14 @@
 
 This script:
 1) Loads the bundled VMEC2000 reference `wout` for n3are.
-2) Runs a lightweight vmec_jax fixed-boundary solve (or uses the initial guess).
+2) Uses a vmec_jax state from either:
+   - the VMEC2000 wout coefficients (plotting parity), or
+   - a lightweight vmec_jax fixed-boundary solve / initial guess.
 3) Generates side-by-side figures for LCFS cross-sections, 3D surface, |B| on LCFS,
    and iota/pressure profiles.
 
-The vmec_jax side reflects the *current* solver capability (not full parity yet).
+The vmec_jax side reflects the *current* solver capability unless
+``--use-wout-state`` is enabled (plotting parity path).
 """
 
 from __future__ import annotations
@@ -128,6 +131,8 @@ def main() -> None:
     p.add_argument("--solver", type=str, default="gd", help="gd, lbfgs, vmec_lbfgs, or vmec_gn")
     p.add_argument("--solve", action="store_true", help="Run the vmec_jax fixed-boundary solver (slower).")
     p.add_argument("--no-solve", action="store_true", help="Use the initial guess only (fast).")
+    p.add_argument("--use-wout-state", action="store_true", help="Use VMEC2000 wout coefficients for vmec_jax state.")
+    p.add_argument("--no-wout-state", action="store_true", help="Use vmec_jax solver/initial-guess state.")
     args = p.parse_args()
 
     outdir = Path(args.outdir)
@@ -136,9 +141,17 @@ def main() -> None:
     # VMEC2000 reference
     wout = _load_vmec2000_wout()
 
-    # vmec_jax current output
+    # Decide which vmec_jax state to visualize.
     use_initial_guess = not bool(args.solve) or bool(args.no_solve)
-    if not use_initial_guess:
+    if bool(args.no_wout_state):
+        use_wout_state = False
+    elif bool(args.use_wout_state):
+        use_wout_state = True
+    else:
+        # Default: use wout coefficients when not running the solver.
+        use_wout_state = not bool(args.solve)
+
+    if not use_initial_guess and not use_wout_state:
         print(
             "[vmec_jax] note: fixed-boundary solver update-loop parity is still in progress; "
             "use --no-solve for the most stable visualization baseline."
@@ -148,17 +161,46 @@ def main() -> None:
     if step_size is None:
         step_size = 1.0 if str(args.solver).lower().endswith("_iter") else 1e-5
 
-    run = run_fixed_boundary(
-        Path(args.input),
-        solver=str(args.solver),
-        max_iter=int(args.max_iter),
-        step_size=step_size,
-        use_initial_guess=use_initial_guess,
-    )
-    state = run.state
-    static = run.static
-    indata = run.indata
-    signgs = run.signgs
+    if use_wout_state:
+        from vmec_jax.config import load_config, VMECConfig
+        from vmec_jax.modes import default_grid_sizes
+        from vmec_jax.static import build_static
+        from vmec_jax.wout import state_from_wout
+        from vmec_jax.field import lamscale_from_phips
+
+        cfg_in, indata = load_config(Path(args.input))
+        ntheta, nzeta = default_grid_sizes(mpol=int(wout.mpol), ntor=int(wout.ntor), ntheta=0, nzeta=0)
+        cfg = VMECConfig(
+            mpol=int(wout.mpol),
+            ntor=int(wout.ntor),
+            ns=int(wout.ns),
+            nfp=int(wout.nfp),
+            lasym=bool(wout.lasym),
+            lthreed=bool(int(wout.ntor) > 0),
+            lconm1=bool(cfg_in.lconm1),
+            ntheta=int(ntheta),
+            nzeta=int(nzeta),
+        )
+        static = build_static(cfg)
+        state = state_from_wout(wout)
+        signgs = int(wout.signgs)
+        lamscale_use = float(np.asarray(lamscale_from_phips(wout.phips, static.s)))
+        flux_lamscale = lamscale_use
+        run = None
+    else:
+        run = run_fixed_boundary(
+            Path(args.input),
+            solver=str(args.solver),
+            max_iter=int(args.max_iter),
+            step_size=step_size,
+            use_initial_guess=use_initial_guess,
+        )
+        state = run.state
+        static = run.static
+        indata = run.indata
+        signgs = run.signgs
+        flux_lamscale = float(np.asarray(run.flux.lamscale))
+
     modes = vmec_mode_table(static.cfg.mpol, static.cfg.ntor)
 
     # --- Cross sections ---
@@ -175,7 +217,10 @@ def main() -> None:
     )
     Raxis_jax, Zaxis_jax = axis_rz_from_state_physical(state, modes, phi=phi_slices, nfp=int(static.cfg.nfp))
 
-    jax_title = "vmec_jax (initial guess)" if use_initial_guess else "vmec_jax (solver)"
+    if use_wout_state:
+        jax_title = "vmec_jax (from wout)"
+    else:
+        jax_title = "vmec_jax (initial guess)" if use_initial_guess else "vmec_jax (solver)"
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 5.5))
     _plot_cross_sections(axes[0], R=R_vmec, Z=Z_vmec, Raxis=Raxis_vmec, Zaxis=Zaxis_vmec, title="VMEC2000")
@@ -189,7 +234,7 @@ def main() -> None:
     phi_b = np.linspace(0.0, 2.0 * np.pi, num=65, endpoint=True)
     B_vmec = bmag_from_wout_physical(wout, theta=theta_b, phi=phi_b, s_index=int(wout.ns) - 1)
     sqrtg_floor = None
-    if use_initial_guess:
+    if use_initial_guess and not use_wout_state:
         geom_init = eval_geom(state, static)
         abs_sg = np.abs(np.asarray(geom_init.sqrtg))
         floor = max(1e-3, 0.5 * float(np.median(abs_sg)))
@@ -208,7 +253,8 @@ def main() -> None:
         signgs=int(wout.signgs),
         phipf=np.asarray(wout.phipf),
         chipf=np.asarray(wout.chipf),
-        lamscale=float(np.asarray(run.flux.lamscale)),
+        lamscale=float(np.asarray(flux_lamscale)),
+        flux_is_internal=False,
         sqrtg_floor=sqrtg_floor,
     )
     B_jax_vmec = bmag_from_state_vmec_realspace(
@@ -219,7 +265,8 @@ def main() -> None:
         signgs=int(wout.signgs),
         phipf=np.asarray(wout.phipf),
         chipf=np.asarray(wout.chipf),
-        lamscale=float(np.asarray(run.flux.lamscale)),
+        lamscale=float(np.asarray(flux_lamscale)),
+        flux_is_internal=False,
         sqrtg_floor=sqrtg_floor,
     )
     print(
@@ -243,10 +290,15 @@ def main() -> None:
     s = prof_vmec["s"]
     s_half = prof_vmec["s_half"]
 
-    prof_jax = run.profiles
-    iota_jax = np.asarray(prof_jax.get("iota", np.zeros_like(np.asarray(static.s))))
-    presf_jax = np.asarray(prof_jax.get("pressure", np.zeros_like(np.asarray(static.s))))
-    pres_jax = np.asarray(prof_jax.get("pressure", np.zeros_like(np.asarray(static.s))))
+    if use_wout_state:
+        iota_jax = np.asarray(prof_vmec["iotaf"])
+        presf_jax = np.asarray(prof_vmec["presf"])
+        pres_jax = np.asarray(prof_vmec["pres"])
+    else:
+        prof_jax = run.profiles
+        iota_jax = np.asarray(prof_jax.get("iota", np.zeros_like(np.asarray(static.s))))
+        presf_jax = np.asarray(prof_jax.get("pressure", np.zeros_like(np.asarray(static.s))))
+        pres_jax = np.asarray(prof_jax.get("pressure", np.zeros_like(np.asarray(static.s))))
 
     fig, axes = plt.subplots(2, 2, figsize=(11, 7))
     _plot_profiles(
@@ -296,7 +348,8 @@ def main() -> None:
         signgs=int(wout.signgs),
         phipf=np.asarray(wout.phipf),
         chipf=np.asarray(wout.chipf),
-        lamscale=float(np.asarray(run.flux.lamscale)),
+        lamscale=float(np.asarray(flux_lamscale)),
+        flux_is_internal=False,
         sqrtg_floor=sqrtg_floor,
     )
     print(f"[vmec_jax] B range (vmec_jax 3D plot) min={B_jax_3d.min():.3e} max={B_jax_3d.max():.3e}")

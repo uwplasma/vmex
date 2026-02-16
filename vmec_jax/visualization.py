@@ -266,6 +266,7 @@ def export_vtk_surface_and_fieldline(
         nfp=int(wout.nfp),
         signgs=int(wout.signgs),
         lamscale=lamscale,
+        flux_is_internal=False,
     )
 
     b2 = b2_from_bsup(geom, bsupu, bsupv)

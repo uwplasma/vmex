@@ -216,10 +216,11 @@ def main() -> None:
         theta=theta_b,
         phi=phi_b,
         s_index=int(static.cfg.ns) - 1,
-        signgs=int(wout.signgs),
-        phipf=np.asarray(wout.phipf),
-        chipf=np.asarray(wout.chipf),
+        signgs=int(run.signgs),
+        phipf=np.asarray(run.flux.phipf),
+        chipf=np.asarray(run.flux.chipf),
         lamscale=float(np.asarray(run.flux.lamscale)),
+        flux_is_internal=True,
         sqrtg_floor=sqrtg_floor,
     )
     B_jax_vmec = bmag_from_state_vmec_realspace(
@@ -227,10 +228,11 @@ def main() -> None:
         static,
         indata,
         s_index=int(static.cfg.ns) - 1,
-        signgs=int(wout.signgs),
-        phipf=np.asarray(wout.phipf),
-        chipf=np.asarray(wout.chipf),
+        signgs=int(run.signgs),
+        phipf=np.asarray(run.flux.phipf),
+        chipf=np.asarray(run.flux.chipf),
         lamscale=float(np.asarray(run.flux.lamscale)),
+        flux_is_internal=True,
         sqrtg_floor=sqrtg_floor,
     )
     print(
@@ -304,10 +306,11 @@ def main() -> None:
         theta=theta_3d,
         phi=phi_3d,
         s_index=int(static.cfg.ns) - 1,
-        signgs=int(wout.signgs),
-        phipf=np.asarray(wout.phipf),
-        chipf=np.asarray(wout.chipf),
+        signgs=int(run.signgs),
+        phipf=np.asarray(run.flux.phipf),
+        chipf=np.asarray(run.flux.chipf),
         lamscale=float(np.asarray(run.flux.lamscale)),
+        flux_is_internal=True,
         sqrtg_floor=sqrtg_floor,
     )
     print(f"[vmec_jax] B range (vmec_jax 3D plot) min={B_jax_3d.min():.3e} max={B_jax_3d.max():.3e}")
