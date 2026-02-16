@@ -25,8 +25,10 @@ vmec-jax documentation
    contributing
    references
 
-.. toctree::
-   :maxdepth: 2
-   :caption: API reference
+.. only:: not fast
 
-   api/index
+   .. toctree::
+      :maxdepth: 2
+      :caption: API reference
+
+      api/index

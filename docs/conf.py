@@ -37,10 +37,23 @@ extensions = [
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
-autosummary_generate = True
+def _truthy(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() not in ("", "0", "false", "no")
+
+
+_FAST = _truthy(os.environ.get("SPHINX_FAST"))
+if _FAST:
+    tags.add("fast")
+
+autosummary_generate = not _FAST
+autosummary_imported_members = False
 autosectionlabel_prefix_document = True
 todo_include_todos = False
 autodoc_mock_imports = ["jax", "jaxlib"]
+if _FAST:
+    exclude_patterns += ["api/index.rst", "api/generated/*"]
 
 
 # -- Options for HTML output ----------------------------------------------------
