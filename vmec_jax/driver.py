@@ -718,7 +718,8 @@ def run_fixed_boundary(
         resume_state_stage = restart_solver_state
         multigrid_resume = False
         if multigrid:
-            env_resume = os.getenv("VMEC_JAX_MULTIGRID_RESUME", "1")
+            # Default to VMEC2000 behavior (reset time-step state per stage).
+            env_resume = os.getenv("VMEC_JAX_MULTIGRID_RESUME", "0")
             multigrid_resume = env_resume.strip().lower() not in ("", "0", "false", "no")
 
         def _sanitize_resume_state_for_stage(resume_state):
