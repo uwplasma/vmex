@@ -67,5 +67,6 @@ jobs:
         env:
           LC_ALL: C.UTF-8
           LANG: C.UTF-8
+          SPHINX_FAST: "1"
         run: |
-          python -m sphinx -W -b html docs docs/_build/html
+          python -m sphinx -W -j auto -b html docs docs/_build/html

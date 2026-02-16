@@ -1096,6 +1096,15 @@ def solve_lambda_gd(
     nfp = int(static.cfg.nfp)
 
     s = jnp.asarray(static.s)
+    dtype_state = jnp.asarray(state0.Rcos).dtype
+    zero_precond_diag = (
+        jnp.zeros((int(s.shape[0]),), dtype=dtype_state),
+        jnp.zeros((int(s.shape[0]),), dtype=dtype_state),
+    )
+    zero_tcon = jnp.zeros((int(s.shape[0]),), dtype=dtype_state)
+    constraint_active_false = jnp.asarray(False)
+    constraint_active_false = jnp.asarray(False)
+    constraint_active_false = jnp.asarray(False)
     theta = jnp.asarray(static.grid.theta)
     zeta = jnp.asarray(static.grid.zeta)
     if s.shape[0] < 2:
@@ -2922,6 +2931,14 @@ def solve_fixed_boundary_residual_iter(
         else (m_modes == 0) & (n_modes > 0)
     )
     lambda_axis_copy_mask = jnp.asarray(axis_copy_mask_np, dtype=jnp.asarray(state0.Rcos).dtype)
+    s = jnp.asarray(static.s)
+    dtype_state = jnp.asarray(state0.Rcos).dtype
+    zero_precond_diag = (
+        jnp.zeros((int(s.shape[0]),), dtype=dtype_state),
+        jnp.zeros((int(s.shape[0]),), dtype=dtype_state),
+    )
+    zero_tcon = jnp.zeros((int(s.shape[0]),), dtype=dtype_state)
+    constraint_active_false = jnp.asarray(False)
 
     # Boundary + axis recompute helpers (for VMEC-style bad-Jacobian reset).
     boundary_for_axis = (
@@ -3018,6 +3035,10 @@ def solve_fixed_boundary_residual_iter(
                     st_tmp,
                     include_edge=False,
                     zero_m1=jnp.asarray(1.0, dtype=jnp.asarray(st.Rcos).dtype),
+                    constraint_precond_diag=zero_precond_diag,
+                    constraint_tcon=zero_tcon,
+                    constraint_precond_active=constraint_active_false,
+                    constraint_tcon_active=constraint_active_false,
                     iter_idx=None,
                     iter2=1,
                 )
@@ -3103,7 +3124,6 @@ def solve_fixed_boundary_residual_iter(
             Lsin=st.Lsin,
         )
         return _apply_vmec_lambda_axis_rules(st_out)
-    s = jnp.asarray(static.s)
     flux = flux_profiles_from_indata(indata, s, signgs=signgs)
     chipf_wout = jnp.asarray(flux.chipf)
 
@@ -3376,9 +3396,8 @@ def solve_fixed_boundary_residual_iter(
         zero_m1: Any,
         constraint_precond_diag: tuple[Any, Any] | None = None,
         constraint_tcon: Any | None = None,
-        norms_override: Any | None = None,
-        rz_scale_override: Any | None = None,
-        l_scale_override: Any | None = None,
+        constraint_precond_active: Any | None = None,
+        constraint_tcon_active: Any | None = None,
         iter_idx: int | None = None,
     ):
         k = vmec_forces_rz_from_wout(
@@ -3389,6 +3408,8 @@ def solve_fixed_boundary_residual_iter(
             constraint_tcon0=constraint_tcon0,
             constraint_tcon=constraint_tcon,
             constraint_precond_diag=constraint_precond_diag,
+            constraint_precond_active=constraint_precond_active,
+            constraint_tcon_active=constraint_tcon_active,
             use_vmec_synthesis=True,
             trig=trig,
             iter_idx=iter_idx,
@@ -3463,23 +3484,11 @@ def solve_fixed_boundary_residual_iter(
                 include_edge=bool(np.asarray(include_edge)),
                 ns=int(static.cfg.ns),
             )
-        if norms_override is None:
-            norms_current = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
-            norms_used = norms_current
-        else:
-            norms_current = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
-            norms_used = norms_override
+        norms_current = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
         if iter_idx is not None:
             _maybe_dump_scalars(norms=norms_current, iter_idx=int(iter_idx), ns=int(static.cfg.ns))
-        fsqr = norms_used.r1 * norms_used.fnorm * gcr2
-        fsqz = norms_used.r1 * norms_used.fnorm * gcz2
-        fsql = norms_used.fnormL * gcl2
-        if (rz_scale_override is None) or (l_scale_override is None):
-            rz_scale, l_scale = _metric_surface_precond_from_bcovar(k.bc)
-        else:
-            rz_scale = jnp.asarray(rz_scale_override, dtype=jnp.asarray(frzl.frcc).dtype)
-            l_scale = jnp.asarray(l_scale_override, dtype=jnp.asarray(frzl.frcc).dtype)
-        return k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale, norms_used
+        rz_scale, l_scale = _metric_surface_precond_from_bcovar(k.bc)
+        return k, frzl, gcr2, gcz2, gcl2, rz_scale, l_scale, norms_current
 
     _compute_forces_impl = _compute_forces
     compute_cache_key = (
@@ -3497,9 +3506,8 @@ def solve_fixed_boundary_residual_iter(
             zero_m1: Any,
             constraint_precond_diag: tuple[Any, Any] | None = None,
             constraint_tcon: Any | None = None,
-            norms_override: Any | None = None,
-            rz_scale_override: Any | None = None,
-            l_scale_override: Any | None = None,
+            constraint_precond_active: Any | None = None,
+            constraint_tcon_active: Any | None = None,
             iter_idx: int | None = None,
         ):
             return _compute_forces_impl(
@@ -3508,9 +3516,8 @@ def solve_fixed_boundary_residual_iter(
                 zero_m1=zero_m1,
                 constraint_precond_diag=constraint_precond_diag,
                 constraint_tcon=constraint_tcon,
-                norms_override=norms_override,
-                rz_scale_override=rz_scale_override,
-                l_scale_override=l_scale_override,
+                constraint_precond_active=constraint_precond_active,
+                constraint_tcon_active=constraint_tcon_active,
                 iter_idx=None,
             )
 
@@ -3532,9 +3539,8 @@ def solve_fixed_boundary_residual_iter(
         zero_m1: Any,
         constraint_precond_diag: tuple[Any, Any] | None = None,
         constraint_tcon: Any | None = None,
-        norms_override: Any | None = None,
-        rz_scale_override: Any | None = None,
-        l_scale_override: Any | None = None,
+        constraint_precond_active: Any | None = None,
+        constraint_tcon_active: Any | None = None,
         iter_idx: int | None = None,
         iter2: int | None = None,
     ):
@@ -3544,25 +3550,23 @@ def solve_fixed_boundary_residual_iter(
 
                 with jax.disable_jit():
                     return _compute_forces_impl(
-                        state,
-                        include_edge=include_edge,
-                        zero_m1=zero_m1,
-                        constraint_precond_diag=constraint_precond_diag,
-                        constraint_tcon=constraint_tcon,
-                        norms_override=norms_override,
-                        rz_scale_override=rz_scale_override,
-                        l_scale_override=l_scale_override,
-                        iter_idx=iter_idx,
-                    )
+                    state,
+                    include_edge=include_edge,
+                    zero_m1=zero_m1,
+                    constraint_precond_diag=constraint_precond_diag,
+                    constraint_tcon=constraint_tcon,
+                    constraint_precond_active=constraint_precond_active,
+                    constraint_tcon_active=constraint_tcon_active,
+                    iter_idx=iter_idx,
+                )
             return _compute_forces_impl(
                 state,
                 include_edge=include_edge,
                 zero_m1=zero_m1,
                 constraint_precond_diag=constraint_precond_diag,
                 constraint_tcon=constraint_tcon,
-                norms_override=norms_override,
-                rz_scale_override=rz_scale_override,
-                l_scale_override=l_scale_override,
+                constraint_precond_active=constraint_precond_active,
+                constraint_tcon_active=constraint_tcon_active,
                 iter_idx=iter_idx,
             )
         return _compute_forces(
@@ -3571,11 +3575,16 @@ def solve_fixed_boundary_residual_iter(
             zero_m1=zero_m1,
             constraint_precond_diag=constraint_precond_diag,
             constraint_tcon=constraint_tcon,
-            norms_override=norms_override,
-            rz_scale_override=rz_scale_override,
-            l_scale_override=l_scale_override,
+            constraint_precond_active=constraint_precond_active,
+            constraint_tcon_active=constraint_tcon_active,
             iter_idx=iter_idx,
         )
+
+    def _fsq_from_norms(norms_in, *, gcr2_in, gcz2_in, gcl2_in):
+        fsqr_out = norms_in.r1 * norms_in.fnorm * gcr2_in
+        fsqz_out = norms_in.r1 * norms_in.fnorm * gcz2_in
+        fsql_out = norms_in.fnormL * gcl2_in
+        return fsqr_out, fsqz_out, fsql_out
 
     mpol = int(static.cfg.mpol)
     ntor = int(static.cfg.ntor)
@@ -4119,12 +4128,22 @@ def solve_fixed_boundary_residual_iter(
         huge_initial_forces = False
         if lmove_axis:
             zero_m1_init = jnp.asarray(1.0, dtype=jnp.asarray(state.Rcos).dtype)
-            k_init, _, fsqr_init, fsqz_init, fsql_init, _, _, _ = _compute_forces_iter(
+            k_init, _, gcr2_init, gcz2_init, gcl2_init, _, _, norms_init = _compute_forces_iter(
                 state,
                 include_edge=False,
                 zero_m1=zero_m1_init,
+                constraint_precond_diag=zero_precond_diag,
+                constraint_tcon=zero_tcon,
+                constraint_precond_active=constraint_active_false,
+                constraint_tcon_active=constraint_active_false,
                 iter_idx=_iter_idx_for_dump(1),
                 iter2=1,
+            )
+            fsqr_init, fsqz_init, fsql_init = _fsq_from_norms(
+                norms_init,
+                gcr2_in=gcr2_init,
+                gcz2_in=gcz2_init,
+                gcl2_in=gcl2_init,
             )
             fsq_init = float(np.asarray(fsqr_init + fsqz_init + fsql_init))
             huge_initial_forces = (not np.isfinite(fsq_init)) or (fsq_init > 1.0e2)
@@ -4342,32 +4361,34 @@ def solve_fixed_boundary_residual_iter(
             )
             bcovar_update_history.append(int(bool(need_bcovar_update)))
     
-            constraint_precond_diag = None
-            constraint_tcon_override = None
-            norms_override = None
-            rz_scale_override = None
-            l_scale_override = None
-            if bool(vmec2000_control) and bool(vmec2000_cache_valid) and (not bool(need_bcovar_update)):
-                constraint_precond_diag = cache_precond_diag
-                # VMEC updates tcon only when refreshing the 1D preconditioner
-                # blocks; between refreshes it reuses the last tcon profile.
-                constraint_tcon_override = cache_tcon
-                norms_override = cache_norms
-                rz_scale_override = cache_rz_scale
-                l_scale_override = cache_l_scale
-    
-            k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale, norms_used = _compute_forces_iter(
+            use_cached_precond = bool(vmec2000_control) and bool(vmec2000_cache_valid) and (not bool(need_bcovar_update))
+            constraint_precond_diag = (
+                cache_precond_diag if (use_cached_precond and cache_precond_diag is not None) else zero_precond_diag
+            )
+            # VMEC updates tcon only when refreshing the 1D preconditioner
+            # blocks; between refreshes it reuses the last tcon profile.
+            constraint_tcon_override = cache_tcon if (use_cached_precond and cache_tcon is not None) else zero_tcon
+            constraint_precond_active = jnp.asarray(use_cached_precond, dtype=bool)
+            constraint_tcon_active = jnp.asarray(use_cached_precond, dtype=bool)
+
+            k, frzl, gcr2, gcz2, gcl2, rz_scale, l_scale, norms_current = _compute_forces_iter(
                 state,
                 include_edge=bool(include_edge),
                 zero_m1=zero_m1,
                 constraint_precond_diag=constraint_precond_diag,
                 constraint_tcon=constraint_tcon_override,
-                norms_override=norms_override,
-                rz_scale_override=rz_scale_override,
-                l_scale_override=l_scale_override,
+                constraint_precond_active=constraint_precond_active,
+                constraint_tcon_active=constraint_tcon_active,
                 iter_idx=_iter_idx_for_dump(iter2),
                 iter2=iter2,
             )
+            norms_used = cache_norms if (bool(vmec2000_control) and bool(vmec2000_cache_valid) and (not bool(need_bcovar_update))) else norms_current
+            fsqr = norms_used.r1 * norms_used.fnorm * gcr2
+            fsqz = norms_used.r1 * norms_used.fnorm * gcz2
+            fsql = norms_used.fnormL * gcl2
+            if bool(vmec2000_control) and bool(vmec2000_cache_valid) and (not bool(need_bcovar_update)):
+                rz_scale = cache_rz_scale
+                l_scale = cache_l_scale
             if bool(vmec2000_control) and bool(need_bcovar_update):
                 if constraint_tcon0 is None or float(constraint_tcon0) == 0.0:
                     cache_precond_diag = None
@@ -4656,11 +4677,21 @@ def solve_fixed_boundary_residual_iter(
                         Lcos=state.Lcos,
                         Lsin=jnp.asarray(state.Lsin) + sign * dL_dir,
                     )
-                    _, _, fsqr_t, fsqz_t, fsql_t, _, _, _ = _compute_forces_iter(
+                    _, _, gcr2_t, gcz2_t, gcl2_t, _, _, norms_t = _compute_forces_iter(
                         st_try,
                         include_edge=True,
                         zero_m1=zero_m1,
+                        constraint_precond_diag=constraint_precond_diag,
+                        constraint_tcon=constraint_tcon_override,
+                        constraint_precond_active=constraint_precond_active,
+                        constraint_tcon_active=constraint_tcon_active,
                         iter2=iter2,
+                    )
+                    fsqr_t, fsqz_t, fsql_t = _fsq_from_norms(
+                        norms_t,
+                        gcr2_in=gcr2_t,
+                        gcz2_in=gcz2_t,
+                        gcl2_in=gcl2_t,
                     )
                     return float(np.asarray(fsqr_t + fsqz_t + fsql_t))
     
@@ -5114,21 +5145,41 @@ def solve_fixed_boundary_residual_iter(
                 idx00=idx00,
             )
             state_try = _apply_vmec_lambda_axis_rules(state_try)
-            _, _, fsqr_t, fsqz_t, fsql_t, _, _, _ = _compute_forces_iter(
+            _, _, gcr2_t, gcz2_t, gcl2_t, _, _, norms_t = _compute_forces_iter(
                 state_try,
                 include_edge=include_edge,
                 zero_m1=zero_m1,
+                constraint_precond_diag=constraint_precond_diag,
+                constraint_tcon=constraint_tcon_override,
+                constraint_precond_active=constraint_precond_active,
+                constraint_tcon_active=constraint_tcon_active,
                 iter2=iter2,
+            )
+            fsqr_t, fsqz_t, fsql_t = _fsq_from_norms(
+                norms_t,
+                gcr2_in=gcr2_t,
+                gcz2_in=gcz2_t,
+                gcl2_in=gcl2_t,
             )
             w_try = float(np.asarray(fsqr_t + fsqz_t + fsql_t))
             w_try_ratio = w_try / max(w_curr, 1e-30) if np.isfinite(w_try) else float("inf")
             probe_bad_jacobian = False
             if bool(reference_mode) and (float(np.asarray(zero_m1)) > 0.5):
-                _, _, fsqr_probe, fsqz_probe, fsql_probe, _, _, _ = _compute_forces_iter(
+                _, _, gcr2_probe, gcz2_probe, gcl2_probe, _, _, norms_probe = _compute_forces_iter(
                     state_try,
                     include_edge=include_edge,
                     zero_m1=jnp.asarray(0.0, dtype=zero_m1.dtype),
+                    constraint_precond_diag=constraint_precond_diag,
+                    constraint_tcon=constraint_tcon_override,
+                    constraint_precond_active=constraint_precond_active,
+                    constraint_tcon_active=constraint_tcon_active,
                     iter2=iter2,
+                )
+                fsqr_probe, fsqz_probe, fsql_probe = _fsq_from_norms(
+                    norms_probe,
+                    gcr2_in=gcr2_probe,
+                    gcz2_in=gcz2_probe,
+                    gcl2_in=gcl2_probe,
                 )
                 w_probe = float(np.asarray(fsqr_probe + fsqz_probe + fsql_probe))
                 if (not np.isfinite(w_probe)) or (w_probe > 1.0e2 * max(w_curr, 1e-30)):
@@ -5166,11 +5217,21 @@ def solve_fixed_boundary_residual_iter(
                         idx00=idx00,
                     )
                     state_try = _apply_vmec_lambda_axis_rules(state_try)
-                    _, _, fsqr_t, fsqz_t, fsql_t, _, _, _ = _compute_forces_iter(
+                    _, _, gcr2_t, gcz2_t, gcl2_t, _, _, norms_t = _compute_forces_iter(
                         state_try,
                         include_edge=include_edge,
                         zero_m1=zero_m1,
+                        constraint_precond_diag=constraint_precond_diag,
+                        constraint_tcon=constraint_tcon_override,
+                        constraint_precond_active=constraint_precond_active,
+                        constraint_tcon_active=constraint_tcon_active,
                         iter2=iter2,
+                    )
+                    fsqr_t, fsqz_t, fsql_t = _fsq_from_norms(
+                        norms_t,
+                        gcr2_in=gcr2_t,
+                        gcz2_in=gcz2_t,
+                        gcl2_in=gcl2_t,
                     )
                     w_try = float(np.asarray(fsqr_t + fsqz_t + fsql_t))
                     w_try_ratio = w_try / max(w_curr, 1e-30) if np.isfinite(w_try) else float("inf")
@@ -5239,11 +5300,21 @@ def solve_fixed_boundary_residual_iter(
                         idx00=idx00,
                     )
                     state_dir = _apply_vmec_lambda_axis_rules(state_dir)
-                    _, _, fsqr_d, fsqz_d, fsql_d, _, _, _ = _compute_forces_iter(
+                    _, _, gcr2_d, gcz2_d, gcl2_d, _, _, norms_d = _compute_forces_iter(
                         state_dir,
                         include_edge=include_edge,
                         zero_m1=zero_m1,
+                        constraint_precond_diag=constraint_precond_diag,
+                        constraint_tcon=constraint_tcon_override,
+                        constraint_precond_active=constraint_precond_active,
+                        constraint_tcon_active=constraint_tcon_active,
                         iter2=iter2,
+                    )
+                    fsqr_d, fsqz_d, fsql_d = _fsq_from_norms(
+                        norms_d,
+                        gcr2_in=gcr2_d,
+                        gcz2_in=gcz2_d,
+                        gcl2_in=gcl2_d,
                     )
                     w_dir = float(np.asarray(fsqr_d + fsqz_d + fsql_d))
                     if np.isfinite(w_dir) and (w_dir <= 1.5 * max(w_curr, 1e-30)):
@@ -5417,11 +5488,21 @@ def solve_fixed_boundary_residual_iter(
                     idx00=idx00,
                 )
                 state_try = _apply_vmec_lambda_axis_rules(state_try)
-                _, _, fsqr_t, fsqz_t, fsql_t, _, _, _ = _compute_forces_iter(
+                _, _, gcr2_t, gcz2_t, gcl2_t, _, _, norms_t = _compute_forces_iter(
                     state_try,
                     include_edge=include_edge,
                     zero_m1=zero_m1,
+                    constraint_precond_diag=constraint_precond_diag,
+                    constraint_tcon=constraint_tcon_override,
+                    constraint_precond_active=constraint_precond_active,
+                    constraint_tcon_active=constraint_tcon_active,
                     iter2=iter2,
+                )
+                fsqr_t, fsqz_t, fsql_t = _fsq_from_norms(
+                    norms_t,
+                    gcr2_in=gcr2_t,
+                    gcz2_in=gcz2_t,
+                    gcl2_in=gcl2_t,
                 )
                 w_try = float(np.asarray(fsqr_t + fsqz_t + fsql_t))
                 if np.isfinite(w_try) and (w_try <= 1.05 * w_curr):

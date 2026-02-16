@@ -258,6 +258,8 @@ def _constraint_kernels_from_state(
     constraint_tcon0: float | None,
     tcon_override: Any | None = None,
     precond_diag_override: tuple[Any, Any] | None = None,
+    precond_active: Any | None = None,
+    tcon_active: Any | None = None,
     trig: VmecTrigTables | None = None,
     iter_idx: int | None = None,
 ) -> VmecConstraintKernels:
@@ -269,22 +271,24 @@ def _constraint_kernels_from_state(
     ns = int(s.shape[0])
     dtype = jnp.asarray(state.Rcos).dtype
 
-    if (constraint_tcon0 is None or float(constraint_tcon0) == 0.0) and (tcon_override is None):
-        z = jnp.zeros_like(pru_0)
-        tcon = jnp.zeros((ns,), dtype=dtype)
-        z1 = jnp.zeros((ns,), dtype=dtype)
-        return VmecConstraintKernels(
-            rcon_force=z,
-            zcon_force=z,
-            arcon_e=z,
-            arcon_o=z,
-            azcon_e=z,
-            azcon_o=z,
-            gcon=z,
-            tcon=tcon,
-            ard1=z1,
-            azd1=z1,
-        )
+    use_dynamic = (precond_active is not None) or (tcon_active is not None)
+    if not use_dynamic:
+        if (constraint_tcon0 is None or float(constraint_tcon0) == 0.0) and (tcon_override is None):
+            z = jnp.zeros_like(pru_0)
+            tcon = jnp.zeros((ns,), dtype=dtype)
+            z1 = jnp.zeros((ns,), dtype=dtype)
+            return VmecConstraintKernels(
+                rcon_force=z,
+                zcon_force=z,
+                arcon_e=z,
+                arcon_o=z,
+                azcon_e=z,
+                azcon_o=z,
+                gcon=z,
+                tcon=tcon,
+                ard1=z1,
+                azd1=z1,
+            )
 
     # xmpq(m,1) = m*(m-1).
     m_modes = np.asarray(static.modes.m, dtype=int)
@@ -361,9 +365,30 @@ def _constraint_kernels_from_state(
             dtype=jnp.asarray(ztemp).dtype,
         )
 
-    if tcon_override is None:
-        if precond_diag_override is None:
-            ard1, azd1 = precondn_diag_axd1_from_bcovar(
+    if use_dynamic:
+        if jax is None:
+            raise RuntimeError("Dynamic constraint overrides require JAX.")
+        tcon0_val = 0.0 if constraint_tcon0 is None else float(constraint_tcon0)
+        precond_override = precond_diag_override
+        if precond_override is None:
+            precond_override = (
+                jnp.zeros((ns,), dtype=dtype),
+                jnp.zeros((ns,), dtype=dtype),
+            )
+        tcon_override_arr = tcon_override
+        if tcon_override_arr is None:
+            tcon_override_arr = jnp.zeros((ns,), dtype=dtype)
+
+        use_precond = precond_active if precond_active is not None else bool(precond_diag_override is not None)
+        use_tcon = tcon_active if tcon_active is not None else bool(tcon_override is not None)
+        use_precond = jnp.asarray(use_precond, dtype=bool)
+        use_tcon = jnp.asarray(use_tcon, dtype=bool)
+
+        def _diag_override(_):
+            return precond_override
+
+        def _diag_from_bc(_):
+            return precondn_diag_axd1_from_bcovar(
                 trig=trig,
                 s=s,
                 bsq=bc.bsq,
@@ -372,38 +397,77 @@ def _constraint_kernels_from_state(
                 ru12=bc.jac.ru12,
                 zu12=bc.jac.zu12,
             )
-        else:
-            ard1, azd1 = precond_diag_override
 
-        # VMEC2000 updates `tcon(js)` only when refreshing the 1D preconditioner
-        # blocks (ns4=25). Between refreshes, `tcon` is reused verbatim. Parity
-        # drivers may therefore pass `tcon_override` on non-refresh iterations.
-        tcon = tcon_from_cached_precondn_diag(
-            tcon0=float(constraint_tcon0),
-            trig=trig,
-            s=s,
-            lasym=bool(wout.lasym),
-            ard1=ard1,
-            azd1=azd1,
-            ru0=ru0,
-            zu0=zu0,
-        )
-        # Fallback to a conservative constant profile if ill-conditioned.
-        finite = jnp.all(jnp.isfinite(tcon))
-        tcon_heur = tcon_from_tcon0_heuristic(
-            tcon0=float(constraint_tcon0),
-            s=s,
-            trig=trig,
-            lasym=bool(wout.lasym),
-        )
-        tcon = jnp.where(finite, tcon, tcon_heur)
+        ard1, azd1 = jax.lax.cond(use_precond, _diag_override, _diag_from_bc, operand=None)
+
+        def _tcon_from_diag(_):
+            tcon_tmp = tcon_from_cached_precondn_diag(
+                tcon0=tcon0_val,
+                trig=trig,
+                s=s,
+                lasym=bool(wout.lasym),
+                ard1=ard1,
+                azd1=azd1,
+                ru0=ru0,
+                zu0=zu0,
+            )
+            finite = jnp.all(jnp.isfinite(tcon_tmp))
+            tcon_heur = tcon_from_tcon0_heuristic(
+                tcon0=tcon0_val,
+                s=s,
+                trig=trig,
+                lasym=bool(wout.lasym),
+            )
+            return jnp.where(finite, tcon_tmp, tcon_heur)
+
+        def _tcon_override(_):
+            return jnp.asarray(tcon_override_arr, dtype=dtype)
+
+        tcon = jax.lax.cond(use_tcon, _tcon_override, _tcon_from_diag, operand=None)
     else:
-        tcon = jnp.asarray(tcon_override, dtype=dtype)
-        if precond_diag_override is None:
-            ard1 = jnp.zeros((ns,), dtype=dtype)
-            azd1 = jnp.zeros((ns,), dtype=dtype)
+        if tcon_override is None:
+            if precond_diag_override is None:
+                ard1, azd1 = precondn_diag_axd1_from_bcovar(
+                    trig=trig,
+                    s=s,
+                    bsq=bc.bsq,
+                    r12=bc.jac.r12,
+                    sqrtg=bc.jac.sqrtg,
+                    ru12=bc.jac.ru12,
+                    zu12=bc.jac.zu12,
+                )
+            else:
+                ard1, azd1 = precond_diag_override
+
+            # VMEC2000 updates `tcon(js)` only when refreshing the 1D preconditioner
+            # blocks (ns4=25). Between refreshes, `tcon` is reused verbatim. Parity
+            # drivers may therefore pass `tcon_override` on non-refresh iterations.
+            tcon = tcon_from_cached_precondn_diag(
+                tcon0=float(constraint_tcon0),
+                trig=trig,
+                s=s,
+                lasym=bool(wout.lasym),
+                ard1=ard1,
+                azd1=azd1,
+                ru0=ru0,
+                zu0=zu0,
+            )
+            # Fallback to a conservative constant profile if ill-conditioned.
+            finite = jnp.all(jnp.isfinite(tcon))
+            tcon_heur = tcon_from_tcon0_heuristic(
+                tcon0=float(constraint_tcon0),
+                s=s,
+                trig=trig,
+                lasym=bool(wout.lasym),
+            )
+            tcon = jnp.where(finite, tcon, tcon_heur)
         else:
-            ard1, azd1 = precond_diag_override
+            tcon = jnp.asarray(tcon_override, dtype=dtype)
+            if precond_diag_override is None:
+                ard1 = jnp.zeros((ns,), dtype=dtype)
+                azd1 = jnp.zeros((ns,), dtype=dtype)
+            else:
+                ard1, azd1 = precond_diag_override
 
     gcon = alias_gcon(
         ztemp=ztemp,
@@ -545,6 +609,8 @@ def vmec_forces_rz_from_wout(
     constraint_tcon0: float | None = None,
     constraint_tcon: Any | None = None,
     constraint_precond_diag: tuple[Any, Any] | None = None,
+    constraint_precond_active: Any | None = None,
+    constraint_tcon_active: Any | None = None,
     use_wout_bsup: bool = False,
     use_vmec_synthesis: bool = False,
     trig: VmecTrigTables | None = None,
@@ -953,6 +1019,8 @@ def vmec_forces_rz_from_wout(
         constraint_tcon0=constraint_tcon0,
         tcon_override=constraint_tcon,
         precond_diag_override=constraint_precond_diag,
+        precond_active=constraint_precond_active,
+        tcon_active=constraint_tcon_active,
         trig=trig,
         iter_idx=iter_idx,
     )
