@@ -4528,6 +4528,21 @@ def solve_fixed_boundary_residual_iter(
                         f"fsqr={fsqr_f:.3e} fsqz={fsqz_f:.3e} fsql={fsql_f:.3e} <= ftol={ftol:.3e}",
                         flush=True,
                     )
+                if bool(vmec2000_control) and bool(verbose_vmec2000_table):
+                    # Always print the final (converged) iteration row.
+                    _print_vmec2000_iter_row(
+                        iter_idx=int(iter2),
+                        fsqr=fsqr_f,
+                        fsqz=fsqz_f,
+                        fsql=fsql_f,
+                        fsqr1=fsqr1_f,
+                        fsqz1=fsqz1_f,
+                        fsql1=fsql1_f,
+                        delt0r=float(time_step_report),
+                        r00=float(r00_val),
+                        w_mhd=float(w_vmec_history[-1]),
+                        z00=float(z00_val),
+                    )
                 converged = True
                 break
     
