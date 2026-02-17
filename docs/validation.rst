@@ -85,7 +85,7 @@ Per-iteration trace parity (VMEC2000 executable, reduced grid):
 ::
 
   python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case circular_tokamak --max-iter 10 --vmec-nstep 1 --single-ns 13
-  python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case nfp4_QH_warm_start --max-iter 10 --single-ns 16 --vmec-timeout 60 --rtol 5e-4 --atol 1e-10
+  python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case nfp4_QH_warm_start --max-iter 10 --single-ns 16 --vmec-timeout 60 --rtol 1e-4 --atol 1e-12
   python tools/diagnostics/nonaxis_parity_batch.py --max-cases 8 --single-ns 13 --max-iter 1 --vmec-timeout 60
 
 This uses a reduced grid to stay under ~1 minute; increase ``--max-iter`` or ``--single-ns`` for deeper parity checks.
@@ -135,14 +135,15 @@ Current observed mismatches (updated parity status):
   suite (``circular_tokamak``, ``purely_toroidal_field``,
   ``shaped_tokamak_pressure``, ``solovev``).
 - **Full-grid multigrid parity** (`--use-input-niter`, `max_iter=10`) using the
-  VMEC2000 executable comparator now passes for QA/QH/n3are/QA-lowres and the
-  standard axisymmetric controls at `rtol=5e-4`, `atol=1e-10`.
+  VMEC2000 executable comparator passes for QA/QH/n3are/QA-lowres and the
+  standard axisymmetric controls at the legacy tolerance (`rtol=5e-4`,
+  `atol=1e-10`). Revalidation is underway at `rtol=1e-4`, `atol=1e-12`.
 - ``betapol``, ``betator``, ``betaxis``, ``ctor``, and ``DMerc`` are present but
   still placeholders in ``vmec_jax`` (zeros) until the VMEC2000 diagnostics path
   is fully ported.
 
 Full-grid parity snapshot (VMEC2000 exec comparator, `--use-input-niter`, `max_iter=10`,
-`rtol=5e-4`, `atol=1e-10`):
+`rtol=5e-4`, `atol=1e-10`; revalidation at `rtol=1e-4`, `atol=1e-12` in progress):
 
 .. list-table::
    :header-rows: 1

@@ -14,5 +14,8 @@ Background and canonical references for VMEC and related equilibrium methods:
 3. P. Merkel, “Solution of stellarator boundary value problems with external
    currents,” *Nuclear Fusion* 27 (1987).
 
-4. VMEC2000 source distribution and ``wout`` file format documentation (as
-   shipped with VMEC/LIBSTELL).
+4. VMEC2000 reference documentation and ``wout`` file format notes (VMEC/LIBSTELL
+   distribution and Princeton VMEC resources).
+
+5. VMEC++ numerics notes (local copy):
+   ``/Users/rogeriojorge/local/test/vmecpp/docs/the_numerics_of_vmecpp.pdf``.

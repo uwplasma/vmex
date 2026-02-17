@@ -27,7 +27,7 @@ Laptop-friendly, end-to-end differentiable (JAX) rewrite of **VMEC2000**, focusi
 
 - Fixed boundary only (free boundary deferred).
 - Axisymmetric end-to-end parity is stable (`ntor=0`, `nfp=1`, `lasym=False`).
-- Non-axisymmetric parity: QA/QH/n3are/QA-lowres multigrid traces pass at `rtol=5e-4`, `atol=1e-10`; remaining 3D/`lasym=True` cases are still in progress.
+- Non-axisymmetric parity: QA/QH/n3are/QA-lowres multigrid traces are being revalidated at `rtol=1e-4`, `atol=1e-12` (QA_lowres stage-1 iter-2 passes). Remaining 3D/`lasym=True` cases are still in progress.
 
 ## Quickstart
 
@@ -145,13 +145,13 @@ Interpretation:
 - The VMEC-style update loop uses scalxc-weighted forces, and ``xc``/``v`` dumps match VMEC2000 at iter 1 in reduced-grid parity runs.
 - The default benchmark path (10 iterations, ``ns=13``) now overlays VMEC2000 and vmec_jax traces for all 4 axisymmetric cases (`circular_tokamak`, `purely_toroidal_field`, `shaped_tokamak_pressure`, `solovev`).
 - Non-axisymmetric parity hardening is wired into a batch comparator (`tools/diagnostics/nonaxis_parity_batch.py`) over Simsopt `input.*` files.
-- Latest full-grid multigrid status at `rtol=5e-4`, `atol=1e-10` (VMEC2000 exec comparator, `--use-input-niter`, `--max-iter 10`):
+- Latest full-grid multigrid snapshot at `rtol=5e-4`, `atol=1e-10` (VMEC2000 exec comparator, `--use-input-niter`, `--max-iter 10`). Revalidation is underway at `rtol=1e-4`, `atol=1e-12`:
   - **Pass:** `input.qa_signgs1` (QA), `input.nfp4_QH_warm_start` (QH), `input.n3are_R7.75B5.7_lowres`, and `input.LandremanPaul2021_QA_lowres`.
   - **Pass (axisymmetric controls):** `input.solovev`, `input.shaped_tokamak_pressure`, `input.ITERModel`.
   - **Pending sweeps:** `li383_low_res` and `lasym=True` cases (e.g., `input.up_down_asymmetric_tokamak`).
 - Remaining known gaps: `lasym=True`, free boundary, and additional 3D inputs not yet swept (li383, etc).
 
-Full-grid parity snapshot (VMEC2000 exec comparator, `--use-input-niter`, `--max-iter 10`, `rtol=5e-4`, `atol=1e-10`):
+Full-grid parity snapshot (VMEC2000 exec comparator, `--use-input-niter`, `--max-iter 10`, `rtol=5e-4`, `atol=1e-10`; revalidation at `rtol=1e-4`, `atol=1e-12` in progress):
 
 | Case | Input | Status | fsq_total (VMEC/JAX) | runtime_s (vmec2000/jax) | Notes |
 |---|---|---|---|---|---|
@@ -167,7 +167,7 @@ Iteration trace parity (VMEC2000 executable, reduced grid):
 
 - Single-grid axisym cases match ``fsq*`` and preconditioned scalars at machine precision for the first **10 iterations** at `--single-ns 13`.
 - Full-grid multigrid axisymmetric traces are validated in the 10-iteration benchmark overlay with matching VMEC2000/vmec_jax lines for all 4 cases.
-- `LandremanPaul2021_QA_lowres` matches through stage 3 iter 48 at `rtol=5e-4`, `atol=1e-10` (`--max-iter 50`).
+- `LandremanPaul2021_QA_lowres` matches through stage 3 iter 48 at the legacy tolerance (`rtol=5e-4`, `atol=1e-10`, `--max-iter 50`). Tighter tolerance revalidation is in progress.
 - ``up_down_asymmetric_tokamak`` (``lasym=True``) shows large bcovar/force-kernel mismatches at iter 1; nonlinear trace diverges. This is the current top lasym parity blocker.
 
 Notes on the snapshot figures:
@@ -222,7 +222,7 @@ For per-iteration trace parity against the VMEC2000 executable (single grid, qui
 
 ```bash
 python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case circular_tokamak --max-iter 30 --vmec-nstep 1 --single-ns 13 --dump-level lite --vmec-timeout 60
-python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case nfp4_QH_warm_start --max-iter 10 --single-ns 16 --vmec-timeout 60 --rtol 5e-4 --atol 1e-10
+python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case nfp4_QH_warm_start --max-iter 10 --single-ns 16 --vmec-timeout 60 --rtol 1e-4 --atol 1e-12
 python tools/diagnostics/nonaxis_parity_batch.py --max-cases 8 --single-ns 13 --max-iter 1 --vmec-timeout 60
 ```
 
