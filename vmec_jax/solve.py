@@ -3375,10 +3375,10 @@ def solve_fixed_boundary_residual_iter(
         return sm, sp
 
     def _lambda_preconditioner(bc, *, return_faclam: bool = False, return_debug: bool = False):
-        from .preconditioner_1d_jax import lambda_preconditioner
+        from .preconditioner_1d_jax import lambda_preconditioner_cached
 
         lam_r0scale = float(getattr(trig, "r0scale", 1.0)) if trig is not None else 1.0
-        return lambda_preconditioner(
+        return lambda_preconditioner_cached(
             bc=bc,
             trig=trig,
             s=s,
