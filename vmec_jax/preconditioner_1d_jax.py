@@ -74,6 +74,7 @@ def lambda_preconditioner(
     damping_factor: float = 2.0,
     return_faclam: bool = False,
     return_debug: bool = False,
+    r0scale: float | None = None,
 ) -> Any:
     """Compute the VMEC lambda preconditioner (n>=0 storage) in JAX.
 
@@ -92,7 +93,9 @@ def lambda_preconditioner(
     damping_factor:
         Damping used in the diagonal lambda preconditioner.
     """
-    r0scale = float(getattr(trig, "r0scale", 1.0)) if trig is not None else 1.0
+    if r0scale is None:
+        r0scale = float(getattr(trig, "r0scale", 1.0)) if trig is not None else 1.0
+    r0scale = float(r0scale)
     s = jnp.asarray(s)
     dtype = s.dtype
 
@@ -318,16 +321,15 @@ def _compute_preconditioning_matrix(
     return axm, axd, bxm, bxd, cxd
 
 
-def rz_preconditioner_matrices(
+@partial(jit, static_argnames=("cfg",))
+def _rz_preconditioner_matrices_impl(
     *,
     bc,
     k,
-    trig,
     s,
     cfg,
 ) -> tuple[dict[str, Any], Any, int]:
     """Return VMEC R/Z radial preconditioner matrices (JAX, fixed-boundary)."""
-    del trig
     if bool(cfg.lasym):
         raise ValueError("rz_preconditioner_matrices does not yet support lasym.")
     s = jnp.asarray(s)
@@ -427,6 +429,19 @@ def rz_preconditioner_matrices(
 
     mats = {"ar": ar, "br": br, "dr": dr, "az": az, "bz": bz, "dz": dz}
     return mats, jmin, int(ns_f)
+
+
+def rz_preconditioner_matrices(
+    *,
+    bc,
+    k,
+    trig,
+    s,
+    cfg,
+) -> tuple[dict[str, Any], Any, int]:
+    """Return VMEC R/Z radial preconditioner matrices (JAX, fixed-boundary)."""
+    del trig
+    return _rz_preconditioner_matrices_impl(bc=bc, k=k, s=s, cfg=cfg)
 
 
 @jit
