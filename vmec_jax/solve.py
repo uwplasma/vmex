@@ -4342,6 +4342,24 @@ def solve_fixed_boundary_residual_iter(
         except Exception:
             return
 
+    def _dump_time_control_trace(*, stage: str, iter2: int, iter1: int, fsq: float, fsq0: float, res0: float, res1: float, time_step: float, irst: int) -> None:
+        if os.getenv("VMEC_JAX_DUMP_TIMECONTROL", "") in ("", "0"):
+            return
+        dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
+        if not dump_dir:
+            return
+        try:
+            path = Path(dump_dir) / "time_control_trace.log"
+            with path.open("a", encoding="utf-8") as f:
+                f.write(
+                    f"{int(iter2):8d} {int(iter1):8d} "
+                    f"{float(fsq): .16e} {float(fsq0): .16e} "
+                    f"{float(res0): .16e} {float(res1): .16e} "
+                    f"{float(time_step): .16e} {int(irst):3d} {stage}\n"
+                )
+        except Exception:
+            return
+
     def _maybe_dump_checkpoint(*, iter_idx: int, fsq: float, fsq0: float, res0: float, res1: float) -> None:
         if os.getenv("VMEC_JAX_DUMP_CHECKPOINT", "") in ("", "0"):
             return
@@ -4940,10 +4958,43 @@ def solve_fixed_boundary_residual_iter(
                     res0 = fsq
                     res1 = fsq0
                     state_checkpoint = state
+                    _dump_time_control_trace(
+                        stage="init",
+                        iter2=int(iter2),
+                        iter1=int(iter1),
+                        fsq=float(fsq),
+                        fsq0=float(fsq0),
+                        res0=float(res0),
+                        res1=float(res1),
+                        time_step=float(time_step),
+                        irst=1,
+                    )
                     _maybe_dump_checkpoint(iter_idx=int(iter2), fsq=float(fsq), fsq0=float(fsq0), res0=float(res0), res1=float(res1))
                 res0 = min(res0, fsq)
                 res1 = min(res1, fsq0)
+                _dump_time_control_trace(
+                    stage="pre",
+                    iter2=int(iter2),
+                    iter1=int(iter1),
+                    fsq=float(fsq),
+                    fsq0=float(fsq0),
+                    res0=float(res0),
+                    res1=float(res1),
+                    time_step=float(time_step),
+                    irst=1,
+                )
                 if (fsq <= res0) and (fsq0 <= res1) and (not bad_jacobian):
+                    _dump_time_control_trace(
+                        stage="checkpoint",
+                        iter2=int(iter2),
+                        iter1=int(iter1),
+                        fsq=float(fsq),
+                        fsq0=float(fsq0),
+                        res0=float(res0),
+                        res1=float(res1),
+                        time_step=float(time_step),
+                        irst=1,
+                    )
                     state_checkpoint = state
                     _maybe_dump_checkpoint(iter_idx=int(iter2), fsq=float(fsq), fsq0=float(fsq0), res0=float(res0), res1=float(res1))
                 if (not bad_jacobian) and ((iter2 - iter1) > 10) and (
@@ -4965,6 +5016,19 @@ def solve_fixed_boundary_residual_iter(
                     vZcs = jnp.zeros_like(vZcs)
                     vLsc = jnp.zeros_like(vLsc)
                     vLcs = jnp.zeros_like(vLcs)
+                    iter1_prev = int(iter1)
+                    time_step_prev = float(time_step)
+                    _dump_time_control_trace(
+                        stage="restart",
+                        iter2=int(iter2),
+                        iter1=iter1_prev,
+                        fsq=float(fsq),
+                        fsq0=float(fsq0),
+                        res0=float(res0),
+                        res1=float(res1),
+                        time_step=time_step_prev,
+                        irst=3,
+                    )
                     # VMEC2000 `restart_iter`: irst=3 (time-control) scales dt by 1/1.03.
                     time_step = max(time_step / restart_badprog_factor, 1e-12)
                     bad_resets += 1
