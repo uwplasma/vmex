@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from ._compat import jnp, has_jax
+from ._compat import jnp, has_jax, einsum
 from .modes import ModeTable
 from .vmec_residue import vmec_scalxc_from_s
 from .vmec_tomnsp import VmecTrigTables
@@ -279,10 +279,10 @@ def vmec_realspace_synthesis(
         if phase is None:
             phase = _vmec_phase_tables_stacked_cached(modes=modes, trig=trig, cache=True)
         coeff = jnp.concatenate([coeff_cos, coeff_sin], axis=-1)
-        f = jnp.einsum("...k,kij->...ij", coeff, phase)
+        f = einsum("...k,kij->...ij", coeff, phase)
     else:
         cos_phase, sin_phase = _vmec_phase_tables_cached(modes=modes, trig=trig, cache=True)
-        f = jnp.einsum("...k,kij->...ij", coeff_cos, cos_phase) + jnp.einsum(
+        f = einsum("...k,kij->...ij", coeff_cos, cos_phase) + einsum(
             "...k,kij->...ij", coeff_sin, sin_phase
         )
     return f
@@ -399,7 +399,7 @@ def vmec_realspace_synthesis_multi(
             raise ValueError(f"Unknown deriv={deriv!r}")
         phases.append(phase)
     phase_all = jnp.stack(phases, axis=0)
-    f_all = jnp.einsum("...k,tkij->t...ij", coeff, phase_all)
+    f_all = einsum("...k,tkij->t...ij", coeff, phase_all)
     return tuple(f_all[i] for i in range(len(derivs)))
 
 
@@ -484,8 +484,8 @@ def vmec_realspace_analysis(
     cos_unscaled = cos_phase / scale[:, None, None]
     sin_unscaled = sin_phase / scale[:, None, None]
 
-    inner_cos = jnp.einsum("sij,kij->sk", f_w, cos_unscaled)
-    inner_sin = jnp.einsum("sij,kij->sk", f_w, sin_unscaled)
+    inner_cos = einsum("sij,kij->sk", f_w, cos_unscaled)
+    inner_sin = einsum("sij,kij->sk", f_w, sin_unscaled)
 
     # Norms of the unscaled basis on the reduced VMEC grid:
     # - (m,n) = (0,0) has norm 1
@@ -557,10 +557,10 @@ def vmec_realspace_synthesis_dtheta(
         if phase is None:
             phase = _vmec_phase_tables_dtheta_stacked_cached(modes=modes, trig=trig, cache=True)
         coeff = jnp.concatenate([coeff_cos, coeff_sin], axis=-1)
-        f = jnp.einsum("...k,kij->...ij", coeff, phase)
+        f = einsum("...k,kij->...ij", coeff, phase)
     else:
         dcos_phase, dsin_phase = _vmec_phase_tables_dtheta_cached(modes=modes, trig=trig, cache=True)
-        f = jnp.einsum("...k,kij->...ij", coeff_cos, dcos_phase) + jnp.einsum(
+        f = einsum("...k,kij->...ij", coeff_cos, dcos_phase) + einsum(
             "...k,kij->...ij", coeff_sin, dsin_phase
         )
     return f
@@ -616,10 +616,10 @@ def vmec_realspace_synthesis_dzeta_phys(
         if phase is None:
             phase = _vmec_phase_tables_dzeta_stacked_cached(modes=modes, trig=trig, cache=True)
         coeff = jnp.concatenate([coeff_cos, coeff_sin], axis=-1)
-        f = jnp.einsum("...k,kij->...ij", coeff, phase)
+        f = einsum("...k,kij->...ij", coeff, phase)
     else:
         dcos_phase, dsin_phase = _vmec_phase_tables_dzeta_cached(modes=modes, trig=trig, cache=True)
-        f = jnp.einsum("...k,kij->...ij", coeff_cos, dcos_phase) + jnp.einsum(
+        f = einsum("...k,kij->...ij", coeff_cos, dcos_phase) + einsum(
             "...k,kij->...ij", coeff_sin, dsin_phase
         )
     return f

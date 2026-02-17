@@ -29,7 +29,7 @@ from typing import Any
 
 import numpy as np
 
-from ._compat import jnp
+from ._compat import jnp, einsum
 from .vmec_tomnsp import VmecTrigTables
 
 
@@ -449,21 +449,21 @@ def alias_gcon(
     sinnv = trig.sinnv[:, : (ntor + 1)]
 
     # Theta integration on half interval.
-    w1 = jnp.einsum("sik,im->smk", zhalf, cosmui)
-    w2 = jnp.einsum("sik,im->smk", zhalf, sinmui)
+    w1 = einsum("sik,im->smk", zhalf, cosmui)
+    w2 = einsum("sik,im->smk", zhalf, sinmui)
 
     if not lasym:
         # Forward zeta transform (de-aliased):
-        gcs = (tcon[:, None, None] * jnp.einsum("smk,kn->smn", w1, sinnv))
-        gsc = (tcon[:, None, None] * jnp.einsum("smk,kn->smn", w2, cosnv))
+        gcs = (tcon[:, None, None] * einsum("smk,kn->smn", w1, sinnv))
+        gsc = (tcon[:, None, None] * einsum("smk,kn->smn", w2, cosnv))
 
         # Inverse zeta transform:
-        work3 = jnp.einsum("smn,kn->smk", gcs, sinnv)
-        work4 = jnp.einsum("smn,kn->smk", gsc, cosnv)
+        work3 = einsum("smn,kn->smk", gcs, sinnv)
+        work4 = einsum("smn,kn->smk", gsc, cosnv)
 
         cosmu_fac = cosmu * faccon[None, :]
         sinmu_fac = sinmu * faccon[None, :]
-        gcon_half = jnp.einsum("smk,im->sik", work3, cosmu_fac) + jnp.einsum("smk,im->sik", work4, sinmu_fac)
+        gcon_half = einsum("smk,im->sik", work3, cosmu_fac) + einsum("smk,im->sik", work4, sinmu_fac)
 
         gcon = jnp.zeros((ns, ntheta3, nzeta), dtype=jnp.asarray(trig.cosmu).dtype)
         gcon = gcon.at[:, :nt2, :].set(gcon_half)
@@ -480,24 +480,24 @@ def alias_gcon(
     kk = (nzeta - np.arange(nzeta, dtype=int)) % nzeta  # (nzeta,)
     zref = ztemp[:, ir, :][:, :, kk]  # (ns, nt2, nzeta)
 
-    w3 = jnp.einsum("sik,im->smk", zref, cosmui)
-    w4 = jnp.einsum("sik,im->smk", zref, sinmui)
+    w3 = einsum("sik,im->smk", zref, cosmui)
+    w4 = einsum("sik,im->smk", zref, sinmui)
 
     half = 0.5 * tcon[:, None, None]
-    gcs = half * jnp.einsum("smk,kn->smn", (w1 - w3), sinnv)
-    gsc = half * jnp.einsum("smk,kn->smn", (w2 - w4), cosnv)
-    gss = half * jnp.einsum("smk,kn->smn", (w2 + w4), sinnv)
-    gcc = half * jnp.einsum("smk,kn->smn", (w1 + w3), cosnv)
+    gcs = half * einsum("smk,kn->smn", (w1 - w3), sinnv)
+    gsc = half * einsum("smk,kn->smn", (w2 - w4), cosnv)
+    gss = half * einsum("smk,kn->smn", (w2 + w4), sinnv)
+    gcc = half * einsum("smk,kn->smn", (w1 + w3), cosnv)
 
-    work3 = jnp.einsum("smn,kn->smk", gcs, sinnv)
-    work4 = jnp.einsum("smn,kn->smk", gsc, cosnv)
-    work1 = jnp.einsum("smn,kn->smk", gcc, cosnv)
-    work2 = jnp.einsum("smn,kn->smk", gss, sinnv)
+    work3 = einsum("smn,kn->smk", gcs, sinnv)
+    work4 = einsum("smn,kn->smk", gsc, cosnv)
+    work1 = einsum("smn,kn->smk", gcc, cosnv)
+    work2 = einsum("smn,kn->smk", gss, sinnv)
 
     cosmu_fac = cosmu * faccon[None, :]
     sinmu_fac = sinmu * faccon[None, :]
-    gcons_half = jnp.einsum("smk,im->sik", work3, cosmu_fac) + jnp.einsum("smk,im->sik", work4, sinmu_fac)
-    gcona_half = jnp.einsum("smk,im->sik", work1, cosmu_fac) + jnp.einsum("smk,im->sik", work2, sinmu_fac)
+    gcons_half = einsum("smk,im->sik", work3, cosmu_fac) + einsum("smk,im->sik", work4, sinmu_fac)
+    gcona_half = einsum("smk,im->sik", work1, cosmu_fac) + einsum("smk,im->sik", work2, sinmu_fac)
 
     gcon = jnp.zeros((ns, ntheta3, nzeta), dtype=jnp.asarray(trig.cosmu).dtype)
     gcon = gcon.at[:, :nt2, :].set(gcons_half + gcona_half)

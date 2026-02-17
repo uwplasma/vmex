@@ -26,7 +26,7 @@ from typing import Tuple
 
 import numpy as np
 
-from ._compat import jnp, jit, has_jax
+from ._compat import jnp, jit, has_jax, einsum
 from .modes import ModeTable
 from .grids import AngleGrid
 
@@ -194,8 +194,8 @@ def eval_fourier(
     phase_stack = getattr(basis, "phase_stack", None)
     if phase_stack is not None:
         coeff = jnp.concatenate([coeff_cos, coeff_sin], axis=-1)
-        return jnp.einsum("...k,kij->...ij", coeff, phase_stack)
-    return jnp.einsum("...k,kij->...ij", coeff_cos, basis.cos_phase) + jnp.einsum(
+        return einsum("...k,kij->...ij", coeff, phase_stack)
+    return einsum("...k,kij->...ij", coeff_cos, basis.cos_phase) + einsum(
         "...k,kij->...ij", coeff_sin, basis.sin_phase
     )
 
@@ -215,8 +215,8 @@ def eval_fourier_dtheta(coeff_cos, coeff_sin, basis: HelicalBasis, *, coeffs_int
     phase_stack = getattr(basis, "phase_stack", None)
     if phase_stack is not None:
         coeff = jnp.concatenate([coeff_sin * m, coeff_cos * (-m)], axis=-1)
-        return jnp.einsum("...k,kij->...ij", coeff, phase_stack)
-    return jnp.einsum("...k,kij->...ij", coeff_cos * (-m), basis.sin_phase) + jnp.einsum(
+        return einsum("...k,kij->...ij", coeff, phase_stack)
+    return einsum("...k,kij->...ij", coeff_cos * (-m), basis.sin_phase) + einsum(
         "...k,kij->...ij", coeff_sin * m, basis.cos_phase
     )
 
@@ -243,8 +243,8 @@ def eval_fourier_dzeta_phys(coeff_cos, coeff_sin, basis: HelicalBasis, *, coeffs
     phase_stack = getattr(basis, "phase_stack", None)
     if phase_stack is not None:
         coeff = jnp.concatenate([coeff_sin * (-n_phys), coeff_cos * n_phys], axis=-1)
-        return jnp.einsum("...k,kij->...ij", coeff, phase_stack)
-    return jnp.einsum("...k,kij->...ij", coeff_cos * n_phys, basis.sin_phase) + jnp.einsum(
+        return einsum("...k,kij->...ij", coeff, phase_stack)
+    return einsum("...k,kij->...ij", coeff_cos * n_phys, basis.sin_phase) + einsum(
         "...k,kij->...ij", coeff_sin * (-n_phys), basis.cos_phase
     )
 
@@ -282,8 +282,8 @@ def project_to_modes(
       routine matching VMEC's normalization exactly.
     """
     # f: (..., i, j), basis: (k, i, j)
-    inner_cos = jnp.einsum("...ij,kij->...k", f, basis.cos_phase)
-    inner_sin = jnp.einsum("...ij,kij->...k", f, basis.sin_phase)
+    inner_cos = einsum("...ij,kij->...k", f, basis.cos_phase)
+    inner_sin = einsum("...ij,kij->...k", f, basis.sin_phase)
 
     if not normalize:
         return inner_cos, inner_sin

@@ -105,3 +105,22 @@ def x64_enabled() -> bool:
 def asarray(x: Any, dtype: Any | None = None):
     """Create an array using the active backend (jax.numpy or numpy)."""
     return jnp.asarray(x, dtype=dtype)
+
+
+def einsum(expr: str, *operands: Any, precision: Any | None = None):
+    """Backend-aware einsum with high-precision accumulation when available."""
+    if jax is None:
+        return _np.einsum(expr, *operands)
+    if precision is None:
+        try:
+            from jax import lax
+
+            precision = lax.Precision.HIGHEST
+        except Exception:
+            precision = None
+    if precision is None:
+        return jnp.einsum(expr, *operands)
+    try:
+        return jnp.einsum(expr, *operands, precision=precision)
+    except TypeError:
+        return jnp.einsum(expr, *operands)
