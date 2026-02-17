@@ -518,6 +518,83 @@ def _maybe_dump_lam_gcl(
     )
 
 
+_HLO_DUMPED_KEYS: set[tuple[str, int, int, int, int, int, bool]] = set()
+
+
+def _maybe_dump_hlo_kernel(
+    *,
+    label: str,
+    fn,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    static: Any,
+    wout_like: Any,
+) -> None:
+    env_dir = os.getenv("VMEC_JAX_DUMP_HLO_DIR", "").strip()
+    if not env_dir:
+        return
+    env_all = os.getenv("VMEC_JAX_DUMP_HLO", "").strip().lower()
+    enabled_all = env_all not in ("", "0", "false", "no")
+    env_label = os.getenv(f"VMEC_JAX_DUMP_HLO_{label.upper()}", "").strip().lower()
+    enabled_label = env_label not in ("", "0", "false", "no")
+    if not (enabled_all or enabled_label):
+        return
+    if not has_jax():
+        return
+    try:
+        ns = int(getattr(static.cfg, "ns", 0))
+        key = (
+            str(label),
+            ns,
+            int(getattr(wout_like, "mpol", 0)),
+            int(getattr(wout_like, "ntor", 0)),
+            int(getattr(wout_like, "nfp", 0)),
+            int(getattr(static.cfg, "ntheta", 0)),
+            bool(getattr(wout_like, "lasym", False)),
+        )
+    except Exception:
+        key = (str(label), 0, 0, 0, 0, 0, False)
+    if key in _HLO_DUMPED_KEYS:
+        return
+
+    try:
+        import jax
+    except Exception:
+        return
+
+    outdir = Path(env_dir).expanduser().resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    fname = f"hlo_{label}_ns{key[1]}_mpol{key[2]}_ntor{key[3]}.txt"
+    outpath = outdir / fname
+
+    hlo_text = None
+    try:
+        jitted = jax.jit(fn)
+        hlo = jitted.lower(*args, **kwargs).compiler_ir(dialect="hlo")
+        if hasattr(hlo, "as_hlo_text"):
+            hlo_text = hlo.as_hlo_text()
+        elif hasattr(hlo, "as_text"):
+            hlo_text = hlo.as_text()
+        else:
+            hlo_text = str(hlo)
+    except Exception:
+        try:
+            hlo = jax.xla_computation(fn)(*args, **kwargs)
+            if hasattr(hlo, "as_hlo_text"):
+                hlo_text = hlo.as_hlo_text()
+            else:
+                hlo_text = str(hlo)
+        except Exception:
+            hlo_text = None
+
+    if hlo_text is None:
+        return
+    try:
+        outpath.write_text(hlo_text)
+        _HLO_DUMPED_KEYS.add(key)
+    except Exception:
+        return
+
 def _maybe_dump_bsube(*, bc, static, iter_idx: int) -> None:
     env = os.getenv("VMEC_JAX_DUMP_BSUBE", "")
     if not env or env == "0":
@@ -2814,6 +2891,7 @@ def solve_fixed_boundary_residual_iter(
     jit_warmup_iters: int = 0,
     jit_precompile: bool = False,
     use_scan: bool = False,
+    precompile_only: bool = False,
     resume_state: dict | None = None,
 ) -> SolveVmecResidualResult:
     """VMEC-style fixed-point update loop using preconditioned force residuals."""
@@ -2821,8 +2899,11 @@ def solve_fixed_boundary_residual_iter(
         raise ImportError("solve_fixed_boundary_residual_iter requires JAX (jax + jaxlib)")
 
     max_iter = int(max_iter)
-    if max_iter < 1:
+    precompile_only = bool(precompile_only)
+    if max_iter < 1 and not precompile_only:
         raise ValueError("max_iter must be >= 1")
+    if max_iter < 1 and precompile_only:
+        max_iter = 1
     step_size = float(step_size)
     if step_size <= 0.0:
         raise ValueError("step_size must be positive")
@@ -3501,6 +3582,77 @@ def solve_fixed_boundary_residual_iter(
         rz_scale, l_scale = _metric_surface_precond_from_bcovar(k.bc)
         return k, frzl, gcr2, gcz2, gcl2, rz_scale, l_scale, norms_current
 
+    if os.getenv("VMEC_JAX_DUMP_HLO_DIR", "").strip():
+        try:
+            def _bcovar_only(st):
+                from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
+
+                return vmec_bcovar_half_mesh_from_wout(
+                    state=st,
+                    static=static,
+                    wout=wout_like,
+                    pres=None,
+                    use_wout_bsup=False,
+                    use_wout_bsub_for_lambda=False,
+                    use_wout_bmag_for_bsq=False,
+                    use_vmec_synthesis=True,
+                    trig=trig,
+                )
+
+            _maybe_dump_hlo_kernel(
+                label="bcovar",
+                fn=_bcovar_only,
+                args=(state0,),
+                kwargs={},
+                static=static,
+                wout_like=wout_like,
+            )
+        except Exception:
+            pass
+        try:
+            from .vmec_forces import vmec_forces_rz_from_wout
+            from .vmec_forces import vmec_residual_internal_from_kernels
+
+            k_hlo = vmec_forces_rz_from_wout(
+                state=state0,
+                static=static,
+                wout=wout_like,
+                indata=None,
+                constraint_tcon0=constraint_tcon0,
+                constraint_tcon=None,
+                constraint_precond_diag=None,
+                constraint_precond_active=None,
+                constraint_tcon_active=None,
+                use_wout_bsup=False,
+                use_vmec_synthesis=True,
+                trig=trig,
+                iter_idx=None,
+            )
+            mask_pack_hlo = static.tomnsps_masks if getattr(static, "tomnsps_masks", None) is not None else None
+
+            def _tomnsps_only(k_in):
+                return vmec_residual_internal_from_kernels(
+                    k_in,
+                    cfg_ntheta=int(static.cfg.ntheta),
+                    cfg_nzeta=int(static.cfg.nzeta),
+                    wout=wout_like,
+                    trig=trig,
+                    apply_lforbal=False,
+                    include_edge=False,
+                    masks=mask_pack_hlo,
+                )
+
+            _maybe_dump_hlo_kernel(
+                label="tomnsps",
+                fn=_tomnsps_only,
+                args=(k_hlo,),
+                kwargs={},
+                static=static,
+                wout_like=wout_like,
+            )
+        except Exception:
+            pass
+
     _compute_forces_impl = _compute_forces
     compute_cache_key = (
         "compute_forces_v1",
@@ -3554,6 +3706,20 @@ def solve_fixed_boundary_residual_iter(
                 ).compile()
         except Exception:
             pass
+
+    if precompile_only:
+        empty = np.zeros((0,), dtype=float)
+        return SolveVmecResidualResult(
+            state=state0,
+            n_iter=0,
+            w_history=empty,
+            fsqr2_history=empty,
+            fsqz2_history=empty,
+            fsql2_history=empty,
+            grad_rms_history=empty,
+            step_history=empty,
+            diagnostics={"precompile_only": True},
+        )
 
     def _iter_idx_for_dump(it: int | None) -> int | None:
         return None if jit_forces else it
