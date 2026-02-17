@@ -25,9 +25,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import os
 import numpy as np
 
-from ._compat import jnp, tree_util
+from ._compat import jnp, tree_util, has_jax
 from .grids import AngleGrid
 from ._compat import has_jax
 
@@ -337,6 +338,59 @@ class TomnspsRZL:
 
 
 _MPARITY_CACHE: dict[tuple[int, str], jnp.ndarray] = {}
+_JNP_EINSUM = jnp.einsum
+_DETERMINISTIC_REDUCE = bool(int(os.environ.get("VMEC_JAX_DETERMINISTIC_REDUCE", "0")))
+
+
+def _einsum(expr: str, *operands):
+    if has_jax():
+        try:
+            from jax import lax
+
+            return _JNP_EINSUM(expr, *operands, precision=lax.Precision.HIGHEST)
+        except TypeError:
+            return _JNP_EINSUM(expr, *operands)
+    return _JNP_EINSUM(expr, *operands)
+
+
+def _theta_contract(arr, mat):
+    """Deterministic theta reduction matching VMEC loop order when enabled."""
+    if (not _DETERMINISTIC_REDUCE) or (not has_jax()):
+        return _einsum("apsik,im->apsmk", arr, mat)
+    from jax import lax
+
+    arr = jnp.asarray(arr)
+    mat = jnp.asarray(mat)
+    a, p, s, i_size, k = arr.shape
+    m = mat.shape[1]
+    acc = jnp.zeros((a, p, s, m, k), dtype=arr.dtype)
+
+    def body(i, acc_i):
+        arr_i = arr[:, :, :, i, :]  # (a, p, s, k)
+        mat_i = mat[i, :]  # (m,)
+        return acc_i + arr_i[..., None, :] * mat_i[None, None, None, :, None]
+
+    return lax.fori_loop(0, i_size, body, acc)
+
+
+def _zeta_contract(arr, mat):
+    """Deterministic zeta reduction matching VMEC loop order when enabled."""
+    if (not _DETERMINISTIC_REDUCE) or (not has_jax()):
+        return _einsum("psmk,kn->psmn", arr, mat)
+    from jax import lax
+
+    arr = jnp.asarray(arr)
+    mat = jnp.asarray(mat)
+    p, s, m, k_size = arr.shape
+    n = mat.shape[1]
+    acc = jnp.zeros((p, s, m, n), dtype=arr.dtype)
+
+    def body(k, acc_k):
+        arr_k = arr[:, :, :, k]  # (p, s, m)
+        mat_k = mat[k, :]  # (n,)
+        return acc_k + arr_k[..., None] * mat_k[None, None, None, :]
+
+    return lax.fori_loop(0, k_size, body, acc)
 
 
 def _cache_allowed() -> bool:
@@ -560,7 +614,7 @@ def tomnsps_rzl(
     azcon = jnp.stack([azcon_even, azcon_odd], axis=0)
 
     def _theta_einsum_stack(arr, mat):
-        return jnp.einsum("apsik,im->apsmk", arr, mat)
+        return _theta_contract(arr, mat)
 
     stack_cosmui = jnp.stack([armn, crmn, azmn, czmn, arcon, azcon, clmn], axis=0)
     stack_sinmumi = jnp.stack([brmn, bzmn, blmn], axis=0)
@@ -632,20 +686,20 @@ def tomnsps_rzl(
 
     # Zeta integration. Result arrays are (ns, mpol, ntor+1).
     w_cosnv = jnp.stack([w1, w7, w11], axis=0)
-    out_cosnv = jnp.einsum("psmk,kn->psmn", w_cosnv, cosnv)
+    out_cosnv = _zeta_contract(w_cosnv, cosnv)
     frcc, fzsc, flsc = out_cosnv[0], out_cosnv[1], out_cosnv[2]
 
     if lthreed:
         w_sinnvn = jnp.stack([w2, w8, w12], axis=0)
-        out_sinnvn = jnp.einsum("psmk,kn->psmn", w_sinnvn, sinnvn)
+        out_sinnvn = _zeta_contract(w_sinnvn, sinnvn)
         frcc = frcc + out_sinnvn[0]
         fzsc = fzsc + out_sinnvn[1]
         flsc = flsc + out_sinnvn[2]
 
         w_sinnv = jnp.stack([w3, w5, w9], axis=0)
         w_cosnvn = jnp.stack([w4, w6, w10], axis=0)
-        out_sinnv = jnp.einsum("psmk,kn->psmn", w_sinnv, sinnv)
-        out_cosnvn = jnp.einsum("psmk,kn->psmn", w_cosnvn, cosnvn)
+        out_sinnv = _zeta_contract(w_sinnv, sinnv)
+        out_cosnvn = _zeta_contract(w_cosnvn, cosnvn)
 
         frss = out_sinnv[0] + out_cosnvn[0]
         fzcs = out_sinnv[1] + out_cosnvn[1]
@@ -811,7 +865,7 @@ def tomnspa_rzl(
     azcon = jnp.stack([azcon_even, azcon_odd], axis=0)
 
     def _theta_einsum_stack(arr, mat):
-        return jnp.einsum("apsik,im->apsmk", arr, mat)
+        return _theta_contract(arr, mat)
 
     stack_cosmui = jnp.stack([armn, crmn, azmn, czmn, arcon, azcon, clmn], axis=0)
     stack_sinmumi = jnp.stack([brmn, bzmn, blmn], axis=0)
@@ -880,20 +934,20 @@ def tomnspa_rzl(
 
     # Zeta integration.
     w_cosnv = jnp.stack([w3, w5, w9], axis=0)
-    out_cosnv = jnp.einsum("psmk,kn->psmn", w_cosnv, cosnv)
+    out_cosnv = _zeta_contract(w_cosnv, cosnv)
     frsc, fzcc, flcc = out_cosnv[0], out_cosnv[1], out_cosnv[2]
 
     if lthreed:
         w_sinnvn = jnp.stack([w4, w6, w10], axis=0)
-        out_sinnvn = jnp.einsum("psmk,kn->psmn", w_sinnvn, sinnvn)
+        out_sinnvn = _zeta_contract(w_sinnvn, sinnvn)
         frsc = frsc + out_sinnvn[0]
         fzcc = fzcc + out_sinnvn[1]
         flcc = flcc + out_sinnvn[2]
 
         w_sinnv = jnp.stack([w1, w7, w11], axis=0)
         w_cosnvn = jnp.stack([w2, w8, w12], axis=0)
-        out_sinnv = jnp.einsum("psmk,kn->psmn", w_sinnv, sinnv)
-        out_cosnvn = jnp.einsum("psmk,kn->psmn", w_cosnvn, cosnvn)
+        out_sinnv = _zeta_contract(w_sinnv, sinnv)
+        out_cosnvn = _zeta_contract(w_cosnvn, cosnvn)
 
         frcs = out_sinnv[0] + out_cosnvn[0]
         fzss = out_sinnv[1] + out_cosnvn[1]
