@@ -10,8 +10,21 @@ from __future__ import annotations
 from typing import Any
 from functools import partial
 
-from ._compat import jax, jnp, jit
+from ._compat import jax, jnp, jit, has_jax
 from .vmec_tomnsp import TomnspsRZL
+
+_LAMBDA_PRECOND_JIT_CACHE: dict[tuple, Any] = {}
+
+
+def _cache_allowed() -> bool:
+    if not has_jax():
+        return True
+    try:
+        from jax import core
+
+        return bool(core.trace_ctx.is_top_level())
+    except Exception:
+        return False
 
 
 def _sqrt_profiles_from_ns(ns: int, *, dtype) -> tuple[Any, Any]:
@@ -209,6 +222,65 @@ def lambda_preconditioner(
         # VMEC dumps faclam as the preconditioner (not the raw denominator).
         return lam_prec, lam_prec
     return lam_prec
+
+
+def lambda_preconditioner_cached(
+    *,
+    bc,
+    trig,
+    s,
+    cfg,
+    damping_factor: float = 2.0,
+    return_faclam: bool = False,
+    return_debug: bool = False,
+    r0scale: float | None = None,
+) -> Any:
+    """Cached/JIT'd lambda preconditioner keyed by (cfg, r0scale, flags)."""
+    if r0scale is None:
+        r0scale = float(getattr(trig, "r0scale", 1.0)) if trig is not None else 1.0
+    r0scale = float(r0scale)
+    if not has_jax() or (not _cache_allowed()):
+        return lambda_preconditioner(
+            bc=bc,
+            trig=trig,
+            s=s,
+            cfg=cfg,
+            damping_factor=damping_factor,
+            return_faclam=return_faclam,
+            return_debug=return_debug,
+            r0scale=r0scale,
+        )
+
+    key = (
+        int(cfg.mpol),
+        int(cfg.ntor),
+        int(cfg.ntheta),
+        int(cfg.nzeta),
+        int(cfg.nfp),
+        bool(cfg.lasym),
+        bool(cfg.lthreed),
+        float(damping_factor),
+        float(r0scale),
+        bool(return_faclam),
+        bool(return_debug),
+    )
+    cached = _LAMBDA_PRECOND_JIT_CACHE.get(key)
+    if cached is None:
+        def _fn(bc_in, s_in):
+            return lambda_preconditioner(
+                bc=bc_in,
+                trig=None,
+                s=s_in,
+                cfg=cfg,
+                damping_factor=damping_factor,
+                return_faclam=return_faclam,
+                return_debug=return_debug,
+                r0scale=r0scale,
+            )
+
+        cached = jax.jit(_fn)
+        _LAMBDA_PRECOND_JIT_CACHE[key] = cached
+    return cached(bc, s)
 
 
 def _compute_preconditioning_matrix(
