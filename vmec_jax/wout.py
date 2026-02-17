@@ -21,6 +21,58 @@ from .vmec_parity import vmec_m1_internal_to_physical_signed, vmec_m1_physical_t
 MU0 = 4e-7 * np.pi  # N/A^2
 
 
+def _chipf_from_chips(chips: np.ndarray) -> np.ndarray:
+    """VMEC add_fluxes: build half-mesh chipf from chips on full mesh."""
+    chips = np.asarray(chips, dtype=float)
+    ns = int(chips.shape[0])
+    if ns <= 1:
+        return chips.copy()
+    chipf = np.zeros((ns,), dtype=chips.dtype)
+    if ns >= 3:
+        chipf[0] = 1.5 * chips[1] - 0.5 * chips[2]
+    else:
+        chipf[0] = chips[1]
+    if ns > 2:
+        chipf[1:-1] = 0.5 * (chips[1:-1] + chips[2:])
+    chipf[-1] = 1.5 * chips[-1] - 0.5 * chips[-2]
+    return chipf
+
+
+def _icurv_full_mesh_from_indata(*, indata, s_full: np.ndarray, signgs: int) -> np.ndarray:
+    from .profiles import eval_profiles
+
+    s_full = np.asarray(s_full, dtype=float)
+    ncurr = int(indata.get_int("NCURR", 0))
+    if ncurr != 1:
+        return np.zeros_like(s_full)
+
+    curtor = float(indata.get_float("CURTOR", 0.0))
+    if abs(curtor) <= np.finfo(float).eps:
+        return np.zeros_like(s_full)
+
+    if s_full.size < 2:
+        s_half = s_full
+    else:
+        s_half = np.concatenate([s_full[:1], 0.5 * (s_full[1:] + s_full[:-1])], axis=0)
+    prof = eval_profiles(indata, s_half)
+    icurv_raw = np.asarray(prof.get("current", np.zeros_like(s_half)))
+    if int(icurv_raw.shape[0]) != int(s_full.shape[0]):
+        icurv_raw = np.zeros_like(s_half)
+
+    pedge_prof = eval_profiles(indata, np.asarray([1.0], dtype=s_full.dtype))
+    pedge = float(np.asarray(pedge_prof.get("current", np.asarray([0.0], dtype=s_full.dtype)))[0])
+    if abs(pedge) <= abs(np.finfo(float).eps * curtor):
+        return np.zeros_like(s_full)
+
+    mu0 = 4e-7 * np.pi
+    currv = mu0 * curtor
+    scale = float(signgs) * currv / (2.0 * np.pi * pedge)
+    icurv = np.asarray(scale, dtype=icurv_raw.dtype) * icurv_raw
+    if int(icurv.shape[0]) > 0:
+        icurv[0] = 0.0
+    return icurv
+
+
 @dataclass(frozen=True)
 class WoutData:
     path: Path
@@ -51,8 +103,8 @@ class WoutData:
     phipf: np.ndarray
     chipf: np.ndarray
     phips: np.ndarray
-    iotaf: np.ndarray  # (ns,) iota on half mesh (VMEC convention)
-    iotas: np.ndarray  # (ns,) iota on full mesh (VMEC convention)
+    iotaf: np.ndarray  # (ns,) iota on full mesh (VMEC convention)
+    iotas: np.ndarray  # (ns,) iota on half mesh (VMEC convention)
 
     # nyquist Fourier coefficients for derived fields
     gmnc: np.ndarray
@@ -112,6 +164,7 @@ class WoutData:
     ac_aux_s: np.ndarray  # (ndfmax,)
     ac_aux_f: np.ndarray  # (ndfmax,)
     pcurr_type: str
+    piota_type: str
 
 
 def _bool_from_nc(x: Any) -> bool:
@@ -228,20 +281,24 @@ def read_wout(path: str | Path) -> WoutData:
         ac_aux_s = np.asarray(ds.variables.get("ac_aux_s", -np.ones((101,), dtype=float))[:])
         ac_aux_f = np.asarray(ds.variables.get("ac_aux_f", np.zeros((101,), dtype=float))[:])
 
-        pcurr_type = ""
-        if "pcurr_type" in ds.variables:
-            raw = np.asarray(ds.variables["pcurr_type"][:])
+        def _read_type_field(name: str) -> str:
+            if name not in ds.variables:
+                return ""
+            raw = np.asarray(ds.variables[name][:])
             if raw.dtype.kind in ("S", "U"):
                 if raw.ndim == 0:
-                    pcurr_type = str(raw)
+                    out = str(raw)
                 else:
-                    pcurr_type = b"".join(raw.astype("S1")).decode("utf-8", "ignore")
+                    out = b"".join(raw.astype("S1")).decode("utf-8", "ignore")
             else:
                 try:
-                    pcurr_type = "".join(raw.tolist())
+                    out = "".join(raw.tolist())
                 except Exception:
-                    pcurr_type = str(raw)
-            pcurr_type = pcurr_type.rstrip()
+                    out = str(raw)
+            return out.rstrip()
+
+        pcurr_type = _read_type_field("pcurr_type")
+        piota_type = _read_type_field("piota_type")
 
     return WoutData(
         path=path,
@@ -312,6 +369,7 @@ def read_wout(path: str | Path) -> WoutData:
         ac_aux_s=ac_aux_s,
         ac_aux_f=ac_aux_f,
         pcurr_type=pcurr_type,
+        piota_type=piota_type,
     )
 
 
@@ -471,6 +529,11 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
         v = ds.createVariable("pcurr_type", "S1", ("dim_00020",))
         v[:] = np.asarray(list(pcurr), dtype="S1")
 
+        piota = str(getattr(wout, "piota_type", "") or "")
+        piota = (piota[:20]).ljust(20)
+        v = ds.createVariable("piota_type", "S1", ("dim_00020",))
+        v[:] = np.asarray(list(piota), dtype="S1")
+
 
 def assert_main_modes_match_wout(*, wout: WoutData) -> None:
     """Ensure vmec_jax mode ordering matches the `wout` file (important for parity)."""
@@ -554,6 +617,7 @@ def wout_minimal_from_fixed_boundary(
             presf[0] = pres[1]
         presf[1:-1] = 0.5 * (pres[1:-1] + pres[2:])
         presf[-1] = 1.5 * pres[-1] - 0.5 * pres[-2]
+    ncurr = int(indata.get_int("NCURR", 0))
     iotas = np.asarray(prof.get("iota", np.zeros((ns,), dtype=float)))
     if iotas.size:
         iotas = iotas.copy()
@@ -561,6 +625,85 @@ def wout_minimal_from_fixed_boundary(
     from .energy import _iotaf_from_iotas
 
     iotaf = np.asarray(_iotaf_from_iotas(iotas, lrfp=bool(indata.get_bool("LRFP", False))))
+
+    # For current-driven runs (ncurr=1), VMEC updates iota from the force balance
+    # (add_fluxes). Recompute iotas/iotaf from the final state to match VMEC2000.
+    if ncurr == 1:
+        from types import SimpleNamespace
+        from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
+        from .vmec_residue import vmec_pwint_from_trig
+        from .vmec_tomnsp import vmec_trig_tables
+
+        icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=int(signgs))
+        phips = np.asarray(flux.phips, dtype=float)
+        if phips.size:
+            phips = phips.copy()
+            phips[0] = 0.0
+
+        wout_like_pre = SimpleNamespace(
+            phipf=np.asarray(flux.phipf, dtype=float),
+            phips=phips,
+            chipf=np.zeros_like(np.asarray(flux.phipf, dtype=float)),
+            signgs=int(signgs),
+            nfp=int(static.cfg.nfp),
+            mpol=int(static.cfg.mpol),
+            ntor=int(static.cfg.ntor),
+            lasym=bool(static.cfg.lasym),
+            ncurr=0,
+            lcurrent=False,
+            icurv=np.zeros_like(np.asarray(flux.phipf, dtype=float)),
+            flux_is_internal=True,
+        )
+
+        trig = getattr(static, "trig_vmec", None)
+        if trig is None:
+            trig = vmec_trig_tables(
+                ntheta=int(static.cfg.ntheta),
+                nzeta=int(static.cfg.nzeta),
+                nfp=int(static.cfg.nfp),
+                mmax=int(static.cfg.mpol) - 1,
+                nmax=int(static.cfg.ntor),
+                lasym=bool(static.cfg.lasym),
+                dtype=np.asarray(state.Rcos).dtype,
+            )
+
+        bc_pre = vmec_bcovar_half_mesh_from_wout(
+            state=state,
+            static=static,
+            wout=wout_like_pre,
+            pres=pres,
+            use_vmec_synthesis=True,
+            trig=trig,
+        )
+
+        sqrtg = np.asarray(bc_pre.jac.sqrtg)
+        overg = np.zeros_like(sqrtg)
+        np.divide(1.0, sqrtg, out=overg, where=(sqrtg != 0.0))
+        pwint = np.asarray(
+            vmec_pwint_from_trig(trig, ns=int(overg.shape[0]), nzeta=int(overg.shape[2])),
+            dtype=overg.dtype,
+        )
+        guu = np.asarray(bc_pre.guu)
+        guv = np.asarray(bc_pre.guv)
+        bsupu = np.asarray(bc_pre.bsupu)
+        bsupv = np.asarray(bc_pre.bsupv)
+
+        top = np.asarray(icurv, dtype=overg.dtype) - np.sum(
+            pwint * ((guu * bsupu) + (guv * bsupv)),
+            axis=(1, 2),
+        )
+        bot = np.sum(pwint * (overg * guu), axis=(1, 2))
+        chips = np.zeros_like(top)
+        np.divide(top, bot, out=chips, where=(bot != 0.0))
+        if chips.size:
+            chips[0] = 0.0
+
+        iotas = np.zeros_like(chips)
+        np.divide(chips, phips, out=iotas, where=(phips != 0.0))
+        if iotas.size:
+            iotas[0] = 0.0
+        iotaf = np.asarray(_iotaf_from_iotas(iotas, lrfp=bool(indata.get_bool("LRFP", False))))
+        chipf_wout = _chipf_from_chips(chips)
 
     # Geometry coefficients on the full mesh (convert internal -> external).
     m_arr = np.asarray(main_modes.m, dtype=int)
@@ -769,6 +912,11 @@ def wout_minimal_from_fixed_boundary(
         pcurr_type = "power_series"
     pcurr_type = str(pcurr_type)
 
+    piota_type = indata.get("PIOTA_TYPE", None)
+    if piota_type is None:
+        piota_type = "power_series"
+    piota_type = str(piota_type)
+
     ac_raw = indata.get("AC", [])
     if isinstance(ac_raw, (int, float, np.floating)):
         ac = np.asarray([float(ac_raw)], dtype=float)
@@ -920,6 +1068,7 @@ def wout_minimal_from_fixed_boundary(
         ac_aux_s=np.asarray(ac_aux_s, dtype=float),
         ac_aux_f=np.asarray(ac_aux_f, dtype=float),
         pcurr_type=str(pcurr_type),
+        piota_type=str(piota_type),
     )
 
 
