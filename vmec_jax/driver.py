@@ -266,6 +266,7 @@ def run_fixed_boundary(
     multigrid_use_input_niter: bool = True,
     verbose: bool = True,
     jit_forces: bool | str = "auto",
+    jit_precompile: bool | None = None,
     use_scan: bool = False,
     grid=None,
     ns_override: int | None = None,
@@ -783,12 +784,23 @@ def run_fixed_boundary(
             static_i = build_static(cfg_i, grid=grid)
             scan_mode = bool(use_scan)
             jit_forces_eff = _resolve_jit_forces(jit_forces, static_i, int(niter_i))
+            jit_precompile_eff = False
+            if bool(jit_forces_eff) and (not bool(scan_mode)):
+                if jit_precompile is None:
+                    val = os.getenv("VMEC_JAX_JIT_PRECOMPILE", "1").strip().lower()
+                    jit_precompile_eff = val not in ("", "0", "false", "no")
+                else:
+                    jit_precompile_eff = bool(jit_precompile)
             jit_warmup_iters = 0
             if bool(jit_forces_eff) and (not bool(scan_mode)):
-                try:
-                    jit_warmup_iters = max(0, int(os.getenv("VMEC_JAX_JIT_WARMUP_ITERS", "2")))
-                except Exception:
-                    jit_warmup_iters = 2
+                env_warmup = os.getenv("VMEC_JAX_JIT_WARMUP_ITERS")
+                if env_warmup is not None:
+                    try:
+                        jit_warmup_iters = max(0, int(env_warmup))
+                    except Exception:
+                        jit_warmup_iters = 2
+                else:
+                    jit_warmup_iters = 0 if bool(jit_precompile_eff) else 2
             if i == 0:
                 if state is None:
                     if boundary_coeffs is None:
@@ -838,6 +850,7 @@ def run_fixed_boundary(
                 verbose_vmec2000_table=bool(verbose),
                 use_scan=bool(use_scan),
                 jit_warmup_iters=int(jit_warmup_iters),
+                jit_precompile=bool(jit_precompile_eff),
             )
             if not bool(jit_forces_eff):
                 try:
