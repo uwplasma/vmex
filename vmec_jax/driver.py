@@ -800,6 +800,9 @@ def run_fixed_boundary(
                 return bool(work >= 2_000_000)
             return bool(flag)
 
+        env_precompile_stages = os.getenv("VMEC_JAX_PRECOMPILE_STAGES", "0")
+        precompile_stages = env_precompile_stages.strip().lower() not in ("", "0", "false", "no")
+
         for i, (ns_i, niter_i, ftol_i) in enumerate(zip(ns_stages, niter_stages, ftol_stages)):
             if verbose:
                 print(
@@ -892,6 +895,26 @@ def run_fixed_boundary(
                 jit_warmup_iters=int(jit_warmup_iters),
                 jit_precompile=bool(jit_precompile_eff),
             )
+            if bool(precompile_stages) and bool(jit_forces_eff) and (not bool(scan_mode)):
+                try:
+                    precompile_kwargs = dict(solve_kwargs)
+                    precompile_kwargs.update(
+                        {
+                            "precompile_only": True,
+                            "verbose": False,
+                            "verbose_vmec2000_table": False,
+                            "jit_warmup_iters": 0,
+                            "jit_precompile": True,
+                        }
+                    )
+                    solve_fixed_boundary_residual_iter(
+                        state,
+                        static_i,
+                        jit_forces=True,
+                        **precompile_kwargs,
+                    )
+                except Exception:
+                    pass
             if not bool(jit_forces_eff):
                 try:
                     import jax

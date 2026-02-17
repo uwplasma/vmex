@@ -63,6 +63,10 @@ class VmecTrigTables:
     sinmumi: Any
     cosmui3: Any
     cosmumi3: Any
+    cosmui_nt2: Any | None = None
+    sinmui_nt2: Any | None = None
+    cosmumi_nt2: Any | None = None
+    sinmumi_nt2: Any | None = None
 
     # Zeta tables. Shapes (nzeta, nmax+1).
     cosnv: Any
@@ -89,6 +93,7 @@ class TomnspsMasks:
     mask_even: Any  # (mpol,)
     mask_rz: Any  # (ns, mpol, 1)
     mask_l: Any  # (ns, mpol, 1)
+    xmpq1: Any | None = None  # (1, mpol, 1)
 
 
 def vmec_theta_sizes(ntheta: int, *, lasym: bool) -> tuple[int, int, int]:
@@ -207,6 +212,11 @@ def vmec_trig_tables(
     sinmumi = -sinmui * m[None, :]
     cosmumi3 = cosmui3 * m[None, :]
 
+    cosmui_nt2 = cosmui[:ntheta2, :]
+    sinmui_nt2 = sinmui[:ntheta2, :]
+    cosmumi_nt2 = cosmumi[:ntheta2, :]
+    sinmumi_nt2 = sinmumi[:ntheta2, :]
+
     # Zeta tables use argj = 2π*(j-1)/nzeta, for j=1..nzeta.
     j = np.arange(nzeta, dtype=float)
     zeta = (2.0 * np.pi) * j / float(nzeta)
@@ -238,6 +248,10 @@ def vmec_trig_tables(
         sinmumi=jnp.asarray(sinmumi, dtype=dtype),
         cosmui3=jnp.asarray(cosmui3, dtype=dtype),
         cosmumi3=jnp.asarray(cosmumi3, dtype=dtype),
+        cosmui_nt2=jnp.asarray(cosmui_nt2, dtype=dtype),
+        sinmui_nt2=jnp.asarray(sinmui_nt2, dtype=dtype),
+        cosmumi_nt2=jnp.asarray(cosmumi_nt2, dtype=dtype),
+        sinmumi_nt2=jnp.asarray(sinmumi_nt2, dtype=dtype),
         cosnv=jnp.asarray(cosnv, dtype=dtype),
         sinnv=jnp.asarray(sinnv, dtype=dtype),
         cosnvn=jnp.asarray(cosnvn, dtype=dtype),
@@ -458,6 +472,8 @@ def tomnsps_masks(
     mask_l = js_fortran[:, None] >= jlam
     mask_rz = mask_rz.astype(jnp.asarray(mask_even).dtype)[:, :, None]
     mask_l = mask_l.astype(jnp.asarray(mask_even).dtype)[:, :, None]
+    m_fortran_f = jnp.asarray(m_fortran, dtype=jnp.asarray(mask_even).dtype)
+    xmpq1 = (m_fortran_f * (m_fortran_f - 1.0))[None, :, None]
     masks = TomnspsMasks(
         ns=ns,
         mpol=mpol,
@@ -465,6 +481,7 @@ def tomnsps_masks(
         mask_even=mask_even,
         mask_rz=mask_rz,
         mask_l=mask_l,
+        xmpq1=xmpq1,
     )
     if cache and _cache_allowed():
         _TOMNSPS_MASK_CACHE[cache_key] = masks
@@ -583,11 +600,22 @@ def tomnsps_rzl(
     azcon_odd = jnp.asarray(azcon_odd)[:, :nt2, :]
 
     # Tables for m=0..mpol-1 and n=0..ntor.
-    m = np.arange(mpol, dtype=int)
-    cosmui = trig.cosmui[:nt2, :mpol]  # (nt2, mpol)
-    sinmui = trig.sinmui[:nt2, :mpol]
-    cosmumi = trig.cosmumi[:nt2, :mpol]
-    sinmumi = trig.sinmumi[:nt2, :mpol]
+    cosmui = getattr(trig, "cosmui_nt2", None)
+    sinmui = getattr(trig, "sinmui_nt2", None)
+    cosmumi = getattr(trig, "cosmumi_nt2", None)
+    sinmumi = getattr(trig, "sinmumi_nt2", None)
+    if cosmui is None or int(cosmui.shape[0]) != nt2:
+        cosmui = trig.cosmui[:nt2, :]
+    if sinmui is None or int(sinmui.shape[0]) != nt2:
+        sinmui = trig.sinmui[:nt2, :]
+    if cosmumi is None or int(cosmumi.shape[0]) != nt2:
+        cosmumi = trig.cosmumi[:nt2, :]
+    if sinmumi is None or int(sinmumi.shape[0]) != nt2:
+        sinmumi = trig.sinmumi[:nt2, :]
+    cosmui = cosmui[:, :mpol]
+    sinmui = sinmui[:, :mpol]
+    cosmumi = cosmumi[:, :mpol]
+    sinmumi = sinmumi[:, :mpol]
 
     cosnv = trig.cosnv[:, : (ntor + 1)]  # (nzeta, ntor+1)
     sinnv = trig.sinnv[:, : (ntor + 1)]
@@ -595,9 +623,21 @@ def tomnsps_rzl(
     sinnvn = trig.sinnvn[:, : (ntor + 1)]
 
     # VMEC constraint operator multiplier: xmpq(m,1)=m*(m-1).
-    xmpq1 = (jnp.asarray(m, dtype=jnp.asarray(armn_even).dtype) * (jnp.asarray(m, dtype=jnp.asarray(armn_even).dtype) - 1.0))[
-        None, :, None
-    ]  # (1, mpol, 1)
+    xmpq1 = None
+    if masks is not None:
+        try:
+            if (int(masks.ns) == int(ns)) and (int(masks.mpol) == int(mpol)):
+                xmpq1 = getattr(masks, "xmpq1", None)
+        except Exception:
+            xmpq1 = None
+    if xmpq1 is None:
+        m = np.arange(mpol, dtype=int)
+        xmpq1 = (
+            jnp.asarray(m, dtype=jnp.asarray(armn_even).dtype)
+            * (jnp.asarray(m, dtype=jnp.asarray(armn_even).dtype) - 1.0)
+        )[None, :, None]
+    else:
+        xmpq1 = jnp.asarray(xmpq1, dtype=jnp.asarray(armn_even).dtype)
 
     # Theta integration: compute work arrays for even-parity and odd-parity pieces.
     # Each is (ns, mpol, nzeta).
@@ -833,20 +873,43 @@ def tomnspa_rzl(
     azcon_even = jnp.asarray(azcon_even)[:, :nt2, :]
     azcon_odd = jnp.asarray(azcon_odd)[:, :nt2, :]
 
-    m = np.arange(mpol, dtype=int)
-    cosmui = trig.cosmui[:nt2, :mpol]  # (nt2, mpol)
-    sinmui = trig.sinmui[:nt2, :mpol]
-    cosmumi = trig.cosmumi[:nt2, :mpol]
-    sinmumi = trig.sinmumi[:nt2, :mpol]
+    cosmui = getattr(trig, "cosmui_nt2", None)
+    sinmui = getattr(trig, "sinmui_nt2", None)
+    cosmumi = getattr(trig, "cosmumi_nt2", None)
+    sinmumi = getattr(trig, "sinmumi_nt2", None)
+    if cosmui is None or int(cosmui.shape[0]) != nt2:
+        cosmui = trig.cosmui[:nt2, :]
+    if sinmui is None or int(sinmui.shape[0]) != nt2:
+        sinmui = trig.sinmui[:nt2, :]
+    if cosmumi is None or int(cosmumi.shape[0]) != nt2:
+        cosmumi = trig.cosmumi[:nt2, :]
+    if sinmumi is None or int(sinmumi.shape[0]) != nt2:
+        sinmumi = trig.sinmumi[:nt2, :]
+    cosmui = cosmui[:, :mpol]
+    sinmui = sinmui[:, :mpol]
+    cosmumi = cosmumi[:, :mpol]
+    sinmumi = sinmumi[:, :mpol]
 
     cosnv = trig.cosnv[:, : (ntor + 1)]  # (nzeta, ntor+1)
     sinnv = trig.sinnv[:, : (ntor + 1)]
     cosnvn = trig.cosnvn[:, : (ntor + 1)]
     sinnvn = trig.sinnvn[:, : (ntor + 1)]
 
-    xmpq1 = (jnp.asarray(m, dtype=jnp.asarray(armn_even).dtype) * (jnp.asarray(m, dtype=jnp.asarray(armn_even).dtype) - 1.0))[
-        None, :, None
-    ]  # (1, mpol, 1)
+    xmpq1 = None
+    if masks is not None:
+        try:
+            if (int(masks.ns) == int(ns)) and (int(masks.mpol) == int(mpol)):
+                xmpq1 = getattr(masks, "xmpq1", None)
+        except Exception:
+            xmpq1 = None
+    if xmpq1 is None:
+        m = np.arange(mpol, dtype=int)
+        xmpq1 = (
+            jnp.asarray(m, dtype=jnp.asarray(armn_even).dtype)
+            * (jnp.asarray(m, dtype=jnp.asarray(armn_even).dtype) - 1.0)
+        )[None, :, None]
+    else:
+        xmpq1 = jnp.asarray(xmpq1, dtype=jnp.asarray(armn_even).dtype)
 
     # Theta integration work arrays (indices per tomnspa_par).
     # Base (present always):
