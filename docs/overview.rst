@@ -50,13 +50,15 @@ summary against bundled VMEC2000 reference ``wout`` files.
 Scope (current)
 ---------------
 
-The current parity target is **fixed-boundary, axisymmetric** VMEC2000:
+The current parity target is **fixed-boundary** VMEC2000:
 
-- ``ntor = 0`` and ``nfp = 1`` (axisymmetric), with ``lasym = False``.
+- Axisymmetric (`ntor = 0`, `nfp = 1`, `lasym = False`) end-to-end parity is stable.
+- Selected 3D stellarator-symmetric cases (QA/QH/n3are/QA-lowres) now pass short
+  multigrid parity sweeps (`rtol=5e-4`, `atol=1e-10`).
 - Fixed boundary only (free boundary deferred).
 
-Many low-level kernels are also exercised on bundled 3D reference ``wout`` files,
-but end-to-end nonlinear solve parity for 3D cases is intentionally deferred.
+Remaining 3D inputs (e.g., `li383_low_res`) and `lasym=True` parity are still in
+progress.
 
 Initial guess
 -------------
