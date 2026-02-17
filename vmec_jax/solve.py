@@ -4396,7 +4396,12 @@ def solve_fixed_boundary_residual_iter(
                 # A conservative heuristic early in a restart window.
                 zero_m1 = 1.0 if (iter_since_restart < 2) or (len(fsqz2_history) and fsqz2_history[-1] < 1e-6) else 0.0
             zero_m1 = jnp.asarray(zero_m1, dtype=jnp.asarray(state.Rcos).dtype)
-            include_edge = bool(iter_since_restart < 50) and (float(prev_rz_fsq) < 1e-6)
+            if vmec2000_control:
+                # VMEC2000 fixed-boundary residuals do not include the edge
+                # surface in the force pipeline; keep this disabled for parity.
+                include_edge = False
+            else:
+                include_edge = bool(iter_since_restart < 50) and (float(prev_rz_fsq) < 1e-6)
             include_edge_history.append(int(bool(include_edge)))
             zero_m1_history.append(int(float(np.asarray(zero_m1)) > 0.5))
     
