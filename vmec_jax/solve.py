@@ -2812,6 +2812,7 @@ def solve_fixed_boundary_residual_iter(
     verbose_vmec2000_table: bool = True,
     jit_forces: bool = True,
     jit_warmup_iters: int = 0,
+    jit_precompile: bool = False,
     use_scan: bool = False,
     resume_state: dict | None = None,
 ) -> SolveVmecResidualResult:
@@ -2831,6 +2832,7 @@ def solve_fixed_boundary_residual_iter(
     enforce_vmec_lambda_axis = bool(enforce_vmec_lambda_axis)
     vmec2000_control = bool(vmec2000_control)
     reference_mode = bool(reference_mode)
+    jit_precompile = bool(jit_precompile)
     if use_restart_triggers is None:
         # Restart triggers are generally stabilizing. Keep them on by default
         # so the fixed-point update loop is robust during parity work.
@@ -3526,6 +3528,23 @@ def solve_fixed_boundary_residual_iter(
             cached = jit(_compute_forces_nodump, static_argnames=("include_edge",))
             _COMPUTE_FORCES_CACHE[compute_cache_key] = cached
         _compute_forces = cached
+
+    if bool(jit_forces) and bool(jit_precompile) and has_jax() and (jax is not None):
+        try:
+            zero_m1_pre = jnp.asarray(1.0, dtype=dtype_state)
+            for include_edge_flag in (False, True):
+                _compute_forces.lower(
+                    state0,
+                    include_edge=include_edge_flag,
+                    zero_m1=zero_m1_pre,
+                    constraint_precond_diag=zero_precond_diag,
+                    constraint_tcon=zero_tcon,
+                    constraint_precond_active=constraint_active_false,
+                    constraint_tcon_active=constraint_active_false,
+                    iter_idx=None,
+                ).compile()
+        except Exception:
+            pass
 
     def _iter_idx_for_dump(it: int | None) -> int | None:
         return None if jit_forces else it
@@ -4850,9 +4869,13 @@ def solve_fixed_boundary_residual_iter(
                     tau_use = tau[1:] if tau.shape[0] > 1 else tau
                     min_tau = float(np.min(tau_use))
                     max_tau = float(np.max(tau_use))
-                    tau_scale = max(abs(min_tau), abs(max_tau))
-                    tau_tol = max(1.0e-12, 1.0e-3 * tau_scale)
-                    bad_jacobian = (min_tau < -tau_tol) and (max_tau > tau_tol)
+                    if bool(vmec2000_control):
+                        # VMEC2000 jacobian.f uses strict sign-change check (no tolerance).
+                        bad_jacobian = (min_tau < 0.0) and (max_tau > 0.0)
+                    else:
+                        tau_scale = max(abs(min_tau), abs(max_tau))
+                        tau_tol = max(1.0e-12, 1.0e-3 * tau_scale)
+                        bad_jacobian = (min_tau < -tau_tol) and (max_tau > tau_tol)
                     min_tau_history.append(min_tau)
                     max_tau_history.append(max_tau)
                     bad_jacobian_history.append(int(bad_jacobian))

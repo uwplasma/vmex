@@ -85,7 +85,7 @@ Per-iteration trace parity (VMEC2000 executable, reduced grid):
 ::
 
   python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case circular_tokamak --max-iter 10 --vmec-nstep 1 --single-ns 13
-  python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case nfp4_QH_warm_start --max-iter 10 --single-ns 16 --vmec-timeout 60 --rtol 1e-3
+  python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case nfp4_QH_warm_start --max-iter 10 --single-ns 16 --vmec-timeout 60 --rtol 5e-4 --atol 1e-10
   python tools/diagnostics/nonaxis_parity_batch.py --max-cases 8 --single-ns 13 --max-iter 1 --vmec-timeout 60
 
 This uses a reduced grid to stay under ~1 minute; increase ``--max-iter`` or ``--single-ns`` for deeper parity checks.
@@ -135,82 +135,78 @@ Current observed mismatches (updated parity status):
   suite (``circular_tokamak``, ``purely_toroidal_field``,
   ``shaped_tokamak_pressure``, ``solovev``).
 - **Full-grid multigrid parity** (`--use-input-niter`, `max_iter=10`) using the
-  VMEC2000 executable comparator:
-  ``input.qa_signgs1`` (QA, NFP=2, NTOR=6) and
-  ``LandremanPaul2021_QH_reactorScale_lowres`` pass per-iteration trace parity
-  through stage 1 iter 1 and stage 2 iters 1-9. The following cases fail at
-  **stage 1 iter 1**: ``LandremanPaul2021_QA_lowres``, ``li383_low_res``,
-  ``n3are_R7.75B5.7_lowres``.
+  VMEC2000 executable comparator now passes for QA/QH/n3are/QA-lowres and the
+  standard axisymmetric controls at `rtol=5e-4`, `atol=1e-10`.
 - ``betapol``, ``betator``, ``betaxis``, ``ctor``, and ``DMerc`` are present but
   still placeholders in ``vmec_jax`` (zeros) until the VMEC2000 diagnostics path
   is fully ported.
 
-Full-grid parity snapshot (VMEC2000 exec comparator, `rtol=1e-3`, `max_iter=10`):
+Full-grid parity snapshot (VMEC2000 exec comparator, `--use-input-niter`, `max_iter=10`,
+`rtol=5e-4`, `atol=1e-10`):
 
 .. list-table::
    :header-rows: 1
-   :widths: 16 36 16 14 16 10 22
+   :widths: 16 36 14 18 16 18
 
    * - Case
      - Input
-     - Stages (ns, niter)
      - Status
      - fsq_total (VMEC/JAX)
-     - runtime_s
+     - runtime_s (vmec2000/jax)
      - Notes
-   * - circular_tokamak
-     - ``examples/data/input.circular_tokamak``
-     - ``[(10,5),(17,5)]``
+   * - solovev
+     - ``examples/data/input.solovev``
      - PASS
-     - ``2.765e-02 / 2.765e-02``
-     - 24.8
-     - Axisymmetric control
+     - ``1.737e-02 / 1.737e-02``
+     - ``0.191 / 5.100``
+     - Axisymmetric
+   * - shaped_tokamak_pressure
+     - ``examples/data/input.shaped_tokamak_pressure``
+     - PASS
+     - ``5.541e-03 / 5.541e-03``
+     - ``0.180 / 18.218``
+     - Axisymmetric
+   * - ITERModel
+     - ``examples/data/input.ITERModel``
+     - PASS
+     - ``7.581e-03 / 7.581e-03``
+     - ``0.235 / 7.787``
+     - Axisymmetric
    * - QA signgs1
      - ``/Users/rogeriojorge/local/test/input.qa_signgs1``
-     - ``[(16,1),(50,9)]``
      - PASS
      - ``5.267e-01 / 5.267e-01``
-     - 44.5
-     - Wout parity: ``rmnc`` relRMS ~8.8e-2, ``zmns`` relRMS ~3.2e-1
-   * - LandremanPaul2021_QA_lowres
-     - ``simsopt/tests/test_files/input.LandremanPaul2021_QA_lowres``
-     - ``[(16,1),(50,1),(75,8)]``
-     - FAIL (stage1 iter1)
-     - ``1.630e+00 / 9.245e+01``
-     - 66.7
-     - fsq mismatch at iter 1
-   * - LandremanPaul2021_QH_reactorScale_lowres
-     - ``simsopt/tests/test_files/input.LandremanPaul2021_QH_reactorScale_lowres``
-     - ``[(12,1),(50,9)]``
+     - ``0.386 / 14.547``
+     - NFP=2, NTOR=6
+   * - nfp4_QH_warm_start
+     - ``examples/data/input.nfp4_QH_warm_start``
      - PASS
-     - ``5.591e+00 / 5.591e+00``
-     - 56.8
-     - Wout parity: ``rmnc`` relRMS ~7.8e-2, ``zmns`` relRMS ~3.1e-1
-   * - li383_low_res
-     - ``simsopt/tests/test_files/input.li383_low_res``
-     - ``[(16,10)]``
-     - FAIL (stage1 iter1)
-     - ``1.489e-01 / 3.726e-01``
-     - 23.9
-     - fsq mismatch at iter 1
+     - ``4.540e-03 / 4.540e-03``
+     - ``0.246 / 14.269``
+     - QH
    * - n3are_R7.75B5.7_lowres
-     - ``simsopt/tests/test_files/input.n3are_R7.75B5.7_lowres``
-     - ``[(16,4),(49,3),(100,3)]``
-     - FAIL (stage1 iter1)
-     - ``3.192e+01 / 1.085e+13``
-     - 65.3
-     - fsq blow-up at iter 1
+     - ``examples/data/input.n3are_R7.75B5.7_lowres``
+     - PASS
+     - ``2.330e+00 / 2.330e+00``
+     - ``0.177 / 27.706``
+     - NFP=4
+   * - LandremanPaul2021_QA_lowres
+     - ``examples/data/input.LandremanPaul2021_QA_lowres``
+     - PASS
+     - ``3.423e+00 / 3.423e+00``
+     - ``0.574 / 11.448``
+     - QA lowres
 
 Scope and known gaps
 --------------------
 
-The primary parity target is fixed-boundary, axisymmetric VMEC2000. Items
-explicitly deferred for now include:
+The primary parity target is fixed-boundary VMEC2000 parity. Items explicitly
+deferred for now include:
 
 - free boundary,
 - ``lasym=True`` (up-down / non-stellarator-symmetric),
-- non-axisymmetric full multigrid end-to-end nonlinear solve parity
-  (``ntor>0`` and/or ``nfp>1``),
+- remaining non-axisymmetric cases beyond the current QA/QH/n3are/QA-lowres
+  sweep (``ntor>0`` and/or ``nfp>1``),
 - parallelization and multi-device execution.
 
 Current blockers worth tracking:
@@ -218,4 +214,4 @@ Current blockers worth tracking:
 - ``lasym=True`` axisymmetric case (``input.up_down_asymmetric_tokamak``) shows large bcovar/force-kernel mismatches at iter 1.
 - Lambda-path internal parity (``flsc``/``gcl`` and ``blmn``/``clmn``) matches VMEC2000
   to ~1e-10 abs on reduced grids with full dumps; remaining work is to validate the
-  same at higher resolution.
+  same at higher resolution and across more ``lasym=True`` cases.

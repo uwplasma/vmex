@@ -29,6 +29,16 @@ the **initial guess** phase by setting::
 This keeps the solver kernel JIT-compiled, but avoids compiling the initial
 boundary->state projection path (useful for short runs or rapid profiling).
 
+To reduce per-iteration latency spikes in multigrid runs, ``vmec-jax`` can
+precompile the force kernel at the start of each stage. This is enabled by
+default when ``jit_forces=True``; you can override it with::
+
+  export VMEC_JAX_JIT_PRECOMPILE=0
+
+If you prefer to run a few iterations without JIT before compiling, set::
+
+  export VMEC_JAX_JIT_WARMUP_ITERS=2
+
 Scan-mode iteration (fast path)
 -------------------------------
 
