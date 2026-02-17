@@ -63,16 +63,18 @@ class VmecTrigTables:
     sinmumi: Any
     cosmui3: Any
     cosmumi3: Any
-    cosmui_nt2: Any | None = None
-    sinmui_nt2: Any | None = None
-    cosmumi_nt2: Any | None = None
-    sinmumi_nt2: Any | None = None
 
     # Zeta tables. Shapes (nzeta, nmax+1).
     cosnv: Any
     sinnv: Any
     cosnvn: Any
     sinnvn: Any
+
+    # Cached theta slices (ntheta2, mmax+1) to reduce per-call slicing cost.
+    cosmui_nt2: Any | None = None
+    sinmui_nt2: Any | None = None
+    cosmumi_nt2: Any | None = None
+    sinmumi_nt2: Any | None = None
 
     # Optional cached phase stacks for vmec_realspace synthesis.
     # These are populated by VMECStatic when enabled.
