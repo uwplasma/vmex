@@ -2971,7 +2971,10 @@ def solve_fixed_boundary_residual_iter(
             Lsin=Lsin,
         )
 
-    def _reset_axis_from_boundary(st: VMECState, *, k_guess=None) -> VMECState:
+    axis_reset_coeffs = None
+
+    def _reset_axis_from_boundary(st: VMECState, *, k_guess=None, full_reset: bool = False) -> VMECState:
+        nonlocal axis_reset_coeffs
         if boundary_for_axis is None:
             return st
         ntor = int(static.cfg.ntor)
@@ -3107,24 +3110,28 @@ def solve_fixed_boundary_residual_iter(
             zaxis_cs,
             dtype=jnp.asarray(st.Rcos).dtype,
         )
-        # Preserve non-axis coefficients (including lambda) when resetting axis.
-        if getattr(static, "m_is_m0", None) is None:
-            mask_m0 = jnp.asarray(np.asarray(static.modes.m, dtype=int) == 0, dtype=jnp.asarray(st.Rcos).dtype)
+        axis_reset_coeffs = (raxis_cc, raxis_cs, zaxis_cc, zaxis_cs)
+        if full_reset:
+            st_out = st_axis
         else:
-            mask_m0 = jnp.asarray(static.m_is_m0, dtype=jnp.asarray(st.Rcos).dtype)
-        Rcos = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Rcos), jnp.asarray(st.Rcos))
-        Rsin = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Rsin), jnp.asarray(st.Rsin))
-        Zcos = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Zcos), jnp.asarray(st.Zcos))
-        Zsin = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Zsin), jnp.asarray(st.Zsin))
-        st_out = VMECState(
-            layout=st.layout,
-            Rcos=Rcos,
-            Rsin=Rsin,
-            Zcos=Zcos,
-            Zsin=Zsin,
-            Lcos=st.Lcos,
-            Lsin=st.Lsin,
-        )
+            # Preserve non-axis coefficients (including lambda) when resetting axis.
+            if getattr(static, "m_is_m0", None) is None:
+                mask_m0 = jnp.asarray(np.asarray(static.modes.m, dtype=int) == 0, dtype=jnp.asarray(st.Rcos).dtype)
+            else:
+                mask_m0 = jnp.asarray(static.m_is_m0, dtype=jnp.asarray(st.Rcos).dtype)
+            Rcos = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Rcos), jnp.asarray(st.Rcos))
+            Rsin = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Rsin), jnp.asarray(st.Rsin))
+            Zcos = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Zcos), jnp.asarray(st.Zcos))
+            Zsin = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Zsin), jnp.asarray(st.Zsin))
+            st_out = VMECState(
+                layout=st.layout,
+                Rcos=Rcos,
+                Rsin=Rsin,
+                Zcos=Zcos,
+                Zsin=Zsin,
+                Lcos=st.Lcos,
+                Lsin=st.Lsin,
+            )
         return _apply_vmec_lambda_axis_rules(st_out)
     flux = flux_profiles_from_indata(indata, s, signgs=signgs)
     chipf_wout = jnp.asarray(flux.chipf)
@@ -3803,7 +3810,7 @@ def solve_fixed_boundary_residual_iter(
     )
     state = _apply_vmec_lambda_axis_rules(state)
 
-    ftol = float(indata.get_float("FTOL", 1e-10)) if ftol is None else float(ftol)
+    ftol = float(indata.get_float("FTOL", 1e-13)) if ftol is None else float(ftol)
     gamma = float(indata.get_float("GAMMA", 0.0))
     if abs(gamma - 1.0) < 1e-14:
         raise ValueError("GAMMA=1 makes wp/(gamma-1) singular (VMEC objective undefined)")
@@ -4161,59 +4168,23 @@ def solve_fixed_boundary_residual_iter(
         cache_prec_faclam = resume_state.get("cache_prec_faclam", cache_prec_faclam)
         cache_prec_lam_debug = resume_state.get("cache_prec_lam_debug", cache_prec_lam_debug)
 
-    if bool(vmec2000_control) and (boundary_for_axis is not None) and (not axis_reset_done):
-        bad_jacobian_init = False
-        k_init = None
-        jac = vmec_half_mesh_jacobian_from_state(
-            state=state,
-            modes=static.modes,
-            trig=trig,
-            s=s,
-            lconm1=bool(getattr(static.cfg, "lconm1", True)),
-            lthreed=bool(getattr(static.cfg, "lthreed", True)),
-            mask_even=getattr(static, "m_is_even", None),
-            mask_odd=getattr(static, "m_is_odd", None),
-        )
-        tau = np.asarray(jac.tau)
-        if tau.size:
-            tau_use = tau[1:] if tau.shape[0] > 1 else tau
-            min_tau_init = float(np.min(tau_use))
-            max_tau_init = float(np.max(tau_use))
-            bad_jacobian_init = (min_tau_init * max_tau_init) < 0.0
-        huge_initial_forces = False
-        if lmove_axis:
-            zero_m1_init = jnp.asarray(1.0, dtype=jnp.asarray(state.Rcos).dtype)
-            k_init, _, gcr2_init, gcz2_init, gcl2_init, _, _, norms_init = _compute_forces_iter(
-                state,
-                include_edge=False,
-                zero_m1=zero_m1_init,
-                constraint_precond_diag=zero_precond_diag,
-                constraint_tcon=zero_tcon,
-                constraint_precond_active=constraint_active_false,
-                constraint_tcon_active=constraint_active_false,
-                iter_idx=_iter_idx_for_dump(1),
-                iter2=1,
-            )
-            fsqr_init, fsqz_init, fsql_init = _fsq_from_norms(
-                norms_init,
-                gcr2_in=gcr2_init,
-                gcz2_in=gcz2_init,
-                gcl2_in=gcl2_init,
-            )
-            fsq_init = float(np.asarray(fsqr_init + fsqz_init + fsql_init))
-            huge_initial_forces = (not np.isfinite(fsq_init)) or (fsq_init > 1.0e2)
-        if bad_jacobian_init or huge_initial_forces:
-            state = _reset_axis_from_boundary(state, k_guess=k_init)
-            state_checkpoint = state
-            vRcc = jnp.zeros_like(vRcc)
-            vRss = jnp.zeros_like(vRcc)
-            vZsc = jnp.zeros_like(vRcc)
-            vZcs = jnp.zeros_like(vRcc)
-            vLsc = jnp.zeros_like(vRcc)
-            vLcs = jnp.zeros_like(vRcc)
-            time_step = float(step_size)
-            ijacob = 1
-            axis_reset_done = True
+    def _fmt_axis_coeff(val: float) -> str:
+        s = f"{float(val):.16g}"
+        if "e" in s:
+            s = s.replace("e", "E")
+        return s
+
+    def _print_axis_guess(raxis_cc, zaxis_cs) -> None:
+        try:
+            r_line = "      RAXIS_CC =    " + "   ".join(_fmt_axis_coeff(v) for v in np.ravel(raxis_cc))
+            z_line = "      ZAXIS_CS =    " + "   ".join(_fmt_axis_coeff(v) for v in np.ravel(zaxis_cs))
+            print("  ---- Improved AXIS Guess ----", flush=True)
+            print(r_line, flush=True)
+            print(z_line, flush=True)
+            print("  -----------------------------", flush=True)
+        except Exception:
+            pass
+
             res0 = -1.0
             res1 = -1.0
             prev_rz_fsq = 2.0
@@ -4500,7 +4471,12 @@ def solve_fixed_boundary_residual_iter(
             fsql2_history.append(fsql_f)
             # VMEC printout uses r00 = r1(1,0): axis R at theta=0, zeta=0,
             # evaluated in real space after scalxc (see funct3d.f).
-            need_scalar = bool(verbose) or (bool(vmec2000_control) and bool(verbose_vmec2000_table))
+            # For VMEC2000-iter parity, always materialize scalars on host so
+            # printed diagnostics can match VMEC's formatting, even when
+            # verbose output is disabled.
+            need_scalar = bool(vmec2000_control) or bool(verbose) or (
+                bool(vmec2000_control) and bool(verbose_vmec2000_table)
+            )
             try:
                 r00_j = jnp.asarray(k.pr1_even)[0, 0, 0]
                 if bool(cfg.lasym):
@@ -4519,6 +4495,10 @@ def solve_fixed_boundary_residual_iter(
                         z00_j = jnp.asarray(0.0, dtype=jnp.asarray(r00_j).dtype)
             r00_val = float(np.asarray(r00_j)) if need_scalar else r00_j
             z00_val = float(np.asarray(z00_j)) if need_scalar else z00_j
+            if need_scalar and bool(vmec2000_control):
+                # Match VMEC's printed precision (E11.3) for parity checks.
+                r00_val = float(f"{float(r00_val):.3E}")
+                z00_val = float(f"{float(z00_val):.3E}")
             r00_history.append(r00_val)
             z00_history.append(z00_val)
             # `norms_used` may be cached (VMEC2000 `ns4=25` behavior). VMEC's
@@ -4898,6 +4878,57 @@ def solve_fixed_boundary_residual_iter(
                 min_tau_history.append(float("nan"))
                 max_tau_history.append(float("nan"))
                 bad_jacobian_history.append(0)
+
+            # VMEC eqsolve: after the first evolve step, if the Jacobian is bad
+            # and ijacob==0, retry with an improved axis guess.
+            if (
+                bool(vmec2000_control)
+                and (not axis_reset_done)
+                and bool(lmove_axis)
+                and (iter2 == 1)
+            ):
+                fsq_curr = fsqr_f + fsqz_f + fsql_f
+                huge_initial_forces = (not np.isfinite(fsq_curr)) or (fsq_curr > 1.0e2)
+                if bad_jacobian or huge_initial_forces:
+                    if verbose and bool(vmec2000_control) and bool(verbose_vmec2000_table):
+                        if bad_jacobian:
+                            print(" INITIAL JACOBIAN CHANGED SIGN!", flush=True)
+                        print(" TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS", flush=True)
+                    state = _reset_axis_from_boundary(state, k_guess=k, full_reset=True)
+                    if verbose and bool(vmec2000_control) and bool(verbose_vmec2000_table):
+                        if axis_reset_coeffs is not None:
+                            raxis_cc, _raxis_cs, _zaxis_cc, zaxis_cs = axis_reset_coeffs
+                            _print_axis_guess(raxis_cc, zaxis_cs)
+                    state_checkpoint = state
+                    vRcc = jnp.zeros_like(vRcc)
+                    vRss = jnp.zeros_like(vRcc)
+                    vZsc = jnp.zeros_like(vRcc)
+                    vZcs = jnp.zeros_like(vRcc)
+                    vLsc = jnp.zeros_like(vRcc)
+                    vLcs = jnp.zeros_like(vRcc)
+                    time_step = max(restart_badjac_factor * float(step_size), 1e-12)
+                    ijacob = 1
+                    axis_reset_done = True
+                    iter1 = iter2
+                    bad_growth_streak = 0
+                    inv_tau = [0.15 / time_step] * k_ndamp
+                    vmec2000_cache_valid = False
+                    cache_precond_diag = None
+                    cache_tcon = None
+                    cache_norms = None
+                    cache_rz_scale = None
+                    cache_l_scale = None
+                    cache_rz_norm = None
+                    cache_f_norm1 = None
+                    cache_prec_rz_mats = None
+                    cache_prec_rz_jmax = None
+                    cache_prec_lam_prec = None
+                    cache_prec_faclam = None
+                    cache_prec_lam_debug = None
+                    _pop_iteration_histories()
+                    prev_rz_fsq = prev_rz_fsq_before
+                    skip_time_control = True
+                    continue
 
             # VMEC-style time-step control: VMEC2000's `TimeStepControl` + `restart_iter`.
             if bool(vmec2000_control) and (not skip_time_control):
@@ -5704,6 +5735,7 @@ def solve_fixed_boundary_residual_iter(
         "use_restart_triggers": bool(use_restart_triggers),
         "use_direct_fallback": bool(use_direct_fallback),
         "max_update_rms": float(max_update_rms),
+        "converged": bool(converged),
         "ijacob": int(ijacob),
         "bad_resets": int(bad_resets),
         "iter1_final": int(iter1),

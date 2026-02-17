@@ -98,6 +98,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     def _as_list(value):
+        if value is None:
+            return None
         if isinstance(value, list):
             return value
         if isinstance(value, tuple):
@@ -109,6 +111,8 @@ def main(argv: list[str] | None = None) -> int:
                 return list(value.tolist())
         except Exception:
             pass
+        if isinstance(value, (int, float)):
+            return [value]
         return None
 
     max_iter = args.max_iter

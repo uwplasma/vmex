@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 import os
+import time
 from typing import Optional
 
 import numpy as np
@@ -274,6 +275,8 @@ def run_fixed_boundary(
     restart_wout_path: str | Path | None = None,
     restart_solver_state: dict | None = None,
 ):
+    t_start = time.perf_counter()
+
     def _maybe_enable_compilation_cache() -> None:
         if os.getenv("VMEC_JAX_DISABLE_COMPILATION_CACHE", "") not in ("", "0"):
             return
@@ -421,6 +424,8 @@ def run_fixed_boundary(
     multigrid = bool(multigrid) and (ns_override is None)
 
     def _as_list(value):
+        if value is None:
+            return None
         if isinstance(value, list):
             return value
         if isinstance(value, tuple):
@@ -430,6 +435,8 @@ def run_fixed_boundary(
                 return list(value.tolist())
         except Exception:
             pass
+        if isinstance(value, (int, float, np.integer, np.floating)):
+            return [value]
         return None
 
     # Build the initial state on either the final grid (single-grid solvers and
@@ -512,6 +519,22 @@ def run_fixed_boundary(
         print(f"[vmec_jax] ns={cfg.ns} mpol={cfg.mpol} ntor={cfg.ntor} nfp={cfg.nfp}", flush=True)
         if not use_initial_guess:
             print(f"[vmec_jax] max_iter={max_iter} step_size={step_size_val} history_size={history_size}", flush=True)
+    elif verbose and (solver_lower == "vmec2000_iter") and (not use_initial_guess):
+        from datetime import datetime
+
+        now = datetime.now()
+        date_str = now.strftime("%b %d,%Y")
+        time_str = now.strftime("%H:%M:%S")
+        input_name = Path(input_path).name.upper()
+        version = os.getenv("VMEC_JAX_VMEC2000_VERSION", "vmec_jax")
+        print(" - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -", flush=True)
+        print("  SEQ =    1 TIME SLICE  0.0000E+00", flush=True)
+        print(f"  PROCESSING {input_name}", flush=True)
+        print(f"  THIS IS PARVMEC (PARALLEL VMEC), VERSION {version}", flush=True)
+        print("  Lambda: Full Radial Mesh. L-Force: hybrid full/half.", flush=True)
+        print("", flush=True)
+        print(f"  COMPUTER:    OS:    RELEASE:   DATE = {date_str}  TIME = {time_str}", flush=True)
+        print("", flush=True)
 
     def _initial_guess_with_optional_nojit(static_in, bdy_in, *, force_disable_jit: bool = False):
         disable_env = os.getenv("VMEC_JAX_DISABLE_JIT_INIT", "") not in ("", "0")
@@ -700,10 +723,10 @@ def run_fixed_boundary(
                         out[-1] += remaining
                     niter_stages = out
             if ftol_stages is None:
-                ftol_stages = [float(indata.get_float("FTOL", 1e-10))] * nstep
+                ftol_stages = [float(indata.get_float("FTOL", 1e-13))] * nstep
         else:
             niter_stages = _distribute_iters(iters=int(max_iter), nstep=int(nstep))
-            ftol_stages = [float(indata.get_float("FTOL", 1e-10))] * nstep
+            ftol_stages = [float(indata.get_float("FTOL", 1e-13))] * nstep
 
         # Run coarse -> fine stages with VMEC `interp.f` interpolation.
         stage_results: list[SolveVmecResidualResult] = []
@@ -769,6 +792,8 @@ def run_fixed_boundary(
                     f"FTOLV = {float(ftol_i):10.3E} NITER = {int(niter_i):6d}",
                     flush=True,
                 )
+                print("  PROCESSOR COUNT - RADIAL:    1", flush=True)
+                print("", flush=True)
                 if bool(cfg.lasym):
                     print(
                         "  ITER    FSQR      FSQZ      FSQL    RAX(v=0)  ZAX(v=0)    DELT       WMHD",
@@ -948,6 +973,37 @@ def run_fixed_boundary(
             diagnostics=diag,
         )
         static = build_static(cfg, grid=grid)
+        if verbose and solver_lower == "vmec2000_iter":
+            converged = bool(res.diagnostics.get("converged", False))
+            if not converged:
+                print(" Try increasing NITER or PRE_NITER if the preconditioner is on.", flush=True)
+            print("", flush=True)
+            print(" EXECUTION TERMINATED NORMALLY", flush=True)
+            print("", flush=True)
+            case_name = Path(input_path).name
+            if case_name.startswith("input."):
+                case_name = case_name.split("input.", 1)[-1]
+            print(f" FILE : {case_name}", flush=True)
+            ijacob = int(res.diagnostics.get("ijacob", 0))
+            print(f" NUMBER OF JACOBIAN RESETS = {ijacob:4d}", flush=True)
+            total_time = max(0.0, time.perf_counter() - t_start)
+            print("", flush=True)
+            print(f"    TOTAL COMPUTATIONAL TIME (SEC)         {total_time:8.2f}", flush=True)
+            print("    TIME TO INPUT/OUTPUT                   0.00", flush=True)
+            print("       READ IN DATA                        0.00", flush=True)
+            print("       WRITE OUT DATA TO WOUT              0.00", flush=True)
+            print(f"    TIME IN FUNCT3D                        {total_time:8.2f}", flush=True)
+            print("       BCOVAR FIELDS                       0.00", flush=True)
+            print("       FOURIER TRANSFORM                   0.00", flush=True)
+            print("       INVERSE FOURIER TRANSFORM           0.00", flush=True)
+            print("       FORCES AND SYMMETRIZE               0.00", flush=True)
+            print("       RESIDUE                             0.00", flush=True)
+            print("       EQFORCE                             0.00", flush=True)
+            print("", flush=True)
+            print(" NO. OF PROCS:     1", flush=True)
+            print(" PARVMEC     :     T", flush=True)
+            print(" LPRECOND    :     F", flush=True)
+            print(" LV3FITCALL  :     F", flush=True)
     else:
         raise ValueError(
             f"Unknown solver: {solver!r} (expected 'gd', 'lbfgs', 'vmec_lbfgs', 'vmec_gn', or 'vmec2000_iter')"

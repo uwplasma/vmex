@@ -327,6 +327,14 @@ def boundary_from_indata(
 
     # Convert through VMEC internal representation to match readin.f sign handling.
     internal = _boundary_internal_from_helical(boundary, modes, lthreed=lthreed, lasym=lasym)
+
+    # VMEC readin.f: check sign of Jacobian using m=1 internal boundary modes
+    # and optionally flip theta (PI - theta). This enforces signgs=-1 convention.
+    if internal.rbcc.shape[1] > 1 and internal.rbcc.shape[0] > 1:
+        rtest = float(np.sum(internal.rbcc[1:, 1]))
+        ztest = float(np.sum(internal.zbsc[1:, 1]))
+        if (rtest * ztest) < 0.0:
+            internal = _boundary_internal_flip_theta(internal, lthreed=lthreed, lasym=lasym)
     if apply_m1_constraint and bool(indata.get_bool("LCONM1", True)) and (lthreed or lasym):
         if internal.rbcc.shape[1] > 1:
             if lthreed:
