@@ -52,6 +52,27 @@ VMEC represents a surface in cylindrical coordinates using Fourier series:
 ``(ns, K)`` where ``K`` is the number of ``(m,n)`` modes in the main VMEC
 ordering.
 
+Regularity and internal storage
+-------------------------------
+
+VMEC stores odd-m harmonics in an **internal** form that factors out the
+radial :math:`\sqrt{s}` behavior so that coefficients remain finite on-axis.
+This is implemented through the ``scalxc`` array (1 for even-m, :math:`1/\sqrt{s}`
+for odd-m) and is applied whenever VMEC interpolates between radial grids or
+builds preconditioned residuals.
+
+When ``LCONM1`` is enabled, VMEC also applies a constrained internal basis for
+the :math:`m=1` boundary modes:
+
+.. math::
+
+   R^{s}_{1n,\mathrm{int}} = \frac{1}{2}\left(R^{s}_{1n,\mathrm{phys}} + Z^{c}_{1n,\mathrm{phys}}\right),
+   \qquad
+   Z^{c}_{1n,\mathrm{int}} = \frac{1}{2}\left(R^{s}_{1n,\mathrm{phys}} - Z^{c}_{1n,\mathrm{phys}}\right).
+
+``vmec-jax`` uses the same internal storage so that its boundary mapping,
+multigrid interpolation, and parity diagnostics match VMEC2000.
+
 The lambda field
 ----------------
 
@@ -152,4 +173,3 @@ in ``wout`` files. In VMEC normalization:
 
 Important: VMEC treats internal pressure in units of :math:`\mu_0\,\mathrm{Pa}`
 (i.e. :math:`B^2` units). ``vmec-jax`` follows this convention for parity.
-
