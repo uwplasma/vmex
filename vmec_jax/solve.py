@@ -5063,10 +5063,19 @@ def solve_fixed_boundary_residual_iter(
             # --- time-step control trackers + optional restart triggers ---
             fsq = fsqr_f + fsqz_f + fsql_f
             fsq_res = fsq if bool(reference_mode) else fsq1
-            if (iter2 == iter1) or (res0 < 0.0):
-                res0 = fsq_res
-            res0_old = res0
-            res0 = min(res0, fsq_res)
+            if bool(vmec2000_control):
+                # VMEC2000 updates res0 only inside TimeStepControl. To keep the
+                # generic tracker from drifting, only tighten res0 when the
+                # preconditioned residual decreases relative to the previous
+                # iteration.
+                if (fsq_res <= fsq_prev) and np.isfinite(fsq_res):
+                    res0 = min(res0, fsq_res)
+                res0_old = res0
+            else:
+                if (iter2 == iter1) or (res0 < 0.0):
+                    res0 = fsq_res
+                res0_old = res0
+                res0 = min(res0, fsq_res)
     
             # Store a "good" checkpoint once residual has improved for many
             # iterations since the last restart marker.
