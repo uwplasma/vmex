@@ -435,8 +435,9 @@ def _mn_cos_to_signed_cached(rcc, rss, *, maps: SignedModeMaps, ncoeff: int):
     pos_flat = pos.reshape(ns, -1) * mask_pos[None, :]
     neg_flat = neg.reshape(ns, -1) * mask_neg[None, :]
 
-    out = out.at[:, idx_pos_safe].add(pos_flat)
-    out = out.at[:, idx_neg_safe].add(neg_flat)
+    idx_all = jnp.concatenate([idx_pos_safe, idx_neg_safe], axis=0)
+    vals_all = jnp.concatenate([pos_flat, neg_flat], axis=1)
+    out = out.at[:, idx_all].add(vals_all)
     return out
 
 
@@ -473,8 +474,9 @@ def _mn_sin_to_signed_cached(sc, cs, *, maps: SignedModeMaps, ncoeff: int):
     pos_flat = pos.reshape(ns, -1) * mask_pos[None, :]
     neg_flat = neg.reshape(ns, -1) * mask_neg_flat[None, :]
 
-    out = out.at[:, idx_pos_safe].add(pos_flat)
-    out = out.at[:, idx_neg_safe].add(neg_flat)
+    idx_all = jnp.concatenate([idx_pos_safe, idx_neg_safe], axis=0)
+    vals_all = jnp.concatenate([pos_flat, neg_flat], axis=1)
+    out = out.at[:, idx_all].add(vals_all)
     return out
 
 
