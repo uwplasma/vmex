@@ -5049,11 +5049,11 @@ def solve_fixed_boundary_residual_iter(
                         mask_even=getattr(static, "m_is_even", None),
                         mask_odd=getattr(static, "m_is_odd", None),
                     )
-                tau = np.asarray(jac.tau)
-                if tau.size:
-                    tau_use = tau[1:] if tau.shape[0] > 1 else tau
-                    min_tau = float(np.min(tau_use))
-                    max_tau = float(np.max(tau_use))
+                tau = jnp.asarray(jac.tau)
+                if int(tau.size) > 0:
+                    tau_use = tau[1:] if int(tau.shape[0]) > 1 else tau
+                    min_tau = float(np.asarray(jnp.min(tau_use)))
+                    max_tau = float(np.asarray(jnp.max(tau_use)))
                     if bool(vmec2000_control):
                         # VMEC2000 jacobian.f uses strict sign-change check (no tolerance).
                         bad_jacobian = (min_tau < 0.0) and (max_tau > 0.0)
