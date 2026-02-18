@@ -2894,6 +2894,7 @@ def solve_fixed_boundary_residual_iter(
     limit_update_rms: bool = False,
     reference_mode: bool = False,
     use_restart_triggers: bool | None = None,
+    vmecpp_restart: bool = False,
     use_direct_fallback: bool | None = None,
     verbose: bool = True,
     verbose_vmec2000_table: bool = True,
@@ -2932,6 +2933,7 @@ def solve_fixed_boundary_residual_iter(
         use_direct_fallback = False
     use_restart_triggers = bool(use_restart_triggers)
     use_direct_fallback = bool(use_direct_fallback)
+    vmecpp_restart = bool(vmecpp_restart)
     verbose_vmec2000_table = bool(verbose_vmec2000_table)
 
     if use_scan and vmec2000_control and auto_flip_force:
@@ -6236,6 +6238,14 @@ def solve_fixed_boundary_residual_iter(
                 bad_growth_streak += 1
             else:
                 bad_growth_streak = 0
+
+            vmecpp_bad_progress = False
+            if vmecpp_restart:
+                vmecpp_bad_progress = (
+                    (iter2 - iter1) > (k_preconditioner_update_interval // 2)
+                    and (iter2 > 2 * k_preconditioner_update_interval)
+                    and ((fsqr_f + fsqz_f) > 1.0e-2)
+                )
     
             if bool(reference_mode):
                 # Conservative restart logic used in the reference-mode trace.
@@ -6254,8 +6264,12 @@ def solve_fixed_boundary_residual_iter(
                 # (irst=2 path in jacobian.f + TimeStepControl).
                 if bad_jacobian and (iter2 > iter1):
                     pre_restart_reason = "bad_jacobian"
+                elif vmecpp_bad_progress:
+                    pre_restart_reason = "bad_progress_vmecpp"
             else:
-                if (iter2 > (iter1 + 8)) and (bad_growth_streak >= 2):
+                if vmecpp_bad_progress:
+                    pre_restart_reason = "bad_progress_vmecpp"
+                elif (iter2 > (iter1 + 8)) and (bad_growth_streak >= 2):
                     pre_restart_reason = "bad_jacobian"
                 elif (
                     (iter2 - iter1) > (k_preconditioner_update_interval // 2)
