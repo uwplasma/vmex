@@ -18,7 +18,7 @@ from dataclasses import dataclass
 import hashlib
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, NamedTuple
 
 import numpy as np
 
@@ -4034,8 +4034,607 @@ def solve_fixed_boundary_residual_iter(
     if abs(gamma - 1.0) < 1e-14:
         raise ValueError("GAMMA=1 makes wp/(gamma-1) singular (VMEC objective undefined)")
 
+    def _run_vmec2000_scan(state_init: VMECState) -> SolveVmecResidualResult:
+        if bool(cfg.lasym):
+            raise ValueError("vmec2000 scan does not yet support lasym=True.")
+        if backtracking or limit_dt_from_force or limit_update_rms or use_direct_fallback or reference_mode:
+            raise ValueError(
+                "vmec2000 scan requires backtracking=False, limit_dt_from_force=False, "
+                "limit_update_rms=False, use_direct_fallback=False, reference_mode=False."
+            )
+        if not bool(strict_update):
+            raise ValueError("vmec2000 scan requires strict_update=True.")
+        if bool(auto_flip_force):
+            raise ValueError("vmec2000 scan does not yet support auto_flip_force=True.")
+
+        k_preconditioner_update_interval = 25
+        restart_badjac_factor = 0.9
+        restart_badprog_factor = 1.03
+        vmec2000_fact = 1.0e4
+        iter_offset = 0
+        dtype = jnp.asarray(state_init.Rcos).dtype
+        time_step0 = jnp.asarray(float(step_size), dtype=dtype)
+        flip_sign0 = jnp.asarray(float(initial_flip_sign), dtype=dtype)
+        k_ndamp = 10
+        inv_tau0 = jnp.full((k_ndamp,), jnp.asarray(0.15, dtype=dtype) / time_step0)
+        fsq_prev0 = jnp.asarray(1.0, dtype=dtype)
+        res0_0 = jnp.asarray(-1.0, dtype=dtype)
+        res1_0 = jnp.asarray(-1.0, dtype=dtype)
+        iter1_0 = jnp.asarray(1, dtype=jnp.int32)
+        ijacob0 = jnp.asarray(0, dtype=jnp.int32)
+        bad_resets0 = jnp.asarray(0, dtype=jnp.int32)
+        bad_growth0 = jnp.asarray(0, dtype=jnp.int32)
+        fsqz_prev0 = jnp.asarray(1.0, dtype=dtype)
+        force_bcovar0 = jnp.asarray(False)
+
+        vRcc0 = jnp.zeros((int(state_init.Rcos.shape[0]), mpol, nrange), dtype=dtype)
+        vRss0 = jnp.zeros_like(vRcc0)
+        vZsc0 = jnp.zeros_like(vRcc0)
+        vZcs0 = jnp.zeros_like(vRcc0)
+        vLsc0 = jnp.zeros_like(vRcc0)
+        vLcs0 = jnp.zeros_like(vRcc0)
+
+        def _scale_m1_precond_rhs(frzl_in: TomnspsRZL, mats: dict[str, Any]) -> TomnspsRZL:
+            if (not bool(getattr(cfg, "lconm1", True))) or (int(cfg.mpol) <= 1):
+                return frzl_in
+            dr = jnp.asarray(mats["dr"])
+            dz = jnp.asarray(mats["dz"])
+            if dr.shape[0] == 0:
+                return frzl_in
+            sr = -dr[:, 1, 0]
+            sz = -dz[:, 1, 0]
+            denom = sr + sz
+            fac_r = jnp.where(denom != 0.0, sr / denom, jnp.ones_like(sr))
+            fac_z = jnp.where(denom != 0.0, sz / denom, jnp.ones_like(sz))
+
+            ns_full = int(jnp.asarray(frzl_in.frcc).shape[0])
+            nsolve = min(ns_full, int(sr.shape[0]))
+            fac_r_full = jnp.ones((ns_full,), dtype=jnp.asarray(frzl_in.frcc).dtype).at[:nsolve].set(fac_r[:nsolve])
+            fac_z_full = jnp.ones((ns_full,), dtype=jnp.asarray(frzl_in.fzsc).dtype).at[:nsolve].set(fac_z[:nsolve])
+
+            frss = frzl_in.frss
+            fzcs = frzl_in.fzcs
+            frsc = getattr(frzl_in, "frsc", None)
+            fzcc = getattr(frzl_in, "fzcc", None)
+            if frss is not None:
+                frss = jnp.asarray(frss)
+                frss = frss.at[:, 1, :].set(frss[:, 1, :] * fac_r_full[:, None])
+            if fzcs is not None:
+                fzcs = jnp.asarray(fzcs)
+                fzcs = fzcs.at[:, 1, :].set(fzcs[:, 1, :] * fac_z_full[:, None])
+            if frsc is not None:
+                frsc = jnp.asarray(frsc)
+                frsc = frsc.at[:, 1, :].set(frsc[:, 1, :] * fac_r_full[:, None])
+            if fzcc is not None:
+                fzcc = jnp.asarray(fzcc)
+                fzcc = fzcc.at[:, 1, :].set(fzcc[:, 1, :] * fac_z_full[:, None])
+            return TomnspsRZL(
+                frcc=frzl_in.frcc,
+                frss=frss,
+                fzsc=frzl_in.fzsc,
+                fzcs=fzcs,
+                flsc=frzl_in.flsc,
+                flcs=frzl_in.flcs,
+                frsc=frsc,
+                frcs=frzl_in.frcs,
+                fzcc=fzcc,
+                fzss=frzl_in.fzss,
+                flcc=getattr(frzl_in, "flcc", None),
+                flss=getattr(frzl_in, "flss", None),
+            )
+
+        _compute_forces_scan = _compute_forces if jit_forces else _compute_forces_impl
+        k0, frzl0, gcr2_0, gcz2_0, gcl2_0, rz_scale0, l_scale0, norms0 = _compute_forces_scan(
+            state_init,
+            include_edge=False,
+            zero_m1=jnp.asarray(1.0, dtype=dtype),
+            constraint_precond_diag=zero_precond_diag,
+            constraint_tcon=zero_tcon,
+            constraint_precond_active=constraint_active_false,
+            constraint_tcon_active=constraint_active_false,
+            iter_idx=None,
+        )
+        cache_valid0 = jnp.asarray(False)
+        if constraint_tcon0 is None or float(constraint_tcon0) == 0.0:
+            cache_precond_diag0 = zero_precond_diag
+            cache_tcon0 = zero_tcon
+        else:
+            from .vmec_constraints import precondn_diag_axd1_from_bcovar
+
+            ard1_0, azd1_0 = precondn_diag_axd1_from_bcovar(
+                trig=trig,
+                s=s,
+                bsq=k0.bc.bsq,
+                r12=k0.bc.jac.r12,
+                sqrtg=k0.bc.jac.sqrtg,
+                ru12=k0.bc.jac.ru12,
+                zu12=k0.bc.jac.zu12,
+            )
+            cache_precond_diag0 = (ard1_0, azd1_0)
+            cache_tcon0 = jnp.asarray(k0.tcon)
+        cache_norms0 = norms0
+        cache_rz_scale0 = rz_scale0
+        cache_l_scale0 = l_scale0
+        cache_rz_norm0 = _rz_norm(state_init)
+        cache_f_norm1_0 = jnp.where(cache_rz_norm0 != 0.0, 1.0 / cache_rz_norm0, jnp.asarray(float("inf"), dtype=dtype))
+        from .preconditioner_1d_jax import rz_preconditioner_matrices
+
+        cache_lam_prec0 = _lambda_preconditioner(k0.bc)
+        cache_rz_mats0, _jmin0, jmax0 = rz_preconditioner_matrices(bc=k0.bc, k=k0, trig=trig, s=s, cfg=cfg)
+        jmax0 = int(jmax0)
+
+        class _ScanCarry(NamedTuple):
+            state: VMECState
+            time_step: Any
+            inv_tau: Any
+            fsq_prev: Any
+            vRcc: Any
+            vRss: Any
+            vZsc: Any
+            vZcs: Any
+            vLsc: Any
+            vLcs: Any
+            flip_sign: Any
+            iter1: Any
+            res0: Any
+            res1: Any
+            state_checkpoint: VMECState
+            cache_valid: Any
+            cache_precond_diag: Any
+            cache_tcon: Any
+            cache_norms: Any
+            cache_rz_scale: Any
+            cache_l_scale: Any
+            cache_rz_norm: Any
+            cache_f_norm1: Any
+            cache_prec_rz_mats: Any
+            cache_prec_lam_prec: Any
+            force_bcovar_update: Any
+            ijacob: Any
+            bad_resets: Any
+            bad_growth: Any
+            fsqz_prev: Any
+
+        def _tree_select(cond, t_true, t_false):
+            return jax.tree_map(lambda a, b: jnp.where(cond, a, b), t_true, t_false)
+
+        def _scan_step(carry: _ScanCarry, it):
+            iter2 = jnp.asarray(it + 1 + int(iter_offset), dtype=jnp.int32)
+            fsq_prev_before = carry.fsq_prev
+            iter_since_restart = iter2 - carry.iter1
+            zero_m1 = jnp.where((iter2 < 2) | (carry.fsqz_prev < 1.0e-6), jnp.asarray(1.0, dtype=dtype), jnp.asarray(0.0, dtype=dtype))
+
+            need_bcovar_update = (~carry.cache_valid) | carry.force_bcovar_update | (((iter2 - carry.iter1) % k_preconditioner_update_interval) == 0)
+            use_cached_precond = carry.cache_valid & (~need_bcovar_update)
+            constraint_precond_diag = _tree_select(use_cached_precond, carry.cache_precond_diag, zero_precond_diag)
+            constraint_tcon_override = jnp.where(use_cached_precond, carry.cache_tcon, zero_tcon)
+            constraint_precond_active = use_cached_precond
+            constraint_tcon_active = use_cached_precond
+
+            k, frzl, gcr2, gcz2, gcl2, rz_scale, l_scale, norms_current = _compute_forces_scan(
+                carry.state,
+                include_edge=False,
+                zero_m1=zero_m1,
+                constraint_precond_diag=constraint_precond_diag,
+                constraint_tcon=constraint_tcon_override,
+                constraint_precond_active=constraint_precond_active,
+                constraint_tcon_active=constraint_tcon_active,
+                iter_idx=None,
+            )
+            norms_used = jax.lax.cond(
+                use_cached_precond,
+                lambda _: carry.cache_norms,
+                lambda _: norms_current,
+                operand=None,
+            )
+            fsqr = norms_used.r1 * norms_used.fnorm * gcr2
+            fsqz = norms_used.r1 * norms_used.fnorm * gcz2
+            fsql = norms_used.fnormL * gcl2
+
+            def _refresh_cache(_):
+                if constraint_tcon0 is None or float(constraint_tcon0) == 0.0:
+                    cache_precond_diag = zero_precond_diag
+                    cache_tcon = zero_tcon
+                else:
+                    from .vmec_constraints import precondn_diag_axd1_from_bcovar
+
+                    ard1, azd1 = precondn_diag_axd1_from_bcovar(
+                        trig=trig,
+                        s=s,
+                        bsq=k.bc.bsq,
+                        r12=k.bc.jac.r12,
+                        sqrtg=k.bc.jac.sqrtg,
+                        ru12=k.bc.jac.ru12,
+                        zu12=k.bc.jac.zu12,
+                    )
+                    cache_precond_diag = (ard1, azd1)
+                    cache_tcon = jnp.asarray(k.tcon)
+                cache_norms = norms_used
+                cache_rz_scale = rz_scale
+                cache_l_scale = l_scale
+                cache_rz_norm = _rz_norm(carry.state)
+                cache_f_norm1 = jnp.where(cache_rz_norm != 0.0, 1.0 / cache_rz_norm, jnp.asarray(float("inf"), dtype=dtype))
+                from .preconditioner_1d_jax import rz_preconditioner_matrices
+
+                cache_lam_prec = _lambda_preconditioner(k.bc)
+                mats, _jmin, jmax = rz_preconditioner_matrices(bc=k.bc, k=k, trig=trig, s=s, cfg=cfg)
+                # jmax is constant for fixed ns; reuse the static jmax0
+                return (
+                    cache_precond_diag,
+                    cache_tcon,
+                    cache_norms,
+                    cache_rz_scale,
+                    cache_l_scale,
+                    cache_rz_norm,
+                    cache_f_norm1,
+                    cache_lam_prec,
+                    mats,
+                    jnp.asarray(True),
+                )
+
+            def _keep_cache(_):
+                return (
+                    carry.cache_precond_diag,
+                    carry.cache_tcon,
+                    carry.cache_norms,
+                    carry.cache_rz_scale,
+                    carry.cache_l_scale,
+                    carry.cache_rz_norm,
+                    carry.cache_f_norm1,
+                    carry.cache_prec_lam_prec,
+                    carry.cache_prec_rz_mats,
+                    carry.cache_valid,
+                )
+
+            (
+                cache_precond_diag,
+                cache_tcon,
+                cache_norms,
+                cache_rz_scale,
+                cache_l_scale,
+                cache_rz_norm,
+                cache_f_norm1,
+                cache_lam_prec,
+                cache_rz_mats,
+                cache_valid,
+            ) = jax.lax.cond(need_bcovar_update, _refresh_cache, _keep_cache, operand=None)
+
+            frzl_rhs = _scale_m1_precond_rhs(frzl, cache_rz_mats)
+            from .preconditioner_1d_jax import rz_preconditioner_apply
+
+            frzl_rz = rz_preconditioner_apply(
+                frzl_in=frzl_rhs,
+                mats=cache_rz_mats,
+                jmax=jmax0,
+                cfg=cfg,
+            )
+            frcc = jnp.asarray(frzl_rz.frcc)
+            frss = frzl_rz.frss if frzl_rz.frss is not None else jnp.zeros_like(frcc)
+            fzsc = jnp.asarray(frzl_rz.fzsc)
+            fzcs = frzl_rz.fzcs if frzl_rz.fzcs is not None else jnp.zeros_like(fzsc)
+            flsc = jnp.asarray(frzl_rz.flsc) * jnp.asarray(cache_lam_prec)
+            flcs = None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * jnp.asarray(cache_lam_prec))
+
+            frcc_u = frcc * w_mode_mn[None, :, :]
+            frss_u = frss * w_mode_mn[None, :, :]
+            fzsc_u = fzsc * w_mode_mn[None, :, :]
+            fzcs_u = fzcs * w_mode_mn[None, :, :]
+            flsc_u = flsc * w_mode_mn[None, :, :]
+            flcs_u = (flcs if flcs is not None else jnp.zeros_like(flsc_u)) * w_mode_mn[None, :, :]
+            if lambda_update_scale != 1.0:
+                flsc_u = flsc_u * lambda_update_scale_j
+                flcs_u = flcs_u * lambda_update_scale_j
+
+            gcr2_p, gcz2_p, gcl2_p = vmec_gcx2_from_tomnsps(
+                frzl=TomnspsRZL(
+                    frcc=frcc,
+                    frss=frss,
+                    fzsc=fzsc,
+                    fzcs=fzcs,
+                    flsc=flsc,
+                    flcs=flcs,
+                ),
+                lconm1=bool(getattr(static.cfg, "lconm1", True)),
+                apply_m1_constraints=False,
+                include_edge=True,
+                apply_scalxc=False,
+                s=s,
+            )
+            rz_norm = jnp.where(cache_valid, cache_rz_norm, _rz_norm(carry.state))
+            f_norm1 = jnp.where(cache_valid, cache_f_norm1, jnp.where(rz_norm != 0.0, 1.0 / rz_norm, jnp.asarray(float("inf"), dtype=dtype)))
+            fsqr1 = gcr2_p * f_norm1
+            fsqz1 = gcz2_p * f_norm1
+            gcl2_full = jnp.sum(frzl_rz.flsc * frzl_rz.flsc)
+            if frzl_rz.flcs is not None:
+                gcl2_full = gcl2_full + jnp.sum(frzl_rz.flcs * frzl_rz.flcs)
+            fsql1 = gcl2_full * delta_s
+            fsq1 = fsqr1 + fsqz1 + fsql1
+
+            tau = jnp.asarray(k.bc.jac.tau)
+            tau_use = tau[1:] if int(tau.shape[0]) > 1 else tau
+            min_tau = jnp.min(tau_use)
+            max_tau = jnp.max(tau_use)
+            bad_jacobian = (min_tau < 0.0) & (max_tau > 0.0)
+
+            fsq0 = fsqr + fsqz + fsql
+            fsq = carry.fsq_prev
+            init_mask = (iter2 == carry.iter1) | (carry.res0 < 0.0) | (carry.res1 < 0.0)
+            res0 = jnp.where(init_mask, fsq, carry.res0)
+            res1 = jnp.where(init_mask, fsq0, carry.res1)
+            state_checkpoint = jax.tree_map(lambda a, b: jnp.where(init_mask, a, b), carry.state, carry.state_checkpoint)
+            res0 = jnp.minimum(res0, fsq)
+            res1 = jnp.minimum(res1, fsq0)
+            checkpoint_mask = (fsq <= res0) & (fsq0 <= res1) & (~bad_jacobian)
+            state_checkpoint = jax.tree_map(lambda a, b: jnp.where(checkpoint_mask, a, b), carry.state, state_checkpoint)
+
+            restart_time = (~bad_jacobian) & ((iter2 - carry.iter1) > 10) & (
+                (fsq > vmec2000_fact * jnp.maximum(res0, 1.0e-30)) | (fsq0 > vmec2000_fact * jnp.maximum(res1, 1.0e-30))
+            )
+            restart_badjac = use_restart_triggers & bad_jacobian & (iter2 > carry.iter1)
+            do_restart = restart_time | restart_badjac
+
+            def _restart_updates(_):
+                time_step = jnp.where(restart_badjac, restart_badjac_factor * carry.time_step, carry.time_step / restart_badprog_factor)
+                time_step = jnp.maximum(time_step, jnp.asarray(1.0e-12, dtype=dtype))
+                iter1 = iter2
+                inv_tau = jnp.full((k_ndamp,), jnp.asarray(0.15, dtype=dtype) / time_step)
+                fsq_prev = fsq_prev_before
+                ijacob = jnp.where(restart_badjac, carry.ijacob + 1, carry.ijacob)
+                bad_resets = carry.bad_resets + 1
+                bad_growth = jnp.asarray(0, dtype=jnp.int32)
+                force_bcovar_update = jnp.asarray(True)
+                vRcc = jnp.zeros_like(carry.vRcc)
+                vRss = jnp.zeros_like(carry.vRss)
+                vZsc = jnp.zeros_like(carry.vZsc)
+                vZcs = jnp.zeros_like(carry.vZcs)
+                vLsc = jnp.zeros_like(carry.vLsc)
+                vLcs = jnp.zeros_like(carry.vLcs)
+                state = state_checkpoint
+                return (
+                    state,
+                    time_step,
+                    inv_tau,
+                    fsq_prev,
+                    vRcc,
+                    vRss,
+                    vZsc,
+                    vZcs,
+                    vLsc,
+                    vLcs,
+                    iter1,
+                    ijacob,
+                    bad_resets,
+                    bad_growth,
+                    force_bcovar_update,
+                )
+
+            def _no_restart_updates(_):
+                return (
+                    carry.state,
+                    carry.time_step,
+                    carry.inv_tau,
+                    carry.fsq_prev,
+                    carry.vRcc,
+                    carry.vRss,
+                    carry.vZsc,
+                    carry.vZcs,
+                    carry.vLsc,
+                    carry.vLcs,
+                    carry.iter1,
+                    carry.ijacob,
+                    carry.bad_resets,
+                    carry.bad_growth,
+                    jnp.asarray(False),
+                )
+
+            (
+                state_post,
+                time_step_post,
+                inv_tau_post,
+                fsq_prev_post,
+                vRcc_post,
+                vRss_post,
+                vZsc_post,
+                vZcs_post,
+                vLsc_post,
+                vLcs_post,
+                iter1_post,
+                ijacob_post,
+                bad_resets_post,
+                bad_growth_post,
+                force_bcovar_post,
+            ) = jax.lax.cond(do_restart, _restart_updates, _no_restart_updates, operand=None)
+
+            def _accept_step(_):
+                inv_tau_reset = jnp.full((k_ndamp,), jnp.asarray(0.15, dtype=dtype) / time_step_post)
+                invtau_num = jnp.where(fsq1 == 0.0, 0.0, jnp.minimum(jnp.abs(jnp.log(fsq1 / jnp.maximum(fsq_prev_post, 1.0e-30))), 0.15))
+                inv_tau_next = jnp.concatenate([inv_tau_post[1:], invtau_num[None] / time_step_post], axis=0)
+                inv_tau = jnp.where(iter2 == iter1_post, inv_tau_reset, inv_tau_next)
+                fsq_prev = fsq1
+                otav = jnp.sum(inv_tau) / float(k_ndamp)
+                dtau = time_step_post * otav / 2.0
+                b1 = 1.0 - dtau
+                fac = 1.0 / (1.0 + dtau)
+                force_scale = time_step_post
+                vRcc = fac * (b1 * vRcc_post + force_scale * (flip_sign0 * frcc_u))
+                vRss = fac * (b1 * vRss_post + force_scale * (flip_sign0 * frss_u))
+                vZsc = fac * (b1 * vZsc_post + force_scale * (flip_sign0 * fzsc_u))
+                vZcs = fac * (b1 * vZcs_post + force_scale * (flip_sign0 * fzcs_u))
+                vLsc = fac * (b1 * vLsc_post + force_scale * (flip_sign0 * flsc_u))
+                vLcs = fac * (b1 * vLcs_post + force_scale * (flip_sign0 * flcs_u))
+                dR = time_step_post * _mn_cos_to_signed_physical(vRcc, vRss)
+                dZ = time_step_post * _mn_sin_to_signed_physical(vZsc, vZcs)
+                dL = time_step_post * _mn_sin_to_signed_physical_lambda(vLsc, vLcs)
+                state_new = VMECState(
+                    layout=state_post.layout,
+                    Rcos=jnp.asarray(state_post.Rcos) + dR,
+                    Rsin=state_post.Rsin,
+                    Zcos=state_post.Zcos,
+                    Zsin=jnp.asarray(state_post.Zsin) + dZ,
+                    Lcos=state_post.Lcos,
+                    Lsin=jnp.asarray(state_post.Lsin) + dL,
+                )
+                state_new = _enforce_fixed_boundary_and_axis(
+                    state_new,
+                    static,
+                    edge_Rcos=edge_Rcos,
+                    edge_Rsin=edge_Rsin,
+                    edge_Zcos=edge_Zcos,
+                    edge_Zsin=edge_Zsin,
+                    enforce_lambda_axis=True,
+                    idx00=idx00,
+                )
+                state_new = _apply_vmec_lambda_axis_rules(state_new)
+                return state_new, vRcc, vRss, vZsc, vZcs, vLsc, vLcs, inv_tau, fsq_prev
+
+            def _reject_step(_):
+                return (
+                    state_post,
+                    vRcc_post,
+                    vRss_post,
+                    vZsc_post,
+                    vZcs_post,
+                    vLsc_post,
+                    vLcs_post,
+                    inv_tau_post,
+                    fsq_prev_post,
+                )
+
+            state_new, vRcc_new, vRss_new, vZsc_new, vZcs_new, vLsc_new, vLcs_new, inv_tau_new, fsq_prev_new = jax.lax.cond(
+                do_restart, _reject_step, _accept_step, operand=None
+            )
+
+            fsqz_prev = jnp.where(do_restart, carry.fsqz_prev, fsqz)
+
+            cache_valid_out = jnp.where(do_restart, jnp.asarray(False), cache_valid)
+            new_carry = _ScanCarry(
+                state=state_new,
+                time_step=time_step_post,
+                inv_tau=inv_tau_new,
+                fsq_prev=fsq_prev_new,
+                vRcc=vRcc_new,
+                vRss=vRss_new,
+                vZsc=vZsc_new,
+                vZcs=vZcs_new,
+                vLsc=vLsc_new,
+                vLcs=vLcs_new,
+                flip_sign=flip_sign0,
+                iter1=iter1_post,
+                res0=res0,
+                res1=res1,
+                state_checkpoint=state_checkpoint,
+                cache_valid=cache_valid_out,
+                cache_precond_diag=cache_precond_diag,
+                cache_tcon=cache_tcon,
+                cache_norms=cache_norms,
+                cache_rz_scale=cache_rz_scale,
+                cache_l_scale=cache_l_scale,
+                cache_rz_norm=cache_rz_norm,
+                cache_f_norm1=cache_f_norm1,
+                cache_prec_rz_mats=cache_rz_mats,
+                cache_prec_lam_prec=cache_lam_prec,
+                force_bcovar_update=force_bcovar_post,
+                ijacob=ijacob_post,
+                bad_resets=bad_resets_post,
+                bad_growth=bad_growth_post,
+                fsqz_prev=fsqz_prev,
+            )
+            accepted = jnp.logical_not(do_restart)
+            return new_carry, (fsqr, fsqz, fsql, accepted)
+
+        carry0 = _ScanCarry(
+            state=state_init,
+            time_step=time_step0,
+            inv_tau=inv_tau0,
+            fsq_prev=fsq_prev0,
+            vRcc=vRcc0,
+            vRss=vRss0,
+            vZsc=vZsc0,
+            vZcs=vZcs0,
+            vLsc=vLsc0,
+            vLcs=vLcs0,
+            flip_sign=flip_sign0,
+            iter1=iter1_0,
+            res0=res0_0,
+            res1=res1_0,
+            state_checkpoint=state_init,
+            cache_valid=cache_valid0,
+            cache_precond_diag=cache_precond_diag0,
+            cache_tcon=cache_tcon0,
+            cache_norms=cache_norms0,
+            cache_rz_scale=cache_rz_scale0,
+            cache_l_scale=cache_l_scale0,
+            cache_rz_norm=cache_rz_norm0,
+            cache_f_norm1=cache_f_norm1_0,
+            cache_prec_rz_mats=cache_rz_mats0,
+            cache_prec_lam_prec=cache_lam_prec0,
+            force_bcovar_update=force_bcovar0,
+            ijacob=ijacob0,
+            bad_resets=bad_resets0,
+            bad_growth=bad_growth0,
+            fsqz_prev=fsqz_prev0,
+        )
+
+        scan_cache_key = (
+            "vmec2000_scan_v1",
+            static_key,
+            wout_key,
+            edge_key,
+            int(max_iter),
+            float(step_size),
+            float(initial_flip_sign),
+            float(lambda_update_scale),
+        )
+
+        def _run_scan(state_init_local):
+            return jax.lax.scan(_scan_step, carry0._replace(state=state_init_local, state_checkpoint=state_init_local), jnp.arange(max_iter, dtype=jnp.int32))
+
+        cached_run = _SCAN_RUNNER_CACHE.get(scan_cache_key)
+        if cached_run is None:
+            _run_scan = jit(_run_scan, donate_argnums=(0,))
+            _SCAN_RUNNER_CACHE[scan_cache_key] = _run_scan
+        else:
+            _run_scan = cached_run
+
+        carry_final, hist = _run_scan(state_init)
+        fsqr_hist, fsqz_hist, fsql_hist, accepted = hist
+        accepted_mask = np.asarray(accepted).astype(bool)
+        fsqr_hist_np = np.asarray(fsqr_hist)[accepted_mask]
+        fsqz_hist_np = np.asarray(fsqz_hist)[accepted_mask]
+        fsql_hist_np = np.asarray(fsql_hist)[accepted_mask]
+        w_hist = fsqr_hist_np + fsqz_hist_np + fsql_hist_np
+        return SolveVmecResidualResult(
+            state=carry_final.state,
+            n_iter=int(w_hist.shape[0]),
+            w_history=np.asarray(w_hist),
+            fsqr2_history=np.asarray(fsqr_hist_np),
+            fsqz2_history=np.asarray(fsqz_hist_np),
+            fsql2_history=np.asarray(fsql_hist_np),
+            grad_rms_history=np.asarray([], dtype=float),
+            step_history=np.asarray([], dtype=float),
+            diagnostics={
+                "use_scan": True,
+                "vmec2000_scan": True,
+                "resume_state": {
+                    "state_checkpoint": carry_final.state_checkpoint,
+                    "time_step": float(np.asarray(carry_final.time_step)),
+                    "inv_tau": np.asarray(carry_final.inv_tau),
+                    "fsq_prev": float(np.asarray(carry_final.fsq_prev)),
+                    "iter1": int(np.asarray(carry_final.iter1)),
+                    "res0": float(np.asarray(carry_final.res0)),
+                    "res1": float(np.asarray(carry_final.res1)),
+                    "vmec2000_cache_valid": bool(np.asarray(carry_final.cache_valid)),
+                },
+            },
+        )
+
+    if use_scan and bool(vmec2000_control) and bool(cfg.lasym):
+        use_scan = False
+
     if use_scan:
-        if vmec2000_control or backtracking or use_restart_triggers or auto_flip_force or limit_dt_from_force or limit_update_rms or strict_update or use_direct_fallback or reference_mode:
+        if vmec2000_control:
+            return _run_vmec2000_scan(state)
+        if backtracking or use_restart_triggers or auto_flip_force or limit_dt_from_force or limit_update_rms or strict_update or use_direct_fallback or reference_mode:
             raise ValueError(
                 "use_scan requires vmec2000_control=False, backtracking=False, "
                 "use_restart_triggers=False, auto_flip_force=False, "

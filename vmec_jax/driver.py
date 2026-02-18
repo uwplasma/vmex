@@ -270,7 +270,7 @@ def run_fixed_boundary(
     jit_forces: bool | str = True,
     jit_precompile: bool | None = None,
     use_scan: bool = False,
-    performance_mode: bool = False,
+    performance_mode: bool = True,
     grid=None,
     ns_override: int | None = None,
     restart_state: any | None = None,

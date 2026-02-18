@@ -361,6 +361,7 @@ class TomnspsRZL:
 _MPARITY_CACHE: dict[tuple[int, str], jnp.ndarray] = {}
 _JNP_EINSUM = jnp.einsum
 _DETERMINISTIC_REDUCE = bool(int(os.environ.get("VMEC_JAX_DETERMINISTIC_REDUCE", "0")))
+_TOMNSPS_FFT = os.environ.get("VMEC_JAX_TOMNSPS_FFT", "1").strip().lower() not in ("0", "false", "no")
 
 
 def _einsum(expr: str, *operands):
@@ -412,6 +413,31 @@ def _zeta_contract(arr, mat):
         return acc_k + arr_k[..., None] * mat_k[None, None, None, :]
 
     return lax.fori_loop(0, k_size, body, acc)
+
+
+def _theta_transform_fft(arr, *, mpol: int, dnorm: float, mscale, want_sin: bool):
+    """FFT-based theta transform for lasym=False (DCT-I / DST-I via FFT)."""
+    arr = jnp.asarray(arr)
+    nt2 = int(arr.shape[-2])
+    if nt2 < 2:
+        out_shape = arr.shape[:-2] + (int(mpol), int(arr.shape[-1]))
+        return jnp.zeros(out_shape, dtype=arr.dtype)
+    if want_sin:
+        # Enforce zero endpoints for sine series.
+        arr = arr.at[..., 0, :].set(0.0)
+        arr = arr.at[..., nt2 - 1, :].set(0.0)
+        ext = jnp.concatenate([arr, -arr[..., nt2 - 2 : 0 : -1, :]], axis=-2)
+        fft = jnp.fft.rfft(ext, axis=-2)
+        coeff = -jnp.imag(fft[..., :mpol, :])
+    else:
+        ext = jnp.concatenate([arr, arr[..., nt2 - 2 : 0 : -1, :]], axis=-2)
+        fft = jnp.fft.rfft(ext, axis=-2)
+        coeff = jnp.real(fft[..., :mpol, :])
+    # Match VMEC's normalization: dnorm and mscale (sqrt2 for m>0).
+    mscale = jnp.asarray(mscale[:mpol], dtype=coeff.dtype)
+    mshape = (1,) * (coeff.ndim - 2) + (int(mpol), 1)
+    coeff = 0.5 * coeff * mscale.reshape(mshape) * jnp.asarray(dnorm, dtype=coeff.dtype)
+    return coeff
 
 
 def _cache_allowed() -> bool:
@@ -672,10 +698,26 @@ def tomnsps_rzl(
     stack_cosmui = jnp.stack([armn, crmn, azmn, czmn, arcon, azcon, clmn], axis=0)
     stack_sinmumi = jnp.stack([brmn, bzmn, blmn], axis=0)
 
-    cosmui_out = _theta_einsum_stack(stack_cosmui, cosmui)
-    sinmui_out = _theta_einsum_stack(stack_cosmui, sinmui)
-    sinmumi_out = _theta_einsum_stack(stack_sinmumi, sinmumi)
-    cosmumi_out = _theta_einsum_stack(stack_sinmumi, cosmumi)
+    use_fft = bool(_TOMNSPS_FFT) and (not bool(lasym)) and has_jax()
+    if use_fft:
+        dnorm = float(getattr(trig, "dnorm", 1.0))
+        mscale = getattr(trig, "mscale", None)
+        if mscale is None:
+            mscale = jnp.ones((mpol,), dtype=jnp.asarray(armn_even).dtype)
+        cosmui_out = _theta_transform_fft(stack_cosmui, mpol=mpol, dnorm=dnorm, mscale=mscale, want_sin=False)
+        sinmui_out = _theta_transform_fft(stack_cosmui, mpol=mpol, dnorm=dnorm, mscale=mscale, want_sin=True)
+        sin_coeff = _theta_transform_fft(stack_sinmumi, mpol=mpol, dnorm=dnorm, mscale=mscale, want_sin=True)
+        cos_coeff = _theta_transform_fft(stack_sinmumi, mpol=mpol, dnorm=dnorm, mscale=mscale, want_sin=False)
+        m = jnp.arange(int(mpol), dtype=cos_coeff.dtype)
+        mshape = (1,) * (cos_coeff.ndim - 2) + (int(mpol), 1)
+        m = m.reshape(mshape)
+        sinmumi_out = -sin_coeff * m
+        cosmumi_out = cos_coeff * m
+    else:
+        cosmui_out = _theta_einsum_stack(stack_cosmui, cosmui)
+        sinmui_out = _theta_einsum_stack(stack_cosmui, sinmui)
+        sinmumi_out = _theta_einsum_stack(stack_sinmumi, sinmumi)
+        cosmumi_out = _theta_einsum_stack(stack_sinmumi, cosmumi)
 
     armn_cos, crmn_cos, azmn_cos, czmn_cos, arcon_cos, azcon_cos, clmn_cos = cosmui_out
     armn_sin, crmn_sin, azmn_sin, czmn_sin, arcon_sin, azcon_sin, clmn_sin = sinmui_out
