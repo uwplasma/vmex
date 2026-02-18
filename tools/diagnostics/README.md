@@ -13,3 +13,12 @@ For user-facing entrypoints, start from:
 
 - `examples/showcase_axisym_input_to_wout.py`
 - `vmec_jax.api`
+
+Common parity/validation scripts (moved from `examples/validation/`):
+
+- `pipeline_parity_summary.py`
+- `getfsq_parity_cases.py`
+- `end_to_end_solve_parity_summary.py`
+- `benchmark_fixed_boundary_runtime_and_residuals.py`
+- `axisym_stage_parity.py`
+- `axisym_first_step_diagnostics.py`

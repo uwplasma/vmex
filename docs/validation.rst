@@ -44,28 +44,28 @@ All of the following scripts are designed to run quickly on bundled data:
 
 - Pipeline parity snapshot (solver-free)::
 
-    python examples/validation/pipeline_parity_summary.py \
+    python tools/diagnostics/pipeline_parity_summary.py \
       --cases circular_tokamak shaped_tokamak_pressure solovev \
       n3are_R7.75B5.7_lowres LandremanPaul2021_QA_lowres li383_low_res
 
 - Scalar residual parity (solver-free, reference states)::
 
-    python examples/validation/getfsq_parity_cases.py --solve-metric
+    python tools/diagnostics/getfsq_parity_cases.py --solve-metric
 
 - End-to-end solve snapshot (short solve, compares a few end-to-end outputs)::
 
-    python examples/validation/end_to_end_solve_parity_summary.py --use-input-niter --fast
+    python tools/diagnostics/end_to_end_solve_parity_summary.py --use-input-niter --fast
 
 - Runtime + residual benchmark for a fixed iteration budget (communication-oriented)::
 
-    python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py \
+    python tools/diagnostics/benchmark_fixed_boundary_runtime_and_residuals.py \
       --iters 10 \
       --cases circular_tokamak shaped_tokamak_pressure solovev purely_toroidal_field \
       --run-vmec2000 --vmec2000-timeout 60
 
   To run at higher resolution::
 
-    python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py \
+    python tools/diagnostics/benchmark_fixed_boundary_runtime_and_residuals.py \
       --iters 20 \
       --cases circular_tokamak shaped_tokamak_pressure solovev purely_toroidal_field \
       --ns-override 17 \
