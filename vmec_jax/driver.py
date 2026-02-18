@@ -267,7 +267,7 @@ def run_fixed_boundary(
     multigrid: bool | None = None,
     multigrid_use_input_niter: bool = True,
     verbose: bool = True,
-    jit_forces: bool | str = "auto",
+    jit_forces: bool | str = True,
     jit_precompile: bool | None = None,
     use_scan: bool = False,
     grid=None,
@@ -376,7 +376,7 @@ def run_fixed_boundary(
     verbose:
         If True (default), print VMEC-style iteration progress and a summary.
     jit_forces:
-        If True, JIT the force kernels. If ``"auto"`` (default), disable JIT
+        If True (default), JIT the force kernels. If ``"auto"``, disable JIT
         for very small workloads to reduce first-iteration latency.
     """
     # Default to 64-bit for VMEC parity; users can opt out via JAX_ENABLE_X64=0.
