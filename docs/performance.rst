@@ -108,23 +108,29 @@ Recent profiling snapshot (QA, 3 iterations on CPU)
 Longer runs benefit more because Python control-flow overhead scales with the
 iteration count in the non-scan path.
 
-Planned: tighter multigrid restart heuristics
----------------------------------------------
+VMEC++ bad-progress restarts (optional)
+-----------------------------------------------
 
 VMEC++ introduces a "bad progress" restart policy that detects large residuals
-on refined grids and restarts the time-step controller more aggressively.
-We plan to mirror this in ``vmec_jax`` to prevent large ``fsqr`` spikes on the
-first few iterations after a grid transition. The intended policy:
+on refined grids and restarts the time-step controller more aggressively. This
+is now available in ``vmec_jax`` behind an explicit flag so the VMEC2000 parity
+path remains unchanged by default.
 
-- detect ``fsq_total`` spikes on the fine grid (e.g. ``fsq_total > 1e-2`` after
-  a small number of iterations),
-- reduce ``delt`` and reset ``res0/res1`` similarly to VMEC++,
-- preserve VMEC2000 parity by applying this only in performance mode or when
-  VMEC++-style restarts are explicitly enabled.
+The VMEC++-style trigger follows the VMEC++ criteria:
 
-The exact thresholds and iteration counters will be aligned with the VMEC++
-numerics notes once the VMEC2000 parity path is fully stable (see References
-[5-6]).
+- ``iter2 - iter1 > k_preconditioner_update_interval / 2``
+- ``iter2 > 2 * k_preconditioner_update_interval``
+- ``fsqr + fsqz > 1e-2`` (physical residual on the full grid)
+
+When triggered, the restart path reduces ``delt`` by ``1/1.03`` (the VMEC++
+"bad progress" factor) and resets the cached preconditioner state.
+
+Enable it with:
+
+- ``run_fixed_boundary(..., vmecpp_restart=True)``
+
+Note: scan mode bypasses VMEC2000-style control logic; the VMEC++ restart flag
+only affects the VMEC2000-style iteration loop.
 
 Static precomputation
 ---------------------
