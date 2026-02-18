@@ -62,8 +62,8 @@ def _collect_vmec_jax_trace(input_path: Path, *, niter: int):
 def _plot_panel(ax, *, fsq_vmec, fsq_jax, title: str, t_vmec: float, t_jax: float):
     n = min(fsq_vmec.size, fsq_jax.size)
     it = np.arange(1, n + 1)
-    ax.plot(it, fsq_vmec[:n], lw=2.0, label="VMEC2000")
-    ax.plot(it, fsq_jax[:n], lw=2.0, label="vmec_jax")
+    ax.plot(it, fsq_vmec[:n], lw=2.8, linestyle="--", label="VMEC2000", zorder=2)
+    ax.plot(it, fsq_jax[:n], lw=2.8, linestyle="-", label="vmec_jax", zorder=1)
     ax.set_yscale("log")
     ax.set_xlabel("iteration")
     ax.set_ylabel("fsq_total")

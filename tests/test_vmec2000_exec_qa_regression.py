@@ -10,6 +10,10 @@ from vmec_jax.driver import run_fixed_boundary
 from vmec_jax.vmec2000_exec import find_vmec2000_exec, flatten_threed1, run_xvmec2000
 from vmec_jax.wout import read_wout, wout_minimal_from_fixed_boundary
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+QA_INPUT_ENV = os.environ.get("VMEC_JAX_QA_INPUT", "")
+QA_INPUT = Path(QA_INPUT_ENV).expanduser().resolve() if QA_INPUT_ENV else (REPO_ROOT / "examples/data/input.qa_signgs1")
+
 
 @pytest.mark.vmec2000
 def test_vmec2000_qa_signgs1_trace_and_wout_parity(tmp_path):
@@ -20,7 +24,7 @@ def test_vmec2000_qa_signgs1_trace_and_wout_parity(tmp_path):
     if exe is None:
         pytest.skip("xvmec2000 executable not found")
 
-    input_path = Path("/Users/rogeriojorge/local/test/input.qa_signgs1")
+    input_path = QA_INPUT
     if not input_path.exists():
         pytest.skip("QA input file not found")
 

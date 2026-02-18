@@ -145,9 +145,8 @@ Current observed mismatches (updated parity status):
   suite (``circular_tokamak``, ``shaped_tokamak_pressure``, ``solovev``).
 - **Non-axisymmetric kernel parity** remains the top gap: ``bsub*`` and
   ``abs(B)`` comparisons for 3D reference states are still off by O(1).
-- **Full-grid QA/QH traces** show an ``r00`` mismatch at iter 2 for
-  `rtol=1e-4`, `atol=1e-12` even though scalar residuals and final `wout`
-  values agree to 1e-7–1e-9.
+- **Full-grid QA/QH traces** now match VMEC2000 at `rtol=1e-4`,
+  `atol=1e-12` for 100-iteration runs.
 - ``betapol``, ``betator``, ``betaxis``, ``ctor``, and ``DMerc`` are present but
   still placeholders in ``vmec_jax`` (zeros) until the VMEC2000 diagnostics path
   is fully ported.
@@ -169,20 +168,20 @@ Full-grid parity snapshot (VMEC2000 exec comparator, `--use-input-niter`, `max_i
      - ``examples/data/input.shaped_tokamak_pressure``
      - PASS
      - ``1.422e-07 / 1.422e-07``
-     - ``0.246 / 5.524``
+     - ``0.213 / 5.552``
      - Axisymmetric
    * - QA signgs1
-     - ``/Users/rogeriojorge/local/test/input.qa_signgs1``
-     - FAIL
+     - ``input.qa_signgs1``
+     - PASS
      - ``1.412e-04 / 1.412e-04``
-     - ``0.445 / 5.350``
-     - r00 mismatch at iter 2 (rtol=1e-4)
+     - ``0.443 / 5.569``
+     - 3D fixed boundary
    * - QH warm start
      - ``examples/data/input.nfp4_QH_warm_start``
-     - FAIL
+     - PASS
      - ``2.888e-07 / 2.888e-07``
-     - ``0.268 / 4.973``
-     - r00 mismatch at iter 2 (rtol=1e-4)
+     - ``0.272 / 5.130``
+     - 3D fixed boundary
 
 Scope and known gaps
 --------------------

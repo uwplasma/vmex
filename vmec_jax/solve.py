@@ -5198,6 +5198,12 @@ def solve_fixed_boundary_residual_iter(
             )
 
     nstep_screen = int(indata.get_int("NSTEP", 1)) if indata is not None else 1
+    nstep_override = os.getenv("VMEC_JAX_NSTEP_OVERRIDE", "").strip()
+    if nstep_override not in ("", "0"):
+        try:
+            nstep_screen = int(nstep_override)
+        except Exception:
+            pass
     if nstep_screen < 1:
         nstep_screen = 1
 

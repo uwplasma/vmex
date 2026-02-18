@@ -13,6 +13,10 @@ from vmec_jax.config import load_config
 from vmec_jax.vmec2000_exec import find_vmec2000_exec, run_xvmec2000
 from vmec_jax.wout import read_wout
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+QA_INPUT_ENV = os.environ.get("VMEC_JAX_QA_INPUT", "")
+QA_INPUT = Path(QA_INPUT_ENV).expanduser().resolve() if QA_INPUT_ENV else (REPO_ROOT / "examples/data/input.qa_signgs1")
+
 
 def _rel_rms(a, b) -> float:
     a = np.asarray(a)
@@ -26,8 +30,8 @@ def _rel_rms(a, b) -> float:
 @pytest.mark.parametrize(
     "input_path, is_3d",
     [
-        (Path("/Users/rogeriojorge/local/test/vmec_jax/examples/data/input.circular_tokamak"), False),
-        (Path("/Users/rogeriojorge/local/test/input.qa_signgs1"), True),
+        (REPO_ROOT / "examples/data/input.circular_tokamak", False),
+        (QA_INPUT, True),
     ],
 )
 def test_cli_matches_vmec2000_wout(tmp_path, input_path: Path, is_3d: bool):

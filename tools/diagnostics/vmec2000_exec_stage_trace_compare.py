@@ -1928,6 +1928,8 @@ def main() -> None:
                 for key in list(os.environ.keys()):
                     if key.startswith("VMEC_JAX_DUMP_"):
                         os.environ.pop(key, None)
+            if args.vmec_nstep is not None:
+                os.environ["VMEC_JAX_NSTEP_OVERRIDE"] = str(int(args.vmec_nstep))
             try:
                 use_scan = False if args.dump_level != "none" else True
                 performance_mode = False if args.dump_level != "none" else True

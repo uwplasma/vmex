@@ -418,6 +418,6 @@ Key modules that directly implement the equations above:
 References (local)
 ------------------
 
-- ``/Users/rogeriojorge/local/test/vmecpp/docs/the_numerics_of_vmecpp.pdf``
-  (the VMEC++ numerics notes; VMEC2000 conventions and formulas).
-- VMEC2000 source in ``/Users/rogeriojorge/local/test/STELLOPT/VMEC2000/Sources``.
+- ``vmecpp/docs/the_numerics_of_vmecpp.pdf`` (VMEC++ numerics notes; VMEC2000
+  conventions and formulas).
+- VMEC2000 source in ``STELLOPT/VMEC2000/Sources``.

@@ -1,10 +1,10 @@
-"""Side-by-side VMEC2000 vs vmec_jax visualization for the QH case.
+"""Side-by-side VMEC2000 vs vmec_jax visualization for fixed-boundary cases.
 
 This script:
-1) Loads a VMEC2000 reference `wout` for the QH input.
+1) Loads a VMEC2000 reference `wout`.
 2) Uses either vmec_jax's solver/initial guess or the VMEC2000 wout coefficients.
-3) Generates side-by-side figures for LCFS cross-sections, 3D surface, |B| on LCFS,
-   and iota/pressure profiles.
+3) Generates side-by-side figures for cross-sections (single phi plane, nested
+   surfaces), 3D surface, |B| on LCFS, and iota profiles.
 
 The vmec_jax side reflects the *current* solver capability unless
 ``--use-wout-state`` is enabled (plotting parity path).
@@ -42,13 +42,21 @@ from vmec_jax.plotting import (
     profiles_from_wout,
     surface_rz_from_state_physical,
     surface_rz_from_wout_physical,
-    vmecplot2_cross_section_indices,
-    zeta_grid_field_period,
 )
 from vmec_jax.driver import run_fixed_boundary
 from vmec_jax.geom import eval_geom
 from vmec_jax.diagnostics import print_jacobian_stats
-from vmec_jax.wout import read_wout
+from vmec_jax.wout import read_wout, wout_minimal_from_fixed_boundary
+
+
+def _resolve_wout_ref(*, input_path: Path, wout_ref: str) -> Path:
+    if wout_ref:
+        return Path(wout_ref).expanduser().resolve()
+    case = input_path.name.split("input.", 1)[-1] if "input." in input_path.name else input_path.stem
+    cand = input_path.parent / f"wout_{case}_reference.nc"
+    if not cand.exists():
+        cand = input_path.parent / f"wout_{case}.nc"
+    return cand
 
 
 def _load_vmec2000_wout(wout_path: Path):
@@ -59,15 +67,15 @@ def _load_vmec2000_wout(wout_path: Path):
 
 
 def _plot_cross_sections(ax, *, R, Z, Raxis, Zaxis, title: str):
-    labels = [r"$\phi=0$", r"$\phi=\pi/2$", r"$\phi=\pi$", r"$\phi=3\pi/2$"]
-    for j in range(R.shape[1]):
-        ax.plot(R[:, j], Z[:, j], lw=1.6, label=labels[j])
-        ax.plot(Raxis[j], Zaxis[j], "x", ms=6, color="black")
+    nsurf = int(R.shape[0])
+    colors = cm.viridis(np.linspace(0.15, 0.95, nsurf))
+    for j in range(nsurf):
+        ax.plot(R[j], Z[j], lw=1.8, color=colors[j])
+    ax.plot(Raxis, Zaxis, "x", ms=6, color="black")
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel("R")
     ax.set_ylabel("Z")
     ax.set_title(title)
-    ax.legend(frameon=False, fontsize=9)
 
 
 def _plot_bmag_surface(ax, *, B, theta, phi, title: str):
@@ -105,18 +113,22 @@ def _plot_3d_surface(ax, *, R, Z, B, phi, title: str):
     fix_matplotlib_3d(ax)
 
 
-def _plot_profiles(ax_iota, ax_pres, *, s, s_half, iota, presf, pres, title_prefix: str):
-    ax_iota.plot(s, iota, lw=2.0)
-    ax_iota.set_xlabel("s")
-    ax_iota.set_ylabel("iota")
-    ax_iota.set_title(f"{title_prefix}: iota")
+def _plot_iota(ax, *, s_vmec, iota_vmec, s_jax, iota_jax, label_jax: str):
+    ax.plot(s_vmec, iota_vmec, lw=2.8, linestyle="--", label="VMEC2000", zorder=2)
+    ax.plot(s_jax, iota_jax, lw=2.8, linestyle="-", label=label_jax, zorder=1)
+    ax.set_xlabel("s")
+    ax.set_ylabel("iota")
+    ax.set_title("iota profile")
+    ax.grid(alpha=0.3)
+    ax.legend(frameon=False, fontsize=9)
 
-    ax_pres.plot(s, presf, lw=2.0, label="presf")
-    ax_pres.plot(s_half, pres[1:], lw=1.5, label="pres (half)")
-    ax_pres.set_xlabel("s")
-    ax_pres.set_ylabel("pressure")
-    ax_pres.set_title(f"{title_prefix}: pressure")
-    ax_pres.legend(frameon=False, fontsize=8)
+
+def _surface_indices(ns: int, n_surfaces: int) -> list[int]:
+    if n_surfaces <= 1:
+        return [max(ns - 1, 0)]
+    idx = np.linspace(1, ns - 1, num=int(n_surfaces))
+    idx = np.unique(np.clip(np.round(idx), 1, ns - 1).astype(int))
+    return idx.tolist()
 
 
 def main() -> None:
@@ -129,9 +141,12 @@ def main() -> None:
     p.add_argument(
         "--wout-ref",
         type=str,
-        default=str(REPO_ROOT / "examples/data/wout_nfp4_QH_warm_start.nc"),
-        help="Path to VMEC2000 reference wout for the QH case.",
+        default="",
+        help="Path to VMEC2000 reference wout (defaults to wout_<case>[_reference].nc next to input).",
     )
+    p.add_argument("--phi", type=float, default=0.0, help="Toroidal angle (radians) for cross-section plot.")
+    p.add_argument("--n-surfaces", type=int, default=6, help="Number of flux surfaces in the cross-section plot.")
+    p.add_argument("--jax-title", type=str, default="", help="Override title label for the vmec_jax panels.")
     p.add_argument("--prefix", type=str, default="qh", help="Output filename prefix.")
     p.add_argument("--outdir", type=str, default=str(REPO_ROOT / "docs/_static/figures"))
     p.add_argument("--max-iter", type=int, default=20)
@@ -146,8 +161,10 @@ def main() -> None:
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
+    input_path = Path(args.input)
+    wout_ref_path = _resolve_wout_ref(input_path=input_path, wout_ref=args.wout_ref)
     # VMEC2000 reference
-    wout = _load_vmec2000_wout(Path(args.wout_ref))
+    wout = _load_vmec2000_wout(wout_ref_path)
     prefix = str(args.prefix)
 
     # vmec_jax current output
@@ -212,26 +229,54 @@ def main() -> None:
 
     # --- Cross sections ---
     theta_cs = closed_theta_grid(200)
-    phi_cs = zeta_grid_field_period(8, nfp=int(wout.nfp))
-    idx = vmecplot2_cross_section_indices(phi_cs.size)
-    phi_slices = phi_cs[idx]
+    phi_slices = np.asarray([float(args.phi)])
+    idx_list = _surface_indices(int(wout.ns), int(args.n_surfaces))
 
-    R_vmec, Z_vmec = surface_rz_from_wout_physical(wout, theta=theta_cs, phi=phi_slices, s_index=int(wout.ns) - 1)
+    R_vmec_list = []
+    Z_vmec_list = []
+    for idx in idx_list:
+        R_vm, Z_vm = surface_rz_from_wout_physical(wout, theta=theta_cs, phi=phi_slices, s_index=int(idx))
+        R_vmec_list.append(R_vm[:, 0])
+        Z_vmec_list.append(Z_vm[:, 0])
+    R_vmec = np.stack(R_vmec_list, axis=0)
+    Z_vmec = np.stack(Z_vmec_list, axis=0)
     Raxis_vmec, Zaxis_vmec = axis_rz_from_wout_physical(wout, phi=phi_slices)
 
-    R_jax, Z_jax = surface_rz_from_state_physical(
-        state, modes, theta=theta_cs, phi=phi_slices, s_index=int(static.cfg.ns) - 1, nfp=int(static.cfg.nfp)
-    )
+    R_jax_list = []
+    Z_jax_list = []
+    for idx in idx_list:
+        R_j, Z_j = surface_rz_from_state_physical(
+            state, modes, theta=theta_cs, phi=phi_slices, s_index=int(idx), nfp=int(static.cfg.nfp)
+        )
+        R_jax_list.append(R_j[:, 0])
+        Z_jax_list.append(Z_j[:, 0])
+    R_jax = np.stack(R_jax_list, axis=0)
+    Z_jax = np.stack(Z_jax_list, axis=0)
     Raxis_jax, Zaxis_jax = axis_rz_from_state_physical(state, modes, phi=phi_slices, nfp=int(static.cfg.nfp))
 
     if use_wout_state:
-        jax_title = "vmec_jax (from wout)"
+        jax_title_default = "vmec_jax (from wout)"
     else:
-        jax_title = "vmec_jax (initial guess)" if use_initial_guess else "vmec_jax (solver)"
+        jax_title_default = "vmec_jax (initial guess)" if use_initial_guess else "vmec_jax (solver)"
+    jax_title = args.jax_title.strip() or jax_title_default
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 5.5))
-    _plot_cross_sections(axes[0], R=R_vmec, Z=Z_vmec, Raxis=Raxis_vmec, Zaxis=Zaxis_vmec, title="VMEC2000")
-    _plot_cross_sections(axes[1], R=R_jax, Z=Z_jax, Raxis=Raxis_jax, Zaxis=Zaxis_jax, title=jax_title)
+    _plot_cross_sections(
+        axes[0],
+        R=R_vmec,
+        Z=Z_vmec,
+        Raxis=float(np.asarray(Raxis_vmec)[0]),
+        Zaxis=float(np.asarray(Zaxis_vmec)[0]),
+        title="VMEC2000",
+    )
+    _plot_cross_sections(
+        axes[1],
+        R=R_jax,
+        Z=Z_jax,
+        Raxis=float(np.asarray(Raxis_jax)[0]),
+        Zaxis=float(np.asarray(Zaxis_jax)[0]),
+        title=jax_title,
+    )
     fig.tight_layout()
     fig.savefig(outdir / f"{prefix}_compare_cross_sections.png", dpi=220)
     plt.close(fig)
@@ -292,44 +337,41 @@ def main() -> None:
     fig.savefig(outdir / f"{prefix}_compare_bmag_surface.png", dpi=220)
     plt.close(fig)
 
-    # --- Profiles ---
+    # --- Iota profiles ---
     prof_vmec = profiles_from_wout(wout)
-    s = prof_vmec["s"]
-    s_half = prof_vmec["s_half"]
+    s_vmec = prof_vmec["s"]
+    iota_vmec = prof_vmec["iotaf"]
 
     if use_wout_state:
-        iota_jax = np.asarray(prof_vmec["iotaf"])
-        presf_jax = np.asarray(prof_vmec["presf"])
-        pres_jax = np.asarray(prof_vmec["pres"])
+        wout_jax_like = wout
+        s_jax = s_vmec
+        iota_jax = iota_vmec
     else:
-        prof_jax = run.profiles
-        iota_jax = np.asarray(prof_jax.get("iota", np.zeros_like(np.asarray(static.s))))
-        presf_jax = np.asarray(prof_jax.get("pressure", np.zeros_like(np.asarray(static.s))))
-        pres_jax = np.asarray(prof_jax.get("pressure", np.zeros_like(np.asarray(static.s))))
+        wout_jax_like = wout_minimal_from_fixed_boundary(
+            path="dummy",
+            state=state,
+            static=static,
+            indata=indata,
+            signgs=int(signgs),
+            fsqr=0.0,
+            fsqz=0.0,
+            fsql=0.0,
+        )
+        prof_jax = profiles_from_wout(wout_jax_like)
+        s_jax = prof_jax["s"]
+        iota_jax = prof_jax["iotaf"]
 
-    fig, axes = plt.subplots(2, 2, figsize=(11, 7))
-    _plot_profiles(
-        axes[0, 0],
-        axes[0, 1],
-        s=s,
-        s_half=s_half,
-        iota=prof_vmec["iotaf"],
-        presf=prof_vmec["presf"],
-        pres=prof_vmec["pres"],
-        title_prefix="VMEC2000",
-    )
-    _plot_profiles(
-        axes[1, 0],
-        axes[1, 1],
-        s=np.asarray(static.s),
-        s_half=s_half,
-        iota=iota_jax,
-        presf=presf_jax,
-        pres=pres_jax,
-        title_prefix=jax_title,
+    fig, ax = plt.subplots(1, 1, figsize=(6.6, 4.6))
+    _plot_iota(
+        ax,
+        s_vmec=s_vmec,
+        iota_vmec=iota_vmec,
+        s_jax=s_jax,
+        iota_jax=iota_jax,
+        label_jax=jax_title,
     )
     fig.tight_layout()
-    fig.savefig(outdir / f"{prefix}_compare_profiles.png", dpi=220)
+    fig.savefig(outdir / f"{prefix}_compare_iota.png", dpi=220)
     plt.close(fig)
 
     # --- 3D LCFS ---

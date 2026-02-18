@@ -4,36 +4,36 @@ Laptop-friendly, end-to-end differentiable (JAX) rewrite of **VMEC2000**, focusi
 
 <table>
   <tr>
-    <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_surfaces.png" width="420" /></td>
+    <td><img src="docs/_static/figures/axisym_compare_cross_sections.png" width="420" /></td>
     <td><img src="docs/_static/figures/qh_compare_cross_sections.png" width="420" /></td>
   </tr>
   <tr>
-    <td align="center">Axisymmetric: LCFS cross-sections</td>
-    <td align="center">QH: LCFS cross-sections (VMEC2000 vs vmec_jax)</td>
+    <td align="center">Axisymmetric: cross-section (VMEC2000 vs vmec_jax)</td>
+    <td align="center">QH: cross-section (VMEC2000 vs vmec_jax)</td>
   </tr>
   <tr>
-    <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_lcfs_3d_bmag.png" width="420" /></td>
+    <td><img src="docs/_static/figures/axisym_compare_3d.png" width="420" /></td>
     <td><img src="docs/_static/figures/qh_compare_3d.png" width="420" /></td>
   </tr>
   <tr>
-    <td align="center">Axisymmetric: 3D LCFS (|B| colored)</td>
+    <td align="center">Axisymmetric: 3D LCFS (VMEC2000 vs vmec_jax)</td>
     <td align="center">QH: 3D LCFS (VMEC2000 vs vmec_jax)</td>
   </tr>
   <tr>
-    <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_bmag_lcfs.png" width="420" /></td>
+    <td><img src="docs/_static/figures/axisym_compare_bmag_surface.png" width="420" /></td>
     <td><img src="docs/_static/figures/qh_compare_bmag_surface.png" width="420" /></td>
   </tr>
   <tr>
-    <td align="center">Axisymmetric: |B| on LCFS</td>
+    <td align="center">Axisymmetric: |B| on LCFS (VMEC2000 vs vmec_jax)</td>
     <td align="center">QH: |B| on LCFS (VMEC2000 vs vmec_jax)</td>
   </tr>
   <tr>
-    <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_profiles.png" width="420" /></td>
-    <td><img src="docs/_static/figures/qh_compare_profiles.png" width="420" /></td>
+    <td><img src="docs/_static/figures/axisym_compare_iota.png" width="420" /></td>
+    <td><img src="docs/_static/figures/qh_compare_iota.png" width="420" /></td>
   </tr>
   <tr>
-    <td align="center">Axisymmetric: iota + pressure profiles</td>
-    <td align="center">QH: iota + pressure profiles (VMEC2000 vs vmec_jax)</td>
+    <td align="center">Axisymmetric: iota (VMEC2000 vs vmec_jax)</td>
+    <td align="center">QH: iota (VMEC2000 vs vmec_jax)</td>
   </tr>
   <tr>
     <td colspan="2"><img src="docs/_static/figures/readme_fsq_trace.png" width="860" /></td>
@@ -47,7 +47,7 @@ Laptop-friendly, end-to-end differentiable (JAX) rewrite of **VMEC2000**, focusi
 
 - Fixed boundary only (free boundary deferred).
 - Axisymmetric end-to-end parity is stable (`ntor=0`, `nfp=1`, `lasym=False`).
-- Non-axisymmetric parity: full VMEC2000 sweeps are being refreshed at `rtol=1e-4`, `atol=1e-12` across QA/QH/n3are/QA-lowres multigrid cases. Use the comparator in `tools/diagnostics/` to regenerate the per-iteration traces and `wout` parity.
+- Non-axisymmetric parity: QA/QH fixed-boundary sweeps pass at `rtol=1e-4`, `atol=1e-12` on 100-iteration full-grid runs. Use the comparator in `tools/diagnostics/` to regenerate the per-iteration traces and `wout` parity for additional 3D cases.
 
 ## Quickstart
 
@@ -118,15 +118,25 @@ Axis m=0 masks are reused from `VMECStatic` to avoid per-iteration reconstructio
 Boundary decomposition from input files is cached across runs (keyed by input path/mtime or a coefficient fingerprint) to reduce host overhead when solving the same case repeatedly.
 Set `VMEC_JAX_INIT_GUESS_JAX=0` to force the legacy NumPy boundary-flip path; the default is the JAX-friendly path.
 
-## QH comparison figures
+## README comparison figures
 
-Reproduce the QH VMEC2000 vs vmec_jax comparison (50 iterations, single grid):
+Reproduce the axisym + QH VMEC2000 vs vmec_jax panels shown above (single-plane
+cross-sections, |B| on LCFS, iota overlays, plus the fsq_total trace):
 
 ```bash
 python tools/diagnostics/qh_vmec_vs_vmecjax.py \
-  --no-solve --use-wout-state \
+  --input examples/data/input.shaped_tokamak_pressure \
+  --wout-ref examples/data/wout_shaped_tokamak_pressure_reference.nc \
+  --use-wout-state --jax-title vmec_jax \
+  --phi 0.0 --n-surfaces 6 \
+  --prefix axisym --outdir docs/_static/figures
+
+python tools/diagnostics/qh_vmec_vs_vmecjax.py \
+  --input examples/data/input.nfp4_QH_warm_start \
   --wout-ref /path/to/wout_nfp4_QH_warm_start.nc \
-  --outdir docs/_static/figures
+  --use-wout-state --jax-title vmec_jax \
+  --phi 0.0 --n-surfaces 6 \
+  --prefix qh --outdir docs/_static/figures
 
 python tools/diagnostics/readme_fsq_trace.py \
   --axisym-input examples/data/input.shaped_tokamak_pressure \
@@ -174,22 +184,21 @@ Current kernel-parity snapshot (solver-free, bundled reference states):
 Interpretation:
 - Axisymmetric cases are at floating-point parity for geometry, ``bsup*``, and ``abs(B)``.
 - Non-axisymmetric kernel parity remains the top gap (``bsub*``/``abs(B)``/``fsq_total`` columns above).
-- End-to-end 3D parity still fails early on the VMEC2000 trace (see full-grid snapshot below), primarily at the ``r00`` scalar.
-- ``lasym=True`` and free-boundary paths remain out of parity.
+- End-to-end 3D trace parity matches VMEC2000 at `rtol=1e-4`, `atol=1e-12` for QA/QH on full grids; ``lasym=True`` and free-boundary remain out of parity.
 
 Full-grid parity snapshot (VMEC2000 exec comparator, `--use-input-niter`, `--max-iter 100`, `rtol=1e-4`, `atol=1e-12`):
 
 | Case | Input | Status | fsq_total (VMEC/JAX) | runtime_s (vmec2000/jax) | Notes |
 |---|---|---|---|---|---|
-| shaped_tokamak_pressure | `examples/data/input.shaped_tokamak_pressure` | PASS | `1.422e-07 / 1.422e-07` | `0.246 / 5.524` | Axisymmetric |
-| QA signgs1 | `/Users/rogeriojorge/local/test/input.qa_signgs1` | FAIL | `1.412e-04 / 1.412e-04` | `0.445 / 5.350` | r00 mismatch at iter 2 (rtol=1e-4) |
-| QH warm start | `examples/data/input.nfp4_QH_warm_start` | FAIL | `2.888e-07 / 2.888e-07` | `0.268 / 4.973` | r00 mismatch at iter 2 (rtol=1e-4) |
+| shaped_tokamak_pressure | `examples/data/input.shaped_tokamak_pressure` | PASS | `1.422e-07 / 1.422e-07` | `0.213 / 5.552` | Axisymmetric |
+| QA signgs1 | `input.qa_signgs1` | PASS | `1.412e-04 / 1.412e-04` | `0.443 / 5.569` | 3D fixed boundary |
+| QH warm start | `examples/data/input.nfp4_QH_warm_start` | PASS | `2.888e-07 / 2.888e-07` | `0.272 / 5.130` | 3D fixed boundary |
 
 Iteration trace parity (VMEC2000 executable, reduced grid):
 
 - Single-grid axisym cases match ``fsq*`` and preconditioned scalars at machine precision for the first **10 iterations** at `--single-ns 13`.
 - Full-grid axisymmetric traces are stable at `rtol=1e-4`, `atol=1e-12` for 100-iteration runs.
-- QA/QH still exhibit an ``r00`` mismatch at iter 2 at `rtol=1e-4`, even though scalar residuals and final `wout` values agree to 1e-7–1e-9.
+- QA/QH full-grid traces now match VMEC2000 at `rtol=1e-4`, `atol=1e-12` for 100-iteration runs.
 - ``up_down_asymmetric_tokamak`` (``lasym=True``) shows large bcovar/force-kernel mismatches at iter 1; nonlinear trace diverges. This is the current top lasym parity blocker.
 
 Notes on the snapshot figures:

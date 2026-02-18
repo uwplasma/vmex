@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -22,7 +23,12 @@ import numpy as np
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-VMEC2000_TESTS = Path("/Users/rogeriojorge/local/test/vmec2000/python/tests")
+VMEC2000_TESTS = Path(
+    os.environ.get(
+        "VMEC2000_TESTS_DIR",
+        str(REPO_ROOT.parent / "vmec2000" / "python" / "tests"),
+    )
+)
 
 
 def _load_netcdf(path: Path):

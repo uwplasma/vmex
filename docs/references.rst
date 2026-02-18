@@ -18,7 +18,7 @@ Background and canonical references for VMEC and related equilibrium methods:
    distribution and Princeton VMEC resources).
 
 5. VMEC++ numerics notes (local copy):
-   ``/Users/rogeriojorge/local/test/vmecpp/docs/the_numerics_of_vmecpp.pdf``.
+   ``vmecpp/docs/the_numerics_of_vmecpp.pdf``.
 
 6. VMEC++ Fourier basis implementation note (local copy):
-   ``/Users/rogeriojorge/local/test/vmecpp/docs/fourier_basis_implementation.md``.
+   ``vmecpp/docs/fourier_basis_implementation.md``.
