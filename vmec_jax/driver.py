@@ -906,7 +906,7 @@ def run_fixed_boundary(
                 jit_warmup_iters=int(jit_warmup_iters),
                 jit_precompile=bool(jit_precompile_eff),
             )
-            if bool(precompile_stages) and bool(jit_forces_eff) and (not bool(scan_mode)):
+            if bool(precompile_stages) and bool(jit_forces_eff):
                 try:
                     precompile_kwargs = dict(solve_kwargs)
                     precompile_kwargs.update(
@@ -916,6 +916,7 @@ def run_fixed_boundary(
                             "verbose_vmec2000_table": False,
                             "jit_warmup_iters": 0,
                             "jit_precompile": True,
+                            "max_iter": 1,
                         }
                     )
                     solve_fixed_boundary_residual_iter(
