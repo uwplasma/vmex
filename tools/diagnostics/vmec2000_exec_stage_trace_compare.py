@@ -831,6 +831,28 @@ def _parse_fsq1_dump(path: Path) -> dict[str, float]:
     return data
 
 
+def _parse_time_control_trace(path: Path) -> dict[int, float]:
+    """Parse time_control_trace.log and return iter2 -> delt0r (pre stage)."""
+    out: dict[int, float] = {}
+    if not path.exists():
+        return out
+    for line in path.read_text().splitlines():
+        toks = line.split()
+        if len(toks) < 9:
+            continue
+        try:
+            iter2 = int(toks[0])
+            stage = toks[8]
+            if stage != "pre":
+                continue
+            delt0r = float(toks[6])
+        except Exception:
+            continue
+        if iter2 not in out:
+            out[iter2] = delt0r
+    return out
+
+
 def _collect_fsq1_dumps(path: Path) -> dict[tuple[int | None, int], dict[str, float]]:
     out: dict[tuple[int | None, int], dict[str, float]] = {}
     if not path.exists():
@@ -1738,6 +1760,7 @@ def main() -> None:
     vmec_fsq_dump: dict[tuple[int | None, int], dict[str, float]] = {}
     jax_fsq_dump: dict[tuple[int | None, int], dict[str, float]] = {}
     vmec_fsq1: dict[tuple[int | None, int], dict[str, float]] = {}
+    vmec_time_control: dict[int, float] = {}
 
     root = Path(__file__).resolve().parents[2]
     if args.input is None:
@@ -1811,6 +1834,7 @@ def main() -> None:
             vmec_env["VMEC_DUMP_SCALARS"] = "1"
             vmec_env["VMEC_DUMP_GCX2"] = "1"
             vmec_env["VMEC_DUMP_FSQ1"] = "1"
+            vmec_env["VMEC_DUMP_TIMECONTROL"] = "1"
             if args.dump_level == "full":
                 vmec_env["VMEC_DUMP_XC"] = "1"
                 vmec_env["VMEC_DUMP_BSUBE"] = "1"
@@ -1882,6 +1906,7 @@ def main() -> None:
                 os.environ["VMEC_JAX_DUMP_DIR"] = str(dump_dir)
                 os.environ["VMEC_JAX_DUMP_SCALARS"] = "1"
                 os.environ["VMEC_JAX_DUMP_GCX2"] = "1"
+                os.environ["VMEC_JAX_DUMP_TIMECONTROL"] = "1"
                 if args.dump_level == "full":
                     os.environ["VMEC_JAX_DUMP_XC"] = "1"
                     os.environ["VMEC_JAX_DUMP_XC_INIT"] = "1"
@@ -2105,6 +2130,7 @@ def main() -> None:
         else:
             jax_gcx2 = _collect_gcx2_dumps(jax_dump_dir_active)
         vmec_fsq1 = _collect_fsq1_dumps(vmec_dump_dir)
+        vmec_time_control = _parse_time_control_trace(vmec_dump_dir / "time_control_trace.log")
         if getattr(run, "static", None) is not None and getattr(run.static, "trig", None) is not None:
             r0scale = float(run.static.trig.r0scale)
         else:
@@ -2231,6 +2257,7 @@ def main() -> None:
                 vmec_fsqr1 = float(row.fsqr1)
                 vmec_fsqz1 = float(row.fsqz1)
                 vmec_fsql1 = float(row.fsql1)
+                vmec_delt0r = float(row.delt0r if row.delt0r is not None else float("nan"))
                 key_ns = int(st.ns)
                 key_it = int(row.it)
                 if args.fsq_from_dumps and vmec_fsq_dump:
@@ -2245,6 +2272,14 @@ def main() -> None:
                         vmec_fsqr1 = float(dump_vals.get("fsqr1", vmec_fsqr1))
                         vmec_fsqz1 = float(dump_vals.get("fsqz1", vmec_fsqz1))
                         vmec_fsql1 = float(dump_vals.get("fsql1", vmec_fsql1))
+                if vmec_time_control:
+                    iter2 = off + int(row.it)
+                    if iter2 in vmec_time_control:
+                        vmec_delt0r = float(vmec_time_control[iter2])
+                    else:
+                        max_key = max(vmec_time_control.keys(), default=None)
+                        if max_key is not None and iter2 > max_key:
+                            vmec_delt0r = float(vmec_time_control[max_key])
                 print(
                     f"  {stage_i+1:>3d} {row.it:>4d}  "
                     f"{vmec_fsqr:>11.3e} {fsqr[j] if j < fsqr.size else float('nan'):>11.3e}  "
@@ -2253,7 +2288,7 @@ def main() -> None:
                     f"{vmec_fsqr1:>11.3e} {fsqr1[j] if j < fsqr1.size else float('nan'):>11.3e}  "
                     f"{vmec_fsqz1:>11.3e} {fsqz1[j] if j < fsqz1.size else float('nan'):>11.3e}  "
                     f"{vmec_fsql1:>11.3e} {fsql1[j] if j < fsql1.size else float('nan'):>11.3e}  "
-                    f"{(row.delt0r if row.delt0r is not None else float('nan')):>11.3e} {delt[j] if j < delt.size else float('nan'):>11.3e}  "
+                    f"{vmec_delt0r:>11.3e} {delt[j] if j < delt.size else float('nan'):>11.3e}  "
                     f"{(row.r00 if row.r00 is not None else float('nan')):>11.3e} {r00[j] if j < r00.size else float('nan'):>11.3e}  "
                     f"{(row.w if row.w is not None else float('nan')):>11.3e} {w[j] if j < w.size else float('nan'):>11.3e}"
                 )
@@ -2270,7 +2305,7 @@ def main() -> None:
                 diff_cols_jax["fsqz1"].append(float(fsqz1[j] if j < fsqz1.size else float("nan")))
                 diff_cols_vmec["fsql1"].append(vmec_fsql1)
                 diff_cols_jax["fsql1"].append(float(fsql1[j] if j < fsql1.size else float("nan")))
-                diff_cols_vmec["delt0r"].append(float(row.delt0r if row.delt0r is not None else float("nan")))
+                diff_cols_vmec["delt0r"].append(vmec_delt0r)
                 diff_cols_jax["delt0r"].append(float(delt[j] if j < delt.size else float("nan")))
                 diff_cols_vmec["r00"].append(float(row.r00 if row.r00 is not None else float("nan")))
                 diff_cols_jax["r00"].append(float(r00[j] if j < r00.size else float("nan")))
@@ -2285,7 +2320,7 @@ def main() -> None:
                         ("fsqr1", vmec_fsqr1, float(fsqr1[j] if j < fsqr1.size else float("nan"))),
                         ("fsqz1", vmec_fsqz1, float(fsqz1[j] if j < fsqz1.size else float("nan"))),
                         ("fsql1", vmec_fsql1, float(fsql1[j] if j < fsql1.size else float("nan"))),
-                        ("delt0r", float(row.delt0r if row.delt0r is not None else float("nan")), float(delt[j] if j < delt.size else float("nan"))),
+                        ("delt0r", vmec_delt0r, float(delt[j] if j < delt.size else float("nan"))),
                         ("r00", float(row.r00 if row.r00 is not None else float("nan")), float(r00[j] if j < r00.size else float("nan"))),
                         ("wmhd", float(row.w if row.w is not None else float("nan")), float(w[j] if j < w.size else float("nan"))),
                     ]
@@ -2657,7 +2692,11 @@ def main() -> None:
         if not common:
             print("  No overlapping scalars dump iterations found.")
         for ns_val, it in common:
-            ns_jx, jx = _resolve_other(jax_scalars, ns=ns_val, it=it)
+            if ns_val is not None:
+                jx = jax_scalars.get((ns_val, it))
+                ns_jx = ns_val if jx is not None else None
+            else:
+                ns_jx, jx = _resolve_other(jax_scalars, ns=ns_val, it=it)
             if jx is None:
                 continue
             vm = vmec_scalars[(ns_val, it)]
@@ -2681,7 +2720,11 @@ def main() -> None:
         if not common:
             print("  No overlapping gcx2 dump iterations found.")
         for ns_val, it in common:
-            ns_jx, jx = _resolve_other(jax_gcx2, ns=ns_val, it=it)
+            if ns_val is not None:
+                jx = jax_gcx2.get((ns_val, it))
+                ns_jx = ns_val if jx is not None else None
+            else:
+                ns_jx, jx = _resolve_other(jax_gcx2, ns=ns_val, it=it)
             if jx is None:
                 continue
             vm = vmec_gcx2[(ns_val, it)]
