@@ -1699,11 +1699,12 @@ def main() -> None:
     )
     p.add_argument(
         "--dump-level",
-        choices=("full", "lite"),
+        choices=("full", "lite", "none"),
         default="full",
         help=(
             "Control VMEC2000 dump verbosity. "
-            "'full' enables all dumps; 'lite' keeps scalar/trace dumps only."
+            "'full' enables all dumps; 'lite' keeps scalar/trace dumps only; "
+            "'none' disables VMEC/JAX dumps."
         ),
     )
     p.add_argument(
@@ -1805,31 +1806,36 @@ def main() -> None:
         input_local.write_text(_patch_indata(indata_text, updates=updates))
         cmd = [str(vmec2000_exe), input_local.name]
         vmec_env = os.environ.copy()
-        vmec_env["VMEC_DUMP_DIR"] = str(vmec_dump_dir)
-        vmec_env["VMEC_DUMP_SCALARS"] = "1"
-        vmec_env["VMEC_DUMP_GCX2"] = "1"
-        vmec_env["VMEC_DUMP_FSQ1"] = "1"
-        if args.dump_level == "full":
-            vmec_env["VMEC_DUMP_XC"] = "1"
-            vmec_env["VMEC_DUMP_BSUBE"] = "1"
-            vmec_env["VMEC_DUMP_BSUBE_TERMS"] = "1"
-            vmec_env["VMEC_DUMP_BSUP"] = "1"
-            vmec_env["VMEC_DUMP_BSUBH"] = "1"
-            vmec_env["VMEC_DUMP_JACOBIAN_TERMS"] = "1"
-            vmec_env["VMEC_DUMP_LULV"] = "1"
-            vmec_env["VMEC_DUMP_LAMCAL"] = "1"
-            vmec_env["VMEC_DUMP_TOMNSPS"] = "1"
-            vmec_env["VMEC_DUMP_TOMNSPS_KERNELS"] = "1"
-        vmec_env["VMEC_DUMP_GC"] = "1"
-        vmec_env["VMEC_DUMP_GC_STAGE"] = "both"
-        vmec_env["VMEC_DUMP_GC_DIR"] = str(vmec_dump_dir)
-        vmec_env["VMEC_DUMP_LAM"] = "1"
-        if args.dump_iter:
-            vmec_env["VMEC_DUMP_ITER"] = str(args.dump_iter)
-            vmec_env["VMEC_DUMP_XC_ITER"] = str(args.dump_iter)
+        if args.dump_level != "none":
+            vmec_env["VMEC_DUMP_DIR"] = str(vmec_dump_dir)
+            vmec_env["VMEC_DUMP_SCALARS"] = "1"
+            vmec_env["VMEC_DUMP_GCX2"] = "1"
+            vmec_env["VMEC_DUMP_FSQ1"] = "1"
+            if args.dump_level == "full":
+                vmec_env["VMEC_DUMP_XC"] = "1"
+                vmec_env["VMEC_DUMP_BSUBE"] = "1"
+                vmec_env["VMEC_DUMP_BSUBE_TERMS"] = "1"
+                vmec_env["VMEC_DUMP_BSUP"] = "1"
+                vmec_env["VMEC_DUMP_BSUBH"] = "1"
+                vmec_env["VMEC_DUMP_JACOBIAN_TERMS"] = "1"
+                vmec_env["VMEC_DUMP_LULV"] = "1"
+                vmec_env["VMEC_DUMP_LAMCAL"] = "1"
+                vmec_env["VMEC_DUMP_TOMNSPS"] = "1"
+                vmec_env["VMEC_DUMP_TOMNSPS_KERNELS"] = "1"
+            vmec_env["VMEC_DUMP_GC"] = "1"
+            vmec_env["VMEC_DUMP_GC_STAGE"] = "both"
+            vmec_env["VMEC_DUMP_GC_DIR"] = str(vmec_dump_dir)
+            vmec_env["VMEC_DUMP_LAM"] = "1"
+            if args.dump_iter:
+                vmec_env["VMEC_DUMP_ITER"] = str(args.dump_iter)
+                vmec_env["VMEC_DUMP_XC_ITER"] = str(args.dump_iter)
+            else:
+                vmec_env.pop("VMEC_DUMP_ITER", None)
+                vmec_env.pop("VMEC_DUMP_XC_ITER", None)
         else:
-            vmec_env.pop("VMEC_DUMP_ITER", None)
-            vmec_env.pop("VMEC_DUMP_XC_ITER", None)
+            for key in list(vmec_env.keys()):
+                if key.startswith("VMEC_DUMP_"):
+                    vmec_env.pop(key, None)
         t0_vmec = time.perf_counter()
         try:
             proc = subprocess.run(
@@ -1872,26 +1878,31 @@ def main() -> None:
         # --- Run vmec_jax with VMEC-style multigrid staging ---
         def _run_vmec_jax(*, dump_dir: Path, max_iter: int, restart_state=None, restart_solver_state=None, multigrid: bool | None = None):
             jax_env_backup = os.environ.copy()
-            os.environ["VMEC_JAX_DUMP_DIR"] = str(dump_dir)
-            os.environ["VMEC_JAX_DUMP_SCALARS"] = "1"
-            os.environ["VMEC_JAX_DUMP_GCX2"] = "1"
-            if args.dump_level == "full":
-                os.environ["VMEC_JAX_DUMP_XC"] = "1"
-                os.environ["VMEC_JAX_DUMP_XC_INIT"] = "1"
-                os.environ["VMEC_JAX_DUMP_BSUBE"] = "1"
-                os.environ["VMEC_JAX_DUMP_BSUBE_TERMS"] = "1"
-                os.environ["VMEC_JAX_DUMP_LULV"] = "1"
-                os.environ["VMEC_JAX_DUMP_LAMCAL"] = "1"
-                os.environ["VMEC_JAX_DUMP_TOMNSPS"] = "1"
-                os.environ["VMEC_JAX_DUMP_FORCE_KERNELS"] = "1"
-                os.environ["VMEC_JAX_DUMP_GC"] = "1"
-                os.environ["VMEC_JAX_DUMP_GC_STAGE"] = "both"
-                os.environ["VMEC_JAX_DUMP_GC_DIR"] = str(dump_dir)
-                os.environ["VMEC_JAX_DUMP_LAM"] = "1"
-            if args.dump_iter:
-                os.environ["VMEC_JAX_DUMP_ITER"] = str(args.dump_iter)
+            if args.dump_level != "none":
+                os.environ["VMEC_JAX_DUMP_DIR"] = str(dump_dir)
+                os.environ["VMEC_JAX_DUMP_SCALARS"] = "1"
+                os.environ["VMEC_JAX_DUMP_GCX2"] = "1"
+                if args.dump_level == "full":
+                    os.environ["VMEC_JAX_DUMP_XC"] = "1"
+                    os.environ["VMEC_JAX_DUMP_XC_INIT"] = "1"
+                    os.environ["VMEC_JAX_DUMP_BSUBE"] = "1"
+                    os.environ["VMEC_JAX_DUMP_BSUBE_TERMS"] = "1"
+                    os.environ["VMEC_JAX_DUMP_LULV"] = "1"
+                    os.environ["VMEC_JAX_DUMP_LAMCAL"] = "1"
+                    os.environ["VMEC_JAX_DUMP_TOMNSPS"] = "1"
+                    os.environ["VMEC_JAX_DUMP_FORCE_KERNELS"] = "1"
+                    os.environ["VMEC_JAX_DUMP_GC"] = "1"
+                    os.environ["VMEC_JAX_DUMP_GC_STAGE"] = "both"
+                    os.environ["VMEC_JAX_DUMP_GC_DIR"] = str(dump_dir)
+                    os.environ["VMEC_JAX_DUMP_LAM"] = "1"
+                if args.dump_iter:
+                    os.environ["VMEC_JAX_DUMP_ITER"] = str(args.dump_iter)
+                else:
+                    os.environ.pop("VMEC_JAX_DUMP_ITER", None)
             else:
-                os.environ.pop("VMEC_JAX_DUMP_ITER", None)
+                for key in list(os.environ.keys()):
+                    if key.startswith("VMEC_JAX_DUMP_"):
+                        os.environ.pop(key, None)
             try:
                 return vj.run_fixed_boundary(
                     input_path,
