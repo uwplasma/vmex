@@ -1022,7 +1022,7 @@ def run_fixed_boundary(
             diagnostics=diag,
         )
         static = build_static(cfg, grid=grid)
-        if verbose and solver_lower == "vmec2000_iter":
+        if verbose and solver == "vmec2000_iter":
             converged = bool(res.diagnostics.get("converged", False))
             if not converged:
                 print(" Try increasing NITER or PRE_NITER if the preconditioner is on.", flush=True)
@@ -1058,7 +1058,7 @@ def run_fixed_boundary(
             f"Unknown solver: {solver!r} (expected 'gd', 'lbfgs', 'vmec_lbfgs', 'vmec_gn', or 'vmec2000_iter')"
         )
 
-    if verbose and solver_lower != "vmec2000_iter":
+    if verbose and solver != "vmec2000_iter":
         n_iter = int(getattr(res, "n_iter", -1))
         w_final = float(res.w_history[-1]) if getattr(res, "w_history", None) is not None else float("nan")
         if getattr(res, "grad_rms_history", None) is not None and len(res.grad_rms_history) > 0:

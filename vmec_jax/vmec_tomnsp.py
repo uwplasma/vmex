@@ -440,6 +440,20 @@ def _theta_transform_fft(arr, *, mpol: int, dnorm: float, mscale, want_sin: bool
     return coeff
 
 
+def _zeta_transform_fft(arr, *, ntor: int, nscale, want_sin: bool):
+    """FFT-based zeta transform for periodic zeta grid."""
+    arr = jnp.asarray(arr)
+    nzeta = int(arr.shape[-1])
+    if nzeta == 0:
+        out_shape = arr.shape[:-1] + (int(ntor) + 1,)
+        return jnp.zeros(out_shape, dtype=arr.dtype)
+    fft = jnp.fft.rfft(arr, axis=-1)
+    coeff = -jnp.imag(fft[..., : (ntor + 1)]) if want_sin else jnp.real(fft[..., : (ntor + 1)])
+    nscale = jnp.asarray(nscale[: (ntor + 1)], dtype=coeff.dtype)
+    nshape = (1,) * (coeff.ndim - 1) + (int(ntor) + 1,)
+    return coeff * nscale.reshape(nshape)
+
+
 def _cache_allowed() -> bool:
     if not has_jax():
         return True
@@ -782,29 +796,61 @@ def tomnsps_rzl(
     lthreed = bool(ntor > 0)
 
     # Zeta integration. Result arrays are (ns, mpol, ntor+1).
-    w_cosnv = jnp.stack([w1, w7, w11], axis=0)
-    out_cosnv = _zeta_contract(w_cosnv, cosnv)
-    frcc, fzsc, flsc = out_cosnv[0], out_cosnv[1], out_cosnv[2]
+    use_fft_zeta = bool(_TOMNSPS_FFT) and has_jax()
+    if use_fft_zeta:
+        nscale = getattr(trig, "nscale", None)
+        if nscale is None:
+            nscale = jnp.ones((ntor + 1,), dtype=jnp.asarray(w1).dtype)
+        n = jnp.arange(ntor + 1, dtype=jnp.asarray(w1).dtype)
+        nfac = (n * float(nfp)).reshape((1, 1, 1, ntor + 1))
 
-    if lthreed:
-        w_sinnvn = jnp.stack([w2, w8, w12], axis=0)
-        out_sinnvn = _zeta_contract(w_sinnvn, sinnvn)
-        frcc = frcc + out_sinnvn[0]
-        fzsc = fzsc + out_sinnvn[1]
-        flsc = flsc + out_sinnvn[2]
+        w_cosnv = jnp.stack([w1, w7, w11], axis=0)
+        out_cosnv = _zeta_transform_fft(w_cosnv, ntor=ntor, nscale=nscale, want_sin=False)
+        frcc, fzsc, flsc = out_cosnv[0], out_cosnv[1], out_cosnv[2]
 
-        w_sinnv = jnp.stack([w3, w5, w9], axis=0)
-        w_cosnvn = jnp.stack([w4, w6, w10], axis=0)
-        out_sinnv = _zeta_contract(w_sinnv, sinnv)
-        out_cosnvn = _zeta_contract(w_cosnvn, cosnvn)
+        if lthreed:
+            w_sinnvn = jnp.stack([w2, w8, w12], axis=0)
+            out_sinnvn = -_zeta_transform_fft(w_sinnvn, ntor=ntor, nscale=nscale, want_sin=True) * nfac
+            frcc = frcc + out_sinnvn[0]
+            fzsc = fzsc + out_sinnvn[1]
+            flsc = flsc + out_sinnvn[2]
 
-        frss = out_sinnv[0] + out_cosnvn[0]
-        fzcs = out_sinnv[1] + out_cosnvn[1]
-        flcs = out_sinnv[2] + out_cosnvn[2]
+            w_sinnv = jnp.stack([w3, w5, w9], axis=0)
+            w_cosnvn = jnp.stack([w4, w6, w10], axis=0)
+            out_sinnv = _zeta_transform_fft(w_sinnv, ntor=ntor, nscale=nscale, want_sin=True)
+            out_cosnvn = _zeta_transform_fft(w_cosnvn, ntor=ntor, nscale=nscale, want_sin=False) * nfac
+
+            frss = out_sinnv[0] + out_cosnvn[0]
+            fzcs = out_sinnv[1] + out_cosnvn[1]
+            flcs = out_sinnv[2] + out_cosnvn[2]
+        else:
+            frss = None
+            fzcs = None
+            flcs = None
     else:
-        frss = None
-        fzcs = None
-        flcs = None
+        w_cosnv = jnp.stack([w1, w7, w11], axis=0)
+        out_cosnv = _zeta_contract(w_cosnv, cosnv)
+        frcc, fzsc, flsc = out_cosnv[0], out_cosnv[1], out_cosnv[2]
+
+        if lthreed:
+            w_sinnvn = jnp.stack([w2, w8, w12], axis=0)
+            out_sinnvn = _zeta_contract(w_sinnvn, sinnvn)
+            frcc = frcc + out_sinnvn[0]
+            fzsc = fzsc + out_sinnvn[1]
+            flsc = flsc + out_sinnvn[2]
+
+            w_sinnv = jnp.stack([w3, w5, w9], axis=0)
+            w_cosnvn = jnp.stack([w4, w6, w10], axis=0)
+            out_sinnv = _zeta_contract(w_sinnv, sinnv)
+            out_cosnvn = _zeta_contract(w_cosnvn, cosnvn)
+
+            frss = out_sinnv[0] + out_cosnvn[0]
+            fzcs = out_sinnv[1] + out_cosnvn[1]
+            flcs = out_sinnv[2] + out_cosnvn[2]
+        else:
+            frss = None
+            fzcs = None
+            flcs = None
 
     # Apply VMEC's radial evolution masks (jmin2/jlam + fixed-boundary edge).
     # For parity work we use the default vmec_params values:

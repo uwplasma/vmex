@@ -4238,6 +4238,9 @@ def solve_fixed_boundary_residual_iter(
             bad_resets: Any
             bad_growth: Any
             fsqz_prev: Any
+            r00_prev: Any
+            z00_prev: Any
+            w_mhd_prev: Any
 
         def _tree_select(cond, t_true, t_false):
             return jax.tree_util.tree_map(lambda a, b: jnp.where(cond, a, b), t_true, t_false)
@@ -4276,13 +4279,22 @@ def solve_fixed_boundary_residual_iter(
             fsqr = norms_used.r1 * norms_used.fnorm * gcr2
             fsqz = norms_used.r1 * norms_used.fnorm * gcz2
             fsql = norms_used.fnormL * gcl2
-            # Scalars for VMEC-style screen output.
-            r00_j = jnp.asarray(k.pr1_even)[0, 0, 0]
-            z00_j = jnp.asarray(0.0, dtype=r00_j.dtype)
-            norms_w = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
-            wb_val = jnp.asarray(norms_w.wb)
-            wp_val = jnp.asarray(norms_w.wp)
-            w_mhd = (wb_val + wp_val / (gamma - 1.0)) * jnp.asarray(float(TWOPI * TWOPI), dtype=wb_val.dtype)
+            # Scalars for VMEC-style screen output (sampled on NSTEP cadence).
+            sample_vmec = (iter2 <= 1) | (iter2 >= int(max_iter)) | ((iter2 % nstep_screen) == 0)
+
+            def _compute_scalars(_):
+                r00_j = jnp.asarray(k.pr1_even)[0, 0, 0]
+                z00_j = jnp.asarray(0.0, dtype=r00_j.dtype)
+                norms_w = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
+                wb_val = jnp.asarray(norms_w.wb)
+                wp_val = jnp.asarray(norms_w.wp)
+                w_mhd = (wb_val + wp_val / (gamma - 1.0)) * jnp.asarray(float(TWOPI * TWOPI), dtype=wb_val.dtype)
+                return r00_j, z00_j, w_mhd
+
+            def _reuse_scalars(_):
+                return carry.r00_prev, carry.z00_prev, carry.w_mhd_prev
+
+            r00_j, z00_j, w_mhd = jax.lax.cond(sample_vmec, _compute_scalars, _reuse_scalars, operand=None)
 
             def _refresh_cache(_):
                 if constraint_tcon0 is None or float(constraint_tcon0) == 0.0:
@@ -4591,6 +4603,9 @@ def solve_fixed_boundary_residual_iter(
                 bad_resets=bad_resets_post,
                 bad_growth=bad_growth_post,
                 fsqz_prev=fsqz_prev,
+                r00_prev=r00_j,
+                z00_prev=z00_j,
+                w_mhd_prev=w_mhd,
             )
             accepted = jnp.logical_not(do_restart)
             return new_carry, (fsqr, fsqz, fsql, fsqr1, fsqz1, fsql1, accepted, r00_j, z00_j, w_mhd, time_step_report, zero_m1, include_edge)
@@ -4626,6 +4641,9 @@ def solve_fixed_boundary_residual_iter(
             bad_resets=bad_resets0,
             bad_growth=bad_growth0,
             fsqz_prev=fsqz_prev0,
+            r00_prev=jnp.asarray(0.0, dtype=dtype),
+            z00_prev=jnp.asarray(0.0, dtype=dtype),
+            w_mhd_prev=jnp.asarray(0.0, dtype=dtype),
         )
 
         scan_cache_key = (
