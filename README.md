@@ -75,6 +75,7 @@ The first command attempts a TensorBoard trace (requires a compatible TensorFlow
 `--use-scan` enables the fast ``lax.scan`` iteration path (no VMEC2000 control logic), which is ideal for performance profiling but not for per-iteration parity.
 You can also select the scan path directly via solver `vmec2000_iter_fast` (alias `vmec2000_scan`).
 Set `VMEC_JAX_USE_SCAN=1` to force scan mode for VMEC-style runs without changing code.
+For a one-line opt-in to the fast path, pass `performance_mode=True` to `run_fixed_boundary(...)`.
 
 VMEC2000 integration parity (requires the VMEC2000 executable):
 

@@ -270,6 +270,7 @@ def run_fixed_boundary(
     jit_forces: bool | str = True,
     jit_precompile: bool | None = None,
     use_scan: bool = False,
+    performance_mode: bool = False,
     grid=None,
     ns_override: int | None = None,
     restart_state: any | None = None,
@@ -378,6 +379,10 @@ def run_fixed_boundary(
     jit_forces:
         If True (default), JIT the force kernels. If ``"auto"``, disable JIT
         for very small workloads to reduce first-iteration latency.
+    performance_mode:
+        If True, force the fast scan-based iteration path (no VMEC2000 control
+        logic). This delivers order-of-magnitude speedups but does not preserve
+        per-iteration VMEC2000 parity.
     """
     # Default to 64-bit for VMEC parity; users can opt out via JAX_ENABLE_X64=0.
     try:
@@ -598,6 +603,11 @@ def run_fixed_boundary(
             profiles=prof,
             signgs=signgs,
         )
+
+    if performance_mode:
+        use_scan = True
+        if solver_lower == "vmec2000_iter":
+            solver_lower = "vmec2000_iter_fast"
 
     solver = solver_lower
     if solver in ("vmec2000_iter_fast", "vmec2000_scan"):
