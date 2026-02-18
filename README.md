@@ -157,33 +157,8 @@ Parity work is tracked in two layers:
 - **Kernel parity on reference states (solver-free):** reconstruct intermediate quantities from a *reference* `wout` state and compare to the quantities stored in that same `wout`. This isolates conventions and avoids solver noise.
 - **End-to-end solve parity:** run a nonlinear fixed-boundary solve from `input.*` and compare the final `wout` to the VMEC2000 reference. This depends on the update loop (preconditioning, time-step control, triggers), and is still in progress.
 
-Reproduce the current kernel-parity snapshot table:
-
-```bash
-python examples/validation/pipeline_parity_summary.py \
-  --cases circular_tokamak shaped_tokamak_pressure solovev \
-  n3are_R7.75B5.7_lowres LandremanPaul2021_QA_lowres li383_low_res
-```
-
-Current kernel-parity snapshot (solver-free, bundled reference states):
-
-| Variable | circular_tokamak | shaped_tokamak_pressure | solovev | n3are_R7.75B5.7_lowres | LandremanPaul2021_QA_lowres | li383_low_res |
-|---| :--: | :--: | :--: | :--: | :--: | :--: |
-| sqrtg | 2.53e-15 | 1.00e-14 | 1.47e-15 | 5.01e-13 | 3.61e-06 | 2.40e-14 |
-| bsupu | 2.02e-15 | 9.12e-15 | 1.40e-15 | 4.87e-13 | 1.34e-05 | 2.73e-14 |
-| bsupv | 2.58e-15 | 1.03e-14 | 1.45e-15 | 5.32e-13 | 5.26e-06 | 2.68e-14 |
-| bsubu | 7.20e-07 | 4.57e-05 | 2.41e-05 | 7.03e-01 | 9.22e-06 | 1.08e+00 |
-| bsubv | 1.24e-05 | 2.59e-05 | 3.11e-05 | 3.24e-02 | 4.62e-06 | 3.88e-02 |
-| abs(B) | 2.50e-15 | 9.98e-15 | 1.41e-15 | 1.58e-02 | 4.90e-06 | 1.93e-02 |
-| bsq = 0.5*B^2 + p | 5.12e-15 | 2.06e-14 | 2.85e-15 | 2.90e-02 | 1.02e-05 | 3.48e-02 |
-| fsqr | 3.09e-09 | 1.54e-08 | 3.64e-07 | 1.82e+10 | 1.55e-03 | 4.77e+04 |
-| fsqz | 1.24e-08 | 1.49e-08 | 2.69e-07 | 1.92e+11 | 9.11e+03 | 2.00e+06 |
-| fsql | 1.00e-10 | 7.75e-11 | 6.42e-07 | 1.20e+14 | 7.06e-03 | 5.34e+07 |
-| fsq_total | 9.17e-09 | 5.57e-10 | 2.56e-07 | 4.39e+11 | 1.56e+03 | 1.22e+06 |
-
 Interpretation:
 - Axisymmetric cases are at floating-point parity for geometry, ``bsup*``, and ``abs(B)``.
-- Non-axisymmetric kernel parity remains the top gap (``bsub*``/``abs(B)``/``fsq_total`` columns above).
 - End-to-end 3D trace parity matches VMEC2000 at `rtol=1e-4`, `atol=1e-12` for QA/QH on full grids; ``lasym=True`` and free-boundary remain out of parity.
 
 Full-grid parity snapshot (VMEC2000 exec comparator, `--use-input-niter`, `--max-iter 100`, `rtol=1e-4`, `atol=1e-12`):
