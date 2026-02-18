@@ -713,15 +713,29 @@ def tomnsps_rzl(
     stack_sinmumi = jnp.stack([brmn, bzmn, blmn], axis=0)
 
     use_fft = bool(_TOMNSPS_FFT) and (not bool(lasym)) and has_jax()
+    use_fft_fused = True
+    if use_fft:
+        env_fused = os.getenv("VMEC_JAX_TOMNSPS_FFT_FUSED", "1").strip().lower()
+        use_fft_fused = env_fused not in ("", "0", "false", "no")
     if use_fft:
         dnorm = float(getattr(trig, "dnorm", 1.0))
         mscale = getattr(trig, "mscale", None)
         if mscale is None:
             mscale = jnp.ones((mpol,), dtype=jnp.asarray(armn_even).dtype)
-        cosmui_out = _theta_transform_fft(stack_cosmui, mpol=mpol, dnorm=dnorm, mscale=mscale, want_sin=False)
-        sinmui_out = _theta_transform_fft(stack_cosmui, mpol=mpol, dnorm=dnorm, mscale=mscale, want_sin=True)
-        sin_coeff = _theta_transform_fft(stack_sinmumi, mpol=mpol, dnorm=dnorm, mscale=mscale, want_sin=True)
-        cos_coeff = _theta_transform_fft(stack_sinmumi, mpol=mpol, dnorm=dnorm, mscale=mscale, want_sin=False)
+        if use_fft_fused:
+            stack_all = jnp.concatenate([stack_cosmui, stack_sinmumi], axis=0)
+            cos_all = _theta_transform_fft(stack_all, mpol=mpol, dnorm=dnorm, mscale=mscale, want_sin=False)
+            sin_all = _theta_transform_fft(stack_all, mpol=mpol, dnorm=dnorm, mscale=mscale, want_sin=True)
+            n_cos = int(stack_cosmui.shape[0])
+            cosmui_out = cos_all[:n_cos]
+            sinmui_out = sin_all[:n_cos]
+            cos_coeff = cos_all[n_cos:]
+            sin_coeff = sin_all[n_cos:]
+        else:
+            cosmui_out = _theta_transform_fft(stack_cosmui, mpol=mpol, dnorm=dnorm, mscale=mscale, want_sin=False)
+            sinmui_out = _theta_transform_fft(stack_cosmui, mpol=mpol, dnorm=dnorm, mscale=mscale, want_sin=True)
+            sin_coeff = _theta_transform_fft(stack_sinmumi, mpol=mpol, dnorm=dnorm, mscale=mscale, want_sin=True)
+            cos_coeff = _theta_transform_fft(stack_sinmumi, mpol=mpol, dnorm=dnorm, mscale=mscale, want_sin=False)
         m = jnp.arange(int(mpol), dtype=cos_coeff.dtype)
         mshape = (1,) * (cos_coeff.ndim - 2) + (int(mpol), 1)
         m = m.reshape(mshape)
@@ -798,35 +812,72 @@ def tomnsps_rzl(
     # Zeta integration. Result arrays are (ns, mpol, ntor+1).
     use_fft_zeta = bool(_TOMNSPS_FFT) and has_jax()
     if use_fft_zeta:
+        env_fused = os.getenv("VMEC_JAX_TOMNSPS_FFT_FUSED", "1").strip().lower()
+        use_fft_fused = env_fused not in ("", "0", "false", "no")
         nscale = getattr(trig, "nscale", None)
         if nscale is None:
             nscale = jnp.ones((ntor + 1,), dtype=jnp.asarray(w1).dtype)
         n = jnp.arange(ntor + 1, dtype=jnp.asarray(w1).dtype)
         nfac = (n * float(nfp)).reshape((1, 1, 1, ntor + 1))
-
         w_cosnv = jnp.stack([w1, w7, w11], axis=0)
-        out_cosnv = _zeta_transform_fft(w_cosnv, ntor=ntor, nscale=nscale, want_sin=False)
-        frcc, fzsc, flsc = out_cosnv[0], out_cosnv[1], out_cosnv[2]
+        if use_fft_fused:
+            if lthreed:
+                w_sinnvn = jnp.stack([w2, w8, w12], axis=0)
+                w_sinnv = jnp.stack([w3, w5, w9], axis=0)
+                w_cosnvn = jnp.stack([w4, w6, w10], axis=0)
+                w_stack = jnp.stack([w_cosnv, w_sinnvn, w_sinnv, w_cosnvn], axis=0)
+            else:
+                w_stack = w_cosnv[None, ...]
 
-        if lthreed:
-            w_sinnvn = jnp.stack([w2, w8, w12], axis=0)
-            out_sinnvn = -_zeta_transform_fft(w_sinnvn, ntor=ntor, nscale=nscale, want_sin=True) * nfac
-            frcc = frcc + out_sinnvn[0]
-            fzsc = fzsc + out_sinnvn[1]
-            flsc = flsc + out_sinnvn[2]
+            fft = jnp.fft.rfft(w_stack, axis=-1)
+            coeff = fft[..., : (ntor + 1)]
+            real_dtype = jnp.asarray(w1).dtype
+            nscale = jnp.asarray(nscale, dtype=real_dtype)
+            nshape = (1,) * (coeff.ndim - 1) + (int(ntor) + 1,)
+            coeff_real = jnp.real(coeff) * nscale.reshape(nshape)
+            coeff_imag = -jnp.imag(coeff) * nscale.reshape(nshape)
 
-            w_sinnv = jnp.stack([w3, w5, w9], axis=0)
-            w_cosnvn = jnp.stack([w4, w6, w10], axis=0)
-            out_sinnv = _zeta_transform_fft(w_sinnv, ntor=ntor, nscale=nscale, want_sin=True)
-            out_cosnvn = _zeta_transform_fft(w_cosnvn, ntor=ntor, nscale=nscale, want_sin=False) * nfac
+            out_cosnv = coeff_real[0]
+            frcc, fzsc, flsc = out_cosnv[0], out_cosnv[1], out_cosnv[2]
 
-            frss = out_sinnv[0] + out_cosnvn[0]
-            fzcs = out_sinnv[1] + out_cosnvn[1]
-            flcs = out_sinnv[2] + out_cosnvn[2]
+            if lthreed:
+                out_sinnvn = -coeff_imag[1] * nfac
+                frcc = frcc + out_sinnvn[0]
+                fzsc = fzsc + out_sinnvn[1]
+                flsc = flsc + out_sinnvn[2]
+
+                out_sinnv = coeff_imag[2]
+                out_cosnvn = coeff_real[3] * nfac
+                frss = out_sinnv[0] + out_cosnvn[0]
+                fzcs = out_sinnv[1] + out_cosnvn[1]
+                flcs = out_sinnv[2] + out_cosnvn[2]
+            else:
+                frss = None
+                fzcs = None
+                flcs = None
         else:
-            frss = None
-            fzcs = None
-            flcs = None
+            out_cosnv = _zeta_transform_fft(w_cosnv, ntor=ntor, nscale=nscale, want_sin=False)
+            frcc, fzsc, flsc = out_cosnv[0], out_cosnv[1], out_cosnv[2]
+
+            if lthreed:
+                w_sinnvn = jnp.stack([w2, w8, w12], axis=0)
+                out_sinnvn = -_zeta_transform_fft(w_sinnvn, ntor=ntor, nscale=nscale, want_sin=True) * nfac
+                frcc = frcc + out_sinnvn[0]
+                fzsc = fzsc + out_sinnvn[1]
+                flsc = flsc + out_sinnvn[2]
+
+                w_sinnv = jnp.stack([w3, w5, w9], axis=0)
+                w_cosnvn = jnp.stack([w4, w6, w10], axis=0)
+                out_sinnv = _zeta_transform_fft(w_sinnv, ntor=ntor, nscale=nscale, want_sin=True)
+                out_cosnvn = _zeta_transform_fft(w_cosnvn, ntor=ntor, nscale=nscale, want_sin=False) * nfac
+
+                frss = out_sinnv[0] + out_cosnvn[0]
+                fzcs = out_sinnv[1] + out_cosnvn[1]
+                flcs = out_sinnv[2] + out_cosnvn[2]
+            else:
+                frss = None
+                fzcs = None
+                flcs = None
     else:
         w_cosnv = jnp.stack([w1, w7, w11], axis=0)
         out_cosnv = _zeta_contract(w_cosnv, cosnv)

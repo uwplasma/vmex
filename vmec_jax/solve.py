@@ -4132,6 +4132,10 @@ def solve_fixed_boundary_residual_iter(
                 time_step0 = jnp.asarray(float(resume_state.get("time_step", time_step0)), dtype=dtype)
             except Exception:
                 time_step0 = jnp.asarray(time_step0, dtype=dtype)
+            try:
+                flip_sign0 = jnp.asarray(float(resume_state.get("flip_sign", flip_sign0)), dtype=dtype)
+            except Exception:
+                pass
             inv_tau_val = resume_state.get("inv_tau", None)
             if inv_tau_val is not None:
                 inv_tau0 = jnp.asarray(inv_tau_val, dtype=dtype)
@@ -4173,6 +4177,12 @@ def solve_fixed_boundary_residual_iter(
                 vZcs0 = jnp.asarray(resume_state.get("vZcs", vZcs0), dtype=dtype)
                 vLsc0 = jnp.asarray(resume_state.get("vLsc", vLsc0), dtype=dtype)
                 vLcs0 = jnp.asarray(resume_state.get("vLcs", vLcs0), dtype=dtype)
+            try:
+                force_bcovar0 = jnp.asarray(
+                    bool(resume_state.get("force_bcovar_update", bool(force_bcovar0))), dtype=bool
+                )
+            except Exception:
+                pass
             if "r00_prev" in resume_state:
                 r00_prev0 = jnp.asarray(resume_state.get("r00_prev", r00_prev0), dtype=dtype)
             if "z00_prev" in resume_state:
@@ -4875,6 +4885,7 @@ def solve_fixed_boundary_residual_iter(
                     "r00_prev": float(np.asarray(carry_final.r00_prev)),
                     "z00_prev": float(np.asarray(carry_final.z00_prev)),
                     "w_mhd_prev": float(np.asarray(carry_final.w_mhd_prev)),
+                    "force_bcovar_update": bool(np.asarray(carry_final.force_bcovar_update)),
                 },
             },
         )
