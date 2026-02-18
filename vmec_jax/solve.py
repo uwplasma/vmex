@@ -4552,6 +4552,7 @@ def solve_fixed_boundary_residual_iter(
         last_iter2 = iter2
         converged = False
         skip_time_control = False
+        force_bcovar_update = False
         while True:
             iter_since_restart = iter2 - iter1
             fsq_prev_before = fsq_prev
@@ -4577,8 +4578,11 @@ def solve_fixed_boundary_residual_iter(
             zero_m1_history.append(int(float(np.asarray(zero_m1)) > 0.5))
     
             need_bcovar_update = bool(vmec2000_control) and (
-                (not bool(vmec2000_cache_valid)) or ((iter2 - iter1) % k_preconditioner_update_interval == 0)
+                (not bool(vmec2000_cache_valid))
+                or bool(force_bcovar_update)
+                or ((iter2 - iter1) % k_preconditioner_update_interval == 0)
             )
+            force_bcovar_update = False
             bcovar_update_history.append(int(bool(need_bcovar_update)))
     
             use_cached_precond = bool(vmec2000_control) and bool(vmec2000_cache_valid) and (not bool(need_bcovar_update))
@@ -5215,6 +5219,20 @@ def solve_fixed_boundary_residual_iter(
                     bad_growth_streak = 0
                     fsq_prev = fsq_prev_before
                     inv_tau = [0.15 / time_step] * k_ndamp
+                    vmec2000_cache_valid = False
+                    cache_precond_diag = None
+                    cache_tcon = None
+                    cache_norms = None
+                    cache_rz_scale = None
+                    cache_l_scale = None
+                    cache_rz_norm = None
+                    cache_f_norm1 = None
+                    cache_prec_rz_mats = None
+                    cache_prec_rz_jmax = None
+                    cache_prec_lam_prec = None
+                    cache_prec_faclam = None
+                    cache_prec_lam_debug = None
+                    force_bcovar_update = True
                     step_status = "restart_time_control"
                     restart_reason = "time_control"
                     step_history.append(0.0)
@@ -5351,6 +5369,21 @@ def solve_fixed_boundary_residual_iter(
                     cache_prec_lam_prec = None
                     cache_prec_faclam = None
                     cache_prec_lam_debug = None
+                else:
+                    vmec2000_cache_valid = False
+                    cache_precond_diag = None
+                    cache_tcon = None
+                    cache_norms = None
+                    cache_rz_scale = None
+                    cache_l_scale = None
+                    cache_rz_norm = None
+                    cache_f_norm1 = None
+                    cache_prec_rz_mats = None
+                    cache_prec_rz_jmax = None
+                    cache_prec_lam_prec = None
+                    cache_prec_faclam = None
+                    cache_prec_lam_debug = None
+                    force_bcovar_update = True
                 step_history.append(0.0)
                 dt_eff_history.append(0.0)
                 update_rms_history.append(0.0)
