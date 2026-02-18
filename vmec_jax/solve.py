@@ -5038,8 +5038,6 @@ def solve_fixed_boundary_residual_iter(
                     jac = getattr(getattr(k, "bc", None), "jac", None)
                 except Exception:
                     jac = None
-                if bool(vmec2000_control) and (not bool(need_bcovar_update)):
-                    jac = None
                 if jac is None:
                     jac = vmec_half_mesh_jacobian_from_state(
                         state=state,
