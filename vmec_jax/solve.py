@@ -4058,6 +4058,11 @@ def solve_fixed_boundary_residual_iter(
         nstep_screen = int(indata.get_int("NSTEP", 1)) if indata is not None else 1
         if nstep_screen < 1:
             nstep_screen = 1
+        if resume_state is not None:
+            try:
+                iter_offset = int(resume_state.get("iter_offset", iter_offset))
+            except Exception:
+                pass
 
         def _should_print_vmec2000_local(iter_idx: int, max_iter_local: int) -> bool:
             if not (bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table)):
@@ -4117,6 +4122,64 @@ def solve_fixed_boundary_residual_iter(
         vZcs0 = jnp.zeros_like(vRcc0)
         vLsc0 = jnp.zeros_like(vRcc0)
         vLcs0 = jnp.zeros_like(vRcc0)
+        r00_prev0 = jnp.asarray(0.0, dtype=dtype)
+        z00_prev0 = jnp.asarray(0.0, dtype=dtype)
+        w_mhd_prev0 = jnp.asarray(0.0, dtype=dtype)
+        state_checkpoint0 = state_init
+
+        if resume_state is not None:
+            try:
+                time_step0 = jnp.asarray(float(resume_state.get("time_step", time_step0)), dtype=dtype)
+            except Exception:
+                time_step0 = jnp.asarray(time_step0, dtype=dtype)
+            inv_tau_val = resume_state.get("inv_tau", None)
+            if inv_tau_val is not None:
+                inv_tau0 = jnp.asarray(inv_tau_val, dtype=dtype)
+            else:
+                inv_tau0 = jnp.full((k_ndamp,), jnp.asarray(0.15, dtype=dtype) / time_step0)
+            try:
+                fsq_prev0 = jnp.asarray(float(resume_state.get("fsq_prev", fsq_prev0)), dtype=dtype)
+            except Exception:
+                pass
+            try:
+                res0_0 = jnp.asarray(float(resume_state.get("res0", res0_0)), dtype=dtype)
+                res1_0 = jnp.asarray(float(resume_state.get("res1", res1_0)), dtype=dtype)
+            except Exception:
+                pass
+            try:
+                iter1_0 = jnp.asarray(int(resume_state.get("iter1", int(iter1_0))), dtype=jnp.int32)
+            except Exception:
+                pass
+            try:
+                ijacob0 = jnp.asarray(int(resume_state.get("ijacob", int(ijacob0))), dtype=jnp.int32)
+            except Exception:
+                pass
+            try:
+                bad_resets0 = jnp.asarray(int(resume_state.get("bad_resets", int(bad_resets0))), dtype=jnp.int32)
+            except Exception:
+                pass
+            try:
+                bad_growth0 = jnp.asarray(int(resume_state.get("bad_growth_streak", int(bad_growth0))), dtype=jnp.int32)
+            except Exception:
+                pass
+            try:
+                fsqz_prev0 = jnp.asarray(float(resume_state.get("fsqz_prev", fsqz_prev0)), dtype=dtype)
+            except Exception:
+                pass
+            if "vRcc" in resume_state:
+                vRcc0 = jnp.asarray(resume_state["vRcc"], dtype=dtype)
+                vRss0 = jnp.asarray(resume_state.get("vRss", vRss0), dtype=dtype)
+                vZsc0 = jnp.asarray(resume_state.get("vZsc", vZsc0), dtype=dtype)
+                vZcs0 = jnp.asarray(resume_state.get("vZcs", vZcs0), dtype=dtype)
+                vLsc0 = jnp.asarray(resume_state.get("vLsc", vLsc0), dtype=dtype)
+                vLcs0 = jnp.asarray(resume_state.get("vLcs", vLcs0), dtype=dtype)
+            if "r00_prev" in resume_state:
+                r00_prev0 = jnp.asarray(resume_state.get("r00_prev", r00_prev0), dtype=dtype)
+            if "z00_prev" in resume_state:
+                z00_prev0 = jnp.asarray(resume_state.get("z00_prev", z00_prev0), dtype=dtype)
+            if "w_mhd_prev" in resume_state:
+                w_mhd_prev0 = jnp.asarray(resume_state.get("w_mhd_prev", w_mhd_prev0), dtype=dtype)
+            state_checkpoint0 = resume_state.get("state_checkpoint", state_checkpoint0)
 
         def _scale_m1_precond_rhs(frzl_in: TomnspsRZL, mats: dict[str, Any]) -> TomnspsRZL:
             if (not bool(getattr(cfg, "lconm1", True))) or (int(cfg.mpol) <= 1):
@@ -4206,6 +4269,36 @@ def solve_fixed_boundary_residual_iter(
         cache_lam_prec0 = _lambda_preconditioner(k0.bc)
         cache_rz_mats0, _jmin0, jmax0 = rz_preconditioner_matrices(bc=k0.bc, k=k0, trig=trig, s=s, cfg=cfg)
         jmax0 = int(jmax0)
+
+        if resume_state is not None:
+            try:
+                cache_valid0 = jnp.asarray(bool(resume_state.get("vmec2000_cache_valid", bool(cache_valid0))), dtype=bool)
+            except Exception:
+                cache_valid0 = jnp.asarray(cache_valid0, dtype=bool)
+            if "cache_precond_diag" in resume_state:
+                cache_precond_diag0 = resume_state.get("cache_precond_diag", cache_precond_diag0)
+            if "cache_tcon" in resume_state:
+                cache_tcon0 = resume_state.get("cache_tcon", cache_tcon0)
+            if "cache_norms" in resume_state:
+                cache_norms0 = resume_state.get("cache_norms", cache_norms0)
+            if "cache_rz_scale" in resume_state:
+                cache_rz_scale0 = resume_state.get("cache_rz_scale", cache_rz_scale0)
+            if "cache_l_scale" in resume_state:
+                cache_l_scale0 = resume_state.get("cache_l_scale", cache_l_scale0)
+            if "cache_rz_norm" in resume_state:
+                try:
+                    cache_rz_norm0 = jnp.asarray(resume_state.get("cache_rz_norm", cache_rz_norm0), dtype=dtype)
+                except Exception:
+                    pass
+            if "cache_f_norm1" in resume_state:
+                try:
+                    cache_f_norm1_0 = jnp.asarray(resume_state.get("cache_f_norm1", cache_f_norm1_0), dtype=dtype)
+                except Exception:
+                    pass
+            if "cache_prec_rz_mats" in resume_state:
+                cache_rz_mats0 = resume_state.get("cache_prec_rz_mats", cache_rz_mats0)
+            if "cache_prec_lam_prec" in resume_state:
+                cache_lam_prec0 = resume_state.get("cache_prec_lam_prec", cache_lam_prec0)
 
         class _ScanCarry(NamedTuple):
             state: VMECState
@@ -4625,7 +4718,7 @@ def solve_fixed_boundary_residual_iter(
             iter1=iter1_0,
             res0=res0_0,
             res1=res1_0,
-            state_checkpoint=state_init,
+            state_checkpoint=state_checkpoint0,
             cache_valid=cache_valid0,
             cache_precond_diag=cache_precond_diag0,
             cache_tcon=cache_tcon0,
@@ -4641,9 +4734,9 @@ def solve_fixed_boundary_residual_iter(
             bad_resets=bad_resets0,
             bad_growth=bad_growth0,
             fsqz_prev=fsqz_prev0,
-            r00_prev=jnp.asarray(0.0, dtype=dtype),
-            z00_prev=jnp.asarray(0.0, dtype=dtype),
-            w_mhd_prev=jnp.asarray(0.0, dtype=dtype),
+            r00_prev=r00_prev0,
+            z00_prev=z00_prev0,
+            w_mhd_prev=w_mhd_prev0,
         )
 
         scan_cache_key = (
@@ -4652,6 +4745,7 @@ def solve_fixed_boundary_residual_iter(
             wout_key,
             edge_key,
             int(max_iter),
+            int(iter_offset),
             float(step_size),
             float(initial_flip_sign),
             float(lambda_update_scale),
@@ -4753,10 +4847,34 @@ def solve_fixed_boundary_residual_iter(
                     "time_step": float(np.asarray(carry_final.time_step)),
                     "inv_tau": np.asarray(carry_final.inv_tau),
                     "fsq_prev": float(np.asarray(carry_final.fsq_prev)),
+                    "flip_sign": float(np.asarray(carry_final.flip_sign)),
                     "iter1": int(np.asarray(carry_final.iter1)),
+                    "iter_offset": int(iter_offset + int(max_iter)),
                     "res0": float(np.asarray(carry_final.res0)),
                     "res1": float(np.asarray(carry_final.res1)),
                     "vmec2000_cache_valid": bool(np.asarray(carry_final.cache_valid)),
+                    "ijacob": int(np.asarray(carry_final.ijacob)),
+                    "bad_resets": int(np.asarray(carry_final.bad_resets)),
+                    "bad_growth_streak": int(np.asarray(carry_final.bad_growth)),
+                    "fsqz_prev": float(np.asarray(carry_final.fsqz_prev)),
+                    "vRcc": np.asarray(carry_final.vRcc),
+                    "vRss": np.asarray(carry_final.vRss),
+                    "vZsc": np.asarray(carry_final.vZsc),
+                    "vZcs": np.asarray(carry_final.vZcs),
+                    "vLsc": np.asarray(carry_final.vLsc),
+                    "vLcs": np.asarray(carry_final.vLcs),
+                    "cache_precond_diag": carry_final.cache_precond_diag,
+                    "cache_tcon": carry_final.cache_tcon,
+                    "cache_norms": carry_final.cache_norms,
+                    "cache_rz_scale": carry_final.cache_rz_scale,
+                    "cache_l_scale": carry_final.cache_l_scale,
+                    "cache_rz_norm": np.asarray(carry_final.cache_rz_norm),
+                    "cache_f_norm1": np.asarray(carry_final.cache_f_norm1),
+                    "cache_prec_rz_mats": carry_final.cache_prec_rz_mats,
+                    "cache_prec_lam_prec": np.asarray(carry_final.cache_prec_lam_prec),
+                    "r00_prev": float(np.asarray(carry_final.r00_prev)),
+                    "z00_prev": float(np.asarray(carry_final.z00_prev)),
+                    "w_mhd_prev": float(np.asarray(carry_final.w_mhd_prev)),
                 },
             },
         )

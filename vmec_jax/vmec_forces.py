@@ -72,6 +72,18 @@ def _named_scope(name: str):
     yield
 
 
+@contextmanager
+def _trace(name: str):
+    if has_jax():
+        try:
+            with jax.profiler.TraceAnnotation(name):
+                yield
+            return
+        except Exception:
+            pass
+    yield
+
+
 @tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class VmecRZForceKernels:
@@ -677,17 +689,18 @@ def vmec_forces_rz_from_wout(
         )
 
     phips = wout_eff.phips
-    bc = vmec_bcovar_half_mesh_from_wout(
-        state=state,
-        static=static,
-        wout=wout_eff,
-        pres=pres_half,
-        use_wout_bsup=use_wout_bsup,
-        use_wout_bsub_for_lambda=use_wout_bsup,
-        use_wout_bmag_for_bsq=use_wout_bsup,
-        use_vmec_synthesis=use_vmec_synthesis,
-        trig=trig,
-    )
+    with _trace("bcovar"):
+        bc = vmec_bcovar_half_mesh_from_wout(
+            state=state,
+            static=static,
+            wout=wout_eff,
+            pres=pres_half,
+            use_wout_bsup=use_wout_bsup,
+            use_wout_bsub_for_lambda=use_wout_bsup,
+            use_wout_bmag_for_bsq=use_wout_bsup,
+            use_vmec_synthesis=use_vmec_synthesis,
+            trig=trig,
+        )
 
     # VMEC stores internal coefficients; undo the m=1 internal constraint for
     # R/Z before real-space synthesis.
@@ -1597,7 +1610,7 @@ def vmec_residual_internal_from_kernels(
         azcon_e_s, azcon_e_a = _symforce_split_one(k.azcon_e, trig=trig, kind="zcs")
         azcon_o_s, azcon_o_a = _symforce_split_one(k.azcon_o, trig=trig, kind="zcs")
 
-        with _named_scope("tomnsps_rzl"):
+        with _trace("tomnsps_rzl"), _named_scope("tomnsps_rzl"):
             out_sym = tomnsps_rzl(
                 armn_even=armn_e_s,
                 armn_odd=armn_o_s,
@@ -1628,7 +1641,7 @@ def vmec_residual_internal_from_kernels(
                 masks=mask_pack,
             )
 
-        with _named_scope("tomnspa_rzl"):
+        with _trace("tomnspa_rzl"), _named_scope("tomnspa_rzl"):
             out_asym = tomnspa_rzl(
                 armn_even=armn_e_a,
                 armn_odd=armn_o_a,
@@ -1659,7 +1672,7 @@ def vmec_residual_internal_from_kernels(
                 masks=mask_pack,
             )
     else:
-        with _named_scope("tomnsps_rzl"):
+        with _trace("tomnsps_rzl"), _named_scope("tomnsps_rzl"):
             out_sym = tomnsps_rzl(
                 armn_even=k.armn_e,
                 armn_odd=k.armn_o,
