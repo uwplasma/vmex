@@ -61,6 +61,29 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-multigrid", dest="multigrid", action="store_false", help="Disable multigrid staging.")
     p.set_defaults(multigrid=None)
     p.add_argument(
+        "--parity",
+        action="store_true",
+        help="Use VMEC2000 parity loop (slower, exact time-step control).",
+    )
+    p.add_argument(
+        "--fast",
+        action="store_true",
+        help="Use scan-based fast loop (default).",
+    )
+    p.add_argument(
+        "--vmecpp-restart",
+        dest="vmecpp_restart",
+        action="store_true",
+        help="Enable VMEC++ bad-progress restart heuristic (fast path).",
+    )
+    p.add_argument(
+        "--no-vmecpp-restart",
+        dest="vmecpp_restart",
+        action="store_false",
+        help="Disable VMEC++ bad-progress restarts.",
+    )
+    p.set_defaults(vmecpp_restart=None)
+    p.add_argument(
         "--use-input-niter",
         dest="use_input_niter",
         action="store_true",
@@ -130,6 +153,19 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(str(exc))
         return 2
 
+    if bool(args.parity) and bool(args.fast):
+        parser.error("--parity and --fast are mutually exclusive")
+        return 2
+    performance_mode = True
+    if bool(args.parity):
+        performance_mode = False
+    elif bool(args.fast):
+        performance_mode = True
+    if args.vmecpp_restart is None:
+        vmecpp_restart = bool(performance_mode)
+    else:
+        vmecpp_restart = bool(args.vmecpp_restart)
+
     profile_dir = os.getenv("VMEC_JAX_PROFILE_DIR", "")
     profile_window = os.getenv("VMEC_JAX_PROFILE_WINDOW", "")
     profile_server = os.getenv("VMEC_JAX_PROFILE_SERVER", "")
@@ -168,7 +204,8 @@ def main(argv: list[str] | None = None) -> int:
             multigrid_use_input_niter=bool(args.use_input_niter),
             verbose=not bool(args.quiet),
             jit_forces=jit_forces,
-            performance_mode=False,
+            performance_mode=bool(performance_mode),
+            vmecpp_restart=bool(vmecpp_restart),
         )
         if profile_dir and not profile_window:
             try:
