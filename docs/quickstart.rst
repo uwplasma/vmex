@@ -36,7 +36,7 @@ Kernel parity on reference states (solver-free)
 To validate intermediate pipeline quantities on *reference* ``wout`` states (no
 nonlinear solve), run::
 
-  python examples/validation/pipeline_parity_summary.py
+  python tools/diagnostics/pipeline_parity_summary.py
 
 By default this covers the 4-axisymmetric benchmark suite (``circular_tokamak``,
 ``purely_toroidal_field``, ``shaped_tokamak_pressure``, ``solovev``).
@@ -47,7 +47,7 @@ Scalar residual parity (``fsqr/fsqz/fsql``) on reference states
 To compare scalar residuals reconstructed from a reference state against
 ``wout.fsqr/fsqz/fsql``::
 
-  python examples/validation/getfsq_parity_cases.py --solve-metric
+  python tools/diagnostics/getfsq_parity_cases.py --solve-metric
 
 End-to-end solve snapshot
 -------------------------
@@ -55,7 +55,7 @@ End-to-end solve snapshot
 To run a short fixed-boundary solve and compare a few end-to-end outputs against
 bundled references::
 
-  python examples/validation/end_to_end_solve_parity_summary.py --use-input-niter --fast
+  python tools/diagnostics/end_to_end_solve_parity_summary.py --use-input-niter --fast
 
 Drop ``--fast`` and increase ``--max-iter`` for a full parity snapshot (longer runtime).
 
@@ -74,7 +74,7 @@ ParaView export (VTK)
 Export a surface B-field (including ``Bx``, ``By``, ``Bz``, and ``Bmag``) and a
 field-line trace for ParaView (requires ``netCDF4``)::
 
-  python examples/visualization/vtk_field_and_fieldlines.py examples/data/input.li383_low_res --hi-res --outdir vtk_out
+  python examples/research/visualization/vtk_field_and_fieldlines.py examples/data/input.li383_low_res --hi-res --outdir vtk_out
 
 A minimal API sketch (recommended)
 ----------------------------------

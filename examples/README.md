@@ -10,10 +10,10 @@ Exception:
 
 ## Layout and intent
 
-- `tutorial/`: minimal low-level kernel demos (start here only if you want to learn internals).
-- `gradients/`: small autodiff examples (requires JAX).
-- `validation/`: parity checks vs bundled `wout_*.nc`.
-- `visualization/`: VMEC-style figure generation + VTK export.
+- `tutorials/`: minimal low-level kernel demos (start here only if you want to learn internals).
+- `tutorials/optimization/`: small autodiff examples (requires JAX).
+- `validation/`: pointer to parity scripts (moved to `tools/diagnostics/`).
+- `research/`: VMEC-style figure generation + VTK export (and other exploratory scripts).
 - `data/`: bundled `input.*` and `wout_*_reference.nc` files used in CI tests.
 - `outputs/`: default location where some scripts write `.npz` artifacts.
  
@@ -27,5 +27,5 @@ Most scripts accept an input path. Solver-style scripts are **verbose by default
 
 ```bash
 python examples/showcase_axisym_input_to_wout.py
-python examples/tutorial/00_parse_and_boundary.py examples/data/input.circular_tokamak --out boundary.npz --verbose
+python examples/tutorials/00_parse_and_boundary.py examples/data/input.circular_tokamak --out boundary.npz --verbose
 ```
