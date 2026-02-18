@@ -162,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     elif bool(args.fast):
         performance_mode = True
     if args.vmecpp_restart is None:
-        vmecpp_restart = bool(performance_mode)
+        vmecpp_restart = False
     else:
         vmecpp_restart = bool(args.vmecpp_restart)
 

@@ -4624,7 +4624,13 @@ def solve_fixed_boundary_residual_iter(
                     | (fsq0 > vmec2000_fact * jnp.maximum(res1, 1.0e-30))
                 )
                 restart_badjac = use_restart_triggers & bad_jacobian & (iter2 > carry_adv.iter1)
-                do_restart = restart_time | restart_badjac
+                vmecpp_bad_progress = jnp.asarray(False)
+                if vmecpp_restart:
+                    vmecpp_bad_progress = (
+                        (iter2 - carry_adv.iter1) > (k_preconditioner_update_interval // 2)
+                    ) & (iter2 > 2 * k_preconditioner_update_interval) & ((fsqr + fsqz) > 1.0e-2)
+                restart_vmecpp = use_restart_triggers & vmecpp_bad_progress
+                do_restart = restart_time | restart_badjac | restart_vmecpp
 
                 def _restart_updates(_):
                     time_step = jnp.where(
@@ -4892,6 +4898,8 @@ def solve_fixed_boundary_residual_iter(
             float(lambda_update_scale),
             float(ftol),
             int(nstep_screen),
+            bool(use_restart_triggers),
+            bool(vmecpp_restart),
         )
 
         def _run_scan(state_init_local):
