@@ -3986,14 +3986,14 @@ def solve_fixed_boundary_residual_iter(
     if abs(gamma - 1.0) < 1e-14:
         raise ValueError("GAMMA=1 makes wp/(gamma-1) singular (VMEC objective undefined)")
 
-        if use_scan:
-            if vmec2000_control or backtracking or use_restart_triggers or auto_flip_force or limit_dt_from_force or limit_update_rms or strict_update or use_direct_fallback or reference_mode:
-                raise ValueError(
-                    "use_scan requires vmec2000_control=False, backtracking=False, "
-                    "use_restart_triggers=False, auto_flip_force=False, "
-                    "limit_dt_from_force=False, limit_update_rms=False, strict_update=False, "
-                    "use_direct_fallback=False, reference_mode=False."
-                )
+    if use_scan:
+        if vmec2000_control or backtracking or use_restart_triggers or auto_flip_force or limit_dt_from_force or limit_update_rms or strict_update or use_direct_fallback or reference_mode:
+            raise ValueError(
+                "use_scan requires vmec2000_control=False, backtracking=False, "
+                "use_restart_triggers=False, auto_flip_force=False, "
+                "limit_dt_from_force=False, limit_update_rms=False, strict_update=False, "
+                "use_direct_fallback=False, reference_mode=False."
+            )
 
         dtype = jnp.asarray(state0.Rcos).dtype
         time_step_j = jnp.asarray(float(step_size), dtype=dtype)
