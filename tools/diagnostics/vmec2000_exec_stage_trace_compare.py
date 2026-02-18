@@ -1929,6 +1929,8 @@ def main() -> None:
                     if key.startswith("VMEC_JAX_DUMP_"):
                         os.environ.pop(key, None)
             try:
+                use_scan = False if args.dump_level != "none" else True
+                performance_mode = False if args.dump_level != "none" else True
                 return vj.run_fixed_boundary(
                     input_path,
                     solver="vmec2000_iter",
@@ -1936,6 +1938,8 @@ def main() -> None:
                     multigrid_use_input_niter=bool(args.use_input_niter),
                     multigrid=multigrid,
                     verbose=False,
+                    use_scan=use_scan,
+                    performance_mode=performance_mode,
                     ns_override=int(args.single_ns) if args.single_ns is not None else None,
                     restart_state=restart_state,
                     restart_solver_state=restart_solver_state,
