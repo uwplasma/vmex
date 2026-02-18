@@ -5126,7 +5126,10 @@ def solve_fixed_boundary_residual_iter(
                 fsq0 = fsqr_f + fsqz_f + fsql_f  # physical
                 # VMEC's TimeStepControl uses the *previous* preconditioned
                 # residual (fsq) which is updated at the end of evolve.f.
-                fsq = fsq_prev if (iter2 > iter1) else fsq1
+                # VMEC's TimeStepControl uses `fsq` from the *previous* evolve
+                # step (initialized to 1.0). It does not switch to fsq1 when
+                # iter2 == iter1 (restart window).
+                fsq = fsq_prev
                 if (iter2 == iter1) or (res0 < 0.0) or (res1 < 0.0):
                     res0 = fsq
                     res1 = fsq0
