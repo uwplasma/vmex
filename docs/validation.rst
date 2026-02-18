@@ -44,7 +44,9 @@ All of the following scripts are designed to run quickly on bundled data:
 
 - Pipeline parity snapshot (solver-free)::
 
-    python examples/validation/pipeline_parity_summary.py
+    python examples/validation/pipeline_parity_summary.py \
+      --cases circular_tokamak shaped_tokamak_pressure solovev \
+      n3are_R7.75B5.7_lowres LandremanPaul2021_QA_lowres li383_low_res
 
 - Scalar residual parity (solver-free, reference states)::
 
@@ -87,6 +89,14 @@ Per-iteration trace parity (VMEC2000 executable, reduced grid):
   python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case circular_tokamak --max-iter 10 --vmec-nstep 1 --single-ns 13
   python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case nfp4_QH_warm_start --max-iter 10 --single-ns 16 --vmec-timeout 60 --rtol 1e-4 --atol 1e-12
   python tools/diagnostics/nonaxis_parity_batch.py --max-cases 8 --single-ns 13 --max-iter 1 --vmec-timeout 60
+
+README trace figures (axisym + QH, 100 iterations)::
+
+  python tools/diagnostics/readme_fsq_trace.py \
+    --axisym-input examples/data/input.shaped_tokamak_pressure \
+    --qh-input examples/data/input.nfp4_QH_warm_start \
+    --niter 100 \
+    --outdir docs/_static/figures
 
 This uses a reduced grid to stay under ~1 minute; increase ``--max-iter`` or ``--single-ns`` for deeper parity checks.
 For longer traces under the timeout cap you can split the vmec_jax run::
@@ -131,19 +141,19 @@ faithful to the legacy script.
 Current observed mismatches (updated parity status):
 
 - **Single-grid axisym parity** (`--single-ns 13`) matches VMEC2000 at machine
-  precision for the first **10 iterations** on the 4-axisymmetric benchmark
-  suite (``circular_tokamak``, ``purely_toroidal_field``,
-  ``shaped_tokamak_pressure``, ``solovev``).
-- **Full-grid multigrid parity** (`--use-input-niter`, `max_iter=10`) using the
-  VMEC2000 executable comparator passes for QA/QH/n3are/QA-lowres and the
-  standard axisymmetric controls at the legacy tolerance (`rtol=5e-4`,
-  `atol=1e-10`). Revalidation is underway at `rtol=1e-4`, `atol=1e-12`.
+  precision for the first **10 iterations** on the axisymmetric benchmark
+  suite (``circular_tokamak``, ``shaped_tokamak_pressure``, ``solovev``).
+- **Non-axisymmetric kernel parity** remains the top gap: ``bsub*`` and
+  ``abs(B)`` comparisons for 3D reference states are still off by O(1).
+- **Full-grid QA/QH traces** show an ``r00`` mismatch at iter 2 for
+  `rtol=1e-4`, `atol=1e-12` even though scalar residuals and final `wout`
+  values agree to 1e-7–1e-9.
 - ``betapol``, ``betator``, ``betaxis``, ``ctor``, and ``DMerc`` are present but
   still placeholders in ``vmec_jax`` (zeros) until the VMEC2000 diagnostics path
   is fully ported.
 
-Full-grid parity snapshot (VMEC2000 exec comparator, `--use-input-niter`, `max_iter=10`,
-`rtol=5e-4`, `atol=1e-10`; revalidation at `rtol=1e-4`, `atol=1e-12` in progress):
+Full-grid parity snapshot (VMEC2000 exec comparator, `--use-input-niter`, `max_iter=100`,
+`rtol=1e-4`, `atol=1e-12`):
 
 .. list-table::
    :header-rows: 1
@@ -155,48 +165,24 @@ Full-grid parity snapshot (VMEC2000 exec comparator, `--use-input-niter`, `max_i
      - fsq_total (VMEC/JAX)
      - runtime_s (vmec2000/jax)
      - Notes
-   * - solovev
-     - ``examples/data/input.solovev``
-     - PASS
-     - ``1.737e-02 / 1.737e-02``
-     - ``0.191 / 5.100``
-     - Axisymmetric
    * - shaped_tokamak_pressure
      - ``examples/data/input.shaped_tokamak_pressure``
      - PASS
-     - ``5.541e-03 / 5.541e-03``
-     - ``0.180 / 18.218``
-     - Axisymmetric
-   * - ITERModel
-     - ``examples/data/input.ITERModel``
-     - PASS
-     - ``7.581e-03 / 7.581e-03``
-     - ``0.235 / 7.787``
+     - ``1.422e-07 / 1.422e-07``
+     - ``0.246 / 5.524``
      - Axisymmetric
    * - QA signgs1
      - ``/Users/rogeriojorge/local/test/input.qa_signgs1``
-     - PASS
-     - ``5.267e-01 / 5.267e-01``
-     - ``0.386 / 14.547``
-     - NFP=2, NTOR=6
-   * - nfp4_QH_warm_start
+     - FAIL
+     - ``1.412e-04 / 1.412e-04``
+     - ``0.445 / 5.350``
+     - r00 mismatch at iter 2 (rtol=1e-4)
+   * - QH warm start
      - ``examples/data/input.nfp4_QH_warm_start``
-     - PASS
-     - ``4.540e-03 / 4.540e-03``
-     - ``0.246 / 14.269``
-     - QH
-   * - n3are_R7.75B5.7_lowres
-     - ``examples/data/input.n3are_R7.75B5.7_lowres``
-     - PASS
-     - ``2.330e+00 / 2.330e+00``
-     - ``0.177 / 27.706``
-     - NFP=4
-   * - LandremanPaul2021_QA_lowres
-     - ``examples/data/input.LandremanPaul2021_QA_lowres``
-     - PASS
-     - ``3.423e+00 / 3.423e+00``
-     - ``0.574 / 11.448``
-     - QA lowres
+     - FAIL
+     - ``2.888e-07 / 2.888e-07``
+     - ``0.268 / 4.973``
+     - r00 mismatch at iter 2 (rtol=1e-4)
 
 Scope and known gaps
 --------------------

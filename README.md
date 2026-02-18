@@ -4,22 +4,42 @@ Laptop-friendly, end-to-end differentiable (JAX) rewrite of **VMEC2000**, focusi
 
 <table>
   <tr>
-    <td><img src="docs/_static/figures/shaped_tokamak_pressure_overview.png" width="420" /></td>
+    <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_surfaces.png" width="420" /></td>
+    <td><img src="docs/_static/figures/qh_compare_cross_sections.png" width="420" /></td>
+  </tr>
+  <tr>
+    <td align="center">Axisymmetric: LCFS cross-sections</td>
+    <td align="center">QH: LCFS cross-sections (VMEC2000 vs vmec_jax)</td>
+  </tr>
+  <tr>
+    <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_lcfs_3d_bmag.png" width="420" /></td>
     <td><img src="docs/_static/figures/qh_compare_3d.png" width="420" /></td>
+  </tr>
+  <tr>
+    <td align="center">Axisymmetric: 3D LCFS (|B| colored)</td>
+    <td align="center">QH: 3D LCFS (VMEC2000 vs vmec_jax)</td>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_bmag_lcfs.png" width="420" /></td>
     <td><img src="docs/_static/figures/qh_compare_bmag_surface.png" width="420" /></td>
   </tr>
   <tr>
-    <td align="center">Tokamak (shaped_tokamak_pressure): vmec_jax overview + |B| on LCFS</td>
-    <td align="center">Stellarator (nfp4_QH_warm_start): VMEC2000 vs vmec_jax</td>
+    <td align="center">Axisymmetric: |B| on LCFS</td>
+    <td align="center">QH: |B| on LCFS (VMEC2000 vs vmec_jax)</td>
   </tr>
   <tr>
-    <td colspan="2"><img src="docs/_static/figures/qh_compare_fsq_trace.png" width="860" /></td>
+    <td><img src="docs/_static/figures/showcase_shaped_tokamak_pressure_profiles.png" width="420" /></td>
+    <td><img src="docs/_static/figures/qh_compare_profiles.png" width="420" /></td>
   </tr>
   <tr>
-    <td align="center" colspan="2">QH (nfp4_QH_warm_start): per-iteration VMEC2000 vs vmec_jax trace</td>
+    <td align="center">Axisymmetric: iota + pressure profiles</td>
+    <td align="center">QH: iota + pressure profiles (VMEC2000 vs vmec_jax)</td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/_static/figures/readme_fsq_trace.png" width="860" /></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2">fsq_total trace (VMEC2000 vs vmec_jax) for axisymmetric + QH cases</td>
   </tr>
 </table>
 
@@ -108,9 +128,10 @@ python tools/diagnostics/qh_vmec_vs_vmecjax.py \
   --wout-ref /path/to/wout_nfp4_QH_warm_start.nc \
   --outdir docs/_static/figures
 
-python tools/diagnostics/qh_compare_fsq_trace.py \
-  --input examples/data/input.nfp4_QH_warm_start \
-  --niter 50 \
+python tools/diagnostics/readme_fsq_trace.py \
+  --axisym-input examples/data/input.shaped_tokamak_pressure \
+  --qh-input examples/data/input.nfp4_QH_warm_start \
+  --niter 100 \
   --outdir docs/_static/figures
 ```
 
@@ -129,54 +150,46 @@ Parity work is tracked in two layers:
 Reproduce the current kernel-parity snapshot table:
 
 ```bash
-python examples/validation/pipeline_parity_summary.py
+python examples/validation/pipeline_parity_summary.py \
+  --cases circular_tokamak shaped_tokamak_pressure solovev \
+  n3are_R7.75B5.7_lowres LandremanPaul2021_QA_lowres li383_low_res
 ```
 
 Current kernel-parity snapshot (solver-free, bundled reference states):
 
-| Variable | circular_tokamak | purely_toroidal_field | shaped_tokamak_pressure | solovev |
-|---| :--: | :--: | :--: | :--: |
-| sqrtg | 3.10e-15 | 2.18e-14 | 1.24e-14 | 2.19e-15 |
-| bsupu | 2.45e-15 | 2.57e-14 | 1.13e-14 | 2.17e-15 |
-| bsupv | 3.08e-15 | 2.68e-14 | 1.32e-14 | 2.23e-15 |
-| bsubu | 7.20e-07 | 1.27e-03 | 4.57e-05 | 2.41e-05 |
-| bsubv | 1.24e-05 | 3.65e-06 | 2.59e-05 | 3.11e-05 |
-| abs(B) | 3.09e-15 | 2.47e-14 | 1.25e-14 | 2.16e-15 |
-| bsq = 0.5*B^2 + p | 6.20e-15 | 5.36e-14 | 2.64e-14 | 4.49e-15 |
-| fsqr | 5.63e-09 | 1.42e-04 | 3.36e-08 | 3.64e-07 |
-| fsqz | 1.15e-10 | 2.45e-04 | 2.67e-08 | 2.69e-07 |
-| fsql | 2.17e-10 | 7.97e-09 | 6.21e-11 | 6.42e-07 |
-| fsq_total | 5.73e-09 | 6.73e-05 | 6.90e-09 | 2.56e-07 |
+| Variable | circular_tokamak | shaped_tokamak_pressure | solovev | n3are_R7.75B5.7_lowres | LandremanPaul2021_QA_lowres | li383_low_res |
+|---| :--: | :--: | :--: | :--: | :--: | :--: |
+| sqrtg | 2.53e-15 | 1.00e-14 | 1.47e-15 | 5.01e-13 | 3.61e-06 | 2.40e-14 |
+| bsupu | 2.02e-15 | 9.12e-15 | 1.40e-15 | 4.87e-13 | 1.34e-05 | 2.73e-14 |
+| bsupv | 2.58e-15 | 1.03e-14 | 1.45e-15 | 5.32e-13 | 5.26e-06 | 2.68e-14 |
+| bsubu | 7.20e-07 | 4.57e-05 | 2.41e-05 | 7.03e-01 | 9.22e-06 | 1.08e+00 |
+| bsubv | 1.24e-05 | 2.59e-05 | 3.11e-05 | 3.24e-02 | 4.62e-06 | 3.88e-02 |
+| abs(B) | 2.50e-15 | 9.98e-15 | 1.41e-15 | 1.58e-02 | 4.90e-06 | 1.93e-02 |
+| bsq = 0.5*B^2 + p | 5.12e-15 | 2.06e-14 | 2.85e-15 | 2.90e-02 | 1.02e-05 | 3.48e-02 |
+| fsqr | 3.09e-09 | 1.54e-08 | 3.64e-07 | 1.82e+10 | 1.55e-03 | 4.77e+04 |
+| fsqz | 1.24e-08 | 1.49e-08 | 2.69e-07 | 1.92e+11 | 9.11e+03 | 2.00e+06 |
+| fsql | 1.00e-10 | 7.75e-11 | 6.42e-07 | 1.20e+14 | 7.06e-03 | 5.34e+07 |
+| fsq_total | 9.17e-09 | 5.57e-10 | 2.56e-07 | 4.39e+11 | 1.56e+03 | 1.22e+06 |
 
 Interpretation:
 - Axisymmetric cases are at floating-point parity for geometry, ``bsup*``, and ``abs(B)``.
-- Axisymmetric tomnsps/gc blocks (including lambda-force ``blmn/clmn``) match VMEC2000 to ~1e-11 abs on reduced grids; scalar residuals now match VMEC2000 at ~1e-7 or better on the standard suite, with the purely-toroidal-field case still the largest scalar residual gap (~1e-4).
-- The VMEC-style update loop uses scalxc-weighted forces, and ``xc``/``v`` dumps match VMEC2000 at iter 1 in reduced-grid parity runs.
-- The default benchmark path (10 iterations, ``ns=13``) now overlays VMEC2000 and vmec_jax traces for all 4 axisymmetric cases (`circular_tokamak`, `purely_toroidal_field`, `shaped_tokamak_pressure`, `solovev`).
-- Non-axisymmetric parity hardening is wired into a batch comparator (`tools/diagnostics/nonaxis_parity_batch.py`) over Simsopt `input.*` files.
-- Latest full-grid multigrid snapshot at `rtol=5e-4`, `atol=1e-10` (VMEC2000 exec comparator, `--use-input-niter`, `--max-iter 10`). Revalidation is underway at `rtol=1e-4`, `atol=1e-12`:
-  - **Pass:** `input.qa_signgs1` (QA), `input.nfp4_QH_warm_start` (QH), `input.n3are_R7.75B5.7_lowres`, and `input.LandremanPaul2021_QA_lowres`.
-  - **Pass (axisymmetric controls):** `input.solovev`, `input.shaped_tokamak_pressure`, `input.ITERModel`.
-  - **Pending sweeps:** `li383_low_res` and `lasym=True` cases (e.g., `input.up_down_asymmetric_tokamak`).
-- Remaining known gaps: `lasym=True`, free boundary, and additional 3D inputs not yet swept (li383, etc).
+- Non-axisymmetric kernel parity remains the top gap (``bsub*``/``abs(B)``/``fsq_total`` columns above).
+- End-to-end 3D parity still fails early on the VMEC2000 trace (see full-grid snapshot below), primarily at the ``r00`` scalar.
+- ``lasym=True`` and free-boundary paths remain out of parity.
 
-Full-grid parity snapshot (VMEC2000 exec comparator, `--use-input-niter`, `--max-iter 10`, `rtol=5e-4`, `atol=1e-10`; revalidation at `rtol=1e-4`, `atol=1e-12` in progress):
+Full-grid parity snapshot (VMEC2000 exec comparator, `--use-input-niter`, `--max-iter 100`, `rtol=1e-4`, `atol=1e-12`):
 
 | Case | Input | Status | fsq_total (VMEC/JAX) | runtime_s (vmec2000/jax) | Notes |
 |---|---|---|---|---|---|
-| solovev | `examples/data/input.solovev` | PASS | `1.737e-02 / 1.737e-02` | `0.191 / 5.100` | Axisymmetric |
-| shaped_tokamak_pressure | `examples/data/input.shaped_tokamak_pressure` | PASS | `5.541e-03 / 5.541e-03` | `0.180 / 18.218` | Axisymmetric |
-| ITERModel | `examples/data/input.ITERModel` | PASS | `7.581e-03 / 7.581e-03` | `0.235 / 7.787` | Axisymmetric |
-| QA signgs1 | `/Users/rogeriojorge/local/test/input.qa_signgs1` | PASS | `5.267e-01 / 5.267e-01` | `0.386 / 14.547` | NFP=2, NTOR=6 |
-| nfp4_QH_warm_start | `examples/data/input.nfp4_QH_warm_start` | PASS | `4.540e-03 / 4.540e-03` | `0.246 / 14.269` | QH |
-| n3are_R7.75B5.7_lowres | `examples/data/input.n3are_R7.75B5.7_lowres` | PASS | `2.330e+00 / 2.330e+00` | `0.177 / 27.706` | NFP=4 |
-| LandremanPaul2021_QA_lowres | `examples/data/input.LandremanPaul2021_QA_lowres` | PASS | `3.423e+00 / 3.423e+00` | `0.574 / 11.448` | QA lowres |
+| shaped_tokamak_pressure | `examples/data/input.shaped_tokamak_pressure` | PASS | `1.422e-07 / 1.422e-07` | `0.246 / 5.524` | Axisymmetric |
+| QA signgs1 | `/Users/rogeriojorge/local/test/input.qa_signgs1` | FAIL | `1.412e-04 / 1.412e-04` | `0.445 / 5.350` | r00 mismatch at iter 2 (rtol=1e-4) |
+| QH warm start | `examples/data/input.nfp4_QH_warm_start` | FAIL | `2.888e-07 / 2.888e-07` | `0.268 / 4.973` | r00 mismatch at iter 2 (rtol=1e-4) |
 
 Iteration trace parity (VMEC2000 executable, reduced grid):
 
 - Single-grid axisym cases match ``fsq*`` and preconditioned scalars at machine precision for the first **10 iterations** at `--single-ns 13`.
-- Full-grid multigrid axisymmetric traces are validated in the 10-iteration benchmark overlay with matching VMEC2000/vmec_jax lines for all 4 cases.
-- `LandremanPaul2021_QA_lowres` matches through stage 3 iter 48 at the legacy tolerance (`rtol=5e-4`, `atol=1e-10`, `--max-iter 50`). Tighter tolerance revalidation is in progress.
+- Full-grid axisymmetric traces are stable at `rtol=1e-4`, `atol=1e-12` for 100-iteration runs.
+- QA/QH still exhibit an ``r00`` mismatch at iter 2 at `rtol=1e-4`, even though scalar residuals and final `wout` values agree to 1e-7–1e-9.
 - ``up_down_asymmetric_tokamak`` (``lasym=True``) shows large bcovar/force-kernel mismatches at iter 1; nonlinear trace diverges. This is the current top lasym parity blocker.
 
 Notes on the snapshot figures:
@@ -210,14 +223,6 @@ python examples/validation/benchmark_fixed_boundary_runtime_and_residuals.py \
 ```
 
 The quick settings above keep runs under ~60s per case. Increase `--iters` and/or pass larger `--ns-override`/`--vmec2000-ns-override` for longer and higher-resolution traces.
-
-<table>
-  <tr>
-    <td><img src="docs/_static/figures/bench_fixed_boundary_runtime.png" width="420" /></td>
-    <td><img src="docs/_static/figures/bench_fixed_boundary_residual.png" width="420" /></td>
-    <td><img src="docs/_static/figures/bench_fixed_boundary_objective.png" width="420" /></td>
-  </tr>
-</table>
 
 ## External VMEC2000 runs (optional)
 
