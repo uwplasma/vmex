@@ -2933,6 +2933,9 @@ def solve_fixed_boundary_residual_iter(
     use_restart_triggers = bool(use_restart_triggers)
     use_direct_fallback = bool(use_direct_fallback)
     verbose_vmec2000_table = bool(verbose_vmec2000_table)
+
+    if use_scan and vmec2000_control and auto_flip_force:
+        auto_flip_force = False
     jit_forces = bool(jit_forces)
     use_scan = bool(use_scan)
     limit_dt_from_force = bool(limit_dt_from_force)
@@ -4052,6 +4055,47 @@ def solve_fixed_boundary_residual_iter(
         restart_badprog_factor = 1.03
         vmec2000_fact = 1.0e4
         iter_offset = 0
+        nstep_screen = int(indata.get_int("NSTEP", 1)) if indata is not None else 1
+        if nstep_screen < 1:
+            nstep_screen = 1
+
+        def _should_print_vmec2000_local(iter_idx: int, max_iter_local: int) -> bool:
+            if not (bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table)):
+                return False
+            if iter_idx <= 1:
+                return True
+            if iter_idx >= max_iter_local:
+                return True
+            return (iter_idx % nstep_screen) == 0
+
+        def _print_vmec2000_row_local(
+            *,
+            iter_idx: int,
+            fsqr: float,
+            fsqz: float,
+            fsql: float,
+            delt0r: float,
+            r00: float,
+            w_mhd: float,
+            z00: float | None = None,
+        ) -> None:
+            if not (bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table)):
+                return
+            if bool(cfg.lasym):
+                z_val = float("nan") if z00 is None else float(z00)
+                print(
+                    f"{int(iter_idx):5d}"
+                    f"{float(fsqr):10.2E}{float(fsqz):10.2E}{float(fsql):10.2E}"
+                    f"{float(r00):11.3E}{z_val:11.3E}{float(delt0r):10.2E}{float(w_mhd):12.4E}",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"{int(iter_idx):5d}"
+                    f"{float(fsqr):10.2E}{float(fsqz):10.2E}{float(fsql):10.2E}"
+                    f"{float(r00):11.3E}{float(delt0r):10.2E}{float(w_mhd):12.4E}",
+                    flush=True,
+                )
         dtype = jnp.asarray(state_init.Rcos).dtype
         time_step0 = jnp.asarray(float(step_size), dtype=dtype)
         flip_sign0 = jnp.asarray(float(initial_flip_sign), dtype=dtype)
@@ -4196,13 +4240,15 @@ def solve_fixed_boundary_residual_iter(
             fsqz_prev: Any
 
         def _tree_select(cond, t_true, t_false):
-            return jax.tree_map(lambda a, b: jnp.where(cond, a, b), t_true, t_false)
+            return jax.tree_util.tree_map(lambda a, b: jnp.where(cond, a, b), t_true, t_false)
 
         def _scan_step(carry: _ScanCarry, it):
             iter2 = jnp.asarray(it + 1 + int(iter_offset), dtype=jnp.int32)
             fsq_prev_before = carry.fsq_prev
             iter_since_restart = iter2 - carry.iter1
+            time_step_report = carry.time_step
             zero_m1 = jnp.where((iter2 < 2) | (carry.fsqz_prev < 1.0e-6), jnp.asarray(1.0, dtype=dtype), jnp.asarray(0.0, dtype=dtype))
+            include_edge = jnp.asarray(False)
 
             need_bcovar_update = (~carry.cache_valid) | carry.force_bcovar_update | (((iter2 - carry.iter1) % k_preconditioner_update_interval) == 0)
             use_cached_precond = carry.cache_valid & (~need_bcovar_update)
@@ -4230,6 +4276,13 @@ def solve_fixed_boundary_residual_iter(
             fsqr = norms_used.r1 * norms_used.fnorm * gcr2
             fsqz = norms_used.r1 * norms_used.fnorm * gcz2
             fsql = norms_used.fnormL * gcl2
+            # Scalars for VMEC-style screen output.
+            r00_j = jnp.asarray(k.pr1_even)[0, 0, 0]
+            z00_j = jnp.asarray(0.0, dtype=r00_j.dtype)
+            norms_w = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
+            wb_val = jnp.asarray(norms_w.wb)
+            wp_val = jnp.asarray(norms_w.wp)
+            w_mhd = (wb_val + wp_val / (gamma - 1.0)) * jnp.asarray(float(TWOPI * TWOPI), dtype=wb_val.dtype)
 
             def _refresh_cache(_):
                 if constraint_tcon0 is None or float(constraint_tcon0) == 0.0:
@@ -4344,9 +4397,9 @@ def solve_fixed_boundary_residual_iter(
             f_norm1 = jnp.where(cache_valid, cache_f_norm1, jnp.where(rz_norm != 0.0, 1.0 / rz_norm, jnp.asarray(float("inf"), dtype=dtype)))
             fsqr1 = gcr2_p * f_norm1
             fsqz1 = gcz2_p * f_norm1
-            gcl2_full = jnp.sum(frzl_rz.flsc * frzl_rz.flsc)
-            if frzl_rz.flcs is not None:
-                gcl2_full = gcl2_full + jnp.sum(frzl_rz.flcs * frzl_rz.flcs)
+            gcl2_full = jnp.sum(flsc * flsc)
+            if flcs is not None:
+                gcl2_full = gcl2_full + jnp.sum(flcs * flcs)
             fsql1 = gcl2_full * delta_s
             fsq1 = fsqr1 + fsqz1 + fsql1
 
@@ -4361,11 +4414,11 @@ def solve_fixed_boundary_residual_iter(
             init_mask = (iter2 == carry.iter1) | (carry.res0 < 0.0) | (carry.res1 < 0.0)
             res0 = jnp.where(init_mask, fsq, carry.res0)
             res1 = jnp.where(init_mask, fsq0, carry.res1)
-            state_checkpoint = jax.tree_map(lambda a, b: jnp.where(init_mask, a, b), carry.state, carry.state_checkpoint)
+            state_checkpoint = jax.tree_util.tree_map(lambda a, b: jnp.where(init_mask, a, b), carry.state, carry.state_checkpoint)
             res0 = jnp.minimum(res0, fsq)
             res1 = jnp.minimum(res1, fsq0)
             checkpoint_mask = (fsq <= res0) & (fsq0 <= res1) & (~bad_jacobian)
-            state_checkpoint = jax.tree_map(lambda a, b: jnp.where(checkpoint_mask, a, b), carry.state, state_checkpoint)
+            state_checkpoint = jax.tree_util.tree_map(lambda a, b: jnp.where(checkpoint_mask, a, b), carry.state, state_checkpoint)
 
             restart_time = (~bad_jacobian) & ((iter2 - carry.iter1) > 10) & (
                 (fsq > vmec2000_fact * jnp.maximum(res0, 1.0e-30)) | (fsq0 > vmec2000_fact * jnp.maximum(res1, 1.0e-30))
@@ -4540,7 +4593,7 @@ def solve_fixed_boundary_residual_iter(
                 fsqz_prev=fsqz_prev,
             )
             accepted = jnp.logical_not(do_restart)
-            return new_carry, (fsqr, fsqz, fsql, accepted)
+            return new_carry, (fsqr, fsqz, fsql, fsqr1, fsqz1, fsql1, accepted, r00_j, z00_j, w_mhd, time_step_report, zero_m1, include_edge)
 
         carry0 = _ScanCarry(
             state=state_init,
@@ -4597,12 +4650,62 @@ def solve_fixed_boundary_residual_iter(
             _run_scan = cached_run
 
         carry_final, hist = _run_scan(state_init)
-        fsqr_hist, fsqz_hist, fsql_hist, accepted = hist
+        (
+            fsqr_hist,
+            fsqz_hist,
+            fsql_hist,
+            fsqr1_hist,
+            fsqz1_hist,
+            fsql1_hist,
+            accepted,
+            r00_hist,
+            z00_hist,
+            w_mhd_hist,
+            dt_hist,
+            zero_m1_hist,
+            include_edge_hist,
+        ) = hist
         accepted_mask = np.asarray(accepted).astype(bool)
         fsqr_hist_np = np.asarray(fsqr_hist)[accepted_mask]
         fsqz_hist_np = np.asarray(fsqz_hist)[accepted_mask]
         fsql_hist_np = np.asarray(fsql_hist)[accepted_mask]
         w_hist = fsqr_hist_np + fsqz_hist_np + fsql_hist_np
+
+        fsqr1_hist_np = np.asarray(fsqr1_hist)[accepted_mask]
+        fsqz1_hist_np = np.asarray(fsqz1_hist)[accepted_mask]
+        fsql1_hist_np = np.asarray(fsql1_hist)[accepted_mask]
+        dt_hist_np = np.asarray(dt_hist)[accepted_mask]
+        r00_hist_np = np.asarray(r00_hist)[accepted_mask]
+        w_mhd_hist_np = np.asarray(w_mhd_hist)[accepted_mask]
+        zero_m1_hist_np = np.asarray(zero_m1_hist)[accepted_mask]
+        include_edge_hist_np = np.asarray(include_edge_hist)[accepted_mask]
+
+        if verbose and bool(vmec2000_control) and bool(verbose_vmec2000_table):
+            fsqr_full = np.asarray(fsqr_hist)
+            fsqz_full = np.asarray(fsqz_hist)
+            fsql_full = np.asarray(fsql_hist)
+            r00_full = np.asarray(r00_hist)
+            z00_full = np.asarray(z00_hist)
+            w_mhd_full = np.asarray(w_mhd_hist)
+            dt_full = np.asarray(dt_hist)
+            for i in range(int(max_iter)):
+                iter2 = i + 1
+                if _should_print_vmec2000_local(int(iter2), int(max_iter)):
+                    r00_val = float(r00_full[i])
+                    z00_val = float(z00_full[i])
+                    # Match VMEC precision (E11.3) for r00/z00.
+                    r00_val = float(f"{r00_val:.3E}")
+                    z00_val = float(f"{z00_val:.3E}")
+                    _print_vmec2000_row_local(
+                        iter_idx=int(iter2),
+                        fsqr=float(fsqr_full[i]),
+                        fsqz=float(fsqz_full[i]),
+                        fsql=float(fsql_full[i]),
+                        delt0r=float(dt_full[i]),
+                        r00=r00_val,
+                        w_mhd=float(w_mhd_full[i]),
+                        z00=z00_val,
+                    )
         return SolveVmecResidualResult(
             state=carry_final.state,
             n_iter=int(w_hist.shape[0]),
@@ -4615,6 +4718,18 @@ def solve_fixed_boundary_residual_iter(
             diagnostics={
                 "use_scan": True,
                 "vmec2000_scan": True,
+                "fsqr_full": np.asarray(fsqr_hist),
+                "fsqz_full": np.asarray(fsqz_hist),
+                "fsql_full": np.asarray(fsql_hist),
+                "accepted_mask": np.asarray(accepted),
+                "fsqr1_history": fsqr1_hist_np,
+                "fsqz1_history": fsqz1_hist_np,
+                "fsql1_history": fsql1_hist_np,
+                "time_step_history": dt_hist_np,
+                "r00_history": r00_hist_np,
+                "w_vmec_history": w_mhd_hist_np,
+                "zero_m1_history": zero_m1_hist_np.astype(int),
+                "include_edge_history": include_edge_hist_np.astype(int),
                 "resume_state": {
                     "state_checkpoint": carry_final.state_checkpoint,
                     "time_step": float(np.asarray(carry_final.time_step)),

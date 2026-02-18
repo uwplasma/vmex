@@ -877,6 +877,7 @@ def run_fixed_boundary(
             static_final = static_i
 
             stage_offsets.append(sum(int(np.asarray(r.w_history).size) for r in stage_results))
+            vmec2000_ctrl = True
             solve_kwargs = dict(
                 indata=indata,
                 signgs=signgs,
@@ -892,11 +893,11 @@ def run_fixed_boundary(
                 divide_by_scalxc_for_update=False,
                 lambda_update_scale=1.0,
                 enforce_vmec_lambda_axis=True,
-                vmec2000_control=not scan_mode,
-                strict_update=False if scan_mode else True,
+                vmec2000_control=vmec2000_ctrl,
+                strict_update=True,
                 backtracking=False,
                 reference_mode=False,
-                use_restart_triggers=False if scan_mode else (True if use_restart_triggers is None else bool(use_restart_triggers)),
+                use_restart_triggers=True if use_restart_triggers is None else bool(use_restart_triggers),
                 use_direct_fallback=False,
                 resume_state=resume_state_stage,
                 verbose=bool(verbose),
@@ -1060,7 +1061,10 @@ def run_fixed_boundary(
     if verbose and solver_lower != "vmec2000_iter":
         n_iter = int(getattr(res, "n_iter", -1))
         w_final = float(res.w_history[-1]) if getattr(res, "w_history", None) is not None else float("nan")
-        grad_final = float(res.grad_rms_history[-1]) if getattr(res, "grad_rms_history", None) is not None else float("nan")
+        if getattr(res, "grad_rms_history", None) is not None and len(res.grad_rms_history) > 0:
+            grad_final = float(res.grad_rms_history[-1])
+        else:
+            grad_final = float("nan")
         print(f"[vmec_jax] finished: n_iter={n_iter} w={w_final:.8e} grad_rms={grad_final:.3e}")
 
     if flux is None or prof is None or pressure is None:
