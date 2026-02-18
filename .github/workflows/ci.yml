@@ -9,6 +9,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  LC_ALL: C.UTF-8
+  LANG: C.UTF-8
+
 jobs:
   test:
     name: Tests (py${{ matrix.python-version }})
