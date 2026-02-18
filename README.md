@@ -52,7 +52,7 @@ Laptop-friendly, end-to-end differentiable (JAX) rewrite of **VMEC2000**, focusi
 ## What it is
 
 - Laptop-friendly, end-to-end differentiable (JAX) rewrite of VMEC2000 (fixed boundary first).
-- Parity-first solver for axisymmetric and selected non-axisymmetric cases (QA/n3are at `rtol=1e-4`, `atol=1e-12`).
+- Parity-first solver for axisymmetric and stellarator cases (QA, n3are at `rtol=1e-4`, `atol=1e-12`).
 - JAX-native kernels for geometry, transforms, and residual assembly.
 - Free-boundary and `lasym=True` parity are still in progress.
 
@@ -71,16 +71,20 @@ CLI (VMEC2000-style executable):
 vmec_jax examples/data/input.circular_tokamak
 ```
 
+Default CLI runs use the fast scan loop (still honoring `NITER_ARRAY`/`FTOL_ARRAY`).
+Pass `--parity` to force VMEC2000-style time-step control.
+
 Run tests:
 
 ```bash
 pytest -q
 ```
 
-Optimization tutorial (differentiable boundary tuning):
+Optimization tutorials (differentiable boundary tuning):
 
 ```bash
-python examples/tutorials/optimization/grad_bmag_wrt_boundary.py --case circular_tokamak --opt-steps 3
+python examples/optimization/optimize_bmag_volume.py --case circular_tokamak --opt-steps 3
+python examples/optimization/target_iota_volume.py --case circular_tokamak --opt-steps 3
 ```
 
 ## Performance vs parity
