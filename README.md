@@ -117,8 +117,9 @@ python tools/diagnostics/qh_compare_fsq_trace.py \
 ## Parity status (VMEC2000)
 
 **Note:** The tables below reflect the most recently recorded sweeps. Re-run the
-parity scripts in `tools/diagnostics/` to refresh numbers after algorithm or
-performance changes.
+parity scripts in `tools/diagnostics/` to refresh numbers (including runtime
+comparisons) after algorithm or performance changes. The current code path is
+fast enough to collect hundreds of iterations for these tables.
 
 Parity work is tracked in two layers:
 
