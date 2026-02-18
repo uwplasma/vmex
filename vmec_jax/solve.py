@@ -4595,6 +4595,10 @@ def solve_fixed_boundary_residual_iter(
                 gcl2_full = jnp.sum(flsc * flsc)
                 if flcs is not None:
                     gcl2_full = gcl2_full + jnp.sum(flcs * flcs)
+                if getattr(frzl, "flcc", None) is not None:
+                    gcl2_full = gcl2_full + jnp.sum(jnp.asarray(frzl.flcc) ** 2)
+                if getattr(frzl, "flss", None) is not None:
+                    gcl2_full = gcl2_full + jnp.sum(jnp.asarray(frzl.flss) ** 2)
                 fsql1 = gcl2_full * delta_s
                 fsq1 = fsqr1 + fsqz1 + fsql1
 
