@@ -96,6 +96,11 @@ class TomnspsMasks:
     mask_rz: Any  # (ns, mpol, 1)
     mask_l: Any  # (ns, mpol, 1)
     xmpq1: Any | None = None  # (1, mpol, 1)
+    # Cached JAX arrays to avoid per-call host->device copies.
+    mask_even_j: Any | None = None
+    mask_rz_j: Any | None = None
+    mask_l_j: Any | None = None
+    xmpq1_j: Any | None = None
 
 
 def vmec_theta_sizes(ntheta: int, *, lasym: bool) -> tuple[int, int, int]:
@@ -484,6 +489,10 @@ def tomnsps_masks(
         mask_rz=mask_rz,
         mask_l=mask_l,
         xmpq1=xmpq1,
+        mask_even_j=jnp.asarray(mask_even, dtype=jnp.asarray(mask_even).dtype),
+        mask_rz_j=jnp.asarray(mask_rz, dtype=jnp.asarray(mask_rz).dtype),
+        mask_l_j=jnp.asarray(mask_l, dtype=jnp.asarray(mask_l).dtype),
+        xmpq1_j=jnp.asarray(xmpq1, dtype=jnp.asarray(xmpq1).dtype) if xmpq1 is not None else None,
     )
     if cache and _cache_allowed():
         _TOMNSPS_MASK_CACHE[cache_key] = masks
@@ -629,7 +638,9 @@ def tomnsps_rzl(
     if masks is not None:
         try:
             if (int(masks.ns) == int(ns)) and (int(masks.mpol) == int(mpol)):
-                xmpq1 = getattr(masks, "xmpq1", None)
+                xmpq1 = getattr(masks, "xmpq1_j", None)
+                if xmpq1 is None:
+                    xmpq1 = getattr(masks, "xmpq1", None)
         except Exception:
             xmpq1 = None
     if xmpq1 is None:
@@ -708,7 +719,9 @@ def tomnsps_rzl(
     mask_even = None
     if masks is not None:
         if (int(masks.ns) == int(ns)) and (int(masks.mpol) == int(mpol)) and (bool(masks.include_edge) == bool(include_edge)):
-            mask_even = jnp.asarray(masks.mask_even, dtype=jnp.asarray(armn_even).dtype)
+            mask_even = getattr(masks, "mask_even_j", None)
+            if mask_even is None:
+                mask_even = jnp.asarray(masks.mask_even, dtype=jnp.asarray(armn_even).dtype)
     if mask_even is None:
         mask_even = _mparity_mask(mpol, dtype=jnp.asarray(armn_even).dtype)
     w1 = _select_mparity(w1_e, w1_o, mask_even)
@@ -755,8 +768,12 @@ def tomnsps_rzl(
     # For parity work we use the default vmec_params values:
     #   jmin2(m=0)=1, jmin2(m>=1)=2; jlam(m)=2.
     if masks is not None and (int(masks.ns) == int(ns)) and (int(masks.mpol) == int(mpol)) and (bool(masks.include_edge) == bool(include_edge)):
-        mask_rz = jnp.asarray(masks.mask_rz, dtype=jnp.asarray(frcc).dtype)
-        mask_l = jnp.asarray(masks.mask_l, dtype=jnp.asarray(flsc).dtype)
+        mask_rz = getattr(masks, "mask_rz_j", None)
+        mask_l = getattr(masks, "mask_l_j", None)
+        if mask_rz is None:
+            mask_rz = jnp.asarray(masks.mask_rz, dtype=jnp.asarray(frcc).dtype)
+        if mask_l is None:
+            mask_l = jnp.asarray(masks.mask_l, dtype=jnp.asarray(flsc).dtype)
     else:
         js_fortran = jnp.arange(ns, dtype=jnp.int32) + 1  # 1..ns
         m_fortran = jnp.arange(mpol, dtype=jnp.int32)  # 0..mpol-1
@@ -901,7 +918,9 @@ def tomnspa_rzl(
     if masks is not None:
         try:
             if (int(masks.ns) == int(ns)) and (int(masks.mpol) == int(mpol)):
-                xmpq1 = getattr(masks, "xmpq1", None)
+                xmpq1 = getattr(masks, "xmpq1_j", None)
+                if xmpq1 is None:
+                    xmpq1 = getattr(masks, "xmpq1", None)
         except Exception:
             xmpq1 = None
     if xmpq1 is None:
@@ -1035,8 +1054,12 @@ def tomnspa_rzl(
 
     # Apply radial evolution masks (same as tomnsps): fixed-boundary edge.
     if masks is not None and (int(masks.ns) == int(ns)) and (int(masks.mpol) == int(mpol)) and (bool(masks.include_edge) == bool(include_edge)):
-        mask_rz = jnp.asarray(masks.mask_rz, dtype=jnp.asarray(frsc).dtype)
-        mask_l = jnp.asarray(masks.mask_l, dtype=jnp.asarray(flcc).dtype)
+        mask_rz = getattr(masks, "mask_rz_j", None)
+        mask_l = getattr(masks, "mask_l_j", None)
+        if mask_rz is None:
+            mask_rz = jnp.asarray(masks.mask_rz, dtype=jnp.asarray(frsc).dtype)
+        if mask_l is None:
+            mask_l = jnp.asarray(masks.mask_l, dtype=jnp.asarray(flcc).dtype)
     else:
         js_fortran = jnp.arange(ns, dtype=jnp.int32) + 1  # 1..ns
         m_fortran = jnp.arange(mpol, dtype=jnp.int32)  # 0..mpol-1
