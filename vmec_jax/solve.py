@@ -3791,7 +3791,9 @@ def solve_fixed_boundary_residual_iter(
 
     from .vmec_parity import signed_maps_from_modes
 
-    signed_maps = signed_maps_from_modes(static.modes)
+    signed_maps = (
+        static.signed_maps if getattr(static, "signed_maps", None) is not None else signed_maps_from_modes(static.modes)
+    )
     idx_pos = np.asarray(signed_maps.idx_pos, dtype=np.int32)
     idx_neg = np.asarray(signed_maps.idx_neg, dtype=np.int32)
     idx_pos_flat_np = np.asarray(signed_maps.idx_pos_flat, dtype=np.int32)
@@ -3801,26 +3803,33 @@ def solve_fixed_boundary_residual_iter(
     idx_pos_safe_np = np.asarray(signed_maps.idx_pos_safe_flat, dtype=np.int32)
     idx_neg_safe_np = np.asarray(signed_maps.idx_neg_safe_flat, dtype=np.int32)
 
-    m_idx_list = []
-    n_idx_list = []
-    kp_idx_list = []
-    kn_idx_list = []
-    for m_i in range(mpol):
-        for n_i in range(nrange):
-            kp = int(idx_pos[m_i, n_i])
-            if kp < 0:
-                continue
-            m_idx_list.append(m_i)
-            n_idx_list.append(n_i)
-            kp_idx_list.append(kp)
-            kn_idx_list.append(int(idx_neg[m_i, n_i]))
+    if getattr(static, "mn_idx_m", None) is not None:
+        m_idx = jnp.asarray(np.asarray(static.mn_idx_m, dtype=np.int32))
+        n_idx = jnp.asarray(np.asarray(static.mn_idx_n, dtype=np.int32))
+        kp_idx = jnp.asarray(np.asarray(static.mn_idx_kp, dtype=np.int32))
+        kn_idx_np = np.asarray(static.mn_idx_kn, dtype=np.int32)
+        has_kn_np = np.asarray(static.mn_has_kn, dtype=bool) if static.mn_has_kn is not None else (kn_idx_np >= 0)
+    else:
+        m_idx_list = []
+        n_idx_list = []
+        kp_idx_list = []
+        kn_idx_list = []
+        for m_i in range(mpol):
+            for n_i in range(nrange):
+                kp = int(idx_pos[m_i, n_i])
+                if kp < 0:
+                    continue
+                m_idx_list.append(m_i)
+                n_idx_list.append(n_i)
+                kp_idx_list.append(kp)
+                kn_idx_list.append(int(idx_neg[m_i, n_i]))
 
-    m_idx = jnp.asarray(np.asarray(m_idx_list, dtype=np.int32))
-    n_idx = jnp.asarray(np.asarray(n_idx_list, dtype=np.int32))
-    kp_idx = jnp.asarray(np.asarray(kp_idx_list, dtype=np.int32))
-    kn_idx_np = np.asarray(kn_idx_list, dtype=np.int32)
+        m_idx = jnp.asarray(np.asarray(m_idx_list, dtype=np.int32))
+        n_idx = jnp.asarray(np.asarray(n_idx_list, dtype=np.int32))
+        kp_idx = jnp.asarray(np.asarray(kp_idx_list, dtype=np.int32))
+        kn_idx_np = np.asarray(kn_idx_list, dtype=np.int32)
+        has_kn_np = kn_idx_np >= 0
     kn_idx = jnp.asarray(kn_idx_np)
-    has_kn_np = kn_idx_np >= 0
     has_kn = jnp.asarray(has_kn_np)
     has_kn_any = bool(np.any(has_kn_np))
     m0_mask = np.asarray(getattr(static, "m_is_m0", None) if getattr(static, "m_is_m0", None) is not None else (np.asarray(static.modes.m) == 0))

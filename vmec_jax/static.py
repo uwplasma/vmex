@@ -48,6 +48,12 @@ class VMECStatic:
     m_is_odd_rest: np.ndarray | None = None
     lambda_axis_copy_mask: np.ndarray | None = None
     m0_n_index: np.ndarray | None = None
+    signed_maps: any | None = None
+    mn_idx_m: np.ndarray | None = None
+    mn_idx_n: np.ndarray | None = None
+    mn_idx_kp: np.ndarray | None = None
+    mn_idx_kn: np.ndarray | None = None
+    mn_has_kn: np.ndarray | None = None
     mode_scale_internal: any | None = None
 
 
@@ -158,6 +164,12 @@ def build_static(cfg: VMECConfig, *, grid: AngleGrid | None = None) -> VMECStati
     m_is_m1 = m_np == 1
     m_is_odd_rest = (m_np % 2 == 1) & (m_np != 1)
     m0_n_index = None
+    signed_maps = None
+    mn_idx_m = None
+    mn_idx_n = None
+    mn_idx_kp = None
+    mn_idx_kn = None
+    mn_has_kn = None
     try:
         nrange = int(cfg.ntor) + 1
         m0_n_index = -np.ones((nrange,), dtype=int)
@@ -166,6 +178,34 @@ def build_static(cfg: VMECConfig, *, grid: AngleGrid | None = None) -> VMECStati
                 m0_n_index[int(n_k)] = int(k)
     except Exception:
         m0_n_index = None
+    try:
+        from .vmec_parity import signed_maps_from_modes
+
+        signed_maps = signed_maps_from_modes(modes)
+        idx_pos = np.asarray(signed_maps.idx_pos, dtype=np.int32)
+        idx_neg = np.asarray(signed_maps.idx_neg, dtype=np.int32)
+        mpol = int(cfg.mpol)
+        nrange = int(cfg.ntor) + 1
+        m_idx_list = []
+        n_idx_list = []
+        kp_idx_list = []
+        kn_idx_list = []
+        for m_i in range(mpol):
+            for n_i in range(nrange):
+                kp = int(idx_pos[m_i, n_i])
+                if kp < 0:
+                    continue
+                m_idx_list.append(m_i)
+                n_idx_list.append(n_i)
+                kp_idx_list.append(kp)
+                kn_idx_list.append(int(idx_neg[m_i, n_i]))
+        mn_idx_m = np.asarray(m_idx_list, dtype=np.int32)
+        mn_idx_n = np.asarray(n_idx_list, dtype=np.int32)
+        mn_idx_kp = np.asarray(kp_idx_list, dtype=np.int32)
+        mn_idx_kn = np.asarray(kn_idx_list, dtype=np.int32)
+        mn_has_kn = mn_idx_kn >= 0
+    except Exception:
+        signed_maps = None
     lambda_axis_copy_mask = (m_np == 0) & (n_np > 0)
     return VMECStatic(
         cfg=cfg,
@@ -185,5 +225,11 @@ def build_static(cfg: VMECConfig, *, grid: AngleGrid | None = None) -> VMECStati
         m_is_odd_rest=m_is_odd_rest,
         lambda_axis_copy_mask=lambda_axis_copy_mask,
         m0_n_index=m0_n_index,
+        signed_maps=signed_maps,
+        mn_idx_m=mn_idx_m,
+        mn_idx_n=mn_idx_n,
+        mn_idx_kp=mn_idx_kp,
+        mn_idx_kn=mn_idx_kn,
+        mn_has_kn=mn_has_kn,
         mode_scale_internal=None if trig_vmec is None else (1.0 / (jnp.asarray(trig_vmec.mscale)[m_np] * jnp.asarray(trig_vmec.nscale)[np.abs(n_np)])).astype(jnp.asarray(s).dtype),
     )
