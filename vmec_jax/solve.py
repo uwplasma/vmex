@@ -3597,12 +3597,8 @@ def solve_fixed_boundary_residual_iter(
                 flss=getattr(frzl_in, "flss", None),
             )
 
-        if has_jax():
-            include_edge_j = jnp.asarray(include_edge)
-            frzl = jax.lax.cond(include_edge_j, lambda x: x, _mask_edge, frzl)
-        else:
-            if not bool(include_edge):
-                frzl = _mask_edge(frzl)
+        if not bool(include_edge):
+            frzl = _mask_edge(frzl)
 
         gcr2, gcz2, gcl2 = vmec_gcx2_from_tomnsps(
             frzl=frzl,
