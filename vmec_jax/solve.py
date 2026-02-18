@@ -529,6 +529,7 @@ def _maybe_dump_hlo_kernel(
     kwargs: dict[str, Any],
     static: Any,
     wout_like: Any,
+    force: bool = False,
 ) -> None:
     env_dir = os.getenv("VMEC_JAX_DUMP_HLO_DIR", "").strip()
     if not env_dir:
@@ -537,7 +538,7 @@ def _maybe_dump_hlo_kernel(
     enabled_all = env_all not in ("", "0", "false", "no")
     env_label = os.getenv(f"VMEC_JAX_DUMP_HLO_{label.upper()}", "").strip().lower()
     enabled_label = env_label not in ("", "0", "false", "no")
-    if not (enabled_all or enabled_label):
+    if not force and not (enabled_all or enabled_label):
         return
     if not has_jax():
         return
@@ -568,6 +569,7 @@ def _maybe_dump_hlo_kernel(
     outpath = outdir / fname
 
     hlo_text = None
+    err_text = None
     try:
         jitted = jax.jit(fn)
         hlo = jitted.lower(*args, **kwargs).compiler_ir(dialect="hlo")
@@ -577,17 +579,25 @@ def _maybe_dump_hlo_kernel(
             hlo_text = hlo.as_text()
         else:
             hlo_text = str(hlo)
-    except Exception:
+    except Exception as exc:
+        err_text = f"jit.lower failed: {exc!r}"
         try:
             hlo = jax.xla_computation(fn)(*args, **kwargs)
             if hasattr(hlo, "as_hlo_text"):
                 hlo_text = hlo.as_hlo_text()
             else:
                 hlo_text = str(hlo)
-        except Exception:
+        except Exception as exc2:
+            err_text = f"{err_text}\n xla_computation failed: {exc2!r}"
             hlo_text = None
 
     if hlo_text is None:
+        if os.getenv("VMEC_JAX_DUMP_HLO_VERBOSE", "").strip().lower() not in ("", "0", "false", "no"):
+            try:
+                errpath = outdir / f"hlo_{label}_error_ns{key[1]}_mpol{key[2]}_ntor{key[3]}.txt"
+                errpath.write_text(err_text or "unknown error")
+            except Exception:
+                pass
         return
     try:
         outpath.write_text(hlo_text)
@@ -3528,6 +3538,38 @@ def solve_fixed_boundary_residual_iter(
             include_edge=bool(include_edge),
             masks=mask_pack,
         )
+        if os.getenv("VMEC_JAX_DUMP_HLO_FORCE_TOMNSPS", "").strip().lower() not in ("", "0", "false", "no"):
+            try:
+                def _tomnsps_only(k_in):
+                    frzl_hlo = vmec_residual_internal_from_kernels(
+                        k_in,
+                        cfg_ntheta=int(static.cfg.ntheta),
+                        cfg_nzeta=int(static.cfg.nzeta),
+                        wout=wout_like,
+                        trig=trig,
+                        apply_lforbal=False,
+                        include_edge=bool(include_edge),
+                        masks=mask_pack,
+                    )
+                    return (
+                        frzl_hlo.frcc,
+                        frzl_hlo.frss,
+                        frzl_hlo.fzsc,
+                        frzl_hlo.fzcs,
+                        frzl_hlo.flsc,
+                        frzl_hlo.flcs,
+                    )
+                _maybe_dump_hlo_kernel(
+                    label="tomnsps",
+                    fn=_tomnsps_only,
+                    args=(k,),
+                    kwargs={},
+                    static=static,
+                    wout_like=wout_like,
+                    force=True,
+                )
+            except Exception:
+                pass
         if iter_idx is not None:
             _maybe_dump_tomnsps(frzl=frzl, static=static, iter_idx=int(iter_idx), label="raw")
         if bool(apply_m1_constraints):
@@ -3634,7 +3676,7 @@ def solve_fixed_boundary_residual_iter(
             mask_pack_hlo = static.tomnsps_masks if getattr(static, "tomnsps_masks", None) is not None else None
 
             def _tomnsps_only(k_in):
-                return vmec_residual_internal_from_kernels(
+                frzl = vmec_residual_internal_from_kernels(
                     k_in,
                     cfg_ntheta=int(static.cfg.ntheta),
                     cfg_nzeta=int(static.cfg.nzeta),
@@ -3644,6 +3686,7 @@ def solve_fixed_boundary_residual_iter(
                     include_edge=False,
                     masks=mask_pack_hlo,
                 )
+                return (frzl.frcc, frzl.frss, frzl.fzsc, frzl.fzcs, frzl.flsc, frzl.flcs)
 
             _maybe_dump_hlo_kernel(
                 label="tomnsps",
@@ -4289,6 +4332,14 @@ def solve_fixed_boundary_residual_iter(
             return True
         return (iter_idx % nstep_screen) == 0
 
+    def _should_sample_vmec2000(iter_idx: int, max_iter: int) -> bool:
+        """Sample VMEC2000 scalar diagnostics on the screen cadence."""
+        if iter_idx <= 1:
+            return True
+        if iter_idx >= max_iter:
+            return True
+        return (iter_idx % nstep_screen) == 0
+
     # VMEC2000 caches 1D preconditioner/norm/tcon updates every `ns4` iterations
     # (vmec_params.f: ns4=25), reusing the cached values between refreshes.
     # This materially affects the nonlinear iteration trace because the
@@ -4678,44 +4729,47 @@ def solve_fixed_boundary_residual_iter(
             fsql2_history.append(fsql_f)
             # VMEC printout uses r00 = r1(1,0): axis R at theta=0, zeta=0,
             # evaluated in real space after scalxc (see funct3d.f).
-            # For VMEC2000-iter parity, always materialize scalars on host so
-            # printed diagnostics can match VMEC's formatting, even when
-            # verbose output is disabled.
-            need_scalar = bool(vmec2000_control) or bool(verbose) or (
-                bool(vmec2000_control) and bool(verbose_vmec2000_table)
-            )
-            try:
-                r00_j = jnp.asarray(k.pr1_even)[0, 0, 0]
-                if bool(cfg.lasym):
-                    z00_j = jnp.asarray(k.pz1_even)[0, 0, 0]
-                else:
-                    z00_j = jnp.asarray(0.0, dtype=jnp.asarray(r00_j).dtype)
-            except Exception:
-                if not np.any(m0_mask):
-                    r00_j = jnp.asarray(float("nan"))
-                    z00_j = jnp.asarray(float("nan"))
-                else:
-                    r00_j = jnp.sum(jnp.asarray(state.Rcos)[0, m0_mask])
+            # For parity diagnostics, sample these scalars on VMEC's screen cadence.
+            sample_vmec = bool(vmec2000_control) and _should_sample_vmec2000(int(iter2), int(max_iter))
+            need_scalar = bool(sample_vmec) or (bool(verbose) and (not bool(vmec2000_control)))
+            if need_scalar:
+                try:
+                    r00_j = jnp.asarray(k.pr1_even)[0, 0, 0]
                     if bool(cfg.lasym):
-                        z00_j = jnp.sum(jnp.asarray(state.Zcos)[0, m0_mask])
+                        z00_j = jnp.asarray(k.pz1_even)[0, 0, 0]
                     else:
                         z00_j = jnp.asarray(0.0, dtype=jnp.asarray(r00_j).dtype)
-            r00_val = float(np.asarray(r00_j)) if need_scalar else r00_j
-            z00_val = float(np.asarray(z00_j)) if need_scalar else z00_j
-            if need_scalar and bool(vmec2000_control):
-                # Match VMEC's printed precision (E11.3) for parity checks.
-                r00_val = float(f"{float(r00_val):.3E}")
-                z00_val = float(f"{float(z00_val):.3E}")
+                except Exception:
+                    if not np.any(m0_mask):
+                        r00_j = jnp.asarray(float("nan"))
+                        z00_j = jnp.asarray(float("nan"))
+                    else:
+                        r00_j = jnp.sum(jnp.asarray(state.Rcos)[0, m0_mask])
+                        if bool(cfg.lasym):
+                            z00_j = jnp.sum(jnp.asarray(state.Zcos)[0, m0_mask])
+                        else:
+                            z00_j = jnp.asarray(0.0, dtype=jnp.asarray(r00_j).dtype)
+                r00_val = float(np.asarray(r00_j))
+                z00_val = float(np.asarray(z00_j))
+                if bool(vmec2000_control):
+                    # Match VMEC's printed precision (E11.3) for parity checks.
+                    r00_val = float(f"{float(r00_val):.3E}")
+                    z00_val = float(f"{float(z00_val):.3E}")
+                # `norms_used` may be cached (VMEC2000 `ns4=25` behavior). VMEC's
+                # printed WMHD uses the *current* wb/wp from `funct3d`, not cached
+                # norm scalars. Recompute wb/wp from the current bcovar state here.
+                norms_w = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
+                wb_j = jnp.asarray(norms_w.wb)
+                wp_j = jnp.asarray(norms_w.wp)
+                wb_val = float(np.asarray(wb_j))
+                wp_val = float(np.asarray(wp_j))
+            else:
+                r00_val = r00_history[-1] if r00_history else float("nan")
+                z00_val = z00_history[-1] if z00_history else float("nan")
+                wb_val = wb_history[-1] if wb_history else float("nan")
+                wp_val = wp_history[-1] if wp_history else float("nan")
             r00_history.append(r00_val)
             z00_history.append(z00_val)
-            # `norms_used` may be cached (VMEC2000 `ns4=25` behavior). VMEC's
-            # printed WMHD uses the *current* wb/wp from `funct3d`, not cached
-            # norm scalars. Recompute wb/wp from the current bcovar state here.
-            norms_w = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
-            wb_j = jnp.asarray(norms_w.wb)
-            wp_j = jnp.asarray(norms_w.wp)
-            wb_val = float(np.asarray(wb_j)) if need_scalar else wb_j
-            wp_val = float(np.asarray(wp_j)) if need_scalar else wp_j
             wb_history.append(wb_val)
             wp_history.append(wp_val)
             w_vmec_history.append((wb_val + wp_val / (gamma - 1.0)) * float(TWOPI * TWOPI))
