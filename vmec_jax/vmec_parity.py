@@ -291,15 +291,19 @@ def _signed_to_mn_cos_cached(coeffs, *, maps: SignedModeMaps):
     if maps.mpol == 0 or maps.nrange == 0:
         z = jnp.zeros((int(coeffs.shape[0]), maps.mpol, maps.nrange), dtype=coeffs.dtype)
         return z, z
-    idx_pos_safe = jnp.asarray(maps.idx_pos_safe, dtype=jnp.int32)
-    idx_neg_safe = jnp.asarray(maps.idx_neg_safe, dtype=jnp.int32)
-    mask_pos = jnp.asarray(maps.mask_pos, dtype=coeffs.dtype)
-    mask_neg = jnp.asarray(maps.mask_neg, dtype=coeffs.dtype)
+    idx_pos_safe = maps.idx_pos_safe_j if maps.idx_pos_safe_j is not None else jnp.asarray(maps.idx_pos_safe, dtype=jnp.int32)
+    idx_neg_safe = maps.idx_neg_safe_j if maps.idx_neg_safe_j is not None else jnp.asarray(maps.idx_neg_safe, dtype=jnp.int32)
+    mask_pos = maps.mask_pos_j if maps.mask_pos_j is not None else jnp.asarray(maps.mask_pos)
+    mask_neg = maps.mask_neg_j if maps.mask_neg_j is not None else jnp.asarray(maps.mask_neg)
+    if mask_pos.dtype != coeffs.dtype:
+        mask_pos = mask_pos.astype(coeffs.dtype)
+    if mask_neg.dtype != coeffs.dtype:
+        mask_neg = mask_neg.astype(coeffs.dtype)
     pos = coeffs[:, idx_pos_safe] * mask_pos
     neg = coeffs[:, idx_neg_safe] * mask_neg
     rcc = pos + neg
     rss = pos - neg
-    zero_mask = jnp.asarray(maps.zero_mask)
+    zero_mask = maps.zero_mask_j if maps.zero_mask_j is not None else jnp.asarray(maps.zero_mask)
     rss = jnp.where(zero_mask[None, :, :], jnp.zeros_like(rss), rss)
     return rcc, rss
 
@@ -310,16 +314,20 @@ def _signed_to_mn_sin_cached(coeffs, *, maps: SignedModeMaps):
     if maps.mpol == 0 or maps.nrange == 0:
         z = jnp.zeros((int(coeffs.shape[0]), maps.mpol, maps.nrange), dtype=coeffs.dtype)
         return z, z
-    idx_pos_safe = jnp.asarray(maps.idx_pos_safe, dtype=jnp.int32)
-    idx_neg_safe = jnp.asarray(maps.idx_neg_safe, dtype=jnp.int32)
-    mask_pos = jnp.asarray(maps.mask_pos, dtype=coeffs.dtype)
-    mask_neg = jnp.asarray(maps.mask_neg, dtype=coeffs.dtype)
+    idx_pos_safe = maps.idx_pos_safe_j if maps.idx_pos_safe_j is not None else jnp.asarray(maps.idx_pos_safe, dtype=jnp.int32)
+    idx_neg_safe = maps.idx_neg_safe_j if maps.idx_neg_safe_j is not None else jnp.asarray(maps.idx_neg_safe, dtype=jnp.int32)
+    mask_pos = maps.mask_pos_j if maps.mask_pos_j is not None else jnp.asarray(maps.mask_pos)
+    mask_neg = maps.mask_neg_j if maps.mask_neg_j is not None else jnp.asarray(maps.mask_neg)
+    if mask_pos.dtype != coeffs.dtype:
+        mask_pos = mask_pos.astype(coeffs.dtype)
+    if mask_neg.dtype != coeffs.dtype:
+        mask_neg = mask_neg.astype(coeffs.dtype)
     pos = coeffs[:, idx_pos_safe] * mask_pos
     neg = coeffs[:, idx_neg_safe] * mask_neg
     sc = pos + neg
     cs = neg - pos
-    n0 = jnp.asarray(maps.n0_mask)
-    m0 = jnp.asarray(maps.m0_mask)
+    n0 = maps.n0_mask_j if maps.n0_mask_j is not None else jnp.asarray(maps.n0_mask)
+    m0 = maps.m0_mask_j if maps.m0_mask_j is not None else jnp.asarray(maps.m0_mask)
     cs = jnp.where(n0[None, :, :], jnp.zeros_like(cs), cs)
     sc = jnp.where(m0[None, :, :] & (~n0[None, :, :]), jnp.zeros_like(sc), sc)
     return sc, cs
@@ -409,16 +417,20 @@ def _mn_cos_to_signed_cached(rcc, rss, *, maps: SignedModeMaps, ncoeff: int):
     out = jnp.zeros((ns, ncoeff), dtype=rcc.dtype)
     if ncoeff == 0:
         return out
-    m0 = jnp.asarray(maps.m0_mask)
-    n0 = jnp.asarray(maps.n0_mask)
+    m0 = maps.m0_mask_j if maps.m0_mask_j is not None else jnp.asarray(maps.m0_mask)
+    n0 = maps.n0_mask_j if maps.n0_mask_j is not None else jnp.asarray(maps.n0_mask)
     pos = 0.5 * (rcc + rss)
     pos = jnp.where((m0 | n0)[None, :, :], rcc, pos)
     neg = 0.5 * (rcc - rss)
 
-    idx_pos_safe = jnp.asarray(maps.idx_pos_safe_flat, dtype=jnp.int32)
-    idx_neg_safe = jnp.asarray(maps.idx_neg_safe_flat, dtype=jnp.int32)
-    mask_pos = jnp.asarray(maps.mask_pos_flat, dtype=rcc.dtype)
-    mask_neg = jnp.asarray(maps.mask_neg_flat, dtype=rcc.dtype)
+    idx_pos_safe = maps.idx_pos_safe_flat_j if maps.idx_pos_safe_flat_j is not None else jnp.asarray(maps.idx_pos_safe_flat, dtype=jnp.int32)
+    idx_neg_safe = maps.idx_neg_safe_flat_j if maps.idx_neg_safe_flat_j is not None else jnp.asarray(maps.idx_neg_safe_flat, dtype=jnp.int32)
+    mask_pos = maps.mask_pos_flat_j if maps.mask_pos_flat_j is not None else jnp.asarray(maps.mask_pos_flat)
+    mask_neg = maps.mask_neg_flat_j if maps.mask_neg_flat_j is not None else jnp.asarray(maps.mask_neg_flat)
+    if mask_pos.dtype != rcc.dtype:
+        mask_pos = mask_pos.astype(rcc.dtype)
+    if mask_neg.dtype != rcc.dtype:
+        mask_neg = mask_neg.astype(rcc.dtype)
 
     pos_flat = pos.reshape(ns, -1) * mask_pos[None, :]
     neg_flat = neg.reshape(ns, -1) * mask_neg[None, :]
@@ -436,23 +448,27 @@ def _mn_sin_to_signed_cached(sc, cs, *, maps: SignedModeMaps, ncoeff: int):
     out = jnp.zeros((ns, ncoeff), dtype=sc.dtype)
     if ncoeff == 0:
         return out
-    m0 = jnp.asarray(maps.m0_mask)
-    n0 = jnp.asarray(maps.n0_mask)
+    m0 = maps.m0_mask_j if maps.m0_mask_j is not None else jnp.asarray(maps.m0_mask)
+    n0 = maps.n0_mask_j if maps.n0_mask_j is not None else jnp.asarray(maps.n0_mask)
 
     pos = 0.5 * (sc - cs)
     pos = jnp.where(n0[None, :, :], sc, pos)
 
-    mask_neg = jnp.asarray(maps.mask_neg)
+    mask_neg = maps.mask_neg_j if maps.mask_neg_j is not None else jnp.asarray(maps.mask_neg)
     mask_no_neg = (~mask_neg) & (~n0)
     pos = jnp.where(mask_no_neg[None, :, :] & m0[None, :, :], -cs, pos)
     pos = jnp.where(mask_no_neg[None, :, :] & (~m0[None, :, :]), sc, pos)
 
     neg = 0.5 * (sc + cs)
 
-    idx_pos_safe = jnp.asarray(maps.idx_pos_safe_flat, dtype=jnp.int32)
-    idx_neg_safe = jnp.asarray(maps.idx_neg_safe_flat, dtype=jnp.int32)
-    mask_pos = jnp.asarray(maps.mask_pos_flat, dtype=sc.dtype)
-    mask_neg_flat = jnp.asarray(maps.mask_neg_flat, dtype=sc.dtype)
+    idx_pos_safe = maps.idx_pos_safe_flat_j if maps.idx_pos_safe_flat_j is not None else jnp.asarray(maps.idx_pos_safe_flat, dtype=jnp.int32)
+    idx_neg_safe = maps.idx_neg_safe_flat_j if maps.idx_neg_safe_flat_j is not None else jnp.asarray(maps.idx_neg_safe_flat, dtype=jnp.int32)
+    mask_pos = maps.mask_pos_flat_j if maps.mask_pos_flat_j is not None else jnp.asarray(maps.mask_pos_flat)
+    mask_neg_flat = maps.mask_neg_flat_j if maps.mask_neg_flat_j is not None else jnp.asarray(maps.mask_neg_flat)
+    if mask_pos.dtype != sc.dtype:
+        mask_pos = mask_pos.astype(sc.dtype)
+    if mask_neg_flat.dtype != sc.dtype:
+        mask_neg_flat = mask_neg_flat.astype(sc.dtype)
 
     pos_flat = pos.reshape(ns, -1) * mask_pos[None, :]
     neg_flat = neg.reshape(ns, -1) * mask_neg_flat[None, :]
@@ -595,6 +611,18 @@ class SignedModeMaps:
     zero_mask: np.ndarray
     m0_mask: np.ndarray
     n0_mask: np.ndarray
+    # Cached JAX arrays for performance (avoid per-call host->device copies).
+    idx_pos_safe_j: any | None = None
+    idx_neg_safe_j: any | None = None
+    mask_pos_j: any | None = None
+    mask_neg_j: any | None = None
+    idx_pos_safe_flat_j: any | None = None
+    idx_neg_safe_flat_j: any | None = None
+    mask_pos_flat_j: any | None = None
+    mask_neg_flat_j: any | None = None
+    zero_mask_j: any | None = None
+    m0_mask_j: any | None = None
+    n0_mask_j: any | None = None
 
 
 def _build_signed_maps(idx_pos: np.ndarray, idx_neg: np.ndarray) -> SignedModeMaps:
@@ -639,6 +667,17 @@ def _build_signed_maps(idx_pos: np.ndarray, idx_neg: np.ndarray) -> SignedModeMa
         zero_mask=zero_mask,
         m0_mask=m0_mask,
         n0_mask=n0_mask,
+        idx_pos_safe_j=jnp.asarray(idx_pos_safe, dtype=jnp.int32),
+        idx_neg_safe_j=jnp.asarray(idx_neg_safe, dtype=jnp.int32),
+        mask_pos_j=jnp.asarray(mask_pos),
+        mask_neg_j=jnp.asarray(mask_neg),
+        idx_pos_safe_flat_j=jnp.asarray(idx_pos_safe_flat, dtype=jnp.int32),
+        idx_neg_safe_flat_j=jnp.asarray(idx_neg_safe_flat, dtype=jnp.int32),
+        mask_pos_flat_j=jnp.asarray(mask_pos_flat),
+        mask_neg_flat_j=jnp.asarray(mask_neg_flat),
+        zero_mask_j=jnp.asarray(zero_mask),
+        m0_mask_j=jnp.asarray(m0_mask),
+        n0_mask_j=jnp.asarray(n0_mask),
     )
 
 
