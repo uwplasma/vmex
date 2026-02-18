@@ -144,6 +144,7 @@ def _parse_key(key: str) -> Tuple[str, Tuple[int, ...] | None]:
 class InData:
     scalars: Dict[str, Value]
     indexed: Dict[str, Dict[Tuple[int, ...], Scalar]]
+    source_path: str | None = None
 
     def get(self, name: str, default: Value | None = None) -> Value | None:
         return self.scalars.get(name.upper(), default)
@@ -177,7 +178,8 @@ class InData:
 
 def read_indata(path: str | Path) -> InData:
     """Read &INDATA from a VMEC input file."""
-    text = Path(path).read_text()
+    path = Path(path)
+    text = path.read_text()
     # isolate &INDATA block
     m_start = re.search(r"&\s*INDATA", text, flags=re.IGNORECASE)
     if not m_start:
@@ -197,7 +199,7 @@ def read_indata(path: str | Path) -> InData:
 
     matches = list(_ASSIGN_RE.finditer(cleaned))
     if not matches:
-        return InData(scalars=scalars, indexed=indexed)
+        return InData(scalars=scalars, indexed=indexed, source_path=str(path))
 
     for i, m in enumerate(matches):
         key_raw = m.group("key")
@@ -230,4 +232,4 @@ def read_indata(path: str | Path) -> InData:
             else:
                 indexed[key_base][idx] = value
 
-    return InData(scalars=scalars, indexed=indexed)
+    return InData(scalars=scalars, indexed=indexed, source_path=str(path))

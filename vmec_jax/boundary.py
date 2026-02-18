@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, Tuple
+from collections import OrderedDict
+import os
 
 import numpy as np
 
@@ -46,6 +48,10 @@ class BoundaryInternalCoeffs:
     zbss: np.ndarray
     zbcs: np.ndarray
     zbsc: np.ndarray
+
+
+_BOUNDARY_CACHE: "OrderedDict[tuple, BoundaryCoeffs]" = OrderedDict()
+_BOUNDARY_CACHE_MAX = 32
 
 
 def _boundary_internal_flip_theta(
@@ -99,6 +105,59 @@ def _get_indexed(indata: InData, name: str) -> Dict[Tuple[int, ...], float]:
             continue
         out[tuple(k)] = float(v)
     return out
+
+
+def _boundary_cache_key(
+    indata: InData,
+    modes: ModeTable,
+    *,
+    apply_m1_constraint: bool,
+    rbc: Dict[Tuple[int, ...], float],
+    rbs: Dict[Tuple[int, ...], float],
+    zbc: Dict[Tuple[int, ...], float],
+    zbs: Dict[Tuple[int, ...], float],
+) -> tuple:
+    """Build a cache key for boundary decomposition across runs."""
+    lasym = bool(indata.get_bool("LASYM", False))
+    lconm1 = bool(indata.get_bool("LCONM1", True))
+    mpol, ntor = _infer_mpol_ntor(modes)
+    path = getattr(indata, "source_path", None)
+    path_key = None
+    if path:
+        try:
+            st = os.stat(path)
+            path_key = (str(path), int(st.st_mtime_ns), int(st.st_size))
+        except OSError:
+            path_key = None
+
+    coeff_key = None
+    if path_key is None:
+        def _sorted_items(d: Dict[Tuple[int, ...], float]):
+            return tuple(sorted((int(k[0]), int(k[1]), float(v)) for k, v in d.items()))
+
+        coeff_key = (
+            _sorted_items(rbc),
+            _sorted_items(rbs),
+            _sorted_items(zbc),
+            _sorted_items(zbs),
+        )
+
+    return (path_key, coeff_key, int(mpol), int(ntor), lasym, lconm1, bool(apply_m1_constraint))
+
+
+def _boundary_cache_get(key: tuple) -> BoundaryCoeffs | None:
+    cached = _BOUNDARY_CACHE.get(key)
+    if cached is None:
+        return None
+    _BOUNDARY_CACHE.move_to_end(key)
+    return cached
+
+
+def _boundary_cache_put(key: tuple, boundary: BoundaryCoeffs) -> None:
+    _BOUNDARY_CACHE[key] = boundary
+    _BOUNDARY_CACHE.move_to_end(key)
+    while len(_BOUNDARY_CACHE) > _BOUNDARY_CACHE_MAX:
+        _BOUNDARY_CACHE.popitem(last=False)
 
 
 def _infer_mpol_ntor(modes: ModeTable) -> tuple[int, int]:
@@ -298,6 +357,19 @@ def boundary_from_indata(
     zbc = _get_indexed(indata, "ZBC")
     zbs = _get_indexed(indata, "ZBS")
 
+    cache_key = _boundary_cache_key(
+        indata,
+        modes,
+        apply_m1_constraint=apply_m1_constraint,
+        rbc=rbc,
+        rbs=rbs,
+        zbc=zbc,
+        zbs=zbs,
+    )
+    cached = _boundary_cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     K = modes.K
     R_cos = np.zeros((K,), dtype=float)
     R_sin = np.zeros((K,), dtype=float)
@@ -346,4 +418,6 @@ def boundary_from_indata(
                 internal.rbsc[:, 1] = 0.5 * (temp + internal.zbcc[:, 1])
                 internal.zbcc[:, 1] = 0.5 * (temp - internal.zbcc[:, 1])
 
-    return _boundary_helical_from_internal(internal, modes, lthreed=lthreed, lasym=lasym)
+    boundary_out = _boundary_helical_from_internal(internal, modes, lthreed=lthreed, lasym=lasym)
+    _boundary_cache_put(cache_key, boundary_out)
+    return boundary_out

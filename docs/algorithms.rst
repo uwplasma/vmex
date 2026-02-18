@@ -36,8 +36,7 @@ Fourier transforms
 ~~~~~~~~~~~~~~~~~~
 
 VMEC uses Fourier transforms between mode space and real space on the angular
-grid. In ``vmec-jax`` we currently implement synthesis using dense basis
-tensors:
+grid. In ``vmec-jax`` we implement synthesis using dense basis tensors:
 
 .. math::
 
@@ -45,13 +44,37 @@ tensors:
      c_{mn}\cos(m\theta-n\zeta) + s_{mn}\sin(m\theta-n\zeta)
    \Bigr).
 
-This is implemented with ``einsum`` for both NumPy and JAX.
+For VMEC parity, the *analysis* transform (real-space → Fourier) follows the
+``fixaray``-style DFT with precomputed trig/weight tables. Denote the VMEC
+theta grid by :math:`\theta_i` with endpoint half-weights and the zeta grid by
+:math:`\zeta_k` over one field period. VMEC defines weighted tables
+(:math:`\mathrm{cosmui}`, :math:`\mathrm{sinmui}`) that already include the
+``mscale`` normalization and endpoint quadrature weights. The first stage is:
 
-Future work:
+.. math::
 
-- VMEC-style DFTs with precomputed trig/weight tables (canonical for parity).
-- FFT-based transforms **only after parity** (must reproduce VMEC scaling,
-  endpoint weights, and ``ntheta1/2/3`` conventions exactly).
+   \tilde{f}^{c}_{m}(\zeta_k) = \sum_i f(\theta_i,\zeta_k)\,\mathrm{cosmui}_{i,m},
+   \qquad
+   \tilde{f}^{s}_{m}(\zeta_k) = \sum_i f(\theta_i,\zeta_k)\,\mathrm{sinmui}_{i,m}.
+
+The second stage uses the precomputed zeta tables
+(:math:`\mathrm{cosnv}`, :math:`\mathrm{sinnv}`) to obtain
+the :math:`(m,n)` coefficients:
+
+.. math::
+
+   c_{m,n} = \sum_k \tilde{f}^{c}_m(\zeta_k)\,\mathrm{cosnv}_{k,n},
+   \qquad
+   s_{m,n} = \sum_k \tilde{f}^{s}_m(\zeta_k)\,\mathrm{sinnv}_{k,n}.
+
+For derivative terms, VMEC uses ``cosnvn/sinnvn`` which already include the
+field-period scaling (:math:`n\,\mathrm{NFP}`); the same tables are used in
+``vmec-jax``.
+
+The implementation in ``vmec_jax.vmec_tomnsp`` performs these two DFT stages as
+batched ``dot_general`` calls (GEMM-friendly) to match VMEC2000 scaling while
+enabling XLA fusion. See References [4-6] for the VMEC2000 ``fixaray`` tables
+and the VMEC++ DFT/basis discussion.
 
 Geometry pipeline
 -----------------

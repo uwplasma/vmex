@@ -1,5 +1,5 @@
 vmec-jax documentation (fast build)
-=====================================
+===================================
 
 Fast doc builds are enabled (``SPHINX_FAST=1``). The full user guide and API
 reference are skipped to keep CI fast.

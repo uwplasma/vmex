@@ -58,6 +58,47 @@ Important:
   per-iteration parity.
 - Debug dump env vars are incompatible with scan mode.
 
+DFT tomnsps (GEMM path)
+-----------------------
+
+VMEC2000's ``tomnsps`` analysis transform is now implemented as a two-stage
+DFT using the precomputed ``fixaray`` trig/weight tables:
+
+- theta stage: multiply by ``cosmui/sinmui`` (endpoint-weighted + ``mscale``),
+- zeta stage: multiply by ``cosnv/sinnv`` (with ``nscale`` and ``n*NFP`` in
+  ``cosnvn/sinnvn`` for derivative terms).
+
+The core contractions are done with batched ``dot_general`` calls so XLA can
+lower them into GEMM kernels. This follows the VMEC++ basis approach (see
+References [5-6]) while keeping VMEC2000 parity.
+
+An FFT-based path remains available for experiments:
+
+- ``VMEC_JAX_TOMNSPS_FFT=1`` enables the FFT implementation (not default).
+
+Boundary decomposition cache + JAX-friendly initial guess
+---------------------------------------------------------
+
+``boundary_from_indata`` now caches the boundary decomposition across runs
+using the input file path + mtime (or a coefficient fingerprint when the path
+is unavailable). This trims repeated host work in workflows that solve the same
+input file multiple times in a single process.
+
+The initial-guess path also supports a fully JAX-backed boundary flip and
+constraint application, which reduces Python-side overhead and keeps the path
+JAX-friendly for future JIT staging. Control this with:
+
+- ``VMEC_JAX_INIT_GUESS_JAX=1`` (default): use JAX boundary flip path.
+- ``VMEC_JAX_INIT_GUESS_JAX=0``: fall back to NumPy/Python boundary flips.
+
+Implementation map (performance-critical paths)
+------------------------------------------------
+
+- ``vmec_jax/vmec_tomnsp.py``: VMEC ``fixaray`` tables + DFT-based ``tomnsps``.
+- ``vmec_jax/init_guess.py``: initial guess, axis blending, JAX boundary flip.
+- ``vmec_jax/boundary.py``: input boundary decomposition + cache.
+- ``vmec_jax/static.py``: cached grids, phase stacks, and per-solve constants.
+
 Recent profiling snapshot (QA, 3 iterations on CPU)
 ---------------------------------------------------
 
@@ -66,6 +107,24 @@ Recent profiling snapshot (QA, 3 iterations on CPU)
 
 Longer runs benefit more because Python control-flow overhead scales with the
 iteration count in the non-scan path.
+
+Planned: tighter multigrid restart heuristics
+---------------------------------------------
+
+VMEC++ introduces a "bad progress" restart policy that detects large residuals
+on refined grids and restarts the time-step controller more aggressively.
+We plan to mirror this in ``vmec_jax`` to prevent large ``fsqr`` spikes on the
+first few iterations after a grid transition. The intended policy:
+
+- detect ``fsq_total`` spikes on the fine grid (e.g. ``fsq_total > 1e-2`` after
+  a small number of iterations),
+- reduce ``delt`` and reset ``res0/res1`` similarly to VMEC++,
+- preserve VMEC2000 parity by applying this only in performance mode or when
+  VMEC++-style restarts are explicitly enabled.
+
+The exact thresholds and iteration counters will be aligned with the VMEC++
+numerics notes once the VMEC2000 parity path is fully stable (see References
+[5-6]).
 
 Static precomputation
 ---------------------

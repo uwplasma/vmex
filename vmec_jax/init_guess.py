@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import os
 import numpy as np
 
 from ._compat import jnp, has_jax
@@ -751,7 +752,10 @@ def initial_guess_from_boundary(
             dtype = _np.float64
 
     boundary_use = boundary
-    if _boundary_is_traced(boundary_use):
+    use_jax_boundary = bool(has_jax()) and (
+        os.environ.get("VMEC_JAX_INIT_GUESS_JAX", "1").strip().lower() not in ("0", "false", "no")
+    )
+    if use_jax_boundary or _boundary_is_traced(boundary_use):
         lflip = _vmec_lflip_from_boundary_jax(static, boundary_use)
         R_cos_flip, R_sin_flip, Z_cos_flip, Z_sin_flip = _flip_boundary_theta_arrays(
             static,

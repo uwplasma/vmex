@@ -361,7 +361,8 @@ class TomnspsRZL:
 _MPARITY_CACHE: dict[tuple[int, str], jnp.ndarray] = {}
 _JNP_EINSUM = jnp.einsum
 _DETERMINISTIC_REDUCE = bool(int(os.environ.get("VMEC_JAX_DETERMINISTIC_REDUCE", "0")))
-_TOMNSPS_FFT = os.environ.get("VMEC_JAX_TOMNSPS_FFT", "1").strip().lower() not in ("0", "false", "no")
+# FFT path is retained for experiments, but DFT + precomputed basis is the default.
+_TOMNSPS_FFT = os.environ.get("VMEC_JAX_TOMNSPS_FFT", "0").strip().lower() not in ("0", "false", "no")
 
 
 def _einsum(expr: str, *operands):
@@ -376,43 +377,73 @@ def _einsum(expr: str, *operands):
 
 
 def _theta_contract(arr, mat):
-    """Deterministic theta reduction matching VMEC loop order when enabled."""
-    if (not _DETERMINISTIC_REDUCE) or (not has_jax()):
-        return _einsum("apsik,im->apsmk", arr, mat)
+    """Theta reduction using precomputed basis; dot_general for GEMM fusion."""
+    if (not has_jax()) or _DETERMINISTIC_REDUCE:
+        if (not _DETERMINISTIC_REDUCE) or (not has_jax()):
+            return _einsum("apsik,im->apsmk", arr, mat)
+        from jax import lax
+
+        arr = jnp.asarray(arr)
+        mat = jnp.asarray(mat)
+        a, p, s, i_size, k = arr.shape
+        m = mat.shape[1]
+        acc = jnp.zeros((a, p, s, m, k), dtype=arr.dtype)
+
+        def body(i, acc_i):
+            arr_i = arr[:, :, :, i, :]  # (a, p, s, k)
+            mat_i = mat[i, :]  # (m,)
+            return acc_i + arr_i[..., None, :] * mat_i[None, None, None, :, None]
+
+        return lax.fori_loop(0, i_size, body, acc)
     from jax import lax
 
     arr = jnp.asarray(arr)
     mat = jnp.asarray(mat)
     a, p, s, i_size, k = arr.shape
-    m = mat.shape[1]
-    acc = jnp.zeros((a, p, s, m, k), dtype=arr.dtype)
-
-    def body(i, acc_i):
-        arr_i = arr[:, :, :, i, :]  # (a, p, s, k)
-        mat_i = mat[i, :]  # (m,)
-        return acc_i + arr_i[..., None, :] * mat_i[None, None, None, :, None]
-
-    return lax.fori_loop(0, i_size, body, acc)
+    arr_t = jnp.moveaxis(arr, 3, -1)  # (a, p, s, k, i)
+    arr2 = arr_t.reshape((a * p * s * k, i_size))
+    out2 = lax.dot_general(
+        arr2,
+        mat,
+        dimension_numbers=(((1,), (0,)), ((), ())),
+        precision=lax.Precision.HIGHEST,
+    )
+    out = out2.reshape((a, p, s, k, mat.shape[1]))
+    return jnp.moveaxis(out, -1, -2)  # (a, p, s, m, k)
 
 
 def _zeta_contract(arr, mat):
-    """Deterministic zeta reduction matching VMEC loop order when enabled."""
-    if (not _DETERMINISTIC_REDUCE) or (not has_jax()):
-        return _einsum("psmk,kn->psmn", arr, mat)
+    """Zeta reduction using precomputed basis; dot_general for GEMM fusion."""
+    if (not has_jax()) or _DETERMINISTIC_REDUCE:
+        if (not _DETERMINISTIC_REDUCE) or (not has_jax()):
+            return _einsum("psmk,kn->psmn", arr, mat)
+        from jax import lax
+
+        arr = jnp.asarray(arr)
+        mat = jnp.asarray(mat)
+        p, s, m, k_size = arr.shape
+        n = mat.shape[1]
+        acc = jnp.zeros((p, s, m, n), dtype=arr.dtype)
+
+        def body(k, acc_k):
+            arr_k = arr[:, :, :, k]  # (p, s, m)
+            mat_k = mat[k, :]  # (n,)
+            return acc_k + arr_k[..., None] * mat_k[None, None, None, :]
+
+        return lax.fori_loop(0, k_size, body, acc)
     from jax import lax
 
     arr = jnp.asarray(arr)
     mat = jnp.asarray(mat)
     p, s, m, k_size = arr.shape
-    n = mat.shape[1]
-    acc = jnp.zeros((p, s, m, n), dtype=arr.dtype)
-
-    def body(k, acc_k):
-        arr_k = arr[:, :, :, k]  # (p, s, m)
-        mat_k = mat[k, :]  # (n,)
-        return acc_k + arr_k[..., None] * mat_k[None, None, None, :]
-
-    return lax.fori_loop(0, k_size, body, acc)
+    arr2 = arr.reshape((p * s * m, k_size))
+    out2 = lax.dot_general(
+        arr2,
+        mat,
+        dimension_numbers=(((1,), (0,)), ((), ())),
+        precision=lax.Precision.HIGHEST,
+    )
+    return out2.reshape((p, s, m, mat.shape[1]))
 
 
 def _theta_transform_fft(arr, *, mpol: int, dnorm: float, mscale, want_sin: bool):

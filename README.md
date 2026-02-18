@@ -27,7 +27,7 @@ Laptop-friendly, end-to-end differentiable (JAX) rewrite of **VMEC2000**, focusi
 
 - Fixed boundary only (free boundary deferred).
 - Axisymmetric end-to-end parity is stable (`ntor=0`, `nfp=1`, `lasym=False`).
-- Non-axisymmetric parity: QA/QH/n3are/QA-lowres multigrid traces are being revalidated at `rtol=1e-4`, `atol=1e-12` (QA_lowres stage-1 iter-2 passes). Remaining 3D/`lasym=True` cases are still in progress.
+- Non-axisymmetric parity: full VMEC2000 sweeps are being refreshed at `rtol=1e-4`, `atol=1e-12` across QA/QH/n3are/QA-lowres multigrid cases. Use the comparator in `tools/diagnostics/` to regenerate the per-iteration traces and `wout` parity.
 
 ## Quickstart
 
@@ -94,6 +94,9 @@ Initial-guess axis blending updates all m=0 columns in one vectorized step to re
 Mode scaling factors (1/(mscale*nscale)) are cached in `VMECStatic` to avoid repeated table gathers in the initial guess.
 Lambda gauge enforcement uses a boolean mask instead of scatter updates in the iteration loop.
 Axis m=0 masks are reused from `VMECStatic` to avoid per-iteration reconstruction.
+`tomnsps` now defaults to a VMEC-style DFT using precomputed trig/weight tables and batched `dot_general` (GEMM-friendly). Set `VMEC_JAX_TOMNSPS_FFT=1` to re-enable the FFT path for experiments.
+Boundary decomposition from input files is cached across runs (keyed by input path/mtime or a coefficient fingerprint) to reduce host overhead when solving the same case repeatedly.
+Set `VMEC_JAX_INIT_GUESS_JAX=0` to force the legacy NumPy boundary-flip path; the default is the JAX-friendly path.
 
 ## QH comparison figures
 
@@ -112,6 +115,10 @@ python tools/diagnostics/qh_compare_fsq_trace.py \
 ```
 
 ## Parity status (VMEC2000)
+
+**Note:** The tables below reflect the most recently recorded sweeps. Re-run the
+parity scripts in `tools/diagnostics/` to refresh numbers after algorithm or
+performance changes.
 
 Parity work is tracked in two layers:
 

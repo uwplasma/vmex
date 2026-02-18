@@ -25,6 +25,40 @@ The Fourier phase convention is:
 where :math:`n` is the field-period toroidal mode number
 (VMEC stores :math:`xn = n\,\mathrm{NFP}` in ``wout``).
 
+VMEC weighted DFT tables (``fixaray``)
+--------------------------------------
+
+VMEC does **not** use a plain FFT for its force/residual transforms. Instead,
+``fixaray`` builds weighted trig tables on a symmetry-aware grid and applies
+explicit normalization factors. Let :math:`\theta_i` be the VMEC theta grid
+over :math:`[0,\pi]` (with endpoint half-weights) and :math:`\zeta_k` the zeta
+grid over one field period. VMEC defines
+
+.. math::
+
+   \mathrm{dnorm} = \frac{1}{n_\zeta\,(n_{\theta2}-1)},\qquad
+   \mathrm{mscale}_0 = 1,\quad \mathrm{mscale}_{m>0}=\sqrt{2},
+
+and the weighted cosine table
+
+.. math::
+
+   \mathrm{cosmui}_{i,m} = \mathrm{dnorm}\,w_i\,\mathrm{mscale}_m \cos(m\theta_i),
+
+with :math:`w_0=w_{n_{\theta2}-1}=1/2` and :math:`w_i=1` elsewhere. The sine
+table is defined analogously, with the same weights and ``mscale``. Zeta tables
+use ``nscale`` (also :math:`\sqrt{2}` for :math:`n>0`) and, for derivative
+terms, include the field-period multiplier :math:`n\,\mathrm{NFP}`:
+
+.. math::
+
+   \mathrm{cosnvn}_{k,n} = (n\,\mathrm{NFP})\,\mathrm{cosnv}_{k,n}, \qquad
+   \mathrm{sinnvn}_{k,n} = -(n\,\mathrm{NFP})\,\mathrm{sinnv}_{k,n}.
+
+``vmec_jax`` uses these tables in ``tomnsps`` so that the Fourier-space force
+arrays exactly match VMEC2000. See References [4-6] for the original VMEC2000
+tables and the VMEC++ DFT/basis discussion.
+
 Ideal MHD equilibrium
 ---------------------
 
