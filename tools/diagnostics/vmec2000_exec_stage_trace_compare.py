@@ -1822,10 +1822,10 @@ def main() -> None:
                 vmec_env["VMEC_DUMP_LAMCAL"] = "1"
                 vmec_env["VMEC_DUMP_TOMNSPS"] = "1"
                 vmec_env["VMEC_DUMP_TOMNSPS_KERNELS"] = "1"
-            vmec_env["VMEC_DUMP_GC"] = "1"
-            vmec_env["VMEC_DUMP_GC_STAGE"] = "both"
-            vmec_env["VMEC_DUMP_GC_DIR"] = str(vmec_dump_dir)
-            vmec_env["VMEC_DUMP_LAM"] = "1"
+                vmec_env["VMEC_DUMP_GC"] = "1"
+                vmec_env["VMEC_DUMP_GC_STAGE"] = "both"
+                vmec_env["VMEC_DUMP_GC_DIR"] = str(vmec_dump_dir)
+                vmec_env["VMEC_DUMP_LAM"] = "1"
             if args.dump_iter:
                 vmec_env["VMEC_DUMP_ITER"] = str(args.dump_iter)
                 vmec_env["VMEC_DUMP_XC_ITER"] = str(args.dump_iter)
@@ -2117,7 +2117,10 @@ def main() -> None:
     use_threed1 = bool(threed1_stages)
     vmec_stages = threed1_stages if use_threed1 else stages
     vmec_ns = np.asarray([int(st.ns) for st in vmec_stages], dtype=int)
-    vmec_niter = np.asarray([int(st.niter) for st in vmec_stages], dtype=int)
+    vmec_niter = np.asarray(
+        [int(len(st.rows)) if st.rows else int(st.niter) for st in vmec_stages],
+        dtype=int,
+    )
     vmec_offsets = np.concatenate([[0], np.cumsum(vmec_niter[:-1])]).astype(int) if vmec_niter.size else np.zeros((0,), dtype=int)
 
     print()

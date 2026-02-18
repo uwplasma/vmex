@@ -2929,14 +2929,18 @@ def solve_fixed_boundary_residual_iter(
     limit_update_rms = bool(limit_update_rms)
     backtracking = bool(backtracking)
     strict_update = bool(strict_update)
-    dump_envs = (
-        "VMEC_JAX_DUMP_DIR",
+    light_dump_envs = (
+        "VMEC_JAX_DUMP_SCALARS",
+        "VMEC_JAX_DUMP_GCX2",
+        "VMEC_JAX_DUMP_FSQ1",
+        "VMEC_JAX_DUMP_TIMECONTROL",
+        "VMEC_JAX_DUMP_CHECKPOINT",
+    )
+    heavy_dump_envs = (
         "VMEC_JAX_DUMP_TOMNSPS",
         "VMEC_JAX_DUMP_TOMNSPS_KERNELS",
         "VMEC_JAX_DUMP_FORCE_KERNELS",
         "VMEC_JAX_DUMP_GC",
-        "VMEC_JAX_DUMP_GCX2",
-        "VMEC_JAX_DUMP_SCALARS",
         "VMEC_JAX_DUMP_BSUBE",
         "VMEC_JAX_DUMP_BSUBE_TERMS",
         "VMEC_JAX_DUMP_LULV",
@@ -2945,9 +2949,8 @@ def solve_fixed_boundary_residual_iter(
         "VMEC_JAX_DUMP_LAMCAL",
         "VMEC_JAX_DUMP_LAM_FSQL1",
         "VMEC_JAX_DUMP_LAM_GCL",
-        "VMEC_JAX_DUMP_FSQ1",
     )
-    dumps_enabled = any(os.getenv(name, "") not in ("", "0") for name in dump_envs)
+    dumps_enabled = any(os.getenv(name, "") not in ("", "0") for name in heavy_dump_envs)
     if dumps_enabled and jit_forces:
         if verbose:
             print("[solve_fixed_boundary_residual_iter] jit_forces disabled (debug dumps enabled)")
