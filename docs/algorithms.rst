@@ -285,6 +285,59 @@ This is a useful subproblem and is part of VMEC’s nonlinear solve.
 
 This is implemented in ``solve_lambda_gd``.
 
+Implicit differentiation
+------------------------
+
+``vmec-jax`` provides custom-VJP wrappers for equilibrium sub-solves in
+``vmec_jax/implicit.py``. These allow outer objectives to differentiate through
+equilibrium solutions without storing the full iteration history.
+
+Fixed-boundary implicit solve
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Let :math:`W(x, p)` be the fixed-boundary objective (magnetic energy plus
+pressure and a soft Jacobian penalty), where :math:`x` are the Fourier
+coefficients and :math:`p` are profile parameters
+(:math:`\phi'(s)`, :math:`\chi'(s)`, pressure, and ``lamscale``). At the
+equilibrium :math:`x^\star(p)` we satisfy:
+
+.. math::
+
+   \nabla_x W\bigl(x^\star(p), p\bigr) = 0.
+
+For an outer loss :math:`\mathcal{L}(x^\star(p), p)`, implicit differentiation
+solves a damped linear system
+
+.. math::
+
+   \bigl(H + \lambda I\bigr)\,v = \nabla_x \mathcal{L},
+
+with :math:`H=\nabla_x^2 W`. The parameter gradient is then
+
+.. math::
+
+   \frac{d\mathcal{L}}{dp} = - v^\top \frac{\partial}{\partial p}\nabla_x W.
+
+Implementation details:
+
+- Hessian–vector products are computed via ``jax.jvp`` on the gradient.
+- Conjugate gradients (CG) solve the linear system without materializing the
+  full Hessian.
+- A mask enforces VMEC gauge/constraint rules (e.g. removes the
+  :math:`(m,n)=(0,0)` mode).
+
+The forward solve uses gradient descent or L-BFGS; the backward pass uses the
+implicit system above, keeping memory use bounded even for long solves.
+If the forward solve does not reach the requested gradient tolerance, the
+implicit wrapper returns **zero** parameter gradients (implicit gradients are
+only valid at a fixed point).
+
+Lambda-only implicit solve
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For fixed geometry, ``solve_lambda_state_implicit`` applies the same
+implicit-function machinery to lambda-only solves.
+
 Experimental VMEC-residual solvers (not yet VMEC2000-parity)
 ------------------------------------------------------------
 
@@ -350,7 +403,8 @@ Remaining limitations are mostly *scope* rather than parity gaps:
 - Experimental optimization solvers (GD/LBFGS/GN) are **not** VMEC2000 and do
   not reproduce all iteration-dependent logic; they are intended for
   differentiable objectives and regression experiments.
-- **Implicit differentiation** is still pending.
+- **Implicit differentiation** is available for lambda-only and fixed-boundary
+  profile solves, but does not yet expose full boundary-shape sensitivities.
 
 Fixed-boundary VMEC2000 parity
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -383,5 +437,6 @@ preconditioning, and VMEC2000 time-step control). The remaining roadmap items ar
 2. **lasym=True parity in scan mode**:
    - extend the scan path to support asymmetric grids and printing.
 
-3. **Implicit differentiation**:
-   - add a custom VJP/implicit-function solver for end-to-end gradients.
+3. **Implicit differentiation extensions**:
+   - extend implicit gradients to boundary-shape sensitivities and free-boundary
+     workflows.

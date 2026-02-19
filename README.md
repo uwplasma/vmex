@@ -85,6 +85,7 @@ Optimization tutorials (differentiable boundary tuning):
 ```bash
 python examples/optimization/optimize_bmag_volume.py --case circular_tokamak --opt-steps 3
 python examples/optimization/target_iota_volume.py --case circular_tokamak --opt-steps 3
+python examples/optimization/implicit_target_iota_volume.py --case circular_tokamak --opt-steps 3
 ```
 
 ## Performance vs parity
@@ -96,9 +97,9 @@ python examples/optimization/target_iota_volume.py --case circular_tokamak --opt
 
 ### Live NSTEP printing
 
-By default, the VMEC2000-style scan loop prints every `NSTEP` iterations using
-JAX's debug callback (differentiable). This keeps the output VMEC-like while
-avoiding explicit host/device syncs in Python.
+By default, the VMEC2000-style iteration loop (scan or non-scan) prints every
+`NSTEP` iterations using JAX's debug callback (differentiable). This keeps the
+output VMEC-like while avoiding explicit host/device syncs in Python.
 
 To disable live printing, set:
 

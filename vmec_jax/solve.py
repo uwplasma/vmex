@@ -5396,6 +5396,26 @@ def solve_fixed_boundary_residual_iter(
     # iteration initializes forces to 1.0). Track that explicitly.
     prev_rz_fsq = 2.0
 
+    scan_print_env = os.getenv("VMEC_JAX_SCAN_PRINT", "1").strip().lower()
+    scan_print_mode = os.getenv("VMEC_JAX_SCAN_PRINT_MODE", "debug_print").strip().lower()
+    scan_print_ordered = os.getenv("VMEC_JAX_SCAN_PRINT_ORDERED", "0").strip().lower() not in ("", "0", "false", "no")
+    print_live = scan_print_env not in ("", "0", "false", "no")
+    _jax_debug = None
+    _io_callback = None
+    if print_live:
+        try:
+            from jax import debug as _jax_debug  # type: ignore[assignment]
+        except Exception:
+            _jax_debug = None
+    if scan_print_mode not in ("debug_print", "debug_callback", "io_callback"):
+        scan_print_mode = "debug_print"
+    if scan_print_mode == "io_callback":
+        try:
+            from jax.experimental import io_callback as _io_callback  # type: ignore[assignment]
+        except Exception:
+            scan_print_mode = "debug_print"
+            _io_callback = None
+
     def _print_vmec2000_iter_row(
         *,
         iter_idx: int,
@@ -5412,23 +5432,138 @@ def solve_fixed_boundary_residual_iter(
     ) -> None:
         if not (bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table)):
             return
+        if not print_live:
+            return
         if bool(cfg.lasym):
             z_val = float("nan") if z00 is None else float(z00)
-            # VMEC screen format (lasym, fixed-boundary): i5,3e10.2,2e11.3,e10.2,e12.4
-            print(
-                f"{int(iter_idx):5d}"
-                f"{float(fsqr):10.2E}{float(fsqz):10.2E}{float(fsql):10.2E}"
-                f"{float(r00):11.3E}{z_val:11.3E}{float(delt0r):10.2E}{float(w_mhd):12.4E}",
-                flush=True,
-            )
+            if _jax_debug is not None:
+                if scan_print_mode == "debug_print":
+                    _jax_debug.print(
+                        "{i:5d}{fsqr:10.2E}{fsqz:10.2E}{fsql:10.2E}{r00:11.3E}{z00:11.3E}{dt:10.2E}{w:12.4E}",
+                        i=iter_idx,
+                        fsqr=fsqr,
+                        fsqz=fsqz,
+                        fsql=fsql,
+                        r00=r00,
+                        z00=z_val,
+                        dt=delt0r,
+                        w=w_mhd,
+                        ordered=bool(scan_print_ordered),
+                    )
+                elif scan_print_mode == "debug_callback":
+                    def _cb(i, fsqr_v, fsqz_v, fsql_v, r00_v, z00_v, dt_v, w_v):
+                        print(
+                            f"{int(i):5d}"
+                            f"{float(fsqr_v):10.2E}{float(fsqz_v):10.2E}{float(fsql_v):10.2E}"
+                            f"{float(r00_v):11.3E}{float(z00_v):11.3E}{float(dt_v):10.2E}{float(w_v):12.4E}",
+                            flush=True,
+                        )
+                        return None
+                    _jax_debug.callback(
+                        _cb,
+                        iter_idx,
+                        fsqr,
+                        fsqz,
+                        fsql,
+                        r00,
+                        z_val,
+                        delt0r,
+                        w_mhd,
+                        ordered=bool(scan_print_ordered),
+                    )
+                else:
+                    def _cb_io(i, fsqr_v, fsqz_v, fsql_v, r00_v, z00_v, dt_v, w_v):
+                        print(
+                            f"{int(i):5d}"
+                            f"{float(fsqr_v):10.2E}{float(fsqz_v):10.2E}{float(fsql_v):10.2E}"
+                            f"{float(r00_v):11.3E}{float(z00_v):11.3E}{float(dt_v):10.2E}{float(w_v):12.4E}",
+                            flush=True,
+                        )
+                        return ()
+                    _io_callback(  # type: ignore[misc]
+                        _cb_io,
+                        None,
+                        iter_idx,
+                        fsqr,
+                        fsqz,
+                        fsql,
+                        r00,
+                        z_val,
+                        delt0r,
+                        w_mhd,
+                        ordered=bool(scan_print_ordered),
+                    )
+            else:
+                # VMEC screen format (lasym, fixed-boundary): i5,3e10.2,2e11.3,e10.2,e12.4
+                print(
+                    f"{int(iter_idx):5d}"
+                    f"{float(fsqr):10.2E}{float(fsqz):10.2E}{float(fsql):10.2E}"
+                    f"{float(r00):11.3E}{z_val:11.3E}{float(delt0r):10.2E}{float(w_mhd):12.4E}",
+                    flush=True,
+                )
         else:
-            # VMEC screen format (fixed-boundary): i5,3e10.2,e11.3,e10.2,e12.4
-            print(
-                f"{int(iter_idx):5d}"
-                f"{float(fsqr):10.2E}{float(fsqz):10.2E}{float(fsql):10.2E}"
-                f"{float(r00):11.3E}{float(delt0r):10.2E}{float(w_mhd):12.4E}",
-                flush=True,
-            )
+            if _jax_debug is not None:
+                if scan_print_mode == "debug_print":
+                    _jax_debug.print(
+                        "{i:5d}{fsqr:10.2E}{fsqz:10.2E}{fsql:10.2E}{r00:11.3E}{dt:10.2E}{w:12.4E}",
+                        i=iter_idx,
+                        fsqr=fsqr,
+                        fsqz=fsqz,
+                        fsql=fsql,
+                        r00=r00,
+                        dt=delt0r,
+                        w=w_mhd,
+                        ordered=bool(scan_print_ordered),
+                    )
+                elif scan_print_mode == "debug_callback":
+                    def _cb(i, fsqr_v, fsqz_v, fsql_v, r00_v, dt_v, w_v):
+                        print(
+                            f"{int(i):5d}"
+                            f"{float(fsqr_v):10.2E}{float(fsqz_v):10.2E}{float(fsql_v):10.2E}"
+                            f"{float(r00_v):11.3E}{float(dt_v):10.2E}{float(w_v):12.4E}",
+                            flush=True,
+                        )
+                        return None
+                    _jax_debug.callback(
+                        _cb,
+                        iter_idx,
+                        fsqr,
+                        fsqz,
+                        fsql,
+                        r00,
+                        delt0r,
+                        w_mhd,
+                        ordered=bool(scan_print_ordered),
+                    )
+                else:
+                    def _cb_io(i, fsqr_v, fsqz_v, fsql_v, r00_v, dt_v, w_v):
+                        print(
+                            f"{int(i):5d}"
+                            f"{float(fsqr_v):10.2E}{float(fsqz_v):10.2E}{float(fsql_v):10.2E}"
+                            f"{float(r00_v):11.3E}{float(dt_v):10.2E}{float(w_v):12.4E}",
+                            flush=True,
+                        )
+                        return ()
+                    _io_callback(  # type: ignore[misc]
+                        _cb_io,
+                        None,
+                        iter_idx,
+                        fsqr,
+                        fsqz,
+                        fsql,
+                        r00,
+                        delt0r,
+                        w_mhd,
+                        ordered=bool(scan_print_ordered),
+                    )
+            else:
+                # VMEC screen format (fixed-boundary): i5,3e10.2,e11.3,e10.2,e12.4
+                print(
+                    f"{int(iter_idx):5d}"
+                    f"{float(fsqr):10.2E}{float(fsqz):10.2E}{float(fsql):10.2E}"
+                    f"{float(r00):11.3E}{float(delt0r):10.2E}{float(w_mhd):12.4E}",
+                    flush=True,
+                )
 
     nstep_screen = int(indata.get_int("NSTEP", 1)) if indata is not None else 1
     nstep_override = os.getenv("VMEC_JAX_NSTEP_OVERRIDE", "").strip()
