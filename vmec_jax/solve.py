@@ -17,7 +17,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import os
-import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, NamedTuple
 
@@ -2944,8 +2943,6 @@ def solve_fixed_boundary_residual_iter(
     if stage_transition_factor <= 0.0 or stage_transition_scale <= 0.0:
         stage_prev_fsq = None
 
-    profile_kernels_requested = os.getenv("VMEC_JAX_PROFILE_KERNELS", "").strip().lower() not in ("", "0", "false", "no")
-
     if use_scan and vmec2000_control and auto_flip_force:
         auto_flip_force = False
     jit_forces = bool(jit_forces)
@@ -2980,35 +2977,6 @@ def solve_fixed_boundary_residual_iter(
         if verbose:
             print("[solve_fixed_boundary_residual_iter] jit_forces disabled (debug dumps enabled)")
         jit_forces = False
-
-    profile_kernels = bool(profile_kernels_requested) and (not jit_forces) and (not use_scan)
-    if profile_kernels_requested and (not profile_kernels) and verbose:
-        print("[solve_fixed_boundary_residual_iter] kernel profiling requires --parity and --jit-forces false")
-
-    kernel_timings: Dict[str, float] = {"bcovar": 0.0, "tomnsps": 0.0, "precond_lam": 0.0, "precond_rz": 0.0}
-    kernel_iterations = 0
-
-    def _block_until_ready(tree):
-        if not profile_kernels:
-            return
-        try:
-            leaves = jax.tree_util.tree_leaves(tree)
-        except Exception:
-            leaves = [tree]
-        for leaf in leaves:
-            try:
-                leaf.block_until_ready()
-            except Exception:
-                pass
-
-    def _time_call(label: str, fn, *args, **kwargs):
-        if not profile_kernels:
-            return fn(*args, **kwargs)
-        t0 = time.perf_counter()
-        out = fn(*args, **kwargs)
-        _block_until_ready(out)
-        kernel_timings[label] = kernel_timings.get(label, 0.0) + (time.perf_counter() - t0)
-        return out
 
     from .energy import flux_profiles_from_indata
     from .energy import magnetic_wb_from_state
@@ -3512,7 +3480,7 @@ def solve_fixed_boundary_residual_iter(
         sp[1] = sm[2] if ns >= 2 else 0.0
         return sm, sp
 
-    def _lambda_preconditioner_impl(bc, *, return_faclam: bool = False, return_debug: bool = False):
+    def _lambda_preconditioner(bc, *, return_faclam: bool = False, return_debug: bool = False):
         from .preconditioner_1d_jax import lambda_preconditioner_cached
 
         lam_r0scale = float(getattr(trig, "r0scale", 1.0)) if trig is not None else 1.0
@@ -3526,16 +3494,7 @@ def solve_fixed_boundary_residual_iter(
             r0scale=lam_r0scale,
         )
 
-    def _lambda_preconditioner(bc, *, return_faclam: bool = False, return_debug: bool = False):
-        return _time_call(
-            "precond_lam",
-            _lambda_preconditioner_impl,
-            bc,
-            return_faclam=return_faclam,
-            return_debug=return_debug,
-        )
-
-    def _rz_preconditioner_impl(frzl_in: TomnspsRZL, bc, k):
+    def _rz_preconditioner(frzl_in: TomnspsRZL, bc, k):
         from .preconditioner_1d_jax import rz_preconditioner
 
         return rz_preconditioner(
@@ -3546,9 +3505,6 @@ def solve_fixed_boundary_residual_iter(
             s=s,
             cfg=cfg,
         )
-
-    def _rz_preconditioner(frzl_in: TomnspsRZL, bc, k):
-        return _time_call("precond_rz", _rz_preconditioner_impl, frzl_in, bc, k)
 
     def _compute_forces(
         state: VMECState,
@@ -3561,9 +3517,7 @@ def solve_fixed_boundary_residual_iter(
         constraint_tcon_active: Any | None = None,
         iter_idx: int | None = None,
     ):
-        k = _time_call(
-            "bcovar",
-            vmec_forces_rz_from_wout,
+        k = vmec_forces_rz_from_wout(
             state=state,
             static=static,
             wout=wout_like,
@@ -3586,9 +3540,7 @@ def solve_fixed_boundary_residual_iter(
         mask_pack = None
         if getattr(static, "tomnsps_masks", None) is not None:
             mask_pack = static.tomnsps_masks_edge if bool(include_edge) else static.tomnsps_masks
-        frzl = _time_call(
-            "tomnsps",
-            vmec_residual_internal_from_kernels,
+        frzl = vmec_residual_internal_from_kernels(
             k,
             cfg_ntheta=int(static.cfg.ntheta),
             cfg_nzeta=int(static.cfg.nzeta),
@@ -3681,9 +3633,6 @@ def solve_fixed_boundary_residual_iter(
         if iter_idx is not None:
             _maybe_dump_scalars(norms=norms_current, iter_idx=int(iter_idx), ns=int(static.cfg.ns))
         rz_scale, l_scale = _metric_surface_precond_from_bcovar(k.bc)
-        nonlocal kernel_iterations
-        if profile_kernels:
-            kernel_iterations += 1
         return k, frzl, gcr2, gcz2, gcl2, rz_scale, l_scale, norms_current
 
     if os.getenv("VMEC_JAX_DUMP_HLO_DIR", "").strip():
@@ -5071,65 +5020,6 @@ def solve_fixed_boundary_residual_iter(
                         w_mhd=float(w_mhd_full[i]),
                         z00=z00_val,
                     )
-        diag_scan = {
-            "use_scan": True,
-            "vmec2000_scan": True,
-            "fsqr_full": fsqr_full,
-            "fsqz_full": fsqz_full,
-            "fsql_full": fsql_full,
-            "accepted_mask": np.asarray(accepted),
-            "converged_iter": int(conv_idx),
-            "converged": bool(np.any(conv_mask)),
-            "fsqr1_history": fsqr1_hist_np,
-            "fsqz1_history": fsqz1_hist_np,
-            "fsql1_history": fsql1_hist_np,
-            "time_step_history": dt_hist_np,
-            "r00_history": r00_hist_np,
-            "w_vmec_history": w_mhd_hist_np,
-            "zero_m1_history": zero_m1_hist_np.astype(int),
-            "include_edge_history": include_edge_hist_np.astype(int),
-            "resume_state": {
-                "state_checkpoint": carry_final.state_checkpoint,
-                "time_step": float(np.asarray(carry_final.time_step)),
-                "inv_tau": np.asarray(carry_final.inv_tau),
-                "fsq_prev": float(np.asarray(carry_final.fsq_prev)),
-                "flip_sign": float(np.asarray(carry_final.flip_sign)),
-                "iter1": int(np.asarray(carry_final.iter1)),
-                "iter_offset": int(iter_offset + int(conv_idx)),
-                "res0": float(np.asarray(carry_final.res0)),
-                "res1": float(np.asarray(carry_final.res1)),
-                "vmec2000_cache_valid": bool(np.asarray(carry_final.cache_valid)),
-                "ijacob": int(np.asarray(carry_final.ijacob)),
-                "bad_resets": int(np.asarray(carry_final.bad_resets)),
-                "bad_growth_streak": int(np.asarray(carry_final.bad_growth)),
-                "fsqz_prev": float(np.asarray(carry_final.fsqz_prev)),
-                "vRcc": np.asarray(carry_final.vRcc),
-                "vRss": np.asarray(carry_final.vRss),
-                "vZsc": np.asarray(carry_final.vZsc),
-                "vZcs": np.asarray(carry_final.vZcs),
-                "vLsc": np.asarray(carry_final.vLsc),
-                "vLcs": np.asarray(carry_final.vLcs),
-                "cache_precond_diag": carry_final.cache_precond_diag,
-                "cache_tcon": carry_final.cache_tcon,
-                "cache_norms": carry_final.cache_norms,
-                "cache_rz_scale": carry_final.cache_rz_scale,
-                "cache_l_scale": carry_final.cache_l_scale,
-                "cache_rz_norm": np.asarray(carry_final.cache_rz_norm),
-                "cache_f_norm1": np.asarray(carry_final.cache_f_norm1),
-                "cache_prec_rz_mats": carry_final.cache_prec_rz_mats,
-                "cache_prec_lam_prec": np.asarray(carry_final.cache_prec_lam_prec),
-                "r00_prev": float(np.asarray(carry_final.r00_prev)),
-                "z00_prev": float(np.asarray(carry_final.z00_prev)),
-                "w_mhd_prev": float(np.asarray(carry_final.w_mhd_prev)),
-                "force_bcovar_update": bool(np.asarray(carry_final.force_bcovar_update)),
-            },
-        }
-        if profile_kernels:
-            kernel_stats = dict(kernel_timings)
-            kernel_stats["iterations"] = int(kernel_iterations)
-            if kernel_iterations > 0:
-                kernel_stats["per_iter"] = {k: float(v) / float(kernel_iterations) for k, v in kernel_timings.items()}
-            diag_scan["kernel_timings"] = kernel_stats
         return SolveVmecResidualResult(
             state=carry_final.state,
             n_iter=int(w_hist.shape[0]),
@@ -5139,7 +5029,59 @@ def solve_fixed_boundary_residual_iter(
             fsql2_history=np.asarray(fsql_hist_np),
             grad_rms_history=np.asarray([], dtype=float),
             step_history=np.asarray([], dtype=float),
-            diagnostics=diag_scan,
+            diagnostics={
+                "use_scan": True,
+                "vmec2000_scan": True,
+                "fsqr_full": fsqr_full,
+                "fsqz_full": fsqz_full,
+                "fsql_full": fsql_full,
+                "accepted_mask": np.asarray(accepted),
+                "converged_iter": int(conv_idx),
+                "converged": bool(np.any(conv_mask)),
+                "fsqr1_history": fsqr1_hist_np,
+                "fsqz1_history": fsqz1_hist_np,
+                "fsql1_history": fsql1_hist_np,
+                "time_step_history": dt_hist_np,
+                "r00_history": r00_hist_np,
+                "w_vmec_history": w_mhd_hist_np,
+                "zero_m1_history": zero_m1_hist_np.astype(int),
+                "include_edge_history": include_edge_hist_np.astype(int),
+                "resume_state": {
+                    "state_checkpoint": carry_final.state_checkpoint,
+                    "time_step": float(np.asarray(carry_final.time_step)),
+                    "inv_tau": np.asarray(carry_final.inv_tau),
+                    "fsq_prev": float(np.asarray(carry_final.fsq_prev)),
+                    "flip_sign": float(np.asarray(carry_final.flip_sign)),
+                    "iter1": int(np.asarray(carry_final.iter1)),
+                    "iter_offset": int(iter_offset + int(conv_idx)),
+                    "res0": float(np.asarray(carry_final.res0)),
+                    "res1": float(np.asarray(carry_final.res1)),
+                    "vmec2000_cache_valid": bool(np.asarray(carry_final.cache_valid)),
+                    "ijacob": int(np.asarray(carry_final.ijacob)),
+                    "bad_resets": int(np.asarray(carry_final.bad_resets)),
+                    "bad_growth_streak": int(np.asarray(carry_final.bad_growth)),
+                    "fsqz_prev": float(np.asarray(carry_final.fsqz_prev)),
+                    "vRcc": np.asarray(carry_final.vRcc),
+                    "vRss": np.asarray(carry_final.vRss),
+                    "vZsc": np.asarray(carry_final.vZsc),
+                    "vZcs": np.asarray(carry_final.vZcs),
+                    "vLsc": np.asarray(carry_final.vLsc),
+                    "vLcs": np.asarray(carry_final.vLcs),
+                    "cache_precond_diag": carry_final.cache_precond_diag,
+                    "cache_tcon": carry_final.cache_tcon,
+                    "cache_norms": carry_final.cache_norms,
+                    "cache_rz_scale": carry_final.cache_rz_scale,
+                    "cache_l_scale": carry_final.cache_l_scale,
+                    "cache_rz_norm": np.asarray(carry_final.cache_rz_norm),
+                    "cache_f_norm1": np.asarray(carry_final.cache_f_norm1),
+                    "cache_prec_rz_mats": carry_final.cache_prec_rz_mats,
+                    "cache_prec_lam_prec": np.asarray(carry_final.cache_prec_lam_prec),
+                    "r00_prev": float(np.asarray(carry_final.r00_prev)),
+                    "z00_prev": float(np.asarray(carry_final.z00_prev)),
+                    "w_mhd_prev": float(np.asarray(carry_final.w_mhd_prev)),
+                    "force_bcovar_update": bool(np.asarray(carry_final.force_bcovar_update)),
+                },
+            },
         )
 
     if use_scan and bool(vmec2000_control) and bool(cfg.lasym):
@@ -7260,12 +7202,6 @@ def solve_fixed_boundary_residual_iter(
         "gcz2_p_history": np.asarray(gcz2_p_history, dtype=float),
         "gcl2_p_history": np.asarray(gcl2_p_history, dtype=float),
     }
-    if profile_kernels:
-        kernel_stats = dict(kernel_timings)
-        kernel_stats["iterations"] = int(kernel_iterations)
-        if kernel_iterations > 0:
-            kernel_stats["per_iter"] = {k: float(v) / float(kernel_iterations) for k, v in kernel_timings.items()}
-        diag["kernel_timings"] = kernel_stats
     diag["resume_state"] = {
         "time_step": float(time_step),
         "inv_tau": list(inv_tau),
