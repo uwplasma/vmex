@@ -272,6 +272,9 @@ def run_fixed_boundary(
     jit_precompile: bool | None = None,
     use_scan: bool = False,
     performance_mode: bool = True,
+    stage_transition_heuristic: bool | None = None,
+    stage_transition_factor: float = 50.0,
+    stage_transition_scale: float = 0.5,
     grid=None,
     ns_override: int | None = None,
     restart_state: any | None = None,
@@ -459,6 +462,15 @@ def run_fixed_boundary(
     if restart_solver_state is not None:
         multigrid = False
     multigrid = bool(multigrid) and (ns_override is None)
+    if stage_transition_heuristic is None:
+        env_stage = os.getenv("VMEC_JAX_STAGE_HEURISTIC", "").strip().lower()
+        if env_stage in ("1", "true", "yes"):
+            stage_transition_heuristic = True
+        elif env_stage in ("0", "false", "no"):
+            stage_transition_heuristic = False
+        else:
+            stage_transition_heuristic = False
+    stage_transition_heuristic = bool(stage_transition_heuristic)
 
     # Build the initial state on either the final grid (single-grid solvers and
     # use_initial_guess) or on the first multigrid stage for VMEC-style solves.
@@ -814,6 +826,7 @@ def run_fixed_boundary(
         env_precompile_stages = os.getenv("VMEC_JAX_PRECOMPILE_STAGES", "0")
         precompile_stages = env_precompile_stages.strip().lower() not in ("", "0", "false", "no")
 
+        prev_stage_fsq = None
         for i, (ns_i, niter_i, ftol_i) in enumerate(zip(ns_stages, niter_stages, ftol_stages)):
             if verbose:
                 print(
@@ -879,6 +892,7 @@ def run_fixed_boundary(
 
             stage_offsets.append(sum(int(np.asarray(r.w_history).size) for r in stage_results))
             vmec2000_ctrl = True
+            stage_prev_fsq = prev_stage_fsq if bool(stage_transition_heuristic) else None
             solve_kwargs = dict(
                 indata=indata,
                 signgs=signgs,
@@ -901,6 +915,9 @@ def run_fixed_boundary(
                 use_restart_triggers=True if use_restart_triggers is None else bool(use_restart_triggers),
                 vmecpp_restart=bool(vmecpp_restart),
                 use_direct_fallback=False,
+                stage_prev_fsq=stage_prev_fsq,
+                stage_transition_factor=float(stage_transition_factor),
+                stage_transition_scale=float(stage_transition_scale),
                 resume_state=resume_state_stage,
                 verbose=bool(verbose),
                 verbose_vmec2000_table=bool(verbose),
@@ -954,6 +971,11 @@ def run_fixed_boundary(
                     **solve_kwargs,
                 )
             stage_results.append(res_i)
+            try:
+                w_hist = np.asarray(res_i.w_history)
+                prev_stage_fsq = float(w_hist[-1]) if w_hist.size else None
+            except Exception:
+                prev_stage_fsq = None
             if multigrid_resume and i < (nstep - 1):
                 resume_state_stage = _sanitize_resume_state_for_stage(res_i.diagnostics.get("resume_state"))
             state = stage_results[-1].state

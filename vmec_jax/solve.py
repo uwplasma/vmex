@@ -2895,6 +2895,9 @@ def solve_fixed_boundary_residual_iter(
     reference_mode: bool = False,
     use_restart_triggers: bool | None = None,
     vmecpp_restart: bool = False,
+    stage_prev_fsq: float | None = None,
+    stage_transition_factor: float = 50.0,
+    stage_transition_scale: float = 0.5,
     use_direct_fallback: bool | None = None,
     verbose: bool = True,
     verbose_vmec2000_table: bool = True,
@@ -2935,6 +2938,10 @@ def solve_fixed_boundary_residual_iter(
     use_direct_fallback = bool(use_direct_fallback)
     vmecpp_restart = bool(vmecpp_restart)
     verbose_vmec2000_table = bool(verbose_vmec2000_table)
+    stage_transition_factor = float(stage_transition_factor)
+    stage_transition_scale = float(stage_transition_scale)
+    if stage_transition_factor <= 0.0 or stage_transition_scale <= 0.0:
+        stage_prev_fsq = None
 
     if use_scan and vmec2000_control and auto_flip_force:
         auto_flip_force = False
@@ -4039,6 +4046,13 @@ def solve_fixed_boundary_residual_iter(
     if abs(gamma - 1.0) < 1e-14:
         raise ValueError("GAMMA=1 makes wp/(gamma-1) singular (VMEC objective undefined)")
 
+    stage_prev_fsq_j = None
+    if stage_prev_fsq is not None:
+        try:
+            stage_prev_fsq_j = jnp.asarray(float(stage_prev_fsq), dtype=dtype)
+        except Exception:
+            stage_prev_fsq_j = None
+
     def _run_vmec2000_scan(state_init: VMECState) -> SolveVmecResidualResult:
         if bool(cfg.lasym):
             raise ValueError("vmec2000 scan does not yet support lasym=True.")
@@ -4634,6 +4648,9 @@ def solve_fixed_boundary_residual_iter(
                         (iter2 - carry_adv.iter1) > (k_preconditioner_update_interval // 2)
                     ) & (iter2 > 2 * k_preconditioner_update_interval) & ((fsqr + fsqz) > 1.0e-2)
                 restart_vmecpp = use_restart_triggers & vmecpp_bad_progress
+                stage_spike = jnp.asarray(False)
+                if stage_prev_fsq_j is not None:
+                    stage_spike = (iter2 == 1) & (fsq0 > (stage_prev_fsq_j * stage_transition_factor))
                 do_restart = restart_time | restart_badjac | restart_vmecpp
 
                 def _restart_updates(_):
@@ -4711,6 +4728,25 @@ def solve_fixed_boundary_residual_iter(
                     bad_growth_post,
                     force_bcovar_post,
                 ) = jax.lax.cond(do_restart, _restart_updates, _no_restart_updates, operand=None)
+
+                if stage_prev_fsq_j is not None:
+                    time_step_post = jnp.where(
+                        stage_spike,
+                        jnp.maximum(time_step_post * jnp.asarray(stage_transition_scale, dtype=dtype), jnp.asarray(1.0e-12, dtype=dtype)),
+                        time_step_post,
+                    )
+                    inv_tau_post = jnp.where(
+                        stage_spike,
+                        jnp.full((k_ndamp,), jnp.asarray(0.15, dtype=dtype) / time_step_post),
+                        inv_tau_post,
+                    )
+                    vRcc_post = jnp.where(stage_spike, jnp.zeros_like(vRcc_post), vRcc_post)
+                    vRss_post = jnp.where(stage_spike, jnp.zeros_like(vRss_post), vRss_post)
+                    vZsc_post = jnp.where(stage_spike, jnp.zeros_like(vZsc_post), vZsc_post)
+                    vZcs_post = jnp.where(stage_spike, jnp.zeros_like(vZcs_post), vZcs_post)
+                    vLsc_post = jnp.where(stage_spike, jnp.zeros_like(vLsc_post), vLsc_post)
+                    vLcs_post = jnp.where(stage_spike, jnp.zeros_like(vLcs_post), vLcs_post)
+                    iter1_post = jnp.where(stage_spike, iter2, iter1_post)
 
                 def _accept_step(_):
                     inv_tau_reset = jnp.full((k_ndamp,), jnp.asarray(0.15, dtype=dtype) / time_step_post)
@@ -4904,6 +4940,9 @@ def solve_fixed_boundary_residual_iter(
             int(nstep_screen),
             bool(use_restart_triggers),
             bool(vmecpp_restart),
+            None if stage_prev_fsq is None else float(stage_prev_fsq),
+            float(stage_transition_factor),
+            float(stage_transition_scale),
         )
 
         def _run_scan(state_init_local):
@@ -6361,6 +6400,14 @@ def solve_fixed_boundary_residual_iter(
             # Restart triggers (bad progress / bad Jacobian proxy).
             # `bad_jacobian` computed above (before TimeStepControl) so that
             # VMEC's irst=2 restart takes precedence over time-control restarts.
+            if stage_prev_fsq is not None and iter2 == 1 and pre_restart_reason == "none":
+                try:
+                    prev_stage_fsq_val = float(stage_prev_fsq)
+                except Exception:
+                    prev_stage_fsq_val = None
+                if prev_stage_fsq_val is not None and np.isfinite(prev_stage_fsq_val):
+                    if fsq > (prev_stage_fsq_val * stage_transition_factor):
+                        pre_restart_reason = "stage_transition"
     
             huge_initial_forces = False
             if iter2 == 1 and lmove_axis:
@@ -6430,6 +6477,9 @@ def solve_fixed_boundary_residual_iter(
                     time_step = max(restart_badjac_factor * time_step, 1e-12)
                     ijacob += 1
                     step_status = "restart_bad_jacobian"
+                elif pre_restart_reason == "stage_transition":
+                    time_step = max(time_step * stage_transition_scale, 1e-12)
+                    step_status = "restart_stage_transition"
                 else:
                     time_step = max(time_step / restart_badprog_factor, 1e-12)
                     step_status = "restart_bad_progress"

@@ -102,6 +102,38 @@ def _parse_ns_iter(match, *, ns_group: int, iter_group: int) -> tuple[int | None
     return ns_val, it_val
 
 
+def _parse_int_list_arg(value: str | None) -> list[int] | None:
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    parts = [p for p in re.split(r"[\\s,]+", text) if p]
+    if not parts:
+        return None
+    return [int(float(p)) for p in parts]
+
+
+def _parse_float_list_arg(value: str | None) -> list[float] | None:
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    parts = [p for p in re.split(r"[\\s,]+", text) if p]
+    if not parts:
+        return None
+    return [float(p) for p in parts]
+
+
+def _extend_list(values: list, target_len: int) -> list:
+    if len(values) >= target_len:
+        return values[:target_len]
+    if not values:
+        return values
+    return values + [values[-1]] * (target_len - len(values))
+
+
 def _parse_vmec2000_stdout(text: str) -> list[Vmec2000PrintedStage]:
     stages: list[Vmec2000PrintedStage] = []
     current: Vmec2000PrintedStage | None = None
@@ -1691,6 +1723,24 @@ def main() -> None:
         help="If set, force both VMEC2000 and vmec_jax to run a single grid at this ns (no multigrid).",
     )
     p.add_argument(
+        "--ns-array",
+        type=str,
+        default=None,
+        help="Override NS_ARRAY staging (space/comma separated list).",
+    )
+    p.add_argument(
+        "--niter-array",
+        type=str,
+        default=None,
+        help="Override NITER_ARRAY staging (space/comma separated list).",
+    )
+    p.add_argument(
+        "--ftol-array",
+        type=str,
+        default=None,
+        help="Override FTOL_ARRAY staging (space/comma separated list).",
+    )
+    p.add_argument(
         "--use-input-niter",
         action="store_true",
         help="Use VMEC input NITER_ARRAY/FTOL_ARRAY staging (still capped by --max-iter).",
@@ -1786,13 +1836,35 @@ def main() -> None:
     ns_stages_eff: list[int] | None = None
     niter_stages_eff: list[int] | None = None
     ftol_stages_eff: list[float] | None = None
+    ns_override = _parse_int_list_arg(args.ns_array)
+    niter_override = _parse_int_list_arg(args.niter_array)
+    ftol_override = _parse_float_list_arg(args.ftol_array)
+    use_input_niter_flag = bool(args.use_input_niter) or bool(ns_override or niter_override or ftol_override)
     if args.single_ns is None:
         ns_stages_eff, niter_stages_eff, ftol_stages_eff = _resolve_stage_controls(
             cfg=_cfg_in,
             indata=_indata_in,
             max_iter=int(args.max_iter),
-            use_input_niter=bool(args.use_input_niter),
+            use_input_niter=use_input_niter_flag,
         )
+        if ns_override is not None:
+            ns_stages_eff = ns_override
+        if niter_override is not None:
+            niter_stages_eff = niter_override
+        if ftol_override is not None:
+            ftol_stages_eff = ftol_override
+        if ns_stages_eff is not None:
+            stage_len = len(ns_stages_eff)
+            if niter_stages_eff is None:
+                niter_stages_eff = [int(args.max_iter)] * stage_len
+            else:
+                niter_stages_eff = _extend_list([int(v) for v in niter_stages_eff], stage_len)
+            if ftol_stages_eff is None:
+                ftol_stages_eff = [ftol_default] * stage_len
+            else:
+                ftol_stages_eff = _extend_list([float(v) for v in ftol_stages_eff], stage_len)
+    elif ns_override is not None or niter_override is not None or ftol_override is not None:
+        raise SystemExit("--single-ns cannot be combined with --ns-array/--niter-array/--ftol-array overrides.")
 
     # --- Run VMEC2000 executable in an isolated workdir ---
     threed1_stages: list[Vmec2000Threed1Stage] | None = None
@@ -1827,6 +1899,7 @@ def main() -> None:
             }
 
         input_local.write_text(_patch_indata(indata_text, updates=updates))
+        jax_input_path = input_local
         cmd = [str(vmec2000_exe), input_local.name]
         vmec_env = os.environ.copy()
         if args.dump_level != "none":
@@ -1934,10 +2007,10 @@ def main() -> None:
                 use_scan = False if args.dump_level != "none" else True
                 performance_mode = False if args.dump_level != "none" else True
                 return vj.run_fixed_boundary(
-                    input_path,
+                    jax_input_path,
                     solver="vmec2000_iter",
                     max_iter=int(max_iter),
-                    multigrid_use_input_niter=bool(args.use_input_niter),
+                    multigrid_use_input_niter=use_input_niter_flag,
                     multigrid=multigrid,
                     verbose=False,
                     use_scan=use_scan,
