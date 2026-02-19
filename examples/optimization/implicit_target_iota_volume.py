@@ -43,9 +43,9 @@ def main() -> None:
     p.add_argument("--opt-lr", type=float, default=5e-2, help="Outer optimization learning rate.")
     p.add_argument("--target-iota", type=float, default=None, help="Target mid-radius iota.")
     p.add_argument("--target-volume", type=float, default=None, help="Target mid-radius volume.")
-    p.add_argument("--ns", type=int, default=31, help="Radial resolution (NS).")
-    p.add_argument("--niter", type=int, default=1000, help="Inner VMEC iterations per objective eval.")
-    p.add_argument("--ftol", type=float, default=1e-13, help="Inner solver grad tolerance.")
+    p.add_argument("--ns", type=int, default=None, help="Radial resolution (NS). Defaults to input file.")
+    p.add_argument("--niter", type=int, default=None, help="Inner VMEC iterations per objective eval.")
+    p.add_argument("--ftol", type=float, default=None, help="Inner solver grad tolerance.")
     args = p.parse_args()
 
     from vmec_jax._compat import enable_x64, has_jax, jax, jnp
@@ -68,7 +68,19 @@ def main() -> None:
     input_path = root / "examples" / "data" / f"input.{args.case}"
 
     cfg0, indata = vj.load_config(input_path)
-    cfg = replace(cfg0, ns=int(args.ns))
+
+    def _last_array_value(key, fallback):
+        val = indata.get(key, None)
+        if isinstance(val, list) and val:
+            return val[-1]
+        if val is None:
+            return fallback
+        return val
+
+    ns_use = int(args.ns) if args.ns is not None else int(cfg0.ns)
+    niter_use = int(args.niter) if args.niter is not None else int(_last_array_value("NITER_ARRAY", indata.get_int("NITER", 50)))
+    ftol_use = float(args.ftol) if args.ftol is not None else float(_last_array_value("FTOL_ARRAY", indata.get_float("FTOL", 1e-11)))
+    cfg = replace(cfg0, ns=int(ns_use))
     static = build_static(cfg)
 
     boundary0 = vj.boundary_from_indata(indata, static.modes, apply_m1_constraint=False)
@@ -78,21 +90,24 @@ def main() -> None:
     Zsin0 = jnp.asarray(boundary0.Z_sin)
 
     # Identify target boundary modes (RBC/ZBS) to optimize.
-    targets = [
-        (1, 0, "RBC(1,0)"),
-        (2, 0, "RBC(2,0)"),
-    ]
-    if int(cfg.ntor) > 0:
-        targets.append((1, 1, "RBC(1,1)"))
-    idx_R, names_R = _pick_mode_indices(static.modes, targets)
+    def _select_boundary_modes(coeffs, label_prefix):
+        m_arr = np.asarray(static.modes.m, dtype=int)
+        n_arr = np.asarray(static.modes.n, dtype=int)
+        sel_idx = []
+        sel_names = []
+        for k, (m_val, n_val) in enumerate(zip(m_arr, n_arr)):
+            if m_val == 0 and n_val == 0:
+                continue
+            if abs(m_val) > 1 or abs(n_val) > 1:
+                continue
+            if abs(float(np.asarray(coeffs)[k])) <= 0.0:
+                continue
+            sel_idx.append(int(k))
+            sel_names.append(f"{label_prefix}({int(m_val)},{int(n_val)})")
+        return sel_idx, sel_names
 
-    targets = [
-        (1, 0, "ZBS(1,0)"),
-        (2, 0, "ZBS(2,0)"),
-    ]
-    if int(cfg.ntor) > 0:
-        targets.append((1, 1, "ZBS(1,1)"))
-    idx_Z, names_Z = _pick_mode_indices(static.modes, targets)
+    idx_R, names_R = _select_boundary_modes(Rcos0, "RBC")
+    idx_Z, names_Z = _select_boundary_modes(Zsin0, "ZBS")
 
     if not idx_R and not idx_Z:
         raise SystemExit("No boundary modes selected for optimization.")
@@ -177,9 +192,9 @@ def main() -> None:
         )
         return Rcos_i[0], Rsin_i[0], Zcos_i[0], Zsin_i[0]
 
-    def _iota_mid(state):
+    def _iota_mean(state):
         if ncurr == 0:
-            return iota_prof[s_idx]
+            return jnp.mean(iota_prof[1:]) if iota_prof.size > 1 else iota_prof[0]
         from types import SimpleNamespace
 
         wout_like = SimpleNamespace(
@@ -220,9 +235,9 @@ def main() -> None:
         chips = chips.at[0].set(jnp.asarray(0.0, dtype=chips.dtype))
         iotas = jnp.where(phips != 0.0, chips / phips, jnp.zeros_like(chips))
         iotas = iotas.at[0].set(jnp.asarray(0.0, dtype=iotas.dtype))
-        return iotas[s_idx]
+        return jnp.mean(iotas[1:]) if iotas.size > 1 else iotas[0]
 
-    def _volume_mid(state):
+    def _volume_total(state):
         geom = eval_geom(state, static)
         _dvds, vol = volume_from_sqrtg(
             geom.sqrtg,
@@ -231,7 +246,10 @@ def main() -> None:
             static.grid.zeta,
             nfp=int(cfg.nfp),
         )
-        return vol[s_idx]
+        return vol[-1]
+
+    solver_name = "lbfgs"
+    step_size_inner = 1.0
 
     def _solve_state(params):
         Rcos, Rsin, Zcos, Zsin = _build_boundary(params)
@@ -246,15 +264,17 @@ def main() -> None:
             pressure=pressure,
             gamma=float(indata.get_float("GAMMA", 0.0)),
             jacobian_penalty=1e3,
-            solver="lbfgs",
-            max_iter=int(args.niter),
-            step_size=1.0,
+            solver=solver_name,
+            max_iter=int(niter_use),
+            step_size=float(step_size_inner),
             history_size=8,
-            grad_tol=float(args.ftol),
+            grad_tol=float(ftol_use),
             preconditioner="mode_diag+radial_tridi",
             precond_exponent=1.0,
             precond_radial_alpha=0.5,
             implicit=implicit_opts,
+            implicit_converge_tol=max(float(ftol_use), 1e-6),
+            implicit_zero_unconverged=False,
             edge_Rcos=edge_Rcos,
             edge_Rsin=edge_Rsin,
             edge_Zcos=edge_Zcos,
@@ -266,26 +286,34 @@ def main() -> None:
     params0 = jnp.zeros((len(idx_R) + len(idx_Z),), dtype=jnp.float64)
     if args.target_iota is None or args.target_volume is None:
         print("computing base equilibrium for target values...")
-        st_base = _solve_state(params0)
-        iota_base = float(np.asarray(_iota_mid(st_base)))
-        vol_base = float(np.asarray(_volume_mid(st_base)))
+        try:
+            st_base = _solve_state(params0)
+        except ValueError as exc:
+            print(f"base solve failed with {solver_name}: {exc}")
+            solver_name = "gd"
+            step_size_inner = 0.2
+            print("falling back to gd for this example run")
+            st_base = _solve_state(params0)
+        iota_base = float(np.asarray(_iota_mean(st_base)))
+        vol_base = float(np.asarray(_volume_total(st_base)))
     else:
         iota_base = float(args.target_iota)
         vol_base = float(args.target_volume)
 
-    target_iota = float(args.target_iota) if args.target_iota is not None else (1.05 * iota_base)
-    target_volume = float(args.target_volume) if args.target_volume is not None else (0.98 * vol_base)
+    target_iota = float(args.target_iota) if args.target_iota is not None else (1.15 * iota_base)
+    target_volume = float(args.target_volume) if args.target_volume is not None else (1.15 * vol_base)
 
     def objective(params):
         st = _solve_state(params)
-        iota_mid = _iota_mid(st)
-        vol_mid = _volume_mid(st)
-        loss = (iota_mid - target_iota) ** 2 + (vol_mid - target_volume) ** 2
-        return loss, (iota_mid, vol_mid)
+        iota_mean = _iota_mean(st)
+        vol_total = _volume_total(st)
+        loss = (iota_mean - target_iota) ** 2 + (vol_total - target_volume) ** 2
+        return loss, (iota_mean, vol_total)
 
     value_and_grad = jax.value_and_grad(objective, has_aux=True)
     params = params0
 
+    print(f"NS={int(cfg.ns)} NITER={int(niter_use)} FTOL={float(ftol_use):.3e}")
     print(f"target_iota={target_iota:.6e} target_volume={target_volume:.6e}")
     print("params:", " ".join(names_R + names_Z))
     if k00 is not None:
@@ -295,13 +323,13 @@ def main() -> None:
         t0 = time.perf_counter()
         (val, aux), grad = value_and_grad(params)
         dt = time.perf_counter() - t0
-        iota_mid, vol_mid = aux
+        iota_mean, vol_total = aux
         grad_abs = float(jnp.sum(jnp.abs(grad)))
         grad_max = float(jnp.max(jnp.abs(grad)))
         params = params - float(args.opt_lr) * grad
         print(
             f"step {step:02d}: loss={float(val):.6e} "
-            f"iota_mid={float(iota_mid):.6e} volume_mid={float(vol_mid):.6e} "
+            f"iota_mean={float(iota_mean):.6e} volume={float(vol_total):.6e} "
             f"grad_abs={grad_abs:.6e} grad_max={grad_max:.6e} dt={dt:.3f}s"
         )
 

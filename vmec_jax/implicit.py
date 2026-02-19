@@ -290,6 +290,8 @@ def solve_fixed_boundary_state_implicit(
     edge_Rsin: Any | None = None,
     edge_Zcos: Any | None = None,
     edge_Zsin: Any | None = None,
+    implicit_converge_tol: float | None = None,
+    implicit_zero_unconverged: bool = True,
     implicit: ImplicitFixedBoundaryOptions | None = None,
 ) -> VMECState:
     """Fixed-boundary solve with a custom VJP using implicit differentiation.
@@ -462,7 +464,8 @@ def solve_fixed_boundary_state_implicit(
         converged = False
         if grad_hist is not None and len(grad_hist) > 0:
             try:
-                converged = bool(float(grad_hist[-1]) < float(grad_tol))
+                tol_check = float(grad_tol) if implicit_converge_tol is None else float(implicit_converge_tol)
+                converged = bool(float(grad_hist[-1]) < tol_check)
             except Exception:
                 converged = False
         return res.state, converged
@@ -519,7 +522,7 @@ def solve_fixed_boundary_state_implicit(
             edge_active,
             converged,
         ) = residual
-        if not bool(converged):
+        if (not bool(converged)) and bool(implicit_zero_unconverged):
             z = jnp.zeros_like(jnp.asarray(phipf_star))
             zc = jnp.zeros_like(jnp.asarray(chipf_star))
             zp = jnp.zeros_like(jnp.asarray(pressure_star))
@@ -531,6 +534,7 @@ def solve_fixed_boundary_state_implicit(
             return (z, zc, zp, zl, zr, zs, zc2, zz)
         layout = st_star.layout
 
+        ct_state_full = ct_state
         ct_state = _mask_grad_for_constraints(ct_state, static, idx00=idx00)
         b = pack_state(ct_state)
 
@@ -581,6 +585,15 @@ def solve_fixed_boundary_state_implicit(
             edge_Zsin_star,
         )
         dphipf, dchipf, dpressure, dlamscale, dRcos, dRsin, dZcos, dZsin = vjp_fun(v)
+        # Direct dependence of the output state on boundary parameters.
+        ct_edge_Rcos = jnp.asarray(ct_state_full.Rcos)[-1, :]
+        ct_edge_Rsin = jnp.asarray(ct_state_full.Rsin)[-1, :]
+        ct_edge_Zcos = jnp.asarray(ct_state_full.Zcos)[-1, :]
+        ct_edge_Zsin = jnp.asarray(ct_state_full.Zsin)[-1, :]
+        dRcos = dRcos + ct_edge_Rcos
+        dRsin = dRsin + ct_edge_Rsin
+        dZcos = dZcos + ct_edge_Zcos
+        dZsin = dZsin + ct_edge_Zsin
         if not bool(edge_active):
             dRcos = jnp.zeros_like(dRcos)
             dRsin = jnp.zeros_like(dRsin)
