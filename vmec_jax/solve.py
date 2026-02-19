@@ -6026,11 +6026,14 @@ def solve_fixed_boundary_residual_iter(
         converged = False
         skip_time_control = False
         force_bcovar_update = False
+        time_step_report_hold: float | None = None
         while True:
             iter_since_restart = iter2 - iter1
             fsq_prev_before = fsq_prev
             pre_restart_reason = "none"
-            time_step_report = float(time_step)
+            if time_step_report_hold is None:
+                time_step_report_hold = float(time_step)
+            time_step_report = float(time_step_report_hold)
             if vmec2000_control:
                 # VMEC2000 `constrain_m1` logic (residue.f90):
                 #   zero gcz(m=1) if (fsqz_prev < 1e-6) OR (iter2 < 2) OR (ictrl_prec2d != 0).
@@ -6900,20 +6903,8 @@ def solve_fixed_boundary_residual_iter(
                 grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
                 if verbose:
                     if bool(vmec2000_control) and bool(verbose_vmec2000_table):
-                        if _should_print_vmec2000(int(iter2), int(max_iter)):
-                            _print_vmec2000_iter_row(
-                                iter_idx=int(iter2),
-                                fsqr=fsqr_f,
-                                fsqz=fsqz_f,
-                                fsql=fsql_f,
-                                fsqr1=fsqr1_f,
-                                fsqz1=fsqz1_f,
-                                fsql1=fsql1_f,
-                                delt0r=float(time_step_iter),
-                                r00=float(r00_val),
-                                w_mhd=float(w_vmec_history[-1]),
-                                z00=float(z00_val),
-                            )
+                        # VMEC does not print rejected restart steps.
+                        pass
                     else:
                         print(
                             f"[solve_fixed_boundary_residual_iter] iter={it:03d} "
