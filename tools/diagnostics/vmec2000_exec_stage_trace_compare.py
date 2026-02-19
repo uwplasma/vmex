@@ -2233,6 +2233,14 @@ def main() -> None:
             return False
         return abs(vmec_val - jax_val) <= max(float(args.atol), float(args.rtol) * abs(vmec_val))
 
+    def _vmec_print_round(val: float, decimals: int) -> float:
+        if not np.isfinite(val):
+            return val
+        try:
+            return float(f"{float(val):.{int(decimals)}E}")
+        except Exception:
+            return float(val)
+
     # Stage transition parity (ns + offsets).
     if offsets.size and ns_stages.size:
         ns_ok = bool(vmec_ns.size == ns_stages.size) and bool(np.all(vmec_ns == ns_stages[: vmec_ns.size]))
@@ -2286,49 +2294,71 @@ def main() -> None:
                         max_key = max(vmec_time_control.keys(), default=None)
                         if max_key is not None and iter2 > max_key:
                             vmec_delt0r = float(vmec_time_control[max_key])
+                jx_fsqr = float(fsqr[j] if j < fsqr.size else float("nan"))
+                jx_fsqz = float(fsqz[j] if j < fsqz.size else float("nan"))
+                jx_fsql = float(fsql[j] if j < fsql.size else float("nan"))
+                jx_fsqr1 = float(fsqr1[j] if j < fsqr1.size else float("nan"))
+                jx_fsqz1 = float(fsqz1[j] if j < fsqz1.size else float("nan"))
+                jx_fsql1 = float(fsql1[j] if j < fsql1.size else float("nan"))
+                jx_delt0r = float(delt[j] if j < delt.size else float("nan"))
+                jx_r00 = float(r00[j] if j < r00.size else float("nan"))
+                jx_w = float(w[j] if j < w.size else float("nan"))
+                # When comparing to threed1 (no dumps), round to VMEC print precision
+                # so the comparator reflects what is actually printed.
+                use_dump_vals = bool(args.fsq_from_dumps) and (bool(vmec_fsq_dump) or bool(vmec_fsq1))
+                if not use_dump_vals:
+                    jx_fsqr = _vmec_print_round(jx_fsqr, 2)
+                    jx_fsqz = _vmec_print_round(jx_fsqz, 2)
+                    jx_fsql = _vmec_print_round(jx_fsql, 2)
+                    jx_fsqr1 = _vmec_print_round(jx_fsqr1, 2)
+                    jx_fsqz1 = _vmec_print_round(jx_fsqz1, 2)
+                    jx_fsql1 = _vmec_print_round(jx_fsql1, 2)
+                    jx_delt0r = _vmec_print_round(jx_delt0r, 2)
+                    jx_r00 = _vmec_print_round(jx_r00, 3)
+                    jx_w = _vmec_print_round(jx_w, 4)
                 print(
                     f"  {stage_i+1:>3d} {row.it:>4d}  "
-                    f"{vmec_fsqr:>11.3e} {fsqr[j] if j < fsqr.size else float('nan'):>11.3e}  "
-                    f"{vmec_fsqz:>11.3e} {fsqz[j] if j < fsqz.size else float('nan'):>11.3e}  "
-                    f"{vmec_fsql:>11.3e} {fsql[j] if j < fsql.size else float('nan'):>11.3e}  "
-                    f"{vmec_fsqr1:>11.3e} {fsqr1[j] if j < fsqr1.size else float('nan'):>11.3e}  "
-                    f"{vmec_fsqz1:>11.3e} {fsqz1[j] if j < fsqz1.size else float('nan'):>11.3e}  "
-                    f"{vmec_fsql1:>11.3e} {fsql1[j] if j < fsql1.size else float('nan'):>11.3e}  "
-                    f"{vmec_delt0r:>11.3e} {delt[j] if j < delt.size else float('nan'):>11.3e}  "
-                    f"{(row.r00 if row.r00 is not None else float('nan')):>11.3e} {r00[j] if j < r00.size else float('nan'):>11.3e}  "
-                    f"{(row.w if row.w is not None else float('nan')):>11.3e} {w[j] if j < w.size else float('nan'):>11.3e}"
+                    f"{vmec_fsqr:>11.3e} {jx_fsqr:>11.3e}  "
+                    f"{vmec_fsqz:>11.3e} {jx_fsqz:>11.3e}  "
+                    f"{vmec_fsql:>11.3e} {jx_fsql:>11.3e}  "
+                    f"{vmec_fsqr1:>11.3e} {jx_fsqr1:>11.3e}  "
+                    f"{vmec_fsqz1:>11.3e} {jx_fsqz1:>11.3e}  "
+                    f"{vmec_fsql1:>11.3e} {jx_fsql1:>11.3e}  "
+                    f"{vmec_delt0r:>11.3e} {jx_delt0r:>11.3e}  "
+                    f"{(row.r00 if row.r00 is not None else float('nan')):>11.3e} {jx_r00:>11.3e}  "
+                    f"{(row.w if row.w is not None else float('nan')):>11.3e} {jx_w:>11.3e}"
                 )
                 diff_rows.append((int(stage_i + 1), int(row.it)))
                 diff_cols_vmec["fsqr"].append(vmec_fsqr)
-                diff_cols_jax["fsqr"].append(float(fsqr[j]))
+                diff_cols_jax["fsqr"].append(jx_fsqr)
                 diff_cols_vmec["fsqz"].append(vmec_fsqz)
-                diff_cols_jax["fsqz"].append(float(fsqz[j]))
+                diff_cols_jax["fsqz"].append(jx_fsqz)
                 diff_cols_vmec["fsql"].append(vmec_fsql)
-                diff_cols_jax["fsql"].append(float(fsql[j]))
+                diff_cols_jax["fsql"].append(jx_fsql)
                 diff_cols_vmec["fsqr1"].append(vmec_fsqr1)
-                diff_cols_jax["fsqr1"].append(float(fsqr1[j] if j < fsqr1.size else float("nan")))
+                diff_cols_jax["fsqr1"].append(jx_fsqr1)
                 diff_cols_vmec["fsqz1"].append(vmec_fsqz1)
-                diff_cols_jax["fsqz1"].append(float(fsqz1[j] if j < fsqz1.size else float("nan")))
+                diff_cols_jax["fsqz1"].append(jx_fsqz1)
                 diff_cols_vmec["fsql1"].append(vmec_fsql1)
-                diff_cols_jax["fsql1"].append(float(fsql1[j] if j < fsql1.size else float("nan")))
+                diff_cols_jax["fsql1"].append(jx_fsql1)
                 diff_cols_vmec["delt0r"].append(vmec_delt0r)
-                diff_cols_jax["delt0r"].append(float(delt[j] if j < delt.size else float("nan")))
+                diff_cols_jax["delt0r"].append(jx_delt0r)
                 diff_cols_vmec["r00"].append(float(row.r00 if row.r00 is not None else float("nan")))
-                diff_cols_jax["r00"].append(float(r00[j] if j < r00.size else float("nan")))
+                diff_cols_jax["r00"].append(jx_r00)
                 diff_cols_vmec["w"].append(float(row.w if row.w is not None else float("nan")))
-                diff_cols_jax["w"].append(float(w[j] if j < w.size else float("nan")))
+                diff_cols_jax["w"].append(jx_w)
 
                 if bool(args.fail_fast) and first_mismatch is None:
                     pairs = [
-                        ("fsqr", vmec_fsqr, float(fsqr[j] if j < fsqr.size else float("nan"))),
-                        ("fsqz", vmec_fsqz, float(fsqz[j] if j < fsqz.size else float("nan"))),
-                        ("fsql", vmec_fsql, float(fsql[j] if j < fsql.size else float("nan"))),
-                        ("fsqr1", vmec_fsqr1, float(fsqr1[j] if j < fsqr1.size else float("nan"))),
-                        ("fsqz1", vmec_fsqz1, float(fsqz1[j] if j < fsqz1.size else float("nan"))),
-                        ("fsql1", vmec_fsql1, float(fsql1[j] if j < fsql1.size else float("nan"))),
-                        ("delt0r", vmec_delt0r, float(delt[j] if j < delt.size else float("nan"))),
-                        ("r00", float(row.r00 if row.r00 is not None else float("nan")), float(r00[j] if j < r00.size else float("nan"))),
-                        ("wmhd", float(row.w if row.w is not None else float("nan")), float(w[j] if j < w.size else float("nan"))),
+                        ("fsqr", vmec_fsqr, jx_fsqr),
+                        ("fsqz", vmec_fsqz, jx_fsqz),
+                        ("fsql", vmec_fsql, jx_fsql),
+                        ("fsqr1", vmec_fsqr1, jx_fsqr1),
+                        ("fsqz1", vmec_fsqz1, jx_fsqz1),
+                        ("fsql1", vmec_fsql1, jx_fsql1),
+                        ("delt0r", vmec_delt0r, jx_delt0r),
+                        ("r00", float(row.r00 if row.r00 is not None else float("nan")), jx_r00),
+                        ("wmhd", float(row.w if row.w is not None else float("nan")), jx_w),
                     ]
                     for name, v, jv in pairs:
                         if not _matches(v, jv):
