@@ -850,7 +850,11 @@ def run_fixed_boundary(
             cfg_i = replace(cfg, ns=int(ns_i))
             static_i = build_static(cfg_i, grid=grid)
             scan_mode = bool(use_scan)
-            jit_forces_eff = _resolve_jit_forces(jit_forces, static_i, int(niter_i))
+            if scan_mode and isinstance(jit_forces, str) and jit_forces.strip().lower() == "auto":
+                # The scan path is already JIT-compiled; avoid nested JIT by default.
+                jit_forces_eff = False
+            else:
+                jit_forces_eff = _resolve_jit_forces(jit_forces, static_i, int(niter_i))
             jit_precompile_eff = False
             if bool(jit_forces_eff) and (not bool(scan_mode)):
                 if jit_precompile is None:
