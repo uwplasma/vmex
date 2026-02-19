@@ -2985,16 +2985,7 @@ def solve_fixed_boundary_residual_iter(
     if profile_kernels_requested and (not profile_kernels) and verbose:
         print("[solve_fixed_boundary_residual_iter] kernel profiling requires --parity and --jit-forces false")
 
-    kernel_timings: Dict[str, float] = {
-        "bcovar": 0.0,
-        "tomnsps": 0.0,
-        "gcx2": 0.0,
-        "realspace": 0.0,
-        "realspace_dtheta": 0.0,
-        "realspace_dzeta": 0.0,
-        "precond_lam": 0.0,
-        "precond_rz": 0.0,
-    }
+    kernel_timings: Dict[str, float] = {"bcovar": 0.0, "tomnsps": 0.0, "precond_lam": 0.0, "precond_rz": 0.0}
     kernel_iterations = 0
 
     def _block_until_ready(tree):
@@ -3585,7 +3576,6 @@ def solve_fixed_boundary_residual_iter(
             use_vmec_synthesis=True,
             trig=trig,
             iter_idx=iter_idx,
-            profile_timings=kernel_timings if profile_kernels else None,
         )
         if iter_idx is not None:
             _maybe_dump_bsube(bc=k.bc, static=static, iter_idx=int(iter_idx))
@@ -3670,9 +3660,7 @@ def solve_fixed_boundary_residual_iter(
         if not bool(include_edge):
             frzl = _mask_edge(frzl)
 
-        gcr2, gcz2, gcl2 = _time_call(
-            "gcx2",
-            vmec_gcx2_from_tomnsps,
+        gcr2, gcz2, gcl2 = vmec_gcx2_from_tomnsps(
             frzl=frzl,
             lconm1=bool(getattr(static.cfg, "lconm1", True)),
             apply_m1_constraints=False,
