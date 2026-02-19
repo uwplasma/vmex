@@ -68,7 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--fast",
         action="store_true",
-        help="Use scan-based fast loop (default).",
+        help="Use scan-based fast loop.",
     )
     p.add_argument(
         "--vmecpp-restart",
@@ -156,11 +156,11 @@ def main(argv: list[str] | None = None) -> int:
     if bool(args.parity) and bool(args.fast):
         parser.error("--parity and --fast are mutually exclusive")
         return 2
-    performance_mode = True
-    if bool(args.parity):
-        performance_mode = False
-    elif bool(args.fast):
+    performance_mode = False
+    if bool(args.fast):
         performance_mode = True
+    elif bool(args.parity):
+        performance_mode = False
     if args.vmecpp_restart is None:
         vmecpp_restart = False
     else:
