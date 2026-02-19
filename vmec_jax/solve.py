@@ -4116,6 +4116,7 @@ def solve_fixed_boundary_residual_iter(
                 iter_offset = int(resume_state.get("iter_offset", iter_offset))
             except Exception:
                 pass
+        axis_reset_enabled = bool(vmec2000_control) and (not axis_reset_done) and bool(lmove_axis)
 
         def _should_print_vmec2000_local(iter_idx: int, max_iter_local: int) -> bool:
             if not (bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table)):
@@ -4155,6 +4156,63 @@ def solve_fixed_boundary_residual_iter(
                     flush=True,
                 )
         dtype = jnp.asarray(state_init.Rcos).dtype
+
+        axis_state_spec = (
+            jax.ShapeDtypeStruct(state_init.Rcos.shape, dtype),
+            jax.ShapeDtypeStruct(state_init.Rsin.shape, dtype),
+            jax.ShapeDtypeStruct(state_init.Zcos.shape, dtype),
+            jax.ShapeDtypeStruct(state_init.Zsin.shape, dtype),
+            jax.ShapeDtypeStruct(state_init.Lcos.shape, dtype),
+            jax.ShapeDtypeStruct(state_init.Lsin.shape, dtype),
+        )
+
+        def _axis_reset_callback(
+            pr1_even,
+            pr1_odd,
+            pz1_even,
+            pz1_odd,
+            pru_even,
+            pru_odd,
+            pzu_even,
+            pzu_odd,
+            bad_jacobian_flag,
+        ):
+            from types import SimpleNamespace
+            k_guess = SimpleNamespace(
+                pr1_even=np.asarray(pr1_even),
+                pr1_odd=np.asarray(pr1_odd),
+                pz1_even=np.asarray(pz1_even),
+                pz1_odd=np.asarray(pz1_odd),
+                pru_even=np.asarray(pru_even),
+                pru_odd=np.asarray(pru_odd),
+                pzu_even=np.asarray(pzu_even),
+                pzu_odd=np.asarray(pzu_odd),
+            )
+            st_template = VMECState(
+                layout=state_init.layout,
+                Rcos=np.asarray(state_init.Rcos),
+                Rsin=np.asarray(state_init.Rsin),
+                Zcos=np.asarray(state_init.Zcos),
+                Zsin=np.asarray(state_init.Zsin),
+                Lcos=np.asarray(state_init.Lcos),
+                Lsin=np.asarray(state_init.Lsin),
+            )
+            st_new = _reset_axis_from_boundary(st_template, k_guess=k_guess, full_reset=True)
+            if bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table):
+                if bool(bad_jacobian_flag):
+                    print(" INITIAL JACOBIAN CHANGED SIGN!", flush=True)
+                print(" TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS", flush=True)
+                if axis_reset_coeffs is not None:
+                    raxis_cc, _raxis_cs, _zaxis_cc, zaxis_cs = axis_reset_coeffs
+                    _print_axis_guess(raxis_cc, zaxis_cs)
+            return (
+                np.asarray(st_new.Rcos),
+                np.asarray(st_new.Rsin),
+                np.asarray(st_new.Zcos),
+                np.asarray(st_new.Zsin),
+                np.asarray(st_new.Lcos),
+                np.asarray(st_new.Lsin),
+            )
         time_step0 = jnp.asarray(float(step_size), dtype=dtype)
         flip_sign0 = jnp.asarray(float(initial_flip_sign), dtype=dtype)
         k_ndamp = 10
@@ -4684,13 +4742,69 @@ def solve_fixed_boundary_residual_iter(
                 fsql1 = gcl2_full * delta_s
                 fsq1 = fsqr1 + fsqz1 + fsql1
 
+                fsq0 = fsqr + fsqz + fsql
                 tau = jnp.asarray(k.bc.jac.tau)
                 tau_use = tau[1:] if int(tau.shape[0]) > 1 else tau
                 min_tau = jnp.min(tau_use)
                 max_tau = jnp.max(tau_use)
                 bad_jacobian = (min_tau < 0.0) & (max_tau > 0.0)
+                if axis_reset_enabled:
+                    def _probe_badjac(_):
+                        jac_probe = vmec_half_mesh_jacobian_from_state(
+                            state=carry_adv.state,
+                            modes=static.modes,
+                            trig=trig,
+                            s=s,
+                            lconm1=bool(getattr(static.cfg, "lconm1", True)),
+                            lthreed=bool(getattr(static.cfg, "lthreed", True)),
+                            mask_even=getattr(static, "m_is_even", None),
+                            mask_odd=getattr(static, "m_is_odd", None),
+                        )
+                        tau_p = jnp.asarray(jac_probe.tau)
+                        tau_p_use = tau_p[1:] if int(tau_p.shape[0]) > 1 else tau_p
+                        return (jnp.min(tau_p_use) < 0.0) & (jnp.max(tau_p_use) > 0.0)
+                    bad_jacobian = jax.lax.cond(iter2 == 1, _probe_badjac, lambda _: bad_jacobian, operand=None)
+                huge_initial_forces = (~jnp.isfinite(fsq0)) | (fsq0 > 1.0e2)
+                axis_reset_trigger = (
+                    jnp.asarray(axis_reset_enabled)
+                    & (iter2 == 1)
+                    & (bad_jacobian | huge_initial_forces)
+                )
+                state_tuple_current = (
+                    carry_adv.state.Rcos,
+                    carry_adv.state.Rsin,
+                    carry_adv.state.Zcos,
+                    carry_adv.state.Zsin,
+                    carry_adv.state.Lcos,
+                    carry_adv.state.Lsin,
+                )
 
-                fsq0 = fsqr + fsqz + fsql
+                def _axis_reset_state(_):
+                    return jax.pure_callback(
+                        _axis_reset_callback,
+                        axis_state_spec,
+                        k.pr1_even,
+                        k.pr1_odd,
+                        k.pz1_even,
+                        k.pz1_odd,
+                        k.pru_even,
+                        k.pru_odd,
+                        k.pzu_even,
+                        k.pzu_odd,
+                        bad_jacobian,
+                    )
+
+                state_tuple_reset = jax.lax.cond(axis_reset_trigger, _axis_reset_state, lambda _: state_tuple_current, operand=None)
+                state_axis = VMECState(
+                    layout=carry_adv.state.layout,
+                    Rcos=state_tuple_reset[0],
+                    Rsin=state_tuple_reset[1],
+                    Zcos=state_tuple_reset[2],
+                    Zsin=state_tuple_reset[3],
+                    Lcos=state_tuple_reset[4],
+                    Lsin=state_tuple_reset[5],
+                )
+
                 fsq = carry_adv.fsq_prev
                 init_mask = (iter2 == carry_adv.iter1) | (carry_adv.res0 < 0.0) | (carry_adv.res1 < 0.0)
                 res0 = jnp.where(init_mask, fsq, carry_adv.res0)
@@ -4716,10 +4830,14 @@ def solve_fixed_boundary_residual_iter(
                         (iter2 - carry_adv.iter1) > (k_preconditioner_update_interval // 2)
                     ) & (iter2 > 2 * k_preconditioner_update_interval) & ((fsqr + fsqz) > 1.0e-2)
                 restart_vmecpp = use_restart_triggers & vmecpp_bad_progress
+                restart_badjac = restart_badjac | axis_reset_trigger
                 stage_spike = jnp.asarray(False)
                 if stage_prev_fsq_j is not None:
                     stage_spike = (iter2 == 1) & (fsq0 > (stage_prev_fsq_j * stage_transition_factor))
                 do_restart = restart_time | restart_badjac | restart_vmecpp
+                state_checkpoint = jax.tree_util.tree_map(
+                    lambda a, b: jnp.where(axis_reset_trigger, a, b), state_axis, state_checkpoint
+                )
 
                 def _restart_updates(_):
                     time_step = jnp.where(
