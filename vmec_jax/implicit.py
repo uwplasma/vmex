@@ -364,6 +364,7 @@ def solve_fixed_boundary_state_implicit(
                 preconditioner=str(preconditioner),
                 precond_exponent=float(precond_exponent),
                 precond_radial_alpha=float(precond_radial_alpha),
+                verbose=False,
             )
         else:
             res = solve_fixed_boundary_lbfgs(
@@ -384,25 +385,65 @@ def solve_fixed_boundary_state_implicit(
                 preconditioner=str(preconditioner),
                 precond_exponent=float(precond_exponent),
                 precond_radial_alpha=float(precond_radial_alpha),
+                verbose=False,
             )
-        return res.state
+            if int(getattr(res, "n_iter", 0)) <= 0:
+                # L-BFGS failed to find a decreasing step; fall back to a more
+                # conservative GD run to keep implicit gradients meaningful.
+                max_iter_fb = max(50, int(max_iter))
+                step_size_fb = min(0.2, float(step_size) * 0.2)
+                res = solve_fixed_boundary_gd(
+                    state0_c,
+                    static,
+                    phipf=phipf,
+                    chipf=chipf,
+                    signgs=signgs_i,
+                    lamscale=lamscale,
+                    pressure=pressure,
+                    gamma=gamma,
+                    jacobian_penalty=jacobian_penalty,
+                    max_iter=max_iter_fb,
+                    step_size=step_size_fb,
+                    grad_tol=float(grad_tol),
+                    max_backtracks=int(max_backtracks),
+                    bt_factor=float(bt_factor),
+                    preconditioner=str(preconditioner),
+                    precond_exponent=float(precond_exponent),
+                    precond_radial_alpha=float(precond_radial_alpha),
+                    verbose=False,
+                )
+        grad_hist = getattr(res, "grad_rms_history", None)
+        converged = False
+        if grad_hist is not None and len(grad_hist) > 0:
+            try:
+                converged = bool(float(grad_hist[-1]) < float(grad_tol))
+            except Exception:
+                converged = False
+        return res.state, converged
 
     @jax.custom_vjp
     def _solve_cust(phipf, chipf, pressure, lamscale):
-        return _solve(phipf, chipf, pressure, lamscale)
+        return _solve(phipf, chipf, pressure, lamscale)[0]
 
     def fwd(phipf, chipf, pressure, lamscale):
-        st = _solve(phipf, chipf, pressure, lamscale)
+        st, converged = _solve(phipf, chipf, pressure, lamscale)
         return st, (
             _stop_gradient_tree(st),
             jnp.asarray(phipf),
             jnp.asarray(chipf),
             jnp.asarray(pressure),
             jnp.asarray(lamscale),
+            bool(converged),
         )
 
     def bwd(residual, ct_state):
-        st_star, phipf_star, chipf_star, pressure_star, lamscale_star = residual
+        st_star, phipf_star, chipf_star, pressure_star, lamscale_star, converged = residual
+        if not bool(converged):
+            z = jnp.zeros_like(jnp.asarray(phipf_star))
+            zc = jnp.zeros_like(jnp.asarray(chipf_star))
+            zp = jnp.zeros_like(jnp.asarray(pressure_star))
+            zl = jnp.zeros_like(jnp.asarray(lamscale_star))
+            return (z, zc, zp, zl)
         layout = st_star.layout
 
         ct_state = _mask_grad_for_constraints(ct_state, static, idx00=idx00)

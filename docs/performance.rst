@@ -61,9 +61,9 @@ Important:
 Live NSTEP printing (debug callback)
 ------------------------------------
 
-The VMEC2000-style scan loop prints iteration rows using a JAX debug callback.
-This keeps the output VMEC-like without inserting Python-side synchronization
-on every step.
+VMEC2000-style iteration rows (scan and non-scan) are printed using a JAX debug
+callback by default. This keeps the output VMEC-like without inserting extra
+Python-side synchronization on every step.
 
 Defaults:
 
