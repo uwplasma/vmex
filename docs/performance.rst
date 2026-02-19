@@ -58,6 +58,33 @@ Important:
   per-iteration parity.
 - Debug dump env vars are incompatible with scan mode.
 
+Live NSTEP printing (debug callback)
+------------------------------------
+
+The VMEC2000-style scan loop prints iteration rows using a JAX debug callback.
+This keeps the output VMEC-like without inserting Python-side synchronization
+on every step.
+
+Defaults:
+
+- Live printing is **enabled** when ``verbose`` and ``vmec2000_control`` are on.
+- The backend uses ``jax.debug.print`` (differentiable).
+
+Disable live printing with:
+
+::
+
+  export VMEC_JAX_SCAN_PRINT=0
+
+If you want to reduce any remaining host-callback overhead, increase ``NSTEP``
+in the input file. Fewer prints means fewer callbacks.
+
+Advanced knobs (not required for normal use):
+
+- ``VMEC_JAX_SCAN_PRINT_MODE=debug_print`` (default)
+- ``VMEC_JAX_SCAN_PRINT_MODE=debug_callback`` (alternate callback)
+- ``VMEC_JAX_SCAN_PRINT_ORDERED=1`` to force ordered prints (may reduce parallelism)
+
 DFT tomnsps (GEMM path)
 -----------------------
 

@@ -4081,7 +4081,7 @@ def solve_fixed_boundary_residual_iter(
         nstep_screen = int(indata.get_int("NSTEP", 1)) if indata is not None else 1
         if nstep_screen < 1:
             nstep_screen = 1
-        scan_print_env = os.getenv("VMEC_JAX_SCAN_PRINT", "").strip().lower()
+        scan_print_env = os.getenv("VMEC_JAX_SCAN_PRINT", "1").strip().lower()
         scan_print_mode = os.getenv("VMEC_JAX_SCAN_PRINT_MODE", "debug_print").strip().lower()
         scan_print_ordered = os.getenv("VMEC_JAX_SCAN_PRINT_ORDERED", "0").strip().lower() not in ("", "0", "false", "no")
         print_in_scan = (
