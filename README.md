@@ -84,7 +84,7 @@ Optimization tutorials (differentiable boundary tuning):
 
 ```bash
 python examples/optimization/optimize_bmag_volume.py --case circular_tokamak --opt-steps 3
-python examples/optimization/target_iota_volume.py --case circular_tokamak --opt-steps 3
+python examples/optimization/explicit_target_iota_volume.py --case circular_tokamak --opt-steps 3
 python examples/optimization/implicit_target_iota_volume.py --case circular_tokamak --opt-steps 3
 ```
 

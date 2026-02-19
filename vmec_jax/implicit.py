@@ -28,7 +28,15 @@ from .field import TWOPI, b2_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda
 from .fourier import eval_fourier_dtheta, eval_fourier_dzeta_phys
 from .geom import eval_geom
 from .grids import angle_steps
-from .solve import _enforce_lambda_gauge, _mask_grad_for_constraints, _mode00_index, solve_fixed_boundary_gd, solve_fixed_boundary_lbfgs, solve_lambda_gd
+from .solve import (
+    _enforce_fixed_boundary_and_axis,
+    _enforce_lambda_gauge,
+    _mask_grad_for_constraints,
+    _mode00_index,
+    solve_fixed_boundary_gd,
+    solve_fixed_boundary_lbfgs,
+    solve_lambda_gd,
+)
 from .state import VMECState, pack_state, unpack_state
 
 
@@ -278,6 +286,10 @@ def solve_fixed_boundary_state_implicit(
     preconditioner: str = "none",
     precond_exponent: float = 1.0,
     precond_radial_alpha: float = 0.0,
+    edge_Rcos: Any | None = None,
+    edge_Rsin: Any | None = None,
+    edge_Zcos: Any | None = None,
+    edge_Zsin: Any | None = None,
     implicit: ImplicitFixedBoundaryOptions | None = None,
 ) -> VMECState:
     """Fixed-boundary solve with a custom VJP using implicit differentiation.
@@ -288,6 +300,7 @@ def solve_fixed_boundary_state_implicit(
     Differentiable inputs (by design)
     ---------------------------------
     - ``phipf(s)``, ``chipf(s)``, ``pressure(s)``, and ``lamscale``.
+    - Optional boundary edge coefficients (``edge_Rcos``/``edge_Rsin``/``edge_Zcos``/``edge_Zsin``).
 
     Notes
     -----
@@ -325,8 +338,29 @@ def solve_fixed_boundary_state_implicit(
     dzeta = jnp.asarray(dzeta_f, dtype=s.dtype)
     weight = ds * dtheta * dzeta
 
-    def _objective(state: VMECState, phipf, chipf, pressure, lamscale):
-        g = eval_geom(state, static)
+    edge_any = any(x is not None for x in (edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin))
+    if edge_any and not all(x is not None for x in (edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin)):
+        raise ValueError("edge_Rcos/edge_Rsin/edge_Zcos/edge_Zsin must be provided together")
+
+    edge_Rcos_use = jnp.asarray(edge_Rcos) if edge_any else jnp.asarray(state0_c.Rcos)[-1, :]
+    edge_Rsin_use = jnp.asarray(edge_Rsin) if edge_any else jnp.asarray(state0_c.Rsin)[-1, :]
+    edge_Zcos_use = jnp.asarray(edge_Zcos) if edge_any else jnp.asarray(state0_c.Zcos)[-1, :]
+    edge_Zsin_use = jnp.asarray(edge_Zsin) if edge_any else jnp.asarray(state0_c.Zsin)[-1, :]
+
+    def _objective(state: VMECState, phipf, chipf, pressure, lamscale, edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin):
+        state_use = _enforce_fixed_boundary_and_axis(
+            state,
+            static,
+            edge_Rcos=edge_Rcos,
+            edge_Rsin=edge_Rsin,
+            edge_Zcos=edge_Zcos,
+            edge_Zsin=edge_Zsin,
+            enforce_axis=True,
+            enforce_edge=True,
+            enforce_lambda_axis=True,
+            idx00=idx00,
+        )
+        g = eval_geom(state_use, static)
         bsupu, bsupv = bsup_from_geom(g, phipf=phipf, chipf=chipf, nfp=nfp, signgs=signgs_i, lamscale=lamscale)
         B2 = b2_from_bsup(g, bsupu, bsupv)
         jac = signgs_i * g.sqrtg
@@ -339,12 +373,12 @@ def solve_fixed_boundary_state_implicit(
         penalty = jacobian_penalty * jnp.mean(neg * neg)
         return w + penalty
 
-    def _grad_flat(state: VMECState, phipf, chipf, pressure, lamscale):
-        g = jax.grad(_objective)(state, phipf, chipf, pressure, lamscale)
+    def _grad_flat(state: VMECState, phipf, chipf, pressure, lamscale, edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin):
+        g = jax.grad(_objective)(state, phipf, chipf, pressure, lamscale, edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin)
         g = _mask_grad_for_constraints(g, static, idx00=idx00)
         return pack_state(g)
 
-    def _solve(phipf, chipf, pressure, lamscale):
+    def _solve(phipf, chipf, pressure, lamscale, *, edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin):
         if solver == "gd":
             res = solve_fixed_boundary_gd(
                 state0_c,
@@ -353,6 +387,10 @@ def solve_fixed_boundary_state_implicit(
                 chipf=chipf,
                 signgs=signgs_i,
                 lamscale=lamscale,
+                edge_Rcos=edge_Rcos,
+                edge_Rsin=edge_Rsin,
+                edge_Zcos=edge_Zcos,
+                edge_Zsin=edge_Zsin,
                 pressure=pressure,
                 gamma=gamma,
                 jacobian_penalty=jacobian_penalty,
@@ -374,6 +412,10 @@ def solve_fixed_boundary_state_implicit(
                 chipf=chipf,
                 signgs=signgs_i,
                 lamscale=lamscale,
+                edge_Rcos=edge_Rcos,
+                edge_Rsin=edge_Rsin,
+                edge_Zcos=edge_Zcos,
+                edge_Zsin=edge_Zsin,
                 pressure=pressure,
                 gamma=gamma,
                 history_size=int(history_size),
@@ -399,6 +441,10 @@ def solve_fixed_boundary_state_implicit(
                     chipf=chipf,
                     signgs=signgs_i,
                     lamscale=lamscale,
+                    edge_Rcos=edge_Rcos,
+                    edge_Rsin=edge_Rsin,
+                    edge_Zcos=edge_Zcos,
+                    edge_Zsin=edge_Zsin,
                     pressure=pressure,
                     gamma=gamma,
                     jacobian_penalty=jacobian_penalty,
@@ -422,28 +468,67 @@ def solve_fixed_boundary_state_implicit(
         return res.state, converged
 
     @jax.custom_vjp
-    def _solve_cust(phipf, chipf, pressure, lamscale):
-        return _solve(phipf, chipf, pressure, lamscale)[0]
+    def _solve_cust(phipf, chipf, pressure, lamscale, edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin):
+        return _solve(
+            phipf,
+            chipf,
+            pressure,
+            lamscale,
+            edge_Rcos=edge_Rcos,
+            edge_Rsin=edge_Rsin,
+            edge_Zcos=edge_Zcos,
+            edge_Zsin=edge_Zsin,
+        )[0]
 
-    def fwd(phipf, chipf, pressure, lamscale):
-        st, converged = _solve(phipf, chipf, pressure, lamscale)
+    def fwd(phipf, chipf, pressure, lamscale, edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin):
+        st, converged = _solve(
+            phipf,
+            chipf,
+            pressure,
+            lamscale,
+            edge_Rcos=edge_Rcos,
+            edge_Rsin=edge_Rsin,
+            edge_Zcos=edge_Zcos,
+            edge_Zsin=edge_Zsin,
+        )
         return st, (
             _stop_gradient_tree(st),
             jnp.asarray(phipf),
             jnp.asarray(chipf),
             jnp.asarray(pressure),
             jnp.asarray(lamscale),
+            jnp.asarray(edge_Rcos),
+            jnp.asarray(edge_Rsin),
+            jnp.asarray(edge_Zcos),
+            jnp.asarray(edge_Zsin),
+            bool(edge_any),
             bool(converged),
         )
 
     def bwd(residual, ct_state):
-        st_star, phipf_star, chipf_star, pressure_star, lamscale_star, converged = residual
+        (
+            st_star,
+            phipf_star,
+            chipf_star,
+            pressure_star,
+            lamscale_star,
+            edge_Rcos_star,
+            edge_Rsin_star,
+            edge_Zcos_star,
+            edge_Zsin_star,
+            edge_active,
+            converged,
+        ) = residual
         if not bool(converged):
             z = jnp.zeros_like(jnp.asarray(phipf_star))
             zc = jnp.zeros_like(jnp.asarray(chipf_star))
             zp = jnp.zeros_like(jnp.asarray(pressure_star))
             zl = jnp.zeros_like(jnp.asarray(lamscale_star))
-            return (z, zc, zp, zl)
+            zr = jnp.zeros_like(jnp.asarray(edge_Rcos_star))
+            zs = jnp.zeros_like(jnp.asarray(edge_Rsin_star))
+            zc2 = jnp.zeros_like(jnp.asarray(edge_Zcos_star))
+            zz = jnp.zeros_like(jnp.asarray(edge_Zsin_star))
+            return (z, zc, zp, zl, zr, zs, zc2, zz)
         layout = st_star.layout
 
         ct_state = _mask_grad_for_constraints(ct_state, static, idx00=idx00)
@@ -453,7 +538,17 @@ def solve_fixed_boundary_state_implicit(
             u_state = unpack_state(u_flat, layout)
             u_state = _mask_grad_for_constraints(u_state, static, idx00=idx00)
             _, hvp = jax.jvp(
-                lambda st: _grad_flat(st, phipf_star, chipf_star, pressure_star, lamscale_star),
+                lambda st: _grad_flat(
+                    st,
+                    phipf_star,
+                    chipf_star,
+                    pressure_star,
+                    lamscale_star,
+                    edge_Rcos_star,
+                    edge_Rsin_star,
+                    edge_Zcos_star,
+                    edge_Zsin_star,
+                ),
                 (st_star,),
                 (u_state,),
             )
@@ -461,13 +556,47 @@ def solve_fixed_boundary_state_implicit(
 
         v = _cg_solve(Hvp, b, tol=float(implicit.cg_tol), max_iter=int(implicit.cg_max_iter))
 
-        def F_params(phipf, chipf, pressure, lamscale):
-            return _grad_flat(st_star, phipf, chipf, pressure, lamscale)
+        def F_params(phipf, chipf, pressure, lamscale, edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin):
+            return _grad_flat(
+                st_star,
+                phipf,
+                chipf,
+                pressure,
+                lamscale,
+                edge_Rcos,
+                edge_Rsin,
+                edge_Zcos,
+                edge_Zsin,
+            )
 
-        (_out, vjp_fun) = jax.vjp(F_params, phipf_star, chipf_star, pressure_star, lamscale_star)
-        dphipf, dchipf, dpressure, dlamscale = vjp_fun(v)
-        return (-dphipf, -dchipf, -dpressure, -dlamscale)
+        (_out, vjp_fun) = jax.vjp(
+            F_params,
+            phipf_star,
+            chipf_star,
+            pressure_star,
+            lamscale_star,
+            edge_Rcos_star,
+            edge_Rsin_star,
+            edge_Zcos_star,
+            edge_Zsin_star,
+        )
+        dphipf, dchipf, dpressure, dlamscale, dRcos, dRsin, dZcos, dZsin = vjp_fun(v)
+        if not bool(edge_active):
+            dRcos = jnp.zeros_like(dRcos)
+            dRsin = jnp.zeros_like(dRsin)
+            dZcos = jnp.zeros_like(dZcos)
+            dZsin = jnp.zeros_like(dZsin)
+        return (-dphipf, -dchipf, -dpressure, -dlamscale, -dRcos, -dRsin, -dZcos, -dZsin)
 
     _solve_cust.defvjp(fwd, bwd)
 
-    return _solve_cust(jnp.asarray(phipf), jnp.asarray(chipf), jnp.asarray(pressure), jnp.asarray(lamscale))
+    return _solve_cust(
+        jnp.asarray(phipf),
+        jnp.asarray(chipf),
+        jnp.asarray(pressure),
+        jnp.asarray(lamscale),
+        jnp.asarray(edge_Rcos_use),
+        jnp.asarray(edge_Rsin_use),
+        jnp.asarray(edge_Zcos_use),
+        jnp.asarray(edge_Zsin_use),
+    )

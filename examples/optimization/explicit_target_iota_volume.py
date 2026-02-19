@@ -1,9 +1,7 @@
-"""Implicit-diff optimization of boundary modes for target iota + volume.
+"""Explicit-diff optimization of boundary modes for target iota + volume.
 
-This example optimizes a small set of boundary coefficients (RBC/ZBS) while
-holding the major radius R00 fixed. The equilibrium solve uses the implicit
-fixed-boundary solver so gradients do not backpropagate through the inner
-iterations.
+This example differentiates *through* the inner VMEC iterations (no implicit
+solve). It is intentionally similar to the implicit example for comparison.
 """
 
 from __future__ import annotations
@@ -46,11 +44,11 @@ def main() -> None:
     p.add_argument("--ns", type=int, default=31, help="Radial resolution (NS).")
     p.add_argument("--niter", type=int, default=1000, help="Inner VMEC iterations per objective eval.")
     p.add_argument("--ftol", type=float, default=1e-13, help="Inner solver grad tolerance.")
+    p.add_argument("--step-size", type=float, default=5e-3, help="Inner solver step size.")
     args = p.parse_args()
 
     from vmec_jax._compat import enable_x64, has_jax, jax, jnp
     from vmec_jax.geom import eval_geom
-    from vmec_jax.implicit import ImplicitFixedBoundaryOptions, solve_fixed_boundary_state_implicit
     from vmec_jax.integrals import volume_from_sqrtg
     from vmec_jax.profiles import eval_profiles
     from vmec_jax.static import build_static
@@ -77,7 +75,6 @@ def main() -> None:
     Zcos0 = jnp.asarray(boundary0.Z_cos)
     Zsin0 = jnp.asarray(boundary0.Z_sin)
 
-    # Identify target boundary modes (RBC/ZBS) to optimize.
     targets = [
         (1, 0, "RBC(1,0)"),
         (2, 0, "RBC(2,0)"),
@@ -97,7 +94,6 @@ def main() -> None:
     if not idx_R and not idx_Z:
         raise SystemExit("No boundary modes selected for optimization.")
 
-    # Keep R00 fixed.
     m_arr = np.asarray(static.modes.m, dtype=int)
     n_arr = np.asarray(static.modes.n, dtype=int)
     k00 = None
@@ -105,7 +101,6 @@ def main() -> None:
     if k00_match.size:
         k00 = int(k00_match[0])
 
-    # Initial guess used for signgs and as a fixed starting point.
     st0 = vj.initial_guess_from_boundary(static, boundary0, indata, vmec_project=False)
     g0 = eval_geom(st0, static)
     signgs = vj.signgs_from_sqrtg(np.asarray(g0.sqrtg), axis_index=1)
@@ -236,7 +231,7 @@ def main() -> None:
     def _solve_state(params):
         Rcos, Rsin, Zcos, Zsin = _build_boundary(params)
         edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin = _boundary_to_edge(Rcos, Rsin, Zcos, Zsin)
-        return solve_fixed_boundary_state_implicit(
+        res = vj.solve_fixed_boundary_gd(
             st0,
             static,
             phipf=phipf,
@@ -246,22 +241,23 @@ def main() -> None:
             pressure=pressure,
             gamma=float(indata.get_float("GAMMA", 0.0)),
             jacobian_penalty=1e3,
-            solver="lbfgs",
             max_iter=int(args.niter),
-            step_size=1.0,
-            history_size=8,
+            step_size=float(args.step_size),
             grad_tol=float(args.ftol),
+            max_backtracks=12,
+            bt_factor=0.5,
             preconditioner="mode_diag+radial_tridi",
             precond_exponent=1.0,
             precond_radial_alpha=0.5,
-            implicit=implicit_opts,
+            differentiable=True,
+            stop_grad_in_update=False,
+            verbose=False,
             edge_Rcos=edge_Rcos,
             edge_Rsin=edge_Rsin,
             edge_Zcos=edge_Zcos,
             edge_Zsin=edge_Zsin,
         )
-
-    implicit_opts = ImplicitFixedBoundaryOptions(cg_max_iter=60, cg_tol=1e-10, damping=1e-5)
+        return res.state
 
     params0 = jnp.zeros((len(idx_R) + len(idx_Z),), dtype=jnp.float64)
     if args.target_iota is None or args.target_volume is None:

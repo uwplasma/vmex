@@ -1311,6 +1311,10 @@ def solve_fixed_boundary_gd(
     chipf,
     signgs: int,
     lamscale,
+    edge_Rcos: Any | None = None,
+    edge_Rsin: Any | None = None,
+    edge_Zcos: Any | None = None,
+    edge_Zsin: Any | None = None,
     pressure: Any | None = None,
     gamma: float = 0.0,
     jacobian_penalty: float = 1e3,
@@ -1384,10 +1388,10 @@ def solve_fixed_boundary_gd(
     if pressure.shape != s.shape:
         raise ValueError(f"pressure must have shape {s.shape}, got {pressure.shape}")
 
-    edge_Rcos = jnp.asarray(state0.Rcos)[-1, :]
-    edge_Rsin = jnp.asarray(state0.Rsin)[-1, :]
-    edge_Zcos = jnp.asarray(state0.Zcos)[-1, :]
-    edge_Zsin = jnp.asarray(state0.Zsin)[-1, :]
+    edge_Rcos = jnp.asarray(edge_Rcos) if edge_Rcos is not None else jnp.asarray(state0.Rcos)[-1, :]
+    edge_Rsin = jnp.asarray(edge_Rsin) if edge_Rsin is not None else jnp.asarray(state0.Rsin)[-1, :]
+    edge_Zcos = jnp.asarray(edge_Zcos) if edge_Zcos is not None else jnp.asarray(state0.Zcos)[-1, :]
+    edge_Zsin = jnp.asarray(edge_Zsin) if edge_Zsin is not None else jnp.asarray(state0.Zsin)[-1, :]
 
     def _wb_wp_from_geom(g) -> Tuple[Any, Any]:
         bsupu, bsupv = bsup_from_geom(g, phipf=phipf, chipf=chipf, nfp=nfp, signgs=signgs, lamscale=lamscale)
@@ -1604,6 +1608,10 @@ def solve_fixed_boundary_lbfgs(
     chipf,
     signgs: int,
     lamscale,
+    edge_Rcos: Any | None = None,
+    edge_Rsin: Any | None = None,
+    edge_Zcos: Any | None = None,
+    edge_Zsin: Any | None = None,
     pressure: Any | None = None,
     gamma: float = 0.0,
     history_size: int = 10,
@@ -1674,10 +1682,10 @@ def solve_fixed_boundary_lbfgs(
     if pressure.shape != s.shape:
         raise ValueError(f"pressure must have shape {s.shape}, got {pressure.shape}")
 
-    edge_Rcos = jnp.asarray(state0.Rcos)[-1, :]
-    edge_Rsin = jnp.asarray(state0.Rsin)[-1, :]
-    edge_Zcos = jnp.asarray(state0.Zcos)[-1, :]
-    edge_Zsin = jnp.asarray(state0.Zsin)[-1, :]
+    edge_Rcos = jnp.asarray(edge_Rcos) if edge_Rcos is not None else jnp.asarray(state0.Rcos)[-1, :]
+    edge_Rsin = jnp.asarray(edge_Rsin) if edge_Rsin is not None else jnp.asarray(state0.Rsin)[-1, :]
+    edge_Zcos = jnp.asarray(edge_Zcos) if edge_Zcos is not None else jnp.asarray(state0.Zcos)[-1, :]
+    edge_Zsin = jnp.asarray(edge_Zsin) if edge_Zsin is not None else jnp.asarray(state0.Zsin)[-1, :]
 
     def _wb_wp_from_geom(g) -> Tuple[Any, Any]:
         bsupu, bsupv = bsup_from_geom(g, phipf=phipf, chipf=chipf, nfp=nfp, signgs=signgs, lamscale=lamscale)
