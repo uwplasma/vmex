@@ -71,8 +71,8 @@ CLI (VMEC2000-style executable):
 vmec_jax examples/data/input.circular_tokamak
 ```
 
-Default CLI runs use the VMEC2000 parity loop (time-step control + restarts).
-Pass `--fast` to use the scan-based fast loop.
+Default CLI runs use the scan-based fast loop.
+Pass `--parity` to use the VMEC2000 parity loop (time-step control + restarts).
 
 Run tests:
 
