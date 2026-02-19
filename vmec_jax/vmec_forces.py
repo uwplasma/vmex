@@ -20,7 +20,6 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 from contextlib import contextmanager
-import time
 
 import numpy as np
 
@@ -83,43 +82,6 @@ def _trace(name: str):
         except Exception:
             pass
     yield
-
-
-def _profile_enabled(profile_timings) -> bool:
-    if profile_timings is None:
-        return False
-    if not has_jax():
-        return True
-    try:
-        from jax import core
-
-        return bool(core.trace_ctx.is_top_level())
-    except Exception:
-        return False
-
-
-def _block_until_ready(tree) -> None:
-    if not has_jax():
-        return
-    try:
-        leaves = tree_util.tree_leaves(tree)
-    except Exception:
-        leaves = [tree]
-    for leaf in leaves:
-        try:
-            leaf.block_until_ready()
-        except Exception:
-            pass
-
-
-def _time_call(profile_timings, label: str, fn, *args, **kwargs):
-    if not _profile_enabled(profile_timings):
-        return fn(*args, **kwargs)
-    t0 = time.perf_counter()
-    out = fn(*args, **kwargs)
-    _block_until_ready(out)
-    profile_timings[label] = profile_timings.get(label, 0.0) + (time.perf_counter() - t0)
-    return out
 
 
 @tree_util.register_pytree_node_class
@@ -657,7 +619,6 @@ def vmec_forces_rz_from_wout(
     use_vmec_synthesis: bool = False,
     trig: VmecTrigTables | None = None,
     iter_idx: int | None = None,
-    profile_timings: dict[str, float] | None = None,
 ) -> VmecRZForceKernels:
     """Compute VMEC R/Z force kernels (armn/brmn/...) from a `wout` equilibrium.
 
@@ -800,10 +761,7 @@ def vmec_forces_rz_from_wout(
             coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
             coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
             with _named_scope("vmec_realspace_synthesis"):
-                return _time_call(
-                    profile_timings,
-                    "realspace",
-                    vmec_realspace_synthesis,
+                return vmec_realspace_synthesis(
                     coeff_cos=coeff_cos,
                     coeff_sin=coeff_sin,
                     modes=static.modes,
@@ -817,10 +775,7 @@ def vmec_forces_rz_from_wout(
             coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
             coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
             with _named_scope("vmec_realspace_synthesis_dtheta"):
-                return _time_call(
-                    profile_timings,
-                    "realspace_dtheta",
-                    vmec_realspace_synthesis_dtheta,
+                return vmec_realspace_synthesis_dtheta(
                     coeff_cos=coeff_cos,
                     coeff_sin=coeff_sin,
                     modes=static.modes,
@@ -834,10 +789,7 @@ def vmec_forces_rz_from_wout(
             coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
             coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
             with _named_scope("vmec_realspace_synthesis_dzeta"):
-                return _time_call(
-                    profile_timings,
-                    "realspace_dzeta",
-                    vmec_realspace_synthesis_dzeta_phys,
+                return vmec_realspace_synthesis_dzeta_phys(
                     coeff_cos=coeff_cos,
                     coeff_sin=coeff_sin,
                     modes=static.modes,

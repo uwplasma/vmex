@@ -851,18 +851,8 @@ def run_fixed_boundary(
             static_i = build_static(cfg_i, grid=grid)
             scan_mode = bool(use_scan)
             if scan_mode and isinstance(jit_forces, str) and jit_forces.strip().lower() == "auto":
-                try:
-                    nmodes_i = int(np.asarray(static_i.modes.m).size)
-                    nrzt = int(static_i.cfg.ns) * int(static_i.cfg.ntheta) * int(static_i.cfg.nzeta)
-                    work = nmodes_i * nrzt
-                except Exception:
-                    work = None
-                # In scan mode, only use nested JIT for large stages that will
-                # amortize compilation costs.
-                if work is not None and (int(niter_i) >= 20) and (work >= 2_000_000):
-                    jit_forces_eff = True
-                else:
-                    jit_forces_eff = False
+                # The scan path is already JIT-compiled; avoid nested JIT by default.
+                jit_forces_eff = False
             else:
                 jit_forces_eff = _resolve_jit_forces(jit_forces, static_i, int(niter_i))
             jit_precompile_eff = False
