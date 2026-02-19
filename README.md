@@ -94,6 +94,21 @@ python examples/optimization/target_iota_volume.py --case circular_tokamak --opt
 - Details and profiling guidance live in `docs/performance.rst`.
 - Parity methodology and current status live in `docs/validation.rst`.
 
+### Live NSTEP printing
+
+By default, the VMEC2000-style scan loop prints every `NSTEP` iterations using
+JAX's debug callback (differentiable). This keeps the output VMEC-like while
+avoiding explicit host/device syncs in Python.
+
+To disable live printing, set:
+
+```bash
+export VMEC_JAX_SCAN_PRINT=0
+```
+
+If you want minimal overhead, increase `NSTEP` in your input file. Larger
+`NSTEP` means fewer host callbacks and faster runs.
+
 ## When to use vmec_jax vs VMEC2000
 
 - Use `vmec_jax` for autodiff, rapid parameter sweeps, and JAX-native pipelines.
