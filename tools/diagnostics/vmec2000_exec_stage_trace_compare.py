@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import TypeVar
 
 import numpy as np
+import math
 
 import vmec_jax.api as vj
 from vmec_jax.solve import SolveVmecResidualResult
@@ -2312,10 +2313,19 @@ def main() -> None:
             diff_cols_vmec[name] = []
             diff_cols_jax[name] = []
 
-    def _matches(vmec_val: float, jax_val: float) -> bool:
+    def _matches(vmec_val: float, jax_val: float, *, round_step: float | None = None) -> bool:
         if not (np.isfinite(vmec_val) and np.isfinite(jax_val)):
             return False
-        return abs(vmec_val - jax_val) <= max(float(args.atol), float(args.rtol) * abs(vmec_val))
+        tol = max(float(args.atol), float(args.rtol) * abs(vmec_val))
+        if round_step is not None and np.isfinite(round_step):
+            tol = max(tol, float(round_step))
+        return abs(vmec_val - jax_val) <= tol
+
+    def _round_step(val: float, decimals: int) -> float:
+        if not np.isfinite(val) or val == 0.0:
+            return 0.0
+        exp = math.floor(math.log10(abs(val)))
+        return (10.0 ** (exp - int(decimals))) * 1.01
 
     def _vmec_print_round(val: float, decimals: int) -> float:
         if not np.isfinite(val):
@@ -2391,6 +2401,13 @@ def main() -> None:
                 # so the comparator reflects what is actually printed.
                 use_dump_vals = bool(args.fsq_from_dumps) and (bool(vmec_fsq_dump) or bool(vmec_fsq1))
                 if not use_dump_vals:
+                    vmec_fsqr = _vmec_print_round(vmec_fsqr, 2)
+                    vmec_fsqz = _vmec_print_round(vmec_fsqz, 2)
+                    vmec_fsql = _vmec_print_round(vmec_fsql, 2)
+                    vmec_fsqr1 = _vmec_print_round(vmec_fsqr1, 2)
+                    vmec_fsqz1 = _vmec_print_round(vmec_fsqz1, 2)
+                    vmec_fsql1 = _vmec_print_round(vmec_fsql1, 2)
+                    vmec_delt0r = _vmec_print_round(vmec_delt0r, 2)
                     jx_fsqr = _vmec_print_round(jx_fsqr, 2)
                     jx_fsqz = _vmec_print_round(jx_fsqz, 2)
                     jx_fsql = _vmec_print_round(jx_fsql, 2)
@@ -2445,7 +2462,23 @@ def main() -> None:
                         ("wmhd", float(row.w if row.w is not None else float("nan")), jx_w),
                     ]
                     for name, v, jv in pairs:
-                        if not _matches(v, jv):
+                        round_step = None
+                        if not use_dump_vals:
+                            decimals_map = {
+                                "fsqr": 2,
+                                "fsqz": 2,
+                                "fsql": 2,
+                                "fsqr1": 2,
+                                "fsqz1": 2,
+                                "fsql1": 2,
+                                "delt0r": 2,
+                                "r00": 3,
+                                "wmhd": 4,
+                            }
+                            dec = decimals_map.get(name)
+                            if dec is not None:
+                                round_step = _round_step(float(v), int(dec))
+                        if not _matches(v, jv, round_step=round_step):
                             first_mismatch = {
                                 "stage": int(stage_i + 1),
                                 "iter": int(row.it),

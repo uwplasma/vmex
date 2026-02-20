@@ -892,10 +892,10 @@ def run_fixed_boundary(
             scan_mode = bool(use_scan)
             # Optional scan-parity guard: probe a few iterations and disable scan
             # if it diverges from the non-scan VMEC2000 path.
-            scan_guard_env = os.getenv("VMEC_JAX_SCAN_PARITY_GUARD", "0").strip().lower()
+            scan_guard_env = os.getenv("VMEC_JAX_SCAN_PARITY_GUARD", "1").strip().lower()
             scan_guard_enabled = scan_guard_env not in ("", "0", "false", "no")
             if scan_mode and scan_guard_enabled and int(niter_i) >= 3:
-                probe_iters = 3
+                probe_iters = min(10, int(niter_i))
                 try:
                     probe_kwargs = dict(
                         indata=indata,
