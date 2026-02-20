@@ -147,9 +147,40 @@ Current observed mismatches (updated parity status):
   ``abs(B)`` comparisons for 3D reference states are still off by O(1).
 - **Full-grid QA/QH traces** now match VMEC2000 at `rtol=1e-4`,
   `atol=1e-12` for 100-iteration runs.
+- **Scan (jax.lax.scan) VMEC2000 control path** can diverge on large-`ns`
+  inputs (e.g., ``input.QI_nfp2``). For parity runs, the default is now the
+  non-scan loop; enable scan explicitly with ``--fast`` when you only care
+  about speed.
 - ``betapol``, ``betator``, ``betaxis``, ``ctor``, and ``DMerc`` are present but
   still placeholders in ``vmec_jax`` (zeros) until the VMEC2000 diagnostics path
   is fully ported.
+
+Axis reset and bad-Jacobian parity notes
+----------------------------------------
+
+VMEC2000 resets the magnetic axis *before* iteration 1 if the half-mesh
+Jacobian changes sign. To match this behavior, the vmec-jax VMEC2000 loop now:
+
+- preflights the Jacobian sign using both VMEC-style ``ptau`` and the
+  state-based Jacobian,
+- triggers the axis reset before the first iteration (no duplicate ``iter=1``),
+- preserves the VMEC2000 ``ijacob`` count and checkpoint state.
+
+This eliminates spurious restarts and aligns the ``zero_m1`` gating with
+VMEC2000 (including the ``fsqz_prev < 1e-6`` condition used later in long runs).
+
+Scan vs non-scan parity notes
+-----------------------------
+
+The VMEC2000 parity loop has two implementations:
+
+- **Non-scan (default)**: Python control flow + JAX kernels. This is the
+  reference for per-iteration parity.
+- **Scan (``--fast``)**: The loop is lifted into ``jax.lax.scan`` for speed.
+  This path is still parity-sensitive and can diverge for large-`ns` inputs.
+
+For parity-critical runs (including ``input.QI_nfp2``), keep the default
+non-scan loop. Use ``--fast`` only when parity is not required.
 
 Full-grid parity snapshot (VMEC2000 exec comparator, `--use-input-niter`, `max_iter=100`,
 `rtol=1e-4`, `atol=1e-12`):

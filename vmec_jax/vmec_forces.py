@@ -17,6 +17,7 @@ VMEC constraint-force pipeline (`tcon` + `alias`) for fixed-boundary parity.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from types import SimpleNamespace
 from typing import Any
 from contextlib import contextmanager
@@ -1531,6 +1532,24 @@ def vmec_residual_internal_from_kernels(
     clmn_odd = getattr(k.bc, "clmn_odd", z)
 
     lasym = bool(wout.lasym)
+
+    if os.getenv("VMEC_JAX_SCAN_DEBUG_FORCE", "") not in ("", "0"):
+        try:
+            from jax import debug as _jax_debug  # type: ignore
+        except Exception:
+            _jax_debug = None  # type: ignore
+        if _jax_debug is not None:
+            azmn_e2 = jnp.sum(k.azmn_e * k.azmn_e)
+            bzmn_e2 = jnp.sum(k.bzmn_e * k.bzmn_e)
+            azmn_o2 = jnp.sum(k.azmn_o * k.azmn_o)
+            bzmn_o2 = jnp.sum(k.bzmn_o * k.bzmn_o)
+            _jax_debug.print(
+                "[tomnsps-debug] azmn_e2={aze:.6e} bzmn_e2={bze:.6e} azmn_o2={azo:.6e} bzmn_o2={bzo:.6e}",
+                aze=azmn_e2,
+                bze=bzmn_e2,
+                azo=azmn_o2,
+                bzo=bzmn_o2,
+            )
 
     def _symforce_split_one(
         a,

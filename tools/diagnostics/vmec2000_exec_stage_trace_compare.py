@@ -1923,6 +1923,9 @@ def main() -> None:
                 vmec_env["VMEC_DUMP_GC_STAGE"] = "both"
                 vmec_env["VMEC_DUMP_GC_DIR"] = str(vmec_dump_dir)
                 vmec_env["VMEC_DUMP_LAM"] = "1"
+                vmec_env["VMEC_DUMP_PRECOND"] = "1"
+                vmec_env["VMEC_DUMP_BCOVAR"] = "1"
+                vmec_env["VMEC_DUMP_CONSTRAINTS"] = "1"
             if args.dump_iter:
                 vmec_env["VMEC_DUMP_ITER"] = str(args.dump_iter)
                 vmec_env["VMEC_DUMP_XC_ITER"] = str(args.dump_iter)
@@ -1973,6 +1976,11 @@ def main() -> None:
         wout = read_wout(wout_path) if wout_path.exists() else None
 
         # --- Run vmec_jax with VMEC-style multigrid staging ---
+        # Some VMEC2000 builds remove the input file from the workdir.
+        # Re-copy it to ensure vmec_jax can read the same input.
+        if not input_local.exists():
+            shutil.copy2(input_path, input_local)
+        jax_input_path = input_local
         def _run_vmec_jax(*, dump_dir: Path, max_iter: int, restart_state=None, restart_solver_state=None, multigrid: bool | None = None):
             jax_env_backup = os.environ.copy()
             if args.dump_level != "none":
@@ -1993,6 +2001,9 @@ def main() -> None:
                     os.environ["VMEC_JAX_DUMP_GC_STAGE"] = "both"
                     os.environ["VMEC_JAX_DUMP_GC_DIR"] = str(dump_dir)
                     os.environ["VMEC_JAX_DUMP_LAM"] = "1"
+                    os.environ["VMEC_JAX_DUMP_JACOBIAN_TERMS"] = "1"
+                    os.environ["VMEC_JAX_DUMP_BCOVAR"] = "1"
+                    os.environ["VMEC_JAX_DUMP_CONSTRAINTS"] = "1"
                 if args.dump_iter:
                     os.environ["VMEC_JAX_DUMP_ITER"] = str(args.dump_iter)
                 else:

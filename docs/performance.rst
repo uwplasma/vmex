@@ -42,21 +42,27 @@ If you prefer to run a few iterations without JIT before compiling, set::
 Scan-mode iteration (fast path)
 -------------------------------
 
-For pure-performance runs (no VMEC2000 control logic), pass ``use_scan=True`` to
-``run_fixed_boundary``. This moves the outer iteration loop into ``jax.lax.scan``
-and eliminates most Python control-flow + host/device syncs.
-Alternatively, use solver ``vmec2000_iter_fast`` (alias ``vmec2000_scan``), which
-enables scan mode automatically.
-You can also set ``VMEC_JAX_USE_SCAN=1`` to force scan mode for VMEC-style runs.
-For a one-line opt-in, pass ``performance_mode=True`` to ``run_fixed_boundary``,
-which forces scan mode and disables VMEC2000 control logic.
+The scan-based loop lifts the VMEC2000 iteration into ``jax.lax.scan`` to reduce
+Python overhead. You can enable it with:
 
-Important:
+- ``--fast`` on the CLI,
+- ``performance_mode=True`` in ``run_fixed_boundary``,
+- or ``VMEC_JAX_USE_SCAN=1``.
 
-- ``use_scan=True`` disables VMEC2000 control features (restart triggers, strict
-  update logic, and VMEC-style preconditioner caches). Use it for speed, not
-  per-iteration parity.
-- Debug dump env vars are incompatible with scan mode.
+**Important**: the scan path is still parity-sensitive for large-``ns`` cases
+(for example ``input.QI_nfp2``). The default remains the non-scan loop, which
+matches VMEC2000 iteration ordering. Use ``--fast`` only when parity is not
+critical or after validating a case.
+
+Debug dump env vars are incompatible with scan mode.
+
+If you want an automatic parity probe when using scan, set::
+
+  export VMEC_JAX_SCAN_PARITY_GUARD=1
+
+This runs a short scan-vs-non-scan probe at the start of each stage and falls
+back to the non-scan loop if a mismatch is detected. It is **off by default**
+because it adds extra compilation and iteration overhead.
 
 Live NSTEP printing (debug callback)
 ------------------------------------
