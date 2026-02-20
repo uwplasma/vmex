@@ -4746,7 +4746,11 @@ def solve_fixed_boundary_residual_iter(
             bad_jacobian_ptau = None
             if (ptau_min0 is not None) and (ptau_max0 is not None):
                 try:
-                    bad_jacobian_ptau = bool(np.asarray((ptau_min0 < 0.0) & (ptau_max0 > 0.0)))
+                    min_tau_ptau0 = float(np.asarray(ptau_min0))
+                    max_tau_ptau0 = float(np.asarray(ptau_max0))
+                    tau_scale_ptau0 = max(abs(min_tau_ptau0), abs(max_tau_ptau0))
+                    tau_tol_ptau0 = max(1.0e-12, 1.0e-2 * tau_scale_ptau0)
+                    bad_jacobian_ptau = (min_tau_ptau0 < -tau_tol_ptau0) and (max_tau_ptau0 > tau_tol_ptau0)
                 except Exception:
                     bad_jacobian_ptau = None
             try:
@@ -4762,9 +4766,11 @@ def solve_fixed_boundary_residual_iter(
                 )
                 tau0 = jnp.asarray(jac0.tau)
                 tau0_use = tau0[1:] if int(tau0.shape[0]) > 1 else tau0
-                bad_jacobian_state = bool(
-                    np.asarray((jnp.min(tau0_use) < 0.0) & (jnp.max(tau0_use) > 0.0))
-                )
+                min_tau_state0 = float(np.asarray(jnp.min(tau0_use)))
+                max_tau_state0 = float(np.asarray(jnp.max(tau0_use)))
+                tau_scale_state0 = max(abs(min_tau_state0), abs(max_tau_state0))
+                tau_tol_state0 = max(1.0e-12, 1.0e-2 * tau_scale_state0)
+                bad_jacobian_state = (min_tau_state0 < -tau_tol_state0) and (max_tau_state0 > tau_tol_state0)
             except Exception:
                 bad_jacobian_state = False
 
@@ -4872,6 +4878,7 @@ def solve_fixed_boundary_residual_iter(
             inv_tau: Any
             fsq_prev: Any
             accepted_count: Any
+            abort_scan: Any
             vRcc: Any
             vRss: Any
             vZsc: Any
@@ -5258,7 +5265,12 @@ def solve_fixed_boundary_residual_iter(
                     else:
                         min_tau_ptau = jnp.asarray(ptau_min)
                         max_tau_ptau = jnp.asarray(ptau_max)
-                        bad_jacobian_ptau = (min_tau_ptau < 0.0) & (max_tau_ptau > 0.0)
+                        tau_scale_ptau = jnp.maximum(jnp.abs(min_tau_ptau), jnp.abs(max_tau_ptau))
+                        tau_tol_ptau = jnp.maximum(
+                            jnp.asarray(1.0e-12, dtype=dtype),
+                            jnp.asarray(1.0e-2, dtype=dtype) * tau_scale_ptau,
+                        )
+                        bad_jacobian_ptau = (min_tau_ptau < -tau_tol_ptau) & (max_tau_ptau > tau_tol_ptau)
                     ptau_valid = jnp.isfinite(min_tau_ptau) & jnp.isfinite(max_tau_ptau)
                     need_state_jac = badjac_use_state | dump_ptau_state | (iter2 <= 2) | (~ptau_valid) | bad_jacobian_ptau
 
@@ -5277,7 +5289,12 @@ def solve_fixed_boundary_residual_iter(
                         tau_use = tau[1:] if int(tau.shape[0]) > 1 else tau
                         min_tau_state = jnp.min(tau_use)
                         max_tau_state = jnp.max(tau_use)
-                        bad_state = (min_tau_state < 0.0) & (max_tau_state > 0.0)
+                        tau_scale_state = jnp.maximum(jnp.abs(min_tau_state), jnp.abs(max_tau_state))
+                        tau_tol_state = jnp.maximum(
+                            jnp.asarray(1.0e-12, dtype=min_tau_state.dtype),
+                            jnp.asarray(1.0e-2, dtype=min_tau_state.dtype) * tau_scale_state,
+                        )
+                        bad_state = (min_tau_state < -tau_tol_state) & (max_tau_state > tau_tol_state)
                         return bad_state, min_tau_state, max_tau_state
 
                     def _ptau_only():
@@ -5820,6 +5837,7 @@ def solve_fixed_boundary_residual_iter(
 
                 accepted = jnp.logical_not(do_restart)
                 accepted_count_new = carry_adv.accepted_count + jnp.asarray(accepted, dtype=jnp.int32)
+                abort_scan_new = carry_adv.abort_scan | bad_jacobian
 
                 cache_valid_out = jnp.where(do_restart, jnp.asarray(False), cache_valid)
                 new_carry = _ScanCarry(
@@ -5828,6 +5846,7 @@ def solve_fixed_boundary_residual_iter(
                     inv_tau=inv_tau_new,
                     fsq_prev=fsq_prev_new,
                     accepted_count=accepted_count_new,
+                    abort_scan=abort_scan_new,
                     vRcc=vRcc_new,
                     vRss=vRss_new,
                     vZsc=vZsc_new,
@@ -5900,7 +5919,9 @@ def solve_fixed_boundary_residual_iter(
                     badjac_state,
                 )
 
-            hold_cond = carry.converged | (carry.accepted_count >= jnp.asarray(int(max_iter), dtype=jnp.int32))
+            hold_cond = carry.converged | carry.abort_scan | (
+                carry.accepted_count >= jnp.asarray(int(max_iter), dtype=jnp.int32)
+            )
             return jax.lax.cond(hold_cond, _hold_step, _advance_step, operand=carry)
 
         carry0 = _ScanCarry(
@@ -5909,6 +5930,7 @@ def solve_fixed_boundary_residual_iter(
             inv_tau=inv_tau0,
             fsq_prev=fsq_prev0,
             accepted_count=jnp.asarray(0, dtype=jnp.int32),
+            abort_scan=jnp.asarray(False),
             vRcc=vRcc0,
             vRss=vRss0,
             vZsc=vZsc0,
@@ -6176,6 +6198,7 @@ def solve_fixed_boundary_residual_iter(
                 "tau_max_state_full": np.asarray(tau_max_state_hist),
                 "badjac_ptau_full": np.asarray(badjac_ptau_hist).astype(int),
                 "badjac_state_full": np.asarray(badjac_state_hist).astype(int),
+                "abort_scan": bool(np.asarray(carry_final.abort_scan)),
                 "resume_state": {
                     "state_checkpoint": carry_final.state_checkpoint,
                     "time_step": float(np.asarray(carry_final.time_step)),
