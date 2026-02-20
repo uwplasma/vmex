@@ -156,10 +156,10 @@ def main(argv: list[str] | None = None) -> int:
     if bool(args.parity) and bool(args.fast):
         parser.error("--parity and --fast are mutually exclusive")
         return 2
-    # Default to the fast (scan) loop unless the user explicitly requests parity.
-    performance_mode = True
-    if bool(args.parity):
-        performance_mode = False
+    # Default to the parity loop; enable scan-based fast loop only with --fast.
+    performance_mode = False
+    if bool(args.fast):
+        performance_mode = True
     if args.vmecpp_restart is None:
         vmecpp_restart = False
     else:

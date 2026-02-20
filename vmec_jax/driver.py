@@ -271,7 +271,7 @@ def run_fixed_boundary(
     jit_forces: bool | str = True,
     jit_precompile: bool | None = None,
     use_scan: bool = False,
-    performance_mode: bool = True,
+    performance_mode: bool = False,
     stage_transition_heuristic: bool | None = None,
     stage_transition_factor: float = 50.0,
     stage_transition_scale: float = 0.5,
@@ -413,9 +413,27 @@ def run_fixed_boundary(
     elif ns_override is not None:
         cfg = replace(cfg, ns=int(ns_override))
     solver_lower = str(solver).lower()
-    # VMEC uses `guess_axis` to build a usable initial axis when the input
-    # axis arrays are missing/zero. Keep this enabled for vmec2000_iter parity.
-    axis_infer_missing = True
+    # VMEC starts from the input axis coefficients and only recomputes the
+    # axis (guess_axis) after a bad-Jacobian trigger. For vmec2000_iter we
+    # follow that behavior by default and allow opt-in axis inference via env.
+    axis_infer_missing = solver_lower != "vmec2000_iter"
+    if solver_lower == "vmec2000_iter":
+        enable_axis_infer = os.getenv("VMEC_JAX_ENABLE_AXIS_INFER", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        disable_axis_infer = os.getenv("VMEC_JAX_DISABLE_AXIS_INFER", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        if enable_axis_infer:
+            axis_infer_missing = True
+        if disable_axis_infer:
+            axis_infer_missing = False
     if grid is None and solver_lower in ("vmec_lbfgs", "vmec_gn", "vmec2000_iter"):
         from .vmec_tomnsp import vmec_angle_grid
 
@@ -483,7 +501,8 @@ def run_fixed_boundary(
 
     # When NITER_ARRAY is present and we are honoring input staging, treat it
     # as the authoritative iteration count unless the caller overrides max_iter.
-    if multigrid and multigrid_use_input_niter:
+    # This should apply even for single-grid runs (NS_ARRAY length == 1).
+    if multigrid_use_input_niter:
         niter_list = _as_list(indata.get("NITER_ARRAY", None))
         if niter_list:
             niter_sum = int(sum(int(v) for v in niter_list))
@@ -850,6 +869,84 @@ def run_fixed_boundary(
             cfg_i = replace(cfg, ns=int(ns_i))
             static_i = build_static(cfg_i, grid=grid)
             scan_mode = bool(use_scan)
+            # Optional scan-parity guard: probe a few iterations and disable scan
+            # if it diverges from the non-scan VMEC2000 path.
+            scan_guard_env = os.getenv("VMEC_JAX_SCAN_PARITY_GUARD", "0").strip().lower()
+            scan_guard_enabled = scan_guard_env not in ("", "0", "false", "no")
+            if scan_mode and scan_guard_enabled and int(niter_i) >= 3:
+                probe_iters = 3
+                try:
+                    probe_kwargs = dict(
+                        indata=indata,
+                        signgs=signgs,
+                        ftol=float(ftol_i),
+                        max_iter=int(probe_iters),
+                        step_size=float(step_size_val),
+                        include_constraint_force=True,
+                        apply_m1_constraints=True,
+                        precond_radial_alpha=0.5,
+                        precond_lambda_alpha=0.5,
+                        mode_diag_exponent=0.0,
+                        auto_flip_force=False,
+                        divide_by_scalxc_for_update=False,
+                        lambda_update_scale=1.0,
+                        enforce_vmec_lambda_axis=True,
+                        vmec2000_control=True,
+                        strict_update=True,
+                        backtracking=False,
+                        reference_mode=False,
+                        use_restart_triggers=True if use_restart_triggers is None else bool(use_restart_triggers),
+                        vmecpp_restart=bool(vmecpp_restart),
+                        use_direct_fallback=False,
+                        stage_prev_fsq=None,
+                        stage_transition_factor=float(stage_transition_factor),
+                        stage_transition_scale=float(stage_transition_scale),
+                        resume_state=None,
+                        verbose=False,
+                        verbose_vmec2000_table=False,
+                        jit_precompile=False,
+                        jit_warmup_iters=0,
+                    )
+                    res_probe_scan = solve_fixed_boundary_residual_iter(
+                        state,
+                        static_i,
+                        jit_forces=_resolve_jit_forces(jit_forces, static_i, int(probe_iters)),
+                        use_scan=True,
+                        **probe_kwargs,
+                    )
+                    res_probe_direct = solve_fixed_boundary_residual_iter(
+                        state,
+                        static_i,
+                        jit_forces=_resolve_jit_forces(jit_forces, static_i, int(probe_iters)),
+                        use_scan=False,
+                        **probe_kwargs,
+                    )
+                    fsqr_scan = np.asarray(res_probe_scan.diagnostics.get("fsqr_full"))
+                    fsqz_scan = np.asarray(res_probe_scan.diagnostics.get("fsqz_full"))
+                    fsql_scan = np.asarray(res_probe_scan.diagnostics.get("fsql_full"))
+                    fsqr_ref = np.asarray(res_probe_direct.fsqr2_history)
+                    fsqz_ref = np.asarray(res_probe_direct.fsqz2_history)
+                    fsql_ref = np.asarray(res_probe_direct.fsql2_history)
+                    mismatch = False
+                    if fsqr_scan.size == fsqr_ref.size == probe_iters:
+                        if not np.allclose(fsqr_scan, fsqr_ref, rtol=1e-7, atol=1e-10):
+                            mismatch = True
+                        if not np.allclose(fsqz_scan, fsqz_ref, rtol=1e-7, atol=1e-10):
+                            mismatch = True
+                        if not np.allclose(fsql_scan, fsql_ref, rtol=1e-7, atol=1e-10):
+                            mismatch = True
+                    else:
+                        mismatch = True
+                    if mismatch:
+                        scan_mode = False
+                        if bool(verbose):
+                            print(
+                                "[vmec_jax] scan parity guard: disabling scan for this stage (probe mismatch)",
+                                flush=True,
+                            )
+                except Exception:
+                    # If probe fails, fall back to the safe (non-scan) path.
+                    scan_mode = False
             jit_forces_eff = _resolve_jit_forces(jit_forces, static_i, int(niter_i))
             jit_precompile_eff = False
             if bool(jit_forces_eff) and (not bool(scan_mode)):
@@ -921,7 +1018,7 @@ def run_fixed_boundary(
                 resume_state=resume_state_stage,
                 verbose=bool(verbose),
                 verbose_vmec2000_table=bool(verbose),
-                use_scan=bool(use_scan),
+                use_scan=bool(scan_mode),
                 jit_warmup_iters=int(jit_warmup_iters),
                 jit_precompile=bool(jit_precompile_eff),
             )
