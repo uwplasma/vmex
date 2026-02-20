@@ -79,6 +79,65 @@ class SolveVmecResidualResult:
     diagnostics: Dict[str, Any]
 
 
+class _ScanCarry(NamedTuple):
+    state: VMECState
+    time_step: Any
+    inv_tau: Any
+    fsq_prev: Any
+    accepted_count: Any
+    probe_count: Any
+    probe_bad_jac: Any
+    probe_accept: Any
+    probe_fsq_min: Any
+    probe_fsq_max: Any
+    probe_fsq_start: Any
+    abort_scan: Any
+    skip_timecontrol: Any
+    vRcc: Any
+    vRss: Any
+    vZsc: Any
+    vZcs: Any
+    vLsc: Any
+    vLcs: Any
+    flip_sign: Any
+    iter_offset: Any
+    iter1: Any
+    res0: Any
+    res1: Any
+    state_checkpoint: VMECState
+    cache_valid: Any
+    cache_precond_diag: Any
+    cache_tcon: Any
+    cache_norms: Any
+    cache_rz_scale: Any
+    cache_l_scale: Any
+    cache_rz_norm: Any
+    cache_f_norm1: Any
+    cache_prec_rz_mats: Any
+    cache_prec_lam_prec: Any
+    force_bcovar_update: Any
+    ijacob: Any
+    bad_resets: Any
+    bad_growth: Any
+    fsqz_prev: Any
+    r00_prev: Any
+    z00_prev: Any
+    w_mhd_prev: Any
+    converged: Any
+    fsqr_prev_phys: Any
+    fsqz_prev_phys: Any
+    fsql_prev_phys: Any
+    fsqr1_prev: Any
+    fsqz1_prev: Any
+    fsql1_prev: Any
+    fsqr_checkpoint: Any
+    fsqz_checkpoint: Any
+    fsql_checkpoint: Any
+    fsqr1_checkpoint: Any
+    fsqz1_checkpoint: Any
+    fsql1_checkpoint: Any
+
+
 def _parse_iter_list(val: str) -> set[int] | None:
     if not val:
         return None
@@ -752,6 +811,65 @@ def _maybe_dump_lulv(
             data["lv_phys_rest"] = np.asarray(lv_rest)
     np.savez(path, **data)
 
+
+def _maybe_dump_precond_inputs(*, bc, trig, static, iter_idx: int) -> None:
+    env = os.getenv("VMEC_JAX_DUMP_PRECOND", "")
+    if not env or env == "0":
+        return
+    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
+    if iters is not None and int(iter_idx) not in iters:
+        return
+    outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    path = outdir / f"precond_inputs_iter{int(iter_idx)}.dat"
+
+    try:
+        r12 = np.asarray(bc.jac.r12)
+        sqrtg = np.asarray(bc.jac.sqrtg)
+        bsq = np.asarray(bc.bsq)
+        ru12 = np.asarray(bc.jac.ru12)
+        zu12 = np.asarray(bc.jac.zu12)
+    except Exception:
+        return
+
+    wint3 = getattr(trig, "wint3_precond", None) if trig is not None else None
+    if wint3 is None:
+        # Fallback to uniform weights if trig tables are missing.
+        wint3 = np.ones((1, r12.shape[1], r12.shape[2]), dtype=float)
+    wint3 = np.asarray(wint3)
+    if wint3.ndim != 3:
+        return
+    if wint3.shape[0] == 1:
+        wint_full = np.broadcast_to(wint3, r12.shape)
+    elif wint3.shape[0] == r12.shape[0]:
+        wint_full = wint3
+    else:
+        wint_full = np.broadcast_to(wint3[:1, :, :], r12.shape)
+
+    ns = int(r12.shape[0])
+    ntheta3 = int(r12.shape[1])
+    nzeta = int(r12.shape[2])
+
+    with path.open("w", encoding="utf-8") as f:
+        f.write("# precond inputs (vmec_jax)\n")
+        f.write(f"ns={ns}\n")
+        f.write(f"nzeta={nzeta}\n")
+        f.write(f"ntheta3={ntheta3}\n")
+        f.write("columns: js lt lz\n")
+        f.write("         r12 sqrtg bsq\n")
+        f.write("         ru12 zu12 wint\n")
+        for lt in range(ntheta3):
+            for lz in range(nzeta):
+                for j in range(1, ns):
+                    f.write(
+                        f"{j+1:6d}{lt+1:6d}{lz+1:6d}"
+                        f"{r12[j, lt, lz]:24.16E}"
+                        f"{sqrtg[j, lt, lz]:24.16E}"
+                        f"{bsq[j, lt, lz]:24.16E}"
+                        f"{ru12[j, lt, lz]:24.16E}"
+                        f"{zu12[j, lt, lz]:24.16E}"
+                        f"{wint_full[j, lt, lz]:24.16E}\n"
+                    )
 
 def _maybe_dump_xc(
     *,
@@ -2941,13 +3059,27 @@ def solve_fixed_boundary_residual_iter(
     lambda_update_scale = float(lambda_update_scale)
     enforce_vmec_lambda_axis = bool(enforce_vmec_lambda_axis)
     vmec2000_control = bool(vmec2000_control)
-    badjac_mode_env = os.getenv("VMEC_JAX_BADJAC_MODE", "state").strip().lower()
+    badjac_mode_env = os.getenv("VMEC_JAX_BADJAC_MODE", "ptau").strip().lower()
     if badjac_mode_env not in ("ptau", "state"):
         badjac_mode_env = "ptau"
     badjac_mode = badjac_mode_env
     badjac_use_state = badjac_mode == "state"
     dump_ptau_state_env = os.getenv("VMEC_JAX_DUMP_PTAU_STATE", "0").strip().lower()
     dump_ptau_state = dump_ptau_state_env not in ("", "0", "false", "no")
+    badjac_state_probe_env = os.getenv("VMEC_JAX_BADJAC_STATE_PROBE", "0").strip().lower()
+    badjac_state_probe = badjac_state_probe_env not in ("", "0", "false", "no")
+    ptau_tol_env = os.getenv("VMEC_JAX_PTAU_TOL", "").strip()
+    ptau_tol_rel_env = os.getenv("VMEC_JAX_PTAU_TOL_REL", "1.0e-6").strip()
+    try:
+        ptau_tol = float(ptau_tol_env) if ptau_tol_env else 0.0
+    except Exception:
+        ptau_tol = 0.0
+    try:
+        ptau_tol_rel = float(ptau_tol_rel_env) if ptau_tol_rel_env else 0.0
+    except Exception:
+        ptau_tol_rel = 0.0
+    if ptau_tol_rel < 0.0:
+        ptau_tol_rel = 0.0
     reference_mode = bool(reference_mode)
     jit_precompile = bool(jit_precompile)
     if use_restart_triggers is None:
@@ -2960,6 +3092,48 @@ def solve_fixed_boundary_residual_iter(
     use_direct_fallback = bool(use_direct_fallback)
     vmecpp_restart = bool(vmecpp_restart)
     verbose_vmec2000_table = bool(verbose_vmec2000_table)
+    scan_fallback_env = os.getenv("VMEC_JAX_SCAN_FALLBACK", "1").strip().lower()
+    scan_fallback_enabled = scan_fallback_env not in ("", "0", "false", "no")
+    scan_fallback_iters_env = os.getenv("VMEC_JAX_SCAN_FALLBACK_ITERS", "20").strip()
+    scan_fallback_badjac_env = os.getenv("VMEC_JAX_SCAN_FALLBACK_BJAC_LIMIT", "10").strip()
+    try:
+        scan_fallback_iters = max(1, int(scan_fallback_iters_env))
+    except Exception:
+        scan_fallback_iters = 20
+    try:
+        scan_fallback_badjac_limit = max(0, int(scan_fallback_badjac_env))
+    except Exception:
+        scan_fallback_badjac_limit = 10
+    scan_fallback_fsq_abs_env = os.getenv("VMEC_JAX_SCAN_FALLBACK_FSQ_ABS", "1.0e-2").strip()
+    try:
+        scan_fallback_fsq_abs = float(scan_fallback_fsq_abs_env)
+    except Exception:
+        scan_fallback_fsq_abs = 1.0e-2
+    if scan_fallback_fsq_abs < 0.0:
+        scan_fallback_fsq_abs = 0.0
+    scan_fallback_accept_env = os.getenv("VMEC_JAX_SCAN_FALLBACK_ACCEPTED_FRAC", "0.5").strip()
+    scan_fallback_fsq_env = os.getenv("VMEC_JAX_SCAN_FALLBACK_FSQ_FACTOR", "50").strip()
+    scan_fallback_improve_env = os.getenv("VMEC_JAX_SCAN_FALLBACK_IMPROVE", "0.9").strip()
+    try:
+        scan_fallback_accept_frac = float(scan_fallback_accept_env)
+    except Exception:
+        scan_fallback_accept_frac = 0.5
+    try:
+        scan_fallback_fsq_factor = float(scan_fallback_fsq_env)
+    except Exception:
+        scan_fallback_fsq_factor = 50.0
+    try:
+        scan_fallback_improve = float(scan_fallback_improve_env)
+    except Exception:
+        scan_fallback_improve = 0.9
+    if scan_fallback_accept_frac < 0.0:
+        scan_fallback_accept_frac = 0.0
+    if scan_fallback_accept_frac > 1.0:
+        scan_fallback_accept_frac = 1.0
+    if scan_fallback_fsq_factor < 1.0:
+        scan_fallback_fsq_factor = 1.0
+    if scan_fallback_improve <= 0.0 or scan_fallback_improve >= 1.0:
+        scan_fallback_improve = 0.9
     stage_transition_factor = float(stage_transition_factor)
     stage_transition_scale = float(stage_transition_scale)
     if stage_transition_factor <= 0.0 or stage_transition_scale <= 0.0:
@@ -3079,6 +3253,13 @@ def solve_fixed_boundary_residual_iter(
     force_axis_reset = False if indata is None else bool(indata.get_bool("LFREEB", False))
     axis_reset_env = os.getenv("VMEC_JAX_AXIS_RESET_ALWAYS_3D", "0").strip().lower()
     axis_reset_always_3d = axis_reset_env not in ("", "0", "false", "no")
+    axis_reset_fsq_env = os.getenv("VMEC_JAX_AXIS_RESET_FSQ_MIN", "1.0").strip()
+    try:
+        axis_reset_fsq_min = float(axis_reset_fsq_env) if axis_reset_fsq_env else 0.0
+    except Exception:
+        axis_reset_fsq_min = 0.0
+    if axis_reset_fsq_min < 0.0:
+        axis_reset_fsq_min = 0.0
 
     def _apply_vmec_lambda_axis_rules(st: VMECState) -> VMECState:
         """Enforce VMEC lambda gauge without mutating stored axis coefficients.
@@ -3842,6 +4023,7 @@ def solve_fixed_boundary_residual_iter(
             _maybe_dump_bsube_terms(bc=k.bc, static=static, iter_idx=int(iter_idx))
             _maybe_dump_lulv(bc=k.bc, static=static, iter_idx=int(iter_idx), state=state, trig=trig)
             _maybe_dump_jacobian_terms(k=k, iter_idx=int(iter_idx))
+            _maybe_dump_precond_inputs(bc=k.bc, trig=trig, static=static, iter_idx=int(iter_idx))
         if iter_idx is not None:
             _maybe_dump_force_kernels(k=k, static=static, iter_idx=int(iter_idx), label="raw")
         mask_pack = None
@@ -4495,14 +4677,27 @@ def solve_fixed_boundary_residual_iter(
         if nstep_screen < 1:
             nstep_screen = 1
         scan_print_env = os.getenv("VMEC_JAX_SCAN_PRINT", "1").strip().lower()
-        scan_print_mode = os.getenv("VMEC_JAX_SCAN_PRINT_MODE", "debug_print").strip().lower()
+        scan_print_mode = os.getenv("VMEC_JAX_SCAN_PRINT_MODE", "debug_callback").strip().lower()
         scan_print_ordered = os.getenv("VMEC_JAX_SCAN_PRINT_ORDERED", "0").strip().lower() not in ("", "0", "false", "no")
+        abort_scan_env = os.getenv("VMEC_JAX_SCAN_ABORT_ON_BADJAC", "0").strip().lower()
+        abort_scan_on_badjac = abort_scan_env not in ("", "0", "false", "no")
+        dump_timecontrol_scan = os.getenv("VMEC_JAX_DUMP_TIMECONTROL", "") not in ("", "0")
+        scan_timecontrol_callback = None
+        if dump_timecontrol_scan:
+            try:
+                from jax.experimental import io_callback as _io_callback
+
+                scan_timecontrol_callback = _io_callback
+            except Exception:
+                dump_timecontrol_scan = False
+                scan_timecontrol_callback = None
         print_in_scan = (
             bool(verbose)
             and bool(vmec2000_control)
             and bool(verbose_vmec2000_table)
             and scan_print_env not in ("", "0", "false", "no")
         )
+        _jax_debug = None
         _jax_debug_print = None
         if print_in_scan:
             try:
@@ -4518,6 +4713,19 @@ def solve_fixed_boundary_residual_iter(
             except Exception:
                 scan_print_mode = "debug_print"
                 _io_callback = None  # type: ignore[assignment]
+        _timecontrol_path = None
+        if dump_timecontrol_scan:
+            dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "").strip()
+            if dump_dir:
+                try:
+                    _timecontrol_path = Path(dump_dir) / "time_control_trace.log"
+                except Exception:
+                    _timecontrol_path = None
+            else:
+                _timecontrol_path = None
+            if _timecontrol_path is None:
+                dump_timecontrol_scan = False
+                scan_timecontrol_callback = None
         if resume_state is not None:
             try:
                 iter_offset0 = int(resume_state.get("iter_offset", iter_offset0))
@@ -4580,6 +4788,46 @@ def solve_fixed_boundary_residual_iter(
             except Exception:
                 pass
         dtype = jnp.asarray(state_init.Rcos).dtype
+
+        def _maybe_dump_timecontrol_scan(*, cond, stage_id, iter2, iter1, fsq, fsq0, res0, res1, time_step, irst):
+            if not dump_timecontrol_scan or scan_timecontrol_callback is None or _timecontrol_path is None:
+                return jnp.asarray(0, dtype=jnp.int32)
+
+            def _emit(args):
+                (iter2_v, iter1_v, fsq_v, fsq0_v, res0_v, res1_v, time_step_v, irst_v, stage_id_v) = args
+                try:
+                    stage_map = {0: "init", 1: "pre", 2: "checkpoint", 3: "restart"}
+                    stage = stage_map.get(int(stage_id_v), "pre")
+                    with _timecontrol_path.open("a", encoding="utf-8") as f:
+                        f.write(
+                            f"{int(iter2_v):8d} {int(iter1_v):8d} "
+                            f"{float(fsq_v): .16e} {float(fsq0_v): .16e} "
+                            f"{float(res0_v): .16e} {float(res1_v): .16e} "
+                            f"{float(time_step_v): .16e} {int(irst_v):3d} {stage}\n"
+                        )
+                except Exception:
+                    pass
+                return np.int32(0)
+
+            def _call(_):
+                return scan_timecontrol_callback(
+                    _emit,
+                    jax.ShapeDtypeStruct((), jnp.int32),
+                    (
+                        iter2,
+                        iter1,
+                        fsq,
+                        fsq0,
+                        res0,
+                        res1,
+                        time_step,
+                        irst,
+                        stage_id,
+                    ),
+                    ordered=True,
+                )
+
+            return jax.lax.cond(cond, _call, lambda _: jnp.asarray(0, dtype=jnp.int32), operand=None)
 
         time_step0 = jnp.asarray(float(step_size), dtype=dtype)
         flip_sign0 = jnp.asarray(float(initial_flip_sign), dtype=dtype)
@@ -4737,8 +4985,17 @@ def solve_fixed_boundary_residual_iter(
             constraint_tcon_active=constraint_active_false,
             iter_idx=None,
         )
+        fsq_phys0_val = None
+        try:
+            fsqr0 = norms0.r1 * norms0.fnorm * gcr2_0
+            fsqz0 = norms0.r1 * norms0.fnorm * gcz2_0
+            fsql0 = norms0.fnormL * gcl2_0
+            fsq_phys0_val = float(np.asarray(fsqr0 + fsqz0 + fsql0))
+        except Exception:
+            fsq_phys0_val = None
         bad_jacobian0 = False
         if axis_reset_enabled:
+            axis_reset_debug = os.getenv("VMEC_JAX_AXIS_RESET_DEBUG", "").strip().lower() not in ("", "0", "false", "no")
             try:
                 ptau_min0, ptau_max0 = _ptau_minmax(k0)
             except Exception:
@@ -4748,43 +5005,61 @@ def solve_fixed_boundary_residual_iter(
                 try:
                     min_tau_ptau0 = float(np.asarray(ptau_min0))
                     max_tau_ptau0 = float(np.asarray(ptau_max0))
-                    tau_scale_ptau0 = max(abs(min_tau_ptau0), abs(max_tau_ptau0))
-                    tau_tol_ptau0 = max(1.0e-12, 1.0e-2 * tau_scale_ptau0)
+                    ptau_scale0 = max(abs(min_tau_ptau0), abs(max_tau_ptau0))
+                    tau_tol_ptau0 = max(abs(ptau_tol), ptau_tol_rel * ptau_scale0)
                     bad_jacobian_ptau = (min_tau_ptau0 < -tau_tol_ptau0) and (max_tau_ptau0 > tau_tol_ptau0)
                 except Exception:
                     bad_jacobian_ptau = None
-            try:
-                jac0 = vmec_half_mesh_jacobian_from_state(
-                    state=state_init,
-                    modes=static.modes,
-                    trig=trig,
-                    s=s,
-                    lconm1=bool(getattr(static.cfg, "lconm1", True)),
-                    lthreed=bool(getattr(static.cfg, "lthreed", True)),
-                    mask_even=getattr(static, "m_is_even", None),
-                    mask_odd=getattr(static, "m_is_odd", None),
-                )
-                tau0 = jnp.asarray(jac0.tau)
-                tau0_use = tau0[1:] if int(tau0.shape[0]) > 1 else tau0
-                min_tau_state0 = float(np.asarray(jnp.min(tau0_use)))
-                max_tau_state0 = float(np.asarray(jnp.max(tau0_use)))
-                tau_scale_state0 = max(abs(min_tau_state0), abs(max_tau_state0))
-                tau_tol_state0 = max(1.0e-12, 1.0e-2 * tau_scale_state0)
-                bad_jacobian_state = (min_tau_state0 < -tau_tol_state0) and (max_tau_state0 > tau_tol_state0)
-            except Exception:
-                bad_jacobian_state = False
-
+            bad_jacobian_state = False
             if badjac_use_state:
-                bad_jacobian0 = bad_jacobian_state
-            elif bad_jacobian_ptau is None:
+                try:
+                    jac0 = vmec_half_mesh_jacobian_from_state(
+                        state=state_init,
+                        modes=static.modes,
+                        trig=trig,
+                        s=s,
+                        lconm1=bool(getattr(static.cfg, "lconm1", True)),
+                        lthreed=bool(getattr(static.cfg, "lthreed", True)),
+                        mask_even=getattr(static, "m_is_even", None),
+                        mask_odd=getattr(static, "m_is_odd", None),
+                    )
+                    tau0 = jnp.asarray(jac0.tau)
+                    tau0_use = tau0[1:] if int(tau0.shape[0]) > 1 else tau0
+                    min_tau_state0 = float(np.asarray(jnp.min(tau0_use)))
+                    max_tau_state0 = float(np.asarray(jnp.max(tau0_use)))
+                    tau_scale_state0 = max(abs(min_tau_state0), abs(max_tau_state0))
+                    tau_tol_state0 = max(1.0e-12, 1.0e-2 * tau_scale_state0)
+                    bad_jacobian_state = (min_tau_state0 < -tau_tol_state0) and (max_tau_state0 > tau_tol_state0)
+                except Exception:
+                    bad_jacobian_state = False
+
+            if bad_jacobian_ptau is None:
                 bad_jacobian0 = bad_jacobian_state
             else:
-                if bad_jacobian_ptau == bad_jacobian_state:
-                    bad_jacobian0 = bad_jacobian_ptau
+                if badjac_use_state:
+                    # Require both ptau and state sign changes to avoid
+                    # false-positive axis resets on benign cases.
+                    bad_jacobian0 = bool(bad_jacobian_ptau) and bool(bad_jacobian_state)
                 else:
-                    # If ptau vs state-based checks disagree, trust the
-                    # state-based result to avoid suppressing axis resets.
-                    bad_jacobian0 = bad_jacobian_state
+                    bad_jacobian0 = bool(bad_jacobian_ptau)
+            if bad_jacobian0 and axis_reset_fsq_min > 0.0:
+                if (fsq_phys0_val is None) or (not np.isfinite(fsq_phys0_val)):
+                    bad_jacobian0 = False
+                elif fsq_phys0_val < axis_reset_fsq_min:
+                    bad_jacobian0 = False
+            if axis_reset_debug:
+                try:
+                    fsq_debug_val = float("nan") if fsq_phys0_val is None else float(fsq_phys0_val)
+                    print(
+                        "[axis_reset] fsq0="
+                        f"{fsq_debug_val:.6e} "
+                        f"axis_reset_fsq_min={axis_reset_fsq_min:.3e} "
+                        f"badjac_ptau={bad_jacobian_ptau} badjac_state={bad_jacobian_state} "
+                        f"badjac_used={bad_jacobian0}",
+                        flush=True,
+                    )
+                except Exception:
+                    pass
         force_axis_reset_init = bool(force_axis_reset) or (
             bool(vmec2000_control) and bool(lmove_axis) and bool(getattr(static.cfg, "lthreed", True)) and axis_reset_always_3d
         )
@@ -4872,64 +5147,23 @@ def solve_fixed_boundary_residual_iter(
             if "cache_prec_lam_prec" in resume_state:
                 cache_lam_prec0 = resume_state.get("cache_prec_lam_prec", cache_lam_prec0)
 
-        class _ScanCarry(NamedTuple):
-            state: VMECState
-            time_step: Any
-            inv_tau: Any
-            fsq_prev: Any
-            accepted_count: Any
-            abort_scan: Any
-            vRcc: Any
-            vRss: Any
-            vZsc: Any
-            vZcs: Any
-            vLsc: Any
-            vLcs: Any
-            flip_sign: Any
-            iter_offset: Any
-            iter1: Any
-            res0: Any
-            res1: Any
-            state_checkpoint: VMECState
-            cache_valid: Any
-            cache_precond_diag: Any
-            cache_tcon: Any
-            cache_norms: Any
-            cache_rz_scale: Any
-            cache_l_scale: Any
-            cache_rz_norm: Any
-            cache_f_norm1: Any
-            cache_prec_rz_mats: Any
-            cache_prec_lam_prec: Any
-            force_bcovar_update: Any
-            ijacob: Any
-            bad_resets: Any
-            bad_growth: Any
-            fsqz_prev: Any
-            r00_prev: Any
-            z00_prev: Any
-            w_mhd_prev: Any
-            converged: Any
-            fsqr_prev_phys: Any
-            fsqz_prev_phys: Any
-            fsql_prev_phys: Any
-            fsqr1_prev: Any
-            fsqz1_prev: Any
-            fsql1_prev: Any
-            fsqr_checkpoint: Any
-            fsqz_checkpoint: Any
-            fsql_checkpoint: Any
-            fsqr1_checkpoint: Any
-            fsqz1_checkpoint: Any
-            fsql1_checkpoint: Any
-
         def _tree_select(cond, t_true, t_false):
             return jax.tree_util.tree_map(lambda a, b: jnp.where(cond, a, b), t_true, t_false)
 
         ftol_j = jnp.asarray(float(ftol), dtype=dtype)
+        scan_fallback_iters_j = jnp.asarray(int(scan_fallback_iters), dtype=jnp.int32)
+        scan_fallback_badjac_limit_j = jnp.asarray(int(scan_fallback_badjac_limit), dtype=jnp.int32)
+        scan_fallback_accept_frac_j = jnp.asarray(float(scan_fallback_accept_frac), dtype=dtype)
+        scan_fallback_fsq_factor_j = jnp.asarray(float(scan_fallback_fsq_factor), dtype=dtype)
+        scan_fallback_fsq_abs_j = jnp.asarray(float(scan_fallback_fsq_abs), dtype=dtype)
+        scan_fallback_improve_j = jnp.asarray(float(scan_fallback_improve), dtype=dtype)
+
+        scan_jax_debug = _jax_debug
+        scan_jax_debug_print = _jax_debug_print
 
         def _scan_step(carry: _ScanCarry, it):
             def _hold_step(carry_hold: _ScanCarry):
+                carry_hold_out = carry_hold
                 fsqr_h = carry_hold.fsqr_prev_phys
                 fsqz_h = carry_hold.fsqz_prev_phys
                 fsql_h = carry_hold.fsql_prev_phys
@@ -4939,7 +5173,7 @@ def solve_fixed_boundary_residual_iter(
                 accepted_h = jnp.asarray(False)
                 zero_m1_h = jnp.asarray(0.0, dtype=dtype)
                 include_edge_h = jnp.asarray(False)
-                return carry_hold, (
+                return carry_hold_out, (
                     fsqr_h,
                     fsqz_h,
                     fsql_h,
@@ -4970,10 +5204,11 @@ def solve_fixed_boundary_residual_iter(
             def _advance_step(carry_adv: _ScanCarry):
                 iter2 = jnp.asarray(it + 1, dtype=jnp.int32) + jnp.asarray(carry_adv.iter_offset, dtype=jnp.int32)
                 fsq_prev_before = carry_adv.fsq_prev
+                skip_timecontrol = carry_adv.skip_timecontrol
                 iter_since_restart = iter2 - carry_adv.iter1
                 time_step_report = carry_adv.time_step
-                # VMEC `constrain_m1`: zero gcz(m=1) on the first iteration, and
-                # again when the previous fsqz drops below the tolerance.
+                # VMEC `constrain_m1`: zero gcz(m=1) on the first global
+                # iteration, and again when the previous fsqz drops below the tolerance.
                 zero_m1 = jnp.where(
                     (iter2 < 2) | (carry_adv.fsqz_prev < 1.0e-6),
                     jnp.asarray(1.0, dtype=dtype),
@@ -5069,8 +5304,8 @@ def solve_fixed_boundary_residual_iter(
                 if print_in_scan:
                     def _do_print(_):
                         if scan_print_mode == "debug_print":
-                            if _jax_debug_print is not None:
-                                _jax_debug_print(
+                            if scan_jax_debug_print is not None:
+                                scan_jax_debug_print(
                                     "{i:5d}{fsqr:10.2E}{fsqz:10.2E}{fsql:10.2E}{r00:11.3E}{dt:10.2E}{w:12.4E}",
                                     i=iter2,
                                     fsqr=fsqr,
@@ -5082,25 +5317,26 @@ def solve_fixed_boundary_residual_iter(
                                     ordered=bool(scan_print_ordered),
                                 )
                         elif scan_print_mode == "debug_callback":
-                            def _cb(i, fsqr_v, fsqz_v, fsql_v, r00_v, dt_v, w_v):
-                                print(
-                                    f"{int(i):5d}"
-                                    f"{float(fsqr_v):10.2E}{float(fsqz_v):10.2E}{float(fsql_v):10.2E}"
-                                    f"{float(r00_v):11.3E}{float(dt_v):10.2E}{float(w_v):12.4E}",
-                                    flush=True,
+                            if scan_jax_debug is not None:
+                                def _cb(i, fsqr_v, fsqz_v, fsql_v, r00_v, dt_v, w_v):
+                                    print(
+                                        f"{int(i):5d}"
+                                        f"{float(fsqr_v):10.2E}{float(fsqz_v):10.2E}{float(fsql_v):10.2E}"
+                                        f"{float(r00_v):11.3E}{float(dt_v):10.2E}{float(w_v):12.4E}",
+                                        flush=True,
+                                    )
+                                    return None
+                                scan_jax_debug.callback(
+                                    _cb,
+                                    iter2,
+                                    fsqr,
+                                    fsqz,
+                                    fsql,
+                                    r00_j,
+                                    time_step_report,
+                                    w_mhd,
+                                    ordered=bool(scan_print_ordered),
                                 )
-                                return None
-                            _jax_debug.callback(
-                                _cb,
-                                iter2,
-                                fsqr,
-                                fsqz,
-                                fsql,
-                                r00_j,
-                                time_step_report,
-                                w_mhd,
-                                ordered=bool(scan_print_ordered),
-                            )
                         else:
                             def _cb_io(i, fsqr_v, fsqz_v, fsql_v, r00_v, dt_v, w_v):
                                 print(
@@ -5265,14 +5501,11 @@ def solve_fixed_boundary_residual_iter(
                     else:
                         min_tau_ptau = jnp.asarray(ptau_min)
                         max_tau_ptau = jnp.asarray(ptau_max)
-                        tau_scale_ptau = jnp.maximum(jnp.abs(min_tau_ptau), jnp.abs(max_tau_ptau))
-                        tau_tol_ptau = jnp.maximum(
-                            jnp.asarray(1.0e-12, dtype=dtype),
-                            jnp.asarray(1.0e-2, dtype=dtype) * tau_scale_ptau,
-                        )
+                        tau_tol_ptau = jnp.asarray(abs(ptau_tol), dtype=dtype)
                         bad_jacobian_ptau = (min_tau_ptau < -tau_tol_ptau) & (max_tau_ptau > tau_tol_ptau)
                     ptau_valid = jnp.isfinite(min_tau_ptau) & jnp.isfinite(max_tau_ptau)
-                    need_state_jac = badjac_use_state | dump_ptau_state | (iter2 <= 2) | (~ptau_valid) | bad_jacobian_ptau
+                    state_probe = badjac_state_probe & (iter2 <= 2)
+                    need_state_jac = badjac_use_state | dump_ptau_state | state_probe | (~ptau_valid) | bad_jacobian_ptau
 
                     def _state_jacobian():
                         jac_scan = vmec_half_mesh_jacobian_from_state(
@@ -5365,30 +5598,122 @@ def solve_fixed_boundary_residual_iter(
                     fsq_res = jnp.where(jnp.asarray(reference_mode), fsq_phys, fsq1)
                     fsq = fsq_res
                 init_mask = (iter2 == carry_adv.iter1) | (carry_adv.res0 < 0.0) | (carry_adv.res1 < 0.0)
-                res0 = jnp.where(init_mask, fsq_res, carry_adv.res0)
-                res1 = jnp.where(init_mask, fsq_phys, carry_adv.res1)
-                state_checkpoint = jax.tree_util.tree_map(
-                    lambda a, b: jnp.where(init_mask, a, b), carry_adv.state, carry_adv.state_checkpoint
-                )
-                if bool(vmec2000_control):
-                    res0 = jnp.minimum(res0, fsq)
-                else:
-                    res0 = jnp.minimum(res0, fsq_res)
-                res1 = jnp.minimum(res1, fsq_phys)
-                checkpoint_mask = (fsq <= res0) & (fsq_phys <= res1) & (~bad_jacobian)
-                state_checkpoint = jax.tree_util.tree_map(
-                    lambda a, b: jnp.where(checkpoint_mask, a, b), carry_adv.state, state_checkpoint
-                )
-                fsqr_checkpoint = jnp.where(checkpoint_mask, fsqr, carry_adv.fsqr_checkpoint)
-                fsqz_checkpoint = jnp.where(checkpoint_mask, fsqz, carry_adv.fsqz_checkpoint)
-                fsql_checkpoint = jnp.where(checkpoint_mask, fsql, carry_adv.fsql_checkpoint)
-                fsqr1_checkpoint = jnp.where(checkpoint_mask, fsqr1, carry_adv.fsqr1_checkpoint)
-                fsqz1_checkpoint = jnp.where(checkpoint_mask, fsqz1, carry_adv.fsqz1_checkpoint)
-                fsql1_checkpoint = jnp.where(checkpoint_mask, fsql1, carry_adv.fsql1_checkpoint)
 
-                restart_time = (~bad_jacobian) & ((iter2 - carry_adv.iter1) > 10) & (
-                    (fsq > vmec2000_fact * jnp.maximum(res0, 1.0e-30))
-                    | (fsq_phys > vmec2000_fact * jnp.maximum(res1, 1.0e-30))
+                def _timecontrol_update(_):
+                    res0_tc = jnp.where(init_mask, fsq_res, carry_adv.res0)
+                    res1_tc = jnp.where(init_mask, fsq_phys, carry_adv.res1)
+                    state_checkpoint_tc = jax.tree_util.tree_map(
+                        lambda a, b: jnp.where(init_mask, a, b), carry_adv.state, carry_adv.state_checkpoint
+                    )
+                    if bool(vmec2000_control):
+                        res0_tc = jnp.minimum(res0_tc, fsq)
+                    else:
+                        res0_tc = jnp.minimum(res0_tc, fsq_res)
+                    res1_tc = jnp.minimum(res1_tc, fsq_phys)
+                    if dump_timecontrol_scan:
+                        _maybe_dump_timecontrol_scan(
+                            cond=init_mask,
+                            stage_id=jnp.asarray(0, dtype=jnp.int32),
+                            iter2=iter2,
+                            iter1=carry_adv.iter1,
+                            fsq=fsq,
+                            fsq0=fsq_phys,
+                            res0=res0_tc,
+                            res1=res1_tc,
+                            time_step=carry_adv.time_step,
+                            irst=jnp.asarray(1, dtype=jnp.int32),
+                        )
+                        _maybe_dump_timecontrol_scan(
+                            cond=jnp.asarray(True),
+                            stage_id=jnp.asarray(1, dtype=jnp.int32),
+                            iter2=iter2,
+                            iter1=carry_adv.iter1,
+                            fsq=fsq,
+                            fsq0=fsq_phys,
+                            res0=res0_tc,
+                            res1=res1_tc,
+                            time_step=carry_adv.time_step,
+                            irst=jnp.asarray(1, dtype=jnp.int32),
+                        )
+                    checkpoint_mask_tc = (fsq <= res0_tc) & (fsq_phys <= res1_tc) & (~bad_jacobian)
+                    state_checkpoint_tc = jax.tree_util.tree_map(
+                        lambda a, b: jnp.where(checkpoint_mask_tc, a, b), carry_adv.state, state_checkpoint_tc
+                    )
+                    fsqr_checkpoint_tc = jnp.where(checkpoint_mask_tc, fsqr, carry_adv.fsqr_checkpoint)
+                    fsqz_checkpoint_tc = jnp.where(checkpoint_mask_tc, fsqz, carry_adv.fsqz_checkpoint)
+                    fsql_checkpoint_tc = jnp.where(checkpoint_mask_tc, fsql, carry_adv.fsql_checkpoint)
+                    fsqr1_checkpoint_tc = jnp.where(checkpoint_mask_tc, fsqr1, carry_adv.fsqr1_checkpoint)
+                    fsqz1_checkpoint_tc = jnp.where(checkpoint_mask_tc, fsqz1, carry_adv.fsqz1_checkpoint)
+                    fsql1_checkpoint_tc = jnp.where(checkpoint_mask_tc, fsql1, carry_adv.fsql1_checkpoint)
+                    if dump_timecontrol_scan:
+                        _maybe_dump_timecontrol_scan(
+                            cond=checkpoint_mask_tc,
+                            stage_id=jnp.asarray(2, dtype=jnp.int32),
+                            iter2=iter2,
+                            iter1=carry_adv.iter1,
+                            fsq=fsq,
+                            fsq0=fsq_phys,
+                            res0=res0_tc,
+                            res1=res1_tc,
+                            time_step=carry_adv.time_step,
+                            irst=jnp.asarray(1, dtype=jnp.int32),
+                        )
+                    return (
+                        res0_tc,
+                        res1_tc,
+                        state_checkpoint_tc,
+                        fsqr_checkpoint_tc,
+                        fsqz_checkpoint_tc,
+                        fsql_checkpoint_tc,
+                        fsqr1_checkpoint_tc,
+                        fsqz1_checkpoint_tc,
+                        fsql1_checkpoint_tc,
+                        checkpoint_mask_tc,
+                    )
+
+                def _skip_timecontrol_update(_):
+                    # Mimic the non-scan skip_time_control behavior: keep res1
+                    # and checkpoint, but allow res0 to tighten when fsq1 improves.
+                    res0_tc = jnp.where(
+                        (fsq1 <= fsq_prev_before) & jnp.isfinite(fsq1),
+                        jnp.minimum(carry_adv.res0, fsq1),
+                        carry_adv.res0,
+                    )
+                    return (
+                        res0_tc,
+                        carry_adv.res1,
+                        carry_adv.state_checkpoint,
+                        carry_adv.fsqr_checkpoint,
+                        carry_adv.fsqz_checkpoint,
+                        carry_adv.fsql_checkpoint,
+                        carry_adv.fsqr1_checkpoint,
+                        carry_adv.fsqz1_checkpoint,
+                        carry_adv.fsql1_checkpoint,
+                        jnp.asarray(False),
+                    )
+
+                (
+                    res0,
+                    res1,
+                    state_checkpoint,
+                    fsqr_checkpoint,
+                    fsqz_checkpoint,
+                    fsql_checkpoint,
+                    fsqr1_checkpoint,
+                    fsqz1_checkpoint,
+                    fsql1_checkpoint,
+                    checkpoint_mask,
+                ) = jax.lax.cond(skip_timecontrol, _skip_timecontrol_update, _timecontrol_update, operand=None)
+
+                restart_time = jnp.where(
+                    skip_timecontrol,
+                    jnp.asarray(False),
+                    (~bad_jacobian)
+                    & ((iter2 - carry_adv.iter1) > 10)
+                    & (
+                        (fsq > vmec2000_fact * jnp.maximum(res0, 1.0e-30))
+                        | (fsq_phys > vmec2000_fact * jnp.maximum(res1, 1.0e-30))
+                    ),
                 )
                 vmecpp_bad_progress = jnp.asarray(False)
                 if vmecpp_restart:
@@ -5399,14 +5724,14 @@ def solve_fixed_boundary_residual_iter(
                 if stage_prev_fsq_j is not None:
                     stage_spike = (iter2 == 1) & (fsq_phys > (stage_prev_fsq_j * stage_transition_factor))
 
+                RESTART_NONE = jnp.asarray(0, dtype=jnp.int32)
+                RESTART_BADJAC = jnp.asarray(1, dtype=jnp.int32)
+                RESTART_STAGE = jnp.asarray(2, dtype=jnp.int32)
+                RESTART_BADPROG_VMEC = jnp.asarray(3, dtype=jnp.int32)
+                RESTART_TIME = jnp.asarray(4, dtype=jnp.int32)
+
                 if bool(vmec2000_control):
                     # Match non-scan VMEC2000 restart logic (pre_restart_reason).
-                    RESTART_NONE = jnp.asarray(0, dtype=jnp.int32)
-                    RESTART_BADJAC = jnp.asarray(1, dtype=jnp.int32)
-                    RESTART_STAGE = jnp.asarray(2, dtype=jnp.int32)
-                    RESTART_BADPROG_VMEC = jnp.asarray(3, dtype=jnp.int32)
-                    RESTART_TIME = jnp.asarray(4, dtype=jnp.int32)
-
                     pre_reason = jnp.where(stage_spike, RESTART_STAGE, RESTART_NONE)
                     pre_reason = jnp.where(
                         bad_jacobian & (iter2 > carry_adv.iter1),
@@ -5428,6 +5753,28 @@ def solve_fixed_boundary_residual_iter(
                         restart_time,
                         jnp.asarray(4, dtype=jnp.int32),
                         jnp.where(restart_badjac, jnp.asarray(1, dtype=jnp.int32), jnp.asarray(3, dtype=jnp.int32)),
+                    )
+                if dump_timecontrol_scan:
+                    irst_restart = jnp.where(
+                        restart_reason == RESTART_BADJAC,
+                        jnp.asarray(2, dtype=jnp.int32),
+                        jnp.where(
+                            (restart_reason == RESTART_TIME) | (restart_reason == RESTART_BADPROG_VMEC),
+                            jnp.asarray(3, dtype=jnp.int32),
+                            jnp.asarray(1, dtype=jnp.int32),
+                        ),
+                    )
+                    _maybe_dump_timecontrol_scan(
+                        cond=do_restart,
+                        stage_id=jnp.asarray(3, dtype=jnp.int32),
+                        iter2=iter2,
+                        iter1=carry_adv.iter1,
+                        fsq=fsq,
+                        fsq0=fsq_phys,
+                        res0=res0,
+                        res1=res1,
+                        time_step=carry_adv.time_step,
+                        irst=irst_restart,
                     )
 
                 def _restart_updates(_):
@@ -5456,7 +5803,10 @@ def solve_fixed_boundary_residual_iter(
                             time_step / restart_badprog_factor,
                         )
                     time_step = jnp.maximum(time_step, jnp.asarray(1.0e-12, dtype=dtype))
-                    iter_offset = carry_adv.iter_offset - jnp.asarray(1, dtype=jnp.int32)
+                    if bool(vmec2000_control):
+                        iter_offset = carry_adv.iter_offset
+                    else:
+                        iter_offset = carry_adv.iter_offset - jnp.asarray(1, dtype=jnp.int32)
                     iter1 = iter2
                     inv_tau = jnp.full((k_ndamp,), jnp.asarray(0.15, dtype=dtype) / time_step)
                     fsq_prev = fsq_prev_before
@@ -5715,7 +6065,7 @@ def solve_fixed_boundary_residual_iter(
                         cache_valid,
                     )
 
-                do_restart_payload = jnp.asarray(False)
+                do_restart_payload = do_restart
                 (
                     frcc_u_use,
                     frss_u_use,
@@ -5833,11 +6183,67 @@ def solve_fixed_boundary_residual_iter(
                 fsqz1_out = fsqz1
                 fsql1_out = fsql1
 
-                fsqz_prev = fsqz_out
+                fsqz_prev = jnp.where(do_restart, carry_adv.fsqz_prev, fsqz_out)
 
                 accepted = jnp.logical_not(do_restart)
                 accepted_count_new = carry_adv.accepted_count + jnp.asarray(accepted, dtype=jnp.int32)
-                abort_scan_new = carry_adv.abort_scan | bad_jacobian
+                # Track the first N probe steps independent of iter2/iter_offset.
+                probe_active = carry_adv.probe_count < scan_fallback_iters_j
+                probe_inc = jnp.where(probe_active, jnp.asarray(1, dtype=jnp.int32), jnp.asarray(0, dtype=jnp.int32))
+                probe_count_new = carry_adv.probe_count + probe_inc
+                probe_bad_jac_new = carry_adv.probe_bad_jac + jnp.where(
+                    probe_active & bad_jacobian,
+                    jnp.asarray(1, dtype=jnp.int32),
+                    jnp.asarray(0, dtype=jnp.int32),
+                )
+                probe_accept_new = carry_adv.probe_accept + jnp.where(
+                    probe_active & accepted,
+                    jnp.asarray(1, dtype=jnp.int32),
+                    jnp.asarray(0, dtype=jnp.int32),
+                )
+                probe_fsq_start_new = jnp.where(
+                    probe_active & (carry_adv.probe_count == 0),
+                    fsq_phys,
+                    carry_adv.probe_fsq_start,
+                )
+                probe_fsq_min_new = jnp.where(
+                    probe_active,
+                    jnp.minimum(carry_adv.probe_fsq_min, fsq_phys),
+                    carry_adv.probe_fsq_min,
+                )
+                probe_fsq_max_new = jnp.where(
+                    probe_active,
+                    jnp.maximum(carry_adv.probe_fsq_max, fsq_phys),
+                    carry_adv.probe_fsq_max,
+                )
+                has_probe = probe_count_new >= scan_fallback_iters_j
+                accepted_frac = probe_accept_new.astype(dtype) / jnp.maximum(
+                    probe_count_new.astype(dtype), jnp.asarray(1.0, dtype=dtype)
+                )
+                probe_start = jnp.maximum(probe_fsq_start_new, jnp.asarray(1.0e-30, dtype=dtype))
+                probe_ratio = probe_fsq_max_new / probe_start
+                bad_progress = probe_ratio > scan_fallback_fsq_factor_j
+                probe_improve = probe_fsq_min_new <= (probe_fsq_start_new * scan_fallback_improve_j)
+                stagnation_trigger = has_probe & (~probe_improve) & (probe_fsq_min_new > scan_fallback_fsq_abs_j)
+                accepted_trigger = (
+                    has_probe
+                    & (accepted_frac < scan_fallback_accept_frac_j)
+                    & (probe_fsq_min_new > scan_fallback_fsq_abs_j)
+                    & bad_progress
+                )
+                bad_jac_trigger = (
+                    probe_bad_jac_new > scan_fallback_badjac_limit_j
+                ) & (probe_fsq_min_new > scan_fallback_fsq_abs_j) & (probe_count_new > 0) & bad_progress
+                scan_fallback_abort = bool(scan_fallback_enabled) & (
+                    bad_jac_trigger | accepted_trigger | stagnation_trigger
+                )
+                nan_fsq = (~jnp.isfinite(fsq_phys)) | (~jnp.isfinite(fsq1))
+                abort_scan_new = (
+                    carry_adv.abort_scan
+                    | nan_fsq
+                    | (bad_jacobian & jnp.asarray(abort_scan_on_badjac))
+                    | scan_fallback_abort
+                )
 
                 cache_valid_out = jnp.where(do_restart, jnp.asarray(False), cache_valid)
                 new_carry = _ScanCarry(
@@ -5847,6 +6253,7 @@ def solve_fixed_boundary_residual_iter(
                     fsq_prev=fsq_prev_new,
                     accepted_count=accepted_count_new,
                     abort_scan=abort_scan_new,
+                    skip_timecontrol=jnp.asarray(do_restart),
                     vRcc=vRcc_new,
                     vRss=vRss_new,
                     vZsc=vZsc_new,
@@ -5878,12 +6285,18 @@ def solve_fixed_boundary_residual_iter(
                     z00_prev=z00_j,
                     w_mhd_prev=w_mhd,
                     converged=carry_adv.converged | conv_now,
-                    fsqr_prev_phys=fsqr_out,
-                    fsqz_prev_phys=fsqz_out,
-                    fsql_prev_phys=fsql_out,
-                    fsqr1_prev=fsqr1_out,
-                    fsqz1_prev=fsqz1_out,
-                    fsql1_prev=fsql1_out,
+                    probe_count=probe_count_new,
+                    probe_bad_jac=probe_bad_jac_new,
+                    probe_accept=probe_accept_new,
+                    probe_fsq_min=probe_fsq_min_new,
+                    probe_fsq_max=probe_fsq_max_new,
+                    probe_fsq_start=probe_fsq_start_new,
+                    fsqr_prev_phys=jnp.where(do_restart, carry_adv.fsqr_prev_phys, fsqr_out),
+                    fsqz_prev_phys=jnp.where(do_restart, carry_adv.fsqz_prev_phys, fsqz_out),
+                    fsql_prev_phys=jnp.where(do_restart, carry_adv.fsql_prev_phys, fsql_out),
+                    fsqr1_prev=jnp.where(do_restart, carry_adv.fsqr1_prev, fsqr1_out),
+                    fsqz1_prev=jnp.where(do_restart, carry_adv.fsqz1_prev, fsqz1_out),
+                    fsql1_prev=jnp.where(do_restart, carry_adv.fsql1_prev, fsql1_out),
                     fsqr_checkpoint=fsqr_checkpoint,
                     fsqz_checkpoint=fsqz_checkpoint,
                     fsql_checkpoint=fsql_checkpoint,
@@ -5919,8 +6332,9 @@ def solve_fixed_boundary_residual_iter(
                     badjac_state,
                 )
 
+            iter2_hold = jnp.asarray(it + 1, dtype=jnp.int32) + jnp.asarray(carry.iter_offset, dtype=jnp.int32)
             hold_cond = carry.converged | carry.abort_scan | (
-                carry.accepted_count >= jnp.asarray(int(max_iter), dtype=jnp.int32)
+                iter2_hold > jnp.asarray(int(max_iter), dtype=jnp.int32)
             )
             return jax.lax.cond(hold_cond, _hold_step, _advance_step, operand=carry)
 
@@ -5930,7 +6344,14 @@ def solve_fixed_boundary_residual_iter(
             inv_tau=inv_tau0,
             fsq_prev=fsq_prev0,
             accepted_count=jnp.asarray(0, dtype=jnp.int32),
+            probe_count=jnp.asarray(0, dtype=jnp.int32),
+            probe_bad_jac=jnp.asarray(0, dtype=jnp.int32),
+            probe_accept=jnp.asarray(0, dtype=jnp.int32),
+            probe_fsq_min=jnp.asarray(jnp.inf, dtype=dtype),
+            probe_fsq_max=jnp.asarray(-jnp.inf, dtype=dtype),
+            probe_fsq_start=jnp.asarray(jnp.inf, dtype=dtype),
             abort_scan=jnp.asarray(False),
+            skip_timecontrol=jnp.asarray(False),
             vRcc=vRcc0,
             vRss=vRss0,
             vZsc=vZsc0,
@@ -5987,7 +6408,8 @@ def solve_fixed_boundary_residual_iter(
                 preflight_iters = 1
         else:
             preflight_iters = 0
-        extra_iters_env = os.getenv("VMEC_JAX_SCAN_EXTRA_ITERS", "10").strip()
+        extra_iters_default = "0" if bool(vmec2000_control) else "10"
+        extra_iters_env = os.getenv("VMEC_JAX_SCAN_EXTRA_ITERS", extra_iters_default).strip()
         try:
             extra_iters = max(0, int(extra_iters_env))
         except Exception:
@@ -6000,7 +6422,7 @@ def solve_fixed_boundary_residual_iter(
         max_iter_tail = int(max_iter_scan) - int(preflight_iters)
 
         scan_cache_key = (
-            "vmec2000_scan_v1",
+            "vmec2000_scan_v5",
             static_key,
             wout_key,
             edge_key,
@@ -6018,6 +6440,11 @@ def solve_fixed_boundary_residual_iter(
             float(stage_transition_factor),
             float(stage_transition_scale),
             bool(jit_forces_scan),
+            int(scan_fallback_iters),
+            float(scan_fallback_accept_frac),
+            float(scan_fallback_fsq_factor),
+            int(scan_fallback_badjac_limit),
+            float(scan_fallback_fsq_abs),
         )
 
         def _run_scan(carry_init, it_seq):
@@ -6242,150 +6669,239 @@ def solve_fixed_boundary_residual_iter(
 
     if use_scan:
         if vmec2000_control:
-            return _run_vmec2000_scan(state)
-        if backtracking or use_restart_triggers or auto_flip_force or limit_dt_from_force or limit_update_rms or strict_update or use_direct_fallback or reference_mode:
-            raise ValueError(
-                "use_scan requires vmec2000_control=False, backtracking=False, "
-                "use_restart_triggers=False, auto_flip_force=False, "
-                "limit_dt_from_force=False, limit_update_rms=False, strict_update=False, "
-                "use_direct_fallback=False, reference_mode=False."
+            scan_result = _run_vmec2000_scan(state)
+            if scan_fallback_enabled:
+                try:
+                    bad_jac_full = scan_result.diagnostics.get("bad_jacobian_full", None)
+                except Exception:
+                    bad_jac_full = None
+                try:
+                    abort_scan_flag = bool(scan_result.diagnostics.get("abort_scan", False))
+                except Exception:
+                    abort_scan_flag = False
+                bad_jac_count = 0
+                if bad_jac_full is not None:
+                    try:
+                        bad_jac_arr = np.asarray(bad_jac_full).astype(int)
+                        probe_iters = min(int(max_iter), int(scan_fallback_iters))
+                        if probe_iters > 0:
+                            bad_jac_count = int(np.sum(bad_jac_arr[:probe_iters]))
+                    except Exception:
+                        bad_jac_count = 0
+                accepted_frac = None
+                try:
+                    accepted_mask = scan_result.diagnostics.get("accepted_mask", None)
+                except Exception:
+                    accepted_mask = None
+                if accepted_mask is not None:
+                    try:
+                        accepted_arr = np.asarray(accepted_mask).astype(float)
+                        probe_iters = min(int(max_iter), int(scan_fallback_iters))
+                        if probe_iters > 0 and accepted_arr.size >= probe_iters:
+                            accepted_frac = float(np.mean(accepted_arr[:probe_iters]))
+                    except Exception:
+                        accepted_frac = None
+                fallback_reasons = []
+                fsq_min_full = None
+                fsq_max_full = None
+                fsq_all_finite = True
+                try:
+                    fsq_full_arr = np.asarray(fsqr_full) + np.asarray(fsqz_full) + np.asarray(fsql_full)
+                    fsq_min_full = float(np.min(fsq_full_arr))
+                    fsq_max_full = float(np.max(fsq_full_arr))
+                    fsq_all_finite = bool(np.all(np.isfinite(fsq_full_arr)))
+                except Exception:
+                    fsq_min_full = None
+                    fsq_max_full = None
+                    fsq_all_finite = False
+                fsq_min_ok = (
+                    True
+                    if fsq_min_full is None
+                    else bool(fsq_min_full > float(scan_fallback_fsq_abs))
+                )
+                fsq_ratio_ok = True
+                if fsq_min_full is not None and fsq_max_full is not None:
+                    if fsq_min_full > 0.0:
+                        fsq_ratio_ok = (fsq_max_full / fsq_min_full) > float(scan_fallback_fsq_factor)
+                if abort_scan_flag and (not fsq_all_finite or fsq_ratio_ok):
+                    fallback_reasons.append("abort_scan")
+
+                if bad_jac_count > scan_fallback_badjac_limit and fsq_min_ok and fsq_ratio_ok:
+                    fallback_reasons.append(
+                        f"bad_jac_count={bad_jac_count} > {scan_fallback_badjac_limit}"
+                    )
+                # Note: ijacob alone is not a reliable failure signal; do not
+                # fall back solely on ijacob growth.
+                if (
+                    accepted_frac is not None
+                    and accepted_frac < scan_fallback_accept_frac
+                    and fsq_min_ok
+                    and fsq_ratio_ok
+                ):
+                    fallback_reasons.append(
+                        f"accepted_frac={accepted_frac:.2f} < {scan_fallback_accept_frac:.2f}"
+                    )
+
+                if fallback_reasons:
+                    if verbose:
+                        reason_str = ", ".join(fallback_reasons)
+                        print(
+                            "[solve_fixed_boundary_residual_iter] scan fallback -> non-scan "
+                            f"({reason_str})",
+                            flush=True,
+                        )
+                    use_scan = False
+                    resume_state = None
+                    state = state0
+                else:
+                    return scan_result
+            else:
+                return scan_result
+
+        if use_scan:
+            if backtracking or use_restart_triggers or auto_flip_force or limit_dt_from_force or limit_update_rms or strict_update or use_direct_fallback or reference_mode:
+                raise ValueError(
+                    "use_scan requires vmec2000_control=False, backtracking=False, "
+                    "use_restart_triggers=False, auto_flip_force=False, "
+                    "limit_dt_from_force=False, limit_update_rms=False, strict_update=False, "
+                    "use_direct_fallback=False, reference_mode=False."
+                )
+
+            dtype = jnp.asarray(state0.Rcos).dtype
+            time_step_j = jnp.asarray(float(step_size), dtype=dtype)
+            flip_sign_j = jnp.asarray(float(initial_flip_sign), dtype=dtype)
+
+            include_edge_scan = False
+            _compute_forces_scan = _compute_forces if jit_forces else _compute_forces_impl
+
+            scan_cache_key = (
+                "scan_v1",
+                static_key,
+                wout_key,
+                edge_key,
+                int(max_iter),
+                float(step_size),
+                float(initial_flip_sign),
+                float(lambda_update_scale),
+                float(precond_radial_alpha),
+                float(precond_lambda_alpha),
+                bool(apply_m1_constraints),
+                bool(jit_forces),
             )
 
-        dtype = jnp.asarray(state0.Rcos).dtype
-        time_step_j = jnp.asarray(float(step_size), dtype=dtype)
-        flip_sign_j = jnp.asarray(float(initial_flip_sign), dtype=dtype)
+            def _scan_step(state, it):
+                it = jnp.asarray(it, dtype=jnp.int32)
+                iter_since_restart = it + 1
+                zero_m1 = jnp.where(iter_since_restart < 2, jnp.asarray(1.0, dtype=dtype), jnp.asarray(0.0, dtype=dtype))
 
-        include_edge_scan = False
-        _compute_forces_scan = _compute_forces if jit_forces else _compute_forces_impl
+                k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale, _norms = _compute_forces_scan(
+                    state,
+                    include_edge=include_edge_scan,
+                    zero_m1=zero_m1,
+                    iter_idx=None,
+                )
 
-        scan_cache_key = (
-            "scan_v1",
-            static_key,
-            wout_key,
-            edge_key,
-            int(max_iter),
-            float(step_size),
-            float(initial_flip_sign),
-            float(lambda_update_scale),
-            float(precond_radial_alpha),
-            float(precond_lambda_alpha),
-            bool(apply_m1_constraints),
-            bool(jit_forces),
-        )
+                frss_in = (frzl.frss if frzl.frss is not None else jnp.zeros_like(frzl.frcc)) * rz_scale[:, None, None]
+                fzcs_in = (frzl.fzcs if frzl.fzcs is not None else jnp.zeros_like(frzl.fzsc)) * rz_scale[:, None, None]
+                frcc, frss, fzsc, fzcs = _apply_radial_tridi_batched(
+                    [
+                        frzl.frcc * rz_scale[:, None, None],
+                        frss_in,
+                        frzl.fzsc * rz_scale[:, None, None],
+                        fzcs_in,
+                    ],
+                    precond_radial_alpha,
+                )
+                flcs_in = (frzl.flcs if frzl.flcs is not None else jnp.zeros_like(frzl.flsc)) * l_scale[:, None, None]
+                flsc, flcs = _apply_radial_tridi_batched(
+                    [
+                        frzl.flsc * l_scale[:, None, None],
+                        flcs_in,
+                    ],
+                    precond_lambda_alpha,
+                )
 
-        def _scan_step(state, it):
-            it = jnp.asarray(it, dtype=jnp.int32)
-            iter_since_restart = it + 1
-            zero_m1 = jnp.where(iter_since_restart < 2, jnp.asarray(1.0, dtype=dtype), jnp.asarray(0.0, dtype=dtype))
+                frzl_pre = TomnspsRZL(
+                    frcc=frcc,
+                    frss=frss,
+                    fzsc=fzsc,
+                    fzcs=fzcs,
+                    flsc=flsc,
+                    flcs=flcs,
+                    frsc=getattr(frzl, "frsc", None),
+                    frcs=getattr(frzl, "frcs", None),
+                    fzcc=getattr(frzl, "fzcc", None),
+                    fzss=getattr(frzl, "fzss", None),
+                    flcc=getattr(frzl, "flcc", None),
+                    flss=getattr(frzl, "flss", None),
+                )
 
-            k, frzl, fsqr, fsqz, fsql, rz_scale, l_scale, _norms = _compute_forces_scan(
-                state,
-                include_edge=include_edge_scan,
-                zero_m1=zero_m1,
-                iter_idx=None,
+                frcc_u = frcc * w_mode_mn[None, :, :]
+                frss_u = frss * w_mode_mn[None, :, :]
+                fzsc_u = fzsc * w_mode_mn[None, :, :]
+                fzcs_u = fzcs * w_mode_mn[None, :, :]
+                flsc_u = flsc * w_mode_mn[None, :, :]
+                flcs_u = flcs * w_mode_mn[None, :, :]
+
+                if lambda_update_scale != 1.0:
+                    flsc_u = flsc_u * lambda_update_scale_j
+                    flcs_u = flcs_u * lambda_update_scale_j
+
+                dR = (time_step_j * flip_sign_j) * _mn_cos_to_signed_physical(frcc_u, frss_u)
+                sin_updates = _mn_sin_to_signed_batch(
+                    jnp.stack([fzsc_u, flsc_u], axis=0),
+                    jnp.stack([fzcs_u, flcs_u], axis=0),
+                )
+                dZ = (time_step_j * flip_sign_j) * sin_updates[0]
+                dL = (time_step_j * flip_sign_j) * sin_updates[1]
+
+                state_new = VMECState(
+                    layout=state.layout,
+                    Rcos=jnp.asarray(state.Rcos) + dR,
+                    Rsin=state.Rsin,
+                    Zcos=state.Zcos,
+                    Zsin=jnp.asarray(state.Zsin) + dZ,
+                    Lcos=state.Lcos,
+                    Lsin=jnp.asarray(state.Lsin) + dL,
+                )
+                state_new = _enforce_fixed_boundary_and_axis(
+                    state_new,
+                    static,
+                    edge_Rcos=edge_Rcos,
+                    edge_Rsin=edge_Rsin,
+                    edge_Zcos=edge_Zcos,
+                    edge_Zsin=edge_Zsin,
+                    enforce_lambda_axis=True,
+                    idx00=idx00,
+                )
+                state_new = _apply_vmec_lambda_axis_rules(state_new)
+
+                return state_new, (fsqr, fsqz, fsql)
+
+            def _run_scan(state_init):
+                return jax.lax.scan(_scan_step, state_init, jnp.arange(max_iter, dtype=jnp.int32))
+
+            cached_run = _SCAN_RUNNER_CACHE.get(scan_cache_key)
+            if cached_run is None:
+                _run_scan = jit(_run_scan, donate_argnums=(0,))
+                _SCAN_RUNNER_CACHE[scan_cache_key] = _run_scan
+            else:
+                _run_scan = cached_run
+
+            state_final, hist = _run_scan(state)
+            fsqr_hist, fsqz_hist, fsql_hist = hist
+            w_hist = fsqr_hist + fsqz_hist + fsql_hist
+            return SolveVmecResidualResult(
+                state=state_final,
+                n_iter=int(max_iter),
+                w_history=np.asarray(w_hist),
+                fsqr2_history=np.asarray(fsqr_hist),
+                fsqz2_history=np.asarray(fsqz_hist),
+                fsql2_history=np.asarray(fsql_hist),
+                grad_rms_history=np.asarray([], dtype=float),
+                step_history=np.asarray([], dtype=float),
+                diagnostics={"use_scan": True},
             )
-
-            frss_in = (frzl.frss if frzl.frss is not None else jnp.zeros_like(frzl.frcc)) * rz_scale[:, None, None]
-            fzcs_in = (frzl.fzcs if frzl.fzcs is not None else jnp.zeros_like(frzl.fzsc)) * rz_scale[:, None, None]
-            frcc, frss, fzsc, fzcs = _apply_radial_tridi_batched(
-                [
-                    frzl.frcc * rz_scale[:, None, None],
-                    frss_in,
-                    frzl.fzsc * rz_scale[:, None, None],
-                    fzcs_in,
-                ],
-                precond_radial_alpha,
-            )
-            flcs_in = (frzl.flcs if frzl.flcs is not None else jnp.zeros_like(frzl.flsc)) * l_scale[:, None, None]
-            flsc, flcs = _apply_radial_tridi_batched(
-                [
-                    frzl.flsc * l_scale[:, None, None],
-                    flcs_in,
-                ],
-                precond_lambda_alpha,
-            )
-
-            frzl_pre = TomnspsRZL(
-                frcc=frcc,
-                frss=frss,
-                fzsc=fzsc,
-                fzcs=fzcs,
-                flsc=flsc,
-                flcs=flcs,
-                frsc=getattr(frzl, "frsc", None),
-                frcs=getattr(frzl, "frcs", None),
-                fzcc=getattr(frzl, "fzcc", None),
-                fzss=getattr(frzl, "fzss", None),
-                flcc=getattr(frzl, "flcc", None),
-                flss=getattr(frzl, "flss", None),
-            )
-
-            frcc_u = frcc * w_mode_mn[None, :, :]
-            frss_u = frss * w_mode_mn[None, :, :]
-            fzsc_u = fzsc * w_mode_mn[None, :, :]
-            fzcs_u = fzcs * w_mode_mn[None, :, :]
-            flsc_u = flsc * w_mode_mn[None, :, :]
-            flcs_u = flcs * w_mode_mn[None, :, :]
-
-            if lambda_update_scale != 1.0:
-                flsc_u = flsc_u * lambda_update_scale_j
-                flcs_u = flcs_u * lambda_update_scale_j
-
-            dR = (time_step_j * flip_sign_j) * _mn_cos_to_signed_physical(frcc_u, frss_u)
-            sin_updates = _mn_sin_to_signed_batch(
-                jnp.stack([fzsc_u, flsc_u], axis=0),
-                jnp.stack([fzcs_u, flcs_u], axis=0),
-            )
-            dZ = (time_step_j * flip_sign_j) * sin_updates[0]
-            dL = (time_step_j * flip_sign_j) * sin_updates[1]
-
-            state_new = VMECState(
-                layout=state.layout,
-                Rcos=jnp.asarray(state.Rcos) + dR,
-                Rsin=state.Rsin,
-                Zcos=state.Zcos,
-                Zsin=jnp.asarray(state.Zsin) + dZ,
-                Lcos=state.Lcos,
-                Lsin=jnp.asarray(state.Lsin) + dL,
-            )
-            state_new = _enforce_fixed_boundary_and_axis(
-                state_new,
-                static,
-                edge_Rcos=edge_Rcos,
-                edge_Rsin=edge_Rsin,
-                edge_Zcos=edge_Zcos,
-                edge_Zsin=edge_Zsin,
-                enforce_lambda_axis=True,
-                idx00=idx00,
-            )
-            state_new = _apply_vmec_lambda_axis_rules(state_new)
-
-            return state_new, (fsqr, fsqz, fsql)
-
-        def _run_scan(state_init):
-            return jax.lax.scan(_scan_step, state_init, jnp.arange(max_iter, dtype=jnp.int32))
-
-        cached_run = _SCAN_RUNNER_CACHE.get(scan_cache_key)
-        if cached_run is None:
-            _run_scan = jit(_run_scan, donate_argnums=(0,))
-            _SCAN_RUNNER_CACHE[scan_cache_key] = _run_scan
-        else:
-            _run_scan = cached_run
-
-        state_final, hist = _run_scan(state)
-        fsqr_hist, fsqz_hist, fsql_hist = hist
-        w_hist = fsqr_hist + fsqz_hist + fsql_hist
-        return SolveVmecResidualResult(
-            state=state_final,
-            n_iter=int(max_iter),
-            w_history=np.asarray(w_hist),
-            fsqr2_history=np.asarray(fsqr_hist),
-            fsqz2_history=np.asarray(fsqz_hist),
-            fsql2_history=np.asarray(fsql_hist),
-            grad_rms_history=np.asarray([], dtype=float),
-            step_history=np.asarray([], dtype=float),
-            diagnostics={"use_scan": True},
-        )
 
     profile_window = os.getenv("VMEC_JAX_PROFILE_WINDOW", "").strip().lower()
     profile_dir_env = os.getenv("VMEC_JAX_PROFILE_DIR", "").strip()
@@ -6984,28 +7500,63 @@ def solve_fixed_boundary_residual_iter(
                 max_tau_ptau = float(np.asarray(ptau_max0))
                 bad_jacobian_ptau = (min_tau_ptau < 0.0) and (max_tau_ptau > 0.0)
 
-            jac0 = vmec_half_mesh_jacobian_from_state(
-                state=state,
-                modes=static.modes,
-                trig=trig,
-                s=s,
-                lconm1=bool(getattr(static.cfg, "lconm1", True)),
-                lthreed=bool(getattr(static.cfg, "lthreed", True)),
-                mask_even=getattr(static, "m_is_even", None),
-                mask_odd=getattr(static, "m_is_odd", None),
-            )
-            tau0 = jnp.asarray(jac0.tau)
-            tau0_use = tau0[1:] if int(tau0.shape[0]) > 1 else tau0
-            min_tau_state = float(np.asarray(jnp.min(tau0_use)))
-            max_tau_state = float(np.asarray(jnp.max(tau0_use)))
-            bad_jacobian_state = (min_tau_state < 0.0) and (max_tau_state > 0.0)
+            bad_jacobian_state = False
+            min_tau_state = float("nan")
+            max_tau_state = float("nan")
+            if badjac_use_state or (bad_jacobian_ptau is None):
+                jac0 = vmec_half_mesh_jacobian_from_state(
+                    state=state,
+                    modes=static.modes,
+                    trig=trig,
+                    s=s,
+                    lconm1=bool(getattr(static.cfg, "lconm1", True)),
+                    lthreed=bool(getattr(static.cfg, "lthreed", True)),
+                    mask_even=getattr(static, "m_is_even", None),
+                    mask_odd=getattr(static, "m_is_odd", None),
+                )
+                tau0 = jnp.asarray(jac0.tau)
+                tau0_use = tau0[1:] if int(tau0.shape[0]) > 1 else tau0
+                min_tau_state = float(np.asarray(jnp.min(tau0_use)))
+                max_tau_state = float(np.asarray(jnp.max(tau0_use)))
+                bad_jacobian_state = (min_tau_state < 0.0) and (max_tau_state > 0.0)
 
-            if badjac_use_state:
-                bad_jacobian0 = bad_jacobian_state
-            elif bad_jacobian_ptau is None:
+            axis_reset_debug = os.getenv("VMEC_JAX_AXIS_RESET_DEBUG", "").strip().lower() not in ("", "0", "false", "no")
+            fsq_phys0_val = None
+            try:
+                fsqr0 = _norms0.r1 * _norms0.fnorm * _gcr2_0
+                fsqz0 = _norms0.r1 * _norms0.fnorm * _gcz2_0
+                fsql0 = _norms0.fnormL * _gcl2_0
+                fsq_phys0_val = float(np.asarray(fsqr0 + fsqz0 + fsql0))
+            except Exception:
+                fsq_phys0_val = None
+
+            if bad_jacobian_ptau is None:
                 bad_jacobian0 = bad_jacobian_state
             else:
-                bad_jacobian0 = bad_jacobian_state if (bad_jacobian_ptau != bad_jacobian_state) else bad_jacobian_ptau
+                if badjac_use_state:
+                    # Require both ptau and state sign changes to avoid
+                    # false-positive axis resets on benign cases.
+                    bad_jacobian0 = bool(bad_jacobian_ptau) and bool(bad_jacobian_state)
+                else:
+                    bad_jacobian0 = bool(bad_jacobian_ptau)
+            if bad_jacobian0 and axis_reset_fsq_min > 0.0:
+                if (fsq_phys0_val is None) or (not np.isfinite(fsq_phys0_val)):
+                    bad_jacobian0 = False
+                elif fsq_phys0_val < axis_reset_fsq_min:
+                    bad_jacobian0 = False
+            if axis_reset_debug:
+                try:
+                    fsq_debug_val = float("nan") if fsq_phys0_val is None else float(fsq_phys0_val)
+                    print(
+                        "[axis_reset] fsq0="
+                        f"{fsq_debug_val:.6e} "
+                        f"axis_reset_fsq_min={axis_reset_fsq_min:.3e} "
+                        f"badjac_ptau={bad_jacobian_ptau} badjac_state={bad_jacobian_state} "
+                        f"badjac_used={bad_jacobian0}",
+                        flush=True,
+                    )
+                except Exception:
+                    pass
 
             force_axis_reset_init = bool(force_axis_reset) or (
                 bool(getattr(cfg, "lthreed", True)) and axis_reset_always_3d
@@ -7570,7 +8121,8 @@ def solve_fixed_boundary_residual_iter(
                     min_tau_ptau = float(np.asarray(ptau_min))
                     max_tau_ptau = float(np.asarray(ptau_max))
                     if bool(vmec2000_control):
-                        bad_jacobian_ptau = (min_tau_ptau < 0.0) and (max_tau_ptau > 0.0)
+                        tau_tol = max(abs(ptau_tol), 0.0)
+                        bad_jacobian_ptau = (min_tau_ptau < -tau_tol) and (max_tau_ptau > tau_tol)
                     else:
                         tau_scale = max(abs(min_tau_ptau), abs(max_tau_ptau))
                         tau_tol = max(1.0e-12, 1.0e-3 * tau_scale)
@@ -7604,7 +8156,8 @@ def solve_fixed_boundary_residual_iter(
                         max_tau_state = float("nan")
                     if np.isfinite(min_tau_state) and np.isfinite(max_tau_state):
                         if bool(vmec2000_control):
-                            bad_jacobian_state = (min_tau_state < 0.0) and (max_tau_state > 0.0)
+                            tau_tol = max(abs(ptau_tol), 0.0)
+                            bad_jacobian_state = (min_tau_state < -tau_tol) and (max_tau_state > tau_tol)
                         else:
                             tau_scale = max(abs(min_tau_state), abs(max_tau_state))
                             tau_tol = max(1.0e-12, 1.0e-3 * tau_scale)
@@ -7675,6 +8228,10 @@ def solve_fixed_boundary_residual_iter(
                 force_axis_reset_init = bool(force_axis_reset) or (
                     bool(getattr(cfg, "lthreed", True)) and axis_reset_always_3d
                 )
+                if (not force_axis_reset_init) and axis_reset_fsq_min > 0.0:
+                    if np.isfinite(fsq_curr) and (fsq_curr < axis_reset_fsq_min):
+                        bad_jacobian = False
+                        huge_initial_forces = False
                 if bad_jacobian or huge_initial_forces or force_axis_reset_init:
                     if verbose and bool(vmec2000_control) and bool(verbose_vmec2000_table):
                         if bad_jacobian or force_axis_reset_init:
