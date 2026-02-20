@@ -520,12 +520,22 @@ def run_fixed_boundary(
 
     # VMEC readin.f hard-codes signgs = -1 (then flips theta if needed).
     # For VMEC2000-iter parity, ignore input SIGNGS and match VMEC behavior.
-    if solver_lower == "vmec2000_iter":
+    if solver_lower in ("vmec2000_iter", "vmec2000_scan", "vmec2000_iter_fast"):
         signgs = -1
     else:
         signgs = int(indata.get_int("SIGNGS", -1))
         if signgs not in (-1, 1):
             signgs = -1
+    if solver_lower in ("vmec2000_iter", "vmec2000_scan", "vmec2000_iter_fast"):
+        force_jit_env = os.getenv("VMEC_JAX_VMEC2000_FORCE_JIT", "").strip().lower()
+        if force_jit_env in ("", "0", "false", "no"):
+            if isinstance(jit_forces, str):
+                if jit_forces.strip().lower() == "auto":
+                    jit_forces = False
+                else:
+                    jit_forces = False
+            elif bool(jit_forces):
+                jit_forces = False
 
     gamma = indata.get_float("GAMMA", 0.0)
     static = None
@@ -557,7 +567,7 @@ def run_fixed_boundary(
             flux, prof, pressure = _profiles_from_static(static)
 
     if step_size is _STEP_SIZE_SENTINEL or step_size is None:
-        if solver_lower in ("vmec2000_iter",):
+        if solver_lower in ("vmec2000_iter", "vmec2000_scan", "vmec2000_iter_fast"):
             step_size_val = float(indata.get_float("DELT", 5e-3))
         else:
             step_size_val = 5e-3
