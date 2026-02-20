@@ -968,11 +968,18 @@ def run_fixed_boundary(
                 except Exception:
                     # If probe fails, fall back to the safe (non-scan) path.
                     scan_mode = False
-            jit_forces_eff = _resolve_jit_forces(jit_forces, static_i, int(niter_i))
+            jit_forces_base = _resolve_jit_forces(jit_forces, static_i, int(niter_i))
+            jit_forces_eff = jit_forces_base
             if scan_mode and solver == "vmec2000_iter":
                 scan_jit_env = os.getenv("VMEC_JAX_SCAN_JIT_FORCES")
-                if scan_jit_env is None or scan_jit_env.strip().lower() in ("", "0", "false", "no"):
+                if scan_jit_env is None:
+                    # Fast mode keeps JIT enabled for scan; parity mode disables by default.
+                    if not bool(performance_mode):
+                        jit_forces_eff = False
+                elif scan_jit_env.strip().lower() in ("", "0", "false", "no"):
                     jit_forces_eff = False
+                else:
+                    jit_forces_eff = True
             jit_precompile_eff = False
             if bool(jit_forces_eff) and (not bool(scan_mode)):
                 if jit_precompile is None:
@@ -990,6 +997,24 @@ def run_fixed_boundary(
                         jit_warmup_iters = 2
                 else:
                     jit_warmup_iters = 0 if bool(jit_precompile_eff) else 2
+            # Precompute non-scan JIT settings for fast-fallback.
+            jit_precompile_noscan = False
+            if bool(jit_forces_base):
+                if jit_precompile is None:
+                    val = os.getenv("VMEC_JAX_JIT_PRECOMPILE", "1").strip().lower()
+                    jit_precompile_noscan = val not in ("", "0", "false", "no")
+                else:
+                    jit_precompile_noscan = bool(jit_precompile)
+            jit_warmup_noscan = 0
+            if bool(jit_forces_base):
+                env_warmup = os.getenv("VMEC_JAX_JIT_WARMUP_ITERS")
+                if env_warmup is not None:
+                    try:
+                        jit_warmup_noscan = max(0, int(env_warmup))
+                    except Exception:
+                        jit_warmup_noscan = 2
+                else:
+                    jit_warmup_noscan = 0 if bool(jit_precompile_noscan) else 2
             if i == 0:
                 if state is None:
                     if boundary_coeffs is None:
@@ -1009,6 +1034,7 @@ def run_fixed_boundary(
                     lconm1=bool(getattr(static_prev.cfg, "lconm1", True)),
                     ns_new=int(ns_i),
                 )
+            state_stage_start = state
             static_prev = static_i
             static_final = static_i
 
@@ -1092,6 +1118,51 @@ def run_fixed_boundary(
                     jit_forces=True,
                     **solve_kwargs,
                 )
+            # Auto-fast fallback: if scan hits a bad-Jacobian path, rerun the stage
+            # in the parity-safe non-scan mode.
+            if bool(performance_mode) and bool(scan_mode):
+                try:
+                    if bool(res_i.diagnostics.get("vmec2000_scan", False)) and bool(res_i.diagnostics.get("abort_scan", False)):
+                        if bool(verbose):
+                            print(
+                                "[vmec_jax] scan abort detected; rerunning stage in parity mode.",
+                                flush=True,
+                            )
+                        solve_kwargs_fallback = dict(solve_kwargs)
+                        solve_kwargs_fallback.update(
+                            {
+                                "use_scan": False,
+                                "resume_state": resume_state_stage,
+                                "jit_warmup_iters": int(jit_warmup_noscan),
+                                "jit_precompile": bool(jit_precompile_noscan),
+                            }
+                        )
+                        if not bool(jit_forces_base):
+                            try:
+                                import jax
+                                with jax.disable_jit():
+                                    res_i = solve_fixed_boundary_residual_iter(
+                                        state_stage_start,
+                                        static_i,
+                                        jit_forces=False,
+                                        **solve_kwargs_fallback,
+                                    )
+                            except Exception:
+                                res_i = solve_fixed_boundary_residual_iter(
+                                    state_stage_start,
+                                    static_i,
+                                    jit_forces=False,
+                                    **solve_kwargs_fallback,
+                                )
+                        else:
+                            res_i = solve_fixed_boundary_residual_iter(
+                                state_stage_start,
+                                static_i,
+                                jit_forces=True,
+                                **solve_kwargs_fallback,
+                            )
+                except Exception:
+                    pass
             stage_results.append(res_i)
             try:
                 w_hist = np.asarray(res_i.w_history)
