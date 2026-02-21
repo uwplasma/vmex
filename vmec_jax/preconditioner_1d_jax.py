@@ -547,17 +547,20 @@ def _tridi_solve_batched_jmin0(a, d, b, rhs) -> Any:
     if n == 0:
         return rhs
 
-    # Prefer XLA's fused tridiagonal solver when available (faster for large batches).
+    # Prefer XLA's fused tridiagonal solver when explicitly enabled.
     use_lax_tridi = os.getenv("VMEC_JAX_TRIDI_SOLVE", "").strip().lower() in (
         "1",
         "true",
         "yes",
         "lax",
+        "force",
     )
     if use_lax_tridi and n >= 3:
-        # Ensure dl/du have zeros on the boundary.
-        dl = a
-        du = b
+        # Map to tridiagonal_solve conventions: dl=subdiagonal, du=superdiagonal.
+        # Our Thomas implementation treats `a` as the superdiagonal and `b` as
+        # the subdiagonal, so swap here to preserve parity.
+        dl = b
+        du = a
         if dl.shape != d.shape:
             dl = jnp.broadcast_to(dl, d.shape)
         if du.shape != d.shape:

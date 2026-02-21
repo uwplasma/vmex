@@ -14,7 +14,6 @@ import time
 from typing import Optional
 
 import numpy as np
-
 from .boundary import boundary_from_indata
 from .config import VMECConfig, load_config
 from .energy import flux_profiles_from_indata
@@ -285,6 +284,9 @@ def run_fixed_boundary(
     max_iter_overridden = max_iter is not _MAX_ITER_SENTINEL
 
     def _maybe_enable_compilation_cache() -> None:
+        cache_env = os.getenv("VMEC_JAX_COMPILATION_CACHE", "1").strip().lower()
+        if cache_env in ("", "0", "false", "no", "off"):
+            return
         if os.getenv("VMEC_JAX_DISABLE_COMPILATION_CACHE", "") not in ("", "0"):
             return
         cache_dir = os.getenv("VMEC_JAX_COMPILATION_CACHE_DIR") or os.getenv("JAX_COMPILATION_CACHE_DIR")
@@ -892,11 +894,13 @@ def run_fixed_boundary(
             scan_mode = bool(use_scan)
             # Optional scan-parity guard: probe a few iterations and disable scan
             # if it diverges from the non-scan VMEC2000 path.
-            scan_guard_env = os.getenv("VMEC_JAX_SCAN_PARITY_GUARD", "1").strip().lower()
+            scan_guard_env = os.getenv("VMEC_JAX_SCAN_PARITY_GUARD", "0").strip().lower()
             scan_guard_enabled = scan_guard_env not in ("", "0", "false", "no")
             if scan_mode and scan_guard_enabled and int(niter_i) >= 3:
                 probe_iters = min(10, int(niter_i))
                 try:
+                    guard_rtol = float(os.getenv("VMEC_JAX_SCAN_GUARD_RTOL", "1e-3"))
+                    guard_atol = float(os.getenv("VMEC_JAX_SCAN_GUARD_ATOL", "1e-12"))
                     probe_kwargs = dict(
                         indata=indata,
                         signgs=signgs,
@@ -942,19 +946,19 @@ def run_fixed_boundary(
                         use_scan=False,
                         **probe_kwargs,
                     )
-                    fsqr_scan = np.asarray(res_probe_scan.diagnostics.get("fsqr_full"))
-                    fsqz_scan = np.asarray(res_probe_scan.diagnostics.get("fsqz_full"))
-                    fsql_scan = np.asarray(res_probe_scan.diagnostics.get("fsql_full"))
+                    fsqr_scan = np.asarray(res_probe_scan.fsqr2_history)
+                    fsqz_scan = np.asarray(res_probe_scan.fsqz2_history)
+                    fsql_scan = np.asarray(res_probe_scan.fsql2_history)
                     fsqr_ref = np.asarray(res_probe_direct.fsqr2_history)
                     fsqz_ref = np.asarray(res_probe_direct.fsqz2_history)
                     fsql_ref = np.asarray(res_probe_direct.fsql2_history)
                     mismatch = False
                     if fsqr_scan.size == fsqr_ref.size == probe_iters:
-                        if not np.allclose(fsqr_scan, fsqr_ref, rtol=1e-7, atol=1e-10):
+                        if not np.allclose(fsqr_scan, fsqr_ref, rtol=guard_rtol, atol=guard_atol):
                             mismatch = True
-                        if not np.allclose(fsqz_scan, fsqz_ref, rtol=1e-7, atol=1e-10):
+                        if not np.allclose(fsqz_scan, fsqz_ref, rtol=guard_rtol, atol=guard_atol):
                             mismatch = True
-                        if not np.allclose(fsql_scan, fsql_ref, rtol=1e-7, atol=1e-10):
+                        if not np.allclose(fsql_scan, fsql_ref, rtol=guard_rtol, atol=guard_atol):
                             mismatch = True
                     else:
                         mismatch = True

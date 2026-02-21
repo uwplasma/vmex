@@ -3094,7 +3094,7 @@ def solve_fixed_boundary_residual_iter(
     verbose_vmec2000_table = bool(verbose_vmec2000_table)
     scan_fallback_env = os.getenv("VMEC_JAX_SCAN_FALLBACK", "1").strip().lower()
     scan_fallback_enabled = scan_fallback_env not in ("", "0", "false", "no")
-    scan_fallback_iters_env = os.getenv("VMEC_JAX_SCAN_FALLBACK_ITERS", "20").strip()
+    scan_fallback_iters_env = os.getenv("VMEC_JAX_SCAN_FALLBACK_ITERS", "50").strip()
     scan_fallback_badjac_env = os.getenv("VMEC_JAX_SCAN_FALLBACK_BJAC_LIMIT", "10").strip()
     try:
         scan_fallback_iters = max(1, int(scan_fallback_iters_env))
@@ -3113,7 +3113,7 @@ def solve_fixed_boundary_residual_iter(
         scan_fallback_fsq_abs = 0.0
     scan_fallback_accept_env = os.getenv("VMEC_JAX_SCAN_FALLBACK_ACCEPTED_FRAC", "0.5").strip()
     scan_fallback_fsq_env = os.getenv("VMEC_JAX_SCAN_FALLBACK_FSQ_FACTOR", "50").strip()
-    scan_fallback_improve_env = os.getenv("VMEC_JAX_SCAN_FALLBACK_IMPROVE", "0.9").strip()
+    scan_fallback_improve_env = os.getenv("VMEC_JAX_SCAN_FALLBACK_IMPROVE", "0.1").strip()
     try:
         scan_fallback_accept_frac = float(scan_fallback_accept_env)
     except Exception:
@@ -4560,6 +4560,14 @@ def solve_fixed_boundary_residual_iter(
         cs = jnp.asarray(cs) / scalxc_mn if cs is not None else None
         return _mn_sin_to_signed(sc, cs)
 
+    def _mn_sin_to_signed_physical_batch(sc, cs):
+        sc = jnp.asarray(sc) / scalxc_mn
+        if cs is None:
+            cs = jnp.zeros_like(sc)
+        else:
+            cs = jnp.asarray(cs) / scalxc_mn
+        return _mn_sin_to_signed_batch(sc, cs)
+
     def _rz_norm(state: VMECState) -> Any:
         """R/Z norm (exclude R(0,0) offset) in (m,n>=0) storage.
 
@@ -4676,9 +4684,14 @@ def solve_fixed_boundary_residual_iter(
         nstep_screen = int(indata.get_int("NSTEP", 1)) if indata is not None else 1
         if nstep_screen < 1:
             nstep_screen = 1
+        # Live scan printing is on by default. To keep compilation caching
+        # effective, we use chunked host-side printing unless explicitly
+        # disabled.
         scan_print_env = os.getenv("VMEC_JAX_SCAN_PRINT", "1").strip().lower()
         scan_print_mode = os.getenv("VMEC_JAX_SCAN_PRINT_MODE", "debug_callback").strip().lower()
         scan_print_ordered = os.getenv("VMEC_JAX_SCAN_PRINT_ORDERED", "0").strip().lower() not in ("", "0", "false", "no")
+        scan_print_chunked_env = os.getenv("VMEC_JAX_SCAN_PRINT_CHUNKED", "1").strip().lower()
+        scan_print_chunked = scan_print_chunked_env not in ("", "0", "false", "no")
         abort_scan_env = os.getenv("VMEC_JAX_SCAN_ABORT_ON_BADJAC", "0").strip().lower()
         abort_scan_on_badjac = abort_scan_env not in ("", "0", "false", "no")
         dump_timecontrol_scan = os.getenv("VMEC_JAX_DUMP_TIMECONTROL", "") not in ("", "0")
@@ -4697,8 +4710,13 @@ def solve_fixed_boundary_residual_iter(
             and bool(verbose_vmec2000_table)
             and scan_print_env not in ("", "0", "false", "no")
         )
+        chunked_print = False
         _jax_debug = None
         _jax_debug_print = None
+        if print_in_scan and scan_print_chunked:
+            # Avoid host callbacks inside the scan: we'll print per chunk on host.
+            chunked_print = True
+            print_in_scan = False
         if print_in_scan:
             try:
                 from jax import debug as _jax_debug
@@ -6126,63 +6144,76 @@ def solve_fixed_boundary_residual_iter(
 
                 accepted = jnp.logical_not(do_restart)
                 accepted_count_new = carry_adv.accepted_count + jnp.asarray(accepted, dtype=jnp.int32)
-                # Track the first N probe steps independent of iter2/iter_offset.
-                probe_active = carry_adv.probe_count < scan_fallback_iters_j
-                probe_inc = jnp.where(probe_active, jnp.asarray(1, dtype=jnp.int32), jnp.asarray(0, dtype=jnp.int32))
-                probe_count_new = carry_adv.probe_count + probe_inc
-                probe_bad_jac_new = carry_adv.probe_bad_jac + jnp.where(
-                    probe_active & bad_jacobian,
-                    jnp.asarray(1, dtype=jnp.int32),
-                    jnp.asarray(0, dtype=jnp.int32),
-                )
-                probe_accept_new = carry_adv.probe_accept + jnp.where(
-                    probe_active & accepted,
-                    jnp.asarray(1, dtype=jnp.int32),
-                    jnp.asarray(0, dtype=jnp.int32),
-                )
-                probe_fsq_start_new = jnp.where(
-                    probe_active & (carry_adv.probe_count == 0),
-                    fsq_phys,
-                    carry_adv.probe_fsq_start,
-                )
-                probe_fsq_min_new = jnp.where(
-                    probe_active,
-                    jnp.minimum(carry_adv.probe_fsq_min, fsq_phys),
-                    carry_adv.probe_fsq_min,
-                )
-                probe_fsq_max_new = jnp.where(
-                    probe_active,
-                    jnp.maximum(carry_adv.probe_fsq_max, fsq_phys),
-                    carry_adv.probe_fsq_max,
-                )
-                has_probe = probe_count_new >= scan_fallback_iters_j
-                accepted_frac = probe_accept_new.astype(dtype) / jnp.maximum(
-                    probe_count_new.astype(dtype), jnp.asarray(1.0, dtype=dtype)
-                )
-                probe_start = jnp.maximum(probe_fsq_start_new, jnp.asarray(1.0e-30, dtype=dtype))
-                probe_ratio = probe_fsq_max_new / probe_start
-                bad_progress = probe_ratio > scan_fallback_fsq_factor_j
-                probe_improve = probe_fsq_min_new <= (probe_fsq_start_new * scan_fallback_improve_j)
-                stagnation_trigger = has_probe & (~probe_improve) & (probe_fsq_min_new > scan_fallback_fsq_abs_j)
-                accepted_trigger = (
-                    has_probe
-                    & (accepted_frac < scan_fallback_accept_frac_j)
-                    & (probe_fsq_min_new > scan_fallback_fsq_abs_j)
-                    & bad_progress
-                )
-                bad_jac_trigger = (
-                    probe_bad_jac_new > scan_fallback_badjac_limit_j
-                ) & (probe_fsq_min_new > scan_fallback_fsq_abs_j) & (probe_count_new > 0) & bad_progress
-                scan_fallback_abort = bool(scan_fallback_enabled) & (
-                    bad_jac_trigger | accepted_trigger | stagnation_trigger
-                )
                 nan_fsq = (~jnp.isfinite(fsq_phys)) | (~jnp.isfinite(fsq1))
-                abort_scan_new = (
-                    carry_adv.abort_scan
-                    | nan_fsq
-                    | (bad_jacobian & jnp.asarray(abort_scan_on_badjac))
-                    | scan_fallback_abort
-                )
+                if scan_fallback_enabled:
+                    # Track the first N probe steps independent of iter2/iter_offset.
+                    probe_active = carry_adv.probe_count < scan_fallback_iters_j
+                    probe_inc = jnp.where(
+                        probe_active,
+                        jnp.asarray(1, dtype=jnp.int32),
+                        jnp.asarray(0, dtype=jnp.int32),
+                    )
+                    probe_count_new = carry_adv.probe_count + probe_inc
+                    probe_bad_jac_new = carry_adv.probe_bad_jac + jnp.where(
+                        probe_active & bad_jacobian,
+                        jnp.asarray(1, dtype=jnp.int32),
+                        jnp.asarray(0, dtype=jnp.int32),
+                    )
+                    probe_accept_new = carry_adv.probe_accept + jnp.where(
+                        probe_active & accepted,
+                        jnp.asarray(1, dtype=jnp.int32),
+                        jnp.asarray(0, dtype=jnp.int32),
+                    )
+                    probe_fsq_start_new = jnp.where(
+                        probe_active & (carry_adv.probe_count == 0),
+                        fsq_phys,
+                        carry_adv.probe_fsq_start,
+                    )
+                    probe_fsq_min_new = jnp.where(
+                        probe_active,
+                        jnp.minimum(carry_adv.probe_fsq_min, fsq_phys),
+                        carry_adv.probe_fsq_min,
+                    )
+                    probe_fsq_max_new = jnp.where(
+                        probe_active,
+                        jnp.maximum(carry_adv.probe_fsq_max, fsq_phys),
+                        carry_adv.probe_fsq_max,
+                    )
+                    has_probe = probe_count_new >= scan_fallback_iters_j
+                    accepted_frac = probe_accept_new.astype(dtype) / jnp.maximum(
+                        probe_count_new.astype(dtype), jnp.asarray(1.0, dtype=dtype)
+                    )
+                    probe_start = jnp.maximum(probe_fsq_start_new, jnp.asarray(1.0e-30, dtype=dtype))
+                    probe_ratio = probe_fsq_max_new / probe_start
+                    bad_progress = probe_ratio > scan_fallback_fsq_factor_j
+                    probe_improve = probe_fsq_min_new <= (probe_fsq_start_new * scan_fallback_improve_j)
+                    stagnation_trigger = has_probe & (~probe_improve) & (probe_fsq_min_new > scan_fallback_fsq_abs_j)
+                    accepted_trigger = (
+                        has_probe
+                        & (accepted_frac < scan_fallback_accept_frac_j)
+                        & (probe_fsq_min_new > scan_fallback_fsq_abs_j)
+                        & bad_progress
+                    )
+                    bad_jac_trigger = (
+                        probe_bad_jac_new > scan_fallback_badjac_limit_j
+                    ) & (probe_fsq_min_new > scan_fallback_fsq_abs_j) & (probe_count_new > 0) & bad_progress
+                    scan_fallback_abort = bad_jac_trigger | accepted_trigger | stagnation_trigger
+                    abort_scan_new = (
+                        carry_adv.abort_scan
+                        | nan_fsq
+                        | (bad_jacobian & jnp.asarray(abort_scan_on_badjac))
+                        | scan_fallback_abort
+                    )
+                else:
+                    probe_count_new = carry_adv.probe_count
+                    probe_bad_jac_new = carry_adv.probe_bad_jac
+                    probe_accept_new = carry_adv.probe_accept
+                    probe_fsq_start_new = carry_adv.probe_fsq_start
+                    probe_fsq_min_new = carry_adv.probe_fsq_min
+                    probe_fsq_max_new = carry_adv.probe_fsq_max
+                    abort_scan_new = (
+                        carry_adv.abort_scan | nan_fsq | (bad_jacobian & jnp.asarray(abort_scan_on_badjac))
+                    )
 
                 cache_valid_out = jnp.where(do_restart, jnp.asarray(False), cache_valid)
                 # VMEC prints the updated time-step (post TimeStepControl/restart),
@@ -6452,37 +6483,149 @@ def solve_fixed_boundary_residual_iter(
         def _run_scan(carry_init, it_seq):
             return jax.lax.scan(_scan_step, carry_init, it_seq)
 
-        cached_run = _SCAN_RUNNER_CACHE.get(scan_cache_key)
-        if cached_run is None:
-            donate_args = ()
-            _run_scan = jit(_run_scan, donate_argnums=donate_args)
-            _SCAN_RUNNER_CACHE[scan_cache_key] = _run_scan
-        else:
-            _run_scan = cached_run
+        def _get_scan_runner(seq_len: int):
+            key = scan_cache_key + (int(seq_len),)
+            cached_run = _SCAN_RUNNER_CACHE.get(key)
+            if cached_run is None:
+                donate_args = ()
+                runner = jit(_run_scan, donate_argnums=donate_args)
+                _SCAN_RUNNER_CACHE[key] = runner
+                return runner
+            return cached_run
+
+        def _emit_scan_prints(
+            *,
+            hist_np,
+            it_start: int,
+            max_iter_local: int,
+        ) -> bool:
+            (
+                fsqr_h,
+                fsqz_h,
+                fsql_h,
+                _fsqr1_h,
+                _fsqz1_h,
+                _fsql1_h,
+                _accepted_h,
+                r00_h,
+                z00_h,
+                w_mhd_h,
+                dt_h,
+                _zero_m1_h,
+                _include_edge_h,
+                _res0_h,
+                _res1_h,
+                _iter1_h,
+                _bad_jac_h,
+                _min_tau_h,
+                _max_tau_h,
+                _ptau_min_h,
+                _ptau_max_h,
+                _tau_min_state_h,
+                _tau_max_state_h,
+                _badjac_ptau_h,
+                _badjac_state_h,
+            ) = hist_np
+            conv_mask = (fsqr_h <= float(ftol)) & (fsqz_h <= float(ftol)) & (fsql_h <= float(ftol))
+            conv_idx = int(np.argmax(conv_mask)) if bool(np.any(conv_mask)) else None
+            n_iter_local = int(fsqr_h.shape[0])
+            for i in range(n_iter_local):
+                iter2 = int(it_start + i + 1 + int(iter_offset0))
+                if iter2 > int(max_iter_local):
+                    break
+                conv_now = (conv_idx is not None) and (i == conv_idx)
+                if _should_print_vmec2000_local(iter2, int(max_iter_local)) or conv_now:
+                    r00_val = float(r00_h[i])
+                    z00_val = float(z00_h[i])
+                    # Match VMEC precision (E11.3) for r00/z00.
+                    r00_val = float(f"{r00_val:.3E}")
+                    z00_val = float(f"{z00_val:.3E}")
+                    _print_vmec2000_row_local(
+                        iter_idx=int(iter2),
+                        fsqr=float(fsqr_h[i]),
+                        fsqz=float(fsqz_h[i]),
+                        fsql=float(fsql_h[i]),
+                        delt0r=float(dt_h[i]),
+                        r00=r00_val,
+                        w_mhd=float(w_mhd_h[i]),
+                        z00=z00_val,
+                    )
+                if conv_now:
+                    return True
+            return False
 
         carry_init = carry0._replace(state=state_init, state_checkpoint=state_init)
-        if preflight_iters > 0:
-            # Preflight the first iteration outside the jitted scan to avoid
-            # XLA aliasing issues in the initial tomnsps pass.
-            try:
-                with jax.disable_jit():
-                    carry_pre, hist_pre = _scan_step(carry_init, jnp.asarray(0, dtype=jnp.int32))
-            except Exception:
-                carry_pre, hist_pre = _scan_step(carry_init, jnp.asarray(0, dtype=jnp.int32))
-            if max_iter_tail > 0:
-                it_seq = jnp.arange(preflight_iters, int(max_iter_scan), dtype=jnp.int32)
-                carry_final, hist_tail = _run_scan(carry_pre, it_seq)
-                hist = jax.tree_util.tree_map(
-                    lambda a, b: jnp.concatenate([a[None], b], axis=0),
-                    hist_pre,
-                    hist_tail,
+        if chunked_print:
+            hist_parts = []
+            start_idx = 0
+            carry = carry_init
+            abort_scan_host = False
+            fsq_min_global = np.inf
+            if preflight_iters > 0:
+                try:
+                    with jax.disable_jit():
+                        carry, hist_pre = _scan_step(carry, jnp.asarray(0, dtype=jnp.int32))
+                except Exception:
+                    carry, hist_pre = _scan_step(carry, jnp.asarray(0, dtype=jnp.int32))
+                hist_pre_np = jax.tree_util.tree_map(lambda a: np.asarray(a)[None], hist_pre)
+                hist_parts.append(hist_pre_np)
+                _ = _emit_scan_prints(hist_np=hist_pre_np, it_start=0, max_iter_local=int(max_iter))
+                fsq_min_global = float(
+                    min(fsq_min_global, np.min(hist_pre_np[0] + hist_pre_np[1] + hist_pre_np[2]))
                 )
-            else:
-                carry_final = carry_pre
-                hist = jax.tree_util.tree_map(lambda a: a[None], hist_pre)
+                start_idx = int(preflight_iters)
+            while start_idx < int(max_iter_scan):
+                chunk_len = min(int(nstep_screen), int(max_iter_scan) - start_idx)
+                it_seq = jnp.arange(start_idx, start_idx + int(chunk_len), dtype=jnp.int32)
+                runner = _get_scan_runner(int(chunk_len))
+                carry, hist_chunk = runner(carry, it_seq)
+                hist_chunk_np = jax.tree_util.tree_map(lambda a: np.asarray(a), hist_chunk)
+                hist_parts.append(hist_chunk_np)
+                converged_now = _emit_scan_prints(
+                    hist_np=hist_chunk_np,
+                    it_start=int(start_idx),
+                    max_iter_local=int(max_iter),
+                )
+                fsq_min_global = float(
+                    min(fsq_min_global, np.min(hist_chunk_np[0] + hist_chunk_np[1] + hist_chunk_np[2]))
+                )
+                start_idx = int(start_idx + int(chunk_len))
+                if converged_now:
+                    break
+                if scan_fallback_enabled and start_idx >= int(scan_fallback_iters):
+                    if fsq_min_global > float(scan_fallback_fsq_abs):
+                        abort_scan_host = True
+                        break
+                if bool(np.asarray(carry.converged)) or bool(np.asarray(carry.abort_scan)):
+                    break
+            hist = jax.tree_util.tree_map(lambda *parts: np.concatenate(parts, axis=0), *hist_parts)
+            carry_final = carry
+            if abort_scan_host:
+                carry_final = carry_final._replace(abort_scan=jnp.asarray(True))
         else:
-            it_seq = jnp.arange(int(max_iter_scan), dtype=jnp.int32)
-            carry_final, hist = _run_scan(carry_init, it_seq)
+            runner = _get_scan_runner(int(max_iter_tail) if int(max_iter_tail) > 0 else int(max_iter_scan))
+            if preflight_iters > 0:
+                # Preflight the first iteration outside the jitted scan to avoid
+                # XLA aliasing issues in the initial tomnsps pass.
+                try:
+                    with jax.disable_jit():
+                        carry_pre, hist_pre = _scan_step(carry_init, jnp.asarray(0, dtype=jnp.int32))
+                except Exception:
+                    carry_pre, hist_pre = _scan_step(carry_init, jnp.asarray(0, dtype=jnp.int32))
+                if max_iter_tail > 0:
+                    it_seq = jnp.arange(preflight_iters, int(max_iter_scan), dtype=jnp.int32)
+                    carry_final, hist_tail = runner(carry_pre, it_seq)
+                    hist = jax.tree_util.tree_map(
+                        lambda a, b: jnp.concatenate([a[None], b], axis=0),
+                        hist_pre,
+                        hist_tail,
+                    )
+                else:
+                    carry_final = carry_pre
+                    hist = jax.tree_util.tree_map(lambda a: a[None], hist_pre)
+            else:
+                it_seq = jnp.arange(int(max_iter_scan), dtype=jnp.int32)
+                carry_final, hist = runner(carry_init, it_seq)
         (
             fsqr_hist,
             fsqz_hist,
@@ -6540,7 +6683,7 @@ def solve_fixed_boundary_residual_iter(
         zero_m1_hist_np = np.asarray(zero_m1_hist)[accepted_idx]
         include_edge_hist_np = np.asarray(include_edge_hist)[accepted_idx]
 
-        if (not print_in_scan) and verbose and bool(vmec2000_control) and bool(verbose_vmec2000_table):
+        if (not print_in_scan) and (not chunked_print) and verbose and bool(vmec2000_control) and bool(verbose_vmec2000_table):
             r00_full = np.asarray(r00_hist)
             z00_full = np.asarray(z00_hist)
             w_mhd_full = np.asarray(w_mhd_hist)
