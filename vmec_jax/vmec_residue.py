@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from jax import core
 
 from ._compat import jnp, has_jax, tree_util
 from .vmec_tomnsp import TomnspsRZL, VmecTrigTables
@@ -35,8 +36,6 @@ def _cache_allowed() -> bool:
     if not has_jax():
         return True
     try:
-        from jax import core
-
         return bool(core.trace_ctx.is_top_level())
     except Exception:
         return False
