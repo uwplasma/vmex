@@ -151,9 +151,34 @@ Current observed mismatches (updated parity status):
   inputs (e.g., ``input.QI_nfp2``). For parity runs, the default is now the
   non-scan loop; enable scan explicitly with ``--fast`` when you only care
   about speed.
-- ``betapol``, ``betator``, ``betaxis``, ``ctor``, and ``DMerc`` are present but
-  still placeholders in ``vmec_jax`` (zeros) until the VMEC2000 diagnostics path
-  is fully ported.
+- ``betapol``/``betator`` and Mercier terms (``DMerc``/``Dgeod``) are now
+  produced by the VMEC-style diagnostics path and match VMEC2000 for QI runs
+  away from the magnetic axis (skip first 6 radial points) at
+  ``rtol <= 5e-4``.
+- ``jdotb`` remains the main QI ``wout`` diagnostic mismatch; force-iteration
+  traces (``fsqr/fsqz/fsql``) and core geometry/current profiles already match.
+
+QI ``wout`` parity snapshot (single-grid, converged, skip first 6 radial points):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 14 20 20 16
+
+   * - Case
+     - NS
+     - DMerc max_rel
+     - Dgeod max_rel
+     - bsubsmns max_rel
+   * - ``input.QI_nfp2``
+     - 35
+     - ``4.336e-04``
+     - ``1.021e-04``
+     - ``1.439e-07``
+   * - ``input.QI_nfp2``
+     - 111
+     - ``1.157e-04``
+     - ``4.011e-05``
+     - ``3.584e-07``
 
 Axis reset and bad-Jacobian parity notes
 ----------------------------------------

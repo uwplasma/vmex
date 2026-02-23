@@ -26,6 +26,13 @@ def _assert_allclose(name, a, b, *, rtol, atol):
     np.testing.assert_allclose(a, b, rtol=rtol, atol=atol, err_msg=f"{name} mismatch")
 
 
+def _trim_radial(arr, skip: int = 2):
+    arr = np.asarray(arr)
+    if arr.ndim == 0:
+        return arr
+    return arr[skip:, ...]
+
+
 @pytest.mark.parametrize("case", CASES)
 def test_wout_parity_against_reference(case, tmp_path):
     pytest.importorskip("netCDF4")
@@ -103,6 +110,13 @@ def test_wout_parity_against_reference(case, tmp_path):
     _assert_allclose("bsubumns", wnew.bsubumns, wref.bsubumns, rtol=1e-3, atol=5e-3)
     _assert_allclose("bsubvmnc", wnew.bsubvmnc, wref.bsubvmnc, rtol=1e-3, atol=5e-3)
     _assert_allclose("bsubvmns", wnew.bsubvmns, wref.bsubvmns, rtol=1e-3, atol=5e-3)
+    _assert_allclose(
+        "bsubsmns[2:]",
+        _trim_radial(wnew.bsubsmns, skip=2),
+        _trim_radial(wref.bsubsmns, skip=2),
+        rtol=5e-4,
+        atol=1e-6,
+    )
     _assert_allclose("bmnc", wnew.bmnc, wref.bmnc, rtol=1e-4, atol=2e-5)
     _assert_allclose("bmns", wnew.bmns, wref.bmns, rtol=1e-4, atol=2e-5)
 
@@ -124,7 +138,6 @@ def test_wout_parity_against_reference(case, tmp_path):
     _assert_allclose("bvco", wnew.bvco, wref.bvco, rtol=1e-6, atol=1e-10)
     _assert_allclose("jcuru", wnew.jcuru, wref.jcuru, rtol=1e-4, atol=1e-4)
     _assert_allclose("jcurv", wnew.jcurv, wref.jcurv, rtol=1e-4, atol=1e-4)
-
     assert np.isfinite(wnew.fsqr)
     assert np.isfinite(wnew.fsqz)
     assert np.isfinite(wnew.fsql)
