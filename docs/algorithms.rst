@@ -92,6 +92,161 @@ The geometry kernel is the foundation of most downstream physics:
 
 The goal is that each step is differentiable and jittable.
 
+Iteration Loop: Non-Scan vs Scan
+--------------------------------
+
+VMEC2000 solves a nonlinear fixed-boundary equilibrium by repeatedly updating
+the state vector :math:`x` (stacked Fourier coefficients of
+:math:`R,Z,\lambda`) using a preconditioned force residual. In compact form:
+
+.. math::
+
+   \mathbf{x}_{k+1}
+   =
+   \mathbf{x}_k
+   +
+   \Delta t_k\,\mathbf{v}_k,
+   \qquad
+   \mathbf{v}_k = P_k^{-1}\,\mathbf{r}(\mathbf{x}_k).
+
+Here :math:`\mathbf{r}` is assembled from the VMEC force blocks
+(:math:`F_R, F_Z, F_\lambda`) after ``tomnsps`` projection, and :math:`P^{-1}`
+is the 1D radial preconditioner built from ``bcovar`` quantities
+(``arm``, ``azm``, ``brm``, ``bzm``, ``crm``, ``czm`` and lambda factors).
+
+The table entries printed each ``NSTEP`` iterations are the VMEC-normalized
+force scalars:
+
+.. math::
+
+   \mathrm{fsqr} = r_1\,f_\mathrm{norm}\,\|F_R\|_2^2,\quad
+   \mathrm{fsqz} = r_1\,f_\mathrm{norm}\,\|F_Z\|_2^2,\quad
+   \mathrm{fsql} = f_\mathrm{norm}^L\,\|F_\lambda\|_2^2,
+
+with the same normalization factors as VMEC2000 ``bcovar``.
+
+VMEC2000 then applies ``TimeStepControl`` [8] on two aggregated residuals:
+
+.. math::
+
+   \mathrm{fsq} = \mathrm{fsqr} + \mathrm{fsqz},
+   \qquad
+   \mathrm{fsq0} = \mathrm{fsqr} + \mathrm{fsqz} + \mathrm{fsql}.
+
+Denoting restart checkpoint values by :math:`\mathrm{res0},\mathrm{res1}`,
+VMEC's control logic in ``evolve.f`` / ``restart.f`` is:
+
+.. math::
+
+   \mathrm{res0}\leftarrow\min(\mathrm{res0},\mathrm{fsq}),
+   \qquad
+   \mathrm{res1}\leftarrow\min(\mathrm{res1},\mathrm{fsq0}),
+
+then:
+
+1. If ``iter2 == iter1`` (or uninitialized ``res0``), initialize checkpoint.
+2. If :math:`\mathrm{fsq}\le\mathrm{res0}` and
+   :math:`\mathrm{fsq0}\le\mathrm{res1}`, store new checkpoint.
+3. If ``iter2 - iter1 > 10`` and
+   :math:`\mathrm{fsq} > 10^4\mathrm{res0}` or
+   :math:`\mathrm{fsq0} > 10^4\mathrm{res1}`, trigger bad-progress restart.
+4. On restart, ``restart_iter`` rescales :math:`\Delta t` exactly as:
+
+   - bad Jacobian (``irst=2``): :math:`\Delta t \leftarrow 0.9\,\Delta t`
+   - bad progress/time-control (``irst=3``):
+     :math:`\Delta t \leftarrow \Delta t / 1.03`
+
+This is the control law vmec-jax must match for per-iteration parity.
+
+``vmec-jax`` exposes two execution paths that use the *same* mathematical
+updates but differ in how the loop is staged:
+
+**Non-scan (parity) path**
+
+- Implements VMEC2000 ordering directly in a host ``for`` loop, including
+  checkpoint/restart sequencing and Jacobian-triggered axis resets.
+- Uses VMEC-style restarts and time-step control with scalar checks in host
+  control flow (same ordering as ``evolve.f`` + ``restart.f``).
+- Supports exact VMEC2000 iteration parity and reproduces ``threed1`` output.
+- Preferred for verification, regression tests, and large ``ns`` where subtle
+  ordering differences can accumulate.
+
+In code, this corresponds to ``solve_fixed_boundary_residual_iter`` using the
+direct loop near the lower part of ``vmec_jax/solve.py``:
+
+- force evaluation: ``_compute_forces_nodump`` / ``_compute_forces_impl``
+- VMEC time-step bookkeeping: ``_dump_time_control_trace`` block and
+  ``restart_reason`` handling
+- restart path: VMEC-compatible ``time_step`` rescaling and checkpoint rollback.
+
+**Scan (performance) path**
+
+- Wraps the same residual+preconditioner update in a JAX ``lax.scan`` to keep
+  the entire iteration loop on device.
+- Eliminates Python overhead, reduces host/device synchronization, and enables
+  kernel fusion across steps (especially with JIT-enabled force kernels).
+- Applies the same update formulas, but encodes control flow in a pure carry
+  state (``_ScanCarry``), with restart decisions represented by ``lax.cond``.
+
+This path is invoked by setting ``use_scan=True`` or using the fast solver
+aliases (``vmec2000_iter_fast``/``vmec2000_scan``).  A parity guard can probe
+the first few iterations and automatically fall back to the non-scan path when
+the scan loop diverges from the VMEC2000 ordering (see
+``VMEC_JAX_SCAN_PARITY_GUARD`` in ``vmec_jax/driver.py``).
+
+Mathematically, the scan path performs:
+
+.. math::
+
+   (\mathbf{x}_{k+1}, c_{k+1}) = \Phi(\mathbf{x}_k, c_k; k),
+
+where :math:`c_k` is the carry (time step, restart indices, cached norms,
+checkpoint state, and running traces). The key difference from non-scan is not
+the physics formulas, but the *placement* of control-flow boundaries and host
+synchronization.
+
+**Why scan is faster**
+
+The scan loop lets XLA treat the entire iteration as a single compiled region.
+That reduces Python dispatch, keeps intermediate arrays on device, and allows
+kernel fusion across consecutive iterations.  On the non-scan path, each
+iteration triggers multiple Python→JAX calls and synchronization points.  For
+small-to-moderate grids this cost dominates; for large grids, the scan path can
+still win but must be validated for parity (especially when ``ns`` or
+``NS_ARRAY`` is large).
+
+**Example usage**
+
+.. code-block:: python
+
+   # Parity-focused run (VMEC2000 ordering)
+   vj.run_fixed_boundary(path, solver="vmec2000_iter", use_scan=False)
+
+   # Performance-focused run (JAX scan loop)
+   vj.run_fixed_boundary(path, solver="vmec2000_iter", use_scan=True, performance_mode=True)
+
+For reproducibility against VMEC2000, prefer the non-scan path.  For fast
+parameter sweeps on validated inputs, the scan path can offer significant
+speedups while preserving differentiability.
+
+Worked comparison against VMEC2000
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For the converged QI test (``examples/data/input.QI_nfp2``), both VMEC2000 and
+vmec-jax non-scan runs follow the same iteration-level convergence pattern
+(same Jacobian reset count and close ``fsq`` traces), while preserving
+end-to-end differentiability of the JAX path.
+
+The most stable workflow for parity-critical studies remains:
+
+1. use non-scan for production parity runs,
+2. compare ``wout`` with an axis mask (skip first 6 radial points),
+3. use scan mode only after the case is validated at the chosen resolution.
+
+This policy is consistent with VMEC2000 behavior near the axis and VMEC++
+documentation about reduced reliability of axis-adjacent Mercier-type
+diagnostics.
+
 Profiles and volume integrals
 -----------------------------
 
