@@ -56,6 +56,13 @@ All of the following scripts are designed to run quickly on bundled data:
 
     python tools/diagnostics/end_to_end_solve_parity_summary.py --use-input-niter --fast
 
+- Axis-masked ``wout`` comparator (for converged runs, skip near-axis points)::
+
+    python tools/diagnostics/wout_compare_axis_mask.py \
+      --a /path/to/vmec2000/wout_case.nc \
+      --b /path/to/vmec_jax/wout_case.nc \
+      --axis-skip 6 --rtol 1e-4 --atol 1e-12
+
 - Runtime + residual benchmark for a fixed iteration budget (communication-oriented)::
 
     python tools/diagnostics/benchmark_fixed_boundary_runtime_and_residuals.py \
@@ -151,34 +158,38 @@ Current observed mismatches (updated parity status):
   inputs (e.g., ``input.QI_nfp2``). For parity runs, the default is now the
   non-scan loop; enable scan explicitly with ``--fast`` when you only care
   about speed.
-- ``betapol``/``betator`` and Mercier terms (``DMerc``/``Dgeod``) are now
-  produced by the VMEC-style diagnostics path and match VMEC2000 for QI runs
-  away from the magnetic axis (skip first 6 radial points) at
-  ``rtol <= 5e-4``.
-- ``jdotb`` remains the main QI ``wout`` diagnostic mismatch; force-iteration
-  traces (``fsqr/fsqz/fsql``) and core geometry/current profiles already match.
+- ``betapol``/``betator`` now match to tight tolerance on converged QA/QI runs.
+- ``jdotb``, ``bsubsmns``, and Mercier terms (``DMerc``/``DGeod``) still show
+  case-dependent drift away from VMEC2000, even when comparing away from the
+  axis (skip first 6 radial points).
+- Force-iteration traces (``fsqr/fsqz/fsql``) and global convergence behavior
+  are much closer than some derived post-processing diagnostics.
 
-QI ``wout`` parity snapshot (single-grid, converged, skip first 6 radial points):
+QI/QA ``wout`` parity snapshot (converged, skip first 6 radial points,
+``rtol=1e-4``, ``atol=1e-12``):
 
 .. list-table::
    :header-rows: 1
-   :widths: 14 14 20 20 16
+   :widths: 18 10 16 16 16 16
 
    * - Case
      - NS
+     - betapol max_rel
+     - betator max_rel
      - DMerc max_rel
-     - Dgeod max_rel
-     - bsubsmns max_rel
+     - jdotb max_rel
    * - ``input.QI_nfp2``
-     - 35
-     - ``4.336e-04``
-     - ``1.021e-04``
-     - ``1.439e-07``
-   * - ``input.QI_nfp2``
-     - 111
-     - ``1.157e-04``
-     - ``4.011e-05``
-     - ``3.584e-07``
+     - 31
+     - ``1.482e-06``
+     - ``2.053e-06``
+     - ``1.238e-02``
+     - ``4.112e+01``
+   * - ``input.LandremanPaul2021_QA_lowres``
+     - 50
+     - ``0.000e+00``
+     - ``0.000e+00``
+     - ``5.886e-02``
+     - ``2.310e+00``
 
 Axis reset and bad-Jacobian parity notes
 ----------------------------------------
