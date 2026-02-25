@@ -3169,6 +3169,8 @@ def solve_fixed_boundary_residual_iter(
     badjac_use_state = badjac_mode == "state"
     dump_ptau_state_env = os.getenv("VMEC_JAX_DUMP_PTAU_STATE", "0").strip().lower()
     dump_ptau_state = dump_ptau_state_env not in ("", "0", "false", "no")
+    light_hist_env = os.getenv("VMEC_JAX_LIGHT_HISTORY", "0").strip().lower()
+    light_history = light_hist_env not in ("", "0", "false", "no")
     badjac_state_probe_env = os.getenv("VMEC_JAX_BADJAC_STATE_PROBE", "0").strip().lower()
     badjac_state_probe = badjac_state_probe_env not in ("", "0", "false", "no")
     ptau_tol_env = os.getenv("VMEC_JAX_PTAU_TOL", "").strip()
@@ -3246,6 +3248,10 @@ def solve_fixed_boundary_residual_iter(
         auto_flip_force = False
     jit_forces = bool(jit_forces)
     use_scan = bool(use_scan)
+    chunked_device_env = os.getenv("VMEC_JAX_VMEC2000_CHUNKED", "0").strip().lower()
+    force_chunked_scan = chunked_device_env not in ("", "0", "false", "no")
+    if force_chunked_scan and bool(vmec2000_control):
+        use_scan = True
     limit_dt_from_force = bool(limit_dt_from_force)
     limit_update_rms = bool(limit_update_rms)
     backtracking = bool(backtracking)
@@ -3276,6 +3282,10 @@ def solve_fixed_boundary_residual_iter(
         if verbose:
             print("[solve_fixed_boundary_residual_iter] jit_forces disabled (debug dumps enabled)")
         jit_forces = False
+    if dumps_enabled:
+        # Force full histories when parity dumps are enabled.
+        light_history = False
+    track_history = not light_history
 
     from .energy import flux_profiles_from_indata
     from .energy import magnetic_wb_from_state
@@ -4823,6 +4833,8 @@ def solve_fixed_boundary_residual_iter(
         scan_print_ordered = os.getenv("VMEC_JAX_SCAN_PRINT_ORDERED", "0").strip().lower() not in ("", "0", "false", "no")
         scan_print_chunked_env = os.getenv("VMEC_JAX_SCAN_PRINT_CHUNKED", "1").strip().lower()
         scan_print_chunked = scan_print_chunked_env not in ("", "0", "false", "no")
+        scan_light_env = os.getenv("VMEC_JAX_SCAN_LIGHT", "0").strip().lower()
+        scan_light = (scan_light_env not in ("", "0", "false", "no")) or bool(light_history)
         abort_scan_env = os.getenv("VMEC_JAX_SCAN_ABORT_ON_BADJAC", "0").strip().lower()
         abort_scan_on_badjac = abort_scan_env not in ("", "0", "false", "no")
         dump_timecontrol_scan = os.getenv("VMEC_JAX_DUMP_TIMECONTROL", "") not in ("", "0")
@@ -4846,6 +4858,9 @@ def solve_fixed_boundary_residual_iter(
         _jax_debug_print = None
         if print_in_scan and scan_print_chunked:
             # Avoid host callbacks inside the scan: we'll print per chunk on host.
+            chunked_print = True
+            print_in_scan = False
+        if force_chunked_scan:
             chunked_print = True
             print_in_scan = False
         if print_in_scan:
@@ -4881,6 +4896,29 @@ def solve_fixed_boundary_residual_iter(
             except Exception:
                 pass
         axis_reset_enabled = bool(vmec2000_control) and (not axis_reset_done) and bool(lmove_axis)
+
+        def _scan_hist_light(
+            fsqr,
+            fsqz,
+            fsql,
+            accepted,
+            r00,
+            z00,
+            w_mhd,
+            time_step,
+            bad_jacobian,
+        ):
+            return (
+                fsqr,
+                fsqz,
+                fsql,
+                accepted,
+                r00,
+                z00,
+                w_mhd,
+                time_step,
+                bad_jacobian,
+            )
 
         def _should_print_vmec2000_local(iter_idx: int, max_iter_local: int) -> bool:
             if not (bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table)):
@@ -5322,6 +5360,18 @@ def solve_fixed_boundary_residual_iter(
                 accepted_h = jnp.asarray(False)
                 zero_m1_h = jnp.asarray(0.0, dtype=dtype)
                 include_edge_h = jnp.asarray(False)
+                if scan_light:
+                    return carry_hold_out, _scan_hist_light(
+                        fsqr_h,
+                        fsqz_h,
+                        fsql_h,
+                        accepted_h,
+                        carry_hold.r00_prev,
+                        carry_hold.z00_prev,
+                        carry_hold.w_mhd_prev,
+                        carry_hold.time_step,
+                        jnp.asarray(False),
+                    )
                 return carry_hold_out, (
                     fsqr_h,
                     fsqz_h,
@@ -6478,6 +6528,18 @@ def solve_fixed_boundary_residual_iter(
                     fsqz1_checkpoint=fsqz1_checkpoint,
                     fsql1_checkpoint=fsql1_checkpoint,
                 )
+                if scan_light:
+                    return new_carry, _scan_hist_light(
+                        fsqr_out,
+                        fsqz_out,
+                        fsql_out,
+                        accepted,
+                        r00_j,
+                        z00_j,
+                        w_mhd,
+                        time_step_report,
+                        bad_jacobian,
+                    )
                 return new_carry, (
                     fsqr_out,
                     fsqz_out,
@@ -6614,6 +6676,7 @@ def solve_fixed_boundary_residual_iter(
             float(stage_transition_factor),
             float(stage_transition_scale),
             bool(jit_forces_scan),
+            bool(scan_light),
             int(scan_fallback_iters),
             float(scan_fallback_accept_frac),
             float(scan_fallback_fsq_factor),
@@ -6640,33 +6703,46 @@ def solve_fixed_boundary_residual_iter(
             it_start: int,
             max_iter_local: int,
         ) -> bool:
-            (
-                fsqr_h,
-                fsqz_h,
-                fsql_h,
-                _fsqr1_h,
-                _fsqz1_h,
-                _fsql1_h,
-                _accepted_h,
-                r00_h,
-                z00_h,
-                w_mhd_h,
-                dt_h,
-                _zero_m1_h,
-                _include_edge_h,
-                _res0_h,
-                _res1_h,
-                _iter1_h,
-                _bad_jac_h,
-                _min_tau_h,
-                _max_tau_h,
-                _ptau_min_h,
-                _ptau_max_h,
-                _tau_min_state_h,
-                _tau_max_state_h,
-                _badjac_ptau_h,
-                _badjac_state_h,
-            ) = hist_np
+            if scan_light:
+                (
+                    fsqr_h,
+                    fsqz_h,
+                    fsql_h,
+                    _accepted_h,
+                    r00_h,
+                    z00_h,
+                    w_mhd_h,
+                    dt_h,
+                    _bad_jac_h,
+                ) = hist_np
+            else:
+                (
+                    fsqr_h,
+                    fsqz_h,
+                    fsql_h,
+                    _fsqr1_h,
+                    _fsqz1_h,
+                    _fsql1_h,
+                    _accepted_h,
+                    r00_h,
+                    z00_h,
+                    w_mhd_h,
+                    dt_h,
+                    _zero_m1_h,
+                    _include_edge_h,
+                    _res0_h,
+                    _res1_h,
+                    _iter1_h,
+                    _bad_jac_h,
+                    _min_tau_h,
+                    _max_tau_h,
+                    _ptau_min_h,
+                    _ptau_max_h,
+                    _tau_min_state_h,
+                    _tau_max_state_h,
+                    _badjac_ptau_h,
+                    _badjac_state_h,
+                ) = hist_np
             conv_mask = (fsqr_h <= float(ftol)) & (fsqz_h <= float(ftol)) & (fsql_h <= float(ftol))
             conv_idx = int(np.argmax(conv_mask)) if bool(np.any(conv_mask)) else None
             n_iter_local = int(fsqr_h.shape[0])
@@ -6767,33 +6843,62 @@ def solve_fixed_boundary_residual_iter(
             else:
                 it_seq = jnp.arange(int(max_iter_scan), dtype=jnp.int32)
                 carry_final, hist = runner(carry_init, it_seq)
-        (
-            fsqr_hist,
-            fsqz_hist,
-            fsql_hist,
-            fsqr1_hist,
-            fsqz1_hist,
-            fsql1_hist,
-            accepted,
-            r00_hist,
-            z00_hist,
-            w_mhd_hist,
-            dt_hist,
-            zero_m1_hist,
-            include_edge_hist,
-            res0_hist,
-            res1_hist,
-            iter1_hist,
-            bad_jac_hist,
-            min_tau_hist,
-            max_tau_hist,
-            ptau_min_hist,
-            ptau_max_hist,
-            tau_min_state_hist,
-            tau_max_state_hist,
-            badjac_ptau_hist,
-            badjac_state_hist,
-        ) = hist
+        if scan_light:
+            (
+                fsqr_hist,
+                fsqz_hist,
+                fsql_hist,
+                accepted,
+                r00_hist,
+                z00_hist,
+                w_mhd_hist,
+                dt_hist,
+                bad_jac_hist,
+            ) = hist
+            fsqr1_hist = None
+            fsqz1_hist = None
+            fsql1_hist = None
+            zero_m1_hist = None
+            include_edge_hist = None
+            res0_hist = None
+            res1_hist = None
+            iter1_hist = None
+            min_tau_hist = None
+            max_tau_hist = None
+            ptau_min_hist = None
+            ptau_max_hist = None
+            tau_min_state_hist = None
+            tau_max_state_hist = None
+            badjac_ptau_hist = None
+            badjac_state_hist = None
+        else:
+            (
+                fsqr_hist,
+                fsqz_hist,
+                fsql_hist,
+                fsqr1_hist,
+                fsqz1_hist,
+                fsql1_hist,
+                accepted,
+                r00_hist,
+                z00_hist,
+                w_mhd_hist,
+                dt_hist,
+                zero_m1_hist,
+                include_edge_hist,
+                res0_hist,
+                res1_hist,
+                iter1_hist,
+                bad_jac_hist,
+                min_tau_hist,
+                max_tau_hist,
+                ptau_min_hist,
+                ptau_max_hist,
+                tau_min_state_hist,
+                tau_max_state_hist,
+                badjac_ptau_hist,
+                badjac_state_hist,
+            ) = hist
         fsqr_full = np.asarray(fsqr_hist)
         fsqz_full = np.asarray(fsqz_hist)
         fsql_full = np.asarray(fsql_hist)
@@ -6815,14 +6920,21 @@ def solve_fixed_boundary_residual_iter(
         fsql_hist_np = fsql_full[accepted_idx]
         w_hist = fsqr_hist_np + fsqz_hist_np + fsql_hist_np
 
-        fsqr1_hist_np = np.asarray(fsqr1_hist)[accepted_idx]
-        fsqz1_hist_np = np.asarray(fsqz1_hist)[accepted_idx]
-        fsql1_hist_np = np.asarray(fsql1_hist)[accepted_idx]
+        if scan_light:
+            fsqr1_hist_np = np.zeros((0,), dtype=float)
+            fsqz1_hist_np = np.zeros((0,), dtype=float)
+            fsql1_hist_np = np.zeros((0,), dtype=float)
+            zero_m1_hist_np = np.zeros((0,), dtype=int)
+            include_edge_hist_np = np.zeros((0,), dtype=int)
+        else:
+            fsqr1_hist_np = np.asarray(fsqr1_hist)[accepted_idx]
+            fsqz1_hist_np = np.asarray(fsqz1_hist)[accepted_idx]
+            fsql1_hist_np = np.asarray(fsql1_hist)[accepted_idx]
+            zero_m1_hist_np = np.asarray(zero_m1_hist)[accepted_idx]
+            include_edge_hist_np = np.asarray(include_edge_hist)[accepted_idx]
         dt_hist_np = np.asarray(dt_hist)[accepted_idx]
         r00_hist_np = np.asarray(r00_hist)[accepted_idx]
         w_mhd_hist_np = np.asarray(w_mhd_hist)[accepted_idx]
-        zero_m1_hist_np = np.asarray(zero_m1_hist)[accepted_idx]
-        include_edge_hist_np = np.asarray(include_edge_hist)[accepted_idx]
 
         if (not print_in_scan) and (not chunked_print) and verbose and bool(vmec2000_control) and bool(verbose_vmec2000_table):
             r00_full = np.asarray(r00_hist)
@@ -6848,7 +6960,7 @@ def solve_fixed_boundary_residual_iter(
                         w_mhd=float(w_mhd_full[i]),
                         z00=z00_val,
                     )
-        if os.getenv("VMEC_JAX_DUMP_PTAU", "") not in ("", "0"):
+        if (not scan_light) and os.getenv("VMEC_JAX_DUMP_PTAU", "") not in ("", "0"):
             last_iter = int(conv_idx_print) if int(conv_idx_print) > 0 else int(max_iter)
             ptau_min_full = np.asarray(ptau_min_hist)
             ptau_max_full = np.asarray(ptau_max_hist)
@@ -6870,6 +6982,22 @@ def solve_fixed_boundary_residual_iter(
                     mode=badjac_mode,
                     label="scan",
                 )
+        res0_full = np.asarray(res0_hist) if res0_hist is not None else np.zeros((0,), dtype=float)
+        res1_full = np.asarray(res1_hist) if res1_hist is not None else np.zeros((0,), dtype=float)
+        iter1_full = np.asarray(iter1_hist) if iter1_hist is not None else np.zeros((0,), dtype=int)
+        min_tau_full = np.asarray(min_tau_hist) if min_tau_hist is not None else np.zeros((0,), dtype=float)
+        max_tau_full = np.asarray(max_tau_hist) if max_tau_hist is not None else np.zeros((0,), dtype=float)
+        ptau_min_full = np.asarray(ptau_min_hist) if ptau_min_hist is not None else np.zeros((0,), dtype=float)
+        ptau_max_full = np.asarray(ptau_max_hist) if ptau_max_hist is not None else np.zeros((0,), dtype=float)
+        tau_min_state_full = (
+            np.asarray(tau_min_state_hist) if tau_min_state_hist is not None else np.zeros((0,), dtype=float)
+        )
+        tau_max_state_full = (
+            np.asarray(tau_max_state_hist) if tau_max_state_hist is not None else np.zeros((0,), dtype=float)
+        )
+        badjac_ptau_full = np.asarray(badjac_ptau_hist) if badjac_ptau_hist is not None else np.zeros((0,), dtype=int)
+        badjac_state_full = np.asarray(badjac_state_hist) if badjac_state_hist is not None else np.zeros((0,), dtype=int)
+
         return SolveVmecResidualResult(
             state=carry_final.state,
             n_iter=int(w_hist.shape[0]),
@@ -6882,6 +7010,7 @@ def solve_fixed_boundary_residual_iter(
             diagnostics={
                 "use_scan": True,
                 "vmec2000_scan": True,
+                "light_history": bool(scan_light),
                 "badjac_use_state": bool(badjac_use_state),
                 "badjac_mode": badjac_mode,
                 "fsqr_full": fsqr_full,
@@ -6899,18 +7028,18 @@ def solve_fixed_boundary_residual_iter(
                 "w_vmec_history": w_mhd_hist_np,
                 "zero_m1_history": zero_m1_hist_np.astype(int),
                 "include_edge_history": include_edge_hist_np.astype(int),
-                "res0_full": np.asarray(res0_hist),
-                "res1_full": np.asarray(res1_hist),
-                "iter1_full": np.asarray(iter1_hist),
+                "res0_full": res0_full,
+                "res1_full": res1_full,
+                "iter1_full": iter1_full,
                 "bad_jacobian_full": np.asarray(bad_jac_hist).astype(int),
-                "min_tau_full": np.asarray(min_tau_hist),
-                "max_tau_full": np.asarray(max_tau_hist),
-                "ptau_min_full": np.asarray(ptau_min_hist),
-                "ptau_max_full": np.asarray(ptau_max_hist),
-                "tau_min_state_full": np.asarray(tau_min_state_hist),
-                "tau_max_state_full": np.asarray(tau_max_state_hist),
-                "badjac_ptau_full": np.asarray(badjac_ptau_hist).astype(int),
-                "badjac_state_full": np.asarray(badjac_state_hist).astype(int),
+                "min_tau_full": min_tau_full,
+                "max_tau_full": max_tau_full,
+                "ptau_min_full": ptau_min_full,
+                "ptau_max_full": ptau_max_full,
+                "tau_min_state_full": tau_min_state_full,
+                "tau_max_state_full": tau_max_state_full,
+                "badjac_ptau_full": badjac_ptau_full.astype(int),
+                "badjac_state_full": badjac_state_full.astype(int),
                 "abort_scan": bool(np.asarray(carry_final.abort_scan)),
                 "resume_state": {
                     "state_checkpoint": carry_final.state_checkpoint,
@@ -7262,6 +7391,11 @@ def solve_fixed_boundary_residual_iter(
     bad_jacobian_history: list[int] = []
     grad_rms_history = []
     step_history = []
+    r00_last = float("nan")
+    z00_last = float("nan")
+    wb_last = float("nan")
+    wp_last = float("nan")
+    w_vmec_last = float("nan")
 
     # Conjugate-gradient-like time-stepping state.
     time_step = float(step_size)
@@ -7922,10 +8056,12 @@ def solve_fixed_boundary_residual_iter(
                 include_edge = False
             else:
                 include_edge = bool(iter_since_restart < 50) and (float(prev_rz_fsq) < 1e-6)
-            include_edge_history.append(int(bool(include_edge)))
+            if track_history:
+                include_edge_history.append(int(bool(include_edge)))
             # `zero_m1` originates from host control flow, so keep the history
             # without forcing an unnecessary device synchronization.
-            zero_m1_history.append(int(zero_m1_val > 0.5))
+            if track_history:
+                zero_m1_history.append(int(zero_m1_val > 0.5))
     
             need_bcovar_update = bool(vmec2000_control) and (
                 (not bool(vmec2000_cache_valid))
@@ -8057,15 +8193,21 @@ def solve_fixed_boundary_residual_iter(
                     r00_val = float(f"{float(r00_val):.3E}")
                     z00_val = float(f"{float(z00_val):.3E}")
             else:
-                r00_val = r00_history[-1] if r00_history else float("nan")
-                z00_val = z00_history[-1] if z00_history else float("nan")
-                wb_val = wb_history[-1] if wb_history else float("nan")
-                wp_val = wp_history[-1] if wp_history else float("nan")
-            r00_history.append(r00_val)
-            z00_history.append(z00_val)
-            wb_history.append(wb_val)
-            wp_history.append(wp_val)
-            w_vmec_history.append((wb_val + wp_val / (gamma - 1.0)) * float(TWOPI * TWOPI))
+                r00_val = r00_last
+                z00_val = z00_last
+                wb_val = wb_last
+                wp_val = wp_last
+            r00_last = float(r00_val)
+            z00_last = float(z00_val)
+            wb_last = float(wb_val)
+            wp_last = float(wp_val)
+            w_vmec_last = (wb_last + wp_last / (gamma - 1.0)) * float(TWOPI * TWOPI)
+            if track_history:
+                r00_history.append(r00_last)
+                z00_history.append(z00_last)
+                wb_history.append(wb_last)
+                wp_history.append(wp_last)
+                w_vmec_history.append(w_vmec_last)
     
             if verbose and (not (bool(vmec2000_control) and bool(verbose_vmec2000_table))):
                 print(
@@ -8092,9 +8234,9 @@ def solve_fixed_boundary_residual_iter(
                         fsqz1=fsqz1_f,
                         fsql1=fsql1_f,
                         delt0r=float(time_step),
-                        r00=float(r00_val),
-                        w_mhd=float(w_vmec_history[-1]),
-                        z00=float(z00_val),
+                        r00=float(r00_last),
+                        w_mhd=float(w_vmec_last),
+                        z00=float(z00_last),
                     )
                 converged = True
                 break
@@ -8407,15 +8549,16 @@ def solve_fixed_boundary_residual_iter(
                 gcl2_p,
             )
             fsq1 = fsqr1_f + fsqz1_f + fsql1_f
-            rz_norm_history.append(rz_norm_f)
-            f_norm1_history.append(f_norm1_f)
-            gcr2_p_history.append(gcr2_p_f)
-            gcz2_p_history.append(gcz2_p_f)
-            gcl2_p_history.append(gcl2_p_f)
-            fsq1_history.append(fsq1)
-            fsqr1_history.append(fsqr1_f)
-            fsqz1_history.append(fsqz1_f)
-            fsql1_history.append(fsql1_f)
+            if track_history:
+                rz_norm_history.append(rz_norm_f)
+                f_norm1_history.append(f_norm1_f)
+                gcr2_p_history.append(gcr2_p_f)
+                gcz2_p_history.append(gcz2_p_f)
+                gcl2_p_history.append(gcl2_p_f)
+                fsq1_history.append(fsq1)
+                fsqr1_history.append(fsqr1_f)
+                fsqz1_history.append(fsqz1_f)
+                fsql1_history.append(fsql1_f)
 
             # Jacobian sign-change check (VMEC jacobian.f sets irst=2).
             bad_jacobian = False
@@ -8498,9 +8641,10 @@ def solve_fixed_boundary_residual_iter(
                 )
 
                 if np.isfinite(min_tau) and np.isfinite(max_tau):
-                    min_tau_history.append(min_tau)
-                    max_tau_history.append(max_tau)
-                    bad_jacobian_history.append(int(bool(bad_jacobian)))
+                    if track_history:
+                        min_tau_history.append(min_tau)
+                        max_tau_history.append(max_tau)
+                        bad_jacobian_history.append(int(bool(bad_jacobian)))
                     if bad_jacobian and os.getenv("VMEC_JAX_DUMP_BADJAC", "") not in ("", "0"):
                         dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
                         if dump_dir:
@@ -8513,13 +8657,15 @@ def solve_fixed_boundary_residual_iter(
                             except Exception:
                                 pass
                 else:
+                    if track_history:
+                        min_tau_history.append(float("nan"))
+                        max_tau_history.append(float("nan"))
+                        bad_jacobian_history.append(0)
+            else:
+                if track_history:
                     min_tau_history.append(float("nan"))
                     max_tau_history.append(float("nan"))
                     bad_jacobian_history.append(0)
-            else:
-                min_tau_history.append(float("nan"))
-                max_tau_history.append(float("nan"))
-                bad_jacobian_history.append(0)
 
             # VMEC eqsolve: after the first evolve step, if the Jacobian is bad
             # and ijacob==0, retry with an improved axis guess.
@@ -8706,23 +8852,26 @@ def solve_fixed_boundary_residual_iter(
                     cache_prec_faclam = None
                     cache_prec_lam_debug = None
                     force_bcovar_update = True
-                    step_history.append(0.0)
-                    dt_eff_history.append(0.0)
-                    update_rms_history.append(0.0)
-                    w_curr_history.append(float(fsqr_f + fsqz_f + fsql_f))
-                    w_try_history.append(float("nan"))
-                    w_try_ratio_history.append(float("nan"))
-                    restart_path_history.append("vmec2000_bad_jacobian" if irst_tc == 2 else "vmec2000_time_control")
-                    step_status_history.append(step_status)
-                    restart_reason_history.append(restart_reason)
-                    pre_restart_reason_history.append(pre_restart_reason)
-                    time_step_history.append(float(time_step))
-                    res0_history.append(float(res0))
-                    res1_history.append(float(res1))
-                    fsq_prev_history.append(float(fsq_prev))
-                    bad_growth_streak_history.append(int(bad_growth_streak))
-                    iter1_history.append(int(iter1))
-                    grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
+                    if track_history:
+                        step_history.append(0.0)
+                        dt_eff_history.append(0.0)
+                        update_rms_history.append(0.0)
+                        w_curr_history.append(float(fsqr_f + fsqz_f + fsql_f))
+                        w_try_history.append(float("nan"))
+                        w_try_ratio_history.append(float("nan"))
+                        restart_path_history.append(
+                            "vmec2000_bad_jacobian" if irst_tc == 2 else "vmec2000_time_control"
+                        )
+                        step_status_history.append(step_status)
+                        restart_reason_history.append(restart_reason)
+                        pre_restart_reason_history.append(pre_restart_reason)
+                        time_step_history.append(float(time_step))
+                        res0_history.append(float(res0))
+                        res1_history.append(float(res1))
+                        fsq_prev_history.append(float(fsq_prev))
+                        bad_growth_streak_history.append(int(bad_growth_streak))
+                        iter1_history.append(int(iter1))
+                        grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
                     _pop_iteration_histories()
                     prev_rz_fsq = prev_rz_fsq_before
                     skip_time_control = True
@@ -8879,23 +9028,24 @@ def solve_fixed_boundary_residual_iter(
                     cache_prec_faclam = None
                     cache_prec_lam_debug = None
                     force_bcovar_update = True
-                step_history.append(0.0)
-                dt_eff_history.append(0.0)
-                update_rms_history.append(0.0)
-                w_curr_history.append(float(fsqr_f + fsqz_f + fsql_f))
-                w_try_history.append(float("nan"))
-                w_try_ratio_history.append(float("nan"))
-                restart_path_history.append("pre_restart_trigger")
-                step_status_history.append(step_status)
-                restart_reason_history.append(pre_restart_reason)
-                pre_restart_reason_history.append(pre_restart_reason)
-                time_step_history.append(time_step_iter)
-                res0_history.append(float(res0))
-                res1_history.append(float(res1))
-                fsq_prev_history.append(float(fsq_prev))
-                bad_growth_streak_history.append(int(bad_growth_streak))
-                iter1_history.append(int(iter1))
-                grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
+                if track_history:
+                    step_history.append(0.0)
+                    dt_eff_history.append(0.0)
+                    update_rms_history.append(0.0)
+                    w_curr_history.append(float(fsqr_f + fsqz_f + fsql_f))
+                    w_try_history.append(float("nan"))
+                    w_try_ratio_history.append(float("nan"))
+                    restart_path_history.append("pre_restart_trigger")
+                    step_status_history.append(step_status)
+                    restart_reason_history.append(pre_restart_reason)
+                    pre_restart_reason_history.append(pre_restart_reason)
+                    time_step_history.append(time_step_iter)
+                    res0_history.append(float(res0))
+                    res1_history.append(float(res1))
+                    fsq_prev_history.append(float(fsq_prev))
+                    bad_growth_streak_history.append(int(bad_growth_streak))
+                    iter1_history.append(int(iter1))
+                    grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
                 if verbose:
                     if bool(vmec2000_control) and bool(verbose_vmec2000_table):
                         # VMEC does not print rejected restart steps.
@@ -9347,11 +9497,12 @@ def solve_fixed_boundary_residual_iter(
                     pass
                 timing_stats["update"] += time.perf_counter() - float(t_update_start)
             timing_stats["iterations"] += 1
-            step_history.append(float(dt_eff))
-            w_curr_history.append(float(w_curr))
-            w_try_history.append(float(w_try))
-            w_try_ratio_history.append(float(w_try_ratio))
-            restart_path_history.append(str(restart_path))
+            if track_history:
+                step_history.append(float(dt_eff))
+                w_curr_history.append(float(w_curr))
+                w_try_history.append(float(w_try))
+                w_try_ratio_history.append(float(w_try_ratio))
+                restart_path_history.append(str(restart_path))
         else:
             accepted = False
             step_status = "rejected"
@@ -9455,12 +9606,13 @@ def solve_fixed_boundary_residual_iter(
                 update_rms = 0.0
                 step_status = "rejected"
             timing_stats["iterations"] += 1
-            step_history.append(dt_eff)
-            restart_reason = "none"
-            w_curr_history.append(float(w_curr))
-            w_try_history.append(float("nan"))
-            w_try_ratio_history.append(float("nan"))
-            restart_path_history.append("non_strict")
+            if track_history:
+                step_history.append(dt_eff)
+                restart_reason = "none"
+                w_curr_history.append(float(w_curr))
+                w_try_history.append(float("nan"))
+                w_try_ratio_history.append(float("nan"))
+                restart_path_history.append("non_strict")
         _maybe_dump_xc(
             state=state,
             vRcc=vRcc,
@@ -9472,8 +9624,9 @@ def solve_fixed_boundary_residual_iter(
             static=static,
             iter_idx=int(iter2),
         )
-        dt_eff_history.append(float(dt_eff))
-        update_rms_history.append(float(update_rms))
+        if track_history:
+            dt_eff_history.append(float(dt_eff))
+            update_rms_history.append(float(update_rms))
         if verbose:
             if bool(vmec2000_control) and bool(verbose_vmec2000_table):
                 if _should_print_vmec2000(int(iter2), int(max_iter)):
@@ -9486,9 +9639,9 @@ def solve_fixed_boundary_residual_iter(
                         fsqz1=fsqz1_f,
                         fsql1=fsql1_f,
                         delt0r=float(time_step),
-                        r00=float(r00_val),
-                        w_mhd=float(w_vmec_history[-1]),
-                        z00=float(z00_val),
+                        r00=float(r00_last),
+                        w_mhd=float(w_vmec_last),
+                        z00=float(z00_last),
                     )
             else:
                 print(
@@ -9498,16 +9651,17 @@ def solve_fixed_boundary_residual_iter(
                     f"step_status={step_status}",
                     flush=True,
                 )
-        step_status_history.append(step_status)
-        restart_reason_history.append(restart_reason)
-        pre_restart_reason_history.append(pre_restart_reason)
-        time_step_history.append(float(time_step))
-        res0_history.append(float(res0))
-        res1_history.append(float(res1))
-        fsq_prev_history.append(float(fsq_prev))
-        bad_growth_streak_history.append(int(bad_growth_streak))
-        iter1_history.append(int(iter1))
-        grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
+        if track_history:
+            step_status_history.append(step_status)
+            restart_reason_history.append(restart_reason)
+            pre_restart_reason_history.append(pre_restart_reason)
+            time_step_history.append(float(time_step))
+            res0_history.append(float(res0))
+            res1_history.append(float(res1))
+            fsq_prev_history.append(float(fsq_prev))
+            bad_growth_streak_history.append(int(bad_growth_streak))
+            iter1_history.append(int(iter1))
+            grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
         skip_time_control = False
 
     diag: Dict[str, Any] = {
@@ -9524,6 +9678,7 @@ def solve_fixed_boundary_residual_iter(
         "converged": bool(converged),
         "badjac_use_state": bool(badjac_use_state),
         "badjac_mode": badjac_mode,
+        "light_history": bool(light_history),
         "ijacob": int(ijacob),
         "bad_resets": int(bad_resets),
         "iter1_final": int(iter1),
