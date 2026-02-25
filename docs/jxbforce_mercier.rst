@@ -191,6 +191,30 @@ The relevant ``vmec_jax`` code paths are:
   - jxbforce-style low-pass filter and reconstruction,
   - Mercier and ``jdotb`` assembly.
 
+Performance Notes (vmec_jax vs VMEC2000)
+----------------------------------------
+
+VMEC2000 implements these diagnostics in Fortran with explicit loops over
+``(m,n)`` modes and over the reduced ``(theta,zeta)`` grid. For parity work,
+``vmec_jax`` originally mirrored this ordering closely, including Python-level
+loop nests for some cancellation-sensitive sums. That path is useful for
+debugging, but it is **too slow** to be a good default.
+
+Today, ``vmec_jax`` uses **vectorized NumPy contractions** (``einsum``) for the
+``wrout``-style Nyquist analysis and the ``jxbforce`` filter by default. These
+vectorized paths preserve the VMEC2000 discretization but may change floating
+point summation order slightly.
+
+If you need the slow loop order for debugging, the following env vars switch
+back to explicit loops:
+
+- ``VMEC_JAX_WROUT_LOOP=1``: use loop-based ``wrout`` Nyquist analysis.
+- ``VMEC_JAX_JXBFORCE_LOOP=1``: use loop-based ``jxbforce`` reconstruction of
+  ``bsubsu/bsubsv``.
+- ``VMEC_JAX_BSUB_FILTER_LOOP=1``: use loop-based ``jxbforce`` low-pass filter.
+- ``VMEC_JAX_MERCIER_EXACT_SUM=1``: use explicit ``theta/zeta`` summation order
+  in Mercier surface averages.
+
 The reference VMEC2000 implementations are:
 
 - ``bcovar.f`` (odd-channel storage convention for ``IEQUI=1`` outputs)
@@ -210,4 +234,3 @@ These figures were generated from VMEC-style ``wout_*.nc`` files using:
      --vars jdotb,DMerc \
      --axis-skip 6 --drop-edge \
      --out docs/_static/figures/case_jdotb_dmerc_parity.png
-
