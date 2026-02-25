@@ -3138,6 +3138,16 @@ def solve_fixed_boundary_residual_iter(
     if not has_jax():
         raise ImportError("solve_fixed_boundary_residual_iter requires JAX (jax + jaxlib)")
 
+    def _device_get_floats(*vals):
+        """Batch host materialization for scalar diagnostics.
+
+        In the VMEC2000 parity (non-scan) loop we still need host scalars to
+        drive Python control flow (TimeStepControl / restarts / printing).
+        Pulling them one-by-one forces repeated synchronization; batch them.
+        """
+
+        return tuple(float(v) for v in jax.device_get(vals))
+
     max_iter = int(max_iter)
     precompile_only = bool(precompile_only)
     if max_iter < 1 and not precompile_only:
@@ -5680,8 +5690,15 @@ def solve_fixed_boundary_residual_iter(
                 def _timecontrol_update(_):
                     res0_tc = jnp.where(init_mask, fsq_res, carry_adv.res0)
                     res1_tc = jnp.where(init_mask, fsq_phys, carry_adv.res1)
-                    state_checkpoint_tc = jax.tree_util.tree_map(
-                        lambda a, b: jnp.where(init_mask, a, b), carry_adv.state, carry_adv.state_checkpoint
+                    # Important for scan performance: avoid element-wise `where`
+                    # over the full state arrays. VMEC-style checkpointing is a
+                    # discrete choice (keep old checkpoint vs overwrite with
+                    # current state), so model it as a conditional.
+                    state_checkpoint_tc = jax.lax.cond(
+                        init_mask,
+                        lambda _: carry_adv.state,
+                        lambda _: carry_adv.state_checkpoint,
+                        operand=None,
                     )
                     if bool(vmec2000_control):
                         res0_tc = jnp.minimum(res0_tc, fsq)
@@ -5714,8 +5731,11 @@ def solve_fixed_boundary_residual_iter(
                             irst=jnp.asarray(1, dtype=jnp.int32),
                         )
                     checkpoint_mask_tc = (fsq <= res0_tc) & (fsq_phys <= res1_tc) & (~bad_jacobian)
-                    state_checkpoint_tc = jax.tree_util.tree_map(
-                        lambda a, b: jnp.where(checkpoint_mask_tc, a, b), carry_adv.state, state_checkpoint_tc
+                    state_checkpoint_tc = jax.lax.cond(
+                        checkpoint_mask_tc,
+                        lambda _: carry_adv.state,
+                        lambda _: state_checkpoint_tc,
+                        operand=None,
                     )
                     fsqr_checkpoint_tc = jnp.where(checkpoint_mask_tc, fsqr, carry_adv.fsqr_checkpoint)
                     fsqz_checkpoint_tc = jnp.where(checkpoint_mask_tc, fsqz, carry_adv.fsqz_checkpoint)
@@ -7887,11 +7907,15 @@ def solve_fixed_boundary_residual_iter(
                 # VMEC2000 `constrain_m1` logic (residue.f90):
                 #   zero gcz(m=1) if (fsqz_prev < 1e-6) OR (iter2 < 2).
                 fsqz_prev = float(fsqz2_history[-1]) if fsqz2_history else 1.0
-                zero_m1 = 1.0 if (iter2 < 2) or (fsqz_prev < 1.0e-6) else 0.0
+                zero_m1_val = 1.0 if (iter2 < 2) or (fsqz_prev < 1.0e-6) else 0.0
             else:
                 # A conservative heuristic early in a restart window.
-                zero_m1 = 1.0 if (iter_since_restart < 2) or (len(fsqz2_history) and fsqz2_history[-1] < 1e-6) else 0.0
-            zero_m1 = jnp.asarray(zero_m1, dtype=jnp.asarray(state.Rcos).dtype)
+                zero_m1_val = (
+                    1.0
+                    if (iter_since_restart < 2) or (len(fsqz2_history) and fsqz2_history[-1] < 1e-6)
+                    else 0.0
+                )
+            zero_m1 = jnp.asarray(zero_m1_val, dtype=jnp.asarray(state.Rcos).dtype)
             if vmec2000_control:
                 # VMEC2000 fixed-boundary residuals do not include the edge
                 # surface in the force pipeline; keep this disabled for parity.
@@ -7899,7 +7923,9 @@ def solve_fixed_boundary_residual_iter(
             else:
                 include_edge = bool(iter_since_restart < 50) and (float(prev_rz_fsq) < 1e-6)
             include_edge_history.append(int(bool(include_edge)))
-            zero_m1_history.append(int(float(np.asarray(zero_m1)) > 0.5))
+            # `zero_m1` originates from host control flow, so keep the history
+            # without forcing an unnecessary device synchronization.
+            zero_m1_history.append(int(zero_m1_val > 0.5))
     
             need_bcovar_update = bool(vmec2000_control) and (
                 (not bool(vmec2000_cache_valid))
@@ -7989,9 +8015,7 @@ def solve_fixed_boundary_residual_iter(
                     cache_prec_rz_mats = mats
                     cache_prec_rz_jmax = int(jmax)
                 vmec2000_cache_valid = True
-            fsqr_f = float(np.asarray(fsqr))
-            fsqz_f = float(np.asarray(fsqz))
-            fsql_f = float(np.asarray(fsql))
+            fsqr_f, fsqz_f, fsql_f = _device_get_floats(fsqr, fsqz, fsql)
             fsq0_curr = fsqr_f + fsqz_f + fsql_f
             prev_rz_fsq_before = prev_rz_fsq
             prev_rz_fsq = fsqr_f + fsqz_f
@@ -8022,20 +8046,17 @@ def solve_fixed_boundary_residual_iter(
                             z00_j = jnp.sum(jnp.asarray(state.Zcos)[0, m0_mask])
                         else:
                             z00_j = jnp.asarray(0.0, dtype=jnp.asarray(r00_j).dtype)
-                r00_val = float(np.asarray(r00_j))
-                z00_val = float(np.asarray(z00_j))
-                if bool(vmec2000_control):
-                    # Match VMEC's printed precision (E11.3) for parity checks.
-                    r00_val = float(f"{float(r00_val):.3E}")
-                    z00_val = float(f"{float(z00_val):.3E}")
                 # `norms_used` may be cached (VMEC2000 `ns4=25` behavior). VMEC's
                 # printed WMHD uses the *current* wb/wp from `funct3d`, not cached
                 # norm scalars. Recompute wb/wp from the current bcovar state here.
                 norms_w = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs)
                 wb_j = jnp.asarray(norms_w.wb)
                 wp_j = jnp.asarray(norms_w.wp)
-                wb_val = float(np.asarray(wb_j))
-                wp_val = float(np.asarray(wp_j))
+                r00_val, z00_val, wb_val, wp_val = _device_get_floats(r00_j, z00_j, wb_j, wp_j)
+                if bool(vmec2000_control):
+                    # Match VMEC's printed precision (E11.3) for parity checks.
+                    r00_val = float(f"{float(r00_val):.3E}")
+                    z00_val = float(f"{float(z00_val):.3E}")
             else:
                 r00_val = r00_history[-1] if r00_history else float("nan")
                 z00_val = z00_history[-1] if z00_history else float("nan")
@@ -8367,15 +8388,31 @@ def solve_fixed_boundary_residual_iter(
                     static=static,
                     iter_idx=int(iter2),
                 )
-            fsqr1_f = float(np.asarray(fsqr1))
-            fsqz1_f = float(np.asarray(fsqz1))
-            fsql1_f = float(np.asarray(fsql1))
+            (
+                fsqr1_f,
+                fsqz1_f,
+                fsql1_f,
+                rz_norm_f,
+                f_norm1_f,
+                gcr2_p_f,
+                gcz2_p_f,
+                gcl2_p_f,
+            ) = _device_get_floats(
+                fsqr1,
+                fsqz1,
+                fsql1,
+                rz_norm,
+                f_norm1,
+                gcr2_p,
+                gcz2_p,
+                gcl2_p,
+            )
             fsq1 = fsqr1_f + fsqz1_f + fsql1_f
-            rz_norm_history.append(float(np.asarray(rz_norm)))
-            f_norm1_history.append(float(np.asarray(f_norm1)))
-            gcr2_p_history.append(float(np.asarray(gcr2_p)))
-            gcz2_p_history.append(float(np.asarray(gcz2_p)))
-            gcl2_p_history.append(float(np.asarray(gcl2_p)))
+            rz_norm_history.append(rz_norm_f)
+            f_norm1_history.append(f_norm1_f)
+            gcr2_p_history.append(gcr2_p_f)
+            gcz2_p_history.append(gcz2_p_f)
+            gcl2_p_history.append(gcl2_p_f)
             fsq1_history.append(fsq1)
             fsqr1_history.append(fsqr1_f)
             fsqz1_history.append(fsqz1_f)
