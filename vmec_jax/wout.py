@@ -13,6 +13,7 @@ from typing import Any, Dict
 
 import numpy as np
 
+from ._compat import has_jax, jax
 from .modes import vmec_mode_table
 from .modes import nyquist_mode_table, nyquist_mode_table_from_grid
 from .namelist import InData
@@ -2935,6 +2936,11 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
 
     # Use VMEC-like dimension names for better interoperability with external tools.
     with netCDF4.Dataset(path, mode="w", format="NETCDF3_CLASSIC") as ds:
+        # Avoid pre-filling data to speed up large writes.
+        try:
+            ds.set_fill_off()
+        except Exception:
+            pass
         ds.createDimension("radius", ns)
         ds.createDimension("mn_mode", mnmax)
         ds.createDimension("mn_mode_nyq", mnmax_nyq)
@@ -3153,6 +3159,11 @@ def wout_minimal_from_fixed_boundary(
     if wout_timing_enabled:
         t0 = _time.perf_counter()
     geom = vmec_realspace_geom_from_state(state=state, modes=static.modes, trig=trig)
+    if has_jax():
+        try:
+            geom = jax.device_get(geom)
+        except Exception:
+            pass
     geom = {k: (None if v is None else np.asarray(v)) for k, v in geom.items()}
     if wout_timing_enabled:
         wout_timing["geom_synthesis_s"] = _time.perf_counter() - t0
@@ -3377,6 +3388,11 @@ def wout_minimal_from_fixed_boundary(
         use_vmec_synthesis=True,
         trig=trig,
     )
+    if has_jax():
+        try:
+            k_force = jax.device_get(k_force)
+        except Exception:
+            pass
     if wout_timing_enabled:
         wout_timing["forces_bcovar_s"] = _time.perf_counter() - t0
     bc = k_force.bc
@@ -3422,6 +3438,11 @@ def wout_minimal_from_fixed_boundary(
 
     # Derived 1D profiles and scalars.
     norms = vmec_force_norms_from_bcovar_dynamic(bc=bc, trig=trig, s=s, signgs=int(signgs))
+    if has_jax():
+        try:
+            norms = jax.device_get(norms)
+        except Exception:
+            pass
     vp = np.asarray(norms.vp, dtype=float)
     wb = float(np.asarray(norms.wb))
     wp = float(np.asarray(norms.wp))
