@@ -66,6 +66,10 @@ class VmecHalfMeshBcovar:
     bsupv: Any  # (ns, ntheta, nzeta)
     bsubu: Any  # (ns, ntheta, nzeta)
     bsubv: Any  # (ns, ntheta, nzeta)
+    bsubu_parity_even: Any  # (ns, ntheta, nzeta) half-mesh even-m channel
+    bsubu_parity_odd: Any  # (ns, ntheta, nzeta) half-mesh odd-m internal channel
+    bsubv_parity_even: Any  # (ns, ntheta, nzeta) half-mesh even-m channel
+    bsubv_parity_odd: Any  # (ns, ntheta, nzeta) half-mesh odd-m internal channel
 
     # VMEC lambda force kernels (Fourier-space transform inputs) on full mesh.
     # These correspond to `bsubu_e/bsubv_e` in `bcovar.f` after the `-lamscale`
@@ -120,6 +124,10 @@ class VmecHalfMeshBcovar:
             self.bsupv,
             self.bsubu,
             self.bsubv,
+            self.bsubu_parity_even,
+            self.bsubu_parity_odd,
+            self.bsubv_parity_even,
+            self.bsubv_parity_odd,
             self.bsubu_e,
             self.bsubv_e,
             self.bsubu_e_scaled,
@@ -581,12 +589,29 @@ def vmec_bcovar_half_mesh_from_wout(
     R2_e = parity.R_even * parity.R_even + ss * (R1 * R1)
     R2_o = 2.0 * parity.R_even * R1
 
+    gvv_e_total = gvv_e + R2_e
+    gvv_o_total = gvv_o + R2_o
+
     guu = _half_mesh_from_even_odd(guu_e, guu_o, s=s)
     guv = _half_mesh_from_even_odd(guv_e, guv_o, s=s)
-    gvv = _half_mesh_from_even_odd(gvv_e, gvv_o, s=s) + _half_mesh_from_even_odd(R2_e, R2_o, s=s)
+    gvv = _half_mesh_from_even_odd(gvv_e_total, gvv_o_total, s=s)
     if ns >= 1:
         guv = guv.at[0].set(jnp.zeros_like(guv[0]))
         gvv = gvv.at[0].set(jnp.zeros_like(gvv[0]))
+
+    def _half_even_odd_full(e_full, o_full):
+        e_half = jnp.zeros_like(guu)
+        o_half = jnp.zeros_like(guu)
+        if ns >= 2:
+            e_half = e_half.at[1:].set(0.5 * (e_full[1:] + e_full[:-1]))
+            o_half = o_half.at[1:].set(0.5 * (o_full[1:] + o_full[:-1]))
+            e_half = e_half.at[0].set(e_half[1])
+            o_half = o_half.at[0].set(o_half[1])
+        return e_half, o_half
+
+    guu_eh, guu_oh = _half_even_odd_full(guu_e, guu_o)
+    guv_eh, guv_oh = _half_even_odd_full(guv_e, guv_o)
+    gvv_eh, gvv_oh = _half_even_odd_full(gvv_e_total, gvv_o_total)
 
     # Lambda derivatives on half mesh (scaled lambda).
     lam_u = _half_mesh_from_even_odd(parity.Lt_even, Lu1, s=s)
@@ -663,14 +688,23 @@ def vmec_bcovar_half_mesh_from_wout(
     # Radial full->half average (Fortran: for l=2..ns).
     bsupu = jnp.zeros_like(jac.sqrtg)
     bsupv = jnp.zeros_like(jac.sqrtg)
+    bsupu_even = jnp.zeros_like(jac.sqrtg)
+    bsupu_odd = jnp.zeros_like(jac.sqrtg)
+    bsupv_even = jnp.zeros_like(jac.sqrtg)
+    bsupv_odd = jnp.zeros_like(jac.sqrtg)
     if ns >= 2:
         avg_lu0 = lu0_full[1:] + lu0_full[:-1]
         avg_lu1 = lu1_full[1:] + lu1_full[:-1]
         avg_lv0 = lv0_full[1:] + lv0_full[:-1]
         avg_lv1 = lv1_full[1:] + lv1_full[:-1]
 
-        bsupv = bsupv.at[1:].set(0.5 * overg[1:] * (avg_lu0 + pshalf[1:] * avg_lu1))
-        bsupu = bsupu.at[1:].set(0.5 * overg[1:] * (avg_lv0 + pshalf[1:] * avg_lv1))
+        bsupv_even = bsupv_even.at[1:].set(0.5 * overg[1:] * avg_lu0)
+        bsupv_odd = bsupv_odd.at[1:].set(0.5 * overg[1:] * avg_lu1)
+        bsupu_even = bsupu_even.at[1:].set(0.5 * overg[1:] * avg_lv0)
+        bsupu_odd = bsupu_odd.at[1:].set(0.5 * overg[1:] * avg_lv1)
+
+        bsupv = bsupv_even + pshalf * bsupv_odd
+        bsupu = bsupu_even + pshalf * bsupu_odd
 
     if (ncurr == 1) and lcurrent and (ns >= 2):
         # VMEC's add_fluxes computes chips using bsup in VMEC orientation.
@@ -691,6 +725,7 @@ def vmec_bcovar_half_mesh_from_wout(
     # `add_fluxes`: VMEC updates `bsupu` in VMEC orientation:
     #   bsupu <- bsupu + chips*overg.
     chip_term = jnp.asarray(chips_eff)[:, None, None] * overg
+    bsupu_even = bsupu_even + chip_term
     bsupu = bsupu + chip_term
 
     basis_nyq = None
@@ -715,14 +750,47 @@ def vmec_bcovar_half_mesh_from_wout(
         basis_nyq = nyquist_basis_from_wout(wout=wout, grid=_nyq_grid())
         bsupu = jnp.asarray(eval_fourier(wout.bsupumnc, wout.bsupumns, basis_nyq))
         bsupv = jnp.asarray(eval_fourier(wout.bsupvmnc, wout.bsupvmns, basis_nyq))
+        bsupu_even = bsupu
+        bsupv_even = bsupv
+        bsupu_odd = jnp.zeros_like(bsupu)
+        bsupv_odd = jnp.zeros_like(bsupv)
 
     # VMEC enforces axis bsup*=0 explicitly.
     if ns >= 1:
         bsupu = bsupu.at[0].set(jnp.zeros_like(bsupu[0]))
         bsupv = bsupv.at[0].set(jnp.zeros_like(bsupv[0]))
+        bsupu_even = bsupu_even.at[0].set(jnp.zeros_like(bsupu_even[0]))
+        bsupv_even = bsupv_even.at[0].set(jnp.zeros_like(bsupv_even[0]))
+        bsupu_odd = bsupu_odd.at[0].set(jnp.zeros_like(bsupu_odd[0]))
+        bsupv_odd = bsupv_odd.at[0].set(jnp.zeros_like(bsupv_odd[0]))
 
     bsubu = guu * bsupu + guv * bsupv
     bsubv = guv * bsupu + gvv * bsupv
+    s_half = pshalf * pshalf
+    bsubu_parity_even = (
+        guu_eh * bsupu_even
+        + s_half * guu_oh * bsupu_odd
+        + guv_eh * bsupv_even
+        + s_half * guv_oh * bsupv_odd
+    )
+    bsubu_parity_odd = (
+        guu_eh * bsupu_odd
+        + guu_oh * bsupu_even
+        + guv_eh * bsupv_odd
+        + guv_oh * bsupv_even
+    )
+    bsubv_parity_even = (
+        guv_eh * bsupu_even
+        + s_half * guv_oh * bsupu_odd
+        + gvv_eh * bsupv_even
+        + s_half * gvv_oh * bsupv_odd
+    )
+    bsubv_parity_odd = (
+        guv_eh * bsupu_odd
+        + guv_oh * bsupu_even
+        + gvv_eh * bsupv_odd
+        + gvv_oh * bsupv_even
+    )
 
     # Optional reference parity path for lambda-force kernels.
     bsubu_lambda = bsubu
@@ -858,6 +926,10 @@ def vmec_bcovar_half_mesh_from_wout(
         bsupv=bsupv,
         bsubu=bsubu,
         bsubv=bsubv,
+        bsubu_parity_even=bsubu_parity_even,
+        bsubu_parity_odd=bsubu_parity_odd,
+        bsubv_parity_even=bsubv_parity_even,
+        bsubv_parity_odd=bsubv_parity_odd,
         bsubu_e=bsubu_e,
         bsubv_e=bsubv_e,
         bsubu_e_scaled=bsubu_e_scaled,

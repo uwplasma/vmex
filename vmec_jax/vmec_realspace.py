@@ -258,8 +258,10 @@ def vmec_realspace_synthesis(
         coeff_cos = coeff_cos * scale.reshape(scale_shape)
         coeff_sin = coeff_sin * scale.reshape(scale_shape)
 
-    # Optional odd-m scaling hook (kept for experiments); VMEC does not apply
-    # scalxc during geometry synthesis, so this should remain False for parity.
+    # Optional odd-m scaling hook. VMEC's `totzsp` uses coefficients that already
+    # include the 1/sqrt(s) odd-m scaling; apply this when synthesizing from
+    # internal VMEC coefficients. For external (wout-style) coefficients, keep
+    # this False.
     if bool(apply_scalxc):
         ns = int(coeff_cos.shape[-2])
         if s is None:

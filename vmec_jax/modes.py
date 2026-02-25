@@ -84,6 +84,32 @@ def nyquist_mode_table(mpol: int, ntor: int) -> ModeTable:
     return _nyquist_mode_table_cached(int(abs(mpol)), int(abs(ntor)))
 
 
+def nyquist_mode_table_from_grid(*, mpol: int, ntor: int, ntheta: int, nzeta: int) -> ModeTable:
+    """Create a VMEC-style Nyquist mode table using the angular grid sizes.
+
+    VMEC derives Nyquist limits from the angular grid (fixaray.f):
+
+    - mnyq = max(ntheta1/2, mpol-1)
+    - nnyq = max(nzeta/2, ntor)
+
+    where ntheta1 = 2*(ntheta//2).
+    """
+    mpol = int(abs(mpol))
+    ntor = int(abs(ntor))
+    ntheta1 = 2 * (int(ntheta) // 2)
+    mnyq = max(ntheta1 // 2, max(mpol - 1, 0))
+    nnyq = max(int(nzeta) // 2, max(ntor, 0))
+
+    ms = []
+    ns = []
+    for m in range(0, mnyq + 1):
+        nmin = 0 if m == 0 else -nnyq
+        for n in range(nmin, nnyq + 1):
+            ms.append(m)
+            ns.append(n)
+    return ModeTable(m=np.asarray(ms, dtype=int), n=np.asarray(ns, dtype=int))
+
+
 def default_grid_sizes(mpol: int, ntor: int, ntheta: int = 0, nzeta: int = 0) -> Tuple[int, int]:
     """Match VMEC defaults in initialize_vmec_arrays.f."""
     mpol = int(abs(mpol))

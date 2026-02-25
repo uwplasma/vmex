@@ -78,6 +78,26 @@ def _pshalf_from_s(s: Any) -> Any:
     return jnp.sqrt(jnp.maximum(p, 0.0))
 
 
+def _apply_vmec_axis_rules(coeff: Any, m: Any) -> Any:
+    """Apply VMEC's jmin1 axis rules to Fourier coefficients.
+
+    VMEC's `totzsp_mod` enforces:
+      - m=1: copy js=2 to js=1 (origin extrapolation),
+      - m>=2: axis contributions are zero (jmin1=2).
+    """
+    coeff = jnp.asarray(coeff)
+    if coeff.shape[0] < 2:
+        return coeff
+    m = jnp.asarray(m)
+    c0 = coeff[0]
+    c1 = coeff[1]
+    m1_mask = (m == 1)
+    mge2_mask = (m >= 2)
+    c0 = jnp.where(m1_mask, c1, c0)
+    c0 = jnp.where(mge2_mask, jnp.zeros_like(c0), c0)
+    return coeff.at[0].set(c0)
+
+
 def jacobian_half_mesh_from_parity(
     *,
     pr1_even,
@@ -191,12 +211,14 @@ def vmec_half_mesh_jacobian_from_state(
     s,
     lconm1: bool = True,
     lthreed: bool = True,
+    apply_m1_constraint: bool = True,
+    apply_scalxc: bool = True,
     mask_even: Any | None = None,
     mask_odd: Any | None = None,
 ) -> VmecHalfMeshJacobian:
     """Compute VMEC half-mesh Jacobian directly from Fourier coefficients."""
+    m = jnp.asarray(modes.m)
     if mask_even is None or mask_odd is None:
-        m = jnp.asarray(modes.m)
         mask_even = (m % 2) == 0
         mask_odd = jnp.logical_not(mask_even)
     else:
@@ -208,22 +230,29 @@ def vmec_half_mesh_jacobian_from_state(
     Zcos = jnp.asarray(state.Zcos)
     Zsin = jnp.asarray(state.Zsin)
 
-    # VMEC stores internal coefficients; undo the m=1 internal constraint before
-    # synthesis.
-    Rcos_int, Zsin_int, Rsin_int, Zcos_int = vmec_m1_internal_to_physical_signed(
-        Rcos=Rcos,
-        Zsin=Zsin,
-        Rsin=Rsin,
-        Zcos=Zcos,
-        modes=modes,
-        lthreed=bool(lthreed),
-        lasym=False,
-        lconm1=bool(lconm1),
-    )
-    Rcos = jnp.asarray(Rcos_int)
-    Rsin = jnp.asarray(Rsin_int)
-    Zcos = jnp.asarray(Zcos_int)
-    Zsin = jnp.asarray(Zsin_int)
+    if bool(apply_m1_constraint):
+        # VMEC stores internal coefficients; undo the m=1 internal constraint before
+        # synthesis when physical coefficients are required.
+        Rcos_int, Zsin_int, Rsin_int, Zcos_int = vmec_m1_internal_to_physical_signed(
+            Rcos=Rcos,
+            Zsin=Zsin,
+            Rsin=Rsin,
+            Zcos=Zcos,
+            modes=modes,
+            lthreed=bool(lthreed),
+            lasym=False,
+            lconm1=bool(lconm1),
+        )
+        Rcos = jnp.asarray(Rcos_int)
+        Rsin = jnp.asarray(Rsin_int)
+        Zcos = jnp.asarray(Zcos_int)
+        Zsin = jnp.asarray(Zsin_int)
+
+    # Apply VMEC's axis rules (jmin1) before real-space synthesis.
+    Rcos = _apply_vmec_axis_rules(Rcos, m)
+    Rsin = _apply_vmec_axis_rules(Rsin, m)
+    Zcos = _apply_vmec_axis_rules(Zcos, m)
+    Zsin = _apply_vmec_axis_rules(Zsin, m)
 
     mask_even_f = jnp.asarray(mask_even, dtype=Rcos.dtype)
     mask_odd_f = jnp.asarray(mask_odd, dtype=Rcos.dtype)
@@ -240,7 +269,7 @@ def vmec_half_mesh_jacobian_from_state(
             modes=modes,
             trig=trig,
             coeffs_internal=True,
-            apply_scalxc=True,
+            apply_scalxc=bool(apply_scalxc),
             s=s,
         )
 
@@ -253,7 +282,7 @@ def vmec_half_mesh_jacobian_from_state(
             modes=modes,
             trig=trig,
             coeffs_internal=True,
-            apply_scalxc=True,
+            apply_scalxc=bool(apply_scalxc),
             s=s,
         )
 

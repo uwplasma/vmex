@@ -148,13 +148,32 @@ def write_wout_from_fixed_boundary_run(
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    fsqt = None
+    converged = None
     if include_fsq:
         fsqr = fsqz = fsql = None
         res = getattr(run, "result", None)
         if res is not None:
+            converged = getattr(res, "diagnostics", {}).get("converged", None)
             fsqr_hist = getattr(res, "fsqr2_history", None)
             fsqz_hist = getattr(res, "fsqz2_history", None)
             fsql_hist = getattr(res, "fsql2_history", None)
+            if fsqr_hist is not None and fsqz_hist is not None:
+                fsqr_hist = np.asarray(fsqr_hist, dtype=float)
+                fsqz_hist = np.asarray(fsqz_hist, dtype=float)
+                fsqt_hist = fsqr_hist + fsqz_hist
+                nstore = 100
+                niter = int(fsqt_hist.size)
+                stride = int(niter // nstore) + 1 if niter > 0 else 1
+                fsqt = np.zeros((nstore,), dtype=float)
+                count = 0
+                for iter2 in range(1, niter + 1):
+                    if iter2 % stride != 0:
+                        continue
+                    fsqt[count] = float(fsqt_hist[iter2 - 1])
+                    count += 1
+                    if count >= nstore:
+                        break
             if fsqr_hist is not None and fsqz_hist is not None and fsql_hist is not None:
                 try:
                     fsqr = float(np.asarray(fsqr_hist)[-1])
@@ -178,6 +197,8 @@ def write_wout_from_fixed_boundary_run(
         fsqr=float(fsqr),
         fsqz=float(fsqz),
         fsql=float(fsql),
+        fsqt=fsqt,
+        converged=converged,
     )
     write_wout(path, wout, overwrite=True)
     return wout
@@ -476,12 +497,11 @@ def run_fixed_boundary(
         multigrid = solver_lower == "vmec2000_iter"
     if max_iter is _MAX_ITER_SENTINEL:
         if solver_lower == "vmec2000_iter":
-            if multigrid and multigrid_use_input_niter:
-                niter_list = _as_list(indata.get("NITER_ARRAY", None))
-                if niter_list:
-                    max_iter = int(sum(int(v) for v in niter_list))
-                else:
-                    max_iter = int(indata.get_int("NITER", 10))
+            niter_list = _as_list(indata.get("NITER_ARRAY", None))
+            if niter_list:
+                # VMEC2000 behavior: when NITER_ARRAY is present, it defines
+                # the stage budgets even if there is only one stage.
+                max_iter = int(sum(int(v) for v in niter_list))
             else:
                 max_iter = int(indata.get_int("NITER", 10))
         else:
@@ -511,16 +531,14 @@ def run_fixed_boundary(
         if ns_list:
             ns_stages = [int(v) for v in ns_list]
 
-    # When NITER_ARRAY is present and we are honoring input staging, treat it
-    # as the authoritative iteration count unless the caller overrides max_iter.
-    # This should apply even for single-grid runs (NS_ARRAY length == 1).
-    if multigrid_use_input_niter:
-        niter_list = _as_list(indata.get("NITER_ARRAY", None))
-        if niter_list:
-            niter_sum = int(sum(int(v) for v in niter_list))
-            niter_default = int(indata.get_int("NITER", max_iter))
-            if (not max_iter_overridden) and int(max_iter) == niter_default:
-                max_iter = niter_sum
+    # When NITER_ARRAY is present, treat it as the authoritative total unless
+    # the caller explicitly overrides max_iter.
+    niter_list = _as_list(indata.get("NITER_ARRAY", None))
+    if niter_list:
+        niter_sum = int(sum(int(v) for v in niter_list))
+        niter_default = int(indata.get_int("NITER", max_iter))
+        if (not max_iter_overridden) and int(max_iter) == niter_default:
+            max_iter = niter_sum
 
     # Precompute boundary coefficients without triggering JAX initialization.
     boundary_coeffs = None
@@ -760,13 +778,15 @@ def run_fixed_boundary(
 
         # Stage controls.
         nstep = len(ns_stages)
+        niter_array = indata.get("NITER_ARRAY", None)
+        ftol_array = indata.get("FTOL_ARRAY", None)
+        niter_list = _as_list(niter_array)
+        ftol_list = _as_list(ftol_array)
+        niter_stages_input = [int(v) for v in niter_list] if niter_list and len(niter_list) == nstep else None
+        ftol_stages_input = [float(v) for v in ftol_list] if ftol_list and len(ftol_list) == nstep else None
         if multigrid_use_input_niter:
-            niter_array = indata.get("NITER_ARRAY", None)
-            ftol_array = indata.get("FTOL_ARRAY", None)
-            niter_list = _as_list(niter_array)
-            ftol_list = _as_list(ftol_array)
-            niter_stages = [int(v) for v in niter_list] if niter_list and len(niter_list) == nstep else None
-            ftol_stages = [float(v) for v in ftol_list] if ftol_list and len(ftol_list) == nstep else None
+            niter_stages = niter_stages_input
+            ftol_stages = ftol_stages_input
             if niter_stages is None:
                 niter_stages = _distribute_iters(iters=int(max_iter), nstep=int(nstep))
             else:
@@ -806,7 +826,11 @@ def run_fixed_boundary(
                 ftol_stages = [float(indata.get_float("FTOL", 1e-13))] * nstep
         else:
             niter_stages = _distribute_iters(iters=int(max_iter), nstep=int(nstep))
-            ftol_stages = [float(indata.get_float("FTOL", 1e-13))] * nstep
+            # VMEC2000 uses FTOL_ARRAY when present, even for single-stage runs.
+            if ftol_stages_input is not None:
+                ftol_stages = ftol_stages_input
+            else:
+                ftol_stages = [float(indata.get_float("FTOL", 1e-13))] * nstep
 
         # Run coarse -> fine stages with VMEC `interp.f` interpolation.
         stage_results: list[SolveVmecResidualResult] = []

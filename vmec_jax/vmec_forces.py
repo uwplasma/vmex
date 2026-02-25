@@ -128,6 +128,10 @@ class VmecRZForceKernels:
     pru_odd: Any  # (ns, ntheta, nzeta)
     pzu_even: Any  # (ns, ntheta, nzeta)
     pzu_odd: Any  # (ns, ntheta, nzeta)
+    prv_even: Any  # (ns, ntheta, nzeta)
+    prv_odd: Any  # (ns, ntheta, nzeta)
+    pzv_even: Any  # (ns, ntheta, nzeta)
+    pzv_odd: Any  # (ns, ntheta, nzeta)
 
     # Optional diagnostic (set by constraint pipeline).
     tcon: Any | None = None  # (ns,)
@@ -160,6 +164,10 @@ class VmecRZForceKernels:
             self.pru_odd,
             self.pzu_even,
             self.pzu_odd,
+            self.prv_even,
+            self.prv_odd,
+            self.pzv_even,
+            self.pzv_odd,
             self.tcon,
         )
         return children, None
@@ -1070,6 +1078,10 @@ def vmec_forces_rz_from_wout(
         pru_odd=pru_1,
         pzu_even=pzu_0,
         pzu_odd=pzu_1,
+        prv_even=prv_0,
+        prv_odd=prv_1,
+        pzv_even=pzv_0,
+        pzv_odd=pzv_1,
     )
 
 
@@ -1407,6 +1419,10 @@ def vmec_forces_rz_from_wout_reference_fields(
         pru_odd=pru_1,
         pzu_even=pzu_0,
         pzu_odd=pzu_1,
+        prv_even=prv_0,
+        prv_odd=prv_1,
+        pzv_even=pzv_0,
+        pzv_odd=pzv_1,
     )
 
 

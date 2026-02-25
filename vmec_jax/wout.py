@@ -7,18 +7,2379 @@ It is meant for regression comparisons against VMEC2000 outputs.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Any, Dict
 
 import numpy as np
 
 from .modes import vmec_mode_table
-from .modes import nyquist_mode_table
+from .modes import nyquist_mode_table, nyquist_mode_table_from_grid
+from .namelist import InData
 from .state import StateLayout, VMECState
+from .fourier import eval_fourier
 from .vmec_parity import vmec_m1_internal_to_physical_signed, vmec_m1_physical_to_internal_signed
+from .vmec_realspace import (
+    vmec_realspace_synthesis,
+    vmec_realspace_synthesis_dtheta,
+    vmec_realspace_synthesis_dzeta_phys,
+    vmec_realspace_geom_from_state,
+)
+from .vmec_residue import vmec_pwint_from_trig
 
 
 MU0 = 4e-7 * np.pi  # N/A^2
+
+
+def _vmec_wint_from_trig(trig) -> np.ndarray:
+    """Return VMEC-style angular weights (wint) on the internal grid."""
+    cosmui3 = np.asarray(trig.cosmui3)
+    mscale = np.asarray(trig.mscale)
+    if cosmui3.ndim != 2:
+        raise ValueError("Expected trig.cosmui3 with shape (ntheta3, mmax+1)")
+    if mscale.size == 0:
+        raise ValueError("Expected non-empty trig.mscale")
+    w_theta = cosmui3[:, 0] / float(mscale[0])
+    nzeta = int(np.asarray(trig.cosnv).shape[0])
+    wint = w_theta[:, None] * np.ones((nzeta,), dtype=w_theta.dtype)[None, :]
+    return np.asarray(wint, dtype=float)
+
+
+def _pshalf_from_s(s_full: np.ndarray) -> np.ndarray:
+    """VMEC half-mesh sqrt(s) used in parity formulas."""
+    if s_full.shape[0] < 2:
+        return np.sqrt(np.maximum(s_full, 0.0))
+    sh = 0.5 * (s_full[1:] + s_full[:-1])
+    p = np.concatenate([sh[:1], sh], axis=0)
+    return np.sqrt(np.maximum(p, 0.0))
+
+
+def _safe_divide(num: np.ndarray, den: np.ndarray) -> np.ndarray:
+    den_safe = np.where(np.abs(den) > 0.0, den, 1.0)
+    return num / den_safe
+
+
+def _jxbforce_nyquist_limits(trig) -> tuple[int, int]:
+    """Return VMEC jxbforce Nyquist cutoffs from grid sizes.
+
+    In VMEC2000, ``mnyq`` / ``nnyq`` are geometric Nyquist limits from
+    ``fixaray`` (based on ``ntheta2`` / ``nzeta``), not simply the maximum
+    retained Fourier mode in a truncated transform loop.
+    """
+    ntheta2 = int(getattr(trig, "ntheta2", 0))
+    cosnv = np.asarray(getattr(trig, "cosnv"))
+    nzeta = int(cosnv.shape[0]) if cosnv.ndim >= 1 else 0
+    mnyq = max(ntheta2 - 1, 0)
+    nnyq = max(nzeta // 2, 0)
+    return mnyq, nnyq
+
+
+def _compute_eqfor_beta(
+    *,
+    pres: np.ndarray,
+    vp: np.ndarray,
+    bsq: np.ndarray,
+    r12: np.ndarray,
+    bsupv: np.ndarray,
+    sqrtg: np.ndarray,
+    wint: np.ndarray,
+    signgs: int,
+) -> tuple[float, float, float, float]:
+    """Compute betapol/betator/betatot/betaxis using VMEC eqfor conventions."""
+    ns = int(pres.shape[0])
+    if ns < 3:
+        return 0.0, 0.0, 0.0, 0.0
+    hs = 1.0 / float(ns - 1)
+    vnorm = (2.0 * np.pi) ** 2 * hs
+    tau = float(signgs) * wint * np.asarray(sqrtg, dtype=float)
+    tau = np.asarray(tau, dtype=float)
+    tau[0] = 0.0
+
+    sump = vnorm * float(np.sum(np.asarray(vp[1:], dtype=float) * np.asarray(pres[1:], dtype=float)))
+    bsq = np.asarray(bsq, dtype=float)
+    r12 = np.asarray(r12, dtype=float)
+    bsupv = np.asarray(bsupv, dtype=float)
+    sum_bsq_tau = float(np.sum(bsq[1:] * tau[1:]))
+    sumbtot = 2.0 * (vnorm * sum_bsq_tau - sump)
+    sumbtor = vnorm * float(np.sum(tau[1:] * (r12[1:] * bsupv[1:]) ** 2))
+    sumbpol = sumbtot - sumbtor
+
+    betapol = float(_safe_divide(2.0 * sump, sumbpol))
+    betator = float(_safe_divide(2.0 * sump, sumbtor))
+    betatot = float(_safe_divide(2.0 * sump, sumbtot))
+
+    beta_vol = np.zeros((ns,), dtype=float)
+    for i in range(1, ns):
+        s2 = float(np.sum(bsq[i] * tau[i])) / float(vp[i]) - float(pres[i])
+        beta_vol[i] = float(_safe_divide(float(pres[i]), s2))
+    betaxis = float(1.5 * beta_vol[1] - 0.5 * beta_vol[2])
+    return betapol, betator, betatot, betaxis
+
+
+def _compute_eqfor_betaxis(
+    *,
+    pres: np.ndarray,
+    vp: np.ndarray,
+    bsq: np.ndarray,
+    sqrtg: np.ndarray,
+    wint: np.ndarray,
+    signgs: int,
+) -> float:
+    """Compute betaxis using eqfor.f conventions (independent of convergence)."""
+    ns = int(pres.shape[0])
+    if ns < 3:
+        return 0.0
+    tau = float(signgs) * np.asarray(wint, dtype=float) * np.asarray(sqrtg, dtype=float)
+    tau[0] = 0.0
+    beta_vol = np.zeros((ns,), dtype=float)
+    for i in range(1, ns):
+        denom = float(np.sum(bsq[i] * tau[i])) / float(vp[i]) - float(pres[i])
+        if denom != 0.0:
+            beta_vol[i] = float(pres[i]) / denom
+    return float(1.5 * beta_vol[1] - 0.5 * beta_vol[2])
+
+def _compute_aspectratio(
+    *,
+    R: np.ndarray,
+    Zu: np.ndarray,
+    wint: np.ndarray,
+) -> tuple[float, float, float, float, float]:
+    """Compute VMEC aspect-ratio geometry scalars from edge R, Zu (aspectratio.f)."""
+    if R.ndim != 3 or Zu.ndim != 3:
+        raise ValueError("Expected R/Zu with shape (ns, ntheta, nzeta)")
+    rb = np.asarray(R[-1], dtype=float)
+    zub = np.asarray(Zu[-1], dtype=float)
+    wint = np.asarray(wint, dtype=float)
+    if wint.shape != rb.shape:
+        raise ValueError("wint shape mismatch for aspectratio")
+    t1 = rb * zub * wint
+    volume_p = float(2.0 * np.pi * np.pi * abs(np.sum(rb * t1)))
+    cross_area_p = float(2.0 * np.pi * abs(np.sum(t1)))
+    if cross_area_p == 0.0:
+        return 0.0, 0.0, 0.0, volume_p, cross_area_p
+    Rmajor_p = float(volume_p / (2.0 * np.pi * cross_area_p))
+    Aminor_p = float(np.sqrt(cross_area_p / np.pi))
+    aspect = float(Rmajor_p / Aminor_p) if Aminor_p != 0.0 else 0.0
+    return Aminor_p, Rmajor_p, aspect, volume_p, cross_area_p
+
+
+def _compute_equif_wout(
+    *,
+    bsubu: np.ndarray,
+    bsubv: np.ndarray,
+    pres: np.ndarray,
+    vp: np.ndarray,
+    phipf: np.ndarray,
+    chipf: np.ndarray,
+    signgs: int,
+    trig,
+    s: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Compute buco/bvco/jcuru/jcurv/equif with VMEC eqfor normalization."""
+    s = np.asarray(s, dtype=float)
+    ns = int(s.shape[0])
+    if ns < 3:
+        z = np.zeros((ns,), dtype=float)
+        return z.copy(), z.copy(), z.copy(), z.copy(), z.copy()
+
+    hs = float(s[1] - s[0])
+    ohs = 1.0 / hs if hs != 0.0 else 0.0
+    wint = _vmec_wint_from_trig(trig)
+    bsubu = np.asarray(bsubu, dtype=float)
+    bsubv = np.asarray(bsubv, dtype=float)
+    pres = np.asarray(pres, dtype=float)
+    vp = np.asarray(vp, dtype=float)
+    phipf = np.asarray(phipf, dtype=float)
+    chipf = np.asarray(chipf, dtype=float)
+
+    buco = np.zeros((ns,), dtype=float)
+    bvco = np.zeros((ns,), dtype=float)
+    ntheta = int(wint.shape[0])
+    nzeta = int(wint.shape[1])
+    # Match VMEC's summation order (theta, then zeta) to reduce parity drift.
+    for js in range(1, ns):
+        acc_u = 0.0
+        acc_v = 0.0
+        for j in range(ntheta):
+            wrow = wint[j]
+            bu_row = bsubu[js, j]
+            bv_row = bsubv[js, j]
+            for k in range(nzeta):
+                w = float(wrow[k])
+                acc_u += float(bu_row[k]) * w
+                acc_v += float(bv_row[k]) * w
+        buco[js] = acc_u
+        bvco[js] = acc_v
+
+    jcuru = np.zeros((ns,), dtype=float)
+    jcurv = np.zeros((ns,), dtype=float)
+    vpphi = np.zeros((ns,), dtype=float)
+    presgrad = np.zeros((ns,), dtype=float)
+    for js in range(1, ns - 1):
+        jcurv[js] = float(signgs) * ohs * (buco[js + 1] - buco[js])
+        jcuru[js] = -float(signgs) * ohs * (bvco[js + 1] - bvco[js])
+        vpphi[js] = 0.5 * (vp[js + 1] + vp[js])
+        presgrad[js] = (pres[js + 1] - pres[js]) * ohs
+
+    equif = np.zeros((ns,), dtype=float)
+    for js in range(1, ns - 1):
+        denom = abs(jcurv[js] * chipf[js]) + abs(jcuru[js] * phipf[js]) + abs(presgrad[js] * vpphi[js])
+        if denom != 0.0 and vpphi[js] != 0.0:
+            raw = ((-phipf[js] * jcuru[js] + chipf[js] * jcurv[js]) / vpphi[js]) + presgrad[js]
+            equif[js] = raw * vpphi[js] / denom
+
+    # Extrapolate endpoints (eqfor.f).
+    for arr in (equif, jcuru, jcurv, presgrad, vpphi):
+        arr[0] = 2.0 * arr[1] - arr[2]
+        arr[-1] = 2.0 * arr[-2] - arr[-3]
+
+    # VMEC stores jcur* in physical units (divide by mu0).
+    from .vmec_lforbal import MU0
+
+    jcuru = jcuru / MU0
+    jcurv = jcurv / MU0
+    return buco, bvco, jcuru, jcurv, equif
+
+
+def _apply_bsubv_equif_correction(
+    *,
+    bsubv: np.ndarray,
+    bsubv_e: np.ndarray,
+    trig,
+) -> np.ndarray:
+    """Apply VMEC bcovar iequi=1 correction to bsubv.
+
+    VMEC adjusts the half-mesh bsubv after mesh blending so that the
+    surface-average <bsubv> matches the pre-blend current profile fpsi
+    (bvco). This routine mirrors the bcovar.f sequence:
+
+      bsubvh(:,js) = 2*bsubv_e(:,js) - bsubvh(:,js+1)
+      bsubvh(:,js) += fpsi(js) - SUM(bsubvh(:,js) * pwint(:,js))
+
+    where fpsi(js) is the surface-average of the *pre*-blend bsubv.
+    """
+    bsubv = np.asarray(bsubv, dtype=float)
+    bsubv_e = np.asarray(bsubv_e, dtype=float)
+    ns = int(bsubv.shape[0])
+    if ns < 3:
+        return bsubv
+
+    nzeta = int(bsubv.shape[2])
+    pwint = np.asarray(vmec_pwint_from_trig(trig, ns=ns, nzeta=nzeta), dtype=float)
+    if pwint.shape != bsubv.shape:
+        # Expect (ns, ntheta, nzeta) matching bsubv.
+        raise ValueError("pwint shape mismatch in bsubv correction")
+
+    # fpsi = surface-average of pre-blend bsubv (VMEC: bvco)
+    fpsi = np.zeros((ns,), dtype=float)
+    for js in range(1, ns):
+        fpsi[js] = float(np.sum(bsubv[js] * pwint[js]))
+
+    # Start from pre-blend bsubv (half mesh) and update inward using bsubv_e.
+    bsubv_h = np.array(bsubv, dtype=float, copy=True)
+    for js in range(ns - 2, 0, -1):
+        bsubv_h[js] = 2.0 * bsubv_e[js] - bsubv_h[js + 1]
+
+    # Adjust <bsubvh> to fpsi after blending (skip axis).
+    for js in range(1, ns):
+        curpol = fpsi[js] - float(np.sum(bsubv_h[js] * pwint[js]))
+        bsubv_h[js] = bsubv_h[js] + curpol
+
+    return bsubv_h
+
+def _compute_ctor_from_buco(*, buco: np.ndarray, signgs: int, indata) -> float:
+    ns = int(buco.shape[0])
+    if ns < 2:
+        return 0.0
+    lfreeb = bool(indata.get_bool("LFREEB", False))
+    ictrl_prec2d = int(indata.get_int("ICTRL_PREC2D", 0))
+    lhess_exact = bool(indata.get_bool("LHESS_EXACT", False))
+    if lhess_exact:
+        lctor = lfreeb and (ictrl_prec2d != 0)
+    else:
+        lctor = lfreeb and (ictrl_prec2d > 1)
+    if lctor:
+        ctor_prec2d = 0.0
+        ctor = float(signgs) * (2.0 * np.pi) * (float(buco[-1]) + ctor_prec2d)
+    else:
+        ctor = float(signgs) * (2.0 * np.pi) * (1.5 * float(buco[-1]) - 0.5 * float(buco[-2]))
+    return float(ctor)
+
+
+def _compute_bsubs_half_mesh(
+    *,
+    state: VMECState,
+    geom_modes,
+    s: np.ndarray,
+    lconm1: bool,
+    lthreed: bool,
+    lasym: bool,
+    bsupu: np.ndarray,
+    bsupv: np.ndarray,
+    trig,
+    geom: dict[str, Any],
+    jac_half: Any | None = None,
+    force_rs: np.ndarray | None = None,
+    force_zs: np.ndarray | None = None,
+    force_ru12: np.ndarray | None = None,
+    force_zu12: np.ndarray | None = None,
+    apply_m1_constraint: bool = True,
+    apply_scalxc: bool = False,
+) -> np.ndarray:
+    """Compute bsubs on the half mesh using VMEC's bss.f conventions."""
+    if bool(lasym):
+        # LASYM path uses full-interval grids; for now we reuse the symmetric
+        # derivation (same as VMEC when lasym=False). LASYM parity support will
+        # be extended later.
+        pass
+
+    # Geometry fields split into even/odd-m components on the full mesh.
+    # VMEC's realspace arrays are built directly from internal coefficients
+    # (which already include the 1/sqrt(s) odd-m scaling), so we keep
+    # apply_scalxc=False to match bss.f inputs.
+    from .vmec_realspace import (
+        vmec_realspace_synthesis,
+        vmec_realspace_synthesis_dtheta,
+        vmec_realspace_synthesis_dzeta_phys,
+    )
+
+    m = np.asarray(geom_modes.m, dtype=int)
+    mask_even = (m % 2) == 0
+    mask_m1 = m == 1
+    mask_odd_rest = (m % 2 == 1) & (~mask_m1)
+    Rcos = np.asarray(state.Rcos)
+    Rsin = np.asarray(state.Rsin)
+    Zcos = np.asarray(state.Zcos)
+    Zsin = np.asarray(state.Zsin)
+    if bool(lconm1):
+        Rcos, Zsin, Rsin, Zcos = vmec_m1_internal_to_physical_signed(
+            Rcos=Rcos,
+            Zsin=Zsin,
+            Rsin=Rsin,
+            Zcos=Zcos,
+            modes=geom_modes,
+            lthreed=bool(lthreed),
+            lasym=bool(lasym),
+            lconm1=bool(lconm1),
+        )
+    from .vmec_jacobian import _apply_vmec_axis_rules
+
+    Rcos = _apply_vmec_axis_rules(Rcos, m)
+    Rsin = _apply_vmec_axis_rules(Rsin, m)
+    Zcos = _apply_vmec_axis_rules(Zcos, m)
+    Zsin = _apply_vmec_axis_rules(Zsin, m)
+
+    coeff_cos_stack = np.stack([Rcos, Zcos], axis=0)
+    coeff_sin_stack = np.stack([Rsin, Zsin], axis=0)
+
+    mask_even_f = mask_even.astype(float)
+    mask_m1_f = mask_m1.astype(float)
+    mask_odd_rest_f = mask_odd_rest.astype(float)
+
+    def _eval_mask(mask: np.ndarray, *, deriv: str, apply_scalxc_local: bool):
+        coeff_cos = coeff_cos_stack * mask[None, None, :]
+        coeff_sin = coeff_sin_stack * mask[None, None, :]
+        if deriv == "base":
+            return vmec_realspace_synthesis(
+                coeff_cos=coeff_cos,
+                coeff_sin=coeff_sin,
+                modes=geom_modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=bool(apply_scalxc_local),
+                s=s,
+            )
+        if deriv == "dtheta":
+            return vmec_realspace_synthesis_dtheta(
+                coeff_cos=coeff_cos,
+                coeff_sin=coeff_sin,
+                modes=geom_modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=bool(apply_scalxc_local),
+                s=s,
+            )
+        if deriv == "dzeta":
+            return vmec_realspace_synthesis_dzeta_phys(
+                coeff_cos=coeff_cos,
+                coeff_sin=coeff_sin,
+                modes=geom_modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=bool(apply_scalxc_local),
+                s=s,
+            )
+        raise ValueError(f"Unknown deriv {deriv}")
+
+    # Match VMEC/bcovar conventions:
+    # - even components use physical coefficients (no scalxc),
+    # - odd components use internal coefficients (apply scalxc).
+    even_base = np.asarray(_eval_mask(mask_even_f, deriv="base", apply_scalxc_local=False))
+    even_t = np.asarray(_eval_mask(mask_even_f, deriv="dtheta", apply_scalxc_local=False))
+    even_p = np.asarray(_eval_mask(mask_even_f, deriv="dzeta", apply_scalxc_local=False))
+
+    odd_m1_base = np.asarray(_eval_mask(mask_m1_f, deriv="base", apply_scalxc_local=bool(apply_scalxc)))
+    odd_m1_t = np.asarray(_eval_mask(mask_m1_f, deriv="dtheta", apply_scalxc_local=bool(apply_scalxc)))
+    odd_m1_p = np.asarray(_eval_mask(mask_m1_f, deriv="dzeta", apply_scalxc_local=bool(apply_scalxc)))
+
+    odd_rest_base = np.asarray(_eval_mask(mask_odd_rest_f, deriv="base", apply_scalxc_local=bool(apply_scalxc)))
+    odd_rest_t = np.asarray(_eval_mask(mask_odd_rest_f, deriv="dtheta", apply_scalxc_local=bool(apply_scalxc)))
+    odd_rest_p = np.asarray(_eval_mask(mask_odd_rest_f, deriv="dzeta", apply_scalxc_local=bool(apply_scalxc)))
+
+    odd_base = odd_m1_base + odd_rest_base
+    odd_t = odd_m1_t + odd_rest_t
+    odd_p = odd_m1_p + odd_rest_p
+    if odd_base.shape[0] >= 2:
+        # VMEC axis convention: copy m=1 odd field from js=2 to js=1.
+        # Axis corresponds to the radial index (js=1 -> index 0).
+        odd_base[0] = odd_m1_base[1]
+        odd_t[0] = odd_m1_t[1]
+        odd_p[0] = odd_m1_p[1]
+
+    R_even = even_base[0]
+    Z_even = even_base[1]
+    Ru_even = even_t[0]
+    Zu_even = even_t[1]
+    Rv_even = even_p[0]
+    Zv_even = even_p[1]
+
+    R1 = odd_base[0]
+    Z1 = odd_base[1]
+    Ru1 = odd_t[0]
+    Zu1 = odd_t[1]
+    Rv1 = odd_p[0]
+    Zv1 = odd_p[1]
+
+    s = np.asarray(s, dtype=float)
+    if s.shape[0] < 2:
+        return np.zeros_like(np.asarray(bsupu, dtype=float))
+
+    # VMEC's bss.f uses internal even/odd components with explicit shalf factors.
+    # See jacobian.f: rs/zs use shalf scaling; rs12/zs12 include d(shalf)/ds.
+    hs = float(s[1] - s[0])
+    ohs = 1.0 / hs
+    dphids = 0.25
+    s_half = 0.5 * (s[1:] + s[:-1])
+    shalf = np.zeros_like(s, dtype=float)
+    shalf[1:] = np.sqrt(np.maximum(s_half, 0.0))
+    sh = shalf[:, None, None]
+
+    rv12 = np.zeros_like(R_even, dtype=float)
+    zv12 = np.zeros_like(Z_even, dtype=float)
+    rs12 = np.zeros_like(R_even, dtype=float)
+    zs12 = np.zeros_like(Z_even, dtype=float)
+
+    use_parity_geom_full = (
+        isinstance(geom, dict)
+        and ("pr1_even" in geom)
+        and ("pr1_odd" in geom)
+        and ("pz1_even" in geom)
+        and ("pz1_odd" in geom)
+        and ("pru_even" in geom)
+        and ("pru_odd" in geom)
+        and ("pzu_even" in geom)
+        and ("pzu_odd" in geom)
+    )
+    use_parity_bss = use_parity_geom_full and (
+        os.getenv("VMEC_JAX_BSS_FROM_PARITY_GEOM", "1") not in ("", "0")
+    )
+
+    # Use force-kernel R/Z arrays (VMEC bss.f path) when supplied.
+    if use_parity_bss:
+        pr1_even = np.asarray(geom["pr1_even"], dtype=float)
+        pr1_odd = np.asarray(geom["pr1_odd"], dtype=float)
+        pz1_even = np.asarray(geom["pz1_even"], dtype=float)
+        pz1_odd = np.asarray(geom["pz1_odd"], dtype=float)
+        pru_even = np.asarray(geom["pru_even"], dtype=float)
+        pru_odd = np.asarray(geom["pru_odd"], dtype=float)
+        pzu_even = np.asarray(geom["pzu_even"], dtype=float)
+        pzu_odd = np.asarray(geom["pzu_odd"], dtype=float)
+
+        ru12 = np.zeros_like(R_even, dtype=float)
+        zu12 = np.zeros_like(Z_even, dtype=float)
+        rs = np.zeros_like(R_even, dtype=float)
+        zs = np.zeros_like(Z_even, dtype=float)
+        ru12[1:] = 0.5 * (
+            pru_even[1:] + pru_even[:-1] + sh[1:] * (pru_odd[1:] + pru_odd[:-1])
+        )
+        zu12[1:] = 0.5 * (
+            pzu_even[1:] + pzu_even[:-1] + sh[1:] * (pzu_odd[1:] + pzu_odd[:-1])
+        )
+        rs[1:] = ohs * (
+            pr1_even[1:] - pr1_even[:-1] + sh[1:] * (pr1_odd[1:] - pr1_odd[:-1])
+        )
+        zs[1:] = ohs * (
+            pz1_even[1:] - pz1_even[:-1] + sh[1:] * (pz1_odd[1:] - pz1_odd[:-1])
+        )
+    elif (
+        force_rs is not None
+        and force_zs is not None
+        and force_ru12 is not None
+        and force_zu12 is not None
+    ):
+        ru12 = np.array(force_ru12, dtype=float, copy=True)
+        zu12 = np.array(force_zu12, dtype=float, copy=True)
+        rs = np.array(force_rs, dtype=float, copy=True)
+        zs = np.array(force_zs, dtype=float, copy=True)
+    # Otherwise use half-mesh Jacobian from bcovar when provided to stay
+    # consistent with bsupu/bsupv (computed from the same bcovar pipeline).
+    elif jac_half is not None:
+        ru12 = np.array(jac_half.ru12, dtype=float, copy=True)
+        zu12 = np.array(jac_half.zu12, dtype=float, copy=True)
+        rs = np.array(jac_half.rs, dtype=float, copy=True)
+        zs = np.array(jac_half.zs, dtype=float, copy=True)
+    else:
+        ru12 = np.zeros_like(R_even, dtype=float)
+        zu12 = np.zeros_like(Z_even, dtype=float)
+        rs = np.zeros_like(R_even, dtype=float)
+        zs = np.zeros_like(Z_even, dtype=float)
+        ru12[1:] = 0.5 * (Ru_even[1:] + Ru_even[:-1] + sh[1:] * (Ru1[1:] + Ru1[:-1]))
+        zu12[1:] = 0.5 * (Zu_even[1:] + Zu_even[:-1] + sh[1:] * (Zu1[1:] + Zu1[:-1]))
+        rs[1:] = ohs * (R_even[1:] - R_even[:-1] + sh[1:] * (R1[1:] - R1[:-1]))
+        zs[1:] = ohs * (Z_even[1:] - Z_even[:-1] + sh[1:] * (Z1[1:] - Z1[:-1]))
+
+    use_parity_geom = (
+        isinstance(geom, dict)
+        and ("pr1_odd" in geom)
+        and ("pz1_odd" in geom)
+        and ("prv_even" in geom)
+        and ("prv_odd" in geom)
+        and ("pzv_even" in geom)
+        and ("pzv_odd" in geom)
+    )
+    if use_parity_geom:
+        pr1_odd = np.asarray(geom["pr1_odd"], dtype=float)
+        pz1_odd = np.asarray(geom["pz1_odd"], dtype=float)
+        prv_even = np.asarray(geom["prv_even"], dtype=float)
+        prv_odd = np.asarray(geom["prv_odd"], dtype=float)
+        pzv_even = np.asarray(geom["pzv_even"], dtype=float)
+        pzv_odd = np.asarray(geom["pzv_odd"], dtype=float)
+
+        rv12[1:] = 0.5 * (
+            prv_even[1:] + prv_even[:-1] + sh[1:] * (prv_odd[1:] + prv_odd[:-1])
+        )
+        zv12[1:] = 0.5 * (
+            pzv_even[1:] + pzv_even[:-1] + sh[1:] * (pzv_odd[1:] + pzv_odd[:-1])
+        )
+        rs12[1:] = rs[1:] + dphids * (pr1_odd[1:] + pr1_odd[:-1]) / sh[1:]
+        zs12[1:] = zs[1:] + dphids * (pz1_odd[1:] + pz1_odd[:-1]) / sh[1:]
+    else:
+        rv12[1:] = 0.5 * (Rv_even[1:] + Rv_even[:-1] + sh[1:] * (Rv1[1:] + Rv1[:-1]))
+        zv12[1:] = 0.5 * (Zv_even[1:] + Zv_even[:-1] + sh[1:] * (Zv1[1:] + Zv1[:-1]))
+
+        rs12[1:] = rs[1:] + dphids * (R1[1:] + R1[:-1]) / sh[1:]
+        zs12[1:] = zs[1:] + dphids * (Z1[1:] + Z1[:-1]) / sh[1:]
+
+    # Axis fill: mirror js=2 into js=1 (VMEC convention).
+    if rs12.shape[0] > 1:
+        rs12[0] = rs12[1]
+        zs12[0] = zs12[1]
+        ru12[0] = ru12[1]
+        zu12[0] = zu12[1]
+        rv12[0] = rv12[1]
+        zv12[0] = zv12[1]
+
+    g_su = rs12 * ru12 + zs12 * zu12
+    g_sv = rs12 * rv12 + zs12 * zv12
+    bsubs = np.asarray(bsupu, dtype=float) * g_su + np.asarray(bsupv, dtype=float) * g_sv
+
+    if os.getenv("VMEC_JAX_DUMP_BSS_TERMS", "") not in ("", "0"):
+        outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+        outdir.mkdir(parents=True, exist_ok=True)
+        tag = os.getenv("VMEC_JAX_DUMP_TAG", "").strip()
+        name = "bss_terms_jax" + (f"_{tag}" if tag else "") + ".npz"
+        np.savez(
+            outdir / name,
+            rs12=np.asarray(rs12, dtype=float),
+            zs12=np.asarray(zs12, dtype=float),
+            rv12=np.asarray(rv12, dtype=float),
+            zv12=np.asarray(zv12, dtype=float),
+            ru12=np.asarray(ru12, dtype=float),
+            zu12=np.asarray(zu12, dtype=float),
+            gsu=np.asarray(g_su, dtype=float),
+            gsv=np.asarray(g_sv, dtype=float),
+            bsubs=np.asarray(bsubs, dtype=float),
+            bsupu=np.asarray(bsupu, dtype=float),
+            bsupv=np.asarray(bsupv, dtype=float),
+            s=np.asarray(s, dtype=float),
+        )
+
+    return bsubs
+
+
+def _bsubuv_parity_from_state(
+    *,
+    state: VMECState,
+    geom_modes,
+    trig,
+    s: np.ndarray,
+    lconm1: bool,
+    lthreed: bool,
+    lasym: bool,
+    bsupu: np.ndarray,
+    bsupv: np.ndarray,
+    lu1_full: np.ndarray,
+    lv1_full: np.ndarray,
+    sqrtg: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Construct parity-separated bsubu/bsubv using VMEC internal even/odd splitting."""
+    from .vmec_realspace import (
+        vmec_realspace_synthesis,
+        vmec_realspace_synthesis_dtheta,
+        vmec_realspace_synthesis_dzeta_phys,
+    )
+    from .vmec_jacobian import _apply_vmec_axis_rules
+
+    m = np.asarray(geom_modes.m, dtype=int)
+    mask_even = (m % 2) == 0
+    mask_odd = ~mask_even
+
+    Rcos = np.asarray(state.Rcos)
+    Rsin = np.asarray(state.Rsin)
+    Zcos = np.asarray(state.Zcos)
+    Zsin = np.asarray(state.Zsin)
+    if bool(lconm1):
+        Rcos, Zsin, Rsin, Zcos = vmec_m1_internal_to_physical_signed(
+            Rcos=Rcos,
+            Zsin=Zsin,
+            Rsin=Rsin,
+            Zcos=Zcos,
+            modes=geom_modes,
+            lthreed=bool(lthreed),
+            lasym=bool(lasym),
+            lconm1=bool(lconm1),
+        )
+
+    Rcos = _apply_vmec_axis_rules(Rcos, m)
+    Rsin = _apply_vmec_axis_rules(Rsin, m)
+    Zcos = _apply_vmec_axis_rules(Zcos, m)
+    Zsin = _apply_vmec_axis_rules(Zsin, m)
+
+    coeff_cos_stack = np.stack([Rcos, Zcos], axis=0)
+    coeff_sin_stack = np.stack([Rsin, Zsin], axis=0)
+    mask_stack = np.stack([mask_even.astype(float), mask_odd.astype(float)], axis=0)
+    coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
+    coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
+
+    stack = vmec_realspace_synthesis(
+        coeff_cos=coeff_cos,
+        coeff_sin=coeff_sin,
+        modes=geom_modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+        s=s,
+    )
+    stack_t = vmec_realspace_synthesis_dtheta(
+        coeff_cos=coeff_cos,
+        coeff_sin=coeff_sin,
+        modes=geom_modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+        s=s,
+    )
+    stack_p = vmec_realspace_synthesis_dzeta_phys(
+        coeff_cos=coeff_cos,
+        coeff_sin=coeff_sin,
+        modes=geom_modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+        s=s,
+    )
+
+    even = np.asarray(stack[0])
+    odd = np.asarray(stack[1])
+    even_t = np.asarray(stack_t[0])
+    odd_t = np.asarray(stack_t[1])
+    even_p = np.asarray(stack_p[0])
+    odd_p = np.asarray(stack_p[1])
+
+    Ru_even = even_t[0]
+    Ru_odd = odd_t[0]
+    Zu_even = even_t[1]
+    Zu_odd = odd_t[1]
+    Rv_even = even_p[0]
+    Rv_odd = odd_p[0]
+    Zv_even = even_p[1]
+    Zv_odd = odd_p[1]
+
+    pshalf = _pshalf_from_s(np.asarray(s, dtype=float))[:, None, None]
+    # bsubu/bsubv live on the radial half mesh in VMEC. Their parity algebra
+    # must therefore use s_half = pshalf^2 (not full-mesh s_j).
+    s_term = pshalf * pshalf
+
+    guu_even = Ru_even * Ru_even + Zu_even * Zu_even + s_term * (Ru_odd * Ru_odd + Zu_odd * Zu_odd)
+    guu_odd = 2.0 * (Ru_even * Ru_odd + Zu_even * Zu_odd)
+    guv_even = Ru_even * Rv_even + Zu_even * Zv_even + s_term * (Ru_odd * Rv_odd + Zu_odd * Zv_odd)
+    guv_odd = Ru_even * Rv_odd + Ru_odd * Rv_even + Zu_even * Zv_odd + Zu_odd * Zv_even
+    gvv_even = Rv_even * Rv_even + Zv_even * Zv_even + s_term * (Rv_odd * Rv_odd + Zv_odd * Zv_odd)
+    gvv_odd = 2.0 * (Rv_even * Rv_odd + Zv_even * Zv_odd)
+
+    overg = np.where(np.asarray(sqrtg) != 0.0, 1.0 / np.asarray(sqrtg), 0.0)
+    bsupu_even = np.asarray(bsupu, dtype=float)
+    bsupv_even = np.asarray(bsupv, dtype=float)
+    bsupu_odd = np.zeros_like(bsupu_even)
+    bsupv_odd = np.zeros_like(bsupv_even)
+    if int(bsupu_even.shape[0]) >= 2:
+        avg_lv1 = np.asarray(lv1_full[1:] + lv1_full[:-1], dtype=float)
+        avg_lu1 = np.asarray(lu1_full[1:] + lu1_full[:-1], dtype=float)
+        bsupu_odd[1:] = 0.5 * overg[1:] * avg_lv1
+        bsupv_odd[1:] = 0.5 * overg[1:] * avg_lu1
+        bsupu_even = bsupu_even - pshalf * bsupu_odd
+        bsupv_even = bsupv_even - pshalf * bsupv_odd
+
+    bsubu_even = (
+        guu_even * bsupu_even
+        + s_term * guu_odd * bsupu_odd
+        + guv_even * bsupv_even
+        + s_term * guv_odd * bsupv_odd
+    )
+    bsubu_odd = (
+        guu_even * bsupu_odd
+        + guu_odd * bsupu_even
+        + guv_even * bsupv_odd
+        + guv_odd * bsupv_even
+    )
+    bsubv_even = (
+        guv_even * bsupu_even
+        + s_term * guv_odd * bsupu_odd
+        + gvv_even * bsupv_even
+        + s_term * gvv_odd * bsupv_odd
+    )
+    bsubv_odd = (
+        guv_even * bsupu_odd
+        + guv_odd * bsupu_even
+        + gvv_even * bsupv_odd
+        + gvv_odd * bsupv_even
+    )
+
+    return bsubu_even, bsubu_odd, bsubv_even, bsubv_odd
+
+
+def _bsubuv_parity_from_coeffs(
+    *,
+    bsubumnc: np.ndarray,
+    bsubumns: np.ndarray,
+    bsubvmnc: np.ndarray,
+    bsubvmns: np.ndarray,
+    modes,
+    trig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Split bsubu/bsubv into even/odd m parity using Fourier coefficients."""
+    m = np.asarray(modes.m, dtype=int)
+    mask_even = (m % 2) == 0
+    mask_odd = ~mask_even
+    mask_even = mask_even[None, :]
+    mask_odd = mask_odd[None, :]
+
+    bsubumnc = np.asarray(bsubumnc, dtype=float)
+    bsubumns = np.asarray(bsubumns, dtype=float)
+    bsubvmnc = np.asarray(bsubvmnc, dtype=float)
+    bsubvmns = np.asarray(bsubvmns, dtype=float)
+
+    bsubumnc_even = bsubumnc * mask_even
+    bsubumns_even = bsubumns * mask_even
+    bsubumnc_odd = bsubumnc * mask_odd
+    bsubumns_odd = bsubumns * mask_odd
+
+    bsubvmnc_even = bsubvmnc * mask_even
+    bsubvmns_even = bsubvmns * mask_even
+    bsubvmnc_odd = bsubvmnc * mask_odd
+    bsubvmns_odd = bsubvmns * mask_odd
+
+    # Use wrout-style Nyquist synthesis instead of generic helical eval so the
+    # parity split stays on VMEC's reduced-grid normalization.
+    bsubu_even = _vmec_wrout_nyquist_synthesis(
+        coeff_c=bsubumnc_even,
+        coeff_s=bsubumns_even,
+        modes=modes,
+        trig=trig,
+    )
+    bsubu_odd = _vmec_wrout_nyquist_synthesis(
+        coeff_c=bsubumnc_odd,
+        coeff_s=bsubumns_odd,
+        modes=modes,
+        trig=trig,
+    )
+    bsubv_even = _vmec_wrout_nyquist_synthesis(
+        coeff_c=bsubvmnc_even,
+        coeff_s=bsubvmns_even,
+        modes=modes,
+        trig=trig,
+    )
+    bsubv_odd = _vmec_wrout_nyquist_synthesis(
+        coeff_c=bsubvmnc_odd,
+        coeff_s=bsubvmns_odd,
+        modes=modes,
+        trig=trig,
+    )
+    return bsubu_even, bsubu_odd, bsubv_even, bsubv_odd
+
+
+def _bsubuv_parity_from_realspace_jxbforce(
+    *,
+    bsubu: np.ndarray,
+    bsubv: np.ndarray,
+    trig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Recover jxbforce parity channels directly from real-space bsubu/bsubv."""
+    # jdotb can be cancellation-limited near the edge. Keep this projection in
+    # long-double to reduce parity-channel roundoff before the jxbforce filter.
+    acc_dtype = np.longdouble
+    bsubu = np.asarray(bsubu, dtype=acc_dtype)
+    bsubv = np.asarray(bsubv, dtype=acc_dtype)
+    if bsubu.shape != bsubv.shape:
+        raise ValueError("bsubu/bsubv shape mismatch")
+    if bsubu.ndim != 3:
+        raise ValueError("Expected bsubu/bsubv with shape (ns, ntheta, nzeta)")
+
+    ns, ntheta, nzeta = bsubu.shape
+    nt2 = int(trig.ntheta2)
+    if ntheta < nt2:
+        raise ValueError("bsubu grid smaller than ntheta2")
+
+    mnyq, nnyq = _jxbforce_nyquist_limits(trig)
+    mmax = int(max(mnyq, 0))
+    nmax = int(max(nnyq, 0))
+
+    cosmui = np.asarray(trig.cosmui, dtype=acc_dtype)[:nt2, : mmax + 1]
+    sinmui = np.asarray(trig.sinmui, dtype=acc_dtype)[:nt2, : mmax + 1]
+    cosmu = np.asarray(trig.cosmu, dtype=acc_dtype)[:nt2, : mmax + 1]
+    sinmu = np.asarray(trig.sinmu, dtype=acc_dtype)[:nt2, : mmax + 1]
+    cosnv = np.asarray(trig.cosnv, dtype=acc_dtype)[:, : nmax + 1]
+    sinnv = np.asarray(trig.sinnv, dtype=acc_dtype)[:, : nmax + 1]
+
+    r0scale = float(getattr(trig, "r0scale", 1.0))
+    base_dnorm = acc_dtype(1.0) / acc_dtype(r0scale**2)
+
+    bsubu_even = np.zeros((ns, nt2, nzeta), dtype=acc_dtype)
+    bsubu_odd = np.zeros((ns, nt2, nzeta), dtype=acc_dtype)
+    bsubv_even = np.zeros((ns, nt2, nzeta), dtype=acc_dtype)
+    bsubv_odd = np.zeros((ns, nt2, nzeta), dtype=acc_dtype)
+
+    for js in range(ns):
+        bu = bsubu[js, :nt2, :]
+        bv = bsubv[js, :nt2, :]
+        for m in range(mmax + 1):
+            use_odd = (m % 2) == 1
+            for n in range(nmax + 1):
+                dnorm1 = base_dnorm
+                if mnyq > 0 and m == mnyq:
+                    dnorm1 *= 0.5
+                if nnyq > 0 and n == nnyq and n != 0:
+                    dnorm1 *= 0.5
+
+                bsubumn1 = acc_dtype(0.0)
+                bsubumn2 = acc_dtype(0.0)
+                bsubvmn1 = acc_dtype(0.0)
+                bsubvmn2 = acc_dtype(0.0)
+                for k in range(nzeta):
+                    for j in range(nt2):
+                        tcosi1 = cosmui[j, m] * cosnv[k, n] * dnorm1
+                        tcosi2 = sinmui[j, m] * sinnv[k, n] * dnorm1
+                        val_u = bu[j, k]
+                        val_v = bv[j, k]
+                        bsubumn1 += tcosi1 * val_u
+                        bsubumn2 += tcosi2 * val_u
+                        bsubvmn1 += tcosi1 * val_v
+                        bsubvmn2 += tcosi2 * val_v
+
+                for k in range(nzeta):
+                    for j in range(nt2):
+                        tcos1 = cosmu[j, m] * cosnv[k, n]
+                        tcos2 = sinmu[j, m] * sinnv[k, n]
+                        ucontrib = tcos1 * bsubumn1 + tcos2 * bsubumn2
+                        vcontrib = tcos1 * bsubvmn1 + tcos2 * bsubvmn2
+                        if use_odd:
+                            bsubu_odd[js, j, k] += ucontrib
+                            bsubv_odd[js, j, k] += vcontrib
+                        else:
+                            bsubu_even[js, j, k] += ucontrib
+                            bsubv_even[js, j, k] += vcontrib
+
+    return (
+        np.asarray(bsubu_even, dtype=float),
+        np.asarray(bsubu_odd, dtype=float),
+        np.asarray(bsubv_even, dtype=float),
+        np.asarray(bsubv_odd, dtype=float),
+    )
+
+
+def _bsubuv_parity_from_bcovar(
+    *,
+    bsubu_even: np.ndarray,
+    bsubv_even: np.ndarray,
+    s: np.ndarray,
+    iequi: int = 0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Construct parity-separated bsubu/bsubv from bcovar even components."""
+    s_full = np.asarray(s, dtype=float)
+    psqrts = np.sqrt(np.maximum(s_full, 0.0))[:, None, None]
+    pshalf = _pshalf_from_s(s_full)[:, None, None]
+    scale = pshalf if int(iequi) == 1 else psqrts
+    bsubu_even = np.asarray(bsubu_even, dtype=float)
+    bsubv_even = np.asarray(bsubv_even, dtype=float)
+    bsubu_odd = scale * bsubu_even
+    bsubv_odd = scale * bsubv_even
+    return bsubu_even, bsubu_odd, bsubv_even, bsubv_odd
+
+
+def _filter_bsubuv_jxbforce(
+    *,
+    bsubu: np.ndarray,
+    bsubv: np.ndarray,
+    trig,
+    nfp: int,
+    mmax_force: int,
+    nmax_force: int,
+    s: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """JXBFORCE-style low-pass filter for bsubu/bsubv (lasym=False)."""
+    # For parity-critical diagnostics we prefer the explicit VMEC loop
+    # ordering, which matches the Fortran summation order more closely.
+    import os
+    use_loop = os.getenv("VMEC_JAX_BSUB_FILTER_LOOP", "1") not in ("", "0")
+    if use_loop:
+        return _filter_bsubuv_jxbforce_loop(
+            bsubu=bsubu,
+            bsubv=bsubv,
+            trig=trig,
+            mmax_force=mmax_force,
+            nmax_force=nmax_force,
+            s=s,
+        )
+    bsubu = np.asarray(bsubu, dtype=float)
+    bsubv = np.asarray(bsubv, dtype=float)
+    ns, ntheta, nzeta = bsubu.shape
+
+    nt2 = int(trig.ntheta2)
+    if ntheta < nt2:
+        raise ValueError("bsubu grid smaller than ntheta2")
+
+    mmax = int(mmax_force)
+    nmax = int(nmax_force)
+    if mmax < 0 or nmax < 0:
+        return bsubu[:, :nt2, :].copy(), bsubv[:, :nt2, :].copy()
+
+    # Implement the jxbforce low-pass filter explicitly to match VMEC's
+    # parity-normalized Fourier transforms.
+    bsubu_red = np.asarray(bsubu[:, :nt2, :], dtype=float)
+    bsubv_red = np.asarray(bsubv[:, :nt2, :], dtype=float)
+
+    cosmui = np.asarray(trig.cosmui, dtype=float)[:nt2, : mmax + 1]
+    sinmui = np.asarray(trig.sinmui, dtype=float)[:nt2, : mmax + 1]
+    cosmu = np.asarray(trig.cosmu, dtype=float)[:nt2, : mmax + 1]
+    sinmu = np.asarray(trig.sinmu, dtype=float)[:nt2, : mmax + 1]
+    cosnv = np.asarray(trig.cosnv, dtype=float)[:, : nmax + 1]
+    sinnv = np.asarray(trig.sinnv, dtype=float)[:, : nmax + 1]
+
+    r0scale = float(getattr(trig, "r0scale", 1.0))
+    dnorm1 = 1.0 / (r0scale**2)
+    dmult = np.full((mmax + 1, nmax + 1), dnorm1, dtype=float)
+    mnyq, nnyq = _jxbforce_nyquist_limits(trig)
+    if mnyq > 0 and mnyq <= mmax:
+        dmult[mnyq, :] *= 0.5
+    if nnyq > 0 and nnyq <= nmax:
+        dmult[:, nnyq] *= 0.5
+
+    def _pshalf_from_s(s_full: np.ndarray) -> np.ndarray:
+        if s_full.shape[0] < 2:
+            return np.sqrt(np.maximum(s_full, 0.0))
+        sh = 0.5 * (s_full[1:] + s_full[:-1])
+        p = np.concatenate([sh[:1], sh], axis=0)
+        return np.sqrt(np.maximum(p, 0.0))
+
+    pshalf = None
+    if s is not None:
+        s_full = np.asarray(s, dtype=float)
+        pshalf = _pshalf_from_s(s_full)
+        # Avoid divide-by-zero on-axis; VMEC sets shalf(1)=shalf(2).
+        if pshalf.shape[0] > 1:
+            pshalf[0] = pshalf[1]
+
+    # When the filter limits match the available basis, the transform should
+    # be identity (avoid numerical drift by returning the original fields).
+    full_mmax, full_nmax = _jxbforce_nyquist_limits(trig)
+    if mmax >= full_mmax and nmax >= full_nmax:
+        return bsubu[:, :nt2, :].copy(), bsubv[:, :nt2, :].copy()
+
+    def _filter_one(f: np.ndarray) -> np.ndarray:
+        # Forward transform: cos(mu)cos(nv) + sin(mu)sin(nv) (jxbforce).
+        f_theta_cos = np.einsum("sik,im->smk", f, cosmui, optimize=True)
+        f_theta_sin = np.einsum("sik,im->smk", f, sinmui, optimize=True)
+        coeff1 = np.einsum("smk,kn->smn", f_theta_cos, cosnv, optimize=True)
+        coeff2 = np.einsum("smk,kn->smn", f_theta_sin, sinnv, optimize=True)
+        coeff1 = coeff1 * dmult[None, :, :]
+        coeff2 = coeff2 * dmult[None, :, :]
+        # VMEC stores odd-m fields with an extra sqrt(s) factor. Undo that
+        # scaling for odd m before the inverse transform (jxbforce does this
+        # via bsubu(js,:,1)/shalf(js)).
+        if pshalf is not None and mmax >= 1:
+            odd = (np.arange(mmax + 1) % 2) == 1
+            if np.any(odd):
+                scale = np.ones((coeff1.shape[0], mmax + 1, 1), dtype=float)
+                scale[:, odd, 0] = 1.0 / pshalf[:, None]
+                coeff1 = coeff1 * scale
+                coeff2 = coeff2 * scale
+
+        # Inverse transform back to real space on the reduced grid.
+        tmp_cos = np.einsum("smn,im->sin", coeff1, cosmu, optimize=True)
+        tmp_sin = np.einsum("smn,im->sin", coeff2, sinmu, optimize=True)
+        return np.einsum("sin,kn->sik", tmp_cos, cosnv, optimize=True) + np.einsum(
+            "sin,kn->sik", tmp_sin, sinnv, optimize=True
+        )
+
+    return _filter_one(bsubu_red), _filter_one(bsubv_red)
+
+
+def _filter_bsubuv_jxbforce_parity_loop(
+    *,
+    bsubu_even: np.ndarray,
+    bsubu_odd: np.ndarray,
+    bsubv_even: np.ndarray,
+    bsubv_odd: np.ndarray,
+    trig,
+    mmax_force: int,
+    nmax_force: int,
+    s: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Loop-based jxbforce low-pass filter using parity-separated bsubu/bsubv."""
+    # Cancellation in the low-pass Fourier sums can be severe near the edge for
+    # high-shear equilibria. Accumulate in long double, cast back to float.
+    acc_dtype = np.longdouble
+    bsubu_even = np.asarray(bsubu_even, dtype=acc_dtype)
+    bsubu_odd = np.asarray(bsubu_odd, dtype=acc_dtype)
+    bsubv_even = np.asarray(bsubv_even, dtype=acc_dtype)
+    bsubv_odd = np.asarray(bsubv_odd, dtype=acc_dtype)
+    if bsubu_even.shape != bsubu_odd.shape or bsubu_even.shape != bsubv_even.shape:
+        raise ValueError("Parity bsubu/bsubv shape mismatch")
+
+    ns, ntheta, nzeta = bsubu_even.shape
+    nt2 = int(trig.ntheta2)
+    if ntheta < nt2:
+        raise ValueError("bsubu grid smaller than ntheta2")
+
+    mmax = int(mmax_force)
+    nmax = int(nmax_force)
+    if mmax < 0 or nmax < 0:
+        return bsubu_even[:, :nt2, :].copy(), bsubv_even[:, :nt2, :].copy()
+
+    cosmui = np.asarray(trig.cosmui, dtype=acc_dtype)[:nt2, : mmax + 1]
+    sinmui = np.asarray(trig.sinmui, dtype=acc_dtype)[:nt2, : mmax + 1]
+    cosmu = np.asarray(trig.cosmu, dtype=acc_dtype)[:nt2, : mmax + 1]
+    sinmu = np.asarray(trig.sinmu, dtype=acc_dtype)[:nt2, : mmax + 1]
+    cosnv = np.asarray(trig.cosnv, dtype=acc_dtype)[:, : nmax + 1]
+    sinnv = np.asarray(trig.sinnv, dtype=acc_dtype)[:, : nmax + 1]
+
+    r0scale = float(getattr(trig, "r0scale", 1.0))
+    base_dnorm = acc_dtype(1.0) / acc_dtype(r0scale**2)
+    mnyq, nnyq = _jxbforce_nyquist_limits(trig)
+
+    def _pshalf_from_s(s_full: np.ndarray) -> np.ndarray:
+        if s_full.shape[0] < 2:
+            return np.sqrt(np.maximum(s_full, 0.0))
+        sh = 0.5 * (s_full[1:] + s_full[:-1])
+        p = np.concatenate([sh[:1], sh], axis=0)
+        return np.sqrt(np.maximum(p, 0.0))
+
+    pshalf = None
+    if s is not None:
+        s_full = np.asarray(s, dtype=acc_dtype)
+        pshalf = _pshalf_from_s(s_full)
+        if pshalf.shape[0] > 1:
+            pshalf[0] = pshalf[1]
+
+    bsubu_out = np.zeros((ns, nt2, nzeta), dtype=acc_dtype)
+    bsubv_out = np.zeros((ns, nt2, nzeta), dtype=acc_dtype)
+
+    for js in range(ns):
+        bsubu_even_s = bsubu_even[js, :nt2, :]
+        bsubu_odd_s = bsubu_odd[js, :nt2, :]
+        bsubv_even_s = bsubv_even[js, :nt2, :]
+        bsubv_odd_s = bsubv_odd[js, :nt2, :]
+        for m in range(mmax + 1):
+            use_odd = (m % 2) == 1
+            bsubu_in = bsubu_odd_s if use_odd else bsubu_even_s
+            bsubv_in = bsubv_odd_s if use_odd else bsubv_even_s
+            for n in range(nmax + 1):
+                dnorm1 = base_dnorm
+                if mnyq > 0 and m == mnyq:
+                    dnorm1 *= 0.5
+                if nnyq > 0 and n == nnyq and n != 0:
+                    dnorm1 *= 0.5
+                if use_odd and (pshalf is not None):
+                    dnorm1 = dnorm1 / float(pshalf[js])
+
+                bsubumn1 = acc_dtype(0.0)
+                bsubumn2 = acc_dtype(0.0)
+                bsubvmn1 = acc_dtype(0.0)
+                bsubvmn2 = acc_dtype(0.0)
+
+                for k in range(nzeta):
+                    for j in range(nt2):
+                        tsini1 = sinmui[j, m] * cosnv[k, n] * dnorm1
+                        tsini2 = cosmui[j, m] * sinnv[k, n] * dnorm1
+                        tcosi1 = cosmui[j, m] * cosnv[k, n] * dnorm1
+                        tcosi2 = sinmui[j, m] * sinnv[k, n] * dnorm1
+                        val_u = bsubu_in[j, k]
+                        val_v = bsubv_in[j, k]
+                        bsubumn1 += tcosi1 * val_u
+                        bsubumn2 += tcosi2 * val_u
+                        bsubvmn1 += tcosi1 * val_v
+                        bsubvmn2 += tcosi2 * val_v
+
+                for k in range(nzeta):
+                    for j in range(nt2):
+                        tcos1 = cosmu[j, m] * cosnv[k, n]
+                        tcos2 = sinmu[j, m] * sinnv[k, n]
+                        bsubu_out[js, j, k] += tcos1 * bsubumn1 + tcos2 * bsubumn2
+                        bsubv_out[js, j, k] += tcos1 * bsubvmn1 + tcos2 * bsubvmn2
+
+    return np.asarray(bsubu_out, dtype=float), np.asarray(bsubv_out, dtype=float)
+
+
+def _filter_bsubuv_jxbforce_loop(
+    *,
+    bsubu: np.ndarray,
+    bsubv: np.ndarray,
+    trig,
+    mmax_force: int,
+    nmax_force: int,
+    s: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Loop-based jxbforce low-pass filter (matches VMEC summation order)."""
+    # Accumulate in long double for cancellation-sensitive mode sums.
+    acc_dtype = np.longdouble
+    bsubu = np.asarray(bsubu, dtype=acc_dtype)
+    bsubv = np.asarray(bsubv, dtype=acc_dtype)
+    ns, ntheta, nzeta = bsubu.shape
+
+    nt2 = int(trig.ntheta2)
+    if ntheta < nt2:
+        raise ValueError("bsubu grid smaller than ntheta2")
+
+    mmax = int(mmax_force)
+    nmax = int(nmax_force)
+    if mmax < 0 or nmax < 0:
+        return bsubu[:, :nt2, :].copy(), bsubv[:, :nt2, :].copy()
+
+    cosmui = np.asarray(trig.cosmui, dtype=acc_dtype)[:nt2, : mmax + 1]
+    sinmui = np.asarray(trig.sinmui, dtype=acc_dtype)[:nt2, : mmax + 1]
+    cosmu = np.asarray(trig.cosmu, dtype=acc_dtype)[:nt2, : mmax + 1]
+    sinmu = np.asarray(trig.sinmu, dtype=acc_dtype)[:nt2, : mmax + 1]
+    cosnv = np.asarray(trig.cosnv, dtype=acc_dtype)[:, : nmax + 1]
+    sinnv = np.asarray(trig.sinnv, dtype=acc_dtype)[:, : nmax + 1]
+
+    r0scale = float(getattr(trig, "r0scale", 1.0))
+    base_dnorm = acc_dtype(1.0) / acc_dtype(r0scale**2)
+    mnyq, nnyq = _jxbforce_nyquist_limits(trig)
+
+    def _pshalf_from_s(s_full: np.ndarray) -> np.ndarray:
+        if s_full.shape[0] < 2:
+            return np.sqrt(np.maximum(s_full, 0.0))
+        sh = 0.5 * (s_full[1:] + s_full[:-1])
+        p = np.concatenate([sh[:1], sh], axis=0)
+        return np.sqrt(np.maximum(p, 0.0))
+
+    pshalf = None
+    if s is not None:
+        s_full = np.asarray(s, dtype=acc_dtype)
+        pshalf = _pshalf_from_s(s_full)
+        if pshalf.shape[0] > 1:
+            pshalf[0] = pshalf[1]
+
+    # If the requested filter spans the full available basis, return the
+    # original fields to avoid introducing numerical drift.
+    full_mmax, full_nmax = _jxbforce_nyquist_limits(trig)
+    if mmax >= full_mmax and nmax >= full_nmax:
+        return bsubu[:, :nt2, :].copy(), bsubv[:, :nt2, :].copy()
+
+    bsubu_out = np.zeros((ns, nt2, nzeta), dtype=acc_dtype)
+    bsubv_out = np.zeros((ns, nt2, nzeta), dtype=acc_dtype)
+
+    for js in range(ns):
+        bsubu_in = bsubu[js, :nt2, :]
+        bsubv_in = bsubv[js, :nt2, :]
+        for m in range(mmax + 1):
+            for n in range(nmax + 1):
+                dnorm1 = base_dnorm
+                if mnyq > 0 and m == mnyq:
+                    dnorm1 *= 0.5
+                if nnyq > 0 and n == nnyq and n != 0:
+                    dnorm1 *= 0.5
+                # Undo odd-m sqrt(s) scaling (VMEC shalf factor).
+                if (m % 2 == 1) and (pshalf is not None):
+                    dnorm1 = dnorm1 / float(pshalf[js])
+
+                bsubumn1 = acc_dtype(0.0)
+                bsubumn2 = acc_dtype(0.0)
+                bsubvmn1 = acc_dtype(0.0)
+                bsubvmn2 = acc_dtype(0.0)
+
+                for k in range(nzeta):
+                    for j in range(nt2):
+                        tsini1 = sinmui[j, m] * cosnv[k, n] * dnorm1
+                        tsini2 = cosmui[j, m] * sinnv[k, n] * dnorm1
+                        tcosi1 = cosmui[j, m] * cosnv[k, n] * dnorm1
+                        tcosi2 = sinmui[j, m] * sinnv[k, n] * dnorm1
+                        val_u = bsubu_in[j, k]
+                        val_v = bsubv_in[j, k]
+                        bsubumn1 += tcosi1 * val_u
+                        bsubumn2 += tcosi2 * val_u
+                        bsubvmn1 += tcosi1 * val_v
+                        bsubvmn2 += tcosi2 * val_v
+
+                for k in range(nzeta):
+                    for j in range(nt2):
+                        tcos1 = cosmu[j, m] * cosnv[k, n]
+                        tcos2 = sinmu[j, m] * sinnv[k, n]
+                        bsubu_out[js, j, k] += tcos1 * bsubumn1 + tcos2 * bsubumn2
+                        bsubv_out[js, j, k] += tcos1 * bsubvmn1 + tcos2 * bsubvmn2
+
+    return np.asarray(bsubu_out, dtype=float), np.asarray(bsubv_out, dtype=float)
+
+
+def _jxbforce_bsubsu_bsubsv_loop(
+    *,
+    bsubs: np.ndarray,
+    trig,
+    mmax_force: int,
+    nmax_force: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Loop-based bsubsu/bsubsv reconstruction (jxbforce)."""
+    # Cancellation in jxbforce transforms is severe for some equilibria
+    # (e.g. QI_nfp2 near edge). Accumulate in long double, then cast back.
+    acc_dtype = np.longdouble
+    bsubs = np.asarray(bsubs, dtype=acc_dtype)
+    ns, ntheta, nzeta = bsubs.shape
+    nt2 = int(trig.ntheta2)
+    if ntheta < nt2:
+        raise ValueError("bsubs grid smaller than ntheta2")
+
+    mmax = int(mmax_force)
+    nmax = int(nmax_force)
+    if mmax < 0 or nmax < 0:
+        return np.zeros((ns, nt2, nzeta), dtype=float), np.zeros((ns, nt2, nzeta), dtype=float)
+
+    cosmui = np.asarray(trig.cosmui, dtype=acc_dtype)[:nt2, : mmax + 1]
+    sinmui = np.asarray(trig.sinmui, dtype=acc_dtype)[:nt2, : mmax + 1]
+    cosmu = np.asarray(trig.cosmu, dtype=acc_dtype)[:nt2, : mmax + 1]
+    sinmu = np.asarray(trig.sinmu, dtype=acc_dtype)[:nt2, : mmax + 1]
+    cosmum = np.asarray(trig.cosmum, dtype=acc_dtype)[:nt2, : mmax + 1]
+    sinmum = np.asarray(trig.sinmum, dtype=acc_dtype)[:nt2, : mmax + 1]
+    cosnv = np.asarray(trig.cosnv, dtype=acc_dtype)[:, : nmax + 1]
+    sinnv = np.asarray(trig.sinnv, dtype=acc_dtype)[:, : nmax + 1]
+    cosnvn = np.asarray(trig.cosnvn, dtype=acc_dtype)[:, : nmax + 1]
+    sinnvn = np.asarray(trig.sinnvn, dtype=acc_dtype)[:, : nmax + 1]
+
+    r0scale = float(getattr(trig, "r0scale", 1.0))
+    base_dnorm = acc_dtype(1.0 / (r0scale**2))
+    mnyq, nnyq = _jxbforce_nyquist_limits(trig)
+
+    bsubsu = np.zeros((ns, nt2, nzeta), dtype=acc_dtype)
+    bsubsv = np.zeros((ns, nt2, nzeta), dtype=acc_dtype)
+
+    for js in range(ns):
+        bsubs_s = bsubs[js, :nt2, :]
+        for m in range(mmax + 1):
+            for n in range(nmax + 1):
+                dnorm1 = base_dnorm
+                if mnyq > 0 and m == mnyq:
+                    dnorm1 *= 0.5
+                if nnyq > 0 and n == nnyq and n != 0:
+                    dnorm1 *= 0.5
+
+                bsubsmn1 = acc_dtype(0.0)
+                bsubsmn2 = acc_dtype(0.0)
+                for k in range(nzeta):
+                    for j in range(nt2):
+                        tsini1 = sinmui[j, m] * cosnv[k, n] * dnorm1
+                        tsini2 = cosmui[j, m] * sinnv[k, n] * dnorm1
+                        val = bsubs_s[j, k]
+                        bsubsmn1 += tsini1 * val
+                        bsubsmn2 += tsini2 * val
+
+                for k in range(nzeta):
+                    for j in range(nt2):
+                        tcosm1 = cosmum[j, m] * cosnv[k, n]
+                        tcosm2 = sinmum[j, m] * sinnv[k, n]
+                        bsubsu[js, j, k] += tcosm1 * bsubsmn1 + tcosm2 * bsubsmn2
+                        tcosn1 = sinmu[j, m] * sinnvn[k, n]
+                        tcosn2 = cosmu[j, m] * cosnvn[k, n]
+                        bsubsv[js, j, k] += tcosn1 * bsubsmn1 + tcosn2 * bsubsmn2
+
+    return np.asarray(bsubsu, dtype=float), np.asarray(bsubsv, dtype=float)
+
+
+def _jxbforce_getbsubs_coeffs_lasym_false(
+    *,
+    frho: np.ndarray,
+    bsupu: np.ndarray,
+    bsupv: np.ndarray,
+    trig,
+    nfp: int,
+) -> np.ndarray | None:
+    """Solve VMEC getbsubs collocation system (lasym=False).
+
+    Returns coefficients ``bsubsmn(m,n)`` with ``m=0..mnyq`` and
+    ``n=-nnyq..nnyq`` in the jxbforce convention:
+    - ``n>=0``: sin(mu)cos(nv)
+    - ``n<0``: cos(mu)sin(|n|v)
+    """
+    frho = np.asarray(frho, dtype=float)
+    bsupu = np.asarray(bsupu, dtype=float)
+    bsupv = np.asarray(bsupv, dtype=float)
+
+    nt2 = int(trig.ntheta2)
+    nzeta = int(np.asarray(trig.cosnv).shape[0])
+    mmax = max(nt2 - 1, 0)
+    nmax = max(nzeta // 2, 0)
+    if frho.shape != (nt2, nzeta):
+        return None
+    if bsupu.shape != (nt2, nzeta) or bsupv.shape != (nt2, nzeta):
+        return None
+
+    nmax1 = max(0, nmax - 1)
+    itotal = nt2 * nzeta - 2 * nmax1
+    if itotal <= 0:
+        return None
+
+    cosmu = np.asarray(trig.cosmu, dtype=float)[:nt2, : mmax + 1]
+    sinmu = np.asarray(trig.sinmu, dtype=float)[:nt2, : mmax + 1]
+    cosnv = np.asarray(trig.cosnv, dtype=float)[:, : nmax + 1]
+    sinnv = np.asarray(trig.sinnv, dtype=float)[:, : nmax + 1]
+
+    A = np.zeros((itotal, itotal), dtype=float)
+    rhs = np.zeros((itotal,), dtype=float)
+    row = 0
+    z_skip_start = (nzeta // 2) + 1
+
+    for i in range(nt2):
+        for k in range(nzeta):
+            if (i == 0 or i == nt2 - 1) and (k >= z_skip_start):
+                continue
+            if row >= itotal:
+                return None
+            rhs[row] = frho[i, k]
+            col = 0
+            bu = bsupu[i, k]
+            bv = bsupv[i, k]
+            for m in range(mmax + 1):
+                dm = float(m) * bu
+                for n in range(nmax + 1):
+                    ccmn = cosmu[i, m] * cosnv[k, n]
+                    ssmn = sinmu[i, m] * sinnv[k, n]
+                    dn = float(n * nfp) * bv
+                    termsc = dm * ccmn - dn * ssmn
+                    termcs = -dm * ssmn + dn * ccmn
+                    if n == 0 or n == nmax:
+                        if m > 0:
+                            A[row, col] = termsc
+                            col += 1
+                        elif n == 0:
+                            # Pedestal term for (m,n)=(0,0).
+                            A[row, col] = bv
+                            col += 1
+                        else:
+                            A[row, col] = termcs
+                            col += 1
+                    elif m == 0 or m == mmax:
+                        A[row, col] = termcs
+                        col += 1
+                    else:
+                        A[row, col] = termsc
+                        col += 1
+                        A[row, col] = termcs
+                        col += 1
+            if col != itotal:
+                return None
+            row += 1
+
+    if row != itotal:
+        return None
+
+    try:
+        sol = np.linalg.solve(A, rhs)
+    except np.linalg.LinAlgError:
+        try:
+            sol, *_ = np.linalg.lstsq(A, rhs, rcond=None)
+        except np.linalg.LinAlgError:
+            return None
+
+    coeff = np.zeros((mmax + 1, 2 * nmax + 1), dtype=float)
+    off = nmax
+    idx = 0
+    for m in range(mmax + 1):
+        for n in range(nmax + 1):
+            if n == 0 or n == nmax:
+                if m > 0:
+                    coeff[m, off + n] = sol[idx]
+                    idx += 1
+                elif n == 0:
+                    coeff[m, off + n] = sol[idx]
+                    idx += 1
+                else:
+                    coeff[m, off - n] = sol[idx]
+                    idx += 1
+            elif m == 0 or m == mmax:
+                coeff[m, off - n] = sol[idx]
+                idx += 1
+            else:
+                coeff[m, off + n] = sol[idx]
+                idx += 1
+                coeff[m, off - n] = sol[idx]
+                idx += 1
+    if idx != itotal:
+        return None
+    return coeff
+
+
+def _jxbforce_apply_bsubs_correction_lasym_false(
+    *,
+    bsubu: np.ndarray,
+    bsubv: np.ndarray,
+    bsubs: np.ndarray,
+    bsubsu: np.ndarray,
+    bsubsv: np.ndarray,
+    bsupu: np.ndarray,
+    bsupv: np.ndarray,
+    sqrtg: np.ndarray,
+    pres: np.ndarray,
+    vp: np.ndarray,
+    hs: float,
+    signgs: float,
+    trig,
+    nfp: int,
+    sum_w,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Mirror VMEC jxbforce corrected-bsubs pass for lasym=False."""
+    bsubu = np.asarray(bsubu, dtype=float)
+    bsubv = np.asarray(bsubv, dtype=float)
+    bsubs = np.asarray(bsubs, dtype=float)
+    bsubsu = np.asarray(bsubsu, dtype=float)
+    bsubsv = np.asarray(bsubsv, dtype=float)
+    bsupu = np.asarray(bsupu, dtype=float)
+    bsupv = np.asarray(bsupv, dtype=float)
+    sqrtg = np.asarray(sqrtg, dtype=float)
+    pres = np.asarray(pres, dtype=float)
+    vp = np.asarray(vp, dtype=float)
+
+    ns, nt2, nzeta = bsubu.shape
+    if ns < 3 or hs == 0.0:
+        return bsubs, bsubsu, bsubsv
+
+    ohs = 1.0 / hs
+    mnyq, nnyq = _jxbforce_nyquist_limits(trig)
+    cosmu = np.asarray(trig.cosmu, dtype=float)[:nt2, : mnyq + 1]
+    sinmu = np.asarray(trig.sinmu, dtype=float)[:nt2, : mnyq + 1]
+    cosmum = np.asarray(trig.cosmum, dtype=float)[:nt2, : mnyq + 1]
+    sinmum = np.asarray(trig.sinmum, dtype=float)[:nt2, : mnyq + 1]
+    cosnv = np.asarray(trig.cosnv, dtype=float)[:, : nnyq + 1]
+    sinnv = np.asarray(trig.sinnv, dtype=float)[:, : nnyq + 1]
+    cosnvn = np.asarray(trig.cosnvn, dtype=float)[:, : nnyq + 1]
+    sinnvn = np.asarray(trig.sinnvn, dtype=float)[:, : nnyq + 1]
+
+    for js in range(1, ns - 1):
+        jxb = 0.5 * (sqrtg[js] + sqrtg[js + 1])
+        bsupu1 = 0.5 * (bsupu[js] * sqrtg[js] + bsupu[js + 1] * sqrtg[js + 1])
+        bsupv1 = 0.5 * (bsupv[js] * sqrtg[js] + bsupv[js + 1] * sqrtg[js + 1])
+
+        brho = ohs * (
+            bsupu1 * (bsubu[js + 1] - bsubu[js]) + bsupv1 * (bsubv[js + 1] - bsubv[js])
+        )
+        brho = brho + (pres[js + 1] - pres[js]) * ohs * jxb
+
+        brho00 = float(sum_w(brho))
+        vden = 0.5 * (vp[js] + vp[js + 1])
+        if vden != 0.0:
+            brho = brho - signgs * jxb * (brho00 / vden)
+
+        coeff = _jxbforce_getbsubs_coeffs_lasym_false(
+            frho=brho,
+            bsupu=bsupu1,
+            bsupv=bsupv1,
+            trig=trig,
+            nfp=int(nfp),
+        )
+        if coeff is None:
+            continue
+
+        bsubs_s = np.zeros((nt2, nzeta), dtype=float)
+        bsubsu_s = np.zeros((nt2, nzeta), dtype=float)
+        bsubsv_s = np.zeros((nt2, nzeta), dtype=float)
+        off = nnyq
+
+        for m in range(mnyq + 1):
+            for n in range(nnyq + 1):
+                c1 = coeff[m, off + n]
+                c2 = 0.0 if n == 0 else coeff[m, off - n]
+                for k in range(nzeta):
+                    for j in range(nt2):
+                        tsin1 = sinmu[j, m] * cosnv[k, n]
+                        tsin2 = cosmu[j, m] * sinnv[k, n]
+                        bsubs_s[j, k] += tsin1 * c1 + tsin2 * c2
+
+                        tcosm1 = cosmum[j, m] * cosnv[k, n]
+                        tcosm2 = sinmum[j, m] * sinnv[k, n]
+                        bsubsu_s[j, k] += tcosm1 * c1 + tcosm2 * c2
+
+                        tcosn1 = sinmu[j, m] * sinnvn[k, n]
+                        tcosn2 = cosmu[j, m] * cosnvn[k, n]
+                        bsubsv_s[j, k] += tcosn1 * c1 + tcosn2 * c2
+
+        bsubs[js] = bsubs_s
+        bsubsu[js] = bsubsu_s
+        bsubsv[js] = bsubsv_s
+
+    if ns > 2:
+        bsubs[0] = 2.0 * bsubs[1] - bsubs[2]
+        bsubs[-1] = 2.0 * bsubs[-1] - bsubs[-2]
+    return bsubs, bsubsu, bsubsv
+
+
+def _compute_mercier(
+    *,
+    state: VMECState,
+    geom_modes,
+    s: np.ndarray,
+    lconm1: bool,
+    lthreed: bool,
+    lasym: bool,
+    nfp: int,
+    mmax_force: int,
+    nmax_force: int,
+    pres: np.ndarray,
+    vp: np.ndarray,
+    phips: np.ndarray,
+    iotas: np.ndarray,
+    bsq: np.ndarray,
+    sqrtg: np.ndarray,
+    bsubu: np.ndarray,
+    bsubv: np.ndarray,
+    bsupu: np.ndarray,
+    bsupv: np.ndarray,
+    trig,
+    geom: dict[str, Any],
+    jac_half: Any | None = None,
+    force_rs: np.ndarray | None = None,
+    force_zs: np.ndarray | None = None,
+    force_ru12: np.ndarray | None = None,
+    force_zu12: np.ndarray | None = None,
+    sigma_an: np.ndarray | None = None,
+    bsubu_raw: np.ndarray | None = None,
+    bsubv_raw: np.ndarray | None = None,
+    signgs: int | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Port of VMEC mercier.f to compute Mercier and jxbforce-style scalars."""
+    ns = int(pres.shape[0])
+    if ns < 3:
+        return np.zeros((ns,), dtype=float)
+    hs = 1.0 / float(ns - 1)
+
+    sqrtg = np.asarray(sqrtg, dtype=float)
+    if sigma_an is None:
+        sigma_an = np.ones_like(sqrtg)
+    else:
+        sigma_an = np.asarray(sigma_an, dtype=float)
+    if signgs is not None and int(signgs) != 0:
+        sign_jac = float(np.sign(float(signgs)))
+    else:
+        sign_jac = float(np.sign(sqrtg[-1, 0, 0])) if float(sqrtg[-1, 0, 0]) != 0.0 else 1.0
+    phip_real = (2.0 * np.pi) * np.asarray(phips, dtype=float) * sign_jac
+    vp_real = np.zeros_like(phip_real)
+    vp_real[1:] = sign_jac * (2.0 * np.pi) ** 2 * np.asarray(vp[1:], dtype=float) / phip_real[1:]
+
+    wint = _vmec_wint_from_trig(trig)
+    nzeta = wint.shape[1]
+    ntheta = wint.shape[0]
+    nznt = ntheta * nzeta
+
+    # Use explicit theta/zeta loop accumulation to match VMEC Fortran
+    # summation order on cancellation-sensitive surface averages.
+    def _sum_w(arr: np.ndarray) -> float:
+        acc = 0.0
+        for j in range(ntheta):
+            wrow = wint[j]
+            arow = arr[j]
+            for k in range(nzeta):
+                acc += float(arow[k]) * float(wrow[k])
+        return acc
+
+    # Geometry fields on the full mesh (physical values from internal VMEC coefficients).
+    R = np.asarray(geom["R"], dtype=float)
+    Z = np.asarray(geom["Z"], dtype=float)
+    Ru = np.asarray(geom["Ru"], dtype=float)
+    Zu = np.asarray(geom["Zu"], dtype=float)
+    Rv = np.asarray(geom["Rv"], dtype=float)
+    Zv = np.asarray(geom["Zv"], dtype=float)
+
+    bsubs = _compute_bsubs_half_mesh(
+        state=state,
+        geom_modes=geom_modes,
+        s=s,
+        lconm1=bool(lconm1),
+        lthreed=bool(lthreed),
+        lasym=bool(lasym),
+        bsupu=bsupu,
+        bsupv=bsupv,
+        trig=trig,
+        geom=geom,
+        jac_half=jac_half,
+        force_rs=force_rs,
+        force_zs=force_zs,
+        force_ru12=force_ru12,
+        force_zu12=force_zu12,
+        apply_scalxc=os.getenv("VMEC_JAX_BSS_APPLY_SCALXC", "0") not in ("", "0"),
+    )
+
+    # For lasym=False, VMEC stores fields on the reduced theta grid already.
+    # Only apply symmetrization when a full theta grid is supplied.
+    if not bool(lasym):
+        nt2 = int(trig.ntheta2)
+        nt1 = int(trig.ntheta1)
+        if nt2 > 0:
+            bsubu = np.asarray(bsubu, dtype=float)
+            bsubv = np.asarray(bsubv, dtype=float)
+            if bsubu.shape[1] > nt2:
+                i0 = np.arange(nt2, dtype=int)
+                ir0 = np.where(i0 == 0, 0, nt1 - i0)
+                kk = (nzeta - np.arange(nzeta, dtype=int)) % nzeta
+
+                def _sym_half(arr: np.ndarray) -> np.ndarray:
+                    a_half = arr[:, :nt2, :]
+                    a_ref = arr[:, ir0, :][:, :, kk]
+                    return 0.5 * (a_half + a_ref)
+
+                bsubu = _sym_half(bsubu)
+                bsubv = _sym_half(bsubv)
+            else:
+                bsubu = bsubu[:, :nt2, :]
+                bsubv = bsubv[:, :nt2, :]
+
+    # Parity-decomposed geometry (totzsps convention): X = X_even + sqrt(s)*X_odd.
+    from .vmec_jacobian import _apply_vmec_axis_rules
+    from .vmec_realspace import (
+        vmec_realspace_synthesis,
+        vmec_realspace_synthesis_dtheta,
+        vmec_realspace_synthesis_dzeta_phys,
+    )
+
+    m = np.asarray(geom_modes.m)
+    mask_even = (m % 2) == 0
+    mask_odd = np.logical_not(mask_even)
+    Rcos = np.asarray(state.Rcos)
+    Rsin = np.asarray(state.Rsin)
+    Zcos = np.asarray(state.Zcos)
+    Zsin = np.asarray(state.Zsin)
+    if bool(lconm1):
+        Rcos, Zsin, Rsin, Zcos = vmec_m1_internal_to_physical_signed(
+            Rcos=Rcos,
+            Zsin=Zsin,
+            Rsin=Rsin,
+            Zcos=Zcos,
+            modes=geom_modes,
+            lthreed=bool(lthreed),
+            lasym=bool(lasym),
+            lconm1=bool(lconm1),
+        )
+    Rcos = _apply_vmec_axis_rules(Rcos, m)
+    Rsin = _apply_vmec_axis_rules(Rsin, m)
+    Zcos = _apply_vmec_axis_rules(Zcos, m)
+    Zsin = _apply_vmec_axis_rules(Zsin, m)
+
+    coeff_cos_stack = np.stack([Rcos, Zcos], axis=0)
+    coeff_sin_stack = np.stack([Rsin, Zsin], axis=0)
+    mask_stack = np.stack([mask_even.astype(float), mask_odd.astype(float)], axis=0)
+    coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
+    coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
+
+    stack = vmec_realspace_synthesis(
+        coeff_cos=coeff_cos,
+        coeff_sin=coeff_sin,
+        modes=geom_modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+        s=s,
+    )
+    stack_t = vmec_realspace_synthesis_dtheta(
+        coeff_cos=coeff_cos,
+        coeff_sin=coeff_sin,
+        modes=geom_modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+        s=s,
+    )
+    stack_p = vmec_realspace_synthesis_dzeta_phys(
+        coeff_cos=coeff_cos,
+        coeff_sin=coeff_sin,
+        modes=geom_modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+        s=s,
+    )
+    even = np.asarray(stack[0])
+    odd = np.asarray(stack[1])
+    even_t = np.asarray(stack_t[0])
+    odd_t = np.asarray(stack_t[1])
+    even_p = np.asarray(stack_p[0])
+    odd_p = np.asarray(stack_p[1])
+
+    R_even = even[0]
+    R_odd = odd[0]
+    Z_even = even[1]
+    Z_odd = odd[1]
+    Ru_even = even_t[0]
+    Ru_odd = odd_t[0]
+    Zu_even = even_t[1]
+    Zu_odd = odd_t[1]
+    Rv_even = even_p[0]
+    Rv_odd = odd_p[0]
+    Zv_even = even_p[1]
+    Zv_odd = odd_p[1]
+
+    # VMEC jxbforce-style derivatives of bsubs on the reduced grid.
+    mmax = int(mmax_force)
+    nmax = int(nmax_force)
+    nt2 = int(trig.ntheta2)
+    nzeta = int(trig.cosnv.shape[0])
+
+    bsubs_use = bsubs.copy()
+    if ns > 2:
+        # Match VMEC's jxbforce/wrout convention: average to the full mesh.
+        for js in range(1, ns - 1):
+            bsubs_use[js] = 0.5 * (bsubs_use[js] + bsubs_use[js + 1])
+    bsubs_use[0] = 0.0
+
+    # Symforce parity adjustment for bsubs would be needed for `lasym=True`
+    # (full-interval theta grid). For `lasym=False`, VMEC already works on the
+    # reduced interval and no additional symmetrization is required.
+
+    # Reconstruct bsubsu/bsubsv via Fourier coefficients to match jxbforce.
+    use_loop = (not bool(lasym)) and os.getenv("VMEC_JAX_JXBFORCE_LOOP", "1") not in ("", "0")
+    if use_loop:
+        bsubsu, bsubsv = _jxbforce_bsubsu_bsubsv_loop(
+            bsubs=bsubs_use,
+            trig=trig,
+            mmax_force=mmax,
+            nmax_force=nmax,
+        )
+    else:
+        cosmui = np.asarray(trig.cosmui, dtype=float)[:nt2, : mmax + 1]
+        sinmui = np.asarray(trig.sinmui, dtype=float)[:nt2, : mmax + 1]
+        cosmu = np.asarray(trig.cosmu, dtype=float)[:nt2, : mmax + 1]
+        sinmu = np.asarray(trig.sinmu, dtype=float)[:nt2, : mmax + 1]
+        cosmum = np.asarray(trig.cosmum, dtype=float)[:nt2, : mmax + 1]
+        sinmum = np.asarray(trig.sinmum, dtype=float)[:nt2, : mmax + 1]
+        cosnv = np.asarray(trig.cosnv, dtype=float)[:, : nmax + 1]
+        sinnv = np.asarray(trig.sinnv, dtype=float)[:, : nmax + 1]
+        cosnvn = np.asarray(trig.cosnvn, dtype=float)[:, : nmax + 1]
+        sinnvn = np.asarray(trig.sinnvn, dtype=float)[:, : nmax + 1]
+
+        r0scale = float(getattr(trig, "r0scale", 1.0))
+        dnorm1 = 1.0 / (r0scale**2)
+        dmult = np.full((mmax + 1, nmax + 1), dnorm1, dtype=float)
+        mnyq = np.asarray(trig.cosmui, dtype=float).shape[1] - 1
+        nnyq = np.asarray(trig.cosnv, dtype=float).shape[1] - 1
+        if mnyq > 0 and mnyq <= mmax:
+            dmult[mnyq, :] *= 0.5
+        if nnyq > 0 and nnyq <= nmax:
+            dmult[:, nnyq] *= 0.5
+
+        # jxbforce-style Fourier coefficients for bsubs (sin basis).
+        f_theta_sin = np.einsum("sik,im->smk", bsubs_use[:, :nt2, :], sinmui, optimize=True)
+        f_theta_cos = np.einsum("sik,im->smk", bsubs_use[:, :nt2, :], cosmui, optimize=True)
+        bsubsmn1 = np.einsum("smk,kn->smn", f_theta_sin, cosnv, optimize=True) * dmult[None, :, :]
+        bsubsmn2 = np.einsum("smk,kn->smn", f_theta_cos, sinnv, optimize=True) * dmult[None, :, :]
+
+        # Reconstruct bsubsu/bsubsv (jxbforce).
+        tmp_su_1 = np.einsum("smn,im->sin", bsubsmn1, cosmum, optimize=True)
+        tmp_su_2 = np.einsum("smn,im->sin", bsubsmn2, sinmum, optimize=True)
+        bsubsu = np.einsum("sin,kn->sik", tmp_su_1, cosnv, optimize=True) + np.einsum(
+            "sin,kn->sik", tmp_su_2, sinnv, optimize=True
+        )
+
+        tmp_sv_1 = np.einsum("smn,im->sin", bsubsmn1, sinmu, optimize=True)
+        tmp_sv_2 = np.einsum("smn,im->sin", bsubsmn2, cosmu, optimize=True)
+        bsubsv = np.einsum("sin,kn->sik", tmp_sv_1, sinnvn, optimize=True) + np.einsum(
+            "sin,kn->sik", tmp_sv_2, cosnvn, optimize=True
+        )
+
+    bsubu = np.asarray(bsubu, dtype=float)
+    bsubv = np.asarray(bsubv, dtype=float)
+    if (not bool(lasym)) and (os.getenv("VMEC_JAX_ENABLE_BSUBS_CORR", "") not in ("", "0")):
+        bsubs_use, bsubsu, bsubsv = _jxbforce_apply_bsubs_correction_lasym_false(
+            bsubu=bsubu,
+            bsubv=bsubv,
+            bsubs=bsubs_use,
+            bsubsu=bsubsu,
+            bsubsv=bsubsv,
+            bsupu=np.asarray(bsupu, dtype=float),
+            bsupv=np.asarray(bsupv, dtype=float),
+            sqrtg=np.asarray(sqrtg, dtype=float),
+            pres=np.asarray(pres, dtype=float),
+            vp=np.asarray(vp, dtype=float),
+            hs=float(hs),
+            signgs=float(sign_jac),
+            trig=trig,
+            nfp=int(nfp),
+            sum_w=_sum_w,
+        )
+    itheta = np.zeros_like(bsubs)
+    izeta = np.zeros_like(bsubs)
+    ohs = 1.0 / hs
+    for js in range(1, ns - 1):
+        itheta[js] = bsubsv[js] - ohs * (bsubv[js + 1] - bsubv[js])
+        izeta[js] = -bsubsu[js] + ohs * (bsubu[js + 1] - bsubu[js])
+    izeta[0] = 2.0 * izeta[1] - izeta[2]
+    izeta[-1] = 2.0 * izeta[-2] - izeta[-3]
+    # Match jxbforce: convert to MKS units (1/mu0 factor).
+    mu0 = 4e-7 * np.pi
+    itheta = itheta / mu0
+    izeta = izeta / mu0
+    bdotk = np.zeros_like(bsubs)
+    for js in range(1, ns - 1):
+        bsubu1 = 0.5 * (bsubu[js + 1] + bsubu[js])
+        bsubv1 = 0.5 * (bsubv[js + 1] + bsubv[js])
+        bdotk[js] = itheta[js] * bsubu1 + izeta[js] * bsubv1
+
+    # VMEC multiplies bdotk by mu0 before feeding Mercier (bdotj = sqrt(g)*J·B).
+    bdotk_merc = MU0 * bdotk
+
+    # Optional debug dump for parity work.
+    if os.getenv("VMEC_JAX_DUMP_JDOTB", "") not in ("", "0"):
+        from pathlib import Path
+        tag = os.getenv("VMEC_JAX_DUMP_TAG", "").strip()
+        name = "jdotb_debug" + (f"_{tag}" if tag else "") + ".npz"
+        outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+        outdir.mkdir(parents=True, exist_ok=True)
+        np.savez(
+            outdir / name,
+            bdotk=np.asarray(bdotk, dtype=float),
+            itheta=np.asarray(itheta, dtype=float),
+            izeta=np.asarray(izeta, dtype=float),
+            bsubsu=np.asarray(bsubsu, dtype=float),
+            bsubsv=np.asarray(bsubsv, dtype=float),
+            bsubu=np.asarray(bsubu, dtype=float),
+            bsubv=np.asarray(bsubv, dtype=float),
+            bsubu_raw=np.asarray(bsubu_raw, dtype=float) if bsubu_raw is not None else None,
+            bsubv_raw=np.asarray(bsubv_raw, dtype=float) if bsubv_raw is not None else None,
+            bsupu=np.asarray(bsupu, dtype=float),
+            bsupv=np.asarray(bsupv, dtype=float),
+            bsubs=np.asarray(bsubs_use, dtype=float),
+            bsubs_raw=np.asarray(bsubs, dtype=float),
+            sqrtg=np.asarray(sqrtg, dtype=float),
+            bsq=np.asarray(bsq, dtype=float),
+            vp=np.asarray(vp, dtype=float),
+            phips=np.asarray(phips, dtype=float),
+            wint=np.asarray(wint, dtype=float),
+        )
+
+    DMerc = np.zeros((ns,), dtype=float)
+    Dshear = np.zeros((ns,), dtype=float)
+    Dcurr = np.zeros((ns,), dtype=float)
+    Dwell = np.zeros((ns,), dtype=float)
+    Dgeod = np.zeros((ns,), dtype=float)
+    shear = np.zeros((ns,), dtype=float)
+    vpp = np.zeros((ns,), dtype=float)
+    presp = np.zeros((ns,), dtype=float)
+    ip = np.zeros((ns,), dtype=float)
+    torcur = np.zeros((ns,), dtype=float)
+    for i in range(1, ns):
+        torcur[i] = sign_jac * (2.0 * np.pi) * _sum_w(bsubu[i])
+    for i in range(1, ns - 1):
+        phip_full = 0.5 * (phip_real[i + 1] + phip_real[i])
+        denom = 1.0 / (hs * phip_full)
+        shear[i] = (iotas[i + 1] - iotas[i]) * denom
+        vpp[i] = (vp_real[i + 1] - vp_real[i]) * denom
+        presp[i] = (pres[i + 1] - pres[i]) * denom
+        ip[i] = (torcur[i + 1] - torcur[i]) * denom
+
+    b2 = 2.0 * (bsq - pres[:, None, None])
+    for i in range(1, ns - 1):
+        phip_full = 0.5 * (phip_real[i + 1] + phip_real[i])
+        gsqrt_raw = 0.5 * (sqrtg[i] + sqrtg[i + 1])
+        gsqrt_full = gsqrt_raw / phip_full
+        sqs = float(np.sqrt(s[i]))
+        r1f = R_even[i] + sqs * R_odd[i]
+        rtf = Ru_even[i] + sqs * Ru_odd[i]
+        ztf = Zu_even[i] + sqs * Zu_odd[i]
+        rzf = Rv_even[i] + sqs * Rv_odd[i]
+        zzf = Zv_even[i] + sqs * Zv_odd[i]
+        gtt = rtf * rtf + ztf * ztf
+        gpp = (gsqrt_full * gsqrt_full) / (
+            gtt * r1f * r1f + (rtf * zzf - rzf * ztf) ** 2
+        )
+        b2i = 0.5 * (b2[i + 1] + b2[i])
+        ob2 = gsqrt_full / b2i
+        tpp = _sum_w(ob2)
+        ob2 = b2i * gsqrt_full * gpp
+        tbb = _sum_w(ob2)
+        # VMEC divides bdotj by the raw Jacobian (before phip scaling),
+        # then uses the flux-normalized Jacobian in jdotb.
+        bdotj_norm = np.where(gsqrt_raw != 0.0, bdotk_merc[i] / gsqrt_raw, 0.0)
+        jdotb = bdotj_norm * gpp * gsqrt_full
+        tjb = _sum_w(jdotb)
+        jdotb2 = jdotb * bdotj_norm / b2i
+        tjj = _sum_w(jdotb2)
+
+        tpp *= (2.0 * np.pi) ** 2
+        tjb *= (2.0 * np.pi) ** 2
+        tbb *= (2.0 * np.pi) ** 2
+        tjj *= (2.0 * np.pi) ** 2
+        dshear = 0.25 * shear[i] * shear[i]
+        dcurr = -shear[i] * (tjb - ip[i] * tbb)
+        dwell = presp[i] * (vpp[i] - presp[i] * tpp) * tbb
+        dgeod = tjb * tjb - tbb * tjj
+        Dshear[i] = dshear
+        Dcurr[i] = dcurr
+        Dwell[i] = dwell
+        Dgeod[i] = dgeod
+        DMerc[i] = dshear + dcurr + dwell + dgeod
+
+    # jxbforce-style 1D diagnostics (jdotb, bdotb, bdotgradv).
+    jdotb = np.zeros((ns,), dtype=float)
+    bdotb = np.zeros((ns,), dtype=float)
+    bdotgradv = np.zeros((ns,), dtype=float)
+    dnorm1 = float((2.0 * np.pi) ** 2)
+    vp = np.asarray(vp, dtype=float)
+    phips = np.asarray(phips, dtype=float)
+    for js in range(1, ns - 1):
+        denom = vp[js + 1] + vp[js]
+        if denom == 0.0:
+            continue
+        ovp = 2.0 / denom / dnorm1
+        tjnorm = ovp * float(sign_jac)
+        sqgb2 = sqrtg[js + 1] * (bsq[js + 1] - pres[js + 1]) + sqrtg[js] * (bsq[js] - pres[js])
+        sigma = sigma_an[js]
+        jdotb[js] = dnorm1 * tjnorm * _sum_w(bdotk[js] / sigma)
+        bdotb[js] = dnorm1 * tjnorm * _sum_w(sqgb2 / sigma)
+        bdotgradv[js] = 0.5 * dnorm1 * tjnorm * (phips[js] + phips[js + 1])
+    if ns > 2:
+        jdotb[0] = 2.0 * jdotb[1] - jdotb[2]
+        jdotb[-1] = 2.0 * jdotb[-2] - jdotb[-3]
+        bdotb[0] = 2.0 * bdotb[2] - bdotb[1]
+        bdotb[-1] = 2.0 * bdotb[-2] - bdotb[-3]
+        bdotgradv[0] = 2.0 * bdotgradv[1] - bdotgradv[2]
+        bdotgradv[-1] = 2.0 * bdotgradv[-2] - bdotgradv[-3]
+
+    return (
+        np.asarray(DMerc, dtype=float),
+        np.asarray(Dshear, dtype=float),
+        np.asarray(Dcurr, dtype=float),
+        np.asarray(Dwell, dtype=float),
+        np.asarray(Dgeod, dtype=float),
+        np.asarray(jdotb, dtype=float),
+        np.asarray(bdotb, dtype=float),
+        np.asarray(bdotgradv, dtype=float),
+    )
+
+
+def _apply_nyquist_half_weight(
+    *,
+    coeff_cos: np.ndarray,
+    coeff_sin: np.ndarray,
+    modes,
+    trig,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Apply VMEC Nyquist normalization for edge modes (m=ntheta1/2, n=nzeta/2)."""
+    coeff_cos = np.asarray(coeff_cos, dtype=float)
+    coeff_sin = np.asarray(coeff_sin, dtype=float)
+    if coeff_cos.ndim != 2 or coeff_sin.ndim != 2:
+        raise ValueError("Expected coeff arrays with shape (ns, K)")
+
+    m = np.asarray(modes.m, dtype=int)
+    n = np.asarray(modes.n, dtype=int)
+    if m.size == 0:
+        return coeff_cos, coeff_sin
+
+    m_nyq = int(np.max(m)) if m.size else -1
+    n_nyq = int(np.max(np.abs(n))) if n.size else -1
+
+    mask = np.zeros_like(m, dtype=bool)
+    if m_nyq > 0:
+        mask |= (m == m_nyq)
+    if n_nyq > 0:
+        mask |= (np.abs(n) == n_nyq)
+    if not np.any(mask):
+        return coeff_cos, coeff_sin
+
+    coeff_cos = coeff_cos.copy()
+    coeff_sin = coeff_sin.copy()
+    coeff_cos[:, mask] *= 0.5
+    coeff_sin[:, mask] *= 0.5
+    return coeff_cos, coeff_sin
+
+
+def _vmec_wrout_nyquist_cos_coeffs(
+    *,
+    f: np.ndarray,
+    modes: ModeTable,
+    trig,
+) -> np.ndarray:
+    """VMEC wrout-style nyquist analysis for cos coefficients (lasym=False).
+
+    This mirrors wrout.f's tcosi integration:
+      tcosi = dmult*(cosmui*cosnv + sgn*sinmui*sinnv)
+      coeff = sum_{i,k} tcosi * f
+    where cosmui/sinmui already include dnorm and endpoint weights.
+    """
+    f = np.asarray(f, dtype=float)
+    if f.ndim != 3:
+        raise ValueError("Expected f with shape (ns, ntheta, nzeta)")
+    m = np.asarray(modes.m, dtype=int)
+    n = np.asarray(modes.n, dtype=int)
+    if m.size == 0:
+        return np.zeros((f.shape[0], 0), dtype=float)
+
+    nt2 = int(trig.ntheta2)
+    if int(f.shape[1]) < nt2:
+        raise ValueError("Input theta grid is smaller than VMEC ntheta2")
+    f = f[:, :nt2, :]
+
+    cosmui = np.asarray(trig.cosmui, dtype=float)[:nt2, :]
+    sinmui = np.asarray(trig.sinmui, dtype=float)[:nt2, :]
+    cosnv = np.asarray(trig.cosnv, dtype=float)
+    sinnv = np.asarray(trig.sinnv, dtype=float)
+
+    mmax = int(np.max(m))
+    nmax = int(np.max(np.abs(n)))
+    if cosmui.shape[1] <= mmax or cosnv.shape[1] <= nmax:
+        raise ValueError("Trig tables do not cover Nyquist mode limits")
+
+    # VMEC halves cosmui(:,mnyq) and cosnv(:,nnyq) during wrout when lnyquist.
+    mnyq = cosmui.shape[1] - 1
+    if mnyq > 0:
+        cosmui = cosmui.copy()
+        cosmui[:, mnyq] *= 0.5
+    nnyq = cosnv.shape[1] - 1
+    if nnyq > 0:
+        cosnv = cosnv.copy()
+        cosnv[:, nnyq] *= 0.5
+
+    f_theta_cos = np.einsum("sik,im->smk", f, cosmui, optimize=True)
+    f_theta_sin = np.einsum("sik,im->smk", f, sinmui, optimize=True)
+    cos_zeta = np.einsum("smk,kn->smn", f_theta_cos, cosnv, optimize=True)
+    sin_zeta = np.einsum("smk,kn->smn", f_theta_sin, sinnv, optimize=True)
+
+    n_abs = np.abs(n)
+    sgn = np.where(n < 0, -1.0, 1.0)
+    cos_part = cos_zeta[:, m, n_abs]
+    sin_part = sin_zeta[:, m, n_abs]
+    coeff = cos_part + sgn[None, :] * sin_part
+
+    mscale = np.asarray(trig.mscale, dtype=float)
+    nscale = np.asarray(trig.nscale, dtype=float)
+    tmult = 0.5 / float(getattr(trig, "r0scale", 1.0)) ** 2
+    dmult = mscale[m] * nscale[n_abs] * tmult
+    dmult = np.where((m == 0) | (n == 0), 2.0 * dmult, dmult)
+    coeff = coeff * dmult[None, :]
+    return np.asarray(coeff, dtype=float)
+
+
+def _vmec_wrout_nyquist_sin_coeffs(
+    *,
+    f: np.ndarray,
+    modes: ModeTable,
+    trig,
+) -> np.ndarray:
+    """VMEC wrout-style nyquist analysis for sin coefficients (lasym=False).
+
+    This mirrors wrout.f's tsini integration:
+      tsini = dmult*(sinmui*cosnv - sgn*cosmui*sinnv)
+      coeff = sum_{i,k} tsini * f
+    where cosmui/sinmui already include dnorm and endpoint weights.
+    """
+    f = np.asarray(f, dtype=float)
+    if f.ndim != 3:
+        raise ValueError("Expected f with shape (ns, ntheta, nzeta)")
+    m = np.asarray(modes.m, dtype=int)
+    n = np.asarray(modes.n, dtype=int)
+    if m.size == 0:
+        return np.zeros((f.shape[0], 0), dtype=float)
+
+    nt2 = int(trig.ntheta2)
+    if int(f.shape[1]) < nt2:
+        raise ValueError("Input theta grid is smaller than VMEC ntheta2")
+    f = f[:, :nt2, :]
+
+    cosmui = np.asarray(trig.cosmui, dtype=float)[:nt2, :]
+    sinmui = np.asarray(trig.sinmui, dtype=float)[:nt2, :]
+    cosnv = np.asarray(trig.cosnv, dtype=float)
+    sinnv = np.asarray(trig.sinnv, dtype=float)
+
+    mmax = int(np.max(m))
+    nmax = int(np.max(np.abs(n)))
+    if cosmui.shape[1] <= mmax or cosnv.shape[1] <= nmax:
+        raise ValueError("Trig tables do not cover Nyquist mode limits")
+
+    # VMEC halves cosmui(:,mnyq) and cosnv(:,nnyq) during wrout when lnyquist.
+    mnyq = cosmui.shape[1] - 1
+    if mnyq > 0:
+        cosmui = cosmui.copy()
+        cosmui[:, mnyq] *= 0.5
+    nnyq = cosnv.shape[1] - 1
+    if nnyq > 0:
+        cosnv = cosnv.copy()
+        cosnv[:, nnyq] *= 0.5
+
+    f_theta_sin = np.einsum("sik,im->smk", f, sinmui, optimize=True)
+    f_theta_cos = np.einsum("sik,im->smk", f, cosmui, optimize=True)
+    cos_zeta = np.einsum("smk,kn->smn", f_theta_sin, cosnv, optimize=True)
+    sin_zeta = np.einsum("smk,kn->smn", f_theta_cos, sinnv, optimize=True)
+
+    n_abs = np.abs(n)
+    sgn = np.where(n < 0, -1.0, 1.0)
+    cos_part = cos_zeta[:, m, n_abs]
+    sin_part = sin_zeta[:, m, n_abs]
+    coeff = cos_part - sgn[None, :] * sin_part
+
+    mscale = np.asarray(trig.mscale, dtype=float)
+    nscale = np.asarray(trig.nscale, dtype=float)
+    tmult = 0.5 / float(getattr(trig, "r0scale", 1.0)) ** 2
+    dmult = mscale[m] * nscale[n_abs] * tmult
+    dmult = np.where((m == 0) | (n == 0), 2.0 * dmult, dmult)
+    coeff = coeff * dmult[None, :]
+    return np.asarray(coeff, dtype=float)
+
+
+def _vmec_wrout_nyquist_synthesis(
+    *,
+    coeff_c: np.ndarray,
+    coeff_s: np.ndarray,
+    modes: ModeTable,
+    trig,
+) -> np.ndarray:
+    """Synthesize real-space field from wrout-style Nyquist coefficients (lasym=False)."""
+    coeff_c = np.asarray(coeff_c, dtype=float)
+    coeff_s = np.asarray(coeff_s, dtype=float)
+    if coeff_c.ndim != 2 or coeff_s.ndim != 2:
+        raise ValueError("Expected coeff arrays with shape (ns, K)")
+    m = np.asarray(modes.m, dtype=int)
+    n = np.asarray(modes.n, dtype=int)
+    if m.size == 0:
+        return np.zeros((coeff_c.shape[0], 0, 0), dtype=float)
+
+    nt2 = int(trig.ntheta2)
+    cosmu = np.asarray(trig.cosmu, dtype=float)[:nt2, :]
+    sinmu = np.asarray(trig.sinmu, dtype=float)[:nt2, :]
+    cosnv = np.asarray(trig.cosnv, dtype=float)
+    sinnv = np.asarray(trig.sinnv, dtype=float)
+
+    mmax = int(np.max(m))
+    nmax = int(np.max(np.abs(n)))
+    if cosmu.shape[1] <= mmax or cosnv.shape[1] <= nmax:
+        raise ValueError("Trig tables do not cover Nyquist mode limits")
+
+    n_abs = np.abs(n)
+    sgn = np.where(n < 0, -1.0, 1.0)
+
+    mscale = np.asarray(trig.mscale, dtype=float)
+    nscale = np.asarray(trig.nscale, dtype=float)
+    tmult = 0.5 / float(getattr(trig, "r0scale", 1.0)) ** 2
+    dmult = mscale[m] * nscale[n_abs] * tmult
+    dmult = np.where((m == 0) | (n == 0), 2.0 * dmult, dmult)
+    dmult = np.where(dmult == 0.0, 1.0, dmult)
+
+    raw_c = coeff_c / dmult[None, :]
+    raw_s = coeff_s / dmult[None, :]
+
+    cosmu_m = cosmu[:, m]
+    sinmu_m = sinmu[:, m]
+    cosnv_n = cosnv[:, n_abs]
+    sinnv_n = sinnv[:, n_abs] * sgn[None, :]
+
+    term_c = cosmu_m[:, None, :] * cosnv_n[None, :, :] + sinmu_m[:, None, :] * sinnv_n[None, :, :]
+    term_s = sinmu_m[:, None, :] * cosnv_n[None, :, :] - cosmu_m[:, None, :] * sinnv_n[None, :, :]
+
+    f = np.einsum("sk,ijk->sij", raw_c, term_c, optimize=True) + np.einsum(
+        "sk,ijk->sij", raw_s, term_s, optimize=True
+    )
+    return np.asarray(f, dtype=float)
+
+
+def _vmec_wrout_nyquist_sin_coeffs_loop(
+    *,
+    f: np.ndarray,
+    modes: ModeTable,
+    trig,
+) -> np.ndarray:
+    """Loop-based wrout nyquist sin coefficients (matches VMEC summation order)."""
+    f = np.asarray(f, dtype=float)
+    if f.ndim != 3:
+        raise ValueError("Expected f with shape (ns, ntheta, nzeta)")
+    m_arr = np.asarray(modes.m, dtype=int)
+    n_arr = np.asarray(modes.n, dtype=int)
+    ns = int(f.shape[0])
+    if m_arr.size == 0:
+        return np.zeros((ns, 0), dtype=float)
+
+    nt2 = int(trig.ntheta2)
+    if int(f.shape[1]) < nt2:
+        raise ValueError("Input theta grid is smaller than VMEC ntheta2")
+    f = f[:, :nt2, :]
+
+    cosmui = np.asarray(trig.cosmui, dtype=float)[:nt2, :]
+    sinmui = np.asarray(trig.sinmui, dtype=float)[:nt2, :]
+    cosnv = np.asarray(trig.cosnv, dtype=float)
+    sinnv = np.asarray(trig.sinnv, dtype=float)
+
+    mmax = int(np.max(m_arr))
+    nmax = int(np.max(np.abs(n_arr)))
+    if cosmui.shape[1] <= mmax or cosnv.shape[1] <= nmax:
+        raise ValueError("Trig tables do not cover Nyquist mode limits")
+
+    # wrout.f applies Nyquist half-weighting by scaling transform tables
+    # before the mode loops when `lnyquist` is enabled.
+    mnyq = cosmui.shape[1] - 1
+    if mnyq > 0:
+        cosmui = cosmui.copy()
+        cosmui[:, mnyq] *= 0.5
+    nnyq = cosnv.shape[1] - 1
+    if nnyq > 0:
+        cosnv = cosnv.copy()
+        cosnv[:, nnyq] *= 0.5
+
+    mscale = np.asarray(trig.mscale, dtype=float)
+    nscale = np.asarray(trig.nscale, dtype=float)
+    tmult = 0.5 / float(getattr(trig, "r0scale", 1.0)) ** 2
+
+    coeff = np.zeros((ns, m_arr.size), dtype=float)
+    nzeta = int(f.shape[2])
+    for js in range(ns):
+        f_js = f[js]
+        for idx, (m, n) in enumerate(zip(m_arr, n_arr)):
+            n1 = abs(int(n))
+            sgn = -1.0 if n < 0 else 1.0
+            dmult = mscale[m] * nscale[n1] * tmult
+            if m == 0 or n == 0:
+                dmult *= 2.0
+            acc = 0.0
+            for k in range(nzeta):
+                for j in range(nt2):
+                    tsini = dmult * (
+                        sinmui[j, m] * cosnv[k, n1] - sgn * cosmui[j, m] * sinnv[k, n1]
+                    )
+                    acc += tsini * f_js[j, k]
+            coeff[js, idx] = acc
+
+    return coeff
+
+
+def _vmec_jxbforce_cos_coeffs(
+    *,
+    f: np.ndarray,
+    modes: ModeTable,
+    trig,
+) -> np.ndarray:
+    """VMEC jxbforce-style cosine coefficients (lasym=False).
+
+    This matches the low-pass filter in jxbforce.f:
+      tcosi = dnorm1*(cosmui*cosnv + sgn*sinmui*sinnv)
+      coeff = sum_{i,k} tcosi * f
+    with dnorm1 = 1/r0scale**2 and Nyquist half-weights for m==mnyq or n==nnyq.
+    """
+    f = np.asarray(f, dtype=float)
+    if f.ndim != 3:
+        raise ValueError("Expected f with shape (ns, ntheta, nzeta)")
+    m = np.asarray(modes.m, dtype=int)
+    n = np.asarray(modes.n, dtype=int)
+    if m.size == 0:
+        return np.zeros((f.shape[0], 0), dtype=float)
+
+    nt2 = int(trig.ntheta2)
+    if int(f.shape[1]) < nt2:
+        raise ValueError("Input theta grid is smaller than VMEC ntheta2")
+    f = f[:, :nt2, :]
+
+    cosmui = np.asarray(trig.cosmui, dtype=float)[:nt2, :]
+    sinmui = np.asarray(trig.sinmui, dtype=float)[:nt2, :]
+    cosnv = np.asarray(trig.cosnv, dtype=float)
+    sinnv = np.asarray(trig.sinnv, dtype=float)
+
+    mmax = int(np.max(m))
+    nmax = int(np.max(np.abs(n)))
+    if cosmui.shape[1] <= mmax or cosnv.shape[1] <= nmax:
+        raise ValueError("Trig tables do not cover Nyquist mode limits")
+
+    f_theta_cos = np.einsum("sik,im->smk", f, cosmui, optimize=True)
+    f_theta_sin = np.einsum("sik,im->smk", f, sinmui, optimize=True)
+    cos_zeta = np.einsum("smk,kn->smn", f_theta_cos, cosnv, optimize=True)
+    sin_zeta = np.einsum("smk,kn->smn", f_theta_sin, sinnv, optimize=True)
+
+    n_abs = np.abs(n)
+    sgn = np.where(n < 0, -1.0, 1.0)
+    cos_part = cos_zeta[:, m, n_abs]
+    sin_part = sin_zeta[:, m, n_abs]
+    coeff = cos_part + sgn[None, :] * sin_part
+
+    r0scale = float(getattr(trig, "r0scale", 1.0))
+    dmult = np.full_like(m, 1.0 / (r0scale**2), dtype=float)
+    mnyq = cosmui.shape[1] - 1
+    nnyq = cosnv.shape[1] - 1
+    if mnyq > 0:
+        dmult = np.where(m == mnyq, 0.5 * dmult, dmult)
+    if nnyq > 0:
+        dmult = np.where((n_abs == nnyq) & (n_abs != 0), 0.5 * dmult, dmult)
+    coeff = coeff * dmult[None, :]
+    return np.asarray(coeff, dtype=float)
+
+
+def _vmec_jxbforce_sin_coeffs(
+    *,
+    f: np.ndarray,
+    modes: ModeTable,
+    trig,
+) -> np.ndarray:
+    """VMEC jxbforce-style sine coefficients (lasym=False)."""
+    f = np.asarray(f, dtype=float)
+    if f.ndim != 3:
+        raise ValueError("Expected f with shape (ns, ntheta, nzeta)")
+    m = np.asarray(modes.m, dtype=int)
+    n = np.asarray(modes.n, dtype=int)
+    if m.size == 0:
+        return np.zeros((f.shape[0], 0), dtype=float)
+
+    nt2 = int(trig.ntheta2)
+    if int(f.shape[1]) < nt2:
+        raise ValueError("Input theta grid is smaller than VMEC ntheta2")
+    f = f[:, :nt2, :]
+
+    cosmui = np.asarray(trig.cosmui, dtype=float)[:nt2, :]
+    sinmui = np.asarray(trig.sinmui, dtype=float)[:nt2, :]
+    cosnv = np.asarray(trig.cosnv, dtype=float)
+    sinnv = np.asarray(trig.sinnv, dtype=float)
+
+    mmax = int(np.max(m))
+    nmax = int(np.max(np.abs(n)))
+    if cosmui.shape[1] <= mmax or cosnv.shape[1] <= nmax:
+        raise ValueError("Trig tables do not cover Nyquist mode limits")
+
+    f_theta_sin = np.einsum("sik,im->smk", f, sinmui, optimize=True)
+    f_theta_cos = np.einsum("sik,im->smk", f, cosmui, optimize=True)
+    cos_zeta = np.einsum("smk,kn->smn", f_theta_sin, cosnv, optimize=True)
+    sin_zeta = np.einsum("smk,kn->smn", f_theta_cos, sinnv, optimize=True)
+
+    n_abs = np.abs(n)
+    sgn = np.where(n < 0, -1.0, 1.0)
+    cos_part = cos_zeta[:, m, n_abs]
+    sin_part = sin_zeta[:, m, n_abs]
+    coeff = cos_part - sgn[None, :] * sin_part
+
+    r0scale = float(getattr(trig, "r0scale", 1.0))
+    dmult = np.full_like(m, 1.0 / (r0scale**2), dtype=float)
+    mnyq = cosmui.shape[1] - 1
+    nnyq = cosnv.shape[1] - 1
+    if mnyq > 0:
+        dmult = np.where(m == mnyq, 0.5 * dmult, dmult)
+    if nnyq > 0:
+        dmult = np.where((n_abs == nnyq) & (n_abs != 0), 0.5 * dmult, dmult)
+    coeff = coeff * dmult[None, :]
+    return np.asarray(coeff, dtype=float)
 
 
 def _chipf_from_chips(chips: np.ndarray) -> np.ndarray:
@@ -119,6 +2480,8 @@ class WoutData:
     bsubumns: np.ndarray
     bsubvmnc: np.ndarray
     bsubvmns: np.ndarray
+    bsubsmns: np.ndarray
+    bsubsmnc: np.ndarray
 
     # nyquist Fourier coefficients for |B|
     bmnc: np.ndarray
@@ -160,6 +2523,13 @@ class WoutData:
     betaxis: float
     ctor: float
     DMerc: np.ndarray  # (ns,)
+    Dshear: np.ndarray  # (ns,)
+    Dwell: np.ndarray  # (ns,)
+    Dcurr: np.ndarray  # (ns,)
+    Dgeod: np.ndarray  # (ns,)
+    jdotb: np.ndarray  # (ns,)
+    bdotb: np.ndarray  # (ns,)
+    bdotgradv: np.ndarray  # (ns,)
     ac: np.ndarray  # (nac,)
     ac_aux_s: np.ndarray  # (ndfmax,)
     ac_aux_f: np.ndarray  # (ndfmax,)
@@ -220,6 +2590,8 @@ def read_wout(path: str | Path) -> WoutData:
         bsubumns = np.asarray(ds.variables.get("bsubumns", np.zeros_like(bsupumnc))[:])
         bsubvmnc = np.asarray(ds.variables.get("bsubvmnc", np.zeros_like(bsupvmnc))[:])
         bsubvmns = np.asarray(ds.variables.get("bsubvmns", np.zeros_like(bsupvmnc))[:])
+        bsubsmns = np.asarray(ds.variables.get("bsubsmns", np.zeros_like(bsupvmnc))[:])
+        bsubsmnc = np.asarray(ds.variables.get("bsubsmnc", np.zeros_like(bsupvmnc))[:])
 
         bmnc = np.asarray(ds.variables.get("bmnc", np.zeros_like(gmnc))[:])
         bmns = np.asarray(ds.variables.get("bmns", np.zeros_like(gmnc))[:])
@@ -276,6 +2648,13 @@ def read_wout(path: str | Path) -> WoutData:
         ctor = float(ds.variables.get("ctor", 0.0)[:]) if "ctor" in ds.variables else 0.0
 
         DMerc = np.asarray(ds.variables.get("DMerc", np.zeros((ns,), dtype=float))[:])
+        Dshear = np.asarray(ds.variables.get("DShear", np.zeros((ns,), dtype=float))[:])
+        Dwell = np.asarray(ds.variables.get("DWell", np.zeros((ns,), dtype=float))[:])
+        Dcurr = np.asarray(ds.variables.get("DCurr", np.zeros((ns,), dtype=float))[:])
+        Dgeod = np.asarray(ds.variables.get("DGeod", np.zeros((ns,), dtype=float))[:])
+        jdotb = np.asarray(ds.variables.get("jdotb", np.zeros((ns,), dtype=float))[:])
+        bdotb = np.asarray(ds.variables.get("bdotb", np.zeros((ns,), dtype=float))[:])
+        bdotgradv = np.asarray(ds.variables.get("bdotgradv", np.zeros((ns,), dtype=float))[:])
 
         ac = np.asarray(ds.variables.get("ac", np.zeros((0,), dtype=float))[:])
         ac_aux_s = np.asarray(ds.variables.get("ac_aux_s", -np.ones((101,), dtype=float))[:])
@@ -333,6 +2712,8 @@ def read_wout(path: str | Path) -> WoutData:
         bsubumns=bsubumns,
         bsubvmnc=bsubvmnc,
         bsubvmns=bsubvmns,
+        bsubsmns=bsubsmns,
+        bsubsmnc=bsubsmnc,
         bmnc=bmnc,
         bmns=bmns,
         wb=wb,
@@ -365,6 +2746,13 @@ def read_wout(path: str | Path) -> WoutData:
         betaxis=betaxis,
         ctor=ctor,
         DMerc=DMerc,
+        Dshear=Dshear,
+        Dwell=Dwell,
+        Dcurr=Dcurr,
+        Dgeod=Dgeod,
+        jdotb=jdotb,
+        bdotb=bdotb,
+        bdotgradv=bdotgradv,
         ac=ac,
         ac_aux_s=ac_aux_s,
         ac_aux_f=ac_aux_f,
@@ -404,7 +2792,7 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
     n_tor = int(wout.ntor) + 1
     ac = np.asarray(getattr(wout, "ac", np.zeros((0,), dtype=float)))
     if ac.size == 0:
-        ac = np.zeros((1,), dtype=float)
+        ac = np.zeros((21,), dtype=float)
     ac_aux_s = np.asarray(getattr(wout, "ac_aux_s", -np.ones((101,), dtype=float)))
     ac_aux_f = np.asarray(getattr(wout, "ac_aux_f", np.zeros((101,), dtype=float)))
     if ac_aux_s.size == 0:
@@ -487,6 +2875,8 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
         _var_f("bsubumns", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubumns))
         _var_f("bsubvmnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubvmnc))
         _var_f("bsubvmns", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubvmns))
+        _var_f("bsubsmns", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubsmns))
+        _var_f("bsubsmnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubsmnc))
 
         _var_f("bmnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bmnc))
         _var_f("bmns", ("radius", "mn_mode_nyq"), np.asarray(wout.bmns))
@@ -500,7 +2890,14 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
         _var_f("bvco", ("radius",), np.asarray(getattr(wout, "bvco", np.zeros((ns,), dtype=float))))
         _var_f("jcuru", ("radius",), np.asarray(getattr(wout, "jcuru", np.zeros((ns,), dtype=float))))
         _var_f("jcurv", ("radius",), np.asarray(getattr(wout, "jcurv", np.zeros((ns,), dtype=float))))
+        _var_f("jdotb", ("radius",), np.asarray(getattr(wout, "jdotb", np.zeros((ns,), dtype=float))))
+        _var_f("bdotb", ("radius",), np.asarray(getattr(wout, "bdotb", np.zeros((ns,), dtype=float))))
+        _var_f("bdotgradv", ("radius",), np.asarray(getattr(wout, "bdotgradv", np.zeros((ns,), dtype=float))))
         _var_f("DMerc", ("radius",), np.asarray(getattr(wout, "DMerc", np.zeros((ns,), dtype=float))))
+        _var_f("DShear", ("radius",), np.asarray(getattr(wout, "Dshear", np.zeros((ns,), dtype=float))))
+        _var_f("DWell", ("radius",), np.asarray(getattr(wout, "Dwell", np.zeros((ns,), dtype=float))))
+        _var_f("DCurr", ("radius",), np.asarray(getattr(wout, "Dcurr", np.zeros((ns,), dtype=float))))
+        _var_f("DGeod", ("radius",), np.asarray(getattr(wout, "Dgeod", np.zeros((ns,), dtype=float))))
 
         # Iteration trace (optional).
         _var_f("fsqt", ("nstore_seq",), np.asarray(wout.fsqt))
@@ -556,6 +2953,8 @@ def wout_minimal_from_fixed_boundary(
     fsqr: float,
     fsqz: float,
     fsql: float,
+    fsqt: np.ndarray | None = None,
+    converged: bool | None = None,
 ) -> WoutData:
     """Build a minimal :class:`WoutData` from an input-only fixed-boundary run.
 
@@ -575,10 +2974,7 @@ def wout_minimal_from_fixed_boundary(
     from .integrals import cumrect_s_halfmesh
     from .vmec_tomnsp import vmec_trig_tables
     from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
-    from .vmec_realspace import vmec_realspace_analysis
     from .vmec_residue import vmec_force_norms_from_bcovar_dynamic
-    from .vmec_lforbal import equif_from_bcovar, currents_from_bcovar
-    from .plotting import surface_rz_from_state_physical
 
     cfg = static.cfg
     ns = int(cfg.ns)
@@ -587,11 +2983,36 @@ def wout_minimal_from_fixed_boundary(
     nfp = int(cfg.nfp)
     lasym = bool(cfg.lasym)
 
+    if converged is None:
+        converged = True
+
     main_modes = vmec_mode_table(mpol, ntor)
     if int(main_modes.K) != int(state.layout.K):
         raise ValueError("state mode count does not match vmec_mode_table(mpol,ntor)")
 
-    nyq_modes = nyquist_mode_table(mpol, ntor)
+    nyq_modes = nyquist_mode_table_from_grid(
+        mpol=mpol,
+        ntor=ntor,
+        ntheta=int(cfg.ntheta),
+        nzeta=int(cfg.nzeta),
+    )
+
+    mmax_nyq = int(np.max(nyq_modes.m)) if int(nyq_modes.K) > 0 else 0
+    nmax_nyq = int(np.max(np.abs(nyq_modes.n))) if int(nyq_modes.K) > 0 else 0
+    mmax_base = max(int(mpol) - 1, mmax_nyq)
+    nmax_base = max(int(ntor), nmax_nyq)
+    trig = vmec_trig_tables(
+        ntheta=int(cfg.ntheta),
+        nzeta=int(cfg.nzeta),
+        nfp=int(nfp),
+        mmax=int(mmax_base),
+        nmax=int(nmax_base),
+        lasym=bool(lasym),
+        dtype=np.asarray(state.Rcos).dtype,
+    )
+
+    geom = vmec_realspace_geom_from_state(state=state, modes=static.modes, trig=trig)
+    geom = {k: (None if v is None else np.asarray(v)) for k, v in geom.items()}
 
     # Flux and profiles on VMEC half mesh.
     s = np.asarray(static.s)
@@ -628,7 +3049,7 @@ def wout_minimal_from_fixed_boundary(
 
     # For current-driven runs (ncurr=1), VMEC updates iota from the force balance
     # (add_fluxes). Recompute iotas/iotaf from the final state to match VMEC2000.
-    if ncurr == 1:
+    if ncurr == 1 and os.getenv("VMEC_JAX_DISABLE_WOUT_NCURR_RECOMPUTE", "0") in ("", "0"):
         from types import SimpleNamespace
         from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
         from .vmec_residue import vmec_pwint_from_trig
@@ -654,18 +3075,6 @@ def wout_minimal_from_fixed_boundary(
             icurv=np.zeros_like(np.asarray(flux.phipf, dtype=float)),
             flux_is_internal=True,
         )
-
-        trig = getattr(static, "trig_vmec", None)
-        if trig is None:
-            trig = vmec_trig_tables(
-                ntheta=int(static.cfg.ntheta),
-                nzeta=int(static.cfg.nzeta),
-                nfp=int(static.cfg.nfp),
-                mmax=int(static.cfg.mpol) - 1,
-                nmax=int(static.cfg.ntor),
-                lasym=bool(static.cfg.lasym),
-                dtype=np.asarray(state.Rcos).dtype,
-            )
 
         bc_pre = vmec_bcovar_half_mesh_from_wout(
             state=state,
@@ -756,41 +3165,11 @@ def wout_minimal_from_fixed_boundary(
             zaxis_cs[nval] = float(zmns[0, idx])
             zaxis_cc[nval] = float(zmnc[0, idx])
 
-    # Simple geometric measures for plotting (VMEC-style Aminor/Rmajor).
-    if ns >= 1:
-        theta_dense = np.linspace(0.0, 2.0 * np.pi, 512, endpoint=False)
-        Rb, Zb = surface_rz_from_state_physical(
-            state,
-            static.modes,
-            theta=theta_dense,
-            phi=np.asarray([0.0]),
-            s_index=int(ns - 1),
-            nfp=int(nfp),
-        )
-        Rb = np.asarray(Rb)[:, 0]
-        Rmin = float(np.min(Rb))
-        Rmax = float(np.max(Rb))
-        Aminor_p = 0.5 * (Rmax - Rmin)
-        Rmajor_p = 0.5 * (Rmax + Rmin)
-        aspect = Rmajor_p / Aminor_p if Aminor_p != 0.0 else 0.0
-    else:
-        Aminor_p = 0.0
-        Rmajor_p = 0.0
-        aspect = 0.0
+    Aminor_p = 0.0
+    Rmajor_p = 0.0
+    aspect = 0.0
 
     # Build VMEC parity grids for Nyquist outputs.
-    mmax = int(np.max(nyq_modes.m)) if int(nyq_modes.K) > 0 else 0
-    nmax = int(np.max(np.abs(nyq_modes.n))) if int(nyq_modes.K) > 0 else 0
-    ntheta_base = int(cfg.ntheta)
-    trig = vmec_trig_tables(
-        ntheta=int(ntheta_base),
-        nzeta=int(cfg.nzeta),
-        nfp=int(nfp),
-        mmax=int(mmax),
-        nmax=int(nmax),
-        lasym=bool(lasym),
-        dtype=np.asarray(state.Rcos).dtype,
-    )
 
     class _WoutLike:
         __slots__ = (
@@ -805,6 +3184,9 @@ def wout_minimal_from_fixed_boundary(
             "ntor",
             "lasym",
             "flux_is_internal",
+            "ncurr",
+            "lcurrent",
+            "icurv",
         )
 
         def __init__(self):
@@ -819,19 +3201,77 @@ def wout_minimal_from_fixed_boundary(
             self.ntor = int(ntor)
             self.lasym = bool(lasym)
             self.flux_is_internal = True
+            self.ncurr = int(ncurr)
+            self.lcurrent = bool(ncurr == 1)
+            self.icurv = np.asarray(_icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=int(signgs)))
 
     wout_like = _WoutLike()
-    bc = vmec_bcovar_half_mesh_from_wout(
+    from .vmec_forces import vmec_forces_rz_from_wout
+
+    # Output diagnostics should default to the same IEQUI path used by the run.
+    # A forced IEQUI=1 path is retained only as an explicit debug override.
+    indata_wout = indata
+    force_iequi1 = os.getenv("VMEC_JAX_WOUT_FORCE_IEQUI1", "0") not in ("", "0")
+    if force_iequi1:
+        try:
+            indata_wout = InData(
+                scalars=dict(indata.scalars),
+                indexed=dict(indata.indexed),
+                source_path=indata.source_path,
+            )
+            indata_wout.scalars["IEQUI"] = 1
+        except Exception:
+            indata_wout = indata
+
+    k_force = vmec_forces_rz_from_wout(
         state=state,
         static=static,
         wout=wout_like,
-        pres=pres,
+        indata=indata_wout,
         use_wout_bsup=False,
-        use_wout_bsub_for_lambda=False,
-        use_wout_bmag_for_bsq=False,
         use_vmec_synthesis=True,
         trig=trig,
     )
+    bc = k_force.bc
+    geom["pr1_even"] = np.asarray(k_force.pr1_even, dtype=float)
+    geom["pr1_odd"] = np.asarray(k_force.pr1_odd, dtype=float)
+    geom["pz1_even"] = np.asarray(k_force.pz1_even, dtype=float)
+    geom["pz1_odd"] = np.asarray(k_force.pz1_odd, dtype=float)
+    geom["pru_even"] = np.asarray(k_force.pru_even, dtype=float)
+    geom["pru_odd"] = np.asarray(k_force.pru_odd, dtype=float)
+    geom["pzu_even"] = np.asarray(k_force.pzu_even, dtype=float)
+    geom["pzu_odd"] = np.asarray(k_force.pzu_odd, dtype=float)
+    geom["prv_even"] = np.asarray(k_force.prv_even, dtype=float)
+    geom["prv_odd"] = np.asarray(k_force.prv_odd, dtype=float)
+    geom["pzv_even"] = np.asarray(k_force.pzv_even, dtype=float)
+    geom["pzv_odd"] = np.asarray(k_force.pzv_odd, dtype=float)
+
+    # Use bcovar/Jacobian-consistent half-mesh fields for bss inputs.
+    # This keeps bsubs reconstruction on the same discretization path used for
+    # bsubu/bsubv/bmag Nyquist outputs.
+    bsupu_bss = np.asarray(bc.bsupu, dtype=float)
+    bsupv_bss = np.asarray(bc.bsupv, dtype=float)
+    ru12_bss = None
+    zu12_bss = None
+    rs_bss = None
+    zs_bss = None
+    if os.getenv("VMEC_JAX_DUMP_BSUB_PARITY", "") not in ("", "0"):
+        outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+        outdir.mkdir(parents=True, exist_ok=True)
+        np.savez(
+            outdir / "bsub_parity_dump.npz",
+            s=np.asarray(s, dtype=float),
+            bsubu=np.asarray(getattr(bc, "bsubu"), dtype=float),
+            bsubv=np.asarray(getattr(bc, "bsubv"), dtype=float),
+            bsubu_e=np.asarray(getattr(bc, "bsubu_e"), dtype=float),
+            bsubv_e=np.asarray(getattr(bc, "bsubv_e"), dtype=float),
+            bsubu_e_scaled=np.asarray(getattr(bc, "bsubu_e_scaled"), dtype=float),
+            bsubv_e_scaled=np.asarray(getattr(bc, "bsubv_e_scaled"), dtype=float),
+            bsubu_parity_even=np.asarray(getattr(bc, "bsubu_parity_even"), dtype=float),
+            bsubu_parity_odd=np.asarray(getattr(bc, "bsubu_parity_odd"), dtype=float),
+            bsubv_parity_even=np.asarray(getattr(bc, "bsubv_parity_even"), dtype=float),
+            bsubv_parity_odd=np.asarray(getattr(bc, "bsubv_parity_odd"), dtype=float),
+        )
 
     # Derived 1D profiles and scalars.
     norms = vmec_force_norms_from_bcovar_dynamic(bc=bc, trig=trig, s=s, signgs=int(signgs))
@@ -842,6 +3282,18 @@ def wout_minimal_from_fixed_boundary(
     volume_p = volume * float(4.0 * np.pi**2)
     betatotal = (wp / wb) if wb != 0.0 else 0.0
 
+    wint = _vmec_wint_from_trig(trig)
+    Aminor_p, Rmajor_p, aspect, volume_p, _ = _compute_aspectratio(
+        R=np.asarray(geom["R"]),
+        Zu=np.asarray(geom["Zu"]),
+        wint=wint,
+    )
+    if not bool(converged):
+        Aminor_p = 0.0
+        Rmajor_p = 0.0
+        aspect = 0.0
+        volume_p = 0.0
+
     # buco/bvco/jcur* will be computed after aligning bsubu sign for wout output.
     buco = bvco = jcuru = jcurv = None
     equif = None
@@ -849,8 +3301,73 @@ def wout_minimal_from_fixed_boundary(
     # Nyquist Fourier coefficients for fields stored in wout.
     bsupu_out = np.asarray(bc.bsupu)
     bsupv_out = np.asarray(bc.bsupv)
-    bsubu_out = np.asarray(bc.bsubu)
-    bsubv_out = np.asarray(bc.bsubv)
+    bsubu_out = np.asarray(bc.bsubu).copy()
+    bsubv_out = np.asarray(bc.bsubv).copy()
+    bsubu_raw = bsubu_out.copy()
+    bsubv_raw = bsubv_out.copy()
+
+    # VMEC wrout.f uses the *raw* bsubu/bsubv for Fourier output (bsubumnc/etc).
+    # JXBFORCE-style diagnostics (jdotb/Mercier) use the equilibrated + filtered
+    # fields. Keep both paths explicit to match VMEC output.
+    bsubu_diag = bsubu_out
+    bsubv_diag = bsubv_out
+    bsub_src = os.getenv("VMEC_JAX_MERCIER_BSUB_SOURCE", "").strip().lower()
+    if bsub_src in {"bsubu_e", "bsubu_e_scaled", "bsubu"}:
+        u_name = bsub_src
+        v_name = bsub_src.replace("bsubu", "bsubv")
+        if hasattr(bc, u_name) and hasattr(bc, v_name):
+            bsubu_diag = np.asarray(getattr(bc, u_name), dtype=float)
+            bsubv_diag = np.asarray(getattr(bc, v_name), dtype=float)
+    elif os.getenv("VMEC_JAX_MERCIER_USE_BSUBE", "0") not in ("", "0"):
+        if hasattr(bc, "bsubu_e") and hasattr(bc, "bsubv_e"):
+            bsubu_diag = np.asarray(getattr(bc, "bsubu_e"), dtype=float)
+            bsubv_diag = np.asarray(getattr(bc, "bsubv_e"), dtype=float)
+    bsubv_diag_from_raw = True
+    # VMEC fileout.f forces IEQUI=1 before calling funct3d/wrout at output
+    # time, regardless of the runtime IEQUI used in iterations.
+    iequi = 1
+    # VMEC parity: keep the raw bsubv path by default for Mercier/jdotb parity.
+    disable_equif_corr = os.getenv("VMEC_JAX_DISABLE_BSUBV_EQUI_CORR", "1") not in ("", "0")
+    if (iequi == 1) and (not disable_equif_corr) and getattr(bc, "bsubv_preblend", None) is not None:
+        bsubv_diag = _apply_bsubv_equif_correction(
+            bsubv=bsubv_diag,
+            bsubv_e=np.asarray(bc.bsubv_preblend),
+            trig=trig,
+        )
+        bsubv_diag_from_raw = False
+    bsubs_half = _compute_bsubs_half_mesh(
+        state=state,
+        geom_modes=static.modes,
+        s=np.asarray(s, dtype=float),
+        lconm1=bool(getattr(cfg, "lconm1", True)),
+        lthreed=bool(ntor > 0),
+        lasym=bool(lasym),
+        bsupu=bsupu_bss,
+        bsupv=bsupv_bss,
+        trig=trig,
+        geom=geom,
+        jac_half=bc.jac,
+        force_rs=rs_bss,
+        force_zs=zs_bss,
+        force_ru12=ru12_bss,
+        force_zu12=zu12_bss,
+        apply_scalxc=os.getenv("VMEC_JAX_BSS_APPLY_SCALXC", "0") not in ("", "0"),
+    )
+    # In VMEC's fileout path, jxbforce is called before wrout and updates bsubs
+    # to a full-mesh representation via:
+    #   bsubs(js) = 0.5*(bsubs(js) + bsubs(js+1)), js=2..ns-1
+    # then endpoint extrapolation:
+    #   bsubs(1)  = 2*bsubs(2)  - bsubs(3)
+    #   bsubs(ns) = 2*bsubs(ns) - bsubs(ns-1)
+    # wrout then transforms this updated array.
+    bsubs_full = np.asarray(bsubs_half, dtype=float).copy()
+    if ns > 0:
+        # jxbforce initializes bsubs(1,:)=0 before full-mesh averaging.
+        bsubs_full[0] = 0.0
+    if ns > 2:
+        bsubs_full[1:-1] = 0.5 * (bsubs_full[1:-1] + bsubs_full[2:])
+        bsubs_full[0] = 2.0 * bsubs_full[1] - bsubs_full[2]
+        bsubs_full[-1] = 2.0 * bsubs_full[-1] - bsubs_full[-2]
 
     if bool(lasym):
         gmnc = z2.copy()
@@ -863,48 +3380,228 @@ def wout_minimal_from_fixed_boundary(
         bsubumns = z2.copy()
         bsubvmnc = z2.copy()
         bsubvmns = z2.copy()
+        bsubsmns = z2.copy()
+        bsubsmnc = z2.copy()
         bmnc = z2.copy()
         bmns = z2.copy()
     else:
-        parity = "both" if bool(lasym) else "cos"
-        gmnc, gmns = vmec_realspace_analysis(f=np.asarray(bc.jac.sqrtg), modes=nyq_modes, trig=trig, parity=parity)
+        gmnc = _vmec_wrout_nyquist_cos_coeffs(
+            f=np.asarray(bc.jac.sqrtg), modes=nyq_modes, trig=trig
+        )
         bsupu_out = np.asarray(bc.bsupu)
         bsupv_out = np.asarray(bc.bsupv)
-        bsubu_out = np.asarray(bc.bsubu)
-        bsubv_out = np.asarray(bc.bsubv)
-        bsupumnc, bsupumns = vmec_realspace_analysis(f=bsupu_out, modes=nyq_modes, trig=trig, parity=parity)
-        bsupvmnc, bsupvmns = vmec_realspace_analysis(f=bsupv_out, modes=nyq_modes, trig=trig, parity=parity)
-        bsubumnc, bsubumns = vmec_realspace_analysis(f=bsubu_out, modes=nyq_modes, trig=trig, parity=parity)
-        bsubvmnc, bsubvmns = vmec_realspace_analysis(f=bsubv_out, modes=nyq_modes, trig=trig, parity=parity)
+        bsupumnc = _vmec_wrout_nyquist_cos_coeffs(f=bsupu_out, modes=nyq_modes, trig=trig)
+        bsupvmnc = _vmec_wrout_nyquist_cos_coeffs(f=bsupv_out, modes=nyq_modes, trig=trig)
+        bsubumnc = _vmec_wrout_nyquist_cos_coeffs(f=bsubu_out, modes=nyq_modes, trig=trig)
+        bsubvmnc = _vmec_wrout_nyquist_cos_coeffs(f=bsubv_out, modes=nyq_modes, trig=trig)
+        use_loop = os.getenv("VMEC_JAX_WROUT_LOOP", "1") not in ("", "0")
+        if use_loop:
+            bsubsmns = _vmec_wrout_nyquist_sin_coeffs_loop(f=bsubs_full, modes=nyq_modes, trig=trig)
+        else:
+            bsubsmns = _vmec_wrout_nyquist_sin_coeffs(f=bsubs_full, modes=nyq_modes, trig=trig)
 
         pres_h = np.asarray(pres, dtype=float)[:, None, None]
-        bmag = np.sqrt(np.maximum(2.0 * (np.asarray(bc.bsq) - pres_h), 0.0))
-        bmnc, bmns = vmec_realspace_analysis(f=bmag, modes=nyq_modes, trig=trig, parity=parity)
+        bmag = np.sqrt(2.0 * np.abs(np.asarray(bc.bsq) - pres_h))
+        bmnc = _vmec_wrout_nyquist_cos_coeffs(f=bmag, modes=nyq_modes, trig=trig)
 
-    # buco/bvco/jcur* and equif use the sign-aligned bsubu/bsubv for wout output.
-    from types import SimpleNamespace
+        # Axis values follow wrout.f (set to zero on js=1).
+        if gmnc.shape[0] > 0:
+            gmnc[0, :] = 0.0
+            bsupumnc[0, :] = 0.0
+            bsupvmnc[0, :] = 0.0
+            bsubumnc[0, :] = 0.0
+            bsubvmnc[0, :] = 0.0
+            bmnc[0, :] = 0.0
 
-    bc_curr = SimpleNamespace(bsubu=bsubu_out, bsubv=bsubv_out)
-    buco, bvco, jcuru, jcurv = currents_from_bcovar(bc=bc_curr, trig=trig, wout=wout_like, s=s)
-    # Replace jcuru/jcurv with VMEC eqfor-style endpoint extrapolation.
-    if ns >= 3:
-        hs = float(s[1] - s[0])
-        ohs = 1.0 / hs if hs != 0.0 else 0.0
-        signgs_f = float(signgs)
-        jcuru = np.zeros_like(buco)
-        jcurv = np.zeros_like(buco)
-        for js in range(1, ns - 1):
-            jcurv[js] = signgs_f * ohs * (buco[js + 1] - buco[js])
-            jcuru[js] = -signgs_f * ohs * (bvco[js + 1] - bvco[js])
-        jcuru[0] = 2.0 * jcuru[1] - jcuru[2]
-        jcuru[-1] = 2.0 * jcuru[-2] - jcuru[-3]
-        jcurv[0] = 2.0 * jcurv[1] - jcurv[2]
-        jcurv[-1] = 2.0 * jcurv[-2] - jcurv[-3]
-        from .vmec_lforbal import MU0
+        gmns = z2.copy()
+        bsupumns = z2.copy()
+        bsupvmns = z2.copy()
+        bsubumns = z2.copy()
+        bsubvmns = z2.copy()
+        bsubsmnc = z2.copy()
+        bmns = z2.copy()
+        if ns > 2:
+            bsubsmns[0, :] = 2.0 * bsubsmns[1, :] - bsubsmns[2, :]
 
-        jcuru = jcuru / MU0
-        jcurv = jcurv / MU0
-    equif = equif_from_bcovar(bc=bc_curr, trig=trig, wout=wout_like, s=s)
+    # Reconstruct physical real-space fields from the Nyquist coefficients so
+    # downstream diagnostics (Mercier/jdotb) use the same normalization as wrout.f.
+    from .fourier import build_helical_basis
+    from .vmec_tomnsp import vmec_angle_grid
+
+    grid_nyq = vmec_angle_grid(
+        ntheta=int(cfg.ntheta),
+        nzeta=int(cfg.nzeta),
+        nfp=int(nfp),
+        lasym=bool(lasym),
+    )
+    basis_nyq = build_helical_basis(nyq_modes, grid_nyq, cache=True)
+    bsupu_phys = np.asarray(eval_fourier(bsupumnc, bsupumns, basis_nyq))
+    bsupv_phys = np.asarray(eval_fourier(bsupvmnc, bsupvmns, basis_nyq))
+    bsubu_phys = np.asarray(eval_fourier(bsubumnc, bsubumns, basis_nyq))
+    bsubv_phys = np.asarray(eval_fourier(bsubvmnc, bsubvmns, basis_nyq))
+    # JXBFORCE applies a low-pass filter on bsubu/bsubv using (mpol-1, ntor).
+    skip_bsub_filter = os.getenv("VMEC_JAX_SKIP_BSUB_FILTER", "") not in ("", "0")
+    filter_from_raw = os.getenv("VMEC_JAX_MERCIER_FILTER_FROM_RAW", "0") not in ("", "0")
+    if not bool(lasym) and not skip_bsub_filter:
+        if filter_from_raw:
+            # Match jxbforce.f directly: filter from the real-space bsubu/bsubv
+            # fields (with odd-m shalf handling done inside the loop filter).
+            bsubu_diag, bsubv_diag = _filter_bsubuv_jxbforce_loop(
+                bsubu=np.asarray(bsubu_diag, dtype=float),
+                bsubv=np.asarray(bsubv_diag, dtype=float),
+                trig=trig,
+                mmax_force=max(int(mpol) - 1, 0),
+                nmax_force=int(ntor),
+                s=np.asarray(s, dtype=float),
+            )
+        else:
+            # Build parity channels directly from VMEC internal geometry/Lambda
+            # fields to mirror jxbforce.f's (mparity) storage as closely as
+            # possible. Fall back to coefficient splitting when unavailable.
+            use_state_parity = os.getenv("VMEC_JAX_MERCIER_STATE_PARITY", "0") not in ("", "0")
+            if use_state_parity and hasattr(bc, "lu1_full") and hasattr(bc, "lv1_full"):
+                bsubu_even, bsubu_odd, bsubv_even, bsubv_odd = _bsubuv_parity_from_state(
+                    state=state,
+                    geom_modes=static.modes,
+                    trig=trig,
+                    s=np.asarray(s, dtype=float),
+                    lconm1=bool(getattr(cfg, "lconm1", True)),
+                    lthreed=bool(ntor > 0),
+                    lasym=bool(lasym),
+                    bsupu=np.asarray(bsupu_bss, dtype=float),
+                    bsupv=np.asarray(bsupv_bss, dtype=float),
+                    lu1_full=np.asarray(bc.lu1_full, dtype=float),
+                    lv1_full=np.asarray(bc.lv1_full, dtype=float),
+                    sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
+                )
+                odd_needs_shalf = True
+            elif (
+                os.getenv("VMEC_JAX_MERCIER_USE_BC_PARITY", "0") not in ("", "0")
+                and hasattr(bc, "bsubu_parity_even")
+                and hasattr(bc, "bsubu_parity_odd")
+                and hasattr(bc, "bsubv_parity_even")
+                and hasattr(bc, "bsubv_parity_odd")
+            ):
+                bsubu_even = np.asarray(bc.bsubu_parity_even, dtype=float)
+                bsubu_odd = np.asarray(bc.bsubu_parity_odd, dtype=float)
+                bsubv_even = np.asarray(bc.bsubv_parity_even, dtype=float)
+                bsubv_odd = np.asarray(bc.bsubv_parity_odd, dtype=float)
+                odd_needs_shalf = True
+            else:
+                # VMEC2000 `bcovar` with `iequi=1` (fileout/wrout path) returns
+                # parity channels for `bsub{u,v}` as:
+                #   bsub*_odd = shalf(js) * bsub*_even
+                # and `jxbforce` immediately divides the odd channel by `shalf`
+                # before the low-pass FFT. This means the parity channels are
+                # not an even/odd-m decomposition of the physical field; they
+                # are a storage convention that `jxbforce` expects.
+                #
+                # Default to this VMEC behavior to match Mercier/jdotb
+                # diagnostics on finite-pressure equilibria.
+                if os.getenv("VMEC_JAX_MERCIER_ODD_FROM_RAW_EVEN", "1") not in ("", "0"):
+                    _psh = _pshalf_from_s(np.asarray(s, dtype=float))[:, None, None]
+                    if _psh.shape[0] > 1:
+                        _psh[0] = _psh[1]
+                    bsubu_even = np.asarray(bsubu_diag, dtype=float)
+                    bsubv_even = np.asarray(bsubv_diag, dtype=float)
+                    bsubu_odd = _psh * bsubu_even
+                    bsubv_odd = _psh * bsubv_even
+                    odd_needs_shalf = False
+                elif os.getenv("VMEC_JAX_MERCIER_BCOVAR_ODD", "0") not in ("", "0"):
+                    bsubu_even, bsubu_odd, bsubv_even, bsubv_odd = _bsubuv_parity_from_bcovar(
+                        bsubu_even=np.asarray(bsubu_diag, dtype=float),
+                        bsubv_even=np.asarray(bsubv_diag, dtype=float),
+                        s=np.asarray(s, dtype=float),
+                        iequi=int(iequi),
+                    )
+                    odd_needs_shalf = False
+                else:
+                    # Mercier/jxbforce operate on parity-separated bsubu/bsubv (m even/odd).
+                    # Preferred path: recover parity channels directly from the
+                    # current real-space bsubu/bsubv using the same jxbforce
+                    # Fourier conventions used in the low-pass filter.
+                    # Default to real-space parity recovery, which tracks VMEC
+                    # jxbforce parity channels more closely on finite-pressure
+                    # stellarator cases.
+                    use_realspace_parity = os.getenv("VMEC_JAX_MERCIER_REALSPACE_PARITY", "1") not in (
+                        "",
+                        "0",
+                    )
+                    if use_realspace_parity:
+                        bsubu_even, bsubu_odd, bsubv_even, bsubv_odd = _bsubuv_parity_from_realspace_jxbforce(
+                            bsubu=np.asarray(bsubu_diag, dtype=float),
+                            bsubv=np.asarray(bsubv_diag, dtype=float),
+                            trig=trig,
+                        )
+                        # This recovers the physical even/odd-m contributions
+                        # directly, so the odd channel already includes shalf.
+                        odd_needs_shalf = False
+                    else:
+                        bsubu_even, bsubu_odd, bsubv_even, bsubv_odd = _bsubuv_parity_from_coeffs(
+                            bsubumnc=bsubumnc,
+                            bsubumns=bsubumns,
+                            bsubvmnc=bsubvmnc,
+                            bsubvmns=bsubvmns,
+                            modes=nyq_modes,
+                            trig=trig,
+                        )
+                        # Coefficient split synthesizes physical contributions
+                        # on the reduced grid, so the odd channel includes shalf.
+                        odd_needs_shalf = False
+                    if os.getenv("VMEC_JAX_MERCIER_ODD_FROM_EVEN", "0") not in ("", "0"):
+                        bsubu_odd = np.asarray(bsubu_even, dtype=float)
+                        bsubv_odd = np.asarray(bsubv_even, dtype=float)
+                        odd_needs_shalf = True
+            # jxbforce expects odd parity channels in the stored/physical
+            # normalization (sqrt(s)-weighted) before the parity FFT filter.
+            if (
+                odd_needs_shalf
+                and os.getenv("VMEC_JAX_MERCIER_DISABLE_ODD_SCALE", "0") in ("", "0")
+            ):
+                pshalf = _pshalf_from_s(np.asarray(s, dtype=float))[:, None, None]
+                if pshalf.shape[0] > 1:
+                    pshalf[0] = pshalf[1]
+                bsubu_odd = np.asarray(bsubu_odd, dtype=float) * pshalf
+                bsubv_odd = np.asarray(bsubv_odd, dtype=float) * pshalf
+            bsubu_diag, bsubv_diag = _filter_bsubuv_jxbforce_parity_loop(
+                bsubu_even=np.asarray(bsubu_even, dtype=float),
+                bsubu_odd=np.asarray(bsubu_odd, dtype=float),
+                bsubv_even=np.asarray(bsubv_even, dtype=float),
+                bsubv_odd=np.asarray(bsubv_odd, dtype=float),
+                trig=trig,
+                mmax_force=max(int(mpol) - 1, 0),
+                nmax_force=int(ntor),
+                s=np.asarray(s, dtype=float),
+            )
+    # Match VMEC wrout: bsubu/bsubv Fourier output uses the jxbforce-filtered
+    # fields, not the raw bcovar fields.
+    bsubu_out = np.asarray(bsubu_diag, dtype=float)
+    bsubv_out = np.asarray(bsubv_diag, dtype=float)
+    if not bool(lasym):
+        bsubumnc = _vmec_wrout_nyquist_cos_coeffs(f=bsubu_out, modes=nyq_modes, trig=trig)
+        bsubvmnc = _vmec_wrout_nyquist_cos_coeffs(f=bsubv_out, modes=nyq_modes, trig=trig)
+        if bsubumnc.shape[0] > 0:
+            bsubumnc[0, :] = 0.0
+            bsubvmnc[0, :] = 0.0
+    sqrtg_phys = np.asarray(eval_fourier(gmnc, gmns, basis_nyq))
+    bmag_phys = np.asarray(eval_fourier(bmnc, bmns, basis_nyq))
+    pres_h = np.asarray(pres, dtype=float)[:, None, None]
+    bsq_phys = 0.5 * (bmag_phys ** 2) + pres_h
+
+    # Keep bsubsmns from the direct bsubs_half computation (wrout.f). The
+    # Nyquist-reconstructed path is used only for consistency checks.
+
+    buco, bvco, jcuru, jcurv, equif = _compute_equif_wout(
+        bsubu=bsubu_out,
+        bsubv=bsubv_out,
+        pres=pres,
+        vp=vp,
+        phipf=np.asarray(flux.phipf, dtype=float),
+        chipf=np.asarray(chipf_wout, dtype=float),
+        signgs=int(signgs),
+        trig=trig,
+        s=s,
+    )
 
     # Current profile metadata for vmecPlot2.
     pcurr_type = indata.get("PCURR_TYPE", None)
@@ -919,18 +3616,116 @@ def wout_minimal_from_fixed_boundary(
 
     ac_raw = indata.get("AC", [])
     if isinstance(ac_raw, (int, float, np.floating)):
-        ac = np.asarray([float(ac_raw)], dtype=float)
+        ac_vals = [float(ac_raw)]
     elif isinstance(ac_raw, list):
-        ac = np.asarray([float(v) for v in ac_raw], dtype=float)
+        ac_vals = [float(v) for v in ac_raw]
     else:
-        ac = np.asarray([], dtype=float)
-    if ac.size == 0:
-        ac = np.zeros((1,), dtype=float)
+        ac_vals = []
+    n_preset = max(21, len(ac_vals) if ac_vals else 1)
+    ac = np.zeros((n_preset,), dtype=float)
+    for i, v in enumerate(ac_vals):
+        if i >= n_preset:
+            break
+        ac[i] = v
 
     ndfmax = 101
     ac_aux_s = -np.ones((ndfmax,), dtype=float)
     ac_aux_f = np.zeros((ndfmax,), dtype=float)
+
+    betapol = 0.0
+    betator = 0.0
+    betaxis = 0.0
+    ctor = 0.0
     DMerc = np.zeros((ns,), dtype=float)
+    Dshear = np.zeros((ns,), dtype=float)
+    Dcurr = np.zeros((ns,), dtype=float)
+    Dwell = np.zeros((ns,), dtype=float)
+    Dgeod = np.zeros((ns,), dtype=float)
+    jdotb = np.zeros((ns,), dtype=float)
+    bdotb = np.zeros((ns,), dtype=float)
+    bdotgradv = np.zeros((ns,), dtype=float)
+    try:
+        # Mercier/jxbforce operate on real-space bsub* fields on VMEC's reduced
+        # angular grid. Do not reconstruct from wout Fourier coefficients here:
+        # wrout output transforms are not a strict inverse of eval_fourier.
+        bsubu_merc = np.asarray(bsubu_diag, dtype=float)
+        bsubv_merc = np.asarray(bsubv_diag, dtype=float)
+        if os.getenv("VMEC_JAX_MERCIER_USE_RAW_BSUBUV", "") not in ("", "0"):
+            bsubu_merc = np.asarray(bsubu_raw, dtype=float)
+            bsubv_merc = np.asarray(bsubv_raw, dtype=float)
+        elif os.getenv("VMEC_JAX_MERCIER_USE_WROUT_BSUBUV", "") not in ("", "0"):
+            # Optional parity path for debugging: use Nyquist-reconstructed
+            # bsubu/bsubv from wrout coefficients in the jxbforce scalars.
+            bsubu_merc = np.asarray(bsubu_phys, dtype=float)
+            bsubv_merc = np.asarray(bsubv_phys, dtype=float)
+        elif os.getenv("VMEC_JAX_MERCIER_USE_RAW_BSUBV", "") not in ("", "0"):
+            bsubv_merc = np.asarray(bsubv_raw, dtype=float)
+
+        wint = _vmec_wint_from_trig(trig)
+        betaxis = _compute_eqfor_betaxis(
+            pres=np.asarray(pres, dtype=float),
+            vp=np.asarray(vp, dtype=float),
+            bsq=np.asarray(bc.bsq, dtype=float),
+            sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
+            wint=wint,
+            signgs=int(signgs),
+        )
+        betapol, betator, betatot_eq, betaxis = _compute_eqfor_beta(
+            pres=np.asarray(pres, dtype=float),
+            vp=np.asarray(vp, dtype=float),
+            bsq=np.asarray(bc.bsq, dtype=float),
+            r12=np.asarray(bc.jac.r12, dtype=float),
+            bsupv=np.asarray(bc.bsupv, dtype=float),
+            sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
+            wint=wint,
+            signgs=int(signgs),
+        )
+        betatotal = float(betatot_eq)
+        ctor = _compute_ctor_from_buco(buco=np.asarray(buco, dtype=float), signgs=int(signgs), indata=indata)
+        (
+            DMerc,
+            Dshear,
+            Dcurr,
+            Dwell,
+            Dgeod,
+            jdotb,
+            bdotb,
+            bdotgradv,
+        ) = _compute_mercier(
+            state=state,
+            geom_modes=static.modes,
+            s=np.asarray(s, dtype=float),
+            lconm1=bool(getattr(cfg, "lconm1", True)),
+            lthreed=bool(ntor > 0),
+            lasym=bool(lasym),
+            nfp=int(nfp),
+            mmax_force=max(int(mpol) - 1, 0),
+            nmax_force=int(ntor),
+            pres=np.asarray(pres, dtype=float),
+            vp=np.asarray(vp, dtype=float),
+            phips=np.asarray(flux.phips, dtype=float),
+            iotas=np.asarray(iotas, dtype=float),
+            # Use bcovar real-space fields directly (VMEC internal grid/normalization)
+            bsq=np.asarray(bc.bsq, dtype=float),
+            sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
+            bsubu=bsubu_merc,
+            bsubv=bsubv_merc,
+            bsupu=np.asarray(bsupu_bss, dtype=float),
+            bsupv=np.asarray(bsupv_bss, dtype=float),
+            trig=trig,
+            geom=geom,
+            jac_half=bc.jac,
+            force_rs=rs_bss,
+            force_zs=zs_bss,
+            force_ru12=ru12_bss,
+            force_zu12=zu12_bss,
+            bsubu_raw=np.asarray(bsubu_raw, dtype=float),
+            bsubv_raw=np.asarray(bsubv_raw, dtype=float),
+            signgs=int(signgs),
+        )
+    except Exception:
+        if os.getenv("VMEC_JAX_STRICT_WOUT_DIAGNOSTICS", "") not in ("", "0"):
+            raise
 
     # Convert internal lambda coefficients to VMEC wout convention.
     from .field import lamscale_from_phips
@@ -998,6 +3793,10 @@ def wout_minimal_from_fixed_boundary(
 
     lmns = _lambda_wout_from_full(lam_full=lmns_internal, m_modes=np.asarray(main_modes.m, dtype=int))
     lmnc = _lambda_wout_from_full(lam_full=lmnc_internal, m_modes=np.asarray(main_modes.m, dtype=int))
+    if fsqt is None:
+        fsqt_out = np.zeros((100,), dtype=float)
+    else:
+        fsqt_out = np.asarray(fsqt, dtype=float)
 
     return WoutData(
         path=Path(path),
@@ -1032,6 +3831,8 @@ def wout_minimal_from_fixed_boundary(
         bsubumns=np.asarray(bsubumns, dtype=float),
         bsubvmnc=np.asarray(bsubvmnc, dtype=float),
         bsubvmns=np.asarray(bsubvmns, dtype=float),
+        bsubsmns=np.asarray(bsubsmns, dtype=float),
+        bsubsmnc=np.asarray(bsubsmnc, dtype=float),
         bmnc=np.asarray(bmnc, dtype=float),
         bmns=np.asarray(bmns, dtype=float),
         wb=float(wb),
@@ -1044,7 +3845,7 @@ def wout_minimal_from_fixed_boundary(
         fsqr=float(fsqr),
         fsqz=float(fsqz),
         fsql=float(fsql),
-        fsqt=np.zeros((0,), dtype=float),
+        fsqt=np.asarray(fsqt_out, dtype=float),
         equif=np.asarray(equif, dtype=float),
         phi=np.asarray(phi, dtype=float),
         buco=np.asarray(buco, dtype=float),
@@ -1059,11 +3860,18 @@ def wout_minimal_from_fixed_boundary(
         Rmajor_p=float(Rmajor_p),
         aspect=float(aspect),
         betatotal=float(betatotal),
-        betapol=0.0,
-        betator=0.0,
-        betaxis=0.0,
-        ctor=0.0,
+        betapol=float(betapol),
+        betator=float(betator),
+        betaxis=float(betaxis),
+        ctor=float(ctor),
         DMerc=np.asarray(DMerc, dtype=float),
+        Dshear=np.asarray(Dshear, dtype=float),
+        Dwell=np.asarray(Dwell, dtype=float),
+        Dcurr=np.asarray(Dcurr, dtype=float),
+        Dgeod=np.asarray(Dgeod, dtype=float),
+        jdotb=np.asarray(jdotb, dtype=float),
+        bdotb=np.asarray(bdotb, dtype=float),
+        bdotgradv=np.asarray(bdotgradv, dtype=float),
         ac=np.asarray(ac, dtype=float),
         ac_aux_s=np.asarray(ac_aux_s, dtype=float),
         ac_aux_f=np.asarray(ac_aux_f, dtype=float),
