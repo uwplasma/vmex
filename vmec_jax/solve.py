@@ -8425,8 +8425,7 @@ def solve_fixed_boundary_residual_iter(
                 min_tau_ptau = max_tau_ptau = None
                 bad_jacobian_ptau = None
                 if ptau_min is not None and ptau_max is not None:
-                    min_tau_ptau = float(np.asarray(ptau_min))
-                    max_tau_ptau = float(np.asarray(ptau_max))
+                    min_tau_ptau, max_tau_ptau = _device_get_floats(ptau_min, ptau_max)
                     if bool(vmec2000_control):
                         tau_tol = max(abs(ptau_tol), 0.0)
                         bad_jacobian_ptau = (min_tau_ptau < -tau_tol) and (max_tau_ptau > tau_tol)
@@ -8456,8 +8455,9 @@ def solve_fixed_boundary_residual_iter(
                     tau = jnp.asarray(jac_state.tau)
                     if int(tau.size) > 0:
                         tau_use = tau[1:] if int(tau.shape[0]) > 1 else tau
-                        min_tau_state = float(np.asarray(jnp.min(tau_use)))
-                        max_tau_state = float(np.asarray(jnp.max(tau_use)))
+                        tau_min = jnp.min(tau_use)
+                        tau_max = jnp.max(tau_use)
+                        min_tau_state, max_tau_state = _device_get_floats(tau_min, tau_max)
                     else:
                         min_tau_state = float("nan")
                         max_tau_state = float("nan")
