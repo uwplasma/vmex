@@ -242,6 +242,56 @@ def _compute_equif_wout(
     return buco, bvco, jcuru, jcurv, equif
 
 
+def _vmec_realspace_geom_light_from_state(*, state: VMECState, modes, trig) -> dict[str, Any]:
+    """Compute minimal geometry (R, Z, Zu) needed for wout diagnostics."""
+    from ._compat import jnp
+
+    Rcos = jnp.asarray(state.Rcos)
+    Rsin = jnp.asarray(state.Rsin)
+    Zcos = jnp.asarray(state.Zcos)
+    Zsin = jnp.asarray(state.Zsin)
+    lthreed = bool(np.any(np.asarray(modes.n)))
+    lasym = bool(np.any(np.asarray(Rsin))) or bool(np.any(np.asarray(Zcos)))
+    lconm1 = bool(lthreed or lasym)
+    if lconm1 and int(np.max(np.asarray(modes.m))) > 0:
+        Rcos, Zsin, Rsin, Zcos = vmec_m1_internal_to_physical_signed(
+            Rcos=Rcos,
+            Zsin=Zsin,
+            Rsin=Rsin,
+            Zcos=Zcos,
+            modes=modes,
+            lthreed=lthreed,
+            lasym=lasym,
+            lconm1=lconm1,
+        )
+    # Only need the edge surface for aspect ratio; avoid full (ns, ntheta, nzeta)
+    # synthesis by slicing to the boundary coefficients.
+    coeff_cos_stack = jnp.stack([Rcos, Zcos], axis=0)[:, -1:, :]
+    coeff_sin_stack = jnp.stack([Rsin, Zsin], axis=0)[:, -1:, :]
+    s_edge = jnp.asarray([1.0], dtype=coeff_cos_stack.dtype)
+    rz = vmec_realspace_synthesis(
+        coeff_cos=coeff_cos_stack,
+        coeff_sin=coeff_sin_stack,
+        modes=modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+        s=s_edge,
+    )
+    rz_t = vmec_realspace_synthesis_dtheta(
+        coeff_cos=coeff_cos_stack,
+        coeff_sin=coeff_sin_stack,
+        modes=modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+        s=s_edge,
+    )
+    R, Z = rz[0], rz[1]
+    Zu = rz_t[1]
+    return {"R": R, "Z": Z, "Zu": Zu}
+
+
 def _apply_bsubv_equif_correction(
     *,
     bsubv: np.ndarray,
@@ -1757,6 +1807,15 @@ def _compute_mercier(
         apply_scalxc=os.getenv("VMEC_JAX_BSS_APPLY_SCALXC", "0") not in ("", "0"),
     )
 
+    # LASYM: jxbforce uses the symmetric (even) bsubu/bsubv channels on the
+    # reduced theta grid. Mimic VMEC's symoutput split here so Mercier/jdotb
+    # operate on the same parity channel.
+    if bool(lasym):
+        bsubu_sym, _ = _vmec_symoutput_split(f=np.asarray(bsubu, dtype=float), trig=trig)
+        bsubv_sym, _ = _vmec_symoutput_split(f=np.asarray(bsubv, dtype=float), trig=trig)
+        bsubu = bsubu_sym
+        bsubv = bsubv_sym
+
     # For lasym=False, VMEC stores fields on the reduced theta grid already.
     # Only apply symmetrization when a full theta grid is supplied.
     if not bool(lasym):
@@ -1877,10 +1936,6 @@ def _compute_mercier(
         bsubs_use[1:-1] = 0.5 * (bsubs_use[1:-1] + bsubs_use[2:])
     bsubs_use[0] = 0.0
 
-    # Symforce parity adjustment for bsubs would be needed for `lasym=True`
-    # (full-interval theta grid). For `lasym=False`, VMEC already works on the
-    # reduced interval and no additional symmetrization is required.
-
     # Reconstruct bsubsu/bsubsv via Fourier coefficients to match jxbforce.
     # Default to the vectorized path for performance; the loop-based path is
     # retained for parity debugging.
@@ -1914,24 +1969,68 @@ def _compute_mercier(
         if nnyq > 0 and nnyq <= nmax:
             dmult[:, nnyq] *= 0.5
 
-        # jxbforce-style Fourier coefficients for bsubs (sin basis).
-        f_theta_sin = np.einsum("sik,im->smk", bsubs_use[:, :nt2, :], sinmui, optimize=True)
-        f_theta_cos = np.einsum("sik,im->smk", bsubs_use[:, :nt2, :], cosmui, optimize=True)
-        bsubsmn1 = np.einsum("smk,kn->smn", f_theta_sin, cosnv, optimize=True) * dmult[None, :, :]
-        bsubsmn2 = np.einsum("smk,kn->smn", f_theta_cos, sinnv, optimize=True) * dmult[None, :, :]
+        if bool(lasym):
+            bsubs_sym, bsubs_asym = _vmec_symoutput_split(
+                f=bsubs_use, trig=trig, reversed_sym=True
+            )
 
-        # Reconstruct bsubsu/bsubsv (jxbforce).
-        tmp_su_1 = np.einsum("smn,im->sin", bsubsmn1, cosmum, optimize=True)
-        tmp_su_2 = np.einsum("smn,im->sin", bsubsmn2, sinmum, optimize=True)
-        bsubsu = np.einsum("sin,kn->sik", tmp_su_1, cosnv, optimize=True) + np.einsum(
-            "sin,kn->sik", tmp_su_2, sinnv, optimize=True
-        )
+            # Symmetric (sin) channel.
+            f_theta_sin = np.einsum("sik,im->smk", bsubs_sym[:, :nt2, :], sinmui, optimize=True)
+            f_theta_cos = np.einsum("sik,im->smk", bsubs_sym[:, :nt2, :], cosmui, optimize=True)
+            bsubsmn1 = np.einsum("smk,kn->smn", f_theta_sin, cosnv, optimize=True) * dmult[None, :, :]
+            bsubsmn2 = np.einsum("smk,kn->smn", f_theta_cos, sinnv, optimize=True) * dmult[None, :, :]
 
-        tmp_sv_1 = np.einsum("smn,im->sin", bsubsmn1, sinmu, optimize=True)
-        tmp_sv_2 = np.einsum("smn,im->sin", bsubsmn2, cosmu, optimize=True)
-        bsubsv = np.einsum("sin,kn->sik", tmp_sv_1, sinnvn, optimize=True) + np.einsum(
-            "sin,kn->sik", tmp_sv_2, cosnvn, optimize=True
-        )
+            tmp_su_1 = np.einsum("smn,im->sin", bsubsmn1, cosmum, optimize=True)
+            tmp_su_2 = np.einsum("smn,im->sin", bsubsmn2, sinmum, optimize=True)
+            bsubsu_s = np.einsum("sin,kn->sik", tmp_su_1, cosnv, optimize=True) + np.einsum(
+                "sin,kn->sik", tmp_su_2, sinnv, optimize=True
+            )
+
+            tmp_sv_1 = np.einsum("smn,im->sin", bsubsmn1, sinmu, optimize=True)
+            tmp_sv_2 = np.einsum("smn,im->sin", bsubsmn2, cosmu, optimize=True)
+            bsubsv_s = np.einsum("sin,kn->sik", tmp_sv_1, sinnvn, optimize=True) + np.einsum(
+                "sin,kn->sik", tmp_sv_2, cosnvn, optimize=True
+            )
+
+            # Asymmetric (cos) channel.
+            f_theta_cos_a = np.einsum("sik,im->smk", bsubs_asym[:, :nt2, :], cosmui, optimize=True)
+            f_theta_sin_a = np.einsum("sik,im->smk", bsubs_asym[:, :nt2, :], sinmui, optimize=True)
+            bsubsmn3 = np.einsum("smk,kn->smn", f_theta_cos_a, cosnv, optimize=True) * dmult[None, :, :]
+            bsubsmn4 = np.einsum("smk,kn->smn", f_theta_sin_a, sinnv, optimize=True) * dmult[None, :, :]
+
+            tmp_su_3 = np.einsum("smn,im->sin", bsubsmn3, sinmum, optimize=True)
+            tmp_su_4 = np.einsum("smn,im->sin", bsubsmn4, cosmum, optimize=True)
+            bsubsu_a = np.einsum("sin,kn->sik", tmp_su_3, cosnv, optimize=True) + np.einsum(
+                "sin,kn->sik", tmp_su_4, sinnv, optimize=True
+            )
+
+            tmp_sv_3 = np.einsum("smn,im->sin", bsubsmn3, cosmu, optimize=True)
+            tmp_sv_4 = np.einsum("smn,im->sin", bsubsmn4, sinmu, optimize=True)
+            bsubsv_a = np.einsum("sin,kn->sik", tmp_sv_3, sinnvn, optimize=True) + np.einsum(
+                "sin,kn->sik", tmp_sv_4, cosnvn, optimize=True
+            )
+
+            bsubsu = bsubsu_s + bsubsu_a
+            bsubsv = bsubsv_s + bsubsv_a
+        else:
+            # jxbforce-style Fourier coefficients for bsubs (sin basis).
+            f_theta_sin = np.einsum("sik,im->smk", bsubs_use[:, :nt2, :], sinmui, optimize=True)
+            f_theta_cos = np.einsum("sik,im->smk", bsubs_use[:, :nt2, :], cosmui, optimize=True)
+            bsubsmn1 = np.einsum("smk,kn->smn", f_theta_sin, cosnv, optimize=True) * dmult[None, :, :]
+            bsubsmn2 = np.einsum("smk,kn->smn", f_theta_cos, sinnv, optimize=True) * dmult[None, :, :]
+
+            # Reconstruct bsubsu/bsubsv (jxbforce).
+            tmp_su_1 = np.einsum("smn,im->sin", bsubsmn1, cosmum, optimize=True)
+            tmp_su_2 = np.einsum("smn,im->sin", bsubsmn2, sinmum, optimize=True)
+            bsubsu = np.einsum("sin,kn->sik", tmp_su_1, cosnv, optimize=True) + np.einsum(
+                "sin,kn->sik", tmp_su_2, sinnv, optimize=True
+            )
+
+            tmp_sv_1 = np.einsum("smn,im->sin", bsubsmn1, sinmu, optimize=True)
+            tmp_sv_2 = np.einsum("smn,im->sin", bsubsmn2, cosmu, optimize=True)
+            bsubsv = np.einsum("sin,kn->sik", tmp_sv_1, sinnvn, optimize=True) + np.einsum(
+                "sin,kn->sik", tmp_sv_2, cosnvn, optimize=True
+            )
 
     bsubu = np.asarray(bsubu, dtype=float)
     bsubv = np.asarray(bsubv, dtype=float)
@@ -2207,6 +2306,46 @@ def _vmec_wrout_nyquist_cos_coeffs(
     dmult = np.where((m == 0) | (n == 0), 2.0 * dmult, dmult)
     coeff = coeff * dmult[None, :]
     return np.asarray(coeff, dtype=float)
+
+
+def _vmec_symoutput_split(
+    *,
+    f: np.ndarray,
+    trig,
+    reversed_sym: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
+    """VMEC symoutput-style split into symmetric/antisymmetric parts on [0,π].
+
+    Mirrors `symforce.f:symoutput`:
+      sym = 0.5*(f + f_ref), asym = 0.5*(f - f_ref)
+    except for `bsubs`, where the dominant symmetry is reversed:
+      sym = 0.5*(f - f_ref), asym = 0.5*(f + f_ref)
+
+    Returns arrays on the reduced theta grid (ntheta2).
+    """
+    f = np.asarray(f, dtype=float)
+    if f.ndim != 3:
+        raise ValueError("Expected f with shape (ns, ntheta, nzeta)")
+    nt2 = int(trig.ntheta2)
+    nt1 = int(trig.ntheta1)
+    if int(f.shape[1]) < nt2:
+        raise ValueError("Input theta grid is smaller than VMEC ntheta2")
+    nzeta = int(f.shape[2])
+    if nzeta <= 0:
+        return f[:, :nt2, :].copy(), f[:, :nt2, :].copy()
+
+    i0 = np.arange(nt2, dtype=int)
+    ir0 = np.where(i0 == 0, 0, nt1 - i0)
+    kk = (nzeta - np.arange(nzeta, dtype=int)) % nzeta
+    f_half = f[:, :nt2, :]
+    f_ref = f[:, ir0, :][:, :, kk]
+    if reversed_sym:
+        sym = 0.5 * (f_half - f_ref)
+        asym = 0.5 * (f_half + f_ref)
+    else:
+        sym = 0.5 * (f_half + f_ref)
+        asym = 0.5 * (f_half - f_ref)
+    return sym, asym
 
 
 def _vmec_wrout_nyquist_sin_coeffs(
@@ -3118,6 +3257,13 @@ def wout_minimal_from_fixed_boundary(
 
     wout_timing_env = os.getenv("VMEC_JAX_WOUT_TIMING", "").strip().lower()
     wout_timing_enabled = wout_timing_env not in ("", "0", "false", "no")
+    wout_light_env = os.getenv("VMEC_JAX_WOUT_LIGHT", "").strip().lower()
+    wout_light = wout_light_env not in ("", "0", "false", "no")
+    wout_fast_bcovar_env = os.getenv("VMEC_JAX_WOUT_FAST_BCOVAR", "").strip().lower()
+    wout_fast_bcovar = wout_fast_bcovar_env not in ("", "0", "false", "no")
+    if wout_light:
+        # Light output favors speed; also use the fast bcovar path.
+        wout_fast_bcovar = True
     wout_timing: dict[str, float] = {}
     if wout_timing_enabled:
         import time as _time
@@ -3158,7 +3304,10 @@ def wout_minimal_from_fixed_boundary(
 
     if wout_timing_enabled:
         t0 = _time.perf_counter()
-    geom = vmec_realspace_geom_from_state(state=state, modes=static.modes, trig=trig)
+    if wout_light:
+        geom = _vmec_realspace_geom_light_from_state(state=state, modes=static.modes, trig=trig)
+    else:
+        geom = vmec_realspace_geom_from_state(state=state, modes=static.modes, trig=trig)
     if has_jax():
         try:
             geom = jax.device_get(geom)
@@ -3379,35 +3528,53 @@ def wout_minimal_from_fixed_boundary(
 
     if wout_timing_enabled:
         t0 = _time.perf_counter()
-    k_force = vmec_forces_rz_from_wout(
-        state=state,
-        static=static,
-        wout=wout_like,
-        indata=indata_wout,
-        use_wout_bsup=False,
-        use_vmec_synthesis=True,
-        trig=trig,
-    )
-    if has_jax():
-        try:
-            k_force = jax.device_get(k_force)
-        except Exception:
-            pass
+    if wout_fast_bcovar:
+        bc = vmec_bcovar_half_mesh_from_wout(
+            state=state,
+            static=static,
+            wout=wout_like,
+            pres=pres,
+            use_wout_bsup=False,
+            use_wout_bsub_for_lambda=False,
+            use_wout_bmag_for_bsq=False,
+            use_vmec_synthesis=True,
+            trig=trig,
+        )
+        if has_jax():
+            try:
+                bc = jax.device_get(bc)
+            except Exception:
+                pass
+    else:
+        k_force = vmec_forces_rz_from_wout(
+            state=state,
+            static=static,
+            wout=wout_like,
+            indata=indata_wout,
+            use_wout_bsup=False,
+            use_vmec_synthesis=True,
+            trig=trig,
+        )
+        if has_jax():
+            try:
+                k_force = jax.device_get(k_force)
+            except Exception:
+                pass
+        bc = k_force.bc
+        geom["pr1_even"] = np.asarray(k_force.pr1_even, dtype=float)
+        geom["pr1_odd"] = np.asarray(k_force.pr1_odd, dtype=float)
+        geom["pz1_even"] = np.asarray(k_force.pz1_even, dtype=float)
+        geom["pz1_odd"] = np.asarray(k_force.pz1_odd, dtype=float)
+        geom["pru_even"] = np.asarray(k_force.pru_even, dtype=float)
+        geom["pru_odd"] = np.asarray(k_force.pru_odd, dtype=float)
+        geom["pzu_even"] = np.asarray(k_force.pzu_even, dtype=float)
+        geom["pzu_odd"] = np.asarray(k_force.pzu_odd, dtype=float)
+        geom["prv_even"] = np.asarray(k_force.prv_even, dtype=float)
+        geom["prv_odd"] = np.asarray(k_force.prv_odd, dtype=float)
+        geom["pzv_even"] = np.asarray(k_force.pzv_even, dtype=float)
+        geom["pzv_odd"] = np.asarray(k_force.pzv_odd, dtype=float)
     if wout_timing_enabled:
         wout_timing["forces_bcovar_s"] = _time.perf_counter() - t0
-    bc = k_force.bc
-    geom["pr1_even"] = np.asarray(k_force.pr1_even, dtype=float)
-    geom["pr1_odd"] = np.asarray(k_force.pr1_odd, dtype=float)
-    geom["pz1_even"] = np.asarray(k_force.pz1_even, dtype=float)
-    geom["pz1_odd"] = np.asarray(k_force.pz1_odd, dtype=float)
-    geom["pru_even"] = np.asarray(k_force.pru_even, dtype=float)
-    geom["pru_odd"] = np.asarray(k_force.pru_odd, dtype=float)
-    geom["pzu_even"] = np.asarray(k_force.pzu_even, dtype=float)
-    geom["pzu_odd"] = np.asarray(k_force.pzu_odd, dtype=float)
-    geom["prv_even"] = np.asarray(k_force.prv_even, dtype=float)
-    geom["prv_odd"] = np.asarray(k_force.prv_odd, dtype=float)
-    geom["pzv_even"] = np.asarray(k_force.pzv_even, dtype=float)
-    geom["pzv_odd"] = np.asarray(k_force.pzv_odd, dtype=float)
 
     # Use bcovar/Jacobian-consistent half-mesh fields for bss inputs.
     # This keeps bsubs reconstruction on the same discretization path used for
@@ -3544,20 +3711,63 @@ def wout_minimal_from_fixed_boundary(
     if wout_timing_enabled:
         t0 = _time.perf_counter()
     if bool(lasym):
-        gmnc = z2.copy()
-        gmns = z2.copy()
-        bsupumnc = z2.copy()
-        bsupumns = z2.copy()
-        bsupvmnc = z2.copy()
-        bsupvmns = z2.copy()
-        bsubumnc = z2.copy()
-        bsubumns = z2.copy()
-        bsubvmnc = z2.copy()
-        bsubvmns = z2.copy()
-        bsubsmns = z2.copy()
-        bsubsmnc = z2.copy()
-        bmnc = z2.copy()
-        bmns = z2.copy()
+        pres_h = np.asarray(pres, dtype=float)[:, None, None]
+        bmag = np.sqrt(2.0 * np.abs(np.asarray(bc.bsq) - pres_h))
+        sqrtg = np.asarray(bc.jac.sqrtg)
+
+        bsubu_sym, bsubu_asym = _vmec_symoutput_split(f=bsubu_out, trig=trig)
+        bsubv_sym, bsubv_asym = _vmec_symoutput_split(f=bsubv_out, trig=trig)
+        bsupu_sym, bsupu_asym = _vmec_symoutput_split(f=bsupu_out, trig=trig)
+        bsupv_sym, bsupv_asym = _vmec_symoutput_split(f=bsupv_out, trig=trig)
+        bsubs_sym, bsubs_asym = _vmec_symoutput_split(f=bsubs_full, trig=trig, reversed_sym=True)
+        bmag_sym, bmag_asym = _vmec_symoutput_split(f=bmag, trig=trig)
+        sqrtg_sym, sqrtg_asym = _vmec_symoutput_split(f=sqrtg, trig=trig)
+
+        gmnc = _vmec_wrout_nyquist_cos_coeffs(f=sqrtg_sym, modes=nyq_modes, trig=trig)
+        bmnc = _vmec_wrout_nyquist_cos_coeffs(f=bmag_sym, modes=nyq_modes, trig=trig)
+        bsubumnc = _vmec_wrout_nyquist_cos_coeffs(f=bsubu_sym, modes=nyq_modes, trig=trig)
+        bsubvmnc = _vmec_wrout_nyquist_cos_coeffs(f=bsubv_sym, modes=nyq_modes, trig=trig)
+        bsupumnc = _vmec_wrout_nyquist_cos_coeffs(f=bsupu_sym, modes=nyq_modes, trig=trig)
+        bsupvmnc = _vmec_wrout_nyquist_cos_coeffs(f=bsupv_sym, modes=nyq_modes, trig=trig)
+        bsubsmns = _vmec_wrout_nyquist_sin_coeffs(f=bsubs_sym, modes=nyq_modes, trig=trig)
+
+        gmns = _vmec_wrout_nyquist_sin_coeffs(f=sqrtg_asym, modes=nyq_modes, trig=trig)
+        bmns = _vmec_wrout_nyquist_sin_coeffs(f=bmag_asym, modes=nyq_modes, trig=trig)
+        bsubumns = _vmec_wrout_nyquist_sin_coeffs(f=bsubu_asym, modes=nyq_modes, trig=trig)
+        bsubvmns = _vmec_wrout_nyquist_sin_coeffs(f=bsubv_asym, modes=nyq_modes, trig=trig)
+        bsupumns = _vmec_wrout_nyquist_sin_coeffs(f=bsupu_asym, modes=nyq_modes, trig=trig)
+        bsupvmns = _vmec_wrout_nyquist_sin_coeffs(f=bsupv_asym, modes=nyq_modes, trig=trig)
+        bsubsmnc = _vmec_wrout_nyquist_cos_coeffs(f=bsubs_asym, modes=nyq_modes, trig=trig)
+
+        # VMEC output: bsubu/bsubv coefficients are band-limited to the base
+        # spectral resolution (mpol-1, ntor). Higher Nyquist modes are zeroed
+        # (wrout.f keeps them at ~0). Enforce this for LASYM parity.
+        m_mask = np.asarray(nyq_modes.m, dtype=int)
+        n_mask = np.asarray(nyq_modes.n, dtype=int)
+        mask_bsub = (m_mask >= int(mpol)) | (np.abs(n_mask) > int(ntor))
+        if np.any(mask_bsub):
+            bsubumnc[:, mask_bsub] = 0.0
+            bsubumns[:, mask_bsub] = 0.0
+            bsubvmnc[:, mask_bsub] = 0.0
+            bsubvmns[:, mask_bsub] = 0.0
+
+        if gmnc.shape[0] > 0:
+            gmnc[0, :] = 0.0
+            bmnc[0, :] = 0.0
+            bsubumnc[0, :] = 0.0
+            bsubvmnc[0, :] = 0.0
+            bsupumnc[0, :] = 0.0
+            bsupvmnc[0, :] = 0.0
+        if gmns.shape[0] > 0:
+            gmns[0, :] = 0.0
+            bmns[0, :] = 0.0
+            bsubumns[0, :] = 0.0
+            bsubvmns[0, :] = 0.0
+            bsupumns[0, :] = 0.0
+            bsupvmns[0, :] = 0.0
+        if ns > 2:
+            bsubsmns[0, :] = 2.0 * bsubsmns[1, :] - bsubsmns[2, :]
+            bsubsmnc[0, :] = 2.0 * bsubsmnc[1, :] - bsubsmnc[2, :]
     else:
         gmnc = _vmec_wrout_nyquist_cos_coeffs(
             f=np.asarray(bc.jac.sqrtg), modes=nyq_modes, trig=trig
@@ -3623,6 +3833,8 @@ def wout_minimal_from_fixed_boundary(
         bsubv_phys = np.asarray(eval_fourier(bsubvmnc, bsubvmns, basis_nyq))
     # JXBFORCE applies a low-pass filter on bsubu/bsubv using (mpol-1, ntor).
     skip_bsub_filter = os.getenv("VMEC_JAX_SKIP_BSUB_FILTER", "") not in ("", "0")
+    if wout_light:
+        skip_bsub_filter = True
     filter_from_raw = os.getenv("VMEC_JAX_MERCIER_FILTER_FROM_RAW", "0") not in ("", "0")
     if wout_timing_enabled:
         t_bsub_filter = _time.perf_counter()
@@ -3776,21 +3988,28 @@ def wout_minimal_from_fixed_boundary(
     # Keep bsubsmns from the direct bsubs_half computation (wrout.f). The
     # Nyquist-reconstructed path is used only for consistency checks.
 
-    if wout_timing_enabled:
-        t_equif = _time.perf_counter()
-    buco, bvco, jcuru, jcurv, equif = _compute_equif_wout(
-        bsubu=bsubu_out,
-        bsubv=bsubv_out,
-        pres=pres,
-        vp=vp,
-        phipf=np.asarray(flux.phipf, dtype=float),
-        chipf=np.asarray(chipf_wout, dtype=float),
-        signgs=int(signgs),
-        trig=trig,
-        s=s,
-    )
-    if wout_timing_enabled:
-        wout_timing["equif_s"] = _time.perf_counter() - t_equif
+    if wout_light:
+        buco = np.zeros((ns,), dtype=float)
+        bvco = np.zeros((ns,), dtype=float)
+        jcuru = np.zeros((ns,), dtype=float)
+        jcurv = np.zeros((ns,), dtype=float)
+        equif = np.zeros((ns,), dtype=float)
+    else:
+        if wout_timing_enabled:
+            t_equif = _time.perf_counter()
+        buco, bvco, jcuru, jcurv, equif = _compute_equif_wout(
+            bsubu=bsubu_out,
+            bsubv=bsubv_out,
+            pres=pres,
+            vp=vp,
+            phipf=np.asarray(flux.phipf, dtype=float),
+            chipf=np.asarray(chipf_wout, dtype=float),
+            signgs=int(signgs),
+            trig=trig,
+            s=s,
+        )
+        if wout_timing_enabled:
+            wout_timing["equif_s"] = _time.perf_counter() - t_equif
 
     # Current profile metadata for vmecPlot2.
     pcurr_type = indata.get("PCURR_TYPE", None)
@@ -3833,96 +4052,97 @@ def wout_minimal_from_fixed_boundary(
     jdotb = np.zeros((ns,), dtype=float)
     bdotb = np.zeros((ns,), dtype=float)
     bdotgradv = np.zeros((ns,), dtype=float)
-    try:
-        # Mercier/jxbforce operate on real-space bsub* fields on VMEC's reduced
-        # angular grid. Do not reconstruct from wout Fourier coefficients here:
-        # wrout output transforms are not a strict inverse of eval_fourier.
-        bsubu_merc = np.asarray(bsubu_diag, dtype=float)
-        bsubv_merc = np.asarray(bsubv_diag, dtype=float)
-        if os.getenv("VMEC_JAX_MERCIER_USE_RAW_BSUBUV", "") not in ("", "0"):
-            bsubu_merc = np.asarray(bsubu_raw, dtype=float)
-            bsubv_merc = np.asarray(bsubv_raw, dtype=float)
-        elif os.getenv("VMEC_JAX_MERCIER_USE_WROUT_BSUBUV", "") not in ("", "0"):
-            # Optional parity path for debugging: use Nyquist-reconstructed
-            # bsubu/bsubv from wrout coefficients in the jxbforce scalars.
-            bsubu_merc = np.asarray(bsubu_phys, dtype=float)
-            bsubv_merc = np.asarray(bsubv_phys, dtype=float)
-        elif os.getenv("VMEC_JAX_MERCIER_USE_RAW_BSUBV", "") not in ("", "0"):
-            bsubv_merc = np.asarray(bsubv_raw, dtype=float)
+    if not wout_light:
+        try:
+            # Mercier/jxbforce operate on real-space bsub* fields on VMEC's reduced
+            # angular grid. Do not reconstruct from wout Fourier coefficients here:
+            # wrout output transforms are not a strict inverse of eval_fourier.
+            bsubu_merc = np.asarray(bsubu_diag, dtype=float)
+            bsubv_merc = np.asarray(bsubv_diag, dtype=float)
+            if os.getenv("VMEC_JAX_MERCIER_USE_RAW_BSUBUV", "") not in ("", "0"):
+                bsubu_merc = np.asarray(bsubu_raw, dtype=float)
+                bsubv_merc = np.asarray(bsubv_raw, dtype=float)
+            elif os.getenv("VMEC_JAX_MERCIER_USE_WROUT_BSUBUV", "") not in ("", "0"):
+                # Optional parity path for debugging: use Nyquist-reconstructed
+                # bsubu/bsubv from wrout coefficients in the jxbforce scalars.
+                bsubu_merc = np.asarray(bsubu_phys, dtype=float)
+                bsubv_merc = np.asarray(bsubv_phys, dtype=float)
+            elif os.getenv("VMEC_JAX_MERCIER_USE_RAW_BSUBV", "") not in ("", "0"):
+                bsubv_merc = np.asarray(bsubv_raw, dtype=float)
 
-        wint = _vmec_wint_from_trig(trig)
-        if wout_timing_enabled:
-            t_beta = _time.perf_counter()
-        betaxis = _compute_eqfor_betaxis(
-            pres=np.asarray(pres, dtype=float),
-            vp=np.asarray(vp, dtype=float),
-            bsq=np.asarray(bc.bsq, dtype=float),
-            sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
-            wint=wint,
-            signgs=int(signgs),
-        )
-        betapol, betator, betatot_eq, betaxis = _compute_eqfor_beta(
-            pres=np.asarray(pres, dtype=float),
-            vp=np.asarray(vp, dtype=float),
-            bsq=np.asarray(bc.bsq, dtype=float),
-            r12=np.asarray(bc.jac.r12, dtype=float),
-            bsupv=np.asarray(bc.bsupv, dtype=float),
-            sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
-            wint=wint,
-            signgs=int(signgs),
-        )
-        if wout_timing_enabled:
-            wout_timing["beta_s"] = _time.perf_counter() - t_beta
-        betatotal = float(betatot_eq)
-        ctor = _compute_ctor_from_buco(buco=np.asarray(buco, dtype=float), signgs=int(signgs), indata=indata)
-        if wout_timing_enabled:
-            t_mercier = _time.perf_counter()
-        (
-            DMerc,
-            Dshear,
-            Dcurr,
-            Dwell,
-            Dgeod,
-            jdotb,
-            bdotb,
-            bdotgradv,
-        ) = _compute_mercier(
-            state=state,
-            geom_modes=static.modes,
-            s=np.asarray(s, dtype=float),
-            lconm1=bool(getattr(cfg, "lconm1", True)),
-            lthreed=bool(ntor > 0),
-            lasym=bool(lasym),
-            nfp=int(nfp),
-            mmax_force=max(int(mpol) - 1, 0),
-            nmax_force=int(ntor),
-            pres=np.asarray(pres, dtype=float),
-            vp=np.asarray(vp, dtype=float),
-            phips=np.asarray(flux.phips, dtype=float),
-            iotas=np.asarray(iotas, dtype=float),
-            # Use bcovar real-space fields directly (VMEC internal grid/normalization)
-            bsq=np.asarray(bc.bsq, dtype=float),
-            sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
-            bsubu=bsubu_merc,
-            bsubv=bsubv_merc,
-            bsupu=np.asarray(bsupu_bss, dtype=float),
-            bsupv=np.asarray(bsupv_bss, dtype=float),
-            trig=trig,
-            geom=geom,
-            jac_half=bc.jac,
-            force_rs=rs_bss,
-            force_zs=zs_bss,
-            force_ru12=ru12_bss,
-            force_zu12=zu12_bss,
-            bsubu_raw=np.asarray(bsubu_raw, dtype=float),
-            bsubv_raw=np.asarray(bsubv_raw, dtype=float),
-            signgs=int(signgs),
-        )
-        if wout_timing_enabled:
-            wout_timing["mercier_s"] = _time.perf_counter() - t_mercier
-    except Exception:
-        if os.getenv("VMEC_JAX_STRICT_WOUT_DIAGNOSTICS", "") not in ("", "0"):
-            raise
+            wint = _vmec_wint_from_trig(trig)
+            if wout_timing_enabled:
+                t_beta = _time.perf_counter()
+            betaxis = _compute_eqfor_betaxis(
+                pres=np.asarray(pres, dtype=float),
+                vp=np.asarray(vp, dtype=float),
+                bsq=np.asarray(bc.bsq, dtype=float),
+                sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
+                wint=wint,
+                signgs=int(signgs),
+            )
+            betapol, betator, betatot_eq, betaxis = _compute_eqfor_beta(
+                pres=np.asarray(pres, dtype=float),
+                vp=np.asarray(vp, dtype=float),
+                bsq=np.asarray(bc.bsq, dtype=float),
+                r12=np.asarray(bc.jac.r12, dtype=float),
+                bsupv=np.asarray(bc.bsupv, dtype=float),
+                sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
+                wint=wint,
+                signgs=int(signgs),
+            )
+            if wout_timing_enabled:
+                wout_timing["beta_s"] = _time.perf_counter() - t_beta
+            betatotal = float(betatot_eq)
+            ctor = _compute_ctor_from_buco(buco=np.asarray(buco, dtype=float), signgs=int(signgs), indata=indata)
+            if wout_timing_enabled:
+                t_mercier = _time.perf_counter()
+            (
+                DMerc,
+                Dshear,
+                Dcurr,
+                Dwell,
+                Dgeod,
+                jdotb,
+                bdotb,
+                bdotgradv,
+            ) = _compute_mercier(
+                state=state,
+                geom_modes=static.modes,
+                s=np.asarray(s, dtype=float),
+                lconm1=bool(getattr(cfg, "lconm1", True)),
+                lthreed=bool(ntor > 0),
+                lasym=bool(lasym),
+                nfp=int(nfp),
+                mmax_force=max(int(mpol) - 1, 0),
+                nmax_force=int(ntor),
+                pres=np.asarray(pres, dtype=float),
+                vp=np.asarray(vp, dtype=float),
+                phips=np.asarray(flux.phips, dtype=float),
+                iotas=np.asarray(iotas, dtype=float),
+                # Use bcovar real-space fields directly (VMEC internal grid/normalization)
+                bsq=np.asarray(bc.bsq, dtype=float),
+                sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
+                bsubu=bsubu_merc,
+                bsubv=bsubv_merc,
+                bsupu=np.asarray(bsupu_bss, dtype=float),
+                bsupv=np.asarray(bsupv_bss, dtype=float),
+                trig=trig,
+                geom=geom,
+                jac_half=bc.jac,
+                force_rs=rs_bss,
+                force_zs=zs_bss,
+                force_ru12=ru12_bss,
+                force_zu12=zu12_bss,
+                bsubu_raw=np.asarray(bsubu_raw, dtype=float),
+                bsubv_raw=np.asarray(bsubv_raw, dtype=float),
+                signgs=int(signgs),
+            )
+            if wout_timing_enabled:
+                wout_timing["mercier_s"] = _time.perf_counter() - t_mercier
+        except Exception:
+            if os.getenv("VMEC_JAX_STRICT_WOUT_DIAGNOSTICS", "") not in ("", "0"):
+                raise
 
     # Convert internal lambda coefficients to VMEC wout convention.
     from .field import lamscale_from_phips
