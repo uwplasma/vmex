@@ -85,6 +85,14 @@ Disable live printing with:
 If you want to reduce any remaining host-callback overhead, increase ``NSTEP``
 in the input file. Fewer prints means fewer callbacks.
 
+Quiet scan runs (``--quiet`` / ``verbose=False``) automatically switch to a
+minimal history mode: only ``fsqr/fsqz/fsql`` (and therefore ``w_history``) are
+kept. Per-iteration print scalars (``r00``, ``w_mhd``) and time-step histories
+are skipped to reduce host/device traffic. Override with::
+
+  export VMEC_JAX_SCAN_MINIMAL=0   # keep full scan diagnostics
+  export VMEC_JAX_SCAN_MINIMAL=1   # force minimal histories
+
 Advanced knobs (not required for normal use):
 
 - ``VMEC_JAX_SCAN_PRINT_MODE=debug_print`` (default)
