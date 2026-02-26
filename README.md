@@ -110,6 +110,14 @@ export VMEC_JAX_SCAN_PRINT=0
 If you want minimal overhead, increase `NSTEP` in your input file. Larger
 `NSTEP` means fewer host callbacks and faster runs.
 
+Quiet runs (`--quiet` or `verbose=False`) default the scan path to a minimal
+history mode (only `fsqr/fsqz/fsql` and `w_history` are kept) to reduce
+host/device traffic. You can override this with:
+
+```bash
+export VMEC_JAX_SCAN_MINIMAL=0  # keep full scan diagnostics even when quiet
+```
+
 ## When to use vmec_jax vs VMEC2000
 
 - Use `vmec_jax` for autodiff, rapid parameter sweeps, and JAX-native pipelines.
