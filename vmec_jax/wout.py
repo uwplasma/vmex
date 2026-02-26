@@ -2392,6 +2392,46 @@ def _compute_mercier(
             nfp=int(nfp),
             sum_w=_sum_w,
         )
+
+    if os.getenv("VMEC_JAX_DUMP_JXB_CHANNELS", "") not in ("", "0"):
+        from pathlib import Path
+        tag = os.getenv("VMEC_JAX_DUMP_TAG", "").strip()
+        dump_dir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+        dump_dir.mkdir(parents=True, exist_ok=True)
+        dump_js = os.getenv("VMEC_JAX_DUMP_JS", "").strip()
+        js_sel = int(dump_js) if dump_js not in ("",) else -1
+        js_list = range(ns) if js_sel < 0 else [js_sel]
+        out = {}
+        for js in js_list:
+            if js < 0 or js >= ns:
+                continue
+            key = f"js{js}"
+            out[key] = dict(
+                bsubs=np.asarray(bsubs_use[js], dtype=float),
+                bsubsu0=np.asarray(bsubsu[js], dtype=float),
+                bsubsv0=np.asarray(bsubsv[js], dtype=float),
+            )
+        np.savez(
+            dump_dir / f"jxb_channels_wout{('_' + tag) if tag else ''}.npz",
+            ntheta2=int(trig.ntheta2),
+            ntheta3=int(getattr(trig, "ntheta3", trig.ntheta2)),
+            nzeta=int(trig.cosnv.shape[0]),
+            **out,
+        )
+    if os.getenv("VMEC_JAX_DUMP_JXBOUT", "") not in ("", "0"):
+        from pathlib import Path
+        tag = os.getenv("VMEC_JAX_DUMP_TAG", "").strip()
+        dump_dir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+        dump_dir.mkdir(parents=True, exist_ok=True)
+        np.savez(
+            dump_dir / f"jxbout_jax{('_' + tag) if tag else ''}.npz",
+            bsubs=np.asarray(bsubs_use, dtype=float),
+            bsubu=np.asarray(bsubu, dtype=float),
+            bsubv=np.asarray(bsubv, dtype=float),
+            ntheta3=int(getattr(trig, "ntheta3", trig.ntheta2)),
+            nzeta=int(trig.cosnv.shape[0]),
+            ns=int(ns),
+        )
     itheta = np.zeros_like(bsubs)
     izeta = np.zeros_like(bsubs)
     ohs = 1.0 / hs
