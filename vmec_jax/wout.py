@@ -1603,6 +1603,159 @@ def _jxbforce_getbsubs_coeffs_lasym_false(
     return coeff
 
 
+def _jxbforce_getbsubs_coeffs_lasym_true(
+    *,
+    frho: np.ndarray,
+    bsupu: np.ndarray,
+    bsupv: np.ndarray,
+    trig,
+    nfp: int,
+) -> np.ndarray | None:
+    """Solve VMEC getbsubs collocation system (lasym=True).
+
+    Port of getbrho.f for the lasym branch. Returns coefficients
+    ``bsubsmn(m,n,parity)`` with ``m=0..mmax``, ``n=-nmax..nmax``,
+    ``parity=0`` (sin/cos channel) and ``parity=1`` (cos/sin channel).
+    """
+    frho = np.asarray(frho, dtype=float)
+    bsupu = np.asarray(bsupu, dtype=float)
+    bsupv = np.asarray(bsupv, dtype=float)
+
+    ntheta3 = int(getattr(trig, "ntheta3", 0))
+    ntheta2 = int(getattr(trig, "ntheta2", 0))
+    nzeta = int(np.asarray(trig.cosnv).shape[0])
+    mmax = max(ntheta2 - 1, 0)
+    nmax = max(nzeta // 2, 0)
+    if frho.shape != (ntheta3, nzeta):
+        return None
+    if bsupu.shape != (ntheta3, nzeta) or bsupv.shape != (ntheta3, nzeta):
+        return None
+
+    itotal = ntheta3 * nzeta
+    if itotal <= 0:
+        return None
+
+    cosmu = np.asarray(trig.cosmu, dtype=float)[:ntheta3, : mmax + 1]
+    sinmu = np.asarray(trig.sinmu, dtype=float)[:ntheta3, : mmax + 1]
+    cosnv = np.asarray(trig.cosnv, dtype=float)[:, : nmax + 1]
+    sinnv = np.asarray(trig.sinnv, dtype=float)[:, : nmax + 1]
+
+    A = np.zeros((itotal, itotal), dtype=float)
+    rhs = np.zeros((itotal,), dtype=float)
+    row = 0
+
+    for i in range(ntheta3):
+        for j in range(nzeta):
+            rhs[row] = frho[i, j]
+            col = 0
+            bu = bsupu[i, j]
+            bv = bsupv[i, j]
+            for m in range(mmax + 1):
+                dm = float(m) * bu
+                for n in range(nmax + 1):
+                    if (m == 0) and (n == 0):
+                        # skip (0,0) for lasym in getbsubs
+                        continue
+                    if col >= itotal:
+                        return None
+                    ccmn = cosmu[i, m] * cosnv[j, n]
+                    ssmn = sinmu[i, m] * sinnv[j, n]
+                    dn = float(n * nfp) * bv
+                    termsc = dm * ccmn - dn * ssmn
+                    termcs = -dm * ssmn + dn * ccmn
+                    if n == 0 or n == nmax:
+                        if m > 0:
+                            A[row, col] = termsc
+                            col += 1
+                        elif n == 0:
+                            A[row, col] = bv  # pedestal term
+                            col += 1
+                        else:
+                            A[row, col] = termcs
+                            col += 1
+                    elif m == 0 or m == mmax:
+                        A[row, col] = termcs
+                        col += 1
+                    else:
+                        A[row, col] = termsc
+                        col += 1
+                        A[row, col] = termcs
+                        col += 1
+
+                    if (m == 0) and (n == 0 or n == nmax):
+                        continue
+                    if col >= itotal:
+                        return None
+                    csmn = cosmu[i, m] * sinnv[j, n]
+                    scmn = sinmu[i, m] * cosnv[j, n]
+                    termcc = -dm * scmn - dn * csmn
+                    termss = dm * csmn + dn * scmn
+                    if (n == 0 or n == nmax) or (m == 0 or m == mmax):
+                        A[row, col] = termcc
+                        col += 1
+                    else:
+                        A[row, col] = termcc
+                        col += 1
+                        A[row, col] = termss
+                        col += 1
+            if col != itotal:
+                return None
+            row += 1
+
+    if row != itotal:
+        return None
+
+    try:
+        sol = np.linalg.solve(A, rhs)
+    except np.linalg.LinAlgError:
+        try:
+            sol, *_ = np.linalg.lstsq(A, rhs, rcond=None)
+        except np.linalg.LinAlgError:
+            return None
+
+    coeff = np.zeros((mmax + 1, 2 * nmax + 1, 2), dtype=float)
+    off = nmax
+    idx = 0
+    for m in range(mmax + 1):
+        for n in range(nmax + 1):
+            if (m == 0) and (n == 0):
+                continue
+            if idx >= itotal:
+                break
+            if n == 0 or n == nmax:
+                if m > 0:
+                    coeff[m, off + n, 0] = sol[idx]
+                    idx += 1
+                elif n == 0:
+                    coeff[m, off + n, 0] = sol[idx]
+                    idx += 1
+                else:
+                    coeff[m, off - n, 0] = sol[idx]
+                    idx += 1
+            elif m == 0 or m == mmax:
+                coeff[m, off - n, 0] = sol[idx]
+                idx += 1
+            else:
+                coeff[m, off + n, 0] = sol[idx]
+                idx += 1
+                coeff[m, off - n, 0] = sol[idx]
+                idx += 1
+
+            if (m == 0) and (n == 0 or n == nmax):
+                continue
+            if idx >= itotal:
+                break
+            if (n == 0 or n == nmax) or (m == 0 or m == mmax):
+                coeff[m, off + n, 1] = sol[idx]
+                idx += 1
+            else:
+                coeff[m, off + n, 1] = sol[idx]
+                idx += 1
+                coeff[m, off - n, 1] = sol[idx]
+                idx += 1
+    return coeff
+
+
 def _jxbforce_apply_bsubs_correction_lasym_false(
     *,
     bsubu: np.ndarray,
@@ -1704,6 +1857,173 @@ def _jxbforce_apply_bsubs_correction_lasym_false(
         bsubs[0] = 2.0 * bsubs[1] - bsubs[2]
         bsubs[-1] = 2.0 * bsubs[-1] - bsubs[-2]
     return bsubs, bsubsu, bsubsv
+
+
+def _jxbforce_apply_bsubs_correction_lasym_true(
+    *,
+    bsubu: np.ndarray,
+    bsubv: np.ndarray,
+    bsubs: np.ndarray,
+    bsubsu: np.ndarray,
+    bsubsv: np.ndarray,
+    bsupu: np.ndarray,
+    bsupv: np.ndarray,
+    sqrtg: np.ndarray,
+    pres: np.ndarray,
+    vp: np.ndarray,
+    hs: float,
+    signgs: float,
+    trig,
+    nfp: int,
+    sum_w,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Mirror VMEC jxbforce corrected-bsubs pass for lasym=True."""
+    bsubu = np.asarray(bsubu, dtype=float)
+    bsubv = np.asarray(bsubv, dtype=float)
+    bsubs = np.asarray(bsubs, dtype=float)
+    bsubsu = np.asarray(bsubsu, dtype=float)
+    bsubsv = np.asarray(bsubsv, dtype=float)
+    bsupu = np.asarray(bsupu, dtype=float)
+    bsupv = np.asarray(bsupv, dtype=float)
+    sqrtg = np.asarray(sqrtg, dtype=float)
+    pres = np.asarray(pres, dtype=float)
+    vp = np.asarray(vp, dtype=float)
+
+    ns, nt2, nzeta = bsubu.shape
+    nt1 = int(getattr(trig, "ntheta1", nt2))
+    nt3 = int(getattr(trig, "ntheta3", nt2))
+    if nt3 < nt2:
+        nt3 = nt2
+    if ns < 3 or hs == 0.0:
+        return bsubs, bsubsu, bsubsv
+
+    ohs = 1.0 / hs
+    mnyq, nnyq = _jxbforce_nyquist_limits(trig)
+    cosmu = np.asarray(trig.cosmu, dtype=float)[:nt2, : mnyq + 1]
+    sinmu = np.asarray(trig.sinmu, dtype=float)[:nt2, : mnyq + 1]
+    cosmum = np.asarray(trig.cosmum, dtype=float)[:nt2, : mnyq + 1]
+    sinmum = np.asarray(trig.sinmum, dtype=float)[:nt2, : mnyq + 1]
+    cosnv = np.asarray(trig.cosnv, dtype=float)[:, : nnyq + 1]
+    sinnv = np.asarray(trig.sinnv, dtype=float)[:, : nnyq + 1]
+    cosnvn = np.asarray(trig.cosnvn, dtype=float)[:, : nnyq + 1]
+    sinnvn = np.asarray(trig.sinnvn, dtype=float)[:, : nnyq + 1]
+
+    def _expand_sym_to_full(sym: np.ndarray) -> np.ndarray:
+        return _vmec_symoutput_expand(sym=sym, asym=None, trig=trig)
+
+    def _extend_parity_to_full(par0: np.ndarray, par1: np.ndarray) -> np.ndarray:
+        full = np.zeros((nt3, nzeta), dtype=float)
+        full[:nt2, :] = par0 + par1
+        if nt3 == nt2:
+            return full
+        i0 = np.arange(nt2, dtype=int)
+        ir0 = np.where(i0 == 0, 0, nt1 - i0)
+        kk = (nzeta - np.arange(nzeta, dtype=int)) % nzeta
+        mask = ir0 >= nt2
+        if np.any(mask):
+            ir = ir0[mask]
+            ref0 = par0[mask][:, kk]
+            ref1 = par1[mask][:, kk]
+            full[ir, :] = ref0 - ref1
+        return full
+
+    if bsubu.shape[1] == nt3:
+        bsubu_full = bsubu
+        bsubv_full = bsubv
+    else:
+        bsubu_full = _expand_sym_to_full(bsubu)
+        bsubv_full = _expand_sym_to_full(bsubv)
+
+    if bsupu.shape[1] == nt3:
+        bsupu_full = bsupu
+        bsupv_full = bsupv
+    else:
+        bsupu_full = _expand_sym_to_full(bsupu[:, :nt2, :])
+        bsupv_full = _expand_sym_to_full(bsupv[:, :nt2, :])
+
+    if sqrtg.shape[1] == nt3:
+        sqrtg_full = sqrtg
+    else:
+        sqrtg_full = _expand_sym_to_full(sqrtg[:, :nt2, :])
+
+    if bsubs.shape[1] == nt3:
+        bsubs_out = bsubs.copy()
+    else:
+        bsubs_out = np.zeros((ns, nt3, nzeta), dtype=float)
+    bsubsu_out = np.zeros((ns, nt3, nzeta), dtype=float)
+    bsubsv_out = np.zeros((ns, nt3, nzeta), dtype=float)
+
+    for js in range(1, ns - 1):
+        jxb = 0.5 * (sqrtg_full[js] + sqrtg_full[js + 1])
+        bsupu1 = 0.5 * (bsupu_full[js] * sqrtg_full[js] + bsupu_full[js + 1] * sqrtg_full[js + 1])
+        bsupv1 = 0.5 * (bsupv_full[js] * sqrtg_full[js] + bsupv_full[js + 1] * sqrtg_full[js + 1])
+
+        brho_full = ohs * (
+            bsupu1 * (bsubu_full[js + 1] - bsubu_full[js])
+            + bsupv1 * (bsubv_full[js + 1] - bsubv_full[js])
+        )
+        brho_full = brho_full + (pres[js + 1] - pres[js]) * ohs * jxb
+
+        brho00 = float(sum_w(brho_full))
+        vden = 0.5 * (vp[js] + vp[js + 1])
+        if vden != 0.0:
+            brho_full = brho_full - signgs * jxb * (brho00 / vden)
+
+        coeff = _jxbforce_getbsubs_coeffs_lasym_true(
+            frho=brho_full,
+            bsupu=bsupu1,
+            bsupv=bsupv1,
+            trig=trig,
+            nfp=int(nfp),
+        )
+        if coeff is None:
+            continue
+
+        bsubs_s = np.zeros((nt2, nzeta), dtype=float)
+        bsubsu_s = np.zeros((nt2, nzeta), dtype=float)
+        bsubsv_s = np.zeros((nt2, nzeta), dtype=float)
+        bsubs_a = np.zeros((nt2, nzeta), dtype=float)
+        bsubsu_a = np.zeros((nt2, nzeta), dtype=float)
+        bsubsv_a = np.zeros((nt2, nzeta), dtype=float)
+        off = nnyq
+
+        for m in range(mnyq + 1):
+            for n in range(nnyq + 1):
+                c1 = coeff[m, off + n, 0]
+                c2 = 0.0 if n == 0 else coeff[m, off - n, 0]
+                c3 = coeff[m, off + n, 1]
+                c4 = 0.0 if n == 0 else coeff[m, off - n, 1]
+                for k in range(nzeta):
+                    for j in range(nt2):
+                        tsin1 = sinmu[j, m] * cosnv[k, n]
+                        tsin2 = cosmu[j, m] * sinnv[k, n]
+                        bsubs_s[j, k] += tsin1 * c1 + tsin2 * c2
+                        tcosm1 = cosmum[j, m] * cosnv[k, n]
+                        tcosm2 = sinmum[j, m] * sinnv[k, n]
+                        bsubsu_s[j, k] += tcosm1 * c1 + tcosm2 * c2
+                        tcosn1 = sinmu[j, m] * sinnvn[k, n]
+                        tcosn2 = cosmu[j, m] * cosnvn[k, n]
+                        bsubsv_s[j, k] += tcosn1 * c1 + tcosn2 * c2
+
+                        tcos1 = cosmu[j, m] * cosnv[k, n]
+                        tcos2 = sinmu[j, m] * sinnv[k, n]
+                        bsubs_a[j, k] += tcos1 * c3 + tcos2 * c4
+                        tsinm1 = sinmum[j, m] * cosnv[k, n]
+                        tsinm2 = cosmum[j, m] * sinnv[k, n]
+                        bsubsu_a[j, k] += tsinm1 * c3 + tsinm2 * c4
+                        tsinn1 = cosmu[j, m] * sinnvn[k, n]
+                        tsinn2 = sinmu[j, m] * cosnvn[k, n]
+                        bsubsv_a[j, k] += tsinn1 * c3 + tsinn2 * c4
+
+        bsubs_full = _extend_parity_to_full(bsubs_a, bsubs_s)
+        bsubs_out[js] = bsubs_full
+        bsubsu_out[js] = _extend_parity_to_full(bsubsu_s, bsubsu_a)
+        bsubsv_out[js] = _extend_parity_to_full(bsubsv_s, bsubsv_a)
+
+    if ns > 2:
+        bsubs_out[0] = 2.0 * bsubs_out[1] - bsubs_out[2]
+        bsubs_out[-1] = 2.0 * bsubs_out[-1] - bsubs_out[-2]
+    return bsubs_out, bsubsu_out, bsubsv_out
 
 
 def _compute_mercier(
@@ -1813,8 +2133,10 @@ def _compute_mercier(
     if bool(lasym):
         bsubu_sym, _ = _vmec_symoutput_split(f=np.asarray(bsubu, dtype=float), trig=trig)
         bsubv_sym, _ = _vmec_symoutput_split(f=np.asarray(bsubv, dtype=float), trig=trig)
-        bsubu = bsubu_sym
-        bsubv = bsubv_sym
+        # Re-expand parity-0 components onto the full theta grid (ntheta3) so
+        # jxbforce-style diagnostics see the same layout as VMEC.
+        bsubu = _vmec_symoutput_expand(sym=bsubu_sym, asym=None, trig=trig)
+        bsubv = _vmec_symoutput_expand(sym=bsubv_sym, asym=None, trig=trig)
 
     # For lasym=False, VMEC stores fields on the reduced theta grid already.
     # Only apply symmetrization when a full theta grid is supplied.
@@ -2034,7 +2356,25 @@ def _compute_mercier(
 
     bsubu = np.asarray(bsubu, dtype=float)
     bsubv = np.asarray(bsubv, dtype=float)
-    if (not bool(lasym)) and (os.getenv("VMEC_JAX_ENABLE_BSUBS_CORR", "") not in ("", "0")):
+    if bool(lasym):
+        bsubs_use, bsubsu, bsubsv = _jxbforce_apply_bsubs_correction_lasym_true(
+            bsubu=bsubu,
+            bsubv=bsubv,
+            bsubs=bsubs_use,
+            bsubsu=bsubsu,
+            bsubsv=bsubsv,
+            bsupu=np.asarray(bsupu, dtype=float),
+            bsupv=np.asarray(bsupv, dtype=float),
+            sqrtg=np.asarray(sqrtg, dtype=float),
+            pres=np.asarray(pres, dtype=float),
+            vp=np.asarray(vp, dtype=float),
+            hs=float(hs),
+            signgs=float(sign_jac),
+            trig=trig,
+            nfp=int(nfp),
+            sum_w=_sum_w,
+        )
+    elif os.getenv("VMEC_JAX_ENABLE_BSUBS_CORR", "") not in ("", "0"):
         bsubs_use, bsubsu, bsubsv = _jxbforce_apply_bsubs_correction_lasym_false(
             bsubu=bsubu,
             bsubv=bsubv,
@@ -2346,6 +2686,46 @@ def _vmec_symoutput_split(
         sym = 0.5 * (f_half + f_ref)
         asym = 0.5 * (f_half - f_ref)
     return sym, asym
+
+
+def _vmec_symoutput_expand(
+    *,
+    sym: np.ndarray,
+    asym: np.ndarray | None,
+    trig,
+) -> np.ndarray:
+    """Expand VMEC symoutput parts back to the full [0,2π) theta grid."""
+    sym = np.asarray(sym, dtype=float)
+    if sym.ndim != 3:
+        raise ValueError("Expected sym with shape (ns, ntheta2, nzeta)")
+    if asym is None:
+        asym = np.zeros_like(sym)
+    else:
+        asym = np.asarray(asym, dtype=float)
+        if asym.shape != sym.shape:
+            raise ValueError("sym/asym shape mismatch")
+
+    ns, nt2, nzeta = sym.shape
+    nt1 = int(getattr(trig, "ntheta1", nt2))
+    nt3 = int(getattr(trig, "ntheta3", nt2))
+    if nt3 < nt2:
+        nt3 = nt2
+
+    full = np.zeros((ns, nt3, nzeta), dtype=float)
+    full[:, :nt2, :] = sym + asym
+    if nt3 == nt2:
+        return full
+
+    i0 = np.arange(nt2, dtype=int)
+    ir0 = np.where(i0 == 0, 0, nt1 - i0)
+    kk = (nzeta - np.arange(nzeta, dtype=int)) % nzeta
+    mask = ir0 >= nt2
+    if np.any(mask):
+        ir = ir0[mask]
+        sym_ref = sym[:, mask, :][:, :, kk]
+        asym_ref = asym[:, mask, :][:, :, kk]
+        full[:, ir, :] = sym_ref - asym_ref
+    return full
 
 
 def _vmec_wrout_nyquist_sin_coeffs(
