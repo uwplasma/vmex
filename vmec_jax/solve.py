@@ -3374,6 +3374,20 @@ def solve_fixed_boundary_residual_iter(
     # using `vmec_angle_grid(...)` so the force terms do not mix full-grid and
     # VMEC-grid arrays (which triggers broadcasting errors and parity drift).
     cfg = static.cfg
+    if (
+        use_scan
+        and vmec2000_control
+        and scan_fallback_enabled
+        and int(cfg.ns) > int(scan_fallback_iters)
+    ):
+        if verbose:
+            print(
+                "[solve_fixed_boundary_residual_iter] scan disabled -> non-scan "
+                f"(ns={int(cfg.ns)} > fallback_iters={int(scan_fallback_iters)})",
+                flush=True,
+            )
+        use_scan = False
+        force_chunked_scan = False
     grid_vmec = vmec_angle_grid(
         ntheta=int(cfg.ntheta),
         nzeta=int(cfg.nzeta),
