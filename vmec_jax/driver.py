@@ -691,7 +691,8 @@ def run_fixed_boundary(
         if solver_lower == "vmec2000_iter":
             solver_lower = "vmec2000_iter_fast"
 
-    scan_minimal_default = True if bool(performance_mode) else None
+    # Fast mode keeps minimal history only when not printing (verbose=False).
+    scan_minimal_default = True if (bool(performance_mode) and (not bool(verbose))) else None
 
     solver = solver_lower
     if solver in ("vmec2000_iter_fast", "vmec2000_scan"):
