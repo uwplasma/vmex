@@ -6801,7 +6801,12 @@ def solve_fixed_boundary_residual_iter(
                     probe_ratio = probe_fsq_max_new / probe_start
                     bad_progress = probe_ratio > scan_fallback_fsq_factor_j
                     probe_improve = probe_fsq_min_new <= (probe_fsq_start_new * scan_fallback_improve_j)
-                    stagnation_trigger = has_probe & (~probe_improve) & (probe_fsq_min_new > scan_fallback_fsq_abs_j)
+                    stagnation_trigger = (
+                        has_probe
+                        & (~probe_improve)
+                        & (probe_fsq_min_new > scan_fallback_fsq_abs_j)
+                        & (bad_progress | (accepted_frac < scan_fallback_accept_frac_j))
+                    )
                     accepted_trigger = (
                         has_probe
                         & (accepted_frac < scan_fallback_accept_frac_j)
@@ -7549,6 +7554,22 @@ def solve_fixed_boundary_residual_iter(
         bad_jac_full = (
             np.asarray(bad_jac_hist).astype(int) if bad_jac_hist is not None else np.zeros((0,), dtype=int)
         )
+        probe_count_final = int(np.asarray(carry_final.probe_count))
+        probe_bad_jac_final = int(np.asarray(carry_final.probe_bad_jac))
+        probe_accept_final = int(np.asarray(carry_final.probe_accept))
+        probe_fsq_start_final = float(np.asarray(carry_final.probe_fsq_start))
+        probe_fsq_min_final = float(np.asarray(carry_final.probe_fsq_min))
+        probe_fsq_max_final = float(np.asarray(carry_final.probe_fsq_max))
+        probe_ratio_final = (
+            probe_fsq_max_final / max(probe_fsq_start_final, 1.0e-30)
+            if probe_count_final > 0
+            else float("nan")
+        )
+        probe_accept_frac_final = (
+            float(probe_accept_final) / max(float(probe_count_final), 1.0)
+            if probe_count_final > 0
+            else float("nan")
+        )
         fsqr_full_diag = fsqr_full if not scan_minimal else np.zeros((0,), dtype=float)
         fsqz_full_diag = fsqz_full if not scan_minimal else np.zeros((0,), dtype=float)
         fsql_full_diag = fsql_full if not scan_minimal else np.zeros((0,), dtype=float)
@@ -7597,6 +7618,14 @@ def solve_fixed_boundary_residual_iter(
                 "badjac_ptau_full": badjac_ptau_full.astype(int),
                 "badjac_state_full": badjac_state_full.astype(int),
                 "abort_scan": bool(np.asarray(carry_final.abort_scan)),
+                "probe_count": probe_count_final,
+                "probe_bad_jac": probe_bad_jac_final,
+                "probe_accept": probe_accept_final,
+                "probe_fsq_start": probe_fsq_start_final,
+                "probe_fsq_min": probe_fsq_min_final,
+                "probe_fsq_max": probe_fsq_max_final,
+                "probe_ratio": probe_ratio_final,
+                "probe_accept_frac": probe_accept_frac_final,
                 "resume_state": {
                     "state_checkpoint": carry_final.state_checkpoint,
                     "time_step": float(np.asarray(carry_final.time_step)),
@@ -7720,9 +7749,22 @@ def solve_fixed_boundary_residual_iter(
                 if fallback_reasons:
                     if verbose:
                         reason_str = ", ".join(fallback_reasons)
+                        probe_msg = ""
+                        try:
+                            probe_count = int(scan_result.diagnostics.get("probe_count", 0))
+                            if probe_count > 0:
+                                probe_msg = (
+                                    " "
+                                    f"(probe_count={probe_count} "
+                                    f"probe_accept_frac={scan_result.diagnostics.get('probe_accept_frac', float('nan')):.2f} "
+                                    f"probe_ratio={scan_result.diagnostics.get('probe_ratio', float('nan')):.2f} "
+                                    f"probe_fsq_min={scan_result.diagnostics.get('probe_fsq_min', float('nan')):.3e})"
+                                )
+                        except Exception:
+                            probe_msg = ""
                         print(
                             "[solve_fixed_boundary_residual_iter] scan fallback -> non-scan "
-                            f"({reason_str})",
+                            f"({reason_str}){probe_msg}",
                             flush=True,
                         )
                     use_scan = False
