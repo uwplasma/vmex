@@ -120,6 +120,58 @@ def split_rzl_even_odd_m(state, basis, modes_m: np.ndarray) -> ParityRZL:
     )
 
 
+def split_rzl_even_odd_lasym(state, basis) -> ParityRZL:
+    """Split real-space fields into even/odd pieces for LASYM=True.
+
+    For asymmetric runs, VMEC's symrzl decomposition corresponds to separating
+    cosine (even) and sine (odd) helical contributions rather than even/odd
+    m-parity. This helper mirrors that by evaluating the cosine-only and
+    sine-only series separately on the full VMEC grid.
+    """
+    dtype = jnp.asarray(state.Rcos).dtype
+    zeros = jnp.zeros_like(state.Rcos)
+
+    coeff_cos_stack = jnp.stack([state.Rcos, state.Zcos, state.Lcos], axis=0)
+    coeff_sin_stack = jnp.stack([state.Rsin, state.Zsin, state.Lsin], axis=0)
+
+    even = eval_fourier(coeff_cos_stack, jnp.zeros_like(coeff_sin_stack), basis, coeffs_internal=True)
+    odd = eval_fourier(jnp.zeros_like(coeff_cos_stack), coeff_sin_stack, basis, coeffs_internal=True)
+
+    even_t = eval_fourier_dtheta(
+        coeff_cos_stack, jnp.zeros_like(coeff_sin_stack), basis, coeffs_internal=True
+    )
+    odd_t = eval_fourier_dtheta(
+        jnp.zeros_like(coeff_cos_stack), coeff_sin_stack, basis, coeffs_internal=True
+    )
+    even_p = eval_fourier_dzeta_phys(
+        coeff_cos_stack, jnp.zeros_like(coeff_sin_stack), basis, coeffs_internal=True
+    )
+    odd_p = eval_fourier_dzeta_phys(
+        jnp.zeros_like(coeff_cos_stack), coeff_sin_stack, basis, coeffs_internal=True
+    )
+
+    return ParityRZL(
+        R_even=even[0],
+        R_odd=odd[0],
+        Z_even=even[1],
+        Z_odd=odd[1],
+        L_even=even[2],
+        L_odd=odd[2],
+        Rt_even=even_t[0],
+        Rt_odd=odd_t[0],
+        Zt_even=even_t[1],
+        Zt_odd=odd_t[1],
+        Lt_even=even_t[2],
+        Lt_odd=odd_t[2],
+        Rp_even=even_p[0],
+        Rp_odd=odd_p[0],
+        Zp_even=even_p[1],
+        Zp_odd=odd_p[1],
+        Lp_even=even_p[2],
+        Lp_odd=odd_p[2],
+    )
+
+
 def internal_odd_from_physical(
     phys_odd,
     s,

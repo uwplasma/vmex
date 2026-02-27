@@ -447,28 +447,37 @@ def vmec_realspace_analysis(
 
     if f.ndim != 3:
         raise ValueError(f"Expected f with shape (ns,ntheta,nzeta), got {f.shape}")
-    if int(trig.ntheta3) != int(trig.ntheta2):
-        raise NotImplementedError("vmec_realspace_analysis currently supports lasym=False only")
-    if int(f.shape[1]) < int(trig.ntheta2):
-        raise ValueError("Input theta grid is smaller than VMEC ntheta2")
+    use_full_theta = int(trig.ntheta3) != int(trig.ntheta2)
+    if use_full_theta:
+        if int(f.shape[1]) < int(trig.ntheta3):
+            raise ValueError("Input theta grid is smaller than VMEC ntheta3")
+    else:
+        if int(f.shape[1]) < int(trig.ntheta2):
+            raise ValueError("Input theta grid is smaller than VMEC ntheta2")
     if int(f.shape[2]) != int(trig.cosnv.shape[0]):
         raise ValueError("Input zeta grid does not match trig tables")
 
-    # VMEC integrates over the reduced theta grid [0,pi] (ntheta2 points)
-    # with endpoint half-weights. `dnorm` already includes the 1/nzeta factor.
-    nt2 = int(trig.ntheta2)
-    f = f[:, :nt2, :]
-
-    dnorm = float(trig.dnorm)
-    w = jnp.full((nt2,), dnorm, dtype=f.dtype)
-    if hasattr(w, "at"):
-        w = w.at[0].set(0.5 * dnorm)
-        w = w.at[nt2 - 1].set(0.5 * dnorm)
-    else:  # numpy fallback
-        w = w.copy()
-        w[0] = 0.5 * dnorm
-        w[nt2 - 1] = 0.5 * dnorm
-    f_w = f * w[None, :, None]
+    if use_full_theta:
+        # LASYM=True: integrate over full poloidal interval [0,2π) using dnorm3.
+        nt3 = int(trig.ntheta3)
+        f = f[:, :nt3, :]
+        dnorm = float(trig.dnorm3)
+        w = jnp.full((nt3,), dnorm, dtype=f.dtype)
+        f_w = f * w[None, :, None]
+    else:
+        # LASYM=False: integrate over reduced grid [0,π] with endpoint half-weights.
+        nt2 = int(trig.ntheta2)
+        f = f[:, :nt2, :]
+        dnorm = float(trig.dnorm)
+        w = jnp.full((nt2,), dnorm, dtype=f.dtype)
+        if hasattr(w, "at"):
+            w = w.at[0].set(0.5 * dnorm)
+            w = w.at[nt2 - 1].set(0.5 * dnorm)
+        else:  # numpy fallback
+            w = w.copy()
+            w[0] = 0.5 * dnorm
+            w[nt2 - 1] = 0.5 * dnorm
+        f_w = f * w[None, :, None]
 
     phase = _phase_stack_from_trig(modes, trig, "phase_stack")
     if phase is not None and phase.shape[0] == 2 * int(m.shape[0]):
@@ -476,8 +485,9 @@ def vmec_realspace_analysis(
         sin_phase = phase[int(m.shape[0]) :]
     else:
         cos_phase, sin_phase = _vmec_phase_tables_cached(modes=modes, trig=trig, cache=True)
-    cos_phase = cos_phase[:, :nt2, :]
-    sin_phase = sin_phase[:, :nt2, :]
+    if not use_full_theta:
+        cos_phase = cos_phase[:, : int(trig.ntheta2), :]
+        sin_phase = sin_phase[:, : int(trig.ntheta2), :]
 
     # Convert to *unscaled* helical basis functions: cos(mθ - nζ), sin(mθ - nζ).
     mscale = jnp.asarray(trig.mscale)

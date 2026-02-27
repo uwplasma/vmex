@@ -46,6 +46,7 @@ class VMECStatic:
     m_is_m0: np.ndarray | None = None
     m_is_m1: np.ndarray | None = None
     m_is_odd_rest: np.ndarray | None = None
+    m_xmpq1: np.ndarray | None = None
     lambda_axis_copy_mask: np.ndarray | None = None
     m0_n_index: np.ndarray | None = None
     signed_maps: any | None = None
@@ -163,6 +164,7 @@ def build_static(cfg: VMECConfig, *, grid: AngleGrid | None = None) -> VMECStati
     m_is_m0 = m_np == 0
     m_is_m1 = m_np == 1
     m_is_odd_rest = (m_np % 2 == 1) & (m_np != 1)
+    m_xmpq1 = (m_np * (m_np - 1)).astype(float)
     m0_n_index = None
     signed_maps = None
     mn_idx_m = None
@@ -223,6 +225,7 @@ def build_static(cfg: VMECConfig, *, grid: AngleGrid | None = None) -> VMECStati
         m_is_m0=m_is_m0,
         m_is_m1=m_is_m1,
         m_is_odd_rest=m_is_odd_rest,
+        m_xmpq1=m_xmpq1,
         lambda_axis_copy_mask=lambda_axis_copy_mask,
         m0_n_index=m0_n_index,
         signed_maps=signed_maps,

@@ -696,6 +696,115 @@ def _recompute_axis_from_state_vmec(
     return raxis_cc, raxis_cs, zaxis_cc, zaxis_cs
 
 
+def _axis_parity_from_state_lasym(
+    *,
+    state: VMECState,
+    static: VMECStatic,
+    trig: VmecTrigTables | None = None,
+) -> dict[str, np.ndarray]:
+    """Compute VMEC parity pieces for LASYM axis recompute (cos/sin split)."""
+    cfg = static.cfg
+    if trig is None:
+        trig = vmec_trig_tables(
+            ntheta=cfg.ntheta,
+            nzeta=cfg.nzeta,
+            nfp=cfg.nfp,
+            mmax=cfg.mpol - 1,
+            nmax=cfg.ntor,
+            lasym=cfg.lasym,
+        )
+    Rcos = jnp.asarray(state.Rcos)
+    Rsin = jnp.asarray(state.Rsin)
+    Zcos = jnp.asarray(state.Zcos)
+    Zsin = jnp.asarray(state.Zsin)
+    Rcos, Zsin, Rsin, Zcos = vmec_m1_internal_to_physical_signed(
+        Rcos=Rcos,
+        Zsin=Zsin,
+        Rsin=Rsin,
+        Zcos=Zcos,
+        modes=static.modes,
+        lthreed=bool(getattr(cfg, "lthreed", False)),
+        lasym=bool(getattr(cfg, "lasym", False)),
+        lconm1=bool(getattr(cfg, "lconm1", True)),
+    )
+    zcos = jnp.zeros_like(Rcos)
+    zsin = jnp.zeros_like(Rsin)
+    pr1_even = vmec_realspace_synthesis(
+        coeff_cos=Rcos,
+        coeff_sin=zsin,
+        modes=static.modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+    )
+    pr1_odd = vmec_realspace_synthesis(
+        coeff_cos=zcos,
+        coeff_sin=Rsin,
+        modes=static.modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+    )
+    pz1_even = vmec_realspace_synthesis(
+        coeff_cos=Zcos,
+        coeff_sin=zsin,
+        modes=static.modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+    )
+    pz1_odd = vmec_realspace_synthesis(
+        coeff_cos=zcos,
+        coeff_sin=Zsin,
+        modes=static.modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+    )
+    pru_even = vmec_realspace_synthesis_dtheta(
+        coeff_cos=Rcos,
+        coeff_sin=zsin,
+        modes=static.modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+    )
+    pru_odd = vmec_realspace_synthesis_dtheta(
+        coeff_cos=zcos,
+        coeff_sin=Rsin,
+        modes=static.modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+    )
+    pzu_even = vmec_realspace_synthesis_dtheta(
+        coeff_cos=Zcos,
+        coeff_sin=zsin,
+        modes=static.modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+    )
+    pzu_odd = vmec_realspace_synthesis_dtheta(
+        coeff_cos=zcos,
+        coeff_sin=Zsin,
+        modes=static.modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+    )
+    return {
+        "pr1_even": np.asarray(pr1_even),
+        "pr1_odd": np.asarray(pr1_odd),
+        "pz1_even": np.asarray(pz1_even),
+        "pz1_odd": np.asarray(pz1_odd),
+        "pru_even": np.asarray(pru_even),
+        "pru_odd": np.asarray(pru_odd),
+        "pzu_even": np.asarray(pzu_even),
+        "pzu_odd": np.asarray(pzu_odd),
+    }
+
+
 def initial_guess_from_boundary(
     static: VMECStatic,
     boundary: BoundaryCoeffs,
@@ -1052,32 +1161,33 @@ def initial_guess_from_boundary(
     # Keep coefficients in VMEC's internal basis (mscale/nscale removed).
 
     if vmec_project:
-        if cfg.lasym:
-            # Defer asymmetric support for the VMEC-grid projection.
-            vmec_project = False
-        else:
-            R_real = vmec_realspace_synthesis(
-                coeff_cos=Rcos,
-                coeff_sin=Rsin,
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=True,
-            )
-            Z_real = vmec_realspace_synthesis(
-                coeff_cos=Zcos,
-                coeff_sin=Zsin,
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=True,
-            )
-            Rcos, Rsin = vmec_realspace_analysis(f=R_real, modes=static.modes, trig=trig, parity="cos")
-            Zcos, Zsin = vmec_realspace_analysis(f=Z_real, modes=static.modes, trig=trig, parity="sin")
-            # vmec_realspace_analysis returns external (physical) coefficients;
-            # convert back to VMEC internal scaling.
-            Rcos = (Rcos * mode_scale[None, :]).astype(dtype)
-            Rsin = (Rsin * mode_scale[None, :]).astype(dtype)
-            Zcos = (Zcos * mode_scale[None, :]).astype(dtype)
-            Zsin = (Zsin * mode_scale[None, :]).astype(dtype)
+        R_real = vmec_realspace_synthesis(
+            coeff_cos=Rcos,
+            coeff_sin=Rsin,
+            modes=static.modes,
+            trig=trig,
+            coeffs_internal=True,
+        )
+        Z_real = vmec_realspace_synthesis(
+            coeff_cos=Zcos,
+            coeff_sin=Zsin,
+            modes=static.modes,
+            trig=trig,
+            coeffs_internal=True,
+        )
+        # VMEC's symmetric projection keeps only the expected parity blocks.
+        # For LASYM=True we must preserve both cos/sin components to avoid
+        # wiping asymmetric contributions (e.g., Zcos, Rsin).
+        parity_r = "both" if bool(cfg.lasym) else "cos"
+        parity_z = "both" if bool(cfg.lasym) else "sin"
+        Rcos, Rsin = vmec_realspace_analysis(f=R_real, modes=static.modes, trig=trig, parity=parity_r)
+        Zcos, Zsin = vmec_realspace_analysis(f=Z_real, modes=static.modes, trig=trig, parity=parity_z)
+        # vmec_realspace_analysis returns external (physical) coefficients;
+        # convert back to VMEC internal scaling.
+        Rcos = (Rcos * mode_scale[None, :]).astype(dtype)
+        Rsin = (Rsin * mode_scale[None, :]).astype(dtype)
+        Zcos = (Zcos * mode_scale[None, :]).astype(dtype)
+        Zsin = (Zsin * mode_scale[None, :]).astype(dtype)
 
     Lcos = jnp.zeros((cfg.ns, K), dtype=dtype)
     Lsin = jnp.zeros((cfg.ns, K), dtype=dtype)

@@ -335,8 +335,6 @@ def rz_preconditioner_matrices(
     cfg,
 ) -> tuple[dict[str, np.ndarray], np.ndarray, int]:
     """Return R/Z preconditioner matrices and jmin."""
-    if bool(cfg.lthreed) or bool(cfg.lasym):
-        raise ValueError("rz_preconditioner_matrices only supports axisym.")
     s_arr = np.asarray(s, dtype=float)
     ns = int(s_arr.shape[0])
     ns_f = max(ns - 1, 1)

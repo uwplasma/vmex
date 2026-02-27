@@ -77,6 +77,11 @@ class VmecTrigTables:
     sinmui_nt2: Any | None = None
     cosmumi_nt2: Any | None = None
     sinmumi_nt2: Any | None = None
+    # Cached fused theta/zeta bases to reduce per-call concatenation.
+    basis_theta_cs_nt2: Any | None = None  # (ntheta2, 2*(mmax+1))
+    basis_theta_mu_nt2: Any | None = None  # (ntheta2, 2*(mmax+1))
+    basis_zeta_cs: Any | None = None  # (nzeta, 2*(nmax+1))
+    basis_zeta_all: Any | None = None  # (nzeta, 4*(nmax+1))
 
     # Optional cached phase stacks for vmec_realspace synthesis.
     # These are populated by VMECStatic when enabled.
@@ -225,6 +230,8 @@ def vmec_trig_tables(
     sinmui_nt2 = sinmui[:ntheta2, :]
     cosmumi_nt2 = cosmumi[:ntheta2, :]
     sinmumi_nt2 = sinmumi[:ntheta2, :]
+    basis_theta_cs_nt2 = np.concatenate([cosmui_nt2, sinmui_nt2], axis=1)
+    basis_theta_mu_nt2 = np.concatenate([sinmumi_nt2, cosmumi_nt2], axis=1)
 
     # Zeta tables use argj = 2π*(j-1)/nzeta, for j=1..nzeta.
     j = np.arange(nzeta, dtype=float)
@@ -236,6 +243,8 @@ def vmec_trig_tables(
 
     cosnvn = cosnv * (n[None, :] * float(nfp))
     sinnvn = -sinnv * (n[None, :] * float(nfp))
+    basis_zeta_cs = np.concatenate([cosnv, sinnv], axis=1)
+    basis_zeta_all = np.concatenate([cosnv, sinnvn, sinnv, cosnvn], axis=1)
 
     # Preconditioner angular weights (wint3) on the VMEC internal grid.
     w_theta = cosmui3[:, 0] / float(mscale[0])
@@ -266,10 +275,14 @@ def vmec_trig_tables(
         sinmui_nt2=jnp.asarray(sinmui_nt2, dtype=dtype),
         cosmumi_nt2=jnp.asarray(cosmumi_nt2, dtype=dtype),
         sinmumi_nt2=jnp.asarray(sinmumi_nt2, dtype=dtype),
+        basis_theta_cs_nt2=jnp.asarray(basis_theta_cs_nt2, dtype=dtype),
+        basis_theta_mu_nt2=jnp.asarray(basis_theta_mu_nt2, dtype=dtype),
         cosnv=jnp.asarray(cosnv, dtype=dtype),
         sinnv=jnp.asarray(sinnv, dtype=dtype),
         cosnvn=jnp.asarray(cosnvn, dtype=dtype),
         sinnvn=jnp.asarray(sinnvn, dtype=dtype),
+        basis_zeta_cs=jnp.asarray(basis_zeta_cs, dtype=dtype),
+        basis_zeta_all=jnp.asarray(basis_zeta_all, dtype=dtype),
         wint3_precond=jnp.asarray(wint3_precond, dtype=dtype),
     )
     if cache:
@@ -371,6 +384,18 @@ _JNP_EINSUM = jnp.einsum
 _DETERMINISTIC_REDUCE = bool(int(os.environ.get("VMEC_JAX_DETERMINISTIC_REDUCE", "0")))
 # FFT path is retained for experiments, but DFT + precomputed basis is the default.
 _TOMNSPS_FFT = os.environ.get("VMEC_JAX_TOMNSPS_FFT", "0").strip().lower() not in ("0", "false", "no")
+_TOMNSPS_THETA_FUSED = os.environ.get("VMEC_JAX_TOMNSPS_THETA_FUSED", "1").strip().lower() not in (
+    "",
+    "0",
+    "false",
+    "no",
+)
+_TOMNSPS_ZETA_FUSED = os.environ.get("VMEC_JAX_TOMNSPS_ZETA_FUSED", "1").strip().lower() not in (
+    "",
+    "0",
+    "false",
+    "no",
+)
 
 
 def _einsum(expr: str, *operands):
@@ -785,8 +810,19 @@ def tomnsps_rzl(
     else:
         # DFT path: use a single cos/sin basis transform for both stacks,
         # then apply m-derivative scaling for the sinmumi/cosmumi blocks.
-        cos_all = _theta_einsum_stack(stack_all, cosmui)
-        sin_all = _theta_einsum_stack(stack_all, sinmui)
+        use_theta_fused = bool(_TOMNSPS_THETA_FUSED)
+        if use_theta_fused:
+            basis_theta = getattr(trig, "basis_theta_cs_nt2", None)
+            if basis_theta is None or int(basis_theta.shape[0]) != nt2:
+                basis_theta = jnp.concatenate([cosmui, sinmui], axis=1)
+            basis_theta = basis_theta[:, : (2 * int(mpol))]
+            out_all = _theta_einsum_stack(stack_all, basis_theta)
+            mpol_i = int(mpol)
+            cos_all = out_all[..., :mpol_i, :]
+            sin_all = out_all[..., mpol_i:, :]
+        else:
+            cos_all = _theta_einsum_stack(stack_all, cosmui)
+            sin_all = _theta_einsum_stack(stack_all, sinmui)
         n_cos = int(stack_cosmui.shape[0])
         cosmui_out = cos_all[:n_cos]
         sinmui_out = sin_all[:n_cos]
@@ -934,15 +970,36 @@ def tomnsps_rzl(
             n = jnp.arange(ntor + 1, dtype=jnp.asarray(w1).dtype)
             nfac = (n * float(nfp)).reshape((1, 1, 1, int(ntor) + 1))
 
-            w_cos_stack = jnp.stack([w1, w7, w11, w4, w6, w10], axis=0)
-            out_cos = _zeta_contract(w_cos_stack, cosnv)
-            frcc, fzsc, flsc = out_cos[0], out_cos[1], out_cos[2]
-            out_cosnvn = out_cos[3:] * nfac
+            use_zeta_fused = bool(_TOMNSPS_ZETA_FUSED)
+            if use_zeta_fused:
+                w_cos_stack = jnp.stack([w1, w7, w11, w4, w6, w10], axis=0)
+                w_sin_stack = jnp.stack([w2, w8, w12, w3, w5, w9], axis=0)
+                w_stack = jnp.concatenate([w_cos_stack, w_sin_stack], axis=0)
+                basis_cs = getattr(trig, "basis_zeta_cs", None)
+                if basis_cs is None or int(basis_cs.shape[0]) != int(nzeta):
+                    basis_cs = jnp.concatenate([cosnv, sinnv], axis=1)
+                basis_cs = basis_cs[:, : (2 * (int(ntor) + 1))]
+                out = _zeta_contract(w_stack, basis_cs)
+                nsize = int(ntor) + 1
+                out_cos = out[..., :nsize]
+                out_sin = out[..., nsize:]
+                out_cos_w = out_cos[:6]
+                out_sin_w = out_sin[6:]
 
-            w_sin_stack = jnp.stack([w2, w8, w12, w3, w5, w9], axis=0)
-            out_sin = _zeta_contract(w_sin_stack, sinnv)
-            out_sinnvn = -out_sin[:3] * nfac
-            out_sinnv = out_sin[3:]
+                frcc, fzsc, flsc = out_cos_w[0], out_cos_w[1], out_cos_w[2]
+                out_cosnvn = out_cos_w[3:] * nfac
+                out_sinnvn = -out_sin_w[:3] * nfac
+                out_sinnv = out_sin_w[3:]
+            else:
+                w_cos_stack = jnp.stack([w1, w7, w11, w4, w6, w10], axis=0)
+                out_cos = _zeta_contract(w_cos_stack, cosnv)
+                frcc, fzsc, flsc = out_cos[0], out_cos[1], out_cos[2]
+                out_cosnvn = out_cos[3:] * nfac
+
+                w_sin_stack = jnp.stack([w2, w8, w12, w3, w5, w9], axis=0)
+                out_sin = _zeta_contract(w_sin_stack, sinnv)
+                out_sinnvn = -out_sin[:3] * nfac
+                out_sinnv = out_sin[3:]
 
             frcc = frcc + out_sinnvn[0]
             fzsc = fzsc + out_sinnvn[1]
@@ -1149,10 +1206,29 @@ def tomnspa_rzl(
     stack_cosmui = jnp.stack([armn, crmn, azmn, czmn, arcon, azcon, clmn], axis=0)
     stack_sinmumi = jnp.stack([brmn, bzmn, blmn], axis=0)
 
-    cosmui_out = _theta_einsum_stack(stack_cosmui, cosmui)
-    sinmui_out = _theta_einsum_stack(stack_cosmui, sinmui)
-    sinmumi_out = _theta_einsum_stack(stack_sinmumi, sinmumi)
-    cosmumi_out = _theta_einsum_stack(stack_sinmumi, cosmumi)
+    use_theta_fused = bool(_TOMNSPS_THETA_FUSED)
+    if use_theta_fused:
+        mpol_i = int(mpol)
+        basis_cs = getattr(trig, "basis_theta_cs_nt2", None)
+        if basis_cs is None or int(basis_cs.shape[0]) != nt2:
+            basis_cs = jnp.concatenate([cosmui, sinmui], axis=1)
+        basis_cs = basis_cs[:, : (2 * mpol_i)]
+        out_cs = _theta_einsum_stack(stack_cosmui, basis_cs)
+        cosmui_out = out_cs[..., :mpol_i, :]
+        sinmui_out = out_cs[..., mpol_i:, :]
+
+        basis_mu = getattr(trig, "basis_theta_mu_nt2", None)
+        if basis_mu is None or int(basis_mu.shape[0]) != nt2:
+            basis_mu = jnp.concatenate([sinmumi, cosmumi], axis=1)
+        basis_mu = basis_mu[:, : (2 * mpol_i)]
+        out_mu = _theta_einsum_stack(stack_sinmumi, basis_mu)
+        sinmumi_out = out_mu[..., :mpol_i, :]
+        cosmumi_out = out_mu[..., mpol_i:, :]
+    else:
+        cosmui_out = _theta_einsum_stack(stack_cosmui, cosmui)
+        sinmui_out = _theta_einsum_stack(stack_cosmui, sinmui)
+        sinmumi_out = _theta_einsum_stack(stack_sinmumi, sinmumi)
+        cosmumi_out = _theta_einsum_stack(stack_sinmumi, cosmumi)
 
     armn_cos, crmn_cos, azmn_cos, czmn_cos, arcon_cos, azcon_cos, clmn_cos = cosmui_out
     armn_sin, crmn_sin, azmn_sin, czmn_sin, arcon_sin, azcon_sin, clmn_sin = sinmui_out
@@ -1210,42 +1286,76 @@ def tomnspa_rzl(
     w12 = _select_mparity(w12_e, w12_o, mask_even)
 
     lthreed = bool(ntor > 0)
+    use_zeta_fused = bool(lthreed) and bool(_TOMNSPS_ZETA_FUSED)
 
     # Zeta integration.
-    w_cosnv = jnp.stack([w3, w5, w9], axis=0)
-    out_cosnv = _zeta_contract(w_cosnv, cosnv)
-    frsc, fzcc, flcc = out_cosnv[0], out_cosnv[1], out_cosnv[2]
+    if use_zeta_fused:
+        nsize = int(ntor) + 1
+        w_stack = jnp.stack(
+            [w3, w5, w9, w4, w6, w10, w1, w7, w11, w2, w8, w12],
+            axis=0,
+        )
+        basis_all = getattr(trig, "basis_zeta_all", None)
+        if basis_all is None or int(basis_all.shape[0]) != int(nzeta):
+            basis_all = jnp.concatenate([cosnv, sinnvn, sinnv, cosnvn], axis=1)
+        basis_all = basis_all[:, : (4 * (int(ntor) + 1))]
+        out = _zeta_contract(w_stack, basis_all)
+        out_cosnv = out[:3, ..., :nsize]
+        out_sinnvn = out[3:6, ..., nsize : 2 * nsize]
+        out_sinnv = out[6:9, ..., 2 * nsize : 3 * nsize]
+        out_cosnvn = out[9:12, ..., 3 * nsize : 4 * nsize]
 
-    if lthreed:
-        w_sinnvn = jnp.stack([w4, w6, w10], axis=0)
-        out_sinnvn = _zeta_contract(w_sinnvn, sinnvn)
+        frsc, fzcc, flcc = out_cosnv[0], out_cosnv[1], out_cosnv[2]
         frsc = frsc + out_sinnvn[0]
         fzcc = fzcc + out_sinnvn[1]
         flcc = flcc + out_sinnvn[2]
-
-        w_sinnv = jnp.stack([w1, w7, w11], axis=0)
-        w_cosnvn = jnp.stack([w2, w8, w12], axis=0)
-        out_sinnv = _zeta_contract(w_sinnv, sinnv)
-        out_cosnvn = _zeta_contract(w_cosnvn, cosnvn)
 
         frcs = out_sinnv[0] + out_cosnvn[0]
         fzss = out_sinnv[1] + out_cosnvn[1]
         flss = out_sinnv[2] + out_cosnvn[2]
     else:
-        frcs = None
-        fzss = None
-        flss = None
+        w_cosnv = jnp.stack([w3, w5, w9], axis=0)
+        out_cosnv = _zeta_contract(w_cosnv, cosnv)
+        frsc, fzcc, flcc = out_cosnv[0], out_cosnv[1], out_cosnv[2]
 
-    # VMEC `tomnspa` note (tomnsp_mod.f): the antisymmetric transform is
-    # performed on a restricted theta interval after `symforce`. For the
-    # 3D+lasym lambda blocks, VMEC's conventions imply an additional √2 scaling
-    # compared to the symmetric (`tomnsps`) lambda blocks. This improves `fsql`
-    # parity on lasym+3D reference equilibria.
+        if lthreed:
+            w_sinnvn = jnp.stack([w4, w6, w10], axis=0)
+            out_sinnvn = _zeta_contract(w_sinnvn, sinnvn)
+            frsc = frsc + out_sinnvn[0]
+            fzcc = fzcc + out_sinnvn[1]
+            flcc = flcc + out_sinnvn[2]
+
+            w_sinnv = jnp.stack([w1, w7, w11], axis=0)
+            w_cosnvn = jnp.stack([w2, w8, w12], axis=0)
+            out_sinnv = _zeta_contract(w_sinnv, sinnv)
+            out_cosnvn = _zeta_contract(w_cosnvn, cosnvn)
+
+            frcs = out_sinnv[0] + out_cosnvn[0]
+            fzss = out_sinnv[1] + out_cosnvn[1]
+            flss = out_sinnv[2] + out_cosnvn[2]
+        else:
+            frcs = None
+            fzss = None
+            flss = None
+
+    # VMEC `tomnspa` integrates over the restricted theta interval without
+    # additional scaling for the asymmetric lambda blocks. Keep parity by
+    # default; a manual override can be enabled via env if needed.
     if bool(lthreed):
-        s2 = jnp.asarray(np.sqrt(2.0), dtype=jnp.asarray(flcc).dtype)
-        flcc = flcc * s2
-        if flss is not None:
-            flss = flss * s2
+        scale_env = os.getenv("VMEC_JAX_TOMNSPA_LAM_SCALE", "").strip().lower()
+        if scale_env not in ("", "0", "false", "no", "1", "true", "yes"):
+            try:
+                scale_val = float(scale_env)
+            except ValueError:
+                scale_val = 1.0
+        elif scale_env in ("1", "true", "yes"):
+            scale_val = np.sqrt(2.0)
+        else:
+            scale_val = 1.0
+        if scale_val != 1.0:
+            flcc = flcc * jnp.asarray(scale_val, dtype=jnp.asarray(flcc).dtype)
+            if flss is not None:
+                flss = flss * jnp.asarray(scale_val, dtype=jnp.asarray(flss).dtype)
 
     # Apply radial evolution masks (same as tomnsps): fixed-boundary edge.
     if masks is not None and (int(masks.ns) == int(ns)) and (int(masks.mpol) == int(mpol)) and (bool(masks.include_edge) == bool(include_edge)):

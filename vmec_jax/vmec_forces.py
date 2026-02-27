@@ -312,13 +312,21 @@ def _constraint_kernels_from_state(
             )
 
     # xmpq(m,1) = m*(m-1).
-    m_modes = np.asarray(static.modes.m, dtype=int)
-    m_k = jnp.asarray(static.modes.m, dtype=dtype)
-    xmpq1 = m_k * (m_k - 1.0)
+    if getattr(static, "m_xmpq1", None) is not None:
+        xmpq1 = jnp.asarray(static.m_xmpq1, dtype=dtype)
+    else:
+        m_k = jnp.asarray(static.modes.m, dtype=dtype)
+        xmpq1 = m_k * (m_k - 1.0)
 
-    mask_even = jnp.asarray((m_modes % 2) == 0, dtype=dtype)
-    mask_m1 = jnp.asarray(m_modes == 1, dtype=dtype)
-    mask_odd_rest = jnp.asarray((m_modes % 2 == 1) & (m_modes != 1), dtype=dtype)
+    if getattr(static, "m_is_even", None) is not None:
+        mask_even = jnp.asarray(static.m_is_even, dtype=dtype)
+        mask_m1 = jnp.asarray(static.m_is_m1, dtype=dtype)
+        mask_odd_rest = jnp.asarray(static.m_is_odd_rest, dtype=dtype)
+    else:
+        m_modes = np.asarray(static.modes.m, dtype=int)
+        mask_even = jnp.asarray((m_modes % 2) == 0, dtype=dtype)
+        mask_m1 = jnp.asarray(m_modes == 1, dtype=dtype)
+        mask_odd_rest = jnp.asarray((m_modes % 2 == 1) & (m_modes != 1), dtype=dtype)
 
     coeff_cos_stack = jnp.stack(
         [
@@ -342,12 +350,25 @@ def _constraint_kernels_from_state(
         ],
         axis=0,
     )
-    eval_stack = eval_fourier(
-        coeff_cos_stack,
-        coeff_sin_stack,
-        static.basis,
-        coeffs_internal=True,
-    )
+    if trig is not None:
+        from .vmec_realspace import vmec_realspace_synthesis
+
+        eval_stack = vmec_realspace_synthesis(
+            coeff_cos=coeff_cos_stack,
+            coeff_sin=coeff_sin_stack,
+            modes=static.modes,
+            trig=trig,
+            coeffs_internal=True,
+            apply_scalxc=False,
+            s=s,
+        )
+    else:
+        eval_stack = eval_fourier(
+            coeff_cos_stack,
+            coeff_sin_stack,
+            static.basis,
+            coeffs_internal=True,
+        )
     rcon_even, zcon_even, rcon_odd_m1, rcon_odd_rest, zcon_odd_m1, zcon_odd_rest = eval_stack
 
     rcon_odd_int = internal_odd_from_physical_vmec_m1(odd_m1_phys=rcon_odd_m1, odd_mge2_phys=rcon_odd_rest, s=s)
@@ -847,7 +868,11 @@ def vmec_forces_rz_from_wout(
                 return out
             return internal_odd_from_physical_vmec_jlam(odd_m1_phys=phys_m1, odd_mge2_phys=phys_rest, s=s)
 
-        odd_is_internal = True
+        odd_internal_env = os.getenv("VMEC_JAX_ODD_INTERNAL_REALSPACE", "").strip().lower()
+        if odd_internal_env == "":
+            odd_is_internal = True
+        else:
+            odd_is_internal = odd_internal_env not in ("0", "false", "no")
         pr1_1 = _odd_internal_from_phys(phys_m1[0], phys_rest[0], odd_is_internal)
         pz1_1 = _odd_internal_from_phys(phys_m1[1], phys_rest[1], odd_is_internal)
         pru_1 = _odd_internal_from_phys(phys_m1_t[0], phys_rest_t[0], odd_is_internal)
@@ -1611,11 +1636,12 @@ def vmec_residual_internal_from_kernels(
         else:  # pragma: no cover
             raise ValueError(f"symforce: unknown kind {kind!r}")
 
-        pad = jnp.zeros((ns, ntheta3 - nt2, nzeta), dtype=a.dtype)
-        return (
-            jnp.concatenate([a_sym_half, pad], axis=1),
-            jnp.concatenate([a_asym_half, pad], axis=1),
-        )
+        # VMEC updates only i<=ntheta2; values for i>ntheta2 are retained on the
+        # symmetric arrays and unused for the antisymmetric ones (tomnspa uses
+        # the restricted interval). Preserve the original data to match VMEC.
+        a_sym = a.at[:, :nt2, :].set(a_sym_half)
+        a_asym = jnp.zeros_like(a).at[:, :nt2, :].set(a_asym_half)
+        return a_sym, a_asym
 
     mask_pack = masks
 

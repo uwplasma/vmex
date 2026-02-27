@@ -747,6 +747,37 @@ def _maybe_dump_bsube_terms(*, bc, static, iter_idx: int) -> None:
                 )
 
 
+def _maybe_dump_bsubh(*, bc, static, iter_idx: int) -> None:
+    env = os.getenv("VMEC_JAX_DUMP_BSUBH", "")
+    if not env or env == "0":
+        return
+    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
+    if iters is not None and int(iter_idx) not in iters:
+        return
+    outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    ns = int(static.cfg.ns)
+    path = outdir / f"bsubh_ns{ns}_iter{int(iter_idx)}.dat"
+
+    bsubu = np.asarray(getattr(bc, "bsubu"))
+    bsubv = np.asarray(getattr(bc, "bsubv"))
+
+    ns, ntheta, nzeta = bsubu.shape
+    with path.open("w", encoding="utf-8") as f:
+        f.write("# bcovar bsubh dump (half mesh)\n")
+        f.write(f"ns={ns}\n")
+        f.write(f"ntheta3={ntheta}\n")
+        f.write(f"nzeta={nzeta}\n")
+        f.write("columns: js lt lz bsubuh bsubvh\n")
+        for lt in range(ntheta):
+            for lz in range(nzeta):
+                for js in range(ns):
+                    f.write(
+                        f"{js + 1:6d}{lt + 1:6d}{lz + 1:6d}"
+                        f"{bsubu[js, lt, lz]:24.16e}{bsubv[js, lt, lz]:24.16e}\n"
+                    )
+
+
 def _maybe_dump_bsubs(*, bc, state, static, trig, iter_idx: int, kernels=None) -> None:
     env = os.getenv("VMEC_JAX_DUMP_BSUBS", "")
     if not env or env == "0":
@@ -2176,6 +2207,8 @@ class _WoutLikeVmecForces:
     phips: Any  # (ns,)
     chipf: Any  # (ns,)  (VMEC `wout` half-mesh averaged convention)
     pres: Any  # (ns,)  (half mesh, VMEC internal units mu0*Pa)
+    mass: Any | None = None  # (ns,) mass profile on half mesh (VMEC internal units)
+    gamma: float | None = None
     ncurr: int = 0
     lcurrent: bool = True
     icurv: Any | None = None  # (ns,) integrated toroidal current profile
@@ -2189,12 +2222,35 @@ def _s_half_from_full_mesh_s(s):
     return jnp.concatenate([s[:1], 0.5 * (s[1:] + s[:-1])], axis=0)
 
 
+def _half_mesh_from_full_mesh(x):
+    x = jnp.asarray(x)
+    if int(x.shape[0]) < 2:
+        return x
+    return jnp.concatenate([x[:1], 0.5 * (x[1:] + x[:-1])], axis=0)
+
+
 def _pressure_half_mesh_from_indata(*, indata, s_full):
     from .profiles import eval_profiles
 
     s_half = _s_half_from_full_mesh_s(s_full)
     prof = eval_profiles(indata, s_half)
     return jnp.asarray(prof.get("pressure", jnp.zeros_like(s_half)))
+
+
+def _mass_half_mesh_from_indata(*, indata, s_full, phips, r00, gamma, lrfp: bool = False, chips=None):
+    """Compute VMEC mass profile on half mesh: mass = pmass * (|vnorm|*r00)^gamma."""
+    from .profiles import eval_profiles
+
+    s_half = _s_half_from_full_mesh_s(s_full)
+    prof = eval_profiles(indata, s_half)
+    pmass = jnp.asarray(prof.get("pressure", jnp.zeros_like(s_half)))
+    vnorm = jnp.asarray(phips)
+    if lrfp and (chips is not None):
+        vnorm = jnp.asarray(chips)
+    mass = pmass * (jnp.abs(vnorm) * jnp.asarray(r00, dtype=pmass.dtype)) ** jnp.asarray(gamma, dtype=pmass.dtype)
+    if int(mass.shape[0]) > 0:
+        mass = mass.at[0].set(jnp.asarray(0.0, dtype=mass.dtype))
+    return mass
 
 
 def _icurv_full_mesh_from_indata(*, indata, s_full, signgs: int):
@@ -2318,6 +2374,24 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
     if phips.shape[0] >= 1:
         phips = phips.at[0].set(0.0)
 
+    # VMEC mass profile uses the boundary r00 coefficient and phips scaling.
+    from .boundary import boundary_from_indata
+
+    boundary = boundary_from_indata(indata, static.modes)
+    r00 = float(np.asarray(boundary.R_cos)[int(idx00)]) if int(idx00) >= 0 else float(np.asarray(boundary.R_cos)[0])
+    gamma = float(indata.get_float("GAMMA", 5.0 / 3.0))
+    lrfp = bool(indata.get_bool("LRFP", False))
+    chips = _half_mesh_from_full_mesh(chipf_wout) if lrfp else None
+    mass = _mass_half_mesh_from_indata(
+        indata=indata,
+        s_full=s,
+        phips=phips,
+        r00=r00,
+        gamma=gamma,
+        lrfp=lrfp,
+        chips=chips,
+    )
+
     pres = _pressure_half_mesh_from_indata(indata=indata, s_full=s)
     ncurr = int(indata.get_int("NCURR", 0))
     icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=signgs)
@@ -2332,6 +2406,8 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
         phips=phips,
         chipf=chipf_wout,
         pres=pres,
+        mass=mass,
+        gamma=gamma,
         ncurr=ncurr,
         lcurrent=True,
         icurv=icurv,
@@ -2805,6 +2881,23 @@ def solve_fixed_boundary_gn_vmec_residual(
     if phips.shape[0] >= 1:
         phips = phips.at[0].set(0.0)
 
+    from .boundary import boundary_from_indata
+
+    boundary = boundary_from_indata(indata, static.modes)
+    r00 = float(np.asarray(boundary.R_cos)[int(idx00)]) if int(idx00) >= 0 else float(np.asarray(boundary.R_cos)[0])
+    gamma = float(indata.get_float("GAMMA", 5.0 / 3.0))
+    lrfp = bool(indata.get_bool("LRFP", False))
+    chips = _half_mesh_from_full_mesh(chipf_wout) if lrfp else None
+    mass = _mass_half_mesh_from_indata(
+        indata=indata,
+        s_full=s,
+        phips=phips,
+        r00=r00,
+        gamma=gamma,
+        lrfp=lrfp,
+        chips=chips,
+    )
+
     pres = _pressure_half_mesh_from_indata(indata=indata, s_full=s)
     ncurr = int(indata.get_int("NCURR", 0))
     icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=signgs)
@@ -2819,6 +2912,8 @@ def solve_fixed_boundary_gn_vmec_residual(
         phips=phips,
         chipf=chipf_wout,
         pres=pres,
+        mass=mass,
+        gamma=gamma,
         ncurr=ncurr,
         lcurrent=True,
         icurv=icurv,
@@ -3628,6 +3723,23 @@ def solve_fixed_boundary_residual_iter(
     if phips.shape[0] >= 1:
         phips = phips.at[0].set(0.0)
 
+    from .boundary import boundary_from_indata
+
+    boundary = boundary_from_indata(indata, static.modes)
+    r00 = float(np.asarray(boundary.R_cos)[int(idx00)]) if int(idx00) >= 0 else float(np.asarray(boundary.R_cos)[0])
+    gamma = float(indata.get_float("GAMMA", 5.0 / 3.0))
+    lrfp = bool(indata.get_bool("LRFP", False))
+    chips = _half_mesh_from_full_mesh(chipf_wout) if lrfp else None
+    mass = _mass_half_mesh_from_indata(
+        indata=indata,
+        s_full=s,
+        phips=phips,
+        r00=r00,
+        gamma=gamma,
+        lrfp=lrfp,
+        chips=chips,
+    )
+
     pres = _pressure_half_mesh_from_indata(indata=indata, s_full=s)
     ncurr = int(indata.get_int("NCURR", 0))
     icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=signgs)
@@ -3642,6 +3754,8 @@ def solve_fixed_boundary_residual_iter(
         phips=phips,
         chipf=chipf_wout,
         pres=pres,
+        mass=mass,
+        gamma=gamma,
         ncurr=ncurr,
         lcurrent=True,
         icurv=icurv,
@@ -4210,6 +4324,7 @@ def solve_fixed_boundary_residual_iter(
         if iter_idx is not None:
             _maybe_dump_bsube(bc=k.bc, static=static, iter_idx=int(iter_idx))
             _maybe_dump_bsube_terms(bc=k.bc, static=static, iter_idx=int(iter_idx))
+            _maybe_dump_bsubh(bc=k.bc, static=static, iter_idx=int(iter_idx))
             _maybe_dump_bsubs(
                 bc=k.bc,
                 state=state,
@@ -10753,6 +10868,23 @@ def first_step_diagnostics(
     phips = jnp.asarray(flux.phips)
     if phips.shape[0] >= 1:
         phips = phips.at[0].set(0.0)
+    from .boundary import boundary_from_indata
+
+    boundary = boundary_from_indata(indata, static_vmec.modes)
+    idx00 = _mode00_index(static_vmec.modes)
+    r00 = float(np.asarray(boundary.R_cos)[int(idx00)]) if int(idx00) >= 0 else float(np.asarray(boundary.R_cos)[0])
+    gamma = float(indata.get_float("GAMMA", 5.0 / 3.0))
+    lrfp = bool(indata.get_bool("LRFP", False))
+    chips = _half_mesh_from_full_mesh(chipf_wout) if lrfp else None
+    mass = _mass_half_mesh_from_indata(
+        indata=indata,
+        s_full=s,
+        phips=phips,
+        r00=r00,
+        gamma=gamma,
+        lrfp=lrfp,
+        chips=chips,
+    )
     pres = _pressure_half_mesh_from_indata(indata=indata, s_full=s)
     ncurr = int(indata.get_int("NCURR", 0))
     icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=signgs)
@@ -10767,6 +10899,8 @@ def first_step_diagnostics(
         phips=phips,
         chipf=chipf_wout,
         pres=pres,
+        mass=mass,
+        gamma=gamma,
         ncurr=ncurr,
         lcurrent=True,
         icurv=icurv,

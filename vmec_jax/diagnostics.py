@@ -220,8 +220,8 @@ def vmec_internal_mn_from_state(
     when ``apply_basis_norm`` is True.
     """
     cfg = static.cfg
-    if bool(getattr(cfg, "lasym", False)):
-        raise NotImplementedError("lasym coefficient decomposition not implemented yet")
+    lasym = bool(getattr(cfg, "lasym", False))
+    lthreed = bool(getattr(cfg, "lthreed", int(getattr(cfg, "ntor", 0)) > 0))
     mpol = int(cfg.mpol)
     ntor = int(cfg.ntor)
     basis_norm = _vmec_basis_norm(mpol=mpol, ntor=ntor)
@@ -229,15 +229,26 @@ def vmec_internal_mn_from_state(
     rcc, rss = _signed_to_mn_cos(state.Rcos, modes=static.modes, mpol=mpol, ntor=ntor)
     zsc, zcs = _signed_to_mn_sin(state.Zsin, modes=static.modes, mpol=mpol, ntor=ntor)
     lsc, lcs = _signed_to_mn_sin(state.Lsin, modes=static.modes, mpol=mpol, ntor=ntor)
+    rsc = rcs = zcc = zss = lcc = lss = None
+    if lasym:
+        rsc, rcs = _signed_to_mn_sin(state.Rsin, modes=static.modes, mpol=mpol, ntor=ntor)
+        zcc, zss = _signed_to_mn_cos(state.Zcos, modes=static.modes, mpol=mpol, ntor=ntor)
+        lcc, lss = _signed_to_mn_cos(state.Lcos, modes=static.modes, mpol=mpol, ntor=ntor)
 
     # VMEC stores m=1 (rss,zcs) in an internal constrained basis when lconm1:
     #   rss_int = 0.5*(rss_phys + zcs_phys)
     #   zcs_int = 0.5*(rss_phys - zcs_phys)
-    if apply_m1_constraint and bool(getattr(cfg, "lthreed", True)) and bool(getattr(cfg, "lconm1", True)) and mpol > 1:
-        rss_m1 = rss[:, 1, :].copy()
-        zcs_m1 = zcs[:, 1, :].copy()
-        rss[:, 1, :] = 0.5 * (rss_m1 + zcs_m1)
-        zcs[:, 1, :] = 0.5 * (rss_m1 - zcs_m1)
+    if apply_m1_constraint and bool(getattr(cfg, "lconm1", True)) and mpol > 1:
+        if lthreed:
+            rss_m1 = rss[:, 1, :].copy()
+            zcs_m1 = zcs[:, 1, :].copy()
+            rss[:, 1, :] = 0.5 * (rss_m1 + zcs_m1)
+            zcs[:, 1, :] = 0.5 * (rss_m1 - zcs_m1)
+        if lasym and rsc is not None and zcc is not None:
+            rsc_m1 = rsc[:, 1, :].copy()
+            zcc_m1 = zcc[:, 1, :].copy()
+            rsc[:, 1, :] = 0.5 * (rsc_m1 + zcc_m1)
+            zcc[:, 1, :] = 0.5 * (rsc_m1 - zcc_m1)
 
     if apply_basis_norm:
         rcc = rcc * basis_norm[None, :, :]
@@ -246,8 +257,20 @@ def vmec_internal_mn_from_state(
         zcs = zcs * basis_norm[None, :, :]
         lsc = lsc * basis_norm[None, :, :]
         lcs = lcs * basis_norm[None, :, :]
+        if rsc is not None:
+            rsc = rsc * basis_norm[None, :, :]
+        if rcs is not None:
+            rcs = rcs * basis_norm[None, :, :]
+        if zcc is not None:
+            zcc = zcc * basis_norm[None, :, :]
+        if zss is not None:
+            zss = zss * basis_norm[None, :, :]
+        if lcc is not None:
+            lcc = lcc * basis_norm[None, :, :]
+        if lss is not None:
+            lss = lss * basis_norm[None, :, :]
 
-    return {
+    out = {
         "rcc": np.asarray(rcc),
         "rss": np.asarray(rss),
         "zsc": np.asarray(zsc),
@@ -255,6 +278,18 @@ def vmec_internal_mn_from_state(
         "lsc": np.asarray(lsc),
         "lcs": np.asarray(lcs),
     }
+    if lasym:
+        out.update(
+            {
+                "rsc": np.asarray(rsc),
+                "rcs": np.asarray(rcs),
+                "zcc": np.asarray(zcc),
+                "zss": np.asarray(zss),
+                "lcc": np.asarray(lcc),
+                "lss": np.asarray(lss),
+            }
+        )
+    return out
 
 
 def vmec_xc_from_mn_blocks(
@@ -265,15 +300,19 @@ def vmec_xc_from_mn_blocks(
     zcs: Any,
     lsc: Any,
     lcs: Any,
+    rsc: Any | None = None,
+    rcs: Any | None = None,
+    zcc: Any | None = None,
+    zss: Any | None = None,
+    lcc: Any | None = None,
+    lss: Any | None = None,
     cfg: Any,
 ) -> np.ndarray:
     """Pack VMEC (m,n>=0) coefficient blocks into the 1D xc vector."""
-    if bool(getattr(cfg, "lasym", False)):
-        raise NotImplementedError("lasym xc packing not implemented yet")
     mpol = int(cfg.mpol)
     ntor = int(cfg.ntor)
-    lthreed = bool(getattr(cfg, "lthreed", True))
-    ntmax = 2 if lthreed else 1
+    lthreed = bool(getattr(cfg, "lthreed", int(ntor) > 0))
+    lasym = bool(getattr(cfg, "lasym", False))
     rcc = _as_array(rcc)
     ns = int(rcc.shape[0])
     nrange = int(ntor) + 1
@@ -288,16 +327,42 @@ def vmec_xc_from_mn_blocks(
         # (js) fastest: idx = js + ns*mn (Fortran 1-based).
         return a.reshape((ns, mnsize)).T.reshape(-1)
 
-    xc = np.zeros((3 * ntmax * mns,), dtype=rcc.dtype)
-    if ntmax == 1:
-        blocks = (rcc, zsc, lsc)
-    elif ntmax == 2:
-        # VMEC serial layout uses variable-major blocks:
-        # [R(ntype=1..ntmax), Z(ntype=1..ntmax), L(ntype=1..ntmax)].
-        # For symmetric 3D (ntmax=2): [rcc, rss, zsc, zcs, lsc, lcs].
-        blocks = (rcc, rss, zsc, zcs, lsc, lcs)
+    def _zero_like() -> np.ndarray:
+        return np.zeros((ns, mnsize), dtype=rcc.dtype)
+
+    def _blk_or_zero(a: Any | None) -> np.ndarray:
+        if a is None:
+            return _zero_like()
+        a = _as_array(a)
+        if a.size == 0:
+            return _zero_like()
+        return a.reshape((ns, mnsize))
+
+    rcc_b = rcc.reshape((ns, mnsize))
+    rss_b = _blk_or_zero(rss)
+    rsc_b = _blk_or_zero(rsc)
+    rcs_b = _blk_or_zero(rcs)
+    zsc_b = _blk_or_zero(zsc)
+    zcs_b = _blk_or_zero(zcs)
+    zcc_b = _blk_or_zero(zcc)
+    zss_b = _blk_or_zero(zss)
+    lsc_b = _blk_or_zero(lsc)
+    lcs_b = _blk_or_zero(lcs)
+    lcc_b = _blk_or_zero(lcc)
+    lss_b = _blk_or_zero(lss)
+
+    if (not lthreed) and (not lasym):
+        blocks = (rcc_b, zsc_b, lsc_b)
+    elif (not lthreed) and lasym:
+        # LTHREED=F, LASYM=T ordering (readin.f)
+        blocks = (rcc_b, rsc_b, zsc_b, zcc_b, lsc_b, lcc_b)
+    elif lthreed and (not lasym):
+        blocks = (rcc_b, rss_b, zsc_b, zcs_b, lsc_b, lcs_b)
     else:
-        raise NotImplementedError("xc packing not implemented for ntmax > 2")
+        # LTHREED=T, LASYM=T ordering (readin.f)
+        blocks = (rcc_b, rss_b, rsc_b, rcs_b, zsc_b, zcs_b, zcc_b, zss_b, lsc_b, lcs_b, lcc_b, lss_b)
+
+    xc = np.zeros((len(blocks) * mns,), dtype=rcc.dtype)
     for i, blk in enumerate(blocks):
-        xc[i * mns : (i + 1) * mns] = _flat(blk)
+        xc[i * mns : (i + 1) * mns] = blk.T.reshape(-1)
     return xc

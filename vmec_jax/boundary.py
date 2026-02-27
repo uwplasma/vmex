@@ -357,6 +357,35 @@ def boundary_from_indata(
     zbc = _get_indexed(indata, "ZBC")
     zbs = _get_indexed(indata, "ZBS")
 
+    lasym = bool(indata.get_bool("LASYM", False))
+    if lasym:
+        # VMEC readin.f: rotate boundary so that RBS(m=1,n=0) == ZBC(m=1,n=0)
+        # (see readin.f around the "CONVERT TO REPRESENTATION WITH RBS(m=1)=ZBC(m=1)" block).
+        rbc01 = float(rbc.get((0, 1), 0.0))
+        rbs01 = float(rbs.get((0, 1), 0.0))
+        zbc01 = float(zbc.get((0, 1), 0.0))
+        zbs01 = float(zbs.get((0, 1), 0.0))
+        denom = abs(rbc01) + abs(zbs01)
+        delta = 0.0 if denom == 0.0 else float(np.arctan((rbs01 - zbc01) / denom))
+        if delta != 0.0:
+            def _rotate_pair(cos_map: Dict[Tuple[int, ...], float], sin_map: Dict[Tuple[int, ...], float]):
+                out_cos: Dict[Tuple[int, ...], float] = {}
+                out_sin: Dict[Tuple[int, ...], float] = {}
+                keys = set(cos_map.keys()) | set(sin_map.keys())
+                for key in keys:
+                    n_i, m_i = int(key[0]), int(key[1])
+                    val_cos = float(cos_map.get((n_i, m_i), 0.0))
+                    val_sin = float(sin_map.get((n_i, m_i), 0.0))
+                    ang = float(m_i) * delta
+                    c = float(np.cos(ang))
+                    s = float(np.sin(ang))
+                    out_cos[(n_i, m_i)] = val_cos * c + val_sin * s
+                    out_sin[(n_i, m_i)] = val_sin * c - val_cos * s
+                return out_cos, out_sin
+
+            rbc, rbs = _rotate_pair(rbc, rbs)
+            zbc, zbs = _rotate_pair(zbc, zbs)
+
     cache_key = _boundary_cache_key(
         indata,
         modes,
@@ -393,7 +422,6 @@ def boundary_from_indata(
 
     boundary = BoundaryCoeffs(R_cos=R_cos, R_sin=R_sin, Z_cos=Z_cos, Z_sin=Z_sin)
 
-    lasym = bool(indata.get_bool("LASYM", False))
     mpol, ntor = _infer_mpol_ntor(modes)
     lthreed = ntor > 0
 
