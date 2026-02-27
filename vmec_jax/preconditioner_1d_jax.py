@@ -512,7 +512,6 @@ def _rz_preconditioner_matrices_impl(
             "lax",
             "force",
         )
-
     cr = ir = cz = iz = None
     if use_precomputed:
         cr, ir = _tridi_precompute_coeffs(ar, dr, br)
@@ -892,18 +891,6 @@ def _rz_preconditioner_apply_arrays(
             sol_r0_stack = _tridi_solve_batched_jmin0(
                 ar[:, 0, :], dr[:, 0, :], br[:, 0, :], rhs_r0_stack, use_lax_tridi=use_lax_tridi
             )
-        idx = 0
-        frcc_u = frcc_u.at[:jmax, 0, :].set(sol_r0_stack[..., idx])
-        idx += 1
-        if use_rss:
-            frss_u = frss_u.at[:jmax, 0, :].set(sol_r0_stack[..., idx])
-            idx += 1
-        if use_rsc:
-            frsc_u = frsc_u.at[:jmax, 0, :].set(sol_r0_stack[..., idx])
-            idx += 1
-        if use_rcs:
-            frcs_u = frcs_u.at[:jmax, 0, :].set(sol_r0_stack[..., idx])
-            idx += 1
         rhs_z0_stack = rhs_z_stack[:, 0, :]
         if use_lax_tridi and (dlz_t is not None) and (dz_t is not None) and (duz_t is not None):
             dlz0 = dlz_t[0, :, :jmax]
@@ -918,6 +905,19 @@ def _rz_preconditioner_apply_arrays(
             sol_z0_stack = _tridi_solve_batched_jmin0(
                 az[:, 0, :], dz[:, 0, :], bz[:, 0, :], rhs_z0_stack, use_lax_tridi=use_lax_tridi
             )
+        idx = 0
+        frcc_u = frcc_u.at[:jmax, 0, :].set(sol_r0_stack[..., idx])
+        idx += 1
+        if use_rss:
+            frss_u = frss_u.at[:jmax, 0, :].set(sol_r0_stack[..., idx])
+            idx += 1
+        if use_rsc:
+            frsc_u = frsc_u.at[:jmax, 0, :].set(sol_r0_stack[..., idx])
+            idx += 1
+        if use_rcs:
+            frcs_u = frcs_u.at[:jmax, 0, :].set(sol_r0_stack[..., idx])
+            idx += 1
+
         idx = 0
         fzsc_u = fzsc_u.at[:jmax, 0, :].set(sol_z0_stack[..., idx])
         idx += 1
@@ -955,18 +955,6 @@ def _rz_preconditioner_apply_arrays(
                 sol_rm = _tridi_solve_batched_jmin0(a_r, d_r, b_r, rhs_rm_stack, use_lax_tridi=use_lax_tridi)
             pad_r = jnp.zeros((1, mpol - 1, nrange, sol_rm.shape[-1]), dtype=sol_rm.dtype)
             sol_rm_full = jnp.concatenate([pad_r, sol_rm], axis=0)
-            idx = 0
-            frcc_u = frcc_u.at[:jmax, 1:, :].set(sol_rm_full[..., idx])
-            idx += 1
-            if use_rss:
-                frss_u = frss_u.at[:jmax, 1:, :].set(sol_rm_full[..., idx])
-                idx += 1
-            if use_rsc:
-                frsc_u = frsc_u.at[:jmax, 1:, :].set(sol_rm_full[..., idx])
-                idx += 1
-            if use_rcs:
-                frcs_u = frcs_u.at[:jmax, 1:, :].set(sol_rm_full[..., idx])
-                idx += 1
 
             rhs_zm_stack = rhs_z_stack[1:, 1:, :]
             if use_lax_tridi and (dlz_t is not None) and (dz_t is not None) and (duz_t is not None):
@@ -982,6 +970,19 @@ def _rz_preconditioner_apply_arrays(
                 sol_zm = _tridi_solve_batched_jmin0(a_z, d_z, b_z, rhs_zm_stack, use_lax_tridi=use_lax_tridi)
             pad_z = jnp.zeros((1, mpol - 1, nrange, sol_zm.shape[-1]), dtype=sol_zm.dtype)
             sol_zm_full = jnp.concatenate([pad_z, sol_zm], axis=0)
+            idx = 0
+            frcc_u = frcc_u.at[:jmax, 1:, :].set(sol_rm_full[..., idx])
+            idx += 1
+            if use_rss:
+                frss_u = frss_u.at[:jmax, 1:, :].set(sol_rm_full[..., idx])
+                idx += 1
+            if use_rsc:
+                frsc_u = frsc_u.at[:jmax, 1:, :].set(sol_rm_full[..., idx])
+                idx += 1
+            if use_rcs:
+                frcs_u = frcs_u.at[:jmax, 1:, :].set(sol_rm_full[..., idx])
+                idx += 1
+
             idx = 0
             fzsc_u = fzsc_u.at[:jmax, 1:, :].set(sol_zm_full[..., idx])
             idx += 1
