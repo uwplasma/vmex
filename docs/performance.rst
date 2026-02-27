@@ -111,8 +111,9 @@ are skipped to reduce host/device traffic. Override with::
   export VMEC_JAX_SCAN_MINIMAL=1   # force minimal histories
 
 In fast mode (``performance_mode=True`` / ``--fast``), ``scan_minimal`` is the
-default unless explicitly overridden by ``VMEC_JAX_SCAN_MINIMAL``. This keeps
-the fast path light on host traffic for large ``NITER`` runs.
+default for **quiet** runs (``verbose=False``) unless explicitly overridden by
+``VMEC_JAX_SCAN_MINIMAL``. When ``verbose=True``, scan keeps the extra scalar
+histories needed for VMEC-style printing.
 
 Advanced knobs (not required for normal use):
 
