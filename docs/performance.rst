@@ -64,6 +64,23 @@ This runs a short scan-vs-non-scan probe at the start of each stage and falls
 back to the non-scan loop if a mismatch is detected. It is **off by default**
 because it adds extra compilation and iteration overhead.
 
+Scan chunking (fixed NSTEP blocks)
+---------------------------------
+
+To avoid retracing for variable tail lengths, the scan loop executes in fixed
+chunks of length ``NSTEP`` (the VMEC input parameter). Iterations beyond
+``NITER`` are masked by the in-scan hold condition, so the extra work is a
+no-op and does not affect parity.
+
+Controls:
+
+- ``VMEC_JAX_VMEC2000_CHUNKED=1`` (default): enable chunked scan.
+- ``VMEC_JAX_SCAN_CHUNK_SIZE=<int>``: override chunk length (defaults to
+  ``NSTEP``).
+
+This reduces compilation cache misses when the stage transition changes
+``NITER`` but keeps the same ``NSTEP`` cadence.
+
 Live NSTEP printing (debug callback)
 ------------------------------------
 
@@ -92,6 +109,10 @@ are skipped to reduce host/device traffic. Override with::
 
   export VMEC_JAX_SCAN_MINIMAL=0   # keep full scan diagnostics
   export VMEC_JAX_SCAN_MINIMAL=1   # force minimal histories
+
+In fast mode (``performance_mode=True`` / ``--fast``), ``scan_minimal`` is the
+default unless explicitly overridden by ``VMEC_JAX_SCAN_MINIMAL``. This keeps
+the fast path light on host traffic for large ``NITER`` runs.
 
 Advanced knobs (not required for normal use):
 
@@ -137,6 +158,20 @@ These weights are now cached in the trig table as ``wint3_precond`` and reused
 whenever the preconditioner diagonal is refreshed. This avoids rebuilding the
 same weight tensor in every refresh call and keeps the preconditioner refresh
 path purely algebraic in ``bsq``, ``r12``, ``sqrtg``, ``ru12``, and ``zu12``.
+
+Experimental tridiagonal solver (scan only)
+------------------------------------------
+
+The scan preconditioner can optionally use XLA's fused tridiagonal solver with
+pretransposed coefficients (``dl/d/du``) computed once per stage. This can be
+faster but is **not parity-safe** in general.
+
+Enable for experiments only:
+
+- ``VMEC_JAX_TRIDI_SOLVE=1`` (build pretransposed coefficients)
+- ``VMEC_JAX_SCAN_PRECOND_LAXTRIDI=1`` (use the fused solver in scan)
+
+If parity diverges, leave these disabled (the default).
 
 Boundary decomposition cache + JAX-friendly initial guess
 ---------------------------------------------------------

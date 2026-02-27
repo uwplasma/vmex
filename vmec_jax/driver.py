@@ -290,8 +290,9 @@ def run_fixed_boundary(
     verbose: bool = True,
     jit_forces: bool | str = True,
     jit_precompile: bool | None = None,
-    use_scan: bool = False,
+    use_scan: bool = True,
     performance_mode: bool = False,
+    scan_wout_corrector: bool | None = None,
     stage_transition_heuristic: bool | None = None,
     stage_transition_factor: float = 50.0,
     stage_transition_scale: float = 0.5,
@@ -368,15 +369,24 @@ def run_fixed_boundary(
         from .diagnostics import vmec_internal_mn_from_state, vmec_xc_from_mn_blocks
 
         blocks = vmec_internal_mn_from_state(state, static, apply_basis_norm=False, apply_m1_constraint=False)
-        xc = vmec_xc_from_mn_blocks(
+        xc_kwargs = dict(
             rcc=blocks["rcc"],
             rss=blocks["rss"],
             zsc=blocks["zsc"],
             zcs=blocks["zcs"],
             lsc=blocks["lsc"],
             lcs=blocks["lcs"],
-            cfg=static.cfg,
         )
+        if "rsc" in blocks:
+            xc_kwargs.update(
+                rsc=blocks.get("rsc"),
+                rcs=blocks.get("rcs"),
+                zcc=blocks.get("zcc"),
+                zss=blocks.get("zss"),
+                lcc=blocks.get("lcc"),
+                lss=blocks.get("lss"),
+            )
+        xc = vmec_xc_from_mn_blocks(cfg=static.cfg, **xc_kwargs)
         xcdot = np.zeros_like(xc)
         with path.open("w") as f:
             f.write("# xc/xcdot dump (init guess)\n")
@@ -496,7 +506,7 @@ def run_fixed_boundary(
     if multigrid is None:
         multigrid = solver_lower == "vmec2000_iter"
     if max_iter is _MAX_ITER_SENTINEL:
-        if solver_lower == "vmec2000_iter":
+        if solver_lower in ("vmec2000_iter", "vmec2000_scan", "vmec2000_iter_fast"):
             niter_list = _as_list(indata.get("NITER_ARRAY", None))
             if niter_list:
                 # VMEC2000 behavior: when NITER_ARRAY is present, it defines
@@ -678,9 +688,10 @@ def run_fixed_boundary(
         )
 
     if performance_mode:
-        use_scan = True
         if solver_lower == "vmec2000_iter":
             solver_lower = "vmec2000_iter_fast"
+
+    scan_minimal_default = True if bool(performance_mode) else None
 
     solver = solver_lower
     if solver in ("vmec2000_iter_fast", "vmec2000_scan"):
@@ -893,6 +904,8 @@ def run_fixed_boundary(
         precompile_stages = env_precompile_stages.strip().lower() not in ("", "0", "false", "no")
 
         prev_stage_fsq = None
+        ftol_last = None
+        step_size_last = None
         for i, (ns_i, niter_i, ftol_i) in enumerate(zip(ns_stages, niter_stages, ftol_stages)):
             if verbose:
                 print(
@@ -955,6 +968,7 @@ def run_fixed_boundary(
                         verbose_vmec2000_table=False,
                         jit_precompile=False,
                         jit_warmup_iters=0,
+                        scan_minimal_default=scan_minimal_default,
                     )
                     res_probe_scan = solve_fixed_boundary_residual_iter(
                         state,
@@ -1100,7 +1114,98 @@ def run_fixed_boundary(
                 use_scan=bool(scan_mode),
                 jit_warmup_iters=int(jit_warmup_iters),
                 jit_precompile=bool(jit_precompile_eff),
+                scan_minimal_default=scan_minimal_default,
             )
+            dynamic_scan_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN", "0").strip().lower()
+            dynamic_scan = dynamic_scan_env not in ("", "0", "false", "no")
+            if (
+                dynamic_scan
+                and bool(performance_mode)
+                and bool(scan_mode)
+                and bool(vmec2000_ctrl)
+                and int(niter_i) > 1
+            ):
+                try:
+                    pre_iters_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", "10").strip()
+                    pre_iters = max(1, int(pre_iters_env))
+                except Exception:
+                    pre_iters = 10
+                if pre_iters >= int(niter_i):
+                    pre_iters = max(1, int(niter_i) - 1)
+                if pre_iters > 0:
+                    fsq_tol_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN_FSQ_RTOL", "1e-6").strip()
+                    try:
+                        fsq_tol = float(fsq_tol_env)
+                    except Exception:
+                        fsq_tol = 1e-6
+                    pre_kwargs = dict(solve_kwargs)
+                    pre_kwargs.update(
+                        {
+                            "max_iter": int(pre_iters),
+                            "verbose": False,
+                            "verbose_vmec2000_table": False,
+                            "jit_warmup_iters": 0,
+                            "jit_precompile": False,
+                        }
+                    )
+                    def _run_pref(*, use_scan_flag: bool):
+                        kwargs = dict(pre_kwargs)
+                        kwargs["use_scan"] = bool(use_scan_flag)
+                        if not bool(jit_forces_base):
+                            try:
+                                import jax
+                                with jax.disable_jit():
+                                    return solve_fixed_boundary_residual_iter(
+                                        state_stage_start,
+                                        static_i,
+                                        jit_forces=False,
+                                        **kwargs,
+                                    )
+                            except Exception:
+                                return solve_fixed_boundary_residual_iter(
+                                    state_stage_start,
+                                    static_i,
+                                    jit_forces=False,
+                                    **kwargs,
+                                )
+                        return solve_fixed_boundary_residual_iter(
+                            state_stage_start,
+                            static_i,
+                            jit_forces=True,
+                            **kwargs,
+                        )
+
+                    t0 = time.perf_counter()
+                    res_pref_noscan = _run_pref(use_scan_flag=False)
+                    t_noscan = time.perf_counter() - t0
+                    t0 = time.perf_counter()
+                    res_pref_scan = _run_pref(use_scan_flag=True)
+                    t_scan = time.perf_counter() - t0
+
+                    fsq_ns = None
+                    fsq_sc = None
+                    try:
+                        fsq_ns = float(np.asarray(res_pref_noscan.w_history)[-1])
+                    except Exception:
+                        fsq_ns = None
+                    try:
+                        fsq_sc = float(np.asarray(res_pref_scan.w_history)[-1])
+                    except Exception:
+                        fsq_sc = None
+                    fsq_ok = True
+                    if fsq_ns is not None and fsq_sc is not None:
+                        denom = max(abs(fsq_ns), 1e-30)
+                        fsq_ok = abs(fsq_sc - fsq_ns) / denom <= float(fsq_tol)
+                    choose_scan = (t_scan < t_noscan) and fsq_ok
+                    scan_mode = bool(choose_scan)
+                    solve_kwargs["use_scan"] = bool(scan_mode)
+                    if bool(verbose):
+                        print(
+                            "[vmec_jax] dynamic scan selection: "
+                            f"scan={t_scan:.3f}s noscan={t_noscan:.3f}s "
+                            f"fsq_ok={fsq_ok} -> use_scan={scan_mode}",
+                            flush=True,
+                        )
             if bool(precompile_stages) and bool(jit_forces_eff):
                 try:
                     precompile_kwargs = dict(solve_kwargs)
@@ -1201,6 +1306,8 @@ def run_fixed_boundary(
                 resume_state_stage = _sanitize_resume_state_for_stage(res_i.diagnostics.get("resume_state"))
             state = stage_results[-1].state
             static_prev = static_i
+            ftol_last = float(ftol_i)
+            step_size_last = float(step_size_val)
 
         # Merge per-stage histories into one VMEC-style trace object.
         def _cat(attr: str) -> np.ndarray:
@@ -1267,6 +1374,76 @@ def run_fixed_boundary(
             step_history=_cat("step_history"),
             diagnostics=diag,
         )
+        # Optional scan corrector: run a single non-scan VMEC2000 step to
+        # re-anchor the final state before writing wout outputs.
+        try:
+            use_scan_any = any(bool(r.diagnostics.get("vmec2000_scan", False)) for r in stage_results)
+        except Exception:
+            use_scan_any = False
+        if scan_wout_corrector is None:
+            scan_wout_env = os.getenv("VMEC_JAX_SCAN_WOUT_CORRECTOR", "0").strip().lower()
+            scan_wout_corrector = scan_wout_env not in ("", "0", "false", "no")
+        if use_scan_any and bool(scan_wout_corrector):
+            try:
+                resume_state_corr = res.diagnostics.get("resume_state", None)
+                static_corr = static_prev if static_prev is not None else build_static(cfg, grid=grid)
+                ftol_corr = float(ftol_last) if ftol_last is not None else float(indata.get_float("FTOL", 1e-13))
+                step_corr = float(step_size_last) if step_size_last is not None else 1.0
+                corr_kwargs = dict(
+                    indata=indata,
+                    signgs=signgs,
+                    ftol=ftol_corr,
+                    max_iter=1,
+                    step_size=step_corr,
+                    include_constraint_force=True,
+                    apply_m1_constraints=True,
+                    precond_radial_alpha=0.5,
+                    precond_lambda_alpha=0.5,
+                    mode_diag_exponent=0.0,
+                    auto_flip_force=False,
+                    divide_by_scalxc_for_update=False,
+                    lambda_update_scale=1.0,
+                    enforce_vmec_lambda_axis=True,
+                    vmec2000_control=True,
+                    strict_update=True,
+                    backtracking=False,
+                    reference_mode=False,
+                    use_restart_triggers=True if use_restart_triggers is None else bool(use_restart_triggers),
+                    vmecpp_restart=bool(vmecpp_restart),
+                    stage_prev_fsq=None,
+                    stage_transition_factor=float(stage_transition_factor),
+                    stage_transition_scale=float(stage_transition_scale),
+                    use_direct_fallback=False,
+                    resume_state=resume_state_corr,
+                    verbose=False,
+                    verbose_vmec2000_table=False,
+                    jit_precompile=False,
+                    jit_warmup_iters=0,
+                    use_scan=False,
+                    scan_minimal_default=scan_minimal_default,
+                )
+                res_corr = solve_fixed_boundary_residual_iter(
+                    res.state,
+                    static_corr,
+                    jit_forces=_resolve_jit_forces(jit_forces, static_corr, 1),
+                    **corr_kwargs,
+                )
+                diag = dict(res.diagnostics)
+                diag["scan_wout_corrector"] = True
+                diag["scan_wout_corrector_iters"] = int(res_corr.n_iter)
+                res = SolveVmecResidualResult(
+                    state=res_corr.state,
+                    n_iter=res.n_iter,
+                    w_history=res.w_history,
+                    fsqr2_history=res.fsqr2_history,
+                    fsqz2_history=res.fsqz2_history,
+                    fsql2_history=res.fsql2_history,
+                    grad_rms_history=res.grad_rms_history,
+                    step_history=res.step_history,
+                    diagnostics=diag,
+                )
+            except Exception:
+                pass
         static = build_static(cfg, grid=grid)
         if verbose and solver == "vmec2000_iter":
             converged = bool(res.diagnostics.get("converged", False))

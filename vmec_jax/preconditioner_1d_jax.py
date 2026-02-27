@@ -401,10 +401,10 @@ def _rz_preconditioner_matrices_impl(
     k,
     s,
     cfg,
+    use_precomputed: bool | None = None,
+    use_lax_tridi: bool | None = None,
 ) -> tuple[dict[str, Any], Any, int]:
     """Return VMEC R/Z radial preconditioner matrices (JAX, fixed-boundary)."""
-    if bool(cfg.lasym):
-        raise ValueError("rz_preconditioner_matrices does not yet support lasym.")
     s = jnp.asarray(s)
     ns = int(s.shape[0])
     ns_f = max(ns - 1, 1)
@@ -497,8 +497,31 @@ def _rz_preconditioner_matrices_impl(
         dr = dr.at[1, 1, :].add(br[1, 1, :])
         dz = dz.at[1, 1, :].add(bz[1, 1, :])
 
-    cr, ir = _tridi_precompute_coeffs(ar, dr, br)
-    cz, iz = _tridi_precompute_coeffs(az, dz, bz)
+    if use_precomputed is None:
+        use_precomputed = os.getenv("VMEC_JAX_TRIDI_PRECOMPUTE", "0").strip().lower() not in (
+            "",
+            "0",
+            "false",
+            "no",
+        )
+    if use_lax_tridi is None:
+        use_lax_tridi = os.getenv("VMEC_JAX_TRIDI_SOLVE", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "lax",
+            "force",
+        )
+
+    cr = ir = cz = iz = None
+    if use_precomputed:
+        cr, ir = _tridi_precompute_coeffs(ar, dr, br)
+        cz, iz = _tridi_precompute_coeffs(az, dz, bz)
+    dlr_t = dr_t = dur_t = None
+    dlz_t = dz_t = duz_t = None
+    if use_lax_tridi:
+        dlr_t, dr_t, dur_t = _tridi_pretranspose_for_lax(ar, dr, br)
+        dlz_t, dz_t, duz_t = _tridi_pretranspose_for_lax(az, dz, bz)
 
     jmin_m = jnp.where(jnp.arange(mpol) > 0, 1, 0).astype(jnp.int32)
     jmin = jmin_m[:, None] * jnp.ones((mpol, nrange), dtype=jnp.int32)
@@ -507,14 +530,30 @@ def _rz_preconditioner_matrices_impl(
         "ar": ar,
         "br": br,
         "dr": dr,
-        "cr": cr,
-        "ir": ir,
         "az": az,
         "bz": bz,
         "dz": dz,
-        "cz": cz,
-        "iz": iz,
     }
+    if cr is not None:
+        mats["cr"] = cr
+    if ir is not None:
+        mats["ir"] = ir
+    if cz is not None:
+        mats["cz"] = cz
+    if iz is not None:
+        mats["iz"] = iz
+    if dlr_t is not None:
+        mats["dlr_t"] = dlr_t
+    if dr_t is not None:
+        mats["dr_t"] = dr_t
+    if dur_t is not None:
+        mats["dur_t"] = dur_t
+    if dlz_t is not None:
+        mats["dlz_t"] = dlz_t
+    if dz_t is not None:
+        mats["dz_t"] = dz_t
+    if duz_t is not None:
+        mats["duz_t"] = duz_t
     return mats, jmin, int(ns_f)
 
 
@@ -525,14 +564,23 @@ def rz_preconditioner_matrices(
     trig,
     s,
     cfg,
+    use_precomputed: bool | None = None,
+    use_lax_tridi: bool | None = None,
 ) -> tuple[dict[str, Any], Any, int]:
     """Return VMEC R/Z radial preconditioner matrices (JAX, fixed-boundary)."""
     del trig
-    return _rz_preconditioner_matrices_impl(bc=bc, k=k, s=s, cfg=cfg)
+    return _rz_preconditioner_matrices_impl(
+        bc=bc,
+        k=k,
+        s=s,
+        cfg=cfg,
+        use_precomputed=use_precomputed,
+        use_lax_tridi=use_lax_tridi,
+    )
 
 
-@jit
-def _tridi_solve_batched_jmin0(a, d, b, rhs) -> Any:
+@partial(jit, static_argnames=("use_lax_tridi",))
+def _tridi_solve_batched_jmin0(a, d, b, rhs, *, use_lax_tridi: bool = False) -> Any:
     """Batched Thomas solve for a/d/b with jmin=0 (axisymmetric)."""
     a = jnp.asarray(a)
     d = jnp.asarray(d)
@@ -548,14 +596,7 @@ def _tridi_solve_batched_jmin0(a, d, b, rhs) -> Any:
         return rhs
 
     # Prefer XLA's fused tridiagonal solver when explicitly enabled.
-    use_lax_tridi = os.getenv("VMEC_JAX_TRIDI_SOLVE", "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "lax",
-        "force",
-    )
-    if use_lax_tridi and n >= 3:
+    if bool(use_lax_tridi) and n >= 3:
         # Map to tridiagonal_solve conventions: dl=subdiagonal, du=superdiagonal.
         # Our Thomas implementation treats `a` as the superdiagonal and `b` as
         # the subdiagonal, so swap here to preserve parity.
@@ -663,6 +704,48 @@ def _tridi_precompute_coeffs(a, d, b) -> tuple[Any, Any]:
 
 
 @jit
+def _tridi_pretranspose_for_lax(a, d, b) -> tuple[Any, Any, Any]:
+    """Pretranspose tridiagonal system for lax.tridiagonal_solve.
+
+    Returns (dl_t, d_t, du_t) with system dimension on the last axis.
+    """
+    a = jnp.asarray(a)
+    d = jnp.asarray(d)
+    b = jnp.asarray(b)
+    if a.shape != d.shape:
+        a = jnp.broadcast_to(a, d.shape)
+    if b.shape != d.shape:
+        b = jnp.broadcast_to(b, d.shape)
+    dl_t = jnp.moveaxis(b, 0, -1)
+    d_t = jnp.moveaxis(d, 0, -1)
+    du_t = jnp.moveaxis(a, 0, -1)
+    dl_t = dl_t.at[..., 0].set(jnp.asarray(0.0, dtype=dl_t.dtype))
+    du_t = du_t.at[..., -1].set(jnp.asarray(0.0, dtype=du_t.dtype))
+    return dl_t, d_t, du_t
+
+
+@jit
+def _tridi_solve_batched_jmin0_lax_pretransposed(dl_t, d_t, du_t, rhs) -> Any:
+    """Batched tridiagonal solve using pretransposed dl/d/du (system dim last)."""
+    dl_t = jnp.asarray(dl_t)
+    d_t = jnp.asarray(d_t)
+    du_t = jnp.asarray(du_t)
+    # Guard against zero diagonal entries (Thomas solver uses eps guards).
+    eps = jnp.asarray(1.0e-12, dtype=d_t.dtype)
+    d_t = jnp.where(d_t != 0.0, d_t, eps)
+    rhs_in = jnp.asarray(rhs)
+    squeeze_rhs = False
+    if rhs_in.ndim == d_t.ndim - 1:
+        rhs_in = rhs_in[..., None]
+        squeeze_rhs = True
+    # rhs expects system dimension on second-to-last axis.
+    rhs_t = jnp.moveaxis(rhs_in, 0, -2)
+    sol_t = jax.lax.linalg.tridiagonal_solve(dl_t, d_t, du_t, rhs_t)
+    sol = jnp.moveaxis(sol_t, -2, 0)
+    return sol[..., 0] if squeeze_rhs else sol
+
+
+@jit
 def _tridi_solve_precomputed(a, cp, inv, rhs) -> Any:
     """Solve tridiagonal using precomputed c' and inv_denom."""
     a = jnp.asarray(a)
@@ -706,7 +789,20 @@ def _tridi_solve_precomputed(a, cp, inv, rhs) -> Any:
     return x_out
 
 
-@partial(jit, static_argnames=("jmax", "use_precomputed"))
+@partial(
+    jit,
+    static_argnames=(
+        "jmax",
+        "use_precomputed",
+        "use_lax_tridi",
+        "use_rss",
+        "use_rsc",
+        "use_rcs",
+        "use_zcs",
+        "use_zcc",
+        "use_zss",
+    ),
+)
 def _rz_preconditioner_apply_arrays(
     *,
     ar,
@@ -719,21 +815,38 @@ def _rz_preconditioner_apply_arrays(
     dz,
     cz,
     iz,
+    dlr_t,
+    dr_t,
+    dur_t,
+    dlz_t,
+    dz_t,
+    duz_t,
     frcc,
     frss,
     fzsc,
     fzcs,
     frsc,
+    frcs,
     fzcc,
+    fzss,
     jmax: int,
     use_precomputed: bool,
+    use_lax_tridi: bool,
+    use_rss: bool,
+    use_rsc: bool,
+    use_rcs: bool,
+    use_zcs: bool,
+    use_zcc: bool,
+    use_zss: bool,
 ):
     frcc_u = frcc
     frss_u = frss
     fzsc_u = fzsc
     fzcs_u = fzcs
     frsc_u = frsc
+    frcs_u = frcs
     fzcc_u = fzcc
+    fzss_u = fzss
     jmax = int(jmax)
     mpol = int(frcc.shape[1])
     nrange = int(frcc.shape[2])
@@ -743,30 +856,83 @@ def _rz_preconditioner_apply_arrays(
         rhs_rs = frss[:jmax]
         rhs_zc = fzcs[:jmax]
         rhs_rsc = frsc[:jmax]
+        rhs_rcs = frcs[:jmax]
         rhs_zcc = fzcc[:jmax]
+        rhs_zss = fzss[:jmax]
 
-        rhs_r0_stack = jnp.stack([rhs_r[:, 0, :], rhs_rs[:, 0, :], rhs_rsc[:, 0, :]], axis=-1)
-        if use_precomputed:
+        r_blocks = [rhs_r]
+        if use_rss:
+            r_blocks.append(rhs_rs)
+        if use_rsc:
+            r_blocks.append(rhs_rsc)
+        if use_rcs:
+            r_blocks.append(rhs_rcs)
+        rhs_r_stack = jnp.stack(r_blocks, axis=-1)
+
+        z_blocks = [rhs_z]
+        if use_zcs:
+            z_blocks.append(rhs_zc)
+        if use_zcc:
+            z_blocks.append(rhs_zcc)
+        if use_zss:
+            z_blocks.append(rhs_zss)
+        rhs_z_stack = jnp.stack(z_blocks, axis=-1)
+
+        rhs_r0_stack = rhs_r_stack[:, 0, :]
+        if use_lax_tridi and (dlr_t is not None) and (dr_t is not None) and (dur_t is not None):
+            dlr0 = dlr_t[0, :, :jmax]
+            dr0 = dr_t[0, :, :jmax]
+            dur0 = dur_t[0, :, :jmax]
+            sol_r0_stack = _tridi_solve_batched_jmin0_lax_pretransposed(dlr0, dr0, dur0, rhs_r0_stack)
+        elif use_precomputed:
             sol_r0_stack = _tridi_solve_precomputed(
                 ar[:, 0, :], cr[:, 0, :], ir[:, 0, :], rhs_r0_stack
             )
         else:
-            sol_r0_stack = _tridi_solve_batched_jmin0(ar[:, 0, :], dr[:, 0, :], br[:, 0, :], rhs_r0_stack)
-        frcc_u = frcc_u.at[:jmax, 0, :].set(sol_r0_stack[..., 0])
-        frss_u = frss_u.at[:jmax, 0, :].set(sol_r0_stack[..., 1])
-        frsc_u = frsc_u.at[:jmax, 0, :].set(sol_r0_stack[..., 2])
-
-        rhs_z0_stack = jnp.stack([rhs_z[:, 0, :], rhs_zc[:, 0, :], rhs_zcc[:, 0, :]], axis=-1)
-        if use_precomputed:
+            sol_r0_stack = _tridi_solve_batched_jmin0(
+                ar[:, 0, :], dr[:, 0, :], br[:, 0, :], rhs_r0_stack, use_lax_tridi=use_lax_tridi
+            )
+        idx = 0
+        frcc_u = frcc_u.at[:jmax, 0, :].set(sol_r0_stack[..., idx])
+        idx += 1
+        if use_rss:
+            frss_u = frss_u.at[:jmax, 0, :].set(sol_r0_stack[..., idx])
+            idx += 1
+        if use_rsc:
+            frsc_u = frsc_u.at[:jmax, 0, :].set(sol_r0_stack[..., idx])
+            idx += 1
+        if use_rcs:
+            frcs_u = frcs_u.at[:jmax, 0, :].set(sol_r0_stack[..., idx])
+            idx += 1
+        rhs_z0_stack = rhs_z_stack[:, 0, :]
+        if use_lax_tridi and (dlz_t is not None) and (dz_t is not None) and (duz_t is not None):
+            dlz0 = dlz_t[0, :, :jmax]
+            dz0 = dz_t[0, :, :jmax]
+            duz0 = duz_t[0, :, :jmax]
+            sol_z0_stack = _tridi_solve_batched_jmin0_lax_pretransposed(dlz0, dz0, duz0, rhs_z0_stack)
+        elif use_precomputed:
             sol_z0_stack = _tridi_solve_precomputed(
                 az[:, 0, :], cz[:, 0, :], iz[:, 0, :], rhs_z0_stack
             )
         else:
-            sol_z0_stack = _tridi_solve_batched_jmin0(az[:, 0, :], dz[:, 0, :], bz[:, 0, :], rhs_z0_stack)
-        fzsc_u = fzsc_u.at[:jmax, 0, :].set(sol_z0_stack[..., 0])
-        fzcs_u = fzcs_u.at[:jmax, 0, :].set(sol_z0_stack[..., 1])
-        fzcc_u = fzcc_u.at[:jmax, 0, :].set(sol_z0_stack[..., 2])
+            sol_z0_stack = _tridi_solve_batched_jmin0(
+                az[:, 0, :], dz[:, 0, :], bz[:, 0, :], rhs_z0_stack, use_lax_tridi=use_lax_tridi
+            )
+        idx = 0
+        fzsc_u = fzsc_u.at[:jmax, 0, :].set(sol_z0_stack[..., idx])
+        idx += 1
+        if use_zcs:
+            fzcs_u = fzcs_u.at[:jmax, 0, :].set(sol_z0_stack[..., idx])
+            idx += 1
+        if use_zcc:
+            fzcc_u = fzcc_u.at[:jmax, 0, :].set(sol_z0_stack[..., idx])
+            idx += 1
+        if use_zss:
+            fzss_u = fzss_u.at[:jmax, 0, :].set(sol_z0_stack[..., idx])
+            idx += 1
 
+        sol_rm_full = None
+        sol_zm_full = None
         if mpol > 1 and jmax > 1:
             a_r = ar[1:jmax, 1:, :]
             d_r = dr[1:jmax, 1:, :]
@@ -775,33 +941,61 @@ def _rz_preconditioner_apply_arrays(
             d_z = dz[1:jmax, 1:, :]
             b_z = bz[1:jmax, 1:, :]
 
-            rhs_rm_stack = jnp.stack([rhs_r[1:, 1:, :], rhs_rs[1:, 1:, :], rhs_rsc[1:, 1:, :]], axis=-1)
-            if use_precomputed:
+            rhs_rm_stack = rhs_r_stack[1:, 1:, :]
+            if use_lax_tridi and (dlr_t is not None) and (dr_t is not None) and (dur_t is not None):
+                dlr_m = dlr_t[1:, :, : jmax - 1]
+                dr_m = dr_t[1:, :, : jmax - 1]
+                dur_m = dur_t[1:, :, : jmax - 1]
+                sol_rm = _tridi_solve_batched_jmin0_lax_pretransposed(dlr_m, dr_m, dur_m, rhs_rm_stack)
+            elif use_precomputed:
                 sol_rm = _tridi_solve_precomputed(
                     a_r, cr[1:jmax, 1:, :], ir[1:jmax, 1:, :], rhs_rm_stack
                 )
             else:
-                sol_rm = _tridi_solve_batched_jmin0(a_r, d_r, b_r, rhs_rm_stack)
+                sol_rm = _tridi_solve_batched_jmin0(a_r, d_r, b_r, rhs_rm_stack, use_lax_tridi=use_lax_tridi)
             pad_r = jnp.zeros((1, mpol - 1, nrange, sol_rm.shape[-1]), dtype=sol_rm.dtype)
             sol_rm_full = jnp.concatenate([pad_r, sol_rm], axis=0)
-            frcc_u = frcc_u.at[:jmax, 1:, :].set(sol_rm_full[..., 0])
-            frss_u = frss_u.at[:jmax, 1:, :].set(sol_rm_full[..., 1])
-            frsc_u = frsc_u.at[:jmax, 1:, :].set(sol_rm_full[..., 2])
+            idx = 0
+            frcc_u = frcc_u.at[:jmax, 1:, :].set(sol_rm_full[..., idx])
+            idx += 1
+            if use_rss:
+                frss_u = frss_u.at[:jmax, 1:, :].set(sol_rm_full[..., idx])
+                idx += 1
+            if use_rsc:
+                frsc_u = frsc_u.at[:jmax, 1:, :].set(sol_rm_full[..., idx])
+                idx += 1
+            if use_rcs:
+                frcs_u = frcs_u.at[:jmax, 1:, :].set(sol_rm_full[..., idx])
+                idx += 1
 
-            rhs_zm_stack = jnp.stack([rhs_z[1:, 1:, :], rhs_zc[1:, 1:, :], rhs_zcc[1:, 1:, :]], axis=-1)
-            if use_precomputed:
+            rhs_zm_stack = rhs_z_stack[1:, 1:, :]
+            if use_lax_tridi and (dlz_t is not None) and (dz_t is not None) and (duz_t is not None):
+                dlz_m = dlz_t[1:, :, : jmax - 1]
+                dz_m = dz_t[1:, :, : jmax - 1]
+                duz_m = duz_t[1:, :, : jmax - 1]
+                sol_zm = _tridi_solve_batched_jmin0_lax_pretransposed(dlz_m, dz_m, duz_m, rhs_zm_stack)
+            elif use_precomputed:
                 sol_zm = _tridi_solve_precomputed(
                     a_z, cz[1:jmax, 1:, :], iz[1:jmax, 1:, :], rhs_zm_stack
                 )
             else:
-                sol_zm = _tridi_solve_batched_jmin0(a_z, d_z, b_z, rhs_zm_stack)
+                sol_zm = _tridi_solve_batched_jmin0(a_z, d_z, b_z, rhs_zm_stack, use_lax_tridi=use_lax_tridi)
             pad_z = jnp.zeros((1, mpol - 1, nrange, sol_zm.shape[-1]), dtype=sol_zm.dtype)
             sol_zm_full = jnp.concatenate([pad_z, sol_zm], axis=0)
-            fzsc_u = fzsc_u.at[:jmax, 1:, :].set(sol_zm_full[..., 0])
-            fzcs_u = fzcs_u.at[:jmax, 1:, :].set(sol_zm_full[..., 1])
-            fzcc_u = fzcc_u.at[:jmax, 1:, :].set(sol_zm_full[..., 2])
+            idx = 0
+            fzsc_u = fzsc_u.at[:jmax, 1:, :].set(sol_zm_full[..., idx])
+            idx += 1
+            if use_zcs:
+                fzcs_u = fzcs_u.at[:jmax, 1:, :].set(sol_zm_full[..., idx])
+                idx += 1
+            if use_zcc:
+                fzcc_u = fzcc_u.at[:jmax, 1:, :].set(sol_zm_full[..., idx])
+                idx += 1
+            if use_zss:
+                fzss_u = fzss_u.at[:jmax, 1:, :].set(sol_zm_full[..., idx])
+                idx += 1
 
-    return frcc_u, frss_u, fzsc_u, fzcs_u, frsc_u, fzcc_u
+    return frcc_u, frss_u, fzsc_u, fzcs_u, frsc_u, frcs_u, fzcc_u, fzss_u
 
 
 def rz_preconditioner_apply(
@@ -810,6 +1004,8 @@ def rz_preconditioner_apply(
     mats: dict[str, Any],
     jmax: int,
     cfg,
+    use_precomputed: bool | None = None,
+    use_lax_tridi: bool | None = None,
 ) -> TomnspsRZL:
     """Apply cached VMEC R/Z preconditioner matrices.
 
@@ -817,9 +1013,6 @@ def rz_preconditioner_apply(
     split out so callers (e.g. VMEC2000-style cached preconditioners) can
     reuse matrices across iterations without recomputing them.
     """
-    if bool(cfg.lasym):
-        return frzl_in
-
     ar = mats["ar"]
     br = mats["br"]
     dr = mats["dr"]
@@ -830,25 +1023,52 @@ def rz_preconditioner_apply(
     dz = mats["dz"]
     cz = mats.get("cz", az)
     iz = mats.get("iz", dz)
+    dlr_t = mats.get("dlr_t", None)
+    dr_t = mats.get("dr_t", None)
+    dur_t = mats.get("dur_t", None)
+    dlz_t = mats.get("dlz_t", None)
+    dz_t = mats.get("dz_t", None)
+    duz_t = mats.get("duz_t", None)
 
     frcc = jnp.asarray(frzl_in.frcc)
     fzsc = jnp.asarray(frzl_in.fzsc)
     frss = jnp.asarray(frzl_in.frss) if frzl_in.frss is not None else jnp.zeros_like(frcc)
     fzcs = jnp.asarray(frzl_in.fzcs) if frzl_in.fzcs is not None else jnp.zeros_like(fzsc)
     frsc = jnp.asarray(getattr(frzl_in, "frsc", None)) if getattr(frzl_in, "frsc", None) is not None else jnp.zeros_like(frcc)
+    frcs = jnp.asarray(getattr(frzl_in, "frcs", None)) if getattr(frzl_in, "frcs", None) is not None else jnp.zeros_like(frcc)
     fzcc = jnp.asarray(getattr(frzl_in, "fzcc", None)) if getattr(frzl_in, "fzcc", None) is not None else jnp.zeros_like(fzsc)
+    fzss = jnp.asarray(getattr(frzl_in, "fzss", None)) if getattr(frzl_in, "fzss", None) is not None else jnp.zeros_like(fzsc)
+
+    lthreed = bool(getattr(cfg, "lthreed", False))
+    lasym = bool(getattr(cfg, "lasym", False))
+    use_rss = bool(lthreed)
+    use_rsc = bool(lasym)
+    use_rcs = bool(lthreed and lasym)
+    use_zcs = bool(lthreed)
+    use_zcc = bool(lasym)
+    use_zss = bool(lthreed and lasym)
 
     # NOTE: precomputed Thomas coefficients have shown parity drift in some
     # cases; default to the direct solver unless explicitly enabled.
-    use_precomputed = os.getenv("VMEC_JAX_TRIDI_PRECOMPUTE", "0").strip().lower() not in (
-        "",
-        "0",
-        "false",
-        "no",
-    )
+    if use_precomputed is None:
+        use_precomputed = os.getenv("VMEC_JAX_TRIDI_PRECOMPUTE", "0").strip().lower() not in (
+            "",
+            "0",
+            "false",
+            "no",
+        )
     if ("cr" not in mats) or ("ir" not in mats) or ("cz" not in mats) or ("iz" not in mats):
         use_precomputed = False
-    frcc_u, frss_u, fzsc_u, fzcs_u, frsc_u, fzcc_u = _rz_preconditioner_apply_arrays(
+    if use_lax_tridi is None:
+        use_lax_tridi = os.getenv("VMEC_JAX_TRIDI_SOLVE", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "lax",
+            "force",
+        )
+
+    frcc_u, frss_u, fzsc_u, fzcs_u, frsc_u, frcs_u, fzcc_u, fzss_u = _rz_preconditioner_apply_arrays(
         ar=ar,
         br=br,
         dr=dr,
@@ -859,20 +1079,37 @@ def rz_preconditioner_apply(
         dz=dz,
         cz=cz,
         iz=iz,
+        dlr_t=dlr_t,
+        dr_t=dr_t,
+        dur_t=dur_t,
+        dlz_t=dlz_t,
+        dz_t=dz_t,
+        duz_t=duz_t,
         frcc=frcc,
         frss=frss,
         fzsc=fzsc,
         fzcs=fzcs,
         frsc=frsc,
+        frcs=frcs,
         fzcc=fzcc,
+        fzss=fzss,
         jmax=int(jmax),
         use_precomputed=bool(use_precomputed),
+        use_lax_tridi=bool(use_lax_tridi),
+        use_rss=bool(use_rss),
+        use_rsc=bool(use_rsc),
+        use_rcs=bool(use_rcs),
+        use_zcs=bool(use_zcs),
+        use_zcc=bool(use_zcc),
+        use_zss=bool(use_zss),
     )
 
     frss_out = frss_u if frzl_in.frss is not None else None
     fzcs_out = fzcs_u if frzl_in.fzcs is not None else None
     frsc_out = frsc_u if getattr(frzl_in, "frsc", None) is not None else None
+    frcs_out = frcs_u if getattr(frzl_in, "frcs", None) is not None else None
     fzcc_out = fzcc_u if getattr(frzl_in, "fzcc", None) is not None else None
+    fzss_out = fzss_u if getattr(frzl_in, "fzss", None) is not None else None
 
     return TomnspsRZL(
         frcc=frcc_u,
@@ -882,9 +1119,9 @@ def rz_preconditioner_apply(
         flsc=frzl_in.flsc,
         flcs=frzl_in.flcs,
         frsc=frsc_out,
-        frcs=getattr(frzl_in, "frcs", None),
+        frcs=frcs_out,
         fzcc=fzcc_out,
-        fzss=getattr(frzl_in, "fzss", None),
+        fzss=fzss_out,
         flcc=getattr(frzl_in, "flcc", None),
         flss=getattr(frzl_in, "flss", None),
     )
@@ -900,7 +1137,5 @@ def rz_preconditioner(
     cfg,
 ) -> TomnspsRZL:
     """Apply the VMEC R/Z radial preconditioner in JAX."""
-    if bool(cfg.lasym):
-        return frzl_in
     mats, _jmin, jmax = rz_preconditioner_matrices(bc=bc, k=k, trig=trig, s=s, cfg=cfg)
     return rz_preconditioner_apply(frzl_in=frzl_in, mats=mats, jmax=jmax, cfg=cfg)
