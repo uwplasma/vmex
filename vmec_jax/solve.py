@@ -102,6 +102,12 @@ class _ScanCarry(NamedTuple):
     vZcs: Any
     vLsc: Any
     vLcs: Any
+    vRsc: Any
+    vRcs: Any
+    vZcc: Any
+    vZss: Any
+    vLcc: Any
+    vLss: Any
     flip_sign: Any
     iter_offset: Any
     iter1: Any
@@ -560,8 +566,9 @@ def _maybe_dump_lam_gcl(
     gcl_pre = np.asarray(gcl_pre)
     gcl_post = np.asarray(gcl_post)
     delta_s_f = float(np.asarray(delta_s))
-    fsql1_pre = float(np.sum(gcl_pre * gcl_pre) * delta_s_f)
-    fsql1_post = float(np.sum(gcl_post * gcl_post) * delta_s_f)
+    # VMEC excludes the axis surface (js=1) from fsql1 sums.
+    fsql1_pre = float(np.sum(gcl_pre[1:] * gcl_pre[1:]) * delta_s_f)
+    fsql1_post = float(np.sum(gcl_post[1:] * gcl_post[1:]) * delta_s_f)
 
     _maybe_dump_lam_fsql1(
         fsql1_pre=fsql1_pre,
@@ -752,11 +759,38 @@ def _maybe_dump_bsubs(*, bc, state, static, trig, iter_idx: int, kernels=None) -
     ns = int(static.cfg.ns)
     path = outdir / f"bsubs_ns{ns}_iter{int(iter_idx)}.npz"
 
-    from .wout import _compute_bsubs_half_mesh
+    from .wout import _compute_bsubs_half_mesh, _vmec_symforce_apply
 
     s = np.asarray(static.s, dtype=float)
     bsupu = np.asarray(bc.bsupu)
     bsupv = np.asarray(bc.bsupv)
+    force_rs = None
+    force_zs = None
+    force_ru12 = None
+    force_zu12 = None
+    _force_bss_env = os.getenv("VMEC_JAX_WOUT_FORCE_BSS", "").strip().lower()
+    if _force_bss_env == "":
+        use_force_bss = not bool(static.cfg.lasym)
+    else:
+        use_force_bss = _force_bss_env not in ("0", "false", "no")
+    def _force_sym(arr, kind: str):
+        arr_np = np.asarray(arr, dtype=float)
+        if not bool(static.cfg.lasym):
+            return arr_np
+        return _vmec_symforce_apply(f=arr_np, trig=trig, kind=kind)
+    if use_force_bss and kernels is not None:
+        if hasattr(kernels, "crmn_e"):
+            bsupu = _force_sym(getattr(kernels, "crmn_e"), "crs")
+        if hasattr(kernels, "czmn_e"):
+            bsupv = _force_sym(getattr(kernels, "czmn_e"), "czs")
+        if hasattr(kernels, "bzmn_e"):
+            force_rs = _force_sym(getattr(kernels, "bzmn_e"), "bzs")
+        if hasattr(kernels, "brmn_e"):
+            force_zs = _force_sym(getattr(kernels, "brmn_e"), "brs")
+        if hasattr(kernels, "azmn_e"):
+            force_ru12 = _force_sym(getattr(kernels, "azmn_e"), "azs")
+        if hasattr(kernels, "armn_e"):
+            force_zu12 = _force_sym(getattr(kernels, "armn_e"), "ars")
     bsubu = np.asarray(bc.bsubu)
     bsubv = np.asarray(bc.bsubv)
     sqrtg = np.asarray(bc.jac.sqrtg)
@@ -792,6 +826,10 @@ def _maybe_dump_bsubs(*, bc, state, static, trig, iter_idx: int, kernels=None) -
         trig=trig,
         geom=geom_terms,
         jac_half=bc.jac,
+        force_rs=force_rs,
+        force_zs=force_zs,
+        force_ru12=force_ru12,
+        force_zu12=force_zu12,
     )
     bsubs_full = np.asarray(bsubs_half, dtype=float).copy()
     if ns > 2:
@@ -992,24 +1030,35 @@ def _maybe_dump_xc(
     from .diagnostics import vmec_internal_mn_from_state, vmec_xc_from_mn_blocks
 
     blocks = vmec_internal_mn_from_state(state, static, apply_basis_norm=False, apply_m1_constraint=False)
-    xc = vmec_xc_from_mn_blocks(
+    xc_kwargs = dict(
         rcc=blocks["rcc"],
         rss=blocks["rss"],
         zsc=blocks["zsc"],
         zcs=blocks["zcs"],
         lsc=blocks["lsc"],
         lcs=blocks["lcs"],
-        cfg=static.cfg,
     )
-    xcdot = vmec_xc_from_mn_blocks(
+    if "rsc" in blocks:
+        xc_kwargs.update(
+            rsc=blocks.get("rsc"),
+            rcs=blocks.get("rcs"),
+            zcc=blocks.get("zcc"),
+            zss=blocks.get("zss"),
+            lcc=blocks.get("lcc"),
+            lss=blocks.get("lss"),
+        )
+    xc = vmec_xc_from_mn_blocks(cfg=static.cfg, **xc_kwargs)
+
+    xcdot_kwargs = dict(
         rcc=np.asarray(vRcc),
         rss=np.asarray(vRss),
         zsc=np.asarray(vZsc),
         zcs=np.asarray(vZcs),
         lsc=np.asarray(vLsc),
         lcs=np.asarray(vLcs),
-        cfg=static.cfg,
     )
+    # Asymmetric force channels are optional in dumps; default to zeros.
+    xcdot = vmec_xc_from_mn_blocks(cfg=static.cfg, **xcdot_kwargs)
     np.savez(
         path,
         xc=np.asarray(xc),
@@ -3136,6 +3185,7 @@ def solve_fixed_boundary_residual_iter(
     use_scan: bool = False,
     precompile_only: bool = False,
     resume_state: dict | None = None,
+    scan_minimal_default: bool | None = None,
 ) -> SolveVmecResidualResult:
     """VMEC-style fixed-point update loop using preconditioned force residuals."""
     if not has_jax():
@@ -3253,10 +3303,11 @@ def solve_fixed_boundary_residual_iter(
     jit_forces = bool(jit_forces)
     use_scan = bool(use_scan)
     # Default to chunked scan to reduce per-iteration host sync overhead.
+    # Respect explicit non-scan requests (e.g., parity comparators).
     chunked_device_env = os.getenv("VMEC_JAX_VMEC2000_CHUNKED", "1").strip().lower()
     force_chunked_scan = chunked_device_env not in ("", "0", "false", "no")
-    if force_chunked_scan and bool(vmec2000_control):
-        use_scan = True
+    if force_chunked_scan and (not use_scan):
+        force_chunked_scan = False
     limit_dt_from_force = bool(limit_dt_from_force)
     limit_update_rms = bool(limit_update_rms)
     backtracking = bool(backtracking)
@@ -3283,11 +3334,12 @@ def solve_fixed_boundary_residual_iter(
         "VMEC_JAX_DUMP_LAM_GCL",
     )
     dumps_enabled = any(os.getenv(name, "") not in ("", "0") for name in heavy_dump_envs)
+    dump_any = dumps_enabled or any(os.getenv(name, "") not in ("", "0") for name in light_dump_envs)
     if dumps_enabled and jit_forces:
         if verbose:
             print("[solve_fixed_boundary_residual_iter] jit_forces disabled (debug dumps enabled)")
         jit_forces = False
-    if dumps_enabled:
+    if dump_any:
         # Force full histories when parity dumps are enabled.
         light_history = False
     track_history = not light_history
@@ -3695,11 +3747,10 @@ def solve_fixed_boundary_residual_iter(
     def _apply_radial_tridi_batched(arrs, alpha: float):
         if alpha <= 0.0:
             return tuple(arrs)
-        stack = jnp.stack(arrs, axis=0)  # (B, ns, ...)
-        stack = jnp.swapaxes(stack, 0, 1)  # (ns, B, ...)
+        # Stack directly into (ns, B, ...) to avoid swapaxes.
+        stack = jnp.stack(arrs, axis=1)
         smooth = _tridi_smooth_dirichlet(stack, alpha=alpha)
-        smooth = jnp.swapaxes(smooth, 0, 1)
-        return tuple(smooth[i] for i in range(int(smooth.shape[0])))
+        return tuple(smooth[:, i] for i in range(int(smooth.shape[1])))
 
     def _tridi_smooth_dirichlet(rhs, *, alpha: float):
         """Dirichlet tridiagonal smoother along s for fixed-point updates."""
@@ -4706,6 +4757,12 @@ def solve_fixed_boundary_residual_iter(
         cs = jnp.asarray(cs) / scalxc_mn if cs is not None else None
         return _mn_sin_to_signed(sc, cs)
 
+    def _mn_cos_to_signed_physical_lambda(cc, ss):
+        """Map asymmetric lambda updates onto signed physical coefficients (VMEC scalxc)."""
+        cc = jnp.asarray(cc) / scalxc_mn
+        ss = jnp.asarray(ss) / scalxc_mn if ss is not None else None
+        return _mn_cos_to_signed(cc, ss)
+
     def _mn_sin_to_signed_physical_batch(sc, cs):
         sc = jnp.asarray(sc) / scalxc_mn
         if cs is None:
@@ -4810,8 +4867,6 @@ def solve_fixed_boundary_residual_iter(
             stage_prev_fsq_j = None
 
     def _run_vmec2000_scan(state_init: VMECState) -> SolveVmecResidualResult:
-        if bool(cfg.lasym):
-            raise ValueError("vmec2000 scan does not yet support lasym=True.")
         if backtracking or limit_dt_from_force or limit_update_rms or use_direct_fallback or reference_mode:
             raise ValueError(
                 "vmec2000 scan requires backtracking=False, limit_dt_from_force=False, "
@@ -4843,9 +4898,14 @@ def solve_fixed_boundary_residual_iter(
         scan_minimal_env = os.getenv("VMEC_JAX_SCAN_MINIMAL", "").strip().lower()
         if scan_minimal_env:
             scan_minimal = scan_minimal_env not in ("", "0", "false", "no")
+        elif scan_minimal_default is not None:
+            scan_minimal = bool(scan_minimal_default)
         else:
             # Quiet runs default to the minimal scan history to reduce host traffic.
             scan_minimal = not bool(verbose)
+        if dump_any:
+            scan_minimal = False
+            scan_light = False
         scan_collect_scalars = not scan_minimal
         scan_collect_print = (
             bool(verbose)
@@ -4859,6 +4919,27 @@ def solve_fixed_boundary_residual_iter(
         scan_trace = scan_trace_env not in ("", "0", "false", "no")
         abort_scan_env = os.getenv("VMEC_JAX_SCAN_ABORT_ON_BADJAC", "0").strip().lower()
         abort_scan_on_badjac = abort_scan_env not in ("", "0", "false", "no")
+        scan_precompute_env = os.getenv("VMEC_JAX_SCAN_PRECOND_PRECOMPUTE", "").strip().lower()
+        if scan_precompute_env:
+            scan_use_precomputed = scan_precompute_env not in ("", "0", "false", "no")
+        else:
+            scan_use_precomputed = os.getenv("VMEC_JAX_TRIDI_PRECOMPUTE", "0").strip().lower() not in (
+                "",
+                "0",
+                "false",
+                "no",
+            )
+        scan_lax_env = os.getenv("VMEC_JAX_SCAN_PRECOND_LAXTRIDI", "").strip().lower()
+        if scan_lax_env:
+            scan_use_lax_tridi = scan_lax_env not in ("", "0", "false", "no")
+        else:
+            scan_use_lax_tridi = os.getenv("VMEC_JAX_TRIDI_SOLVE", "").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+                "lax",
+                "force",
+            )
         dump_timecontrol_scan = os.getenv("VMEC_JAX_DUMP_TIMECONTROL", "") not in ("", "0")
         scan_timecontrol_callback = None
         if dump_timecontrol_scan:
@@ -5079,6 +5160,12 @@ def solve_fixed_boundary_residual_iter(
         vZcs0 = jnp.zeros_like(vRcc0)
         vLsc0 = jnp.zeros_like(vRcc0)
         vLcs0 = jnp.zeros_like(vRcc0)
+        vRsc0 = jnp.zeros_like(vRcc0)
+        vRcs0 = jnp.zeros_like(vRcc0)
+        vZcc0 = jnp.zeros_like(vRcc0)
+        vZss0 = jnp.zeros_like(vRcc0)
+        vLcc0 = jnp.zeros_like(vRcc0)
+        vLss0 = jnp.zeros_like(vRcc0)
         r00_prev0 = jnp.asarray(0.0, dtype=dtype)
         z00_prev0 = jnp.asarray(0.0, dtype=dtype)
         w_mhd_prev0 = jnp.asarray(0.0, dtype=dtype)
@@ -5138,6 +5225,12 @@ def solve_fixed_boundary_residual_iter(
                 vZcs0 = jnp.asarray(resume_state.get("vZcs", vZcs0), dtype=dtype)
                 vLsc0 = jnp.asarray(resume_state.get("vLsc", vLsc0), dtype=dtype)
                 vLcs0 = jnp.asarray(resume_state.get("vLcs", vLcs0), dtype=dtype)
+                vRsc0 = jnp.asarray(resume_state.get("vRsc", vRsc0), dtype=dtype)
+                vRcs0 = jnp.asarray(resume_state.get("vRcs", vRcs0), dtype=dtype)
+                vZcc0 = jnp.asarray(resume_state.get("vZcc", vZcc0), dtype=dtype)
+                vZss0 = jnp.asarray(resume_state.get("vZss", vZss0), dtype=dtype)
+                vLcc0 = jnp.asarray(resume_state.get("vLcc", vLcc0), dtype=dtype)
+                vLss0 = jnp.asarray(resume_state.get("vLss", vLss0), dtype=dtype)
             try:
                 force_bcovar0 = jnp.asarray(
                     bool(resume_state.get("force_bcovar_update", bool(force_bcovar0))), dtype=bool
@@ -5351,7 +5444,13 @@ def solve_fixed_boundary_residual_iter(
         from .preconditioner_1d_jax import rz_preconditioner_matrices
 
         cache_lam_prec0 = _lambda_preconditioner(k0.bc)
-        cache_rz_mats0, _jmin0, jmax0 = rz_preconditioner_matrices(bc=k0.bc, k=k0, trig=trig, s=s, cfg=cfg)
+        cache_rz_mats0, _jmin0, jmax0 = rz_preconditioner_matrices(
+            bc=k0.bc,
+            k=k0,
+            trig=trig,
+            s=s,
+            cfg=cfg,
+        )
         jmax0 = int(jmax0)
 
         if resume_state is not None:
@@ -5397,6 +5496,12 @@ def solve_fixed_boundary_residual_iter(
 
         scan_jax_debug = _jax_debug
         scan_jax_debug_print = _jax_debug_print
+        scan_debug_force = os.getenv("VMEC_JAX_SCAN_DEBUG_FORCE", "") not in ("", "0")
+        debug_iter_env = os.getenv("VMEC_JAX_SCAN_DEBUG_ITER", "").strip()
+        try:
+            scan_debug_iter = int(debug_iter_env) if debug_iter_env else -1
+        except Exception:
+            scan_debug_iter = -1
 
         def _scan_step(carry: _ScanCarry, it):
             def _hold_step(carry_hold: _ScanCarry):
@@ -5498,7 +5603,7 @@ def solve_fixed_boundary_residual_iter(
                 fsqr = norms_used.r1 * norms_used.fnorm * gcr2
                 fsqz = norms_used.r1 * norms_used.fnorm * gcz2
                 fsql = norms_used.fnormL * gcl2
-                if os.getenv("VMEC_JAX_SCAN_DEBUG_FORCE", "") not in ("", "0"):
+                if scan_debug_force:
                     try:
                         from jax import debug as _jax_debug  # type: ignore
                     except Exception:
@@ -5536,53 +5641,47 @@ def solve_fixed_boundary_residual_iter(
                             )
                             return 0
                         _ = jax.lax.cond(iter2 == 1, _dbg, lambda _: 0, operand=None)
-                debug_iter_env = os.getenv("VMEC_JAX_SCAN_DEBUG_ITER", "").strip()
-                if debug_iter_env:
+                if scan_debug_iter > 0:
                     try:
-                        debug_iter = int(debug_iter_env)
+                        from jax import debug as _jax_debug_state  # type: ignore
                     except Exception:
-                        debug_iter = -1
-                    if debug_iter > 0:
-                        try:
-                            from jax import debug as _jax_debug_state  # type: ignore
-                        except Exception:
-                            _jax_debug_state = None  # type: ignore
-                        if _jax_debug_state is not None:
-                            def _dbg_state(_):
-                                rcos_sum = jnp.sum(carry_adv.state.Rcos)
-                                zsin_sum = jnp.sum(carry_adv.state.Zsin)
-                                lsin_sum = jnp.sum(carry_adv.state.Lsin)
-                                rcos_ck = jnp.sum(carry_adv.state_checkpoint.Rcos)
-                                zsin_ck = jnp.sum(carry_adv.state_checkpoint.Zsin)
-                                lsin_ck = jnp.sum(carry_adv.state_checkpoint.Lsin)
-                                fsqr_dbg = norms_used.r1 * norms_used.fnorm * gcr2
-                                fsqz_dbg = norms_used.r1 * norms_used.fnorm * gcz2
-                                fsql_dbg = norms_used.fnormL * gcl2
-                                _jax_debug_state.print(
-                                    "[scan-state] iter={i} rcos_sum={rc:.6e} zsin_sum={zs:.6e} lsin_sum={ls:.6e} "
-                                    "rcos_ck={rck:.6e} zsin_ck={zck:.6e} lsin_ck={lck:.6e} "
-                                    "use_cached={uc} need_bcovar={nb} gcr2={gcr:.6e} gcz2={gcz:.6e} gcl2={gcl:.6e} "
-                                    "fnorm={fn:.6e} r1={r1:.6e} fsqr={fsqr:.6e} fsqz={fsqz:.6e} fsql={fsql:.6e}",
-                                    i=iter2,
-                                    rc=rcos_sum,
-                                    zs=zsin_sum,
-                                    ls=lsin_sum,
-                                    rck=rcos_ck,
-                                    zck=zsin_ck,
-                                    lck=lsin_ck,
-                                    uc=jnp.asarray(use_cached_precond, dtype=jnp.int32),
-                                    nb=jnp.asarray(need_bcovar_update, dtype=jnp.int32),
-                                    gcr=gcr2,
-                                    gcz=gcz2,
-                                    gcl=gcl2,
-                                    fn=norms_used.fnorm,
-                                    r1=norms_used.r1,
-                                    fsqr=fsqr_dbg,
-                                    fsqz=fsqz_dbg,
-                                    fsql=fsql_dbg,
-                                )
-                                return 0
-                            _ = jax.lax.cond(iter2 == debug_iter, _dbg_state, lambda _: 0, operand=None)
+                        _jax_debug_state = None  # type: ignore
+                    if _jax_debug_state is not None:
+                        def _dbg_state(_):
+                            rcos_sum = jnp.sum(carry_adv.state.Rcos)
+                            zsin_sum = jnp.sum(carry_adv.state.Zsin)
+                            lsin_sum = jnp.sum(carry_adv.state.Lsin)
+                            rcos_ck = jnp.sum(carry_adv.state_checkpoint.Rcos)
+                            zsin_ck = jnp.sum(carry_adv.state_checkpoint.Zsin)
+                            lsin_ck = jnp.sum(carry_adv.state_checkpoint.Lsin)
+                            fsqr_dbg = norms_used.r1 * norms_used.fnorm * gcr2
+                            fsqz_dbg = norms_used.r1 * norms_used.fnorm * gcz2
+                            fsql_dbg = norms_used.fnormL * gcl2
+                            _jax_debug_state.print(
+                                "[scan-state] iter={i} rcos_sum={rc:.6e} zsin_sum={zs:.6e} lsin_sum={ls:.6e} "
+                                "rcos_ck={rck:.6e} zsin_ck={zck:.6e} lsin_ck={lck:.6e} "
+                                "use_cached={uc} need_bcovar={nb} gcr2={gcr:.6e} gcz2={gcz:.6e} gcl2={gcl:.6e} "
+                                "fnorm={fn:.6e} r1={r1:.6e} fsqr={fsqr:.6e} fsqz={fsqz:.6e} fsql={fsql:.6e}",
+                                i=iter2,
+                                rc=rcos_sum,
+                                zs=zsin_sum,
+                                ls=lsin_sum,
+                                rck=rcos_ck,
+                                zck=zsin_ck,
+                                lck=lsin_ck,
+                                uc=jnp.asarray(use_cached_precond, dtype=jnp.int32),
+                                nb=jnp.asarray(need_bcovar_update, dtype=jnp.int32),
+                                gcr=gcr2,
+                                gcz=gcz2,
+                                gcl=gcl2,
+                                fn=norms_used.fnorm,
+                                r1=norms_used.r1,
+                                fsqr=fsqr_dbg,
+                                fsqz=fsqz_dbg,
+                                fsql=fsql_dbg,
+                            )
+                            return 0
+                        _ = jax.lax.cond(iter2 == scan_debug_iter, _dbg_state, lambda _: 0, operand=None)
                 conv_now = (fsqr <= ftol_j) & (fsqz <= ftol_j) & (fsql <= ftol_j)
                 # Scalars for VMEC-style screen output (sampled on NSTEP cadence + convergence).
                 sample_vmec = (
@@ -5592,7 +5691,10 @@ def solve_fixed_boundary_residual_iter(
 
                 def _compute_scalars(_):
                     r00_j = jnp.asarray(k.pr1_even)[0, 0, 0]
-                    z00_j = jnp.asarray(0.0, dtype=r00_j.dtype)
+                    if bool(cfg.lasym):
+                        z00_j = jnp.asarray(k.pz1_even)[0, 0, 0]
+                    else:
+                        z00_j = jnp.asarray(0.0, dtype=r00_j.dtype)
                     # `norms_current` already reflects the current bcovar state.
                     wb_val = jnp.asarray(norms_current.wb)
                     wp_val = jnp.asarray(norms_current.wp)
@@ -5631,7 +5733,13 @@ def solve_fixed_boundary_residual_iter(
                     from .preconditioner_1d_jax import rz_preconditioner_matrices
 
                     cache_lam_prec = _lambda_preconditioner(k.bc)
-                    mats, _jmin, jmax = rz_preconditioner_matrices(bc=k.bc, k=k, trig=trig, s=s, cfg=cfg)
+                    mats, _jmin, jmax = rz_preconditioner_matrices(
+                        bc=k.bc,
+                        k=k,
+                        trig=trig,
+                        s=s,
+                        cfg=cfg,
+                    )
                     # jmax is constant for fixed ns; reuse the static jmax0
                     return (
                         cache_precond_diag,
@@ -5676,10 +5784,6 @@ def solve_fixed_boundary_residual_iter(
                 frzl_rhs = _scale_m1_precond_rhs(frzl, cache_rz_mats)
                 from .preconditioner_1d_jax import rz_preconditioner_apply
 
-                scan_precompute_env = os.getenv("VMEC_JAX_SCAN_PRECOND_PRECOMPUTE", "0").strip().lower()
-                scan_use_precomputed = scan_precompute_env not in ("", "0", "false", "no")
-                scan_lax_env = os.getenv("VMEC_JAX_SCAN_PRECOND_LAXTRIDI", "0").strip().lower()
-                scan_use_lax_tridi = scan_lax_env not in ("", "0", "false", "no")
                 frzl_rz = rz_preconditioner_apply(
                     frzl_in=frzl_rhs,
                     mats=cache_rz_mats,
@@ -5694,6 +5798,24 @@ def solve_fixed_boundary_residual_iter(
                 fzcs = frzl_rz.fzcs if frzl_rz.fzcs is not None else jnp.zeros_like(fzsc)
                 flsc = jnp.asarray(frzl_rz.flsc) * jnp.asarray(cache_lam_prec)
                 flcs = None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * jnp.asarray(cache_lam_prec))
+                frsc = jnp.zeros_like(frcc)
+                frcs = jnp.zeros_like(frcc)
+                fzcc = jnp.zeros_like(fzsc)
+                fzss = jnp.zeros_like(fzsc)
+                flcc = jnp.zeros_like(flsc)
+                flss = jnp.zeros_like(flsc)
+                if getattr(frzl_rz, "frsc", None) is not None:
+                    frsc = jnp.asarray(frzl_rz.frsc)
+                if getattr(frzl_rz, "frcs", None) is not None:
+                    frcs = jnp.asarray(frzl_rz.frcs)
+                if getattr(frzl_rz, "fzcc", None) is not None:
+                    fzcc = jnp.asarray(frzl_rz.fzcc)
+                if getattr(frzl_rz, "fzss", None) is not None:
+                    fzss = jnp.asarray(frzl_rz.fzss)
+                if getattr(frzl_rz, "flcc", None) is not None:
+                    flcc = jnp.asarray(frzl_rz.flcc) * jnp.asarray(cache_lam_prec)
+                if getattr(frzl_rz, "flss", None) is not None:
+                    flss = jnp.asarray(frzl_rz.flss) * jnp.asarray(cache_lam_prec)
 
                 frcc_u = frcc * w_mode_mn[None, :, :]
                 frss_u = frss * w_mode_mn[None, :, :]
@@ -5701,9 +5823,17 @@ def solve_fixed_boundary_residual_iter(
                 fzcs_u = fzcs * w_mode_mn[None, :, :]
                 flsc_u = flsc * w_mode_mn[None, :, :]
                 flcs_u = (flcs if flcs is not None else jnp.zeros_like(flsc_u)) * w_mode_mn[None, :, :]
+                frsc_u = frsc * w_mode_mn[None, :, :]
+                frcs_u = frcs * w_mode_mn[None, :, :]
+                fzcc_u = fzcc * w_mode_mn[None, :, :]
+                fzss_u = fzss * w_mode_mn[None, :, :]
+                flcc_u = flcc * w_mode_mn[None, :, :]
+                flss_u = flss * w_mode_mn[None, :, :]
                 if lambda_update_scale != 1.0:
                     flsc_u = flsc_u * lambda_update_scale_j
                     flcs_u = flcs_u * lambda_update_scale_j
+                    flcc_u = flcc_u * lambda_update_scale_j
+                    flss_u = flss_u * lambda_update_scale_j
 
                 gcr2_p, gcz2_p, gcl2_p = vmec_gcx2_from_tomnsps(
                     frzl=TomnspsRZL(
@@ -5713,6 +5843,12 @@ def solve_fixed_boundary_residual_iter(
                         fzcs=fzcs,
                         flsc=flsc,
                         flcs=flcs,
+                        frsc=frsc,
+                        frcs=frcs,
+                        fzcc=fzcc,
+                        fzss=fzss,
+                        flcc=flcc,
+                        flss=flss,
                     ),
                     lconm1=bool(getattr(static.cfg, "lconm1", True)),
                     apply_m1_constraints=False,
@@ -5728,13 +5864,16 @@ def solve_fixed_boundary_residual_iter(
                 )
                 fsqr1 = gcr2_p * f_norm1
                 fsqz1 = gcz2_p * f_norm1
-                gcl2_full = jnp.sum(flsc * flsc)
+                # VMEC excludes the axis surface (js=1) from fsql1 sums.
+                gcl2_full = jnp.sum(flsc[1:] * flsc[1:])
                 if flcs is not None:
-                    gcl2_full = gcl2_full + jnp.sum(flcs * flcs)
+                    gcl2_full = gcl2_full + jnp.sum(flcs[1:] * flcs[1:])
                 if getattr(frzl, "flcc", None) is not None:
-                    gcl2_full = gcl2_full + jnp.sum(jnp.asarray(frzl.flcc) ** 2)
+                    flcc = jnp.asarray(frzl.flcc)
+                    gcl2_full = gcl2_full + jnp.sum(flcc[1:] * flcc[1:])
                 if getattr(frzl, "flss", None) is not None:
-                    gcl2_full = gcl2_full + jnp.sum(jnp.asarray(frzl.flss) ** 2)
+                    flss = jnp.asarray(frzl.flss)
+                    gcl2_full = gcl2_full + jnp.sum(flss[1:] * flss[1:])
                 fsql1 = gcl2_full * delta_s
                 fsq1 = fsqr1 + fsqz1 + fsql1
 
@@ -6103,6 +6242,12 @@ def solve_fixed_boundary_residual_iter(
                     vZcs = jnp.zeros_like(carry_adv.vZcs)
                     vLsc = jnp.zeros_like(carry_adv.vLsc)
                     vLcs = jnp.zeros_like(carry_adv.vLcs)
+                    vRsc = jnp.zeros_like(carry_adv.vRcc)
+                    vRcs = jnp.zeros_like(carry_adv.vRcc)
+                    vZcc = jnp.zeros_like(carry_adv.vRcc)
+                    vZss = jnp.zeros_like(carry_adv.vRcc)
+                    vLcc = jnp.zeros_like(carry_adv.vRcc)
+                    vLss = jnp.zeros_like(carry_adv.vRcc)
                     state = state_checkpoint
                     return (
                         state,
@@ -6115,6 +6260,12 @@ def solve_fixed_boundary_residual_iter(
                         vZcs,
                         vLsc,
                         vLcs,
+                        vRsc,
+                        vRcs,
+                        vZcc,
+                        vZss,
+                        vLcc,
+                        vLss,
                         iter_offset,
                         iter1,
                         ijacob,
@@ -6135,6 +6286,12 @@ def solve_fixed_boundary_residual_iter(
                         carry_adv.vZcs,
                         carry_adv.vLsc,
                         carry_adv.vLcs,
+                        carry_adv.vRsc,
+                        carry_adv.vRcs,
+                        carry_adv.vZcc,
+                        carry_adv.vZss,
+                        carry_adv.vLcc,
+                        carry_adv.vLss,
                         carry_adv.iter_offset,
                         carry_adv.iter1,
                         carry_adv.ijacob,
@@ -6154,6 +6311,12 @@ def solve_fixed_boundary_residual_iter(
                     vZcs_post,
                     vLsc_post,
                     vLcs_post,
+                    vRsc_post,
+                    vRcs_post,
+                    vZcc_post,
+                    vZss_post,
+                    vLcc_post,
+                    vLss_post,
                     iter_offset_post,
                     iter1_post,
                     ijacob_post,
@@ -6181,6 +6344,12 @@ def solve_fixed_boundary_residual_iter(
                     vZcs_post = jnp.where(stage_spike, jnp.zeros_like(vZcs_post), vZcs_post)
                     vLsc_post = jnp.where(stage_spike, jnp.zeros_like(vLsc_post), vLsc_post)
                     vLcs_post = jnp.where(stage_spike, jnp.zeros_like(vLcs_post), vLcs_post)
+                    vRsc_post = jnp.where(stage_spike, jnp.zeros_like(vRsc_post), vRsc_post)
+                    vRcs_post = jnp.where(stage_spike, jnp.zeros_like(vRcs_post), vRcs_post)
+                    vZcc_post = jnp.where(stage_spike, jnp.zeros_like(vZcc_post), vZcc_post)
+                    vZss_post = jnp.where(stage_spike, jnp.zeros_like(vZss_post), vZss_post)
+                    vLcc_post = jnp.where(stage_spike, jnp.zeros_like(vLcc_post), vLcc_post)
+                    vLss_post = jnp.where(stage_spike, jnp.zeros_like(vLss_post), vLss_post)
                     iter1_post = jnp.where(stage_spike, iter2, iter1_post)
 
                 def _restart_payload(_):
@@ -6250,6 +6419,24 @@ def solve_fixed_boundary_residual_iter(
                     fzcs_r = frzl_rz_r.fzcs if frzl_rz_r.fzcs is not None else jnp.zeros_like(fzsc_r)
                     flsc_r = jnp.asarray(frzl_rz_r.flsc) * jnp.asarray(cache_lam_prec_r)
                     flcs_r = None if frzl_rz_r.flcs is None else (jnp.asarray(frzl_rz_r.flcs) * jnp.asarray(cache_lam_prec_r))
+                    frsc_r = jnp.zeros_like(frcc_r)
+                    frcs_r = jnp.zeros_like(frcc_r)
+                    fzcc_r = jnp.zeros_like(fzsc_r)
+                    fzss_r = jnp.zeros_like(fzsc_r)
+                    flcc_r = jnp.zeros_like(flsc_r)
+                    flss_r = jnp.zeros_like(flsc_r)
+                    if getattr(frzl_rz_r, "frsc", None) is not None:
+                        frsc_r = jnp.asarray(frzl_rz_r.frsc)
+                    if getattr(frzl_rz_r, "frcs", None) is not None:
+                        frcs_r = jnp.asarray(frzl_rz_r.frcs)
+                    if getattr(frzl_rz_r, "fzcc", None) is not None:
+                        fzcc_r = jnp.asarray(frzl_rz_r.fzcc)
+                    if getattr(frzl_rz_r, "fzss", None) is not None:
+                        fzss_r = jnp.asarray(frzl_rz_r.fzss)
+                    if getattr(frzl_rz_r, "flcc", None) is not None:
+                        flcc_r = jnp.asarray(frzl_rz_r.flcc) * jnp.asarray(cache_lam_prec_r)
+                    if getattr(frzl_rz_r, "flss", None) is not None:
+                        flss_r = jnp.asarray(frzl_rz_r.flss) * jnp.asarray(cache_lam_prec_r)
 
                     frzl_pre_r = TomnspsRZL(
                         frcc=frcc_r,
@@ -6258,12 +6445,12 @@ def solve_fixed_boundary_residual_iter(
                         fzcs=fzcs_r,
                         flsc=flsc_r,
                         flcs=flcs_r,
-                        frsc=getattr(frzl_r, "frsc", None),
-                        frcs=getattr(frzl_r, "frcs", None),
-                        fzcc=getattr(frzl_r, "fzcc", None),
-                        fzss=getattr(frzl_r, "fzss", None),
-                        flcc=getattr(frzl_r, "flcc", None),
-                        flss=getattr(frzl_r, "flss", None),
+                        frsc=frsc_r,
+                        frcs=frcs_r,
+                        fzcc=fzcc_r,
+                        fzss=fzss_r,
+                        flcc=flcc_r,
+                        flss=flss_r,
                     )
                     gcr2_p_r, gcz2_p_r, gcl2_p_r = vmec_gcx2_from_tomnsps(
                         frzl=frzl_pre_r,
@@ -6275,13 +6462,16 @@ def solve_fixed_boundary_residual_iter(
                     )
                     fsqr1_r = gcr2_p_r * f_norm1_r
                     fsqz1_r = gcz2_p_r * f_norm1_r
-                    gcl2_full_r = jnp.sum(flsc_r * flsc_r)
+                    gcl2_full_r = jnp.sum(flsc_r[1:] * flsc_r[1:])
                     if flcs_r is not None:
-                        gcl2_full_r = gcl2_full_r + jnp.sum(jnp.asarray(flcs_r) ** 2)
+                        flcs_r_arr = jnp.asarray(flcs_r)
+                        gcl2_full_r = gcl2_full_r + jnp.sum(flcs_r_arr[1:] * flcs_r_arr[1:])
                     if getattr(frzl_pre_r, "flcc", None) is not None:
-                        gcl2_full_r = gcl2_full_r + jnp.sum(jnp.asarray(frzl_pre_r.flcc) ** 2)
+                        flcc_r = jnp.asarray(frzl_pre_r.flcc)
+                        gcl2_full_r = gcl2_full_r + jnp.sum(flcc_r[1:] * flcc_r[1:])
                     if getattr(frzl_pre_r, "flss", None) is not None:
-                        gcl2_full_r = gcl2_full_r + jnp.sum(jnp.asarray(frzl_pre_r.flss) ** 2)
+                        flss_r = jnp.asarray(frzl_pre_r.flss)
+                        gcl2_full_r = gcl2_full_r + jnp.sum(flss_r[1:] * flss_r[1:])
                     fsql1_r = gcl2_full_r * delta_s
 
                     frcc_u_r = frcc_r * w_mode_mn[None, :, :]
@@ -6290,9 +6480,17 @@ def solve_fixed_boundary_residual_iter(
                     fzcs_u_r = fzcs_r * w_mode_mn[None, :, :]
                     flsc_u_r = flsc_r * w_mode_mn[None, :, :]
                     flcs_u_r = (flcs_r if flcs_r is not None else jnp.zeros_like(flsc_u_r)) * w_mode_mn[None, :, :]
+                    frsc_u_r = frsc_r * w_mode_mn[None, :, :]
+                    frcs_u_r = frcs_r * w_mode_mn[None, :, :]
+                    fzcc_u_r = fzcc_r * w_mode_mn[None, :, :]
+                    fzss_u_r = fzss_r * w_mode_mn[None, :, :]
+                    flcc_u_r = flcc_r * w_mode_mn[None, :, :]
+                    flss_u_r = flss_r * w_mode_mn[None, :, :]
                     if lambda_update_scale != 1.0:
                         flsc_u_r = flsc_u_r * lambda_update_scale_j
                         flcs_u_r = flcs_u_r * lambda_update_scale_j
+                        flcc_u_r = flcc_u_r * lambda_update_scale_j
+                        flss_u_r = flss_u_r * lambda_update_scale_j
 
                     return (
                         frcc_u_r,
@@ -6301,6 +6499,12 @@ def solve_fixed_boundary_residual_iter(
                         fzcs_u_r,
                         flsc_u_r,
                         flcs_u_r,
+                        frsc_u_r,
+                        frcs_u_r,
+                        fzcc_u_r,
+                        fzss_u_r,
+                        flcc_u_r,
+                        flss_u_r,
                         fsqr_r,
                         fsqz_r,
                         fsql_r,
@@ -6327,6 +6531,12 @@ def solve_fixed_boundary_residual_iter(
                         fzcs_u,
                         flsc_u,
                         flcs_u,
+                        frsc_u,
+                        frcs_u,
+                        fzcc_u,
+                        fzss_u,
+                        flcc_u,
+                        flss_u,
                         fsqr,
                         fsqz,
                         fsql,
@@ -6353,6 +6563,12 @@ def solve_fixed_boundary_residual_iter(
                     fzcs_u_use,
                     flsc_u_use,
                     flcs_u_use,
+                    frsc_u_use,
+                    frcs_u_use,
+                    fzcc_u_use,
+                    fzss_u_use,
+                    flcc_u_use,
+                    flss_u_use,
                     fsqr_use,
                     fsqz_use,
                     fsql_use,
@@ -6377,6 +6593,12 @@ def solve_fixed_boundary_residual_iter(
                 fzcs_u = fzcs_u_use
                 flsc_u = flsc_u_use
                 flcs_u = flcs_u_use
+                frsc_u = frsc_u_use
+                frcs_u = frcs_u_use
+                fzcc_u = fzcc_u_use
+                fzss_u = fzss_u_use
+                flcc_u = flcc_u_use
+                flss_u = flss_u_use
                 fsqr = fsqr_use
                 fsqz = fsqz_use
                 fsql = fsql_use
@@ -6402,20 +6624,33 @@ def solve_fixed_boundary_residual_iter(
                     force_scale = time_step_post
                     vRcc = fac * (b1 * vRcc_post + force_scale * (flip_sign0 * frcc_u))
                     vRss = fac * (b1 * vRss_post + force_scale * (flip_sign0 * frss_u))
+                    vRsc = fac * (b1 * vRsc_post + force_scale * (flip_sign0 * frsc_u))
+                    vRcs = fac * (b1 * vRcs_post + force_scale * (flip_sign0 * frcs_u))
                     vZsc = fac * (b1 * vZsc_post + force_scale * (flip_sign0 * fzsc_u))
                     vZcs = fac * (b1 * vZcs_post + force_scale * (flip_sign0 * fzcs_u))
+                    vZcc = fac * (b1 * vZcc_post + force_scale * (flip_sign0 * fzcc_u))
+                    vZss = fac * (b1 * vZss_post + force_scale * (flip_sign0 * fzss_u))
                     vLsc = fac * (b1 * vLsc_post + force_scale * (flip_sign0 * flsc_u))
                     vLcs = fac * (b1 * vLcs_post + force_scale * (flip_sign0 * flcs_u))
+                    vLcc = fac * (b1 * vLcc_post + force_scale * (flip_sign0 * flcc_u))
+                    vLss = fac * (b1 * vLss_post + force_scale * (flip_sign0 * flss_u))
                     dR = time_step_post * _mn_cos_to_signed_physical(vRcc, vRss)
                     dZ = time_step_post * _mn_sin_to_signed_physical(vZsc, vZcs)
                     dL = time_step_post * _mn_sin_to_signed_physical_lambda(vLsc, vLcs)
+                    dR_sin = time_step_post * _mn_sin_to_signed_physical(vRsc, vRcs)
+                    dZ_cos = time_step_post * _mn_cos_to_signed_physical(vZcc, vZss)
+                    dL_cos = time_step_post * _mn_cos_to_signed_physical_lambda(vLcc, vLss)
+                    if not bool(cfg.lasym):
+                        dR_sin = jnp.zeros_like(dR_sin)
+                        dZ_cos = jnp.zeros_like(dZ_cos)
+                        dL_cos = jnp.zeros_like(dL_cos)
                     state_new = VMECState(
                         layout=state_post.layout,
                         Rcos=jnp.asarray(state_post.Rcos) + dR,
-                        Rsin=state_post.Rsin,
-                        Zcos=state_post.Zcos,
+                        Rsin=jnp.asarray(state_post.Rsin) + dR_sin,
+                        Zcos=jnp.asarray(state_post.Zcos) + dZ_cos,
                         Zsin=jnp.asarray(state_post.Zsin) + dZ,
-                        Lcos=state_post.Lcos,
+                        Lcos=jnp.asarray(state_post.Lcos) + dL_cos,
                         Lsin=jnp.asarray(state_post.Lsin) + dL,
                     )
                     state_new = _enforce_fixed_boundary_and_axis(
@@ -6429,7 +6664,23 @@ def solve_fixed_boundary_residual_iter(
                         idx00=idx00,
                     )
                     state_new = _apply_vmec_lambda_axis_rules(state_new)
-                    return state_new, vRcc, vRss, vZsc, vZcs, vLsc, vLcs, inv_tau, fsq_prev
+                    return (
+                        state_new,
+                        vRcc,
+                        vRss,
+                        vZsc,
+                        vZcs,
+                        vLsc,
+                        vLcs,
+                        vRsc,
+                        vRcs,
+                        vZcc,
+                        vZss,
+                        vLcc,
+                        vLss,
+                        inv_tau,
+                        fsq_prev,
+                    )
 
                 def _reject_step(_):
                     return (
@@ -6440,6 +6691,12 @@ def solve_fixed_boundary_residual_iter(
                         vZcs_post,
                         vLsc_post,
                         vLcs_post,
+                        vRsc_post,
+                        vRcs_post,
+                        vZcc_post,
+                        vZss_post,
+                        vLcc_post,
+                        vLss_post,
                         inv_tau_post,
                         fsq_prev_post,
                     )
@@ -6455,6 +6712,12 @@ def solve_fixed_boundary_residual_iter(
                         vZcs_new,
                         vLsc_new,
                         vLcs_new,
+                        vRsc_new,
+                        vRcs_new,
+                        vZcc_new,
+                        vZss_new,
+                        vLcc_new,
+                        vLss_new,
                         inv_tau_new,
                         fsq_prev_new,
                     ) = _accept_step(None)
@@ -6467,6 +6730,12 @@ def solve_fixed_boundary_residual_iter(
                         vZcs_new,
                         vLsc_new,
                         vLcs_new,
+                        vRsc_new,
+                        vRcs_new,
+                        vZcc_new,
+                        vZss_new,
+                        vLcc_new,
+                        vLss_new,
                         inv_tau_new,
                         fsq_prev_new,
                     ) = jax.lax.cond(do_restart, _reject_step, _accept_step, operand=None)
@@ -6642,6 +6911,12 @@ def solve_fixed_boundary_residual_iter(
                     vZcs=vZcs_new,
                     vLsc=vLsc_new,
                     vLcs=vLcs_new,
+                    vRsc=vRsc_new,
+                    vRcs=vRcs_new,
+                    vZcc=vZcc_new,
+                    vZss=vZss_new,
+                    vLcc=vLcc_new,
+                    vLss=vLss_new,
                     flip_sign=flip_sign0,
                     iter_offset=iter_offset_post,
                     iter1=iter1_post,
@@ -6757,6 +7032,12 @@ def solve_fixed_boundary_residual_iter(
             vZcs=vZcs0,
             vLsc=vLsc0,
             vLcs=vLcs0,
+            vRsc=vRsc0,
+            vRcs=vRcs0,
+            vZcc=vZcc0,
+            vZss=vZss0,
+            vLcc=vLcc0,
+            vLss=vLss0,
             flip_sign=flip_sign0,
             iter_offset=jnp.asarray(iter_offset0, dtype=jnp.int32),
             iter1=iter1_0,
@@ -6983,17 +7264,9 @@ def solve_fixed_boundary_residual_iter(
                 if axis_reset_repeat:
                     carry = carry._replace(iter_offset=jnp.asarray(iter_offset0, dtype=jnp.int32))
             while start_idx < int(max_iter_scan):
-                chunk_len = min(int(chunk_size), int(max_iter_scan) - start_idx)
-                # If scan-fallback is enabled and the fallback window is smaller
-                # than the chunk size, run a short first chunk so we can decide
-                # earlier without waiting for the full NSTEP block.
-                if (
-                    early_fallback
-                    and (int(scan_fallback_iters) > 0)
-                    and (start_idx < int(scan_fallback_iters))
-                    and (chunk_len > int(scan_fallback_iters) - start_idx)
-                ):
-                    chunk_len = max(1, int(scan_fallback_iters) - start_idx)
+                # Fixed-length chunk to avoid retracing for varying tail sizes.
+                # Extra iterations are masked by the in-scan hold condition.
+                chunk_len = int(chunk_size)
                 it_seq = jnp.arange(start_idx, start_idx + int(chunk_len), dtype=jnp.int32)
                 runner = _get_scan_runner(int(chunk_len))
                 carry, hist_chunk = runner(carry, it_seq)
@@ -7362,9 +7635,6 @@ def solve_fixed_boundary_residual_iter(
             },
         )
 
-    if use_scan and bool(vmec2000_control) and bool(cfg.lasym):
-        use_scan = False
-
     if use_scan:
         if vmec2000_control:
             scan_result = _run_vmec2000_scan(state)
@@ -7547,10 +7817,18 @@ def solve_fixed_boundary_residual_iter(
                 fzcs_u = fzcs * w_mode_mn[None, :, :]
                 flsc_u = flsc * w_mode_mn[None, :, :]
                 flcs_u = flcs * w_mode_mn[None, :, :]
+                frsc_u = (jnp.asarray(getattr(frzl, "frsc", None)) if getattr(frzl, "frsc", None) is not None else jnp.zeros_like(frcc_u)) * w_mode_mn[None, :, :]
+                frcs_u = (jnp.asarray(getattr(frzl, "frcs", None)) if getattr(frzl, "frcs", None) is not None else jnp.zeros_like(frcc_u)) * w_mode_mn[None, :, :]
+                fzcc_u = (jnp.asarray(getattr(frzl, "fzcc", None)) if getattr(frzl, "fzcc", None) is not None else jnp.zeros_like(fzsc_u)) * w_mode_mn[None, :, :]
+                fzss_u = (jnp.asarray(getattr(frzl, "fzss", None)) if getattr(frzl, "fzss", None) is not None else jnp.zeros_like(fzsc_u)) * w_mode_mn[None, :, :]
+                flcc_u = (jnp.asarray(getattr(frzl, "flcc", None)) if getattr(frzl, "flcc", None) is not None else jnp.zeros_like(flsc_u)) * w_mode_mn[None, :, :]
+                flss_u = (jnp.asarray(getattr(frzl, "flss", None)) if getattr(frzl, "flss", None) is not None else jnp.zeros_like(flsc_u)) * w_mode_mn[None, :, :]
 
                 if lambda_update_scale != 1.0:
                     flsc_u = flsc_u * lambda_update_scale_j
                     flcs_u = flcs_u * lambda_update_scale_j
+                    flcc_u = flcc_u * lambda_update_scale_j
+                    flss_u = flss_u * lambda_update_scale_j
 
                 dR = (time_step_j * flip_sign_j) * _mn_cos_to_signed_physical(frcc_u, frss_u)
                 sin_updates = _mn_sin_to_signed_batch(
@@ -7559,14 +7837,21 @@ def solve_fixed_boundary_residual_iter(
                 )
                 dZ = (time_step_j * flip_sign_j) * sin_updates[0]
                 dL = (time_step_j * flip_sign_j) * sin_updates[1]
+                dR_sin = (time_step_j * flip_sign_j) * _mn_sin_to_signed_physical(frsc_u, frcs_u)
+                dZ_cos = (time_step_j * flip_sign_j) * _mn_cos_to_signed_physical(fzcc_u, fzss_u)
+                dL_cos = (time_step_j * flip_sign_j) * _mn_cos_to_signed_physical_lambda(flcc_u, flss_u)
+                if not bool(cfg.lasym):
+                    dR_sin = jnp.zeros_like(dR_sin)
+                    dZ_cos = jnp.zeros_like(dZ_cos)
+                    dL_cos = jnp.zeros_like(dL_cos)
 
                 state_new = VMECState(
                     layout=state.layout,
                     Rcos=jnp.asarray(state.Rcos) + dR,
-                    Rsin=state.Rsin,
-                    Zcos=state.Zcos,
+                    Rsin=jnp.asarray(state.Rsin) + dR_sin,
+                    Zcos=jnp.asarray(state.Zcos) + dZ_cos,
                     Zsin=jnp.asarray(state.Zsin) + dZ,
-                    Lcos=state.Lcos,
+                    Lcos=jnp.asarray(state.Lcos) + dL_cos,
                     Lsin=jnp.asarray(state.Lsin) + dL,
                 )
                 state_new = _enforce_fixed_boundary_and_axis(
@@ -7699,6 +7984,12 @@ def solve_fixed_boundary_residual_iter(
     vZcs = jnp.zeros_like(vRcc)
     vLsc = jnp.zeros_like(vRcc)
     vLcs = jnp.zeros_like(vRcc)
+    vRsc = jnp.zeros_like(vRcc)
+    vRcs = jnp.zeros_like(vRcc)
+    vZcc = jnp.zeros_like(vRcc)
+    vZss = jnp.zeros_like(vRcc)
+    vLcc = jnp.zeros_like(vRcc)
+    vLss = jnp.zeros_like(vRcc)
     flip_sign = float(initial_flip_sign)
     max_coeff_delta_rms = 1e-5
     max_update_rms = 5e-3
@@ -8016,7 +8307,22 @@ def solve_fixed_boundary_residual_iter(
             cache_prec_faclam = None
             cache_prec_lam_debug = None
 
-    def _safe_dt_from_force(*, dt_nominal: float, frcc, frss, fzsc, fzcs, flsc, flcs) -> float:
+    def _safe_dt_from_force(
+        *,
+        dt_nominal: float,
+        frcc,
+        frss,
+        fzsc,
+        fzcs,
+        flsc,
+        flcs,
+        frsc=None,
+        frcs=None,
+        fzcc=None,
+        fzss=None,
+        flcc=None,
+        flss=None,
+    ) -> float:
         """Optional limiter for dt based on force magnitude.
 
         The reference iteration uses `time_step` directly (with restart-trigger
@@ -8030,7 +8336,28 @@ def solve_fixed_boundary_residual_iter(
         fzcs = jnp.asarray(fzcs) if fzcs is not None else jnp.zeros_like(fzsc)
         flsc = jnp.asarray(flsc)
         flcs = jnp.asarray(flcs) if flcs is not None else jnp.zeros_like(flsc)
-        rms = jnp.sqrt(jnp.mean(frcc * frcc + frss * frss + fzsc * fzsc + fzcs * fzcs + flsc * flsc + flcs * flcs))
+        frsc = jnp.asarray(frsc) if frsc is not None else jnp.zeros_like(frcc)
+        frcs = jnp.asarray(frcs) if frcs is not None else jnp.zeros_like(frcc)
+        fzcc = jnp.asarray(fzcc) if fzcc is not None else jnp.zeros_like(fzsc)
+        fzss = jnp.asarray(fzss) if fzss is not None else jnp.zeros_like(fzsc)
+        flcc = jnp.asarray(flcc) if flcc is not None else jnp.zeros_like(flsc)
+        flss = jnp.asarray(flss) if flss is not None else jnp.zeros_like(flsc)
+        rms = jnp.sqrt(
+            jnp.mean(
+                frcc * frcc
+                + frss * frss
+                + frsc * frsc
+                + frcs * frcs
+                + fzsc * fzsc
+                + fzcs * fzcs
+                + fzcc * fzcc
+                + fzss * fzss
+                + flsc * flsc
+                + flcs * flcs
+                + flcc * flcc
+                + flss * flss
+            )
+        )
         rms_f = float(np.asarray(rms))
         if not np.isfinite(rms_f) or rms_f <= 0.0:
             return max(float(dt_nominal), 1e-12)
@@ -8626,6 +8953,24 @@ def solve_fixed_boundary_residual_iter(
                 fzcs = frzl_rz.fzcs
                 flsc = jnp.asarray(frzl_rz.flsc) * jnp.asarray(lam_prec)
                 flcs = None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * jnp.asarray(lam_prec))
+                frsc = jnp.zeros_like(frcc)
+                frcs = jnp.zeros_like(frcc)
+                fzcc = jnp.zeros_like(fzsc)
+                fzss = jnp.zeros_like(fzsc)
+                flcc = jnp.zeros_like(flsc)
+                flss = jnp.zeros_like(flsc)
+                if getattr(frzl_rz, "frsc", None) is not None:
+                    frsc = jnp.asarray(frzl_rz.frsc)
+                if getattr(frzl_rz, "frcs", None) is not None:
+                    frcs = jnp.asarray(frzl_rz.frcs)
+                if getattr(frzl_rz, "fzcc", None) is not None:
+                    fzcc = jnp.asarray(frzl_rz.fzcc)
+                if getattr(frzl_rz, "fzss", None) is not None:
+                    fzss = jnp.asarray(frzl_rz.fzss)
+                if getattr(frzl_rz, "flcc", None) is not None:
+                    flcc = jnp.asarray(frzl_rz.flcc) * jnp.asarray(lam_prec)
+                if getattr(frzl_rz, "flss", None) is not None:
+                    flss = jnp.asarray(frzl_rz.flss) * jnp.asarray(lam_prec)
             elif not bool(cfg.lthreed):
                 from .preconditioner_1d_jax import rz_preconditioner_apply, rz_preconditioner_matrices
 
@@ -8677,8 +9022,13 @@ def solve_fixed_boundary_residual_iter(
                 _maybe_dump_lam_prec(lam_prec=lam_prec, faclam=faclam_dump, static=static, iter_idx=int(iter2))
                 if lam_debug is not None:
                     _maybe_dump_lamcal(lam_debug=lam_debug, static=static, iter_idx=int(iter2))
+                frzl_rhs = (
+                    _apply_vmec_scale_m1_precond_rhs(frzl, mats)
+                    if bool(getattr(cfg, "lasym", False))
+                    else frzl
+                )
                 frzl_rz = rz_preconditioner_apply(
-                    frzl_in=frzl,
+                    frzl_in=frzl_rhs,
                     mats=mats,
                     jmax=jmax,
                     cfg=cfg,
@@ -8690,6 +9040,24 @@ def solve_fixed_boundary_residual_iter(
                 fzcs = frzl_rz.fzcs
                 flsc = jnp.asarray(frzl_rz.flsc) * jnp.asarray(lam_prec)
                 flcs = None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * jnp.asarray(lam_prec))
+                frsc = jnp.zeros_like(frcc)
+                frcs = jnp.zeros_like(frcc)
+                fzcc = jnp.zeros_like(fzsc)
+                fzss = jnp.zeros_like(fzsc)
+                flcc = jnp.zeros_like(flsc)
+                flss = jnp.zeros_like(flsc)
+                if getattr(frzl_rz, "frsc", None) is not None:
+                    frsc = jnp.asarray(frzl_rz.frsc)
+                if getattr(frzl_rz, "frcs", None) is not None:
+                    frcs = jnp.asarray(frzl_rz.frcs)
+                if getattr(frzl_rz, "fzcc", None) is not None:
+                    fzcc = jnp.asarray(frzl_rz.fzcc)
+                if getattr(frzl_rz, "fzss", None) is not None:
+                    fzss = jnp.asarray(frzl_rz.fzss)
+                if getattr(frzl_rz, "flcc", None) is not None:
+                    flcc = jnp.asarray(frzl_rz.flcc) * jnp.asarray(lam_prec)
+                if getattr(frzl_rz, "flss", None) is not None:
+                    flss = jnp.asarray(frzl_rz.flss) * jnp.asarray(lam_prec)
             else:
                 frcc = _apply_radial_tridi(frzl.frcc * rz_scale[:, None, None], precond_radial_alpha)
                 frss = (
@@ -8709,6 +9077,36 @@ def solve_fixed_boundary_residual_iter(
                     if frzl.flcs is not None
                     else None
                 )
+                frsc = (
+                    _apply_radial_tridi(frzl.frsc * rz_scale[:, None, None], precond_radial_alpha)
+                    if getattr(frzl, "frsc", None) is not None
+                    else jnp.zeros_like(frcc)
+                )
+                frcs = (
+                    _apply_radial_tridi(frzl.frcs * rz_scale[:, None, None], precond_radial_alpha)
+                    if getattr(frzl, "frcs", None) is not None
+                    else jnp.zeros_like(frcc)
+                )
+                fzcc = (
+                    _apply_radial_tridi(frzl.fzcc * rz_scale[:, None, None], precond_radial_alpha)
+                    if getattr(frzl, "fzcc", None) is not None
+                    else jnp.zeros_like(fzsc)
+                )
+                fzss = (
+                    _apply_radial_tridi(frzl.fzss * rz_scale[:, None, None], precond_radial_alpha)
+                    if getattr(frzl, "fzss", None) is not None
+                    else jnp.zeros_like(fzsc)
+                )
+                flcc = (
+                    _apply_radial_tridi(frzl.flcc * l_scale[:, None, None], precond_lambda_alpha)
+                    if getattr(frzl, "flcc", None) is not None
+                    else jnp.zeros_like(flsc)
+                )
+                flss = (
+                    _apply_radial_tridi(frzl.flss * l_scale[:, None, None], precond_lambda_alpha)
+                    if getattr(frzl, "flss", None) is not None
+                    else jnp.zeros_like(flsc)
+                )
     
             frzl_pre = TomnspsRZL(
                 frcc=frcc,
@@ -8717,12 +9115,12 @@ def solve_fixed_boundary_residual_iter(
                 fzcs=fzcs,
                 flsc=flsc,
                 flcs=flcs,
-                frsc=getattr(frzl, "frsc", None),
-                frcs=getattr(frzl, "frcs", None),
-                fzcc=getattr(frzl, "fzcc", None),
-                fzss=getattr(frzl, "fzss", None),
-                flcc=getattr(frzl, "flcc", None),
-                flss=getattr(frzl, "flss", None),
+                frsc=frsc,
+                frcs=frcs,
+                fzcc=fzcc,
+                fzss=fzss,
+                flcc=flcc,
+                flss=flss,
             )
             if frzl_lam_pre is not None:
                 _maybe_dump_lam_gcl(
@@ -8741,6 +9139,12 @@ def solve_fixed_boundary_residual_iter(
             fzcs_u = (fzcs if fzcs is not None else jnp.zeros_like(fzsc_u)) * w_mode_mn[None, :, :]
             flsc_u = flsc * w_mode_mn[None, :, :]
             flcs_u = (flcs if flcs is not None else jnp.zeros_like(flsc_u)) * w_mode_mn[None, :, :]
+            frsc_u = frsc * w_mode_mn[None, :, :]
+            frcs_u = frcs * w_mode_mn[None, :, :]
+            fzcc_u = fzcc * w_mode_mn[None, :, :]
+            fzss_u = fzss * w_mode_mn[None, :, :]
+            flcc_u = flcc * w_mode_mn[None, :, :]
+            flss_u = flss * w_mode_mn[None, :, :]
             if timing_enabled:
                 try:
                     if has_jax():
@@ -8756,6 +9160,8 @@ def solve_fixed_boundary_residual_iter(
             if lambda_update_scale != 1.0:
                 flsc_u = flsc_u * lambda_update_scale_j
                 flcs_u = flcs_u * lambda_update_scale_j
+                flcc_u = flcc_u * lambda_update_scale_j
+                flss_u = flss_u * lambda_update_scale_j
     
             if auto_flip_force and it == 0:
                 # Choose force direction by a tiny trial step on the VMEC residual
@@ -8768,15 +9174,22 @@ def solve_fixed_boundary_residual_iter(
                 dR_dir = dt_probe * _mn_cos_to_signed_physical(frcc_u, frss_u)
                 dZ_dir = dt_probe * _mn_sin_to_signed_physical(fzsc_u, fzcs_u)
                 dL_dir = dt_probe * _mn_sin_to_signed_physical_lambda(flsc_u, flcs_u)
-    
+                dR_sin_dir = dt_probe * _mn_sin_to_signed_physical(frsc_u, frcs_u)
+                dZ_cos_dir = dt_probe * _mn_cos_to_signed_physical(fzcc_u, fzss_u)
+                dL_cos_dir = dt_probe * _mn_cos_to_signed_physical_lambda(flcc_u, flss_u)
+                if not bool(cfg.lasym):
+                    dR_sin_dir = jnp.zeros_like(dR_sin_dir)
+                    dZ_cos_dir = jnp.zeros_like(dZ_cos_dir)
+                    dL_cos_dir = jnp.zeros_like(dL_cos_dir)
+
                 def _trial(sign: float) -> float:
                     st_try = VMECState(
                         layout=state.layout,
                         Rcos=jnp.asarray(state.Rcos) + sign * dR_dir,
-                        Rsin=state.Rsin,
-                        Zcos=state.Zcos,
+                        Rsin=jnp.asarray(state.Rsin) + sign * dR_sin_dir,
+                        Zcos=jnp.asarray(state.Zcos) + sign * dZ_cos_dir,
                         Zsin=jnp.asarray(state.Zsin) + sign * dZ_dir,
-                        Lcos=state.Lcos,
+                        Lcos=jnp.asarray(state.Lcos) + sign * dL_cos_dir,
                         Lsin=jnp.asarray(state.Lsin) + sign * dL_dir,
                     )
                     _, _, gcr2_t, gcz2_t, gcl2_t, _, _, norms_t = _compute_forces_iter(
@@ -8826,13 +9239,17 @@ def solve_fixed_boundary_residual_iter(
             fsqz1 = gcz2_p * f_norm1
             if bool(vmec2000_control):
                 # VMEC2000 `residue.f90`: fsql1 = hs * SUM( (faclam*gcl)**2 ) over all js.
-                gcl2_full = jnp.sum(jnp.asarray(frzl_pre.flsc) ** 2)
+                flsc_pre = jnp.asarray(frzl_pre.flsc)
+                gcl2_full = jnp.sum(flsc_pre[1:] * flsc_pre[1:])
                 if frzl_pre.flcs is not None:
-                    gcl2_full = gcl2_full + jnp.sum(jnp.asarray(frzl_pre.flcs) ** 2)
+                    flcs_pre = jnp.asarray(frzl_pre.flcs)
+                    gcl2_full = gcl2_full + jnp.sum(flcs_pre[1:] * flcs_pre[1:])
                 if getattr(frzl_pre, "flcc", None) is not None:
-                    gcl2_full = gcl2_full + jnp.sum(jnp.asarray(frzl_pre.flcc) ** 2)
+                    flcc_pre = jnp.asarray(frzl_pre.flcc)
+                    gcl2_full = gcl2_full + jnp.sum(flcc_pre[1:] * flcc_pre[1:])
                 if getattr(frzl_pre, "flss", None) is not None:
-                    gcl2_full = gcl2_full + jnp.sum(jnp.asarray(frzl_pre.flss) ** 2)
+                    flss_pre = jnp.asarray(frzl_pre.flss)
+                    gcl2_full = gcl2_full + jnp.sum(flss_pre[1:] * flss_pre[1:])
                 fsql1 = gcl2_full * delta_s
             else:
                 fsql1 = gcl2_p * delta_s
@@ -9131,6 +9548,12 @@ def solve_fixed_boundary_residual_iter(
                     vZcs = jnp.zeros_like(vZcs)
                     vLsc = jnp.zeros_like(vLsc)
                     vLcs = jnp.zeros_like(vLcs)
+                    vRsc = jnp.zeros_like(vRsc)
+                    vRcs = jnp.zeros_like(vRcs)
+                    vZcc = jnp.zeros_like(vZcc)
+                    vZss = jnp.zeros_like(vZss)
+                    vLcc = jnp.zeros_like(vLcc)
+                    vLss = jnp.zeros_like(vLss)
                     iter1_prev = int(iter1)
                     time_step_prev = float(time_step)
                     _dump_time_control_trace(
@@ -9291,6 +9714,12 @@ def solve_fixed_boundary_residual_iter(
                 vZcs_before = vZcs
                 vLsc_before = vLsc
                 vLcs_before = vLcs
+                vRsc_before = vRsc
+                vRcs_before = vRcs
+                vZcc_before = vZcc
+                vZss_before = vZss
+                vLcc_before = vLcc
+                vLss_before = vLss
                 state = state_checkpoint
                 vRcc = jnp.zeros_like(vRcc)
                 vRss = jnp.zeros_like(vRss)
@@ -9298,6 +9727,12 @@ def solve_fixed_boundary_residual_iter(
                 vZcs = jnp.zeros_like(vZcs)
                 vLsc = jnp.zeros_like(vLsc)
                 vLcs = jnp.zeros_like(vLcs)
+                vRsc = jnp.zeros_like(vRsc)
+                vRcs = jnp.zeros_like(vRcs)
+                vZcc = jnp.zeros_like(vZcc)
+                vZss = jnp.zeros_like(vZss)
+                vLcc = jnp.zeros_like(vLcc)
+                vLss = jnp.zeros_like(vLss)
                 if pre_restart_reason == "bad_jacobian":
                     time_step = max(restart_badjac_factor * time_step, 1e-12)
                     ijacob += 1
@@ -9438,6 +9873,12 @@ def solve_fixed_boundary_residual_iter(
                     fzcs=fzcs_u,
                     flsc=flsc_u,
                     flcs=flcs_u,
+                    frsc=frsc_u,
+                    frcs=frcs_u,
+                    fzcc=fzcc_u,
+                    fzss=fzss_u,
+                    flcc=flcc_u,
+                    flss=flss_u,
                 )
 
             # Momentum semantics: v <- fac*(b1*v + dt*F), x <- x + dt*v.
@@ -9447,10 +9888,16 @@ def solve_fixed_boundary_residual_iter(
 
             vRcc = fac * (b1 * vRcc + force_scale * (flip_sign * jnp.asarray(frcc_u)))
             vRss = fac * (b1 * vRss + force_scale * (flip_sign * jnp.asarray(frss_u)))
+            vRsc = fac * (b1 * vRsc + force_scale * (flip_sign * jnp.asarray(frsc_u)))
+            vRcs = fac * (b1 * vRcs + force_scale * (flip_sign * jnp.asarray(frcs_u)))
             vZsc = fac * (b1 * vZsc + force_scale * (flip_sign * jnp.asarray(fzsc_u)))
             vZcs = fac * (b1 * vZcs + force_scale * (flip_sign * jnp.asarray(fzcs_u)))
+            vZcc = fac * (b1 * vZcc + force_scale * (flip_sign * jnp.asarray(fzcc_u)))
+            vZss = fac * (b1 * vZss + force_scale * (flip_sign * jnp.asarray(fzss_u)))
             vLsc = fac * (b1 * vLsc + force_scale * (flip_sign * jnp.asarray(flsc_u)))
             vLcs = fac * (b1 * vLcs + force_scale * (flip_sign * jnp.asarray(flcs_u)))
+            vLcc = fac * (b1 * vLcc + force_scale * (flip_sign * jnp.asarray(flcc_u)))
+            vLss = fac * (b1 * vLss + force_scale * (flip_sign * jnp.asarray(flss_u)))
 
             update_rms = float(
                 np.asarray(
@@ -9458,10 +9905,16 @@ def solve_fixed_boundary_residual_iter(
                         jnp.mean(
                             (dt_eff * vRcc) ** 2
                             + (dt_eff * vRss) ** 2
+                            + (dt_eff * vRsc) ** 2
+                            + (dt_eff * vRcs) ** 2
                             + (dt_eff * vZsc) ** 2
                             + (dt_eff * vZcs) ** 2
+                            + (dt_eff * vZcc) ** 2
+                            + (dt_eff * vZss) ** 2
                             + (dt_eff * vLsc) ** 2
                             + (dt_eff * vLcs) ** 2
+                            + (dt_eff * vLcc) ** 2
+                            + (dt_eff * vLss) ** 2
                         )
                     )
                 )
@@ -9470,20 +9923,32 @@ def solve_fixed_boundary_residual_iter(
                 scl = max_update_rms / max(update_rms, 1e-30)
                 vRcc = vRcc * scl
                 vRss = vRss * scl
+                vRsc = vRsc * scl
+                vRcs = vRcs * scl
                 vZsc = vZsc * scl
                 vZcs = vZcs * scl
+                vZcc = vZcc * scl
+                vZss = vZss * scl
                 vLsc = vLsc * scl
                 vLcs = vLcs * scl
+                vLcc = vLcc * scl
+                vLss = vLss * scl
                 update_rms = float(
                     np.asarray(
                         jnp.sqrt(
                             jnp.mean(
                                 (dt_eff * vRcc) ** 2
                                 + (dt_eff * vRss) ** 2
+                                + (dt_eff * vRsc) ** 2
+                                + (dt_eff * vRcs) ** 2
                                 + (dt_eff * vZsc) ** 2
                                 + (dt_eff * vZcs) ** 2
+                                + (dt_eff * vZcc) ** 2
+                                + (dt_eff * vZss) ** 2
                                 + (dt_eff * vLsc) ** 2
                                 + (dt_eff * vLcs) ** 2
+                                + (dt_eff * vLcc) ** 2
+                                + (dt_eff * vLss) ** 2
                             )
                         )
                     )
@@ -9492,13 +9957,20 @@ def solve_fixed_boundary_residual_iter(
             dR = dt_eff * _mn_cos_to_signed_physical(vRcc, vRss)
             dZ = dt_eff * _mn_sin_to_signed_physical(vZsc, vZcs)
             dL = dt_eff * _mn_sin_to_signed_physical_lambda(vLsc, vLcs)
+            dR_sin = dt_eff * _mn_sin_to_signed_physical(vRsc, vRcs)
+            dZ_cos = dt_eff * _mn_cos_to_signed_physical(vZcc, vZss)
+            dL_cos = dt_eff * _mn_cos_to_signed_physical_lambda(vLcc, vLss)
+            if not bool(cfg.lasym):
+                dR_sin = jnp.zeros_like(dR_sin)
+                dZ_cos = jnp.zeros_like(dZ_cos)
+                dL_cos = jnp.zeros_like(dL_cos)
             state_try = VMECState(
                 layout=state.layout,
                 Rcos=jnp.asarray(state.Rcos) + dR,
-                Rsin=state.Rsin,
-                Zcos=state.Zcos,
+                Rsin=jnp.asarray(state.Rsin) + dR_sin,
+                Zcos=jnp.asarray(state.Zcos) + dZ_cos,
                 Zsin=jnp.asarray(state.Zsin) + dZ,
-                Lcos=state.Lcos,
+                Lcos=jnp.asarray(state.Lcos) + dL_cos,
                 Lsin=jnp.asarray(state.Lsin) + dL,
             )
             state_try = _enforce_fixed_boundary_and_axis(
@@ -9572,10 +10044,10 @@ def solve_fixed_boundary_residual_iter(
                     state_try = VMECState(
                         layout=state.layout,
                         Rcos=jnp.asarray(state.Rcos) + alpha * dR,
-                        Rsin=state.Rsin,
-                        Zcos=state.Zcos,
+                        Rsin=jnp.asarray(state.Rsin) + alpha * dR_sin,
+                        Zcos=jnp.asarray(state.Zcos) + alpha * dZ_cos,
                         Zsin=jnp.asarray(state.Zsin) + alpha * dZ,
-                        Lcos=state.Lcos,
+                        Lcos=jnp.asarray(state.Lcos) + alpha * dL_cos,
                         Lsin=jnp.asarray(state.Lsin) + alpha * dL,
                     )
                     state_try = _enforce_fixed_boundary_and_axis(
@@ -9638,10 +10110,16 @@ def solve_fixed_boundary_residual_iter(
                                 jnp.mean(
                                     frcc_u * frcc_u
                                     + frss_u * frss_u
+                                    + frsc_u * frsc_u
+                                    + frcs_u * frcs_u
                                     + fzsc_u * fzsc_u
                                     + fzcs_u * fzcs_u
+                                    + fzcc_u * fzcc_u
+                                    + fzss_u * fzss_u
                                     + flsc_u * flsc_u
                                     + flcs_u * flcs_u
+                                    + flcc_u * flcc_u
+                                    + flss_u * flss_u
                                 )
                             )
                         )
@@ -9652,13 +10130,20 @@ def solve_fixed_boundary_residual_iter(
                     dR_dir = dt_direct * _mn_cos_to_signed(flip_sign * frcc_u, flip_sign * frss_u)
                     dZ_dir = dt_direct * _mn_sin_to_signed(flip_sign * fzsc_u, flip_sign * fzcs_u)
                     dL_dir = dt_direct * _mn_sin_to_signed(flip_sign * flsc_u, flip_sign * flcs_u)
+                    dR_sin_dir = dt_direct * _mn_sin_to_signed(flip_sign * frsc_u, flip_sign * frcs_u)
+                    dZ_cos_dir = dt_direct * _mn_cos_to_signed(flip_sign * fzcc_u, flip_sign * fzss_u)
+                    dL_cos_dir = dt_direct * _mn_cos_to_signed(flip_sign * flcc_u, flip_sign * flss_u)
+                    if not bool(cfg.lasym):
+                        dR_sin_dir = jnp.zeros_like(dR_sin_dir)
+                        dZ_cos_dir = jnp.zeros_like(dZ_cos_dir)
+                        dL_cos_dir = jnp.zeros_like(dL_cos_dir)
                     state_dir = VMECState(
                         layout=state.layout,
                         Rcos=jnp.asarray(state.Rcos) + dR_dir,
-                        Rsin=state.Rsin,
-                        Zcos=state.Zcos,
+                        Rsin=jnp.asarray(state.Rsin) + dR_sin_dir,
+                        Zcos=jnp.asarray(state.Zcos) + dZ_cos_dir,
                         Zsin=jnp.asarray(state.Zsin) + dZ_dir,
-                        Lcos=state.Lcos,
+                        Lcos=jnp.asarray(state.Lcos) + dL_cos_dir,
                         Lsin=jnp.asarray(state.Lsin) + dL_dir,
                     )
                     state_dir = _enforce_fixed_boundary_and_axis(
@@ -9697,6 +10182,12 @@ def solve_fixed_boundary_residual_iter(
                         vZcs = jnp.zeros_like(vZcs)
                         vLsc = jnp.zeros_like(vLsc)
                         vLcs = jnp.zeros_like(vLcs)
+                        vRsc = jnp.zeros_like(vRsc)
+                        vRcs = jnp.zeros_like(vRcs)
+                        vZcc = jnp.zeros_like(vZcc)
+                        vZss = jnp.zeros_like(vZss)
+                        vLcc = jnp.zeros_like(vLcc)
+                        vLss = jnp.zeros_like(vLss)
                         step_status = "fallback_direct"
                         restart_reason = "none"
                         huge_force_restart_count = 0
@@ -9707,10 +10198,16 @@ def solve_fixed_boundary_residual_iter(
                                     jnp.mean(
                                         (dt_direct * frcc_u) ** 2
                                         + (dt_direct * frss_u) ** 2
+                                        + (dt_direct * frsc_u) ** 2
+                                        + (dt_direct * frcs_u) ** 2
                                         + (dt_direct * fzsc_u) ** 2
                                         + (dt_direct * fzcs_u) ** 2
+                                        + (dt_direct * fzcc_u) ** 2
+                                        + (dt_direct * fzss_u) ** 2
                                         + (dt_direct * flsc_u) ** 2
                                         + (dt_direct * flcs_u) ** 2
+                                        + (dt_direct * flcc_u) ** 2
+                                        + (dt_direct * flss_u) ** 2
                                     )
                                 )
                             )
@@ -9833,6 +10330,9 @@ def solve_fixed_boundary_residual_iter(
             vRcc_best, vRss_best = vRcc, vRss
             vZsc_best, vZcs_best = vZsc, vZcs
             vLsc_best, vLcs_best = vLsc, vLcs
+            vRsc_best, vRcs_best = vRsc, vRcs
+            vZcc_best, vZss_best = vZcc, vZss
+            vLcc_best, vLss_best = vLcc, vLss
             state_best = state
             dt_eff = float(time_step)
             update_rms = 0.0
@@ -9842,22 +10342,35 @@ def solve_fixed_boundary_residual_iter(
                 dt_try = time_step * step_factor
                 vRcc_try = fac * (b1 * vRcc + dt_try * (flip_sign * jnp.asarray(frcc_u)))
                 vRss_try = fac * (b1 * vRss + dt_try * (flip_sign * jnp.asarray(frss_u)))
+                vRsc_try = fac * (b1 * vRsc + dt_try * (flip_sign * jnp.asarray(frsc_u)))
+                vRcs_try = fac * (b1 * vRcs + dt_try * (flip_sign * jnp.asarray(frcs_u)))
                 vZsc_try = fac * (b1 * vZsc + dt_try * (flip_sign * jnp.asarray(fzsc_u)))
                 vZcs_try = fac * (b1 * vZcs + dt_try * (flip_sign * jnp.asarray(fzcs_u)))
+                vZcc_try = fac * (b1 * vZcc + dt_try * (flip_sign * jnp.asarray(fzcc_u)))
+                vZss_try = fac * (b1 * vZss + dt_try * (flip_sign * jnp.asarray(fzss_u)))
                 vLsc_try = fac * (b1 * vLsc + dt_try * (flip_sign * jnp.asarray(flsc_u)))
                 vLcs_try = fac * (b1 * vLcs + dt_try * (flip_sign * jnp.asarray(flcs_u)))
+                vLcc_try = fac * (b1 * vLcc + dt_try * (flip_sign * jnp.asarray(flcc_u)))
+                vLss_try = fac * (b1 * vLss + dt_try * (flip_sign * jnp.asarray(flss_u)))
 
                 dR_try = dt_try * _mn_cos_to_signed(vRcc_try, vRss_try)
                 dZ_try = dt_try * _mn_sin_to_signed(vZsc_try, vZcs_try)
                 dL_try = dt_try * _mn_sin_to_signed(vLsc_try, vLcs_try)
+                dR_sin_try = dt_try * _mn_sin_to_signed(vRsc_try, vRcs_try)
+                dZ_cos_try = dt_try * _mn_cos_to_signed(vZcc_try, vZss_try)
+                dL_cos_try = dt_try * _mn_cos_to_signed(vLcc_try, vLss_try)
+                if not bool(cfg.lasym):
+                    dR_sin_try = jnp.zeros_like(dR_sin_try)
+                    dZ_cos_try = jnp.zeros_like(dZ_cos_try)
+                    dL_cos_try = jnp.zeros_like(dL_cos_try)
 
                 state_try = VMECState(
                     layout=state.layout,
                     Rcos=jnp.asarray(state.Rcos) + dR_try,
-                    Rsin=state.Rsin,
-                    Zcos=state.Zcos,
+                    Rsin=jnp.asarray(state.Rsin) + dR_sin_try,
+                    Zcos=jnp.asarray(state.Zcos) + dZ_cos_try,
                     Zsin=jnp.asarray(state.Zsin) + dZ_try,
-                    Lcos=state.Lcos,
+                    Lcos=jnp.asarray(state.Lcos) + dL_cos_try,
                     Lsin=jnp.asarray(state.Lsin) + dL_try,
                 )
                 state_try = _enforce_fixed_boundary_and_axis(
@@ -9895,6 +10408,9 @@ def solve_fixed_boundary_residual_iter(
                     vRcc_best, vRss_best = vRcc_try, vRss_try
                     vZsc_best, vZcs_best = vZsc_try, vZcs_try
                     vLsc_best, vLcs_best = vLsc_try, vLcs_try
+                    vRsc_best, vRcs_best = vRsc_try, vRcs_try
+                    vZcc_best, vZss_best = vZcc_try, vZss_try
+                    vLcc_best, vLss_best = vLcc_try, vLss_try
                     dt_eff = float(dt_try)
                     update_rms = float(
                         np.asarray(
@@ -9902,10 +10418,16 @@ def solve_fixed_boundary_residual_iter(
                                 jnp.mean(
                                     (dt_try * vRcc_try) ** 2
                                     + (dt_try * vRss_try) ** 2
+                                    + (dt_try * vRsc_try) ** 2
+                                    + (dt_try * vRcs_try) ** 2
                                     + (dt_try * vZsc_try) ** 2
                                     + (dt_try * vZcs_try) ** 2
+                                    + (dt_try * vZcc_try) ** 2
+                                    + (dt_try * vZss_try) ** 2
                                     + (dt_try * vLsc_try) ** 2
                                     + (dt_try * vLcs_try) ** 2
+                                    + (dt_try * vLcc_try) ** 2
+                                    + (dt_try * vLss_try) ** 2
                                 )
                             )
                         )
@@ -9917,14 +10439,23 @@ def solve_fixed_boundary_residual_iter(
             vRcc, vRss = vRcc_best, vRss_best
             vZsc, vZcs = vZsc_best, vZcs_best
             vLsc, vLcs = vLsc_best, vLcs_best
+            vRsc, vRcs = vRsc_best, vRcs_best
+            vZcc, vZss = vZcc_best, vZss_best
+            vLcc, vLss = vLcc_best, vLss_best
             if not accepted:
                 # No acceptable update was found; damp velocity to avoid runaway.
                 vRcc = 0.5 * vRcc
                 vRss = 0.5 * vRss
+                vRsc = 0.5 * vRsc
+                vRcs = 0.5 * vRcs
                 vZsc = 0.5 * vZsc
                 vZcs = 0.5 * vZcs
+                vZcc = 0.5 * vZcc
+                vZss = 0.5 * vZss
                 vLsc = 0.5 * vLsc
                 vLcs = 0.5 * vLcs
+                vLcc = 0.5 * vLcc
+                vLss = 0.5 * vLss
                 dt_eff = float(step_size * step_factor)
                 update_rms = 0.0
                 step_status = "rejected"
@@ -10091,6 +10622,12 @@ def solve_fixed_boundary_residual_iter(
         "vZcs": np.asarray(vZcs),
         "vLsc": np.asarray(vLsc),
         "vLcs": np.asarray(vLcs),
+        "vRsc": np.asarray(vRsc),
+        "vRcs": np.asarray(vRcs),
+        "vZcc": np.asarray(vZcc),
+        "vZss": np.asarray(vZss),
+        "vLcc": np.asarray(vLcc),
+        "vLss": np.asarray(vLss),
         "state_checkpoint": state_checkpoint,
         "vmec2000_cache_valid": bool(vmec2000_cache_valid),
         "cache_precond_diag": cache_precond_diag,
