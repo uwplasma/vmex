@@ -5,7 +5,12 @@ from .namelist import read_indata, InData
 from .config import VMECConfig, load_config
 from .modes import ModeTable, vmec_mode_table, nyquist_mode_table, default_grid_sizes
 from .grids import AngleGrid, make_angle_grid
-from .boundary import BoundaryCoeffs, boundary_from_indata
+from .boundary import (
+    BoundaryCoeffs,
+    boundary_from_indata,
+    boundary_aspect_ratio,
+    boundary_aspect_ratio_from_static,
+)
 from .fourier import (
     HelicalBasis,
     build_helical_basis,
@@ -53,6 +58,7 @@ from .driver import (
     load_input,
     load_wout,
     run_fixed_boundary,
+    solve_fixed_boundary_from_boundary,
     save_npz,
     residual_scalars_from_state,
     write_wout_from_fixed_boundary_run,
@@ -104,6 +110,8 @@ __all__ = [
     "make_angle_grid",
     "BoundaryCoeffs",
     "boundary_from_indata",
+    "boundary_aspect_ratio",
+    "boundary_aspect_ratio_from_static",
     "HelicalBasis",
     "build_helical_basis",
     "eval_fourier",
@@ -146,6 +154,7 @@ __all__ = [
     "load_input",
     "load_wout",
     "run_fixed_boundary",
+    "solve_fixed_boundary_from_boundary",
     "save_npz",
     "residual_scalars_from_state",
     "write_wout_from_fixed_boundary_run",
