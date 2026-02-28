@@ -376,15 +376,15 @@ def _boundary_helical_from_internal(
             R_sin = jnp.where(mask_n0, rbsc_k, R_sin)
             Z_cos = jnp.where(mask_n0, zbcc_k, Z_cos)
 
-        # n>0
-        mask_np = n_pos & m_nonneg & ~mask_n0
+        # n>0 (exclude m=0 special-case so we don't overwrite it)
+        mask_np = n_pos & m_nonneg & ~mask_n0 & ~mask_m0_nnz
         R_cos = jnp.where(mask_np, 0.5 * (rbcc_k + rbss_k), R_cos)
         R_sin = jnp.where(mask_np, 0.5 * (rbsc_k - rbcs_k), R_sin)
         Z_cos = jnp.where(mask_np, 0.5 * (zbcc_k + zbss_k), Z_cos)
         Z_sin = jnp.where(mask_np, 0.5 * (zbsc_k - zbcs_k), Z_sin)
 
-        # n<0
-        mask_nn = (n_arr < 0) & m_nonneg & ~mask_n0
+        # n<0 (exclude m=0 special-case so we don't overwrite it)
+        mask_nn = (n_arr < 0) & m_nonneg & ~mask_n0 & ~mask_m0_nnz
         R_cos = jnp.where(mask_nn, 0.5 * (rbcc_k - rbss_k), R_cos)
         R_sin = jnp.where(mask_nn, 0.5 * (rbsc_k + rbcs_k), R_sin)
         Z_cos = jnp.where(mask_nn, 0.5 * (zbcc_k - zbss_k), Z_cos)

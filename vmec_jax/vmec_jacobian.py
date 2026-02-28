@@ -233,6 +233,7 @@ def vmec_half_mesh_jacobian_from_state(
     if bool(apply_m1_constraint):
         # VMEC stores internal coefficients; undo the m=1 internal constraint before
         # synthesis when physical coefficients are required.
+        lasym_state = bool(getattr(getattr(state, "layout", None), "lasym", False))
         Rcos_int, Zsin_int, Rsin_int, Zcos_int = vmec_m1_internal_to_physical_signed(
             Rcos=Rcos,
             Zsin=Zsin,
@@ -240,7 +241,7 @@ def vmec_half_mesh_jacobian_from_state(
             Zcos=Zcos,
             modes=modes,
             lthreed=bool(lthreed),
-            lasym=False,
+            lasym=lasym_state,
             lconm1=bool(lconm1),
         )
         Rcos = jnp.asarray(Rcos_int)
