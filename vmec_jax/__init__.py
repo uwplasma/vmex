@@ -56,6 +56,7 @@ from .driver import (
     save_npz,
     residual_scalars_from_state,
     write_wout_from_fixed_boundary_run,
+    wout_from_fixed_boundary_run,
 )
 from .state import VMECState, pack_state, unpack_state
 from .static import VMECStatic, build_static
@@ -147,6 +148,7 @@ __all__ = [
     "save_npz",
     "residual_scalars_from_state",
     "write_wout_from_fixed_boundary_run",
+    "wout_from_fixed_boundary_run",
     "VMECState",
     "pack_state",
     "unpack_state",

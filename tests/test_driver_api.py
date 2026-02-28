@@ -4,7 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from vmec_jax.driver import example_paths, load_example, run_fixed_boundary, save_npz
+from vmec_jax.driver import (
+    example_paths,
+    load_example,
+    run_fixed_boundary,
+    save_npz,
+    wout_from_fixed_boundary_run,
+)
 from vmec_jax.vmec_tomnsp import vmec_angle_grid
 
 
@@ -42,3 +48,6 @@ def test_run_fixed_boundary_initial_guess():
     assert run.cfg.ns > 0
     assert run.state is not None
     assert run.result is None
+
+    wout = wout_from_fixed_boundary_run(run, include_fsq=False, fast_bcovar=True)
+    assert wout.ns == run.cfg.ns

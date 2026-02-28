@@ -18,6 +18,7 @@ from .driver import (
     load_wout,
     run_fixed_boundary,
     residual_scalars_from_state,
+    wout_from_fixed_boundary_run,
     write_wout_from_fixed_boundary_run,
 )
 from .field import signgs_from_sqrtg
@@ -52,6 +53,7 @@ __all__ = [
     "load_wout",
     "run_fixed_boundary",
     "residual_scalars_from_state",
+    "wout_from_fixed_boundary_run",
     "write_wout_from_fixed_boundary_run",
     # Plotting helpers
     "bmag_from_state_physical",
