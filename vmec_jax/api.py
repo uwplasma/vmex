@@ -21,6 +21,7 @@ from .driver import (
     wout_from_fixed_boundary_run,
     write_wout_from_fixed_boundary_run,
 )
+from .booz_input import booz_xform_inputs_from_state
 from .field import signgs_from_sqrtg
 from .energy import flux_profiles_from_indata
 from .plotting import (
@@ -55,6 +56,7 @@ __all__ = [
     "residual_scalars_from_state",
     "wout_from_fixed_boundary_run",
     "write_wout_from_fixed_boundary_run",
+    "booz_xform_inputs_from_state",
     # Plotting helpers
     "bmag_from_state_physical",
     "bmag_from_wout",

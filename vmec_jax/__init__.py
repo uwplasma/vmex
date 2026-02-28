@@ -58,6 +58,7 @@ from .driver import (
     write_wout_from_fixed_boundary_run,
     wout_from_fixed_boundary_run,
 )
+from .booz_input import booz_xform_inputs_from_state
 from .state import VMECState, pack_state, unpack_state
 from .static import VMECStatic, build_static
 from .init_guess import initial_guess_from_boundary
@@ -149,6 +150,7 @@ __all__ = [
     "residual_scalars_from_state",
     "write_wout_from_fixed_boundary_run",
     "wout_from_fixed_boundary_run",
+    "booz_xform_inputs_from_state",
     "VMECState",
     "pack_state",
     "unpack_state",
