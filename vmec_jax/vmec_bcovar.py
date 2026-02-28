@@ -732,7 +732,9 @@ def vmec_bcovar_half_mesh_from_wout(
 
     # VMEC bcovar: overg = 1 / sqrtg (phipog in bcovar.f).
     denom = jac.sqrtg
-    overg = jnp.where(denom != 0, 1.0 / denom, 0.0)
+    # Avoid NaNs in autodiff by preventing division-by-zero in the inactive branch.
+    safe_denom = jnp.where(denom != 0, denom, jnp.asarray(1.0, dtype=denom.dtype))
+    overg = jnp.where(denom != 0, 1.0 / safe_denom, 0.0)
 
     # Full-mesh LU = d(lambda)/du and LV = -d(lambda)/dv in VMEC conventions.
     lu0_full = jnp.asarray(parity.Lt_even)
@@ -780,7 +782,8 @@ def vmec_bcovar_half_mesh_from_wout(
         bot = jnp.sum(pwint * (overg * guu), axis=(1, 2))
 
         chips_dyn = jnp.asarray(chips_eff, dtype=bsupu.dtype)
-        chips_new = jnp.where(bot != 0.0, top / bot, chips_dyn)
+        safe_bot = jnp.where(bot != 0.0, bot, jnp.asarray(1.0, dtype=bot.dtype))
+        chips_new = jnp.where(bot != 0.0, top / safe_bot, chips_dyn)
         chips_dyn = chips_dyn.at[0].set(jnp.asarray(0.0, dtype=chips_dyn.dtype))
         chips_dyn = chips_dyn.at[1:].set(chips_new[1:])
         chips_eff = chips_dyn
@@ -898,7 +901,12 @@ def vmec_bcovar_half_mesh_from_wout(
             vp = jnp.sum(pwint * jac_s, axis=(1, 2))
             mass_in = jnp.asarray(mass_in, dtype=vp.dtype)
             # Axis value is treated as zero in VMEC (pwint masks js=1).
-            pres_1d = jnp.where(vp != 0.0, mass_in / (vp**gamma), jnp.asarray(0.0, dtype=vp.dtype))
+            safe_vp = jnp.where(vp != 0.0, vp, jnp.asarray(1.0, dtype=vp.dtype))
+            pres_1d = jnp.where(
+                vp != 0.0,
+                mass_in / (safe_vp**gamma),
+                jnp.asarray(0.0, dtype=vp.dtype),
+            )
             pres_h = pres_1d[:, None, None]
         except Exception:
             pres_h = None
@@ -933,7 +941,12 @@ def vmec_bcovar_half_mesh_from_wout(
 
     # lvv on half mesh: phipog * gvv (bcovar.f uses phipog == 1/sqrtg).
     # NOTE: phipog does **not** include the 2π scaling used in `overg`.
-    phipog = jnp.where(jac.sqrtg != 0, 1.0 / jac.sqrtg, 0.0)
+    phipog_safe = jnp.where(
+        jac.sqrtg != 0,
+        jac.sqrtg,
+        jnp.asarray(1.0, dtype=jac.sqrtg.dtype),
+    )
+    phipog = jnp.where(jac.sqrtg != 0, 1.0 / phipog_safe, 0.0)
     if ns >= 1:
         phipog = phipog.at[0].set(jnp.zeros_like(phipog[0]))
     lvv = phipog * gvv
