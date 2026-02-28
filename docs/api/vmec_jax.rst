@@ -29,6 +29,7 @@ Submodules
    integrals
    modes
    namelist
+   optimization
    profiles
    radial
    residuals
