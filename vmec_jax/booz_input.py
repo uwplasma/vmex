@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from ._compat import jnp
+from ._compat import jax, jnp
 from .energy import FluxProfiles, flux_profiles_from_indata
 from .field import lamscale_from_phips
 from .modes import vmec_mode_table, nyquist_mode_table_from_grid
@@ -81,6 +81,27 @@ def _vmec_full_to_half(*, full: Any, m_modes: Any, s_full: Any) -> Any:
     if half.shape[0] != ns_in:
         half = half[:ns_in, :]
     return half
+
+
+if jax is None:
+
+    def _safe_sqrt_nonneg(x: Any) -> Any:
+        return jnp.sqrt(jnp.maximum(x, 0.0))
+
+
+else:
+
+    @jax.custom_jvp
+    def _safe_sqrt_nonneg(x: Any) -> Any:
+        return jnp.sqrt(jnp.maximum(x, 0.0))
+
+    @_safe_sqrt_nonneg.defjvp
+    def _safe_sqrt_nonneg_jvp(primals, tangents):
+        (x,) = primals
+        (t,) = tangents
+        y = _safe_sqrt_nonneg(x)
+        safe = jnp.where(y > 0.0, 0.5 / y, 0.0)
+        return y, t * safe
 
 
 def _lambda_wout_from_full_jax(
@@ -284,7 +305,7 @@ def booz_xform_inputs_from_state(
     bsubv = jnp.asarray(bc.bsubv)
     bsq = jnp.asarray(bc.bsq)
     pres_h = pres[:, None, None]
-    bmod = jnp.sqrt(jnp.maximum(2.0 * (bsq - pres_h), 0.0))
+    bmod = _safe_sqrt_nonneg(2.0 * (bsq - pres_h))
 
     bsubumnc_full, bsubumns_full = vmec_realspace_analysis(
         f=bsubu, modes=nyq_modes, trig=trig, parity="both"

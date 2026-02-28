@@ -178,6 +178,24 @@ def surface_indices_from_static(
     return surface_indices_from_s(s_half, surfaces)
 
 
+def parse_surface_list(text: str) -> list[float | int]:
+    """Parse a comma-separated surface list into floats/ints.
+
+    Integers are treated as 1-based indices; floats in [0, 1] are treated as
+    normalized toroidal flux ``s`` values.
+    """
+    items: list[float | int] = []
+    for raw in text.split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        if any(ch in raw for ch in (".", "e", "E")):
+            items.append(float(raw))
+        else:
+            items.append(int(raw))
+    return items
+
+
 def prepare_fixed_boundary_context(
     *,
     static: VMECStatic,
