@@ -324,7 +324,7 @@ def run_fixed_boundary(
     jit_forces: bool | str = True,
     jit_precompile: bool | None = None,
     use_scan: bool = True,
-    performance_mode: bool = False,
+    performance_mode: bool = True,
     scan_wout_corrector: bool | None = None,
     stage_transition_heuristic: bool | None = None,
     stage_transition_factor: float = 50.0,
