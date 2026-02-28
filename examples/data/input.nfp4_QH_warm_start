@@ -4,8 +4,8 @@
   NITER = 10000
   NSTEP =  200
   TCON0 =   2.00E+00
-  NS_ARRAY    =      16       50
-  NITER_ARRAY =     600     2000
+  NS_ARRAY    =      31
+  NITER_ARRAY =    1500
   FTOL = 1e-14
   FTOL_ARRAY  = 1e-14  1e-14
   PRECON_TYPE = 'none'
@@ -13,8 +13,8 @@
 !----- Grid Parameters -----
   LASYM = F
   NFP = 0004
-  MPOL = 0005
-  NTOR =  1
+  MPOL = 002
+  NTOR = 002
   PHIEDGE =    0.048
 !----- Free Boundary Parameters -----
   LFREEB = F

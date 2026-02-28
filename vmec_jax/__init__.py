@@ -68,6 +68,16 @@ from .booz_input import booz_xform_inputs_from_state
 from .state import VMECState, pack_state, unpack_state
 from .static import VMECStatic, build_static
 from .init_guess import initial_guess_from_boundary
+from .optimization import (
+    BoundaryParamSpec,
+    FixedBoundaryContext,
+    apply_boundary_params,
+    boundary_param_names,
+    boundary_param_specs,
+    prepare_fixed_boundary_context,
+    surface_indices_from_s,
+    surface_indices_from_static,
+)
 from .coords import Coords, eval_coords
 from .geom import Geom, eval_geom
 from .profiles import ProfileInputs, profiles_from_indata, eval_profiles
@@ -166,6 +176,14 @@ __all__ = [
     "VMECStatic",
     "build_static",
     "initial_guess_from_boundary",
+    "BoundaryParamSpec",
+    "FixedBoundaryContext",
+    "apply_boundary_params",
+    "boundary_param_names",
+    "boundary_param_specs",
+    "prepare_fixed_boundary_context",
+    "surface_indices_from_s",
+    "surface_indices_from_static",
     "Coords",
     "eval_coords",
     "Geom",
