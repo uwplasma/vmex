@@ -22,9 +22,36 @@ from collections import OrderedDict
 import os
 
 import numpy as np
+import jax
+import jax.numpy as jnp
 
 from .namelist import InData
 from .modes import ModeTable
+from .fourier import build_helical_basis, eval_fourier
+
+
+def boundary_aspect_ratio(boundary: BoundaryCoeffs, basis) -> jax.Array:
+    """Compute aspect ratio from boundary coefficients using a precomputed basis."""
+    Rb = eval_fourier(jnp.asarray(boundary.R_cos), jnp.asarray(boundary.R_sin), basis)
+    Zb = eval_fourier(jnp.asarray(boundary.Z_cos), jnp.asarray(boundary.Z_sin), basis)
+    dA = Rb * jnp.roll(Zb, -1, axis=0) - jnp.roll(Rb, -1, axis=0) * Zb
+    area = 0.5 * jnp.sum(dA, axis=0)
+    minor = jnp.sqrt(jnp.abs(area) / jnp.pi)
+    Rmax = jnp.max(Rb, axis=0)
+    Rmin = jnp.min(Rb, axis=0)
+    Rmajor = jnp.mean(0.5 * (Rmax + Rmin))
+    Aminor = jnp.mean(minor)
+    return Rmajor / Aminor
+
+
+def _is_jax_array(value: object) -> bool:
+    return isinstance(value, (jax.Array, jax.core.Tracer))
+
+
+def boundary_aspect_ratio_from_static(boundary: BoundaryCoeffs, static) -> jax.Array:
+    """Compute aspect ratio from boundary coefficients using a VMEC static config."""
+    basis = build_helical_basis(static.modes, static.grid)
+    return boundary_aspect_ratio(boundary, basis)
 
 
 @dataclass(frozen=True)
@@ -178,6 +205,58 @@ def _boundary_internal_from_helical(
     """Convert helical boundary coefficients to VMEC internal arrays."""
     mpol, ntor = _infer_mpol_ntor(modes)
     shape = (ntor + 1, mpol + 1)
+
+    # JAX-friendly path for traced arrays.
+    if _is_jax_array(boundary.R_cos) or _is_jax_array(boundary.Z_sin):
+        m_arr = jnp.asarray(modes.m, dtype=jnp.int32)
+        n_arr = jnp.asarray(modes.n, dtype=jnp.int32)
+        m_nonneg = m_arr >= 0
+        m_pos = m_arr > 0
+        ni = jnp.abs(n_arr)
+        isgn = jnp.sign(n_arr).astype(jnp.float64)
+
+        m_safe = jnp.where(m_nonneg, m_arr, 0)
+        ni_safe = jnp.where(m_nonneg, ni, 0)
+        mask = m_nonneg.astype(jnp.float64)
+        mask_pos = m_pos.astype(jnp.float64)
+
+        rbc = jnp.asarray(boundary.R_cos)
+        rbs = jnp.asarray(boundary.R_sin)
+        zbc = jnp.asarray(boundary.Z_cos)
+        zbs = jnp.asarray(boundary.Z_sin)
+
+        rbcc = jnp.zeros(shape, dtype=rbc.dtype).at[ni_safe, m_safe].add(rbc * mask)
+        rbss = jnp.zeros(shape, dtype=rbc.dtype)
+        rbcs = jnp.zeros(shape, dtype=rbc.dtype)
+        rbsc = jnp.zeros(shape, dtype=rbc.dtype)
+        zbcc = jnp.zeros(shape, dtype=rbc.dtype)
+        zbss = jnp.zeros(shape, dtype=rbc.dtype)
+        zbcs = jnp.zeros(shape, dtype=rbc.dtype)
+        zbsc = jnp.zeros(shape, dtype=rbc.dtype).at[ni_safe, m_safe].add(zbs * mask_pos)
+
+        if lthreed:
+            rbss = rbss.at[ni_safe, m_safe].add(isgn * rbc * mask_pos)
+            zbcs = zbcs.at[ni_safe, m_safe].add(-isgn * zbs * mask)
+
+        if lasym:
+            rbsc = rbsc.at[ni_safe, m_safe].add(rbs * mask_pos)
+            zbcc = zbcc.at[ni_safe, m_safe].add(zbc * mask)
+            if lthreed:
+                rbcs = rbcs.at[ni_safe, m_safe].add(-isgn * rbs * mask)
+                zbss = zbss.at[ni_safe, m_safe].add(isgn * zbc * mask_pos)
+
+        return BoundaryInternalCoeffs(
+            rbcc=rbcc,
+            rbss=rbss,
+            rbcs=rbcs,
+            rbsc=rbsc,
+            zbcc=zbcc,
+            zbss=zbss,
+            zbcs=zbcs,
+            zbsc=zbsc,
+        )
+
+    # NumPy path for host-side preprocessing.
     rbcc = np.zeros(shape, dtype=float)
     rbss = np.zeros(shape, dtype=float)
     rbcs = np.zeros(shape, dtype=float)
@@ -245,6 +324,80 @@ def _boundary_helical_from_internal(
     lasym: bool,
 ) -> BoundaryCoeffs:
     """Convert VMEC internal boundary arrays back to helical coefficients."""
+    if _is_jax_array(internal.rbcc):
+        m_arr = jnp.asarray(modes.m, dtype=jnp.int32)
+        n_arr = jnp.asarray(modes.n, dtype=jnp.int32)
+        K = m_arr.size
+        R_cos = jnp.zeros((K,), dtype=internal.rbcc.dtype)
+        R_sin = jnp.zeros((K,), dtype=internal.rbcc.dtype)
+        Z_cos = jnp.zeros((K,), dtype=internal.rbcc.dtype)
+        Z_sin = jnp.zeros((K,), dtype=internal.rbcc.dtype)
+
+        rbcc = internal.rbcc
+        rbss = internal.rbss if lthreed else jnp.zeros_like(internal.rbcc)
+        rbcs = internal.rbcs if (lthreed and lasym) else jnp.zeros_like(internal.rbcc)
+        rbsc = internal.rbsc if lasym else jnp.zeros_like(internal.rbcc)
+        zbcc = internal.zbcc if lasym else jnp.zeros_like(internal.rbcc)
+        zbss = internal.zbss if (lthreed and lasym) else jnp.zeros_like(internal.rbcc)
+        zbcs = internal.zbcs if lthreed else jnp.zeros_like(internal.rbcc)
+        zbsc = internal.zbsc
+
+        m_nonneg = m_arr >= 0
+        m_pos = m_arr > 0
+        n_pos = n_arr > 0
+        n_zero = n_arr == 0
+        n_nonzero = n_arr != 0
+        ni = jnp.abs(n_arr)
+
+        rbcc_k = rbcc[ni, m_arr]
+        rbss_k = rbss[ni, m_arr]
+        rbcs_k = rbcs[ni, m_arr]
+        rbsc_k = rbsc[ni, m_arr]
+        zbcc_k = zbcc[ni, m_arr]
+        zbss_k = zbss[ni, m_arr]
+        zbcs_k = zbcs[ni, m_arr]
+        zbsc_k = zbsc[ni, m_arr]
+
+        isgn = jnp.sign(n_arr).astype(rbcc_k.dtype)
+
+        # Case m=0 and n!=0
+        mask_m0_nnz = (m_arr == 0) & n_nonzero & m_nonneg
+        R_cos = jnp.where(mask_m0_nnz, rbcc_k, R_cos)
+        Z_sin = jnp.where(mask_m0_nnz, -isgn * zbcs_k, Z_sin)
+        if lasym:
+            R_sin = jnp.where(mask_m0_nnz, -isgn * rbcs_k, R_sin)
+            Z_cos = jnp.where(mask_m0_nnz, zbcc_k, Z_cos)
+
+        # n==0 (m>=0)
+        mask_n0 = n_zero & m_nonneg
+        R_cos = jnp.where(mask_n0, rbcc_k, R_cos)
+        Z_sin = jnp.where(mask_n0, zbsc_k, Z_sin)
+        if lasym:
+            R_sin = jnp.where(mask_n0, rbsc_k, R_sin)
+            Z_cos = jnp.where(mask_n0, zbcc_k, Z_cos)
+
+        # n>0
+        mask_np = n_pos & m_nonneg & ~mask_n0
+        R_cos = jnp.where(mask_np, 0.5 * (rbcc_k + rbss_k), R_cos)
+        R_sin = jnp.where(mask_np, 0.5 * (rbsc_k - rbcs_k), R_sin)
+        Z_cos = jnp.where(mask_np, 0.5 * (zbcc_k + zbss_k), Z_cos)
+        Z_sin = jnp.where(mask_np, 0.5 * (zbsc_k - zbcs_k), Z_sin)
+
+        # n<0
+        mask_nn = (n_arr < 0) & m_nonneg & ~mask_n0
+        R_cos = jnp.where(mask_nn, 0.5 * (rbcc_k - rbss_k), R_cos)
+        R_sin = jnp.where(mask_nn, 0.5 * (rbsc_k + rbcs_k), R_sin)
+        Z_cos = jnp.where(mask_nn, 0.5 * (zbcc_k - zbss_k), Z_cos)
+        Z_sin = jnp.where(mask_nn, 0.5 * (zbsc_k + zbcs_k), Z_sin)
+
+        # Zero out m<0
+        R_cos = jnp.where(m_nonneg, R_cos, 0.0)
+        R_sin = jnp.where(m_nonneg, R_sin, 0.0)
+        Z_cos = jnp.where(m_nonneg, Z_cos, 0.0)
+        Z_sin = jnp.where(m_nonneg, Z_sin, 0.0)
+
+        return BoundaryCoeffs(R_cos=R_cos, R_sin=R_sin, Z_cos=Z_cos, Z_sin=Z_sin)
+
     m_arr = np.asarray(modes.m, dtype=int)
     n_arr = np.asarray(modes.n, dtype=int)
     K = m_arr.size
@@ -307,6 +460,35 @@ def boundary_apply_vmec_m1_constraint(
 ) -> BoundaryCoeffs:
     """Apply VMEC's internal m=1 boundary constraint and return helical coeffs."""
     internal = _boundary_internal_from_helical(boundary, modes, lthreed=lthreed, lasym=lasym)
+    if _is_jax_array(internal.rbcc):
+        rbcc = internal.rbcc
+        rbss = internal.rbss
+        rbcs = internal.rbcs
+        rbsc = internal.rbsc
+        zbcc = internal.zbcc
+        zbss = internal.zbss
+        zbcs = internal.zbcs
+        zbsc = internal.zbsc
+        if internal.rbcc.shape[1] > 1:
+            if lthreed:
+                temp = rbss[:, 1]
+                rbss = rbss.at[:, 1].set(0.5 * (temp + zbcs[:, 1]))
+                zbcs = zbcs.at[:, 1].set(0.5 * (temp - zbcs[:, 1]))
+            if lasym:
+                temp = rbsc[:, 1]
+                rbsc = rbsc.at[:, 1].set(0.5 * (temp + zbcc[:, 1]))
+                zbcc = zbcc.at[:, 1].set(0.5 * (temp - zbcc[:, 1]))
+        internal = BoundaryInternalCoeffs(
+            rbcc=rbcc,
+            rbss=rbss,
+            rbcs=rbcs,
+            rbsc=rbsc,
+            zbcc=zbcc,
+            zbss=zbss,
+            zbcs=zbcs,
+            zbsc=zbsc,
+        )
+        return _boundary_helical_from_internal(internal, modes, lthreed=lthreed, lasym=lasym)
     if internal.rbcc.shape[1] > 1:
         if lthreed:
             temp = internal.rbss[:, 1].copy()
@@ -328,6 +510,35 @@ def boundary_undo_vmec_m1_constraint(
 ) -> BoundaryCoeffs:
     """Undo VMEC's internal m=1 boundary constraint and return helical coeffs."""
     internal = _boundary_internal_from_helical(boundary, modes, lthreed=lthreed, lasym=lasym)
+    if _is_jax_array(internal.rbcc):
+        rbcc = internal.rbcc
+        rbss = internal.rbss
+        rbcs = internal.rbcs
+        rbsc = internal.rbsc
+        zbcc = internal.zbcc
+        zbss = internal.zbss
+        zbcs = internal.zbcs
+        zbsc = internal.zbsc
+        if internal.rbcc.shape[1] > 1:
+            if lthreed:
+                temp = rbss[:, 1]
+                rbss = rbss.at[:, 1].set(temp + zbcs[:, 1])
+                zbcs = zbcs.at[:, 1].set(temp - zbcs[:, 1])
+            if lasym:
+                temp = rbsc[:, 1]
+                rbsc = rbsc.at[:, 1].set(temp + zbcc[:, 1])
+                zbcc = zbcc.at[:, 1].set(temp - zbcc[:, 1])
+        internal = BoundaryInternalCoeffs(
+            rbcc=rbcc,
+            rbss=rbss,
+            rbcs=rbcs,
+            rbsc=rbsc,
+            zbcc=zbcc,
+            zbss=zbss,
+            zbcs=zbcs,
+            zbsc=zbsc,
+        )
+        return _boundary_helical_from_internal(internal, modes, lthreed=lthreed, lasym=lasym)
     if internal.rbcc.shape[1] > 1:
         if lthreed:
             temp = internal.rbss[:, 1].copy()
