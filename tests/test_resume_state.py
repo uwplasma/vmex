@@ -15,6 +15,8 @@ def test_resume_state_matches_continuous():
         multigrid=False,
         ns_override=13,
         verbose=False,
+        performance_mode=False,
+        use_scan=False,
     )
     run1 = vj.run_fixed_boundary(
         input_path,
@@ -23,6 +25,8 @@ def test_resume_state_matches_continuous():
         multigrid=False,
         ns_override=13,
         verbose=False,
+        performance_mode=False,
+        use_scan=False,
     )
     resume_state = run1.result.diagnostics["resume_state"]
     run2 = vj.run_fixed_boundary(
@@ -34,6 +38,8 @@ def test_resume_state_matches_continuous():
         restart_state=run1.state,
         restart_solver_state=resume_state,
         verbose=False,
+        performance_mode=False,
+        use_scan=False,
     )
 
     def _cat(a, b):

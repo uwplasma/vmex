@@ -82,49 +82,6 @@ def residual_scalars_from_state(
             self.lasym = bool(lasym)
             self.signgs = int(signgs)
 
-
-def solve_fixed_boundary_from_boundary(
-    *,
-    boundary,
-    static: VMECStatic,
-    indata,
-    flux,
-    pressure,
-    signgs: int,
-    max_iter: int = 2,
-    step_size: float = 5e-3,
-    jacobian_penalty: float = 1e3,
-    jit_grad: bool = False,
-    differentiable: bool = True,
-    stop_grad_in_update: bool = True,
-    verbose: bool = False,
-    vmec_project: bool = False,
-):
-    """Solve VMEC fixed-boundary starting from a boundary coefficient set.
-
-    This helper wraps `initial_guess_from_boundary` and `solve_fixed_boundary_gd`
-    so optimization scripts can call a single function.
-    """
-    st_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=vmec_project)
-    res = solve_fixed_boundary_gd(
-        st_guess,
-        static,
-        phipf=flux.phipf,
-        chipf=flux.chipf,
-        signgs=signgs,
-        lamscale=flux.lamscale,
-        pressure=pressure,
-        gamma=float(indata.get_float("GAMMA", 0.0)),
-        max_iter=int(max_iter),
-        step_size=float(step_size),
-        jacobian_penalty=float(jacobian_penalty),
-        jit_grad=bool(jit_grad),
-        differentiable=bool(differentiable),
-        stop_grad_in_update=bool(stop_grad_in_update),
-        verbose=bool(verbose),
-    )
-    return res.state
-
     wout_like = wout
     if wout_like is None:
         wout_like = _WoutLike(
@@ -175,8 +132,53 @@ def solve_fixed_boundary_from_boundary(
         flss=rzl.flss,
     )
     norms = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=static.s, signgs=int(signgs))
-    scal = vmec_fsq_from_tomnsps_dynamic(frzl=frzl, norms=norms, lconm1=bool(getattr(static.cfg, "lconm1", True)))
+    scal = vmec_fsq_from_tomnsps_dynamic(
+        frzl=frzl, norms=norms, lconm1=bool(getattr(static.cfg, "lconm1", True))
+    )
     return float(scal.fsqr), float(scal.fsqz), float(scal.fsql)
+
+
+def solve_fixed_boundary_from_boundary(
+    *,
+    boundary,
+    static: VMECStatic,
+    indata,
+    flux,
+    pressure,
+    signgs: int,
+    max_iter: int = 2,
+    step_size: float = 5e-3,
+    jacobian_penalty: float = 1e3,
+    jit_grad: bool = False,
+    differentiable: bool = True,
+    stop_grad_in_update: bool = True,
+    verbose: bool = False,
+    vmec_project: bool = False,
+):
+    """Solve VMEC fixed-boundary starting from a boundary coefficient set.
+
+    This helper wraps `initial_guess_from_boundary` and `solve_fixed_boundary_gd`
+    so optimization scripts can call a single function.
+    """
+    st_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=vmec_project)
+    res = solve_fixed_boundary_gd(
+        st_guess,
+        static,
+        phipf=flux.phipf,
+        chipf=flux.chipf,
+        signgs=signgs,
+        lamscale=flux.lamscale,
+        pressure=pressure,
+        gamma=float(indata.get_float("GAMMA", 0.0)),
+        max_iter=int(max_iter),
+        step_size=float(step_size),
+        jacobian_penalty=float(jacobian_penalty),
+        jit_grad=bool(jit_grad),
+        differentiable=bool(differentiable),
+        stop_grad_in_update=bool(stop_grad_in_update),
+        verbose=bool(verbose),
+    )
+    return res.state
 
 
 def wout_from_fixed_boundary_run(
@@ -529,6 +531,13 @@ def run_fixed_boundary(
                 f"restart_state ns={restart_ns} does not match ns_override={ns_override}"
             )
         cfg = replace(cfg, ns=int(restart_ns))
+        if restart_solver_state is not None:
+            # Ensure resume checkpoints align with the provided restart state.
+            try:
+                restart_solver_state = dict(restart_solver_state)
+                restart_solver_state["state_checkpoint"] = restart_state_eff
+            except Exception:
+                pass
     elif ns_override is not None:
         cfg = replace(cfg, ns=int(ns_override))
     solver_lower = str(solver).lower()
