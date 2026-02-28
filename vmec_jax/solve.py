@@ -7688,6 +7688,8 @@ def solve_fixed_boundary_residual_iter(
         fsqr_full_diag = fsqr_full if not scan_minimal else np.zeros((0,), dtype=float)
         fsqz_full_diag = fsqz_full if not scan_minimal else np.zeros((0,), dtype=float)
         fsql_full_diag = fsql_full if not scan_minimal else np.zeros((0,), dtype=float)
+        n_iter_hist = int(np.asarray(w_hist).shape[0])
+        resume_iter_offset = int(np.asarray(carry_final.iter_offset)) + n_iter_hist
 
         return SolveVmecResidualResult(
             state=carry_final.state,
@@ -7746,11 +7748,15 @@ def solve_fixed_boundary_residual_iter(
                     "time_step": float(np.asarray(carry_final.time_step)),
                     "inv_tau": np.asarray(carry_final.inv_tau),
                     "fsq_prev": float(np.asarray(carry_final.fsq_prev)),
+                    "fsq0_prev": float(np.asarray(carry_final.fsq0_prev)),
                     "flip_sign": float(np.asarray(carry_final.flip_sign)),
                     "iter1": int(np.asarray(carry_final.iter1)),
-                    "iter_offset": int(np.asarray(carry_final.iter_offset)),
+                    "iter_offset": int(resume_iter_offset),
                     "res0": float(np.asarray(carry_final.res0)),
                     "res1": float(np.asarray(carry_final.res1)),
+                    "prev_rz_fsq": float(
+                        np.asarray(carry_final.fsqr_prev_phys + carry_final.fsqz_prev_phys)
+                    ),
                     "vmec2000_cache_valid": bool(np.asarray(carry_final.cache_valid)),
                     "ijacob": int(np.asarray(carry_final.ijacob)),
                     "bad_resets": int(np.asarray(carry_final.bad_resets)),
