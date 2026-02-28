@@ -160,6 +160,7 @@ def booz_xform_inputs_from_state(
     indata,
     signgs: int,
     use_nyq_from_grid: bool = True,
+    trig: VmecTrigTables | None = None,
 ) -> BoozXformInputs:
     """Construct booz_xform_jax inputs from a VMEC state using JAX kernels."""
     cfg = static.cfg
@@ -245,6 +246,23 @@ def booz_xform_inputs_from_state(
     pres = jnp.asarray(prof.get("pressure", jnp.zeros_like(s_half)))
     pres = pres.at[0].set(0.0)
 
+    # Build or reuse trig tables for VMEC parity transforms.
+    if trig is None:
+        nyq_m = np.asarray(nyq_modes.m)
+        nyq_n = np.asarray(nyq_modes.n)
+        mmax = int(np.max(nyq_m)) if nyq_m.size else 0
+        nmax = int(np.max(np.abs(nyq_n))) if nyq_n.size else 0
+        trig = vmec_trig_tables(
+            ntheta=int(cfg.ntheta),
+            nzeta=int(cfg.nzeta),
+            nfp=int(cfg.nfp),
+            mmax=mmax,
+            nmax=nmax,
+            lasym=bool(cfg.lasym),
+            dtype=jnp.asarray(state.Rcos).dtype,
+            cache=True,
+        )
+
     bc = vmec_bcovar_half_mesh_from_wout(
         state=state,
         static=static,
@@ -254,7 +272,7 @@ def booz_xform_inputs_from_state(
         use_wout_bsub_for_lambda=False,
         use_wout_bmag_for_bsq=False,
         use_vmec_synthesis=True,
-        trig=None,
+        trig=trig,
     )
 
     bsubu = jnp.asarray(bc.bsubu)
@@ -262,21 +280,6 @@ def booz_xform_inputs_from_state(
     bsq = jnp.asarray(bc.bsq)
     pres_h = pres[:, None, None]
     bmod = jnp.sqrt(jnp.maximum(2.0 * (bsq - pres_h), 0.0))
-
-    nyq_m = np.asarray(nyq_modes.m)
-    nyq_n = np.asarray(nyq_modes.n)
-    mmax = int(np.max(nyq_m)) if nyq_m.size else 0
-    nmax = int(np.max(np.abs(nyq_n))) if nyq_n.size else 0
-    trig = vmec_trig_tables(
-        ntheta=int(cfg.ntheta),
-        nzeta=int(cfg.nzeta),
-        nfp=int(cfg.nfp),
-        mmax=mmax,
-        nmax=nmax,
-        lasym=bool(cfg.lasym),
-        dtype=jnp.asarray(bsubu).dtype,
-        cache=True,
-    )
 
     bsubumnc_full, bsubumns_full = vmec_realspace_analysis(
         f=bsubu, modes=nyq_modes, trig=trig, parity="both"
