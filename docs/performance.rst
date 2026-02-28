@@ -46,7 +46,7 @@ The scan-based loop lifts the VMEC2000 iteration into ``jax.lax.scan`` to reduce
 Python overhead. You can enable it with:
 
 - ``--fast`` on the CLI,
-- ``performance_mode=True`` in ``run_fixed_boundary``,
+- ``performance_mode=True`` in ``run_fixed_boundary`` (default),
 - or ``VMEC_JAX_USE_SCAN=1``.
 
 **Important**: the scan path is still parity-sensitive for large-``ns`` cases

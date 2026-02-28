@@ -90,8 +90,8 @@ python examples/optimization/implicit_target_iota_volume.py --case circular_toka
 
 ## Performance vs parity
 
-- Default runs prioritize VMEC2000-style iteration parity (time-step control, restarts, dumps).
-- For pure speed, use the scan path (`performance_mode=True` or solver `vmec2000_iter_fast`).
+- Default runs enable the scan-based fast loop (`performance_mode=True`) with a parity guard.
+- Use `--parity` or `performance_mode=False` to force the conservative parity path.
 - Details and profiling guidance live in `docs/performance.rst`.
 - Parity methodology and current status live in `docs/validation.rst`.
 
