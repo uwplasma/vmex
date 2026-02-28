@@ -136,70 +136,103 @@ def residual_scalars_from_state(
     return float(scal.fsqr), float(scal.fsqz), float(scal.fsql)
 
 
+def wout_from_fixed_boundary_run(
+    run: FixedBoundaryRun,
+    *,
+    include_fsq: bool = True,
+    path: str | Path | None = None,
+    fast_bcovar: bool | None = None,
+) -> WoutData:
+    """Build a minimal VMEC-style ``WoutData`` from a fixed-boundary run.
+
+    This is the in-memory counterpart to :func:`write_wout_from_fixed_boundary_run`.
+    Set ``fast_bcovar=True`` to enable the fast bcovar path for this call.
+    """
+    from .wout import wout_minimal_from_fixed_boundary
+
+    path = Path(path) if path is not None else Path("wout_vmec_jax.nc")
+
+    prev_fast_bcovar = None
+    if fast_bcovar is not None:
+        prev_fast_bcovar = os.getenv("VMEC_JAX_WOUT_FAST_BCOVAR")
+        os.environ["VMEC_JAX_WOUT_FAST_BCOVAR"] = "1" if fast_bcovar else "0"
+
+    try:
+        fsqt = None
+        converged = None
+        if include_fsq:
+            fsqr = fsqz = fsql = None
+            res = getattr(run, "result", None)
+            if res is not None:
+                converged = getattr(res, "diagnostics", {}).get("converged", None)
+                fsqr_hist = getattr(res, "fsqr2_history", None)
+                fsqz_hist = getattr(res, "fsqz2_history", None)
+                fsql_hist = getattr(res, "fsql2_history", None)
+                if fsqr_hist is not None and fsqz_hist is not None:
+                    fsqr_hist = np.asarray(fsqr_hist, dtype=float)
+                    fsqz_hist = np.asarray(fsqz_hist, dtype=float)
+                    fsqt_hist = fsqr_hist + fsqz_hist
+                    nstore = 100
+                    niter = int(fsqt_hist.size)
+                    stride = int(niter // nstore) + 1 if niter > 0 else 1
+                    fsqt = np.zeros((nstore,), dtype=float)
+                    count = 0
+                    for iter2 in range(1, niter + 1):
+                        if iter2 % stride != 0:
+                            continue
+                        fsqt[count] = float(fsqt_hist[iter2 - 1])
+                        count += 1
+                        if count >= nstore:
+                            break
+                if fsqr_hist is not None and fsqz_hist is not None and fsql_hist is not None:
+                    try:
+                        fsqr = float(np.asarray(fsqr_hist)[-1])
+                        fsqz = float(np.asarray(fsqz_hist)[-1])
+                        fsql = float(np.asarray(fsql_hist)[-1])
+                    except Exception:
+                        fsqr = fsqz = fsql = None
+            if fsqr is None or fsqz is None or fsql is None:
+                fsqr, fsqz, fsql = residual_scalars_from_state(
+                    state=run.state, static=run.static, indata=run.indata, signgs=int(run.signgs), use_vmec_synthesis=True
+                )
+        else:
+            fsqr = fsqz = fsql = 0.0
+
+        wout = wout_minimal_from_fixed_boundary(
+            path=path,
+            state=run.state,
+            static=run.static,
+            indata=run.indata,
+            signgs=int(run.signgs),
+            fsqr=float(fsqr),
+            fsqz=float(fsqz),
+            fsql=float(fsql),
+            fsqt=fsqt,
+            converged=converged,
+        )
+    finally:
+        if fast_bcovar is not None:
+            if prev_fast_bcovar is None:
+                os.environ.pop("VMEC_JAX_WOUT_FAST_BCOVAR", None)
+            else:
+                os.environ["VMEC_JAX_WOUT_FAST_BCOVAR"] = prev_fast_bcovar
+    return wout
+
+
 def write_wout_from_fixed_boundary_run(
     path: str | Path,
     run: FixedBoundaryRun,
     *,
     include_fsq: bool = True,
+    fast_bcovar: bool | None = None,
 ):
     """Write a minimal VMEC-style `wout_*.nc` from a fixed-boundary run."""
-    from .wout import write_wout, wout_minimal_from_fixed_boundary
+    from .wout import write_wout
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    fsqt = None
-    converged = None
-    if include_fsq:
-        fsqr = fsqz = fsql = None
-        res = getattr(run, "result", None)
-        if res is not None:
-            converged = getattr(res, "diagnostics", {}).get("converged", None)
-            fsqr_hist = getattr(res, "fsqr2_history", None)
-            fsqz_hist = getattr(res, "fsqz2_history", None)
-            fsql_hist = getattr(res, "fsql2_history", None)
-            if fsqr_hist is not None and fsqz_hist is not None:
-                fsqr_hist = np.asarray(fsqr_hist, dtype=float)
-                fsqz_hist = np.asarray(fsqz_hist, dtype=float)
-                fsqt_hist = fsqr_hist + fsqz_hist
-                nstore = 100
-                niter = int(fsqt_hist.size)
-                stride = int(niter // nstore) + 1 if niter > 0 else 1
-                fsqt = np.zeros((nstore,), dtype=float)
-                count = 0
-                for iter2 in range(1, niter + 1):
-                    if iter2 % stride != 0:
-                        continue
-                    fsqt[count] = float(fsqt_hist[iter2 - 1])
-                    count += 1
-                    if count >= nstore:
-                        break
-            if fsqr_hist is not None and fsqz_hist is not None and fsql_hist is not None:
-                try:
-                    fsqr = float(np.asarray(fsqr_hist)[-1])
-                    fsqz = float(np.asarray(fsqz_hist)[-1])
-                    fsql = float(np.asarray(fsql_hist)[-1])
-                except Exception:
-                    fsqr = fsqz = fsql = None
-        if fsqr is None or fsqz is None or fsql is None:
-            fsqr, fsqz, fsql = residual_scalars_from_state(
-                state=run.state, static=run.static, indata=run.indata, signgs=int(run.signgs), use_vmec_synthesis=True
-            )
-    else:
-        fsqr = fsqz = fsql = 0.0
-
-    wout = wout_minimal_from_fixed_boundary(
-        path=path,
-        state=run.state,
-        static=run.static,
-        indata=run.indata,
-        signgs=int(run.signgs),
-        fsqr=float(fsqr),
-        fsqz=float(fsqz),
-        fsql=float(fsql),
-        fsqt=fsqt,
-        converged=converged,
-    )
+    wout = wout_from_fixed_boundary_run(run, include_fsq=include_fsq, path=path, fast_bcovar=fast_bcovar)
     write_wout(path, wout, overwrite=True)
     return wout
 

@@ -86,6 +86,9 @@ Most users should start from the small public API in ``vmec_jax.api``::
       include_fsq=True,
   )
 
+  # If you only need an in-memory wout object (no file I/O):
+  wout_mem = vj.wout_from_fixed_boundary_run(run, include_fsq=True)
+
   wref = vj.read_wout("examples/data/wout_shaped_tokamak_pressure_reference.nc")
   print("fsq_total(ref)=", float(wref.fsqr + wref.fsqz + wref.fsql))
   print("fsq_total(new)=", float(wout.fsqr + wout.fsqz + wout.fsql))
