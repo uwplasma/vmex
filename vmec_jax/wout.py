@@ -4513,9 +4513,9 @@ def wout_minimal_from_fixed_boundary(
     # opt-in.
     _force_bss_env = os.getenv("VMEC_JAX_WOUT_FORCE_BSS", "").strip().lower()
     if _force_bss_env == "":
-        # Default: use force-kernel bsup inputs for LASYM parity; keep bcovar
-        # path for symmetric cases unless explicitly requested.
-        use_force_bss = bool(lasym)
+        # Default to bcovar/Jacobian bss inputs. Force-kernel bss inputs remain
+        # opt-in for targeted debugging.
+        use_force_bss = False
     else:
         use_force_bss = _force_bss_env not in ("0", "false", "no")
     bsupu_bss = np.asarray(bc.bsupu, dtype=float)
@@ -5309,6 +5309,48 @@ def wout_minimal_from_fixed_boundary(
         fsqt_out = np.zeros((100,), dtype=float)
     else:
         fsqt_out = np.asarray(fsqt, dtype=float)
+
+    if os.getenv("VMEC_JAX_DUMP_WROUT_MODES", "") not in ("", "0"):
+        dump_dir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+        dump_dir.mkdir(parents=True, exist_ok=True)
+        dump_path = dump_dir / "wrout_modes_jax.dat"
+        m_modes = np.asarray(nyq_modes.m, dtype=int)
+        n_modes = np.asarray(nyq_modes.n, dtype=int)
+        gmnc_np = np.asarray(gmnc, dtype=float)
+        gmns_np = np.asarray(gmns, dtype=float)
+        bmnc_np = np.asarray(bmnc, dtype=float)
+        bmns_np = np.asarray(bmns, dtype=float)
+        bsubumnc_np = np.asarray(bsubumnc, dtype=float)
+        bsubumns_np = np.asarray(bsubumns, dtype=float)
+        bsubvmnc_np = np.asarray(bsubvmnc, dtype=float)
+        bsubvmns_np = np.asarray(bsubvmns, dtype=float)
+        bsubsmnc_np = np.asarray(bsubsmnc, dtype=float)
+        bsubsmns_np = np.asarray(bsubsmns, dtype=float)
+        bsupumnc_np = np.asarray(bsupumnc, dtype=float)
+        bsupumns_np = np.asarray(bsupumns, dtype=float)
+        bsupvmnc_np = np.asarray(bsupvmnc, dtype=float)
+        bsupvmns_np = np.asarray(bsupvmns, dtype=float)
+        with dump_path.open("w") as f:
+            f.write("# wrout Fourier-mode dump (vmec_jax)\n")
+            f.write(f"ns={ns}\n")
+            f.write(f"mnmax_nyq={m_modes.size}\n")
+            f.write("cols: js mn m n\n")
+            f.write(" gmnc gmns bmnc bmns\n")
+            f.write(" bsubumnc bsubumns bsubvmnc bsubvmns\n")
+            f.write(" bsubsmnc bsubsmns\n")
+            f.write(" bsupumnc bsupumns bsupvmnc bsupvmns\n")
+            for js_idx in range(ns):
+                for mn_idx in range(m_modes.size):
+                    f.write(
+                        f"{js_idx + 1:6d}{mn_idx + 1:6d}{int(m_modes[mn_idx]):6d}{int(n_modes[mn_idx]):6d}"
+                        f"{gmnc_np[js_idx, mn_idx]:24.16E}{gmns_np[js_idx, mn_idx]:24.16E}"
+                        f"{bmnc_np[js_idx, mn_idx]:24.16E}{bmns_np[js_idx, mn_idx]:24.16E}"
+                        f"{bsubumnc_np[js_idx, mn_idx]:24.16E}{bsubumns_np[js_idx, mn_idx]:24.16E}"
+                        f"{bsubvmnc_np[js_idx, mn_idx]:24.16E}{bsubvmns_np[js_idx, mn_idx]:24.16E}"
+                        f"{bsubsmnc_np[js_idx, mn_idx]:24.16E}{bsubsmns_np[js_idx, mn_idx]:24.16E}"
+                        f"{bsupumnc_np[js_idx, mn_idx]:24.16E}{bsupumns_np[js_idx, mn_idx]:24.16E}"
+                        f"{bsupvmnc_np[js_idx, mn_idx]:24.16E}{bsupvmns_np[js_idx, mn_idx]:24.16E}\n"
+                    )
 
     wout = WoutData(
         path=Path(path),
