@@ -783,6 +783,10 @@ def run_fixed_boundary(
     if solver in ("vmec2000_iter_fast", "vmec2000_scan"):
         use_scan = True
         solver = "vmec2000_iter"
+    # Parity mode defaults to the VMEC2000 non-scan control path unless
+    # explicitly forced via environment variables.
+    if solver == "vmec2000_iter" and (not bool(performance_mode)):
+        use_scan = False
     if os.getenv("VMEC_JAX_USE_SCAN", "") not in ("", "0"):
         use_scan = True
     if solver == "gd":
