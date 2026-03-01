@@ -3920,9 +3920,28 @@ class WoutData:
 def _bool_from_nc(x: Any) -> bool:
     # VMEC stores *_logical__ as 0/1 integers in netcdf.
     try:
-        return bool(int(np.asarray(x)))
+        arr = np.asarray(np.ma.filled(x, 0))
+        return bool(int(np.ravel(arr)[0]))
     except Exception:
         return bool(x)
+
+
+def _nc_scalar(x: Any, default: float = 0.0, *, as_int: bool = False) -> int | float:
+    """Robust scalar extraction from netCDF values, including masked scalars."""
+    try:
+        arr = np.asarray(np.ma.filled(x, default))
+        val = np.ravel(arr)[0]
+    except Exception:
+        val = default
+    if as_int:
+        try:
+            return int(val)
+        except Exception:
+            return int(default)
+    try:
+        return float(val)
+    except Exception:
+        return float(default)
 
 
 def read_wout(path: str | Path) -> WoutData:
@@ -3934,17 +3953,34 @@ def read_wout(path: str | Path) -> WoutData:
         raise ImportError("netCDF4 is required to read wout files (pip install -e .[netcdf])") from e
 
     with netCDF4.Dataset(path) as ds:
-        ns = int(ds.variables["ns"][:])
-        mpol = int(ds.variables["mpol"][:])
-        ntor = int(ds.variables["ntor"][:])
-        nfp = int(ds.variables["nfp"][:])
+        ns = int(_nc_scalar(ds.variables["ns"][:], 0.0, as_int=True))
+        mpol = int(_nc_scalar(ds.variables["mpol"][:], 0.0, as_int=True))
+        ntor = int(_nc_scalar(ds.variables["ntor"][:], 0.0, as_int=True))
+        nfp = int(_nc_scalar(ds.variables["nfp"][:], 0.0, as_int=True))
         lasym = _bool_from_nc(ds.variables.get("lasym__logical__", 0)[:])
-        signgs = int(ds.variables["signgs"][:])
+        signgs = int(_nc_scalar(ds.variables["signgs"][:], 1.0, as_int=True))
+        if ns <= 0 or mpol <= 0 or ntor < 0 or nfp <= 0:
+            raise ValueError(f"Incomplete or masked wout scalar metadata in {path}")
 
-        xm = np.asarray(ds.variables["xm"][:], dtype=int)
-        xn = np.asarray(ds.variables["xn"][:], dtype=int)
-        xm_nyq = np.asarray(ds.variables["xm_nyq"][:], dtype=int)
-        xn_nyq = np.asarray(ds.variables["xn_nyq"][:], dtype=int)
+        xm_raw = ds.variables["xm"][:]
+        xn_raw = ds.variables["xn"][:]
+        xm_nyq_raw = ds.variables["xm_nyq"][:]
+        xn_nyq_raw = ds.variables["xn_nyq"][:]
+        for raw_name, raw in (
+            ("xm", xm_raw),
+            ("xn", xn_raw),
+            ("xm_nyq", xm_nyq_raw),
+            ("xn_nyq", xn_nyq_raw),
+        ):
+            if np.ma.isMaskedArray(raw):
+                mask = np.asarray(raw.mask)
+                if mask.size > 0 and bool(np.all(mask)):
+                    raise ValueError(f"Incomplete or masked wout mode metadata ({raw_name}) in {path}")
+
+        xm = np.asarray(np.ma.filled(xm_raw, 0.0), dtype=int)
+        xn = np.asarray(np.ma.filled(xn_raw, 0.0), dtype=int)
+        xm_nyq = np.asarray(np.ma.filled(xm_nyq_raw, 0.0), dtype=int)
+        xn_nyq = np.asarray(np.ma.filled(xn_nyq_raw, 0.0), dtype=int)
 
         rmnc = np.asarray(ds.variables["rmnc"][:])
         rmns = np.asarray(ds.variables.get("rmns", np.zeros_like(rmnc))[:])
@@ -3976,10 +4012,10 @@ def read_wout(path: str | Path) -> WoutData:
         bmnc = np.asarray(ds.variables.get("bmnc", np.zeros_like(gmnc))[:])
         bmns = np.asarray(ds.variables.get("bmns", np.zeros_like(gmnc))[:])
 
-        wb = float(ds.variables["wb"][:])
-        volume_p = float(ds.variables["volume_p"][:])
-        gamma = float(ds.variables.get("gamma", 0.0)[:]) if "gamma" in ds.variables else 0.0
-        wp = float(ds.variables.get("wp", 0.0)[:]) if "wp" in ds.variables else 0.0
+        wb = float(_nc_scalar(ds.variables["wb"][:], 0.0))
+        volume_p = float(_nc_scalar(ds.variables["volume_p"][:], 0.0))
+        gamma = float(_nc_scalar(ds.variables.get("gamma", 0.0)[:], 0.0)) if "gamma" in ds.variables else 0.0
+        wp = float(_nc_scalar(ds.variables.get("wp", 0.0)[:], 0.0)) if "wp" in ds.variables else 0.0
         vp = np.asarray(ds.variables.get("vp", np.zeros((ns,), dtype=float))[:])
 
         # `wout` stores pres/presf divided by mu0. Convert back to VMEC internal
@@ -3990,9 +4026,9 @@ def read_wout(path: str | Path) -> WoutData:
         presf = MU0 * presf_pa
 
         # Force residual scalars (present in most VMEC wout files).
-        fsqr = float(ds.variables.get("fsqr", 0.0)[:]) if "fsqr" in ds.variables else 0.0
-        fsqz = float(ds.variables.get("fsqz", 0.0)[:]) if "fsqz" in ds.variables else 0.0
-        fsql = float(ds.variables.get("fsql", 0.0)[:]) if "fsql" in ds.variables else 0.0
+        fsqr = float(_nc_scalar(ds.variables.get("fsqr", 0.0)[:], 0.0)) if "fsqr" in ds.variables else 0.0
+        fsqz = float(_nc_scalar(ds.variables.get("fsqz", 0.0)[:], 0.0)) if "fsqz" in ds.variables else 0.0
+        fsql = float(_nc_scalar(ds.variables.get("fsql", 0.0)[:], 0.0)) if "fsql" in ds.variables else 0.0
         fsqt = np.asarray(ds.variables.get("fsqt", np.zeros((0,), dtype=float))[:])
         equif = np.asarray(ds.variables.get("equif", np.zeros((ns,), dtype=float))[:])
 
@@ -4018,14 +4054,14 @@ def read_wout(path: str | Path) -> WoutData:
         raxis_cs = np.asarray(ds.variables.get("raxis_cs", np.zeros_like(raxis_cc))[:])
         zaxis_cc = np.asarray(ds.variables.get("zaxis_cc", np.zeros_like(zaxis_cs))[:])
 
-        Aminor_p = float(ds.variables.get("Aminor_p", 0.0)[:]) if "Aminor_p" in ds.variables else 0.0
-        Rmajor_p = float(ds.variables.get("Rmajor_p", 0.0)[:]) if "Rmajor_p" in ds.variables else 0.0
-        aspect = float(ds.variables.get("aspect", 0.0)[:]) if "aspect" in ds.variables else 0.0
-        betatotal = float(ds.variables.get("betatotal", 0.0)[:]) if "betatotal" in ds.variables else 0.0
-        betapol = float(ds.variables.get("betapol", 0.0)[:]) if "betapol" in ds.variables else 0.0
-        betator = float(ds.variables.get("betator", 0.0)[:]) if "betator" in ds.variables else 0.0
-        betaxis = float(ds.variables.get("betaxis", 0.0)[:]) if "betaxis" in ds.variables else 0.0
-        ctor = float(ds.variables.get("ctor", 0.0)[:]) if "ctor" in ds.variables else 0.0
+        Aminor_p = float(_nc_scalar(ds.variables.get("Aminor_p", 0.0)[:], 0.0)) if "Aminor_p" in ds.variables else 0.0
+        Rmajor_p = float(_nc_scalar(ds.variables.get("Rmajor_p", 0.0)[:], 0.0)) if "Rmajor_p" in ds.variables else 0.0
+        aspect = float(_nc_scalar(ds.variables.get("aspect", 0.0)[:], 0.0)) if "aspect" in ds.variables else 0.0
+        betatotal = float(_nc_scalar(ds.variables.get("betatotal", 0.0)[:], 0.0)) if "betatotal" in ds.variables else 0.0
+        betapol = float(_nc_scalar(ds.variables.get("betapol", 0.0)[:], 0.0)) if "betapol" in ds.variables else 0.0
+        betator = float(_nc_scalar(ds.variables.get("betator", 0.0)[:], 0.0)) if "betator" in ds.variables else 0.0
+        betaxis = float(_nc_scalar(ds.variables.get("betaxis", 0.0)[:], 0.0)) if "betaxis" in ds.variables else 0.0
+        ctor = float(_nc_scalar(ds.variables.get("ctor", 0.0)[:], 0.0)) if "ctor" in ds.variables else 0.0
 
         DMerc = np.asarray(ds.variables.get("DMerc", np.zeros((ns,), dtype=float))[:])
         Dshear = np.asarray(ds.variables.get("DShear", np.zeros((ns,), dtype=float))[:])
