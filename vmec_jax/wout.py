@@ -1568,6 +1568,165 @@ def _filter_bsubuv_jxbforce_loop(
     return np.asarray(bsubu_out, dtype=float), np.asarray(bsubv_out, dtype=float)
 
 
+def _filter_bsubuv_jxbforce_lasym_loop(
+    *,
+    bsubu: np.ndarray,
+    bsubv: np.ndarray,
+    trig,
+    mmax_force: int,
+    nmax_force: int,
+    s: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Loop-accurate LASYM low-pass filter for bsubu/bsubv (jxbforce + fext_fft).
+
+    Mirrors jxbforce.f for LASYM runs:
+    1) contract full-grid fields to reduced-grid symmetric/antisymmetric channels
+       (fsym_fft parity split),
+    2) low-pass Fourier transform/inverse on the reduced grid,
+    3) extend filtered channels back to full theta grid (fext_fft).
+    """
+    acc_dtype = np.longdouble
+    bsubu = np.asarray(bsubu, dtype=acc_dtype)
+    bsubv = np.asarray(bsubv, dtype=acc_dtype)
+    if bsubu.shape != bsubv.shape:
+        raise ValueError("bsubu/bsubv shape mismatch")
+
+    ns, ntheta, nzeta = bsubu.shape
+    nt2 = int(trig.ntheta2)
+    nt1 = int(trig.ntheta1)
+    nt3 = int(getattr(trig, "ntheta3", nt2))
+    if ntheta < nt3:
+        raise ValueError("LASYM bsubu grid smaller than ntheta3")
+
+    mmax = int(mmax_force)
+    nmax = int(nmax_force)
+    if mmax < 0 or nmax < 0:
+        return bsubu[:, :nt3, :].astype(float), bsubv[:, :nt3, :].astype(float)
+
+    cosmui = np.asarray(trig.cosmui, dtype=acc_dtype)[:nt2, : mmax + 1]
+    sinmui = np.asarray(trig.sinmui, dtype=acc_dtype)[:nt2, : mmax + 1]
+    cosmu = np.asarray(trig.cosmu, dtype=acc_dtype)[:nt2, : mmax + 1]
+    sinmu = np.asarray(trig.sinmu, dtype=acc_dtype)[:nt2, : mmax + 1]
+    cosnv = np.asarray(trig.cosnv, dtype=acc_dtype)[:, : nmax + 1]
+    sinnv = np.asarray(trig.sinnv, dtype=acc_dtype)[:, : nmax + 1]
+
+    r0scale = float(getattr(trig, "r0scale", 1.0))
+    base_dnorm = acc_dtype(1.0) / acc_dtype(r0scale**2)
+    mnyq, nnyq = _jxbforce_nyquist_limits(trig)
+
+    def _pshalf_from_s(s_full: np.ndarray) -> np.ndarray:
+        if s_full.shape[0] < 2:
+            return np.sqrt(np.maximum(s_full, 0.0))
+        sh = 0.5 * (s_full[1:] + s_full[:-1])
+        p = np.concatenate([sh[:1], sh], axis=0)
+        return np.sqrt(np.maximum(p, 0.0))
+
+    pshalf = None
+    if s is not None:
+        s_full = np.asarray(s, dtype=acc_dtype)
+        pshalf = _pshalf_from_s(s_full)
+        if pshalf.shape[0] > 1:
+            pshalf[0] = pshalf[1]
+
+    bsubu_out = np.zeros((ns, nt3, nzeta), dtype=acc_dtype)
+    bsubv_out = np.zeros((ns, nt3, nzeta), dtype=acc_dtype)
+
+    for js in range(ns):
+        # Fortran fext/fsym paths use (zeta, theta) ordering.
+        bu = np.asarray(bsubu[js, :nt3, :], dtype=acc_dtype).T  # (nzeta, ntheta3)
+        bv = np.asarray(bsubv[js, :nt3, :], dtype=acc_dtype).T
+
+        # VMEC iequi=1 path stores odd channel as shalf*bsub*_e, and jxbforce
+        # immediately divides by shalf. Net effect: both parity channels start
+        # from the same full-grid field.
+        if pshalf is not None and pshalf[js] != 0.0:
+            _ = pshalf[js]
+        bu_ch = np.stack([bu, bu], axis=-1)  # (nzeta, ntheta3, 2)
+        bv_ch = np.stack([bv, bv], axis=-1)
+
+        bu_s = np.zeros((nzeta, nt2, 2), dtype=acc_dtype)
+        bu_a = np.zeros((nzeta, nt2, 2), dtype=acc_dtype)
+        bv_s = np.zeros((nzeta, nt2, 2), dtype=acc_dtype)
+        bv_a = np.zeros((nzeta, nt2, 2), dtype=acc_dtype)
+
+        # fsym_fft contraction.
+        for i in range(nt2):
+            ir = 0 if i == 0 else (nt1 - i)
+            for kz in range(nzeta):
+                kzr = 0 if kz == 0 else (nzeta - kz)
+                bu_a[kz, i, :] = 0.5 * (bu_ch[kz, i, :] - bu_ch[kzr, ir, :])
+                bu_s[kz, i, :] = 0.5 * (bu_ch[kz, i, :] + bu_ch[kzr, ir, :])
+                bv_a[kz, i, :] = 0.5 * (bv_ch[kz, i, :] - bv_ch[kzr, ir, :])
+                bv_s[kz, i, :] = 0.5 * (bv_ch[kz, i, :] + bv_ch[kzr, ir, :])
+
+        bsubua = np.zeros((nzeta, nt2, 2), dtype=acc_dtype)
+        bsubva = np.zeros((nzeta, nt2, 2), dtype=acc_dtype)
+
+        for m in range(mmax + 1):
+            mparity = m & 1
+            for n in range(nmax + 1):
+                dnorm1 = base_dnorm
+                if mnyq > 0 and m == mnyq:
+                    dnorm1 *= 0.5
+                if nnyq > 0 and n == nnyq and n != 0:
+                    dnorm1 *= 0.5
+
+                bsubumn1 = acc_dtype(0.0)
+                bsubumn2 = acc_dtype(0.0)
+                bsubvmn1 = acc_dtype(0.0)
+                bsubvmn2 = acc_dtype(0.0)
+                bsubumn3 = acc_dtype(0.0)
+                bsubumn4 = acc_dtype(0.0)
+                bsubvmn3 = acc_dtype(0.0)
+                bsubvmn4 = acc_dtype(0.0)
+
+                for k in range(nzeta):
+                    for j in range(nt2):
+                        tsini1 = sinmui[j, m] * cosnv[k, n] * dnorm1
+                        tsini2 = cosmui[j, m] * sinnv[k, n] * dnorm1
+                        tcosi1 = cosmui[j, m] * cosnv[k, n] * dnorm1
+                        tcosi2 = sinmui[j, m] * sinnv[k, n] * dnorm1
+
+                        bsubumn1 += tcosi1 * bu_s[k, j, mparity]
+                        bsubumn2 += tcosi2 * bu_s[k, j, mparity]
+                        bsubvmn1 += tcosi1 * bv_s[k, j, mparity]
+                        bsubvmn2 += tcosi2 * bv_s[k, j, mparity]
+
+                        bsubumn3 += tsini1 * bu_a[k, j, mparity]
+                        bsubumn4 += tsini2 * bu_a[k, j, mparity]
+                        bsubvmn3 += tsini1 * bv_a[k, j, mparity]
+                        bsubvmn4 += tsini2 * bv_a[k, j, mparity]
+
+                for k in range(nzeta):
+                    for j in range(nt2):
+                        tcos1 = cosmu[j, m] * cosnv[k, n]
+                        tcos2 = sinmu[j, m] * sinnv[k, n]
+                        bsubua[k, j, 0] += tcos1 * bsubumn1 + tcos2 * bsubumn2
+                        bsubva[k, j, 0] += tcos1 * bsubvmn1 + tcos2 * bsubvmn2
+
+                        tsin1 = sinmu[j, m] * cosnv[k, n]
+                        tsin2 = cosmu[j, m] * sinnv[k, n]
+                        bsubua[k, j, 1] += tsin1 * bsubumn3 + tsin2 * bsubumn4
+                        bsubva[k, j, 1] += tsin1 * bsubvmn3 + tsin2 * bsubvmn4
+
+        # fext_fft extension to full theta grid.
+        bu_full = np.zeros((nzeta, nt3), dtype=acc_dtype)
+        bv_full = np.zeros((nzeta, nt3), dtype=acc_dtype)
+        bu_full[:, :nt2] = bsubua[:, :, 0] + bsubua[:, :, 1]
+        bv_full[:, :nt2] = bsubva[:, :, 0] + bsubva[:, :, 1]
+        for i in range(nt2, nt3):
+            ir = nt1 - i
+            for kz in range(nzeta):
+                kzr = 0 if kz == 0 else (nzeta - kz)
+                bu_full[kz, i] = bsubua[kzr, ir, 0] - bsubua[kzr, ir, 1]
+                bv_full[kz, i] = bsubva[kzr, ir, 0] - bsubva[kzr, ir, 1]
+
+        bsubu_out[js, :, :] = bu_full.T
+        bsubv_out[js, :, :] = bv_full.T
+
+    return np.asarray(bsubu_out, dtype=float), np.asarray(bsubv_out, dtype=float)
+
+
 def _jxbforce_bsubsu_bsubsv_loop(
     *,
     bsubs: np.ndarray,
@@ -2329,6 +2488,18 @@ def _compute_mercier(
             else:
                 bsubu = bsubu[:, :nt2, :]
                 bsubv = bsubv[:, :nt2, :]
+    else:
+        # Match jxbforce LASYM preprocessing: low-pass filter bsubu/bsubv on the
+        # reduced grid then extend back to full theta before Mercier assembly.
+        if os.getenv("VMEC_JAX_MERCIER_LASYM_FILTER", "1") not in ("", "0"):
+            bsubu, bsubv = _filter_bsubuv_jxbforce_lasym_loop(
+                bsubu=np.asarray(bsubu, dtype=float),
+                bsubv=np.asarray(bsubv, dtype=float),
+                trig=trig,
+                mmax_force=max(int(mmax_force), 0),
+                nmax_force=max(int(nmax_force), 0),
+                s=np.asarray(s, dtype=float),
+            )
 
     # Parity-decomposed geometry (totzsps convention): X = X_even + sqrt(s)*X_odd.
     from .vmec_jacobian import _apply_vmec_axis_rules
@@ -2840,20 +3011,10 @@ def _vmec_wrout_nyquist_cos_coeffs(
         raise ValueError("Input theta grid is smaller than VMEC ntheta2")
     f = f[:, :nt2, :]
 
-    cosmui = np.asarray(trig.cosmui, dtype=float)[:nt2, :].copy()
-    sinmui = np.asarray(trig.sinmui, dtype=float)[:nt2, :].copy()
-    cosnv = np.asarray(trig.cosnv, dtype=float).copy()
-    sinnv = np.asarray(trig.sinnv, dtype=float).copy()
-    # Match wrout.f Nyquist handling: halve the highest m/n trig columns once.
-    # Without this, LASYM Nyquist edge modes are over-weighted (often by ~4x).
-    mnyq = cosmui.shape[1] - 1
-    if mnyq > 0:
-        cosmui[:, mnyq] *= 0.5
-        sinmui[:, mnyq] *= 0.5
-    nnyq = cosnv.shape[1] - 1
-    if nnyq > 0:
-        cosnv[:, nnyq] *= 0.5
-        sinnv[:, nnyq] *= 0.5
+    cosmui = np.asarray(trig.cosmui, dtype=float)[:nt2, :]
+    sinmui = np.asarray(trig.sinmui, dtype=float)[:nt2, :]
+    cosnv = np.asarray(trig.cosnv, dtype=float)
+    sinnv = np.asarray(trig.sinnv, dtype=float)
 
     mmax = int(np.max(m))
     nmax = int(np.max(np.abs(n)))
@@ -4724,6 +4885,12 @@ def wout_minimal_from_fixed_boundary(
         bsubs_full[0] = 2.0 * bsubs_full[1] - bsubs_full[2]
         bsubs_full[-1] = 2.0 * bsubs_full[-1] - bsubs_full[-2]
 
+    # JXBFORCE applies a low-pass filter on bsubu/bsubv using (mpol-1, ntor).
+    skip_bsub_filter = os.getenv("VMEC_JAX_SKIP_BSUB_FILTER", "") not in ("", "0")
+    if wout_light:
+        skip_bsub_filter = True
+    filter_from_raw = os.getenv("VMEC_JAX_MERCIER_FILTER_FROM_RAW", "0") not in ("", "0")
+
     if wout_timing_enabled:
         t0 = _time.perf_counter()
     if bool(lasym):
@@ -4731,7 +4898,22 @@ def wout_minimal_from_fixed_boundary(
         if strict_lasym_loop:
             use_lasym_loop = True
         else:
-            use_lasym_loop = os.getenv("VMEC_JAX_WROUT_LASYM_LOOP", "1") not in ("", "0", "false", "no")
+            # Default to vectorized LASYM Nyquist transforms. The explicit
+            # loop path is retained for parity debugging via env toggle.
+            use_lasym_loop = os.getenv("VMEC_JAX_WROUT_LASYM_LOOP", "0") not in ("", "0", "false", "no")
+        if (not skip_bsub_filter) and (
+            os.getenv("VMEC_JAX_WROUT_LASYM_FILTER", "1") not in ("", "0")
+        ):
+            bsubu_out, bsubv_out = _filter_bsubuv_jxbforce_lasym_loop(
+                bsubu=np.asarray(bsubu_out, dtype=float),
+                bsubv=np.asarray(bsubv_out, dtype=float),
+                trig=trig,
+                mmax_force=max(int(mpol) - 1, 0),
+                nmax_force=int(ntor),
+                s=np.asarray(s, dtype=float),
+            )
+            bsubu_diag = np.asarray(bsubu_out, dtype=float)
+            bsubv_diag = np.asarray(bsubv_out, dtype=float)
         pres_h = np.asarray(pres, dtype=float)[:, None, None]
         bmag = np.sqrt(2.0 * np.abs(np.asarray(bc.bsq) - pres_h))
         sqrtg = np.asarray(bc.jac.sqrtg)
@@ -4922,14 +5104,9 @@ def wout_minimal_from_fixed_boundary(
         basis_nyq = build_helical_basis(nyq_modes, grid_nyq, cache=True)
         bsubu_phys = np.asarray(eval_fourier(bsubumnc, bsubumns, basis_nyq))
         bsubv_phys = np.asarray(eval_fourier(bsubvmnc, bsubvmns, basis_nyq))
-    # JXBFORCE applies a low-pass filter on bsubu/bsubv using (mpol-1, ntor).
-    skip_bsub_filter = os.getenv("VMEC_JAX_SKIP_BSUB_FILTER", "") not in ("", "0")
-    if wout_light:
-        skip_bsub_filter = True
-    filter_from_raw = os.getenv("VMEC_JAX_MERCIER_FILTER_FROM_RAW", "0") not in ("", "0")
     if wout_timing_enabled:
         t_bsub_filter = _time.perf_counter()
-    if not bool(lasym) and not skip_bsub_filter:
+    if (not bool(lasym)) and (not skip_bsub_filter):
         if filter_from_raw:
             # Match jxbforce.f directly: filter from the real-space bsubu/bsubv
             # fields (with odd-m shalf handling done inside the loop filter).
