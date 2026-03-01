@@ -2840,10 +2840,20 @@ def _vmec_wrout_nyquist_cos_coeffs(
         raise ValueError("Input theta grid is smaller than VMEC ntheta2")
     f = f[:, :nt2, :]
 
-    cosmui = np.asarray(trig.cosmui, dtype=float)[:nt2, :]
-    sinmui = np.asarray(trig.sinmui, dtype=float)[:nt2, :]
-    cosnv = np.asarray(trig.cosnv, dtype=float)
-    sinnv = np.asarray(trig.sinnv, dtype=float)
+    cosmui = np.asarray(trig.cosmui, dtype=float)[:nt2, :].copy()
+    sinmui = np.asarray(trig.sinmui, dtype=float)[:nt2, :].copy()
+    cosnv = np.asarray(trig.cosnv, dtype=float).copy()
+    sinnv = np.asarray(trig.sinnv, dtype=float).copy()
+    # Match wrout.f Nyquist handling: halve the highest m/n trig columns once.
+    # Without this, LASYM Nyquist edge modes are over-weighted (often by ~4x).
+    mnyq = cosmui.shape[1] - 1
+    if mnyq > 0:
+        cosmui[:, mnyq] *= 0.5
+        sinmui[:, mnyq] *= 0.5
+    nnyq = cosnv.shape[1] - 1
+    if nnyq > 0:
+        cosnv[:, nnyq] *= 0.5
+        sinnv[:, nnyq] *= 0.5
 
     mmax = int(np.max(m))
     nmax = int(np.max(np.abs(n)))
