@@ -5501,6 +5501,18 @@ def wout_minimal_from_fixed_boundary(
             if os.getenv("VMEC_JAX_STRICT_WOUT_DIAGNOSTICS", "") not in ("", "0"):
                 raise
 
+    # Match VMEC2000 wrout behavior for non-converged runs.
+    keep_beta_nonconv = os.getenv("VMEC_JAX_WOUT_KEEP_NONCONVERGED_BETA", "").strip().lower() not in (
+        "",
+        "0",
+        "false",
+        "no",
+    )
+    if (not bool(converged)) and (not keep_beta_nonconv):
+        betatotal = 0.0
+        betapol = 0.0
+        betator = 0.0
+
     # Convert internal lambda coefficients to VMEC wout convention.
     from .field import lamscale_from_phips
 

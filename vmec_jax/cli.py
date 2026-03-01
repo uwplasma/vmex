@@ -120,32 +120,14 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"failed to read &INDATA from {input_path}: {exc}")
         return 2
 
-    def _as_list(value):
-        if value is None:
-            return None
-        if isinstance(value, list):
-            return value
-        if isinstance(value, tuple):
-            return list(value)
-        try:
-            import numpy as np
-
-            if isinstance(value, np.ndarray):
-                return list(value.tolist())
-        except Exception:
-            pass
-        if isinstance(value, (int, float)):
-            return [value]
-        return None
-
-    max_iter = args.max_iter
-    if max_iter is None:
-        niter_array = _as_list(indata.get("NITER_ARRAY", None))
-        ns_array = _as_list(indata.get("NS_ARRAY", None))
-        if bool(args.use_input_niter) and niter_array and (not ns_array or len(niter_array) == len(ns_array)):
-            max_iter = int(sum(int(v) for v in niter_array))
-        else:
-            max_iter = int(indata.get_int("NITER", 10))
+    # Preserve driver semantics:
+    # - default (--use-input-niter): let run_fixed_boundary infer stage budgets
+    #   directly from the input (NITER_ARRAY if present, else NITER).
+    # - --no-use-input-niter: fall back to a single total budget from NITER
+    #   unless --max-iter is explicitly provided.
+    max_iter_arg: int | None = args.max_iter
+    if max_iter_arg is None and (not bool(args.use_input_niter)):
+        max_iter_arg = int(indata.get_int("NITER", 10))
 
     try:
         jit_forces = _parse_jit_forces(args.jit_forces)
@@ -195,10 +177,8 @@ def main(argv: list[str] | None = None) -> int:
             profile_dir = ""
 
     try:
-        run = run_fixed_boundary(
-            str(input_path),
+        run_kwargs = dict(
             solver=str(args.solver),
-            max_iter=int(max_iter),
             step_size=args.step_size,
             history_size=int(args.history_size),
             multigrid=args.multigrid,
@@ -208,6 +188,9 @@ def main(argv: list[str] | None = None) -> int:
             performance_mode=bool(performance_mode),
             vmecpp_restart=bool(vmecpp_restart),
         )
+        if max_iter_arg is not None:
+            run_kwargs["max_iter"] = int(max_iter_arg)
+        run = run_fixed_boundary(str(input_path), **run_kwargs)
         if profile_dir and not profile_window:
             try:
                 import jax

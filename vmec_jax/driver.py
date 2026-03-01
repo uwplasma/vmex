@@ -885,7 +885,14 @@ def run_fixed_boundary(
             niter_stages = niter_stages_input
             ftol_stages = ftol_stages_input
             if niter_stages is None:
-                niter_stages = _distribute_iters(iters=int(max_iter), nstep=int(nstep))
+                if max_iter_overridden:
+                    # Explicit caller budget: distribute total iterations across stages.
+                    niter_stages = _distribute_iters(iters=int(max_iter), nstep=int(nstep))
+                else:
+                    # VMEC2000 semantics: when NITER_ARRAY is absent, NITER applies
+                    # to each stage (not split across stages).
+                    niter_stage = int(indata.get_int("NITER", int(max_iter)))
+                    niter_stages = [niter_stage] * nstep
             else:
                 # Respect the caller's `max_iter` as a total budget, but keep at
                 # least 1 iteration per stage when possible (so staging still
