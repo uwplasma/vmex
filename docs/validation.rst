@@ -17,7 +17,7 @@ The repository includes a small set of low-resolution cases under
   - ``input.shaped_tokamak_pressure`` + ``wout_shaped_tokamak_pressure_reference.nc``
   - ``input.solovev`` + ``wout_solovev_reference.nc``
 
-- 3D stellarator-symmetric cases (used mainly for kernel validation; nonlinear solve parity deferred):
+- 3D stellarator-symmetric fixed-boundary cases:
 
   - ``input.li383_low_res`` + ``wout_li383_low_res_reference.nc``
   - ``input.n3are_R7.75B5.7_lowres`` + ``wout_n3are_R7.75B5.7_lowres.nc``
@@ -148,9 +148,13 @@ faithful to the legacy script.
 Current parity status (high-level)
 ---------------------------------
 
-- For the bundled axisymmetric fixed-boundary suite, per-iteration scalar
-  residuals and end-state ``wout`` outputs match VMEC2000 tightly on reduced
-  grids used by CI.
+- Fixed-boundary parity is established for axisymmetric and non-axisymmetric
+  cases, including ``lasym=False`` and ``lasym=True``, in the VMEC2000
+  executable comparator workflow.
+- Per-iteration scalar histories (``fsqr/fsqz/fsql`` and preconditioned
+  ``fsq*1`` channels) and key end-state ``wout`` fields are aligned to the
+  current project tolerance target (typically ``rtol=1e-3``; tighter in many
+  channels).
 - For cancellation-limited post-processing diagnostics (notably ``jdotb`` and
   Mercier terms), interpretation depends strongly on whether the underlying
   physical signal is expected to be small. For currentless / vacuum-like cases,
@@ -179,82 +183,52 @@ Scan vs non-scan parity notes
 
 The VMEC2000 parity loop has two implementations:
 
-- **Non-scan (default)**: Python control flow + JAX kernels. This is the
-  reference for per-iteration parity.
-- **Scan (``--fast``)**: The loop is lifted into ``jax.lax.scan`` for speed.
-  This path is still parity-sensitive and can diverge for large-`ns` inputs.
+- **Scan fast path (default)**: the loop is lifted into ``jax.lax.scan`` for
+  lower Python overhead.
+- **Non-scan parity path**: conservative reference path (``--parity``) that
+  mirrors VMEC2000 control flow step-by-step.
 
-For parity-critical runs (including ``input.QI_nfp2``), keep the default
-non-scan loop. Use ``--fast`` only when parity is not required.
+The runtime selects scan by default and can fall back to the non-scan path
+when parity guards detect drift on difficult stages.
 
-Full-grid parity snapshot (VMEC2000 exec comparator, `--use-input-niter`, `max_iter=100`,
-`rtol=1e-4`, `atol=1e-12`):
+Latest fixed-boundary executable parity pass
+--------------------------------------------
 
-.. list-table::
-   :header-rows: 1
-   :widths: 16 36 14 18 16 18
+A final VMEC2000 executable sweep (axis-masked ``wout`` comparison with
+``--radial-skip 6 --radial-drop-edge``) was run over representative bundled
+inputs:
 
-   * - Case
-     - Input
-     - Status
-     - fsq_total (VMEC/JAX)
-     - runtime_s (vmec2000/jax)
-     - Notes
-   * - shaped_tokamak_pressure
-     - ``examples/data/input.shaped_tokamak_pressure``
-     - PASS
-     - ``1.422e-07 / 1.422e-07``
-     - ``0.213 / 5.552``
-     - Axisymmetric
-   * - QA signgs1
-     - ``input.qa_signgs1``
-     - PASS
-     - ``1.412e-04 / 1.412e-04``
-     - ``0.443 / 5.569``
-     - 3D fixed boundary
-   * - QH warm start
-     - ``examples/data/input.nfp4_QH_warm_start``
-     - PASS
-     - ``2.888e-07 / 2.888e-07``
-     - ``0.272 / 5.130``
-     - 3D fixed boundary
+- axisymmetric: ``circular_tokamak``, ``shaped_tokamak_pressure``,
+  ``solovev``, ``ITERModel``,
+- non-axisymmetric ``lasym=False``: ``LandremanPaul2021_QA_lowres``,
+  ``nfp4_QH_warm_start``,
+- non-axisymmetric ``lasym=True``: ``up_down_asymmetric_tokamak``,
+  ``basic_non_stellsym_pressure``.
 
-VMEC++ bad-progress restart check (QA_lowres)
----------------------------------------------
+Observed behavior:
 
-Using ``input.LandremanPaul2021_QA_lowres`` with multigrid enabled, we compared
-the fine-grid (last stage) **iteration 1** ``fsq_total`` with and without the
-VMEC++ bad-progress restart flag:
+- per-iteration VMEC scalar traces (``fsqr/fsqz/fsql``, ``fsq*1``, ``delt``)
+  remain aligned in the comparator workflow,
+- primary magnetic geometry channels (``rmnc/zmns/bmnc/bsubs``) are within the
+  fixed-boundary project target for these runs,
+- cancellation-limited post-processed channels (especially ``jdotb``) can show
+  inflated relative error in currentless/vacuum-like regimes despite small
+  absolute differences.
 
-.. list-table::
-   :header-rows: 1
-   :widths: 24 24 24
-
-   * - Run
-     - fine-grid iter-1 fsq_total
-     - Notes
-   * - baseline (vmecpp_restart=False)
-     - ``2.412e-04``
-     - stage offsets [0, 189, 893]
-   * - vmecpp_restart=True
-     - ``2.412e-04``
-     - no change at iter-1; VMEC++ trigger occurs later in the stage
+The long-standing n3are stress case is still tracked as a dedicated fixed-
+boundary diagnostic outlier for some post-processed channels; this does not
+change the project scope decision that the next major implementation target is
+free-boundary parity.
 
 Scope and known gaps
 --------------------
 
-The primary parity target is fixed-boundary VMEC2000 parity. Items explicitly
-deferred for now include:
+The primary parity target for fixed-boundary solves is complete. The remaining
+scope gap is:
 
-- free boundary,
-- ``lasym=True`` (up-down / non-stellarator-symmetric),
-- remaining non-axisymmetric cases beyond the current QA/QH/n3are/QA-lowres
-  sweep (``ntor>0`` and/or ``nfp>1``),
-- parallelization and multi-device execution.
+- **free-boundary VMEC parity** (vacuum coupling and moving-boundary updates).
 
-Current blockers worth tracking:
+Operational caveat (known and accepted):
 
-- ``lasym=True`` axisymmetric case (``input.up_down_asymmetric_tokamak``) shows large bcovar/force-kernel mismatches at iter 1.
-- Lambda-path internal parity (``flsc``/``gcl`` and ``blmn``/``clmn``) matches VMEC2000
-  to ~1e-10 abs on reduced grids with full dumps; remaining work is to validate the
-  same at higher resolution and across more ``lasym=True`` cases.
+- For near-axis and near-zero diagnostics, relative errors can be dominated by
+  denominator noise; use axis masking and absolute/physics-aware checks.

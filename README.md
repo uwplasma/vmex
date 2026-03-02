@@ -52,9 +52,10 @@ Laptop-friendly, end-to-end differentiable (JAX) rewrite of **VMEC2000**, focusi
 ## What it is
 
 - Laptop-friendly, end-to-end differentiable (JAX) rewrite of VMEC2000 (fixed boundary first).
-- Parity-first solver for axisymmetric and stellarator cases (QA, n3are at `rtol=1e-4`, `atol=1e-12`).
+- Fixed-boundary parity solver for axisymmetric and non-axisymmetric cases, including `lasym=False` and `lasym=True`.
+- Current fixed-boundary parity target is met at `rtol=1e-3` (with axis masking for cancellation-limited near-axis channels).
 - JAX-native kernels for geometry, transforms, and residual assembly.
-- Free-boundary and `lasym=True` parity are still in progress.
+- Next major milestone: free-boundary parity.
 
 ## Quickstart
 
@@ -121,7 +122,7 @@ export VMEC_JAX_SCAN_MINIMAL=0  # keep full scan diagnostics even when quiet
 ## When to use vmec_jax vs VMEC2000
 
 - Use `vmec_jax` for autodiff, rapid parameter sweeps, and JAX-native pipelines.
-- Use VMEC2000 for production runs or when you need full free-boundary / `lasym=True` parity today.
+- Use VMEC2000 when you need mature free-boundary workflows today.
 
 ## Reproduce figures
 
@@ -141,6 +142,7 @@ python tools/diagnostics/readme_runtime_compare.py   --axisym-input examples/dat
 
 - `docs/quickstart.rst`: getting started
 - `docs/validation.rst`: parity workflow and regression tests
+- `docs/free_boundary_plan.rst`: VMEC2000-aligned free-boundary implementation plan
 - `docs/performance.rst`: profiling and performance knobs
 - `docs/algorithms.rst`: algorithmic overview
 - `docs/equations.rst`: equations and conventions

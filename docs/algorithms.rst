@@ -543,7 +543,7 @@ Current limitations (important)
 
 The **VMEC2000-style fixed-boundary loop** (``solver=vmec2000_iter``) now
 reproduces VMEC2000 iteration traces for axisymmetric and non-axisymmetric
-``lasym=False`` cases, including:
+cases, including ``lasym=False`` and ``lasym=True``:
 
 - VMEC time-step control (Garabedian update with restarts),
 - preconditioner and normalization caching (``ns4=25`` behavior),
@@ -553,8 +553,6 @@ reproduces VMEC2000 iteration traces for axisymmetric and non-axisymmetric
 Remaining limitations are mostly *scope* rather than parity gaps:
 
 - **Free-boundary** equilibria are not implemented.
-- **lasym=True scan path** is not supported; lasym runs use the parity (non-scan)
-  loop for VMEC2000-style printing and control logic.
 - Experimental optimization solvers (GD/LBFGS/GN) are **not** VMEC2000 and do
   not reproduce all iteration-dependent logic; they are intended for
   differentiable objectives and regression experiments.
@@ -583,15 +581,15 @@ which implements VMEC’s force residuals, preconditioning, and time-stepping.
 Roadmap to VMEC-quality parity
 ------------------------------
 
-Fixed-boundary parity for ``lasym=False`` is now in place (force residuals,
-preconditioning, and VMEC2000 time-step control). The remaining roadmap items are:
+Fixed-boundary parity is in place for both ``lasym=False`` and ``lasym=True``
+(force residuals, preconditioning, and VMEC2000 time-step control). The next
+major roadmap item is:
 
 1. **Free-boundary equilibrium**:
-   - external vacuum field solve and boundary update.
+   - external vacuum field solve and boundary update,
+   - coupling of plasma boundary updates with vacuum response,
+   - parity validation against VMEC2000 free-boundary runs.
 
-2. **lasym=True parity in scan mode**:
-   - extend the scan path to support asymmetric grids and printing.
-
-3. **Implicit differentiation extensions**:
+2. **Implicit differentiation extensions**:
    - extend implicit gradients to boundary-shape sensitivities and free-boundary
      workflows.

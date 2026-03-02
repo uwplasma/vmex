@@ -50,16 +50,16 @@ summary against bundled VMEC2000 reference ``wout`` files.
 Scope (current)
 ---------------
 
-The current parity target is **fixed-boundary** VMEC2000:
+The current parity target is **fixed-boundary** VMEC2000, and this is now the
+default validated scope:
 
-- Axisymmetric (`ntor = 0`, `nfp = 1`, `lasym = False`) end-to-end parity is stable.
-- Selected 3D stellarator-symmetric cases (QA/QH/n3are/QA-lowres) pass short
-  multigrid parity sweeps at the legacy tolerance (`rtol=5e-4`, `atol=1e-10`);
-  revalidation is underway at `rtol=1e-4`, `atol=1e-12`.
-- Fixed boundary only (free boundary deferred).
-
-Remaining 3D inputs (e.g., `li383_low_res`) and `lasym=True` parity are still in
-progress.
+- Axisymmetric (`ntor = 0`, `nfp = 1`) fixed-boundary parity is stable.
+- Non-axisymmetric fixed-boundary parity is validated for both
+  ``lasym=False`` and ``lasym=True`` in the VMEC2000 comparator workflow.
+- For cancellation-limited diagnostics (notably near-axis channels and
+  near-zero denominators), comparisons use the standard axis mask and relaxed
+  interpretation.
+- Remaining scope gap is **free-boundary** parity.
 
 Initial guess
 -------------

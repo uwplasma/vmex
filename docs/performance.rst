@@ -49,10 +49,10 @@ Python overhead. You can enable it with:
 - ``performance_mode=True`` in ``run_fixed_boundary`` (default),
 - or ``VMEC_JAX_USE_SCAN=1``.
 
-**Important**: the scan path is still parity-sensitive for large-``ns`` cases
-(for example ``input.QI_nfp2``). The default remains the non-scan loop, which
-matches VMEC2000 iteration ordering. Use ``--fast`` only when parity is not
-critical or after validating a case.
+**Important**: scan parity is case-dependent on difficult large-``ns`` stages.
+The runtime uses scan as the default fast path, with a fallback to the
+non-scan parity path when parity guards detect drift. You can always force the
+conservative path with ``--parity``.
 
 Debug dump env vars are incompatible with scan mode.
 
@@ -227,8 +227,9 @@ Enable it with:
 
 - ``run_fixed_boundary(..., vmecpp_restart=True)``
 
-Note: scan mode bypasses VMEC2000-style control logic; the VMEC++ restart flag
-only affects the VMEC2000-style iteration loop.
+Note: the VMEC++ restart flag is currently wired to the VMEC2000-control path.
+When scan is active, it takes effect on fallback segments that execute in the
+non-scan parity controller.
 
 Static precomputation
 ---------------------
