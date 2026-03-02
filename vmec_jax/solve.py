@@ -5205,14 +5205,14 @@ def solve_fixed_boundary_residual_iter(
                     f"{int(iter_idx):5d}"
                     f"{float(fsqr):10.2E}{float(fsqz):10.2E}{float(fsql):10.2E}"
                     f"{float(r00):11.3E}{z_val:11.3E}{float(delt0r):10.2E}{float(w_mhd):12.4E}",
-                    flush=False,
+                    flush=True,
                 )
             else:
                 print(
                     f"{int(iter_idx):5d}"
                     f"{float(fsqr):10.2E}{float(fsqz):10.2E}{float(fsql):10.2E}"
                     f"{float(r00):11.3E}{float(delt0r):10.2E}{float(w_mhd):12.4E}",
-                    flush=False,
+                    flush=True,
                 )
 
         def _fmt_axis_coeff_local(val: float) -> str:
