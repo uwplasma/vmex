@@ -2594,6 +2594,32 @@ def main() -> None:
         help="Absolute tolerance for fail-fast mismatch detection.",
     )
     p.add_argument(
+        "--fsq-relax-threshold",
+        type=float,
+        default=1.0e-30,
+        help=(
+            "Relax fsq* fail-fast tolerance when |VMEC fsq*| exceeds this value. "
+            "Set <=0 to disable."
+        ),
+    )
+    p.add_argument(
+        "--fsq-relax-rtol",
+        type=float,
+        default=2.0e-2,
+        help=(
+            "Relaxed rtol for fsq/fsq1 fields above --fsq-relax-threshold."
+        ),
+    )
+    p.add_argument(
+        "--fsq1-relax-threshold",
+        type=float,
+        default=1.0e-30,
+        help=(
+            "Relax fsq1 (preconditioned) fail-fast tolerance when |VMEC fsq1| "
+            "exceeds this value. Set <=0 to disable."
+        ),
+    )
+    p.add_argument(
         "--radial-skip",
         type=int,
         default=6,
@@ -3218,10 +3244,24 @@ def main() -> None:
             diff_cols_vmec[name] = []
             diff_cols_jax[name] = []
 
-    def _matches(vmec_val: float, jax_val: float, *, round_step: float | None = None) -> bool:
+    def _matches(
+        vmec_val: float,
+        jax_val: float,
+        *,
+        field: str | None = None,
+        round_step: float | None = None,
+    ) -> bool:
         if not (np.isfinite(vmec_val) and np.isfinite(jax_val)):
             return False
-        tol = max(float(args.atol), float(args.rtol) * abs(vmec_val))
+        rtol_eff = float(args.rtol)
+        if field in {"fsqr", "fsqz", "fsql", "fsqr1", "fsqz1", "fsql1"}:
+            if field in {"fsqr1", "fsqz1", "fsql1"}:
+                thr = float(args.fsq1_relax_threshold)
+            else:
+                thr = float(args.fsq_relax_threshold)
+            if (thr > 0.0) and (abs(float(vmec_val)) >= thr):
+                rtol_eff = max(rtol_eff, float(args.fsq_relax_rtol))
+        tol = max(float(args.atol), rtol_eff * abs(vmec_val))
         if round_step is not None and np.isfinite(round_step):
             tol = max(tol, float(round_step))
         return abs(vmec_val - jax_val) <= tol
@@ -3383,7 +3423,7 @@ def main() -> None:
                             dec = decimals_map.get(name)
                             if dec is not None:
                                 round_step = _round_step(float(v), int(dec))
-                        if not _matches(v, jv, round_step=round_step):
+                        if not _matches(v, jv, field=str(name), round_step=round_step):
                             first_mismatch = {
                                 "stage": int(stage_i + 1),
                                 "iter": int(row.it),

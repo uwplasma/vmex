@@ -9053,31 +9053,10 @@ def solve_fixed_boundary_residual_iter(
                     f"fsql={fsql_f:.3e} include_edge={include_edge}",
                     flush=True,
                 )
-            # Terminate on invariant residuals (fsqr/fsqz/fsql), not fsq1.
-            if (fsqr_f <= ftol) and (fsqz_f <= ftol) and (fsql_f <= ftol):
-                if verbose and not (bool(vmec2000_control) and bool(verbose_vmec2000_table)):
-                    print(
-                        f"[solve_fixed_boundary_residual_iter] converged: "
-                        f"fsqr={fsqr_f:.3e} fsqz={fsqz_f:.3e} fsql={fsql_f:.3e} <= ftol={ftol:.3e}",
-                        flush=True,
-                    )
-                if bool(vmec2000_control) and bool(verbose_vmec2000_table):
-                    # Always print the final (converged) iteration row.
-                    _print_vmec2000_iter_row(
-                        iter_idx=int(iter2),
-                        fsqr=fsqr_f,
-                        fsqz=fsqz_f,
-                        fsql=fsql_f,
-                        fsqr1=fsqr1_f,
-                        fsqz1=fsqz1_f,
-                        fsql1=fsql1_f,
-                        delt0r=float(time_step),
-                        r00=float(r00_last),
-                        w_mhd=float(w_vmec_last),
-                        z00=float(z00_last),
-                    )
-                converged = True
-                break
+            # Defer convergence exit until after preconditioned diagnostics are
+            # computed for this iteration, so fsqr1/fsqz1/fsql1 histories and
+            # VMEC-style tables remain length-aligned.
+            converged_physical = (fsqr_f <= ftol) and (fsqz_f <= ftol) and (fsql_f <= ftol)
     
             # Precondition forces.
             t_precond_start = time.perf_counter() if timing_enabled else None
@@ -9423,8 +9402,11 @@ def solve_fixed_boundary_residual_iter(
             else:
                 rz_norm = _rz_norm(state)
                 f_norm1 = jnp.where(rz_norm != 0.0, 1.0 / rz_norm, jnp.asarray(float("inf"), dtype=rz_norm.dtype))
-            fsqr1 = gcr2_p * f_norm1
-            fsqz1 = gcz2_p * f_norm1
+            # Avoid inf*0 -> NaN in late-converged iterations when rz_norm=0 and
+            # gcx2 terms are exactly zero. VMEC treats these channels as zero.
+            finite_fnorm1 = jnp.isfinite(f_norm1)
+            fsqr1 = jnp.where(finite_fnorm1, gcr2_p * f_norm1, jnp.asarray(0.0, dtype=jnp.asarray(gcr2_p).dtype))
+            fsqz1 = jnp.where(finite_fnorm1, gcz2_p * f_norm1, jnp.asarray(0.0, dtype=jnp.asarray(gcz2_p).dtype))
             if bool(vmec2000_control):
                 # VMEC2000 `residue.f90`: fsql1 = hs * SUM( (faclam*gcl)**2 ) over all js.
                 flsc_pre = jnp.asarray(frzl_pre.flsc)
@@ -9476,6 +9458,15 @@ def solve_fixed_boundary_residual_iter(
                 gcz2_p,
                 gcl2_p,
             )
+            # Extremely small late-iteration channels can occasionally surface
+            # as NaN/Inf through mixed 0*Inf paths in XLA. VMEC treats these
+            # as effectively zero for the preconditioned residual diagnostics.
+            if not np.isfinite(fsqr1_f):
+                fsqr1_f = 0.0
+            if not np.isfinite(fsqz1_f):
+                fsqz1_f = 0.0
+            if not np.isfinite(fsql1_f):
+                fsql1_f = 0.0
             fsq1 = fsqr1_f + fsqz1_f + fsql1_f
             if track_history:
                 rz_norm_history.append(rz_norm_f)
@@ -9487,6 +9478,51 @@ def solve_fixed_boundary_residual_iter(
                 fsqr1_history.append(fsqr1_f)
                 fsqz1_history.append(fsqz1_f)
                 fsql1_history.append(fsql1_f)
+
+            if converged_physical:
+                if track_history:
+                    # Keep per-iteration history channels length-aligned with
+                    # fsqr/fsqz/fsql when convergence happens before the update
+                    # block. VMEC's table still reports DELT on this row.
+                    step_history.append(0.0)
+                    dt_eff_history.append(0.0)
+                    update_rms_history.append(0.0)
+                    w_curr_history.append(float(fsqr_f + fsqz_f + fsql_f))
+                    w_try_history.append(float("nan"))
+                    w_try_ratio_history.append(float("nan"))
+                    restart_path_history.append("converged")
+                    step_status_history.append("converged")
+                    restart_reason_history.append("none")
+                    pre_restart_reason_history.append("none")
+                    time_step_history.append(float(time_step))
+                    res0_history.append(float(res0))
+                    res1_history.append(float(res1))
+                    fsq_prev_history.append(float(fsq_prev))
+                    bad_growth_streak_history.append(int(bad_growth_streak))
+                    iter1_history.append(int(iter1))
+                    grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
+                if verbose and not (bool(vmec2000_control) and bool(verbose_vmec2000_table)):
+                    print(
+                        f"[solve_fixed_boundary_residual_iter] converged: "
+                        f"fsqr={fsqr_f:.3e} fsqz={fsqz_f:.3e} fsql={fsql_f:.3e} <= ftol={ftol:.3e}",
+                        flush=True,
+                    )
+                if bool(vmec2000_control) and bool(verbose_vmec2000_table):
+                    _print_vmec2000_iter_row(
+                        iter_idx=int(iter2),
+                        fsqr=fsqr_f,
+                        fsqz=fsqz_f,
+                        fsql=fsql_f,
+                        fsqr1=fsqr1_f,
+                        fsqz1=fsqz1_f,
+                        fsql1=fsql1_f,
+                        delt0r=float(time_step),
+                        r00=float(r00_last),
+                        w_mhd=float(w_vmec_last),
+                        z00=float(z00_last),
+                    )
+                converged = True
+                break
 
             # Jacobian sign-change check (VMEC jacobian.f sets irst=2).
             bad_jacobian = False
