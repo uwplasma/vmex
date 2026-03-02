@@ -2274,12 +2274,14 @@ def _format_kernel_index(idx: int, *, shape: tuple[int, int, int, int]) -> str:
     return f"js={js+1} lt={lt+1} lz={lz+1} mpar={mpar}"
 
 
-def _decode_xc_index(idx: int, *, ns: int, mpol: int, ntor: int, lthreed: bool) -> str:
+def _decode_xc_index(idx: int, *, ns: int, mpol: int, ntor: int, lthreed: bool, lasym: bool = False) -> str:
     """Decode xc/xcdot flat index into (component, m, n, js) info."""
     ns = int(ns)
     mpol = int(mpol)
     ntor = int(ntor)
-    ntmax = 2 if bool(lthreed) else 1
+    lthreed = bool(lthreed)
+    lasym = bool(lasym)
+    ntmax = (2 if lthreed else 1) * (2 if lasym else 1)
     nrange = ntor + 1
     mnsize = mpol * nrange
     mns = ns * mnsize
@@ -2293,12 +2295,20 @@ def _decode_xc_index(idx: int, *, ns: int, mpol: int, ntor: int, lthreed: bool) 
     js = offset - mn * ns
     m = mn // nrange
     n = mn - m * nrange
-    if ntmax == 1:
+    if (not lthreed) and (not lasym):
         comps = ("rcc", "zsc", "lsc")
-    else:
-        # VMEC serial packed layout (symmetric 3D):
+    elif (not lthreed) and lasym:
+        # VMEC serial packed layout (LTHREED=F, LASYM=T):
+        # [rcc, rsc, zsc, zcc, lsc, lcc]
+        comps = ("rcc", "rsc", "zsc", "zcc", "lsc", "lcc")
+    elif lthreed and (not lasym):
+        # VMEC serial packed layout (LTHREED=T, LASYM=F):
         # [rcc, rss, zsc, zcs, lsc, lcs]
         comps = ("rcc", "rss", "zsc", "zcs", "lsc", "lcs")
+    else:
+        # VMEC serial packed layout (LTHREED=T, LASYM=T):
+        # [rcc, rss, rsc, rcs, zsc, zcs, zcc, zss, lsc, lcs, lcc, lss]
+        comps = ("rcc", "rss", "rsc", "rcs", "zsc", "zcs", "zcc", "zss", "lsc", "lcs", "lcc", "lss")
     comp = comps[ntype] if 0 <= ntype < len(comps) else f"ntype={ntype}"
     return f"{comp}: m={m} n={n} js={js + 1} (ns={ns})"
 
@@ -3525,6 +3535,7 @@ def main() -> None:
                         mpol=int(cfg.mpol),
                         ntor=int(cfg.ntor),
                         lthreed=bool(cfg.lthreed),
+                        lasym=bool(getattr(cfg, "lasym", False)),
                     )
                 except Exception:
                     dec_xc = "idx decode unavailable"
@@ -3536,6 +3547,7 @@ def main() -> None:
                         mpol=int(cfg.mpol),
                         ntor=int(cfg.ntor),
                         lthreed=bool(cfg.lthreed),
+                        lasym=bool(getattr(cfg, "lasym", False)),
                     )
                 except Exception:
                     dec_v = "idx decode unavailable"
@@ -3589,6 +3601,7 @@ def main() -> None:
                         mpol=int(cfg.mpol),
                         ntor=int(cfg.ntor),
                         lthreed=bool(cfg.lthreed),
+                        lasym=bool(getattr(cfg, "lasym", False)),
                     )
                 except Exception:
                     dec_xc = "idx decode unavailable"
