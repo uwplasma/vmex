@@ -1467,6 +1467,142 @@ def _filter_bsubuv_jxbforce_parity_loop(
     return np.asarray(bsubu_out, dtype=float), np.asarray(bsubv_out, dtype=float)
 
 
+def _jxbforce_filter_with_bsubs_derivs_loop(
+    *,
+    bsubs: np.ndarray,
+    bsubu_even: np.ndarray,
+    bsubu_odd: np.ndarray,
+    bsubv_even: np.ndarray,
+    bsubv_odd: np.ndarray,
+    trig,
+    mmax_force: int,
+    nmax_force: int,
+    s: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """VMEC jxbforce low-pass + bsubsu/bsubsv in one loop (lasym=False).
+
+    This mirrors the coupled transform block in ``jxbforce.f`` where filtered
+    ``bsubu/bsubv`` and derivatives ``bsubsu/bsubsv`` are reconstructed from the
+    same Fourier accumulators. Keeping these coupled reduces cancellation drift
+    in downstream ``itheta/izeta/bdotk`` diagnostics.
+    """
+    acc_dtype = np.longdouble
+    bsubs = np.asarray(bsubs, dtype=acc_dtype)
+    bsubu_even = np.asarray(bsubu_even, dtype=acc_dtype)
+    bsubu_odd = np.asarray(bsubu_odd, dtype=acc_dtype)
+    bsubv_even = np.asarray(bsubv_even, dtype=acc_dtype)
+    bsubv_odd = np.asarray(bsubv_odd, dtype=acc_dtype)
+
+    if bsubu_even.shape != bsubu_odd.shape or bsubu_even.shape != bsubv_even.shape:
+        raise ValueError("Parity bsubu/bsubv shape mismatch")
+    if bsubs.shape[:2] != bsubu_even.shape[:2]:
+        raise ValueError("bsubs and parity bsub shapes mismatch")
+
+    ns, ntheta, nzeta = bsubu_even.shape
+    nt2 = int(trig.ntheta2)
+    if ntheta < nt2:
+        raise ValueError("bsubu grid smaller than ntheta2")
+
+    mmax = int(mmax_force)
+    nmax = int(nmax_force)
+    if mmax < 0 or nmax < 0:
+        z = np.zeros((ns, nt2, nzeta), dtype=float)
+        return z.copy(), z.copy(), z.copy(), z.copy()
+
+    cosmui = np.asarray(trig.cosmui, dtype=acc_dtype)[:nt2, : mmax + 1]
+    sinmui = np.asarray(trig.sinmui, dtype=acc_dtype)[:nt2, : mmax + 1]
+    cosmu = np.asarray(trig.cosmu, dtype=acc_dtype)[:nt2, : mmax + 1]
+    sinmu = np.asarray(trig.sinmu, dtype=acc_dtype)[:nt2, : mmax + 1]
+    cosmum = np.asarray(trig.cosmum, dtype=acc_dtype)[:nt2, : mmax + 1]
+    sinmum = np.asarray(trig.sinmum, dtype=acc_dtype)[:nt2, : mmax + 1]
+    cosnv = np.asarray(trig.cosnv, dtype=acc_dtype)[:, : nmax + 1]
+    sinnv = np.asarray(trig.sinnv, dtype=acc_dtype)[:, : nmax + 1]
+    cosnvn = np.asarray(trig.cosnvn, dtype=acc_dtype)[:, : nmax + 1]
+    sinnvn = np.asarray(trig.sinnvn, dtype=acc_dtype)[:, : nmax + 1]
+
+    r0scale = float(getattr(trig, "r0scale", 1.0))
+    base_dnorm = acc_dtype(1.0 / (r0scale**2))
+    mnyq, nnyq = _jxbforce_nyquist_limits(trig)
+
+    s_full = np.asarray(s, dtype=acc_dtype)
+    if s_full.shape[0] < 2:
+        pshalf = np.sqrt(np.maximum(s_full, 0.0))
+    else:
+        sh = 0.5 * (s_full[1:] + s_full[:-1])
+        pshalf = np.concatenate([sh[:1], sh], axis=0)
+        pshalf = np.sqrt(np.maximum(pshalf, 0.0))
+    if pshalf.shape[0] > 1:
+        pshalf[0] = pshalf[1]
+
+    bsubu_out = np.zeros((ns, nt2, nzeta), dtype=acc_dtype)
+    bsubv_out = np.zeros((ns, nt2, nzeta), dtype=acc_dtype)
+    bsubsu = np.zeros((ns, nt2, nzeta), dtype=acc_dtype)
+    bsubsv = np.zeros((ns, nt2, nzeta), dtype=acc_dtype)
+
+    for js in range(ns):
+        bsubs_s = bsubs[js, :nt2, :]
+        bu_even = bsubu_even[js, :nt2, :]
+        bu_odd = bsubu_odd[js, :nt2, :]
+        bv_even = bsubv_even[js, :nt2, :]
+        bv_odd = bsubv_odd[js, :nt2, :]
+        for m in range(mmax + 1):
+            use_odd = (m % 2) == 1
+            bu_in = bu_odd if use_odd else bu_even
+            bv_in = bv_odd if use_odd else bv_even
+            for n in range(nmax + 1):
+                dnorm1 = base_dnorm
+                if mnyq > 0 and m == mnyq:
+                    dnorm1 *= 0.5
+                if nnyq > 0 and n == nnyq and n != 0:
+                    dnorm1 *= 0.5
+                if use_odd:
+                    dnorm1 = dnorm1 / pshalf[js]
+
+                bsubsmn1 = acc_dtype(0.0)
+                bsubsmn2 = acc_dtype(0.0)
+                bsubumn1 = acc_dtype(0.0)
+                bsubumn2 = acc_dtype(0.0)
+                bsubvmn1 = acc_dtype(0.0)
+                bsubvmn2 = acc_dtype(0.0)
+
+                for k in range(nzeta):
+                    for j in range(nt2):
+                        tsini1 = sinmui[j, m] * cosnv[k, n] * dnorm1
+                        tsini2 = cosmui[j, m] * sinnv[k, n] * dnorm1
+                        tcosi1 = cosmui[j, m] * cosnv[k, n] * dnorm1
+                        tcosi2 = sinmui[j, m] * sinnv[k, n] * dnorm1
+                        vbs = bsubs_s[j, k]
+                        vu = bu_in[j, k]
+                        vv = bv_in[j, k]
+                        bsubsmn1 += tsini1 * vbs
+                        bsubsmn2 += tsini2 * vbs
+                        bsubumn1 += tcosi1 * vu
+                        bsubumn2 += tcosi2 * vu
+                        bsubvmn1 += tcosi1 * vv
+                        bsubvmn2 += tcosi2 * vv
+
+                for k in range(nzeta):
+                    for j in range(nt2):
+                        tcos1 = cosmu[j, m] * cosnv[k, n]
+                        tcos2 = sinmu[j, m] * sinnv[k, n]
+                        bsubu_out[js, j, k] += tcos1 * bsubumn1 + tcos2 * bsubumn2
+                        bsubv_out[js, j, k] += tcos1 * bsubvmn1 + tcos2 * bsubvmn2
+
+                        tcosm1 = cosmum[j, m] * cosnv[k, n]
+                        tcosm2 = sinmum[j, m] * sinnv[k, n]
+                        bsubsu[js, j, k] += tcosm1 * bsubsmn1 + tcosm2 * bsubsmn2
+                        tcosn1 = sinmu[j, m] * sinnvn[k, n]
+                        tcosn2 = cosmu[j, m] * cosnvn[k, n]
+                        bsubsv[js, j, k] += tcosn1 * bsubsmn1 + tcosn2 * bsubsmn2
+
+    return (
+        np.asarray(bsubu_out, dtype=float),
+        np.asarray(bsubv_out, dtype=float),
+        np.asarray(bsubsu, dtype=float),
+        np.asarray(bsubsv, dtype=float),
+    )
+
+
 def _filter_bsubuv_jxbforce_loop(
     *,
     bsubu: np.ndarray,
@@ -2652,10 +2788,59 @@ def _compute_mercier(
     bsubs_use[0] = 0.0
 
     # Reconstruct bsubsu/bsubsv via Fourier coefficients to match jxbforce.
+    # Optional strict path: run the low-pass bsubu/bsubv filter and bsubs
+    # derivative reconstruction in a single coupled loop (Fortran-like order).
+    use_coupled = (not bool(lasym)) and os.getenv("VMEC_JAX_JXBFORCE_COUPLED_BSUB", "0") not in (
+        "",
+        "0",
+        "false",
+        "no",
+    )
+    if use_coupled:
+        psh = _pshalf_from_s(np.asarray(s, dtype=float))[:, None, None]
+        if psh.shape[0] > 1:
+            psh[0] = psh[1]
+        use_bc_parity = os.getenv("VMEC_JAX_JXBFORCE_COUPLED_USE_BC_PARITY", "0") not in ("", "0", "false", "no")
+        if use_bc_parity:
+            bu_even = (
+                np.asarray(bsubu_parity_even, dtype=float)
+                if (bsubu_parity_even is not None and np.asarray(bsubu_parity_even).shape == np.asarray(bsubu).shape)
+                else np.asarray(bsubu, dtype=float)
+            )
+            bv_even = (
+                np.asarray(bsubv_parity_even, dtype=float)
+                if (bsubv_parity_even is not None and np.asarray(bsubv_parity_even).shape == np.asarray(bsubv).shape)
+                else np.asarray(bsubv, dtype=float)
+            )
+            bu_odd = (
+                np.asarray(bsubu_parity_odd, dtype=float)
+                if (bsubu_parity_odd is not None and np.asarray(bsubu_parity_odd).shape == np.asarray(bsubu).shape)
+                else psh * bu_even
+            )
+            bv_odd = (
+                np.asarray(bsubv_parity_odd, dtype=float)
+                if (bsubv_parity_odd is not None and np.asarray(bsubv_parity_odd).shape == np.asarray(bsubv).shape)
+                else psh * bv_even
+            )
+        else:
+            bu_even = np.asarray(bsubu, dtype=float)
+            bv_even = np.asarray(bsubv, dtype=float)
+            bu_odd = psh * bu_even
+            bv_odd = psh * bv_even
+        bsubu, bsubv, bsubsu, bsubsv = _jxbforce_filter_with_bsubs_derivs_loop(
+            bsubs=bsubs_use,
+            bsubu_even=bu_even,
+            bsubu_odd=bu_odd,
+            bsubv_even=bv_even,
+            bsubv_odd=bv_odd,
+            trig=trig,
+            mmax_force=mmax,
+            nmax_force=nmax,
+            s=np.asarray(s, dtype=float),
+        )
     # Default to the vectorized path for performance; the loop-based path is
     # retained for parity debugging.
-    use_loop = (not bool(lasym)) and os.getenv("VMEC_JAX_JXBFORCE_LOOP", "0") not in ("", "0")
-    if use_loop:
+    elif (not bool(lasym)) and os.getenv("VMEC_JAX_JXBFORCE_LOOP", "0") not in ("", "0"):
         bsubsu, bsubsv = _jxbforce_bsubsu_bsubsv_loop(
             bsubs=bsubs_use,
             trig=trig,
@@ -5253,10 +5438,17 @@ def wout_minimal_from_fixed_boundary(
             _psh = _pshalf_from_s(np.asarray(s, dtype=float))[:, None, None]
             if _psh.shape[0] > 1:
                 _psh[0] = _psh[1]
-            bsubu_even = np.asarray(bsubu_diag, dtype=float)
-            bsubv_even = np.asarray(bsubv_diag, dtype=float)
-            bsubu_odd = _psh * bsubu_even
-            bsubv_odd = _psh * bsubv_even
+            use_bc_parity = os.getenv("VMEC_JAX_BSUB_FILTER_USE_BC_PARITY", "0") not in ("", "0", "false", "no")
+            if use_bc_parity and getattr(bc, "bsubu_parity_even", None) is not None:
+                bsubu_even = np.asarray(getattr(bc, "bsubu_parity_even"), dtype=float)
+                bsubv_even = np.asarray(getattr(bc, "bsubv_parity_even"), dtype=float)
+                bsubu_odd = np.asarray(getattr(bc, "bsubu_parity_odd"), dtype=float)
+                bsubv_odd = np.asarray(getattr(bc, "bsubv_parity_odd"), dtype=float)
+            else:
+                bsubu_even = np.asarray(bsubu_diag, dtype=float)
+                bsubv_even = np.asarray(bsubv_diag, dtype=float)
+                bsubu_odd = _psh * bsubu_even
+                bsubv_odd = _psh * bsubv_even
             if os.getenv("VMEC_JAX_DUMP_BSUB_PARITY_INPUTS", "") not in ("", "0"):
                 tag = os.getenv("VMEC_JAX_DUMP_TAG", "").strip()
                 outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
@@ -5269,7 +5461,7 @@ def wout_minimal_from_fixed_boundary(
                     bsubu_odd=np.asarray(bsubu_odd, dtype=float),
                     bsubv_even=np.asarray(bsubv_even, dtype=float),
                     bsubv_odd=np.asarray(bsubv_odd, dtype=float),
-                    odd_needs_shalf=np.asarray(False, dtype=np.int32),
+                    odd_needs_shalf=np.asarray(use_bc_parity, dtype=np.int32),
                 )
             bsubu_diag, bsubv_diag = _filter_bsubuv_jxbforce_parity(
                 bsubu_even=np.asarray(bsubu_even, dtype=float),
