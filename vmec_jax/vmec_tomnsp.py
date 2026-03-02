@@ -396,6 +396,16 @@ _TOMNSPS_ZETA_FUSED = os.environ.get("VMEC_JAX_TOMNSPS_ZETA_FUSED", "1").strip()
     "false",
     "no",
 )
+# NOTE: Keep tomnspa zeta fusion off by default for LASYM parity. In practice,
+# the large fused GEMM introduces cancellation-order drift in flcc/flss for
+# low-(m,n) channels (notably stage-3 iter-2 in LASYM parity traces). Users can
+# still opt in explicitly when they want to trade parity for speed.
+_TOMNSPA_ZETA_FUSED = os.environ.get("VMEC_JAX_TOMNSPA_ZETA_FUSED", "0").strip().lower() not in (
+    "",
+    "0",
+    "false",
+    "no",
+)
 
 
 def _einsum(expr: str, *operands):
@@ -1286,7 +1296,7 @@ def tomnspa_rzl(
     w12 = _select_mparity(w12_e, w12_o, mask_even)
 
     lthreed = bool(ntor > 0)
-    use_zeta_fused = bool(lthreed) and bool(_TOMNSPS_ZETA_FUSED)
+    use_zeta_fused = bool(lthreed) and bool(_TOMNSPA_ZETA_FUSED)
 
     # Zeta integration.
     if use_zeta_fused:
