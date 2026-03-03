@@ -64,6 +64,52 @@ The dense operator is a parity-oriented stepping stone toward full NESTOR
 matrix/integral equivalence; exact VMEC2000 ``scalpot/vacuum`` term-by-term
 parity is still in progress.
 
+Program goals and parity matrix
+-------------------------------
+
+Project-level free-boundary acceptance requires parity and performance across
+all major VMEC branches:
+
+1. axisymmetric + non-axisymmetric geometries,
+2. ``lasym=False`` and ``lasym=True``,
+3. fixed-boundary and free-boundary solves.
+
+To make this auditable and repeatable, the case matrix is now codified in:
+
+- ``tools/diagnostics/parity_manifest.toml``
+
+and executed by:
+
+- ``tools/diagnostics/parity_sweep_manifest.py``
+
+Current manifest coverage:
+
+- fixed-boundary, axisymmetric, ``lasym=False``:
+  ``input.circular_tokamak``.
+- fixed-boundary, axisymmetric, ``lasym=True``:
+  ``input.up_down_asymmetric_tokamak``.
+- fixed-boundary, non-axisymmetric, ``lasym=False``:
+  ``input.LandremanPaul2021_QA_lowres``, ``input.nfp4_QH_warm_start``.
+- fixed-boundary, non-axisymmetric, ``lasym=True``:
+  ``input.basic_non_stellsym_pressure``,
+  ``input.LandremanSenguptaPlunk_section5p3``.
+- free-boundary, non-axisymmetric, ``lasym=False``:
+  ``input.cth_like_free_bdy``, ``input.stellcopt``.
+- free-boundary, axisymmetric, ``lasym=True``:
+  ``input.DIII-D``, ``input.DIII-D_reset``.
+
+Known manifest gap (tracked explicitly as planning-only case):
+
+- free-boundary, non-axisymmetric, ``lasym=True`` with self-contained local
+  mgrid data.
+
+The immediate implementation focus remains:
+
+``source_sym -> bvecNS -> amatrix -> potvac -> edge-force channels``
+
+with VMEC2000 executable dumps as the source of truth at selected iterations
+around vacuum turn-on.
+
 Current tests and benchmark coverage
 ------------------------------------
 
