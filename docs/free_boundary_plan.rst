@@ -33,7 +33,31 @@ WP1 is partially in place:
 - a no-op vacuum coupling stub is now explicit in diagnostics
   (``free_boundary.vacuum_stub = True``), so free-boundary runs are not
   mistaken for physically coupled NESTOR solves yet.
+- an external-field sampling hook now exists:
+  mgrid trilinear interpolation on the boundary with EXTCUR weighting,
+  emitted as ``free_boundary_external_field`` diagnostics.
 - vacuum coupling and NESTOR solve integration remain pending.
+
+Current tests and benchmark coverage
+------------------------------------
+
+Implemented coverage (``tests/test_free_boundary_wp0.py``):
+
+- parser/default behavior parity for ``LFREEB``, ``MGRID_FILE``, ``NVACSKIP``,
+  and indexed ``EXTCUR(i)``,
+- mgrid metadata + full tensor load checks from synthetic NetCDF fixtures,
+- strict metadata validation (``NFP`` and ``kp % nzeta``),
+- trilinear interpolation exactness on synthetic affine fields,
+- solver diagnostics plumbing:
+  ``free_boundary`` control block + ``free_boundary_external_field`` summary,
+- environment-controlled external-field sampling disable path.
+
+Micro-benchmark coverage:
+
+- ``tools/benchmarks/bench_free_boundary_wp1.py`` measures metadata validation,
+  full field load, and interpolation throughput on random boundary-like points.
+- Intended use is regression-style performance tracking during WP2/WP3
+  integration; it is not a physics acceptance benchmark.
 
 Scope and acceptance target
 ---------------------------
