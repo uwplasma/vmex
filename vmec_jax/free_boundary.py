@@ -1408,6 +1408,8 @@ def _maybe_dump_scalpot_jax(
     gsource_vmec: np.ndarray | None = None,
     potvac: np.ndarray | None = None,
     bvec_mode: np.ndarray | None = None,
+    bvec_mode_nonsing: np.ndarray | None = None,
+    bvec_mode_analytic: np.ndarray | None = None,
 ) -> None:
     env = os.getenv("VMEC_JAX_DUMP_SCALPOT", "").strip().lower()
     if env in ("", "0", "false", "no"):
@@ -1500,6 +1502,16 @@ def _maybe_dump_scalpot_jax(
             out["bvec_mode_sin"] = np.asarray(bv[:mnpd], dtype=float)
             if bool(basis["lasym"]) and bv.size >= 2 * mnpd:
                 out["bvec_mode_cos"] = np.asarray(bv[mnpd : 2 * mnpd], dtype=float)
+            if bvec_mode_nonsing is not None:
+                bvn = np.asarray(bvec_mode_nonsing, dtype=float).reshape(-1)
+                out["bvec_mode_nonsing_sin"] = np.asarray(bvn[:mnpd], dtype=float)
+                if bool(basis["lasym"]) and bvn.size >= 2 * mnpd:
+                    out["bvec_mode_nonsing_cos"] = np.asarray(bvn[mnpd : 2 * mnpd], dtype=float)
+            if bvec_mode_analytic is not None:
+                bva = np.asarray(bvec_mode_analytic, dtype=float).reshape(-1)
+                out["bvec_mode_analytic_sin"] = np.asarray(bva[:mnpd], dtype=float)
+                if bool(basis["lasym"]) and bva.size >= 2 * mnpd:
+                    out["bvec_mode_analytic_cos"] = np.asarray(bva[mnpd : 2 * mnpd], dtype=float)
 
             if cache.mode_matrix is not None:
                 out["amatrix_mode"] = np.asarray(cache.mode_matrix, dtype=float)
@@ -1635,6 +1647,8 @@ def nestor_external_only_step(
         mode_for_step = used_mode
     potvac = None
     bvec_mode = None
+    bvec_mode_nonsing = None
+    bvec_mode_analytic = None
 
     if _is_dense_mode(mode_for_step):
         alpha = _as_float_env("VMEC_JAX_FREEB_VMEC_LIKE_ALPHA", 1.0)
@@ -1668,10 +1682,11 @@ def nestor_external_only_step(
             if dense_solve_mode in ("mode", "vmec_mode", "fouri_mode"):
                 rhs_mode_eff = None
                 if cache.mode_basis is not None:
-                    rhs_mode_eff = _vmec_bvec_from_gsource(
+                    bvec_mode_nonsing = _vmec_bvec_from_gsource(
                         gsource=np.asarray(gsource_vmec, dtype=float),
                         basis=cache.mode_basis,
                     )
+                    rhs_mode_eff = np.asarray(bvec_mode_nonsing, dtype=float)
                     add_analytic = os.getenv("VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC", "0").strip().lower() not in (
                         "",
                         "0",
@@ -1679,11 +1694,12 @@ def nestor_external_only_step(
                         "no",
                     )
                     if add_analytic:
-                        rhs_mode_eff = np.asarray(rhs_mode_eff, dtype=float) + _vmec_analytic_bvec_from_geometry(
+                        bvec_mode_analytic = _vmec_analytic_bvec_from_geometry(
                             sample=sample,
                             basis=cache.mode_basis,
                             bexni=np.asarray(gsource_vmec, dtype=float),
                         )
+                        rhs_mode_eff = rhs_mode_eff + np.asarray(bvec_mode_analytic, dtype=float)
                 phi, potvac, bvec_mode = _solve_vmec_like_mode_from_gsource(
                     cache=cache,
                     gsource=np.asarray(gsource_vmec, dtype=float),
@@ -1754,6 +1770,8 @@ def nestor_external_only_step(
         gsource_vmec=np.asarray(gsource_vmec, dtype=float),
         potvac=None if potvac is None else np.asarray(potvac, dtype=float),
         bvec_mode=None if bvec_mode is None else np.asarray(bvec_mode, dtype=float),
+        bvec_mode_nonsing=None if bvec_mode_nonsing is None else np.asarray(bvec_mode_nonsing, dtype=float),
+        bvec_mode_analytic=None if bvec_mode_analytic is None else np.asarray(bvec_mode_analytic, dtype=float),
     )
     return res, runtime_next
 

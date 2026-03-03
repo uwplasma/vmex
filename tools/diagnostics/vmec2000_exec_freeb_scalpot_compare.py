@@ -399,6 +399,83 @@ def main() -> int:
             "rel_scaled": rel_bvec_scaled,
             "scale_jax_to_vmec": a_bvec,
         }
+        if "bvecsav" in vmec_scal:
+            vmec_bvec_ns = np.asarray(vmec_scal["bvecsav"])
+            nns = min(vmec_bvec_ns.size, jax_bvec.size)
+            vmns = vmec_bvec_ns[:nns]
+            jjns = jax_bvec[:nns]
+            a_ns, rel_ns_scaled = _rel_scaled(vmns, jjns)
+            out["bvec_vs_bvecsav"] = {
+                "size_vmec": int(vmec_bvec_ns.size),
+                "size_jax": int(jax_bvec.size),
+                "size_cmp": int(nns),
+                "rel_raw": _rel(vmns, jjns),
+                "rel_scaled": rel_ns_scaled,
+                "scale_jax_to_vmec": a_ns,
+            }
+            vmec_bvec_an = np.asarray(vmec_scal["bvec"]) - np.asarray(vmec_scal["bvecsav"])
+            nan = min(vmec_bvec_an.size, jax_bvec.size)
+            vman = vmec_bvec_an[:nan]
+            jjan = jax_bvec[:nan]
+            a_an, rel_an_scaled = _rel_scaled(vman, jjan)
+            out["bvec_vs_analytic"] = {
+                "size_vmec": int(vmec_bvec_an.size),
+                "size_jax": int(jax_bvec.size),
+                "size_cmp": int(nan),
+                "rel_raw": _rel(vman, jjan),
+                "rel_scaled": rel_an_scaled,
+                "scale_jax_to_vmec": a_an,
+            }
+
+    if "bvec_mode_nonsing_sin" in jax:
+        jax_ns = np.asarray(jax["bvec_mode_nonsing_sin"])
+        if "bvec_mode_nonsing_cos" in jax:
+            jax_ns = np.concatenate([jax_ns, np.asarray(jax["bvec_mode_nonsing_cos"])], axis=0)
+        if mode_map is not None and mode_map.size > 0 and jax_ns.size >= int(mode_map.size):
+            mnpd = int(mode_map.size)
+            if jax_ns.size >= 2 * mnpd:
+                idx = np.concatenate([mode_map, mode_map + mnpd], axis=0)
+                jax_ns = jax_ns[idx]
+            else:
+                jax_ns = jax_ns[mode_map]
+        vmec_ns = np.asarray(vmec_scal.get("bvecsav", np.zeros_like(vmec_scal["bvec"])))
+        n = min(vmec_ns.size, jax_ns.size)
+        vm = vmec_ns[:n]
+        jj = jax_ns[:n]
+        a_ns, rel_ns_scaled = _rel_scaled(vm, jj)
+        out["bvec_nonsing"] = {
+            "size_vmec": int(vmec_ns.size),
+            "size_jax": int(jax_ns.size),
+            "size_cmp": int(n),
+            "rel_raw": _rel(vm, jj),
+            "rel_scaled": rel_ns_scaled,
+            "scale_jax_to_vmec": a_ns,
+        }
+
+    if "bvec_mode_analytic_sin" in jax:
+        jax_an = np.asarray(jax["bvec_mode_analytic_sin"])
+        if "bvec_mode_analytic_cos" in jax:
+            jax_an = np.concatenate([jax_an, np.asarray(jax["bvec_mode_analytic_cos"])], axis=0)
+        if mode_map is not None and mode_map.size > 0 and jax_an.size >= int(mode_map.size):
+            mnpd = int(mode_map.size)
+            if jax_an.size >= 2 * mnpd:
+                idx = np.concatenate([mode_map, mode_map + mnpd], axis=0)
+                jax_an = jax_an[idx]
+            else:
+                jax_an = jax_an[mode_map]
+        vmec_an = np.asarray(vmec_scal["bvec"]) - np.asarray(vmec_scal.get("bvecsav", np.zeros_like(vmec_scal["bvec"])))
+        n = min(vmec_an.size, jax_an.size)
+        vm = vmec_an[:n]
+        jj = jax_an[:n]
+        a_an, rel_an_scaled = _rel_scaled(vm, jj)
+        out["bvec_analytic"] = {
+            "size_vmec": int(vmec_an.size),
+            "size_jax": int(jax_an.size),
+            "size_cmp": int(n),
+            "rel_raw": _rel(vm, jj),
+            "rel_scaled": rel_an_scaled,
+            "scale_jax_to_vmec": a_an,
+        }
 
     if "potvac" in jax:
         jpot = np.asarray(jax["potvac"], dtype=float).reshape(-1)
