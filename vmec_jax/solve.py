@@ -173,17 +173,64 @@ def _parse_iter_list(val: str) -> set[int] | None:
 
 
 def _free_boundary_iter_controls(iter2: int, iter1: int, nvacskip: int) -> tuple[int, int]:
-    """VMEC-style free-boundary update cadence controls.
+    """Simple free-boundary cadence helper (legacy/diagnostics path).
 
-    Returns `(ivac, ivacskip)` from integer iteration counters.
+    Returns `(ivac, ivacskip)` from integer iteration counters using the
+    reduced two-state model:
     - `ivacskip = mod(iter2 - iter1, nvacskip)`
-    - `ivac = 1` for full vacuum update (`ivacskip==0`), else `2` (skip/reuse).
+    - `ivac = 1` for full vacuum update (`ivacskip==0`), else `2`.
     """
 
     nv = max(1, int(nvacskip))
     ivs = int((int(iter2) - int(iter1)) % nv)
     ivac = 1 if ivs == 0 else 2
     return ivac, ivs
+
+
+def _free_boundary_iter_controls_vmec(
+    *,
+    iter2: int,
+    iter1: int,
+    ivac: int,
+    nvacskip: int,
+    nvskip0: int,
+    fsq_rz_prev: float,
+) -> tuple[int, int, int]:
+    """VMEC2000-style `ivac/ivacskip/nvacskip` update (funct3d, ictrl_prec2d=0).
+
+    This mirrors the fixed-boundary run path used here:
+    - free-boundary turns on only after force residual drops below threshold,
+    - `ivac<=2` forces full vacuum updates (`ivacskip=0`),
+    - `nvacskip` is adapted when a full update is performed.
+    """
+
+    i2 = int(iter2)
+    i1 = int(iter1)
+    iv = int(ivac)
+    nv = max(1, int(nvacskip))
+    nv0 = max(1, int(nvskip0))
+    fs = float(fsq_rz_prev)
+    if not np.isfinite(fs) or fs < 0.0:
+        fs = 1.0
+
+    # VMEC funct3d free-boundary gating:
+    # IF (iter2 > 1 .AND. iequi == 0 .AND. fsqr+fsqz <= 1e-3) ivac = ivac + 1
+    if i2 > 1 and fs <= 1.0e-3:
+        iv += 1
+
+    if iv < 0:
+        return iv, 0, nv
+
+    ivs = int((i2 - i1) % nv)
+    if iv <= 2:
+        ivs = 0
+
+    # Extend NVACSKIP as equilibrium converges, only on full update.
+    if ivs == 0:
+        nv_est = int(1.0 / max(1.0e-1, 1.0e11 * fs))
+        nv = max(nv0, max(1, nv_est))
+
+    return iv, ivs, nv
 
 
 def _sample_free_boundary_external_field(*, state: VMECState, static) -> dict[str, Any]:
@@ -3540,8 +3587,9 @@ def solve_fixed_boundary_residual_iter(
             mgrid_metadata=getattr(static, "mgrid_metadata", None),
             free_boundary_extcur=getattr(static, "free_boundary_extcur", None),
         )
-    # Free-boundary control scaffold (WP1): currently metadata/state plumbing only.
-    # The full NESTOR coupling is added in later work packages.
+    # Free-boundary control + coupling scaffold (WP2):
+    # VMEC-style ivac/ivacskip cadence with edge bsqvac coupling.
+    # Exact VMEC2000 NESTOR term-by-term parity is still in progress.
     free_boundary_enabled = bool(getattr(cfg, "lfreeb", False))
     freeb_nvacskip = max(1, int(getattr(cfg, "nvacskip", int(getattr(cfg, "nfp", 1)))))
     freeb_nvskip0 = max(1, freeb_nvacskip)
@@ -7877,7 +7925,7 @@ def solve_fixed_boundary_residual_iter(
                 },
                 "freeb_ivac_full": freeb_ivac_full,
                 "freeb_ivacskip_full": freeb_ivacskip_full,
-                "freeb_full_update_full": (freeb_ivac_full == 1).astype(int),
+                "freeb_full_update_full": (freeb_ivacskip_full == 0).astype(int),
                 "resume_state": {
                     "state_checkpoint": carry_final.state_checkpoint,
                     "time_step": float(np.asarray(carry_final.time_step)),
@@ -8316,7 +8364,7 @@ def solve_fixed_boundary_residual_iter(
     ijacob = 0
     bad_resets = 0
     iter1 = 1
-    freeb_ivac = 0
+    freeb_ivac = -1
     freeb_ivacskip = 0
     freeb_nestor_runtime: NestorRuntimeState | None = None
     freeb_bsqvac_half_current = None
@@ -8980,16 +9028,26 @@ def solve_fixed_boundary_residual_iter(
         time_step_report_hold: float | None = None
         while True:
             iter_since_restart = iter2 - iter1
-            if free_boundary_enabled:
-                freeb_ivac, freeb_ivacskip = _free_boundary_iter_controls(
-                    int(iter2), int(iter1), int(freeb_nvacskip)
-                )
             fsq_prev_before = fsq_prev
             fsq0_prev_before = fsq0_prev
             pre_restart_reason = "none"
             if time_step_report_hold is None:
                 time_step_report_hold = float(time_step)
             time_step_report = float(time_step_report_hold)
+            if free_boundary_enabled:
+                fsq_rz_prev = (
+                    float(fsqr2_history[-1]) + float(fsqz2_history[-1])
+                    if (fsqr2_history and fsqz2_history)
+                    else 1.0
+                )
+                freeb_ivac, freeb_ivacskip, freeb_nvacskip = _free_boundary_iter_controls_vmec(
+                    iter2=int(iter2),
+                    iter1=int(iter1),
+                    ivac=int(freeb_ivac),
+                    nvacskip=int(freeb_nvacskip),
+                    nvskip0=int(freeb_nvskip0),
+                    fsq_rz_prev=float(fsq_rz_prev),
+                )
             if vmec2000_control:
                 # VMEC2000 `constrain_m1` logic (residue.f90):
                 #   zero gcz(m=1) if (fsqz_prev < 1e-6) OR (iter2 < 2).
@@ -9005,9 +9063,9 @@ def solve_fixed_boundary_residual_iter(
             zero_m1 = jnp.asarray(zero_m1_val, dtype=jnp.asarray(state.Rcos).dtype)
             if vmec2000_control:
                 # VMEC2000 fixed-boundary residuals do not include the edge
-                # surface in the force pipeline. Free-boundary coupling uses
-                # edge forcing, so include the edge there.
-                include_edge = bool(free_boundary_enabled and freeb_couple_edge)
+                # surface in the force pipeline. In free-boundary mode, edge
+                # forcing activates only once vacuum updates begin (ivac>=0).
+                include_edge = bool(free_boundary_enabled and freeb_couple_edge and int(freeb_ivac) >= 0)
             else:
                 include_edge = bool(iter_since_restart < 50) and (float(prev_rz_fsq) < 1e-6)
             if track_history:
@@ -9041,7 +9099,7 @@ def solve_fixed_boundary_residual_iter(
             freeb_reused = False
             freeb_solve_time = 0.0
             freeb_sample_time = 0.0
-            if bool(free_boundary_enabled and freeb_couple_edge):
+            if bool(free_boundary_enabled and freeb_couple_edge and int(freeb_ivac) >= 0):
                 try:
                     nestor_res, freeb_nestor_runtime = nestor_external_only_step(
                         state=state,
@@ -9687,7 +9745,9 @@ def solve_fixed_boundary_residual_iter(
                     if free_boundary_enabled:
                         freeb_ivac_history.append(int(freeb_ivac))
                         freeb_ivacskip_history.append(int(freeb_ivacskip))
-                        freeb_full_update_history.append(1 if int(freeb_ivac) == 1 else 0)
+                        freeb_full_update_history.append(
+                            1 if (int(freeb_ivac) >= 0 and int(freeb_ivacskip) == 0) else 0
+                        )
                     grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
                 if verbose and not (bool(vmec2000_control) and bool(verbose_vmec2000_table)):
                     print(
@@ -10033,7 +10093,9 @@ def solve_fixed_boundary_residual_iter(
                         if free_boundary_enabled:
                             freeb_ivac_history.append(int(freeb_ivac))
                             freeb_ivacskip_history.append(int(freeb_ivacskip))
-                            freeb_full_update_history.append(1 if int(freeb_ivac) == 1 else 0)
+                            freeb_full_update_history.append(
+                                1 if (int(freeb_ivac) >= 0 and int(freeb_ivacskip) == 0) else 0
+                            )
                         grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
                     _pop_iteration_histories()
                     prev_rz_fsq = prev_rz_fsq_before
@@ -10224,7 +10286,9 @@ def solve_fixed_boundary_residual_iter(
                     if free_boundary_enabled:
                         freeb_ivac_history.append(int(freeb_ivac))
                         freeb_ivacskip_history.append(int(freeb_ivacskip))
-                        freeb_full_update_history.append(1 if int(freeb_ivac) == 1 else 0)
+                        freeb_full_update_history.append(
+                            1 if (int(freeb_ivac) >= 0 and int(freeb_ivacskip) == 0) else 0
+                        )
                     grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
                 if verbose:
                     if bool(vmec2000_control) and bool(verbose_vmec2000_table):
@@ -10958,7 +11022,9 @@ def solve_fixed_boundary_residual_iter(
             if free_boundary_enabled:
                 freeb_ivac_history.append(int(freeb_ivac))
                 freeb_ivacskip_history.append(int(freeb_ivacskip))
-                freeb_full_update_history.append(1 if int(freeb_ivac) == 1 else 0)
+                freeb_full_update_history.append(
+                    1 if (int(freeb_ivac) >= 0 and int(freeb_ivacskip) == 0) else 0
+                )
                 freeb_nestor_reused_history.append(1 if bool(freeb_reused) else 0)
                 freeb_nestor_solve_time_history.append(float(freeb_solve_time))
                 freeb_nestor_sample_time_history.append(float(freeb_sample_time))

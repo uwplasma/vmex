@@ -41,12 +41,16 @@ def _parse_scalpot_dump(path: Path) -> dict[str, Any]:
     lines = path.read_text(encoding="utf-8").splitlines()
     kv = _parse_keyvals(lines)
     mnpd2 = int(kv.get("mnpd2", "0"))
+    mnpd = int(kv.get("mnpd", str(mnpd2)))
     if mnpd2 <= 0:
         raise ValueError(f"missing mnpd2 in {path}")
     section = ""
     bvec = np.zeros((mnpd2,), dtype=float)
     bvecsav = np.zeros((mnpd2,), dtype=float)
+    amat_raw = np.zeros((mnpd2, mnpd2), dtype=float)
     amat = np.zeros((mnpd2, mnpd2), dtype=float)
+    xmpot = np.zeros((max(0, mnpd),), dtype=np.int64)
+    xnpot = np.zeros((max(0, mnpd),), dtype=np.int64)
     for ln in lines:
         s = ln.strip()
         if not s:
@@ -65,19 +69,51 @@ def _parse_scalpot_dump(path: Path) -> dict[str, Any]:
             i = int(parts[0]) - 1
             if 0 <= i < mnpd2:
                 bvecsav[i] = float(parts[1].replace("D", "E"))
+        elif section == "amatrix_raw" and len(parts) >= 3:
+            i = int(parts[0]) - 1
+            j = int(parts[1]) - 1
+            if (0 <= i < mnpd2) and (0 <= j < mnpd2):
+                amat_raw[i, j] = float(parts[2].replace("D", "E"))
         elif section == "amatrix_lu" and len(parts) >= 3:
             i = int(parts[0]) - 1
             j = int(parts[1]) - 1
             if (0 <= i < mnpd2) and (0 <= j < mnpd2):
                 amat[i, j] = float(parts[2].replace("D", "E"))
+        elif section == "xmpot_xnpot" and len(parts) >= 3:
+            i = int(parts[0]) - 1
+            if 0 <= i < mnpd:
+                xmpot[i] = int(round(float(parts[1].replace("D", "E"))))
+                xnpot[i] = int(round(float(parts[2].replace("D", "E"))))
     return {
         "iter2": int(kv.get("iter2", "-1")),
         "ivacskip": int(kv.get("ivacskip", "-1")),
         "mnpd2": mnpd2,
+        "mnpd": mnpd,
         "bvec": bvec,
         "bvecsav": bvecsav,
+        "amatrix_raw": amat_raw,
         "amatrix_lu": amat,
+        "xmpot": xmpot,
+        "xnpot": xnpot,
     }
+
+
+def _mode_reindex(vmec_modes: np.ndarray, jax_modes: np.ndarray) -> np.ndarray | None:
+    """Return indices selecting jax order that matches vmec order, or None."""
+
+    if vmec_modes.shape != jax_modes.shape or vmec_modes.ndim != 2:
+        return None
+    key_to_idx: dict[tuple[int, int], int] = {}
+    for j, key in enumerate(map(tuple, jax_modes.tolist())):
+        if key not in key_to_idx:
+            key_to_idx[key] = j
+    out = np.empty((vmec_modes.shape[0],), dtype=np.int64)
+    for i, key in enumerate(map(tuple, vmec_modes.tolist())):
+        j = key_to_idx.get(key)
+        if j is None:
+            return None
+        out[i] = int(j)
+    return out
 
 
 def _parse_vacuum_dump(path: Path) -> dict[str, Any]:
@@ -249,12 +285,23 @@ def main() -> int:
     vmec_vac = _parse_vacuum_dump(vmec_vac_files[0])
     jax = dict(np.load(jax_npz, allow_pickle=False))
 
+    vmec_modes = None
+    jax_modes = None
+    mode_map = None
+    if ("xmpot" in vmec_scal) and ("xnpot" in vmec_scal):
+        vmec_modes = np.stack([np.asarray(vmec_scal["xmpot"]), np.asarray(vmec_scal["xnpot"])], axis=1)
+    if ("xmpot" in jax) and ("xnpot" in jax):
+        jax_modes = np.stack([np.asarray(jax["xmpot"]), np.asarray(jax["xnpot"])], axis=1)
+    if (vmec_modes is not None) and (jax_modes is not None):
+        mode_map = _mode_reindex(vmec_modes, jax_modes)
+
     out: dict[str, Any] = {
         "workdir": str(workdir),
         "vmec_scalpot_dump": str(vmec_scalpot_files[0]),
         "vmec_vacuum_dump": str(vmec_vac_files[0]),
         "jax_dump": str(jax_npz),
         "iter": int(args.iter),
+        "mode_map_applied": bool(mode_map is not None),
     }
 
     if "bvec_mode_sin" in jax:
@@ -262,6 +309,14 @@ def main() -> int:
             jax_bvec = np.concatenate([np.asarray(jax["bvec_mode_sin"]), np.asarray(jax["bvec_mode_cos"])], axis=0)
         else:
             jax_bvec = np.asarray(jax["bvec_mode_sin"])
+        if mode_map is not None and mode_map.size > 0:
+            mnpd = int(mode_map.size)
+            if jax_bvec.size >= mnpd:
+                if jax_bvec.size >= 2 * mnpd:
+                    idx = np.concatenate([mode_map, mode_map + mnpd], axis=0)
+                    jax_bvec = jax_bvec[idx]
+                else:
+                    jax_bvec = jax_bvec[mode_map]
         vmec_bvec = np.asarray(vmec_scal["bvec"])
         n = min(vmec_bvec.size, jax_bvec.size)
         vm = vmec_bvec[:n]
@@ -278,7 +333,17 @@ def main() -> int:
 
     if "amatrix_mode" in jax:
         jax_a = np.asarray(jax["amatrix_mode"], dtype=float)
-        vmec_a = np.asarray(vmec_scal["amatrix_lu"], dtype=float)
+        if mode_map is not None and mode_map.size > 0 and jax_a.ndim == 2:
+            mnpd = int(mode_map.size)
+            if jax_a.shape[0] >= mnpd and jax_a.shape[1] >= mnpd:
+                if jax_a.shape[0] >= 2 * mnpd and jax_a.shape[1] >= 2 * mnpd:
+                    idx = np.concatenate([mode_map, mode_map + mnpd], axis=0)
+                else:
+                    idx = mode_map
+                jax_a = jax_a[np.ix_(idx, idx)]
+        vmec_a_raw = np.asarray(vmec_scal.get("amatrix_raw", np.zeros_like(vmec_scal["amatrix_lu"])), dtype=float)
+        vmec_a_lu = np.asarray(vmec_scal["amatrix_lu"], dtype=float)
+        vmec_a = vmec_a_raw if np.any(np.abs(vmec_a_raw) > 0.0) else vmec_a_lu
         n = min(vmec_a.shape[0], jax_a.shape[0])
         vm = vmec_a[:n, :n]
         jj = jax_a[:n, :n]
@@ -290,6 +355,7 @@ def main() -> int:
             "rel_raw": _rel(vm.reshape(-1), jj.reshape(-1)),
             "rel_scaled": rel_mat_scaled,
             "scale_jax_to_vmec": a_mat,
+            "vmec_matrix_kind": "raw" if np.any(np.abs(vmec_a_raw) > 0.0) else "lu",
         }
 
     if "bsqvac" in jax:

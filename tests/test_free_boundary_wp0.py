@@ -20,6 +20,7 @@ from vmec_jax.free_boundary import (
     vacuum_boundary_fields_from_cylindrical,
 )
 from vmec_jax.namelist import read_indata
+from vmec_jax.solve import _free_boundary_iter_controls_vmec
 from vmec_jax.static import build_static
 from vmec_jax.driver import run_fixed_boundary
 
@@ -80,6 +81,86 @@ def test_free_boundary_config_extcur_indexed(tmp_path: Path):
     static = build_static(cfg)
     assert static.free_boundary_state0 is not None
     assert static.free_boundary_state0.nvacskip == 2
+
+
+def test_free_boundary_iter_controls_vmec_threshold_and_skip_logic():
+    ivac = -1
+    nvacskip = 9
+    nvskip0 = 9
+
+    # iter2<=1 does not advance vacuum activation.
+    ivac, ivacskip, nvacskip = _free_boundary_iter_controls_vmec(
+        iter2=1,
+        iter1=1,
+        ivac=ivac,
+        nvacskip=nvacskip,
+        nvskip0=nvskip0,
+        fsq_rz_prev=1.0e-1,
+    )
+    assert ivac == -1
+    assert ivacskip == 0
+    assert nvacskip == 9
+
+    # Turn-on ramp starts once residual is small enough and iter2>1.
+    ivac, ivacskip, nvacskip = _free_boundary_iter_controls_vmec(
+        iter2=2,
+        iter1=1,
+        ivac=ivac,
+        nvacskip=nvacskip,
+        nvskip0=nvskip0,
+        fsq_rz_prev=1.0e-4,
+    )
+    assert ivac == 0
+    assert ivacskip == 0
+
+    ivac, ivacskip, nvacskip = _free_boundary_iter_controls_vmec(
+        iter2=3,
+        iter1=1,
+        ivac=ivac,
+        nvacskip=nvacskip,
+        nvskip0=nvskip0,
+        fsq_rz_prev=1.0e-4,
+    )
+    assert ivac == 1
+    assert ivacskip == 0
+
+    ivac, ivacskip, nvacskip = _free_boundary_iter_controls_vmec(
+        iter2=4,
+        iter1=1,
+        ivac=ivac,
+        nvacskip=nvacskip,
+        nvskip0=nvskip0,
+        fsq_rz_prev=1.0e-4,
+    )
+    assert ivac == 2
+    assert ivacskip == 0
+
+    # After ivac>2, reuse cadence can become nonzero.
+    ivac, ivacskip, nvacskip = _free_boundary_iter_controls_vmec(
+        iter2=5,
+        iter1=1,
+        ivac=ivac,
+        nvacskip=nvacskip,
+        nvskip0=nvskip0,
+        fsq_rz_prev=1.0e-4,
+    )
+    assert ivac == 3
+    assert ivacskip == (5 - 1) % nvacskip
+
+
+def test_free_boundary_iter_controls_vmec_updates_nvacskip_on_full_step():
+    ivac, ivacskip, nvacskip = _free_boundary_iter_controls_vmec(
+        iter2=10,
+        iter1=1,
+        ivac=5,
+        nvacskip=9,
+        nvskip0=9,
+        fsq_rz_prev=1.0e-12,
+    )
+    assert ivac == 6
+    assert ivacskip == 0
+    # fsq=1e-12 -> max(1e-1,1e11*fsq)=1e-1 -> nvacskip target=10
+    assert nvacskip == 10
 
 
 def test_mgrid_loader_skeleton(tmp_path: Path):

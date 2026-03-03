@@ -831,7 +831,8 @@ def _maybe_dump_scalpot_jax(
         out["rhs_scale"] = np.asarray(cache.rhs_scale, dtype=float)
         try:
             ntheta, nzeta = rhs.shape
-            theta = (2.0 * np.pi / float(max(1, ntheta))) * np.arange(ntheta, dtype=float)
+            pi2 = 2.0 * np.pi
+            theta = (pi2 / float(max(1, ntheta))) * np.arange(ntheta, dtype=float)
             zeta = np.asarray(sample.phi, dtype=float) * float(max(1, int(nfp)))
             if zeta.shape != rhs.shape:
                 zeta = np.broadcast_to(zeta, rhs.shape)
@@ -839,22 +840,49 @@ def _maybe_dump_scalpot_jax(
             zz = zeta.reshape(-1)
             w = np.asarray(cache.rhs_scale, dtype=float).reshape(-1)
             rhs_f = np.asarray(rhs, dtype=float).reshape(-1)
+            onp = 1.0 / float(max(1, int(nfp)))
+
+            if bool(lasym):
+                src = onp * rhs_f
+            else:
+                # VMEC fouri.f source symmetrization:
+                # source = 0.5*onp*(gsource(i) - gsource(imirr(i))).
+                idx = np.arange(rhs_f.size, dtype=np.int64)
+                lt = idx // int(nzeta)
+                lz = idx % int(nzeta)
+                lt_m = (int(ntheta) - lt) % int(ntheta)
+                lz_m = (int(nzeta) - lz) % int(nzeta)
+                imirr = lt_m * int(nzeta) + lz_m
+                src = 0.5 * onp * (rhs_f - rhs_f[imirr])
+
             nmode = (int(mf) + 1) * (2 * int(nf) + 1)
             bsin = np.zeros((nmode,), dtype=float)
             bcos = np.zeros((nmode,), dtype=float)
             basis_s = np.zeros((rhs_f.size, nmode), dtype=float)
             basis_c = np.zeros((rhs_f.size, nmode), dtype=float)
+            xmpot = np.zeros((nmode,), dtype=np.int64)
+            xnpot = np.zeros((nmode,), dtype=np.int64)
             mn = 0
             for n in range(-int(nf), int(nf) + 1):
                 for m in range(0, int(mf) + 1):
+                    xmpot[mn] = int(m)
+                    xnpot[mn] = int(n) * int(nfp)
+                    if (m == 0) and (n < 0):
+                        mn += 1
+                        continue
                     ph = (float(m) * th) - (float(n) * zz)
                     s = np.sin(ph)
                     c = np.cos(ph)
-                    basis_s[:, mn] = s
-                    basis_c[:, mn] = c
-                    bsin[mn] = np.sum(w * rhs_f * s)
-                    bcos[mn] = np.sum(w * rhs_f * c)
+                    sinmni = (pi2 * pi2) * w * s
+                    cosmni = (pi2 * pi2) * w * c
+                    basis_s[:, mn] = sinmni
+                    basis_c[:, mn] = cosmni
+                    bsin[mn] = np.sum(sinmni * src)
+                    bcos[mn] = np.sum(cosmni * src)
                     mn += 1
+
+            out["xmpot"] = xmpot
+            out["xnpot"] = xnpot
             if bool(lasym):
                 B = np.concatenate([basis_s, basis_c], axis=1)
                 out["bvec_mode_sin"] = bsin
@@ -862,9 +890,8 @@ def _maybe_dump_scalpot_jax(
             else:
                 B = basis_s
                 out["bvec_mode_sin"] = bsin
-            W = w[:, None]
             A = np.asarray(cache.matrix, dtype=float)
-            amod = (B.T @ (W * (A @ B))) / float(max(1, rhs_f.size))
+            amod = B.T @ (A @ B)
             out["amatrix_mode"] = amod
         except Exception:
             pass

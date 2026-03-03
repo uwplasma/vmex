@@ -255,20 +255,32 @@ path. It still follows staged VMEC2000 parity work, but ``bsqvac`` is now
 computed and coupled into the edge force channel in fixed-boundary iterations
 when ``LFREEB=T``.
 
-Control law currently threaded (VMEC2000-compatible):
+Control law currently threaded (VMEC2000 ``funct3d`` compatible for
+``ictrl_prec2d=0`` path):
 
 .. math::
 
-   \mathrm{ivacskip}_k = \mathrm{mod}(iter2_k - iter1_k,\; nvacskip),
-   \qquad
-   \mathrm{ivac}_k =
-   \begin{cases}
-     1, & \mathrm{ivacskip}_k = 0 \\
-     2, & \mathrm{ivacskip}_k \neq 0
-   \end{cases}
+   \mathrm{if}\; iter2_k>1 \;\mathrm{and}\; (fsqr_{k-1}+fsqz_{k-1})\le 10^{-3},
+   \quad ivac_k \leftarrow ivac_{k-1}+1
 
-matching VMEC2000 ``funct3d`` cadence semantics (full vacuum update vs
-reused/skip update).
+and, for :math:`ivac_k \ge 0`:
+
+.. math::
+
+   ivacskip_k = \mathrm{mod}(iter2_k - iter1_k,\; nvacskip_k),
+   \qquad
+   \mathrm{if}\; ivac_k \le 2,\; ivacskip_k \leftarrow 0.
+
+On full vacuum updates (:math:`ivacskip_k=0`), ``nvacskip`` is adapted as in
+VMEC:
+
+.. math::
+
+   nvacskip_k \leftarrow \max\!\left(nvskip0,\;
+   \left\lfloor\frac{1}{\max(10^{-1},\,10^{11}(fsqr_{k-1}+fsqz_{k-1}))}\right\rfloor\right).
+
+This yields the same operational phases as VMEC2000: delayed vacuum turn-on,
+forced full updates while ``ivac<=2``, then periodic reuse updates.
 
 MGRID interpolation model
 ~~~~~~~~~~~~~~~~~~~~~~~~~

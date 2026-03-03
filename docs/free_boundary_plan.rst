@@ -24,19 +24,19 @@ WP0 is implemented:
 - trilinear mgrid field interpolation utility with periodic toroidal angle,
 - unit tests for parsing, normalization, and mgrid metadata loading.
 
-WP1 is partially in place:
+WP1 is in place:
 
 - driver now loads and validates mgrid metadata for ``LFREEB=T``,
   with strict checks for ``NFP`` agreement and ``kp % nzeta == 0``.
-- solve loop now carries VMEC-style free-boundary control placeholders
+- solve loop now carries VMEC-style free-boundary control state
   (``ivac``, ``ivacskip``, ``nvacskip``) in diagnostics/resume state.
-- a no-op vacuum coupling stub is now explicit in diagnostics
-  (``free_boundary.vacuum_stub = True``), so free-boundary runs are not
-  mistaken for physically coupled NESTOR solves yet.
+- free-boundary control now follows VMEC turn-on/ramp semantics:
+  delayed vacuum activation (``ivac`` starts negative), forced full updates
+  while ``ivac<=2``, and adaptive ``nvacskip`` updates on full solves.
 - an external-field sampling hook now exists:
   mgrid trilinear interpolation on the boundary with EXTCUR weighting,
   emitted as ``free_boundary_external_field`` diagnostics.
-- vacuum coupling and NESTOR solve integration remain pending.
+- full NESTOR term-by-term parity remains pending.
 
 WP2 now has an initial coupling scaffold plus a VMEC2000-like dense path:
 
@@ -52,8 +52,8 @@ WP2 now has an initial coupling scaffold plus a VMEC2000-like dense path:
 - mode selection is controlled by ``VMEC_JAX_FREEB_NESTOR_MODE`` with an
   ``auto`` default; large boundary grids fall back to the spectral path via
   ``VMEC_JAX_FREEB_VMEC_LIKE_MAX_POINTS``.
-- VMEC-style ``ivac``/``ivacskip`` update vs reuse behavior is preserved in
-  both models.
+- VMEC-style ``ivac``/``ivacskip``/``nvacskip`` update vs reuse behavior is
+  preserved (funct3d cadence semantics, ``ictrl_prec2d=0`` path).
 - On ``ivacskip != 0``, the implementation now reuses the cached operator and
   refreshes only the RHS/solve (instead of freezing ``phi``), aligning closer
   to VMEC2000 ``scalpot`` reuse semantics.
