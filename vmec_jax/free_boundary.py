@@ -138,6 +138,12 @@ class NestorRuntimeState:
     mode: str
     update_count: int
     reuse_count: int
+    # VMEC scalpot/fouri reuse state: on ivacskip>0, fouri is skipped and the
+    # non-singular source transform from the last full update is reused.
+    source_cache_iter: int = -1
+    gsource_cached: np.ndarray | None = None
+    source_sym_cached: np.ndarray | None = None
+    bvec_nonsing_cached: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -1630,6 +1636,7 @@ def _maybe_dump_scalpot_jax(
     bvec_mode: np.ndarray | None = None,
     bvec_mode_nonsing: np.ndarray | None = None,
     bvec_mode_analytic: np.ndarray | None = None,
+    source_cache_iter: int | None = None,
 ) -> None:
     env = os.getenv("VMEC_JAX_DUMP_SCALPOT", "").strip().lower()
     if env in ("", "0", "false", "no"):
@@ -1675,6 +1682,8 @@ def _maybe_dump_scalpot_jax(
         "bsqvac": np.asarray(vac.bsqvac, dtype=float),
         "bnormal_unit": np.asarray(vac.bnormal_unit, dtype=float),
     }
+    if source_cache_iter is not None:
+        out["source_cache_iter"] = np.asarray(int(source_cache_iter), dtype=np.int64)
     ntheta, nzeta = rhs.shape
     wint_uniform = np.full((ntheta, nzeta), 1.0 / float(max(1, ntheta * nzeta)), dtype=float)
     out["wint_uniform"] = wint_uniform
@@ -1789,6 +1798,10 @@ def nestor_external_only_step(
     runtime_mode = "spectral_poisson_external_only" if runtime is None else str(
         getattr(runtime, "mode", "spectral_poisson_external_only")
     )
+    runtime_source_cache_iter = -1 if runtime is None else int(getattr(runtime, "source_cache_iter", -1))
+    runtime_gsource_cached = None if runtime is None else getattr(runtime, "gsource_cached", None)
+    runtime_source_sym_cached = None if runtime is None else getattr(runtime, "source_sym_cached", None)
+    runtime_bvec_nonsing_cached = None if runtime is None else getattr(runtime, "bvec_nonsing_cached", None)
     if runtime_cache is None and runtime is not None and hasattr(runtime, "poisson"):
         # Backward compatibility with older runtime state shape.
         runtime_cache = getattr(runtime, "poisson")
@@ -1834,6 +1847,14 @@ def nestor_external_only_step(
             mode=runtime_mode,
             update_count=int(runtime.update_count),
             reuse_count=int(runtime.reuse_count) + 1,
+            source_cache_iter=int(runtime_source_cache_iter),
+            gsource_cached=None if runtime_gsource_cached is None else np.asarray(runtime_gsource_cached, dtype=float),
+            source_sym_cached=None
+            if runtime_source_sym_cached is None
+            else np.asarray(runtime_source_sym_cached, dtype=float),
+            bvec_nonsing_cached=None
+            if runtime_bvec_nonsing_cached is None
+            else np.asarray(runtime_bvec_nonsing_cached, dtype=float),
         )
         return res, runtime_next
 
@@ -1858,11 +1879,13 @@ def nestor_external_only_step(
     wint_vmec = _vmec_boundary_wint(static=static, ntheta=int(ntheta), nzeta=int(nzeta))
     gsource_bexni = -np.asarray(sample.vac_ext.bnormal, dtype=float) * np.asarray(wint_vmec, dtype=float) * ((2.0 * np.pi) ** 2)
     gsource_vmec = np.asarray(gsource_bexni, dtype=float)
+    if reuse_step and runtime_gsource_cached is not None:
+        gsource_vmec = np.asarray(runtime_gsource_cached, dtype=float)
     if rhs_mode in ("unit", "unit_normal", "bnormal_unit"):
         rhs = -np.asarray(sample.vac_ext.bnormal_unit, dtype=float)
         rhs_mode = "bnormal_unit"
     elif rhs_mode in ("bexni", "vmec_bexni", "bnormal_wint"):
-        rhs = np.asarray(gsource_vmec, dtype=float)
+        rhs = np.asarray(gsource_bexni, dtype=float)
         rhs_mode = "bexni"
     else:
         # VMEC scalpot source uses B·dS (non-unit normal) channels.
@@ -1913,13 +1936,13 @@ def nestor_external_only_step(
                     lasym=bool(getattr(static.cfg, "lasym", False)),
                     wint_vmec=np.asarray(wint_vmec, dtype=float),
                 )
-            use_greenf_source = os.getenv("VMEC_JAX_FREEB_USE_GREENF_SOURCE", "0").strip().lower() not in (
+            use_greenf_source = os.getenv("VMEC_JAX_FREEB_USE_GREENF_SOURCE", "1").strip().lower() not in (
                 "",
                 "0",
                 "false",
                 "no",
             )
-            if use_greenf_source and cache.mode_basis is not None:
+            if use_greenf_source and (not reuse_step) and cache.mode_basis is not None:
                 try:
                     gsource_vmec = _vmec_nonsingular_gsource_from_bexni(
                         sample=sample,
@@ -1933,10 +1956,13 @@ def nestor_external_only_step(
             if dense_solve_mode in ("mode", "vmec_mode", "fouri_mode"):
                 rhs_mode_eff = None
                 if cache.mode_basis is not None:
-                    bvec_mode_nonsing = _vmec_bvec_from_gsource(
-                        gsource=np.asarray(gsource_vmec, dtype=float),
-                        basis=cache.mode_basis,
-                    )
+                    if reuse_step and runtime_bvec_nonsing_cached is not None:
+                        bvec_mode_nonsing = np.asarray(runtime_bvec_nonsing_cached, dtype=float)
+                    else:
+                        bvec_mode_nonsing = _vmec_bvec_from_gsource(
+                            gsource=np.asarray(gsource_vmec, dtype=float),
+                            basis=cache.mode_basis,
+                        )
                     rhs_mode_eff = np.asarray(bvec_mode_nonsing, dtype=float)
                     add_analytic = os.getenv("VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC", "1").strip().lower() not in (
                         "",
@@ -1995,6 +2021,35 @@ def nestor_external_only_step(
         sample_time_s=sample_time,
         model=used_mode,
     )
+    source_sym_cached = runtime_source_sym_cached
+    bvec_nonsing_cached = runtime_bvec_nonsing_cached
+    gsource_cached = runtime_gsource_cached
+    source_cache_iter = runtime_source_cache_iter
+    if isinstance(cache, NestorVmecLikeCache) and (cache.mode_basis is not None):
+        basis = cache.mode_basis
+        if (not reuse_step) or (gsource_cached is None):
+            gsource_cached = np.asarray(gsource_vmec, dtype=float)
+        if (not reuse_step) or (source_sym_cached is None):
+            try:
+                source_sym_cached = _vmec_source_from_gsource(
+                    gsource=np.asarray(gsource_cached, dtype=float),
+                    basis=basis,
+                )
+            except Exception:
+                source_sym_cached = runtime_source_sym_cached
+        if (not reuse_step) or (bvec_nonsing_cached is None):
+            if bvec_mode_nonsing is not None:
+                bvec_nonsing_cached = np.asarray(bvec_mode_nonsing, dtype=float)
+            else:
+                try:
+                    bvec_nonsing_cached = _vmec_bvec_from_gsource(
+                        gsource=np.asarray(gsource_cached, dtype=float),
+                        basis=basis,
+                    )
+                except Exception:
+                    bvec_nonsing_cached = runtime_bvec_nonsing_cached
+        if (not reuse_step) and (iter_idx is not None):
+            source_cache_iter = int(iter_idx)
     runtime_next = NestorRuntimeState(
         operator_cache=cache,
         phi=np.asarray(phi),
@@ -2002,6 +2057,17 @@ def nestor_external_only_step(
         mode=used_mode,
         update_count=(0 if runtime is None else int(runtime.update_count)) + (0 if reuse_step else 1),
         reuse_count=(0 if runtime is None else int(runtime.reuse_count)) + (1 if reuse_step else 0),
+        source_cache_iter=int(source_cache_iter),
+        gsource_cached=None if gsource_cached is None else np.asarray(gsource_cached, dtype=float),
+        source_sym_cached=None if source_sym_cached is None else np.asarray(source_sym_cached, dtype=float),
+        bvec_nonsing_cached=None
+        if bvec_nonsing_cached is None
+        else np.asarray(bvec_nonsing_cached, dtype=float),
+    )
+    gsource_dump = (
+        np.asarray(gsource_cached, dtype=float)
+        if (reuse_step and gsource_cached is not None)
+        else np.asarray(gsource_vmec, dtype=float)
     )
     _maybe_dump_scalpot_jax(
         iter_idx=iter_idx,
@@ -2018,11 +2084,12 @@ def nestor_external_only_step(
         nfp=max(1, int(getattr(static.cfg, "nfp", 1))),
         lasym=bool(getattr(static.cfg, "lasym", False)),
         wint_vmec=np.asarray(wint_vmec, dtype=float),
-        gsource_vmec=np.asarray(gsource_vmec, dtype=float),
+        gsource_vmec=gsource_dump,
         potvac=None if potvac is None else np.asarray(potvac, dtype=float),
         bvec_mode=None if bvec_mode is None else np.asarray(bvec_mode, dtype=float),
         bvec_mode_nonsing=None if bvec_mode_nonsing is None else np.asarray(bvec_mode_nonsing, dtype=float),
         bvec_mode_analytic=None if bvec_mode_analytic is None else np.asarray(bvec_mode_analytic, dtype=float),
+        source_cache_iter=int(source_cache_iter),
     )
     return res, runtime_next
 

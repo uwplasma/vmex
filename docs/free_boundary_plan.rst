@@ -57,6 +57,13 @@ WP2 now has an initial coupling scaffold plus a VMEC2000-like dense path:
 - On ``ivacskip != 0``, the implementation now reuses the cached operator and
   refreshes only the RHS/solve (instead of freezing ``phi``), aligning closer
   to VMEC2000 ``scalpot`` reuse semantics.
+- In VMEC-like dense mode, non-singular source assembly now defaults to the
+  Green-function path (``VMEC_JAX_FREEB_USE_GREENF_SOURCE=1`` default) instead
+  of direct ``bexni`` projection, improving fouri/source parity on vacuum
+  turn-on iterations.
+- On ``ivacskip > 0`` reuse steps, vmec-jax now carries cached
+  ``gsource/source_sym/bvecNS`` channels in runtime state so reuse follows
+  VMEC ``scalpot`` semantics (analytic update + cached non-singular source).
 - edge ``bsq`` coupling is now threaded into the force path by overriding the
   half-mesh edge magnetic-pressure term from vacuum channels.
 
