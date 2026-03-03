@@ -772,6 +772,52 @@ def _vmec_boundary_wint(*, static: Any, ntheta: int, nzeta: int) -> np.ndarray:
     return np.full((int(ntheta), int(nzeta)), 1.0 / float(max(1, int(ntheta) * int(nzeta))), dtype=float)
 
 
+def _build_vmec_cmns(*, mf: int, nf: int, onp: float) -> np.ndarray:
+    """VMEC precal.f cmns(l,m,n) coefficients (n>=0 block)."""
+
+    mf = max(0, int(mf))
+    nf = max(0, int(nf))
+    lmax = mf + nf
+    cmn = np.zeros((lmax + 1, mf + 1, nf + 1), dtype=float)
+    for m in range(mf + 1):
+        for n in range(nf + 1):
+            jmn = m + n
+            imn = m - n
+            kmn = abs(imn)
+            smn = (jmn + kmn) // 2
+            f1 = 1.0
+            f2 = 1.0
+            f3 = 1.0
+            for i in range(1, kmn + 1):
+                f1 *= float(smn + 1 - i)
+                f2 *= float(i)
+            for l in range(kmn, jmn + 1, 2):
+                cmn[l, m, n] = (f1 / (f2 * f3)) * ((-1.0) ** ((l - imn) // 2))
+                f1 = f1 * 0.25 * float((jmn + l + 2) * (jmn - l))
+                f2 = f2 * 0.5 * float(l + 2 + kmn)
+                f3 = f3 * 0.5 * float(l + 2 - kmn)
+
+    alp = 2.0 * np.pi * float(onp)
+    cmns = np.zeros_like(cmn)
+    if mf >= 1 and nf >= 1:
+        cmns[:, 1 : mf + 1, 1 : nf + 1] = (
+            0.5
+            * alp
+            * (
+                cmn[:, 1 : mf + 1, 1 : nf + 1]
+                + cmn[:, :mf, 1 : nf + 1]
+                + cmn[:, 1 : mf + 1, :nf]
+                + cmn[:, :mf, :nf]
+            )
+        )
+    if mf >= 1:
+        cmns[:, 1 : mf + 1, 0] = 0.5 * alp * (cmn[:, 1 : mf + 1, 0] + cmn[:, :mf, 0])
+    if nf >= 1:
+        cmns[:, 0, 1 : nf + 1] = 0.5 * alp * (cmn[:, 0, 1 : nf + 1] + cmn[:, 0, :nf])
+    cmns[:, 0, 0] = 0.5 * alp * (cmn[:, 0, 0] + cmn[:, 0, 0])
+    return cmns
+
+
 def _build_vmec_mode_basis(
     *,
     ntheta: int,
@@ -853,6 +899,9 @@ def _build_vmec_mode_basis(
         "mf": mf,
         "nf": nf,
         "lasym": lasym,
+        "theta": th,
+        "zeta": ze,
+        "cmns": _build_vmec_cmns(mf=mf, nf=nf, onp=1.0 / float(nfp)),
     }
 
 
@@ -1014,11 +1063,133 @@ def _vmec_bvec_from_gsource(*, gsource: np.ndarray, basis: dict[str, Any]) -> np
     return bsin
 
 
+def _vmec_analytic_bvec_from_geometry(
+    *,
+    sample: ExternalBoundarySample,
+    basis: dict[str, Any],
+    bexni: np.ndarray,
+) -> np.ndarray:
+    """Analytic-source bvec term from VMEC analyt.f (bvec part only)."""
+
+    mnpd = int(basis["mnpd"])
+    lasym = bool(basis["lasym"])
+    mf = int(basis["mf"])
+    nf = int(basis["nf"])
+    onp = float(basis["onp"])
+    cmns = np.asarray(basis["cmns"], dtype=float)
+    theta = np.asarray(basis["theta"], dtype=float)
+    zeta = np.asarray(basis["zeta"], dtype=float)
+    bex = np.asarray(bexni, dtype=float).reshape(-1)
+
+    R = np.asarray(sample.R, dtype=float).reshape(-1)
+    Ru = np.asarray(sample.Ru, dtype=float).reshape(-1)
+    Rv = np.asarray(sample.Rv, dtype=float).reshape(-1)
+    Zu = np.asarray(sample.Zu, dtype=float).reshape(-1)
+    Zv = np.asarray(sample.Zv, dtype=float).reshape(-1)
+
+    guu = Ru * Ru + Zu * Zu
+    guv = (Ru * Rv + Zu * Zv) * onp * 2.0
+    gvv = (Rv * Rv + Zv * Zv + R * R) * (onp * onp)
+
+    adp = guu + guv + gvv
+    adm = guu - guv + gvv
+    cma = gvv - guu
+    sqrtc = 2.0 * np.sqrt(np.maximum(gvv, 1.0e-32))
+    sqrta = 2.0 * np.sqrt(np.maximum(guu, 1.0e-32))
+    sqad1 = np.sqrt(np.maximum(adp, 1.0e-32))
+    sqad2 = np.sqrt(np.maximum(adm, 1.0e-32))
+
+    num_p = sqad1 * sqrtc + adp + cma
+    den_p = sqad1 * sqrta - adp + cma
+    num_m = sqad2 * sqrtc + adm + cma
+    den_m = sqad2 * sqrta - adm + cma
+    tlp = np.zeros_like(adp)
+    tlm = np.zeros_like(adm)
+    mask_p = np.abs(den_p) > 1.0e-32
+    mask_m = np.abs(den_m) > 1.0e-32
+    if np.any(mask_p):
+        tlp[mask_p] = (1.0 / sqad1[mask_p]) * np.log(np.maximum(num_p[mask_p] / den_p[mask_p], 1.0e-32))
+    if np.any(mask_m):
+        tlm[mask_m] = (1.0 / sqad2[mask_m]) * np.log(np.maximum(num_m[mask_m] / den_m[mask_m], 1.0e-32))
+    tlp1 = np.zeros_like(tlp)
+    tlm1 = np.zeros_like(tlm)
+    tlp2 = np.zeros_like(tlp)
+    tlm2 = np.zeros_like(tlm)
+    tlpm = tlp + tlm
+
+    bsin = np.zeros((mf + 1, 2 * nf + 1), dtype=float)
+    bcos = np.zeros((mf + 1, 2 * nf + 1), dtype=float) if lasym else None
+
+    sign1 = 1.0
+    fl1 = 0.0
+    for l in range(0, mf + nf + 1):
+        fl = fl1
+        for nabs in range(0, nf + 1):
+            zv = float(nabs) * zeta
+            cosv = np.cos(zv)
+            sinv = np.sin(zv)
+            for m in range(0, mf + 1):
+                cm = float(cmns[l, m, nabs])
+                if cm == 0.0:
+                    continue
+                mu = float(m) * theta
+                sinu = np.sin(mu)
+                cosu = np.cos(mu)
+                col_p = nabs + nf
+                col_m = (-nabs) + nf
+                if nabs == 0 or m == 0:
+                    sinp = (sinu * cosv - sinv * cosu) * cm
+                    bsin[m, col_p] += np.sum(tlpm * bex * sinp)
+                    if lasym and bcos is not None:
+                        cosp = (cosu * cosv + sinv * sinu) * cm
+                        bcos[m, col_p] += np.sum(tlpm * bex * cosp)
+                else:
+                    sinp0 = sinu * cosv * cm
+                    temp = -cosu * sinv * cm
+                    sinm = sinp0 - temp
+                    sinp = sinp0 + temp
+                    bsin[m, col_p] += np.sum(tlp * bex * sinp)
+                    bsin[m, col_m] += np.sum(tlm * bex * sinm)
+                    if lasym and bcos is not None:
+                        cosp0 = cosu * cosv * cm
+                        temp2 = sinu * sinv * cm
+                        cosm = cosp0 - temp2
+                        cosp = cosp0 + temp2
+                        bcos[m, col_p] += np.sum(tlp * bex * cosp)
+                        bcos[m, col_m] += np.sum(tlm * bex * cosm)
+
+        fl1 = fl1 + 1.0
+        fl2 = 2.0 * fl1 - 1.0
+        sign1 = -sign1
+        tlp2 = tlp1
+        tlm2 = tlm1
+        tlp1 = tlp
+        tlm1 = tlm
+        tlp = ((sqrtc + sign1 * sqrta) - fl2 * cma * tlp1 - fl * adm * tlp2) / np.maximum(adp * fl1, 1.0e-32)
+        tlm = ((sqrtc + sign1 * sqrta) - fl2 * cma * tlm1 - fl * adp * tlm2) / np.maximum(adm * fl1, 1.0e-32)
+        tlpm = tlp + tlm
+
+    out_s = np.zeros((mnpd,), dtype=float)
+    out_c = np.zeros((mnpd,), dtype=float) if lasym else None
+    xmpot = np.asarray(basis["xmpot"], dtype=np.int64)
+    n_raw = np.asarray(basis["n_raw"], dtype=np.int64)
+    for j in range(mnpd):
+        m = int(xmpot[j])
+        n = int(n_raw[j])
+        out_s[j] = bsin[m, n + nf]
+        if lasym and out_c is not None:
+            out_c[j] = bcos[m, n + nf]
+    if lasym and out_c is not None:
+        return np.concatenate([out_s, out_c], axis=0)
+    return out_s
+
+
 def _solve_vmec_like_mode_from_gsource(
     *,
     cache: NestorVmecLikeCache,
     gsource: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
+    rhs_mode: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Solve VMEC-like dense integral in mode space and return (phi, potvac)."""
 
     basis = cache.mode_basis
@@ -1026,8 +1197,8 @@ def _solve_vmec_like_mode_from_gsource(
     if basis is None or amod is None:
         raise ValueError("missing_mode_cache")
 
-    rhs_mode = _vmec_bvec_from_gsource(gsource=gsource, basis=basis)
-    potvac = np.linalg.solve(np.asarray(amod, dtype=float), np.asarray(rhs_mode, dtype=float))
+    rhs_eff = np.asarray(rhs_mode, dtype=float) if rhs_mode is not None else _vmec_bvec_from_gsource(gsource=gsource, basis=basis)
+    potvac = np.linalg.solve(np.asarray(amod, dtype=float), np.asarray(rhs_eff, dtype=float))
 
     sin_phase = np.asarray(basis["sin_phase"], dtype=float)
     cos_phase = np.asarray(basis["cos_phase"], dtype=float)
@@ -1041,7 +1212,7 @@ def _solve_vmec_like_mode_from_gsource(
         phi_flat = sin_phase @ potsin
     phi = phi_flat.reshape(int(cache.ntheta), int(cache.nzeta))
     phi = phi - float(np.mean(phi))
-    return np.asarray(phi, dtype=float), np.asarray(potvac, dtype=float)
+    return np.asarray(phi, dtype=float), np.asarray(potvac, dtype=float), np.asarray(rhs_eff, dtype=float)
 
 
 def _base_nestor_mode(mode: str) -> str:
@@ -1495,15 +1666,30 @@ def nestor_external_only_step(
                     wint_vmec=np.asarray(wint_vmec, dtype=float),
                 )
             if dense_solve_mode in ("mode", "vmec_mode", "fouri_mode"):
-                phi, potvac = _solve_vmec_like_mode_from_gsource(
-                    cache=cache,
-                    gsource=np.asarray(gsource_vmec, dtype=float),
-                )
+                rhs_mode_eff = None
                 if cache.mode_basis is not None:
-                    bvec_mode = _vmec_bvec_from_gsource(
+                    rhs_mode_eff = _vmec_bvec_from_gsource(
                         gsource=np.asarray(gsource_vmec, dtype=float),
                         basis=cache.mode_basis,
                     )
+                    add_analytic = os.getenv("VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC", "0").strip().lower() not in (
+                        "",
+                        "0",
+                        "false",
+                        "no",
+                    )
+                    if add_analytic:
+                        rhs_mode_eff = np.asarray(rhs_mode_eff, dtype=float) + _vmec_analytic_bvec_from_geometry(
+                            sample=sample,
+                            basis=cache.mode_basis,
+                            bexni=np.asarray(gsource_vmec, dtype=float),
+                        )
+                phi, potvac, bvec_mode = _solve_vmec_like_mode_from_gsource(
+                    cache=cache,
+                    gsource=np.asarray(gsource_vmec, dtype=float),
+                    rhs_mode=rhs_mode_eff,
+                )
+                if cache.mode_basis is not None:
                     vac_total = _vacuum_channels_from_sample_potvac(
                         sample=sample,
                         basis=cache.mode_basis,

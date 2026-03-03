@@ -453,6 +453,9 @@ Both models share the same boundary sampling and edge-coupling equations.
 
         A_{mode}\,potvac = bvec.
 
+   An experimental analytic-source augmentation path (``VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC=1``)
+   is available for debugging ``analyt.f`` parity, but remains off by default.
+
 3. Reconstruct tangential potential derivatives with VMEC vacuum.f formulas:
 
    .. math::
