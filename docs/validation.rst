@@ -75,6 +75,10 @@ Outputs (logs + JSON summary) are written under:
 
 Each case directory stores comparator logs and, for free-boundary cases,
 per-iteration scalpot comparator JSON payloads.
+Free-boundary cases can also define quantitative pass/fail thresholds in the
+manifest via ``metric_thresholds_rel_scaled`` (for keys like
+``source_sym``, ``bvec_nonsing_fouri``, ``amatrix``, ``potvac``), so the sweep
+fails on metric drift even when command return code is zero.
 
 - Pipeline parity snapshot (solver-free)::
 
