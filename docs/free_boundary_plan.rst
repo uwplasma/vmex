@@ -66,6 +66,13 @@ WP2 now has an initial coupling scaffold plus a VMEC2000-like dense path:
   VMEC ``scalpot`` semantics (analytic update + cached non-singular source).
 - edge ``bsq`` coupling is now threaded into the force path by overriding the
   half-mesh edge magnetic-pressure term from vacuum channels.
+- free-boundary residual assembly now keeps the core VMEC interior stencil by
+  default (``include_edge=False``), with edge forcing entering only through the
+  dedicated ``rbsq`` terms in ``forces``. A debug-only override remains
+  available via ``VMEC_JAX_FREEB_INCLUDE_EDGE=1``.
+- the free-boundary comparator now parses and reports additional bextern
+  geometry/operator channels (``rub/rvb/zub/zvb``, ``snr/snv/snz``, and
+  ``brad_axis/bphi_axis/bz_axis``) to localize late-iteration drift.
 
 The dense operator is a parity-oriented stepping stone toward full NESTOR
 matrix/integral equivalence; exact VMEC2000 ``scalpot/vacuum`` term-by-term
