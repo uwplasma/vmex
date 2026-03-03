@@ -22,3 +22,4 @@ Common parity/validation scripts (moved from `examples/validation/`):
 - `benchmark_fixed_boundary_runtime_and_residuals.py`
 - `axisym_stage_parity.py`
 - `axisym_first_step_diagnostics.py`
+- `parity_sweep_manifest.py` + `parity_manifest.toml` (fixed/free boundary matrix)

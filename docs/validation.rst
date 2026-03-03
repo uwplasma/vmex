@@ -42,6 +42,40 @@ Recommended validation scripts
 
 All of the following scripts are designed to run quickly on bundled data:
 
+Manifest-driven sweep (fixed + free boundary)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The canonical parity matrix now lives in:
+
+- ``tools/diagnostics/parity_manifest.toml``
+
+The manifest includes representative cases across:
+
+- fixed-boundary axisymmetric and non-axisymmetric,
+- ``lasym=False`` and ``lasym=True``,
+- free-boundary axisymmetric and non-axisymmetric.
+
+Run the manifest sweep runner:
+
+::
+
+  python tools/diagnostics/parity_sweep_manifest.py --tier smoke
+  python tools/diagnostics/parity_sweep_manifest.py --tier full
+  python tools/diagnostics/parity_sweep_manifest.py --ids freeb_nonaxis_lasym_false_cth_like
+
+Dry-run (print commands only):
+
+::
+
+  python tools/diagnostics/parity_sweep_manifest.py --tier smoke --dry-run
+
+Outputs (logs + JSON summary) are written under:
+
+- ``outputs/parity_sweeps/<timestamp>/``
+
+Each case directory stores comparator logs and, for free-boundary cases,
+per-iteration scalpot comparator JSON payloads.
+
 - Pipeline parity snapshot (solver-free)::
 
     python tools/diagnostics/pipeline_parity_summary.py \
