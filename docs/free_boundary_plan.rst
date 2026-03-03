@@ -54,6 +54,9 @@ WP2 now has an initial coupling scaffold plus a VMEC2000-like dense path:
   ``VMEC_JAX_FREEB_VMEC_LIKE_MAX_POINTS``.
 - VMEC-style ``ivac``/``ivacskip`` update vs reuse behavior is preserved in
   both models.
+- On ``ivacskip != 0``, the implementation now reuses the cached operator and
+  refreshes only the RHS/solve (instead of freezing ``phi``), aligning closer
+  to VMEC2000 ``scalpot`` reuse semantics.
 - edge ``bsq`` coupling is now threaded into the force path by overriding the
   half-mesh edge magnetic-pressure term from vacuum channels.
 
