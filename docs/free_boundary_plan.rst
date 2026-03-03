@@ -27,6 +27,8 @@ WP1 is partially in place:
 
 - driver now loads and validates mgrid metadata for ``LFREEB=T``,
   with strict checks for ``NFP`` agreement and ``kp % nzeta == 0``.
+- solve loop now carries VMEC-style free-boundary control placeholders
+  (``ivac``, ``ivacskip``, ``nvacskip``) in diagnostics/resume state.
 - vacuum coupling and NESTOR solve integration remain pending.
 
 Scope and acceptance target

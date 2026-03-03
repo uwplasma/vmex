@@ -15,6 +15,7 @@ from vmec_jax.free_boundary import (
 )
 from vmec_jax.namelist import read_indata
 from vmec_jax.static import build_static
+from vmec_jax.driver import run_fixed_boundary
 
 
 def test_free_boundary_config_vmec2000_defaults(tmp_path: Path):
@@ -227,3 +228,102 @@ def test_prepare_mgrid_for_config_rejects_nfp_mismatch(tmp_path: Path):
     cfg = config_from_indata(read_indata(p))
     with pytest.raises(ValueError, match="MGRID nfp"):
         prepare_mgrid_for_config(cfg, load_fields=False, strict=True)
+
+
+def test_prepare_mgrid_for_config_rejects_kp_nzeta_mismatch(tmp_path: Path):
+    netCDF4 = pytest.importorskip("netCDF4", reason="netCDF4 required for mgrid loader test")
+
+    mg = tmp_path / "mgrid_bad_kp.nc"
+    with netCDF4.Dataset(str(mg), mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createDimension("stringsize", 4)
+        ds.createDimension("external_coil_groups", 1)
+        ds.createDimension("dim_00001", 1)
+        ds.createDimension("external_coils", 1)
+        ds.createDimension("rad", 2)
+        ds.createDimension("zee", 2)
+        ds.createDimension("phi", 5)
+        for name, value in (
+            ("ir", 2),
+            ("jz", 2),
+            ("kp", 5),
+            ("nfp", 2),
+            ("nextcur", 1),
+        ):
+            v = ds.createVariable(name, "i4", ())
+            v.assignValue(value)
+        for name, value in (("rmin", 1.0), ("rmax", 2.0), ("zmin", -1.0), ("zmax", 1.0)):
+            v = ds.createVariable(name, "f8", ())
+            v.assignValue(value)
+
+    txt = f"""
+&INDATA
+  NFP = 2
+  MPOL = 5
+  NTOR = 1
+  NS = 9
+  NZETA = 3
+  LFREEB = T
+  MGRID_FILE = '{mg}'
+/
+"""
+    p = tmp_path / "input.fb_bad_kp"
+    p.write_text(txt)
+    cfg = config_from_indata(read_indata(p))
+    with pytest.raises(ValueError, match="kp="):
+        prepare_mgrid_for_config(cfg, load_fields=False, strict=True)
+
+
+def test_run_fixed_boundary_initial_guess_carries_mgrid_metadata(tmp_path: Path):
+    netCDF4 = pytest.importorskip("netCDF4", reason="netCDF4 required for mgrid loader test")
+
+    mg = tmp_path / "mgrid_ok.nc"
+    with netCDF4.Dataset(str(mg), mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createDimension("stringsize", 8)
+        ds.createDimension("external_coil_groups", 2)
+        ds.createDimension("dim_00001", 1)
+        ds.createDimension("external_coils", 2)
+        ds.createDimension("rad", 2)
+        ds.createDimension("zee", 2)
+        ds.createDimension("phi", 4)
+        for name, value in (
+            ("ir", 2),
+            ("jz", 2),
+            ("kp", 4),
+            ("nfp", 1),
+            ("nextcur", 2),
+        ):
+            v = ds.createVariable(name, "i4", ())
+            v.assignValue(value)
+        for name, value in (("rmin", 1.0), ("rmax", 2.0), ("zmin", -1.0), ("zmax", 1.0)):
+            v = ds.createVariable(name, "f8", ())
+            v.assignValue(value)
+
+    inpath = tmp_path / "input.fb_guess"
+    inpath.write_text(
+        f"""
+&INDATA
+  NFP = 1
+  MPOL = 5
+  NTOR = 0
+  NS = 9
+  NZETA = 2
+  NTHETA = 8
+  LASYM = F
+  LFREEB = T
+  MGRID_FILE = '{mg}'
+  EXTCUR(1) = 3.5
+  RBC(0,0) = 6.0
+  ZBS(1,0) = 2.0
+/
+"""
+    )
+
+    run = run_fixed_boundary(
+        inpath,
+        use_initial_guess=True,
+        verbose=False,
+    )
+    assert run.cfg.lfreeb is True
+    assert run.static.mgrid_metadata is not None
+    assert int(run.static.mgrid_metadata.kp) == 4
+    assert run.static.free_boundary_extcur == (3.5, 0.0)

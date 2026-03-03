@@ -172,6 +172,20 @@ def _parse_iter_list(val: str) -> set[int] | None:
     return out if out else None
 
 
+def _free_boundary_iter_controls(iter2: int, iter1: int, nvacskip: int) -> tuple[int, int]:
+    """VMEC-style free-boundary update cadence controls.
+
+    Returns `(ivac, ivacskip)` from integer iteration counters.
+    - `ivacskip = mod(iter2 - iter1, nvacskip)`
+    - `ivac = 1` for full vacuum update (`ivacskip==0`), else `2` (skip/reuse).
+    """
+
+    nv = max(1, int(nvacskip))
+    ivs = int((int(iter2) - int(iter1)) % nv)
+    ivac = 1 if ivs == 0 else 2
+    return ivac, ivs
+
+
 def _maybe_dump_tomnsps(*, frzl, static, iter_idx: int, label: str = "raw") -> None:
     env = os.getenv("VMEC_JAX_DUMP_TOMNSPS", "")
     if not env or env == "0":
@@ -3508,7 +3522,17 @@ def solve_fixed_boundary_residual_iter(
     except Exception:
         reuse_static = False
     if not reuse_static:
-        static = build_static(cfg, grid=grid_vmec)
+        static = build_static(
+            cfg,
+            grid=grid_vmec,
+            mgrid_metadata=getattr(static, "mgrid_metadata", None),
+            free_boundary_extcur=getattr(static, "free_boundary_extcur", None),
+        )
+    # Free-boundary control scaffold (WP1): currently metadata/state plumbing only.
+    # The full NESTOR coupling is added in later work packages.
+    free_boundary_enabled = bool(getattr(cfg, "lfreeb", False))
+    freeb_nvacskip = max(1, int(getattr(cfg, "nvacskip", int(getattr(cfg, "nfp", 1)))))
+    freeb_nvskip0 = max(1, freeb_nvacskip)
 
     idx00 = _mode00_index(static.modes)
     m_modes = np.asarray(getattr(static, "m_np", None) if getattr(static, "m_np", None) is not None else static.modes.m, dtype=int)
@@ -7709,6 +7733,24 @@ def solve_fixed_boundary_residual_iter(
         fsql_full_diag = fsql_full if not scan_minimal else np.zeros((0,), dtype=float)
         n_iter_hist = int(np.asarray(w_hist).shape[0])
         resume_iter_offset = int(np.asarray(carry_final.iter_offset)) + n_iter_hist
+        if free_boundary_enabled:
+            freeb_iter1_final = int(np.asarray(carry_final.iter1))
+            freeb_ivac_final, freeb_ivacskip_final = _free_boundary_iter_controls(
+                int(resume_iter_offset), int(freeb_iter1_final), int(freeb_nvacskip)
+            )
+            if iter1_full.size > 0:
+                iter2_full = np.arange(1, int(iter1_full.size) + 1, dtype=int) + int(iter_offset0)
+                freeb_ivacskip_full = np.mod(iter2_full - iter1_full.astype(int), int(freeb_nvacskip)).astype(int)
+                freeb_ivac_full = np.where(freeb_ivacskip_full == 0, 1, 2).astype(int)
+            else:
+                freeb_ivacskip_full = np.zeros((0,), dtype=int)
+                freeb_ivac_full = np.zeros((0,), dtype=int)
+        else:
+            freeb_iter1_final = 1
+            freeb_ivac_final = 0
+            freeb_ivacskip_final = 0
+            freeb_ivacskip_full = np.zeros((0,), dtype=int)
+            freeb_ivac_full = np.zeros((0,), dtype=int)
 
         return SolveVmecResidualResult(
             state=carry_final.state,
@@ -7762,6 +7804,15 @@ def solve_fixed_boundary_residual_iter(
                 "probe_fsq_max": probe_fsq_max_final,
                 "probe_ratio": probe_ratio_final,
                 "probe_accept_frac": probe_accept_frac_final,
+                "free_boundary": {
+                    "enabled": bool(free_boundary_enabled),
+                    "nvacskip": int(freeb_nvacskip),
+                    "nvskip0": int(freeb_nvskip0),
+                    "ivac": int(freeb_ivac_final),
+                    "ivacskip": int(freeb_ivacskip_final),
+                },
+                "freeb_ivac_full": freeb_ivac_full,
+                "freeb_ivacskip_full": freeb_ivacskip_full,
                 "resume_state": {
                     "state_checkpoint": carry_final.state_checkpoint,
                     "time_step": float(np.asarray(carry_final.time_step)),
@@ -7806,6 +7857,10 @@ def solve_fixed_boundary_residual_iter(
                     "z00_prev": float(np.asarray(carry_final.z00_prev)),
                     "w_mhd_prev": float(np.asarray(carry_final.w_mhd_prev)),
                     "force_bcovar_update": bool(np.asarray(carry_final.force_bcovar_update)),
+                    "freeb_ivac": int(freeb_ivac_final),
+                    "freeb_ivacskip": int(freeb_ivacskip_final),
+                    "freeb_nvacskip": int(freeb_nvacskip),
+                    "freeb_nvskip0": int(freeb_nvskip0),
                 },
             },
         )
@@ -8141,8 +8196,11 @@ def solve_fixed_boundary_residual_iter(
     fsq_prev_history: list[float] = []
     bad_growth_streak_history: list[int] = []
     iter1_history: list[int] = []
+    iter2_history: list[int] = []
     include_edge_history: list[int] = []
     zero_m1_history: list[int] = []
+    freeb_ivac_history: list[int] = []
+    freeb_ivacskip_history: list[int] = []
     dt_eff_history: list[float] = []
     update_rms_history: list[float] = []
     w_curr_history: list[float] = []
@@ -8187,6 +8245,8 @@ def solve_fixed_boundary_residual_iter(
     ijacob = 0
     bad_resets = 0
     iter1 = 1
+    freeb_ivac = 0
+    freeb_ivacskip = 0
     res0 = -1.0
     k_preconditioner_update_interval = 25
     state_checkpoint = state
@@ -8460,6 +8520,11 @@ def solve_fixed_boundary_residual_iter(
         cache_prec_lam_prec = resume_state.get("cache_prec_lam_prec", cache_prec_lam_prec)
         cache_prec_faclam = resume_state.get("cache_prec_faclam", cache_prec_faclam)
         cache_prec_lam_debug = resume_state.get("cache_prec_lam_debug", cache_prec_lam_debug)
+        if free_boundary_enabled:
+            freeb_ivac = int(resume_state.get("freeb_ivac", freeb_ivac))
+            freeb_ivacskip = int(resume_state.get("freeb_ivacskip", freeb_ivacskip))
+            freeb_nvacskip = max(1, int(resume_state.get("freeb_nvacskip", freeb_nvacskip)))
+            freeb_nvskip0 = max(1, int(resume_state.get("freeb_nvskip0", freeb_nvskip0)))
 
     def _fmt_axis_coeff(val: float) -> str:
         s = f"{float(val):.16g}"
@@ -8651,6 +8716,9 @@ def solve_fixed_boundary_residual_iter(
             fsq_prev_history,
             bad_growth_streak_history,
             iter1_history,
+            iter2_history,
+            freeb_ivac_history,
+            freeb_ivacskip_history,
             grad_rms_history,
         ):
             _pop(h)
@@ -8836,6 +8904,10 @@ def solve_fixed_boundary_residual_iter(
         time_step_report_hold: float | None = None
         while True:
             iter_since_restart = iter2 - iter1
+            if free_boundary_enabled:
+                freeb_ivac, freeb_ivacskip = _free_boundary_iter_controls(
+                    int(iter2), int(iter1), int(freeb_nvacskip)
+                )
             fsq_prev_before = fsq_prev
             fsq0_prev_before = fsq0_prev
             pre_restart_reason = "none"
@@ -9500,6 +9572,10 @@ def solve_fixed_boundary_residual_iter(
                     fsq_prev_history.append(float(fsq_prev))
                     bad_growth_streak_history.append(int(bad_growth_streak))
                     iter1_history.append(int(iter1))
+                    iter2_history.append(int(iter2))
+                    if free_boundary_enabled:
+                        freeb_ivac_history.append(int(freeb_ivac))
+                        freeb_ivacskip_history.append(int(freeb_ivacskip))
                     grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
                 if verbose and not (bool(vmec2000_control) and bool(verbose_vmec2000_table)):
                     print(
@@ -9841,6 +9917,10 @@ def solve_fixed_boundary_residual_iter(
                         fsq_prev_history.append(float(fsq_prev))
                         bad_growth_streak_history.append(int(bad_growth_streak))
                         iter1_history.append(int(iter1))
+                        iter2_history.append(int(iter2))
+                        if free_boundary_enabled:
+                            freeb_ivac_history.append(int(freeb_ivac))
+                            freeb_ivacskip_history.append(int(freeb_ivacskip))
                         grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
                     _pop_iteration_histories()
                     prev_rz_fsq = prev_rz_fsq_before
@@ -10027,6 +10107,10 @@ def solve_fixed_boundary_residual_iter(
                     fsq_prev_history.append(float(fsq_prev))
                     bad_growth_streak_history.append(int(bad_growth_streak))
                     iter1_history.append(int(iter1))
+                    iter2_history.append(int(iter2))
+                    if free_boundary_enabled:
+                        freeb_ivac_history.append(int(freeb_ivac))
+                        freeb_ivacskip_history.append(int(freeb_ivacskip))
                     grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
                 if verbose:
                     if bool(vmec2000_control) and bool(verbose_vmec2000_table):
@@ -10751,6 +10835,10 @@ def solve_fixed_boundary_residual_iter(
             fsq_prev_history.append(float(fsq_prev))
             bad_growth_streak_history.append(int(bad_growth_streak))
             iter1_history.append(int(iter1))
+            iter2_history.append(int(iter2))
+            if free_boundary_enabled:
+                freeb_ivac_history.append(int(freeb_ivac))
+                freeb_ivacskip_history.append(int(freeb_ivacskip))
             grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
         skip_time_control = False
 
@@ -10782,6 +10870,7 @@ def solve_fixed_boundary_residual_iter(
         "fsq_prev_history": np.asarray(fsq_prev_history, dtype=float),
         "bad_growth_streak_history": np.asarray(bad_growth_streak_history, dtype=int),
         "iter1_history": np.asarray(iter1_history, dtype=int),
+        "iter2_history": np.asarray(iter2_history, dtype=int),
         "bcovar_update_history": np.asarray(bcovar_update_history, dtype=int),
         "include_edge_history": np.asarray(include_edge_history, dtype=int),
         "zero_m1_history": np.asarray(zero_m1_history, dtype=int),
@@ -10808,6 +10897,15 @@ def solve_fixed_boundary_residual_iter(
         "gcr2_p_history": np.asarray(gcr2_p_history, dtype=float),
         "gcz2_p_history": np.asarray(gcz2_p_history, dtype=float),
         "gcl2_p_history": np.asarray(gcl2_p_history, dtype=float),
+        "free_boundary": {
+            "enabled": bool(free_boundary_enabled),
+            "nvacskip": int(freeb_nvacskip),
+            "nvskip0": int(freeb_nvskip0),
+            "ivac": int(freeb_ivac),
+            "ivacskip": int(freeb_ivacskip),
+        },
+        "freeb_ivac_history": np.asarray(freeb_ivac_history, dtype=int),
+        "freeb_ivacskip_history": np.asarray(freeb_ivacskip_history, dtype=int),
     }
     if timing_enabled:
         iters = max(int(timing_stats["iterations"]), 1)
@@ -10878,6 +10976,10 @@ def solve_fixed_boundary_residual_iter(
         "cache_prec_lam_prec": cache_prec_lam_prec,
         "cache_prec_faclam": cache_prec_faclam,
         "cache_prec_lam_debug": cache_prec_lam_debug,
+        "freeb_ivac": int(freeb_ivac),
+        "freeb_ivacskip": int(freeb_ivacskip),
+        "freeb_nvacskip": int(freeb_nvacskip),
+        "freeb_nvskip0": int(freeb_nvskip0),
     }
     return SolveVmecResidualResult(
         state=state,
