@@ -9,6 +9,26 @@ VMEC2000-quality free-boundary capability to ``vmec-jax`` while preserving:
 - high CPU performance (scan fast path + parity fallback),
 - bounded memory usage.
 
+Current Implementation Status (March 2, 2026)
+---------------------------------------------
+
+WP0 is implemented:
+
+- typed free-boundary input config parsed from ``&INDATA``:
+  ``LFREEB``, ``MGRID_FILE``, ``EXTCUR``, ``NVACSKIP``,
+- VMEC2000-aligned defaults:
+  ``LFREEB=T`` with ``MGRID_FILE='NONE'`` disables free-boundary,
+  ``NVACSKIP<=0`` falls back to ``NFP``,
+- typed free-boundary runtime state scaffold in ``VMECStatic``,
+- mgrid loader skeleton (metadata + optional BR/BP/BZ tensor loading),
+- unit tests for parsing, normalization, and mgrid metadata loading.
+
+WP1 is partially in place:
+
+- driver now loads and validates mgrid metadata for ``LFREEB=T``,
+  with strict checks for ``NFP`` agreement and ``kp % nzeta == 0``.
+- vacuum coupling and NESTOR solve integration remain pending.
+
 Scope and acceptance target
 ---------------------------
 

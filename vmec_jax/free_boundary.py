@@ -57,6 +57,14 @@ class MGridData:
     bz: np.ndarray
 
 
+@dataclass(frozen=True)
+class PreparedMGrid:
+    """Validated mgrid metadata plus normalized external-current vector."""
+
+    metadata: MGridMetadata
+    extcur: tuple[float, ...]
+
+
 def initial_free_boundary_state(cfg: VMECConfig) -> FreeBoundaryRuntimeState:
     """Initialize free-boundary control state for a VMEC stage."""
 
@@ -84,6 +92,17 @@ def validate_free_boundary_config(cfg: VMECConfig, *, strict: bool = False) -> N
         return
     if int(cfg.nvacskip) <= 0:
         raise ValueError(f"nvacskip must be >=1 after normalization, got {cfg.nvacskip}")
+
+
+def _normalize_extcur(extcur_in: tuple[float, ...], nextcur: int) -> tuple[float, ...]:
+    if nextcur <= 0:
+        return tuple()
+    vals = list(float(v) for v in extcur_in)
+    if len(vals) < nextcur:
+        vals.extend([0.0] * (nextcur - len(vals)))
+    elif len(vals) > nextcur:
+        vals = vals[:nextcur]
+    return tuple(vals)
 
 
 def _decode_char_scalar(x: Any) -> str:
@@ -207,3 +226,35 @@ def load_mgrid(path: str | Path, *, load_fields: bool = True) -> MGridMetadata |
                 out[i, :, :, :] = v
 
         return MGridData(metadata=meta, br=br, bp=bp, bz=bz)
+
+
+def prepare_mgrid_for_config(
+    cfg: VMECConfig,
+    *,
+    load_fields: bool = False,
+    strict: bool = True,
+) -> PreparedMGrid | MGridData | None:
+    """Load and validate mgrid against VMECConfig.
+
+    Validation mirrors VMEC2000's read_mgrid checks:
+    - `nfp` must match mgrid `nfper0`,
+    - `kp` must be divisible by `nzeta`.
+    """
+
+    if not bool(cfg.lfreeb):
+        return None
+    validate_free_boundary_config(cfg, strict=strict)
+    loaded = load_mgrid(cfg.mgrid_file, load_fields=load_fields)
+    meta = loaded.metadata if isinstance(loaded, MGridData) else loaded
+
+    if int(meta.nfp) != int(cfg.nfp):
+        raise ValueError(f"MGRID nfp={meta.nfp} does not match input nfp={cfg.nfp}")
+    if int(cfg.nzeta) <= 0 or (int(meta.kp) % int(cfg.nzeta) != 0):
+        raise ValueError(
+            f"MGRID kp={meta.kp} must be divisible by nzeta={cfg.nzeta}"
+        )
+
+    extcur = _normalize_extcur(tuple(cfg.extcur), int(meta.nextcur))
+    if isinstance(loaded, MGridData):
+        return MGridData(metadata=meta, br=loaded.br, bp=loaded.bp, bz=loaded.bz)
+    return PreparedMGrid(metadata=meta, extcur=extcur)
