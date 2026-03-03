@@ -92,12 +92,14 @@ A dedicated free-boundary comparator is now available:
 
 - ``tools/diagnostics/vmec2000_exec_freeb_scalpot_compare.py``
 
-It runs VMEC2000 with ``VMEC_DUMP_SCALPOT=1`` and vmec-jax with
+It runs VMEC2000 with ``VMEC_DUMP_SCALPOT=1``, ``VMEC_DUMP_BEXTERN=1``,
+``VMEC_DUMP_FOURI=1`` and vmec-jax with
 ``VMEC_JAX_DUMP_SCALPOT=1`` on the same input, then reports deltas for:
 
 - scalpot RHS vector (VMEC mode space vs vmec-jax projected mode space),
 - scalpot matrix (VMEC LU-space matrix vs vmec-jax projected dense operator),
 - vacuum boundary ``bsqvac`` channel.
+- fouri non-singular source channels (``gsource``, ``source_sym``, ``bvecNS``).
 
 When VMEC2000 includes ``VMEC_DUMP_BEXTERN`` support, the comparator also
 reports upstream source-channel deltas:
@@ -110,6 +112,14 @@ Example benchmark (``input.cth_like_free_bdy``, iter 53 where vacuum turns on):
 - ``bvec rel_scaled``: ~``7.68e-01``
 - ``amatrix rel_scaled``: ~``6.80e-01``
 - ``bsqvac rel_scaled``: ~``1.25e-01``
+
+Current deep-dump status (same case/iter):
+
+- upstream geometry/external channels are close (``bex*`` O(1e-3...1e-2)),
+- ``amatrix`` projected shape/scaling is close after scalar normalization,
+- ``gsource``/``source_sym`` are still far from VMEC (O(1)),
+  indicating the main remaining gap is the VMEC ``greenf/fourp/fouri``
+  source/operator pipeline, not wrout formatting.
 
 These values quantify the current WP2 gap and provide the baseline for the
 next parity increments (analytic source terms and Green-function kernel

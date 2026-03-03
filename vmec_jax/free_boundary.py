@@ -1488,6 +1488,12 @@ def _maybe_dump_scalpot_jax(
             out["xnpot"] = np.asarray(basis["xnpot"], dtype=np.int64)
             out["sinmni"] = np.asarray(basis["sinmni"], dtype=float)
             out["cosmni"] = np.asarray(basis["cosmni"], dtype=float)
+            if gsource_vmec is not None:
+                src_sym = _vmec_source_from_gsource(
+                    gsource=np.asarray(gsource_vmec, dtype=float),
+                    basis=basis,
+                )
+                out["source_sym"] = np.asarray(src_sym, dtype=float).reshape(ntheta, nzeta)
 
             if bvec_mode is not None:
                 bv = np.asarray(bvec_mode, dtype=float).reshape(-1)

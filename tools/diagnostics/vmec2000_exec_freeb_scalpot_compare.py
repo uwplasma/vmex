@@ -225,6 +225,52 @@ def _parse_bextern_dump(path: Path) -> dict[str, Any]:
     }
 
 
+def _parse_fouri_dump(path: Path) -> dict[str, Any]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    kv = _parse_keyvals(lines)
+    mnpd = int(kv.get("mnpd", "0"))
+    mnpd2 = int(kv.get("mnpd2", str(mnpd)))
+    nuv3 = int(kv.get("nuv3", "0"))
+    source_sym = np.zeros((max(0, nuv3),), dtype=float)
+    gsource = np.zeros((max(0, nuv3),), dtype=float)
+    bvec_ns_sin = np.zeros((max(0, mnpd),), dtype=float)
+    bvec_ns_cos = np.zeros((max(0, mnpd),), dtype=float)
+    section = ""
+    for ln in lines:
+        s = ln.strip()
+        if not s:
+            continue
+        if s.startswith("[") and s.endswith("]"):
+            section = s[1:-1].strip().lower()
+            continue
+        if s.startswith("#"):
+            continue
+        parts = s.split()
+        if section == "gsource" and len(parts) >= 2:
+            i = int(parts[0]) - 1
+            if 0 <= i < gsource.size:
+                gsource[i] = float(parts[1].replace("D", "E"))
+        elif section == "source_sym" and len(parts) >= 2:
+            i = int(parts[0]) - 1
+            if 0 <= i < source_sym.size:
+                source_sym[i] = float(parts[1].replace("D", "E"))
+        elif section == "bvecns" and len(parts) >= 3:
+            i = int(parts[0]) - 1
+            if 0 <= i < bvec_ns_sin.size:
+                bvec_ns_sin[i] = float(parts[1].replace("D", "E"))
+                bvec_ns_cos[i] = float(parts[2].replace("D", "E"))
+    return {
+        "iter2": int(kv.get("iter2", "-1")),
+        "mnpd": mnpd,
+        "mnpd2": mnpd2,
+        "nuv3": nuv3,
+        "gsource": gsource,
+        "source_sym": source_sym,
+        "bvecns_sin": bvec_ns_sin,
+        "bvecns_cos": bvec_ns_cos,
+    }
+
+
 def _rel(a: np.ndarray, b: np.ndarray) -> float:
     da = np.asarray(a, dtype=float)
     db = np.asarray(b, dtype=float)
@@ -304,6 +350,7 @@ def main() -> int:
         {
             "VMEC_DUMP_SCALPOT": "1",
             "VMEC_DUMP_BEXTERN": "1",
+            "VMEC_DUMP_FOURI": "1",
             "VMEC_DUMP_ITER": str(int(args.iter)),
             "VMEC_DUMP_DIR": str(vmec_dump_dir),
         }
@@ -340,6 +387,7 @@ def main() -> int:
     vmec_scalpot_files = sorted(vmec_dump_dir.glob(f"scalpot_iter{int(args.iter)}_ivacskip*.dat"))
     vmec_vac_files = sorted(vmec_dump_dir.glob(f"vacuum_iter{int(args.iter)}_ivacskip*.dat"))
     vmec_bextern_files = sorted(vmec_dump_dir.glob(f"bextern_iter{int(args.iter)}.dat"))
+    vmec_fouri_files = sorted(vmec_dump_dir.glob(f"fouri_iter{int(args.iter)}.dat"))
     jax_npz = jax_dump_dir / f"scalpot_jax_iter{int(args.iter)}.npz"
     if not vmec_scalpot_files:
         raise SystemExit(f"missing VMEC scalpot dump in {vmec_dump_dir}")
@@ -351,6 +399,7 @@ def main() -> int:
     vmec_scal = _parse_scalpot_dump(vmec_scalpot_files[0])
     vmec_vac = _parse_vacuum_dump(vmec_vac_files[0])
     vmec_bex = _parse_bextern_dump(vmec_bextern_files[0]) if vmec_bextern_files else None
+    vmec_fouri = _parse_fouri_dump(vmec_fouri_files[0]) if vmec_fouri_files else None
     jax = dict(np.load(jax_npz, allow_pickle=False))
 
     vmec_modes = None
@@ -368,6 +417,7 @@ def main() -> int:
         "vmec_scalpot_dump": str(vmec_scalpot_files[0]),
         "vmec_vacuum_dump": str(vmec_vac_files[0]),
         "vmec_bextern_dump": str(vmec_bextern_files[0]) if vmec_bextern_files else None,
+        "vmec_fouri_dump": str(vmec_fouri_files[0]) if vmec_fouri_files else None,
         "jax_dump": str(jax_npz),
         "iter": int(args.iter),
         "mode_map_applied": bool(mode_map is not None),
@@ -451,6 +501,22 @@ def main() -> int:
             "rel_scaled": rel_ns_scaled,
             "scale_jax_to_vmec": a_ns,
         }
+        if vmec_fouri is not None:
+            vmec_ns2 = np.asarray(vmec_fouri["bvecns_sin"], dtype=float)
+            if bool(np.any(np.asarray(vmec_fouri["bvecns_cos"], dtype=float) != 0.0)):
+                vmec_ns2 = np.concatenate([vmec_ns2, np.asarray(vmec_fouri["bvecns_cos"], dtype=float)], axis=0)
+            n2 = min(vmec_ns2.size, jax_ns.size)
+            vm2 = vmec_ns2[:n2]
+            jj2 = jax_ns[:n2]
+            a_ns2, rel_ns2_scaled = _rel_scaled(vm2, jj2)
+            out["bvec_nonsing_fouri"] = {
+                "size_vmec": int(vmec_ns2.size),
+                "size_jax": int(jax_ns.size),
+                "size_cmp": int(n2),
+                "rel_raw": _rel(vm2, jj2),
+                "rel_scaled": rel_ns2_scaled,
+                "scale_jax_to_vmec": a_ns2,
+            }
 
     if "bvec_mode_analytic_sin" in jax:
         jax_an = np.asarray(jax["bvec_mode_analytic_sin"])
@@ -491,6 +557,37 @@ def main() -> int:
             "rel_raw": _rel(vm, jj),
             "rel_scaled": rel_pot_scaled,
             "scale_jax_to_vmec": a_pot,
+        }
+
+    if (vmec_fouri is not None) and ("source_sym" in jax):
+        jsrc = np.asarray(jax["source_sym"], dtype=float).reshape(-1)
+        vsrc = np.asarray(vmec_fouri["source_sym"], dtype=float).reshape(-1)
+        n = min(vsrc.size, jsrc.size)
+        vm = vsrc[:n]
+        jj = jsrc[:n]
+        a_src, rel_src_scaled = _rel_scaled(vm, jj)
+        out["source_sym"] = {
+            "size_vmec": int(vsrc.size),
+            "size_jax": int(jsrc.size),
+            "size_cmp": int(n),
+            "rel_raw": _rel(vm, jj),
+            "rel_scaled": rel_src_scaled,
+            "scale_jax_to_vmec": a_src,
+        }
+    if (vmec_fouri is not None) and ("gsource_vmec" in jax):
+        jsrc = np.asarray(jax["gsource_vmec"], dtype=float).reshape(-1)
+        vsrc = np.asarray(vmec_fouri["gsource"], dtype=float).reshape(-1)
+        n = min(vsrc.size, jsrc.size)
+        vm = vsrc[:n]
+        jj = jsrc[:n]
+        a_src, rel_src_scaled = _rel_scaled(vm, jj)
+        out["gsource"] = {
+            "size_vmec": int(vsrc.size),
+            "size_jax": int(jsrc.size),
+            "size_cmp": int(n),
+            "rel_raw": _rel(vm, jj),
+            "rel_scaled": rel_src_scaled,
+            "scale_jax_to_vmec": a_src,
         }
 
     if "amatrix_mode" in jax:
