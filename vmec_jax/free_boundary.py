@@ -516,7 +516,7 @@ def _sample_external_boundary_arrays(
             coeff_sin=np.asarray(state.Rsin)[-1:, :],
             modes=static.modes,
             trig=trig,
-            coeffs_internal=False,
+            coeffs_internal=True,
         )[0]
     )
     Z = np.asarray(
@@ -525,7 +525,7 @@ def _sample_external_boundary_arrays(
             coeff_sin=np.asarray(state.Zsin)[-1:, :],
             modes=static.modes,
             trig=trig,
-            coeffs_internal=False,
+            coeffs_internal=True,
         )[0]
     )
     Ru = np.asarray(
@@ -534,7 +534,7 @@ def _sample_external_boundary_arrays(
             coeff_sin=np.asarray(state.Rsin)[-1:, :],
             modes=static.modes,
             trig=trig,
-            coeffs_internal=False,
+            coeffs_internal=True,
         )[0]
     )
     Zu = np.asarray(
@@ -543,7 +543,7 @@ def _sample_external_boundary_arrays(
             coeff_sin=np.asarray(state.Zsin)[-1:, :],
             modes=static.modes,
             trig=trig,
-            coeffs_internal=False,
+            coeffs_internal=True,
         )[0]
     )
     Rv = np.asarray(
@@ -552,7 +552,7 @@ def _sample_external_boundary_arrays(
             coeff_sin=np.asarray(state.Rsin)[-1:, :],
             modes=static.modes,
             trig=trig,
-            coeffs_internal=False,
+            coeffs_internal=True,
         )[0]
     )
     Zv = np.asarray(
@@ -561,7 +561,7 @@ def _sample_external_boundary_arrays(
             coeff_sin=np.asarray(state.Zsin)[-1:, :],
             modes=static.modes,
             trig=trig,
-            coeffs_internal=False,
+            coeffs_internal=True,
         )[0]
     )
 
