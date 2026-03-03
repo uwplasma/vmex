@@ -1131,16 +1131,19 @@ def _vmec_nonsingular_gsource_from_bexni(
         Zu2[:ntheta3, :] = Zu_red
         Rv2[:ntheta3, :] = Rv_red
         Zv2[:ntheta3, :] = Zv_red
+        kv_m = (nv - np.arange(nv, dtype=np.int64)) % max(1, nv)
         for ku in range(1, max(1, ntheta3 - 1)):
             km = (nu - ku) % max(1, nu)
             if km < ntheta3:
                 continue
-            R2[km, :] = R_red[ku, :]
-            Z2[km, :] = -Z_red[ku, :]
-            Ru2[km, :] = -Ru_red[ku, :]
-            Zu2[km, :] = Zu_red[ku, :]
-            Rv2[km, :] = Rv_red[ku, :]
-            Zv2[km, :] = -Zv_red[ku, :]
+            # Stellarator symmetry for missing half-grid rows:
+            # (u,v) -> (-u,+v) maps to source rows sampled at (+u,-v).
+            R2[km, :] = R_red[ku, kv_m]
+            Z2[km, :] = -Z_red[ku, kv_m]
+            Ru2[km, :] = -Ru_red[ku, kv_m]
+            Zu2[km, :] = Zu_red[ku, kv_m]
+            Rv2[km, :] = -Rv_red[ku, kv_m]
+            Zv2[km, :] = Zv_red[ku, kv_m]
 
     # Periodic second derivatives (central finite difference) to build AU* terms.
     dth = 2.0 * np.pi / float(max(1, nu))
@@ -1935,7 +1938,7 @@ def nestor_external_only_step(
                         basis=cache.mode_basis,
                     )
                     rhs_mode_eff = np.asarray(bvec_mode_nonsing, dtype=float)
-                    add_analytic = os.getenv("VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC", "0").strip().lower() not in (
+                    add_analytic = os.getenv("VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC", "1").strip().lower() not in (
                         "",
                         "0",
                         "false",
@@ -1945,7 +1948,7 @@ def nestor_external_only_step(
                         bvec_mode_analytic = _vmec_analytic_bvec_from_geometry(
                             sample=sample,
                             basis=cache.mode_basis,
-                            bexni=np.asarray(gsource_vmec, dtype=float),
+                            bexni=np.asarray(gsource_bexni, dtype=float),
                         )
                         rhs_mode_eff = rhs_mode_eff + np.asarray(bvec_mode_analytic, dtype=float)
                 phi, potvac, bvec_mode = _solve_vmec_like_mode_from_gsource(
