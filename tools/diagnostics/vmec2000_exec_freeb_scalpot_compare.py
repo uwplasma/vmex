@@ -42,6 +42,9 @@ def _parse_scalpot_dump(path: Path) -> dict[str, Any]:
     kv = _parse_keyvals(lines)
     mnpd2 = int(kv.get("mnpd2", "0"))
     mnpd = int(kv.get("mnpd", str(mnpd2)))
+    nuv = int(kv.get("nuv", "0"))
+    nuv3 = int(kv.get("nuv3", "0"))
+    source_cache_iter = int(kv.get("source_cache_iter", "-1"))
     if mnpd2 <= 0:
         raise ValueError(f"missing mnpd2 in {path}")
     section = ""
@@ -51,6 +54,10 @@ def _parse_scalpot_dump(path: Path) -> dict[str, Any]:
     amat = np.zeros((mnpd2, mnpd2), dtype=float)
     xmpot = np.zeros((max(0, mnpd),), dtype=np.int64)
     xnpot = np.zeros((max(0, mnpd),), dtype=np.int64)
+    source_sym_cached = np.zeros((max(0, nuv3),), dtype=float)
+    gsource_cached = np.zeros((max(0, nuv),), dtype=float)
+    bvecns_cached_sin = np.zeros((max(0, mnpd),), dtype=float)
+    bvecns_cached_cos = np.zeros((max(0, mnpd),), dtype=float)
     for ln in lines:
         s = ln.strip()
         if not s:
@@ -84,17 +91,37 @@ def _parse_scalpot_dump(path: Path) -> dict[str, Any]:
             if 0 <= i < mnpd:
                 xmpot[i] = int(round(float(parts[1].replace("D", "E"))))
                 xnpot[i] = int(round(float(parts[2].replace("D", "E"))))
+        elif section == "source_sym_cached" and len(parts) >= 2:
+            i = int(parts[0]) - 1
+            if 0 <= i < source_sym_cached.size:
+                source_sym_cached[i] = float(parts[1].replace("D", "E"))
+        elif section == "gsource_cached" and len(parts) >= 2:
+            i = int(parts[0]) - 1
+            if 0 <= i < gsource_cached.size:
+                gsource_cached[i] = float(parts[1].replace("D", "E"))
+        elif section == "bvecns_cached" and len(parts) >= 3:
+            i = int(parts[0]) - 1
+            if 0 <= i < bvecns_cached_sin.size:
+                bvecns_cached_sin[i] = float(parts[1].replace("D", "E"))
+                bvecns_cached_cos[i] = float(parts[2].replace("D", "E"))
     return {
         "iter2": int(kv.get("iter2", "-1")),
         "ivacskip": int(kv.get("ivacskip", "-1")),
         "mnpd2": mnpd2,
         "mnpd": mnpd,
+        "nuv": nuv,
+        "nuv3": nuv3,
+        "source_cache_iter": source_cache_iter,
         "bvec": bvec,
         "bvecsav": bvecsav,
         "amatrix_raw": amat_raw,
         "amatrix_lu": amat,
         "xmpot": xmpot,
         "xnpot": xnpot,
+        "source_sym_cached": source_sym_cached,
+        "gsource_cached": gsource_cached,
+        "bvecns_cached_sin": bvecns_cached_sin,
+        "bvecns_cached_cos": bvecns_cached_cos,
     }
 
 
@@ -431,6 +458,11 @@ def main() -> int:
         "jax_dump": str(jax_npz),
         "iter": int(args.iter),
         "mode_map_applied": bool(mode_map is not None),
+        "vmec_scalpot_meta": {
+            "iter2": int(vmec_scal.get("iter2", -1)),
+            "ivacskip": int(vmec_scal.get("ivacskip", -1)),
+            "source_cache_iter": int(vmec_scal.get("source_cache_iter", -1)),
+        },
     }
 
     if "bvec_mode_sin" in jax:
@@ -511,10 +543,19 @@ def main() -> int:
             "rel_scaled": rel_ns_scaled,
             "scale_jax_to_vmec": a_ns,
         }
+        vmec_ns2 = None
+        vmec_ns2_src = None
         if vmec_fouri is not None:
             vmec_ns2 = np.asarray(vmec_fouri["bvecns_sin"], dtype=float)
             if bool(np.any(np.asarray(vmec_fouri["bvecns_cos"], dtype=float) != 0.0)):
                 vmec_ns2 = np.concatenate([vmec_ns2, np.asarray(vmec_fouri["bvecns_cos"], dtype=float)], axis=0)
+            vmec_ns2_src = "fouri"
+        elif vmec_scal.get("bvecns_cached_sin", np.zeros((0,), dtype=float)).size > 0:
+            vmec_ns2 = np.asarray(vmec_scal["bvecns_cached_sin"], dtype=float)
+            if bool(np.any(np.asarray(vmec_scal.get("bvecns_cached_cos", np.zeros((0,), dtype=float)) != 0.0))):
+                vmec_ns2 = np.concatenate([vmec_ns2, np.asarray(vmec_scal["bvecns_cached_cos"], dtype=float)], axis=0)
+            vmec_ns2_src = "scalpot_cached"
+        if vmec_ns2 is not None:
             n2 = min(vmec_ns2.size, jax_ns.size)
             vm2 = vmec_ns2[:n2]
             jj2 = jax_ns[:n2]
@@ -526,6 +567,7 @@ def main() -> int:
                 "rel_raw": _rel(vm2, jj2),
                 "rel_scaled": rel_ns2_scaled,
                 "scale_jax_to_vmec": a_ns2,
+                "vmec_source": vmec_ns2_src,
             }
 
     if "bvec_mode_analytic_sin" in jax:
@@ -569,9 +611,14 @@ def main() -> int:
             "scale_jax_to_vmec": a_pot,
         }
 
-    if (vmec_fouri is not None) and ("source_sym" in jax):
+    if "source_sym" in jax:
         jsrc = np.asarray(jax["source_sym"], dtype=float).reshape(-1)
-        vsrc = np.asarray(vmec_fouri["source_sym"], dtype=float).reshape(-1)
+        if vmec_fouri is not None:
+            vsrc = np.asarray(vmec_fouri["source_sym"], dtype=float).reshape(-1)
+            vmec_source_kind = "fouri"
+        else:
+            vsrc = np.asarray(vmec_scal.get("source_sym_cached", np.zeros((0,), dtype=float)), dtype=float).reshape(-1)
+            vmec_source_kind = "scalpot_cached"
         n = min(vsrc.size, jsrc.size)
         vm = vsrc[:n]
         jj = jsrc[:n]
@@ -583,10 +630,16 @@ def main() -> int:
             "rel_raw": _rel(vm, jj),
             "rel_scaled": rel_src_scaled,
             "scale_jax_to_vmec": a_src,
+            "vmec_source": vmec_source_kind,
         }
-    if (vmec_fouri is not None) and ("gsource_vmec" in jax):
+    if "gsource_vmec" in jax:
         jsrc = np.asarray(jax["gsource_vmec"], dtype=float).reshape(-1)
-        vsrc = np.asarray(vmec_fouri["gsource"], dtype=float).reshape(-1)
+        if vmec_fouri is not None:
+            vsrc = np.asarray(vmec_fouri["gsource"], dtype=float).reshape(-1)
+            vmec_source_kind = "fouri"
+        else:
+            vsrc = np.asarray(vmec_scal.get("gsource_cached", np.zeros((0,), dtype=float)), dtype=float).reshape(-1)
+            vmec_source_kind = "scalpot_cached"
         n = min(vsrc.size, jsrc.size)
         vm = vsrc[:n]
         jj = jsrc[:n]
@@ -598,8 +651,13 @@ def main() -> int:
             "rel_raw": _rel(vm, jj),
             "rel_scaled": rel_src_scaled,
             "scale_jax_to_vmec": a_src,
+            "vmec_source": vmec_source_kind,
         }
-        vfull = np.asarray(vmec_fouri.get("gsource_full", np.zeros((0,), dtype=float)), dtype=float).reshape(-1)
+        vfull = (
+            np.asarray(vmec_fouri.get("gsource_full", np.zeros((0,), dtype=float)), dtype=float).reshape(-1)
+            if vmec_fouri is not None
+            else np.asarray(vmec_scal.get("gsource_cached", np.zeros((0,), dtype=float)), dtype=float).reshape(-1)
+        )
         if vfull.size > 0 and jsrc.size > 0:
             nfull = min(vfull.size, jsrc.size)
             vmf = vfull[:nfull]
@@ -612,10 +670,16 @@ def main() -> int:
                 "rel_raw": _rel(vmf, jjf),
                 "rel_scaled": rel_full_scaled,
                 "scale_jax_to_vmec": a_full,
+                "vmec_source": vmec_source_kind,
             }
-    if (vmec_fouri is not None) and ("gsource_kernel" in jax):
+    if "gsource_kernel" in jax:
         jsrc = np.asarray(jax["gsource_kernel"], dtype=float).reshape(-1)
-        vsrc = np.asarray(vmec_fouri["gsource"], dtype=float).reshape(-1)
+        if vmec_fouri is not None:
+            vsrc = np.asarray(vmec_fouri["gsource"], dtype=float).reshape(-1)
+            vmec_source_kind = "fouri"
+        else:
+            vsrc = np.asarray(vmec_scal.get("gsource_cached", np.zeros((0,), dtype=float)), dtype=float).reshape(-1)
+            vmec_source_kind = "scalpot_cached"
         n = min(vsrc.size, jsrc.size)
         vm = vsrc[:n]
         jj = jsrc[:n]
@@ -627,6 +691,7 @@ def main() -> int:
             "rel_raw": _rel(vm, jj),
             "rel_scaled": rel_src_scaled,
             "scale_jax_to_vmec": a_src,
+            "vmec_source": vmec_source_kind,
         }
 
     if "amatrix_mode" in jax:

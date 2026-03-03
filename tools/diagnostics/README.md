@@ -41,3 +41,12 @@ Free-boundary manifest notes:
   included:
   - `examples/data/input.cth_like_free_bdy_lasym_small`
   - `examples/data/mgrid_cth_like_lasym_small.nc`
+
+Late-iteration free-boundary diagnostics:
+
+- VMEC2000 `scalpot` dumps now include cached source channels
+  (`source_sym_cached`, `gsource_cached`, `bvecNS_cached`) plus
+  `source_cache_iter` metadata.
+- The free-boundary comparator uses these cached channels when `fouri` dump
+  files are absent (common at `ivacskip > 0`), so `source_sym`/`bvecNS`
+  alignment remains observable beyond vacuum turn-on iterations.

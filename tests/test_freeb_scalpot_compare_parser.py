@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from tools.diagnostics.vmec2000_exec_freeb_scalpot_compare import _parse_fouri_dump
+from tools.diagnostics.vmec2000_exec_freeb_scalpot_compare import _parse_fouri_dump, _parse_scalpot_dump
 
 
 def test_parse_fouri_dump_reads_gsource_source_and_bvecns(tmp_path: Path) -> None:
@@ -42,3 +42,56 @@ def test_parse_fouri_dump_reads_gsource_source_and_bvecns(tmp_path: Path) -> Non
     np.testing.assert_allclose(got["source_sym"], np.array([1.5, 2.5, 3.5, 4.5]))
     np.testing.assert_allclose(got["bvecns_sin"], np.array([0.1, 0.3, 0.5]))
     np.testing.assert_allclose(got["bvecns_cos"], np.array([0.2, 0.4, 0.6]))
+
+
+def test_parse_scalpot_dump_reads_cached_source_sections(tmp_path: Path) -> None:
+    p = tmp_path / "scalpot_iter100_ivacskip2.dat"
+    p.write_text(
+        "\n".join(
+            [
+                "# scalpot dump",
+                "iter2=100",
+                "ivacskip=2",
+                "mnpd2=4",
+                "mnpd=2",
+                "nuv=6",
+                "nuv3=4",
+                "source_cache_iter=98",
+                "[bvec]",
+                "1 1.0D+00",
+                "2 2.0D+00",
+                "3 3.0D+00",
+                "4 4.0D+00",
+                "[bvecsav]",
+                "1 1.0D-01",
+                "2 2.0D-01",
+                "3 3.0D-01",
+                "4 4.0D-01",
+                "[source_sym_cached]",
+                "1 1.1D+00",
+                "2 2.2D+00",
+                "3 3.3D+00",
+                "4 4.4D+00",
+                "[gsource_cached]",
+                "1 0.1D+00",
+                "2 0.2D+00",
+                "3 0.3D+00",
+                "4 0.4D+00",
+                "5 0.5D+00",
+                "6 0.6D+00",
+                "[bvecNS_cached]",
+                "1 1.0D-02 2.0D-02",
+                "2 3.0D-02 4.0D-02",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    got = _parse_scalpot_dump(p)
+    assert got["nuv"] == 6
+    assert got["nuv3"] == 4
+    assert got["source_cache_iter"] == 98
+    np.testing.assert_allclose(got["source_sym_cached"], np.array([1.1, 2.2, 3.3, 4.4]))
+    np.testing.assert_allclose(got["gsource_cached"], np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
+    np.testing.assert_allclose(got["bvecns_cached_sin"], np.array([1.0e-2, 3.0e-2]))
+    np.testing.assert_allclose(got["bvecns_cached_cos"], np.array([2.0e-2, 4.0e-2]))

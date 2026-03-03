@@ -168,6 +168,11 @@ Current deep-dump status (same case/iter):
 - ``gsource``/``source_sym`` are still far from VMEC (O(1)),
   indicating the main remaining gap is the VMEC ``greenf/fourp/fouri``
   source/operator pipeline, not wrout formatting.
+- For ``ivacskip > 0`` iterations (where VMEC skips ``fouri``), the
+  instrumentation now exports cached source channels from ``scalpot``
+  (``source_sym_cached``, ``gsource_cached``, ``bvecNS_cached`` plus
+  ``source_cache_iter``), and the comparator consumes these as the VMEC
+  reference. This closes the observability gap for late-iteration drift.
 
 These values quantify the current WP2 gap and provide the baseline for the
 next parity increments (analytic source terms and Green-function kernel
