@@ -10,6 +10,8 @@ from vmec_jax.free_boundary import (
     MGridData,
     MGridMetadata,
     PreparedMGrid,
+    _build_vmec_mode_basis,
+    _vmec_bvec_from_gsource,
     boundary_metric_from_rz,
     covariant_boundary_field_from_cylindrical,
     contravariant_boundary_field_from_covariant,
@@ -162,6 +164,43 @@ def test_free_boundary_iter_controls_vmec_updates_nvacskip_on_full_step():
     assert ivacskip == 0
     # fsq=1e-12 -> max(1e-1,1e11*fsq)=1e-1 -> nvacskip target=10
     assert nvacskip == 10
+
+
+def test_vmec_mode_basis_and_bvec_skip_modes():
+    ntheta, nzeta = 5, 7
+    wint = np.full((ntheta, nzeta), 1.0 / float(ntheta * nzeta))
+    basis = _build_vmec_mode_basis(
+        ntheta=ntheta,
+        nzeta=nzeta,
+        nfp=2,
+        mf=2,
+        nf=1,
+        lasym=False,
+        wint=wint,
+    )
+    gsource = np.ones((ntheta, nzeta), dtype=float)
+    bvec = _vmec_bvec_from_gsource(gsource=gsource, basis=basis)
+    assert bvec.shape == (basis["mnpd"],)
+    # VMEC fouri.f: (m==0 and n<0) entries are skipped/cycled.
+    skip = np.logical_and(np.asarray(basis["xmpot"]) == 0, np.asarray(basis["n_raw"]) < 0)
+    assert np.allclose(np.asarray(bvec)[skip], 0.0)
+    # Constant source anti-symmetrizes to zero in non-LASYM path.
+    assert np.linalg.norm(np.asarray(bvec)) < 1.0e-12
+
+    basis_asym = _build_vmec_mode_basis(
+        ntheta=ntheta,
+        nzeta=nzeta,
+        nfp=2,
+        mf=2,
+        nf=1,
+        lasym=True,
+        wint=wint,
+    )
+    bvec_asym = _vmec_bvec_from_gsource(gsource=gsource, basis=basis_asym)
+    mnpd = int(basis_asym["mnpd"])
+    assert bvec_asym.shape == (2 * mnpd,)
+    assert np.allclose(np.asarray(bvec_asym[:mnpd])[skip], 0.0)
+    assert np.allclose(np.asarray(bvec_asym[mnpd:])[skip], 0.0)
 
 
 def test_mgrid_loader_skeleton(tmp_path: Path):

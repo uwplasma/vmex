@@ -124,6 +124,8 @@ class NestorVmecLikeCache:
     nzeta: int
     matrix: np.ndarray
     rhs_scale: np.ndarray
+    mode_basis: Any | None = None
+    mode_matrix: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -754,6 +756,106 @@ def _sample_external_boundary_arrays(
     )
 
 
+def _vmec_boundary_wint(*, static: Any, ntheta: int, nzeta: int) -> np.ndarray:
+    """Return VMEC angular weights on the free-boundary mesh."""
+
+    trig = getattr(static, "trig_vmec", None)
+    if trig is not None:
+        try:
+            from .vmec_residue import vmec_wint_from_trig
+
+            w = np.asarray(vmec_wint_from_trig(trig, nzeta=int(nzeta)), dtype=float)
+            if w.shape == (int(ntheta), int(nzeta)):
+                return w
+        except Exception:
+            pass
+    return np.full((int(ntheta), int(nzeta)), 1.0 / float(max(1, int(ntheta) * int(nzeta))), dtype=float)
+
+
+def _build_vmec_mode_basis(
+    *,
+    ntheta: int,
+    nzeta: int,
+    nfp: int,
+    mf: int,
+    nf: int,
+    lasym: bool,
+    wint: np.ndarray,
+) -> dict[str, Any]:
+    """Build VMEC-like mode tables and weighted sin/cos basis arrays."""
+
+    ntheta = int(ntheta)
+    nzeta = int(nzeta)
+    nfp = max(1, int(nfp))
+    mf = max(0, int(mf))
+    nf = max(0, int(nf))
+    lasym = bool(lasym)
+
+    pi2 = 2.0 * np.pi
+    theta = (pi2 / float(max(1, ntheta))) * np.arange(ntheta, dtype=float)
+    zeta = (pi2 / float(max(1, nzeta))) * np.arange(nzeta, dtype=float)
+    th_grid = np.broadcast_to(theta[:, None], (ntheta, nzeta))
+    ze_grid = np.broadcast_to(zeta[None, :], (ntheta, nzeta))
+    th = th_grid.reshape(-1)
+    ze = ze_grid.reshape(-1)
+
+    w = np.asarray(wint, dtype=float).reshape(-1)
+    if w.size != th.size:
+        w = np.full((th.size,), 1.0 / float(max(1, th.size)), dtype=float)
+
+    mvals: list[int] = []
+    nvals: list[int] = []
+    for n in range(-nf, nf + 1):
+        for m in range(0, mf + 1):
+            mvals.append(int(m))
+            nvals.append(int(n))
+    xmpot = np.asarray(mvals, dtype=np.int64)
+    n_raw = np.asarray(nvals, dtype=np.int64)
+    xnpot = np.asarray(n_raw * nfp, dtype=np.int64)
+    mnpd = int(xmpot.size)
+    mnpd2 = int(mnpd * (2 if lasym else 1))
+
+    phase = (xmpot[None, :] * th[:, None]) - (n_raw[None, :] * ze[:, None])
+    sin_phase = np.sin(phase)
+    cos_phase = np.cos(phase)
+    weight = ((pi2 * pi2) * w)[:, None]
+    sinmni = weight * sin_phase
+    cosmni = weight * cos_phase
+
+    idx = np.arange(th.size, dtype=np.int64)
+    lt = idx // max(1, nzeta)
+    lz = idx % max(1, nzeta)
+    lt_m = (ntheta - lt) % max(1, ntheta)
+    lz_m = (nzeta - lz) % max(1, nzeta)
+    imirr = (lt_m * nzeta + lz_m).astype(np.int64)
+
+    mn0 = 0
+    for j in range(mnpd):
+        if int(xmpot[j]) == 0 and int(n_raw[j]) == 0:
+            mn0 = int(j)
+            break
+
+    return {
+        "xmpot": xmpot,
+        "xnpot": xnpot,
+        "n_raw": n_raw,
+        "sin_phase": sin_phase,
+        "cos_phase": cos_phase,
+        "sinmni": sinmni,
+        "cosmni": cosmni,
+        "wint": w,
+        "imirr": imirr,
+        "mnpd": mnpd,
+        "mnpd2": mnpd2,
+        "mn0": mn0,
+        "onp": 1.0 / float(nfp),
+        "nfp": nfp,
+        "mf": mf,
+        "nf": nf,
+        "lasym": lasym,
+    }
+
+
 def _build_poisson_cache(*, ntheta: int, nzeta: int) -> NestorPoissonCache:
     """Build spectral Laplacian eigenvalues on periodic `(theta,zeta)` grid."""
 
@@ -777,6 +879,11 @@ def _build_vmec_like_cache(
     diag_coeff: float,
     row_sum_zero: bool,
     singular_diag_scale: float,
+    nfp: int,
+    mf: int,
+    nf: int,
+    lasym: bool,
+    wint_vmec: np.ndarray | None = None,
 ) -> NestorVmecLikeCache:
     """Build a dense boundary-integral-like operator on the VMEC angular grid.
 
@@ -828,11 +935,41 @@ def _build_vmec_like_cache(
     matrix = float(alpha) * kernel
     matrix[np.arange(npts), np.arange(npts)] += float(diag_coeff) + diag_extra
     rhs_scale = np.where(w > rhs_floor, w, rhs_floor)
+
+    wint_use = np.asarray(wint_vmec, dtype=float) if wint_vmec is not None else np.asarray(w, dtype=float).reshape(ntheta, nzeta)
+    mode_basis = _build_vmec_mode_basis(
+        ntheta=ntheta,
+        nzeta=nzeta,
+        nfp=int(nfp),
+        mf=int(mf),
+        nf=int(nf),
+        lasym=bool(lasym),
+        wint=np.asarray(wint_use, dtype=float),
+    )
+    sinmni = np.asarray(mode_basis["sinmni"], dtype=float)
+    cosmni = np.asarray(mode_basis["cosmni"], dtype=float)
+    if bool(lasym):
+        B = np.concatenate([sinmni, cosmni], axis=1)
+    else:
+        B = sinmni
+    mode_matrix = B.T @ (matrix @ B)
+    mnpd = int(mode_basis["mnpd"])
+    if mnpd > 0:
+        pi3 = float(np.pi**3)
+        mode_matrix[:mnpd, :mnpd][np.diag_indices(mnpd)] += pi3
+        if bool(lasym):
+            mode_matrix[mnpd:, mnpd:][np.diag_indices(mnpd)] += pi3
+            mn0 = int(mode_basis["mn0"])
+            if 0 <= mn0 < mnpd:
+                mode_matrix[mnpd + mn0, mnpd + mn0] += pi3
+
     return NestorVmecLikeCache(
         ntheta=ntheta,
         nzeta=nzeta,
         matrix=matrix,
         rhs_scale=rhs_scale,
+        mode_basis=mode_basis,
+        mode_matrix=mode_matrix,
     )
 
 
@@ -842,6 +979,69 @@ def _solve_vmec_like_dense(rhs: np.ndarray, cache: NestorVmecLikeCache) -> np.nd
     phi = phi_flat.reshape(int(cache.ntheta), int(cache.nzeta))
     phi = phi - float(np.mean(phi))
     return phi
+
+
+def _vmec_source_from_gsource(*, gsource: np.ndarray, basis: dict[str, Any]) -> np.ndarray:
+    """VMEC fouri.f source symmetrization from gsource = -(2π)^2*B·dS*wint."""
+
+    gsrc = np.asarray(gsource, dtype=float).reshape(-1)
+    onp = float(basis["onp"])
+    if bool(basis["lasym"]):
+        src = onp * gsrc
+    else:
+        imirr = np.asarray(basis["imirr"], dtype=np.int64)
+        src = 0.5 * onp * (gsrc - gsrc[imirr])
+    return np.asarray(src, dtype=float)
+
+
+def _vmec_bvec_from_gsource(*, gsource: np.ndarray, basis: dict[str, Any]) -> np.ndarray:
+    src = _vmec_source_from_gsource(gsource=gsource, basis=basis)
+    sinmni = np.asarray(basis["sinmni"], dtype=float)
+    bsin = sinmni.T @ src
+    xmpot = np.asarray(basis["xmpot"], dtype=np.int64)
+    n_raw = np.asarray(basis["n_raw"], dtype=np.int64)
+    skip_mask = np.logical_and(xmpot == 0, n_raw < 0)
+    if np.any(skip_mask):
+        bsin = np.asarray(bsin, dtype=float)
+        bsin[skip_mask] = 0.0
+    if bool(basis["lasym"]):
+        cosmni = np.asarray(basis["cosmni"], dtype=float)
+        bcos = cosmni.T @ src
+        if np.any(skip_mask):
+            bcos = np.asarray(bcos, dtype=float)
+            bcos[skip_mask] = 0.0
+        return np.concatenate([bsin, bcos], axis=0)
+    return bsin
+
+
+def _solve_vmec_like_mode_from_gsource(
+    *,
+    cache: NestorVmecLikeCache,
+    gsource: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Solve VMEC-like dense integral in mode space and return (phi, potvac)."""
+
+    basis = cache.mode_basis
+    amod = cache.mode_matrix
+    if basis is None or amod is None:
+        raise ValueError("missing_mode_cache")
+
+    rhs_mode = _vmec_bvec_from_gsource(gsource=gsource, basis=basis)
+    potvac = np.linalg.solve(np.asarray(amod, dtype=float), np.asarray(rhs_mode, dtype=float))
+
+    sin_phase = np.asarray(basis["sin_phase"], dtype=float)
+    cos_phase = np.asarray(basis["cos_phase"], dtype=float)
+    mnpd = int(basis["mnpd"])
+    if bool(basis["lasym"]):
+        potsin = np.asarray(potvac[:mnpd], dtype=float)
+        potcos = np.asarray(potvac[mnpd : 2 * mnpd], dtype=float)
+        phi_flat = sin_phase @ potsin + cos_phase @ potcos
+    else:
+        potsin = np.asarray(potvac[:mnpd], dtype=float)
+        phi_flat = sin_phase @ potsin
+    phi = phi_flat.reshape(int(cache.ntheta), int(cache.nzeta))
+    phi = phi - float(np.mean(phi))
+    return np.asarray(phi, dtype=float), np.asarray(potvac, dtype=float)
 
 
 def _base_nestor_mode(mode: str) -> str:
@@ -957,6 +1157,67 @@ def _vacuum_channels_from_sample_phi(sample: ExternalBoundarySample, phi: np.nda
     )
 
 
+def _vacuum_channels_from_sample_potvac(
+    *,
+    sample: ExternalBoundarySample,
+    basis: dict[str, Any],
+    potvac: np.ndarray,
+) -> VacuumBoundaryFields:
+    """Compute VMEC vacuum channels from mode coefficients (potsin/potcos)."""
+
+    pot = np.asarray(potvac, dtype=float).reshape(-1)
+    mnpd = int(basis["mnpd"])
+    if pot.size < mnpd:
+        raise ValueError("potvac_too_small")
+    potsin = np.asarray(pot[:mnpd], dtype=float)
+    if bool(basis["lasym"]) and pot.size >= 2 * mnpd:
+        potcos = np.asarray(pot[mnpd : 2 * mnpd], dtype=float)
+    else:
+        potcos = np.zeros((mnpd,), dtype=float)
+
+    xmpot = np.asarray(basis["xmpot"], dtype=float)
+    n_raw = np.asarray(basis["n_raw"], dtype=float)
+    nfp = float(int(basis["nfp"]))
+    cos_phase = np.asarray(basis["cos_phase"], dtype=float)
+    sin_phase = np.asarray(basis["sin_phase"], dtype=float)
+
+    mfac = xmpot * potsin
+    nfac = (-n_raw * nfp) * potsin
+    potu = cos_phase @ mfac
+    potv = cos_phase @ nfac
+    if bool(basis["lasym"]):
+        mfac_c = xmpot * potcos
+        nfac_c = (-n_raw * nfp) * potcos
+        potu = potu - (sin_phase @ mfac_c)
+        potv = potv - (sin_phase @ nfac_c)
+
+    potu2 = potu.reshape(sample.R.shape)
+    potv2 = potv.reshape(sample.R.shape)
+    bu = np.asarray(sample.vac_ext.bu, dtype=float) + potu2
+    bv = np.asarray(sample.vac_ext.bv, dtype=float) + potv2
+    bsupu, bsupv, det = contravariant_boundary_field_from_covariant(
+        bu=bu,
+        bv=bv,
+        g_uu=sample.vac_ext.g_uu,
+        g_uv=sample.vac_ext.g_uv,
+        g_vv=sample.vac_ext.g_vv,
+    )
+    bsqvac = 0.5 * (bu * bsupu + bv * bsupv)
+    return VacuumBoundaryFields(
+        bu=bu,
+        bv=bv,
+        bsupu=bsupu,
+        bsupv=bsupv,
+        bsqvac=bsqvac,
+        bnormal=np.asarray(sample.vac_ext.bnormal, dtype=float),
+        bnormal_unit=np.asarray(sample.vac_ext.bnormal_unit, dtype=float),
+        g_uu=np.asarray(sample.vac_ext.g_uu, dtype=float),
+        g_uv=np.asarray(sample.vac_ext.g_uv, dtype=float),
+        g_vv=np.asarray(sample.vac_ext.g_vv, dtype=float),
+        det_guv=det,
+    )
+
+
 def _maybe_dump_scalpot_jax(
     *,
     iter_idx: int | None,
@@ -972,6 +1233,10 @@ def _maybe_dump_scalpot_jax(
     nf: int,
     nfp: int,
     lasym: bool,
+    wint_vmec: np.ndarray | None = None,
+    gsource_vmec: np.ndarray | None = None,
+    potvac: np.ndarray | None = None,
+    bvec_mode: np.ndarray | None = None,
 ) -> None:
     env = os.getenv("VMEC_JAX_DUMP_SCALPOT", "").strip().lower()
     if env in ("", "0", "false", "no"):
@@ -1018,77 +1283,64 @@ def _maybe_dump_scalpot_jax(
         "bnormal_unit": np.asarray(vac.bnormal_unit, dtype=float),
     }
     ntheta, nzeta = rhs.shape
-    wint = np.full((ntheta, nzeta), 1.0 / float(max(1, ntheta * nzeta)), dtype=float)
-    out["wint_uniform"] = wint
-    out["bexni_uniform"] = np.asarray(-sample.vac_ext.bnormal, dtype=float) * wint * ((2.0 * np.pi) ** 2)
+    wint_uniform = np.full((ntheta, nzeta), 1.0 / float(max(1, ntheta * nzeta)), dtype=float)
+    out["wint_uniform"] = wint_uniform
+    out["bexni_uniform"] = np.asarray(-sample.vac_ext.bnormal, dtype=float) * wint_uniform * ((2.0 * np.pi) ** 2)
+    if wint_vmec is not None:
+        wv = np.asarray(wint_vmec, dtype=float)
+        if wv.shape == (ntheta, nzeta):
+            out["wint_vmec"] = wv
+            out["bexni_vmec"] = np.asarray(-sample.vac_ext.bnormal, dtype=float) * wv * ((2.0 * np.pi) ** 2)
     if isinstance(cache, NestorVmecLikeCache):
         out["cache_kind"] = np.asarray("dense")
         out["matrix"] = np.asarray(cache.matrix, dtype=float)
         out["rhs_scale"] = np.asarray(cache.rhs_scale, dtype=float)
+        if gsource_vmec is not None:
+            out["gsource_vmec"] = np.asarray(gsource_vmec, dtype=float)
+        if potvac is not None:
+            out["potvac"] = np.asarray(potvac, dtype=float)
         try:
-            ntheta, nzeta = rhs.shape
-            pi2 = 2.0 * np.pi
-            theta = (pi2 / float(max(1, ntheta))) * np.arange(ntheta, dtype=float)
-            zeta = np.asarray(sample.phi, dtype=float) * float(max(1, int(nfp)))
-            if zeta.shape != rhs.shape:
-                zeta = np.broadcast_to(zeta, rhs.shape)
-            th = np.broadcast_to(theta[:, None], rhs.shape).reshape(-1)
-            zz = zeta.reshape(-1)
-            w = np.asarray(cache.rhs_scale, dtype=float).reshape(-1)
-            rhs_f = np.asarray(rhs, dtype=float).reshape(-1)
-            onp = 1.0 / float(max(1, int(nfp)))
+            basis = cache.mode_basis
+            if basis is None:
+                basis = _build_vmec_mode_basis(
+                    ntheta=int(ntheta),
+                    nzeta=int(nzeta),
+                    nfp=int(nfp),
+                    mf=int(mf),
+                    nf=int(nf),
+                    lasym=bool(lasym),
+                    wint=np.asarray(wint_vmec if wint_vmec is not None else np.asarray(cache.rhs_scale).reshape(ntheta, nzeta), dtype=float),
+                )
+            out["xmpot"] = np.asarray(basis["xmpot"], dtype=np.int64)
+            out["xnpot"] = np.asarray(basis["xnpot"], dtype=np.int64)
+            out["sinmni"] = np.asarray(basis["sinmni"], dtype=float)
+            out["cosmni"] = np.asarray(basis["cosmni"], dtype=float)
 
-            if bool(lasym):
-                src = onp * rhs_f
+            if bvec_mode is not None:
+                bv = np.asarray(bvec_mode, dtype=float).reshape(-1)
             else:
-                # VMEC fouri.f source symmetrization:
-                # source = 0.5*onp*(gsource(i) - gsource(imirr(i))).
-                idx = np.arange(rhs_f.size, dtype=np.int64)
-                lt = idx // int(nzeta)
-                lz = idx % int(nzeta)
-                lt_m = (int(ntheta) - lt) % int(ntheta)
-                lz_m = (int(nzeta) - lz) % int(nzeta)
-                imirr = lt_m * int(nzeta) + lz_m
-                src = 0.5 * onp * (rhs_f - rhs_f[imirr])
+                if gsource_vmec is None:
+                    gsource_loc = np.asarray(rhs, dtype=float).reshape(-1)
+                else:
+                    gsource_loc = np.asarray(gsource_vmec, dtype=float).reshape(-1)
+                bv = _vmec_bvec_from_gsource(gsource=gsource_loc, basis=basis)
 
-            nmode = (int(mf) + 1) * (2 * int(nf) + 1)
-            bsin = np.zeros((nmode,), dtype=float)
-            bcos = np.zeros((nmode,), dtype=float)
-            basis_s = np.zeros((rhs_f.size, nmode), dtype=float)
-            basis_c = np.zeros((rhs_f.size, nmode), dtype=float)
-            xmpot = np.zeros((nmode,), dtype=np.int64)
-            xnpot = np.zeros((nmode,), dtype=np.int64)
-            mn = 0
-            for n in range(-int(nf), int(nf) + 1):
-                for m in range(0, int(mf) + 1):
-                    xmpot[mn] = int(m)
-                    xnpot[mn] = int(n) * int(nfp)
-                    if (m == 0) and (n < 0):
-                        mn += 1
-                        continue
-                    ph = (float(m) * th) - (float(n) * zz)
-                    s = np.sin(ph)
-                    c = np.cos(ph)
-                    sinmni = (pi2 * pi2) * w * s
-                    cosmni = (pi2 * pi2) * w * c
-                    basis_s[:, mn] = sinmni
-                    basis_c[:, mn] = cosmni
-                    bsin[mn] = np.sum(sinmni * src)
-                    bcos[mn] = np.sum(cosmni * src)
-                    mn += 1
+            mnpd = int(basis["mnpd"])
+            out["bvec_mode_sin"] = np.asarray(bv[:mnpd], dtype=float)
+            if bool(basis["lasym"]) and bv.size >= 2 * mnpd:
+                out["bvec_mode_cos"] = np.asarray(bv[mnpd : 2 * mnpd], dtype=float)
 
-            out["xmpot"] = xmpot
-            out["xnpot"] = xnpot
-            if bool(lasym):
-                B = np.concatenate([basis_s, basis_c], axis=1)
-                out["bvec_mode_sin"] = bsin
-                out["bvec_mode_cos"] = bcos
+            if cache.mode_matrix is not None:
+                out["amatrix_mode"] = np.asarray(cache.mode_matrix, dtype=float)
             else:
-                B = basis_s
-                out["bvec_mode_sin"] = bsin
-            A = np.asarray(cache.matrix, dtype=float)
-            amod = B.T @ (A @ B)
-            out["amatrix_mode"] = amod
+                sinmni = np.asarray(basis["sinmni"], dtype=float)
+                if bool(basis["lasym"]):
+                    cosmni = np.asarray(basis["cosmni"], dtype=float)
+                    B = np.concatenate([sinmni, cosmni], axis=1)
+                else:
+                    B = sinmni
+                A = np.asarray(cache.matrix, dtype=float)
+                out["amatrix_mode"] = B.T @ (A @ B)
         except Exception:
             pass
     elif isinstance(cache, NestorPoissonCache):
@@ -1180,10 +1432,21 @@ def nestor_external_only_step(
     ntheta, nzeta = sample.R.shape
     selected_mode, mode_reason = _select_nestor_mode(ntheta=ntheta, nzeta=nzeta)
 
+    if ivacskip is not None:
+        reuse_step = (int(ivacskip) != 0 and runtime is not None)
+    else:
+        reuse_step = (int(ivac) != 1 and runtime is not None)
+
     rhs_mode = os.getenv("VMEC_JAX_FREEB_RHS_MODE", "bnormal_unit").strip().lower()
+    ntheta, nzeta = sample.R.shape
+    wint_vmec = _vmec_boundary_wint(static=static, ntheta=int(ntheta), nzeta=int(nzeta))
+    gsource_vmec = -np.asarray(sample.vac_ext.bnormal, dtype=float) * np.asarray(wint_vmec, dtype=float) * ((2.0 * np.pi) ** 2)
     if rhs_mode in ("unit", "unit_normal", "bnormal_unit"):
         rhs = -np.asarray(sample.vac_ext.bnormal_unit, dtype=float)
         rhs_mode = "bnormal_unit"
+    elif rhs_mode in ("bexni", "vmec_bexni", "bnormal_wint"):
+        rhs = np.asarray(gsource_vmec, dtype=float)
+        rhs_mode = "bexni"
     else:
         # VMEC scalpot source uses B·dS (non-unit normal) channels.
         rhs = -np.asarray(sample.vac_ext.bnormal, dtype=float)
@@ -1193,16 +1456,14 @@ def nestor_external_only_step(
     if mode_reason not in ("forced_fast", "forced_vmec_like", "auto_vmec_like"):
         used_mode = f"{selected_mode}_fallback:{mode_reason}"
     cache: Any = runtime_cache
-    if ivacskip is not None:
-        reuse_step = (int(ivacskip) != 0 and runtime is not None)
-    else:
-        reuse_step = (int(ivac) != 1 and runtime is not None)
 
     # On ivacskip reuse, emulate VMEC2000 scalpot behavior by reusing the cached
     # operator while refreshing the source term / solve.
     mode_for_step = runtime_mode if reuse_step else used_mode
     if reuse_step and runtime_cache is None:
         mode_for_step = used_mode
+    potvac = None
+    bvec_mode = None
 
     if _is_dense_mode(mode_for_step):
         alpha = _as_float_env("VMEC_JAX_FREEB_VMEC_LIKE_ALPHA", 1.0)
@@ -1211,6 +1472,7 @@ def nestor_external_only_step(
         diag_coeff = _as_float_env("VMEC_JAX_FREEB_VMEC_LIKE_DIAG_COEFF", 0.5)
         row_sum_zero = _as_int_env("VMEC_JAX_FREEB_VMEC_LIKE_ROW_SUM_ZERO", 1) != 0
         singular_diag_scale = _as_float_env("VMEC_JAX_FREEB_VMEC_LIKE_SINGULAR_DIAG_SCALE", 1.0)
+        dense_solve_mode = os.getenv("VMEC_JAX_FREEB_DENSE_SOLVE_MODE", "mode").strip().lower()
         try:
             if (
                 not isinstance(cache, NestorVmecLikeCache)
@@ -1226,12 +1488,37 @@ def nestor_external_only_step(
                     diag_coeff=diag_coeff,
                     row_sum_zero=row_sum_zero,
                     singular_diag_scale=singular_diag_scale,
+                    nfp=max(1, int(getattr(static.cfg, "nfp", 1))),
+                    mf=max(0, int(getattr(static.cfg, "mpol", 1)) + 1),
+                    nf=max(0, int(getattr(static.cfg, "ntor", 0))),
+                    lasym=bool(getattr(static.cfg, "lasym", False)),
+                    wint_vmec=np.asarray(wint_vmec, dtype=float),
                 )
-            phi = _solve_vmec_like_dense(rhs, cache)
+            if dense_solve_mode in ("mode", "vmec_mode", "fouri_mode"):
+                phi, potvac = _solve_vmec_like_mode_from_gsource(
+                    cache=cache,
+                    gsource=np.asarray(gsource_vmec, dtype=float),
+                )
+                if cache.mode_basis is not None:
+                    bvec_mode = _vmec_bvec_from_gsource(
+                        gsource=np.asarray(gsource_vmec, dtype=float),
+                        basis=cache.mode_basis,
+                    )
+                    vac_total = _vacuum_channels_from_sample_potvac(
+                        sample=sample,
+                        basis=cache.mode_basis,
+                        potvac=np.asarray(potvac, dtype=float),
+                    )
+                else:
+                    vac_total = _vacuum_channels_from_sample_phi(sample, phi)
+            else:
+                phi = _solve_vmec_like_dense(rhs, cache)
+                vac_total = _vacuum_channels_from_sample_phi(sample, phi)
             used_mode = mode_for_step
         except Exception:
             cache = _build_poisson_cache(ntheta=ntheta, nzeta=nzeta)
             phi = _solve_periodic_poisson_fft(rhs, cache)
+            vac_total = _vacuum_channels_from_sample_phi(sample, phi)
             used_mode = "spectral_poisson_external_only_fallback:dense_failed"
     else:
         if (
@@ -1241,9 +1528,9 @@ def nestor_external_only_step(
         ):
             cache = _build_poisson_cache(ntheta=ntheta, nzeta=nzeta)
         phi = _solve_periodic_poisson_fft(rhs, cache)
+        vac_total = _vacuum_channels_from_sample_phi(sample, phi)
         used_mode = mode_for_step
 
-    vac_total = _vacuum_channels_from_sample_phi(sample, phi)
     bsqvac = np.asarray(vac_total.bsqvac)
     solve_time = max(0.0, time.perf_counter() - ts)
 
@@ -1277,6 +1564,10 @@ def nestor_external_only_step(
         nf=max(0, int(getattr(static.cfg, "ntor", 0))),
         nfp=max(1, int(getattr(static.cfg, "nfp", 1))),
         lasym=bool(getattr(static.cfg, "lasym", False)),
+        wint_vmec=np.asarray(wint_vmec, dtype=float),
+        gsource_vmec=np.asarray(gsource_vmec, dtype=float),
+        potvac=None if potvac is None else np.asarray(potvac, dtype=float),
+        bvec_mode=None if bvec_mode is None else np.asarray(bvec_mode, dtype=float),
     )
     return res, runtime_next
 

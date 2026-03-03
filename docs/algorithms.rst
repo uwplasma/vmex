@@ -421,44 +421,73 @@ The free-boundary iteration path supports two potential-solve models:
 
 Both models share the same boundary sampling and edge-coupling equations.
 
-1. Build RHS from the sampled external normal field:
+1. Build VMEC source on the boundary grid:
 
    .. math::
 
-      rhs(\theta,\zeta) = -\hat{n}\cdot B_{\mathrm{ext}}.
+      gsource_i = -(2\pi)^2\,\left(B\cdot dS\right)_i\,w_i.
 
-2. Solve for scalar potential :math:`\phi`:
+   For stellarator-symmetric runs (``lasym=F``), apply the VMEC fouri source
+   symmetrization:
 
-   - Dense model:
+   .. math::
+
+      source_i = \tfrac{1}{2}\,onp\,(gsource_i - gsource_{\mathrm{imirr}(i)}),
+      \qquad onp = 1/nfp.
+
+2. Dense VMEC-like mode solve (new default inside dense free-boundary mode):
+
+   - Project to VMEC sine/cosine mode basis using weighted tables
+     :math:`sinmni, cosmni` (including ``wint`` normalization).
+   - Assemble a mode operator by projection of the dense point operator:
 
      .. math::
 
-        \left(I + \alpha K\right)\phi = rhs_s,
+        A_{mode} = B^T A_{point} B,
 
-     where :math:`K` is a Green-function-like dense kernel over boundary
-     samples (pairwise inverse-distance with quadrature-like weights), and
-     :math:`rhs_s` is a weighted RHS.
+     then add the VMEC diagonal term :math:`\pi^3` on the sin-sin (and
+     cos-cos for ``lasym=T``) blocks.
+   - Solve for ``potvac`` coefficients:
 
-   - Fast surrogate:
+     .. math::
+
+        A_{mode}\,potvac = bvec.
+
+3. Reconstruct tangential potential derivatives with VMEC vacuum.f formulas:
+
+   .. math::
+
+      \partial_u \Phi = \sum_{m,n}\Big[m\,pot_{sin,mn}\cos\chi_{mn}
+      - m\,pot_{cos,mn}\sin\chi_{mn}\Big],
+
+   .. math::
+
+      \partial_v \Phi = \sum_{m,n}\Big[-n\,nfp\,pot_{sin,mn}\cos\chi_{mn}
+      + n\,nfp\,pot_{cos,mn}\sin\chi_{mn}\Big],
+
+   where :math:`\chi_{mn}=m\theta-n\zeta`.
+
+   Then:
+
+   .. math::
+
+      B_u^{tot} = B_u^{ext} + \partial_u \Phi,\qquad
+      B_v^{tot} = B_v^{ext} + \partial_v \Phi,
+
+   followed by recomputation of :math:`B^u,B^v` and
+   :math:`B_{\mathrm{sq,vac}} = \tfrac{1}{2}(B_u B^u + B_v B^v)`.
+
+4. Fast surrogate (fallback/forced mode):
 
    .. math::
 
       \nabla_{\theta,\zeta}^2 \phi = rhs,\qquad \langle \phi\rangle = 0.
 
-     The solver is spectral (FFT) with precomputed stage-static eigenvalues
-     :math:`\lambda_{k_\theta,k_\zeta} = k_\theta^2 + k_\zeta^2`, and
-     :math:`\lambda_{0,0}` pinned to a nonzero constant for gauge handling.
+   The solver is spectral (FFT) with precomputed stage-static eigenvalues
+   :math:`\lambda_{k_\theta,k_\zeta} = k_\theta^2 + k_\zeta^2`, and
+   :math:`\lambda_{0,0}` pinned to a nonzero constant for gauge handling.
 
-3. Form corrected tangential channels:
-
-   .. math::
-
-      B_u^{tot} = B_u^{ext} + \partial_\theta \phi,\qquad
-      B_v^{tot} = B_v^{ext} + \partial_\zeta \phi,
-
-   then recompute :math:`B^u, B^v` and :math:`B_{\mathrm{sq,vac}}`.
-
-4. Couple edge vacuum pressure proxy into the force pipeline by overriding
+5. Couple edge vacuum pressure proxy into the force pipeline by overriding
    half-mesh edge ``bsq`` as:
 
    .. math::

@@ -483,8 +483,9 @@ def main() -> int:
                 "rel_scaled": rel_n_scaled,
                 "scale_jax_to_vmec": a_n,
             }
-        if "bexni_uniform" in jax:
-            jni = np.asarray(jax["bexni_uniform"]).reshape(-1)
+        bexni_key = "bexni_vmec" if "bexni_vmec" in jax else ("bexni_uniform" if "bexni_uniform" in jax else None)
+        if bexni_key is not None:
+            jni = np.asarray(jax[bexni_key]).reshape(-1)
             vni = np.asarray(vmec_bex["bexni"]).reshape(-1)
             n = min(vni.size, jni.size)
             a_ni, rel_ni_scaled = _rel_scaled(vni[:n], jni[:n])
@@ -495,6 +496,7 @@ def main() -> int:
                 "rel_raw": _rel(vni[:n], jni[:n]),
                 "rel_scaled": rel_ni_scaled,
                 "scale_jax_to_vmec": a_ni,
+                "jax_key": bexni_key,
             }
         if "R" in jax:
             jr = np.asarray(jax["R"]).reshape(-1)
