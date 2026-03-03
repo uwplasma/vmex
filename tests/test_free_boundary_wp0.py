@@ -10,6 +10,7 @@ from vmec_jax.free_boundary import (
     MGridData,
     MGridMetadata,
     PreparedMGrid,
+    interpolate_mgrid_bfield,
     load_mgrid,
     prepare_mgrid_for_config,
 )
@@ -327,3 +328,112 @@ def test_run_fixed_boundary_initial_guess_carries_mgrid_metadata(tmp_path: Path)
     assert run.static.mgrid_metadata is not None
     assert int(run.static.mgrid_metadata.kp) == 4
     assert run.static.free_boundary_extcur == (3.5, 0.0)
+
+
+def test_run_fixed_boundary_freeb_diagnostics_stub(tmp_path: Path):
+    netCDF4 = pytest.importorskip("netCDF4", reason="netCDF4 required for mgrid loader test")
+
+    mg = tmp_path / "mgrid_fb_diag.nc"
+    with netCDF4.Dataset(str(mg), mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createDimension("stringsize", 8)
+        ds.createDimension("external_coil_groups", 1)
+        ds.createDimension("dim_00001", 1)
+        ds.createDimension("external_coils", 1)
+        ds.createDimension("rad", 2)
+        ds.createDimension("zee", 2)
+        ds.createDimension("phi", 4)
+        for name, value in (
+            ("ir", 2),
+            ("jz", 2),
+            ("kp", 4),
+            ("nfp", 1),
+            ("nextcur", 1),
+        ):
+            v = ds.createVariable(name, "i4", ())
+            v.assignValue(value)
+        for name, value in (("rmin", 1.0), ("rmax", 2.0), ("zmin", -1.0), ("zmax", 1.0)):
+            v = ds.createVariable(name, "f8", ())
+            v.assignValue(value)
+
+    inpath = tmp_path / "input.fb_diag"
+    inpath.write_text(
+        f"""
+&INDATA
+  NFP = 1
+  MPOL = 5
+  NTOR = 0
+  NS = 9
+  NZETA = 2
+  NTHETA = 8
+  LASYM = F
+  LFREEB = T
+  MGRID_FILE = '{mg}'
+  NVACSKIP = 2
+  RBC(0,0) = 6.0
+  ZBS(1,0) = 2.0
+/
+"""
+    )
+
+    run = run_fixed_boundary(
+        inpath,
+        solver="vmec2000_iter",
+        max_iter=1,
+        multigrid=False,
+        verbose=False,
+    )
+    assert run.result is not None
+    fb = run.result.diagnostics.get("free_boundary")
+    assert isinstance(fb, dict)
+    assert bool(fb.get("enabled", False)) is True
+    assert int(fb.get("nvacskip", 0)) == 2
+    assert bool(fb.get("vacuum_stub", False)) is True
+
+
+def test_interpolate_mgrid_bfield_trilinear_linear_field():
+    meta = MGridMetadata(
+        path="dummy.nc",
+        ir=3,
+        jz=3,
+        kp=4,
+        nfp=1,
+        nextcur=2,
+        rmin=0.0,
+        rmax=2.0,
+        zmin=-1.0,
+        zmax=1.0,
+        mgrid_mode="S",
+        coil_groups=("A", "B"),
+        raw_coil_cur=(1.0, 1.0),
+    )
+    # Build a linear field in index-space mapped to physical coordinates.
+    r_nodes = np.linspace(meta.rmin, meta.rmax, meta.ir)
+    z_nodes = np.linspace(meta.zmin, meta.zmax, meta.jz)
+    phi_nodes = np.arange(meta.kp, dtype=float) * (2.0 * np.pi / meta.kp)
+    br = np.zeros((meta.nextcur, meta.kp, meta.jz, meta.ir), dtype=float)
+    bp = np.zeros_like(br)
+    bz = np.zeros_like(br)
+    for ig in range(meta.nextcur):
+        scale = float(ig + 1)
+        for k, phi in enumerate(phi_nodes):
+            for j, zv in enumerate(z_nodes):
+                for i, rv in enumerate(r_nodes):
+                    # Linear in (r,z,phi): trilinear interpolation should be exact.
+                    val = scale * (rv + 2.0 * zv + 0.1 * phi)
+                    br[ig, k, j, i] = val
+                    bp[ig, k, j, i] = 2.0 * val
+                    bz[ig, k, j, i] = -val
+    data = MGridData(metadata=meta, br=br, bp=bp, bz=bz)
+    extcur = (2.0, -0.5)
+
+    rq = np.array([0.25, 1.5])
+    zq = np.array([-0.25, 0.75])
+    phiq = np.array([0.5, 2.0 * np.pi + 0.2])  # second point checks periodic wrap
+    br_q, bp_q, bz_q = interpolate_mgrid_bfield(data, r=rq, z=zq, phi=phiq, extcur=extcur)
+
+    # Expected from analytic linear field with same extcur weighting.
+    coeff = extcur[0] * 1.0 + extcur[1] * 2.0
+    expected = coeff * (rq + 2.0 * zq + 0.1 * np.mod(phiq, 2.0 * np.pi))
+    np.testing.assert_allclose(br_q, expected, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(bp_q, 2.0 * expected, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(bz_q, -expected, rtol=1e-12, atol=1e-12)

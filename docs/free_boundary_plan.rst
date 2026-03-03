@@ -21,6 +21,7 @@ WP0 is implemented:
   ``NVACSKIP<=0`` falls back to ``NFP``,
 - typed free-boundary runtime state scaffold in ``VMECStatic``,
 - mgrid loader skeleton (metadata + optional BR/BP/BZ tensor loading),
+- trilinear mgrid field interpolation utility with periodic toroidal angle,
 - unit tests for parsing, normalization, and mgrid metadata loading.
 
 WP1 is partially in place:
@@ -29,6 +30,9 @@ WP1 is partially in place:
   with strict checks for ``NFP`` agreement and ``kp % nzeta == 0``.
 - solve loop now carries VMEC-style free-boundary control placeholders
   (``ivac``, ``ivacskip``, ``nvacskip``) in diagnostics/resume state.
+- a no-op vacuum coupling stub is now explicit in diagnostics
+  (``free_boundary.vacuum_stub = True``), so free-boundary runs are not
+  mistaken for physically coupled NESTOR solves yet.
 - vacuum coupling and NESTOR solve integration remain pending.
 
 Scope and acceptance target

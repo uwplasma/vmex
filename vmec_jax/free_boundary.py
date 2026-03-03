@@ -105,6 +105,117 @@ def _normalize_extcur(extcur_in: tuple[float, ...], nextcur: int) -> tuple[float
     return tuple(vals)
 
 
+def _broadcast_xyz(r: Any, z: Any, phi: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    rr, zz, pp = np.broadcast_arrays(np.asarray(r, dtype=float), np.asarray(z, dtype=float), np.asarray(phi, dtype=float))
+    return rr, zz, pp
+
+
+def interpolate_mgrid_bfield(
+    data: MGridData,
+    *,
+    r: Any,
+    z: Any,
+    phi: Any,
+    extcur: tuple[float, ...] | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Trilinear interpolation of mgrid BR/BP/BZ with periodic toroidal angle.
+
+    Parameters
+    ----------
+    data:
+        Loaded mgrid tensor data (`load_mgrid(..., load_fields=True)`).
+    r, z, phi:
+        Query coordinates (broadcastable arrays).
+    extcur:
+        External current weights per coil group. If omitted, uses `raw_coil_cur`
+        when available; otherwise unit weights.
+    """
+
+    meta = data.metadata
+    rr, zz, pp = _broadcast_xyz(r, z, phi)
+    out_shape = rr.shape
+    n = int(rr.size)
+
+    ir = int(meta.ir)
+    jz = int(meta.jz)
+    kp = int(meta.kp)
+    if ir < 2 or jz < 2 or kp < 2:
+        raise ValueError(f"mgrid dimensions too small for interpolation: ir={ir} jz={jz} kp={kp}")
+
+    # Non-periodic axes (R, Z): clamp to domain.
+    rmin = float(meta.rmin)
+    rmax = float(meta.rmax)
+    zmin = float(meta.zmin)
+    zmax = float(meta.zmax)
+    if rmax <= rmin or zmax <= zmin:
+        raise ValueError("Invalid mgrid bounds: require rmax>rmin and zmax>zmin")
+
+    r_flat = np.clip(rr.reshape(-1), rmin, rmax)
+    z_flat = np.clip(zz.reshape(-1), zmin, zmax)
+
+    fr = (r_flat - rmin) * ((ir - 1) / (rmax - rmin))
+    fz = (z_flat - zmin) * ((jz - 1) / (zmax - zmin))
+
+    i0 = np.floor(fr).astype(np.int64)
+    j0 = np.floor(fz).astype(np.int64)
+    i0 = np.clip(i0, 0, ir - 2)
+    j0 = np.clip(j0, 0, jz - 2)
+    i1 = i0 + 1
+    j1 = j0 + 1
+    wr = fr - i0
+    wz = fz - j0
+
+    # Periodic toroidal axis: one field period [0, 2*pi/nfp).
+    nfp = max(1, int(meta.nfp))
+    period = (2.0 * np.pi) / float(nfp)
+    phi_flat = np.mod(pp.reshape(-1), period)
+    fk = phi_flat * (kp / period)
+    k0 = np.floor(fk).astype(np.int64) % kp
+    k1 = (k0 + 1) % kp
+    wk = fk - np.floor(fk)
+
+    w0r = 1.0 - wr
+    w0z = 1.0 - wz
+    w0k = 1.0 - wk
+
+    cur = _normalize_extcur(
+        tuple(extcur) if extcur is not None else tuple(meta.raw_coil_cur),
+        int(meta.nextcur),
+    )
+    if len(cur) == 0:
+        cur = tuple(1.0 for _ in range(int(meta.nextcur)))
+    cur_vec = np.asarray(cur, dtype=float).reshape((-1, 1))
+
+    def _interp(field: np.ndarray) -> np.ndarray:
+        f = np.asarray(field, dtype=float)
+        if f.shape != (int(meta.nextcur), kp, jz, ir):
+            raise ValueError(
+                f"field shape {f.shape} != expected {(int(meta.nextcur), kp, jz, ir)}"
+            )
+        v000 = f[:, k0, j0, i0]
+        v001 = f[:, k0, j0, i1]
+        v010 = f[:, k0, j1, i0]
+        v011 = f[:, k0, j1, i1]
+        v100 = f[:, k1, j0, i0]
+        v101 = f[:, k1, j0, i1]
+        v110 = f[:, k1, j1, i0]
+        v111 = f[:, k1, j1, i1]
+
+        c00 = v000 * w0r + v001 * wr
+        c01 = v010 * w0r + v011 * wr
+        c10 = v100 * w0r + v101 * wr
+        c11 = v110 * w0r + v111 * wr
+        c0 = c00 * w0z + c01 * wz
+        c1 = c10 * w0z + c11 * wz
+        c = c0 * w0k + c1 * wk
+        return np.sum(cur_vec * c, axis=0).reshape(out_shape)
+
+    br = _interp(data.br)
+    bp = _interp(data.bp)
+    bz = _interp(data.bz)
+    return br, bp, bz
+
+
 def _decode_char_scalar(x: Any) -> str:
     arr = np.asarray(x)
     if arr.dtype.kind == "S":
