@@ -247,14 +247,13 @@ This policy is consistent with VMEC2000 behavior near the axis and VMEC++
 documentation about reduced reliability of axis-adjacent Mercier-type
 diagnostics.
 
-Free-Boundary Scaffold (Current WP0/WP1)
-----------------------------------------
+Free-Boundary Path (Current WP2)
+--------------------------------
 
-The free-boundary implementation is in staged integration. The current code
-path validates free-boundary input + mgrid metadata and threads VMEC-style
-control variables through the solver diagnostics and resume state. NESTOR
-vacuum coupling is **not** active yet (diagnostics report
-``free_boundary.vacuum_stub = True``).
+The free-boundary implementation now includes an active vacuum-edge coupling
+path. It still follows staged VMEC2000 parity work, but ``bsqvac`` is now
+computed and coupled into the edge force channel in fixed-boundary iterations
+when ``LFREEB=T``.
 
 Control law currently threaded (VMEC2000-compatible):
 
@@ -269,7 +268,7 @@ Control law currently threaded (VMEC2000-compatible):
    \end{cases}
 
 matching VMEC2000 ``funct3d`` cadence semantics (full vacuum update vs
-reused/skip update). These values are currently diagnostic-only.
+reused/skip update).
 
 MGRID interpolation model
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -320,7 +319,7 @@ assembly in later work packages.
 Current boundary sampling uses edge-surface
 :math:`R(\theta,\zeta), Z(\theta,\zeta)` synthesis and
 :math:`\phi = \zeta/NFP` for one field period, producing a diagnostic
-external-field summary (RMS and extrema) without force coupling yet.
+external-field summary (RMS and extrema).
 
 WP2 boundary-vacuum algebra scaffold
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -355,14 +354,20 @@ The diagnostic vacuum magnetic pressure proxy is then
 
    B_{\mathrm{sq,vac}} = B_u B^u + B_v B^v.
 
-This is currently diagnostic-only (no edge-force feedback yet). A signed floor
-is applied to :math:`\Delta` to avoid non-finite values in degenerate cells.
+This quantity now feeds edge-force coupling. A signed floor is applied to
+:math:`\Delta` to avoid non-finite values in degenerate cells.
 
-WP2 NESTOR-Core Surrogate (Current)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+WP2 NESTOR-Core Models (Current)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The current free-boundary iteration path now includes a lightweight
-NESTOR-style potential solve surrogate on the boundary torus:
+The free-boundary iteration path supports two potential-solve models:
+
+1. ``vmec2000_like_dense_integral`` (default in ``auto`` for moderate grids):
+   a dense boundary-integral-style operator assembly + dense linear solve.
+2. ``spectral_poisson_external_only``: the previous FFT Poisson surrogate,
+   used as a fast fallback.
+
+Both models share the same boundary sampling and edge-coupling equations.
 
 1. Build RHS from the sampled external normal field:
 
@@ -370,15 +375,27 @@ NESTOR-style potential solve surrogate on the boundary torus:
 
       rhs(\theta,\zeta) = -\hat{n}\cdot B_{\mathrm{ext}}.
 
-2. Solve periodic Poisson equation on the angular grid:
+2. Solve for scalar potential :math:`\phi`:
+
+   - Dense model:
+
+     .. math::
+
+        \left(I + \alpha K\right)\phi = rhs_s,
+
+     where :math:`K` is a Green-function-like dense kernel over boundary
+     samples (pairwise inverse-distance with quadrature-like weights), and
+     :math:`rhs_s` is a weighted RHS.
+
+   - Fast surrogate:
 
    .. math::
 
       \nabla_{\theta,\zeta}^2 \phi = rhs,\qquad \langle \phi\rangle = 0.
 
-   The solver is spectral (FFT) with precomputed stage-static eigenvalues
-   :math:`\lambda_{k_\theta,k_\zeta} = k_\theta^2 + k_\zeta^2`, and
-   :math:`\lambda_{0,0}` pinned to a nonzero constant for gauge handling.
+     The solver is spectral (FFT) with precomputed stage-static eigenvalues
+     :math:`\lambda_{k_\theta,k_\zeta} = k_\theta^2 + k_\zeta^2`, and
+     :math:`\lambda_{0,0}` pinned to a nonzero constant for gauge handling.
 
 3. Form corrected tangential channels:
 
@@ -404,8 +421,8 @@ The VMEC-style cadence is enforced by ``ivac``:
 - ``ivac=1``: full potential update (sample + Poisson solve),
 - ``ivac=2``: reuse previous potential :math:`\phi` and skip the solve.
 
-This mirrors the matrix-reuse intent in VMEC2000/NESTOR while keeping runtime
-bounded in the current surrogate implementation.
+This mirrors VMEC2000's matrix-reuse cadence intent while keeping the fast
+surrogate as a robust fallback on large grids.
 
 Profiles and volume integrals
 -----------------------------

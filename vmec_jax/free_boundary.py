@@ -9,6 +9,7 @@ WP0 scope:
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 import re
 import time
 from pathlib import Path
@@ -91,6 +92,7 @@ class ExternalBoundarySample:
     Zu: np.ndarray
     Rv: np.ndarray
     Zv: np.ndarray
+    phi: np.ndarray
     br: np.ndarray
     bp: np.ndarray
     bz: np.ndarray
@@ -107,12 +109,23 @@ class NestorPoissonCache:
 
 
 @dataclass(frozen=True)
-class NestorRuntimeState:
-    """Runtime cache for the simplified NESTOR solve path."""
+class NestorVmecLikeCache:
+    """VMEC2000-like dense boundary-integral operator cache."""
 
-    poisson: NestorPoissonCache
+    ntheta: int
+    nzeta: int
+    matrix: np.ndarray
+    rhs_scale: np.ndarray
+
+
+@dataclass(frozen=True)
+class NestorRuntimeState:
+    """Runtime cache for the NESTOR solve path."""
+
+    operator_cache: Any
     phi: np.ndarray
     bsqvac: np.ndarray
+    mode: str
     update_count: int
     reuse_count: int
 
@@ -564,6 +577,7 @@ def _sample_external_boundary_arrays(
         Zu=Zu,
         Rv=Rv,
         Zv=Zv,
+        phi=phi_grid,
         br=br,
         bp=bp,
         bz=bz,
@@ -585,6 +599,62 @@ def _build_poisson_cache(*, ntheta: int, nzeta: int) -> NestorPoissonCache:
     return NestorPoissonCache(ntheta=ntheta, nzeta=nzeta, lam=lam)
 
 
+def _build_vmec_like_cache(
+    sample: ExternalBoundarySample,
+    *,
+    alpha: float,
+    dist_eps: float,
+    rhs_floor: float,
+) -> NestorVmecLikeCache:
+    """Build a dense boundary-integral-like operator on the VMEC angular grid.
+
+    This mirrors NESTOR's matrix-assembly style (dense Green-function operator
+    over boundary samples), while remaining a compact NumPy implementation.
+    """
+
+    R = np.asarray(sample.R, dtype=float)
+    Z = np.asarray(sample.Z, dtype=float)
+    ntheta, nzeta = R.shape
+    npts = int(ntheta * nzeta)
+    phi_grid = np.asarray(sample.phi, dtype=float)
+    if phi_grid.shape != R.shape:
+        phi_grid = np.broadcast_to(phi_grid, R.shape)
+    x = R * np.cos(phi_grid)
+    y = R * np.sin(phi_grid)
+    coords = np.stack([x, y, Z], axis=-1).reshape(npts, 3)
+    det = np.asarray(sample.vac_ext.det_guv, dtype=float)
+    # Surface-area-like quadrature weights; normalization keeps conditioning sane.
+    w = np.sqrt(np.maximum(np.abs(det), 0.0)).reshape(npts)
+    w_sum = float(np.sum(w))
+    if not np.isfinite(w_sum) or w_sum <= rhs_floor:
+        w = np.full((npts,), 1.0 / float(max(1, npts)), dtype=float)
+    else:
+        w = w / w_sum
+
+    diff = coords[:, None, :] - coords[None, :, :]
+    dist = np.sqrt(np.sum(diff * diff, axis=-1) + float(dist_eps) ** 2)
+    invdist = np.where(dist > 0.0, 1.0 / dist, 0.0)
+    np.fill_diagonal(invdist, 0.0)
+
+    kernel = (invdist * w[None, :]) / (4.0 * np.pi)
+    matrix = np.eye(npts, dtype=float) + float(alpha) * kernel
+    rhs_scale = np.where(w > rhs_floor, w, rhs_floor)
+    return NestorVmecLikeCache(
+        ntheta=ntheta,
+        nzeta=nzeta,
+        matrix=matrix,
+        rhs_scale=rhs_scale,
+    )
+
+
+def _solve_vmec_like_dense(rhs: np.ndarray, cache: NestorVmecLikeCache) -> np.ndarray:
+    rhs_flat = np.asarray(rhs, dtype=float).reshape(-1) * np.asarray(cache.rhs_scale, dtype=float)
+    phi_flat = np.linalg.solve(np.asarray(cache.matrix, dtype=float), rhs_flat)
+    phi = phi_flat.reshape(int(cache.ntheta), int(cache.nzeta))
+    phi = phi - float(np.mean(phi))
+    return phi
+
+
 def _solve_periodic_poisson_fft(rhs: np.ndarray, cache: NestorPoissonCache) -> np.ndarray:
     rhs_hat = np.fft.fftn(rhs)
     phi_hat = -rhs_hat / cache.lam
@@ -603,6 +673,45 @@ def _spectral_grad(phi: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return du, dv
 
 
+def _as_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if raw == "":
+        return int(default)
+    try:
+        return int(raw)
+    except Exception:
+        return int(default)
+
+
+def _as_float_env(name: str, default: float) -> float:
+    raw = os.getenv(name, "").strip()
+    if raw == "":
+        return float(default)
+    try:
+        return float(raw)
+    except Exception:
+        return float(default)
+
+
+def _select_nestor_mode(*, ntheta: int, nzeta: int) -> tuple[str, str]:
+    """Pick free-boundary NESTOR model mode with fallback-friendly semantics."""
+
+    mode_raw = os.getenv("VMEC_JAX_FREEB_NESTOR_MODE", "auto").strip().lower()
+    npts = int(ntheta * nzeta)
+    max_pts = max(1, _as_int_env("VMEC_JAX_FREEB_VMEC_LIKE_MAX_POINTS", 4096))
+
+    if mode_raw in ("spectral", "fast", "surrogate", "poisson"):
+        return "spectral_poisson_external_only", "forced_fast"
+    if mode_raw in ("vmec2000_like", "vmec_like", "vmec2000", "dense", "integral"):
+        if npts > max_pts:
+            return "spectral_poisson_external_only", f"fallback_max_points:{npts}>{max_pts}"
+        return "vmec2000_like_dense_integral", "forced_vmec_like"
+    # auto
+    if npts <= max_pts:
+        return "vmec2000_like_dense_integral", "auto_vmec_like"
+    return "spectral_poisson_external_only", f"auto_fast_max_points:{npts}>{max_pts}"
+
+
 def nestor_external_only_step(
     *,
     state: Any,
@@ -616,6 +725,16 @@ def nestor_external_only_step(
     - `ivac==1`: full update (sample + spectral Poisson solve)
     - `ivac!=1`: reuse previous solution if available
     """
+
+    runtime_cache = None if runtime is None else getattr(runtime, "operator_cache", None)
+    runtime_mode = "spectral_poisson_external_only" if runtime is None else str(
+        getattr(runtime, "mode", "spectral_poisson_external_only")
+    )
+    if runtime_cache is None and runtime is not None and hasattr(runtime, "poisson"):
+        # Backward compatibility with older runtime state shape.
+        runtime_cache = getattr(runtime, "poisson")
+        if runtime_mode == "spectral_poisson_external_only":
+            runtime_mode = "spectral_poisson_external_only"
 
     if int(ivac) != 1 and runtime is not None:
         bsqvac = np.asarray(runtime.bsqvac)
@@ -639,11 +758,13 @@ def nestor_external_only_step(
             reused=True,
             solve_time_s=0.0,
             sample_time_s=0.0,
+            model=runtime_mode,
         )
         runtime_next = NestorRuntimeState(
-            poisson=runtime.poisson,
+            operator_cache=runtime_cache,
             phi=np.asarray(runtime.phi),
             bsqvac=np.asarray(bsqvac),
+            mode=runtime_mode,
             update_count=int(runtime.update_count),
             reuse_count=int(runtime.reuse_count) + 1,
         )
@@ -653,21 +774,39 @@ def nestor_external_only_step(
     sample = _sample_external_boundary_arrays(state=state, static=static, extcur=extcur)
     sample_time = max(0.0, time.perf_counter() - t0)
     ntheta, nzeta = sample.R.shape
-    if runtime is None or runtime.poisson.ntheta != ntheta or runtime.poisson.nzeta != nzeta:
-        cache = _build_poisson_cache(ntheta=ntheta, nzeta=nzeta)
-        phi_prev = np.zeros((ntheta, nzeta), dtype=float)
-        bsq_prev = np.asarray(sample.vac_ext.bsqvac, dtype=float)
-        runtime = NestorRuntimeState(
-            poisson=cache,
-            phi=phi_prev,
-            bsqvac=bsq_prev,
-            update_count=0,
-            reuse_count=0,
-        )
+    selected_mode, mode_reason = _select_nestor_mode(ntheta=ntheta, nzeta=nzeta)
 
     rhs = -np.asarray(sample.vac_ext.bnormal_unit, dtype=float)
     ts = time.perf_counter()
-    phi = _solve_periodic_poisson_fft(rhs, runtime.poisson)
+    used_mode = selected_mode
+    if mode_reason not in ("forced_fast", "forced_vmec_like", "auto_vmec_like"):
+        used_mode = f"{selected_mode}_fallback:{mode_reason}"
+    cache: Any = runtime_cache
+    if selected_mode == "vmec2000_like_dense_integral":
+        alpha = _as_float_env("VMEC_JAX_FREEB_VMEC_LIKE_ALPHA", 1.0)
+        dist_eps = _as_float_env("VMEC_JAX_FREEB_VMEC_LIKE_DIST_EPS", 1.0e-8)
+        rhs_floor = _as_float_env("VMEC_JAX_FREEB_VMEC_LIKE_RHS_FLOOR", 1.0e-14)
+        try:
+            cache = _build_vmec_like_cache(
+                sample,
+                alpha=alpha,
+                dist_eps=dist_eps,
+                rhs_floor=rhs_floor,
+            )
+            phi = _solve_vmec_like_dense(rhs, cache)
+        except Exception:
+            cache = _build_poisson_cache(ntheta=ntheta, nzeta=nzeta)
+            phi = _solve_periodic_poisson_fft(rhs, cache)
+            used_mode = f"spectral_poisson_external_only_fallback:{mode_reason}"
+    else:
+        if (
+            not isinstance(cache, NestorPoissonCache)
+            or int(cache.ntheta) != int(ntheta)
+            or int(cache.nzeta) != int(nzeta)
+        ):
+            cache = _build_poisson_cache(ntheta=ntheta, nzeta=nzeta)
+        phi = _solve_periodic_poisson_fft(rhs, cache)
+
     dphi_u, dphi_v = _spectral_grad(phi)
     bu = np.asarray(sample.vac_ext.bu) + dphi_u
     bv = np.asarray(sample.vac_ext.bv) + dphi_v
@@ -700,13 +839,15 @@ def nestor_external_only_step(
         reused=False,
         solve_time_s=solve_time,
         sample_time_s=sample_time,
+        model=used_mode,
     )
     runtime_next = NestorRuntimeState(
-        poisson=runtime.poisson,
+        operator_cache=cache,
         phi=np.asarray(phi),
         bsqvac=np.asarray(bsqvac),
-        update_count=int(runtime.update_count) + 1,
-        reuse_count=int(runtime.reuse_count),
+        mode=used_mode,
+        update_count=(0 if runtime is None else int(runtime.update_count)) + 1,
+        reuse_count=0 if runtime is None else int(runtime.reuse_count),
     )
     return res, runtime_next
 

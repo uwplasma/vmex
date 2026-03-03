@@ -55,7 +55,7 @@ Laptop-friendly, end-to-end differentiable (JAX) rewrite of **VMEC2000**, focusi
 - Fixed-boundary parity solver for axisymmetric and non-axisymmetric cases, including `lasym=False` and `lasym=True`.
 - Current fixed-boundary parity target is met at `rtol=1e-3` (with axis masking for cancellation-limited near-axis channels).
 - JAX-native kernels for geometry, transforms, and residual assembly.
-- Free-boundary WP0/WP1 + WP2 scaffold is implemented (typed config/state, mgrid validation + interpolation, VMEC-style `ivac/ivacskip`, boundary `Bu/Bv/B^u/B^v/bsqvac`, and edge `bsq` coupling via a lightweight spectral potential solve). Full VMEC2000 NESTOR integral/matrix parity is the next active phase.
+- Free-boundary WP0/WP1 + WP2 scaffold is implemented (typed config/state, mgrid validation + interpolation, VMEC-style `ivac/ivacskip`, boundary `Bu/Bv/B^u/B^v/bsqvac`, edge `bsq` coupling, and dual NESTOR models: VMEC2000-like dense integral assembly + fast spectral fallback).
 - Next major milestone: free-boundary parity.
 
 ## Quickstart

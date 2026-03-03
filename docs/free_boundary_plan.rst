@@ -38,20 +38,28 @@ WP1 is partially in place:
   emitted as ``free_boundary_external_field`` diagnostics.
 - vacuum coupling and NESTOR solve integration remain pending.
 
-WP2 now has an initial coupling scaffold:
+WP2 now has an initial coupling scaffold plus a VMEC2000-like dense path:
 
 - boundary geometry/tangent metric terms are evaluated on the edge surface,
 - external cylindrical field is projected to ``Bu/Bv`` and inverted to
   ``B^u/B^v`` via the 2x2 boundary metric,
 - ``bsqvac`` proxy and boundary-normal channel summaries are emitted in
   ``free_boundary_external_field`` diagnostics.
-- a lightweight periodic spectral potential solve is active for free-boundary
-  runs, with VMEC-style ``ivac``/``ivacskip`` update vs reuse behavior.
+- free-boundary vacuum update now supports two models:
+  - ``vmec2000_like_dense_integral``: dense Green-function-like boundary
+    operator assembly + linear solve on the boundary grid,
+  - ``spectral_poisson_external_only``: previous fast surrogate.
+- mode selection is controlled by ``VMEC_JAX_FREEB_NESTOR_MODE`` with an
+  ``auto`` default; large boundary grids fall back to the spectral path via
+  ``VMEC_JAX_FREEB_VMEC_LIKE_MAX_POINTS``.
+- VMEC-style ``ivac``/``ivacskip`` update vs reuse behavior is preserved in
+  both models.
 - edge ``bsq`` coupling is now threaded into the force path by overriding the
   half-mesh edge magnetic-pressure term from vacuum channels.
 
-NESTOR Green-function assembly and full VMEC2000 matrix/integral parity are
-still pending.
+The dense operator is a parity-oriented stepping stone toward full NESTOR
+matrix/integral equivalence; exact VMEC2000 ``scalpot/vacuum`` term-by-term
+parity is still in progress.
 
 Current tests and benchmark coverage
 ------------------------------------
