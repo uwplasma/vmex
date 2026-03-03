@@ -4,7 +4,11 @@ from pathlib import Path
 
 import numpy as np
 
-from tools.diagnostics.vmec2000_exec_freeb_scalpot_compare import _parse_fouri_dump, _parse_scalpot_dump
+from tools.diagnostics.vmec2000_exec_freeb_scalpot_compare import (
+    _parse_bextern_dump,
+    _parse_fouri_dump,
+    _parse_scalpot_dump,
+)
 
 
 def test_parse_fouri_dump_reads_gsource_source_and_bvecns(tmp_path: Path) -> None:
@@ -95,3 +99,34 @@ def test_parse_scalpot_dump_reads_cached_source_sections(tmp_path: Path) -> None
     np.testing.assert_allclose(got["gsource_cached"], np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
     np.testing.assert_allclose(got["bvecns_cached_sin"], np.array([1.0e-2, 3.0e-2]))
     np.testing.assert_allclose(got["bvecns_cached_cos"], np.array([2.0e-2, 4.0e-2]))
+
+
+def test_parse_bextern_dump_reads_axis_sections(tmp_path: Path) -> None:
+    p = tmp_path / "bextern_iter98.dat"
+    p.write_text(
+        "\n".join(
+            [
+                "# bextern dump",
+                "iter2=98",
+                "nuv3=3",
+                "[brad_axis]",
+                "1  1.0D-03",
+                "2  2.0D-03",
+                "3  3.0D-03",
+                "[bphi_axis]",
+                "1 -1.0D-04",
+                "2 -2.0D-04",
+                "3 -3.0D-04",
+                "[bz_axis]",
+                "1  4.0D-05",
+                "2  5.0D-05",
+                "3  6.0D-05",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    got = _parse_bextern_dump(p)
+    np.testing.assert_allclose(got["brad_axis"], np.array([1.0e-3, 2.0e-3, 3.0e-3]))
+    np.testing.assert_allclose(got["bphi_axis"], np.array([-1.0e-4, -2.0e-4, -3.0e-4]))
+    np.testing.assert_allclose(got["bz_axis"], np.array([4.0e-5, 5.0e-5, 6.0e-5]))

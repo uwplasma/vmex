@@ -1055,6 +1055,28 @@ def vmec_forces_rz_from_wout(
             )
         pres = jnp.asarray(getattr(wout, "pres", jnp.zeros((int(s.shape[0]),), dtype=vac_edge.dtype)))
         pres_edge = jnp.asarray(pres[-1], dtype=vac_edge.dtype) if pres.ndim > 0 else jnp.asarray(pres, dtype=vac_edge.dtype)
+        # VMEC funct3d free-boundary pressure coupling uses:
+        #   presf_ns = pmass(hs*(ns-1.5))
+        #   if presf_ns != 0: presf_ns = (pmass(1)/presf_ns) * pres(ns)
+        # This differs from simply taking `pres(ns)` at the edge.
+        if (indata is not None) and int(s.shape[0]) >= 2:
+            try:
+                from .profiles import eval_profiles
+
+                hs_f = float(np.asarray(s[1] - s[0], dtype=float))
+                sedge = hs_f * (float(int(s.shape[0])) - 1.5)
+                p_edge_prof = eval_profiles(indata, jnp.asarray([sedge], dtype=jnp.asarray(s).dtype)).get("pressure", None)
+                p_one_prof = eval_profiles(indata, jnp.asarray([1.0], dtype=jnp.asarray(s).dtype)).get("pressure", None)
+                if p_edge_prof is not None and p_one_prof is not None:
+                    p_edge_val = float(np.asarray(p_edge_prof, dtype=float).reshape(-1)[0])
+                    p_one_val = float(np.asarray(p_one_prof, dtype=float).reshape(-1)[0])
+                    if p_edge_val != 0.0:
+                        pres_ns_val = float(np.asarray(pres_edge, dtype=float))
+                        pres_edge = jnp.asarray((p_one_val / p_edge_val) * pres_ns_val, dtype=vac_edge.dtype)
+                    else:
+                        pres_edge = jnp.asarray(p_edge_val, dtype=vac_edge.dtype)
+            except Exception:
+                pass
         gcon_edge = vac_edge + pres_edge
         rbsq_scale = float(os.getenv("VMEC_JAX_FREEB_RBSQ_SCALE", "1.0") or 1.0)
         rbsq_edge = (
@@ -1063,25 +1085,13 @@ def vmec_forces_rz_from_wout(
             * jnp.asarray(ohs, dtype=vac_edge.dtype)
             * jnp.asarray(rbsq_scale, dtype=vac_edge.dtype)
         )
-        # VMEC free-boundary edge terms use physical ru0/zu0 on the edge.
-        ru0_edge = vmec_realspace_synthesis_dtheta(
-            coeff_cos=jnp.asarray(state_geom.Rcos)[-1:, :],
-            coeff_sin=jnp.asarray(state_geom.Rsin)[-1:, :],
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-            apply_scalxc=False,
-            s=s,
-        )[0]
-        zu0_edge = vmec_realspace_synthesis_dtheta(
-            coeff_cos=jnp.asarray(state_geom.Zcos)[-1:, :],
-            coeff_sin=jnp.asarray(state_geom.Zsin)[-1:, :],
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-            apply_scalxc=False,
-            s=s,
-        )[0]
+        # VMEC free-boundary edge terms use physical pzu0/pru0 at js=ns.
+        # In our parity split:
+        #   pru0_phys = pru_even + sqrt(s)*pru_odd_internal
+        #   pzu0_phys = pzu_even + sqrt(s)*pzu_odd_internal
+        # and sqrt(s_edge)=1 on the full-mesh edge.
+        ru0_edge = jnp.asarray(pru_0[-1]) + jnp.asarray(pru_1[-1])
+        zu0_edge = jnp.asarray(pzu_0[-1]) + jnp.asarray(pzu_1[-1])
         if iter_idx is not None:
             env = os.getenv("VMEC_JAX_DUMP_FREEB_COUPLING", "").strip().lower()
             if env not in ("", "0", "false", "no"):

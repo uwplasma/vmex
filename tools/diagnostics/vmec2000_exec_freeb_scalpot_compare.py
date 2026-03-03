@@ -199,9 +199,19 @@ def _parse_bextern_dump(path: Path) -> dict[str, Any]:
     wint = np.zeros((max(0, nuv3),), dtype=float)
     r1b = np.zeros((max(0, nuv3),), dtype=float)
     z1b = np.zeros((max(0, nuv3),), dtype=float)
+    rub = np.zeros((max(0, nuv3),), dtype=float)
+    rvb = np.zeros((max(0, nuv3),), dtype=float)
+    zub = np.zeros((max(0, nuv3),), dtype=float)
+    zvb = np.zeros((max(0, nuv3),), dtype=float)
+    snr = np.zeros((max(0, nuv3),), dtype=float)
+    snv = np.zeros((max(0, nuv3),), dtype=float)
+    snz = np.zeros((max(0, nuv3),), dtype=float)
     brad = np.zeros((max(0, nuv3),), dtype=float)
     bphi = np.zeros((max(0, nuv3),), dtype=float)
     bz = np.zeros((max(0, nuv3),), dtype=float)
+    brad_axis = np.zeros((max(0, nuv3),), dtype=float)
+    bphi_axis = np.zeros((max(0, nuv3),), dtype=float)
+    bz_axis = np.zeros((max(0, nuv3),), dtype=float)
     for ln in lines:
         s = ln.strip()
         if not s:
@@ -230,12 +240,32 @@ def _parse_bextern_dump(path: Path) -> dict[str, Any]:
             r1b[idx] = val
         elif section == "z1b" and 0 <= idx < z1b.size:
             z1b[idx] = val
+        elif section == "rub" and 0 <= idx < rub.size:
+            rub[idx] = val
+        elif section == "rvb" and 0 <= idx < rvb.size:
+            rvb[idx] = val
+        elif section == "zub" and 0 <= idx < zub.size:
+            zub[idx] = val
+        elif section == "zvb" and 0 <= idx < zvb.size:
+            zvb[idx] = val
+        elif section == "snr" and 0 <= idx < snr.size:
+            snr[idx] = val
+        elif section == "snv" and 0 <= idx < snv.size:
+            snv[idx] = val
+        elif section == "snz" and 0 <= idx < snz.size:
+            snz[idx] = val
         elif section == "brad" and 0 <= idx < brad.size:
             brad[idx] = val
         elif section == "bphi" and 0 <= idx < bphi.size:
             bphi[idx] = val
         elif section == "bz" and 0 <= idx < bz.size:
             bz[idx] = val
+        elif section == "brad_axis" and 0 <= idx < brad_axis.size:
+            brad_axis[idx] = val
+        elif section == "bphi_axis" and 0 <= idx < bphi_axis.size:
+            bphi_axis[idx] = val
+        elif section == "bz_axis" and 0 <= idx < bz_axis.size:
+            bz_axis[idx] = val
     return {
         "iter2": int(kv.get("iter2", "-1")),
         "nuv3": nuv3,
@@ -246,9 +276,19 @@ def _parse_bextern_dump(path: Path) -> dict[str, Any]:
         "wint": wint,
         "r1b": r1b,
         "z1b": z1b,
+        "rub": rub,
+        "rvb": rvb,
+        "zub": zub,
+        "zvb": zvb,
+        "snr": snr,
+        "snv": snv,
+        "snz": snz,
         "brad": brad,
         "bphi": bphi,
         "bz": bz,
+        "brad_axis": brad_axis,
+        "bphi_axis": bphi_axis,
+        "bz_axis": bz_axis,
     }
 
 
@@ -818,6 +858,82 @@ def main() -> int:
                 "rel_scaled": rel_z_scaled,
                 "scale_jax_to_vmec": a_z,
             }
+        if "Ru" in jax:
+            jru = np.asarray(jax["Ru"]).reshape(-1)
+            vru = np.asarray(vmec_bex["rub"]).reshape(-1)
+            n = min(vru.size, jru.size)
+            a_ru, rel_ru_scaled = _rel_scaled(vru[:n], jru[:n])
+            out["rub"] = {
+                "size_vmec": int(vru.size),
+                "size_jax": int(jru.size),
+                "size_cmp": int(n),
+                "rel_raw": _rel(vru[:n], jru[:n]),
+                "rel_scaled": rel_ru_scaled,
+                "scale_jax_to_vmec": a_ru,
+            }
+        if "Rv" in jax:
+            jrv = np.asarray(jax["Rv"]).reshape(-1)
+            vrv = np.asarray(vmec_bex["rvb"]).reshape(-1)
+            n = min(vrv.size, jrv.size)
+            a_rv, rel_rv_scaled = _rel_scaled(vrv[:n], jrv[:n])
+            out["rvb"] = {
+                "size_vmec": int(vrv.size),
+                "size_jax": int(jrv.size),
+                "size_cmp": int(n),
+                "rel_raw": _rel(vrv[:n], jrv[:n]),
+                "rel_scaled": rel_rv_scaled,
+                "scale_jax_to_vmec": a_rv,
+            }
+        if "Zu" in jax:
+            jzu = np.asarray(jax["Zu"]).reshape(-1)
+            vzu = np.asarray(vmec_bex["zub"]).reshape(-1)
+            n = min(vzu.size, jzu.size)
+            a_zu, rel_zu_scaled = _rel_scaled(vzu[:n], jzu[:n])
+            out["zub"] = {
+                "size_vmec": int(vzu.size),
+                "size_jax": int(jzu.size),
+                "size_cmp": int(n),
+                "rel_raw": _rel(vzu[:n], jzu[:n]),
+                "rel_scaled": rel_zu_scaled,
+                "scale_jax_to_vmec": a_zu,
+            }
+        if "Zv" in jax:
+            jzv_geom = np.asarray(jax["Zv"]).reshape(-1)
+            vzv_geom = np.asarray(vmec_bex["zvb"]).reshape(-1)
+            n = min(vzv_geom.size, jzv_geom.size)
+            a_zv_geom, rel_zv_geom_scaled = _rel_scaled(vzv_geom[:n], jzv_geom[:n])
+            out["zvb"] = {
+                "size_vmec": int(vzv_geom.size),
+                "size_jax": int(jzv_geom.size),
+                "size_cmp": int(n),
+                "rel_raw": _rel(vzv_geom[:n], jzv_geom[:n]),
+                "rel_scaled": rel_zv_geom_scaled,
+                "scale_jax_to_vmec": a_zv_geom,
+            }
+        if all(k in jax for k in ("R", "Ru", "Zu", "Rv", "Zv")):
+            jR = np.asarray(jax["R"]).reshape(-1)
+            jRu = np.asarray(jax["Ru"]).reshape(-1)
+            jZu = np.asarray(jax["Zu"]).reshape(-1)
+            jRv = np.asarray(jax["Rv"]).reshape(-1)
+            jZv = np.asarray(jax["Zv"]).reshape(-1)
+            jsnr = -jR * jZu
+            jsnv = jZu * jRv - jRu * jZv
+            jsnz = jR * jRu
+            for name, vv, jj in (
+                ("snr", np.asarray(vmec_bex["snr"]).reshape(-1), jsnr),
+                ("snv", np.asarray(vmec_bex["snv"]).reshape(-1), jsnv),
+                ("snz", np.asarray(vmec_bex["snz"]).reshape(-1), jsnz),
+            ):
+                n = min(vv.size, jj.size)
+                a_t, rel_t_scaled = _rel_scaled(vv[:n], jj[:n])
+                out[name] = {
+                    "size_vmec": int(vv.size),
+                    "size_jax": int(jj.size),
+                    "size_cmp": int(n),
+                    "rel_raw": _rel(vv[:n], jj[:n]),
+                    "rel_scaled": rel_t_scaled,
+                    "scale_jax_to_vmec": a_t,
+                }
         if "br" in jax:
             jb = np.asarray(jax["br"]).reshape(-1)
             vb = np.asarray(vmec_bex["brad"]).reshape(-1)
@@ -856,6 +972,45 @@ def main() -> int:
                 "rel_raw": _rel(vzv[:n], jzv[:n]),
                 "rel_scaled": rel_zv_scaled,
                 "scale_jax_to_vmec": a_zv,
+            }
+        if "br_axis" in jax:
+            jba = np.asarray(jax["br_axis"]).reshape(-1)
+            vba = np.asarray(vmec_bex["brad_axis"]).reshape(-1)
+            n = min(vba.size, jba.size)
+            a_ba, rel_ba_scaled = _rel_scaled(vba[:n], jba[:n])
+            out["brad_axis"] = {
+                "size_vmec": int(vba.size),
+                "size_jax": int(jba.size),
+                "size_cmp": int(n),
+                "rel_raw": _rel(vba[:n], jba[:n]),
+                "rel_scaled": rel_ba_scaled,
+                "scale_jax_to_vmec": a_ba,
+            }
+        if "bp_axis" in jax:
+            jpa = np.asarray(jax["bp_axis"]).reshape(-1)
+            vpa = np.asarray(vmec_bex["bphi_axis"]).reshape(-1)
+            n = min(vpa.size, jpa.size)
+            a_pa, rel_pa_scaled = _rel_scaled(vpa[:n], jpa[:n])
+            out["bphi_axis"] = {
+                "size_vmec": int(vpa.size),
+                "size_jax": int(jpa.size),
+                "size_cmp": int(n),
+                "rel_raw": _rel(vpa[:n], jpa[:n]),
+                "rel_scaled": rel_pa_scaled,
+                "scale_jax_to_vmec": a_pa,
+            }
+        if "bz_axis" in jax:
+            jza = np.asarray(jax["bz_axis"]).reshape(-1)
+            vza = np.asarray(vmec_bex["bz_axis"]).reshape(-1)
+            n = min(vza.size, jza.size)
+            a_za, rel_za_scaled = _rel_scaled(vza[:n], jza[:n])
+            out["bz_axis"] = {
+                "size_vmec": int(vza.size),
+                "size_jax": int(jza.size),
+                "size_cmp": int(n),
+                "rel_raw": _rel(vza[:n], jza[:n]),
+                "rel_scaled": rel_za_scaled,
+                "scale_jax_to_vmec": a_za,
             }
 
     print(json.dumps(out, indent=2))

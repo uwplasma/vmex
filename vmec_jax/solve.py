@@ -9081,10 +9081,15 @@ def solve_fixed_boundary_residual_iter(
                 )
             zero_m1 = jnp.asarray(zero_m1_val, dtype=jnp.asarray(state.Rcos).dtype)
             if vmec2000_control:
-                # VMEC2000 fixed-boundary residuals do not include the edge
-                # surface in the force pipeline. In free-boundary mode, edge
-                # forcing activates only once vacuum updates begin (ivac>=0).
-                include_edge = bool(free_boundary_enabled and freeb_couple_edge and int(freeb_ivac) >= 0)
+                # VMEC2000 keeps the core R/Z residual assembly on the
+                # interior mesh; free-boundary coupling enters through the
+                # dedicated edge `rbsq` terms in `forces.f`, not by enabling
+                # generic edge residual rows.
+                #
+                # Keep `include_edge=False` by default for parity. A debug
+                # override is left available for diagnostics only.
+                include_edge_env = os.getenv("VMEC_JAX_FREEB_INCLUDE_EDGE", "0").strip().lower()
+                include_edge = include_edge_env not in ("", "0", "false", "no")
             else:
                 include_edge = bool(iter_since_restart < 50) and (float(prev_rz_fsq) < 1e-6)
             if track_history:
