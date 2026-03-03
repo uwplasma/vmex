@@ -233,6 +233,7 @@ def _parse_fouri_dump(path: Path) -> dict[str, Any]:
     nuv3 = int(kv.get("nuv3", "0"))
     source_sym = np.zeros((max(0, nuv3),), dtype=float)
     gsource = np.zeros((max(0, nuv3),), dtype=float)
+    gsource_full = None
     bvec_ns_sin = np.zeros((max(0, mnpd),), dtype=float)
     bvec_ns_cos = np.zeros((max(0, mnpd),), dtype=float)
     section = ""
@@ -250,6 +251,14 @@ def _parse_fouri_dump(path: Path) -> dict[str, Any]:
             i = int(parts[0]) - 1
             if 0 <= i < gsource.size:
                 gsource[i] = float(parts[1].replace("D", "E"))
+        elif section == "gsource_full" and len(parts) >= 2:
+            if gsource_full is None:
+                gsource_full = np.zeros((0,), dtype=float)
+            i = int(parts[0]) - 1
+            if i >= gsource_full.size:
+                pad = np.zeros((i + 1 - gsource_full.size,), dtype=float)
+                gsource_full = np.concatenate([gsource_full, pad], axis=0)
+            gsource_full[i] = float(parts[1].replace("D", "E"))
         elif section == "source_sym" and len(parts) >= 2:
             i = int(parts[0]) - 1
             if 0 <= i < source_sym.size:
@@ -265,6 +274,7 @@ def _parse_fouri_dump(path: Path) -> dict[str, Any]:
         "mnpd2": mnpd2,
         "nuv3": nuv3,
         "gsource": gsource,
+        "gsource_full": np.asarray(gsource_full, dtype=float) if gsource_full is not None else np.zeros((0,), dtype=float),
         "source_sym": source_sym,
         "bvecns_sin": bvec_ns_sin,
         "bvecns_cos": bvec_ns_cos,
@@ -589,6 +599,20 @@ def main() -> int:
             "rel_scaled": rel_src_scaled,
             "scale_jax_to_vmec": a_src,
         }
+        vfull = np.asarray(vmec_fouri.get("gsource_full", np.zeros((0,), dtype=float)), dtype=float).reshape(-1)
+        if vfull.size > 0 and jsrc.size > 0:
+            nfull = min(vfull.size, jsrc.size)
+            vmf = vfull[:nfull]
+            jjf = jsrc[:nfull]
+            a_full, rel_full_scaled = _rel_scaled(vmf, jjf)
+            out["gsource_full"] = {
+                "size_vmec": int(vfull.size),
+                "size_jax": int(jsrc.size),
+                "size_cmp": int(nfull),
+                "rel_raw": _rel(vmf, jjf),
+                "rel_scaled": rel_full_scaled,
+                "scale_jax_to_vmec": a_full,
+            }
     if (vmec_fouri is not None) and ("gsource_kernel" in jax):
         jsrc = np.asarray(jax["gsource_kernel"], dtype=float).reshape(-1)
         vsrc = np.asarray(vmec_fouri["gsource"], dtype=float).reshape(-1)
