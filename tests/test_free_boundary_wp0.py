@@ -10,9 +10,13 @@ from vmec_jax.free_boundary import (
     MGridData,
     MGridMetadata,
     PreparedMGrid,
+    boundary_metric_from_rz,
+    covariant_boundary_field_from_cylindrical,
+    contravariant_boundary_field_from_covariant,
     interpolate_mgrid_bfield,
     load_mgrid,
     prepare_mgrid_for_config,
+    vacuum_boundary_fields_from_cylindrical,
 )
 from vmec_jax.namelist import read_indata
 from vmec_jax.static import build_static
@@ -502,3 +506,139 @@ def test_interpolate_mgrid_bfield_trilinear_linear_field():
     np.testing.assert_allclose(br_q, expected, rtol=1e-12, atol=1e-12)
     np.testing.assert_allclose(bp_q, 2.0 * expected, rtol=1e-12, atol=1e-12)
     np.testing.assert_allclose(bz_q, -expected, rtol=1e-12, atol=1e-12)
+
+
+def test_boundary_vacuum_projection_toroidal_field():
+    ntheta = 16
+    nzeta = 8
+    theta = np.linspace(0.0, 2.0 * np.pi, ntheta, endpoint=False)[:, None]
+    _zeta = np.linspace(0.0, 2.0 * np.pi, nzeta, endpoint=False)[None, :]
+    r0 = 10.0
+    a = 1.2
+    bphi0 = 2.5
+
+    R = r0 + a * np.cos(theta)
+    Ru = -a * np.sin(theta) * np.ones_like(_zeta)
+    Zu = a * np.cos(theta) * np.ones_like(_zeta)
+    Rv = np.zeros((ntheta, nzeta))
+    Zv = np.zeros((ntheta, nzeta))
+    br = np.zeros((ntheta, nzeta))
+    bp = np.full((ntheta, nzeta), bphi0)
+    bz = np.zeros((ntheta, nzeta))
+
+    g_uu, g_uv, g_vv, det = boundary_metric_from_rz(R=R, Ru=Ru, Zu=Zu, Rv=Rv, Zv=Zv)
+    np.testing.assert_allclose(g_uu, a * a, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(g_uv, 0.0, rtol=1e-12, atol=1e-12)
+    R2 = np.broadcast_to(R * R, g_vv.shape)
+    np.testing.assert_allclose(g_vv, R2, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(det, (a * a) * R2, rtol=1e-12, atol=1e-12)
+
+    bu, bv = covariant_boundary_field_from_cylindrical(
+        br=br,
+        bp=bp,
+        bz=bz,
+        R=R,
+        Ru=Ru,
+        Zu=Zu,
+        Rv=Rv,
+        Zv=Zv,
+    )
+    Rb = np.broadcast_to(R, bv.shape)
+    np.testing.assert_allclose(bu, 0.0, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(bv, Rb * bphi0, rtol=1e-12, atol=1e-12)
+
+    bsupu, bsupv, _ = contravariant_boundary_field_from_covariant(
+        bu=bu,
+        bv=bv,
+        g_uu=g_uu,
+        g_uv=g_uv,
+        g_vv=g_vv,
+    )
+    np.testing.assert_allclose(bsupu, 0.0, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(bsupv, bphi0 / Rb, rtol=1e-12, atol=1e-12)
+
+    vac = vacuum_boundary_fields_from_cylindrical(
+        br=br,
+        bp=bp,
+        bz=bz,
+        R=R,
+        Ru=Ru,
+        Zu=Zu,
+        Rv=Rv,
+        Zv=Zv,
+    )
+    np.testing.assert_allclose(vac.bsqvac, bphi0 * bphi0, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(vac.bnormal, 0.0, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(vac.bnormal_unit, 0.0, rtol=1e-12, atol=1e-12)
+
+
+def test_run_fixed_boundary_freeb_diagnostics_include_wp2_channels(tmp_path: Path):
+    netCDF4 = pytest.importorskip("netCDF4", reason="netCDF4 required for mgrid loader test")
+
+    mg = tmp_path / "mgrid_fb_diag_wp2.nc"
+    with netCDF4.Dataset(str(mg), mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createDimension("stringsize", 8)
+        ds.createDimension("external_coil_groups", 1)
+        ds.createDimension("dim_00001", 1)
+        ds.createDimension("external_coils", 1)
+        ds.createDimension("rad", 2)
+        ds.createDimension("zee", 2)
+        ds.createDimension("phi", 4)
+        for name, value in (
+            ("ir", 2),
+            ("jz", 2),
+            ("kp", 4),
+            ("nfp", 1),
+            ("nextcur", 1),
+        ):
+            ds.createVariable(name, "i4", ()).assignValue(value)
+        for name, value in (("rmin", 1.0), ("rmax", 12.0), ("zmin", -3.0), ("zmax", 3.0)):
+            ds.createVariable(name, "f8", ()).assignValue(value)
+        # Uniform toroidal field in the single coil group.
+        ds.createVariable("br_001", "f8", ("phi", "zee", "rad"))[:] = 0.0
+        ds.createVariable("bp_001", "f8", ("phi", "zee", "rad"))[:] = 1.0
+        ds.createVariable("bz_001", "f8", ("phi", "zee", "rad"))[:] = 0.0
+
+    inpath = tmp_path / "input.fb_diag_wp2"
+    inpath.write_text(
+        f"""
+&INDATA
+  NFP = 1
+  MPOL = 5
+  NTOR = 0
+  NS = 9
+  NZETA = 2
+  NTHETA = 8
+  LASYM = F
+  LFREEB = T
+  MGRID_FILE = '{mg}'
+  NVACSKIP = 2
+  RBC(0,0) = 6.0
+  ZBS(1,0) = 2.0
+/
+"""
+    )
+
+    run = run_fixed_boundary(
+        inpath,
+        solver="vmec2000_iter",
+        max_iter=1,
+        multigrid=False,
+        verbose=False,
+    )
+    fbext = run.result.diagnostics.get("free_boundary_external_field")
+    assert isinstance(fbext, dict)
+    for key in (
+        "bu_rms",
+        "bv_rms",
+        "bsupu_rms",
+        "bsupv_rms",
+        "bsqvac_mean",
+        "bsqvac_max",
+        "bnormal_rms",
+        "bnormal_unit_rms",
+        "det_guv_min",
+        "det_guv_max",
+    ):
+        assert key in fbext
+    assert bool(fbext.get("available", False)) is True

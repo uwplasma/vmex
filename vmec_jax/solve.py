@@ -187,94 +187,13 @@ def _free_boundary_iter_controls(iter2: int, iter1: int, nvacskip: int) -> tuple
 
 
 def _sample_free_boundary_external_field(*, state: VMECState, static) -> dict[str, Any]:
-    """Sample external mgrid field on the current plasma boundary (diagnostic hook).
+    """WP2 diagnostic scaffold for external-field boundary channels."""
+    from .free_boundary import sample_external_vacuum_diagnostics
 
-    This is a WP1 placeholder for free-boundary coupling. It does not feed back
-    into forces yet; it provides a deterministic diagnostic that exercises:
-    - mgrid field loading,
-    - edge geometry evaluation,
-    - trilinear interpolation with EXTCUR weighting.
-    """
-
-    from .free_boundary import interpolate_mgrid_bfield, load_mgrid
-    from .vmec_realspace import vmec_realspace_synthesis
-    from .vmec_tomnsp import vmec_trig_tables
-
-    out: dict[str, Any] = {
-        "enabled": False,
-        "available": False,
-        "vacuum_stub": True,
-    }
-    meta = getattr(static, "mgrid_metadata", None)
-    if meta is None:
-        out["reason"] = "missing_mgrid_metadata"
-        return out
-    mgrid_path = str(getattr(meta, "path", "")).strip()
-    if not mgrid_path:
-        out["reason"] = "missing_mgrid_path"
-        return out
-    extcur = tuple(getattr(static, "free_boundary_extcur", ()) or ())
-    t0 = time.perf_counter()
-    try:
-        mgrid = load_mgrid(mgrid_path, load_fields=True)
-        trig = getattr(static, "trig_vmec", None)
-        if trig is None:
-            trig = vmec_trig_tables(
-                ntheta=int(static.cfg.ntheta),
-                nzeta=int(static.cfg.nzeta),
-                nfp=int(static.cfg.nfp),
-                mmax=int(static.cfg.mpol) - 1,
-                nmax=int(static.cfg.ntor),
-                lasym=bool(static.cfg.lasym),
-            )
-        r_edge = np.asarray(
-            vmec_realspace_synthesis(
-                coeff_cos=jnp.asarray(state.Rcos)[-1:, :],
-                coeff_sin=jnp.asarray(state.Rsin)[-1:, :],
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=False,
-            )[0]
-        )
-        z_edge = np.asarray(
-            vmec_realspace_synthesis(
-                coeff_cos=jnp.asarray(state.Zcos)[-1:, :],
-                coeff_sin=jnp.asarray(state.Zsin)[-1:, :],
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=False,
-            )[0]
-        )
-        nzeta = int(r_edge.shape[1])
-        zeta = (2.0 * np.pi / max(1, nzeta)) * np.arange(nzeta, dtype=float)
-        phi = zeta / max(1, int(static.cfg.nfp))
-        phi_grid = np.broadcast_to(phi[None, :], r_edge.shape)
-        br, bp, bz = interpolate_mgrid_bfield(
-            mgrid,
-            r=r_edge,
-            z=z_edge,
-            phi=phi_grid,
-            extcur=extcur,
-        )
-        bmag = np.sqrt(br * br + bp * bp + bz * bz)
-        out.update(
-            {
-                "enabled": True,
-                "available": True,
-                "mgrid_path": mgrid_path,
-                "n_samples": int(br.size),
-                "br_rms": float(np.sqrt(np.mean(br * br))),
-                "bp_rms": float(np.sqrt(np.mean(bp * bp))),
-                "bz_rms": float(np.sqrt(np.mean(bz * bz))),
-                "bmag_mean": float(np.mean(bmag)),
-                "bmag_max": float(np.max(bmag)),
-            }
-        )
-    except Exception as exc:
-        out["reason"] = "sample_failed"
-        out["error"] = str(exc)
-    out["sample_time_s"] = float(max(0.0, time.perf_counter() - t0))
-    return out
+    return sample_external_vacuum_diagnostics(
+        state=state,
+        static=static,
+    )
 
 
 def _maybe_dump_tomnsps(*, frzl, static, iter_idx: int, label: str = "raw") -> None:

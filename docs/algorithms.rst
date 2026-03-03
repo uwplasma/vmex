@@ -322,6 +322,42 @@ Current boundary sampling uses edge-surface
 :math:`\phi = \zeta/NFP` for one field period, producing a diagnostic
 external-field summary (RMS and extrema) without force coupling yet.
 
+WP2 boundary-vacuum algebra scaffold
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The next staged piece now computes VMEC-style surface field channels from the
+sampled external cylindrical field:
+
+.. math::
+
+   B_u = B_R R_u + B_Z Z_u,\qquad
+   B_v = B_R R_v + R B_\phi + B_Z Z_v.
+
+With metric terms
+
+.. math::
+
+   g_{uu}=R_u^2+Z_u^2,\quad
+   g_{uv}=R_u R_v + Z_u Z_v,\quad
+   g_{vv}=R^2 + R_v^2 + Z_v^2,
+
+and determinant :math:`\Delta = g_{uu}g_{vv}-g_{uv}^2`, contravariant channels
+are evaluated as:
+
+.. math::
+
+   B^u = \frac{g_{vv}B_u - g_{uv}B_v}{\Delta},\qquad
+   B^v = \frac{g_{uu}B_v - g_{uv}B_u}{\Delta}.
+
+The diagnostic vacuum magnetic pressure proxy is then
+
+.. math::
+
+   B_{\mathrm{sq,vac}} = B_u B^u + B_v B^v.
+
+This is currently diagnostic-only (no edge-force feedback yet). A signed floor
+is applied to :math:`\Delta` to avoid non-finite values in degenerate cells.
+
 Profiles and volume integrals
 -----------------------------
 

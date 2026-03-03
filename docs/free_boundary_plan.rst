@@ -38,6 +38,16 @@ WP1 is partially in place:
   emitted as ``free_boundary_external_field`` diagnostics.
 - vacuum coupling and NESTOR solve integration remain pending.
 
+WP2 now has an initial diagnostic scaffold:
+
+- boundary geometry/tangent metric terms are evaluated on the edge surface,
+- external cylindrical field is projected to ``Bu/Bv`` and inverted to
+  ``B^u/B^v`` via the 2x2 boundary metric,
+- ``bsqvac`` proxy and boundary-normal channel summaries are emitted in
+  ``free_boundary_external_field`` diagnostics.
+
+NESTOR Green-function assembly + scalar-potential solve are still pending.
+
 Current tests and benchmark coverage
 ------------------------------------
 
