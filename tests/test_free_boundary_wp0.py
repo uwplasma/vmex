@@ -388,6 +388,71 @@ def test_run_fixed_boundary_freeb_diagnostics_stub(tmp_path: Path):
     assert bool(fb.get("enabled", False)) is True
     assert int(fb.get("nvacskip", 0)) == 2
     assert bool(fb.get("vacuum_stub", False)) is True
+    fbext = run.result.diagnostics.get("free_boundary_external_field")
+    assert isinstance(fbext, dict)
+    assert bool(fbext.get("vacuum_stub", False)) is True
+    assert "sample_time_s" in fbext
+
+
+def test_run_fixed_boundary_freeb_external_sampling_can_be_disabled(tmp_path: Path, monkeypatch):
+    netCDF4 = pytest.importorskip("netCDF4", reason="netCDF4 required for mgrid loader test")
+
+    mg = tmp_path / "mgrid_fb_diag_off.nc"
+    with netCDF4.Dataset(str(mg), mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createDimension("stringsize", 8)
+        ds.createDimension("external_coil_groups", 1)
+        ds.createDimension("dim_00001", 1)
+        ds.createDimension("external_coils", 1)
+        ds.createDimension("rad", 2)
+        ds.createDimension("zee", 2)
+        ds.createDimension("phi", 4)
+        for name, value in (
+            ("ir", 2),
+            ("jz", 2),
+            ("kp", 4),
+            ("nfp", 1),
+            ("nextcur", 1),
+        ):
+            v = ds.createVariable(name, "i4", ())
+            v.assignValue(value)
+        for name, value in (("rmin", 1.0), ("rmax", 2.0), ("zmin", -1.0), ("zmax", 1.0)):
+            v = ds.createVariable(name, "f8", ())
+            v.assignValue(value)
+
+    inpath = tmp_path / "input.fb_diag_off"
+    inpath.write_text(
+        f"""
+&INDATA
+  NFP = 1
+  MPOL = 5
+  NTOR = 0
+  NS = 9
+  NZETA = 2
+  NTHETA = 8
+  LASYM = F
+  LFREEB = T
+  MGRID_FILE = '{mg}'
+  NVACSKIP = 2
+  RBC(0,0) = 6.0
+  ZBS(1,0) = 2.0
+/
+"""
+    )
+
+    monkeypatch.setenv("VMEC_JAX_FREEB_SAMPLE_EXTERNAL", "0")
+    run = run_fixed_boundary(
+        inpath,
+        solver="vmec2000_iter",
+        max_iter=1,
+        multigrid=False,
+        verbose=False,
+    )
+    fbext = run.result.diagnostics.get("free_boundary_external_field")
+    assert isinstance(fbext, dict)
+    assert bool(fbext.get("vacuum_stub", False)) is True
+    assert bool(fbext.get("enabled", True)) is False
+    assert bool(fbext.get("available", True)) is False
+    assert fbext.get("reason") == "disabled_by_env"
 
 
 def test_interpolate_mgrid_bfield_trilinear_linear_field():

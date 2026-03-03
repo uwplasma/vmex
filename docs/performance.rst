@@ -160,6 +160,31 @@ whenever the preconditioner diagonal is refreshed. This avoids rebuilding the
 same weight tensor in every refresh call and keeps the preconditioner refresh
 path purely algebraic in ``bsq``, ``r12``, ``sqrtg``, ``ru12``, and ``zu12``.
 
+Free-boundary WP1 micro-benchmark
+---------------------------------
+
+For free-boundary staging, use the dedicated benchmark script:
+
+.. code-block:: bash
+
+  python tools/benchmarks/bench_free_boundary_wp1.py \
+    --input examples/data/input.DIII-D \
+    --interp-points 20000 \
+    --interp-repeats 5
+
+This reports:
+
+- metadata validation/load time,
+- full mgrid tensor load time,
+- interpolation throughput and sampled ``|B_ext|`` stats.
+
+Solver note: free-boundary is still in WP1 scaffold mode, so the external-field
+sampling is diagnostic-only. You can disable that sampling with:
+
+.. code-block:: bash
+
+  export VMEC_JAX_FREEB_SAMPLE_EXTERNAL=0
+
 Experimental tridiagonal solver (scan only)
 ------------------------------------------
 
