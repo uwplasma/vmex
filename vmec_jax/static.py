@@ -21,6 +21,7 @@ import numpy as np
 
 from ._compat import jnp
 from .config import VMECConfig
+from .free_boundary import FreeBoundaryRuntimeState, initial_free_boundary_state
 from .fourier import HelicalBasis, build_helical_basis
 from .grids import AngleGrid, make_angle_grid
 from .modes import ModeTable, vmec_mode_table
@@ -56,6 +57,7 @@ class VMECStatic:
     mn_idx_kn: np.ndarray | None = None
     mn_has_kn: np.ndarray | None = None
     mode_scale_internal: any | None = None
+    free_boundary_state0: FreeBoundaryRuntimeState | None = None
 
 
 def build_static(cfg: VMECConfig, *, grid: AngleGrid | None = None) -> VMECStatic:
@@ -235,4 +237,5 @@ def build_static(cfg: VMECConfig, *, grid: AngleGrid | None = None) -> VMECStati
         mn_idx_kn=mn_idx_kn,
         mn_has_kn=mn_has_kn,
         mode_scale_internal=None if trig_vmec is None else (1.0 / (jnp.asarray(trig_vmec.mscale)[m_np] * jnp.asarray(trig_vmec.nscale)[np.abs(n_np)])).astype(jnp.asarray(s).dtype),
+        free_boundary_state0=initial_free_boundary_state(cfg) if bool(cfg.lfreeb) else None,
     )

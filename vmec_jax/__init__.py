@@ -2,7 +2,7 @@
 
 from . import api
 from .namelist import read_indata, InData
-from .config import VMECConfig, load_config
+from .config import FreeBoundaryConfig, VMECConfig, load_config
 from .modes import ModeTable, vmec_mode_table, nyquist_mode_table, default_grid_sizes
 from .grids import AngleGrid, make_angle_grid
 from .boundary import (
@@ -67,6 +67,14 @@ from .driver import (
 from .booz_input import booz_xform_inputs_from_state
 from .state import VMECState, pack_state, unpack_state
 from .static import VMECStatic, build_static
+from .free_boundary import (
+    FreeBoundaryRuntimeState,
+    MGridMetadata,
+    MGridData,
+    initial_free_boundary_state,
+    load_mgrid,
+    validate_free_boundary_config,
+)
 from .init_guess import initial_guess_from_boundary
 from .optimization import (
     BoundaryParamSpec,
@@ -111,6 +119,7 @@ __all__ = [
     "api",
     "read_indata",
     "InData",
+    "FreeBoundaryConfig",
     "VMECConfig",
     "load_config",
     "ModeTable",
@@ -176,6 +185,12 @@ __all__ = [
     "unpack_state",
     "VMECStatic",
     "build_static",
+    "FreeBoundaryRuntimeState",
+    "MGridMetadata",
+    "MGridData",
+    "initial_free_boundary_state",
+    "load_mgrid",
+    "validate_free_boundary_config",
     "initial_guess_from_boundary",
     "BoundaryParamSpec",
     "FixedBoundaryContext",

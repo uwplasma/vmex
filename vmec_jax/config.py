@@ -9,11 +9,26 @@ This config can be extended to include profiles, iteration controls, etc.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .namelist import InData, read_indata
 from .modes import default_grid_sizes
+
+
+@dataclass(frozen=True)
+class FreeBoundaryConfig:
+    """Free-boundary runtime inputs from &INDATA.
+
+    This mirrors VMEC2000's top-level indata behavior:
+    - `LFREEB=T` is ignored when `MGRID_FILE='NONE'`.
+    - `NVACSKIP<=0` falls back to `NFP` in readin.f.
+    """
+
+    enabled: bool = False
+    mgrid_file: str = "NONE"
+    extcur: tuple[float, ...] = ()
+    nvacskip: int = 1
 
 
 @dataclass(frozen=True)
@@ -27,6 +42,52 @@ class VMECConfig:
     lconm1: bool
     ntheta: int
     nzeta: int
+    free_boundary: FreeBoundaryConfig = field(default_factory=FreeBoundaryConfig)
+
+    @property
+    def lfreeb(self) -> bool:
+        return bool(self.free_boundary.enabled)
+
+    @property
+    def mgrid_file(self) -> str:
+        return str(self.free_boundary.mgrid_file)
+
+    @property
+    def extcur(self) -> tuple[float, ...]:
+        return tuple(self.free_boundary.extcur)
+
+    @property
+    def nvacskip(self) -> int:
+        return int(self.free_boundary.nvacskip)
+
+
+def _as_float_sequence(value) -> list[float]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [float(v) for v in value]
+    return [float(value)]
+
+
+def _extcur_from_indata(indata: InData) -> tuple[float, ...]:
+    # EXTCUR can appear as EXTCUR = ... or indexed EXTCUR(i) = ...
+    indexed = indata.indexed.get("EXTCUR")
+    if indexed:
+        max_i = 0
+        for idx in indexed:
+            if len(idx) == 1 and idx[0] > max_i:
+                max_i = int(idx[0])
+        if max_i > 0:
+            vals = [0.0] * max_i
+            for idx, value in indexed.items():
+                if len(idx) != 1:
+                    continue
+                i = int(idx[0])
+                if i <= 0:
+                    continue
+                vals[i - 1] = float(value)
+            return tuple(vals)
+    return tuple(_as_float_sequence(indata.get("EXTCUR", None)))
 
 
 def config_from_indata(indata: InData) -> VMECConfig:
@@ -48,6 +109,24 @@ def config_from_indata(indata: InData) -> VMECConfig:
     ntheta_in = indata.get_int("NTHETA", 0)
     nzeta_in = indata.get_int("NZETA", 0)
     ntheta, nzeta = default_grid_sizes(mpol=mpol, ntor=ntor, ntheta=ntheta_in, nzeta=nzeta_in)
+    mgrid_file = str(indata.get("MGRID_FILE", "NONE")).strip()
+    if (mgrid_file.startswith("'") and mgrid_file.endswith("'")) or (
+        mgrid_file.startswith('"') and mgrid_file.endswith('"')
+    ):
+        mgrid_file = mgrid_file[1:-1].strip()
+    lfreeb_req = bool(indata.get_bool("LFREEB", False))
+    # VMEC2000 read_indata.f: IF (lfreeb .and. mgrid_file.eq.'NONE') lfreeb = .false.
+    lfreeb = bool(lfreeb_req and mgrid_file.upper() != "NONE")
+    nvacskip = int(indata.get_int("NVACSKIP", 0))
+    # VMEC2000 readin.f: IF (nvacskip .LE. 0) nvacskip = nfp
+    if nvacskip <= 0:
+        nvacskip = nfp
+    free_boundary = FreeBoundaryConfig(
+        enabled=lfreeb,
+        mgrid_file=mgrid_file,
+        extcur=_extcur_from_indata(indata),
+        nvacskip=nvacskip,
+    )
     return VMECConfig(
         mpol=mpol,
         ntor=ntor,
@@ -58,6 +137,7 @@ def config_from_indata(indata: InData) -> VMECConfig:
         lconm1=lconm1,
         ntheta=ntheta,
         nzeta=nzeta,
+        free_boundary=free_boundary,
     )
 
 
