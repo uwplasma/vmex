@@ -838,7 +838,15 @@ def _build_vmec_mode_basis(
     lasym = bool(lasym)
 
     pi2 = 2.0 * np.pi
-    theta = (pi2 / float(max(1, ntheta))) * np.arange(ntheta, dtype=float)
+    # VMEC vacuum precal uses a full poloidal grid `nu`; for stellarator-symmetric
+    # solves (`lasym=F`) the active storage is only the first `nu3 = nu/2 + 1` rows.
+    # Our free-boundary boundary arrays live on that reduced grid, so recover `nu`
+    # from `nu3` to match precal sinmni/cosmni phases exactly.
+    if lasym:
+        nu_full = int(ntheta)
+    else:
+        nu_full = max(int(ntheta), 2 * (int(ntheta) - 1))
+    theta = (pi2 / float(max(1, nu_full))) * np.arange(ntheta, dtype=float)
     zeta = (pi2 / float(max(1, nzeta))) * np.arange(nzeta, dtype=float)
     th_grid = np.broadcast_to(theta[:, None], (ntheta, nzeta))
     ze_grid = np.broadcast_to(zeta[None, :], (ntheta, nzeta))
@@ -874,6 +882,13 @@ def _build_vmec_mode_basis(
     lt_m = (ntheta - lt) % max(1, ntheta)
     lz_m = (nzeta - lz) % max(1, nzeta)
     imirr = (lt_m * nzeta + lz_m).astype(np.int64)
+    nuv_full = int(max(1, nu_full) * max(1, nzeta))
+    idx_full = np.arange(nuv_full, dtype=np.int64)
+    ku_full = idx_full // max(1, nzeta)
+    kv_full = idx_full % max(1, nzeta)
+    ku_m_full = (nu_full - ku_full) % max(1, nu_full)
+    kv_m_full = (nzeta - kv_full) % max(1, nzeta)
+    imirr_full = (ku_m_full * nzeta + kv_m_full).astype(np.int64)
 
     mn0 = 0
     for j in range(mnpd):
@@ -891,13 +906,17 @@ def _build_vmec_mode_basis(
         "cosmni": cosmni,
         "wint": w,
         "imirr": imirr,
+        "imirr_full": imirr_full,
         "mnpd": mnpd,
         "mnpd2": mnpd2,
+        "nuv3": int(th.size),
+        "nuv_full": nuv_full,
         "mn0": mn0,
         "onp": 1.0 / float(nfp),
         "nfp": nfp,
         "mf": mf,
         "nf": nf,
+        "nu_full": int(nu_full),
         "lasym": lasym,
         "theta": th,
         "zeta": ze,
@@ -1035,12 +1054,206 @@ def _vmec_source_from_gsource(*, gsource: np.ndarray, basis: dict[str, Any]) -> 
 
     gsrc = np.asarray(gsource, dtype=float).reshape(-1)
     onp = float(basis["onp"])
+    nuv3 = int(basis.get("nuv3", gsrc.size))
+    nuv_full = int(basis.get("nuv_full", nuv3))
     if bool(basis["lasym"]):
-        src = onp * gsrc
+        if gsrc.size >= nuv_full:
+            src = onp * gsrc[:nuv3]
+        else:
+            src = onp * gsrc[:nuv3]
     else:
-        imirr = np.asarray(basis["imirr"], dtype=np.int64)
-        src = 0.5 * onp * (gsrc - gsrc[imirr])
+        if gsrc.size >= nuv_full and "imirr_full" in basis:
+            imirr_full = np.asarray(basis["imirr_full"], dtype=np.int64)
+            src = 0.5 * onp * (gsrc[:nuv3] - gsrc[imirr_full[:nuv3]])
+        else:
+            imirr = np.asarray(basis["imirr"], dtype=np.int64)
+            src = 0.5 * onp * (gsrc[:nuv3] - gsrc[imirr[:nuv3]])
     return np.asarray(src, dtype=float)
+
+
+def _vmec_nonsingular_gsource_from_bexni(
+    *,
+    sample: ExternalBoundarySample,
+    basis: dict[str, Any],
+    bexni: np.ndarray,
+    signgs: int,
+    nvper: int,
+) -> np.ndarray:
+    """Approximate VMEC greenf+gstore source assembly on one boundary period.
+
+    This ports the key numerics of ``greenf.f``/``scalpot.f`` source accumulation:
+    ``gstore(i) = sum_ip bexni(ip) * delgr(i;ip)``, where ``delgr`` is the
+    non-singular Green-function remainder over field periods.
+    """
+
+    ntheta3, nzeta = sample.R.shape
+    nu = int(basis.get("nu_full", ntheta3))
+    nv = int(nzeta)
+    nuv_full = int(nu * nv)
+    nuv3 = int(ntheta3 * nv)
+    if nuv_full <= 0:
+        return np.zeros((0,), dtype=float)
+
+    onp = float(basis["onp"])
+    onp2 = onp * onp
+    signgs = int(signgs)
+    nvper = max(1, int(nvper))
+
+    R_red = np.asarray(sample.R, dtype=float)
+    Z_red = np.asarray(sample.Z, dtype=float)
+    Ru_red = np.asarray(sample.Ru, dtype=float)
+    Zu_red = np.asarray(sample.Zu, dtype=float)
+    Rv_red = np.asarray(sample.Rv, dtype=float)
+    Zv_red = np.asarray(sample.Zv, dtype=float)
+
+    if (nu == ntheta3) or bool(basis.get("lasym", False)):
+        R2 = np.asarray(R_red, dtype=float)
+        Z2 = np.asarray(Z_red, dtype=float)
+        Ru2 = np.asarray(Ru_red, dtype=float)
+        Zu2 = np.asarray(Zu_red, dtype=float)
+        Rv2 = np.asarray(Rv_red, dtype=float)
+        Zv2 = np.asarray(Zv_red, dtype=float)
+    else:
+        # Rebuild full `nu` surface arrays from stellarator-symmetric half grid.
+        R2 = np.zeros((nu, nv), dtype=float)
+        Z2 = np.zeros((nu, nv), dtype=float)
+        Ru2 = np.zeros((nu, nv), dtype=float)
+        Zu2 = np.zeros((nu, nv), dtype=float)
+        Rv2 = np.zeros((nu, nv), dtype=float)
+        Zv2 = np.zeros((nu, nv), dtype=float)
+        R2[:ntheta3, :] = R_red
+        Z2[:ntheta3, :] = Z_red
+        Ru2[:ntheta3, :] = Ru_red
+        Zu2[:ntheta3, :] = Zu_red
+        Rv2[:ntheta3, :] = Rv_red
+        Zv2[:ntheta3, :] = Zv_red
+        for ku in range(1, max(1, ntheta3 - 1)):
+            km = (nu - ku) % max(1, nu)
+            if km < ntheta3:
+                continue
+            R2[km, :] = R_red[ku, :]
+            Z2[km, :] = -Z_red[ku, :]
+            Ru2[km, :] = -Ru_red[ku, :]
+            Zu2[km, :] = Zu_red[ku, :]
+            Rv2[km, :] = Rv_red[ku, :]
+            Zv2[km, :] = -Zv_red[ku, :]
+
+    # Periodic second derivatives (central finite difference) to build AU* terms.
+    dth = 2.0 * np.pi / float(max(1, nu))
+    dze = 2.0 * np.pi / float(max(1, nv))
+    ruu = (np.roll(R2, -1, axis=0) - 2.0 * R2 + np.roll(R2, 1, axis=0)) / (dth * dth)
+    rvv = (np.roll(R2, -1, axis=1) - 2.0 * R2 + np.roll(R2, 1, axis=1)) / (dze * dze)
+    zuu = (np.roll(Z2, -1, axis=0) - 2.0 * Z2 + np.roll(Z2, 1, axis=0)) / (dth * dth)
+    zvv = (np.roll(Z2, -1, axis=1) - 2.0 * Z2 + np.roll(Z2, 1, axis=1)) / (dze * dze)
+    ruv = (
+        np.roll(np.roll(R2, -1, axis=0), -1, axis=1)
+        - np.roll(np.roll(R2, -1, axis=0), 1, axis=1)
+        - np.roll(np.roll(R2, 1, axis=0), -1, axis=1)
+        + np.roll(np.roll(R2, 1, axis=0), 1, axis=1)
+    ) / (4.0 * dth * dze)
+    zuv = (
+        np.roll(np.roll(Z2, -1, axis=0), -1, axis=1)
+        - np.roll(np.roll(Z2, -1, axis=0), 1, axis=1)
+        - np.roll(np.roll(Z2, 1, axis=0), -1, axis=1)
+        + np.roll(np.roll(Z2, 1, axis=0), 1, axis=1)
+    ) / (4.0 * dth * dze)
+    R = R2.reshape(-1)
+    Z = Z2.reshape(-1)
+    Ru = Ru2.reshape(-1)
+    Zu = Zu2.reshape(-1)
+    Rv = Rv2.reshape(-1)
+    Zv = Zv2.reshape(-1)
+    ruu = ruu.reshape(-1)
+    rvv = rvv.reshape(-1)
+    ruv = ruv.reshape(-1)
+    zuu = zuu.reshape(-1)
+    zvv = zvv.reshape(-1)
+    zuv = zuv.reshape(-1)
+
+    snr = float(signgs) * R * Zu
+    snv = float(signgs) * (Ru * Zv - Rv * Zu)
+    snz = -float(signgs) * R * Ru
+    drv = -(R * snr + Z * snz)
+    guu_b = Ru * Ru + Zu * Zu
+    guv_b = (Ru * Rv + Zu * Zv) * onp * 2.0
+    gvv_b = (Rv * Rv + Zv * Zv + R * R) * onp2
+    auu = 0.5 * (snr * ruu + snz * zuu)
+    auv = (snr * ruv + snv * Ru + snz * zuv) * onp
+    avv = (snv * Rv + 0.5 * (snr * (rvv - R) + snz * zvv)) * onp2
+    rzb2 = R * R + Z * Z
+
+    alv = 2.0 * np.pi / float(max(1, nv))
+    alvp = onp * alv
+    kv = np.arange(nv, dtype=np.int64)
+    cos_v = np.cos(alvp * kv)
+    sin_v = np.sin(alvp * kv)
+    cosuv = np.broadcast_to(cos_v[None, :], (nu, nv)).reshape(-1)
+    sinuv = np.broadcast_to(sin_v[None, :], (nu, nv)).reshape(-1)
+    rcosuv = R * cosuv
+    rsinuv = R * sinuv
+
+    # tanu/tanv tables from precal.f for nv>1 path.
+    nu2 = 2 * nu
+    tanu = np.zeros((nu2, nv), dtype=float)
+    tanv = np.zeros((nu2, nv), dtype=float)
+    for ku_idx in range(nu2):
+        argu = 0.5 * (2.0 * np.pi / float(max(1, nu))) * float(ku_idx)
+        tu = 2.0 * np.tan(argu)
+        for kv_idx in range(nv):
+            argv = 0.5 * alv * float(kv_idx)
+            tv = 2.0 * np.tan(argv)
+            tanu[ku_idx, kv_idx] = tu
+            tanv[ku_idx, kv_idx] = tv
+    tanu = tanu.reshape(-1)
+    tanv = tanv.reshape(-1)
+
+    # Field-period rotation factors.
+    alp_per = 2.0 * np.pi / float(max(1, nvper))
+    cosper = np.cos(alp_per * np.arange(nvper, dtype=float))
+    sinper = np.sin(alp_per * np.arange(nvper, dtype=float))
+
+    bex = np.asarray(bexni, dtype=float).reshape(-1)
+    if bex.size < nuv3:
+        bex = np.resize(bex, (nuv3,))
+    else:
+        bex = bex[:nuv3]
+
+    gstore = np.zeros((nuv_full,), dtype=float)
+    idx_all = np.arange(nuv_full, dtype=np.int64)
+    for ip in range(nuv3):
+        xip = rcosuv[ip]
+        yip = rsinuv[ip]
+        ivoff = nuv_full - ip
+        iskip = ip // nv
+        iuoff = nuv_full - nv * iskip
+
+        gsave = rzb2[ip] + rzb2 - 2.0 * Z[ip] * Z
+        dsave = drv[ip] + Z * snz[ip]
+        delgr = np.zeros((nuv_full,), dtype=float)
+        for kp in range(nvper):
+            xper = xip * cosper[kp] - yip * sinper[kp]
+            yper = yip * cosper[kp] + xip * sinper[kp]
+            rden = np.where(np.abs(R[ip]) > 1.0e-16, R[ip], np.sign(R[ip]) * 1.0e-16 + 1.0e-16)
+            sxsave = (snr[ip] * xper - snv[ip] * yper) / rden
+            sysave = (snr[ip] * yper + snv[ip] * xper) / rden
+            base = gsave - 2.0 * (xper * rcosuv + yper * rsinuv)
+            base = np.where(base > 1.0e-20, base, 1.0e-20)
+            htemp = np.sqrt(1.0 / base)
+            if kp == 0 or nv == 1:
+                tidx_u = idx_all + iuoff
+                tidx_v = idx_all + ivoff
+                ga1 = tanu[tidx_u] * (guu_b[ip] * tanu[tidx_u] + guv_b[ip] * tanv[tidx_v]) + gvv_b[ip] * tanv[tidx_v] * tanv[tidx_v]
+                ga2 = tanu[tidx_u] * (auu[ip] * tanu[tidx_u] + auv[ip] * tanv[tidx_v]) + avv[ip] * tanv[tidx_v] * tanv[tidx_v]
+                ga1 = np.where(np.abs(ga1) > 1.0e-20, ga1, np.sign(ga1) * 1.0e-20 + 1.0e-20)
+                ga2 = ga2 / ga1
+                ga1s = 1.0 / np.sqrt(np.abs(ga1))
+                mask = idx_all != ip
+                delgr[mask] += htemp[mask] - ga1s[mask]
+            else:
+                delgr += htemp
+        gstore += bex[ip] * delgr
+
+    return np.asarray(gstore, dtype=float)
 
 
 def _vmec_bvec_from_gsource(*, gsource: np.ndarray, basis: dict[str, Any]) -> np.ndarray:
@@ -1636,7 +1849,8 @@ def nestor_external_only_step(
     rhs_mode = os.getenv("VMEC_JAX_FREEB_RHS_MODE", "bnormal_unit").strip().lower()
     ntheta, nzeta = sample.R.shape
     wint_vmec = _vmec_boundary_wint(static=static, ntheta=int(ntheta), nzeta=int(nzeta))
-    gsource_vmec = -np.asarray(sample.vac_ext.bnormal, dtype=float) * np.asarray(wint_vmec, dtype=float) * ((2.0 * np.pi) ** 2)
+    gsource_bexni = -np.asarray(sample.vac_ext.bnormal, dtype=float) * np.asarray(wint_vmec, dtype=float) * ((2.0 * np.pi) ** 2)
+    gsource_vmec = np.asarray(gsource_bexni, dtype=float)
     if rhs_mode in ("unit", "unit_normal", "bnormal_unit"):
         rhs = -np.asarray(sample.vac_ext.bnormal_unit, dtype=float)
         rhs_mode = "bnormal_unit"
@@ -1692,6 +1906,23 @@ def nestor_external_only_step(
                     lasym=bool(getattr(static.cfg, "lasym", False)),
                     wint_vmec=np.asarray(wint_vmec, dtype=float),
                 )
+            use_greenf_source = os.getenv("VMEC_JAX_FREEB_USE_GREENF_SOURCE", "0").strip().lower() not in (
+                "",
+                "0",
+                "false",
+                "no",
+            )
+            if use_greenf_source and cache.mode_basis is not None:
+                try:
+                    gsource_vmec = _vmec_nonsingular_gsource_from_bexni(
+                        sample=sample,
+                        basis=cache.mode_basis,
+                        bexni=np.asarray(gsource_bexni, dtype=float),
+                        signgs=int(getattr(static, "signgs", -1)),
+                        nvper=max(1, int(getattr(static.cfg, "nfp", 1))),
+                    ).reshape(int(ntheta), int(nzeta))
+                except Exception:
+                    gsource_vmec = np.asarray(gsource_bexni, dtype=float)
             if dense_solve_mode in ("mode", "vmec_mode", "fouri_mode"):
                 rhs_mode_eff = None
                 if cache.mode_basis is not None:
