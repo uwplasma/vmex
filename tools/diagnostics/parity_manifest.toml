@@ -142,6 +142,8 @@ ntor = 4
 max_iter = 60
 iter_list = [53, 54, 60]
 vmec_timeout = 300
+max_runtime_s = 30.0
+max_total_runtime_s = 80.0
 goal = "Primary free-boundary parity blocker case: source_sym -> bvecNS -> potvac."
 
 [cases.env]
@@ -166,6 +168,15 @@ potvac = 3.0e-1
 [cases.metric_thresholds_rel_scaled_by_iter."60"]
 amatrix = 1.5e-1
 potvac = 9.0e-1
+
+[cases.runtime_thresholds_s_by_iter."53"]
+max_runtime_s = 25.0
+
+[cases.runtime_thresholds_s_by_iter."54"]
+max_runtime_s = 25.0
+
+[cases.runtime_thresholds_s_by_iter."60"]
+max_runtime_s = 25.0
 
 [[cases]]
 id = "freeb_axisym_lasym_true_diiid"
@@ -242,6 +253,8 @@ ntor = 2
 max_iter = 120
 iter_list = [80, 100]
 vmec_timeout = 300
+max_runtime_s = 45.0
+max_total_runtime_s = 95.0
 goal = "Self-contained local free-boundary non-axisymmetric LASYM=true coverage case (synthetic cth-like asymmetric variant)."
 
 [cases.env]
@@ -262,3 +275,9 @@ potvac = 8.5e-1
 [cases.metric_thresholds_rel_scaled_by_iter."100"]
 amatrix = 9.5e-1
 potvac = 8.5e-1
+
+[cases.runtime_thresholds_s_by_iter."80"]
+max_runtime_s = 40.0
+
+[cases.runtime_thresholds_s_by_iter."100"]
+max_runtime_s = 40.0

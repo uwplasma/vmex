@@ -31,8 +31,12 @@ Free-boundary manifest notes:
   `bvec_nonsing_fouri`, `amatrix`, `potvac`);
 - optional per-iteration limits are supported via
   `[cases.metric_thresholds_rel_scaled_by_iter."<iter>"]`;
+- optional performance gates are supported per case:
+  - `max_runtime_s`
+  - `max_total_runtime_s`
+  - `[cases.runtime_thresholds_s_by_iter."<iter>"]`;
 - `parity_sweep_manifest.py` now fails a case when command `rc=0` but metric
-  thresholds are exceeded;
+  or runtime thresholds are exceeded;
 - a local self-contained non-axisymmetric `LASYM=T` free-boundary case is
   included:
   - `examples/data/input.cth_like_free_bdy_lasym_small`

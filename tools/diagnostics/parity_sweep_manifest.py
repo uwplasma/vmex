@@ -19,6 +19,8 @@ import time
 import tomllib
 from typing import Any
 
+import numpy as np
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = REPO_ROOT / "tools" / "diagnostics" / "parity_manifest.toml"
@@ -161,6 +163,85 @@ def _evaluate_freeb_thresholds(case: dict[str, Any], runs: list[dict[str, Any]])
                 all_ok = False
         report["by_iter"] = by_iter_report
 
+    return all_ok, report
+
+
+def _evaluate_runtime_thresholds(case: dict[str, Any], runs: list[dict[str, Any]]) -> tuple[bool, dict[str, Any]]:
+    """Evaluate per-run and total runtime thresholds.
+
+    Manifest schema (per case):
+      max_runtime_s = 30.0
+      max_total_runtime_s = 80.0
+
+      [cases.runtime_thresholds_s_by_iter."53"]
+      max_runtime_s = 20.0
+    """
+
+    has_any = any(k in case for k in ("max_runtime_s", "max_total_runtime_s", "runtime_thresholds_s_by_iter"))
+    if not has_any:
+        return True, {}
+
+    report: dict[str, Any] = {}
+    all_ok = True
+    runtime_vals = [float(r.get("runtime_s", 0.0)) for r in runs if "runtime_s" in r]
+    total_runtime = float(sum(runtime_vals))
+    report["observed_total_runtime_s"] = total_runtime
+
+    if "max_runtime_s" in case:
+        lim = float(case["max_runtime_s"])
+        observed_max = float(max(runtime_vals)) if runtime_vals else 0.0
+        ok = bool(observed_max <= lim)
+        report["max_runtime_s"] = {
+            "limit_s": lim,
+            "observed_max_s": observed_max,
+            "pass": ok,
+        }
+        if not ok:
+            all_ok = False
+
+    if "max_total_runtime_s" in case:
+        lim = float(case["max_total_runtime_s"])
+        ok = bool(total_runtime <= lim)
+        report["max_total_runtime_s"] = {
+            "limit_s": lim,
+            "observed_s": total_runtime,
+            "pass": ok,
+        }
+        if not ok:
+            all_ok = False
+
+    by_iter = case.get("runtime_thresholds_s_by_iter", {})
+    if isinstance(by_iter, dict) and by_iter:
+        by_iter_report: dict[str, Any] = {}
+        for iter_key, rules in by_iter.items():
+            iter_key_str = str(iter_key)
+            try:
+                iter_target = int(iter_key_str)
+            except ValueError:
+                all_ok = False
+                by_iter_report[iter_key_str] = {"error": "iter key must be integer-like", "pass": False}
+                continue
+            if not isinstance(rules, dict):
+                all_ok = False
+                by_iter_report[iter_key_str] = {"error": "iter runtime rule must be a table", "pass": False}
+                continue
+            rec = next((r for r in runs if int(r.get("iter", -1)) == iter_target), None)
+            iter_runtime = float(rec.get("runtime_s", float("nan"))) if rec is not None else float("nan")
+            iter_ok = True
+            iter_report: dict[str, Any] = {"observed_runtime_s": iter_runtime}
+            if "max_runtime_s" in rules:
+                lim = float(rules["max_runtime_s"])
+                ok = bool(np.isfinite(iter_runtime) and iter_runtime <= lim)
+                iter_report["max_runtime_s"] = {"limit_s": lim, "observed_s": iter_runtime, "pass": ok}
+                if not ok:
+                    iter_ok = False
+            iter_report["pass"] = iter_ok
+            by_iter_report[iter_key_str] = iter_report
+            if not iter_ok:
+                all_ok = False
+        report["by_iter"] = by_iter_report
+
+    report["pass"] = all_ok
     return all_ok, report
 
 
@@ -358,8 +439,12 @@ def main() -> int:
                 rc = int(rec["returncode"])
                 print(f"  rc={rc} runtime={rec['runtime_s']:.2f}s")
             case_rec["runs"].append(rec)
-            case_rec["status"] = "pass" if rc == 0 else "fail"
-            if rc != 0:
+            runtime_ok, runtime_report = _evaluate_runtime_thresholds(case, case_rec["runs"])
+            if runtime_report:
+                case_rec["runtime_thresholds_s"] = runtime_report
+            case_ok = bool((rc == 0) and runtime_ok)
+            case_rec["status"] = "pass" if case_ok else "fail"
+            if not case_ok:
                 n_fail += 1
 
         elif compare == "freeb_scalpot":
@@ -410,9 +495,12 @@ def main() -> int:
                     all_ok = False
                 case_rec["runs"].append(rec)
             thresholds_ok, thresholds_report = _evaluate_freeb_thresholds(case, case_rec["runs"])
+            runtime_ok, runtime_report = _evaluate_runtime_thresholds(case, case_rec["runs"])
             if thresholds_report:
                 case_rec["metric_thresholds_rel_scaled"] = thresholds_report
-            case_ok = bool(all_ok and thresholds_ok)
+            if runtime_report:
+                case_rec["runtime_thresholds_s"] = runtime_report
+            case_ok = bool(all_ok and thresholds_ok and runtime_ok)
             case_rec["status"] = "pass" if case_ok else "fail"
             if not case_ok:
                 n_fail += 1

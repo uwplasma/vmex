@@ -81,6 +81,9 @@ manifest via ``metric_thresholds_rel_scaled`` (for keys like
 fails on metric drift even when command return code is zero. For turn-on /
 restart-sensitive phases, per-iteration thresholds are available via
 ``metric_thresholds_rel_scaled_by_iter``.
+Performance guardrails are also available in the same manifest using
+``max_runtime_s``, ``max_total_runtime_s``, and
+``runtime_thresholds_s_by_iter``.
 
 - Pipeline parity snapshot (solver-free)::
 
