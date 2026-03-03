@@ -419,7 +419,12 @@ Both models share the same boundary sampling and edge-coupling equations.
 The VMEC-style cadence is enforced by ``ivac``:
 
 - ``ivac=1``: full potential update (sample + Poisson solve),
-- ``ivac=2``: reuse previous potential :math:`\phi` and skip the solve.
+- ``ivac=2``: reuse cached operator (matrix/LU analog) and recompute only the
+  RHS + solve, mirroring ``scalpot``'s reuse intent for ``ivacskip != 0``.
+
+For debugging/performance comparison, legacy hold behavior (reuse previous
+:math:`\phi` without recomputing RHS) is still available via
+``VMEC_JAX_FREEB_REUSE_RHS_UPDATE=0``.
 
 This mirrors VMEC2000's matrix-reuse cadence intent while keeping the fast
 surrogate as a robust fallback on large grids.

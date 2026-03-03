@@ -605,6 +605,9 @@ def _build_vmec_like_cache(
     alpha: float,
     dist_eps: float,
     rhs_floor: float,
+    diag_coeff: float,
+    row_sum_zero: bool,
+    singular_diag_scale: float,
 ) -> NestorVmecLikeCache:
     """Build a dense boundary-integral-like operator on the VMEC angular grid.
 
@@ -637,7 +640,24 @@ def _build_vmec_like_cache(
     np.fill_diagonal(invdist, 0.0)
 
     kernel = (invdist * w[None, :]) / (4.0 * np.pi)
-    matrix = np.eye(npts, dtype=float) + float(alpha) * kernel
+    if bool(row_sum_zero):
+        # Principal-value-inspired stabilization: remove each row mean contribution
+        # from the diagonal so constant offsets do not spuriously dominate.
+        row_sum = np.sum(kernel, axis=1)
+        kernel[np.arange(npts), np.arange(npts)] -= row_sum
+
+    diag_extra = np.zeros((npts,), dtype=float)
+    if float(singular_diag_scale) != 0.0:
+        # Local nearest-neighbor scale as a compact proxy for the singular
+        # self-panel contribution in VMEC/NESTOR diagonal treatment.
+        dist_nodiag = np.asarray(dist, dtype=float).copy()
+        np.fill_diagonal(dist_nodiag, np.inf)
+        h = np.minimum(np.min(dist_nodiag, axis=1), 1.0 / float(max(1, npts)))
+        h = np.maximum(h, float(dist_eps))
+        diag_extra = (float(singular_diag_scale) / (4.0 * np.pi)) * (w / h)
+
+    matrix = float(alpha) * kernel
+    matrix[np.arange(npts), np.arange(npts)] += float(diag_coeff) + diag_extra
     rhs_scale = np.where(w > rhs_floor, w, rhs_floor)
     return NestorVmecLikeCache(
         ntheta=ntheta,
@@ -653,6 +673,18 @@ def _solve_vmec_like_dense(rhs: np.ndarray, cache: NestorVmecLikeCache) -> np.nd
     phi = phi_flat.reshape(int(cache.ntheta), int(cache.nzeta))
     phi = phi - float(np.mean(phi))
     return phi
+
+
+def _base_nestor_mode(mode: str) -> str:
+    return str(mode).split("_fallback:", 1)[0]
+
+
+def _is_dense_mode(mode: str) -> bool:
+    return _base_nestor_mode(mode).startswith("vmec2000_like_dense_integral")
+
+
+def _is_spectral_mode(mode: str) -> bool:
+    return _base_nestor_mode(mode).startswith("spectral_poisson_external_only")
 
 
 def _solve_periodic_poisson_fft(rhs: np.ndarray, cache: NestorPoissonCache) -> np.ndarray:
@@ -712,6 +744,33 @@ def _select_nestor_mode(*, ntheta: int, nzeta: int) -> tuple[str, str]:
     return "spectral_poisson_external_only", f"auto_fast_max_points:{npts}>{max_pts}"
 
 
+def _vacuum_channels_from_sample_phi(sample: ExternalBoundarySample, phi: np.ndarray) -> VacuumBoundaryFields:
+    dphi_u, dphi_v = _spectral_grad(phi)
+    bu = np.asarray(sample.vac_ext.bu) + dphi_u
+    bv = np.asarray(sample.vac_ext.bv) + dphi_v
+    bsupu, bsupv, det = contravariant_boundary_field_from_covariant(
+        bu=bu,
+        bv=bv,
+        g_uu=sample.vac_ext.g_uu,
+        g_uv=sample.vac_ext.g_uv,
+        g_vv=sample.vac_ext.g_vv,
+    )
+    bsqvac = bu * bsupu + bv * bsupv
+    return VacuumBoundaryFields(
+        bu=bu,
+        bv=bv,
+        bsupu=bsupu,
+        bsupv=bsupv,
+        bsqvac=bsqvac,
+        bnormal=sample.vac_ext.bnormal,
+        bnormal_unit=sample.vac_ext.bnormal_unit,
+        g_uu=sample.vac_ext.g_uu,
+        g_uv=sample.vac_ext.g_uv,
+        g_vv=sample.vac_ext.g_vv,
+        det_guv=det,
+    )
+
+
 def nestor_external_only_step(
     *,
     state: Any,
@@ -736,7 +795,15 @@ def nestor_external_only_step(
         if runtime_mode == "spectral_poisson_external_only":
             runtime_mode = "spectral_poisson_external_only"
 
-    if int(ivac) != 1 and runtime is not None:
+    force_rhs_reuse = os.getenv("VMEC_JAX_FREEB_REUSE_RHS_UPDATE", "1").strip().lower() not in (
+        "",
+        "0",
+        "false",
+        "no",
+    )
+
+    if int(ivac) != 1 and runtime is not None and not force_rhs_reuse:
+        # Legacy fast reuse mode: hold previous potential/bsqvac unchanged.
         bsqvac = np.asarray(runtime.bsqvac)
         z = np.zeros_like(bsqvac)
         vac_total = VacuumBoundaryFields(
@@ -782,22 +849,43 @@ def nestor_external_only_step(
     if mode_reason not in ("forced_fast", "forced_vmec_like", "auto_vmec_like"):
         used_mode = f"{selected_mode}_fallback:{mode_reason}"
     cache: Any = runtime_cache
-    if selected_mode == "vmec2000_like_dense_integral":
+    reuse_step = (int(ivac) != 1 and runtime is not None)
+
+    # On ivacskip reuse, emulate VMEC2000 scalpot behavior by reusing the cached
+    # operator while refreshing the source term / solve.
+    mode_for_step = runtime_mode if reuse_step else used_mode
+    if reuse_step and runtime_cache is None:
+        mode_for_step = used_mode
+
+    if _is_dense_mode(mode_for_step):
         alpha = _as_float_env("VMEC_JAX_FREEB_VMEC_LIKE_ALPHA", 1.0)
         dist_eps = _as_float_env("VMEC_JAX_FREEB_VMEC_LIKE_DIST_EPS", 1.0e-8)
         rhs_floor = _as_float_env("VMEC_JAX_FREEB_VMEC_LIKE_RHS_FLOOR", 1.0e-14)
+        diag_coeff = _as_float_env("VMEC_JAX_FREEB_VMEC_LIKE_DIAG_COEFF", 0.5)
+        row_sum_zero = _as_int_env("VMEC_JAX_FREEB_VMEC_LIKE_ROW_SUM_ZERO", 1) != 0
+        singular_diag_scale = _as_float_env("VMEC_JAX_FREEB_VMEC_LIKE_SINGULAR_DIAG_SCALE", 1.0)
         try:
-            cache = _build_vmec_like_cache(
-                sample,
-                alpha=alpha,
-                dist_eps=dist_eps,
-                rhs_floor=rhs_floor,
-            )
+            if (
+                not isinstance(cache, NestorVmecLikeCache)
+                or int(cache.ntheta) != int(ntheta)
+                or int(cache.nzeta) != int(nzeta)
+                or not reuse_step
+            ):
+                cache = _build_vmec_like_cache(
+                    sample,
+                    alpha=alpha,
+                    dist_eps=dist_eps,
+                    rhs_floor=rhs_floor,
+                    diag_coeff=diag_coeff,
+                    row_sum_zero=row_sum_zero,
+                    singular_diag_scale=singular_diag_scale,
+                )
             phi = _solve_vmec_like_dense(rhs, cache)
+            used_mode = mode_for_step
         except Exception:
             cache = _build_poisson_cache(ntheta=ntheta, nzeta=nzeta)
             phi = _solve_periodic_poisson_fft(rhs, cache)
-            used_mode = f"spectral_poisson_external_only_fallback:{mode_reason}"
+            used_mode = "spectral_poisson_external_only_fallback:dense_failed"
     else:
         if (
             not isinstance(cache, NestorPoissonCache)
@@ -806,37 +894,16 @@ def nestor_external_only_step(
         ):
             cache = _build_poisson_cache(ntheta=ntheta, nzeta=nzeta)
         phi = _solve_periodic_poisson_fft(rhs, cache)
+        used_mode = mode_for_step
 
-    dphi_u, dphi_v = _spectral_grad(phi)
-    bu = np.asarray(sample.vac_ext.bu) + dphi_u
-    bv = np.asarray(sample.vac_ext.bv) + dphi_v
-    bsupu, bsupv, det = contravariant_boundary_field_from_covariant(
-        bu=bu,
-        bv=bv,
-        g_uu=sample.vac_ext.g_uu,
-        g_uv=sample.vac_ext.g_uv,
-        g_vv=sample.vac_ext.g_vv,
-    )
-    bsqvac = bu * bsupu + bv * bsupv
+    vac_total = _vacuum_channels_from_sample_phi(sample, phi)
+    bsqvac = np.asarray(vac_total.bsqvac)
     solve_time = max(0.0, time.perf_counter() - ts)
 
-    vac_total = VacuumBoundaryFields(
-        bu=bu,
-        bv=bv,
-        bsupu=bsupu,
-        bsupv=bsupv,
-        bsqvac=bsqvac,
-        bnormal=sample.vac_ext.bnormal,
-        bnormal_unit=sample.vac_ext.bnormal_unit,
-        g_uu=sample.vac_ext.g_uu,
-        g_uv=sample.vac_ext.g_uv,
-        g_vv=sample.vac_ext.g_vv,
-        det_guv=det,
-    )
     res = NestorSolveResult(
         vac_total=vac_total,
         phi=phi,
-        reused=False,
+        reused=bool(reuse_step),
         solve_time_s=solve_time,
         sample_time_s=sample_time,
         model=used_mode,
@@ -846,8 +913,8 @@ def nestor_external_only_step(
         phi=np.asarray(phi),
         bsqvac=np.asarray(bsqvac),
         mode=used_mode,
-        update_count=(0 if runtime is None else int(runtime.update_count)) + 1,
-        reuse_count=0 if runtime is None else int(runtime.reuse_count),
+        update_count=(0 if runtime is None else int(runtime.update_count)) + (0 if reuse_step else 1),
+        reuse_count=(0 if runtime is None else int(runtime.reuse_count)) + (1 if reuse_step else 0),
     )
     return res, runtime_next
 
