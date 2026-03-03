@@ -1470,6 +1470,13 @@ def _maybe_dump_scalpot_jax(
         out["rhs_scale"] = np.asarray(cache.rhs_scale, dtype=float)
         if gsource_vmec is not None:
             out["gsource_vmec"] = np.asarray(gsource_vmec, dtype=float)
+            try:
+                gsrc_flat = np.asarray(gsource_vmec, dtype=float).reshape(-1)
+                amat = np.asarray(cache.matrix, dtype=float)
+                if amat.ndim == 2 and amat.shape[1] == gsrc_flat.size:
+                    out["gsource_kernel"] = (amat @ gsrc_flat).reshape(ntheta, nzeta)
+            except Exception:
+                pass
         if potvac is not None:
             out["potvac"] = np.asarray(potvac, dtype=float)
         try:
