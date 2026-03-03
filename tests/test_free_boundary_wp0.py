@@ -15,6 +15,7 @@ from vmec_jax.free_boundary import (
     contravariant_boundary_field_from_covariant,
     interpolate_mgrid_bfield,
     load_mgrid,
+    nestor_external_only_step,
     prepare_mgrid_for_config,
     vacuum_boundary_fields_from_cylindrical,
 )
@@ -642,3 +643,198 @@ def test_run_fixed_boundary_freeb_diagnostics_include_wp2_channels(tmp_path: Pat
     ):
         assert key in fbext
     assert bool(fbext.get("available", False)) is True
+
+
+def test_nestor_external_only_step_reuse(tmp_path: Path):
+    netCDF4 = pytest.importorskip("netCDF4", reason="netCDF4 required for mgrid loader test")
+
+    mg = tmp_path / "mgrid_fb_nestor_reuse.nc"
+    with netCDF4.Dataset(str(mg), mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createDimension("stringsize", 8)
+        ds.createDimension("external_coil_groups", 1)
+        ds.createDimension("dim_00001", 1)
+        ds.createDimension("external_coils", 1)
+        ds.createDimension("rad", 2)
+        ds.createDimension("zee", 2)
+        ds.createDimension("phi", 4)
+        for name, value in (
+            ("ir", 2),
+            ("jz", 2),
+            ("kp", 4),
+            ("nfp", 1),
+            ("nextcur", 1),
+        ):
+            ds.createVariable(name, "i4", ()).assignValue(value)
+        for name, value in (("rmin", 1.0), ("rmax", 12.0), ("zmin", -3.0), ("zmax", 3.0)):
+            ds.createVariable(name, "f8", ()).assignValue(value)
+        ds.createVariable("br_001", "f8", ("phi", "zee", "rad"))[:] = 0.0
+        ds.createVariable("bp_001", "f8", ("phi", "zee", "rad"))[:] = 1.0
+        ds.createVariable("bz_001", "f8", ("phi", "zee", "rad"))[:] = 0.0
+
+    inpath = tmp_path / "input.fb_nestor_reuse"
+    inpath.write_text(
+        f"""
+&INDATA
+  NFP = 1
+  MPOL = 5
+  NTOR = 0
+  NS = 9
+  NZETA = 2
+  NTHETA = 8
+  LASYM = F
+  LFREEB = T
+  MGRID_FILE = '{mg}'
+  NVACSKIP = 2
+  RBC(0,0) = 6.0
+  ZBS(1,0) = 2.0
+/
+"""
+    )
+
+    run = run_fixed_boundary(
+        inpath,
+        solver="vmec2000_iter",
+        max_iter=1,
+        multigrid=False,
+        verbose=False,
+    )
+    state = run.result.state
+    static = run.static
+
+    step1, rt1 = nestor_external_only_step(state=state, static=static, ivac=1, runtime=None)
+    assert step1.reused is False
+    assert step1.vac_total.bsqvac.shape == step1.phi.shape
+    assert int(rt1.update_count) == 1
+    assert int(rt1.reuse_count) == 0
+
+    step2, rt2 = nestor_external_only_step(state=state, static=static, ivac=2, runtime=rt1)
+    assert step2.reused is True
+    assert int(rt2.update_count) == 1
+    assert int(rt2.reuse_count) == 1
+
+
+def test_run_fixed_boundary_freeb_edge_coupling_diag(tmp_path: Path):
+    netCDF4 = pytest.importorskip("netCDF4", reason="netCDF4 required for mgrid loader test")
+
+    mg = tmp_path / "mgrid_fb_edge_coupling.nc"
+    with netCDF4.Dataset(str(mg), mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createDimension("stringsize", 8)
+        ds.createDimension("external_coil_groups", 1)
+        ds.createDimension("dim_00001", 1)
+        ds.createDimension("external_coils", 1)
+        ds.createDimension("rad", 2)
+        ds.createDimension("zee", 2)
+        ds.createDimension("phi", 4)
+        for name, value in (
+            ("ir", 2),
+            ("jz", 2),
+            ("kp", 4),
+            ("nfp", 1),
+            ("nextcur", 1),
+        ):
+            ds.createVariable(name, "i4", ()).assignValue(value)
+        for name, value in (("rmin", 1.0), ("rmax", 12.0), ("zmin", -3.0), ("zmax", 3.0)):
+            ds.createVariable(name, "f8", ()).assignValue(value)
+        ds.createVariable("br_001", "f8", ("phi", "zee", "rad"))[:] = 0.0
+        ds.createVariable("bp_001", "f8", ("phi", "zee", "rad"))[:] = 1.0
+        ds.createVariable("bz_001", "f8", ("phi", "zee", "rad"))[:] = 0.0
+
+    inpath = tmp_path / "input.fb_edge_coupling"
+    inpath.write_text(
+        f"""
+&INDATA
+  NFP = 1
+  MPOL = 5
+  NTOR = 0
+  NS = 9
+  NZETA = 2
+  NTHETA = 8
+  LASYM = F
+  LFREEB = T
+  MGRID_FILE = '{mg}'
+  NVACSKIP = 2
+  RBC(0,0) = 6.0
+  ZBS(1,0) = 2.0
+/
+"""
+    )
+
+    run = run_fixed_boundary(
+        inpath,
+        solver="vmec2000_iter",
+        max_iter=2,
+        multigrid=False,
+        verbose=False,
+    )
+    diag = run.result.diagnostics
+    fb = diag.get("free_boundary", {})
+    assert bool(fb.get("enabled", False)) is True
+    assert bool(fb.get("couple_edge", False)) is True
+    assert "nestor_model" in fb
+    inc = np.asarray(diag.get("include_edge_history", np.zeros((0,), dtype=int)))
+    reused = np.asarray(diag.get("freeb_nestor_reused_history", np.zeros((0,), dtype=int)))
+    stime = np.asarray(diag.get("freeb_nestor_solve_time_history", np.zeros((0,), dtype=float)))
+    assert inc.size >= 1
+    assert reused.size >= 1
+    assert stime.size >= 1
+    assert np.all((inc == 0) | (inc == 1))
+    assert np.all((reused == 0) | (reused == 1))
+
+
+def test_run_fixed_boundary_freeb_edge_coupling_can_be_disabled(tmp_path: Path, monkeypatch):
+    netCDF4 = pytest.importorskip("netCDF4", reason="netCDF4 required for mgrid loader test")
+
+    mg = tmp_path / "mgrid_fb_edge_off.nc"
+    with netCDF4.Dataset(str(mg), mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createDimension("stringsize", 8)
+        ds.createDimension("external_coil_groups", 1)
+        ds.createDimension("dim_00001", 1)
+        ds.createDimension("external_coils", 1)
+        ds.createDimension("rad", 2)
+        ds.createDimension("zee", 2)
+        ds.createDimension("phi", 4)
+        for name, value in (
+            ("ir", 2),
+            ("jz", 2),
+            ("kp", 4),
+            ("nfp", 1),
+            ("nextcur", 1),
+        ):
+            ds.createVariable(name, "i4", ()).assignValue(value)
+        for name, value in (("rmin", 1.0), ("rmax", 12.0), ("zmin", -3.0), ("zmax", 3.0)):
+            ds.createVariable(name, "f8", ()).assignValue(value)
+        ds.createVariable("br_001", "f8", ("phi", "zee", "rad"))[:] = 0.0
+        ds.createVariable("bp_001", "f8", ("phi", "zee", "rad"))[:] = 1.0
+        ds.createVariable("bz_001", "f8", ("phi", "zee", "rad"))[:] = 0.0
+
+    inpath = tmp_path / "input.fb_edge_off"
+    inpath.write_text(
+        f"""
+&INDATA
+  NFP = 1
+  MPOL = 5
+  NTOR = 0
+  NS = 9
+  NZETA = 2
+  NTHETA = 8
+  LASYM = F
+  LFREEB = T
+  MGRID_FILE = '{mg}'
+  NVACSKIP = 2
+  RBC(0,0) = 6.0
+  ZBS(1,0) = 2.0
+/
+"""
+    )
+
+    monkeypatch.setenv("VMEC_JAX_FREEB_COUPLE_EDGE", "0")
+    run = run_fixed_boundary(
+        inpath,
+        solver="vmec2000_iter",
+        max_iter=2,
+        multigrid=False,
+        verbose=False,
+    )
+    fb = run.result.diagnostics.get("free_boundary", {})
+    assert bool(fb.get("enabled", False)) is True
+    assert bool(fb.get("couple_edge", True)) is False

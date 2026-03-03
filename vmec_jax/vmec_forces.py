@@ -645,6 +645,7 @@ def vmec_forces_rz_from_wout(
     constraint_precond_diag: tuple[Any, Any] | None = None,
     constraint_precond_active: Any | None = None,
     constraint_tcon_active: Any | None = None,
+    freeb_bsqvac_half: Any | None = None,
     use_wout_bsup: bool = False,
     use_vmec_synthesis: bool = False,
     trig: VmecTrigTables | None = None,
@@ -660,6 +661,10 @@ def vmec_forces_rz_from_wout(
         algebra from small differences in the derived contravariant field. In
         this parity mode, lambda-force kernels (`blmn/clmn`) are also formed
         from averaged `wout` `bsub*` fields.
+    freeb_bsqvac_half:
+        Optional half-mesh free-boundary vacuum ``|B|^2`` proxy. If provided,
+        only the edge slice ``freeb_bsqvac_half[-1]`` is used to override
+        edge ``bsq`` in `bcovar`.
     """
     s = jnp.asarray(static.s)
     ohs = jnp.asarray(1.0 / (s[1] - s[0])) if s.shape[0] >= 2 else jnp.asarray(0.0)
@@ -725,6 +730,7 @@ def vmec_forces_rz_from_wout(
             static=static,
             wout=wout_eff,
             pres=pres_half,
+            freeb_bsqvac_edge=None if freeb_bsqvac_half is None else jnp.asarray(freeb_bsqvac_half)[-1],
             use_wout_bsup=use_wout_bsup,
             use_wout_bsub_for_lambda=use_wout_bsup,
             use_wout_bmag_for_bsq=use_wout_bsup,

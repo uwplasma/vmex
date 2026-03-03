@@ -185,6 +185,30 @@ sampling is diagnostic-only. You can disable that sampling with:
 
   export VMEC_JAX_FREEB_SAMPLE_EXTERNAL=0
 
+WP2 free-boundary runtime controls
+----------------------------------
+
+Current free-boundary coupling uses a lightweight spectral potential solve.
+To keep runtime bounded:
+
+- mgrid field tensors are cached by path in-process (avoids per-iteration
+  NetCDF reloads),
+- Poisson spectral denominators are stage-static,
+- ``ivacskip`` reuses prior potential (skip solve) when ``ivac != 1``.
+
+Control flags:
+
+.. code-block:: bash
+
+  export VMEC_JAX_FREEB_COUPLE_EDGE=1         # default: on
+  export VMEC_JAX_FREEB_SAMPLE_EXTERNAL=1     # default: on
+
+If profiling free-boundary solver-only cost, disable sampling diagnostics:
+
+.. code-block:: bash
+
+  export VMEC_JAX_FREEB_SAMPLE_EXTERNAL=0
+
 Experimental tridiagonal solver (scan only)
 ------------------------------------------
 

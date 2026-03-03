@@ -3506,6 +3506,7 @@ def solve_fixed_boundary_residual_iter(
     )
     from .vmec_jacobian import vmec_half_mesh_jacobian_from_state
     from .vmec_tomnsp import TomnspsRZL, vmec_angle_grid, vmec_trig_tables
+    from .free_boundary import NestorRuntimeState, nestor_external_only_step
 
     # VMEC2000 evaluates the force kernels on VMEC's internal
     # angle grid. In particular, when `lasym=False`, VMEC uses a reduced theta
@@ -3544,6 +3545,16 @@ def solve_fixed_boundary_residual_iter(
     free_boundary_enabled = bool(getattr(cfg, "lfreeb", False))
     freeb_nvacskip = max(1, int(getattr(cfg, "nvacskip", int(getattr(cfg, "nfp", 1)))))
     freeb_nvskip0 = max(1, freeb_nvacskip)
+    freeb_couple_env = os.getenv("VMEC_JAX_FREEB_COUPLE_EDGE", "1").strip().lower()
+    freeb_couple_edge = bool(free_boundary_enabled) and (freeb_couple_env not in ("", "0", "false", "no"))
+    if free_boundary_enabled and use_scan:
+        # WP2 free-boundary coupling is currently wired through the VMEC2000
+        # control (non-scan) path, including ivacskip-driven reuse.
+        use_scan = False
+    if free_boundary_enabled and jit_forces:
+        # Free-boundary bsqvac coupling changes per-iteration edge forcing.
+        # Keep this path non-jitted for now to avoid retrace/capture overhead.
+        jit_forces = False
     freeb_sample_env = os.getenv("VMEC_JAX_FREEB_SAMPLE_EXTERNAL", "1").strip().lower()
     freeb_sample_external = freeb_sample_env not in ("", "0", "false", "no")
 
@@ -4386,6 +4397,7 @@ def solve_fixed_boundary_residual_iter(
         *,
         include_edge: bool,
         zero_m1: Any,
+        freeb_bsqvac_half: Any | None = None,
         constraint_precond_diag: tuple[Any, Any] | None = None,
         constraint_tcon: Any | None = None,
         constraint_precond_active: Any | None = None,
@@ -4402,6 +4414,7 @@ def solve_fixed_boundary_residual_iter(
             constraint_precond_diag=constraint_precond_diag,
             constraint_precond_active=constraint_precond_active,
             constraint_tcon_active=constraint_tcon_active,
+            freeb_bsqvac_half=freeb_bsqvac_half,
             use_vmec_synthesis=True,
             trig=trig,
             iter_idx=iter_idx,
@@ -4784,6 +4797,7 @@ def solve_fixed_boundary_residual_iter(
         *,
         include_edge: bool,
         zero_m1: Any,
+        freeb_bsqvac_half: Any | None = None,
         constraint_precond_diag: tuple[Any, Any] | None = None,
         constraint_tcon: Any | None = None,
         constraint_precond_active: Any | None = None,
@@ -4800,6 +4814,7 @@ def solve_fixed_boundary_residual_iter(
                     state,
                     include_edge=include_edge,
                     zero_m1=zero_m1,
+                    freeb_bsqvac_half=freeb_bsqvac_half,
                     constraint_precond_diag=constraint_precond_diag,
                     constraint_tcon=constraint_tcon,
                     constraint_precond_active=constraint_precond_active,
@@ -4810,6 +4825,7 @@ def solve_fixed_boundary_residual_iter(
                 state,
                 include_edge=include_edge,
                 zero_m1=zero_m1,
+                freeb_bsqvac_half=freeb_bsqvac_half,
                 constraint_precond_diag=constraint_precond_diag,
                 constraint_tcon=constraint_tcon,
                 constraint_precond_active=constraint_precond_active,
@@ -4825,6 +4841,11 @@ def solve_fixed_boundary_residual_iter(
             constraint_precond_active=constraint_precond_active,
             constraint_tcon_active=constraint_tcon_active,
             iter_idx=iter_idx,
+            **(
+                {"freeb_bsqvac_half": freeb_bsqvac_half}
+                if freeb_bsqvac_half is not None
+                else {}
+            ),
         )
 
     def _fsq_from_norms(norms_in, *, gcr2_in, gcz2_in, gcl2_in):
@@ -8248,6 +8269,9 @@ def solve_fixed_boundary_residual_iter(
     freeb_ivac_history: list[int] = []
     freeb_ivacskip_history: list[int] = []
     freeb_full_update_history: list[int] = []
+    freeb_nestor_reused_history: list[int] = []
+    freeb_nestor_solve_time_history: list[float] = []
+    freeb_nestor_sample_time_history: list[float] = []
     dt_eff_history: list[float] = []
     update_rms_history: list[float] = []
     w_curr_history: list[float] = []
@@ -8294,6 +8318,9 @@ def solve_fixed_boundary_residual_iter(
     iter1 = 1
     freeb_ivac = 0
     freeb_ivacskip = 0
+    freeb_nestor_runtime: NestorRuntimeState | None = None
+    freeb_bsqvac_half_current = None
+    freeb_last_model = "none"
     res0 = -1.0
     k_preconditioner_update_interval = 25
     state_checkpoint = state
@@ -8572,6 +8599,7 @@ def solve_fixed_boundary_residual_iter(
             freeb_ivacskip = int(resume_state.get("freeb_ivacskip", freeb_ivacskip))
             freeb_nvacskip = max(1, int(resume_state.get("freeb_nvacskip", freeb_nvacskip)))
             freeb_nvskip0 = max(1, int(resume_state.get("freeb_nvskip0", freeb_nvskip0)))
+            freeb_last_model = str(resume_state.get("freeb_model", freeb_last_model))
 
     def _fmt_axis_coeff(val: float) -> str:
         s = f"{float(val):.16g}"
@@ -8977,8 +9005,9 @@ def solve_fixed_boundary_residual_iter(
             zero_m1 = jnp.asarray(zero_m1_val, dtype=jnp.asarray(state.Rcos).dtype)
             if vmec2000_control:
                 # VMEC2000 fixed-boundary residuals do not include the edge
-                # surface in the force pipeline; keep this disabled for parity.
-                include_edge = False
+                # surface in the force pipeline. Free-boundary coupling uses
+                # edge forcing, so include the edge there.
+                include_edge = bool(free_boundary_enabled and freeb_couple_edge)
             else:
                 include_edge = bool(iter_since_restart < 50) and (float(prev_rz_fsq) < 1e-6)
             if track_history:
@@ -9006,6 +9035,37 @@ def solve_fixed_boundary_residual_iter(
             constraint_precond_active = jnp.asarray(use_cached_precond, dtype=bool)
             constraint_tcon_active = jnp.asarray(use_cached_precond, dtype=bool)
 
+            # Free-boundary WP2 scaffold: run/update the NESTOR-like external
+            # vacuum solve and couple bsqvac on the edge slice into bcovar.
+            freeb_bsqvac_half_current = None
+            freeb_reused = False
+            freeb_solve_time = 0.0
+            freeb_sample_time = 0.0
+            if bool(free_boundary_enabled and freeb_couple_edge):
+                try:
+                    nestor_res, freeb_nestor_runtime = nestor_external_only_step(
+                        state=state,
+                        static=static,
+                        ivac=int(freeb_ivac),
+                        runtime=freeb_nestor_runtime,
+                        extcur=tuple(getattr(static, "free_boundary_extcur", ()) or ()),
+                    )
+                    freeb_last_model = str(getattr(nestor_res, "model", "spectral_poisson_external_only"))
+                    freeb_reused = bool(getattr(nestor_res, "reused", False))
+                    freeb_solve_time = float(getattr(nestor_res, "solve_time_s", 0.0))
+                    freeb_sample_time = float(getattr(nestor_res, "sample_time_s", 0.0))
+                    bsqvac_edge = np.asarray(nestor_res.vac_total.bsqvac, dtype=float)
+                    freeb_bsqvac_half_current = np.zeros(
+                        (int(s.shape[0]),) + bsqvac_edge.shape,
+                        dtype=bsqvac_edge.dtype,
+                    )
+                    freeb_bsqvac_half_current[-1, :, :] = bsqvac_edge
+                except Exception:
+                    freeb_bsqvac_half_current = None
+                    freeb_reused = False
+                    freeb_solve_time = 0.0
+                    freeb_sample_time = 0.0
+
             if profile_active and (not profile_started) and (profile_start_iter is not None) and (iter2 == profile_start_iter):
                 if has_jax():
                     try:
@@ -9020,6 +9080,7 @@ def solve_fixed_boundary_residual_iter(
                 state,
                 include_edge=bool(include_edge),
                 zero_m1=zero_m1,
+                freeb_bsqvac_half=freeb_bsqvac_half_current,
                 constraint_precond_diag=constraint_precond_diag,
                 constraint_tcon=constraint_tcon_override,
                 constraint_precond_active=constraint_precond_active,
@@ -9483,6 +9544,7 @@ def solve_fixed_boundary_residual_iter(
                         st_try,
                         include_edge=True,
                         zero_m1=zero_m1,
+                        freeb_bsqvac_half=freeb_bsqvac_half_current,
                         constraint_precond_diag=constraint_precond_diag,
                         constraint_tcon=constraint_tcon_override,
                         constraint_precond_active=constraint_precond_active,
@@ -10356,6 +10418,7 @@ def solve_fixed_boundary_residual_iter(
                     state_try,
                     include_edge=include_edge,
                     zero_m1=zero_m1,
+                    freeb_bsqvac_half=freeb_bsqvac_half_current,
                     constraint_precond_diag=constraint_precond_diag,
                     constraint_tcon=constraint_tcon_override,
                     constraint_precond_active=constraint_precond_active,
@@ -10375,6 +10438,7 @@ def solve_fixed_boundary_residual_iter(
                         state_try,
                         include_edge=include_edge,
                         zero_m1=jnp.asarray(0.0, dtype=zero_m1.dtype),
+                        freeb_bsqvac_half=freeb_bsqvac_half_current,
                         constraint_precond_diag=constraint_precond_diag,
                         constraint_tcon=constraint_tcon_override,
                         constraint_precond_active=constraint_precond_active,
@@ -10430,6 +10494,7 @@ def solve_fixed_boundary_residual_iter(
                         state_try,
                         include_edge=include_edge,
                         zero_m1=zero_m1,
+                        freeb_bsqvac_half=freeb_bsqvac_half_current,
                         constraint_precond_diag=constraint_precond_diag,
                         constraint_tcon=constraint_tcon_override,
                         constraint_precond_active=constraint_precond_active,
@@ -10526,6 +10591,7 @@ def solve_fixed_boundary_residual_iter(
                         state_dir,
                         include_edge=include_edge,
                         zero_m1=zero_m1,
+                        freeb_bsqvac_half=freeb_bsqvac_half_current,
                         constraint_precond_diag=constraint_precond_diag,
                         constraint_tcon=constraint_tcon_override,
                         constraint_precond_active=constraint_precond_active,
@@ -10753,6 +10819,7 @@ def solve_fixed_boundary_residual_iter(
                     state_try,
                     include_edge=include_edge,
                     zero_m1=zero_m1,
+                    freeb_bsqvac_half=freeb_bsqvac_half_current,
                     constraint_precond_diag=constraint_precond_diag,
                     constraint_tcon=constraint_tcon_override,
                     constraint_precond_active=constraint_precond_active,
@@ -10891,6 +10958,9 @@ def solve_fixed_boundary_residual_iter(
                 freeb_ivac_history.append(int(freeb_ivac))
                 freeb_ivacskip_history.append(int(freeb_ivacskip))
                 freeb_full_update_history.append(1 if int(freeb_ivac) == 1 else 0)
+                freeb_nestor_reused_history.append(1 if bool(freeb_reused) else 0)
+                freeb_nestor_solve_time_history.append(float(freeb_solve_time))
+                freeb_nestor_sample_time_history.append(float(freeb_sample_time))
             grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
         skip_time_control = False
 
@@ -10955,11 +11025,16 @@ def solve_fixed_boundary_residual_iter(
             "nvskip0": int(freeb_nvskip0),
             "ivac": int(freeb_ivac),
             "ivacskip": int(freeb_ivacskip),
+            "couple_edge": bool(freeb_couple_edge),
+            "nestor_model": str(freeb_last_model),
             "vacuum_stub": True,
         },
         "freeb_ivac_history": np.asarray(freeb_ivac_history, dtype=int),
         "freeb_ivacskip_history": np.asarray(freeb_ivacskip_history, dtype=int),
         "freeb_full_update_history": np.asarray(freeb_full_update_history, dtype=int),
+        "freeb_nestor_reused_history": np.asarray(freeb_nestor_reused_history, dtype=int),
+        "freeb_nestor_solve_time_history": np.asarray(freeb_nestor_solve_time_history, dtype=float),
+        "freeb_nestor_sample_time_history": np.asarray(freeb_nestor_sample_time_history, dtype=float),
     }
     if timing_enabled:
         iters = max(int(timing_stats["iterations"]), 1)
@@ -11034,6 +11109,13 @@ def solve_fixed_boundary_residual_iter(
         "freeb_ivacskip": int(freeb_ivacskip),
         "freeb_nvacskip": int(freeb_nvacskip),
         "freeb_nvskip0": int(freeb_nvskip0),
+        "freeb_model": str(freeb_last_model),
+        "freeb_nestor_update_count": (
+            0 if freeb_nestor_runtime is None else int(getattr(freeb_nestor_runtime, "update_count", 0))
+        ),
+        "freeb_nestor_reuse_count": (
+            0 if freeb_nestor_runtime is None else int(getattr(freeb_nestor_runtime, "reuse_count", 0))
+        ),
     }
     return _attach_freeb_diag(
         SolveVmecResidualResult(
