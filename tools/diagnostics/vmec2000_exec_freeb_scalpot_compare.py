@@ -400,6 +400,22 @@ def main() -> int:
             "scale_jax_to_vmec": a_bvec,
         }
 
+    if "potvac" in jax:
+        jpot = np.asarray(jax["potvac"], dtype=float).reshape(-1)
+        vpot = np.asarray(vmec_vac["potvac"], dtype=float).reshape(-1)
+        n = min(vpot.size, jpot.size)
+        vm = vpot[:n]
+        jj = jpot[:n]
+        a_pot, rel_pot_scaled = _rel_scaled(vm, jj)
+        out["potvac"] = {
+            "size_vmec": int(vpot.size),
+            "size_jax": int(jpot.size),
+            "size_cmp": int(n),
+            "rel_raw": _rel(vm, jj),
+            "rel_scaled": rel_pot_scaled,
+            "scale_jax_to_vmec": a_pot,
+        }
+
     if "amatrix_mode" in jax:
         jax_a = np.asarray(jax["amatrix_mode"], dtype=float)
         if mode_map is not None and mode_map.size > 0 and jax_a.ndim == 2:
