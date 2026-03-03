@@ -711,6 +711,76 @@ def test_nestor_external_only_step_reuse(tmp_path: Path):
     assert step2.reused is True
     assert int(rt2.update_count) == 1
     assert int(rt2.reuse_count) == 1
+    assert float(step2.sample_time_s) >= 0.0
+    assert float(step2.solve_time_s) >= 0.0
+    assert step2.vac_total.bsqvac.shape == step1.vac_total.bsqvac.shape
+    assert np.max(np.abs(np.asarray(step2.vac_total.det_guv))) > 0.0
+
+
+def test_nestor_reuse_legacy_hold_path(tmp_path: Path, monkeypatch):
+    netCDF4 = pytest.importorskip("netCDF4", reason="netCDF4 required for mgrid loader test")
+
+    mg = tmp_path / "mgrid_fb_nestor_hold.nc"
+    with netCDF4.Dataset(str(mg), mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createDimension("stringsize", 8)
+        ds.createDimension("external_coil_groups", 1)
+        ds.createDimension("dim_00001", 1)
+        ds.createDimension("external_coils", 1)
+        ds.createDimension("rad", 2)
+        ds.createDimension("zee", 2)
+        ds.createDimension("phi", 4)
+        for name, value in (
+            ("ir", 2),
+            ("jz", 2),
+            ("kp", 4),
+            ("nfp", 1),
+            ("nextcur", 1),
+        ):
+            ds.createVariable(name, "i4", ()).assignValue(value)
+        for name, value in (("rmin", 1.0), ("rmax", 12.0), ("zmin", -3.0), ("zmax", 3.0)):
+            ds.createVariable(name, "f8", ()).assignValue(value)
+        ds.createVariable("br_001", "f8", ("phi", "zee", "rad"))[:] = 0.0
+        ds.createVariable("bp_001", "f8", ("phi", "zee", "rad"))[:] = 1.0
+        ds.createVariable("bz_001", "f8", ("phi", "zee", "rad"))[:] = 0.0
+
+    inpath = tmp_path / "input.fb_nestor_hold"
+    inpath.write_text(
+        f"""
+&INDATA
+  NFP = 1
+  MPOL = 5
+  NTOR = 0
+  NS = 9
+  NZETA = 2
+  NTHETA = 8
+  LASYM = F
+  LFREEB = T
+  MGRID_FILE = '{mg}'
+  NVACSKIP = 2
+  RBC(0,0) = 6.0
+  ZBS(1,0) = 2.0
+/
+"""
+    )
+    run = run_fixed_boundary(
+        inpath,
+        solver="vmec2000_iter",
+        max_iter=1,
+        multigrid=False,
+        verbose=False,
+    )
+    state = run.result.state
+    static = run.static
+
+    step1, rt1 = nestor_external_only_step(state=state, static=static, ivac=1, runtime=None)
+    monkeypatch.setenv("VMEC_JAX_FREEB_REUSE_RHS_UPDATE", "0")
+    step2, rt2 = nestor_external_only_step(state=state, static=static, ivac=2, runtime=rt1)
+    assert bool(step2.reused) is True
+    assert float(step2.sample_time_s) == pytest.approx(0.0, abs=1e-15)
+    np.testing.assert_allclose(np.asarray(step2.phi), np.asarray(step1.phi), rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(np.asarray(step2.vac_total.bsqvac), np.asarray(step1.vac_total.bsqvac), rtol=0.0, atol=0.0)
+    assert int(rt2.update_count) == int(rt1.update_count)
+    assert int(rt2.reuse_count) == int(rt1.reuse_count) + 1
 
 
 def test_nestor_vmec2000_like_mode_and_fallback(tmp_path: Path, monkeypatch):
