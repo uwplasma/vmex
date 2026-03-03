@@ -202,6 +202,7 @@ def interpolate_mgrid_bfield(
     z: Any,
     phi: Any,
     extcur: tuple[float, ...] | None = None,
+    use_vmec_kv: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Trilinear interpolation of mgrid BR/BP/BZ with periodic toroidal angle.
 
@@ -250,14 +251,31 @@ def interpolate_mgrid_bfield(
     wr = fr - i0
     wz = fz - j0
 
-    # Periodic toroidal axis: one field period [0, 2*pi/nfp).
-    nfp = max(1, int(meta.nfp))
-    period = (2.0 * np.pi) / float(nfp)
-    phi_flat = np.mod(pp.reshape(-1), period)
-    fk = phi_flat * (kp / period)
-    k0 = np.floor(fk).astype(np.int64) % kp
-    k1 = (k0 + 1) % kp
-    wk = fk - np.floor(fk)
+    # Toroidal index selection:
+    # - VMEC becoil path uses a zeta-grid index (no toroidal interpolation),
+    # - generic path uses periodic toroidal interpolation in physical angle.
+    if bool(use_vmec_kv):
+        if rr.ndim < 1:
+            raise ValueError("use_vmec_kv=True requires array inputs with an explicit zeta axis")
+        nzeta = int(rr.shape[-1]) if int(rr.shape[-1]) > 0 else kp
+        k_idx = np.arange(nzeta, dtype=np.int64)
+        if kp >= nzeta:
+            # Preserve VMEC grid-index behavior while supporting kp!=nzeta cases.
+            k_idx = (k_idx * kp) // max(1, nzeta)
+        else:
+            k_idx = np.minimum(k_idx, kp - 1)
+        k_idx = np.clip(k_idx, 0, kp - 1)
+        k0 = np.broadcast_to(k_idx.reshape((1,) * (rr.ndim - 1) + (nzeta,)), rr.shape).reshape(-1)
+        k1 = k0
+        wk = np.zeros_like(fr)
+    else:
+        nfp = max(1, int(meta.nfp))
+        period = (2.0 * np.pi) / float(nfp)
+        phi_flat = np.mod(pp.reshape(-1), period)
+        fk = phi_flat * (kp / period)
+        k0 = np.floor(fk).astype(np.int64) % kp
+        k1 = (k0 + 1) % kp
+        wk = fk - np.floor(fk)
 
     w0r = 1.0 - wr
     w0z = 1.0 - wz
@@ -558,6 +576,7 @@ def _sample_external_boundary_arrays(
         z=Z,
         phi=phi_grid,
         extcur=extcur_eff,
+        use_vmec_kv=True,
     )
     vac = vacuum_boundary_fields_from_cylindrical(
         br=br,
@@ -820,6 +839,16 @@ def _maybe_dump_scalpot_jax(
         "mode": np.asarray(str(mode)),
         "rhs": np.asarray(rhs, dtype=float),
         "phi": np.asarray(phi, dtype=float),
+        "R": np.asarray(sample.R, dtype=float),
+        "Z": np.asarray(sample.Z, dtype=float),
+        "phi_grid": np.asarray(sample.phi, dtype=float),
+        "Ru": np.asarray(sample.Ru, dtype=float),
+        "Zu": np.asarray(sample.Zu, dtype=float),
+        "Rv": np.asarray(sample.Rv, dtype=float),
+        "Zv": np.asarray(sample.Zv, dtype=float),
+        "br": np.asarray(sample.br, dtype=float),
+        "bp": np.asarray(sample.bp, dtype=float),
+        "bz": np.asarray(sample.bz, dtype=float),
         "bexu_ext": np.asarray(sample.vac_ext.bu, dtype=float),
         "bexv_ext": np.asarray(sample.vac_ext.bv, dtype=float),
         "bexn_ext": np.asarray(-sample.vac_ext.bnormal, dtype=float),
