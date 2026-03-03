@@ -71,44 +71,96 @@ def _evaluate_freeb_thresholds(case: dict[str, Any], runs: list[dict[str, Any]])
       bvec_nonsing_fouri = 1e-2
       amatrix = 2e-1
       potvac = 1.0
+
+      [cases.metric_thresholds_rel_scaled_by_iter."53"]
+      source_sym = 1e-2
+      bvec_nonsing_fouri = 1e-2
     """
 
     thr = case.get("metric_thresholds_rel_scaled", {})
-    if not isinstance(thr, dict) or not thr:
+    thr_by_iter = case.get("metric_thresholds_rel_scaled_by_iter", {})
+    if not isinstance(thr, dict):
+        thr = {}
+    if not isinstance(thr_by_iter, dict):
+        thr_by_iter = {}
+    if (not thr) and (not thr_by_iter):
         return True, {}
+
+    observations: dict[str, list[tuple[int | None, float]]] = {}
+    for rec in runs:
+        payload = rec.get("metrics_full", {})
+        if not isinstance(payload, dict):
+            continue
+        iter_idx = rec.get("iter")
+        for key, metric in payload.items():
+            if not isinstance(metric, dict) or ("rel_scaled" not in metric):
+                continue
+            observations.setdefault(str(key), []).append((iter_idx, float(metric["rel_scaled"])))
 
     report: dict[str, Any] = {}
     all_ok = True
-    for key, lim in thr.items():
-        metric_key = str(key)
-        limit = float(lim)
-        observed_vals: list[float] = []
-        observed_iters: list[int | None] = []
-        for rec in runs:
-            payload = rec.get("metrics_full", {})
-            if not isinstance(payload, dict):
+    if thr:
+        global_report: dict[str, Any] = {}
+        for key, lim in thr.items():
+            metric_key = str(key)
+            limit = float(lim)
+            obs = observations.get(metric_key, [])
+            if obs:
+                observed_max = float(max(abs(v) for _, v in obs))
+                observed_iters = [it for it, _ in obs]
+                ok = bool(observed_max <= limit)
+            else:
+                observed_max = float("nan")
+                observed_iters = []
+                ok = False
+            global_report[metric_key] = {
+                "limit_rel_scaled": limit,
+                "observed_max_rel_scaled": observed_max,
+                "observed_iters": observed_iters,
+                "pass": ok,
+            }
+            if not ok:
+                all_ok = False
+        report["global"] = global_report
+
+    if thr_by_iter:
+        by_iter_report: dict[str, Any] = {}
+        for iter_key, metric_limits in thr_by_iter.items():
+            if not isinstance(metric_limits, dict):
                 continue
-            m = payload.get(metric_key)
-            if not isinstance(m, dict):
+            iter_key_str = str(iter_key)
+            try:
+                iter_target = int(iter_key_str)
+            except ValueError:
+                all_ok = False
+                by_iter_report[iter_key_str] = {"error": "iter key must be integer-like", "pass": False}
                 continue
-            if "rel_scaled" not in m:
-                continue
-            observed_vals.append(float(m["rel_scaled"]))
-            observed_iters.append(rec.get("iter"))
-        if observed_vals:
-            observed_max = float(max(abs(v) for v in observed_vals))
-            ok = bool(observed_max <= limit)
-        else:
-            observed_max = float("nan")
-            ok = False
-        report[metric_key] = {
-            "limit_rel_scaled": limit,
-            "observed_max_rel_scaled": observed_max,
-            "observed_iters": observed_iters,
-            "pass": ok,
-        }
-        if not ok:
-            all_ok = False
+            iter_report: dict[str, Any] = {}
+            iter_ok = True
+            for metric_key, lim in metric_limits.items():
+                metric_name = str(metric_key)
+                limit = float(lim)
+                obs = observations.get(metric_name, [])
+                vals = [abs(v) for it, v in obs if it == iter_target]
+                if vals:
+                    observed_max = float(max(vals))
+                    ok = bool(observed_max <= limit)
+                else:
+                    observed_max = float("nan")
+                    ok = False
+                iter_report[metric_name] = {
+                    "limit_rel_scaled": limit,
+                    "observed_max_rel_scaled": observed_max,
+                    "pass": ok,
+                }
+                if not ok:
+                    iter_ok = False
+            iter_report["pass"] = iter_ok
+            by_iter_report[iter_key_str] = iter_report
+            if not iter_ok:
+                all_ok = False
+        report["by_iter"] = by_iter_report
+
     return all_ok, report
 
 

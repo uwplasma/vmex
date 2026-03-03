@@ -29,6 +29,8 @@ Free-boundary manifest notes:
 - each free-boundary case can define quantitative pass/fail limits via
   `[cases.metric_thresholds_rel_scaled]` (for keys such as `source_sym`,
   `bvec_nonsing_fouri`, `amatrix`, `potvac`);
+- optional per-iteration limits are supported via
+  `[cases.metric_thresholds_rel_scaled_by_iter."<iter>"]`;
 - `parity_sweep_manifest.py` now fails a case when command `rc=0` but metric
   thresholds are exceeded;
 - a local self-contained non-axisymmetric `LASYM=T` free-boundary case is

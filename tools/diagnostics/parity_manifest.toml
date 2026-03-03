@@ -153,6 +153,20 @@ bvec_nonsing_fouri = 2.0e-2
 amatrix = 1.5e-1
 potvac = 9.0e-1
 
+[cases.metric_thresholds_rel_scaled_by_iter."53"]
+source_sym = 2.0e-2
+bvec_nonsing_fouri = 2.0e-2
+amatrix = 1.5e-1
+potvac = 3.0e-1
+
+[cases.metric_thresholds_rel_scaled_by_iter."54"]
+amatrix = 1.5e-1
+potvac = 3.0e-1
+
+[cases.metric_thresholds_rel_scaled_by_iter."60"]
+amatrix = 1.5e-1
+potvac = 9.0e-1
+
 [[cases]]
 id = "freeb_axisym_lasym_true_diiid"
 tier = "full"
@@ -236,5 +250,15 @@ VMEC_JAX_FREEB_USE_GREENF_SOURCE = "1"
 [cases.metric_thresholds_rel_scaled]
 source_sym = 3.0e-1
 bvec_nonsing_fouri = 3.0e-1
+amatrix = 9.5e-1
+potvac = 8.5e-1
+
+[cases.metric_thresholds_rel_scaled_by_iter."80"]
+source_sym = 1.0e-2
+bvec_nonsing_fouri = 1.0e-2
+amatrix = 9.0e-1
+potvac = 8.5e-1
+
+[cases.metric_thresholds_rel_scaled_by_iter."100"]
 amatrix = 9.5e-1
 potvac = 8.5e-1

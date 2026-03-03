@@ -78,7 +78,9 @@ per-iteration scalpot comparator JSON payloads.
 Free-boundary cases can also define quantitative pass/fail thresholds in the
 manifest via ``metric_thresholds_rel_scaled`` (for keys like
 ``source_sym``, ``bvec_nonsing_fouri``, ``amatrix``, ``potvac``), so the sweep
-fails on metric drift even when command return code is zero.
+fails on metric drift even when command return code is zero. For turn-on /
+restart-sensitive phases, per-iteration thresholds are available via
+``metric_thresholds_rel_scaled_by_iter``.
 
 - Pipeline parity snapshot (solver-free)::
 
