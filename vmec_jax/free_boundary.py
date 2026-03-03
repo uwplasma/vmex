@@ -879,7 +879,11 @@ def _build_vmec_mode_basis(
     idx = np.arange(th.size, dtype=np.int64)
     lt = idx // max(1, nzeta)
     lz = idx % max(1, nzeta)
-    lt_m = (ntheta - lt) % max(1, ntheta)
+    if lasym or (nu_full == ntheta):
+        lt_m = (ntheta - lt) % max(1, ntheta)
+    else:
+        lt_m_full = (nu_full - lt) % max(1, nu_full)
+        lt_m = np.minimum(lt_m_full, (nu_full - lt_m_full) % max(1, nu_full))
     lz_m = (nzeta - lz) % max(1, nzeta)
     imirr = (lt_m * nzeta + lz_m).astype(np.int64)
     nuv_full = int(max(1, nu_full) * max(1, nzeta))
@@ -1920,7 +1924,7 @@ def nestor_external_only_step(
                         bexni=np.asarray(gsource_bexni, dtype=float),
                         signgs=int(getattr(static, "signgs", -1)),
                         nvper=max(1, int(getattr(static.cfg, "nfp", 1))),
-                    ).reshape(int(ntheta), int(nzeta))
+                    )
                 except Exception:
                     gsource_vmec = np.asarray(gsource_bexni, dtype=float)
             if dense_solve_mode in ("mode", "vmec_mode", "fouri_mode"):
