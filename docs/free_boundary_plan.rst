@@ -38,15 +38,20 @@ WP1 is partially in place:
   emitted as ``free_boundary_external_field`` diagnostics.
 - vacuum coupling and NESTOR solve integration remain pending.
 
-WP2 now has an initial diagnostic scaffold:
+WP2 now has an initial coupling scaffold:
 
 - boundary geometry/tangent metric terms are evaluated on the edge surface,
 - external cylindrical field is projected to ``Bu/Bv`` and inverted to
   ``B^u/B^v`` via the 2x2 boundary metric,
 - ``bsqvac`` proxy and boundary-normal channel summaries are emitted in
   ``free_boundary_external_field`` diagnostics.
+- a lightweight periodic spectral potential solve is active for free-boundary
+  runs, with VMEC-style ``ivac``/``ivacskip`` update vs reuse behavior.
+- edge ``bsq`` coupling is now threaded into the force path by overriding the
+  half-mesh edge magnetic-pressure term from vacuum channels.
 
-NESTOR Green-function assembly + scalar-potential solve are still pending.
+NESTOR Green-function assembly and full VMEC2000 matrix/integral parity are
+still pending.
 
 Current tests and benchmark coverage
 ------------------------------------

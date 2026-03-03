@@ -358,6 +358,55 @@ The diagnostic vacuum magnetic pressure proxy is then
 This is currently diagnostic-only (no edge-force feedback yet). A signed floor
 is applied to :math:`\Delta` to avoid non-finite values in degenerate cells.
 
+WP2 NESTOR-Core Surrogate (Current)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The current free-boundary iteration path now includes a lightweight
+NESTOR-style potential solve surrogate on the boundary torus:
+
+1. Build RHS from the sampled external normal field:
+
+   .. math::
+
+      rhs(\theta,\zeta) = -\hat{n}\cdot B_{\mathrm{ext}}.
+
+2. Solve periodic Poisson equation on the angular grid:
+
+   .. math::
+
+      \nabla_{\theta,\zeta}^2 \phi = rhs,\qquad \langle \phi\rangle = 0.
+
+   The solver is spectral (FFT) with precomputed stage-static eigenvalues
+   :math:`\lambda_{k_\theta,k_\zeta} = k_\theta^2 + k_\zeta^2`, and
+   :math:`\lambda_{0,0}` pinned to a nonzero constant for gauge handling.
+
+3. Form corrected tangential channels:
+
+   .. math::
+
+      B_u^{tot} = B_u^{ext} + \partial_\theta \phi,\qquad
+      B_v^{tot} = B_v^{ext} + \partial_\zeta \phi,
+
+   then recompute :math:`B^u, B^v` and :math:`B_{\mathrm{sq,vac}}`.
+
+4. Couple edge vacuum pressure proxy into the force pipeline by overriding
+   half-mesh edge ``bsq`` as:
+
+   .. math::
+
+      bsq_{\mathrm{edge}} = \frac{1}{2} B_{\mathrm{sq,vac}} + p_{\mathrm{edge}}.
+
+`ivacskip` reuse behavior
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The VMEC-style cadence is enforced by ``ivac``:
+
+- ``ivac=1``: full potential update (sample + Poisson solve),
+- ``ivac=2``: reuse previous potential :math:`\phi` and skip the solve.
+
+This mirrors the matrix-reuse intent in VMEC2000/NESTOR while keeping runtime
+bounded in the current surrogate implementation.
+
 Profiles and volume integrals
 -----------------------------
 

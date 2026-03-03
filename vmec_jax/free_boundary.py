@@ -18,6 +18,8 @@ import numpy as np
 
 from .config import VMECConfig
 
+_MGRID_FIELD_CACHE: dict[str, MGridData] = {}
+
 
 @dataclass(frozen=True)
 class FreeBoundaryRuntimeState:
@@ -76,6 +78,55 @@ class VacuumBoundaryFields:
     g_uv: np.ndarray
     g_vv: np.ndarray
     det_guv: np.ndarray
+
+
+@dataclass(frozen=True)
+class ExternalBoundarySample:
+    """External-field sample on the plasma boundary."""
+
+    mgrid_path: str
+    R: np.ndarray
+    Z: np.ndarray
+    Ru: np.ndarray
+    Zu: np.ndarray
+    Rv: np.ndarray
+    Zv: np.ndarray
+    br: np.ndarray
+    bp: np.ndarray
+    bz: np.ndarray
+    vac_ext: VacuumBoundaryFields
+
+
+@dataclass(frozen=True)
+class NestorPoissonCache:
+    """Stage-static spectral Poisson operator cache on the (theta,zeta) torus."""
+
+    ntheta: int
+    nzeta: int
+    lam: np.ndarray
+
+
+@dataclass(frozen=True)
+class NestorRuntimeState:
+    """Runtime cache for the simplified NESTOR solve path."""
+
+    poisson: NestorPoissonCache
+    phi: np.ndarray
+    bsqvac: np.ndarray
+    update_count: int
+    reuse_count: int
+
+
+@dataclass(frozen=True)
+class NestorSolveResult:
+    """Output of one NESTOR-like update/reuse step."""
+
+    vac_total: VacuumBoundaryFields
+    phi: np.ndarray
+    reused: bool
+    solve_time_s: float
+    sample_time_s: float
+    model: str = "spectral_poisson_external_only"
 
 
 @dataclass(frozen=True)
@@ -386,6 +437,280 @@ def vacuum_boundary_fields_from_cylindrical(
     )
 
 
+def _sample_external_boundary_arrays(
+    *,
+    state: Any,
+    static: Any,
+    extcur: tuple[float, ...] | None = None,
+) -> ExternalBoundarySample:
+    """Return full boundary arrays for external mgrid field sampling."""
+
+    from .vmec_realspace import (
+        vmec_realspace_synthesis,
+        vmec_realspace_synthesis_dtheta,
+        vmec_realspace_synthesis_dzeta_phys,
+    )
+    from .vmec_tomnsp import vmec_trig_tables
+
+    meta = getattr(static, "mgrid_metadata", None)
+    if meta is None:
+        raise ValueError("missing_mgrid_metadata")
+    mgrid_path = str(getattr(meta, "path", "")).strip()
+    if not mgrid_path:
+        raise ValueError("missing_mgrid_path")
+
+    mgrid = _MGRID_FIELD_CACHE.get(mgrid_path)
+    if mgrid is None:
+        loaded = load_mgrid(mgrid_path, load_fields=True)
+        if not isinstance(loaded, MGridData):  # pragma: no cover
+            raise TypeError("load_mgrid(load_fields=True) must return MGridData")
+        mgrid = loaded
+        _MGRID_FIELD_CACHE[mgrid_path] = mgrid
+    extcur_eff = tuple(extcur) if extcur is not None else tuple(getattr(static, "free_boundary_extcur", ()) or ())
+
+    trig = getattr(static, "trig_vmec", None)
+    if trig is None:
+        trig = vmec_trig_tables(
+            ntheta=int(static.cfg.ntheta),
+            nzeta=int(static.cfg.nzeta),
+            nfp=int(static.cfg.nfp),
+            mmax=int(static.cfg.mpol) - 1,
+            nmax=int(static.cfg.ntor),
+            lasym=bool(static.cfg.lasym),
+        )
+
+    R = np.asarray(
+        vmec_realspace_synthesis(
+            coeff_cos=np.asarray(state.Rcos)[-1:, :],
+            coeff_sin=np.asarray(state.Rsin)[-1:, :],
+            modes=static.modes,
+            trig=trig,
+            coeffs_internal=False,
+        )[0]
+    )
+    Z = np.asarray(
+        vmec_realspace_synthesis(
+            coeff_cos=np.asarray(state.Zcos)[-1:, :],
+            coeff_sin=np.asarray(state.Zsin)[-1:, :],
+            modes=static.modes,
+            trig=trig,
+            coeffs_internal=False,
+        )[0]
+    )
+    Ru = np.asarray(
+        vmec_realspace_synthesis_dtheta(
+            coeff_cos=np.asarray(state.Rcos)[-1:, :],
+            coeff_sin=np.asarray(state.Rsin)[-1:, :],
+            modes=static.modes,
+            trig=trig,
+            coeffs_internal=False,
+        )[0]
+    )
+    Zu = np.asarray(
+        vmec_realspace_synthesis_dtheta(
+            coeff_cos=np.asarray(state.Zcos)[-1:, :],
+            coeff_sin=np.asarray(state.Zsin)[-1:, :],
+            modes=static.modes,
+            trig=trig,
+            coeffs_internal=False,
+        )[0]
+    )
+    Rv = np.asarray(
+        vmec_realspace_synthesis_dzeta_phys(
+            coeff_cos=np.asarray(state.Rcos)[-1:, :],
+            coeff_sin=np.asarray(state.Rsin)[-1:, :],
+            modes=static.modes,
+            trig=trig,
+            coeffs_internal=False,
+        )[0]
+    )
+    Zv = np.asarray(
+        vmec_realspace_synthesis_dzeta_phys(
+            coeff_cos=np.asarray(state.Zcos)[-1:, :],
+            coeff_sin=np.asarray(state.Zsin)[-1:, :],
+            modes=static.modes,
+            trig=trig,
+            coeffs_internal=False,
+        )[0]
+    )
+
+    nzeta = int(R.shape[1])
+    zeta = (2.0 * np.pi / max(1, nzeta)) * np.arange(nzeta, dtype=float)
+    phi = zeta / max(1, int(static.cfg.nfp))
+    phi_grid = np.broadcast_to(phi[None, :], R.shape)
+
+    br, bp, bz = interpolate_mgrid_bfield(
+        mgrid,
+        r=R,
+        z=Z,
+        phi=phi_grid,
+        extcur=extcur_eff,
+    )
+    vac = vacuum_boundary_fields_from_cylindrical(
+        br=br,
+        bp=bp,
+        bz=bz,
+        R=R,
+        Ru=Ru,
+        Zu=Zu,
+        Rv=Rv,
+        Zv=Zv,
+    )
+    return ExternalBoundarySample(
+        mgrid_path=mgrid_path,
+        R=R,
+        Z=Z,
+        Ru=Ru,
+        Zu=Zu,
+        Rv=Rv,
+        Zv=Zv,
+        br=br,
+        bp=bp,
+        bz=bz,
+        vac_ext=vac,
+    )
+
+
+def _build_poisson_cache(*, ntheta: int, nzeta: int) -> NestorPoissonCache:
+    """Build spectral Laplacian eigenvalues on periodic `(theta,zeta)` grid."""
+
+    ntheta = int(ntheta)
+    nzeta = int(nzeta)
+    ku = 2.0 * np.pi * np.fft.fftfreq(ntheta)
+    kv = 2.0 * np.pi * np.fft.fftfreq(nzeta)
+    ku2 = ku[:, None] * ku[:, None]
+    kv2 = kv[None, :] * kv[None, :]
+    lam = ku2 + kv2
+    lam[0, 0] = 1.0
+    return NestorPoissonCache(ntheta=ntheta, nzeta=nzeta, lam=lam)
+
+
+def _solve_periodic_poisson_fft(rhs: np.ndarray, cache: NestorPoissonCache) -> np.ndarray:
+    rhs_hat = np.fft.fftn(rhs)
+    phi_hat = -rhs_hat / cache.lam
+    phi_hat[0, 0] = 0.0
+    phi = np.fft.ifftn(phi_hat).real
+    return phi
+
+
+def _spectral_grad(phi: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    ntheta, nzeta = phi.shape
+    ku = 2.0 * np.pi * np.fft.fftfreq(ntheta)
+    kv = 2.0 * np.pi * np.fft.fftfreq(nzeta)
+    ph = np.fft.fftn(phi)
+    du = np.fft.ifftn((1j * ku[:, None]) * ph).real
+    dv = np.fft.ifftn((1j * kv[None, :]) * ph).real
+    return du, dv
+
+
+def nestor_external_only_step(
+    *,
+    state: Any,
+    static: Any,
+    ivac: int,
+    runtime: NestorRuntimeState | None = None,
+    extcur: tuple[float, ...] | None = None,
+) -> tuple[NestorSolveResult, NestorRuntimeState]:
+    """Simplified NESTOR-style update/reuse with ivacskip-compatible behavior.
+
+    - `ivac==1`: full update (sample + spectral Poisson solve)
+    - `ivac!=1`: reuse previous solution if available
+    """
+
+    if int(ivac) != 1 and runtime is not None:
+        bsqvac = np.asarray(runtime.bsqvac)
+        z = np.zeros_like(bsqvac)
+        vac_total = VacuumBoundaryFields(
+            bu=z,
+            bv=z,
+            bsupu=z,
+            bsupv=z,
+            bsqvac=bsqvac,
+            bnormal=z,
+            bnormal_unit=z,
+            g_uu=z,
+            g_uv=z,
+            g_vv=z,
+            det_guv=z,
+        )
+        res = NestorSolveResult(
+            vac_total=vac_total,
+            phi=np.asarray(runtime.phi),
+            reused=True,
+            solve_time_s=0.0,
+            sample_time_s=0.0,
+        )
+        runtime_next = NestorRuntimeState(
+            poisson=runtime.poisson,
+            phi=np.asarray(runtime.phi),
+            bsqvac=np.asarray(bsqvac),
+            update_count=int(runtime.update_count),
+            reuse_count=int(runtime.reuse_count) + 1,
+        )
+        return res, runtime_next
+
+    t0 = time.perf_counter()
+    sample = _sample_external_boundary_arrays(state=state, static=static, extcur=extcur)
+    sample_time = max(0.0, time.perf_counter() - t0)
+    ntheta, nzeta = sample.R.shape
+    if runtime is None or runtime.poisson.ntheta != ntheta or runtime.poisson.nzeta != nzeta:
+        cache = _build_poisson_cache(ntheta=ntheta, nzeta=nzeta)
+        phi_prev = np.zeros((ntheta, nzeta), dtype=float)
+        bsq_prev = np.asarray(sample.vac_ext.bsqvac, dtype=float)
+        runtime = NestorRuntimeState(
+            poisson=cache,
+            phi=phi_prev,
+            bsqvac=bsq_prev,
+            update_count=0,
+            reuse_count=0,
+        )
+
+    rhs = -np.asarray(sample.vac_ext.bnormal_unit, dtype=float)
+    ts = time.perf_counter()
+    phi = _solve_periodic_poisson_fft(rhs, runtime.poisson)
+    dphi_u, dphi_v = _spectral_grad(phi)
+    bu = np.asarray(sample.vac_ext.bu) + dphi_u
+    bv = np.asarray(sample.vac_ext.bv) + dphi_v
+    bsupu, bsupv, det = contravariant_boundary_field_from_covariant(
+        bu=bu,
+        bv=bv,
+        g_uu=sample.vac_ext.g_uu,
+        g_uv=sample.vac_ext.g_uv,
+        g_vv=sample.vac_ext.g_vv,
+    )
+    bsqvac = bu * bsupu + bv * bsupv
+    solve_time = max(0.0, time.perf_counter() - ts)
+
+    vac_total = VacuumBoundaryFields(
+        bu=bu,
+        bv=bv,
+        bsupu=bsupu,
+        bsupv=bsupv,
+        bsqvac=bsqvac,
+        bnormal=sample.vac_ext.bnormal,
+        bnormal_unit=sample.vac_ext.bnormal_unit,
+        g_uu=sample.vac_ext.g_uu,
+        g_uv=sample.vac_ext.g_uv,
+        g_vv=sample.vac_ext.g_vv,
+        det_guv=det,
+    )
+    res = NestorSolveResult(
+        vac_total=vac_total,
+        phi=phi,
+        reused=False,
+        solve_time_s=solve_time,
+        sample_time_s=sample_time,
+    )
+    runtime_next = NestorRuntimeState(
+        poisson=runtime.poisson,
+        phi=np.asarray(phi),
+        bsqvac=np.asarray(bsqvac),
+        update_count=int(runtime.update_count) + 1,
+        reuse_count=int(runtime.reuse_count),
+    )
+    return res, runtime_next
+
+
 def sample_external_vacuum_diagnostics(
     *,
     state: Any,
@@ -399,128 +724,25 @@ def sample_external_vacuum_diagnostics(
     external field only. NESTOR scalar-potential coupling is still pending.
     """
 
-    from .vmec_realspace import (
-        vmec_realspace_synthesis,
-        vmec_realspace_synthesis_dtheta,
-        vmec_realspace_synthesis_dzeta_phys,
-    )
-    from .vmec_tomnsp import vmec_trig_tables
-
     out: dict[str, Any] = {
         "enabled": False,
         "available": False,
         "vacuum_stub": True,
     }
 
-    meta = getattr(static, "mgrid_metadata", None)
-    if meta is None:
-        out["reason"] = "missing_mgrid_metadata"
-        return out
-    mgrid_path = str(getattr(meta, "path", "")).strip()
-    if not mgrid_path:
-        out["reason"] = "missing_mgrid_path"
-        return out
-
     t0 = time.perf_counter()
     try:
-        mgrid = load_mgrid(mgrid_path, load_fields=True)
-        extcur_eff = tuple(extcur) if extcur is not None else tuple(getattr(static, "free_boundary_extcur", ()) or ())
-
-        trig = getattr(static, "trig_vmec", None)
-        if trig is None:
-            trig = vmec_trig_tables(
-                ntheta=int(static.cfg.ntheta),
-                nzeta=int(static.cfg.nzeta),
-                nfp=int(static.cfg.nfp),
-                mmax=int(static.cfg.mpol) - 1,
-                nmax=int(static.cfg.ntor),
-                lasym=bool(static.cfg.lasym),
-            )
-
-        # Boundary surface geometry (last radial surface).
-        R = np.asarray(
-            vmec_realspace_synthesis(
-                coeff_cos=np.asarray(state.Rcos)[-1:, :],
-                coeff_sin=np.asarray(state.Rsin)[-1:, :],
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=False,
-            )[0]
-        )
-        Z = np.asarray(
-            vmec_realspace_synthesis(
-                coeff_cos=np.asarray(state.Zcos)[-1:, :],
-                coeff_sin=np.asarray(state.Zsin)[-1:, :],
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=False,
-            )[0]
-        )
-        Ru = np.asarray(
-            vmec_realspace_synthesis_dtheta(
-                coeff_cos=np.asarray(state.Rcos)[-1:, :],
-                coeff_sin=np.asarray(state.Rsin)[-1:, :],
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=False,
-            )[0]
-        )
-        Zu = np.asarray(
-            vmec_realspace_synthesis_dtheta(
-                coeff_cos=np.asarray(state.Zcos)[-1:, :],
-                coeff_sin=np.asarray(state.Zsin)[-1:, :],
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=False,
-            )[0]
-        )
-        Rv = np.asarray(
-            vmec_realspace_synthesis_dzeta_phys(
-                coeff_cos=np.asarray(state.Rcos)[-1:, :],
-                coeff_sin=np.asarray(state.Rsin)[-1:, :],
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=False,
-            )[0]
-        )
-        Zv = np.asarray(
-            vmec_realspace_synthesis_dzeta_phys(
-                coeff_cos=np.asarray(state.Zcos)[-1:, :],
-                coeff_sin=np.asarray(state.Zsin)[-1:, :],
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=False,
-            )[0]
-        )
-
-        nzeta = int(R.shape[1])
-        zeta = (2.0 * np.pi / max(1, nzeta)) * np.arange(nzeta, dtype=float)
-        phi = zeta / max(1, int(static.cfg.nfp))
-        phi_grid = np.broadcast_to(phi[None, :], R.shape)
-
-        br, bp, bz = interpolate_mgrid_bfield(
-            mgrid,
-            r=R,
-            z=Z,
-            phi=phi_grid,
-            extcur=extcur_eff,
-        )
-        vac = vacuum_boundary_fields_from_cylindrical(
-            br=br,
-            bp=bp,
-            bz=bz,
-            R=R,
-            Ru=Ru,
-            Zu=Zu,
-            Rv=Rv,
-            Zv=Zv,
-        )
+        sample = _sample_external_boundary_arrays(state=state, static=static, extcur=extcur)
+        vac = sample.vac_ext
+        br = sample.br
+        bp = sample.bp
+        bz = sample.bz
         bmag = np.sqrt(br * br + bp * bp + bz * bz)
         out.update(
             {
                 "enabled": True,
                 "available": True,
-                "mgrid_path": mgrid_path,
+                "mgrid_path": sample.mgrid_path,
                 "n_samples": int(br.size),
                 "br_rms": float(np.sqrt(np.mean(br * br))),
                 "bp_rms": float(np.sqrt(np.mean(bp * bp))),

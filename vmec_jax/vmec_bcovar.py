@@ -252,6 +252,7 @@ def vmec_bcovar_half_mesh_from_wout(
     use_wout_bsup: bool = False,
     use_wout_bsub_for_lambda: bool = False,
     use_wout_bmag_for_bsq: bool = False,
+    freeb_bsqvac_edge: Any | None = None,
     use_vmec_synthesis: bool = False,
     trig: VmecTrigTables | None = None,
 ) -> VmecHalfMeshBcovar:
@@ -284,6 +285,10 @@ def vmec_bcovar_half_mesh_from_wout(
         If True, use ``wout`` Nyquist ``|B|`` to form ``bsq = |B|^2/2 + p`` in
         this parity path, instead of deriving ``|B|^2`` from
         ``bsup/bsub`` products.
+    freeb_bsqvac_edge:
+        Optional free-boundary vacuum ``|B|^2`` proxy on the edge surface
+        `(ntheta, nzeta)`. When provided, the half-mesh edge ``bsq`` is
+        overridden as ``0.5*freeb_bsqvac_edge + p_edge``.
     trig:
         Optional precomputed VMEC trig tables. If omitted and
         ``use_vmec_synthesis=True``, they are built internally.
@@ -896,6 +901,19 @@ def vmec_bcovar_half_mesh_from_wout(
     if pres_h is None:
         pres_h = jnp.asarray(wout.pres if pres is None else pres)[:, None, None]
     bsq = 0.5 * b2 + pres_h
+    if freeb_bsqvac_edge is not None:
+        vac_edge = jnp.asarray(freeb_bsqvac_edge, dtype=bsq.dtype)
+        if vac_edge.ndim != 2:
+            raise ValueError(
+                f"freeb_bsqvac_edge must have shape (ntheta,nzeta), got {vac_edge.shape}"
+            )
+        if vac_edge.shape != bsq.shape[1:]:
+            raise ValueError(
+                "freeb_bsqvac_edge shape mismatch: "
+                f"expected {bsq.shape[1:]}, got {vac_edge.shape}"
+            )
+        bsq_edge = 0.5 * vac_edge + pres_h[-1]
+        bsq = bsq.at[-1, :, :].set(bsq_edge)
 
     # Force-kernel inputs matching what `forces.f` expects after `bcovar`.
     gij_b_uu = (bsupu * bsupu) * jac.sqrtg
