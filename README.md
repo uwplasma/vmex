@@ -96,6 +96,9 @@ python examples/optimization/implicit_target_iota_volume.py --case circular_toka
 - Use `--parity` or `performance_mode=False` to force the conservative parity path.
 - Details and profiling guidance live in `docs/performance.rst`.
 - Parity methodology and current status live in `docs/validation.rst`.
+- The cross-case parity matrix (fixed/free boundary, axisym/non-axisym, `lasym=False/True`)
+  is maintained in `tools/diagnostics/parity_manifest.toml` and executed with
+  `tools/diagnostics/parity_sweep_manifest.py`.
 
 ### Live NSTEP printing
 

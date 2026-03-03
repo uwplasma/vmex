@@ -1,0 +1,222 @@
+version = 1
+name = "vmec_jax parity matrix"
+vmec2000_default = "../STELLOPT/VMEC2000/Release/xvmec2000"
+notes = "Manifest for fixed/free boundary parity and performance sweeps across axisymmetric, non-axisymmetric, and LASYM branches."
+
+[[cases]]
+id = "fixed_axisym_lasym_false_circular"
+tier = "smoke"
+enabled = true
+compare = "stage_trace"
+source = "vmec_jax/examples"
+input = "examples/data/input.circular_tokamak"
+lfreeb = false
+lasym = false
+axisymmetric = true
+nfp = 1
+ntor = 0
+single_ns = 13
+max_iter = 10
+vmec_nstep = 1
+rtol = 1e-3
+atol = 1e-10
+dump_level = "lite"
+vmec_timeout = 60
+goal = "Fixed-boundary axisymmetric baseline parity and performance sanity."
+
+[[cases]]
+id = "fixed_axisym_lasym_true_updown"
+tier = "smoke"
+enabled = true
+compare = "stage_trace"
+source = "vmec_jax/examples"
+input = "examples/data/input.up_down_asymmetric_tokamak"
+lfreeb = false
+lasym = true
+axisymmetric = true
+nfp = 1
+ntor = 0
+single_ns = 17
+max_iter = 10
+vmec_nstep = 1
+rtol = 1e-3
+atol = 1e-10
+dump_level = "lite"
+vmec_timeout = 90
+goal = "Fixed-boundary LASYM=true axisymmetric parity."
+
+[[cases]]
+id = "fixed_nonaxis_lasym_false_qa_lowres"
+tier = "smoke"
+enabled = true
+compare = "stage_trace"
+source = "vmec_jax/examples"
+input = "examples/data/input.LandremanPaul2021_QA_lowres"
+lfreeb = false
+lasym = false
+axisymmetric = false
+nfp = 2
+ntor = 8
+use_input_niter = true
+max_iter = 10
+rtol = 1e-3
+atol = 1e-10
+dump_level = "lite"
+vmec_timeout = 120
+goal = "Fixed-boundary QA multigrid stage parity."
+
+[[cases]]
+id = "fixed_nonaxis_lasym_false_qh_warm_start"
+tier = "full"
+enabled = true
+compare = "stage_trace"
+source = "vmec_jax/examples"
+input = "examples/data/input.nfp4_QH_warm_start"
+lfreeb = false
+lasym = false
+axisymmetric = false
+nfp = 4
+ntor = 2
+use_input_niter = true
+max_iter = 20
+rtol = 1e-3
+atol = 1e-10
+dump_level = "lite"
+vmec_timeout = 180
+goal = "Fixed-boundary QH parity beyond first stage."
+
+[[cases]]
+id = "fixed_nonaxis_lasym_true_basic_non_stellsym"
+tier = "smoke"
+enabled = true
+compare = "stage_trace"
+source = "vmec_jax/examples"
+input = "examples/data/input.basic_non_stellsym_pressure"
+lfreeb = false
+lasym = true
+axisymmetric = false
+nfp = 1
+ntor = 2
+single_ns = 13
+max_iter = 10
+vmec_nstep = 1
+rtol = 2e-3
+atol = 1e-10
+dump_level = "lite"
+vmec_timeout = 120
+goal = "Fixed-boundary LASYM=true non-axisymmetric parity smoke."
+
+[[cases]]
+id = "fixed_nonaxis_lasym_true_landreman_plunk"
+tier = "full"
+enabled = true
+compare = "stage_trace"
+source = "simsopt/tests"
+input = "../simsopt/tests/test_files/input.LandremanSenguptaPlunk_section5p3"
+lfreeb = false
+lasym = true
+axisymmetric = false
+nfp = 3
+ntor = 4
+single_ns = 25
+max_iter = 12
+vmec_nstep = 1
+rtol = 2e-3
+atol = 1e-10
+dump_level = "lite"
+vmec_timeout = 180
+goal = "Fixed-boundary LASYM=true finite-pressure parity target."
+
+[[cases]]
+id = "freeb_nonaxis_lasym_false_cth_like"
+tier = "smoke"
+enabled = true
+compare = "freeb_scalpot"
+source = "vmecpp/test_data"
+input = "../vmecpp/src/vmecpp/cpp/vmecpp/test_data/input.cth_like_free_bdy"
+lfreeb = true
+lasym = false
+axisymmetric = false
+nfp = 5
+ntor = 4
+max_iter = 60
+iter_list = [53, 54, 60]
+vmec_timeout = 300
+goal = "Primary free-boundary parity blocker case: source_sym -> bvecNS -> potvac."
+
+[cases.env]
+VMEC_JAX_FREEB_USE_GREENF_SOURCE = "1"
+
+[[cases]]
+id = "freeb_axisym_lasym_true_diiid"
+tier = "full"
+enabled = true
+compare = "freeb_scalpot"
+source = "STELLOPT/VMEC_TEST"
+input = "../STELLOPT/BENCHMARKS/VMEC_TEST/input.DIII-D"
+lfreeb = true
+lasym = true
+axisymmetric = true
+nfp = 1
+ntor = 0
+max_iter = 120
+iter_list = [20, 40, 80]
+vmec_timeout = 420
+goal = "Free-boundary LASYM=true axisymmetric parity target."
+
+[cases.env]
+VMEC_JAX_FREEB_USE_GREENF_SOURCE = "1"
+
+[[cases]]
+id = "freeb_axisym_lasym_true_diiid_reset"
+tier = "full"
+enabled = true
+compare = "freeb_scalpot"
+source = "STELLOPT/VMEC_TEST"
+input = "../STELLOPT/BENCHMARKS/VMEC_TEST/input.DIII-D_reset"
+lfreeb = true
+lasym = true
+axisymmetric = true
+nfp = 1
+ntor = 0
+max_iter = 120
+iter_list = [20, 40, 80]
+vmec_timeout = 420
+goal = "Free-boundary LASYM=true restart/reset parity target."
+
+[cases.env]
+VMEC_JAX_FREEB_USE_GREENF_SOURCE = "1"
+
+[[cases]]
+id = "freeb_nonaxis_lasym_false_stellcopt"
+tier = "full"
+enabled = true
+compare = "freeb_scalpot"
+source = "STELLOPT/STELLCOPT"
+input = "../STELLOPT/BENCHMARKS/STELLOPT_TEST/STELLCOPT/input.stellcopt"
+lfreeb = true
+lasym = false
+axisymmetric = false
+nfp = 3
+ntor = 6
+max_iter = 80
+iter_list = [10, 20, 40]
+vmec_timeout = 420
+goal = "Free-boundary non-axisymmetric stress case for operator parity and scaling."
+
+[cases.env]
+VMEC_JAX_FREEB_USE_GREENF_SOURCE = "1"
+
+[[cases]]
+id = "freeb_nonaxis_lasym_true_missing_local"
+tier = "planning"
+enabled = false
+compare = "freeb_scalpot"
+source = "none"
+input = ""
+lfreeb = true
+lasym = true
+axisymmetric = false
+nfp = 0
+ntor = 0
+goal = "No self-contained local mgrid-backed non-axisymmetric LASYM=true free-boundary case currently available. Create synthetic variant from cth_like_free_bdy."
