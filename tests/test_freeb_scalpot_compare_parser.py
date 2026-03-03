@@ -1,0 +1,44 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+
+from tools.diagnostics.vmec2000_exec_freeb_scalpot_compare import _parse_fouri_dump
+
+
+def test_parse_fouri_dump_reads_gsource_source_and_bvecns(tmp_path: Path) -> None:
+    p = tmp_path / "fouri_iter53.dat"
+    p.write_text(
+        "\n".join(
+            [
+                "# fouri dump",
+                "iter2=53",
+                "mnpd=3",
+                "mnpd2=3",
+                "nuv3=4",
+                "ndim=1",
+                "[gsource]",
+                "1  1.0D+00",
+                "2  2.0D+00",
+                "3  3.0D+00",
+                "4  4.0D+00",
+                "[source_sym]",
+                "1  1.5D+00",
+                "2  2.5D+00",
+                "3  3.5D+00",
+                "4  4.5D+00",
+                "[bvecNS]",
+                "1  1.0D-01  2.0D-01",
+                "2  3.0D-01  4.0D-01",
+                "3  5.0D-01  6.0D-01",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    got = _parse_fouri_dump(p)
+    np.testing.assert_allclose(got["gsource"], np.array([1.0, 2.0, 3.0, 4.0]))
+    np.testing.assert_allclose(got["source_sym"], np.array([1.5, 2.5, 3.5, 4.5]))
+    np.testing.assert_allclose(got["bvecns_sin"], np.array([0.1, 0.3, 0.5]))
+    np.testing.assert_allclose(got["bvecns_cos"], np.array([0.2, 0.4, 0.6]))
