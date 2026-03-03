@@ -725,6 +725,22 @@ def _as_float_env(name: str, default: float) -> float:
         return float(default)
 
 
+def _parse_iter_list_env(name: str) -> set[int]:
+    raw = os.getenv(name, "").strip()
+    if raw == "":
+        return set()
+    out: set[int] = set()
+    for tok in raw.replace(";", ",").split(","):
+        t = tok.strip()
+        if not t:
+            continue
+        try:
+            out.add(int(t))
+        except Exception:
+            continue
+    return out
+
+
 def _select_nestor_mode(*, ntheta: int, nzeta: int) -> tuple[str, str]:
     """Pick free-boundary NESTOR model mode with fallback-friendly semantics."""
 
@@ -771,11 +787,102 @@ def _vacuum_channels_from_sample_phi(sample: ExternalBoundarySample, phi: np.nda
     )
 
 
+def _maybe_dump_scalpot_jax(
+    *,
+    iter_idx: int | None,
+    ivac: int,
+    reused: bool,
+    mode: str,
+    rhs: np.ndarray,
+    phi: np.ndarray,
+    vac: VacuumBoundaryFields,
+    cache: Any,
+    sample: ExternalBoundarySample,
+    mf: int,
+    nf: int,
+    nfp: int,
+    lasym: bool,
+) -> None:
+    env = os.getenv("VMEC_JAX_DUMP_SCALPOT", "").strip().lower()
+    if env in ("", "0", "false", "no"):
+        return
+    if iter_idx is None:
+        return
+    iters = _parse_iter_list_env("VMEC_JAX_DUMP_ITER")
+    if iters and int(iter_idx) not in iters:
+        return
+    outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    out = {
+        "iter": np.asarray(int(iter_idx), dtype=np.int64),
+        "ivac": np.asarray(int(ivac), dtype=np.int64),
+        "reused": np.asarray(1 if bool(reused) else 0, dtype=np.int64),
+        "mode": np.asarray(str(mode)),
+        "rhs": np.asarray(rhs, dtype=float),
+        "phi": np.asarray(phi, dtype=float),
+        "bu": np.asarray(vac.bu, dtype=float),
+        "bv": np.asarray(vac.bv, dtype=float),
+        "bsqvac": np.asarray(vac.bsqvac, dtype=float),
+        "bnormal_unit": np.asarray(vac.bnormal_unit, dtype=float),
+    }
+    if isinstance(cache, NestorVmecLikeCache):
+        out["cache_kind"] = np.asarray("dense")
+        out["matrix"] = np.asarray(cache.matrix, dtype=float)
+        out["rhs_scale"] = np.asarray(cache.rhs_scale, dtype=float)
+        try:
+            ntheta, nzeta = rhs.shape
+            theta = (2.0 * np.pi / float(max(1, ntheta))) * np.arange(ntheta, dtype=float)
+            zeta = np.asarray(sample.phi, dtype=float) * float(max(1, int(nfp)))
+            if zeta.shape != rhs.shape:
+                zeta = np.broadcast_to(zeta, rhs.shape)
+            th = np.broadcast_to(theta[:, None], rhs.shape).reshape(-1)
+            zz = zeta.reshape(-1)
+            w = np.asarray(cache.rhs_scale, dtype=float).reshape(-1)
+            rhs_f = np.asarray(rhs, dtype=float).reshape(-1)
+            nmode = (int(mf) + 1) * (2 * int(nf) + 1)
+            bsin = np.zeros((nmode,), dtype=float)
+            bcos = np.zeros((nmode,), dtype=float)
+            basis_s = np.zeros((rhs_f.size, nmode), dtype=float)
+            basis_c = np.zeros((rhs_f.size, nmode), dtype=float)
+            mn = 0
+            for n in range(-int(nf), int(nf) + 1):
+                for m in range(0, int(mf) + 1):
+                    ph = (float(m) * th) - (float(n) * zz)
+                    s = np.sin(ph)
+                    c = np.cos(ph)
+                    basis_s[:, mn] = s
+                    basis_c[:, mn] = c
+                    bsin[mn] = np.sum(w * rhs_f * s)
+                    bcos[mn] = np.sum(w * rhs_f * c)
+                    mn += 1
+            if bool(lasym):
+                B = np.concatenate([basis_s, basis_c], axis=1)
+                out["bvec_mode_sin"] = bsin
+                out["bvec_mode_cos"] = bcos
+            else:
+                B = basis_s
+                out["bvec_mode_sin"] = bsin
+            W = w[:, None]
+            A = np.asarray(cache.matrix, dtype=float)
+            amod = (B.T @ (W * (A @ B))) / float(max(1, rhs_f.size))
+            out["amatrix_mode"] = amod
+        except Exception:
+            pass
+    elif isinstance(cache, NestorPoissonCache):
+        out["cache_kind"] = np.asarray("spectral")
+        out["lam"] = np.asarray(cache.lam, dtype=float)
+    else:
+        out["cache_kind"] = np.asarray("unknown")
+    fpath = outdir / f"scalpot_jax_iter{int(iter_idx)}.npz"
+    np.savez_compressed(fpath, **out)
+
+
 def nestor_external_only_step(
     *,
     state: Any,
     static: Any,
     ivac: int,
+    iter_idx: int | None = None,
     runtime: NestorRuntimeState | None = None,
     extcur: tuple[float, ...] | None = None,
 ) -> tuple[NestorSolveResult, NestorRuntimeState]:
@@ -915,6 +1022,21 @@ def nestor_external_only_step(
         mode=used_mode,
         update_count=(0 if runtime is None else int(runtime.update_count)) + (0 if reuse_step else 1),
         reuse_count=(0 if runtime is None else int(runtime.reuse_count)) + (1 if reuse_step else 0),
+    )
+    _maybe_dump_scalpot_jax(
+        iter_idx=iter_idx,
+        ivac=int(ivac),
+        reused=bool(reuse_step),
+        mode=used_mode,
+        rhs=np.asarray(rhs, dtype=float),
+        phi=np.asarray(phi, dtype=float),
+        vac=vac_total,
+        cache=cache,
+        sample=sample,
+        mf=max(0, int(getattr(static.cfg, "mpol", 1)) + 1),
+        nf=max(0, int(getattr(static.cfg, "ntor", 0))),
+        nfp=max(1, int(getattr(static.cfg, "nfp", 1))),
+        lasym=bool(getattr(static.cfg, "lasym", False)),
     )
     return res, runtime_next
 

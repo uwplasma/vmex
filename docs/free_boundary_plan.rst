@@ -85,6 +85,30 @@ Micro-benchmark coverage:
 - Intended use is regression-style performance tracking during WP2/WP3
   integration; it is not a physics acceptance benchmark.
 
+WP2 dump-to-dump alignment harness
+----------------------------------
+
+A dedicated free-boundary comparator is now available:
+
+- ``tools/diagnostics/vmec2000_exec_freeb_scalpot_compare.py``
+
+It runs VMEC2000 with ``VMEC_DUMP_SCALPOT=1`` and vmec-jax with
+``VMEC_JAX_DUMP_SCALPOT=1`` on the same input, then reports deltas for:
+
+- scalpot RHS vector (VMEC mode space vs vmec-jax projected mode space),
+- scalpot matrix (VMEC LU-space matrix vs vmec-jax projected dense operator),
+- vacuum boundary ``bsqvac`` channel.
+
+Example benchmark (``input.cth_like_free_bdy``, iter 53 where vacuum turns on):
+
+- ``bvec rel_scaled``: ~``7.68e-01``
+- ``amatrix rel_scaled``: ~``6.80e-01``
+- ``bsqvac rel_scaled``: ~``1.25e-01``
+
+These values quantify the current WP2 gap and provide the baseline for the
+next parity increments (analytic source terms and Green-function kernel
+treatment).
+
 Scope and acceptance target
 ---------------------------
 
