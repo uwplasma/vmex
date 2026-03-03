@@ -247,6 +247,81 @@ This policy is consistent with VMEC2000 behavior near the axis and VMEC++
 documentation about reduced reliability of axis-adjacent Mercier-type
 diagnostics.
 
+Free-Boundary Scaffold (Current WP0/WP1)
+----------------------------------------
+
+The free-boundary implementation is in staged integration. The current code
+path validates free-boundary input + mgrid metadata and threads VMEC-style
+control variables through the solver diagnostics and resume state. NESTOR
+vacuum coupling is **not** active yet (diagnostics report
+``free_boundary.vacuum_stub = True``).
+
+Control law currently threaded (VMEC2000-compatible):
+
+.. math::
+
+   \mathrm{ivacskip}_k = \mathrm{mod}(iter2_k - iter1_k,\; nvacskip),
+   \qquad
+   \mathrm{ivac}_k =
+   \begin{cases}
+     1, & \mathrm{ivacskip}_k = 0 \\
+     2, & \mathrm{ivacskip}_k \neq 0
+   \end{cases}
+
+matching VMEC2000 ``funct3d`` cadence semantics (full vacuum update vs
+reused/skip update). These values are currently diagnostic-only.
+
+MGRID interpolation model
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For hook validation, ``vmec-jax`` now includes trilinear interpolation on the
+mgrid tensor :math:`B_{r,\phi,z}(k,j,i)` with periodic toroidal angle:
+
+.. math::
+
+   \phi \mapsto \phi \bmod \frac{2\pi}{NFP},
+
+and piecewise-linear weights along :math:`R`, :math:`Z`, and :math:`\phi`.
+Given coil-group weights ``EXTCUR``, the interpolated external field is:
+
+.. math::
+
+   \mathbf{B}_{ext}(R,Z,\phi)
+   = \sum_{g=1}^{N_{cur}} I_g \,\mathcal{I}_{tri}\!\left(\mathbf{B}_g; R,Z,\phi\right),
+
+where :math:`\mathcal{I}_{tri}` is trilinear interpolation on the mgrid cell.
+
+For a query point :math:`(R,Z,\phi)` in one mgrid cell with local normalized
+coordinates :math:`(\alpha,\beta,\gamma)\in[0,1]^3`, the interpolation used in
+``vmec_jax.free_boundary.interpolate_mgrid_bfield`` is
+
+.. math::
+
+   \mathcal{I}_{tri}(B)
+   = \sum_{p,q,r\in\{0,1\}}
+     w_p(\alpha)\,w_q(\beta)\,w_r(\gamma)\,B_{pqr},
+
+with
+
+.. math::
+
+   w_0(t)=1-t,\qquad w_1(t)=t.
+
+This is applied independently to :math:`B_R`, :math:`B_\phi`, and :math:`B_Z`,
+and the toroidal index wraps periodically before cell selection. The model is
+first-order accurate in grid spacing and exactly reproduces fields that are
+affine in each coordinate over a cell.
+
+Because interpolation + EXTCUR weighting are algebraic operations, the path is
+compatible with JAX transformations in downstream coupled implementations
+(``grad``, ``jit``, ``vmap``), once the vacuum coupling enters the force
+assembly in later work packages.
+
+Current boundary sampling uses edge-surface
+:math:`R(\theta,\zeta), Z(\theta,\zeta)` synthesis and
+:math:`\phi = \zeta/NFP` for one field period, producing a diagnostic
+external-field summary (RMS and extrema) without force coupling yet.
+
 Profiles and volume integrals
 -----------------------------
 

@@ -186,6 +186,97 @@ def _free_boundary_iter_controls(iter2: int, iter1: int, nvacskip: int) -> tuple
     return ivac, ivs
 
 
+def _sample_free_boundary_external_field(*, state: VMECState, static) -> dict[str, Any]:
+    """Sample external mgrid field on the current plasma boundary (diagnostic hook).
+
+    This is a WP1 placeholder for free-boundary coupling. It does not feed back
+    into forces yet; it provides a deterministic diagnostic that exercises:
+    - mgrid field loading,
+    - edge geometry evaluation,
+    - trilinear interpolation with EXTCUR weighting.
+    """
+
+    from .free_boundary import interpolate_mgrid_bfield, load_mgrid
+    from .vmec_realspace import vmec_realspace_synthesis
+    from .vmec_tomnsp import vmec_trig_tables
+
+    out: dict[str, Any] = {
+        "enabled": False,
+        "available": False,
+        "vacuum_stub": True,
+    }
+    meta = getattr(static, "mgrid_metadata", None)
+    if meta is None:
+        out["reason"] = "missing_mgrid_metadata"
+        return out
+    mgrid_path = str(getattr(meta, "path", "")).strip()
+    if not mgrid_path:
+        out["reason"] = "missing_mgrid_path"
+        return out
+    extcur = tuple(getattr(static, "free_boundary_extcur", ()) or ())
+    t0 = time.perf_counter()
+    try:
+        mgrid = load_mgrid(mgrid_path, load_fields=True)
+        trig = getattr(static, "trig_vmec", None)
+        if trig is None:
+            trig = vmec_trig_tables(
+                ntheta=int(static.cfg.ntheta),
+                nzeta=int(static.cfg.nzeta),
+                nfp=int(static.cfg.nfp),
+                mmax=int(static.cfg.mpol) - 1,
+                nmax=int(static.cfg.ntor),
+                lasym=bool(static.cfg.lasym),
+            )
+        r_edge = np.asarray(
+            vmec_realspace_synthesis(
+                coeff_cos=jnp.asarray(state.Rcos)[-1:, :],
+                coeff_sin=jnp.asarray(state.Rsin)[-1:, :],
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=False,
+            )[0]
+        )
+        z_edge = np.asarray(
+            vmec_realspace_synthesis(
+                coeff_cos=jnp.asarray(state.Zcos)[-1:, :],
+                coeff_sin=jnp.asarray(state.Zsin)[-1:, :],
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=False,
+            )[0]
+        )
+        nzeta = int(r_edge.shape[1])
+        zeta = (2.0 * np.pi / max(1, nzeta)) * np.arange(nzeta, dtype=float)
+        phi = zeta / max(1, int(static.cfg.nfp))
+        phi_grid = np.broadcast_to(phi[None, :], r_edge.shape)
+        br, bp, bz = interpolate_mgrid_bfield(
+            mgrid,
+            r=r_edge,
+            z=z_edge,
+            phi=phi_grid,
+            extcur=extcur,
+        )
+        bmag = np.sqrt(br * br + bp * bp + bz * bz)
+        out.update(
+            {
+                "enabled": True,
+                "available": True,
+                "mgrid_path": mgrid_path,
+                "n_samples": int(br.size),
+                "br_rms": float(np.sqrt(np.mean(br * br))),
+                "bp_rms": float(np.sqrt(np.mean(bp * bp))),
+                "bz_rms": float(np.sqrt(np.mean(bz * bz))),
+                "bmag_mean": float(np.mean(bmag)),
+                "bmag_max": float(np.max(bmag)),
+            }
+        )
+    except Exception as exc:
+        out["reason"] = "sample_failed"
+        out["error"] = str(exc)
+    out["sample_time_s"] = float(max(0.0, time.perf_counter() - t0))
+    return out
+
+
 def _maybe_dump_tomnsps(*, frzl, static, iter_idx: int, label: str = "raw") -> None:
     env = os.getenv("VMEC_JAX_DUMP_TOMNSPS", "")
     if not env or env == "0":
@@ -2790,7 +2881,7 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
         "precond_exponent": float(precond_exponent),
         "precond_radial_alpha": float(precond_radial_alpha),
     }
-    return SolveVmecResidualResult(
+    res_final = SolveVmecResidualResult(
         state=state,
         n_iter=len(w_history) - 1,
         w_history=np.asarray(w_history, dtype=float),
@@ -2801,6 +2892,7 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
         step_history=np.asarray(step_history, dtype=float),
         diagnostics=diag,
     )
+    return res_final
 
 
 def solve_fixed_boundary_gn_vmec_residual(
@@ -3533,6 +3625,37 @@ def solve_fixed_boundary_residual_iter(
     free_boundary_enabled = bool(getattr(cfg, "lfreeb", False))
     freeb_nvacskip = max(1, int(getattr(cfg, "nvacskip", int(getattr(cfg, "nfp", 1)))))
     freeb_nvskip0 = max(1, freeb_nvacskip)
+    freeb_sample_env = os.getenv("VMEC_JAX_FREEB_SAMPLE_EXTERNAL", "1").strip().lower()
+    freeb_sample_external = freeb_sample_env not in ("", "0", "false", "no")
+
+    def _attach_freeb_diag(res: SolveVmecResidualResult) -> SolveVmecResidualResult:
+        if not bool(free_boundary_enabled):
+            return res
+        diag_local = dict(res.diagnostics)
+        if "free_boundary_external_field" not in diag_local:
+            if bool(freeb_sample_external):
+                diag_local["free_boundary_external_field"] = _sample_free_boundary_external_field(
+                    state=res.state,
+                    static=static,
+                )
+            else:
+                diag_local["free_boundary_external_field"] = {
+                    "enabled": False,
+                    "available": False,
+                    "vacuum_stub": True,
+                    "reason": "disabled_by_env",
+                }
+        return SolveVmecResidualResult(
+            state=res.state,
+            n_iter=int(res.n_iter),
+            w_history=np.asarray(res.w_history),
+            fsqr2_history=np.asarray(res.fsqr2_history),
+            fsqz2_history=np.asarray(res.fsqz2_history),
+            fsql2_history=np.asarray(res.fsql2_history),
+            grad_rms_history=np.asarray(res.grad_rms_history),
+            step_history=np.asarray(res.step_history),
+            diagnostics=diag_local,
+        )
 
     idx00 = _mode00_index(static.modes)
     m_modes = np.asarray(getattr(static, "m_np", None) if getattr(static, "m_np", None) is not None else static.modes.m, dtype=int)
@@ -7752,7 +7875,7 @@ def solve_fixed_boundary_residual_iter(
             freeb_ivacskip_full = np.zeros((0,), dtype=int)
             freeb_ivac_full = np.zeros((0,), dtype=int)
 
-        return SolveVmecResidualResult(
+        res_scan = SolveVmecResidualResult(
             state=carry_final.state,
             n_iter=int(w_hist.shape[0]),
             w_history=np.asarray(w_hist),
@@ -7866,6 +7989,7 @@ def solve_fixed_boundary_residual_iter(
                 },
             },
         )
+        return _attach_freeb_diag(res_scan)
 
     if use_scan:
         if vmec2000_control:
@@ -7974,9 +8098,9 @@ def solve_fixed_boundary_residual_iter(
                     resume_state = None
                     state = state0
                 else:
-                    return scan_result
+                    return _attach_freeb_diag(scan_result)
             else:
-                return scan_result
+                return _attach_freeb_diag(scan_result)
 
         if use_scan:
             if backtracking or use_restart_triggers or auto_flip_force or limit_dt_from_force or limit_update_rms or strict_update or use_direct_fallback or reference_mode:
@@ -8126,7 +8250,7 @@ def solve_fixed_boundary_residual_iter(
             state_final, hist = _run_scan(state)
             fsqr_hist, fsqz_hist, fsql_hist = hist
             w_hist = fsqr_hist + fsqz_hist + fsql_hist
-            return SolveVmecResidualResult(
+            res_scan_fast = SolveVmecResidualResult(
                 state=state_final,
                 n_iter=int(max_iter),
                 w_history=np.asarray(w_hist),
@@ -8137,6 +8261,7 @@ def solve_fixed_boundary_residual_iter(
                 step_history=np.asarray([], dtype=float),
                 diagnostics={"use_scan": True},
             )
+            return _attach_freeb_diag(res_scan_fast)
 
     profile_window = os.getenv("VMEC_JAX_PROFILE_WINDOW", "").strip().lower()
     profile_dir_env = os.getenv("VMEC_JAX_PROFILE_DIR", "").strip()
@@ -10991,16 +11116,18 @@ def solve_fixed_boundary_residual_iter(
         "freeb_nvacskip": int(freeb_nvacskip),
         "freeb_nvskip0": int(freeb_nvskip0),
     }
-    return SolveVmecResidualResult(
-        state=state,
-        n_iter=len(w_history) - 1,
-        w_history=np.asarray(w_history, dtype=float),
-        fsqr2_history=np.asarray(fsqr2_history, dtype=float),
-        fsqz2_history=np.asarray(fsqz2_history, dtype=float),
-        fsql2_history=np.asarray(fsql2_history, dtype=float),
-        grad_rms_history=np.asarray(grad_rms_history, dtype=float),
-        step_history=np.asarray(step_history, dtype=float),
-        diagnostics=diag,
+    return _attach_freeb_diag(
+        SolveVmecResidualResult(
+            state=state,
+            n_iter=len(w_history) - 1,
+            w_history=np.asarray(w_history, dtype=float),
+            fsqr2_history=np.asarray(fsqr2_history, dtype=float),
+            fsqz2_history=np.asarray(fsqz2_history, dtype=float),
+            fsql2_history=np.asarray(fsql2_history, dtype=float),
+            grad_rms_history=np.asarray(grad_rms_history, dtype=float),
+            step_history=np.asarray(step_history, dtype=float),
+            diagnostics=diag,
+        )
     )
 
 
