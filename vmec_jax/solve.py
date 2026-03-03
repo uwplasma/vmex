@@ -9047,6 +9047,7 @@ def solve_fixed_boundary_residual_iter(
                         state=state,
                         static=static,
                         ivac=int(freeb_ivac),
+                        iter_idx=int(iter2),
                         runtime=freeb_nestor_runtime,
                         extcur=tuple(getattr(static, "free_boundary_extcur", ()) or ()),
                     )
