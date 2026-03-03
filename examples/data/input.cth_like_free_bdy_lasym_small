@@ -1,0 +1,85 @@
+&INDATA
+  MGRID_FILE = 'mgrid_cth_like_lasym_small.nc'
+  LFREEB = T
+  LASYM = T
+  DELT = 0.7
+  TCON0 = 1.0
+  NFP = 5
+
+  NS_ARRAY = 11
+  FTOL_ARRAY = 1.0E-8
+  NITER_ARRAY = 220
+
+  NSTEP = 50
+  NTOR = 2
+  MPOL = 3
+  NZETA = 20
+  NTHETA = 16
+  NVACSKIP = 5
+
+  EXTCUR = 4500.0
+
+  GAMMA = 0.0
+  PHIEDGE = -0.02
+  BLOAT = 1.0
+
+  NCURR = 1
+  CURTOR = 12000.0
+  AC = 1.0, 3.0, 3.0
+  PCURR_TYPE = 'two_power'
+
+  SPRES_PED = 1.0
+  AM = 1.0, 2.0, 2.0
+  PRES_SCALE = 80.0
+  PMASS_TYPE = 'two_power'
+
+  RAXIS_CC(0) = 1.00
+  RAXIS_CC(1) = -0.02
+  RAXIS_CC(2) = 0.002
+  ZAXIS_CS(0) = 0.0
+  ZAXIS_CS(1) = 0.02
+  ZAXIS_CS(2) = -0.001
+  RAXIS_CS(1) = 0.005
+  ZAXIS_CC(1) = -0.004
+
+  RBC(0,0) = 1.00
+  ZBS(0,0) = 0.0
+  RBS(0,0) = 0.0
+  ZBC(0,0) = 0.0
+
+  RBC(1,0) = 0.16
+  ZBS(1,0) = -0.16
+  RBS(1,0) = 0.012
+  ZBC(1,0) = -0.011
+
+  RBC(2,0) = 0.02
+  ZBS(2,0) = -0.015
+  RBS(2,0) = 0.003
+  ZBC(2,0) = -0.002
+
+  RBC(0,1) = 0.03
+  ZBS(0,1) = 0.035
+  RBS(0,1) = 0.004
+  ZBC(0,1) = -0.003
+
+  RBC(1,1) = -0.015
+  ZBS(1,1) = 0.012
+  RBS(1,1) = 0.005
+  ZBC(1,1) = -0.004
+
+  RBC(2,1) = 0.004
+  ZBS(2,1) = -0.003
+  RBS(2,1) = 0.002
+  ZBC(2,1) = -0.001
+
+  RBC(0,2) = 0.006
+  ZBS(0,2) = -0.005
+  RBS(0,2) = 0.001
+  ZBC(0,2) = -0.001
+
+  RBC(1,2) = -0.003
+  ZBS(1,2) = 0.002
+  RBS(1,2) = 0.001
+  ZBC(1,2) = -0.001
+/
+&END

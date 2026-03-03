@@ -62,6 +62,56 @@ def _parse_manifest(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     return meta, cases
 
 
+def _evaluate_freeb_thresholds(case: dict[str, Any], runs: list[dict[str, Any]]) -> tuple[bool, dict[str, Any]]:
+    """Evaluate free-boundary metric thresholds against run JSON payloads.
+
+    Manifest schema (per case):
+      [cases.metric_thresholds_rel_scaled]
+      source_sym = 1e-2
+      bvec_nonsing_fouri = 1e-2
+      amatrix = 2e-1
+      potvac = 1.0
+    """
+
+    thr = case.get("metric_thresholds_rel_scaled", {})
+    if not isinstance(thr, dict) or not thr:
+        return True, {}
+
+    report: dict[str, Any] = {}
+    all_ok = True
+    for key, lim in thr.items():
+        metric_key = str(key)
+        limit = float(lim)
+        observed_vals: list[float] = []
+        observed_iters: list[int | None] = []
+        for rec in runs:
+            payload = rec.get("metrics_full", {})
+            if not isinstance(payload, dict):
+                continue
+            m = payload.get(metric_key)
+            if not isinstance(m, dict):
+                continue
+            if "rel_scaled" not in m:
+                continue
+            observed_vals.append(float(m["rel_scaled"]))
+            observed_iters.append(rec.get("iter"))
+        if observed_vals:
+            observed_max = float(max(abs(v) for v in observed_vals))
+            ok = bool(observed_max <= limit)
+        else:
+            observed_max = float("nan")
+            ok = False
+        report[metric_key] = {
+            "limit_rel_scaled": limit,
+            "observed_max_rel_scaled": observed_max,
+            "observed_iters": observed_iters,
+            "pass": ok,
+        }
+        if not ok:
+            all_ok = False
+    return all_ok, report
+
+
 def _build_stage_trace_cmd(case: dict[str, Any], *, vmec_exec: Path, workdir: Path) -> list[str]:
     script = REPO_ROOT / "tools" / "diagnostics" / "vmec2000_exec_stage_trace_compare.py"
     cmd = [
@@ -171,7 +221,7 @@ def main() -> int:
     meta, cases = _parse_manifest(manifest_path)
 
     vmec_exec = args.vmec_exec.resolve()
-    if not vmec_exec.exists():
+    if (not args.dry_run) and (not vmec_exec.exists()):
         raise SystemExit(f"missing VMEC2000 executable: {vmec_exec}")
 
     selected_ids = [x.strip() for x in str(args.ids).split(",") if x.strip()]
@@ -302,12 +352,17 @@ def main() -> int:
                             if key in payload:
                                 metric_excerpt[key] = payload[key]
                         rec["metrics"] = metric_excerpt
+                        rec["metrics_full"] = payload
                     print(f"  iter={iter_idx} rc={rc} runtime={rec['runtime_s']:.2f}s")
                 if rc != 0:
                     all_ok = False
                 case_rec["runs"].append(rec)
-            case_rec["status"] = "pass" if all_ok else "fail"
-            if not all_ok:
+            thresholds_ok, thresholds_report = _evaluate_freeb_thresholds(case, case_rec["runs"])
+            if thresholds_report:
+                case_rec["metric_thresholds_rel_scaled"] = thresholds_report
+            case_ok = bool(all_ok and thresholds_ok)
+            case_rec["status"] = "pass" if case_ok else "fail"
+            if not case_ok:
                 n_fail += 1
         else:
             print(f"  SKIP unsupported compare mode: {compare}")

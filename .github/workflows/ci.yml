@@ -14,6 +14,21 @@ env:
   LANG: C.UTF-8
 
 jobs:
+  parity-smoke:
+    name: Parity Manifest Smoke (dry-run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Manifest smoke sweep (dry-run)
+        run: |
+          python tools/diagnostics/parity_sweep_manifest.py --tier smoke --max-cases 4 --dry-run --vmec-exec /usr/bin/true
+
   test:
     name: Tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
