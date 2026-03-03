@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from contextlib import contextmanager
@@ -662,9 +663,10 @@ def vmec_forces_rz_from_wout(
         this parity mode, lambda-force kernels (`blmn/clmn`) are also formed
         from averaged `wout` `bsub*` fields.
     freeb_bsqvac_half:
-        Optional half-mesh free-boundary vacuum ``|B|^2`` proxy. If provided,
-        only the edge slice ``freeb_bsqvac_half[-1]`` is used to override
-        edge ``bsq`` in `bcovar`.
+        Optional half-mesh free-boundary vacuum ``0.5*|B|^2`` proxy. If
+        provided, the edge slice ``freeb_bsqvac_half[-1]`` is used to
+        override the edge constraint-pressure channel ``gcon`` (VMEC
+        funct3d-style coupling) while keeping `bcovar` unchanged.
     """
     s = jnp.asarray(static.s)
     ohs = jnp.asarray(1.0 / (s[1] - s[0])) if s.shape[0] >= 2 else jnp.asarray(0.0)
@@ -730,7 +732,7 @@ def vmec_forces_rz_from_wout(
             static=static,
             wout=wout_eff,
             pres=pres_half,
-            freeb_bsqvac_edge=None if freeb_bsqvac_half is None else jnp.asarray(freeb_bsqvac_half)[-1],
+            freeb_bsqvac_edge=None,
             use_wout_bsup=use_wout_bsup,
             use_wout_bsub_for_lambda=use_wout_bsup,
             use_wout_bmag_for_bsq=use_wout_bsup,
@@ -1043,6 +1045,65 @@ def vmec_forces_rz_from_wout(
         czmn_e = jnp.asarray(lu_e)
         crmn_o = -lamscale * jnp.asarray(Lv1)
         czmn_o = jnp.asarray(lu_o)
+
+    # Free-boundary edge forcing (VMEC forces.f): add rbsq terms to A-kernels.
+    if freeb_bsqvac_half is not None:
+        vac_edge = jnp.asarray(freeb_bsqvac_half)[-1]
+        if vac_edge.shape != pr1_0[-1].shape:
+            raise ValueError(
+                f"freeb_bsqvac_half edge shape mismatch: expected {pr1_0[-1].shape}, got {vac_edge.shape}"
+            )
+        pres = jnp.asarray(getattr(wout, "pres", jnp.zeros((int(s.shape[0]),), dtype=vac_edge.dtype)))
+        pres_edge = jnp.asarray(pres[-1], dtype=vac_edge.dtype) if pres.ndim > 0 else jnp.asarray(pres, dtype=vac_edge.dtype)
+        gcon_edge = vac_edge + pres_edge
+        rbsq_scale = float(os.getenv("VMEC_JAX_FREEB_RBSQ_SCALE", "1.0") or 1.0)
+        rbsq_edge = (
+            gcon_edge
+            * (pr1_0[-1] + pr1_1[-1])
+            * jnp.asarray(ohs, dtype=vac_edge.dtype)
+            * jnp.asarray(rbsq_scale, dtype=vac_edge.dtype)
+        )
+        # VMEC free-boundary edge terms use physical ru0/zu0 on the edge.
+        ru0_edge = vmec_realspace_synthesis_dtheta(
+            coeff_cos=jnp.asarray(state_geom.Rcos)[-1:, :],
+            coeff_sin=jnp.asarray(state_geom.Rsin)[-1:, :],
+            modes=static.modes,
+            trig=trig,
+            coeffs_internal=True,
+            apply_scalxc=False,
+            s=s,
+        )[0]
+        zu0_edge = vmec_realspace_synthesis_dtheta(
+            coeff_cos=jnp.asarray(state_geom.Zcos)[-1:, :],
+            coeff_sin=jnp.asarray(state_geom.Zsin)[-1:, :],
+            modes=static.modes,
+            trig=trig,
+            coeffs_internal=True,
+            apply_scalxc=False,
+            s=s,
+        )[0]
+        if iter_idx is not None:
+            env = os.getenv("VMEC_JAX_DUMP_FREEB_COUPLING", "").strip().lower()
+            if env not in ("", "0", "false", "no"):
+                outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+                outdir.mkdir(parents=True, exist_ok=True)
+                np.savez(
+                    outdir / f"freeb_coupling_iter{int(iter_idx)}.npz",
+                    gcon_edge=np.asarray(gcon_edge),
+                    rbsq_edge=np.asarray(rbsq_edge),
+                    bsqvac_edge=np.asarray(vac_edge),
+                    pres_edge=np.asarray(pres_edge),
+                    pr1_even_edge=np.asarray(pr1_0[-1]),
+                    pr1_odd_edge=np.asarray(pr1_1[-1]),
+                    pzu0_edge=np.asarray(pzu_0[-1]),
+                    pru0_edge=np.asarray(pru_0[-1]),
+                    zu0_phys_edge=np.asarray(zu0_edge),
+                    ru0_phys_edge=np.asarray(ru0_edge),
+                )
+        armn_e = armn_e.at[-1].add(zu0_edge * rbsq_edge)
+        armn_o = armn_o.at[-1].add(zu0_edge * rbsq_edge)
+        azmn_e = azmn_e.at[-1].add(-ru0_edge * rbsq_edge)
+        azmn_o = azmn_o.at[-1].add(-ru0_edge * rbsq_edge)
 
     # ---------------------------------------------------------------------
     # Constraint force pipeline: compute gcon from ztemp via alias and apply

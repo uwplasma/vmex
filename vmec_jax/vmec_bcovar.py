@@ -286,9 +286,10 @@ def vmec_bcovar_half_mesh_from_wout(
         this parity path, instead of deriving ``|B|^2`` from
         ``bsup/bsub`` products.
     freeb_bsqvac_edge:
-        Optional free-boundary vacuum ``|B|^2`` proxy on the edge surface
-        `(ntheta, nzeta)`. When provided, the half-mesh edge ``bsq`` is
-        overridden as ``0.5*freeb_bsqvac_edge + p_edge``.
+        Optional free-boundary vacuum boundary ``0.5*|B|^2`` on the edge
+        surface `(ntheta, nzeta)` (VMEC ``bsqvac`` convention). When provided,
+        the half-mesh edge ``bsq`` is overridden as
+        ``freeb_bsqvac_edge + p_edge``.
     trig:
         Optional precomputed VMEC trig tables. If omitted and
         ``use_vmec_synthesis=True``, they are built internally.
@@ -912,7 +913,7 @@ def vmec_bcovar_half_mesh_from_wout(
                 "freeb_bsqvac_edge shape mismatch: "
                 f"expected {bsq.shape[1:]}, got {vac_edge.shape}"
             )
-        bsq_edge = 0.5 * vac_edge + pres_h[-1]
+        bsq_edge = vac_edge + pres_h[-1]
         bsq = bsq.at[-1, :, :].set(bsq_edge)
 
     # Force-kernel inputs matching what `forces.f` expects after `bcovar`.
