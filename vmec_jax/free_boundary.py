@@ -96,6 +96,14 @@ class ExternalBoundarySample:
     br: np.ndarray
     bp: np.ndarray
     bz: np.ndarray
+    br_mgrid: np.ndarray
+    bp_mgrid: np.ndarray
+    bz_mgrid: np.ndarray
+    br_axis: np.ndarray
+    bp_axis: np.ndarray
+    bz_axis: np.ndarray
+    axis_r: np.ndarray
+    axis_z: np.ndarray
     vac_ext: VacuumBoundaryFields
 
 
@@ -319,6 +327,94 @@ def interpolate_mgrid_bfield(
     return br, bp, bz
 
 
+def _axis_current_field_simple(
+    *,
+    R: np.ndarray,
+    Z: np.ndarray,
+    phi: np.ndarray,
+    axis_r: np.ndarray,
+    axis_z: np.ndarray,
+    nfp: int,
+    plascur: float,
+    eps: float = 1.0e-18,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Finite-segment Biot-Savart axis-current field (VMEC++ simple path).
+
+    The net toroidal plasma current is modeled as a filament on the magnetic
+    axis, replicated over all field periods and evaluated at the plasma
+    boundary points.
+    """
+
+    R = np.asarray(R, dtype=float)
+    Z = np.asarray(Z, dtype=float)
+    phi = np.asarray(phi, dtype=float)
+    axis_r = np.asarray(axis_r, dtype=float).reshape(-1)
+    axis_z = np.asarray(axis_z, dtype=float).reshape(-1)
+
+    if R.ndim != 2 or Z.shape != R.shape or phi.shape != R.shape:
+        raise ValueError("R/Z/phi must be 2D arrays with matching shape")
+    ntheta, nzeta = R.shape
+    if axis_r.size != nzeta or axis_z.size != nzeta:
+        raise ValueError(
+            f"axis arrays must match nzeta={nzeta}: got {axis_r.size}, {axis_z.size}"
+        )
+
+    mu0 = 4.0e-7 * np.pi
+    # VMEC's `ctor/plascur` sign convention is opposite to the geometric
+    # right-hand rule used by this explicit filament formula.
+    current_amp = -float(plascur) / mu0
+    if (not np.isfinite(current_amp)) or abs(current_amp) <= 0.0:
+        z = np.zeros_like(R)
+        return z, z, z
+
+    phi_row = np.asarray(phi[0], dtype=float)
+    x0 = axis_r * np.cos(phi_row)
+    y0 = axis_r * np.sin(phi_row)
+    z0 = axis_z
+
+    nfp = max(1, int(nfp))
+    axis_xyz = np.zeros((nfp * nzeta, 3), dtype=float)
+    for p in range(nfp):
+        ang = 2.0 * np.pi * float(p) / float(nfp)
+        cp = np.cos(ang)
+        sp = np.sin(ang)
+        sl = slice(p * nzeta, (p + 1) * nzeta)
+        axis_xyz[sl, 0] = cp * x0 - sp * y0
+        axis_xyz[sl, 1] = sp * x0 + cp * y0
+        axis_xyz[sl, 2] = z0
+    axis_xyz = np.vstack([axis_xyz, axis_xyz[:1, :]])
+
+    rq = R.reshape(-1)
+    zq = Z.reshape(-1)
+    pq = phi.reshape(-1)
+    qxyz = np.stack([rq * np.cos(pq), rq * np.sin(pq), zq], axis=1)
+
+    bxyz = np.zeros_like(qxyz, dtype=float)
+    magnetic_field_scale = 1.0e-7 * current_amp * 2.0
+    for sidx in range(axis_xyz.shape[0] - 1):
+        p0 = axis_xyz[sidx]
+        p1 = axis_xyz[sidx + 1]
+        dseg = p1 - p0
+        seg_len2 = float(np.dot(dseg, dseg))
+        ri = qxyz - p0[None, :]
+        rf = qxyz - p1[None, :]
+        ri_norm = np.linalg.norm(ri, axis=1)
+        rf_norm = np.linalg.norm(rf, axis=1)
+        sum_rf = ri_norm + rf_norm
+        denom = ri_norm * rf_norm * (sum_rf * sum_rf - seg_len2)
+        mag = np.zeros_like(denom)
+        mask = np.abs(denom) > float(eps)
+        mag[mask] = magnetic_field_scale * sum_rf[mask] / denom[mask]
+        bxyz += mag[:, None] * np.cross(dseg[None, :], ri)
+
+    cp = np.cos(pq)
+    sp = np.sin(pq)
+    br = cp * bxyz[:, 0] + sp * bxyz[:, 1]
+    bp = cp * bxyz[:, 1] - sp * bxyz[:, 0]
+    bz = bxyz[:, 2]
+    return br.reshape((ntheta, nzeta)), bp.reshape((ntheta, nzeta)), bz.reshape((ntheta, nzeta))
+
+
 def boundary_metric_from_rz(
     *,
     R: Any,
@@ -442,7 +538,8 @@ def vacuum_boundary_fields_from_cylindrical(
         g_vv=g_vv,
         det_floor=det_floor,
     )
-    bsqvac = bu * bsupu + bv * bsupv
+    # VMEC vacuum.f stores bsqvac as 0.5*|B|^2 on the boundary.
+    bsqvac = 0.5 * (bu * bsupu + bv * bsupv)
 
     # Non-unit boundary normal from x_u x x_v in cylindrical components.
     n_r = -R * Zu
@@ -473,9 +570,11 @@ def _sample_external_boundary_arrays(
     state: Any,
     static: Any,
     extcur: tuple[float, ...] | None = None,
+    plascur: float = 0.0,
 ) -> ExternalBoundarySample:
     """Return full boundary arrays for external mgrid field sampling."""
 
+    from .vmec_parity import vmec_m1_internal_to_physical_signed
     from .vmec_realspace import (
         vmec_realspace_synthesis,
         vmec_realspace_synthesis_dtheta,
@@ -510,10 +609,21 @@ def _sample_external_boundary_arrays(
             lasym=bool(static.cfg.lasym),
         )
 
+    Rcos_phys, Zsin_phys, Rsin_phys, Zcos_phys = vmec_m1_internal_to_physical_signed(
+        Rcos=np.asarray(state.Rcos),
+        Zsin=np.asarray(state.Zsin),
+        Rsin=np.asarray(state.Rsin),
+        Zcos=np.asarray(state.Zcos),
+        modes=static.modes,
+        lthreed=bool(getattr(static.cfg, "lthreed", True)),
+        lasym=bool(getattr(static.cfg, "lasym", False)),
+        lconm1=bool(getattr(static.cfg, "lconm1", True)),
+    )
+
     R = np.asarray(
         vmec_realspace_synthesis(
-            coeff_cos=np.asarray(state.Rcos)[-1:, :],
-            coeff_sin=np.asarray(state.Rsin)[-1:, :],
+            coeff_cos=np.asarray(Rcos_phys)[-1:, :],
+            coeff_sin=np.asarray(Rsin_phys)[-1:, :],
             modes=static.modes,
             trig=trig,
             coeffs_internal=True,
@@ -521,8 +631,8 @@ def _sample_external_boundary_arrays(
     )
     Z = np.asarray(
         vmec_realspace_synthesis(
-            coeff_cos=np.asarray(state.Zcos)[-1:, :],
-            coeff_sin=np.asarray(state.Zsin)[-1:, :],
+            coeff_cos=np.asarray(Zcos_phys)[-1:, :],
+            coeff_sin=np.asarray(Zsin_phys)[-1:, :],
             modes=static.modes,
             trig=trig,
             coeffs_internal=True,
@@ -530,8 +640,8 @@ def _sample_external_boundary_arrays(
     )
     Ru = np.asarray(
         vmec_realspace_synthesis_dtheta(
-            coeff_cos=np.asarray(state.Rcos)[-1:, :],
-            coeff_sin=np.asarray(state.Rsin)[-1:, :],
+            coeff_cos=np.asarray(Rcos_phys)[-1:, :],
+            coeff_sin=np.asarray(Rsin_phys)[-1:, :],
             modes=static.modes,
             trig=trig,
             coeffs_internal=True,
@@ -539,8 +649,8 @@ def _sample_external_boundary_arrays(
     )
     Zu = np.asarray(
         vmec_realspace_synthesis_dtheta(
-            coeff_cos=np.asarray(state.Zcos)[-1:, :],
-            coeff_sin=np.asarray(state.Zsin)[-1:, :],
+            coeff_cos=np.asarray(Zcos_phys)[-1:, :],
+            coeff_sin=np.asarray(Zsin_phys)[-1:, :],
             modes=static.modes,
             trig=trig,
             coeffs_internal=True,
@@ -548,8 +658,8 @@ def _sample_external_boundary_arrays(
     )
     Rv = np.asarray(
         vmec_realspace_synthesis_dzeta_phys(
-            coeff_cos=np.asarray(state.Rcos)[-1:, :],
-            coeff_sin=np.asarray(state.Rsin)[-1:, :],
+            coeff_cos=np.asarray(Rcos_phys)[-1:, :],
+            coeff_sin=np.asarray(Rsin_phys)[-1:, :],
             modes=static.modes,
             trig=trig,
             coeffs_internal=True,
@@ -557,8 +667,8 @@ def _sample_external_boundary_arrays(
     )
     Zv = np.asarray(
         vmec_realspace_synthesis_dzeta_phys(
-            coeff_cos=np.asarray(state.Zcos)[-1:, :],
-            coeff_sin=np.asarray(state.Zsin)[-1:, :],
+            coeff_cos=np.asarray(Zcos_phys)[-1:, :],
+            coeff_sin=np.asarray(Zsin_phys)[-1:, :],
             modes=static.modes,
             trig=trig,
             coeffs_internal=True,
@@ -570,7 +680,7 @@ def _sample_external_boundary_arrays(
     phi = zeta / max(1, int(static.cfg.nfp))
     phi_grid = np.broadcast_to(phi[None, :], R.shape)
 
-    br, bp, bz = interpolate_mgrid_bfield(
+    br_mgrid, bp_mgrid, bz_mgrid = interpolate_mgrid_bfield(
         mgrid,
         r=R,
         z=Z,
@@ -578,6 +688,38 @@ def _sample_external_boundary_arrays(
         extcur=extcur_eff,
         use_vmec_kv=True,
     )
+    axis_r = np.asarray(
+        vmec_realspace_synthesis(
+            coeff_cos=np.asarray(Rcos_phys)[:1, :],
+            coeff_sin=np.asarray(Rsin_phys)[:1, :],
+            modes=static.modes,
+            trig=trig,
+            coeffs_internal=True,
+            apply_scalxc=True,
+        )[0, 0, :]
+    )
+    axis_z = np.asarray(
+        vmec_realspace_synthesis(
+            coeff_cos=np.asarray(Zcos_phys)[:1, :],
+            coeff_sin=np.asarray(Zsin_phys)[:1, :],
+            modes=static.modes,
+            trig=trig,
+            coeffs_internal=True,
+            apply_scalxc=True,
+        )[0, 0, :]
+    )
+    br_axis, bp_axis, bz_axis = _axis_current_field_simple(
+        R=R,
+        Z=Z,
+        phi=phi_grid,
+        axis_r=axis_r,
+        axis_z=axis_z,
+        nfp=int(static.cfg.nfp),
+        plascur=float(plascur),
+    )
+    br = np.asarray(br_mgrid, dtype=float) + np.asarray(br_axis, dtype=float)
+    bp = np.asarray(bp_mgrid, dtype=float) + np.asarray(bp_axis, dtype=float)
+    bz = np.asarray(bz_mgrid, dtype=float) + np.asarray(bz_axis, dtype=float)
     vac = vacuum_boundary_fields_from_cylindrical(
         br=br,
         bp=bp,
@@ -600,6 +742,14 @@ def _sample_external_boundary_arrays(
         br=br,
         bp=bp,
         bz=bz,
+        br_mgrid=np.asarray(br_mgrid, dtype=float),
+        bp_mgrid=np.asarray(bp_mgrid, dtype=float),
+        bz_mgrid=np.asarray(bz_mgrid, dtype=float),
+        br_axis=np.asarray(br_axis, dtype=float),
+        bp_axis=np.asarray(bp_axis, dtype=float),
+        bz_axis=np.asarray(bz_axis, dtype=float),
+        axis_r=np.asarray(axis_r, dtype=float),
+        axis_z=np.asarray(axis_z, dtype=float),
         vac_ext=vac,
     )
 
@@ -790,7 +940,8 @@ def _vacuum_channels_from_sample_phi(sample: ExternalBoundarySample, phi: np.nda
         g_uv=sample.vac_ext.g_uv,
         g_vv=sample.vac_ext.g_vv,
     )
-    bsqvac = bu * bsupu + bv * bsupv
+    # Keep parity with VMEC vacuum.f convention: bsqvac = 0.5*|B|^2.
+    bsqvac = 0.5 * (bu * bsupu + bv * bsupv)
     return VacuumBoundaryFields(
         bu=bu,
         bv=bv,
@@ -849,6 +1000,14 @@ def _maybe_dump_scalpot_jax(
         "br": np.asarray(sample.br, dtype=float),
         "bp": np.asarray(sample.bp, dtype=float),
         "bz": np.asarray(sample.bz, dtype=float),
+        "br_mgrid": np.asarray(sample.br_mgrid, dtype=float),
+        "bp_mgrid": np.asarray(sample.bp_mgrid, dtype=float),
+        "bz_mgrid": np.asarray(sample.bz_mgrid, dtype=float),
+        "br_axis": np.asarray(sample.br_axis, dtype=float),
+        "bp_axis": np.asarray(sample.bp_axis, dtype=float),
+        "bz_axis": np.asarray(sample.bz_axis, dtype=float),
+        "axis_r": np.asarray(sample.axis_r, dtype=float),
+        "axis_z": np.asarray(sample.axis_z, dtype=float),
         "bexu_ext": np.asarray(sample.vac_ext.bu, dtype=float),
         "bexv_ext": np.asarray(sample.vac_ext.bv, dtype=float),
         "bexn_ext": np.asarray(-sample.vac_ext.bnormal, dtype=float),
@@ -946,9 +1105,11 @@ def nestor_external_only_step(
     state: Any,
     static: Any,
     ivac: int,
+    ivacskip: int | None = None,
     iter_idx: int | None = None,
     runtime: NestorRuntimeState | None = None,
     extcur: tuple[float, ...] | None = None,
+    plascur: float = 0.0,
 ) -> tuple[NestorSolveResult, NestorRuntimeState]:
     """Simplified NESTOR-style update/reuse with ivacskip-compatible behavior.
 
@@ -1009,7 +1170,12 @@ def nestor_external_only_step(
         return res, runtime_next
 
     t0 = time.perf_counter()
-    sample = _sample_external_boundary_arrays(state=state, static=static, extcur=extcur)
+    sample = _sample_external_boundary_arrays(
+        state=state,
+        static=static,
+        extcur=extcur,
+        plascur=float(plascur),
+    )
     sample_time = max(0.0, time.perf_counter() - t0)
     ntheta, nzeta = sample.R.shape
     selected_mode, mode_reason = _select_nestor_mode(ntheta=ntheta, nzeta=nzeta)
@@ -1027,7 +1193,10 @@ def nestor_external_only_step(
     if mode_reason not in ("forced_fast", "forced_vmec_like", "auto_vmec_like"):
         used_mode = f"{selected_mode}_fallback:{mode_reason}"
     cache: Any = runtime_cache
-    reuse_step = (int(ivac) != 1 and runtime is not None)
+    if ivacskip is not None:
+        reuse_step = (int(ivacskip) != 0 and runtime is not None)
+    else:
+        reuse_step = (int(ivac) != 1 and runtime is not None)
 
     # On ivacskip reuse, emulate VMEC2000 scalpot behavior by reusing the cached
     # operator while refreshing the source term / solve.
@@ -1117,6 +1286,7 @@ def sample_external_vacuum_diagnostics(
     state: Any,
     static: Any,
     extcur: tuple[float, ...] | None = None,
+    plascur: float = 0.0,
 ) -> dict[str, Any]:
     """Sample external mgrid field on plasma boundary and derive vacuum channels.
 
@@ -1133,7 +1303,12 @@ def sample_external_vacuum_diagnostics(
 
     t0 = time.perf_counter()
     try:
-        sample = _sample_external_boundary_arrays(state=state, static=static, extcur=extcur)
+        sample = _sample_external_boundary_arrays(
+            state=state,
+            static=static,
+            extcur=extcur,
+            plascur=float(plascur),
+        )
         vac = sample.vac_ext
         br = sample.br
         bp = sample.bp
@@ -1148,6 +1323,9 @@ def sample_external_vacuum_diagnostics(
                 "br_rms": float(np.sqrt(np.mean(br * br))),
                 "bp_rms": float(np.sqrt(np.mean(bp * bp))),
                 "bz_rms": float(np.sqrt(np.mean(bz * bz))),
+                "br_axis_rms": float(np.sqrt(np.mean(sample.br_axis * sample.br_axis))),
+                "bp_axis_rms": float(np.sqrt(np.mean(sample.bp_axis * sample.bp_axis))),
+                "bz_axis_rms": float(np.sqrt(np.mean(sample.bz_axis * sample.bz_axis))),
                 "bmag_mean": float(np.mean(bmag)),
                 "bmag_max": float(np.max(bmag)),
                 "bu_rms": float(np.sqrt(np.mean(vac.bu * vac.bu))),

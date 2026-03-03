@@ -17,6 +17,7 @@ from vmec_jax.free_boundary import (
     load_mgrid,
     nestor_external_only_step,
     prepare_mgrid_for_config,
+    sample_external_vacuum_diagnostics,
     vacuum_boundary_fields_from_cylindrical,
 )
 from vmec_jax.namelist import read_indata
@@ -110,7 +111,7 @@ def test_free_boundary_iter_controls_vmec_threshold_and_skip_logic():
         nvskip0=nvskip0,
         fsq_rz_prev=1.0e-4,
     )
-    assert ivac == 0
+    assert ivac == 1
     assert ivacskip == 0
 
     ivac, ivacskip, nvacskip = _free_boundary_iter_controls_vmec(
@@ -121,7 +122,7 @@ def test_free_boundary_iter_controls_vmec_threshold_and_skip_logic():
         nvskip0=nvskip0,
         fsq_rz_prev=1.0e-4,
     )
-    assert ivac == 1
+    assert ivac == 2
     assert ivacskip == 0
 
     ivac, ivacskip, nvacskip = _free_boundary_iter_controls_vmec(
@@ -132,8 +133,8 @@ def test_free_boundary_iter_controls_vmec_threshold_and_skip_logic():
         nvskip0=nvskip0,
         fsq_rz_prev=1.0e-4,
     )
-    assert ivac == 2
-    assert ivacskip == 0
+    assert ivac == 3
+    assert ivacskip == (4 - 1) % nvacskip
 
     # After ivac>2, reuse cadence can become nonzero.
     ivac, ivacskip, nvacskip = _free_boundary_iter_controls_vmec(
@@ -144,7 +145,7 @@ def test_free_boundary_iter_controls_vmec_threshold_and_skip_logic():
         nvskip0=nvskip0,
         fsq_rz_prev=1.0e-4,
     )
-    assert ivac == 3
+    assert ivac == 4
     assert ivacskip == (5 - 1) % nvacskip
 
 
@@ -649,7 +650,8 @@ def test_boundary_vacuum_projection_toroidal_field():
         Rv=Rv,
         Zv=Zv,
     )
-    np.testing.assert_allclose(vac.bsqvac, bphi0 * bphi0, rtol=1e-12, atol=1e-12)
+    # VMEC vacuum convention stores bsqvac = 0.5*|B|^2.
+    np.testing.assert_allclose(vac.bsqvac, 0.5 * bphi0 * bphi0, rtol=1e-12, atol=1e-12)
     np.testing.assert_allclose(vac.bnormal, 0.0, rtol=1e-12, atol=1e-12)
     np.testing.assert_allclose(vac.bnormal_unit, 0.0, rtol=1e-12, atol=1e-12)
 
@@ -930,6 +932,147 @@ def test_nestor_vmec2000_like_mode_and_fallback(tmp_path: Path, monkeypatch):
     step_fb, rt_fb = nestor_external_only_step(state=state, static=static, ivac=1, runtime=None)
     assert str(step_fb.model).startswith("spectral_poisson_external_only_fallback")
     assert str(rt_fb.mode).startswith("spectral_poisson_external_only_fallback")
+
+
+def test_freeb_axis_current_sampling_changes_boundary_field(tmp_path: Path):
+    netCDF4 = pytest.importorskip("netCDF4", reason="netCDF4 required for mgrid loader test")
+
+    mg = tmp_path / "mgrid_fb_axis_current.nc"
+    with netCDF4.Dataset(str(mg), mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createDimension("stringsize", 8)
+        ds.createDimension("external_coil_groups", 1)
+        ds.createDimension("dim_00001", 1)
+        ds.createDimension("external_coils", 1)
+        ds.createDimension("rad", 2)
+        ds.createDimension("zee", 2)
+        ds.createDimension("phi", 4)
+        for name, value in (
+            ("ir", 2),
+            ("jz", 2),
+            ("kp", 4),
+            ("nfp", 1),
+            ("nextcur", 1),
+        ):
+            ds.createVariable(name, "i4", ()).assignValue(value)
+        for name, value in (("rmin", 1.0), ("rmax", 12.0), ("zmin", -3.0), ("zmax", 3.0)):
+            ds.createVariable(name, "f8", ()).assignValue(value)
+        # Keep mgrid contribution zero so the axis-current effect is isolated.
+        ds.createVariable("br_001", "f8", ("phi", "zee", "rad"))[:] = 0.0
+        ds.createVariable("bp_001", "f8", ("phi", "zee", "rad"))[:] = 0.0
+        ds.createVariable("bz_001", "f8", ("phi", "zee", "rad"))[:] = 0.0
+
+    inpath = tmp_path / "input.fb_axis_current"
+    inpath.write_text(
+        f"""
+&INDATA
+  NFP = 1
+  MPOL = 5
+  NTOR = 0
+  NS = 9
+  NZETA = 4
+  NTHETA = 8
+  LASYM = F
+  LFREEB = T
+  MGRID_FILE = '{mg}'
+  NVACSKIP = 2
+  RBC(0,0) = 6.0
+  ZBS(1,0) = 2.0
+/
+"""
+    )
+
+    run = run_fixed_boundary(
+        inpath,
+        solver="vmec2000_iter",
+        max_iter=1,
+        multigrid=False,
+        verbose=False,
+    )
+    state = run.result.state
+    static = run.static
+
+    d0 = sample_external_vacuum_diagnostics(state=state, static=static, plascur=0.0)
+    d1 = sample_external_vacuum_diagnostics(state=state, static=static, plascur=0.2)
+
+    assert float(d0.get("br_axis_rms", 0.0)) == pytest.approx(0.0, abs=1e-14)
+    assert float(d0.get("bp_axis_rms", 0.0)) == pytest.approx(0.0, abs=1e-14)
+    assert float(d0.get("bz_axis_rms", 0.0)) == pytest.approx(0.0, abs=1e-14)
+    axis_rms_sum = (
+        float(d1.get("br_axis_rms", 0.0))
+        + float(d1.get("bp_axis_rms", 0.0))
+        + float(d1.get("bz_axis_rms", 0.0))
+    )
+    assert axis_rms_sum > 0.0
+
+
+def test_freeb_turnon_restart_sets_iter1_and_reuse_step(tmp_path: Path, monkeypatch):
+    netCDF4 = pytest.importorskip("netCDF4", reason="netCDF4 required for mgrid loader test")
+
+    mg = tmp_path / "mgrid_fb_turnon.nc"
+    with netCDF4.Dataset(str(mg), mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createDimension("stringsize", 8)
+        ds.createDimension("external_coil_groups", 1)
+        ds.createDimension("dim_00001", 1)
+        ds.createDimension("external_coils", 1)
+        ds.createDimension("rad", 2)
+        ds.createDimension("zee", 2)
+        ds.createDimension("phi", 4)
+        for name, value in (
+            ("ir", 2),
+            ("jz", 2),
+            ("kp", 4),
+            ("nfp", 1),
+            ("nextcur", 1),
+        ):
+            ds.createVariable(name, "i4", ()).assignValue(value)
+        for name, value in (("rmin", 1.0), ("rmax", 10.0), ("zmin", -3.0), ("zmax", 3.0)):
+            ds.createVariable(name, "f8", ()).assignValue(value)
+        ds.createVariable("br_001", "f8", ("phi", "zee", "rad"))[:] = 0.0
+        ds.createVariable("bp_001", "f8", ("phi", "zee", "rad"))[:] = 0.0
+        ds.createVariable("bz_001", "f8", ("phi", "zee", "rad"))[:] = 0.0
+
+    inpath = tmp_path / "input.fb_turnon"
+    inpath.write_text(
+        f"""
+&INDATA
+  NFP = 1
+  MPOL = 5
+  NTOR = 0
+  NS = 9
+  NZETA = 4
+  NTHETA = 8
+  LASYM = F
+  LFREEB = T
+  MGRID_FILE = '{mg}'
+  NVACSKIP = 3
+  RBC(0,0) = 6.0
+  ZBS(1,0) = 2.0
+/
+"""
+    )
+
+    monkeypatch.setenv("VMEC_JAX_FREEB_ACTIVATE_FSQ", "1.0e8")
+    monkeypatch.setenv("VMEC_JAX_FREEB_NESTOR_MODE", "vmec2000_like")
+    monkeypatch.setenv("VMEC_JAX_FREEB_VMEC_LIKE_MAX_POINTS", "1000000")
+
+    run = run_fixed_boundary(
+        inpath,
+        solver="vmec2000_iter",
+        max_iter=6,
+        multigrid=False,
+        verbose=False,
+    )
+    diag = run.result.diagnostics
+    ivac = np.asarray(diag["freeb_ivac_history"], dtype=int)
+    ivacskip = np.asarray(diag["freeb_ivacskip_history"], dtype=int)
+    reused = np.asarray(diag["freeb_nestor_reused_history"], dtype=int)
+
+    turnon_idx = np.where(ivac == 1)[0]
+    assert turnon_idx.size >= 1
+    k = int(turnon_idx[0])
+    if (k + 1) < ivac.size:
+        assert int(ivacskip[k + 1]) == 1
+        assert int(reused[k + 1]) == 1
 
 
 def test_run_fixed_boundary_freeb_edge_coupling_diag(tmp_path: Path):

@@ -255,13 +255,17 @@ path. It still follows staged VMEC2000 parity work, but ``bsqvac`` is now
 computed and coupled into the edge force channel in fixed-boundary iterations
 when ``LFREEB=T``.
 
-Control law currently threaded (VMEC2000 ``funct3d`` compatible for
-``ictrl_prec2d=0`` path):
+Control law currently threaded (VMEC2000 ``funct3d`` + ``eqsolve`` compatible
+for ``ictrl_prec2d=0`` path):
 
 .. math::
 
-   \mathrm{if}\; iter2_k>1 \;\mathrm{and}\; (fsqr_{k-1}+fsqz_{k-1})\le 10^{-3},
-   \quad ivac_k \leftarrow ivac_{k-1}+1
+   \mathrm{if}\; iter2_k>1:
+   \quad
+   \begin{cases}
+   ivac_k \leftarrow 1, & ivac_{k-1}<0\;\wedge\;(fsqr_{k-1}+fsqz_{k-1})\le f_{\mathrm{act}},\\
+   ivac_k \leftarrow ivac_{k-1}+1, & ivac_{k-1}\ge 0.
+   \end{cases}
 
 and, for :math:`ivac_k \ge 0`:
 
@@ -279,8 +283,44 @@ VMEC:
    nvacskip_k \leftarrow \max\!\left(nvskip0,\;
    \left\lfloor\frac{1}{\max(10^{-1},\,10^{11}(fsqr_{k-1}+fsqz_{k-1}))}\right\rfloor\right).
 
-This yields the same operational phases as VMEC2000: delayed vacuum turn-on,
-forced full updates while ``ivac<=2``, then periodic reuse updates.
+When ``ivac==1`` (vacuum turn-on iteration), vmec-jax applies the VMEC
+``restart_iter(irst=2)`` analog used in free-boundary runs: the state is reset
+to the checkpoint, pseudo-velocities are zeroed, ``delt`` is reduced by ``0.9``,
+``iter1`` is set to ``iter2``, and ``ijacob`` is incremented. This yields the
+same operational phases as VMEC2000: delayed vacuum turn-on, forced full
+updates while ``ivac<=2``, then periodic reuse updates.
+
+In vmec-jax the default activation threshold is
+:math:`f_{\mathrm{act}}=5\times 10^{-4}` (override with
+``VMEC_JAX_FREEB_ACTIVATE_FSQ``). This reproduces VMEC2000 turn-on timing on
+the current free-boundary parity cases and keeps ``ivac/ivacskip`` reuse
+cadence aligned with VMEC diagnostics.
+
+Axis-current contribution (VMEC ``tolicu``/``belicu`` port)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+VMEC2000 ``bextern.f`` combines two sources on the plasma boundary:
+
+.. math::
+
+   \mathbf{B}_{ext} = \mathbf{B}_{mgrid} + \mathbf{B}_{axis\ current}.
+
+The axis-current term is modeled as a filament along the magnetic axis and is
+evaluated with a finite-segment Biot-Savart formula (matching VMEC++'s simple
+``AddAxisCurrentFieldSimple`` path):
+
+.. math::
+
+   \Delta \mathbf{B}
+   = \frac{\mu_0 I}{4\pi}\,2\,
+     \frac{r_i+r_f}{r_i r_f\left((r_i+r_f)^2-\ell^2\right)}
+     \left(\Delta\mathbf{s}\times\mathbf{r}_i\right),
+
+for each segment :math:`\Delta\mathbf{s}` of the axis polygon, with endpoint
+distances :math:`r_i,r_f` from the evaluation point and segment length
+:math:`\ell`. vmec-jax replicates the axis polygon over all field periods and
+adds this term to interpolated mgrid fields before computing
+:math:`(B_u,B_v,B_n)` and ``bexni``.
 
 MGRID interpolation model
 ~~~~~~~~~~~~~~~~~~~~~~~~~

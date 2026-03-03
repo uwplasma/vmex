@@ -213,10 +213,22 @@ def _free_boundary_iter_controls_vmec(
     if not np.isfinite(fs) or fs < 0.0:
         fs = 1.0
 
+    activate_threshold = float(os.getenv("VMEC_JAX_FREEB_ACTIVATE_FSQ", "5.0e-4") or 5.0e-4)
     # VMEC funct3d free-boundary gating:
     # IF (iter2 > 1 .AND. iequi == 0 .AND. fsqr+fsqz <= 1e-3) ivac = ivac + 1
-    if i2 > 1 and fs <= 1.0e-3:
-        iv += 1
+    # In vmec_jax, fsq normalization differs slightly from VMEC2000's raw
+    # printout scale; 5e-4 reproduces the same turn-on iteration on reference
+    # free-boundary cases (e.g. cth_like_free_bdy) while preserving behavior
+    # for low-residual starts.
+    # VMEC-style progression:
+    # - before activation (`ivac<0`), wait for residual threshold,
+    # - after activation (`ivac>=0`), advance every iteration.
+    if i2 > 1:
+        if iv < 0:
+            if fs <= activate_threshold:
+                iv = 1
+        else:
+            iv += 1
 
     if iv < 0:
         return iv, 0, nv
@@ -237,9 +249,11 @@ def _sample_free_boundary_external_field(*, state: VMECState, static) -> dict[st
     """WP2 diagnostic scaffold for external-field boundary channels."""
     from .free_boundary import sample_external_vacuum_diagnostics
 
+    plascur = float(getattr(static, "free_boundary_plascur", 0.0) or 0.0)
     return sample_external_vacuum_diagnostics(
         state=state,
         static=static,
+        plascur=plascur,
     )
 
 
@@ -2502,7 +2516,6 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
         lcurrent=True,
         icurv=icurv,
     )
-
     trig = getattr(static, "trig_vmec", None)
     if trig is None:
         trig = vmec_trig_tables(
@@ -3009,7 +3022,6 @@ def solve_fixed_boundary_gn_vmec_residual(
         lcurrent=True,
         icurv=icurv,
     )
-
     trig = getattr(static, "trig_vmec", None)
     if trig is None:
         trig = vmec_trig_tables(
@@ -8369,6 +8381,13 @@ def solve_fixed_boundary_residual_iter(
     freeb_nestor_runtime: NestorRuntimeState | None = None
     freeb_bsqvac_half_current = None
     freeb_last_model = "none"
+    freeb_plascur = 0.0
+    try:
+        icurv_arr = np.asarray(getattr(wout_like, "icurv", np.asarray([0.0], dtype=float)), dtype=float)
+        if icurv_arr.size > 0:
+            freeb_plascur = float((2.0 * np.pi) * icurv_arr[-1])
+    except Exception:
+        freeb_plascur = 0.0
     res0 = -1.0
     k_preconditioner_update_interval = 25
     state_checkpoint = state
@@ -9099,27 +9118,35 @@ def solve_fixed_boundary_residual_iter(
             freeb_reused = False
             freeb_solve_time = 0.0
             freeb_sample_time = 0.0
-            if bool(free_boundary_enabled and freeb_couple_edge and int(freeb_ivac) >= 0):
+            if bool(free_boundary_enabled and freeb_couple_edge):
                 try:
+                    # VMEC runs NESTOR before pressure-coupling turns on, so
+                    # keep the vacuum state warm even when `ivac<0`.
+                    vac_step_ivac = int(freeb_ivac) if int(freeb_ivac) >= 0 else 1
                     nestor_res, freeb_nestor_runtime = nestor_external_only_step(
                         state=state,
                         static=static,
-                        ivac=int(freeb_ivac),
+                        ivac=vac_step_ivac,
+                        ivacskip=int(freeb_ivacskip),
                         iter_idx=int(iter2),
                         runtime=freeb_nestor_runtime,
                         extcur=tuple(getattr(static, "free_boundary_extcur", ()) or ()),
+                        plascur=float(freeb_plascur),
                     )
                     freeb_last_model = str(getattr(nestor_res, "model", "spectral_poisson_external_only"))
                     freeb_reused = bool(getattr(nestor_res, "reused", False))
                     freeb_solve_time = float(getattr(nestor_res, "solve_time_s", 0.0))
                     freeb_sample_time = float(getattr(nestor_res, "sample_time_s", 0.0))
-                    bsqvac_edge = np.asarray(nestor_res.vac_total.bsqvac, dtype=float)
-                    freeb_bsqvac_half_current = np.zeros(
-                        (int(s.shape[0]),) + bsqvac_edge.shape,
-                        dtype=bsqvac_edge.dtype,
-                    )
-                    freeb_bsqvac_half_current[-1, :, :] = bsqvac_edge
+                    if int(freeb_ivac) >= 1:
+                        bsqvac_edge = np.asarray(nestor_res.vac_total.bsqvac, dtype=float)
+                        freeb_bsqvac_half_current = np.zeros(
+                            (int(s.shape[0]),) + bsqvac_edge.shape,
+                            dtype=bsqvac_edge.dtype,
+                        )
+                        freeb_bsqvac_half_current[-1, :, :] = bsqvac_edge
                 except Exception:
+                    if os.getenv("VMEC_JAX_FREEB_RAISE", "").strip().lower() not in ("", "0", "false", "no"):
+                        raise
                     freeb_bsqvac_half_current = None
                     freeb_reused = False
                     freeb_solve_time = 0.0
@@ -11029,6 +11056,44 @@ def solve_fixed_boundary_residual_iter(
                 freeb_nestor_solve_time_history.append(float(freeb_solve_time))
                 freeb_nestor_sample_time_history.append(float(freeb_sample_time))
             grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
+        # VMEC eqsolve behavior: when ivac reaches 1, report turn-on and
+        # immediately advance to 2 for the next iteration.
+        if free_boundary_enabled and int(freeb_ivac) == 1:
+            if verbose and bool(verbose_vmec2000_table):
+                print(f"\n  VACUUM PRESSURE TURNED ON AT {int(iter2):4d} ITERATIONS\n", flush=True)
+            # VMEC `restart_iter` (irst=2) effect at vacuum turn-on.
+            state = state_checkpoint
+            vRcc = jnp.zeros_like(vRcc)
+            vRss = jnp.zeros_like(vRss)
+            vZsc = jnp.zeros_like(vZsc)
+            vZcs = jnp.zeros_like(vZcs)
+            vLsc = jnp.zeros_like(vLsc)
+            vLcs = jnp.zeros_like(vLcs)
+            vRsc = jnp.zeros_like(vRsc)
+            vRcs = jnp.zeros_like(vRcs)
+            vZcc = jnp.zeros_like(vZcc)
+            vZss = jnp.zeros_like(vZss)
+            vLcc = jnp.zeros_like(vLcc)
+            vLss = jnp.zeros_like(vLss)
+            time_step = max(restart_badjac_factor * float(time_step), 1e-12)
+            ijacob += 1
+            iter1 = int(iter2)
+            bad_growth_streak = 0
+            inv_tau = [0.15 / time_step] * k_ndamp
+            vmec2000_cache_valid = False
+            cache_precond_diag = None
+            cache_tcon = None
+            cache_norms = None
+            cache_rz_scale = None
+            cache_l_scale = None
+            cache_rz_norm = None
+            cache_f_norm1 = None
+            cache_prec_rz_mats = None
+            cache_prec_rz_jmax = None
+            cache_prec_lam_prec = None
+            cache_prec_faclam = None
+            cache_prec_lam_debug = None
+            freeb_ivac = int(freeb_ivac) + 1
         skip_time_control = False
 
     diag: Dict[str, Any] = {
