@@ -17,6 +17,12 @@ import numpy as np
 from .boundary import boundary_from_indata
 from .config import VMECConfig, load_config
 from .energy import flux_profiles_from_indata
+from .free_boundary import (
+    MGridMetadata,
+    PreparedMGrid,
+    prepare_mgrid_for_config,
+    validate_free_boundary_config,
+)
 from .geom import eval_geom
 from .init_guess import initial_guess_from_boundary
 from .multigrid import interp_vmec_state
@@ -305,7 +311,10 @@ def load_example(
     """Load a bundled example case (config + static + optional wout/state)."""
     input_path, wout_path = example_paths(case, root=root)
     cfg, indata = load_config(str(input_path))
-    static = build_static(cfg, grid=grid)
+    prepared_fb = prepare_mgrid_for_config(cfg, load_fields=False, strict=False)
+    fb_meta = prepared_fb.metadata if isinstance(prepared_fb, PreparedMGrid) else None
+    fb_extcur = prepared_fb.extcur if isinstance(prepared_fb, PreparedMGrid) else None
+    static = build_static(cfg, grid=grid, mgrid_metadata=fb_meta, free_boundary_extcur=fb_extcur)
     if with_wout and wout_path is not None:
         wout = read_wout(wout_path)
         state = state_from_wout(wout)
@@ -617,6 +626,16 @@ def run_fixed_boundary(
             stage_transition_heuristic = False
     stage_transition_heuristic = bool(stage_transition_heuristic)
 
+    fb_strict_env = os.getenv("VMEC_JAX_FREEB_STRICT", "1").strip().lower()
+    fb_strict = fb_strict_env not in ("", "0", "false", "no")
+    validate_free_boundary_config(cfg, strict=fb_strict)
+    prepared_fb = prepare_mgrid_for_config(cfg, load_fields=False, strict=fb_strict)
+    fb_meta: MGridMetadata | None = None
+    fb_extcur: tuple[float, ...] | None = None
+    if isinstance(prepared_fb, PreparedMGrid):
+        fb_meta = prepared_fb.metadata
+        fb_extcur = prepared_fb.extcur
+
     # Build the initial state on either the final grid (single-grid solvers and
     # use_initial_guess) or on the first multigrid stage for VMEC-style solves.
     ns_stages = [int(cfg.ns)]
@@ -671,6 +690,16 @@ def run_fixed_boundary(
     prof = None
     pressure = None
 
+    def _build_static_cfg(cfg_in: VMECConfig) -> VMECStatic:
+        if bool(cfg_in.lfreeb):
+            return build_static(
+                cfg_in,
+                grid=grid,
+                mgrid_metadata=fb_meta,
+                free_boundary_extcur=fb_extcur,
+            )
+        return build_static(cfg_in, grid=grid)
+
     def _profiles_from_static(static_in: VMECStatic):
         flux_local = flux_profiles_from_indata(indata, static_in.s, signgs=signgs)
         # VMEC evaluates pressure/iota/current profiles on the radial half mesh.
@@ -686,7 +715,7 @@ def run_fixed_boundary(
     def _ensure_static_profiles() -> None:
         nonlocal static, bdy, flux, prof, pressure
         if static is None:
-            static = build_static(cfg, grid=grid)
+            static = _build_static_cfg(cfg)
         if bdy is None:
             bdy = boundary_from_indata(indata, static.modes)
         if flux is None or prof is None or pressure is None:
@@ -1024,7 +1053,7 @@ def run_fixed_boundary(
                     )
 
             cfg_i = replace(cfg, ns=int(ns_i))
-            static_i = build_static(cfg_i, grid=grid)
+            static_i = _build_static_cfg(cfg_i)
             scan_mode = bool(use_scan)
             if bool(cfg.lasym):
                 # LASYM scan parity is still being finalized; default to the
@@ -1495,7 +1524,7 @@ def run_fixed_boundary(
         if use_scan_any and bool(scan_wout_corrector):
             try:
                 resume_state_corr = res.diagnostics.get("resume_state", None)
-                static_corr = static_prev if static_prev is not None else build_static(cfg, grid=grid)
+                static_corr = static_prev if static_prev is not None else _build_static_cfg(cfg)
                 ftol_corr = float(ftol_last) if ftol_last is not None else float(indata.get_float("FTOL", 1e-13))
                 step_corr = float(step_size_last) if step_size_last is not None else 1.0
                 corr_kwargs = dict(
@@ -1553,7 +1582,7 @@ def run_fixed_boundary(
                 )
             except Exception:
                 pass
-        static = build_static(cfg, grid=grid)
+        static = _build_static_cfg(cfg)
         if verbose and solver == "vmec2000_iter":
             converged = bool(res.diagnostics.get("converged", False))
             if not converged:
@@ -1601,7 +1630,7 @@ def run_fixed_boundary(
 
     if flux is None or prof is None or pressure is None:
         if static is None:
-            static = build_static(cfg, grid=grid)
+            static = _build_static_cfg(cfg)
         flux, prof, pressure = _profiles_from_static(static)
 
     return FixedBoundaryRun(

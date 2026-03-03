@@ -71,8 +71,10 @@ from .free_boundary import (
     FreeBoundaryRuntimeState,
     MGridMetadata,
     MGridData,
+    PreparedMGrid,
     initial_free_boundary_state,
     load_mgrid,
+    prepare_mgrid_for_config,
     validate_free_boundary_config,
 )
 from .init_guess import initial_guess_from_boundary
@@ -188,8 +190,10 @@ __all__ = [
     "FreeBoundaryRuntimeState",
     "MGridMetadata",
     "MGridData",
+    "PreparedMGrid",
     "initial_free_boundary_state",
     "load_mgrid",
+    "prepare_mgrid_for_config",
     "validate_free_boundary_config",
     "initial_guess_from_boundary",
     "BoundaryParamSpec",

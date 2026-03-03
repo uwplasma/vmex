@@ -6,7 +6,13 @@ import numpy as np
 import pytest
 
 from vmec_jax.config import config_from_indata
-from vmec_jax.free_boundary import MGridData, MGridMetadata, load_mgrid
+from vmec_jax.free_boundary import (
+    MGridData,
+    MGridMetadata,
+    PreparedMGrid,
+    load_mgrid,
+    prepare_mgrid_for_config,
+)
 from vmec_jax.namelist import read_indata
 from vmec_jax.static import build_static
 
@@ -132,3 +138,92 @@ def test_mgrid_loader_skeleton(tmp_path: Path):
     assert data.bz.shape == (2, 2, 4, 3)
     # Check one value round-trips correctly.
     assert float(data.br[1, 1, 3, 2]) == pytest.approx(200 + (1 * 12 + 3 * 3 + 2))
+
+
+def test_prepare_mgrid_for_config_validates_and_normalizes_extcur(tmp_path: Path):
+    netCDF4 = pytest.importorskip("netCDF4", reason="netCDF4 required for mgrid loader test")
+
+    mg = tmp_path / "mgrid_test.nc"
+    with netCDF4.Dataset(str(mg), mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createDimension("stringsize", 8)
+        ds.createDimension("external_coil_groups", 2)
+        ds.createDimension("dim_00001", 1)
+        ds.createDimension("external_coils", 2)
+        ds.createDimension("rad", 2)
+        ds.createDimension("zee", 3)
+        ds.createDimension("phi", 6)
+        for name, value in (
+            ("ir", 2),
+            ("jz", 3),
+            ("kp", 6),
+            ("nfp", 3),
+            ("nextcur", 2),
+        ):
+            v = ds.createVariable(name, "i4", ())
+            v.assignValue(value)
+        for name, value in (("rmin", 1.0), ("rmax", 2.0), ("zmin", -1.0), ("zmax", 1.0)):
+            v = ds.createVariable(name, "f8", ())
+            v.assignValue(value)
+
+    txt = f"""
+&INDATA
+  NFP = 3
+  MPOL = 5
+  NTOR = 1
+  NS = 9
+  NZETA = 3
+  LFREEB = T
+  MGRID_FILE = '{mg}'
+  EXTCUR(1) = 5.0
+/
+"""
+    p = tmp_path / "input.fb_prepare"
+    p.write_text(txt)
+    cfg = config_from_indata(read_indata(p))
+    prepared = prepare_mgrid_for_config(cfg, load_fields=False, strict=True)
+    assert isinstance(prepared, PreparedMGrid)
+    assert prepared.metadata.nextcur == 2
+    assert prepared.extcur == (5.0, 0.0)
+
+
+def test_prepare_mgrid_for_config_rejects_nfp_mismatch(tmp_path: Path):
+    netCDF4 = pytest.importorskip("netCDF4", reason="netCDF4 required for mgrid loader test")
+
+    mg = tmp_path / "mgrid_bad_nfp.nc"
+    with netCDF4.Dataset(str(mg), mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createDimension("stringsize", 4)
+        ds.createDimension("external_coil_groups", 1)
+        ds.createDimension("dim_00001", 1)
+        ds.createDimension("external_coils", 1)
+        ds.createDimension("rad", 2)
+        ds.createDimension("zee", 2)
+        ds.createDimension("phi", 4)
+        for name, value in (
+            ("ir", 2),
+            ("jz", 2),
+            ("kp", 4),
+            ("nfp", 7),
+            ("nextcur", 1),
+        ):
+            v = ds.createVariable(name, "i4", ())
+            v.assignValue(value)
+        for name, value in (("rmin", 1.0), ("rmax", 2.0), ("zmin", -1.0), ("zmax", 1.0)):
+            v = ds.createVariable(name, "f8", ())
+            v.assignValue(value)
+
+    txt = f"""
+&INDATA
+  NFP = 2
+  MPOL = 5
+  NTOR = 1
+  NS = 9
+  NZETA = 2
+  LFREEB = T
+  MGRID_FILE = '{mg}'
+/
+"""
+    p = tmp_path / "input.fb_bad_nfp"
+    p.write_text(txt)
+    cfg = config_from_indata(read_indata(p))
+    with pytest.raises(ValueError, match="MGRID nfp"):
+        prepare_mgrid_for_config(cfg, load_fields=False, strict=True)
