@@ -178,6 +178,11 @@ def test_vmec_mode_basis_and_bvec_skip_modes():
         lasym=False,
         wint=wint,
     )
+    # VMEC precal convention: reduced nu3 grid uses full nu spacing.
+    assert int(basis["nu_full"]) == 2 * (ntheta - 1)
+    assert int(basis["nuv3"]) == ntheta * nzeta
+    assert int(basis["nuv_full"]) == int(basis["nu_full"]) * nzeta
+    assert np.asarray(basis["imirr_full"]).shape == (int(basis["nuv_full"]),)
     gsource = np.ones((ntheta, nzeta), dtype=float)
     bvec = _vmec_bvec_from_gsource(gsource=gsource, basis=basis)
     assert bvec.shape == (basis["mnpd"],)

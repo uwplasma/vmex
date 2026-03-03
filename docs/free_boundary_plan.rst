@@ -116,6 +116,8 @@ Example benchmark (``input.cth_like_free_bdy``, iter 53 where vacuum turns on):
 Current deep-dump status (same case/iter):
 
 - upstream geometry/external channels are close (``bex*`` O(1e-3...1e-2)),
+- VMEC ``precal`` basis tables are now matched in JAX for free-boundary mode
+  (``sinmni/cosmni`` on the reduced ``nu3`` grid with VMEC ``nu`` spacing),
 - ``amatrix`` projected shape/scaling is close after scalar normalization,
 - ``gsource``/``source_sym`` are still far from VMEC (O(1)),
   indicating the main remaining gap is the VMEC ``greenf/fourp/fouri``
