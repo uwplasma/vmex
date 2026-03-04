@@ -10,6 +10,7 @@ from vmec_jax.free_boundary import (
     MGridData,
     MGridMetadata,
     PreparedMGrid,
+    _axis_current_field_vmec_filament,
     _build_vmec_mode_basis,
     _vmec_bvec_from_gsource,
     boundary_metric_from_rz,
@@ -741,6 +742,27 @@ def test_interpolate_mgrid_bfield_allows_single_toroidal_plane():
     np.testing.assert_allclose(br_q, 3.0, rtol=0.0, atol=1e-14)
     np.testing.assert_allclose(bp_q, -2.0, rtol=0.0, atol=1e-14)
     np.testing.assert_allclose(bz_q, 7.5, rtol=0.0, atol=1e-14)
+
+
+def test_axis_current_vmec_filament_nonzero_for_nzeta1():
+    # VMEC precal/tolicu uses nvper=64 when nv=1 (axisymmetric vacuum). Ensure
+    # the JAX filament path remains non-degenerate for nzeta=1.
+    ntheta = 8
+    nzeta = 1
+    R = np.full((ntheta, nzeta), 2.0, dtype=float)
+    Z = np.linspace(-0.25, 0.25, ntheta, dtype=float).reshape(ntheta, nzeta)
+    axis_r = np.asarray([1.0], dtype=float)
+    axis_z = np.asarray([0.0], dtype=float)
+    br, bp, bz = _axis_current_field_vmec_filament(
+        R=R,
+        Z=Z,
+        axis_r=axis_r,
+        axis_z=axis_z,
+        nfp=1,
+        plascur=0.3,
+    )
+    total_rms = float(np.sqrt(np.mean(br * br + bp * bp + bz * bz)))
+    assert total_rms > 0.0
 
 
 def test_boundary_vacuum_projection_toroidal_field():
