@@ -104,9 +104,22 @@ def test_free_boundary_iter_controls_vmec_threshold_and_skip_logic():
     assert ivacskip == 0
     assert nvacskip == 9
 
-    # Turn-on ramp starts once residual is small enough and iter2>1.
+    # VMEC funct3d increments ivac by +1 whenever residual is below threshold.
+    # Starting from ivac=-1, the first low-residual step moves to ivac=0.
     ivac, ivacskip, nvacskip = _free_boundary_iter_controls_vmec(
         iter2=2,
+        iter1=1,
+        ivac=ivac,
+        nvacskip=nvacskip,
+        nvskip0=nvskip0,
+        fsq_rz_prev=1.0e-4,
+    )
+    assert ivac == 0
+    assert ivacskip == 0
+
+    # Next low-residual step reaches ivac=1 (vacuum turn-on point).
+    ivac, ivacskip, nvacskip = _free_boundary_iter_controls_vmec(
+        iter2=3,
         iter1=1,
         ivac=ivac,
         nvacskip=nvacskip,
@@ -116,8 +129,9 @@ def test_free_boundary_iter_controls_vmec_threshold_and_skip_logic():
     assert ivac == 1
     assert ivacskip == 0
 
+    # ivac<=2 forces full updates.
     ivac, ivacskip, nvacskip = _free_boundary_iter_controls_vmec(
-        iter2=3,
+        iter2=4,
         iter1=1,
         ivac=ivac,
         nvacskip=nvacskip,
@@ -128,18 +142,6 @@ def test_free_boundary_iter_controls_vmec_threshold_and_skip_logic():
     assert ivacskip == 0
 
     ivac, ivacskip, nvacskip = _free_boundary_iter_controls_vmec(
-        iter2=4,
-        iter1=1,
-        ivac=ivac,
-        nvacskip=nvacskip,
-        nvskip0=nvskip0,
-        fsq_rz_prev=1.0e-4,
-    )
-    assert ivac == 3
-    assert ivacskip == (4 - 1) % nvacskip
-
-    # After ivac>2, reuse cadence can become nonzero.
-    ivac, ivacskip, nvacskip = _free_boundary_iter_controls_vmec(
         iter2=5,
         iter1=1,
         ivac=ivac,
@@ -147,8 +149,20 @@ def test_free_boundary_iter_controls_vmec_threshold_and_skip_logic():
         nvskip0=nvskip0,
         fsq_rz_prev=1.0e-4,
     )
-    assert ivac == 4
+    assert ivac == 3
     assert ivacskip == (5 - 1) % nvacskip
+
+    # After ivac>2, reuse cadence can become nonzero.
+    ivac, ivacskip, nvacskip = _free_boundary_iter_controls_vmec(
+        iter2=6,
+        iter1=1,
+        ivac=ivac,
+        nvacskip=nvacskip,
+        nvskip0=nvskip0,
+        fsq_rz_prev=1.0e-4,
+    )
+    assert ivac == 4
+    assert ivacskip == (6 - 1) % nvacskip
 
 
 def test_free_boundary_iter_controls_vmec_updates_nvacskip_on_full_step():
@@ -1115,8 +1129,13 @@ def test_freeb_turnon_restart_sets_iter1_and_reuse_step(tmp_path: Path, monkeypa
     assert turnon_idx.size >= 1
     k = int(turnon_idx[0])
     if (k + 1) < ivac.size:
-        assert int(ivacskip[k + 1]) == 1
-        assert int(reused[k + 1]) == 1
+        # VMEC keeps full vacuum updates while ivac<=2.
+        assert int(ivacskip[k + 1]) == 0
+        assert int(reused[k + 1]) == 0
+    # Ensure reuse activates once ivac advances beyond 2.
+    post_turnon = np.where((ivac > 2) & (ivacskip > 0))[0]
+    if post_turnon.size:
+        assert np.any(reused[post_turnon] == 1)
 
 
 def test_run_fixed_boundary_freeb_edge_coupling_diag(tmp_path: Path):
