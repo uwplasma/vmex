@@ -422,6 +422,22 @@ def rz_preconditioner_matrices(
                     dr[jf, m, n] += br[jf, m, n]
                     dz[jf, m, n] += bz[jf, m, n]
 
+    # VMEC scalfor free-boundary edge conditioning (scalfor.f):
+    # when jmax==ns (vacuum active), strengthen edge diagonals and apply
+    # the iflag=1 stabilization term to the Z-system m=n=0 mode.
+    if ns_f >= ns and ns > 0:
+        edge_idx = ns - 1
+        edge_pedestal = 0.05
+        fac = 0.25
+        hs = float(delta_s)
+        mult_fac = min(fac, fac * hs * 15.0)
+        dr[edge_idx, 0:2, :] *= (1.0 + edge_pedestal)
+        dz[edge_idx, 0:2, :] *= (1.0 + edge_pedestal)
+        if mpol > 2:
+            dr[edge_idx, 2:, :] *= (1.0 + 2.0 * edge_pedestal)
+            dz[edge_idx, 2:, :] *= (1.0 + 2.0 * edge_pedestal)
+        dz[edge_idx, 0, 0] *= (1.0 - mult_fac) / (1.0 + edge_pedestal)
+
     mats = {"ar": ar, "br": br, "dr": dr, "az": az, "bz": bz, "dz": dz}
     return mats, jmin, ns_f
 

@@ -136,6 +136,22 @@ def _parse_float_list_arg(value: str | None) -> list[float] | None:
     return [float(p) for p in parts]
 
 
+def _parse_fortran_float(tok: str) -> float:
+    """Parse Fortran/VMEC dump float token robustly.
+
+    Handles canonical D/E exponents and legacy tokens where `E` is omitted,
+    e.g. `1.0634199273127645-314`.
+    """
+    t = tok.strip().replace("D", "E").replace("d", "E")
+    try:
+        return float(t)
+    except ValueError:
+        m = re.fullmatch(r"([+-]?(?:\d+(?:\.\d*)?|\.\d+))([+-]\d{2,4})", t)
+        if m:
+            return float(f"{m.group(1)}E{m.group(2)}")
+        return float("nan")
+
+
 def _extend_list(values: list, target_len: int) -> list:
     if len(values) >= target_len:
         return values[:target_len]
@@ -310,8 +326,8 @@ def _parse_vmec_xc_dump(path: Path) -> tuple[np.ndarray, np.ndarray]:
             _i = int(toks[0])
         except ValueError:
             continue
-        xc_vals.append(float(toks[1].replace("D", "E").replace("d", "E")))
-        v_vals.append(float(toks[2].replace("D", "E").replace("d", "E")))
+        xc_vals.append(_parse_fortran_float(toks[1]))
+        v_vals.append(_parse_fortran_float(toks[2]))
     return np.asarray(xc_vals, dtype=float), np.asarray(v_vals, dtype=float)
 
 

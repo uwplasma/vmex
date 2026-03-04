@@ -3647,6 +3647,23 @@ def solve_fixed_boundary_residual_iter(
     )
     lambda_axis_copy_mask = jnp.asarray(axis_copy_mask_np, dtype=jnp.asarray(state0.Rcos).dtype)
     s = jnp.asarray(static.s)
+    freeb_pres_scale = None
+    if bool(free_boundary_enabled) and (indata is not None) and int(s.shape[0]) >= 2:
+        try:
+            from .profiles import eval_profiles
+
+            hs_f = float(np.asarray(s[1] - s[0], dtype=float))
+            sedge = hs_f * (float(int(s.shape[0])) - 1.5)
+            prof_edge = eval_profiles(indata, np.asarray([sedge], dtype=float))
+            prof_one = eval_profiles(indata, np.asarray([1.0], dtype=float))
+            p_edge = float(np.asarray(prof_edge.get("pressure", np.asarray([0.0], dtype=float))).reshape(-1)[0])
+            p_one = float(np.asarray(prof_one.get("pressure", np.asarray([0.0], dtype=float))).reshape(-1)[0])
+            if p_edge != 0.0:
+                freeb_pres_scale = p_one / p_edge
+            else:
+                freeb_pres_scale = 0.0
+        except Exception:
+            freeb_pres_scale = None
     dtype_state = jnp.asarray(state0.Rcos).dtype
     zero_precond_diag = (
         jnp.zeros((int(s.shape[0]),), dtype=dtype_state),
@@ -4471,6 +4488,7 @@ def solve_fixed_boundary_residual_iter(
             constraint_rcon0=constraint_rcon0,
             constraint_zcon0=constraint_zcon0,
             freeb_bsqvac_half=freeb_bsqvac_half,
+            freeb_pres_scale=freeb_pres_scale,
             use_vmec_synthesis=True,
             trig=trig,
             iter_idx=iter_idx,
@@ -9184,10 +9202,8 @@ def solve_fixed_boundary_residual_iter(
                 and bool(free_boundary_enabled)
                 and (int(freeb_ivac_effective) >= 1)
             ):
-                # Keep ns-1 default for parity/stability unless explicitly
-                # debugging edge-row preconditioner behavior.
-                if os.getenv("VMEC_JAX_FREEB_PRECOND_JMAX_NS", "").strip().lower() in ("1", "true", "yes"):
-                    precond_jmax_override = int(s.shape[0])
+                # VMEC scalfor: jmax=ns once free-boundary vacuum is active.
+                precond_jmax_override = int(s.shape[0])
             precond_expected_jmax = (
                 int(precond_jmax_override) if (precond_jmax_override is not None) else max(int(s.shape[0]) - 1, 1)
             )
@@ -9516,7 +9532,7 @@ def solve_fixed_boundary_residual_iter(
                 wb_history.append(wb_last)
                 wp_history.append(wp_last)
                 w_vmec_history.append(w_vmec_last)
-    
+
             if verbose and (not (bool(vmec2000_control) and bool(verbose_vmec2000_table))):
                 print(
                     f"[solve_fixed_boundary_residual_iter] iter={it:03d} fsqr={fsqr_f:.3e} fsqz={fsqz_f:.3e} "
@@ -9527,7 +9543,7 @@ def solve_fixed_boundary_residual_iter(
             # computed for this iteration, so fsqr1/fsqz1/fsql1 histories and
             # VMEC-style tables remain length-aligned.
             converged_physical = (fsqr_f <= ftol) and (fsqz_f <= ftol) and (fsql_f <= ftol)
-    
+
             # Precondition forces.
             t_precond_start = time.perf_counter() if timing_enabled else None
             frzl_lam_pre = None
