@@ -511,6 +511,27 @@ def _rz_preconditioner_matrices_impl(
         dr = dr.at[1, 1, :].add(br[1, 1, :])
         dz = dz.at[1, 1, :].add(bz[1, 1, :])
 
+    # VMEC scalfor free-boundary edge conditioning (scalfor.f):
+    # when jmax==ns (vacuum active), strengthen edge diagonals and apply
+    # the iflag=1 stabilization term to the Z-system m=n=0 mode.
+    if ns_f >= ns and ns > 0:
+        edge_pedestal = jnp.asarray(0.05, dtype=dtype)
+        fac = jnp.asarray(0.25, dtype=dtype)
+        hs = jnp.asarray(delta_s, dtype=dtype)
+        mult_fac = jnp.minimum(fac, fac * hs * jnp.asarray(15.0, dtype=dtype))
+        edge_idx = ns - 1
+        if mpol > 0:
+            dr = dr.at[edge_idx, 0:1, :].multiply(1.0 + edge_pedestal)
+            dz = dz.at[edge_idx, 0:1, :].multiply(1.0 + edge_pedestal)
+        if mpol > 1:
+            dr = dr.at[edge_idx, 1:2, :].multiply(1.0 + edge_pedestal)
+            dz = dz.at[edge_idx, 1:2, :].multiply(1.0 + edge_pedestal)
+        if mpol > 2:
+            dr = dr.at[edge_idx, 2:, :].multiply(1.0 + 2.0 * edge_pedestal)
+            dz = dz.at[edge_idx, 2:, :].multiply(1.0 + 2.0 * edge_pedestal)
+        if mpol > 0 and nrange > 0:
+            dz = dz.at[edge_idx, 0, 0].multiply((1.0 - mult_fac) / (1.0 + edge_pedestal))
+
     if use_precomputed is None:
         use_precomputed = os.getenv("VMEC_JAX_TRIDI_PRECOMPUTE", "0").strip().lower() not in (
             "",

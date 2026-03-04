@@ -674,6 +674,7 @@ def vmec_forces_rz_from_wout(
     constraint_rcon0: Any | None = None,
     constraint_zcon0: Any | None = None,
     freeb_bsqvac_half: Any | None = None,
+    freeb_pres_scale: Any | None = None,
     use_wout_bsup: bool = False,
     use_vmec_synthesis: bool = False,
     trig: VmecTrigTables | None = None,
@@ -694,6 +695,10 @@ def vmec_forces_rz_from_wout(
         provided, the edge slice ``freeb_bsqvac_half[-1]`` is used to
         override the edge constraint-pressure channel ``gcon`` (VMEC
         funct3d-style coupling) while keeping `bcovar` unchanged.
+    freeb_pres_scale:
+        Optional VMEC free-boundary pressure scale ``pmass(1)/pmass(s_edge)``
+        used in ``presf_ns``. When provided, this is multiplied by the current
+        edge pressure ``pres(ns)`` before forming ``gcon``.
     """
     s = jnp.asarray(static.s)
     ohs = jnp.asarray(1.0 / (s[1] - s[0])) if s.shape[0] >= 2 else jnp.asarray(0.0)
@@ -1082,11 +1087,13 @@ def vmec_forces_rz_from_wout(
             )
         pres = jnp.asarray(getattr(wout, "pres", jnp.zeros((int(s.shape[0]),), dtype=vac_edge.dtype)))
         pres_edge = jnp.asarray(pres[-1], dtype=vac_edge.dtype) if pres.ndim > 0 else jnp.asarray(pres, dtype=vac_edge.dtype)
+        if freeb_pres_scale is not None:
+            pres_edge = jnp.asarray(pres_edge) * jnp.asarray(freeb_pres_scale, dtype=vac_edge.dtype)
         # VMEC funct3d free-boundary pressure coupling uses:
         #   presf_ns = pmass(hs*(ns-1.5))
         #   if presf_ns != 0: presf_ns = (pmass(1)/presf_ns) * pres(ns)
         # This differs from simply taking `pres(ns)` at the edge.
-        if (indata is not None) and int(s.shape[0]) >= 2:
+        elif (indata is not None) and int(s.shape[0]) >= 2:
             try:
                 from .profiles import eval_profiles
 
