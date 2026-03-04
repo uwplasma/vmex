@@ -164,6 +164,19 @@ def test_free_boundary_iter_controls_vmec_threshold_and_skip_logic():
     assert ivac == 4
     assert ivacskip == (6 - 1) % nvacskip
 
+    # Solver path initializes ivac at 0, so the first low-residual iteration
+    # should immediately reach the turn-on state ivac==1.
+    ivac2, ivs2, _ = _free_boundary_iter_controls_vmec(
+        iter2=2,
+        iter1=1,
+        ivac=0,
+        nvacskip=9,
+        nvskip0=9,
+        fsq_rz_prev=1.0e-4,
+    )
+    assert ivac2 == 1
+    assert ivs2 == 0
+
 
 def test_free_boundary_iter_controls_vmec_updates_nvacskip_on_full_step():
     ivac, ivacskip, nvacskip = _free_boundary_iter_controls_vmec(

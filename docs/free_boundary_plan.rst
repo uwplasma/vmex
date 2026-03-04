@@ -188,6 +188,14 @@ Key implementation updates that closed the matrix-side gap:
 - VMEC ``becoil`` toroidal sampling was aligned in JAX mgrid interpolation:
   with ``use_vmec_kv=True`` the code now uses direct ``kv=mod(i-1,nv)+1``
   indexing (0-based: ``k=min(k, kp-1)``), i.e. no ``kp/nzeta`` rescaling.
+- VMEC free-boundary turn-on sequencing was tightened in the non-scan path:
+  ``ivac`` now starts at ``0`` (not ``-1``), so turn-on iteration aligns with
+  VMEC ``funct3d`` for the same trajectory.
+- Initial axis reset is no longer implicitly forced by ``LFREEB``. The default
+  now follows VMEC Jacobian checks; forced behavior is available only via
+  ``VMEC_JAX_FORCE_AXIS_RESET_INIT=1`` for debugging.
+- The turn-on ``restart_iter(irst=2)`` parity path no longer mutates the
+  persistent time step in JAX. VMEC calls restart on a local ``delt0`` copy.
 
 Remaining late-iteration drift is concentrated on ``ivacskip>0`` reuse steps
 for challenging ``lasym=True`` trajectories, where VMEC and JAX can follow

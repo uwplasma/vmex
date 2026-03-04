@@ -3661,7 +3661,8 @@ def solve_fixed_boundary_residual_iter(
     )
     axis_reset_done = bool(resume_state is not None)
     lmove_axis = True if indata is None else bool(indata.get_bool("LMOVE_AXIS", True))
-    force_axis_reset = False if indata is None else bool(indata.get_bool("LFREEB", False))
+    force_axis_reset_env = os.getenv("VMEC_JAX_FORCE_AXIS_RESET_INIT", "0").strip().lower()
+    force_axis_reset = force_axis_reset_env not in ("", "0", "false", "no")
     axis_reset_env = os.getenv("VMEC_JAX_AXIS_RESET_ALWAYS_3D", "0").strip().lower()
     axis_reset_always_3d = axis_reset_env not in ("", "0", "false", "no")
     axis_reset_fsq_env = os.getenv("VMEC_JAX_AXIS_RESET_FSQ_MIN", "1.0").strip()
@@ -8369,7 +8370,9 @@ def solve_fixed_boundary_residual_iter(
     ijacob = 0
     bad_resets = 0
     iter1 = 1
-    freeb_ivac = -1
+    # VMEC runvmec/funct3d cadence starts free-boundary control at ivac=0.
+    # Starting at -1 delays vacuum turn-on by one accepted iteration.
+    freeb_ivac = 0
     freeb_ivacskip = 0
     freeb_nestor_runtime: NestorRuntimeState | None = None
     freeb_bsqvac_half_current = None
@@ -9289,7 +9292,10 @@ def solve_fixed_boundary_residual_iter(
                 # VMEC calls restart_iter(irst=2) inside funct3d on the first
                 # vacuum-coupled iteration. This resets the state/velocity used
                 # by evolve while keeping the force residuals from this call.
-                # restart_iter(irst=2) also damps the time-step by 0.9.
+                #
+                # In VMEC this call is `delt0 = delt ; call restart_iter(delt0)`,
+                # i.e. the damping is applied to a local copy and does NOT alter
+                # the persistent integration step (`delt`) used by evolve/print.
                 state = state_checkpoint
                 vRcc = jnp.zeros_like(vRcc)
                 vRss = jnp.zeros_like(vRss)
@@ -9303,7 +9309,6 @@ def solve_fixed_boundary_residual_iter(
                 vZss = jnp.zeros_like(vZss)
                 vLcc = jnp.zeros_like(vLcc)
                 vLss = jnp.zeros_like(vLss)
-                time_step = float(time_step) * 0.9
                 time_step_report_hold = float(time_step)
                 ijacob += 1
                 iter1 = int(iter2)
