@@ -282,13 +282,11 @@ def interpolate_mgrid_bfield(
         if rr.ndim < 1:
             raise ValueError("use_vmec_kv=True requires array inputs with an explicit zeta axis")
         nzeta = int(rr.shape[-1]) if int(rr.shape[-1]) > 0 else kp
+        # VMEC becoil.f uses kv = 1 + mod(i-1,nv), then clamps with
+        # kv = min(kv, np0b). In 0-based indexing this is simply
+        # kv = min(k, kp-1): no toroidal interpolation and no rescaling.
         k_idx = np.arange(nzeta, dtype=np.int64)
-        if kp >= nzeta:
-            # Preserve VMEC grid-index behavior while supporting kp!=nzeta cases.
-            k_idx = (k_idx * kp) // max(1, nzeta)
-        else:
-            k_idx = np.minimum(k_idx, kp - 1)
-        k_idx = np.clip(k_idx, 0, kp - 1)
+        k_idx = np.minimum(k_idx, kp - 1)
         k0 = np.broadcast_to(k_idx.reshape((1,) * (rr.ndim - 1) + (nzeta,)), rr.shape).reshape(-1)
         k1 = k0
         wk = np.zeros_like(fr)
