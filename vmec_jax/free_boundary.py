@@ -431,6 +431,130 @@ def _axis_current_field_simple(
     return br.reshape((ntheta, nzeta)), bp.reshape((ntheta, nzeta)), bz.reshape((ntheta, nzeta))
 
 
+def _axis_current_field_vmec_filament(
+    *,
+    R: np.ndarray,
+    Z: np.ndarray,
+    axis_r: np.ndarray,
+    axis_z: np.ndarray,
+    nfp: int,
+    plascur: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """VMEC tolicu/belicu-equivalent axis-current field.
+
+    This routine mirrors the VMEC call chain:
+      - `tolicu`: build axis filament points across field periods,
+      - `belicu`: evaluate `bsc_b(single_coil, xpt, bvec)` on boundary points.
+
+    The Biot-Savart line-segment kernel follows `bsc_b_coil_fil_loop` from
+    LIBSTELL `bsc_T.f` (including `eps_sq` regularization).
+    """
+
+    R = np.asarray(R, dtype=float)
+    Z = np.asarray(Z, dtype=float)
+    axis_r = np.asarray(axis_r, dtype=float).reshape(-1)
+    axis_z = np.asarray(axis_z, dtype=float).reshape(-1)
+
+    if R.ndim != 2 or Z.shape != R.shape:
+        raise ValueError("R/Z must be 2D arrays with matching shape")
+    ntheta, nzeta = R.shape
+    if axis_r.size != nzeta or axis_z.size != nzeta:
+        raise ValueError(f"axis arrays must match nzeta={nzeta}: got {axis_r.size}, {axis_z.size}")
+
+    mu0 = 4.0e-7 * np.pi
+    # Match VMEC sign convention used in the legacy simple path and belicu call-chain.
+    current = -float(plascur) / mu0
+    if (not np.isfinite(current)) or abs(current) <= 0.0:
+        z = np.zeros_like(R)
+        return z, z, z
+
+    nfp = max(1, int(nfp))
+    nv = int(nzeta)
+    alv = 2.0 * np.pi / float(max(1, nv))
+    onp = 1.0 / float(nfp)
+    alvp = onp * alv
+    cosuv_1d = np.cos(alvp * np.arange(nv, dtype=float))
+    sinuv_1d = np.sin(alvp * np.arange(nv, dtype=float))
+    alp_per = 2.0 * np.pi / float(max(1, nfp))
+    cosper = np.cos(alp_per * np.arange(nfp, dtype=float))
+    sinper = np.sin(alp_per * np.arange(nfp, dtype=float))
+
+    # tolicu.f: xpts(3,nvp), DO NOT CLOSE LOOP (wrap done in bsc_construct).
+    xpts = np.zeros((3, nfp * nv), dtype=float)
+    idx = 0
+    for kper in range(nfp):
+        cp = cosper[kper]
+        sp = sinper[kper]
+        for kv in range(nv):
+            c = cosuv_1d[kv]
+            s = sinuv_1d[kv]
+            rr = axis_r[kv]
+            xpts[0, idx] = rr * (cp * c - sp * s)
+            xpts[1, idx] = rr * (sp * c + cp * s)
+            xpts[2, idx] = axis_z[kv]
+            idx += 1
+
+    # bsc_construct_coil('fil_loop'): remove zero-length consecutive segments,
+    # then wrap by appending the first point when needed.
+    xnod_temp = np.zeros((3, xpts.shape[1] + 1), dtype=float)
+    itemp = 1
+    xnod_temp[:, 0] = xpts[:, 0]
+    for i in range(1, xpts.shape[1]):
+        vec = xnod_temp[:, itemp - 1] - xpts[:, i]
+        if float(np.dot(vec, vec)) == 0.0:
+            continue
+        xnod_temp[:, itemp] = xpts[:, i]
+        itemp += 1
+    if itemp <= 1:
+        z = np.zeros_like(R)
+        return z, z, z
+    vec_wrap = xnod_temp[:, itemp - 1] - xpts[:, 0]
+    if float(np.dot(vec_wrap, vec_wrap)) == 0.0:
+        itemp -= 1
+    if itemp == 2:
+        # Degenerate straight filament fallback.
+        pass
+    else:
+        xnod_temp[:, itemp] = xpts[:, 0]
+        itemp += 1
+    xnod = np.asarray(xnod_temp[:, :itemp], dtype=float)
+    nnode = int(xnod.shape[1])
+    if nnode < 2:
+        z = np.zeros_like(R)
+        return z, z, z
+
+    dxnod = xnod[:, 1:] - xnod[:, :-1]
+    lsqnod = np.sum(dxnod * dxnod, axis=0)
+    if not np.any(lsqnod > 0.0):
+        z = np.zeros_like(R)
+        return z, z, z
+    eps_sq = np.finfo(float).eps * float(np.min(lsqnod[lsqnod > 0.0]))
+    eps_sq = max(eps_sq, np.finfo(float).tiny)
+
+    # belicu.f uses cosuv/sinuv tables, not arbitrary phi-grid values.
+    cos1 = np.broadcast_to(cosuv_1d[None, :], (ntheta, nv)).reshape(-1)
+    sin1 = np.broadcast_to(sinuv_1d[None, :], (ntheta, nv)).reshape(-1)
+    rp = np.asarray(R, dtype=float).reshape(-1)
+    zp = np.asarray(Z, dtype=float).reshape(-1)
+    xobs = np.stack([rp * cos1, rp * sin1, zp], axis=1)
+
+    # bsc_b_coil_fil_loop kernel, vectorized over observation points.
+    capRv = xobs[:, None, :] - xnod.T[None, :, :]
+    capR = np.sqrt(np.maximum(eps_sq, np.sum(capRv * capRv, axis=2)))
+    R1p2 = capR[:, :-1] + capR[:, 1:]
+    denom = np.maximum(R1p2 * R1p2 - lsqnod[None, :], eps_sq)
+    Rfactor = 2.0 * R1p2 / (capR[:, :-1] * capR[:, 1:] * denom)
+    crossv = np.cross(dxnod.T[None, :, :], capRv[:, :-1, :])
+    braw = np.sum(crossv * Rfactor[:, :, None], axis=1)
+
+    # bsc_b_coil: b = current * bsc_k2_def * braw, with bsc_k2_def = 1e-7.
+    bxyz = (current * 1.0e-7) * braw
+    br = cos1 * bxyz[:, 0] + sin1 * bxyz[:, 1]
+    bp = -sin1 * bxyz[:, 0] + cos1 * bxyz[:, 1]
+    bz = bxyz[:, 2]
+    return br.reshape((ntheta, nv)), bp.reshape((ntheta, nv)), bz.reshape((ntheta, nv))
+
+
 def boundary_metric_from_rz(
     *,
     R: Any,
@@ -791,15 +915,37 @@ def _sample_external_boundary_arrays(
             apply_scalxc=True,
         )[0, 0, :]
     )
-    br_axis, bp_axis, bz_axis = _axis_current_field_simple(
-        R=R,
-        Z=Z,
-        phi=phi_grid,
-        axis_r=axis_r,
-        axis_z=axis_z,
-        nfp=int(static.cfg.nfp),
-        plascur=float(plascur),
-    )
+    axis_field_mode = os.getenv("VMEC_JAX_FREEB_AXIS_FIELD_MODE", "vmec_filament").strip().lower()
+    if axis_field_mode in ("simple", "legacy"):
+        br_axis, bp_axis, bz_axis = _axis_current_field_simple(
+            R=R,
+            Z=Z,
+            phi=phi_grid,
+            axis_r=axis_r,
+            axis_z=axis_z,
+            nfp=int(static.cfg.nfp),
+            plascur=float(plascur),
+        )
+    else:
+        try:
+            br_axis, bp_axis, bz_axis = _axis_current_field_vmec_filament(
+                R=R,
+                Z=Z,
+                axis_r=axis_r,
+                axis_z=axis_z,
+                nfp=int(static.cfg.nfp),
+                plascur=float(plascur),
+            )
+        except Exception:
+            br_axis, bp_axis, bz_axis = _axis_current_field_simple(
+                R=R,
+                Z=Z,
+                phi=phi_grid,
+                axis_r=axis_r,
+                axis_z=axis_z,
+                nfp=int(static.cfg.nfp),
+                plascur=float(plascur),
+            )
     br = np.asarray(br_mgrid, dtype=float) + np.asarray(br_axis, dtype=float)
     bp = np.asarray(bp_mgrid, dtype=float) + np.asarray(bp_axis, dtype=float)
     bz = np.asarray(bz_mgrid, dtype=float) + np.asarray(bz_axis, dtype=float)
