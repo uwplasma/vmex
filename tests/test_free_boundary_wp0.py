@@ -649,6 +649,51 @@ def test_interpolate_mgrid_bfield_trilinear_linear_field():
     np.testing.assert_allclose(bz_q, -expected, rtol=1e-12, atol=1e-12)
 
 
+def test_interpolate_mgrid_bfield_vmec_kv_no_rescale():
+    meta = MGridMetadata(
+        path="dummy.nc",
+        ir=2,
+        jz=2,
+        kp=6,
+        nfp=1,
+        nextcur=1,
+        rmin=0.0,
+        rmax=1.0,
+        zmin=0.0,
+        zmax=1.0,
+        mgrid_mode="S",
+        coil_groups=("A",),
+        raw_coil_cur=(1.0,),
+    )
+    # Encode toroidal plane index directly in the field values.
+    br = np.zeros((1, meta.kp, meta.jz, meta.ir), dtype=float)
+    bp = np.zeros_like(br)
+    bz = np.zeros_like(br)
+    for k in range(meta.kp):
+        br[0, k, :, :] = float(k)
+        bp[0, k, :, :] = 10.0 * float(k)
+        bz[0, k, :, :] = -float(k)
+    data = MGridData(metadata=meta, br=br, bp=bp, bz=bz)
+
+    # VMEC becoil indexing uses kv = 1 + mod(i-1,nv), clamped by np0b.
+    # For nzeta=4, this should sample planes k=0,1,2,3 (no kp rescaling).
+    r = np.full((2, 4), 0.5)
+    z = np.full((2, 4), 0.5)
+    phi = np.zeros((2, 4))
+    br_q, bp_q, bz_q = interpolate_mgrid_bfield(
+        data,
+        r=r,
+        z=z,
+        phi=phi,
+        use_vmec_kv=True,
+    )
+    expected_k = np.array([0.0, 1.0, 2.0, 3.0], dtype=float)
+    expected = np.broadcast_to(expected_k[None, :], r.shape)
+    np.testing.assert_allclose(br_q, expected, rtol=0.0, atol=1e-14)
+    np.testing.assert_allclose(bp_q, 10.0 * expected, rtol=0.0, atol=1e-14)
+    np.testing.assert_allclose(bz_q, -expected, rtol=0.0, atol=1e-14)
+
+
 def test_boundary_vacuum_projection_toroidal_field():
     ntheta = 16
     nzeta = 8
