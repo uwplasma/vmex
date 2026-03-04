@@ -145,3 +145,11 @@ def test_parse_bextern_dump_reads_axis_sections(tmp_path: Path) -> None:
     np.testing.assert_allclose(got["brad_axis"], np.array([1.0e-3, 2.0e-3, 3.0e-3]))
     np.testing.assert_allclose(got["bphi_axis"], np.array([-1.0e-4, -2.0e-4, -3.0e-4]))
     np.testing.assert_allclose(got["bz_axis"], np.array([4.0e-5, 5.0e-5, 6.0e-5]))
+
+
+def test_parse_fortran_float_handles_missing_exponent_marker() -> None:
+    from tools.diagnostics.vmec2000_exec_freeb_scalpot_compare import _parse_fortran_float
+
+    np.testing.assert_allclose(_parse_fortran_float("1.0D+03"), 1.0e3, rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(_parse_fortran_float("1.0564215887228806-316"), 1.0564215887228806e-316, rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(_parse_fortran_float("-2.5+02"), -2.5e2, rtol=0.0, atol=0.0)
