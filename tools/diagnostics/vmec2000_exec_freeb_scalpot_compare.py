@@ -26,6 +26,29 @@ from typing import Any
 import numpy as np
 
 
+_FORTRAN_FLOAT_RE = re.compile(
+    r"^\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))(?:[DdEe]([+-]?\d+)|([+-]\d+))?\s*$"
+)
+
+
+def _parse_fortran_float(token: str) -> float:
+    """Parse Fortran-style floats, including missing-exp marker forms.
+
+    Some VMEC dumps contain underflow values like ``1.0564215887228806-316``
+    (missing ``E`` before the exponent sign). Accept those here.
+    """
+
+    s = str(token).strip()
+    m = _FORTRAN_FLOAT_RE.match(s)
+    if m is None:
+        return float(s.replace("D", "E").replace("d", "e"))
+    mant = m.group(1)
+    exp = m.group(2) if m.group(2) is not None else m.group(3)
+    if exp is None:
+        return float(mant)
+    return float(f"{mant}e{exp}")
+
+
 def _parse_keyvals(lines: list[str]) -> dict[str, str]:
     out: dict[str, str] = {}
     for ln in lines:
@@ -73,49 +96,49 @@ def _parse_scalpot_dump(path: Path) -> dict[str, Any]:
         if section == "bvec" and len(parts) >= 2:
             i = int(parts[0]) - 1
             if 0 <= i < mnpd2:
-                bvec[i] = float(parts[1].replace("D", "E"))
+                bvec[i] = _parse_fortran_float(parts[1])
         elif section == "bvecsav" and len(parts) >= 2:
             i = int(parts[0]) - 1
             if 0 <= i < mnpd2:
-                bvecsav[i] = float(parts[1].replace("D", "E"))
+                bvecsav[i] = _parse_fortran_float(parts[1])
         elif section == "amatrix_raw" and len(parts) >= 3:
             i = int(parts[0]) - 1
             j = int(parts[1]) - 1
             if (0 <= i < mnpd2) and (0 <= j < mnpd2):
-                amat_raw[i, j] = float(parts[2].replace("D", "E"))
+                amat_raw[i, j] = _parse_fortran_float(parts[2])
         elif section == "amatrix_lu" and len(parts) >= 3:
             i = int(parts[0]) - 1
             j = int(parts[1]) - 1
             if (0 <= i < mnpd2) and (0 <= j < mnpd2):
-                amat[i, j] = float(parts[2].replace("D", "E"))
+                amat[i, j] = _parse_fortran_float(parts[2])
         elif section == "xmpot_xnpot" and len(parts) >= 3:
             i = int(parts[0]) - 1
             if 0 <= i < mnpd:
-                xmpot[i] = int(round(float(parts[1].replace("D", "E"))))
-                xnpot[i] = int(round(float(parts[2].replace("D", "E"))))
+                xmpot[i] = int(round(_parse_fortran_float(parts[1])))
+                xnpot[i] = int(round(_parse_fortran_float(parts[2])))
         elif section == "source_sym_cached" and len(parts) >= 2:
             i = int(parts[0]) - 1
             if 0 <= i < source_sym_cached.size:
-                source_sym_cached[i] = float(parts[1].replace("D", "E"))
+                source_sym_cached[i] = _parse_fortran_float(parts[1])
         elif section == "gsource_cached" and len(parts) >= 2:
             i = int(parts[0]) - 1
             if 0 <= i < gsource_cached.size:
-                gsource_cached[i] = float(parts[1].replace("D", "E"))
+                gsource_cached[i] = _parse_fortran_float(parts[1])
         elif section == "bvecns_cached" and len(parts) >= 3:
             i = int(parts[0]) - 1
             if 0 <= i < bvecns_cached_sin.size:
-                bvecns_cached_sin[i] = float(parts[1].replace("D", "E"))
-                bvecns_cached_cos[i] = float(parts[2].replace("D", "E"))
+                bvecns_cached_sin[i] = _parse_fortran_float(parts[1])
+                bvecns_cached_cos[i] = _parse_fortran_float(parts[2])
         elif section == "grpmn_analytic" and len(parts) >= 3:
             j = int(parts[0]) - 1
             i = int(parts[1]) - 1
             if 0 <= j < grpmn_analytic.shape[0] and 0 <= i < grpmn_analytic.shape[1]:
-                grpmn_analytic[j, i] = float(parts[2].replace("D", "E"))
+                grpmn_analytic[j, i] = _parse_fortran_float(parts[2])
         elif section == "grpmn_total" and len(parts) >= 3:
             j = int(parts[0]) - 1
             i = int(parts[1]) - 1
             if 0 <= j < grpmn_total.shape[0] and 0 <= i < grpmn_total.shape[1]:
-                grpmn_total[j, i] = float(parts[2].replace("D", "E"))
+                grpmn_total[j, i] = _parse_fortran_float(parts[2])
     return {
         "iter2": int(kv.get("iter2", "-1")),
         "ivacskip": int(kv.get("ivacskip", "-1")),
@@ -180,7 +203,7 @@ def _parse_vacuum_dump(path: Path) -> dict[str, Any]:
         if len(parts) < 2:
             continue
         idx = int(parts[0]) - 1
-        val = float(parts[1].replace("D", "E"))
+        val = _parse_fortran_float(parts[1])
         if section == "potvac" and 0 <= idx < potvac.size:
             potvac[idx] = val
         elif section == "bsqvac" and 0 <= idx < bsqvac.size:
@@ -249,7 +272,7 @@ def _parse_bextern_dump(path: Path) -> dict[str, Any]:
         if len(parts) < 2:
             continue
         idx = int(parts[0]) - 1
-        val = float(parts[1].replace("D", "E"))
+        val = _parse_fortran_float(parts[1])
         if section == "bexu" and 0 <= idx < bexu.size:
             bexu[idx] = val
         elif section == "bexv" and 0 <= idx < bexv.size:
@@ -372,7 +395,7 @@ def _parse_fouri_dump(path: Path) -> dict[str, Any]:
         if section == "gsource" and len(parts) >= 2:
             i = int(parts[0]) - 1
             if 0 <= i < gsource.size:
-                gsource[i] = float(parts[1].replace("D", "E"))
+                gsource[i] = _parse_fortran_float(parts[1])
         elif section == "gsource_full" and len(parts) >= 2:
             if gsource_full is None:
                 gsource_full = np.zeros((0,), dtype=float)
@@ -380,21 +403,21 @@ def _parse_fouri_dump(path: Path) -> dict[str, Any]:
             if i >= gsource_full.size:
                 pad = np.zeros((i + 1 - gsource_full.size,), dtype=float)
                 gsource_full = np.concatenate([gsource_full, pad], axis=0)
-            gsource_full[i] = float(parts[1].replace("D", "E"))
+            gsource_full[i] = _parse_fortran_float(parts[1])
         elif section == "source_sym" and len(parts) >= 2:
             i = int(parts[0]) - 1
             if 0 <= i < source_sym.size:
-                source_sym[i] = float(parts[1].replace("D", "E"))
+                source_sym[i] = _parse_fortran_float(parts[1])
         elif section == "grpmn" and len(parts) >= 3:
             j = int(parts[0]) - 1
             i = int(parts[1]) - 1
             if (0 <= j < grpmn.shape[0]) and (0 <= i < grpmn.shape[1]):
-                grpmn[j, i] = float(parts[2].replace("D", "E"))
+                grpmn[j, i] = _parse_fortran_float(parts[2])
         elif section == "bvecns" and len(parts) >= 3:
             i = int(parts[0]) - 1
             if 0 <= i < bvec_ns_sin.size:
-                bvec_ns_sin[i] = float(parts[1].replace("D", "E"))
-                bvec_ns_cos[i] = float(parts[2].replace("D", "E"))
+                bvec_ns_sin[i] = _parse_fortran_float(parts[1])
+                bvec_ns_cos[i] = _parse_fortran_float(parts[2])
     return {
         "iter2": int(kv.get("iter2", "-1")),
         "mnpd": mnpd,
