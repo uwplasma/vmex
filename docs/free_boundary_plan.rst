@@ -201,6 +201,10 @@ Key implementation updates that closed the matrix-side gap:
   practical grids (large ``VMEC_JAX_FREEB_VMEC_LIKE_MAX_POINTS`` default) and
   the manifest now runs these cases without ``VMEC_JAX_FREEB_USE_GREENF_SOURCE``
   overrides.
+- The free-boundary scalpot comparator now infers VMEC-style multigrid staging
+  from ``NS_ARRAY`` by default (``--multigrid auto``), preventing false
+  "missing JAX dump" failures on staged free-boundary inputs where vacuum
+  turn-on happens before the finest grid.
 
 Remaining late-iteration drift is concentrated on ``ivacskip>0`` reuse steps
 for challenging ``lasym=True`` trajectories, where VMEC and JAX can follow

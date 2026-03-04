@@ -60,6 +60,20 @@ def _parse_keyvals(lines: list[str]) -> dict[str, str]:
     return out
 
 
+def _infer_multigrid_from_input(input_path: Path) -> bool:
+    """Infer whether VMEC multigrid staging is requested by the input file."""
+    try:
+        from vmec_jax.namelist import read_indata
+
+        indata = read_indata(input_path)
+        ns_array = indata.get("NS_ARRAY", None)
+        if isinstance(ns_array, list):
+            return len(ns_array) > 1
+    except Exception:
+        pass
+    return False
+
+
 def _parse_scalpot_dump(path: Path) -> dict[str, Any]:
     lines = path.read_text(encoding="utf-8").splitlines()
     kv = _parse_keyvals(lines)
@@ -545,6 +559,13 @@ def main() -> int:
     )
     p.add_argument("--iter", type=int, default=1, help="Iteration index to compare.")
     p.add_argument("--max-iter", type=int, default=2, help="vmec_jax max_iter.")
+    p.add_argument(
+        "--multigrid",
+        type=str,
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="vmec_jax multigrid staging: auto (infer from NS_ARRAY), on, or off.",
+    )
     p.add_argument("--workdir", type=Path, default=None)
     p.add_argument("--json", type=Path, default=None, help="Optional output json path.")
     args = p.parse_args()
@@ -607,6 +628,11 @@ def main() -> int:
     # Run vmec_jax
     from vmec_jax.driver import run_fixed_boundary
 
+    if args.multigrid == "auto":
+        use_multigrid = _infer_multigrid_from_input(run_input)
+    else:
+        use_multigrid = args.multigrid == "on"
+
     old_env = os.environ.copy()
     os.environ["VMEC_JAX_DUMP_SCALPOT"] = "1"
     # Dump all free-boundary iterations so comparator can robustly select the
@@ -619,7 +645,7 @@ def main() -> int:
             str(run_input),
             solver="vmec2000_iter",
             max_iter=int(args.max_iter),
-            multigrid=False,
+            multigrid=bool(use_multigrid),
             verbose=False,
             performance_mode=False,
             use_scan=False,
@@ -676,6 +702,7 @@ def main() -> int:
         "jax_dump": str(jax_npz),
         "iter": int(args.iter),
         "jax_iter_used": int(jax_iter_used),
+        "jax_multigrid": bool(use_multigrid),
         "mode_map_applied": bool(mode_map is not None),
         "vmec_scalpot_meta": {
             "iter2": int(vmec_scal.get("iter2", -1)),
