@@ -196,6 +196,11 @@ Key implementation updates that closed the matrix-side gap:
   ``VMEC_JAX_FORCE_AXIS_RESET_INIT=1`` for debugging.
 - The turn-on ``restart_iter(irst=2)`` parity path no longer mutates the
   persistent time step in JAX. VMEC calls restart on a local ``delt0`` copy.
+- Free-boundary parity defaults no longer rely on manifest-side environment
+  tuning. The default mode selection keeps VMEC-like dense assembly active on
+  practical grids (large ``VMEC_JAX_FREEB_VMEC_LIKE_MAX_POINTS`` default) and
+  the manifest now runs these cases without ``VMEC_JAX_FREEB_USE_GREENF_SOURCE``
+  overrides.
 
 Remaining late-iteration drift is concentrated on ``ivacskip>0`` reuse steps
 for challenging ``lasym=True`` trajectories, where VMEC and JAX can follow

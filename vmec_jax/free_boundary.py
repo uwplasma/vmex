@@ -2338,7 +2338,9 @@ def _select_nestor_mode(*, ntheta: int, nzeta: int) -> tuple[str, str]:
 
     mode_raw = os.getenv("VMEC_JAX_FREEB_NESTOR_MODE", "auto").strip().lower()
     npts = int(ntheta * nzeta)
-    max_pts = max(1, _as_int_env("VMEC_JAX_FREEB_VMEC_LIKE_MAX_POINTS", 4096))
+    # Parity-first default: keep VMEC-like dense integral enabled on practical
+    # free-boundary grids without requiring environment tuning.
+    max_pts = max(1, _as_int_env("VMEC_JAX_FREEB_VMEC_LIKE_MAX_POINTS", 1_000_000))
 
     if mode_raw in ("spectral", "fast", "surrogate", "poisson"):
         return "spectral_poisson_external_only", "forced_fast"

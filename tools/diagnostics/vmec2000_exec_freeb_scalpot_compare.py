@@ -180,6 +180,17 @@ def _mode_reindex(vmec_modes: np.ndarray, jax_modes: np.ndarray) -> np.ndarray |
     return out
 
 
+def _iter_from_jax_scalpot(path: Path) -> int | None:
+    stem = path.stem
+    prefix = "scalpot_jax_iter"
+    if not stem.startswith(prefix):
+        return None
+    try:
+        return int(stem[len(prefix) :])
+    except Exception:
+        return None
+
+
 def _parse_vacuum_dump(path: Path) -> dict[str, Any]:
     lines = path.read_text(encoding="utf-8").splitlines()
     kv = _parse_keyvals(lines)
@@ -598,10 +609,11 @@ def main() -> int:
 
     old_env = os.environ.copy()
     os.environ["VMEC_JAX_DUMP_SCALPOT"] = "1"
-    os.environ["VMEC_JAX_DUMP_ITER"] = str(int(args.iter))
+    # Dump all free-boundary iterations so comparator can robustly select the
+    # nearest available JAX iteration when VMEC/JAX restart bookkeeping causes
+    # off-by-one or sparse dump alignment at a requested iteration.
+    os.environ.pop("VMEC_JAX_DUMP_ITER", None)
     os.environ["VMEC_JAX_DUMP_DIR"] = str(jax_dump_dir)
-    os.environ["VMEC_JAX_FREEB_NESTOR_MODE"] = "vmec2000_like"
-    os.environ["VMEC_JAX_FREEB_VMEC_LIKE_MAX_POINTS"] = "1000000"
     try:
         run_fixed_boundary(
             str(run_input),
@@ -625,8 +637,19 @@ def main() -> int:
         raise SystemExit(f"missing VMEC scalpot dump in {vmec_dump_dir}")
     if not vmec_vac_files:
         raise SystemExit(f"missing VMEC vacuum dump in {vmec_dump_dir}")
+    jax_iter_used = int(args.iter)
     if not jax_npz.exists():
-        raise SystemExit(f"missing vmec_jax dump: {jax_npz}")
+        candidates = []
+        for pth in sorted(jax_dump_dir.glob("scalpot_jax_iter*.npz")):
+            it = _iter_from_jax_scalpot(pth)
+            if it is not None:
+                candidates.append((it, pth))
+        if not candidates:
+            raise SystemExit(f"missing vmec_jax dump: {jax_npz}")
+        # Prefer nearest not-greater iteration, else nearest greater.
+        lower = [c for c in candidates if c[0] <= int(args.iter)]
+        chosen = max(lower, key=lambda x: x[0]) if lower else min(candidates, key=lambda x: x[0])
+        jax_iter_used, jax_npz = int(chosen[0]), chosen[1]
 
     vmec_scal = _parse_scalpot_dump(vmec_scalpot_files[0])
     vmec_vac = _parse_vacuum_dump(vmec_vac_files[0])
@@ -652,6 +675,7 @@ def main() -> int:
         "vmec_fouri_dump": str(vmec_fouri_files[0]) if vmec_fouri_files else None,
         "jax_dump": str(jax_npz),
         "iter": int(args.iter),
+        "jax_iter_used": int(jax_iter_used),
         "mode_map_applied": bool(mode_map is not None),
         "vmec_scalpot_meta": {
             "iter2": int(vmec_scal.get("iter2", -1)),
