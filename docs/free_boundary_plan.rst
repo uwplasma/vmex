@@ -205,6 +205,13 @@ Key implementation updates that closed the matrix-side gap:
   from ``NS_ARRAY`` by default (``--multigrid auto``), preventing false
   "missing JAX dump" failures on staged free-boundary inputs where vacuum
   turn-on happens before the finest grid.
+- MGRID interpolation now accepts axisymmetric vacuum grids with a single
+  toroidal plane (``kp=1``), matching VMEC behavior for DIII-D-like files and
+  avoiding silent fallback when free-boundary sampling raises.
+- VMEC2000-iter stage budgeting with ``NITER_ARRAY`` + capped ``max_iter`` now
+  consumes iterations in coarse-to-fine order (VMEC-like), instead of
+  prioritizing the finest stage. This restores early-iteration free-boundary
+  diagnostics parity for staged inputs.
 
 Remaining late-iteration drift is concentrated on ``ivacskip>0`` reuse steps
 for challenging ``lasym=True`` trajectories, where VMEC and JAX can follow

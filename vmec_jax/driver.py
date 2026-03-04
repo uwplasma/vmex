@@ -927,38 +927,20 @@ def run_fixed_boundary(
                     niter_stage = int(indata.get_int("NITER", int(max_iter)))
                     niter_stages = [niter_stage] * nstep
             else:
-                # Respect the caller's `max_iter` as a total budget, but keep at
-                # least 1 iteration per stage when possible (so staging still
-                # happens in short debugging runs).
+                # Respect caller `max_iter` as a total budget while preserving
+                # VMEC2000 stage order semantics: consume iterations on coarse
+                # stages first, then proceed to finer stages.
                 budget = int(max_iter)
-                if budget < nstep:
-                    # Too few iterations to meaningfully stage; collapse to the
-                    # final grid only.
-                    ns_stages = [int(ns_stages[-1])]
-                    nstep = 1
-                    niter_stages = [int(max(budget, 1))]
-                    if ftol_stages is not None:
-                        ftol_stages = [float(ftol_stages[-1])]
-                else:
-                    base = [1] * nstep
-                    remaining = budget - nstep
-                    caps = [max(0, int(n) - 1) for n in niter_stages]
-                    out = base[:]
-
-                    # When the total budget is smaller than the sum of the
-                    # input's NITER_ARRAY, prioritize iterations on the final
-                    # (finest) grid. This keeps short debugging runs focused
-                    # on the physically relevant resolution instead of spending
-                    # nearly the entire budget on coarse stages.
-                    for i in range(nstep - 1, -1, -1):
-                        if remaining <= 0:
-                            break
-                        take = min(caps[i], remaining)
-                        out[i] += take
-                        remaining -= take
-                    if remaining > 0:
-                        out[-1] += remaining
-                    niter_stages = out
+                remaining = max(0, budget)
+                out = [0] * nstep
+                for i in range(nstep):
+                    if remaining <= 0:
+                        break
+                    cap = max(0, int(niter_stages[i]))
+                    take = min(cap, remaining)
+                    out[i] = take
+                    remaining -= take
+                niter_stages = out
             if ftol_stages is None:
                 ftol_stages = [float(indata.get_float("FTOL", 1e-13))] * nstep
         else:
@@ -1033,6 +1015,8 @@ def run_fixed_boundary(
         ftol_last = None
         step_size_last = None
         for i, (ns_i, niter_i, ftol_i) in enumerate(zip(ns_stages, niter_stages, ftol_stages)):
+            if int(niter_i) <= 0:
+                continue
             if verbose:
                 print(
                     f"  NS = {int(ns_i):4d} NO. FOURIER MODES = {nmodes_header:4d} "

@@ -249,7 +249,7 @@ def interpolate_mgrid_bfield(
     ir = int(meta.ir)
     jz = int(meta.jz)
     kp = int(meta.kp)
-    if ir < 2 or jz < 2 or kp < 2:
+    if ir < 2 or jz < 2 or kp < 1:
         raise ValueError(f"mgrid dimensions too small for interpolation: ir={ir} jz={jz} kp={kp}")
 
     # Non-periodic axes (R, Z): clamp to domain.

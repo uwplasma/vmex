@@ -707,6 +707,42 @@ def test_interpolate_mgrid_bfield_vmec_kv_no_rescale():
     np.testing.assert_allclose(bz_q, -expected, rtol=0.0, atol=1e-14)
 
 
+def test_interpolate_mgrid_bfield_allows_single_toroidal_plane():
+    meta = MGridMetadata(
+        path="dummy.nc",
+        ir=2,
+        jz=2,
+        kp=1,
+        nfp=1,
+        nextcur=1,
+        rmin=0.0,
+        rmax=1.0,
+        zmin=0.0,
+        zmax=1.0,
+        mgrid_mode="S",
+        coil_groups=("A",),
+        raw_coil_cur=(1.0,),
+    )
+    br = np.full((1, 1, 2, 2), 3.0, dtype=float)
+    bp = np.full((1, 1, 2, 2), -2.0, dtype=float)
+    bz = np.full((1, 1, 2, 2), 7.5, dtype=float)
+    data = MGridData(metadata=meta, br=br, bp=bp, bz=bz)
+    r = np.full((2, 4), 0.5)
+    z = np.full((2, 4), 0.5)
+    phi = np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False).reshape(2, 4)
+
+    br_q, bp_q, bz_q = interpolate_mgrid_bfield(
+        data,
+        r=r,
+        z=z,
+        phi=phi,
+        use_vmec_kv=True,
+    )
+    np.testing.assert_allclose(br_q, 3.0, rtol=0.0, atol=1e-14)
+    np.testing.assert_allclose(bp_q, -2.0, rtol=0.0, atol=1e-14)
+    np.testing.assert_allclose(bz_q, 7.5, rtol=0.0, atol=1e-14)
+
+
 def test_boundary_vacuum_projection_toroidal_field():
     ntheta = 16
     nzeta = 8
