@@ -58,6 +58,8 @@ def _parse_scalpot_dump(path: Path) -> dict[str, Any]:
     gsource_cached = np.zeros((max(0, nuv),), dtype=float)
     bvecns_cached_sin = np.zeros((max(0, mnpd),), dtype=float)
     bvecns_cached_cos = np.zeros((max(0, mnpd),), dtype=float)
+    grpmn_analytic = np.zeros((max(0, mnpd2), max(0, nuv3)), dtype=float)
+    grpmn_total = np.zeros((max(0, mnpd2), max(0, nuv3)), dtype=float)
     for ln in lines:
         s = ln.strip()
         if not s:
@@ -104,6 +106,16 @@ def _parse_scalpot_dump(path: Path) -> dict[str, Any]:
             if 0 <= i < bvecns_cached_sin.size:
                 bvecns_cached_sin[i] = float(parts[1].replace("D", "E"))
                 bvecns_cached_cos[i] = float(parts[2].replace("D", "E"))
+        elif section == "grpmn_analytic" and len(parts) >= 3:
+            j = int(parts[0]) - 1
+            i = int(parts[1]) - 1
+            if 0 <= j < grpmn_analytic.shape[0] and 0 <= i < grpmn_analytic.shape[1]:
+                grpmn_analytic[j, i] = float(parts[2].replace("D", "E"))
+        elif section == "grpmn_total" and len(parts) >= 3:
+            j = int(parts[0]) - 1
+            i = int(parts[1]) - 1
+            if 0 <= j < grpmn_total.shape[0] and 0 <= i < grpmn_total.shape[1]:
+                grpmn_total[j, i] = float(parts[2].replace("D", "E"))
     return {
         "iter2": int(kv.get("iter2", "-1")),
         "ivacskip": int(kv.get("ivacskip", "-1")),
@@ -122,6 +134,8 @@ def _parse_scalpot_dump(path: Path) -> dict[str, Any]:
         "gsource_cached": gsource_cached,
         "bvecns_cached_sin": bvecns_cached_sin,
         "bvecns_cached_cos": bvecns_cached_cos,
+        "grpmn_analytic": grpmn_analytic,
+        "grpmn_total": grpmn_total,
     }
 
 
@@ -206,6 +220,13 @@ def _parse_bextern_dump(path: Path) -> dict[str, Any]:
     snr = np.zeros((max(0, nuv3),), dtype=float)
     snv = np.zeros((max(0, nuv3),), dtype=float)
     snz = np.zeros((max(0, nuv3),), dtype=float)
+    drv = np.zeros((max(0, nuv3),), dtype=float)
+    guu_b = np.zeros((max(0, nuv3),), dtype=float)
+    guv_b = np.zeros((max(0, nuv3),), dtype=float)
+    gvv_b = np.zeros((max(0, nuv3),), dtype=float)
+    auu = np.zeros((max(0, nuv3),), dtype=float)
+    auv = np.zeros((max(0, nuv3),), dtype=float)
+    avv = np.zeros((max(0, nuv3),), dtype=float)
     brad = np.zeros((max(0, nuv3),), dtype=float)
     bphi = np.zeros((max(0, nuv3),), dtype=float)
     bz = np.zeros((max(0, nuv3),), dtype=float)
@@ -257,6 +278,20 @@ def _parse_bextern_dump(path: Path) -> dict[str, Any]:
             snv[idx] = val
         elif section == "snz" and 0 <= idx < snz.size:
             snz[idx] = val
+        elif section == "drv" and 0 <= idx < drv.size:
+            drv[idx] = val
+        elif section == "guu_b" and 0 <= idx < guu_b.size:
+            guu_b[idx] = val
+        elif section == "guv_b" and 0 <= idx < guv_b.size:
+            guv_b[idx] = val
+        elif section == "gvv_b" and 0 <= idx < gvv_b.size:
+            gvv_b[idx] = val
+        elif section == "auu" and 0 <= idx < auu.size:
+            auu[idx] = val
+        elif section == "auv" and 0 <= idx < auv.size:
+            auv[idx] = val
+        elif section == "avv" and 0 <= idx < avv.size:
+            avv[idx] = val
         elif section == "brad" and 0 <= idx < brad.size:
             brad[idx] = val
         elif section == "bphi" and 0 <= idx < bphi.size:
@@ -292,6 +327,13 @@ def _parse_bextern_dump(path: Path) -> dict[str, Any]:
         "snr": snr,
         "snv": snv,
         "snz": snz,
+        "drv": drv,
+        "guu_b": guu_b,
+        "guv_b": guv_b,
+        "gvv_b": gvv_b,
+        "auu": auu,
+        "auv": auv,
+        "avv": avv,
         "brad": brad,
         "bphi": bphi,
         "bz": bz,
@@ -313,6 +355,7 @@ def _parse_fouri_dump(path: Path) -> dict[str, Any]:
     source_sym = np.zeros((max(0, nuv3),), dtype=float)
     gsource = np.zeros((max(0, nuv3),), dtype=float)
     gsource_full = None
+    grpmn = np.zeros((max(0, mnpd2), max(0, nuv3)), dtype=float)
     bvec_ns_sin = np.zeros((max(0, mnpd),), dtype=float)
     bvec_ns_cos = np.zeros((max(0, mnpd),), dtype=float)
     section = ""
@@ -342,6 +385,11 @@ def _parse_fouri_dump(path: Path) -> dict[str, Any]:
             i = int(parts[0]) - 1
             if 0 <= i < source_sym.size:
                 source_sym[i] = float(parts[1].replace("D", "E"))
+        elif section == "grpmn" and len(parts) >= 3:
+            j = int(parts[0]) - 1
+            i = int(parts[1]) - 1
+            if (0 <= j < grpmn.shape[0]) and (0 <= i < grpmn.shape[1]):
+                grpmn[j, i] = float(parts[2].replace("D", "E"))
         elif section == "bvecns" and len(parts) >= 3:
             i = int(parts[0]) - 1
             if 0 <= i < bvec_ns_sin.size:
@@ -355,6 +403,7 @@ def _parse_fouri_dump(path: Path) -> dict[str, Any]:
         "gsource": gsource,
         "gsource_full": np.asarray(gsource_full, dtype=float) if gsource_full is not None else np.zeros((0,), dtype=float),
         "source_sym": source_sym,
+        "grpmn": grpmn,
         "bvecns_sin": bvec_ns_sin,
         "bvecns_cos": bvec_ns_cos,
     }
@@ -745,6 +794,93 @@ def main() -> int:
             "scale_jax_to_vmec": a_src,
             "vmec_source": vmec_source_kind,
         }
+
+    if vmec_fouri is not None and "grpmn_total" in jax:
+        jgr = np.asarray(jax["grpmn_total"], dtype=float)
+        vgr = np.asarray(vmec_fouri.get("grpmn", np.zeros((0, 0), dtype=float)), dtype=float)
+        if mode_map is not None and mode_map.size > 0 and jgr.ndim == 2:
+            mnpd = int(mode_map.size)
+            if jgr.shape[0] >= mnpd:
+                if jgr.shape[0] >= 2 * mnpd:
+                    idx = np.concatenate([mode_map, mode_map + mnpd], axis=0)
+                else:
+                    idx = mode_map
+                jgr = jgr[idx, :]
+        nrow = min(vgr.shape[0], jgr.shape[0])
+        ncol = min(vgr.shape[1], jgr.shape[1])
+        if nrow > 0 and ncol > 0:
+            vm = vgr[:nrow, :ncol]
+            jj = jgr[:nrow, :ncol]
+            a_gr, rel_gr_scaled = _rel_scaled(vm.reshape(-1), jj.reshape(-1))
+            out["grpmn_total"] = {
+                "shape_vmec": list(vgr.shape),
+                "shape_jax": list(jgr.shape),
+                "shape_cmp": [int(nrow), int(ncol)],
+                "rel_raw": _rel(vm.reshape(-1), jj.reshape(-1)),
+                "rel_scaled": rel_gr_scaled,
+                "scale_jax_to_vmec": a_gr,
+            }
+
+    if "grpmn_analytic" in jax:
+        jgr = np.asarray(jax["grpmn_analytic"], dtype=float)
+        vgr = np.asarray(vmec_scal.get("grpmn_analytic", np.zeros((0, 0), dtype=float)), dtype=float)
+        if mode_map is not None and mode_map.size > 0 and jgr.ndim == 2:
+            mnpd = int(mode_map.size)
+            if jgr.shape[0] >= mnpd:
+                if jgr.shape[0] >= 2 * mnpd:
+                    idx = np.concatenate([mode_map, mode_map + mnpd], axis=0)
+                else:
+                    idx = mode_map
+                jgr = jgr[idx, :]
+        nrow = min(vgr.shape[0], jgr.shape[0])
+        ncol = min(vgr.shape[1], jgr.shape[1])
+        if nrow > 0 and ncol > 0:
+            vm = vgr[:nrow, :ncol]
+            jj = jgr[:nrow, :ncol]
+            a_gr, rel_gr_scaled = _rel_scaled(vm.reshape(-1), jj.reshape(-1))
+            out["grpmn_analytic"] = {
+                "shape_vmec": list(vgr.shape),
+                "shape_jax": list(jgr.shape),
+                "shape_cmp": [int(nrow), int(ncol)],
+                "rel_raw": _rel(vm.reshape(-1), jj.reshape(-1)),
+                "rel_scaled": rel_gr_scaled,
+                "scale_jax_to_vmec": a_gr,
+            }
+
+    if "grpmn_nonsing" in jax:
+        jgr = np.asarray(jax["grpmn_nonsing"], dtype=float)
+        vtot = (
+            np.asarray(vmec_fouri.get("grpmn", np.zeros((0, 0), dtype=float)), dtype=float)
+            if vmec_fouri is not None
+            else np.asarray(vmec_scal.get("grpmn_total", np.zeros((0, 0), dtype=float)), dtype=float)
+        )
+        vana = np.asarray(vmec_scal.get("grpmn_analytic", np.zeros((0, 0), dtype=float)), dtype=float)
+        if vtot.shape == vana.shape and vtot.size > 0:
+            vgr = vtot - vana
+        else:
+            vgr = np.zeros((0, 0), dtype=float)
+        if mode_map is not None and mode_map.size > 0 and jgr.ndim == 2:
+            mnpd = int(mode_map.size)
+            if jgr.shape[0] >= mnpd:
+                if jgr.shape[0] >= 2 * mnpd:
+                    idx = np.concatenate([mode_map, mode_map + mnpd], axis=0)
+                else:
+                    idx = mode_map
+                jgr = jgr[idx, :]
+        nrow = min(vgr.shape[0], jgr.shape[0])
+        ncol = min(vgr.shape[1], jgr.shape[1])
+        if nrow > 0 and ncol > 0:
+            vm = vgr[:nrow, :ncol]
+            jj = jgr[:nrow, :ncol]
+            a_gr, rel_gr_scaled = _rel_scaled(vm.reshape(-1), jj.reshape(-1))
+            out["grpmn_nonsing"] = {
+                "shape_vmec": list(vgr.shape),
+                "shape_jax": list(jgr.shape),
+                "shape_cmp": [int(nrow), int(ncol)],
+                "rel_raw": _rel(vm.reshape(-1), jj.reshape(-1)),
+                "rel_scaled": rel_gr_scaled,
+                "scale_jax_to_vmec": a_gr,
+            }
 
     if "amatrix_mode" in jax:
         jax_a = np.asarray(jax["amatrix_mode"], dtype=float)
