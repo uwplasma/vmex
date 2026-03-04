@@ -146,9 +146,6 @@ max_runtime_s = 30.0
 max_total_runtime_s = 80.0
 goal = "Primary free-boundary parity blocker case: source_sym -> bvecNS -> potvac."
 
-[cases.env]
-VMEC_JAX_FREEB_USE_GREENF_SOURCE = "1"
-
 [cases.metric_thresholds_rel_scaled]
 source_sym = 2.0e-2
 bvec_nonsing_fouri = 2.0e-2
@@ -195,9 +192,6 @@ iter_list = [80, 100, 120]
 vmec_timeout = 420
 goal = "Free-boundary LASYM=true axisymmetric parity target."
 
-[cases.env]
-VMEC_JAX_FREEB_USE_GREENF_SOURCE = "1"
-
 [[cases]]
 id = "freeb_axisym_lasym_true_diiid_reset"
 tier = "full"
@@ -215,9 +209,6 @@ iter_list = [80, 100, 120]
 vmec_timeout = 420
 goal = "Free-boundary LASYM=true restart/reset parity target."
 
-[cases.env]
-VMEC_JAX_FREEB_USE_GREENF_SOURCE = "1"
-
 [[cases]]
 id = "freeb_nonaxis_lasym_false_stellcopt"
 tier = "full"
@@ -234,9 +225,6 @@ max_iter = 80
 iter_list = [10, 20, 40]
 vmec_timeout = 420
 goal = "Free-boundary non-axisymmetric stress case for operator parity and scaling."
-
-[cases.env]
-VMEC_JAX_FREEB_USE_GREENF_SOURCE = "1"
 
 [[cases]]
 id = "freeb_nonaxis_lasym_true_cth_like_local"
@@ -256,9 +244,6 @@ vmec_timeout = 300
 max_runtime_s = 45.0
 max_total_runtime_s = 95.0
 goal = "Self-contained local free-boundary non-axisymmetric LASYM=true coverage case (synthetic cth-like asymmetric variant)."
-
-[cases.env]
-VMEC_JAX_FREEB_USE_GREENF_SOURCE = "1"
 
 [cases.metric_thresholds_rel_scaled]
 source_sym = 3.0e-1
