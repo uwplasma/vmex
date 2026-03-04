@@ -466,21 +466,25 @@ def _axis_current_field_vmec_filament(
         z = np.zeros_like(R)
         return z, z, z
 
-    nfp = max(1, int(nfp))
+    nfper = max(1, int(nfp))
     nv = int(nzeta)
+    # VMEC precal.f:
+    #   if (nv == 1) then nvper = 64 else nvper = nfper
+    # This keeps axis-current sampling non-degenerate in axisymmetric vacuum runs.
+    nvper = 64 if nv == 1 else nfper
     alv = 2.0 * np.pi / float(max(1, nv))
-    onp = 1.0 / float(nfp)
+    onp = 1.0 / float(nfper)
     alvp = onp * alv
     cosuv_1d = np.cos(alvp * np.arange(nv, dtype=float))
     sinuv_1d = np.sin(alvp * np.arange(nv, dtype=float))
-    alp_per = 2.0 * np.pi / float(max(1, nfp))
-    cosper = np.cos(alp_per * np.arange(nfp, dtype=float))
-    sinper = np.sin(alp_per * np.arange(nfp, dtype=float))
+    alp_per = 2.0 * np.pi / float(max(1, nvper))
+    cosper = np.cos(alp_per * np.arange(nvper, dtype=float))
+    sinper = np.sin(alp_per * np.arange(nvper, dtype=float))
 
     # tolicu.f: xpts(3,nvp), DO NOT CLOSE LOOP (wrap done in bsc_construct).
-    xpts = np.zeros((3, nfp * nv), dtype=float)
+    xpts = np.zeros((3, nvper * nv), dtype=float)
     idx = 0
-    for kper in range(nfp):
+    for kper in range(nvper):
         cp = cosper[kper]
         sp = sinper[kper]
         for kv in range(nv):
@@ -2471,6 +2475,7 @@ def _maybe_dump_scalpot_jax(
     grpmn_nonsing: np.ndarray | None = None,
     grpmn_analytic: np.ndarray | None = None,
     grpmn_total: np.ndarray | None = None,
+    plascur: float | None = None,
 ) -> None:
     env = os.getenv("VMEC_JAX_DUMP_SCALPOT", "").strip().lower()
     if env in ("", "0", "false", "no"):
@@ -2516,6 +2521,8 @@ def _maybe_dump_scalpot_jax(
         "bsqvac": np.asarray(vac.bsqvac, dtype=float),
         "bnormal_unit": np.asarray(vac.bnormal_unit, dtype=float),
     }
+    if plascur is not None:
+        out["plascur"] = np.asarray(float(plascur), dtype=float)
     if sample.ruu is not None:
         out["Ruu"] = np.asarray(sample.ruu, dtype=float)
     if sample.ruv is not None:
@@ -2799,12 +2806,19 @@ def nestor_external_only_step(
                     lasym=bool(getattr(static.cfg, "lasym", False)),
                     wint_vmec=np.asarray(wint_vmec, dtype=float),
                 )
-            use_greenf_source = os.getenv("VMEC_JAX_FREEB_USE_GREENF_SOURCE", "1").strip().lower() not in (
-                "",
-                "0",
-                "false",
-                "no",
-            )
+            greenf_env = os.getenv("VMEC_JAX_FREEB_USE_GREENF_SOURCE")
+            if greenf_env is None:
+                # VMEC axisymmetric free-boundary (`nf=0`) is better matched by
+                # the direct bexni source path, while non-axisymmetric cases
+                # generally need Green-function nonsingular source assembly.
+                use_greenf_source = int(getattr(static.cfg, "ntor", 0)) > 0
+            else:
+                use_greenf_source = greenf_env.strip().lower() not in (
+                    "",
+                    "0",
+                    "false",
+                    "no",
+                )
             # Default to Fortran-equivalent matrix assembly from grpmn (fouri
             # path). Can be disabled via VMEC_JAX_FREEB_EXPERIMENTAL_FOURI_MATRIX=0
             # for diagnostics.
@@ -3001,6 +3015,7 @@ def nestor_external_only_step(
         grpmn_nonsing=None if grpmn_nonsing is None else np.asarray(grpmn_nonsing, dtype=float),
         grpmn_analytic=None if grpmn_analytic is None else np.asarray(grpmn_analytic, dtype=float),
         grpmn_total=None if grpmn_total is None else np.asarray(grpmn_total, dtype=float),
+        plascur=float(plascur),
     )
     return res, runtime_next
 
