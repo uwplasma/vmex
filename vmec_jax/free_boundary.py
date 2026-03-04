@@ -1938,6 +1938,12 @@ def _vmec_nonsingular_terms_from_bexni(
                             idx_m = m + ((-n) + nf) * mf1
                             grpmn_nonsing[row_off + idx_m, ip] += gcos - gsin
 
+    # fourp/fouri normalization: VMEC accumulates the non-singular matrix-side
+    # kernel with an additional 1/2 factor relative to the raw delgrp sum used
+    # above (see analysesum2/fourp coupling on the reduced nu3 mesh). Apply it
+    # here so `grpmn_nonsing` is in the same scale as VMEC `fouri`'s `grpmn`.
+    grpmn_nonsing *= 0.5
+
     return np.asarray(gstore, dtype=float), np.asarray(grpmn_nonsing, dtype=float)
 
 
@@ -2801,7 +2807,10 @@ def nestor_external_only_step(
                 "false",
                 "no",
             )
-            experimental_fouri_matrix = os.getenv("VMEC_JAX_FREEB_EXPERIMENTAL_FOURI_MATRIX", "0").strip().lower() not in (
+            # Default to Fortran-equivalent matrix assembly from grpmn (fouri
+            # path). Can be disabled via VMEC_JAX_FREEB_EXPERIMENTAL_FOURI_MATRIX=0
+            # for diagnostics.
+            experimental_fouri_matrix = os.getenv("VMEC_JAX_FREEB_EXPERIMENTAL_FOURI_MATRIX", "1").strip().lower() not in (
                 "",
                 "0",
                 "false",

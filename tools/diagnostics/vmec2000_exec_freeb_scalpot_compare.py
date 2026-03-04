@@ -589,6 +589,8 @@ def main() -> int:
             max_iter=int(args.max_iter),
             multigrid=False,
             verbose=False,
+            performance_mode=False,
+            use_scan=False,
         )
     finally:
         os.environ.clear()
