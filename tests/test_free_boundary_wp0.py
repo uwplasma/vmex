@@ -1128,10 +1128,13 @@ def test_freeb_turnon_restart_sets_iter1_and_reuse_step(tmp_path: Path, monkeypa
     turnon_idx = np.where(ivac == 1)[0]
     assert turnon_idx.size >= 1
     k = int(turnon_idx[0])
+    # Turn-on iteration itself must be a full update.
+    assert int(ivacskip[k]) == 0
+    assert int(reused[k]) == 0
+    # VMEC eqsolve promotes ivac==1 -> 2 after the turn-on iteration, so the
+    # next step can already enter reuse cadence.
     if (k + 1) < ivac.size:
-        # VMEC keeps full vacuum updates while ivac<=2.
-        assert int(ivacskip[k + 1]) == 0
-        assert int(reused[k + 1]) == 0
+        assert int(ivac[k + 1]) >= 2
     # Ensure reuse activates once ivac advances beyond 2.
     post_turnon = np.where((ivac > 2) & (ivacskip > 0))[0]
     if post_turnon.size:
