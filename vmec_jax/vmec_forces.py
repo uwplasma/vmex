@@ -1105,8 +1105,12 @@ def vmec_forces_rz_from_wout(
                     pres_edge=np.asarray(pres_edge),
                     pr1_even_edge=np.asarray(pr1_0[-1]),
                     pr1_odd_edge=np.asarray(pr1_1[-1]),
-                    pzu0_edge=np.asarray(pzu_0[-1]),
-                    pru0_edge=np.asarray(pru_0[-1]),
+                    # VMEC funct3d/forces uses physical pzu0/pru0:
+                    # p?u0 = p?u(:,0) + p?u(:,1)*sqrt(s), with sqrt(s_edge)=1.
+                    pzu0_edge=np.asarray(zu0_edge),
+                    pru0_edge=np.asarray(ru0_edge),
+                    pzu0_even_edge=np.asarray(pzu_0[-1]),
+                    pru0_even_edge=np.asarray(pru_0[-1]),
                     zu0_phys_edge=np.asarray(zu0_edge),
                     ru0_phys_edge=np.asarray(ru0_edge),
                 )

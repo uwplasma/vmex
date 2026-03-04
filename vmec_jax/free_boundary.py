@@ -898,29 +898,64 @@ def _sample_external_boundary_arrays(
     # VMEC funct3d sets:
     #   raxis_nestor(1:nzeta) = pr1(1:nzeta,1,0)
     #   zaxis_nestor(1:nzeta) = pz1(1:nzeta,1,0)
-    # where parity index 0 is the even-m channel. Build that channel directly.
-    try:
-        if getattr(static, "m_is_even", None) is not None:
-            mask_even = np.asarray(static.m_is_even, dtype=float)
-        else:
-            mask_even = (np.asarray(static.modes.m, dtype=int) % 2 == 0).astype(float)
-        mask_even = mask_even.reshape((1, 1, -1))
-        coeff_cos = np.stack([np.asarray(Rcos_phys), np.asarray(Zcos_phys)], axis=0) * mask_even
-        coeff_sin = np.stack([np.asarray(Rsin_phys), np.asarray(Zsin_phys)], axis=0) * mask_even
-        parity_even = np.asarray(
-            vmec_realspace_synthesis(
-                coeff_cos=coeff_cos,
-                coeff_sin=coeff_sin,
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=True,
-                apply_scalxc=False,
-            ),
-            dtype=float,
-        )
-        axis_r = np.asarray(parity_even[0, 0, 0, :], dtype=float)
-        axis_z = np.asarray(parity_even[1, 0, 0, :], dtype=float)
-    except Exception:
+    # where parity index 0 is the even-m channel.
+    axis_mode = os.getenv("VMEC_JAX_FREEB_AXIS_MODE", "vmec_pr1").strip().lower()
+    axis_from_parity_env = os.getenv("VMEC_JAX_FREEB_AXIS_FROM_PARITY", "1").strip().lower()
+    axis_from_parity = axis_from_parity_env not in ("", "0", "false", "no")
+    axis_ready = False
+
+    # VMEC-exact shortcut for lasym=False:
+    # pr1(:,1,0) uses only rmncc at theta=0; pz1(:,1,0) uses only zmncs.
+    if (not bool(getattr(static.cfg, "lasym", False))) and axis_mode in ("vmec_pr1", "pr1_vmec", "vmec"):
+        try:
+            from .vmec_parity import signed_maps_from_modes, _signed_to_mn_cos_cached, _signed_to_mn_sin_cached
+
+            maps = signed_maps_from_modes(static.modes)
+            rcc, _rss = _signed_to_mn_cos_cached(np.asarray(state.Rcos), maps=maps)
+            _zsc, zcs = _signed_to_mn_sin_cached(np.asarray(state.Zsin), maps=maps)
+            rcc_js1 = np.asarray(rcc[0], dtype=float)  # (mpol, ntor+1)
+            zcs_js1 = np.asarray(zcs[0], dtype=float)  # (mpol, ntor+1)
+            even_m = (np.arange(rcc_js1.shape[0], dtype=int) % 2) == 0
+            rmncc_n = np.sum(rcc_js1[even_m, :], axis=0)
+            zmncs_n = np.sum(zcs_js1[even_m, :], axis=0)
+            nrange = int(rmncc_n.shape[0])
+            cosnv = np.asarray(trig.cosnv, dtype=float)[:, :nrange]
+            sinnv = np.asarray(trig.sinnv, dtype=float)[:, :nrange]
+            axis_r = np.asarray(cosnv @ rmncc_n, dtype=float)
+            axis_z = np.asarray(sinnv @ zmncs_n, dtype=float)
+            axis_ready = True
+        except Exception:
+            axis_ready = False
+
+    if (not axis_ready) and axis_from_parity:
+        try:
+            if getattr(static, "m_is_even", None) is not None:
+                mask_even = np.asarray(static.m_is_even, dtype=float)
+            else:
+                mask_even = (np.asarray(static.modes.m, dtype=int) % 2 == 0).astype(float)
+            mask_even = mask_even.reshape((1, 1, -1))
+            axis_scalxc_env = os.getenv("VMEC_JAX_FREEB_AXIS_PARITY_SCALXC", "0").strip().lower()
+            axis_apply_scalxc = axis_scalxc_env not in ("", "0", "false", "no")
+            coeff_cos = np.stack([np.asarray(Rcos_phys), np.asarray(Zcos_phys)], axis=0) * mask_even
+            coeff_sin = np.stack([np.asarray(Rsin_phys), np.asarray(Zsin_phys)], axis=0) * mask_even
+            parity_even = np.asarray(
+                vmec_realspace_synthesis(
+                    coeff_cos=coeff_cos,
+                    coeff_sin=coeff_sin,
+                    modes=static.modes,
+                    trig=trig,
+                    coeffs_internal=True,
+                    apply_scalxc=bool(axis_apply_scalxc),
+                ),
+                dtype=float,
+            )
+            axis_r = np.asarray(parity_even[0, 0, 0, :], dtype=float)
+            axis_z = np.asarray(parity_even[1, 0, 0, :], dtype=float)
+            axis_ready = True
+        except Exception:
+            axis_ready = False
+
+    if not axis_ready:
         # Conservative fallback: direct synthesis from axis coefficients.
         axis_r = np.asarray(
             vmec_realspace_synthesis(
@@ -1348,6 +1383,42 @@ def _spectral_second_derivatives_2d(field: np.ndarray) -> tuple[np.ndarray, np.n
     return np.asarray(duu, dtype=float), np.asarray(duv, dtype=float), np.asarray(dvv, dtype=float)
 
 
+def _vmec_precal_tan_tables(*, nu: int, nv: int, nvper: int) -> tuple[np.ndarray, np.ndarray]:
+    """VMEC ``precal.f`` tan tables used by ``greenf.f``."""
+
+    nu = max(1, int(nu))
+    nv = max(1, int(nv))
+    nvper = max(1, int(nvper))
+    kp_count = int(nvper) if int(nv) == 1 else 1
+    nuv_tan = int(2 * nu * nv * kp_count)
+    tanu = np.zeros((nuv_tan,), dtype=float)
+    tanv = np.zeros((nuv_tan,), dtype=float)
+    alu = 2.0 * np.pi / float(nu)
+    alv = 2.0 * np.pi / float(nv)
+    alp_per = 2.0 * np.pi / float(nvper)
+    epstan = np.finfo(float).eps
+    bigno = 1.0e50
+    i = 0
+    for kp in range(1, kp_count + 1):
+        argp = 0.5 * alp_per * float(kp - 1)
+        for ku in range(1, 2 * nu + 1):
+            argu = 0.5 * alu * float(ku - 1)
+            near_qpi = abs(argu - 0.25 * 2.0 * np.pi) < epstan
+            near_3qpi = abs(argu - 0.75 * 2.0 * np.pi) < epstan
+            for kv in range(1, nv + 1):
+                argv = 0.5 * alv * float(kv - 1) + argp
+                if near_qpi or near_3qpi:
+                    tanu[i] = bigno
+                else:
+                    tanu[i] = 2.0 * np.tan(argu)
+                if abs(argv - 0.25 * 2.0 * np.pi) < epstan:
+                    tanv[i] = bigno
+                else:
+                    tanv[i] = 2.0 * np.tan(argv)
+                i += 1
+    return np.asarray(tanu, dtype=float), np.asarray(tanv, dtype=float)
+
+
 def _vmec_nonsingular_gsource_from_bexni(
     *,
     sample: ExternalBoundarySample,
@@ -1493,20 +1564,7 @@ def _vmec_nonsingular_gsource_from_bexni(
     rcosuv = R * cosuv
     rsinuv = R * sinuv
 
-    # tanu/tanv tables from precal.f for nv>1 path.
-    nu_tan = 2 * nu
-    tanu = np.zeros((nu_tan, nv), dtype=float)
-    tanv = np.zeros((nu_tan, nv), dtype=float)
-    for ku_idx in range(nu_tan):
-        argu = 0.5 * (2.0 * np.pi / float(max(1, nu))) * float(ku_idx)
-        tu = 2.0 * np.tan(argu)
-        for kv_idx in range(nv):
-            argv = 0.5 * alv * float(kv_idx)
-            tv = 2.0 * np.tan(argv)
-            tanu[ku_idx, kv_idx] = tu
-            tanv[ku_idx, kv_idx] = tv
-    tanu = tanu.reshape(-1)
-    tanv = tanv.reshape(-1)
+    tanu, tanv = _vmec_precal_tan_tables(nu=nu, nv=nv, nvper=nvper)
 
     # Field-period rotation factors.
     alp_per = 2.0 * np.pi / float(max(1, nvper))
@@ -1537,17 +1595,21 @@ def _vmec_nonsingular_gsource_from_bexni(
             sxsave = (snr[ip] * xper - snv[ip] * yper) / R[ip]
             sysave = (snr[ip] * yper + snv[ip] * xper) / R[ip]
             base = gsave - 2.0 * (xper * rcosuv + yper * rsinuv)
-            htemp = np.sqrt(1.0 / base)
             if kp == 0 or nv == 1:
                 tidx_u = idx_all + iuoff
-                tidx_v = idx_all + ivoff
+                ivoff_k = ivoff + (2 * nu * kp if nv == 1 else 0)
+                tidx_v = idx_all + ivoff_k
                 ga1 = tanu[tidx_u] * (guu_b[ip] * tanu[tidx_u] + guv_b[ip] * tanv[tidx_v]) + gvv_b[ip] * tanv[tidx_v] * tanv[tidx_v]
                 ga2 = tanu[tidx_u] * (auu[ip] * tanu[tidx_u] + auv[ip] * tanv[tidx_v]) + avv[ip] * tanv[tidx_v] * tanv[tidx_v]
                 ga2 = ga2 / ga1
                 ga1s = 1.0 / np.sqrt(ga1)
-                mask = idx_all != ip
-                delgr[mask] += htemp[mask] - ga1s[mask]
+                mask = (idx_all != ip) if kp == 0 else np.ones_like(idx_all, dtype=bool)
+                if np.any(mask):
+                    base_m = base[mask]
+                    htemp_m = np.sqrt(1.0 / base_m)
+                    delgr[mask] += htemp_m - ga1s[mask]
             else:
+                htemp = np.sqrt(1.0 / base)
                 delgr += htemp
         gstore += bex[ip] * delgr
 
@@ -1755,19 +1817,7 @@ def _vmec_nonsingular_terms_from_bexni(
     rcosuv = R * cosuv
     rsinuv = R * sinuv
 
-    nu2 = 2 * nu
-    tanu = np.zeros((nu2, nv), dtype=float)
-    tanv = np.zeros((nu2, nv), dtype=float)
-    for ku_idx in range(nu2):
-        argu = 0.5 * (2.0 * np.pi / float(max(1, nu))) * float(ku_idx)
-        tu = 2.0 * np.tan(argu)
-        for kv_idx in range(nv):
-            argv = 0.5 * alv * float(kv_idx)
-            tv = 2.0 * np.tan(argv)
-            tanu[ku_idx, kv_idx] = tu
-            tanv[ku_idx, kv_idx] = tv
-    tanu = tanu.reshape(-1)
-    tanv = tanv.reshape(-1)
+    tanu, tanv = _vmec_precal_tan_tables(nu=nu, nv=nv, nvper=nvper)
 
     alp_per = 2.0 * np.pi / float(max(1, nvper))
     cosper = np.cos(alp_per * np.arange(nvper, dtype=float))
@@ -1824,20 +1874,28 @@ def _vmec_nonsingular_terms_from_bexni(
             sxsave = (snr[ip] * xper - snv[ip] * yper) / R[ip]
             sysave = (snr[ip] * yper + snv[ip] * xper) / R[ip]
             base = gsave - 2.0 * (xper * rcosuv + yper * rsinuv)
-            ftemp = 1.0 / base
-            htemp = np.sqrt(ftemp)
-            deriv = ftemp * htemp * (rcosuv * sxsave + rsinuv * sysave + dsave)
             if kp == 0 or nv == 1:
                 tidx_u = idx_all + iuoff
-                tidx_v = idx_all + ivoff
+                ivoff_k = ivoff + (2 * nu * kp if nv == 1 else 0)
+                tidx_v = idx_all + ivoff_k
                 ga1 = tanu[tidx_u] * (guu_b[ip] * tanu[tidx_u] + guv_b[ip] * tanv[tidx_v]) + gvv_b[ip] * tanv[tidx_v] * tanv[tidx_v]
                 ga2 = tanu[tidx_u] * (auu[ip] * tanu[tidx_u] + auv[ip] * tanv[tidx_v]) + avv[ip] * tanv[tidx_v] * tanv[tidx_v]
                 ga2 = ga2 / ga1
                 ga1s = 1.0 / np.sqrt(ga1)
-                mask = idx_all != ip
-                delgr[mask] += htemp[mask] - ga1s[mask]
-                delgrp[mask] += deriv[mask] - ga2[mask] * ga1s[mask]
+                mask = (idx_all != ip) if kp == 0 else np.ones_like(idx_all, dtype=bool)
+                if np.any(mask):
+                    base_m = base[mask]
+                    ftemp_m = 1.0 / base_m
+                    htemp_m = np.sqrt(ftemp_m)
+                    deriv_m = ftemp_m * htemp_m * (
+                        rcosuv[mask] * sxsave + rsinuv[mask] * sysave + dsave[mask]
+                    )
+                    delgr[mask] += htemp_m - ga1s[mask]
+                    delgrp[mask] += deriv_m - ga2[mask] * ga1s[mask]
             else:
+                ftemp = 1.0 / base
+                htemp = np.sqrt(ftemp)
+                deriv = ftemp * htemp * (rcosuv * sxsave + rsinuv * sysave + dsave)
                 delgr += htemp
                 delgrp += deriv
         gstore += bex[ip] * delgr

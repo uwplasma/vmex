@@ -8391,6 +8391,30 @@ def solve_fixed_boundary_residual_iter(
             freeb_plascur = float((2.0 * np.pi) * icurv_arr[-1])
     except Exception:
         freeb_plascur = 0.0
+    def _vmec_freeb_plascur_from_bcovar(bc_obj, fallback: float) -> float:
+        """VMEC `ctor` proxy used by NESTOR (`vacuum_par(..., ctor, ...)`)."""
+        try:
+            from .vmec_lforbal import currents_from_bcovar
+
+            buco, _bvco, _jcuru, _jcurv = currents_from_bcovar(
+                bc=bc_obj,
+                trig=trig,
+                wout=wout_like,
+                s=s,
+            )
+            buco_np = np.asarray(buco, dtype=float).reshape(-1)
+            if buco_np.size < 2:
+                return float(fallback)
+            # VMEC passes `ctor` to NESTOR. In the JAX bcovar path the
+            # averaged `buco` sign convention is flipped relative to NESTOR's
+            # toroidal-current convention, so apply the VMEC-equivalent sign
+            # correction here.
+            ctor = -float(signgs) * float(TWOPI) * (1.5 * float(buco_np[-1]) - 0.5 * float(buco_np[-2]))
+            if np.isfinite(ctor):
+                return float(ctor)
+        except Exception:
+            pass
+        return float(fallback)
     res0 = -1.0
     k_preconditioner_update_interval = 25
     state_checkpoint = state
@@ -9048,6 +9072,7 @@ def solve_fixed_boundary_residual_iter(
         skip_time_control = False
         force_bcovar_update = False
         time_step_report_hold: float | None = None
+        freeb_turnon_applied = False
         while True:
             iter_since_restart = iter2 - iter1
             fsq_prev_before = fsq_prev
@@ -9182,6 +9207,8 @@ def solve_fixed_boundary_residual_iter(
                 iter_idx=_iter_idx_for_dump(iter2),
                 iter2=iter2,
             )
+            if bool(free_boundary_enabled):
+                freeb_plascur = _vmec_freeb_plascur_from_bcovar(k.bc, freeb_plascur)
             if timing_enabled:
                 try:
                     if has_jax():
@@ -9265,6 +9292,45 @@ def solve_fixed_boundary_residual_iter(
                     cache_prec_rz_jmax = int(jmax)
                 vmec2000_cache_valid = True
             fsqr_f, fsqz_f, fsql_f = _device_get_floats(fsqr, fsqz, fsql)
+            if bool(free_boundary_enabled) and (int(freeb_ivac) == 1) and (not bool(freeb_turnon_applied)):
+                # VMEC calls restart_iter(irst=2) inside funct3d on the first
+                # vacuum-coupled iteration. This resets the state/velocity used
+                # by evolve while keeping the force residuals from this call.
+                # restart_iter(irst=2) also damps the time-step by 0.9.
+                state = state_checkpoint
+                vRcc = jnp.zeros_like(vRcc)
+                vRss = jnp.zeros_like(vRss)
+                vZsc = jnp.zeros_like(vZsc)
+                vZcs = jnp.zeros_like(vZcs)
+                vLsc = jnp.zeros_like(vLsc)
+                vLcs = jnp.zeros_like(vLcs)
+                vRsc = jnp.zeros_like(vRsc)
+                vRcs = jnp.zeros_like(vRcs)
+                vZcc = jnp.zeros_like(vZcc)
+                vZss = jnp.zeros_like(vZss)
+                vLcc = jnp.zeros_like(vLcc)
+                vLss = jnp.zeros_like(vLss)
+                time_step = float(time_step) * 0.9
+                time_step_report_hold = float(time_step)
+                ijacob += 1
+                iter1 = int(iter2)
+                bad_growth_streak = 0
+                inv_tau = [0.15 / max(float(time_step), 1e-12)] * k_ndamp
+                vmec2000_cache_valid = False
+                cache_precond_diag = None
+                cache_tcon = None
+                cache_norms = None
+                cache_rz_scale = None
+                cache_l_scale = None
+                cache_rz_norm = None
+                cache_f_norm1 = None
+                cache_prec_rz_mats = None
+                cache_prec_rz_jmax = None
+                cache_prec_lam_prec = None
+                cache_prec_faclam = None
+                cache_prec_lam_debug = None
+                force_bcovar_update = True
+                freeb_turnon_applied = True
             fsq0_curr = fsqr_f + fsqz_f + fsql_f
             prev_rz_fsq_before = prev_rz_fsq
             prev_rz_fsq = fsqr_f + fsqz_f
@@ -11073,40 +11139,6 @@ def solve_fixed_boundary_residual_iter(
         if free_boundary_enabled and int(freeb_ivac) == 1:
             if verbose and bool(verbose_vmec2000_table):
                 print(f"\n  VACUUM PRESSURE TURNED ON AT {int(iter2):4d} ITERATIONS\n", flush=True)
-            # VMEC funct3d/fvac turn-on path does *not* roll back `xc` here.
-            # It toggles irst/restart_iter bookkeeping (time-step + iter1) while
-            # preserving the current state vector. Keep JAX parity by only
-            # resetting velocity-like accumulators and restart scalars.
-            vRcc = jnp.zeros_like(vRcc)
-            vRss = jnp.zeros_like(vRss)
-            vZsc = jnp.zeros_like(vZsc)
-            vZcs = jnp.zeros_like(vZcs)
-            vLsc = jnp.zeros_like(vLsc)
-            vLcs = jnp.zeros_like(vLcs)
-            vRsc = jnp.zeros_like(vRsc)
-            vRcs = jnp.zeros_like(vRcs)
-            vZcc = jnp.zeros_like(vZcc)
-            vZss = jnp.zeros_like(vZss)
-            vLcc = jnp.zeros_like(vLcc)
-            vLss = jnp.zeros_like(vLss)
-            time_step = max(restart_badjac_factor * float(time_step), 1e-12)
-            ijacob += 1
-            iter1 = int(iter2)
-            bad_growth_streak = 0
-            inv_tau = [0.15 / time_step] * k_ndamp
-            vmec2000_cache_valid = False
-            cache_precond_diag = None
-            cache_tcon = None
-            cache_norms = None
-            cache_rz_scale = None
-            cache_l_scale = None
-            cache_rz_norm = None
-            cache_f_norm1 = None
-            cache_prec_rz_mats = None
-            cache_prec_rz_jmax = None
-            cache_prec_lam_prec = None
-            cache_prec_faclam = None
-            cache_prec_lam_debug = None
             freeb_ivac = int(freeb_ivac) + 1
         skip_time_control = False
 
