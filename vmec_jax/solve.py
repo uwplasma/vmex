@@ -5130,6 +5130,7 @@ def solve_fixed_boundary_residual_iter(
         edge_Rsin=edge_Rsin,
         edge_Zcos=edge_Zcos,
         edge_Zsin=edge_Zsin,
+        enforce_edge=not bool(free_boundary_enabled),
         enforce_lambda_axis=True,
         idx00=idx00,
     )
@@ -6941,6 +6942,7 @@ def solve_fixed_boundary_residual_iter(
                         edge_Rsin=edge_Rsin,
                         edge_Zcos=edge_Zcos,
                         edge_Zsin=edge_Zsin,
+                        enforce_edge=not bool(free_boundary_enabled),
                         enforce_lambda_axis=True,
                         idx00=idx00,
                     )
@@ -8230,6 +8232,7 @@ def solve_fixed_boundary_residual_iter(
                     edge_Rsin=edge_Rsin,
                     edge_Zcos=edge_Zcos,
                     edge_Zsin=edge_Zsin,
+                    enforce_edge=not bool(free_boundary_enabled),
                     enforce_lambda_axis=True,
                     idx00=idx00,
                 )
@@ -10504,6 +10507,7 @@ def solve_fixed_boundary_residual_iter(
                 edge_Rsin=edge_Rsin,
                 edge_Zcos=edge_Zcos,
                 edge_Zsin=edge_Zsin,
+                enforce_edge=not bool(free_boundary_enabled),
                 enforce_lambda_axis=True,
                 idx00=idx00,
             )
@@ -10583,6 +10587,7 @@ def solve_fixed_boundary_residual_iter(
                         edge_Rsin=edge_Rsin,
                         edge_Zcos=edge_Zcos,
                         edge_Zsin=edge_Zsin,
+                        enforce_edge=not bool(free_boundary_enabled),
                         enforce_lambda_axis=True,
                         idx00=idx00,
                     )
@@ -10680,6 +10685,7 @@ def solve_fixed_boundary_residual_iter(
                         edge_Rsin=edge_Rsin,
                         edge_Zcos=edge_Zcos,
                         edge_Zsin=edge_Zsin,
+                        enforce_edge=not bool(free_boundary_enabled),
                         enforce_lambda_axis=True,
                         idx00=idx00,
                     )
@@ -10908,6 +10914,7 @@ def solve_fixed_boundary_residual_iter(
                     edge_Rsin=edge_Rsin,
                     edge_Zcos=edge_Zcos,
                     edge_Zsin=edge_Zsin,
+                    enforce_edge=not bool(free_boundary_enabled),
                     enforce_lambda_axis=True,
                     idx00=idx00,
                 )
@@ -11066,8 +11073,10 @@ def solve_fixed_boundary_residual_iter(
         if free_boundary_enabled and int(freeb_ivac) == 1:
             if verbose and bool(verbose_vmec2000_table):
                 print(f"\n  VACUUM PRESSURE TURNED ON AT {int(iter2):4d} ITERATIONS\n", flush=True)
-            # VMEC `restart_iter` (irst=2) effect at vacuum turn-on.
-            state = state_checkpoint
+            # VMEC funct3d/fvac turn-on path does *not* roll back `xc` here.
+            # It toggles irst/restart_iter bookkeeping (time-step + iter1) while
+            # preserving the current state vector. Keep JAX parity by only
+            # resetting velocity-like accumulators and restart scalars.
             vRcc = jnp.zeros_like(vRcc)
             vRss = jnp.zeros_like(vRss)
             vZsc = jnp.zeros_like(vZsc)
