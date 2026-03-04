@@ -185,6 +185,9 @@ Key implementation updates that closed the matrix-side gap:
   (no extra post-factor), matching VMEC ``fouri`` matrix construction.
 - VMEC ``eqsolve`` turn-on behavior is mirrored: after ``ivac==1`` the solver
   promotes to ``ivac=2`` for subsequent iterations.
+- VMEC ``becoil`` toroidal sampling was aligned in JAX mgrid interpolation:
+  with ``use_vmec_kv=True`` the code now uses direct ``kv=mod(i-1,nv)+1``
+  indexing (0-based: ``k=min(k, kp-1)``), i.e. no ``kp/nzeta`` rescaling.
 
 Remaining late-iteration drift is concentrated on ``ivacskip>0`` reuse steps
 for challenging ``lasym=True`` trajectories, where VMEC and JAX can follow
