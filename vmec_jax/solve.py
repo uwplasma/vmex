@@ -198,10 +198,10 @@ def _free_boundary_iter_controls_vmec(
 ) -> tuple[int, int, int]:
     """VMEC2000-style `ivac/ivacskip/nvacskip` update (funct3d, ictrl_prec2d=0).
 
-    This mirrors the fixed-boundary run path used here:
-    - free-boundary turns on only after force residual drops below threshold,
+    Mirrors funct3d.f free-boundary cadence (ictrl_prec2d=0):
+    - `ivac` advances only when `(fsqr+fsqz) <= threshold`,
     - `ivac<=2` forces full vacuum updates (`ivacskip=0`),
-    - `nvacskip` is adapted when a full update is performed.
+    - `nvacskip` is adapted on full updates.
     """
 
     i2 = int(iter2)
@@ -213,22 +213,12 @@ def _free_boundary_iter_controls_vmec(
     if not np.isfinite(fs) or fs < 0.0:
         fs = 1.0
 
-    activate_threshold = float(os.getenv("VMEC_JAX_FREEB_ACTIVATE_FSQ", "5.0e-4") or 5.0e-4)
-    # VMEC funct3d free-boundary gating:
-    # IF (iter2 > 1 .AND. iequi == 0 .AND. fsqr+fsqz <= 1e-3) ivac = ivac + 1
-    # In vmec_jax, fsq normalization differs slightly from VMEC2000's raw
-    # printout scale; 5e-4 reproduces the same turn-on iteration on reference
-    # free-boundary cases (e.g. cth_like_free_bdy) while preserving behavior
-    # for low-residual starts.
-    # VMEC-style progression:
-    # - before activation (`ivac<0`), wait for residual threshold,
-    # - after activation (`ivac>=0`), advance every iteration.
-    if i2 > 1:
-        if iv < 0:
-            if fs <= activate_threshold:
-                iv = 1
-        else:
-            iv += 1
+    activate_threshold = float(os.getenv("VMEC_JAX_FREEB_ACTIVATE_FSQ", "1.0e-3") or 1.0e-3)
+    # VMEC funct3d:
+    #   IF (iter2 > 1 .AND. fsqr+fsqz <= 1e-3) ivac = ivac + 1
+    # Keep this literal behavior for cadence parity.
+    if i2 > 1 and fs <= activate_threshold:
+        iv += 1
 
     if iv < 0:
         return iv, 0, nv
@@ -9153,24 +9143,27 @@ def solve_fixed_boundary_residual_iter(
             freeb_sample_time = 0.0
             if bool(free_boundary_enabled and freeb_couple_edge):
                 try:
-                    # VMEC runs NESTOR before pressure-coupling turns on, so
-                    # keep the vacuum state warm even when `ivac<0`.
-                    vac_step_ivac = int(freeb_ivac) if int(freeb_ivac) >= 0 else 1
-                    nestor_res, freeb_nestor_runtime = nestor_external_only_step(
-                        state=state,
-                        static=static,
-                        ivac=vac_step_ivac,
-                        ivacskip=int(freeb_ivacskip),
-                        iter_idx=int(iter2),
-                        runtime=freeb_nestor_runtime,
-                        extcur=tuple(getattr(static, "free_boundary_extcur", ()) or ()),
-                        plascur=float(freeb_plascur),
-                    )
-                    freeb_last_model = str(getattr(nestor_res, "model", "spectral_poisson_external_only"))
-                    freeb_reused = bool(getattr(nestor_res, "reused", False))
-                    freeb_solve_time = float(getattr(nestor_res, "solve_time_s", 0.0))
-                    freeb_sample_time = float(getattr(nestor_res, "sample_time_s", 0.0))
+                    # VMEC free-boundary path in funct3d only enters NESTOR
+                    # after vacuum turn-on (`ivac >= 1`). Running vacuum solves
+                    # earlier changes source-cache cadence and breaks iter-level
+                    # parity on free-boundary diagnostics.
                     if int(freeb_ivac) >= 1:
+                        nestor_res, freeb_nestor_runtime = nestor_external_only_step(
+                            state=state,
+                            static=static,
+                            ivac=int(freeb_ivac),
+                            ivacskip=int(freeb_ivacskip),
+                            iter_idx=int(iter2),
+                            runtime=freeb_nestor_runtime,
+                            extcur=tuple(getattr(static, "free_boundary_extcur", ()) or ()),
+                            plascur=float(freeb_plascur),
+                        )
+                        freeb_last_model = str(
+                            getattr(nestor_res, "model", "spectral_poisson_external_only")
+                        )
+                        freeb_reused = bool(getattr(nestor_res, "reused", False))
+                        freeb_solve_time = float(getattr(nestor_res, "solve_time_s", 0.0))
+                        freeb_sample_time = float(getattr(nestor_res, "sample_time_s", 0.0))
                         bsqvac_edge = np.asarray(nestor_res.vac_total.bsqvac, dtype=float)
                         freeb_bsqvac_half_current = np.zeros(
                             (int(s.shape[0]),) + bsqvac_edge.shape,
@@ -11134,12 +11127,12 @@ def solve_fixed_boundary_residual_iter(
                 freeb_nestor_solve_time_history.append(float(freeb_solve_time))
                 freeb_nestor_sample_time_history.append(float(freeb_sample_time))
             grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
-        # VMEC eqsolve behavior: when ivac reaches 1, report turn-on and
-        # immediately advance to 2 for the next iteration.
+        # VMEC funct3d behavior: report turn-on when ivac==1. Do not advance
+        # ivac here; cadence advancement is handled by the free-boundary
+        # control update (`_free_boundary_iter_controls_vmec`).
         if free_boundary_enabled and int(freeb_ivac) == 1:
             if verbose and bool(verbose_vmec2000_table):
                 print(f"\n  VACUUM PRESSURE TURNED ON AT {int(iter2):4d} ITERATIONS\n", flush=True)
-            freeb_ivac = int(freeb_ivac) + 1
         skip_time_control = False
 
     diag: Dict[str, Any] = {
