@@ -895,26 +895,51 @@ def _sample_external_boundary_arrays(
         extcur=extcur_eff,
         use_vmec_kv=True,
     )
-    axis_r = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=np.asarray(Rcos_phys)[:1, :],
-            coeff_sin=np.asarray(Rsin_phys)[:1, :],
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-            apply_scalxc=True,
-        )[0, 0, :]
-    )
-    axis_z = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=np.asarray(Zcos_phys)[:1, :],
-            coeff_sin=np.asarray(Zsin_phys)[:1, :],
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-            apply_scalxc=True,
-        )[0, 0, :]
-    )
+    # VMEC funct3d sets:
+    #   raxis_nestor(1:nzeta) = pr1(1:nzeta,1,0)
+    #   zaxis_nestor(1:nzeta) = pz1(1:nzeta,1,0)
+    # where parity index 0 is the even-m channel. Build that channel directly.
+    try:
+        if getattr(static, "m_is_even", None) is not None:
+            mask_even = np.asarray(static.m_is_even, dtype=float)
+        else:
+            mask_even = (np.asarray(static.modes.m, dtype=int) % 2 == 0).astype(float)
+        mask_even = mask_even.reshape((1, 1, -1))
+        coeff_cos = np.stack([np.asarray(Rcos_phys), np.asarray(Zcos_phys)], axis=0) * mask_even
+        coeff_sin = np.stack([np.asarray(Rsin_phys), np.asarray(Zsin_phys)], axis=0) * mask_even
+        parity_even = np.asarray(
+            vmec_realspace_synthesis(
+                coeff_cos=coeff_cos,
+                coeff_sin=coeff_sin,
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+                apply_scalxc=False,
+            ),
+            dtype=float,
+        )
+        axis_r = np.asarray(parity_even[0, 0, 0, :], dtype=float)
+        axis_z = np.asarray(parity_even[1, 0, 0, :], dtype=float)
+    except Exception:
+        # Conservative fallback: direct synthesis from axis coefficients.
+        axis_r = np.asarray(
+            vmec_realspace_synthesis(
+                coeff_cos=np.asarray(Rcos_phys)[:1, :],
+                coeff_sin=np.asarray(Rsin_phys)[:1, :],
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+            )[0, 0, :]
+        )
+        axis_z = np.asarray(
+            vmec_realspace_synthesis(
+                coeff_cos=np.asarray(Zcos_phys)[:1, :],
+                coeff_sin=np.asarray(Zsin_phys)[:1, :],
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+            )[0, 0, :]
+        )
     axis_field_mode = os.getenv("VMEC_JAX_FREEB_AXIS_FIELD_MODE", "vmec_filament").strip().lower()
     if axis_field_mode in ("simple", "legacy"):
         br_axis, bp_axis, bz_axis = _axis_current_field_simple(
