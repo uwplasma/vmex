@@ -333,11 +333,16 @@ def rz_preconditioner_matrices(
     trig,
     s: np.ndarray,
     cfg,
+    jmax_override: int | None = None,
 ) -> tuple[dict[str, np.ndarray], np.ndarray, int]:
     """Return R/Z preconditioner matrices and jmin."""
     s_arr = np.asarray(s, dtype=float)
     ns = int(s_arr.shape[0])
-    ns_f = max(ns - 1, 1)
+    ns_f_default = max(ns - 1, 1)
+    if jmax_override is None:
+        ns_f = ns_f_default
+    else:
+        ns_f = int(max(1, min(int(jmax_override), ns)))
     w_int = wint_from_config(cfg=cfg)
     r12 = np.asarray(bc.jac.r12, dtype=float)[1:]
     tau = np.asarray(bc.jac.tau, dtype=float)[1:]
@@ -392,6 +397,12 @@ def rz_preconditioner_matrices(
     az = np.zeros_like(ar)
     bz = np.zeros_like(ar)
     dz = np.zeros_like(ar)
+    if arm.shape[0] < ns_f:
+        pad = ns_f - arm.shape[0]
+        arm = np.concatenate([arm, np.zeros((pad, arm.shape[1]), dtype=arm.dtype)], axis=0)
+        brm = np.concatenate([brm, np.zeros((pad, brm.shape[1]), dtype=brm.dtype)], axis=0)
+        azm = np.concatenate([azm, np.zeros((pad, azm.shape[1]), dtype=azm.dtype)], axis=0)
+        bzm = np.concatenate([bzm, np.zeros((pad, bzm.shape[1]), dtype=bzm.dtype)], axis=0)
     jmin = np.zeros((mpol, nrange), dtype=int)
     for m in range(mpol):
         jmin[m, :] = 1 if m > 0 else 0

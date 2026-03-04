@@ -136,6 +136,8 @@ class VmecRZForceKernels:
 
     # Optional diagnostic (set by constraint pipeline).
     tcon: Any | None = None  # (ns,)
+    constraint_rcon0: Any | None = None  # (ns, ntheta, nzeta)
+    constraint_zcon0: Any | None = None  # (ns, ntheta, nzeta)
 
     def tree_flatten(self):
         children = (
@@ -170,6 +172,8 @@ class VmecRZForceKernels:
             self.pzv_even,
             self.pzv_odd,
             self.tcon,
+            self.constraint_rcon0,
+            self.constraint_zcon0,
         )
         return children, None
 
@@ -192,6 +196,8 @@ class VmecConstraintKernels:
     tcon: Any  # (ns,)
     ard1: Any  # (ns,)
     azd1: Any  # (ns,)
+    rcon0: Any  # (ns, ntheta, nzeta)
+    zcon0: Any  # (ns, ntheta, nzeta)
 
 
 def _parse_iter_list(val: str) -> set[int] | None:
@@ -282,6 +288,8 @@ def _constraint_kernels_from_state(
     precond_diag_override: tuple[Any, Any] | None = None,
     precond_active: Any | None = None,
     tcon_active: Any | None = None,
+    rcon0_override: Any | None = None,
+    zcon0_override: Any | None = None,
     trig: VmecTrigTables | None = None,
     iter_idx: int | None = None,
 ) -> VmecConstraintKernels:
@@ -310,6 +318,8 @@ def _constraint_kernels_from_state(
                 tcon=tcon,
                 ard1=z1,
                 azd1=z1,
+                rcon0=z,
+                zcon0=z,
             )
 
     # xmpq(m,1) = m*(m-1).
@@ -379,9 +389,22 @@ def _constraint_kernels_from_state(
     rcon_phys = jnp.asarray(rcon_even) + psqrts * jnp.asarray(rcon_odd_int)
     zcon_phys = jnp.asarray(zcon_even) + psqrts * jnp.asarray(zcon_odd_int)
 
-    # Fixed-boundary scaling for rcon0/zcon0 (funct3d.f).
-    rcon0 = (s[:, None, None] * jnp.asarray(rcon_phys[-1])[None, :, :]).astype(jnp.asarray(rcon_phys).dtype)
-    zcon0 = (s[:, None, None] * jnp.asarray(zcon_phys[-1])[None, :, :]).astype(jnp.asarray(zcon_phys).dtype)
+    # Constraint baseline (VMEC `rcon0/zcon0`):
+    # initialize from edge profile scaled by s, then persist/update in caller.
+    if (rcon0_override is None) or (zcon0_override is None):
+        rcon0 = (s[:, None, None] * jnp.asarray(rcon_phys[-1])[None, :, :]).astype(jnp.asarray(rcon_phys).dtype)
+        zcon0 = (s[:, None, None] * jnp.asarray(zcon_phys[-1])[None, :, :]).astype(jnp.asarray(zcon_phys).dtype)
+    else:
+        rcon0 = jnp.asarray(rcon0_override, dtype=jnp.asarray(rcon_phys).dtype)
+        zcon0 = jnp.asarray(zcon0_override, dtype=jnp.asarray(zcon_phys).dtype)
+        if rcon0.shape != rcon_phys.shape:
+            raise ValueError(
+                f"rcon0_override shape mismatch: expected {rcon_phys.shape}, got {rcon0.shape}"
+            )
+        if zcon0.shape != zcon_phys.shape:
+            raise ValueError(
+                f"zcon0_override shape mismatch: expected {zcon_phys.shape}, got {zcon0.shape}"
+            )
 
     # Physical ru0/zu0 for ztemp formation.
     ru0 = jnp.asarray(pru_0) + psqrts * jnp.asarray(pru_1)
@@ -610,6 +633,8 @@ def _constraint_kernels_from_state(
         tcon=tcon,
         ard1=ard1,
         azd1=azd1,
+        rcon0=rcon0,
+        zcon0=zcon0,
     )
 
 
@@ -646,6 +671,8 @@ def vmec_forces_rz_from_wout(
     constraint_precond_diag: tuple[Any, Any] | None = None,
     constraint_precond_active: Any | None = None,
     constraint_tcon_active: Any | None = None,
+    constraint_rcon0: Any | None = None,
+    constraint_zcon0: Any | None = None,
     freeb_bsqvac_half: Any | None = None,
     use_wout_bsup: bool = False,
     use_vmec_synthesis: bool = False,
@@ -1141,6 +1168,8 @@ def vmec_forces_rz_from_wout(
         precond_diag_override=constraint_precond_diag,
         precond_active=constraint_precond_active,
         tcon_active=constraint_tcon_active,
+        rcon0_override=constraint_rcon0,
+        zcon0_override=constraint_zcon0,
         trig=trig,
         iter_idx=iter_idx,
     )
@@ -1188,6 +1217,8 @@ def vmec_forces_rz_from_wout(
         prv_odd=prv_1,
         pzv_even=pzv_0,
         pzv_odd=pzv_1,
+        constraint_rcon0=con.rcon0,
+        constraint_zcon0=con.zcon0,
     )
 
 

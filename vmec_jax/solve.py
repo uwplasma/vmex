@@ -4447,8 +4447,11 @@ def solve_fixed_boundary_residual_iter(
         state: VMECState,
         *,
         include_edge: bool,
+        include_edge_residual: bool | None = None,
         zero_m1: Any,
         freeb_bsqvac_half: Any | None = None,
+        constraint_rcon0: Any | None = None,
+        constraint_zcon0: Any | None = None,
         constraint_precond_diag: tuple[Any, Any] | None = None,
         constraint_tcon: Any | None = None,
         constraint_precond_active: Any | None = None,
@@ -4465,6 +4468,8 @@ def solve_fixed_boundary_residual_iter(
             constraint_precond_diag=constraint_precond_diag,
             constraint_precond_active=constraint_precond_active,
             constraint_tcon_active=constraint_tcon_active,
+            constraint_rcon0=constraint_rcon0,
+            constraint_zcon0=constraint_zcon0,
             freeb_bsqvac_half=freeb_bsqvac_half,
             use_vmec_synthesis=True,
             trig=trig,
@@ -4487,9 +4492,10 @@ def solve_fixed_boundary_residual_iter(
             _maybe_dump_precond_inputs(bc=k.bc, trig=trig, static=static, iter_idx=int(iter_idx))
         if iter_idx is not None:
             _maybe_dump_force_kernels(k=k, static=static, iter_idx=int(iter_idx), label="raw")
+        include_edge_residual = bool(include_edge if include_edge_residual is None else include_edge_residual)
         mask_pack = None
         if getattr(static, "tomnsps_masks", None) is not None:
-            mask_pack = static.tomnsps_masks_edge if bool(include_edge) else static.tomnsps_masks
+            mask_pack = static.tomnsps_masks_edge if bool(include_edge_residual) else static.tomnsps_masks
         frzl = vmec_residual_internal_from_kernels(
             k,
             cfg_ntheta=int(static.cfg.ntheta),
@@ -4497,7 +4503,7 @@ def solve_fixed_boundary_residual_iter(
             wout=wout_like,
             trig=trig,
             apply_lforbal=apply_lforbal,
-            include_edge=bool(include_edge),
+            include_edge=bool(include_edge_residual),
             masks=mask_pack,
         )
         if os.getenv("VMEC_JAX_SCAN_DEBUG_FORCE", "") not in ("", "0"):
@@ -4527,7 +4533,7 @@ def solve_fixed_boundary_residual_iter(
                         wout=wout_like,
                         trig=trig,
                         apply_lforbal=apply_lforbal,
-                        include_edge=bool(include_edge),
+                        include_edge=bool(include_edge_residual),
                         masks=mask_pack,
                     )
                     return (
@@ -4649,7 +4655,8 @@ def solve_fixed_boundary_residual_iter(
             _maybe_dump_gc(frzl=frzl, static=static, iter_idx=int(iter_idx), label="raw")
 
         # Optionally remove the LCFS contribution from the R/Z force arrays
-        # before forming gcr2/gcz2 (lambda always uses the full-domain residual).
+        # before forming physical gcr2/gcz2. Keep the unmasked residual for
+        # the preconditioner path (VMEC free-boundary parity).
         def _mask_edge(frzl_in: TomnspsRZL) -> TomnspsRZL:
             return TomnspsRZL(
                 frcc=_zero_edge_rz(frzl_in.frcc),
@@ -4666,11 +4673,13 @@ def solve_fixed_boundary_residual_iter(
                 flss=getattr(frzl_in, "flss", None),
             )
 
+        frzl_full = frzl
+        frzl_metric = frzl_full
         if not bool(include_edge):
-            frzl = _mask_edge(frzl)
+            frzl_metric = _mask_edge(frzl_full)
 
         gcr2, gcz2, gcl2 = vmec_gcx2_from_tomnsps(
-            frzl=frzl,
+            frzl=frzl_metric,
             lconm1=bool(getattr(static.cfg, "lconm1", True)),
             apply_m1_constraints=False,
             include_edge=include_edge,
@@ -4696,7 +4705,7 @@ def solve_fixed_boundary_residual_iter(
         if iter_idx is not None:
             _maybe_dump_scalars(norms=norms_current, iter_idx=int(iter_idx), ns=int(static.cfg.ns))
         rz_scale, l_scale = _metric_surface_precond_from_bcovar(k.bc)
-        return k, frzl, gcr2, gcz2, gcl2, rz_scale, l_scale, norms_current
+        return k, frzl_full, gcr2, gcz2, gcl2, rz_scale, l_scale, norms_current
 
     if os.getenv("VMEC_JAX_DUMP_HLO_DIR", "").strip():
         try:
@@ -4783,7 +4792,10 @@ def solve_fixed_boundary_residual_iter(
             state: VMECState,
             *,
             include_edge: bool,
+            include_edge_residual: bool | None = None,
             zero_m1: Any,
+            constraint_rcon0: Any | None = None,
+            constraint_zcon0: Any | None = None,
             constraint_precond_diag: tuple[Any, Any] | None = None,
             constraint_tcon: Any | None = None,
             constraint_precond_active: Any | None = None,
@@ -4793,7 +4805,10 @@ def solve_fixed_boundary_residual_iter(
             return _compute_forces_impl(
                 state,
                 include_edge=include_edge,
+                include_edge_residual=include_edge_residual,
                 zero_m1=zero_m1,
+                constraint_rcon0=constraint_rcon0,
+                constraint_zcon0=constraint_zcon0,
                 constraint_precond_diag=constraint_precond_diag,
                 constraint_tcon=constraint_tcon,
                 constraint_precond_active=constraint_precond_active,
@@ -4803,7 +4818,7 @@ def solve_fixed_boundary_residual_iter(
 
         cached = _COMPUTE_FORCES_CACHE.get(compute_cache_key)
         if cached is None:
-            cached = jit(_compute_forces_nodump, static_argnames=("include_edge",))
+            cached = jit(_compute_forces_nodump, static_argnames=("include_edge", "include_edge_residual"))
             _COMPUTE_FORCES_CACHE[compute_cache_key] = cached
         _compute_forces = cached
 
@@ -4847,8 +4862,11 @@ def solve_fixed_boundary_residual_iter(
         state: VMECState,
         *,
         include_edge: bool,
+        include_edge_residual: bool | None = None,
         zero_m1: Any,
         freeb_bsqvac_half: Any | None = None,
+        constraint_rcon0: Any | None = None,
+        constraint_zcon0: Any | None = None,
         constraint_precond_diag: tuple[Any, Any] | None = None,
         constraint_tcon: Any | None = None,
         constraint_precond_active: Any | None = None,
@@ -4864,8 +4882,11 @@ def solve_fixed_boundary_residual_iter(
                     return _compute_forces_impl(
                     state,
                     include_edge=include_edge,
+                    include_edge_residual=include_edge_residual,
                     zero_m1=zero_m1,
                     freeb_bsqvac_half=freeb_bsqvac_half,
+                    constraint_rcon0=constraint_rcon0,
+                    constraint_zcon0=constraint_zcon0,
                     constraint_precond_diag=constraint_precond_diag,
                     constraint_tcon=constraint_tcon,
                     constraint_precond_active=constraint_precond_active,
@@ -4875,8 +4896,11 @@ def solve_fixed_boundary_residual_iter(
             return _compute_forces_impl(
                 state,
                 include_edge=include_edge,
+                include_edge_residual=include_edge_residual,
                 zero_m1=zero_m1,
                 freeb_bsqvac_half=freeb_bsqvac_half,
+                constraint_rcon0=constraint_rcon0,
+                constraint_zcon0=constraint_zcon0,
                 constraint_precond_diag=constraint_precond_diag,
                 constraint_tcon=constraint_tcon,
                 constraint_precond_active=constraint_precond_active,
@@ -4886,7 +4910,10 @@ def solve_fixed_boundary_residual_iter(
         return _compute_forces(
             state,
             include_edge=include_edge,
+            include_edge_residual=include_edge_residual,
             zero_m1=zero_m1,
+            constraint_rcon0=constraint_rcon0,
+            constraint_zcon0=constraint_zcon0,
             constraint_precond_diag=constraint_precond_diag,
             constraint_tcon=constraint_tcon,
             constraint_precond_active=constraint_precond_active,
@@ -8372,7 +8399,9 @@ def solve_fixed_boundary_residual_iter(
     iter1 = 1
     # VMEC runvmec/funct3d cadence starts free-boundary control at ivac=0.
     # Starting at -1 delays vacuum turn-on by one accepted iteration.
-    freeb_ivac = 0
+    # VMEC initializes ivac=-1 (reset_params.f), then promotes to 0/1/...
+    # once free-boundary activation criteria are met.
+    freeb_ivac = -1
     freeb_ivacskip = 0
     freeb_nestor_runtime: NestorRuntimeState | None = None
     freeb_bsqvac_half_current = None
@@ -8640,6 +8669,8 @@ def solve_fixed_boundary_residual_iter(
     cache_prec_lam_prec = None
     cache_prec_faclam = None
     cache_prec_lam_debug = None
+    cache_constraint_rcon0 = None
+    cache_constraint_zcon0 = None
     bcovar_update_history: list[int] = []
     iter_offset = 0
 
@@ -8681,6 +8712,8 @@ def solve_fixed_boundary_residual_iter(
         cache_prec_lam_prec = resume_state.get("cache_prec_lam_prec", cache_prec_lam_prec)
         cache_prec_faclam = resume_state.get("cache_prec_faclam", cache_prec_faclam)
         cache_prec_lam_debug = resume_state.get("cache_prec_lam_debug", cache_prec_lam_debug)
+        cache_constraint_rcon0 = resume_state.get("cache_constraint_rcon0", cache_constraint_rcon0)
+        cache_constraint_zcon0 = resume_state.get("cache_constraint_zcon0", cache_constraint_zcon0)
         if free_boundary_enabled:
             freeb_ivac = int(resume_state.get("freeb_ivac", freeb_ivac))
             freeb_ivacskip = int(resume_state.get("freeb_ivacskip", freeb_ivacskip))
@@ -8721,6 +8754,8 @@ def solve_fixed_boundary_residual_iter(
             cache_prec_lam_prec = None
             cache_prec_faclam = None
             cache_prec_lam_debug = None
+            cache_constraint_rcon0 = None
+            cache_constraint_zcon0 = None
 
     def _safe_dt_from_force(
         *,
@@ -9054,6 +9089,8 @@ def solve_fixed_boundary_residual_iter(
                 cache_prec_lam_prec = None
                 cache_prec_faclam = None
                 cache_prec_lam_debug = None
+                cache_constraint_rcon0 = None
+                cache_constraint_zcon0 = None
         except Exception:
             pass
 
@@ -9066,6 +9103,7 @@ def solve_fixed_boundary_residual_iter(
         force_bcovar_update = False
         time_step_report_hold: float | None = None
         freeb_turnon_applied = False
+        freeb_controls_cached: tuple[int, int, int] | None = None
         while True:
             iter_since_restart = iter2 - iter1
             fsq_prev_before = fsq_prev
@@ -9075,19 +9113,37 @@ def solve_fixed_boundary_residual_iter(
                 time_step_report_hold = float(time_step)
             time_step_report = float(time_step_report_hold)
             if free_boundary_enabled:
-                fsq_rz_prev = (
-                    float(fsqr2_history[-1]) + float(fsqz2_history[-1])
-                    if (fsqr2_history and fsqz2_history)
-                    else 1.0
-                )
-                freeb_ivac, freeb_ivacskip, freeb_nvacskip = _free_boundary_iter_controls_vmec(
-                    iter2=int(iter2),
-                    iter1=int(iter1),
-                    ivac=int(freeb_ivac),
-                    nvacskip=int(freeb_nvacskip),
-                    nvskip0=int(freeb_nvskip0),
-                    fsq_rz_prev=float(fsq_rz_prev),
-                )
+                # Keep free-boundary cadence fixed for this `iter2` across
+                # retry/restart passes in the inner while-loop.
+                if freeb_controls_cached is None:
+                    fsq_rz_prev = (
+                        float(fsqr2_history[-1]) + float(fsqz2_history[-1])
+                        if (fsqr2_history and fsqz2_history)
+                        else 1.0
+                    )
+                    freeb_ivac, freeb_ivacskip, freeb_nvacskip = _free_boundary_iter_controls_vmec(
+                        iter2=int(iter2),
+                        iter1=int(iter1),
+                        ivac=int(freeb_ivac),
+                        nvacskip=int(freeb_nvacskip),
+                        nvskip0=int(freeb_nvskip0),
+                        fsq_rz_prev=float(fsq_rz_prev),
+                    )
+                    freeb_controls_cached = (
+                        int(freeb_ivac),
+                        int(freeb_ivacskip),
+                        int(freeb_nvacskip),
+                    )
+                else:
+                    freeb_ivac, freeb_ivacskip, freeb_nvacskip = freeb_controls_cached
+            # VMEC vacuum.f promotes ivac=0 -> 1 inside the vacuum solve.
+            # Keep both values: pre-vacuum (`freeb_ivac`) for cadence/calls,
+            # and post-vacuum effective (`freeb_ivac_effective`) for force/
+            # residue gating in this same iteration.
+            freeb_turnon_iter = bool(free_boundary_enabled) and (int(freeb_ivac) == 0) and (int(freeb_ivacskip) == 0)
+            freeb_ivac_effective = int(freeb_ivac)
+            if freeb_turnon_iter:
+                freeb_ivac_effective = 1
             if vmec2000_control:
                 # VMEC2000 `constrain_m1` logic (residue.f90):
                 #   zero gcz(m=1) if (fsqz_prev < 1e-6) OR (iter2 < 2).
@@ -9106,19 +9162,50 @@ def solve_fixed_boundary_residual_iter(
                 # interior mesh; free-boundary coupling enters through the
                 # dedicated edge `rbsq` terms in `forces.f`, not by enabling
                 # generic edge residual rows.
-                #
-                # Keep `include_edge=False` by default for parity. A debug
-                # override is left available for diagnostics only.
                 include_edge_env = os.getenv("VMEC_JAX_FREEB_INCLUDE_EDGE", "0").strip().lower()
                 include_edge = include_edge_env not in ("", "0", "false", "no")
             else:
                 include_edge = bool(iter_since_restart < 50) and (float(prev_rz_fsq) < 1e-6)
             if track_history:
                 include_edge_history.append(int(bool(include_edge)))
+            # Residual transform edge handling:
+            # VMEC tomnsp_mod uses jmax=ns once free-boundary vacuum is on
+            # (ivac >= 1), independent of residue's `jedge` scalar gating.
+            # Keep `include_edge` for scalar gating/diagnostics, but include
+            # edge rows in the transform when vacuum coupling is active.
+            include_edge_residual = bool(include_edge)
+            if bool(free_boundary_enabled) and int(freeb_ivac_effective) >= 1:
+                include_edge_residual = True
+            if os.getenv("VMEC_JAX_FORCE_EDGE_RESIDUAL", "").strip().lower() in ("1", "true", "yes"):
+                include_edge_residual = True
+            precond_jmax_override: int | None = None
+            if (
+                bool(vmec2000_control)
+                and bool(free_boundary_enabled)
+                and (int(freeb_ivac_effective) >= 1)
+            ):
+                # Keep ns-1 default for parity/stability unless explicitly
+                # debugging edge-row preconditioner behavior.
+                if os.getenv("VMEC_JAX_FREEB_PRECOND_JMAX_NS", "").strip().lower() in ("1", "true", "yes"):
+                    precond_jmax_override = int(s.shape[0])
+            precond_expected_jmax = (
+                int(precond_jmax_override) if (precond_jmax_override is not None) else max(int(s.shape[0]) - 1, 1)
+            )
             # `zero_m1` originates from host control flow, so keep the history
             # without forcing an unnecessary device synchronization.
             if track_history:
                 zero_m1_history.append(int(zero_m1_val > 0.5))
+
+            if (
+                bool(vmec2000_control)
+                and bool(free_boundary_enabled)
+                and bool(freeb_turnon_iter)
+                and int(freeb_ivacskip) == 0
+            ):
+                # Full vacuum updates change the edge-coupled forcing terms.
+                # Refresh preconditioner/cache in this same iteration so fsq*1
+                # channels use the updated coupled operator (VMEC parity path).
+                force_bcovar_update = True
     
             need_bcovar_update = bool(vmec2000_control) and (
                 (not bool(vmec2000_cache_valid))
@@ -9147,10 +9234,9 @@ def solve_fixed_boundary_residual_iter(
             if bool(free_boundary_enabled and freeb_couple_edge):
                 try:
                     # VMEC free-boundary path in funct3d only enters NESTOR
-                    # after vacuum turn-on (`ivac >= 1`). Running vacuum solves
-                    # earlier changes source-cache cadence and breaks iter-level
-                    # parity on free-boundary diagnostics.
-                    if int(freeb_ivac) >= 1:
+                    # once control is active (`ivac >= 0`), with `vacuum.f`
+                    # promoting ivac=0 -> 1 internally on first turn-on.
+                    if int(freeb_ivac) >= 0:
                         nestor_res, freeb_nestor_runtime = nestor_external_only_step(
                             state=state,
                             static=static,
@@ -9173,6 +9259,16 @@ def solve_fixed_boundary_residual_iter(
                             dtype=bsqvac_edge.dtype,
                         )
                         freeb_bsqvac_half_current[-1, :, :] = bsqvac_edge
+                        if freeb_turnon_iter:
+                            # Mirror vacuum.f side effect for downstream
+                            # force/residual gating in this same iteration.
+                            freeb_ivac = 1
+                            freeb_ivac_effective = 1
+                            freeb_controls_cached = (
+                                int(freeb_ivac),
+                                int(freeb_ivacskip),
+                                int(freeb_nvacskip),
+                            )
                 except Exception:
                     if os.getenv("VMEC_JAX_FREEB_RAISE", "").strip().lower() not in ("", "0", "false", "no"):
                         raise
@@ -9180,6 +9276,23 @@ def solve_fixed_boundary_residual_iter(
                     freeb_reused = False
                     freeb_solve_time = 0.0
                     freeb_sample_time = 0.0
+
+            constraint_rcon0_current = None
+            constraint_zcon0_current = None
+            if (
+                bool(vmec2000_control)
+                and bool(free_boundary_enabled)
+                and (cache_constraint_rcon0 is not None)
+                and (cache_constraint_zcon0 is not None)
+            ):
+                # VMEC keeps rcon0/zcon0 as persistent baselines; once free-
+                # boundary control is active (ivac>=0), damp them by 0.9 each
+                # iteration before evaluating forces.
+                if int(freeb_ivac) >= 0:
+                    cache_constraint_rcon0 = 0.9 * jnp.asarray(cache_constraint_rcon0)
+                    cache_constraint_zcon0 = 0.9 * jnp.asarray(cache_constraint_zcon0)
+                constraint_rcon0_current = cache_constraint_rcon0
+                constraint_zcon0_current = cache_constraint_zcon0
 
             if profile_active and (not profile_started) and (profile_start_iter is not None) and (iter2 == profile_start_iter):
                 if has_jax():
@@ -9194,8 +9307,11 @@ def solve_fixed_boundary_residual_iter(
             k, frzl, gcr2, gcz2, gcl2, rz_scale, l_scale, norms_current = _compute_forces_iter(
                 state,
                 include_edge=bool(include_edge),
+                include_edge_residual=bool(include_edge_residual),
                 zero_m1=zero_m1,
                 freeb_bsqvac_half=freeb_bsqvac_half_current,
+                constraint_rcon0=constraint_rcon0_current,
+                constraint_zcon0=constraint_zcon0_current,
                 constraint_precond_diag=constraint_precond_diag,
                 constraint_tcon=constraint_tcon_override,
                 constraint_precond_active=constraint_precond_active,
@@ -9205,6 +9321,11 @@ def solve_fixed_boundary_residual_iter(
             )
             if bool(free_boundary_enabled):
                 freeb_plascur = _vmec_freeb_plascur_from_bcovar(k.bc, freeb_plascur)
+                if getattr(k, "constraint_rcon0", None) is not None:
+                    if cache_constraint_rcon0 is None or cache_constraint_zcon0 is None:
+                        # Initialize persistent VMEC-style constraint baseline.
+                        cache_constraint_rcon0 = jnp.asarray(k.constraint_rcon0)
+                        cache_constraint_zcon0 = jnp.asarray(k.constraint_zcon0)
             if timing_enabled:
                 try:
                     if has_jax():
@@ -9281,14 +9402,21 @@ def solve_fixed_boundary_residual_iter(
                 )
                 if not bool(cfg.lasym):
                     from .preconditioner_1d_jax import rz_preconditioner_matrices
-    
+
                     cache_prec_lam_prec = _lambda_preconditioner(k.bc)
-                    mats, _jmin, jmax = rz_preconditioner_matrices(bc=k.bc, k=k, trig=trig, s=s, cfg=cfg)
+                    mats, _jmin, jmax = rz_preconditioner_matrices(
+                        bc=k.bc,
+                        k=k,
+                        trig=trig,
+                        s=s,
+                        cfg=cfg,
+                        jmax_override=precond_jmax_override,
+                    )
                     cache_prec_rz_mats = mats
                     cache_prec_rz_jmax = int(jmax)
                 vmec2000_cache_valid = True
             fsqr_f, fsqz_f, fsql_f = _device_get_floats(fsqr, fsqz, fsql)
-            if bool(free_boundary_enabled) and (int(freeb_ivac) == 1) and (not bool(freeb_turnon_applied)):
+            if bool(free_boundary_enabled) and bool(freeb_turnon_iter) and (not bool(freeb_turnon_applied)):
                 # VMEC calls restart_iter(irst=2) inside funct3d on the first
                 # vacuum-coupled iteration. This resets the state/velocity used
                 # by evolve while keeping the force residuals from this call.
@@ -9329,6 +9457,9 @@ def solve_fixed_boundary_residual_iter(
                 cache_prec_lam_debug = None
                 force_bcovar_update = True
                 freeb_turnon_applied = True
+                # Continue this iteration with the current force residuals so
+                # TimeStepControl sees the same turn-on step (iter2==iter1)
+                # that VMEC records after `restart_iter` in funct3d.
             fsq0_curr = fsqr_f + fsqz_f + fsql_f
             prev_rz_fsq_before = prev_rz_fsq
             prev_rz_fsq = fsqr_f + fsqz_f
@@ -9405,7 +9536,14 @@ def solve_fixed_boundary_residual_iter(
     
                 need_lam_prec = os.getenv("VMEC_JAX_DUMP_LAM", "") not in ("", "0")
                 need_lamcal = os.getenv("VMEC_JAX_DUMP_LAMCAL", "") not in ("", "0")
-                need_prec_refresh = (not bool(vmec2000_cache_valid)) or (cache_prec_lam_prec is None) or (cache_prec_rz_mats is None) or (cache_prec_rz_jmax is None) or bool(need_bcovar_update)
+                need_prec_refresh = (
+                    (not bool(vmec2000_cache_valid))
+                    or (cache_prec_lam_prec is None)
+                    or (cache_prec_rz_mats is None)
+                    or (cache_prec_rz_jmax is None)
+                    or bool(need_bcovar_update)
+                    or (cache_prec_rz_jmax is not None and int(cache_prec_rz_jmax) != int(precond_expected_jmax))
+                )
                 if need_prec_refresh:
                     t_prec_refresh_start = time.perf_counter() if timing_enabled else None
                     if need_lamcal:
@@ -9423,7 +9561,14 @@ def solve_fixed_boundary_residual_iter(
                             lam_prec = _lambda_preconditioner(k.bc)
                             faclam_dump = None
                         lam_debug = None
-                    mats, _jmin, jmax = rz_preconditioner_matrices(bc=k.bc, k=k, trig=trig, s=s, cfg=cfg)
+                    mats, _jmin, jmax = rz_preconditioner_matrices(
+                        bc=k.bc,
+                        k=k,
+                        trig=trig,
+                        s=s,
+                        cfg=cfg,
+                        jmax_override=precond_jmax_override,
+                    )
                     cache_prec_lam_prec = lam_prec
                     cache_prec_faclam = faclam_dump
                     cache_prec_lam_debug = lam_debug
@@ -9488,6 +9633,7 @@ def solve_fixed_boundary_residual_iter(
                     or (cache_prec_rz_mats is None)
                     or (cache_prec_rz_jmax is None)
                     or bool(need_bcovar_update)
+                    or (cache_prec_rz_jmax is not None and int(cache_prec_rz_jmax) != int(precond_expected_jmax))
                 )
                 if need_prec_refresh:
                     t_prec_refresh_start = time.perf_counter() if timing_enabled else None
@@ -9506,7 +9652,14 @@ def solve_fixed_boundary_residual_iter(
                             lam_prec = _lambda_preconditioner(k.bc)
                             faclam_dump = None
                         lam_debug = None
-                    mats, _jmin, jmax = rz_preconditioner_matrices(bc=k.bc, k=k, trig=trig, s=s, cfg=cfg)
+                    mats, _jmin, jmax = rz_preconditioner_matrices(
+                        bc=k.bc,
+                        k=k,
+                        trig=trig,
+                        s=s,
+                        cfg=cfg,
+                        jmax_override=precond_jmax_override,
+                    )
                     cache_prec_lam_prec = lam_prec
                     cache_prec_faclam = faclam_dump
                     cache_prec_lam_debug = lam_debug
@@ -9732,11 +9885,19 @@ def solve_fixed_boundary_residual_iter(
                 frzl=frzl_pre,
                 lconm1=bool(getattr(static.cfg, "lconm1", True)),
                 apply_m1_constraints=False,
+                # VMEC residue.f90 calls getfsq(..., medge=m1) for fsq*1,
+                # i.e. it includes the edge row in preconditioned R/Z norms.
                 include_edge=True,
                 apply_scalxc=False,
                 s=s,
             )
-            if bool(vmec2000_control) and bool(vmec2000_cache_valid) and (cache_rz_norm is not None) and (cache_f_norm1 is not None):
+            if (
+                bool(vmec2000_control)
+                and bool(vmec2000_cache_valid)
+                and (not bool(need_bcovar_update))
+                and (cache_rz_norm is not None)
+                and (cache_f_norm1 is not None)
+            ):
                 rz_norm = jnp.asarray(cache_rz_norm)
                 f_norm1 = jnp.asarray(cache_f_norm1)
             else:
@@ -11281,6 +11442,8 @@ def solve_fixed_boundary_residual_iter(
         "cache_prec_lam_prec": cache_prec_lam_prec,
         "cache_prec_faclam": cache_prec_faclam,
         "cache_prec_lam_debug": cache_prec_lam_debug,
+        "cache_constraint_rcon0": cache_constraint_rcon0,
+        "cache_constraint_zcon0": cache_constraint_zcon0,
         "freeb_ivac": int(freeb_ivac),
         "freeb_ivacskip": int(freeb_ivacskip),
         "freeb_nvacskip": int(freeb_nvacskip),

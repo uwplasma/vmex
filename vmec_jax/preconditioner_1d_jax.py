@@ -368,21 +368,21 @@ def _compute_preconditioning_matrix(
     axm = jnp.stack([axm0, axm1], axis=1)
     bxm = jnp.stack([bxm0, bxm1], axis=1)
 
-    # Full-grid accumulation.
+    # Full-grid accumulation (Fortran precondn loop over jf):
+    # inner contribution uses jhi=jf-1 for jf>0, outer uses jho=jf for jf<ns_half.
+    # Build full-length bases (ns_half+1) and truncate to ns_full.
     z = jnp.zeros((1,), dtype=xs.dtype)
-    ax0_inner = jnp.concatenate([z, ax[:-1, 0]], axis=0)[:ns_full]
-    ax1_inner = jnp.concatenate([z, ax[:-1, 2] * (sm[:-1] * sm[:-1])], axis=0)[:ns_full]
-    bx0_inner = jnp.concatenate([z, bx[:-1, 1]], axis=0)[:ns_full]
-    bx1_inner = jnp.concatenate([z, bx[:-1, 1] * (sm[:-1] * sm[:-1])], axis=0)[:ns_full]
-    cx_inner = jnp.concatenate([z, cx[:-1]], axis=0)[:ns_full]
+    ax0_inner = jnp.concatenate([z, ax[:, 0]], axis=0)[:ns_full]
+    ax1_inner = jnp.concatenate([z, ax[:, 2] * (sm * sm)], axis=0)[:ns_full]
+    bx0_inner = jnp.concatenate([z, bx[:, 1]], axis=0)[:ns_full]
+    bx1_inner = jnp.concatenate([z, bx[:, 1] * (sm * sm)], axis=0)[:ns_full]
+    cx_inner = jnp.concatenate([z, cx], axis=0)[:ns_full]
 
-    pad_len = max(ns_full - ns_half, 0)
-    zp = jnp.zeros((pad_len,), dtype=xs.dtype)
-    ax0_outer = jnp.concatenate([ax[:, 0], zp], axis=0)[:ns_full]
-    ax1_outer = jnp.concatenate([ax[:, 3] * (sp * sp), zp], axis=0)[:ns_full]
-    bx0_outer = jnp.concatenate([bx[:, 2], zp], axis=0)[:ns_full]
-    bx1_outer = jnp.concatenate([bx[:, 2] * (sp * sp), zp], axis=0)[:ns_full]
-    cx_outer = jnp.concatenate([cx, zp], axis=0)[:ns_full]
+    ax0_outer = jnp.concatenate([ax[:, 0], z], axis=0)[:ns_full]
+    ax1_outer = jnp.concatenate([ax[:, 3] * (sp * sp), z], axis=0)[:ns_full]
+    bx0_outer = jnp.concatenate([bx[:, 2], z], axis=0)[:ns_full]
+    bx1_outer = jnp.concatenate([bx[:, 2] * (sp * sp), z], axis=0)[:ns_full]
+    cx_outer = jnp.concatenate([cx, z], axis=0)[:ns_full]
 
     axd0 = ax0_inner + ax0_outer
     axd1 = ax1_inner + ax1_outer
@@ -394,20 +394,25 @@ def _compute_preconditioning_matrix(
     return axm, axd, bxm, bxd, cxd
 
 
-@partial(jit, static_argnames=("cfg",))
+@partial(jit, static_argnames=("cfg", "jmax_override"))
 def _rz_preconditioner_matrices_impl(
     *,
     bc,
     k,
     s,
     cfg,
+    jmax_override: int | None = None,
     use_precomputed: bool | None = None,
     use_lax_tridi: bool | None = None,
 ) -> tuple[dict[str, Any], Any, int]:
     """Return VMEC R/Z radial preconditioner matrices (JAX, fixed-boundary)."""
     s = jnp.asarray(s)
     ns = int(s.shape[0])
-    ns_f = max(ns - 1, 1)
+    ns_f_default = max(ns - 1, 1)
+    if jmax_override is None:
+        ns_f = ns_f_default
+    else:
+        ns_f = int(max(1, min(int(jmax_override), ns)))
     dtype = jnp.asarray(bc.guu).dtype
     w_int = _wint_from_config(cfg=cfg, dtype=dtype)
 
@@ -466,6 +471,15 @@ def _rz_preconditioner_matrices_impl(
     m2 = (m * m)[None, :, None]
     n2 = ((n * nfp) ** 2)[None, None, :]
     m_par = (jnp.arange(mpol) % 2).astype(jnp.int32)
+    ns_half = int(arm.shape[0])
+    pad_rows = max(ns_f - ns_half, 0)
+    if pad_rows > 0:
+        z_arm = jnp.zeros((pad_rows, arm.shape[1]), dtype=dtype)
+        z_azm = jnp.zeros((pad_rows, azm.shape[1]), dtype=dtype)
+        arm = jnp.concatenate([arm, z_arm], axis=0)
+        brm = jnp.concatenate([brm, z_arm], axis=0)
+        azm = jnp.concatenate([azm, z_azm], axis=0)
+        bzm = jnp.concatenate([bzm, z_azm], axis=0)
     arm_m = arm[:, m_par]
     brm_m = brm[:, m_par]
     ard_m = ard[:, m_par]
@@ -563,6 +577,7 @@ def rz_preconditioner_matrices(
     trig,
     s,
     cfg,
+    jmax_override: int | None = None,
     use_precomputed: bool | None = None,
     use_lax_tridi: bool | None = None,
 ) -> tuple[dict[str, Any], Any, int]:
@@ -573,6 +588,7 @@ def rz_preconditioner_matrices(
         k=k,
         s=s,
         cfg=cfg,
+        jmax_override=jmax_override,
         use_precomputed=use_precomputed,
         use_lax_tridi=use_lax_tridi,
     )
