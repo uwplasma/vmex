@@ -11127,12 +11127,12 @@ def solve_fixed_boundary_residual_iter(
                 freeb_nestor_solve_time_history.append(float(freeb_solve_time))
                 freeb_nestor_sample_time_history.append(float(freeb_sample_time))
             grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
-        # VMEC funct3d behavior: report turn-on when ivac==1. Do not advance
-        # ivac here; cadence advancement is handled by the free-boundary
-        # control update (`_free_boundary_iter_controls_vmec`).
+        # VMEC eqsolve behavior: when `ivac==1`, print turn-on and promote to
+        # `ivac=2` for subsequent iterations.
         if free_boundary_enabled and int(freeb_ivac) == 1:
             if verbose and bool(verbose_vmec2000_table):
                 print(f"\n  VACUUM PRESSURE TURNED ON AT {int(iter2):4d} ITERATIONS\n", flush=True)
+            freeb_ivac = int(freeb_ivac) + 1
         skip_time_control = False
 
     diag: Dict[str, Any] = {

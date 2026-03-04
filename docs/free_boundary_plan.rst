@@ -167,30 +167,30 @@ reports upstream source-channel deltas:
 - ``bexu`` / ``bexv`` (covariant external tangential channels),
 - ``bexn`` / ``bexni`` (normal source channels used by ``scalpot``).
 
-Example benchmark (``input.cth_like_free_bdy``, iter 53 where vacuum turns on):
+Updated benchmark snapshot (March 2026):
 
-- ``bvec rel_scaled``: ~``7.68e-01``
-- ``amatrix rel_scaled``: ~``6.80e-01``
-- ``bsqvac rel_scaled``: ~``1.25e-01``
+- ``input.cth_like_free_bdy`` (non-axisymmetric, ``lasym=False``), iter 53:
+  ``grpmn_nonsing rel_scaled ~1e-13``, ``amatrix rel_scaled ~1e-13``,
+  ``potvac rel_scaled ~6.8e-2``.
+- ``input.cth_like_free_bdy_lasym_small`` (non-axisymmetric, ``lasym=True``),
+  iter 78 (full-update step, ``ivacskip=0``):
+  ``grpmn_nonsing rel_scaled ~1e-11``, ``amatrix rel_scaled ~1e-11``,
+  ``potvac rel_scaled ~1e-5``.
 
-Current deep-dump status (same case/iter):
+Key implementation updates that closed the matrix-side gap:
 
-- upstream geometry/external channels are close (``bex*`` O(1e-3...1e-2)),
-- VMEC ``precal`` basis tables are now matched in JAX for free-boundary mode
-  (``sinmni/cosmni`` on the reduced ``nu3`` grid with VMEC ``nu`` spacing),
-- ``amatrix`` projected shape/scaling is close after scalar normalization,
-- ``gsource``/``source_sym`` are still far from VMEC (O(1)),
-  indicating the main remaining gap is the VMEC ``greenf/fourp/fouri``
-  source/operator pipeline, not wrout formatting.
-- For ``ivacskip > 0`` iterations (where VMEC skips ``fouri``), the
-  instrumentation now exports cached source channels from ``scalpot``
-  (``source_sym_cached``, ``gsource_cached``, ``bvecNS_cached`` plus
-  ``source_cache_iter``), and the comparator consumes these as the VMEC
-  reference. This closes the observability gap for late-iteration drift.
+- Fortran-equivalent ``fourp`` poloidal extent was enforced with
+  ``nu2 = nu/2 + 1`` (from ``read_indata.f``), including ``lasym=True`` runs.
+- The non-singular ``grpmn`` assembly now uses raw ``fourp`` scale in JAX
+  (no extra post-factor), matching VMEC ``fouri`` matrix construction.
+- VMEC ``eqsolve`` turn-on behavior is mirrored: after ``ivac==1`` the solver
+  promotes to ``ivac=2`` for subsequent iterations.
 
-These values quantify the current WP2 gap and provide the baseline for the
-next parity increments (analytic source terms and Green-function kernel
-treatment).
+Remaining late-iteration drift is concentrated on ``ivacskip>0`` reuse steps
+for challenging ``lasym=True`` trajectories, where VMEC and JAX can follow
+different nonlinear states; cached-channel diagnostics
+(``source_sym_cached``, ``gsource_cached``, ``bvecNS_cached``,
+``source_cache_iter``) remain enabled to localize that drift quantitatively.
 
 Scope and acceptance target
 ---------------------------

@@ -1837,9 +1837,10 @@ def _vmec_nonsingular_terms_from_bexni(
         cosv_tab[n, :] = np.cos(dn1 * kv_idx)
         sinv_tab[n, :] = np.sin(dn1 * kv_idx)
     alu = 2.0 * np.pi / float(max(1, nu))
-    # VMEC fourp loops over KU=1..nu2, with nu2 = nu/2 + 1 for lasym=F.
-    # Our sampled reduced grid has exactly this `ntheta3` extent.
-    nu_fourp = ntheta3
+    # VMEC fourp always loops over KU=1..nu2 with nu2 = nu/2 + 1
+    # (read_indata.f), independent of LASYM. `nu` is the full precal poloidal
+    # grid (`nu_full` here), while `ntheta3` may be larger (e.g. LASYM=T).
+    nu_fourp = int(nu // 2 + 1)
     cosui = np.zeros((mf + 1, nu_fourp), dtype=float)
     sinui = np.zeros((mf + 1, nu_fourp), dtype=float)
     for m in range(0, mf + 1):
@@ -1938,11 +1939,8 @@ def _vmec_nonsingular_terms_from_bexni(
                             idx_m = m + ((-n) + nf) * mf1
                             grpmn_nonsing[row_off + idx_m, ip] += gcos - gsin
 
-    # fourp/fouri normalization: VMEC accumulates the non-singular matrix-side
-    # kernel with an additional 1/2 factor relative to the raw delgrp sum used
-    # above (see analysesum2/fourp coupling on the reduced nu3 mesh). Apply it
-    # here so `grpmn_nonsing` is in the same scale as VMEC `fouri`'s `grpmn`.
-    grpmn_nonsing *= 0.5
+    # Keep raw fourp accumulation scale; any legacy scale experiments are
+    # handled upstream in diagnostics, not in the core assembly path.
 
     return np.asarray(gstore, dtype=float), np.asarray(grpmn_nonsing, dtype=float)
 
