@@ -555,23 +555,43 @@ def main() -> int:
     run_input = _copy_input_and_mgrid(input_path, workdir)
 
     # Run VMEC2000
-    env_vmec = os.environ.copy()
-    env_vmec.update(
+    env_vmec_base = os.environ.copy()
+    env_vmec_base.update(
         {
             "VMEC_DUMP_SCALPOT": "1",
             "VMEC_DUMP_BEXTERN": "1",
             "VMEC_DUMP_FOURI": "1",
-            "VMEC_DUMP_ITER": str(int(args.iter)),
             "VMEC_DUMP_DIR": str(vmec_dump_dir),
         }
     )
-    subprocess.run(
-        [str(vmec_exec), run_input.name],
-        cwd=str(workdir),
-        env=env_vmec,
-        check=True,
-        timeout=300,
-    )
+
+    def _run_vmec_with_dump_iter(dump_iter: int) -> None:
+        env_vmec = env_vmec_base.copy()
+        env_vmec["VMEC_DUMP_ITER"] = str(int(dump_iter))
+        subprocess.run(
+            [str(vmec_exec), run_input.name],
+            cwd=str(workdir),
+            env=env_vmec,
+            check=True,
+            timeout=300,
+        )
+
+    _run_vmec_with_dump_iter(int(args.iter))
+
+    vmec_scalpot_files = sorted(vmec_dump_dir.glob(f"scalpot_iter{int(args.iter)}_ivacskip*.dat"))
+    if not vmec_scalpot_files:
+        raise SystemExit(f"missing VMEC scalpot dump in {vmec_dump_dir}")
+    vmec_scal = _parse_scalpot_dump(vmec_scalpot_files[0])
+    # On reuse steps (`ivacskip>0`), VMEC dump for target iteration may only
+    # contain LU-form matrix data. Pull the source-cache reference iteration
+    # (typically ivacskip=0) so matrix-side comparisons can use VMEC raw mode
+    # space when available.
+    vmec_source_cache_iter = int(vmec_scal.get("source_cache_iter", -1))
+    vmec_ivacskip = int(vmec_scal.get("ivacskip", -1))
+    if vmec_ivacskip > 0 and vmec_source_cache_iter >= 0:
+        ref = vmec_dump_dir / f"scalpot_iter{vmec_source_cache_iter}_ivacskip0.dat"
+        if not ref.exists():
+            _run_vmec_with_dump_iter(vmec_source_cache_iter)
 
     # Run vmec_jax
     from vmec_jax.driver import run_fixed_boundary
