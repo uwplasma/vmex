@@ -534,7 +534,10 @@ def _maybe_dump_lam_prec(*, lam_prec, faclam, static, iter_idx: int) -> None:
     path = outdir / f"lam_prec_ns{ns}_iter{int(iter_idx)}.npz"
     lthreed = bool(static.cfg.lthreed)
     lasym = bool(static.cfg.lasym)
-    ntmax = 4 if (lasym and lthreed) else (2 if lthreed else 1)
+    if lasym:
+        ntmax = 4 if lthreed else 2
+    else:
+        ntmax = 2 if lthreed else 1
     lam_arr = np.asarray(lam_prec)
     if lam_arr.ndim != 3:
         raise ValueError(f"lam_prec expected 3D (ns,mpol,ntor+1), got {lam_arr.shape}")
@@ -564,6 +567,38 @@ def _maybe_dump_lam_prec(*, lam_prec, faclam, static, iter_idx: int) -> None:
         else:
             faclam_out = fac_arr
         data["faclam"] = faclam_out
+    np.savez(path, **data)
+
+
+def _maybe_dump_precond_mats(*, mats, static, iter_idx: int, jmax: int, used_cache: bool | None = None) -> None:
+    env = os.getenv("VMEC_JAX_DUMP_PRECOND_MATS", "")
+    if not env or env == "0":
+        return
+    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_PRECOND_MATS_ITER", ""))
+    if iters is None:
+        iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
+    if iters is not None and int(iter_idx) not in iters:
+        return
+    outdir = os.getenv("VMEC_JAX_DUMP_PRECOND_MATS_DIR", "")
+    if not outdir:
+        outdir = os.getenv("VMEC_JAX_DUMP_DIR", ".")
+    outdir = Path(outdir).expanduser().resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    ns = int(static.cfg.ns)
+    path = outdir / f"precond_mats_ns{ns}_iter{int(iter_idx)}.npz"
+    data = {
+        "ns": ns,
+        "mpol": int(static.cfg.mpol),
+        "ntor": int(static.cfg.ntor),
+        "lthreed": bool(static.cfg.lthreed),
+        "lasym": bool(static.cfg.lasym),
+        "jmax": int(jmax),
+    }
+    if used_cache is not None:
+        data["used_cache"] = bool(used_cache)
+    for key in ("ar", "br", "dr", "az", "bz", "dz"):
+        if key in mats:
+            data[key] = np.asarray(mats[key])
     np.savez(path, **data)
 
 
@@ -9773,6 +9808,13 @@ def solve_fixed_boundary_residual_iter(
                     faclam_dump = cache_prec_faclam if need_lam_prec else None
                     lam_debug = cache_prec_lam_debug if need_lamcal else None
                 _maybe_dump_lam_prec(lam_prec=lam_prec, faclam=faclam_dump, static=static, iter_idx=int(iter2))
+                _maybe_dump_precond_mats(
+                    mats=mats,
+                    static=static,
+                    iter_idx=int(iter2),
+                    jmax=int(jmax),
+                    used_cache=(not bool(need_prec_refresh)),
+                )
                 if lam_debug is not None:
                     _maybe_dump_lamcal(lam_debug=lam_debug, static=static, iter_idx=int(iter2))
                 frzl_rhs = _apply_vmec_scale_m1_precond_rhs(frzl, mats)
@@ -9864,6 +9906,13 @@ def solve_fixed_boundary_residual_iter(
                     faclam_dump = cache_prec_faclam if need_lam_prec else None
                     lam_debug = cache_prec_lam_debug if need_lamcal else None
                 _maybe_dump_lam_prec(lam_prec=lam_prec, faclam=faclam_dump, static=static, iter_idx=int(iter2))
+                _maybe_dump_precond_mats(
+                    mats=mats,
+                    static=static,
+                    iter_idx=int(iter2),
+                    jmax=int(jmax),
+                    used_cache=(not bool(need_prec_refresh)),
+                )
                 if lam_debug is not None:
                     _maybe_dump_lamcal(lam_debug=lam_debug, static=static, iter_idx=int(iter2))
                 frzl_rhs = (
