@@ -198,6 +198,24 @@ bvec_nonsing_fouri = 2.0e-2
 amatrix = 5.0e-3
 potvac = 2.0e-2
 
+[cases.metric_thresholds_rel_scaled_by_iter."80"]
+source_sym = 2.0e-2
+bvec_nonsing_fouri = 2.0e-2
+amatrix = 5.0e-3
+potvac = 2.0e-2
+
+[cases.metric_thresholds_rel_scaled_by_iter."100"]
+source_sym = 1.0e-6
+bvec_nonsing_fouri = 1.0e-6
+amatrix = 1.0e-8
+potvac = 1.0e-6
+
+[cases.metric_thresholds_rel_scaled_by_iter."120"]
+source_sym = 1.0e-6
+bvec_nonsing_fouri = 1.0e-6
+amatrix = 1.0e-8
+potvac = 1.0e-6
+
 [[cases]]
 id = "freeb_axisym_lasym_true_diiid_reset"
 tier = "full"
@@ -220,6 +238,24 @@ source_sym = 2.0e-2
 bvec_nonsing_fouri = 2.0e-2
 amatrix = 5.0e-3
 potvac = 2.0e-2
+
+[cases.metric_thresholds_rel_scaled_by_iter."80"]
+source_sym = 2.0e-2
+bvec_nonsing_fouri = 2.0e-2
+amatrix = 5.0e-3
+potvac = 2.0e-2
+
+[cases.metric_thresholds_rel_scaled_by_iter."100"]
+source_sym = 1.0e-6
+bvec_nonsing_fouri = 1.0e-6
+amatrix = 1.0e-8
+potvac = 1.0e-6
+
+[cases.metric_thresholds_rel_scaled_by_iter."120"]
+source_sym = 1.0e-6
+bvec_nonsing_fouri = 1.0e-6
+amatrix = 1.0e-8
+potvac = 1.0e-6
 
 [[cases]]
 id = "freeb_nonaxis_lasym_false_stellcopt"
