@@ -8988,6 +8988,48 @@ def solve_fixed_boundary_residual_iter(
         except Exception:
             return
 
+    def _dump_freeb_control_trace(
+        *,
+        iter2: int,
+        iter1: int,
+        ivac: int,
+        ivacskip: int,
+        nvacskip: int,
+        fsq_rz_prev: float,
+        cached: bool,
+    ) -> None:
+        if os.getenv("VMEC_JAX_DUMP_FREEB_CONTROL", "") in ("", "0"):
+            return
+        dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
+        if not dump_dir:
+            return
+        try:
+            path = Path(dump_dir) / "freeb_control_trace.log"
+            with path.open("a", encoding="utf-8") as f:
+                f.write(
+                    f"{int(iter2):8d} {int(iter1):8d} {int(ivac):8d} {int(ivacskip):8d} "
+                    f"{int(nvacskip):8d} {float(fsq_rz_prev): .16e} {1 if bool(cached) else 0:2d}\n"
+                )
+        except Exception:
+            return
+
+    def _dump_freeb_axis_trace(*, iter2: int, axis_r: np.ndarray, axis_z: np.ndarray) -> None:
+        if os.getenv("VMEC_JAX_DUMP_FREEB_AXIS", "") in ("", "0"):
+            return
+        dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
+        if not dump_dir:
+            return
+        try:
+            path = Path(dump_dir) / f"freeb_axis_iter{int(iter2)}.npz"
+            np.savez_compressed(
+                path,
+                iter2=int(iter2),
+                axis_r=np.asarray(axis_r, dtype=float).reshape(-1),
+                axis_z=np.asarray(axis_z, dtype=float).reshape(-1),
+            )
+        except Exception:
+            return
+
     # VMEC `eqsolve`: if the initial Jacobian changes sign, improve the axis
     # guess *before* the first iteration (no extra iter1). This aligns the
     # zero_m1 gating and time-control history with VMEC2000.
@@ -9133,12 +9175,13 @@ def solve_fixed_boundary_residual_iter(
             if free_boundary_enabled:
                 # Keep free-boundary cadence fixed for this `iter2` across
                 # retry/restart passes in the inner while-loop.
+                fsq_rz_prev = (
+                    float(fsqr2_history[-1]) + float(fsqz2_history[-1])
+                    if (fsqr2_history and fsqz2_history)
+                    else 1.0
+                )
+                controls_cached_before = freeb_controls_cached is not None
                 if freeb_controls_cached is None:
-                    fsq_rz_prev = (
-                        float(fsqr2_history[-1]) + float(fsqz2_history[-1])
-                        if (fsqr2_history and fsqz2_history)
-                        else 1.0
-                    )
                     freeb_ivac, freeb_ivacskip, freeb_nvacskip = _free_boundary_iter_controls_vmec(
                         iter2=int(iter2),
                         iter1=int(iter1),
@@ -9154,6 +9197,15 @@ def solve_fixed_boundary_residual_iter(
                     )
                 else:
                     freeb_ivac, freeb_ivacskip, freeb_nvacskip = freeb_controls_cached
+                _dump_freeb_control_trace(
+                    iter2=int(iter2),
+                    iter1=int(iter1),
+                    ivac=int(freeb_ivac),
+                    ivacskip=int(freeb_ivacskip),
+                    nvacskip=int(freeb_nvacskip),
+                    fsq_rz_prev=float(fsq_rz_prev),
+                    cached=bool(controls_cached_before),
+                )
             # VMEC vacuum.f promotes ivac=0 -> 1 inside the vacuum solve.
             # Keep both values: pre-vacuum (`freeb_ivac`) for cadence/calls,
             # and post-vacuum effective (`freeb_ivac_effective`) for force/
@@ -9212,17 +9264,6 @@ def solve_fixed_boundary_residual_iter(
             if track_history:
                 zero_m1_history.append(int(zero_m1_val > 0.5))
 
-            if (
-                bool(vmec2000_control)
-                and bool(free_boundary_enabled)
-                and bool(freeb_turnon_iter)
-                and int(freeb_ivacskip) == 0
-            ):
-                # Full vacuum updates change the edge-coupled forcing terms.
-                # Refresh preconditioner/cache in this same iteration so fsq*1
-                # channels use the updated coupled operator (VMEC parity path).
-                force_bcovar_update = True
-    
             need_bcovar_update = bool(vmec2000_control) and (
                 (not bool(vmec2000_cache_valid))
                 or bool(force_bcovar_update)
@@ -9337,6 +9378,17 @@ def solve_fixed_boundary_residual_iter(
             )
             if bool(free_boundary_enabled):
                 freeb_plascur = _vmec_freeb_plascur_from_bcovar(k.bc, freeb_plascur)
+                try:
+                    pr1_axis = np.asarray(k.pr1_even, dtype=float)
+                    pz1_axis = np.asarray(k.pz1_even, dtype=float)
+                    if pr1_axis.ndim >= 3 and pz1_axis.ndim >= 3:
+                        _dump_freeb_axis_trace(
+                            iter2=int(iter2),
+                            axis_r=np.asarray(pr1_axis[0, 0, :], dtype=float).reshape(-1),
+                            axis_z=np.asarray(pz1_axis[0, 0, :], dtype=float).reshape(-1),
+                        )
+                except Exception:
+                    pass
                 if getattr(k, "constraint_rcon0", None) is not None:
                     if cache_constraint_rcon0 is None or cache_constraint_zcon0 is None:
                         # Initialize persistent VMEC-style constraint baseline.
@@ -9458,20 +9510,9 @@ def solve_fixed_boundary_residual_iter(
                 iter1 = int(iter2)
                 bad_growth_streak = 0
                 inv_tau = [0.15 / max(float(time_step), 1e-12)] * k_ndamp
-                vmec2000_cache_valid = False
-                cache_precond_diag = None
-                cache_tcon = None
-                cache_norms = None
-                cache_rz_scale = None
-                cache_l_scale = None
-                cache_rz_norm = None
-                cache_f_norm1 = None
-                cache_prec_rz_mats = None
-                cache_prec_rz_jmax = None
-                cache_prec_lam_prec = None
-                cache_prec_faclam = None
-                cache_prec_lam_debug = None
-                force_bcovar_update = True
+                # VMEC's restart_iter does not clear the ns4-cached preconditioner
+                # or normalization arrays (ard/azd, tcon, fnorm*). Keeping these
+                # caches intact is required for turn-on-window parity.
                 freeb_turnon_applied = True
                 # Continue this iteration with the current force residuals so
                 # TimeStepControl sees the same turn-on step (iter2==iter1)
