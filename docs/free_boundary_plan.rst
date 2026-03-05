@@ -191,6 +191,36 @@ Updated benchmark snapshot (March 2026):
   (``source_sym ~8.3e-3``, ``bvec_nonsing_fouri ~8.3e-3``,
   ``amatrix ~1.5e-3``, ``potvac ~9.5e-3``), then near machine-precision
   parity by iter 100+ (all these channels ``~1e-10`` or better).
+- 2026-03-05 manifest rerun: all fixed-boundary manifest cases passed.
+- 2026-03-05 manifest rerun: ``input.DIII-D`` and ``input.DIII-D_reset`` passed
+  at current tightened thresholds.
+- 2026-03-05 manifest rerun: ``input.cth_like_free_bdy_lasym_small`` is still
+  excellent at iter 80 but fails global status at iter 100 from ``potvac`` plus
+  runtime threshold misses.
+- 2026-03-05 manifest rerun: ``input.stellcopt`` is currently blocked by
+  missing VMEC scalpot dumps in the comparator workdir.
+- 2026-03-05 manifest rerun: ``freeb_nonaxis_lasym_false_cth_like`` is
+  currently a fixture-path issue in this checkout, not a fresh numerical
+  regression.
+- 2026-03-05 manual spot check: preserved local ``input.cth_like_free_bdy``
+  rerun remains tight at iter 53/54/60
+  (``source_sym ~5.3e-7``, ``bvec_nonsing_fouri ~5.5e-7``,
+  ``amatrix ~1.1e-13``, ``potvac <= 3.6e-4``).
+- 2026-03-05 manual spot check: temporary symmetric
+  ``input.DIII-D_lasym_false`` shows the same turn-on envelope at iter 80
+  (``source_sym ~8.4e-3``, ``bvec_nonsing_fouri ~8.4e-3``,
+  ``amatrix ~1.7e-3``, ``potvac ~9.4e-3``) and returns to near machine
+  precision by iter 100+.
+- 2026-03-05 cold-start direct runtime/memory matrix vs VMEC2000:
+  fixed-boundary default runs are currently about ``26x``-``50x`` slower and
+  use about ``6x``-``12x`` more RSS.
+- 2026-03-05 cold-start direct runtime/memory matrix vs VMEC2000:
+  free-boundary default runs are currently about ``23x``-``98x`` slower and use
+  about ``12x``-``16x`` more RSS.
+- 2026-03-05 cold-start direct runtime/memory matrix vs VMEC2000: worst
+  observed case in this matrix is the local non-axisymmetric ``lasym=True``
+  free-boundary solve at about ``62s`` / ``1.74 GiB`` RSS versus VMEC2000 at
+  about ``0.63s`` / ``110 MiB`` RSS.
 
 Key implementation updates that closed the matrix-side gap:
 
