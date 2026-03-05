@@ -9030,6 +9030,134 @@ def solve_fixed_boundary_residual_iter(
         except Exception:
             return
 
+    def _dump_evolve_trace(
+        *,
+        iter2: int,
+        iter1: int,
+        stage: str,
+        fsq1_val: float,
+        fsq_prev_val: float,
+        time_step_val: float,
+        dtau_val: float,
+        b1_val: float,
+        fac_val: float,
+        state_val: VMECState,
+        vRcc_val,
+        vRss_val,
+        vZsc_val,
+        vZcs_val,
+        vLsc_val,
+        vLcs_val,
+        vRsc_val=None,
+        vRcs_val=None,
+        vZcc_val=None,
+        vZss_val=None,
+        vLcc_val=None,
+        vLss_val=None,
+        frcc_val=None,
+        frss_val=None,
+        fzsc_val=None,
+        fzcs_val=None,
+        flsc_val=None,
+        flcs_val=None,
+        frsc_val=None,
+        frcs_val=None,
+        fzcc_val=None,
+        fzss_val=None,
+        flcc_val=None,
+        flss_val=None,
+    ) -> None:
+        if os.getenv("VMEC_JAX_DUMP_EVOLVE", "") in ("", "0"):
+            return
+        dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
+        if not dump_dir:
+            return
+        try:
+            from .diagnostics import vmec_internal_mn_from_state, vmec_xc_from_mn_blocks
+
+            blocks = vmec_internal_mn_from_state(
+                state_val,
+                static,
+                apply_basis_norm=False,
+                apply_m1_constraint=False,
+            )
+            xc_kwargs = {
+                "rcc": blocks["rcc"],
+                "rss": blocks["rss"],
+                "zsc": blocks["zsc"],
+                "zcs": blocks["zcs"],
+                "lsc": blocks["lsc"],
+                "lcs": blocks["lcs"],
+            }
+            if "rsc" in blocks:
+                xc_kwargs.update(
+                    {
+                        "rsc": blocks.get("rsc"),
+                        "rcs": blocks.get("rcs"),
+                        "zcc": blocks.get("zcc"),
+                        "zss": blocks.get("zss"),
+                        "lcc": blocks.get("lcc"),
+                        "lss": blocks.get("lss"),
+                    }
+                )
+            xc_vec = np.asarray(vmec_xc_from_mn_blocks(cfg=static.cfg, **xc_kwargs), dtype=float)
+            v_kwargs = {
+                "rcc": np.asarray(vRcc_val, dtype=float),
+                "rss": np.asarray(vRss_val, dtype=float),
+                "zsc": np.asarray(vZsc_val, dtype=float),
+                "zcs": np.asarray(vZcs_val, dtype=float),
+                "lsc": np.asarray(vLsc_val, dtype=float),
+                "lcs": np.asarray(vLcs_val, dtype=float),
+            }
+            if vRsc_val is not None:
+                v_kwargs["rsc"] = np.asarray(vRsc_val, dtype=float)
+            if vRcs_val is not None:
+                v_kwargs["rcs"] = np.asarray(vRcs_val, dtype=float)
+            if vZcc_val is not None:
+                v_kwargs["zcc"] = np.asarray(vZcc_val, dtype=float)
+            if vZss_val is not None:
+                v_kwargs["zss"] = np.asarray(vZss_val, dtype=float)
+            if vLcc_val is not None:
+                v_kwargs["lcc"] = np.asarray(vLcc_val, dtype=float)
+            if vLss_val is not None:
+                v_kwargs["lss"] = np.asarray(vLss_val, dtype=float)
+            v_vec = np.asarray(vmec_xc_from_mn_blocks(cfg=static.cfg, **v_kwargs), dtype=float)
+            gnorm = 0.0
+            if frcc_val is not None:
+                g_kwargs = {
+                    "rcc": np.asarray(frcc_val, dtype=float),
+                    "rss": np.asarray(frss_val, dtype=float),
+                    "zsc": np.asarray(fzsc_val, dtype=float),
+                    "zcs": np.asarray(fzcs_val, dtype=float),
+                    "lsc": np.asarray(flsc_val, dtype=float),
+                    "lcs": np.asarray(flcs_val, dtype=float),
+                }
+                if frsc_val is not None:
+                    g_kwargs["rsc"] = np.asarray(frsc_val, dtype=float)
+                if frcs_val is not None:
+                    g_kwargs["rcs"] = np.asarray(frcs_val, dtype=float)
+                if fzcc_val is not None:
+                    g_kwargs["zcc"] = np.asarray(fzcc_val, dtype=float)
+                if fzss_val is not None:
+                    g_kwargs["zss"] = np.asarray(fzss_val, dtype=float)
+                if flcc_val is not None:
+                    g_kwargs["lcc"] = np.asarray(flcc_val, dtype=float)
+                if flss_val is not None:
+                    g_kwargs["lss"] = np.asarray(flss_val, dtype=float)
+                g_vec = np.asarray(vmec_xc_from_mn_blocks(cfg=static.cfg, **g_kwargs), dtype=float)
+                gnorm = float(np.linalg.norm(g_vec))
+            path = Path(dump_dir) / "evolve_trace.log"
+            with path.open("a", encoding="utf-8") as f:
+                f.write(
+                    f"{int(iter2):8d} {int(iter1):8d} {int(static.cfg.ns):8d} {stage} "
+                    f"{float(fsq1_val): .16e} {float(fsq_prev_val): .16e} "
+                    f"{float(time_step_val): .16e} {float(dtau_val): .16e} "
+                    f"{float(b1_val): .16e} {float(fac_val): .16e} "
+                    f"{float(np.linalg.norm(xc_vec)): .16e} {float(np.linalg.norm(v_vec)): .16e} {float(gnorm): .16e}\n"
+                )
+        except Exception:
+            return
+
     # VMEC `eqsolve`: if the initial Jacobian changes sign, improve the axis
     # guess *before* the first iteration (no extra iter1). This aligns the
     # zero_m1 gating and time-control history with VMEC2000.
@@ -10665,6 +10793,42 @@ def solve_fixed_boundary_residual_iter(
         dtau = time_step * otav / 2.0
         b1 = 1.0 - dtau
         fac = 1.0 / (1.0 + dtau)
+        _dump_evolve_trace(
+            iter2=int(iter2),
+            iter1=int(iter1),
+            stage="pre",
+            fsq1_val=float(fsq1),
+            fsq_prev_val=float(fsq_prev_before),
+            time_step_val=float(time_step),
+            dtau_val=float(dtau),
+            b1_val=float(b1),
+            fac_val=float(fac),
+            state_val=state,
+            vRcc_val=vRcc,
+            vRss_val=vRss,
+            vZsc_val=vZsc,
+            vZcs_val=vZcs,
+            vLsc_val=vLsc,
+            vLcs_val=vLcs,
+            vRsc_val=vRsc,
+            vRcs_val=vRcs,
+            vZcc_val=vZcc,
+            vZss_val=vZss,
+            vLcc_val=vLcc,
+            vLss_val=vLss,
+            frcc_val=frcc_u,
+            frss_val=frss_u,
+            fzsc_val=fzsc_u,
+            fzcs_val=fzcs_u,
+            flsc_val=flsc_u,
+            flcs_val=flcs_u,
+            frsc_val=frsc_u,
+            frcs_val=frcs_u,
+            fzcc_val=fzcc_u,
+            fzss_val=fzss_u,
+            flcc_val=flcc_u,
+            flss_val=flss_u,
+        )
 
         t_update_start = time.perf_counter() if timing_enabled else None
         if bool(strict_update):
@@ -11285,6 +11449,42 @@ def solve_fixed_boundary_residual_iter(
                 w_try_history.append(float("nan"))
                 w_try_ratio_history.append(float("nan"))
                 restart_path_history.append("non_strict")
+        _dump_evolve_trace(
+            iter2=int(iter2),
+            iter1=int(iter1),
+            stage="post",
+            fsq1_val=float(fsq1),
+            fsq_prev_val=float(fsq_prev_before),
+            time_step_val=float(time_step),
+            dtau_val=float(dtau),
+            b1_val=float(b1),
+            fac_val=float(fac),
+            state_val=state,
+            vRcc_val=vRcc,
+            vRss_val=vRss,
+            vZsc_val=vZsc,
+            vZcs_val=vZcs,
+            vLsc_val=vLsc,
+            vLcs_val=vLcs,
+            vRsc_val=vRsc,
+            vRcs_val=vRcs,
+            vZcc_val=vZcc,
+            vZss_val=vZss,
+            vLcc_val=vLcc,
+            vLss_val=vLss,
+            frcc_val=frcc_u,
+            frss_val=frss_u,
+            fzsc_val=fzsc_u,
+            fzcs_val=fzcs_u,
+            flsc_val=flsc_u,
+            flcs_val=flcs_u,
+            frsc_val=frsc_u,
+            frcs_val=frcs_u,
+            fzcc_val=fzcc_u,
+            fzss_val=fzss_u,
+            flcc_val=flcc_u,
+            flss_val=flss_u,
+        )
         _maybe_dump_xc(
             state=state,
             vRcc=vRcc,
