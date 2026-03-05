@@ -183,6 +183,11 @@ Updated benchmark snapshot (March 2026):
   iter 78 (full-update step, ``ivacskip=0``):
   ``grpmn_nonsing rel_scaled ~1e-11``, ``amatrix rel_scaled ~1e-11``,
   ``potvac rel_scaled ~1e-5``.
+- ``input.DIII-D`` / ``input.DIII-D_reset`` (axisymmetric, ``lasym=True``):
+  transient turn-on-window drift at iter 80
+  (``source_sym ~8.3e-3``, ``bvec_nonsing_fouri ~8.3e-3``,
+  ``amatrix ~1.5e-3``, ``potvac ~9.5e-3``), then near machine-precision
+  parity by iter 100+ (all these channels ``~1e-10`` or better).
 
 Key implementation updates that closed the matrix-side gap:
 
@@ -232,11 +237,13 @@ Key implementation updates that closed the matrix-side gap:
   prioritizing the finest stage. This restores early-iteration free-boundary
   diagnostics parity for staged inputs.
 
-Remaining late-iteration drift is concentrated on ``ivacskip>0`` reuse steps
-for challenging ``lasym=True`` trajectories, where VMEC and JAX can follow
-different nonlinear states; cached-channel diagnostics
+Current residual mismatch is concentrated in the free-boundary turn-on window
+for axisymmetric ``lasym=True`` trajectories. Time-control and restart traces
+are now aligned channel-by-channel (``iter1``, ``ivac``, ``ivacskip``,
+``irst``, ``res0/res1``, ``delt``), and post-turn-on parity returns to
+near machine precision. Cached-channel diagnostics
 (``source_sym_cached``, ``gsource_cached``, ``bvecNS_cached``,
-``source_cache_iter``) remain enabled to localize that drift quantitatively.
+``source_cache_iter``) remain enabled to localize any future reuse-step drift.
 
 Scope and acceptance target
 ---------------------------

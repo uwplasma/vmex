@@ -193,10 +193,10 @@ vmec_timeout = 420
 goal = "Free-boundary LASYM=true axisymmetric parity target."
 
 [cases.metric_thresholds_rel_scaled]
-source_sym = 9.0e-1
-bvec_nonsing_fouri = 9.0e-1
-amatrix = 4.5e-1
-potvac = 1.0
+source_sym = 2.0e-2
+bvec_nonsing_fouri = 2.0e-2
+amatrix = 5.0e-3
+potvac = 2.0e-2
 
 [[cases]]
 id = "freeb_axisym_lasym_true_diiid_reset"
@@ -216,10 +216,10 @@ vmec_timeout = 420
 goal = "Free-boundary LASYM=true restart/reset parity target."
 
 [cases.metric_thresholds_rel_scaled]
-source_sym = 9.0e-1
-bvec_nonsing_fouri = 9.0e-1
-amatrix = 4.5e-1
-potvac = 1.0
+source_sym = 2.0e-2
+bvec_nonsing_fouri = 2.0e-2
+amatrix = 5.0e-3
+potvac = 2.0e-2
 
 [[cases]]
 id = "freeb_nonaxis_lasym_false_stellcopt"
