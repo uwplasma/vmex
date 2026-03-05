@@ -443,6 +443,13 @@ Legend:
    - Use new channels in `/Users/rogeriojorge/local/test/vmec_jax/vmec_jax/free_boundary.py` and comparator output:
      - `snr/snv/snz`, `bexn_term_r/phi/z`, `bexn_recon`.
    - Compare iter 72-80 and identify first channel that diverges above threshold.
+   - Current localization:
+     - iter 72 raw `gc` matches VMEC2000 to machine precision,
+     - first persistent mismatch is in **preconditioned** `gc` at iter 72,
+     - top-level free-boundary cadence/time-control already matches VMEC2000.
+   - New low-level dump support on JAX side:
+     - `VMEC_JAX_DUMP_PRECOND_MATS=1` writes `ar/br/dr/az/bz/dz` + `jmax/used_cache`,
+     - `VMEC_JAX_DUMP_LAM=1` now emits correct VMEC-style `ntmax=2` shape for axisymmetric `lasym=True`.
    - Patch VMEC-order operation where mismatch begins.
 
 2. **Free-boundary LASYM non-axisymmetric expansion**
@@ -471,4 +478,10 @@ Legend:
   - JAX dump now includes `snr/snv/snz` and `bexn_term_r/phi/z` + `bexn_recon`.
   - Comparator now reports these channels directly.
 - Confirmed DIII-D and DIII-D_reset manifest runs pass under tightened thresholds.
-
+- Localized DIII-D turn-on drift further:
+  - iter 72 raw `gc` matches VMEC2000 to machine precision,
+  - first stable mismatch is in preconditioned `gc`, not force assembly or top-level free-boundary control flow.
+- Added JAX preconditioner matrix dump support:
+  - `VMEC_JAX_DUMP_PRECOND_MATS=1` writes `precond_mats_ns*_iter*.npz` with `ar/br/dr/az/bz/dz`, `jmax`, and cache-use flag.
+- Fixed JAX lambda dump shape for axisymmetric `lasym=True`:
+  - `VMEC_JAX_DUMP_LAM=1` now writes VMEC-style `ntmax=2` channels for `ntor=0, lasym=True`, enabling direct comparison to `lam_ns*_iter*.dat`.
