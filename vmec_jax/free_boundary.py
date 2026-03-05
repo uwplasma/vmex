@@ -2583,6 +2583,30 @@ def _maybe_dump_scalpot_jax(
         "bsqvac": np.asarray(vac.bsqvac, dtype=float),
         "bnormal_unit": np.asarray(vac.bnormal_unit, dtype=float),
     }
+    # VMEC bextern.f diagnostics: explicit normal components and bexn terms.
+    try:
+        snr = -np.asarray(sample.R, dtype=float) * np.asarray(sample.Zu, dtype=float)
+        snv = (
+            np.asarray(sample.Zu, dtype=float) * np.asarray(sample.Rv, dtype=float)
+            - np.asarray(sample.Ru, dtype=float) * np.asarray(sample.Zv, dtype=float)
+        )
+        snz = np.asarray(sample.R, dtype=float) * np.asarray(sample.Ru, dtype=float)
+        out["snr"] = np.asarray(snr, dtype=float)
+        out["snv"] = np.asarray(snv, dtype=float)
+        out["snz"] = np.asarray(snz, dtype=float)
+        bexn_term_r = np.asarray(sample.br, dtype=float) * np.asarray(snr, dtype=float)
+        bexn_term_phi = np.asarray(sample.bp, dtype=float) * np.asarray(snv, dtype=float)
+        bexn_term_z = np.asarray(sample.bz, dtype=float) * np.asarray(snz, dtype=float)
+        out["bexn_term_r"] = np.asarray(bexn_term_r, dtype=float)
+        out["bexn_term_phi"] = np.asarray(bexn_term_phi, dtype=float)
+        out["bexn_term_z"] = np.asarray(bexn_term_z, dtype=float)
+        out["bexn_recon"] = -(
+            np.asarray(bexn_term_r, dtype=float)
+            + np.asarray(bexn_term_phi, dtype=float)
+            + np.asarray(bexn_term_z, dtype=float)
+        )
+    except Exception:
+        pass
     if sample.axis_r_full is not None:
         out["axis_r_full"] = np.asarray(sample.axis_r_full, dtype=float)
     if sample.axis_z_full is not None:

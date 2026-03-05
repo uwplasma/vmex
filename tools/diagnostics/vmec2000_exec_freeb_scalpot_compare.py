@@ -1333,15 +1333,23 @@ def main() -> int:
                 "rel_scaled": rel_zv_geom_scaled,
                 "scale_jax_to_vmec": a_zv_geom,
             }
-        if all(k in jax for k in ("R", "Ru", "Zu", "Rv", "Zv")):
-            jR = np.asarray(jax["R"]).reshape(-1)
-            jRu = np.asarray(jax["Ru"]).reshape(-1)
-            jZu = np.asarray(jax["Zu"]).reshape(-1)
-            jRv = np.asarray(jax["Rv"]).reshape(-1)
-            jZv = np.asarray(jax["Zv"]).reshape(-1)
-            jsnr = -jR * jZu
-            jsnv = jZu * jRv - jRu * jZv
-            jsnz = jR * jRu
+        if (
+            ("snr" in jax and "snv" in jax and "snz" in jax)
+            or all(k in jax for k in ("R", "Ru", "Zu", "Rv", "Zv"))
+        ):
+            if ("snr" in jax) and ("snv" in jax) and ("snz" in jax):
+                jsnr = np.asarray(jax["snr"]).reshape(-1)
+                jsnv = np.asarray(jax["snv"]).reshape(-1)
+                jsnz = np.asarray(jax["snz"]).reshape(-1)
+            else:
+                jR = np.asarray(jax["R"]).reshape(-1)
+                jRu = np.asarray(jax["Ru"]).reshape(-1)
+                jZu = np.asarray(jax["Zu"]).reshape(-1)
+                jRv = np.asarray(jax["Rv"]).reshape(-1)
+                jZv = np.asarray(jax["Zv"]).reshape(-1)
+                jsnr = -jR * jZu
+                jsnv = jZu * jRv - jRu * jZv
+                jsnz = jR * jRu
             for name, vv, jj in (
                 ("snr", np.asarray(vmec_bex["snr"]).reshape(-1), jsnr),
                 ("snv", np.asarray(vmec_bex["snv"]).reshape(-1), jsnv),
@@ -1396,6 +1404,53 @@ def main() -> int:
                 "rel_scaled": rel_zv_scaled,
                 "scale_jax_to_vmec": a_zv,
             }
+        if (
+            "br" in jax
+            and "bp" in jax
+            and "bz" in jax
+            and (
+                ("snr" in jax and "snv" in jax and "snz" in jax)
+                or all(k in jax for k in ("R", "Ru", "Zu", "Rv", "Zv"))
+            )
+        ):
+            jbr = np.asarray(jax["br"]).reshape(-1)
+            jbp = np.asarray(jax["bp"]).reshape(-1)
+            jbz = np.asarray(jax["bz"]).reshape(-1)
+            if ("snr" in jax) and ("snv" in jax) and ("snz" in jax):
+                jsnr = np.asarray(jax["snr"]).reshape(-1)
+                jsnv = np.asarray(jax["snv"]).reshape(-1)
+                jsnz = np.asarray(jax["snz"]).reshape(-1)
+            else:
+                jR = np.asarray(jax["R"]).reshape(-1)
+                jRu = np.asarray(jax["Ru"]).reshape(-1)
+                jZu = np.asarray(jax["Zu"]).reshape(-1)
+                jRv = np.asarray(jax["Rv"]).reshape(-1)
+                jZv = np.asarray(jax["Zv"]).reshape(-1)
+                jsnr = -jR * jZu
+                jsnv = jZu * jRv - jRu * jZv
+                jsnz = jR * jRu
+            vm_snr = np.asarray(vmec_bex["snr"]).reshape(-1)
+            vm_snv = np.asarray(vmec_bex["snv"]).reshape(-1)
+            vm_snz = np.asarray(vmec_bex["snz"]).reshape(-1)
+            vm_br = np.asarray(vmec_bex["brad"]).reshape(-1)
+            vm_bp = np.asarray(vmec_bex["bphi"]).reshape(-1)
+            vm_bz = np.asarray(vmec_bex["bz"]).reshape(-1)
+            channels = (
+                ("bexn_term_r", vm_br * vm_snr, jbr * jsnr),
+                ("bexn_term_phi", vm_bp * vm_snv, jbp * jsnv),
+                ("bexn_term_z", vm_bz * vm_snz, jbz * jsnz),
+            )
+            for name, vv, jj in channels:
+                n = min(vv.size, jj.size)
+                a_t, rel_t_scaled = _rel_scaled(vv[:n], jj[:n])
+                out[name] = {
+                    "size_vmec": int(vv.size),
+                    "size_jax": int(jj.size),
+                    "size_cmp": int(n),
+                    "rel_raw": _rel(vv[:n], jj[:n]),
+                    "rel_scaled": rel_t_scaled,
+                    "scale_jax_to_vmec": a_t,
+                }
         if "br_axis" in jax:
             jba = np.asarray(jax["br_axis"]).reshape(-1)
             vba = np.asarray(vmec_bex["brad_axis"]).reshape(-1)

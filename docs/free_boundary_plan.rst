@@ -166,6 +166,9 @@ reports upstream source-channel deltas:
 
 - ``bexu`` / ``bexv`` (covariant external tangential channels),
 - ``bexn`` / ``bexni`` (normal source channels used by ``scalpot``).
+- ``bexn`` decomposition channels (``bexn_term_r``, ``bexn_term_phi``,
+  ``bexn_term_z``) from ``brad*snr``, ``bphi*snv``, ``bz*snz`` to localize
+  source drift to geometry vs field contributions.
 - free-boundary edge-coupling channels from ``funct3d``/``forces``
   (``pgcon``, ``rbsq``, ``bsqvac``, ``p1e/p1o``, ``pzu0/pru0``) plus an
   inferred ``ohs`` check to flag multigrid stage misalignment in comparisons.
