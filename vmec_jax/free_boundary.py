@@ -751,6 +751,8 @@ def _sample_external_boundary_arrays(
             lasym=bool(static.cfg.lasym),
         )
 
+    # Apply VMEC m=1 internal->physical conversion before free-boundary
+    # sampling. This matches the convert_sym/convert_asym path feeding NESTOR.
     Rcos_phys, Zsin_phys, Rsin_phys, Zcos_phys = vmec_m1_internal_to_physical_signed(
         Rcos=np.asarray(state.Rcos),
         Zsin=np.asarray(state.Zsin),
