@@ -189,7 +189,7 @@ resolution and toroidal angle conventions) so figure-to-figure comparisons are
 faithful to the legacy script.
 
 Current parity status (high-level)
----------------------------------
+----------------------------------
 
 - Fixed-boundary parity is established for axisymmetric and non-axisymmetric
   cases, including ``lasym=False`` and ``lasym=True``, in the VMEC2000
