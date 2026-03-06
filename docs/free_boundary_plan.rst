@@ -197,9 +197,9 @@ Updated benchmark snapshot (March 2026):
 - 2026-03-05 manifest rerun: all fixed-boundary manifest cases passed.
 - 2026-03-05 manifest rerun: ``input.DIII-D`` and ``input.DIII-D_reset`` passed
   at current tightened thresholds.
-- 2026-03-05 manifest rerun: ``input.cth_like_free_bdy_lasym_small`` is still
-  excellent at iter 80 but fails global status at iter 100 from ``potvac`` plus
-  runtime threshold misses.
+- 2026-03-06 manifest rerun: ``input.cth_like_free_bdy_lasym_small`` now passes
+  the current parity thresholds at iter 80 and iter 100, but the full-tier case
+  still fails global status by runtime thresholds only.
 - 2026-03-05 non-axisymmetric ``lasym=True`` cadence fix:
   the 3D path now preserves the pre-turn-on residual only where needed and
   invalidates cached ``ivac/ivacskip`` controls whenever a same-iteration
@@ -221,6 +221,27 @@ Updated benchmark snapshot (March 2026):
   the reconstructed field/coupling channels
   (``potvac ~7.1e-3``, ``bsqvac ~1.25e-2``,
   ``freeb_coupling_pgcon ~1.25e-2``).
+- 2026-03-06 turn-on ``iter1`` control split:
+  all free-boundary paths still use the same-iteration soft restart at turn-on,
+  but only the non-axisymmetric ``lasym=True`` path now preserves the pre-turn-on
+  ``iter1`` anchor. This keeps ``input.DIII-D`` at machine precision while
+  matching the late VMEC reuse cadence on
+  ``input.cth_like_free_bdy_lasym_small``.
+- 2026-03-06 direct comparator after the ``iter1`` control split:
+  ``input.cth_like_free_bdy`` iter 60 remains tight
+  (``source_sym ~5.6e-7``, ``bvec_nonsing_fouri ~5.8e-7``,
+  ``amatrix ~1.1e-13``, ``potvac ~8.4e-4``).
+- 2026-03-06 direct comparator after the ``iter1`` control split:
+  ``input.cth_like_free_bdy_lasym_small`` iter 60 is now near machine
+  precision in the source/matrix channels with much smaller field drift
+  (``bvec ~6.3e-5``, ``potvac ~4.0e-5``, ``bsqvac ~2.0e-4``).
+- 2026-03-06 direct comparator after the ``iter1`` control split:
+  ``input.cth_like_free_bdy_lasym_small`` iter 100 still has visible
+  reuse-step drift in the reconstructed field/coupling channels, but it now
+  stays within the current parity thresholds
+  (``potvac ~1.0e-1``, ``bsqvac ~3.1e-1``,
+  ``freeb_coupling_pgcon ~3.1e-1``). The remaining failure mode for this case
+  is runtime, not comparator thresholds.
 - 2026-03-05 manifest cleanup rerun
   (``outputs/parity_sweeps/20260305_183853/summary.json``):
   preserved local ``input.cth_like_free_bdy`` now passes in-manifest at

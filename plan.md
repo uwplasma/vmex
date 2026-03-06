@@ -224,18 +224,23 @@ Keep VMEC parity mode, while introducing better robustness, richer outputs, easi
   - iter 100+ returns to near machine precision,
   - targeted manifest rerun passes at iter 80/100/120.
 - Current free-boundary matrix gaps are split between:
-  - remaining non-axisymmetric `lasym=True` reuse-step field drift on
-    `input.cth_like_free_bdy_lasym_small`
+  - remaining non-axisymmetric `lasym=True` late reuse-step field drift plus
+    runtime overhead on `input.cth_like_free_bdy_lasym_small`:
+    current parity thresholds now pass at iter 80/100, but iter 100 still
+    shows reused field/coupling deltas
     (`source_sym ~2.6e-8`, `bvec_nonsing_fouri ~2.4e-8`,
-    `amatrix ~1.3e-11`, `potvac ~7.1e-3`, `bsqvac ~1.25e-2` at iter 100),
+    `amatrix ~1.3e-11`, `potvac ~1.0e-1`, `bsqvac ~3.1e-1`,
+    `freeb_coupling_pgcon ~3.1e-1`), and the full-tier case currently fails
+    by runtime only (`~115s` total vs `95s` limit),
   - coarse but valid post-turn-on parity on `input.stellcopt`
     (`source_sym ~2.7e-1`, `bvec_nonsing_fouri ~2.8e-1`,
     `amatrix ~1.2e-1`, `potvac ~3.6e-1` at iter 80),
   - remaining preserved-mgrid dependency for the local CTH-like `lasym=False`
     smoke fixture.
 - Remaining work: tighten the non-axisymmetric `lasym=True` reuse-step
-  field/coupling drift, tighten post-turn-on `input.stellcopt`, and replace
-  preserved local free-boundary fixtures with distributable inputs where practical.
+  field/coupling drift and its runtime cost, tighten post-turn-on
+  `input.stellcopt`, and replace preserved local free-boundary fixtures with
+  distributable inputs where practical.
 
 ### 5.3 Practical parity policy
 - Compare with masks where numerically justified:
@@ -627,3 +632,33 @@ Legend:
     `amatrix ~1.3e-11`), with the remaining drift confined to the reused
     field/coupling channels (`potvac ~7.1e-3`, `bsqvac ~1.25e-2`,
     `freeb_coupling_pgcon ~1.25e-2`).
+### 2026-03-06
+- Split free-boundary turn-on restart behavior by topology/symmetry instead of
+  using one global `iter1` policy:
+  - all free-boundary paths still get the same-iteration soft restart at
+    turn-on,
+  - only the non-axisymmetric `lasym=True` path now preserves the pre-turn-on
+    `iter1` anchor, matching the late VMEC reuse cadence without regressing
+    DIII-D or the non-axisymmetric `lasym=False` smoke case.
+- Added a unit test for the new turn-on `iter1` reset policy in
+  `tests/test_free_boundary_wp0.py`.
+- Revalidated the targeted free-boundary comparators after the control-flow
+  change:
+  - `input.DIII-D` iter 80 remains at near machine precision
+    (`source_sym ~2.06e-12`, `bvec_nonsing_fouri ~2.07e-12`,
+    `amatrix ~1.44e-13`, `potvac ~1.83e-12`),
+  - `input.cth_like_free_bdy` iter 60 remains tight
+    (`source_sym ~5.6e-7`, `bvec_nonsing_fouri ~5.8e-7`,
+    `amatrix ~1.1e-13`, `potvac ~8.4e-4`),
+  - `input.cth_like_free_bdy_lasym_small` iter 60 is now near machine
+    precision in the source/matrix channels with much smaller field drift
+    (`potvac ~4.0e-5`, `bsqvac ~2.0e-4`),
+  - `input.cth_like_free_bdy_lasym_small` iter 100 now passes the current
+    parity thresholds, with the remaining miss confined to reused field and
+    coupling channels plus runtime thresholds.
+- Re-ran manifest parity after the turn-on-control split:
+  - smoke tier passes with `failed_cases=0`
+    (`outputs/parity_sweeps/20260306_074540/summary.json`),
+  - full-tier `freeb_nonaxis_lasym_true_cth_like_local` now fails only by
+    runtime thresholds, not by parity thresholds
+    (`outputs/parity_sweeps/20260306_073934/summary.json`).

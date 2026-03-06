@@ -25,7 +25,12 @@ from vmec_jax.free_boundary import (
     vacuum_boundary_fields_from_cylindrical,
 )
 from vmec_jax.namelist import read_indata
-from vmec_jax.solve import _free_boundary_iter_controls_vmec, _free_boundary_prev_rz_fsq_next
+from vmec_jax.solve import (
+    _free_boundary_iter_controls_vmec,
+    _free_boundary_prev_rz_fsq_next,
+    _free_boundary_should_damp_constraint_baseline,
+    _free_boundary_turnon_resets_iter1_immediately,
+)
 from vmec_jax.static import build_static
 from vmec_jax.driver import run_fixed_boundary
 
@@ -214,6 +219,36 @@ def test_free_boundary_prev_rz_fsq_next_preserves_pre_turnon_value():
         turnon_restart=True,
         preserve_turnon_restart=False,
     ) == pytest.approx(2.5e-1)
+
+
+def test_free_boundary_constraint_baseline_damping_skips_turnon_step():
+    assert _free_boundary_should_damp_constraint_baseline(
+        freeb_ivac=1,
+        freeb_turnon_iter=True,
+        lthreed=True,
+    ) is False
+    assert _free_boundary_should_damp_constraint_baseline(
+        freeb_ivac=2,
+        freeb_turnon_iter=False,
+        lthreed=True,
+    ) is True
+    assert _free_boundary_should_damp_constraint_baseline(
+        freeb_ivac=1,
+        freeb_turnon_iter=True,
+        lthreed=False,
+    ) is True
+    assert _free_boundary_should_damp_constraint_baseline(
+        freeb_ivac=-1,
+        freeb_turnon_iter=False,
+        lthreed=True,
+    ) is False
+
+
+def test_free_boundary_turnon_iter1_reset_policy_depends_on_lasym_and_topology():
+    assert _free_boundary_turnon_resets_iter1_immediately(lthreed=False, lasym=False) is True
+    assert _free_boundary_turnon_resets_iter1_immediately(lthreed=False, lasym=True) is True
+    assert _free_boundary_turnon_resets_iter1_immediately(lthreed=True, lasym=False) is True
+    assert _free_boundary_turnon_resets_iter1_immediately(lthreed=True, lasym=True) is False
 
 
 def test_vmec_mode_basis_and_bvec_skip_modes():

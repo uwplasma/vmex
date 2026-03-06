@@ -248,6 +248,25 @@ def _free_boundary_prev_rz_fsq_next(
     return float(fsq_rz_curr)
 
 
+def _free_boundary_should_damp_constraint_baseline(
+    *, freeb_ivac: int, freeb_turnon_iter: bool, lthreed: bool
+) -> bool:
+    """Mirror VMEC turn-on behavior for persistent `rcon0/zcon0` baselines.
+
+    The first vacuum-coupled iteration should preserve the pre-turn-on
+    constraint baseline on the 3D path. Axisymmetric turn-on keeps the
+    original VMEC-aligned immediate damping behavior.
+    """
+    if not bool(lthreed):
+        return int(freeb_ivac) >= 0
+    return int(freeb_ivac) >= 0 and (not bool(freeb_turnon_iter))
+
+
+def _free_boundary_turnon_resets_iter1_immediately(*, lthreed: bool, lasym: bool) -> bool:
+    """Return whether turn-on should immediately reset `iter1` for cadence."""
+    return (not bool(lthreed)) or (not bool(lasym))
+
+
 def _sample_free_boundary_external_field(*, state: VMECState, static) -> dict[str, Any]:
     """WP2 diagnostic scaffold for external-field boundary channels."""
     from .free_boundary import sample_external_vacuum_diagnostics
@@ -9613,8 +9632,8 @@ def solve_fixed_boundary_residual_iter(
                         )
                         freeb_bsqvac_half_current[-1, :, :] = bsqvac_edge
                         if freeb_turnon_iter:
-                            # Mirror vacuum.f side effect for downstream
-                            # force/residual gating in this same iteration.
+                            # VMEC promotes ivac=0 -> 1 inside vacuum.f before
+                            # the same-iteration funct3d restart on turn-on.
                             freeb_ivac = 1
                             freeb_ivac_effective = 1
                             freeb_controls_cached = (
@@ -9639,9 +9658,13 @@ def solve_fixed_boundary_residual_iter(
                 and (cache_constraint_zcon0 is not None)
             ):
                 # VMEC keeps rcon0/zcon0 as persistent baselines; once free-
-                # boundary control is active (ivac>=0), damp them by 0.9 each
-                # iteration before evaluating forces.
-                if int(freeb_ivac) >= 0:
+                # boundary control is active, damp them by 0.9 on reuse steps.
+                # The first turn-on iteration keeps the pre-turn-on baseline.
+                if _free_boundary_should_damp_constraint_baseline(
+                    freeb_ivac=int(freeb_ivac),
+                    freeb_turnon_iter=bool(freeb_turnon_iter),
+                    lthreed=bool(cfg.lthreed),
+                ):
                     cache_constraint_rcon0 = 0.9 * jnp.asarray(cache_constraint_rcon0)
                     cache_constraint_zcon0 = 0.9 * jnp.asarray(cache_constraint_zcon0)
                 constraint_rcon0_current = cache_constraint_rcon0
@@ -9780,14 +9803,14 @@ def solve_fixed_boundary_residual_iter(
                     cache_prec_rz_jmax = int(jmax)
                 vmec2000_cache_valid = True
             fsqr_f, fsqz_f, fsql_f = _device_get_floats(fsqr, fsqz, fsql)
-            if bool(free_boundary_enabled) and bool(freeb_turnon_iter) and (not bool(freeb_turnon_applied)):
-                # VMEC calls restart_iter(irst=2) inside funct3d on the first
-                # vacuum-coupled iteration. This resets the state/velocity used
-                # by evolve while keeping the force residuals from this call.
-                #
-                # In VMEC this call is `delt0 = delt ; call restart_iter(delt0)`,
-                # i.e. the damping is applied to a local copy and does NOT alter
-                # the persistent integration step (`delt`) used by evolve/print.
+            if (
+                bool(free_boundary_enabled)
+                and bool(freeb_turnon_iter)
+                and (not bool(freeb_turnon_applied))
+            ):
+                # VMEC restarts funct3d immediately after the first
+                # free-boundary turn-on solve, keeping the cached ns4 blocks
+                # intact across the same-iteration retry.
                 state = state_checkpoint
                 vRcc = jnp.zeros_like(vRcc)
                 vRss = jnp.zeros_like(vRss)
@@ -9803,16 +9826,14 @@ def solve_fixed_boundary_residual_iter(
                 vLss = jnp.zeros_like(vLss)
                 time_step_report_hold = float(time_step)
                 ijacob += 1
-                iter1 = int(iter2)
+                if _free_boundary_turnon_resets_iter1_immediately(
+                    lthreed=bool(cfg.lthreed),
+                    lasym=bool(cfg.lasym),
+                ):
+                    iter1 = int(iter2)
                 bad_growth_streak = 0
                 inv_tau = [0.15 / max(float(time_step), 1e-12)] * k_ndamp
-                # VMEC's restart_iter does not clear the ns4-cached preconditioner
-                # or normalization arrays (ard/azd, tcon, fnorm*). Keeping these
-                # caches intact is required for turn-on-window parity.
                 freeb_turnon_applied = True
-                # Continue this iteration with the current force residuals so
-                # TimeStepControl sees the same turn-on step (iter2==iter1)
-                # that VMEC records after `restart_iter` in funct3d.
             fsq0_curr = fsqr_f + fsqz_f + fsql_f
             prev_rz_fsq_before = prev_rz_fsq
             prev_rz_fsq = _free_boundary_prev_rz_fsq_next(
