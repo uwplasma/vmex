@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import vmec_jax.driver as driver_module
 from vmec_jax.driver import (
     example_paths,
     load_example,
@@ -73,3 +74,36 @@ def test_lasym_performance_mode_infers_axis_for_fast_path():
     assert abs(float(perf.state.Zcos[0, 0])) > 1e-3
     assert float(safe.state.Rcos[0, 0]) == 0.0
     assert float(safe.state.Zcos[0, 0]) == 0.0
+
+
+def test_dynamic_scan_probe_settings_cpu(monkeypatch):
+    monkeypatch.setattr(driver_module, "_default_backend_name", lambda: "cpu")
+    monkeypatch.delenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", raising=False)
+    monkeypatch.delenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", raising=False)
+
+    pre_iters, timed_probe, backend = driver_module._dynamic_scan_probe_settings(50)
+    assert pre_iters == 10
+    assert timed_probe is True
+    assert backend == "cpu"
+
+
+def test_dynamic_scan_probe_settings_accelerator(monkeypatch):
+    monkeypatch.setattr(driver_module, "_default_backend_name", lambda: "gpu")
+    monkeypatch.delenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", raising=False)
+    monkeypatch.delenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", raising=False)
+
+    pre_iters, timed_probe, backend = driver_module._dynamic_scan_probe_settings(50)
+    assert pre_iters == 3
+    assert timed_probe is False
+    assert backend == "gpu"
+
+
+def test_dynamic_scan_probe_settings_env_override(monkeypatch):
+    monkeypatch.setattr(driver_module, "_default_backend_name", lambda: "gpu")
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", "7")
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", "1")
+
+    pre_iters, timed_probe, backend = driver_module._dynamic_scan_probe_settings(5)
+    assert pre_iters == 4
+    assert timed_probe is True
+    assert backend == "gpu"

@@ -54,6 +54,22 @@ The runtime uses scan as the default fast path, with a fallback to the
 non-scan parity path when parity guards detect drift. You can always force the
 conservative path with ``--parity``.
 
+For LASYM fixed-boundary stages in ``performance_mode=True``, the default
+selector now uses:
+
+- a timed scan/non-scan probe on CPU backends,
+- a short parity-only probe on accelerator backends.
+
+This keeps the default GPU path from paying the full warmed non-scan timing
+cost while still rejecting scan when the short parity probe disagrees.
+
+Controls:
+
+- ``VMEC_JAX_DYNAMIC_SCAN_TIMED=1``: force a timed probe even on accelerators.
+- ``VMEC_JAX_DYNAMIC_SCAN_TIMED=0``: force parity-only probing.
+- ``VMEC_JAX_DYNAMIC_SCAN_ITERS=<int>``: override the probe window
+  (defaults to ``10`` on CPU, ``3`` on accelerators).
+
 Debug dump env vars are incompatible with scan mode.
 
 If you want an automatic parity probe when using scan, set::
@@ -233,7 +249,7 @@ Recent artifacts from this tool:
 Current snapshot highlights:
 
 - Fixed-boundary ``lasym=True`` improved materially after the automatic
-  performance-mode axis inference + warmed scan probe:
+  performance-mode axis inference + accelerator-aware scan probe:
 
   - ``input.up_down_asymmetric_tokamak`` now runs in about ``6.7s`` /
     ``0.89 GiB`` on the reference CPU host versus VMEC2000 about ``0.74s``.
@@ -242,6 +258,10 @@ Current snapshot highlights:
   - ``input.LandremanSenguptaPlunk_section5p3_low_res`` remains a heavy
     fallback case at about ``46.8s`` / ``4.07 GiB`` versus VMEC2000
     about ``0.69s``.
+  - On the reference GPU host, the same selector change cut bundled cold-start
+    runtimes to about ``16.9s`` for ``input.up_down_asymmetric_tokamak``,
+    ``71.4s`` for ``input.basic_non_stellsym_pressure``, and ``27.5s`` for
+    ``input.LandremanSenguptaPlunk_section5p3_low_res``.
 
 - Bundled free-boundary cases remain the dominant default-path outliers:
 
