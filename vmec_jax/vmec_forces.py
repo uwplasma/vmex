@@ -691,9 +691,10 @@ def vmec_forces_rz_from_wout(
         this parity mode, lambda-force kernels (`blmn/clmn`) are also formed
         from averaged `wout` `bsub*` fields.
     freeb_bsqvac_half:
-        Optional half-mesh free-boundary vacuum ``0.5*|B|^2`` proxy. If
-        provided, the edge slice ``freeb_bsqvac_half[-1]`` is used to
-        override the edge constraint-pressure channel ``gcon`` (VMEC
+        Optional free-boundary vacuum ``0.5*|B|^2`` proxy. This may be either
+        the full half-mesh field ``(ns, ntheta, nzeta)`` or just the edge
+        slice ``(ntheta, nzeta)``. In both cases only the edge slice is used
+        to override the edge constraint-pressure channel ``gcon`` (VMEC
         funct3d-style coupling) while keeping `bcovar` unchanged.
     freeb_pres_scale:
         Optional VMEC free-boundary pressure scale ``pmass(1)/pmass(s_edge)``
@@ -1080,7 +1081,16 @@ def vmec_forces_rz_from_wout(
 
     # Free-boundary edge forcing (VMEC forces.f): add rbsq terms to A-kernels.
     if freeb_bsqvac_half is not None:
-        vac_edge = jnp.asarray(freeb_bsqvac_half)[-1]
+        vac_full = jnp.asarray(freeb_bsqvac_half)
+        if vac_full.shape == pr1_0[-1].shape:
+            vac_edge = vac_full
+        elif vac_full.shape == pr1_0.shape:
+            vac_edge = vac_full[-1]
+        else:
+            raise ValueError(
+                "freeb_bsqvac_half shape mismatch: "
+                f"expected edge {pr1_0[-1].shape} or full {pr1_0.shape}, got {vac_full.shape}"
+            )
         if vac_edge.shape != pr1_0[-1].shape:
             raise ValueError(
                 f"freeb_bsqvac_half edge shape mismatch: expected {pr1_0[-1].shape}, got {vac_edge.shape}"

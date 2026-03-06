@@ -9670,11 +9670,11 @@ def solve_fixed_boundary_residual_iter(
                         freeb_solve_time = float(getattr(nestor_res, "solve_time_s", 0.0))
                         freeb_sample_time = float(getattr(nestor_res, "sample_time_s", 0.0))
                         bsqvac_edge = np.asarray(nestor_res.vac_total.bsqvac, dtype=float)
-                        freeb_bsqvac_half_current = np.zeros(
-                            (int(s.shape[0]),) + bsqvac_edge.shape,
-                            dtype=bsqvac_edge.dtype,
-                        )
-                        freeb_bsqvac_half_current[-1, :, :] = bsqvac_edge
+                        # Only the edge slice is consumed by the force kernels.
+                        # Keep this as a 2D edge field so the GPU path does not
+                        # re-transfer a mostly-zero `(ns, ntheta, nzeta)` array
+                        # on every free-boundary iteration.
+                        freeb_bsqvac_half_current = bsqvac_edge
                         if freeb_turnon_iter:
                             # VMEC promotes ivac=0 -> 1 inside vacuum.f before
                             # the same-iteration funct3d restart on turn-on.
