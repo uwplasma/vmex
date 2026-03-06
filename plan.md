@@ -578,3 +578,15 @@ Legend:
   - the current run is blocked at comparator level because no `jax_dumps` were
     emitted (`missing vmec_jax dump: .../jax_dumps/scalpot_jax_iter*.npz`),
   - this is presently a harness/runtime issue, not a measured metric-threshold failure.
+- Fixed free-boundary `MGRID_FILE` resolution for driver/comparator workflows:
+  - `load_config(path)` now resolves relative `MGRID_FILE` entries against the
+    input file directory instead of the process working directory,
+  - added a regression test covering `run_fixed_boundary(...)` from outside the
+    input directory with `MGRID_FILE='mgrid_rel.nc'`.
+- Re-ran the DIII-D free-boundary comparator from the repo root after the path fix:
+  - JAX dumps are emitted again (`.../jax_dumps/scalpot_jax_iter80.npz` and
+    `freeb_coupling_iter80.npz`),
+  - the run now returns real parity numbers instead of a missing-dump failure,
+    with iter-80 metrics back in the expected turn-on envelope
+    (`source_sym ~8.29e-3`, `bvec_nonsing_fouri ~8.31e-3`,
+    `amatrix ~1.51e-3`, `potvac ~9.45e-3`).

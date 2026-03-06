@@ -554,6 +554,70 @@ def test_run_fixed_boundary_freeb_diagnostics_stub(tmp_path: Path):
     assert "sample_time_s" in fbext
 
 
+def test_run_fixed_boundary_resolves_relative_mgrid_from_input_dir(tmp_path: Path, monkeypatch):
+    netCDF4 = pytest.importorskip("netCDF4", reason="netCDF4 required for mgrid loader test")
+
+    input_dir = tmp_path / "case"
+    input_dir.mkdir()
+    other_dir = tmp_path / "outside"
+    other_dir.mkdir()
+
+    mg = input_dir / "mgrid_rel.nc"
+    with netCDF4.Dataset(str(mg), mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createDimension("stringsize", 8)
+        ds.createDimension("external_coil_groups", 1)
+        ds.createDimension("dim_00001", 1)
+        ds.createDimension("external_coils", 1)
+        ds.createDimension("rad", 2)
+        ds.createDimension("zee", 2)
+        ds.createDimension("phi", 4)
+        for name, value in (
+            ("ir", 2),
+            ("jz", 2),
+            ("kp", 4),
+            ("nfp", 1),
+            ("nextcur", 1),
+        ):
+            v = ds.createVariable(name, "i4", ())
+            v.assignValue(value)
+        for name, value in (("rmin", 1.0), ("rmax", 2.0), ("zmin", -1.0), ("zmax", 1.0)):
+            v = ds.createVariable(name, "f8", ())
+            v.assignValue(value)
+
+    inpath = input_dir / "input.fb_relpath"
+    inpath.write_text(
+        """
+&INDATA
+  NFP = 1
+  MPOL = 5
+  NTOR = 0
+  NS = 9
+  NZETA = 2
+  NTHETA = 8
+  LASYM = F
+  LFREEB = T
+  MGRID_FILE = 'mgrid_rel.nc'
+  EXTCUR(1) = 2.5
+  RBC(0,0) = 6.0
+  ZBS(1,0) = 2.0
+/
+"""
+    )
+
+    monkeypatch.chdir(other_dir)
+    run = run_fixed_boundary(
+        inpath,
+        use_initial_guess=True,
+        verbose=False,
+    )
+
+    assert run.cfg.lfreeb is True
+    assert run.cfg.mgrid_file == str(mg.resolve())
+    assert run.static.mgrid_metadata is not None
+    assert int(run.static.mgrid_metadata.kp) == 4
+    assert run.static.free_boundary_extcur == (2.5,)
+
+
 def test_run_fixed_boundary_freeb_external_sampling_can_be_disabled(tmp_path: Path, monkeypatch):
     netCDF4 = pytest.importorskip("netCDF4", reason="netCDF4 required for mgrid loader test")
 
