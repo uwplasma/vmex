@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -27,7 +28,14 @@ from vmec_jax.config import load_config
 from vmec_jax.vmec2000_exec import find_vmec2000_exec
 
 
-_RE_TIME_VALUE = re.compile(r"^\s*([0-9]+)\s+(peak memory footprint|maximum resident set size)\s*$", re.MULTILINE)
+_RE_TIME_VALUE_DARWIN = re.compile(
+    r"^\s*([0-9]+)\s+(peak memory footprint|maximum resident set size)\s*$",
+    re.MULTILINE,
+)
+_RE_TIME_VALUE_LINUX = re.compile(
+    r"^\s*Maximum resident set size \(kbytes\):\s*([0-9]+)\s*$",
+    re.MULTILINE,
+)
 
 
 @dataclass(frozen=True)
@@ -44,10 +52,12 @@ class CaseSpec:
     nfp: int
 
 
-def _child_env() -> dict[str, str]:
+def _child_env(*, jax_platforms: str | None) -> dict[str, str]:
     env = dict(os.environ)
     env.setdefault("VMEC_JAX_SCAN_PRINT", "0")
     env.setdefault("PYTHONUNBUFFERED", "1")
+    if jax_platforms:
+        env["JAX_PLATFORMS"] = str(jax_platforms)
     return env
 
 
@@ -68,12 +78,18 @@ def _parse_time_metrics(stderr: str) -> dict[str, int | None]:
         "peak_footprint_bytes": None,
         "max_rss_bytes": None,
     }
-    for value_s, label in _RE_TIME_VALUE.findall(stderr):
+    for value_s, label in _RE_TIME_VALUE_DARWIN.findall(stderr):
         value = int(value_s)
         if label == "peak memory footprint":
             out["peak_footprint_bytes"] = value
         elif label == "maximum resident set size":
             out["max_rss_bytes"] = value
+    if out["max_rss_bytes"] is None:
+        match = _RE_TIME_VALUE_LINUX.search(stderr)
+        if match is not None:
+            value = int(match.group(1)) * 1024
+            out["max_rss_bytes"] = value
+            out["peak_footprint_bytes"] = value
     return out
 
 
@@ -87,7 +103,10 @@ def _run_timed_subprocess(
     wrapped_cmd = cmd
     time_bin = Path("/usr/bin/time")
     if time_bin.exists():
-        wrapped_cmd = [str(time_bin), "-l", *cmd]
+        if platform.system().lower() == "darwin":
+            wrapped_cmd = [str(time_bin), "-l", *cmd]
+        else:
+            wrapped_cmd = [str(time_bin), "-v", *cmd]
     t0 = time.perf_counter()
     try:
         proc = subprocess.run(
@@ -140,12 +159,13 @@ def _json_tail(text: str) -> dict[str, Any] | None:
     return None
 
 
-def _run_vmec_jax_case(*, case: CaseSpec, timeout_s: float) -> dict[str, Any]:
+def _run_vmec_jax_case(*, case: CaseSpec, timeout_s: float, env: dict[str, str], runner_label: str) -> dict[str, Any]:
     code = r"""
 import json
 import sys
 import time
 from pathlib import Path
+import jax
 from vmec_jax.api import run_fixed_boundary
 
 input_path = Path(sys.argv[1])
@@ -162,6 +182,8 @@ payload = {
     "converged": bool(diag.get("converged", False)),
     "use_scan": bool(diag.get("use_scan", False)),
     "free_boundary": bool(diag.get("free_boundary", False)),
+    "platform": str(jax.default_backend()),
+    "device_kind": str(jax.devices()[0].device_kind) if jax.devices() else "unknown",
 }
 print(json.dumps(payload))
 """
@@ -169,11 +191,12 @@ print(json.dumps(payload))
         cmd=[sys.executable, "-c", code, str(case.input_path)],
         cwd=REPO_ROOT,
         timeout_s=float(timeout_s),
-        env=_child_env(),
+        env=env,
     )
     payload = _json_tail(out["stdout"])
     rec = {
         "backend": "vmec_jax",
+        "runner_label": runner_label,
         "case_id": case.id,
         "returncode": int(out["returncode"]),
         "time_real_s": float(out["time_real_s"]),
@@ -190,13 +213,15 @@ print(json.dumps(payload))
         rec["n_iter"] = int(payload.get("n_iter", -1))
         rec["converged"] = bool(payload.get("converged", False))
         rec["use_scan"] = bool(payload.get("use_scan", False))
+        rec["platform"] = str(payload.get("platform", "unknown"))
+        rec["device_kind"] = str(payload.get("device_kind", "unknown"))
     else:
         rec["runtime_s"] = float(out["time_real_s"])
         rec["ok"] = False
     return rec
 
 
-def _run_vmec2000_case(*, case: CaseSpec, exec_path: Path, timeout_s: float) -> dict[str, Any]:
+def _run_vmec2000_case(*, case: CaseSpec, exec_path: Path, timeout_s: float, env: dict[str, str]) -> dict[str, Any]:
     code = r"""
 import json
 import sys
@@ -219,7 +244,7 @@ print(json.dumps(payload))
         cmd=[sys.executable, "-c", code, str(case.input_path), str(exec_path), str(float(timeout_s))],
         cwd=REPO_ROOT,
         timeout_s=float(timeout_s) + 30.0,
-        env=_child_env(),
+        env=env,
     )
     payload = _json_tail(out["stdout"])
     rec = {
@@ -354,6 +379,18 @@ def main() -> int:
     p.add_argument("--timeout-s", type=float, default=1800.0, help="Timeout per vmec_jax case.")
     p.add_argument("--vmec-timeout-s", type=float, default=1800.0, help="Timeout per VMEC2000 case.")
     p.add_argument(
+        "--jax-platforms",
+        type=str,
+        default="",
+        help="Value to set for JAX_PLATFORMS in vmec_jax child processes (for example 'cpu' or 'cuda,cpu').",
+    )
+    p.add_argument(
+        "--runner-label",
+        type=str,
+        default="default",
+        help="Free-form label stored in vmec_jax records (for example 'cpu' or 'gpu').",
+    )
+    p.add_argument(
         "--outdir",
         type=Path,
         default=REPO_ROOT / "outputs" / f"example_runtime_memory_matrix_{time.strftime('%Y%m%d_%H%M%S')}",
@@ -375,6 +412,7 @@ def main() -> int:
 
     run_vmec_jax = args.backend in ("both", "vmec_jax")
     run_vmec2000 = args.backend in ("both", "vmec2000")
+    child_env = _child_env(jax_platforms=args.jax_platforms.strip() or None)
     vmec_exec = None if args.vmec_exec is None else Path(args.vmec_exec).expanduser().resolve()
     if run_vmec2000 and (vmec_exec is None or not vmec_exec.exists()):
         raise SystemExit("VMEC2000 executable not found. Use --vmec-exec.")
@@ -390,16 +428,26 @@ def main() -> int:
         print(f"[{idx}/{len(cases)}] {case.id} ({kind}, {sym}, lasym={case.lasym})", flush=True)
         results_by_case.setdefault(case.id, {})
         if run_vmec_jax:
-            rec = _run_vmec_jax_case(case=case, timeout_s=float(args.timeout_s))
+            rec = _run_vmec_jax_case(
+                case=case,
+                timeout_s=float(args.timeout_s),
+                env=child_env,
+                runner_label=str(args.runner_label),
+            )
             results.append(rec)
             results_by_case[case.id]["vmec_jax"] = rec
             print(
                 f"  vmec_jax: rc={rec['returncode']} runtime={_format_seconds(float(rec.get('runtime_s', rec['time_real_s'])))} "
-                f"peak={rec.get('peak_footprint_bytes')}",
+                f"peak={rec.get('peak_footprint_bytes')} platform={rec.get('platform', '-')}",
                 flush=True,
             )
         if run_vmec2000:
-            rec = _run_vmec2000_case(case=case, exec_path=vmec_exec, timeout_s=float(args.vmec_timeout_s))
+            rec = _run_vmec2000_case(
+                case=case,
+                exec_path=vmec_exec,
+                timeout_s=float(args.vmec_timeout_s),
+                env=child_env,
+            )
             results.append(rec)
             results_by_case[case.id]["vmec2000"] = rec
             print(
@@ -412,6 +460,8 @@ def main() -> int:
         "cases": [_case_to_json(case) for case in cases],
         "results": results,
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "runner_label": str(args.runner_label),
+        "jax_platforms": str(args.jax_platforms),
     }
     summary_path = outdir / "summary.json"
     summary_path.write_text(json.dumps(summary, indent=2))
