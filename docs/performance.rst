@@ -70,6 +70,14 @@ Controls:
 - ``VMEC_JAX_DYNAMIC_SCAN_ITERS=<int>``: override the probe window
   (defaults to ``10`` on CPU, ``3`` on accelerators).
 
+For quiet accelerator scans, ``vmec-jax`` also increases the default scan chunk
+target and caps each chunk to the remaining iteration budget. This reduces
+host/device launch overhead without changing the in-scan hold semantics.
+
+Controls:
+
+- ``VMEC_JAX_SCAN_CHUNK_SIZE=<int>``: override the chunk target explicitly.
+
 Debug dump env vars are incompatible with scan mode.
 
 If you want an automatic parity probe when using scan, set::
@@ -248,20 +256,27 @@ Recent artifacts from this tool:
 
 Current snapshot highlights:
 
-- Fixed-boundary ``lasym=True`` improved materially after the automatic
-  performance-mode axis inference + accelerator-aware scan probe:
+- Fixed-boundary scan performance on the reference GPU host improved materially
+  after the accelerator-aware scan probe and quiet-scan chunking changes:
 
-  - ``input.up_down_asymmetric_tokamak`` now runs in about ``6.7s`` /
-    ``0.89 GiB`` on the reference CPU host versus VMEC2000 about ``0.74s``.
-  - ``input.basic_non_stellsym_pressure`` runs in about ``29.7s`` /
-    ``3.22 GiB`` on the reference CPU host versus VMEC2000 about ``2.02s``.
-  - ``input.LandremanSenguptaPlunk_section5p3_low_res`` remains a heavy
-    fallback case at about ``46.8s`` / ``4.07 GiB`` versus VMEC2000
-    about ``0.69s``.
-  - On the reference GPU host, the same selector change cut bundled cold-start
-    runtimes to about ``16.9s`` for ``input.up_down_asymmetric_tokamak``,
-    ``71.4s`` for ``input.basic_non_stellsym_pressure``, and ``27.5s`` for
-    ``input.LandremanSenguptaPlunk_section5p3_low_res``.
+  - ``input.circular_tokamak`` now runs in about ``13.8s`` / ``1.97 GiB``.
+  - ``input.LandremanPaul2021_QA_lowres`` now runs in about ``33.9s`` /
+    ``2.66 GiB``.
+  - ``input.up_down_asymmetric_tokamak`` now runs in about ``16.5s`` /
+    ``1.60 GiB``.
+  - ``input.basic_non_stellsym_pressure`` now runs in about ``141.1s`` /
+    ``3.68 GiB``.
+  - ``input.LandremanSenguptaPlunk_section5p3_low_res`` now runs in about
+    ``77.1s`` / ``2.13 GiB``.
+
+- Fixed-boundary ``lasym=True`` on the reference CPU host remains:
+
+  - ``input.up_down_asymmetric_tokamak`` about ``6.7s`` / ``0.89 GiB`` versus
+    VMEC2000 about ``0.74s``.
+  - ``input.basic_non_stellsym_pressure`` about ``29.7s`` / ``3.22 GiB``
+    versus VMEC2000 about ``2.02s``.
+  - ``input.LandremanSenguptaPlunk_section5p3_low_res`` about ``46.8s`` /
+    ``4.07 GiB`` versus VMEC2000 about ``0.69s``.
 
 - Bundled free-boundary cases remain the dominant default-path outliers:
 

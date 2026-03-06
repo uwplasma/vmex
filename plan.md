@@ -760,3 +760,15 @@ Legend:
     (`input.up_down_asymmetric_tokamak`), `71.4s`
     (`input.basic_non_stellsym_pressure`), and `27.5s`
     (`input.LandremanSenguptaPlunk_section5p3_low_res`) on the reference GPU host.
+- Reduced the quiet fixed-boundary GPU scan overhead further by using
+  backend-aware chunk targets and capping chunk lengths to the remaining work:
+  - axisymmetric quiet accelerator scans now default to larger chunks,
+  - 3D quiet accelerator scans now default to moderately larger chunks,
+  - short parity probes no longer burn through hundreds of masked no-op steps.
+- Updated cold-start GPU benchmark points after the chunking change:
+  - `input.circular_tokamak` about `13.8s` / `1.97 GiB`,
+  - `input.LandremanPaul2021_QA_lowres` about `33.9s` / `2.66 GiB`,
+  - `input.up_down_asymmetric_tokamak` about `16.5s` / `1.60 GiB`,
+  - `input.basic_non_stellsym_pressure` about `141.1s` / `3.68 GiB`,
+  - `input.LandremanSenguptaPlunk_section5p3_low_res` about `77.1s` / `2.13 GiB`
+    on the reference GPU host.

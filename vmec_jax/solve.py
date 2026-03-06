@@ -45,6 +45,40 @@ def _hash_array_bytes(a: Any) -> str:
     return h.hexdigest()
 
 
+def _scan_backend_name() -> str:
+    if not has_jax() or jax is None:
+        return "cpu"
+    try:
+        return str(jax.default_backend()).strip().lower() or "cpu"
+    except Exception:
+        return "cpu"
+
+
+def _scan_chunk_settings(
+    *,
+    max_iter_scan: int,
+    nstep_screen: int,
+    need_print: bool,
+    lthreed: bool,
+) -> tuple[int, bool]:
+    chunk_size_env = os.getenv("VMEC_JAX_SCAN_CHUNK_SIZE", "").strip()
+    backend = _scan_backend_name()
+    if chunk_size_env:
+        try:
+            chunk_size = max(1, int(chunk_size_env))
+        except Exception:
+            chunk_size = max(1, int(nstep_screen))
+    elif (backend != "cpu") and (not bool(need_print)):
+        # Quiet accelerator runs benefit from much larger chunks because the
+        # host chunk loop otherwise pays repeated device sync/launch overhead.
+        accel_chunk_target = 400 if bool(lthreed) else 1000
+        chunk_size = max(1, max(int(nstep_screen), min(int(max_iter_scan), int(accel_chunk_target))))
+    else:
+        chunk_size = max(1, int(nstep_screen))
+    cap_to_remaining = (backend != "cpu") and (not bool(need_print))
+    return chunk_size, cap_to_remaining
+
+
 @dataclass(frozen=True)
 class SolveLambdaResult:
     state: VMECState
@@ -7750,14 +7784,12 @@ def solve_fixed_boundary_residual_iter(
             fsq_min_global_j = jnp.asarray(jnp.inf, dtype=dtype)
             early_fallback = bool(scan_fallback_enabled) and (int(cfg.ns) > int(scan_fallback_iters))
             need_print = bool(scan_collect_print)
-            chunk_size_env = os.getenv("VMEC_JAX_SCAN_CHUNK_SIZE", "").strip()
-            if chunk_size_env:
-                try:
-                    chunk_size = max(1, int(chunk_size_env))
-                except Exception:
-                    chunk_size = int(nstep_screen)
-            else:
-                chunk_size = int(nstep_screen)
+            chunk_size, chunk_cap_remaining = _scan_chunk_settings(
+                max_iter_scan=int(max_iter_scan),
+                nstep_screen=int(nstep_screen),
+                need_print=bool(need_print),
+                lthreed=bool(cfg.lthreed),
+            )
             if preflight_iters > 0:
                 if iter_offset_preflight is not None:
                     carry = carry._replace(iter_offset=jnp.asarray(iter_offset_preflight, dtype=jnp.int32))
@@ -7781,8 +7813,12 @@ def solve_fixed_boundary_residual_iter(
                     carry = carry._replace(iter_offset=jnp.asarray(iter_offset0, dtype=jnp.int32))
             while start_idx < int(max_iter_scan):
                 # Fixed-length chunk to avoid retracing for varying tail sizes.
-                # Extra iterations are masked by the in-scan hold condition.
-                chunk_len = int(chunk_size)
+                # On quiet accelerator runs, cap the chunk to the remaining work
+                # so short probe windows do not pay hundreds of masked no-op steps.
+                remaining = int(max_iter_scan) - int(start_idx)
+                if remaining <= 0:
+                    break
+                chunk_len = min(int(chunk_size), int(remaining)) if chunk_cap_remaining else int(chunk_size)
                 it_seq = jnp.arange(start_idx, start_idx + int(chunk_len), dtype=jnp.int32)
                 runner = _get_scan_runner(int(chunk_len))
                 carry, hist_chunk = runner(carry, it_seq)
