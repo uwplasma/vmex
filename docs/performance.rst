@@ -209,6 +209,60 @@ If profiling free-boundary solver-only cost, disable sampling diagnostics:
 
   export VMEC_JAX_FREEB_SAMPLE_EXTERNAL=0
 
+Bundled example runtime/memory matrix (March 2026)
+--------------------------------------------------
+
+For repeatable runtime/memory sweeps across the bundled inputs, use:
+
+.. code-block:: bash
+
+  python tools/diagnostics/example_runtime_memory_matrix.py \
+    --backend both \
+    --vmec-exec /Users/rogeriojorge/local/test/STELLOPT/VMEC2000/Release/xvmec2000
+
+Recent artifacts from this tool:
+
+- ``outputs/example_runtime_memory_matrix_20260306_080658/summary.json``:
+  all bundled fixed-boundary examples.
+- ``outputs/example_runtime_memory_matrix_20260306_083756/summary.json``:
+  bundled free-boundary examples.
+
+Current snapshot highlights:
+
+- Fixed-boundary outliers are currently dominated by large or ``lasym=True``
+  default runs:
+
+  - ``input.up_down_asymmetric_tokamak``:
+    about ``57.8s`` / ``5.05 GiB`` versus VMEC2000 about ``0.80s``.
+  - ``input.n3are_R7.75B5.7_lowres``:
+    about ``158.1s`` / ``6.97 GiB`` versus VMEC2000 about ``9.44s``.
+  - ``input.LandremanSenguptaPlunk_section5p3_low_res``:
+    about ``45.8s`` / ``4.02 GiB`` versus VMEC2000 about ``0.68s``.
+
+- Bundled free-boundary examples remain the heaviest default-path cases:
+
+  - ``input.DIII-D_lasym_false``:
+    about ``402.0s`` / ``7.98 GiB`` versus VMEC2000 about ``13.9s``.
+  - ``input.cth_like_free_bdy``:
+    about ``40.4s`` / ``1.76 GiB`` versus VMEC2000 about ``2.47s``.
+  - ``input.cth_like_free_bdy_lasym_small``:
+    about ``36.9s`` / ``1.54 GiB`` versus VMEC2000 about ``0.62s``.
+
+- The recent free-boundary force-kernel JIT fix materially improved the worst
+  bundled free-boundary ``lasym=True`` case:
+
+  - direct ``run_fixed_boundary("examples/data/input.cth_like_free_bdy_lasym_small")``
+    dropped from about ``71.5s`` to about ``37.8s`` on the same local machine.
+
+- Fixed-boundary ``lasym=True`` still has a large performance opportunity behind
+  the conservative default policy:
+
+  - with ``VMEC_JAX_LASYM_USE_SCAN=1``, ``input.up_down_asymmetric_tokamak``
+    drops from about ``57.8s`` to about ``7.5s``,
+  - but ``VMEC_JAX_SCAN_PARITY_GUARD=1`` currently disables that fast path, so
+    the default remains on the slower non-scan route pending tighter parity
+    evidence.
+
 Experimental tridiagonal solver (scan only)
 -------------------------------------------
 

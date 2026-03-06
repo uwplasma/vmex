@@ -678,17 +678,17 @@ def _maybe_dump_lamcal(*, lam_debug: dict[str, np.ndarray], static, iter_idx: in
     )
 
 
-def _vmec_scale_m1_factors_from_mats(mats: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
+def _vmec_scale_m1_factors_from_mats(mats: dict[str, Any]) -> tuple[Any, Any]:
     """Return VMEC `scale_m1_par` R/Z factors from cached preconditioner data."""
     ard = mats.get("ard_parity")
     brd = mats.get("brd_parity")
     azd = mats.get("azd_parity")
     bzd = mats.get("bzd_parity")
     if ard is not None and brd is not None and azd is not None and bzd is not None:
-        ard_arr = np.asarray(ard, dtype=float)
-        brd_arr = np.asarray(brd, dtype=float)
-        azd_arr = np.asarray(azd, dtype=float)
-        bzd_arr = np.asarray(bzd, dtype=float)
+        ard_arr = jnp.asarray(ard)
+        brd_arr = jnp.asarray(brd)
+        azd_arr = jnp.asarray(azd)
+        bzd_arr = jnp.asarray(bzd)
         if (
             ard_arr.ndim == 2
             and brd_arr.shape == ard_arr.shape
@@ -699,17 +699,17 @@ def _vmec_scale_m1_factors_from_mats(mats: dict[str, Any]) -> tuple[np.ndarray, 
             sr = ard_arr[:, 1] + brd_arr[:, 1]
             sz = azd_arr[:, 1] + bzd_arr[:, 1]
             denom = sr + sz
-            fac_r = np.where(denom != 0.0, sr / denom, 1.0)
-            fac_z = np.where(denom != 0.0, sz / denom, 1.0)
+            fac_r = jnp.where(denom != 0.0, sr / denom, 1.0)
+            fac_z = jnp.where(denom != 0.0, sz / denom, 1.0)
             return fac_r, fac_z
 
-    dr = np.asarray(mats["dr"], dtype=float)
-    dz = np.asarray(mats["dz"], dtype=float)
+    dr = jnp.asarray(mats["dr"])
+    dz = jnp.asarray(mats["dz"])
     sr = -dr[:, 1, 0]
     sz = -dz[:, 1, 0]
     denom = sr + sz
-    fac_r = np.where(denom != 0.0, sr / denom, 1.0)
-    fac_z = np.where(denom != 0.0, sz / denom, 1.0)
+    fac_r = jnp.where(denom != 0.0, sr / denom, 1.0)
+    fac_z = jnp.where(denom != 0.0, sz / denom, 1.0)
     return fac_r, fac_z
 
 

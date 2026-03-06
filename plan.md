@@ -149,6 +149,8 @@ Keep VMEC parity mode, while introducing better robustness, richer outputs, easi
 - Manifest and sweep runner:
   - `/Users/rogeriojorge/local/test/vmec_jax/tools/diagnostics/parity_manifest.toml`
   - `/Users/rogeriojorge/local/test/vmec_jax/tools/diagnostics/parity_sweep_manifest.py`
+- Example runtime/memory sweep:
+  - `/Users/rogeriojorge/local/test/vmec_jax/tools/diagnostics/example_runtime_memory_matrix.py`
 
 ### 3.4 Core docs
 - Main docs index:
@@ -675,3 +677,31 @@ Legend:
   - direct `run_fixed_boundary("examples/data/input.cth_like_free_bdy_lasym_small")`
     fell from about `71.5s` to about `37.8s` on the same local machine and
     iteration count.
+- Added a checked-in bundled example runtime/memory sweep tool:
+  - `tools/diagnostics/example_runtime_memory_matrix.py` benchmarks the default
+    user path against VMEC2000 and records wall time plus `/usr/bin/time -l`
+    peak-memory metrics.
+- Fixed a default fixed-boundary fast-path regression exposed by the new sweep:
+  - `_vmec_scale_m1_factors_from_mats(...)` now works on traced JAX arrays, so
+    `run_fixed_boundary("examples/data/input.circular_tokamak", verbose=False)`
+    no longer crashes in the scan path with `TracerArrayConversionError`.
+- Collected the current bundled example runtime/memory matrix:
+  - fixed-boundary summary:
+    `outputs/example_runtime_memory_matrix_20260306_080658/summary.json`,
+  - bundled free-boundary summary:
+    `outputs/example_runtime_memory_matrix_20260306_083756/summary.json`.
+- Current performance outliers from the bundled example sweep:
+  - fixed-boundary:
+    `input.up_down_asymmetric_tokamak` (~`57.8s`, ~`5.05 GiB`),
+    `input.n3are_R7.75B5.7_lowres` (~`158.1s`, ~`6.97 GiB`),
+    `input.LandremanSenguptaPlunk_section5p3_low_res` (~`45.8s`, ~`4.02 GiB`),
+  - free-boundary:
+    `input.DIII-D_lasym_false` (~`402.0s`, ~`7.98 GiB`),
+    `input.cth_like_free_bdy` (~`40.4s`, ~`1.76 GiB`),
+    `input.cth_like_free_bdy_lasym_small` (~`36.9s`, ~`1.54 GiB`).
+- Identified an important next performance candidate for fixed-boundary
+  `lasym=True`:
+  - forcing `VMEC_JAX_LASYM_USE_SCAN=1` drops
+    `input.up_down_asymmetric_tokamak` from about `57.8s` to about `7.5s`,
+    but the current scan parity guard disables that fast path, so the default
+    remains conservative until the LASYM scan parity evidence is tightened.

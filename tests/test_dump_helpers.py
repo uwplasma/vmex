@@ -155,6 +155,55 @@ def test_vmec_scale_m1_factors_fall_back_to_expanded_diagonals():
     assert np.allclose(fac_z, np.array([0.75, 0.7]))
 
 
+def test_vmec_scale_m1_factors_accept_traced_jax_arrays():
+    jax = pytest.importorskip("jax")
+    import jax.numpy as jnp
+
+    from vmec_jax.solve import _vmec_scale_m1_factors_from_mats
+
+    def _eval(dr, dz, ard, brd, azd, bzd):
+        return _vmec_scale_m1_factors_from_mats(
+            {
+                "dr": dr,
+                "dz": dz,
+                "ard_parity": ard,
+                "brd_parity": brd,
+                "azd_parity": azd,
+                "bzd_parity": bzd,
+            }
+        )
+
+    fn = jax.jit(_eval)
+    fac_r, fac_z = fn(
+        jnp.array(
+            [
+                [[-2.0], [-20.0]],
+                [[-3.0], [-99.0]],
+                [[-4.0], [-40.0]],
+            ],
+            dtype=jnp.float64,
+        ),
+        jnp.array(
+            [
+                [[-6.0], [-60.0]],
+                [[-7.0], [-88.0]],
+                [[-8.0], [-80.0]],
+            ],
+            dtype=jnp.float64,
+        ),
+        jnp.array([[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]], dtype=jnp.float64),
+        jnp.array([[4.0, 40.0], [5.0, 50.0], [6.0, 60.0]], dtype=jnp.float64),
+        jnp.array([[7.0, 70.0], [8.0, 80.0], [9.0, 90.0]], dtype=jnp.float64),
+        jnp.array([[10.0, 100.0], [11.0, 110.0], [12.0, 120.0]], dtype=jnp.float64),
+    )
+
+    sr = np.array([50.0, 70.0, 90.0])
+    sz = np.array([170.0, 190.0, 210.0])
+    denom = sr + sz
+    assert np.allclose(np.asarray(fac_r), sr / denom)
+    assert np.allclose(np.asarray(fac_z), sz / denom)
+
+
 def test_precond_inputs_dump_writes_hidden_kernel_channels(tmp_path, monkeypatch):
     from vmec_jax.solve import _maybe_dump_precond_inputs
 

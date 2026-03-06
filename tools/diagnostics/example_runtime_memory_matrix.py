@@ -1,0 +1,434 @@
+"""Benchmark runtime and memory across bundled vmec_jax examples.
+
+This tool measures the default user path (`run_fixed_boundary(input, verbose=False)`)
+against the local VMEC2000 executable when available. It records wall time,
+backend-reported runtime, and memory signals from `/usr/bin/time -l`.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from vmec_jax.config import load_config
+from vmec_jax.vmec2000_exec import find_vmec2000_exec
+
+
+_RE_TIME_VALUE = re.compile(r"^\s*([0-9]+)\s+(peak memory footprint|maximum resident set size)\s*$", re.MULTILINE)
+
+
+@dataclass(frozen=True)
+class CaseSpec:
+    id: str
+    input_path: Path
+    source: str
+    lfreeb: bool
+    lasym: bool
+    axisymmetric: bool
+    ns: int
+    mpol: int
+    ntor: int
+    nfp: int
+
+
+def _child_env() -> dict[str, str]:
+    env = dict(os.environ)
+    env.setdefault("VMEC_JAX_SCAN_PRINT", "0")
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    return env
+
+
+def _format_seconds(value: float | None) -> str:
+    if value is None:
+        return "-"
+    return f"{value:.2f}s"
+
+
+def _format_ratio(value: float | None) -> str:
+    if value is None:
+        return "-"
+    return f"{value:.2f}x"
+
+
+def _parse_time_metrics(stderr: str) -> dict[str, int | None]:
+    out: dict[str, int | None] = {
+        "peak_footprint_bytes": None,
+        "max_rss_bytes": None,
+    }
+    for value_s, label in _RE_TIME_VALUE.findall(stderr):
+        value = int(value_s)
+        if label == "peak memory footprint":
+            out["peak_footprint_bytes"] = value
+        elif label == "maximum resident set size":
+            out["max_rss_bytes"] = value
+    return out
+
+
+def _run_timed_subprocess(
+    *,
+    cmd: list[str],
+    cwd: Path,
+    timeout_s: float,
+    env: dict[str, str],
+) -> dict[str, Any]:
+    wrapped_cmd = cmd
+    time_bin = Path("/usr/bin/time")
+    if time_bin.exists():
+        wrapped_cmd = [str(time_bin), "-l", *cmd]
+    t0 = time.perf_counter()
+    try:
+        proc = subprocess.run(
+            wrapped_cmd,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=float(timeout_s),
+            check=False,
+            env=env,
+        )
+        dt = time.perf_counter() - t0
+        metrics = _parse_time_metrics(proc.stderr)
+        return {
+            "returncode": int(proc.returncode),
+            "time_real_s": float(dt),
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+            "timed_out": False,
+            **metrics,
+        }
+    except subprocess.TimeoutExpired as exc:
+        dt = time.perf_counter() - t0
+        stdout = exc.stdout if isinstance(exc.stdout, str) else ""
+        stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+        metrics = _parse_time_metrics(stderr)
+        return {
+            "returncode": 124,
+            "time_real_s": float(dt),
+            "stdout": stdout,
+            "stderr": stderr,
+            "timed_out": True,
+            **metrics,
+        }
+
+
+def _json_tail(text: str) -> dict[str, Any] | None:
+    text = text.strip()
+    if not text:
+        return None
+    lines = [line for line in text.splitlines() if line.strip()]
+    for line in reversed(lines):
+        line = line.strip()
+        if not (line.startswith("{") and line.endswith("}")):
+            continue
+        try:
+            return json.loads(line)
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def _run_vmec_jax_case(*, case: CaseSpec, timeout_s: float) -> dict[str, Any]:
+    code = r"""
+import json
+import sys
+import time
+from pathlib import Path
+from vmec_jax.api import run_fixed_boundary
+
+input_path = Path(sys.argv[1])
+t0 = time.perf_counter()
+run = run_fixed_boundary(input_path, verbose=False)
+dt = time.perf_counter() - t0
+res = getattr(run, "result", None)
+diag = {} if res is None else dict(getattr(res, "diagnostics", {}) or {})
+payload = {
+    "backend": "vmec_jax",
+    "runtime_s": float(dt),
+    "ok": bool(res is not None),
+    "n_iter": -1 if res is None else int(getattr(res, "n_iter", -1)),
+    "converged": bool(diag.get("converged", False)),
+    "use_scan": bool(diag.get("use_scan", False)),
+    "free_boundary": bool(diag.get("free_boundary", False)),
+}
+print(json.dumps(payload))
+"""
+    out = _run_timed_subprocess(
+        cmd=[sys.executable, "-c", code, str(case.input_path)],
+        cwd=REPO_ROOT,
+        timeout_s=float(timeout_s),
+        env=_child_env(),
+    )
+    payload = _json_tail(out["stdout"])
+    rec = {
+        "backend": "vmec_jax",
+        "case_id": case.id,
+        "returncode": int(out["returncode"]),
+        "time_real_s": float(out["time_real_s"]),
+        "max_rss_bytes": out["max_rss_bytes"],
+        "peak_footprint_bytes": out["peak_footprint_bytes"],
+        "timed_out": bool(out.get("timed_out", False)),
+        "stdout_tail": "\n".join(out["stdout"].splitlines()[-10:]),
+        "stderr_tail": "\n".join(out["stderr"].splitlines()[-12:]),
+        "child": payload,
+    }
+    if payload is not None:
+        rec["runtime_s"] = float(payload.get("runtime_s", out["time_real_s"]))
+        rec["ok"] = bool(payload.get("ok", False)) and (int(out["returncode"]) == 0)
+        rec["n_iter"] = int(payload.get("n_iter", -1))
+        rec["converged"] = bool(payload.get("converged", False))
+        rec["use_scan"] = bool(payload.get("use_scan", False))
+    else:
+        rec["runtime_s"] = float(out["time_real_s"])
+        rec["ok"] = False
+    return rec
+
+
+def _run_vmec2000_case(*, case: CaseSpec, exec_path: Path, timeout_s: float) -> dict[str, Any]:
+    code = r"""
+import json
+import sys
+from pathlib import Path
+from vmec_jax.vmec2000_exec import run_xvmec2000
+
+input_path = Path(sys.argv[1])
+exec_path = Path(sys.argv[2])
+res = run_xvmec2000(input_path=input_path, exec_path=exec_path, timeout_s=float(sys.argv[3]), keep_workdir=False)
+payload = {
+    "backend": "vmec2000",
+    "runtime_s": float(res.runtime_s),
+    "ok": bool("EXECUTION TERMINATED NORMALLY" in res.stdout),
+    "n_stage": int(len(res.stages)),
+    "has_threed1": bool(res.threed1_path is not None),
+}
+print(json.dumps(payload))
+"""
+    out = _run_timed_subprocess(
+        cmd=[sys.executable, "-c", code, str(case.input_path), str(exec_path), str(float(timeout_s))],
+        cwd=REPO_ROOT,
+        timeout_s=float(timeout_s) + 30.0,
+        env=_child_env(),
+    )
+    payload = _json_tail(out["stdout"])
+    rec = {
+        "backend": "vmec2000",
+        "case_id": case.id,
+        "returncode": int(out["returncode"]),
+        "time_real_s": float(out["time_real_s"]),
+        "max_rss_bytes": out["max_rss_bytes"],
+        "peak_footprint_bytes": out["peak_footprint_bytes"],
+        "timed_out": bool(out.get("timed_out", False)),
+        "stdout_tail": "\n".join(out["stdout"].splitlines()[-10:]),
+        "stderr_tail": "\n".join(out["stderr"].splitlines()[-12:]),
+        "child": payload,
+    }
+    if payload is not None:
+        rec["runtime_s"] = float(payload.get("runtime_s", out["time_real_s"]))
+        rec["ok"] = bool(payload.get("ok", False)) and (int(out["returncode"]) == 0)
+        rec["n_stage"] = int(payload.get("n_stage", -1))
+    else:
+        rec["runtime_s"] = float(out["time_real_s"])
+        rec["ok"] = False
+    return rec
+
+
+def _discover_cases(*, include_external_diiid: bool) -> list[CaseSpec]:
+    cases: list[CaseSpec] = []
+    for input_path in sorted((REPO_ROOT / "examples" / "data").glob("input.*")):
+        cfg, _ = load_config(input_path)
+        cases.append(
+            CaseSpec(
+                id=input_path.name.removeprefix("input."),
+                input_path=input_path.resolve(),
+                source="bundled",
+                lfreeb=bool(cfg.lfreeb),
+                lasym=bool(cfg.lasym),
+                axisymmetric=int(cfg.ntor) == 0,
+                ns=int(cfg.ns),
+                mpol=int(cfg.mpol),
+                ntor=int(cfg.ntor),
+                nfp=int(cfg.nfp),
+            )
+        )
+    if include_external_diiid:
+        for extra in (
+            Path("/Users/rogeriojorge/local/test/STELLOPT/BENCHMARKS/VMEC_TEST/input.DIII-D"),
+            Path("/Users/rogeriojorge/local/test/STELLOPT/BENCHMARKS/VMEC_TEST/input.DIII-D_reset"),
+        ):
+            if not extra.exists():
+                continue
+            cfg, _ = load_config(extra)
+            cases.append(
+                CaseSpec(
+                    id=extra.name.removeprefix("input."),
+                    input_path=extra.resolve(),
+                    source="external",
+                    lfreeb=bool(cfg.lfreeb),
+                    lasym=bool(cfg.lasym),
+                    axisymmetric=int(cfg.ntor) == 0,
+                    ns=int(cfg.ns),
+                    mpol=int(cfg.mpol),
+                    ntor=int(cfg.ntor),
+                    nfp=int(cfg.nfp),
+                )
+            )
+    return cases
+
+
+def _select_cases(cases: list[CaseSpec], *, ids: set[str] | None, kind: str | None) -> list[CaseSpec]:
+    out = []
+    for case in cases:
+        if ids is not None and case.id not in ids:
+            continue
+        if kind == "fixed" and case.lfreeb:
+            continue
+        if kind == "freeb" and not case.lfreeb:
+            continue
+        out.append(case)
+    return out
+
+
+def _case_to_json(case: CaseSpec) -> dict[str, Any]:
+    rec = asdict(case)
+    rec["input_path"] = str(case.input_path)
+    return rec
+
+
+def _case_row(case: CaseSpec, results_by_case: dict[str, dict[str, dict[str, Any]]]) -> str:
+    vmec_jax = results_by_case.get(case.id, {}).get("vmec_jax")
+    vmec2000 = results_by_case.get(case.id, {}).get("vmec2000")
+    rt_jax = None if vmec_jax is None else float(vmec_jax.get("runtime_s", vmec_jax.get("time_real_s", float("nan"))))
+    rt_vmec = None if vmec2000 is None else float(vmec2000.get("runtime_s", vmec2000.get("time_real_s", float("nan"))))
+    ratio = None
+    if rt_jax is not None and rt_vmec is not None and rt_vmec > 0.0:
+        ratio = rt_jax / rt_vmec
+    mem_ratio = None
+    if vmec_jax is not None and vmec2000 is not None:
+        mem_jax = vmec_jax.get("peak_footprint_bytes")
+        mem_vmec = vmec2000.get("peak_footprint_bytes")
+        if isinstance(mem_jax, int) and isinstance(mem_vmec, int) and mem_vmec > 0:
+            mem_ratio = float(mem_jax) / float(mem_vmec)
+    kind = "freeb" if case.lfreeb else "fixed"
+    sym = "axisym" if case.axisymmetric else "nonaxis"
+    lasym = "lasym" if case.lasym else "sym"
+    return (
+        f"{case.id:38s}  {kind:5s}  {sym:7s}  {lasym:5s}  "
+        f"{_format_seconds(rt_jax):>8s}  {_format_seconds(rt_vmec):>8s}  "
+        f"{_format_ratio(ratio):>7s}  {_format_ratio(mem_ratio):>7s}"
+    )
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--ids", type=str, default="", help="Comma-separated case ids to run.")
+    p.add_argument("--kind", choices=("fixed", "freeb"), default=None, help="Filter to fixed or free-boundary cases.")
+    p.add_argument(
+        "--backend",
+        choices=("both", "vmec_jax", "vmec2000"),
+        default="both",
+        help="Backends to benchmark.",
+    )
+    p.add_argument(
+        "--include-external-diiid",
+        action="store_true",
+        help="Include external DIII-D and DIII-D_reset benchmark cases.",
+    )
+    p.add_argument(
+        "--vmec-exec",
+        type=Path,
+        default=find_vmec2000_exec(root=REPO_ROOT.parent),
+        help="Path to xvmec2000.",
+    )
+    p.add_argument("--timeout-s", type=float, default=1800.0, help="Timeout per vmec_jax case.")
+    p.add_argument("--vmec-timeout-s", type=float, default=1800.0, help="Timeout per VMEC2000 case.")
+    p.add_argument(
+        "--outdir",
+        type=Path,
+        default=REPO_ROOT / "outputs" / f"example_runtime_memory_matrix_{time.strftime('%Y%m%d_%H%M%S')}",
+        help="Directory for summary artifacts.",
+    )
+    args = p.parse_args()
+
+    ids = {tok.strip() for tok in args.ids.split(",") if tok.strip()} or None
+    cases = _discover_cases(include_external_diiid=bool(args.include_external_diiid))
+    cases = _select_cases(cases, ids=ids, kind=args.kind)
+    if not cases:
+        raise SystemExit("No cases selected.")
+
+    outdir = args.outdir.resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    results: list[dict[str, Any]] = []
+    results_by_case: dict[str, dict[str, dict[str, Any]]] = {}
+
+    run_vmec_jax = args.backend in ("both", "vmec_jax")
+    run_vmec2000 = args.backend in ("both", "vmec2000")
+    vmec_exec = None if args.vmec_exec is None else Path(args.vmec_exec).expanduser().resolve()
+    if run_vmec2000 and (vmec_exec is None or not vmec_exec.exists()):
+        raise SystemExit("VMEC2000 executable not found. Use --vmec-exec.")
+
+    print(f"selected_cases={len(cases)}")
+    print(f"outdir={outdir}")
+    if vmec_exec is not None:
+        print(f"vmec_exec={vmec_exec}")
+
+    for idx, case in enumerate(cases, start=1):
+        kind = "freeb" if case.lfreeb else "fixed"
+        sym = "axisym" if case.axisymmetric else "nonaxis"
+        print(f"[{idx}/{len(cases)}] {case.id} ({kind}, {sym}, lasym={case.lasym})", flush=True)
+        results_by_case.setdefault(case.id, {})
+        if run_vmec_jax:
+            rec = _run_vmec_jax_case(case=case, timeout_s=float(args.timeout_s))
+            results.append(rec)
+            results_by_case[case.id]["vmec_jax"] = rec
+            print(
+                f"  vmec_jax: rc={rec['returncode']} runtime={_format_seconds(float(rec.get('runtime_s', rec['time_real_s'])))} "
+                f"peak={rec.get('peak_footprint_bytes')}",
+                flush=True,
+            )
+        if run_vmec2000:
+            rec = _run_vmec2000_case(case=case, exec_path=vmec_exec, timeout_s=float(args.vmec_timeout_s))
+            results.append(rec)
+            results_by_case[case.id]["vmec2000"] = rec
+            print(
+                f"  vmec2000: rc={rec['returncode']} runtime={_format_seconds(float(rec.get('runtime_s', rec['time_real_s'])))} "
+                f"peak={rec.get('peak_footprint_bytes')}",
+                flush=True,
+            )
+
+    summary = {
+        "cases": [_case_to_json(case) for case in cases],
+        "results": results,
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    summary_path = outdir / "summary.json"
+    summary_path.write_text(json.dumps(summary, indent=2))
+
+    rows = [
+        "case                                   kind   topo     sym    vmec_jax  vmec2000    speed      mem",
+        "------------------------------------------------------------------------------------------------------",
+    ]
+    rows.extend(_case_row(case, results_by_case) for case in cases)
+    table = "\n".join(rows)
+    table_path = outdir / "summary.txt"
+    table_path.write_text(table + "\n")
+
+    print(f"summary={summary_path}")
+    print(table)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
