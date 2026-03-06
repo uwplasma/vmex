@@ -1,8 +1,8 @@
 """Benchmark runtime and memory across bundled vmec_jax examples.
 
 This tool measures the default user path (`run_fixed_boundary(input, verbose=False)`)
-against the local VMEC2000 executable when available. It records wall time,
-backend-reported runtime, and memory signals from `/usr/bin/time -l`.
+against a VMEC2000 executable when available. It records wall time,
+backend-reported runtime, and memory signals from `/usr/bin/time -l/-v`.
 """
 
 from __future__ import annotations
@@ -288,10 +288,15 @@ def _discover_cases(*, include_external_diiid: bool) -> list[CaseSpec]:
             )
         )
     if include_external_diiid:
-        for extra in (
-            Path("/Users/rogeriojorge/local/test/STELLOPT/BENCHMARKS/VMEC_TEST/input.DIII-D"),
-            Path("/Users/rogeriojorge/local/test/STELLOPT/BENCHMARKS/VMEC_TEST/input.DIII-D_reset"),
-        ):
+        external_env = os.environ.get("VMEC_JAX_EXTERNAL_DIIID_INPUTS", "").strip()
+        if external_env:
+            extras = [Path(tok).expanduser() for tok in external_env.split(os.pathsep) if tok.strip()]
+        else:
+            extras = [
+                REPO_ROOT.parent / "STELLOPT" / "BENCHMARKS" / "VMEC_TEST" / "input.DIII-D",
+                REPO_ROOT.parent / "STELLOPT" / "BENCHMARKS" / "VMEC_TEST" / "input.DIII-D_reset",
+            ]
+        for extra in extras:
             if not extra.exists():
                 continue
             cfg, _ = load_config(extra)
@@ -368,7 +373,7 @@ def main() -> int:
     p.add_argument(
         "--include-external-diiid",
         action="store_true",
-        help="Include external DIII-D and DIII-D_reset benchmark cases.",
+        help="Include external DIII-D benchmark inputs from VMEC_JAX_EXTERNAL_DIIID_INPUTS or a sibling STELLOPT checkout.",
     )
     p.add_argument(
         "--vmec-exec",

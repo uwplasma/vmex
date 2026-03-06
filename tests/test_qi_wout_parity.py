@@ -7,6 +7,8 @@ import subprocess
 
 import pytest
 
+from vmec_jax.vmec2000_exec import find_vmec2000_exec
+
 
 def _parse_metric(text: str, name: str) -> float:
     pat = re.compile(rf"\s+{re.escape(name)}: max_abs=[0-9.Ee+-]+ max_rel=([0-9.Ee+-]+)")
@@ -26,13 +28,9 @@ def test_qi_wout_parity_ns35_ns111():
     if not input_path.exists():
         pytest.skip("Missing examples/data/input.QI_nfp2")
 
-    vmec_exe = Path(
-        os.getenv(
-            "VMEC2000_EXE",
-            "/Users/rogeriojorge/local/test/STELLOPT/VMEC2000/Release/xvmec2000",
-        )
-    )
-    if not vmec_exe.exists():
+    vmec_exe_env = os.getenv("VMEC2000_EXE", "")
+    vmec_exe = Path(vmec_exe_env) if vmec_exe_env else find_vmec2000_exec(root=root.parent)
+    if vmec_exe is None or not vmec_exe.exists():
         pytest.skip(f"Missing VMEC2000 executable: {vmec_exe}")
 
     cmp_script = root / "tools" / "diagnostics" / "vmec2000_exec_stage_trace_compare.py"

@@ -218,16 +218,16 @@ For repeatable runtime/memory sweeps across the bundled inputs, use:
 
   python tools/diagnostics/example_runtime_memory_matrix.py \
     --backend both \
-    --vmec-exec /Users/rogeriojorge/local/test/STELLOPT/VMEC2000/Release/xvmec2000
+    --vmec-exec /path/to/xvmec2000
 
 Recent artifacts from this tool:
 
 - ``outputs/example_runtime_memory_matrix_cpu_20260306/summary.json``:
-  all bundled examples on the local CPU, including VMEC2000 reference timings.
+  all bundled examples on a reference CPU host, including VMEC2000 timings.
 - ``outputs/example_runtime_memory_matrix_gpu_20260306_summary.json``:
-  all bundled examples on the ``office`` GPU host (CUDA JAX).
+  all bundled examples on a reference CUDA host (CUDA JAX).
 - ``outputs/example_runtime_memory_matrix_gpu_freeb_20260306_rerun_summary.json``:
-  corrected GPU rerun for the bundled free-boundary cases after staging local
+  corrected GPU rerun for the bundled free-boundary cases after staging bundled
   ``mgrid`` files in the benchmark clone.
 
 Current snapshot highlights:
@@ -236,9 +236,9 @@ Current snapshot highlights:
   performance-mode axis inference + warmed scan probe:
 
   - ``input.up_down_asymmetric_tokamak`` now runs in about ``6.7s`` /
-    ``0.89 GiB`` on the local CPU versus VMEC2000 about ``0.74s``.
+    ``0.89 GiB`` on the reference CPU host versus VMEC2000 about ``0.74s``.
   - ``input.basic_non_stellsym_pressure`` runs in about ``29.7s`` /
-    ``3.22 GiB`` on the local CPU versus VMEC2000 about ``2.02s``.
+    ``3.22 GiB`` on the reference CPU host versus VMEC2000 about ``2.02s``.
   - ``input.LandremanSenguptaPlunk_section5p3_low_res`` remains a heavy
     fallback case at about ``46.8s`` / ``4.07 GiB`` versus VMEC2000
     about ``0.69s``.
@@ -246,22 +246,22 @@ Current snapshot highlights:
 - Bundled free-boundary cases remain the dominant default-path outliers:
 
   - ``input.DIII-D_lasym_false``:
-    about ``428.2s`` / ``7.36 GiB`` on the local CPU,
-    about ``1602.3s`` / ``6.23 GiB`` on the GPU host,
+    about ``428.2s`` / ``7.36 GiB`` on the reference CPU host,
+    about ``1602.3s`` / ``6.23 GiB`` on the reference GPU host,
     versus VMEC2000 about ``14.4s``.
   - ``input.cth_like_free_bdy``:
-    about ``41.8s`` / ``1.64 GiB`` on the local CPU,
-    about ``155.8s`` / ``2.30 GiB`` on the GPU host,
+    about ``41.8s`` / ``1.64 GiB`` on the reference CPU host,
+    about ``155.8s`` / ``2.30 GiB`` on the reference GPU host,
     versus VMEC2000 about ``2.48s``.
   - ``input.cth_like_free_bdy_lasym_small``:
-    about ``37.6s`` / ``1.47 GiB`` on the local CPU,
-    about ``103.5s`` / ``1.97 GiB`` on the GPU host,
+    about ``37.6s`` / ``1.47 GiB`` on the reference CPU host,
+    about ``103.5s`` / ``1.97 GiB`` on the reference GPU host,
     versus VMEC2000 about ``0.63s``.
 
 - The current GPU path is not yet a universal speedup:
 
   - ``input.n3are_R7.75B5.7_lowres`` is about ``160.1s`` on the local CPU but
-    about ``710.5s`` on the GPU host.
+    about ``710.5s`` on the reference GPU host.
   - ``input.LandremanPaul2021_QA_lowres`` and
     ``input.LandremanPaul2021_QA_lowres1`` are already faster than VMEC2000 on
     the local CPU, but slower on the current GPU stack.

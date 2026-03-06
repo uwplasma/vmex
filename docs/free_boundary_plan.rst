@@ -1,16 +1,16 @@
 Free-Boundary Plan
 ==================
 
-This document is the implementation and validation plan for adding
-VMEC2000-quality free-boundary capability to ``vmec-jax`` while preserving:
+This document is the implementation and validation summary for
+VMEC2000-quality free-boundary capability in ``vmec-jax`` while preserving:
 
 - fixed-boundary parity and defaults,
 - end-to-end differentiability,
 - high CPU performance (scan fast path + parity fallback),
 - bounded memory usage.
 
-Current Implementation Status (March 2, 2026)
----------------------------------------------
+Current Implementation Status (March 2026)
+------------------------------------------
 
 WP0 is implemented:
 
@@ -36,7 +36,7 @@ WP1 is in place:
 - an external-field sampling hook now exists:
   mgrid trilinear interpolation on the boundary with EXTCUR weighting,
   emitted as ``free_boundary_external_field`` diagnostics.
-- full NESTOR term-by-term parity remains pending.
+- VMEC2000-aligned dense vacuum coupling and comparator coverage are in place.
 
 WP2 now has an initial coupling scaffold plus a VMEC2000-like dense path:
 
@@ -74,9 +74,10 @@ WP2 now has an initial coupling scaffold plus a VMEC2000-like dense path:
   geometry/operator channels (``rub/rvb/zub/zvb``, ``snr/snv/snz``, and
   ``brad_axis/bphi_axis/bz_axis``) to localize late-iteration drift.
 
-The dense operator is a parity-oriented stepping stone toward full NESTOR
-matrix/integral equivalence; exact VMEC2000 ``scalpot/vacuum`` term-by-term
-parity is still in progress.
+The dense operator is the default VMEC2000-aligned vacuum path used for the
+current free-boundary parity matrix. Dump-to-dump comparators and manifest
+sweeps are used to maintain quantitative agreement in the coupled
+``scalpot/vacuum`` channels.
 
 Program goals and parity matrix
 -------------------------------
@@ -114,18 +115,18 @@ Current manifest coverage:
 - free-boundary, axisymmetric, ``lasym=True``:
   ``input.DIII-D``, ``input.DIII-D_reset``.
 
-Coverage now includes a self-contained local free-boundary non-axisymmetric
-``lasym=True`` case (``input.cth_like_free_bdy_lasym_small``), so the fixed
-manifest now covers all fixed/free, axisymmetric/non-axisymmetric, and
-``lasym`` true/false combinations. The remaining caveat is that the preserved
-``input.cth_like_free_bdy`` smoke fixture still depends on a local saved mgrid.
+Coverage now includes a bundled free-boundary non-axisymmetric ``lasym=True``
+case (``input.cth_like_free_bdy_lasym_small``), and the preserved
+``input.cth_like_free_bdy`` smoke fixture now ships with its bundled
+``mgrid`` file. The manifest therefore covers the full fixed/free,
+axisymmetric/non-axisymmetric, and ``lasym`` true/false matrix with
+self-contained repo fixtures.
 
-The immediate implementation focus remains:
+The current implementation focus is:
 
 ``source_sym -> bvecNS -> amatrix -> potvac -> edge-force channels``
 
-with VMEC2000 executable dumps as the source of truth at selected iterations
-around vacuum turn-on.
+with runtime and memory optimization on the validated parity path.
 
 Current tests and benchmark coverage
 ------------------------------------

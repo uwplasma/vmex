@@ -1,4 +1,4 @@
-"""vmec_jax: a JAX port of VMEC2000 (work in progress)."""
+"""vmec_jax: a JAX implementation of VMEC2000 for fixed and free-boundary equilibria."""
 
 from . import api
 from .namelist import read_indata, InData

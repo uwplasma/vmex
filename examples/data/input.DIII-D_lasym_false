@@ -11,7 +11,7 @@
   NITER = 20000
   NSTEP =  200
   NVACSKIP = 6
-  MGRID_FILE = '/Users/rogeriojorge/local/test/STELLOPT/BENCHMARKS/VMEC_TEST/mgrid_d3d_ef.nc'
+  MGRID_FILE = 'mgrid_d3d_ef.nc'
   EXTCUR(01) =  -1.370985E+03  EXTCUR(02) =  -1.609154E+03
   EXTCUR(03) =  -2.751331E+03  EXTCUR(04) =  -2.524384E+03
   EXTCUR(05) =  -3.435372E+03  EXTCUR(06) =  -3.466123E+03

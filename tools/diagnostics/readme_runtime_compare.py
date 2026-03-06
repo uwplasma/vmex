@@ -168,7 +168,7 @@ def _write_figure(rows: list[dict[str, Any]], outpath: Path) -> None:
         sortable.append((runtime_ratio, row["id"], row))
     ordered_rows = [row for _, _, row in sorted(sortable, key=lambda item: (item[0], item[1]))]
 
-    fig, axes = plt.subplots(1, 2, figsize=(13.0, max(8.0, 0.36 * len(ordered_rows) + 1.2)), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(13.6, max(8.4, 0.36 * len(ordered_rows) + 1.4)), sharey=True)
     _draw_ratio_panel(
         axes[0],
         rows=ordered_rows,
@@ -186,9 +186,9 @@ def _write_figure(rows: list[dict[str, Any]], outpath: Path) -> None:
         xlabel="ratio (log scale)",
     )
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", ncol=2, frameon=False)
-    fig.suptitle("Bundled example benchmarks: vmec_jax vs VMEC2000", y=0.995)
-    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.97))
+    fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, 0.015), ncol=2, frameon=False)
+    fig.suptitle("Bundled Example Benchmarks: vmec_jax vs VMEC2000", y=0.985)
+    fig.tight_layout(rect=(0.0, 0.05, 1.0, 0.95))
     fig.savefig(outpath, dpi=220)
     plt.close(fig)
 

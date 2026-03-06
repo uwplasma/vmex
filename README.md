@@ -1,6 +1,7 @@
 # vmec-jax
 
-Laptop-friendly, end-to-end differentiable (JAX) rewrite of **VMEC2000**, focusing on **fixed-boundary** first.
+End-to-end differentiable JAX implementation of **VMEC2000** for fixed-boundary
+and free-boundary ideal-MHD equilibria.
 
 <table>
   <tr>
@@ -45,18 +46,18 @@ Laptop-friendly, end-to-end differentiable (JAX) rewrite of **VMEC2000**, focusi
     <td colspan="2"><img src="docs/_static/figures/readme_runtime_compare.png" width="860" /></td>
   </tr>
   <tr>
-    <td align="center" colspan="2">Bundled-example runtime and memory ratios vs VMEC2000 (local CPU and office GPU)</td>
+    <td align="center" colspan="2">Bundled-example runtime and memory ratios vs VMEC2000 on reference CPU and GPU hosts</td>
   </tr>
 </table>
 
 ## What it is
 
-- Laptop-friendly, end-to-end differentiable (JAX) rewrite of VMEC2000 (fixed boundary first).
-- Fixed-boundary parity solver for axisymmetric and non-axisymmetric cases, including `lasym=False` and `lasym=True`.
-- Current fixed-boundary parity target is met at `rtol=1e-3` (with axis masking for cancellation-limited near-axis channels).
+- VMEC2000-parity solver for fixed-boundary and free-boundary equilibria.
+- Supports axisymmetric and non-axisymmetric configurations, with `lasym=False` and `lasym=True` for stellarator symmetry/asymmetry and up-down symmetry/asymmetry.
+- Default CLI path is the same across all supported branches: `vmec_jax input.name`.
+- `wout_*.nc` outputs, iteration diagnostics, and manifest-based parity sweeps are built around VMEC2000-compatible workflows.
 - JAX-native kernels for geometry, transforms, and residual assembly.
-- Free-boundary WP0/WP1 + WP2 scaffold is implemented (typed config/state, mgrid validation + interpolation, VMEC-style `ivac/ivacskip`, boundary `Bu/Bv/B^u/B^v/bsqvac`, edge `bsq` coupling, and dual NESTOR models: VMEC2000-like dense integral assembly + fast spectral fallback).
-- Next major milestone: free-boundary parity.
+- Differentiable optimization workflows are available through the Python API and bundled examples.
 
 ## Quickstart
 
@@ -123,10 +124,10 @@ host/device traffic. You can override this with:
 export VMEC_JAX_SCAN_MINIMAL=0  # keep full scan diagnostics even when quiet
 ```
 
-## When to use vmec_jax vs VMEC2000
+## When to use vmec_jax
 
-- Use `vmec_jax` for autodiff, rapid parameter sweeps, and JAX-native pipelines.
-- Use VMEC2000 when you need mature free-boundary workflows today.
+- Use `vmec_jax` for fixed-boundary and free-boundary production runs, autodiff, rapid parameter sweeps, and JAX-native optimization workflows.
+- Use the VMEC2000 executable as an optional parity reference or regression oracle, not as an operational requirement.
 
 ## Reproduce figures
 
@@ -143,42 +144,26 @@ python tools/diagnostics/example_runtime_memory_matrix.py \
   --backend both \
   --runner-label cpu \
   --jax-platforms cpu \
-  --vmec-exec /Users/rogeriojorge/local/test/STELLOPT/VMEC2000/Release/xvmec2000 \
-  --outdir outputs/example_runtime_memory_matrix_cpu_20260306
+  --vmec-exec /path/to/xvmec2000 \
+  --outdir outputs/example_runtime_memory_matrix_cpu
 
-ssh office 'source /home/rjorge/venvs/vmec_jax_gpu_bench/bin/activate && \
-  cd /home/rjorge/vmec_jax_gpu_bench && \
-  python tools/diagnostics/example_runtime_memory_matrix.py \
-    --backend vmec_jax \
-    --runner-label gpu \
-    --jax-platforms cuda,cpu \
-    --outdir /home/rjorge/vmec_jax_gpu_bench/outputs/example_runtime_memory_matrix_gpu_20260306'
-
-ssh office 'source /home/rjorge/venvs/vmec_jax_gpu_bench/bin/activate && \
-  cd /home/rjorge/vmec_jax_gpu_bench && \
-  CUDA_VISIBLE_DEVICES=1 python tools/diagnostics/example_runtime_memory_matrix.py \
-    --ids DIII-D_lasym_false,cth_like_free_bdy,cth_like_free_bdy_lasym_small \
-    --backend vmec_jax \
-    --runner-label gpu \
-    --jax-platforms cuda,cpu \
-    --outdir /home/rjorge/vmec_jax_gpu_bench/outputs/example_runtime_memory_matrix_gpu_freeb_20260306_rerun'
-
-scp office:/home/rjorge/vmec_jax_gpu_bench/outputs/example_runtime_memory_matrix_gpu_20260306/summary.json \
-  outputs/example_runtime_memory_matrix_gpu_20260306_summary.json
-scp office:/home/rjorge/vmec_jax_gpu_bench/outputs/example_runtime_memory_matrix_gpu_freeb_20260306_rerun/summary.json \
-  outputs/example_runtime_memory_matrix_gpu_freeb_20260306_rerun_summary.json
+# Run the same benchmark on a CUDA-capable machine with JAX GPU support.
+python tools/diagnostics/example_runtime_memory_matrix.py \
+  --backend vmec_jax \
+  --runner-label gpu \
+  --jax-platforms cuda,cpu \
+  --outdir outputs/example_runtime_memory_matrix_gpu
 
 python tools/diagnostics/readme_runtime_compare.py \
-  --cpu-summary outputs/example_runtime_memory_matrix_cpu_20260306/summary.json \
-  --gpu-summary outputs/example_runtime_memory_matrix_gpu_20260306_summary.json \
-    outputs/example_runtime_memory_matrix_gpu_freeb_20260306_rerun_summary.json \
+  --cpu-summary outputs/example_runtime_memory_matrix_cpu/summary.json \
+  --gpu-summary outputs/example_runtime_memory_matrix_gpu/summary.json \
   --outdir docs/_static/figures \
-  --table-out outputs/readme_runtime_table_20260306.md
+  --table-out outputs/readme_runtime_table.md
 ```
 
-The README GPU rows were measured on the `office` benchmark clone with JAX CUDA
-enabled. The free-boundary GPU rows used local copies of `mgrid_d3d_ef.nc` and
-`mgrid_cth_like.nc` with the cloned input files rewritten to those local paths.
+The exact numbers in the checked-in benchmark table will vary by machine. Use
+the commands above to regenerate a CPU summary and a GPU summary on your own
+reference hosts.
 
 ## Documentation
 
@@ -192,8 +177,8 @@ enabled. The free-boundary GPU rows used local copies of `mgrid_d3d_ef.nc` and
 ## Bundled Example Benchmarks
 
 Measured on 2026-03-06 using the default `run_fixed_boundary(input, verbose=False)`
-path. `VMEC2000` and `vmec_jax` CPU were run locally on an Apple M2 (8 GiB RAM).
-`vmec_jax` GPU was run on `office` with dual RTX A4000 GPUs.
+path. This checked-in snapshot used a reference CPU host (Apple M2, 8 GiB RAM)
+and a reference CUDA host (dual RTX A4000 GPUs). Exact results vary by machine.
 
 | Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax CPU runtime | vmec_jax CPU memory | vmec_jax GPU runtime | vmec_jax GPU memory |
 | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |

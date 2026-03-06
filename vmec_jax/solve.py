@@ -3787,9 +3787,8 @@ def solve_fixed_boundary_residual_iter(
             mgrid_metadata=getattr(static, "mgrid_metadata", None),
             free_boundary_extcur=getattr(static, "free_boundary_extcur", None),
         )
-    # Free-boundary control + coupling scaffold (WP2):
+    # Free-boundary control + coupling path:
     # VMEC-style ivac/ivacskip cadence with edge bsqvac coupling.
-    # Exact VMEC2000 NESTOR term-by-term parity is still in progress.
     free_boundary_enabled = bool(getattr(cfg, "lfreeb", False))
     freeb_nvacskip = max(1, int(getattr(cfg, "nvacskip", int(getattr(cfg, "nfp", 1)))))
     freeb_nvskip0 = max(1, freeb_nvacskip)

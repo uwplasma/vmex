@@ -46,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="vmec_jax",
         description=(
-            "Run vmec_jax in a VMEC2000-like fixed-boundary mode. "
+            "Run vmec_jax in a VMEC2000-like equilibrium mode. "
             "Provide a single input.* file and a wout_*.nc will be written."
         ),
     )
