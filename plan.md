@@ -207,22 +207,29 @@ Keep VMEC parity mode, while introducing better robustness, richer outputs, easi
 - Scan/non-scan auto-selection: active; must keep correctness as first priority and avoid hardcoded case IDs.
 
 ### 5.2 Free-boundary status
-- Non-axisymmetric free-boundary channels: strong parity on CTH-like cases when
-  the input fixture is available locally.
+- Non-axisymmetric free-boundary channels: strong parity on the preserved
+  CTH-like `lasym=False` fixture now tracked via
+  `examples/data/input.cth_like_free_bdy`.
 - Axisymmetric `lasym=True` DIII-D cases:
   - transient mismatch around turn-on window (iter ~80) at ~1e-2 scale for source/potvac channels,
   - post-turn-on iterations converge back to near machine precision in compared channels.
 - Axisymmetric `lasym=False` free-boundary parity:
-  - manual DIII-D symmetric spot-check is tight at iter 80
+  - manifest case `examples/data/input.DIII-D_lasym_false` is tight at iter 80
     (`source_sym ~8.4e-3`, `bvec_nonsing_fouri ~8.4e-3`,
     `amatrix ~1.7e-3`, `potvac ~9.4e-3`),
   - iter 100+ returns to near machine precision,
-  - no manifest case yet.
+  - targeted manifest rerun passes at iter 80/100/120.
 - Current free-boundary matrix gaps are split between:
   - real numerical drift (`input.cth_like_free_bdy_lasym_small` potvac/runtime at iter 100),
-  - missing local fixture (`freeb_nonaxis_lasym_false_cth_like` manifest path),
-  - missing VMEC dump artifact (`input.stellcopt` emits no scalpot dump in current sweep).
-- Remaining work: tighten turn-on-window drift by channel-level alignment in geometry-normal contributions, restore self-contained fixture coverage, and remove dump-generation blockers from the manifest path.
+  - coarse but valid post-turn-on parity on `input.stellcopt`
+    (`source_sym ~2.7e-1`, `bvec_nonsing_fouri ~2.8e-1`,
+    `amatrix ~1.2e-1`, `potvac ~3.6e-1` at iter 80),
+  - remaining preserved-mgrid dependency for the local CTH-like `lasym=False`
+    smoke fixture.
+- Remaining work: tighten DIII-D turn-on-window drift by channel-level
+  alignment in the preconditioner path, improve the non-axisymmetric
+  `lasym=True` runtime/parity outlier, and replace preserved local free-boundary
+  fixtures with distributable inputs where practical.
 
 ### 5.3 Practical parity policy
 - Compare with masks where numerically justified:
@@ -243,7 +250,7 @@ pytest -q
 ### 6.2 Docs build (CI-equivalent locale settings)
 ```bash
 cd /Users/rogeriojorge/local/test/vmec_jax
-LC_ALL=C LANG=C python -m sphinx -W -j auto -b html docs docs/_build/html
+LC_ALL=C LANG=C SPHINX_FAST=1 python -m sphinx -W -j auto -b html docs docs/_build/html
 ```
 
 ### 6.3 Fixed-boundary parity compare
@@ -397,9 +404,10 @@ Legend:
 - [x] Axisymmetric `lasym=True` DIII-D parity is tight post turn-on.
 - [-] Reduce DIII-D turn-on-window drift around iter ~72-80 (`gsource/source_sym/bvec/potvac`).
 - [x] Add bexn decomposition diagnostics to localize turn-on drift.
-- [-] Add an automated axisymmetric `lasym=False` free-boundary case to the manifest (manual DIII-D symmetric spot-check is strong).
-- [-] Restore a self-contained non-axisymmetric `lasym=False` free-boundary smoke fixture in the current checkout.
-- [-] Diagnose `input.stellcopt` missing VMEC scalpot dumps before treating it as a numerical parity regression.
+- [x] Add an automated axisymmetric `lasym=False` free-boundary case to the manifest.
+- [-] Keep a stable non-axisymmetric `lasym=False` free-boundary smoke fixture in the current checkout without depending on preserved local mgrid artifacts.
+- [x] Diagnose `input.stellcopt` missing VMEC scalpot dumps before treating it as a numerical parity regression.
+- [-] Tighten post-turn-on `input.stellcopt` parity now that iter-80 comparison is valid.
 - [ ] Extend free-boundary parity matrix to additional non-axisymmetric `lasym=True` real-world cases beyond local synthetic case.
 
 ### 10.4 Differentiability and optimization UX
@@ -419,6 +427,7 @@ Legend:
 ### 10.6 Documentation and maintainability
 - [x] Keep free-boundary plan updated with parity findings.
 - [x] Keep manifest thresholds quantitative and per-case.
+- [x] Restore CI-equivalent docs build after RST heading/indentation cleanup.
 - [-] Keep README concise; move deep detail to docs.
 - [ ] Add a dedicated docs page for scan vs non-scan equations/workflow with VMEC2000 mapping.
 - [ ] Add docs page for free-boundary turn-on-window diagnostics and interpretation.
@@ -470,8 +479,8 @@ Legend:
 2. **Free-boundary LASYM non-axisymmetric expansion**
    - Add at least one additional finite-pressure non-axisymmetric `lasym=True` free-boundary case to manifest.
    - Set realistic thresholds and add to smoke/full tier as appropriate.
-   - Restore a self-contained `lasym=False` CTH-like fixture in-repo or repoint the smoke case to a stable local source.
-   - Understand why `input.stellcopt` does not emit VMEC scalpot dumps in the current comparator flow.
+   - Replace the preserved-local `lasym=False` CTH-like mgrid dependency with a distributable fixture or documented stable source.
+   - Tighten `input.stellcopt` post-turn-on parity now that the manifest compares iter 80 instead of pre-turn-on iterations.
 
 3. **Default behavior hardening**
    - Ensure `vmec_jax input.name` is robust without manual env settings.
@@ -525,3 +534,23 @@ Legend:
   - fixed-boundary default runs are currently about `26x`-`50x` slower than VMEC2000 and use about `6x`-`12x` more RSS,
   - free-boundary default runs are currently about `23x`-`98x` slower and use about `12x`-`16x` more RSS,
   - worst observed case in this matrix is the local non-axisymmetric `lasym=True` free-boundary solve (`~62s`, `~1.74 GiB` RSS vs VMEC2000 `~0.63s`, `~110 MiB` RSS).
+- Fixed the current RST heading/indentation issues and revalidated the CI-equivalent docs build:
+  - `LC_ALL=C LANG=C SPHINX_FAST=1 python -m sphinx -W -j auto -b html docs docs/_build/html` now passes.
+- Added repo-local benchmark/parity inputs:
+  - `examples/data/input.cth_like_free_bdy`,
+  - `examples/data/input.DIII-D_lasym_false`.
+- Updated the parity manifest:
+  - repointed `freeb_nonaxis_lasym_false_cth_like` to `examples/data/input.cth_like_free_bdy`,
+  - added `freeb_axisym_lasym_false_diiid_sym`,
+  - moved `freeb_nonaxis_lasym_false_stellcopt` to post-turn-on iter 80.
+- Re-ran the corrected free-boundary subset (`outputs/parity_sweeps/20260305_183853/summary.json`):
+  - `freeb_nonaxis_lasym_false_cth_like` now passes in-manifest at iter 53/54/60 with
+    `source_sym ~5.3e-7`, `bvec_nonsing_fouri ~5.5e-7`,
+    `amatrix ~1.1e-13`, `potvac <= 3.6e-4`,
+  - `freeb_axisym_lasym_false_diiid_sym` now passes in-manifest at iter 80/100/120 with
+    the same turn-on envelope as the earlier manual spot-check and near machine
+    precision by iter 100+,
+  - `freeb_nonaxis_lasym_false_stellcopt` now runs as a valid post-turn-on comparison
+    and passes current coarse thresholds at iter 80
+    (`source_sym ~2.72e-1`, `bvec_nonsing_fouri ~2.80e-1`,
+    `amatrix ~1.20e-1`, `potvac ~3.56e-1`).

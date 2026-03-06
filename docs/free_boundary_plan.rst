@@ -45,10 +45,10 @@ WP2 now has an initial coupling scaffold plus a VMEC2000-like dense path:
   ``B^u/B^v`` via the 2x2 boundary metric,
 - ``bsqvac`` proxy and boundary-normal channel summaries are emitted in
   ``free_boundary_external_field`` diagnostics.
-- free-boundary vacuum update now supports two models:
-  - ``vmec2000_like_dense_integral``: dense Green-function-like boundary
-    operator assembly + linear solve on the boundary grid,
-  - ``spectral_poisson_external_only``: previous fast surrogate.
+- ``vmec2000_like_dense_integral`` provides a dense Green-function-like
+  boundary operator assembly plus linear solve on the boundary grid.
+- ``spectral_poisson_external_only`` remains available as the previous fast
+  surrogate model.
 - mode selection is controlled by ``VMEC_JAX_FREEB_NESTOR_MODE`` with an
   ``auto`` default; large boundary grids fall back to the spectral path via
   ``VMEC_JAX_FREEB_VMEC_LIKE_MAX_POINTS``.
@@ -109,13 +109,16 @@ Current manifest coverage:
   ``input.LandremanSenguptaPlunk_section5p3``.
 - free-boundary, non-axisymmetric, ``lasym=False``:
   ``input.cth_like_free_bdy``, ``input.stellcopt``.
+- free-boundary, axisymmetric, ``lasym=False``:
+  ``input.DIII-D_lasym_false``.
 - free-boundary, axisymmetric, ``lasym=True``:
   ``input.DIII-D``, ``input.DIII-D_reset``.
 
 Coverage now includes a self-contained local free-boundary non-axisymmetric
 ``lasym=True`` case (``input.cth_like_free_bdy_lasym_small``), so the fixed
-manifest has no remaining topology/symmetry gap for free-boundary smoke/full
-tiers.
+manifest now covers all fixed/free, axisymmetric/non-axisymmetric, and
+``lasym`` true/false combinations. The remaining caveat is that the preserved
+``input.cth_like_free_bdy`` smoke fixture still depends on a local saved mgrid.
 
 The immediate implementation focus remains:
 
@@ -197,20 +200,23 @@ Updated benchmark snapshot (March 2026):
 - 2026-03-05 manifest rerun: ``input.cth_like_free_bdy_lasym_small`` is still
   excellent at iter 80 but fails global status at iter 100 from ``potvac`` plus
   runtime threshold misses.
-- 2026-03-05 manifest rerun: ``input.stellcopt`` is currently blocked by
-  missing VMEC scalpot dumps in the comparator workdir.
-- 2026-03-05 manifest rerun: ``freeb_nonaxis_lasym_false_cth_like`` is
-  currently a fixture-path issue in this checkout, not a fresh numerical
-  regression.
-- 2026-03-05 manual spot check: preserved local ``input.cth_like_free_bdy``
-  rerun remains tight at iter 53/54/60
+- 2026-03-05 manifest cleanup rerun
+  (``outputs/parity_sweeps/20260305_183853/summary.json``):
+  preserved local ``input.cth_like_free_bdy`` now passes in-manifest at
+  iter 53/54/60
   (``source_sym ~5.3e-7``, ``bvec_nonsing_fouri ~5.5e-7``,
   ``amatrix ~1.1e-13``, ``potvac <= 3.6e-4``).
-- 2026-03-05 manual spot check: temporary symmetric
-  ``input.DIII-D_lasym_false`` shows the same turn-on envelope at iter 80
+- 2026-03-05 manifest cleanup rerun:
+  ``input.DIII-D_lasym_false`` now passes in-manifest and shows the same
+  turn-on envelope at iter 80
   (``source_sym ~8.4e-3``, ``bvec_nonsing_fouri ~8.4e-3``,
   ``amatrix ~1.7e-3``, ``potvac ~9.4e-3``) and returns to near machine
   precision by iter 100+.
+- 2026-03-05 manifest cleanup rerun:
+  ``input.stellcopt`` now compares at post-turn-on iter 80 instead of
+  pre-turn-on iterations with missing dumps; it passes the current coarse
+  thresholds with ``source_sym ~2.72e-1``, ``bvec_nonsing_fouri ~2.80e-1``,
+  ``amatrix ~1.20e-1``, ``potvac ~3.56e-1``.
 - 2026-03-05 cold-start direct runtime/memory matrix vs VMEC2000:
   fixed-boundary default runs are currently about ``26x``-``50x`` slower and
   use about ``6x``-``12x`` more RSS.
@@ -303,47 +309,40 @@ Primary files and responsibilities in
 
 1. Input and setup
 
-   - ``Input_Output/read_indata.f``
-     - disables free-boundary when ``MGRID_FILE='NONE'``.
-   - ``Input_Output/readin.f``
-     - reads mgrid via ``read_mgrid(...)`` when ``LFREEB=T``,
-     - validates ``NZETA`` against mgrid toroidal grid and ``NFP`` consistency.
-   - ``LIBSTELL/Sources/Modules/mgrid_mod.f``
-     - mgrid fields, interpolation metadata, ``nextcur``, ``mgrid_mode``,
-       external field tables.
+   - ``Input_Output/read_indata.f``: disables free-boundary when
+     ``MGRID_FILE='NONE'``.
+   - ``Input_Output/readin.f``: reads mgrid via ``read_mgrid(...)`` when
+     ``LFREEB=T`` and validates ``NZETA`` against the mgrid toroidal grid plus
+     ``NFP`` consistency.
+   - ``LIBSTELL/Sources/Modules/mgrid_mod.f``: mgrid fields, interpolation
+     metadata, ``nextcur``, ``mgrid_mode``, and external field tables.
 
 2. Iteration control and coupling
 
-   - ``TimeStep/runvmec.f``
-     - initializes vacuum communicator/state per stage,
-     - carries ``ivac``/grid transitions in multigrid.
-   - ``General/funct3d.f``
-     - computes plasma fields,
-     - computes ``ivacskip = mod(iter2-iter1, nvacskip)`` (with early-iteration
-       and preconditioner overrides),
-     - triggers ``vacuum_par`` full vs skipped updates,
-     - injects edge free-boundary forcing inputs (``pgcon``, ``rbsq``).
-   - ``General/forces.f``
-     - adds free-boundary edge-force terms when ``ivac >= 1``.
+   - ``TimeStep/runvmec.f``: initializes vacuum communicator/state per stage
+     and carries ``ivac``/grid transitions in multigrid.
+   - ``General/funct3d.f``: computes plasma fields, computes
+     ``ivacskip = mod(iter2-iter1, nvacskip)`` with early-iteration and
+     preconditioner overrides, triggers ``vacuum_par`` full vs skipped updates,
+     and injects edge free-boundary forcing inputs (``pgcon``, ``rbsq``).
+   - ``General/forces.f``: adds free-boundary edge-force terms when
+     ``ivac >= 1``.
 
 3. Vacuum solve (NESTOR)
 
-   - ``NESTOR_vacuum/vacuum.f``
-     - surface geometry + external field + potential solve + ``bsqvac``,
-       ``B^R/B^phi/B^Z`` on boundary.
-   - ``NESTOR_vacuum/scalpot.f``
-     - integral-equation assembly, full update vs reused matrix
-       (``ivacskip != 0``), LU reuse.
+   - ``NESTOR_vacuum/vacuum.f``: surface geometry, external field, potential
+     solve, ``bsqvac``, and ``B^R/B^phi/B^Z`` on the boundary.
+   - ``NESTOR_vacuum/scalpot.f``: integral-equation assembly, full update vs
+     reused matrix (``ivacskip != 0``), and LU reuse.
    - ``NESTOR_vacuum/surface.f``, ``bextern.f``, ``becoil.f``,
-     ``analyt.f``, ``greenf.f``, ``fouri.f``, ``fourp.f``.
+     ``analyt.f``, ``greenf.f``, ``fouri.f``, and ``fourp.f``.
 
 4. Output diagnostics
 
-   - ``Input_Output/eqfor.f``
-     - uses ``bsqvac`` and edge terms for free-boundary diagnostics and
-       betas/shape metrics.
-   - ``wrout``/fileout path
-     - persists free-boundary outputs for ``wout`` parity.
+   - ``Input_Output/eqfor.f``: uses ``bsqvac`` and edge terms for
+     free-boundary diagnostics plus betas/shape metrics.
+   - ``wrout``/fileout path: persists free-boundary outputs for ``wout``
+     parity.
 
 Core equations and numerics to replicate
 ----------------------------------------
@@ -402,10 +401,10 @@ VMEC++ contains a modular NESTOR implementation that is useful as a second
 reference for structure and performance:
 
 - ``vmecpp/cpp/vmecpp/free_boundary/nestor/nestor.cc``
-  - explicit staged update:
-    ``surface -> bextern -> singular integrals -> regularized integrals -> DFT -> LU solve -> bsqvac``.
+  : explicit staged update
+  ``surface -> bextern -> singular integrals -> regularized integrals -> DFT -> LU solve -> bsqvac``.
 - ``vmecpp/cpp/vmecpp/free_boundary/mgrid_provider/*``
-  - explicit mgrid loading/interpolation and ``nextcur`` checks.
+  : explicit mgrid loading/interpolation and ``nextcur`` checks.
 - ``vmecpp`` numerics PDF documents NESTOR derivation and vacuum-pressure path.
 
 Important caveat from VMEC++ docs:
@@ -571,13 +570,12 @@ Unit tests
 Integration/parity tests
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-1. Free-boundary executable comparator (new):
-   - extend stage comparator to include
-     ``ivac``, ``ivacskip``, ``bsqvac``, edge force channels.
-2. Case ladder:
-   - Tier 1: ``input.cth_like_free_bdy`` (VMEC++ test data),
-   - Tier 2: ``input.DIII-D`` (VMEC2000 benchmark),
-   - Tier 3: additional STELLOPT/SIMSOPT cases.
+1. Free-boundary executable comparator (new): extend the stage comparator to
+   include ``ivac``, ``ivacskip``, ``bsqvac``, and edge-force channels.
+2. Case ladder: Tier 1 is the preserved local ``input.cth_like_free_bdy``
+   smoke fixture, Tier 2 is ``input.DIII-D`` plus
+   ``input.DIII-D_lasym_false``, and Tier 3 is ``input.stellcopt`` plus
+   additional STELLOPT/SIMSOPT cases.
 3. ``wout`` parity:
    - same axis masking policy where required for cancellation-limited channels.
 
