@@ -48,3 +48,22 @@ def test_vmec_bcovar_halfmesh_smoke_circular_tokamak():
     vp_calc = dvds / (4.0 * np.pi**2)
     vp_err = _rel_rms(vp_calc[1:], np.asarray(wout.vp)[1:])
     assert vp_err < 2e-2
+
+
+def test_vmec_bcovar_axisymmetric_metric_matches_vmec_convention():
+    """Axisymmetric VMEC keeps half-mesh pguv/pgvv zero and leaves the axis slot empty."""
+    pytest.importorskip("netCDF4")
+
+    root = Path(__file__).resolve().parents[1]
+    input_path = root / "examples/data/input.circular_tokamak"
+    wout_path = root / "examples/data/wout_circular_tokamak_reference.nc"
+    cfg, _indata = load_config(str(input_path))
+    wout = read_wout(wout_path)
+    static = build_static(cfg)
+
+    st = state_from_wout(wout)
+    bc = vmec_bcovar_half_mesh_from_wout(state=st, static=static, wout=wout)
+
+    assert np.allclose(np.asarray(bc.guu[0]), 0.0)
+    assert np.allclose(np.asarray(bc.guv), 0.0)
+    assert np.allclose(np.asarray(bc.gvv), 0.0)
