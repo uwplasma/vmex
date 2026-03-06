@@ -805,3 +805,15 @@ Legend:
   - `docs/performance.rst` now has a dedicated section explaining the current
     architectural reasons in detail, with measured free-boundary examples and
     the distinction between the fast scan path and the conservative parity path.
+- Created branch `codex/nonparity-performance` for an accelerated, non-parity
+  solver track aimed at final-equilibrium quality rather than
+  iteration-by-iteration VMEC2000 agreement.
+- Added `docs/aggressive_performance_plan.rst` and linked it from the docs
+  index. The new plan defines:
+  - acceptance criteria for accelerated mode (`fsq_total`, `wout`
+    similarity, differentiability, and Jacobian-health gates),
+  - architecture changes for order-of-magnitude runtime and memory reductions
+    on CPU and GPU,
+  - specific workstreams for device-resident control flow, continuation,
+    preconditioner redesign, free-boundary acceleration, and gradient scaling,
+  - benchmark and CI gates plus an expanded example matrix.
