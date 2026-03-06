@@ -646,6 +646,41 @@ def _maybe_dump_lamcal(*, lam_debug: dict[str, np.ndarray], static, iter_idx: in
     )
 
 
+def _vmec_scale_m1_factors_from_mats(mats: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
+    """Return VMEC `scale_m1_par` R/Z factors from cached preconditioner data."""
+    ard = mats.get("ard_parity")
+    brd = mats.get("brd_parity")
+    azd = mats.get("azd_parity")
+    bzd = mats.get("bzd_parity")
+    if ard is not None and brd is not None and azd is not None and bzd is not None:
+        ard_arr = np.asarray(ard, dtype=float)
+        brd_arr = np.asarray(brd, dtype=float)
+        azd_arr = np.asarray(azd, dtype=float)
+        bzd_arr = np.asarray(bzd, dtype=float)
+        if (
+            ard_arr.ndim == 2
+            and brd_arr.shape == ard_arr.shape
+            and azd_arr.shape == ard_arr.shape
+            and bzd_arr.shape == ard_arr.shape
+            and ard_arr.shape[1] > 1
+        ):
+            sr = ard_arr[:, 1] + brd_arr[:, 1]
+            sz = azd_arr[:, 1] + bzd_arr[:, 1]
+            denom = sr + sz
+            fac_r = np.where(denom != 0.0, sr / denom, 1.0)
+            fac_z = np.where(denom != 0.0, sz / denom, 1.0)
+            return fac_r, fac_z
+
+    dr = np.asarray(mats["dr"], dtype=float)
+    dz = np.asarray(mats["dz"], dtype=float)
+    sr = -dr[:, 1, 0]
+    sz = -dz[:, 1, 0]
+    denom = sr + sz
+    fac_r = np.where(denom != 0.0, sr / denom, 1.0)
+    fac_z = np.where(denom != 0.0, sz / denom, 1.0)
+    return fac_r, fac_z
+
+
 def _maybe_dump_lam_gcl(
     *,
     frzl_pre,
@@ -5662,18 +5697,14 @@ def solve_fixed_boundary_residual_iter(
         def _scale_m1_precond_rhs(frzl_in: TomnspsRZL, mats: dict[str, Any]) -> TomnspsRZL:
             if (not bool(getattr(cfg, "lconm1", True))) or (int(cfg.mpol) <= 1):
                 return frzl_in
-            dr = jnp.asarray(mats["dr"])
-            dz = jnp.asarray(mats["dz"])
-            if dr.shape[0] == 0:
+            fac_r_np, fac_z_np = _vmec_scale_m1_factors_from_mats(mats)
+            if fac_r_np.size == 0:
                 return frzl_in
-            sr = -dr[:, 1, 0]
-            sz = -dz[:, 1, 0]
-            denom = sr + sz
-            fac_r = jnp.where(denom != 0.0, sr / denom, jnp.ones_like(sr))
-            fac_z = jnp.where(denom != 0.0, sz / denom, jnp.ones_like(sz))
+            fac_r = jnp.asarray(fac_r_np, dtype=jnp.asarray(frzl_in.frcc).dtype)
+            fac_z = jnp.asarray(fac_z_np, dtype=jnp.asarray(frzl_in.fzsc).dtype)
 
             ns_full = int(jnp.asarray(frzl_in.frcc).shape[0])
-            nsolve = min(ns_full, int(sr.shape[0]))
+            nsolve = min(ns_full, int(fac_r.shape[0]))
             fac_r_full = jnp.ones((ns_full,), dtype=jnp.asarray(frzl_in.frcc).dtype).at[:nsolve].set(fac_r[:nsolve])
             fac_z_full = jnp.ones((ns_full,), dtype=jnp.asarray(frzl_in.fzsc).dtype).at[:nsolve].set(fac_z[:nsolve])
 
@@ -8934,18 +8965,14 @@ def solve_fixed_boundary_residual_iter(
         """Apply VMEC `scale_m1_par` factors before the radial preconditioner solve."""
         if (not bool(getattr(cfg, "lconm1", True))) or (int(cfg.mpol) <= 1):
             return frzl_in
-        dr = jnp.asarray(mats["dr"])
-        dz = jnp.asarray(mats["dz"])
-        if dr.shape[0] == 0:
+        fac_r_np, fac_z_np = _vmec_scale_m1_factors_from_mats(mats)
+        if fac_r_np.size == 0:
             return frzl_in
-        sr = -dr[:, 1, 0]
-        sz = -dz[:, 1, 0]
-        denom = sr + sz
-        fac_r = jnp.where(denom != 0.0, sr / denom, jnp.ones_like(sr))
-        fac_z = jnp.where(denom != 0.0, sz / denom, jnp.ones_like(sz))
+        fac_r = jnp.asarray(fac_r_np, dtype=jnp.asarray(frzl_in.frcc).dtype)
+        fac_z = jnp.asarray(fac_z_np, dtype=jnp.asarray(frzl_in.fzsc).dtype)
 
         ns_full = int(jnp.asarray(frzl_in.frcc).shape[0])
-        nsolve = min(ns_full, int(sr.shape[0]))
+        nsolve = min(ns_full, int(fac_r.shape[0]))
         fac_r_full = jnp.ones((ns_full,), dtype=jnp.asarray(frzl_in.frcc).dtype).at[:nsolve].set(fac_r[:nsolve])
         fac_z_full = jnp.ones((ns_full,), dtype=jnp.asarray(frzl_in.fzsc).dtype).at[:nsolve].set(fac_z[:nsolve])
 
