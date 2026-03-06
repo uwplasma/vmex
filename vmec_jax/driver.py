@@ -58,6 +58,37 @@ class FixedBoundaryRun:
     signgs: int
 
 
+def _default_backend_name() -> str:
+    try:
+        import jax
+
+        return str(jax.default_backend()).strip().lower() or "cpu"
+    except Exception:
+        return "cpu"
+
+
+def _dynamic_scan_probe_settings(niter_i: int) -> tuple[int, bool, str]:
+    backend = _default_backend_name()
+    timed_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", "").strip().lower()
+    if timed_env in ("1", "true", "yes", "on"):
+        timed_probe = True
+    elif timed_env in ("0", "false", "no", "off"):
+        timed_probe = False
+    else:
+        timed_probe = backend == "cpu"
+
+    default_probe_iters = 10 if timed_probe else 3
+    try:
+        pre_iters_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", "").strip()
+        pre_iters = max(1, int(pre_iters_env)) if pre_iters_env else default_probe_iters
+    except Exception:
+        pre_iters = default_probe_iters
+
+    if pre_iters >= int(niter_i):
+        pre_iters = max(1, int(niter_i) - 1)
+    return pre_iters, timed_probe, backend
+
+
 def residual_scalars_from_state(
     *,
     state,
@@ -1257,13 +1288,7 @@ def run_fixed_boundary(
                 and bool(vmec2000_ctrl)
                 and int(niter_i) > 1
             ):
-                try:
-                    pre_iters_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", "10").strip()
-                    pre_iters = max(1, int(pre_iters_env))
-                except Exception:
-                    pre_iters = 10
-                if pre_iters >= int(niter_i):
-                    pre_iters = max(1, int(niter_i) - 1)
+                pre_iters, timed_probe, probe_backend = _dynamic_scan_probe_settings(int(niter_i))
                 if pre_iters > 0:
                     fsq_tol_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN_FSQ_RTOL", "1e-6").strip()
                     try:
@@ -1339,20 +1364,26 @@ def run_fixed_boundary(
                             **kwargs,
                         )
 
-                    # Warm both variants before timing so the selector compares
-                    # steady-state iteration cost rather than one-off compile cost.
-                    _ = _run_pref(use_scan_flag=False)
-                    _ = _run_pref(use_scan_flag=True)
+                    if timed_probe:
+                        # Warm both variants before timing so the selector compares
+                        # steady-state iteration cost rather than one-off compile cost.
+                        _ = _run_pref(use_scan_flag=False)
+                        _ = _run_pref(use_scan_flag=True)
 
-                    t0 = time.perf_counter()
-                    res_pref_noscan = _run_pref(use_scan_flag=False)
-                    t_noscan = time.perf_counter() - t0
-                    t0 = time.perf_counter()
-                    res_pref_scan = _run_pref(use_scan_flag=True)
-                    t_scan = time.perf_counter() - t0
+                        t0 = time.perf_counter()
+                        res_pref_noscan = _run_pref(use_scan_flag=False)
+                        t_noscan = time.perf_counter() - t0
+                        t0 = time.perf_counter()
+                        res_pref_scan = _run_pref(use_scan_flag=True)
+                        t_scan = time.perf_counter() - t0
+                    else:
+                        t_noscan = None
+                        t_scan = None
+                        res_pref_scan = _run_pref(use_scan_flag=True)
+                        res_pref_noscan = _run_pref(use_scan_flag=False)
 
                     fsq_ok = _histories_match(res_pref_scan, res_pref_noscan)
-                    choose_scan = bool(fsq_ok) and (t_scan < t_noscan)
+                    choose_scan = bool(fsq_ok) and ((not timed_probe) or (t_scan < t_noscan))
                     scan_mode = bool(choose_scan)
                     solve_kwargs["use_scan"] = bool(scan_mode)
                     if bool(verbose):
@@ -1365,12 +1396,20 @@ def run_fixed_boundary(
                                 f"fsql={_history_relerr(res_pref_scan.fsql2_history, res_pref_noscan.fsql2_history):.3e}",
                                 flush=True,
                             )
-                        print(
-                            "[vmec_jax] dynamic scan selection: "
-                            f"scan={t_scan:.3f}s noscan={t_noscan:.3f}s "
-                            f"fsq_ok={fsq_ok} -> use_scan={scan_mode}",
-                            flush=True,
-                        )
+                        if timed_probe:
+                            print(
+                                "[vmec_jax] dynamic scan selection: "
+                                f"backend={probe_backend} scan={t_scan:.3f}s noscan={t_noscan:.3f}s "
+                                f"fsq_ok={fsq_ok} -> use_scan={scan_mode}",
+                                flush=True,
+                            )
+                        else:
+                            print(
+                                "[vmec_jax] dynamic scan parity probe: "
+                                f"backend={probe_backend} iters={pre_iters} "
+                                f"fsq_ok={fsq_ok} -> use_scan={scan_mode}",
+                                flush=True,
+                            )
             if bool(precompile_stages) and bool(jit_forces_eff):
                 try:
                     precompile_kwargs = dict(solve_kwargs)

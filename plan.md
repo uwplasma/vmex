@@ -752,3 +752,11 @@ Legend:
     `SPHINX_FAST=1 python -m sphinx -W -j auto -b html docs docs/_build/html`,
   - checked the GitHub repo state with `gh`: no open Dependabot alerts,
     no code-scanning analysis uploaded, and secret scanning currently disabled.
+- Reduced the default GPU overhead on LASYM fixed-boundary stages by making the
+  dynamic scan selector accelerator-aware:
+  - CPU backends keep the timed scan/non-scan probe,
+  - accelerator backends now use a short parity-only probe by default,
+  - measured cold-start GPU runtimes improved to about `16.9s`
+    (`input.up_down_asymmetric_tokamak`), `71.4s`
+    (`input.basic_non_stellsym_pressure`), and `27.5s`
+    (`input.LandremanSenguptaPlunk_section5p3_low_res`) on the reference GPU host.
