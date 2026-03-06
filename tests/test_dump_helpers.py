@@ -70,6 +70,7 @@ def test_gmetric_dump_writes_half_mesh_metric(tmp_path, monkeypatch):
         guu=np.arange(12, dtype=float).reshape(3, 2, 2),
         guv=np.arange(12, 24, dtype=float).reshape(3, 2, 2),
         gvv=np.arange(24, 36, dtype=float).reshape(3, 2, 2),
+        jac=SimpleNamespace(r12=np.ones((3, 2, 2), dtype=float) * 2.0),
     )
 
     monkeypatch.setenv("VMEC_JAX_DUMP_GMETRIC", "1")
@@ -88,5 +89,6 @@ def test_gmetric_dump_writes_half_mesh_metric(tmp_path, monkeypatch):
         "nzeta=2",
         "columns: js lt lz pguu pguv pgvv",
     ]
-    assert lines[5].split() == ["1", "1", "1", "0.0000000000000000e+00", "1.2000000000000000e+01", "2.4000000000000000e+01"]
-    assert lines[-1].split() == ["3", "2", "2", "1.1000000000000000e+01", "2.3000000000000000e+01", "3.5000000000000000e+01"]
+    assert lines[5].split() == ["1", "1", "1", "0.0000000000000000e+00", "0.0000000000000000e+00", "0.0000000000000000e+00"]
+    assert lines[6].split() == ["2", "1", "1", "4.0000000000000000e+00", "1.6000000000000000e+01", "2.4000000000000000e+01"]
+    assert lines[-1].split() == ["3", "2", "2", "1.1000000000000000e+01", "2.3000000000000000e+01", "3.1000000000000000e+01"]

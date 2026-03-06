@@ -627,8 +627,6 @@ def vmec_bcovar_half_mesh_from_wout(
         pzu_odd=Zu1,
         s=s,
     )
-    lthreed = bool(getattr(static.cfg, "lthreed", True))
-
     # Metric elements on full mesh split into even/odd (internal) pieces, then
     # staggered to the half mesh using VMEC's pshalf convention.
     guu_e, guu_o = _metric_even_odd(a0=parity.Rt_even, a1=Ru1, b0=parity.Zt_even, b1=Zu1, s=s)
@@ -649,11 +647,7 @@ def vmec_bcovar_half_mesh_from_wout(
     guu = _half_mesh_from_even_odd(guu_e, guu_o, s=s)
     guv = _half_mesh_from_even_odd(guv_e, guv_o, s=s)
     gvv = _half_mesh_from_even_odd(gvv_e_total, gvv_o_total, s=s)
-    if not lthreed:
-        guv = jnp.zeros_like(guv)
-        gvv = jnp.zeros_like(gvv)
     if ns >= 1:
-        guu = guu.at[0].set(jnp.zeros_like(guu[0]))
         guv = guv.at[0].set(jnp.zeros_like(guv[0]))
         gvv = gvv.at[0].set(jnp.zeros_like(gvv[0]))
 
@@ -670,18 +664,6 @@ def vmec_bcovar_half_mesh_from_wout(
     guu_eh, guu_oh = _half_even_odd_full(guu_e, guu_o)
     guv_eh, guv_oh = _half_even_odd_full(guv_e, guv_o)
     gvv_eh, gvv_oh = _half_even_odd_full(gvv_e_total, gvv_o_total)
-    if not lthreed:
-        guv_eh = jnp.zeros_like(guv_eh)
-        guv_oh = jnp.zeros_like(guv_oh)
-        gvv_eh = jnp.zeros_like(gvv_eh)
-        gvv_oh = jnp.zeros_like(gvv_oh)
-    if ns >= 1:
-        guu_eh = guu_eh.at[0].set(jnp.zeros_like(guu_eh[0]))
-        guu_oh = guu_oh.at[0].set(jnp.zeros_like(guu_oh[0]))
-        guv_eh = guv_eh.at[0].set(jnp.zeros_like(guv_eh[0]))
-        guv_oh = guv_oh.at[0].set(jnp.zeros_like(guv_oh[0]))
-        gvv_eh = gvv_eh.at[0].set(jnp.zeros_like(gvv_eh[0]))
-        gvv_oh = gvv_oh.at[0].set(jnp.zeros_like(gvv_oh[0]))
 
     # Lambda derivatives on half mesh (scaled lambda).
     lam_u = _half_mesh_from_even_odd(parity.Lt_even, Lu1, s=s)

@@ -557,10 +557,11 @@ Legend:
 - Added direct half-mesh metric dump support for JAX `bcovar` parity tracing:
   - `VMEC_JAX_DUMP_GMETRIC=1` writes `gmetric_iter*.dat` in VMEC-compatible
     `(js, lt, lz, pguu, pguv, pgvv)` format.
-- Fixed the axisymmetric half-mesh metric convention in `vmec_bcovar`:
-  - when `lthreed=False`, JAX now keeps `pguv/pgvv` identically zero like VMEC2000,
-  - the half-mesh metric axis slot is now explicitly zeroed for diagnostics parity.
-- Re-ran the DIII-D iter-72 metric dump comparison after the axisymmetric `bcovar` fix:
+- Narrowed the VMEC-specific axisymmetric metric convention to the diagnostics path:
+  - the live `vmec_bcovar` field metric remains post-`R^2` for `bsubv`, `wb`, scalar residuals,
+  - `VMEC_JAX_DUMP_GMETRIC` now reconstructs the VMEC dump convention by removing the
+    cylindrical `R^2` term from `pgvv` and zeroing the axis slot in the emitted file only.
+- Re-ran the DIII-D iter-72 metric dump comparison after the dump-alignment fix:
   - `pguv` and `pgvv` now match VMEC2000 exactly,
   - the remaining first-order mismatch in this block is `pguu`
     (`max_abs ~1.30e-1`, `max_rel ~3.85e-1` in
@@ -569,6 +570,9 @@ Legend:
     assembly/order rather than the vac/sourceterm channels.
 - Revalidated the edited docs/tests around this patch:
   - `pytest -q tests/test_dump_helpers.py tests/test_vmec_bcovar_smoke.py` -> `5 passed`,
+  - targeted CI regression set
+    (`test_force_norms_dynamic_parity`, `test_residue_getfsq_parity`,
+    `test_resume_state`, `test_wout_parity_reference`) -> `11 passed`,
   - `LC_ALL=C LANG=C SPHINX_FAST=1 python -m sphinx -W -j auto -b html docs docs/_build/html` passes.
 - Re-ran the two axisymmetric DIII-D manifest cases after the `bcovar` fix:
   - the current run is blocked at comparator level because no `jax_dumps` were

@@ -1159,14 +1159,31 @@ def _maybe_dump_gmetric(*, bc, static, iter_idx: int) -> None:
     path = outdir / f"gmetric_iter{int(iter_idx)}.dat"
 
     try:
-        guu = np.asarray(bc.guu)
-        guv = np.asarray(bc.guv)
-        gvv = np.asarray(bc.gvv)
+        guu = np.asarray(bc.guu, dtype=float)
+        guv = np.asarray(bc.guv, dtype=float)
+        gvv = np.asarray(bc.gvv, dtype=float)
     except Exception:
         return
 
     if guu.ndim != 3 or guv.shape != guu.shape or gvv.shape != guu.shape:
         return
+
+    # VMEC dumps `gmetric_iter*.dat` before the cylindrical `R^2` term is
+    # added into `pgvv`, while the live JAX half-mesh fields store the later
+    # post-`R^2` metric needed by `bsubv`, `wb`, and `wout` parity.
+    gmetric_guu = np.array(guu, copy=True)
+    gmetric_guv = np.array(guv, copy=True)
+    gmetric_gvv = np.array(gvv, copy=True)
+    try:
+        r12 = np.asarray(bc.jac.r12, dtype=float)
+        if r12.shape == gmetric_gvv.shape:
+            gmetric_gvv = gmetric_gvv - (r12 * r12)
+    except Exception:
+        pass
+    if gmetric_guu.shape[0] >= 1:
+        gmetric_guu[0, :, :] = 0.0
+        gmetric_guv[0, :, :] = 0.0
+        gmetric_gvv[0, :, :] = 0.0
 
     ns = int(guu.shape[0])
     ntheta3 = int(guu.shape[1])
@@ -1183,7 +1200,9 @@ def _maybe_dump_gmetric(*, bc, static, iter_idx: int) -> None:
                 for js in range(ns):
                     f.write(
                         f"{js + 1:6d}{lt + 1:6d}{lz + 1:6d}"
-                        f"{guu[js, lt, lz]:24.16e}{guv[js, lt, lz]:24.16e}{gvv[js, lt, lz]:24.16e}\n"
+                        f"{gmetric_guu[js, lt, lz]:24.16e}"
+                        f"{gmetric_guv[js, lt, lz]:24.16e}"
+                        f"{gmetric_gvv[js, lt, lz]:24.16e}\n"
                     )
 
 

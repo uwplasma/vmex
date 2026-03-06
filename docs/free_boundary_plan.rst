@@ -218,9 +218,10 @@ Updated benchmark snapshot (March 2026):
   thresholds with ``source_sym ~2.72e-1``, ``bvec_nonsing_fouri ~2.80e-1``,
   ``amatrix ~1.20e-1``, ``potvac ~3.56e-1``.
 - 2026-03-05 DIII-D iter-72 half-mesh metric trace:
-  after fixing the axisymmetric ``bcovar`` convention, JAX ``pguv`` and
-  ``pgvv`` now match VMEC2000 exactly in ``gmetric_iter72.dat``; the remaining
-  metric-side mismatch is isolated to ``pguu`` (currently
+  after aligning the JAX ``gmetric`` dump to the VMEC pre-``R^2`` convention,
+  ``pguv`` and ``pgvv`` now match VMEC2000 exactly in ``gmetric_iter72.dat``;
+  the live ``bcovar`` field metric remains post-``R^2`` for ``bsubv``/``wb`` parity.
+  The remaining metric-side mismatch is isolated to ``pguu`` (currently
   ``max_abs ~1.3e-1``, ``max_rel ~3.8e-1``), which is the next turn-on
   localization target.
 - 2026-03-05 cold-start direct runtime/memory matrix vs VMEC2000:
