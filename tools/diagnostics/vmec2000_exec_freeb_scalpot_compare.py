@@ -457,6 +457,64 @@ def _parse_fouri_dump(path: Path) -> dict[str, Any]:
     }
 
 
+def _parse_gc_dump(path: Path) -> dict[str, Any]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    ns = mpol1 = ntor = ntmax = None
+    rows: list[tuple[int, int, int, int, float, float, float]] = []
+    for ln in lines:
+        s = ln.strip()
+        if (not s) or s.startswith("#") or s.startswith("columns:"):
+            continue
+        if s.startswith("ns="):
+            ns = int(s.split("=", 1)[1])
+            continue
+        if s.startswith("mpol1="):
+            mpol1 = int(s.split("=", 1)[1])
+            continue
+        if s.startswith("ntor="):
+            ntor = int(s.split("=", 1)[1])
+            continue
+        if s.startswith("ntmax="):
+            ntmax = int(s.split("=", 1)[1])
+            continue
+        parts = s.split()
+        if len(parts) < 7:
+            continue
+        rows.append(
+            (
+                int(parts[0]) - 1,
+                int(parts[1]),
+                int(parts[2]),
+                int(parts[3]) - 1,
+                _parse_fortran_float(parts[4]),
+                _parse_fortran_float(parts[5]),
+                _parse_fortran_float(parts[6]),
+            )
+        )
+    if ns is None or mpol1 is None or ntor is None or ntmax is None:
+        raise ValueError(f"malformed gc dump: {path}")
+    gcr = np.zeros((ns, ntor + 1, mpol1 + 1, ntmax), dtype=float)
+    gcz = np.zeros_like(gcr)
+    gcl = np.zeros_like(gcr)
+    for js, m, n, t, vcr, vcz, vcl in rows:
+        if js < 0 or m < 0 or n < 0 or t < 0:
+            continue
+        if js >= ns or n > ntor or m > mpol1 or t >= ntmax:
+            continue
+        gcr[js, n, m, t] = vcr
+        gcz[js, n, m, t] = vcz
+        gcl[js, n, m, t] = vcl
+    return {
+        "ns": ns,
+        "mpol1": mpol1,
+        "ntor": ntor,
+        "ntmax": ntmax,
+        "gcr": gcr,
+        "gcz": gcz,
+        "gcl": gcl,
+    }
+
+
 def _parse_freeb_coupling_dump(path: Path) -> dict[str, Any]:
     """Parse VMEC free-boundary coupling dump from funct3d."""
 
@@ -567,6 +625,73 @@ def _rel_scaled(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
     den = float(np.dot(db, db))
     alpha = 1.0 if den <= 0.0 else float(np.dot(da, db) / den)
     return alpha, _rel(da, alpha * db)
+
+
+def _max_diff_report(
+    vmec_vals: np.ndarray, jax_vals: np.ndarray, *, eps: float = 1.0e-30
+) -> tuple[float, float, tuple[int, ...], float, float]:
+    vmec_vals = np.asarray(vmec_vals, dtype=float)
+    jax_vals = np.asarray(jax_vals, dtype=float)
+    diff = np.abs(vmec_vals - jax_vals)
+    if diff.size == 0:
+        return float("nan"), float("nan"), (), float("nan"), float("nan")
+    idx_flat = int(np.argmax(diff))
+    idx = tuple(int(v) for v in np.unravel_index(idx_flat, diff.shape))
+    max_abs = float(diff[idx])
+    vmec_v = float(vmec_vals[idx])
+    jax_v = float(jax_vals[idx])
+    denom = max(eps, abs(vmec_v))
+    return max_abs, float(max_abs / denom), idx, vmec_v, jax_v
+
+
+def _truthy_env(name: str) -> bool:
+    val = os.getenv(name, "")
+    return bool(val) and val != "0"
+
+
+def _find_latest_dump(directory: Path, pattern: str) -> Path | None:
+    matches = sorted(directory.glob(pattern))
+    return matches[-1] if matches else None
+
+
+def _gc_metric_block(vmec_arr: np.ndarray, jax_arr: np.ndarray) -> dict[str, Any]:
+    if (
+        np.ndim(vmec_arr) == 4
+        and np.ndim(jax_arr) == 4
+        and jax_arr.shape[1] == vmec_arr.shape[2]
+        and jax_arr.shape[2] == vmec_arr.shape[1]
+    ):
+        jax_arr = np.transpose(jax_arr, (0, 2, 1, 3))
+    ns = min(vmec_arr.shape[0], jax_arr.shape[0])
+    nn = min(vmec_arr.shape[1], jax_arr.shape[1])
+    mm = min(vmec_arr.shape[2], jax_arr.shape[2])
+    tt = min(vmec_arr.shape[3], jax_arr.shape[3])
+    vm = np.asarray(vmec_arr[:ns, :nn, :mm, :tt], dtype=float)
+    jj = np.asarray(jax_arr[:ns, :nn, :mm, :tt], dtype=float)
+    max_abs, max_rel, idx, vmec_v, jax_v = _max_diff_report(vm, jj)
+    rel_by_t = [_rel(vm[..., t], jj[..., t]) for t in range(tt)]
+    max_rel_by_t = [_max_diff_report(vm[..., t], jj[..., t])[1] for t in range(tt)]
+    loc = None
+    if len(idx) == 4:
+        loc = {
+            "js": int(idx[0] + 1),
+            "n": int(idx[1]),
+            "m": int(idx[2]),
+            "t": int(idx[3] + 1),
+        }
+    return {
+        "shape_vmec": list(vmec_arr.shape),
+        "shape_jax": list(jax_arr.shape),
+        "shape_cmp": [int(ns), int(nn), int(mm), int(tt)],
+        "rel_raw": _rel(vm, jj),
+        "max_abs": max_abs,
+        "max_rel": max_rel,
+        "max_loc": loc,
+        "vmec_at_max": vmec_v,
+        "jax_at_max": jax_v,
+        "rel_raw_by_t": [float(v) for v in rel_by_t],
+        "max_rel_by_t": [float(v) for v in max_rel_by_t],
+    }
 
 
 def _copy_input_and_mgrid(input_path: Path, workdir: Path) -> Path:
@@ -710,6 +835,11 @@ def main() -> int:
     if bool(use_multigrid) and int(args.max_iter) > 0:
         _cap_multigrid_input_to_max_iter(run_input, int(args.max_iter))
 
+    request_gc = _truthy_env("VMEC_DUMP_GC") or _truthy_env("VMEC_JAX_DUMP_GC")
+    gc_stage = os.getenv("VMEC_DUMP_GC_STAGE", os.getenv("VMEC_JAX_DUMP_GC_STAGE", "precond")).lower()
+    if gc_stage not in {"raw", "precond", "both"}:
+        gc_stage = "precond"
+
     # Run VMEC2000
     env_vmec_base = os.environ.copy()
     env_vmec_base.update(
@@ -721,6 +851,15 @@ def main() -> int:
             "VMEC_DUMP_DIR": str(vmec_dump_dir),
         }
     )
+    if request_gc:
+        env_vmec_base.update(
+            {
+                "VMEC_DUMP_GC": "1",
+                "VMEC_DUMP_GC_ITER": str(int(args.iter)),
+                "VMEC_DUMP_GC_STAGE": str(gc_stage),
+                "VMEC_DUMP_GC_DIR": str(vmec_dump_dir),
+            }
+        )
 
     def _run_vmec_with_dump_iter(dump_iter: int) -> None:
         env_vmec = env_vmec_base.copy()
@@ -761,6 +900,11 @@ def main() -> int:
     # off-by-one or sparse dump alignment at a requested iteration.
     os.environ.pop("VMEC_JAX_DUMP_ITER", None)
     os.environ["VMEC_JAX_DUMP_DIR"] = str(jax_dump_dir)
+    if request_gc:
+        os.environ["VMEC_JAX_DUMP_GC"] = "1"
+        os.environ["VMEC_JAX_DUMP_GC_ITER"] = str(int(args.iter))
+        os.environ["VMEC_JAX_DUMP_GC_STAGE"] = str(gc_stage)
+        os.environ["VMEC_JAX_DUMP_GC_DIR"] = str(jax_dump_dir)
     try:
         run_fixed_boundary(
             str(run_input),
@@ -780,8 +924,16 @@ def main() -> int:
     vmec_bextern_files = sorted(vmec_dump_dir.glob(f"bextern_iter{int(args.iter)}.dat"))
     vmec_fouri_files = sorted(vmec_dump_dir.glob(f"fouri_iter{int(args.iter)}.dat"))
     vmec_coupling_files = sorted(vmec_dump_dir.glob(f"freeb_coupling_iter{int(args.iter)}.dat"))
+    vmec_gc_files = {
+        stage: _find_latest_dump(vmec_dump_dir, f"gc_{stage}*_iter{int(args.iter)}.dat")
+        for stage in ("raw", "precond")
+    }
     jax_npz = jax_dump_dir / f"scalpot_jax_iter{int(args.iter)}.npz"
     jax_coupling_npz = jax_dump_dir / f"freeb_coupling_iter{int(args.iter)}.npz"
+    jax_gc_npz = {
+        stage: _find_latest_dump(jax_dump_dir, f"gc_{stage}*_iter{int(args.iter)}.npz")
+        for stage in ("raw", "precond")
+    }
     if not vmec_scalpot_files:
         raise SystemExit(f"missing VMEC scalpot dump in {vmec_dump_dir}")
     if not vmec_vac_files:
@@ -827,6 +979,8 @@ def main() -> int:
         "vmec_freeb_coupling_dump": str(vmec_coupling_files[0]) if vmec_coupling_files else None,
         "jax_dump": str(jax_npz),
         "jax_freeb_coupling_dump": str(jax_coupling_npz) if jax_coupling_npz.exists() else None,
+        "vmec_gc_dumps": {k: (str(v) if v is not None else None) for k, v in vmec_gc_files.items()},
+        "jax_gc_dumps": {k: (str(v) if v is not None else None) for k, v in jax_gc_npz.items()},
         "iter": int(args.iter),
         "jax_iter_used": int(jax_iter_used),
         "jax_multigrid": bool(use_multigrid),
@@ -837,6 +991,23 @@ def main() -> int:
             "source_cache_iter": int(vmec_scal.get("source_cache_iter", -1)),
         },
     }
+
+    if request_gc:
+        stages = ("raw", "precond") if gc_stage == "both" else (gc_stage,)
+        for stage in stages:
+            vmec_gc_path = vmec_gc_files.get(stage)
+            jax_gc_path = jax_gc_npz.get(stage)
+            if vmec_gc_path is None or jax_gc_path is None:
+                continue
+            vmec_gc = _parse_gc_dump(vmec_gc_path)
+            jax_gc = dict(np.load(jax_gc_path, allow_pickle=False))
+            for name in ("gcr", "gcz", "gcl"):
+                if name not in jax_gc:
+                    continue
+                out[f"gc_{stage}_{name}"] = _gc_metric_block(
+                    np.asarray(vmec_gc[name], dtype=float),
+                    np.asarray(jax_gc[name], dtype=float),
+                )
 
     if "bvec_mode_sin" in jax:
         if "bvec_mode_cos" in jax:

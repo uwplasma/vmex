@@ -5,8 +5,10 @@ from pathlib import Path
 import numpy as np
 
 from tools.diagnostics.vmec2000_exec_freeb_scalpot_compare import (
+    _gc_metric_block,
     _parse_bextern_dump,
     _parse_fouri_dump,
+    _parse_gc_dump,
     _parse_scalpot_dump,
 )
 
@@ -145,6 +147,52 @@ def test_parse_bextern_dump_reads_axis_sections(tmp_path: Path) -> None:
     np.testing.assert_allclose(got["brad_axis"], np.array([1.0e-3, 2.0e-3, 3.0e-3]))
     np.testing.assert_allclose(got["bphi_axis"], np.array([-1.0e-4, -2.0e-4, -3.0e-4]))
     np.testing.assert_allclose(got["bz_axis"], np.array([4.0e-5, 5.0e-5, 6.0e-5]))
+
+
+def test_parse_gc_dump_reads_vmec_layout(tmp_path: Path) -> None:
+    p = tmp_path / "gc_raw_ns3_iter10.dat"
+    p.write_text(
+        "\n".join(
+            [
+                "# gc dump",
+                "ns=3",
+                "mpol1=2",
+                "ntor=1",
+                "ntmax=4",
+                "columns: js m n t gcr gcz gcl",
+                "1 0 0 1 1.0D+00 2.0D+00 3.0D+00",
+                "2 1 1 3 -4.0D+00 5.0D+00 -6.0D+00",
+                "3 2 0 4 7.5D-01 -8.5D-01 9.5D-01",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    got = _parse_gc_dump(p)
+    assert got["ns"] == 3
+    assert got["mpol1"] == 2
+    assert got["ntor"] == 1
+    assert got["ntmax"] == 4
+    assert got["gcr"].shape == (3, 2, 3, 4)
+    np.testing.assert_allclose(got["gcr"][0, 0, 0, 0], 1.0)
+    np.testing.assert_allclose(got["gcz"][0, 0, 0, 0], 2.0)
+    np.testing.assert_allclose(got["gcl"][0, 0, 0, 0], 3.0)
+    np.testing.assert_allclose(got["gcr"][1, 1, 1, 2], -4.0)
+    np.testing.assert_allclose(got["gcz"][1, 1, 1, 2], 5.0)
+    np.testing.assert_allclose(got["gcl"][1, 1, 1, 2], -6.0)
+    np.testing.assert_allclose(got["gcr"][2, 0, 2, 3], 7.5e-1)
+    np.testing.assert_allclose(got["gcz"][2, 0, 2, 3], -8.5e-1)
+    np.testing.assert_allclose(got["gcl"][2, 0, 2, 3], 9.5e-1)
+
+
+def test_gc_metric_block_transposes_jax_gc_axes() -> None:
+    vm = np.zeros((2, 2, 3, 4))
+    vm[1, 1, 2, 3] = 7.0
+    jax = np.transpose(vm, (0, 2, 1, 3))
+    got = _gc_metric_block(vm, jax)
+    np.testing.assert_allclose(got["rel_raw"], 0.0, atol=0.0, rtol=0.0)
+    np.testing.assert_allclose(got["max_abs"], 0.0, atol=0.0, rtol=0.0)
+    assert got["max_loc"] == {"js": 1, "n": 0, "m": 0, "t": 1}
 
 
 def test_parse_fortran_float_handles_missing_exponent_marker() -> None:
