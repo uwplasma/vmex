@@ -849,13 +849,10 @@ Roadmap to VMEC-quality parity
 
 Fixed-boundary parity is in place for both ``lasym=False`` and ``lasym=True``
 (force residuals, preconditioning, and VMEC2000 time-step control). The next
-major roadmap item is:
+major roadmap items are:
 
-1. **Free-boundary equilibrium**:
-   - external vacuum field solve and boundary update,
-   - coupling of plasma boundary updates with vacuum response,
-   - parity validation against VMEC2000 free-boundary runs.
-
-2. **Implicit differentiation extensions**:
-   - extend implicit gradients to boundary-shape sensitivities and free-boundary
-     workflows.
+- **Free-boundary equilibrium**: external vacuum field solve and boundary
+  update, coupling of plasma boundary updates with vacuum response, and parity
+  validation against VMEC2000 free-boundary runs.
+- **Implicit differentiation extensions**: extend implicit gradients to
+  boundary-shape sensitivities and free-boundary workflows.

@@ -1,5 +1,5 @@
 JXBFORCE / Mercier Diagnostics (``jdotb``, ``DMerc``)
-====================================================
+=====================================================
 
 VMEC2000 writes a set of derived diagnostics related to the Mercier stability
 criterion and to current-related scalars. In the VMEC2000 code base, these
@@ -27,7 +27,7 @@ This page documents:
    ``vmec_jax`` mirrors these conventions to reproduce VMEC2000 outputs.
 
 Key VMEC2000 Convention: Parity Channels For ``bsubu``/``bsubv``
----------------------------------------------------------------
+----------------------------------------------------------------
 
 VMEC2000 stores covariant components ``bsubu`` and ``bsubv`` in two "parity
 channels" (the last dimension in Fortran is indexed ``0:1``). These channels
@@ -85,7 +85,7 @@ half-weighting at the geometric Nyquist limits.
 same (mpol-1, ntor) cutoffs when building the ``wout`` diagnostics.
 
 From Filtered Fields To ``jdotb`` (VMEC2000 Discretization)
-----------------------------------------------------------
+-----------------------------------------------------------
 
 After the filter, VMEC2000 reconstructs ``bsubsu`` and ``bsubsv`` and defines
 two auxiliary fields (names follow the VMEC2000 source):
