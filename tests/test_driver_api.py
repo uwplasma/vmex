@@ -51,3 +51,25 @@ def test_run_fixed_boundary_initial_guess():
 
     wout = wout_from_fixed_boundary_run(run, include_fsq=False, fast_bcovar=True)
     assert wout.ns == run.cfg.ns
+
+
+def test_lasym_performance_mode_infers_axis_for_fast_path():
+    root = Path(__file__).resolve().parents[1]
+    input_path = root / "examples/data/input.up_down_asymmetric_tokamak"
+    perf = run_fixed_boundary(
+        input_path,
+        use_initial_guess=True,
+        verbose=False,
+    )
+    safe = run_fixed_boundary(
+        input_path,
+        use_initial_guess=True,
+        verbose=False,
+        performance_mode=False,
+    )
+    assert perf.result is None
+    assert safe.result is None
+    assert float(perf.state.Rcos[0, 0]) > 1.0
+    assert abs(float(perf.state.Zcos[0, 0])) > 1e-3
+    assert float(safe.state.Rcos[0, 0]) == 0.0
+    assert float(safe.state.Zcos[0, 0]) == 0.0
