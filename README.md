@@ -95,6 +95,7 @@ python examples/optimization/implicit_target_iota_volume.py --case circular_toka
 
 - Default runs enable the scan-based fast loop (`performance_mode=True`) with a parity guard.
 - LASYM fixed-boundary stages now use a timed scan/non-scan probe on CPU and a short parity-only probe on accelerators, so the default GPU path keeps the scan fast path without paying the full non-scan timing cost.
+- Quiet accelerator scan runs now use backend-aware larger chunks, capped to the remaining iterations, to reduce host/device launch overhead without changing solver parity.
 - Use `--parity` or `performance_mode=False` to force the conservative parity path.
 - Details and profiling guidance live in `docs/performance.rst`.
 - Parity methodology and current status live in `docs/validation.rst`.
@@ -185,12 +186,12 @@ and a reference CUDA host (dual RTX A4000 GPUs). Exact results vary by machine.
 | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | DIII-D_lasym_false | free | axisym | false | 14.37s | 0.07 GiB | 428.24s | 7.36 GiB | 1602.31s | 6.23 GiB |
 | ITERModel | fixed | axisym | false | 0.90s | 0.07 GiB | 5.83s | 0.91 GiB | 68.66s | 1.81 GiB |
-| LandremanPaul2021_QA_lowres | fixed | non-axisym | false | 23.89s | 0.07 GiB | 16.79s | 1.84 GiB | 131.89s | 2.85 GiB |
+| LandremanPaul2021_QA_lowres | fixed | non-axisym | false | 23.89s | 0.07 GiB | 16.79s | 1.84 GiB | 33.91s | 2.66 GiB |
 | LandremanPaul2021_QA_lowres1 | fixed | non-axisym | false | 15.37s | 0.07 GiB | 14.86s | 1.82 GiB | 123.45s | 2.84 GiB |
 | LandremanSengupta2019_section5.4_B2_A80 | fixed | axisym | false | 0.24s | 0.07 GiB | 3.90s | 0.70 GiB | 44.38s | 1.60 GiB |
-| LandremanSenguptaPlunk_section5p3_low_res | fixed | axisym | true | 0.69s | 0.07 GiB | 46.77s | 4.07 GiB | 27.52s | 1.99 GiB |
-| basic_non_stellsym_pressure | fixed | non-axisym | true | 2.02s | 0.07 GiB | 29.73s | 3.22 GiB | 71.37s | 3.48 GiB |
-| circular_tokamak | fixed | axisym | false | 0.29s | 0.07 GiB | 5.55s | 1.18 GiB | 60.72s | 2.13 GiB |
+| LandremanSenguptaPlunk_section5p3_low_res | fixed | axisym | true | 0.69s | 0.07 GiB | 46.77s | 4.07 GiB | 77.13s | 2.13 GiB |
+| basic_non_stellsym_pressure | fixed | non-axisym | true | 2.02s | 0.07 GiB | 29.73s | 3.22 GiB | 141.07s | 3.68 GiB |
+| circular_tokamak | fixed | axisym | false | 0.29s | 0.07 GiB | 5.55s | 1.18 GiB | 13.84s | 1.97 GiB |
 | circular_tokamak_aspect_100 | fixed | axisym | false | 2.36s | 0.07 GiB | 9.64s | 1.58 GiB | 104.44s | 2.49 GiB |
 | cth_like_fixed_bdy | fixed | axisym | false | 0.81s | 0.07 GiB | 2.43s | 0.54 GiB | 26.46s | 1.42 GiB |
 | cth_like_free_bdy | free | non-axisym | false | 2.48s | 0.07 GiB | 41.83s | 1.64 GiB | 155.79s | 2.30 GiB |
@@ -201,4 +202,4 @@ and a reference CUDA host (dual RTX A4000 GPUs). Exact results vary by machine.
 | purely_toroidal_field | fixed | axisym | false | 3.21s | 0.07 GiB | 9.87s | 1.59 GiB | 104.91s | 2.49 GiB |
 | shaped_tokamak_pressure | fixed | axisym | false | 0.79s | 0.07 GiB | 5.66s | 0.90 GiB | 48.58s | 1.76 GiB |
 | solovev | fixed | axisym | false | 0.16s | 0.07 GiB | 2.08s | 0.48 GiB | 18.80s | 1.38 GiB |
-| up_down_asymmetric_tokamak | fixed | axisym | true | 0.74s | 0.07 GiB | 6.72s | 0.89 GiB | 16.88s | 1.60 GiB |
+| up_down_asymmetric_tokamak | fixed | axisym | true | 0.74s | 0.07 GiB | 6.72s | 0.89 GiB | 16.54s | 1.60 GiB |
