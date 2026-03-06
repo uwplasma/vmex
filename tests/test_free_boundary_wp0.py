@@ -25,7 +25,7 @@ from vmec_jax.free_boundary import (
     vacuum_boundary_fields_from_cylindrical,
 )
 from vmec_jax.namelist import read_indata
-from vmec_jax.solve import _free_boundary_iter_controls_vmec
+from vmec_jax.solve import _free_boundary_iter_controls_vmec, _free_boundary_prev_rz_fsq_next
 from vmec_jax.static import build_static
 from vmec_jax.driver import run_fixed_boundary
 
@@ -193,6 +193,27 @@ def test_free_boundary_iter_controls_vmec_updates_nvacskip_on_full_step():
     assert ivacskip == 0
     # fsq=1e-12 -> max(1e-1,1e11*fsq)=1e-1 -> nvacskip target=10
     assert nvacskip == 10
+
+
+def test_free_boundary_prev_rz_fsq_next_preserves_pre_turnon_value():
+    assert _free_boundary_prev_rz_fsq_next(
+        prev_fsq_before=8.9e-4,
+        fsq_rz_curr=2.5e-1,
+        turnon_restart=True,
+        preserve_turnon_restart=True,
+    ) == pytest.approx(8.9e-4)
+    assert _free_boundary_prev_rz_fsq_next(
+        prev_fsq_before=8.9e-4,
+        fsq_rz_curr=2.5e-1,
+        turnon_restart=False,
+        preserve_turnon_restart=True,
+        ) == pytest.approx(2.5e-1)
+    assert _free_boundary_prev_rz_fsq_next(
+        prev_fsq_before=8.9e-4,
+        fsq_rz_curr=2.5e-1,
+        turnon_restart=True,
+        preserve_turnon_restart=False,
+    ) == pytest.approx(2.5e-1)
 
 
 def test_vmec_mode_basis_and_bvec_skip_modes():
