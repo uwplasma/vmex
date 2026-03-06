@@ -235,6 +235,19 @@ def _free_boundary_iter_controls_vmec(
     return iv, ivs, nv
 
 
+def _free_boundary_prev_rz_fsq_next(
+    *,
+    prev_fsq_before: float,
+    fsq_rz_curr: float,
+    turnon_restart: bool,
+    preserve_turnon_restart: bool,
+) -> float:
+    """Optionally carry the pre-turn-on residual into the next cadence step."""
+    if bool(turnon_restart) and bool(preserve_turnon_restart):
+        return float(prev_fsq_before)
+    return float(fsq_rz_curr)
+
+
 def _sample_free_boundary_external_field(*, state: VMECState, static) -> dict[str, Any]:
     """WP2 diagnostic scaffold for external-field boundary channels."""
     from .free_boundary import sample_external_vacuum_diagnostics
@@ -9462,11 +9475,7 @@ def solve_fixed_boundary_residual_iter(
             if free_boundary_enabled:
                 # Keep free-boundary cadence fixed for this `iter2` across
                 # retry/restart passes in the inner while-loop.
-                fsq_rz_prev = (
-                    float(fsqr2_history[-1]) + float(fsqz2_history[-1])
-                    if (fsqr2_history and fsqz2_history)
-                    else 1.0
-                )
+                fsq_rz_prev = float(prev_rz_fsq) if np.isfinite(prev_rz_fsq) else 1.0
                 controls_cached_before = freeb_controls_cached is not None
                 if freeb_controls_cached is None:
                     freeb_ivac, freeb_ivacskip, freeb_nvacskip = _free_boundary_iter_controls_vmec(
@@ -9806,7 +9815,12 @@ def solve_fixed_boundary_residual_iter(
                 # that VMEC records after `restart_iter` in funct3d.
             fsq0_curr = fsqr_f + fsqz_f + fsql_f
             prev_rz_fsq_before = prev_rz_fsq
-            prev_rz_fsq = fsqr_f + fsqz_f
+            prev_rz_fsq = _free_boundary_prev_rz_fsq_next(
+                prev_fsq_before=prev_rz_fsq_before,
+                fsq_rz_curr=fsqr_f + fsqz_f,
+                turnon_restart=bool(free_boundary_enabled) and bool(freeb_turnon_iter) and bool(freeb_turnon_applied),
+                preserve_turnon_restart=bool(free_boundary_enabled) and bool(cfg.lthreed),
+            )
 
             w_history.append(fsq0_curr)
             fsqr2_history.append(fsqr_f)
