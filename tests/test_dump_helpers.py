@@ -92,3 +92,64 @@ def test_gmetric_dump_writes_half_mesh_metric(tmp_path, monkeypatch):
     assert lines[5].split() == ["1", "1", "1", "0.0000000000000000e+00", "0.0000000000000000e+00", "0.0000000000000000e+00"]
     assert lines[6].split() == ["2", "1", "1", "4.0000000000000000e+00", "1.6000000000000000e+01", "2.4000000000000000e+01"]
     assert lines[-1].split() == ["3", "2", "2", "1.1000000000000000e+01", "2.3000000000000000e+01", "3.1000000000000000e+01"]
+
+
+def test_vmec_scale_m1_factors_prefer_parity_diagonals():
+    from vmec_jax.solve import _vmec_scale_m1_factors_from_mats
+
+    mats = {
+        "dr": np.array(
+            [
+                [[-2.0], [-20.0]],
+                [[-3.0], [-99.0]],
+                [[-4.0], [-40.0]],
+            ],
+            dtype=float,
+        ),
+        "dz": np.array(
+            [
+                [[-6.0], [-60.0]],
+                [[-7.0], [-88.0]],
+                [[-8.0], [-80.0]],
+            ],
+            dtype=float,
+        ),
+        "ard_parity": np.array([[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]], dtype=float),
+        "brd_parity": np.array([[4.0, 40.0], [5.0, 50.0], [6.0, 60.0]], dtype=float),
+        "azd_parity": np.array([[7.0, 70.0], [8.0, 80.0], [9.0, 90.0]], dtype=float),
+        "bzd_parity": np.array([[10.0, 100.0], [11.0, 110.0], [12.0, 120.0]], dtype=float),
+    }
+
+    fac_r, fac_z = _vmec_scale_m1_factors_from_mats(mats)
+
+    sr = np.array([50.0, 70.0, 90.0])
+    sz = np.array([170.0, 190.0, 210.0])
+    denom = sr + sz
+    assert np.allclose(fac_r, sr / denom)
+    assert np.allclose(fac_z, sz / denom)
+
+
+def test_vmec_scale_m1_factors_fall_back_to_expanded_diagonals():
+    from vmec_jax.solve import _vmec_scale_m1_factors_from_mats
+
+    mats = {
+        "dr": np.array(
+            [
+                [[-2.0], [-20.0]],
+                [[-3.0], [-30.0]],
+            ],
+            dtype=float,
+        ),
+        "dz": np.array(
+            [
+                [[-6.0], [-60.0]],
+                [[-7.0], [-70.0]],
+            ],
+            dtype=float,
+        ),
+    }
+
+    fac_r, fac_z = _vmec_scale_m1_factors_from_mats(mats)
+
+    assert np.allclose(fac_r, np.array([0.25, 0.3]))
+    assert np.allclose(fac_z, np.array([0.75, 0.7]))

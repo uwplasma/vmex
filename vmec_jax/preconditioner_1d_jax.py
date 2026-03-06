@@ -567,6 +567,10 @@ def _rz_preconditioner_matrices_impl(
         "az": az,
         "bz": bz,
         "dz": dz,
+        "ard_parity": ard,
+        "brd_parity": brd,
+        "azd_parity": azd,
+        "bzd_parity": bzd,
     }
     if cr is not None:
         mats["cr"] = cr
