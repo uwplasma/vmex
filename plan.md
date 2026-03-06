@@ -224,14 +224,17 @@ Keep VMEC parity mode, while introducing better robustness, richer outputs, easi
   - iter 100+ returns to near machine precision,
   - targeted manifest rerun passes at iter 80/100/120.
 - Current free-boundary matrix gaps are split between:
-  - real numerical drift (`input.cth_like_free_bdy_lasym_small` potvac/runtime at iter 100),
+  - remaining non-axisymmetric `lasym=True` reuse-step field drift on
+    `input.cth_like_free_bdy_lasym_small`
+    (`source_sym ~2.6e-8`, `bvec_nonsing_fouri ~2.4e-8`,
+    `amatrix ~1.3e-11`, `potvac ~7.1e-3`, `bsqvac ~1.25e-2` at iter 100),
   - coarse but valid post-turn-on parity on `input.stellcopt`
     (`source_sym ~2.7e-1`, `bvec_nonsing_fouri ~2.8e-1`,
     `amatrix ~1.2e-1`, `potvac ~3.6e-1` at iter 80),
   - remaining preserved-mgrid dependency for the local CTH-like `lasym=False`
     smoke fixture.
-- Remaining work: improve the non-axisymmetric `lasym=True`
-  runtime/parity outlier, tighten post-turn-on `input.stellcopt`, and replace
+- Remaining work: tighten the non-axisymmetric `lasym=True` reuse-step
+  field/coupling drift, tighten post-turn-on `input.stellcopt`, and replace
   preserved local free-boundary fixtures with distributable inputs where practical.
 
 ### 5.3 Practical parity policy
@@ -410,6 +413,7 @@ Legend:
 - [x] Add an automated axisymmetric `lasym=False` free-boundary case to the manifest.
 - [-] Keep a stable non-axisymmetric `lasym=False` free-boundary smoke fixture in the current checkout without depending on preserved local mgrid artifacts.
 - [x] Diagnose `input.stellcopt` missing VMEC scalpot dumps before treating it as a numerical parity regression.
+- [-] Tighten the remaining non-axisymmetric `lasym=True` reuse-step field/coupling drift after matching VMEC restart cadence.
 - [-] Tighten post-turn-on `input.stellcopt` parity now that iter-80 comparison is valid.
 - [ ] Extend free-boundary parity matrix to additional non-axisymmetric `lasym=True` real-world cases beyond local synthetic case.
 
@@ -590,7 +594,7 @@ Legend:
    - direct iter-72 matrix comparison now matches VMEC2000 to machine precision
      with `jmax=16` and `used_cache=True`
      (`ar/dr/br/az/dz/bz rel ~1e-14`).
-   - direct `input.DIII-D` iter-80 free-boundary comparator now returns near
+ - direct `input.DIII-D` iter-80 free-boundary comparator now returns near
      machine-precision parity across the prior turn-on blocker channels
      (`source_sym ~2.06e-12`, `bvec_nonsing_fouri ~2.07e-12`,
      `amatrix ~1.44e-13`, `potvac ~1.83e-12`).
@@ -602,3 +606,24 @@ Legend:
      -> `failed_cases=0`
      with summary at
      `outputs/parity_sweeps/20260305_211007/summary.json`.
+- Tightened the non-axisymmetric `lasym=True` CTH-like free-boundary gap:
+  - the 3D turn-on residual carry is now restricted to the non-axisymmetric
+    path, which keeps `input.DIII-D` at machine precision while allowing the
+    local `input.cth_like_free_bdy_lasym_small` case to enter VMEC-style
+    reuse cadence.
+  - same-iteration restart paths now invalidate cached free-boundary control
+    tuples when `iter1` changes, so JAX recomputes `ivacskip` from the updated
+    restart anchor just like VMEC2000.
+  - direct solver history on `input.cth_like_free_bdy_lasym_small` now matches
+    the VMEC control trace around the late window:
+    `(94,94,3,0)`, `(95,95,3,0)`, `(96,96,3,0)`, `(97,97,3,0)`,
+    `(98,97,3,1)`, `(99,99,3,0)`, `(100,99,3,1)`.
+  - direct iter-99 comparator is back to near machine precision
+    (`source_sym ~2.6e-8`, `bvec_nonsing_fouri ~2.4e-8`,
+    `amatrix ~1.3e-11`, `potvac ~1.1e-7`, `bsqvac ~1.3e-7`).
+  - direct iter-100 comparator no longer has the old order-one reuse failure;
+    cached source/matrix channels are near machine precision
+    (`source_sym ~2.6e-8`, `bvec_nonsing_fouri ~2.4e-8`,
+    `amatrix ~1.3e-11`), with the remaining drift confined to the reused
+    field/coupling channels (`potvac ~7.1e-3`, `bsqvac ~1.25e-2`,
+    `freeb_coupling_pgcon ~1.25e-2`).
