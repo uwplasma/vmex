@@ -554,3 +554,23 @@ Legend:
     and passes current coarse thresholds at iter 80
     (`source_sym ~2.72e-1`, `bvec_nonsing_fouri ~2.80e-1`,
     `amatrix ~1.20e-1`, `potvac ~3.56e-1`).
+- Added direct half-mesh metric dump support for JAX `bcovar` parity tracing:
+  - `VMEC_JAX_DUMP_GMETRIC=1` writes `gmetric_iter*.dat` in VMEC-compatible
+    `(js, lt, lz, pguu, pguv, pgvv)` format.
+- Fixed the axisymmetric half-mesh metric convention in `vmec_bcovar`:
+  - when `lthreed=False`, JAX now keeps `pguv/pgvv` identically zero like VMEC2000,
+  - the half-mesh metric axis slot is now explicitly zeroed for diagnostics parity.
+- Re-ran the DIII-D iter-72 metric dump comparison after the axisymmetric `bcovar` fix:
+  - `pguv` and `pgvv` now match VMEC2000 exactly,
+  - the remaining first-order mismatch in this block is `pguu`
+    (`max_abs ~1.30e-1`, `max_rel ~3.85e-1` in
+    `/private/tmp/freeb_diiid_iter72_gmetric_after_fix/.../gmetric_iter72.dat`),
+  - next localization target is therefore the axisymmetric `pguu` half-mesh
+    assembly/order rather than the vac/sourceterm channels.
+- Revalidated the edited docs/tests around this patch:
+  - `pytest -q tests/test_dump_helpers.py tests/test_vmec_bcovar_smoke.py` -> `5 passed`,
+  - `LC_ALL=C LANG=C SPHINX_FAST=1 python -m sphinx -W -j auto -b html docs docs/_build/html` passes.
+- Re-ran the two axisymmetric DIII-D manifest cases after the `bcovar` fix:
+  - the current run is blocked at comparator level because no `jax_dumps` were
+    emitted (`missing vmec_jax dump: .../jax_dumps/scalpot_jax_iter*.npz`),
+  - this is presently a harness/runtime issue, not a measured metric-threshold failure.
