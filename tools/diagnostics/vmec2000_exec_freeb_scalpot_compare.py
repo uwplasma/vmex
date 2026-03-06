@@ -25,6 +25,8 @@ from typing import Any
 
 import numpy as np
 
+from vmec_jax.vmec2000_exec import find_vmec2000_exec
+
 
 _FORTRAN_FLOAT_RE = re.compile(
     r"^\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))(?:[DdEe]([+-]?\d+)|([+-]\d+))?\s*$"
@@ -798,7 +800,7 @@ def main() -> int:
     p.add_argument(
         "--vmec-exec",
         type=Path,
-        default=Path("/Users/rogeriojorge/local/test/STELLOPT/VMEC2000/Release/xvmec2000"),
+        default=find_vmec2000_exec(root=Path(__file__).resolve().parents[3]),
     )
     p.add_argument("--iter", type=int, default=1, help="Iteration index to compare.")
     p.add_argument("--max-iter", type=int, default=2, help="vmec_jax max_iter.")

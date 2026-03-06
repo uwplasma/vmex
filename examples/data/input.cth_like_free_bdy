@@ -1,7 +1,7 @@
 &INDATA
 
-! Preserved local free-boundary CTH-like parity fixture.
-  MGRID_FILE = '/Users/rogeriojorge/local/test/.workdir_freeb_coupling_iter60/mgrid_cth_like.nc',
+! Bundled free-boundary CTH-like parity fixture.
+  MGRID_FILE = 'mgrid_cth_like.nc',
   LFREEB = T,
   DELT = 0.7,
   TCON0 = 1.0,

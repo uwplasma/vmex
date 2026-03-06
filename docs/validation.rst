@@ -258,18 +258,17 @@ Observed behavior:
   inflated relative error in currentless/vacuum-like regimes despite small
   absolute differences.
 
-The long-standing n3are stress case is still tracked as a dedicated fixed-
-boundary diagnostic outlier for some post-processed channels; this does not
-change the project scope decision that the next major implementation target is
-free-boundary parity.
+The long-standing n3are stress case is still tracked as a dedicated diagnostic
+outlier for some post-processed channels, but it does not change the current
+product scope: parity coverage is maintained across the fixed/free,
+axisymmetric/non-axisymmetric, and ``lasym`` true/false matrix.
 
-Scope and known gaps
---------------------
+Scope and known caveats
+-----------------------
 
-The primary parity target for fixed-boundary solves is complete. The remaining
-scope gap is:
-
-- **free-boundary VMEC parity** (vacuum coupling and moving-boundary updates).
+VMEC2000-aligned parity is tracked across both fixed-boundary and
+free-boundary solves. Remaining work is focused on performance, memory, and
+continued regression expansion rather than missing capability branches.
 
 Operational caveat (known and accepted):
 

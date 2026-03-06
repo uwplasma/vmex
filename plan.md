@@ -1,8 +1,8 @@
 # VMEC-JAX Master Plan and New-Agent Handoff (Living Document)
 
-Last updated: 2026-03-05
+Last updated: 2026-03-06
 Primary owner: `vmec_jax` contributors
-Canonical repo: `/Users/rogeriojorge/local/test/vmec_jax`
+Canonical repo: `<repo-root>`
 
 ---
 
@@ -17,10 +17,10 @@ Update rules:
 - Keep an activity log at the end of each work session.
 - Never leave parity or performance claims without command outputs and artifacts.
 - Keep this file in sync with:
-  - `/Users/rogeriojorge/local/test/vmec_jax/README.md`
-  - `/Users/rogeriojorge/local/test/vmec_jax/docs/validation.rst`
-  - `/Users/rogeriojorge/local/test/vmec_jax/docs/performance.rst`
-  - `/Users/rogeriojorge/local/test/vmec_jax/docs/free_boundary_plan.rst`
+  - `<repo-root>/README.md`
+  - `<repo-root>/docs/validation.rst`
+  - `<repo-root>/docs/performance.rst`
+  - `<repo-root>/docs/free_boundary_plan.rst`
 
 ---
 
@@ -63,22 +63,22 @@ This code solves ideal MHD equilibrium for toroidal plasmas and is intended to m
 - Regression in differentiability or major memory/runtime regressions.
 
 ### Where everything lives
-- Workspace root: `/Users/rogeriojorge/local/test`
-- Main repo: `/Users/rogeriojorge/local/test/vmec_jax`
+- Workspace root: `<workspace-root>`
+- Main repo: `<repo-root>`
 - VMEC2000 source/executable (source of truth):
-  - source: `/Users/rogeriojorge/local/test/STELLOPT/VMEC2000/Sources`
-  - executable: `/Users/rogeriojorge/local/test/STELLOPT/VMEC2000/Release/xvmec2000`
+  - source: `<vmec2000-source>`
+  - executable: `<vmec2000-exec>`
 - Other local VMEC trees (non-canonical for parity unless explicitly tested):
-  - `/Users/rogeriojorge/local/STELLOPT/VMEC2000`
-  - `/Users/rogeriojorge/local/test/vmec2000`
+  - `<alt-vmec-tree-1>`
+  - `<alt-vmec-tree-2>`
 - Examples/data:
-  - `/Users/rogeriojorge/local/test/vmec_jax/examples/data`
+  - `<repo-root>/examples/data`
 - Diagnostics tools:
-  - `/Users/rogeriojorge/local/test/vmec_jax/tools/diagnostics`
+  - `<repo-root>/tools/diagnostics`
 - Tests:
-  - `/Users/rogeriojorge/local/test/vmec_jax/tests`
+  - `<repo-root>/tests`
 - Docs:
-  - `/Users/rogeriojorge/local/test/vmec_jax/docs`
+  - `<repo-root>/docs`
 
 ### Immediate operating workflow
 1. Run parity on target cases (fixed/free, lasym true/false).
@@ -114,55 +114,55 @@ Keep VMEC parity mode, while introducing better robustness, richer outputs, easi
 
 ### 3.1 Core solver paths
 - Driver and orchestration:
-  - `/Users/rogeriojorge/local/test/vmec_jax/vmec_jax/driver.py`
+  - `<repo-root>/vmec_jax/driver.py`
 - Nonlinear solver control and scan/non-scan paths:
-  - `/Users/rogeriojorge/local/test/vmec_jax/vmec_jax/solve.py`
+  - `<repo-root>/vmec_jax/solve.py`
 - Free-boundary coupling and vacuum/scalpot channels:
-  - `/Users/rogeriojorge/local/test/vmec_jax/vmec_jax/free_boundary.py`
+  - `<repo-root>/vmec_jax/free_boundary.py`
 - Geometry/forces/jacobian/residual:
-  - `/Users/rogeriojorge/local/test/vmec_jax/vmec_jax/vmec_bcovar.py`
-  - `/Users/rogeriojorge/local/test/vmec_jax/vmec_jax/vmec_forces.py`
-  - `/Users/rogeriojorge/local/test/vmec_jax/vmec_jax/vmec_jacobian.py`
-  - `/Users/rogeriojorge/local/test/vmec_jax/vmec_jax/vmec_residue.py`
+  - `<repo-root>/vmec_jax/vmec_bcovar.py`
+  - `<repo-root>/vmec_jax/vmec_forces.py`
+  - `<repo-root>/vmec_jax/vmec_jacobian.py`
+  - `<repo-root>/vmec_jax/vmec_residue.py`
 - Fourier/tables/transforms:
-  - `/Users/rogeriojorge/local/test/vmec_jax/vmec_jax/vmec_tomnsp.py`
-  - `/Users/rogeriojorge/local/test/vmec_jax/vmec_jax/fourier.py`
-  - `/Users/rogeriojorge/local/test/vmec_jax/vmec_jax/vmec_realspace.py`
+  - `<repo-root>/vmec_jax/vmec_tomnsp.py`
+  - `<repo-root>/vmec_jax/fourier.py`
+  - `<repo-root>/vmec_jax/vmec_realspace.py`
 - Preconditioners:
-  - `/Users/rogeriojorge/local/test/vmec_jax/vmec_jax/preconditioner_1d.py`
-  - `/Users/rogeriojorge/local/test/vmec_jax/vmec_jax/preconditioner_1d_jax.py`
+  - `<repo-root>/vmec_jax/preconditioner_1d.py`
+  - `<repo-root>/vmec_jax/preconditioner_1d_jax.py`
 - Output handling (`wout` and derived channels):
-  - `/Users/rogeriojorge/local/test/vmec_jax/vmec_jax/wout.py`
+  - `<repo-root>/vmec_jax/wout.py`
 
 ### 3.2 APIs for optimization/autodiff workflows
 - Optimization-facing tools:
-  - `/Users/rogeriojorge/local/test/vmec_jax/vmec_jax/optimization.py`
+  - `<repo-root>/vmec_jax/optimization.py`
 - Programmatic output adapter style object for optimization pipelines:
-  - `/Users/rogeriojorge/local/test/vmec_jax/vmec_jax/booz_input.py`
+  - `<repo-root>/vmec_jax/booz_input.py`
   - (contains JAX-array export channels such as `rmnc/zmns/lmns`, Nyquist fields, `xm/xn`, `xm_nyq/xn_nyq`, `iota`, etc.)
 
 ### 3.3 Diagnostics and parity infrastructure
 - Fixed-boundary comparator:
-  - `/Users/rogeriojorge/local/test/vmec_jax/tools/diagnostics/vmec2000_exec_stage_trace_compare.py`
+  - `<repo-root>/tools/diagnostics/vmec2000_exec_stage_trace_compare.py`
 - Free-boundary comparator:
-  - `/Users/rogeriojorge/local/test/vmec_jax/tools/diagnostics/vmec2000_exec_freeb_scalpot_compare.py`
+  - `<repo-root>/tools/diagnostics/vmec2000_exec_freeb_scalpot_compare.py`
 - Manifest and sweep runner:
-  - `/Users/rogeriojorge/local/test/vmec_jax/tools/diagnostics/parity_manifest.toml`
-  - `/Users/rogeriojorge/local/test/vmec_jax/tools/diagnostics/parity_sweep_manifest.py`
+  - `<repo-root>/tools/diagnostics/parity_manifest.toml`
+  - `<repo-root>/tools/diagnostics/parity_sweep_manifest.py`
 - Example runtime/memory sweep:
-  - `/Users/rogeriojorge/local/test/vmec_jax/tools/diagnostics/example_runtime_memory_matrix.py`
+  - `<repo-root>/tools/diagnostics/example_runtime_memory_matrix.py`
 
 ### 3.4 Core docs
 - Main docs index:
-  - `/Users/rogeriojorge/local/test/vmec_jax/docs/index.rst`
+  - `<repo-root>/docs/index.rst`
 - Algorithms and numerics:
-  - `/Users/rogeriojorge/local/test/vmec_jax/docs/algorithms.rst`
+  - `<repo-root>/docs/algorithms.rst`
 - Validation:
-  - `/Users/rogeriojorge/local/test/vmec_jax/docs/validation.rst`
+  - `<repo-root>/docs/validation.rst`
 - Performance:
-  - `/Users/rogeriojorge/local/test/vmec_jax/docs/performance.rst`
+  - `<repo-root>/docs/performance.rst`
 - Free-boundary implementation plan:
-  - `/Users/rogeriojorge/local/test/vmec_jax/docs/free_boundary_plan.rst`
+  - `<repo-root>/docs/free_boundary_plan.rst`
 
 ---
 
@@ -255,40 +255,40 @@ Keep VMEC parity mode, while introducing better robustness, richer outputs, easi
 
 ### 6.1 Tests
 ```bash
-cd /Users/rogeriojorge/local/test/vmec_jax
+cd <repo-root>
 pytest -q
 ```
 
 ### 6.2 Docs build (CI-equivalent locale settings)
 ```bash
-cd /Users/rogeriojorge/local/test/vmec_jax
+cd <repo-root>
 LC_ALL=C LANG=C SPHINX_FAST=1 python -m sphinx -W -j auto -b html docs docs/_build/html
 ```
 
 ### 6.3 Fixed-boundary parity compare
 ```bash
-cd /Users/rogeriojorge/local/test/vmec_jax
+cd <repo-root>
 python tools/diagnostics/vmec2000_exec_stage_trace_compare.py \
-  --input /Users/rogeriojorge/local/test/vmec_jax/examples/data/input.LandremanPaul2021_QA_lowres \
+  --input <repo-root>/examples/data/input.LandremanPaul2021_QA_lowres \
   --use-input-niter --max-iter 10 --dump-level full \
-  --vmec2000 /Users/rogeriojorge/local/test/STELLOPT/VMEC2000/Release/xvmec2000
+  --vmec2000 <vmec2000-exec>
 ```
 
 ### 6.4 Free-boundary parity compare (single iteration)
 ```bash
-cd /Users/rogeriojorge/local/test/vmec_jax
+cd <repo-root>
 python tools/diagnostics/vmec2000_exec_freeb_scalpot_compare.py \
-  --input /Users/rogeriojorge/local/test/STELLOPT/BENCHMARKS/VMEC_TEST/input.DIII-D \
+  --input <workspace-root>/STELLOPT/BENCHMARKS/VMEC_TEST/input.DIII-D \
   --iter 80 --max-iter 80 \
-  --vmec-exec /Users/rogeriojorge/local/test/STELLOPT/VMEC2000/Release/xvmec2000 \
+  --vmec-exec <vmec2000-exec> \
   --workdir /tmp/freeb_diiid_iter80
 ```
 
 ### 6.5 Manifest sweeps
 ```bash
-cd /Users/rogeriojorge/local/test/vmec_jax
+cd <repo-root>
 python tools/diagnostics/parity_sweep_manifest.py \
-  --tier smoke --vmec-exec /Users/rogeriojorge/local/test/STELLOPT/VMEC2000/Release/xvmec2000
+  --tier smoke --vmec-exec <vmec2000-exec>
 ```
 
 ---
@@ -311,7 +311,7 @@ Current requirement to enforce:
 
 ### 8.1 CI summary
 Workflow file:
-- `/Users/rogeriojorge/local/test/vmec_jax/.github/workflows/ci.yml`
+- `<repo-root>/.github/workflows/ci.yml`
 
 Current jobs:
 - Parity manifest smoke dry-run.
@@ -328,7 +328,7 @@ Current jobs:
 
 ### 8.3 Validation artifacts
 Keep machine-readable summaries under
-`/Users/rogeriojorge/local/test/vmec_jax/outputs/parity_sweeps/...`
+`<repo-root>/outputs/parity_sweeps/...`
 and attach key metrics in docs.
 
 ### 8.4 Documentation update checklist
@@ -716,9 +716,9 @@ Legend:
   - `input.LandremanSenguptaPlunk_section5p3_low_res` still falls back
     conservatively because the warmed probe detects real drift.
 - Re-ran the bundled-example benchmark matrix for the README refresh:
-  - local CPU + VMEC2000 summary:
+  - reference CPU host + VMEC2000 summary:
     `outputs/example_runtime_memory_matrix_cpu_20260306/summary.json`,
-  - GPU all-example summary from the `office` benchmark clone:
+  - GPU all-example summary from the `reference GPU host` benchmark clone:
     `outputs/example_runtime_memory_matrix_gpu_20260306_summary.json`,
   - corrected GPU free-boundary rerun summary:
     `outputs/example_runtime_memory_matrix_gpu_freeb_20260306_rerun_summary.json`.
@@ -729,15 +729,26 @@ Legend:
   - generated markdown table artifact:
     `outputs/readme_runtime_table_20260306.md`.
 - Current benchmark snapshot from the refreshed matrix:
-  - local CPU `lasym=True` fixed-boundary:
+  - reference CPU host `lasym=True` fixed-boundary:
     `input.up_down_asymmetric_tokamak` ~`6.72s` / ~`0.89 GiB`,
     `input.basic_non_stellsym_pressure` ~`29.73s` / ~`3.22 GiB`,
     `input.LandremanSenguptaPlunk_section5p3_low_res` ~`46.77s` / ~`4.07 GiB`,
-  - local CPU free-boundary:
+  - reference CPU host free-boundary:
     `input.DIII-D_lasym_false` ~`428.24s` / ~`7.36 GiB`,
     `input.cth_like_free_bdy` ~`41.83s` / ~`1.64 GiB`,
     `input.cth_like_free_bdy_lasym_small` ~`37.59s` / ~`1.47 GiB`,
-  - GPU host (`office`, dual RTX A4000):
+  - GPU host (`reference GPU host`, dual RTX A4000):
     `input.DIII-D_lasym_false` ~`1602.31s` / ~`6.23 GiB`,
     `input.n3are_R7.75B5.7_lowres` ~`710.51s` / ~`6.16 GiB`,
     `input.basic_non_stellsym_pressure` ~`223.36s` / ~`3.90 GiB`.
+- Completed a public-repo audit pass for portability and user-facing docs:
+  - removed tracked absolute workstation paths and host-specific instructions,
+  - bundled `mgrid_d3d_ef.nc` and `mgrid_cth_like.nc` so the shipped
+    free-boundary examples are self-contained,
+  - updated README/docs/package metadata to describe full fixed/free,
+    axisymmetric/non-axisymmetric, and `lasym=False/True` support,
+  - regenerated and visually QA’d the README runtime figure and the docs figure set,
+  - validated the audit pass with `pytest -q` (`135 passed, 12 skipped`) and
+    `SPHINX_FAST=1 python -m sphinx -W -j auto -b html docs docs/_build/html`,
+  - checked the GitHub repo state with `gh`: no open Dependabot alerts,
+    no code-scanning analysis uploaded, and secret scanning currently disabled.

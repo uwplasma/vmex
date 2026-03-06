@@ -12,7 +12,7 @@ implementation is **VMEC2000** (Fortran).
 What is vmec-jax?
 -----------------
 
-``vmec-jax`` is a from-scratch Python package that ports VMEC2000’s fixed-boundary
+``vmec-jax`` is a from-scratch Python package that ports VMEC2000’s equilibrium
 pipeline to JAX:
 
 - vectorized numerical kernels (``jax.numpy`` + ``jit``),
@@ -50,16 +50,15 @@ summary against bundled VMEC2000 reference ``wout`` files.
 Scope (current)
 ---------------
 
-The current parity target is **fixed-boundary** VMEC2000, and this is now the
-default validated scope:
+The validated scope covers the full VMEC branch matrix:
 
-- Axisymmetric (`ntor = 0`, `nfp = 1`) fixed-boundary parity is stable.
-- Non-axisymmetric fixed-boundary parity is validated for both
-  ``lasym=False`` and ``lasym=True`` in the VMEC2000 comparator workflow.
-- For cancellation-limited diagnostics (notably near-axis channels and
-  near-zero denominators), comparisons use the standard axis mask and relaxed
-  interpretation.
-- Remaining scope gap is **free-boundary** parity.
+- fixed-boundary and free-boundary solves,
+- axisymmetric (`ntor = 0`, `nfp = 1`) and non-axisymmetric configurations,
+- ``lasym=False`` and ``lasym=True`` branches.
+
+For cancellation-limited diagnostics (notably near-axis channels and
+near-zero denominators), comparisons use the standard axis mask and relaxed
+interpretation documented in :doc:`validation`.
 
 Initial guess
 -------------

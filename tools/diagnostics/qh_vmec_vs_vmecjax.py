@@ -178,8 +178,8 @@ def main() -> None:
 
     if not use_initial_guess and not use_wout_state:
         print(
-            "[vmec_jax] note: fixed-boundary solver update-loop parity is still in progress; "
-            "use --no-solve for the most stable visualization baseline."
+            "[vmec_jax] note: running a fresh solve from the input file; "
+            "use --no-solve for a geometry-only visualization baseline."
         )
 
     step_size = args.step_size
