@@ -243,13 +243,20 @@ def _compute_preconditioning_matrix(
     bx = np.zeros((ns_half, 3), dtype=float)
     cx = np.zeros((ns_half,), dtype=float)
     pfactor = -4.0
-    tau_safe = np.where(tau != 0.0, tau, 1.0)
+    gsqrt_safe = np.where(sqrtg != 0.0, sqrtg, 1.0)
     sqrt_sh_safe = np.where(sqrt_sh != 0.0, sqrt_sh, 1.0)
     for jh in range(ns_half):
         for kl in range(ntheta * nzeta):
             l = kl % ntheta
             k = kl // ntheta
-            p_tau = pfactor * r12[jh, l, k] * total_pressure[jh, l, k] / tau_safe[jh, l, k] * w_int[l]
+            p_tau = (
+                pfactor
+                * r12[jh, l, k]
+                * r12[jh, l, k]
+                * total_pressure[jh, l, k]
+                / gsqrt_safe[jh, l, k]
+                * w_int[l]
+            )
             t1a = xu12[jh, l, k] / delta_s
             t2a = 0.25 * (xu_e[jh + 1, l, k] / sqrt_sh_safe[jh] + xu_o[jh + 1, l, k]) / sqrt_sh_safe[jh]
             t3a = 0.25 * (xu_e[jh, l, k] / sqrt_sh_safe[jh] + xu_o[jh, l, k]) / sqrt_sh_safe[jh]

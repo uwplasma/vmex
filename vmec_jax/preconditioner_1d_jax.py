@@ -328,14 +328,14 @@ def _compute_preconditioning_matrix(
 
     pfactor = jnp.asarray(-4.0, dtype=xs.dtype)
     delta_s = jnp.asarray(delta_s, dtype=xs.dtype)
-    tau_safe = jnp.where(tau != 0.0, tau, 1.0)
+    gsqrt_safe = jnp.where(sqrtg != 0.0, sqrtg, 1.0)
     sqrt_sh_safe = jnp.where(sqrt_sh != 0.0, sqrt_sh, 1.0)
 
     # Broadcast helpers.
     sh = sqrt_sh_safe[:, None, None]
     w3 = w_int[None, :, None]
 
-    p_tau = pfactor * r12 * total_pressure / tau_safe * w3
+    p_tau = pfactor * r12 * r12 * total_pressure / gsqrt_safe * w3
     t1a = xu12 / delta_s
     xu_e_o = xu_e[1 : ns_half + 1]
     xu_e_i = xu_e[:ns_half]

@@ -4,6 +4,148 @@ import numpy as np
 import pytest
 
 
+def _reference_preconditioning_matrix(
+    *,
+    xs,
+    xu12,
+    xu_e,
+    xu_o,
+    x1_o,
+    r12,
+    total_pressure,
+    sqrtg,
+    bsupv,
+    w_int,
+    sqrt_sh,
+    sm,
+    sp,
+    delta_s,
+    ns_full,
+):
+    xs = np.asarray(xs, dtype=float)
+    xu12 = np.asarray(xu12, dtype=float)
+    xu_e = np.asarray(xu_e, dtype=float)
+    xu_o = np.asarray(xu_o, dtype=float)
+    x1_o = np.asarray(x1_o, dtype=float)
+    r12 = np.asarray(r12, dtype=float)
+    total_pressure = np.asarray(total_pressure, dtype=float)
+    sqrtg = np.asarray(sqrtg, dtype=float)
+    bsupv = np.asarray(bsupv, dtype=float)
+    w_int = np.asarray(w_int, dtype=float)
+    sqrt_sh = np.asarray(sqrt_sh, dtype=float)
+    sm = np.asarray(sm, dtype=float)
+    sp = np.asarray(sp, dtype=float)
+    ns_half = int(xs.shape[0])
+    ntheta = int(xs.shape[1])
+    nzeta = int(xs.shape[2])
+    ax = np.zeros((ns_half, 4), dtype=float)
+    bx = np.zeros((ns_half, 3), dtype=float)
+    cx = np.zeros((ns_half,), dtype=float)
+    pfactor = -4.0
+    for jh in range(ns_half):
+        sh = sqrt_sh[jh] if sqrt_sh[jh] != 0.0 else 1.0
+        for kl in range(ntheta * nzeta):
+            l = kl % ntheta
+            k = kl // ntheta
+            p_tau = pfactor * r12[jh, l, k] * r12[jh, l, k] * total_pressure[jh, l, k] / sqrtg[jh, l, k] * w_int[l]
+            t1a = xu12[jh, l, k] / delta_s
+            t2a = 0.25 * (xu_e[jh + 1, l, k] / sh + xu_o[jh + 1, l, k]) / sh
+            t3a = 0.25 * (xu_e[jh, l, k] / sh + xu_o[jh, l, k]) / sh
+            ax[jh, 0] += p_tau * t1a * t1a
+            ax[jh, 1] += p_tau * (t1a + t2a) * (-t1a + t3a)
+            ax[jh, 2] += p_tau * (t1a + t2a) * (t1a + t2a)
+            ax[jh, 3] += p_tau * (-t1a + t3a) * (-t1a + t3a)
+            t1b = 0.5 * (xs[jh, l, k] + 0.5 / sh * x1_o[jh + 1, l, k])
+            t2b = 0.5 * (xs[jh, l, k] + 0.5 / sh * x1_o[jh, l, k])
+            bx[jh, 0] += p_tau * t1b * t2b
+            bx[jh, 1] += p_tau * t1b * t1b
+            bx[jh, 2] += p_tau * t2b * t2b
+            cx[jh] += 0.25 * pfactor * (bsupv[jh, l, k] ** 2) * sqrtg[jh, l, k] * w_int[l]
+
+    axm = np.stack([-ax[:, 0], ax[:, 1] * sm * sp], axis=1)
+    bxm = np.stack([bx[:, 0], bx[:, 0] * sm * sp], axis=1)
+    z = np.zeros((1,), dtype=float)
+    axd = np.stack(
+        [
+            np.concatenate([z, ax[:, 0]], axis=0)[:ns_full] + np.concatenate([ax[:, 0], z], axis=0)[:ns_full],
+            np.concatenate([z, ax[:, 2] * (sm * sm)], axis=0)[:ns_full]
+            + np.concatenate([ax[:, 3] * (sp * sp), z], axis=0)[:ns_full],
+        ],
+        axis=1,
+    )
+    bxd = np.stack(
+        [
+            np.concatenate([z, bx[:, 1]], axis=0)[:ns_full] + np.concatenate([bx[:, 2], z], axis=0)[:ns_full],
+            np.concatenate([z, bx[:, 1] * (sm * sm)], axis=0)[:ns_full]
+            + np.concatenate([bx[:, 2] * (sp * sp), z], axis=0)[:ns_full],
+        ],
+        axis=1,
+    )
+    cxd = np.concatenate([z, cx], axis=0)[:ns_full] + np.concatenate([cx, z], axis=0)[:ns_full]
+    return axm, axd, bxm, bxd, cxd
+
+
+def _synthetic_precond_inputs():
+    xs = np.array([[[0.9], [1.1]], [[1.2], [1.4]]], dtype=float)
+    xu12 = np.array([[[0.2], [0.3]], [[0.4], [0.5]]], dtype=float)
+    xu_e = np.array([[[0.6], [0.7]], [[0.8], [0.9]], [[1.0], [1.1]]], dtype=float)
+    xu_o = np.array([[[0.15], [0.2]], [[0.25], [0.3]], [[0.35], [0.4]]], dtype=float)
+    x1_o = np.array([[[0.05], [0.07]], [[0.09], [0.11]], [[0.13], [0.15]]], dtype=float)
+    r12 = np.array([[[1.8], [1.6]], [[1.4], [1.2]]], dtype=float)
+    total_pressure = np.array([[[2.0], [2.2]], [[2.4], [2.6]]], dtype=float)
+    sqrtg = np.array([[[0.5], [0.7]], [[0.8], [1.1]]], dtype=float)
+    tau = np.full_like(sqrtg, 9.0)
+    bsupv = np.array([[[0.4], [0.45]], [[0.5], [0.55]]], dtype=float)
+    w_int = np.array([0.3, 0.7], dtype=float)
+    sqrt_sh = np.array([0.2, 0.6], dtype=float)
+    sm = np.array([0.4, 0.8], dtype=float)
+    sp = np.array([0.4, 1.2], dtype=float)
+    delta_s = 0.25
+    ns_full = 3
+    return {
+        "xs": xs,
+        "xu12": xu12,
+        "xu_e": xu_e,
+        "xu_o": xu_o,
+        "x1_o": x1_o,
+        "r12": r12,
+        "total_pressure": total_pressure,
+        "tau": tau,
+        "bsupv": bsupv,
+        "sqrtg": sqrtg,
+        "w_int": w_int,
+        "sqrt_sh": sqrt_sh,
+        "sm": sm,
+        "sp": sp,
+        "delta_s": delta_s,
+        "ns_full": ns_full,
+    }
+
+
+def test_numpy_precond_matrix_uses_sqrtg_not_tau():
+    from vmec_jax.preconditioner_1d import _compute_preconditioning_matrix
+
+    inputs = _synthetic_precond_inputs()
+    out = _compute_preconditioning_matrix(**inputs)
+    ref = _reference_preconditioning_matrix(**{k: v for k, v in inputs.items() if k != "tau"})
+
+    for got, want in zip(out, ref, strict=True):
+        assert np.allclose(got, want, rtol=1e-12, atol=1e-12)
+
+
+def test_jax_precond_matrix_uses_sqrtg_not_tau():
+    pytest.importorskip("jax")
+
+    from vmec_jax.preconditioner_1d_jax import _compute_preconditioning_matrix
+
+    inputs = _synthetic_precond_inputs()
+    out = _compute_preconditioning_matrix(**inputs)
+    ref = _reference_preconditioning_matrix(**{k: v for k, v in inputs.items() if k != "tau"})
+
+    for got, want in zip(out, ref, strict=True):
+        assert np.allclose(np.asarray(got), want, rtol=1e-12, atol=1e-12)
+
+
 def test_tcon_from_bcovar_precondn_diag_matches_reference_formula():
     pytest.importorskip("jax")
 
