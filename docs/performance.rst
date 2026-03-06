@@ -202,8 +202,9 @@ This reports:
 - full mgrid tensor load time,
 - interpolation throughput and sampled ``|B_ext|`` stats.
 
-Solver note: free-boundary is still in WP1 scaffold mode, so the external-field
-sampling is diagnostic-only. You can disable that sampling with:
+Solver note: this benchmark isolates external-field staging cost. The sampling
+toggle below is diagnostic-only; it does not describe overall free-boundary
+solver maturity. You can disable that sampling with:
 
 .. code-block:: bash
 
@@ -319,6 +320,127 @@ Current snapshot highlights:
   - ``input.LandremanPaul2021_QA_lowres`` and
     ``input.LandremanPaul2021_QA_lowres1`` are already faster than VMEC2000 on
     the local CPU, but slower on the current GPU stack.
+
+Why the GPU can still be slower than the CPU
+--------------------------------------------
+
+This is a consequence of the current solver architecture, not a statement that
+VMEC-like equilibria are fundamentally better suited to CPUs. The short
+version is:
+
+- the **fast** path is the scan-lifted path, where JAX can keep long stretches
+  of work on-device,
+- the **parity** path is still a host-controlled VMEC2000-style iteration,
+- many of the slowest benchmark rows are exactly those parity-path solves,
+  especially free-boundary cases.
+
+In more detail:
+
+1. VMEC2000 parity requires a host-controlled nonlinear loop
+
+   The conservative path preserves VMEC2000-style semantics such as:
+
+   - Garabedian time-step control,
+   - Jacobian sign checks,
+   - same-iteration restarts,
+   - free-boundary ``ivac/ivacskip/nvacskip`` cadence,
+   - per-iteration diagnostics and VMEC-style tables,
+   - stage transitions and cache refresh rules.
+
+   In the current implementation, those decisions still happen in Python on the
+   host. Each iteration therefore launches several short JAX kernels, waits for
+   scalar decisions, then launches the next block. CPUs tolerate that control
+   pattern much better than GPUs because the launch/synchronization cost is
+   smaller.
+
+2. The kernels are mostly moderate-size float64 kernels, not giant batched GPU kernels
+
+   For parity we run in float64, matching VMEC2000 numerics. On many of the
+   shipped examples the per-iteration grids are only moderate in size, so the
+   GPU never reaches the kind of occupancy that would amortize launch overhead.
+   The work is also heavy in transforms, synthesis, and tensor assembly
+   (`bcovar`, `tomnsps`, force kernels), which are often memory-traffic bound
+   rather than one large dense GEMM.
+
+   The result is that the CPU can look surprisingly competitive, because it is
+   executing the same float64 algebra with lower orchestration overhead and
+   without paying for many small host->device transitions.
+
+3. Free-boundary parity is the worst case for the current GPU stack
+
+   Free-boundary adds more than just one extra kernel. It adds:
+
+   - external/vacuum field staging,
+   - extra edge-force coupling,
+   - free-boundary reuse/refresh cadence,
+   - more restart-sensitive control flow,
+   - larger edge/state tensors on some axisymmetric cases.
+
+   The timing probes in this repo show that on the current parity free-boundary
+   GPU path, ``compute_forces`` dominates. For example, on the reference GPU
+   host:
+
+   - ``input.cth_like_free_bdy`` with ``performance_mode=False`` spends about
+     ``0.278s/iter`` in ``compute_forces``, while preconditioning and update are
+     much smaller.
+   - ``input.DIII-D_lasym_false`` is even more sensitive to force-path data
+     movement because of its large ``ns``.
+
+4. Data movement and edge-coupling details matter a lot on large free-boundary cases
+
+   Recent profiling made this explicit. Passing only the free-boundary
+   ``bsqvac`` edge slice into the force kernel, instead of rebuilding a mostly
+   zero ``(ns, ntheta, nzeta)`` array each iteration, was nearly neutral on the
+   smaller ``input.cth_like_free_bdy`` case but materially improved the large
+   axisymmetric case. On a parity-path ``max_iter=10`` probe of
+   ``input.DIII-D_lasym_false`` on the reference GPU host:
+
+   - ``compute_forces`` dropped from about ``0.579s/iter`` to about ``0.258s/iter``,
+   - ``preconditioner`` dropped from about ``0.067s/iter`` to about ``0.032s/iter``,
+   - ``update`` dropped from about ``0.091s/iter`` to about ``0.054s/iter``.
+
+   That is a good example of the current situation: the GPU is not losing
+   because of the physics model itself, but because the parity path still
+   contains control-flow and data-shaping patterns that are cheap on CPU and
+   expensive on GPU.
+
+5. Compilation and warmup amplify the gap on short runs
+
+   JAX/XLA compile cost is front-loaded. On short solves, or on runs that only
+   execute a small number of iterations per stage, compile and cache warmup can
+   dominate the wall time. This hurts accelerator results more than CPU results
+   because the GPU path has higher startup overhead and stricter sensitivity to
+   retracing/recompilation.
+
+6. Differentiability and parity constraints limit aggressive GPU-only shortcuts
+
+   ``vmec-jax`` is not trying to be a separate non-parity GPU solver. We are
+   preserving:
+
+   - end-to-end differentiability,
+   - VMEC2000-compatible iteration behavior where parity is required,
+   - VMEC-style outputs and diagnostics.
+
+   That rules out some easy GPU wins that would change ordering, skip
+   diagnostics, or replace the parity controller with a different nonlinear
+   algorithm. The current performance work is therefore focused on moving more
+   of the existing algorithm into longer device-resident regions without
+   changing the numerical contract.
+
+7. When the GPU already helps today
+
+   The GPU story is already much better when the solve can remain on the fast
+   scan path, or when repeated runs can amortize compile cost. That is why the
+   fixed-boundary scan cases improved materially after:
+
+   - accelerator-aware scan probing,
+   - larger quiet-scan chunks,
+   - reduced launch overhead in the scan path.
+
+   The next large gains on GPU are therefore expected to come from the same
+   direction on the parity/free-boundary side: keeping more of the
+   force/residual/control pipeline on-device for longer stretches, and reducing
+   per-iteration host orchestration.
 
 Experimental tridiagonal solver (scan only)
 -------------------------------------------

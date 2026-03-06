@@ -798,3 +798,10 @@ Legend:
     is effectively neutral (`~111.3s` warm on `70fc418` vs `~111.4s` warm on
     `f35ce44`), which is consistent with the optimization targeting large
     radial grids.
+- Updated user-facing performance docs to explain the current CPU-vs-GPU gap:
+  - README now gives a concise explanation that the slow GPU rows are mostly
+    parity-path solves with host-controlled VMEC2000 logic wrapped around many
+    short float64 kernels,
+  - `docs/performance.rst` now has a dedicated section explaining the current
+    architectural reasons in detail, with measured free-boundary examples and
+    the distinction between the fast scan path and the conservative parity path.

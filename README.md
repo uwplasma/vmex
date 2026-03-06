@@ -97,6 +97,8 @@ python examples/optimization/implicit_target_iota_volume.py --case circular_toka
 - LASYM fixed-boundary stages now use a timed scan/non-scan probe on CPU and a short parity-only probe on accelerators, so the default GPU path keeps the scan fast path without paying the full non-scan timing cost.
 - Quiet accelerator scan runs now use backend-aware larger chunks, capped to the remaining iterations, to reduce host/device launch overhead without changing solver parity.
 - Use `--parity` or `performance_mode=False` to force the conservative parity path.
+- The current GPU path is fastest when the solve can stay on the scan fast path. Many of the slow GPU benchmark rows are parity-path solves, especially free-boundary cases, where VMEC2000-style restart logic, Jacobian checks, and cadence control still run as a host-controlled loop around many short float64 kernels.
+- That means the GPU often sees too little work per launch to amortize host/device overhead, while the CPU benefits from lower launch latency and efficient float64 execution on these moderate-size grids. This is an implementation limit of the current parity path, not a claim that the underlying physics is inherently CPU-only.
 - Details and profiling guidance live in `docs/performance.rst`.
 - Parity methodology and current status live in `docs/validation.rst`.
 - The cross-case parity matrix (fixed/free boundary, axisym/non-axisym, `lasym=False/True`)
