@@ -7,6 +7,7 @@ power users to drop down to lower-level APIs.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
 import os
@@ -571,6 +572,11 @@ def run_fixed_boundary(
             axis_infer_missing = True
         if disable_axis_infer:
             axis_infer_missing = False
+        if (not disable_axis_infer) and bool(performance_mode) and bool(cfg.lasym):
+            # LASYM scan probes are more stable and much faster once the initial
+            # axis guess is inferred up front. Keep the conservative VMEC-style
+            # raw-axis start in parity mode.
+            axis_infer_missing = True
     if grid is None and solver_lower in ("vmec_lbfgs", "vmec_gn", "vmec2000_iter"):
         from .vmec_tomnsp import vmec_angle_grid
 
@@ -1040,11 +1046,14 @@ def run_fixed_boundary(
             static_i = _build_static_cfg(cfg_i)
             scan_mode = bool(use_scan)
             if bool(cfg.lasym):
-                # LASYM scan parity is still being finalized; default to the
-                # VMEC2000-style non-scan control path unless explicitly forced.
-                lasym_scan_env = os.getenv("VMEC_JAX_LASYM_USE_SCAN", "0").strip().lower()
-                if lasym_scan_env in ("", "0", "false", "no"):
+                # For LASYM fixed-boundary stages, allow scan as a candidate in
+                # the default fast path and let the automatic selector decide
+                # whether the warmed scan route is both safe and worthwhile.
+                lasym_scan_env = os.getenv("VMEC_JAX_LASYM_USE_SCAN", "auto").strip().lower()
+                if lasym_scan_env in ("0", "false", "no", "off"):
                     scan_mode = False
+                elif lasym_scan_env not in ("", "auto"):
+                    scan_mode = True
             # Optional scan-parity guard: probe a few iterations and disable scan
             # if it diverges from the non-scan VMEC2000 path.
             scan_guard_default = "0"
@@ -1238,7 +1247,8 @@ def run_fixed_boundary(
                 jit_precompile=bool(jit_precompile_eff),
                 scan_minimal_default=scan_minimal_default,
             )
-            dynamic_scan_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN", "0").strip().lower()
+            dynamic_scan_default = "1" if bool(cfg.lasym) else "0"
+            dynamic_scan_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN", dynamic_scan_default).strip().lower()
             dynamic_scan = dynamic_scan_env not in ("", "0", "false", "no")
             if (
                 dynamic_scan
@@ -1260,6 +1270,11 @@ def run_fixed_boundary(
                         fsq_tol = float(fsq_tol_env)
                     except Exception:
                         fsq_tol = 1e-6
+                    hist_atol_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN_ATOL", "1e-12").strip()
+                    try:
+                        hist_atol = float(hist_atol_env)
+                    except Exception:
+                        hist_atol = 1e-12
                     pre_kwargs = dict(solve_kwargs)
                     pre_kwargs.update(
                         {
@@ -1268,34 +1283,66 @@ def run_fixed_boundary(
                             "verbose_vmec2000_table": False,
                             "jit_warmup_iters": 0,
                             "jit_precompile": False,
+                            # Keep full histories in the probe so we can compare
+                            # the warmed scan/non-scan traces, not just a single
+                            # terminal residual scalar.
+                            "scan_minimal_default": False,
                         }
                     )
+
+                    def _history_relerr(lhs_hist, rhs_hist) -> float:
+                        lhs_hist = np.asarray(lhs_hist)
+                        rhs_hist = np.asarray(rhs_hist)
+                        if lhs_hist.shape != rhs_hist.shape:
+                            return float("inf")
+                        diff = np.max(np.abs(lhs_hist - rhs_hist))
+                        scale = max(float(np.max(np.abs(rhs_hist))), 1e-30)
+                        return float(diff / scale)
+
+                    def _histories_match(lhs, rhs) -> bool:
+                        keys = ("w_history", "fsqr2_history", "fsqz2_history", "fsql2_history")
+                        for key in keys:
+                            lhs_hist = np.asarray(getattr(lhs, key))
+                            rhs_hist = np.asarray(getattr(rhs, key))
+                            if lhs_hist.shape != rhs_hist.shape:
+                                return False
+                            if not np.allclose(lhs_hist, rhs_hist, rtol=float(fsq_tol), atol=float(hist_atol)):
+                                return False
+                        return True
+
                     def _run_pref(*, use_scan_flag: bool):
                         kwargs = dict(pre_kwargs)
                         kwargs["use_scan"] = bool(use_scan_flag)
+                        kwargs["resume_state"] = deepcopy(resume_state_stage)
+                        state_probe = deepcopy(state_stage_start)
                         if not bool(jit_forces_base):
                             try:
                                 import jax
                                 with jax.disable_jit():
                                     return solve_fixed_boundary_residual_iter(
-                                        state_stage_start,
+                                        state_probe,
                                         static_i,
                                         jit_forces=False,
                                         **kwargs,
                                     )
                             except Exception:
                                 return solve_fixed_boundary_residual_iter(
-                                    state_stage_start,
+                                    state_probe,
                                     static_i,
                                     jit_forces=False,
                                     **kwargs,
                                 )
                         return solve_fixed_boundary_residual_iter(
-                            state_stage_start,
+                            state_probe,
                             static_i,
                             jit_forces=True,
                             **kwargs,
                         )
+
+                    # Warm both variants before timing so the selector compares
+                    # steady-state iteration cost rather than one-off compile cost.
+                    _ = _run_pref(use_scan_flag=False)
+                    _ = _run_pref(use_scan_flag=True)
 
                     t0 = time.perf_counter()
                     res_pref_noscan = _run_pref(use_scan_flag=False)
@@ -1304,24 +1351,20 @@ def run_fixed_boundary(
                     res_pref_scan = _run_pref(use_scan_flag=True)
                     t_scan = time.perf_counter() - t0
 
-                    fsq_ns = None
-                    fsq_sc = None
-                    try:
-                        fsq_ns = float(np.asarray(res_pref_noscan.w_history)[-1])
-                    except Exception:
-                        fsq_ns = None
-                    try:
-                        fsq_sc = float(np.asarray(res_pref_scan.w_history)[-1])
-                    except Exception:
-                        fsq_sc = None
-                    fsq_ok = True
-                    if fsq_ns is not None and fsq_sc is not None:
-                        denom = max(abs(fsq_ns), 1e-30)
-                        fsq_ok = abs(fsq_sc - fsq_ns) / denom <= float(fsq_tol)
-                    choose_scan = (t_scan < t_noscan) and fsq_ok
+                    fsq_ok = _histories_match(res_pref_scan, res_pref_noscan)
+                    choose_scan = bool(fsq_ok) and (t_scan < t_noscan)
                     scan_mode = bool(choose_scan)
                     solve_kwargs["use_scan"] = bool(scan_mode)
                     if bool(verbose):
+                        if not bool(fsq_ok):
+                            print(
+                                "[vmec_jax] dynamic scan probe mismatch: "
+                                f"w={_history_relerr(res_pref_scan.w_history, res_pref_noscan.w_history):.3e} "
+                                f"fsqr={_history_relerr(res_pref_scan.fsqr2_history, res_pref_noscan.fsqr2_history):.3e} "
+                                f"fsqz={_history_relerr(res_pref_scan.fsqz2_history, res_pref_noscan.fsqz2_history):.3e} "
+                                f"fsql={_history_relerr(res_pref_scan.fsql2_history, res_pref_noscan.fsql2_history):.3e}",
+                                flush=True,
+                            )
                         print(
                             "[vmec_jax] dynamic scan selection: "
                             f"scan={t_scan:.3f}s noscan={t_noscan:.3f}s "
