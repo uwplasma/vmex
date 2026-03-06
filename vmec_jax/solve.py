@@ -10593,6 +10593,7 @@ def solve_fixed_boundary_residual_iter(
                     ijacob = 1
                     axis_reset_done = True
                     iter1 = iter2
+                    freeb_controls_cached = None
                     bad_growth_streak = 0
                     inv_tau = [0.15 / time_step] * k_ndamp
                     vmec2000_cache_valid = False
@@ -10728,6 +10729,7 @@ def solve_fixed_boundary_residual_iter(
                         restart_reason = "time_control"
                     bad_resets += 1
                     iter1 = iter2
+                    freeb_controls_cached = None
                     bad_growth_streak = 0
                     fsq_prev = fsq_prev_before
                     fsq0_prev = fsq0_prev_before
@@ -10908,6 +10910,7 @@ def solve_fixed_boundary_residual_iter(
                 time_step_iter = float(time_step)
                 bad_resets += 1
                 iter1 = iter2
+                freeb_controls_cached = None
                 bad_growth_streak = 0
                 fsq_prev = fsq_prev_before
                 fsq0_prev = fsq0_prev_before
@@ -11454,6 +11457,7 @@ def solve_fixed_boundary_residual_iter(
                             time_step = max(scale * float(step_size), 1e-12)
                         bad_resets += 1
                         iter1 = iter2
+                        freeb_controls_cached = None
                         fsq_prev = fsq_prev_before
                         fsq0_prev = fsq0_prev_before
                         inv_tau = [0.15 / time_step] * k_ndamp
@@ -11502,6 +11506,7 @@ def solve_fixed_boundary_residual_iter(
                         time_step = max(scale * float(step_size), 1e-12)
                     bad_resets += 1
                     iter1 = iter2
+                    freeb_controls_cached = None
                     fsq_prev = fsq_prev_before
                     fsq0_prev = fsq0_prev_before
                     inv_tau = [0.15 / time_step] * k_ndamp
