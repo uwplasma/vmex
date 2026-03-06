@@ -200,6 +200,27 @@ Updated benchmark snapshot (March 2026):
 - 2026-03-05 manifest rerun: ``input.cth_like_free_bdy_lasym_small`` is still
   excellent at iter 80 but fails global status at iter 100 from ``potvac`` plus
   runtime threshold misses.
+- 2026-03-05 non-axisymmetric ``lasym=True`` cadence fix:
+  the 3D path now preserves the pre-turn-on residual only where needed and
+  invalidates cached ``ivac/ivacskip`` controls whenever a same-iteration
+  restart updates ``iter1``. With that change, JAX matches the VMEC control
+  trace around the late reuse window on
+  ``input.cth_like_free_bdy_lasym_small``:
+  ``(94,94,3,0)``, ``(95,95,3,0)``, ``(96,96,3,0)``, ``(97,97,3,0)``,
+  ``(98,97,3,1)``, ``(99,99,3,0)``, ``(100,99,3,1)``.
+- 2026-03-05 direct comparator after the cadence fix:
+  ``input.cth_like_free_bdy_lasym_small`` iter 99 is back to near machine
+  precision on the full-update step
+  (``source_sym ~2.6e-8``, ``bvec_nonsing_fouri ~2.4e-8``,
+  ``amatrix ~1.3e-11``, ``potvac ~1.1e-7``, ``bsqvac ~1.3e-7``).
+- 2026-03-05 direct comparator after the cadence fix:
+  ``input.cth_like_free_bdy_lasym_small`` iter 100 no longer shows the old
+  order-one reuse failure; cached source/matrix channels are near machine
+  precision (``source_sym ~2.6e-8``, ``bvec_nonsing_fouri ~2.4e-8``,
+  ``amatrix ~1.3e-11``). The remaining reuse-step drift is now confined to
+  the reconstructed field/coupling channels
+  (``potvac ~7.1e-3``, ``bsqvac ~1.25e-2``,
+  ``freeb_coupling_pgcon ~1.25e-2``).
 - 2026-03-05 manifest cleanup rerun
   (``outputs/parity_sweeps/20260305_183853/summary.json``):
   preserved local ``input.cth_like_free_bdy`` now passes in-manifest at
