@@ -681,6 +681,24 @@ def _vmec_scale_m1_factors_from_mats(mats: dict[str, Any]) -> tuple[np.ndarray, 
     return fac_r, fac_z
 
 
+def _can_reassemble_precond_mats(mats: Any) -> bool:
+    if not isinstance(mats, dict):
+        return False
+    required = (
+        "arm_parity",
+        "ard_parity",
+        "brm_parity",
+        "brd_parity",
+        "azm_parity",
+        "azd_parity",
+        "bzm_parity",
+        "bzd_parity",
+        "cxd_full",
+        "delta_s",
+    )
+    return all(key in mats for key in required)
+
+
 def _maybe_dump_lam_gcl(
     *,
     frzl_pre,
@@ -1122,7 +1140,7 @@ def _maybe_dump_lulv(
     np.savez(path, **data)
 
 
-def _maybe_dump_precond_inputs(*, bc, trig, static, iter_idx: int) -> None:
+def _maybe_dump_precond_inputs(*, bc, trig, static, iter_idx: int, kernels=None) -> None:
     env = os.getenv("VMEC_JAX_DUMP_PRECOND", "")
     if not env or env == "0":
         return
@@ -1180,6 +1198,24 @@ def _maybe_dump_precond_inputs(*, bc, trig, static, iter_idx: int) -> None:
                         f"{zu12[j, lt, lz]:24.16E}"
                     f"{wint_full[j, lt, lz]:24.16E}\n"
                     )
+
+    if kernels is None:
+        return
+    try:
+        hidden = {
+            "tau": np.asarray(bc.jac.tau),
+            "rs": np.asarray(bc.jac.rs),
+            "zs": np.asarray(bc.jac.zs),
+            "pru_even": np.asarray(kernels.pru_even),
+            "pru_odd": np.asarray(kernels.pru_odd),
+            "pzu_even": np.asarray(kernels.pzu_even),
+            "pzu_odd": np.asarray(kernels.pzu_odd),
+            "pr1_odd": np.asarray(kernels.pr1_odd),
+            "pz1_odd": np.asarray(kernels.pz1_odd),
+        }
+    except Exception:
+        return
+    np.savez(outdir / f"precond_hidden_iter{int(iter_idx)}.npz", **hidden)
 
 
 def _maybe_dump_gmetric(*, bc, static, iter_idx: int) -> None:
@@ -4637,7 +4673,7 @@ def solve_fixed_boundary_residual_iter(
             )
             _maybe_dump_lulv(bc=k.bc, static=static, iter_idx=int(iter_idx), state=state, trig=trig)
             _maybe_dump_jacobian_terms(k=k, iter_idx=int(iter_idx))
-            _maybe_dump_precond_inputs(bc=k.bc, trig=trig, static=static, iter_idx=int(iter_idx))
+            _maybe_dump_precond_inputs(bc=k.bc, trig=trig, static=static, iter_idx=int(iter_idx), kernels=k)
             _maybe_dump_gmetric(bc=k.bc, static=static, iter_idx=int(iter_idx))
         if iter_idx is not None:
             _maybe_dump_force_kernels(k=k, static=static, iter_idx=int(iter_idx), label="raw")
@@ -9840,17 +9876,30 @@ def solve_fixed_boundary_residual_iter(
             t_precond_start = time.perf_counter() if timing_enabled else None
             frzl_lam_pre = None
             if bool(vmec2000_control) and bool(cfg.lthreed):
-                from .preconditioner_1d_jax import rz_preconditioner_apply, rz_preconditioner_matrices
+                from .preconditioner_1d_jax import (
+                    rz_preconditioner_apply,
+                    rz_preconditioner_matrices,
+                    rz_preconditioner_matrices_reassemble,
+                )
     
                 need_lam_prec = os.getenv("VMEC_JAX_DUMP_LAM", "") not in ("", "0")
                 need_lamcal = os.getenv("VMEC_JAX_DUMP_LAMCAL", "") not in ("", "0")
+                need_prec_reassemble = (
+                    (cache_prec_rz_jmax is not None)
+                    and (int(cache_prec_rz_jmax) != int(precond_expected_jmax))
+                    and _can_reassemble_precond_mats(cache_prec_rz_mats)
+                )
                 need_prec_refresh = (
                     (not bool(vmec2000_cache_valid))
                     or (cache_prec_lam_prec is None)
                     or (cache_prec_rz_mats is None)
                     or (cache_prec_rz_jmax is None)
                     or bool(need_bcovar_update)
-                    or (cache_prec_rz_jmax is not None and int(cache_prec_rz_jmax) != int(precond_expected_jmax))
+                    or (
+                        (cache_prec_rz_jmax is not None)
+                        and (int(cache_prec_rz_jmax) != int(precond_expected_jmax))
+                        and (not bool(need_prec_reassemble))
+                    )
                 )
                 if need_prec_refresh:
                     t_prec_refresh_start = time.perf_counter() if timing_enabled else None
@@ -9891,10 +9940,19 @@ def solve_fixed_boundary_residual_iter(
                         timing_stats["precond_refresh"] += time.perf_counter() - float(t_prec_refresh_start)
                 else:
                     lam_prec = cache_prec_lam_prec
-                    mats = cache_prec_rz_mats
-                    jmax = int(cache_prec_rz_jmax)
                     faclam_dump = cache_prec_faclam if need_lam_prec else None
                     lam_debug = cache_prec_lam_debug if need_lamcal else None
+                    if bool(need_prec_reassemble):
+                        mats, _jmin, jmax = rz_preconditioner_matrices_reassemble(
+                            mats=cache_prec_rz_mats,
+                            cfg=cfg,
+                            jmax_override=precond_jmax_override,
+                        )
+                        cache_prec_rz_mats = mats
+                        cache_prec_rz_jmax = int(jmax)
+                    else:
+                        mats = cache_prec_rz_mats
+                        jmax = int(cache_prec_rz_jmax)
                 _maybe_dump_lam_prec(lam_prec=lam_prec, faclam=faclam_dump, static=static, iter_idx=int(iter2))
                 _maybe_dump_precond_mats(
                     mats=mats,
@@ -9938,17 +9996,30 @@ def solve_fixed_boundary_residual_iter(
                 if getattr(frzl_rz, "flss", None) is not None:
                     flss = jnp.asarray(frzl_rz.flss) * jnp.asarray(lam_prec)
             elif not bool(cfg.lthreed):
-                from .preconditioner_1d_jax import rz_preconditioner_apply, rz_preconditioner_matrices
+                from .preconditioner_1d_jax import (
+                    rz_preconditioner_apply,
+                    rz_preconditioner_matrices,
+                    rz_preconditioner_matrices_reassemble,
+                )
 
                 need_lam_prec = os.getenv("VMEC_JAX_DUMP_LAM", "") not in ("", "0")
                 need_lamcal = os.getenv("VMEC_JAX_DUMP_LAMCAL", "") not in ("", "0")
+                need_prec_reassemble = (
+                    (cache_prec_rz_jmax is not None)
+                    and (int(cache_prec_rz_jmax) != int(precond_expected_jmax))
+                    and _can_reassemble_precond_mats(cache_prec_rz_mats)
+                )
                 need_prec_refresh = (
                     (not bool(vmec2000_cache_valid))
                     or (cache_prec_lam_prec is None)
                     or (cache_prec_rz_mats is None)
                     or (cache_prec_rz_jmax is None)
                     or bool(need_bcovar_update)
-                    or (cache_prec_rz_jmax is not None and int(cache_prec_rz_jmax) != int(precond_expected_jmax))
+                    or (
+                        (cache_prec_rz_jmax is not None)
+                        and (int(cache_prec_rz_jmax) != int(precond_expected_jmax))
+                        and (not bool(need_prec_reassemble))
+                    )
                 )
                 if need_prec_refresh:
                     t_prec_refresh_start = time.perf_counter() if timing_enabled else None
@@ -9989,10 +10060,19 @@ def solve_fixed_boundary_residual_iter(
                         timing_stats["precond_refresh"] += time.perf_counter() - float(t_prec_refresh_start)
                 else:
                     lam_prec = cache_prec_lam_prec
-                    mats = cache_prec_rz_mats
-                    jmax = int(cache_prec_rz_jmax)
                     faclam_dump = cache_prec_faclam if need_lam_prec else None
                     lam_debug = cache_prec_lam_debug if need_lamcal else None
+                    if bool(need_prec_reassemble):
+                        mats, _jmin, jmax = rz_preconditioner_matrices_reassemble(
+                            mats=cache_prec_rz_mats,
+                            cfg=cfg,
+                            jmax_override=precond_jmax_override,
+                        )
+                        cache_prec_rz_mats = mats
+                        cache_prec_rz_jmax = int(jmax)
+                    else:
+                        mats = cache_prec_rz_mats
+                        jmax = int(cache_prec_rz_jmax)
                 _maybe_dump_lam_prec(lam_prec=lam_prec, faclam=faclam_dump, static=static, iter_idx=int(iter2))
                 _maybe_dump_precond_mats(
                     mats=mats,

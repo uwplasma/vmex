@@ -211,8 +211,12 @@ Keep VMEC parity mode, while introducing better robustness, richer outputs, easi
   CTH-like `lasym=False` fixture now tracked via
   `examples/data/input.cth_like_free_bdy`.
 - Axisymmetric `lasym=True` DIII-D cases:
-  - transient mismatch around turn-on window (iter ~80) at ~1e-2 scale for source/potvac channels,
-  - post-turn-on iterations converge back to near machine precision in compared channels.
+  - turn-on-window preconditioner cache reuse now matches VMEC2000 order/cadence,
+  - iter 72 `scalfor` matrices match VMEC2000 to machine precision after `jmax=15 -> 16`
+    cache reassembly,
+  - direct iter-80 comparator on `input.DIII-D` is now near machine precision
+    (`source_sym ~2.1e-12`, `bvec_nonsing_fouri ~2.1e-12`,
+    `amatrix ~1.4e-13`, `potvac ~1.8e-12`).
 - Axisymmetric `lasym=False` free-boundary parity:
   - manifest case `examples/data/input.DIII-D_lasym_false` is tight at iter 80
     (`source_sym ~8.4e-3`, `bvec_nonsing_fouri ~8.4e-3`,
@@ -226,10 +230,9 @@ Keep VMEC parity mode, while introducing better robustness, richer outputs, easi
     `amatrix ~1.2e-1`, `potvac ~3.6e-1` at iter 80),
   - remaining preserved-mgrid dependency for the local CTH-like `lasym=False`
     smoke fixture.
-- Remaining work: tighten DIII-D turn-on-window drift by channel-level
-  alignment in the preconditioner path, improve the non-axisymmetric
-  `lasym=True` runtime/parity outlier, and replace preserved local free-boundary
-  fixtures with distributable inputs where practical.
+- Remaining work: improve the non-axisymmetric `lasym=True`
+  runtime/parity outlier, tighten post-turn-on `input.stellcopt`, and replace
+  preserved local free-boundary fixtures with distributable inputs where practical.
 
 ### 5.3 Practical parity policy
 - Compare with masks where numerically justified:
@@ -402,7 +405,7 @@ Legend:
 - [x] Implement VMEC-like dense vacuum coupling path and channel caching.
 - [x] Non-axisymmetric free-boundary parity on CTH-like reference.
 - [x] Axisymmetric `lasym=True` DIII-D parity is tight post turn-on.
-- [-] Reduce DIII-D turn-on-window drift around iter ~72-80 (`gsource/source_sym/bvec/potvac`).
+- [x] Reduce DIII-D turn-on-window drift around iter ~72-80 (`gsource/source_sym/bvec/potvac`).
 - [x] Add bexn decomposition diagnostics to localize turn-on drift.
 - [x] Add an automated axisymmetric `lasym=False` free-boundary case to the manifest.
 - [-] Keep a stable non-axisymmetric `lasym=False` free-boundary smoke fixture in the current checkout without depending on preserved local mgrid artifacts.
@@ -463,26 +466,16 @@ Legend:
 
 ## 12) Current immediate next steps (concrete execution)
 
-1. **DIII-D turn-on drift closure**
-   - Use new channels in `/Users/rogeriojorge/local/test/vmec_jax/vmec_jax/free_boundary.py` and comparator output:
-     - `snr/snv/snz`, `bexn_term_r/phi/z`, `bexn_recon`.
-   - Compare iter 72-80 and identify first channel that diverges above threshold.
-   - Current localization:
-     - iter 72 raw `gc` matches VMEC2000 to machine precision,
-     - first persistent mismatch is in **preconditioned** `gc` at iter 72,
-     - top-level free-boundary cadence/time-control already matches VMEC2000.
-   - New low-level dump support on JAX side:
-     - `VMEC_JAX_DUMP_PRECOND_MATS=1` writes `ar/br/dr/az/bz/dz` + `jmax/used_cache`,
-     - `VMEC_JAX_DUMP_LAM=1` now emits correct VMEC-style `ntmax=2` shape for axisymmetric `lasym=True`.
-   - Patch VMEC-order operation where mismatch begins.
-
-2. **Free-boundary LASYM non-axisymmetric expansion**
-   - Add at least one additional finite-pressure non-axisymmetric `lasym=True` free-boundary case to manifest.
+1. **Free-boundary LASYM non-axisymmetric expansion**
+   - Add at least one additional finite-pressure non-axisymmetric `lasym=True`
+     free-boundary case to manifest.
    - Set realistic thresholds and add to smoke/full tier as appropriate.
-   - Replace the preserved-local `lasym=False` CTH-like mgrid dependency with a distributable fixture or documented stable source.
-   - Tighten `input.stellcopt` post-turn-on parity now that the manifest compares iter 80 instead of pre-turn-on iterations.
+   - Replace the preserved-local `lasym=False` CTH-like mgrid dependency with a
+     distributable fixture or documented stable source.
+   - Tighten `input.stellcopt` post-turn-on parity now that the manifest compares
+     iter 80 instead of pre-turn-on iterations.
 
-3. **Default behavior hardening**
+2. **Default behavior hardening**
    - Ensure `vmec_jax input.name` is robust without manual env settings.
    - Keep adaptive scan/non-scan fallback based on solver signals.
 
@@ -590,3 +583,22 @@ Legend:
     with iter-80 metrics back in the expected turn-on envelope
     (`source_sym ~8.29e-3`, `bvec_nonsing_fouri ~8.31e-3`,
     `amatrix ~1.51e-3`, `potvac ~9.45e-3`).
+ - Closed the remaining DIII-D turn-on numerical gap in the preconditioner path:
+   - `preconditioner_1d_jax.py` now caches full parity coefficients and reassembles
+     `scalfor` matrices for a new `jmax` without forcing a fresh `bcovar` refresh,
+     matching VMEC2000 stale-cache behavior at free-boundary turn-on.
+   - direct iter-72 matrix comparison now matches VMEC2000 to machine precision
+     with `jmax=16` and `used_cache=True`
+     (`ar/dr/br/az/dz/bz rel ~1e-14`).
+   - direct `input.DIII-D` iter-80 free-boundary comparator now returns near
+     machine-precision parity across the prior turn-on blocker channels
+     (`source_sym ~2.06e-12`, `bvec_nonsing_fouri ~2.07e-12`,
+     `amatrix ~1.44e-13`, `potvac ~1.83e-12`).
+   - validation on this patch:
+     `pytest -q tests/test_dump_helpers.py tests/test_tcon_precondn_diag.py`
+     -> `10 passed`,
+     `pytest -q` -> `128 passed, 12 skipped`,
+     `python tools/diagnostics/parity_sweep_manifest.py --tier smoke ...`
+     -> `failed_cases=0`
+     with summary at
+     `outputs/parity_sweeps/20260305_211007/summary.json`.

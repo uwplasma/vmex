@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -144,6 +146,88 @@ def test_jax_precond_matrix_uses_sqrtg_not_tau():
 
     for got, want in zip(out, ref, strict=True):
         assert np.allclose(np.asarray(got), want, rtol=1e-12, atol=1e-12)
+
+
+def test_rz_precond_cache_reassembles_for_new_jmax():
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import jnp
+    from vmec_jax.preconditioner_1d_jax import rz_preconditioner_matrices, rz_preconditioner_matrices_reassemble
+
+    ns = 6
+    ntheta = 6
+    nzeta = 2
+    ntheta_eff = ntheta // 2 + 1
+    shape = (ns, ntheta_eff, nzeta)
+    base = jnp.arange(np.prod(shape), dtype=jnp.float64).reshape(shape)
+
+    cfg = SimpleNamespace(
+        mpol=4,
+        ntor=1,
+        ntheta=ntheta,
+        nzeta=nzeta,
+        nfp=1,
+        lasym=False,
+        lthreed=False,
+    )
+    bc = SimpleNamespace(
+        guu=jnp.ones(shape, dtype=jnp.float64),
+        bsq=1.0 + 0.01 * base,
+        bsupv=0.7 + 0.005 * base,
+        jac=SimpleNamespace(
+            r12=1.3 + 0.01 * base,
+            tau=2.0 + 0.01 * base,
+            sqrtg=0.9 + 0.01 * base,
+            rs=1.1 + 0.02 * base,
+            zs=0.8 + 0.015 * base,
+            ru12=0.6 + 0.01 * base,
+            zu12=0.4 + 0.01 * base,
+        ),
+    )
+    k = SimpleNamespace(
+        pru_even=0.2 + 0.01 * base,
+        pru_odd=0.3 + 0.01 * base,
+        pzu_even=0.4 + 0.01 * base,
+        pzu_odd=0.5 + 0.01 * base,
+        pr1_odd=0.6 + 0.01 * base,
+        pz1_odd=0.7 + 0.01 * base,
+    )
+    s = jnp.linspace(0.0, 1.0, ns, dtype=jnp.float64)
+
+    mats_base, _jmin_base, jmax_base = rz_preconditioner_matrices(
+        bc=bc,
+        k=k,
+        trig=None,
+        s=s,
+        cfg=cfg,
+        jmax_override=ns - 1,
+    )
+    mats_full, _jmin_full, jmax_full = rz_preconditioner_matrices(
+        bc=bc,
+        k=k,
+        trig=None,
+        s=s,
+        cfg=cfg,
+        jmax_override=ns,
+    )
+    mats_reassembled, _jmin_reassembled, jmax_reassembled = rz_preconditioner_matrices_reassemble(
+        mats=mats_base,
+        cfg=cfg,
+        jmax_override=ns,
+    )
+
+    assert int(jmax_base) == ns - 1
+    assert int(jmax_full) == ns
+    assert int(jmax_reassembled) == ns
+    assert np.asarray(mats_base["arm_parity"]).shape[0] == ns - 1
+    assert np.asarray(mats_base["ard_parity"]).shape[0] == ns
+    for key in ("ar", "br", "dr", "az", "bz", "dz"):
+        assert np.allclose(
+            np.asarray(mats_reassembled[key]),
+            np.asarray(mats_full[key]),
+            rtol=1e-12,
+            atol=1e-12,
+        )
 
 
 def test_tcon_from_bcovar_precondn_diag_matches_reference_formula():
