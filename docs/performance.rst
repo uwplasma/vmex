@@ -65,7 +65,7 @@ back to the non-scan loop if a mismatch is detected. It is **off by default**
 because it adds extra compilation and iteration overhead.
 
 Scan chunking (fixed NSTEP blocks)
----------------------------------
+----------------------------------
 
 To avoid retracing for variable tail lengths, the scan loop executes in fixed
 chunks of length ``NSTEP`` (the VMEC input parameter). Iterations beyond
@@ -210,7 +210,7 @@ If profiling free-boundary solver-only cost, disable sampling diagnostics:
   export VMEC_JAX_FREEB_SAMPLE_EXTERNAL=0
 
 Experimental tridiagonal solver (scan only)
-------------------------------------------
+-------------------------------------------
 
 The scan preconditioner can optionally use XLA's fused tridiagonal solver with
 pretransposed coefficients (``dl/d/du``) computed once per stage. This can be

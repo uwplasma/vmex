@@ -181,7 +181,7 @@ On the axis, VMEC applies *odd-m* rules:
 - :math:`m\ge 2`: force the internal odd field to zero on-axis.
 
 m=1 internal constraint (``lconm1``)
------------------------------------
+------------------------------------
 
 When ``LCONM1`` is enabled (VMEC default for 3D runs), VMEC stores the *m=1*
 boundary coefficients in a constrained internal basis:
