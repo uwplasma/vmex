@@ -61,3 +61,32 @@ def test_precond_mats_dump_writes_matrix_channels(tmp_path, monkeypatch):
     for key, arr in mats.items():
         assert np.array_equal(np.asarray(data[key]), arr)
 
+
+def test_gmetric_dump_writes_half_mesh_metric(tmp_path, monkeypatch):
+    from vmec_jax.solve import _maybe_dump_gmetric
+
+    static = SimpleNamespace(cfg=SimpleNamespace(ns=3))
+    bc = SimpleNamespace(
+        guu=np.arange(12, dtype=float).reshape(3, 2, 2),
+        guv=np.arange(12, 24, dtype=float).reshape(3, 2, 2),
+        gvv=np.arange(24, 36, dtype=float).reshape(3, 2, 2),
+    )
+
+    monkeypatch.setenv("VMEC_JAX_DUMP_GMETRIC", "1")
+    monkeypatch.setenv("VMEC_JAX_DUMP_DIR", str(tmp_path))
+    monkeypatch.setenv("VMEC_JAX_DUMP_ITER", "13")
+
+    _maybe_dump_gmetric(bc=bc, static=static, iter_idx=13)
+
+    path = tmp_path / "gmetric_iter13.dat"
+    lines = path.read_text().splitlines()
+
+    assert lines[:5] == [
+        "# bcovar metric dump (half mesh)",
+        "ns=3",
+        "ntheta3=2",
+        "nzeta=2",
+        "columns: js lt lz pguu pguv pgvv",
+    ]
+    assert lines[5].split() == ["1", "1", "1", "0.0000000000000000e+00", "1.2000000000000000e+01", "2.4000000000000000e+01"]
+    assert lines[-1].split() == ["3", "2", "2", "1.1000000000000000e+01", "2.3000000000000000e+01", "3.5000000000000000e+01"]

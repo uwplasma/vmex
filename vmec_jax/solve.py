@@ -1143,8 +1143,49 @@ def _maybe_dump_precond_inputs(*, bc, trig, static, iter_idx: int) -> None:
                         f"{bsq[j, lt, lz]:24.16E}"
                         f"{ru12[j, lt, lz]:24.16E}"
                         f"{zu12[j, lt, lz]:24.16E}"
-                        f"{wint_full[j, lt, lz]:24.16E}\n"
+                    f"{wint_full[j, lt, lz]:24.16E}\n"
                     )
+
+
+def _maybe_dump_gmetric(*, bc, static, iter_idx: int) -> None:
+    env = os.getenv("VMEC_JAX_DUMP_GMETRIC", "")
+    if not env or env == "0":
+        return
+    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
+    if iters is not None and int(iter_idx) not in iters:
+        return
+    outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    path = outdir / f"gmetric_iter{int(iter_idx)}.dat"
+
+    try:
+        guu = np.asarray(bc.guu)
+        guv = np.asarray(bc.guv)
+        gvv = np.asarray(bc.gvv)
+    except Exception:
+        return
+
+    if guu.ndim != 3 or guv.shape != guu.shape or gvv.shape != guu.shape:
+        return
+
+    ns = int(guu.shape[0])
+    ntheta3 = int(guu.shape[1])
+    nzeta = int(guu.shape[2])
+
+    with path.open("w", encoding="utf-8") as f:
+        f.write("# bcovar metric dump (half mesh)\n")
+        f.write(f"ns={ns}\n")
+        f.write(f"ntheta3={ntheta3}\n")
+        f.write(f"nzeta={nzeta}\n")
+        f.write("columns: js lt lz pguu pguv pgvv\n")
+        for lt in range(ntheta3):
+            for lz in range(nzeta):
+                for js in range(ns):
+                    f.write(
+                        f"{js + 1:6d}{lt + 1:6d}{lz + 1:6d}"
+                        f"{guu[js, lt, lz]:24.16e}{guv[js, lt, lz]:24.16e}{gvv[js, lt, lz]:24.16e}\n"
+                    )
+
 
 def _maybe_dump_xc(
     *,
@@ -4543,6 +4584,7 @@ def solve_fixed_boundary_residual_iter(
             _maybe_dump_lulv(bc=k.bc, static=static, iter_idx=int(iter_idx), state=state, trig=trig)
             _maybe_dump_jacobian_terms(k=k, iter_idx=int(iter_idx))
             _maybe_dump_precond_inputs(bc=k.bc, trig=trig, static=static, iter_idx=int(iter_idx))
+            _maybe_dump_gmetric(bc=k.bc, static=static, iter_idx=int(iter_idx))
         if iter_idx is not None:
             _maybe_dump_force_kernels(k=k, static=static, iter_idx=int(iter_idx), label="raw")
         include_edge_residual = bool(include_edge if include_edge_residual is None else include_edge_residual)
