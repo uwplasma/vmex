@@ -3799,10 +3799,6 @@ def solve_fixed_boundary_residual_iter(
         # WP2 free-boundary coupling is currently wired through the VMEC2000
         # control (non-scan) path, including ivacskip-driven reuse.
         use_scan = False
-    if free_boundary_enabled and jit_forces:
-        # Free-boundary bsqvac coupling changes per-iteration edge forcing.
-        # Keep this path non-jitted for now to avoid retrace/capture overhead.
-        jit_forces = False
     freeb_sample_env = os.getenv("VMEC_JAX_FREEB_SAMPLE_EXTERNAL", "1").strip().lower()
     freeb_sample_external = freeb_sample_env not in ("", "0", "false", "no")
 
@@ -5011,6 +5007,7 @@ def solve_fixed_boundary_residual_iter(
             include_edge: bool,
             include_edge_residual: bool | None = None,
             zero_m1: Any,
+            freeb_bsqvac_half: Any | None = None,
             constraint_rcon0: Any | None = None,
             constraint_zcon0: Any | None = None,
             constraint_precond_diag: tuple[Any, Any] | None = None,
@@ -5024,6 +5021,7 @@ def solve_fixed_boundary_residual_iter(
                 include_edge=include_edge,
                 include_edge_residual=include_edge_residual,
                 zero_m1=zero_m1,
+                freeb_bsqvac_half=freeb_bsqvac_half,
                 constraint_rcon0=constraint_rcon0,
                 constraint_zcon0=constraint_zcon0,
                 constraint_precond_diag=constraint_precond_diag,

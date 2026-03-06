@@ -224,14 +224,13 @@ Keep VMEC parity mode, while introducing better robustness, richer outputs, easi
   - iter 100+ returns to near machine precision,
   - targeted manifest rerun passes at iter 80/100/120.
 - Current free-boundary matrix gaps are split between:
-  - remaining non-axisymmetric `lasym=True` late reuse-step field drift plus
-    runtime overhead on `input.cth_like_free_bdy_lasym_small`:
-    current parity thresholds now pass at iter 80/100, but iter 100 still
-    shows reused field/coupling deltas
-    (`source_sym ~2.6e-8`, `bvec_nonsing_fouri ~2.4e-8`,
+  - remaining non-axisymmetric `lasym=True` late reuse-step field drift on
+    `input.cth_like_free_bdy_lasym_small`:
+    current parity thresholds pass at iter 80/100 and the manifest runtime
+    thresholds now pass again, but iter 100 still shows reused field/coupling
+    deltas (`source_sym ~2.6e-8`, `bvec_nonsing_fouri ~2.4e-8`,
     `amatrix ~1.3e-11`, `potvac ~1.0e-1`, `bsqvac ~3.1e-1`,
-    `freeb_coupling_pgcon ~3.1e-1`), and the full-tier case currently fails
-    by runtime only (`~115s` total vs `95s` limit),
+    `freeb_coupling_pgcon ~3.1e-1`),
   - coarse but valid post-turn-on parity on `input.stellcopt`
     (`source_sym ~2.7e-1`, `bvec_nonsing_fouri ~2.8e-1`,
     `amatrix ~1.2e-1`, `potvac ~3.6e-1` at iter 80),
@@ -662,3 +661,17 @@ Legend:
   - full-tier `freeb_nonaxis_lasym_true_cth_like_local` now fails only by
     runtime thresholds, not by parity thresholds
     (`outputs/parity_sweeps/20260306_073934/summary.json`).
+- Re-enabled jitted force kernels on the free-boundary non-scan path after
+  fixing the jitted wrapper to accept `freeb_bsqvac_half`.
+- Revalidated the key free-boundary parity paths with the free-boundary JIT fix:
+  - direct `input.DIII-D` iter 80 remains at near machine precision
+    (`source_sym ~2.06e-12`, `bvec_nonsing_fouri ~2.08e-12`,
+    `amatrix ~1.26e-13`, `potvac ~1.89e-12`),
+  - the full-tier `freeb_nonaxis_lasym_true_cth_like_local` manifest case now
+    passes with `failed_cases=0`
+    (`outputs/parity_sweeps/20260306_075253/summary.json`).
+- Measured a large default-path runtime drop on the heavy local free-boundary
+  `lasym=True` example:
+  - direct `run_fixed_boundary("examples/data/input.cth_like_free_bdy_lasym_small")`
+    fell from about `71.5s` to about `37.8s` on the same local machine and
+    iteration count.

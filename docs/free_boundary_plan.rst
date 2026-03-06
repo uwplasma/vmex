@@ -242,6 +242,20 @@ Updated benchmark snapshot (March 2026):
   (``potvac ~1.0e-1``, ``bsqvac ~3.1e-1``,
   ``freeb_coupling_pgcon ~3.1e-1``). The remaining failure mode for this case
   is runtime, not comparator thresholds.
+- 2026-03-06 free-boundary force-kernel JIT fix:
+  the non-scan free-boundary path now keeps the jitted force kernels enabled,
+  and the jitted wrapper accepts the free-boundary ``bsqvac`` edge-coupling
+  argument. This preserves DIII-D parity while removing the runtime-only
+  failure on the heavy local ``lasym=True`` case.
+- 2026-03-06 manifest rerun after the free-boundary JIT fix:
+  ``freeb_nonaxis_lasym_true_cth_like_local`` now passes with
+  ``failed_cases=0`` in
+  ``outputs/parity_sweeps/20260306_075253/summary.json``. Per-iteration
+  runtimes dropped to about ``33.5s`` at iter 80 and ``32.7s`` at iter 100.
+- 2026-03-06 direct full-solve runtime after the free-boundary JIT fix:
+  ``run_fixed_boundary("examples/data/input.cth_like_free_bdy_lasym_small")``
+  dropped from about ``71.5s`` to about ``37.8s`` on the same local machine
+  and iteration count.
 - 2026-03-05 manifest cleanup rerun
   (``outputs/parity_sweeps/20260305_183853/summary.json``):
   preserved local ``input.cth_like_free_bdy`` now passes in-manifest at
