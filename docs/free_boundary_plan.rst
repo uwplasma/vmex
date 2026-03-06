@@ -190,10 +190,10 @@ Updated benchmark snapshot (March 2026):
   ``grpmn_nonsing rel_scaled ~1e-11``, ``amatrix rel_scaled ~1e-11``,
   ``potvac rel_scaled ~1e-5``.
 - ``input.DIII-D`` / ``input.DIII-D_reset`` (axisymmetric, ``lasym=True``):
-  transient turn-on-window drift at iter 80
-  (``source_sym ~8.3e-3``, ``bvec_nonsing_fouri ~8.3e-3``,
-  ``amatrix ~1.5e-3``, ``potvac ~9.5e-3``), then near machine-precision
-  parity by iter 100+ (all these channels ``~1e-10`` or better).
+  direct turn-on-window comparator on ``input.DIII-D`` is now near
+  machine precision at iter 80
+  (``source_sym ~2.06e-12``, ``bvec_nonsing_fouri ~2.07e-12``,
+  ``amatrix ~1.44e-13``, ``potvac ~1.83e-12``).
 - 2026-03-05 manifest rerun: all fixed-boundary manifest cases passed.
 - 2026-03-05 manifest rerun: ``input.DIII-D`` and ``input.DIII-D_reset`` passed
   at current tightened thresholds.
@@ -217,13 +217,10 @@ Updated benchmark snapshot (March 2026):
   pre-turn-on iterations with missing dumps; it passes the current coarse
   thresholds with ``source_sym ~2.72e-1``, ``bvec_nonsing_fouri ~2.80e-1``,
   ``amatrix ~1.20e-1``, ``potvac ~3.56e-1``.
-- 2026-03-05 DIII-D iter-72 half-mesh metric trace:
-  after aligning the JAX ``gmetric`` dump to the VMEC pre-``R^2`` convention,
-  ``pguv`` and ``pgvv`` now match VMEC2000 exactly in ``gmetric_iter72.dat``;
-  the live ``bcovar`` field metric remains post-``R^2`` for ``bsubv``/``wb`` parity.
-  The remaining metric-side mismatch is isolated to ``pguu`` (currently
-  ``max_abs ~1.3e-1``, ``max_rel ~3.8e-1``), which is the next turn-on
-  localization target.
+- 2026-03-05 DIII-D iter-72 preconditioner cache diagnosis:
+  raw ``gc`` and hidden preconditioner inputs already matched VMEC2000 to
+  machine precision, and the first persistent mismatch was in the assembled
+  ``scalfor`` matrices after free-boundary turn-on.
 - 2026-03-05 DIII-D comparator path fix:
   relative ``MGRID_FILE`` entries are now resolved against the input file
   directory, which restores repo-root comparator runs. A direct rerun of
@@ -231,6 +228,20 @@ Updated benchmark snapshot (March 2026):
   expected turn-on-window parity metrics
   (``source_sym ~8.29e-3``, ``bvec_nonsing_fouri ~8.31e-3``,
   ``amatrix ~1.51e-3``, ``potvac ~9.45e-3``).
+- 2026-03-05 DIII-D preconditioner cache-reuse fix:
+  JAX now caches the full parity coefficients from ``precondn`` and
+  reassembles ``scalfor`` matrices for a new ``jmax`` without forcing a fresh
+  ``bcovar`` refresh. This matches VMEC2000 stale-cache behavior at the
+  turn-on ``jmax=15 -> 16`` transition.
+- 2026-03-05 direct iter-72 matrix comparison after the cache-reuse fix:
+  JAX ``scalfor`` matrices now match VMEC2000 to machine precision with
+  ``used_cache=True`` and ``jmax=16``
+  (``ar/dr/br/az/dz/bz rel ~1e-14``).
+- 2026-03-05 direct iter-80 comparator after the cache-reuse fix:
+  ``input.DIII-D`` now returns near machine-precision parity in the prior
+  turn-on blocker channels
+  (``source_sym ~2.06e-12``, ``bvec_nonsing_fouri ~2.07e-12``,
+  ``amatrix ~1.44e-13``, ``potvac ~1.83e-12``).
 - 2026-03-05 cold-start direct runtime/memory matrix vs VMEC2000:
   fixed-boundary default runs are currently about ``26x``-``50x`` slower and
   use about ``6x``-``12x`` more RSS.
@@ -289,12 +300,14 @@ Key implementation updates that closed the matrix-side gap:
   consumes iterations in coarse-to-fine order (VMEC-like), instead of
   prioritizing the finest stage. This restores early-iteration free-boundary
   diagnostics parity for staged inputs.
+- R/Z preconditioner caching now stores full parity coefficients and reuses
+  them across turn-on ``jmax`` changes, so the cached matrix path matches VMEC
+  ``scalfor`` reuse instead of recomputing fresh coefficients at iter 72.
 
-Current residual mismatch is concentrated in the free-boundary turn-on window
-for axisymmetric ``lasym=True`` trajectories. Time-control and restart traces
-are now aligned channel-by-channel (``iter1``, ``ivac``, ``ivacskip``,
-``irst``, ``res0/res1``, ``delt``), and post-turn-on parity returns to
-near machine precision. Cached-channel diagnostics
+The previous axisymmetric ``lasym=True`` turn-on residual is closed in the
+preconditioner path. Time-control and restart traces remain aligned
+channel-by-channel (``iter1``, ``ivac``, ``ivacskip``, ``irst``,
+``res0/res1``, ``delt``), and the cached-channel diagnostics
 (``source_sym_cached``, ``gsource_cached``, ``bvecNS_cached``,
 ``source_cache_iter``) remain enabled to localize any future reuse-step drift.
 

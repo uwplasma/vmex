@@ -153,3 +153,53 @@ def test_vmec_scale_m1_factors_fall_back_to_expanded_diagonals():
 
     assert np.allclose(fac_r, np.array([0.25, 0.3]))
     assert np.allclose(fac_z, np.array([0.75, 0.7]))
+
+
+def test_precond_inputs_dump_writes_hidden_kernel_channels(tmp_path, monkeypatch):
+    from vmec_jax.solve import _maybe_dump_precond_inputs
+
+    static = SimpleNamespace(cfg=SimpleNamespace(ns=3))
+    bc = SimpleNamespace(
+        bsq=np.arange(12, dtype=float).reshape(3, 2, 2),
+        jac=SimpleNamespace(
+            r12=np.arange(12, 24, dtype=float).reshape(3, 2, 2),
+            sqrtg=np.arange(24, 36, dtype=float).reshape(3, 2, 2),
+            ru12=np.arange(36, 48, dtype=float).reshape(3, 2, 2),
+            zu12=np.arange(48, 60, dtype=float).reshape(3, 2, 2),
+            tau=np.arange(60, 72, dtype=float).reshape(3, 2, 2),
+            rs=np.arange(72, 84, dtype=float).reshape(3, 2, 2),
+            zs=np.arange(84, 96, dtype=float).reshape(3, 2, 2),
+        ),
+    )
+    trig = SimpleNamespace(wint3_precond=np.ones((1, 2, 2), dtype=float) * 0.25)
+    kernels = SimpleNamespace(
+        pru_even=np.arange(96, 108, dtype=float).reshape(3, 2, 2),
+        pru_odd=np.arange(108, 120, dtype=float).reshape(3, 2, 2),
+        pzu_even=np.arange(120, 132, dtype=float).reshape(3, 2, 2),
+        pzu_odd=np.arange(132, 144, dtype=float).reshape(3, 2, 2),
+        pr1_odd=np.arange(144, 156, dtype=float).reshape(3, 2, 2),
+        pz1_odd=np.arange(156, 168, dtype=float).reshape(3, 2, 2),
+    )
+
+    monkeypatch.setenv("VMEC_JAX_DUMP_PRECOND", "1")
+    monkeypatch.setenv("VMEC_JAX_DUMP_DIR", str(tmp_path))
+    monkeypatch.setenv("VMEC_JAX_DUMP_ITER", "17")
+
+    _maybe_dump_precond_inputs(bc=bc, trig=trig, static=static, iter_idx=17, kernels=kernels)
+
+    path = tmp_path / "precond_hidden_iter17.npz"
+    data = np.load(path)
+
+    expected = {
+        "tau": bc.jac.tau,
+        "rs": bc.jac.rs,
+        "zs": bc.jac.zs,
+        "pru_even": kernels.pru_even,
+        "pru_odd": kernels.pru_odd,
+        "pzu_even": kernels.pzu_even,
+        "pzu_odd": kernels.pzu_odd,
+        "pr1_odd": kernels.pr1_odd,
+        "pz1_odd": kernels.pz1_odd,
+    }
+    for key, arr in expected.items():
+        assert np.array_equal(np.asarray(data[key]), arr)

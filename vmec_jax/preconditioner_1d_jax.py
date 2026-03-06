@@ -394,6 +394,198 @@ def _compute_preconditioning_matrix(
     return axm, axd, bxm, bxd, cxd
 
 
+def _resolve_tridi_flags(*, use_precomputed: bool | None, use_lax_tridi: bool | None) -> tuple[bool, bool]:
+    if use_precomputed is None:
+        use_precomputed = os.getenv("VMEC_JAX_TRIDI_PRECOMPUTE", "0").strip().lower() not in (
+            "",
+            "0",
+            "false",
+            "no",
+        )
+    if use_lax_tridi is None:
+        use_lax_tridi = os.getenv("VMEC_JAX_TRIDI_SOLVE", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "lax",
+            "force",
+        )
+    return bool(use_precomputed), bool(use_lax_tridi)
+
+
+@partial(jit, static_argnames=("cfg", "jmax_override"))
+def _assemble_rz_preconditioner_matrices_impl(
+    *,
+    arm,
+    ard,
+    brm,
+    brd,
+    azm,
+    azd,
+    bzm,
+    bzd,
+    cxd,
+    delta_s,
+    cfg,
+    jmax_override: int | None = None,
+    use_precomputed: bool | None = None,
+    use_lax_tridi: bool | None = None,
+) -> tuple[dict[str, Any], Any, int]:
+    """Assemble VMEC R/Z preconditioner matrices from cached parity coefficients."""
+    ard = jnp.asarray(ard)
+    ns = int(ard.shape[0])
+    ns_f_default = max(ns - 1, 1)
+    if jmax_override is None:
+        ns_f = ns_f_default
+    else:
+        ns_f = int(max(1, min(int(jmax_override), ns)))
+    dtype = ard.dtype
+
+    arm = jnp.asarray(arm, dtype=dtype)
+    brm = jnp.asarray(brm, dtype=dtype)
+    brd = jnp.asarray(brd, dtype=dtype)
+    azm = jnp.asarray(azm, dtype=dtype)
+    azd = jnp.asarray(azd, dtype=dtype)
+    bzm = jnp.asarray(bzm, dtype=dtype)
+    bzd = jnp.asarray(bzd, dtype=dtype)
+    cxd = jnp.asarray(cxd, dtype=dtype)
+    delta_s = jnp.asarray(delta_s, dtype=dtype)
+
+    mpol = int(cfg.mpol)
+    nrange = int(cfg.ntor) + 1
+    nfp = float(cfg.nfp)
+    m = jnp.arange(mpol, dtype=dtype)
+    n = jnp.arange(nrange, dtype=dtype)
+    m2 = (m * m)[None, :, None]
+    n2 = ((n * nfp) ** 2)[None, None, :]
+    m_par = (jnp.arange(mpol) % 2).astype(jnp.int32)
+
+    ns_half = int(arm.shape[0])
+    pad_rows = max(ns_f - ns_half, 0)
+    if pad_rows > 0:
+        z_arm = jnp.zeros((pad_rows, arm.shape[1]), dtype=dtype)
+        z_azm = jnp.zeros((pad_rows, azm.shape[1]), dtype=dtype)
+        arm_f = jnp.concatenate([arm, z_arm], axis=0)
+        brm_f = jnp.concatenate([brm, z_arm], axis=0)
+        azm_f = jnp.concatenate([azm, z_azm], axis=0)
+        bzm_f = jnp.concatenate([bzm, z_azm], axis=0)
+    else:
+        arm_f = arm[:ns_f]
+        brm_f = brm[:ns_f]
+        azm_f = azm[:ns_f]
+        bzm_f = bzm[:ns_f]
+    ard_f = ard[:ns_f]
+    brd_f = brd[:ns_f]
+    azd_f = azd[:ns_f]
+    bzd_f = bzd[:ns_f]
+    cxd_f = cxd[:ns_f]
+
+    arm_m = arm_f[:, m_par]
+    brm_m = brm_f[:, m_par]
+    ard_m = ard_f[:, m_par]
+    brd_m = brd_f[:, m_par]
+    azm_m = azm_f[:, m_par]
+    bzm_m = bzm_f[:, m_par]
+    azd_m = azd_f[:, m_par]
+    bzd_m = bzd_f[:, m_par]
+
+    ar = -(arm_m[:, :, None] + brm_m[:, :, None] * m2)
+    az = -(azm_m[:, :, None] + bzm_m[:, :, None] * m2)
+    dr = -(ard_m[:, :, None] + brd_m[:, :, None] * m2 + cxd_f[:, None, None] * n2)
+    dz = -(azd_m[:, :, None] + bzd_m[:, :, None] * m2 + cxd_f[:, None, None] * n2)
+
+    br = jnp.zeros_like(ar)
+    bz = jnp.zeros_like(az)
+    if ns_f > 1:
+        br = br.at[1:].set(-(arm_m[:-1, :, None] + brm_m[:-1, :, None] * m2))
+        bz = bz.at[1:].set(-(azm_m[:-1, :, None] + bzm_m[:-1, :, None] * m2))
+
+    if ns_f > 0 and mpol > 1:
+        ar = ar.at[0, 1:, :].set(0.0)
+        az = az.at[0, 1:, :].set(0.0)
+        dr = dr.at[0, 1:, :].set(0.0)
+        dz = dz.at[0, 1:, :].set(0.0)
+
+    if ns_f > 1 and mpol > 1:
+        dr = dr.at[1, 1, :].add(br[1, 1, :])
+        dz = dz.at[1, 1, :].add(bz[1, 1, :])
+
+    if ns_f >= ns and ns > 0:
+        edge_pedestal = jnp.asarray(0.05, dtype=dtype)
+        fac = jnp.asarray(0.25, dtype=dtype)
+        hs = jnp.asarray(delta_s, dtype=dtype)
+        mult_fac = jnp.minimum(fac, fac * hs * jnp.asarray(15.0, dtype=dtype))
+        edge_idx = ns - 1
+        if mpol > 0:
+            dr = dr.at[edge_idx, 0:1, :].multiply(1.0 + edge_pedestal)
+            dz = dz.at[edge_idx, 0:1, :].multiply(1.0 + edge_pedestal)
+        if mpol > 1:
+            dr = dr.at[edge_idx, 1:2, :].multiply(1.0 + edge_pedestal)
+            dz = dz.at[edge_idx, 1:2, :].multiply(1.0 + edge_pedestal)
+        if mpol > 2:
+            dr = dr.at[edge_idx, 2:, :].multiply(1.0 + 2.0 * edge_pedestal)
+            dz = dz.at[edge_idx, 2:, :].multiply(1.0 + 2.0 * edge_pedestal)
+        if mpol > 0 and nrange > 0:
+            dz = dz.at[edge_idx, 0, 0].multiply((1.0 - mult_fac) / (1.0 + edge_pedestal))
+
+    use_precomputed, use_lax_tridi = _resolve_tridi_flags(
+        use_precomputed=use_precomputed,
+        use_lax_tridi=use_lax_tridi,
+    )
+    cr = ir = cz = iz = None
+    if use_precomputed:
+        cr, ir = _tridi_precompute_coeffs(ar, dr, br)
+        cz, iz = _tridi_precompute_coeffs(az, dz, bz)
+    dlr_t = dr_t = dur_t = None
+    dlz_t = dz_t = duz_t = None
+    if use_lax_tridi:
+        dlr_t, dr_t, dur_t = _tridi_pretranspose_for_lax(ar, dr, br)
+        dlz_t, dz_t, duz_t = _tridi_pretranspose_for_lax(az, dz, bz)
+
+    jmin_m = jnp.where(jnp.arange(mpol) > 0, 1, 0).astype(jnp.int32)
+    jmin = jmin_m[:, None] * jnp.ones((mpol, nrange), dtype=jnp.int32)
+
+    mats = {
+        "ar": ar,
+        "br": br,
+        "dr": dr,
+        "az": az,
+        "bz": bz,
+        "dz": dz,
+        "arm_parity": arm,
+        "ard_parity": ard,
+        "brm_parity": brm,
+        "brd_parity": brd,
+        "azm_parity": azm,
+        "azd_parity": azd,
+        "bzm_parity": bzm,
+        "bzd_parity": bzd,
+        "cxd_full": cxd,
+        "delta_s": delta_s,
+    }
+    if cr is not None:
+        mats["cr"] = cr
+    if ir is not None:
+        mats["ir"] = ir
+    if cz is not None:
+        mats["cz"] = cz
+    if iz is not None:
+        mats["iz"] = iz
+    if dlr_t is not None:
+        mats["dlr_t"] = dlr_t
+    if dr_t is not None:
+        mats["dr_t"] = dr_t
+    if dur_t is not None:
+        mats["dur_t"] = dur_t
+    if dlz_t is not None:
+        mats["dlz_t"] = dlz_t
+    if dz_t is not None:
+        mats["dz_t"] = dz_t
+    if duz_t is not None:
+        mats["duz_t"] = duz_t
+    return mats, jmin, int(ns_f)
+
+
 @partial(jit, static_argnames=("cfg", "jmax_override"))
 def _rz_preconditioner_matrices_impl(
     *,
@@ -408,11 +600,6 @@ def _rz_preconditioner_matrices_impl(
     """Return VMEC R/Z radial preconditioner matrices (JAX, fixed-boundary)."""
     s = jnp.asarray(s)
     ns = int(s.shape[0])
-    ns_f_default = max(ns - 1, 1)
-    if jmax_override is None:
-        ns_f = ns_f_default
-    else:
-        ns_f = int(max(1, min(int(jmax_override), ns)))
     dtype = jnp.asarray(bc.guu).dtype
     w_int = _wint_from_config(cfg=cfg, dtype=dtype)
 
@@ -442,7 +629,7 @@ def _rz_preconditioner_matrices_impl(
         sm=sm,
         sp=sp,
         delta_s=delta_s,
-        ns_full=ns_f,
+        ns_full=ns,
     )
     azm, azd, bzm, bzd, _cxd_z = _compute_preconditioning_matrix(
         xs=jnp.asarray(bc.jac.rs, dtype=dtype)[1:],
@@ -460,139 +647,24 @@ def _rz_preconditioner_matrices_impl(
         sm=sm,
         sp=sp,
         delta_s=delta_s,
-        ns_full=ns_f,
+        ns_full=ns,
     )
-
-    mpol = int(cfg.mpol)
-    nrange = int(cfg.ntor) + 1
-    nfp = float(cfg.nfp)
-    m = jnp.arange(mpol, dtype=dtype)
-    n = jnp.arange(nrange, dtype=dtype)
-    m2 = (m * m)[None, :, None]
-    n2 = ((n * nfp) ** 2)[None, None, :]
-    m_par = (jnp.arange(mpol) % 2).astype(jnp.int32)
-    ns_half = int(arm.shape[0])
-    pad_rows = max(ns_f - ns_half, 0)
-    if pad_rows > 0:
-        z_arm = jnp.zeros((pad_rows, arm.shape[1]), dtype=dtype)
-        z_azm = jnp.zeros((pad_rows, azm.shape[1]), dtype=dtype)
-        arm = jnp.concatenate([arm, z_arm], axis=0)
-        brm = jnp.concatenate([brm, z_arm], axis=0)
-        azm = jnp.concatenate([azm, z_azm], axis=0)
-        bzm = jnp.concatenate([bzm, z_azm], axis=0)
-    arm_m = arm[:, m_par]
-    brm_m = brm[:, m_par]
-    ard_m = ard[:, m_par]
-    brd_m = brd[:, m_par]
-    azm_m = azm[:, m_par]
-    bzm_m = bzm[:, m_par]
-    azd_m = azd[:, m_par]
-    bzd_m = bzd[:, m_par]
-
-    ar = -(arm_m[:, :, None] + brm_m[:, :, None] * m2)
-    az = -(azm_m[:, :, None] + bzm_m[:, :, None] * m2)
-    dr = -(ard_m[:, :, None] + brd_m[:, :, None] * m2 + cxd[:, None, None] * n2)
-    dz = -(azd_m[:, :, None] + bzd_m[:, :, None] * m2 + cxd[:, None, None] * n2)
-
-    br = jnp.zeros_like(ar)
-    bz = jnp.zeros_like(az)
-    if ns_f > 1:
-        br = br.at[1:].set(-(arm_m[:-1, :, None] + brm_m[:-1, :, None] * m2))
-        bz = bz.at[1:].set(-(azm_m[:-1, :, None] + bzm_m[:-1, :, None] * m2))
-
-    # Set matrices to 0 for jf < jmin(m,n).
-    if ns_f > 0 and mpol > 1:
-        ar = ar.at[0, 1:, :].set(0.0)
-        az = az.at[0, 1:, :].set(0.0)
-        dr = dr.at[0, 1:, :].set(0.0)
-        dz = dz.at[0, 1:, :].set(0.0)
-
-    if ns_f > 1 and mpol > 1:
-        dr = dr.at[1, 1, :].add(br[1, 1, :])
-        dz = dz.at[1, 1, :].add(bz[1, 1, :])
-
-    # VMEC scalfor free-boundary edge conditioning (scalfor.f):
-    # when jmax==ns (vacuum active), strengthen edge diagonals and apply
-    # the iflag=1 stabilization term to the Z-system m=n=0 mode.
-    if ns_f >= ns and ns > 0:
-        edge_pedestal = jnp.asarray(0.05, dtype=dtype)
-        fac = jnp.asarray(0.25, dtype=dtype)
-        hs = jnp.asarray(delta_s, dtype=dtype)
-        mult_fac = jnp.minimum(fac, fac * hs * jnp.asarray(15.0, dtype=dtype))
-        edge_idx = ns - 1
-        if mpol > 0:
-            dr = dr.at[edge_idx, 0:1, :].multiply(1.0 + edge_pedestal)
-            dz = dz.at[edge_idx, 0:1, :].multiply(1.0 + edge_pedestal)
-        if mpol > 1:
-            dr = dr.at[edge_idx, 1:2, :].multiply(1.0 + edge_pedestal)
-            dz = dz.at[edge_idx, 1:2, :].multiply(1.0 + edge_pedestal)
-        if mpol > 2:
-            dr = dr.at[edge_idx, 2:, :].multiply(1.0 + 2.0 * edge_pedestal)
-            dz = dz.at[edge_idx, 2:, :].multiply(1.0 + 2.0 * edge_pedestal)
-        if mpol > 0 and nrange > 0:
-            dz = dz.at[edge_idx, 0, 0].multiply((1.0 - mult_fac) / (1.0 + edge_pedestal))
-
-    if use_precomputed is None:
-        use_precomputed = os.getenv("VMEC_JAX_TRIDI_PRECOMPUTE", "0").strip().lower() not in (
-            "",
-            "0",
-            "false",
-            "no",
-        )
-    if use_lax_tridi is None:
-        use_lax_tridi = os.getenv("VMEC_JAX_TRIDI_SOLVE", "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-            "lax",
-            "force",
-        )
-    cr = ir = cz = iz = None
-    if use_precomputed:
-        cr, ir = _tridi_precompute_coeffs(ar, dr, br)
-        cz, iz = _tridi_precompute_coeffs(az, dz, bz)
-    dlr_t = dr_t = dur_t = None
-    dlz_t = dz_t = duz_t = None
-    if use_lax_tridi:
-        dlr_t, dr_t, dur_t = _tridi_pretranspose_for_lax(ar, dr, br)
-        dlz_t, dz_t, duz_t = _tridi_pretranspose_for_lax(az, dz, bz)
-
-    jmin_m = jnp.where(jnp.arange(mpol) > 0, 1, 0).astype(jnp.int32)
-    jmin = jmin_m[:, None] * jnp.ones((mpol, nrange), dtype=jnp.int32)
-
-    mats = {
-        "ar": ar,
-        "br": br,
-        "dr": dr,
-        "az": az,
-        "bz": bz,
-        "dz": dz,
-        "ard_parity": ard,
-        "brd_parity": brd,
-        "azd_parity": azd,
-        "bzd_parity": bzd,
-    }
-    if cr is not None:
-        mats["cr"] = cr
-    if ir is not None:
-        mats["ir"] = ir
-    if cz is not None:
-        mats["cz"] = cz
-    if iz is not None:
-        mats["iz"] = iz
-    if dlr_t is not None:
-        mats["dlr_t"] = dlr_t
-    if dr_t is not None:
-        mats["dr_t"] = dr_t
-    if dur_t is not None:
-        mats["dur_t"] = dur_t
-    if dlz_t is not None:
-        mats["dlz_t"] = dlz_t
-    if dz_t is not None:
-        mats["dz_t"] = dz_t
-    if duz_t is not None:
-        mats["duz_t"] = duz_t
-    return mats, jmin, int(ns_f)
+    return _assemble_rz_preconditioner_matrices_impl(
+        arm=arm,
+        ard=ard,
+        brm=brm,
+        brd=brd,
+        azm=azm,
+        azd=azd,
+        bzm=bzm,
+        bzd=bzd,
+        cxd=cxd,
+        delta_s=delta_s,
+        cfg=cfg,
+        jmax_override=jmax_override,
+        use_precomputed=use_precomputed,
+        use_lax_tridi=use_lax_tridi,
+    )
 
 
 def rz_preconditioner_matrices(
@@ -612,6 +684,48 @@ def rz_preconditioner_matrices(
         bc=bc,
         k=k,
         s=s,
+        cfg=cfg,
+        jmax_override=jmax_override,
+        use_precomputed=use_precomputed,
+        use_lax_tridi=use_lax_tridi,
+    )
+
+
+def rz_preconditioner_matrices_reassemble(
+    *,
+    mats: dict[str, Any],
+    cfg,
+    jmax_override: int | None = None,
+    use_precomputed: bool | None = None,
+    use_lax_tridi: bool | None = None,
+) -> tuple[dict[str, Any], Any, int]:
+    """Reassemble R/Z matrices from cached parity coefficients for a new jmax."""
+    required = (
+        "arm_parity",
+        "ard_parity",
+        "brm_parity",
+        "brd_parity",
+        "azm_parity",
+        "azd_parity",
+        "bzm_parity",
+        "bzd_parity",
+        "cxd_full",
+        "delta_s",
+    )
+    missing = [key for key in required if key not in mats]
+    if missing:
+        raise KeyError(f"Missing cached preconditioner coefficients: {', '.join(missing)}")
+    return _assemble_rz_preconditioner_matrices_impl(
+        arm=mats["arm_parity"],
+        ard=mats["ard_parity"],
+        brm=mats["brm_parity"],
+        brd=mats["brd_parity"],
+        azm=mats["azm_parity"],
+        azd=mats["azd_parity"],
+        bzm=mats["bzm_parity"],
+        bzd=mats["bzd_parity"],
+        cxd=mats["cxd_full"],
+        delta_s=mats["delta_s"],
         cfg=cfg,
         jmax_override=jmax_override,
         use_precomputed=use_precomputed,
