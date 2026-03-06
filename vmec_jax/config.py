@@ -9,7 +9,7 @@ This config can be extended to include profiles, iteration controls, etc.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .namelist import InData, read_indata
@@ -141,7 +141,21 @@ def config_from_indata(indata: InData) -> VMECConfig:
     )
 
 
+def _resolve_input_relative_paths(cfg: VMECConfig, *, input_path: str | Path) -> VMECConfig:
+    if not bool(cfg.lfreeb):
+        return cfg
+    mgrid_file = str(cfg.mgrid_file).strip()
+    if (not mgrid_file) or mgrid_file.upper() == "NONE":
+        return cfg
+    mgrid_path = Path(mgrid_file).expanduser()
+    if mgrid_path.is_absolute():
+        return cfg
+    input_dir = Path(input_path).expanduser().resolve().parent
+    resolved = str((input_dir / mgrid_path).resolve())
+    return replace(cfg, free_boundary=replace(cfg.free_boundary, mgrid_file=resolved))
+
+
 def load_config(path: str | Path) -> tuple[VMECConfig, InData]:
     indata = read_indata(path)
-    cfg = config_from_indata(indata)
+    cfg = _resolve_input_relative_paths(config_from_indata(indata), input_path=path)
     return cfg, indata

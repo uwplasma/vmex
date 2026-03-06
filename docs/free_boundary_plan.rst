@@ -224,6 +224,13 @@ Updated benchmark snapshot (March 2026):
   The remaining metric-side mismatch is isolated to ``pguu`` (currently
   ``max_abs ~1.3e-1``, ``max_rel ~3.8e-1``), which is the next turn-on
   localization target.
+- 2026-03-05 DIII-D comparator path fix:
+  relative ``MGRID_FILE`` entries are now resolved against the input file
+  directory, which restores repo-root comparator runs. A direct rerun of
+  ``input.DIII-D`` at iter 80 again emits ``jax_dumps`` and returns the
+  expected turn-on-window parity metrics
+  (``source_sym ~8.29e-3``, ``bvec_nonsing_fouri ~8.31e-3``,
+  ``amatrix ~1.51e-3``, ``potvac ~9.45e-3``).
 - 2026-03-05 cold-start direct runtime/memory matrix vs VMEC2000:
   fixed-boundary default runs are currently about ``26x``-``50x`` slower and
   use about ``6x``-``12x`` more RSS.
