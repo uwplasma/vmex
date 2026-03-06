@@ -772,3 +772,29 @@ Legend:
   - `input.basic_non_stellsym_pressure` about `141.1s` / `3.68 GiB`,
   - `input.LandremanSenguptaPlunk_section5p3_low_res` about `77.1s` / `2.13 GiB`
     on the reference GPU host.
+- Re-profiled the parity free-boundary GPU path to localize the remaining
+  steady-state cost:
+  - on `input.cth_like_free_bdy` with `performance_mode=False`, the
+    scalar-history deferral patch (`70fc418`) was effectively neutral
+    versus `285e9f5`:
+    `~127.8s` cold / `~111.3s` warm versus
+    `~123.5s` cold / `~112.6s` warm on the reference GPU host,
+  - a `VMEC_JAX_TIMING=1` probe on `70fc418` showed the real bottleneck is
+    `compute_forces` (`~0.278s/iter`) rather than preconditioning or the
+    momentum update on this non-axisymmetric free-boundary case.
+- Reduced large-`ns` axisymmetric free-boundary GPU cost by passing only the
+  `bsqvac` edge slice into the force kernels:
+  - `vmec_forces_rz_from_wout()` now accepts either a full half-mesh
+    `freeb_bsqvac_half` array or just the edge slice,
+  - the solver no longer rebuilds a mostly-zero `(ns, ntheta, nzeta)` array
+    on every free-boundary iteration,
+  - on the heavy `input.DIII-D_lasym_false` parity probe
+    (`max_iter=10`, `multigrid=False`, reference GPU host),
+    `compute_forces` dropped from `~5.79s` total (`~0.579s/iter`) on
+    `70fc418` to `~2.58s` total (`~0.258s/iter`) on `f35ce44`,
+    with `preconditioner` also dropping from `~0.675s` to `~0.324s`
+    and `update` from `~0.914s` to `~0.535s`,
+  - on the smaller `input.cth_like_free_bdy` case (`ns=15`) the same change
+    is effectively neutral (`~111.3s` warm on `70fc418` vs `~111.4s` warm on
+    `f35ce44`), which is consistent with the optimization targeting large
+    radial grids.

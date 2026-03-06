@@ -293,6 +293,25 @@ Current snapshot highlights:
     about ``103.5s`` / ``1.97 GiB`` on the reference GPU host,
     versus VMEC2000 about ``0.63s``.
 
+- Recent parity-path free-boundary GPU work narrowed the large-``ns``
+  force-kernel overhead:
+
+  - deferring non-scan scalar-history materialization was effectively neutral
+    on the smaller ``input.cth_like_free_bdy`` case
+    (about ``111.3s`` warm on ``70fc418`` versus about ``111.4s`` warm on
+    ``f35ce44``).
+  - passing only the free-boundary ``bsqvac`` edge slice into the force kernel
+    instead of rebuilding a mostly-zero ``(ns, ntheta, nzeta)`` array every
+    iteration materially improves the heavy axisymmetric case. On the reference
+    GPU host, a parity-path ``max_iter=10`` probe of
+    ``input.DIII-D_lasym_false`` dropped:
+
+    - ``compute_forces`` from about ``5.79s`` total
+      (``0.579s/iter`` on ``70fc418``) to about ``2.58s`` total
+      (``0.258s/iter`` on ``f35ce44``),
+    - ``preconditioner`` from about ``0.675s`` to about ``0.324s``,
+    - ``update`` from about ``0.914s`` to about ``0.535s``.
+
 - The current GPU path is not yet a universal speedup:
 
   - ``input.n3are_R7.75B5.7_lowres`` is about ``160.1s`` on the local CPU but
