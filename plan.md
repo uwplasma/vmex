@@ -932,3 +932,18 @@ Legend:
   - recommended PR scope is now clear:
     merge the accelerated fixed-boundary feature set as experimental,
     while keeping the parity/default controller as the ordinary path.
+- Fixed an accelerated single-grid stage-budget mismatch during local review:
+  - when staged fixed-boundary inputs are collapsed to a single accelerated
+    final-grid solve, the driver now carries forward the total `NITER_ARRAY`
+    budget and final-stage `FTOL_ARRAY` value instead of falling back to
+    `NITER`,
+  - added regression coverage for the `LandremanPaul2021_QA_lowres`
+    single-grid budget selection,
+  - refreshed the serial reassessment artifact in
+    `outputs/accelerated_fixed_boundary_reassessment_20260309/summary.json`:
+    - `input.LandremanSenguptaPlunk_section5p3_low_res`:
+      `45.48s` default vs `0.198s` accelerated single-grid,
+    - `input.LandremanPaul2021_QA_lowres`:
+      `8.18s` default vs `7.31s` accelerated single-grid,
+    - `input.n3are_R7.75B5.7_lowres`:
+      `1.25s` accelerated single-grid with final `fsq_total ~1.1e-4`.

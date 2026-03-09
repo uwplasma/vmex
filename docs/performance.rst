@@ -152,17 +152,20 @@ Early March 2026 smoke results on the local CPU host:
   robust baseline, not a new fast free-boundary controller.
 
 Serial fixed-boundary follow-up measurements from
-``outputs/accelerated_fixed_boundary_singlegrid_serial_20260307/summary.json``
+``outputs/accelerated_fixed_boundary_reassessment_20260309/summary.json``
 show why the single-grid default is now the accelerated fixed-boundary policy:
 
 - ``input.LandremanSenguptaPlunk_section5p3_low_res``:
-  ``0.241s`` single-grid vs ``0.284s`` explicit multigrid, with both runs
-  converged and final ``fsq_total`` at ``~1e-13`` to ``1e-14``,
+  ``45.48s`` current default vs ``0.198s`` accelerated single-grid and
+  ``0.232s`` accelerated explicit multigrid; the accelerated single-grid route
+  converges and is dramatically faster than both,
 - ``input.LandremanPaul2021_QA_lowres``:
-  ``6.15s`` single-grid vs ``16.50s`` explicit multigrid, with both runs
-  reaching very small final residuals (``~4.0e-12`` and ``~5.6e-13``),
+  ``8.18s`` current default vs ``7.31s`` accelerated single-grid and
+  ``8.10s`` accelerated explicit multigrid; the accelerated single-grid route
+  now carries the full staged iteration budget and converges at
+  ``~3.0e-13``,
 - ``input.n3are_R7.75B5.7_lowres``:
-  ``1.37s`` single-grid with final ``fsq_total ~1.1e-4`` on the same serial
+  ``1.25s`` accelerated single-grid with final ``fsq_total ~1.1e-4`` on the serial
   workflow, keeping the accelerated route on the final grid instead of paying
   the old staged control overhead by default.
 

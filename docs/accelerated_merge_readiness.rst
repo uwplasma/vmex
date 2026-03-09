@@ -45,19 +45,18 @@ Representative fixed-boundary reassessment
 
 The latest serial CPU reassessment artifact is:
 
-- ``outputs/accelerated_fixed_boundary_singlegrid_serial_20260307/summary.json``
+- ``outputs/accelerated_fixed_boundary_reassessment_20260309/summary.json``
 
 Key results from that artifact:
 
 - ``input.LandremanSenguptaPlunk_section5p3_low_res``:
-  ``0.241s`` accelerated single-grid vs ``0.284s`` accelerated explicit
-  multigrid, with both runs converged and final ``fsq_total`` at
-  ``~1e-13`` to ``1e-14``,
+  ``45.48s`` current default vs ``0.198s`` accelerated single-grid and
+  ``0.232s`` accelerated explicit multigrid,
 - ``input.LandremanPaul2021_QA_lowres``:
-  ``6.15s`` accelerated single-grid vs ``16.50s`` accelerated explicit
-  multigrid, with both runs reaching very small final residuals,
+  ``8.18s`` current default vs ``7.31s`` accelerated single-grid and
+  ``8.10s`` accelerated explicit multigrid,
 - ``input.n3are_R7.75B5.7_lowres``:
-  ``1.37s`` accelerated single-grid with final
+  ``1.25s`` accelerated single-grid with final
   ``fsq_total ~ 1.1e-4`` in the same serial workflow.
 
 These numbers justify the current fixed-boundary accelerated default:

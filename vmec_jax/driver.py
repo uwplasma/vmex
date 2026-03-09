@@ -1001,11 +1001,23 @@ def run_fixed_boundary(
         ftol_list = _as_list(ftol_array)
         niter_stages_input = [int(v) for v in niter_list] if niter_list and len(niter_list) == nstep else None
         ftol_stages_input = [float(v) for v in ftol_list] if ftol_list and len(ftol_list) == nstep else None
+        accelerated_single_grid_budget = (
+            bool(accelerated_single_grid_default)
+            and (not bool(multigrid_user_provided))
+            and int(nstep) == 1
+            and bool(niter_list)
+            and (not bool(max_iter_overridden))
+        )
         if multigrid_use_input_niter:
             niter_stages = niter_stages_input
             ftol_stages = ftol_stages_input
             if niter_stages is None:
-                if max_iter_overridden:
+                if accelerated_single_grid_budget:
+                    # Accelerated single-grid runs collapse the staged solve to
+                    # a single final-grid solve, but they should still honor
+                    # the total input iteration budget implied by NITER_ARRAY.
+                    niter_stages = [int(max_iter)]
+                elif max_iter_overridden:
                     # Explicit caller budget: distribute total iterations across stages.
                     niter_stages = _distribute_iters(iters=int(max_iter), nstep=int(nstep))
                 else:
@@ -1029,7 +1041,10 @@ def run_fixed_boundary(
                     remaining -= take
                 niter_stages = out
             if ftol_stages is None:
-                ftol_stages = [float(indata.get_float("FTOL", 1e-13))] * nstep
+                if bool(accelerated_single_grid_default) and int(nstep) == 1 and bool(ftol_list):
+                    ftol_stages = [float(ftol_list[-1])]
+                else:
+                    ftol_stages = [float(indata.get_float("FTOL", 1e-13))] * nstep
         else:
             niter_stages = _distribute_iters(iters=int(max_iter), nstep=int(nstep))
             # VMEC2000 uses FTOL_ARRAY when present, even for single-stage runs.

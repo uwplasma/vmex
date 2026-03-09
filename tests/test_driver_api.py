@@ -7,6 +7,7 @@ import pytest
 
 import vmec_jax.cli as cli_module
 import vmec_jax.driver as driver_module
+import vmec_jax.solve as solve_module
 from vmec_jax.driver import (
     example_paths,
     load_example,
@@ -14,6 +15,7 @@ from vmec_jax.driver import (
     save_npz,
     wout_from_fixed_boundary_run,
 )
+from vmec_jax.solve import SolveVmecResidualResult
 from vmec_jax.vmec_tomnsp import vmec_angle_grid
 
 
@@ -178,6 +180,59 @@ def test_run_fixed_boundary_accelerated_mode_defaults_to_single_grid():
     assert np.asarray(diag_acc["multigrid_ns_stages"]).tolist() == [int(run_acc.cfg.ns)]
     assert diag_parity["accelerated_single_grid_default"] is False
     assert np.asarray(diag_parity["multigrid_ns_stages"]).tolist() == [11, 25]
+
+
+def test_accelerated_single_grid_uses_total_niter_array_budget(monkeypatch):
+    root = Path(__file__).resolve().parents[1]
+    input_path = root / "examples/data/input.LandremanPaul2021_QA_lowres"
+    grid = vmec_angle_grid(ntheta=8, nzeta=8, nfp=2, lasym=False)
+    calls = []
+
+    def _fake_solver(state, static, **kwargs):
+        calls.append(
+            {
+                "ns": int(static.cfg.ns),
+                "max_iter": int(kwargs["max_iter"]),
+                "ftol": float(kwargs["ftol"]),
+                "use_scan": bool(kwargs["use_scan"]),
+            }
+        )
+        return SolveVmecResidualResult(
+            state=state,
+            n_iter=0,
+            w_history=np.asarray([1.0], dtype=float),
+            fsqr2_history=np.asarray([1.0], dtype=float),
+            fsqz2_history=np.asarray([0.0], dtype=float),
+            fsql2_history=np.asarray([0.0], dtype=float),
+            grad_rms_history=np.asarray([], dtype=float),
+            step_history=np.asarray([], dtype=float),
+            diagnostics={
+                "use_scan": bool(kwargs["use_scan"]),
+                "resume_state": {},
+                "light_history": True,
+                "resume_state_mode": "minimal",
+                "converged": False,
+            },
+        )
+
+    monkeypatch.setattr(solve_module, "solve_fixed_boundary_residual_iter", _fake_solver)
+
+    run = run_fixed_boundary(
+        input_path,
+        solver="vmec2000_iter",
+        solver_mode="accelerated",
+        verbose=False,
+        grid=grid,
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["ns"] == int(run.cfg.ns)
+    assert calls[0]["max_iter"] == 2600
+    assert np.isclose(calls[0]["ftol"], 1.0e-13)
+    assert calls[0]["use_scan"] is True
+    assert np.asarray(run.result.diagnostics["multigrid_ns_stages"]).tolist() == [50]
+    assert np.asarray(run.result.diagnostics["multigrid_niter_stages"]).tolist() == [2600]
+    assert np.allclose(np.asarray(run.result.diagnostics["multigrid_ftol_stages"]), np.asarray([1.0e-13]))
 
 
 def test_vmec2000_iter_histories_materialize_numeric_arrays():

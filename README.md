@@ -102,10 +102,17 @@ python examples/optimization/implicit_target_iota_volume.py --case circular_toka
 - Use `--solver-mode accelerated` to force the experimental accelerated
   fixed-boundary path, which skips parity-oriented scan probes and is judged by
   final residual/output quality rather than iteration-trace parity.
+- In the current branch, accelerated fixed-boundary solves default to a single
+  final-grid stage unless the caller explicitly requests `multigrid=True`. When
+  staged inputs provide `NITER_ARRAY`, the accelerated single-grid path now
+  carries the total staged iteration budget forward instead of silently falling
+  back to `NITER`.
 - The current GPU path is fastest when the solve can stay on the scan fast path. Many of the slow GPU benchmark rows are parity-path solves, especially free-boundary cases, where VMEC2000-style restart logic, Jacobian checks, and cadence control still run as a host-controlled loop around many short float64 kernels.
 - That means the GPU often sees too little work per launch to amortize host/device overhead, while the CPU benefits from lower launch latency and efficient float64 execution on these moderate-size grids. This is an implementation limit of the current parity path, not a claim that the underlying physics is inherently CPU-only.
 - The accelerated-mode comparison harness lives at `tools/diagnostics/benchmark_accelerated_mode.py`.
 - Details and profiling guidance live in `docs/performance.rst`.
+- Merge scope and review criteria for the accelerated branch live in
+  `docs/accelerated_merge_readiness.rst`.
 - Parity methodology and current status live in `docs/validation.rst`.
 - The cross-case parity matrix (fixed/free boundary, axisym/non-axisym, `lasym=False/True`)
   is maintained in `tools/diagnostics/parity_manifest.toml` and executed with
@@ -184,7 +191,7 @@ reference hosts.
 - `docs/algorithms.rst`: algorithmic overview
 - `docs/equations.rst`: equations and conventions
 
-## Bundled Example Benchmarks
+## Default-Path Bundled Benchmarks
 
 Measured on 2026-03-06 using the default `run_fixed_boundary(input, verbose=False)`
 path. This checked-in snapshot used a reference CPU host (Apple M2, 8 GiB RAM)
@@ -211,3 +218,16 @@ and a reference CUDA host (dual RTX A4000 GPUs). Exact results vary by machine.
 | shaped_tokamak_pressure | fixed | axisym | false | 0.79s | 0.07 GiB | 5.66s | 0.90 GiB | 48.58s | 1.76 GiB |
 | solovev | fixed | axisym | false | 0.16s | 0.07 GiB | 2.08s | 0.48 GiB | 18.80s | 1.38 GiB |
 | up_down_asymmetric_tokamak | fixed | axisym | true | 0.74s | 0.07 GiB | 6.72s | 0.89 GiB | 16.54s | 1.60 GiB |
+
+## Accelerated Branch Reassessment
+
+Serial warm-run reassessment for the current `solver_mode="accelerated"` branch
+is recorded in
+`outputs/accelerated_fixed_boundary_reassessment_20260309/summary.json`.
+These rows are the right table to use when reviewing this branch for merge.
+
+| Example | Same-machine default runtime | Accelerated runtime | Speedup | Accelerated explicit multigrid | Accelerated final `fsq_total` | Note |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| LandremanSenguptaPlunk_section5p3_low_res | 45.48s | 0.20s | 229.58x | 0.23s | 3.00e-14 | Accelerated single-grid converges and is much faster than both the current default path and accelerated explicit multigrid. |
+| LandremanPaul2021_QA_lowres | 8.18s | 7.31s | 1.12x | 8.10s | 2.98e-13 | Accelerated single-grid now uses the full staged iteration budget (`2600`) and converges. |
+| n3are_R7.75B5.7_lowres | - | 1.25s | - | - | 1.12e-4 | Accelerated single-grid stays on the final grid and reaches a small residual in the serial reassessment workflow. |
