@@ -972,3 +972,34 @@ Legend:
   - fast Sphinx build passed,
   - direct CLI smoke on `input.n3are_R7.75B5.7_lowres` completed and wrote
     `wout_n3are_cli_accel.nc` successfully.
+- Tightened the CLI-only fixed-boundary finisher on the experimental branch:
+  - the finisher now preserves the original staged-policy diagnostics when it
+    returns a best resumed run,
+  - resumed finish attempts now call `solve_fixed_boundary_residual_iter()`
+    directly instead of recursively re-entering `run_fixed_boundary()`,
+  - minimal accelerated `resume_state` is sanitized before handing it to the
+    strict controller so cache-valid flags do not advertise missing norm/cache
+    payloads,
+  - accelerated CLI finish attempts now tag explicit metadata:
+    `cli_fixed_boundary_initial_policy`,
+    `cli_fixed_boundary_finish_budgets`,
+    `cli_fixed_boundary_finish_modes`,
+    `cli_fixed_boundary_finish_converged`, and
+    `cli_fixed_boundary_full_parity_fallback`.
+- Current fixed-boundary CLI accelerated status on the branch:
+  - `input.li383_low_res` is no longer a qualitative blocker:
+    a resumed strict finisher with parity budgets `[1000, 2000]`
+    reaches `fsq_total ~1.24e-14` and marks
+    `converged_by_total_fsq=True` in about `89.9s`,
+  - `input.up_down_asymmetric_tokamak` was already known to close under a
+    resumed strict finisher,
+  - `input.n3are_R7.75B5.7_lowres` remains the unresolved fixed-boundary
+    holdout for the experimental branch:
+    - mixed staged policies help but do not yet close the target,
+    - accelerated coarse stages plus a parity fine stage reduce the final-grid
+      residual from order `1e-2` to order `1e-5`, but not to `FTOL`,
+    - a parity fine stage with `max_iter=5000` from the improved stage-49
+      state reached `fsq_total ~4.47e-6` in about `193s` and still did not
+      converge,
+    - a full end-to-end CLI accelerated `n3are` run still exceeded acceptable
+      multi-minute runtime and was stopped without convergence.

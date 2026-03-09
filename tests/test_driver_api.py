@@ -124,8 +124,8 @@ def test_normalize_solver_mode():
 
 def test_accelerated_cli_budgeted_stage_iters():
     total = driver_module._accelerated_cli_budgeted_total_iters(total_budget=5000, ns_stages=[16, 49, 100])
-    assert total == 800
-    assert driver_module._accelerated_cli_budgeted_stage_iters(total_budget=total, ns_stages=[16, 49, 100]) == [52, 221, 527]
+    assert total == 2000
+    assert driver_module._accelerated_cli_budgeted_stage_iters(total_budget=total, ns_stages=[16, 49, 100]) == [130, 552, 1318]
 
 
 def test_cli_solver_mode_conflicts_with_fast_flags():
@@ -187,6 +187,7 @@ def test_run_fixed_boundary_cli_budgeted_multigrid_path(monkeypatch):
     calls = []
 
     def _fake_solver(state, static, **kwargs):
+        converged = bool(int(static.cfg.ns) == 100 and len(calls) == 3)
         calls.append(
             {
                 "ns": int(static.cfg.ns),
@@ -209,11 +210,12 @@ def test_run_fixed_boundary_cli_budgeted_multigrid_path(monkeypatch):
                 "resume_state": {},
                 "light_history": True,
                 "resume_state_mode": "minimal",
-                "converged": False,
+                "converged": converged,
             },
         )
 
     monkeypatch.setattr(solve_module, "solve_fixed_boundary_residual_iter", _fake_solver)
+    monkeypatch.setattr(driver_module, "solve_fixed_boundary_residual_iter", _fake_solver)
 
     run = run_fixed_boundary(
         input_path,
@@ -224,14 +226,17 @@ def test_run_fixed_boundary_cli_budgeted_multigrid_path(monkeypatch):
     )
 
     assert [call["ns"] for call in calls] == [16, 49, 100, 100]
-    assert [call["max_iter"] for call in calls] == [52, 221, 527, 527]
+    assert [call["max_iter"] for call in calls] == [130, 552, 1318, 5000]
     assert [call["use_scan"] for call in calls] == [True, True, True, False]
     diag = run.result.diagnostics
     assert diag["cli_fixed_boundary_mode"] is True
     assert diag["cli_accelerated_fixed_policy"] == "budgeted_multigrid"
     assert np.asarray(diag["cli_accelerated_stage_ns"]).tolist() == [16, 49, 100]
-    assert np.asarray(diag["cli_accelerated_stage_niter"]).tolist() == [52, 221, 527]
-    assert diag["cli_accelerated_polish"] is True
+    assert np.asarray(diag["cli_accelerated_stage_niter"]).tolist() == [130, 552, 1318]
+    assert diag["cli_fixed_boundary_initial_policy"] == "budgeted_multigrid"
+    assert np.asarray(diag["cli_fixed_boundary_finish_budgets"]).tolist() == [5000]
+    assert np.asarray(diag["cli_fixed_boundary_finish_converged"]).tolist() == [True]
+    assert diag["cli_fixed_boundary_full_parity_fallback"] is False
     assert diag["solver_mode"] == "accelerated"
 
 
