@@ -1032,3 +1032,12 @@ Legend:
     - `input.n3are_R7.75B5.7_lowres` improves to a best measured
       `fsq_total ~1.61e-6` under the staged hybrid controller, but still does
       not reach `FTOL`.
+- Bundled-example update:
+  - `examples/data/input.n3are_R7.75B5.7_lowres` now includes
+    `NITER_ARRAY = 1000 1000 5000`,
+  - this makes the example’s staged continuation explicit instead of relying on
+    the legacy “`NITER` applies to every stage” interpretation,
+  - the generic CLI policy for staged fixed-boundary inputs without
+    `NITER_ARRAY` remains in place, but that policy is now exercised by tests
+    using a synthetic staged fixed-boundary input rather than the bundled
+    `n3are` file.

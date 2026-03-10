@@ -81,6 +81,11 @@ avoid staged VMEC-style multigrid unless the user explicitly asks for it in the
 API, but allow the CLI to use a more robust staged fallback on difficult inputs
 that lack explicit stage budgets.
 
+The bundled ``n3are`` example now includes an explicit
+``NITER_ARRAY = 1000 1000 5000``. The conservative staged CLI fallback remains
+important for the generic ``NS_ARRAY`` without ``NITER_ARRAY`` class, but that
+policy is no longer represented by the checked-in ``n3are`` input itself.
+
 Merge checklist
 ---------------
 

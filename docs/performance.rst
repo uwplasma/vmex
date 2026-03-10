@@ -197,6 +197,12 @@ That CLI-specific controller is intentionally scoped:
 - it improves difficult cases such as ``n3are`` materially, but it does not
   yet force strict ``FTOL`` convergence on every staged input.
 
+The bundled ``n3are`` input now carries an explicit staged budget
+(``NITER_ARRAY = 1000 1000 5000``). The conservative CLI fallback policy still
+applies generically to fixed-boundary staged inputs that provide ``NS_ARRAY``
+without ``NITER_ARRAY``, but ``n3are`` is no longer the repository example for
+that input class.
+
 The next hybrid follow-up in
 ``outputs/accelerated_cli_fixed_boundary_hybrid_20260309/summary.json``
 tightened that staged controller further:

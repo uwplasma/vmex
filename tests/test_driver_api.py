@@ -19,6 +19,27 @@ from vmec_jax.solve import SolveVmecResidualResult
 from vmec_jax.vmec_tomnsp import vmec_angle_grid
 
 
+def _write_staged_no_niter_input(tmp_path: Path) -> Path:
+    input_path = tmp_path / "input.staged_no_niter"
+    input_path.write_text(
+        "&INDATA\n"
+        "  LFREEB = F\n"
+        "  NFP = 1\n"
+        "  MPOL = 5\n"
+        "  NTOR = 0\n"
+        "  NS = 13\n"
+        "  NITER = 100\n"
+        "  FTOL = 1e-14\n"
+        "  NS_ARRAY = 5 9 13\n"
+        "  FTOL_ARRAY = 1e-14 1e-14 1e-14\n"
+        "  PHIEDGE = 1.0\n"
+        "  RBC(0,0) = 1.0\n"
+        "  ZBS(1,0) = 0.1\n"
+        "/\n"
+    )
+    return input_path
+
+
 def test_example_paths_and_load_example():
     pytest.importorskip("netCDF4")
 
@@ -177,7 +198,7 @@ def test_cli_defaults_to_accelerated_on_simple_fixed_boundary(monkeypatch, tmp_p
 
 
 def test_cli_defaults_to_parity_on_staged_fixed_boundary_without_niter_array(monkeypatch, tmp_path):
-    input_path = Path(__file__).resolve().parents[1] / "examples/data/input.n3are_R7.75B5.7_lowres"
+    input_path = _write_staged_no_niter_input(tmp_path)
     captured = {}
 
     def _fake_run_fixed_boundary(input_path_arg, **kwargs):
@@ -227,13 +248,12 @@ def test_run_fixed_boundary_accelerated_mode_uses_scan():
     assert "converged" in diag
 
 
-def test_run_fixed_boundary_cli_budgeted_multigrid_path(monkeypatch):
-    root = Path(__file__).resolve().parents[1]
-    input_path = root / "examples/data/input.n3are_R7.75B5.7_lowres"
+def test_run_fixed_boundary_cli_budgeted_multigrid_path(monkeypatch, tmp_path):
+    input_path = _write_staged_no_niter_input(tmp_path)
     calls = []
 
     def _fake_solver(state, static, **kwargs):
-        converged = bool(int(static.cfg.ns) == 100 and len(calls) == 3)
+        converged = bool(int(static.cfg.ns) == 13 and len(calls) == 3)
         calls.append(
             {
                 "ns": int(static.cfg.ns),
@@ -271,26 +291,25 @@ def test_run_fixed_boundary_cli_budgeted_multigrid_path(monkeypatch):
         cli_fixed_boundary_mode=True,
     )
 
-    assert [call["ns"] for call in calls] == [16, 49, 100, 100]
-    assert [call["max_iter"] for call in calls] == [130, 552, 5000, 5000]
+    assert [call["ns"] for call in calls] == [5, 9, 13, 13]
+    assert [call["max_iter"] for call in calls] == [27, 18, 100, 100]
     assert [call["use_scan"] for call in calls] == [True, True, False, False]
     diag = run.result.diagnostics
     assert diag["cli_fixed_boundary_mode"] is True
     assert diag["cli_accelerated_fixed_policy"] == "budgeted_multigrid"
-    assert np.asarray(diag["cli_accelerated_stage_ns"]).tolist() == [16, 49, 100]
-    assert np.asarray(diag["cli_accelerated_stage_niter"]).tolist() == [130, 552, 5000]
+    assert np.asarray(diag["cli_accelerated_stage_ns"]).tolist() == [5, 9, 13]
+    assert np.asarray(diag["cli_accelerated_stage_niter"]).tolist() == [27, 18, 100]
     assert np.asarray(diag["cli_accelerated_stage_modes"]).tolist() == ["accelerated", "accelerated", "parity"]
-    assert diag["cli_accelerated_final_stage_budget"] == 5000
+    assert diag["cli_accelerated_final_stage_budget"] == 100
     assert diag["cli_fixed_boundary_initial_policy"] == "budgeted_multigrid"
-    assert np.asarray(diag["cli_fixed_boundary_finish_budgets"]).tolist() == [5000]
+    assert np.asarray(diag["cli_fixed_boundary_finish_budgets"]).tolist() == [100]
     assert np.asarray(diag["cli_fixed_boundary_finish_converged"]).tolist() == [True]
     assert diag["cli_fixed_boundary_full_parity_fallback"] is False
     assert diag["solver_mode"] == "accelerated"
 
 
-def test_run_fixed_boundary_cli_parity_finisher_uses_state_only_blocks(monkeypatch):
-    root = Path(__file__).resolve().parents[1]
-    input_path = root / "examples/data/input.n3are_R7.75B5.7_lowres"
+def test_run_fixed_boundary_cli_parity_finisher_uses_state_only_blocks(monkeypatch, tmp_path):
+    input_path = _write_staged_no_niter_input(tmp_path)
     calls = []
     fsq_values = [
         1.0e-2,
@@ -346,14 +365,14 @@ def test_run_fixed_boundary_cli_parity_finisher_uses_state_only_blocks(monkeypat
         cli_fixed_boundary_mode=True,
     )
 
-    assert [call["ns"] for call in calls[:3]] == [16, 49, 100]
-    assert all(call["max_iter"] == 5000 for call in calls[:3])
-    assert [call["max_iter"] for call in calls[3:]] == [5000, 5000, 5000, 2500, 2500, 1250]
+    assert [call["ns"] for call in calls[:3]] == [5, 9, 13]
+    assert all(call["max_iter"] == 100 for call in calls[:3])
+    assert [call["max_iter"] for call in calls[3:]] == [100, 100, 100, 50, 50, 25]
     assert all(call["resume_state"] is None for call in calls[3:])
     diag = run.result.diagnostics
     assert diag["cli_fixed_boundary_mode"] is True
     assert diag["cli_fixed_boundary_initial_policy"] == "multigrid"
-    assert np.asarray(diag["cli_fixed_boundary_finish_budgets"]).tolist() == [5000, 5000, 5000, 2500, 2500, 1250]
+    assert np.asarray(diag["cli_fixed_boundary_finish_budgets"]).tolist() == [100, 100, 100, 50, 50, 25]
     assert np.asarray(diag["cli_fixed_boundary_finish_modes"]).tolist() == ["parity"] * 6
     assert np.asarray(diag["cli_fixed_boundary_finish_converged"]).tolist() == [False, False, False, False, False, True]
     assert diag["cli_fixed_boundary_full_parity_fallback"] is False
