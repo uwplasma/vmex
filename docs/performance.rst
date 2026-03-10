@@ -144,6 +144,7 @@ solver policy:
   python tools/diagnostics/benchmark_accelerated_mode.py \
     --baseline-mode default \
     --candidate-mode accelerated \
+    --candidate-cli-fixed-boundary-mode \
     --kind fixed \
     --jax-platforms cpu
 
@@ -211,6 +212,55 @@ result for ``input.circular_tokamak``:
 That example uses the same public Python driver entry point as library users,
 but it enables ``cli_fixed_boundary_mode=True`` on the optimized path so the
 controller matches the executable behavior exactly.
+
+Latest serial bundled fixed-boundary reassessment
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The freshest branch-wide artifact for the optimized CLI-style controller is:
+
+- ``outputs/accelerated_cli_fixed_boundary_no_n3are_20260310/summary.json``
+
+That sweep compares baseline ``solver_mode="default"`` against candidate
+``solver_mode="accelerated"`` with ``cli_fixed_boundary_mode=True`` across the
+bundled fixed-boundary matrix, excluding only ``n3are`` from the bulk run so
+the hard outlier does not dominate the rest of the signal.
+
+Current results from that 15-case matrix:
+
+- 11 of 15 bundled fixed-boundary cases are faster on the optimized CLI-style
+  path,
+- strongest wins include
+  ``LandremanSenguptaPlunk_section5p3_low_res`` (``249.49x``),
+  ``basic_non_stellsym_pressure`` (``12.47x``), and
+  ``ITERModel`` (``1.78x``),
+- near-neutral cases include
+  ``LandremanPaul2021_QA_lowres`` (``1.02x``),
+  ``cth_like_fixed_bdy`` (``1.02x``), and
+  ``nfp4_QH_warm_start`` (``1.00x``),
+- the current slow outliers are
+  ``li383_low_res`` (``0.0036x``),
+  ``up_down_asymmetric_tokamak`` (``0.0225x``),
+  ``LandremanPaul2021_QA_lowres1`` (``0.93x``), and
+  ``solovev`` (``0.94x``).
+
+The optimized candidate converged on all 15 cases in that matrix. However, the
+same reassessment also shows why this branch is not ready to become the
+default controller yet: those slow outliers are too severe to hide behind the
+average speedup.
+
+``n3are_R7.75B5.7_lowres`` was measured separately because it dominates the
+wall clock:
+
+- a same-branch cold ``solver_mode="default"`` run took ``41.67s`` and stopped
+  at ``fsq_total ~ 6.90e-2`` without converging,
+- the optimized CLI-style path ran for more than 15 minutes without completing
+  the cold solve before the reassessment was stopped.
+
+That makes the current branch state clear:
+
+- mergeable for review as an experimental controller,
+- useful on many fixed-boundary cases,
+- not yet ready to replace the default controller on the full bundled matrix.
 
 Additional controller finding from March 2026:
 

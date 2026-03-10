@@ -57,6 +57,8 @@ The latest serial CPU reassessment artifact is:
 - ``outputs/accelerated_fixed_boundary_reassessment_20260309/summary.json``
 - ``examples/fixed_boundary_driver_tracks.py`` for live parity-vs-optimized
   comparisons on the current branch
+- ``outputs/accelerated_cli_fixed_boundary_no_n3are_20260310/summary.json``
+  for the latest bundled fixed-boundary CLI-style sweep
 
 Key results from that artifact:
 
@@ -79,11 +81,21 @@ Current CLI behavior is better captured as policy than as one stale table:
   on ``input.circular_tokamak``:
   parity ``28.863s`` vs optimized CLI-style ``3.445s``, both converged at
   ``fsq_total ~ 2e-14``.
+- the new 15-case bundled fixed-boundary CLI-style reassessment shows
+  11 of 15 cases faster on the optimized path, with the strongest wins on
+  ``LandremanSenguptaPlunk_section5p3_low_res`` (``249.49x``),
+  ``basic_non_stellsym_pressure`` (``12.47x``), and
+  ``ITERModel`` (``1.78x``),
+- that same reassessment also surfaces the current blockers clearly:
+  ``li383_low_res`` (``0.0036x``),
+  ``up_down_asymmetric_tokamak`` (``0.0225x``),
+  ``LandremanPaul2021_QA_lowres1`` (``0.93x``), and
+  ``solovev`` (``0.94x``) are all slower on the optimized CLI-style path.
 
-These numbers justify the current fixed-boundary accelerated default:
-avoid staged VMEC-style multigrid unless the user explicitly asks for it in the
-API, but allow the CLI to use a more robust staged fallback on difficult inputs
-when the fast single-grid route misses.
+These numbers justify the current controller split on the branch:
+keep the optimized fixed-boundary logic available for explicit testing and
+review, but do not promote it to the repo-wide default until the slow outliers
+are closed.
 
 The bundled ``n3are`` example now includes an explicit
 ``NITER_ARRAY = 1000 1000 5000``. The conservative staged CLI fallback remains
@@ -106,6 +118,31 @@ true:
   correctness on the benchmarked bundled cases,
 - the remaining staged hard-case limitation is explicitly documented if the
   branch is merged before every staged hard case is demonstrated at ``FTOL``.
+
+Current PR summary
+------------------
+
+The branch is ready for an honest review PR, but not for a default flip.
+
+- Positive signal:
+  the optimized CLI-style controller is materially better on most of the
+  bundled fixed-boundary matrix and keeps convergence on the successful cases.
+- Blocking signal:
+  the March 10 serial sweep still has severe slowdowns on
+  ``li383_low_res`` and ``up_down_asymmetric_tokamak``, plus smaller slowdowns
+  on ``LandremanPaul2021_QA_lowres1`` and ``solovev``.
+- Hard-outlier signal:
+  ``n3are_R7.75B5.7_lowres`` remains too expensive; a same-branch cold
+  ``solver_mode="default"`` run took ``41.67s`` and stopped at
+  ``fsq_total ~ 6.90e-2``, while the optimized CLI-style run exceeded 15
+  minutes without finishing the cold solve during reassessment.
+
+Conclusion:
+
+- mergeable as an experimental branch if reviewers want the tooling and the
+  partial wins on `main`,
+- not ready to become the default controller,
+- not ready to market as a universal fixed-boundary runtime win yet.
 
 Recommended reviewer checklist
 ------------------------------
@@ -130,16 +167,19 @@ Recommended reviewer checklist
       python tools/diagnostics/benchmark_accelerated_mode.py \
         --ids LandremanSenguptaPlunk_section5p3_low_res \
         --kind fixed --baseline-mode default --candidate-mode accelerated \
+        --candidate-cli-fixed-boundary-mode \
         --jax-platforms cpu
 
       python tools/diagnostics/benchmark_accelerated_mode.py \
         --ids LandremanPaul2021_QA_lowres \
         --kind fixed --baseline-mode default --candidate-mode accelerated \
+        --candidate-cli-fixed-boundary-mode \
         --jax-platforms cpu
 
       python tools/diagnostics/benchmark_accelerated_mode.py \
         --ids n3are_R7.75B5.7_lowres \
         --kind fixed --baseline-mode default --candidate-mode accelerated \
+        --candidate-cli-fixed-boundary-mode \
         --jax-platforms cpu
 
 4. Confirm the merge scope is still experimental:

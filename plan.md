@@ -1050,3 +1050,21 @@ Legend:
   - added `examples/fixed_boundary_driver_tracks.py` so users can compare the
     parity track and the optimized CLI-style track from Python on their own
     CPU/GPU machine.
+- 2026-03-10 fixed-boundary reassessment:
+  - new serial bundled artifact:
+    `outputs/accelerated_cli_fixed_boundary_no_n3are_20260310/summary.json`,
+  - 11 of 15 bundled fixed-boundary cases are faster under
+    `solver_mode="accelerated"` with `cli_fixed_boundary_mode=True`,
+  - strongest wins:
+    `LandremanSenguptaPlunk_section5p3_low_res` (`249.49x`),
+    `basic_non_stellsym_pressure` (`12.47x`),
+    `ITERModel` (`1.78x`),
+  - current slow outliers:
+    `li383_low_res` (`0.0036x`),
+    `up_down_asymmetric_tokamak` (`0.0225x`),
+    `LandremanPaul2021_QA_lowres1` (`0.93x`),
+    `solovev` (`0.94x`),
+  - `n3are` remains the hard outlier:
+    a same-branch cold `solver_mode="default"` run took `41.67s` and stopped at
+    `fsq_total ~ 6.90e-2`, while the optimized CLI-style run exceeded 15
+    minutes without finishing the cold reassessment solve.

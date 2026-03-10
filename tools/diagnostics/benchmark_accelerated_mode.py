@@ -197,6 +197,7 @@ def _run_solver_mode_case(
     *,
     case: CaseSpec,
     solver_mode: str,
+    cli_fixed_boundary_mode: bool,
     max_iter: int | None,
     warm_runs: int,
     timeout_s: float,
@@ -269,12 +270,17 @@ def _quality_metrics(run, input_path: Path) -> dict:
 
 input_path = Path(sys.argv[1])
 solver_mode = str(sys.argv[2])
-max_iter = None if sys.argv[3] == "none" else int(sys.argv[3])
-warm_runs = int(sys.argv[4])
+cli_fixed_boundary_mode = bool(int(sys.argv[3]))
+max_iter = None if sys.argv[4] == "none" else int(sys.argv[4])
+warm_runs = int(sys.argv[5])
 
 
 def _run_once():
-    kwargs = dict(verbose=False, solver_mode=solver_mode)
+    kwargs = dict(
+        verbose=False,
+        solver_mode=solver_mode,
+        cli_fixed_boundary_mode=bool(cli_fixed_boundary_mode),
+    )
     if max_iter is not None:
         kwargs["max_iter"] = int(max_iter)
     t0 = time.perf_counter()
@@ -308,6 +314,7 @@ else:
 payload = {
     "backend": "vmec_jax",
     "solver_mode": solver_mode,
+    "cli_fixed_boundary_mode": bool(cli_fixed_boundary_mode),
     "runtime_cold_s": float(cold_dt),
     "runtime_warm_s": float(np.mean(warm_times)) if warm_times else None,
     "compile_overhead_s": float(max(0.0, cold_dt - np.mean(warm_times))) if warm_times else None,
@@ -316,6 +323,9 @@ payload = {
     "converged": bool(diag.get("converged", False)),
     "use_scan": bool(diag.get("use_scan", False)),
     "accelerated_scan": bool(diag.get("accelerated_scan", False)),
+    "cli_fixed_boundary_initial_policy": diag.get("cli_fixed_boundary_initial_policy"),
+    "cli_fixed_boundary_staged_followup_used": bool(diag.get("cli_fixed_boundary_staged_followup_used", False)),
+    "cli_fixed_boundary_full_parity_fallback": bool(diag.get("cli_fixed_boundary_full_parity_fallback", False)),
     "free_boundary": bool(diag.get("free_boundary", False)),
     "fsq_total": float(fsq_total),
     "platform": str(jax.default_backend()),
@@ -331,6 +341,7 @@ print(json.dumps(payload))
             code,
             str(case.input_path),
             str(solver_mode),
+            "1" if bool(cli_fixed_boundary_mode) else "0",
             "none" if max_iter is None else str(int(max_iter)),
             str(int(warm_runs)),
         ],
@@ -343,6 +354,7 @@ print(json.dumps(payload))
         "backend": "vmec_jax",
         "case_id": case.id,
         "solver_mode": str(solver_mode),
+        "cli_fixed_boundary_mode": bool(cli_fixed_boundary_mode),
         "returncode": int(out["returncode"]),
         "time_real_s": float(out["time_real_s"]),
         "max_rss_bytes": out["max_rss_bytes"],
@@ -386,6 +398,16 @@ def main() -> int:
     p.add_argument("--kind", choices=("fixed", "freeb", "all"), default="fixed", help="Case filter.")
     p.add_argument("--baseline-mode", type=str, default="default", help="Baseline solver mode.")
     p.add_argument("--candidate-mode", type=str, default="accelerated", help="Candidate solver mode.")
+    p.add_argument(
+        "--baseline-cli-fixed-boundary-mode",
+        action="store_true",
+        help="Enable cli_fixed_boundary_mode for the baseline vmec_jax run.",
+    )
+    p.add_argument(
+        "--candidate-cli-fixed-boundary-mode",
+        action="store_true",
+        help="Enable cli_fixed_boundary_mode for the candidate vmec_jax run.",
+    )
     p.add_argument("--max-iter", type=int, default=None, help="Optional max_iter override.")
     p.add_argument("--warm-runs", type=int, default=1, help="Number of warmed reruns in the same child process.")
     p.add_argument("--timeout-s", type=float, default=1800.0, help="Timeout per case/mode subprocess.")
@@ -431,6 +453,7 @@ def main() -> int:
         baseline = _run_solver_mode_case(
             case=case,
             solver_mode=str(args.baseline_mode),
+            cli_fixed_boundary_mode=bool(args.baseline_cli_fixed_boundary_mode),
             max_iter=args.max_iter,
             warm_runs=int(args.warm_runs),
             timeout_s=float(args.timeout_s),
@@ -439,6 +462,7 @@ def main() -> int:
         candidate = _run_solver_mode_case(
             case=case,
             solver_mode=str(args.candidate_mode),
+            cli_fixed_boundary_mode=bool(args.candidate_cli_fixed_boundary_mode),
             max_iter=args.max_iter,
             warm_runs=int(args.warm_runs),
             timeout_s=float(args.timeout_s),
@@ -459,6 +483,8 @@ def main() -> int:
             "case_id": case.id,
             "baseline_mode": str(args.baseline_mode),
             "candidate_mode": str(args.candidate_mode),
+            "baseline_cli_fixed_boundary_mode": bool(args.baseline_cli_fixed_boundary_mode),
+            "candidate_cli_fixed_boundary_mode": bool(args.candidate_cli_fixed_boundary_mode),
             "warm_speedup": warm_speedup,
             "cold_speedup": cold_speedup,
             "memory_ratio": mem_ratio,
@@ -466,6 +492,9 @@ def main() -> int:
             "candidate_quality_max_rel_rms": quality,
             "candidate_quality_pass": quality_pass,
             "candidate_converged": converged_pass,
+            "candidate_initial_policy": candidate.get("cli_fixed_boundary_initial_policy"),
+            "candidate_staged_followup_used": bool(candidate.get("cli_fixed_boundary_staged_followup_used", False)),
+            "candidate_full_parity_fallback": bool(candidate.get("cli_fixed_boundary_full_parity_fallback", False)),
         }
         comparisons.append(comp)
         rows.append(
@@ -485,6 +514,8 @@ def main() -> int:
         "comparisons": comparisons,
         "baseline_mode": str(args.baseline_mode),
         "candidate_mode": str(args.candidate_mode),
+        "baseline_cli_fixed_boundary_mode": bool(args.baseline_cli_fixed_boundary_mode),
+        "candidate_cli_fixed_boundary_mode": bool(args.candidate_cli_fixed_boundary_mode),
         "quality_rtol": float(args.quality_rtol),
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "jax_platforms": str(args.jax_platforms),

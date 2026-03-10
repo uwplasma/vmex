@@ -238,28 +238,41 @@ and a reference CUDA host (dual RTX A4000 GPUs). Exact results vary by machine.
 
 ## Accelerated Branch Reassessment
 
-Serial warm-run reassessment for the current `solver_mode="accelerated"` branch
-is recorded in
-`outputs/accelerated_fixed_boundary_reassessment_20260309/summary.json`.
-These rows are still the right baseline table to use when reviewing the branch
-for merge.
+The latest serial fixed-boundary reassessment artifact for the optimized
+CLI-style controller is:
 
-| Example | Same-machine default runtime | Accelerated runtime | Speedup | Accelerated explicit multigrid | Accelerated final `fsq_total` | Note |
-| --- | ---: | ---: | ---: | ---: | ---: | --- |
-| LandremanSenguptaPlunk_section5p3_low_res | 45.48s | 0.20s | 229.58x | 0.23s | 3.00e-14 | Accelerated single-grid converges and is much faster than both the current default path and accelerated explicit multigrid. |
-| LandremanPaul2021_QA_lowres | 8.18s | 7.31s | 1.12x | 8.10s | 2.98e-13 | Accelerated single-grid now uses the full staged iteration budget (`2600`) and converges. |
-| n3are_R7.75B5.7_lowres | - | 1.25s | - | - | 1.12e-4 | Accelerated single-grid stays on the final grid and reaches a small residual in the serial reassessment workflow. |
+- `outputs/accelerated_cli_fixed_boundary_no_n3are_20260310/summary.json`
 
-The CLI controller is now slightly richer than the reassessment artifact above:
+That 15-case bundled sweep compares baseline `solver_mode="default"` against
+candidate `solver_mode="accelerated"` with `cli_fixed_boundary_mode=True`,
+excluding only `n3are` from the bulk matrix so the hard outlier does not hide
+the rest of the branch signal.
 
-- simple fixed-boundary inputs stay on the same fast single-grid optimized path,
-- staged fixed-boundary inputs with explicit `NITER_ARRAY` try that same fast
-  path first, then replay the staged schedule from the input if the fast solve
-  misses the target,
-- staged fixed-boundary inputs without explicit `NITER_ARRAY` still default to
-  the conservative parity path unless the user explicitly requests the
-  optimized controller.
+Current branch summary:
 
-On the local branch, the new Python driver example already shows the intended
-easy-case behavior on `input.circular_tokamak`: parity `28.863s` vs optimized
-CLI-style `3.445s`, both converged at `fsq_total ~ 2e-14`.
+- 11 of 15 bundled fixed-boundary cases are faster on the optimized CLI-style path.
+- Biggest wins:
+  `LandremanSenguptaPlunk_section5p3_low_res` `249.49x`,
+  `basic_non_stellsym_pressure` `12.47x`,
+  `ITERModel` `1.78x`.
+- Near-neutral cases:
+  `LandremanPaul2021_QA_lowres` `1.02x`,
+  `cth_like_fixed_bdy` `1.02x`,
+  `nfp4_QH_warm_start` `1.00x`.
+- Current slow outliers:
+  `li383_low_res` `0.0036x`,
+  `up_down_asymmetric_tokamak` `0.0225x`,
+  `LandremanPaul2021_QA_lowres1` `0.93x`,
+  `solovev` `0.94x`.
+
+The optimized path converged on all 15 cases in that bundled matrix. The new
+Python driver example also shows the intended easy-case behavior on
+`input.circular_tokamak`: parity `28.863s` vs optimized CLI-style `3.445s`,
+both at `fsq_total ~ 2e-14`.
+
+`n3are_R7.75B5.7_lowres` remains the honest hard outlier on this branch. A
+same-branch cold `solver_mode="default"` run took `41.67s` and stopped at
+`fsq_total ~ 6.90e-2` (not converged), while the optimized CLI-style path ran
+for more than 15 minutes without completing the cold solve before it was
+stopped for the reassessment. That means the branch is useful for review, but
+it is not ready to become the default controller yet.
