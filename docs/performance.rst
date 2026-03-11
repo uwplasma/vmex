@@ -250,6 +250,22 @@ controller fixes improved several non-axisymmetric cases materially:
 - the runtime picture is now favorable on the bundled CPU matrix, but the
   branch remains experimental because the non-parity scope and GPU/default
   policy questions are broader than this one fixed-boundary CPU result.
+- a later ``wout`` audit found that much of the remaining QA/QH benchmark
+  error was coming from symmetry-forbidden geometry channels being exported
+  for ``lasym=False``:
+  zeroing ``rmns`` and ``zmnc`` in ``wout`` for symmetric runs reduced the
+  bundled 3D quality metric from about ``3.37e-01`` to ``4.19e-02`` on
+  ``LandremanPaul2021_QA_lowres``, from ``3.56e+00`` to ``3.14e-02`` on
+  ``LandremanPaul2021_QA_reactorScale_lowres``, and from ``4.61e+00`` to
+  ``2.22e-02`` on ``LandremanPaul2021_QH_reactorScale_lowres`` in
+  ``outputs/fixed_wout_3d_audit_20260311_r1/summary.json``,
+- the remaining notable 3D quality gap in the bundled audit is now the
+  ``lasym=True`` current-driven case ``basic_non_stellsym_pressure``
+  (max relRMS about ``4.29e-01``), plus residual lambda-channel drift on the
+  QA/QH cases,
+- a follow-on experiment that added a final-grid parity polish to the
+  staged 3D accelerated path was rejected because it raised runtime
+  substantially without improving those benchmarked quality numbers.
 
 Representative warmed CPU baseline-vs-optimized points from the current full
 matrix:

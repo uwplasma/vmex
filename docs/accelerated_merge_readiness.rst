@@ -119,6 +119,10 @@ The branch is ready for an honest review PR.
   final-state quality versus VMEC2000 is still a separate topic from the
   runtime comparison, and GPU/default-library policy should not be flipped just
   because the fixed-boundary CPU CLI story improved.
+  The latest useful quality fix was in ``wout`` export for ``lasym=False`` 3D
+  cases, which removed symmetry-forbidden ``rmns/zmnc`` output and cut the
+  bundled QA/QH quality metric by about an order of magnitude; the remaining
+  quality gap is now much narrower and more localized.
 
 Conclusion:
 

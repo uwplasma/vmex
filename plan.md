@@ -1241,3 +1241,28 @@ Legend:
     fixed-boundary CLI on CPU is now plausible as the default path on `main`
     if reviewers accept the non-parity scope; GPU and broader library/default
     questions remain separate.
+- 2026-03-11 3D final-`wout` quality audit and export fix:
+  - audited the remaining non-axisymmetric fixed-boundary `wout` mismatch
+    fields using the refreshed bundled benchmark artifacts,
+  - found that the dominant QA/QH error was no longer the solved geometry
+    itself but symmetry-forbidden `rmns` / `zmnc` channels being exported in
+    `wout` for `lasym=False` runs,
+  - `vmec_jax/wout.py` now zeros `rmns` and `zmnc` when `lasym=False`,
+    matching VMEC2000's symmetric `wout` convention,
+  - added a reference-based regression in
+    `tests/test_wout_parity_reference.py` on
+    `LandremanPaul2021_QA_lowres` to lock that behavior in,
+  - refreshed 3D bundled audit in
+    `outputs/fixed_wout_3d_audit_20260311_r1/summary.json`,
+  - quality improvements from that fix:
+    `LandremanPaul2021_QA_lowres` `~3.37e-01 -> 4.19e-02`,
+    `LandremanPaul2021_QA_reactorScale_lowres` `~3.56e+00 -> 3.14e-02`,
+    `LandremanPaul2021_QH_reactorScale_lowres` `~4.61e+00 -> 2.22e-02`,
+  - remaining notable 3D bundled quality gap is now concentrated in
+    `basic_non_stellsym_pressure` (`~4.29e-01`) and residual lambda-channel
+    drift on the QA/QH cases,
+  - also tested a final-grid parity-polish controller for staged 3D runs, but
+    rejected it because it increased runtime substantially without improving
+    the benchmarked final-`wout` metrics,
+  - full regression suite after the `wout` fix:
+    `169 passed, 12 skipped`.

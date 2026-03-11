@@ -1120,7 +1120,10 @@ def run_fixed_boundary(
             and bool(cfg.lthreed)
             and (not bool(deferred_staged_current_driven_3d_cli))
         )
-        if bool(run_in.result.diagnostics.get("converged", False)) and (not bool(require_staged_followup)):
+        if (
+            bool(run_in.result.diagnostics.get("converged", False))
+            and (not bool(require_staged_followup))
+        ):
             base_diag["cli_fixed_boundary_finish_budgets"] = np.zeros((0,), dtype=int)
             base_diag["cli_fixed_boundary_finish_fsq"] = np.zeros((0,), dtype=float)
             base_diag["cli_fixed_boundary_finish_converged"] = np.zeros((0,), dtype=bool)
@@ -1128,7 +1131,10 @@ def run_fixed_boundary(
             base_diag["cli_fixed_boundary_full_parity_fallback"] = False
             return replace(run_in, result=replace(run_in.result, diagnostics=base_diag))
         run_in_fsq = float(np.asarray(run_in.result.w_history)[-1])
-        if (run_in_fsq <= float(target_fsq)) and (not bool(require_staged_followup)):
+        if (
+            (run_in_fsq <= float(target_fsq))
+            and (not bool(require_staged_followup))
+        ):
             base_diag["converged"] = True
             base_diag["converged_by_total_fsq"] = True
             base_diag["cli_fixed_boundary_finish_budgets"] = np.zeros((0,), dtype=int)
