@@ -1016,12 +1016,11 @@ def run_fixed_boundary(
             is_final_stage = idx == (len(ns_stage_list) - 1)
             if bool(is_final_stage):
                 stage_mode_i = "parity"
-            elif bool(cfg.lthreed) and (len(ns_stage_list) >= 3) and int(idx) == 0:
+            elif bool(cfg.lthreed) and int(idx) == 0:
                 # On staged 3D fixed-boundary cases, the coarsest continuation
-                # stage determines which solution branch the later accelerated
-                # continuation follows. Keep the entry and final stages on the
-                # conservative VMEC-like controller, and accelerate only the
-                # interior stages.
+                # stage determines which solution branch the later continuation
+                # follows. Keep the entry and final stages on the conservative
+                # VMEC-like controller, and accelerate only interior stages.
                 stage_mode_i = "parity"
             else:
                 stage_mode_i = "accelerated"

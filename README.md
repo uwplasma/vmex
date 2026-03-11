@@ -6,41 +6,41 @@ and free-boundary ideal-MHD equilibria.
 <table>
   <tr>
     <td><img src="docs/_static/figures/axisym_compare_cross_sections.png" width="420" /></td>
-    <td><img src="docs/_static/figures/iter_compare_cross_sections.png" width="420" /></td>
+    <td><img src="docs/_static/figures/qa_compare_cross_sections.png" width="420" /></td>
   </tr>
   <tr>
     <td align="center">Axisymmetric: optimized fixed-boundary cross-section (VMEC2000 vs vmec_jax)</td>
-    <td align="center">ITERModel: optimized fixed-boundary cross-section (VMEC2000 vs vmec_jax)</td>
+    <td align="center">LandremanPaul2021_QA_lowres: optimized fixed-boundary cross-section (VMEC2000 vs vmec_jax)</td>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/axisym_compare_3d.png" width="420" /></td>
-    <td><img src="docs/_static/figures/iter_compare_3d.png" width="420" /></td>
+    <td><img src="docs/_static/figures/qa_compare_3d.png" width="420" /></td>
   </tr>
   <tr>
     <td align="center">Axisymmetric: optimized fixed-boundary 3D LCFS (VMEC2000 vs vmec_jax)</td>
-    <td align="center">ITERModel: optimized fixed-boundary 3D LCFS (VMEC2000 vs vmec_jax)</td>
+    <td align="center">LandremanPaul2021_QA_lowres: optimized fixed-boundary 3D LCFS (VMEC2000 vs vmec_jax)</td>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/axisym_compare_bmag_surface.png" width="420" /></td>
-    <td><img src="docs/_static/figures/iter_compare_bmag_surface.png" width="420" /></td>
+    <td><img src="docs/_static/figures/qa_compare_bmag_surface.png" width="420" /></td>
   </tr>
   <tr>
     <td align="center">Axisymmetric: optimized fixed-boundary |B| on LCFS (VMEC2000 vs vmec_jax)</td>
-    <td align="center">ITERModel: optimized fixed-boundary |B| on LCFS (VMEC2000 vs vmec_jax)</td>
+    <td align="center">LandremanPaul2021_QA_lowres: optimized fixed-boundary |B| on LCFS (VMEC2000 vs vmec_jax)</td>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/axisym_compare_iota.png" width="420" /></td>
-    <td><img src="docs/_static/figures/iter_compare_iota.png" width="420" /></td>
+    <td><img src="docs/_static/figures/qa_compare_iota.png" width="420" /></td>
   </tr>
   <tr>
     <td align="center">Axisymmetric: optimized fixed-boundary iota (VMEC2000 vs vmec_jax)</td>
-    <td align="center">ITERModel: optimized fixed-boundary iota (VMEC2000 vs vmec_jax)</td>
+    <td align="center">LandremanPaul2021_QA_lowres: optimized fixed-boundary iota (VMEC2000 vs vmec_jax)</td>
   </tr>
   <tr>
     <td colspan="2"><img src="docs/_static/figures/readme_fsq_trace.png" width="860" /></td>
   </tr>
   <tr>
-    <td align="center" colspan="2">Optimized fixed-boundary fsq_total trace (VMEC2000 vs vmec_jax) for shaped tokamak + ITERModel cases</td>
+    <td align="center" colspan="2">Optimized fixed-boundary fsq_total trace (VMEC2000 vs vmec_jax) for shaped tokamak + LandremanPaul2021_QA_lowres cases</td>
   </tr>
   <tr>
     <td colspan="2"><img src="docs/_static/figures/readme_runtime_compare.png" width="860" /></td>
@@ -165,7 +165,7 @@ export VMEC_JAX_SCAN_MINIMAL=0  # keep full scan diagnostics even when quiet
 
 ## Reproduce figures
 
-Recreate the shaped-tokamak + ITERModel VMEC2000 vs vmec_jax optimized panels shown above (single-plane cross-sections, |B| on LCFS, iota overlays, plus the fsq_total trace):
+Recreate the shaped-tokamak + LandremanPaul2021_QA_lowres VMEC2000 vs vmec_jax optimized panels shown above (single-plane cross-sections, |B| on LCFS, iota overlays, plus the fsq_total trace):
 
 ```bash
 python tools/diagnostics/qh_vmec_vs_vmecjax.py \
@@ -177,17 +177,17 @@ python tools/diagnostics/qh_vmec_vs_vmecjax.py \
   --prefix axisym --outdir docs/_static/figures
 
 python tools/diagnostics/qh_vmec_vs_vmecjax.py \
-  --input examples/data/input.ITERModel \
-  --wout-ref examples/data/wout_ITERModel_reference.nc \
+  --input examples/data/input.LandremanPaul2021_QA_lowres \
+  --wout-ref examples/data/wout_LandremanPaul2021_QA_lowres_reference.nc \
   --solve --solver vmec2000_iter --solver-mode accelerated \
   --cli-fixed-boundary-mode --jax-title "vmec_jax optimized" \
   --phi 0.0 --n-surfaces 31 \
-  --prefix iter --outdir docs/_static/figures
+  --prefix qa --outdir docs/_static/figures
 
 python tools/diagnostics/readme_fsq_trace.py \
   --axisym-input examples/data/input.shaped_tokamak_pressure \
-  --stellarator-input examples/data/input.ITERModel \
-  --niter 1600 --ftol 1e-13 --solver-mode accelerated \
+  --stellarator-input examples/data/input.LandremanPaul2021_QA_lowres \
+  --niter 1800 --ftol 1e-13 --solver-mode accelerated \
   --outdir docs/_static/figures
 
 python tools/diagnostics/example_runtime_memory_matrix.py \

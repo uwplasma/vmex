@@ -1166,8 +1166,22 @@ Legend:
     `zmns` `~2.71e-03 -> 2.83e-04`,
     `lmns` `~4.19e-02 -> 4.75e-03`,
   - measured QA-reactor-scale improvement on the accelerated CLI path:
+    initial staged-followup fix brought the case to
     `rmnc ~4.16e-04`, `zmns ~2.02e-03`, `lmns ~3.10e-02`,
   - measured QH-reactor-scale improvement on the accelerated CLI path:
+    initial staged-followup fix brought the case to
     `rmnc ~2.05e-04`, `zmns ~6.37e-04`, `lmns ~2.32e-02`,
+  - final staged-3D policy was then tightened further so the first stage is
+    parity-controlled on all staged non-axisymmetric fixed-boundary cases:
+    `parity -> parity` for two-stage inputs and
+    `parity -> accelerated -> parity` for three-or-more-stage inputs,
+  - that closes the remaining reactor-scale fixed-boundary gaps on the
+    accelerated CLI path:
+    `LandremanPaul2021_QA_reactorScale_lowres`
+    now reaches `rmnc ~2.49e-05`, `zmns ~1.61e-04`, `lmns ~2.86e-03`;
+    `LandremanPaul2021_QH_reactorScale_lowres`
+    now reaches `rmnc ~6.12e-05`, `zmns ~2.60e-04`, `lmns ~9.97e-03`,
+  - the README showcase is switched back from the temporary ITER fallback to
+    the repaired QA-lowres accelerated comparison panels.
   - full regression suite after these fixes:
     `166 passed, 12 skipped`.
