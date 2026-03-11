@@ -84,6 +84,13 @@ def _scan_chunk_settings(
     return chunk_size, cap_to_remaining
 
 
+def _default_scan_core(*, scan_core_env: str, scan_minimal: bool, fsq_total_target: float | None) -> bool:
+    """Choose the lean scan carry for accelerated quiet runs unless overridden."""
+    if scan_core_env:
+        return scan_core_env not in ("", "0", "false", "no")
+    return bool(scan_minimal) and (fsq_total_target is not None)
+
+
 @dataclass(frozen=True)
 class SolveLambdaResult:
     state: VMECState
@@ -5627,8 +5634,12 @@ def solve_fixed_boundary_residual_iter(
             and bool(verbose_vmec2000_table)
             and scan_collect_scalars
         )
-        scan_core_env = os.getenv("VMEC_JAX_SCAN_CORE", "0").strip().lower()
-        scan_core = scan_core_env not in ("", "0", "false", "no")
+        scan_core_env = os.getenv("VMEC_JAX_SCAN_CORE", "").strip().lower()
+        scan_core = _default_scan_core(
+            scan_core_env=scan_core_env,
+            scan_minimal=bool(scan_minimal),
+            fsq_total_target=fsq_total_target,
+        )
         scan_trace_env = os.getenv("VMEC_JAX_SCAN_TRACE", "0").strip().lower()
         scan_trace = scan_trace_env not in ("", "0", "false", "no")
         abort_scan_env = os.getenv("VMEC_JAX_SCAN_ABORT_ON_BADJAC", "0").strip().lower()

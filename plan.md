@@ -1097,14 +1097,42 @@ Legend:
     cases,
   - bundled fixed-boundary examples/benchmarks now use the QA/QH reactor-scale
     replacements instead of the retired internal stress cases.
-  - refreshed the top README comparison panels to use an axisymmetric case plus
-    `LandremanPaul2021_QA_lowres` on the optimized fixed-boundary controller,
-    with a bundled `wout_LandremanPaul2021_QA_lowres_reference.nc` added for
-    self-contained reproduction,
+  - refreshed the top README comparison panels to use an optimized
+    axisymmetric case plus a bundled 3D showcase,
   - regenerated the README `fsq_total` trace on the optimized controller for
-    the axisymmetric + QA cases,
-  - replaced the top README speedup chart with a runtime chart showing
-    VMEC2000, `vmec_jax` CPU, and `vmec_jax` GPU together,
+    the README showcase cases,
+  - replaced the top README speedup chart with a CPU-only runtime chart showing
+    VMEC2000 and `vmec_jax` CPU together,
   - same-host CPU/GPU benchmarking on the updated 16-case fixed-boundary
     bundle now shows GPU wins on 5 heavier 3D cases and CPU wins on the
     remaining 11 smaller or more launch-latency-dominated cases.
+- 2026-03-10 fixed-boundary final-`wout` audit:
+  - regenerated `wout_LandremanPaul2021_QA_lowres_reference.nc` from the
+    canonical VMEC2000 executable because the previously bundled file used a
+    mismatched radial resolution (`ns=75` vs input `ns=50`),
+  - `tools/diagnostics/benchmark_accelerated_mode.py` now aligns coefficient
+    fields on a common radial grid before computing relRMS, so bundled audits no
+    longer silently return `nan` just because `ns` differs,
+  - full bundled fixed-boundary audit is recorded in
+    `outputs/fixed_wout_audit_20260310_r3/summary.json`,
+  - low `fsq_total` is not sufficient for final-output quality on the current
+    branch:
+    `LandremanPaul2021_QA_lowres` remains at max relRMS `~3.37e-01`,
+    `LandremanPaul2021_QA_reactorScale_lowres` at `~3.58e+00`,
+    `LandremanPaul2021_QH_reactorScale_lowres` at `~4.96e+00`,
+    `up_down_asymmetric_tokamak` at `~1.70e-01`,
+  - validated showcase-quality cases are:
+    `ITERModel` (`~6.01e-06`),
+    `shaped_tokamak_pressure` (`~1.55e-07`),
+    `circular_tokamak` (`~1.03e-05`),
+  - the README showcase was updated accordingly so it no longer presents the QA
+    low-resolution case as a parity-quality final state.
+- 2026-03-10 accelerated scan-core pass:
+  - accelerated quiet scan runs now default to the leaner `scan_core` path
+    unless explicitly overridden with `VMEC_JAX_SCAN_CORE`,
+  - this removes part of the fallback/probe bookkeeping from the hot path
+    without changing the fixed-boundary convergence results on the bundled
+    audit,
+  - attempted scan-carry buffer donation was rejected by JAX because the carry
+    currently aliases internal buffers; that avenue needs a carry-structure
+    refactor before it can be used safely.

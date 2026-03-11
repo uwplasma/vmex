@@ -238,6 +238,50 @@ def _reference_wout_path(input_path: Path) -> Path | None:
     return None
 
 
+def _radial_resample(arr, n_out: int):
+    arr = np.asarray(arr, dtype=float)
+    if arr.ndim == 0 or int(arr.shape[0]) == int(n_out):
+        return arr
+    x_old = np.linspace(0.0, 1.0, num=int(arr.shape[0]), endpoint=True)
+    x_new = np.linspace(0.0, 1.0, num=int(n_out), endpoint=True)
+    flat = arr.reshape(int(arr.shape[0]), -1)
+    out = np.empty((int(n_out), flat.shape[1]), dtype=float)
+    for j in range(flat.shape[1]):
+        out[:, j] = np.interp(x_new, x_old, flat[:, j])
+    return out.reshape((int(n_out),) + arr.shape[1:])
+
+
+def _mode_table(wout, *, nyq: bool):
+    xm_name = "xm_nyq" if nyq else "xm"
+    xn_name = "xn_nyq" if nyq else "xn"
+    if not hasattr(wout, xm_name) or not hasattr(wout, xn_name):
+        return None
+    xm = np.asarray(getattr(wout, xm_name), dtype=int).ravel()
+    xn = np.asarray(getattr(wout, xn_name), dtype=int).ravel()
+    return {(int(m), int(n)): idx for idx, (m, n) in enumerate(zip(xm.tolist(), xn.tolist()))}
+
+
+def _align_coeff_field(field: str, lhs, rhs, wlhs, wrhs):
+    lhs = np.asarray(lhs, dtype=float)
+    rhs = np.asarray(rhs, dtype=float)
+    if lhs.ndim == 1 and rhs.ndim == 1:
+        n = max(int(lhs.shape[0]), int(rhs.shape[0]))
+        return _radial_resample(lhs, n), _radial_resample(rhs, n)
+    if lhs.ndim != 2 or rhs.ndim != 2:
+        return lhs, rhs
+
+    nyq = field in ("bmnc", "bmns")
+    lhs_modes = _mode_table(wlhs, nyq=nyq)
+    rhs_modes = _mode_table(wrhs, nyq=nyq)
+    if lhs_modes and rhs_modes:
+        keys = [key for key in rhs_modes if key in lhs_modes]
+        if keys:
+            lhs = lhs[:, [lhs_modes[key] for key in keys]]
+            rhs = rhs[:, [rhs_modes[key] for key in keys]]
+    n = max(int(lhs.shape[0]), int(rhs.shape[0]))
+    return _radial_resample(lhs, n), _radial_resample(rhs, n)
+
+
 def _quality_metrics(run, input_path: Path) -> dict:
     ref_path = _reference_wout_path(input_path)
     out = {
@@ -259,7 +303,8 @@ def _quality_metrics(run, input_path: Path) -> dict:
     for field in fields:
         if not hasattr(wnew, field) or not hasattr(wref, field):
             continue
-        rel = _rel_rms(getattr(wnew, field), getattr(wref, field))
+        lhs, rhs = _align_coeff_field(field, getattr(wnew, field), getattr(wref, field), wnew, wref)
+        rel = _rel_rms(lhs, rhs)
         metrics[field] = None if not np.isfinite(rel) else float(rel)
         if np.isfinite(rel):
             worst = rel if worst is None else max(worst, rel)

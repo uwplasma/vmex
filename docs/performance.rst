@@ -227,6 +227,23 @@ Current warmed fixed-boundary CPU results on the optimized CLI track:
 - the warmed CPU matrix is now clean enough to serve as the public README
   speedup benchmark.
 
+Final-``wout`` accuracy is a separate gate from residual convergence. A full
+fixed-boundary audit on the accelerated branch is recorded in
+``outputs/fixed_wout_audit_20260310_r3/summary.json``:
+
+- strong final-``wout`` agreement on the current shipped showcase cases:
+  ``ITERModel`` (max relRMS ``6.01e-06``),
+  ``shaped_tokamak_pressure`` (``1.55e-07``),
+  ``circular_tokamak`` (``1.03e-05``),
+- meaningful residual-to-``wout`` drift still present on several 3D cases even
+  when ``fsq_total`` is very small:
+  ``LandremanPaul2021_QA_lowres`` (``3.37e-01``),
+  ``LandremanPaul2021_QA_reactorScale_lowres`` (``3.58e+00``),
+  ``LandremanPaul2021_QH_reactorScale_lowres`` (``4.96e+00``),
+  ``up_down_asymmetric_tokamak`` (``1.70e-01``),
+- the public README showcase therefore now uses validated fixed-boundary cases
+  instead of the previously misleading QA low-resolution panel.
+
 Representative warmed CPU points from that matrix:
 
 - ``ITERModel``: ``0.19s`` vs VMEC2000 ``1.01s``,
