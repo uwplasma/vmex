@@ -1136,3 +1136,38 @@ Legend:
   - attempted scan-carry buffer donation was rejected by JAX because the carry
     currently aliases internal buffers; that avenue needs a carry-structure
     refactor before it can be used safely.
+- 2026-03-11 non-axisymmetric fixed-boundary audit and first repair:
+  - localized the dominant non-axisymmetric state-vs-VMEC2000 field mismatch to
+    stale driver-returned `chipf/iota` on `NCURR=1` fixed-boundary runs:
+    geometry stayed near machine precision while `|B|` drifted because
+    `run_fixed_boundary()` returned input-built flux profiles instead of the
+    solved current-driven profiles,
+  - `vmec_jax/driver.py` now recomputes post-solve `chipf/iota` for
+    `NCURR=1` returns using the same force-balance reconstruction already used
+    by `wout`,
+  - added regression coverage in `tests/test_driver_api.py` ensuring
+    non-axisymmetric current-driven runs return nonzero `chipf/iota` and match
+    the `wout` reconstruction,
+  - QA/QH/basic-non-stellsym `|B|` drift dropped from the earlier
+    `~2.6%-8.0%` range down to about `0.5%-1.8%` on the patched return path,
+  - a second control-flow issue was then identified on the accelerated CLI
+    branch: staged 3D inputs with explicit `NS_ARRAY/NITER_ARRAY` returned
+    immediately when the first single-grid pass met the scalar `fsq_total`
+    target, so the intended staged follow-up never ran,
+  - the CLI accelerated finisher now forces staged follow-up for staged 3D
+    fixed-boundary inputs even if the first single-grid pass already satisfies
+    `fsq_total`,
+  - staged 3D explicit follow-up now uses a continuation policy of
+    `parity -> accelerated -> parity` across three or more stages, keeping the
+    coarsest and finest stages conservative while accelerating only interior
+    continuation stages,
+  - measured QA-lowres final-quality improvement on the accelerated CLI path:
+    `rmnc` `~4.98e-04 -> 5.83e-05`,
+    `zmns` `~2.71e-03 -> 2.83e-04`,
+    `lmns` `~4.19e-02 -> 4.75e-03`,
+  - measured QA-reactor-scale improvement on the accelerated CLI path:
+    `rmnc ~4.16e-04`, `zmns ~2.02e-03`, `lmns ~3.10e-02`,
+  - measured QH-reactor-scale improvement on the accelerated CLI path:
+    `rmnc ~2.05e-04`, `zmns ~6.37e-04`, `lmns ~2.32e-02`,
+  - full regression suite after these fixes:
+    `166 passed, 12 skipped`.

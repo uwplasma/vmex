@@ -17,7 +17,7 @@ from typing import Optional
 import numpy as np
 from .boundary import boundary_from_indata
 from .config import VMECConfig, load_config
-from .energy import flux_profiles_from_indata
+from .energy import FluxProfiles, _iotaf_from_iotas, flux_profiles_from_indata
 from .free_boundary import (
     MGridMetadata,
     PreparedMGrid,
@@ -187,6 +187,144 @@ def _accelerated_cli_budgeted_stage_iters(*, total_budget: int, ns_stages: list[
     if out:
         out[-1] = max(1, int(out[-1]))
     return out
+
+
+def _final_flux_profiles_from_state(
+    *,
+    indata,
+    static_in: VMECStatic,
+    state,
+    signgs: int,
+    flux_local,
+    prof_local: dict,
+    pressure_local,
+):
+    """Return post-solve flux/profile payloads consistent with the solved state.
+
+    `flux_profiles_from_indata()` is input-only. For current-driven runs
+    (`NCURR=1`), VMEC updates the rotational transform from the solved force
+    balance. Mirror that here so the driver returns the same effective flux/iota
+    channels that `wout` reconstruction uses.
+    """
+    ncurr = int(indata.get_int("NCURR", 0))
+    if ncurr != 1:
+        return flux_local, prof_local
+    if os.getenv("VMEC_JAX_DISABLE_WOUT_NCURR_RECOMPUTE", "0") not in ("", "0"):
+        return flux_local, prof_local
+
+    from types import SimpleNamespace
+
+    from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
+    from .vmec_residue import vmec_pwint_from_trig
+    from .vmec_tomnsp import vmec_trig_tables
+    from .wout import _chipf_from_chips, _icurv_full_mesh_from_indata
+
+    s = np.asarray(static_in.s, dtype=float)
+    try:
+        state_ns = int(np.asarray(state.Rcos).shape[0])
+    except Exception:
+        state_ns = int(s.shape[0])
+    if int(state_ns) != int(s.shape[0]):
+        return flux_local, prof_local
+    phipf = np.asarray(flux_local.phipf, dtype=float)
+    phips = np.asarray(flux_local.phips, dtype=float)
+    if phips.size:
+        phips = phips.copy()
+        phips[0] = 0.0
+
+    pressure_out = np.asarray(pressure_local, dtype=float)
+    if pressure_out.size:
+        pressure_out = pressure_out.copy()
+        pressure_out[0] = 0.0
+
+    gamma = float(indata.get_float("GAMMA", 0.0))
+    lrfp = bool(indata.get_bool("LRFP", False))
+    boundary = boundary_from_indata(indata, static_in.modes)
+    idx00 = np.where((np.asarray(static_in.modes.m) == 0) & (np.asarray(static_in.modes.n) == 0))[0]
+    r00 = float(boundary.R_cos[int(idx00[0])]) if idx00.size else float(np.asarray(boundary.R_cos)[0])
+    vnorm = phips
+    if lrfp:
+        chipf_in = np.asarray(flux_local.chipf, dtype=float)
+        if chipf_in.size:
+            chips_in = np.concatenate([chipf_in[:1], 0.5 * (chipf_in[1:] + chipf_in[:-1])], axis=0)
+            vnorm = chips_in
+    mass = pressure_out * (np.abs(vnorm) * r00) ** gamma
+    if mass.size:
+        mass = mass.copy()
+        mass[0] = 0.0
+
+    trig = getattr(static_in, "trig_vmec", None)
+    if trig is None:
+        trig = vmec_trig_tables(
+            ntheta=int(np.asarray(static_in.grid.theta).shape[0]),
+            nzeta=int(np.asarray(static_in.grid.zeta).shape[0]),
+            nfp=int(static_in.cfg.nfp),
+            mmax=max(0, int(static_in.cfg.mpol) - 1),
+            nmax=max(0, int(static_in.cfg.ntor)),
+            lasym=bool(static_in.cfg.lasym),
+        )
+    icurv = np.asarray(_icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=int(signgs)), dtype=float)
+    wout_like_pre = SimpleNamespace(
+        phipf=phipf,
+        phips=phips,
+        chipf=np.zeros_like(phipf),
+        signgs=int(signgs),
+        nfp=int(static_in.cfg.nfp),
+        mpol=int(static_in.cfg.mpol),
+        ntor=int(static_in.cfg.ntor),
+        lasym=bool(static_in.cfg.lasym),
+        ncurr=0,
+        lcurrent=False,
+        icurv=np.zeros_like(phipf),
+        flux_is_internal=True,
+        mass=mass,
+        gamma=gamma,
+    )
+    bc_pre = vmec_bcovar_half_mesh_from_wout(
+        state=state,
+        static=static_in,
+        wout=wout_like_pre,
+        pres=pressure_out,
+        use_vmec_synthesis=True,
+        trig=trig,
+    )
+
+    sqrtg = np.asarray(bc_pre.jac.sqrtg, dtype=float)
+    overg = np.zeros_like(sqrtg)
+    np.divide(1.0, sqrtg, out=overg, where=(sqrtg != 0.0))
+    pwint = np.asarray(
+        vmec_pwint_from_trig(trig, ns=int(overg.shape[0]), nzeta=int(overg.shape[2])),
+        dtype=overg.dtype,
+    )
+    guu = np.asarray(bc_pre.guu, dtype=float)
+    guv = np.asarray(bc_pre.guv, dtype=float)
+    bsupu = np.asarray(bc_pre.bsupu, dtype=float)
+    bsupv = np.asarray(bc_pre.bsupv, dtype=float)
+    top = icurv - np.sum(pwint * ((guu * bsupu) + (guv * bsupv)), axis=(1, 2))
+    bot = np.sum(pwint * (overg * guu), axis=(1, 2))
+    chips = np.zeros_like(top)
+    np.divide(top, bot, out=chips, where=(bot != 0.0))
+    if chips.size:
+        chips[0] = 0.0
+
+    iotas = np.zeros_like(chips)
+    np.divide(chips, phips, out=iotas, where=(phips != 0.0))
+    if iotas.size:
+        iotas[0] = 0.0
+    iotaf = np.asarray(_iotaf_from_iotas(iotas, lrfp=lrfp), dtype=float)
+    chipf = np.asarray(_chipf_from_chips(chips), dtype=float)
+
+    prof_out = dict(prof_local)
+    prof_out["iota"] = iotas
+    prof_out["iotaf"] = iotaf
+    flux_out = FluxProfiles(
+        phipf=phipf,
+        chipf=chipf,
+        phips=phips,
+        signgs=int(signgs),
+        lamscale=np.asarray(flux_local.lamscale),
+    )
+    return flux_out, prof_out
 
 
 def residual_scalars_from_state(
@@ -876,7 +1014,17 @@ def run_fixed_boundary(
             if int(niter_i) <= 0:
                 continue
             is_final_stage = idx == (len(ns_stage_list) - 1)
-            stage_mode_i = "parity" if bool(is_final_stage) else "accelerated"
+            if bool(is_final_stage):
+                stage_mode_i = "parity"
+            elif bool(cfg.lthreed) and (len(ns_stage_list) >= 3) and int(idx) == 0:
+                # On staged 3D fixed-boundary cases, the coarsest continuation
+                # stage determines which solution branch the later accelerated
+                # continuation follows. Keep the entry and final stages on the
+                # conservative VMEC-like controller, and accelerate only the
+                # interior stages.
+                stage_mode_i = "parity"
+            else:
+                stage_mode_i = "accelerated"
             if stage_state is not None and int(stage_static_prev.cfg.ns) != int(ns_i):
                 stage_state = interp_vmec_state(
                     stage_state,
@@ -959,7 +1107,20 @@ def run_fixed_boundary(
         base_diag["cli_fixed_boundary_initial_policy"] = str(initial_policy)
         target_fsq = _accelerated_fsq_total_target_from_ftol(float(indata.get_float("FTOL", 1.0e-13)))
         base_diag["fsq_total_target"] = float(target_fsq)
-        if bool(run_in.result.diagnostics.get("converged", False)):
+        staged_input = (ns_list_input is not None) and (len(ns_list_input) > 1)
+        explicit_niter_stages = (
+            [int(v) for v in niter_list_input]
+            if (niter_list_input is not None) and (len(niter_list_input) == len(ns_list_input or []))
+            else None
+        )
+        require_staged_followup = (
+            bool(accelerated_mode)
+            and str(initial_policy) == "single_grid"
+            and bool(staged_input)
+            and (explicit_niter_stages is not None)
+            and bool(cfg.lthreed)
+        )
+        if bool(run_in.result.diagnostics.get("converged", False)) and (not bool(require_staged_followup)):
             base_diag["cli_fixed_boundary_finish_budgets"] = np.zeros((0,), dtype=int)
             base_diag["cli_fixed_boundary_finish_fsq"] = np.zeros((0,), dtype=float)
             base_diag["cli_fixed_boundary_finish_converged"] = np.zeros((0,), dtype=bool)
@@ -967,7 +1128,7 @@ def run_fixed_boundary(
             base_diag["cli_fixed_boundary_full_parity_fallback"] = False
             return replace(run_in, result=replace(run_in.result, diagnostics=base_diag))
         run_in_fsq = float(np.asarray(run_in.result.w_history)[-1])
-        if run_in_fsq <= float(target_fsq):
+        if (run_in_fsq <= float(target_fsq)) and (not bool(require_staged_followup)):
             base_diag["converged"] = True
             base_diag["converged_by_total_fsq"] = True
             base_diag["cli_fixed_boundary_finish_budgets"] = np.zeros((0,), dtype=int)
@@ -981,7 +1142,6 @@ def run_fixed_boundary(
 
         best_run = run_in
         best_fsq = float(np.asarray(run_in.result.w_history)[-1])
-        staged_input = (ns_list_input is not None) and (len(ns_list_input) > 1)
         attempt_budgets: list[int] = []
         attempt_fsq: list[float] = []
         attempt_converged: list[bool] = []
@@ -1064,11 +1224,6 @@ def run_fixed_boundary(
             return replace(best_run, state=res_i.state, result=res_i)
 
         if staged_input and bool(accelerated_mode) and str(initial_policy) == "single_grid":
-            explicit_niter_stages = (
-                [int(v) for v in niter_list_input]
-                if (niter_list_input is not None) and (len(niter_list_input) == len(ns_list_input))
-                else None
-            )
             explicit_ftol_stages = (
                 [float(v) for v in ftol_list_input]
                 if (ftol_list_input is not None) and (len(ftol_list_input) == len(ns_list_input))
@@ -2338,6 +2493,15 @@ def run_fixed_boundary(
         if static is None:
             static = _build_static_cfg(cfg)
         flux, prof, pressure = _profiles_from_static(static)
+    flux, prof = _final_flux_profiles_from_state(
+        indata=indata,
+        static_in=static,
+        state=res.state,
+        signgs=signgs,
+        flux_local=flux,
+        prof_local=prof,
+        pressure_local=pressure,
+    )
 
     run_out = FixedBoundaryRun(
         cfg=cfg,
