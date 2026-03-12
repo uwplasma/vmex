@@ -1329,5 +1329,14 @@ Legend:
     bundled VMEC2000 reference; `basic_non_stellsym_pressure` held its
     baseline-level `~2.98e-02` quality and remained slightly faster
     (`~9.12s -> 8.95s`),
+  - reran the full warmed bundled fixed-boundary `lasym=False` CPU matrix in
+    `outputs/fixed_lasym_false_matrix_20260312/summary.json`: all 13 cases
+    converged on both paths and the optimized controller was faster on all 13,
+    including the reactor-scale QA/QH cases,
+  - profiled representative `lasym=False` free-boundary
+    `input.cth_like_free_bdy`; the next safe overhead reduction was in
+    `_sample_external_boundary_arrays`, where batching the boundary
+    real-space syntheses cut the total cProfile wall time from about `60.41s`
+    to about `58.21s` while keeping the direct NESTOR regression tests green,
   - full regression suite on the final split-controller head:
     `170 passed, 12 skipped`.

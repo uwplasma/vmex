@@ -132,7 +132,12 @@ The branch is ready for an honest review PR.
   ``lasym=False`` path by moving ``ptau`` sign-change checks and signed-update
   assembly off the repeated JAX host-control path; the targeted QA-lowres
   reassessment improved from a branch-local ``38.64s`` optimized runtime to
-  ``31.17s`` while keeping the same ``~4.20e-03`` final-quality metric.
+  ``31.17s`` while keeping the same ``~4.20e-03`` final-quality metric. On the
+  next warmed bundled CPU rerun, all 13 bundled ``lasym=False``
+  fixed-boundary cases improved on the default path. The first follow-on
+  ``lasym=False`` free-boundary batching change also reduced the
+  representative ``cth_like_free_bdy`` CPU profile from about ``60.4s`` to
+  ``58.2s``.
 
 Conclusion:
 

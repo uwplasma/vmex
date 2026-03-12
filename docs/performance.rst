@@ -307,6 +307,21 @@ controller fixes improved several non-axisymmetric cases materially:
   relRMS against the VMEC2000 reference. The sensitive
   ``basic_non_stellsym_pressure`` case also held baseline-level quality and
   remained slightly faster (about ``9.12s`` baseline vs ``8.95s`` optimized),
+- rerunning the full warmed bundled ``lasym=False`` fixed-boundary CPU matrix
+  on that new head produced the cleanest branch-level fixed-boundary result so
+  far: all 13 bundled ``lasym=False`` cases converged on both paths, and the
+  optimized CLI controller was faster on all 13. Representative rows from
+  ``outputs/fixed_lasym_false_matrix_20260312/summary.json`` include
+  ``LandremanPaul2021_QA_reactorScale_lowres`` (``51.31s`` baseline vs
+  ``38.56s`` optimized), ``LandremanPaul2021_QH_reactorScale_lowres``
+  (``60.10s`` vs ``46.33s``), ``ITERModel`` (``12.73s`` vs ``5.00s``), and
+  ``cth_like_fixed_bdy`` (``4.71s`` vs ``0.97s``),
+- carrying the same “reduce host-controlled overhead” approach into
+  ``lasym=False`` free-boundary showed the next safe win: batching the
+  boundary ``R/Z`` synthesis and first-derivative synthesis in
+  ``_sample_external_boundary_arrays`` cut the representative
+  ``input.cth_like_free_bdy`` profile from about ``60.41s`` total wall time to
+  about ``58.21s`` while keeping the direct NESTOR regression tests green,
 - a follow-on experiment that added a final-grid parity polish to the
   staged 3D accelerated path was rejected because it raised runtime
   substantially without improving those benchmarked quality numbers.

@@ -245,6 +245,8 @@ Current checked-in summary:
   the baseline and optimized paths.
 - The optimized controller is now faster on 13 of 16 cases and neutral on the
   remaining 3. There are no runtime regressions left in the bundled CPU sweep.
+- On the latest warmed rerun of the bundled ``lasym=False`` fixed-boundary
+  subset, the optimized controller is faster on all 13 cases.
 - The largest wins are `LandremanSenguptaPlunk_section5p3_low_res`,
   `up_down_asymmetric_tokamak`, and `ITERModel`.
 - After the latest strict-`FTOL` and 3D LASYM quality pass,

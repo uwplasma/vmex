@@ -724,8 +724,7 @@ def _sample_external_boundary_arrays(
     from .vmec_parity import vmec_m1_internal_to_physical_signed
     from .vmec_realspace import (
         vmec_realspace_synthesis,
-        vmec_realspace_synthesis_dtheta,
-        vmec_realspace_synthesis_dzeta_phys,
+        vmec_realspace_synthesis_multi,
     )
     from .vmec_tomnsp import vmec_trig_tables
 
@@ -775,60 +774,33 @@ def _sample_external_boundary_arrays(
             lconm1=bool(getattr(static.cfg, "lconm1", True)),
         )
 
-    R = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=np.asarray(Rcos_phys)[-1:, :],
-            coeff_sin=np.asarray(Rsin_phys)[-1:, :],
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
+    r_boundary = np.asarray(Rcos_phys)[-1:, :]
+    rs_boundary = np.asarray(Rsin_phys)[-1:, :]
+    zc_boundary = np.asarray(Zcos_phys)[-1:, :]
+    zs_boundary = np.asarray(Zsin_phys)[-1:, :]
+
+    R_all = vmec_realspace_synthesis_multi(
+        coeff_cos=r_boundary,
+        coeff_sin=rs_boundary,
+        modes=static.modes,
+        trig=trig,
+        coeffs_internal=True,
+        derivs=("base", "dtheta", "dzeta"),
     )
-    Z = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=np.asarray(Zcos_phys)[-1:, :],
-            coeff_sin=np.asarray(Zsin_phys)[-1:, :],
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
+    Z_all = vmec_realspace_synthesis_multi(
+        coeff_cos=zc_boundary,
+        coeff_sin=zs_boundary,
+        modes=static.modes,
+        trig=trig,
+        coeffs_internal=True,
+        derivs=("base", "dtheta", "dzeta"),
     )
-    Ru = np.asarray(
-        vmec_realspace_synthesis_dtheta(
-            coeff_cos=np.asarray(Rcos_phys)[-1:, :],
-            coeff_sin=np.asarray(Rsin_phys)[-1:, :],
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
-    )
-    Zu = np.asarray(
-        vmec_realspace_synthesis_dtheta(
-            coeff_cos=np.asarray(Zcos_phys)[-1:, :],
-            coeff_sin=np.asarray(Zsin_phys)[-1:, :],
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
-    )
-    Rv = np.asarray(
-        vmec_realspace_synthesis_dzeta_phys(
-            coeff_cos=np.asarray(Rcos_phys)[-1:, :],
-            coeff_sin=np.asarray(Rsin_phys)[-1:, :],
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
-    )
-    Zv = np.asarray(
-        vmec_realspace_synthesis_dzeta_phys(
-            coeff_cos=np.asarray(Zcos_phys)[-1:, :],
-            coeff_sin=np.asarray(Zsin_phys)[-1:, :],
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
-    )
+    R = np.asarray(R_all[0][0])
+    Ru = np.asarray(R_all[1][0])
+    Rv = np.asarray(R_all[2][0])
+    Z = np.asarray(Z_all[0][0])
+    Zu = np.asarray(Z_all[1][0])
+    Zv = np.asarray(Z_all[2][0])
     # VMEC surface.f uses exact modal second derivatives. Reconstruct those
     # directly from boundary Fourier coefficients (instead of finite/spectral
     # differencing sampled R,Z) for matrix-side parity in analyt/fouri/scalpot.
