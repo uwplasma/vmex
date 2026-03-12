@@ -244,8 +244,9 @@ Current checked-in summary:
 - the free-boundary work on this branch is still in profiling/optimization
   mode: on the representative `cth_like_free_bdy` case, the latest boundary
   synthesis + nonsingular-kernel-table caching pass, followed by a batched
-  second-derivative synthesis pass, reduced the warmed `vmec_jax` CPU runtime
-  to about `10.41s` while keeping convergence.
+  second-derivative synthesis pass and a cached NumPy host-synthesis path,
+  reduced the warmed `vmec_jax` CPU runtime to about `9.86s` while keeping
+  convergence.
 
 Representative warmed CPU VMEC2000-vs-`vmec_jax` points:
 

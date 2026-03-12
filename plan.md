@@ -1372,3 +1372,16 @@ Legend:
   - direct warmed CPU benchmark for that case improved from about `11.25s` to
     about `10.41s` in
     `outputs/freeb_cth_runtime_20260312_r2/summary.json`.
+- 2026-03-12 cached NumPy host synthesis for free-boundary external sampling:
+  - profiled the updated representative `input.cth_like_free_bdy` case again
+    and found the next remaining free-boundary hotspot was still JAX
+    lowering/indexing overhead inside `_sample_external_boundary_arrays`,
+  - replaced the remaining host-only boundary synthesis calls in that helper
+    with a cached NumPy phase-stack path that keeps the same VMEC trig algebra
+    while avoiding repeated JAX lowering for external sampling,
+  - direct NESTOR reuse/turn-on regression tests stayed green,
+  - representative cProfile total improved further from about `31.04s` to
+    about `30.20s`, with `_sample_external_boundary_arrays` itself dropping to
+    about `5.78s`,
+  - direct warmed CPU benchmark for that case improved again to about `9.86s`
+    in `outputs/freeb_cth_runtime_20260312_r4/summary.json`.

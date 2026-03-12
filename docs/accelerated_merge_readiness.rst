@@ -212,10 +212,10 @@ The remaining gates are broader than this PR:
   target,
 - accelerated free-boundary redesign and validation,
 - free-boundary runtime work is now making measurable progress
-  (for example, ``cth_like_free_bdy`` warmed CPU is now about ``10.41s`` after
-  the latest boundary-synthesis, nonsingular-kernel-table caching, and batched
-  second-derivative synthesis passes), but it is still not ready to be
-  marketed as a finished accelerated path,
+  (for example, ``cth_like_free_bdy`` warmed CPU is now about ``9.86s`` after
+  the latest boundary-synthesis, nonsingular-kernel-table caching, batched
+  second-derivative synthesis, and cached NumPy host-synthesis passes), but it
+  is still not ready to be marketed as a finished accelerated path,
 - gradient checks on representative accelerated fixed-boundary and
   free-boundary workflows,
 - policy hardening for unseen inputs beyond the current representative set.

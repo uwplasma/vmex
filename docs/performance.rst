@@ -345,6 +345,14 @@ controller fixes improved several non-axisymmetric cases materially:
   warmed CPU benchmark to about ``10.41s`` in
   ``outputs/freeb_cth_runtime_20260312_r2/summary.json`` while keeping the
   direct NESTOR reuse tests green.
+- the next step replaced the remaining JAX-backed boundary synthesis in that
+  host-only external-sampling path with a cached NumPy phase-stack helper.
+  That keeps the same VMEC trig algebra but removes more JAX lowering/indexing
+  overhead from ``_sample_external_boundary_arrays`` itself. On the same
+  representative case, the cProfile total dropped again to about ``30.20s``
+  with ``_sample_external_boundary_arrays`` down to about ``5.78s``, and the
+  warmed CPU benchmark improved further to about ``9.86s`` in
+  ``outputs/freeb_cth_runtime_20260312_r4/summary.json``.
   boundary ``R/Z`` synthesis and first-derivative synthesis in
   ``_sample_external_boundary_arrays`` cut the representative
   ``input.cth_like_free_bdy`` profile from about ``60.41s`` total wall time to

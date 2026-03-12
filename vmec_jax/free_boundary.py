@@ -20,6 +20,78 @@ import numpy as np
 from .config import VMECConfig
 
 _MGRID_FIELD_CACHE: dict[str, MGridData] = {}
+_FREEB_HOST_PHASE_CACHE: dict[tuple[int, int, tuple[str, ...]], np.ndarray] = {}
+
+
+def _freeb_host_phase_stack(*, modes: Any, trig: Any, derivs: tuple[str, ...]) -> np.ndarray:
+    """Return cached NumPy phase stacks for host-side boundary synthesis."""
+
+    key = (id(modes), id(trig), tuple(derivs))
+    cached = _FREEB_HOST_PHASE_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    m = np.asarray(modes.m, dtype=np.int32)
+    n = np.asarray(modes.n, dtype=np.int32)
+    n1 = np.abs(n)
+    sgn = np.where(n < 0, -1.0, 1.0)
+
+    cosmu = np.asarray(trig.cosmu, dtype=float)
+    sinmu = np.asarray(trig.sinmu, dtype=float)
+    cosmum = np.asarray(trig.cosmum, dtype=float)
+    sinmum = np.asarray(trig.sinmum, dtype=float)
+    cosnv = np.asarray(trig.cosnv, dtype=float)
+    sinnv = np.asarray(trig.sinnv, dtype=float)
+    cosnvn = np.asarray(trig.cosnvn, dtype=float)
+    sinnvn = np.asarray(trig.sinnvn, dtype=float)
+
+    cosmu_m = cosmu[:, m].T
+    sinmu_m = sinmu[:, m].T
+    cosmum_m = cosmum[:, m].T
+    sinmum_m = sinmum[:, m].T
+    cosnv_n = cosnv[:, n1].T
+    sinnv_n = sinnv[:, n1].T
+    cosnvn_n = cosnvn[:, n1].T
+    sinnvn_n = sinnvn[:, n1].T
+
+    phase_blocks: list[np.ndarray] = []
+    for deriv in derivs:
+        if deriv == "base":
+            cos_phase = cosmu_m[:, :, None] * cosnv_n[:, None, :] + sgn[:, None, None] * sinmu_m[:, :, None] * sinnv_n[:, None, :]
+            sin_phase = sinmu_m[:, :, None] * cosnv_n[:, None, :] - sgn[:, None, None] * cosmu_m[:, :, None] * sinnv_n[:, None, :]
+        elif deriv == "dtheta":
+            cos_phase = sinmum_m[:, :, None] * cosnv_n[:, None, :] + sgn[:, None, None] * cosmum_m[:, :, None] * sinnv_n[:, None, :]
+            sin_phase = cosmum_m[:, :, None] * cosnv_n[:, None, :] - sgn[:, None, None] * sinmum_m[:, :, None] * sinnv_n[:, None, :]
+        elif deriv == "dzeta":
+            cos_phase = cosmu_m[:, :, None] * sinnvn_n[:, None, :] + sgn[:, None, None] * sinmu_m[:, :, None] * cosnvn_n[:, None, :]
+            sin_phase = sinmu_m[:, :, None] * sinnvn_n[:, None, :] - sgn[:, None, None] * cosmu_m[:, :, None] * cosnvn_n[:, None, :]
+        else:  # pragma: no cover
+            raise ValueError(f"Unknown deriv={deriv!r}")
+        phase_blocks.append(np.concatenate([cos_phase, sin_phase], axis=0))
+
+    phase_all = np.stack(phase_blocks, axis=0)
+    _FREEB_HOST_PHASE_CACHE[key] = phase_all
+    return phase_all
+
+
+def _vmec_realspace_synthesis_multi_host(
+    *,
+    coeff_cos: np.ndarray,
+    coeff_sin: np.ndarray,
+    modes: Any,
+    trig: Any,
+    derivs: tuple[str, ...] = ("base",),
+) -> tuple[np.ndarray, ...]:
+    """Host-side VMEC synthesis for external boundary sampling."""
+
+    coeff_cos = np.asarray(coeff_cos, dtype=float)
+    coeff_sin = np.asarray(coeff_sin, dtype=float)
+    if coeff_cos.shape != coeff_sin.shape:
+        raise ValueError("coeff_cos and coeff_sin must have the same shape")
+    phase_all = _freeb_host_phase_stack(modes=modes, trig=trig, derivs=tuple(derivs))
+    coeff = np.concatenate([coeff_cos, coeff_sin], axis=-1)
+    out = np.einsum("...k,tkij->t...ij", coeff, phase_all, optimize=True)
+    return tuple(np.asarray(out[i], dtype=float) for i in range(len(derivs)))
 
 
 @dataclass(frozen=True)
@@ -724,7 +796,6 @@ def _sample_external_boundary_arrays(
     from .vmec_parity import vmec_m1_internal_to_physical_signed
     from .vmec_realspace import (
         vmec_realspace_synthesis,
-        vmec_realspace_synthesis_multi,
     )
     from .vmec_tomnsp import vmec_trig_tables
 
@@ -779,28 +850,21 @@ def _sample_external_boundary_arrays(
     zc_boundary = np.asarray(Zcos_phys)[-1:, :]
     zs_boundary = np.asarray(Zsin_phys)[-1:, :]
 
-    R_all = vmec_realspace_synthesis_multi(
-        coeff_cos=r_boundary,
-        coeff_sin=rs_boundary,
+    boundary_cos = np.stack([r_boundary, zc_boundary], axis=0)
+    boundary_sin = np.stack([rs_boundary, zs_boundary], axis=0)
+    boundary_all = _vmec_realspace_synthesis_multi_host(
+        coeff_cos=boundary_cos,
+        coeff_sin=boundary_sin,
         modes=static.modes,
         trig=trig,
-        coeffs_internal=True,
         derivs=("base", "dtheta", "dzeta"),
     )
-    Z_all = vmec_realspace_synthesis_multi(
-        coeff_cos=zc_boundary,
-        coeff_sin=zs_boundary,
-        modes=static.modes,
-        trig=trig,
-        coeffs_internal=True,
-        derivs=("base", "dtheta", "dzeta"),
-    )
-    R = np.asarray(R_all[0][0])
-    Ru = np.asarray(R_all[1][0])
-    Rv = np.asarray(R_all[2][0])
-    Z = np.asarray(Z_all[0][0])
-    Zu = np.asarray(Z_all[1][0])
-    Zv = np.asarray(Z_all[2][0])
+    R = np.asarray(boundary_all[0][0, 0])
+    Ru = np.asarray(boundary_all[1][0, 0])
+    Rv = np.asarray(boundary_all[2][0, 0])
+    Z = np.asarray(boundary_all[0][1, 0])
+    Zu = np.asarray(boundary_all[1][1, 0])
+    Zv = np.asarray(boundary_all[2][1, 0])
     # VMEC surface.f uses exact modal second derivatives. Reconstruct those
     # directly from boundary Fourier coefficients (instead of finite/spectral
     # differencing sampled R,Z) for matrix-side parity in analyt/fouri/scalpot.
@@ -815,32 +879,23 @@ def _sample_external_boundary_arrays(
     zsin_b = np.asarray(Zsin_phys, dtype=float)[-1:, :]
 
     second_facs = np.stack([d2u_fac, duv_fac, d2v_fac], axis=0)
-    R_second = np.asarray(
-        vmec_realspace_synthesis_multi(
-            coeff_cos=np.asarray(rcos_b)[None, :, :] * second_facs,
-            coeff_sin=np.asarray(rsin_b)[None, :, :] * second_facs,
+    second_cos = np.stack([rcos_b, zcos_b], axis=0)[:, None, :, :] * second_facs[None, :, :, :]
+    second_sin = np.stack([rsin_b, zsin_b], axis=0)[:, None, :, :] * second_facs[None, :, :, :]
+    second_all = np.asarray(
+        _vmec_realspace_synthesis_multi_host(
+            coeff_cos=second_cos,
+            coeff_sin=second_sin,
             modes=static.modes,
             trig=trig,
-            coeffs_internal=True,
             derivs=("base",),
         )[0]
     )
-    Z_second = np.asarray(
-        vmec_realspace_synthesis_multi(
-            coeff_cos=np.asarray(zcos_b)[None, :, :] * second_facs,
-            coeff_sin=np.asarray(zsin_b)[None, :, :] * second_facs,
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-            derivs=("base",),
-        )[0]
-    )
-    Ruu = np.asarray(R_second[0, 0])
-    Ruv = np.asarray(R_second[1, 0])
-    Rvv = np.asarray(R_second[2, 0])
-    Zuu = np.asarray(Z_second[0, 0])
-    Zuv = np.asarray(Z_second[1, 0])
-    Zvv = np.asarray(Z_second[2, 0])
+    Ruu = np.asarray(second_all[0, 0, 0])
+    Ruv = np.asarray(second_all[0, 1, 0])
+    Rvv = np.asarray(second_all[0, 2, 0])
+    Zuu = np.asarray(second_all[1, 0, 0])
+    Zuv = np.asarray(second_all[1, 1, 0])
+    Zvv = np.asarray(second_all[1, 2, 0])
 
     nzeta = int(R.shape[1])
     zeta = (2.0 * np.pi / max(1, nzeta)) * np.arange(nzeta, dtype=float)
