@@ -1009,11 +1009,11 @@ def test_run_fixed_boundary_cli_three_stage_lasym_current_driven_nonaxis_uses_mu
 
     assert [call["ns"] for call in calls] == [5, 9, 13]
     assert [call["max_iter"] for call in calls] == [10, 20, 40]
-    assert [call["use_scan"] for call in calls] == [False, True, False]
+    assert [call["use_scan"] for call in calls] == [False, False, False]
     diag = run.result.diagnostics
     assert diag["cli_fixed_boundary_initial_policy"] == "multigrid"
     assert "cli_fixed_boundary_staged_followup_used" not in diag
-    assert np.asarray(diag["multigrid_stage_modes"]).tolist() == ["parity", "accelerated", "parity"]
+    assert np.asarray(diag["multigrid_stage_modes"]).tolist() == ["parity", "parity", "parity"]
 
 
 def test_vmec2000_iter_histories_materialize_numeric_arrays():

@@ -122,15 +122,12 @@ The branch is ready for an honest review PR.
   The latest useful quality fix was in ``wout`` export for ``lasym=False`` 3D
   cases, which removed symmetry-forbidden ``rmns/zmnc`` output and cut the
   bundled QA/QH quality metric by about an order of magnitude. A follow-up
-  staged-controller fix for 3-stage ``lasym=True`` current-driven runs then
-  reduced ``basic_non_stellsym_pressure`` from about ``3.46e-01`` to
-  ``3.46e-02`` max relRMS while keeping a runtime win over baseline. The
-  remaining quality gap is now much narrower and more localized. The latest
-  targeted split keeps ``lasym=False`` current-driven 3D runs on staged
-  non-scan multigrid and restores the lighter mixed-stage controller for
-  ``lasym=True``. That brings the reactor-scale QA/QH cases into the
-  ``1e-4`` to ``1e-3`` range and QA-lowres to about ``4e-3`` while keeping
-  the bundled ``basic_non_stellsym_pressure`` case faster than baseline.
+  staged-controller fixes then brought the reactor-scale QA/QH cases into the
+  ``1e-4`` to ``1e-3`` range and QA-lowres to about ``4e-3``. The last
+  branch-specific ``basic_non_stellsym_pressure`` regression was removed by
+  keeping ``lasym=True`` current-driven 3D staged runs fully on the
+  conservative controller, which restores baseline-level quality there
+  (about ``2.98e-02`` max relRMS) at roughly neutral runtime.
 
 Conclusion:
 

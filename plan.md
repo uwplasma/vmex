@@ -1290,16 +1290,21 @@ Legend:
     non-scan policy for all current-driven 3D accelerated runs,
   - kept the useful part of that audit: `lasym=False` current-driven 3D CLI
     runs now go straight to staged multigrid on the conservative non-scan
-    residual path, while `lasym=True` keeps the lighter mixed-stage controller,
+    residual path,
   - targeted audit in
     `outputs/nonaxis_quality_subset_20260312_r5/summary.json` now shows:
     `LandremanPaul2021_QA_lowres` `~4.20e-03`,
     `LandremanPaul2021_QA_reactorScale_lowres` `~6.42e-04`,
     `LandremanPaul2021_QH_reactorScale_lowres` `~6.00e-05`,
-  - separate validation on
-    `outputs/basic_nonaxis_lasym_true_20260312_final/summary.json` keeps
-    `basic_non_stellsym_pressure` at `~3.46e-02` with a runtime win
-    (`~25.06s -> 19.21s`),
+  - follow-on audit on `basic_non_stellsym_pressure` showed that the remaining
+    `~3.46e-02` mismatch was largely baseline-level lambda error rather than a
+    unique accelerated-path geometry failure,
+  - updated `vmec_jax/driver.py` so `lasym=True` current-driven 3D staged runs
+    stay fully on the conservative controller; that removes the branch-specific
+    quality regression and brings
+    `outputs/basic_non_stellsym_pressure_audit_20260312_r2/summary.json` back
+    to baseline-level quality (`~2.98e-02`) at essentially neutral warmed
+    runtime (`~22.24s -> 22.31s`),
   - accelerated fixed-boundary return semantics now treat per-channel final
     `FTOL` as the acceptance truth, while keeping `fsq_total = fsqr + fsqz +
     fsql` as an internal early-stop only for accelerated blocks,

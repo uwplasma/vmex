@@ -1963,13 +1963,13 @@ def run_fixed_boundary(
                 bool(stage_accelerated_mode)
                 and bool(direct_staged_current_driven_3d_cli)
                 and bool(cfg.lasym)
-                and int(nstep) >= 3
-                and (int(i) == 0 or int(i) == int(nstep - 1))
             ):
-                # For LASYM current-driven 3D staged runs, the entry/final
-                # continuation stages determine the lambda branch. Keep those
-                # stages on the conservative controller and accelerate only the
-                # interior continuation stage(s).
+                # LASYM current-driven 3D staged runs remain noticeably more
+                # sensitive in lambda than in geometry. The mixed accelerated
+                # controller was slightly faster here, but it consistently
+                # degraded the final lambda channels versus the conservative
+                # staged baseline. Keep this class fully on the conservative
+                # controller until the lambda mismatch is closed numerically.
                 stage_accelerated_mode = False
             stage_mode_history.append("accelerated" if bool(stage_accelerated_mode) else "parity")
             if verbose:

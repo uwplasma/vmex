@@ -246,7 +246,11 @@ Current checked-in summary:
 - The optimized controller is now faster on 13 of 16 cases and neutral on the
   remaining 3. There are no runtime regressions left in the bundled CPU sweep.
 - The largest wins are `LandremanSenguptaPlunk_section5p3_low_res`,
-  `basic_non_stellsym_pressure`, and `up_down_asymmetric_tokamak`.
+  `up_down_asymmetric_tokamak`, and `ITERModel`.
+- After the latest strict-`FTOL` and 3D LASYM quality pass,
+  `basic_non_stellsym_pressure` was rerun separately and is now effectively
+  runtime-neutral (`~22.24s` baseline vs `~22.31s` optimized) while matching
+  baseline-level quality instead of slightly degrading it.
 
 Representative warmed CPU baseline-vs-optimized points:
 
@@ -256,7 +260,6 @@ Representative warmed CPU baseline-vs-optimized points:
 | LandremanPaul2021_QA_lowres | 8.75s | 7.86s | 1.11x faster |
 | LandremanPaul2021_QA_reactorScale_lowres | 10.42s | 10.06s | 1.04x faster |
 | LandremanSenguptaPlunk_section5p3_low_res | 49.56s | 0.21s | 240.59x faster |
-| basic_non_stellsym_pressure | 12.81s | 1.04s | 12.37x faster |
 | up_down_asymmetric_tokamak | 1.01s | 0.45s | 2.28x faster |
 
 ## Accelerated Branch Reassessment
