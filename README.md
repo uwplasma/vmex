@@ -243,8 +243,9 @@ Current checked-in summary:
   `circular_tokamak_aspect_100` and `solovev`,
 - the free-boundary work on this branch is still in profiling/optimization
   mode: on the representative `cth_like_free_bdy` case, the latest boundary
-  synthesis + nonsingular-kernel-table caching pass reduced the warmed
-  `vmec_jax` CPU runtime to about `11.25s` while keeping convergence.
+  synthesis + nonsingular-kernel-table caching pass, followed by a batched
+  second-derivative synthesis pass, reduced the warmed `vmec_jax` CPU runtime
+  to about `10.41s` while keeping convergence.
 
 Representative warmed CPU VMEC2000-vs-`vmec_jax` points:
 

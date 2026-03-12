@@ -1360,3 +1360,15 @@ Legend:
   - direct warmed CPU benchmark for that same case is now recorded in
     `outputs/freeb_cth_runtime_20260312/summary.json` at about `11.25s`
     versus VMEC2000 `1.78s`, with convergence preserved.
+- 2026-03-12 second-derivative batching for free-boundary boundary sampling:
+  - profiled the updated `lasym=False` free-boundary path again and found that
+    `_sample_external_boundary_arrays` still spent a large fraction of time in
+    six separate second-derivative real-space syntheses,
+  - replaced those six scalar syntheses with two stacked batched calls in
+    `vmec_jax/free_boundary.py`,
+  - direct NESTOR reuse/turn-on regression tests stayed green,
+  - representative `input.cth_like_free_bdy` cProfile total improved further
+    from about `32.10s` to about `31.04s`,
+  - direct warmed CPU benchmark for that case improved from about `11.25s` to
+    about `10.41s` in
+    `outputs/freeb_cth_runtime_20260312_r2/summary.json`.

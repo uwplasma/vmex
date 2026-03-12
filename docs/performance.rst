@@ -338,6 +338,13 @@ controller fixes improved several non-axisymmetric cases materially:
   brought the direct warmed CPU benchmark for ``cth_like_free_bdy`` to about
   ``11.25s`` in ``outputs/freeb_cth_runtime_20260312/summary.json`` while
   preserving convergence.
+- one more pass then removed six separate second-derivative boundary synthesis
+  calls from ``_sample_external_boundary_arrays`` and replaced them with two
+  stacked batched syntheses. On the same representative free-boundary case,
+  that moved the cProfile total further to about ``31.04s`` and improved the
+  warmed CPU benchmark to about ``10.41s`` in
+  ``outputs/freeb_cth_runtime_20260312_r2/summary.json`` while keeping the
+  direct NESTOR reuse tests green.
   boundary ``R/Z`` synthesis and first-derivative synthesis in
   ``_sample_external_boundary_arrays`` cut the representative
   ``input.cth_like_free_bdy`` profile from about ``60.41s`` total wall time to

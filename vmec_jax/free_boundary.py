@@ -814,60 +814,33 @@ def _sample_external_boundary_arrays(
     zcos_b = np.asarray(Zcos_phys, dtype=float)[-1:, :]
     zsin_b = np.asarray(Zsin_phys, dtype=float)[-1:, :]
 
-    Ruu = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=rcos_b * d2u_fac,
-            coeff_sin=rsin_b * d2u_fac,
+    second_facs = np.stack([d2u_fac, duv_fac, d2v_fac], axis=0)
+    R_second = np.asarray(
+        vmec_realspace_synthesis_multi(
+            coeff_cos=np.asarray(rcos_b)[None, :, :] * second_facs,
+            coeff_sin=np.asarray(rsin_b)[None, :, :] * second_facs,
             modes=static.modes,
             trig=trig,
             coeffs_internal=True,
+            derivs=("base",),
         )[0]
     )
-    Ruv = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=rcos_b * duv_fac,
-            coeff_sin=rsin_b * duv_fac,
+    Z_second = np.asarray(
+        vmec_realspace_synthesis_multi(
+            coeff_cos=np.asarray(zcos_b)[None, :, :] * second_facs,
+            coeff_sin=np.asarray(zsin_b)[None, :, :] * second_facs,
             modes=static.modes,
             trig=trig,
             coeffs_internal=True,
+            derivs=("base",),
         )[0]
     )
-    Rvv = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=rcos_b * d2v_fac,
-            coeff_sin=rsin_b * d2v_fac,
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
-    )
-    Zuu = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=zcos_b * d2u_fac,
-            coeff_sin=zsin_b * d2u_fac,
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
-    )
-    Zuv = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=zcos_b * duv_fac,
-            coeff_sin=zsin_b * duv_fac,
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
-    )
-    Zvv = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=zcos_b * d2v_fac,
-            coeff_sin=zsin_b * d2v_fac,
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
-    )
+    Ruu = np.asarray(R_second[0, 0])
+    Ruv = np.asarray(R_second[1, 0])
+    Rvv = np.asarray(R_second[2, 0])
+    Zuu = np.asarray(Z_second[0, 0])
+    Zuv = np.asarray(Z_second[1, 0])
+    Zvv = np.asarray(Z_second[2, 0])
 
     nzeta = int(R.shape[1])
     zeta = (2.0 * np.pi / max(1, nzeta)) * np.arange(nzeta, dtype=float)
