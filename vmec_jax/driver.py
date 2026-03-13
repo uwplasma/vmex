@@ -786,6 +786,7 @@ def run_fixed_boundary(
     restart_wout_path: str | Path | None = None,
     restart_solver_state: dict | None = None,
     cli_fixed_boundary_mode: bool = False,
+    _auto_cli_fixed_boundary_mode: bool = True,
 ):
     t_start = time.perf_counter()
     max_iter_overridden = max_iter is not _MAX_ITER_SENTINEL
@@ -940,7 +941,8 @@ def run_fixed_boundary(
     accelerated_mode = solver_mode_eff == "accelerated"
     performance_mode = solver_mode_eff != "parity"
     cli_fixed_boundary_mode = bool(cli_fixed_boundary_mode) or (
-        (not bool(cfg.lfreeb))
+        bool(_auto_cli_fixed_boundary_mode)
+        and (not bool(cfg.lfreeb))
         and bool(performance_mode)
         and str(solver).strip().lower() == "vmec2000_iter"
     )
@@ -1094,6 +1096,7 @@ def run_fixed_boundary(
                 stage_transition_scale=float(stage_transition_scale),
                 grid=grid,
                 cli_fixed_boundary_mode=False,
+                _auto_cli_fixed_boundary_mode=False,
             )
             if stage_state is None:
                 kwargs["ns_override"] = int(ns_i)
@@ -1192,6 +1195,7 @@ def run_fixed_boundary(
                 stage_transition_scale=float(stage_transition_scale),
                 grid=grid,
                 cli_fixed_boundary_mode=False,
+                _auto_cli_fixed_boundary_mode=False,
             )
             if stage_state is None:
                 kwargs["ns_override"] = int(ns_i)
@@ -1496,6 +1500,7 @@ def run_fixed_boundary(
                 stage_transition_scale=float(stage_transition_scale),
                 grid=grid,
                 cli_fixed_boundary_mode=False,
+                _auto_cli_fixed_boundary_mode=False,
             )
             fallback_fsq = float(_result_final_fsq(fallback.result))
             fallback_conv = bool(_result_meets_requested_ftol(fallback.result, ftol=float(requested_ftol)))

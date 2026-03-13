@@ -1447,3 +1447,22 @@ Legend:
     about `8.00s` warmed to about `7.88s` warmed on the same CPU host, with
     unchanged final residuals,
   - targeted free-boundary regression tests and the fast Sphinx build passed.
+- 2026-03-13 fresh validation/figure pass:
+  - a fresh broad pytest sweep exposed two real issues on the new head:
+    a free-boundary regression from the cache-cleanup pass and a recursive
+    re-entry bug in the automatic CLI fixed-boundary finisher during staged
+    follow-up runs,
+  - fixed the free-boundary regressions by restoring full toroidal-grid
+    `bsqvac` coupling for axisymmetric sampling, narrowing light-history mode
+    so free-boundary diagnostics are preserved, and keeping prepared mgrid
+    metadata `kp` capped to the effective `2*nzeta` working grid,
+  - fixed the CLI recursion by adding an internal
+    `_auto_cli_fixed_boundary_mode` guard so recursive staged follow-up calls
+    do not re-trigger automatic CLI optimization mode,
+  - reran `tests/test_free_boundary_wp0.py` successfully (`31 passed`),
+  - regenerated the README/public figures for the axisymmetric comparison,
+    QA comparison, and `readme_fsq_trace.png`, and refreshed the runtime chart
+    from the checked-in benchmark summaries,
+  - fast Sphinx build passed after the figure refresh,
+  - a truly fresh completed all-files pytest sweep is still limited by a very
+    slow long-tail in the driver/wout coverage on this machine.
