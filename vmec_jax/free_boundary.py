@@ -906,7 +906,7 @@ def _sample_external_boundary_arrays(
 ) -> ExternalBoundarySample:
     """Return full boundary arrays for external mgrid field sampling."""
 
-    from .vmec_parity import vmec_m1_internal_to_physical_signed
+    from .vmec_parity import vmec_m1_internal_to_physical_signed_host
     from .vmec_realspace import (
         vmec_realspace_synthesis,
     )
@@ -944,7 +944,7 @@ def _sample_external_boundary_arrays(
         Rsin_phys = np.asarray(state.Rsin)
         Zcos_phys = np.asarray(state.Zcos)
     else:
-        Rcos_phys, Zsin_phys, Rsin_phys, Zcos_phys = vmec_m1_internal_to_physical_signed(
+        Rcos_phys, Zsin_phys, Rsin_phys, Zcos_phys = vmec_m1_internal_to_physical_signed_host(
             Rcos=np.asarray(state.Rcos),
             Zsin=np.asarray(state.Zsin),
             Rsin=np.asarray(state.Rsin),
@@ -1042,11 +1042,11 @@ def _sample_external_boundary_arrays(
     # pr1(:,1,0) uses only rmncc at theta=0; pz1(:,1,0) uses only zmncs.
     if (not bool(getattr(static.cfg, "lasym", False))) and axis_mode in ("vmec_pr1", "pr1_vmec", "vmec"):
         try:
-            from .vmec_parity import signed_maps_from_modes, _signed_to_mn_cos_cached, _signed_to_mn_sin_cached
+            from .vmec_parity import signed_maps_from_modes, _signed_to_mn_cos_host, _signed_to_mn_sin_host
 
             maps = signed_maps_from_modes(static.modes)
-            rcc, _rss = _signed_to_mn_cos_cached(np.asarray(state.Rcos), maps=maps)
-            _zsc, zcs = _signed_to_mn_sin_cached(np.asarray(state.Zsin), maps=maps)
+            rcc, _rss = _signed_to_mn_cos_host(np.asarray(state.Rcos), maps=maps)
+            _zsc, zcs = _signed_to_mn_sin_host(np.asarray(state.Zsin), maps=maps)
             rcc_js1 = np.asarray(rcc[0], dtype=float)  # (mpol, ntor+1)
             zcs_js1 = np.asarray(zcs[0], dtype=float)  # (mpol, ntor+1)
             even_m = (np.arange(rcc_js1.shape[0], dtype=int) % 2) == 0

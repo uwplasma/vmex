@@ -131,6 +131,28 @@ def currents_from_bcovar(*, bc, trig: VmecTrigTables, wout, s: Any) -> tuple[jnp
     return buco, bvco, jcuru, jcurv
 
 
+def plascur_edge_from_bcovar(*, bc, trig: VmecTrigTables, wout, s: Any) -> jnp.ndarray:
+    """Compute the VMEC/NESTOR `ctor` proxy from the last two `buco` surfaces.
+
+    This is a cheaper specialization of `currents_from_bcovar` for the
+    free-boundary path, which only needs the edge extrapolation
+
+      ctor = -signgs * 2π * (1.5*buco(ns) - 0.5*buco(ns-1))
+    """
+    s = jnp.asarray(s)
+    ns = int(s.shape[0])
+    if ns < 2:
+        return jnp.asarray(0.0, dtype=jnp.float64)
+
+    signgs = float(getattr(wout, "signgs", 1))
+    bsubu = jnp.asarray(bc.bsubu, dtype=jnp.float64)
+    _, ntheta, nzeta = bsubu.shape
+    pwint = _pwint_from_trig(trig, nzeta=nzeta, dtype=jnp.float64)
+    buco_edge = jnp.sum(bsubu[-2:] * pwint[None, :, :], axis=(1, 2))
+    ctor = -signgs * TWOPI * (1.5 * buco_edge[-1] - 0.5 * buco_edge[-2])
+    return jnp.asarray(ctor, dtype=jnp.float64)
+
+
 def equif_from_bcovar(*, bc, trig: VmecTrigTables, wout, s: Any) -> jnp.ndarray:
     """Compute VMEC's `equif(js)` profile from bsubu/bsubv averages (fbal.f)."""
     s = jnp.asarray(s)

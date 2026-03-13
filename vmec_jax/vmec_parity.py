@@ -360,6 +360,22 @@ def _signed_to_mn_cos_cached(coeffs, *, maps: SignedModeMaps):
     return rcc, rss
 
 
+def _signed_to_mn_cos_host(coeffs, *, maps: SignedModeMaps):
+    """NumPy host-side version of `_signed_to_mn_cos_cached`."""
+    coeffs = np.asarray(coeffs)
+    if maps.mpol == 0 or maps.nrange == 0:
+        z = np.zeros((int(coeffs.shape[0]), maps.mpol, maps.nrange), dtype=coeffs.dtype)
+        return z, z
+    mask_pos = maps.mask_pos.astype(coeffs.dtype, copy=False)
+    mask_neg = maps.mask_neg.astype(coeffs.dtype, copy=False)
+    pos = coeffs[:, maps.idx_pos_safe] * mask_pos[None, :, :]
+    neg = coeffs[:, maps.idx_neg_safe] * mask_neg[None, :, :]
+    rcc = pos + neg
+    rss = pos - neg
+    rss[:, maps.zero_mask] = 0
+    return rcc, rss
+
+
 def _signed_to_mn_sin_cached(coeffs, *, maps: SignedModeMaps):
     """Cached version of _signed_to_mn_sin using prebuilt masks."""
     coeffs = jnp.asarray(coeffs)
@@ -382,6 +398,23 @@ def _signed_to_mn_sin_cached(coeffs, *, maps: SignedModeMaps):
     m0 = maps.m0_mask_j if maps.m0_mask_j is not None else jnp.asarray(maps.m0_mask)
     cs = jnp.where(n0[None, :, :], jnp.zeros_like(cs), cs)
     sc = jnp.where(m0[None, :, :] & (~n0[None, :, :]), jnp.zeros_like(sc), sc)
+    return sc, cs
+
+
+def _signed_to_mn_sin_host(coeffs, *, maps: SignedModeMaps):
+    """NumPy host-side version of `_signed_to_mn_sin_cached`."""
+    coeffs = np.asarray(coeffs)
+    if maps.mpol == 0 or maps.nrange == 0:
+        z = np.zeros((int(coeffs.shape[0]), maps.mpol, maps.nrange), dtype=coeffs.dtype)
+        return z, z
+    mask_pos = maps.mask_pos.astype(coeffs.dtype, copy=False)
+    mask_neg = maps.mask_neg.astype(coeffs.dtype, copy=False)
+    pos = coeffs[:, maps.idx_pos_safe] * mask_pos[None, :, :]
+    neg = coeffs[:, maps.idx_neg_safe] * mask_neg[None, :, :]
+    sc = pos + neg
+    cs = neg - pos
+    cs = np.where(maps.n0_mask[None, :, :], np.zeros_like(cs), cs)
+    sc = np.where((maps.m0_mask & (~maps.n0_mask))[None, :, :], np.zeros_like(sc), sc)
     return sc, cs
 
 
@@ -493,6 +526,24 @@ def _mn_cos_to_signed_cached(rcc, rss, *, maps: SignedModeMaps, ncoeff: int):
     return out
 
 
+def _mn_cos_to_signed_host(rcc, rss, *, maps: SignedModeMaps, ncoeff: int):
+    """NumPy host-side version of `_mn_cos_to_signed_cached`."""
+    rcc = np.asarray(rcc)
+    rss = np.asarray(rss)
+    ns = int(rcc.shape[0])
+    out = np.zeros((ns, ncoeff), dtype=rcc.dtype)
+    if ncoeff == 0:
+        return out
+    pos = 0.5 * (rcc + rss)
+    pos = np.where((maps.m0_mask | maps.n0_mask)[None, :, :], rcc, pos)
+    neg = 0.5 * (rcc - rss)
+    pos_flat = pos.reshape(ns, -1) * maps.mask_pos_flat.astype(rcc.dtype, copy=False)[None, :]
+    neg_flat = neg.reshape(ns, -1) * maps.mask_neg_flat.astype(rcc.dtype, copy=False)[None, :]
+    out[:, maps.idx_pos_safe_flat] += pos_flat
+    out[:, maps.idx_neg_safe_flat] += neg_flat
+    return out
+
+
 def _mn_sin_to_signed_cached(sc, cs, *, maps: SignedModeMaps, ncoeff: int):
     """Cached version of _mn_sin_to_signed using prebuilt masks."""
     sc = jnp.asarray(sc)
@@ -529,6 +580,27 @@ def _mn_sin_to_signed_cached(sc, cs, *, maps: SignedModeMaps, ncoeff: int):
     idx_all = jnp.concatenate([idx_pos_safe, idx_neg_safe], axis=0)
     vals_all = jnp.concatenate([pos_flat, neg_flat], axis=1)
     out = out.at[:, idx_all].add(vals_all)
+    return out
+
+
+def _mn_sin_to_signed_host(sc, cs, *, maps: SignedModeMaps, ncoeff: int):
+    """NumPy host-side version of `_mn_sin_to_signed_cached`."""
+    sc = np.asarray(sc)
+    cs = np.asarray(cs)
+    ns = int(sc.shape[0])
+    out = np.zeros((ns, ncoeff), dtype=sc.dtype)
+    if ncoeff == 0:
+        return out
+    pos = 0.5 * (sc - cs)
+    pos = np.where(maps.n0_mask[None, :, :], sc, pos)
+    mask_no_neg = (~maps.mask_neg) & (~maps.n0_mask)
+    pos = np.where((mask_no_neg & maps.m0_mask)[None, :, :], -cs, pos)
+    pos = np.where((mask_no_neg & (~maps.m0_mask))[None, :, :], sc, pos)
+    neg = 0.5 * (sc + cs)
+    pos_flat = pos.reshape(ns, -1) * maps.mask_pos_flat.astype(sc.dtype, copy=False)[None, :]
+    neg_flat = neg.reshape(ns, -1) * maps.mask_neg_flat.astype(sc.dtype, copy=False)[None, :]
+    out[:, maps.idx_pos_safe_flat] += pos_flat
+    out[:, maps.idx_neg_safe_flat] += neg_flat
     return out
 
 
@@ -583,6 +655,57 @@ def vmec_m1_internal_to_physical_signed(
         zcc = zcc.at[:, 1, :].set(rsc_m1 - zcc_m1)
         Rsin_out = _mn_sin_to_signed_cached(rsc, rcs, maps=maps, ncoeff=ncoeff)
         Zcos_out = _mn_cos_to_signed_cached(zcc, zss, maps=maps, ncoeff=ncoeff)
+
+    return Rcos_out, Zsin_out, Rsin_out, Zcos_out
+
+
+def vmec_m1_internal_to_physical_signed_host(
+    *,
+    Rcos,
+    Zsin,
+    Rsin,
+    Zcos,
+    modes,
+    lthreed: bool,
+    lasym: bool,
+    lconm1: bool,
+):
+    """NumPy host-side version of `vmec_m1_internal_to_physical_signed`."""
+    if not bool(lconm1) or (not bool(lthreed) and not bool(lasym)):
+        return np.asarray(Rcos), np.asarray(Zsin), np.asarray(Rsin), np.asarray(Zcos)
+    maps = signed_maps_from_modes(modes)
+    if maps.mpol <= 1:
+        return np.asarray(Rcos), np.asarray(Zsin), np.asarray(Rsin), np.asarray(Zcos)
+    Rcos = np.asarray(Rcos)
+    Zsin = np.asarray(Zsin)
+    Rsin = np.asarray(Rsin)
+    Zcos = np.asarray(Zcos)
+    ncoeff = int(Rcos.shape[1])
+
+    Rcos_out = Rcos
+    Zsin_out = Zsin
+    Rsin_out = Rsin
+    Zcos_out = Zcos
+
+    if bool(lthreed):
+        rcc, rss = _signed_to_mn_cos_host(Rcos, maps=maps)
+        zsc, zcs = _signed_to_mn_sin_host(Zsin, maps=maps)
+        rss_m1 = np.array(rss[:, 1, :], copy=True)
+        zcs_m1 = np.array(zcs[:, 1, :], copy=True)
+        rss[:, 1, :] = rss_m1 + zcs_m1
+        zcs[:, 1, :] = rss_m1 - zcs_m1
+        Rcos_out = _mn_cos_to_signed_host(rcc, rss, maps=maps, ncoeff=ncoeff)
+        Zsin_out = _mn_sin_to_signed_host(zsc, zcs, maps=maps, ncoeff=ncoeff)
+
+    if bool(lasym):
+        rsc, rcs = _signed_to_mn_sin_host(Rsin, maps=maps)
+        zcc, zss = _signed_to_mn_cos_host(Zcos, maps=maps)
+        rsc_m1 = np.array(rsc[:, 1, :], copy=True)
+        zcc_m1 = np.array(zcc[:, 1, :], copy=True)
+        rsc[:, 1, :] = rsc_m1 + zcc_m1
+        zcc[:, 1, :] = rsc_m1 - zcc_m1
+        Rsin_out = _mn_sin_to_signed_host(rsc, rcs, maps=maps, ncoeff=ncoeff)
+        Zcos_out = _mn_cos_to_signed_host(zcc, zss, maps=maps, ncoeff=ncoeff)
 
     return Rcos_out, Zsin_out, Rsin_out, Zcos_out
 

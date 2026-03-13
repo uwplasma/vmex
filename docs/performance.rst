@@ -364,6 +364,33 @@ controller fixes improved several non-axisymmetric cases materially:
   with ``_sample_external_boundary_arrays`` down to about ``5.78s``, and the
   warmed CPU benchmark improved further to about ``9.86s`` in
   ``outputs/freeb_cth_runtime_20260312_r4/summary.json``.
+- a deeper 2026-03-13 profiling pass then combined full ``pytest -q`` /
+  Sphinx validation with kernel-level auditing:
+
+  - the accelerated fixed-boundary HLO dump for
+    ``input.LandremanPaul2021_QA_lowres`` showed the bcovar kernel still
+    contains a large gather/scatter footprint (roughly ``96`` gathers and
+    ``55`` scatters in the dumped HLO), which means the next fixed-boundary
+    wins are more likely to come from refactoring bcovar/state-enforcement
+    kernels than from controller tweaks,
+  - cProfile on the representative free-boundary case
+    ``input.cth_like_free_bdy`` showed the remaining dominant host-side cost
+    was still inside ``free_boundary.py``:
+    ``_sample_external_boundary_arrays`` plus JAX-backed parity conversions
+    and the full-profile ``currents_from_bcovar`` path used only to recover
+    the edge ``ctor`` scalar for NESTOR,
+  - replacing those host-only parity conversions with pure NumPy helpers in
+    ``vmec_parity.py`` and adding a specialized
+    ``vmec_lforbal.plascur_edge_from_bcovar`` helper cut the same warmed
+    200-iteration ``input.cth_like_free_bdy`` benchmark from about ``8.00s``
+    to about ``3.45s`` on the same CPU host while keeping the free-boundary
+    regression tests green,
+  - after that change, the same cProfile run dropped from about ``8.00s`` to
+    about ``6.06s`` total Python-side wall time, and the remaining dominant
+    CPU hotspots became the update/preconditioner side
+    (``_apply_vmec_scale_m1_precond_rhs``,
+    ``_enforce_fixed_boundary_and_axis``, and the free-boundary update block)
+    rather than the old external-boundary sampling path itself.
 
 Full same-host readiness sweep
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

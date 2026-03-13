@@ -1466,3 +1466,30 @@ Legend:
   - fast Sphinx build passed after the figure refresh,
   - a truly fresh completed all-files pytest sweep is still limited by a very
     slow long-tail in the driver/wout coverage on this machine.
+- 2026-03-13 deep profiling / bottleneck pass:
+  - fixed the remaining long-tail test blocker and reran the full suite cleanly:
+    `pytest -q` now completes on the branch (`181 passed, 12 skipped`), and the
+    fast Sphinx build also passes on the same head,
+  - profiled a representative accelerated fixed-boundary 3D case
+    (`input.LandremanPaul2021_QA_reactorScale_lowres`) and confirmed that the
+    next fixed-boundary performance ceiling is in the compiled bcovar/update
+    kernels rather than Python control flow; the dumped bcovar HLO still shows
+    a heavy gather/scatter footprint,
+  - profiled representative free-boundary cases with `VMEC_JAX_TIMING=1`,
+    cProfile, and HLO inspection; the main remaining host-side bottlenecks were
+    `_sample_external_boundary_arrays` and the full-profile
+    `currents_from_bcovar` path used only to recover edge `ctor`,
+  - added pure-NumPy host parity conversions in `vmec_parity.py` for the
+    free-boundary external-sampling path and switched
+    `free_boundary.py:_sample_external_boundary_arrays` to use them,
+  - added `vmec_lforbal.plascur_edge_from_bcovar` and used it in
+    `solve.py` so NESTOR no longer computes full `buco/bvco/jcur*` profiles
+    when it only needs the edge `ctor` scalar,
+  - the representative warmed 200-iteration `input.cth_like_free_bdy` runtime
+    improved from about `8.00s` to about `3.45s` on the same host after these
+    profiling-driven changes, while targeted free-boundary regression tests and
+    the full suite stayed green,
+  - the next best free-boundary targets are now the update/preconditioner side
+    (`_apply_vmec_scale_m1_precond_rhs`, `_enforce_fixed_boundary_and_axis`,
+    and the remaining free-boundary update block), not the old host-side
+    boundary sampling path.

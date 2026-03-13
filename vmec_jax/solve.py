@@ -9012,24 +9012,17 @@ def solve_fixed_boundary_residual_iter(
     def _vmec_freeb_plascur_from_bcovar(bc_obj, fallback: float) -> float:
         """VMEC `ctor` proxy used by NESTOR (`vacuum_par(..., ctor, ...)`)."""
         try:
-            from .vmec_lforbal import currents_from_bcovar
+            from .vmec_lforbal import plascur_edge_from_bcovar
 
-            buco, _bvco, _jcuru, _jcurv = currents_from_bcovar(
+            ctor = plascur_edge_from_bcovar(
                 bc=bc_obj,
                 trig=trig,
                 wout=wout_like,
                 s=s,
             )
-            buco_np = np.asarray(buco, dtype=float).reshape(-1)
-            if buco_np.size < 2:
-                return float(fallback)
-            # VMEC passes `ctor` to NESTOR. In the JAX bcovar path the
-            # averaged `buco` sign convention is flipped relative to NESTOR's
-            # toroidal-current convention, so apply the VMEC-equivalent sign
-            # correction here.
-            ctor = -float(signgs) * float(TWOPI) * (1.5 * float(buco_np[-1]) - 0.5 * float(buco_np[-2]))
-            if np.isfinite(ctor):
-                return float(ctor)
+            ctor_f = float(np.asarray(ctor))
+            if np.isfinite(ctor_f):
+                return float(ctor_f)
         except Exception:
             pass
         return float(fallback)
