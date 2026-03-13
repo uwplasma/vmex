@@ -1063,6 +1063,26 @@ Lambda gauge masking
 The (m,n)=(0,0) lambda gauge constraint now uses a boolean mask instead of a
 scatter update, trimming another small scatter kernel from the iteration loop.
 
+Concatenation-based mode updates
+--------------------------------
+
+The current optimized branch also replaces several remaining scatter-style
+fixed-boundary hot-path updates with concatenation-based helpers:
+
+- zeroing the lambda gauge coefficient column,
+- replacing or scaling a single ``m``-mode slice in the preconditioned force
+  blocks,
+- and enforcing axis/edge constraints on the R/Z/L state fields.
+
+This keeps the same constraints and algebra, but reduces the number of
+scatter-heavy kernels created inside the iteration loop. On the representative
+accelerated reactor-scale QA case
+(``input.LandremanPaul2021_QA_reactorScale_lowres``), the warmed CPU runtime
+improved from about ``12.00s`` to about ``11.04s`` on the same host. The same
+pass also nudged the representative free-boundary warmed CPU benchmark
+(``input.cth_like_free_bdy``) from about ``3.11s`` to about ``3.07s`` while
+keeping the full test suite green.
+
 Vectorized axis blending
 ------------------------
 

@@ -1493,3 +1493,22 @@ Legend:
     (`_apply_vmec_scale_m1_precond_rhs`, `_enforce_fixed_boundary_and_axis`,
     and the remaining free-boundary update block), not the old host-side
     boundary sampling path.
+- 2026-03-13 scatter-heavy fixed-boundary hot-path cleanup:
+  - replaced the remaining hot-path scatter-style update helpers in
+    `solve.py` with concatenation-based equivalents for:
+    zeroing the lambda gauge coefficient column, replacing/scaling a single
+    `(m,:)` mode slice, and enforcing axis/edge row constraints,
+  - added direct regression coverage in `tests/test_solve_hotpaths.py` to lock
+    the new helpers to the old semantics on synthetic arrays and a real
+    circular tokamak mode layout,
+  - reran the full local validation gates successfully on the new head:
+    `pytest -q` completed (`186 passed, 12 skipped`) and the fast Sphinx build
+    passed,
+  - representative warmed runtime checks improved modestly but consistently on
+    the same host:
+    `input.LandremanPaul2021_QA_reactorScale_lowres` about `12.00s -> 11.04s`,
+    `input.cth_like_free_bdy` about `3.11s -> 3.07s`,
+    and `input.DIII-D_lasym_false` (`max_iter=20`) about `0.264s -> 0.262s`,
+  - this leaves the next optimization ceiling where the profiler already
+    pointed: compiled `bcovar`/update kernels for fixed-boundary 3D and the
+    remaining free-boundary update/preconditioner block.

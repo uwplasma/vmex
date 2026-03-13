@@ -1454,10 +1454,8 @@ def _enforce_lambda_gauge(Lcos, Lsin, *, idx00: Optional[int]):
     """Fix the (m,n)=(0,0) gauge mode to 0 (it is a nullspace)."""
     if idx00 is None:
         return Lcos, Lsin
-    mask = jnp.asarray(np.arange(int(jnp.asarray(Lcos).shape[1])) == int(idx00))
-    mask = mask[None, :]
-    Lcos = jnp.where(mask, jnp.asarray(0.0, dtype=jnp.asarray(Lcos).dtype), jnp.asarray(Lcos))
-    Lsin = jnp.where(mask, jnp.asarray(0.0, dtype=jnp.asarray(Lsin).dtype), jnp.asarray(Lsin))
+    Lcos = _zero_coeff_column(Lcos, idx=int(idx00))
+    Lsin = _zero_coeff_column(Lsin, idx=int(idx00))
     return Lcos, Lsin
 
 
@@ -1466,6 +1464,86 @@ def _axis_m0_mask(static, *, dtype):
         return jnp.asarray(static.m_is_m0, dtype=dtype)
     m = jnp.asarray(static.modes.m)
     return (m == 0).astype(dtype)
+
+
+def _zero_coeff_column(arr, *, idx: int):
+    """Zero one Fourier coefficient column with concatenation instead of masking."""
+    arr = jnp.asarray(arr)
+    ncols = int(arr.shape[1])
+    if idx < 0 or idx >= ncols:
+        return arr
+    zero = jnp.zeros_like(arr[:, :1])
+    if idx == 0:
+        if ncols == 1:
+            return zero
+        return jnp.concatenate([zero, arr[:, 1:]], axis=1)
+    if idx == ncols - 1:
+        return jnp.concatenate([arr[:, :idx], zero], axis=1)
+    return jnp.concatenate([arr[:, :idx], zero, arr[:, idx + 1 :]], axis=1)
+
+
+def _replace_mode_slice(arr, *, mode_idx: int, replacement):
+    """Replace one `(m, :)` slice of a `(ns, mpol, nrange)` array."""
+    if arr is None:
+        return None
+    arr = jnp.asarray(arr)
+    nmodes = int(arr.shape[1])
+    if mode_idx < 0 or mode_idx >= nmodes:
+        return arr
+    repl = jnp.asarray(replacement, dtype=arr.dtype)[:, None, :]
+    if mode_idx == 0:
+        if nmodes == 1:
+            return repl
+        return jnp.concatenate([repl, arr[:, 1:, :]], axis=1)
+    if mode_idx == nmodes - 1:
+        return jnp.concatenate([arr[:, :mode_idx, :], repl], axis=1)
+    return jnp.concatenate([arr[:, :mode_idx, :], repl, arr[:, mode_idx + 1 :, :]], axis=1)
+
+
+def _scale_mode_slice(arr, *, mode_idx: int, scale):
+    """Scale one `(m, :)` slice of a `(ns, mpol, nrange)` array."""
+    if arr is None:
+        return None
+    arr = jnp.asarray(arr)
+    nmodes = int(arr.shape[1])
+    if mode_idx < 0 or mode_idx >= nmodes:
+        return arr
+    scaled = arr[:, mode_idx, :] * jnp.asarray(scale, dtype=arr.dtype)[:, None]
+    return _replace_mode_slice(arr, mode_idx=mode_idx, replacement=scaled)
+
+
+def _enforce_field_rows(arr, *, axis_mask=None, edge_row=None, zero_axis: bool = False):
+    """Apply axis/edge row constraints with at most one concatenation."""
+    arr = jnp.asarray(arr)
+    ns = int(arr.shape[0])
+    if ns == 0:
+        return arr
+
+    first = arr[:1, :]
+    if zero_axis:
+        first = jnp.zeros_like(first)
+    elif axis_mask is not None:
+        first = first * jnp.asarray(axis_mask, dtype=arr.dtype)[None, :]
+
+    last = arr[-1:, :]
+    if edge_row is not None:
+        last = jnp.asarray(edge_row, dtype=arr.dtype)[None, :]
+
+    if ns == 1:
+        row = last
+        if zero_axis:
+            row = jnp.zeros_like(row)
+        elif axis_mask is not None:
+            row = row * jnp.asarray(axis_mask, dtype=arr.dtype)[None, :]
+        return row
+
+    if (zero_axis or axis_mask is not None) and (edge_row is not None):
+        return jnp.concatenate([first, arr[1:-1, :], last], axis=0)
+    if zero_axis or axis_mask is not None:
+        return jnp.concatenate([first, arr[1:, :]], axis=0)
+    if edge_row is not None:
+        return jnp.concatenate([arr[:-1, :], last], axis=0)
+    return arr
 
 
 def _enforce_fixed_boundary_and_axis(
@@ -1494,22 +1572,18 @@ def _enforce_fixed_boundary_and_axis(
     Lcos = jnp.asarray(state.Lcos)
     Lsin = jnp.asarray(state.Lsin)
 
-    if enforce_edge:
-        Rcos = jnp.concatenate([Rcos[:-1, :], jnp.asarray(edge_Rcos)[None, :]], axis=0)
-        Rsin = jnp.concatenate([Rsin[:-1, :], jnp.asarray(edge_Rsin)[None, :]], axis=0)
-        Zcos = jnp.concatenate([Zcos[:-1, :], jnp.asarray(edge_Zcos)[None, :]], axis=0)
-        Zsin = jnp.concatenate([Zsin[:-1, :], jnp.asarray(edge_Zsin)[None, :]], axis=0)
+    mask_m0 = _axis_m0_mask(static, dtype=Rcos.dtype) if enforce_axis else None
+    edge_Rcos_arr = edge_Rcos if enforce_edge else None
+    edge_Rsin_arr = edge_Rsin if enforce_edge else None
+    edge_Zcos_arr = edge_Zcos if enforce_edge else None
+    edge_Zsin_arr = edge_Zsin if enforce_edge else None
 
-    if enforce_axis:
-        mask_m0 = _axis_m0_mask(static, dtype=Rcos.dtype)
-        Rcos = jnp.concatenate([Rcos[:1, :] * mask_m0[None, :], Rcos[1:, :]], axis=0)
-        Rsin = jnp.concatenate([Rsin[:1, :] * mask_m0[None, :], Rsin[1:, :]], axis=0)
-        Zcos = jnp.concatenate([Zcos[:1, :] * mask_m0[None, :], Zcos[1:, :]], axis=0)
-        Zsin = jnp.concatenate([Zsin[:1, :] * mask_m0[None, :], Zsin[1:, :]], axis=0)
-
-    if enforce_lambda_axis:
-        Lcos = jnp.concatenate([jnp.zeros_like(Lcos[:1, :]), Lcos[1:, :]], axis=0)
-        Lsin = jnp.concatenate([jnp.zeros_like(Lsin[:1, :]), Lsin[1:, :]], axis=0)
+    Rcos = _enforce_field_rows(Rcos, axis_mask=mask_m0, edge_row=edge_Rcos_arr)
+    Rsin = _enforce_field_rows(Rsin, axis_mask=mask_m0, edge_row=edge_Rsin_arr)
+    Zcos = _enforce_field_rows(Zcos, axis_mask=mask_m0, edge_row=edge_Zcos_arr)
+    Zsin = _enforce_field_rows(Zsin, axis_mask=mask_m0, edge_row=edge_Zsin_arr)
+    Lcos = _enforce_field_rows(Lcos, zero_axis=bool(enforce_lambda_axis))
+    Lsin = _enforce_field_rows(Lsin, zero_axis=bool(enforce_lambda_axis))
 
     Lcos, Lsin = _enforce_lambda_gauge(Lcos, Lsin, idx00=idx00)
 
@@ -9417,25 +9491,23 @@ def solve_fixed_boundary_residual_iter(
 
         ns_full = int(jnp.asarray(frzl_in.frcc).shape[0])
         nsolve = min(ns_full, int(fac_r.shape[0]))
-        fac_r_full = jnp.ones((ns_full,), dtype=jnp.asarray(frzl_in.frcc).dtype).at[:nsolve].set(fac_r[:nsolve])
-        fac_z_full = jnp.ones((ns_full,), dtype=jnp.asarray(frzl_in.fzsc).dtype).at[:nsolve].set(fac_z[:nsolve])
+        ones_r = jnp.ones((max(ns_full - nsolve, 0),), dtype=jnp.asarray(frzl_in.frcc).dtype)
+        ones_z = jnp.ones((max(ns_full - nsolve, 0),), dtype=jnp.asarray(frzl_in.fzsc).dtype)
+        fac_r_full = (
+            fac_r[:nsolve]
+            if nsolve == ns_full
+            else jnp.concatenate([fac_r[:nsolve], ones_r], axis=0)
+        )
+        fac_z_full = (
+            fac_z[:nsolve]
+            if nsolve == ns_full
+            else jnp.concatenate([fac_z[:nsolve], ones_z], axis=0)
+        )
 
-        frss = frzl_in.frss
-        fzcs = frzl_in.fzcs
-        frsc = getattr(frzl_in, "frsc", None)
-        fzcc = getattr(frzl_in, "fzcc", None)
-        if frss is not None:
-            frss = jnp.asarray(frss)
-            frss = frss.at[:, 1, :].set(frss[:, 1, :] * fac_r_full[:, None])
-        if fzcs is not None:
-            fzcs = jnp.asarray(fzcs)
-            fzcs = fzcs.at[:, 1, :].set(fzcs[:, 1, :] * fac_z_full[:, None])
-        if frsc is not None:
-            frsc = jnp.asarray(frsc)
-            frsc = frsc.at[:, 1, :].set(frsc[:, 1, :] * fac_r_full[:, None])
-        if fzcc is not None:
-            fzcc = jnp.asarray(fzcc)
-            fzcc = fzcc.at[:, 1, :].set(fzcc[:, 1, :] * fac_z_full[:, None])
+        frss = _scale_mode_slice(frzl_in.frss, mode_idx=1, scale=fac_r_full)
+        fzcs = _scale_mode_slice(frzl_in.fzcs, mode_idx=1, scale=fac_z_full)
+        frsc = _scale_mode_slice(getattr(frzl_in, "frsc", None), mode_idx=1, scale=fac_r_full)
+        fzcc = _scale_mode_slice(getattr(frzl_in, "fzcc", None), mode_idx=1, scale=fac_z_full)
 
         return TomnspsRZL(
             frcc=frzl_in.frcc,
