@@ -196,6 +196,17 @@ not a single algorithm:
 - only the genuinely hard cases should reach the final strict continuation
   phase.
 
+The last pre-PR cleanup on ``codex/nonparity-performance`` did not change the
+controller policy again. Instead, it trimmed overhead around the existing fast
+path:
+
+- performance-oriented non-verbose staged runs now default to the lighter
+  history footprint, not just the explicitly accelerated subset,
+- ordinary free-boundary runs now skip extra axis syntheses that were only
+  needed for ``VMEC_JAX_DUMP_SCALPOT`` diagnostics,
+- the VMEC-like dense free-boundary solve path now reuses cached LU
+  factorizations when SciPy is available, with a NumPy fallback otherwise.
+
 For an up-to-date side-by-side comparison on your machine, use the bundled
 driver example:
 

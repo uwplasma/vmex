@@ -122,6 +122,10 @@ python examples/optimization/implicit_target_iota_volume.py --case circular_toka
   fast final-grid accelerated attempt first, then input-driven staged follow-up
   for explicit `NS_ARRAY` / `NITER_ARRAY`, then strict parity finish blocks
   only if the staged route still has not closed.
+- On the optimized non-autodiff path, non-verbose runs now keep lighter
+  iteration histories by default, and ordinary free-boundary runs avoid extra
+  `scalpot` axis-diagnostic synthesis unless dump env vars are explicitly
+  enabled.
 - The current GPU path is fastest when the solve can stay on the scan fast path. Many of the slow GPU benchmark rows are parity-path solves, especially free-boundary cases, where VMEC2000-style restart logic, Jacobian checks, and cadence control still run as a host-controlled loop around many short float64 kernels.
 - That means the GPU often sees too little work per launch to amortize host/device overhead, while the CPU benefits from lower launch latency and efficient float64 execution on these moderate-size grids. This is an implementation limit of the current parity path, not a claim that the underlying physics is inherently CPU-only.
 - The accelerated-mode comparison harness lives at `tools/diagnostics/benchmark_accelerated_mode.py`.

@@ -173,7 +173,10 @@ The branch is ready for an honest review PR.
   fixed-boundary cases improved on the default path. The first follow-on
   ``lasym=False`` free-boundary batching change also reduced the
   representative ``cth_like_free_bdy`` CPU profile from about ``60.4s`` to
-  ``58.2s``.
+  ``58.2s``. The final pre-PR cleanup then stayed conservative: it broadened
+  light-history mode on the optimized non-autodiff path and made
+  free-boundary ``scalpot`` axis diagnostics lazy, but it did not claim a new
+  major algorithmic speedup beyond that.
 
 Conclusion:
 
