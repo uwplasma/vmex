@@ -1436,3 +1436,14 @@ Legend:
     tail seen previously on this machine, so the final validation signal for
     this pass is the targeted test set plus the representative runtime and
     convergence checks above.
+- 2026-03-13 extra free-boundary cache cleanup:
+  - cached static host-side boundary sampling setup in `free_boundary.py`
+    (second-derivative mode factors, sampled `phi` grids, even-`m` masks,
+    and VMEC `wint` weights) so the external-step loop rebuilds less
+    per-vacuum-step metadata,
+  - cached optional SciPy LU helpers at module import time instead of looking
+    them up during every dense free-boundary solve,
+  - representative `input.cth_like_free_bdy` runtime improved again from
+    about `8.00s` warmed to about `7.88s` warmed on the same CPU host, with
+    unchanged final residuals,
+  - targeted free-boundary regression tests and the fast Sphinx build passed.

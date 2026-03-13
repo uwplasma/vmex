@@ -1050,6 +1050,24 @@ Cached mode scaling
 ``1/(mscale*nscale)`` so initial-guess construction avoids repeated gathers
 from the trig tables.
 
+Latest branch notes
+-------------------
+
+On the current optimized branch, the last free-boundary cleanup pass cached
+more of the static external-boundary sampling setup on the host:
+
+- phase-independent second-derivative mode factors,
+- angular ``phi`` grids for the sampled boundary mesh,
+- even-``m`` masks used by the axis-parity shortcut,
+- VMEC angular ``wint`` weights for the sampled mesh,
+- and the optional SciPy LU helpers used by the VMEC-like dense solve path.
+
+That keeps the vacuum-step loop focused on state-dependent work instead of
+rebuilding static sampling metadata. On the representative
+``input.cth_like_free_bdy`` path, the warmed CPU runtime improved from about
+``8.00s`` to about ``7.88s`` on the same host while preserving the same final
+residuals and free-boundary sampling test coverage.
+
 Avoid Python objects in jitted functions
 ----------------------------------------
 

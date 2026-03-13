@@ -19,9 +19,18 @@ import numpy as np
 
 from .config import VMECConfig
 
+try:  # pragma: no cover - optional dependency
+    from scipy.linalg import lu_factor as _SCIPY_LU_FACTOR  # type: ignore
+    from scipy.linalg import lu_solve as _SCIPY_LU_SOLVE  # type: ignore
+except Exception:  # pragma: no cover - SciPy is optional at runtime
+    _SCIPY_LU_FACTOR = None
+    _SCIPY_LU_SOLVE = None
+
 _MGRID_FIELD_CACHE: dict[str, MGridData] = {}
 _FREEB_HOST_PHASE_CACHE: dict[tuple[int, int, tuple[str, ...]], np.ndarray] = {}
 _FREEB_TRIG_CACHE: dict[tuple[int, int, int, int, int, bool], Any] = {}
+_FREEB_BOUNDARY_SETUP_CACHE: dict[tuple[int, int], Any] = {}
+_FREEB_WINT_CACHE: dict[tuple[int, int, int], np.ndarray] = {}
 
 
 def _freeb_host_phase_stack(*, modes: Any, trig: Any, derivs: tuple[str, ...]) -> np.ndarray:
@@ -221,6 +230,60 @@ class ExternalBoundarySample:
 
 
 @dataclass(frozen=True)
+class _FreeBoundarySampleSetup:
+    trig: Any
+    second_facs: np.ndarray
+    phi_grid: np.ndarray
+    even_m_mask: np.ndarray
+    wint_vmec: np.ndarray
+
+
+def _freeb_boundary_sample_setup(*, static: Any, sample_nzeta: int) -> _FreeBoundarySampleSetup:
+    """Return cached static data used by host-side free-boundary sampling."""
+
+    key = (id(static), int(sample_nzeta))
+    cached = _FREEB_BOUNDARY_SETUP_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    trig = getattr(static, "trig_vmec", None)
+    if trig is None or int(sample_nzeta) != int(static.cfg.nzeta):
+        trig = _freeb_boundary_trig(cfg=static.cfg, nzeta=int(sample_nzeta))
+
+    m_arr = np.asarray(static.modes.m, dtype=float)
+    n_arr = np.asarray(static.modes.n, dtype=float) * float(int(static.cfg.nfp))
+    second_facs = np.stack(
+        [
+            (-(m_arr**2)).reshape((1, -1)),
+            (m_arr * n_arr).reshape((1, -1)),
+            (-(n_arr**2)).reshape((1, -1)),
+        ],
+        axis=0,
+    )
+
+    ntheta = int(np.asarray(trig.cosmu).shape[0])
+    nzeta = max(1, int(sample_nzeta))
+    phi = (2.0 * np.pi / float(nzeta)) * np.arange(nzeta, dtype=float)
+    phi /= float(max(1, int(static.cfg.nfp)))
+    phi_grid = np.broadcast_to(phi[None, :], (ntheta, nzeta))
+
+    if getattr(static, "m_is_even", None) is not None:
+        even_m_mask = np.asarray(static.m_is_even, dtype=float).reshape((1, 1, -1))
+    else:
+        even_m_mask = (np.asarray(static.modes.m, dtype=int) % 2 == 0).astype(float).reshape((1, 1, -1))
+
+    setup = _FreeBoundarySampleSetup(
+        trig=trig,
+        second_facs=second_facs,
+        phi_grid=phi_grid,
+        even_m_mask=even_m_mask,
+        wint_vmec=_vmec_boundary_wint(static=static, ntheta=ntheta, nzeta=nzeta, trig=trig),
+    )
+    _FREEB_BOUNDARY_SETUP_CACHE[key] = setup
+    return setup
+
+
+@dataclass(frozen=True)
 class NestorPoissonCache:
     """Stage-static spectral Poisson operator cache on the (theta,zeta) torus."""
 
@@ -274,21 +337,19 @@ class NestorSolveResult:
 
 
 def _dense_lu_factor(matrix: np.ndarray) -> Any | None:
+    if _SCIPY_LU_FACTOR is None:
+        return None
     try:
-        from scipy.linalg import lu_factor  # type: ignore
-
-        return lu_factor(np.asarray(matrix, dtype=float))
+        return _SCIPY_LU_FACTOR(np.asarray(matrix, dtype=float))
     except Exception:
         return None
 
 
 def _dense_lu_solve(lu_fac: Any | None, matrix: np.ndarray, rhs: np.ndarray) -> np.ndarray:
     rhs_arr = np.asarray(rhs, dtype=float)
-    if lu_fac is not None:
+    if lu_fac is not None and _SCIPY_LU_SOLVE is not None:
         try:
-            from scipy.linalg import lu_solve  # type: ignore
-
-            return np.asarray(lu_solve(lu_fac, rhs_arr), dtype=float)
+            return np.asarray(_SCIPY_LU_SOLVE(lu_fac, rhs_arr), dtype=float)
         except Exception:
             pass
     return np.asarray(np.linalg.solve(np.asarray(matrix, dtype=float), rhs_arr), dtype=float)
@@ -872,9 +933,8 @@ def _sample_external_boundary_arrays(
         "false",
         "no",
     )
-    trig = getattr(static, "trig_vmec", None)
-    if trig is None or int(sample_nzeta) != int(static.cfg.nzeta):
-        trig = _freeb_boundary_trig(cfg=static.cfg, nzeta=int(sample_nzeta))
+    setup = _freeb_boundary_sample_setup(static=static, sample_nzeta=int(sample_nzeta))
+    trig = setup.trig
 
     # Apply VMEC m=1 internal->physical conversion before free-boundary
     # sampling. This matches the convert_sym/convert_asym path feeding NESTOR.
@@ -918,19 +978,13 @@ def _sample_external_boundary_arrays(
     # VMEC surface.f uses exact modal second derivatives. Reconstruct those
     # directly from boundary Fourier coefficients (instead of finite/spectral
     # differencing sampled R,Z) for matrix-side parity in analyt/fouri/scalpot.
-    m_arr = np.asarray(static.modes.m, dtype=float)
-    n_arr = np.asarray(static.modes.n, dtype=float) * float(int(static.cfg.nfp))
-    d2u_fac = (-(m_arr**2)).reshape((1, -1))
-    duv_fac = (m_arr * n_arr).reshape((1, -1))
-    d2v_fac = (-(n_arr**2)).reshape((1, -1))
     rcos_b = np.asarray(Rcos_phys, dtype=float)[-1:, :]
     rsin_b = np.asarray(Rsin_phys, dtype=float)[-1:, :]
     zcos_b = np.asarray(Zcos_phys, dtype=float)[-1:, :]
     zsin_b = np.asarray(Zsin_phys, dtype=float)[-1:, :]
 
-    second_facs = np.stack([d2u_fac, duv_fac, d2v_fac], axis=0)
-    second_cos = np.stack([rcos_b, zcos_b], axis=0)[:, None, :, :] * second_facs[None, :, :, :]
-    second_sin = np.stack([rsin_b, zsin_b], axis=0)[:, None, :, :] * second_facs[None, :, :, :]
+    second_cos = np.stack([rcos_b, zcos_b], axis=0)[:, None, :, :] * setup.second_facs[None, :, :, :]
+    second_sin = np.stack([rsin_b, zsin_b], axis=0)[:, None, :, :] * setup.second_facs[None, :, :, :]
     second_all = np.asarray(
         _vmec_realspace_synthesis_multi_host(
             coeff_cos=second_cos,
@@ -948,9 +1002,7 @@ def _sample_external_boundary_arrays(
     Zvv = np.asarray(second_all[1, 2, 0])
 
     nzeta = int(R.shape[1])
-    zeta = (2.0 * np.pi / max(1, nzeta)) * np.arange(nzeta, dtype=float)
-    phi = zeta / max(1, int(static.cfg.nfp))
-    phi_grid = np.broadcast_to(phi[None, :], R.shape)
+    phi_grid = setup.phi_grid
 
     br_mgrid, bp_mgrid, bz_mgrid = interpolate_mgrid_bfield(
         mgrid,
@@ -1013,13 +1065,8 @@ def _sample_external_boundary_arrays(
         try:
             axis_scalxc_env = os.getenv("VMEC_JAX_FREEB_AXIS_PARITY_SCALXC", "0").strip().lower()
             axis_apply_scalxc = axis_scalxc_env not in ("", "0", "false", "no")
-            if getattr(static, "m_is_even", None) is not None:
-                mask_even = np.asarray(static.m_is_even, dtype=float)
-            else:
-                mask_even = (np.asarray(static.modes.m, dtype=int) % 2 == 0).astype(float)
-            mask_even = mask_even.reshape((1, 1, -1))
-            coeff_cos = np.stack([np.asarray(Rcos_phys), np.asarray(Zcos_phys)], axis=0) * mask_even
-            coeff_sin = np.stack([np.asarray(Rsin_phys), np.asarray(Zsin_phys)], axis=0) * mask_even
+            coeff_cos = np.stack([np.asarray(Rcos_phys), np.asarray(Zcos_phys)], axis=0) * setup.even_m_mask
+            coeff_sin = np.stack([np.asarray(Rsin_phys), np.asarray(Zsin_phys)], axis=0) * setup.even_m_mask
             parity_even = np.asarray(
                 vmec_realspace_synthesis(
                     coeff_cos=coeff_cos,
@@ -1159,20 +1206,28 @@ def _sample_external_boundary_arrays(
     )
 
 
-def _vmec_boundary_wint(*, static: Any, ntheta: int, nzeta: int) -> np.ndarray:
+def _vmec_boundary_wint(*, static: Any, ntheta: int, nzeta: int, trig: Any | None = None) -> np.ndarray:
     """Return VMEC angular weights on the free-boundary mesh."""
 
-    trig = getattr(static, "trig_vmec", None)
+    key = (id(static), int(ntheta), int(nzeta))
+    cached = _FREEB_WINT_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    trig = getattr(static, "trig_vmec", None) if trig is None else trig
     if trig is not None:
         try:
             from .vmec_residue import vmec_wint_from_trig
 
             w = np.asarray(vmec_wint_from_trig(trig, nzeta=int(nzeta)), dtype=float)
             if w.shape == (int(ntheta), int(nzeta)):
+                _FREEB_WINT_CACHE[key] = w
                 return w
         except Exception:
             pass
-    return np.full((int(ntheta), int(nzeta)), 1.0 / float(max(1, int(ntheta) * int(nzeta))), dtype=float)
+    w = np.full((int(ntheta), int(nzeta)), 1.0 / float(max(1, int(ntheta) * int(nzeta))), dtype=float)
+    _FREEB_WINT_CACHE[key] = w
+    return w
 
 
 def _build_vmec_cmns(*, mf: int, nf: int, onp: float) -> np.ndarray:
