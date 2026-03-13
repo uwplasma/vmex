@@ -2215,7 +2215,11 @@ def run_fixed_boundary(
             stage_offsets.append(sum(int(np.asarray(r.w_history).size) for r in stage_results))
             vmec2000_ctrl = True
             stage_prev_fsq = prev_stage_fsq if bool(stage_transition_heuristic) else None
-            stage_light_history = True if (bool(performance_mode) and (not bool(verbose))) else None
+            stage_light_history = (
+                True
+                if (bool(performance_mode) and (not bool(verbose)) and (not bool(cfg.lfreeb)))
+                else None
+            )
             stage_resume_state_mode = "minimal" if stage_accelerated_mode else None
             stage_fsq_total_target = (
                 _accelerated_fsq_total_target_from_ftol(float(ftol_i)) if stage_accelerated_mode else None

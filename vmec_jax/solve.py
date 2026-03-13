@@ -10009,6 +10009,12 @@ def solve_fixed_boundary_residual_iter(
                         freeb_solve_time = float(getattr(nestor_res, "solve_time_s", 0.0))
                         freeb_sample_time = float(getattr(nestor_res, "sample_time_s", 0.0))
                         bsqvac_edge = np.asarray(nestor_res.vac_total.bsqvac, dtype=float)
+                        if (
+                            bsqvac_edge.ndim == 2
+                            and int(bsqvac_edge.shape[1]) == 1
+                            and int(getattr(static.cfg, "nzeta", 1)) > 1
+                        ):
+                            bsqvac_edge = np.repeat(bsqvac_edge, int(static.cfg.nzeta), axis=1)
                         # Only the edge slice is consumed by the force kernels.
                         # Keep this as a 2D edge field so the GPU path does not
                         # re-transfer a mostly-zero `(ns, ntheta, nzeta)` array

@@ -3487,6 +3487,8 @@ def prepare_mgrid_for_config(
         )
 
     extcur = _normalize_extcur(tuple(cfg.extcur), int(meta.nextcur))
+    kp_eff = min(int(meta.kp), max(1, 2 * int(cfg.nzeta))) if int(cfg.nzeta) > 0 else int(meta.kp)
+    meta_eff = replace(meta, kp=kp_eff)
     if isinstance(loaded, MGridData):
-        return MGridData(metadata=meta, br=loaded.br, bp=loaded.bp, bz=loaded.bz)
-    return PreparedMGrid(metadata=meta, extcur=extcur)
+        return MGridData(metadata=meta_eff, br=loaded.br, bp=loaded.bp, bz=loaded.bz)
+    return PreparedMGrid(metadata=meta_eff, extcur=extcur)
