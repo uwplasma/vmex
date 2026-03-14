@@ -37,10 +37,10 @@ and free-boundary ideal-MHD equilibria.
     <td align="center">LandremanPaul2021_QA_lowres: optimized fixed-boundary iota (VMEC2000 vs vmec_jax)</td>
   </tr>
   <tr>
-    <td colspan="2"><img src="docs/_static/figures/readme_fsq_trace.png" width="860" /></td>
+    <td colspan="2"><img src="docs/_static/figures/readme_fsq_trace_single_grid.png" width="860" /></td>
   </tr>
   <tr>
-    <td align="center" colspan="2">Optimized fixed-boundary fsq_total trace (VMEC2000 vs vmec_jax) for shaped tokamak + LandremanPaul2021_QA_lowres cases</td>
+    <td align="center" colspan="2">Single-grid fixed-boundary fsq_total trace (VMEC2000 vs vmec_jax) for ITERModel + LandremanPaul2021_QA_lowres. Run settings: NS_ARRAY=151, NITER_ARRAY=5000, FTOL_ARRAY=1e-14. vmec_jax was run as <code>vmec_jax &lt;inputfile&gt;</code> (no flags); NSTEP was set to 1 in a temporary copy only to record the per-iteration trace.</td>
   </tr>
   <tr>
     <td colspan="2"><img src="docs/_static/figures/readme_runtime_compare.png" width="860" /></td>

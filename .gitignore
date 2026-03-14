@@ -74,6 +74,8 @@ instance/
 # Sphinx documentation
 docs/_build/
 docs/api/generated/
+docs/_static/figures/readme_*_vmec2000_trace/
+docs/_static/figures/readme_*_wout_audit.json
 examples/outputs/
 outputs/
 tmp/

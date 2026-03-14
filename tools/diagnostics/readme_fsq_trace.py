@@ -1,8 +1,21 @@
-"""Generate README fsq_total traces for optimized axisymmetric and stellarator cases."""
+"""Generate README fsq_total traces for representative single-grid cases.
+
+This script is intended to support README figures that compare convergence
+traces between VMEC2000 and vmec_jax using:
+
+- NS_ARRAY = 151
+- NITER_ARRAY = 5000
+- FTOL_ARRAY = 1e-14
+
+vmec_jax is run strictly via the CLI: `vmec_jax <inputfile>` (no extra flags).
+"""
 
 from __future__ import annotations
 
 import argparse
+import json
+import shutil
+import subprocess
 import time
 from pathlib import Path
 
@@ -10,84 +23,170 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+import netCDF4  # noqa: E402
 import numpy as np  # noqa: E402
 
-from vmec_jax.config import load_config
-from vmec_jax.driver import run_fixed_boundary
 from vmec_jax.vmec2000_exec import _patch_indata, find_vmec2000_exec, run_xvmec2000
 
 
-def _collect_vmec2000_trace(input_path: Path, *, niter: int, ftol: float, workdir: Path):
+def _find_wout(workdir: Path, *, case: str) -> Path:
+    # VMEC typically writes `wout_<case>.nc`.
+    direct = workdir / f"wout_{case}.nc"
+    if direct.exists():
+        return direct
+    matches = sorted(workdir.glob(f"wout_{case}*.nc"))
+    if matches:
+        return matches[0]
+    matches = sorted(workdir.glob("wout_*.nc"))
+    if matches:
+        return matches[0]
+    raise FileNotFoundError(f"no wout_*.nc found in {workdir}")
+
+
+def _audit_wout(wout_path: Path) -> dict[str, object]:
+    # Keep this summary safe to commit or paste: do not include absolute paths.
+    out: dict[str, object] = {"file": wout_path.name}
+    with netCDF4.Dataset(str(wout_path), mode="r") as ds:
+        # Prefer dimension size when available (most robust across writers).
+        if "radius" in ds.dimensions:
+            out["radius_dim"] = int(ds.dimensions["radius"].size)
+        if "ns" in ds.dimensions:
+            out["ns_dim"] = int(ds.dimensions["ns"].size)
+        if "ns" in ds.variables:
+            try:
+                out["ns"] = int(np.asarray(ds.variables["ns"][...]).item())
+            except Exception:
+                pass
+        for key in ("nfp", "mpol", "ntor", "lasym", "lfreeb", "ier_flag"):
+            if key in ds.variables:
+                v = ds.variables[key][...]
+                try:
+                    out[key] = v.item()
+                except Exception:
+                    out[key] = np.asarray(v).tolist()
+        for key in ("version_", "input_extension", "mgrid_file"):
+            if key in ds.variables:
+                v = ds.variables[key][...]
+                try:
+                    s = netCDF4.chartostring(v).tobytes().decode(errors="ignore")
+                    out[key] = s.replace("\x00", "").strip()
+                except Exception:
+                    out[key] = str(v)
+        # Common scalar diagnostics (not guaranteed).
+        for key in ("wb", "wp", "w", "fsqr", "fsqz", "fsql"):
+            if key in ds.variables:
+                v = ds.variables[key][...]
+                try:
+                    out[key] = float(np.asarray(v).reshape(-1)[-1])
+                except Exception:
+                    pass
+    return out
+
+
+def _collect_vmec2000_trace(input_path: Path, *, ns: int, niter: int, ftol: float, workdir: Path):
     exe = find_vmec2000_exec()
     if exe is None:
         raise SystemExit("xvmec2000 executable not found")
-    cfg, _ = load_config(str(input_path))
     vmec = run_xvmec2000(
         input_path,
         exec_path=exe,
         workdir=workdir,
-        timeout_s=600.0,
+        timeout_s=3600.0,
         indata_updates={
-            "NITER": str(niter),
             "NSTEP": "1",
-            "NS_ARRAY": f"{int(cfg.ns)}",
+            "NS_ARRAY": f"{int(ns)}",
             "NITER_ARRAY": f"{niter}",
-            "FTOL": f"{float(ftol):.3e}",
             "FTOL_ARRAY": f"{float(ftol):.3e}",
         },
         keep_workdir=True,
     )
     fsq = []
+    it = []
     for stage in vmec.stages:
         for row in stage.rows:
+            it.append(int(row.it))
             fsq.append(float(row.fsqr + row.fsqz + row.fsql))
-    return np.asarray(fsq), float(vmec.runtime_s)
+    case = input_path.name.replace("input.", "")
+    wout_path = _find_wout(workdir, case=case)
+    archived = workdir / f"wout_{case}_VMEC2000.nc"
+    shutil.copy2(wout_path, archived)
+    audit = _audit_wout(archived)
+    return np.asarray(it, dtype=int), np.asarray(fsq, dtype=float), float(vmec.runtime_s), audit
 
 
-def _collect_vmec_jax_trace(
-    input_path: Path,
-    *,
-    niter: int,
-    ftol: float,
-    workdir: Path,
-    solver_mode: str,
-    cli_fixed_boundary_mode: bool,
-):
+def _parse_vmec_table_trace(stdout: str) -> tuple[np.ndarray, np.ndarray]:
+    it: list[int] = []
+    fsq: list[float] = []
+    in_table = False
+
+    def _f(tok: str) -> float:
+        return float(tok.replace("D", "E").replace("d", "E"))
+
+    for line in stdout.splitlines():
+        if line.strip().startswith("ITER") and ("FSQR" in line) and ("FSQZ" in line):
+            in_table = True
+            continue
+        if not in_table:
+            continue
+        toks = line.split()
+        if len(toks) < 4 or (not toks[0].isdigit()):
+            # End when VMEC prints post-table messages.
+            if toks and toks[0].upper() in {"TRY", "EXECUTION", "FILE", "TOTAL", "TIME"}:
+                break
+            continue
+        it.append(int(toks[0]))
+        fsq.append(_f(toks[1]) + _f(toks[2]) + _f(toks[3]))
+
+    return np.asarray(it, dtype=int), np.asarray(fsq, dtype=float)
+
+
+def _collect_vmec_jax_trace(input_path: Path, *, ns: int, niter: int, ftol: float, workdir: Path):
+    case = input_path.name.replace("input.", "")
     patched = _patch_indata(
         input_path.read_text(),
         updates={
-            "NITER": str(niter),
             "NSTEP": "1",
-            "FTOL": f"{float(ftol):.3e}",
+            "NS_ARRAY": f"{int(ns)}",
+            "NITER_ARRAY": f"{int(niter)}",
             "FTOL_ARRAY": f"{float(ftol):.3e}",
         },
     )
-    tmp_input = workdir / f"input_patched_{input_path.name}"
+    tmp_input = workdir / f"input.{case}"
     tmp_input.write_text(patched)
     t0 = time.perf_counter()
-    res = run_fixed_boundary(
-        str(tmp_input),
-        solver="vmec2000_iter",
-        max_iter=int(niter),
-        multigrid=False,
-        multigrid_use_input_niter=False,
-        verbose=False,
-        solver_mode=str(solver_mode),
-        performance_mode=bool(str(solver_mode) != "parity"),
-        cli_fixed_boundary_mode=bool(cli_fixed_boundary_mode),
+    proc = subprocess.run(
+        ["vmec_jax", str(tmp_input)],
+        cwd=str(workdir),
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
     runtime = time.perf_counter() - t0
-    fsq = np.asarray(res.result.fsqr2_history) + np.asarray(res.result.fsqz2_history) + np.asarray(
-        res.result.fsql2_history
-    )
-    return fsq, float(runtime)
+    if proc.returncode != 0:
+        raise RuntimeError(f"vmec_jax failed for {input_path} (code={proc.returncode})\n{proc.stderr}")
+    it, fsq = _parse_vmec_table_trace(proc.stdout)
+    wout_path = _find_wout(workdir, case=case)
+    archived = workdir / f"wout_{case}_vmec_jax.nc"
+    shutil.copy2(wout_path, archived)
+    audit = _audit_wout(archived)
+    return it, fsq, float(runtime), audit
 
 
-def _plot_panel(ax, *, fsq_vmec, fsq_jax, title: str, t_vmec: float, t_jax: float, jax_label: str):
-    n = min(fsq_vmec.size, fsq_jax.size)
-    it = np.arange(1, n + 1)
-    ax.plot(it, fsq_vmec[:n], lw=2.8, linestyle="--", label="VMEC2000", zorder=2)
-    ax.plot(it, fsq_jax[:n], lw=2.8, linestyle="-", label=jax_label, zorder=1)
+def _plot_panel(
+    ax,
+    *,
+    it_vmec: np.ndarray,
+    fsq_vmec: np.ndarray,
+    it_jax: np.ndarray,
+    fsq_jax: np.ndarray,
+    title: str,
+    t_vmec: float,
+    t_jax: float,
+    jax_label: str,
+):
+    ax.plot(it_vmec, fsq_vmec, lw=2.6, linestyle="--", marker="o", ms=3.0, label="VMEC2000", zorder=2)
+    ax.plot(it_jax, fsq_jax, lw=2.6, linestyle="-", marker="o", ms=3.0, label=jax_label, zorder=1)
     ax.set_yscale("log")
     ax.set_xlabel("iteration")
     ax.set_ylabel("fsq_total")
@@ -100,12 +199,12 @@ def main() -> None:
     p.add_argument(
         "--axisym-input",
         type=str,
-        default=str(Path(__file__).resolve().parents[2] / "examples/data/input.shaped_tokamak_pressure"),
+        default=str(Path(__file__).resolve().parents[2] / "examples_single_grid/data/input.ITERModel"),
     )
     p.add_argument(
         "--stellarator-input",
         type=str,
-        default=str(Path(__file__).resolve().parents[2] / "examples/data/input.LandremanPaul2021_QA_lowres"),
+        default=str(Path(__file__).resolve().parents[2] / "examples_single_grid/data/input.LandremanPaul2021_QA_lowres"),
     )
     p.add_argument(
         "--qh-input",
@@ -118,23 +217,16 @@ def main() -> None:
         type=str,
         default=str(Path(__file__).resolve().parents[2] / "docs/_static/figures"),
     )
-    p.add_argument("--niter", type=int, default=250)
+    p.add_argument(
+        "--workdir",
+        type=str,
+        default=str(Path(__file__).resolve().parents[2] / "outputs" / "readme_fsq_trace_single_grid_work"),
+        help="Scratch directory for VMEC2000/vmec_jax run artifacts (wouts, threed1, logs).",
+    )
+    p.add_argument("--ns", type=int, default=151)
+    p.add_argument("--niter", type=int, default=5000)
     p.add_argument("--ftol", type=float, default=1e-14)
-    p.add_argument("--solver-mode", type=str, default="accelerated")
-    p.add_argument("--jax-label", type=str, default="vmec_jax optimized")
-    p.add_argument(
-        "--cli-fixed-boundary-mode",
-        dest="cli_fixed_boundary_mode",
-        action="store_true",
-        help="Use the optimized CLI-style fixed-boundary controller for vmec_jax traces.",
-    )
-    p.add_argument(
-        "--no-cli-fixed-boundary-mode",
-        dest="cli_fixed_boundary_mode",
-        action="store_false",
-        help="Disable the CLI-style fixed-boundary controller for vmec_jax traces.",
-    )
-    p.set_defaults(cli_fixed_boundary_mode=True)
+    p.add_argument("--jax-label", type=str, default="vmec_jax")
     args = p.parse_args()
 
     axisym_input = Path(args.axisym_input).expanduser().resolve()
@@ -143,51 +235,49 @@ def main() -> None:
         stellarator_input = Path(args.qh_input).expanduser().resolve()
     outdir = Path(args.outdir).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
+    workdir = Path(args.workdir).expanduser().resolve()
+    workdir.mkdir(parents=True, exist_ok=True)
 
-    axisym_work = outdir / "readme_axisym_vmec2000_trace"
-    st_work = outdir / "readme_stellarator_vmec2000_trace"
+    axisym_work = workdir / "ITERModel"
+    st_work = workdir / "LandremanPaul2021_QA_lowres"
+    shutil.rmtree(axisym_work, ignore_errors=True)
+    shutil.rmtree(st_work, ignore_errors=True)
     axisym_work.mkdir(parents=True, exist_ok=True)
     st_work.mkdir(parents=True, exist_ok=True)
 
-    fsq_vmec_a, t_vmec_a = _collect_vmec2000_trace(
-        axisym_input, niter=int(args.niter), ftol=float(args.ftol), workdir=axisym_work
+    it_vmec_a, fsq_vmec_a, t_vmec_a, wout_vmec_a = _collect_vmec2000_trace(
+        axisym_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=axisym_work
     )
-    fsq_jax_a, t_jax_a = _collect_vmec_jax_trace(
-        axisym_input,
-        niter=int(args.niter),
-        ftol=float(args.ftol),
-        workdir=axisym_work,
-        solver_mode=str(args.solver_mode),
-        cli_fixed_boundary_mode=bool(args.cli_fixed_boundary_mode),
+    it_jax_a, fsq_jax_a, t_jax_a, wout_jax_a = _collect_vmec_jax_trace(
+        axisym_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=axisym_work
     )
 
-    fsq_vmec_s, t_vmec_s = _collect_vmec2000_trace(
-        stellarator_input, niter=int(args.niter), ftol=float(args.ftol), workdir=st_work
+    it_vmec_s, fsq_vmec_s, t_vmec_s, wout_vmec_s = _collect_vmec2000_trace(
+        stellarator_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=st_work
     )
-    fsq_jax_s, t_jax_s = _collect_vmec_jax_trace(
-        stellarator_input,
-        niter=int(args.niter),
-        ftol=float(args.ftol),
-        workdir=st_work,
-        solver_mode=str(args.solver_mode),
-        cli_fixed_boundary_mode=bool(args.cli_fixed_boundary_mode),
+    it_jax_s, fsq_jax_s, t_jax_s, wout_jax_s = _collect_vmec_jax_trace(
+        stellarator_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=st_work
     )
 
     fig, axes = plt.subplots(1, 2, figsize=(12.5, 4.2))
     _plot_panel(
         axes[0],
+        it_vmec=it_vmec_a,
         fsq_vmec=fsq_vmec_a,
+        it_jax=it_jax_a,
         fsq_jax=fsq_jax_a,
-        title=f"Axisymmetric fsq_total trace ({int(args.niter)} iters)",
+        title=f"ITERModel fsq_total trace (single-grid)",
         t_vmec=t_vmec_a,
         t_jax=t_jax_a,
         jax_label=str(args.jax_label),
     )
     _plot_panel(
         axes[1],
+        it_vmec=it_vmec_s,
         fsq_vmec=fsq_vmec_s,
+        it_jax=it_jax_s,
         fsq_jax=fsq_jax_s,
-        title=f"LandremanPaul QA fsq_total trace ({int(args.niter)} iters)",
+        title="LandremanPaul2021_QA_lowres fsq_total trace (single-grid)",
         t_vmec=t_vmec_s,
         t_jax=t_jax_s,
         jax_label=str(args.jax_label),
@@ -195,10 +285,23 @@ def main() -> None:
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="upper center", ncol=2, frameon=False, bbox_to_anchor=(0.5, 1.03))
     fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.94))
-    outpath = outdir / "readme_fsq_trace.png"
+    outpath = outdir / "readme_fsq_trace_single_grid.png"
     fig.savefig(outpath, dpi=220)
     plt.close(fig)
+    audit_out = workdir / "readme_fsq_trace_single_grid_wout_audit.json"
+    audit_out.write_text(
+        json.dumps(
+            {
+                "ITERModel": {"VMEC2000": wout_vmec_a, "vmec_jax": wout_jax_a},
+                "LandremanPaul2021_QA_lowres": {"VMEC2000": wout_vmec_s, "vmec_jax": wout_jax_s},
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
     print(f"Wrote {outpath}")
+    print(f"Wrote {audit_out}")
 
 
 if __name__ == "__main__":

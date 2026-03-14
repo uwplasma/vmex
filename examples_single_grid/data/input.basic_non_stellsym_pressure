@@ -1,0 +1,42 @@
+&INDATA
+  ! Simple non-stellarator symmetric example with finite pressure
+  LFREEB = F
+  LASYM = T
+  DELT =   0.9
+  TCON0 =   2.00E+00
+  NFP =   1
+  NCURR =    1
+  MPOL =    2
+  NTOR =   2
+  NZETA  = 10
+  NTHETA = 10
+
+  NS_ARRAY = 151
+  FTOL_ARRAY = 1.0E-14
+  NITER_ARRAY = 5000
+  NSTEP =  200
+  NVACSKIP =    8
+  GAMMA =   1.6666666666667
+  PHIEDGE =  -119.416456038
+  BLOAT =   1.000000E+00
+  CURTOR =     0.0
+  SPRES_PED =   1.00000000000000E+00
+  PMASS_TYPE = 'power_series'
+  AM =  1.0  -1.0
+  PIOTA_TYPE = 'power_series'
+  AI =  0.0  0.0
+  PCURR_TYPE = 'power_series'
+  AC =  1.0  0.0
+RAXIS_CC = 6.698820504223022
+ZAXIS_CS = 0.0
+RAXIS_CS = 0.0
+ZAXIS_CC = 0.5203227532718783
+RBC(   0,   0) =    5.000000000000000e+00,      ZBS(   0,   0) =    0.000000000000000e+00
+RBS(   0,   0) =    0.000000000000000e+00,      ZBC(   0,   0) =    0.000000000000000e+00
+RBC(   0,   1) =    1.250000000000000e+00,      ZBS(   0,   1) =   -1.250000000000000e+00
+RBS(   0,   1) =    1.000000000000000e-01,      ZBC(   0,   1) =   -1.000000000000000e-01
+RBC(   1,   0) =    1.250000000000000e+00,      ZBS(   1,   0) =   -1.500000000000000e+00
+RBS(   1,   0) =    1.000000000000000e-01,      ZBC(   1,   0) =   -1.000000000000000e-01
+RBC(   1,   1) =    5.000000000000000e-01,      ZBS(   1,   1) =   -5.000000000000000e-01
+RBS(   1,   1) =    5.000000000000000e-01,      ZBC(   1,   1) =   -5.000000000000000e-01
+/

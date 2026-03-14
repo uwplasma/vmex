@@ -294,6 +294,12 @@ def main() -> None:
         default=REPO_ROOT / "docs" / "_static" / "figures",
     )
     p.add_argument(
+        "--figure-out",
+        type=Path,
+        default=None,
+        help="Optional explicit output path for the figure (defaults to outdir/readme_runtime_compare.png).",
+    )
+    p.add_argument(
         "--table-out",
         type=Path,
         default=REPO_ROOT / "outputs" / "readme_runtime_table.md",
@@ -321,7 +327,7 @@ def main() -> None:
     table_out = args.table_out.expanduser().resolve()
     table_out.parent.mkdir(parents=True, exist_ok=True)
 
-    fig_out = outdir / "readme_runtime_compare.png"
+    fig_out = (args.figure_out.expanduser().resolve() if args.figure_out is not None else (outdir / "readme_runtime_compare.png"))
     if str(args.plot_mode) == "speedup":
         _write_figure(rows, fig_out, figure_kind=str(args.figure_kind))
     else:

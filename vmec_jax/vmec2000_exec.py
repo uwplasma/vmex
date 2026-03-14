@@ -160,6 +160,8 @@ def _patch_indata(text: str, *, updates: dict[str, str]) -> str:
 def _default_exec_candidates(root: Path) -> list[Path]:
     return [
         root / "STELLOPT" / "VMEC2000" / "Release" / "xvmec2000",
+        # Common local layout: STELLOPT cloned next to vmec_jax.
+        root.parent / "STELLOPT" / "VMEC2000" / "Release" / "xvmec2000",
         root / "vmec2000" / "build" / "xvmec2000",
         root / "vmec2000" / "build" / "Release" / "xvmec2000",
     ]
@@ -274,4 +276,3 @@ def threed1_fsq_total(rows: Iterable[Vmec2000Threed1Row]) -> np.ndarray:
     if not r:
         return np.asarray([], dtype=float)
     return np.asarray([x.fsqr + x.fsqz + x.fsql for x in r], dtype=float)
-

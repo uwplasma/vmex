@@ -313,9 +313,14 @@ print(json.dumps(payload))
     return rec
 
 
-def _discover_cases(*, include_external_diiid: bool) -> list[CaseSpec]:
+def _discover_cases(
+    *,
+    inputs_dir: Path,
+    inputs_glob: str,
+    include_external_diiid: bool,
+) -> list[CaseSpec]:
     cases: list[CaseSpec] = []
-    for input_path in sorted((REPO_ROOT / "examples" / "data").glob("input.*")):
+    for input_path in sorted(Path(inputs_dir).expanduser().resolve().glob(str(inputs_glob))):
         cfg, _ = load_config(input_path)
         cases.append(
             CaseSpec(
@@ -416,6 +421,18 @@ def main() -> int:
     p.add_argument("--ids", type=str, default="", help="Comma-separated case ids to run.")
     p.add_argument("--kind", choices=("fixed", "freeb"), default=None, help="Filter to fixed or free-boundary cases.")
     p.add_argument(
+        "--inputs-dir",
+        type=Path,
+        default=REPO_ROOT / "examples" / "data",
+        help="Directory containing input.* files to benchmark.",
+    )
+    p.add_argument(
+        "--inputs-glob",
+        type=str,
+        default="input.*",
+        help="Glob (relative to --inputs-dir) selecting input files.",
+    )
+    p.add_argument(
         "--backend",
         choices=("both", "vmec_jax", "vmec2000"),
         default="both",
@@ -472,7 +489,11 @@ def main() -> int:
     args = p.parse_args()
 
     ids = {tok.strip() for tok in args.ids.split(",") if tok.strip()} or None
-    cases = _discover_cases(include_external_diiid=bool(args.include_external_diiid))
+    cases = _discover_cases(
+        inputs_dir=Path(args.inputs_dir),
+        inputs_glob=str(args.inputs_glob),
+        include_external_diiid=bool(args.include_external_diiid),
+    )
     cases = _select_cases(cases, ids=ids, kind=args.kind)
     if not cases:
         raise SystemExit("No cases selected.")
