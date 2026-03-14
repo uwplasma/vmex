@@ -29,7 +29,7 @@ BLOAT = 1.0,
 
 LFREEB = F,
 
-NSTEP = 200,
+  NSTEP = 500
 DELT = 0.7,
 
 ! Initial Position.

@@ -8,7 +8,7 @@
   MPOL = 12
   NTHETA = 48
   GAMMA =   0.000000E+00
-  NSTEP =  200
+  NSTEP = 500
   NVACSKIP = 6
   MGRID_FILE = 'mgrid_d3d_ef.nc'
   EXTCUR(01) =  -1.370985E+03  EXTCUR(02) =  -1.609154E+03

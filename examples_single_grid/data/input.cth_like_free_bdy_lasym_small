@@ -14,7 +14,7 @@
   FTOL_ARRAY = 1.0E-14
   NITER_ARRAY = 5000
 
-  NSTEP = 100,
+  NSTEP = 500
   NTOR = 4,
   MPOL = 5,
   NZETA = 36,

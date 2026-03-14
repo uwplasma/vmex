@@ -1,7 +1,7 @@
 !----- Runtime Parameters -----
 &INDATA
   DELT =    9.000000000000E-001
-  NSTEP = 200
+  NSTEP = 500
   TCON0 =    2.000000000000E+000
   
 !  NS_ARRAY =                12            25            50            75
