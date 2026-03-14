@@ -9,50 +9,44 @@ and free-boundary ideal-MHD equilibria.
     <td><img src="docs/_static/figures/qa_compare_cross_sections.png" width="420" /></td>
   </tr>
   <tr>
-    <td align="center">Axisymmetric: optimized fixed-boundary cross-section (VMEC2000 vs vmec_jax)</td>
-    <td align="center">LandremanPaul2021_QA_lowres: optimized fixed-boundary cross-section (VMEC2000 vs vmec_jax)</td>
+    <td align="center">Axisymmetric: single-grid fixed-boundary cross-section (VMEC2000 vs vmec_jax)</td>
+    <td align="center">LandremanPaul2021_QA_lowres: single-grid fixed-boundary cross-section (VMEC2000 vs vmec_jax)</td>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/axisym_compare_3d.png" width="420" /></td>
     <td><img src="docs/_static/figures/qa_compare_3d.png" width="420" /></td>
   </tr>
   <tr>
-    <td align="center">Axisymmetric: optimized fixed-boundary 3D LCFS (VMEC2000 vs vmec_jax)</td>
-    <td align="center">LandremanPaul2021_QA_lowres: optimized fixed-boundary 3D LCFS (VMEC2000 vs vmec_jax)</td>
+    <td align="center">Axisymmetric: single-grid fixed-boundary 3D LCFS (VMEC2000 vs vmec_jax)</td>
+    <td align="center">LandremanPaul2021_QA_lowres: single-grid fixed-boundary 3D LCFS (VMEC2000 vs vmec_jax)</td>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/axisym_compare_bmag_surface.png" width="420" /></td>
     <td><img src="docs/_static/figures/qa_compare_bmag_surface.png" width="420" /></td>
   </tr>
   <tr>
-    <td align="center">Axisymmetric: optimized fixed-boundary |B| on LCFS (VMEC2000 vs vmec_jax)</td>
-    <td align="center">LandremanPaul2021_QA_lowres: optimized fixed-boundary |B| on LCFS (VMEC2000 vs vmec_jax)</td>
+    <td align="center">Axisymmetric: single-grid fixed-boundary |B| on LCFS (VMEC2000 vs vmec_jax)</td>
+    <td align="center">LandremanPaul2021_QA_lowres: single-grid fixed-boundary |B| on LCFS (VMEC2000 vs vmec_jax)</td>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/axisym_compare_iota.png" width="420" /></td>
     <td><img src="docs/_static/figures/qa_compare_iota.png" width="420" /></td>
   </tr>
   <tr>
-    <td align="center">Axisymmetric: optimized fixed-boundary iota (VMEC2000 vs vmec_jax)</td>
-    <td align="center">LandremanPaul2021_QA_lowres: optimized fixed-boundary iota (VMEC2000 vs vmec_jax)</td>
+    <td align="center">Axisymmetric: single-grid fixed-boundary iota (VMEC2000 vs vmec_jax vs VMEC++)</td>
+    <td align="center">LandremanPaul2021_QA_lowres: single-grid fixed-boundary iota (VMEC2000 vs vmec_jax vs VMEC++)</td>
   </tr>
   <tr>
     <td colspan="2"><img src="docs/_static/figures/readme_fsq_trace_single_grid.png" width="860" /></td>
   </tr>
   <tr>
-    <td align="center" colspan="2">Single-grid fixed-boundary fsq_total trace (VMEC2000 vs vmec_jax) for ITERModel + LandremanPaul2021_QA_lowres. Run settings: NS_ARRAY=151, NITER_ARRAY=5000, FTOL_ARRAY=1e-14, NSTEP=500. vmec_jax was run as <code>vmec_jax &lt;inputfile&gt;</code> (no flags); NSTEP was set to 1 in a temporary copy only to record the per-iteration trace.</td>
-  </tr>
-  <tr>
-    <td colspan="2"><img src="docs/_static/figures/readme_runtime_two_cases_vmecpp.png" width="860" /></td>
-  </tr>
-  <tr>
-    <td align="center" colspan="2">Single-grid fixed-boundary runtime (log scale) for the same two cases: VMEC2000 vs vmec_jax vs VMEC++. VMEC++ is run via <code>vmec_standalone</code> on JSON input; the one-time INDATA-&gt;JSON conversion (~0.01s) is excluded.</td>
+    <td align="center" colspan="2">Single-grid fixed-boundary fsq_total trace (VMEC2000 vs vmec_jax vs VMEC++) for ITERModel + LandremanPaul2021_QA_lowres. Run settings: NS_ARRAY=151, NITER_ARRAY=5000, FTOL_ARRAY=1e-14, NSTEP=500. vmec_jax was run as <code>vmec_jax &lt;inputfile&gt;</code> (no flags); NSTEP was set to 1 in a temporary copy only to record the per-iteration trace.</td>
   </tr>
   <tr>
     <td colspan="2"><img src="docs/_static/figures/readme_runtime_compare.png" width="860" /></td>
   </tr>
   <tr>
-    <td align="center" colspan="2">Bundled fixed/free runtime comparison: VMEC2000 vs vmec_jax CPU on a reference CPU host</td>
+    <td align="center" colspan="2">Single-grid bundled runtime comparison (log scale): VMEC2000 (blue) vs vmec_jax (orange, warmed) vs VMEC++ (green). Missing green bars indicate VMEC++ did not converge or does not support that input (for example LASYM cases).</td>
   </tr>
 </table>
 
