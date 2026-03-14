@@ -1,262 +1,107 @@
-Accelerated Mode Merge Readiness
-================================
+Optimized Fixed-Boundary Merge Notes
+====================================
 
-This page tracks whether branch ``codex/nonparity-performance`` is ready to
-merge into ``main`` as an **experimental** feature.
+This page records the final merge scope for the optimized non-autodiff solver
+work.
 
-The important distinction is:
+Final decision
+--------------
 
-- **mergeable to main**: the accelerated mode is isolated, documented, tested,
-  and useful behind an explicit opt-in API,
-- **ready to become default**: the accelerated mode has passed the broader
-  fixed-boundary and free-boundary acceptance matrix and can replace the
-  existing default controller.
+Merge the optimized non-autodiff fixed-boundary path as the default user
+experience for ordinary CLI and Python usage.
 
-Current recommendation
-----------------------
+Do not change these defaults in the same step:
 
-Current recommendation: **merge and make the optimized non-autodiff
-fixed-boundary path the default**.
+- keep parity-oriented routes available,
+- keep autodiff-oriented workflows available,
+- keep free-boundary on the current robust default controller,
+- do not market the merged result as a blanket VMEC2000 runtime win.
 
-Rationale:
-
-- the public API split is explicit:
-  ``run_fixed_boundary(..., solver_mode="accelerated")`` and
-  ``vmec_jax input.name --solver-mode accelerated``,
-- the ordinary non-autodiff fixed-boundary CLI/Python path now auto-selects
-  the optimized controller, while explicit parity/autodiff workflows still
-  keep their conservative route,
-- local validation is green on the branch,
-- the latest fixed-boundary readiness rerun shows all 16 bundled cases
-  converged with the optimized controller faster on 13, effectively neutral on
-  1, and slower on 2,
-- free-boundary remains on the current robust controller by default, which is
-  the right scope boundary for this PR.
-
-What this branch adds
+What changes on merge
 ---------------------
 
-- explicit ``default`` / ``parity`` / ``accelerated`` solver policies,
-- ftol-derived accelerated convergence targets instead of fixed absolute
-  stopping literals,
-- compact accelerated histories and resume payloads,
-- a bundled accelerated-mode benchmark harness,
-- an accelerated fixed-boundary controller that now defaults to a single
-  final-grid solve unless the caller explicitly requests multigrid,
-- a CLI-only fixed-boundary follow-up stack:
+- ordinary non-autodiff fixed-boundary CLI runs use the optimized controller
+  automatically,
+- ordinary non-autodiff Python fixed-boundary runs do the same,
+- accelerated finishes accept only when the requested final-stage ``FTOL`` is
+  satisfied through ``fsqr``, ``fsqz``, and ``fsql``,
+- staged and symmetry-sensitive fixed-boundary cases keep the more
+  conservative handoff/follow-up logic that proved reliable on the bundled
+  matrix,
+- free-boundary performance improvements are included, but free-boundary does
+  not switch to the accelerated controller by default.
 
-  - explicit staged inputs (``NS_ARRAY`` + ``NITER_ARRAY``) can replay their
-    input-defined schedule after a missed single-grid fast pass,
-  - staged inputs without ``NITER_ARRAY`` still have the reduced-budget
-    multigrid fallback when accelerated mode is explicitly requested,
-  - strict parity finish blocks continue from state only,
-- a bundled Python example that compares the parity and optimized CLI-style
-  driver tracks directly.
+Final branch-head evidence
+--------------------------
 
-Representative fixed-boundary reassessment
-------------------------------------------
+Local validation on the final merge head:
 
-The current fixed-boundary review set is:
+- ``pytest -q`` completed successfully:
+  ``186 passed, 12 skipped, 58 warnings``,
+- ``SPHINX_FAST=1 LC_ALL=C LANG=C python -m sphinx -W -j auto -b html docs docs/_build/html_fastcheck``
+  passed.
 
-- ``examples/fixed_boundary_driver_tracks.py`` for live parity-vs-optimized
-  comparisons on the current branch,
-- the warmed bundled fixed-boundary CPU sweep used for the README benchmark,
-- the same-host CPU/GPU warmed sweep on the updated 16-case bundled matrix.
+Fresh final-head artifacts:
 
-Key current results:
-
-- the latest warmed fixed-boundary reassessment on 2026-03-11 shows the
-  optimized CLI path converging on all 16 bundled cases,
-- that same matrix now shows 13 cases faster than the current branch baseline
-  and 3 roughly neutral, with no bundled CPU regressions left,
-- targeted non-axisymmetric fixes materially improved final ``wout`` quality on
-  the QA/QH reactor-scale cases, while also removing the earlier runtime
-  regressions on the bundled CPU sweep.
-
-Current CLI behavior is better captured as policy than as one stale table:
-
-- easy fixed-boundary inputs remain on the fast single-grid route,
-- explicit staged inputs now retry the input-defined stage schedule before the
-  strict finisher starts,
-- the bundled driver example already confirms the intended easy-case behavior
-  on ``input.circular_tokamak``:
-  parity ``28.863s`` vs optimized CLI-style ``3.445s``, both converged at
-  ``fsq_total ~ 2e-14``.
-- the freshest full warmed fixed-boundary CPU matrix is now favorable:
-  all 16 cases converge, 13 of 16 improve on the current default path, and the
-  remaining 3 are effectively neutral,
-- the public README-facing VMEC2000 comparison is intentionally stricter:
-  the refreshed warmed CPU artifacts in
-  ``outputs/fixed_runtime_vmec2000_accel_cpu_warm_20260313/summary.json`` and
-  ``outputs/free_runtime_vmec2000_cpu_warm_20260313/summary.json`` keep all 21
-  shipped rows converged, but they still show VMEC2000 ahead on most of the
-  heavier non-axisymmetric and free-boundary cases,
-- same-host CPU/GPU benchmarking still confirms the GPU path can help on the
-  larger 3D bundled cases, but backend choice still matters and remains a
-  separate question from the fixed-boundary CPU controller decision.
-
-These numbers justify the current controller split on the branch:
-keep the optimized fixed-boundary logic available for explicit testing and
-review, and promote it cautiously only after backend selection becomes
-automatic on mixed CPU/GPU workstations.
-
-Latest full fixed/free readiness rerun
---------------------------------------
-
-The latest same-host readiness sweep broadens the scope beyond the earlier
-fixed-boundary-only CPU matrix:
-
-- fixed-boundary optimized CLI / automatic Python path:
+- fixed-boundary optimized readiness:
   ``outputs/readiness_fixed_all_20260313/summary.json``
-- free-boundary runtime/convergence matrix on the robust default path:
+- fixed-boundary VMEC2000-vs-optimized warmed runtime matrix:
+  ``outputs/fixed_runtime_vmec2000_accel_cpu_warm_20260313/summary.json``
+- free-boundary VMEC2000-vs-default warmed runtime matrix:
   ``outputs/free_runtime_vmec2000_cpu_warm_20260313/summary.json``
 
-Current result:
+Key results from those artifacts:
 
-- 21 total shipped rows across fixed/free, axisymmetric/non-axisymmetric, and
-  ``lasym=False/True``,
-- all 21 ``vmec_jax`` rows now end with ``converged=True``,
-- the previous shipped holdout
-  ``cth_like_free_bdy_lasym_small`` was replaced with a convergent
-  ``lasym=True`` CTH-like free-boundary benchmark,
-- the ordinary non-autodiff Python path now matches the CLI policy and
-  automatically chooses the optimized fixed-boundary controller,
-- the free-boundary DIII-D rows are still far slower than VMEC2000 on CPU,
-  though ``DIII-D_lasym_false`` improved materially on this branch
-  (now about ``113.78s`` warmed in the fresh runtime matrix).
+- fixed-boundary optimized path converged on all 16 bundled cases,
+- fixed-boundary optimized path is faster on 13 of 16 cases, effectively
+  neutral on 1, and slower on 2,
+- all 21 shipped ``vmec_jax`` rows in the final VMEC2000 runtime matrix
+  converged,
+- free-boundary DIII-D remains much slower than VMEC2000 on CPU, but the
+  branch still improved the robust default path materially
+  (for example ``DIII-D_lasym_false`` is down to about ``113.78s`` warmed on
+  the same host, versus the earlier ``~174s`` branch checkpoint).
 
-That means the merge recommendation changes in a narrow but meaningful way:
-this branch is now ready for a PR that makes the optimized non-autodiff
-fixed-boundary path the default ``vmec_jax`` user experience on ``main``. It
-is **not** a claim that the branch beats VMEC2000 on same-host CPU runtime,
-and it does not replace the parity / implicit-differentiation paths or the
-current robust free-boundary controller.
+Representative fixed-boundary before/after points
+-------------------------------------------------
 
-Merge checklist
----------------
+Before = old default fixed-boundary controller on the same final head.
+After = optimized controller that becomes the ordinary non-autodiff default.
 
-This branch is ready for a draft or review PR when all of the following are
-true:
+- ``ITERModel``: ``8.86s`` -> ``4.48s``
+- ``LandremanPaul2021_QA_reactorScale_lowres``: ``47.17s`` -> ``45.52s``
+- ``LandremanSenguptaPlunk_section5p3_low_res``: ``15.86s`` -> ``7.48s``
+- ``up_down_asymmetric_tokamak``: ``24.58s`` -> ``2.97s``
 
-- ``pytest -q`` passes on the branch,
-- docs build passes,
-- accelerated-mode docs explain scope and limitations clearly,
-- default/parity behavior remains available and tested,
-- the branch includes at least one benchmark artifact demonstrating the
-  accelerated fixed-boundary controller is useful on representative cases,
-- no user-set environment variable is required for accelerated fixed-boundary
-  correctness on the benchmarked bundled cases,
-- the current GPU backend-selection limitation is explicitly documented if the
-  branch is merged before automatic device choice lands.
+Scope boundary
+--------------
 
-Current PR summary
+This merge is about the default non-autodiff fixed-boundary user path.
+
+It is not a claim that:
+
+- accelerated free-boundary is ready to be the default controller,
+- the merged code is broadly faster than VMEC2000 on same-host CPU,
+- parity-oriented or autodiff-oriented workflows should be removed or hidden.
+
+Reviewer checklist
 ------------------
 
-The branch is ready for an honest review PR.
-
-- Positive signal:
-  the optimized CLI-style fixed-boundary controller now keeps convergence and
-  removes the runtime-regression blocker on the full bundled fixed-boundary CPU
-  matrix.
-- Remaining caution:
-  final-state quality versus VMEC2000 is still a separate topic from the
-  runtime comparison, and GPU/default-library policy should not be flipped just
-  because the fixed-boundary CPU CLI story improved.
-  The latest useful quality fix was in ``wout`` export for ``lasym=False`` 3D
-  cases, which removed symmetry-forbidden ``rmns/zmnc`` output and cut the
-  bundled QA/QH quality metric by about an order of magnitude. A follow-up
-  staged-controller fixes then brought the reactor-scale QA/QH cases into the
-  ``1e-4`` to ``1e-3`` range and QA-lowres to about ``4e-3``. The last
-  branch-specific ``basic_non_stellsym_pressure`` regression was removed by
-  keeping ``lasym=True`` current-driven 3D staged runs fully on the
-  conservative controller, which restores baseline-level quality there
-  (about ``2.98e-02`` max relRMS) at roughly neutral runtime. A subsequent
-  CPU-only profiling pass also trimmed controller overhead on the optimized
-  ``lasym=False`` path by moving ``ptau`` sign-change checks and signed-update
-  assembly off the repeated JAX host-control path; the targeted QA-lowres
-  reassessment improved from a branch-local ``38.64s`` optimized runtime to
-  ``31.17s`` while keeping the same ``~4.20e-03`` final-quality metric. On the
-  next warmed bundled CPU rerun, all 13 bundled ``lasym=False``
-  fixed-boundary cases improved on the default path. The first follow-on
-  ``lasym=False`` free-boundary batching change also reduced the
-  representative ``cth_like_free_bdy`` CPU profile from about ``60.4s`` to
-  ``58.2s``. The final pre-PR cleanup then stayed conservative: it broadened
-  light-history mode on the optimized non-autodiff path and made
-  free-boundary ``scalpot`` axis diagnostics lazy, but it did not claim a new
-  major algorithmic speedup beyond that.
-
-Conclusion:
-
-- ready to merge with the optimized non-autodiff fixed-boundary path as the
-  default on ``main``,
-- parity, implicit-differentiation, and free-boundary workflows should keep
-  their current explicit or robust routes,
-- not yet ready to become the universal default across GPU and all solver
-  modes.
-
-Recommended reviewer checklist
-------------------------------
-
-1. Verify the API split and docs:
+1. Confirm the default-path scope:
 
    .. code-block:: bash
 
-      git diff main...HEAD -- vmec_jax/driver.py vmec_jax/cli.py docs/performance.rst
+      git diff main...HEAD -- vmec_jax/driver.py vmec_jax/cli.py README.md
 
-2. Re-run the main validation gates:
+2. Confirm the main local gates:
 
    .. code-block:: bash
 
       pytest -q
       SPHINX_FAST=1 LC_ALL=C LANG=C python -m sphinx -W -j auto -b html docs docs/_build/html_fastcheck
 
-3. Re-run representative accelerated fixed-boundary benchmarks serially:
+3. Inspect the final artifacts if needed:
 
-   .. code-block:: bash
-
-      python tools/diagnostics/benchmark_accelerated_mode.py \
-        --ids LandremanSenguptaPlunk_section5p3_low_res \
-        --kind fixed --baseline-mode default --candidate-mode accelerated \
-        --candidate-cli-fixed-boundary-mode \
-        --jax-platforms cpu
-
-      python tools/diagnostics/benchmark_accelerated_mode.py \
-        --ids LandremanPaul2021_QA_lowres \
-        --kind fixed --baseline-mode default --candidate-mode accelerated \
-        --candidate-cli-fixed-boundary-mode \
-        --jax-platforms cpu
-
-      python tools/diagnostics/benchmark_accelerated_mode.py \
-        --ids LandremanPaul2021_QA_reactorScale_lowres \
-        --kind fixed --baseline-mode default --candidate-mode accelerated \
-        --candidate-cli-fixed-boundary-mode \
-        --jax-platforms cpu
-
-4. Confirm the merge scope is still experimental:
-
-- do not switch the repo-wide default to ``solver_mode="accelerated"``,
-- do not advertise accelerated free-boundary as finished,
-- do not remove or weaken parity-mode coverage.
-
-Not yet ready for default
--------------------------
-
-The branch should **not** make accelerated mode the default controller yet.
-
-The remaining gates are broader than this PR:
-
-- exact per-channel final-stage ``FTOL`` is now enforced on the accelerated
-  fixed-boundary return path, but that still needs to be revalidated on the
-  full bundled fixed-boundary matrix after any further controller changes,
-- full bundled example runtime and memory matrix on CPU and GPU,
-- full final-``wout`` accuracy matrix against VMEC2000 at the accelerated-mode
-  target,
-- accelerated free-boundary redesign and validation,
-- free-boundary runtime work is now making measurable progress
-  (for example, ``cth_like_free_bdy`` warmed CPU is now about ``9.86s`` after
-  the latest boundary-synthesis, nonsingular-kernel-table caching, batched
-  second-derivative synthesis, and cached NumPy host-synthesis passes), but it
-  is still not ready to be marketed as a finished accelerated path,
-- gradient checks on representative accelerated fixed-boundary and
-  free-boundary workflows,
-- policy hardening for unseen inputs beyond the current representative set.
+   - ``outputs/readiness_fixed_all_20260313/summary.json``
+   - ``outputs/fixed_runtime_vmec2000_accel_cpu_warm_20260313/summary.json``
+   - ``outputs/free_runtime_vmec2000_cpu_warm_20260313/summary.json``

@@ -54,7 +54,7 @@ and free-boundary ideal-MHD equilibria.
 
 - VMEC2000-parity solver for fixed-boundary and free-boundary equilibria.
 - Supports axisymmetric and non-axisymmetric configurations, with `lasym=False` and `lasym=True` for stellarator symmetry/asymmetry and up-down symmetry/asymmetry.
-- Default CLI path is the same across all supported branches: `vmec_jax input.name`.
+- Default CLI path is `vmec_jax input.name`.
 - `wout_*.nc` outputs, iteration diagnostics, and manifest-based parity sweeps are built around VMEC2000-compatible workflows.
 - JAX-native kernels for geometry, transforms, and residual assembly.
 - Differentiable optimization workflows are available through the Python API and bundled examples.
@@ -109,10 +109,10 @@ python examples/optimization/implicit_target_iota_volume.py --case circular_toka
 - LASYM fixed-boundary stages now use a timed scan/non-scan probe on CPU and a short parity-only probe on accelerators, so the default GPU path keeps the scan fast path without paying the full non-scan timing cost.
 - Quiet accelerator scan runs now use backend-aware larger chunks, capped to the remaining iterations, to reduce host/device launch overhead without changing solver parity.
 - Use `--parity` or `performance_mode=False` to force the conservative parity path.
-- Use `--solver-mode accelerated` to force the experimental accelerated
-  fixed-boundary path, which skips parity-oriented scan probes and is judged by
-  final residual/output quality rather than iteration-trace parity.
-- In the current branch, accelerated fixed-boundary solves default to a single
+- Use `--solver-mode accelerated` to force the optimized fixed-boundary path
+  explicitly, which skips parity-oriented scan probes and is judged by final
+  residual/output quality rather than iteration-trace parity.
+- Accelerated fixed-boundary solves default to a single
   final-grid stage unless the caller explicitly requests `multigrid=True`. When
   staged inputs provide `NITER_ARRAY`, the accelerated single-grid path now
   carries the total staged iteration budget forward instead of silently falling
@@ -132,7 +132,7 @@ python examples/optimization/implicit_target_iota_volume.py --case circular_toka
 - The parity-vs-optimized Python driver example lives at
   `examples/fixed_boundary_driver_tracks.py`.
 - Details and profiling guidance live in `docs/performance.rst`.
-- Merge scope and review criteria for the accelerated branch live in
+- Implementation notes and merge rationale for the optimized controller live in
   `docs/accelerated_merge_readiness.rst`.
 - Parity methodology and current status live in `docs/validation.rst`.
 - The cross-case parity matrix (fixed/free boundary, axisym/non-axisym, `lasym=False/True`)
@@ -226,7 +226,7 @@ python tools/diagnostics/readme_runtime_compare.py \
 The exact numbers in the checked-in benchmark table will vary by machine. The
 README runtime figure intentionally uses warmed fixed-boundary optimized-CLI
 runs so it reflects steady-state solve cost rather than cold JAX startup
-overhead. The top-level README plot is CPU-only on this branch because the GPU
+overhead. The top-level README plot is CPU-only here because the GPU
 path is still under active optimization and is not yet a broadly faster default
 story.
 
@@ -262,7 +262,8 @@ Current checked-in summary:
   effectively neutral on 1, and slower on 2 while still meeting the requested
   final-stage `FTOL`,
 - the free-boundary runtime plot intentionally uses the robust default path,
-  not the experimental accelerated flag, because free-boundary acceleration is
+  not the optimized fixed-boundary controller, because free-boundary
+  acceleration is
   still a separate follow-on problem,
 - the runtime plot is sorted by best VMEC2000-relative CPU speedup first,
 - on this host, `vmec_jax` CPU is faster than VMEC2000 on 4 of the 21 shipped
@@ -270,7 +271,7 @@ Current checked-in summary:
   `nfp4_QH_warm_start`) and close on the reactor-scale QA/QH fixed-boundary
   cases,
 - the free-boundary DIII-D rows are still the dominant same-host CPU gap, but
-  `DIII-D_lasym_false` is down to about `113.78s` warmed on this branch from
+  `DIII-D_lasym_false` is down to about `113.78s` warmed here from
   the earlier `~174s` range, and `cth_like_free_bdy` is down to about `6.96s`
   warmed while staying converged.
 
@@ -284,10 +285,10 @@ Representative warmed CPU VMEC2000-vs-`vmec_jax` points:
 | cth_like_free_bdy | 1.79s | 6.96s | converged, VMEC2000 faster |
 | DIII-D_lasym_false | 19.80s | 113.78s | converged, VMEC2000 faster |
 
-## Accelerated Branch Reassessment
+## Optimized Fixed-Boundary Reassessment
 
 The optimized non-autodiff fixed-boundary track is now the intended default
-user path for the branch:
+user path:
 
 - it is selected automatically by both the CLI and ordinary Python
   `run_fixed_boundary(...)` calls,
@@ -306,7 +307,7 @@ python examples/fixed_boundary_driver_tracks.py \
   --quiet --json
 ```
 
-The current branch is ready for a PR that makes this optimized non-autodiff
-fixed-boundary path the default `vmec_jax` experience on `main`, while leaving
-free-boundary on the current robust controller and leaving parity /
-implicit-differentiation paths available when that is the priority.
+This optimized non-autodiff fixed-boundary path is intended to be the default
+`vmec_jax` experience, while leaving free-boundary on the current robust
+controller and leaving parity / implicit-differentiation paths available when
+that is the priority.
