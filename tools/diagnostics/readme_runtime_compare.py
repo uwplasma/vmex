@@ -79,18 +79,23 @@ def _collect_records(
         cpu = cpu_results.get(case_id, {}).get("cpu")
         pp = cpu_vmecpp.get(case_id)
         gpu = gpu_results.get(case_id, {}).get("gpu")
-        vmec_rt = None if vmec is None else float(vmec.get("runtime_s", vmec.get("time_real_s", np.nan)))
-        cpu_rt = None if cpu is None else float(
+        vmec_ok = bool(vmec is not None and vmec.get("ok", True))
+        cpu_ok = bool(cpu is not None and cpu.get("ok", True))
+        pp_ok = bool(pp is not None and pp.get("ok", True))
+        gpu_ok = bool(gpu is not None and gpu.get("ok", True))
+
+        vmec_rt = None if (vmec is None or not vmec_ok) else float(vmec.get("runtime_s", vmec.get("time_real_s", np.nan)))
+        cpu_rt = None if (cpu is None or not cpu_ok) else float(
             cpu.get("runtime_warm_s", cpu.get("runtime_s", cpu.get("time_real_s", np.nan)))
         )
-        pp_rt = None if pp is None else float(pp.get("runtime_s", pp.get("time_real_s", np.nan)))
-        gpu_rt = None if gpu is None else float(
+        pp_rt = None if (pp is None or not pp_ok) else float(pp.get("runtime_s", pp.get("time_real_s", np.nan)))
+        gpu_rt = None if (gpu is None or not gpu_ok) else float(
             gpu.get("runtime_warm_s", gpu.get("runtime_s", gpu.get("time_real_s", np.nan)))
         )
-        vmec_mem = _mem_bytes(vmec)
-        cpu_mem = _mem_bytes(cpu)
-        pp_mem = _mem_bytes(pp)
-        gpu_mem = _mem_bytes(gpu)
+        vmec_mem = _mem_bytes(vmec) if vmec_ok else None
+        cpu_mem = _mem_bytes(cpu) if cpu_ok else None
+        pp_mem = _mem_bytes(pp) if pp_ok else None
+        gpu_mem = _mem_bytes(gpu) if gpu_ok else None
         rows.append(
             {
                 "id": case_id,
