@@ -46,7 +46,11 @@ and free-boundary ideal-MHD equilibria.
     <td colspan="2"><img src="docs/_static/figures/readme_runtime_compare.png" width="860" /></td>
   </tr>
   <tr>
-    <td align="center" colspan="2">Single-grid bundled runtime comparison (log scale): VMEC2000 (blue) vs vmec_jax (orange, warmed) vs VMEC++ (green). Missing green bars indicate VMEC++ did not converge or does not support that input (for example LASYM cases).</td>
+    <td align="center" colspan="2">
+      Single-grid bundled runtime comparison (log scale): VMEC2000 (blue) vs vmec_jax (orange, warmed) vs VMEC++ (green).<br/>
+      VMEC++ unsupported inputs in this benchmark (<code>lasym=True</code>): <code>LandremanSenguptaPlunk_section5p3_low_res</code>, <code>basic_non_stellsym_pressure</code>, <code>cth_like_free_bdy_lasym_small</code>, <code>up_down_asymmetric_tokamak</code>.<br/>
+      VMEC++ failed to converge (non-zero exit) on these <code>lasym=False</code> cases under the same single-grid settings: <code>DIII-D_lasym_false</code>, <code>LandremanPaul2021_QA_reactorScale_lowres</code>, <code>LandremanPaul2021_QH_reactorScale_lowres</code>, <code>LandremanSengupta2019_section5.4_B2_A80</code>, <code>cth_like_fixed_bdy</code>.
+    </td>
   </tr>
 </table>
 
