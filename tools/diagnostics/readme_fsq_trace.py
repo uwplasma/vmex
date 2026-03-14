@@ -107,11 +107,18 @@ def _collect_vmec2000_trace(input_path: Path, *, ns: int, niter: int, ftol: floa
             it.append(int(row.it))
             fsq.append(float(row.fsqr + row.fsqz + row.fsql))
     case = input_path.name.replace("input.", "")
+    # Archive threed1 before vmec_jax overwrites it in the same scratch dir.
+    if vmec.threed1_path is not None and vmec.threed1_path.exists():
+        archived_threed1 = workdir / f"threed1.{case}_VMEC2000"
+        shutil.copy2(vmec.threed1_path, archived_threed1)
     wout_path = _find_wout(workdir, case=case)
     archived = workdir / f"wout_{case}_VMEC2000.nc"
     shutil.copy2(wout_path, archived)
     audit = _audit_wout(archived)
-    return np.asarray(it, dtype=int), np.asarray(fsq, dtype=float), float(vmec.runtime_s), audit
+    it_arr = np.asarray(it, dtype=int)
+    fsq_arr = np.asarray(fsq, dtype=float)
+    np.savez(workdir / f"trace_{case}_VMEC2000.npz", it=it_arr, fsq_total=fsq_arr)
+    return it_arr, fsq_arr, float(vmec.runtime_s), audit
 
 
 def _parse_vmec_table_trace(stdout: str) -> tuple[np.ndarray, np.ndarray]:
@@ -166,11 +173,37 @@ def _collect_vmec_jax_trace(input_path: Path, *, ns: int, niter: int, ftol: floa
     if proc.returncode != 0:
         raise RuntimeError(f"vmec_jax failed for {input_path} (code={proc.returncode})\n{proc.stderr}")
     it, fsq = _parse_vmec_table_trace(proc.stdout)
+    # Archive threed1 written by vmec_jax.
+    threed1_path = workdir / f"threed1.{case}"
+    if threed1_path.exists():
+        shutil.copy2(threed1_path, workdir / f"threed1.{case}_vmec_jax")
     wout_path = _find_wout(workdir, case=case)
     archived = workdir / f"wout_{case}_vmec_jax.nc"
     shutil.copy2(wout_path, archived)
     audit = _audit_wout(archived)
+    np.savez(workdir / f"trace_{case}_vmec_jax.npz", it=it, fsq_total=fsq)
     return it, fsq, float(runtime), audit
+
+
+def _trace_mismatch(it_a: np.ndarray, fsq_a: np.ndarray, it_b: np.ndarray, fsq_b: np.ndarray) -> dict[str, float]:
+    # Align by explicit iteration numbers.
+    a = {int(i): float(v) for i, v in zip(it_a.tolist(), fsq_a.tolist(), strict=False)}
+    b = {int(i): float(v) for i, v in zip(it_b.tolist(), fsq_b.tolist(), strict=False)}
+    common = sorted(set(a).intersection(b))
+    if not common:
+        return {"n_common": 0.0}
+    rel = []
+    for i in common:
+        av = abs(a[i])
+        bv = abs(b[i])
+        denom = max(av, bv, 1e-300)
+        rel.append(abs(a[i] - b[i]) / denom)
+    rel = np.asarray(rel, dtype=float)
+    return {
+        "n_common": float(len(common)),
+        "max_rel": float(np.nanmax(rel)),
+        "p50_rel": float(np.nanmedian(rel)),
+    }
 
 
 def _plot_panel(
@@ -181,8 +214,6 @@ def _plot_panel(
     it_jax: np.ndarray,
     fsq_jax: np.ndarray,
     title: str,
-    t_vmec: float,
-    t_jax: float,
     jax_label: str,
 ):
     ax.plot(it_vmec, fsq_vmec, lw=2.6, linestyle="--", marker="o", ms=3.0, label="VMEC2000", zorder=2)
@@ -190,7 +221,9 @@ def _plot_panel(
     ax.set_yscale("log")
     ax.set_xlabel("iteration")
     ax.set_ylabel("fsq_total")
-    ax.set_title(f"{title}\nVMEC2000 {t_vmec:.2f}s | {jax_label} {t_jax:.2f}s", fontsize=11)
+    # Do not annotate runtimes on this figure: traces run with NSTEP=1 solely to
+    # capture per-iteration values, and those runtimes are not representative.
+    ax.set_title(title, fontsize=11)
     ax.grid(alpha=0.3)
 
 
@@ -251,6 +284,7 @@ def main() -> None:
     it_jax_a, fsq_jax_a, t_jax_a, wout_jax_a = _collect_vmec_jax_trace(
         axisym_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=axisym_work
     )
+    mismatch_a = _trace_mismatch(it_vmec_a, fsq_vmec_a, it_jax_a, fsq_jax_a)
 
     it_vmec_s, fsq_vmec_s, t_vmec_s, wout_vmec_s = _collect_vmec2000_trace(
         stellarator_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=st_work
@@ -258,6 +292,7 @@ def main() -> None:
     it_jax_s, fsq_jax_s, t_jax_s, wout_jax_s = _collect_vmec_jax_trace(
         stellarator_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=st_work
     )
+    mismatch_s = _trace_mismatch(it_vmec_s, fsq_vmec_s, it_jax_s, fsq_jax_s)
 
     fig, axes = plt.subplots(1, 2, figsize=(12.5, 4.2))
     _plot_panel(
@@ -267,8 +302,6 @@ def main() -> None:
         it_jax=it_jax_a,
         fsq_jax=fsq_jax_a,
         title=f"ITERModel fsq_total trace (single-grid)",
-        t_vmec=t_vmec_a,
-        t_jax=t_jax_a,
         jax_label=str(args.jax_label),
     )
     _plot_panel(
@@ -278,8 +311,6 @@ def main() -> None:
         it_jax=it_jax_s,
         fsq_jax=fsq_jax_s,
         title="LandremanPaul2021_QA_lowres fsq_total trace (single-grid)",
-        t_vmec=t_vmec_s,
-        t_jax=t_jax_s,
         jax_label=str(args.jax_label),
     )
     handles, labels = axes[0].get_legend_handles_labels()
@@ -300,8 +331,22 @@ def main() -> None:
         )
         + "\n"
     )
+    mismatch_out = workdir / "readme_fsq_trace_single_grid_mismatch.json"
+    mismatch_out.write_text(
+        json.dumps(
+            {
+                "ITERModel": mismatch_a,
+                "LandremanPaul2021_QA_lowres": mismatch_s,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
     print(f"Wrote {outpath}")
     print(f"Wrote {audit_out}")
+    print(f"Wrote {mismatch_out}")
+    print(f"Mismatch summary (relative): ITERModel max={mismatch_a.get('max_rel')} | QA max={mismatch_s.get('max_rel')}")
 
 
 if __name__ == "__main__":

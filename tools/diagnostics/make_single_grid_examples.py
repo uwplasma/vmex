@@ -6,6 +6,7 @@ and rewrites iteration controls to a single explicit grid request:
 - NS_ARRAY = 151
 - NITER_ARRAY = 5000
 - FTOL_ARRAY = 1e-14
+- NSTEP = 500
 
 This intentionally avoids multigrid staging (no arrays with multiple entries),
 and avoids scalar NS/NITER/FTOL to keep the intent unambiguous for VMEC2000 and
@@ -44,11 +45,12 @@ def _key_of_assignment(code: str) -> str | None:
     return str(m.group(1)).upper()
 
 
-def _rewrite_input(text: str, *, ns: int, niter: int, ftol: float) -> str:
+def _rewrite_input(text: str, *, ns: int, niter: int, ftol: float, nstep: int) -> str:
     out_lines: list[str] = []
     saw_ns = False
     saw_niter = False
     saw_ftol = False
+    saw_nstep = False
     inserted = False
 
     for line in text.splitlines(True):
@@ -99,11 +101,19 @@ def _rewrite_input(text: str, *, ns: int, niter: int, ftol: float) -> str:
             if not out_lines[-1].endswith("\n"):
                 out_lines[-1] += "\n"
             continue
+        if key == "NSTEP":
+            saw_nstep = True
+            out_lines.append(
+                f"  NSTEP = {int(nstep)}{(' ' if comment and not comment.startswith(' !') else '')}{comment}"
+            )
+            if not out_lines[-1].endswith("\n"):
+                out_lines[-1] += "\n"
+            continue
 
         out_lines.append(line)
 
     # Insert controls right after &INDATA for determinism if any were missing.
-    if not (saw_ns and saw_niter and saw_ftol):
+    if not (saw_ns and saw_niter and saw_ftol and saw_nstep):
         final_lines: list[str] = []
         for line in out_lines:
             final_lines.append(line)
@@ -114,6 +124,8 @@ def _rewrite_input(text: str, *, ns: int, niter: int, ftol: float) -> str:
                     final_lines.append(f"  FTOL_ARRAY = {float(ftol):.1E}\n")
                 if not saw_ns:
                     final_lines.append(f"  NS_ARRAY = {int(ns)}\n")
+                if not saw_nstep:
+                    final_lines.append(f"  NSTEP = {int(nstep)}\n")
                 inserted = True
         out_lines = final_lines
 
@@ -132,6 +144,7 @@ def main() -> int:
     p.add_argument("--ns", type=int, default=151)
     p.add_argument("--niter", type=int, default=5000)
     p.add_argument("--ftol", type=float, default=1.0e-14)
+    p.add_argument("--nstep", type=int, default=500)
     p.add_argument("--force", action="store_true", help="Overwrite destination if it exists.")
     args = p.parse_args()
 
@@ -149,11 +162,13 @@ def main() -> int:
     # Rewrite only input.*; keep mgrid and reference wouts available in the copy.
     for input_path in sorted(dst.glob("input.*")):
         raw = input_path.read_text()
-        rewritten = _rewrite_input(raw, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol))
+        rewritten = _rewrite_input(
+            raw, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), nstep=int(args.nstep)
+        )
         input_path.write_text(rewritten)
 
     print(f"wrote={dst}")
-    print(f"ns={int(args.ns)} niter={int(args.niter)} ftol={float(args.ftol):.3e}")
+    print(f"ns={int(args.ns)} niter={int(args.niter)} ftol={float(args.ftol):.3e} nstep={int(args.nstep)}")
     return 0
 
 
