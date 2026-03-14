@@ -45,8 +45,6 @@ def test_end_to_end_gn_vmec_residual_decreases_for_circular_tokamak():
         signgs=int(wout.signgs),
         include_constraint_force=True,
         max_iter=2,
-        damping=1e-2,
-        cg_tol=1e-6,
         cg_maxiter=60,
         step_size=1.0,
         jit_kernels=True,
@@ -55,6 +53,8 @@ def test_end_to_end_gn_vmec_residual_decreases_for_circular_tokamak():
     assert res.w_history.shape[0] >= 2
     assert np.isfinite(res.w_history).all()
     assert np.all(np.diff(res.w_history) < 0.0)
+    assert res.diagnostics["damping_mode"] == "adaptive"
+    assert res.diagnostics["cg_tol_mode"] == "adaptive"
     # The VMEC-style initial guess is more physical but can start at a higher
     # residual; require a meaningful reduction rather than a strict absolute target.
     assert float(res.w_history[-1]) < 0.85

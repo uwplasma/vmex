@@ -141,3 +141,52 @@ def test_wout_parity_against_reference(case, tmp_path):
     assert np.isfinite(wnew.fsqr)
     assert np.isfinite(wnew.fsqz)
     assert np.isfinite(wnew.fsql)
+
+
+def test_wout_lasym_false_nonaxis_zeroes_forbidden_geometry_channels(tmp_path):
+    pytest.importorskip("netCDF4")
+
+    root = Path(__file__).resolve().parents[1]
+    data_dir = root / "examples" / "data"
+    input_path = data_dir / "input.LandremanPaul2021_QA_lowres"
+    wout_path = data_dir / "wout_LandremanPaul2021_QA_lowres_reference.nc"
+    if not input_path.exists() or not wout_path.exists():
+        pytest.skip("Missing bundled QA low-resolution reference data")
+
+    cfg, indata = load_config(str(input_path))
+    wref = read_wout(wout_path)
+    grid = vmec_angle_grid(
+        ntheta=int(cfg.ntheta),
+        nzeta=int(cfg.nzeta),
+        nfp=int(cfg.nfp),
+        lasym=bool(cfg.lasym),
+    )
+    static = build_static(cfg, grid=grid)
+    state = state_from_wout(wref)
+
+    fsqr, fsqz, fsql = vj.residual_scalars_from_state(
+        state=state,
+        static=static,
+        indata=indata,
+        signgs=int(wref.signgs),
+        wout=wref,
+        use_vmec_synthesis=True,
+    )
+
+    out_path = tmp_path / "wout_qa_lowres_vmec_jax.nc"
+    wnew = wout_minimal_from_fixed_boundary(
+        path=out_path,
+        state=state,
+        static=static,
+        indata=indata,
+        signgs=int(wref.signgs),
+        fsqr=float(fsqr),
+        fsqz=float(fsqz),
+        fsql=float(fsql),
+    )
+
+    assert bool(wnew.lasym) is False
+    np.testing.assert_allclose(np.asarray(wnew.rmns), 0.0, atol=1e-14)
+    np.testing.assert_allclose(np.asarray(wnew.zmnc), 0.0, atol=1e-14)
+    np.testing.assert_allclose(np.asarray(wref.rmns), 0.0, atol=1e-14)
+    np.testing.assert_allclose(np.asarray(wref.zmnc), 0.0, atol=1e-14)

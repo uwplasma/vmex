@@ -4799,6 +4799,9 @@ def wout_minimal_from_fixed_boundary(
     rmns = np.asarray(Rsin_use, dtype=float) * mode_scale
     zmnc = np.asarray(Zcos_use, dtype=float) * mode_scale
     zmns = np.asarray(Zsin_use, dtype=float) * mode_scale
+    if not bool(lasym):
+        rmns = np.zeros_like(rmnc)
+        zmnc = np.zeros_like(zmns)
     lmnc_internal = np.asarray(state.Lcos, dtype=float)
     lmns_internal = np.asarray(state.Lsin, dtype=float)
     lmnc_internal = lmnc_internal * mode_scale

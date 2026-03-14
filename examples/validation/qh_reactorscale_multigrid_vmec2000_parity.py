@@ -8,7 +8,7 @@ from pathlib import Path
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     script = repo_root / "tools" / "diagnostics" / "vmec2000_exec_stage_trace_compare.py"
-    input_path = repo_root.parent / "simsopt" / "tests" / "test_files" / "input.n3are_R7.75B5.7_lowres"
+    input_path = repo_root / "examples" / "data" / "input.LandremanPaul2021_QH_reactorScale_lowres"
     if not input_path.exists():
         raise SystemExit(f"Missing input file: {input_path}")
 
@@ -18,7 +18,7 @@ def main() -> None:
         "--input",
         str(input_path),
         "--ns-array",
-        "16 31 50",
+        "12 31 50",
         "--niter-array",
         "200 200 200",
         "--ftol-array",

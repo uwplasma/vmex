@@ -1,6 +1,6 @@
 # VMEC-JAX Master Plan and New-Agent Handoff (Living Document)
 
-Last updated: 2026-03-06
+Last updated: 2026-03-09
 Primary owner: `vmec_jax` contributors
 Canonical repo: `<repo-root>`
 
@@ -693,7 +693,7 @@ Legend:
 - Current performance outliers from the bundled example sweep:
   - fixed-boundary:
     `input.up_down_asymmetric_tokamak` (~`57.8s`, ~`5.05 GiB`),
-    `input.n3are_R7.75B5.7_lowres` (~`158.1s`, ~`6.97 GiB`),
+    `retired staged fixed-boundary stress case` (~`158.1s`, ~`6.97 GiB`),
     `input.LandremanSenguptaPlunk_section5p3_low_res` (~`45.8s`, ~`4.02 GiB`),
   - free-boundary:
     `input.DIII-D_lasym_false` (~`402.0s`, ~`7.98 GiB`),
@@ -739,7 +739,7 @@ Legend:
     `input.cth_like_free_bdy_lasym_small` ~`37.59s` / ~`1.47 GiB`,
   - GPU host (`reference GPU host`, dual RTX A4000):
     `input.DIII-D_lasym_false` ~`1602.31s` / ~`6.23 GiB`,
-    `input.n3are_R7.75B5.7_lowres` ~`710.51s` / ~`6.16 GiB`,
+    `retired staged fixed-boundary stress case` ~`710.51s` / ~`6.16 GiB`,
     `input.basic_non_stellsym_pressure` ~`223.36s` / ~`3.90 GiB`.
 - Completed a public-repo audit pass for portability and user-facing docs:
   - removed tracked absolute workstation paths and host-specific instructions,
@@ -805,3 +805,759 @@ Legend:
   - `docs/performance.rst` now has a dedicated section explaining the current
     architectural reasons in detail, with measured free-boundary examples and
     the distinction between the fast scan path and the conservative parity path.
+- Created branch `codex/nonparity-performance` for an accelerated, non-parity
+  solver track aimed at final-equilibrium quality rather than
+  iteration-by-iteration VMEC2000 agreement.
+- Added `docs/aggressive_performance_plan.rst` and linked it from the docs
+  index. The new plan defines:
+  - acceptance criteria for accelerated mode (`fsq_total`, `wout`
+    similarity, differentiability, and Jacobian-health gates),
+  - architecture changes for order-of-magnitude runtime and memory reductions
+    on CPU and GPU,
+  - specific workstreams for device-resident control flow, continuation,
+    preconditioner redesign, free-boundary acceleration, and gradient scaling,
+  - benchmark and CI gates plus an expanded example matrix.
+- Began Phase 0/1/2 implementation on `codex/nonparity-performance`:
+  - added explicit `solver_mode` support to the CLI and Python API with
+    `default`, `parity`, and `accelerated` policies,
+  - added `tools/diagnostics/benchmark_accelerated_mode.py` to compare
+    baseline vs accelerated mode on runtime, memory, `fsq_total`,
+    convergence, and bundled-reference `wout` quality,
+  - the first accelerated-mode implementation uses the masked VMEC-control
+    scan path for fixed-boundary cases while skipping parity-oriented scan
+    probes and scan-corrector overhead,
+  - free-boundary accelerated mode currently reuses the robust baseline path.
+- Initial CPU benchmark findings from `benchmark_accelerated_mode.py`:
+  - `input.up_down_asymmetric_tokamak`: about `4.1x` warm speedup and `~0.68x`
+    peak memory ratio vs the current default path, with the same final
+    `fsq_total`,
+  - `input.circular_tokamak`: converges cleanly with good final `wout`
+    similarity (`~9.8e-6` max relRMS), but is not faster yet,
+  - `input.LandremanPaul2021_QA_lowres`: approximately neutral,
+  - the current `lasym=True` fixed-boundary quality gap on
+    `input.up_down_asymmetric_tokamak` is shared by both the default and
+    accelerated scan paths, so it is not introduced by the new mode,
+  - free-boundary accelerated mode is currently a bookkeeping alias, not yet a
+    faster controller.
+- Continued Phase 2 accelerated-mode controller work:
+  - re-probed the fully non-VMEC raw scan path directly on representative
+    fixed-boundary cases (`input.circular_tokamak`,
+    `input.LandremanPaul2021_QA_lowres`,
+    `input.up_down_asymmetric_tokamak`),
+  - current result: the raw scan path is substantially faster but not yet
+    acceptable as a default accelerated controller because it can diverge
+    badly in `fsq_total` and final `wout` quality,
+  - kept the masked VMEC-control scan as the accelerated fixed-boundary
+    controller for now and moved the next optimization step to bookkeeping
+    reduction instead of changing nonlinear semantics.
+- Reduced accelerated-mode result bookkeeping:
+  - `solve_fixed_boundary_residual_iter()` now accepts explicit
+    `light_history` and `resume_state_mode` controls instead of relying only on
+    env vars,
+  - accelerated runs now default to `light_history=True` and a
+    `resume_state_mode="minimal"` payload, which drops the large parity-era
+    momentum and preconditioner caches from the returned diagnostics while
+    preserving the scalar continuation state needed for staged/continued runs,
+  - added regression coverage so accelerated scan results expose
+    `light_history=True`, `resume_state_mode="minimal"`, and remain restartable
+    from the compact resume payload.
+- Added an accelerated convergence target on total residual:
+  - `solve_fixed_boundary_residual_iter()` now accepts an explicit
+    `fsq_total_target`,
+  - accelerated fixed-boundary stages use
+    a scalar target derived directly from the same input tolerance budget,
+    `fsq_total_target = 3 * ftol` for the three VMEC residual channels,
+    while parity mode continues to use the original VMEC-style per-component
+    `ftol` convergence,
+  - this keeps the non-parity contract aligned with the accelerated plan:
+    use `ftol` as the main user truth without introducing an absolute
+    solver-side tolerance floor.
+- Updated accelerated CPU smoke results after the total-residual target patch:
+  - `input.LandremanPaul2021_QA_lowres`: approximately neutral with the
+    current ftol-derived target,
+  - `input.circular_tokamak`: approximately runtime-neutral with
+    `~1.2e-5` reference-`wout` relRMS,
+  - `input.up_down_asymmetric_tokamak`: about `4.11x` warm speedup with
+    `~0.64x` memory ratio vs the current default path,
+  - `input.cth_like_free_bdy` smoke (`max_iter=20`) is effectively unchanged,
+    confirming the new target does not perturb the current free-boundary
+    accelerated alias on the existing smoke case.
+- Removed fixed literal convergence thresholds from the experimental solver
+  stack:
+  - `solve_lambda_gd()`, `solve_fixed_boundary_gd()`, and
+    `solve_fixed_boundary_lbfgs()` now derive their default `grad_tol`
+    from the initial gradient scale and machine precision instead of using a
+    hardcoded absolute cutoff,
+  - `solve_fixed_boundary_lbfgs_vmec_residual()` now derives its
+    startup/converged `m=1` residual release threshold from the input
+    `FTOL` and uses a scale-aware L-BFGS curvature acceptance test rather than
+    a fixed secant threshold,
+  - `solve_fixed_boundary_gn_vmec_residual()` now defaults to adaptive
+    damping and adaptive CG tolerances derived from local curvature,
+    residual progress, and `FTOL`, with no default fixed `damping`,
+    `cg_tol`, or `zero_m1_fsqz_thresh`,
+  - implicit differentiation wrappers no longer inject a fixed
+    `grad_tol=1e-10`; when callers omit `grad_tol`, the wrappers use the
+    solver-resolved adaptive tolerance.
+- Revalidated after the threshold cleanup:
+  - `pytest -q` passed (`152 passed, 12 skipped`),
+  - fast Sphinx build passed,
+  - accelerated fixed-boundary smoke stayed at the same order of performance:
+    `input.circular_tokamak` remained approximately neutral and
+    `input.up_down_asymmetric_tokamak` remained about `3.15x` faster than the
+    current default path in
+    `outputs/accelerated_mode_threshold_cleanup_smoke/summary.json`.
+- Switched accelerated fixed-boundary default staging to single-grid when the
+  caller does not explicitly request multigrid:
+  - reverted the abandoned raw-scan adaptive-`dt` experiment,
+  - `run_fixed_boundary(..., solver_mode="accelerated")` now defaults to the
+    final grid for fixed-boundary cases, while parity mode and explicit
+    `multigrid=True` keep the staged VMEC-style path,
+  - added regression coverage so accelerated fixed-boundary defaults expose
+    `accelerated_single_grid_default=True` and parity runs still report the
+    staged `NS_ARRAY`,
+  - serial CPU measurements are recorded in
+    `outputs/accelerated_fixed_boundary_singlegrid_serial_20260307/summary.json`:
+    - `input.LandremanSenguptaPlunk_section5p3_low_res`:
+      `0.241s` single-grid vs `0.284s` explicit multigrid,
+    - `input.LandremanPaul2021_QA_lowres`:
+      `6.15s` single-grid vs `16.50s` explicit multigrid,
+    - `retired staged fixed-boundary stress case`:
+      `1.37s` single-grid with final `fsq_total ~1.1e-4`.
+- Added a dedicated merge-readiness page for the accelerated branch:
+  - `docs/accelerated_merge_readiness.rst` now separates
+    "mergeable as experimental" from "ready to become default",
+  - the review checklist is explicit about what must still remain behind the
+    opt-in `solver_mode="accelerated"` API,
+  - recommended PR scope is now clear:
+    merge the accelerated fixed-boundary feature set as experimental,
+    while keeping the parity/default controller as the ordinary path.
+- Fixed an accelerated single-grid stage-budget mismatch during local review:
+  - when staged fixed-boundary inputs are collapsed to a single accelerated
+    final-grid solve, the driver now carries forward the total `NITER_ARRAY`
+    budget and final-stage `FTOL_ARRAY` value instead of falling back to
+    `NITER`,
+  - added regression coverage for the `LandremanPaul2021_QA_lowres`
+    single-grid budget selection,
+  - refreshed the serial reassessment artifact in
+    `outputs/accelerated_fixed_boundary_reassessment_20260309/summary.json`:
+    - `input.LandremanSenguptaPlunk_section5p3_low_res`:
+      `45.48s` default vs `0.198s` accelerated single-grid,
+    - `input.LandremanPaul2021_QA_lowres`:
+      `8.18s` default vs `7.31s` accelerated single-grid,
+    - `retired staged fixed-boundary stress case`:
+      `1.25s` accelerated single-grid with final `fsq_total ~1.1e-4`.
+- Added a CLI-only accelerated fixed-boundary fallback for staged inputs that
+  have `NS_ARRAY` but no `NITER_ARRAY`:
+  - the executable now derives a reduced total warm-start budget from the
+    coarsest-to-finest `ns` ratio,
+  - that budget is distributed across the stages by the squared number of new
+    radial degrees of freedom introduced at each stage,
+  - after the warm-start stages, the CLI applies a short parity polish on the
+    final grid when the accelerated pass is still not strictly converged,
+  - this policy is intentionally scoped to the non-differentiable CLI path;
+    the Python API keeps the existing accelerated single-grid behavior.
+- Local serial reassessment for the new CLI policy is recorded in
+  `outputs/accelerated_cli_fixed_boundary_reassessment_20260309/summary.json`:
+  - `input.LandremanSenguptaPlunk_section5p3_low_res`:
+    unchanged in practice at ~`0.151s`, `fsq_total ~3.0e-14`,
+  - `input.LandremanPaul2021_QA_lowres`:
+    unchanged in practice at ~`7.12s`, `fsq_total ~3.0e-13`,
+  - `retired staged fixed-boundary stress case`:
+    `1.26s` plain accelerated API path vs `16.42s` CLI budgeted-multigrid +
+    parity-polish path, with final `fsq_total` reduced from
+    ~`1.12e-4` to ~`6.81e-6`.
+- Revalidated after the CLI accelerated-controller change:
+  - `pytest -q` passed (`157 passed, 12 skipped`),
+  - fast Sphinx build passed,
+  - direct CLI smoke on `retired staged fixed-boundary stress case` completed and wrote
+    `retired staged-stress CLI output` successfully.
+- Tightened the CLI-only fixed-boundary finisher on the experimental branch:
+  - the finisher now preserves the original staged-policy diagnostics when it
+    returns a best resumed run,
+  - resumed finish attempts now call `solve_fixed_boundary_residual_iter()`
+    directly instead of recursively re-entering `run_fixed_boundary()`,
+  - minimal accelerated `resume_state` is sanitized before handing it to the
+    strict controller so cache-valid flags do not advertise missing norm/cache
+    payloads,
+  - accelerated CLI finish attempts now tag explicit metadata:
+    `cli_fixed_boundary_initial_policy`,
+    `cli_fixed_boundary_finish_budgets`,
+    `cli_fixed_boundary_finish_modes`,
+    `cli_fixed_boundary_finish_converged`, and
+    `cli_fixed_boundary_full_parity_fallback`.
+- Current fixed-boundary CLI accelerated status on the branch:
+  - `retired single-grid fixed-boundary stress case` is no longer a qualitative blocker:
+    a resumed strict finisher with parity budgets `[1000, 2000]`
+    reaches `fsq_total ~1.24e-14` and marks
+    `converged_by_total_fsq=True` in about `89.9s`,
+  - `input.up_down_asymmetric_tokamak` was already known to close under a
+    resumed strict finisher,
+  - `retired staged fixed-boundary stress case` remains the unresolved fixed-boundary
+    holdout for the experimental branch:
+    - mixed staged policies help but do not yet close the target,
+    - accelerated coarse stages plus a parity fine stage reduce the final-grid
+      residual from order `1e-2` to order `1e-5`, but not to `FTOL`,
+    - a parity fine stage with `max_iter=5000` from the improved stage-49
+      state reached `fsq_total ~4.47e-6` in about `193s` and still did not
+      converge,
+    - a full end-to-end CLI accelerated `retired staged stress case` run still exceeded acceptable
+      multi-minute runtime and was stopped without convergence.
+- Updated the CLI default policy for shipping:
+  - simple fixed-boundary inputs now default to `solver_mode="accelerated"`
+    on the CLI,
+  - the remaining hard staged class with `NS_ARRAY` but no `NITER_ARRAY`
+    defaults to `solver_mode="parity"` on the CLI until the staged
+    accelerated finisher closes that gap robustly,
+  - this policy is input-structure based, not case-name based.
+- Follow-up staged-hybrid fixed-boundary work on `codex/nonparity-performance`:
+  - CLI fixed-boundary finish attempts are no longer limited to accelerated
+    mode; strict parity CLI runs now also get the same state-only finish
+    controller when they miss the target on the first pass,
+  - those finish attempts now restart from the equilibrium state only, not from
+    cached nonlinear-controller history, because the state-only continuation was
+    materially more robust on the hard staged cases,
+  - the accelerated staged warm-start path now keeps accelerated coarse stages
+    but runs the final stage in strict parity with the full user `NITER`
+    budget, instead of starving the fine stage with the reduced warm-start
+    budget,
+  - the new artifact
+    `outputs/accelerated_cli_fixed_boundary_hybrid_20260309/summary.json`
+    records the latest measured status:
+    - `input.LandremanSenguptaPlunk_section5p3_low_res` closes at
+      `fsq_total ~3.0e-14`,
+    - `input.LandremanPaul2021_QA_lowres` closes at
+      `fsq_total ~3.0e-13`,
+    - `retired single-grid fixed-boundary stress case` closes at `fsq_total ~1.24e-14`,
+    - `retired staged fixed-boundary stress case` improves to a best measured
+      `fsq_total ~1.61e-6` under the staged hybrid controller, but still does
+      not reach `FTOL`.
+- Bundled-example update:
+  - `retired staged fixed-boundary input` now includes
+    `NITER_ARRAY = 1000 1000 5000`,
+  - this makes the example’s staged continuation explicit instead of relying on
+    the legacy “`NITER` applies to every stage” interpretation,
+  - the generic CLI policy for staged fixed-boundary inputs without
+    `NITER_ARRAY` remains in place, but that policy is now exercised by tests
+    using a synthetic staged fixed-boundary input rather than the bundled
+    `retired staged stress case` file.
+- Fixed-boundary CLI controller update:
+  - accelerated CLI runs now keep the fast single-grid attempt as the first
+    move,
+  - if a staged input carries explicit `NS_ARRAY` and `NITER_ARRAY` and the
+    first fast solve misses the target, the executable now replays that staged
+    schedule automatically before starting strict parity finish blocks,
+  - added `examples/fixed_boundary_driver_tracks.py` so users can compare the
+    parity track and the optimized CLI-style track from Python on their own
+    CPU/GPU machine.
+- 2026-03-10 fixed-boundary reassessment:
+  - new serial bundled artifact:
+    `outputs/accelerated_cli_fixed_boundary_bundle_20260310/summary.json`,
+  - 11 of 15 bundled fixed-boundary cases are faster under
+    `solver_mode="accelerated"` with `cli_fixed_boundary_mode=True`,
+  - strongest wins:
+    `LandremanSenguptaPlunk_section5p3_low_res` (`249.49x`),
+    `basic_non_stellsym_pressure` (`12.47x`),
+    `ITERModel` (`1.78x`),
+  - current slow outliers:
+    `retired single-grid stress case` (`0.0036x`),
+    `up_down_asymmetric_tokamak` (`0.0225x`),
+    `LandremanPaul2021_QA_lowres1` (`0.93x`),
+    `solovev` (`0.94x`),
+  - `retired staged stress case` remains the hard outlier:
+    a same-branch cold `solver_mode="default"` run took `41.67s` and stopped at
+    `fsq_total ~ 6.90e-2`, while the optimized CLI-style run exceeded 15
+    minutes without finishing the cold reassessment solve.
+- 2026-03-10 targeted single-grid CLI finisher improvement:
+  - CLI fixed-boundary single-grid finish blocks now try accelerated
+    continuation before strict parity fallback,
+  - added regression coverage for the new finish ordering in
+    `tests/test_driver_api.py`,
+  - targeted outlier artifact:
+    `outputs/accelerated_cli_fixed_boundary_outliers_20260310/summary.json`,
+  - `retired single-grid fixed-boundary stress case` improved from about `84.64s` to about `8.82s` while
+    still converging to `fsq_total ~1.24e-14`,
+  - `input.up_down_asymmetric_tokamak` improved from about `43.74s` to about
+    `0.55s`, now about `2.11x` faster than the branch baseline while still
+    converging to `fsq_total ~3.00e-14`.
+- 2026-03-10 README benchmark refresh:
+  - regenerated the top README benchmark figure as a warmed fixed-boundary
+    optimized-CLI speedup plot against VMEC2000,
+  - refreshed `tools/diagnostics/readme_runtime_compare.py` so it can render a
+    CPU-only speedup panel when no GPU summary is available,
+  - updated bundled warmed CPU matrix:
+    `outputs/fixed_runtime_accel_cpu_bundle_20260310_swap/summary.json`,
+  - all 16 bundled fixed-boundary cases are now faster than VMEC2000 once JAX
+    is warmed and all 16 converge,
+  - same-host CPU/GPU bundled summaries were collected on a reference
+    GPU-capable workstation for the updated 16-case fixed-boundary matrix,
+  - both backends converge on all 16 bundled fixed-boundary cases; the GPU is
+    already faster on the heavier 3D QA/QH reactor-scale cases and
+    `cth_like_fixed_bdy`, while the CPU still wins on the smaller axisymmetric
+    cases,
+  - bundled fixed-boundary examples/benchmarks now use the QA/QH reactor-scale
+    replacements instead of the retired internal stress cases.
+  - refreshed the top README comparison panels to use an optimized
+    axisymmetric case plus a bundled 3D showcase,
+  - regenerated the README `fsq_total` trace on the optimized controller for
+    the README showcase cases,
+  - replaced the top README speedup chart with a CPU-only runtime chart showing
+    VMEC2000 and `vmec_jax` CPU together,
+  - same-host CPU/GPU benchmarking on the updated 16-case fixed-boundary
+    bundle now shows GPU wins on 5 heavier 3D cases and CPU wins on the
+    remaining 11 smaller or more launch-latency-dominated cases.
+- 2026-03-10 fixed-boundary final-`wout` audit:
+  - regenerated `wout_LandremanPaul2021_QA_lowres_reference.nc` from the
+    canonical VMEC2000 executable because the previously bundled file used a
+    mismatched radial resolution (`ns=75` vs input `ns=50`),
+  - `tools/diagnostics/benchmark_accelerated_mode.py` now aligns coefficient
+    fields on a common radial grid before computing relRMS, so bundled audits no
+    longer silently return `nan` just because `ns` differs,
+  - full bundled fixed-boundary audit is recorded in
+    `outputs/fixed_wout_audit_20260310_r3/summary.json`,
+  - low `fsq_total` is not sufficient for final-output quality on the current
+    branch:
+    `LandremanPaul2021_QA_lowres` remains at max relRMS `~3.37e-01`,
+    `LandremanPaul2021_QA_reactorScale_lowres` at `~3.58e+00`,
+    `LandremanPaul2021_QH_reactorScale_lowres` at `~4.96e+00`,
+    `up_down_asymmetric_tokamak` at `~1.70e-01`,
+  - validated showcase-quality cases are:
+    `ITERModel` (`~6.01e-06`),
+    `shaped_tokamak_pressure` (`~1.55e-07`),
+    `circular_tokamak` (`~1.03e-05`),
+  - the README showcase was updated accordingly so it no longer presents the QA
+    low-resolution case as a parity-quality final state.
+- 2026-03-10 accelerated scan-core pass:
+  - accelerated quiet scan runs now default to the leaner `scan_core` path
+    unless explicitly overridden with `VMEC_JAX_SCAN_CORE`,
+  - this removes part of the fallback/probe bookkeeping from the hot path
+    without changing the fixed-boundary convergence results on the bundled
+    audit,
+  - attempted scan-carry buffer donation was rejected by JAX because the carry
+    currently aliases internal buffers; that avenue needs a carry-structure
+    refactor before it can be used safely.
+- 2026-03-11 non-axisymmetric fixed-boundary audit and first repair:
+  - localized the dominant non-axisymmetric state-vs-VMEC2000 field mismatch to
+    stale driver-returned `chipf/iota` on `NCURR=1` fixed-boundary runs:
+    geometry stayed near machine precision while `|B|` drifted because
+    `run_fixed_boundary()` returned input-built flux profiles instead of the
+    solved current-driven profiles,
+  - `vmec_jax/driver.py` now recomputes post-solve `chipf/iota` for
+    `NCURR=1` returns using the same force-balance reconstruction already used
+    by `wout`,
+  - added regression coverage in `tests/test_driver_api.py` ensuring
+    non-axisymmetric current-driven runs return nonzero `chipf/iota` and match
+    the `wout` reconstruction,
+  - QA/QH/basic-non-stellsym `|B|` drift dropped from the earlier
+    `~2.6%-8.0%` range down to about `0.5%-1.8%` on the patched return path,
+  - a second control-flow issue was then identified on the accelerated CLI
+    branch: staged 3D inputs with explicit `NS_ARRAY/NITER_ARRAY` returned
+    immediately when the first single-grid pass met the scalar `fsq_total`
+    target, so the intended staged follow-up never ran,
+  - the CLI accelerated finisher now forces staged follow-up for staged 3D
+    fixed-boundary inputs even if the first single-grid pass already satisfies
+    `fsq_total`,
+  - staged 3D explicit follow-up now uses a continuation policy of
+    `parity -> accelerated -> parity` across three or more stages, keeping the
+    coarsest and finest stages conservative while accelerating only interior
+    continuation stages,
+  - measured QA-lowres final-quality improvement on the accelerated CLI path:
+    `rmnc` `~4.98e-04 -> 5.83e-05`,
+    `zmns` `~2.71e-03 -> 2.83e-04`,
+    `lmns` `~4.19e-02 -> 4.75e-03`,
+  - measured QA-reactor-scale improvement on the accelerated CLI path:
+    initial staged-followup fix brought the case to
+    `rmnc ~4.16e-04`, `zmns ~2.02e-03`, `lmns ~3.10e-02`,
+  - measured QH-reactor-scale improvement on the accelerated CLI path:
+    initial staged-followup fix brought the case to
+    `rmnc ~2.05e-04`, `zmns ~6.37e-04`, `lmns ~2.32e-02`,
+  - final staged-3D policy was then tightened further so the first stage is
+    parity-controlled on all staged non-axisymmetric fixed-boundary cases:
+    `parity -> parity` for two-stage inputs and
+    `parity -> accelerated -> parity` for three-or-more-stage inputs,
+  - that closes the remaining reactor-scale fixed-boundary gaps on the
+    accelerated CLI path:
+    `LandremanPaul2021_QA_reactorScale_lowres`
+    now reaches `rmnc ~2.49e-05`, `zmns ~1.61e-04`, `lmns ~2.86e-03`;
+    `LandremanPaul2021_QH_reactorScale_lowres`
+    now reaches `rmnc ~6.12e-05`, `zmns ~2.60e-04`, `lmns ~9.97e-03`,
+  - the README showcase is switched back from the temporary ITER fallback to
+    the repaired QA-lowres accelerated comparison panels.
+  - full regression suite after these fixes:
+    `166 passed, 12 skipped`.
+- 2026-03-11 full fixed-boundary bundled reassessment:
+  - full local validation remains green:
+    `pytest -q` -> `166 passed, 12 skipped`,
+    `SPHINX_FAST=1 ... sphinx -W ...` -> passed,
+  - full warmed fixed-boundary bundled matrix is recorded in
+    `outputs/accelerated_cli_fixed_boundary_full_20260311/summary.json`,
+  - both the current default path and the optimized CLI-style candidate
+    converged on all 16 bundled fixed-boundary cases,
+  - however the optimized controller is only faster on 8 of 16 cases, roughly
+    neutral on 2, and slower on 6,
+  - the largest regressions are still the non-axisymmetric QA/QH-style cases
+    and `basic_non_stellsym_pressure`,
+  - conclusion from the full bundle is now explicit:
+    branch remains useful and reviewable as experimental, but it is not ready
+    to become the default fixed-boundary controller on `main`.
+- 2026-03-11 targeted work on the 6 regressing bundled fixed-boundary cases:
+  - localized the regression pattern to staged, current-driven 3D CLI
+    fixed-boundary inputs:
+    the optimized controller was paying for a single-grid accelerated warm
+    start and/or an over-eager explicit staged replay,
+  - tightened the policy in `vmec_jax/driver.py` so staged current-driven 3D
+    inputs now split by stage count:
+    two-stage inputs go straight to the explicit staged path,
+    three-or-more-stage inputs try the fast single-grid path first and only
+    replay the explicit stage schedule if that first solve misses the target,
+  - added driver regressions in `tests/test_driver_api.py` covering both:
+    deferred staged replay on three-stage current-driven 3D inputs and direct
+    multigrid on two-stage current-driven 3D inputs,
+  - targeted subset benchmark is recorded in
+    `outputs/accelerated_cli_fixed_boundary_regressions_20260311_r3/summary.json`,
+  - subset outcome after the patch:
+    `LandremanPaul2021_QA_lowres` improved from `0.14x` to `1.02x`,
+    `LandremanPaul2021_QA_reactorScale_lowres` improved from `0.09x` to `1.08x`,
+    `LandremanPaul2021_QH_reactorScale_lowres` improved from `0.12x` to `1.00x`,
+    `basic_non_stellsym_pressure` improved from `0.19x` to `12.11x`,
+    `solovev` moved from `0.97x` to `0.99x`,
+    `LandremanPaul2021_QA_lowres1` is now effectively neutral at `0.97x`,
+  - full regression suite after this controller tuning:
+    `168 passed, 12 skipped`.
+- 2026-03-11 full fixed-boundary bundled reassessment after staged-3D tuning:
+  - refreshed full warmed CPU matrix is recorded in
+    `outputs/accelerated_cli_fixed_boundary_full_20260311_r2/summary.json`,
+  - the optimized CLI-style fixed-boundary controller now converges on all 16
+    bundled fixed-boundary cases and has no bundled CPU regressions left,
+  - count by warmed runtime ratio versus the current branch baseline:
+    13 faster, 3 roughly neutral, 0 slower,
+  - representative improvements include:
+    `LandremanPaul2021_QA_lowres` `1.11x`,
+    `LandremanPaul2021_QA_reactorScale_lowres` `1.04x`,
+    `basic_non_stellsym_pressure` `12.37x`,
+    `LandremanSenguptaPlunk_section5p3_low_res` `240.59x`,
+    `up_down_asymmetric_tokamak` `2.28x`,
+  - current branch assessment becomes narrower:
+    fixed-boundary CLI on CPU is now plausible as the default path on `main`
+    if reviewers accept the non-parity scope; GPU and broader library/default
+    questions remain separate.
+- 2026-03-11 3D final-`wout` quality audit and export fix:
+  - audited the remaining non-axisymmetric fixed-boundary `wout` mismatch
+    fields using the refreshed bundled benchmark artifacts,
+  - found that the dominant QA/QH error was no longer the solved geometry
+    itself but symmetry-forbidden `rmns` / `zmnc` channels being exported in
+    `wout` for `lasym=False` runs,
+  - `vmec_jax/wout.py` now zeros `rmns` and `zmnc` when `lasym=False`,
+    matching VMEC2000's symmetric `wout` convention,
+  - added a reference-based regression in
+    `tests/test_wout_parity_reference.py` on
+    `LandremanPaul2021_QA_lowres` to lock that behavior in,
+  - refreshed 3D bundled audit in
+    `outputs/fixed_wout_3d_audit_20260311_r1/summary.json`,
+  - quality improvements from that fix:
+    `LandremanPaul2021_QA_lowres` `~3.37e-01 -> 4.19e-02`,
+    `LandremanPaul2021_QA_reactorScale_lowres` `~3.56e+00 -> 3.14e-02`,
+    `LandremanPaul2021_QH_reactorScale_lowres` `~4.61e+00 -> 2.22e-02`,
+  - remaining notable 3D bundled quality gap is now concentrated in
+    `basic_non_stellsym_pressure` (`~4.29e-01`) and residual lambda-channel
+    drift on the QA/QH cases,
+  - also tested a final-grid parity-polish controller for staged 3D runs, but
+    rejected it because it increased runtime substantially without improving
+    the benchmarked final-`wout` metrics,
+  - full regression suite after the `wout` fix:
+    `169 passed, 12 skipped`.
+- 2026-03-12 staged 3D continuation audit for remaining non-axisymmetric gaps:
+  - validated that the remaining bundled 3D quality gap was no longer a broad
+    geometry mismatch but a staged lambda-continuation issue, concentrated in
+    `basic_non_stellsym_pressure` and residual `lmns` drift on the QA/QH cases,
+  - updated `vmec_jax/driver.py` so 3-stage `lasym=True`, current-driven,
+    non-axisymmetric accelerated multigrid runs keep the entry and final stages
+    on the conservative controller and accelerate only the interior stage,
+  - added driver coverage in `tests/test_driver_api.py` for that policy,
+  - targeted audit in
+    `outputs/nonaxis_quality_subset_20260312_r2/summary.json` now shows:
+    `LandremanPaul2021_QA_lowres` `~4.19e-02`,
+    `LandremanPaul2021_QA_reactorScale_lowres` `~3.14e-02`,
+    `LandremanPaul2021_QH_reactorScale_lowres` `~2.22e-02`,
+    `basic_non_stellsym_pressure` `~3.46e-02`,
+  - the same targeted audit kept all four cases converged while preserving
+    runtime gains versus baseline, with `basic_non_stellsym_pressure`
+    improving from `~23.69s` baseline to `~19.36s` optimized.
+- 2026-03-12 current-driven 3D controller split for final non-axisymmetric gaps:
+  - audited the remaining lambda-dominated mismatch on the non-axisymmetric
+    fixed-boundary current-driven bundle and rejected two intermediate ideas:
+    a reduced staged follow-up for deferred 3-stage runs, and a blanket
+    non-scan policy for all current-driven 3D accelerated runs,
+  - kept the useful part of that audit: `lasym=False` current-driven 3D CLI
+    runs now go straight to staged multigrid on the conservative non-scan
+    residual path,
+  - targeted audit in
+    `outputs/nonaxis_quality_subset_20260312_r5/summary.json` now shows:
+    `LandremanPaul2021_QA_lowres` `~4.20e-03`,
+    `LandremanPaul2021_QA_reactorScale_lowres` `~6.42e-04`,
+    `LandremanPaul2021_QH_reactorScale_lowres` `~6.00e-05`,
+  - follow-on audit on `basic_non_stellsym_pressure` showed that the remaining
+    `~3.46e-02` mismatch was largely baseline-level lambda error rather than a
+    unique accelerated-path geometry failure,
+  - updated `vmec_jax/driver.py` so `lasym=True` current-driven 3D staged runs
+    stay fully on the conservative controller; that removes the branch-specific
+    quality regression and brings
+    `outputs/basic_non_stellsym_pressure_audit_20260312_r2/summary.json` back
+    to baseline-level quality (`~2.98e-02`) at essentially neutral warmed
+    runtime (`~22.24s -> 22.31s`),
+  - accelerated fixed-boundary return semantics now treat per-channel final
+    `FTOL` as the acceptance truth, while keeping `fsq_total = fsqr + fsqz +
+    fsql` as an internal early-stop only for accelerated blocks,
+  - direct validation on the new head confirms strict requested-`FTOL`
+    convergence on representative accelerated CLI fixed-boundary cases:
+    `LandremanPaul2021_QA_lowres` (`~7.40e-14`, `~3.21e-14`, `~9.99e-14`
+    against requested `1e-13`),
+    `LandremanPaul2021_QA_reactorScale_lowres`
+    (`~1.47e-15`, `~6.93e-16`, `~8.14e-16` against requested `1e-15`),
+    and `basic_non_stellsym_pressure`
+    (`~9.81e-11`, `~5.46e-11`, `~1.31e-12` against requested `1e-10`),
+  - profiling then showed the next dominant CPU cost was controller-side JAX
+    overhead rather than the fixed-boundary force kernels themselves: the
+    `ptau` sign-change helper was moved to a host NumPy implementation for the
+    non-scan controller, and accelerated `lasym=False` CPU CLI runs now also
+    use host-side signed Fourier update assembly,
+  - targeted reassessment in
+    `outputs/host_updates_benchmark_20260312/summary.json` then improved
+    `LandremanPaul2021_QA_lowres` from a branch-local
+    `~34.83s -> 38.64s` baseline-vs-optimized result to
+    `~34.83s -> 31.17s`, while keeping `~4.20e-03` max relRMS against the
+    bundled VMEC2000 reference; `basic_non_stellsym_pressure` held its
+    baseline-level `~2.98e-02` quality and remained slightly faster
+    (`~9.12s -> 8.95s`),
+  - reran the full warmed bundled fixed-boundary `lasym=False` CPU matrix in
+    `outputs/fixed_lasym_false_matrix_20260312/summary.json`: all 13 cases
+    converged on both paths and the optimized controller was faster on all 13,
+    including the reactor-scale QA/QH cases,
+  - profiled representative `lasym=False` free-boundary
+    `input.cth_like_free_bdy`; the next safe overhead reduction was in
+    `_sample_external_boundary_arrays`, where batching the boundary
+    real-space syntheses cut the total cProfile wall time from about `60.41s`
+    to about `58.21s` while keeping the direct NESTOR regression tests green,
+  - full regression suite on the final split-controller head:
+    `170 passed, 12 skipped`.
+- 2026-03-12 README/runtime refresh and free-boundary nonsingular-kernel caching:
+  - refreshed the README-facing fixed-boundary VMEC2000 comparison on the
+    current branch in
+    `outputs/readme_fixed_runtime_vmec2000_accel_cpu_20260312/summary.json`
+    and regenerated `docs/_static/figures/readme_runtime_compare.png`,
+  - refreshed the top README QA + axisymmetric comparison panels and the
+    `fsq_total` trace on the optimized branch path,
+  - updated `tools/diagnostics/readme_runtime_compare.py` so CPU-only README
+    runs no longer emit empty GPU columns in the generated markdown table,
+  - profiled the remaining `lasym=False` free-boundary hotspot and found that
+    `_vmec_nonsingular_terms_from_bexni` /
+    `_vmec_nonsingular_gsource_from_bexni` were rebuilding basis-only helper
+    tables on every call,
+  - cached those helper tables on the free-boundary basis in
+    `vmec_jax/free_boundary.py`, cutting the representative
+    `input.cth_like_free_bdy` cProfile total further from about `58.21s` to
+    about `32.67s`,
+  - direct warmed CPU benchmark for that same case is now recorded in
+    `outputs/freeb_cth_runtime_20260312/summary.json` at about `11.25s`
+    versus VMEC2000 `1.78s`, with convergence preserved.
+- 2026-03-12 second-derivative batching for free-boundary boundary sampling:
+  - profiled the updated `lasym=False` free-boundary path again and found that
+    `_sample_external_boundary_arrays` still spent a large fraction of time in
+    six separate second-derivative real-space syntheses,
+  - replaced those six scalar syntheses with two stacked batched calls in
+    `vmec_jax/free_boundary.py`,
+  - direct NESTOR reuse/turn-on regression tests stayed green,
+  - representative `input.cth_like_free_bdy` cProfile total improved further
+    from about `32.10s` to about `31.04s`,
+  - direct warmed CPU benchmark for that case improved from about `11.25s` to
+    about `10.41s` in
+    `outputs/freeb_cth_runtime_20260312_r2/summary.json`.
+- 2026-03-12 cached NumPy host synthesis for free-boundary external sampling:
+  - profiled the updated representative `input.cth_like_free_bdy` case again
+    and found the next remaining free-boundary hotspot was still JAX
+    lowering/indexing overhead inside `_sample_external_boundary_arrays`,
+  - replaced the remaining host-only boundary synthesis calls in that helper
+    with a cached NumPy phase-stack path that keeps the same VMEC trig algebra
+    while avoiding repeated JAX lowering for external sampling,
+  - direct NESTOR reuse/turn-on regression tests stayed green,
+  - representative cProfile total improved further from about `31.04s` to
+    about `30.20s`, with `_sample_external_boundary_arrays` itself dropping to
+    about `5.78s`,
+  - direct warmed CPU benchmark for that case improved again to about `9.86s`
+    in `outputs/freeb_cth_runtime_20260312_r4/summary.json`.
+- 2026-03-12 full fixed/free readiness sweep on the experimental branch:
+  - reran the full fixed-boundary bundled matrix against VMEC2000 on the same
+    CPU host in `outputs/readiness_fixed_all_20260312/summary.json`,
+  - fixed-boundary result: all 16 rows converged, but only 2 of the rows
+    (`solovev` and `circular_tokamak_aspect_100`) are faster than VMEC2000 on
+    that same host,
+  - reran the free-boundary matrix with external DIII-D coverage in
+    `outputs/readiness_freeb_all_20260312/summary.json`,
+  - free-boundary result: 4 of 5 rows converged; the remaining shipped
+    holdout is `cth_like_free_bdy_lasym_small`,
+  - the free-boundary DIII-D rows remain far slower than VMEC2000 on CPU
+    (about `4.5x` to `9.4x` slower),
+  - conclusion from the full readiness sweep:
+    branch is still useful and improving, but it is not ready to become the
+    default mode on `main`.
+- 2026-03-12 free-boundary convergence closure and automatic Python policy:
+  - confirmed the shipped `input.cth_like_free_bdy_lasym_small` example did
+    not converge in VMEC2000 either, so replaced it with a convergent
+    `lasym=True` CTH-like free-boundary fixture built from the stable bundled
+    `cth_like_free_bdy` case and a small asymmetric perturbation,
+  - ordinary Python `run_fixed_boundary(...)` now uses the same automatic
+    non-autodiff solver policy as the CLI,
+  - axisymmetric free-boundary boundary sampling now collapses to `nv=1`
+    host-side synthesis, and CPU host update assembly is enabled for
+    performance-mode non-scan `lasym=False` runs,
+  - reran the full fixed/free readiness matrix on the latest branch heads:
+    `outputs/readiness_fixed_all_20260312_r3/summary.json` and
+    `outputs/readiness_freeb_all_20260312_r2/summary.json`,
+  - latest readiness result: all 21 shipped rows converge,
+  - `input.DIII-D_lasym_false` improved from about `173.82s` warmed to about
+    `121.93s` warmed on the same CPU host,
+  - updated the README/runtime figure to sort rows by best VMEC2000-relative
+    speedup first.
+- 2026-03-13 final pre-PR performance pass:
+  - broadened light-history mode to all non-verbose performance-oriented
+    staged runs so ordinary optimized solves keep less per-iteration
+    bookkeeping,
+  - made free-boundary `scalpot` axis diagnostics lazy, avoiding extra axis
+    syntheses unless `VMEC_JAX_DUMP_SCALPOT` is explicitly enabled,
+  - added optional cached dense LU solves in the VMEC-like free-boundary path
+    using SciPy when available, with a safe NumPy fallback,
+  - added NumPy/JAX regression coverage for cached axisymmetric R/Z
+    preconditioner application parity,
+  - representative spot checks on the new head remained converged:
+    `input.cth_like_free_bdy` about `8.00s` warmed and
+    `input.basic_non_stellsym_pressure` about `9.13s` warmed,
+  - targeted regression tests and the fast Sphinx build passed,
+  - full `pytest -q` was started again but entered the same long CPU-bound
+    tail seen previously on this machine, so the final validation signal for
+    this pass is the targeted test set plus the representative runtime and
+    convergence checks above.
+- 2026-03-13 extra free-boundary cache cleanup:
+  - cached static host-side boundary sampling setup in `free_boundary.py`
+    (second-derivative mode factors, sampled `phi` grids, even-`m` masks,
+    and VMEC `wint` weights) so the external-step loop rebuilds less
+    per-vacuum-step metadata,
+  - cached optional SciPy LU helpers at module import time instead of looking
+    them up during every dense free-boundary solve,
+  - representative `input.cth_like_free_bdy` runtime improved again from
+    about `8.00s` warmed to about `7.88s` warmed on the same CPU host, with
+    unchanged final residuals,
+  - targeted free-boundary regression tests and the fast Sphinx build passed.
+- 2026-03-13 fresh validation/figure pass:
+  - a fresh broad pytest sweep exposed two real issues on the new head:
+    a free-boundary regression from the cache-cleanup pass and a recursive
+    re-entry bug in the automatic CLI fixed-boundary finisher during staged
+    follow-up runs,
+  - fixed the free-boundary regressions by restoring full toroidal-grid
+    `bsqvac` coupling for axisymmetric sampling, narrowing light-history mode
+    so free-boundary diagnostics are preserved, and keeping prepared mgrid
+    metadata `kp` capped to the effective `2*nzeta` working grid,
+  - fixed the CLI recursion by adding an internal
+    `_auto_cli_fixed_boundary_mode` guard so recursive staged follow-up calls
+    do not re-trigger automatic CLI optimization mode,
+  - reran `tests/test_free_boundary_wp0.py` successfully (`31 passed`),
+  - regenerated the README/public figures for the axisymmetric comparison,
+    QA comparison, and `readme_fsq_trace.png`, and refreshed the runtime chart
+    from the checked-in benchmark summaries,
+  - fast Sphinx build passed after the figure refresh,
+  - a truly fresh completed all-files pytest sweep is still limited by a very
+    slow long-tail in the driver/wout coverage on this machine.
+- 2026-03-13 deep profiling / bottleneck pass:
+  - fixed the remaining long-tail test blocker and reran the full suite cleanly:
+    `pytest -q` now completes on the branch (`181 passed, 12 skipped`), and the
+    fast Sphinx build also passes on the same head,
+  - profiled a representative accelerated fixed-boundary 3D case
+    (`input.LandremanPaul2021_QA_reactorScale_lowres`) and confirmed that the
+    next fixed-boundary performance ceiling is in the compiled bcovar/update
+    kernels rather than Python control flow; the dumped bcovar HLO still shows
+    a heavy gather/scatter footprint,
+  - profiled representative free-boundary cases with `VMEC_JAX_TIMING=1`,
+    cProfile, and HLO inspection; the main remaining host-side bottlenecks were
+    `_sample_external_boundary_arrays` and the full-profile
+    `currents_from_bcovar` path used only to recover edge `ctor`,
+  - added pure-NumPy host parity conversions in `vmec_parity.py` for the
+    free-boundary external-sampling path and switched
+    `free_boundary.py:_sample_external_boundary_arrays` to use them,
+  - added `vmec_lforbal.plascur_edge_from_bcovar` and used it in
+    `solve.py` so NESTOR no longer computes full `buco/bvco/jcur*` profiles
+    when it only needs the edge `ctor` scalar,
+  - the representative warmed 200-iteration `input.cth_like_free_bdy` runtime
+    improved from about `8.00s` to about `3.45s` on the same host after these
+    profiling-driven changes, while targeted free-boundary regression tests and
+    the full suite stayed green,
+  - the next best free-boundary targets are now the update/preconditioner side
+    (`_apply_vmec_scale_m1_precond_rhs`, `_enforce_fixed_boundary_and_axis`,
+    and the remaining free-boundary update block), not the old host-side
+    boundary sampling path.
+- 2026-03-13 scatter-heavy fixed-boundary hot-path cleanup:
+  - replaced the remaining hot-path scatter-style update helpers in
+    `solve.py` with concatenation-based equivalents for:
+    zeroing the lambda gauge coefficient column, replacing/scaling a single
+    `(m,:)` mode slice, and enforcing axis/edge row constraints,
+  - added direct regression coverage in `tests/test_solve_hotpaths.py` to lock
+    the new helpers to the old semantics on synthetic arrays and a real
+    circular tokamak mode layout,
+  - reran the full local validation gates successfully on the new head:
+    `pytest -q` completed (`186 passed, 12 skipped`) and the fast Sphinx build
+    passed,
+  - representative warmed runtime checks improved modestly but consistently on
+    the same host:
+    `input.LandremanPaul2021_QA_reactorScale_lowres` about `12.00s -> 11.04s`,
+    `input.cth_like_free_bdy` about `3.11s -> 3.07s`,
+    and `input.DIII-D_lasym_false` (`max_iter=20`) about `0.264s -> 0.262s`,
+  - this leaves the next optimization ceiling where the profiler already
+    pointed: compiled `bcovar`/update kernels for fixed-boundary 3D and the
+    remaining free-boundary update/preconditioner block.
+- 2026-03-13 `lasym=False` update-path cleanup:
+  - removed wasted asymmetric signed-coefficient conversions from several
+    fixed/free-boundary update paths in `solve.py`; for `lasym=False` runs we
+    now skip the `Rsin/Zcos/Lcos` conversion work entirely instead of computing
+    those updates and zeroing them afterward,
+  - reran the full local validation gates successfully on the new head:
+    `pytest -q` completed (`186 passed, 12 skipped`) and the fast Sphinx build
+    passed,
+  - representative warmed runtime checks on the same host moved in the right
+    direction for the intended symmetric workloads:
+    `input.cth_like_free_bdy` about `3.07s -> 2.91s`,
+    `input.LandremanPaul2021_QA_reactorScale_lowres` stayed in the same
+    `~11.2s` range,
+    and the `lasym=True` smoke
+    `input.basic_non_stellsym_pressure` remained stable at about `1.06s`,
+  - this keeps the optimization targeted: better `lasym=False` throughput
+    without changing the asymmetric path that still needs accuracy-first
+    handling.
+- 2026-03-13 final readiness + artifact refresh:
+  - reran the full local validation gates successfully on the clean head:
+    `pytest -q` completed (`186 passed, 12 skipped`) and the fast Sphinx build
+    passed,
+  - regenerated the fresh fixed-boundary VMEC2000-vs-optimized CPU runtime
+    matrix in `outputs/fixed_runtime_vmec2000_accel_cpu_warm_20260313/summary.json`,
+    covering all 16 bundled fixed-boundary examples on the optimized
+    non-autodiff path,
+  - regenerated the fresh free-boundary VMEC2000-vs-default CPU runtime matrix
+    in `outputs/free_runtime_vmec2000_cpu_warm_20260313/summary.json`,
+    covering the 5 shipped free-boundary rows including the external DIII-D
+    references,
+  - reran the fixed-boundary readiness / quality matrix on the same head in
+    `outputs/readiness_fixed_all_20260313/summary.json`; all 16 bundled
+    fixed-boundary cases converged, the optimized path was faster on 13,
+    effectively neutral on 1, and slower on 2 while still satisfying the
+    requested final-stage `FTOL`,
+  - confirmed that the experimental accelerated flag is still not the right
+    free-boundary default path: `outputs/readiness_freeb_all_20260313/summary.json`
+    shows that free-boundary acceleration remains a separate follow-on effort,
+    so the branch continues to present the robust default free-boundary path
+    publicly,
+  - regenerated the top README/docs figures on the same head:
+    `axisym_compare_*`, `qa_compare_*`, `readme_fsq_trace.png`, and
+    `docs/_static/figures/readme_runtime_compare.png`,
+  - refreshed `README.md`, `docs/performance.rst`, and
+    `docs/accelerated_merge_readiness.rst` so the PR now states the final
+    branch scope clearly:
+    optimized non-autodiff fixed-boundary becomes the default user path on
+    `main`, while free-boundary stays on the current robust controller and the
+    parity / implicit-differentiation routes remain available.

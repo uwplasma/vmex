@@ -57,7 +57,6 @@ def test_step9_implicit_fixed_boundary_grad_matches_finite_difference():
             max_iter=18,
             step_size=1.0,
             history_size=8,
-            grad_tol=1e-10,
             preconditioner="mode_diag+radial_tridi",
             precond_exponent=1.0,
             precond_radial_alpha=0.5,

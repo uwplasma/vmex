@@ -415,11 +415,11 @@ def test_prepare_mgrid_for_config_rejects_nfp_mismatch(tmp_path: Path):
         ds.createDimension("external_coils", 1)
         ds.createDimension("rad", 2)
         ds.createDimension("zee", 2)
-        ds.createDimension("phi", 4)
+        ds.createDimension("phi", 8)
         for name, value in (
             ("ir", 2),
             ("jz", 2),
-            ("kp", 4),
+            ("kp", 8),
             ("nfp", 7),
             ("nextcur", 1),
         ):
@@ -501,11 +501,11 @@ def test_run_fixed_boundary_initial_guess_carries_mgrid_metadata(tmp_path: Path)
         ds.createDimension("external_coils", 2)
         ds.createDimension("rad", 2)
         ds.createDimension("zee", 2)
-        ds.createDimension("phi", 4)
+        ds.createDimension("phi", 8)
         for name, value in (
             ("ir", 2),
             ("jz", 2),
-            ("kp", 4),
+            ("kp", 8),
             ("nfp", 1),
             ("nextcur", 2),
         ):
@@ -1311,6 +1311,66 @@ def test_freeb_axis_current_sampling_changes_boundary_field(tmp_path: Path):
         + float(d1.get("bz_axis_rms", 0.0))
     )
     assert axis_rms_sum > 0.0
+
+
+def test_axisymmetric_freeb_sampling_collapses_toroidal_grid(tmp_path: Path):
+    netCDF4 = pytest.importorskip("netCDF4", reason="netCDF4 required for mgrid loader test")
+
+    mg = tmp_path / "mgrid_fb_axisym_nv1.nc"
+    with netCDF4.Dataset(str(mg), mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createDimension("stringsize", 8)
+        ds.createDimension("external_coil_groups", 1)
+        ds.createDimension("dim_00001", 1)
+        ds.createDimension("external_coils", 1)
+        ds.createDimension("rad", 2)
+        ds.createDimension("zee", 2)
+        ds.createDimension("phi", 8)
+        for name, value in (
+            ("ir", 2),
+            ("jz", 2),
+            ("kp", 8),
+            ("nfp", 1),
+            ("nextcur", 1),
+        ):
+            ds.createVariable(name, "i4", ()).assignValue(value)
+        for name, value in (("rmin", 1.0), ("rmax", 12.0), ("zmin", -3.0), ("zmax", 3.0)):
+            ds.createVariable(name, "f8", ()).assignValue(value)
+        ds.createVariable("br_001", "f8", ("phi", "zee", "rad"))[:] = 0.0
+        ds.createVariable("bp_001", "f8", ("phi", "zee", "rad"))[:] = 0.0
+        ds.createVariable("bz_001", "f8", ("phi", "zee", "rad"))[:] = 0.0
+
+    inpath = tmp_path / "input.fb_axisym_nv1"
+    inpath.write_text(
+        f"""
+&INDATA
+  NFP = 1
+  MPOL = 5
+  NTOR = 0
+  NS = 9
+  NZETA = 8
+  NTHETA = 10
+  LASYM = F
+  LFREEB = T
+  MGRID_FILE = '{mg}'
+  NVACSKIP = 2
+  RBC(0,0) = 6.0
+  ZBS(1,0) = 2.0
+/
+"""
+    )
+
+    run = run_fixed_boundary(
+        inpath,
+        solver="vmec2000_iter",
+        max_iter=1,
+        multigrid=False,
+        verbose=False,
+    )
+    d = sample_external_vacuum_diagnostics(state=run.result.state, static=run.static, plascur=0.0)
+
+    assert bool(d.get("available", False)) is True
+    expected_ntheta3 = int(np.asarray(run.static.trig_vmec.cosmu).shape[0])
+    assert int(d.get("n_samples", -1)) == expected_ntheta3
 
 
 def test_freeb_turnon_restart_sets_iter1_and_reuse_step(tmp_path: Path, monkeypatch):

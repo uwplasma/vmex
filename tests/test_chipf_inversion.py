@@ -14,7 +14,7 @@ from vmec_jax.wout import read_wout
     "wout_rel",
     [
         "examples/data/wout_circular_tokamak_reference.nc",
-        "examples/data/wout_li383_low_res_reference.nc",
+        "examples/data/wout_LandremanPaul2021_QA_reactorScale_lowres_reference.nc",
     ],
 )
 def test_chips_from_chipf_matches_iotas_phips_when_ncurr0(wout_rel: str):

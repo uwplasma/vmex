@@ -16,12 +16,17 @@ from vmec_jax.static import build_static
 from vmec_jax.wout import read_wout, state_from_wout
 
 
-def test_step5_solve_lambda_decreases_wb_toward_wout(load_case_li383_low_res):
+def test_step5_solve_lambda_decreases_wb_toward_wout(load_case_qa_reactorscale_lowres):
     pytest.importorskip("netCDF4")
 
-    cfg, _indata, _static_unused, _bdy, _st0 = load_case_li383_low_res
+    cfg, _indata, _static_unused, _bdy, _st0 = load_case_qa_reactorscale_lowres
 
-    wout_path = Path(__file__).resolve().parents[1] / "examples" / "data" / "wout_li383_low_res_reference.nc"
+    wout_path = (
+        Path(__file__).resolve().parents[1]
+        / "examples"
+        / "data"
+        / "wout_LandremanPaul2021_QA_reactorScale_lowres_reference.nc"
+    )
     wout = read_wout(wout_path)
     st_ref = state_from_wout(wout)
     ntheta = max(int(cfg.ntheta), 4 * int(wout.mpol) + 16)

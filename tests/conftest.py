@@ -33,8 +33,8 @@ def require_slow() -> None:
 
 
 @pytest.fixture(scope="session")
-def load_case_li383_low_res():
-    """Load the bundled li383 low-res symmetric (lasym=False) input used in examples."""
+def load_case_qa_reactorscale_lowres():
+    """Load the bundled QA reactor-scale low-res input used in examples."""
     from vmec_jax._compat import has_jax, enable_x64
     from vmec_jax.config import load_config
     from vmec_jax.static import build_static
@@ -44,7 +44,7 @@ def load_case_li383_low_res():
     if has_jax():
         enable_x64(True)
 
-    inpath = _ROOT / "examples" / "data" / "input.li383_low_res"
+    inpath = _ROOT / "examples" / "data" / "input.LandremanPaul2021_QA_reactorScale_lowres"
     cfg, indata = load_config(str(inpath))
     static = build_static(cfg)
     bdy = boundary_from_indata(indata, static.modes)

@@ -30,6 +30,17 @@ silence the iteration table, and ``--outdir`` or ``--output`` to control where
 the ``wout_*.nc`` file is written. If you only want a short debug run, pass
 ``--max-iter`` and ``--no-multigrid`` (single grid).
 
+If you want to compare the conservative parity track against the optimized
+fixed-boundary CLI-style controller from Python, run::
+
+  python examples/fixed_boundary_driver_tracks.py \
+    examples/data/input.circular_tokamak \
+    --quiet --json
+
+That example writes two ``wout`` files (parity and optimized) unless you pass
+``--no-write-wout``, and it prints a short runtime / ``fsq_total`` comparison
+table at the end.
+
 Kernel parity on reference states (solver-free)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

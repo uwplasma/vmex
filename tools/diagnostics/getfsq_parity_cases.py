@@ -57,8 +57,8 @@ def main() -> None:
     if args.all:
         # Keep this list small: this is a kernel parity script, not a benchmark.
         cases += [
-            "li383_low_res",
-            "n3are_R7.75B5.7_lowres",
+            "LandremanPaul2021_QA_reactorScale_lowres",
+            "LandremanPaul2021_QH_reactorScale_lowres",
         ]
 
     print("[vmec_jax] getfsq parity (reference wout states)")

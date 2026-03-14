@@ -8,7 +8,7 @@ import pytest
 from vmec_jax.config import load_config
 from vmec_jax.static import build_static
 from vmec_jax.vmec_forces import vmec_forces_rz_from_wout
-from vmec_jax.vmec_lforbal import _pwint_from_trig, equif_from_bcovar
+from vmec_jax.vmec_lforbal import _pwint_from_trig, equif_from_bcovar, plascur_edge_from_bcovar
 from vmec_jax.vmec_tomnsp import vmec_angle_grid, vmec_trig_tables
 from vmec_jax.wout import read_wout, state_from_wout
 
@@ -103,3 +103,32 @@ def test_equif_matches_eqfor_normalization(input_rel: str, wout_rel: str):
         eq_norm[-1] = 2.0 * eq_norm[-2] - eq_norm[-3]
 
     np.testing.assert_allclose(eq_norm, np.asarray(wout.equif), atol=5e-10, rtol=1e-8)
+
+
+def test_plascur_edge_matches_full_buco_path():
+    pytest.importorskip("netCDF4")
+    root = Path(__file__).resolve().parents[1]
+    input_path = root / "examples/data/input.circular_tokamak"
+    wout_path = root / "examples/data/wout_circular_tokamak_reference.nc"
+
+    cfg, indata = load_config(str(input_path))
+    wout = read_wout(wout_path)
+    grid = vmec_angle_grid(ntheta=int(cfg.ntheta), nzeta=int(cfg.nzeta), nfp=int(wout.nfp), lasym=bool(wout.lasym))
+    static = build_static(cfg, grid=grid)
+    trig = vmec_trig_tables(
+        ntheta=int(cfg.ntheta),
+        nzeta=int(cfg.nzeta),
+        nfp=int(wout.nfp),
+        mmax=int(wout.mpol) - 1,
+        nmax=int(wout.ntor),
+        lasym=bool(wout.lasym),
+    )
+    st = state_from_wout(wout)
+    k = vmec_forces_rz_from_wout(state=st, static=static, wout=wout, indata=indata)
+
+    bsubu = np.asarray(k.bc.bsubu, dtype=float)
+    pwint = np.asarray(_pwint_from_trig(trig, nzeta=int(bsubu.shape[2]), dtype=bsubu.dtype), dtype=float)
+    buco_edge = np.sum(bsubu[-2:] * pwint[None, :, :], axis=(1, 2))
+    ctor_full = -float(wout.signgs) * (2.0 * np.pi) * (1.5 * buco_edge[-1] - 0.5 * buco_edge[-2])
+    ctor_fast = float(np.asarray(plascur_edge_from_bcovar(bc=k.bc, trig=trig, wout=wout, s=static.s)))
+    np.testing.assert_allclose(ctor_fast, ctor_full, rtol=1e-12, atol=1e-12)

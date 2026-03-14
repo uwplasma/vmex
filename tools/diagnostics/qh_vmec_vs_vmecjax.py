@@ -7,7 +7,9 @@ This script:
    surfaces), 3D surface, |B| on LCFS, and iota profiles.
 
 The vmec_jax side reflects the *current* solver capability unless
-``--use-wout-state`` is enabled (plotting parity path).
+``--use-wout-state`` is enabled. For README-quality optimized comparisons, use
+``--solve --solver vmec2000_iter --solver-mode accelerated
+--cli-fixed-boundary-mode``.
 """
 
 from __future__ import annotations
@@ -149,9 +151,25 @@ def main() -> None:
     p.add_argument("--jax-title", type=str, default="", help="Override title label for the vmec_jax panels.")
     p.add_argument("--prefix", type=str, default="qh", help="Output filename prefix.")
     p.add_argument("--outdir", type=str, default=str(REPO_ROOT / "docs/_static/figures"))
-    p.add_argument("--max-iter", type=int, default=20)
+    p.add_argument("--max-iter", type=int, default=None)
     p.add_argument("--step-size", type=float, default=None)
-    p.add_argument("--solver", type=str, default="gd", help="gd, lbfgs, vmec_lbfgs, or vmec_gn")
+    p.add_argument(
+        "--solver",
+        type=str,
+        default="vmec2000_iter",
+        help="gd, lbfgs, vmec_lbfgs, vmec_gn, or vmec2000_iter",
+    )
+    p.add_argument(
+        "--solver-mode",
+        type=str,
+        default="accelerated",
+        help="run_fixed_boundary solver_mode to use when --solve is active.",
+    )
+    p.add_argument(
+        "--cli-fixed-boundary-mode",
+        action="store_true",
+        help="Use the optimized CLI-style fixed-boundary controller when solving.",
+    )
     p.add_argument("--solve", action="store_true", help="Run the vmec_jax fixed-boundary solver (slower).")
     p.add_argument("--no-solve", action="store_true", help="Use the initial guess only (fast).")
     p.add_argument("--use-wout-state", action="store_true", help="Use VMEC2000 wout coefficients for vmec_jax state.")
@@ -212,13 +230,16 @@ def main() -> None:
         flux_lamscale = float(np.asarray(lamscale_from_phips(wout.phips, static.s)))
         run = None
     else:
-        run = run_fixed_boundary(
-            Path(args.input),
+        run_kwargs = dict(
             solver=str(args.solver),
-            max_iter=int(args.max_iter),
             step_size=step_size,
             use_initial_guess=use_initial_guess,
+            solver_mode=str(args.solver_mode),
+            cli_fixed_boundary_mode=bool(args.cli_fixed_boundary_mode),
         )
+        if args.max_iter is not None:
+            run_kwargs["max_iter"] = int(args.max_iter)
+        run = run_fixed_boundary(Path(args.input), **run_kwargs)
         state = run.state
         static = run.static
         indata = run.indata

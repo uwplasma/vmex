@@ -32,15 +32,15 @@ summary against bundled VMEC2000 reference ``wout`` files.
    Example output: nested flux-surface cross-sections at ``phi=0`` for the
    bundled ``shaped_tokamak_pressure`` case.
 
-.. figure:: _static/figures/n3are_compare_cross_sections.png
+.. figure:: _static/figures/qh_reactor_compare_cross_sections.png
    :alt: Stellarator cross-sections (VMEC2000 vs vmec_jax)
    :align: center
    :width: 90%
 
    Side-by-side VMEC2000 vs vmec_jax cross-sections for the bundled
-   ``n3are_R7.75B5.7_lowres`` stellarator case.
+   ``LandremanPaul2021_QH_reactorScale_lowres`` stellarator case.
 
-.. figure:: _static/figures/n3are_compare_bmag_surface.png
+.. figure:: _static/figures/qh_reactor_compare_bmag_surface.png
    :alt: Stellarator |B| on LCFS (VMEC2000 vs vmec_jax)
    :align: center
    :width: 90%

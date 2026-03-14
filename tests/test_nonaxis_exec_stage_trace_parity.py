@@ -24,8 +24,7 @@ def test_nonaxis_stage_trace_parity_first_iters():
     simsopt_root = repo_root.parent / "simsopt" / "tests" / "test_files"
     cases = [
         (repo_root / "examples" / "data" / "input.nfp4_QH_warm_start", 1),
-        (simsopt_root / "input.li383_low_res", 1),
-        (simsopt_root / "input.n3are_R7.75B5.7_lowres", 1),
+        (simsopt_root / "input.LandremanPaul2021_QA_reactorScale_lowres", 5),
         (simsopt_root / "input.LandremanPaul2021_QA_lowres", 10),
         (simsopt_root / "input.LandremanPaul2021_QH_reactorScale_lowres", 10),
     ]

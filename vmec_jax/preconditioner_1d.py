@@ -87,9 +87,12 @@ def lambda_preconditioner(
     damping_factor: float = 2.0,
     return_faclam: bool = False,
     return_debug: bool = False,
+    r0scale: float | None = None,
 ) -> np.ndarray:
     """Compute VMEC lambda preconditioner (n>=0 storage)."""
-    r0scale = float(getattr(trig, "r0scale", 1.0)) if trig is not None else 1.0
+    if r0scale is None:
+        r0scale = float(getattr(trig, "r0scale", 1.0)) if trig is not None else 1.0
+    r0scale = float(r0scale)
     guu = np.asarray(bc.guu, dtype=float)
     guv = np.asarray(bc.guv, dtype=float)
     gvv = np.asarray(bc.gvv, dtype=float)
@@ -487,6 +490,57 @@ def rz_preconditioner(
             )
             fzsc_u[:jmax, m, n] = _tridiagonal_solve(
                 az[:, m, n], dz[:, m, n], bz[:, m, n], fzsc_u[:jmax, m, n], jmin_mn, jmax
+            )
+
+    return TomnspsRZL(
+        frcc=frcc_u,
+        frss=frzl_in.frss,
+        fzsc=fzsc_u,
+        fzcs=frzl_in.fzcs,
+        flsc=frzl_in.flsc,
+        flcs=frzl_in.flcs,
+        frsc=getattr(frzl_in, "frsc", None),
+        frcs=getattr(frzl_in, "frcs", None),
+        fzcc=getattr(frzl_in, "fzcc", None),
+        fzss=getattr(frzl_in, "fzss", None),
+        flcc=getattr(frzl_in, "flcc", None),
+        flss=getattr(frzl_in, "flss", None),
+    )
+
+
+def rz_preconditioner_apply(
+    *,
+    frzl_in: TomnspsRZL,
+    mats: dict[str, np.ndarray],
+    jmax: int,
+    cfg,
+) -> TomnspsRZL:
+    """Apply cached R/Z radial preconditioner matrices (NumPy, axisymmetric)."""
+    if bool(cfg.lthreed) or bool(cfg.lasym):
+        return frzl_in
+
+    ar = np.asarray(mats["ar"], dtype=float)
+    br = np.asarray(mats["br"], dtype=float)
+    dr = np.asarray(mats["dr"], dtype=float)
+    az = np.asarray(mats["az"], dtype=float)
+    bz = np.asarray(mats["bz"], dtype=float)
+    dz = np.asarray(mats["dz"], dtype=float)
+
+    mpol = int(cfg.mpol)
+    nrange = int(cfg.ntor) + 1
+    jmax = min(max(0, int(jmax)), int(ar.shape[0]))
+
+    frcc_u = np.array(frzl_in.frcc, dtype=float, copy=True)
+    fzsc_u = np.array(frzl_in.fzsc, dtype=float, copy=True)
+
+    for m in range(mpol):
+        jmin_m = 1 if m > 0 else 0
+        for n in range(nrange):
+            frcc_u[:jmax, m, n] = _tridiagonal_solve(
+                ar[:, m, n], dr[:, m, n], br[:, m, n], frcc_u[:jmax, m, n], jmin_m, jmax
+            )
+            fzsc_u[:jmax, m, n] = _tridiagonal_solve(
+                az[:, m, n], dz[:, m, n], bz[:, m, n], fzsc_u[:jmax, m, n], jmin_m, jmax
             )
 
     return TomnspsRZL(

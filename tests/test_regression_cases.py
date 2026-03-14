@@ -24,9 +24,9 @@ _CASES = [
         "examples/data/wout_circular_tokamak_reference.nc",
     ),
     (
-        "li383_low_res",
-        "examples/data/input.li383_low_res",
-        "examples/data/wout_li383_low_res_reference.nc",
+        "LandremanPaul2021_QH_reactorScale_lowres",
+        "examples/data/input.LandremanPaul2021_QH_reactorScale_lowres",
+        "examples/data/wout_LandremanPaul2021_QH_reactorScale_lowres_reference.nc",
     ),
 ]
 

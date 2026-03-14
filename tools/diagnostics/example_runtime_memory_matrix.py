@@ -56,6 +56,7 @@ def _child_env(*, jax_platforms: str | None) -> dict[str, str]:
     env = dict(os.environ)
     env.setdefault("VMEC_JAX_SCAN_PRINT", "0")
     env.setdefault("PYTHONUNBUFFERED", "1")
+    env.setdefault("VMEC_JAX_BENCH_WARM_RUNS", "0")
     if jax_platforms:
         env["JAX_PLATFORMS"] = str(jax_platforms)
     return env
@@ -159,7 +160,15 @@ def _json_tail(text: str) -> dict[str, Any] | None:
     return None
 
 
-def _run_vmec_jax_case(*, case: CaseSpec, timeout_s: float, env: dict[str, str], runner_label: str) -> dict[str, Any]:
+def _run_vmec_jax_case(
+    *,
+    case: CaseSpec,
+    timeout_s: float,
+    env: dict[str, str],
+    runner_label: str,
+    solver_mode: str,
+    cli_fixed_boundary_mode: bool,
+) -> dict[str, Any]:
     code = r"""
 import json
 import sys
@@ -169,26 +178,56 @@ import jax
 from vmec_jax.api import run_fixed_boundary
 
 input_path = Path(sys.argv[1])
+solver_mode = str(sys.argv[2])
+cli_fixed_boundary_mode = bool(int(sys.argv[3]))
+warm_runs = int(sys.argv[4])
 t0 = time.perf_counter()
-run = run_fixed_boundary(input_path, verbose=False)
+run = run_fixed_boundary(
+    input_path,
+    verbose=False,
+    solver_mode=solver_mode,
+    cli_fixed_boundary_mode=bool(cli_fixed_boundary_mode),
+)
 dt = time.perf_counter() - t0
+warm_times = []
+for _ in range(max(0, warm_runs)):
+    t1 = time.perf_counter()
+    run = run_fixed_boundary(
+        input_path,
+        verbose=False,
+        solver_mode=solver_mode,
+        cli_fixed_boundary_mode=bool(cli_fixed_boundary_mode),
+    )
+    warm_times.append(time.perf_counter() - t1)
 res = getattr(run, "result", None)
 diag = {} if res is None else dict(getattr(res, "diagnostics", {}) or {})
 payload = {
     "backend": "vmec_jax",
     "runtime_s": float(dt),
+    "runtime_cold_s": float(dt),
+    "runtime_warm_s": (None if not warm_times else float(sum(warm_times) / len(warm_times))),
     "ok": bool(res is not None),
     "n_iter": -1 if res is None else int(getattr(res, "n_iter", -1)),
     "converged": bool(diag.get("converged", False)),
     "use_scan": bool(diag.get("use_scan", False)),
     "free_boundary": bool(diag.get("free_boundary", False)),
+    "solver_mode": solver_mode,
+    "cli_fixed_boundary_mode": bool(cli_fixed_boundary_mode),
     "platform": str(jax.default_backend()),
     "device_kind": str(jax.devices()[0].device_kind) if jax.devices() else "unknown",
 }
 print(json.dumps(payload))
 """
     out = _run_timed_subprocess(
-        cmd=[sys.executable, "-c", code, str(case.input_path)],
+        cmd=[
+            sys.executable,
+            "-c",
+            code,
+            str(case.input_path),
+            str(solver_mode),
+            "1" if bool(cli_fixed_boundary_mode) else "0",
+            str(int(env.get("VMEC_JAX_BENCH_WARM_RUNS", "0"))),
+        ],
         cwd=REPO_ROOT,
         timeout_s=float(timeout_s),
         env=env,
@@ -209,10 +248,15 @@ print(json.dumps(payload))
     }
     if payload is not None:
         rec["runtime_s"] = float(payload.get("runtime_s", out["time_real_s"]))
+        rec["runtime_cold_s"] = float(payload.get("runtime_cold_s", rec["runtime_s"]))
+        if payload.get("runtime_warm_s", None) is not None:
+            rec["runtime_warm_s"] = float(payload["runtime_warm_s"])
         rec["ok"] = bool(payload.get("ok", False)) and (int(out["returncode"]) == 0)
         rec["n_iter"] = int(payload.get("n_iter", -1))
         rec["converged"] = bool(payload.get("converged", False))
         rec["use_scan"] = bool(payload.get("use_scan", False))
+        rec["solver_mode"] = str(payload.get("solver_mode", solver_mode))
+        rec["cli_fixed_boundary_mode"] = bool(payload.get("cli_fixed_boundary_mode", cli_fixed_boundary_mode))
         rec["platform"] = str(payload.get("platform", "unknown"))
         rec["device_kind"] = str(payload.get("device_kind", "unknown"))
     else:
@@ -339,7 +383,14 @@ def _case_to_json(case: CaseSpec) -> dict[str, Any]:
 def _case_row(case: CaseSpec, results_by_case: dict[str, dict[str, dict[str, Any]]]) -> str:
     vmec_jax = results_by_case.get(case.id, {}).get("vmec_jax")
     vmec2000 = results_by_case.get(case.id, {}).get("vmec2000")
-    rt_jax = None if vmec_jax is None else float(vmec_jax.get("runtime_s", vmec_jax.get("time_real_s", float("nan"))))
+    rt_jax = None
+    if vmec_jax is not None:
+        rt_jax = float(
+            vmec_jax.get(
+                "runtime_warm_s",
+                vmec_jax.get("runtime_s", vmec_jax.get("time_real_s", float("nan"))),
+            )
+        )
     rt_vmec = None if vmec2000 is None else float(vmec2000.get("runtime_s", vmec2000.get("time_real_s", float("nan"))))
     ratio = None
     if rt_jax is not None and rt_vmec is not None and rt_vmec > 0.0:
@@ -396,6 +447,23 @@ def main() -> int:
         help="Free-form label stored in vmec_jax records (for example 'cpu' or 'gpu').",
     )
     p.add_argument(
+        "--solver-mode",
+        type=str,
+        default="default",
+        help="Solver mode passed to run_fixed_boundary (for example 'default' or 'accelerated').",
+    )
+    p.add_argument(
+        "--cli-fixed-boundary-mode",
+        action="store_true",
+        help="Enable cli_fixed_boundary_mode for vmec_jax runs.",
+    )
+    p.add_argument(
+        "--warm-runs",
+        type=int,
+        default=0,
+        help="Additional warmed vmec_jax runs to average inside the child process.",
+    )
+    p.add_argument(
         "--outdir",
         type=Path,
         default=REPO_ROOT / "outputs" / f"example_runtime_memory_matrix_{time.strftime('%Y%m%d_%H%M%S')}",
@@ -418,6 +486,7 @@ def main() -> int:
     run_vmec_jax = args.backend in ("both", "vmec_jax")
     run_vmec2000 = args.backend in ("both", "vmec2000")
     child_env = _child_env(jax_platforms=args.jax_platforms.strip() or None)
+    child_env["VMEC_JAX_BENCH_WARM_RUNS"] = str(max(0, int(args.warm_runs)))
     vmec_exec = None if args.vmec_exec is None else Path(args.vmec_exec).expanduser().resolve()
     if run_vmec2000 and (vmec_exec is None or not vmec_exec.exists()):
         raise SystemExit("VMEC2000 executable not found. Use --vmec-exec.")
@@ -438,6 +507,8 @@ def main() -> int:
                 timeout_s=float(args.timeout_s),
                 env=child_env,
                 runner_label=str(args.runner_label),
+                solver_mode=str(args.solver_mode),
+                cli_fixed_boundary_mode=bool(args.cli_fixed_boundary_mode),
             )
             results.append(rec)
             results_by_case[case.id]["vmec_jax"] = rec
@@ -466,6 +537,9 @@ def main() -> int:
         "results": results,
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "runner_label": str(args.runner_label),
+        "solver_mode": str(args.solver_mode),
+        "cli_fixed_boundary_mode": bool(args.cli_fixed_boundary_mode),
+        "warm_runs": int(args.warm_runs),
         "jax_platforms": str(args.jax_platforms),
     }
     summary_path = outdir / "summary.json"

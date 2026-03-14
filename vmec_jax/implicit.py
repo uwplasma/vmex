@@ -123,7 +123,7 @@ def solve_lambda_state_implicit(
     sqrtg: Any | None = None,
     max_iter: int = 60,
     step_size: float = 0.05,
-    grad_tol: float = 1e-10,
+    grad_tol: float | None = None,
     bt_factor: float = 0.5,
     max_backtracks: int = 12,
     implicit: ImplicitLambdaOptions | None = None,
@@ -199,7 +199,7 @@ def solve_lambda_state_implicit(
             sqrtg=sqrtg_use,
             max_iter=int(max_iter),
             step_size=float(step_size),
-            grad_tol=float(grad_tol),
+            grad_tol=None if grad_tol is None else float(grad_tol),
             bt_factor=float(bt_factor),
             max_backtracks=int(max_backtracks),
         )
@@ -280,7 +280,7 @@ def solve_fixed_boundary_state_implicit(
     max_iter: int = 25,
     step_size: float = 5e-3,
     history_size: int = 10,
-    grad_tol: float = 1e-10,
+    grad_tol: float | None = None,
     max_backtracks: int = 12,
     bt_factor: float = 0.5,
     preconditioner: str = "none",
@@ -398,7 +398,7 @@ def solve_fixed_boundary_state_implicit(
                 jacobian_penalty=jacobian_penalty,
                 max_iter=int(max_iter),
                 step_size=float(step_size),
-                grad_tol=float(grad_tol),
+                grad_tol=None if grad_tol is None else float(grad_tol),
                 max_backtracks=int(max_backtracks),
                 bt_factor=float(bt_factor),
                 preconditioner=str(preconditioner),
@@ -423,7 +423,7 @@ def solve_fixed_boundary_state_implicit(
                 history_size=int(history_size),
                 max_iter=int(max_iter),
                 step_size=float(step_size),
-                grad_tol=float(grad_tol),
+                grad_tol=None if grad_tol is None else float(grad_tol),
                 max_backtracks=int(max_backtracks),
                 bt_factor=float(bt_factor),
                 preconditioner=str(preconditioner),
@@ -452,7 +452,7 @@ def solve_fixed_boundary_state_implicit(
                     jacobian_penalty=jacobian_penalty,
                     max_iter=max_iter_fb,
                     step_size=step_size_fb,
-                    grad_tol=float(grad_tol),
+                    grad_tol=None if grad_tol is None else float(grad_tol),
                     max_backtracks=int(max_backtracks),
                     bt_factor=float(bt_factor),
                     preconditioner=str(preconditioner),
@@ -464,8 +464,12 @@ def solve_fixed_boundary_state_implicit(
         converged = False
         if grad_hist is not None and len(grad_hist) > 0:
             try:
-                tol_check = float(grad_tol) if implicit_converge_tol is None else float(implicit_converge_tol)
-                converged = bool(float(grad_hist[-1]) < tol_check)
+                if implicit_converge_tol is not None:
+                    tol_check = float(implicit_converge_tol)
+                else:
+                    tol_check = getattr(getattr(res, "diagnostics", {}), "get", lambda *_args, **_kwargs: None)("grad_tol")
+                    tol_check = None if tol_check is None else float(tol_check)
+                converged = bool((tol_check is not None) and (float(grad_hist[-1]) < float(tol_check)))
             except Exception:
                 converged = False
         return res.state, converged

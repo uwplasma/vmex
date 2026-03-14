@@ -43,7 +43,6 @@ def test_step9_implicit_lambda_grad_matches_finite_difference(load_case_circular
             lamscale=lamscale,
             sqrtg=jnp.asarray(g0.sqrtg),
             max_iter=80,
-            grad_tol=1e-10,
         )
         return jnp.mean(st.Lcos**2 + st.Lsin**2)
 

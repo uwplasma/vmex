@@ -230,6 +230,99 @@ def test_rz_precond_cache_reassembles_for_new_jmax():
         )
 
 
+def test_numpy_cached_rz_preconditioner_apply_matches_jax():
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import jnp
+    from vmec_jax.preconditioner_1d import (
+        lambda_preconditioner as lambda_preconditioner_np,
+        rz_preconditioner_apply as rz_preconditioner_apply_np,
+        rz_preconditioner_matrices as rz_preconditioner_matrices_np,
+    )
+    from vmec_jax.preconditioner_1d_jax import (
+        lambda_preconditioner_cached,
+        rz_preconditioner_apply,
+        rz_preconditioner_matrices,
+    )
+    from vmec_jax.vmec_tomnsp import TomnspsRZL
+
+    ns = 6
+    ntheta = 6
+    nzeta = 2
+    ntheta_eff = ntheta // 2 + 1
+    shape = (ns, ntheta_eff, nzeta)
+    base = jnp.arange(np.prod(shape), dtype=jnp.float64).reshape(shape)
+
+    cfg = SimpleNamespace(
+        mpol=4,
+        ntor=1,
+        ntheta=ntheta,
+        nzeta=nzeta,
+        nfp=1,
+        lasym=False,
+        lthreed=False,
+    )
+    bc = SimpleNamespace(
+        guu=jnp.ones(shape, dtype=jnp.float64),
+        guv=jnp.zeros(shape, dtype=jnp.float64),
+        gvv=1.0 + 0.02 * base,
+        bsq=1.0 + 0.01 * base,
+        bsupv=0.7 + 0.005 * base,
+        lamscale=1.0,
+        jac=SimpleNamespace(
+            r12=1.3 + 0.01 * base,
+            tau=2.0 + 0.01 * base,
+            sqrtg=0.9 + 0.01 * base,
+            rs=1.1 + 0.02 * base,
+            zs=0.8 + 0.015 * base,
+            ru12=0.6 + 0.01 * base,
+            zu12=0.4 + 0.01 * base,
+        ),
+    )
+    k = SimpleNamespace(
+        pru_even=0.2 + 0.01 * base,
+        pru_odd=0.3 + 0.01 * base,
+        pzu_even=0.4 + 0.01 * base,
+        pzu_odd=0.5 + 0.01 * base,
+        pr1_odd=0.6 + 0.01 * base,
+        pz1_odd=0.7 + 0.01 * base,
+    )
+    s = jnp.linspace(0.0, 1.0, ns, dtype=jnp.float64)
+    frzl = TomnspsRZL(
+        frcc=0.1 + 0.01 * jnp.arange(ns * cfg.mpol * (cfg.ntor + 1), dtype=jnp.float64).reshape(ns, cfg.mpol, cfg.ntor + 1),
+        frss=None,
+        fzsc=0.2 + 0.01 * jnp.arange(ns * cfg.mpol * (cfg.ntor + 1), dtype=jnp.float64).reshape(ns, cfg.mpol, cfg.ntor + 1),
+        fzcs=None,
+        flsc=0.3 + 0.01 * jnp.arange(ns * cfg.mpol * (cfg.ntor + 1), dtype=jnp.float64).reshape(ns, cfg.mpol, cfg.ntor + 1),
+        flcs=None,
+    )
+
+    mats_np, _jmin_np, jmax_np = rz_preconditioner_matrices_np(
+        bc=bc,
+        k=k,
+        trig=None,
+        s=np.asarray(s),
+        cfg=cfg,
+        jmax_override=ns,
+    )
+    mats_jax, _jmin_jax, jmax_jax = rz_preconditioner_matrices(
+        bc=bc,
+        k=k,
+        trig=None,
+        s=s,
+        cfg=cfg,
+        jmax_override=ns,
+    )
+    out_np = rz_preconditioner_apply_np(frzl_in=frzl, mats=mats_np, jmax=jmax_np, cfg=cfg)
+    out_jax = rz_preconditioner_apply(frzl_in=frzl, mats=mats_jax, jmax=jmax_jax, cfg=cfg)
+    lam_np = lambda_preconditioner_np(bc=bc, trig=None, s=np.asarray(s), cfg=cfg)
+    lam_jax = lambda_preconditioner_cached(bc=bc, trig=None, s=s, cfg=cfg)
+
+    np.testing.assert_allclose(np.asarray(out_np.frcc), np.asarray(out_jax.frcc), rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(np.asarray(out_np.fzsc), np.asarray(out_jax.fzsc), rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(np.asarray(lam_np), np.asarray(lam_jax), rtol=1e-12, atol=1e-12)
+
+
 def test_tcon_from_bcovar_precondn_diag_matches_reference_formula():
     pytest.importorskip("jax")
 

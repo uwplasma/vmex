@@ -167,18 +167,11 @@ drop the edge point to avoid the most cancellation-limited region.
 
    ``LandremanPaul2021_QA_lowres``: vacuum-like case; ``DMerc`` should be ~0.
 
-Profiles: li383_low_res (``jdotb`` is nonzero; parity is meaningful)
---------------------------------------------------------------------
-
-To validate the ``jdotb`` pipeline when the signal is nonzero, we use
-``li383_low_res`` which has a nontrivial current profile. This plot shows the
-VMEC2000 and ``vmec_jax`` ``jdotb`` profiles across the radius.
-
-.. figure:: _static/figures/li383_low_res_jdotb_parity.png
-   :alt: li383_low_res jdotb parity
-   :width: 92%
-
-   ``li383_low_res``: ``jdotb`` parity in a current-driven case.
+For current-driven cases, use the bundled reactor-scale QA/QH examples when a
+nonzero ``jdotb`` profile is needed for targeted parity checks. The small-signal
+QI/QA plots above remain the default documentation figures because they are the
+most stable examples for explaining the cancellation-limited behavior of
+``jdotb`` and Mercier diagnostics.
 
 Implementation Pointers (Source Code)
 -------------------------------------

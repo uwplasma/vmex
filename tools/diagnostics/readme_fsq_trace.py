@@ -1,4 +1,4 @@
-"""Generate README fsq_total traces for axisymmetric and stellarator cases."""
+"""Generate README fsq_total traces for optimized axisymmetric and stellarator cases."""
 
 from __future__ import annotations
 
@@ -44,7 +44,15 @@ def _collect_vmec2000_trace(input_path: Path, *, niter: int, ftol: float, workdi
     return np.asarray(fsq), float(vmec.runtime_s)
 
 
-def _collect_vmec_jax_trace(input_path: Path, *, niter: int, ftol: float, workdir: Path):
+def _collect_vmec_jax_trace(
+    input_path: Path,
+    *,
+    niter: int,
+    ftol: float,
+    workdir: Path,
+    solver_mode: str,
+    cli_fixed_boundary_mode: bool,
+):
     patched = _patch_indata(
         input_path.read_text(),
         updates={
@@ -64,7 +72,9 @@ def _collect_vmec_jax_trace(input_path: Path, *, niter: int, ftol: float, workdi
         multigrid=False,
         multigrid_use_input_niter=False,
         verbose=False,
-        performance_mode=False,
+        solver_mode=str(solver_mode),
+        performance_mode=bool(str(solver_mode) != "parity"),
+        cli_fixed_boundary_mode=bool(cli_fixed_boundary_mode),
     )
     runtime = time.perf_counter() - t0
     fsq = np.asarray(res.result.fsqr2_history) + np.asarray(res.result.fsqz2_history) + np.asarray(
@@ -73,27 +83,16 @@ def _collect_vmec_jax_trace(input_path: Path, *, niter: int, ftol: float, workdi
     return fsq, float(runtime)
 
 
-def _plot_panel(ax, *, fsq_vmec, fsq_jax, title: str, t_vmec: float, t_jax: float):
+def _plot_panel(ax, *, fsq_vmec, fsq_jax, title: str, t_vmec: float, t_jax: float, jax_label: str):
     n = min(fsq_vmec.size, fsq_jax.size)
     it = np.arange(1, n + 1)
     ax.plot(it, fsq_vmec[:n], lw=2.8, linestyle="--", label="VMEC2000", zorder=2)
-    ax.plot(it, fsq_jax[:n], lw=2.8, linestyle="-", label="vmec_jax", zorder=1)
+    ax.plot(it, fsq_jax[:n], lw=2.8, linestyle="-", label=jax_label, zorder=1)
     ax.set_yscale("log")
     ax.set_xlabel("iteration")
     ax.set_ylabel("fsq_total")
-    ax.set_title(title)
+    ax.set_title(f"{title}\nVMEC2000 {t_vmec:.2f}s | {jax_label} {t_jax:.2f}s", fontsize=11)
     ax.grid(alpha=0.3)
-    txt = f"VMEC2000: {t_vmec:.2f}s\nvmec_jax: {t_jax:.2f}s"
-    ax.text(
-        0.98,
-        0.95,
-        txt,
-        transform=ax.transAxes,
-        ha="right",
-        va="top",
-        fontsize=9,
-        bbox=dict(facecolor="white", alpha=0.8, edgecolor="none"),
-    )
 
 
 def main() -> None:
@@ -106,7 +105,7 @@ def main() -> None:
     p.add_argument(
         "--stellarator-input",
         type=str,
-        default=str(Path(__file__).resolve().parents[2] / "examples/data/input.n3are_R7.75B5.7_lowres"),
+        default=str(Path(__file__).resolve().parents[2] / "examples/data/input.LandremanPaul2021_QA_lowres"),
     )
     p.add_argument(
         "--qh-input",
@@ -121,6 +120,21 @@ def main() -> None:
     )
     p.add_argument("--niter", type=int, default=250)
     p.add_argument("--ftol", type=float, default=1e-14)
+    p.add_argument("--solver-mode", type=str, default="accelerated")
+    p.add_argument("--jax-label", type=str, default="vmec_jax optimized")
+    p.add_argument(
+        "--cli-fixed-boundary-mode",
+        dest="cli_fixed_boundary_mode",
+        action="store_true",
+        help="Use the optimized CLI-style fixed-boundary controller for vmec_jax traces.",
+    )
+    p.add_argument(
+        "--no-cli-fixed-boundary-mode",
+        dest="cli_fixed_boundary_mode",
+        action="store_false",
+        help="Disable the CLI-style fixed-boundary controller for vmec_jax traces.",
+    )
+    p.set_defaults(cli_fixed_boundary_mode=True)
     args = p.parse_args()
 
     axisym_input = Path(args.axisym_input).expanduser().resolve()
@@ -139,14 +153,24 @@ def main() -> None:
         axisym_input, niter=int(args.niter), ftol=float(args.ftol), workdir=axisym_work
     )
     fsq_jax_a, t_jax_a = _collect_vmec_jax_trace(
-        axisym_input, niter=int(args.niter), ftol=float(args.ftol), workdir=axisym_work
+        axisym_input,
+        niter=int(args.niter),
+        ftol=float(args.ftol),
+        workdir=axisym_work,
+        solver_mode=str(args.solver_mode),
+        cli_fixed_boundary_mode=bool(args.cli_fixed_boundary_mode),
     )
 
     fsq_vmec_s, t_vmec_s = _collect_vmec2000_trace(
         stellarator_input, niter=int(args.niter), ftol=float(args.ftol), workdir=st_work
     )
     fsq_jax_s, t_jax_s = _collect_vmec_jax_trace(
-        stellarator_input, niter=int(args.niter), ftol=float(args.ftol), workdir=st_work
+        stellarator_input,
+        niter=int(args.niter),
+        ftol=float(args.ftol),
+        workdir=st_work,
+        solver_mode=str(args.solver_mode),
+        cli_fixed_boundary_mode=bool(args.cli_fixed_boundary_mode),
     )
 
     fig, axes = plt.subplots(1, 2, figsize=(12.5, 4.2))
@@ -157,18 +181,20 @@ def main() -> None:
         title=f"Axisymmetric fsq_total trace ({int(args.niter)} iters)",
         t_vmec=t_vmec_a,
         t_jax=t_jax_a,
+        jax_label=str(args.jax_label),
     )
     _plot_panel(
         axes[1],
         fsq_vmec=fsq_vmec_s,
         fsq_jax=fsq_jax_s,
-        title=f"Stellarator fsq_total trace ({int(args.niter)} iters)",
+        title=f"LandremanPaul QA fsq_total trace ({int(args.niter)} iters)",
         t_vmec=t_vmec_s,
         t_jax=t_jax_s,
+        jax_label=str(args.jax_label),
     )
-    axes[0].legend(frameon=False)
-    axes[1].legend(frameon=False)
-    fig.tight_layout()
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=2, frameon=False, bbox_to_anchor=(0.5, 1.03))
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.94))
     outpath = outdir / "readme_fsq_trace.png"
     fig.savefig(outpath, dpi=220)
     plt.close(fig)

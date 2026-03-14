@@ -6,47 +6,47 @@ and free-boundary ideal-MHD equilibria.
 <table>
   <tr>
     <td><img src="docs/_static/figures/axisym_compare_cross_sections.png" width="420" /></td>
-    <td><img src="docs/_static/figures/n3are_compare_cross_sections.png" width="420" /></td>
+    <td><img src="docs/_static/figures/qa_compare_cross_sections.png" width="420" /></td>
   </tr>
   <tr>
-    <td align="center">Axisymmetric: cross-section (VMEC2000 vs vmec_jax)</td>
-    <td align="center">Stellarator (n3are): cross-section (VMEC2000 vs vmec_jax)</td>
+    <td align="center">Axisymmetric: optimized fixed-boundary cross-section (VMEC2000 vs vmec_jax)</td>
+    <td align="center">LandremanPaul2021_QA_lowres: optimized fixed-boundary cross-section (VMEC2000 vs vmec_jax)</td>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/axisym_compare_3d.png" width="420" /></td>
-    <td><img src="docs/_static/figures/n3are_compare_3d.png" width="420" /></td>
+    <td><img src="docs/_static/figures/qa_compare_3d.png" width="420" /></td>
   </tr>
   <tr>
-    <td align="center">Axisymmetric: 3D LCFS (VMEC2000 vs vmec_jax)</td>
-    <td align="center">Stellarator (n3are): 3D LCFS (VMEC2000 vs vmec_jax)</td>
+    <td align="center">Axisymmetric: optimized fixed-boundary 3D LCFS (VMEC2000 vs vmec_jax)</td>
+    <td align="center">LandremanPaul2021_QA_lowres: optimized fixed-boundary 3D LCFS (VMEC2000 vs vmec_jax)</td>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/axisym_compare_bmag_surface.png" width="420" /></td>
-    <td><img src="docs/_static/figures/n3are_compare_bmag_surface.png" width="420" /></td>
+    <td><img src="docs/_static/figures/qa_compare_bmag_surface.png" width="420" /></td>
   </tr>
   <tr>
-    <td align="center">Axisymmetric: |B| on LCFS (VMEC2000 vs vmec_jax)</td>
-    <td align="center">Stellarator (n3are): |B| on LCFS (VMEC2000 vs vmec_jax)</td>
+    <td align="center">Axisymmetric: optimized fixed-boundary |B| on LCFS (VMEC2000 vs vmec_jax)</td>
+    <td align="center">LandremanPaul2021_QA_lowres: optimized fixed-boundary |B| on LCFS (VMEC2000 vs vmec_jax)</td>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/axisym_compare_iota.png" width="420" /></td>
-    <td><img src="docs/_static/figures/n3are_compare_iota.png" width="420" /></td>
+    <td><img src="docs/_static/figures/qa_compare_iota.png" width="420" /></td>
   </tr>
   <tr>
-    <td align="center">Axisymmetric: iota (VMEC2000 vs vmec_jax)</td>
-    <td align="center">Stellarator (n3are): iota (VMEC2000 vs vmec_jax)</td>
+    <td align="center">Axisymmetric: optimized fixed-boundary iota (VMEC2000 vs vmec_jax)</td>
+    <td align="center">LandremanPaul2021_QA_lowres: optimized fixed-boundary iota (VMEC2000 vs vmec_jax)</td>
   </tr>
   <tr>
     <td colspan="2"><img src="docs/_static/figures/readme_fsq_trace.png" width="860" /></td>
   </tr>
   <tr>
-    <td align="center" colspan="2">fsq_total trace (VMEC2000 vs vmec_jax) for axisymmetric + n3are cases</td>
+    <td align="center" colspan="2">Optimized fixed-boundary fsq_total trace (VMEC2000 vs vmec_jax) for shaped tokamak + LandremanPaul2021_QA_lowres cases</td>
   </tr>
   <tr>
     <td colspan="2"><img src="docs/_static/figures/readme_runtime_compare.png" width="860" /></td>
   </tr>
   <tr>
-    <td align="center" colspan="2">Bundled-example runtime and memory ratios vs VMEC2000 on reference CPU and GPU hosts</td>
+    <td align="center" colspan="2">Bundled fixed/free runtime comparison: VMEC2000 vs vmec_jax CPU on a reference CPU host</td>
   </tr>
 </table>
 
@@ -54,7 +54,7 @@ and free-boundary ideal-MHD equilibria.
 
 - VMEC2000-parity solver for fixed-boundary and free-boundary equilibria.
 - Supports axisymmetric and non-axisymmetric configurations, with `lasym=False` and `lasym=True` for stellarator symmetry/asymmetry and up-down symmetry/asymmetry.
-- Default CLI path is the same across all supported branches: `vmec_jax input.name`.
+- Default CLI path is `vmec_jax input.name`.
 - `wout_*.nc` outputs, iteration diagnostics, and manifest-based parity sweeps are built around VMEC2000-compatible workflows.
 - JAX-native kernels for geometry, transforms, and residual assembly.
 - Differentiable optimization workflows are available through the Python API and bundled examples.
@@ -74,8 +74,20 @@ CLI (VMEC2000-style executable):
 vmec_jax examples/data/input.circular_tokamak
 ```
 
-Default CLI runs use the scan-based fast loop.
-Pass `--parity` to use the VMEC2000 parity loop (time-step control + restarts).
+For fixed-boundary inputs, the default CLI path now uses the optimized
+controller: it tries the fast final-grid scan route first, then escalates to
+staged continuation and strict parity finishing only when the input structure
+and residual history require it. Pass `--parity` to force the conservative
+VMEC2000 loop. Pass `--solver-mode accelerated` to request the optimized track
+explicitly.
+
+Python driver comparison (reference track vs optimized CLI-style track):
+
+```bash
+python examples/fixed_boundary_driver_tracks.py \
+  examples/data/input.circular_tokamak \
+  --quiet --json
+```
 
 Run tests:
 
@@ -97,9 +109,31 @@ python examples/optimization/implicit_target_iota_volume.py --case circular_toka
 - LASYM fixed-boundary stages now use a timed scan/non-scan probe on CPU and a short parity-only probe on accelerators, so the default GPU path keeps the scan fast path without paying the full non-scan timing cost.
 - Quiet accelerator scan runs now use backend-aware larger chunks, capped to the remaining iterations, to reduce host/device launch overhead without changing solver parity.
 - Use `--parity` or `performance_mode=False` to force the conservative parity path.
+- Use `--solver-mode accelerated` to force the optimized fixed-boundary path
+  explicitly, which skips parity-oriented scan probes and is judged by final
+  residual/output quality rather than iteration-trace parity.
+- Accelerated fixed-boundary solves default to a single
+  final-grid stage unless the caller explicitly requests `multigrid=True`. When
+  staged inputs provide `NITER_ARRAY`, the accelerated single-grid path now
+  carries the total staged iteration budget forward instead of silently falling
+  back to `NITER`, and the CLI can automatically retry that staged schedule if
+  the first final-grid solve misses the target.
+- The optimized CLI controller is therefore layered:
+  fast final-grid accelerated attempt first, then input-driven staged follow-up
+  for explicit `NS_ARRAY` / `NITER_ARRAY`, then strict parity finish blocks
+  only if the staged route still has not closed.
+- On the optimized non-autodiff path, non-verbose runs now keep lighter
+  iteration histories by default, and ordinary free-boundary runs avoid extra
+  `scalpot` axis-diagnostic synthesis unless dump env vars are explicitly
+  enabled.
 - The current GPU path is fastest when the solve can stay on the scan fast path. Many of the slow GPU benchmark rows are parity-path solves, especially free-boundary cases, where VMEC2000-style restart logic, Jacobian checks, and cadence control still run as a host-controlled loop around many short float64 kernels.
 - That means the GPU often sees too little work per launch to amortize host/device overhead, while the CPU benefits from lower launch latency and efficient float64 execution on these moderate-size grids. This is an implementation limit of the current parity path, not a claim that the underlying physics is inherently CPU-only.
+- The accelerated-mode comparison harness lives at `tools/diagnostics/benchmark_accelerated_mode.py`.
+- The parity-vs-optimized Python driver example lives at
+  `examples/fixed_boundary_driver_tracks.py`.
 - Details and profiling guidance live in `docs/performance.rst`.
+- Implementation notes and merge rationale for the optimized controller live in
+  `docs/accelerated_merge_readiness.rst`.
 - Parity methodology and current status live in `docs/validation.rst`.
 - The cross-case parity matrix (fixed/free boundary, axisym/non-axisym, `lasym=False/True`)
   is maintained in `tools/diagnostics/parity_manifest.toml` and executed with
@@ -135,39 +169,66 @@ export VMEC_JAX_SCAN_MINIMAL=0  # keep full scan diagnostics even when quiet
 
 ## Reproduce figures
 
-Recreate the axisym + n3are VMEC2000 vs vmec_jax panels shown above (single-plane cross-sections, |B| on LCFS, iota overlays, plus the fsq_total trace):
+Recreate the shaped-tokamak + LandremanPaul2021_QA_lowres VMEC2000 vs vmec_jax optimized panels shown above (single-plane cross-sections, |B| on LCFS, iota overlays, plus the fsq_total trace):
 
 ```bash
-python tools/diagnostics/qh_vmec_vs_vmecjax.py   --input examples/data/input.shaped_tokamak_pressure   --wout-ref examples/data/wout_shaped_tokamak_pressure_reference.nc   --use-wout-state --jax-title vmec_jax   --phi 0.0 --n-surfaces 31   --prefix axisym --outdir docs/_static/figures
+python tools/diagnostics/qh_vmec_vs_vmecjax.py \
+  --input examples/data/input.shaped_tokamak_pressure \
+  --wout-ref examples/data/wout_shaped_tokamak_pressure_reference.nc \
+  --solve --solver vmec2000_iter --solver-mode accelerated \
+  --cli-fixed-boundary-mode --jax-title "vmec_jax optimized" \
+  --phi 0.0 --n-surfaces 31 \
+  --prefix axisym --outdir docs/_static/figures
 
-python tools/diagnostics/qh_vmec_vs_vmecjax.py   --input examples/data/input.n3are_R7.75B5.7_lowres   --wout-ref examples/data/wout_n3are_R7.75B5.7_lowres.nc   --use-wout-state --jax-title vmec_jax   --phi 0.0 --n-surfaces 31   --prefix n3are --outdir docs/_static/figures
+python tools/diagnostics/qh_vmec_vs_vmecjax.py \
+  --input examples/data/input.LandremanPaul2021_QA_lowres \
+  --wout-ref examples/data/wout_LandremanPaul2021_QA_lowres_reference.nc \
+  --solve --solver vmec2000_iter --solver-mode accelerated \
+  --cli-fixed-boundary-mode --jax-title "vmec_jax optimized" \
+  --phi 0.0 --n-surfaces 31 \
+  --prefix qa --outdir docs/_static/figures
 
-python tools/diagnostics/readme_fsq_trace.py   --axisym-input examples/data/input.shaped_tokamak_pressure   --stellarator-input examples/data/input.n3are_R7.75B5.7_lowres   --niter 250 --ftol 1e-14   --outdir docs/_static/figures
+python tools/diagnostics/readme_fsq_trace.py \
+  --axisym-input examples/data/input.shaped_tokamak_pressure \
+  --stellarator-input examples/data/input.LandremanPaul2021_QA_lowres \
+  --niter 1800 --ftol 1e-13 --solver-mode accelerated \
+  --outdir docs/_static/figures
 
 python tools/diagnostics/example_runtime_memory_matrix.py \
   --backend both \
   --runner-label cpu \
   --jax-platforms cpu \
   --vmec-exec /path/to/xvmec2000 \
-  --outdir outputs/example_runtime_memory_matrix_cpu
+  --solver-mode accelerated \
+  --cli-fixed-boundary-mode \
+  --warm-runs 1 \
+  --outdir outputs/fixed_runtime_vmec2000_accel_cpu_warm
 
-# Run the same benchmark on a CUDA-capable machine with JAX GPU support.
 python tools/diagnostics/example_runtime_memory_matrix.py \
-  --backend vmec_jax \
-  --runner-label gpu \
-  --jax-platforms cuda,cpu \
-  --outdir outputs/example_runtime_memory_matrix_gpu
+  --kind freeb \
+  --backend both \
+  --include-external-diiid \
+  --runner-label cpu \
+  --jax-platforms cpu \
+  --vmec-exec /path/to/xvmec2000 \
+  --warm-runs 1 \
+  --outdir outputs/free_runtime_vmec2000_cpu_warm
 
 python tools/diagnostics/readme_runtime_compare.py \
-  --cpu-summary outputs/example_runtime_memory_matrix_cpu/summary.json \
-  --gpu-summary outputs/example_runtime_memory_matrix_gpu/summary.json \
+  --cpu-summary outputs/fixed_runtime_vmec2000_accel_cpu_warm/summary.json \
+               outputs/free_runtime_vmec2000_cpu_warm/summary.json \
   --outdir docs/_static/figures \
-  --table-out outputs/readme_runtime_table.md
+  --table-out outputs/readme_runtime_table.md \
+  --figure-kind all \
+  --plot-mode runtime
 ```
 
-The exact numbers in the checked-in benchmark table will vary by machine. Use
-the commands above to regenerate a CPU summary and a GPU summary on your own
-reference hosts.
+The exact numbers in the checked-in benchmark table will vary by machine. The
+README runtime figure intentionally uses warmed fixed-boundary optimized-CLI
+runs so it reflects steady-state solve cost rather than cold JAX startup
+overhead. The top-level README plot is CPU-only here because the GPU
+path is still under active optimization and is not yet a broadly faster default
+story.
 
 ## Documentation
 
@@ -178,30 +239,75 @@ reference hosts.
 - `docs/algorithms.rst`: algorithmic overview
 - `docs/equations.rst`: equations and conventions
 
-## Bundled Example Benchmarks
+## Bundled Runtime Snapshot
 
-Measured on 2026-03-06 using the default `run_fixed_boundary(input, verbose=False)`
-path. This checked-in snapshot used a reference CPU host (Apple M2, 8 GiB RAM)
-and a reference CUDA host (dual RTX A4000 GPUs). Exact results vary by machine.
+Measured on 2026-03-13 using warmed serial runs on the same CPU host. The top
+runtime plot now combines:
 
-| Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax CPU runtime | vmec_jax CPU memory | vmec_jax GPU runtime | vmec_jax GPU memory |
-| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| DIII-D_lasym_false | free | axisym | false | 14.37s | 0.07 GiB | 428.24s | 7.36 GiB | 1602.31s | 6.23 GiB |
-| ITERModel | fixed | axisym | false | 0.90s | 0.07 GiB | 5.83s | 0.91 GiB | 68.66s | 1.81 GiB |
-| LandremanPaul2021_QA_lowres | fixed | non-axisym | false | 23.89s | 0.07 GiB | 16.79s | 1.84 GiB | 33.91s | 2.66 GiB |
-| LandremanPaul2021_QA_lowres1 | fixed | non-axisym | false | 15.37s | 0.07 GiB | 14.86s | 1.82 GiB | 123.45s | 2.84 GiB |
-| LandremanSengupta2019_section5.4_B2_A80 | fixed | axisym | false | 0.24s | 0.07 GiB | 3.90s | 0.70 GiB | 44.38s | 1.60 GiB |
-| LandremanSenguptaPlunk_section5p3_low_res | fixed | axisym | true | 0.69s | 0.07 GiB | 46.77s | 4.07 GiB | 77.13s | 2.13 GiB |
-| basic_non_stellsym_pressure | fixed | non-axisym | true | 2.02s | 0.07 GiB | 29.73s | 3.22 GiB | 141.07s | 3.68 GiB |
-| circular_tokamak | fixed | axisym | false | 0.29s | 0.07 GiB | 5.55s | 1.18 GiB | 13.84s | 1.97 GiB |
-| circular_tokamak_aspect_100 | fixed | axisym | false | 2.36s | 0.07 GiB | 9.64s | 1.58 GiB | 104.44s | 2.49 GiB |
-| cth_like_fixed_bdy | fixed | axisym | false | 0.81s | 0.07 GiB | 2.43s | 0.54 GiB | 26.46s | 1.42 GiB |
-| cth_like_free_bdy | free | non-axisym | false | 2.48s | 0.07 GiB | 41.83s | 1.64 GiB | 155.79s | 2.30 GiB |
-| cth_like_free_bdy_lasym_small | free | non-axisym | true | 0.63s | 0.07 GiB | 37.59s | 1.47 GiB | 103.53s | 1.97 GiB |
-| li383_low_res | fixed | axisym | false | 0.29s | 0.07 GiB | 3.81s | 0.99 GiB | 38.87s | 1.94 GiB |
-| n3are_R7.75B5.7_lowres | fixed | axisym | false | 9.54s | 0.07 GiB | 160.06s | 6.50 GiB | 710.51s | 6.16 GiB |
-| nfp4_QH_warm_start | fixed | non-axisym | false | 0.55s | 0.07 GiB | 5.14s | 1.32 GiB | 54.84s | 2.33 GiB |
-| purely_toroidal_field | fixed | axisym | false | 3.21s | 0.07 GiB | 9.87s | 1.59 GiB | 104.91s | 2.49 GiB |
-| shaped_tokamak_pressure | fixed | axisym | false | 0.79s | 0.07 GiB | 5.66s | 0.90 GiB | 48.58s | 1.76 GiB |
-| solovev | fixed | axisym | false | 0.16s | 0.07 GiB | 2.08s | 0.48 GiB | 18.80s | 1.38 GiB |
-| up_down_asymmetric_tokamak | fixed | axisym | true | 0.74s | 0.07 GiB | 6.72s | 0.89 GiB | 16.54s | 1.60 GiB |
+- fixed-boundary VMEC2000-vs-optimized-controller runs from
+  `outputs/fixed_runtime_vmec2000_accel_cpu_warm_20260313/summary.json`
+- free-boundary VMEC2000-vs-default-path runs from
+  `outputs/free_runtime_vmec2000_cpu_warm_20260313/summary.json`
+
+Current checked-in summary:
+
+- 21 total shipped rows were exercised across fixed/free, axisymmetric /
+  non-axisymmetric, and `lasym=False/True`,
+- all 21 `vmec_jax` rows completed with `converged=True`,
+- ordinary CLI and non-autodiff Python fixed-boundary calls now choose the
+  optimized controller automatically,
+- the fixed-boundary readiness rerun on this same head
+  (`outputs/readiness_fixed_all_20260313/summary.json`) shows the optimized
+  path converging on all 16 bundled fixed-boundary cases, faster on 13,
+  effectively neutral on 1, and slower on 2 while still meeting the requested
+  final-stage `FTOL`,
+- the free-boundary runtime plot intentionally uses the robust default path,
+  not the optimized fixed-boundary controller, because free-boundary
+  acceleration is
+  still a separate follow-on problem,
+- the runtime plot is sorted by best VMEC2000-relative CPU speedup first,
+- on this host, `vmec_jax` CPU is faster than VMEC2000 on 4 of the 21 shipped
+  rows (`solovev`, `circular_tokamak_aspect_100`, `cth_like_fixed_bdy`,
+  `nfp4_QH_warm_start`) and close on the reactor-scale QA/QH fixed-boundary
+  cases,
+- the free-boundary DIII-D rows are still the dominant same-host CPU gap, but
+  `DIII-D_lasym_false` is down to about `113.78s` warmed here from
+  the earlier `~174s` range, and `cth_like_free_bdy` is down to about `6.96s`
+  warmed while staying converged.
+
+Representative warmed CPU VMEC2000-vs-`vmec_jax` points:
+
+| Example | VMEC2000 runtime | vmec_jax CPU runtime | Relative result |
+| --- | ---: | ---: | --- |
+| LandremanPaul2021_QH_reactorScale_lowres | 46.34s | 53.93s | close, VMEC2000 faster |
+| LandremanPaul2021_QA_reactorScale_lowres | 39.27s | 44.48s | close, VMEC2000 faster |
+| LandremanPaul2021_QA_lowres | 27.69s | 37.34s | converged, VMEC2000 faster |
+| cth_like_free_bdy | 1.79s | 6.96s | converged, VMEC2000 faster |
+| DIII-D_lasym_false | 19.80s | 113.78s | converged, VMEC2000 faster |
+
+## Optimized Fixed-Boundary Reassessment
+
+The optimized non-autodiff fixed-boundary track is now the intended default
+user path:
+
+- it is selected automatically by both the CLI and ordinary Python
+  `run_fixed_boundary(...)` calls,
+- it keeps convergence on the bundled fixed-boundary matrix,
+- and the conservative parity / implicit-differentiation paths remain
+  available when exact VMEC-style control or autodiff-specific behavior is the
+  priority.
+
+The bundled Python driver example shows the intended user flow on
+`input.circular_tokamak`: parity `28.863s` vs optimized CLI-style `3.445s`,
+both at `fsq_total ~ 2e-14`:
+
+```bash
+python examples/fixed_boundary_driver_tracks.py \
+  examples/data/input.circular_tokamak \
+  --quiet --json
+```
+
+This optimized non-autodiff fixed-boundary path is intended to be the default
+`vmec_jax` experience, while leaving free-boundary on the current robust
+controller and leaving parity / implicit-differentiation paths available when
+that is the priority.

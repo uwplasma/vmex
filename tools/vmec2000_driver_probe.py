@@ -64,7 +64,7 @@ def _parse_args():
     p.add_argument(
         "--case",
         type=str,
-        default="li383_low_res",
+        default="LandremanPaul2021_QA_reactorScale_lowres",
         help="Case name under vmec2000/python/tests (input.<case>)",
     )
     p.add_argument(

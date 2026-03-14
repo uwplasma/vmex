@@ -19,7 +19,117 @@ import numpy as np
 
 from .config import VMECConfig
 
+try:  # pragma: no cover - optional dependency
+    from scipy.linalg import lu_factor as _SCIPY_LU_FACTOR  # type: ignore
+    from scipy.linalg import lu_solve as _SCIPY_LU_SOLVE  # type: ignore
+except Exception:  # pragma: no cover - SciPy is optional at runtime
+    _SCIPY_LU_FACTOR = None
+    _SCIPY_LU_SOLVE = None
+
 _MGRID_FIELD_CACHE: dict[str, MGridData] = {}
+_FREEB_HOST_PHASE_CACHE: dict[tuple[int, int, tuple[str, ...]], np.ndarray] = {}
+_FREEB_TRIG_CACHE: dict[tuple[int, int, int, int, int, bool], Any] = {}
+_FREEB_BOUNDARY_SETUP_CACHE: dict[tuple[int, int], Any] = {}
+_FREEB_WINT_CACHE: dict[tuple[int, int, int], np.ndarray] = {}
+
+
+def _freeb_host_phase_stack(*, modes: Any, trig: Any, derivs: tuple[str, ...]) -> np.ndarray:
+    """Return cached NumPy phase stacks for host-side boundary synthesis."""
+
+    key = (id(modes), id(trig), tuple(derivs))
+    cached = _FREEB_HOST_PHASE_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    m = np.asarray(modes.m, dtype=np.int32)
+    n = np.asarray(modes.n, dtype=np.int32)
+    n1 = np.abs(n)
+    sgn = np.where(n < 0, -1.0, 1.0)
+
+    cosmu = np.asarray(trig.cosmu, dtype=float)
+    sinmu = np.asarray(trig.sinmu, dtype=float)
+    cosmum = np.asarray(trig.cosmum, dtype=float)
+    sinmum = np.asarray(trig.sinmum, dtype=float)
+    cosnv = np.asarray(trig.cosnv, dtype=float)
+    sinnv = np.asarray(trig.sinnv, dtype=float)
+    cosnvn = np.asarray(trig.cosnvn, dtype=float)
+    sinnvn = np.asarray(trig.sinnvn, dtype=float)
+
+    cosmu_m = cosmu[:, m].T
+    sinmu_m = sinmu[:, m].T
+    cosmum_m = cosmum[:, m].T
+    sinmum_m = sinmum[:, m].T
+    cosnv_n = cosnv[:, n1].T
+    sinnv_n = sinnv[:, n1].T
+    cosnvn_n = cosnvn[:, n1].T
+    sinnvn_n = sinnvn[:, n1].T
+
+    phase_blocks: list[np.ndarray] = []
+    for deriv in derivs:
+        if deriv == "base":
+            cos_phase = cosmu_m[:, :, None] * cosnv_n[:, None, :] + sgn[:, None, None] * sinmu_m[:, :, None] * sinnv_n[:, None, :]
+            sin_phase = sinmu_m[:, :, None] * cosnv_n[:, None, :] - sgn[:, None, None] * cosmu_m[:, :, None] * sinnv_n[:, None, :]
+        elif deriv == "dtheta":
+            cos_phase = sinmum_m[:, :, None] * cosnv_n[:, None, :] + sgn[:, None, None] * cosmum_m[:, :, None] * sinnv_n[:, None, :]
+            sin_phase = cosmum_m[:, :, None] * cosnv_n[:, None, :] - sgn[:, None, None] * sinmum_m[:, :, None] * sinnv_n[:, None, :]
+        elif deriv == "dzeta":
+            cos_phase = cosmu_m[:, :, None] * sinnvn_n[:, None, :] + sgn[:, None, None] * sinmu_m[:, :, None] * cosnvn_n[:, None, :]
+            sin_phase = sinmu_m[:, :, None] * sinnvn_n[:, None, :] - sgn[:, None, None] * cosmu_m[:, :, None] * cosnvn_n[:, None, :]
+        else:  # pragma: no cover
+            raise ValueError(f"Unknown deriv={deriv!r}")
+        phase_blocks.append(np.concatenate([cos_phase, sin_phase], axis=0))
+
+    phase_all = np.stack(phase_blocks, axis=0)
+    _FREEB_HOST_PHASE_CACHE[key] = phase_all
+    return phase_all
+
+
+def _freeb_boundary_trig(*, cfg: VMECConfig, nzeta: int) -> Any:
+    """Return cached trig tables for free-boundary boundary sampling."""
+
+    from .vmec_tomnsp import vmec_trig_tables
+
+    key = (
+        int(cfg.ntheta),
+        int(nzeta),
+        int(cfg.nfp),
+        int(cfg.mpol) - 1,
+        int(cfg.ntor),
+        bool(cfg.lasym),
+    )
+    cached = _FREEB_TRIG_CACHE.get(key)
+    if cached is not None:
+        return cached
+    trig = vmec_trig_tables(
+        ntheta=int(cfg.ntheta),
+        nzeta=int(nzeta),
+        nfp=int(cfg.nfp),
+        mmax=int(cfg.mpol) - 1,
+        nmax=int(cfg.ntor),
+        lasym=bool(cfg.lasym),
+    )
+    _FREEB_TRIG_CACHE[key] = trig
+    return trig
+
+
+def _vmec_realspace_synthesis_multi_host(
+    *,
+    coeff_cos: np.ndarray,
+    coeff_sin: np.ndarray,
+    modes: Any,
+    trig: Any,
+    derivs: tuple[str, ...] = ("base",),
+) -> tuple[np.ndarray, ...]:
+    """Host-side VMEC synthesis for external boundary sampling."""
+
+    coeff_cos = np.asarray(coeff_cos, dtype=float)
+    coeff_sin = np.asarray(coeff_sin, dtype=float)
+    if coeff_cos.shape != coeff_sin.shape:
+        raise ValueError("coeff_cos and coeff_sin must have the same shape")
+    phase_all = _freeb_host_phase_stack(modes=modes, trig=trig, derivs=tuple(derivs))
+    coeff = np.concatenate([coeff_cos, coeff_sin], axis=-1)
+    out = np.einsum("...k,tkij->t...ij", coeff, phase_all, optimize=True)
+    return tuple(np.asarray(out[i], dtype=float) for i in range(len(derivs)))
 
 
 @dataclass(frozen=True)
@@ -120,6 +230,60 @@ class ExternalBoundarySample:
 
 
 @dataclass(frozen=True)
+class _FreeBoundarySampleSetup:
+    trig: Any
+    second_facs: np.ndarray
+    phi_grid: np.ndarray
+    even_m_mask: np.ndarray
+    wint_vmec: np.ndarray
+
+
+def _freeb_boundary_sample_setup(*, static: Any, sample_nzeta: int) -> _FreeBoundarySampleSetup:
+    """Return cached static data used by host-side free-boundary sampling."""
+
+    key = (id(static), int(sample_nzeta))
+    cached = _FREEB_BOUNDARY_SETUP_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    trig = getattr(static, "trig_vmec", None)
+    if trig is None or int(sample_nzeta) != int(static.cfg.nzeta):
+        trig = _freeb_boundary_trig(cfg=static.cfg, nzeta=int(sample_nzeta))
+
+    m_arr = np.asarray(static.modes.m, dtype=float)
+    n_arr = np.asarray(static.modes.n, dtype=float) * float(int(static.cfg.nfp))
+    second_facs = np.stack(
+        [
+            (-(m_arr**2)).reshape((1, -1)),
+            (m_arr * n_arr).reshape((1, -1)),
+            (-(n_arr**2)).reshape((1, -1)),
+        ],
+        axis=0,
+    )
+
+    ntheta = int(np.asarray(trig.cosmu).shape[0])
+    nzeta = max(1, int(sample_nzeta))
+    phi = (2.0 * np.pi / float(nzeta)) * np.arange(nzeta, dtype=float)
+    phi /= float(max(1, int(static.cfg.nfp)))
+    phi_grid = np.broadcast_to(phi[None, :], (ntheta, nzeta))
+
+    if getattr(static, "m_is_even", None) is not None:
+        even_m_mask = np.asarray(static.m_is_even, dtype=float).reshape((1, 1, -1))
+    else:
+        even_m_mask = (np.asarray(static.modes.m, dtype=int) % 2 == 0).astype(float).reshape((1, 1, -1))
+
+    setup = _FreeBoundarySampleSetup(
+        trig=trig,
+        second_facs=second_facs,
+        phi_grid=phi_grid,
+        even_m_mask=even_m_mask,
+        wint_vmec=_vmec_boundary_wint(static=static, ntheta=ntheta, nzeta=nzeta, trig=trig),
+    )
+    _FREEB_BOUNDARY_SETUP_CACHE[key] = setup
+    return setup
+
+
+@dataclass(frozen=True)
 class NestorPoissonCache:
     """Stage-static spectral Poisson operator cache on the (theta,zeta) torus."""
 
@@ -138,6 +302,8 @@ class NestorVmecLikeCache:
     rhs_scale: np.ndarray
     mode_basis: Any | None = None
     mode_matrix: np.ndarray | None = None
+    matrix_lu: Any | None = None
+    mode_matrix_lu: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -168,6 +334,25 @@ class NestorSolveResult:
     solve_time_s: float
     sample_time_s: float
     model: str = "spectral_poisson_external_only"
+
+
+def _dense_lu_factor(matrix: np.ndarray) -> Any | None:
+    if _SCIPY_LU_FACTOR is None:
+        return None
+    try:
+        return _SCIPY_LU_FACTOR(np.asarray(matrix, dtype=float))
+    except Exception:
+        return None
+
+
+def _dense_lu_solve(lu_fac: Any | None, matrix: np.ndarray, rhs: np.ndarray) -> np.ndarray:
+    rhs_arr = np.asarray(rhs, dtype=float)
+    if lu_fac is not None and _SCIPY_LU_SOLVE is not None:
+        try:
+            return np.asarray(_SCIPY_LU_SOLVE(lu_fac, rhs_arr), dtype=float)
+        except Exception:
+            pass
+    return np.asarray(np.linalg.solve(np.asarray(matrix, dtype=float), rhs_arr), dtype=float)
 
 
 @dataclass(frozen=True)
@@ -721,14 +906,10 @@ def _sample_external_boundary_arrays(
 ) -> ExternalBoundarySample:
     """Return full boundary arrays for external mgrid field sampling."""
 
-    from .vmec_parity import vmec_m1_internal_to_physical_signed
+    from .vmec_parity import vmec_m1_internal_to_physical_signed_host
     from .vmec_realspace import (
         vmec_realspace_synthesis,
-        vmec_realspace_synthesis_dtheta,
-        vmec_realspace_synthesis_dzeta_phys,
     )
-    from .vmec_tomnsp import vmec_trig_tables
-
     meta = getattr(static, "mgrid_metadata", None)
     if meta is None:
         raise ValueError("missing_mgrid_metadata")
@@ -745,16 +926,15 @@ def _sample_external_boundary_arrays(
         _MGRID_FIELD_CACHE[mgrid_path] = mgrid
     extcur_eff = tuple(extcur) if extcur is not None else tuple(getattr(static, "free_boundary_extcur", ()) or ())
 
-    trig = getattr(static, "trig_vmec", None)
-    if trig is None:
-        trig = vmec_trig_tables(
-            ntheta=int(static.cfg.ntheta),
-            nzeta=int(static.cfg.nzeta),
-            nfp=int(static.cfg.nfp),
-            mmax=int(static.cfg.mpol) - 1,
-            nmax=int(static.cfg.ntor),
-            lasym=bool(static.cfg.lasym),
-        )
+    sample_nzeta = 1 if (not bool(getattr(static.cfg, "lthreed", True))) else int(static.cfg.nzeta)
+    dump_scalpot_enabled = os.getenv("VMEC_JAX_DUMP_SCALPOT", "").strip().lower() not in (
+        "",
+        "0",
+        "false",
+        "no",
+    )
+    setup = _freeb_boundary_sample_setup(static=static, sample_nzeta=int(sample_nzeta))
+    trig = setup.trig
 
     # Apply VMEC m=1 internal->physical conversion before free-boundary
     # sampling. This matches the convert_sym/convert_asym path feeding NESTOR.
@@ -764,7 +944,7 @@ def _sample_external_boundary_arrays(
         Rsin_phys = np.asarray(state.Rsin)
         Zcos_phys = np.asarray(state.Zcos)
     else:
-        Rcos_phys, Zsin_phys, Rsin_phys, Zcos_phys = vmec_m1_internal_to_physical_signed(
+        Rcos_phys, Zsin_phys, Rsin_phys, Zcos_phys = vmec_m1_internal_to_physical_signed_host(
             Rcos=np.asarray(state.Rcos),
             Zsin=np.asarray(state.Zsin),
             Rsin=np.asarray(state.Rsin),
@@ -775,132 +955,54 @@ def _sample_external_boundary_arrays(
             lconm1=bool(getattr(static.cfg, "lconm1", True)),
         )
 
-    R = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=np.asarray(Rcos_phys)[-1:, :],
-            coeff_sin=np.asarray(Rsin_phys)[-1:, :],
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
+    r_boundary = np.asarray(Rcos_phys)[-1:, :]
+    rs_boundary = np.asarray(Rsin_phys)[-1:, :]
+    zc_boundary = np.asarray(Zcos_phys)[-1:, :]
+    zs_boundary = np.asarray(Zsin_phys)[-1:, :]
+
+    boundary_cos = np.stack([r_boundary, zc_boundary], axis=0)
+    boundary_sin = np.stack([rs_boundary, zs_boundary], axis=0)
+    boundary_all = _vmec_realspace_synthesis_multi_host(
+        coeff_cos=boundary_cos,
+        coeff_sin=boundary_sin,
+        modes=static.modes,
+        trig=trig,
+        derivs=("base", "dtheta", "dzeta"),
     )
-    Z = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=np.asarray(Zcos_phys)[-1:, :],
-            coeff_sin=np.asarray(Zsin_phys)[-1:, :],
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
-    )
-    Ru = np.asarray(
-        vmec_realspace_synthesis_dtheta(
-            coeff_cos=np.asarray(Rcos_phys)[-1:, :],
-            coeff_sin=np.asarray(Rsin_phys)[-1:, :],
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
-    )
-    Zu = np.asarray(
-        vmec_realspace_synthesis_dtheta(
-            coeff_cos=np.asarray(Zcos_phys)[-1:, :],
-            coeff_sin=np.asarray(Zsin_phys)[-1:, :],
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
-    )
-    Rv = np.asarray(
-        vmec_realspace_synthesis_dzeta_phys(
-            coeff_cos=np.asarray(Rcos_phys)[-1:, :],
-            coeff_sin=np.asarray(Rsin_phys)[-1:, :],
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
-    )
-    Zv = np.asarray(
-        vmec_realspace_synthesis_dzeta_phys(
-            coeff_cos=np.asarray(Zcos_phys)[-1:, :],
-            coeff_sin=np.asarray(Zsin_phys)[-1:, :],
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
-    )
+    R = np.asarray(boundary_all[0][0, 0])
+    Ru = np.asarray(boundary_all[1][0, 0])
+    Rv = np.asarray(boundary_all[2][0, 0])
+    Z = np.asarray(boundary_all[0][1, 0])
+    Zu = np.asarray(boundary_all[1][1, 0])
+    Zv = np.asarray(boundary_all[2][1, 0])
     # VMEC surface.f uses exact modal second derivatives. Reconstruct those
     # directly from boundary Fourier coefficients (instead of finite/spectral
     # differencing sampled R,Z) for matrix-side parity in analyt/fouri/scalpot.
-    m_arr = np.asarray(static.modes.m, dtype=float)
-    n_arr = np.asarray(static.modes.n, dtype=float) * float(int(static.cfg.nfp))
-    d2u_fac = (-(m_arr**2)).reshape((1, -1))
-    duv_fac = (m_arr * n_arr).reshape((1, -1))
-    d2v_fac = (-(n_arr**2)).reshape((1, -1))
     rcos_b = np.asarray(Rcos_phys, dtype=float)[-1:, :]
     rsin_b = np.asarray(Rsin_phys, dtype=float)[-1:, :]
     zcos_b = np.asarray(Zcos_phys, dtype=float)[-1:, :]
     zsin_b = np.asarray(Zsin_phys, dtype=float)[-1:, :]
 
-    Ruu = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=rcos_b * d2u_fac,
-            coeff_sin=rsin_b * d2u_fac,
+    second_cos = np.stack([rcos_b, zcos_b], axis=0)[:, None, :, :] * setup.second_facs[None, :, :, :]
+    second_sin = np.stack([rsin_b, zsin_b], axis=0)[:, None, :, :] * setup.second_facs[None, :, :, :]
+    second_all = np.asarray(
+        _vmec_realspace_synthesis_multi_host(
+            coeff_cos=second_cos,
+            coeff_sin=second_sin,
             modes=static.modes,
             trig=trig,
-            coeffs_internal=True,
+            derivs=("base",),
         )[0]
     )
-    Ruv = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=rcos_b * duv_fac,
-            coeff_sin=rsin_b * duv_fac,
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
-    )
-    Rvv = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=rcos_b * d2v_fac,
-            coeff_sin=rsin_b * d2v_fac,
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
-    )
-    Zuu = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=zcos_b * d2u_fac,
-            coeff_sin=zsin_b * d2u_fac,
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
-    )
-    Zuv = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=zcos_b * duv_fac,
-            coeff_sin=zsin_b * duv_fac,
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
-    )
-    Zvv = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=zcos_b * d2v_fac,
-            coeff_sin=zsin_b * d2v_fac,
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0]
-    )
+    Ruu = np.asarray(second_all[0, 0, 0])
+    Ruv = np.asarray(second_all[0, 1, 0])
+    Rvv = np.asarray(second_all[0, 2, 0])
+    Zuu = np.asarray(second_all[1, 0, 0])
+    Zuv = np.asarray(second_all[1, 1, 0])
+    Zvv = np.asarray(second_all[1, 2, 0])
 
     nzeta = int(R.shape[1])
-    zeta = (2.0 * np.pi / max(1, nzeta)) * np.arange(nzeta, dtype=float)
-    phi = zeta / max(1, int(static.cfg.nfp))
-    phi_grid = np.broadcast_to(phi[None, :], R.shape)
+    phi_grid = setup.phi_grid
 
     br_mgrid, bp_mgrid, bz_mgrid = interpolate_mgrid_bfield(
         mgrid,
@@ -940,11 +1042,11 @@ def _sample_external_boundary_arrays(
     # pr1(:,1,0) uses only rmncc at theta=0; pz1(:,1,0) uses only zmncs.
     if (not bool(getattr(static.cfg, "lasym", False))) and axis_mode in ("vmec_pr1", "pr1_vmec", "vmec"):
         try:
-            from .vmec_parity import signed_maps_from_modes, _signed_to_mn_cos_cached, _signed_to_mn_sin_cached
+            from .vmec_parity import signed_maps_from_modes, _signed_to_mn_cos_host, _signed_to_mn_sin_host
 
             maps = signed_maps_from_modes(static.modes)
-            rcc, _rss = _signed_to_mn_cos_cached(np.asarray(state.Rcos), maps=maps)
-            _zsc, zcs = _signed_to_mn_sin_cached(np.asarray(state.Zsin), maps=maps)
+            rcc, _rss = _signed_to_mn_cos_host(np.asarray(state.Rcos), maps=maps)
+            _zsc, zcs = _signed_to_mn_sin_host(np.asarray(state.Zsin), maps=maps)
             rcc_js1 = np.asarray(rcc[0], dtype=float)  # (mpol, ntor+1)
             zcs_js1 = np.asarray(zcs[0], dtype=float)  # (mpol, ntor+1)
             even_m = (np.arange(rcc_js1.shape[0], dtype=int) % 2) == 0
@@ -963,13 +1065,8 @@ def _sample_external_boundary_arrays(
         try:
             axis_scalxc_env = os.getenv("VMEC_JAX_FREEB_AXIS_PARITY_SCALXC", "0").strip().lower()
             axis_apply_scalxc = axis_scalxc_env not in ("", "0", "false", "no")
-            if getattr(static, "m_is_even", None) is not None:
-                mask_even = np.asarray(static.m_is_even, dtype=float)
-            else:
-                mask_even = (np.asarray(static.modes.m, dtype=int) % 2 == 0).astype(float)
-            mask_even = mask_even.reshape((1, 1, -1))
-            coeff_cos = np.stack([np.asarray(Rcos_phys), np.asarray(Zcos_phys)], axis=0) * mask_even
-            coeff_sin = np.stack([np.asarray(Rsin_phys), np.asarray(Zsin_phys)], axis=0) * mask_even
+            coeff_cos = np.stack([np.asarray(Rcos_phys), np.asarray(Zcos_phys)], axis=0) * setup.even_m_mask
+            coeff_sin = np.stack([np.asarray(Rsin_phys), np.asarray(Zsin_phys)], axis=0) * setup.even_m_mask
             parity_even = np.asarray(
                 vmec_realspace_synthesis(
                     coeff_cos=coeff_cos,
@@ -983,8 +1080,9 @@ def _sample_external_boundary_arrays(
             )
             axis_r = np.asarray(parity_even[0, 0, 0, :], dtype=float)
             axis_z = np.asarray(parity_even[1, 0, 0, :], dtype=float)
-            axis_r_parity = np.asarray(axis_r, dtype=float)
-            axis_z_parity = np.asarray(axis_z, dtype=float)
+            if dump_scalpot_enabled:
+                axis_r_parity = np.asarray(axis_r, dtype=float)
+                axis_z_parity = np.asarray(axis_z, dtype=float)
             axis_ready = True
         except Exception:
             axis_ready = False
@@ -1009,24 +1107,27 @@ def _sample_external_boundary_arrays(
                 coeffs_internal=True,
             )[0, 0, :]
         )
-    axis_r_full = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=np.asarray(Rcos_phys)[:1, :],
-            coeff_sin=np.asarray(Rsin_phys)[:1, :],
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0, 0, :]
-    )
-    axis_z_full = np.asarray(
-        vmec_realspace_synthesis(
-            coeff_cos=np.asarray(Zcos_phys)[:1, :],
-            coeff_sin=np.asarray(Zsin_phys)[:1, :],
-            modes=static.modes,
-            trig=trig,
-            coeffs_internal=True,
-        )[0, 0, :]
-    )
+    axis_r_full = None
+    axis_z_full = None
+    if dump_scalpot_enabled:
+        axis_r_full = np.asarray(
+            vmec_realspace_synthesis(
+                coeff_cos=np.asarray(Rcos_phys)[:1, :],
+                coeff_sin=np.asarray(Rsin_phys)[:1, :],
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+            )[0, 0, :]
+        )
+        axis_z_full = np.asarray(
+            vmec_realspace_synthesis(
+                coeff_cos=np.asarray(Zcos_phys)[:1, :],
+                coeff_sin=np.asarray(Zsin_phys)[:1, :],
+                modes=static.modes,
+                trig=trig,
+                coeffs_internal=True,
+            )[0, 0, :]
+        )
     axis_field_mode = os.getenv("VMEC_JAX_FREEB_AXIS_FIELD_MODE", "vmec_filament").strip().lower()
     if axis_field_mode in ("simple", "legacy"):
         br_axis, bp_axis, bz_axis = _axis_current_field_simple(
@@ -1105,20 +1206,28 @@ def _sample_external_boundary_arrays(
     )
 
 
-def _vmec_boundary_wint(*, static: Any, ntheta: int, nzeta: int) -> np.ndarray:
+def _vmec_boundary_wint(*, static: Any, ntheta: int, nzeta: int, trig: Any | None = None) -> np.ndarray:
     """Return VMEC angular weights on the free-boundary mesh."""
 
-    trig = getattr(static, "trig_vmec", None)
+    key = (id(static), int(ntheta), int(nzeta))
+    cached = _FREEB_WINT_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    trig = getattr(static, "trig_vmec", None) if trig is None else trig
     if trig is not None:
         try:
             from .vmec_residue import vmec_wint_from_trig
 
             w = np.asarray(vmec_wint_from_trig(trig, nzeta=int(nzeta)), dtype=float)
             if w.shape == (int(ntheta), int(nzeta)):
+                _FREEB_WINT_CACHE[key] = w
                 return w
         except Exception:
             pass
-    return np.full((int(ntheta), int(nzeta)), 1.0 / float(max(1, int(ntheta) * int(nzeta))), dtype=float)
+    w = np.full((int(ntheta), int(nzeta)), 1.0 / float(max(1, int(ntheta) * int(nzeta))), dtype=float)
+    _FREEB_WINT_CACHE[key] = w
+    return w
 
 
 def _build_vmec_cmns(*, mf: int, nf: int, onp: float) -> np.ndarray:
@@ -1392,12 +1501,14 @@ def _build_vmec_like_cache(
         rhs_scale=rhs_scale,
         mode_basis=mode_basis,
         mode_matrix=mode_matrix,
+        matrix_lu=_dense_lu_factor(matrix),
+        mode_matrix_lu=_dense_lu_factor(mode_matrix),
     )
 
 
 def _solve_vmec_like_dense(rhs: np.ndarray, cache: NestorVmecLikeCache) -> np.ndarray:
     rhs_flat = np.asarray(rhs, dtype=float).reshape(-1) * np.asarray(cache.rhs_scale, dtype=float)
-    phi_flat = np.linalg.solve(np.asarray(cache.matrix, dtype=float), rhs_flat)
+    phi_flat = _dense_lu_solve(cache.matrix_lu, np.asarray(cache.matrix, dtype=float), rhs_flat)
     phi = phi_flat.reshape(int(cache.ntheta), int(cache.nzeta))
     phi = phi - float(np.mean(phi))
     return phi
@@ -1473,6 +1584,79 @@ def _vmec_precal_tan_tables(*, nu: int, nv: int, nvper: int) -> tuple[np.ndarray
                     tanv[i] = 2.0 * np.tan(argv)
                 i += 1
     return np.asarray(tanu, dtype=float), np.asarray(tanv, dtype=float)
+
+
+def _ensure_vmec_nonsingular_kernel_tables(*, basis: dict[str, Any], nv: int, nvper: int) -> dict[str, np.ndarray]:
+    """Cache VMEC nonsingular Green-function helper tables on the mode basis."""
+
+    nv = max(1, int(nv))
+    nvper = max(1, int(nvper))
+    cache = basis.get("_nonsingular_kernel_tables")
+    if (
+        isinstance(cache, dict)
+        and int(cache.get("nv", -1)) == nv
+        and int(cache.get("nvper", -1)) == nvper
+    ):
+        return cache
+
+    nu = int(basis["nu_full"])
+    mf = int(basis["mf"])
+    nf = int(basis["nf"])
+    onp = float(basis["onp"])
+    nuv_full = int(basis["nuv_full"])
+
+    tanu, tanv = _vmec_precal_tan_tables(nu=nu, nv=nv, nvper=nvper)
+
+    alv = 2.0 * np.pi / float(max(1, nv))
+    alvp = onp * alv
+    kv = np.arange(nv, dtype=np.int64)
+    cos_v = np.cos(alvp * kv)
+    sin_v = np.sin(alvp * kv)
+    cosuv = np.broadcast_to(cos_v[None, :], (nu, nv)).reshape(-1)
+    sinuv = np.broadcast_to(sin_v[None, :], (nu, nv)).reshape(-1)
+
+    alp_per = 2.0 * np.pi / float(max(1, nvper))
+    cosper = np.cos(alp_per * np.arange(nvper, dtype=float))
+    sinper = np.sin(alp_per * np.arange(nvper, dtype=float))
+
+    cosv_tab = np.zeros((nf + 1, nv), dtype=float)
+    sinv_tab = np.zeros((nf + 1, nv), dtype=float)
+    kv_idx = np.arange(nv, dtype=float)
+    for n in range(0, nf + 1):
+        dn1 = alv * float(n)
+        cosv_tab[n, :] = np.cos(dn1 * kv_idx)
+        sinv_tab[n, :] = np.sin(dn1 * kv_idx)
+
+    alu = 2.0 * np.pi / float(max(1, nu))
+    nu_fourp = int(nu // 2 + 1)
+    cosui = np.zeros((mf + 1, nu_fourp), dtype=float)
+    sinui = np.zeros((mf + 1, nu_fourp), dtype=float)
+    ku_idx = np.arange(nu_fourp, dtype=float)
+    for m in range(0, mf + 1):
+        c = np.cos(alu * float(m) * ku_idx)
+        s = np.sin(alu * float(m) * ku_idx)
+        cosui[m, :] = c * alu * alv * 2.0
+        sinui[m, :] = s * alu * alv * 2.0
+        cosui[m, 0] *= 0.5
+        cosui[m, -1] *= 0.5
+
+    cache = {
+        "nv": np.asarray(nv, dtype=np.int64),
+        "nvper": np.asarray(nvper, dtype=np.int64),
+        "idx_all": np.arange(nuv_full, dtype=np.int64),
+        "tanu": np.asarray(tanu, dtype=float),
+        "tanv": np.asarray(tanv, dtype=float),
+        "cosuv": np.asarray(cosuv, dtype=float),
+        "sinuv": np.asarray(sinuv, dtype=float),
+        "cosper": np.asarray(cosper, dtype=float),
+        "sinper": np.asarray(sinper, dtype=float),
+        "cosv_tab": np.asarray(cosv_tab, dtype=float),
+        "sinv_tab": np.asarray(sinv_tab, dtype=float),
+        "cosui": np.asarray(cosui, dtype=float),
+        "sinui": np.asarray(sinui, dtype=float),
+    }
+    basis["_nonsingular_kernel_tables"] = cache
+    return cache
 
 
 def _vmec_nonsingular_gsource_from_bexni(
@@ -1610,22 +1794,16 @@ def _vmec_nonsingular_gsource_from_bexni(
     avv = (snv * Rv + 0.5 * (snr * (rvv - R) + snz * zvv)) * onp2
     rzb2 = R * R + Z * Z
 
-    alv = 2.0 * np.pi / float(max(1, nv))
-    alvp = onp * alv
-    kv = np.arange(nv, dtype=np.int64)
-    cos_v = np.cos(alvp * kv)
-    sin_v = np.sin(alvp * kv)
-    cosuv = np.broadcast_to(cos_v[None, :], (nu, nv)).reshape(-1)
-    sinuv = np.broadcast_to(sin_v[None, :], (nu, nv)).reshape(-1)
+    tables = _ensure_vmec_nonsingular_kernel_tables(basis=basis, nv=nv, nvper=nvper)
+    idx_all = np.asarray(tables["idx_all"], dtype=np.int64)
+    tanu = np.asarray(tables["tanu"], dtype=float)
+    tanv = np.asarray(tables["tanv"], dtype=float)
+    cosuv = np.asarray(tables["cosuv"], dtype=float)
+    sinuv = np.asarray(tables["sinuv"], dtype=float)
+    cosper = np.asarray(tables["cosper"], dtype=float)
+    sinper = np.asarray(tables["sinper"], dtype=float)
     rcosuv = R * cosuv
     rsinuv = R * sinuv
-
-    tanu, tanv = _vmec_precal_tan_tables(nu=nu, nv=nv, nvper=nvper)
-
-    # Field-period rotation factors.
-    alp_per = 2.0 * np.pi / float(max(1, nvper))
-    cosper = np.cos(alp_per * np.arange(nvper, dtype=float))
-    sinper = np.sin(alp_per * np.arange(nvper, dtype=float))
 
     bex = np.asarray(bexni, dtype=float).reshape(-1)
     if bex.size < nuv3:
@@ -1634,7 +1812,6 @@ def _vmec_nonsingular_gsource_from_bexni(
         bex = bex[:nuv3]
 
     gstore = np.zeros((nuv_full,), dtype=float)
-    idx_all = np.arange(nuv_full, dtype=np.int64)
     for ip in range(nuv3):
         xip = rcosuv[ip]
         yip = rsinuv[ip]
@@ -1866,21 +2043,20 @@ def _vmec_nonsingular_terms_from_bexni(
     avv = (snv * Rv + 0.5 * (snr * (rvv - R) + snz * zvv)) * (onp * onp)
     rzb2 = R * R + Z * Z
 
-    alv = 2.0 * np.pi / float(max(1, nv))
-    alvp = onp * alv
-    kv = np.arange(nv, dtype=np.int64)
-    cos_v = np.cos(alvp * kv)
-    sin_v = np.sin(alvp * kv)
-    cosuv = np.broadcast_to(cos_v[None, :], (nu, nv)).reshape(-1)
-    sinuv = np.broadcast_to(sin_v[None, :], (nu, nv)).reshape(-1)
+    tables = _ensure_vmec_nonsingular_kernel_tables(basis=basis, nv=nv, nvper=nvper)
+    idx_all = np.asarray(tables["idx_all"], dtype=np.int64)
+    tanu = np.asarray(tables["tanu"], dtype=float)
+    tanv = np.asarray(tables["tanv"], dtype=float)
+    cosuv = np.asarray(tables["cosuv"], dtype=float)
+    sinuv = np.asarray(tables["sinuv"], dtype=float)
+    cosper = np.asarray(tables["cosper"], dtype=float)
+    sinper = np.asarray(tables["sinper"], dtype=float)
+    cosv_tab = np.asarray(tables["cosv_tab"], dtype=float)
+    sinv_tab = np.asarray(tables["sinv_tab"], dtype=float)
+    cosui = np.asarray(tables["cosui"], dtype=float)
+    sinui = np.asarray(tables["sinui"], dtype=float)
     rcosuv = R * cosuv
     rsinuv = R * sinuv
-
-    tanu, tanv = _vmec_precal_tan_tables(nu=nu, nv=nv, nvper=nvper)
-
-    alp_per = 2.0 * np.pi / float(max(1, nvper))
-    cosper = np.cos(alp_per * np.arange(nvper, dtype=float))
-    sinper = np.sin(alp_per * np.arange(nvper, dtype=float))
 
     bex = np.asarray(bexni, dtype=float).reshape(-1)
     if bex.size < nuv3:
@@ -1888,36 +2064,12 @@ def _vmec_nonsingular_terms_from_bexni(
     else:
         bex = bex[:nuv3]
 
-    cosv_tab = np.zeros((nf + 1, nv), dtype=float)
-    sinv_tab = np.zeros((nf + 1, nv), dtype=float)
-    for n in range(0, nf + 1):
-        dn1 = alv * float(n)
-        kv_idx = np.arange(nv, dtype=float)
-        cosv_tab[n, :] = np.cos(dn1 * kv_idx)
-        sinv_tab[n, :] = np.sin(dn1 * kv_idx)
-    alu = 2.0 * np.pi / float(max(1, nu))
-    # VMEC fourp always loops over KU=1..nu2 with nu2 = nu/2 + 1
-    # (read_indata.f), independent of LASYM. `nu` is the full precal poloidal
-    # grid (`nu_full` here), while `ntheta3` may be larger (e.g. LASYM=T).
-    nu_fourp = int(nu // 2 + 1)
-    cosui = np.zeros((mf + 1, nu_fourp), dtype=float)
-    sinui = np.zeros((mf + 1, nu_fourp), dtype=float)
-    for m in range(0, mf + 1):
-        ku_idx = np.arange(nu_fourp, dtype=float)
-        c = np.cos(alu * float(m) * ku_idx)
-        s = np.sin(alu * float(m) * ku_idx)
-        cosui[m, :] = c * alu * alv * 2.0
-        sinui[m, :] = s * alu * alv * 2.0
-        cosui[m, 0] *= 0.5
-        cosui[m, -1] *= 0.5
-
     imirr_full = np.asarray(basis["imirr_full"], dtype=np.int64)
     grpmn_nonsing = np.zeros((mnpd2, nuv3), dtype=float)
     mf1 = mf + 1
     ndim = 2 if lasym else 1
 
     gstore = np.zeros((nuv_full,), dtype=float)
-    idx_all = np.arange(nuv_full, dtype=np.int64)
     for ip in range(nuv3):
         xip = rcosuv[ip]
         yip = rsinuv[ip]
@@ -2316,7 +2468,7 @@ def _solve_vmec_like_mode_from_gsource(
         raise ValueError("missing_mode_cache")
 
     rhs_eff = np.asarray(rhs_mode, dtype=float) if rhs_mode is not None else _vmec_bvec_from_gsource(gsource=gsource, basis=basis)
-    potvac = np.linalg.solve(np.asarray(amod, dtype=float), np.asarray(rhs_eff, dtype=float))
+    potvac = _dense_lu_solve(cache.mode_matrix_lu, np.asarray(amod, dtype=float), np.asarray(rhs_eff, dtype=float))
 
     sin_phase = np.asarray(basis["sin_phase"], dtype=float)
     cos_phase = np.asarray(basis["cos_phase"], dtype=float)
@@ -2988,6 +3140,7 @@ def nestor_external_only_step(
                             cache = replace(
                                 cache,
                                 mode_matrix=np.asarray(amatrix_mode_from_grpmn, dtype=float),
+                                mode_matrix_lu=_dense_lu_factor(np.asarray(amatrix_mode_from_grpmn, dtype=float)),
                             )
                             matrix_override_applied = True
                         except Exception:
@@ -3334,6 +3487,8 @@ def prepare_mgrid_for_config(
         )
 
     extcur = _normalize_extcur(tuple(cfg.extcur), int(meta.nextcur))
+    kp_eff = min(int(meta.kp), max(1, 2 * int(cfg.nzeta))) if int(cfg.nzeta) > 0 else int(meta.kp)
+    meta_eff = replace(meta, kp=kp_eff)
     if isinstance(loaded, MGridData):
-        return MGridData(metadata=meta, br=loaded.br, bp=loaded.bp, bz=loaded.bz)
-    return PreparedMGrid(metadata=meta, extcur=extcur)
+        return MGridData(metadata=meta_eff, br=loaded.br, bp=loaded.bp, bz=loaded.bz)
+    return PreparedMGrid(metadata=meta_eff, extcur=extcur)

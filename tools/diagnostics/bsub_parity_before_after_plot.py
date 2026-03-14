@@ -25,8 +25,16 @@ from vmec_jax.wout import read_wout, state_from_wout
 
 
 CASES = [
-    ("li383_low_res", "examples/data/input.li383_low_res", "examples/data/wout_li383_low_res_reference.nc"),
-    ("n3are_R7.75B5.7_lowres", "examples/data/input.n3are_R7.75B5.7_lowres", "examples/data/wout_n3are_R7.75B5.7_lowres.nc"),
+    (
+        "LandremanPaul2021_QA_reactorScale_lowres",
+        "examples/data/input.LandremanPaul2021_QA_reactorScale_lowres",
+        "examples/data/wout_LandremanPaul2021_QA_reactorScale_lowres_reference.nc",
+    ),
+    (
+        "LandremanPaul2021_QH_reactorScale_lowres",
+        "examples/data/input.LandremanPaul2021_QH_reactorScale_lowres",
+        "examples/data/wout_LandremanPaul2021_QH_reactorScale_lowres_reference.nc",
+    ),
 ]
 
 

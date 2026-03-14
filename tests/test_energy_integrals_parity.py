@@ -44,7 +44,11 @@ def _cfg_aligned_to_wout(cfg, wout):
     "case_name,input_rel,wout_rel",
     [
         ("circular_tokamak", "examples/data/input.circular_tokamak", "examples/data/wout_circular_tokamak_reference.nc"),
-        ("li383_low_res", "examples/data/input.li383_low_res", "examples/data/wout_li383_low_res_reference.nc"),
+        (
+            "LandremanPaul2021_QA_reactorScale_lowres",
+            "examples/data/input.LandremanPaul2021_QA_reactorScale_lowres",
+            "examples/data/wout_LandremanPaul2021_QA_reactorScale_lowres_reference.nc",
+        ),
     ],
 )
 def test_wb_wp_integrals_match_wout(case_name: str, input_rel: str, wout_rel: str):

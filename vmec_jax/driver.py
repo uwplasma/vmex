@@ -17,7 +17,7 @@ from typing import Optional
 import numpy as np
 from .boundary import boundary_from_indata
 from .config import VMECConfig, load_config
-from .energy import flux_profiles_from_indata
+from .energy import FluxProfiles, _iotaf_from_iotas, flux_profiles_from_indata
 from .free_boundary import (
     MGridMetadata,
     PreparedMGrid,
@@ -28,7 +28,12 @@ from .geom import eval_geom
 from .init_guess import initial_guess_from_boundary
 from .multigrid import interp_vmec_state
 from .profiles import eval_profiles
-from .solve import solve_fixed_boundary_gd, solve_fixed_boundary_lbfgs
+from .solve import (
+    SolveVmecResidualResult,
+    solve_fixed_boundary_gd,
+    solve_fixed_boundary_lbfgs,
+    solve_fixed_boundary_residual_iter,
+)
 from .static import VMECStatic, build_static
 from .wout import WoutData, read_wout, state_from_wout
 
@@ -87,6 +92,365 @@ def _dynamic_scan_probe_settings(niter_i: int) -> tuple[int, bool, str]:
     if pre_iters >= int(niter_i):
         pre_iters = max(1, int(niter_i) - 1)
     return pre_iters, timed_probe, backend
+
+
+_VALID_SOLVER_MODES = frozenset(("default", "parity", "accelerated"))
+_FSQ_COMPONENT_NAMES = ("fsqr", "fsqz", "fsql")
+
+
+def _normalize_solver_mode(*, solver_mode: str | None, performance_mode: bool) -> str:
+    if solver_mode is None:
+        return "default" if bool(performance_mode) else "parity"
+    mode = str(solver_mode).strip().lower()
+    aliases = {
+        "fast": "default",
+        "safe": "parity",
+        "reference": "parity",
+        "perf": "accelerated",
+    }
+    mode = aliases.get(mode, mode)
+    if mode not in _VALID_SOLVER_MODES:
+        valid = ", ".join(sorted(_VALID_SOLVER_MODES))
+        raise ValueError(f"Unknown solver_mode {solver_mode!r}. Expected one of: {valid}.")
+    return mode
+
+
+def _accelerated_fsq_total_target_from_ftol(ftol: float) -> float:
+    """Collapse per-component FTOL into an equivalent total-residual target.
+
+    The accelerated path still treats the input FTOL as the user truth. The
+    total objective is `fsqr + fsqz + fsql`, so the corresponding scalar target
+    is the same per-channel budget summed across the active residual channels.
+    """
+    return max(0.0, float(ftol)) * float(len(_FSQ_COMPONENT_NAMES))
+
+
+def _requested_final_ftol(*, indata, ftol_list_input) -> float:
+    ftol_list = _as_float_list(ftol_list_input)
+    if ftol_list:
+        return max(0.0, float(ftol_list[-1]))
+    return max(0.0, float(indata.get_float("FTOL", 1.0e-13)))
+
+
+def _as_float_list(value) -> list[float] | None:
+    if value is None:
+        return None
+    try:
+        return [float(v) for v in value]
+    except Exception:
+        return None
+
+
+def _as_list_like(value):
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    try:
+        if isinstance(value, np.ndarray):
+            return list(value.tolist())
+    except Exception:
+        pass
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return [value]
+    try:
+        return list(value)
+    except Exception:
+        return None
+
+
+def default_non_autodiff_solver_policy(indata) -> tuple[str, bool]:
+    """Choose the ordinary non-autodiff solver policy from input structure."""
+
+    if bool(indata.get_bool("LFREEB", False)):
+        return "default", True
+    ns_array = _as_list_like(indata.get("NS_ARRAY", None))
+    niter_array = _as_list_like(indata.get("NITER_ARRAY", None))
+    if (ns_array is not None) and (len(ns_array) > 1) and (niter_array is None):
+        return "parity", False
+    return "accelerated", True
+
+
+def _result_final_residuals(result) -> tuple[float, float, float] | None:
+    if result is None:
+        return None
+    diag = getattr(result, "diagnostics", {}) or {}
+    explicit = (
+        diag.get("final_fsqr", None),
+        diag.get("final_fsqz", None),
+        diag.get("final_fsql", None),
+    )
+    if all(val is not None for val in explicit):
+        try:
+            return tuple(float(val) for val in explicit)
+        except Exception:
+            pass
+    try:
+        fsqr = np.asarray(getattr(result, "fsqr2_history"))
+        fsqz = np.asarray(getattr(result, "fsqz2_history"))
+        fsql = np.asarray(getattr(result, "fsql2_history"))
+        if fsqr.size > 0 and fsqz.size > 0 and fsql.size > 0:
+            return (
+                float(fsqr.reshape(-1)[-1]),
+                float(fsqz.reshape(-1)[-1]),
+                float(fsql.reshape(-1)[-1]),
+            )
+    except Exception:
+        pass
+    try:
+        fsqr = np.asarray(diag.get("fsqr_full", []))
+        fsqz = np.asarray(diag.get("fsqz_full", []))
+        fsql = np.asarray(diag.get("fsql_full", []))
+        if fsqr.size > 0 and fsqz.size > 0 and fsql.size > 0:
+            return (
+                float(fsqr.reshape(-1)[-1]),
+                float(fsqz.reshape(-1)[-1]),
+                float(fsql.reshape(-1)[-1]),
+            )
+    except Exception:
+        pass
+    return None
+
+
+def _result_final_fsq(result) -> float:
+    if result is None:
+        return float("inf")
+    try:
+        w_hist = np.asarray(getattr(result, "w_history"))
+        if w_hist.size > 0:
+            return float(w_hist.reshape(-1)[-1])
+    except Exception:
+        pass
+    residuals = _result_final_residuals(result)
+    if residuals is not None:
+        return float(sum(residuals))
+    return float("inf")
+
+
+def _result_meets_requested_ftol(result, *, ftol: float) -> bool:
+    if result is None:
+        return False
+    diag = getattr(result, "diagnostics", {}) or {}
+    strict = diag.get("converged_strict", None)
+    if strict is not None:
+        return bool(strict)
+    if ("ftol" not in diag) and ("requested_ftol" not in diag):
+        return bool(diag.get("converged", False))
+    residuals = _result_final_residuals(result)
+    if residuals is None:
+        return False
+    target = max(0.0, float(ftol))
+    return all(float(val) <= target for val in residuals)
+
+
+def _result_hits_total_target(result, *, fsq_total_target: float | None) -> bool:
+    if result is None or fsq_total_target is None:
+        return False
+    return bool(_result_final_fsq(result) <= max(0.0, float(fsq_total_target)))
+
+
+def _allocate_integer_budget(*, total: int, weights: list[int]) -> list[int]:
+    total = max(0, int(total))
+    if total <= 0:
+        return [0] * len(weights)
+    if not weights:
+        return []
+    weights_eff = [max(0, int(w)) for w in weights]
+    if sum(weights_eff) <= 0:
+        out = [0] * len(weights_eff)
+        out[-1] = total
+        return out
+    raw = [float(total) * float(w) / float(sum(weights_eff)) for w in weights_eff]
+    out = [int(v) for v in raw]
+    remaining = int(total - sum(out))
+    if remaining > 0:
+        order = sorted(range(len(raw)), key=lambda idx: (raw[idx] - float(out[idx])), reverse=True)
+        for idx in order[:remaining]:
+            out[idx] += 1
+    elif remaining < 0:
+        order = sorted(range(len(raw)), key=lambda idx: (raw[idx] - float(out[idx])))
+        for idx in order[: abs(remaining)]:
+            if out[idx] > 0:
+                out[idx] -= 1
+    return out
+
+
+def _accelerated_cli_budgeted_total_iters(*, total_budget: int, ns_stages: list[int]) -> int:
+    """Reduce oversized parity-era budgets for CLI accelerated warm starts.
+
+    When an input provides multiple NS stages but no explicit NITER_ARRAY, the
+    VMEC-style NITER value is typically sized for a conservative final-grid
+    iteration. For the CLI-only accelerated path, use a radial-work-equivalent
+    total budget scaled by the square root of the coarsest-to-finest NS ratio.
+    That keeps aggressive multigrid speedups while avoiding the severe
+    under-budgeting seen on the hardest staged fixed-boundary cases.
+    """
+    total_budget = max(1, int(total_budget))
+    if not ns_stages:
+        return total_budget
+    ns0 = max(1, int(ns_stages[0]))
+    nsf = max(ns0, int(ns_stages[-1]))
+    return max(1, int(round(float(total_budget) * float(np.sqrt(float(ns0) / float(nsf))))))
+
+
+def _accelerated_cli_budgeted_stage_iters(*, total_budget: int, ns_stages: list[int]) -> list[int]:
+    """Distribute a reduced CLI accelerated budget across multigrid stages.
+
+    Use the number of newly introduced radial degrees of freedom per stage as
+    the structural signal. Squaring that increment biases the budget toward the
+    fine stages where most of the unresolved detail enters.
+    """
+    if not ns_stages:
+        return [max(1, int(total_budget))]
+    ns_int = [max(1, int(v)) for v in ns_stages]
+    increments = [ns_int[0]]
+    for prev_ns, curr_ns in zip(ns_int[:-1], ns_int[1:]):
+        increments.append(max(1, int(curr_ns - prev_ns)))
+    weights = [int(v) * int(v) for v in increments]
+    out = _allocate_integer_budget(total=max(1, int(total_budget)), weights=weights)
+    if out:
+        out[-1] = max(1, int(out[-1]))
+    return out
+
+
+def _final_flux_profiles_from_state(
+    *,
+    indata,
+    static_in: VMECStatic,
+    state,
+    signgs: int,
+    flux_local,
+    prof_local: dict,
+    pressure_local,
+):
+    """Return post-solve flux/profile payloads consistent with the solved state.
+
+    `flux_profiles_from_indata()` is input-only. For current-driven runs
+    (`NCURR=1`), VMEC updates the rotational transform from the solved force
+    balance. Mirror that here so the driver returns the same effective flux/iota
+    channels that `wout` reconstruction uses.
+    """
+    ncurr = int(indata.get_int("NCURR", 0))
+    if ncurr != 1:
+        return flux_local, prof_local
+    if os.getenv("VMEC_JAX_DISABLE_WOUT_NCURR_RECOMPUTE", "0") not in ("", "0"):
+        return flux_local, prof_local
+
+    from types import SimpleNamespace
+
+    from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
+    from .vmec_residue import vmec_pwint_from_trig
+    from .vmec_tomnsp import vmec_trig_tables
+    from .wout import _chipf_from_chips, _icurv_full_mesh_from_indata
+
+    s = np.asarray(static_in.s, dtype=float)
+    try:
+        state_ns = int(np.asarray(state.Rcos).shape[0])
+    except Exception:
+        state_ns = int(s.shape[0])
+    if int(state_ns) != int(s.shape[0]):
+        return flux_local, prof_local
+    phipf = np.asarray(flux_local.phipf, dtype=float)
+    phips = np.asarray(flux_local.phips, dtype=float)
+    if phips.size:
+        phips = phips.copy()
+        phips[0] = 0.0
+
+    pressure_out = np.asarray(pressure_local, dtype=float)
+    if pressure_out.size:
+        pressure_out = pressure_out.copy()
+        pressure_out[0] = 0.0
+
+    gamma = float(indata.get_float("GAMMA", 0.0))
+    lrfp = bool(indata.get_bool("LRFP", False))
+    boundary = boundary_from_indata(indata, static_in.modes)
+    idx00 = np.where((np.asarray(static_in.modes.m) == 0) & (np.asarray(static_in.modes.n) == 0))[0]
+    r00 = float(boundary.R_cos[int(idx00[0])]) if idx00.size else float(np.asarray(boundary.R_cos)[0])
+    vnorm = phips
+    if lrfp:
+        chipf_in = np.asarray(flux_local.chipf, dtype=float)
+        if chipf_in.size:
+            chips_in = np.concatenate([chipf_in[:1], 0.5 * (chipf_in[1:] + chipf_in[:-1])], axis=0)
+            vnorm = chips_in
+    mass = pressure_out * (np.abs(vnorm) * r00) ** gamma
+    if mass.size:
+        mass = mass.copy()
+        mass[0] = 0.0
+
+    trig = getattr(static_in, "trig_vmec", None)
+    if trig is None:
+        trig = vmec_trig_tables(
+            ntheta=int(np.asarray(static_in.grid.theta).shape[0]),
+            nzeta=int(np.asarray(static_in.grid.zeta).shape[0]),
+            nfp=int(static_in.cfg.nfp),
+            mmax=max(0, int(static_in.cfg.mpol) - 1),
+            nmax=max(0, int(static_in.cfg.ntor)),
+            lasym=bool(static_in.cfg.lasym),
+        )
+    icurv = np.asarray(_icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=int(signgs)), dtype=float)
+    wout_like_pre = SimpleNamespace(
+        phipf=phipf,
+        phips=phips,
+        chipf=np.zeros_like(phipf),
+        signgs=int(signgs),
+        nfp=int(static_in.cfg.nfp),
+        mpol=int(static_in.cfg.mpol),
+        ntor=int(static_in.cfg.ntor),
+        lasym=bool(static_in.cfg.lasym),
+        ncurr=0,
+        lcurrent=False,
+        icurv=np.zeros_like(phipf),
+        flux_is_internal=True,
+        mass=mass,
+        gamma=gamma,
+    )
+    bc_pre = vmec_bcovar_half_mesh_from_wout(
+        state=state,
+        static=static_in,
+        wout=wout_like_pre,
+        pres=pressure_out,
+        use_vmec_synthesis=True,
+        trig=trig,
+    )
+
+    sqrtg = np.asarray(bc_pre.jac.sqrtg, dtype=float)
+    overg = np.zeros_like(sqrtg)
+    np.divide(1.0, sqrtg, out=overg, where=(sqrtg != 0.0))
+    pwint = np.asarray(
+        vmec_pwint_from_trig(trig, ns=int(overg.shape[0]), nzeta=int(overg.shape[2])),
+        dtype=overg.dtype,
+    )
+    guu = np.asarray(bc_pre.guu, dtype=float)
+    guv = np.asarray(bc_pre.guv, dtype=float)
+    bsupu = np.asarray(bc_pre.bsupu, dtype=float)
+    bsupv = np.asarray(bc_pre.bsupv, dtype=float)
+    top = icurv - np.sum(pwint * ((guu * bsupu) + (guv * bsupv)), axis=(1, 2))
+    bot = np.sum(pwint * (overg * guu), axis=(1, 2))
+    chips = np.zeros_like(top)
+    np.divide(top, bot, out=chips, where=(bot != 0.0))
+    if chips.size:
+        chips[0] = 0.0
+
+    iotas = np.zeros_like(chips)
+    np.divide(chips, phips, out=iotas, where=(phips != 0.0))
+    if iotas.size:
+        iotas[0] = 0.0
+    iotaf = np.asarray(_iotaf_from_iotas(iotas, lrfp=lrfp), dtype=float)
+    chipf = np.asarray(_chipf_from_chips(chips), dtype=float)
+
+    prof_out = dict(prof_local)
+    prof_out["iota"] = iotas
+    prof_out["iotaf"] = iotaf
+    flux_out = FluxProfiles(
+        phipf=phipf,
+        chipf=chipf,
+        phips=phips,
+        signgs=int(signgs),
+        lamscale=np.asarray(flux_local.lamscale),
+    )
+    return flux_out, prof_out
 
 
 def residual_scalars_from_state(
@@ -392,12 +756,13 @@ def run_fixed_boundary(
     input_path: str | Path,
     *,
     solver: str = "vmec2000_iter",
+    solver_mode: str | None = None,
     max_iter: int | object = _MAX_ITER_SENTINEL,
     step_size: float | object = _STEP_SIZE_SENTINEL,
     history_size: int = 10,
     # vmec_gn tuning (Gauss-Newton on VMEC residual vector)
-    gn_damping: float = 1e-3,
-    gn_cg_tol: float = 1e-6,
+    gn_damping: float | None = None,
+    gn_cg_tol: float | None = None,
     gn_cg_maxiter: int = 80,
     use_initial_guess: bool = False,
     vmec_project: bool = True,
@@ -420,6 +785,8 @@ def run_fixed_boundary(
     restart_state: any | None = None,
     restart_wout_path: str | Path | None = None,
     restart_solver_state: dict | None = None,
+    cli_fixed_boundary_mode: bool = False,
+    _auto_cli_fixed_boundary_mode: bool = True,
 ):
     t_start = time.perf_counter()
     max_iter_overridden = max_iter is not _MAX_ITER_SENTINEL
@@ -537,6 +904,9 @@ def run_fixed_boundary(
         (``diagnostics["resume_state"]``). When supplied with ``solver="vmec2000_iter"``,
         the time-step/momentum/preconditioner cache is resumed. This disables multigrid
         staging.
+    cli_fixed_boundary_mode:
+        Internal CLI-only flag for non-differentiable fixed-boundary policy
+        overrides. Library callers should leave this as False.
     vmec_project:
         If True (default), re-project the initial guess through the VMEC
         internal grid/weights before returning or solving.
@@ -549,6 +919,12 @@ def run_fixed_boundary(
         If True, force the fast scan-based iteration path (no VMEC2000 control
         logic). This delivers order-of-magnitude speedups but does not preserve
         per-iteration VMEC2000 parity.
+    solver_mode:
+        Optional explicit solver policy. Supported values:
+        ``"default"`` (current parity-guarded fast path),
+        ``"parity"`` (strict VMEC2000-style control path), and
+        ``"accelerated"`` (experimental non-parity path that prioritizes
+        final residual/quality and device residency).
     """
     # Default to 64-bit for VMEC parity; users can opt out via JAX_ENABLE_X64=0.
     try:
@@ -559,6 +935,20 @@ def run_fixed_boundary(
         pass
     _maybe_enable_compilation_cache()
     cfg, indata = load_config(str(input_path))
+    solver_mode_explicit = solver_mode is not None
+    if solver_mode is None and bool(performance_mode):
+        solver_mode, performance_mode = default_non_autodiff_solver_policy(indata)
+    solver_mode_eff = _normalize_solver_mode(solver_mode=solver_mode, performance_mode=bool(performance_mode))
+    accelerated_mode = solver_mode_eff == "accelerated"
+    performance_mode = solver_mode_eff != "parity"
+    cli_fixed_boundary_mode = bool(cli_fixed_boundary_mode) or (
+        bool(_auto_cli_fixed_boundary_mode)
+        and (not bool(solver_mode_explicit))
+        and (not bool(cfg.lfreeb))
+        and bool(performance_mode)
+        and (grid is None)
+        and str(solver).strip().lower() == "vmec2000_iter"
+    )
     restart_state_eff = restart_state
     restart_wout = None
     if restart_wout_path is not None:
@@ -633,9 +1023,583 @@ def run_fixed_boundary(
             return [value]
         return None
 
+    ns_list_input = _as_list(indata.get("NS_ARRAY", None))
+    niter_list_input = _as_list(indata.get("NITER_ARRAY", None))
+    ftol_list_input = _as_list(indata.get("FTOL_ARRAY", None))
+    cli_budgeted_multigrid_requested = (
+        bool(cli_fixed_boundary_mode)
+        and bool(accelerated_mode)
+        and (solver_lower in ("vmec2000_iter", "vmec2000_scan", "vmec2000_iter_fast"))
+        and (not bool(cfg.lfreeb))
+        and (restart_state_eff is None)
+        and (restart_solver_state is None)
+        and (multigrid is None)
+        and (ns_list_input is not None)
+        and (len(ns_list_input) > 1)
+        and (niter_list_input is None)
+    )
+    cli_fixed_boundary_finish_enabled = (
+        bool(cli_fixed_boundary_mode)
+        and (solver_lower == "vmec2000_iter")
+        and (not bool(cfg.lfreeb))
+    )
+
+    def _run_cli_accelerated_budgeted_multigrid(
+        *,
+        ns_stage_list: list[int],
+        warm_start_budget: int,
+        final_stage_budget: int,
+    ):
+        stage_budgets = _accelerated_cli_budgeted_stage_iters(
+            total_budget=int(warm_start_budget),
+            ns_stages=ns_stage_list,
+        )
+        if stage_budgets:
+            stage_budgets[-1] = max(int(stage_budgets[-1]), int(final_stage_budget))
+        stage_runs: list[FixedBoundaryRun] = []
+        stage_state = None
+        stage_static_prev = None
+        stage_modes: list[str] = []
+        for idx, (ns_i, niter_i) in enumerate(zip(ns_stage_list, stage_budgets)):
+            is_final_stage = idx == (len(ns_stage_list) - 1)
+            stage_mode_i = "parity" if bool(is_final_stage) else "accelerated"
+            if stage_state is not None and int(stage_static_prev.cfg.ns) != int(ns_i):
+                stage_state = interp_vmec_state(
+                    stage_state,
+                    m=stage_static_prev.modes.m,
+                    n=stage_static_prev.modes.n,
+                    lthreed=bool(stage_static_prev.cfg.lthreed),
+                    lconm1=bool(getattr(stage_static_prev.cfg, "lconm1", True)),
+                    ns_new=int(ns_i),
+                )
+            kwargs = dict(
+                solver="vmec2000_iter",
+                solver_mode=stage_mode_i,
+                max_iter=int(niter_i),
+                step_size=step_size,
+                history_size=int(history_size),
+                gn_damping=gn_damping,
+                gn_cg_tol=gn_cg_tol,
+                gn_cg_maxiter=int(gn_cg_maxiter),
+                use_initial_guess=False,
+                vmec_project=bool(vmec_project),
+                use_restart_triggers=use_restart_triggers,
+                vmecpp_restart=bool(vmecpp_restart),
+                use_direct_fallback=use_direct_fallback,
+                multigrid=False,
+                multigrid_use_input_niter=False,
+                verbose=bool(verbose),
+                jit_forces=jit_forces,
+                jit_precompile=jit_precompile,
+                use_scan=False if bool(is_final_stage) else bool(use_scan),
+                performance_mode=False if bool(is_final_stage) else True,
+                scan_wout_corrector=scan_wout_corrector,
+                stage_transition_heuristic=stage_transition_heuristic,
+                stage_transition_factor=float(stage_transition_factor),
+                stage_transition_scale=float(stage_transition_scale),
+                grid=grid,
+                cli_fixed_boundary_mode=False,
+                _auto_cli_fixed_boundary_mode=False,
+            )
+            if stage_state is None:
+                kwargs["ns_override"] = int(ns_i)
+            else:
+                kwargs["restart_state"] = stage_state
+            stage_run = run_fixed_boundary(input_path, **kwargs)
+            stage_runs.append(stage_run)
+            stage_modes.append(str(stage_mode_i))
+            stage_state = stage_run.state
+            stage_static_prev = stage_run.static
+
+        final_run = stage_runs[-1]
+        if final_run.result is None:
+            return final_run
+        diag = dict(final_run.result.diagnostics)
+        diag["solver_mode"] = str(solver_mode_eff)
+        diag["accelerated_mode"] = True
+        diag["cli_fixed_boundary_mode"] = True
+        diag["cli_accelerated_fixed_policy"] = "budgeted_multigrid"
+        diag["cli_accelerated_stage_ns"] = np.asarray(ns_stage_list, dtype=int)
+        diag["cli_accelerated_stage_niter"] = np.asarray(stage_budgets, dtype=int)
+        diag["cli_accelerated_stage_modes"] = np.asarray(stage_modes, dtype=object)
+        diag["cli_accelerated_stage_fsq"] = np.asarray(
+            [float(np.asarray(stage_run.result.w_history)[-1]) for stage_run in stage_runs],
+            dtype=float,
+        )
+        diag["cli_accelerated_budget_total"] = int(warm_start_budget)
+        diag["cli_accelerated_final_stage_budget"] = int(final_stage_budget)
+        diag["multigrid_ns_stages"] = np.asarray(ns_stage_list, dtype=int)
+        diag["multigrid_niter_stages"] = np.asarray(stage_budgets, dtype=int)
+        diag["accelerated_single_grid_default"] = False
+        final_run = replace(final_run, result=replace(final_run.result, diagnostics=diag))
+        return _maybe_finish_cli_fixed_boundary_run(
+            final_run,
+            initial_policy="budgeted_multigrid",
+            enabled=bool(cli_fixed_boundary_finish_enabled),
+        )
+
+    def _run_cli_explicit_staged_followup(
+        *,
+        ns_stage_list: list[int],
+        niter_stage_list: list[int],
+        ftol_stage_list: list[float],
+    ) -> FixedBoundaryRun:
+        stage_runs: list[FixedBoundaryRun] = []
+        stage_state = None
+        stage_static_prev = None
+        stage_modes: list[str] = []
+        for idx, (ns_i, niter_i, ftol_i) in enumerate(zip(ns_stage_list, niter_stage_list, ftol_stage_list)):
+            if int(niter_i) <= 0:
+                continue
+            is_final_stage = idx == (len(ns_stage_list) - 1)
+            if bool(is_final_stage):
+                stage_mode_i = "parity"
+            elif bool(cfg.lthreed) and int(idx) == 0:
+                # On staged 3D fixed-boundary cases, the coarsest continuation
+                # stage determines which solution branch the later continuation
+                # follows. Keep the entry and final stages on the conservative
+                # VMEC-like controller, and accelerate only interior stages.
+                stage_mode_i = "parity"
+            else:
+                stage_mode_i = "accelerated"
+            if stage_state is not None and int(stage_static_prev.cfg.ns) != int(ns_i):
+                stage_state = interp_vmec_state(
+                    stage_state,
+                    m=stage_static_prev.modes.m,
+                    n=stage_static_prev.modes.n,
+                    lthreed=bool(stage_static_prev.cfg.lthreed),
+                    lconm1=bool(getattr(stage_static_prev.cfg, "lconm1", True)),
+                    ns_new=int(ns_i),
+                )
+            kwargs = dict(
+                solver="vmec2000_iter",
+                solver_mode=stage_mode_i,
+                max_iter=int(niter_i),
+                step_size=step_size,
+                history_size=int(history_size),
+                gn_damping=gn_damping,
+                gn_cg_tol=gn_cg_tol,
+                gn_cg_maxiter=int(gn_cg_maxiter),
+                use_initial_guess=False,
+                vmec_project=bool(vmec_project),
+                use_restart_triggers=use_restart_triggers,
+                vmecpp_restart=bool(vmecpp_restart),
+                use_direct_fallback=use_direct_fallback,
+                multigrid=False,
+                multigrid_use_input_niter=False,
+                verbose=bool(verbose),
+                jit_forces=jit_forces,
+                jit_precompile=jit_precompile,
+                use_scan=False if bool(is_final_stage) else bool(use_scan),
+                performance_mode=False if bool(is_final_stage) else True,
+                scan_wout_corrector=scan_wout_corrector,
+                stage_transition_heuristic=stage_transition_heuristic,
+                stage_transition_factor=float(stage_transition_factor),
+                stage_transition_scale=float(stage_transition_scale),
+                grid=grid,
+                cli_fixed_boundary_mode=False,
+                _auto_cli_fixed_boundary_mode=False,
+            )
+            if stage_state is None:
+                kwargs["ns_override"] = int(ns_i)
+            else:
+                kwargs["restart_state"] = stage_state
+            stage_run = run_fixed_boundary(input_path, **kwargs)
+            stage_runs.append(stage_run)
+            stage_modes.append(str(stage_mode_i))
+            stage_state = stage_run.state
+            stage_static_prev = stage_run.static
+
+        final_run = stage_runs[-1]
+        if final_run.result is None:
+            return final_run
+        diag = dict(final_run.result.diagnostics)
+        diag["solver_mode"] = str(solver_mode_eff)
+        diag["accelerated_mode"] = True
+        diag["cli_fixed_boundary_mode"] = True
+        diag["cli_staged_followup_policy"] = "input_multigrid"
+        diag["cli_staged_followup_stage_ns"] = np.asarray(ns_stage_list, dtype=int)
+        diag["cli_staged_followup_stage_niter"] = np.asarray(niter_stage_list, dtype=int)
+        diag["cli_staged_followup_stage_modes"] = np.asarray(stage_modes, dtype=object)
+        diag["cli_staged_followup_stage_fsq"] = np.asarray(
+            [float(np.asarray(stage_run.result.w_history)[-1]) for stage_run in stage_runs],
+            dtype=float,
+        )
+        final_run = replace(final_run, result=replace(final_run.result, diagnostics=diag))
+        return final_run
+
+    def _maybe_finish_cli_fixed_boundary_run(
+        run_in: FixedBoundaryRun,
+        *,
+        initial_policy: str,
+        enabled: bool,
+    ) -> FixedBoundaryRun:
+        if not bool(enabled):
+            return run_in
+        if run_in.result is None:
+            return run_in
+        base_diag = dict(run_in.result.diagnostics)
+        base_diag["solver_mode"] = str(solver_mode_eff)
+        base_diag["accelerated_mode"] = bool(accelerated_mode)
+        base_diag["cli_fixed_boundary_mode"] = True
+        base_diag["cli_fixed_boundary_initial_policy"] = str(initial_policy)
+        requested_ftol = _requested_final_ftol(indata=indata, ftol_list_input=ftol_list_input)
+        target_fsq = _accelerated_fsq_total_target_from_ftol(float(requested_ftol))
+        base_diag["requested_ftol"] = float(requested_ftol)
+        base_diag["fsq_total_target"] = float(target_fsq)
+        staged_input = (ns_list_input is not None) and (len(ns_list_input) > 1)
+        explicit_niter_stages = (
+            [int(v) for v in niter_list_input]
+            if (niter_list_input is not None) and (len(niter_list_input) == len(ns_list_input or []))
+            else None
+        )
+        require_staged_followup = (
+            bool(accelerated_mode)
+            and str(initial_policy) == "single_grid"
+            and bool(staged_input)
+            and (explicit_niter_stages is not None)
+            and bool(cfg.lthreed)
+            and (not bool(deferred_staged_current_driven_3d_cli))
+        )
+        run_in_strict = _result_meets_requested_ftol(run_in.result, ftol=float(requested_ftol))
+        run_in_total = _result_hits_total_target(run_in.result, fsq_total_target=float(target_fsq))
+        if (
+            bool(run_in.result.diagnostics.get("converged", False))
+            and bool(run_in_strict)
+            and (not bool(require_staged_followup))
+        ):
+            base_diag["cli_fixed_boundary_finish_budgets"] = np.zeros((0,), dtype=int)
+            base_diag["cli_fixed_boundary_finish_fsq"] = np.zeros((0,), dtype=float)
+            base_diag["cli_fixed_boundary_finish_converged"] = np.zeros((0,), dtype=bool)
+            base_diag["cli_fixed_boundary_finish_modes"] = np.asarray([], dtype=object)
+            base_diag["cli_fixed_boundary_full_parity_fallback"] = False
+            base_diag["converged"] = True
+            base_diag["converged_strict"] = True
+            base_diag["converged_by_total_fsq"] = bool(run_in_total)
+            return replace(run_in, result=replace(run_in.result, diagnostics=base_diag))
+        if (
+            bool(run_in_strict)
+            and (not bool(require_staged_followup))
+        ):
+            base_diag["converged"] = True
+            base_diag["converged_strict"] = True
+            base_diag["converged_by_total_fsq"] = bool(run_in_total)
+            base_diag["cli_fixed_boundary_finish_budgets"] = np.zeros((0,), dtype=int)
+            base_diag["cli_fixed_boundary_finish_fsq"] = np.zeros((0,), dtype=float)
+            base_diag["cli_fixed_boundary_finish_converged"] = np.zeros((0,), dtype=bool)
+            base_diag["cli_fixed_boundary_finish_modes"] = np.asarray([], dtype=object)
+            base_diag["cli_fixed_boundary_full_parity_fallback"] = False
+            return replace(run_in, result=replace(run_in.result, diagnostics=base_diag))
+
+        base_total_budget = max(1, int(max_iter))
+
+        best_run = run_in
+        best_fsq = float(_result_final_fsq(run_in.result))
+        attempt_budgets: list[int] = []
+        attempt_fsq: list[float] = []
+        attempt_converged: list[bool] = []
+        attempt_modes: list[str] = []
+        fallback_used = False
+        staged_followup_used = False
+        staged_followup_policy = ""
+        staged_followup_ns = np.zeros((0,), dtype=int)
+        staged_followup_niter = np.zeros((0,), dtype=int)
+        staged_followup_modes = np.asarray([], dtype=object)
+        staged_followup_fsq = np.zeros((0,), dtype=float)
+
+        def _sanitize_minimal_resume_state(resume_state):
+            if not isinstance(resume_state, dict):
+                return resume_state
+            time_step = resume_state.get("time_step", None)
+            if time_step is None:
+                return resume_state
+            try:
+                time_step_f = float(time_step)
+            except Exception:
+                return resume_state
+            out = {
+                "time_step": float(time_step_f),
+                "inv_tau": list(resume_state.get("inv_tau", [0.15 / max(abs(time_step_f), 1.0e-16)] * 10)),
+                "iter_offset": int(resume_state.get("iter_offset", 0)),
+                "vmec2000_cache_valid": bool(resume_state.get("vmec2000_cache_valid", False)),
+            }
+            if "flip_sign" in resume_state:
+                try:
+                    out["flip_sign"] = float(resume_state["flip_sign"])
+                except Exception:
+                    pass
+            return out
+
+        def _resolve_finish_jit_forces(static_i: VMECStatic, niter_i: int) -> bool:
+            if isinstance(jit_forces, str):
+                if jit_forces.strip().lower() != "auto":
+                    return True
+                try:
+                    nmodes_i = int(np.asarray(static_i.modes.m).size)
+                    nrzt = int(static_i.cfg.ns) * int(static_i.cfg.ntheta) * int(static_i.cfg.nzeta)
+                    work = nmodes_i * nrzt
+                except Exception:
+                    return True
+                if int(niter_i) >= 5:
+                    return True
+                return bool(work >= 2_000_000)
+            return bool(jit_forces)
+
+        def _run_finish_attempt(*, budget_i: int, mode_i: str, use_scan_i: bool, performance_mode_i: bool):
+            static_i = best_run.static
+            mode_i_l = str(mode_i).strip().lower()
+            scan_minimal_default_i = True if (bool(performance_mode_i) and (not bool(verbose))) else None
+            host_update_assembly_i = (
+                bool(performance_mode_i)
+                and (not bool(static_i.cfg.lasym))
+                and (_default_backend_name() == "cpu")
+            )
+            if step_size is _STEP_SIZE_SENTINEL or step_size is None:
+                step_size_finish = float(indata.get_float("DELT", 5e-3))
+            else:
+                step_size_finish = float(step_size)
+            finish_fsq_total_target = float(target_fsq) if mode_i_l == "accelerated" else None
+            finish_resume_state_mode = "minimal" if mode_i_l == "accelerated" else "full"
+            res_i = solve_fixed_boundary_residual_iter(
+                best_run.state,
+                static_i,
+                indata=indata,
+                signgs=best_run.signgs,
+                ftol=float(indata.get_float("FTOL", 1.0e-13)),
+                max_iter=int(budget_i),
+                step_size=float(step_size_finish),
+                include_constraint_force=True,
+                apply_m1_constraints=True,
+                precond_radial_alpha=0.5,
+                precond_lambda_alpha=0.5,
+                mode_diag_exponent=0.0,
+                auto_flip_force=False,
+                divide_by_scalxc_for_update=False,
+                lambda_update_scale=1.0,
+                enforce_vmec_lambda_axis=True,
+                vmec2000_control=True,
+                strict_update=True,
+                backtracking=False,
+                reference_mode=False,
+                use_restart_triggers=True if use_restart_triggers is None else bool(use_restart_triggers),
+                vmecpp_restart=bool(vmecpp_restart),
+                stage_prev_fsq=None,
+                stage_transition_factor=float(stage_transition_factor),
+                stage_transition_scale=float(stage_transition_scale),
+                use_direct_fallback=use_direct_fallback,
+                # CLI finish attempts deliberately restart from the current
+                # equilibrium state only. Reusing the nonlinear controller
+                # caches was materially less robust on the hard staged inputs.
+                resume_state=None,
+                verbose=False,
+                verbose_vmec2000_table=False,
+                jit_precompile=False,
+                jit_warmup_iters=0,
+                use_scan=bool(use_scan_i),
+                scan_minimal_default=scan_minimal_default_i,
+                light_history=True,
+                resume_state_mode=finish_resume_state_mode,
+                fsq_total_target=finish_fsq_total_target,
+                host_update_assembly=host_update_assembly_i,
+                jit_forces=_resolve_finish_jit_forces(static_i, int(budget_i)),
+            )
+            return replace(best_run, state=res_i.state, result=res_i)
+
+        if staged_input and bool(accelerated_mode) and str(initial_policy) == "single_grid":
+            explicit_ftol_stages = (
+                [float(v) for v in ftol_list_input]
+                if (ftol_list_input is not None) and (len(ftol_list_input) == len(ns_list_input))
+                else [float(indata.get_float("FTOL", 1.0e-13))] * len(ns_list_input)
+            )
+            missed_target = not bool(_result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol)))
+            should_run_staged_followup = bool(explicit_niter_stages is not None) and (
+                bool(require_staged_followup) or bool(missed_target)
+            )
+            if should_run_staged_followup:
+                staged_followup = _run_cli_explicit_staged_followup(
+                    ns_stage_list=[int(v) for v in ns_list_input],
+                    niter_stage_list=explicit_niter_stages,
+                    ftol_stage_list=explicit_ftol_stages,
+                )
+                staged_followup_used = True
+                staged_followup_policy = "input_multigrid"
+                staged_diag = dict(staged_followup.result.diagnostics)
+                staged_followup_ns = np.asarray(staged_diag.get("cli_staged_followup_stage_ns", []), dtype=int)
+                staged_followup_niter = np.asarray(staged_diag.get("cli_staged_followup_stage_niter", []), dtype=int)
+                staged_followup_modes = np.asarray(staged_diag.get("cli_staged_followup_stage_modes", []), dtype=object)
+                staged_followup_fsq = np.asarray(staged_diag.get("cli_staged_followup_stage_fsq", []), dtype=float)
+                staged_fsq_val = float(_result_final_fsq(staged_followup.result))
+                staged_conv = bool(_result_meets_requested_ftol(staged_followup.result, ftol=float(requested_ftol)))
+                if staged_conv or (staged_fsq_val < float(best_fsq)):
+                    best_run = staged_followup
+                    best_fsq = float(staged_fsq_val)
+
+        max_fallback_budget = int(2 * base_total_budget)
+        improvement_floor = np.finfo(float).eps * max(1.0, abs(float(best_fsq)), abs(float(target_fsq)))
+        if (
+            bool(accelerated_mode)
+            and str(initial_policy) == "single_grid"
+            and (not bool(staged_followup_used))
+            and not bool(_result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol)))
+        ):
+            accel_budget_i = int(base_total_budget)
+            accel_budget_used = 0
+            while int(accel_budget_i) >= 1 and int(accel_budget_used) < int(max_fallback_budget):
+                prev_best_fsq = float(best_fsq)
+                trial = _run_finish_attempt(
+                    budget_i=accel_budget_i,
+                    mode_i="accelerated",
+                    use_scan_i=True,
+                    performance_mode_i=True,
+                )
+                trial_fsq = float(_result_final_fsq(trial.result))
+                trial_conv = bool(_result_meets_requested_ftol(trial.result, ftol=float(requested_ftol)))
+                attempt_budgets.append(int(accel_budget_i))
+                attempt_fsq.append(float(trial_fsq))
+                attempt_converged.append(bool(trial_conv))
+                attempt_modes.append("accelerated")
+                accel_budget_used += int(accel_budget_i)
+                improved = trial_conv or (float(trial_fsq) < float(prev_best_fsq - improvement_floor))
+                if improved:
+                    best_run = trial
+                    best_fsq = float(trial_fsq)
+                if trial_conv or (not improved):
+                    break
+        if not bool(_result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol))):
+            budget_i = int(base_total_budget)
+            while int(budget_i) >= 1:
+                prev_best_fsq = float(best_fsq)
+                trial = _run_finish_attempt(
+                    budget_i=budget_i,
+                    mode_i="parity",
+                    use_scan_i=False,
+                    performance_mode_i=False,
+                )
+                trial_fsq = float(_result_final_fsq(trial.result))
+                trial_conv = bool(_result_meets_requested_ftol(trial.result, ftol=float(requested_ftol)))
+                attempt_budgets.append(int(budget_i))
+                attempt_fsq.append(float(trial_fsq))
+                attempt_converged.append(bool(trial_conv))
+                attempt_modes.append("parity")
+                improved = trial_conv or (float(trial_fsq) < float(prev_best_fsq - improvement_floor))
+                if improved:
+                    best_run = trial
+                    best_fsq = float(trial_fsq)
+                if trial_conv:
+                    break
+                if improved:
+                    continue
+                next_budget = max(1, int(np.ceil(float(budget_i) / 2.0)))
+                if int(next_budget) == int(budget_i):
+                    break
+                budget_i = int(next_budget)
+
+        if staged_input and not (
+            bool(_result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol)))
+        ) and bool(accelerated_mode):
+            fallback_used = True
+            fallback = run_fixed_boundary(
+                input_path,
+                solver="vmec2000_iter",
+                solver_mode="parity",
+                max_iter=int(max_fallback_budget),
+                step_size=step_size,
+                history_size=int(history_size),
+                gn_damping=gn_damping,
+                gn_cg_tol=gn_cg_tol,
+                gn_cg_maxiter=int(gn_cg_maxiter),
+                use_initial_guess=False,
+                vmec_project=bool(vmec_project),
+                use_restart_triggers=use_restart_triggers,
+                vmecpp_restart=bool(vmecpp_restart),
+                use_direct_fallback=use_direct_fallback,
+                multigrid=multigrid if bool(multigrid_user_provided) else None,
+                multigrid_use_input_niter=bool(multigrid_use_input_niter),
+                verbose=bool(verbose),
+                jit_forces=jit_forces,
+                jit_precompile=jit_precompile,
+                use_scan=False,
+                performance_mode=False,
+                scan_wout_corrector=scan_wout_corrector,
+                stage_transition_heuristic=stage_transition_heuristic,
+                stage_transition_factor=float(stage_transition_factor),
+                stage_transition_scale=float(stage_transition_scale),
+                grid=grid,
+                cli_fixed_boundary_mode=False,
+                _auto_cli_fixed_boundary_mode=False,
+            )
+            fallback_fsq = float(_result_final_fsq(fallback.result))
+            fallback_conv = bool(_result_meets_requested_ftol(fallback.result, ftol=float(requested_ftol)))
+            if fallback_conv or fallback_fsq < best_fsq:
+                best_run = fallback
+                best_fsq = float(fallback_fsq)
+
+        diag = dict(base_diag)
+        diag.update(best_run.result.diagnostics)
+        diag["solver_mode"] = str(solver_mode_eff)
+        diag["accelerated_mode"] = bool(accelerated_mode)
+        diag["cli_fixed_boundary_mode"] = True
+        diag["cli_fixed_boundary_initial_policy"] = str(initial_policy)
+        final_residuals = _result_final_residuals(best_run.result)
+        strict_converged = bool(_result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol)))
+        total_converged = bool(_result_hits_total_target(best_run.result, fsq_total_target=float(target_fsq)))
+        diag["requested_ftol"] = float(requested_ftol)
+        if final_residuals is not None:
+            diag["final_fsqr"] = float(final_residuals[0])
+            diag["final_fsqz"] = float(final_residuals[1])
+            diag["final_fsql"] = float(final_residuals[2])
+        diag["converged"] = bool(strict_converged)
+        diag["converged_strict"] = bool(strict_converged)
+        diag["converged_by_total_fsq"] = bool(total_converged)
+        diag["cli_fixed_boundary_finish_budgets"] = np.asarray(attempt_budgets, dtype=int)
+        diag["cli_fixed_boundary_finish_fsq"] = np.asarray(attempt_fsq, dtype=float)
+        diag["cli_fixed_boundary_finish_converged"] = np.asarray(attempt_converged, dtype=bool)
+        diag["cli_fixed_boundary_finish_modes"] = np.asarray(attempt_modes)
+        diag["cli_fixed_boundary_full_parity_fallback"] = bool(fallback_used)
+        diag["cli_fixed_boundary_staged_followup_used"] = bool(staged_followup_used)
+        diag["cli_fixed_boundary_staged_followup_policy"] = str(staged_followup_policy)
+        diag["cli_fixed_boundary_staged_followup_ns"] = staged_followup_ns
+        diag["cli_fixed_boundary_staged_followup_niter"] = staged_followup_niter
+        diag["cli_fixed_boundary_staged_followup_modes"] = staged_followup_modes
+        diag["cli_fixed_boundary_staged_followup_fsq"] = staged_followup_fsq
+        diag["multigrid_user_provided"] = bool(multigrid_user_provided)
+        diag["accelerated_single_grid_default"] = bool(accelerated_single_grid_default)
+        if bool(accelerated_mode):
+            diag["resume_state_mode"] = "minimal"
+            diag["resume_state"] = _sanitize_minimal_resume_state(diag.get("resume_state"))
+        best_run = replace(best_run, result=replace(best_run.result, diagnostics=diag))
+        return best_run
+
     multigrid_use_input_niter = bool(multigrid_use_input_niter)
+    multigrid_user_provided = multigrid is not None
+    accelerated_single_grid_default = False
+    current_driven_3d_cli = (
+        bool(cli_fixed_boundary_mode)
+        and bool(accelerated_mode)
+        and (not bool(cfg.lfreeb))
+        and bool(cfg.lthreed)
+        and (ns_list_input is not None)
+        and (len(ns_list_input) > 1)
+        and (niter_list_input is not None)
+        and (len(niter_list_input) == len(ns_list_input))
+        and (int(indata.get_int("NCURR", 0)) != 0)
+    )
+    direct_staged_current_driven_3d_cli = bool(current_driven_3d_cli)
+    deferred_staged_current_driven_3d_cli = bool(current_driven_3d_cli) and (
+        not bool(direct_staged_current_driven_3d_cli)
+    )
     if multigrid is None:
         multigrid = solver_lower == "vmec2000_iter"
+        if bool(cli_budgeted_multigrid_requested):
+            multigrid = True
+        elif bool(direct_staged_current_driven_3d_cli):
+            multigrid = True
+        elif accelerated_mode and (not bool(cfg.lfreeb)):
+            # In accelerated fixed-boundary mode, direct final-grid solves avoid
+            # per-stage interpolation/recompilation overhead and have been more
+            # efficient across the heavy bundled cases tested so far.
+            multigrid = False
+            accelerated_single_grid_default = True
     if max_iter is _MAX_ITER_SENTINEL:
         if solver_lower in ("vmec2000_iter", "vmec2000_scan", "vmec2000_iter_fast"):
             niter_list = _as_list(indata.get("NITER_ARRAY", None))
@@ -677,19 +1641,25 @@ def run_fixed_boundary(
     # use_initial_guess) or on the first multigrid stage for VMEC-style solves.
     ns_stages = [int(cfg.ns)]
     if multigrid:
-        ns_array = indata.get("NS_ARRAY", None)
-        ns_list = _as_list(ns_array)
-        if ns_list:
-            ns_stages = [int(v) for v in ns_list]
+        if ns_list_input:
+            ns_stages = [int(v) for v in ns_list_input]
 
     # When NITER_ARRAY is present, treat it as the authoritative total unless
     # the caller explicitly overrides max_iter.
-    niter_list = _as_list(indata.get("NITER_ARRAY", None))
+    niter_list = niter_list_input
     if niter_list:
         niter_sum = int(sum(int(v) for v in niter_list))
         niter_default = int(indata.get_int("NITER", max_iter))
         if (not max_iter_overridden) and int(max_iter) == niter_default:
             max_iter = niter_sum
+
+    if bool(cli_budgeted_multigrid_requested):
+        budget_total = _accelerated_cli_budgeted_total_iters(total_budget=int(max_iter), ns_stages=ns_stages)
+        return _run_cli_accelerated_budgeted_multigrid(
+            ns_stage_list=list(ns_stages),
+            warm_start_budget=int(budget_total),
+            final_stage_budget=int(max_iter),
+        )
 
     # Precompute boundary coefficients without triggering JAX initialization.
     boundary_coeffs = None
@@ -922,15 +1892,13 @@ def run_fixed_boundary(
             signgs=signgs,
             max_iter=int(max_iter),
             step_size=float(step_size_val),
-            damping=float(gn_damping),
-            cg_tol=float(gn_cg_tol),
+            damping=None if gn_damping is None else float(gn_damping),
+            cg_tol=None if gn_cg_tol is None else float(gn_cg_tol),
             cg_maxiter=int(gn_cg_maxiter),
             jit_kernels=True,
             verbose=bool(verbose),
         )
     elif solver == "vmec2000_iter":
-        from .solve import SolveVmecResidualResult, solve_fixed_boundary_residual_iter
-
         def _distribute_iters(*, iters: int, nstep: int) -> list[int]:
             iters = int(iters)
             nstep = int(nstep)
@@ -951,11 +1919,23 @@ def run_fixed_boundary(
         ftol_list = _as_list(ftol_array)
         niter_stages_input = [int(v) for v in niter_list] if niter_list and len(niter_list) == nstep else None
         ftol_stages_input = [float(v) for v in ftol_list] if ftol_list and len(ftol_list) == nstep else None
+        accelerated_single_grid_budget = (
+            bool(accelerated_single_grid_default)
+            and (not bool(multigrid_user_provided))
+            and int(nstep) == 1
+            and bool(niter_list)
+            and (not bool(max_iter_overridden))
+        )
         if multigrid_use_input_niter:
             niter_stages = niter_stages_input
             ftol_stages = ftol_stages_input
             if niter_stages is None:
-                if max_iter_overridden:
+                if accelerated_single_grid_budget:
+                    # Accelerated single-grid runs collapse the staged solve to
+                    # a single final-grid solve, but they should still honor
+                    # the total input iteration budget implied by NITER_ARRAY.
+                    niter_stages = [int(max_iter)]
+                elif max_iter_overridden:
                     # Explicit caller budget: distribute total iterations across stages.
                     niter_stages = _distribute_iters(iters=int(max_iter), nstep=int(nstep))
                 else:
@@ -979,7 +1959,10 @@ def run_fixed_boundary(
                     remaining -= take
                 niter_stages = out
             if ftol_stages is None:
-                ftol_stages = [float(indata.get_float("FTOL", 1e-13))] * nstep
+                if bool(accelerated_single_grid_default) and int(nstep) == 1 and bool(ftol_list):
+                    ftol_stages = [float(ftol_list[-1])]
+                else:
+                    ftol_stages = [float(indata.get_float("FTOL", 1e-13))] * nstep
         else:
             niter_stages = _distribute_iters(iters=int(max_iter), nstep=int(nstep))
             # VMEC2000 uses FTOL_ARRAY when present, even for single-stage runs.
@@ -1049,11 +2032,26 @@ def run_fixed_boundary(
         precompile_stages = env_precompile_stages.strip().lower() not in ("", "0", "false", "no")
 
         prev_stage_fsq = None
+        stage_mode_history: list[str] = []
         ftol_last = None
         step_size_last = None
         for i, (ns_i, niter_i, ftol_i) in enumerate(zip(ns_stages, niter_stages, ftol_stages)):
             if int(niter_i) <= 0:
                 continue
+            stage_accelerated_mode = bool(accelerated_mode)
+            if (
+                bool(stage_accelerated_mode)
+                and bool(direct_staged_current_driven_3d_cli)
+                and bool(cfg.lasym)
+            ):
+                # LASYM current-driven 3D staged runs remain noticeably more
+                # sensitive in lambda than in geometry. The mixed accelerated
+                # controller was slightly faster here, but it consistently
+                # degraded the final lambda channels versus the conservative
+                # staged baseline. Keep this class fully on the conservative
+                # controller until the lambda mismatch is closed numerically.
+                stage_accelerated_mode = False
+            stage_mode_history.append("accelerated" if bool(stage_accelerated_mode) else "parity")
             if verbose:
                 print(
                     f"  NS = {int(ns_i):4d} NO. FOURIER MODES = {nmodes_header:4d} "
@@ -1075,7 +2073,9 @@ def run_fixed_boundary(
 
             cfg_i = replace(cfg, ns=int(ns_i))
             static_i = _build_static_cfg(cfg_i)
-            scan_mode = bool(use_scan)
+            scan_mode = bool(use_scan) if bool(stage_accelerated_mode) else False
+            if stage_accelerated_mode:
+                scan_mode = not bool(cfg_i.lfreeb)
             if bool(cfg.lasym):
                 # For LASYM fixed-boundary stages, allow scan as a candidate in
                 # the default fast path and let the automatic selector decide
@@ -1085,12 +2085,18 @@ def run_fixed_boundary(
                     scan_mode = False
                 elif lasym_scan_env not in ("", "auto"):
                     scan_mode = True
+            if bool(accelerated_mode) and bool(current_driven_3d_cli) and (not bool(cfg.lasym)):
+                # Current-driven non-axisymmetric fixed-boundary cases are much
+                # more sensitive in lambda than in force-balance geometry. Keep
+                # the accelerated controller and lightweight histories, but use
+                # the conservative non-scan residual path for this class.
+                scan_mode = False
             # Optional scan-parity guard: probe a few iterations and disable scan
             # if it diverges from the non-scan VMEC2000 path.
             scan_guard_default = "0"
             scan_guard_env = os.getenv("VMEC_JAX_SCAN_PARITY_GUARD", scan_guard_default).strip().lower()
             scan_guard_enabled = scan_guard_env not in ("", "0", "false", "no")
-            if scan_mode and scan_guard_enabled and int(niter_i) >= 3:
+            if (not accelerated_mode) and scan_mode and scan_guard_enabled and int(niter_i) >= 3:
                 probe_iters = min(10, int(niter_i))
                 try:
                     guard_rtol = float(os.getenv("VMEC_JAX_SCAN_GUARD_RTOL", "1e-3"))
@@ -1245,6 +2251,20 @@ def run_fixed_boundary(
             stage_offsets.append(sum(int(np.asarray(r.w_history).size) for r in stage_results))
             vmec2000_ctrl = True
             stage_prev_fsq = prev_stage_fsq if bool(stage_transition_heuristic) else None
+            stage_light_history = (
+                True
+                if (bool(performance_mode) and (not bool(verbose)) and (not bool(cfg.lfreeb)))
+                else None
+            )
+            stage_resume_state_mode = "minimal" if stage_accelerated_mode else None
+            stage_fsq_total_target = (
+                _accelerated_fsq_total_target_from_ftol(float(ftol_i)) if stage_accelerated_mode else None
+            )
+            stage_host_update_assembly = (
+                bool(performance_mode)
+                and (not bool(cfg_i.lasym))
+                and (_default_backend_name() == "cpu")
+            )
             solve_kwargs = dict(
                 indata=indata,
                 signgs=signgs,
@@ -1277,11 +2297,17 @@ def run_fixed_boundary(
                 jit_warmup_iters=int(jit_warmup_iters),
                 jit_precompile=bool(jit_precompile_eff),
                 scan_minimal_default=scan_minimal_default,
+                light_history=stage_light_history,
+                resume_state_mode=stage_resume_state_mode,
+                fsq_total_target=stage_fsq_total_target,
+                host_update_assembly=stage_host_update_assembly,
             )
             dynamic_scan_default = "1" if bool(cfg.lasym) else "0"
             dynamic_scan_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN", dynamic_scan_default).strip().lower()
             dynamic_scan = dynamic_scan_env not in ("", "0", "false", "no")
             if (
+                (not accelerated_mode)
+                and
                 dynamic_scan
                 and bool(performance_mode)
                 and bool(scan_mode)
@@ -1457,7 +2483,7 @@ def run_fixed_boundary(
                 )
             # Auto-fast fallback: if scan hits a bad-Jacobian path, rerun the stage
             # in the parity-safe non-scan mode.
-            if bool(performance_mode) and bool(scan_mode):
+            if (not accelerated_mode) and bool(performance_mode) and bool(scan_mode):
                 try:
                     if bool(res_i.diagnostics.get("vmec2000_scan", False)) and bool(res_i.diagnostics.get("abort_scan", False)):
                         if bool(verbose):
@@ -1519,10 +2545,16 @@ def run_fixed_boundary(
             return np.concatenate(parts, axis=0) if parts else np.zeros((0,), dtype=float)
 
         diag = dict(stage_results[-1].diagnostics)
+        diag["solver_mode"] = str(solver_mode_eff)
+        diag["accelerated_mode"] = bool(accelerated_mode)
+        diag["accelerated_scan"] = bool(accelerated_mode) and bool(diag.get("use_scan", False))
+        diag["multigrid_user_provided"] = bool(multigrid_user_provided)
+        diag["accelerated_single_grid_default"] = bool(accelerated_single_grid_default)
         diag["multigrid_ns_stages"] = np.asarray(ns_stages, dtype=int)
         diag["multigrid_niter_stages"] = np.asarray(niter_stages, dtype=int)
         diag["multigrid_ftol_stages"] = np.asarray(ftol_stages, dtype=float)
         diag["multigrid_stage_offsets"] = np.asarray(stage_offsets, dtype=int)
+        diag["multigrid_stage_modes"] = np.asarray(stage_mode_history, dtype=object)
 
         # Concatenate the common history keys that are useful for parity debugging.
         for k in (
@@ -1584,6 +2616,8 @@ def run_fixed_boundary(
             use_scan_any = any(bool(r.diagnostics.get("vmec2000_scan", False)) for r in stage_results)
         except Exception:
             use_scan_any = False
+        if accelerated_mode and scan_wout_corrector is None:
+            scan_wout_corrector = False
         if scan_wout_corrector is None:
             scan_wout_env = os.getenv("VMEC_JAX_SCAN_WOUT_CORRECTOR", "0").strip().lower()
             scan_wout_corrector = scan_wout_env not in ("", "0", "false", "no")
@@ -1625,6 +2659,11 @@ def run_fixed_boundary(
                     jit_warmup_iters=0,
                     use_scan=False,
                     scan_minimal_default=scan_minimal_default,
+                    light_history=True if accelerated_mode else None,
+                    resume_state_mode="minimal" if accelerated_mode else None,
+                    fsq_total_target=(
+                        _accelerated_fsq_total_target_from_ftol(float(ftol_corr)) if accelerated_mode else None
+                    ),
                 )
                 res_corr = solve_fixed_boundary_residual_iter(
                     res.state,
@@ -1648,6 +2687,34 @@ def run_fixed_boundary(
                 )
             except Exception:
                 pass
+        final_requested_ftol = _requested_final_ftol(indata=indata, ftol_list_input=ftol_list_input)
+        final_target_fsq = _accelerated_fsq_total_target_from_ftol(float(final_requested_ftol))
+        final_residuals = _result_final_residuals(res)
+        final_diag = dict(res.diagnostics)
+        final_diag["requested_ftol"] = float(final_requested_ftol)
+        final_diag["fsq_total_target"] = (
+            final_target_fsq if (final_diag.get("fsq_total_target", None) is not None or bool(accelerated_mode)) else None
+        )
+        if final_residuals is not None:
+            final_diag["final_fsqr"] = float(final_residuals[0])
+            final_diag["final_fsqz"] = float(final_residuals[1])
+            final_diag["final_fsql"] = float(final_residuals[2])
+        final_diag["converged_strict"] = bool(_result_meets_requested_ftol(res, ftol=float(final_requested_ftol)))
+        final_diag["converged_by_total_fsq"] = bool(
+            _result_hits_total_target(res, fsq_total_target=float(final_target_fsq))
+        )
+        final_diag["converged"] = bool(final_diag["converged_strict"])
+        res = SolveVmecResidualResult(
+            state=res.state,
+            n_iter=int(res.n_iter),
+            w_history=np.asarray(res.w_history),
+            fsqr2_history=np.asarray(res.fsqr2_history),
+            fsqz2_history=np.asarray(res.fsqz2_history),
+            fsql2_history=np.asarray(res.fsql2_history),
+            grad_rms_history=np.asarray(res.grad_rms_history),
+            step_history=np.asarray(res.step_history),
+            diagnostics=final_diag,
+        )
         static = _build_static_cfg(cfg)
         if verbose and solver == "vmec2000_iter":
             converged = bool(res.diagnostics.get("converged", False))
@@ -1698,8 +2765,17 @@ def run_fixed_boundary(
         if static is None:
             static = _build_static_cfg(cfg)
         flux, prof, pressure = _profiles_from_static(static)
+    flux, prof = _final_flux_profiles_from_state(
+        indata=indata,
+        static_in=static,
+        state=res.state,
+        signgs=signgs,
+        flux_local=flux,
+        prof_local=prof,
+        pressure_local=pressure,
+    )
 
-    return FixedBoundaryRun(
+    run_out = FixedBoundaryRun(
         cfg=cfg,
         indata=indata,
         static=static,
@@ -1708,4 +2784,10 @@ def run_fixed_boundary(
         flux=flux,
         profiles=prof,
         signgs=signgs,
+    )
+    cli_initial_policy = "multigrid" if bool(multigrid) and (len(ns_stages) > 1) else "single_grid"
+    return _maybe_finish_cli_fixed_boundary_run(
+        run_out,
+        initial_policy=cli_initial_policy,
+        enabled=bool(cli_fixed_boundary_finish_enabled),
     )

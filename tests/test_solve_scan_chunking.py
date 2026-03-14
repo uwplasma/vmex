@@ -14,8 +14,8 @@ def test_scan_chunk_settings_cpu_default(monkeypatch):
         lthreed=False,
     )
 
-    assert chunk_size == 200
-    assert cap_to_remaining is False
+    assert chunk_size == 783
+    assert cap_to_remaining is True
 
 
 def test_scan_chunk_settings_accelerator_default(monkeypatch):
@@ -61,3 +61,24 @@ def test_scan_chunk_settings_respects_override(monkeypatch):
 
     assert chunk_size == 1000
     assert cap_to_remaining is True
+
+
+def test_default_scan_core_uses_minimal_accelerated_path():
+    assert solve_module._default_scan_core(
+        scan_core_env="",
+        scan_minimal=True,
+        fsq_total_target=3.0e-13,
+    )
+
+
+def test_default_scan_core_respects_override():
+    assert not solve_module._default_scan_core(
+        scan_core_env="0",
+        scan_minimal=True,
+        fsq_total_target=3.0e-13,
+    )
+    assert solve_module._default_scan_core(
+        scan_core_env="1",
+        scan_minimal=False,
+        fsq_total_target=None,
+    )
