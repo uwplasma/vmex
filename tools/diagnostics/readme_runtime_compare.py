@@ -51,6 +51,7 @@ def _collect_records(
 ) -> list[dict[str, Any]]:
     cpu_cases: dict[str, dict[str, Any]] = {}
     cpu_results: dict[str, dict[str, Any]] = {}
+    cpu_vmecpp: dict[str, dict[str, Any]] = {}
     gpu_results: dict[str, dict[str, Any]] = {}
 
     for summary in cpu_summaries:
@@ -62,6 +63,8 @@ def _collect_records(
                 cpu_results.setdefault(case_id, {})["vmec2000"] = rec
             elif rec.get("backend") == "vmec_jax":
                 cpu_results.setdefault(case_id, {})["cpu"] = rec
+            elif rec.get("backend") == "vmecpp":
+                cpu_vmecpp[case_id] = rec
 
     for summary in gpu_summaries:
         for rec in summary.get("results", []):
@@ -74,16 +77,19 @@ def _collect_records(
         case = cpu_cases[case_id]
         vmec = cpu_results.get(case_id, {}).get("vmec2000")
         cpu = cpu_results.get(case_id, {}).get("cpu")
+        pp = cpu_vmecpp.get(case_id)
         gpu = gpu_results.get(case_id, {}).get("gpu")
         vmec_rt = None if vmec is None else float(vmec.get("runtime_s", vmec.get("time_real_s", np.nan)))
         cpu_rt = None if cpu is None else float(
             cpu.get("runtime_warm_s", cpu.get("runtime_s", cpu.get("time_real_s", np.nan)))
         )
+        pp_rt = None if pp is None else float(pp.get("runtime_s", pp.get("time_real_s", np.nan)))
         gpu_rt = None if gpu is None else float(
             gpu.get("runtime_warm_s", gpu.get("runtime_s", gpu.get("time_real_s", np.nan)))
         )
         vmec_mem = _mem_bytes(vmec)
         cpu_mem = _mem_bytes(cpu)
+        pp_mem = _mem_bytes(pp)
         gpu_mem = _mem_bytes(gpu)
         rows.append(
             {
@@ -93,12 +99,15 @@ def _collect_records(
                 "axisymmetric": bool(case.get("axisymmetric", False)),
                 "vmec2000": vmec,
                 "cpu": cpu,
+                "vmecpp": pp,
                 "gpu": gpu,
                 "vmec_runtime_s": vmec_rt,
                 "cpu_runtime_s": cpu_rt,
+                "vmecpp_runtime_s": pp_rt,
                 "gpu_runtime_s": gpu_rt,
                 "vmec_mem_bytes": vmec_mem,
                 "cpu_mem_bytes": cpu_mem,
+                "vmecpp_mem_bytes": pp_mem,
                 "gpu_mem_bytes": gpu_mem,
             }
         )
@@ -123,16 +132,23 @@ def _speedup(value: float | int | None, baseline: float | int | None) -> float |
 
 def _write_markdown_table(rows: list[dict[str, Any]], outpath: Path) -> None:
     include_gpu = any(row["gpu_runtime_s"] is not None or row["gpu_mem_bytes"] is not None for row in rows)
+    include_vmecpp = any(row.get("vmecpp_runtime_s") is not None or row.get("vmecpp_mem_bytes") is not None for row in rows)
     if include_gpu:
         header = [
-            "| Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax CPU runtime (warmed) | vmec_jax CPU memory | vmec_jax GPU runtime (warmed) | vmec_jax GPU memory |",
-            "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax CPU runtime (warmed) | vmec_jax CPU memory | VMEC++ runtime | VMEC++ memory | vmec_jax GPU runtime (warmed) | vmec_jax GPU memory |",
+            "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
     else:
-        header = [
-            "| Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax CPU runtime (warmed) | vmec_jax CPU memory |",
-            "| --- | --- | --- | --- | ---: | ---: | ---: | ---: |",
-        ]
+        if include_vmecpp:
+            header = [
+                "| Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax CPU runtime (warmed) | vmec_jax CPU memory | VMEC++ runtime | VMEC++ memory |",
+                "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        else:
+            header = [
+                "| Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax CPU runtime (warmed) | vmec_jax CPU memory |",
+                "| --- | --- | --- | --- | ---: | ---: | ---: | ---: |",
+            ]
     lines = list(header)
     for row in rows:
         boundary = "free" if row["lfreeb"] else "fixed"
@@ -148,11 +164,13 @@ def _write_markdown_table(rows: list[dict[str, Any]], outpath: Path) -> None:
             _format_seconds(row["cpu_runtime_s"]),
             _format_gib(row["cpu_mem_bytes"]),
         ]
+        if include_vmecpp:
+            cols.extend([_format_seconds(row.get("vmecpp_runtime_s")), _format_gib(row.get("vmecpp_mem_bytes"))])
         if include_gpu:
             cols.extend(
                 [
-                    _format_seconds(row["gpu_runtime_s"]),
-                    _format_gib(row["gpu_mem_bytes"]),
+                    _format_seconds(row.get("gpu_runtime_s")),
+                    _format_gib(row.get("gpu_mem_bytes")),
                 ]
             )
         lines.append("| " + " | ".join(cols) + " |")
@@ -193,29 +211,36 @@ def _write_runtime_figure(rows: list[dict[str, Any]], outpath: Path, *, figure_k
     rows = sorted(
         rows,
         key=lambda row: (
-            -(_speedup(row["cpu_runtime_s"], row["vmec_runtime_s"]) or 0.0),
+            -max(
+                (_speedup(row["cpu_runtime_s"], row["vmec_runtime_s"]) or 0.0),
+                (_speedup(row.get("vmecpp_runtime_s"), row["vmec_runtime_s"]) or 0.0),
+            ),
             row["id"],
         ),
     )
     labels = [row["id"] for row in rows]
     y = np.arange(len(rows), dtype=float)
-    height = 0.28
+    height = 0.22
     fig, ax = plt.subplots(1, 1, figsize=(14.5, max(8.0, 0.42 * len(rows) + 1.6)))
     vmec = np.array([row["vmec_runtime_s"] if row["vmec_runtime_s"] is not None else np.nan for row in rows], dtype=float)
     cpu = np.array([row["cpu_runtime_s"] if row["cpu_runtime_s"] is not None else np.nan for row in rows], dtype=float)
-    ax.barh(y - (height / 2.0), vmec, height=height, color="#4B5563", label="VMEC2000")
-    ax.barh(y + (height / 2.0), cpu, height=height, color="#0F766E", label="vmec_jax CPU")
+    pp = np.array(
+        [row.get("vmecpp_runtime_s") if row.get("vmecpp_runtime_s") is not None else np.nan for row in rows], dtype=float
+    )
+    ax.barh(y - height, vmec, height=height, color="#1f77b4", label="VMEC2000")
+    ax.barh(y, cpu, height=height, color="#ff7f0e", label="vmec_jax")
+    ax.barh(y + height, pp, height=height, color="#2ca02c", label="VMEC++")
     ax.set_xscale("log")
     ax.set_yticks(y)
     ax.set_yticklabels(labels, fontsize=8)
     ax.invert_yaxis()
     ax.set_xlabel("runtime (seconds, log scale)")
     ax.grid(axis="x", alpha=0.18, which="both")
-    ax.legend(frameon=False, ncol=2, loc="upper right")
+    ax.legend(frameon=False, ncol=3, loc="upper right")
     title = {
-        "all": "Bundled Example Runtime: VMEC2000 vs vmec_jax CPU (warmed)",
-        "fixed": "Bundled Fixed-Boundary Runtime: VMEC2000 vs vmec_jax CPU (warmed)",
-        "freeb": "Bundled Free-Boundary Runtime: VMEC2000 vs vmec_jax CPU (warmed)",
+        "all": "Bundled Example Runtime: VMEC2000 vs vmec_jax vs VMEC++",
+        "fixed": "Bundled Fixed-Boundary Runtime: VMEC2000 vs vmec_jax vs VMEC++",
+        "freeb": "Bundled Free-Boundary Runtime: VMEC2000 vs vmec_jax vs VMEC++",
     }[figure_kind]
     ax.set_title(title)
     fig.tight_layout()
