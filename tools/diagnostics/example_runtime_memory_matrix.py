@@ -313,6 +313,73 @@ print(json.dumps(payload))
     return rec
 
 
+def _stage_input_with_mgrid(*, input_path: Path, dst_dir: Path) -> Path:
+    """Copy input + referenced mgrid file (if any) into dst_dir.
+
+    VMEC++ resolves relative mgrid paths relative to cwd, so staging avoids
+    cwd-dependent failures and avoids polluting the source tree with outputs.
+    """
+
+    text = input_path.read_text()
+    dst_input = dst_dir / input_path.name
+    dst_input.write_text(text)
+
+    if "mgrid_file" not in text.lower():
+        return dst_input
+    for line in text.splitlines():
+        if "mgrid_file" not in line.lower():
+            continue
+        if "=" not in line:
+            continue
+        rhs = line.split("=", 1)[1]
+        rhs = rhs.split("!", 1)[0].strip().rstrip(",")
+        rhs = rhs.strip().strip('"').strip("'")
+        if not rhs:
+            continue
+        src = (input_path.parent / rhs).resolve()
+        if src.exists():
+            (dst_dir / src.name).write_bytes(src.read_bytes())
+        break
+    return dst_input
+
+
+def _run_vmecpp_case(*, case: CaseSpec, timeout_s: float, env: dict[str, str], outdir: Path) -> dict[str, Any]:
+    """Run VMEC++ CLI (`vmecpp`) and measure runtime/memory via /usr/bin/time."""
+
+    case_workdir = outdir / f"work_vmecpp_{case.id}"
+    case_workdir.mkdir(parents=True, exist_ok=True)
+    staged = _stage_input_with_mgrid(input_path=case.input_path, dst_dir=case_workdir)
+
+    out = _run_timed_subprocess(
+        cmd=["vmecpp", "-q", str(staged)],
+        cwd=case_workdir,
+        timeout_s=float(timeout_s),
+        env=env,
+    )
+    rec = {
+        "backend": "vmecpp",
+        "case_id": case.id,
+        "returncode": int(out["returncode"]),
+        "time_real_s": float(out["time_real_s"]),
+        "max_rss_bytes": out["max_rss_bytes"],
+        "peak_footprint_bytes": out["peak_footprint_bytes"],
+        "timed_out": bool(out.get("timed_out", False)),
+        "stdout_tail": "\n".join(out["stdout"].splitlines()[-10:]),
+        "stderr_tail": "\n".join(out["stderr"].splitlines()[-12:]),
+    }
+    # VMEC++ doesn't currently emit a reliable "total runtime" scalar in a stable
+    # machine-readable form, so we use the wall time.
+    rec["runtime_s"] = float(out["time_real_s"])
+    rec["ok"] = int(out["returncode"]) == 0
+    # Avoid accumulating large netCDF outputs in the benchmark workdir.
+    for p in case_workdir.glob("wout_*.nc"):
+        try:
+            p.unlink()
+        except OSError:
+            pass
+    return rec
+
+
 def _discover_cases(
     *,
     inputs_dir: Path,
@@ -388,6 +455,7 @@ def _case_to_json(case: CaseSpec) -> dict[str, Any]:
 def _case_row(case: CaseSpec, results_by_case: dict[str, dict[str, dict[str, Any]]]) -> str:
     vmec_jax = results_by_case.get(case.id, {}).get("vmec_jax")
     vmec2000 = results_by_case.get(case.id, {}).get("vmec2000")
+    vmecpp = results_by_case.get(case.id, {}).get("vmecpp")
     rt_jax = None
     if vmec_jax is not None:
         rt_jax = float(
@@ -397,6 +465,7 @@ def _case_row(case: CaseSpec, results_by_case: dict[str, dict[str, dict[str, Any
             )
         )
     rt_vmec = None if vmec2000 is None else float(vmec2000.get("runtime_s", vmec2000.get("time_real_s", float("nan"))))
+    rt_pp = None if vmecpp is None else float(vmecpp.get("runtime_s", vmecpp.get("time_real_s", float("nan"))))
     ratio = None
     if rt_jax is not None and rt_vmec is not None and rt_vmec > 0.0:
         ratio = rt_jax / rt_vmec
@@ -411,7 +480,7 @@ def _case_row(case: CaseSpec, results_by_case: dict[str, dict[str, dict[str, Any
     lasym = "lasym" if case.lasym else "sym"
     return (
         f"{case.id:38s}  {kind:5s}  {sym:7s}  {lasym:5s}  "
-        f"{_format_seconds(rt_jax):>8s}  {_format_seconds(rt_vmec):>8s}  "
+        f"{_format_seconds(rt_jax):>8s}  {_format_seconds(rt_pp):>8s}  {_format_seconds(rt_vmec):>8s}  "
         f"{_format_ratio(ratio):>7s}  {_format_ratio(mem_ratio):>7s}"
     )
 
@@ -434,9 +503,9 @@ def main() -> int:
     )
     p.add_argument(
         "--backend",
-        choices=("both", "vmec_jax", "vmec2000"),
+        choices=("all", "both", "vmec_jax", "vmec2000", "vmecpp"),
         default="both",
-        help="Backends to benchmark.",
+        help="Backends to benchmark. both=vmec_jax+vmec2000, all=vmec_jax+vmecpp+vmec2000.",
     )
     p.add_argument(
         "--include-external-diiid",
@@ -504,8 +573,9 @@ def main() -> int:
     results: list[dict[str, Any]] = []
     results_by_case: dict[str, dict[str, dict[str, Any]]] = {}
 
-    run_vmec_jax = args.backend in ("both", "vmec_jax")
-    run_vmec2000 = args.backend in ("both", "vmec2000")
+    run_vmec_jax = args.backend in ("all", "both", "vmec_jax")
+    run_vmecpp = args.backend in ("all", "vmecpp")
+    run_vmec2000 = args.backend in ("all", "both", "vmec2000")
     child_env = _child_env(jax_platforms=args.jax_platforms.strip() or None)
     child_env["VMEC_JAX_BENCH_WARM_RUNS"] = str(max(0, int(args.warm_runs)))
     vmec_exec = None if args.vmec_exec is None else Path(args.vmec_exec).expanduser().resolve()
@@ -538,6 +608,20 @@ def main() -> int:
                 f"peak={rec.get('peak_footprint_bytes')} platform={rec.get('platform', '-')}",
                 flush=True,
             )
+        if run_vmecpp:
+            rec = _run_vmecpp_case(
+                case=case,
+                timeout_s=float(args.timeout_s),
+                env=child_env,
+                outdir=outdir,
+            )
+            results.append(rec)
+            results_by_case[case.id]["vmecpp"] = rec
+            print(
+                f"  vmecpp:   rc={rec['returncode']} runtime={_format_seconds(float(rec.get('runtime_s', rec['time_real_s'])))} "
+                f"peak={rec.get('peak_footprint_bytes')}",
+                flush=True,
+            )
         if run_vmec2000:
             rec = _run_vmec2000_case(
                 case=case,
@@ -567,8 +651,8 @@ def main() -> int:
     summary_path.write_text(json.dumps(summary, indent=2))
 
     rows = [
-        "case                                   kind   topo     sym    vmec_jax  vmec2000    speed      mem",
-        "------------------------------------------------------------------------------------------------------",
+        "case                                   kind   topo     sym    vmec_jax    vmecpp  vmec2000    speed      mem",
+        "----------------------------------------------------------------------------------------------------------",
     ]
     rows.extend(_case_row(case, results_by_case) for case in cases)
     table = "\n".join(rows)

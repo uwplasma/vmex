@@ -16,7 +16,10 @@ from __future__ import annotations
 
 import argparse
 import sys
+import subprocess
+import tempfile
 from pathlib import Path
+from typing import Final
 
 import numpy as np
 
@@ -50,6 +53,10 @@ from vmec_jax.geom import eval_geom
 from vmec_jax.diagnostics import print_jacobian_stats
 from vmec_jax.wout import read_wout, wout_minimal_from_fixed_boundary
 
+_C_VMEC2000: Final[str] = "#1f77b4"  # blue
+_C_VMEC_JAX: Final[str] = "#ff7f0e"  # orange
+_C_VMECPP: Final[str] = "#2ca02c"  # green
+
 
 def _resolve_wout_ref(*, input_path: Path, wout_ref: str) -> Path:
     if wout_ref:
@@ -65,6 +72,69 @@ def _load_vmec2000_wout(wout_path: Path):
     if not wout_path.exists():
         raise SystemExit(f"Missing wout reference: {wout_path}")
     return read_wout(wout_path)
+
+
+def _stage_input_with_mgrid(*, input_path: Path, dst_dir: Path) -> Path:
+    """Copy input + referenced mgrid file (if any) into dst_dir.
+
+    VMEC++ resolves relative mgrid paths relative to cwd, so staging avoids
+    cwd-dependent failures.
+    """
+
+    text = input_path.read_text()
+    dst_input = dst_dir / input_path.name
+    dst_input.write_text(text)
+
+    if "mgrid_file" not in text.lower():
+        return dst_input
+
+    for line in text.splitlines():
+        if "mgrid_file" not in line.lower():
+            continue
+        if "=" not in line:
+            continue
+        rhs = line.split("=", 1)[1]
+        rhs = rhs.split("!", 1)[0].strip().rstrip(",")
+        rhs = rhs.strip().strip('"').strip("'")
+        if not rhs:
+            continue
+        src = (input_path.parent / rhs).resolve()
+        if src.exists():
+            (dst_dir / src.name).write_bytes(src.read_bytes())
+        break
+    return dst_input
+
+
+def _find_any_wout(workdir: Path, *, case_hint: str) -> Path:
+    direct = workdir / f"wout_{case_hint}.nc"
+    if direct.exists():
+        return direct
+    matches = sorted(workdir.glob(f"wout_{case_hint}*.nc"))
+    if matches:
+        return matches[0]
+    matches = sorted(workdir.glob("wout_*.nc"))
+    if matches:
+        return matches[0]
+    raise FileNotFoundError(f"no wout_*.nc found in {workdir}")
+
+
+def _run_vmecpp_wout(*, input_path: Path, vmecpp_exec: str) -> object:
+    case = input_path.name.split("input.", 1)[-1] if "input." in input_path.name else input_path.stem
+    with tempfile.TemporaryDirectory(prefix="vmecpp_readme_") as td:
+        workdir = Path(td)
+        staged = _stage_input_with_mgrid(input_path=input_path, dst_dir=workdir)
+        proc = subprocess.run(
+            [str(vmecpp_exec), "-q", str(staged)],
+            cwd=str(workdir),
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(f"vmecpp failed (code={proc.returncode})\n{proc.stderr}")
+        wout_path = _find_any_wout(workdir, case_hint=case)
+        return read_wout(wout_path)
 
 
 
@@ -115,9 +185,59 @@ def _plot_3d_surface(ax, *, R, Z, B, phi, title: str):
     fix_matplotlib_3d(ax)
 
 
-def _plot_iota(ax, *, s_vmec, iota_vmec, s_jax, iota_jax, label_jax: str):
-    ax.plot(s_vmec, iota_vmec, lw=3.6, linestyle="--", label="VMEC2000", zorder=2)
-    ax.plot(s_jax, iota_jax, lw=3.6, linestyle="-", label=label_jax, zorder=1)
+def _plot_iota(
+    ax,
+    *,
+    s_vmec,
+    iota_vmec,
+    s_jax,
+    iota_jax,
+    label_jax: str,
+    s_pp=None,
+    iota_pp=None,
+):
+    ax.plot(
+        s_jax,
+        iota_jax,
+        lw=3.4,
+        linestyle="-",
+        color=_C_VMEC_JAX,
+        label=label_jax,
+        zorder=1,
+    )
+    if s_pp is not None and iota_pp is not None:
+        ax.plot(
+            s_pp,
+            iota_pp,
+            lw=3.4,
+            linestyle="-",
+            color=_C_VMECPP,
+            marker="^",
+            ms=4.0,
+            markevery=max(1, int(len(s_pp) // 18)),
+            mfc="none",
+            mec=_C_VMECPP,
+            mew=1.0,
+            alpha=0.95,
+            label="VMEC++",
+            zorder=2,
+        )
+    ax.plot(
+        s_vmec,
+        iota_vmec,
+        lw=3.4,
+        linestyle="--",
+        color=_C_VMEC2000,
+        marker="s",
+        ms=4.4,
+        markevery=max(1, int(len(s_vmec) // 16)),
+        mfc="none",
+        mec=_C_VMEC2000,
+        mew=1.1,
+        alpha=0.95,
+        label="VMEC2000",
+        zorder=3,
+    )
     ax.set_xlabel("s")
     ax.set_ylabel("iota")
     ax.set_title("iota profile")
@@ -174,6 +294,17 @@ def main() -> None:
     p.add_argument("--no-solve", action="store_true", help="Use the initial guess only (fast).")
     p.add_argument("--use-wout-state", action="store_true", help="Use VMEC2000 wout coefficients for vmec_jax state.")
     p.add_argument("--no-wout-state", action="store_true", help="Use vmec_jax solver/initial-guess state.")
+    p.add_argument(
+        "--include-vmecpp",
+        action="store_true",
+        help="Also run VMEC++ and include it in the iota profile plot.",
+    )
+    p.add_argument(
+        "--vmecpp-exec",
+        type=str,
+        default="vmecpp",
+        help="VMEC++ executable name/path (default: vmecpp from PATH).",
+    )
     args = p.parse_args()
 
     outdir = Path(args.outdir)
@@ -363,6 +494,19 @@ def main() -> None:
     s_vmec = prof_vmec["s"]
     iota_vmec = prof_vmec["iotaf"]
 
+    s_pp = None
+    iota_pp = None
+    if bool(args.include_vmecpp):
+        try:
+            wout_pp = _run_vmecpp_wout(input_path=Path(args.input).expanduser().resolve(), vmecpp_exec=str(args.vmecpp_exec))
+            prof_pp = profiles_from_wout(wout_pp)
+            s_pp = prof_pp["s"]
+            iota_pp = prof_pp["iotaf"]
+        except FileNotFoundError:
+            print("[vmecpp] vmecpp executable not found; skipping VMEC++ iota curve.")
+        except Exception as exc:
+            print(f"[vmecpp] failed to run VMEC++: {exc}\nSkipping VMEC++ iota curve.")
+
     if use_wout_state:
         wout_jax_like = wout
         s_jax = s_vmec
@@ -390,6 +534,8 @@ def main() -> None:
         s_jax=s_jax,
         iota_jax=iota_jax,
         label_jax=jax_title,
+        s_pp=s_pp,
+        iota_pp=iota_pp,
     )
     fig.tight_layout()
     fig.savefig(outdir / f"{prefix}_compare_iota.png", dpi=220)

@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
+from typing import Final
 
 import matplotlib
 
@@ -27,6 +28,10 @@ import netCDF4  # noqa: E402
 import numpy as np  # noqa: E402
 
 from vmec_jax.vmec2000_exec import _patch_indata, find_vmec2000_exec, run_xvmec2000
+
+_C_VMEC2000: Final[str] = "#1f77b4"  # blue
+_C_VMEC_JAX: Final[str] = "#ff7f0e"  # orange
+_C_VMECPP: Final[str] = "#2ca02c"  # green
 
 
 def _find_wout(workdir: Path, *, case: str) -> Path:
@@ -185,6 +190,42 @@ def _collect_vmec_jax_trace(input_path: Path, *, ns: int, niter: int, ftol: floa
     return it, fsq, float(runtime), audit
 
 
+def _collect_vmecpp_trace(input_path: Path, *, ns: int, niter: int, ftol: float, workdir: Path):
+    case = input_path.name.replace("input.", "")
+    patched = _patch_indata(
+        input_path.read_text(),
+        updates={
+            "NSTEP": "1",
+            "NS_ARRAY": f"{int(ns)}",
+            "NITER_ARRAY": f"{int(niter)}",
+            "FTOL_ARRAY": f"{float(ftol):.3e}",
+        },
+    )
+    tmp_input = workdir / f"input.{case}"
+    tmp_input.write_text(patched)
+
+    t0 = time.perf_counter()
+    proc = subprocess.run(
+        ["vmecpp", "--legacy", str(tmp_input)],
+        cwd=str(workdir),
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    runtime = time.perf_counter() - t0
+    if proc.returncode != 0:
+        raise RuntimeError(f"vmecpp failed for {input_path} (code={proc.returncode})\n{proc.stderr}")
+
+    it, fsq = _parse_vmec_table_trace(proc.stdout)
+    wout_path = _find_wout(workdir, case=case)
+    archived = workdir / f"wout_{case}_vmecpp.nc"
+    shutil.copy2(wout_path, archived)
+    audit = _audit_wout(archived)
+    np.savez(workdir / f"trace_{case}_vmecpp.npz", it=it, fsq_total=fsq)
+    return it, fsq, float(runtime), audit
+
+
 def _trace_mismatch(it_a: np.ndarray, fsq_a: np.ndarray, it_b: np.ndarray, fsq_b: np.ndarray) -> dict[str, float]:
     # Align by explicit iteration numbers.
     a = {int(i): float(v) for i, v in zip(it_a.tolist(), fsq_a.tolist(), strict=False)}
@@ -213,6 +254,8 @@ def _plot_panel(
     fsq_vmec: np.ndarray,
     it_jax: np.ndarray,
     fsq_jax: np.ndarray,
+    it_vmecpp: np.ndarray | None,
+    fsq_vmecpp: np.ndarray | None,
     title: str,
     jax_label: str,
 ):
@@ -225,7 +268,7 @@ def _plot_panel(
         fsq_jax,
         lw=2.6,
         linestyle="-",
-        color="#ff7f0e",
+        color=_C_VMEC_JAX,
         marker="o",
         ms=2.6,
         markevery=mark_jax,
@@ -233,21 +276,39 @@ def _plot_panel(
         label=jax_label,
         zorder=1,
     )
+    if it_vmecpp is not None and fsq_vmecpp is not None and it_vmecpp.size:
+        mark_pp = max(1, int(max(it_vmecpp.size, 1) // 40))
+        ax.plot(
+            it_vmecpp,
+            fsq_vmecpp,
+            lw=2.6,
+            linestyle="-",
+            color=_C_VMECPP,
+            marker="^",
+            ms=3.0,
+            markevery=mark_pp,
+            mfc="none",
+            mec=_C_VMECPP,
+            mew=1.0,
+            alpha=0.92,
+            label="VMEC++",
+            zorder=2,
+        )
     ax.plot(
         it_vmec,
         fsq_vmec,
         lw=2.6,
         linestyle="--",
-        color="#1f77b4",
+        color=_C_VMEC2000,
         marker="s",
         ms=3.6,
         markevery=mark_vmec,
         mfc="none",
-        mec="#1f77b4",
+        mec=_C_VMEC2000,
         mew=1.1,
         alpha=0.95,
         label="VMEC2000",
-        zorder=2,
+        zorder=3,
     )
     ax.set_yscale("log")
     ax.set_xlabel("iteration")
@@ -318,8 +379,10 @@ def main() -> None:
     if bool(args.reuse_workdir):
         a_vmec = np.load(axisym_work / "trace_ITERModel_VMEC2000.npz")
         a_jax = np.load(axisym_work / "trace_ITERModel_vmec_jax.npz")
+        a_pp = np.load(axisym_work / "trace_ITERModel_vmecpp.npz")
         it_vmec_a, fsq_vmec_a = a_vmec["it"], a_vmec["fsq_total"]
         it_jax_a, fsq_jax_a = a_jax["it"], a_jax["fsq_total"]
+        it_pp_a, fsq_pp_a = a_pp["it"], a_pp["fsq_total"]
         mismatch_a = _trace_mismatch(it_vmec_a, fsq_vmec_a, it_jax_a, fsq_jax_a)
         wout_vmec_a = json.loads((workdir / "readme_fsq_trace_single_grid_wout_audit.json").read_text())["ITERModel"][
             "VMEC2000"
@@ -327,11 +390,16 @@ def main() -> None:
         wout_jax_a = json.loads((workdir / "readme_fsq_trace_single_grid_wout_audit.json").read_text())["ITERModel"][
             "vmec_jax"
         ]
+        wout_pp_a = json.loads((workdir / "readme_fsq_trace_single_grid_wout_audit.json").read_text())["ITERModel"][
+            "vmecpp"
+        ]
 
         s_vmec = np.load(st_work / "trace_LandremanPaul2021_QA_lowres_VMEC2000.npz")
         s_jax = np.load(st_work / "trace_LandremanPaul2021_QA_lowres_vmec_jax.npz")
+        s_pp = np.load(st_work / "trace_LandremanPaul2021_QA_lowres_vmecpp.npz")
         it_vmec_s, fsq_vmec_s = s_vmec["it"], s_vmec["fsq_total"]
         it_jax_s, fsq_jax_s = s_jax["it"], s_jax["fsq_total"]
+        it_pp_s, fsq_pp_s = s_pp["it"], s_pp["fsq_total"]
         mismatch_s = _trace_mismatch(it_vmec_s, fsq_vmec_s, it_jax_s, fsq_jax_s)
         wout_vmec_s = json.loads((workdir / "readme_fsq_trace_single_grid_wout_audit.json").read_text())[
             "LandremanPaul2021_QA_lowres"
@@ -339,11 +407,17 @@ def main() -> None:
         wout_jax_s = json.loads((workdir / "readme_fsq_trace_single_grid_wout_audit.json").read_text())[
             "LandremanPaul2021_QA_lowres"
         ]["vmec_jax"]
+        wout_pp_s = json.loads((workdir / "readme_fsq_trace_single_grid_wout_audit.json").read_text())[
+            "LandremanPaul2021_QA_lowres"
+        ]["vmecpp"]
     else:
         it_vmec_a, fsq_vmec_a, _, wout_vmec_a = _collect_vmec2000_trace(
             axisym_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=axisym_work
         )
         it_jax_a, fsq_jax_a, _, wout_jax_a = _collect_vmec_jax_trace(
+            axisym_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=axisym_work
+        )
+        it_pp_a, fsq_pp_a, _, wout_pp_a = _collect_vmecpp_trace(
             axisym_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=axisym_work
         )
         mismatch_a = _trace_mismatch(it_vmec_a, fsq_vmec_a, it_jax_a, fsq_jax_a)
@@ -352,6 +426,9 @@ def main() -> None:
             stellarator_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=st_work
         )
         it_jax_s, fsq_jax_s, _, wout_jax_s = _collect_vmec_jax_trace(
+            stellarator_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=st_work
+        )
+        it_pp_s, fsq_pp_s, _, wout_pp_s = _collect_vmecpp_trace(
             stellarator_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=st_work
         )
         mismatch_s = _trace_mismatch(it_vmec_s, fsq_vmec_s, it_jax_s, fsq_jax_s)
@@ -363,6 +440,8 @@ def main() -> None:
         fsq_vmec=fsq_vmec_a,
         it_jax=it_jax_a,
         fsq_jax=fsq_jax_a,
+        it_vmecpp=it_pp_a,
+        fsq_vmecpp=fsq_pp_a,
         title=f"ITERModel fsq_total trace (single-grid)",
         jax_label=str(args.jax_label),
     )
@@ -372,11 +451,13 @@ def main() -> None:
         fsq_vmec=fsq_vmec_s,
         it_jax=it_jax_s,
         fsq_jax=fsq_jax_s,
+        it_vmecpp=it_pp_s,
+        fsq_vmecpp=fsq_pp_s,
         title="LandremanPaul2021_QA_lowres fsq_total trace (single-grid)",
         jax_label=str(args.jax_label),
     )
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", ncol=2, frameon=False, bbox_to_anchor=(0.5, 1.03))
+    fig.legend(handles, labels, loc="upper center", ncol=3, frameon=False, bbox_to_anchor=(0.5, 1.03))
     fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.94))
     outpath = outdir / "readme_fsq_trace_single_grid.png"
     fig.savefig(outpath, dpi=220)
@@ -385,8 +466,8 @@ def main() -> None:
     audit_out.write_text(
         json.dumps(
             {
-                "ITERModel": {"VMEC2000": wout_vmec_a, "vmec_jax": wout_jax_a},
-                "LandremanPaul2021_QA_lowres": {"VMEC2000": wout_vmec_s, "vmec_jax": wout_jax_s},
+                "ITERModel": {"VMEC2000": wout_vmec_a, "vmec_jax": wout_jax_a, "vmecpp": wout_pp_a},
+                "LandremanPaul2021_QA_lowres": {"VMEC2000": wout_vmec_s, "vmec_jax": wout_jax_s, "vmecpp": wout_pp_s},
             },
             indent=2,
             sort_keys=True,
@@ -397,8 +478,14 @@ def main() -> None:
     mismatch_out.write_text(
         json.dumps(
             {
-                "ITERModel": mismatch_a,
-                "LandremanPaul2021_QA_lowres": mismatch_s,
+                "ITERModel": {
+                    "vmec_jax_vs_vmec2000": mismatch_a,
+                    "vmecpp_vs_vmec2000": _trace_mismatch(it_vmec_a, fsq_vmec_a, it_pp_a, fsq_pp_a),
+                },
+                "LandremanPaul2021_QA_lowres": {
+                    "vmec_jax_vs_vmec2000": mismatch_s,
+                    "vmecpp_vs_vmec2000": _trace_mismatch(it_vmec_s, fsq_vmec_s, it_pp_s, fsq_pp_s),
+                },
             },
             indent=2,
             sort_keys=True,
