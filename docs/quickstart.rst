@@ -14,6 +14,8 @@ If you have a fresh clone, fetch the optional large assets first::
 By default the showcase uses a parity-first single-grid run (``--single-ns 13``)
 and VMEC2000-style per-iteration **screen** output (FSQR/FSQZ/FSQL, RAX, DELT, WMHD)::
 
+  python -m venv .venv
+  source .venv/bin/activate
   python examples/showcase_axisym_input_to_wout.py --suite
 
 Run the test suite::
@@ -32,6 +34,10 @@ Once installed (or when working from the repo), you can run vmec_jax like the
 VMEC2000 executable by pointing it to a single ``input.*`` file::
 
   vmec_jax examples/data/input.circular_tokamak
+
+Sanity check (verifies the console script is wired to the right interpreter)::
+
+  vmec_jax --help
 
 If the ``vmec_jax`` command is not found or raises ``ModuleNotFoundError``,
 install and run via the module entrypoint::

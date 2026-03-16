@@ -71,6 +71,8 @@ All figures below use the same **single-grid** run settings: `NS_ARRAY=151`, `NI
 Install (editable) and run the showcase:
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate
 python -m pip install -e .
 python examples/showcase_axisym_input_to_wout.py --suite
 ```
@@ -95,6 +97,12 @@ CLI (VMEC2000-style executable):
 
 ```bash
 vmec_jax examples/data/input.circular_tokamak
+```
+
+Sanity check (verifies the console script is wired to the right interpreter):
+
+```bash
+vmec_jax --help
 ```
 
 If the `vmec_jax` command is not found or raises `ModuleNotFoundError`, make sure
