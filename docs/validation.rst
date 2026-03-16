@@ -2,13 +2,18 @@ Validation and regression testing
 =================================
 
 ``vmec-jax`` is developed using a parity-first workflow: whenever possible,
-intermediate quantities are validated against bundled **VMEC2000**
-``wout_*.nc`` reference outputs before tightening nonlinear iteration parity.
+intermediate quantities are validated against **VMEC2000** ``wout_*.nc``
+reference outputs before tightening nonlinear iteration parity.
+
+Large reference outputs and figures are downloaded on demand. On a fresh clone,
+run::
+
+  python tools/fetch_assets.py
 
 Bundled regression cases
 ------------------------
 
-The repository includes a small set of low-resolution cases under
+The asset bundle includes a small set of low-resolution cases under
 ``examples/data/`` used by tests and examples:
 
 - Axisymmetric tokamak sanity cases (fixed boundary):
