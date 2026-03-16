@@ -13,6 +13,9 @@ def test_freeb_bsqvac_edge_slice_matches_full_half_mesh():
     pytest.importorskip("netCDF4")
 
     root = Path(__file__).resolve().parents[1]
+    wout_path = root / "examples" / "data" / "wout_circular_tokamak_reference.nc"
+    if not wout_path.exists():
+        pytest.skip("Missing example assets. Run tools/fetch_assets.py")
     ex = load_example("circular_tokamak", root=root, with_wout=True)
 
     kernels_ref = vmec_forces_rz_from_wout(
