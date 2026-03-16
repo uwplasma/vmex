@@ -31,8 +31,9 @@ docs = [
 plots = ["matplotlib>=3.7"]
 dev = ["pytest>=7.0", "ruff>=0.1", "mypy>=1.6"]
 
-[tool.setuptools]
-packages = ["vmec_jax"]
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["tests*", "docs*", "examples*", "tools*"]
 
 [tool.pytest.ini_options]
 markers = [

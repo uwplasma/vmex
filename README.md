@@ -97,6 +97,14 @@ CLI (VMEC2000-style executable):
 vmec_jax examples/data/input.circular_tokamak
 ```
 
+If the `vmec_jax` command is not found or raises `ModuleNotFoundError`, make sure
+you installed with the same interpreter and use the module entrypoint:
+
+```bash
+python -m pip install -e .
+python -m vmec_jax examples/data/input.circular_tokamak
+```
+
 For fixed-boundary inputs, the default CLI path now uses the optimized
 controller: it tries the fast final-grid scan route first, then escalates to
 staged continuation and strict parity finishing only when the input structure

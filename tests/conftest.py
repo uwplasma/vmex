@@ -46,11 +46,12 @@ def pytest_collection_modifyitems(config, items):
     run_full = os.environ.get("RUN_FULL", "") == "1"
     if run_full and not has_assets:
         raise pytest.UsageError("RUN_FULL=1 but example assets are missing. Run tools/fetch_assets.py")
-    if has_assets:
-        return
     for item in items:
         if item.get_closest_marker("full") is not None:
-            item.add_marker(pytest.mark.skip(reason="Missing example assets. Run tools/fetch_assets.py"))
+            if not run_full:
+                item.add_marker(pytest.mark.skip(reason="Full tests disabled. Set RUN_FULL=1."))
+            elif not has_assets:
+                item.add_marker(pytest.mark.skip(reason="Missing example assets. Run tools/fetch_assets.py"))
 
 @pytest.fixture(scope="session")
 def load_case_qa_reactorscale_lowres():
