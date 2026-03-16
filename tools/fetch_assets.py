@@ -14,13 +14,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-DEFAULT_TAG = "assets-20260316"
-ASSET_NAME = "vmec_jax_assets_20260316.tar.gz"
+DEFAULT_TAG = "assets-20260316-nc"
+ASSET_NAME = "vmec_jax_assets_20260316_nc_only.tar.gz"
 DEFAULT_URL = (
     "https://github.com/uwplasma/vmec_jax/releases/download/"
     f"{DEFAULT_TAG}/{ASSET_NAME}"
 )
-DEFAULT_SHA256 = "f24b4106304dc5d9b373399e27f5c8eb039227b549506bfd351cca31c104637c"
+DEFAULT_SHA256 = "3344fc2401fffed240ee57ae741ec521594c592627c76dae203503f485e4c0d8"
 
 
 def _sha256(data: bytes) -> str:

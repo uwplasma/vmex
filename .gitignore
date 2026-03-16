@@ -222,8 +222,7 @@ __marimo__/
 
 # Local scratch
 .tmp/
-# Large assets are fetched on-demand (see tools/fetch_assets.py)
-docs/_static/figures/
+# Large netCDF assets are fetched on-demand (see tools/fetch_assets.py)
 examples/data/*.nc
 examples_single_grid/data/*.nc
 .assets_installed

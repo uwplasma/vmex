@@ -6,7 +6,6 @@ and free-boundary ideal-MHD equilibria.
 ## Showcase (single-grid)
 
 All figures below use the same **single-grid** run settings: `NS_ARRAY=151`, `NITER_ARRAY=5000`, `FTOL_ARRAY=1e-14`, `NSTEP=500`.
-If the images are missing on a fresh clone, run `python tools/fetch_assets.py` to download them.
 
 <table>
   <tr>
@@ -76,7 +75,7 @@ python -m pip install -e .
 python examples/showcase_axisym_input_to_wout.py --suite
 ```
 
-If you want the bundled reference outputs, figures, and mgrid files, fetch the assets once:
+If you want the bundled reference outputs and mgrid files, fetch the assets once:
 
 ```bash
 python tools/fetch_assets.py
