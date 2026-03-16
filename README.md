@@ -82,6 +82,16 @@ If you want the bundled reference outputs, figures, and mgrid files, fetch the a
 python tools/fetch_assets.py
 ```
 
+Lightweight clone (keeps full history, downloads blobs lazily):
+
+```bash
+git clone --filter=blob:none https://github.com/uwplasma/vmec_jax
+```
+
+Note: the repo history was rewritten on 2026-03-16 to remove large assets from
+all commits. If you cloned before that date, please re-clone (or prune and
+reset) to get the smaller history.
+
 CLI (VMEC2000-style executable):
 
 ```bash
