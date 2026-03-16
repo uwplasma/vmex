@@ -33,6 +33,12 @@ VMEC2000 executable by pointing it to a single ``input.*`` file::
 
   vmec_jax examples/data/input.circular_tokamak
 
+If the ``vmec_jax`` command is not found or raises ``ModuleNotFoundError``,
+install and run via the module entrypoint::
+
+  python -m pip install -e .
+  python -m vmec_jax examples/data/input.circular_tokamak
+
 This writes ``wout_circular_tokamak.nc`` next to the input file and prints the
 VMEC2000-style per-iteration screen output by default. Use ``--quiet`` to
 silence the iteration table, and ``--outdir`` or ``--output`` to control where
