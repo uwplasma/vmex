@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 import numpy as np
 import pytest
+pytestmark = pytest.mark.full
+
 
 
 def test_step8_wout_state_is_nearly_stationary_for_total_energy():

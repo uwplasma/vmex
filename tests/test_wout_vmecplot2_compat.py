@@ -2,7 +2,9 @@ from pathlib import Path
 
 import pytest
 
+
 from vmec_jax.wout import read_wout, write_wout
+pytestmark = pytest.mark.full
 
 
 def test_write_wout_is_vmecplot2_compatible(tmp_path: Path) -> None:

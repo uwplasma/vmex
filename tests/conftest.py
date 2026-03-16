@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 """Pytest configuration.
 
 Allows running tests directly from the repo without requiring an editable install.
 """
 
-from __future__ import annotations
 
 import sys
 from pathlib import Path
@@ -34,7 +35,6 @@ def require_slow() -> None:
 
 
 _ASSET_SENTINEL = _ROOT / "examples" / "data" / "wout_circular_tokamak_reference.nc"
-_ASSET_PATTERNS = ("examples/data/", "wout_", "mgrid_", "read_wout(")
 
 
 def _assets_available() -> bool:
@@ -42,18 +42,14 @@ def _assets_available() -> bool:
 
 
 def pytest_collection_modifyitems(config, items):
-    if _assets_available():
+    has_assets = _assets_available()
+    run_full = os.environ.get("RUN_FULL", "") == "1"
+    if run_full and not has_assets:
+        raise pytest.UsageError("RUN_FULL=1 but example assets are missing. Run tools/fetch_assets.py")
+    if has_assets:
         return
-    cache: dict[str, bool] = {}
     for item in items:
-        path = str(item.fspath)
-        if path not in cache:
-            try:
-                content = Path(path).read_text()
-            except Exception:
-                content = ""
-            cache[path] = any(tok in content for tok in _ASSET_PATTERNS)
-        if cache[path]:
+        if item.get_closest_marker("full") is not None:
             item.add_marker(pytest.mark.skip(reason="Missing example assets. Run tools/fetch_assets.py"))
 
 @pytest.fixture(scope="session")

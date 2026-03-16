@@ -5,11 +5,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+
 from vmec_jax.config import load_config
 from vmec_jax.static import build_static
 from vmec_jax.vmec_forces import vmec_forces_rz_from_wout
 from vmec_jax.vmec_tomnsp import vmec_angle_grid
 from vmec_jax.wout import read_wout, state_from_wout
+pytestmark = pytest.mark.full
 
 
 def test_c_kernels_nonzero_for_axisym_reference():

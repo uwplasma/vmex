@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+
 from vmec_jax.plotting import (
     bmag_from_wout,
     bmag_from_wout_physical,
@@ -18,6 +19,7 @@ from vmec_jax.plotting import (
 from vmec_jax.modes import vmec_mode_table
 from vmec_jax.wout import read_wout
 from vmec_jax.wout import state_from_wout
+pytestmark = pytest.mark.full
 
 
 def test_plotting_surface_helpers_shapes():

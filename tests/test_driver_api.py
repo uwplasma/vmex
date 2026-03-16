@@ -185,6 +185,7 @@ def _write_single_stage_input(tmp_path: Path) -> Path:
     return input_path
 
 
+@pytest.mark.full
 def test_example_paths_and_load_example():
     pytest.importorskip("netCDF4")
 
