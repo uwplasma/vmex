@@ -61,6 +61,7 @@ jobs:
       - name: Run tests
         env:
           JAX_ENABLE_X64: "1"
+          RUN_FULL: "1"
         run: |
           pytest -q
 
