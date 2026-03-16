@@ -7,6 +7,10 @@ Run the minimal showcase (recommended)
 The simplest way to get started is the axisymmetric showcase. It runs a small
 suite of bundled inputs, writes a ``wout_*.nc`` for each, produces plots, and
 prints a parity summary against bundled VMEC2000 reference ``wout`` files.
+If you have a fresh clone, fetch the optional large assets first::
+
+  python tools/fetch_assets.py
+
 By default the showcase uses a parity-first single-grid run (``--single-ns 13``)
 and VMEC2000-style per-iteration **screen** output (FSQR/FSQZ/FSQL, RAX, DELT, WMHD)::
 

@@ -12,7 +12,9 @@ authors = [{name = "vmec_jax contributors"}]
 license = {text = "MIT"}
 
 dependencies = [
-  "numpy>=1.23"
+  "numpy>=1.23",
+  "jax>=0.4.0",
+  "jaxlib>=0.4.0"
 ]
 
 [project.scripts]
