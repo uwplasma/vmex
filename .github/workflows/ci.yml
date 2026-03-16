@@ -50,6 +50,10 @@ jobs:
           python -m pip install -U pip
           python -m pip install -e ".[dev,jax,netcdf,docs]"
 
+      - name: Fetch large assets
+        run: |
+          python tools/fetch_assets.py
+
       - name: Compile (Python)
         run: |
           python -m compileall -q vmec_jax
@@ -77,6 +81,10 @@ jobs:
           python -m pip install -U pip
           python -m pip install build
           python -m pip install -e ".[docs]"
+
+      - name: Fetch large assets
+        run: |
+          python tools/fetch_assets.py
 
       - name: Build wheel and sdist
         run: |
