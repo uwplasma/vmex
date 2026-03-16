@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+pytestmark = pytest.mark.full
+
 
 
 def test_end_to_end_gn_vmec_residual_decreases_for_circular_tokamak():

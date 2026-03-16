@@ -20,6 +20,11 @@ Run the test suite::
 
   pytest -q
 
+Run the full test suite (requires netCDF assets)::
+
+  python tools/fetch_assets.py
+  RUN_FULL=1 pytest -q
+
 CLI (VMEC2000-style executable)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

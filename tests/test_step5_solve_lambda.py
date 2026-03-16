@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+
 from vmec_jax.field import bsup_from_sqrtg_lambda, chips_from_chipf, lamscale_from_phips
 from vmec_jax.fourier import build_helical_basis, eval_fourier
 from vmec_jax.geom import eval_geom
@@ -14,6 +15,7 @@ from vmec_jax.modes import ModeTable
 from vmec_jax.solve import solve_lambda_gd
 from vmec_jax.static import build_static
 from vmec_jax.wout import read_wout, state_from_wout
+pytestmark = pytest.mark.full
 
 
 def test_step5_solve_lambda_decreases_wb_toward_wout(load_case_qa_reactorscale_lowres):

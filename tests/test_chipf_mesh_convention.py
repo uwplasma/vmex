@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import pytest
+
+
 import numpy as np
 from pathlib import Path
 
 from vmec_jax.field import chips_from_wout_chipf, full_mesh_from_half_mesh_avg
 from vmec_jax.wout import read_wout
+pytestmark = pytest.mark.full
 
 
 def _rel_rms(a: np.ndarray, b: np.ndarray) -> float:

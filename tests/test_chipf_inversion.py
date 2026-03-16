@@ -5,9 +5,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+
 from vmec_jax._compat import has_jax
 from vmec_jax.field import chips_from_chipf
 from vmec_jax.wout import read_wout
+pytestmark = pytest.mark.full
 
 
 @pytest.mark.parametrize(

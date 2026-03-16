@@ -118,6 +118,13 @@ Run tests:
 pytest -q
 ```
 
+Full test suite (requires netCDF assets):
+
+```bash
+python tools/fetch_assets.py
+RUN_FULL=1 pytest -q
+```
+
 Optimization tutorials (differentiable boundary tuning):
 
 ```bash

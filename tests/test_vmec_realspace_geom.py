@@ -1,5 +1,7 @@
 import numpy as np
 import pytest
+pytestmark = pytest.mark.full
+
 
 
 def test_vmec_realspace_geom_shapes_and_finite():
