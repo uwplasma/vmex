@@ -6,6 +6,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+pytestmark = pytest.mark.full
+
 
 
 def _vmec2000_root() -> Path | None:

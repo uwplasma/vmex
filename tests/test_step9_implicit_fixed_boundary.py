@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+pytestmark = pytest.mark.full
+
 
 
 def test_step9_implicit_fixed_boundary_grad_matches_finite_difference():

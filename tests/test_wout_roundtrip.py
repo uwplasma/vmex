@@ -5,7 +5,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+
 from vmec_jax.wout import read_wout, write_wout
+pytestmark = pytest.mark.full
 
 
 _CASES = [

@@ -5,8 +5,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+
 from vmec_jax.driver import load_example
 from vmec_jax.vmec_forces import vmec_forces_rz_from_wout
+pytestmark = pytest.mark.full
 
 
 def test_freeb_bsqvac_edge_slice_matches_full_half_mesh():

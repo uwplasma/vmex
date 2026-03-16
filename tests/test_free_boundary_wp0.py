@@ -1373,6 +1373,7 @@ def test_axisymmetric_freeb_sampling_collapses_toroidal_grid(tmp_path: Path):
     assert int(d.get("n_samples", -1)) == expected_ntheta3
 
 
+@pytest.mark.full
 def test_freeb_turnon_restart_sets_iter1_and_reuse_step(tmp_path: Path, monkeypatch):
     netCDF4 = pytest.importorskip("netCDF4", reason="netCDF4 required for mgrid loader test")
 

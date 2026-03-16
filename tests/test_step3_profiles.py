@@ -5,10 +5,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+
 from vmec_jax.geom import eval_geom
 from vmec_jax.integrals import cumtrapz_s, dvds_from_sqrtg
 from vmec_jax.namelist import InData
 from vmec_jax.profiles import MU0, eval_profiles
+pytestmark = pytest.mark.full
 
 
 def test_power_series_profiles_against_manual():

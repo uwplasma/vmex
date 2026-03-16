@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+
 from vmec_jax.config import load_config
 from vmec_jax.fourier import build_helical_basis, eval_fourier
 from vmec_jax.grids import AngleGrid
@@ -14,6 +15,7 @@ from vmec_jax.static import build_static
 from vmec_jax.vmec_residue import vmec_wint_from_trig
 from vmec_jax.vmec_tomnsp import vmec_angle_grid, vmec_trig_tables
 from vmec_jax.wout import read_wout
+pytestmark = pytest.mark.full
 
 
 def _rel_err(a: float, b: float) -> float:

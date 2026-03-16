@@ -37,4 +37,5 @@ packages = ["vmec_jax"]
 [tool.pytest.ini_options]
 markers = [
   "vmec2000: integration tests requiring a local VMEC2000 build (+ mpi4py/netCDF4)",
+  "full: tests that require large netCDF assets (run tools/fetch_assets.py)",
 ]
