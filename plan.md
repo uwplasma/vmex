@@ -263,6 +263,27 @@ Keep VMEC parity mode, while introducing better robustness, richer outputs, easi
   - memory scaling across representative axisymmetric / 3D / `lasym` cases,
   - downstream end-to-end pipelines such as
     `vmec_jax -> booz_xform_jax -> neo_jax`.
+- Recommended canonical benchmark shape:
+  - a small fixed-boundary least-squares problem with a handful of boundary
+    Fourier degrees of freedom, close to the SIMSOPT
+    `2DOF_vmecOnly_targetIotaAndVolume` workflow but kept entirely inside
+    `vmec_jax`,
+  - objective terms chosen from:
+    - plasma volume,
+    - `iota_axis`,
+    - optionally one mid-radius `iota` term or a major-radius-preserving term,
+  - initial case matrix:
+    - `circular_tokamak`,
+    - `ITERModel`,
+    - `LandremanPaul2021_QA_lowres`,
+  - reported outputs:
+    - primal solve time,
+    - explicit gradient time,
+    - implicit gradient time,
+    - peak memory,
+    - final objective value,
+    - final `fsq_total`,
+    - explicit/implicit gradient agreement.
 
 ### 5.5 Source-structure / maintainability status
 - Core functionality is concentrated in a few very large modules:
@@ -279,6 +300,24 @@ Keep VMEC parity mode, while introducing better robustness, richer outputs, easi
   - kernel assembly,
   - accelerated vs parity execution policy,
   - fixed-boundary vs free-boundary orchestration.
+- Concrete next split target:
+  - keep `vmec_jax/api.py` as the narrow public export surface,
+  - reduce `vmec_jax/driver.py` to orchestration and public wrappers,
+  - split `vmec_jax/solve.py` into policy / engines / reporting / debug helpers,
+  - split `vmec_jax/wout.py` into model / synthesis / derived diagnostics,
+  - split `vmec_jax/free_boundary.py` into runtime state / vacuum kernels /
+    debug helpers.
+- Docstring / comment priority:
+  - add full public docstrings first to:
+    - `run_fixed_boundary`,
+    - `FixedBoundaryRun`,
+    - `wout_from_fixed_boundary_run`,
+    - `write_wout_from_fixed_boundary_run`,
+    - `booz_xform_inputs_from_state`,
+  - add short stage-level comments at major assembly boundaries instead of
+    dense inline comments,
+  - add one architecture page that explains:
+    input -> static/build -> initial guess -> solve -> `WoutData` / Boozer export.
 
 ### 5.6 Current performance bottlenecks
 - Fixed-boundary accelerated runs improved materially, but the main remaining
@@ -318,6 +357,13 @@ Keep VMEC parity mode, while introducing better robustness, richer outputs, easi
 - `regcoil_jax`:
   - integration target remains relevant, but the referenced repository URL
     should be re-verified before committing to a concrete adapter design.
+- Usability direction from external wrappers:
+  - SIMSOPT demonstrates that users want a compact object-oriented surface with
+    cached results, easy boundary-DOF mutation, and direct output accessors,
+  - the near-term `vmec_jax` response should be:
+    - keep the functional public API as the stable base,
+    - add a thin compatibility wrapper later (`VmecJax`-style adapter),
+    - document today’s equivalent workflow clearly in examples and docs.
 
 ---
 
@@ -497,6 +543,17 @@ Legend:
 - [-] Tighten the remaining non-axisymmetric `lasym=True` reuse-step field/coupling drift after matching VMEC restart cadence.
 - [-] Tighten post-turn-on `input.stellcopt` parity now that iter-80 comparison is valid.
 - [ ] Extend free-boundary parity matrix to additional non-axisymmetric `lasym=True` real-world cases beyond local synthetic case.
+- [ ] Add a targeted reuse-step audit harness for `lasym=True` free-boundary cases
+  that records:
+  - cached `gsource/source_sym`,
+  - reused `bvec_nonsing_fouri`,
+  - `potvac`,
+  - `bsqvac`,
+  - `freeb_coupling_pgcon`,
+  - cache state / reuse counters / `ivacskip` cadence.
+- [ ] Separate “full update” and “reuse update” diagnostics in the comparator
+  outputs so `input.cth_like_free_bdy_lasym_small` and `input.stellcopt` can be
+  localized without conflating two different solver phases.
 
 ### 10.4 Differentiability and optimization UX
 - [x] Expose optimization-oriented output adapter channels as JAX arrays.
@@ -505,6 +562,13 @@ Legend:
 - [ ] Add benchmark report comparing implicit vs explicit gradient workflows on the same objective and cases.
 - [ ] Add a canonical optimization benchmark matrix (solve time, gradient time, peak memory, final objective quality) for axisymmetric and 3D cases.
 - [ ] Add a public, reusable benchmark harness for downstream pipelines (`vmec_jax`, `vmec_jax -> booz_xform_jax`, `vmec_jax -> booz_xform_jax -> neo_jax`).
+- [ ] Add a simple built-in optimization benchmark modeled on the SIMSOPT
+  2-DOF VMEC-only example:
+  - optimize a small set of boundary Fourier coefficients,
+  - target volume and `iota_axis`,
+  - run on `circular_tokamak`, `ITERModel`, and `LandremanPaul2021_QA_lowres`.
+- [ ] Publish explicit-vs-implicit gradient agreement metrics so performance
+  numbers are paired with correctness, not only wall-clock time.
 
 ### 10.5 Performance and memory
 - [x] Introduce many CPU-path improvements (tomnsps batching/cache, reduced host sync where safe).
@@ -522,6 +586,15 @@ Legend:
 - [ ] Define and document a stable relative force metric, e.g. a volume-weighted `||J x B - grad p|| / max(||J x B||, ||grad p||, eps)`-style quantity.
 - [ ] Print the actual force residual (and, where meaningful, a percent-like relative force error) in CLI / solver summaries without changing parity semantics.
 - [ ] Add regression tests and a diagnostic script for the new force-residual reporting path.
+- [ ] Reconstruct VMEC-style real-space force-balance channels first
+  (`jxb`, `pprime`, `jxb_gradp`, `avforce`, `amaxfor`, `aminfor`) before
+  deciding the final user-facing scalar.
+- [ ] Use those reconstructed VMEC-style channels as the implementation truth
+  for the new metric instead of the current objective-gradient proxy in
+  `vmec_jax/residuals.py`.
+- [ ] Keep the current differentiable gradient-proxy residuals available, but
+  relabel them clearly as optimization diagnostics rather than physical
+  force-balance diagnostics.
 
 ### 10.7 Documentation and maintainability
 - [x] Keep free-boundary plan updated with parity findings.
@@ -550,6 +623,8 @@ Legend:
 - Close the remaining free-boundary non-axisymmetric `lasym=True` reuse-step drift and keep the distributable free-boundary fixtures stable.
 - Add actual force-residual reporting (absolute + relative) to solver summaries and diagnostics.
 - Build the first optimization benchmark matrix: explicit vs implicit gradients on axisymmetric + QA cases.
+- Document the small stable public API and provide one “Simsopt-style workflow
+  in plain vmec_jax” example.
 
 ### 11.2 Medium term (1-2 months)
 - Stabilize default automatic scan/non-scan selection by solver signals only.
@@ -575,32 +650,58 @@ Legend:
      field/coupling drift.
    - Tighten post-turn-on `input.stellcopt`.
    - Keep the bundled free-boundary fixture matrix distributable and stable.
+   - First isolate whether the remaining drift enters through:
+     - reused mode-space source/coupling caches,
+     - potential reconstruction (`potvac`),
+     - sampled field reconstruction (`bsqvac` / coupling edge channels),
+     - or comparator alignment on reuse steps.
 
 2. **Force residual reporting**
-   - Define the actual force-imbalance metric to print.
-   - Add the metric to solver output and diagnostics without perturbing parity.
-   - Add tests / docs for how to interpret it physically.
+   - Reconstruct VMEC-style real-space force-balance fields from existing
+     `bcovar` / force kernels:
+     - `jxb`,
+     - `pprime`,
+     - `jxb_gradp`,
+     - surface summaries (`avforce`, `amaxfor`, `aminfor`).
+   - Define the primary user-facing scalar as a relative, volume-weighted force
+     imbalance, with VMEC-like per-surface summaries retained for parity and
+     debugging.
+   - Keep the gradient-proxy residuals as secondary optimization diagnostics,
+     not as the main physical-force number.
 
 3. **Optimization benchmark closure**
-   - Benchmark explicit vs implicit gradients on at least:
+   - Benchmark a small least-squares fixed-boundary optimization problem on at least:
      - `circular_tokamak`,
      - `ITERModel`,
      - `LandremanPaul2021_QA_lowres`.
+   - Use a small number of boundary Fourier dofs and targets modeled after the
+     common VMEC/SIMSOPT usage pattern:
+     - target volume,
+     - target `iota_axis`,
+     - optional fixed-major-radius penalty if needed for conditioning.
    - Record:
      - solve time,
      - gradient time,
      - peak memory,
      - final objective quality,
-     - backend.
+     - final `fsq_total`,
+     - backend,
+     - explicit/implicit gradient agreement.
 
 4. **Architecture cleanup**
-   - Start splitting `solve.py` by responsibility:
-     - controller policy,
-     - scan/non-scan execution,
-     - diagnostics / reporting,
-     - fixed-boundary kernel assembly,
-     - free-boundary control glue.
-   - Freeze a small documented public interface for downstream packages.
+   - Start splitting the large modules by responsibility with minimal behavior change:
+     - `solve.py` -> policy / engines / reporting / debug helpers,
+     - `wout.py` -> model / synthesis / derived diagnostics,
+     - `free_boundary.py` -> runtime state / vacuum kernels / debug helpers,
+     - `driver.py` -> orchestration only.
+   - Add full docstrings to the small public surface:
+     - `run_fixed_boundary`,
+     - `FixedBoundaryRun`,
+     - `wout_from_fixed_boundary_run`,
+     - `write_wout_from_fixed_boundary_run`,
+     - `booz_xform_inputs_from_state`.
+   - Freeze that documented interface for downstream packages before adding a
+     higher-level compatibility wrapper.
 
 5. **Validation closure**
    - Run:
@@ -657,6 +758,32 @@ Legend:
   - optimization / gradient benchmarking,
   - architecture cleanup tasks,
   - ecosystem integration tasks and readiness gates.
+- Re-audited the physical residual path against VMEC2000:
+  - VMEC2000 already computes real-space `jxb_gradp = jxb - pprime` in
+    `jxbforce.f` and exposes per-surface summaries (`avforce`, `amaxfor`,
+    `aminfor`),
+  - the current `vmec_jax/residuals.py` metric is still an
+    objective-gradient proxy and should not be presented as the physical force
+    imbalance.
+- Chose the next benchmark target for optimization work:
+  - a small fixed-boundary least-squares problem in the style of SIMSOPT’s
+    `2DOF_vmecOnly_targetIotaAndVolume`,
+  - first benchmark cases should be `circular_tokamak`, `ITERModel`, and
+    `LandremanPaul2021_QA_lowres`,
+  - report solve time, explicit gradient time, implicit gradient time, peak
+    memory, final objective, final `fsq_total`, and gradient agreement.
+- Converted the architecture cleanup into an explicit file plan:
+  - split `solve.py`,
+  - split `wout.py`,
+  - split `free_boundary.py`,
+  - keep `api.py` narrow and `driver.py` orchestration-focused,
+  - document the public integration surface around `run_fixed_boundary`,
+    `FixedBoundaryRun`, `wout_from_fixed_boundary_run`, and
+    `booz_xform_inputs_from_state`.
+- Re-reviewed external wrapper ergonomics:
+  - SIMSOPT’s `Vmec` API confirms that future integration should use a thin
+    compatibility wrapper with cached results and boundary-dof ownership,
+    rather than pushing mutable-wrapper semantics into the core solver.
 - Re-ran the full parity manifest (`outputs/parity_sweeps/20260305_171806/summary.json`):
   - all 6 fixed-boundary cases passed,
   - `input.DIII-D` and `input.DIII-D_reset` passed at current tightened thresholds,
