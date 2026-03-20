@@ -1,6 +1,6 @@
 # VMEC-JAX Master Plan and New-Agent Handoff (Living Document)
 
-Last updated: 2026-03-09
+Last updated: 2026-03-20
 Primary owner: `vmec_jax` contributors
 Canonical repo: `<repo-root>`
 
@@ -249,6 +249,76 @@ Keep VMEC parity mode, while introducing better robustness, richer outputs, easi
   - near-zero denominator aware relative metrics,
   - explicit caveat for channels expected to be near zero (e.g., `jdotb` in vacuum/no-current cases).
 
+### 5.4 Optimization and differentiability status
+- Explicit-diff and implicit-diff fixed-boundary examples exist and remain
+  runnable through the public Python API.
+- JAX-array export for Boozer-facing channels is implemented via
+  `vmec_jax.booz_xform_inputs_from_state`, and downstream projects already use
+  it in in-memory pipelines.
+- Current gap: optimization support is validated functionally, but not yet
+  tracked with the same quantitative rigor as parity. There is no canonical
+  benchmark matrix for:
+  - solve runtime vs gradient runtime,
+  - explicit vs implicit differentiation cost,
+  - memory scaling across representative axisymmetric / 3D / `lasym` cases,
+  - downstream end-to-end pipelines such as
+    `vmec_jax -> booz_xform_jax -> neo_jax`.
+
+### 5.5 Source-structure / maintainability status
+- Core functionality is concentrated in a few very large modules:
+  - `vmec_jax/solve.py` (~12.9k lines),
+  - `vmec_jax/wout.py` (~6.1k lines),
+  - `vmec_jax/free_boundary.py` (~3.5k lines),
+  - `vmec_jax/driver.py` (~2.8k lines).
+- This is the main maintainability risk for both parity and performance work.
+  Solver policy, reporting, restart logic, host/device synchronization, and
+  physics kernels are currently too interleaved.
+- The immediate refactor target is not “rewrite everything”; it is to separate:
+  - controller policy,
+  - per-iteration reporting / diagnostics,
+  - kernel assembly,
+  - accelerated vs parity execution policy,
+  - fixed-boundary vs free-boundary orchestration.
+
+### 5.6 Current performance bottlenecks
+- Fixed-boundary accelerated runs improved materially, but the main remaining
+  overheads are still:
+  - host-controlled iteration and frequent scalar materialization
+    (`float(...)`, `np.asarray(...)`, `device_get(...)`) inside hot solver
+    paths,
+  - print / history / resume bookkeeping mixed into the iteration body,
+  - repeated large Fourier / real-space materializations between
+    `tomnsp/bcovar/forces/residual` stages,
+  - `wout` synthesis cost after convergence,
+  - dense free-boundary vacuum solves and their cache/reuse cadence.
+- For optimization workflows, the biggest missing measurement is not just solve
+  time, but the ratio:
+  - primal solve time,
+  - explicit gradient time,
+  - implicit-gradient linear-solve time,
+  - memory footprint for repeated objective evaluations.
+
+### 5.7 Ecosystem integration status
+- `booz_xform_jax` / `neo_jax`:
+  - already have a live in-memory path through
+    `vmec_jax.booz_xform_inputs_from_state`,
+  - current work should preserve and document that API as a stability surface.
+- `simsopt`:
+  - still centers its optimization workflows around a mutable `Vmec` wrapper
+    with cached runs, surface ownership, and `wout`-style accessors,
+  - likely integration path is an adapter layer (`VmecJax` / compatibility
+    wrapper), not changing the core solver to imitate `simsopt` internals.
+- `essos`:
+  - currently consumes VMEC `wout_*.nc` files and geometry objects,
+  - readiness depends mostly on `wout` completeness and documented examples,
+    not deep solver changes.
+- `sfincs_jax`:
+  - currently consumes VMEC `wout_*.nc` for geometry-scheme-5 workflows,
+  - readiness depends on stable `wout` fields and a documented handoff recipe.
+- `regcoil_jax`:
+  - integration target remains relevant, but the referenced repository URL
+    should be re-verified before committing to a concrete adapter design.
+
 ---
 
 ## 6) Runbook (daily commands)
@@ -325,6 +395,11 @@ Current jobs:
 - Regression tests: resume behavior, wout compatibility, parity-sensitive channels.
 - Physics sanity tests: invariants and expected profile behavior.
 - Integration diagnostics: VMEC2000 comparator scripts and manifest sweeps.
+- Local default test path:
+  - `pytest -q` runs the light suite without requiring large netCDF assets.
+- Full test path:
+  - `python tools/fetch_assets.py`
+  - `RUN_FULL=1 pytest -q`
 
 ### 8.3 Validation artifacts
 Keep machine-readable summaries under
@@ -427,7 +502,9 @@ Legend:
 - [x] Expose optimization-oriented output adapter channels as JAX arrays.
 - [x] Keep implicit differentiation examples and tests available.
 - [-] Add end-to-end optimization tutorial(s) with realistic constraints (target iota, volume, fixed major radius).
-- [ ] Add benchmark report comparing implicit vs explicit gradient workflows on same objective.
+- [ ] Add benchmark report comparing implicit vs explicit gradient workflows on the same objective and cases.
+- [ ] Add a canonical optimization benchmark matrix (solve time, gradient time, peak memory, final objective quality) for axisymmetric and 3D cases.
+- [ ] Add a public, reusable benchmark harness for downstream pipelines (`vmec_jax`, `vmec_jax -> booz_xform_jax`, `vmec_jax -> booz_xform_jax -> neo_jax`).
 
 ### 10.5 Performance and memory
 - [x] Introduce many CPU-path improvements (tomnsps batching/cache, reduced host sync where safe).
@@ -436,34 +513,49 @@ Legend:
 - [-] Re-profile scan and non-scan after each parity patch, preserving default robust behavior.
 - [-] Keep a current cold-start runtime/memory matrix against VMEC2000 for the 8-way boundary/symmetry/LASYM coverage set.
 - [ ] Optimize wout generation hot spots further (`forces_bcovar_s`, synthesis sections) while preserving parity.
+- [ ] Make the accelerated fixed-boundary outer loop more device-resident by separating reporting/history from the numerical loop body.
+- [ ] Rework the hottest Fourier / real-space transforms to reduce memory traffic first, not just FLOPs.
+- [ ] Add an optimization-specific profiler suite that captures primal solve, explicit gradients, implicit gradients, and downstream pipeline costs.
 
-### 10.6 Documentation and maintainability
+### 10.6 Diagnostics, reporting, and physical residual quality
+- [ ] Add a user-facing force-imbalance diagnostic that reports an actual residual scale, not only `fsq` deltas.
+- [ ] Define and document a stable relative force metric, e.g. a volume-weighted `||J x B - grad p|| / max(||J x B||, ||grad p||, eps)`-style quantity.
+- [ ] Print the actual force residual (and, where meaningful, a percent-like relative force error) in CLI / solver summaries without changing parity semantics.
+- [ ] Add regression tests and a diagnostic script for the new force-residual reporting path.
+
+### 10.7 Documentation and maintainability
 - [x] Keep free-boundary plan updated with parity findings.
 - [x] Keep manifest thresholds quantitative and per-case.
 - [x] Restore CI-equivalent docs build after RST heading/indentation cleanup.
 - [-] Keep README concise; move deep detail to docs.
 - [ ] Add a dedicated docs page for scan vs non-scan equations/workflow with VMEC2000 mapping.
 - [ ] Add docs page for free-boundary turn-on-window diagnostics and interpretation.
+- [ ] Add a docs page that explains the optimization stack: explicit diff, implicit diff, benchmark methodology, and when to use each.
+- [ ] Add a docs page that explains ecosystem integration surfaces (`simsopt`, `essos`, `booz_xform_jax`, `neo_jax`, `sfincs_jax`) and which APIs are intended to stay stable.
+- [ ] Split monolithic solver code into smaller modules with a documented architecture map before further major feature growth.
 
-### 10.7 Release readiness gate for fixed+free boundary
+### 10.8 Release readiness gate for fixed+free boundary
 - [ ] All core manifest cases passing at target tolerances with no manual env-tuning required for correctness.
 - [ ] CI green on tests + docs + smoke parity.
 - [ ] Documentation complete for user onboarding and developer parity workflow.
 - [ ] Known limitations explicitly listed (near-axis caveats, near-zero denominators).
+- [ ] Optimization / gradient benchmark results published for representative cases and backends.
+- [ ] Downstream integration contracts documented for at least `booz_xform_jax` / `neo_jax`, with `simsopt` adapter design frozen.
 
 ---
 
 ## 11) Time horizons
 
 ### 11.1 Short term (1-2 weeks)
-- Finish free-boundary turn-on-window drift tightening for DIII-D-style axisymmetric LASYM.
-- Expand free-boundary LASYM=true non-axisymmetric coverage in manifest.
-- Keep per-iteration thresholds strict where parity is already excellent.
+- Close the remaining free-boundary non-axisymmetric `lasym=True` reuse-step drift and keep the distributable free-boundary fixtures stable.
+- Add actual force-residual reporting (absolute + relative) to solver summaries and diagnostics.
+- Build the first optimization benchmark matrix: explicit vs implicit gradients on axisymmetric + QA cases.
 
 ### 11.2 Medium term (1-2 months)
 - Stabilize default automatic scan/non-scan selection by solver signals only.
 - Finish optimization/autodiff examples and tests with robust APIs.
-- Produce full parity and performance report artifacts for representative case matrix.
+- Produce full parity, runtime, memory, and gradient-cost report artifacts for representative case matrix.
+- Define and document stable integration adapters for `simsopt` and `sfincs_jax`.
 
 ### 11.3 Long term (quarter+)
 - Move from VMEC2000 parity mode to dual-mode architecture:
@@ -471,29 +563,51 @@ Legend:
   - enhanced differentiable optimization mode (documented tradeoffs).
 - Add more advanced ML/adjoint workflows and multi-case optimization examples.
 - Evaluate GPU-focused kernel strategy for large optimization batches.
+- Unify the broader UWPlasma JAX stack around file-free pipelines where practical:
+  `vmec_jax -> booz_xform_jax -> neo_jax / sfincs_jax / regcoil_jax`.
 
 ---
 
 ## 12) Current immediate next steps (concrete execution)
 
-1. **Free-boundary LASYM non-axisymmetric expansion**
-   - Add at least one additional finite-pressure non-axisymmetric `lasym=True`
-     free-boundary case to manifest.
-   - Set realistic thresholds and add to smoke/full tier as appropriate.
-   - Replace the preserved-local `lasym=False` CTH-like mgrid dependency with a
-     distributable fixture or documented stable source.
-   - Tighten `input.stellcopt` post-turn-on parity now that the manifest compares
-     iter 80 instead of pre-turn-on iterations.
+1. **Free-boundary closure on remaining gaps**
+   - Tighten the remaining `input.cth_like_free_bdy_lasym_small` reuse-step
+     field/coupling drift.
+   - Tighten post-turn-on `input.stellcopt`.
+   - Keep the bundled free-boundary fixture matrix distributable and stable.
 
-2. **Default behavior hardening**
-   - Ensure `vmec_jax input.name` is robust without manual env settings.
-   - Keep adaptive scan/non-scan fallback based on solver signals.
+2. **Force residual reporting**
+   - Define the actual force-imbalance metric to print.
+   - Add the metric to solver output and diagnostics without perturbing parity.
+   - Add tests / docs for how to interpret it physically.
 
-4. **Validation closure**
+3. **Optimization benchmark closure**
+   - Benchmark explicit vs implicit gradients on at least:
+     - `circular_tokamak`,
+     - `ITERModel`,
+     - `LandremanPaul2021_QA_lowres`.
+   - Record:
+     - solve time,
+     - gradient time,
+     - peak memory,
+     - final objective quality,
+     - backend.
+
+4. **Architecture cleanup**
+   - Start splitting `solve.py` by responsibility:
+     - controller policy,
+     - scan/non-scan execution,
+     - diagnostics / reporting,
+     - fixed-boundary kernel assembly,
+     - free-boundary control glue.
+   - Freeze a small documented public interface for downstream packages.
+
+5. **Validation closure**
    - Run:
      - `pytest -q`
      - docs build
      - targeted parity sweeps for changed cases
+     - optimization benchmark harness
    - Update docs and this file with measured deltas and runtimes.
 
 ---
@@ -518,6 +632,31 @@ Legend:
   - `VMEC_JAX_DUMP_PRECOND_MATS=1` writes `precond_mats_ns*_iter*.npz` with `ar/br/dr/az/bz/dz`, `jmax`, and cache-use flag.
 - Fixed JAX lambda dump shape for axisymmetric `lasym=True`:
   - `VMEC_JAX_DUMP_LAM=1` now writes VMEC-style `ntmax=2` channels for `ntor=0, lasym=True`, enabling direct comparison to `lam_ns*_iter*.dat`.
+
+### 2026-03-20
+- Ran the current local light test suite:
+  - `pytest -q` -> `137 passed, 61 skipped, 42 warnings` in `75.87s`.
+- Audited the current code-size / maintenance hotspots:
+  - `solve.py` (~12.9k lines),
+  - `wout.py` (~6.1k lines),
+  - `free_boundary.py` (~3.5k lines),
+  - `driver.py` (~2.8k lines).
+- Re-audited parity / performance artifacts:
+  - latest bundled fixed-boundary readiness artifact still reports 16 fixed cases,
+  - latest bundled free-boundary readiness artifact still reports the current 3 shipped free-boundary cases,
+  - latest README single-grid runtime artifact reports 19 cases.
+- Reviewed downstream ecosystem surfaces:
+  - `simsopt` current VMEC workflows still revolve around a mutable `Vmec`
+    wrapper and `wout` accessors,
+  - `booz_xform_jax` / `neo_jax` already use the in-memory
+    `booz_xform_inputs_from_state` path,
+  - `essos` and `sfincs_jax` currently depend primarily on stable `wout`
+    products, not direct solver internals.
+- Updated this plan to add:
+  - actual force-residual reporting,
+  - optimization / gradient benchmarking,
+  - architecture cleanup tasks,
+  - ecosystem integration tasks and readiness gates.
 - Re-ran the full parity manifest (`outputs/parity_sweeps/20260305_171806/summary.json`):
   - all 6 fixed-boundary cases passed,
   - `input.DIII-D` and `input.DIII-D_reset` passed at current tightened thresholds,
