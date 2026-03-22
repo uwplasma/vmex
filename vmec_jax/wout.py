@@ -4483,10 +4483,13 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
         _var_f("fsql", (), np.asarray(float(wout.fsql)))
 
         # Mode tables.
-        _var_i("xm", ("mn_mode",), np.asarray(wout.xm))
-        _var_i("xn", ("mn_mode",), np.asarray(wout.xn))
-        _var_i("xm_nyq", ("mn_mode_nyq",), np.asarray(wout.xm_nyq))
-        _var_i("xn_nyq", ("mn_mode_nyq",), np.asarray(wout.xn_nyq))
+        # Keep the scalar mode-count metadata as integers, but store the mode
+        # tables themselves as floats to match the legacy libstell/SFINCS wout
+        # convention while remaining readable by integer-oriented consumers.
+        _var_f("xm", ("mn_mode",), np.asarray(wout.xm))
+        _var_f("xn", ("mn_mode",), np.asarray(wout.xn))
+        _var_f("xm_nyq", ("mn_mode_nyq",), np.asarray(wout.xm_nyq))
+        _var_f("xn_nyq", ("mn_mode_nyq",), np.asarray(wout.xn_nyq))
 
         # Geometry coefficients (full mesh).
         _var_f("rmnc", ("radius", "mn_mode"), np.asarray(wout.rmnc))
