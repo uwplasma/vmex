@@ -323,10 +323,30 @@ def boundary_from_input_convention(
     internal = _boundary_internal_from_helical(boundary, modes, lthreed=lthreed, lasym=lasym)
 
     if internal.rbcc.shape[1] > 1 and internal.rbcc.shape[0] > 1:
-        rtest = float(np.sum(internal.rbcc[1:, 1]))
-        ztest = float(np.sum(internal.zbsc[1:, 1]))
-        if (rtest * ztest) < 0.0:
-            internal = _boundary_internal_flip_theta(internal, lthreed=lthreed, lasym=lasym)
+        if _is_jax_array(internal.rbcc) or _is_jax_array(internal.zbsc):
+            rtest = jnp.sum(jnp.asarray(internal.rbcc)[1:, 1])
+            ztest = jnp.sum(jnp.asarray(internal.zbsc)[1:, 1])
+            flip = (rtest * ztest) < 0.0
+            flipped = _boundary_internal_flip_theta(internal, lthreed=lthreed, lasym=lasym)
+
+            def _select(new_arr, old_arr):
+                return jnp.where(flip, jnp.asarray(new_arr), jnp.asarray(old_arr))
+
+            internal = BoundaryInternalCoeffs(
+                rbcc=_select(flipped.rbcc, internal.rbcc),
+                rbss=_select(flipped.rbss, internal.rbss),
+                rbcs=_select(flipped.rbcs, internal.rbcs),
+                rbsc=_select(flipped.rbsc, internal.rbsc),
+                zbcc=_select(flipped.zbcc, internal.zbcc),
+                zbss=_select(flipped.zbss, internal.zbss),
+                zbcs=_select(flipped.zbcs, internal.zbcs),
+                zbsc=_select(flipped.zbsc, internal.zbsc),
+            )
+        else:
+            rtest = float(np.sum(internal.rbcc[1:, 1]))
+            ztest = float(np.sum(internal.zbsc[1:, 1]))
+            if (rtest * ztest) < 0.0:
+                internal = _boundary_internal_flip_theta(internal, lthreed=lthreed, lasym=lasym)
     if apply_m1_constraint and (lthreed or lasym) and internal.rbcc.shape[1] > 1:
         if lthreed:
             temp = internal.rbss[:, 1].copy()
