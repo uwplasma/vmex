@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 
 from ._compat import jax, jnp
-from .energy import FluxProfiles, flux_profiles_from_indata
+from .energy import FluxProfiles, _iotaf_from_iotas, flux_profiles_from_indata
 from .field import lamscale_from_phips
 from .modes import vmec_mode_table, nyquist_mode_table_from_grid
 from .profiles import eval_profiles
@@ -143,6 +143,95 @@ def _mode_scale(m: Any, n: Any) -> Any:
     mscale = jnp.where(m == 0, 1.0, sqrt2)
     nscale = jnp.where(jnp.abs(n) == 0, 1.0, sqrt2)
     return mscale * nscale
+
+
+def _jxbforce_nyquist_limits_from_trig(trig) -> tuple[int, int]:
+    ntheta2 = int(getattr(trig, "ntheta2", 0))
+    cosnv = np.asarray(getattr(trig, "cosnv"))
+    nzeta = int(cosnv.shape[0]) if cosnv.ndim >= 1 else 0
+    return max(ntheta2 - 1, 0), max(nzeta // 2, 0)
+
+
+def _filter_bsubuv_jxbforce_parity_jax(
+    *,
+    bsubu_even: Any,
+    bsubu_odd: Any,
+    bsubv_even: Any,
+    bsubv_odd: Any,
+    trig,
+    mmax_force: int,
+    nmax_force: int,
+    s: Any,
+) -> tuple[Any, Any]:
+    """JAX-friendly JXBFORCE low-pass filter for lasym=False bsub channels."""
+    bsubu_even = jnp.asarray(bsubu_even)
+    bsubu_odd = jnp.asarray(bsubu_odd)
+    bsubv_even = jnp.asarray(bsubv_even)
+    bsubv_odd = jnp.asarray(bsubv_odd)
+
+    ns, ntheta, nzeta = bsubu_even.shape
+    nt2 = int(trig.ntheta2)
+    if ntheta < nt2:
+        raise ValueError("bsubu grid smaller than ntheta2")
+
+    mmax = int(mmax_force)
+    nmax = int(nmax_force)
+    if mmax < 0 or nmax < 0:
+        return bsubu_even[:, :nt2, :], bsubv_even[:, :nt2, :]
+
+    bsubu_even_red = bsubu_even[:, :nt2, :]
+    bsubu_odd_red = bsubu_odd[:, :nt2, :]
+    bsubv_even_red = bsubv_even[:, :nt2, :]
+    bsubv_odd_red = bsubv_odd[:, :nt2, :]
+
+    cosmui = jnp.asarray(trig.cosmui)[:nt2, : mmax + 1]
+    sinmui = jnp.asarray(trig.sinmui)[:nt2, : mmax + 1]
+    cosmu = jnp.asarray(trig.cosmu)[:nt2, : mmax + 1]
+    sinmu = jnp.asarray(trig.sinmu)[:nt2, : mmax + 1]
+    cosnv = jnp.asarray(trig.cosnv)[:, : nmax + 1]
+    sinnv = jnp.asarray(trig.sinnv)[:, : nmax + 1]
+
+    r0scale = float(getattr(trig, "r0scale", 1.0))
+    dmult = jnp.full((mmax + 1, nmax + 1), 1.0 / (r0scale**2), dtype=bsubu_even.dtype)
+    mnyq, nnyq = _jxbforce_nyquist_limits_from_trig(trig)
+    if mnyq > 0 and mnyq <= mmax:
+        dmult = dmult.at[mnyq, :].multiply(0.5)
+    if nnyq > 0 and nnyq <= nmax:
+        dmult = dmult.at[:, nnyq].multiply(0.5)
+
+    s_full = jnp.asarray(s)
+    pshalf = 0.5 * (s_full[1:] + s_full[:-1]) if int(s_full.shape[0]) > 1 else s_full
+    pshalf = jnp.sqrt(jnp.maximum(jnp.concatenate([pshalf[:1], pshalf], axis=0) if int(s_full.shape[0]) > 1 else pshalf, 0.0))
+    if int(pshalf.shape[0]) > 1:
+        pshalf = pshalf.at[0].set(pshalf[1])
+
+    odd_m = (jnp.arange(mmax + 1) % 2) == 1
+
+    def _forward(f):
+        f_theta_cos = jnp.einsum("sik,im->smk", f, cosmui, optimize=True)
+        f_theta_sin = jnp.einsum("sik,im->smk", f, sinmui, optimize=True)
+        coeff1 = jnp.einsum("smk,kn->smn", f_theta_cos, cosnv, optimize=True)
+        coeff2 = jnp.einsum("smk,kn->smn", f_theta_sin, sinnv, optimize=True)
+        return coeff1 * dmult[None, :, :], coeff2 * dmult[None, :, :]
+
+    def _inverse(coeff1, coeff2):
+        tmp_cos = jnp.einsum("smn,im->sin", coeff1, cosmu, optimize=True)
+        tmp_sin = jnp.einsum("smn,im->sin", coeff2, sinmu, optimize=True)
+        return jnp.einsum("sin,kn->sik", tmp_cos, cosnv, optimize=True) + jnp.einsum(
+            "sin,kn->sik", tmp_sin, sinnv, optimize=True
+        )
+
+    def _filter_field(f_even, f_odd):
+        c1e, c2e = _forward(f_even)
+        c1o, c2o = _forward(f_odd)
+        scale = pshalf[:, None, None]
+        c1o = c1o.at[:, odd_m, :].set(c1o[:, odd_m, :] / scale)
+        c2o = c2o.at[:, odd_m, :].set(c2o[:, odd_m, :] / scale)
+        c1 = c1e.at[:, odd_m, :].set(c1o[:, odd_m, :])
+        c2 = c2e.at[:, odd_m, :].set(c2o[:, odd_m, :])
+        return _inverse(c1, c2)
+
+    return _filter_field(bsubu_even_red, bsubu_odd_red), _filter_field(bsubv_even_red, bsubv_odd_red)
 
 
 def _vmec_full_to_half(*, full: Any, m_modes: Any, s_full: Any) -> Any:
@@ -363,15 +452,23 @@ def booz_xform_inputs_from_state(
     s_half = jnp.concatenate([s_full[:1], 0.5 * (s_full[1:] + s_full[:-1])], axis=0)
     iotas = jnp.asarray(prof.get("iota", jnp.zeros_like(s_half)))
     iotas = iotas.at[0].set(0.0)
+    iotaf = jnp.asarray(_iotaf_from_iotas(iotas, lrfp=bool(indata.get_bool("LRFP", False))))
     iota_half = iotas[1:]
 
     wout_like = SimpleNamespace(
         phipf=flux.phipf,
         chipf=flux.chipf,
         phips=flux.phips,
+        iotas=iotas,
+        iotaf=iotaf,
         nfp=nfp,
+        mpol=int(cfg.mpol),
+        ntor=int(cfg.ntor),
         lasym=bool(cfg.lasym),
         signgs=int(signgs),
+        ncurr=int(indata.get_int("NCURR", 0)),
+        lcurrent=bool(int(indata.get_int("NCURR", 0)) == 1),
+        flux_is_internal=True,
     )
 
     pres = jnp.asarray(prof.get("pressure", jnp.zeros_like(s_half)))
@@ -408,23 +505,45 @@ def booz_xform_inputs_from_state(
 
     bsubu = jnp.asarray(bc.bsubu)
     bsubv = jnp.asarray(bc.bsubv)
+    if not bool(cfg.lasym):
+        pshalf = jnp.sqrt(jnp.maximum(0.5 * (s_full[1:] + s_full[:-1]), 0.0))
+        pshalf = jnp.concatenate([pshalf[:1], pshalf], axis=0)
+        if int(pshalf.shape[0]) > 1:
+            pshalf = pshalf.at[0].set(pshalf[1])
+        pshalf = pshalf[:, None, None]
+        bsubu, bsubv = _filter_bsubuv_jxbforce_parity_jax(
+            bsubu_even=bsubu,
+            bsubu_odd=pshalf * bsubu,
+            bsubv_even=bsubv,
+            bsubv_odd=pshalf * bsubv,
+            trig=trig,
+            mmax_force=max(int(cfg.mpol) - 1, 0),
+            nmax_force=int(cfg.ntor),
+            s=s_full,
+        )
     bsq = jnp.asarray(bc.bsq)
     pres_h = pres[:, None, None]
     bmod = _safe_sqrt_nonneg(2.0 * (bsq - pres_h))
 
+    parity = "both" if bool(cfg.lasym) else "cos"
     bsubumnc_full, bsubumns_full = vmec_realspace_analysis(
-        f=bsubu, modes=nyq_modes, trig=trig, parity="both"
+        f=bsubu, modes=nyq_modes, trig=trig, parity=parity
     )
     bsubvmnc_full, bsubvmns_full = vmec_realspace_analysis(
-        f=bsubv, modes=nyq_modes, trig=trig, parity="both"
+        f=bsubv, modes=nyq_modes, trig=trig, parity=parity
     )
     bmnc_full, bmns_full = vmec_realspace_analysis(
-        f=bmod, modes=nyq_modes, trig=trig, parity="both"
+        f=bmod, modes=nyq_modes, trig=trig, parity=parity
     )
 
     bsubumnc = jnp.asarray(bsubumnc_full)[1:, :]
     bsubvmnc = jnp.asarray(bsubvmnc_full)[1:, :]
     bmnc = jnp.asarray(bmnc_full)[1:, :]
+
+    if not bool(cfg.lasym):
+        mask_bsub = (jnp.asarray(nyq_modes.m) >= int(cfg.mpol)) | (jnp.abs(jnp.asarray(nyq_modes.n)) > int(cfg.ntor))
+        bsubumnc = jnp.where(mask_bsub[None, :], 0.0, bsubumnc)
+        bsubvmnc = jnp.where(mask_bsub[None, :], 0.0, bsubvmnc)
 
     bsubumns = jnp.asarray(bsubumns_full)[1:, :] if bool(cfg.lasym) else None
     bsubvmns = jnp.asarray(bsubvmns_full)[1:, :] if bool(cfg.lasym) else None
