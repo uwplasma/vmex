@@ -88,6 +88,43 @@ def _boundary_internal_flip_theta(
     lasym: bool,
 ) -> BoundaryInternalCoeffs:
     """Apply VMEC's flip_theta to internal boundary arrays (PI - theta)."""
+    if _is_jax_array(internal.rbcc):
+        rbcc = jnp.asarray(internal.rbcc)
+        rbss = jnp.asarray(internal.rbss)
+        rbcs = jnp.asarray(internal.rbcs)
+        rbsc = jnp.asarray(internal.rbsc)
+        zbcc = jnp.asarray(internal.zbcc)
+        zbss = jnp.asarray(internal.zbss)
+        zbcs = jnp.asarray(internal.zbcs)
+        zbsc = jnp.asarray(internal.zbsc)
+
+        mpol = int(rbcc.shape[1] - 1)
+        mul1 = -1.0
+        for m in range(1, mpol + 1):
+            rbcc = rbcc.at[:, m].set(mul1 * rbcc[:, m])
+            zbsc = zbsc.at[:, m].set(-mul1 * zbsc[:, m])
+            if lthreed:
+                rbss = rbss.at[:, m].set(-mul1 * rbss[:, m])
+                zbcs = zbcs.at[:, m].set(mul1 * zbcs[:, m])
+            if lasym:
+                rbsc = rbsc.at[:, m].set(-mul1 * rbsc[:, m])
+                zbcc = zbcc.at[:, m].set(mul1 * zbcc[:, m])
+                if lthreed:
+                    rbcs = rbcs.at[:, m].set(mul1 * rbcs[:, m])
+                    zbss = zbss.at[:, m].set(-mul1 * zbss[:, m])
+            mul1 = -mul1
+
+        return BoundaryInternalCoeffs(
+            rbcc=rbcc,
+            rbss=rbss,
+            rbcs=rbcs,
+            rbsc=rbsc,
+            zbcc=zbcc,
+            zbss=zbss,
+            zbcs=zbcs,
+            zbsc=zbsc,
+        )
+
     rbcc = internal.rbcc.copy()
     rbss = internal.rbss.copy()
     rbcs = internal.rbcs.copy()
@@ -132,6 +169,84 @@ def _get_indexed(indata: InData, name: str) -> Dict[Tuple[int, ...], float]:
             continue
         out[tuple(k)] = float(v)
     return out
+
+
+def _rotate_lasym_input_maps(
+    *,
+    indata: InData,
+    rbc: Dict[Tuple[int, ...], float],
+    rbs: Dict[Tuple[int, ...], float],
+    zbc: Dict[Tuple[int, ...], float],
+    zbs: Dict[Tuple[int, ...], float],
+) -> tuple[
+    Dict[Tuple[int, ...], float],
+    Dict[Tuple[int, ...], float],
+    Dict[Tuple[int, ...], float],
+    Dict[Tuple[int, ...], float],
+]:
+    """Apply VMEC readin.f LASYM boundary rotation to sparse input maps."""
+    if not bool(indata.get_bool("LASYM", False)):
+        return rbc, rbs, zbc, zbs
+
+    rbc01 = float(rbc.get((0, 1), 0.0))
+    rbs01 = float(rbs.get((0, 1), 0.0))
+    zbc01 = float(zbc.get((0, 1), 0.0))
+    zbs01 = float(zbs.get((0, 1), 0.0))
+    denom = abs(rbc01) + abs(zbs01)
+    delta = 0.0 if denom == 0.0 else float(np.arctan((rbs01 - zbc01) / denom))
+    if delta == 0.0:
+        return rbc, rbs, zbc, zbs
+
+    def _rotate_pair(cos_map: Dict[Tuple[int, ...], float], sin_map: Dict[Tuple[int, ...], float]):
+        out_cos: Dict[Tuple[int, ...], float] = {}
+        out_sin: Dict[Tuple[int, ...], float] = {}
+        keys = set(cos_map.keys()) | set(sin_map.keys())
+        for key in keys:
+            n_i, m_i = int(key[0]), int(key[1])
+            val_cos = float(cos_map.get((n_i, m_i), 0.0))
+            val_sin = float(sin_map.get((n_i, m_i), 0.0))
+            ang = float(m_i) * delta
+            c = float(np.cos(ang))
+            s = float(np.sin(ang))
+            out_cos[(n_i, m_i)] = val_cos * c + val_sin * s
+            out_sin[(n_i, m_i)] = val_sin * c - val_cos * s
+        return out_cos, out_sin
+
+    return (*_rotate_pair(rbc, rbs), *_rotate_pair(zbc, zbs))
+
+
+def boundary_input_from_indata(indata: InData, modes: ModeTable) -> BoundaryCoeffs:
+    """Build dense boundary coefficients in the raw input convention.
+
+    This matches the Fourier coefficient convention used by VMEC namelists and
+    by SurfaceRZFourier-facing wrappers before VMEC's internal sign handling and
+    optional theta flip are applied.
+    """
+    rbc = _get_indexed(indata, "RBC")
+    rbs = _get_indexed(indata, "RBS")
+    zbc = _get_indexed(indata, "ZBC")
+    zbs = _get_indexed(indata, "ZBS")
+    rbc, rbs, zbc, zbs = _rotate_lasym_input_maps(indata=indata, rbc=rbc, rbs=rbs, zbc=zbc, zbs=zbs)
+
+    K = modes.K
+    R_cos = np.zeros((K,), dtype=float)
+    R_sin = np.zeros((K,), dtype=float)
+    Z_cos = np.zeros((K,), dtype=float)
+    Z_sin = np.zeros((K,), dtype=float)
+
+    key_to_k = {(int(m), int(n)): k for k, (m, n) in enumerate(zip(modes.m, modes.n))}
+
+    def assign_from(src: Dict[Tuple[int, ...], float], dest: np.ndarray):
+        for (n, m), val in src.items():
+            k = key_to_k.get((int(m), int(n)))
+            if k is not None:
+                dest[k] = val
+
+    assign_from(rbc, R_cos)
+    assign_from(rbs, R_sin)
+    assign_from(zbc, Z_cos)
+    assign_from(zbs, Z_sin)
+    return BoundaryCoeffs(R_cos=R_cos, R_sin=R_sin, Z_cos=Z_cos, Z_sin=Z_sin)
 
 
 def _boundary_cache_key(
@@ -193,6 +308,36 @@ def _infer_mpol_ntor(modes: ModeTable) -> tuple[int, int]:
     mpol = int(m_arr.max()) if m_arr.size else 0
     ntor = int(np.abs(n_arr).max()) if n_arr.size else 0
     return mpol, ntor
+
+
+def boundary_from_input_convention(
+    boundary: BoundaryCoeffs,
+    modes: ModeTable,
+    *,
+    lasym: bool,
+    apply_m1_constraint: bool = False,
+) -> BoundaryCoeffs:
+    """Convert raw input-convention boundary coefficients to solver convention."""
+    mpol, ntor = _infer_mpol_ntor(modes)
+    lthreed = ntor > 0
+    internal = _boundary_internal_from_helical(boundary, modes, lthreed=lthreed, lasym=lasym)
+
+    if internal.rbcc.shape[1] > 1 and internal.rbcc.shape[0] > 1:
+        rtest = float(np.sum(internal.rbcc[1:, 1]))
+        ztest = float(np.sum(internal.zbsc[1:, 1]))
+        if (rtest * ztest) < 0.0:
+            internal = _boundary_internal_flip_theta(internal, lthreed=lthreed, lasym=lasym)
+    if apply_m1_constraint and (lthreed or lasym) and internal.rbcc.shape[1] > 1:
+        if lthreed:
+            temp = internal.rbss[:, 1].copy()
+            internal.rbss[:, 1] = 0.5 * (temp + internal.zbcs[:, 1])
+            internal.zbcs[:, 1] = 0.5 * (temp - internal.zbcs[:, 1])
+        if lasym:
+            temp = internal.rbsc[:, 1].copy()
+            internal.rbsc[:, 1] = 0.5 * (temp + internal.zbcc[:, 1])
+            internal.zbcc[:, 1] = 0.5 * (temp - internal.zbcc[:, 1])
+
+    return _boundary_helical_from_internal(internal, modes, lthreed=lthreed, lasym=lasym)
 
 
 def _boundary_internal_from_helical(
@@ -567,35 +712,9 @@ def boundary_from_indata(
     rbs = _get_indexed(indata, "RBS")
     zbc = _get_indexed(indata, "ZBC")
     zbs = _get_indexed(indata, "ZBS")
+    rbc, rbs, zbc, zbs = _rotate_lasym_input_maps(indata=indata, rbc=rbc, rbs=rbs, zbc=zbc, zbs=zbs)
 
     lasym = bool(indata.get_bool("LASYM", False))
-    if lasym:
-        # VMEC readin.f: rotate boundary so that RBS(m=1,n=0) == ZBC(m=1,n=0)
-        # (see readin.f around the "CONVERT TO REPRESENTATION WITH RBS(m=1)=ZBC(m=1)" block).
-        rbc01 = float(rbc.get((0, 1), 0.0))
-        rbs01 = float(rbs.get((0, 1), 0.0))
-        zbc01 = float(zbc.get((0, 1), 0.0))
-        zbs01 = float(zbs.get((0, 1), 0.0))
-        denom = abs(rbc01) + abs(zbs01)
-        delta = 0.0 if denom == 0.0 else float(np.arctan((rbs01 - zbc01) / denom))
-        if delta != 0.0:
-            def _rotate_pair(cos_map: Dict[Tuple[int, ...], float], sin_map: Dict[Tuple[int, ...], float]):
-                out_cos: Dict[Tuple[int, ...], float] = {}
-                out_sin: Dict[Tuple[int, ...], float] = {}
-                keys = set(cos_map.keys()) | set(sin_map.keys())
-                for key in keys:
-                    n_i, m_i = int(key[0]), int(key[1])
-                    val_cos = float(cos_map.get((n_i, m_i), 0.0))
-                    val_sin = float(sin_map.get((n_i, m_i), 0.0))
-                    ang = float(m_i) * delta
-                    c = float(np.cos(ang))
-                    s = float(np.sin(ang))
-                    out_cos[(n_i, m_i)] = val_cos * c + val_sin * s
-                    out_sin[(n_i, m_i)] = val_sin * c - val_cos * s
-                return out_cos, out_sin
-
-            rbc, rbs = _rotate_pair(rbc, rbs)
-            zbc, zbs = _rotate_pair(zbc, zbs)
 
     cache_key = _boundary_cache_key(
         indata,
@@ -610,53 +729,12 @@ def boundary_from_indata(
     if cached is not None:
         return cached
 
-    K = modes.K
-    R_cos = np.zeros((K,), dtype=float)
-    R_sin = np.zeros((K,), dtype=float)
-    Z_cos = np.zeros((K,), dtype=float)
-    Z_sin = np.zeros((K,), dtype=float)
-
-    # Build a quick lookup from (m,n) to k
-    key_to_k = {(int(m), int(n)): k for k, (m, n) in enumerate(zip(modes.m, modes.n))}
-
-    def assign_from(src: Dict[Tuple[int, ...], float], dest: np.ndarray, kind: str):
-        for (n, m), val in src.items():
-            k = key_to_k.get((int(m), int(n)))
-            if k is None:
-                continue
-            dest[k] = val
-
-    assign_from(rbc, R_cos, "rbc")
-    assign_from(rbs, R_sin, "rbs")
-    assign_from(zbc, Z_cos, "zbc")
-    assign_from(zbs, Z_sin, "zbs")
-
-    boundary = BoundaryCoeffs(R_cos=R_cos, R_sin=R_sin, Z_cos=Z_cos, Z_sin=Z_sin)
-
-    mpol, ntor = _infer_mpol_ntor(modes)
-    lthreed = ntor > 0
-
-    # Convert through VMEC internal representation to match readin.f sign handling.
-    internal = _boundary_internal_from_helical(boundary, modes, lthreed=lthreed, lasym=lasym)
-
-    # VMEC readin.f: check sign of Jacobian using m=1 internal boundary modes
-    # and optionally flip theta (PI - theta). This enforces signgs=-1 convention.
-    if internal.rbcc.shape[1] > 1 and internal.rbcc.shape[0] > 1:
-        rtest = float(np.sum(internal.rbcc[1:, 1]))
-        ztest = float(np.sum(internal.zbsc[1:, 1]))
-        if (rtest * ztest) < 0.0:
-            internal = _boundary_internal_flip_theta(internal, lthreed=lthreed, lasym=lasym)
-    if apply_m1_constraint and bool(indata.get_bool("LCONM1", True)) and (lthreed or lasym):
-        if internal.rbcc.shape[1] > 1:
-            if lthreed:
-                temp = internal.rbss[:, 1].copy()
-                internal.rbss[:, 1] = 0.5 * (temp + internal.zbcs[:, 1])
-                internal.zbcs[:, 1] = 0.5 * (temp - internal.zbcs[:, 1])
-            if lasym:
-                temp = internal.rbsc[:, 1].copy()
-                internal.rbsc[:, 1] = 0.5 * (temp + internal.zbcc[:, 1])
-                internal.zbcc[:, 1] = 0.5 * (temp - internal.zbcc[:, 1])
-
-    boundary_out = _boundary_helical_from_internal(internal, modes, lthreed=lthreed, lasym=lasym)
+    boundary_input = boundary_input_from_indata(indata, modes)
+    boundary_out = boundary_from_input_convention(
+        boundary_input,
+        modes,
+        lasym=lasym,
+        apply_m1_constraint=bool(apply_m1_constraint and indata.get_bool("LCONM1", True)),
+    )
     _boundary_cache_put(cache_key, boundary_out)
     return boundary_out
