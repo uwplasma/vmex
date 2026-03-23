@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import jax
 import numpy as np
 
 from vmec_jax.namelist import read_indata
@@ -77,3 +78,48 @@ def test_boundary_input_conversion_matches_solver_boundary(tmp_path: Path):
     np.testing.assert_allclose(np.asarray(converted.R_sin), np.asarray(direct.R_sin))
     np.testing.assert_allclose(np.asarray(converted.Z_cos), np.asarray(direct.Z_cos))
     np.testing.assert_allclose(np.asarray(converted.Z_sin), np.asarray(direct.Z_sin))
+
+
+def test_boundary_input_conversion_is_jittable(tmp_path: Path):
+    txt = """
+&INDATA
+  NFP = 4
+  LASYM = F
+  MPOL = 3
+  NTOR = 1
+  NTHETA = 16
+  NZETA = 14
+  RBC(0,0) = 1.0
+  RBC(1,0) = 0.13
+  RBC(-1,1) = -0.07
+  RBC(0,1) = 0.16
+  RBC(1,1) = -0.01
+  ZBS(1,0) = 0.12
+  ZBS(-1,1) = 0.10
+  ZBS(0,1) = 0.17
+  ZBS(1,1) = -0.02
+/
+"""
+    p = tmp_path / "input.test3d"
+    p.write_text(txt)
+
+    indata = read_indata(p)
+    modes = vmec_mode_table(mpol=3, ntor=1)
+    raw = boundary_input_from_indata(indata, modes)
+    raw_jax = type(raw)(
+        R_cos=jax.numpy.asarray(raw.R_cos),
+        R_sin=jax.numpy.asarray(raw.R_sin),
+        Z_cos=jax.numpy.asarray(raw.Z_cos),
+        Z_sin=jax.numpy.asarray(raw.Z_sin),
+    )
+    fn = jax.jit(
+        lambda b: boundary_from_input_convention(
+            b,
+            modes,
+            lasym=False,
+            apply_m1_constraint=False,
+        ).R_cos
+    )
+    out = np.asarray(fn(raw_jax))
+    expected = np.asarray(boundary_from_indata(indata, modes, apply_m1_constraint=False).R_cos)
+    np.testing.assert_allclose(out, expected)
