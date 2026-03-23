@@ -295,6 +295,18 @@ def vmec_bcovar_half_mesh_from_wout(
         ``use_vmec_synthesis=True``, they are built internally.
     """
     s = jnp.asarray(static.s)
+    if trig is None:
+        trig = getattr(static, "trig_vmec", None)
+    if trig is None:
+        trig = vmec_trig_tables(
+            ntheta=int(static.cfg.ntheta),
+            nzeta=int(static.cfg.nzeta),
+            nfp=int(getattr(wout, "nfp", static.cfg.nfp)),
+            mmax=int(getattr(wout, "mpol", static.cfg.mpol)) - 1,
+            nmax=int(getattr(wout, "ntor", static.cfg.ntor)),
+            lasym=bool(getattr(wout, "lasym", static.cfg.lasym)),
+            dtype=jnp.asarray(state.Rcos).dtype,
+        )
     ns = int(s.shape[0])
     # VMEC stores internal coefficients. Undo the m=1 internal constraint for
     # R/Z before real-space synthesis.
