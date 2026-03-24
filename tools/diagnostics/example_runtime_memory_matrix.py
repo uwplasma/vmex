@@ -363,7 +363,7 @@ def _stage_input_with_mgrid(*, input_path: Path, dst_dir: Path) -> Path:
         rhs = line.split("=", 1)[1]
         rhs = rhs.split("!", 1)[0].strip().rstrip(",")
         rhs = rhs.strip().strip('"').strip("'")
-        if not rhs:
+        if not rhs or rhs.strip().upper() == "NONE":
             continue
         src = _resolve_support_file(rhs)
         if src is None:
