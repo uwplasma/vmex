@@ -27,6 +27,7 @@ from .vmec_realspace import (
     vmec_realspace_geom_from_state,
 )
 from .vmec_residue import vmec_pwint_from_trig
+from .vmec_tomnsp import vmec_trig_tables
 
 
 MU0 = 4e-7 * np.pi  # N/A^2
@@ -44,6 +45,19 @@ def _vmec_wint_from_trig(trig) -> np.ndarray:
     nzeta = int(np.asarray(trig.cosnv).shape[0])
     wint = w_theta[:, None] * np.ones((nzeta,), dtype=w_theta.dtype)[None, :]
     return np.asarray(wint, dtype=float)
+
+
+def _vmec_wint_from_trig_jax(trig):
+    """Return VMEC-style angular weights on the internal grid as JAX arrays."""
+    cosmui3 = jnp.asarray(trig.cosmui3)
+    mscale = jnp.asarray(trig.mscale)
+    if cosmui3.ndim != 2:
+        raise ValueError("Expected trig.cosmui3 with shape (ntheta3, mmax+1)")
+    if int(mscale.size) == 0:
+        raise ValueError("Expected non-empty trig.mscale")
+    w_theta = cosmui3[:, 0] / mscale[0]
+    nzeta = int(np.asarray(trig.cosnv).shape[0])
+    return w_theta[:, None] * jnp.ones((nzeta,), dtype=w_theta.dtype)[None, :]
 
 
 def _pshalf_from_s(s_full: np.ndarray) -> np.ndarray:
@@ -162,6 +176,39 @@ def _compute_aspectratio(
     Aminor_p = float(np.sqrt(cross_area_p / np.pi))
     aspect = float(Rmajor_p / Aminor_p) if Aminor_p != 0.0 else 0.0
     return Aminor_p, Rmajor_p, aspect, volume_p, cross_area_p
+
+
+def equilibrium_aspect_ratio_from_state(*, state: VMECState, static) -> Any:
+    """Compute VMEC's equilibrium aspect ratio directly from a solved state.
+
+    This mirrors the ``aspectratio.f`` path used during ``wout`` synthesis, but
+    keeps the calculation on JAX arrays so callers can differentiate through the
+    solved equilibrium without materializing a full ``wout`` object.
+    """
+    cfg = static.cfg
+    trig = vmec_trig_tables(
+        ntheta=int(cfg.ntheta),
+        nzeta=int(cfg.nzeta),
+        nfp=int(cfg.nfp),
+        mmax=int(cfg.mpol),
+        nmax=int(cfg.ntor),
+        lasym=bool(cfg.lasym),
+        dtype=jnp.asarray(state.Rcos).dtype,
+        cache=True,
+    )
+    geom = _vmec_realspace_geom_light_from_state(state=state, modes=static.modes, trig=trig)
+    R = jnp.asarray(geom["R"])
+    Zu = jnp.asarray(geom["Zu"])
+    wint = _vmec_wint_from_trig_jax(trig)
+    rb = R[-1]
+    zub = Zu[-1]
+    t1 = rb * zub * wint
+    volume_p = (2.0 * jnp.pi * jnp.pi) * jnp.abs(jnp.sum(rb * t1))
+    cross_area_p = (2.0 * jnp.pi) * jnp.abs(jnp.sum(t1))
+    cross_area_safe = jnp.where(cross_area_p != 0.0, cross_area_p, 1.0)
+    Aminor_p = jnp.where(cross_area_p != 0.0, jnp.sqrt(cross_area_safe / jnp.pi), 0.0)
+    Rmajor_p = jnp.where(cross_area_p != 0.0, volume_p / (2.0 * jnp.pi * cross_area_safe), 0.0)
+    return jnp.where(Aminor_p != 0.0, Rmajor_p / Aminor_p, 0.0)
 
 
 def _compute_equif_wout(
