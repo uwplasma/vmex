@@ -186,17 +186,24 @@ def equilibrium_aspect_ratio_from_state(*, state: VMECState, static) -> Any:
     solved equilibrium without materializing a full ``wout`` object.
     """
     cfg = static.cfg
-    trig = vmec_trig_tables(
-        ntheta=int(cfg.ntheta),
-        nzeta=int(cfg.nzeta),
-        nfp=int(cfg.nfp),
-        mmax=int(cfg.mpol),
-        nmax=int(cfg.ntor),
+    trig = getattr(static, "trig_vmec", None)
+    if trig is None:
+        trig = vmec_trig_tables(
+            ntheta=int(cfg.ntheta),
+            nzeta=int(cfg.nzeta),
+            nfp=int(cfg.nfp),
+            mmax=int(cfg.mpol),
+            nmax=int(cfg.ntor),
+            lasym=bool(cfg.lasym),
+            dtype=jnp.asarray(state.Rcos).dtype,
+            cache=False,
+        )
+    geom = _vmec_realspace_geom_light_from_state(
+        state=state,
+        modes=static.modes,
+        trig=trig,
         lasym=bool(cfg.lasym),
-        dtype=jnp.asarray(state.Rcos).dtype,
-        cache=True,
     )
-    geom = _vmec_realspace_geom_light_from_state(state=state, modes=static.modes, trig=trig)
     R = jnp.asarray(geom["R"])
     Zu = jnp.asarray(geom["Zu"])
     wint = _vmec_wint_from_trig_jax(trig)
@@ -289,7 +296,7 @@ def _compute_equif_wout(
     return buco, bvco, jcuru, jcurv, equif
 
 
-def _vmec_realspace_geom_light_from_state(*, state: VMECState, modes, trig) -> dict[str, Any]:
+def _vmec_realspace_geom_light_from_state(*, state: VMECState, modes, trig, lasym: bool | None = None) -> dict[str, Any]:
     """Compute minimal geometry (R, Z, Zu) needed for wout diagnostics."""
     from ._compat import jnp
 
@@ -298,7 +305,8 @@ def _vmec_realspace_geom_light_from_state(*, state: VMECState, modes, trig) -> d
     Zcos = jnp.asarray(state.Zcos)
     Zsin = jnp.asarray(state.Zsin)
     lthreed = bool(np.any(np.asarray(modes.n)))
-    lasym = bool(np.any(np.asarray(Rsin))) or bool(np.any(np.asarray(Zcos)))
+    if lasym is None:
+        lasym = bool(np.any(np.asarray(Rsin))) or bool(np.any(np.asarray(Zcos)))
     lconm1 = bool(lthreed or lasym)
     if lconm1 and int(np.max(np.asarray(modes.m))) > 0:
         Rcos, Zsin, Rsin, Zcos = vmec_m1_internal_to_physical_signed(
