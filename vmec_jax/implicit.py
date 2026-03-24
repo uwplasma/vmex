@@ -651,6 +651,7 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
     *,
     indata,
     signgs: int,
+    state0_host: VMECState | None = None,
     max_iter: int = 50,
     step_size: float = 1.0,
     ftol: float | None = None,
@@ -671,6 +672,16 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
 
     implicit = implicit or ImplicitFixedBoundaryOptions()
     state0_c = _stop_gradient_tree(state0)
+    if state0_host is None:
+        state0_host = VMECState(
+            layout=state0_c.layout,
+            Rcos=np.asarray(jax.device_get(state0_c.Rcos)),
+            Rsin=np.asarray(jax.device_get(state0_c.Rsin)),
+            Zcos=np.asarray(jax.device_get(state0_c.Zcos)),
+            Zsin=np.asarray(jax.device_get(state0_c.Zsin)),
+            Lcos=np.asarray(jax.device_get(state0_c.Lcos)),
+            Lsin=np.asarray(jax.device_get(state0_c.Lsin)),
+        )
     idx00 = _mode00_index(static.modes)
     signgs_i = int(signgs)
 
@@ -824,13 +835,13 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         eZcos_np = np.asarray(eZcos)
         eZsin_np = np.asarray(eZsin)
         state_init = VMECState(
-            layout=state0_c.layout,
-            Rcos=np.asarray(state0_c.Rcos),
-            Rsin=np.asarray(state0_c.Rsin),
-            Zcos=np.asarray(state0_c.Zcos),
-            Zsin=np.asarray(state0_c.Zsin),
-            Lcos=np.asarray(state0_c.Lcos),
-            Lsin=np.asarray(state0_c.Lsin),
+            layout=state0_host.layout,
+            Rcos=np.array(state0_host.Rcos, copy=True),
+            Rsin=np.array(state0_host.Rsin, copy=True),
+            Zcos=np.array(state0_host.Zcos, copy=True),
+            Zsin=np.array(state0_host.Zsin, copy=True),
+            Lcos=np.array(state0_host.Lcos, copy=True),
+            Lsin=np.array(state0_host.Lsin, copy=True),
         )
         state_init = _enforce_state(state_init, eRcos_np, eRsin_np, eZcos_np, eZsin_np)
         res = solve_fixed_boundary_residual_iter(
@@ -853,7 +864,7 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         )
         fsqz_hist = np.asarray(getattr(res, "fsqz2_history", []), dtype=float)
         zero_m1 = 1.0 if (int(getattr(res, "n_iter", 0)) < 2 or (fsqz_hist.size > 0 and float(fsqz_hist[-1]) < 1.0e-6)) else 0.0
-        return np.asarray(pack_state(res.state)), np.asarray(zero_m1, dtype=np.asarray(state0_c.Rcos).dtype)
+        return np.asarray(pack_state(res.state)), np.asarray(zero_m1, dtype=state0_host.Rcos.dtype)
 
     def _is_traced(*xs):
         return any(isinstance(x, jax.core.Tracer) for x in xs)

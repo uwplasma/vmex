@@ -169,6 +169,9 @@ def _run_vmec_jax_case(
     solver_mode: str,
     cli_fixed_boundary_mode: bool,
 ) -> dict[str, Any]:
+    case_workdir = REPO_ROOT / "outputs" / "_bench_stage" / f"work_vmec_jax_{case.id}"
+    case_workdir.mkdir(parents=True, exist_ok=True)
+    staged = _stage_input_with_mgrid(input_path=case.input_path, dst_dir=case_workdir)
     code = r"""
 import json
 import sys
@@ -223,12 +226,12 @@ print(json.dumps(payload))
             sys.executable,
             "-c",
             code,
-            str(case.input_path),
+            str(staged),
             str(solver_mode),
             "1" if bool(cli_fixed_boundary_mode) else "0",
             str(int(env.get("VMEC_JAX_BENCH_WARM_RUNS", "0"))),
         ],
-        cwd=REPO_ROOT,
+        cwd=case_workdir,
         timeout_s=float(timeout_s),
         env=env,
     )
@@ -266,6 +269,9 @@ print(json.dumps(payload))
 
 
 def _run_vmec2000_case(*, case: CaseSpec, exec_path: Path, timeout_s: float, env: dict[str, str]) -> dict[str, Any]:
+    case_workdir = REPO_ROOT / "outputs" / "_bench_stage" / f"work_vmec2000_{case.id}"
+    case_workdir.mkdir(parents=True, exist_ok=True)
+    staged = _stage_input_with_mgrid(input_path=case.input_path, dst_dir=case_workdir)
     code = r"""
 import json
 import sys
@@ -285,8 +291,8 @@ payload = {
 print(json.dumps(payload))
 """
     out = _run_timed_subprocess(
-        cmd=[sys.executable, "-c", code, str(case.input_path), str(exec_path), str(float(timeout_s))],
-        cwd=REPO_ROOT,
+        cmd=[sys.executable, "-c", code, str(staged), str(exec_path), str(float(timeout_s))],
+        cwd=case_workdir,
         timeout_s=float(timeout_s) + 30.0,
         env=env,
     )
@@ -326,6 +332,29 @@ def _stage_input_with_mgrid(*, input_path: Path, dst_dir: Path) -> Path:
 
     if "mgrid_file" not in text.lower():
         return dst_input
+
+    def _resolve_support_file(name: str) -> Path | None:
+        direct = (input_path.parent / name).resolve()
+        if direct.exists():
+            return direct
+        search_roots = [
+            REPO_ROOT / "examples" / "data",
+            REPO_ROOT / "examples_single_grid" / "data",
+            REPO_ROOT.parent / "STELLOPT" / "BENCHMARKS" / "VMEC_TEST",
+            REPO_ROOT.parent / "external",
+            REPO_ROOT / "outputs",
+        ]
+        for root in search_roots:
+            if not root.exists():
+                continue
+            exact = (root / name).resolve()
+            if exact.exists():
+                return exact
+            matches = list(root.rglob(name))
+            if matches:
+                return matches[0].resolve()
+        return None
+
     for line in text.splitlines():
         if "mgrid_file" not in line.lower():
             continue
@@ -336,9 +365,12 @@ def _stage_input_with_mgrid(*, input_path: Path, dst_dir: Path) -> Path:
         rhs = rhs.strip().strip('"').strip("'")
         if not rhs:
             continue
-        src = (input_path.parent / rhs).resolve()
-        if src.exists():
-            (dst_dir / src.name).write_bytes(src.read_bytes())
+        src = _resolve_support_file(rhs)
+        if src is None:
+            raise FileNotFoundError(
+                f"Could not locate support file {rhs!r} referenced by {input_path}"
+            )
+        (dst_dir / src.name).write_bytes(src.read_bytes())
         break
     return dst_input
 
