@@ -254,6 +254,54 @@ def test_run_fixed_boundary_returns_current_driven_flux_profiles():
     np.testing.assert_allclose(iota, np.asarray(wout.iotas, dtype=float), rtol=1e-10, atol=1e-12)
 
 
+def test_final_flux_profiles_from_state_supports_traced_lsin():
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import enable_x64, jax, jnp
+    from vmec_jax.driver import _final_flux_profiles_from_state, run_fixed_boundary
+    from vmec_jax.vmec_tomnsp import vmec_angle_grid
+
+    enable_x64(True)
+
+    root = Path(__file__).resolve().parents[1]
+    input_path = root / "examples/data/input.basic_non_stellsym_pressure"
+    grid = vmec_angle_grid(ntheta=10, nzeta=8, nfp=1, lasym=True)
+    run = run_fixed_boundary(
+        input_path,
+        max_iter=2,
+        verbose=False,
+        multigrid=False,
+        grid=grid,
+    )
+
+    radial_idx = min(5, int(np.asarray(run.state.Lsin).shape[0]) - 1)
+    mode_idx = 1
+
+    def scalar(alpha):
+        state = type(run.state)(
+            layout=run.state.layout,
+            Rcos=jnp.asarray(run.state.Rcos),
+            Rsin=jnp.asarray(run.state.Rsin),
+            Zcos=jnp.asarray(run.state.Zcos),
+            Zsin=jnp.asarray(run.state.Zsin),
+            Lcos=jnp.asarray(run.state.Lcos),
+            Lsin=jnp.asarray(run.state.Lsin).at[radial_idx, mode_idx].add(alpha),
+        )
+        _flux, prof = _final_flux_profiles_from_state(
+            indata=run.indata,
+            static_in=run.static,
+            state=state,
+            signgs=run.signgs,
+            flux_local=run.flux,
+            prof_local=run.profiles,
+            pressure_local=run.profiles["pressure"],
+        )
+        return jnp.sum(jnp.asarray(prof["iota"]))
+
+    grad = float(jax.grad(scalar)(0.0))
+    assert np.isfinite(grad)
+
+
 def test_host_update_assembly_matches_jax_update_path():
     root = Path(__file__).resolve().parents[1]
     input_path = root / "examples/data/input.LandremanPaul2021_QA_lowres"
