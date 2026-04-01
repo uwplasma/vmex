@@ -86,6 +86,40 @@ def test_initial_guess_vmec_project_edge_rc01_gradient_matches_internal_scale():
     assert grad_ad == pytest.approx(grad_fd, rel=0.0, abs=1e-7)
 
 
+def test_stellsym_active_keep_scatter_supports_reverse_mode(load_case_circular_tokamak):
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import enable_x64, jax, jnp
+    from vmec_jax.implicit import (
+        _mode00_index,
+        _pack_stellsym_feasible_state,
+        _stellsym_feasible_indices,
+        _stellsym_structural_active_keep_indices,
+    )
+
+    enable_x64(True)
+
+    _cfg, _indata, static, _bdy, st0 = load_case_circular_tokamak
+    idx00 = _mode00_index(static.modes)
+    rz_idx, lam_idx, _ns, K = _stellsym_feasible_indices(static, idx00=idx00, mask_lambda_axis=True)
+    x_full0 = _pack_stellsym_feasible_state(st0, rz_idx=rz_idx, lam_idx=lam_idx)
+    keep = _stellsym_structural_active_keep_indices(
+        rz_idx=np.asarray(rz_idx),
+        lam_idx=np.asarray(lam_idx),
+        K=int(K),
+        idx00=idx00,
+    )
+    x0 = jnp.take(x_full0, keep)
+
+    def objective(x):
+        rebuilt = x_full0.at[keep].set(x, indices_are_sorted=True, unique_indices=True)
+        return jnp.sum(rebuilt * rebuilt)
+
+    grad = np.asarray(jax.grad(objective)(x0))
+    assert grad.shape == tuple(np.asarray(x0).shape)
+    assert np.all(np.isfinite(grad))
+
+
 def test_fixed_boundary_residual_implicit_primal_matches_reference_mode(load_case_circular_tokamak):
     pytest.importorskip("jax")
 

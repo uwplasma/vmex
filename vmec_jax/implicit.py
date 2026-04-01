@@ -1257,7 +1257,11 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         x_active_star = jnp.take(x_active_star_full, active_keep_idx)
 
         def residual_fun_active(x_active):
-            x_active_full = x_active_star_full.at[active_keep_idx].set(x_active)
+            x_active_full = x_active_star_full.at[active_keep_idx].set(
+                x_active,
+                indices_are_sorted=True,
+                unique_indices=True,
+            )
             st_active = _update_stellsym_feasible_state(
                 st_active_ref,
                 x_active_full,
@@ -1309,7 +1313,7 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
             )
             if bool(success):
                 dx_active = dx_lineax
-        if dx_active is None and active_is_square and tangent_mode in ("auto", "direct", "bicgstab", "lineax"):
+        if dx_active is None and active_is_square and tangent_mode in ("direct", "bicgstab"):
             from jax.scipy.sparse.linalg import bicgstab
 
             dx_bicgstab, info = bicgstab(
@@ -1356,7 +1360,11 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
                 max_iter=int(implicit.cg_max_iter),
             )
 
-        dx_active_full = jnp.zeros_like(x_active_star_full).at[active_keep_idx].set(dx_active)
+        dx_active_full = jnp.zeros_like(x_active_star_full).at[active_keep_idx].set(
+            dx_active,
+            indices_are_sorted=True,
+            unique_indices=True,
+        )
         tangent_state = _update_stellsym_feasible_state(
             _zero_state_like(st_star),
             dx_active_full,
@@ -1503,7 +1511,11 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
             )
 
             def residual_fun_active(x_active):
-                x_active_full = x_active_star_full.at[active_keep_idx].set(x_active)
+                x_active_full = x_active_star_full.at[active_keep_idx].set(
+                    x_active,
+                    indices_are_sorted=True,
+                    unique_indices=True,
+                )
                 st_active = _update_stellsym_feasible_state(
                     st_active_ref,
                     x_active_full,
