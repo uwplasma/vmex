@@ -353,8 +353,15 @@ def _final_flux_profiles_from_state(
             isinstance(x, jax.core.Tracer)
             for x in (
                 getattr(state, "Rcos", None),
+                getattr(state, "Rsin", None),
+                getattr(state, "Zcos", None),
+                getattr(state, "Zsin", None),
+                getattr(state, "Lcos", None),
+                getattr(state, "Lsin", None),
                 getattr(flux_local, "phipf", None),
                 getattr(flux_local, "phips", None),
+                getattr(flux_local, "chipf", None),
+                getattr(flux_local, "lamscale", None),
                 pressure_local,
             )
         )
