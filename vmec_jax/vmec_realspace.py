@@ -42,31 +42,34 @@ def _cache_allowed() -> bool:
         return False
 
 
+def _mode_index_arrays(*, m: Any, n: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    m_idx = np.asarray(m, dtype=np.int32)
+    n_idx = np.asarray(n, dtype=np.int32)
+    n_abs = np.abs(n_idx)
+    sgn = np.where(n_idx < 0, -1.0, 1.0)
+    return m_idx, n_abs, sgn
+
+
+def _take_mode_columns(table: Any, indices: np.ndarray) -> Any:
+    return jnp.take(jnp.asarray(table), indices, axis=1).T
+
+
 def _vmec_mode_scaling(*, m: Any, n: Any, trig: VmecTrigTables) -> Any:
     """Return 1/(mscale* nscale) for each (m,n)."""
-    m = jnp.asarray(m)
-    n = jnp.asarray(n)
-    n1 = jnp.abs(n)
+    m_idx, n1_idx, _ = _mode_index_arrays(m=m, n=n)
     mscale = jnp.asarray(trig.mscale)
     nscale = jnp.asarray(trig.nscale)
-    return 1.0 / (mscale[m] * nscale[n1])
+    return 1.0 / (jnp.take(mscale, m_idx, axis=0) * jnp.take(nscale, n1_idx, axis=0))
 
 
 def _vmec_phase_tables(*, m: Any, n: Any, trig: VmecTrigTables):
-    m = jnp.asarray(m).astype(jnp.int32)
-    n = jnp.asarray(n).astype(jnp.int32)
-    n1 = jnp.abs(n)
-    sgn = jnp.where(n < 0, -1.0, 1.0)
+    m_idx, n1_idx, sgn_np = _mode_index_arrays(m=m, n=n)
+    sgn = jnp.asarray(sgn_np)
 
-    cosmu = jnp.asarray(trig.cosmu)  # (ntheta3, mmax+1)
-    sinmu = jnp.asarray(trig.sinmu)
-    cosnv = jnp.asarray(trig.cosnv)  # (nzeta, nmax+1)
-    sinnv = jnp.asarray(trig.sinnv)
-
-    cosmu_m = cosmu[:, m].T  # (K, ntheta3)
-    sinmu_m = sinmu[:, m].T
-    cosnv_n = cosnv[:, n1].T  # (K, nzeta)
-    sinnv_n = sinnv[:, n1].T
+    cosmu_m = _take_mode_columns(trig.cosmu, m_idx)
+    sinmu_m = _take_mode_columns(trig.sinmu, m_idx)
+    cosnv_n = _take_mode_columns(trig.cosnv, n1_idx)
+    sinnv_n = _take_mode_columns(trig.sinnv, n1_idx)
 
     cos_phase = cosmu_m[:, :, None] * cosnv_n[:, None, :] + sgn[:, None, None] * sinmu_m[:, :, None] * sinnv_n[:, None, :]
     sin_phase = sinmu_m[:, :, None] * cosnv_n[:, None, :] - sgn[:, None, None] * cosmu_m[:, :, None] * sinnv_n[:, None, :]
@@ -110,24 +113,15 @@ def _phase_stack_from_trig(modes: ModeTable, trig: VmecTrigTables, attr: str) ->
 
 
 def _vmec_phase_tables_dtheta(*, m: Any, n: Any, trig: VmecTrigTables):
-    m = jnp.asarray(m).astype(jnp.int32)
-    n = jnp.asarray(n).astype(jnp.int32)
-    n1 = jnp.abs(n)
-    sgn = jnp.where(n < 0, -1.0, 1.0)
+    m_idx, n1_idx, sgn_np = _mode_index_arrays(m=m, n=n)
+    sgn = jnp.asarray(sgn_np)
 
-    cosmu = jnp.asarray(trig.cosmu)  # (ntheta3, mmax+1)
-    sinmu = jnp.asarray(trig.sinmu)
-    cosmum = jnp.asarray(trig.cosmum)
-    sinmum = jnp.asarray(trig.sinmum)
-    cosnv = jnp.asarray(trig.cosnv)
-    sinnv = jnp.asarray(trig.sinnv)
-
-    cosmu_m = cosmu[:, m].T
-    sinmu_m = sinmu[:, m].T
-    cosmum_m = cosmum[:, m].T
-    sinmum_m = sinmum[:, m].T
-    cosnv_n = cosnv[:, n1].T
-    sinnv_n = sinnv[:, n1].T
+    cosmu_m = _take_mode_columns(trig.cosmu, m_idx)
+    sinmu_m = _take_mode_columns(trig.sinmu, m_idx)
+    cosmum_m = _take_mode_columns(trig.cosmum, m_idx)
+    sinmum_m = _take_mode_columns(trig.sinmum, m_idx)
+    cosnv_n = _take_mode_columns(trig.cosnv, n1_idx)
+    sinnv_n = _take_mode_columns(trig.sinnv, n1_idx)
 
     dcos_phase = sinmum_m[:, :, None] * cosnv_n[:, None, :] + sgn[:, None, None] * cosmum_m[:, :, None] * sinnv_n[:, None, :]
     dsin_phase = cosmum_m[:, :, None] * cosnv_n[:, None, :] - sgn[:, None, None] * sinmum_m[:, :, None] * sinnv_n[:, None, :]
@@ -160,20 +154,13 @@ def _vmec_phase_tables_dtheta_stacked_cached(*, modes: ModeTable, trig: VmecTrig
 
 
 def _vmec_phase_tables_dzeta(*, m: Any, n: Any, trig: VmecTrigTables):
-    m = jnp.asarray(m).astype(jnp.int32)
-    n = jnp.asarray(n).astype(jnp.int32)
-    n1 = jnp.abs(n)
-    sgn = jnp.where(n < 0, -1.0, 1.0)
+    m_idx, n1_idx, sgn_np = _mode_index_arrays(m=m, n=n)
+    sgn = jnp.asarray(sgn_np)
 
-    cosmu = jnp.asarray(trig.cosmu)
-    sinmu = jnp.asarray(trig.sinmu)
-    cosnvn = jnp.asarray(trig.cosnvn)
-    sinnvn = jnp.asarray(trig.sinnvn)
-
-    cosmu_m = cosmu[:, m].T
-    sinmu_m = sinmu[:, m].T
-    cosnvn_n = cosnvn[:, n1].T
-    sinnvn_n = sinnvn[:, n1].T
+    cosmu_m = _take_mode_columns(trig.cosmu, m_idx)
+    sinmu_m = _take_mode_columns(trig.sinmu, m_idx)
+    cosnvn_n = _take_mode_columns(trig.cosnvn, n1_idx)
+    sinnvn_n = _take_mode_columns(trig.sinnvn, n1_idx)
 
     dcos_phase = cosmu_m[:, :, None] * sinnvn_n[:, None, :] + sgn[:, None, None] * sinmu_m[:, :, None] * cosnvn_n[:, None, :]
     dsin_phase = sinmu_m[:, :, None] * sinnvn_n[:, None, :] - sgn[:, None, None] * cosmu_m[:, :, None] * cosnvn_n[:, None, :]

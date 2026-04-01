@@ -19,11 +19,19 @@ implicit-function machinery.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
+import time
 from typing import Any, Callable, Tuple
 
 import numpy as np
 
 from ._compat import has_jax, jax, jnp
+
+try:
+    import lineax as lx
+except Exception:  # pragma: no cover - optional dependency
+    lx = None
+
 from .field import TWOPI, b2_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda
 from .energy import flux_profiles_from_indata
 from .fourier import eval_fourier_dtheta, eval_fourier_dzeta_phys
@@ -39,12 +47,43 @@ from .solve import (
     _mask_grad_for_constraints,
     _mode00_index,
     _pressure_half_mesh_from_indata,
+    _vmec_force_flux_profiles,
     solve_fixed_boundary_gd,
     solve_fixed_boundary_lbfgs,
     solve_fixed_boundary_residual_iter,
     solve_lambda_gd,
 )
 from .state import VMECState, pack_state, unpack_state
+
+
+def _vmec_backward_profile_enabled() -> bool:
+    value = os.environ.get("VMEC_JAX_PROFILE_BACKWARD", "")
+    return value.strip().lower() not in ("", "0", "false", "no")
+
+
+def _vmec_backward_profile_log(stage: str, start: float | None = None, **extra) -> None:
+    if not _vmec_backward_profile_enabled():
+        return
+    payload = {"stage": stage}
+    if start is not None:
+        payload["elapsed_s"] = time.perf_counter() - start
+    payload.update(extra)
+    print(f"[vmec_jax backward] {payload}", flush=True)
+
+
+def _vmec_residual_profile_enabled() -> bool:
+    value = os.environ.get("VMEC_JAX_PROFILE_RESIDUAL", "")
+    return value.strip().lower() not in ("", "0", "false", "no")
+
+
+def _vmec_residual_profile_log(stage: str, start: float | None = None, **extra) -> None:
+    if not _vmec_residual_profile_enabled():
+        return
+    payload = {"stage": stage}
+    if start is not None:
+        payload["elapsed_s"] = time.perf_counter() - start
+    payload.update(extra)
+    print(f"[vmec_jax residual] {payload}", flush=True)
 
 
 @dataclass(frozen=True)
@@ -63,10 +102,25 @@ class ImplicitFixedBoundaryOptions:
     cg_max_iter: int = 80
     cg_tol: float = 1e-10
     damping: float = 1e-6
+    residual_adjoint_mode: str = "auto"
+    residual_tangent_mode: str = "opaque"
+    jac_chunk_size: int | None = None
 
 
 def _stop_gradient_tree(x):
     return jax.tree_util.tree_map(jax.lax.stop_gradient, x)
+
+
+def _zero_state_like(state: VMECState) -> VMECState:
+    return VMECState(
+        layout=state.layout,
+        Rcos=jnp.zeros_like(jnp.asarray(state.Rcos)),
+        Rsin=jnp.zeros_like(jnp.asarray(state.Rsin)),
+        Zcos=jnp.zeros_like(jnp.asarray(state.Zcos)),
+        Zsin=jnp.zeros_like(jnp.asarray(state.Zsin)),
+        Lcos=jnp.zeros_like(jnp.asarray(state.Lcos)),
+        Lsin=jnp.zeros_like(jnp.asarray(state.Lsin)),
+    )
 
 
 def _flatten_L(Lcos, Lsin) -> Any:
@@ -117,6 +171,157 @@ def _cg_solve(
 
     _i, x, _r, _p, _rs = jax.lax.while_loop(cond_fun, body_fun, (0, x, r, p, rs))
     return x
+
+
+def _lineax_bicgstab_solve(
+    matvec: Callable[[Any], Any],
+    b: Any,
+    *,
+    x0: Any | None = None,
+    tol: float,
+    max_iter: int,
+):
+    """Solve a square linear system with lineax when available.
+
+    This is kept as an optional feature-gated path so we can benchmark whether
+    lineax materially improves the residual adjoint solve before depending on it
+    more broadly.
+    """
+    if lx is None:
+        return None, False, {}
+
+    b = jnp.asarray(b)
+    input_structure = jax.ShapeDtypeStruct(tuple(b.shape), b.dtype)
+    operator = lx.FunctionLinearOperator(matvec, input_structure)
+    options = {}
+    if x0 is not None:
+        options["y0"] = jnp.asarray(x0)
+    solution = lx.linear_solve(
+        operator,
+        b,
+        solver=lx.BiCGStab(rtol=float(tol), atol=0.0, max_steps=int(max_iter)),
+        options=options,
+        throw=False,
+    )
+    value = jnp.asarray(solution.value)
+    try:
+        success = bool(np.all(np.isfinite(np.asarray(jax.device_get(value)))))
+    except Exception:
+        success = False
+    return value, success, getattr(solution, "stats", {})
+
+
+def _linear_map_jacobian_columns(
+    linear_map: Callable[[Any], Any],
+    *,
+    input_size: int,
+    output_size: int,
+    dtype: Any,
+    chunk_size: int,
+):
+    """Build a dense Jacobian by batching JVP columns in chunks.
+
+    This mirrors DESC's chunked Jacobian construction pattern: apply the same
+    linearized map to blocks of basis directions instead of tracing a separate
+    Jacobian transform for every column.
+    """
+    if chunk_size <= 0:
+        raise ValueError(f"chunk_size must be positive, got {chunk_size}")
+
+    eye_idx = jnp.arange(int(input_size), dtype=jnp.int32)
+    chunks = []
+    for start in range(0, int(input_size), int(chunk_size)):
+        stop = min(start + int(chunk_size), int(input_size))
+        rows = jnp.arange(start, stop, dtype=jnp.int32)
+        basis = (rows[:, None] == eye_idx[None, :]).astype(dtype)
+        chunk = jax.vmap(linear_map)(basis).T
+        chunk = jnp.reshape(chunk, (int(output_size), stop - start))
+        chunks.append(chunk)
+    return jnp.concatenate(chunks, axis=1)
+
+
+def _stellsym_feasible_indices_np(static, *, idx00: int | None, mask_lambda_axis: bool = True):
+    """NumPy flat indices for feasible lasym=False coefficients."""
+    ns = int(static.cfg.ns)
+    K = int(static.modes.m.shape[0])
+    m = np.asarray(static.modes.m)
+
+    rz_mask = np.ones((ns, K), dtype=bool)
+    rz_mask[-1, :] = False
+    rz_mask[0, :] = (m == 0)
+
+    lam_mask = np.ones((ns, K), dtype=bool)
+    if bool(mask_lambda_axis):
+        lam_mask[0, :] = False
+    if idx00 is not None:
+        lam_mask[:, int(idx00)] = False
+
+    return np.flatnonzero(rz_mask.reshape(-1)), np.flatnonzero(lam_mask.reshape(-1)), ns, K
+
+
+def _stellsym_feasible_indices(static, *, idx00: int | None, mask_lambda_axis: bool = True):
+    """Flat indices for feasible lasym=False coefficients."""
+    rz_idx, lam_idx, ns, K = _stellsym_feasible_indices_np(static, idx00=idx00, mask_lambda_axis=mask_lambda_axis)
+    return jnp.asarray(rz_idx, dtype=jnp.int32), jnp.asarray(lam_idx, dtype=jnp.int32), ns, K
+
+
+def _pack_stellsym_feasible_state(state: VMECState, *, rz_idx, lam_idx):
+    """Pack only feasible stellarator-symmetric coefficients."""
+    return jnp.concatenate(
+        [
+            jnp.take(jnp.ravel(jnp.asarray(state.Rcos)), rz_idx),
+            jnp.take(jnp.ravel(jnp.asarray(state.Zsin)), rz_idx),
+            jnp.take(jnp.ravel(jnp.asarray(state.Lsin)), lam_idx),
+        ],
+        axis=0,
+    )
+
+
+def _update_stellsym_feasible_state(state: VMECState, x, *, rz_idx, lam_idx, ns: int, K: int):
+    """Update feasible lasym=False coefficients, leaving constrained entries unchanged."""
+    x = jnp.asarray(x)
+    n_rz = int(rz_idx.shape[0])
+    n_l = int(lam_idx.shape[0])
+
+    Rcos = jnp.ravel(jnp.asarray(state.Rcos)).at[rz_idx].set(x[:n_rz]).reshape((ns, K))
+    Zsin = jnp.ravel(jnp.asarray(state.Zsin)).at[rz_idx].set(x[n_rz : 2 * n_rz]).reshape((ns, K))
+    Lsin = jnp.ravel(jnp.asarray(state.Lsin)).at[lam_idx].set(x[2 * n_rz : 2 * n_rz + n_l]).reshape((ns, K))
+    return VMECState(
+        layout=state.layout,
+        Rcos=Rcos,
+        Rsin=jnp.asarray(state.Rsin),
+        Zcos=jnp.asarray(state.Zcos),
+        Zsin=Zsin,
+        Lcos=jnp.asarray(state.Lcos),
+        Lsin=Lsin,
+    )
+
+
+def _stellsym_structural_active_keep_indices(*, rz_idx, lam_idx, K: int, idx00: int | None):
+    """Packed active-column keep indices for the reduced lasym=False adjoint.
+
+    After projecting the residual onto structurally nonzero Tomnsps rows, the
+    only remaining dead active columns in the simplified fixed-boundary
+    lasym=False path are the Zsin (m,n)=(0,0) coefficients across radius.
+    Dropping them makes the reduced system square on the QH case.
+    """
+    rz_idx = np.asarray(rz_idx, dtype=np.int32)
+    lam_idx = np.asarray(lam_idx, dtype=np.int32)
+    n_rz = int(rz_idx.shape[0])
+    n_l = int(lam_idx.shape[0])
+    rz_keep = np.arange(n_rz, dtype=np.int32)
+    z_keep = np.arange(n_rz, dtype=np.int32)
+    if idx00 is not None:
+        rz_mod = rz_idx % int(K)
+        z_keep = z_keep[rz_mod != int(idx00)]
+    keep = np.concatenate(
+        [
+            rz_keep,
+            n_rz + z_keep,
+            2 * n_rz + np.arange(n_l, dtype=np.int32),
+        ]
+    )
+    return jnp.asarray(keep, dtype=jnp.int32)
 
 
 def solve_lambda_state_implicit(
@@ -666,6 +871,11 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
     The forward solve uses ``solve_fixed_boundary_residual_iter`` with the
     VMEC2000-style control path. The backward pass differentiates the VMEC
     residual vector itself rather than an auxiliary energy objective.
+
+    ``implicit.residual_adjoint_mode='auto'`` selects a cheaper reduced-
+    coordinate adjoint for the common ``lasym=False`` path when the residual
+    dimension matches the active state dimension, falling back to the legacy
+    normal-equation CG solve otherwise.
     """
     if not has_jax():
         raise ImportError("solve_fixed_boundary_state_implicit_vmec_residual requires JAX (jax + jaxlib)")
@@ -690,7 +900,8 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
     edge_Zcos_use = jnp.asarray(edge_Zcos) if edge_Zcos is not None else jnp.asarray(state0_c.Zcos)[-1, :]
     edge_Zsin_use = jnp.asarray(edge_Zsin) if edge_Zsin is not None else jnp.asarray(state0_c.Zsin)[-1, :]
 
-    from .boundary import boundary_from_indata
+    from .boundary import BoundaryCoeffs, boundary_from_indata
+    from .init_guess import initial_guess_from_boundary
     from .vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
     from .vmec_residue import (
         vmec_apply_m1_constraints,
@@ -724,6 +935,12 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
     pres = _pressure_half_mesh_from_indata(indata=indata, s_full=s)
     ncurr = int(indata.get_int("NCURR", 0))
     icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=signgs_i)
+    phipf_internal, chipf_internal, chips_eff = _vmec_force_flux_profiles(
+        phipf=jnp.asarray(flux.phipf),
+        chipf=chipf_wout,
+        signgs=signgs_i,
+        flux_is_internal=True,
+    )
     wout_like = _WoutLikeVmecForces(
         nfp=int(static.cfg.nfp),
         mpol=int(static.cfg.mpol),
@@ -739,6 +956,9 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         ncurr=ncurr,
         lcurrent=True,
         icurv=icurv,
+        phipf_internal=phipf_internal,
+        chipf_internal=chipf_internal,
+        chips_eff=chips_eff,
     )
     trig = getattr(static, "trig_vmec", None)
     if trig is None:
@@ -753,6 +973,46 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         )
     apply_lforbal = bool(indata.get_bool("LFORBAL", False))
     mask_pack = getattr(static, "tomnsps_masks", None)
+    stellsym_residual_projector = None
+    stellsym_active_keep_idx = None
+    if (not bool(static.cfg.lasym)) and (mask_pack is not None):
+        ns_mask = int(static.cfg.ns)
+        mpol_mask = int(static.cfg.mpol)
+        ntor1_mask = int(static.cfg.ntor) + 1
+        mask_rz_np = np.broadcast_to(np.asarray(mask_pack.mask_rz) > 0, (ns_mask, mpol_mask, ntor1_mask))
+        mask_l_np = np.broadcast_to(np.asarray(mask_pack.mask_l) > 0, (ns_mask, mpol_mask, ntor1_mask))
+        m0_mask = np.broadcast_to((np.arange(mpol_mask)[None, :, None] == 0), (ns_mask, mpol_mask, ntor1_mask))
+        n0_mask = np.broadcast_to((np.arange(ntor1_mask)[None, None, :] == 0), (ns_mask, mpol_mask, ntor1_mask))
+        stellsym_residual_projector = {
+            "frcc": jnp.asarray(np.flatnonzero(mask_rz_np.reshape(-1)), dtype=jnp.int32),
+            "fzsc": jnp.asarray(np.flatnonzero((mask_rz_np & ~m0_mask).reshape(-1)), dtype=jnp.int32),
+            "flsc": jnp.asarray(np.flatnonzero((mask_l_np & ~m0_mask).reshape(-1)), dtype=jnp.int32),
+            "frss": jnp.asarray(np.flatnonzero((mask_rz_np & ~m0_mask & ~n0_mask).reshape(-1)), dtype=jnp.int32),
+            "fzcs": jnp.asarray(np.flatnonzero((mask_rz_np & ~n0_mask).reshape(-1)), dtype=jnp.int32),
+            "flcs": jnp.asarray(np.flatnonzero((mask_l_np & ~n0_mask).reshape(-1)), dtype=jnp.int32),
+        }
+        rz_idx_np, lam_idx_np, _ns_active_tmp, K_active_tmp = _stellsym_feasible_indices_np(
+            static,
+            idx00=idx00,
+            mask_lambda_axis=True,
+        )
+        stellsym_active_keep_idx = _stellsym_structural_active_keep_indices(
+            rz_idx=np.asarray(rz_idx_np),
+            lam_idx=np.asarray(lam_idx_np),
+            K=int(K_active_tmp),
+            idx00=idx00,
+        )
+
+    def _pack_residual_parts(parts, projector=None):
+        packed = []
+        for name, arr in parts:
+            flat = jnp.ravel(jnp.asarray(arr))
+            if projector is not None:
+                keep = projector.get(name)
+                if keep is not None:
+                    flat = jnp.take(flat, keep)
+            packed.append(flat)
+        return jnp.concatenate(packed, axis=0)
 
     def _enforce_state(st, eRcos, eRsin, eZcos, eZsin):
         return _enforce_fixed_boundary_and_axis(
@@ -775,8 +1035,10 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
             return a
         return a.at[-1].set(jnp.zeros_like(a[-1]))
 
-    def _residual_vec(state, zero_m1_zforce, eRcos, eRsin, eZcos, eZsin):
+    def _residual_vec(state, zero_m1_zforce, eRcos, eRsin, eZcos, eZsin, *, project_stellsym: bool = False):
+        residual_start = time.perf_counter()
         state = _enforce_state(state, eRcos, eRsin, eZcos, eZsin)
+        forces_start = time.perf_counter()
         k = vmec_forces_rz_from_wout(
             state=state,
             static=static,
@@ -786,6 +1048,8 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
             use_vmec_synthesis=True,
             trig=trig,
         )
+        _vmec_residual_profile_log("forces_done", forces_start)
+        tomnsps_start = time.perf_counter()
         frzl = vmec_residual_internal_from_kernels(
             k,
             cfg_ntheta=int(static.cfg.ntheta),
@@ -796,6 +1060,8 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
             include_edge=False,
             masks=mask_pack,
         )
+        _vmec_residual_profile_log("tomnsps_done", tomnsps_start)
+        post_start = time.perf_counter()
         frzl = vmec_apply_m1_constraints(frzl=frzl, lconm1=bool(getattr(static.cfg, "lconm1", True)))
         frzl = vmec_zero_m1_zforce(frzl=frzl, enabled=zero_m1_zforce)
         frzl = vmec_apply_scalxc_to_tomnsps(frzl=frzl, s=s)
@@ -816,34 +1082,55 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         norms = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs_i)
         scale_rz = jnp.sqrt(norms.r1 * norms.fnorm)
         scale_l = jnp.sqrt(norms.fnormL)
-        parts = [scale_rz * frzl.frcc, scale_rz * frzl.fzsc, scale_l * frzl.flsc]
+        parts = [("frcc", scale_rz * frzl.frcc), ("fzsc", scale_rz * frzl.fzsc), ("flsc", scale_l * frzl.flsc)]
         if frzl.frss is not None:
-            parts.append(scale_rz * frzl.frss)
+            parts.append(("frss", scale_rz * frzl.frss))
         if frzl.fzcs is not None:
-            parts.append(scale_rz * frzl.fzcs)
+            parts.append(("fzcs", scale_rz * frzl.fzcs))
         if frzl.flcs is not None:
-            parts.append(scale_l * frzl.flcs)
+            parts.append(("flcs", scale_l * frzl.flcs))
         for name in ["frsc", "fzcc", "flcc", "frcs", "fzss", "flss"]:
             arr = getattr(frzl, name, None)
             if arr is not None:
-                parts.append((scale_l if name.startswith("fl") else scale_rz) * arr)
-        return jnp.concatenate([jnp.ravel(jnp.asarray(p)) for p in parts], axis=0)
+                parts.append((name, (scale_l if name.startswith("fl") else scale_rz) * arr))
+        projector = stellsym_residual_projector if bool(project_stellsym) else None
+        packed = _pack_residual_parts(parts, projector=projector)
+        _vmec_residual_profile_log("postprocess_done", post_start)
+        _vmec_residual_profile_log(
+            "residual_done",
+            residual_start,
+            projected=bool(project_stellsym),
+            output_size=int(np.prod(np.shape(packed))),
+        )
+        return packed
 
     def _solve_host(eRcos, eRsin, eZcos, eZsin):
         eRcos_np = np.asarray(eRcos)
         eRsin_np = np.asarray(eRsin)
         eZcos_np = np.asarray(eZcos)
         eZsin_np = np.asarray(eZsin)
-        state_init = VMECState(
-            layout=state0_host.layout,
-            Rcos=np.array(state0_host.Rcos, copy=True),
-            Rsin=np.array(state0_host.Rsin, copy=True),
-            Zcos=np.array(state0_host.Zcos, copy=True),
-            Zsin=np.array(state0_host.Zsin, copy=True),
-            Lcos=np.array(state0_host.Lcos, copy=True),
-            Lsin=np.array(state0_host.Lsin, copy=True),
+        boundary_host = BoundaryCoeffs(
+            R_cos=np.array(eRcos_np, copy=True),
+            R_sin=np.array(eRsin_np, copy=True),
+            Z_cos=np.array(eZcos_np, copy=True),
+            Z_sin=np.array(eZsin_np, copy=True),
         )
-        state_init = _enforce_state(state_init, eRcos_np, eRsin_np, eZcos_np, eZsin_np)
+        state_init = initial_guess_from_boundary(
+            static,
+            boundary_host,
+            indata,
+            dtype=np.asarray(state0_host.Rcos).dtype,
+            vmec_project=True,
+        )
+        state_init = VMECState(
+            layout=state_init.layout,
+            Rcos=np.asarray(jax.device_get(state_init.Rcos)),
+            Rsin=np.asarray(jax.device_get(state_init.Rsin)),
+            Zcos=np.asarray(jax.device_get(state_init.Zcos)),
+            Zsin=np.asarray(jax.device_get(state_init.Zsin)),
+            Lcos=np.asarray(jax.device_get(state_init.Lcos)),
+            Lsin=np.asarray(jax.device_get(state_init.Lsin)),
+        )
         res = solve_fixed_boundary_residual_iter(
             state_init,
             static,
@@ -853,7 +1140,7 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
             max_iter=int(max_iter),
             step_size=float(step_size),
             vmec2000_control=True,
-            reference_mode=True,
+            reference_mode=False,
             backtracking=True,
             limit_dt_from_force=True,
             limit_update_rms=True,
@@ -885,6 +1172,197 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         x_flat, _zero_m1 = _solve_host(edge_Rcos_use, edge_Rsin_use, edge_Zcos_use, edge_Zsin_use)
         return unpack_state(jnp.asarray(x_flat), state0_c.layout)
 
+    residual_tangent_mode = str(getattr(implicit, "residual_tangent_mode", "opaque")).strip().lower()
+
+    def _state_tangent_from_boundary_tangent(
+        st_star,
+        zero_m1_star,
+        eRcos_star,
+        eRsin_star,
+        eZcos_star,
+        eZsin_star,
+        deRcos,
+        deRsin,
+        deZcos,
+        deZsin,
+    ):
+        if bool(static.cfg.lasym):
+            raise NotImplementedError(
+                "residual_tangent_mode='linearize' currently supports only lasym=False residual solves"
+            )
+
+        tangent_mode = str(getattr(implicit, "residual_adjoint_mode", "auto")).strip().lower()
+        rz_idx, lam_idx, ns_active, K_active = _stellsym_feasible_indices(static, idx00=idx00, mask_lambda_axis=True)
+        active_keep_idx = stellsym_active_keep_idx
+        if active_keep_idx is None:
+            active_keep_idx = _stellsym_structural_active_keep_indices(
+                rz_idx=np.asarray(rz_idx),
+                lam_idx=np.asarray(lam_idx),
+                K=int(K_active),
+                idx00=idx00,
+            )
+
+        st_active_ref = _stop_gradient_tree(st_star)
+        x_active_star_full = _pack_stellsym_feasible_state(st_active_ref, rz_idx=rz_idx, lam_idx=lam_idx)
+        x_active_star = jnp.take(x_active_star_full, active_keep_idx)
+
+        def residual_fun_active(x_active):
+            x_active_full = x_active_star_full.at[active_keep_idx].set(x_active)
+            st_active = _update_stellsym_feasible_state(
+                st_active_ref,
+                x_active_full,
+                rz_idx=rz_idx,
+                lam_idx=lam_idx,
+                ns=ns_active,
+                K=K_active,
+            )
+            return _residual_vec(
+                st_active,
+                zero_m1_star,
+                eRcos_star,
+                eRsin_star,
+                eZcos_star,
+                eZsin_star,
+                project_stellsym=True,
+            )
+
+        residual_star_active, residual_jvp_active = jax.linearize(residual_fun_active, x_active_star)
+        residual_vjp_active = jax.linear_transpose(residual_jvp_active, x_active_star)
+        damping = jnp.asarray(float(implicit.damping), dtype=jnp.asarray(x_active_star).dtype)
+
+        def residual_jvp_active_damped(u_active):
+            return residual_jvp_active(u_active) + damping * u_active
+
+        boundary_tangent = jax.jvp(
+            lambda a, b, c, d: _residual_vec(
+                st_star,
+                zero_m1_star,
+                a,
+                b,
+                c,
+                d,
+                project_stellsym=True,
+            ),
+            (eRcos_star, eRsin_star, eZcos_star, eZsin_star),
+            (deRcos, deRsin, deZcos, deZsin),
+        )[1]
+        rhs = jnp.asarray(boundary_tangent)
+
+        if tuple(residual_star_active.shape) != tuple(x_active_star.shape):
+            raise NotImplementedError(
+                "residual_tangent_mode='linearize' currently requires a square reduced residual system"
+            )
+
+        dx_active = None
+        if tangent_mode in ("auto", "lineax"):
+            dx_lineax, success, _stats = _lineax_bicgstab_solve(
+                residual_jvp_active_damped,
+                rhs,
+                tol=float(implicit.cg_tol),
+                max_iter=int(implicit.cg_max_iter),
+            )
+            if bool(success):
+                dx_active = dx_lineax
+        if dx_active is None and tangent_mode in ("auto", "direct", "bicgstab", "lineax"):
+            from jax.scipy.sparse.linalg import bicgstab
+
+            dx_bicgstab, info = bicgstab(
+                residual_jvp_active_damped,
+                rhs,
+                tol=float(implicit.cg_tol),
+                atol=0.0,
+                maxiter=int(implicit.cg_max_iter),
+            )
+            if info is None:
+                dx_active = dx_bicgstab
+        if dx_active is None and tangent_mode == "chunked":
+            chunk_size = getattr(implicit, "jac_chunk_size", None)
+            if chunk_size is None:
+                chunk_size = min(int(x_active_star.shape[0]), 64)
+            J_active = _linear_map_jacobian_columns(
+                residual_jvp_active,
+                input_size=int(x_active_star.shape[0]),
+                output_size=int(np.prod(np.shape(residual_star_active))),
+                dtype=jnp.asarray(x_active_star).dtype,
+                chunk_size=int(chunk_size),
+            )
+            dx_active = jnp.linalg.solve(
+                J_active + damping * jnp.eye(int(J_active.shape[0]), dtype=J_active.dtype),
+                rhs,
+            )
+        if dx_active is None:
+            def Hvp_active(u_active):
+                jv = residual_jvp_active_damped(u_active)
+                jt_jv = residual_vjp_active(jv)[0]
+                return jt_jv + damping * u_active
+
+            rhs_normal = residual_vjp_active(rhs)[0]
+            dx_active = _cg_solve(
+                Hvp_active,
+                rhs_normal,
+                tol=float(implicit.cg_tol),
+                max_iter=int(implicit.cg_max_iter),
+            )
+
+        dx_active_full = jnp.zeros_like(x_active_star_full).at[active_keep_idx].set(dx_active)
+        tangent_state = _update_stellsym_feasible_state(
+            _zero_state_like(st_star),
+            dx_active_full,
+            rz_idx=rz_idx,
+            lam_idx=lam_idx,
+            ns=ns_active,
+            K=K_active,
+        )
+        return VMECState(
+            layout=tangent_state.layout,
+            Rcos=jnp.asarray(tangent_state.Rcos).at[-1].set(jnp.asarray(deRcos)),
+            Rsin=jnp.asarray(tangent_state.Rsin).at[-1].set(jnp.asarray(deRsin)),
+            Zcos=jnp.asarray(tangent_state.Zcos).at[-1].set(jnp.asarray(deZcos)),
+            Zsin=jnp.asarray(tangent_state.Zsin).at[-1].set(jnp.asarray(deZsin)),
+            Lcos=jnp.asarray(tangent_state.Lcos),
+            Lsin=jnp.asarray(tangent_state.Lsin),
+        )
+
+    if residual_tangent_mode not in ("", "0", "false", "no", "opaque"):
+        @jax.custom_jvp
+        def _solve_cust_jvp(eRcos, eRsin, eZcos, eZsin):
+            return _solve(eRcos, eRsin, eZcos, eZsin)[0]
+
+        @_solve_cust_jvp.defjvp
+        def _solve_cust_jvp_rule(primals, tangents):
+            eRcos, eRsin, eZcos, eZsin = primals
+            deRcos, deRsin, deZcos, deZsin = tangents
+            st, zero_m1 = _solve(eRcos, eRsin, eZcos, eZsin)
+            tangent_state = _state_tangent_from_boundary_tangent(
+                st,
+                zero_m1,
+                eRcos,
+                eRsin,
+                eZcos,
+                eZsin,
+                jnp.asarray(deRcos),
+                jnp.asarray(deRsin),
+                jnp.asarray(deZcos),
+                jnp.asarray(deZsin),
+            )
+            tangent_state = VMECState(
+                layout=tangent_state.layout,
+                Rcos=-jnp.asarray(tangent_state.Rcos),
+                Rsin=-jnp.asarray(tangent_state.Rsin),
+                Zcos=-jnp.asarray(tangent_state.Zcos),
+                Zsin=-jnp.asarray(tangent_state.Zsin),
+                Lcos=-jnp.asarray(tangent_state.Lcos),
+                Lsin=-jnp.asarray(tangent_state.Lsin),
+            )
+            return st, tangent_state
+
+        return _solve_cust_jvp(
+            jnp.asarray(edge_Rcos_use),
+            jnp.asarray(edge_Rsin_use),
+            jnp.asarray(edge_Zcos_use),
+            jnp.asarray(edge_Zsin_use),
+        )
+
     @jax.custom_vjp
     def _solve_cust(eRcos, eRsin, eZcos, eZsin):
         return _solve(eRcos, eRsin, eZcos, eZsin)[0]
@@ -901,45 +1379,214 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         )
 
     def bwd(residual, ct_state):
+        bwd_start = time.perf_counter()
+        _vmec_backward_profile_log("bwd_start")
         st_star, zero_m1_star, eRcos_star, eRsin_star, eZcos_star, eZsin_star = residual
         ct_state_full = ct_state
         ct_state = _project_state(ct_state)
         b = pack_state(ct_state)
 
+        residual_fun = lambda st: _residual_vec(st, zero_m1_star, eRcos_star, eRsin_star, eZcos_star, eZsin_star)
+
+        def _boundary_param_vjp(lam, *, project_stellsym: bool = False):
+            vjp_start = time.perf_counter()
+
+            def F_params(eRcos, eRsin, eZcos, eZsin):
+                return _residual_vec(
+                    st_star,
+                    zero_m1_star,
+                    eRcos,
+                    eRsin,
+                    eZcos,
+                    eZsin,
+                    project_stellsym=project_stellsym,
+                )
+
+            _, vjp_fun = jax.vjp(F_params, eRcos_star, eRsin_star, eZcos_star, eZsin_star)
+            dRcos, dRsin, dZcos, dZsin = vjp_fun(lam)
+            dRcos = dRcos + jnp.asarray(ct_state_full.Rcos)[-1, :]
+            dRsin = dRsin + jnp.asarray(ct_state_full.Rsin)[-1, :]
+            dZcos = dZcos + jnp.asarray(ct_state_full.Zcos)[-1, :]
+            dZsin = dZsin + jnp.asarray(ct_state_full.Zsin)[-1, :]
+            _vmec_backward_profile_log("boundary_param_vjp_done", vjp_start)
+            return (-dRcos, -dRsin, -dZcos, -dZsin)
+
+        residual_adjoint_mode = str(getattr(implicit, "residual_adjoint_mode", "auto")).strip().lower()
+        if not bool(static.cfg.lasym):
+            active_setup_start = time.perf_counter()
+            rz_idx, lam_idx, ns_active, K_active = _stellsym_feasible_indices(static, idx00=idx00, mask_lambda_axis=True)
+            active_keep_idx = stellsym_active_keep_idx
+            if active_keep_idx is None:
+                active_keep_idx = _stellsym_structural_active_keep_indices(
+                    rz_idx=np.asarray(rz_idx),
+                    lam_idx=np.asarray(lam_idx),
+                    K=int(K_active),
+                    idx00=idx00,
+                )
+            b_active_full = _pack_stellsym_feasible_state(ct_state, rz_idx=rz_idx, lam_idx=lam_idx)
+            b_active = jnp.take(b_active_full, active_keep_idx)
+            st_active_ref = _stop_gradient_tree(st_star)
+            x_active_star_full = _pack_stellsym_feasible_state(st_star, rz_idx=rz_idx, lam_idx=lam_idx)
+            x_active_star = jnp.take(x_active_star_full, active_keep_idx)
+            _vmec_backward_profile_log(
+                "active_setup_done",
+                active_setup_start,
+                active_size=int(np.shape(b_active)[0]),
+                active_full_size=int(np.shape(b_active_full)[0]),
+                residual_mode=residual_adjoint_mode,
+            )
+
+            def residual_fun_active(x_active):
+                x_active_full = x_active_star_full.at[active_keep_idx].set(x_active)
+                st_active = _update_stellsym_feasible_state(
+                    st_active_ref,
+                    x_active_full,
+                    rz_idx=rz_idx,
+                    lam_idx=lam_idx,
+                    ns=ns_active,
+                    K=K_active,
+                )
+                return _residual_vec(
+                    st_active,
+                    zero_m1_star,
+                    eRcos_star,
+                    eRsin_star,
+                    eZcos_star,
+                    eZsin_star,
+                    project_stellsym=True,
+                )
+
+            active_linearize_start = time.perf_counter()
+            residual_star_active, residual_jvp_active = jax.linearize(residual_fun_active, x_active_star)
+            residual_vjp_active = jax.linear_transpose(residual_jvp_active, x_active_star)
+            _vmec_backward_profile_log(
+                "active_linearize_done",
+                active_linearize_start,
+                residual_size=int(np.prod(np.shape(residual_star_active))),
+            )
+            use_chunked_active = residual_adjoint_mode == "chunked"
+            use_lineax_active = residual_adjoint_mode == "lineax"
+            use_direct_stellsym = (
+                residual_adjoint_mode in ("auto", "direct", "bicgstab")
+                and tuple(residual_star_active.shape) == tuple(b_active.shape)
+            )
+
+            if use_chunked_active:
+                chunk_size = getattr(implicit, "jac_chunk_size", None)
+                if chunk_size is None:
+                    chunk_size = min(int(x_active_star.shape[0]), 64)
+                chunk_size = int(chunk_size)
+                dense_start = time.perf_counter()
+                J_active = _linear_map_jacobian_columns(
+                    residual_jvp_active,
+                    input_size=int(x_active_star.shape[0]),
+                    output_size=int(np.prod(np.shape(residual_star_active))),
+                    dtype=jnp.asarray(x_active_star).dtype,
+                    chunk_size=chunk_size,
+                )
+                _vmec_backward_profile_log(
+                    "active_dense_jacobian_done",
+                    dense_start,
+                    chunk_size=chunk_size,
+                    jac_shape=tuple(int(x) for x in J_active.shape),
+                )
+                solve_start = time.perf_counter()
+                H_active = J_active.T @ J_active
+                damping = jnp.asarray(float(implicit.damping), dtype=H_active.dtype)
+                H_active = H_active + damping * jnp.eye(int(H_active.shape[0]), dtype=H_active.dtype)
+                u_active = jnp.linalg.solve(H_active, b_active)
+                _vmec_backward_profile_log("active_dense_solve_done", solve_start)
+                lam = J_active @ u_active
+                result = _boundary_param_vjp(lam, project_stellsym=True)
+                _vmec_backward_profile_log("bwd_done_chunked", bwd_start)
+                return result
+
+            if use_direct_stellsym:
+                from jax.scipy.sparse.linalg import bicgstab
+
+                def JT_active(v):
+                    return residual_vjp_active(v)[0] + jnp.asarray(float(implicit.damping), dtype=jnp.asarray(v).dtype) * v
+
+                direct_solve_start = time.perf_counter()
+                lam, info = bicgstab(
+                    JT_active,
+                    b_active,
+                    tol=float(implicit.cg_tol),
+                    atol=0.0,
+                    maxiter=int(implicit.cg_max_iter),
+                )
+                _vmec_backward_profile_log("direct_bicgstab_done", direct_solve_start, info=str(info))
+                if info is None:
+                    result = _boundary_param_vjp(lam, project_stellsym=True)
+                    _vmec_backward_profile_log("bwd_done_direct", bwd_start)
+                    return result
+
+            if use_lineax_active:
+                direct_solve_start = time.perf_counter()
+
+                def JT_active_lineax(v):
+                    return residual_vjp_active(v)[0] + jnp.asarray(float(implicit.damping), dtype=jnp.asarray(v).dtype) * v
+
+                lam, success, stats = _lineax_bicgstab_solve(
+                    JT_active_lineax,
+                    b_active,
+                    tol=float(implicit.cg_tol),
+                    max_iter=int(implicit.cg_max_iter),
+                )
+                num_steps = stats.get("num_steps") if isinstance(stats, dict) else None
+                if num_steps is not None:
+                    try:
+                        num_steps = int(np.asarray(jax.device_get(num_steps)))
+                    except Exception:
+                        num_steps = None
+                _vmec_backward_profile_log(
+                    "direct_lineax_done",
+                    direct_solve_start,
+                    success=bool(success),
+                    num_steps=num_steps,
+                )
+                if bool(success):
+                    result = _boundary_param_vjp(lam, project_stellsym=True)
+                    _vmec_backward_profile_log("bwd_done_lineax", bwd_start)
+                    return result
+
+            def Hvp_active(u_active):
+                jv = residual_jvp_active(u_active)
+                jt_jv = residual_vjp_active(jv)[0]
+                return jt_jv + jnp.asarray(float(implicit.damping), dtype=jnp.asarray(jv).dtype) * u_active
+
+            cg_start = time.perf_counter()
+            u_active = _cg_solve(Hvp_active, b_active, tol=float(implicit.cg_tol), max_iter=int(implicit.cg_max_iter))
+            _vmec_backward_profile_log("active_cg_done", cg_start)
+            jvp_start = time.perf_counter()
+            lam = residual_jvp_active(u_active)
+            _vmec_backward_profile_log("active_jvp_done", jvp_start)
+            result = _boundary_param_vjp(lam, project_stellsym=True)
+            _vmec_backward_profile_log("bwd_done_active", bwd_start)
+            return result
+
+        linearize_start = time.perf_counter()
+        residual_star, residual_jvp = jax.linearize(residual_fun, st_star)
+        residual_vjp = jax.linear_transpose(residual_jvp, st_star)
+        _vmec_backward_profile_log("full_linearize_done", linearize_start, residual_size=int(np.prod(np.shape(residual_star))))
+
         def Hvp(u_flat):
             u_state = _project_state(unpack_state(u_flat, st_star.layout))
-            jv = jax.jvp(
-                lambda st: _residual_vec(st, zero_m1_star, eRcos_star, eRsin_star, eZcos_star, eZsin_star),
-                (st_star,),
-                (u_state,),
-            )[1]
-            _, vjp_fun = jax.vjp(
-                lambda st: _residual_vec(st, zero_m1_star, eRcos_star, eRsin_star, eZcos_star, eZsin_star),
-                st_star,
-            )
-            jt_jv = vjp_fun(jv)[0]
+            jv = residual_jvp(u_state)
+            jt_jv = residual_vjp(jv)[0]
             jt_jv = _project_state(jt_jv)
             return pack_state(jt_jv) + jnp.asarray(float(implicit.damping), dtype=jnp.asarray(jv).dtype) * u_flat
 
+        cg_start = time.perf_counter()
         u = _cg_solve(Hvp, b, tol=float(implicit.cg_tol), max_iter=int(implicit.cg_max_iter))
+        _vmec_backward_profile_log("full_cg_done", cg_start)
         u_state = _project_state(unpack_state(u, st_star.layout))
-        lam = jax.jvp(
-            lambda st: _residual_vec(st, zero_m1_star, eRcos_star, eRsin_star, eZcos_star, eZsin_star),
-            (st_star,),
-            (u_state,),
-        )[1]
-
-        def F_params(eRcos, eRsin, eZcos, eZsin):
-            return _residual_vec(st_star, zero_m1_star, eRcos, eRsin, eZcos, eZsin)
-
-        _, vjp_fun = jax.vjp(F_params, eRcos_star, eRsin_star, eZcos_star, eZsin_star)
-        dRcos, dRsin, dZcos, dZsin = vjp_fun(lam)
-
-        dRcos = dRcos + jnp.asarray(ct_state_full.Rcos)[-1, :]
-        dRsin = dRsin + jnp.asarray(ct_state_full.Rsin)[-1, :]
-        dZcos = dZcos + jnp.asarray(ct_state_full.Zcos)[-1, :]
-        dZsin = dZsin + jnp.asarray(ct_state_full.Zsin)[-1, :]
-        return (-dRcos, -dRsin, -dZcos, -dZsin)
+        jvp_start = time.perf_counter()
+        lam = residual_jvp(u_state)
+        _vmec_backward_profile_log("full_jvp_done", jvp_start)
+        result = _boundary_param_vjp(lam)
+        _vmec_backward_profile_log("bwd_done_full", bwd_start)
+        return result
 
     _solve_cust.defvjp(fwd, bwd)
     return _solve_cust(
