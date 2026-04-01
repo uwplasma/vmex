@@ -345,23 +345,47 @@ def _final_flux_profiles_from_state(
     from .vmec_tomnsp import vmec_trig_tables
     from .wout import _chipf_from_chips, _icurv_full_mesh_from_indata
 
-    s = np.asarray(static_in.s, dtype=float)
+    traced = False
     try:
-        state_ns = int(np.asarray(state.Rcos).shape[0])
+        import jax
+
+        traced = any(
+            isinstance(x, jax.core.Tracer)
+            for x in (
+                getattr(state, "Rcos", None),
+                getattr(flux_local, "phipf", None),
+                getattr(flux_local, "phips", None),
+                pressure_local,
+            )
+        )
+    except Exception:
+        traced = False
+
+    xp = jax.numpy if traced else np
+
+    def _asarray(x):
+        return xp.asarray(x, dtype=float)
+
+    def _set_axis_zero(arr):
+        if int(arr.shape[0]) == 0:
+            return arr
+        if traced:
+            return arr.at[0].set(0.0)
+        arr = arr.copy()
+        arr[0] = 0.0
+        return arr
+
+    s = _asarray(static_in.s)
+    try:
+        state_ns = int(getattr(state.Rcos, "shape", _asarray(state.Rcos).shape)[0])
     except Exception:
         state_ns = int(s.shape[0])
     if int(state_ns) != int(s.shape[0]):
         return flux_local, prof_local
-    phipf = np.asarray(flux_local.phipf, dtype=float)
-    phips = np.asarray(flux_local.phips, dtype=float)
-    if phips.size:
-        phips = phips.copy()
-        phips[0] = 0.0
+    phipf = _asarray(flux_local.phipf)
+    phips = _set_axis_zero(_asarray(flux_local.phips))
 
-    pressure_out = np.asarray(pressure_local, dtype=float)
-    if pressure_out.size:
-        pressure_out = pressure_out.copy()
-        pressure_out[0] = 0.0
+    pressure_out = _set_axis_zero(_asarray(pressure_local))
 
     gamma = float(indata.get_float("GAMMA", 0.0))
     lrfp = bool(indata.get_bool("LRFP", False))
@@ -370,14 +394,12 @@ def _final_flux_profiles_from_state(
     r00 = float(boundary.R_cos[int(idx00[0])]) if idx00.size else float(np.asarray(boundary.R_cos)[0])
     vnorm = phips
     if lrfp:
-        chipf_in = np.asarray(flux_local.chipf, dtype=float)
-        if chipf_in.size:
-            chips_in = np.concatenate([chipf_in[:1], 0.5 * (chipf_in[1:] + chipf_in[:-1])], axis=0)
+        chipf_in = _asarray(flux_local.chipf)
+        if int(chipf_in.shape[0]) > 0:
+            chips_in = xp.concatenate([chipf_in[:1], 0.5 * (chipf_in[1:] + chipf_in[:-1])], axis=0)
             vnorm = chips_in
-    mass = pressure_out * (np.abs(vnorm) * r00) ** gamma
-    if mass.size:
-        mass = mass.copy()
-        mass[0] = 0.0
+    mass = pressure_out * (xp.abs(vnorm) * r00) ** gamma
+    mass = _set_axis_zero(mass)
 
     trig = getattr(static_in, "trig_vmec", None)
     if trig is None:
@@ -389,11 +411,11 @@ def _final_flux_profiles_from_state(
             nmax=max(0, int(static_in.cfg.ntor)),
             lasym=bool(static_in.cfg.lasym),
         )
-    icurv = np.asarray(_icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=int(signgs)), dtype=float)
+    icurv = _asarray(_icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=int(signgs)))
     wout_like_pre = SimpleNamespace(
         phipf=phipf,
         phips=phips,
-        chipf=np.zeros_like(phipf),
+        chipf=xp.zeros_like(phipf),
         signgs=int(signgs),
         nfp=int(static_in.cfg.nfp),
         mpol=int(static_in.cfg.mpol),
@@ -401,7 +423,7 @@ def _final_flux_profiles_from_state(
         lasym=bool(static_in.cfg.lasym),
         ncurr=0,
         lcurrent=False,
-        icurv=np.zeros_like(phipf),
+        icurv=xp.zeros_like(phipf),
         flux_is_internal=True,
         mass=mass,
         gamma=gamma,
@@ -415,30 +437,27 @@ def _final_flux_profiles_from_state(
         trig=trig,
     )
 
-    sqrtg = np.asarray(bc_pre.jac.sqrtg, dtype=float)
-    overg = np.zeros_like(sqrtg)
-    np.divide(1.0, sqrtg, out=overg, where=(sqrtg != 0.0))
-    pwint = np.asarray(
+    sqrtg = _asarray(bc_pre.jac.sqrtg)
+    safe_sqrtg = xp.where(sqrtg != 0.0, sqrtg, 1.0)
+    overg = xp.where(sqrtg != 0.0, 1.0 / safe_sqrtg, 0.0)
+    pwint = _asarray(
         vmec_pwint_from_trig(trig, ns=int(overg.shape[0]), nzeta=int(overg.shape[2])),
-        dtype=overg.dtype,
     )
-    guu = np.asarray(bc_pre.guu, dtype=float)
-    guv = np.asarray(bc_pre.guv, dtype=float)
-    bsupu = np.asarray(bc_pre.bsupu, dtype=float)
-    bsupv = np.asarray(bc_pre.bsupv, dtype=float)
-    top = icurv - np.sum(pwint * ((guu * bsupu) + (guv * bsupv)), axis=(1, 2))
-    bot = np.sum(pwint * (overg * guu), axis=(1, 2))
-    chips = np.zeros_like(top)
-    np.divide(top, bot, out=chips, where=(bot != 0.0))
-    if chips.size:
-        chips[0] = 0.0
+    guu = _asarray(bc_pre.guu)
+    guv = _asarray(bc_pre.guv)
+    bsupu = _asarray(bc_pre.bsupu)
+    bsupv = _asarray(bc_pre.bsupv)
+    top = icurv - xp.sum(pwint * ((guu * bsupu) + (guv * bsupv)), axis=(1, 2))
+    bot = xp.sum(pwint * (overg * guu), axis=(1, 2))
+    safe_bot = xp.where(bot != 0.0, bot, 1.0)
+    chips = xp.where(bot != 0.0, top / safe_bot, 0.0)
+    chips = _set_axis_zero(chips)
 
-    iotas = np.zeros_like(chips)
-    np.divide(chips, phips, out=iotas, where=(phips != 0.0))
-    if iotas.size:
-        iotas[0] = 0.0
-    iotaf = np.asarray(_iotaf_from_iotas(iotas, lrfp=lrfp), dtype=float)
-    chipf = np.asarray(_chipf_from_chips(chips), dtype=float)
+    safe_phips = xp.where(phips != 0.0, phips, 1.0)
+    iotas = xp.where(phips != 0.0, chips / safe_phips, 0.0)
+    iotas = _set_axis_zero(iotas)
+    iotaf = _asarray(_iotaf_from_iotas(iotas, lrfp=lrfp))
+    chipf = _asarray(_chipf_from_chips(chips))
 
     prof_out = dict(prof_local)
     prof_out["iota"] = iotas
@@ -448,7 +467,7 @@ def _final_flux_profiles_from_state(
         chipf=chipf,
         phips=phips,
         signgs=int(signgs),
-        lamscale=np.asarray(flux_local.lamscale),
+        lamscale=_asarray(flux_local.lamscale),
     )
     return flux_out, prof_out
 

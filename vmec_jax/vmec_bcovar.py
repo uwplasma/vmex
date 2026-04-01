@@ -19,6 +19,8 @@ the ``fixaray`` trig tables.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
+import time
 from types import SimpleNamespace
 from typing import Any
 
@@ -48,6 +50,21 @@ from .vmec_realspace import (
 from .vmec_tomnsp import VmecTrigTables, vmec_trig_tables
 from .vmec_residue import vmec_pwint_from_trig
 from .nyquist import nyquist_basis_from_wout
+
+
+def _vmec_bcovar_profile_enabled() -> bool:
+    value = os.environ.get("VMEC_JAX_PROFILE_BCOVAR", "")
+    return value.strip().lower() not in ("", "0", "false", "no")
+
+
+def _vmec_bcovar_profile_log(stage: str, start: float | None = None, **extra) -> None:
+    if not _vmec_bcovar_profile_enabled():
+        return
+    payload = {"stage": stage}
+    if start is not None:
+        payload["elapsed_s"] = time.perf_counter() - start
+    payload.update(extra)
+    print(f"[vmec_jax bcovar] {payload}", flush=True)
 
 
 @tree_util.register_pytree_node_class
@@ -255,6 +272,7 @@ def vmec_bcovar_half_mesh_from_wout(
     freeb_bsqvac_edge: Any | None = None,
     use_vmec_synthesis: bool = False,
     trig: VmecTrigTables | None = None,
+    return_parity_aux: bool = False,
 ) -> VmecHalfMeshBcovar:
     """Compute VMEC-style half-mesh metric and B components for parity tests.
 
@@ -294,7 +312,20 @@ def vmec_bcovar_half_mesh_from_wout(
         Optional precomputed VMEC trig tables. If omitted and
         ``use_vmec_synthesis=True``, they are built internally.
     """
+    bcovar_start = time.perf_counter()
     s = jnp.asarray(static.s)
+    if trig is None:
+        trig = getattr(static, "trig_vmec", None)
+    if trig is None:
+        trig = vmec_trig_tables(
+            ntheta=int(static.cfg.ntheta),
+            nzeta=int(static.cfg.nzeta),
+            nfp=int(getattr(wout, "nfp", static.cfg.nfp)),
+            mmax=int(getattr(wout, "mpol", static.cfg.mpol)) - 1,
+            nmax=int(getattr(wout, "ntor", static.cfg.ntor)),
+            lasym=bool(getattr(wout, "lasym", static.cfg.lasym)),
+            dtype=jnp.asarray(state.Rcos).dtype,
+        )
     ns = int(s.shape[0])
     # VMEC stores internal coefficients. Undo the m=1 internal constraint for
     # R/Z before real-space synthesis.
@@ -332,7 +363,9 @@ def vmec_bcovar_half_mesh_from_wout(
         Lcos=Lcos_force,
         Lsin=Lsin_force,
     )
+    _vmec_bcovar_profile_log("setup_done", bcovar_start)
 
+    parity_start = time.perf_counter()
     if use_vmec_synthesis:
         if trig is None:
             mmax = int(np.max(static.modes.m))
@@ -404,6 +437,7 @@ def vmec_bcovar_half_mesh_from_wout(
         # form), even when LASYM is enabled. Using cos/sin splits here
         # breaks bsupu/bsupv parity for asymmetric runs.
         parity = split_rzl_even_odd_m(state_parity, static.basis, static.modes.m)
+    _vmec_bcovar_profile_log("parity_done", parity_start)
 
     # VMEC axis convention (vmec_params.f: jmin1):
     # - m=1 odd-m internal fields are extrapolated to the axis (copy js=2),
@@ -447,122 +481,45 @@ def vmec_bcovar_half_mesh_from_wout(
             return out
         return internal_odd_from_physical_vmec_jlam(odd_m1_phys=phys_m1, odd_mge2_phys=phys_rest, s=s)
 
+    odd_start = time.perf_counter()
     if use_vmec_synthesis:
         s_grid = s
         odd_is_internal = True
-        R1 = _odd_internal_vmec(
-            coeff_cos=state_parity.Rcos,
-            coeff_sin=state_parity.Rsin,
-            eval_fn=lambda c, s_: vmec_realspace_synthesis(
-                coeff_cos=c,
-                coeff_sin=s_,
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=True,
-                apply_scalxc=True,
-                s=s_grid,
-            ),
-            odd_is_internal=odd_is_internal,
-        )
-        Z1 = _odd_internal_vmec(
-            coeff_cos=state_parity.Zcos,
-            coeff_sin=state_parity.Zsin,
-            eval_fn=lambda c, s_: vmec_realspace_synthesis(
-                coeff_cos=c,
-                coeff_sin=s_,
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=True,
-                apply_scalxc=True,
-                s=s_grid,
-            ),
-            odd_is_internal=odd_is_internal,
-        )
-        Ru1 = _odd_internal_vmec(
-            coeff_cos=state_parity.Rcos,
-            coeff_sin=state_parity.Rsin,
-            eval_fn=lambda c, s_: vmec_realspace_synthesis_dtheta(
-                coeff_cos=c,
-                coeff_sin=s_,
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=True,
-                apply_scalxc=True,
-                s=s_grid,
-            ),
-            odd_is_internal=odd_is_internal,
-        )
-        Zu1 = _odd_internal_vmec(
-            coeff_cos=state_parity.Zcos,
-            coeff_sin=state_parity.Zsin,
-            eval_fn=lambda c, s_: vmec_realspace_synthesis_dtheta(
-                coeff_cos=c,
-                coeff_sin=s_,
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=True,
-                apply_scalxc=True,
-                s=s_grid,
-            ),
-            odd_is_internal=odd_is_internal,
-        )
-        Rv1 = _odd_internal_vmec(
-            coeff_cos=state_parity.Rcos,
-            coeff_sin=state_parity.Rsin,
-            eval_fn=lambda c, s_: vmec_realspace_synthesis_dzeta_phys(
-                coeff_cos=c,
-                coeff_sin=s_,
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=True,
-                apply_scalxc=True,
-                s=s_grid,
-            ),
-            odd_is_internal=odd_is_internal,
-        )
-        Zv1 = _odd_internal_vmec(
-            coeff_cos=state_parity.Zcos,
-            coeff_sin=state_parity.Zsin,
-            eval_fn=lambda c, s_: vmec_realspace_synthesis_dzeta_phys(
-                coeff_cos=c,
-                coeff_sin=s_,
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=True,
-                apply_scalxc=True,
-                s=s_grid,
-            ),
-            odd_is_internal=odd_is_internal,
+
+        def _odd_internal_from_phys(phys_m1, phys_rest, *, lambda_field: bool = False):
+            if odd_is_internal:
+                out = phys_m1 + phys_rest
+                if out.shape[0] >= 2:
+                    out = out.at[0].set(phys_m1[1])
+                return out
+            if lambda_field:
+                return internal_odd_from_physical_vmec_jlam(odd_m1_phys=phys_m1, odd_mge2_phys=phys_rest, s=s)
+            return internal_odd_from_physical_vmec_m1(odd_m1_phys=phys_m1, odd_mge2_phys=phys_rest, s=s)
+
+        coeff_cos_stack = jnp.stack([state_parity.Rcos, state_parity.Zcos, state_parity.Lcos], axis=0)
+        coeff_sin_stack = jnp.stack([state_parity.Rsin, state_parity.Zsin, state_parity.Lsin], axis=0)
+        mask_stack = jnp.stack([mask_m1, mask_odd_rest], axis=0)
+        coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
+        coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
+        odd_base, odd_dtheta, odd_dzeta = vmec_realspace_synthesis_multi(
+            coeff_cos=coeff_cos,
+            coeff_sin=coeff_sin,
+            modes=static.modes,
+            trig=trig,
+            coeffs_internal=True,
+            apply_scalxc=True,
+            s=s_grid,
+            derivs=("base", "dtheta", "dzeta"),
         )
 
-        Lu1 = _odd_internal_vmec_lambda(
-            coeff_cos=state_parity.Lcos,
-            coeff_sin=state_parity.Lsin,
-            eval_fn=lambda c, s_: vmec_realspace_synthesis_dtheta(
-                coeff_cos=c,
-                coeff_sin=s_,
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=True,
-                apply_scalxc=True,
-                s=s_grid,
-            ),
-            odd_is_internal=odd_is_internal,
-        )
-        Lv1 = _odd_internal_vmec_lambda(
-            coeff_cos=state_parity.Lcos,
-            coeff_sin=state_parity.Lsin,
-            eval_fn=lambda c, s_: vmec_realspace_synthesis_dzeta_phys(
-                coeff_cos=c,
-                coeff_sin=s_,
-                modes=static.modes,
-                trig=trig,
-                coeffs_internal=True,
-                apply_scalxc=True,
-                s=s_grid,
-            ),
-            odd_is_internal=odd_is_internal,
-        )
+        R1 = _odd_internal_from_phys(odd_base[0, 0], odd_base[1, 0])
+        Z1 = _odd_internal_from_phys(odd_base[0, 1], odd_base[1, 1])
+        Ru1 = _odd_internal_from_phys(odd_dtheta[0, 0], odd_dtheta[1, 0])
+        Zu1 = _odd_internal_from_phys(odd_dtheta[0, 1], odd_dtheta[1, 1])
+        Rv1 = _odd_internal_from_phys(odd_dzeta[0, 0], odd_dzeta[1, 0])
+        Zv1 = _odd_internal_from_phys(odd_dzeta[0, 1], odd_dzeta[1, 1])
+        Lu1 = _odd_internal_from_phys(odd_dtheta[0, 2], odd_dtheta[1, 2], lambda_field=True)
+        Lv1 = _odd_internal_from_phys(odd_dzeta[0, 2], odd_dzeta[1, 2], lambda_field=True)
     else:
         odd_is_internal = False
         R1 = _odd_internal_vmec(
@@ -614,8 +571,10 @@ def vmec_bcovar_half_mesh_from_wout(
             eval_fn=eval_fourier_dzeta_phys,
             odd_is_internal=odd_is_internal,
         )
+    _vmec_bcovar_profile_log("odd_channels_done", odd_start)
 
     # Half-mesh Jacobian quantities from VMEC's discrete formula.
+    metric_start = time.perf_counter()
     jac = jacobian_half_mesh_from_parity(
         pr1_even=parity.R_even,
         pr1_odd=R1,
@@ -673,10 +632,12 @@ def vmec_bcovar_half_mesh_from_wout(
     # force pipeline, but the (guu,guv,gvv) metric elements used for bsub*
     # parity are those constructed above from (Ru,Zu,Rv,Zv) and the cylindrical
     # +R^2 term.
+    _vmec_bcovar_profile_log("metric_done", metric_start)
 
     # ---------------------------------------------------------------------
     # Contravariant B components (bsupu, bsupv) on the half mesh.
     # ---------------------------------------------------------------------
+    field_start = time.perf_counter()
     # VMEC does not form bsupu/bsupv from pointwise (sqrtg, lam_u, lam_v) alone.
     # Instead, it:
     #   1) builds full-mesh LU = d(lambda)/du and LV = -d(lambda)/dv (even/odd-m),
@@ -691,17 +652,26 @@ def vmec_bcovar_half_mesh_from_wout(
     # VMEC adds the **full-mesh** flux function `chips(js)` to bsupu in
     # `add_fluxes`, while `wout` commonly stores the half-mesh array `chipf`.
     chipf_out = getattr(wout, "chipf", None)
-    phipf_out = jnp.asarray(getattr(wout, "phipf"))
-    signgs = int(getattr(wout, "signgs", 1))
-    flux_is_internal = bool(getattr(wout, "flux_is_internal", False))
-    if not flux_is_internal:
-        scale = jnp.asarray(TWOPI, dtype=phipf_out.dtype) * jnp.asarray(signgs, dtype=phipf_out.dtype)
-        phipf_internal = phipf_out / scale
-        chipf_internal = None if chipf_out is None else (jnp.asarray(chipf_out) / scale)
+    phipf_cached = getattr(wout, "phipf_internal", None)
+    chipf_cached = getattr(wout, "chipf_internal", None)
+    chips_cached = getattr(wout, "chips_eff", None)
+    if phipf_cached is None:
+        phipf_out = jnp.asarray(getattr(wout, "phipf"))
+        signgs = int(getattr(wout, "signgs", 1))
+        flux_is_internal = bool(getattr(wout, "flux_is_internal", False))
+        if not flux_is_internal:
+            scale = jnp.asarray(TWOPI, dtype=phipf_out.dtype) * jnp.asarray(signgs, dtype=phipf_out.dtype)
+            phipf_internal = phipf_out / scale
+            chipf_internal = None if chipf_out is None else (jnp.asarray(chipf_out) / scale)
+        else:
+            phipf_internal = phipf_out
+            chipf_internal = None if chipf_out is None else jnp.asarray(chipf_out)
     else:
-        phipf_internal = phipf_out
-        chipf_internal = None if chipf_out is None else jnp.asarray(chipf_out)
-    if chipf_out is not None:
+        phipf_internal = jnp.asarray(phipf_cached)
+        chipf_internal = None if chipf_cached is None else jnp.asarray(chipf_cached)
+    if chips_cached is not None:
+        chips_eff = jnp.asarray(chips_cached)
+    elif chipf_out is not None:
         chips_eff = chips_from_wout_chipf(
             chipf=chipf_internal,
             phipf=phipf_internal,
@@ -763,6 +733,14 @@ def vmec_bcovar_half_mesh_from_wout(
     if (ncurr == 1) and lcurrent and (ns >= 2):
         # VMEC's add_fluxes computes chips using bsup in VMEC orientation.
         pwint = vmec_pwint_from_trig(trig, ns=int(overg.shape[0]), nzeta=int(overg.shape[2])).astype(bsupu.dtype)
+        if pwint.shape[1:] != bsupu.shape[1:]:
+            # The non-VMEC-synthesis path uses the full theta grid instead of
+            # VMEC's reduced ntheta3 grid. Fall back to uniform surface-average
+            # weights on that active grid so the current-driven chips update can
+            # run on the same angular discretization as guu/bsupu/bsupv.
+            dnorm3 = jnp.asarray(getattr(trig, "dnorm3", 0.0), dtype=bsupu.dtype)
+            pwint = jnp.broadcast_to(dnorm3, bsupu.shape)
+            pwint = pwint.at[0].set(jnp.zeros_like(bsupu[0]))
 
         top = jnp.asarray(icurv, dtype=bsupu.dtype) - jnp.sum(
             pwint * ((guu * bsupu) + (guv * bsupv)),
@@ -922,10 +900,12 @@ def vmec_bcovar_half_mesh_from_wout(
     gij_b_vv = (bsupv * bsupv) * jac.sqrtg
     lu_e = bsq * jac.r12
     lv_e = bsq * jac.tau
+    _vmec_bcovar_profile_log("field_done", field_start)
 
     # ---------------------------------------------------------------------
     # Lambda force kernels (bcovar.f "lambda full mesh forces" block)
     # ---------------------------------------------------------------------
+    lambda_start = time.perf_counter()
     # This reproduces the structure in `bcovar.f`:
     #   - compute an intermediate bsubv_e on the full radial mesh from LU and metrics
     #   - average (bsubuh,bsubvh) from the half mesh onto the full mesh
@@ -1023,7 +1003,9 @@ def vmec_bcovar_half_mesh_from_wout(
     bsubu_e_scaled = clmn_even
     bsubv_e_scaled = blmn_even
 
-    return VmecHalfMeshBcovar(
+    _vmec_bcovar_profile_log("lambda_done", lambda_start)
+
+    result = VmecHalfMeshBcovar(
         jac=jac,
         guu=guu,
         guv=guv,
@@ -1066,3 +1048,23 @@ def vmec_bcovar_half_mesh_from_wout(
         blmn_even=blmn_even,
         blmn_odd=blmn_odd,
     )
+    _vmec_bcovar_profile_log("bcovar_done", bcovar_start)
+    if bool(return_parity_aux):
+        aux = SimpleNamespace(
+            pr1_even=parity.R_even,
+            pr1_odd=R1,
+            pz1_even=parity.Z_even,
+            pz1_odd=Z1,
+            pru_even=parity.Rt_even,
+            pru_odd=Ru1,
+            pzu_even=parity.Zt_even,
+            pzu_odd=Zu1,
+            prv_even=parity.Rp_even,
+            prv_odd=Rv1,
+            pzv_even=parity.Zp_even,
+            pzv_odd=Zv1,
+            lu_odd=Lu1,
+            lv_odd=Lv1,
+        )
+        return result, aux
+    return result

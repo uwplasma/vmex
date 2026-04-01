@@ -13,7 +13,7 @@ from typing import Any, Dict
 
 import numpy as np
 
-from ._compat import has_jax, jax
+from ._compat import has_jax, jax, jnp
 from .modes import vmec_mode_table
 from .modes import nyquist_mode_table, nyquist_mode_table_from_grid
 from .namelist import InData
@@ -27,6 +27,7 @@ from .vmec_realspace import (
     vmec_realspace_geom_from_state,
 )
 from .vmec_residue import vmec_pwint_from_trig
+from .vmec_tomnsp import vmec_trig_tables
 
 
 MU0 = 4e-7 * np.pi  # N/A^2
@@ -44,6 +45,19 @@ def _vmec_wint_from_trig(trig) -> np.ndarray:
     nzeta = int(np.asarray(trig.cosnv).shape[0])
     wint = w_theta[:, None] * np.ones((nzeta,), dtype=w_theta.dtype)[None, :]
     return np.asarray(wint, dtype=float)
+
+
+def _vmec_wint_from_trig_jax(trig):
+    """Return VMEC-style angular weights on the internal grid as JAX arrays."""
+    cosmui3 = jnp.asarray(trig.cosmui3)
+    mscale = jnp.asarray(trig.mscale)
+    if cosmui3.ndim != 2:
+        raise ValueError("Expected trig.cosmui3 with shape (ntheta3, mmax+1)")
+    if int(mscale.size) == 0:
+        raise ValueError("Expected non-empty trig.mscale")
+    w_theta = cosmui3[:, 0] / mscale[0]
+    nzeta = int(np.asarray(trig.cosnv).shape[0])
+    return w_theta[:, None] * jnp.ones((nzeta,), dtype=w_theta.dtype)[None, :]
 
 
 def _pshalf_from_s(s_full: np.ndarray) -> np.ndarray:
@@ -164,6 +178,166 @@ def _compute_aspectratio(
     return Aminor_p, Rmajor_p, aspect, volume_p, cross_area_p
 
 
+def equilibrium_aspect_ratio_from_state(*, state: VMECState, static) -> Any:
+    """Compute VMEC's equilibrium aspect ratio directly from a solved state.
+
+    This mirrors the ``aspectratio.f`` path used during ``wout`` synthesis, but
+    keeps the calculation on JAX arrays so callers can differentiate through the
+    solved equilibrium without materializing a full ``wout`` object.
+    """
+    cfg = static.cfg
+    trig = getattr(static, "trig_vmec", None)
+    if trig is None:
+        trig = vmec_trig_tables(
+            ntheta=int(cfg.ntheta),
+            nzeta=int(cfg.nzeta),
+            nfp=int(cfg.nfp),
+            mmax=int(cfg.mpol),
+            nmax=int(cfg.ntor),
+            lasym=bool(cfg.lasym),
+            dtype=jnp.asarray(state.Rcos).dtype,
+            cache=False,
+        )
+    geom = _vmec_realspace_geom_light_from_state(
+        state=state,
+        modes=static.modes,
+        trig=trig,
+        lasym=bool(cfg.lasym),
+    )
+    R = jnp.asarray(geom["R"])
+    Zu = jnp.asarray(geom["Zu"])
+    wint = _vmec_wint_from_trig_jax(trig)
+    rb = R[-1]
+    zub = Zu[-1]
+    t1 = rb * zub * wint
+    volume_p = (2.0 * jnp.pi * jnp.pi) * jnp.abs(jnp.sum(rb * t1))
+    cross_area_p = (2.0 * jnp.pi) * jnp.abs(jnp.sum(t1))
+    cross_area_safe = jnp.where(cross_area_p != 0.0, cross_area_p, 1.0)
+    Aminor_p = jnp.where(cross_area_p != 0.0, jnp.sqrt(cross_area_safe / jnp.pi), 0.0)
+    Rmajor_p = jnp.where(cross_area_p != 0.0, volume_p / (2.0 * jnp.pi * cross_area_safe), 0.0)
+    return jnp.where(Aminor_p != 0.0, Rmajor_p / Aminor_p, 0.0)
+
+
+def equilibrium_iota_profiles_from_state(*, state: VMECState, static, indata, signgs: int):
+    """Compute VMEC-consistent current/iota profiles from a solved state.
+
+    For ``NCURR=0`` this returns the prescribed input profile. For
+    ``NCURR=1`` it mirrors VMEC's ``add_fluxes``-style recomputation from the
+    solved force-balance state so callers can differentiate a current-driven
+    iota target without reimplementing the wout synthesis logic.
+    """
+    from types import SimpleNamespace
+
+    from .boundary import boundary_from_indata
+    from .energy import _iotaf_from_iotas, flux_profiles_from_indata
+    from .profiles import eval_profiles
+    from .solve import _half_mesh_from_full_mesh, _mass_half_mesh_from_indata
+    from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
+
+    s = jnp.asarray(static.s)
+    if s.shape[0] < 2:
+        s_half = s
+    else:
+        s_half = jnp.concatenate([s[:1], 0.5 * (s[1:] + s[:-1])], axis=0)
+
+    flux = flux_profiles_from_indata(indata, s, signgs=int(signgs))
+    phipf = jnp.asarray(flux.phipf)
+    phips = jnp.asarray(flux.phips)
+    if phips.shape[0] >= 1:
+        phips = phips.at[0].set(0.0)
+
+    prof = eval_profiles(indata, s_half)
+    iotas = jnp.asarray(prof.get("iota", jnp.zeros_like(s_half)))
+    if iotas.shape[0] >= 1:
+        iotas = iotas.at[0].set(0.0)
+    if int(indata.get_int("NCURR", 0)) == 0:
+        chips = iotas * phips
+        iotaf = jnp.asarray(_iotaf_from_iotas(iotas, lrfp=bool(indata.get_bool("LRFP", False))))
+        return chips, iotas, iotaf
+
+    boundary = boundary_from_indata(indata, static.modes)
+    idx00 = np.where((np.asarray(static.modes.m) == 0) & (np.asarray(static.modes.n) == 0))[0]
+    r00 = float(np.asarray(boundary.R_cos)[int(idx00[0])]) if idx00.size else float(np.asarray(boundary.R_cos)[0])
+    gamma = float(indata.get_float("GAMMA", 0.0))
+    lrfp = bool(indata.get_bool("LRFP", False))
+    chips_half = _half_mesh_from_full_mesh(jnp.asarray(flux.chipf)) if lrfp else None
+    mass = _mass_half_mesh_from_indata(
+        indata=indata,
+        s_full=s,
+        phips=phips,
+        r00=r00,
+        gamma=gamma,
+        lrfp=lrfp,
+        chips=chips_half,
+    )
+    pres = jnp.asarray(prof.get("pressure", jnp.zeros_like(s_half)))
+    if pres.shape[0] >= 1:
+        pres = pres.at[0].set(0.0)
+    icurv = jnp.asarray(_icurv_full_mesh_from_indata(indata=indata, s_full=np.asarray(s), signgs=int(signgs)))
+
+    trig = getattr(static, "trig_vmec", None)
+    if trig is None:
+        trig = vmec_trig_tables(
+            ntheta=int(static.cfg.ntheta),
+            nzeta=int(static.cfg.nzeta),
+            nfp=int(static.cfg.nfp),
+            mmax=int(np.max(np.asarray(static.modes.m))),
+            nmax=int(np.max(np.abs(np.asarray(static.modes.n)))),
+            lasym=bool(static.cfg.lasym),
+            dtype=jnp.asarray(state.Rcos).dtype,
+        )
+
+    wout_like_pre = SimpleNamespace(
+        phipf=phipf,
+        phips=phips,
+        chipf=jnp.zeros_like(phipf),
+        signgs=int(signgs),
+        nfp=int(static.cfg.nfp),
+        mpol=int(static.cfg.mpol),
+        ntor=int(static.cfg.ntor),
+        lasym=bool(static.cfg.lasym),
+        ncurr=0,
+        lcurrent=False,
+        icurv=jnp.zeros_like(phipf),
+        flux_is_internal=True,
+        mass=mass,
+        gamma=gamma,
+    )
+    bc_pre = vmec_bcovar_half_mesh_from_wout(
+        state=state,
+        static=static,
+        wout=wout_like_pre,
+        pres=pres,
+        use_vmec_synthesis=True,
+        trig=trig,
+    )
+
+    sqrtg = jnp.asarray(bc_pre.jac.sqrtg)
+    overg = jnp.where(sqrtg != 0.0, 1.0 / sqrtg, 0.0)
+    pwint = jnp.asarray(
+        vmec_pwint_from_trig(trig, ns=int(overg.shape[0]), nzeta=int(overg.shape[2])),
+        dtype=overg.dtype,
+    )
+    guu = jnp.asarray(bc_pre.guu)
+    guv = jnp.asarray(bc_pre.guv)
+    bsupu = jnp.asarray(bc_pre.bsupu)
+    bsupv = jnp.asarray(bc_pre.bsupv)
+
+    top = jnp.asarray(icurv, dtype=overg.dtype) - jnp.sum(
+        pwint * ((guu * bsupu) + (guv * bsupv)),
+        axis=(1, 2),
+    )
+    bot = jnp.sum(pwint * (overg * guu), axis=(1, 2))
+    chips = jnp.where(bot != 0.0, top / bot, jnp.zeros_like(top))
+    if chips.shape[0] >= 1:
+        chips = chips.at[0].set(0.0)
+    iotas = jnp.where(phips != 0.0, chips / phips, jnp.zeros_like(chips))
+    if iotas.shape[0] >= 1:
+        iotas = iotas.at[0].set(0.0)
+    iotaf = jnp.asarray(_iotaf_from_iotas(iotas, lrfp=lrfp))
+    return chips, iotas, iotaf
+
+
 def _compute_equif_wout(
     *,
     bsubu: np.ndarray,
@@ -242,7 +416,7 @@ def _compute_equif_wout(
     return buco, bvco, jcuru, jcurv, equif
 
 
-def _vmec_realspace_geom_light_from_state(*, state: VMECState, modes, trig) -> dict[str, Any]:
+def _vmec_realspace_geom_light_from_state(*, state: VMECState, modes, trig, lasym: bool | None = None) -> dict[str, Any]:
     """Compute minimal geometry (R, Z, Zu) needed for wout diagnostics."""
     from ._compat import jnp
 
@@ -251,7 +425,8 @@ def _vmec_realspace_geom_light_from_state(*, state: VMECState, modes, trig) -> d
     Zcos = jnp.asarray(state.Zcos)
     Zsin = jnp.asarray(state.Zsin)
     lthreed = bool(np.any(np.asarray(modes.n)))
-    lasym = bool(np.any(np.asarray(Rsin))) or bool(np.any(np.asarray(Zcos)))
+    if lasym is None:
+        lasym = bool(np.any(np.asarray(Rsin))) or bool(np.any(np.asarray(Zcos)))
     lconm1 = bool(lthreed or lasym)
     if lconm1 and int(np.max(np.asarray(modes.m))) > 0:
         Rcos, Zsin, Rsin, Zcos = vmec_m1_internal_to_physical_signed(
@@ -3949,6 +4124,21 @@ def _vmec_jxbforce_sin_coeffs(
 
 def _chipf_from_chips(chips: np.ndarray) -> np.ndarray:
     """VMEC add_fluxes: build half-mesh chipf from chips on full mesh."""
+    is_traced = bool(has_jax()) and (
+        isinstance(chips, jax.core.Tracer) or isinstance(chips, jax.Array)
+    )
+    if is_traced:
+        chips = jnp.asarray(chips, dtype=jnp.float64)
+        ns = int(chips.shape[0])
+        if ns <= 1:
+            return chips
+        chipf = jnp.zeros((ns,), dtype=chips.dtype)
+        chipf = chipf.at[0].set((1.5 * chips[1] - 0.5 * chips[2]) if ns >= 3 else chips[1])
+        if ns > 2:
+            chipf = chipf.at[1:-1].set(0.5 * (chips[1:-1] + chips[2:]))
+        chipf = chipf.at[-1].set(1.5 * chips[-1] - 0.5 * chips[-2])
+        return chipf
+
     chips = np.asarray(chips, dtype=float)
     ns = int(chips.shape[0])
     if ns <= 1:
@@ -4008,6 +4198,10 @@ class WoutData:
     nfp: int
     lasym: bool
     signgs: int
+    mnmax: int
+    mpol_nyq: int
+    ntor_nyq: int
+    mnmax_nyq: int
 
     # main mode table
     xm: np.ndarray
@@ -4166,6 +4360,22 @@ def read_wout(path: str | Path) -> WoutData:
         xn = np.asarray(np.ma.filled(xn_raw, 0.0), dtype=int)
         xm_nyq = np.asarray(np.ma.filled(xm_nyq_raw, 0.0), dtype=int)
         xn_nyq = np.asarray(np.ma.filled(xn_nyq_raw, 0.0), dtype=int)
+        mnmax = int(_nc_scalar(ds.variables.get("mnmax", xm.size)[:], xm.size, as_int=True)) if "mnmax" in ds.variables else int(xm.size)
+        mnmax_nyq = (
+            int(_nc_scalar(ds.variables.get("mnmax_nyq", xm_nyq.size)[:], xm_nyq.size, as_int=True))
+            if "mnmax_nyq" in ds.variables
+            else int(xm_nyq.size)
+        )
+        mpol_nyq = (
+            int(_nc_scalar(ds.variables.get("mpol_nyq", np.max(xm_nyq) if xm_nyq.size else 0)[:], np.max(xm_nyq) if xm_nyq.size else 0, as_int=True))
+            if "mpol_nyq" in ds.variables
+            else int(np.max(xm_nyq)) if xm_nyq.size else 0
+        )
+        ntor_nyq = (
+            int(_nc_scalar(ds.variables.get("ntor_nyq", np.max(np.abs(xn_nyq // nfp)) if xn_nyq.size else 0)[:], np.max(np.abs(xn_nyq // nfp)) if xn_nyq.size else 0, as_int=True))
+            if "ntor_nyq" in ds.variables
+            else int(np.max(np.abs(xn_nyq // nfp))) if xn_nyq.size else 0
+        )
 
         rmnc = np.asarray(ds.variables["rmnc"][:])
         rmns = np.asarray(ds.variables.get("rmns", np.zeros_like(rmnc))[:])
@@ -4288,6 +4498,10 @@ def read_wout(path: str | Path) -> WoutData:
         nfp=nfp,
         lasym=lasym,
         signgs=signgs,
+        mnmax=mnmax,
+        mpol_nyq=mpol_nyq,
+        ntor_nyq=ntor_nyq,
+        mnmax_nyq=mnmax_nyq,
         xm=xm,
         xn=xn,
         xm_nyq=xm_nyq,
@@ -4441,6 +4655,14 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
         _var_i("nfp", (), np.asarray(int(wout.nfp)))
         _var_i("signgs", (), np.asarray(int(wout.signgs)))
         _var_i("lasym__logical__", (), np.asarray(int(bool(wout.lasym))))
+        _var_i("mnmax", (), np.asarray(int(getattr(wout, "mnmax", mnmax))))
+        _var_i("mpol_nyq", (), np.asarray(int(getattr(wout, "mpol_nyq", np.max(np.asarray(wout.xm_nyq)) if mnmax_nyq > 0 else 0))))
+        _var_i(
+            "ntor_nyq",
+            (),
+            np.asarray(int(getattr(wout, "ntor_nyq", np.max(np.abs(np.asarray(wout.xn_nyq) // int(wout.nfp))) if mnmax_nyq > 0 else 0))),
+        )
+        _var_i("mnmax_nyq", (), np.asarray(int(getattr(wout, "mnmax_nyq", mnmax_nyq))))
 
         _var_f("wb", (), np.asarray(float(wout.wb)))
         _var_f("volume_p", (), np.asarray(float(wout.volume_p)))
@@ -4451,10 +4673,13 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
         _var_f("fsql", (), np.asarray(float(wout.fsql)))
 
         # Mode tables.
-        _var_i("xm", ("mn_mode",), np.asarray(wout.xm))
-        _var_i("xn", ("mn_mode",), np.asarray(wout.xn))
-        _var_i("xm_nyq", ("mn_mode_nyq",), np.asarray(wout.xm_nyq))
-        _var_i("xn_nyq", ("mn_mode_nyq",), np.asarray(wout.xn_nyq))
+        # Keep the scalar mode-count metadata as integers, but store the mode
+        # tables themselves as floats to match the legacy libstell/SFINCS wout
+        # convention while remaining readable by integer-oriented consumers.
+        _var_f("xm", ("mn_mode",), np.asarray(wout.xm))
+        _var_f("xn", ("mn_mode",), np.asarray(wout.xn))
+        _var_f("xm_nyq", ("mn_mode_nyq",), np.asarray(wout.xm_nyq))
+        _var_f("xn_nyq", ("mn_mode_nyq",), np.asarray(wout.xn_nyq))
 
         # Geometry coefficients (full mesh).
         _var_f("rmnc", ("radius", "mn_mode"), np.asarray(wout.rmnc))
@@ -4711,70 +4936,15 @@ def wout_minimal_from_fixed_boundary(
     # For current-driven runs (ncurr=1), VMEC updates iota from the force balance
     # (add_fluxes). Recompute iotas/iotaf from the final state to match VMEC2000.
     if ncurr == 1 and os.getenv("VMEC_JAX_DISABLE_WOUT_NCURR_RECOMPUTE", "0") in ("", "0"):
-        from types import SimpleNamespace
-        from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
-        from .vmec_residue import vmec_pwint_from_trig
-        from .vmec_tomnsp import vmec_trig_tables
-
-        icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=int(signgs))
-        phips = np.asarray(flux.phips, dtype=float)
-        if phips.size:
-            phips = phips.copy()
-            phips[0] = 0.0
-
-        wout_like_pre = SimpleNamespace(
-            phipf=np.asarray(flux.phipf, dtype=float),
-            phips=phips,
-            chipf=np.zeros_like(np.asarray(flux.phipf, dtype=float)),
-            signgs=int(signgs),
-            nfp=int(static.cfg.nfp),
-            mpol=int(static.cfg.mpol),
-            ntor=int(static.cfg.ntor),
-            lasym=bool(static.cfg.lasym),
-            ncurr=0,
-            lcurrent=False,
-            icurv=np.zeros_like(np.asarray(flux.phipf, dtype=float)),
-            flux_is_internal=True,
-            mass=np.asarray(mass, dtype=float),
-            gamma=float(gamma),
-        )
-
-        bc_pre = vmec_bcovar_half_mesh_from_wout(
+        chips, iotas, iotaf = equilibrium_iota_profiles_from_state(
             state=state,
             static=static,
-            wout=wout_like_pre,
-            pres=pres,
-            use_vmec_synthesis=True,
-            trig=trig,
+            indata=indata,
+            signgs=int(signgs),
         )
-
-        sqrtg = np.asarray(bc_pre.jac.sqrtg)
-        overg = np.zeros_like(sqrtg)
-        np.divide(1.0, sqrtg, out=overg, where=(sqrtg != 0.0))
-        pwint = np.asarray(
-            vmec_pwint_from_trig(trig, ns=int(overg.shape[0]), nzeta=int(overg.shape[2])),
-            dtype=overg.dtype,
-        )
-        guu = np.asarray(bc_pre.guu)
-        guv = np.asarray(bc_pre.guv)
-        bsupu = np.asarray(bc_pre.bsupu)
-        bsupv = np.asarray(bc_pre.bsupv)
-
-        top = np.asarray(icurv, dtype=overg.dtype) - np.sum(
-            pwint * ((guu * bsupu) + (guv * bsupv)),
-            axis=(1, 2),
-        )
-        bot = np.sum(pwint * (overg * guu), axis=(1, 2))
-        chips = np.zeros_like(top)
-        np.divide(top, bot, out=chips, where=(bot != 0.0))
-        if chips.size:
-            chips[0] = 0.0
-
-        iotas = np.zeros_like(chips)
-        np.divide(chips, phips, out=iotas, where=(phips != 0.0))
-        if iotas.size:
-            iotas[0] = 0.0
-        iotaf = np.asarray(_iotaf_from_iotas(iotas, lrfp=bool(indata.get_bool("LRFP", False))))
+        chips = np.asarray(chips, dtype=float)
+        iotas = np.asarray(iotas, dtype=float)
+        iotaf = np.asarray(iotaf, dtype=float)
         chipf_wout = _chipf_from_chips(chips)
 
     # Geometry coefficients on the full mesh (convert internal -> external).
@@ -4906,7 +5076,7 @@ def wout_minimal_from_fixed_boundary(
             use_wout_bsub_for_lambda=False,
             use_wout_bmag_for_bsq=False,
             use_vmec_synthesis=True,
-            trig=trig,
+            trig=None,
         )
         if has_jax():
             try:
@@ -4923,7 +5093,7 @@ def wout_minimal_from_fixed_boundary(
             indata=indata_wout,
             use_wout_bsup=False,
             use_vmec_synthesis=wout_force_vmec_synth,
-            trig=trig,
+            trig=None,
         )
         if has_jax():
             try:
@@ -5807,6 +5977,10 @@ def wout_minimal_from_fixed_boundary(
         nfp=nfp,
         lasym=lasym,
         signgs=int(signgs),
+        mnmax=int(main_modes.K),
+        mpol_nyq=int(np.max(nyq_modes.m)) if int(nyq_modes.K) > 0 else 0,
+        ntor_nyq=int(np.max(np.abs(nyq_modes.n))) if int(nyq_modes.K) > 0 else 0,
+        mnmax_nyq=int(nyq_modes.K),
         xm=np.asarray(main_modes.m, dtype=int),
         xn=np.asarray(main_modes.n * nfp, dtype=int),
         xm_nyq=np.asarray(nyq_modes.m, dtype=int),
