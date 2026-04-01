@@ -138,6 +138,17 @@ def _boundary_is_traced(boundary: BoundaryCoeffs) -> bool:
     return isinstance(boundary.R_cos, tracer) or isinstance(boundary.R_sin, tracer) or isinstance(boundary.Z_cos, tracer) or isinstance(boundary.Z_sin, tracer)
 
 
+def _any_value_is_traced(*values) -> bool:
+    if not has_jax():
+        return False
+    try:
+        import jax
+    except Exception:
+        return False
+    tracer = jax.core.Tracer
+    return any(isinstance(value, tracer) for value in values)
+
+
 def _vmec_lflip_from_boundary(static: VMECStatic, boundary: BoundaryCoeffs) -> bool | None:
     """Return VMEC's initial lflip decision from boundary (or None if undecidable).
 
@@ -1071,25 +1082,44 @@ def initial_guess_from_boundary(
                     s=s,
                 )
 
-                raxis_cc, raxis_cs, zaxis_cc, zaxis_cs = _recompute_axis_from_state_vmec(
-                    static,
-                    pr1_even=pr1_even,
-                    pr1_odd=pr1_odd,
-                    pz1_even=pz1_even,
-                    pz1_odd=pz1_odd,
-                    pru_even=pru_even,
-                    pru_odd=pru_odd,
-                    pzu_even=pzu_even,
-                    pzu_odd=pzu_odd,
-                    signgs=signgs_guess,
-                    trig=trig,
-                )
+                if _any_value_is_traced(
+                    pr1_even,
+                    pr1_odd,
+                    pz1_even,
+                    pz1_odd,
+                    pru_even,
+                    pru_odd,
+                    pzu_even,
+                    pzu_odd,
+                ):
+                    # The VMEC guess_axis port still relies on NumPy-heavy logic.
+                    # During tracing, keep a simple zero-axis seed instead of
+                    # failing the whole solve/JIT path.
+                    raxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+                    raxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+                    zaxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+                    zaxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+                    axis_from_indata = True
+                else:
+                    raxis_cc, raxis_cs, zaxis_cc, zaxis_cs = _recompute_axis_from_state_vmec(
+                        static,
+                        pr1_even=pr1_even,
+                        pr1_odd=pr1_odd,
+                        pz1_even=pz1_even,
+                        pz1_odd=pz1_odd,
+                        pru_even=pru_even,
+                        pru_odd=pru_odd,
+                        pzu_even=pzu_even,
+                        pzu_odd=pzu_odd,
+                        signgs=signgs_guess,
+                        trig=trig,
+                    )
 
-                raxis_cc = jnp.asarray(raxis_cc, dtype=dtype) * axis_scale
-                raxis_cs = jnp.asarray(raxis_cs, dtype=dtype) * axis_scale
-                zaxis_cc = jnp.asarray(zaxis_cc, dtype=dtype) * axis_scale
-                zaxis_cs = jnp.asarray(zaxis_cs, dtype=dtype) * axis_scale
-                axis_from_indata = False
+                    raxis_cc = jnp.asarray(raxis_cc, dtype=dtype) * axis_scale
+                    raxis_cs = jnp.asarray(raxis_cs, dtype=dtype) * axis_scale
+                    zaxis_cc = jnp.asarray(zaxis_cc, dtype=dtype) * axis_scale
+                    zaxis_cs = jnp.asarray(zaxis_cs, dtype=dtype) * axis_scale
+                    axis_from_indata = False
             else:
                 # VMEC parity path: keep the explicit zero axis and let
                 # `guess_axis`-style reset logic handle bad-Jacobian starts.

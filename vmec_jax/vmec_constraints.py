@@ -214,6 +214,9 @@ def precondn_diag_axd1_from_bcovar(
     sqrtg = jnp.asarray(sqrtg)
     ru12 = jnp.asarray(ru12)
     zu12 = jnp.asarray(zu12)
+    if wint3.shape[1:] != bsq.shape[1:]:
+        dnorm3 = jnp.asarray(getattr(trig, "dnorm3", 0.0), dtype=bsq.dtype)
+        wint3 = jnp.broadcast_to(dnorm3, (1,) + bsq.shape[1:])
 
     # Avoid division by zero in ptau.
     gs = jnp.where(sqrtg != 0, sqrtg, jnp.ones_like(sqrtg))
@@ -256,6 +259,9 @@ def tcon_from_cached_precondn_diag(
     azd1 = jnp.asarray(azd1)
     ru0 = jnp.asarray(ru0)
     zu0 = jnp.asarray(zu0)
+    if wint3.shape[1:] != ru0.shape[1:]:
+        dnorm3 = jnp.asarray(getattr(trig, "dnorm3", 0.0), dtype=ru0.dtype)
+        wint3 = jnp.broadcast_to(dnorm3, (1,) + ru0.shape[1:])
 
     arnorm = jnp.sum((ru0 * ru0) * wint3, axis=(1, 2))
     aznorm = jnp.sum((zu0 * zu0) * wint3, axis=(1, 2))

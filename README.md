@@ -144,7 +144,16 @@ RUN_FULL=1 pytest -q
 Advanced optimization examples live in `examples/optimization/`. They are
 intended as deeper workflow templates rather than README quickstarts, so use
 the fixed-boundary driver example above as the validated copy/paste entry point
-and then adapt the optimization scripts for your target objective.
+and then adapt the optimization scripts for your target objective. The simplest
+starting point is:
+
+```bash
+python examples/optimization/target_iota_aspect_volume.py --opt-steps 2
+```
+
+That example keeps the boundary parameterization small (`max |m|,|n| <= 1`),
+targets equilibrium volume, aspect ratio, and mean iota, and defaults to the
+bundled current-driven `cth_like_fixed_bdy` case so the iota channel is active.
 
 ## Performance vs parity
 

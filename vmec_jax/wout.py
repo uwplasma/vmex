@@ -218,6 +218,126 @@ def equilibrium_aspect_ratio_from_state(*, state: VMECState, static) -> Any:
     return jnp.where(Aminor_p != 0.0, Rmajor_p / Aminor_p, 0.0)
 
 
+def equilibrium_iota_profiles_from_state(*, state: VMECState, static, indata, signgs: int):
+    """Compute VMEC-consistent current/iota profiles from a solved state.
+
+    For ``NCURR=0`` this returns the prescribed input profile. For
+    ``NCURR=1`` it mirrors VMEC's ``add_fluxes``-style recomputation from the
+    solved force-balance state so callers can differentiate a current-driven
+    iota target without reimplementing the wout synthesis logic.
+    """
+    from types import SimpleNamespace
+
+    from .boundary import boundary_from_indata
+    from .energy import _iotaf_from_iotas, flux_profiles_from_indata
+    from .profiles import eval_profiles
+    from .solve import _half_mesh_from_full_mesh, _mass_half_mesh_from_indata
+    from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
+
+    s = jnp.asarray(static.s)
+    if s.shape[0] < 2:
+        s_half = s
+    else:
+        s_half = jnp.concatenate([s[:1], 0.5 * (s[1:] + s[:-1])], axis=0)
+
+    flux = flux_profiles_from_indata(indata, s, signgs=int(signgs))
+    phipf = jnp.asarray(flux.phipf)
+    phips = jnp.asarray(flux.phips)
+    if phips.shape[0] >= 1:
+        phips = phips.at[0].set(0.0)
+
+    prof = eval_profiles(indata, s_half)
+    iotas = jnp.asarray(prof.get("iota", jnp.zeros_like(s_half)))
+    if iotas.shape[0] >= 1:
+        iotas = iotas.at[0].set(0.0)
+    if int(indata.get_int("NCURR", 0)) == 0:
+        chips = iotas * phips
+        iotaf = jnp.asarray(_iotaf_from_iotas(iotas, lrfp=bool(indata.get_bool("LRFP", False))))
+        return chips, iotas, iotaf
+
+    boundary = boundary_from_indata(indata, static.modes)
+    idx00 = np.where((np.asarray(static.modes.m) == 0) & (np.asarray(static.modes.n) == 0))[0]
+    r00 = float(np.asarray(boundary.R_cos)[int(idx00[0])]) if idx00.size else float(np.asarray(boundary.R_cos)[0])
+    gamma = float(indata.get_float("GAMMA", 0.0))
+    lrfp = bool(indata.get_bool("LRFP", False))
+    chips_half = _half_mesh_from_full_mesh(jnp.asarray(flux.chipf)) if lrfp else None
+    mass = _mass_half_mesh_from_indata(
+        indata=indata,
+        s_full=s,
+        phips=phips,
+        r00=r00,
+        gamma=gamma,
+        lrfp=lrfp,
+        chips=chips_half,
+    )
+    pres = jnp.asarray(prof.get("pressure", jnp.zeros_like(s_half)))
+    if pres.shape[0] >= 1:
+        pres = pres.at[0].set(0.0)
+    icurv = jnp.asarray(_icurv_full_mesh_from_indata(indata=indata, s_full=np.asarray(s), signgs=int(signgs)))
+
+    trig = getattr(static, "trig_vmec", None)
+    if trig is None:
+        trig = vmec_trig_tables(
+            ntheta=int(static.cfg.ntheta),
+            nzeta=int(static.cfg.nzeta),
+            nfp=int(static.cfg.nfp),
+            mmax=int(np.max(np.asarray(static.modes.m))),
+            nmax=int(np.max(np.abs(np.asarray(static.modes.n)))),
+            lasym=bool(static.cfg.lasym),
+            dtype=jnp.asarray(state.Rcos).dtype,
+        )
+
+    wout_like_pre = SimpleNamespace(
+        phipf=phipf,
+        phips=phips,
+        chipf=jnp.zeros_like(phipf),
+        signgs=int(signgs),
+        nfp=int(static.cfg.nfp),
+        mpol=int(static.cfg.mpol),
+        ntor=int(static.cfg.ntor),
+        lasym=bool(static.cfg.lasym),
+        ncurr=0,
+        lcurrent=False,
+        icurv=jnp.zeros_like(phipf),
+        flux_is_internal=True,
+        mass=mass,
+        gamma=gamma,
+    )
+    bc_pre = vmec_bcovar_half_mesh_from_wout(
+        state=state,
+        static=static,
+        wout=wout_like_pre,
+        pres=pres,
+        use_vmec_synthesis=True,
+        trig=trig,
+    )
+
+    sqrtg = jnp.asarray(bc_pre.jac.sqrtg)
+    overg = jnp.where(sqrtg != 0.0, 1.0 / sqrtg, 0.0)
+    pwint = jnp.asarray(
+        vmec_pwint_from_trig(trig, ns=int(overg.shape[0]), nzeta=int(overg.shape[2])),
+        dtype=overg.dtype,
+    )
+    guu = jnp.asarray(bc_pre.guu)
+    guv = jnp.asarray(bc_pre.guv)
+    bsupu = jnp.asarray(bc_pre.bsupu)
+    bsupv = jnp.asarray(bc_pre.bsupv)
+
+    top = jnp.asarray(icurv, dtype=overg.dtype) - jnp.sum(
+        pwint * ((guu * bsupu) + (guv * bsupv)),
+        axis=(1, 2),
+    )
+    bot = jnp.sum(pwint * (overg * guu), axis=(1, 2))
+    chips = jnp.where(bot != 0.0, top / bot, jnp.zeros_like(top))
+    if chips.shape[0] >= 1:
+        chips = chips.at[0].set(0.0)
+    iotas = jnp.where(phips != 0.0, chips / phips, jnp.zeros_like(chips))
+    if iotas.shape[0] >= 1:
+        iotas = iotas.at[0].set(0.0)
+    iotaf = jnp.asarray(_iotaf_from_iotas(iotas, lrfp=lrfp))
+    return chips, iotas, iotaf
+
+
 def _compute_equif_wout(
     *,
     bsubu: np.ndarray,
@@ -4816,79 +4936,15 @@ def wout_minimal_from_fixed_boundary(
     # For current-driven runs (ncurr=1), VMEC updates iota from the force balance
     # (add_fluxes). Recompute iotas/iotaf from the final state to match VMEC2000.
     if ncurr == 1 and os.getenv("VMEC_JAX_DISABLE_WOUT_NCURR_RECOMPUTE", "0") in ("", "0"):
-        from types import SimpleNamespace
-        from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
-        from .vmec_residue import vmec_pwint_from_trig
-        from .vmec_tomnsp import vmec_trig_tables
-
-        icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=int(signgs))
-        phips = np.asarray(flux.phips, dtype=float)
-        if phips.size:
-            phips = phips.copy()
-            phips[0] = 0.0
-
-        wout_like_pre = SimpleNamespace(
-            phipf=np.asarray(flux.phipf, dtype=float),
-            phips=phips,
-            chipf=np.zeros_like(np.asarray(flux.phipf, dtype=float)),
-            signgs=int(signgs),
-            nfp=int(static.cfg.nfp),
-            mpol=int(static.cfg.mpol),
-            ntor=int(static.cfg.ntor),
-            lasym=bool(static.cfg.lasym),
-            ncurr=0,
-            lcurrent=False,
-            icurv=np.zeros_like(np.asarray(flux.phipf, dtype=float)),
-            flux_is_internal=True,
-            mass=np.asarray(mass, dtype=float),
-            gamma=float(gamma),
-        )
-        trig_ncurr = vmec_trig_tables(
-            ntheta=int(cfg.ntheta),
-            nzeta=int(cfg.nzeta),
-            nfp=int(static.cfg.nfp),
-            mmax=int(np.max(np.asarray(static.modes.m))),
-            nmax=int(np.max(np.abs(np.asarray(static.modes.n)))),
-            lasym=bool(static.cfg.lasym),
-            dtype=np.asarray(state.Rcos).dtype,
-        )
-
-        bc_pre = vmec_bcovar_half_mesh_from_wout(
+        chips, iotas, iotaf = equilibrium_iota_profiles_from_state(
             state=state,
             static=static,
-            wout=wout_like_pre,
-            pres=pres,
-            use_vmec_synthesis=True,
-            trig=trig_ncurr,
+            indata=indata,
+            signgs=int(signgs),
         )
-
-        sqrtg = np.asarray(bc_pre.jac.sqrtg)
-        overg = np.zeros_like(sqrtg)
-        np.divide(1.0, sqrtg, out=overg, where=(sqrtg != 0.0))
-        pwint = np.asarray(
-            vmec_pwint_from_trig(trig_ncurr, ns=int(overg.shape[0]), nzeta=int(overg.shape[2])),
-            dtype=overg.dtype,
-        )
-        guu = np.asarray(bc_pre.guu)
-        guv = np.asarray(bc_pre.guv)
-        bsupu = np.asarray(bc_pre.bsupu)
-        bsupv = np.asarray(bc_pre.bsupv)
-
-        top = np.asarray(icurv, dtype=overg.dtype) - np.sum(
-            pwint * ((guu * bsupu) + (guv * bsupv)),
-            axis=(1, 2),
-        )
-        bot = np.sum(pwint * (overg * guu), axis=(1, 2))
-        chips = np.zeros_like(top)
-        np.divide(top, bot, out=chips, where=(bot != 0.0))
-        if chips.size:
-            chips[0] = 0.0
-
-        iotas = np.zeros_like(chips)
-        np.divide(chips, phips, out=iotas, where=(phips != 0.0))
-        if iotas.size:
-            iotas[0] = 0.0
-        iotaf = np.asarray(_iotaf_from_iotas(iotas, lrfp=bool(indata.get_bool("LRFP", False))))
+        chips = np.asarray(chips, dtype=float)
+        iotas = np.asarray(iotas, dtype=float)
+        iotaf = np.asarray(iotaf, dtype=float)
         chipf_wout = _chipf_from_chips(chips)
 
     # Geometry coefficients on the full mesh (convert internal -> external).
