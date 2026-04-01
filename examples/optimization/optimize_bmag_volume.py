@@ -34,12 +34,13 @@ def main() -> None:
     args = p.parse_args()
 
     from vmec_jax._compat import enable_x64, has_jax, jax, jnp
+    from vmec_jax.integrals import volume_from_sqrtg_vmec
 
     if not has_jax():
         raise SystemExit("This example requires JAX (pip install -e '.[jax]').")
     enable_x64(True)
 
-    root = Path(__file__).resolve().parents[3]
+    root = Path(__file__).resolve().parents[2]
     input_path = root / "examples" / "data" / f"input.{args.case}"
 
     cfg, indata = vj.load_config(input_path)
@@ -113,7 +114,7 @@ def main() -> None:
         bmag_mean = jnp.mean(B)
 
         geom = vj.eval_geom(res.state, static)
-        _dvds, vol = vj.volume_from_sqrtg_vmec(
+        _dvds, vol = volume_from_sqrtg_vmec(
             geom.sqrtg,
             static.s,
             static.grid.theta,

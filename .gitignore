@@ -226,3 +226,9 @@ __marimo__/
 examples/data/*.nc
 examples_single_grid/data/*.nc
 .assets_installed
+
+# Root-level generated VMEC run artifacts
+/parvmecinfo.txt
+/threed1.*
+/wout_*.nc
+/input.*_[0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9]
