@@ -25,7 +25,7 @@ from typing import Any, Dict, Optional, Tuple, NamedTuple
 import numpy as np
 
 from ._compat import has_jax, jax, jnp, jit
-from .field import TWOPI, b2_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda
+from .field import TWOPI, b2_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda, chips_from_wout_chipf
 from .fourier import eval_fourier_dtheta, eval_fourier_dzeta_phys
 from .geom import eval_geom
 from .grids import angle_steps
@@ -2705,6 +2705,36 @@ class _WoutLikeVmecForces:
     lcurrent: bool = True
     icurv: Any | None = None  # (ns,) integrated toroidal current profile
     flux_is_internal: bool = True
+    phipf_internal: Any | None = None
+    chipf_internal: Any | None = None
+    chips_eff: Any | None = None
+
+
+def _vmec_force_flux_profiles(*, phipf, chipf, signgs: int, flux_is_internal: bool, iotaf=None, iotas=None):
+    phipf = jnp.asarray(phipf)
+    chipf = None if chipf is None else jnp.asarray(chipf)
+    if flux_is_internal:
+        phipf_internal = phipf
+        chipf_internal = chipf
+    else:
+        scale = jnp.asarray(TWOPI, dtype=phipf.dtype) * jnp.asarray(int(signgs), dtype=phipf.dtype)
+        phipf_internal = phipf / scale
+        chipf_internal = None if chipf is None else (chipf / scale)
+    if chipf_internal is not None:
+        chips_eff = chips_from_wout_chipf(
+            chipf=chipf_internal,
+            phipf=phipf_internal,
+            iotaf=iotaf,
+            iotas=iotas,
+            assume_half_if_unknown=True,
+        )
+    else:
+        iota = iotaf if iotaf is not None else iotas
+        if iota is None:
+            chips_eff = jnp.zeros_like(phipf_internal)
+        else:
+            chips_eff = jnp.asarray(iota, dtype=phipf_internal.dtype) * phipf_internal
+    return phipf_internal, chipf_internal, chips_eff
 
 
 def _s_half_from_full_mesh_s(s):
@@ -2887,6 +2917,12 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
     pres = _pressure_half_mesh_from_indata(indata=indata, s_full=s)
     ncurr = int(indata.get_int("NCURR", 0))
     icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=signgs)
+    phipf_internal, chipf_internal, chips_eff = _vmec_force_flux_profiles(
+        phipf=jnp.asarray(flux.phipf),
+        chipf=chipf_wout,
+        signgs=signgs,
+        flux_is_internal=True,
+    )
 
     wout_like = _WoutLikeVmecForces(
         nfp=int(static.cfg.nfp),
@@ -2903,6 +2939,9 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
         ncurr=ncurr,
         lcurrent=True,
         icurv=icurv,
+        phipf_internal=phipf_internal,
+        chipf_internal=chipf_internal,
+        chips_eff=chips_eff,
     )
     trig = getattr(static, "trig_vmec", None)
     if trig is None:
@@ -3404,6 +3443,12 @@ def solve_fixed_boundary_gn_vmec_residual(
     pres = _pressure_half_mesh_from_indata(indata=indata, s_full=s)
     ncurr = int(indata.get_int("NCURR", 0))
     icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=signgs)
+    phipf_internal, chipf_internal, chips_eff = _vmec_force_flux_profiles(
+        phipf=jnp.asarray(flux.phipf),
+        chipf=chipf_wout,
+        signgs=signgs,
+        flux_is_internal=True,
+    )
 
     wout_like = _WoutLikeVmecForces(
         nfp=int(static.cfg.nfp),
@@ -3420,6 +3465,9 @@ def solve_fixed_boundary_gn_vmec_residual(
         ncurr=ncurr,
         lcurrent=True,
         icurv=icurv,
+        phipf_internal=phipf_internal,
+        chipf_internal=chipf_internal,
+        chips_eff=chips_eff,
     )
     trig = getattr(static, "trig_vmec", None)
     if trig is None:
@@ -4383,6 +4431,12 @@ def solve_fixed_boundary_residual_iter(
     pres = _pressure_half_mesh_from_indata(indata=indata, s_full=s)
     ncurr = int(indata.get_int("NCURR", 0))
     icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=signgs)
+    phipf_internal, chipf_internal, chips_eff = _vmec_force_flux_profiles(
+        phipf=jnp.asarray(flux.phipf),
+        chipf=chipf_wout,
+        signgs=signgs,
+        flux_is_internal=True,
+    )
 
     wout_like = _WoutLikeVmecForces(
         nfp=int(static.cfg.nfp),
@@ -4399,6 +4453,9 @@ def solve_fixed_boundary_residual_iter(
         ncurr=ncurr,
         lcurrent=True,
         icurv=icurv,
+        phipf_internal=phipf_internal,
+        chipf_internal=chipf_internal,
+        chips_eff=chips_eff,
     )
 
     trig = getattr(static, "trig_vmec", None)
@@ -12532,6 +12589,12 @@ def first_step_diagnostics(
     pres = _pressure_half_mesh_from_indata(indata=indata, s_full=s)
     ncurr = int(indata.get_int("NCURR", 0))
     icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=signgs)
+    phipf_internal, chipf_internal, chips_eff = _vmec_force_flux_profiles(
+        phipf=jnp.asarray(flux.phipf),
+        chipf=chipf_wout,
+        signgs=signgs,
+        flux_is_internal=True,
+    )
 
     wout_like = _WoutLikeVmecForces(
         nfp=int(cfg.nfp),
@@ -12548,6 +12611,9 @@ def first_step_diagnostics(
         ncurr=ncurr,
         lcurrent=True,
         icurv=icurv,
+        phipf_internal=phipf_internal,
+        chipf_internal=chipf_internal,
+        chips_eff=chips_eff,
     )
 
     trig = getattr(static_vmec, "trig_vmec", None)

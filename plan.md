@@ -715,6 +715,28 @@ Legend:
 
 ## 13) Activity log (append-only)
 
+### 2026-03-22
+- Reviewed the updated JAX QH draft PRs across `vmec_jax` and `simsopt` against the latest PR heads.
+- Confirmed the earlier wrapper blockers are fixed in-tree:
+  - `Boozer(..., use_wout_file=...)` now exists in `simsopt`,
+  - `warm_start_iters` is explicit and defaults to `0`,
+  - staged VMEC controls are read from `NITER_ARRAY` / `FTOL_ARRAY` when present.
+- Fixed the remaining stale `simsopt` wrapper regression expectation:
+  - `tests/mhd/test_vmec_jax_wrapper.py` now matches the checked-in `2_Intermediate/input.nfp4_QH_warm_start` staged controls (`NITER_ARRAY = 1500`, `FTOL_ARRAY = 1e-13`).
+- Tightened downstream `wout` compatibility in `vmec_jax`:
+  - `mnmax`, `mnmax_nyq`, `mpol_nyq`, `ntor_nyq` remain integer netCDF scalars,
+  - mode tables `xm`, `xn`, `xm_nyq`, `xn_nyq` are now written as `float64` to match legacy libstell/SFINCS conventions while remaining numerically integral.
+- Added a light local regression for the mode-table storage convention:
+  - `tests/test_wout_vmecplot2_compat.py::test_write_wout_mode_tables_use_float_storage`.
+- Removed more hidden solver policy from the `simsopt` JAX wrapper:
+  - `VmecJax.set_solver_options(...)` now exposes step size, L-BFGS history, Jacobian penalty, preconditioner settings, and implicit-CG / damping / convergence controls,
+  - `QH_fixed_resolution_boozer_jax.py` exposes the same knobs at the CLI level instead of burying them in wrapper internals.
+- Revalidated the focused PR-critical tests locally:
+  - `vmec_jax`: `pytest -q tests/test_wout_vmecplot2_compat.py` -> `1 passed, 1 skipped`,
+  - `vmec_jax`: `RUN_SLOW=1 pytest -q tests/test_step9_implicit_fixed_boundary.py tests/test_step9_implicit_lambda.py` -> `1 passed, 1 skipped`,
+  - `simsopt`: `pytest -q tests/mhd/test_vmec_jax_wrapper.py tests/mhd/test_booz_input_parity.py tests/mhd/test_vmec_jax_qh_mismatch_diagnostics.py` -> `12 passed`.
+- Remaining draft-state blocker is still upstream in the VMEC-JAX equilibrium/QH parity path, especially current-driven `lambda/current` convergence and downstream `lmns` / `iota` / `bsub*` agreement for the live equilibrium, not the wrapper plumbing.
+
 ### 2026-03-05
 - Ran the full Python test suite:
   - `pytest -q` -> `120 passed, 12 skipped, 61 warnings` in `42.23s`.
