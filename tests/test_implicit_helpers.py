@@ -84,3 +84,51 @@ def test_initial_guess_vmec_project_edge_rc01_gradient_matches_internal_scale():
     assert np.isfinite(grad_fd)
     assert grad_ad == pytest.approx(expected, rel=0.0, abs=1e-12)
     assert grad_ad == pytest.approx(grad_fd, rel=0.0, abs=1e-7)
+
+
+def test_fixed_boundary_residual_implicit_primal_matches_reference_mode(load_case_circular_tokamak):
+    pytest.importorskip("jax")
+
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.implicit import solve_fixed_boundary_state_implicit_vmec_residual
+    from vmec_jax.solve import solve_fixed_boundary_residual_iter
+    from vmec_jax.state import pack_state
+    _cfg, indata, static, boundary, state_init = load_case_circular_tokamak
+    signgs0 = signgs_from_sqrtg(np.asarray(eval_geom(state_init, static).sqrtg), axis_index=1)
+
+    direct = solve_fixed_boundary_residual_iter(
+        state_init,
+        static,
+        indata=indata,
+        signgs=int(signgs0),
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        reference_mode=True,
+        backtracking=True,
+        limit_dt_from_force=True,
+        limit_update_rms=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces="auto",
+        use_scan=False,
+    ).state
+
+    wrapped = solve_fixed_boundary_state_implicit_vmec_residual(
+        state_init,
+        static,
+        indata=indata,
+        signgs=int(signgs0),
+        state0_host=state_init,
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        edge_Rcos=np.asarray(boundary.R_cos),
+        edge_Rsin=np.asarray(boundary.R_sin),
+        edge_Zcos=np.asarray(boundary.Z_cos),
+        edge_Zsin=np.asarray(boundary.Z_sin),
+    )
+
+    assert np.asarray(pack_state(wrapped)) == pytest.approx(np.asarray(pack_state(direct)), rel=0.0, abs=1e-12)

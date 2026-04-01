@@ -32,7 +32,7 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     lx = None
 
-from .field import TWOPI, b2_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda
+from .field import TWOPI, b2_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda, signgs_from_sqrtg
 from .energy import flux_profiles_from_indata
 from .fourier import eval_fourier_dtheta, eval_fourier_dzeta_phys
 from .geom import eval_geom
@@ -1168,6 +1168,8 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
             dtype=np.asarray(state0_host.Rcos).dtype,
             vmec_project=True,
         )
+        geom0 = eval_geom(state_init, static)
+        signgs0 = signgs_from_sqrtg(np.asarray(geom0.sqrtg), axis_index=1)
         state_init = VMECState(
             layout=state_init.layout,
             Rcos=np.asarray(jax.device_get(state_init.Rcos)),
@@ -1181,12 +1183,12 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
             state_init,
             static,
             indata=indata,
-            signgs=signgs_i,
+            signgs=int(signgs0),
             ftol=ftol,
             max_iter=int(max_iter),
             step_size=float(step_size),
             vmec2000_control=True,
-            reference_mode=False,
+            reference_mode=True,
             backtracking=True,
             limit_dt_from_force=True,
             limit_update_rms=True,
