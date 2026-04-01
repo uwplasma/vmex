@@ -65,6 +65,7 @@ from .driver import (
     wout_from_fixed_boundary_run,
 )
 from .booz_input import booz_xform_inputs_from_state
+from .wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 from .state import VMECState, pack_state, unpack_state
 from .static import VMECStatic, build_static
 from .free_boundary import (
@@ -195,6 +196,8 @@ __all__ = [
     "write_wout_from_fixed_boundary_run",
     "wout_from_fixed_boundary_run",
     "booz_xform_inputs_from_state",
+    "equilibrium_aspect_ratio_from_state",
+    "equilibrium_iota_profiles_from_state",
     "VMECState",
     "pack_state",
     "unpack_state",

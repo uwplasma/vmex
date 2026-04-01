@@ -124,3 +124,14 @@ Most users should start from the small public API in ``vmec_jax.api``::
   wref = vj.read_wout("examples/data/wout_shaped_tokamak_pressure_reference.nc")
   print("fsq_total(ref)=", float(wref.fsqr + wref.fsqz + wref.fsql))
   print("fsq_total(new)=", float(wout.fsqr + wout.fsqz + wout.fsql))
+
+Simple optimization example
+---------------------------
+
+For a minimal VMEC-JAX-only optimization workflow, run::
+
+  python examples/optimization/target_iota_aspect_volume.py --opt-steps 2
+
+This example keeps the boundary DOF set small (``|m|, |n| <= 1``) and targets
+equilibrium aspect ratio, total volume, and mean iota on the bundled
+``cth_like_fixed_bdy`` fixed-boundary case.
