@@ -37,12 +37,32 @@ _COMPUTE_FORCES_CACHE: dict[tuple, Any] = {}
 
 
 def _hash_array_bytes(a: Any) -> str:
-    arr = np.asarray(a)
+    try:
+        arr = np.asarray(a)
+    except Exception:
+        try:
+            aval = jax.core.get_aval(a)
+        except Exception:
+            aval = None
+        if aval is None:
+            return f"opaque:{type(a).__name__}"
+        shape = tuple(getattr(aval, "shape", ()))
+        dtype = getattr(aval, "dtype", None)
+        weak_type = bool(getattr(aval, "weak_type", False))
+        return f"traced:{shape}:{dtype}:{weak_type}"
     h = hashlib.blake2b(digest_size=16)
     h.update(arr.tobytes())
     h.update(str(arr.shape).encode())
     h.update(str(arr.dtype).encode())
     return h.hexdigest()
+
+
+def _tree_has_tracer(tree: Any) -> bool:
+    try:
+        leaves = jax.tree_util.tree_leaves(tree)
+    except Exception:
+        leaves = (tree,)
+    return any(isinstance(leaf, jax.core.Tracer) for leaf in leaves)
 
 
 def _scan_backend_name() -> str:
@@ -6415,7 +6435,13 @@ def solve_fixed_boundary_residual_iter(
                 cache_lam_prec0 = resume_state.get("cache_prec_lam_prec", cache_lam_prec0)
 
         def _tree_select(cond, t_true, t_false):
-            return jax.tree_util.tree_map(lambda a, b: jnp.where(cond, a, b), t_true, t_false)
+            if t_true is None or t_false is None:
+                return t_true if t_false is None else t_false
+            if isinstance(t_true, tuple) and isinstance(t_false, tuple):
+                return type(t_true)(_tree_select(cond, a, b) for a, b in zip(t_true, t_false, strict=True))
+            if isinstance(t_true, list) and isinstance(t_false, list):
+                return [_tree_select(cond, a, b) for a, b in zip(t_true, t_false, strict=True)]
+            return jnp.where(cond, jnp.asarray(t_true), jnp.asarray(t_false))
 
         ftol_j = jnp.asarray(float(ftol), dtype=dtype)
         scan_fallback_iters_j = jnp.asarray(int(scan_fallback_iters), dtype=jnp.int32)
@@ -8256,7 +8282,8 @@ def solve_fixed_boundary_residual_iter(
                 hist = jax.tree_util.tree_map(lambda *parts: np.concatenate(parts, axis=0), *hist_parts)
             else:
                 hist = jax.tree_util.tree_map(lambda *parts: jnp.concatenate(parts, axis=0), *hist_parts)
-                hist = jax.tree_util.tree_map(lambda a: np.asarray(a), hist)
+                if not _tree_has_tracer(hist):
+                    hist = jax.tree_util.tree_map(lambda a: np.asarray(a), hist)
             carry_final = carry
             if abort_scan_host:
                 carry_final = carry_final._replace(abort_scan=jnp.asarray(True))
@@ -8375,6 +8402,57 @@ def solve_fixed_boundary_residual_iter(
                 badjac_ptau_hist,
                 badjac_state_hist,
             ) = hist
+        if _tree_has_tracer(hist) or _tree_has_tracer(carry_final.state):
+            hist_dtype = jnp.asarray(state0.Rcos).dtype
+            empty = jnp.zeros((0,), dtype=hist_dtype)
+            traced_resume_state = {
+                "time_step": carry_final.time_step,
+                "inv_tau": carry_final.inv_tau,
+                "fsq_prev": carry_final.fsq_prev,
+                "fsq0_prev": carry_final.fsq0_prev,
+                "flip_sign": carry_final.flip_sign,
+                "iter1": carry_final.iter1,
+                "iter_offset": carry_final.iter_offset + jnp.asarray(int(max_iter), dtype=jnp.int32),
+                "res0": carry_final.res0,
+                "res1": carry_final.res1,
+                "ijacob": carry_final.ijacob,
+                "bad_resets": carry_final.bad_resets,
+                "bad_growth_streak": carry_final.bad_growth,
+                "fsqz_prev": carry_final.fsqz_prev,
+                "state_checkpoint": carry_final.state_checkpoint,
+                "vRcc": carry_final.vRcc,
+                "vRss": carry_final.vRss,
+                "vZsc": carry_final.vZsc,
+                "vZcs": carry_final.vZcs,
+                "vLsc": carry_final.vLsc,
+                "vLcs": carry_final.vLcs,
+                "vRsc": carry_final.vRsc,
+                "vRcs": carry_final.vRcs,
+                "vZcc": carry_final.vZcc,
+                "vZss": carry_final.vZss,
+                "vLcc": carry_final.vLcc,
+                "vLss": carry_final.vLss,
+                "vmec2000_cache_valid": carry_final.cache_valid,
+                "force_bcovar_update": carry_final.force_bcovar_update,
+            }
+            return _attach_freeb_diag(
+                SolveVmecResidualResult(
+                    state=carry_final.state,
+                    n_iter=int(max_iter),
+                    w_history=empty,
+                    fsqr2_history=empty,
+                    fsqz2_history=empty,
+                    fsql2_history=empty,
+                    grad_rms_history=empty,
+                    step_history=empty,
+                    diagnostics={
+                        "use_scan": True,
+                        "vmec2000_scan": True,
+                        "traced_scan": True,
+                        "resume_state": traced_resume_state,
+                    },
+                )
+            )
         fsqr_full = np.asarray(fsqr_hist)
         fsqz_full = np.asarray(fsqz_hist)
         fsql_full = np.asarray(fsql_hist)
