@@ -1,6 +1,6 @@
 # VMEC-JAX Master Plan and New-Agent Handoff (Living Document)
 
-Last updated: 2026-03-09
+Last updated: 2026-04-02
 Primary owner: `vmec_jax` contributors
 Canonical repo: `<repo-root>`
 
@@ -21,6 +21,249 @@ Update rules:
   - `<repo-root>/docs/validation.rst`
   - `<repo-root>/docs/performance.rst`
   - `<repo-root>/docs/free_boundary_plan.rst`
+
+---
+
+## 0A) Current priority: unblock QH autodiff for simsopt/vmec_jax
+
+This section is the active branch-specific plan for the current blocker:
+
+- repo: `vmec_jax`
+- branch: `codex/qh-parity-wip`
+- coupled repo: `simsopt` on `codex/qh-boozer-jax-wip`
+- benchmark target: the fixed-resolution QH example in simsopt using VMEC-JAX
+
+### 0A.1 Objective
+
+Deliver a correct autodiff path for the fixed-boundary QH optimization so that:
+
+- autodiff gradients are in the same ballpark as finite differences on the exact 8-DOF QH benchmark,
+- the optimizer can reduce the QH objective materially beyond the current broken-AD plateau,
+- the path remains compatible with the parity work already completed in `vmec_jax`,
+- no finite-difference fallback is required in the final solution.
+
+### 0A.2 Exact benchmark definition
+
+Use this benchmark unless there is a clearly documented reason to revise it:
+
+- classic script: `simsopt/examples/2_Intermediate/QH_fixed_resolution.py`
+- JAX script: `simsopt/examples/2_Intermediate/QH_fixed_resolution_jax.py`
+- objective: aspect + quasisymmetry only
+- no `mean_iota` term for QH
+- `max_mode = 1`
+- VMEC `mpol = ntor = 3`
+- 8 free boundary DOFs
+- `max_nfev = 10`
+
+Reference numbers currently in hand:
+
+- classic final objective after 10 nfev: `0.21378863910867005`
+- classic wall time: about `24.75 s`
+- current JAX start objective on the converged control path: `0.2983122217172473`
+- current JAX AD gradient mismatch on the exact QH start point:
+  - AD linf: about `690.78`
+  - FD linf: about `12.98`
+
+### 0A.3 What is currently known
+
+The most important settled findings are:
+
+- The previous aligned-JAX path had a real primal inconsistency. That was fixed by restoring the converged default control path rather than the stalled `reference_mode=True` path.
+- The projected boundary-to-state edge map mattered. Using raw boundary rows was wrong; the projected edge rows from `initial_guess_from_boundary(..., vmec_project=True)` are the correct direct map.
+- Direct edge-state derivatives and simple aspect derivatives now match finite differences after the edge-map fix.
+- The remaining failure is specifically in the boundary-to-interior-state sensitivity, especially the lambda branch.
+- Probing the one-step fixed-point map showed a unit-eigenvalue nullspace in the problematic lambda direction, so the current fixed-point relation is not a well-posed differentiated equation for QH.
+
+Interpretation:
+
+- This is not primarily an outer-optimizer problem.
+- This is not solved by more line search tuning.
+- This is not solved by differentiating a one-step continuation map harder.
+- The live bug is that the current implicit relation does not uniquely determine the differentiated lambda branch for the QH case.
+
+### 0A.4 Deep-dive takeaway from DESC
+
+DESC is relevant, but not because it "does autodiff through another equilibrium code".
+It succeeds because its equilibrium, objective, and derivative machinery are designed
+together.
+
+What DESC does in practice:
+
+- `desc/backend.py` uses `jax.lax.custom_root` for root solves, with an explicit tangent solve for the residual Jacobian.
+- `desc/examples/precise_QH.py` optimizes QS + aspect ratio while enforcing force balance as a constraint.
+- `desc/optimize/_constraint_wrappers.py` uses `ProximalProjection` to remove equilibrium state coefficients from the outer optimization variables and keep only controls such as boundary/profile coefficients.
+- `desc/optimize/_constraint_wrappers.py` explicitly constructs the control-to-state embedding (`dxdc`) for boundary variables.
+- `desc/objectives/_omnigenity.py` evaluates QS objectives directly on DESC equilibrium quantities.
+
+The transferable idea is not to copy DESC's equilibrium formulation. The transferable
+idea is:
+
+1. differentiate a well-posed equilibrium relation, not a fragile solver history map,
+2. keep the control/state split explicit,
+3. include the exact control-to-state embedding,
+4. add whatever gauge or branch conditions are necessary so the differentiated relation
+   is nonsingular.
+
+### 0A.5 Mapping from DESC ideas to vmec_jax
+
+Current `vmec_jax` files involved:
+
+- `vmec_jax/implicit.py`
+- `vmec_jax/solve.py`
+- `vmec_jax/state.py`
+- `vmec_jax/vmec_bcovar.py`
+- `vmec_jax/vmec_residue.py`
+- `vmec_jax/vmec_tomnsp.py`
+
+Current `simsopt` files involved:
+
+- `src/simsopt/mhd/vmec_jax.py`
+- `src/simsopt/solve/jax_solve.py`
+- `examples/2_Intermediate/QH_fixed_resolution_jax.py`
+
+Direct mapping:
+
+- DESC `controls` correspond to the outer boundary DOFs in simsopt.
+- DESC `equilibrium state` corresponds to the VMEC Fourier state `(R, Z, lambda)`.
+- DESC `ForceBalance constraint` corresponds to the VMEC residual equations we already assemble in `solve_fixed_boundary_state_implicit_vmec_residual(...)`.
+- DESC `dxdc` is directly analogous to our projected edge-state embedding from boundary coefficients.
+- DESC `custom_root` is the right architectural direction for the next `vmec_jax` implicit layer.
+
+### 0A.6 Working hypothesis for the remaining bug
+
+The residual used by `solve_fixed_boundary_state_implicit_vmec_residual(...)` is close
+to the right foundation, but it is still missing at least one branch-selection or
+gauge-fixing relation needed to make the differentiated state unique for QH.
+
+The evidence for this is:
+
+- the converged QH state is a near-root of the physical residual,
+- forward and reverse autodiff paths agree with each other much more than they agree
+  with finite differences,
+- the lambda direction shows a nullspace in the differentiated one-step map,
+- full-active and reduced-active variants change the size of the error, but do not
+  remove it.
+
+Therefore the next version of the implicit layer must be based on an augmented root
+system, not just better linear algebra around the current masked system.
+
+### 0A.7 Concrete implementation plan
+
+#### Phase 1: lock down regression harnesses
+
+- [ ] Add a reusable QH derivative regression in `vmec_jax/tests` or `simsopt/tests`
+      that compares AD against central FD on the exact 8-DOF benchmark.
+- [ ] Check both:
+  - total objective gradient,
+  - individual residual component sensitivities.
+- [ ] Add a focused probe for a representative lambda interior coefficient, since that
+      is where the current singular behavior is most visible.
+
+Acceptance:
+
+- every future derivative change must report before/after mismatch on the exact QH
+  start point.
+
+#### Phase 2: promote the residual-root path to the primary AD target
+
+- [ ] Treat `solve_fixed_boundary_state_implicit_vmec_residual(...)` as the primary
+      path to repair, not the energy-Hessian wrapper in
+      `solve_fixed_boundary_state_implicit(...)`.
+- [ ] Keep warm-start / scan / resume-state machinery as primal accelerators only.
+- [ ] Ensure the differentiated relation is the converged residual equation, not the
+      one-step scan continuation map.
+
+Acceptance:
+
+- the branch used in the backward pass is the same converged branch produced by the
+  primal host solve.
+
+#### Phase 3: define an augmented reduced state and residual
+
+- [ ] Make the independent differentiated state explicit:
+  - free interior `Rcos`,
+  - free interior `Zsin`,
+  - free interior `Lsin`,
+  - plus any additional gauge or branch variables/constraints required for lambda.
+- [ ] Replace ad hoc masked active-coordinate handling with a single documented
+      reduced-state packing convention.
+- [ ] Keep the projected boundary embedding exact and shared.
+
+Acceptance:
+
+- one authoritative pack/unpack for the reduced implicit state exists and is tested.
+
+#### Phase 4: add missing lambda branch conditions
+
+- [ ] Identify the exact branch condition that removes the QH lambda nullspace.
+- [ ] Candidate sources:
+  - existing VMEC lambda gauge enforcement,
+  - axis closure conditions,
+  - parity or closure equations already implicit in VMEC2000 iteration logic,
+  - explicit constraints on the differentiated lambda representation rather than only
+    masking entries after the fact.
+- [ ] Build these into the residual relation itself, not as a post-hoc projection.
+
+Acceptance:
+
+- the linearized implicit operator no longer has the current QH lambda nullspace in
+  the tested probe direction.
+
+#### Phase 5: replace the backward rule with a root-based implicit solve
+
+- [ ] Introduce a `custom_root`-style wrapper or equivalent custom VJP around the
+      augmented residual solve.
+- [ ] Solve the tangent/adjoint equations on the augmented residual Jacobian rather
+      than on a Hessian surrogate or a one-step fixed-point linearization.
+- [ ] Keep the implementation compatible with JAX transforms and with the existing
+      parity-oriented forward solver path.
+
+Acceptance:
+
+- reverse-mode and forward-mode derivatives agree with finite differences to within a
+  documented tolerance on the QH benchmark.
+
+#### Phase 6: re-hook simsopt and re-benchmark
+
+- [ ] Point the simsopt QH VMEC-JAX example at the repaired implicit path.
+- [ ] Re-run the exact 10-nfev apples-to-apples benchmark after every meaningful
+      derivative fix.
+- [ ] Track both:
+  - final objective quality,
+  - wall time and objective/gradient call counts.
+
+Acceptance:
+
+- AD path materially outperforms the current broken-AD result and moves toward the
+  classic objective in a stable way.
+
+### 0A.8 Non-goals
+
+Do not do these as the primary fix:
+
+- do not pivot to finite differences except as a temporary diagnostic,
+- do not optimize GPU performance before CPU autodiff is correct,
+- do not overfit the solution to one optimizer or one line-search setting,
+- do not add correctness-critical environment-variable toggles.
+
+### 0A.9 Immediate next coding tasks
+
+These are the next tasks to execute on this branch, in order:
+
+- [ ] Factor the current QH derivative probe into a committed reusable regression.
+- [ ] Extract and document the reduced implicit state packing used by the residual path.
+- [ ] Identify the missing lambda branch condition by comparing:
+  - residual-root linearization,
+  - enforced gauge/axis rules,
+  - VMEC iteration closures already present in the primal path.
+- [ ] Prototype the augmented residual relation in `vmec_jax/implicit.py`.
+- [ ] Validate against finite differences before any optimizer retuning.
+
+### 0A.10 Branch notes
+
+When editing this plan, preserve the broader repo-wide parity roadmap below. This
+section exists to keep the current QH autodiff work tightly scoped so it does not
+accidentally regress the rest of the VMEC parity project.
 
 ---
 
@@ -1583,3 +1826,22 @@ Legend:
     optimized non-autodiff fixed-boundary becomes the default user path on
     `main`, while free-boundary stays on the current robust controller and the
     parity / implicit-differentiation routes remain available.
+- 2026-04-02 QH autodiff unblock planning update:
+  - added section `0A` near the top of this file as the active branch-specific
+    plan for the simsopt/vmec_jax QH autodiff blocker,
+  - documented the exact apples-to-apples QH benchmark definition and the
+    current known gradient mismatch against finite differences,
+  - summarized the settled findings from the current investigation:
+    projected edge-map fix, restored converged primal control path, and the
+    remaining lambda-branch nullspace in the differentiated relation,
+  - captured the relevant DESC implementation patterns after a source-level
+    deep dive:
+    `custom_root`, explicit control/state split, proximal equilibrium
+    projection, and explicit boundary-control embedding,
+  - translated those DESC ideas into a concrete `vmec_jax` plan:
+    augment the residual-root formulation, make the reduced implicit state
+    explicit, add the missing lambda branch condition, and move the backward
+    rule to a root-based implicit solve rather than the current brittle
+    fixed-point relation,
+  - this planning update is intentionally scoped to unblock correct and
+    performant QH autodiff without regressing the broader VMEC parity work.
