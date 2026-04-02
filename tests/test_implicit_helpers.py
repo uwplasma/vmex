@@ -120,7 +120,7 @@ def test_stellsym_active_keep_scatter_supports_reverse_mode(load_case_circular_t
     assert np.all(np.isfinite(grad))
 
 
-def test_fixed_boundary_residual_implicit_primal_matches_reference_mode(load_case_circular_tokamak):
+def test_fixed_boundary_residual_implicit_primal_matches_default_control_path(load_case_circular_tokamak):
     pytest.importorskip("jax")
 
     from vmec_jax.field import signgs_from_sqrtg
@@ -140,7 +140,7 @@ def test_fixed_boundary_residual_implicit_primal_matches_reference_mode(load_cas
         max_iter=1,
         step_size=float(indata.get_float("DELT", 1.0)),
         vmec2000_control=True,
-        reference_mode=True,
+        reference_mode=False,
         backtracking=True,
         limit_dt_from_force=True,
         limit_update_rms=True,
