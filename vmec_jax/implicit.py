@@ -1188,7 +1188,7 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
             max_iter=int(max_iter),
             step_size=float(step_size),
             vmec2000_control=True,
-            reference_mode=True,
+            reference_mode=False,
             backtracking=True,
             limit_dt_from_force=True,
             limit_update_rms=True,
