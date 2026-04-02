@@ -120,6 +120,79 @@ def test_stellsym_active_keep_scatter_supports_reverse_mode(load_case_circular_t
     assert np.all(np.isfinite(grad))
 
 
+def test_stellsym_reduced_lambda_mn_coords_roundtrip_and_support_reverse_mode(load_case_circular_tokamak):
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import enable_x64, jax, jnp
+    from vmec_jax.implicit import (
+        _mode00_index,
+        _pack_stellsym_reduced_state,
+        _stellsym_feasible_indices_np,
+        _stellsym_lambda_mn_indices,
+        _stellsym_reduced_z_indices,
+        _update_stellsym_reduced_state,
+    )
+
+    enable_x64(True)
+
+    _cfg, _indata, static, _bdy, st0 = load_case_circular_tokamak
+    idx00 = _mode00_index(static.modes)
+    rz_idx_np, _lam_idx_np, ns, K = _stellsym_feasible_indices_np(static, idx00=idx00, mask_lambda_axis=True)
+    rz_idx = jnp.asarray(rz_idx_np, dtype=jnp.int32)
+    z_idx = _stellsym_reduced_z_indices(rz_idx=rz_idx_np, K=int(K), idx00=idx00)
+    lam_sc_idx, lam_cs_idx, lam_maps = _stellsym_lambda_mn_indices(
+        static,
+        idx00=idx00,
+        mask_lambda_axis=True,
+    )
+
+    x0 = _pack_stellsym_reduced_state(
+        st0,
+        rz_idx=rz_idx,
+        z_idx=z_idx,
+        lam_sc_idx=lam_sc_idx,
+        lam_cs_idx=lam_cs_idx,
+        lam_maps=lam_maps,
+    )
+    st1 = _update_stellsym_reduced_state(
+        st0,
+        x0,
+        rz_idx=rz_idx,
+        z_idx=z_idx,
+        lam_sc_idx=lam_sc_idx,
+        lam_cs_idx=lam_cs_idx,
+        lam_maps=lam_maps,
+        ns=ns,
+        K=K,
+    )
+
+    assert np.asarray(st1.Rcos) == pytest.approx(np.asarray(st0.Rcos), rel=0.0, abs=1e-12)
+    assert np.asarray(st1.Zsin) == pytest.approx(np.asarray(st0.Zsin), rel=0.0, abs=1e-12)
+    assert np.asarray(st1.Lsin) == pytest.approx(np.asarray(st0.Lsin), rel=0.0, abs=1e-12)
+
+    def objective(x):
+        st = _update_stellsym_reduced_state(
+            st0,
+            x,
+            rz_idx=rz_idx,
+            z_idx=z_idx,
+            lam_sc_idx=lam_sc_idx,
+            lam_cs_idx=lam_cs_idx,
+            lam_maps=lam_maps,
+            ns=ns,
+            K=K,
+        )
+        return (
+            jnp.sum(jnp.asarray(st.Rcos) ** 2)
+            + jnp.sum(jnp.asarray(st.Zsin) ** 2)
+            + jnp.sum(jnp.asarray(st.Lsin) ** 2)
+        )
+
+    grad = np.asarray(jax.grad(objective)(x0))
+    assert grad.shape == tuple(np.asarray(x0).shape)
+    assert np.all(np.isfinite(grad))
+
+
 def test_fixed_boundary_residual_implicit_primal_matches_default_control_path(load_case_circular_tokamak):
     pytest.importorskip("jax")
 
