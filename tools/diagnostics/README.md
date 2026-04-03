@@ -50,3 +50,13 @@ Late-iteration free-boundary diagnostics:
 - The free-boundary comparator uses these cached channels when `fouri` dump
   files are absent (common at `ivacskip > 0`), so `source_sym`/`bvecNS`
   alignment remains observable beyond vacuum turn-on iterations.
+
+Fixed-boundary implicit-AD debugging:
+
+- `VMEC_JAX_IMPLICIT_KEEP_ALL_ACTIVE=1` disables the reduced active-column drop
+  in the lasym=`False` implicit solve and uses the full active state instead.
+- `VMEC_JAX_IMPLICIT_DISABLE_REDUCED_ACTIVE=1` bypasses the reduced
+  stellarator-symmetric adjoint path entirely and falls back to the full-state
+  adjoint.
+- These flags are diagnostic tools for derivative investigations, not parity or
+  performance defaults.
