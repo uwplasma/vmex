@@ -37,6 +37,13 @@ def _try_import_jax() -> Tuple[Any, Any, Callable[[Callable[..., Any]], Callable
     try:
         # Enable x64 by default for VMEC parity unless the user opted out.
         os.environ.setdefault("JAX_ENABLE_X64", "1")
+        # Suppress noisy C++ warnings from XLA/PjRt backend (e.g.
+        # "Assume version compatibility. PjRt-IFRT does not track XLA
+        # executable versions.").  These are harmless informational
+        # messages emitted by abseil logging inside the XLA runtime.
+        # Level 0=INFO, 1=WARNING, 2=ERROR — we default to ERROR-only
+        # so that genuine errors still surface.
+        os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
         import jax
 
         # If Sphinx (or other tooling) has inserted a mock, treat JAX as unavailable.
