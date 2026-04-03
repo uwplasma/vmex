@@ -1,5 +1,13 @@
 """vmec_jax: a JAX implementation of VMEC2000 for fixed and free-boundary equilibria."""
 
+import os as _os
+
+# Suppress noisy C++ warnings from XLA/PjRt backend (e.g. "Assume version
+# compatibility. PjRt-IFRT does not track XLA executable versions.").  Must be
+# set before *any* ``import jax`` in the process.  Uses setdefault so the user
+# can still override via the environment.
+_os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+
 from . import api
 from .namelist import read_indata, InData
 from .config import FreeBoundaryConfig, VMECConfig, load_config

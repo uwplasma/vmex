@@ -1,5 +1,10 @@
 """Module entry point for `python -m vmec_jax`."""
 
+import os as _os
+
+# Suppress noisy C++ warnings from XLA/PjRt before any JAX import.
+_os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+
 from .cli import main
 
 
