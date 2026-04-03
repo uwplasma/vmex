@@ -3,6 +3,35 @@ Performance notes
 
 This page collects practical advice for using ``vmec-jax`` efficiently.
 
+Current bottlenecks
+-------------------
+
+The current performance picture is no longer dominated by one missing JIT.
+Instead, the main costs are split across a few categories:
+
+- control-path overhead:
+  - solver policy, restart logic, printing, history capture, and convergence
+    bookkeeping still live too close to the per-iteration numerical work,
+  - this shows up most clearly on GPU and on medium-sized CPU cases where the
+    numerical kernels themselves are already reasonably fast.
+- host/device synchronization:
+  - scalar extraction, diagnostic collection, and print-oriented logic still
+    force some hot paths back to the host more often than ideal.
+- transform / assembly memory traffic:
+  - repeated large real-space and Fourier materializations between
+    ``tomnsp -> bcovar -> forces -> residual`` stages can cost more than the
+    arithmetic itself.
+- output generation:
+  - ``wout`` synthesis is still a noticeable post-convergence cost on larger
+    cases.
+- free-boundary dense vacuum solves:
+  - the remaining free-boundary runtime work is concentrated in operator reuse,
+    cadence, and coupled edge-force plumbing, not only raw linear algebra.
+
+In practice, this means the next major performance gains are likely to come
+from making loops more device-resident and from reducing memory traffic, rather
+than from adding more isolated ``jit`` wrappers.
+
 Enable float64
 --------------
 
@@ -258,6 +287,42 @@ controller fixes improved several non-axisymmetric cases materially:
   ``rmnc 5.83e-05``, ``zmns 2.83e-04``, ``lmns 4.75e-03``;
   ``LandremanPaul2021_QA_reactorScale_lowres`` reaches about
   ``rmnc 2.49e-05``, ``zmns 1.61e-04``, ``lmns 2.86e-03``;
+
+Optimization and gradient benchmarking
+--------------------------------------
+
+For optimization workflows, runtime alone is not the right metric. The project
+needs to track at least four numbers per case:
+
+- primal solve time,
+- explicit-gradient time,
+- implicit-gradient time,
+- peak memory for each of the above.
+
+The current repo already has the pieces needed to build this:
+
+- explicit-diff and implicit-diff examples in ``examples/optimization/``,
+- implicit solver support in ``vmec_jax/implicit.py``,
+- profiling hooks in ``tools/diagnostics/``.
+
+What is still missing is a canonical benchmark matrix and reporting format. The
+recommended first benchmark set is:
+
+- ``circular_tokamak`` for small axisymmetric behavior,
+- ``ITERModel`` for a larger axisymmetric case,
+- ``LandremanPaul2021_QA_lowres`` for a representative 3D case.
+
+For each case, record:
+
+- backend,
+- primal runtime,
+- explicit-gradient runtime,
+- implicit-gradient runtime,
+- peak memory,
+- final objective / residual quality.
+
+This will tell us where the real optimization bottlenecks are, and it will
+also guide downstream integration work for ``booz_xform_jax`` and ``neo_jax``.
   ``LandremanPaul2021_QH_reactorScale_lowres`` reaches about
   ``rmnc 6.12e-05``, ``zmns 2.60e-04``, ``lmns 9.97e-03``,
 - the runtime picture is now favorable on the bundled CPU matrix, but the

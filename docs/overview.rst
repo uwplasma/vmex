@@ -60,6 +60,34 @@ For cancellation-limited diagnostics (notably near-axis channels and
 near-zero denominators), comparisons use the standard axis mask and relaxed
 interpretation documented in :doc:`validation`.
 
+Current project state (March 2026)
+----------------------------------
+
+The project has now crossed the point where the main questions are less about
+"can it run?" and more about "which path should become the long-term stable
+interface?" The current state is:
+
+- parity:
+  - fixed-boundary parity is strong across axisymmetric / non-axisymmetric and
+    ``lasym=False/True`` branches,
+  - free-boundary parity is strong on the main shipped matrix, with the
+    remaining documented work concentrated in non-axisymmetric ``lasym=True``
+    reuse-step drift and a small number of heavy post-turn-on cases.
+- performance:
+  - the fixed-boundary optimized controller is materially faster on most
+    bundled cases while still converging to the requested ``ftol``,
+  - the remaining bottlenecks are now mostly control-path overhead,
+    host/device synchronization, and output-generation cost rather than a
+    single obviously wrong kernel.
+- differentiability:
+  - explicit and implicit differentiation both work through the public Python
+    API,
+  - the next gap is measurement: optimization / gradient cost needs the same
+    benchmark discipline that parity already has.
+- ecosystem:
+  - the easiest downstream integrations are now through stable ``wout`` output
+    and through JAX-native Boozer inputs, not through deeper solver internals.
+
 Initial guess
 -------------
 
@@ -98,3 +126,20 @@ Bundled VMEC2000 ``wout_*.nc`` files are treated as ground truth for:
 
 Nonlinear iteration parity is tracked separately from kernel parity on reference
 states (which is solver-free and therefore isolates conventions).
+
+Ecosystem integration direction
+-------------------------------
+
+``vmec-jax`` now sits in a broader JAX plasma-tool ecosystem. The most useful
+integration surfaces to preserve and document are:
+
+- ``wout_*.nc`` compatibility for tools that consume VMEC outputs directly,
+- ``booz_xform_inputs_from_state`` for file-free in-memory Boozer pipelines,
+- a small public solve/result API (`run_fixed_boundary`, `FixedBoundaryRun`,
+  `wout_from_fixed_boundary_run`) that downstream packages can wrap without
+  importing internal solver modules.
+
+This suggests a practical rule for future refactors:
+
+- simplify internals aggressively,
+- keep the public solve/result / `wout` / Boozer-export surfaces stable.
