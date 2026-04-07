@@ -3915,7 +3915,11 @@ def solve_fixed_boundary_residual_iter(
     step_size = float(step_size)
     if step_size <= 0.0:
         raise ValueError("step_size must be positive")
-    host_update_assembly = bool(host_update_assembly) and (not bool(use_scan)) and (jax.default_backend() == "cpu")
+    # Auto-enable host_update_assembly (NumPy-path) for non-scan CPU solves.
+    # This avoids the _mn_sin_to_signed JAX-eager overhead (~2s for circular_tokamak).
+    # The caller can still force host_update_assembly=False to opt out.
+    _auto_host = (not bool(use_scan)) and (jax.default_backend() == "cpu")
+    host_update_assembly = (bool(host_update_assembly) or _auto_host) and (not bool(use_scan)) and (jax.default_backend() == "cpu")
 
     signgs = int(signgs)
     fsq_total_target = None if fsq_total_target is None else max(0.0, float(fsq_total_target))
@@ -10590,7 +10594,8 @@ def solve_fixed_boundary_residual_iter(
                 if lam_debug is not None:
                     _maybe_dump_lamcal(lam_debug=lam_debug, static=static, iter_idx=int(iter2))
                 frzl_rhs = _apply_vmec_scale_m1_precond_rhs(frzl, mats)
-                frzl_rz = rz_preconditioner_apply(
+                from .preconditioner_1d_jax import rz_preconditioner_apply_jit as _rz_apply_jit_1
+                frzl_rz = _rz_apply_jit_1(
                     frzl_in=frzl_rhs,
                     mats=mats,
                     jmax=jmax,
@@ -10714,7 +10719,8 @@ def solve_fixed_boundary_residual_iter(
                     if bool(getattr(cfg, "lasym", False))
                     else frzl
                 )
-                frzl_rz = rz_preconditioner_apply(
+                from .preconditioner_1d_jax import rz_preconditioner_apply_jit as _rz_apply_jit_2
+                frzl_rz = _rz_apply_jit_2(
                     frzl_in=frzl_rhs,
                     mats=mats,
                     jmax=jmax,
