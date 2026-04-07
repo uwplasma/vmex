@@ -17,6 +17,25 @@ from .vmec_tomnsp import TomnspsRZL
 
 _LAMBDA_PRECOND_JIT_CACHE: dict[tuple, Any] = {}
 
+# Cache env-var flags at import time — these don't change during a run and
+# os.getenv() + .strip().lower() was being called 7000+ times per solve.
+_ENV_USE_PRECOMPUTED: bool | None = None
+_ENV_USE_LAX_TRIDI: bool | None = None
+
+
+def _get_env_tridi_flags() -> tuple[bool, bool]:
+    """Return (use_precomputed, use_lax_tridi) from env, cached after first call."""
+    global _ENV_USE_PRECOMPUTED, _ENV_USE_LAX_TRIDI
+    if _ENV_USE_PRECOMPUTED is None:
+        _ENV_USE_PRECOMPUTED = os.getenv("VMEC_JAX_TRIDI_PRECOMPUTE", "0").strip().lower() not in (
+            "", "0", "false", "no",
+        )
+    if _ENV_USE_LAX_TRIDI is None:
+        _ENV_USE_LAX_TRIDI = os.getenv("VMEC_JAX_TRIDI_SOLVE", "").strip().lower() in (
+            "1", "true", "yes", "lax", "force",
+        )
+    return _ENV_USE_PRECOMPUTED, _ENV_USE_LAX_TRIDI
+
 
 def _cache_allowed() -> bool:
     if not has_jax():
@@ -1376,17 +1395,15 @@ def rz_preconditioner_apply_jit(
     lthreed = bool(getattr(cfg, "lthreed", False))
     lasym = bool(getattr(cfg, "lasym", False))
 
-    if use_precomputed is None:
-        use_precomputed = os.getenv("VMEC_JAX_TRIDI_PRECOMPUTE", "0").strip().lower() not in (
-            "", "0", "false", "no",
-        )
+    if use_precomputed is None or use_lax_tridi is None:
+        _env_pre, _env_lax = _get_env_tridi_flags()
+        if use_precomputed is None:
+            use_precomputed = _env_pre
+        if use_lax_tridi is None:
+            use_lax_tridi = _env_lax
     has_cr_ir = ("cr" in mats) and ("ir" in mats) and ("cz" in mats) and ("iz" in mats)
     if not has_cr_ir:
         use_precomputed = False
-    if use_lax_tridi is None:
-        use_lax_tridi = os.getenv("VMEC_JAX_TRIDI_SOLVE", "").strip().lower() in (
-            "1", "true", "yes", "lax", "force",
-        )
 
     # Structural None checks determine output shape (static)
     has_frss = frzl_in.frss is not None
