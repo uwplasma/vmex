@@ -726,6 +726,46 @@ def vmec_gcx2_from_tomnsps(
     return gcr2, gcz2, gcl2
 
 
+def vmec_gcx2_from_tomnsps_np(
+    *,
+    frzl: TomnspsRZL,
+    include_edge: bool = False,
+) -> tuple:
+    """NumPy-only version of vmec_gcx2_from_tomnsps.
+
+    Assumes apply_m1_constraints=False and apply_scalxc=False (pre-conditioned
+    forces already passed in).  Returns plain numpy scalars instead of JAX
+    arrays to avoid JAX dispatch overhead on the CPU host-assembly path.
+    """
+    frcc_np = np.asarray(frzl.frcc)
+    ns = frcc_np.shape[0]
+    jsmax = ns if bool(include_edge) else max(ns - 1, 0)
+
+    gcr2 = np.sum(frcc_np[:jsmax] ** 2)
+    gcz2 = np.sum(np.asarray(frzl.fzsc)[:jsmax] ** 2)
+    gcl2 = np.sum(np.asarray(frzl.flsc) ** 2)
+    if frzl.frss is not None:
+        gcr2 = gcr2 + np.sum(np.asarray(frzl.frss)[:jsmax] ** 2)
+    if frzl.fzcs is not None:
+        gcz2 = gcz2 + np.sum(np.asarray(frzl.fzcs)[:jsmax] ** 2)
+    if frzl.flcs is not None:
+        gcl2 = gcl2 + np.sum(np.asarray(frzl.flcs) ** 2)
+    if getattr(frzl, "frsc", None) is not None:
+        gcr2 = gcr2 + np.sum(np.asarray(frzl.frsc)[:jsmax] ** 2)
+    if getattr(frzl, "fzcc", None) is not None:
+        gcz2 = gcz2 + np.sum(np.asarray(frzl.fzcc)[:jsmax] ** 2)
+    if getattr(frzl, "flcc", None) is not None:
+        gcl2 = gcl2 + np.sum(np.asarray(frzl.flcc) ** 2)
+    if getattr(frzl, "frcs", None) is not None:
+        gcr2 = gcr2 + np.sum(np.asarray(frzl.frcs)[:jsmax] ** 2)
+    if getattr(frzl, "fzss", None) is not None:
+        gcz2 = gcz2 + np.sum(np.asarray(frzl.fzss)[:jsmax] ** 2)
+    if getattr(frzl, "flss", None) is not None:
+        gcl2 = gcl2 + np.sum(np.asarray(frzl.flss) ** 2)
+
+    return gcr2, gcz2, gcl2
+
+
 def vmec_fsq_from_tomnsps(
     *,
     frzl: TomnspsRZL,
