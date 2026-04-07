@@ -6039,6 +6039,26 @@ def solve_fixed_boundary_residual_iter(
         np.asarray(_axis_m0_mask(static, dtype=_state0_dtype))
         if host_update_assembly else None
     )
+    # Cache JAX scalar constants used every iteration (avoids 7000+
+    # jnp.asarray dispatches for zero_m1 and constraint_precond_active).
+    if host_update_assembly and has_jax():
+        _jnp_state_dtype = jnp.asarray(state0.Rcos).dtype
+        _jnp_zero_m1_0 = jnp.asarray(0.0, dtype=_jnp_state_dtype)  # zero_m1_val=0
+        _jnp_zero_m1_1 = jnp.asarray(1.0, dtype=_jnp_state_dtype)  # zero_m1_val=1
+        _jnp_true_bool = jnp.asarray(True, dtype=bool)
+        _jnp_false_bool = jnp.asarray(False, dtype=bool)
+    else:
+        _jnp_state_dtype = None
+        _jnp_zero_m1_0 = _jnp_zero_m1_1 = None
+        _jnp_true_bool = _jnp_false_bool = None
+    # Pre-allocate zero-filled arrays for mode-diag and state-update host paths.
+    # Reused every iteration instead of np.zeros_like (avoids 9+ allocations/iter).
+    if host_update_assembly:
+        # Shape for force arrays (ns, mpol, nrange) — used in mode-diag scaling.
+        _coeff_shape_np = (int(np.asarray(state0.Rcos).shape[0]), mpol, nrange)
+        _zeros_coeff_np = np.zeros(_coeff_shape_np, dtype=_state0_dtype)
+        # Shape for dR/dZ/dL arrays (ns, K) — used when lasym=False for zeros.
+        _zeros_dR_np = np.zeros_like(np.asarray(state0.Rcos))
     delta_s = (
         jnp.asarray(s[1] - s[0], dtype=jnp.asarray(state0.Rcos).dtype)
         if int(jnp.asarray(s).shape[0]) > 1
@@ -10412,7 +10432,12 @@ def solve_fixed_boundary_residual_iter(
                     if (iter_since_restart < 2) or (len(fsqz2_history) and fsqz2_history[-1] < 1e-6)
                     else 0.0
                 )
-            zero_m1 = jnp.asarray(zero_m1_val, dtype=jnp.asarray(state.Rcos).dtype)
+            if host_update_assembly and _jnp_zero_m1_0 is not None:
+                # Use pre-cached JAX scalars to avoid jnp.asarray dispatch + dtype
+                # lookup every iteration (saves 2 apply_primitive calls per iter).
+                zero_m1 = _jnp_zero_m1_1 if zero_m1_val > 0.5 else _jnp_zero_m1_0
+            else:
+                zero_m1 = jnp.asarray(zero_m1_val, dtype=jnp.asarray(state.Rcos).dtype)
             if vmec2000_control:
                 # VMEC2000 keeps the core R/Z residual assembly on the
                 # interior mesh; free-boundary coupling enters through the
@@ -10465,8 +10490,13 @@ def solve_fixed_boundary_residual_iter(
             # VMEC updates tcon only when refreshing the 1D preconditioner
             # blocks; between refreshes it reuses the last tcon profile.
             constraint_tcon_override = cache_tcon if (use_cached_precond and cache_tcon is not None) else zero_tcon
-            constraint_precond_active = jnp.asarray(use_cached_precond, dtype=bool)
-            constraint_tcon_active = jnp.asarray(use_cached_precond, dtype=bool)
+            if host_update_assembly and _jnp_true_bool is not None:
+                # Use pre-cached bool scalars — avoids 2 jnp.asarray dispatches/iter.
+                constraint_precond_active = _jnp_true_bool if use_cached_precond else _jnp_false_bool
+                constraint_tcon_active = _jnp_true_bool if use_cached_precond else _jnp_false_bool
+            else:
+                constraint_precond_active = jnp.asarray(use_cached_precond, dtype=bool)
+                constraint_tcon_active = jnp.asarray(use_cached_precond, dtype=bool)
 
             # Free-boundary WP2 scaffold: run/update the NESTOR-like external
             # vacuum solve and couple bsqvac on the edge slice into bcovar.
@@ -11183,19 +11213,21 @@ def solve_fixed_boundary_residual_iter(
             # Mode-diagonal preconditioning in (m, n>=0) storage.
             if host_update_assembly:
                 # NumPy path: avoids 36 JAX dispatches (expand_dims + broadcast + mul per array).
+                # _zeros_coeff_np replaces np.zeros_like (pre-allocated, avoids 6+ allocs/iter).
                 _w = w_mode_mn_np[None, :, :]
+                _z = _zeros_coeff_np  # shared zero array (read-only, never modified in-place)
                 frcc_u = np.asarray(frcc) * _w
-                frss_u = (np.asarray(frss) if frss is not None else np.zeros_like(frcc_u)) * _w
+                frss_u = (np.asarray(frss) * _w) if frss is not None else _z
                 fzsc_u = np.asarray(fzsc) * _w
-                fzcs_u = (np.asarray(fzcs) if fzcs is not None else np.zeros_like(fzsc_u)) * _w
+                fzcs_u = (np.asarray(fzcs) * _w) if fzcs is not None else _z
                 flsc_u = np.asarray(flsc) * _w
-                flcs_u = (np.asarray(flcs) if flcs is not None else np.zeros_like(flsc_u)) * _w
-                frsc_u = np.asarray(frsc) * _w
-                frcs_u = np.asarray(frcs) * _w
-                fzcc_u = np.asarray(fzcc) * _w
-                fzss_u = np.asarray(fzss) * _w
-                flcc_u = np.asarray(flcc) * _w
-                flss_u = np.asarray(flss) * _w
+                flcs_u = (np.asarray(flcs) * _w) if flcs is not None else _z
+                frsc_u = (np.asarray(frsc) * _w) if frsc is not None else _z
+                frcs_u = (np.asarray(frcs) * _w) if frcs is not None else _z
+                fzcc_u = (np.asarray(fzcc) * _w) if fzcc is not None else _z
+                fzss_u = (np.asarray(fzss) * _w) if fzss is not None else _z
+                flcc_u = (np.asarray(flcc) * _w) if flcc is not None else _z
+                flss_u = (np.asarray(flss) * _w) if flss is not None else _z
             else:
                 frcc_u = frcc * w_mode_mn[None, :, :]
                 frss_u = (frss if frss is not None else jnp.zeros_like(frcc_u)) * w_mode_mn[None, :, :]
@@ -12119,17 +12151,26 @@ def solve_fixed_boundary_residual_iter(
                     np.asarray(vZsc), np.asarray(vZcs), np.asarray(vZcc), np.asarray(vZss),
                     np.asarray(vLsc), np.asarray(vLcs), np.asarray(vLcc), np.asarray(vLss),
                 ])
+                # In-place update: V = fac*(b1*V + scale*F) — avoids 3 temp arrays.
+                # _F is a new array (forces change every iter) so in-place mul is safe.
+                _fac_b1 = fac * b1
+                _fac_fs = fac * force_scale * flip_sign
                 _F = np.stack([
-                    np.asarray(frcc_u), np.asarray(frss_u), np.asarray(frsc_u), np.asarray(frcs_u),
-                    np.asarray(fzsc_u), np.asarray(fzcs_u), np.asarray(fzcc_u), np.asarray(fzss_u),
-                    np.asarray(flsc_u), np.asarray(flcs_u), np.asarray(flcc_u), np.asarray(flss_u),
+                    frcc_u, frss_u, frsc_u, frcs_u,
+                    fzsc_u, fzcs_u, fzcc_u, fzss_u,
+                    flsc_u, flcs_u, flcc_u, flss_u,
                 ])
-                _V = fac * (b1 * _V + force_scale * flip_sign * _F)
+                np.multiply(_V, _fac_b1, out=_V)
+                np.multiply(_F, _fac_fs, out=_F)
+                np.add(_V, _F, out=_V)
                 # Unpack as NumPy array views — no JAX conversion here.
                 (vRcc, vRss, vRsc, vRcs,
                  vZsc, vZcs, vZcc, vZss,
-                 vLsc, vLcs, vLcc, vLss) = (_V[i] for i in range(12))
-                update_rms_j = np.sqrt(np.mean((dt_eff * _V) ** 2))
+                 vLsc, vLcs, vLcc, vLss) = _V
+                # RMS via dot-product avoids 2 extra temp arrays.
+                update_rms_j = abs(dt_eff) * np.sqrt(
+                    np.dot(_V.ravel(), _V.ravel()) / _V.size
+                )
             else:
                 vRcc = fac * (b1 * vRcc + force_scale * (flip_sign * jnp.asarray(frcc_u)))
                 vRss = fac * (b1 * vRss + force_scale * (flip_sign * jnp.asarray(frss_u)))
@@ -12214,9 +12255,10 @@ def solve_fixed_boundary_residual_iter(
                 dL_cos = dt_eff * _mn_cos_to_signed_physical_lambda(vLcc, vLss)
             else:
                 if host_update_assembly:
-                    dR_sin = np.zeros_like(np.asarray(dR))
-                    dZ_cos = np.zeros_like(np.asarray(dR))
-                    dL_cos = np.zeros_like(np.asarray(dR))
+                    # Use pre-allocated zero arrays (avoid 3 np.zeros_like allocs/iter).
+                    dR_sin = _zeros_dR_np
+                    dZ_cos = _zeros_dR_np
+                    dL_cos = _zeros_dR_np
                 else:
                     dR_sin = jnp.zeros_like(dR)
                     dZ_cos = jnp.zeros_like(dR)
