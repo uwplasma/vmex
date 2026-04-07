@@ -759,9 +759,15 @@ def test_run_fixed_boundary_cli_single_grid_uses_accelerated_finish_first(monkey
 
     assert [call["ns"] for call in calls] == [13, 13, 13]
     assert [call["max_iter"] for call in calls] == [100, 100, 100]
-    assert [call["use_scan"] for call in calls] == [True, True, True]
+    # Initial stage uses scan (accelerated, fixed-boundary); retry attempts
+    # use scan only on non-CPU backends (avoids recompilation overhead on CPU).
+    retry_use_scan = driver_module._default_backend_name() != "cpu"
+    assert [call["use_scan"] for call in calls] == [True, retry_use_scan, retry_use_scan]
     assert [call["resume_state_mode"] for call in calls] == ["minimal", "minimal", "minimal"]
-    assert calls[0]["fsq_total_target"] is not None
+    # Single-grid: only stage is the final stage, so fsq_total_target=None for
+    # exact per-component convergence matching VMEC2000. Retry attempts (mode=
+    # "accelerated") still use a total target for their own early-exit heuristic.
+    assert calls[0]["fsq_total_target"] is None
     assert calls[1]["fsq_total_target"] is not None
     assert calls[2]["fsq_total_target"] is not None
     diag = run.result.diagnostics
@@ -827,7 +833,8 @@ def test_run_fixed_boundary_cli_single_grid_requires_strict_ftol(monkeypatch, tm
 
     assert [call["ns"] for call in calls] == [13, 13, 13]
     assert [call["max_iter"] for call in calls] == [100, 100, 100]
-    assert [call["use_scan"] for call in calls] == [True, True, True]
+    retry_use_scan = driver_module._default_backend_name() != "cpu"
+    assert [call["use_scan"] for call in calls] == [True, retry_use_scan, retry_use_scan]
     diag = run.result.diagnostics
     assert np.asarray(diag["cli_fixed_boundary_finish_budgets"]).tolist() == [100, 100]
     assert np.asarray(diag["cli_fixed_boundary_finish_modes"]).tolist() == ["accelerated", "accelerated"]
