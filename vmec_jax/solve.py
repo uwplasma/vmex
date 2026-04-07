@@ -1718,11 +1718,13 @@ def _enforce_fixed_boundary_and_axis_np(
     enforce_edge: bool = True,
     enforce_lambda_axis: bool = True,
     idx00: Optional[int],
+    precomputed_axis_mask: Optional[np.ndarray] = None,
 ) -> VMECState:
     """NumPy version of _enforce_fixed_boundary_and_axis.
 
     Avoids 8 jnp.concatenate calls by using in-place NumPy row assignment.
     Only safe to call from the non-scan CPU path (host_update_assembly=True).
+    Pass `precomputed_axis_mask` to avoid recomputing _axis_m0_mask every call.
     """
     Rcos = np.array(state.Rcos)
     Rsin = np.array(state.Rsin)
@@ -1731,7 +1733,10 @@ def _enforce_fixed_boundary_and_axis_np(
     Lcos = np.array(state.Lcos)
     Lsin = np.array(state.Lsin)
 
-    mask_m0 = np.asarray(_axis_m0_mask(static, dtype=Rcos.dtype)) if enforce_axis else None
+    if precomputed_axis_mask is not None:
+        mask_m0 = precomputed_axis_mask if enforce_axis else None
+    else:
+        mask_m0 = np.asarray(_axis_m0_mask(static, dtype=Rcos.dtype)) if enforce_axis else None
     edge_Rcos_np = np.asarray(edge_Rcos) if enforce_edge else None
     edge_Rsin_np = np.asarray(edge_Rsin) if enforce_edge else None
     edge_Zcos_np = np.asarray(edge_Zcos) if enforce_edge else None
@@ -6027,6 +6032,13 @@ def solve_fixed_boundary_residual_iter(
     w_mode_mn = _mode_diag_weights_mn(jnp.asarray(state0.Rcos).dtype)
     # NumPy copy for host-path mode-diagonal step (avoids 36 JAX dispatches/iter).
     w_mode_mn_np = np.asarray(w_mode_mn)
+    # Precompute axis mask for _enforce_fixed_boundary_and_axis_np (avoids 7000+
+    # _axis_m0_mask JAX dispatches per solve — saves ~0.5s real).
+    _state0_dtype = np.asarray(state0.Rcos).dtype
+    _precomputed_axis_mask_np = (
+        np.asarray(_axis_m0_mask(static, dtype=_state0_dtype))
+        if host_update_assembly else None
+    )
     delta_s = (
         jnp.asarray(s[1] - s[0], dtype=jnp.asarray(state0.Rcos).dtype)
         if int(jnp.asarray(s).shape[0]) > 1
@@ -12242,6 +12254,7 @@ def solve_fixed_boundary_residual_iter(
                     enforce_edge=not bool(free_boundary_enabled),
                     enforce_lambda_axis=True,
                     idx00=idx00,
+                    precomputed_axis_mask=_precomputed_axis_mask_np,
                 )
             else:
                 state_try = _enforce_fixed_boundary_and_axis(
@@ -12335,6 +12348,7 @@ def solve_fixed_boundary_residual_iter(
                             enforce_edge=not bool(free_boundary_enabled),
                             enforce_lambda_axis=True,
                             idx00=idx00,
+                            precomputed_axis_mask=_precomputed_axis_mask_np,
                         )
                     else:
                         state_try = _enforce_fixed_boundary_and_axis(
