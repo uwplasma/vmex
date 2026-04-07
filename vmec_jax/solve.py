@@ -11003,6 +11003,9 @@ def solve_fixed_boundary_residual_iter(
                 frzl_lam_pre = frzl_rz
                 if host_update_assembly:
                     # NumPy path: avoids ~15 JAX dispatches (jnp.asarray, zeros_like, mul).
+                    # Asymmetric (lasym) components default to None — the downstream
+                    # mode-diag scaling uses _z (pre-allocated zeros) for None entries,
+                    # avoiding 6 np.zeros_like allocations per iteration (~0.5s saving).
                     _lp = np.asarray(lam_prec)
                     frcc = np.asarray(frzl_rz.frcc)
                     frss = frzl_rz.frss if frzl_rz.frss is None else np.asarray(frzl_rz.frss)
@@ -11010,24 +11013,12 @@ def solve_fixed_boundary_residual_iter(
                     fzcs = frzl_rz.fzcs if frzl_rz.fzcs is None else np.asarray(frzl_rz.fzcs)
                     flsc = np.asarray(frzl_rz.flsc) * _lp
                     flcs = None if frzl_rz.flcs is None else (np.asarray(frzl_rz.flcs) * _lp)
-                    frsc = np.zeros_like(frcc)
-                    frcs = np.zeros_like(frcc)
-                    fzcc = np.zeros_like(fzsc)
-                    fzss = np.zeros_like(fzsc)
-                    flcc = np.zeros_like(flsc)
-                    flss = np.zeros_like(flsc)
-                    if getattr(frzl_rz, "frsc", None) is not None:
-                        frsc = np.asarray(frzl_rz.frsc)
-                    if getattr(frzl_rz, "frcs", None) is not None:
-                        frcs = np.asarray(frzl_rz.frcs)
-                    if getattr(frzl_rz, "fzcc", None) is not None:
-                        fzcc = np.asarray(frzl_rz.fzcc)
-                    if getattr(frzl_rz, "fzss", None) is not None:
-                        fzss = np.asarray(frzl_rz.fzss)
-                    if getattr(frzl_rz, "flcc", None) is not None:
-                        flcc = np.asarray(frzl_rz.flcc) * _lp
-                    if getattr(frzl_rz, "flss", None) is not None:
-                        flss = np.asarray(frzl_rz.flss) * _lp
+                    frsc = None if getattr(frzl_rz, "frsc", None) is None else np.asarray(frzl_rz.frsc)
+                    frcs = None if getattr(frzl_rz, "frcs", None) is None else np.asarray(frzl_rz.frcs)
+                    fzcc = None if getattr(frzl_rz, "fzcc", None) is None else np.asarray(frzl_rz.fzcc)
+                    fzss = None if getattr(frzl_rz, "fzss", None) is None else np.asarray(frzl_rz.fzss)
+                    flcc = None if getattr(frzl_rz, "flcc", None) is None else (np.asarray(frzl_rz.flcc) * _lp)
+                    flss = None if getattr(frzl_rz, "flss", None) is None else (np.asarray(frzl_rz.flss) * _lp)
                 else:
                     frcc = jnp.asarray(frzl_rz.frcc)
                     frss = frzl_rz.frss
@@ -11156,6 +11147,9 @@ def solve_fixed_boundary_residual_iter(
                 frzl_lam_pre = frzl_rz
                 if host_update_assembly:
                     # NumPy path: avoids ~15 JAX dispatches (jnp.asarray, zeros_like, mul).
+                    # Asymmetric (lasym) components default to None — the downstream
+                    # mode-diag scaling uses _z (pre-allocated zeros) for None entries,
+                    # avoiding 6 np.zeros_like allocations per iteration (~0.5s saving).
                     _lp = np.asarray(lam_prec)
                     frcc = np.asarray(frzl_rz.frcc)
                     frss = frzl_rz.frss if frzl_rz.frss is None else np.asarray(frzl_rz.frss)
@@ -11163,24 +11157,12 @@ def solve_fixed_boundary_residual_iter(
                     fzcs = frzl_rz.fzcs if frzl_rz.fzcs is None else np.asarray(frzl_rz.fzcs)
                     flsc = np.asarray(frzl_rz.flsc) * _lp
                     flcs = None if frzl_rz.flcs is None else (np.asarray(frzl_rz.flcs) * _lp)
-                    frsc = np.zeros_like(frcc)
-                    frcs = np.zeros_like(frcc)
-                    fzcc = np.zeros_like(fzsc)
-                    fzss = np.zeros_like(fzsc)
-                    flcc = np.zeros_like(flsc)
-                    flss = np.zeros_like(flsc)
-                    if getattr(frzl_rz, "frsc", None) is not None:
-                        frsc = np.asarray(frzl_rz.frsc)
-                    if getattr(frzl_rz, "frcs", None) is not None:
-                        frcs = np.asarray(frzl_rz.frcs)
-                    if getattr(frzl_rz, "fzcc", None) is not None:
-                        fzcc = np.asarray(frzl_rz.fzcc)
-                    if getattr(frzl_rz, "fzss", None) is not None:
-                        fzss = np.asarray(frzl_rz.fzss)
-                    if getattr(frzl_rz, "flcc", None) is not None:
-                        flcc = np.asarray(frzl_rz.flcc) * _lp
-                    if getattr(frzl_rz, "flss", None) is not None:
-                        flss = np.asarray(frzl_rz.flss) * _lp
+                    frsc = None if getattr(frzl_rz, "frsc", None) is None else np.asarray(frzl_rz.frsc)
+                    frcs = None if getattr(frzl_rz, "frcs", None) is None else np.asarray(frzl_rz.frcs)
+                    fzcc = None if getattr(frzl_rz, "fzcc", None) is None else np.asarray(frzl_rz.fzcc)
+                    fzss = None if getattr(frzl_rz, "fzss", None) is None else np.asarray(frzl_rz.fzss)
+                    flcc = None if getattr(frzl_rz, "flcc", None) is None else (np.asarray(frzl_rz.flcc) * _lp)
+                    flss = None if getattr(frzl_rz, "flss", None) is None else (np.asarray(frzl_rz.flss) * _lp)
                 else:
                     frcc = jnp.asarray(frzl_rz.frcc)
                     frss = frzl_rz.frss
