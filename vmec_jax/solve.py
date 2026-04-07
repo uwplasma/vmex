@@ -5742,8 +5742,58 @@ def solve_fixed_boundary_residual_iter(
             _ix = int(_idx_all_np[_j])
             if 0 <= _ix < ncoeff:
                 _proj_mn_signed[_j, _ix] = 1.0
+        # Precompute combined projection matrices for 2-DGEMM host transforms.
+        # A_cos/B_cos: map (cc_flat, ss_flat) → result in one pass, no np.where/concat.
+        _n_half = _n_flat_mn // 2  # = mpol * nrange
+        # m0_mask has shape (mpol, 1), n0_mask has shape (1, nrange).
+        # | broadcasts to (mpol, nrange); individual reshape would give wrong size.
+        _mn_bcast_shape = np.broadcast_shapes(_m0_mask_np.shape, _n0_mask_np.shape)
+        _m0n0_flat_1d = (_m0_mask_np | _n0_mask_np).reshape(-1)
+        _n0_flat_1d = np.broadcast_to(_n0_mask_np, _mn_bcast_shape).reshape(-1)
+        _m0_flat_1d = np.broadcast_to(_m0_mask_np, _mn_bcast_shape).reshape(-1)
+        _has_neg_flat = _mask_neg_flat_f64 > 0.0
+        _mask_no_neg_flat = ~_has_neg_flat & ~_n0_flat_1d
+        # cos: pos = 0.5*(cc+ss) unless m0|n0 → pos = cc
+        _cc_pos_fac = np.where(_m0n0_flat_1d, 1.0, 0.5) * _mask_pos_flat_f64
+        _ss_pos_fac = np.where(_m0n0_flat_1d, 0.0, 0.5) * _mask_pos_flat_f64
+        _proj_pos = _proj_mn_signed[:_n_half]
+        _proj_neg = _proj_mn_signed[_n_half:]
+        _A_cos = (
+            _cc_pos_fac[:, None] * _proj_pos
+            + 0.5 * _mask_neg_flat_f64[:, None] * _proj_neg
+        )
+        _B_cos = (
+            _ss_pos_fac[:, None] * _proj_pos
+            + (-0.5) * _mask_neg_flat_f64[:, None] * _proj_neg
+        )
+        # sin: pos depends on n0/mask_no_neg/m0 category
+        _sc_pos_fac = np.where(
+            _n0_flat_1d, 1.0,
+            np.where(_mask_no_neg_flat & _m0_flat_1d, 0.0,
+                     np.where(_mask_no_neg_flat & ~_m0_flat_1d, 1.0, 0.5))
+        ) * _mask_pos_flat_f64
+        _cs_pos_fac = np.where(
+            _n0_flat_1d, 0.0,
+            np.where(_mask_no_neg_flat & _m0_flat_1d, -1.0,
+                     np.where(_mask_no_neg_flat & ~_m0_flat_1d, 0.0, -0.5))
+        ) * _mask_pos_flat_f64
+        _A_sin = (
+            _sc_pos_fac[:, None] * _proj_pos
+            + 0.5 * _mask_neg_flat_f64[:, None] * _proj_neg
+        )
+        _B_sin = (
+            _cs_pos_fac[:, None] * _proj_pos
+            + 0.5 * _mask_neg_flat_f64[:, None] * _proj_neg
+        )
+        # Stacked matrices for single-DGEMM path: [cc, ss] @ _AB_cos
+        # avoids 2 smaller DGEMMs which have worse BLAS efficiency than 1 large one.
+        _AB_cos = np.vstack([_A_cos, _B_cos])  # (2*n_half, ncoeff)
+        _AB_sin = np.vstack([_A_sin, _B_sin])  # (2*n_half, ncoeff)
     else:
         _proj_mn_signed = None
+        _A_cos = _B_cos = _A_sin = _B_sin = None
+        _AB_cos = _AB_sin = None
+        _n_half = 0
 
     if getattr(static, "mn_idx_m", None) is not None:
         m_idx = jnp.asarray(np.asarray(static.mn_idx_m, dtype=np.int32))
@@ -5839,39 +5889,30 @@ def solve_fixed_boundary_residual_iter(
     scalxc_mn_np = np.asarray(scalxc_mn, dtype=float)
 
     def _mn_cos_to_signed_host(cc, ss):
+        # Single-DGEMM path: [cc, ss] @ _AB_cos (= vstack([A_cos, B_cos]))
+        # Eliminates 3 np.where + old element-wise ops; keeps k=2*n_half for BLAS efficiency.
         cc_np = np.asarray(cc, dtype=float)
-        ss_np = np.zeros_like(cc_np) if ss is None else np.asarray(ss, dtype=float)
         ns = int(cc_np.shape[0])
         if ncoeff == 0:
             return np.zeros((ns, ncoeff), dtype=cc_np.dtype)
-        pos = 0.5 * (cc_np + ss_np)
-        pos = np.where((_m0_mask_np | _n0_mask_np)[None, :, :], cc_np, pos)
-        neg = 0.5 * (cc_np - ss_np)
-        vals_all = np.concatenate(
-            [pos.reshape(ns, -1) * _mask_pos_flat_f64[None, :],
-             neg.reshape(ns, -1) * _mask_neg_flat_f64[None, :]],
-            axis=1,
-        )
-        return vals_all @ _proj_mn_signed  # DGEMM: 9× faster than np.add.at
+        if ss is None:
+            return cc_np.reshape(ns, -1) @ _A_cos
+        cc_ss = np.concatenate([cc_np.reshape(ns, -1),
+                                np.asarray(ss, dtype=float).reshape(ns, -1)], axis=1)
+        return cc_ss @ _AB_cos
 
     def _mn_sin_to_signed_host(sc, cs):
+        # Single-DGEMM path: [sc, cs] @ _AB_sin (= vstack([A_sin, B_sin]))
+        # Eliminates 3 np.where + old element-wise ops; keeps k=2*n_half for BLAS efficiency.
         sc_np = np.asarray(sc, dtype=float)
-        cs_np = np.zeros_like(sc_np) if cs is None else np.asarray(cs, dtype=float)
         ns = int(sc_np.shape[0])
         if ncoeff == 0:
             return np.zeros((ns, ncoeff), dtype=sc_np.dtype)
-        mask_no_neg = (~_mask_neg_bool_np) & (~_n0_mask_np)
-        pos = 0.5 * (sc_np - cs_np)
-        pos = np.where(_n0_mask_np[None, :, :], sc_np, pos)
-        pos = np.where(mask_no_neg[None, :, :] & _m0_mask_np[None, :, :], -cs_np, pos)
-        pos = np.where(mask_no_neg[None, :, :] & (~_m0_mask_np[None, :, :]), sc_np, pos)
-        neg = 0.5 * (sc_np + cs_np)
-        vals_all = np.concatenate(
-            [pos.reshape(ns, -1) * _mask_pos_flat_f64[None, :],
-             neg.reshape(ns, -1) * _mask_neg_flat_f64[None, :]],
-            axis=1,
-        )
-        return vals_all @ _proj_mn_signed  # DGEMM: 9× faster than np.add.at
+        if cs is None:
+            return sc_np.reshape(ns, -1) @ _A_sin
+        sc_cs = np.concatenate([sc_np.reshape(ns, -1),
+                                np.asarray(cs, dtype=float).reshape(ns, -1)], axis=1)
+        return sc_cs @ _AB_sin
 
     def _mn_cos_to_signed_physical(cc, ss):
         if host_update_assembly:
@@ -5984,6 +6025,8 @@ def solve_fixed_boundary_residual_iter(
 
     # Precompute per-iteration constants once.
     w_mode_mn = _mode_diag_weights_mn(jnp.asarray(state0.Rcos).dtype)
+    # NumPy copy for host-path mode-diagonal step (avoids 36 JAX dispatches/iter).
+    w_mode_mn_np = np.asarray(w_mode_mn)
     delta_s = (
         jnp.asarray(s[1] - s[0], dtype=jnp.asarray(state0.Rcos).dtype)
         if int(jnp.asarray(s).shape[0]) > 1
@@ -10543,9 +10586,22 @@ def solve_fixed_boundary_residual_iter(
                     pass
                 timing_stats["compute_forces"] += time.perf_counter() - float(t_compute_start)
             norms_used = cache_norms if (bool(vmec2000_control) and bool(vmec2000_cache_valid) and (not bool(need_bcovar_update))) else norms_current
-            fsqr = norms_used.r1 * norms_used.fnorm * gcr2
-            fsqz = norms_used.r1 * norms_used.fnorm * gcz2
-            fsql = norms_used.fnormL * gcl2
+            if host_update_assembly:
+                # NumPy path: gcr2/gcz2/gcl2 already synced by block_until_ready above.
+                # float() on synced JAX scalars is fast (no blocking). Avoids 5 JAX dispatches.
+                _gcr2_f = float(gcr2)
+                _gcz2_f = float(gcz2)
+                _gcl2_f = float(gcl2)
+                _fnorm_f = float(norms_used.fnorm)
+                _fnormL_f = float(norms_used.fnormL)
+                _r1_f = float(norms_used.r1)
+                fsqr = _r1_f * _fnorm_f * _gcr2_f
+                fsqz = _r1_f * _fnorm_f * _gcz2_f
+                fsql = _fnormL_f * _gcl2_f
+            else:
+                fsqr = norms_used.r1 * norms_used.fnorm * gcr2
+                fsqz = norms_used.r1 * norms_used.fnorm * gcz2
+                fsql = norms_used.fnormL * gcl2
             debug_iter_env = os.getenv("VMEC_JAX_DEBUG_ITER", "").strip()
             if debug_iter_env:
                 try:
@@ -10624,7 +10680,11 @@ def solve_fixed_boundary_residual_iter(
                     cache_prec_rz_mats = mats
                     cache_prec_rz_jmax = int(jmax)
                 vmec2000_cache_valid = True
-            fsqr_f, fsqz_f, fsql_f = _device_get_floats(fsqr, fsqz, fsql)
+            if host_update_assembly:
+                # fsqr/fsqz/fsql are already Python floats from the NumPy path above.
+                fsqr_f, fsqz_f, fsql_f = fsqr, fsqz, fsql
+            else:
+                fsqr_f, fsqz_f, fsql_f = _device_get_floats(fsqr, fsqz, fsql)
             if (
                 bool(free_boundary_enabled)
                 and bool(freeb_turnon_iter)
@@ -10829,30 +10889,58 @@ def solve_fixed_boundary_residual_iter(
                     cfg=cfg,
                 )
                 frzl_lam_pre = frzl_rz
-                frcc = jnp.asarray(frzl_rz.frcc)
-                frss = frzl_rz.frss
-                fzsc = jnp.asarray(frzl_rz.fzsc)
-                fzcs = frzl_rz.fzcs
-                flsc = jnp.asarray(frzl_rz.flsc) * jnp.asarray(lam_prec)
-                flcs = None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * jnp.asarray(lam_prec))
-                frsc = jnp.zeros_like(frcc)
-                frcs = jnp.zeros_like(frcc)
-                fzcc = jnp.zeros_like(fzsc)
-                fzss = jnp.zeros_like(fzsc)
-                flcc = jnp.zeros_like(flsc)
-                flss = jnp.zeros_like(flsc)
-                if getattr(frzl_rz, "frsc", None) is not None:
-                    frsc = jnp.asarray(frzl_rz.frsc)
-                if getattr(frzl_rz, "frcs", None) is not None:
-                    frcs = jnp.asarray(frzl_rz.frcs)
-                if getattr(frzl_rz, "fzcc", None) is not None:
-                    fzcc = jnp.asarray(frzl_rz.fzcc)
-                if getattr(frzl_rz, "fzss", None) is not None:
-                    fzss = jnp.asarray(frzl_rz.fzss)
-                if getattr(frzl_rz, "flcc", None) is not None:
-                    flcc = jnp.asarray(frzl_rz.flcc) * jnp.asarray(lam_prec)
-                if getattr(frzl_rz, "flss", None) is not None:
-                    flss = jnp.asarray(frzl_rz.flss) * jnp.asarray(lam_prec)
+                if host_update_assembly:
+                    # NumPy path: avoids ~15 JAX dispatches (jnp.asarray, zeros_like, mul).
+                    _lp = np.asarray(lam_prec)
+                    frcc = np.asarray(frzl_rz.frcc)
+                    frss = frzl_rz.frss if frzl_rz.frss is None else np.asarray(frzl_rz.frss)
+                    fzsc = np.asarray(frzl_rz.fzsc)
+                    fzcs = frzl_rz.fzcs if frzl_rz.fzcs is None else np.asarray(frzl_rz.fzcs)
+                    flsc = np.asarray(frzl_rz.flsc) * _lp
+                    flcs = None if frzl_rz.flcs is None else (np.asarray(frzl_rz.flcs) * _lp)
+                    frsc = np.zeros_like(frcc)
+                    frcs = np.zeros_like(frcc)
+                    fzcc = np.zeros_like(fzsc)
+                    fzss = np.zeros_like(fzsc)
+                    flcc = np.zeros_like(flsc)
+                    flss = np.zeros_like(flsc)
+                    if getattr(frzl_rz, "frsc", None) is not None:
+                        frsc = np.asarray(frzl_rz.frsc)
+                    if getattr(frzl_rz, "frcs", None) is not None:
+                        frcs = np.asarray(frzl_rz.frcs)
+                    if getattr(frzl_rz, "fzcc", None) is not None:
+                        fzcc = np.asarray(frzl_rz.fzcc)
+                    if getattr(frzl_rz, "fzss", None) is not None:
+                        fzss = np.asarray(frzl_rz.fzss)
+                    if getattr(frzl_rz, "flcc", None) is not None:
+                        flcc = np.asarray(frzl_rz.flcc) * _lp
+                    if getattr(frzl_rz, "flss", None) is not None:
+                        flss = np.asarray(frzl_rz.flss) * _lp
+                else:
+                    frcc = jnp.asarray(frzl_rz.frcc)
+                    frss = frzl_rz.frss
+                    fzsc = jnp.asarray(frzl_rz.fzsc)
+                    fzcs = frzl_rz.fzcs
+                    flsc = jnp.asarray(frzl_rz.flsc) * jnp.asarray(lam_prec)
+                    flcs = None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * jnp.asarray(lam_prec))
+                    frsc = jnp.zeros_like(frcc)
+                    frcs = jnp.zeros_like(frcc)
+                    fzcc = jnp.zeros_like(fzsc)
+                    fzss = jnp.zeros_like(fzsc)
+                    flcc = jnp.zeros_like(flsc)
+                    flss = jnp.zeros_like(flsc)
+                    if getattr(frzl_rz, "frsc", None) is not None:
+                        frsc = jnp.asarray(frzl_rz.frsc)
+                    if getattr(frzl_rz, "frcs", None) is not None:
+                        frcs = jnp.asarray(frzl_rz.frcs)
+                    if getattr(frzl_rz, "fzcc", None) is not None:
+                        fzcc = jnp.asarray(frzl_rz.fzcc)
+                    if getattr(frzl_rz, "fzss", None) is not None:
+                        fzss = jnp.asarray(frzl_rz.fzss)
+                    if getattr(frzl_rz, "flcc", None) is not None:
+                        flcc = jnp.asarray(frzl_rz.flcc) * jnp.asarray(lam_prec)
+                    if getattr(frzl_rz, "flss", None) is not None:
+                        flss = jnp.asarray(frzl_rz.flss) * jnp.asarray(lam_prec)
             elif not bool(cfg.lthreed):
                 from .preconditioner_1d_jax import (
                     rz_preconditioner_apply,
@@ -10954,30 +11042,58 @@ def solve_fixed_boundary_residual_iter(
                     cfg=cfg,
                 )
                 frzl_lam_pre = frzl_rz
-                frcc = jnp.asarray(frzl_rz.frcc)
-                frss = frzl_rz.frss
-                fzsc = jnp.asarray(frzl_rz.fzsc)
-                fzcs = frzl_rz.fzcs
-                flsc = jnp.asarray(frzl_rz.flsc) * jnp.asarray(lam_prec)
-                flcs = None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * jnp.asarray(lam_prec))
-                frsc = jnp.zeros_like(frcc)
-                frcs = jnp.zeros_like(frcc)
-                fzcc = jnp.zeros_like(fzsc)
-                fzss = jnp.zeros_like(fzsc)
-                flcc = jnp.zeros_like(flsc)
-                flss = jnp.zeros_like(flsc)
-                if getattr(frzl_rz, "frsc", None) is not None:
-                    frsc = jnp.asarray(frzl_rz.frsc)
-                if getattr(frzl_rz, "frcs", None) is not None:
-                    frcs = jnp.asarray(frzl_rz.frcs)
-                if getattr(frzl_rz, "fzcc", None) is not None:
-                    fzcc = jnp.asarray(frzl_rz.fzcc)
-                if getattr(frzl_rz, "fzss", None) is not None:
-                    fzss = jnp.asarray(frzl_rz.fzss)
-                if getattr(frzl_rz, "flcc", None) is not None:
-                    flcc = jnp.asarray(frzl_rz.flcc) * jnp.asarray(lam_prec)
-                if getattr(frzl_rz, "flss", None) is not None:
-                    flss = jnp.asarray(frzl_rz.flss) * jnp.asarray(lam_prec)
+                if host_update_assembly:
+                    # NumPy path: avoids ~15 JAX dispatches (jnp.asarray, zeros_like, mul).
+                    _lp = np.asarray(lam_prec)
+                    frcc = np.asarray(frzl_rz.frcc)
+                    frss = frzl_rz.frss if frzl_rz.frss is None else np.asarray(frzl_rz.frss)
+                    fzsc = np.asarray(frzl_rz.fzsc)
+                    fzcs = frzl_rz.fzcs if frzl_rz.fzcs is None else np.asarray(frzl_rz.fzcs)
+                    flsc = np.asarray(frzl_rz.flsc) * _lp
+                    flcs = None if frzl_rz.flcs is None else (np.asarray(frzl_rz.flcs) * _lp)
+                    frsc = np.zeros_like(frcc)
+                    frcs = np.zeros_like(frcc)
+                    fzcc = np.zeros_like(fzsc)
+                    fzss = np.zeros_like(fzsc)
+                    flcc = np.zeros_like(flsc)
+                    flss = np.zeros_like(flsc)
+                    if getattr(frzl_rz, "frsc", None) is not None:
+                        frsc = np.asarray(frzl_rz.frsc)
+                    if getattr(frzl_rz, "frcs", None) is not None:
+                        frcs = np.asarray(frzl_rz.frcs)
+                    if getattr(frzl_rz, "fzcc", None) is not None:
+                        fzcc = np.asarray(frzl_rz.fzcc)
+                    if getattr(frzl_rz, "fzss", None) is not None:
+                        fzss = np.asarray(frzl_rz.fzss)
+                    if getattr(frzl_rz, "flcc", None) is not None:
+                        flcc = np.asarray(frzl_rz.flcc) * _lp
+                    if getattr(frzl_rz, "flss", None) is not None:
+                        flss = np.asarray(frzl_rz.flss) * _lp
+                else:
+                    frcc = jnp.asarray(frzl_rz.frcc)
+                    frss = frzl_rz.frss
+                    fzsc = jnp.asarray(frzl_rz.fzsc)
+                    fzcs = frzl_rz.fzcs
+                    flsc = jnp.asarray(frzl_rz.flsc) * jnp.asarray(lam_prec)
+                    flcs = None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * jnp.asarray(lam_prec))
+                    frsc = jnp.zeros_like(frcc)
+                    frcs = jnp.zeros_like(frcc)
+                    fzcc = jnp.zeros_like(fzsc)
+                    fzss = jnp.zeros_like(fzsc)
+                    flcc = jnp.zeros_like(flsc)
+                    flss = jnp.zeros_like(flsc)
+                    if getattr(frzl_rz, "frsc", None) is not None:
+                        frsc = jnp.asarray(frzl_rz.frsc)
+                    if getattr(frzl_rz, "frcs", None) is not None:
+                        frcs = jnp.asarray(frzl_rz.frcs)
+                    if getattr(frzl_rz, "fzcc", None) is not None:
+                        fzcc = jnp.asarray(frzl_rz.fzcc)
+                    if getattr(frzl_rz, "fzss", None) is not None:
+                        fzss = jnp.asarray(frzl_rz.fzss)
+                    if getattr(frzl_rz, "flcc", None) is not None:
+                        flcc = jnp.asarray(frzl_rz.flcc) * jnp.asarray(lam_prec)
+                    if getattr(frzl_rz, "flss", None) is not None:
+                        flss = jnp.asarray(frzl_rz.flss) * jnp.asarray(lam_prec)
             else:
                 frcc = _apply_radial_tridi(frzl.frcc * rz_scale[:, None, None], precond_radial_alpha)
                 frss = (
@@ -11053,18 +11169,34 @@ def solve_fixed_boundary_residual_iter(
             _maybe_dump_gc(frzl=frzl_pre, static=static, iter_idx=int(iter2), label="precond")
     
             # Mode-diagonal preconditioning in (m, n>=0) storage.
-            frcc_u = frcc * w_mode_mn[None, :, :]
-            frss_u = (frss if frss is not None else jnp.zeros_like(frcc_u)) * w_mode_mn[None, :, :]
-            fzsc_u = fzsc * w_mode_mn[None, :, :]
-            fzcs_u = (fzcs if fzcs is not None else jnp.zeros_like(fzsc_u)) * w_mode_mn[None, :, :]
-            flsc_u = flsc * w_mode_mn[None, :, :]
-            flcs_u = (flcs if flcs is not None else jnp.zeros_like(flsc_u)) * w_mode_mn[None, :, :]
-            frsc_u = frsc * w_mode_mn[None, :, :]
-            frcs_u = frcs * w_mode_mn[None, :, :]
-            fzcc_u = fzcc * w_mode_mn[None, :, :]
-            fzss_u = fzss * w_mode_mn[None, :, :]
-            flcc_u = flcc * w_mode_mn[None, :, :]
-            flss_u = flss * w_mode_mn[None, :, :]
+            if host_update_assembly:
+                # NumPy path: avoids 36 JAX dispatches (expand_dims + broadcast + mul per array).
+                _w = w_mode_mn_np[None, :, :]
+                frcc_u = np.asarray(frcc) * _w
+                frss_u = (np.asarray(frss) if frss is not None else np.zeros_like(frcc_u)) * _w
+                fzsc_u = np.asarray(fzsc) * _w
+                fzcs_u = (np.asarray(fzcs) if fzcs is not None else np.zeros_like(fzsc_u)) * _w
+                flsc_u = np.asarray(flsc) * _w
+                flcs_u = (np.asarray(flcs) if flcs is not None else np.zeros_like(flsc_u)) * _w
+                frsc_u = np.asarray(frsc) * _w
+                frcs_u = np.asarray(frcs) * _w
+                fzcc_u = np.asarray(fzcc) * _w
+                fzss_u = np.asarray(fzss) * _w
+                flcc_u = np.asarray(flcc) * _w
+                flss_u = np.asarray(flss) * _w
+            else:
+                frcc_u = frcc * w_mode_mn[None, :, :]
+                frss_u = (frss if frss is not None else jnp.zeros_like(frcc_u)) * w_mode_mn[None, :, :]
+                fzsc_u = fzsc * w_mode_mn[None, :, :]
+                fzcs_u = (fzcs if fzcs is not None else jnp.zeros_like(fzsc_u)) * w_mode_mn[None, :, :]
+                flsc_u = flsc * w_mode_mn[None, :, :]
+                flcs_u = (flcs if flcs is not None else jnp.zeros_like(flsc_u)) * w_mode_mn[None, :, :]
+                frsc_u = frsc * w_mode_mn[None, :, :]
+                frcs_u = frcs * w_mode_mn[None, :, :]
+                fzcc_u = fzcc * w_mode_mn[None, :, :]
+                fzss_u = fzss * w_mode_mn[None, :, :]
+                flcc_u = flcc * w_mode_mn[None, :, :]
+                flss_u = flss * w_mode_mn[None, :, :]
             if timing_enabled:
                 try:
                     if has_jax():
@@ -11195,13 +11327,11 @@ def solve_fixed_boundary_residual_iter(
                 fsqz1_safe = fsqz1 if np.isfinite(fsqz1) else 0.0
                 fsql1_safe = float(fsql1) if np.isfinite(fsql1) else 0.0
                 fsq1 = fsqr1_safe + fsqz1_safe + fsql1_safe
-                # Keep JAX-typed versions for track_history and downstream JAX code paths.
-                fsqr1 = jnp.asarray(fsqr1_safe)
-                fsqz1 = jnp.asarray(fsqz1_safe)
-                fsql1 = jnp.asarray(fsql1_safe)
-                fsqr1_safe = jnp.asarray(fsqr1_safe)
-                fsqz1_safe = jnp.asarray(fsqz1_safe)
-                fsql1_safe = jnp.asarray(fsql1_safe)
+                # host_update_assembly: keep as Python floats — downstream code (history
+                # lists, _precond_diag_floats) handles both float and JAX scalar.
+                fsqr1 = fsqr1_safe
+                fsqz1 = fsqz1_safe
+                fsql1 = fsql1_safe
             else:
                 # Avoid inf*0 -> NaN in late-converged iterations when rz_norm=0 and
                 # gcx2 terms are exactly zero. VMEC treats these channels as zero.
