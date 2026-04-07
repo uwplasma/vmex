@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 import os
+import functools
 from functools import partial
 
 from ._compat import jax, jnp, jit, has_jax
@@ -1280,6 +1281,179 @@ def rz_preconditioner_apply(
         fzss=fzss_out,
         flcc=getattr(frzl_in, "flcc", None),
         flss=getattr(frzl_in, "flss", None),
+    )
+
+
+@functools.lru_cache(maxsize=32)
+def _make_rz_preconditioner_apply_jit(
+    jmax: int,
+    lthreed: bool,
+    lasym: bool,
+    use_precomputed: bool,
+    use_lax_tridi: bool,
+    has_frss: bool,
+    has_fzcs: bool,
+    has_frsc: bool,
+    has_frcs: bool,
+    has_fzcc: bool,
+    has_fzss: bool,
+    has_lax_t: bool,
+):
+    """Return a JIT-compiled inner apply function for the given static config.
+
+    This avoids the ~237 eager JAX dispatches per iteration that occur when
+    rz_preconditioner_apply is called without JIT.  The static booleans key
+    the cache so each distinct configuration compiles only once.
+    """
+    use_rss = bool(lthreed)
+    use_rsc = bool(lasym)
+    use_rcs = bool(lthreed and lasym)
+    use_zcs = bool(lthreed)
+    use_zcc = bool(lasym)
+    use_zss = bool(lthreed and lasym)
+
+    @partial(
+        jit,
+        static_argnames=(),
+    )
+    def _apply_jit(
+        frcc, fzsc, frss, fzcs, frsc, frcs, fzcc, fzss,
+        ar, br, dr, cr, ir,
+        az, bz, dz, cz, iz,
+        dlr_t, dr_t, dur_t,
+        dlz_t, dz_t, duz_t,
+        flsc, flcs, flcc, flss,
+    ):
+        frcc_u, frss_u, fzsc_u, fzcs_u, frsc_u, frcs_u, fzcc_u, fzss_u = _rz_preconditioner_apply_arrays(
+            ar=ar, br=br, dr=dr, cr=cr, ir=ir,
+            az=az, bz=bz, dz=dz, cz=cz, iz=iz,
+            dlr_t=dlr_t, dr_t=dr_t, dur_t=dur_t,
+            dlz_t=dlz_t, dz_t=dz_t, duz_t=duz_t,
+            frcc=frcc, frss=frss, fzsc=fzsc, fzcs=fzcs,
+            frsc=frsc, frcs=frcs, fzcc=fzcc, fzss=fzss,
+            jmax=jmax,
+            use_precomputed=use_precomputed,
+            use_lax_tridi=use_lax_tridi,
+            use_rss=use_rss, use_rsc=use_rsc, use_rcs=use_rcs,
+            use_zcs=use_zcs, use_zcc=use_zcc, use_zss=use_zss,
+        )
+        return TomnspsRZL(
+            frcc=frcc_u,
+            frss=frss_u if has_frss else None,
+            fzsc=fzsc_u,
+            fzcs=fzcs_u if has_fzcs else None,
+            flsc=flsc,
+            flcs=flcs,
+            frsc=frsc_u if has_frsc else None,
+            frcs=frcs_u if has_frcs else None,
+            fzcc=fzcc_u if has_fzcc else None,
+            fzss=fzss_u if has_fzss else None,
+            flcc=flcc,
+            flss=flss,
+        )
+
+    return _apply_jit
+
+
+def rz_preconditioner_apply_jit(
+    *,
+    frzl_in: TomnspsRZL,
+    mats: dict[str, Any],
+    jmax: int,
+    cfg,
+    use_precomputed: bool | None = None,
+    use_lax_tridi: bool | None = None,
+) -> TomnspsRZL:
+    """JIT-cached wrapper for :func:`rz_preconditioner_apply`.
+
+    Resolves all Python-level static parameters once per distinct
+    configuration and caches a JIT-compiled apply function.  On subsequent
+    calls with the same configuration (same lthreed/lasym/flags/jmax) only
+    the JIT-compiled XLA computation is dispatched, eliminating ~237 eager
+    JAX ops per call.
+    """
+    # --- resolve static booleans (Python-level, outside JIT) ---
+    lthreed = bool(getattr(cfg, "lthreed", False))
+    lasym = bool(getattr(cfg, "lasym", False))
+
+    if use_precomputed is None:
+        use_precomputed = os.getenv("VMEC_JAX_TRIDI_PRECOMPUTE", "0").strip().lower() not in (
+            "", "0", "false", "no",
+        )
+    has_cr_ir = ("cr" in mats) and ("ir" in mats) and ("cz" in mats) and ("iz" in mats)
+    if not has_cr_ir:
+        use_precomputed = False
+    if use_lax_tridi is None:
+        use_lax_tridi = os.getenv("VMEC_JAX_TRIDI_SOLVE", "").strip().lower() in (
+            "1", "true", "yes", "lax", "force",
+        )
+
+    # Structural None checks determine output shape (static)
+    has_frss = frzl_in.frss is not None
+    has_fzcs = frzl_in.fzcs is not None
+    has_frsc = getattr(frzl_in, "frsc", None) is not None
+    has_frcs = getattr(frzl_in, "frcs", None) is not None
+    has_fzcc = getattr(frzl_in, "fzcc", None) is not None
+    has_fzss = getattr(frzl_in, "fzss", None) is not None
+
+    has_lax_t = (
+        ("dlr_t" in mats) and ("dr_t" in mats) and ("dur_t" in mats)
+        and ("dlz_t" in mats) and ("dz_t" in mats) and ("duz_t" in mats)
+    )
+
+    _apply_jit = _make_rz_preconditioner_apply_jit(
+        jmax=int(jmax),
+        lthreed=lthreed,
+        lasym=lasym,
+        use_precomputed=bool(use_precomputed),
+        use_lax_tridi=bool(use_lax_tridi),
+        has_frss=has_frss,
+        has_fzcs=has_fzcs,
+        has_frsc=has_frsc,
+        has_frcs=has_frcs,
+        has_fzcc=has_fzcc,
+        has_fzss=has_fzss,
+        has_lax_t=has_lax_t,
+    )
+
+    # --- extract arrays (dict access outside JIT, then pass as flat args) ---
+    ar = mats["ar"]
+    br = mats["br"]
+    dr = mats["dr"]
+    cr = mats.get("cr", ar)
+    ir = mats.get("ir", dr)
+    az = mats["az"]
+    bz = mats["bz"]
+    dz = mats["dz"]
+    cz = mats.get("cz", az)
+    iz = mats.get("iz", dz)
+    dlr_t = mats.get("dlr_t", ar)  # placeholder (unused if has_lax_t=False)
+    dr_t = mats.get("dr_t", ar)
+    dur_t = mats.get("dur_t", ar)
+    dlz_t = mats.get("dlz_t", az)
+    dz_t = mats.get("dz_t", az)
+    duz_t = mats.get("duz_t", az)
+
+    frcc = frzl_in.frcc
+    fzsc = frzl_in.fzsc
+    frss = frzl_in.frss if has_frss else jnp.zeros_like(frcc)
+    fzcs = frzl_in.fzcs if has_fzcs else jnp.zeros_like(fzsc)
+    frsc = getattr(frzl_in, "frsc", None) if has_frsc else jnp.zeros_like(frcc)
+    frcs = getattr(frzl_in, "frcs", None) if has_frcs else jnp.zeros_like(frcc)
+    fzcc = getattr(frzl_in, "fzcc", None) if has_fzcc else jnp.zeros_like(fzsc)
+    fzss = getattr(frzl_in, "fzss", None) if has_fzss else jnp.zeros_like(fzsc)
+    flsc = frzl_in.flsc
+    flcs = frzl_in.flcs
+    flcc = getattr(frzl_in, "flcc", None)
+    flss = getattr(frzl_in, "flss", None)
+
+    return _apply_jit(
+        frcc, fzsc, frss, fzcs, frsc, frcs, fzcc, fzss,
+        ar, br, dr, cr, ir,
+        az, bz, dz, cz, iz,
+        dlr_t, dr_t, dur_t,
+        dlz_t, dz_t, duz_t,
+        flsc, flcs, flcc, flss,
     )
 
 
