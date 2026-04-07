@@ -2286,18 +2286,22 @@ def run_fixed_boundary(
             )
             stage_resume_state_mode = "minimal" if stage_accelerated_mode else None
             is_last_stage = (i == len(ns_stages) - 1)
+            _final_cpu_scan_env = os.getenv("VMEC_JAX_FINAL_STAGE_CPU_SCAN", "0").strip().lower()
+            _final_cpu_scan_forced = _final_cpu_scan_env not in ("", "0", "false", "no")
             if (
                 bool(accelerated_mode)
                 and bool(is_last_stage)
                 and scan_mode
                 and (_default_backend_name() == "cpu")
                 and int(ns_i) >= 50
+                and not _final_cpu_scan_forced
             ):
                 # For large final-stage NS on CPU, the Python loop with
                 # host_update_assembly (NumPy mode assembly) is faster than
                 # lax.scan because: (1) NumPy is more cache-efficient for the
-                # large (ns, nmodes) matrix ops, and (2) scan carry overhead
-                # grows with ns. Measured ~5% speedup for NS=151 on nfp3_QI.
+                # large (ns, nmodes) matrix ops, and (2) scan verbose output
+                # requires bulk device-to-host transfers per chunk. Override
+                # with VMEC_JAX_FINAL_STAGE_CPU_SCAN=1 to force scan.
                 scan_mode = False
             stage_fsq_total_target = (
                 _accelerated_fsq_total_target_from_ftol(float(ftol_i))
