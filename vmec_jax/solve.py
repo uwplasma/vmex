@@ -5829,6 +5829,71 @@ def solve_fixed_boundary_residual_iter(
     kn_idx = jnp.asarray(kn_idx_np)
     has_kn = jnp.asarray(has_kn_np)
     has_kn_any = bool(np.any(has_kn_np))
+    # NumPy index arrays for _rz_norm_np (avoid JAX dispatch on preconditioner rebuilds).
+    _kp_idx_np = np.asarray(kp_idx, dtype=np.int32)
+    _m_idx_np = np.asarray(m_idx, dtype=np.int32)
+    _n_idx_np = np.asarray(n_idx, dtype=np.int32)
+    _include_rcc_np = (_m_idx_np > 0) | (_n_idx_np > 0)
+    _is_m0_1d = (_m_idx_np == 0)
+    _is_n0_1d = (_n_idx_np == 0)
+    _rz_norm_lthreed = bool(getattr(static.cfg, "lthreed", True))
+    _rz_norm_lasym = bool(getattr(static.cfg, "lasym", False))
+
+    def _rz_norm_np(state) -> float:
+        """Pure NumPy version of _rz_norm — avoids JAX dispatch on precond rebuilds.
+
+        Used by the host_update_assembly path to compute fnorm1 without
+        blocking on XLA.  Semantically identical to _rz_norm(state).
+        """
+        Rcos = np.asarray(state.Rcos)
+        Zsin = np.asarray(state.Zsin)
+        rpos = Rcos[:, _kp_idx_np]
+        zpos = Zsin[:, _kp_idx_np]
+        rneg = np.zeros_like(rpos)
+        zneg = np.zeros_like(zpos)
+        if has_kn_any:
+            hk = has_kn_np
+            rneg[:, hk] = Rcos[:, kn_idx_np[hk]]
+            zneg[:, hk] = Zsin[:, kn_idx_np[hk]]
+        # Rebuild signed (m,n) representation.
+        rcc = rpos + np.where(has_kn_np, rneg, 0.0)
+        zsc = np.where(has_kn_np, zpos + zneg, zpos)
+        rss = np.where(_is_n0_1d | _is_m0_1d, 0.0, np.where(has_kn_np, rpos - rneg, 0.0))
+        zsc = np.where((~_is_n0_1d) & _is_m0_1d, 0.0, zsc)
+        zcs = np.where(_is_n0_1d, 0.0, np.where(has_kn_np, zneg - zpos, -zpos))
+        sl = slice(1, None)
+        rz = float(
+            np.dot(zsc[sl].ravel(), zsc[sl].ravel())
+            + np.dot((_include_rcc_np * rcc[sl]).ravel(), (_include_rcc_np * rcc[sl]).ravel())
+        )
+        if _rz_norm_lthreed:
+            rz += float(
+                np.dot(rss[sl].ravel(), rss[sl].ravel())
+                + np.dot(zcs[sl].ravel(), zcs[sl].ravel())
+            )
+        if _rz_norm_lasym:
+            Rsin = np.asarray(state.Rsin)
+            Zcos = np.asarray(state.Zcos)
+            rs_pos = Rsin[:, _kp_idx_np]
+            zc_pos = Zcos[:, _kp_idx_np]
+            rs_neg = np.zeros_like(rs_pos)
+            zc_neg = np.zeros_like(zc_pos)
+            if has_kn_any:
+                hk = has_kn_np
+                rs_neg[:, hk] = Rsin[:, kn_idx_np[hk]]
+                zc_neg[:, hk] = Zcos[:, kn_idx_np[hk]]
+            rsc = np.where(has_kn_np, rs_pos + rs_neg, np.where(_is_n0_1d, rs_pos, np.where(_is_m0_1d, 0.0, rs_pos)))
+            rcs = np.where(has_kn_np, rs_neg - rs_pos, np.where(_is_n0_1d, 0.0, np.where(_is_m0_1d, -rs_pos, 0.0)))
+            zcc = zc_pos + np.where(has_kn_np, zc_neg, 0.0)
+            zss = np.where(_is_n0_1d | _is_m0_1d, 0.0, np.where(has_kn_np, zc_pos - zc_neg, 0.0))
+            rz += float(
+                np.dot(rsc[sl].ravel(), rsc[sl].ravel())
+                + np.dot(rcs[sl].ravel(), rcs[sl].ravel())
+                + np.dot(zcc[sl].ravel(), zcc[sl].ravel())
+                + np.dot(zss[sl].ravel(), zss[sl].ravel())
+            )
+        return rz
+
     m0_mask = np.asarray(getattr(static, "m_is_m0", None) if getattr(static, "m_is_m0", None) is not None else (np.asarray(static.modes.m) == 0))
     m0 = jnp.asarray((np.arange(mpol)[:, None] == 0))
     n0 = jnp.asarray((np.arange(nrange)[None, :] == 0))
@@ -10701,12 +10766,17 @@ def solve_fixed_boundary_residual_iter(
                 cache_norms = norms_used
                 cache_rz_scale = rz_scale
                 cache_l_scale = l_scale
-                cache_rz_norm = _rz_norm(state)
-                cache_f_norm1 = jnp.where(
-                    jnp.asarray(cache_rz_norm) != 0.0,
-                    1.0 / jnp.asarray(cache_rz_norm),
-                    jnp.asarray(float("inf"), dtype=jnp.asarray(cache_rz_norm).dtype),
-                )
+                if host_update_assembly:
+                    # NumPy path: avoids JAX dispatch + XLA blocking for fnorm1.
+                    cache_rz_norm = _rz_norm_np(state)  # Python float
+                    cache_f_norm1 = (1.0 / cache_rz_norm) if cache_rz_norm != 0.0 else float("inf")
+                else:
+                    cache_rz_norm = _rz_norm(state)
+                    cache_f_norm1 = jnp.where(
+                        jnp.asarray(cache_rz_norm) != 0.0,
+                        1.0 / jnp.asarray(cache_rz_norm),
+                        jnp.asarray(float("inf"), dtype=jnp.asarray(cache_rz_norm).dtype),
+                    )
                 if not bool(cfg.lasym):
                     from .preconditioner_1d_jax import rz_preconditioner_matrices
 
@@ -11336,21 +11406,22 @@ def solve_fixed_boundary_residual_iter(
                     apply_scalxc=False,
                     s=s,
                 )
-            if (
-                bool(vmec2000_control)
-                and bool(vmec2000_cache_valid)
-                and (not bool(need_bcovar_update))
-                and (cache_rz_norm is not None)
-                and (cache_f_norm1 is not None)
-            ):
-                rz_norm = jnp.asarray(cache_rz_norm)
-                f_norm1 = jnp.asarray(cache_f_norm1)
-            else:
-                rz_norm = _rz_norm(state)
-                f_norm1 = jnp.where(rz_norm != 0.0, 1.0 / rz_norm, jnp.asarray(float("inf"), dtype=rz_norm.dtype))
             if host_update_assembly:
-                # NumPy path for fsqr1/fsqz1/fsql1: avoids 3 jnp.where dispatches + blocking sync.
-                _f_norm1_np = float(np.asarray(f_norm1))
+                # Fast NumPy path: use cached Python-float fnorm1 directly — no JAX dispatch.
+                if (
+                    bool(vmec2000_control)
+                    and bool(vmec2000_cache_valid)
+                    and (not bool(need_bcovar_update))
+                    and (cache_rz_norm is not None)
+                    and (cache_f_norm1 is not None)
+                ):
+                    _f_norm1_np = float(cache_f_norm1)
+                    rz_norm = cache_rz_norm  # Python float (for history list)
+                else:
+                    _rz_norm_val = _rz_norm_np(state)
+                    _f_norm1_np = (1.0 / _rz_norm_val) if _rz_norm_val != 0.0 else float("inf")
+                    rz_norm = _rz_norm_val
+                f_norm1 = _f_norm1_np  # alias for history list (Python float)
                 _finite = np.isfinite(_f_norm1_np)
                 fsqr1 = float(gcr2_p) * _f_norm1_np if _finite else 0.0
                 fsqz1 = float(gcz2_p) * _f_norm1_np if _finite else 0.0
@@ -11377,6 +11448,22 @@ def solve_fixed_boundary_residual_iter(
                 fsqz1 = fsqz1_safe
                 fsql1 = fsql1_safe
             else:
+                # JAX path: set rz_norm and f_norm1 from cache or recompute.
+                if (
+                    bool(vmec2000_control)
+                    and bool(vmec2000_cache_valid)
+                    and (not bool(need_bcovar_update))
+                    and (cache_rz_norm is not None)
+                    and (cache_f_norm1 is not None)
+                ):
+                    rz_norm = jnp.asarray(cache_rz_norm)
+                    f_norm1 = jnp.asarray(cache_f_norm1)
+                else:
+                    rz_norm = _rz_norm(state)
+                    f_norm1 = jnp.where(
+                        rz_norm != 0.0, 1.0 / rz_norm,
+                        jnp.asarray(float("inf"), dtype=rz_norm.dtype)
+                    )
                 # Avoid inf*0 -> NaN in late-converged iterations when rz_norm=0 and
                 # gcx2 terms are exactly zero. VMEC treats these channels as zero.
                 finite_fnorm1 = jnp.isfinite(f_norm1)
