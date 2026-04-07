@@ -121,6 +121,8 @@ def _accelerated_fsq_total_target_from_ftol(ftol: float) -> float:
     The accelerated path still treats the input FTOL as the user truth. The
     total objective is `fsqr + fsqz + fsql`, so the corresponding scalar target
     is the same per-channel budget summed across the active residual channels.
+    This is used only for non-final warm-up stages; the final stage uses None
+    (per-component convergence) to match VMEC2000 exactly.
     """
     return max(0.0, float(ftol)) * float(len(_FSQ_COMPONENT_NAMES))
 
@@ -1475,7 +1477,7 @@ def run_fixed_boundary(
                 trial = _run_finish_attempt(
                     budget_i=accel_budget_i,
                     mode_i="accelerated",
-                    use_scan_i=True,
+                    use_scan_i=(_default_backend_name() != "cpu"),
                     performance_mode_i=True,
                 )
                 trial_fsq = float(_result_final_fsq(trial.result))
@@ -2283,8 +2285,11 @@ def run_fixed_boundary(
                 else None
             )
             stage_resume_state_mode = "minimal" if stage_accelerated_mode else None
+            is_last_stage = (i == len(ns_stages) - 1)
             stage_fsq_total_target = (
-                _accelerated_fsq_total_target_from_ftol(float(ftol_i)) if stage_accelerated_mode else None
+                _accelerated_fsq_total_target_from_ftol(float(ftol_i))
+                if (stage_accelerated_mode and not is_last_stage)
+                else None
             )
             stage_host_update_assembly = (
                 bool(performance_mode)
@@ -2744,7 +2749,7 @@ def run_fixed_boundary(
         static = _build_static_cfg(cfg)
         if verbose and solver == "vmec2000_iter":
             converged = bool(res.diagnostics.get("converged", False))
-            if not converged:
+            if not converged and int(res.n_iter) >= int(niter_i):
                 print(" Try increasing NITER or PRE_NITER if the preconditioner is on.", flush=True)
             print("", flush=True)
             print(" EXECUTION TERMINATED NORMALLY", flush=True)
