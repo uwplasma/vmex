@@ -2286,6 +2286,19 @@ def run_fixed_boundary(
             )
             stage_resume_state_mode = "minimal" if stage_accelerated_mode else None
             is_last_stage = (i == len(ns_stages) - 1)
+            if (
+                bool(accelerated_mode)
+                and bool(is_last_stage)
+                and scan_mode
+                and (_default_backend_name() == "cpu")
+                and int(ns_i) >= 50
+            ):
+                # For large final-stage NS on CPU, the Python loop with
+                # host_update_assembly (NumPy mode assembly) is faster than
+                # lax.scan because: (1) NumPy is more cache-efficient for the
+                # large (ns, nmodes) matrix ops, and (2) scan carry overhead
+                # grows with ns. Measured ~5% speedup for NS=151 on nfp3_QI.
+                scan_mode = False
             stage_fsq_total_target = (
                 _accelerated_fsq_total_target_from_ftol(float(ftol_i))
                 if (stage_accelerated_mode and not is_last_stage)
