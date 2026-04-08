@@ -150,6 +150,11 @@ class _NpModule:
     @staticmethod
     def asarray(x, dtype=None) -> _NpArray:
         if dtype is not None:
+            # Fast path: already a _NpArray with the requested dtype — no copy.
+            # This avoids repeated bool→float conversions for pre-converted mask
+            # arrays (static.m_is_even, m_is_m1, etc.) on every iteration.
+            if isinstance(x, _NpArray) and x.dtype == np.dtype(dtype):
+                return x
             return _wrap(np.asarray(x, dtype=dtype))
         if isinstance(x, _NpArray):
             return x

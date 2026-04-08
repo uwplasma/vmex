@@ -5645,16 +5645,46 @@ def solve_fixed_boundary_residual_iter(
     if _compute_forces_np is not None:
         try:
             import dataclasses as _dc
-            from .vmec_numpy_forces import _to_numpy_recursive as _tonp
+            import numpy as _np_host
+            from .vmec_numpy_forces import _to_numpy_recursive as _tonp, _wrap as _np_wrap
             trig = _tonp(trig)
             wout_like = _tonp(wout_like)
+            # Build a replacement dict for static fields that benefit from
+            # pre-conversion to _NpArray.  This eliminates JAX device→host
+            # transfers that would otherwise happen on every iteration when
+            # vmec_bcovar/vmec_realspace access static.s and friends.
+            _repl: dict = {}
+            # static.s: accessed as jnp.asarray(static.s) ~490×/run in vmec_bcovar;
+            # converting to _NpArray here makes that a cheap isinstance pass.
+            _s_val = getattr(static, "s", None)
+            if _s_val is not None:
+                try:
+                    _repl["s"] = _np_wrap(_np_host.asarray(_s_val))
+                except Exception:
+                    pass
             # Also convert tomnsps_masks (holds JAX mask_even_j etc.)
             _np_masks = getattr(static, "tomnsps_masks", None)
             _np_masks_edge = getattr(static, "tomnsps_masks_edge", None)
             if _np_masks is not None:
-                _repl: dict = {"tomnsps_masks": _tonp(_np_masks)}
+                _repl["tomnsps_masks"] = _tonp(_np_masks)
                 if _np_masks_edge is not None:
                     _repl["tomnsps_masks_edge"] = _tonp(_np_masks_edge)
+            # Pre-convert boolean mask arrays (m_is_even, m_is_m1, etc.) to
+            # float _NpArray with the state dtype so that
+            #   jnp.asarray(static.m_is_even, dtype=dtype)
+            # hits the fast path in _NP_MODULE.asarray and returns immediately
+            # when dtype already matches, saving ~60k np.asarray calls per run.
+            try:
+                _state_dtype = _np_host.asarray(state0.Rcos).dtype
+                for _mask_field in ("m_is_even", "m_is_odd", "m_is_m1", "m_is_odd_rest"):
+                    _mval = getattr(static, _mask_field, None)
+                    if _mval is not None:
+                        _repl[_mask_field] = _np_wrap(
+                            _np_host.asarray(_mval, dtype=_state_dtype)
+                        )
+            except Exception:
+                pass
+            if _repl:
                 static = _dc.replace(static, **_repl)
         except Exception:
             pass
@@ -10179,15 +10209,11 @@ def solve_fixed_boundary_residual_iter(
                 ones = np.ones((ns_full - nsolve,), dtype=fac_r_arr.dtype)
                 fac_r_full = np.concatenate([fac_r_arr[:nsolve], ones])
                 fac_z_full = np.concatenate([fac_z_arr[:nsolve], ones])
-            _frss = _scale_mode_slice_np(frzl_in.frss, mode_idx=1, scale=fac_r_full)
-            _fzcs = _scale_mode_slice_np(frzl_in.fzcs, mode_idx=1, scale=fac_z_full)
-            _frsc = _scale_mode_slice_np(getattr(frzl_in, "frsc", None), mode_idx=1, scale=fac_r_full)
-            _fzcc = _scale_mode_slice_np(getattr(frzl_in, "fzcc", None), mode_idx=1, scale=fac_z_full)
-            # Convert back to JAX for the downstream JIT-compiled preconditioner.
-            frss = jnp.asarray(_frss) if _frss is not None else None
-            fzcs = jnp.asarray(_fzcs) if _fzcs is not None else None
-            frsc = jnp.asarray(_frsc) if _frsc is not None else None
-            fzcc = jnp.asarray(_fzcc) if _fzcc is not None else None
+            frss = _scale_mode_slice_np(frzl_in.frss, mode_idx=1, scale=fac_r_full)
+            fzcs = _scale_mode_slice_np(frzl_in.fzcs, mode_idx=1, scale=fac_z_full)
+            frsc = _scale_mode_slice_np(getattr(frzl_in, "frsc", None), mode_idx=1, scale=fac_r_full)
+            fzcc = _scale_mode_slice_np(getattr(frzl_in, "fzcc", None), mode_idx=1, scale=fac_z_full)
+            # Keep as NumPy arrays — rz_preconditioner_apply_numpy accepts them directly.
         else:
             fac_r = jnp.asarray(fac_r_jax, dtype=jnp.asarray(frzl_in.frcc).dtype)
             fac_z = jnp.asarray(fac_z_jax, dtype=jnp.asarray(frzl_in.fzsc).dtype)
@@ -11194,13 +11220,24 @@ def solve_fixed_boundary_residual_iter(
                 if lam_debug is not None:
                     _maybe_dump_lamcal(lam_debug=lam_debug, static=static, iter_idx=int(iter2))
                 frzl_rhs = _apply_vmec_scale_m1_precond_rhs(frzl, mats)
-                from .preconditioner_1d_jax import rz_preconditioner_apply_jit as _rz_apply_jit_1
-                frzl_rz = _rz_apply_jit_1(
-                    frzl_in=frzl_rhs,
-                    mats=mats,
-                    jmax=jmax,
-                    cfg=cfg,
-                )
+                if host_update_assembly:
+                    # Pure-NumPy preconditioner: avoids NumPy→JAX→NumPy round-trip
+                    # (device_put + XLA dispatch + device_get) that costs ~40ms/run.
+                    from .preconditioner_1d_jax import rz_preconditioner_apply_numpy as _rz_apply_np_1
+                    frzl_rz = _rz_apply_np_1(
+                        frzl_in=frzl_rhs,
+                        mats=mats,
+                        jmax=jmax,
+                        cfg=cfg,
+                    )
+                else:
+                    from .preconditioner_1d_jax import rz_preconditioner_apply_jit as _rz_apply_jit_1
+                    frzl_rz = _rz_apply_jit_1(
+                        frzl_in=frzl_rhs,
+                        mats=mats,
+                        jmax=jmax,
+                        cfg=cfg,
+                    )
                 frzl_lam_pre = frzl_rz
                 if host_update_assembly:
                     # NumPy path: avoids ~15 JAX dispatches (jnp.asarray, zeros_like, mul).
@@ -11338,13 +11375,22 @@ def solve_fixed_boundary_residual_iter(
                     if bool(getattr(cfg, "lasym", False))
                     else frzl
                 )
-                from .preconditioner_1d_jax import rz_preconditioner_apply_jit as _rz_apply_jit_2
-                frzl_rz = _rz_apply_jit_2(
-                    frzl_in=frzl_rhs,
-                    mats=mats,
-                    jmax=jmax,
-                    cfg=cfg,
-                )
+                if host_update_assembly:
+                    from .preconditioner_1d_jax import rz_preconditioner_apply_numpy as _rz_apply_np_2
+                    frzl_rz = _rz_apply_np_2(
+                        frzl_in=frzl_rhs,
+                        mats=mats,
+                        jmax=jmax,
+                        cfg=cfg,
+                    )
+                else:
+                    from .preconditioner_1d_jax import rz_preconditioner_apply_jit as _rz_apply_jit_2
+                    frzl_rz = _rz_apply_jit_2(
+                        frzl_in=frzl_rhs,
+                        mats=mats,
+                        jmax=jmax,
+                        cfg=cfg,
+                    )
                 frzl_lam_pre = frzl_rz
                 if host_update_assembly:
                     # NumPy path: avoids ~15 JAX dispatches (jnp.asarray, zeros_like, mul).
