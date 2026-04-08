@@ -4126,7 +4126,12 @@ def solve_fixed_boundary_residual_iter(
     vmecpp_restart = bool(vmecpp_restart)
     verbose_vmec2000_table = bool(verbose_vmec2000_table)
     # Allow automatic fallback to the non-scan path when scan diverges.
-    scan_fallback_env = os.getenv("VMEC_JAX_SCAN_FALLBACK", "1").strip().lower()
+    # On GPU/TPU, the non-scan fallback uses a Python loop with per-iteration
+    # device→host synchronization, which is catastrophically slow (~74 ms/iter
+    # vs ~4 ms/iter in the scan path). Disable scan fallback by default on
+    # non-CPU backends, unless the user explicitly sets VMEC_JAX_SCAN_FALLBACK=1.
+    _scan_fallback_default = "1" if (_scan_backend_name() == "cpu") else "0"
+    scan_fallback_env = os.getenv("VMEC_JAX_SCAN_FALLBACK", _scan_fallback_default).strip().lower()
     scan_fallback_enabled = scan_fallback_env not in ("", "0", "false", "no")
     scan_fallback_iters_env = os.getenv("VMEC_JAX_SCAN_FALLBACK_ITERS", "50").strip()
     scan_fallback_badjac_env = os.getenv("VMEC_JAX_SCAN_FALLBACK_BJAC_LIMIT", "10").strip()
