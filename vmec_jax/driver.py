@@ -2779,7 +2779,15 @@ def run_fixed_boundary(
             step_history=np.asarray(res.step_history),
             diagnostics=final_diag,
         )
-        static = _build_static_cfg(cfg)
+        # Use the static from the last executed stage (static_prev) when
+        # available.  This ensures that static.cfg.ns matches the actual
+        # solved state's ns even when the final NS_ARRAY stage is skipped
+        # because the iteration budget (max_iter) was exhausted by earlier
+        # stages — e.g. max_iter=1500 with NITER_ARRAY=[600,1000,1000]
+        # only reaches ns=31, so static_prev.cfg.ns=31 while cfg.ns=50.
+        # Falling back to _build_static_cfg(cfg) when static_prev is None
+        # preserves the existing behavior for single-stage solves.
+        static = static_prev if static_prev is not None else _build_static_cfg(cfg)
         if verbose and solver == "vmec2000_iter":
             converged = bool(res.diagnostics.get("converged", False))
             if not converged and int(res.n_iter) >= int(niter_i):
