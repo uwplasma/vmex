@@ -1119,7 +1119,7 @@ def run_fixed_boundary(
                 verbose=bool(verbose),
                 jit_forces=jit_forces,
                 jit_precompile=jit_precompile,
-                use_scan=False if bool(is_final_stage) else bool(use_scan),
+                use_scan=False if (bool(is_final_stage) or (bool(cli_fixed_boundary_mode) and _default_backend_name() == "cpu")) else bool(use_scan),
                 performance_mode=False if bool(is_final_stage) else True,
                 scan_wout_corrector=scan_wout_corrector,
                 stage_transition_heuristic=stage_transition_heuristic,
@@ -1218,7 +1218,7 @@ def run_fixed_boundary(
                 verbose=bool(verbose),
                 jit_forces=jit_forces,
                 jit_precompile=jit_precompile,
-                use_scan=False if bool(is_final_stage) else bool(use_scan),
+                use_scan=False if (bool(is_final_stage) or (bool(cli_fixed_boundary_mode) and _default_backend_name() == "cpu")) else bool(use_scan),
                 performance_mode=False if bool(is_final_stage) else True,
                 scan_wout_corrector=scan_wout_corrector,
                 stage_transition_heuristic=stage_transition_heuristic,
@@ -1845,7 +1845,11 @@ def run_fixed_boundary(
 
     solver = solver_lower
     if solver in ("vmec2000_iter_fast", "vmec2000_scan"):
-        use_scan = True
+        # Respect an explicitly-passed use_scan=False (e.g. CPU CLI fast path
+        # that uses the Python loop instead of lax.scan).  Only default to
+        # scan=True when the caller did not explicitly opt out.
+        if use_scan is not False:
+            use_scan = True
         solver = "vmec2000_iter"
     # Parity mode defaults to the VMEC2000 non-scan control path unless
     # explicitly forced via environment variables.
@@ -2102,7 +2106,9 @@ def run_fixed_boundary(
             cfg_i = replace(cfg, ns=int(ns_i))
             static_i = _build_static_cfg(cfg_i)
             scan_mode = bool(use_scan) if bool(stage_accelerated_mode) else False
-            if stage_accelerated_mode:
+            if stage_accelerated_mode and bool(use_scan):
+                # In accelerated mode the default is to use scan (lax.scan is
+                # faster on GPU; on CPU the caller can override via use_scan=False).
                 scan_mode = not bool(cfg_i.lfreeb)
             if bool(cfg.lasym):
                 # For LASYM fixed-boundary stages, allow scan as a candidate in
@@ -2296,19 +2302,22 @@ def run_fixed_boundary(
             _final_cpu_scan_env = os.getenv("VMEC_JAX_FINAL_STAGE_CPU_SCAN", "0").strip().lower()
             _final_cpu_scan_forced = _final_cpu_scan_env not in ("", "0", "false", "no")
             if (
-                bool(accelerated_mode)
-                and bool(is_last_stage)
+                bool(cli_fixed_boundary_mode)
                 and scan_mode
                 and (_default_backend_name() == "cpu")
-                and int(ns_i) >= 50
                 and not _final_cpu_scan_forced
             ):
-                # For large final-stage NS on CPU, the Python loop with
-                # host_update_assembly (NumPy mode assembly) is faster than
-                # lax.scan because: (1) NumPy is more cache-efficient for the
-                # large (ns, nmodes) matrix ops, and (2) scan verbose output
-                # requires bulk device-to-host transfers per chunk. Override
-                # with VMEC_JAX_FINAL_STAGE_CPU_SCAN=1 to force scan.
+                # On CPU CLI runs, the Python loop with host_update_assembly
+                # (NumPy mode assembly) is faster than lax.scan for all stage
+                # sizes because:
+                # (1) NumPy is more cache-efficient for the (ns, nmodes) matrix
+                # ops, (2) lax.scan requires JIT compilation (6–30 s first call
+                # per unique (ns, nmodes) config), and (3) with _to_numpy_recursive
+                # and JAX-cache patching the per-iteration Python-loop cost is
+                # now ~0.5–2 ms vs the scan compile amortised cost.
+                # This flag is NOT set for programmatic/autodiff use of
+                # run_fixed_boundary(), so gradient computations still use scan.
+                # Override with VMEC_JAX_FINAL_STAGE_CPU_SCAN=1 to force scan.
                 scan_mode = False
             stage_fsq_total_target = (
                 _accelerated_fsq_total_target_from_ftol(float(ftol_i))

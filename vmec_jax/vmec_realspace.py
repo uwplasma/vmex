@@ -31,6 +31,30 @@ def _phase_cache_key(modes: ModeTable, trig: VmecTrigTables) -> tuple[int, int]:
     return (id(modes), id(trig))
 
 
+def _phase_cache_valid(cached: Any, modes: ModeTable, trig: VmecTrigTables) -> bool:
+    """Return True when a cached phase pair (cos_phase, sin_phase) is valid.
+
+    Python reuses object ids when objects are garbage-collected.  Two distinct
+    (modes, trig) pairs from different tests may therefore share the same id-
+    based cache key.  We guard against stale hits by checking that the cached
+    array has the expected shape for the *current* modes/trig pair.
+
+    Expected shape: (K, ntheta3, nzeta).
+    """
+    try:
+        cos_phase, sin_phase = cached
+        K = int(np.asarray(modes.m).shape[0])
+        nzeta = int(np.asarray(trig.cosnv).shape[0])
+        ntheta3 = int(trig.ntheta3)
+        return (
+            int(cos_phase.shape[0]) == K
+            and int(cos_phase.shape[1]) == ntheta3
+            and int(cos_phase.shape[2]) == nzeta
+        )
+    except Exception:
+        return False
+
+
 def _cache_allowed() -> bool:
     if not has_jax():
         return True
@@ -80,7 +104,7 @@ def _vmec_phase_tables_cached(*, modes: ModeTable, trig: VmecTrigTables, cache: 
     if cache and _cache_allowed():
         key = _phase_cache_key(modes, trig)
         cached = _PHASE_CACHE.get(key)
-        if cached is not None:
+        if cached is not None and _phase_cache_valid(cached, modes, trig):
             return cached
     cos_phase, sin_phase = _vmec_phase_tables(m=modes.m, n=modes.n, trig=trig)
     if cache and _cache_allowed():
@@ -88,11 +112,26 @@ def _vmec_phase_tables_cached(*, modes: ModeTable, trig: VmecTrigTables, cache: 
     return cos_phase, sin_phase
 
 
+def _phase_stack_cache_valid(cached: Any, modes: ModeTable, trig: VmecTrigTables) -> bool:
+    """Return True when a stacked phase (2*K, ntheta3, nzeta) is valid for modes/trig."""
+    try:
+        K = int(np.asarray(modes.m).shape[0])
+        nzeta = int(np.asarray(trig.cosnv).shape[0])
+        ntheta3 = int(trig.ntheta3)
+        return (
+            int(cached.shape[0]) == 2 * K
+            and int(cached.shape[1]) == ntheta3
+            and int(cached.shape[2]) == nzeta
+        )
+    except Exception:
+        return False
+
+
 def _vmec_phase_tables_stacked_cached(*, modes: ModeTable, trig: VmecTrigTables, cache: bool = True):
     if cache and _cache_allowed():
         key = _phase_cache_key(modes, trig)
         cached = _PHASE_STACK_CACHE.get(key)
-        if cached is not None:
+        if cached is not None and _phase_stack_cache_valid(cached, modes, trig):
             return cached
     cos_phase, sin_phase = _vmec_phase_tables_cached(modes=modes, trig=trig, cache=cache)
     phase = jnp.concatenate([cos_phase, sin_phase], axis=0)
@@ -132,7 +171,7 @@ def _vmec_phase_tables_dtheta_cached(*, modes: ModeTable, trig: VmecTrigTables, 
     if cache and _cache_allowed():
         key = _phase_cache_key(modes, trig)
         cached = _PHASE_DTHETA_CACHE.get(key)
-        if cached is not None:
+        if cached is not None and _phase_cache_valid(cached, modes, trig):
             return cached
     dcos_phase, dsin_phase = _vmec_phase_tables_dtheta(m=modes.m, n=modes.n, trig=trig)
     if cache and _cache_allowed():
@@ -144,7 +183,7 @@ def _vmec_phase_tables_dtheta_stacked_cached(*, modes: ModeTable, trig: VmecTrig
     if cache and _cache_allowed():
         key = _phase_cache_key(modes, trig)
         cached = _PHASE_DTHETA_STACK_CACHE.get(key)
-        if cached is not None:
+        if cached is not None and _phase_stack_cache_valid(cached, modes, trig):
             return cached
     dcos_phase, dsin_phase = _vmec_phase_tables_dtheta_cached(modes=modes, trig=trig, cache=cache)
     phase = jnp.concatenate([dcos_phase, dsin_phase], axis=0)
@@ -171,7 +210,7 @@ def _vmec_phase_tables_dzeta_cached(*, modes: ModeTable, trig: VmecTrigTables, c
     if cache and _cache_allowed():
         key = _phase_cache_key(modes, trig)
         cached = _PHASE_DZETA_CACHE.get(key)
-        if cached is not None:
+        if cached is not None and _phase_cache_valid(cached, modes, trig):
             return cached
     dcos_phase, dsin_phase = _vmec_phase_tables_dzeta(m=modes.m, n=modes.n, trig=trig)
     if cache and _cache_allowed():
@@ -183,7 +222,7 @@ def _vmec_phase_tables_dzeta_stacked_cached(*, modes: ModeTable, trig: VmecTrigT
     if cache and _cache_allowed():
         key = _phase_cache_key(modes, trig)
         cached = _PHASE_DZETA_STACK_CACHE.get(key)
-        if cached is not None:
+        if cached is not None and _phase_stack_cache_valid(cached, modes, trig):
             return cached
     dcos_phase, dsin_phase = _vmec_phase_tables_dzeta_cached(modes=modes, trig=trig, cache=cache)
     phase = jnp.concatenate([dcos_phase, dsin_phase], axis=0)

@@ -3676,12 +3676,20 @@ def solve_fixed_boundary_gn_vmec_residual(
         )
 
     def _zero_edge_rz(a):
-        a = None if a is None else jnp.asarray(a)
         if a is None:
             return None
+        # Preserve NumPy arrays (numpy hot-path) to avoid JAX dispatch.
+        # Only wrap with jnp.asarray when the array is not already a NumPy array.
+        if not isinstance(a, np.ndarray):
+            a = jnp.asarray(a)
+            if a.shape[0] < 2:
+                return a
+            return a.at[-1].set(jnp.zeros_like(a[-1]))
         if a.shape[0] < 2:
             return a
-        return a.at[-1].set(jnp.zeros_like(a[-1]))
+        out = a.copy()
+        out[-1] = np.zeros_like(a[-1])
+        return out
 
     mask_pack = getattr(static, "tomnsps_masks", None)
 
@@ -4739,12 +4747,20 @@ def solve_fixed_boundary_residual_iter(
     )
 
     def _zero_edge_rz(a):
-        a = None if a is None else jnp.asarray(a)
         if a is None:
             return None
+        # Preserve NumPy arrays (numpy hot-path) to avoid JAX dispatch.
+        # Only wrap with jnp.asarray when the array is not already a NumPy array.
+        if not isinstance(a, np.ndarray):
+            a = jnp.asarray(a)
+            if a.shape[0] < 2:
+                return a
+            return a.at[-1].set(jnp.zeros_like(a[-1]))
         if a.shape[0] < 2:
             return a
-        return a.at[-1].set(jnp.zeros_like(a[-1]))
+        out = a.copy()
+        out[-1] = np.zeros_like(a[-1])
+        return out
 
     def _apply_radial_tridi(a, alpha: float):
         if alpha <= 0.0:
@@ -4816,26 +4832,30 @@ def solve_fixed_boundary_residual_iter(
         return out
 
     def _metric_surface_precond_from_bcovar(bc):
-        """Approximate radial preconditioner scaling from bcovar metrics."""
-        guu = jnp.asarray(bc.guu)
-        r12 = jnp.asarray(bc.jac.r12)
-        bsubu = jnp.asarray(bc.bsubu)
-        bsubv = jnp.asarray(bc.bsubv)
+        """Approximate radial preconditioner scaling from bcovar metrics.
+
+        This function is only called from the host (never inside lax.scan
+        traced code), so plain NumPy is sufficient and avoids JAX dispatch.
+        """
+        guu = np.asarray(bc.guu)
+        r12 = np.asarray(bc.jac.r12)
+        bsubu = np.asarray(bc.bsubu)
+        bsubv = np.asarray(bc.bsubv)
         nzeta = int(guu.shape[2])
-        w_ang = vmec_wint_from_trig(trig, nzeta=nzeta).astype(guu.dtype)
+        w_ang = np.asarray(vmec_wint_from_trig(trig, nzeta=nzeta)).astype(guu.dtype)
         w3 = w_ang[None, :, :]
 
         # R/Z preconditioner proxy: VMEC force-norm denominator integrand.
-        rz_denom = jnp.sum((guu * (r12 * r12)) * w3, axis=(1, 2))
-        rz_scale = jnp.where(rz_denom > 0.0, 1.0 / jnp.sqrt(rz_denom), 1.0)
+        rz_denom = np.sum((guu * (r12 * r12)) * w3, axis=(1, 2))
+        rz_scale = np.where(rz_denom > 0.0, 1.0 / np.sqrt(np.maximum(rz_denom, 1e-300)), 1.0)
 
         # Lambda preconditioner proxy: VMEC lambda norm denominator integrand.
-        l_denom = jnp.sum(((bsubu * bsubu) + (bsubv * bsubv)) * w3, axis=(1, 2))
-        l_scale = jnp.where(l_denom > 0.0, 1.0 / jnp.sqrt(l_denom), 1.0)
+        l_denom = np.sum(((bsubu * bsubu) + (bsubv * bsubv)) * w3, axis=(1, 2))
+        l_scale = np.where(l_denom > 0.0, 1.0 / np.sqrt(np.maximum(l_denom, 1e-300)), 1.0)
 
         # Keep updates bounded and avoid axis/boundary blowups.
-        rz_scale = jnp.clip(rz_scale, 1e-4, 1e2)
-        l_scale = jnp.clip(l_scale, 1e-4, 1e2)
+        rz_scale = np.clip(rz_scale, 1e-4, 1e2)
+        l_scale = np.clip(l_scale, 1e-4, 1e2)
         return rz_scale, l_scale
 
     def _pshalf_from_s(s_arr):
@@ -5381,6 +5401,10 @@ def solve_fixed_boundary_residual_iter(
         frzl = vmec_apply_scalxc_to_tomnsps(frzl=frzl, s=s)
         # Materialize tomnsps blocks after scalxc to avoid XLA aliasing.
         def _nan_guard(x):
+            # Fast path: NumPy arrays are already materialized; skip the JAX
+            # identity jnp.where which would convert _NpArray back to JAX arrays.
+            if isinstance(x, np.ndarray):
+                return x
             x = jnp.asarray(x)
             return jnp.where(jnp.isnan(x), x, x)
         try:
@@ -5564,6 +5588,77 @@ def solve_fixed_boundary_residual_iter(
             pass
 
     _compute_forces_impl = _compute_forces
+
+    # NumPy hot-path: wrap _compute_forces_impl with pure-NumPy module patching.
+    # Used when host_update_assembly=True to eliminate all JAX dispatch overhead.
+    _compute_forces_np = None
+    if bool(host_update_assembly) and has_jax():
+        try:
+            from .vmec_numpy_forces import compute_forces_numpy as _cfn_helper
+
+            def _compute_forces_np(
+                state: VMECState,
+                *,
+                include_edge: bool,
+                include_edge_residual: bool | None = None,
+                zero_m1: Any,
+                freeb_bsqvac_half: Any | None = None,
+                constraint_rcon0: Any | None = None,
+                constraint_zcon0: Any | None = None,
+                constraint_precond_diag: tuple[Any, Any] | None = None,
+                constraint_tcon: Any | None = None,
+                constraint_precond_active: Any | None = None,
+                constraint_tcon_active: Any | None = None,
+                iter_idx: int | None = None,
+            ):
+                return _cfn_helper(
+                    _compute_forces_impl,
+                    state,
+                    include_edge=include_edge,
+                    include_edge_residual=include_edge_residual,
+                    zero_m1=zero_m1,
+                    freeb_bsqvac_half=freeb_bsqvac_half,
+                    constraint_rcon0=constraint_rcon0,
+                    constraint_zcon0=constraint_zcon0,
+                    constraint_precond_diag=constraint_precond_diag,
+                    constraint_tcon=constraint_tcon,
+                    constraint_precond_active=constraint_precond_active,
+                    constraint_tcon_active=constraint_tcon_active,
+                    iter_idx=iter_idx,
+                )
+        except Exception:
+            _compute_forces_np = None
+
+    # Pre-convert trig/wout_like/static.tomnsps_masks to pure-NumPy so that
+    # indexing their array fields inside vmec_bcovar/tomnsps_rzl never triggers
+    # JAX dispatch.  This must happen AFTER _compute_forces_np is set (so we
+    # know the NumPy path is active) and BEFORE the iteration loop.
+    #
+    # Because _compute_forces is a closure that reads `trig`, `wout_like`, and
+    # `static` from this enclosing scope by reference (Python cell variables),
+    # reassigning them here makes the closure see the NumPy versions on every
+    # subsequent call.
+    #
+    # static.tomnsps_masks contains TomnspsMasks with mask_even_j as a JAX
+    # array; accessing it in _select_mparity triggers ~62 JAX dispatches/iter.
+    # Replacing static with a shallow copy that has NumPy masks eliminates this.
+    if _compute_forces_np is not None:
+        try:
+            import dataclasses as _dc
+            from .vmec_numpy_forces import _to_numpy_recursive as _tonp
+            trig = _tonp(trig)
+            wout_like = _tonp(wout_like)
+            # Also convert tomnsps_masks (holds JAX mask_even_j etc.)
+            _np_masks = getattr(static, "tomnsps_masks", None)
+            _np_masks_edge = getattr(static, "tomnsps_masks_edge", None)
+            if _np_masks is not None:
+                _repl: dict = {"tomnsps_masks": _tonp(_np_masks)}
+                if _np_masks_edge is not None:
+                    _repl["tomnsps_masks_edge"] = _tonp(_np_masks_edge)
+                static = _dc.replace(static, **_repl)
+        except Exception:
+            pass
+
     compute_cache_key = (
         "compute_forces_v1",
         static_key,
@@ -5680,6 +5775,23 @@ def solve_fixed_boundary_residual_iter(
                     iter_idx=iter_idx,
                 )
             return _compute_forces_impl(
+                state,
+                include_edge=include_edge,
+                include_edge_residual=include_edge_residual,
+                zero_m1=zero_m1,
+                freeb_bsqvac_half=freeb_bsqvac_half,
+                constraint_rcon0=constraint_rcon0,
+                constraint_zcon0=constraint_zcon0,
+                constraint_precond_diag=constraint_precond_diag,
+                constraint_tcon=constraint_tcon,
+                constraint_precond_active=constraint_precond_active,
+                constraint_tcon_active=constraint_tcon_active,
+                iter_idx=iter_idx,
+            )
+        # NumPy fast path: use pure-NumPy force computation when available.
+        # This eliminates all JAX dispatch overhead from the per-iteration loop.
+        if _compute_forces_np is not None:
+            return _compute_forces_np(
                 state,
                 include_edge=include_edge,
                 include_edge_residual=include_edge_residual,
@@ -10508,6 +10620,17 @@ def solve_fixed_boundary_residual_iter(
         except Exception:
             pass
 
+    # Cache os.getenv calls that would otherwise be repeated every iteration
+    # in the hot loop below (saves ~9 os.getenv calls × ~2144 iters = ~19k calls).
+    _env_freeb_include_edge = os.getenv("VMEC_JAX_FREEB_INCLUDE_EDGE", "0").strip().lower()
+    _env_force_edge_residual = os.getenv("VMEC_JAX_FORCE_EDGE_RESIDUAL", "").strip().lower()
+    _env_freeb_raise = os.getenv("VMEC_JAX_FREEB_RAISE", "").strip().lower()
+    _env_debug_iter = os.getenv("VMEC_JAX_DEBUG_ITER", "").strip()
+    _env_dump_lam = os.getenv("VMEC_JAX_DUMP_LAM", "")
+    _env_dump_lamcal = os.getenv("VMEC_JAX_DUMP_LAMCAL", "")
+    _env_dump_badjac = os.getenv("VMEC_JAX_DUMP_BADJAC", "")
+    _env_dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
+
     last_iter2 = 0
     for it in range(max_iter):
         iter2 = it + 1 + int(iter_offset)
@@ -10587,8 +10710,7 @@ def solve_fixed_boundary_residual_iter(
                 # interior mesh; free-boundary coupling enters through the
                 # dedicated edge `rbsq` terms in `forces.f`, not by enabling
                 # generic edge residual rows.
-                include_edge_env = os.getenv("VMEC_JAX_FREEB_INCLUDE_EDGE", "0").strip().lower()
-                include_edge = include_edge_env not in ("", "0", "false", "no")
+                include_edge = _env_freeb_include_edge not in ("", "0", "false", "no")
             else:
                 include_edge = bool(iter_since_restart < 50) and (float(prev_rz_fsq) < 1e-6)
             if track_history:
@@ -10601,7 +10723,7 @@ def solve_fixed_boundary_residual_iter(
             include_edge_residual = bool(include_edge)
             if bool(free_boundary_enabled) and int(freeb_ivac_effective) >= 1:
                 include_edge_residual = True
-            if os.getenv("VMEC_JAX_FORCE_EDGE_RESIDUAL", "").strip().lower() in ("1", "true", "yes"):
+            if _env_force_edge_residual in ("1", "true", "yes"):
                 include_edge_residual = True
             precond_jmax_override: int | None = None
             if (
@@ -10693,7 +10815,7 @@ def solve_fixed_boundary_residual_iter(
                                 int(freeb_nvacskip),
                             )
                 except Exception:
-                    if os.getenv("VMEC_JAX_FREEB_RAISE", "").strip().lower() not in ("", "0", "false", "no"):
+                    if _env_freeb_raise not in ("", "0", "false", "no"):
                         raise
                     freeb_bsqvac_half_current = None
                     freeb_reused = False
@@ -10788,7 +10910,7 @@ def solve_fixed_boundary_residual_iter(
                 fsqr = norms_used.r1 * norms_used.fnorm * gcr2
                 fsqz = norms_used.r1 * norms_used.fnorm * gcz2
                 fsql = norms_used.fnormL * gcl2
-            debug_iter_env = os.getenv("VMEC_JAX_DEBUG_ITER", "").strip()
+            debug_iter_env = _env_debug_iter
             if debug_iter_env:
                 try:
                     debug_iter = int(debug_iter_env)
@@ -10990,8 +11112,8 @@ def solve_fixed_boundary_residual_iter(
                     rz_preconditioner_matrices_reassemble,
                 )
     
-                need_lam_prec = os.getenv("VMEC_JAX_DUMP_LAM", "") not in ("", "0")
-                need_lamcal = os.getenv("VMEC_JAX_DUMP_LAMCAL", "") not in ("", "0")
+                need_lam_prec = _env_dump_lam not in ("", "0")
+                need_lamcal = _env_dump_lamcal not in ("", "0")
                 need_prec_reassemble = (
                     (cache_prec_rz_jmax is not None)
                     and (int(cache_prec_rz_jmax) != int(precond_expected_jmax))
@@ -11130,8 +11252,8 @@ def solve_fixed_boundary_residual_iter(
                     rz_preconditioner_matrices_reassemble,
                 )
 
-                need_lam_prec = os.getenv("VMEC_JAX_DUMP_LAM", "") not in ("", "0")
-                need_lamcal = os.getenv("VMEC_JAX_DUMP_LAMCAL", "") not in ("", "0")
+                need_lam_prec = _env_dump_lam not in ("", "0")
+                need_lamcal = _env_dump_lamcal not in ("", "0")
                 need_prec_reassemble = (
                     (cache_prec_rz_jmax is not None)
                     and (int(cache_prec_rz_jmax) != int(precond_expected_jmax))
@@ -11546,7 +11668,7 @@ def solve_fixed_boundary_residual_iter(
                     fsql1 = gcl2_full * delta_s
                 else:
                     fsql1 = gcl2_p * delta_s
-            if os.getenv("VMEC_JAX_DUMP_LAM", "") not in ("", "0") and frzl_lam_pre is None:
+            if _env_dump_lam not in ("", "0") and frzl_lam_pre is None:
                 gcr2_raw, gcz2_raw, gcl2_raw = vmec_gcx2_from_tomnsps(
                     frzl=frzl,
                     lconm1=bool(getattr(static.cfg, "lconm1", True)),
@@ -11728,8 +11850,8 @@ def solve_fixed_boundary_residual_iter(
                         min_tau_history.append(min_tau)
                         max_tau_history.append(max_tau)
                         bad_jacobian_history.append(int(bool(bad_jacobian)))
-                    if bad_jacobian and os.getenv("VMEC_JAX_DUMP_BADJAC", "") not in ("", "0"):
-                        dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
+                    if bad_jacobian and _env_dump_badjac not in ("", "0"):
+                        dump_dir = _env_dump_dir
                         if dump_dir:
                             try:
                                 path = Path(dump_dir) / "bad_jacobian.log"
@@ -13445,19 +13567,24 @@ def first_step_diagnostics(
         return out
 
     def _metric_surface_precond_from_bcovar(bc):
-        guu = jnp.asarray(bc.guu)
-        r12 = jnp.asarray(bc.jac.r12)
-        bsubu = jnp.asarray(bc.bsubu)
-        bsubv = jnp.asarray(bc.bsubv)
+        """Approximate radial preconditioner scaling from bcovar metrics.
+
+        Only called from the host (never inside lax.scan traced code), so
+        plain NumPy is sufficient and avoids JAX dispatch overhead.
+        """
+        guu = np.asarray(bc.guu)
+        r12 = np.asarray(bc.jac.r12)
+        bsubu = np.asarray(bc.bsubu)
+        bsubv = np.asarray(bc.bsubv)
         nzeta = int(guu.shape[2])
-        w_ang = vmec_wint_from_trig(trig, nzeta=nzeta).astype(guu.dtype)
+        w_ang = np.asarray(vmec_wint_from_trig(trig, nzeta=nzeta)).astype(guu.dtype)
         w3 = w_ang[None, :, :]
-        rz_denom = jnp.sum((guu * (r12 * r12)) * w3, axis=(1, 2))
-        rz_scale = jnp.where(rz_denom > 0.0, 1.0 / jnp.sqrt(rz_denom), 1.0)
-        l_denom = jnp.sum(((bsubu * bsubu) + (bsubv * bsubv)) * w3, axis=(1, 2))
-        l_scale = jnp.where(l_denom > 0.0, 1.0 / jnp.sqrt(l_denom), 1.0)
-        rz_scale = jnp.clip(rz_scale, 1e-4, 1e2)
-        l_scale = jnp.clip(l_scale, 1e-4, 1e2)
+        rz_denom = np.sum((guu * (r12 * r12)) * w3, axis=(1, 2))
+        rz_scale = np.where(rz_denom > 0.0, 1.0 / np.sqrt(np.maximum(rz_denom, 1e-300)), 1.0)
+        l_denom = np.sum(((bsubu * bsubu) + (bsubv * bsubv)) * w3, axis=(1, 2))
+        l_scale = np.where(l_denom > 0.0, 1.0 / np.sqrt(np.maximum(l_denom, 1e-300)), 1.0)
+        rz_scale = np.clip(rz_scale, 1e-4, 1e2)
+        l_scale = np.clip(l_scale, 1e-4, 1e2)
         return rz_scale, l_scale
 
     def _pshalf_from_s(s_arr):

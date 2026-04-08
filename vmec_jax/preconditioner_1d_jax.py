@@ -1453,12 +1453,28 @@ def rz_preconditioner_apply_jit(
 
     frcc = frzl_in.frcc
     fzsc = frzl_in.fzsc
-    frss = frzl_in.frss if has_frss else jnp.zeros_like(frcc)
-    fzcs = frzl_in.fzcs if has_fzcs else jnp.zeros_like(fzsc)
-    frsc = getattr(frzl_in, "frsc", None) if has_frsc else jnp.zeros_like(frcc)
-    frcs = getattr(frzl_in, "frcs", None) if has_frcs else jnp.zeros_like(frcc)
-    fzcc = getattr(frzl_in, "fzcc", None) if has_fzcc else jnp.zeros_like(fzsc)
-    fzss = getattr(frzl_in, "fzss", None) if has_fzss else jnp.zeros_like(fzsc)
+    # Use np.zeros for placeholder arrays (not needed by the JIT code for the
+    # active branches, but JAX requires positional args).  This avoids 4–6
+    # eager JAX device allocations per preconditioner call when the arrays are
+    # unused (e.g. non-lasym case where frsc/frcs/fzcc/fzss are None).
+    # np.zeros(shape, dtype) never triggers JAX dispatch or device copies.
+    import numpy as _np_prec_local
+    _frcc_shape = frcc.shape
+    _fzsc_shape = fzsc.shape
+    try:
+        _frcc_dtype = frcc.dtype
+        _fzsc_dtype = fzsc.dtype
+    except AttributeError:
+        _frcc_dtype = None
+        _fzsc_dtype = None
+    _zl_frcc = _np_prec_local.zeros(_frcc_shape, dtype=_frcc_dtype)
+    _zl_fzsc = _np_prec_local.zeros(_fzsc_shape, dtype=_fzsc_dtype)
+    frss = frzl_in.frss if has_frss else _zl_frcc
+    fzcs = frzl_in.fzcs if has_fzcs else _zl_fzsc
+    frsc = getattr(frzl_in, "frsc", None) if has_frsc else _zl_frcc
+    frcs = getattr(frzl_in, "frcs", None) if has_frcs else _zl_frcc
+    fzcc = getattr(frzl_in, "fzcc", None) if has_fzcc else _zl_fzsc
+    fzss = getattr(frzl_in, "fzss", None) if has_fzss else _zl_fzsc
     flsc = frzl_in.flsc
     flcs = frzl_in.flcs
     flcc = getattr(frzl_in, "flcc", None)
@@ -1486,3 +1502,250 @@ def rz_preconditioner(
     """Apply the VMEC R/Z radial preconditioner in JAX."""
     mats, _jmin, jmax = rz_preconditioner_matrices(bc=bc, k=k, trig=trig, s=s, cfg=cfg)
     return rz_preconditioner_apply(frzl_in=frzl_in, mats=mats, jmax=jmax, cfg=cfg)
+
+
+# ---------------------------------------------------------------------------
+# Pure-NumPy preconditioner apply (avoids JAX JIT dispatch overhead)
+# ---------------------------------------------------------------------------
+
+import numpy as _np_prec  # local alias to avoid shadowing jnp
+
+
+def _tridi_fwd_np(a, inv, rhs) -> _np_prec.ndarray:
+    """Forward sweep of Thomas algorithm (precomputed form) in pure NumPy.
+
+    Parameters
+    ----------
+    a   : (n, ...) superdiagonal coefficients (normalised)
+    inv : (n, ...) inverse of reduced diagonal
+    rhs : (n, ...) right-hand side
+    Returns dp array of same shape as rhs.
+    """
+    n = rhs.shape[0]
+    if n == 0:
+        return _np_prec.empty_like(rhs)
+    if rhs.ndim > inv.ndim:
+        extra = (1,) * (rhs.ndim - inv.ndim)
+        a   = a.reshape(a.shape + extra)
+        inv = inv.reshape(inv.shape + extra)
+    dp = _np_prec.empty_like(rhs)
+    dp[0] = rhs[0] * inv[0]
+    for j in range(1, n):
+        dp[j] = (rhs[j] - a[j] * dp[j - 1]) * inv[j]
+    return dp
+
+
+def _tridi_bwd_np(cp, dp) -> _np_prec.ndarray:
+    """Backward sweep of Thomas algorithm in pure NumPy.
+
+    x[j] = dp[j] - cp[j] * x[j+1]
+    """
+    n = dp.shape[0]
+    if n <= 1:
+        return dp.copy()
+    x = _np_prec.empty_like(dp)
+    x[n - 1] = dp[n - 1]
+    for j in range(n - 2, -1, -1):
+        x[j] = dp[j] - cp[j] * x[j + 1]
+    return x
+
+
+def _tridi_solve_precomputed_np(a, cp, inv, rhs) -> _np_prec.ndarray:
+    """Solve tridiagonal system using precomputed c'/inv coefficients (NumPy)."""
+    a   = _np_prec.asarray(a)
+    cp  = _np_prec.asarray(cp)
+    inv = _np_prec.asarray(inv)
+    rhs = _np_prec.asarray(rhs)
+    if rhs.ndim > inv.ndim:
+        extra = (1,) * (rhs.ndim - inv.ndim)
+        a   = a.reshape(a.shape + extra)
+        cp  = cp.reshape(cp.shape + extra)
+        inv = inv.reshape(inv.shape + extra)
+    dp = _tridi_fwd_np(a, inv, rhs)
+    return _tridi_bwd_np(cp, dp)
+
+
+def _tridi_solve_np(a, d, b, rhs) -> _np_prec.ndarray:
+    """Full Thomas algorithm (no precomputed coefficients) in pure NumPy."""
+    a   = _np_prec.asarray(a)
+    d   = _np_prec.asarray(d)
+    b   = _np_prec.asarray(b)
+    rhs = _np_prec.asarray(rhs)
+    n = rhs.shape[0]
+    if n == 0:
+        return rhs.copy()
+    if rhs.ndim > d.ndim:
+        extra = (1,) * (rhs.ndim - d.ndim)
+        a = a.reshape(a.shape + extra)
+        d = d.reshape(d.shape + extra)
+        b = b.reshape(b.shape + extra)
+    eps = 1e-12
+    a_norm = _np_prec.empty_like(rhs)
+    x_mod  = _np_prec.empty_like(rhs)
+    d0 = _np_prec.where(d[0] != 0.0, d[0], eps)
+    a_norm[0] = a[0] / d0
+    x_mod[0]  = rhs[0] / d0
+    for j in range(1, n):
+        denom = d[j] - a_norm[j - 1] * b[j]
+        denom = _np_prec.where(denom != 0.0, denom, eps)
+        a_norm[j] = a[j] / denom
+        x_mod[j]  = (rhs[j] - x_mod[j - 1] * b[j]) / denom
+    x = _np_prec.empty_like(rhs)
+    x[n - 1] = x_mod[n - 1]
+    for j in range(n - 2, -1, -1):
+        x[j] = x_mod[j] - a_norm[j] * x[j + 1]
+    return x
+
+
+def rz_preconditioner_apply_numpy(
+    *,
+    frzl_in: TomnspsRZL,
+    mats: dict,
+    jmax: int,
+    cfg,
+    use_precomputed: bool | None = None,
+) -> TomnspsRZL:
+    """Pure-NumPy version of ``rz_preconditioner_apply_jit``.
+
+    Avoids all JAX JIT dispatch overhead by running the Thomas tridiagonal
+    solve as a plain Python loop over radial surfaces.  This is faster than
+    the JIT path for the non-scan CPU iteration loop because the overhead of
+    converting NumPy→JAX arrays, dispatching to XLA, and converting back
+    dominates the actual computation for small ns (10–50 surfaces).
+    """
+    np = _np_prec
+    if use_precomputed is None:
+        _env_pre, _ = _get_env_tridi_flags()
+        use_precomputed = _env_pre
+
+    has_cr_ir = ("cr" in mats) and ("ir" in mats) and ("cz" in mats) and ("iz" in mats)
+    if not has_cr_ir:
+        use_precomputed = False
+
+    lthreed = bool(getattr(cfg, "lthreed", False))
+    lasym   = bool(getattr(cfg, "lasym",   False))
+    use_rss = lthreed
+    use_rsc = lasym
+    use_rcs = lthreed and lasym
+    use_zcs = lthreed
+    use_zcc = lasym
+    use_zss = lthreed and lasym
+
+    # Convert all mats to NumPy once.
+    def _get(key, fallback):
+        v = mats.get(key, None)
+        return np.asarray(v) if v is not None else np.asarray(fallback)
+
+    ar = np.asarray(mats["ar"])
+    br = np.asarray(mats["br"])
+    dr = np.asarray(mats["dr"])
+    cr = _get("cr", ar)
+    ir = _get("ir", dr)
+    az = np.asarray(mats["az"])
+    bz = np.asarray(mats["bz"])
+    dz = np.asarray(mats["dz"])
+    cz = _get("cz", az)
+    iz = _get("iz", dz)
+
+    def _to_np(x, like):
+        return np.asarray(x) if x is not None else np.zeros_like(like)
+
+    frcc = np.asarray(frzl_in.frcc)
+    fzsc = np.asarray(frzl_in.fzsc)
+    frss = _to_np(frzl_in.frss, frcc)
+    fzcs = _to_np(frzl_in.fzcs, fzsc)
+    frsc = _to_np(getattr(frzl_in, "frsc", None), frcc)
+    frcs = _to_np(getattr(frzl_in, "frcs", None), frcc)
+    fzcc = _to_np(getattr(frzl_in, "fzcc", None), fzsc)
+    fzss = _to_np(getattr(frzl_in, "fzss", None), fzsc)
+
+    has_frss = frzl_in.frss is not None
+    has_fzcs = frzl_in.fzcs is not None
+
+    jmax = int(jmax)
+
+    frcc_u = frcc.copy()
+    frss_u = frss.copy()
+    fzsc_u = fzsc.copy()
+    fzcs_u = fzcs.copy()
+    frsc_u = frsc.copy()
+    frcs_u = frcs.copy()
+    fzcc_u = fzcc.copy()
+    fzss_u = fzss.copy()
+
+    if jmax > 0:
+        # --- m = 0 block ---
+        r_blocks  = [frcc[:jmax]]
+        if use_rss: r_blocks.append(frss[:jmax])
+        if use_rsc: r_blocks.append(frsc[:jmax])
+        if use_rcs: r_blocks.append(frcs[:jmax])
+        rhs_r0 = np.stack(r_blocks, axis=-1)[:, 0, :]  # (jmax, nrange, nb_r)
+
+        z_blocks  = [fzsc[:jmax]]
+        if use_zcs: z_blocks.append(fzcs[:jmax])
+        if use_zcc: z_blocks.append(fzcc[:jmax])
+        if use_zss: z_blocks.append(fzss[:jmax])
+        rhs_z0 = np.stack(z_blocks, axis=-1)[:, 0, :]  # (jmax, nrange, nb_z)
+
+        if use_precomputed:
+            sol_r0 = _tridi_solve_precomputed_np(ar[:, 0, :], cr[:, 0, :], ir[:, 0, :], rhs_r0)
+            sol_z0 = _tridi_solve_precomputed_np(az[:, 0, :], cz[:, 0, :], iz[:, 0, :], rhs_z0)
+        else:
+            sol_r0 = _tridi_solve_np(ar[:, 0, :], dr[:, 0, :], br[:, 0, :], rhs_r0)
+            sol_z0 = _tridi_solve_np(az[:, 0, :], dz[:, 0, :], bz[:, 0, :], rhs_z0)
+
+        idx = 0
+        frcc_u[:jmax, 0, :] = sol_r0[..., idx]; idx += 1
+        if use_rss: frss_u[:jmax, 0, :] = sol_r0[..., idx]; idx += 1
+        if use_rsc: frsc_u[:jmax, 0, :] = sol_r0[..., idx]; idx += 1
+        if use_rcs: frcs_u[:jmax, 0, :] = sol_r0[..., idx]; idx += 1
+
+        idx = 0
+        fzsc_u[:jmax, 0, :] = sol_z0[..., idx]; idx += 1
+        if use_zcs: fzcs_u[:jmax, 0, :] = sol_z0[..., idx]; idx += 1
+        if use_zcc: fzcc_u[:jmax, 0, :] = sol_z0[..., idx]; idx += 1
+        if use_zss: fzss_u[:jmax, 0, :] = sol_z0[..., idx]; idx += 1
+
+        # --- m >= 1 blocks (jmin = 1, so surface 0 is skipped) ---
+        mpol = int(frcc.shape[1])
+        if mpol > 1 and jmax > 1:
+            rhs_rm = np.stack(r_blocks, axis=-1)[1:, 1:, :]  # (jmax-1, mpol-1, nrange, nb_r)
+            rhs_zm = np.stack(z_blocks, axis=-1)[1:, 1:, :]  # (jmax-1, mpol-1, nrange, nb_z)
+
+            if use_precomputed:
+                sol_rm = _tridi_solve_precomputed_np(
+                    ar[1:jmax, 1:, :], cr[1:jmax, 1:, :], ir[1:jmax, 1:, :], rhs_rm)
+                sol_zm = _tridi_solve_precomputed_np(
+                    az[1:jmax, 1:, :], cz[1:jmax, 1:, :], iz[1:jmax, 1:, :], rhs_zm)
+            else:
+                sol_rm = _tridi_solve_np(
+                    ar[1:jmax, 1:, :], dr[1:jmax, 1:, :], br[1:jmax, 1:, :], rhs_rm)
+                sol_zm = _tridi_solve_np(
+                    az[1:jmax, 1:, :], dz[1:jmax, 1:, :], bz[1:jmax, 1:, :], rhs_zm)
+
+            idx = 0
+            frcc_u[1:jmax, 1:, :] = sol_rm[..., idx]; idx += 1
+            if use_rss: frss_u[1:jmax, 1:, :] = sol_rm[..., idx]; idx += 1
+            if use_rsc: frsc_u[1:jmax, 1:, :] = sol_rm[..., idx]; idx += 1
+            if use_rcs: frcs_u[1:jmax, 1:, :] = sol_rm[..., idx]; idx += 1
+
+            idx = 0
+            fzsc_u[1:jmax, 1:, :] = sol_zm[..., idx]; idx += 1
+            if use_zcs: fzcs_u[1:jmax, 1:, :] = sol_zm[..., idx]; idx += 1
+            if use_zcc: fzcc_u[1:jmax, 1:, :] = sol_zm[..., idx]; idx += 1
+            if use_zss: fzss_u[1:jmax, 1:, :] = sol_zm[..., idx]; idx += 1
+
+    return TomnspsRZL(
+        frcc=frcc_u,
+        frss=frss_u if has_frss else None,
+        fzsc=fzsc_u,
+        fzcs=fzcs_u if has_fzcs else None,
+        flsc=np.asarray(frzl_in.flsc),
+        flcs=(np.asarray(frzl_in.flcs) if frzl_in.flcs is not None else None),
+        frsc=(frsc_u if getattr(frzl_in, "frsc", None) is not None else None),
+        frcs=(frcs_u if getattr(frzl_in, "frcs", None) is not None else None),
+        fzcc=(fzcc_u if getattr(frzl_in, "fzcc", None) is not None else None),
+        fzss=(fzss_u if getattr(frzl_in, "fzss", None) is not None else None),
+        flcc=(np.asarray(frzl_in.flcc) if getattr(frzl_in, "flcc", None) is not None else None),
+        flss=(np.asarray(frzl_in.flss) if getattr(frzl_in, "flss", None) is not None else None),
+    )

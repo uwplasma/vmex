@@ -623,7 +623,11 @@ def test_run_fixed_boundary_cli_budgeted_multigrid_path(monkeypatch, tmp_path):
 
     assert [call["ns"] for call in calls] == [5, 9, 13, 13]
     assert [call["max_iter"] for call in calls] == [27, 18, 100, 100]
-    assert [call["use_scan"] for call in calls] == [True, True, False, False]
+    # On CPU CLI runs, all accelerated stages use non-scan (Python loop + NumPy
+    # hot-path is faster); parity stages were already non-scan.  On non-CPU
+    # backends, accelerated stages still use scan (device loop is faster).
+    _cli_scan = driver_module._default_backend_name() != "cpu"
+    assert [call["use_scan"] for call in calls] == [_cli_scan, _cli_scan, False, False]
     diag = run.result.diagnostics
     assert diag["cli_fixed_boundary_mode"] is True
     assert diag["cli_accelerated_fixed_policy"] == "budgeted_multigrid"
@@ -759,10 +763,11 @@ def test_run_fixed_boundary_cli_single_grid_uses_accelerated_finish_first(monkey
 
     assert [call["ns"] for call in calls] == [13, 13, 13]
     assert [call["max_iter"] for call in calls] == [100, 100, 100]
-    # Initial stage uses scan (accelerated, fixed-boundary); retry attempts
-    # use scan only on non-CPU backends (avoids recompilation overhead on CPU).
-    retry_use_scan = driver_module._default_backend_name() != "cpu"
-    assert [call["use_scan"] for call in calls] == [True, retry_use_scan, retry_use_scan]
+    # On CPU CLI runs, all attempts use the Python loop (non-scan) path because
+    # the NumPy hot-path is faster than lax.scan + JIT compilation for CLI use.
+    # On non-CPU backends, scan is used (device loop is faster than host loop).
+    cpu_use_scan = driver_module._default_backend_name() != "cpu"
+    assert [call["use_scan"] for call in calls] == [cpu_use_scan, cpu_use_scan, cpu_use_scan]
     assert [call["resume_state_mode"] for call in calls] == ["minimal", "minimal", "minimal"]
     # Single-grid: only stage is the final stage, so fsq_total_target=None for
     # exact per-component convergence matching VMEC2000. Retry attempts (mode=
@@ -833,8 +838,9 @@ def test_run_fixed_boundary_cli_single_grid_requires_strict_ftol(monkeypatch, tm
 
     assert [call["ns"] for call in calls] == [13, 13, 13]
     assert [call["max_iter"] for call in calls] == [100, 100, 100]
-    retry_use_scan = driver_module._default_backend_name() != "cpu"
-    assert [call["use_scan"] for call in calls] == [True, retry_use_scan, retry_use_scan]
+    # On CPU CLI runs, all stages use non-scan (NumPy hot-path); non-CPU uses scan.
+    cli_scan = driver_module._default_backend_name() != "cpu"
+    assert [call["use_scan"] for call in calls] == [cli_scan, cli_scan, cli_scan]
     diag = run.result.diagnostics
     assert np.asarray(diag["cli_fixed_boundary_finish_budgets"]).tolist() == [100, 100]
     assert np.asarray(diag["cli_fixed_boundary_finish_modes"]).tolist() == ["accelerated", "accelerated"]
@@ -920,7 +926,9 @@ def test_run_fixed_boundary_cli_explicit_staged_followup_after_single_grid_miss(
 
     assert [call["ns"] for call in calls] == [13, 5, 9, 13]
     assert [call["max_iter"] for call in calls] == [70, 10, 20, 40]
-    assert [call["use_scan"] for call in calls] == [True, True, True, False]
+    # On CPU CLI runs: accelerated stages use non-scan; parity stages always non-scan.
+    _cli_scan = driver_module._default_backend_name() != "cpu"
+    assert [call["use_scan"] for call in calls] == [_cli_scan, _cli_scan, _cli_scan, False]
     diag = run.result.diagnostics
     assert diag["cli_fixed_boundary_mode"] is True
     assert diag["cli_fixed_boundary_initial_policy"] == "single_grid"

@@ -618,7 +618,9 @@ def vmec_scalxc_from_s(*, s: Any, mpol: int, cache: bool = True) -> jnp.ndarray:
         key = _scalxc_cache_key(s=s, mpol=mpol)
         cached = _SCALXC_CACHE.get(key)
         if cached is not None:
-            return cached
+            # In numpy mode (host_update_assembly hot-path), the cached JAX array
+            # must be converted to numpy to avoid JAX dispatch in downstream ops.
+            return jnp.asarray(cached)
 
     s = jnp.asarray(s)
     ns = int(s.shape[0])
@@ -636,7 +638,10 @@ def vmec_scalxc_from_s(*, s: Any, mpol: int, cache: bool = True) -> jnp.ndarray:
     m = jnp.arange(mpol, dtype=jnp.int32)
     is_odd = (m % 2) == 1
     out = jnp.where(is_odd[None, :], scal_odd[:, None], jnp.ones((ns, mpol), dtype=sqrts.dtype))
-    if cache and _cache_allowed():
+    if cache and _cache_allowed() and has_jax():
+        # Only cache when in JAX mode so that _NpArray values from the numpy
+        # hot-path are never stored.  Storing _NpArray here would contaminate
+        # subsequent JAX-mode callers that share the same cache key.
         _SCALXC_CACHE[key] = out
     return out
 

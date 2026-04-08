@@ -39,6 +39,22 @@ def _freeb_host_phase_stack(*, modes: Any, trig: Any, derivs: tuple[str, ...]) -
     key = (id(modes), id(trig), tuple(derivs))
     cached = _FREEB_HOST_PHASE_CACHE.get(key)
     if cached is not None:
+        # Guard against Python id-reuse: a GC'd (modes, trig) pair may share the
+        # same id as a new pair with different shapes.  Validate the cached array.
+        # Expected shape: (len(derivs), 2*K, ntheta3, nzeta).
+        try:
+            K = int(np.asarray(modes.m).shape[0])
+            nzeta = int(np.asarray(trig.cosnv).shape[0])
+            ntheta3 = int(np.asarray(trig.cosmu).shape[0])
+            if (
+                int(cached.shape[1]) != 2 * K
+                or int(cached.shape[2]) != ntheta3
+                or int(cached.shape[3]) != nzeta
+            ):
+                cached = None
+        except Exception:
+            cached = None
+    if cached is not None:
         return cached
 
     m = np.asarray(modes.m, dtype=np.int32)

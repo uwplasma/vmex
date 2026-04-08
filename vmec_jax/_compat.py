@@ -13,11 +13,40 @@ JAX is imported, unless the user has explicitly set ``JAX_ENABLE_X64``.
 from __future__ import annotations
 
 from typing import Any, Callable, Tuple
+import threading
 import types
 
 import os
 
 import numpy as _np
+
+
+# ---------------------------------------------------------------------------
+# Thread-local NumPy-mode override (for pure-NumPy force hot path).
+# ---------------------------------------------------------------------------
+
+_numpy_mode_local = threading.local()
+
+
+def numpy_mode_enabled() -> bool:
+    """Return True if the current thread is inside a numpy_mode_context."""
+    return getattr(_numpy_mode_local, "active", False)
+
+
+class numpy_mode_context:
+    """Context manager to force pure-NumPy paths in has_jax()-gated code.
+
+    Inside this context, ``has_jax()`` returns False so that all
+    ``jnp.*`` dispatch is replaced by ``np.*`` (via the fallback path).
+    This eliminates all JAX eager-dispatch overhead in the force hot loop.
+    """
+
+    def __enter__(self):
+        _numpy_mode_local.active = True
+        return self
+
+    def __exit__(self, *_):
+        _numpy_mode_local.active = False
 
 
 def _noop_jit(f=None, *args, **_kwargs):
@@ -81,6 +110,8 @@ except Exception:
 
 
 def has_jax() -> bool:
+    if getattr(_numpy_mode_local, "active", False):
+        return False
     return jax is not None
 
 
@@ -116,7 +147,7 @@ def asarray(x: Any, dtype: Any | None = None):
 
 def einsum(expr: str, *operands: Any, precision: Any | None = None):
     """Backend-aware einsum with high-precision accumulation when available."""
-    if jax is None:
+    if jax is None or getattr(_numpy_mode_local, "active", False):
         return _np.einsum(expr, *operands)
     if precision is None:
         try:
