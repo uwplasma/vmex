@@ -11220,24 +11220,13 @@ def solve_fixed_boundary_residual_iter(
                 if lam_debug is not None:
                     _maybe_dump_lamcal(lam_debug=lam_debug, static=static, iter_idx=int(iter2))
                 frzl_rhs = _apply_vmec_scale_m1_precond_rhs(frzl, mats)
-                if host_update_assembly:
-                    # Pure-NumPy preconditioner: avoids NumPy→JAX→NumPy round-trip
-                    # (device_put + XLA dispatch + device_get) that costs ~40ms/run.
-                    from .preconditioner_1d_jax import rz_preconditioner_apply_numpy as _rz_apply_np_1
-                    frzl_rz = _rz_apply_np_1(
-                        frzl_in=frzl_rhs,
-                        mats=mats,
-                        jmax=jmax,
-                        cfg=cfg,
-                    )
-                else:
-                    from .preconditioner_1d_jax import rz_preconditioner_apply_jit as _rz_apply_jit_1
-                    frzl_rz = _rz_apply_jit_1(
-                        frzl_in=frzl_rhs,
-                        mats=mats,
-                        jmax=jmax,
-                        cfg=cfg,
-                    )
+                from .preconditioner_1d_jax import rz_preconditioner_apply_jit as _rz_apply_jit_1
+                frzl_rz = _rz_apply_jit_1(
+                    frzl_in=frzl_rhs,
+                    mats=mats,
+                    jmax=jmax,
+                    cfg=cfg,
+                )
                 frzl_lam_pre = frzl_rz
                 if host_update_assembly:
                     # NumPy path: avoids ~15 JAX dispatches (jnp.asarray, zeros_like, mul).
@@ -11375,21 +11364,12 @@ def solve_fixed_boundary_residual_iter(
                     if bool(getattr(cfg, "lasym", False))
                     else frzl
                 )
-                if host_update_assembly:
-                    from .preconditioner_1d_jax import rz_preconditioner_apply_numpy as _rz_apply_np_2
-                    frzl_rz = _rz_apply_np_2(
-                        frzl_in=frzl_rhs,
-                        mats=mats,
-                        jmax=jmax,
-                        cfg=cfg,
-                    )
-                else:
-                    from .preconditioner_1d_jax import rz_preconditioner_apply_jit as _rz_apply_jit_2
-                    frzl_rz = _rz_apply_jit_2(
-                        frzl_in=frzl_rhs,
-                        mats=mats,
-                        jmax=jmax,
-                        cfg=cfg,
+                from .preconditioner_1d_jax import rz_preconditioner_apply_jit as _rz_apply_jit_2
+                frzl_rz = _rz_apply_jit_2(
+                    frzl_in=frzl_rhs,
+                    mats=mats,
+                    jmax=jmax,
+                    cfg=cfg,
                     )
                 frzl_lam_pre = frzl_rz
                 if host_update_assembly:

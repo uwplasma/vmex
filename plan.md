@@ -2182,3 +2182,52 @@ NS=[31→151], ftol=1e-13, warm run after XLA compilation):
 **Remaining GPU items**:
 - Split `_ScanCarry` hot/cold to further reduce per-iter memory traffic (potential 2× more)
 - GPU is now the *recommended backend* for scan-based solves with NS ≥ 151.
+
+---
+
+### 2026-04-08 — CPU NumPy hot-path refinements (Phase 1.5)
+
+**Goal**: fix regression introduced by NumPy preconditioner switch for 3D (lthreed=True) cases;
+also add asarray dtype fast path and mask pre-conversion to reduce Python overhead.
+
+**Changes committed this session** (all on `main`):
+
+#### Commits:
+1. `915a221` — stack cache + fix static/state ns mismatch when NS_ARRAY stages skipped.
+2. `a63ee24` — asarray dtype fast path; pre-convert mask/s arrays to _NpArray; NumPy precond
+   (REVERTED in a63ee24+fix below).
+3. This commit — revert NumPy preconditioner (too slow for 3D), keep dtype fast path.
+
+#### Root cause analysis:
+- Commit `a63ee24` switched both preconditioner call sites to `rz_preconditioner_apply_numpy`
+  (Python-loop Thomas algorithm) when `host_update_assembly=True`.
+- For the **2D tokamak** (lthreed=False) with a single-stage grid, this was neutral or slightly
+  faster (JIT precond compile amortized over many fewer calls).
+- For **3D cases** (lthreed=True, nfp4_QH, nfp3_QI), the accelerated CLI driver calls
+  `solve_fixed_boundary_residual_iter` ~993 times per `max_iter=5` run (adaptive outer loop).
+  Each call invokes the preconditioner ~5 times → ~4965 precond applications.
+  - NumPy path: 19824 `_tridi_solve_np` calls at 0.13ms + overhead = **5.3s extra vs 915a221**
+  - JIT path: compiles once (~1-2s amortized), then ~0.1ms/call = faster overall.
+
+#### Profiler measurements (`input.nfp4_QH_warm_start --max-iter 5`):
+| Version | user time | Notes |
+|---------|-----------|-------|
+| 5be3263 (pre-Phase-1) | 62.46s | JAX eager, no NumPy path |
+| 32d2470 / 915a221 (JIT precond) | 62.55s | NumPy forces + JIT precond |
+| a63ee24 (NumPy precond, broken) | **67.86s** | +5.3s regression |
+| **This fix** (JIT precond restored) | **59.70s** | **12% faster than a63ee24** |
+
+#### What is kept from a63ee24:
+- `_NP_MODULE.asarray` dtype fast path: if input is already `_NpArray` with matching dtype,
+  return it immediately (avoids redundant `np.asarray` copy for pre-converted mask arrays).
+- Pre-convert `static.m_is_even/odd/m1/odd_rest` to float `_NpArray` before iteration loop,
+  so the fast path fires on every access (~60k `asarray` calls/run eliminated).
+- Pre-convert `static.s` to `_NpArray` for the same reason.
+- `_apply_vmec_scale_m1_precond_rhs` NumPy path (no jnp.asarray round-trip).
+
+#### What was reverted:
+- Switched both `rz_preconditioner_apply_numpy` call sites back to `rz_preconditioner_apply_jit`
+  (unconditionally, regardless of `host_update_assembly`).
+  The JIT cache is keyed on `(jmax, lthreed, lasym, ...)` so it compiles once per unique config.
+
+**Test suite**: 148 passed, 61 skipped.
