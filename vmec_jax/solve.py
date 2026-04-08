@@ -6233,6 +6233,19 @@ def solve_fixed_boundary_residual_iter(
                 "lax",
                 "force",
             )
+        # On GPU/TPU, lax.cond executes BOTH branches unconditionally. The
+        # restart payload (_restart_payload) re-runs the full vmec_bcovar +
+        # force computation for the checkpoint state, doubling per-iteration
+        # cost even when restarts are rare. On CPU, lax.cond branches are
+        # selected at Python level (Python loop), so this overhead is avoided.
+        # Default: use restart payload on CPU only; skip it on GPU/TPU.
+        _rp_env = os.getenv("VMEC_JAX_SCAN_RESTART_PAYLOAD", "").strip().lower()
+        if _rp_env in ("1", "true", "yes"):
+            scan_use_restart_payload = True
+        elif _rp_env in ("0", "false", "no"):
+            scan_use_restart_payload = False
+        else:
+            scan_use_restart_payload = (_scan_backend_name() == "cpu")
         dump_timecontrol_scan = os.getenv("VMEC_JAX_DUMP_TIMECONTROL", "") not in ("", "0")
         scan_timecontrol_callback = None
         if dump_timecontrol_scan:
@@ -7861,36 +7874,77 @@ def solve_fixed_boundary_residual_iter(
                     )
 
                 do_restart_payload = do_restart
-                (
-                    frcc_u_use,
-                    frss_u_use,
-                    fzsc_u_use,
-                    fzcs_u_use,
-                    flsc_u_use,
-                    flcs_u_use,
-                    frsc_u_use,
-                    frcs_u_use,
-                    fzcc_u_use,
-                    fzss_u_use,
-                    flcc_u_use,
-                    flss_u_use,
-                    fsqr_use,
-                    fsqz_use,
-                    fsql_use,
-                    fsqr1_use,
-                    fsqz1_use,
-                    fsql1_use,
-                    cache_precond_diag_use,
-                    cache_tcon_use,
-                    cache_norms_use,
-                    cache_rz_scale_use,
-                    cache_l_scale_use,
-                    cache_rz_norm_use,
-                    cache_f_norm1_use,
-                    cache_rz_mats_use,
-                    cache_lam_prec_use,
-                    cache_valid_use,
-                ) = jax.lax.cond(do_restart_payload, _restart_payload, _current_payload, operand=None)
+                if bool(scan_use_restart_payload):
+                    # CPU path (or explicit override): run lax.cond so that
+                    # when a restart occurs the forces are re-evaluated for the
+                    # checkpoint state before updating velocities. On CPU the
+                    # Python-loop only calls the selected branch, so this is free.
+                    (
+                        frcc_u_use,
+                        frss_u_use,
+                        fzsc_u_use,
+                        fzcs_u_use,
+                        flsc_u_use,
+                        flcs_u_use,
+                        frsc_u_use,
+                        frcs_u_use,
+                        fzcc_u_use,
+                        fzss_u_use,
+                        flcc_u_use,
+                        flss_u_use,
+                        fsqr_use,
+                        fsqz_use,
+                        fsql_use,
+                        fsqr1_use,
+                        fsqz1_use,
+                        fsql1_use,
+                        cache_precond_diag_use,
+                        cache_tcon_use,
+                        cache_norms_use,
+                        cache_rz_scale_use,
+                        cache_l_scale_use,
+                        cache_rz_norm_use,
+                        cache_f_norm1_use,
+                        cache_rz_mats_use,
+                        cache_lam_prec_use,
+                        cache_valid_use,
+                    ) = jax.lax.cond(do_restart_payload, _restart_payload, _current_payload, operand=None)
+                else:
+                    # GPU/TPU path: lax.cond executes BOTH branches on every
+                    # iteration, which doubles the vmec_bcovar cost. Instead,
+                    # always use the current-state forces. After a restart,
+                    # force_bcovar_update=True (set in _restart_updates) ensures
+                    # fresh forces and a rebuilt preconditioner at the next iter.
+                    (
+                        frcc_u_use,
+                        frss_u_use,
+                        fzsc_u_use,
+                        fzcs_u_use,
+                        flsc_u_use,
+                        flcs_u_use,
+                        frsc_u_use,
+                        frcs_u_use,
+                        fzcc_u_use,
+                        fzss_u_use,
+                        flcc_u_use,
+                        flss_u_use,
+                        fsqr_use,
+                        fsqz_use,
+                        fsql_use,
+                        fsqr1_use,
+                        fsqz1_use,
+                        fsql1_use,
+                        cache_precond_diag_use,
+                        cache_tcon_use,
+                        cache_norms_use,
+                        cache_rz_scale_use,
+                        cache_l_scale_use,
+                        cache_rz_norm_use,
+                        cache_f_norm1_use,
+                        cache_rz_mats_use,
+                        cache_lam_prec_use,
+                        cache_valid_use,
+                    ) = _current_payload(None)
 
                 frcc_u = frcc_u_use
                 frss_u = frss_u_use
@@ -8436,6 +8490,7 @@ def solve_fixed_boundary_residual_iter(
             int(nstep_screen),
             bool(use_restart_triggers),
             bool(vmecpp_restart),
+            bool(scan_use_restart_payload),
             None if stage_prev_fsq is None else float(stage_prev_fsq),
             float(stage_transition_factor),
             float(stage_transition_scale),
