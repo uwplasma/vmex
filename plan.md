@@ -2142,8 +2142,25 @@ Legend:
   over ns=151 radial steps with small arrays).
 - The FFT is now auto-detected: OFF on CPU (DFT-GEMM wins), ON on GPU/TPU (cuFFT wins).
 
-**GPU path** (RTX A4000, office machine):
-- Uses `lax.scan` (not Python loop) — full solve compiled as one XLA computation.
+**GPU path** (RTX A4500, office machine, JAX 0.6.2):
+- **Bug fixed** (`95f214d`): `current_driven_3d_cli` scan override was CPU-only in
+  intent but applied unconditionally, forcing Python-loop on GPU. Fixed by adding
+  `_default_backend_name() == "cpu"` guard — mirrors `FINAL_STAGE_CPU_SCAN` pattern.
+  Before fix: **539s** (Python-loop, 74ms/iter device→host sync × 7114 iters).
+  After fix (scan mode): **483s** cold (first run, includes XLA compilation).
 - `host_update_assembly` (NumPy hot-path) is CPU-only; JAX path used on GPU.
-- FFT now enabled by default on GPU via auto-detection.
-- GPU benchmark in progress (first run includes JIT compilation overhead).
+- FFT now enabled by default on GPU via auto-detection (`_get_tomnsps_fft()`).
+- XLA compilation for the scan body: ~130s (CPU-bound, cached after first run).
+- GPU compute for NS=151 case: ~350s (warm run, cached compile not yet confirmed).
+  Root cause of slow GPU: problem too small for RTX A4500's 6144 CUDA cores
+  (arrays 21k elements → 3 elements/core). Memory-bound by 64-field scan carry
+  (~5 MB/iter × 10000 iters = 50 GB GDDR6 traffic at 448 GB/s = 112s minimum).
+- **Recommendation**: GPU scan beneficial for NS > 500 or batched evaluations.
+  For NS=151, CPU Python-loop+NumPy (32s) outperforms GPU scan (~350s warm).
+
+**GPU improvement TODO** (Phase 2.2):
+- Split `_ScanCarry` hot (state, velocities, fsq, time_step) / cold (checkpoint,
+  precond cache) to reduce per-iter memory from ~5 MB to ~1.5 MB, potentially
+  3× speedup on GPU (targeting ~120s warm for NS=151).
+- For truly competitive GPU: use `lax.while_loop` (supports early termination)
+  instead of `lax.scan` on GPU to avoid running `max_iter` iterations after conv.
