@@ -2142,7 +2142,7 @@ Legend:
   over ns=151 radial steps with small arrays).
 - The FFT is now auto-detected: OFF on CPU (DFT-GEMM wins), ON on GPU/TPU (cuFFT wins).
 
-**GPU path** (RTX A4500, office machine, JAX 0.6.2):
+**GPU path** (RTX A4000, office machine, JAX 0.6.2):
 - **Bug fixed** (`95f214d`): `current_driven_3d_cli` scan override was CPU-only in
   intent but applied unconditionally, forcing Python-loop on GPU. Fixed by adding
   `_default_backend_name() == "cpu"` guard — mirrors `FINAL_STAGE_CPU_SCAN` pattern.
