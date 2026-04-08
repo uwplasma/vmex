@@ -7917,9 +7917,12 @@ def solve_fixed_boundary_residual_iter(
                 else:
                     # GPU/TPU path: lax.cond executes BOTH branches on every
                     # iteration, which doubles the vmec_bcovar cost. Instead,
-                    # always use the current-state forces. After a restart,
-                    # force_bcovar_update=True (set in _restart_updates) ensures
-                    # fresh forces and a rebuilt preconditioner at the next iter.
+                    # always use the current-state forces, but zero them out
+                    # when a restart occurred. This is safe because velocities
+                    # are also zeroed on restart (_restart_updates), so the
+                    # velocity update v_new = inv_tau*0 + gamma*0 = 0 becomes
+                    # a no-op and the next iteration starts fresh from the
+                    # checkpoint state with force_bcovar_update=True.
                     (
                         frcc_u_use,
                         frss_u_use,
@@ -7950,6 +7953,22 @@ def solve_fixed_boundary_residual_iter(
                         cache_lam_prec_use,
                         cache_valid_use,
                     ) = _current_payload(None)
+                    # Zero out force arrays on restart so the velocity update
+                    # is a no-op (velocities are also zeroed in _restart_updates).
+                    _no_restart = ~do_restart
+                    frcc_u_use = jnp.where(_no_restart, frcc_u_use, jnp.zeros_like(frcc_u_use))
+                    frss_u_use = jnp.where(_no_restart, frss_u_use, jnp.zeros_like(frss_u_use))
+                    fzsc_u_use = jnp.where(_no_restart, fzsc_u_use, jnp.zeros_like(fzsc_u_use))
+                    fzcs_u_use = jnp.where(_no_restart, fzcs_u_use, jnp.zeros_like(fzcs_u_use))
+                    flsc_u_use = jnp.where(_no_restart, flsc_u_use, jnp.zeros_like(flsc_u_use))
+                    flcs_u_use = jnp.where(_no_restart, flcs_u_use, jnp.zeros_like(flcs_u_use))
+                    frsc_u_use = jnp.where(_no_restart, frsc_u_use, jnp.zeros_like(frsc_u_use))
+                    frcs_u_use = jnp.where(_no_restart, frcs_u_use, jnp.zeros_like(frcs_u_use))
+                    fzcc_u_use = jnp.where(_no_restart, fzcc_u_use, jnp.zeros_like(fzcc_u_use))
+                    fzss_u_use = jnp.where(_no_restart, fzss_u_use, jnp.zeros_like(fzss_u_use))
+                    flcc_u_use = jnp.where(_no_restart, flcc_u_use, jnp.zeros_like(flcc_u_use))
+                    flss_u_use = jnp.where(_no_restart, flss_u_use, jnp.zeros_like(flss_u_use))
+                    cache_valid_use = jnp.where(_no_restart, cache_valid_use, jnp.asarray(False))
 
                 frcc_u = frcc_u_use
                 frss_u = frss_u_use
