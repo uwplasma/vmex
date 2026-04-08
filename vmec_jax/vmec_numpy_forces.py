@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from typing import Any
+import weakref
 
 import numpy as np
 
@@ -142,6 +143,10 @@ class _NpModule:
     int64 = np.int64
     bool_ = np.bool_
 
+    # Provide jnp.fft.rfft / jnp.fft.irfft as _NpFftModule instance.
+    # (defined after _NpFftModule class below; patched at module load time)
+    fft: "_NpFftModule" = None  # type: ignore[assignment]  # set after class def
+
     @staticmethod
     def asarray(x, dtype=None) -> _NpArray:
         if dtype is not None:
@@ -198,7 +203,29 @@ class _NpModule:
 
     @staticmethod
     def stack(arrays, axis=0) -> _NpArray:
-        return _wrap(np.stack([np.asarray(a) for a in arrays], axis=axis))
+        # Cache by identity of each input array + axis.  For the common case
+        # where input arrays are long-lived cached phase tables, this avoids
+        # re-running np.stack on every iteration (~55 000 calls saved per run).
+        #
+        # We validate cache entries with weakrefs so that Python id()-reuse
+        # after garbage collection cannot produce stale (wrong) results.
+        arr_list = list(arrays)
+        key = tuple(id(a) for a in arr_list) + (axis,)
+        entry = _NP_STACK_CACHE.get(key)
+        if entry is not None:
+            refs, result = entry
+            # refs[i]() returns the original array if still alive, else None.
+            # "is" comparison ensures it's the exact same Python object, not
+            # a newly-allocated object that happens to share the same id().
+            if all(r() is a for r, a in zip(refs, arr_list)):
+                return result
+        result = _wrap(np.stack([np.asarray(a) for a in arr_list], axis=axis))
+        try:
+            refs = [weakref.ref(a) for a in arr_list]
+            _NP_STACK_CACHE[key] = (refs, result)
+        except TypeError:
+            pass  # not weakly referenceable — skip caching
+        return result
 
     @staticmethod
     def concatenate(arrays, axis=0) -> _NpArray:
@@ -369,10 +396,6 @@ class _NpModule:
         return _wrap(np.cumsum(np.asarray(x), axis=axis))
 
     @staticmethod
-    def fft(*args, **kwargs) -> _NpArray:
-        return _wrap(np.fft.fft(*[np.asarray(a) if not isinstance(a, int) else a for a in args], **kwargs))
-
-    @staticmethod
     def real(x) -> _NpArray:
         return _wrap(np.real(np.asarray(x)))
 
@@ -381,8 +404,35 @@ class _NpModule:
         return _wrap(np.imag(np.asarray(x)))
 
 
+class _NpFftModule:
+    """Minimal jnp.fft namespace backed by NumPy FFT.
+
+    jnp.fft is accessed as a sub-namespace (e.g. jnp.fft.rfft).  When jnp is
+    replaced by _NP_MODULE, attribute lookups like ``jnp.fft.rfft`` hit
+    ``_NP_MODULE.fft.rfft``, which requires ``fft`` to be an object with the
+    relevant methods rather than a bare function.
+    """
+
+    @staticmethod
+    def fft(a, n=None, axis=-1, norm=None) -> _NpArray:
+        return _wrap(np.fft.fft(np.asarray(a), n=n, axis=axis, norm=norm))
+
+    @staticmethod
+    def ifft(a, n=None, axis=-1, norm=None) -> _NpArray:
+        return _wrap(np.fft.ifft(np.asarray(a), n=n, axis=axis, norm=norm))
+
+    @staticmethod
+    def rfft(a, n=None, axis=-1, norm=None) -> _NpArray:
+        return _wrap(np.fft.rfft(np.asarray(a), n=n, axis=axis, norm=norm))
+
+    @staticmethod
+    def irfft(a, n=None, axis=-1, norm=None) -> _NpArray:
+        return _wrap(np.fft.irfft(np.asarray(a), n=n, axis=axis, norm=norm))
+
+
 # Singleton instance.
 _NP_MODULE = _NpModule()
+_NP_MODULE.fft = _NpFftModule()
 
 
 # ---------------------------------------------------------------------------
@@ -454,6 +504,11 @@ _PATCHES: list[tuple[Any, list[tuple[str, Any]]]] | None = None
 _NP_MPARITY_CACHE: dict = {}
 _NP_MASKS_CACHE: dict = {}
 _NP_TOMNSPS_MASK_CACHE: dict = {}
+# Force FFT path in NumPy mode by injecting a pre-populated cache that returns
+# True.  The real _TOMNSPS_FFT_CACHE returns False on CPU (JAX backend = cpu),
+# but numpy.fft.rfft is always available and FFT is strictly faster than DFT
+# for ntheta >= 8.
+_NP_TOMNSPS_FFT_CACHE: list = [True]
 
 # vmec_parity: SignedModeMaps has '_j' JAX fields (mask_pos_j, idx_pos_safe_j …)
 # that are indexed as n0[None,:,:] inside _mn_sin_to_signed_cached, triggering
@@ -486,10 +541,124 @@ _NP_SCALXC_CACHE: dict = {}
 # HelicalBasis objects from polluting the JAX cache.
 _NP_HELICAL_BASIS_CACHE: dict = {}
 
+# Generic stack cache: keyed by (id(a0), id(a1), ..., axis).  The phase-table
+# arrays returned by _vmec_phase_tables_stacked_cached are long-lived Python
+# objects (held in _NP_PHASE_*_STACK_CACHE), so their id()s are stable for the
+# lifetime of a VMEC solve. Caching here avoids 55 000+ redundant np.stack
+# calls (0.44 s in QA_lowres) where the input arrays don't change between
+# iterations.
+_NP_STACK_CACHE: dict = {}
+
 
 def _np_einsum(expr: str, *operands, **kwargs) -> _NpArray:
-    """NumPy einsum that always returns _NpArray."""
-    return _wrap(np.einsum(expr, *[np.asarray(op) for op in operands]))
+    """NumPy einsum that always returns _NpArray, with BLAS fast-paths.
+
+    Replaces ``np.einsum`` for the common VMEC contraction patterns so that
+    numpy dispatches to BLAS DGEMM instead of its slow loop-based C kernel.
+    Each fast-path is mathematically equivalent to the corresponding einsum.
+    """
+    # Normalise operands to plain ndarray once.
+    ops = [np.asarray(op) for op in operands]
+
+    # -----------------------------------------------------------------------
+    # vmec_tomnsp hot-path patterns (the dominant cost for large cases)
+    # -----------------------------------------------------------------------
+    if expr == "apsik,im->apsmk" and len(ops) == 2:
+        # arr (a,p,s,i,k), mat (i,m) → result (a,p,s,m,k)
+        # numpy's einsum with optimize=True is ~2× faster than manual
+        # reshape-transpose-GEMM because it avoids the non-contiguous strided copy.
+        return _wrap(np.einsum("apsik,im->apsmk", ops[0], ops[1], optimize=True))
+
+    if expr == "psmk,kn->psmn" and len(ops) == 2:
+        # arr (p,s,m,k), mat (k,n) → result (p,s,m,n)
+        arr, mat = ops
+        p, s, m, k_ = arr.shape
+        arr2 = arr.reshape(p * s * m, k_)  # k already last → no copy needed if C-contiguous
+        out2 = arr2 @ mat  # (p*s*m, n)
+        return _wrap(out2.reshape(p, s, m, mat.shape[1]))
+
+    # -----------------------------------------------------------------------
+    # vmec_constraints patterns (DFT basis projections / reconstructions)
+    # -----------------------------------------------------------------------
+    if expr == "sik,im->smk" and len(ops) == 2:
+        # arr (s,i,k), mat (i,m) → result (s,m,k)
+        arr, mat = ops
+        s, i_, k = arr.shape
+        # Bring i to last: (s,k,i) then contract with mat(i,m)
+        arr2 = arr.transpose(0, 2, 1).reshape(s * k, i_)  # (s*k, i)
+        out2 = arr2 @ mat  # (s*k, m)
+        return _wrap(out2.reshape(s, k, mat.shape[1]).transpose(0, 2, 1))
+
+    if expr == "smk,kn->smn" and len(ops) == 2:
+        # arr (s,m,k), mat (k,n) → result (s,m,n)
+        arr, mat = ops
+        s, m, k_ = arr.shape
+        arr2 = arr.reshape(s * m, k_)
+        return _wrap((arr2 @ mat).reshape(s, m, mat.shape[1]))
+
+    if expr == "smn,kn->smk" and len(ops) == 2:
+        # arr (s,m,n), mat (k,n) → result (s,m,k)
+        arr, mat = ops
+        s, m, n = arr.shape
+        arr2 = arr.reshape(s * m, n)
+        return _wrap((arr2 @ mat.T).reshape(s, m, mat.shape[0]))
+
+    if expr == "smk,im->sik" and len(ops) == 2:
+        # arr (s,m,k), mat (i,m) → result (s,i,k)
+        arr, mat = ops
+        s, m, k = arr.shape
+        # Bring m to last: (s,k,m) then contract with mat.T(m,i)
+        arr2 = arr.transpose(0, 2, 1).reshape(s * k, m)  # (s*k, m)
+        out2 = arr2 @ mat.T  # (s*k, i)
+        return _wrap(out2.reshape(s, k, mat.shape[0]).transpose(0, 2, 1))
+
+    # -----------------------------------------------------------------------
+    # fourier / vmec_realspace patterns (synthesis and analysis transforms)
+    # -----------------------------------------------------------------------
+    if expr == "...k,kij->...ij" and len(ops) == 2:
+        # coeff (...,k), phase (k,i,j) → result (...,i,j)
+        coeff, phase = ops
+        k = coeff.shape[-1]
+        prefix = coeff.shape[:-1]
+        i, j = phase.shape[1], phase.shape[2]
+        out = coeff.reshape(-1, k) @ phase.reshape(k, i * j)
+        return _wrap(out.reshape(*prefix, i, j))
+
+    if expr == "...ij,kij->...k" and len(ops) == 2:
+        # f (...,i,j), phase (k,i,j) → result (...,k)
+        f, phase = ops
+        ij = f.shape[-2] * f.shape[-1]
+        prefix = f.shape[:-2]
+        k = phase.shape[0]
+        out = f.reshape(-1, ij) @ phase.reshape(k, ij).T
+        return _wrap(out.reshape(*prefix, k))
+
+    if expr == "sij,kij->sk" and len(ops) == 2:
+        # f (s,i,j), phase (k,i,j) → result (s,k)
+        f, phase = ops
+        s = f.shape[0]
+        ij = f.shape[1] * f.shape[2]
+        k = phase.shape[0]
+        out = f.reshape(s, ij) @ phase.reshape(k, ij).T
+        return _wrap(out)
+
+    if expr == "...k,tkij->t...ij" and len(ops) == 2:
+        # coeff (...,k), phase_all (t,k,i,j) → result (t,...,i,j)
+        # vmec_realspace_synthesis_multi: stacked synthesis for multiple derivs
+        coeff, phase_all = ops
+        k = coeff.shape[-1]
+        prefix = coeff.shape[:-1]
+        t, _, i, j = phase_all.shape
+        # Batch matmul via numpy broadcast: (1,n,k) @ (t,k,ij) → (t,n,ij)
+        n = int(np.prod(prefix)) if prefix else 1
+        coeff2 = coeff.reshape(n, k)           # (n, k)
+        phase2 = phase_all.reshape(t, k, i * j)  # (t, k, i*j) — view if C-contiguous
+        # numpy batched matmul: (1,n,k) @ (t,k,i*j) = (t,n,i*j)
+        out2 = coeff2[np.newaxis] @ phase2      # broadcast over t
+        return _wrap(out2.reshape(t, *prefix, i, j))
+
+    # Fallback: generic numpy einsum
+    return _wrap(np.einsum(expr, *ops))
 
 
 def _build_patches() -> list[tuple[Any, list[tuple[str, Any]]]]:
@@ -524,6 +693,10 @@ def _build_patches() -> list[tuple[Any, list[tuple[str, Any]]]]:
             # triggering JAX __getitem__ dispatch (saves ~6500 JAX dispatches/iter).
             ("_MPARITY_CACHE", _NP_MPARITY_CACHE),
             ("_TOMNSPS_MASK_CACHE", _NP_TOMNSPS_MASK_CACHE),
+            # Override the FFT-enable cache to True so _get_tomnsps_fft() returns
+            # True in NumPy mode.  numpy.fft.rfft is always available and faster
+            # than the DFT-GEMM fallback for ntheta >= ~8.
+            ("_TOMNSPS_FFT_CACHE", _NP_TOMNSPS_FFT_CACHE),
         ]),
         (_vmec_parity, [
             ("jnp", _NP_MODULE),
