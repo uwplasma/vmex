@@ -708,6 +708,25 @@ def _copy_input_and_mgrid(input_path: Path, workdir: Path) -> Path:
         mg_src = Path(mg)
         if not mg_src.is_absolute():
             mg_src = src.parent / mg_src
+        if not mg_src.exists():
+            search_roots = [
+                Path(__file__).resolve().parents[2] / "examples" / "data",
+                Path(__file__).resolve().parents[2] / "examples_single_grid" / "data",
+                Path(__file__).resolve().parents[3] / "STELLOPT" / "BENCHMARKS" / "VMEC_TEST",
+                Path(__file__).resolve().parents[3] / "external",
+                Path(__file__).resolve().parents[2] / "outputs",
+            ]
+            for root in search_roots:
+                if not root.exists():
+                    continue
+                exact = (root / Path(mg).name).resolve()
+                if exact.exists():
+                    mg_src = exact
+                    break
+                matches = list(root.rglob(Path(mg).name))
+                if matches:
+                    mg_src = matches[0].resolve()
+                    break
         if mg_src.exists():
             mg_dst = (workdir / Path(mg).name).resolve()
             shutil.copy2(mg_src, mg_dst)
