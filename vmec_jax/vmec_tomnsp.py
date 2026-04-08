@@ -382,9 +382,10 @@ class TomnspsRZL:
 _MPARITY_CACHE: dict[tuple[int, str], jnp.ndarray] = {}
 _JNP_EINSUM = jnp.einsum
 _DETERMINISTIC_REDUCE = bool(int(os.environ.get("VMEC_JAX_DETERMINISTIC_REDUCE", "0")))
-# FFT path is now the default for stellarator-symmetric cases (faster for large grids).
-# Disable with VMEC_JAX_TOMNSPS_FFT=0.
-_TOMNSPS_FFT = os.environ.get("VMEC_JAX_TOMNSPS_FFT", "1").strip().lower() not in ("0", "false", "no")
+# FFT path for stellarator-symmetric cases. Disabled by default on CPU: benchmarks show
+# the DFT-GEMM path is faster for typical CPU problem sizes (small ntor/mpol grids).
+# Enable with VMEC_JAX_TOMNSPS_FFT=1 (recommended for GPU or very large ntor grids).
+_TOMNSPS_FFT = os.environ.get("VMEC_JAX_TOMNSPS_FFT", "0").strip().lower() not in ("0", "false", "no")
 _TOMNSPS_THETA_FUSED = os.environ.get("VMEC_JAX_TOMNSPS_THETA_FUSED", "1").strip().lower() not in (
     "",
     "0",
