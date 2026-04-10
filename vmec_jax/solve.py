@@ -4844,9 +4844,7 @@ def solve_fixed_boundary_residual_iter(
         bsubu = bc.bsubu
         bsubv = bc.bsubv
         nzeta = int(guu.shape[2])
-        w_ang = jnp.asarray(
-            np.asarray(vmec_wint_from_trig(trig, nzeta=nzeta)), dtype=guu.dtype
-        )
+        w_ang = jnp.asarray(vmec_wint_from_trig(trig, nzeta=nzeta), dtype=guu.dtype)
         w3 = w_ang[None, :, :]
 
         # R/Z preconditioner proxy: VMEC force-norm denominator integrand.
