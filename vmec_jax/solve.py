@@ -4834,28 +4834,32 @@ def solve_fixed_boundary_residual_iter(
     def _metric_surface_precond_from_bcovar(bc):
         """Approximate radial preconditioner scaling from bcovar metrics.
 
-        This function is only called from the host (never inside lax.scan
-        traced code), so plain NumPy is sufficient and avoids JAX dispatch.
+        Called from within JIT-compiled force computation (both CPU and GPU),
+        so all operations on traced arrays must use jnp rather than np.
+        The integration weights w_ang come from a static (non-traced) source
+        and can be computed with plain NumPy before being passed to jnp ops.
         """
-        guu = np.asarray(bc.guu)
-        r12 = np.asarray(bc.jac.r12)
-        bsubu = np.asarray(bc.bsubu)
-        bsubv = np.asarray(bc.bsubv)
+        guu = bc.guu
+        r12 = bc.jac.r12
+        bsubu = bc.bsubu
+        bsubv = bc.bsubv
         nzeta = int(guu.shape[2])
-        w_ang = np.asarray(vmec_wint_from_trig(trig, nzeta=nzeta)).astype(guu.dtype)
+        w_ang = jnp.asarray(
+            np.asarray(vmec_wint_from_trig(trig, nzeta=nzeta)), dtype=guu.dtype
+        )
         w3 = w_ang[None, :, :]
 
         # R/Z preconditioner proxy: VMEC force-norm denominator integrand.
-        rz_denom = np.sum((guu * (r12 * r12)) * w3, axis=(1, 2))
-        rz_scale = np.where(rz_denom > 0.0, 1.0 / np.sqrt(np.maximum(rz_denom, 1e-300)), 1.0)
+        rz_denom = jnp.sum((guu * (r12 * r12)) * w3, axis=(1, 2))
+        rz_scale = jnp.where(rz_denom > 0.0, 1.0 / jnp.sqrt(jnp.maximum(rz_denom, 1e-300)), 1.0)
 
         # Lambda preconditioner proxy: VMEC lambda norm denominator integrand.
-        l_denom = np.sum(((bsubu * bsubu) + (bsubv * bsubv)) * w3, axis=(1, 2))
-        l_scale = np.where(l_denom > 0.0, 1.0 / np.sqrt(np.maximum(l_denom, 1e-300)), 1.0)
+        l_denom = jnp.sum(((bsubu * bsubu) + (bsubv * bsubv)) * w3, axis=(1, 2))
+        l_scale = jnp.where(l_denom > 0.0, 1.0 / jnp.sqrt(jnp.maximum(l_denom, 1e-300)), 1.0)
 
         # Keep updates bounded and avoid axis/boundary blowups.
-        rz_scale = np.clip(rz_scale, 1e-4, 1e2)
-        l_scale = np.clip(l_scale, 1e-4, 1e2)
+        rz_scale = jnp.clip(rz_scale, 1e-4, 1e2)
+        l_scale = jnp.clip(l_scale, 1e-4, 1e2)
         return rz_scale, l_scale
 
     def _pshalf_from_s(s_arr):
