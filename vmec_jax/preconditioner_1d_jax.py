@@ -1013,14 +1013,17 @@ def _rz_preconditioner_apply_arrays(
     use_zcc: bool,
     use_zss: bool,
 ):
-    frcc_u = frcc
-    frss_u = frss
-    fzsc_u = fzsc
-    fzcs_u = fzcs
-    frsc_u = frsc
-    frcs_u = frcs
-    fzcc_u = fzcc
-    fzss_u = fzss
+    # Ensure JAX .at[] support — numpy arrays pass through JIT boundary when JIT
+    # is active, but when JIT is disabled (e.g. jax_disable_jit=True in tests)
+    # they stay as plain numpy and .at[].set() would raise AttributeError.
+    frcc_u = jnp.asarray(frcc)
+    frss_u = jnp.asarray(frss)
+    fzsc_u = jnp.asarray(fzsc)
+    fzcs_u = jnp.asarray(fzcs)
+    frsc_u = jnp.asarray(frsc)
+    frcs_u = jnp.asarray(frcs)
+    fzcc_u = jnp.asarray(fzcc)
+    fzss_u = jnp.asarray(fzss)
     jmax = int(jmax)
     mpol = int(frcc.shape[1])
     nrange = int(frcc.shape[2])
