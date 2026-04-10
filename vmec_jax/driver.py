@@ -1119,7 +1119,7 @@ def run_fixed_boundary(
                 verbose=bool(verbose),
                 jit_forces=jit_forces,
                 jit_precompile=jit_precompile,
-                use_scan=False if (bool(is_final_stage) or (bool(cli_fixed_boundary_mode) and _default_backend_name() == "cpu")) else bool(use_scan),
+                use_scan=False if bool(is_final_stage) else bool(use_scan),
                 performance_mode=False if bool(is_final_stage) else True,
                 scan_wout_corrector=scan_wout_corrector,
                 stage_transition_heuristic=stage_transition_heuristic,
@@ -1218,7 +1218,7 @@ def run_fixed_boundary(
                 verbose=bool(verbose),
                 jit_forces=jit_forces,
                 jit_precompile=jit_precompile,
-                use_scan=False if (bool(is_final_stage) or (bool(cli_fixed_boundary_mode) and _default_backend_name() == "cpu")) else bool(use_scan),
+                use_scan=False if bool(is_final_stage) else bool(use_scan),
                 performance_mode=False if bool(is_final_stage) else True,
                 scan_wout_corrector=scan_wout_corrector,
                 stage_transition_heuristic=stage_transition_heuristic,
@@ -1477,7 +1477,7 @@ def run_fixed_boundary(
                 trial = _run_finish_attempt(
                     budget_i=accel_budget_i,
                     mode_i="accelerated",
-                    use_scan_i=(_default_backend_name() != "cpu"),
+                    use_scan_i=True,
                     performance_mode_i=True,
                 )
                 trial_fsq = float(_result_final_fsq(trial.result))
@@ -2299,25 +2299,22 @@ def run_fixed_boundary(
             )
             stage_resume_state_mode = "minimal" if stage_accelerated_mode else None
             is_last_stage = (i == len(ns_stages) - 1)
-            _final_cpu_scan_env = os.getenv("VMEC_JAX_FINAL_STAGE_CPU_SCAN", "0").strip().lower()
-            _final_cpu_scan_forced = _final_cpu_scan_env not in ("", "0", "false", "no")
+            _final_cpu_scan_env = os.getenv("VMEC_JAX_FINAL_STAGE_CPU_SCAN", "1").strip().lower()
+            _final_cpu_scan_disabled = _final_cpu_scan_env in ("0", "false", "no")
             if (
                 bool(cli_fixed_boundary_mode)
                 and scan_mode
                 and (_default_backend_name() == "cpu")
-                and not _final_cpu_scan_forced
+                and _final_cpu_scan_disabled
             ):
-                # On CPU CLI runs, the Python loop with host_update_assembly
-                # (NumPy mode assembly) is faster than lax.scan for all stage
-                # sizes because:
-                # (1) NumPy is more cache-efficient for the (ns, nmodes) matrix
-                # ops, (2) lax.scan requires JIT compilation (6–30 s first call
-                # per unique (ns, nmodes) config), and (3) with _to_numpy_recursive
-                # and JAX-cache patching the per-iteration Python-loop cost is
-                # now ~0.5–2 ms vs the scan compile amortised cost.
-                # This flag is NOT set for programmatic/autodiff use of
-                # run_fixed_boundary(), so gradient computations still use scan.
-                # Override with VMEC_JAX_FINAL_STAGE_CPU_SCAN=1 to force scan.
+                # lax.scan on CPU CLI is consistently faster than the NumPy
+                # hot-path when the JAX compilation disk cache is warm (which it
+                # is after the first CLI run).  Benchmarks show 2-2.5× speedup
+                # for small cases (circular/shaped tokamak, QH warm-start) and
+                # ~5% speedup for medium cases (QA_lowres NS=50) when using scan.
+                # The scan path also benefits GPU runs maximally (10-100×).
+                # Disable via VMEC_JAX_FINAL_STAGE_CPU_SCAN=0 to revert to the
+                # NumPy hot-path (useful for debugging or first-run profiling).
                 scan_mode = False
             stage_fsq_total_target = (
                 _accelerated_fsq_total_target_from_ftol(float(ftol_i))
