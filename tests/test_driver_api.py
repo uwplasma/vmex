@@ -623,14 +623,14 @@ def test_run_fixed_boundary_cli_budgeted_multigrid_path(monkeypatch, tmp_path):
 
     assert [call["ns"] for call in calls] == [5, 9, 13, 13]
     assert [call["max_iter"] for call in calls] == [27, 18, 100, 100]
-    # Scan is now the default for CLI CPU accelerated stages; parity stages are non-scan.
-    assert [call["use_scan"] for call in calls] == [True, True, False, False]
+    # All budgeted multigrid stages use accelerated+scan; parity fallback is non-scan.
+    assert [call["use_scan"] for call in calls] == [True, True, True, False]
     diag = run.result.diagnostics
     assert diag["cli_fixed_boundary_mode"] is True
     assert diag["cli_accelerated_fixed_policy"] == "budgeted_multigrid"
     assert np.asarray(diag["cli_accelerated_stage_ns"]).tolist() == [5, 9, 13]
     assert np.asarray(diag["cli_accelerated_stage_niter"]).tolist() == [27, 18, 100]
-    assert np.asarray(diag["cli_accelerated_stage_modes"]).tolist() == ["accelerated", "accelerated", "parity"]
+    assert np.asarray(diag["cli_accelerated_stage_modes"]).tolist() == ["accelerated", "accelerated", "accelerated"]
     assert diag["cli_accelerated_final_stage_budget"] == 100
     assert diag["cli_fixed_boundary_initial_policy"] == "budgeted_multigrid"
     assert np.asarray(diag["cli_fixed_boundary_finish_budgets"]).tolist() == [100]
@@ -920,8 +920,8 @@ def test_run_fixed_boundary_cli_explicit_staged_followup_after_single_grid_miss(
 
     assert [call["ns"] for call in calls] == [13, 5, 9, 13]
     assert [call["max_iter"] for call in calls] == [70, 10, 20, 40]
-    # Scan is now the default for CLI CPU accelerated stages; parity fallback is non-scan.
-    assert [call["use_scan"] for call in calls] == [True, True, True, False]
+    # All stages now use accelerated (scan) mode; parity fallback is only used as last resort.
+    assert [call["use_scan"] for call in calls] == [True, True, True, True]
     diag = run.result.diagnostics
     assert diag["cli_fixed_boundary_mode"] is True
     assert diag["cli_fixed_boundary_initial_policy"] == "single_grid"
@@ -932,7 +932,7 @@ def test_run_fixed_boundary_cli_explicit_staged_followup_after_single_grid_miss(
     assert np.asarray(diag["cli_fixed_boundary_staged_followup_modes"]).tolist() == [
         "accelerated",
         "accelerated",
-        "parity",
+        "accelerated",
     ]
     assert np.asarray(diag["cli_fixed_boundary_finish_budgets"]).tolist() == []
     assert diag["converged"] is True
@@ -994,7 +994,7 @@ def test_run_fixed_boundary_cli_explicit_staged_followup_runs_for_converged_nona
     assert np.asarray(diag["cli_fixed_boundary_staged_followup_modes"]).tolist() == [
         "parity",
         "accelerated",
-        "parity",
+        "accelerated",
     ]
 
 
