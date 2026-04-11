@@ -2623,10 +2623,22 @@ def run_fixed_boundary(
         diag["multigrid_stage_modes"] = np.asarray(stage_mode_history, dtype=object)
         # Record whether the final stage exhausted its NITER budget (matches
         # xvmec2000 behavior: terminate normally when NITER is reached).
+        # n_iter is 0-indexed (999 means 1000 iterations completed).
+        # The +1 correction is only applied when NITER_ARRAY was explicitly provided
+        # by the user (niter_stages_input is not None); when the per-stage budget is
+        # derived from a single NITER value, exhausting it doesn't constitute a
+        # "EXECUTION TERMINATED NORMALLY" signal and the parity finisher should still
+        # run if convergence hasn't been reached.
         try:
             _final_stage_niter = int(stage_results[-1].n_iter)
             _final_stage_budget = int(niter_stages[-1]) if niter_stages else 0
-            diag["multigrid_final_stage_niter_exhausted"] = bool(_final_stage_niter >= _final_stage_budget)
+            if niter_stages_input is not None:
+                # NITER_ARRAY was explicitly given: use 0-indexed check
+                _exhausted = bool(_final_stage_niter + 1 >= _final_stage_budget)
+            else:
+                # Budget derived from NITER (one value per stage): use plain >=
+                _exhausted = bool(_final_stage_niter >= _final_stage_budget)
+            diag["multigrid_final_stage_niter_exhausted"] = _exhausted
         except Exception:
             diag["multigrid_final_stage_niter_exhausted"] = False
 
