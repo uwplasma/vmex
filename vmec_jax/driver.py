@@ -1529,7 +1529,7 @@ def run_fixed_boundary(
 
         if staged_input and not (
             bool(_result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol)))
-        ) and bool(accelerated_mode):
+        ) and bool(accelerated_mode) and not bool(_multigrid_niter_exhausted):
             fallback_used = True
             fallback = run_fixed_boundary(
                 input_path,
