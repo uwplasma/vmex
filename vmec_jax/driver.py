@@ -2124,19 +2124,10 @@ def run_fixed_boundary(
                     scan_mode = False
                 elif lasym_scan_env not in ("", "auto"):
                     scan_mode = True
-            if (
-                bool(accelerated_mode)
-                and bool(current_driven_3d_cli)
-                and (not bool(cfg.lasym))
-                and (_default_backend_name() == "cpu")
-            ):
-                # Current-driven non-axisymmetric fixed-boundary cases are much
-                # more sensitive in lambda than in force-balance geometry. On CPU,
-                # the Python-loop + NumPy hot-path is faster anyway, so keep the
-                # conservative non-scan residual path for this class.
-                # On GPU/TPU we must use scan: a Python loop with per-iteration
-                # device→host syncs is 10–100× slower than lax.scan on GPU.
-                scan_mode = False
+            # Note: scan is now enabled for current_driven_3d_cli on CPU as well.
+            # Benchmarks show lax.scan is faster than the Python-loop NumPy hot-path
+            # (26s cold vs 36s cold for LandremanPaul2021_QA_lowres), with identical
+            # numerical results.
             # Optional scan-parity guard: probe a few iterations and disable scan
             # if it diverges from the non-scan VMEC2000 path.
             scan_guard_default = "0"

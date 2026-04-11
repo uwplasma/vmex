@@ -1045,7 +1045,9 @@ def test_run_fixed_boundary_cli_current_driven_nonaxis_uses_direct_multigrid(mon
 
     assert [call["ns"] for call in calls] == [5, 9, 13]
     assert [call["max_iter"] for call in calls] == [10, 20, 40]
-    assert [call["use_scan"] for call in calls] == [False, False, False]
+    # Scan is enabled for current_driven_3d_cli on CPU (benchmarks show lax.scan
+    # is faster than the Python-loop NumPy hot-path for this case).
+    assert [call["use_scan"] for call in calls] == [True, True, True]
     diag = run.result.diagnostics
     assert diag["cli_fixed_boundary_initial_policy"] == "multigrid"
     assert np.asarray(diag["multigrid_stage_modes"]).tolist() == [
