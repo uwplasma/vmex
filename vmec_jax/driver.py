@@ -1090,7 +1090,7 @@ def run_fixed_boundary(
         stage_modes: list[str] = []
         for idx, (ns_i, niter_i) in enumerate(zip(ns_stage_list, stage_budgets)):
             is_final_stage = idx == (len(ns_stage_list) - 1)
-            stage_mode_i = "parity" if bool(is_final_stage) else "accelerated"
+            stage_mode_i = "accelerated"
             if stage_state is not None and int(stage_static_prev.cfg.ns) != int(ns_i):
                 stage_state = interp_vmec_state(
                     stage_state,
@@ -1119,8 +1119,8 @@ def run_fixed_boundary(
                 verbose=bool(verbose),
                 jit_forces=jit_forces,
                 jit_precompile=jit_precompile,
-                use_scan=False if bool(is_final_stage) else bool(use_scan),
-                performance_mode=False if bool(is_final_stage) else True,
+                use_scan=bool(use_scan),
+                performance_mode=True,
                 scan_wout_corrector=scan_wout_corrector,
                 stage_transition_heuristic=stage_transition_heuristic,
                 stage_transition_factor=float(stage_transition_factor),
@@ -1180,13 +1180,11 @@ def run_fixed_boundary(
             if int(niter_i) <= 0:
                 continue
             is_final_stage = idx == (len(ns_stage_list) - 1)
-            if bool(is_final_stage):
-                stage_mode_i = "parity"
-            elif bool(cfg.lthreed) and int(idx) == 0:
+            if bool(cfg.lthreed) and int(idx) == 0:
                 # On staged 3D fixed-boundary cases, the coarsest continuation
                 # stage determines which solution branch the later continuation
-                # follows. Keep the entry and final stages on the conservative
-                # VMEC-like controller, and accelerate only interior stages.
+                # follows. Keep the entry stage on the conservative
+                # VMEC-like controller; accelerate all later stages.
                 stage_mode_i = "parity"
             else:
                 stage_mode_i = "accelerated"
@@ -1218,8 +1216,8 @@ def run_fixed_boundary(
                 verbose=bool(verbose),
                 jit_forces=jit_forces,
                 jit_precompile=jit_precompile,
-                use_scan=False if bool(is_final_stage) else bool(use_scan),
-                performance_mode=False if bool(is_final_stage) else True,
+                use_scan=bool(use_scan),
+                performance_mode=True,
                 scan_wout_corrector=scan_wout_corrector,
                 stage_transition_heuristic=stage_transition_heuristic,
                 stage_transition_factor=float(stage_transition_factor),
@@ -1493,7 +1491,14 @@ def run_fixed_boundary(
                     best_fsq = float(trial_fsq)
                 if trial_conv or (not improved):
                     break
-        if not bool(_result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol))):
+        # For multigrid paths where the final stage exhausted its NITER budget,
+        # skip extra parity iterations — matching xvmec2000's "EXECUTION TERMINATED
+        # NORMALLY" behavior when NITER is reached regardless of FTOLV convergence.
+        _multigrid_niter_exhausted = (
+            str(initial_policy) == "multigrid"
+            and bool(best_run.result.diagnostics.get("multigrid_final_stage_niter_exhausted", False))
+        )
+        if not bool(_multigrid_niter_exhausted) and not bool(_result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol))):
             budget_i = int(base_total_budget)
             while int(budget_i) >= 1:
                 prev_best_fsq = float(best_fsq)
@@ -2616,6 +2621,14 @@ def run_fixed_boundary(
         diag["multigrid_ftol_stages"] = np.asarray(ftol_stages, dtype=float)
         diag["multigrid_stage_offsets"] = np.asarray(stage_offsets, dtype=int)
         diag["multigrid_stage_modes"] = np.asarray(stage_mode_history, dtype=object)
+        # Record whether the final stage exhausted its NITER budget (matches
+        # xvmec2000 behavior: terminate normally when NITER is reached).
+        try:
+            _final_stage_niter = int(stage_results[-1].n_iter)
+            _final_stage_budget = int(niter_stages[-1]) if niter_stages else 0
+            diag["multigrid_final_stage_niter_exhausted"] = bool(_final_stage_niter >= _final_stage_budget)
+        except Exception:
+            diag["multigrid_final_stage_niter_exhausted"] = False
 
         # Concatenate the common history keys that are useful for parity debugging.
         for k in (
