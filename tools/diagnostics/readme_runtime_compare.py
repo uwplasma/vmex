@@ -77,7 +77,7 @@ def _collect_records(
 
         vmec_rt = None if (vmec is None or not vmec_ok) else float(vmec.get("runtime_s", vmec.get("time_real_s", np.nan)))
         cpu_rt = None if (cpu is None or not cpu_ok) else float(
-            cpu.get("runtime_warm_s", cpu.get("runtime_s", cpu.get("time_real_s", np.nan)))
+            cpu.get("runtime_cold_s", cpu.get("runtime_s", cpu.get("time_real_s", np.nan)))
         )
         pp_rt = None if (pp is None or not pp_ok) else float(pp.get("runtime_s", pp.get("time_real_s", np.nan)))
         vmec_mem = _mem_bytes(vmec) if vmec_ok else None
@@ -123,12 +123,12 @@ def _write_markdown_table(rows: list[dict[str, Any]], outpath: Path) -> None:
     include_vmecpp = any(row.get("vmecpp_runtime_s") is not None or row.get("vmecpp_mem_bytes") is not None for row in rows)
     if include_vmecpp:
         header = [
-            "| Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax runtime (warmed) | vmec_jax memory | VMEC++ runtime | VMEC++ memory |",
+            "| Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax runtime (cold) | vmec_jax memory | VMEC++ runtime | VMEC++ memory |",
             "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
     else:
         header = [
-            "| Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax runtime (warmed) | vmec_jax memory |",
+            "| Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax runtime (cold) | vmec_jax memory |",
             "| --- | --- | --- | --- | ---: | ---: | ---: | ---: |",
         ]
     lines = list(header)
@@ -202,7 +202,7 @@ def _write_runtime_figure(rows: list[dict[str, Any]], outpath: Path, *, figure_k
     fig, ax = plt.subplots(1, 1, figsize=(14.5, max(8.0, 0.42 * len(rows) + 1.6)))
     vmec = np.array([row["vmec_runtime_s"] if row["vmec_runtime_s"] is not None else np.nan for row in rows], dtype=float)
     cpu = np.array([row["cpu_runtime_s"] if row["cpu_runtime_s"] is not None else np.nan for row in rows], dtype=float)
-    series = [("#1f77b4", "VMEC2000", vmec), ("#ff7f0e", "vmec_jax (warmed)", cpu)]
+    series = [("#1f77b4", "VMEC2000", vmec), ("#ff7f0e", "vmec_jax (cold)", cpu)]
     if include_vmecpp:
         pp = np.array(
             [row.get("vmecpp_runtime_s") if row.get("vmecpp_runtime_s") is not None else np.nan for row in rows], dtype=float
