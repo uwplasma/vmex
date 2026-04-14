@@ -283,6 +283,7 @@ def checkpoint_tape_state_vjp(
     tape: ResidualCheckpointTape,
     static,
     final_cotangent,
+    rebuild_preconditioner: bool = False,
 ):
     """Reverse a packed-state cotangent through the extracted step tape."""
     if not tape.step_traces:
@@ -305,10 +306,10 @@ def checkpoint_tape_state_vjp(
                 include_edge_residual=trace["include_edge_residual"],
                 apply_m1_constraints=trace["apply_m1_constraints"],
                 zero_m1=trace["zero_m1"],
-                mats=trace["precond_mats"],
-                jmax=trace["precond_jmax"],
-                lam_prec=trace["lam_prec"],
-                w_mode_mn=trace["w_mode_mn"],
+                mats=None if rebuild_preconditioner else trace["precond_mats"],
+                jmax=None if rebuild_preconditioner else trace["precond_jmax"],
+                lam_prec=None if rebuild_preconditioner else trace["lam_prec"],
+                w_mode_mn=None if rebuild_preconditioner else trace["w_mode_mn"],
                 lambda_update_scale=trace["lambda_update_scale"],
                 dt_eff=trace["dt_eff"],
                 b1=trace["b1"],
@@ -330,6 +331,48 @@ def checkpoint_tape_state_vjp(
         _, vjp_fun = jax.vjp(_step_map, x0)
         cotangent = vjp_fun(cotangent)[0]
     return cotangent
+
+
+def checkpoint_tape_param_vjp(
+    *,
+    tape: ResidualCheckpointTape,
+    static,
+    boundary,
+    indata,
+    specs,
+    params,
+    axis_override,
+    final_cotangent,
+    vmec_project: bool = True,
+    rebuild_preconditioner: bool = True,
+):
+    """Reverse a packed-state cotangent back to boundary parameters."""
+    from ._compat import jax
+    from .init_guess import initial_guess_from_boundary
+    from .optimization import apply_boundary_params
+
+    state_cotangent = checkpoint_tape_state_vjp(
+        tape=tape,
+        static=static,
+        final_cotangent=final_cotangent,
+        rebuild_preconditioner=rebuild_preconditioner,
+    )
+
+    params0 = jnp.asarray(params)
+
+    def _state_from_params(p):
+        boundary_p = apply_boundary_params(boundary, specs, p)
+        state = initial_guess_from_boundary(
+            static,
+            boundary_p,
+            indata,
+            vmec_project=vmec_project,
+            axis_override=axis_override,
+        )
+        return pack_state(state)
+
+    _, vjp_fun = jax.vjp(_state_from_params, params0)
+    return vjp_fun(jnp.asarray(state_cotangent))[0]
 
 
 def strict_update_velocity_block(

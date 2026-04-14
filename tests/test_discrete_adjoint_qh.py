@@ -399,6 +399,126 @@ def test_checkpoint_tape_state_vjp_matches_direct_two_step_qh(load_case_qh_warm_
     assert np.asarray(replay) == pytest.approx(np.asarray(direct), rel=1.0e-10, abs=1.0e-10)
 
 
+def test_checkpoint_tape_param_vjp_matches_direct_two_step_qh(load_case_qh_warm_start):
+    pytest.importorskip("jax")
+    _require_slow()
+
+    from vmec_jax._compat import enable_x64, jax, jnp
+    from vmec_jax.discrete_adjoint import build_residual_checkpoint_tape, checkpoint_tape_param_vjp
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.init_guess import extract_axis_override_from_state, initial_guess_from_boundary
+    from vmec_jax.optimization import apply_boundary_params, boundary_param_specs
+    from vmec_jax.state import pack_state, unpack_state
+
+    enable_x64(True)
+
+    _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
+    state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
+    axis_override = extract_axis_override_from_state(state_guess, static)
+    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state_guess, static).sqrtg), axis_index=1))
+    common_kwargs = dict(
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        reference_mode=False,
+        backtracking=True,
+        limit_dt_from_force=True,
+        limit_update_rms=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces="auto",
+        use_scan=False,
+        light_history=True,
+        resume_state_mode="full",
+    )
+    tape = build_residual_checkpoint_tape(
+        state_guess,
+        static,
+        max_iter=2,
+        solver_kwargs=common_kwargs,
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        step_size=float(indata.get_float("DELT", 1.0)),
+        light_history=True,
+        resume_state_mode="full",
+    )
+
+    specs = boundary_param_specs(
+        boundary,
+        static.modes,
+        max_mode=1,
+        min_coeff=0.0,
+        include=("rc",),
+        fix=(),
+    )
+    specs = [spec for spec in specs if spec.m == 0 and spec.n == 1]
+    assert len(specs) == 1
+    params0 = jnp.zeros((1,), dtype=jnp.float64)
+    cotangent = jnp.linspace(-0.2, 0.2, int(state_guess.layout.size), dtype=jnp.float64)
+
+    def _forward_from_params(p):
+        from vmec_jax.discrete_adjoint import strict_update_one_step_from_state
+
+        boundary_p = apply_boundary_params(boundary, specs, p)
+        state = initial_guess_from_boundary(
+            static,
+            boundary_p,
+            indata,
+            vmec_project=True,
+            axis_override=axis_override,
+        )
+        x = jnp.asarray(pack_state(state))
+        state = unpack_state(x, state.layout)
+        for trace in tape.step_traces:
+            out = strict_update_one_step_from_state(
+                state,
+                static,
+                wout_like=trace["wout_like"],
+                trig=trace["trig"],
+                apply_lforbal=trace["apply_lforbal"],
+                include_edge_residual=trace["include_edge_residual"],
+                apply_m1_constraints=trace["apply_m1_constraints"],
+                zero_m1=trace["zero_m1"],
+                lambda_update_scale=trace["lambda_update_scale"],
+                dt_eff=trace["dt_eff"],
+                b1=trace["b1"],
+                fac=trace["fac"],
+                force_scale=trace["force_scale"],
+                flip_sign=trace["flip_sign"],
+                vRcc_before=trace["vRcc_before"],
+                vRss_before=trace["vRss_before"],
+                vZsc_before=trace["vZsc_before"],
+                vZcs_before=trace["vZcs_before"],
+                vLsc_before=trace["vLsc_before"],
+                vLcs_before=trace["vLcs_before"],
+                max_update_rms=trace["max_update_rms_pre"],
+                limit_update_rms=trace["limit_update_rms"],
+                divide_by_scalxc_for_update=trace["divide_by_scalxc_for_update"],
+            )
+            state = out["step"]["state_post"]
+        return pack_state(state)
+
+    _, vjp_fun = jax.vjp(_forward_from_params, params0)
+    direct = vjp_fun(cotangent)[0]
+    replay = checkpoint_tape_param_vjp(
+        tape=tape,
+        static=static,
+        boundary=boundary,
+        indata=indata,
+        specs=specs,
+        params=params0,
+        axis_override=axis_override,
+        final_cotangent=cotangent,
+        vmec_project=True,
+        rebuild_preconditioner=True,
+    )
+    assert np.asarray(replay) == pytest.approx(np.asarray(direct), rel=1.0e-9, abs=1.0e-9)
+
+
 def test_replay_residual_checkpoint_step_matches_second_direct_step_qh(load_case_qh_warm_start):
     pytest.importorskip("jax")
     _require_slow()
