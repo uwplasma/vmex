@@ -333,6 +333,60 @@ def checkpoint_tape_state_vjp(
     return cotangent
 
 
+def checkpoint_tape_state_jvp(
+    *,
+    tape: ResidualCheckpointTape,
+    static,
+    initial_tangent,
+    rebuild_preconditioner: bool = False,
+):
+    """Push a packed-state tangent forward through the extracted step tape."""
+    if not tape.step_traces:
+        return jnp.asarray(initial_tangent)
+
+    from ._compat import jax
+
+    tangent = jnp.asarray(initial_tangent)
+    for trace in tape.step_traces:
+        x0 = jnp.asarray(pack_state(trace["state_pre"]))
+
+        def _step_map(x):
+            state = unpack_state(x, trace["state_pre"].layout)
+            out = strict_update_one_step_from_state(
+                state,
+                static,
+                wout_like=trace["wout_like"],
+                trig=trace["trig"],
+                apply_lforbal=trace["apply_lforbal"],
+                include_edge_residual=trace["include_edge_residual"],
+                apply_m1_constraints=trace["apply_m1_constraints"],
+                zero_m1=trace["zero_m1"],
+                mats=None if rebuild_preconditioner else trace["precond_mats"],
+                jmax=None if rebuild_preconditioner else trace["precond_jmax"],
+                lam_prec=None if rebuild_preconditioner else trace["lam_prec"],
+                w_mode_mn=None if rebuild_preconditioner else trace["w_mode_mn"],
+                lambda_update_scale=trace["lambda_update_scale"],
+                dt_eff=trace["dt_eff"],
+                b1=trace["b1"],
+                fac=trace["fac"],
+                force_scale=trace["force_scale"],
+                flip_sign=trace["flip_sign"],
+                vRcc_before=trace["vRcc_before"],
+                vRss_before=trace["vRss_before"],
+                vZsc_before=trace["vZsc_before"],
+                vZcs_before=trace["vZcs_before"],
+                vLsc_before=trace["vLsc_before"],
+                vLcs_before=trace["vLcs_before"],
+                max_update_rms=trace["max_update_rms_pre"],
+                limit_update_rms=trace["limit_update_rms"],
+                divide_by_scalxc_for_update=trace["divide_by_scalxc_for_update"],
+            )
+            return pack_state(out["step"]["state_post"])
+
+        _, tangent = jax.jvp(_step_map, (x0,), (tangent,))
+    return tangent
+
+
 def checkpoint_tape_param_vjp(
     *,
     tape: ResidualCheckpointTape,
@@ -373,6 +427,47 @@ def checkpoint_tape_param_vjp(
 
     _, vjp_fun = jax.vjp(_state_from_params, params0)
     return vjp_fun(jnp.asarray(state_cotangent))[0]
+
+
+def checkpoint_tape_param_jvp(
+    *,
+    tape: ResidualCheckpointTape,
+    static,
+    boundary,
+    indata,
+    specs,
+    params,
+    axis_override,
+    params_tangent,
+    vmec_project: bool = True,
+    rebuild_preconditioner: bool = True,
+):
+    """Push a parameter tangent forward to the final packed state."""
+    from ._compat import jax
+    from .init_guess import initial_guess_from_boundary
+    from .optimization import apply_boundary_params
+
+    params0 = jnp.asarray(params)
+    params_tangent = jnp.asarray(params_tangent)
+
+    def _state_from_params(p):
+        boundary_p = apply_boundary_params(boundary, specs, p)
+        state = initial_guess_from_boundary(
+            static,
+            boundary_p,
+            indata,
+            vmec_project=vmec_project,
+            axis_override=axis_override,
+        )
+        return pack_state(state)
+
+    _, state_tangent = jax.jvp(_state_from_params, (params0,), (params_tangent,))
+    return checkpoint_tape_state_jvp(
+        tape=tape,
+        static=static,
+        initial_tangent=state_tangent,
+        rebuild_preconditioner=rebuild_preconditioner,
+    )
 
 
 def strict_update_velocity_block(
@@ -1120,6 +1215,10 @@ __all__ = [
     "ResidualIterationTrace",
     "ResidualCheckpointTape",
     "build_residual_checkpoint_tape",
+    "checkpoint_tape_param_jvp",
+    "checkpoint_tape_param_vjp",
+    "checkpoint_tape_state_jvp",
+    "checkpoint_tape_state_vjp",
     "concat_residual_iteration_traces",
     "preconditioned_force_channels_from_raw_forces",
     "preconditioned_force_channels_from_rz_output",
