@@ -94,10 +94,13 @@ def _scan_chunk_settings(
         # chunk loop overhead entirely.
         chunk_size = max(1, int(max_iter_scan))
     elif (backend != "cpu") and (not bool(need_print)):
-        # Quiet accelerator runs benefit from much larger chunks because the
-        # host chunk loop otherwise pays repeated device sync/launch overhead.
-        accel_chunk_target = 400 if bool(lthreed) else 1000
-        chunk_size = max(1, max(int(nstep_screen), min(int(max_iter_scan), int(accel_chunk_target))))
+        # Quiet accelerator runs: use the full iteration budget as a single
+        # chunk to eliminate the Python outer-loop host/device sync overhead.
+        # Like the CPU quiet path, this compiles one program for the entire
+        # solve, then breaks early via the carry.converged flag with no further
+        # host syncs.  The env override VMEC_JAX_SCAN_CHUNK_SIZE can cap this
+        # when GPU memory is tight.
+        chunk_size = max(1, int(max_iter_scan))
     else:
         chunk_size = max(1, int(nstep_screen))
     cap_to_remaining = (not bool(need_print))
