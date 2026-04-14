@@ -27,6 +27,7 @@ from vmec_jax._compat import enable_x64, has_jax, jax, jnp
 from vmec_jax.boundary import boundary_from_indata
 from vmec_jax.config import load_config
 from vmec_jax.discrete_adjoint import build_residual_checkpoint_tape
+from vmec_jax.discrete_adjoint import strict_update_velocity_state_advance
 from vmec_jax.field import signgs_from_sqrtg
 from vmec_jax.geom import eval_geom
 from vmec_jax.implicit import solve_fixed_boundary_state_implicit_vmec_residual
@@ -154,6 +155,31 @@ def main() -> None:
     final_state_diff = float(
         np.max(np.abs(np.asarray(pack_state(direct.state)) - np.asarray(tape.packed_states[-1])))
     ) if tape.packed_states.shape[0] else float("nan")
+    strict_update_runtime_s = float("nan")
+    strict_update_state_diff = float("nan")
+    if int(args.max_iter) >= 1 and tape.resume_states:
+        resume = direct.diagnostics.get("resume_state")
+        if resume is not None and len(np.asarray(direct.diagnostics.get("dt_eff_history", []))) >= 1:
+            t0 = time.perf_counter()
+            reconstructed = strict_update_velocity_state_advance(
+                state_guess,
+                static,
+                dt_eff=float(np.asarray(direct.diagnostics["dt_eff_history"])[0]),
+                vRcc=resume["vRcc"],
+                vRss=resume["vRss"],
+                vZsc=resume["vZsc"],
+                vZcs=resume["vZcs"],
+                vLsc=resume["vLsc"],
+                vLcs=resume["vLcs"],
+                edge_Rcos=np.asarray(state_guess.Rcos)[-1, :],
+                edge_Rsin=np.asarray(state_guess.Rsin)[-1, :],
+                edge_Zcos=np.asarray(state_guess.Zcos)[-1, :],
+                edge_Zsin=np.asarray(state_guess.Zsin)[-1, :],
+            )
+            strict_update_runtime_s = time.perf_counter() - t0
+            strict_update_state_diff = float(
+                np.max(np.abs(np.asarray(pack_state(reconstructed)) - np.asarray(pack_state(direct.state))))
+            )
 
     out = {
         "input": str(REPO_ROOT / args.input),
@@ -183,6 +209,8 @@ def main() -> None:
             "checkpoint_count": int(tape.packed_states.shape[0]),
             "trace_len": int(tape.trace.iter2.shape[0]),
             "final_state_linf": final_state_diff,
+            "strict_update_block_runtime_s": strict_update_runtime_s,
+            "strict_update_block_state_linf": strict_update_state_diff,
         },
     }
     print(json.dumps(out, indent=2, sort_keys=True))

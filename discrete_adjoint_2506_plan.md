@@ -471,3 +471,10 @@ Stop or reduce scope if:
   - Validated Gate 2A and Gate 2B: one-step and two-step QH checkpoint replay recover the exact direct-solve final state.
   - Established an important constraint for the next phase: exact multi-step replay currently requires `resume_state_mode='full'`; the existing minimal checkpoint is not sufficient once cached VMEC control/preconditioner state is reused.
   - Added a QH diagnostic script that reports aspect/lambda AD-vs-FD plus direct-vs-replay runtime and final-state agreement.
+  - Added an explicit `replay_residual_checkpoint_step(...)` primitive and validated it against the second direct QH step from a full resume checkpoint.
+  - Implemented the first real per-step reverse target: the strict-update state-advance block used by the QH benchmark path.
+  - Locked the first Phase 3 gates on exact QH one-step data:
+    - block reconstruction matches the solver state exactly when evaluated on the JAX path,
+    - local JVP/VJP identity passes,
+    - one-step Taylor remainder passes.
+  - Measured the standalone strict-update state-advance block runtime on exact QH one-step data at about `4.3e-2 s`, well below the full one-step direct solve cost.
