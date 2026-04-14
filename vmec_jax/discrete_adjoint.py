@@ -215,7 +215,10 @@ def build_residual_checkpoint_tape(
     # caller wants minimal resume checkpoints, so force full history capture
     # here and keep compactness in the saved resume_state dictionaries instead.
     solve_kwargs["light_history"] = False
-    solve_kwargs.setdefault("resume_state_mode", str(resume_state_mode))
+    # Multi-step replay currently needs the cached preconditioner/control state
+    # carried in the full resume checkpoint. A later optimization pass can
+    # shrink this once exact replay coverage is in place.
+    solve_kwargs["resume_state_mode"] = "full"
     state = state0
     resume_state = None
     traces: list[ResidualIterationTrace] = []
