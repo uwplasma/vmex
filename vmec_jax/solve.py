@@ -6280,10 +6280,18 @@ def solve_fixed_boundary_residual_iter(
     # Precompute per-iteration constants once.
     w_mode_mn = _mode_diag_weights_mn(jnp.asarray(state0.Rcos).dtype)
     # NumPy copy for host-path mode-diagonal step (avoids 36 JAX dispatches/iter).
-    w_mode_mn_np = np.asarray(w_mode_mn)
+    w_mode_mn_np = (
+        np.asarray(w_mode_mn)
+        if bool(host_update_assembly) and (not _tree_has_tracer(w_mode_mn))
+        else None
+    )
     # Precompute axis mask for _enforce_fixed_boundary_and_axis_np (avoids 7000+
     # _axis_m0_mask JAX dispatches per solve — saves ~0.5s real).
-    _state0_dtype = np.asarray(state0.Rcos).dtype
+    _state0_dtype = (
+        np.asarray(state0.Rcos).dtype
+        if bool(host_update_assembly) and (not _tree_has_tracer(state0.Rcos))
+        else jnp.asarray(state0.Rcos).dtype
+    )
     _precomputed_axis_mask_np = (
         np.asarray(_axis_m0_mask(static, dtype=_state0_dtype))
         if host_update_assembly else None
