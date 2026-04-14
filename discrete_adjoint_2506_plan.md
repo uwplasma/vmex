@@ -84,6 +84,41 @@ The right adaptation for VMEC-JAX is:
 This is likely a better long-term direction than continuing to patch the current
 implicit active-state machinery.
 
+## Additional sources consulted
+
+### Code sources
+
+- Dedalus adjoint branch:
+  - `dedalus/extras/adjoint.py`
+  - `dedalus/core/solvers.py`
+- Dedalus adjoint examples:
+  - `nlbvp_lane_emden/lane_emden.py`
+  - `ivp_optimal_mixing/optimal_mixing.py`
+  - `evp_mathieu/mathieu_evp_adj.py`
+- Existing `vmec_jax` implementation:
+  - `vmec_jax/solve.py`
+  - `vmec_jax/implicit.py`
+  - `vmec_jax/driver.py`
+  - `docs/algorithms.rst`
+  - `docs/equations.rst`
+  - `tests/test_implicit_helpers.py`
+  - `tests/test_driver_api.py`
+
+### Literature / equations sources
+
+- Skene & Burns, `Fast automated adjoints for spectral PDE solvers`,
+  `arXiv:2506.14792`.
+- VMEC-JAX local equations docs in `docs/equations.rst`.
+- VMEC-JAX local algorithm/control-law docs in `docs/algorithms.rst`.
+- SIMSOPT QH objective equations in `simsopt/src/simsopt/mhd/vmec_diagnostics.py`.
+
+Practical consequence:
+
+- the differentiated object must be the accepted solver trajectory,
+- the backward pass must reuse solver-native structure,
+- local Taylor/VJP checks must exist below the full optimization level,
+- runtime tracking must happen at each layer, not only in the top-level script.
+
 ## Why this is likely better than the current path
 
 The current path tries to infer sensitivities from an auxiliary implicit relation in
@@ -115,6 +150,56 @@ This branch should target one problem only at first:
 
 If that path becomes correct and fast, then generalize.
 
+## Code inventory and expected refactor surface
+
+### Files that will definitely matter
+
+- `vmec_jax/solve.py`
+  - owns the fixed-boundary residual iteration,
+  - must expose a compact accepted-step tape and replay hooks,
+  - is the core file for the new discrete-adjoint path.
+- `vmec_jax/implicit.py`
+  - owns the current fragile derivative path,
+  - should become a compatibility layer rather than the place where the new QH
+    derivative logic lives.
+- `vmec_jax/driver.py`
+  - already controls solver mode selection and staged runs,
+  - should expose the new backend cleanly for scripts and tests.
+- `vmec_jax/tests/test_implicit_helpers.py`
+  - good home for local operator and derivative regression tests.
+- `vmec_jax/tests/test_driver_api.py`
+  - good home for backend-selection and policy regressions.
+
+### New files likely worth creating
+
+- `vmec_jax/discrete_adjoint.py` or `vmec_jax/residual_adjoint.py`
+  - explicit home for tape/replay/VJP code.
+- `vmec_jax/tests/test_discrete_adjoint_qh.py`
+  - exact 8-DOF QH derivative regression and short runtime gates.
+- `vmec_jax/tools/diagnostics/benchmark_discrete_adjoint_qh.py`
+  - function-level and short-horizon runtime harness.
+
+### Files that should not be the first place we modify
+
+- free-boundary modules,
+- GPU-specific execution paths,
+- general `lasym=True` support,
+- scan-mode control-flow variants.
+
+## Working implementation strategy
+
+Keep the work split into three layers:
+
+1. **Primal tape layer**
+   - expose a deterministic record of accepted fixed-boundary iterations.
+2. **Discrete-adjoint layer**
+   - define per-step VJPs and reverse replay over that tape.
+3. **Public backend layer**
+   - integrate the new derivative backend into the existing user-facing API.
+
+Do not mix these layers in the same patch unless a very small compatibility shim
+forces it.
+
 ## Implementation plan
 
 ### Phase 0: preserve a stable forward baseline
@@ -131,6 +216,14 @@ Acceptance:
 
 - repeated forward solves from the same state/control produce the same accepted update
   history and final state.
+- the forward run exports enough structured metadata to explain the accepted
+  control-flow decisions.
+
+Validation / runtime gates:
+
+- Gate 0A: exact QH start-point determinism on CPU.
+- Gate 0B: one-iteration runtime benchmark for the chosen primal mode.
+- Gate 0C: small circular-tokamak forward runtime benchmark.
 
 ### Phase 1: add a committed regression harness
 
@@ -146,6 +239,14 @@ Acceptance:
 
 - every adjoint change is judged against the same exact benchmark probe.
 
+Validation / runtime gates:
+
+- Gate 1A: directional derivative test on the exact QH start point.
+- Gate 1B: component tests for one lambda, one `Rcos`, and one `Zsin`
+  interior sensitivity.
+- Gate 1C: finite-difference probe runtime benchmark so the regression remains
+  cheap enough to run frequently.
+
 ### Phase 2: expose the primal iteration tape
 
 - [ ] Refactor `solve_fixed_boundary_residual_iter(...)` so one iteration step has a
@@ -160,6 +261,24 @@ Acceptance:
 Acceptance:
 
 - the forward solve can return a compact tape/checkpoint object sufficient for replay.
+
+Design requirements:
+
+- tape entries must distinguish:
+  - proposed update,
+  - accepted update,
+  - backtracking/time-step scaling,
+  - restart/checkpoint rollback,
+  - boundary/axis/lambda enforcement.
+- tape data must be split into:
+  - adjoint-critical state,
+  - diagnostics only.
+
+Validation / runtime gates:
+
+- Gate 2A: replay one accepted step and recover the exact same next state.
+- Gate 2B: replay a small multi-step case and recover the exact final state.
+- Gate 2C: tape size and tape-creation wall-time benchmark.
 
 ### Phase 3: implement per-step VJPs
 
@@ -177,6 +296,18 @@ Acceptance:
 
 - one accepted forward step passes local Taylor or VJP consistency tests.
 
+Implementation note:
+
+The first per-step VJP does not need to be fully symbolic. It does need to be
+solver-faithful. Freezing branch decisions from the accepted primal step is
+acceptable for the first version.
+
+Validation / runtime gates:
+
+- Gate 3A: local VJP identity check for each operator block.
+- Gate 3B: one-step Taylor test for the composed accepted update.
+- Gate 3C: one-step backward runtime benchmark broken down by block.
+
 ### Phase 4: reverse the accepted iteration history
 
 - [ ] Build a backward replay over the accepted primal tape.
@@ -188,6 +319,20 @@ Acceptance:
 
 - full reverse-mode gradient on the exact QH start point is in the same ballpark as
   central finite differences.
+
+Validation / runtime gates:
+
+- Gate 4A: one-iteration reverse gradient vs FD.
+- Gate 4B: two-iteration reverse gradient vs FD.
+- Gate 4C: exact QH start-point gradient vs FD on the full converged primal solve.
+- Gate 4D: backward/forward runtime ratio benchmark on:
+  - a one-iteration small case,
+  - the exact QH start-point solve.
+
+Targets:
+
+- no single lambda component remains an orders-of-magnitude outlier,
+- backward runtime is clearly below the current dense/chunked Jacobian path.
 
 ### Phase 5: integrate into the public wrapper
 
@@ -201,6 +346,12 @@ Acceptance:
 
 - `simsopt` can call the new path without local hacks.
 
+Validation / runtime gates:
+
+- Gate 5A: public API can request the new backend explicitly.
+- Gate 5B: existing non-adjoint solver paths remain unchanged.
+- Gate 5C: backend-selection overhead is negligible relative to solve time.
+
 ### Phase 6: wire the new path into the QH example
 
 - [ ] Draft a new `QH_fixed_resolution_jax.py` in `simsopt` that mirrors the classic
@@ -212,6 +363,64 @@ Acceptance:
 
 - the example materially improves QH quasisymmetry under the exact 10-evaluation
   benchmark and moves toward runtime parity.
+
+Validation / runtime gates:
+
+- Gate 6A: `max_nfev=1` script smoke benchmark.
+- Gate 6B: `max_nfev=2` exact QH benchmark.
+- Gate 6C: `max_nfev=10` full apples-to-apples benchmark.
+
+Per-run metrics to record every time:
+
+- total wall time,
+- objective call count,
+- derivative call count,
+- wall time per objective call,
+- wall time per derivative call,
+- final total objective,
+- final QS objective,
+- final aspect.
+
+## Runtime and profiling policy
+
+Every new function added for the discrete-adjoint path must be benchmarked in
+isolation before it is trusted in the end-to-end script.
+
+### Required microbench harnesses
+
+- accepted-step forward replay cost,
+- one-step VJP cost,
+- full reverse replay cost,
+- tape creation cost,
+- tape replay memory footprint.
+
+### Required macrobench harnesses
+
+- exact QH start-point forward solve,
+- exact QH start-point gradient,
+- `max_nfev=2` QH optimization,
+- `max_nfev=10` QH optimization.
+
+### Performance policy
+
+- do not wait until the 10-evaluation script to discover a 10x slowdown,
+- do not add dense Jacobian construction to the new path except as a temporary
+  diagnostic,
+- keep benchmarking on CPU first,
+- treat backward/forward wall-time ratio as a first-class metric.
+
+## Coupling plan with simsopt
+
+Clean `simsopt` mainline does **not** yet include the `VmecJax` wrapper or the
+JAX least-squares solver surface used in the previous experimental branch. That
+means this branch must deliver a backend that is stable enough to justify
+reintroducing that consumer layer.
+
+Recommended sequencing:
+
+1. finish Phases 1-4 here in `vmec_jax`,
+2. only then port the minimum `VmecJax` consumer layer into clean `simsopt`,
+3. only then resume end-to-end optimizer benchmarking.
 
 ## Risks
 
@@ -248,3 +457,5 @@ Stop or reduce scope if:
 - [ ] Add the exact QH derivative regression on this clean branch.
 - [ ] Refactor the forward residual solver to expose a compact accepted-step tape.
 - [ ] Prototype a one-step discrete VJP for the fixed-boundary residual update.
+- [ ] Create a small runtime harness for step/tape/VJP costs before any large
+  consumer-side refactor.
