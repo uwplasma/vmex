@@ -21,8 +21,8 @@ All figures below use the same **single-grid** run settings: `NS_ARRAY=151`, `NI
     <td><img src="docs/_static/figures/qa_compare_iota.png" width="420" /></td>
   </tr>
   <tr>
-    <td align="center"><code>ITERModel</code> iota (VMEC2000 vs vmec_jax vs VMEC++)</td>
-    <td align="center"><code>LandremanPaul2021_QA_lowres</code> iota (VMEC2000 vs vmec_jax vs VMEC++)</td>
+    <td align="center"><code>ITERModel</code> iota (VMEC2000 vs vmec_jax)</td>
+    <td align="center"><code>LandremanPaul2021_QA_lowres</code> iota (VMEC2000 vs vmec_jax)</td>
   </tr>
 </table>
 
@@ -34,28 +34,26 @@ All figures below use the same **single-grid** run settings: `NS_ARRAY=151`, `NI
   <img src="docs/_static/figures/readme_runtime_compare.png" width="860" />
 </p>
 
-<details>
-  <summary>More visuals (single-grid)</summary>
-  <br/>
-  <table>
-    <tr>
-      <td><img src="docs/_static/figures/axisym_compare_3d.png" width="420" /></td>
-      <td><img src="docs/_static/figures/qa_compare_3d.png" width="420" /></td>
-    </tr>
-    <tr>
-      <td align="center"><code>ITERModel</code> 3D LCFS (VMEC2000 vs vmec_jax)</td>
-      <td align="center"><code>LandremanPaul2021_QA_lowres</code> 3D LCFS (VMEC2000 vs vmec_jax)</td>
-    </tr>
-    <tr>
-      <td><img src="docs/_static/figures/axisym_compare_bmag_surface.png" width="420" /></td>
-      <td><img src="docs/_static/figures/qa_compare_bmag_surface.png" width="420" /></td>
-    </tr>
-    <tr>
-      <td align="center"><code>ITERModel</code> |B| on LCFS (VMEC2000 vs vmec_jax)</td>
-      <td align="center"><code>LandremanPaul2021_QA_lowres</code> |B| on LCFS (VMEC2000 vs vmec_jax)</td>
-    </tr>
-  </table>
-</details>
+## More visuals (single-grid)
+
+<table>
+  <tr>
+    <td><img src="docs/_static/figures/axisym_compare_3d.png" width="420" /></td>
+    <td><img src="docs/_static/figures/qa_compare_3d.png" width="420" /></td>
+  </tr>
+  <tr>
+    <td align="center"><code>ITERModel</code> 3D LCFS (VMEC2000 vs vmec_jax)</td>
+    <td align="center"><code>LandremanPaul2021_QA_lowres</code> 3D LCFS (VMEC2000 vs vmec_jax)</td>
+  </tr>
+  <tr>
+    <td><img src="docs/_static/figures/axisym_compare_bmag_surface.png" width="420" /></td>
+    <td><img src="docs/_static/figures/qa_compare_bmag_surface.png" width="420" /></td>
+  </tr>
+  <tr>
+    <td align="center"><code>ITERModel</code> |B| on LCFS (VMEC2000 vs vmec_jax)</td>
+    <td align="center"><code>LandremanPaul2021_QA_lowres</code> |B| on LCFS (VMEC2000 vs vmec_jax)</td>
+  </tr>
+</table>
 
 ## What it is
 
@@ -169,16 +167,18 @@ Details, profiling guidance, and parity methodology:
 
 ## VMEC++ notes
 
-The runtime plot includes VMEC++ (green) for context. Some inputs are not supported or do not converge under the same single-grid settings.
+The current runtime benchmark compares vmec_jax against VMEC2000. VMEC++ is not included in this benchmark.
 
-VMEC++ unsupported inputs in this benchmark (`lasym=True`):
+When VMEC++ is available, it can be added to the runtime plot via `--cpu-summary` entries with `backend=vmecpp`. Some inputs are not supported or do not converge under the same single-grid settings:
+
+VMEC++ unsupported inputs (`lasym=True`):
 
 - `LandremanSenguptaPlunk_section5p3_low_res`
 - `basic_non_stellsym_pressure`
 - `cth_like_free_bdy_lasym_small`
 - `up_down_asymmetric_tokamak`
 
-VMEC++ failed to converge (non-zero exit) on these `lasym=False` cases under the same single-grid settings:
+VMEC++ known non-convergence on these `lasym=False` cases under the same single-grid settings:
 
 - `DIII-D_lasym_false`
 - `LandremanPaul2021_QA_reactorScale_lowres`
@@ -204,7 +204,3 @@ host/device traffic. You can override this with:
 export VMEC_JAX_SCAN_MINIMAL=0  # keep full scan diagnostics even when quiet
 ```
 
-## When to use vmec_jax
-
-- Use `vmec_jax` for fixed-boundary and free-boundary production runs, autodiff, rapid parameter sweeps, and JAX-native optimization workflows.
-- Use the VMEC2000 executable as an optional parity reference or regression oracle, not as an operational requirement.

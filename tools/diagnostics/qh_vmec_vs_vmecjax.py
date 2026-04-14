@@ -266,6 +266,16 @@ def main() -> None:
         default="",
         help="Path to VMEC2000 reference wout (defaults to wout_<case>[_reference].nc next to input).",
     )
+    p.add_argument(
+        "--jax-wout",
+        type=str,
+        default="",
+        help=(
+            "Path to a vmec_jax wout .nc file to use for the vmec_jax cross-section panel. "
+            "When provided, both panels use their respective wout files (no solve needed). "
+            "Overrides --use-wout-state / --no-wout-state for the cross-section and iota plots."
+        ),
+    )
     p.add_argument("--phi", type=float, default=0.0, help="Toroidal angle (radians) for cross-section plot.")
     p.add_argument("--n-surfaces", type=int, default=6, help="Number of flux surfaces in the cross-section plot.")
     p.add_argument("--jax-title", type=str, default="", help="Override title label for the vmec_jax panels.")
@@ -315,6 +325,16 @@ def main() -> None:
     # VMEC2000 reference
     wout = _load_vmec2000_wout(wout_ref_path)
     prefix = str(args.prefix)
+
+    # Optional: vmec_jax wout for side-by-side wout comparison (bypasses solver).
+    jax_wout_path = args.jax_wout.strip() if args.jax_wout else ""
+    wout_jax_external: object | None = None
+    if jax_wout_path:
+        jax_wout_p = Path(jax_wout_path).expanduser().resolve()
+        if not jax_wout_p.exists():
+            raise SystemExit(f"--jax-wout file not found: {jax_wout_p}")
+        wout_jax_external = read_wout(jax_wout_p)
+        print(f"[vmec_jax] loaded --jax-wout: {jax_wout_p} (ns={int(wout_jax_external.ns)})")
 
     # vmec_jax current output
     use_initial_guess = not bool(args.solve) or bool(args.no_solve)
@@ -382,11 +402,14 @@ def main() -> None:
     # --- Cross sections ---
     theta_cs = closed_theta_grid(200)
     phi_slices = np.asarray([float(args.phi)])
-    idx_list = _surface_indices(int(wout.ns), int(args.n_surfaces))
+    # Use separate index lists for wout (VMEC2000) and state (vmec_jax) to handle
+    # the case where wout.ns != state.ns (e.g., multigrid wout vs single-grid state).
+    # Each side samples n_surfaces evenly across its own radial grid.
+    idx_list_vmec = _surface_indices(int(wout.ns), int(args.n_surfaces))
 
     R_vmec_list = []
     Z_vmec_list = []
-    for idx in idx_list:
+    for idx in idx_list_vmec:
         R_vm, Z_vm = surface_rz_from_wout_physical(wout, theta=theta_cs, phi=phi_slices, s_index=int(idx))
         R_vmec_list.append(R_vm[:, 0])
         Z_vmec_list.append(Z_vm[:, 0])
@@ -394,19 +417,35 @@ def main() -> None:
     Z_vmec = np.stack(Z_vmec_list, axis=0)
     Raxis_vmec, Zaxis_vmec = axis_rz_from_wout_physical(wout, phi=phi_slices)
 
-    R_jax_list = []
-    Z_jax_list = []
-    for idx in idx_list:
-        R_j, Z_j = surface_rz_from_state_physical(
-            state, modes, theta=theta_cs, phi=phi_slices, s_index=int(idx), nfp=int(static.cfg.nfp)
-        )
-        R_jax_list.append(R_j[:, 0])
-        Z_jax_list.append(Z_j[:, 0])
-    R_jax = np.stack(R_jax_list, axis=0)
-    Z_jax = np.stack(Z_jax_list, axis=0)
-    Raxis_jax, Zaxis_jax = axis_rz_from_state_physical(state, modes, phi=phi_slices, nfp=int(static.cfg.nfp))
+    if wout_jax_external is not None:
+        # Side-by-side wout comparison: use the vmec_jax wout directly.
+        idx_list_jax_wout = _surface_indices(int(wout_jax_external.ns), int(args.n_surfaces))
+        R_jax_list = []
+        Z_jax_list = []
+        for idx in idx_list_jax_wout:
+            R_j, Z_j = surface_rz_from_wout_physical(wout_jax_external, theta=theta_cs, phi=phi_slices, s_index=int(idx))
+            R_jax_list.append(R_j[:, 0])
+            Z_jax_list.append(Z_j[:, 0])
+        R_jax = np.stack(R_jax_list, axis=0)
+        Z_jax = np.stack(Z_jax_list, axis=0)
+        Raxis_jax, Zaxis_jax = axis_rz_from_wout_physical(wout_jax_external, phi=phi_slices)
+    else:
+        idx_list_jax = _surface_indices(int(static.cfg.ns), int(args.n_surfaces))
+        R_jax_list = []
+        Z_jax_list = []
+        for idx in idx_list_jax:
+            R_j, Z_j = surface_rz_from_state_physical(
+                state, modes, theta=theta_cs, phi=phi_slices, s_index=int(idx), nfp=int(static.cfg.nfp)
+            )
+            R_jax_list.append(R_j[:, 0])
+            Z_jax_list.append(Z_j[:, 0])
+        R_jax = np.stack(R_jax_list, axis=0)
+        Z_jax = np.stack(Z_jax_list, axis=0)
+        Raxis_jax, Zaxis_jax = axis_rz_from_state_physical(state, modes, phi=phi_slices, nfp=int(static.cfg.nfp))
 
-    if use_wout_state:
+    if wout_jax_external is not None:
+        jax_title_default = "vmec_jax"
+    elif use_wout_state:
         jax_title_default = "vmec_jax (from wout)"
     else:
         jax_title_default = "vmec_jax (initial guess)" if use_initial_guess else "vmec_jax (solver)"
@@ -507,7 +546,12 @@ def main() -> None:
         except Exception as exc:
             print(f"[vmecpp] failed to run VMEC++: {exc}\nSkipping VMEC++ iota curve.")
 
-    if use_wout_state:
+    if wout_jax_external is not None:
+        wout_jax_like = wout_jax_external
+        prof_jax = profiles_from_wout(wout_jax_external)
+        s_jax = prof_jax["s"]
+        iota_jax = prof_jax["iotaf"]
+    elif use_wout_state:
         wout_jax_like = wout
         s_jax = s_vmec
         iota_jax = iota_vmec
