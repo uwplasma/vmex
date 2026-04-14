@@ -538,3 +538,16 @@ Stop or reduce scope if:
   - The current root cause is therefore no longer in the accepted-step algebra or the raw-force assembly; it was the
     initialization branch mismatch caused by traced missing-axis handling. The next phase should thread the frozen-axis branch choice
     through the replay/tape consumer path and then start the reverse-over-history implementation on top of that consistent primal map.
+  - Added the matching forward helpers, `checkpoint_tape_state_jvp(...)` and
+    `checkpoint_tape_param_jvp(...)`, and locked exact-QH two-step gates showing
+    they match direct JAX JVPs through the extracted replay map.
+  - This established that the discrete-adjoint tape now supports both reverse
+    and forward sensitivity transport over the validated replay path, which is
+    the right interface for the `m >> n` QH least-squares consumer in
+    `simsopt`.
+  - Identified a new JIT blocker in the residual solver while exercising that
+    forward path from `simsopt`: a NumPy-only `ptau` cache precompute was still
+    converting traced `s` arrays with `np.asarray(...)`.
+  - Began removing that blocker by making the `ptau` cache tracer-safe so the
+    forward discrete-adjoint backend can participate in `jacfwd`-driven SciPy
+    least-squares solves.

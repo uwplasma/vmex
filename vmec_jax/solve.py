@@ -4076,7 +4076,11 @@ def solve_fixed_boundary_residual_iter(
     # Auto-enable host_update_assembly (NumPy-path) for non-scan CPU solves.
     # This avoids the _mn_sin_to_signed JAX-eager overhead (~2s for circular_tokamak).
     # The caller can still force host_update_assembly=False to opt out.
-    _auto_host = (not bool(use_scan)) and (jax.default_backend() == "cpu")
+    _auto_host = (
+        (not bool(use_scan))
+        and (jax.default_backend() == "cpu")
+        and (not _tree_has_tracer(state0))
+    )
     host_update_assembly = (bool(host_update_assembly) or _auto_host) and (not bool(use_scan)) and (jax.default_backend() == "cpu")
     adjoint_trace = bool(adjoint_trace)
 
@@ -4878,14 +4882,34 @@ def solve_fixed_boundary_residual_iter(
         return jnp.sqrt(jnp.maximum(p, jnp.asarray(0.0, dtype=dtype)))
 
     # Precompute pshalf and ohs for the JIT-accelerated ptau check.
-    # These are fixed for the lifetime of this NS-stage closure.
-    _ptau_s_np = np.asarray(s)
-    _ptau_hs = float(_ptau_s_np[1] - _ptau_s_np[0]) if int(_ptau_s_np.shape[0]) > 1 else 1.0
-    _ptau_ohs_scalar = 0.0 if _ptau_hs == 0.0 else 1.0 / _ptau_hs
-    _ptau_pshalf_np = _pshalf_from_s(s)
+    # These are fixed for the lifetime of this NS-stage closure. Keep the
+    # cached constants tracer-safe so the residual solver can participate in a
+    # JIT-compiled forward-mode Jacobian build.
+    _ptau_s_is_traced = _tree_has_tracer(s)
+    if _ptau_s_is_traced and has_jax():
+        _ptau_s_jax = jnp.asarray(s, dtype=jnp.float64)
+        if int(_ptau_s_jax.shape[0]) > 1:
+            _ptau_hs_jax0 = _ptau_s_jax[1] - _ptau_s_jax[0]
+        else:
+            _ptau_hs_jax0 = jnp.asarray(1.0, dtype=jnp.float64)
+        _ptau_ohs_scalar = None
+        _ptau_pshalf_np = None
+    else:
+        _ptau_s_np = np.asarray(s)
+        _ptau_hs = float(_ptau_s_np[1] - _ptau_s_np[0]) if int(_ptau_s_np.shape[0]) > 1 else 1.0
+        _ptau_ohs_scalar = 0.0 if _ptau_hs == 0.0 else 1.0 / _ptau_hs
+        _ptau_pshalf_np = _pshalf_from_s(s)
     if has_jax():
-        _ptau_pshalf_jax = jnp.asarray(_ptau_pshalf_np, dtype=jnp.float64)
-        _ptau_ohs_jax = jnp.asarray(_ptau_ohs_scalar, dtype=jnp.float64)
+        if _ptau_s_is_traced:
+            _ptau_pshalf_jax = _pshalf_from_s_jax(_ptau_s_jax, jnp.float64)
+            _ptau_ohs_jax = jnp.where(
+                _ptau_hs_jax0 == 0.0,
+                jnp.asarray(0.0, dtype=jnp.float64),
+                jnp.asarray(1.0, dtype=jnp.float64) / _ptau_hs_jax0,
+            )
+        else:
+            _ptau_pshalf_jax = jnp.asarray(_ptau_pshalf_np, dtype=jnp.float64)
+            _ptau_ohs_jax = jnp.asarray(_ptau_ohs_scalar, dtype=jnp.float64)
 
         @jax.jit
         def _ptau_compute_jit(pru_even, pru_odd, pzu_even, pzu_odd,
@@ -5951,9 +5975,12 @@ def solve_fixed_boundary_residual_iter(
         _n_half = 0
 
     if getattr(static, "mn_idx_m", None) is not None:
-        m_idx = jnp.asarray(np.asarray(static.mn_idx_m, dtype=np.int32))
-        n_idx = jnp.asarray(np.asarray(static.mn_idx_n, dtype=np.int32))
-        kp_idx = jnp.asarray(np.asarray(static.mn_idx_kp, dtype=np.int32))
+        m_idx_np = np.asarray(static.mn_idx_m, dtype=np.int32)
+        n_idx_np = np.asarray(static.mn_idx_n, dtype=np.int32)
+        kp_idx_np = np.asarray(static.mn_idx_kp, dtype=np.int32)
+        m_idx = jnp.asarray(m_idx_np)
+        n_idx = jnp.asarray(n_idx_np)
+        kp_idx = jnp.asarray(kp_idx_np)
         kn_idx_np = np.asarray(static.mn_idx_kn, dtype=np.int32)
         has_kn_np = np.asarray(static.mn_has_kn, dtype=bool) if static.mn_has_kn is not None else (kn_idx_np >= 0)
     else:
@@ -5971,18 +5998,21 @@ def solve_fixed_boundary_residual_iter(
                 kp_idx_list.append(kp)
                 kn_idx_list.append(int(idx_neg[m_i, n_i]))
 
-        m_idx = jnp.asarray(np.asarray(m_idx_list, dtype=np.int32))
-        n_idx = jnp.asarray(np.asarray(n_idx_list, dtype=np.int32))
-        kp_idx = jnp.asarray(np.asarray(kp_idx_list, dtype=np.int32))
+        m_idx_np = np.asarray(m_idx_list, dtype=np.int32)
+        n_idx_np = np.asarray(n_idx_list, dtype=np.int32)
+        kp_idx_np = np.asarray(kp_idx_list, dtype=np.int32)
+        m_idx = jnp.asarray(m_idx_np)
+        n_idx = jnp.asarray(n_idx_np)
+        kp_idx = jnp.asarray(kp_idx_np)
         kn_idx_np = np.asarray(kn_idx_list, dtype=np.int32)
         has_kn_np = kn_idx_np >= 0
     kn_idx = jnp.asarray(kn_idx_np)
     has_kn = jnp.asarray(has_kn_np)
     has_kn_any = bool(np.any(has_kn_np))
     # NumPy index arrays for _rz_norm_np (avoid JAX dispatch on preconditioner rebuilds).
-    _kp_idx_np = np.asarray(kp_idx, dtype=np.int32)
-    _m_idx_np = np.asarray(m_idx, dtype=np.int32)
-    _n_idx_np = np.asarray(n_idx, dtype=np.int32)
+    _kp_idx_np = kp_idx_np
+    _m_idx_np = m_idx_np
+    _n_idx_np = n_idx_np
     _include_rcc_np = (_m_idx_np > 0) | (_n_idx_np > 0)
     _is_m0_1d = (_m_idx_np == 0)
     _is_n0_1d = (_n_idx_np == 0)
@@ -6106,7 +6136,11 @@ def solve_fixed_boundary_residual_iter(
     scalxc_mn = vmec_scalxc_from_s(s=s, mpol=int(static.cfg.mpol)).astype(jnp.asarray(state0.Rcos).dtype)[:, :, None]
     if not bool(divide_by_scalxc_for_update):
         scalxc_mn = jnp.ones_like(scalxc_mn)
-    scalxc_mn_np = np.asarray(scalxc_mn, dtype=float)
+    scalxc_mn_np = (
+        np.asarray(scalxc_mn, dtype=float)
+        if bool(host_update_assembly) and (not _tree_has_tracer(scalxc_mn))
+        else None
+    )
 
     def _mn_cos_to_signed_host(cc, ss):
         # Single-DGEMM path: [cc, ss] @ _AB_cos (= vstack([A_cos, B_cos]))
