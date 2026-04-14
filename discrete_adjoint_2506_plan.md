@@ -533,6 +533,8 @@ Stop or reduce scope if:
     guess with the tape-level reverse pass to propagate cotangents back to boundary parameters.
   - Locked the corresponding two-step exact QH control gate: the replay-based parameter VJP matches a direct two-step JAX VJP
     through the same frozen-axis extracted map for the `(m,n)=(0,1)` boundary coefficient.
+  - Added the first scalar objective gate on top of that control path: a two-step QH aspect gradient propagated with
+    `checkpoint_tape_param_vjp(...)` matches both direct AD through the extracted map and central finite differences.
   - The current root cause is therefore no longer in the accepted-step algebra or the raw-force assembly; it was the
     initialization branch mismatch caused by traced missing-axis handling. The next phase should thread the frozen-axis branch choice
     through the replay/tape consumer path and then start the reverse-over-history implementation on top of that consistent primal map.
