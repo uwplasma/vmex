@@ -15,6 +15,7 @@ import numpy as np
 
 from ._compat import jnp
 from .state import pack_state
+from .vmec_tomnsp import TomnspsRZL
 
 
 @dataclass(frozen=True)
@@ -427,6 +428,117 @@ def strict_update_velocity_limit(
     return out
 
 
+def preconditioned_force_channels_from_rz_output(
+    *,
+    frzl_rz,
+    lam_prec,
+    w_mode_mn,
+    lambda_update_scale=1.0,
+):
+    """Map R/Z preconditioner output into solver force channels for one step."""
+    frcc = jnp.asarray(frzl_rz.frcc)
+    zeros_r = jnp.zeros_like(frcc)
+    fzsc = jnp.asarray(frzl_rz.fzsc)
+    zeros_z = jnp.zeros_like(fzsc)
+    flsc = jnp.asarray(frzl_rz.flsc) * jnp.asarray(lam_prec)
+    zeros_l = jnp.zeros_like(flsc)
+
+    frss = None if frzl_rz.frss is None else jnp.asarray(frzl_rz.frss)
+    fzcs = None if frzl_rz.fzcs is None else jnp.asarray(frzl_rz.fzcs)
+    flcs = None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * jnp.asarray(lam_prec))
+    frsc = jnp.asarray(frzl_rz.frsc) if getattr(frzl_rz, "frsc", None) is not None else zeros_r
+    frcs = jnp.asarray(frzl_rz.frcs) if getattr(frzl_rz, "frcs", None) is not None else zeros_r
+    fzcc = jnp.asarray(frzl_rz.fzcc) if getattr(frzl_rz, "fzcc", None) is not None else zeros_z
+    fzss = jnp.asarray(frzl_rz.fzss) if getattr(frzl_rz, "fzss", None) is not None else zeros_z
+    flcc = (
+        jnp.asarray(frzl_rz.flcc) * jnp.asarray(lam_prec)
+        if getattr(frzl_rz, "flcc", None) is not None
+        else zeros_l
+    )
+    flss = (
+        jnp.asarray(frzl_rz.flss) * jnp.asarray(lam_prec)
+        if getattr(frzl_rz, "flss", None) is not None
+        else zeros_l
+    )
+
+    frzl_pre = TomnspsRZL(
+        frcc=frcc,
+        frss=frss,
+        fzsc=fzsc,
+        fzcs=fzcs,
+        flsc=flsc,
+        flcs=flcs,
+        frsc=frsc,
+        frcs=frcs,
+        fzcc=fzcc,
+        fzss=fzss,
+        flcc=flcc,
+        flss=flss,
+    )
+    w = jnp.asarray(w_mode_mn)[None, :, :]
+    frcc_u = frcc * w
+    frss_u = (frss if frss is not None else zeros_r) * w
+    fzsc_u = fzsc * w
+    fzcs_u = (fzcs if fzcs is not None else zeros_z) * w
+    flsc_u = flsc * w
+    flcs_u = (flcs if flcs is not None else zeros_l) * w
+    frsc_u = frsc * w
+    frcs_u = frcs * w
+    fzcc_u = fzcc * w
+    fzss_u = fzss * w
+    flcc_u = flcc * w
+    flss_u = flss * w
+    if float(lambda_update_scale) != 1.0:
+        scale = jnp.asarray(lambda_update_scale, dtype=flsc_u.dtype)
+        flsc_u = flsc_u * scale
+        flcs_u = flcs_u * scale
+        flcc_u = flcc_u * scale
+        flss_u = flss_u * scale
+    return {
+        "frzl_pre": frzl_pre,
+        "frcc_u": frcc_u,
+        "frss_u": frss_u,
+        "fzsc_u": fzsc_u,
+        "fzcs_u": fzcs_u,
+        "flsc_u": flsc_u,
+        "flcs_u": flcs_u,
+        "frsc_u": frsc_u,
+        "frcs_u": frcs_u,
+        "fzcc_u": fzcc_u,
+        "fzss_u": fzss_u,
+        "flcc_u": flcc_u,
+        "flss_u": flss_u,
+    }
+
+
+def preconditioned_force_channels_from_raw_forces(
+    *,
+    frzl,
+    mats,
+    jmax,
+    cfg,
+    lam_prec,
+    w_mode_mn,
+    lambda_update_scale=1.0,
+):
+    """Apply the radial preconditioner, lambda scaling, and mode scaling."""
+    from .preconditioner_1d_jax import rz_preconditioner_apply_jit
+
+    frzl_rz = rz_preconditioner_apply_jit(
+        frzl_in=frzl,
+        mats=mats,
+        jmax=int(jmax),
+        cfg=cfg,
+    )
+    out = preconditioned_force_channels_from_rz_output(
+        frzl_rz=frzl_rz,
+        lam_prec=lam_prec,
+        w_mode_mn=w_mode_mn,
+        lambda_update_scale=lambda_update_scale,
+    )
+    return {"frzl_rz": frzl_rz, **out}
+
+
 def strict_update_accepted_step(
     state_pre,
     static,
@@ -660,6 +772,8 @@ __all__ = [
     "ResidualCheckpointTape",
     "build_residual_checkpoint_tape",
     "concat_residual_iteration_traces",
+    "preconditioned_force_channels_from_raw_forces",
+    "preconditioned_force_channels_from_rz_output",
     "replay_residual_checkpoint_step",
     "strict_update_accepted_step",
     "strict_update_velocity_limit",

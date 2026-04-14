@@ -498,3 +498,17 @@ Stop or reduce scope if:
     - accepted-step block runtime is about `1.29e-1 s`,
     - accepted-step block state reconstruction remains exact,
     - lambda scalar mismatch is unchanged, confirming the remaining defect is still upstream of the accepted-step map.
+  - Added the next exact upstream block for the QH path: preconditioned force channels from the stored `rz_preconditioner_apply` output plus lambda/mode scaling.
+  - Locked new local gates on exact QH one-step data for that block:
+    - `frzl_rz -> fr*_u` reconstruction matches the solver trace exactly,
+    - local JVP/VJP identity passes,
+    - composing `frzl_rz -> accepted step` still reconstructs the solver state exactly.
+  - Added the next upstream block for the current QH branch assumptions (`lasym=False`): raw Fourier residuals through `rz_preconditioner_apply` into the solver force channels.
+  - Locked new local gates on exact QH one-step data for that block:
+    - `frzl -> fr*_u` reconstruction matches the solver trace exactly,
+    - local JVP/VJP identity passes.
+  - Re-benchmarked the exact QH one-step block runtimes:
+    - `frzl -> fr*_u` runtime is about `2.14e-2 s`,
+    - `frzl_rz -> fr*_u` runtime is about `6.0e-4 s`,
+    - `frzl_rz -> accepted step` remains exact with no change to the lambda mismatch diagnostic.
+  - This leaves the remaining one-step upstream seam at the raw-force assembly itself (`_compute_forces_iter` / `vmec_forces_rz_from_wout` + `vmec_residual_internal_from_kernels` + post-`tomnsps` VMEC cleanup), which is now the only part of the first-step map not yet extracted into solver-faithful discrete-adjoint blocks.

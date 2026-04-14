@@ -797,6 +797,413 @@ def test_strict_update_velocity_limit_clips_and_vjp_identity():
     assert lhs == pytest.approx(rhs, rel=1.0e-10, abs=1.0e-10)
 
 
+def test_preconditioned_force_channels_from_rz_output_reconstructs_first_qh_step(load_case_qh_warm_start):
+    pytest.importorskip("jax")
+
+    from vmec_jax.discrete_adjoint import preconditioned_force_channels_from_rz_output
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.init_guess import initial_guess_from_boundary
+    from vmec_jax.solve import solve_fixed_boundary_residual_iter
+    from vmec_jax.vmec_tomnsp import TomnspsRZL
+
+    _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
+    state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
+    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state_guess, static).sqrtg), axis_index=1))
+    result = solve_fixed_boundary_residual_iter(
+        state_guess,
+        static,
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        reference_mode=False,
+        backtracking=True,
+        limit_dt_from_force=True,
+        limit_update_rms=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces="auto",
+        use_scan=False,
+        host_update_assembly=False,
+        light_history=False,
+        resume_state_mode="full",
+        adjoint_trace=True,
+    )
+    trace = result.diagnostics["adjoint_step_trace"][0]
+    frzl_rz = TomnspsRZL(
+        frcc=trace["frzl_rz_frcc"],
+        frss=trace["frzl_rz_frss"],
+        fzsc=trace["frzl_rz_fzsc"],
+        fzcs=trace["frzl_rz_fzcs"],
+        flsc=trace["frzl_rz_flsc"],
+        flcs=trace["frzl_rz_flcs"],
+        frsc=trace["frzl_rz_frsc"],
+        frcs=trace["frzl_rz_frcs"],
+        fzcc=trace["frzl_rz_fzcc"],
+        fzss=trace["frzl_rz_fzss"],
+        flcc=trace["frzl_rz_flcc"],
+        flss=trace["frzl_rz_flss"],
+    )
+    out = preconditioned_force_channels_from_rz_output(
+        frzl_rz=frzl_rz,
+        lam_prec=trace["lam_prec"],
+        w_mode_mn=trace["w_mode_mn"],
+        lambda_update_scale=trace["lambda_update_scale"],
+    )
+    for key in ["frcc_u", "frss_u", "fzsc_u", "fzcs_u", "flsc_u", "flcs_u"]:
+        assert np.asarray(out[key]) == pytest.approx(np.asarray(trace[key]), rel=0.0, abs=1.0e-12)
+
+
+def test_preconditioned_force_channels_from_rz_output_vjp_identity_qh(load_case_qh_warm_start):
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import enable_x64, jax, jnp
+    from vmec_jax.discrete_adjoint import preconditioned_force_channels_from_rz_output
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.init_guess import initial_guess_from_boundary
+    from vmec_jax.solve import solve_fixed_boundary_residual_iter
+    from vmec_jax.vmec_tomnsp import TomnspsRZL
+
+    enable_x64(True)
+
+    _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
+    state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
+    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state_guess, static).sqrtg), axis_index=1))
+    result = solve_fixed_boundary_residual_iter(
+        state_guess,
+        static,
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        reference_mode=False,
+        backtracking=True,
+        limit_dt_from_force=True,
+        limit_update_rms=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces="auto",
+        use_scan=False,
+        host_update_assembly=False,
+        light_history=False,
+        resume_state_mode="full",
+        adjoint_trace=True,
+    )
+    trace = result.diagnostics["adjoint_step_trace"][0]
+    pieces0 = [
+        jnp.asarray(trace["frzl_rz_frcc"]),
+        jnp.asarray(trace["frzl_rz_frss"]),
+        jnp.asarray(trace["frzl_rz_fzsc"]),
+        jnp.asarray(trace["frzl_rz_fzcs"]),
+        jnp.asarray(trace["frzl_rz_flsc"]),
+        jnp.asarray(trace["frzl_rz_flcs"]),
+        jnp.asarray(trace["lam_prec"]),
+    ]
+    sizes = [int(p.size) for p in pieces0]
+    offsets = np.cumsum([0] + sizes)
+    x0 = jnp.concatenate([jnp.ravel(p) for p in pieces0], axis=0)
+    tangent = jnp.linspace(-0.15, 0.65, int(x0.size), dtype=x0.dtype)
+
+    def _unpack(x):
+        vals = []
+        for start, stop, ref in zip(offsets[:-1], offsets[1:], pieces0):
+            vals.append(jnp.reshape(x[start:stop], ref.shape))
+        return vals
+
+    def _f(x):
+        vals = _unpack(x)
+        frzl_rz = TomnspsRZL(
+            frcc=vals[0],
+            frss=vals[1],
+            fzsc=vals[2],
+            fzcs=vals[3],
+            flsc=vals[4],
+            flcs=vals[5],
+        )
+        out = preconditioned_force_channels_from_rz_output(
+            frzl_rz=frzl_rz,
+            lam_prec=vals[6],
+            w_mode_mn=trace["w_mode_mn"],
+            lambda_update_scale=trace["lambda_update_scale"],
+        )
+        return jnp.concatenate(
+            [
+                jnp.ravel(out["frcc_u"]),
+                jnp.ravel(out["frss_u"]),
+                jnp.ravel(out["fzsc_u"]),
+                jnp.ravel(out["fzcs_u"]),
+                jnp.ravel(out["flsc_u"]),
+                jnp.ravel(out["flcs_u"]),
+            ],
+            axis=0,
+        )
+
+    y_ref = _f(x0)
+    cotangent = jnp.linspace(-0.35, 0.25, int(y_ref.size), dtype=x0.dtype)
+    _, jvp = jax.jvp(_f, (x0,), (tangent,))
+    _, vjp_fun = jax.vjp(_f, x0)
+    vjp = vjp_fun(cotangent)[0]
+    lhs = float(jnp.vdot(jvp, cotangent))
+    rhs = float(jnp.vdot(tangent, vjp))
+    assert lhs == pytest.approx(rhs, rel=1.0e-10, abs=1.0e-10)
+
+
+def test_rz_output_to_accepted_step_reconstructs_first_qh_step(load_case_qh_warm_start):
+    pytest.importorskip("jax")
+
+    from vmec_jax.discrete_adjoint import preconditioned_force_channels_from_rz_output, strict_update_accepted_step
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.init_guess import initial_guess_from_boundary
+    from vmec_jax.solve import solve_fixed_boundary_residual_iter
+    from vmec_jax.state import pack_state
+    from vmec_jax.vmec_tomnsp import TomnspsRZL
+
+    _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
+    state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
+    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state_guess, static).sqrtg), axis_index=1))
+    result = solve_fixed_boundary_residual_iter(
+        state_guess,
+        static,
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        reference_mode=False,
+        backtracking=True,
+        limit_dt_from_force=True,
+        limit_update_rms=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces="auto",
+        use_scan=False,
+        host_update_assembly=False,
+        light_history=False,
+        resume_state_mode="full",
+        adjoint_trace=True,
+    )
+    trace = result.diagnostics["adjoint_step_trace"][0]
+    frzl_rz = TomnspsRZL(
+        frcc=trace["frzl_rz_frcc"],
+        frss=trace["frzl_rz_frss"],
+        fzsc=trace["frzl_rz_fzsc"],
+        fzcs=trace["frzl_rz_fzcs"],
+        flsc=trace["frzl_rz_flsc"],
+        flcs=trace["frzl_rz_flcs"],
+        frsc=trace["frzl_rz_frsc"],
+        frcs=trace["frzl_rz_frcs"],
+        fzcc=trace["frzl_rz_fzcc"],
+        fzss=trace["frzl_rz_fzss"],
+        flcc=trace["frzl_rz_flcc"],
+        flss=trace["frzl_rz_flss"],
+    )
+    force_out = preconditioned_force_channels_from_rz_output(
+        frzl_rz=frzl_rz,
+        lam_prec=trace["lam_prec"],
+        w_mode_mn=trace["w_mode_mn"],
+        lambda_update_scale=trace["lambda_update_scale"],
+    )
+    out = strict_update_accepted_step(
+        trace["state_pre"],
+        static,
+        dt_eff=trace["dt_eff"],
+        b1=trace["b1"],
+        fac=trace["fac"],
+        force_scale=trace["force_scale"],
+        flip_sign=trace["flip_sign"],
+        vRcc_before=trace["vRcc_before"],
+        vRss_before=trace["vRss_before"],
+        vZsc_before=trace["vZsc_before"],
+        vZcs_before=trace["vZcs_before"],
+        vLsc_before=trace["vLsc_before"],
+        vLcs_before=trace["vLcs_before"],
+        frcc_u=force_out["frcc_u"],
+        frss_u=force_out["frss_u"],
+        fzsc_u=force_out["fzsc_u"],
+        fzcs_u=force_out["fzcs_u"],
+        flsc_u=force_out["flsc_u"],
+        flcs_u=force_out["flcs_u"],
+        max_update_rms=trace["max_update_rms_pre"],
+        limit_update_rms=trace["limit_update_rms"],
+        divide_by_scalxc_for_update=trace["divide_by_scalxc_for_update"],
+    )
+    assert np.asarray(pack_state(out["state_post"])) == pytest.approx(
+        np.asarray(pack_state(trace["state_post"])),
+        rel=0.0,
+        abs=1.0e-12,
+    )
+
+
+def test_preconditioned_force_channels_from_raw_forces_reconstructs_first_qh_step(load_case_qh_warm_start):
+    pytest.importorskip("jax")
+
+    from vmec_jax.discrete_adjoint import preconditioned_force_channels_from_raw_forces
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.init_guess import initial_guess_from_boundary
+    from vmec_jax.solve import solve_fixed_boundary_residual_iter
+    from vmec_jax.vmec_tomnsp import TomnspsRZL
+
+    _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
+    state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
+    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state_guess, static).sqrtg), axis_index=1))
+    result = solve_fixed_boundary_residual_iter(
+        state_guess,
+        static,
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        reference_mode=False,
+        backtracking=True,
+        limit_dt_from_force=True,
+        limit_update_rms=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces="auto",
+        use_scan=False,
+        host_update_assembly=False,
+        light_history=False,
+        resume_state_mode="full",
+        adjoint_trace=True,
+    )
+    trace = result.diagnostics["adjoint_step_trace"][0]
+    frzl = TomnspsRZL(
+        frcc=trace["frzl_frcc"],
+        frss=trace["frzl_frss"],
+        fzsc=trace["frzl_fzsc"],
+        fzcs=trace["frzl_fzcs"],
+        flsc=trace["frzl_flsc"],
+        flcs=trace["frzl_flcs"],
+        frsc=trace["frzl_frsc"],
+        frcs=trace["frzl_frcs"],
+        fzcc=trace["frzl_fzcc"],
+        fzss=trace["frzl_fzss"],
+        flcc=trace["frzl_flcc"],
+        flss=trace["frzl_flss"],
+    )
+    out = preconditioned_force_channels_from_raw_forces(
+        frzl=frzl,
+        mats=trace["precond_mats"],
+        jmax=trace["precond_jmax"],
+        cfg=static.cfg,
+        lam_prec=trace["lam_prec"],
+        w_mode_mn=trace["w_mode_mn"],
+        lambda_update_scale=trace["lambda_update_scale"],
+    )
+    assert np.asarray(out["frcc_u"]) == pytest.approx(np.asarray(trace["frcc_u"]), rel=0.0, abs=1.0e-12)
+    assert np.asarray(out["flsc_u"]) == pytest.approx(np.asarray(trace["flsc_u"]), rel=0.0, abs=1.0e-12)
+
+
+def test_preconditioned_force_channels_from_raw_forces_vjp_identity_qh(load_case_qh_warm_start):
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import enable_x64, jax, jnp
+    from vmec_jax.discrete_adjoint import preconditioned_force_channels_from_raw_forces
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.init_guess import initial_guess_from_boundary
+    from vmec_jax.solve import solve_fixed_boundary_residual_iter
+    from vmec_jax.vmec_tomnsp import TomnspsRZL
+
+    enable_x64(True)
+
+    _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
+    state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
+    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state_guess, static).sqrtg), axis_index=1))
+    result = solve_fixed_boundary_residual_iter(
+        state_guess,
+        static,
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        reference_mode=False,
+        backtracking=True,
+        limit_dt_from_force=True,
+        limit_update_rms=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces="auto",
+        use_scan=False,
+        host_update_assembly=False,
+        light_history=False,
+        resume_state_mode="full",
+        adjoint_trace=True,
+    )
+    trace = result.diagnostics["adjoint_step_trace"][0]
+    pieces0 = [
+        jnp.asarray(trace["frzl_frcc"]),
+        jnp.asarray(trace["frzl_frss"]),
+        jnp.asarray(trace["frzl_fzsc"]),
+        jnp.asarray(trace["frzl_fzcs"]),
+        jnp.asarray(trace["frzl_flsc"]),
+        jnp.asarray(trace["frzl_flcs"]),
+    ]
+    sizes = [int(p.size) for p in pieces0]
+    offsets = np.cumsum([0] + sizes)
+    x0 = jnp.concatenate([jnp.ravel(p) for p in pieces0], axis=0)
+    tangent = jnp.linspace(-0.1, 0.55, int(x0.size), dtype=x0.dtype)
+
+    def _unpack(x):
+        vals = []
+        for start, stop, ref in zip(offsets[:-1], offsets[1:], pieces0):
+            vals.append(jnp.reshape(x[start:stop], ref.shape))
+        return vals
+
+    def _f(x):
+        vals = _unpack(x)
+        frzl = TomnspsRZL(
+            frcc=vals[0],
+            frss=vals[1],
+            fzsc=vals[2],
+            fzcs=vals[3],
+            flsc=vals[4],
+            flcs=vals[5],
+        )
+        out = preconditioned_force_channels_from_raw_forces(
+            frzl=frzl,
+            mats=trace["precond_mats"],
+            jmax=trace["precond_jmax"],
+            cfg=static.cfg,
+            lam_prec=trace["lam_prec"],
+            w_mode_mn=trace["w_mode_mn"],
+            lambda_update_scale=trace["lambda_update_scale"],
+        )
+        return jnp.concatenate(
+            [
+                jnp.ravel(out["frcc_u"]),
+                jnp.ravel(out["frss_u"]),
+                jnp.ravel(out["fzsc_u"]),
+                jnp.ravel(out["fzcs_u"]),
+                jnp.ravel(out["flsc_u"]),
+                jnp.ravel(out["flcs_u"]),
+            ],
+            axis=0,
+        )
+
+    y_ref = _f(x0)
+    cotangent = jnp.linspace(-0.25, 0.2, int(y_ref.size), dtype=x0.dtype)
+    _, jvp = jax.jvp(_f, (x0,), (tangent,))
+    _, vjp_fun = jax.vjp(_f, x0)
+    vjp = vjp_fun(cotangent)[0]
+    lhs = float(jnp.vdot(jvp, cotangent))
+    rhs = float(jnp.vdot(tangent, vjp))
+    assert lhs == pytest.approx(rhs, rel=1.0e-10, abs=1.0e-10)
+
+
 def test_strict_update_accepted_step_reconstructs_first_qh_step(load_case_qh_warm_start):
     pytest.importorskip("jax")
 
