@@ -302,6 +302,103 @@ def test_residual_checkpoint_tape_matches_direct_two_step_qh(load_case_qh_warm_s
     )
 
 
+def test_checkpoint_tape_state_vjp_matches_direct_two_step_qh(load_case_qh_warm_start):
+    pytest.importorskip("jax")
+    _require_slow()
+
+    from vmec_jax._compat import enable_x64, jax, jnp
+    from vmec_jax.discrete_adjoint import build_residual_checkpoint_tape, checkpoint_tape_state_vjp
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.init_guess import initial_guess_from_boundary
+    from vmec_jax.state import pack_state, unpack_state
+
+    enable_x64(True)
+
+    _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
+    state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
+    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state_guess, static).sqrtg), axis_index=1))
+    common_kwargs = dict(
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        reference_mode=False,
+        backtracking=True,
+        limit_dt_from_force=True,
+        limit_update_rms=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces="auto",
+        use_scan=False,
+        light_history=True,
+        resume_state_mode="full",
+    )
+    tape = build_residual_checkpoint_tape(
+        state_guess,
+        static,
+        max_iter=2,
+        solver_kwargs=common_kwargs,
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        step_size=float(indata.get_float("DELT", 1.0)),
+        light_history=True,
+        resume_state_mode="full",
+    )
+    assert len(tape.step_traces) == 2
+
+    x0 = jnp.asarray(pack_state(tape.step_traces[0]["state_pre"]))
+    cotangent = jnp.linspace(-0.15, 0.15, int(x0.size), dtype=x0.dtype)
+
+    def _forward_two_step(x):
+        from vmec_jax.discrete_adjoint import strict_update_one_step_from_state
+
+        state = unpack_state(x, tape.step_traces[0]["state_pre"].layout)
+        for trace in tape.step_traces:
+            out = strict_update_one_step_from_state(
+                state,
+                static,
+                wout_like=trace["wout_like"],
+                trig=trace["trig"],
+                apply_lforbal=trace["apply_lforbal"],
+                include_edge_residual=trace["include_edge_residual"],
+                apply_m1_constraints=trace["apply_m1_constraints"],
+                zero_m1=trace["zero_m1"],
+                mats=trace["precond_mats"],
+                jmax=trace["precond_jmax"],
+                lam_prec=trace["lam_prec"],
+                w_mode_mn=trace["w_mode_mn"],
+                lambda_update_scale=trace["lambda_update_scale"],
+                dt_eff=trace["dt_eff"],
+                b1=trace["b1"],
+                fac=trace["fac"],
+                force_scale=trace["force_scale"],
+                flip_sign=trace["flip_sign"],
+                vRcc_before=trace["vRcc_before"],
+                vRss_before=trace["vRss_before"],
+                vZsc_before=trace["vZsc_before"],
+                vZcs_before=trace["vZcs_before"],
+                vLsc_before=trace["vLsc_before"],
+                vLcs_before=trace["vLcs_before"],
+                max_update_rms=trace["max_update_rms_pre"],
+                limit_update_rms=trace["limit_update_rms"],
+                divide_by_scalxc_for_update=trace["divide_by_scalxc_for_update"],
+            )
+            state = out["step"]["state_post"]
+        return pack_state(state)
+
+    _, vjp_fun = jax.vjp(_forward_two_step, x0)
+    direct = vjp_fun(cotangent)[0]
+    replay = checkpoint_tape_state_vjp(
+        tape=tape,
+        static=static,
+        final_cotangent=cotangent,
+    )
+    assert np.asarray(replay) == pytest.approx(np.asarray(direct), rel=1.0e-10, abs=1.0e-10)
+
+
 def test_replay_residual_checkpoint_step_matches_second_direct_step_qh(load_case_qh_warm_start):
     pytest.importorskip("jax")
     _require_slow()

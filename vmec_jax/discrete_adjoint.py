@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 
 from ._compat import jnp
-from .state import pack_state
+from .state import pack_state, unpack_state
 from .vmec_tomnsp import TomnspsRZL
 
 
@@ -276,6 +276,60 @@ def replay_residual_checkpoint_step(
         adjoint_trace=True,
         **solve_kwargs,
     )
+
+
+def checkpoint_tape_state_vjp(
+    *,
+    tape: ResidualCheckpointTape,
+    static,
+    final_cotangent,
+):
+    """Reverse a packed-state cotangent through the extracted step tape."""
+    if not tape.step_traces:
+        return jnp.asarray(final_cotangent)
+
+    from ._compat import jax
+
+    cotangent = jnp.asarray(final_cotangent)
+    for trace in reversed(tape.step_traces):
+        x0 = jnp.asarray(pack_state(trace["state_pre"]))
+
+        def _step_map(x):
+            state = unpack_state(x, trace["state_pre"].layout)
+            out = strict_update_one_step_from_state(
+                state,
+                static,
+                wout_like=trace["wout_like"],
+                trig=trace["trig"],
+                apply_lforbal=trace["apply_lforbal"],
+                include_edge_residual=trace["include_edge_residual"],
+                apply_m1_constraints=trace["apply_m1_constraints"],
+                zero_m1=trace["zero_m1"],
+                mats=trace["precond_mats"],
+                jmax=trace["precond_jmax"],
+                lam_prec=trace["lam_prec"],
+                w_mode_mn=trace["w_mode_mn"],
+                lambda_update_scale=trace["lambda_update_scale"],
+                dt_eff=trace["dt_eff"],
+                b1=trace["b1"],
+                fac=trace["fac"],
+                force_scale=trace["force_scale"],
+                flip_sign=trace["flip_sign"],
+                vRcc_before=trace["vRcc_before"],
+                vRss_before=trace["vRss_before"],
+                vZsc_before=trace["vZsc_before"],
+                vZcs_before=trace["vZcs_before"],
+                vLsc_before=trace["vLsc_before"],
+                vLcs_before=trace["vLcs_before"],
+                max_update_rms=trace["max_update_rms_pre"],
+                limit_update_rms=trace["limit_update_rms"],
+                divide_by_scalxc_for_update=trace["divide_by_scalxc_for_update"],
+            )
+            return pack_state(out["step"]["state_post"])
+
+        _, vjp_fun = jax.vjp(_step_map, x0)
+        cotangent = vjp_fun(cotangent)[0]
+    return cotangent
 
 
 def strict_update_velocity_block(
