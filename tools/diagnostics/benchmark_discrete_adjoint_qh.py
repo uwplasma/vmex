@@ -27,6 +27,8 @@ from vmec_jax._compat import enable_x64, has_jax, jax, jnp
 from vmec_jax.boundary import boundary_from_indata
 from vmec_jax.config import load_config
 from vmec_jax.discrete_adjoint import build_residual_checkpoint_tape
+from vmec_jax.discrete_adjoint import preconditioned_force_channels_from_raw_forces
+from vmec_jax.discrete_adjoint import preconditioned_force_channels_from_rz_output
 from vmec_jax.discrete_adjoint import strict_update_accepted_step
 from vmec_jax.discrete_adjoint import strict_update_velocity_state_advance
 from vmec_jax.field import signgs_from_sqrtg
@@ -35,6 +37,7 @@ from vmec_jax.implicit import solve_fixed_boundary_state_implicit_vmec_residual
 from vmec_jax.init_guess import initial_guess_from_boundary
 from vmec_jax.solve import solve_fixed_boundary_residual_iter
 from vmec_jax.state import pack_state
+from vmec_jax.vmec_tomnsp import TomnspsRZL
 from vmec_jax.wout import equilibrium_aspect_ratio_from_state
 
 
@@ -158,6 +161,10 @@ def main() -> None:
     ) if tape.packed_states.shape[0] else float("nan")
     strict_update_runtime_s = float("nan")
     strict_update_state_diff = float("nan")
+    raw_force_block_runtime_s = float("nan")
+    raw_force_block_force_diff = float("nan")
+    force_block_runtime_s = float("nan")
+    force_block_force_diff = float("nan")
     strict_step_runtime_s = float("nan")
     strict_step_state_diff = float("nan")
     if int(args.max_iter) >= 1 and tape.resume_states:
@@ -185,6 +192,59 @@ def main() -> None:
             )
         if tape.step_traces:
             trace = tape.step_traces[0]
+            frzl = TomnspsRZL(
+                frcc=trace["frzl_frcc"],
+                frss=trace["frzl_frss"],
+                fzsc=trace["frzl_fzsc"],
+                fzcs=trace["frzl_fzcs"],
+                flsc=trace["frzl_flsc"],
+                flcs=trace["frzl_flcs"],
+                frsc=trace["frzl_frsc"],
+                frcs=trace["frzl_frcs"],
+                fzcc=trace["frzl_fzcc"],
+                fzss=trace["frzl_fzss"],
+                flcc=trace["frzl_flcc"],
+                flss=trace["frzl_flss"],
+            )
+            t0 = time.perf_counter()
+            raw_force_out = preconditioned_force_channels_from_raw_forces(
+                frzl=frzl,
+                mats=trace["precond_mats"],
+                jmax=trace["precond_jmax"],
+                cfg=static.cfg,
+                lam_prec=trace["lam_prec"],
+                w_mode_mn=trace["w_mode_mn"],
+                lambda_update_scale=trace["lambda_update_scale"],
+            )
+            raw_force_block_runtime_s = time.perf_counter() - t0
+            raw_force_block_force_diff = float(
+                np.max(np.abs(np.asarray(raw_force_out["flsc_u"]) - np.asarray(trace["flsc_u"])))
+            )
+            frzl_rz = TomnspsRZL(
+                frcc=trace["frzl_rz_frcc"],
+                frss=trace["frzl_rz_frss"],
+                fzsc=trace["frzl_rz_fzsc"],
+                fzcs=trace["frzl_rz_fzcs"],
+                flsc=trace["frzl_rz_flsc"],
+                flcs=trace["frzl_rz_flcs"],
+                frsc=trace["frzl_rz_frsc"],
+                frcs=trace["frzl_rz_frcs"],
+                fzcc=trace["frzl_rz_fzcc"],
+                fzss=trace["frzl_rz_fzss"],
+                flcc=trace["frzl_rz_flcc"],
+                flss=trace["frzl_rz_flss"],
+            )
+            t0 = time.perf_counter()
+            force_out = preconditioned_force_channels_from_rz_output(
+                frzl_rz=frzl_rz,
+                lam_prec=trace["lam_prec"],
+                w_mode_mn=trace["w_mode_mn"],
+                lambda_update_scale=trace["lambda_update_scale"],
+            )
+            force_block_runtime_s = time.perf_counter() - t0
+            force_block_force_diff = float(
+                np.max(np.abs(np.asarray(force_out["flsc_u"]) - np.asarray(trace["flsc_u"])))
+            )
             t0 = time.perf_counter()
             out = strict_update_accepted_step(
                 trace["state_pre"],
@@ -200,12 +260,12 @@ def main() -> None:
                 vZcs_before=trace["vZcs_before"],
                 vLsc_before=trace["vLsc_before"],
                 vLcs_before=trace["vLcs_before"],
-                frcc_u=trace["frcc_u"],
-                frss_u=trace["frss_u"],
-                fzsc_u=trace["fzsc_u"],
-                fzcs_u=trace["fzcs_u"],
-                flsc_u=trace["flsc_u"],
-                flcs_u=trace["flcs_u"],
+                frcc_u=force_out["frcc_u"],
+                frss_u=force_out["frss_u"],
+                fzsc_u=force_out["fzsc_u"],
+                fzcs_u=force_out["fzcs_u"],
+                flsc_u=force_out["flsc_u"],
+                flcs_u=force_out["flcs_u"],
                 max_update_rms=trace["max_update_rms_pre"],
                 limit_update_rms=trace["limit_update_rms"],
                 divide_by_scalxc_for_update=trace["divide_by_scalxc_for_update"],
@@ -243,6 +303,10 @@ def main() -> None:
             "checkpoint_count": int(tape.packed_states.shape[0]),
             "trace_len": int(tape.trace.iter2.shape[0]),
             "final_state_linf": final_state_diff,
+            "raw_force_block_runtime_s": raw_force_block_runtime_s,
+            "raw_force_block_flsc_linf": raw_force_block_force_diff,
+            "force_block_runtime_s": force_block_runtime_s,
+            "force_block_flsc_linf": force_block_force_diff,
             "strict_update_block_runtime_s": strict_update_runtime_s,
             "strict_update_block_state_linf": strict_update_state_diff,
             "strict_step_block_runtime_s": strict_step_runtime_s,
