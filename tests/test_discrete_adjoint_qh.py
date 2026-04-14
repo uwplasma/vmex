@@ -185,6 +185,7 @@ def test_residual_checkpoint_tape_matches_direct_one_step_qh(load_case_qh_warm_s
     assert tape.packed_states.shape[0] == 1
     assert tape.trace.iter2.shape[0] >= 1
     assert tape.resume_states[0] is not None
+    assert len(tape.step_traces) == 1
     assert np.asarray(tape.packed_states[-1]) == pytest.approx(
         np.asarray(pack_state(direct.state)),
         rel=0.0,
@@ -246,6 +247,7 @@ def test_residual_checkpoint_tape_matches_direct_two_step_qh(load_case_qh_warm_s
     assert tape.packed_states.shape[0] == 2
     assert tape.trace.iter2.shape[0] >= 2
     assert tape.resume_states[-1] is not None
+    assert len(tape.step_traces) == 2
     assert np.asarray(tape.packed_states[-1]) == pytest.approx(
         np.asarray(pack_state(direct.state)),
         rel=0.0,
@@ -359,6 +361,63 @@ def test_strict_update_velocity_state_advance_reconstructs_first_qh_step(load_ca
         rel=0.0,
         abs=1.0e-12,
     )
+
+
+def test_strict_update_velocity_block_reconstructs_first_qh_step(load_case_qh_warm_start):
+    pytest.importorskip("jax")
+
+    from vmec_jax.discrete_adjoint import strict_update_velocity_block
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.init_guess import initial_guess_from_boundary
+    from vmec_jax.solve import solve_fixed_boundary_residual_iter
+
+    _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
+    state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
+    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state_guess, static).sqrtg), axis_index=1))
+    result = solve_fixed_boundary_residual_iter(
+        state_guess,
+        static,
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        reference_mode=False,
+        backtracking=True,
+        limit_dt_from_force=True,
+        limit_update_rms=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces="auto",
+        use_scan=False,
+        host_update_assembly=False,
+        light_history=False,
+        resume_state_mode="full",
+        adjoint_trace=True,
+    )
+    trace = result.diagnostics["adjoint_step_trace"][0]
+    block = strict_update_velocity_block(
+        b1=trace["b1"],
+        fac=trace["fac"],
+        force_scale=trace["force_scale"],
+        flip_sign=trace["flip_sign"],
+        vRcc_before=trace["vRcc_before"],
+        vRss_before=trace["vRss_before"],
+        vZsc_before=trace["vZsc_before"],
+        vZcs_before=trace["vZcs_before"],
+        vLsc_before=trace["vLsc_before"],
+        vLcs_before=trace["vLcs_before"],
+        frcc_u=trace["frcc_u"],
+        frss_u=trace["frss_u"],
+        fzsc_u=trace["fzsc_u"],
+        fzcs_u=trace["fzcs_u"],
+        flsc_u=trace["flsc_u"],
+        flcs_u=trace["flcs_u"],
+    )
+    for key in ["vRcc_after", "vRss_after", "vZsc_after", "vZcs_after", "vLsc_after", "vLcs_after"]:
+        assert np.asarray(block[key]) == pytest.approx(np.asarray(trace[key]), rel=0.0, abs=1.0e-12)
 
 
 def test_strict_update_velocity_state_advance_vjp_identity_qh(load_case_qh_warm_start):
@@ -540,3 +599,122 @@ def test_strict_update_velocity_state_advance_taylor_qh(load_case_qh_warm_start)
     y1 = _f(x0 + eps * direction)
     residual = np.asarray(y1 - y0 - eps * jvp)
     assert np.max(np.abs(residual)) < 1.0e-8
+
+
+def test_strict_update_velocity_block_vjp_identity_qh(load_case_qh_warm_start):
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import enable_x64, jax, jnp
+    from vmec_jax.discrete_adjoint import strict_update_velocity_block
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.init_guess import initial_guess_from_boundary
+    from vmec_jax.solve import solve_fixed_boundary_residual_iter
+
+    enable_x64(True)
+
+    _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
+    state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
+    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state_guess, static).sqrtg), axis_index=1))
+    result = solve_fixed_boundary_residual_iter(
+        state_guess,
+        static,
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        reference_mode=False,
+        backtracking=True,
+        limit_dt_from_force=True,
+        limit_update_rms=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces="auto",
+        use_scan=False,
+        host_update_assembly=False,
+        light_history=False,
+        resume_state_mode="full",
+        adjoint_trace=True,
+    )
+    trace = result.diagnostics["adjoint_step_trace"][0]
+    pieces0 = [
+        jnp.asarray(trace["vRcc_before"]),
+        jnp.asarray(trace["vRss_before"]),
+        jnp.asarray(trace["vZsc_before"]),
+        jnp.asarray(trace["vZcs_before"]),
+        jnp.asarray(trace["vLsc_before"]),
+        jnp.asarray(trace["vLcs_before"]),
+        jnp.asarray(trace["frcc_u"]),
+        jnp.asarray(trace["frss_u"]),
+        jnp.asarray(trace["fzsc_u"]),
+        jnp.asarray(trace["fzcs_u"]),
+        jnp.asarray(trace["flsc_u"]),
+        jnp.asarray(trace["flcs_u"]),
+    ]
+    sizes = [int(p.size) for p in pieces0]
+    offsets = np.cumsum([0] + sizes)
+    x0 = jnp.concatenate([jnp.ravel(p) for p in pieces0], axis=0)
+    tangent = jnp.linspace(0.2, 1.3, int(x0.size), dtype=x0.dtype)
+    out_ref = strict_update_velocity_block(
+        b1=trace["b1"],
+        fac=trace["fac"],
+        force_scale=trace["force_scale"],
+        flip_sign=trace["flip_sign"],
+        vRcc_before=trace["vRcc_before"],
+        vRss_before=trace["vRss_before"],
+        vZsc_before=trace["vZsc_before"],
+        vZcs_before=trace["vZcs_before"],
+        vLsc_before=trace["vLsc_before"],
+        vLcs_before=trace["vLcs_before"],
+        frcc_u=trace["frcc_u"],
+        frss_u=trace["frss_u"],
+        fzsc_u=trace["fzsc_u"],
+        fzcs_u=trace["fzcs_u"],
+        flsc_u=trace["flsc_u"],
+        flcs_u=trace["flcs_u"],
+    )
+    y_ref = jnp.concatenate(
+        [jnp.ravel(out_ref[k]) for k in ["vRcc_after", "vRss_after", "vZsc_after", "vZcs_after", "vLsc_after", "vLcs_after"]],
+        axis=0,
+    )
+    cotangent = jnp.linspace(-0.5, 0.4, int(y_ref.size), dtype=x0.dtype)
+
+    def _unpack(x):
+        vals = []
+        for start, stop, ref in zip(offsets[:-1], offsets[1:], pieces0):
+            vals.append(jnp.reshape(x[start:stop], ref.shape))
+        return vals
+
+    def _f(x):
+        vals = _unpack(x)
+        out = strict_update_velocity_block(
+            b1=trace["b1"],
+            fac=trace["fac"],
+            force_scale=trace["force_scale"],
+            flip_sign=trace["flip_sign"],
+            vRcc_before=vals[0],
+            vRss_before=vals[1],
+            vZsc_before=vals[2],
+            vZcs_before=vals[3],
+            vLsc_before=vals[4],
+            vLcs_before=vals[5],
+            frcc_u=vals[6],
+            frss_u=vals[7],
+            fzsc_u=vals[8],
+            fzcs_u=vals[9],
+            flsc_u=vals[10],
+            flcs_u=vals[11],
+        )
+        return jnp.concatenate(
+            [jnp.ravel(out[k]) for k in ["vRcc_after", "vRss_after", "vZsc_after", "vZcs_after", "vLsc_after", "vLcs_after"]],
+            axis=0,
+        )
+
+    _, jvp = jax.jvp(_f, (x0,), (tangent,))
+    _, vjp_fun = jax.vjp(_f, x0)
+    vjp = vjp_fun(cotangent)[0]
+    lhs = float(jnp.vdot(jvp, cotangent))
+    rhs = float(jnp.vdot(tangent, vjp))
+    assert lhs == pytest.approx(rhs, rel=1.0e-10, abs=1.0e-10)

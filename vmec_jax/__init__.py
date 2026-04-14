@@ -140,6 +140,7 @@ from .discrete_adjoint import (
     build_residual_checkpoint_tape,
     concat_residual_iteration_traces,
     replay_residual_checkpoint_step,
+    strict_update_velocity_block,
     strict_update_velocity_state_advance,
     residual_iteration_trace_from_result,
 )
@@ -292,6 +293,7 @@ __all__ = [
     "build_residual_checkpoint_tape",
     "concat_residual_iteration_traces",
     "replay_residual_checkpoint_step",
+    "strict_update_velocity_block",
     "strict_update_velocity_state_advance",
     "residual_iteration_trace_from_result",
     "SolveLambdaResult",
