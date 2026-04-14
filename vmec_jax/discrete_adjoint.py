@@ -13,6 +13,7 @@ from typing import Any
 
 import numpy as np
 
+from ._compat import jnp
 from .state import pack_state
 
 
@@ -271,11 +272,99 @@ def replay_residual_checkpoint_step(
     )
 
 
+def strict_update_velocity_state_advance(
+    state,
+    static,
+    *,
+    dt_eff,
+    vRcc,
+    vRss,
+    vZsc,
+    vZcs,
+    vLsc,
+    vLcs,
+    edge_Rcos,
+    edge_Rsin,
+    edge_Zcos,
+    edge_Zsin,
+    vRsc=None,
+    vRcs=None,
+    vZcc=None,
+    vZss=None,
+    vLcc=None,
+    vLss=None,
+    divide_by_scalxc_for_update: bool = False,
+):
+    """Apply the strict-update state-advance block from VMEC residual iteration.
+
+    This is the accepted geometry/lambda update map after the velocity blocks
+    have already been formed for the current step. It excludes force assembly
+    and acceptance/restart logic and is intended as the first local reverse-mode
+    target for the discrete-adjoint refactor.
+    """
+    from .solve import _enforce_fixed_boundary_and_axis, _mode00_index
+    from .vmec_parity import _mn_cos_to_signed_cached, _mn_sin_to_signed_cached, signed_maps_from_modes
+    from .vmec_residue import vmec_scalxc_from_s
+
+    dt_eff = jnp.asarray(dt_eff, dtype=jnp.asarray(state.Rcos).dtype)
+    scalxc = vmec_scalxc_from_s(s=jnp.asarray(static.s), mpol=int(static.cfg.mpol)).astype(jnp.asarray(state.Rcos).dtype)
+    scalxc = scalxc[:, :, None]
+    if not bool(divide_by_scalxc_for_update):
+        scalxc = jnp.ones_like(scalxc)
+    maps = static.signed_maps if getattr(static, "signed_maps", None) is not None else signed_maps_from_modes(static.modes)
+    ncoeff = int(static.modes.K)
+    idx00 = _mode00_index(static.modes)
+
+    def _cos_phys(cc, ss):
+        cc = jnp.asarray(cc) / scalxc
+        ss = jnp.asarray(ss) / scalxc if ss is not None else None
+        return _mn_cos_to_signed_cached(cc, ss, maps=maps, ncoeff=ncoeff)
+
+    def _sin_phys(sc, cs):
+        sc = jnp.asarray(sc) / scalxc
+        cs = jnp.asarray(cs) / scalxc if cs is not None else None
+        return _mn_sin_to_signed_cached(sc, cs, maps=maps, ncoeff=ncoeff)
+
+    dR = dt_eff * _cos_phys(vRcc, vRss)
+    dZ = dt_eff * _sin_phys(vZsc, vZcs)
+    dL = dt_eff * _sin_phys(vLsc, vLcs)
+    if bool(static.cfg.lasym):
+        dR_sin = dt_eff * _sin_phys(vRsc, vRcs)
+        dZ_cos = dt_eff * _cos_phys(vZcc, vZss)
+        dL_cos = dt_eff * _cos_phys(vLcc, vLss)
+    else:
+        dR_sin = jnp.zeros_like(dR)
+        dZ_cos = jnp.zeros_like(dR)
+        dL_cos = jnp.zeros_like(dR)
+
+    state_try = type(state)(
+        layout=state.layout,
+        Rcos=jnp.asarray(state.Rcos) + dR,
+        Rsin=jnp.asarray(state.Rsin) + dR_sin,
+        Zcos=jnp.asarray(state.Zcos) + dZ_cos,
+        Zsin=jnp.asarray(state.Zsin) + dZ,
+        Lcos=jnp.asarray(state.Lcos) + dL_cos,
+        Lsin=jnp.asarray(state.Lsin) + dL,
+    )
+    return _enforce_fixed_boundary_and_axis(
+        state_try,
+        static,
+        edge_Rcos=edge_Rcos,
+        edge_Rsin=edge_Rsin,
+        edge_Zcos=edge_Zcos,
+        edge_Zsin=edge_Zsin,
+        enforce_edge=True,
+        enforce_lambda_axis=True,
+        idx00=idx00,
+    )
+
+
 __all__ = [
     "ResidualIterationTrace",
     "ResidualCheckpointTape",
     "build_residual_checkpoint_tape",
     "concat_residual_iteration_traces",
     "replay_residual_checkpoint_step",
+    "strict_update_velocity_state_advance",
     "residual_iteration_trace_from_result",
 ]
