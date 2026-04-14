@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, Tuple
 
 
+import numpy as np
+
 from ._compat import jax, jnp
 from .field import TWOPI, b2_from_bsup, bsup_from_geom, lamscale_from_phips
 from .geom import eval_geom
@@ -46,27 +48,30 @@ def _as_float_list(x: Any) -> list[float]:
 
 def _poly_no_const(coeffs_1based, x):
     """Evaluate Σ_{i>=1} a_i x^i, where `coeffs_1based[i-1] == a_i`."""
-    a = jnp.asarray(coeffs_1based)
+    # Use np.asarray so coeffs[k] in the Python loop is a plain NumPy scalar, not
+    # a JAX dynamic_slice that triggers an eager XLA compilation per iteration.
+    a = np.asarray(coeffs_1based)
     x = jnp.asarray(x)
     if a.shape[0] == 0:
         return jnp.zeros_like(x)
     # Σ_{i=1..N} a_i x^i = x * Σ_{k=0..N-1} a_{k+1} x^k
     y = jnp.zeros_like(x, dtype=a.dtype)
-    for k in range(int(a.shape[0]) - 1, -1, -1):
+    for k in range(len(a) - 1, -1, -1):
         y = y * x + a[k]
     return x * y
 
 
 def _poly_no_const_deriv(coeffs_1based, x):
     """Derivative of Σ_{i>=1} a_i x^i."""
-    a = jnp.asarray(coeffs_1based)
+    # Use np.asarray to avoid eager XLA compilations for each c[k] indexing.
+    a = np.asarray(coeffs_1based)
     x = jnp.asarray(x)
     if a.shape[0] == 0:
         return jnp.zeros_like(x)
     # d/dx Σ_{i=1..N} a_i x^i = Σ_{i=1..N} i a_i x^{i-1}
-    c = a * jnp.arange(1, int(a.shape[0]) + 1, dtype=a.dtype)
+    c = a * np.arange(1, len(a) + 1, dtype=a.dtype)
     y = jnp.zeros_like(x, dtype=a.dtype)
-    for k in range(int(c.shape[0]) - 1, -1, -1):
+    for k in range(len(c) - 1, -1, -1):
         y = y * x + c[k]
     return y
 

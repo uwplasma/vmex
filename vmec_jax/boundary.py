@@ -87,33 +87,31 @@ def _boundary_internal_flip_theta(
     lthreed: bool,
     lasym: bool,
 ) -> BoundaryInternalCoeffs:
-    """Apply VMEC's flip_theta to internal boundary arrays (PI - theta)."""
+    """Apply VMEC's flip_theta to internal boundary arrays (PI - theta).
+
+    Under theta → pi - theta the (m, n) harmonic gains a sign factor (-1)^m.
+    The eight internal arrays are signed as follows:
+      rbcc[:, m] *= (-1)^m       zbsc[:, m] *= (-1)^(m+1)
+      rbss[:, m] *= (-1)^(m+1)  zbcs[:, m] *= (-1)^m        (lthreed)
+      rbsc[:, m] *= (-1)^(m+1)  zbcc[:, m] *= (-1)^m        (lasym)
+      rbcs[:, m] *= (-1)^m      zbss[:, m] *= (-1)^(m+1)    (lasym+lthreed)
+    """
     if _is_jax_array(internal.rbcc):
-        rbcc = jnp.asarray(internal.rbcc)
-        rbss = jnp.asarray(internal.rbss)
-        rbcs = jnp.asarray(internal.rbcs)
-        rbsc = jnp.asarray(internal.rbsc)
-        zbcc = jnp.asarray(internal.zbcc)
-        zbss = jnp.asarray(internal.zbss)
-        zbcs = jnp.asarray(internal.zbcs)
-        zbsc = jnp.asarray(internal.zbsc)
-
-        mpol = int(rbcc.shape[1] - 1)
-        mul1 = -1.0
-        for m in range(1, mpol + 1):
-            rbcc = rbcc.at[:, m].set(mul1 * rbcc[:, m])
-            zbsc = zbsc.at[:, m].set(-mul1 * zbsc[:, m])
-            if lthreed:
-                rbss = rbss.at[:, m].set(-mul1 * rbss[:, m])
-                zbcs = zbcs.at[:, m].set(mul1 * zbcs[:, m])
-            if lasym:
-                rbsc = rbsc.at[:, m].set(-mul1 * rbsc[:, m])
-                zbcc = zbcc.at[:, m].set(mul1 * zbcc[:, m])
-                if lthreed:
-                    rbcs = rbcs.at[:, m].set(mul1 * rbcs[:, m])
-                    zbss = zbss.at[:, m].set(-mul1 * zbss[:, m])
-            mul1 = -mul1
-
+        # Build a vectorised sign array: signs[m] = (-1)^m for m=0..mpol.
+        # Avoid a Python loop over m (each .at[] on a JAX array outside JIT triggers
+        # an eager XLA compilation).  A single broadcast-multiply is one XLA op.
+        mpol = int(internal.rbcc.shape[1] - 1)
+        signs = jnp.array([(-1.0) ** m for m in range(mpol + 1)])  # (mpol+1,)
+        # signs starts at m=0 → +1, m=1 → -1, ...
+        # Broadcast over (ntor+1, mpol+1) layout: multiply along the m axis (axis=1).
+        rbcc = jnp.asarray(internal.rbcc) * signs[None, :]
+        zbsc = jnp.asarray(internal.zbsc) * (-signs[None, :])
+        rbss = jnp.asarray(internal.rbss) * (-signs[None, :]) if lthreed else jnp.asarray(internal.rbss)
+        zbcs = jnp.asarray(internal.zbcs) * signs[None, :] if lthreed else jnp.asarray(internal.zbcs)
+        rbsc = jnp.asarray(internal.rbsc) * (-signs[None, :]) if lasym else jnp.asarray(internal.rbsc)
+        zbcc = jnp.asarray(internal.zbcc) * signs[None, :] if lasym else jnp.asarray(internal.zbcc)
+        zbss = jnp.asarray(internal.zbss) * (-signs[None, :]) if (lasym and lthreed) else jnp.asarray(internal.zbss)
+        rbcs = jnp.asarray(internal.rbcs) * signs[None, :] if (lasym and lthreed) else jnp.asarray(internal.rbcs)
         return BoundaryInternalCoeffs(
             rbcc=rbcc,
             rbss=rbss,
