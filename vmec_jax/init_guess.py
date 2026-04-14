@@ -548,6 +548,32 @@ def _recompute_axis_from_boundary(
     return new_raxis_c, new_zaxis_s
 
 
+def extract_axis_override_from_state(state: VMECState, static: VMECStatic) -> dict[str, jnp.ndarray]:
+    """Extract m=0 axis coefficients from a state in VMEC internal scaling."""
+    m0_idx = getattr(static, "m0_n_index", None)
+    if m0_idx is None:
+        m0_idx = -np.ones((static.cfg.ntor + 1,), dtype=int)
+        for k, (m_k, n_k) in enumerate(zip(static.modes.m, static.modes.n)):
+            if int(m_k) == 0 and 0 <= int(n_k) < m0_idx.shape[0]:
+                m0_idx[int(n_k)] = int(k)
+    m0_idx = np.asarray(m0_idx, dtype=int)
+    valid = m0_idx >= 0
+    out = {
+        "raxis_cc": jnp.zeros((static.cfg.ntor + 1,), dtype=jnp.asarray(state.Rcos).dtype),
+        "raxis_cs": jnp.zeros((static.cfg.ntor + 1,), dtype=jnp.asarray(state.Rsin).dtype),
+        "zaxis_cc": jnp.zeros((static.cfg.ntor + 1,), dtype=jnp.asarray(state.Zcos).dtype),
+        "zaxis_cs": jnp.zeros((static.cfg.ntor + 1,), dtype=jnp.asarray(state.Zsin).dtype),
+    }
+    if np.any(valid):
+        n_idx = jnp.asarray(np.nonzero(valid)[0], dtype=jnp.int32)
+        k_idx = jnp.asarray(m0_idx[valid], dtype=jnp.int32)
+        out["raxis_cc"] = out["raxis_cc"].at[n_idx].set(jnp.asarray(state.Rcos)[0, k_idx])
+        out["raxis_cs"] = out["raxis_cs"].at[n_idx].set(jnp.asarray(state.Rsin)[0, k_idx])
+        out["zaxis_cc"] = out["zaxis_cc"].at[n_idx].set(jnp.asarray(state.Zcos)[0, k_idx])
+        out["zaxis_cs"] = out["zaxis_cs"].at[n_idx].set(jnp.asarray(state.Zsin)[0, k_idx])
+    return out
+
+
 def _recompute_axis_from_state_vmec(
     static: VMECStatic,
     *,
@@ -824,6 +850,7 @@ def initial_guess_from_boundary(
     dtype=None,
     vmec_project: bool = False,
     infer_axis_if_missing: bool = True,
+    axis_override: dict[str, object] | None = None,
 ) -> VMECState:
     """Build a VMECState initial guess from boundary coefficients.
 
@@ -843,6 +870,12 @@ def initial_guess_from_boundary(
         If True, re-project the initial guess through VMEC's internal real-space
         grid (via ``vmec_realspace_synthesis`` + ``vmec_realspace_analysis``).
         This matches the VMEC grid/weighting used in parity diagnostics.
+    axis_override:
+        Optional explicit axis coefficients in VMEC internal scaling with keys
+        ``raxis_cc``, ``raxis_cs``, ``zaxis_cc``, ``zaxis_cs``. When provided,
+        these coefficients are used directly and missing-axis inference is
+        skipped. This freezes the initialization branch choice for
+        differentiated replay paths.
     """
     cfg = static.cfg
     if infer_axis_if_missing and _boundary_is_traced(boundary):
@@ -972,17 +1005,25 @@ def initial_guess_from_boundary(
         if zaxis_cs is not None:
             zaxis_cs = zaxis_cs * axis_scale
 
-        # If axis arrays are all zero or missing, fall back to boundary-based axis.
-        have_axis = False
-        if raxis_cc is not None and np.any(np.asarray(raxis_cc) != 0.0):
+        if axis_override is not None:
+            raxis_cc = jnp.asarray(axis_override.get("raxis_cc", jnp.zeros((cfg.ntor + 1,), dtype=dtype)), dtype=dtype)
+            raxis_cs = jnp.asarray(axis_override.get("raxis_cs", jnp.zeros((cfg.ntor + 1,), dtype=dtype)), dtype=dtype)
+            zaxis_cc = jnp.asarray(axis_override.get("zaxis_cc", jnp.zeros((cfg.ntor + 1,), dtype=dtype)), dtype=dtype)
+            zaxis_cs = jnp.asarray(axis_override.get("zaxis_cs", jnp.zeros((cfg.ntor + 1,), dtype=dtype)), dtype=dtype)
             have_axis = True
-        if raxis_cs is not None and np.any(np.asarray(raxis_cs) != 0.0):
-            have_axis = True
-        if zaxis_cc is not None and np.any(np.asarray(zaxis_cc) != 0.0):
-            have_axis = True
-        if zaxis_cs is not None and np.any(np.asarray(zaxis_cs) != 0.0):
-            have_axis = True
-        axis_from_indata = bool(have_axis)
+            axis_from_indata = False
+        else:
+            # If axis arrays are all zero or missing, fall back to boundary-based axis.
+            have_axis = False
+            if raxis_cc is not None and np.any(np.asarray(raxis_cc) != 0.0):
+                have_axis = True
+            if raxis_cs is not None and np.any(np.asarray(raxis_cs) != 0.0):
+                have_axis = True
+            if zaxis_cc is not None and np.any(np.asarray(zaxis_cc) != 0.0):
+                have_axis = True
+            if zaxis_cs is not None and np.any(np.asarray(zaxis_cs) != 0.0):
+                have_axis = True
+            axis_from_indata = bool(have_axis)
 
         if not have_axis:
             if bool(infer_axis_if_missing):

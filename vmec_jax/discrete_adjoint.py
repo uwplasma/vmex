@@ -523,9 +523,37 @@ def preconditioned_force_channels_from_raw_forces(
 ):
     """Apply the radial preconditioner, lambda scaling, and mode scaling."""
     from .preconditioner_1d_jax import rz_preconditioner_apply_jit
+    from .solve import _scale_mode_slice, _vmec_scale_m1_factors_from_mats
+
+    frzl_rhs = frzl
+    if bool(getattr(cfg, "lconm1", True)) and int(cfg.mpol) > 1:
+        fac_r, fac_z = _vmec_scale_m1_factors_from_mats(mats)
+        if int(jnp.asarray(fac_r).size) > 0:
+            fac_r = jnp.asarray(fac_r, dtype=jnp.asarray(frzl.frcc).dtype)
+            fac_z = jnp.asarray(fac_z, dtype=jnp.asarray(frzl.fzsc).dtype)
+            ns_full = int(jnp.asarray(frzl.frcc).shape[0])
+            nsolve = min(ns_full, int(fac_r.shape[0]))
+            ones_r = jnp.ones((max(ns_full - nsolve, 0),), dtype=jnp.asarray(frzl.frcc).dtype)
+            ones_z = jnp.ones((max(ns_full - nsolve, 0),), dtype=jnp.asarray(frzl.fzsc).dtype)
+            fac_r_full = fac_r[:nsolve] if nsolve == ns_full else jnp.concatenate([fac_r[:nsolve], ones_r], axis=0)
+            fac_z_full = fac_z[:nsolve] if nsolve == ns_full else jnp.concatenate([fac_z[:nsolve], ones_z], axis=0)
+            frzl_rhs = TomnspsRZL(
+                frcc=frzl.frcc,
+                frss=_scale_mode_slice(frzl.frss, mode_idx=1, scale=fac_r_full),
+                fzsc=frzl.fzsc,
+                fzcs=_scale_mode_slice(frzl.fzcs, mode_idx=1, scale=fac_z_full),
+                flsc=frzl.flsc,
+                flcs=frzl.flcs,
+                frsc=_scale_mode_slice(getattr(frzl, "frsc", None), mode_idx=1, scale=fac_r_full),
+                frcs=getattr(frzl, "frcs", None),
+                fzcc=_scale_mode_slice(getattr(frzl, "fzcc", None), mode_idx=1, scale=fac_z_full),
+                fzss=getattr(frzl, "fzss", None),
+                flcc=getattr(frzl, "flcc", None),
+                flss=getattr(frzl, "flss", None),
+            )
 
     frzl_rz = rz_preconditioner_apply_jit(
-        frzl_in=frzl,
+        frzl_in=frzl_rhs,
         mats=mats,
         jmax=int(jmax),
         cfg=cfg,
@@ -536,7 +564,231 @@ def preconditioned_force_channels_from_raw_forces(
         w_mode_mn=w_mode_mn,
         lambda_update_scale=lambda_update_scale,
     )
-    return {"frzl_rz": frzl_rz, **out}
+    return {"frzl_rhs": frzl_rhs, "frzl_rz": frzl_rz, **out}
+
+
+def raw_force_residual_from_state(
+    state,
+    static,
+    *,
+    wout_like,
+    trig,
+    apply_lforbal: bool,
+    include_edge_residual: bool,
+    apply_m1_constraints: bool,
+    zero_m1,
+    constraint_tcon0=None,
+    constraint_tcon=None,
+    constraint_precond_diag=None,
+    constraint_precond_active=None,
+    constraint_tcon_active=None,
+    constraint_rcon0=None,
+    constraint_zcon0=None,
+    freeb_bsqvac_half=None,
+    freeb_pres_scale=None,
+):
+    """Rebuild the solver's raw VMEC residual blocks for one fixed-boundary step."""
+    from dataclasses import replace as dc_replace
+
+    from .vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
+    from .vmec_residue import vmec_apply_m1_constraints, vmec_apply_scalxc_to_tomnsps, vmec_zero_m1_zforce
+
+    k = vmec_forces_rz_from_wout(
+        state=state,
+        static=static,
+        wout=wout_like,
+        indata=None,
+        constraint_tcon0=constraint_tcon0,
+        constraint_tcon=constraint_tcon,
+        constraint_precond_diag=constraint_precond_diag,
+        constraint_precond_active=constraint_precond_active,
+        constraint_tcon_active=constraint_tcon_active,
+        constraint_rcon0=constraint_rcon0,
+        constraint_zcon0=constraint_zcon0,
+        freeb_bsqvac_half=freeb_bsqvac_half,
+        freeb_pres_scale=freeb_pres_scale,
+        use_vmec_synthesis=True,
+        trig=trig,
+        iter_idx=None,
+    )
+    mask_pack = None
+    if getattr(static, "tomnsps_masks", None) is not None:
+        mask_pack = static.tomnsps_masks_edge if bool(include_edge_residual) else static.tomnsps_masks
+    frzl = vmec_residual_internal_from_kernels(
+        k,
+        cfg_ntheta=int(static.cfg.ntheta),
+        cfg_nzeta=int(static.cfg.nzeta),
+        wout=wout_like,
+        trig=trig,
+        apply_lforbal=bool(apply_lforbal),
+        include_edge=bool(include_edge_residual),
+        masks=mask_pack,
+    )
+    if bool(apply_m1_constraints):
+        frzl = vmec_apply_m1_constraints(frzl=frzl, lconm1=bool(getattr(static.cfg, "lconm1", True)))
+    frzl = vmec_zero_m1_zforce(frzl=frzl, enabled=zero_m1)
+    frzl = vmec_apply_scalxc_to_tomnsps(frzl=frzl, s=jnp.asarray(static.s))
+
+    def _nan_guard(x):
+        if x is None:
+            return None
+        if isinstance(x, np.ndarray):
+            return x
+        x = jnp.asarray(x)
+        return jnp.where(jnp.isnan(x), x, x)
+
+    frzl = dc_replace(
+        frzl,
+        frcc=_nan_guard(frzl.frcc),
+        frss=_nan_guard(frzl.frss),
+        fzsc=_nan_guard(frzl.fzsc),
+        fzcs=_nan_guard(frzl.fzcs),
+        flsc=_nan_guard(frzl.flsc),
+        flcs=_nan_guard(frzl.flcs),
+        frsc=_nan_guard(getattr(frzl, "frsc", None)),
+        frcs=_nan_guard(getattr(frzl, "frcs", None)),
+        fzcc=_nan_guard(getattr(frzl, "fzcc", None)),
+        fzss=_nan_guard(getattr(frzl, "fzss", None)),
+        flcc=_nan_guard(getattr(frzl, "flcc", None)),
+        flss=_nan_guard(getattr(frzl, "flss", None)),
+    )
+    return {"k": k, "frzl": frzl}
+
+
+def state_dependent_preconditioner_from_forces(
+    *,
+    k,
+    static,
+    trig,
+    dtype=None,
+):
+    """Rebuild the solver's state-dependent preconditioner objects."""
+    from .preconditioner_1d_jax import lambda_preconditioner, rz_preconditioner_matrices
+
+    cfg = static.cfg
+    s = jnp.asarray(static.s)
+    lam_prec = lambda_preconditioner(
+        bc=k.bc,
+        trig=trig,
+        s=s,
+        cfg=cfg,
+        return_faclam=False,
+    )
+    mats, _jmin, jmax = rz_preconditioner_matrices(
+        bc=k.bc,
+        k=k,
+        trig=trig,
+        s=s,
+        cfg=cfg,
+        jmax_override=None,
+    )
+    if dtype is None:
+        dtype = jnp.asarray(lam_prec).dtype
+    m = jnp.arange(int(cfg.mpol), dtype=jnp.float64)
+    n = jnp.arange(int(cfg.ntor) + 1, dtype=jnp.float64) * float(cfg.nfp)
+    k2 = (m[:, None] * m[:, None]) + (n[None, :] * n[None, :])
+    w_mode_mn = (1.0 + k2).astype(jnp.float64) ** (-1.0)
+    w_mode_mn = w_mode_mn.astype(dtype)
+    return {
+        "lam_prec": lam_prec,
+        "mats": mats,
+        "jmax": int(jmax),
+        "w_mode_mn": w_mode_mn,
+    }
+
+
+def strict_update_one_step_from_state(
+    state_pre,
+    static,
+    *,
+    wout_like,
+    trig,
+    apply_lforbal: bool,
+    include_edge_residual: bool,
+    apply_m1_constraints: bool,
+    zero_m1,
+    mats=None,
+    jmax=None,
+    lam_prec=None,
+    w_mode_mn=None,
+    lambda_update_scale,
+    dt_eff,
+    b1,
+    fac,
+    force_scale,
+    flip_sign,
+    vRcc_before,
+    vRss_before,
+    vZsc_before,
+    vZcs_before,
+    vLsc_before,
+    vLcs_before,
+    max_update_rms=5.0e-3,
+    limit_update_rms: bool = True,
+    divide_by_scalxc_for_update: bool = False,
+):
+    """Compose the exact QH one-step map from state through accepted update."""
+    residual_out = raw_force_residual_from_state(
+        state_pre,
+        static,
+        wout_like=wout_like,
+        trig=trig,
+        apply_lforbal=apply_lforbal,
+        include_edge_residual=include_edge_residual,
+        apply_m1_constraints=apply_m1_constraints,
+        zero_m1=zero_m1,
+    )
+    preconditioner_out = None
+    if mats is None or jmax is None or lam_prec is None or w_mode_mn is None:
+        preconditioner_out = state_dependent_preconditioner_from_forces(
+            k=residual_out["k"],
+            static=static,
+            trig=trig,
+            dtype=jnp.asarray(state_pre.Rcos).dtype,
+        )
+        mats = preconditioner_out["mats"]
+        jmax = preconditioner_out["jmax"]
+        lam_prec = preconditioner_out["lam_prec"]
+        w_mode_mn = preconditioner_out["w_mode_mn"]
+    force_out = preconditioned_force_channels_from_raw_forces(
+        frzl=residual_out["frzl"],
+        mats=mats,
+        jmax=jmax,
+        cfg=static.cfg,
+        lam_prec=lam_prec,
+        w_mode_mn=w_mode_mn,
+        lambda_update_scale=lambda_update_scale,
+    )
+    step_out = strict_update_accepted_step(
+        state_pre,
+        static,
+        dt_eff=dt_eff,
+        b1=b1,
+        fac=fac,
+        force_scale=force_scale,
+        flip_sign=flip_sign,
+        vRcc_before=vRcc_before,
+        vRss_before=vRss_before,
+        vZsc_before=vZsc_before,
+        vZcs_before=vZcs_before,
+        vLsc_before=vLsc_before,
+        vLcs_before=vLcs_before,
+        frcc_u=force_out["frcc_u"],
+        frss_u=force_out["frss_u"],
+        fzsc_u=force_out["fzsc_u"],
+        fzcs_u=force_out["fzcs_u"],
+        flsc_u=force_out["flsc_u"],
+        flcs_u=force_out["flcs_u"],
+        max_update_rms=max_update_rms,
+        limit_update_rms=limit_update_rms,
+        divide_by_scalxc_for_update=divide_by_scalxc_for_update,
+    )
+    return {
+        "residual": residual_out,
+        "preconditioner": preconditioner_out,
+        "force": force_out,
+        "step": step_out,
+    }
 
 
 def strict_update_accepted_step(
@@ -774,8 +1026,10 @@ __all__ = [
     "concat_residual_iteration_traces",
     "preconditioned_force_channels_from_raw_forces",
     "preconditioned_force_channels_from_rz_output",
+    "raw_force_residual_from_state",
     "replay_residual_checkpoint_step",
     "strict_update_accepted_step",
+    "strict_update_one_step_from_state",
     "strict_update_velocity_limit",
     "strict_update_velocity_block",
     "strict_update_velocity_state_advance",
