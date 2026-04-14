@@ -359,6 +359,11 @@ def main() -> None:
     p.add_argument("--niter", type=int, default=5000)
     p.add_argument("--ftol", type=float, default=1e-14)
     p.add_argument("--jax-label", type=str, default="vmec_jax")
+    p.add_argument(
+        "--skip-vmecpp",
+        action="store_true",
+        help="Skip VMEC++ trace collection (use when vmecpp is not available).",
+    )
     args = p.parse_args()
 
     axisym_input = Path(args.axisym_input).expanduser().resolve()
@@ -370,6 +375,8 @@ def main() -> None:
     workdir = Path(args.workdir).expanduser().resolve()
     workdir.mkdir(parents=True, exist_ok=True)
 
+    skip_vmecpp = bool(args.skip_vmecpp)
+
     axisym_work = workdir / "ITERModel"
     st_work = workdir / "LandremanPaul2021_QA_lowres"
     if not bool(args.reuse_workdir):
@@ -378,40 +385,38 @@ def main() -> None:
     axisym_work.mkdir(parents=True, exist_ok=True)
     st_work.mkdir(parents=True, exist_ok=True)
 
+    _empty_arr = np.zeros(0, dtype=float)
+
     if bool(args.reuse_workdir):
         a_vmec = np.load(axisym_work / "trace_ITERModel_VMEC2000.npz")
         a_jax = np.load(axisym_work / "trace_ITERModel_vmec_jax.npz")
-        a_pp = np.load(axisym_work / "trace_ITERModel_vmecpp.npz")
         it_vmec_a, fsq_vmec_a = a_vmec["it"], a_vmec["fsq_total"]
         it_jax_a, fsq_jax_a = a_jax["it"], a_jax["fsq_total"]
-        it_pp_a, fsq_pp_a = a_pp["it"], a_pp["fsq_total"]
+        if not skip_vmecpp and (axisym_work / "trace_ITERModel_vmecpp.npz").exists():
+            a_pp = np.load(axisym_work / "trace_ITERModel_vmecpp.npz")
+            it_pp_a, fsq_pp_a = a_pp["it"], a_pp["fsq_total"]
+        else:
+            it_pp_a, fsq_pp_a = None, None
         mismatch_a = _trace_mismatch(it_vmec_a, fsq_vmec_a, it_jax_a, fsq_jax_a)
-        wout_vmec_a = json.loads((workdir / "readme_fsq_trace_single_grid_wout_audit.json").read_text())["ITERModel"][
-            "VMEC2000"
-        ]
-        wout_jax_a = json.loads((workdir / "readme_fsq_trace_single_grid_wout_audit.json").read_text())["ITERModel"][
-            "vmec_jax"
-        ]
-        wout_pp_a = json.loads((workdir / "readme_fsq_trace_single_grid_wout_audit.json").read_text())["ITERModel"][
-            "vmecpp"
-        ]
+        audit = json.loads((workdir / "readme_fsq_trace_single_grid_wout_audit.json").read_text())
+        wout_vmec_a = audit["ITERModel"]["VMEC2000"]
+        wout_jax_a = audit["ITERModel"]["vmec_jax"]
+        wout_pp_a = audit["ITERModel"].get("vmecpp", {})
 
         s_vmec = np.load(st_work / "trace_LandremanPaul2021_QA_lowres_VMEC2000.npz")
         s_jax = np.load(st_work / "trace_LandremanPaul2021_QA_lowres_vmec_jax.npz")
-        s_pp = np.load(st_work / "trace_LandremanPaul2021_QA_lowres_vmecpp.npz")
         it_vmec_s, fsq_vmec_s = s_vmec["it"], s_vmec["fsq_total"]
         it_jax_s, fsq_jax_s = s_jax["it"], s_jax["fsq_total"]
-        it_pp_s, fsq_pp_s = s_pp["it"], s_pp["fsq_total"]
+        if not skip_vmecpp and (st_work / "trace_LandremanPaul2021_QA_lowres_vmecpp.npz").exists():
+            s_pp = np.load(st_work / "trace_LandremanPaul2021_QA_lowres_vmecpp.npz")
+            it_pp_s, fsq_pp_s = s_pp["it"], s_pp["fsq_total"]
+        else:
+            it_pp_s, fsq_pp_s = None, None
         mismatch_s = _trace_mismatch(it_vmec_s, fsq_vmec_s, it_jax_s, fsq_jax_s)
-        wout_vmec_s = json.loads((workdir / "readme_fsq_trace_single_grid_wout_audit.json").read_text())[
-            "LandremanPaul2021_QA_lowres"
-        ]["VMEC2000"]
-        wout_jax_s = json.loads((workdir / "readme_fsq_trace_single_grid_wout_audit.json").read_text())[
-            "LandremanPaul2021_QA_lowres"
-        ]["vmec_jax"]
-        wout_pp_s = json.loads((workdir / "readme_fsq_trace_single_grid_wout_audit.json").read_text())[
-            "LandremanPaul2021_QA_lowres"
-        ]["vmecpp"]
+        audit_s = json.loads((workdir / "readme_fsq_trace_single_grid_wout_audit.json").read_text())
+        wout_vmec_s = audit_s["LandremanPaul2021_QA_lowres"]["VMEC2000"]
+        wout_jax_s = audit_s["LandremanPaul2021_QA_lowres"]["vmec_jax"]
+        wout_pp_s = audit_s["LandremanPaul2021_QA_lowres"].get("vmecpp", {})
     else:
         it_vmec_a, fsq_vmec_a, _, wout_vmec_a = _collect_vmec2000_trace(
             axisym_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=axisym_work
@@ -419,9 +424,12 @@ def main() -> None:
         it_jax_a, fsq_jax_a, _, wout_jax_a = _collect_vmec_jax_trace(
             axisym_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=axisym_work
         )
-        it_pp_a, fsq_pp_a, _, wout_pp_a = _collect_vmecpp_trace(
-            axisym_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=axisym_work
-        )
+        if not skip_vmecpp:
+            it_pp_a, fsq_pp_a, _, wout_pp_a = _collect_vmecpp_trace(
+                axisym_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=axisym_work
+            )
+        else:
+            it_pp_a, fsq_pp_a, wout_pp_a = None, None, {}
         mismatch_a = _trace_mismatch(it_vmec_a, fsq_vmec_a, it_jax_a, fsq_jax_a)
 
         it_vmec_s, fsq_vmec_s, _, wout_vmec_s = _collect_vmec2000_trace(
@@ -430,9 +438,12 @@ def main() -> None:
         it_jax_s, fsq_jax_s, _, wout_jax_s = _collect_vmec_jax_trace(
             stellarator_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=st_work
         )
-        it_pp_s, fsq_pp_s, _, wout_pp_s = _collect_vmecpp_trace(
-            stellarator_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=st_work
-        )
+        if not skip_vmecpp:
+            it_pp_s, fsq_pp_s, _, wout_pp_s = _collect_vmecpp_trace(
+                stellarator_input, ns=int(args.ns), niter=int(args.niter), ftol=float(args.ftol), workdir=st_work
+            )
+        else:
+            it_pp_s, fsq_pp_s, wout_pp_s = None, None, {}
         mismatch_s = _trace_mismatch(it_vmec_s, fsq_vmec_s, it_jax_s, fsq_jax_s)
 
     fig, axes = plt.subplots(1, 2, figsize=(12.5, 4.2))
@@ -482,11 +493,11 @@ def main() -> None:
             {
                 "ITERModel": {
                     "vmec_jax_vs_vmec2000": mismatch_a,
-                    "vmecpp_vs_vmec2000": _trace_mismatch(it_vmec_a, fsq_vmec_a, it_pp_a, fsq_pp_a),
+                    "vmecpp_vs_vmec2000": {} if (it_pp_a is None) else _trace_mismatch(it_vmec_a, fsq_vmec_a, it_pp_a, fsq_pp_a),
                 },
                 "LandremanPaul2021_QA_lowres": {
                     "vmec_jax_vs_vmec2000": mismatch_s,
-                    "vmecpp_vs_vmec2000": _trace_mismatch(it_vmec_s, fsq_vmec_s, it_pp_s, fsq_pp_s),
+                    "vmecpp_vs_vmec2000": {} if (it_pp_s is None) else _trace_mismatch(it_vmec_s, fsq_vmec_s, it_pp_s, fsq_pp_s),
                 },
             },
             indent=2,

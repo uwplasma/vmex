@@ -213,39 +213,58 @@ def _write_runtime_figure(rows: list[dict[str, Any]], outpath: Path, *, figure_k
         rows = [row for row in rows if bool(row["lfreeb"])]
     if not rows:
         raise ValueError(f"No rows available for figure_kind={figure_kind!r}.")
+    include_gpu = any(row.get("gpu_runtime_s") is not None for row in rows)
+    include_vmecpp = any(row.get("vmecpp_runtime_s") is not None for row in rows)
     rows = sorted(
         rows,
         key=lambda row: (
             -max(
                 (_speedup(row["cpu_runtime_s"], row["vmec_runtime_s"]) or 0.0),
                 (_speedup(row.get("vmecpp_runtime_s"), row["vmec_runtime_s"]) or 0.0),
+                (_speedup(row.get("gpu_runtime_s"), row["vmec_runtime_s"]) or 0.0) if include_gpu else 0.0,
             ),
             row["id"],
         ),
     )
     labels = [row["id"] for row in rows]
     y = np.arange(len(rows), dtype=float)
-    height = 0.22
+    n_series = 2 + int(include_vmecpp) + int(include_gpu)
+    height = min(0.22, 0.9 / n_series)
+    offsets = np.linspace(-(n_series - 1) / 2 * height, (n_series - 1) / 2 * height, n_series)
     fig, ax = plt.subplots(1, 1, figsize=(14.5, max(8.0, 0.42 * len(rows) + 1.6)))
     vmec = np.array([row["vmec_runtime_s"] if row["vmec_runtime_s"] is not None else np.nan for row in rows], dtype=float)
     cpu = np.array([row["cpu_runtime_s"] if row["cpu_runtime_s"] is not None else np.nan for row in rows], dtype=float)
-    pp = np.array(
-        [row.get("vmecpp_runtime_s") if row.get("vmecpp_runtime_s") is not None else np.nan for row in rows], dtype=float
-    )
-    ax.barh(y - height, vmec, height=height, color="#1f77b4", label="VMEC2000")
-    ax.barh(y, cpu, height=height, color="#ff7f0e", label="vmec_jax")
-    ax.barh(y + height, pp, height=height, color="#2ca02c", label="VMEC++")
+    series = [("#1f77b4", "VMEC2000", vmec), ("#ff7f0e", "vmec_jax (CPU, warmed)", cpu)]
+    if include_vmecpp:
+        pp = np.array(
+            [row.get("vmecpp_runtime_s") if row.get("vmecpp_runtime_s") is not None else np.nan for row in rows], dtype=float
+        )
+        series.append(("#2ca02c", "VMEC++", pp))
+    if include_gpu:
+        gpu = np.array(
+            [row.get("gpu_runtime_s") if row.get("gpu_runtime_s") is not None else np.nan for row in rows], dtype=float
+        )
+        series.append(("#d62728", "vmec_jax (GPU, warmed)", gpu))
+    for (color, label, vals), off in zip(series, offsets):
+        ax.barh(y + off, vals, height=height, color=color, label=label)
     ax.set_xscale("log")
     ax.set_yticks(y)
     ax.set_yticklabels(labels, fontsize=8)
     ax.invert_yaxis()
     ax.set_xlabel("runtime (seconds, log scale)")
     ax.grid(axis="x", alpha=0.18, which="both")
-    ax.legend(frameon=False, ncol=3, loc="upper right")
+    ncol = n_series
+    ax.legend(frameon=False, ncol=ncol, loc="upper right")
+    parts = ["VMEC2000", "vmec_jax"]
+    if include_vmecpp:
+        parts.append("VMEC++")
+    if include_gpu:
+        parts.append("vmec_jax GPU")
+    title_str = " vs ".join(parts)
     title = {
-        "all": "Bundled Example Runtime: VMEC2000 vs vmec_jax vs VMEC++",
-        "fixed": "Bundled Fixed-Boundary Runtime: VMEC2000 vs vmec_jax vs VMEC++",
-        "freeb": "Bundled Free-Boundary Runtime: VMEC2000 vs vmec_jax vs VMEC++",
+        "all": f"Bundled Example Runtime: {title_str}",
+        "fixed": f"Bundled Fixed-Boundary Runtime: {title_str}",
+        "freeb": f"Bundled Free-Boundary Runtime: {title_str}",
     }[figure_kind]
     ax.set_title(title)
     fig.tight_layout()

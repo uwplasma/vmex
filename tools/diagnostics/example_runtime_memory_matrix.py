@@ -57,6 +57,8 @@ def _child_env(*, jax_platforms: str | None) -> dict[str, str]:
     env.setdefault("VMEC_JAX_SCAN_PRINT", "0")
     env.setdefault("PYTHONUNBUFFERED", "1")
     env.setdefault("VMEC_JAX_BENCH_WARM_RUNS", "0")
+    # Minimal scan mode keeps only fsq/w_history to avoid OOM on large NS runs.
+    env.setdefault("VMEC_JAX_SCAN_MINIMAL", "1")
     if jax_platforms:
         env["JAX_PLATFORMS"] = str(jax_platforms)
     return env
