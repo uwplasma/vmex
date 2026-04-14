@@ -551,3 +551,10 @@ Stop or reduce scope if:
   - Began removing that blocker by making the `ptau` cache tracer-safe so the
     forward discrete-adjoint backend can participate in `jacfwd`-driven SciPy
     least-squares solves.
+  - Continued hardening the traced residual path by removing additional
+    unconditional host-only caches (`mn` index arrays, `scalxc_mn`, mode-diag
+    weights) from the traced setup path.
+  - This moved the `jit=True` failure mode forward from traced NumPy
+    conversions to a real JAX issue: `_rz_norm(...)` still uses boolean
+    indexing with a traced mask, which must be rewritten before the forward
+    discrete-adjoint SciPy path can run under JIT on CPU.
