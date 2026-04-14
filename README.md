@@ -34,6 +34,8 @@ All figures below use the same **single-grid** run settings: `NS_ARRAY=151`, `NI
   <img src="docs/_static/figures/readme_runtime_compare.png" width="860" />
 </p>
 
+**Cold vs warm runtime**: the *cold* bar includes XLA JIT compilation on the first call (one-time cost per process); the *warm* bar is the steady-state solve time for all subsequent calls in the same process, with the compiled kernels already cached. VMEC2000 is a pre-compiled Fortran binary and therefore has no compilation overhead — it is always effectively "cold". The warm vmec_jax time is the fair comparison for repeated solves (e.g., in an optimization loop).
+
 ## More visuals (single-grid)
 
 <table>
