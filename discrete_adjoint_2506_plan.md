@@ -525,6 +525,10 @@ Stop or reduce scope if:
   - Locked two new exact QH gates with that frozen-axis path:
     - projected-initial-guess boundary derivative matches central FD,
     - extracted one-step boundary derivative matches central FD.
+  - Added the first tape-level reverse helper, `checkpoint_tape_state_vjp(...)`, which chains VJPs backward through the extracted
+    strict-update step map over a stored residual checkpoint tape.
+  - Locked the corresponding two-step exact QH gate: the chained tape reverse pass matches a direct two-step JAX VJP through the
+    extracted step map.
   - The current root cause is therefore no longer in the accepted-step algebra or the raw-force assembly; it was the
     initialization branch mismatch caused by traced missing-axis handling. The next phase should thread the frozen-axis branch choice
     through the replay/tape consumer path and then start the reverse-over-history implementation on top of that consistent primal map.
