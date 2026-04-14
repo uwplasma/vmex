@@ -25,6 +25,27 @@ vmec_timeout = 60
 goal = "Fixed-boundary axisymmetric baseline parity and performance sanity."
 
 [[cases]]
+id = "fixed_axisym_lasym_false_itermodel"
+tier = "smoke"
+enabled = true
+compare = "stage_trace"
+source = "vmec_jax/examples"
+input = "examples/data/input.ITERModel"
+lfreeb = false
+lasym = false
+axisymmetric = true
+nfp = 1
+ntor = 0
+single_ns = 13
+max_iter = 10
+vmec_nstep = 1
+rtol = 1e-3
+atol = 1e-10
+dump_level = "lite"
+vmec_timeout = 90
+goal = "Fixed-boundary large axisymmetric tokamak parity (ITERModel, mpol=12)."
+
+[[cases]]
 id = "fixed_axisym_lasym_true_updown"
 tier = "smoke"
 enabled = true
