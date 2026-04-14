@@ -6223,13 +6223,10 @@ def solve_fixed_boundary_residual_iter(
         """
         rpos = jnp.asarray(state.Rcos)[:, kp_idx]
         zpos = jnp.asarray(state.Zsin)[:, kp_idx]
-        rneg = jnp.zeros_like(rpos)
-        zneg = jnp.zeros_like(zpos)
-        if has_kn_any:
-            rneg = rneg.at[:, has_kn].set(jnp.asarray(state.Rcos)[:, kn_idx[has_kn]])
-            zneg = zneg.at[:, has_kn].set(jnp.asarray(state.Zsin)[:, kn_idx[has_kn]])
-
         has_kn_mask = has_kn[None, :]
+        kn_idx_safe = jnp.maximum(kn_idx, 0)
+        rneg = jnp.where(has_kn_mask, jnp.asarray(state.Rcos)[:, kn_idx_safe], 0.0)
+        zneg = jnp.where(has_kn_mask, jnp.asarray(state.Zsin)[:, kn_idx_safe], 0.0)
         is_m0 = (m_idx == 0)[None, :]
         rcc = rpos + jnp.where(has_kn_mask, rneg, 0.0)
         zsc = jnp.where(has_kn_mask, zpos + zneg, zpos)
@@ -6253,11 +6250,8 @@ def solve_fixed_boundary_residual_iter(
             # Asymmetric terms: include Rsin/Zcos internal components.
             rs_pos = jnp.asarray(state.Rsin)[:, kp_idx]
             zc_pos = jnp.asarray(state.Zcos)[:, kp_idx]
-            rs_neg = jnp.zeros_like(rs_pos)
-            zc_neg = jnp.zeros_like(zc_pos)
-            if has_kn_any:
-                rs_neg = rs_neg.at[:, has_kn].set(jnp.asarray(state.Rsin)[:, kn_idx[has_kn]])
-                zc_neg = zc_neg.at[:, has_kn].set(jnp.asarray(state.Zcos)[:, kn_idx[has_kn]])
+            rs_neg = jnp.where(has_kn_mask, jnp.asarray(state.Rsin)[:, kn_idx_safe], 0.0)
+            zc_neg = jnp.where(has_kn_mask, jnp.asarray(state.Zcos)[:, kn_idx_safe], 0.0)
 
             # Internal sin/cos blocks from signed coefficients.
             rsc = jnp.where(has_kn_mask, rs_pos + rs_neg, jnp.where(is_n0, rs_pos, jnp.where(is_m0, 0.0, rs_pos)))
@@ -11063,7 +11057,7 @@ def solve_fixed_boundary_residual_iter(
                         jmax_override=precond_jmax_override,
                     )
                     cache_prec_rz_mats = mats
-                    cache_prec_rz_jmax = int(jmax)
+                    cache_prec_rz_jmax = None if _tree_has_tracer(k) else int(jmax)
                 vmec2000_cache_valid = True
             if host_update_assembly:
                 # fsqr/fsqz/fsql are already Python floats from the NumPy path above.
@@ -11183,14 +11177,18 @@ def solve_fixed_boundary_residual_iter(
                     rz_preconditioner_matrices_reassemble,
                 )
 
+                precond_traced = _tree_has_tracer(k)
                 need_lam_prec = _env_dump_lam not in ("", "0")
                 need_lamcal = _env_dump_lamcal not in ("", "0")
                 need_prec_reassemble = (
-                    (cache_prec_rz_jmax is not None)
+                    (not precond_traced)
+                    and (cache_prec_rz_jmax is not None)
                     and (int(cache_prec_rz_jmax) != int(precond_expected_jmax))
                     and _can_reassemble_precond_mats(cache_prec_rz_mats)
                 )
                 need_prec_refresh = (
+                    precond_traced
+                    or
                     (not bool(vmec2000_cache_valid))
                     or (cache_prec_lam_prec is None)
                     or (cache_prec_rz_mats is None)
@@ -11231,7 +11229,7 @@ def solve_fixed_boundary_residual_iter(
                     cache_prec_faclam = faclam_dump
                     cache_prec_lam_debug = lam_debug
                     cache_prec_rz_mats = mats
-                    cache_prec_rz_jmax = int(jmax)
+                    cache_prec_rz_jmax = None if precond_traced else int(jmax)
                     if timing_enabled and t_prec_refresh_start is not None:
                         try:
                             if has_jax():
@@ -11250,18 +11248,19 @@ def solve_fixed_boundary_residual_iter(
                             jmax_override=precond_jmax_override,
                         )
                         cache_prec_rz_mats = mats
-                        cache_prec_rz_jmax = int(jmax)
+                        cache_prec_rz_jmax = None if precond_traced else int(jmax)
                     else:
                         mats = cache_prec_rz_mats
-                        jmax = int(cache_prec_rz_jmax)
+                        jmax = cache_prec_rz_jmax
                 _maybe_dump_lam_prec(lam_prec=lam_prec, faclam=faclam_dump, static=static, iter_idx=int(iter2))
-                _maybe_dump_precond_mats(
-                    mats=mats,
-                    static=static,
-                    iter_idx=int(iter2),
-                    jmax=int(jmax),
-                    used_cache=(not bool(need_prec_refresh)),
-                )
+                if not precond_traced:
+                    _maybe_dump_precond_mats(
+                        mats=mats,
+                        static=static,
+                        iter_idx=int(iter2),
+                        jmax=int(jmax),
+                        used_cache=(not bool(need_prec_refresh)),
+                    )
                 if lam_debug is not None:
                     _maybe_dump_lamcal(lam_debug=lam_debug, static=static, iter_idx=int(iter2))
                 frzl_rhs = _apply_vmec_scale_m1_precond_rhs(frzl, mats)
@@ -11322,14 +11321,18 @@ def solve_fixed_boundary_residual_iter(
                     rz_preconditioner_matrices_reassemble,
                 )
 
+                precond_traced = _tree_has_tracer(k)
                 need_lam_prec = _env_dump_lam not in ("", "0")
                 need_lamcal = _env_dump_lamcal not in ("", "0")
                 need_prec_reassemble = (
-                    (cache_prec_rz_jmax is not None)
+                    (not precond_traced)
+                    and (cache_prec_rz_jmax is not None)
                     and (int(cache_prec_rz_jmax) != int(precond_expected_jmax))
                     and _can_reassemble_precond_mats(cache_prec_rz_mats)
                 )
                 need_prec_refresh = (
+                    precond_traced
+                    or
                     (not bool(vmec2000_cache_valid))
                     or (cache_prec_lam_prec is None)
                     or (cache_prec_rz_mats is None)
@@ -11370,7 +11373,7 @@ def solve_fixed_boundary_residual_iter(
                     cache_prec_faclam = faclam_dump
                     cache_prec_lam_debug = lam_debug
                     cache_prec_rz_mats = mats
-                    cache_prec_rz_jmax = int(jmax)
+                    cache_prec_rz_jmax = None if precond_traced else int(jmax)
                     if timing_enabled and t_prec_refresh_start is not None:
                         try:
                             if has_jax():
@@ -11389,18 +11392,19 @@ def solve_fixed_boundary_residual_iter(
                             jmax_override=precond_jmax_override,
                         )
                         cache_prec_rz_mats = mats
-                        cache_prec_rz_jmax = int(jmax)
+                        cache_prec_rz_jmax = None if precond_traced else int(jmax)
                     else:
                         mats = cache_prec_rz_mats
-                        jmax = int(cache_prec_rz_jmax)
+                        jmax = cache_prec_rz_jmax
                 _maybe_dump_lam_prec(lam_prec=lam_prec, faclam=faclam_dump, static=static, iter_idx=int(iter2))
-                _maybe_dump_precond_mats(
-                    mats=mats,
-                    static=static,
-                    iter_idx=int(iter2),
-                    jmax=int(jmax),
-                    used_cache=(not bool(need_prec_refresh)),
-                )
+                if not precond_traced:
+                    _maybe_dump_precond_mats(
+                        mats=mats,
+                        static=static,
+                        iter_idx=int(iter2),
+                        jmax=int(jmax),
+                        used_cache=(not bool(need_prec_refresh)),
+                    )
                 if lam_debug is not None:
                     _maybe_dump_lamcal(lam_debug=lam_debug, static=static, iter_idx=int(iter2))
                 frzl_rhs = (

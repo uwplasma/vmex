@@ -558,3 +558,10 @@ Stop or reduce scope if:
     conversions to a real JAX issue: `_rz_norm(...)` still uses boolean
     indexing with a traced mask, which must be rewritten before the forward
     discrete-adjoint SciPy path can run under JIT on CPU.
+  - Rewrote the traced `_rz_norm(...)` gathers to use clipped gathers plus
+    masking instead of boolean indexing, which removed that JAX error class.
+  - After that fix, the remaining `jit=True` blockers are no longer localized
+    cache conversions; they are host scalar bookkeeping paths in
+    `solve_fixed_boundary_residual_iter(...)` (`int(jmax)`, `_device_get_floats`,
+    VMEC-style scalar histories / diagnostics) that need to be separated from
+    the traced solve path more systematically.
