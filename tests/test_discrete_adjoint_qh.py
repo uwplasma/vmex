@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+import os
+
+import numpy as np
+import pytest
+
+
+def _mode_index(modes, m: int, n: int) -> int:
+    for k, (mm, nn) in enumerate(zip(np.asarray(modes.m), np.asarray(modes.n))):
+        if int(mm) == int(m) and int(nn) == int(n):
+            return k
+    raise KeyError((m, n))
+
+
+def _require_slow() -> None:
+    if os.environ.get("RUN_SLOW", "") != "1":
+        pytest.skip("Set RUN_SLOW=1 to run slow QH derivative checks")
+
+
+def test_qh_warm_start_fixture_loads_expected_case(load_case_qh_warm_start):
+    _cfg, _indata, static, boundary, _state0 = load_case_qh_warm_start
+
+    assert int(static.cfg.nfp) == 4
+    assert not bool(static.cfg.lasym)
+    assert _mode_index(static.modes, 0, 1) >= 0
+    assert float(np.max(np.abs(np.asarray(boundary.R_cos)))) > 0.0
+    assert float(np.max(np.abs(np.asarray(boundary.Z_sin)))) > 0.0
+
+
+def test_qh_warm_start_implicit_aspect_directional_derivative_matches_fd(load_case_qh_warm_start):
+    pytest.importorskip("jax")
+    _require_slow()
+
+    from vmec_jax._compat import enable_x64, jax, jnp
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.implicit import solve_fixed_boundary_state_implicit_vmec_residual
+    from vmec_jax.init_guess import initial_guess_from_boundary
+    from vmec_jax.wout import equilibrium_aspect_ratio_from_state
+
+    enable_x64(True)
+
+    _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
+    state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
+    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state_guess, static).sqrtg), axis_index=1))
+
+    k_rc01 = _mode_index(static.modes, 0, 1)
+    edge_Rcos0 = np.asarray(boundary.R_cos, dtype=float)
+    edge_Rsin0 = np.asarray(boundary.R_sin, dtype=float)
+    edge_Zcos0 = np.asarray(boundary.Z_cos, dtype=float)
+    edge_Zsin0 = np.asarray(boundary.Z_sin, dtype=float)
+    alpha0 = float(edge_Rcos0[k_rc01])
+    step_size = float(indata.get_float("DELT", 1.0))
+    ftol = float(indata.get_float("FTOL", 1e-14))
+
+    def _aspect_from_alpha(alpha):
+        edge_Rcos = jnp.asarray(edge_Rcos0).at[k_rc01].set(alpha)
+        state = solve_fixed_boundary_state_implicit_vmec_residual(
+            state_guess,
+            static,
+            indata=indata,
+            signgs=signgs,
+            state0_host=state_guess,
+            max_iter=1,
+            step_size=step_size,
+            ftol=ftol,
+            edge_Rcos=edge_Rcos,
+            edge_Rsin=jnp.asarray(edge_Rsin0),
+            edge_Zcos=jnp.asarray(edge_Zcos0),
+            edge_Zsin=jnp.asarray(edge_Zsin0),
+        )
+        return equilibrium_aspect_ratio_from_state(state=state, static=static)
+
+    eps = 1.0e-5
+    grad_ad = float(np.asarray(jax.grad(_aspect_from_alpha)(alpha0)))
+    grad_fd = float(
+        (
+            np.asarray(_aspect_from_alpha(alpha0 + eps))
+            - np.asarray(_aspect_from_alpha(alpha0 - eps))
+        )
+        / (2.0 * eps)
+    )
+
+    assert np.isfinite(grad_ad)
+    assert np.isfinite(grad_fd)
+    assert grad_ad == pytest.approx(grad_fd, rel=1.0e-1, abs=5.0e-4)
+
+
+def test_residual_iteration_trace_extracts_qh_history(load_case_qh_warm_start):
+    pytest.importorskip("jax")
+
+    from vmec_jax.discrete_adjoint import residual_iteration_trace_from_result
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.init_guess import initial_guess_from_boundary
+    from vmec_jax.solve import solve_fixed_boundary_residual_iter
+
+    _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
+    state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
+    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state_guess, static).sqrtg), axis_index=1))
+
+    result = solve_fixed_boundary_residual_iter(
+        state_guess,
+        static,
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        reference_mode=False,
+        backtracking=True,
+        limit_dt_from_force=True,
+        limit_update_rms=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces="auto",
+        use_scan=False,
+    )
+
+    trace = residual_iteration_trace_from_result(result)
+    n = int(trace.iter2.shape[0])
+
+    assert n >= 1
+    assert trace.step_status.shape == (n,)
+    assert trace.restart_reason.shape == (n,)
+    assert trace.time_step.shape == (n,)
+    assert trace.dt_eff.shape == (n,)
+    assert trace.fsq_curr.shape == (n,)
+    assert trace.state_advanced.shape == (n,)
+    assert np.all(np.isfinite(trace.fsq_curr))
