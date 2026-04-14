@@ -107,7 +107,7 @@ from .free_boundary import (
     prepare_mgrid_for_config,
     validate_free_boundary_config,
 )
-from .init_guess import initial_guess_from_boundary
+from .init_guess import extract_axis_override_from_state, initial_guess_from_boundary
 from .optimization import (
     BoundaryParamSpec,
     FixedBoundaryContext,
@@ -141,8 +141,11 @@ from .discrete_adjoint import (
     concat_residual_iteration_traces,
     preconditioned_force_channels_from_raw_forces,
     preconditioned_force_channels_from_rz_output,
+    raw_force_residual_from_state,
     replay_residual_checkpoint_step,
+    state_dependent_preconditioner_from_forces,
     strict_update_accepted_step,
+    strict_update_one_step_from_state,
     strict_update_velocity_block,
     strict_update_velocity_limit,
     strict_update_velocity_state_advance,
@@ -255,6 +258,7 @@ __all__ = [
     "prepare_mgrid_for_config",
     "validate_free_boundary_config",
     "initial_guess_from_boundary",
+    "extract_axis_override_from_state",
     "BoundaryParamSpec",
     "FixedBoundaryContext",
     "apply_boundary_params",
@@ -298,8 +302,11 @@ __all__ = [
     "concat_residual_iteration_traces",
     "preconditioned_force_channels_from_raw_forces",
     "preconditioned_force_channels_from_rz_output",
+    "raw_force_residual_from_state",
     "replay_residual_checkpoint_step",
+    "state_dependent_preconditioner_from_forces",
     "strict_update_accepted_step",
+    "strict_update_one_step_from_state",
     "strict_update_velocity_block",
     "strict_update_velocity_limit",
     "strict_update_velocity_state_advance",

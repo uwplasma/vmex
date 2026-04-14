@@ -512,3 +512,19 @@ Stop or reduce scope if:
     - `frzl_rz -> fr*_u` runtime is about `6.0e-4 s`,
     - `frzl_rz -> accepted step` remains exact with no change to the lambda mismatch diagnostic.
   - This leaves the remaining one-step upstream seam at the raw-force assembly itself (`_compute_forces_iter` / `vmec_forces_rz_from_wout` + `vmec_residual_internal_from_kernels` + post-`tomnsps` VMEC cleanup), which is now the only part of the first-step map not yet extracted into solver-faithful discrete-adjoint blocks.
+  - Extracted the raw-force assembly into `raw_force_residual_from_state(...)` and verified that the full one-step composition
+    `state -> raw force -> state-dependent preconditioner -> preconditioned channels -> accepted strict update`
+    reconstructs the exact first QH step on the current branch.
+  - Isolated a real algebra bug in the raw preconditioner helper: the `scale_m1_par` rewrite on the RHS must be applied before
+    `rz_preconditioner_apply_jit`; once fixed, `frzl -> fr*_u` and `raw force -> accepted step` both matched the traced QH first step.
+  - Probed boundary derivatives through the extracted one-step map and found that the apparent preconditioner AD failure was upstream:
+    traced `initial_guess_from_boundary(..., vmec_project=True)` was silently disabling missing-axis inference, so AD and FD were
+    differentiating different initialization branches.
+  - Added `extract_axis_override_from_state(...)` and an `axis_override=` path in `initial_guess_from_boundary(...)` so the
+    initialization branch can be frozen explicitly for differentiated replay paths.
+  - Locked two new exact QH gates with that frozen-axis path:
+    - projected-initial-guess boundary derivative matches central FD,
+    - extracted one-step boundary derivative matches central FD.
+  - The current root cause is therefore no longer in the accepted-step algebra or the raw-force assembly; it was the
+    initialization branch mismatch caused by traced missing-axis handling. The next phase should thread the frozen-axis branch choice
+    through the replay/tape consumer path and then start the reverse-over-history implementation on top of that consistent primal map.
