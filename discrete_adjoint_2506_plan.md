@@ -478,3 +478,13 @@ Stop or reduce scope if:
     - local JVP/VJP identity passes,
     - one-step Taylor remainder passes.
   - Measured the standalone strict-update state-advance block runtime on exact QH one-step data at about `4.3e-2 s`, well below the full one-step direct solve cost.
+  - Added solver-side `adjoint_trace` capture for the accepted strict-update branch so replay tape entries now include solver-faithful pre/post velocity blocks, force blocks, and step metadata from the exact QH primal step.
+  - Extended `ResidualCheckpointTape` to keep per-step strict-update traces alongside replay checkpoints.
+  - Implemented the strict-update velocity recurrence as a separate block and locked its first local Phase 3 gates on exact QH one-step data:
+    - velocity block reconstruction matches the solver trace exactly,
+    - local JVP/VJP identity passes.
+  - Re-ran the exact one-step QH diagnostic harness after the trace refactor:
+    - aspect AD vs FD remains at machine precision,
+    - lambda scalar mismatch remains the primary local derivative defect,
+    - replay/direct final state agreement remains exact,
+    - checkpoint replay overhead remains negligible relative to direct one-step solve time.

@@ -4037,6 +4037,7 @@ def solve_fixed_boundary_residual_iter(
     resume_state_mode: str | None = None,
     fsq_total_target: float | None = None,
     host_update_assembly: bool = False,
+    adjoint_trace: bool = False,
 ) -> SolveVmecResidualResult:
     """VMEC-style fixed-point update loop using preconditioned force residuals."""
     if not has_jax():
@@ -4077,6 +4078,7 @@ def solve_fixed_boundary_residual_iter(
     # The caller can still force host_update_assembly=False to opt out.
     _auto_host = (not bool(use_scan)) and (jax.default_backend() == "cpu")
     host_update_assembly = (bool(host_update_assembly) or _auto_host) and (not bool(use_scan)) and (jax.default_backend() == "cpu")
+    adjoint_trace = bool(adjoint_trace)
 
     signgs = int(signgs)
     fsq_total_target = None if fsq_total_target is None else max(0.0, float(fsq_total_target))
@@ -9736,6 +9738,7 @@ def solve_fixed_boundary_residual_iter(
     w_try_history: list[float] = []
     w_try_ratio_history: list[float] = []
     restart_path_history: list[str] = []
+    adjoint_step_trace_history: list[dict[str, Any]] = []
     min_tau_history: list[float] = []
     max_tau_history: list[float] = []
     bad_jacobian_history: list[int] = []
@@ -12413,6 +12416,35 @@ def solve_fixed_boundary_residual_iter(
             # iteration in (m, n>=0) storage, no line-search accept/reject.
             w_curr = fsqr_f + fsqz_f + fsql_f
             state_backup = state
+            if adjoint_trace:
+                trace_entry: dict[str, Any] = {
+                    "branch": "strict_update",
+                    "state_pre": state_backup,
+                    "vRcc_before": np.asarray(vRcc),
+                    "vRss_before": np.asarray(vRss),
+                    "vZsc_before": np.asarray(vZsc),
+                    "vZcs_before": np.asarray(vZcs),
+                    "vLsc_before": np.asarray(vLsc),
+                    "vLcs_before": np.asarray(vLcs),
+                    "vRsc_before": np.asarray(vRsc),
+                    "vRcs_before": np.asarray(vRcs),
+                    "vZcc_before": np.asarray(vZcc),
+                    "vZss_before": np.asarray(vZss),
+                    "vLcc_before": np.asarray(vLcc),
+                    "vLss_before": np.asarray(vLss),
+                    "frcc_u": np.asarray(frcc_u),
+                    "frss_u": np.asarray(frss_u),
+                    "fzsc_u": np.asarray(fzsc_u),
+                    "fzcs_u": np.asarray(fzcs_u),
+                    "flsc_u": np.asarray(flsc_u),
+                    "flcs_u": np.asarray(flcs_u),
+                    "frsc_u": np.asarray(frsc_u),
+                    "frcs_u": np.asarray(frcs_u),
+                    "fzcc_u": np.asarray(fzcc_u),
+                    "fzss_u": np.asarray(fzss_u),
+                    "flcc_u": np.asarray(flcc_u),
+                    "flss_u": np.asarray(flss_u),
+                }
             dt_eff = float(time_step)
             if bool(limit_dt_from_force):
                 dt_eff = _safe_dt_from_force(
@@ -12855,6 +12887,8 @@ def solve_fixed_boundary_residual_iter(
                                 )
                             )
                         )
+                        if adjoint_trace:
+                            trace_entry["fallback_direct_dt"] = float(dt_direct)
                     else:
                         # Roll back state and zero velocity.
                         state = state_backup
@@ -12954,6 +12988,38 @@ def solve_fixed_boundary_residual_iter(
                         cache_prec_lam_prec = None
                         cache_prec_faclam = None
                         cache_prec_lam_debug = None
+            if adjoint_trace:
+                trace_entry.update(
+                    {
+                        "step_status": str(step_status),
+                        "restart_reason": str(restart_reason),
+                        "restart_path": str(restart_path),
+                        "dt_eff": float(dt_eff),
+                        "time_step": float(time_step),
+                        "w_curr": float(w_curr),
+                        "w_try": float(w_try),
+                        "w_try_ratio": float(w_try_ratio),
+                        "b1": float(b1),
+                        "fac": float(fac),
+                        "flip_sign": float(flip_sign),
+                        "force_scale": float(force_scale),
+                        "limit_update_rms": bool(limit_update_rms),
+                        "state_post": state,
+                        "vRcc_after": np.asarray(vRcc),
+                        "vRss_after": np.asarray(vRss),
+                        "vZsc_after": np.asarray(vZsc),
+                        "vZcs_after": np.asarray(vZcs),
+                        "vLsc_after": np.asarray(vLsc),
+                        "vLcs_after": np.asarray(vLcs),
+                        "vRsc_after": np.asarray(vRsc),
+                        "vRcs_after": np.asarray(vRcs),
+                        "vZcc_after": np.asarray(vZcc),
+                        "vZss_after": np.asarray(vZss),
+                        "vLcc_after": np.asarray(vLcc),
+                        "vLss_after": np.asarray(vLss),
+                    }
+                )
+                adjoint_step_trace_history.append(trace_entry)
             if timing_enabled and t_update_start is not None:
                 try:
                     if has_jax():
@@ -13275,6 +13341,7 @@ def solve_fixed_boundary_residual_iter(
         "w_try_history": np.asarray(w_try_history, dtype=float),
         "w_try_ratio_history": np.asarray(w_try_ratio_history, dtype=float),
         "restart_path_history": np.asarray(restart_path_history, dtype=object),
+        "adjoint_step_trace": adjoint_step_trace_history,
         "min_tau_history": np.asarray(min_tau_history, dtype=float),
         "max_tau_history": np.asarray(max_tau_history, dtype=float),
         "bad_jacobian_history": np.asarray(bad_jacobian_history, dtype=int),

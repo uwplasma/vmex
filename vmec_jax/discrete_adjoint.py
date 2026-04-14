@@ -48,6 +48,7 @@ class ResidualCheckpointTape:
     packed_states: np.ndarray
     trace: ResidualIterationTrace
     resume_states: tuple[dict[str, Any] | None, ...]
+    step_traces: tuple[dict[str, Any], ...]
 
 
 def _array_from_diag(diagnostics: dict[str, Any], key: str, *, dtype=None) -> np.ndarray:
@@ -225,6 +226,7 @@ def build_residual_checkpoint_tape(
     traces: list[ResidualIterationTrace] = []
     packed_states: list[np.ndarray] = []
     resume_states: list[dict[str, Any] | None] = []
+    step_traces: list[dict[str, Any]] = []
 
     for _ in range(int(max_iter)):
         result = replay_residual_checkpoint_step(
@@ -238,6 +240,7 @@ def build_residual_checkpoint_tape(
         traces.append(residual_iteration_trace_from_result(result))
         resume_state = result.diagnostics.get("resume_state")
         resume_states.append(resume_state)
+        step_traces.extend(list(result.diagnostics.get("adjoint_step_trace", [])))
         if bool(result.diagnostics.get("converged", False)):
             break
 
@@ -250,6 +253,7 @@ def build_residual_checkpoint_tape(
         packed_states=packed_states_arr,
         trace=concat_residual_iteration_traces(traces),
         resume_states=tuple(resume_states),
+        step_traces=tuple(step_traces),
     )
 
 
@@ -268,8 +272,87 @@ def replay_residual_checkpoint_step(
         static,
         max_iter=1,
         resume_state=resume_state,
+        adjoint_trace=True,
         **solve_kwargs,
     )
+
+
+def strict_update_velocity_block(
+    *,
+    b1,
+    fac,
+    force_scale,
+    flip_sign,
+    vRcc_before,
+    vRss_before,
+    vZsc_before,
+    vZcs_before,
+    vLsc_before,
+    vLcs_before,
+    frcc_u,
+    frss_u,
+    fzsc_u,
+    fzcs_u,
+    flsc_u,
+    flcs_u,
+    vRsc_before=None,
+    vRcs_before=None,
+    vZcc_before=None,
+    vZss_before=None,
+    vLcc_before=None,
+    vLss_before=None,
+    frsc_u=None,
+    frcs_u=None,
+    fzcc_u=None,
+    fzss_u=None,
+    flcc_u=None,
+    flss_u=None,
+):
+    """Apply the strict-update velocity recurrence for one solver step."""
+    b1 = jnp.asarray(b1, dtype=jnp.asarray(vRcc_before).dtype)
+    fac = jnp.asarray(fac, dtype=jnp.asarray(vRcc_before).dtype)
+    force_scale = jnp.asarray(force_scale, dtype=jnp.asarray(vRcc_before).dtype)
+    flip_sign = jnp.asarray(flip_sign, dtype=jnp.asarray(vRcc_before).dtype)
+    scale = fac * force_scale * flip_sign
+    memory = fac * b1
+
+    def _update(v_before, force):
+        return memory * jnp.asarray(v_before) + scale * jnp.asarray(force)
+
+    vRcc_after = _update(vRcc_before, frcc_u)
+    vRss_after = _update(vRss_before, frss_u)
+    vZsc_after = _update(vZsc_before, fzsc_u)
+    vZcs_after = _update(vZcs_before, fzcs_u)
+    vLsc_after = _update(vLsc_before, flsc_u)
+    vLcs_after = _update(vLcs_before, flcs_u)
+    if vRsc_before is None:
+        vRsc_after = None
+        vRcs_after = None
+        vZcc_after = None
+        vZss_after = None
+        vLcc_after = None
+        vLss_after = None
+    else:
+        vRsc_after = _update(vRsc_before, frsc_u)
+        vRcs_after = _update(vRcs_before, frcs_u)
+        vZcc_after = _update(vZcc_before, fzcc_u)
+        vZss_after = _update(vZss_before, fzss_u)
+        vLcc_after = _update(vLcc_before, flcc_u)
+        vLss_after = _update(vLss_before, flss_u)
+    return {
+        "vRcc_after": vRcc_after,
+        "vRss_after": vRss_after,
+        "vZsc_after": vZsc_after,
+        "vZcs_after": vZcs_after,
+        "vLsc_after": vLsc_after,
+        "vLcs_after": vLcs_after,
+        "vRsc_after": vRsc_after,
+        "vRcs_after": vRcs_after,
+        "vZcc_after": vZcc_after,
+        "vZss_after": vZss_after,
+        "vLcc_after": vLcc_after,
+        "vLss_after": vLss_after,
+    }
 
 
 def strict_update_velocity_state_advance(
