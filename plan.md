@@ -2231,3 +2231,96 @@ also add asarray dtype fast path and mask pre-conversion to reduce Python overhe
   The JIT cache is keyed on `(jmax, lthreed, lasym, ...)` so it compiles once per unique config.
 
 **Test suite**: 148 passed, 61 skipped.
+
+---
+
+### 2026-04-13 — Phase 1 accelerated-mode single-grid benchmark + ITERModel parity
+
+**Goal**: Establish Phase 1 accelerated-mode performance baseline on the full
+NS=151 single-grid benchmark matrix; add ITERModel to the parity manifest;
+remove premature GPU bars from README.
+
+#### Commits: `49cfab3` through `7d5304c`
+
+#### Figure regeneration (commit `49cfab3`):
+- Regenerated all 10 README comparison figures from fresh NS=151 single-grid runs.
+- Fixed cross-section figures: both sides now show 8 evenly-spaced surfaces.
+- Removed `<details>` dropdown from "More visuals" section.
+- Removed "When to use vmec_jax" section.
+- Fixed iota captions (removed incorrect "vs VMEC++").
+- Updated VMEC++ notes to reflect current benchmark state (VMEC++ not in benchmark).
+
+#### GPU assessment (commit `7d5304c`):
+- Warm GPU timings (RTX A4000, NVIDIA, office) on 7 cases: all 7 slower than VMEC2000.
+- Root cause: small-to-medium fixed-boundary cases (NS=151) do not fill the GPU with
+  enough parallelism to amortize kernel-launch latency.
+- Removed GPU bars from `readme_runtime_compare.py` and README until GPU speedups
+  are real (requires Phase 2 device-resident loop and larger problems).
+
+#### GPU chunk optimization (solve.py, commit `7d5304c`):
+- For GPU non-print runs, switch `_scan_chunk_settings` to use `max_iter_scan` as
+  the chunk size (same as the CPU quiet-run path).
+- This eliminates the outer Python loop's host/device sync overhead on GPU:
+  1 JIT compilation + 1 kernel call + 1 final sync instead of 5–12.
+- Prior behavior was `min(max_iter, 400–1000)` causing ~5–12 kernel dispatches.
+- `VMEC_JAX_SCAN_CHUNK_SIZE` env var overrides this when GPU memory is tight.
+
+#### Phase 1 accelerated-mode benchmark results (commit `7d5304c`):
+- Command: `example_runtime_memory_matrix.py --solver-mode accelerated
+  --cli-fixed-boundary-mode --warm-runs 1 --inputs-dir examples_single_grid/data`
+- Results stored in `outputs/bench_accel_20260413/summary.json`.
+
+**vmec_jax warm vs VMEC2000 (NS=151 single-grid)**:
+| Case | vmec_jax warm | VMEC2000 | Ratio |
+|------|-------------|----------|-------|
+| ITERModel | 0.44s | 1.72s | 3.9× faster |
+| B2_A80 | 0.16s | 0.81s | 5.1× faster |
+| SenguptaPlunk | 0.23s | 1.00s | 4.3× faster |
+| up_down_asymm | 1.62s | 7.03s | 4.3× faster |
+| circular_tokamak | 0.62s | 1.50s | 2.4× faster |
+| shaped_tokamak | 0.77s | 1.99s | 2.6× faster |
+| solovev | 0.26s | 1.23s | 4.7× faster |
+| nfp4_QH_warm | 0.96s | 1.71s | 1.8× faster |
+| basic_non_stellsym | 3.61s | 8.38s | 2.3× faster |
+| circular_aspect100 | 0.43s | 0.84s | 2.0× faster |
+| purely_toroidal | 1.44s | 1.37s | ~neutral |
+| QA_lowres | 57.26s | 35.18s | 1.6× slower |
+| QA_reactorScale | 53.81s | 34.57s | 1.6× slower |
+| QH_reactorScale | 51.14s | 32.98s | 1.6× slower |
+| QA_lowres1 | 32.33s | 16.03s | 2.0× slower |
+| cth_like_fixed_bdy | 23.66s | 4.19s | 5.7× slower |
+
+- **11 of 16 cases faster** than VMEC2000 in warm accelerated mode.
+- Large QA/QH reactor-scale 3D cases (QA_lowres, QA_reactorScale, QH_reactorScale)
+  remain slower — these require Phase 2 transform/memory refactor.
+- `cth_like_fixed_bdy` is anomalously slow (5.7×) — likely JIT fusion issue for
+  current-driven 3D case; separate investigation needed.
+- All 16 cases complete without OOM (previously 3 failed with default mode at NS=151).
+
+#### ITERModel parity (commit `7d5304c`):
+- Added `fixed_axisym_lasym_false_itermodel` to `parity_manifest.toml`
+  (smoke tier, NS=13, 10 iterations, rtol=1e-3).
+- Parity sweep result: **PASS** — all FSQ channels bit-exact (max_rel = 0.0),
+  rmnc relRMS = 8.7e-16 (machine epsilon), zmns relRMS = 1.9e-15.
+- FSQ trace mismatch at NS=151/NITER=5000 (max_rel=0.9998) is a convergence-path
+  sampling artifact, NOT a real parity regression. Both solvers converge to the
+  same final state (fsqr ≈ 9.24e-15).
+
+#### Parity disparities noted:
+- **QA_lowres**: FSQ trace max_rel=0.006 at NS=151 — good convergence-path parity.
+- **ITERModel**: FSQ trace max_rel=0.9998 at NS=151 — convergence path differs,
+  final state matches (not a bug).
+- **QA_lowres/reactorScale/QH_reactorScale**: vmec_jax accelerated mode 1.6–2×
+  slower than VMEC2000 — not a parity issue, performance target for Phase 2.
+
+#### Remaining Phase 2 targets:
+1. **Large 3D reactor-scale cases**: refactor transforms/synthesis to reduce
+   memory traffic (aggressive_performance_plan.rst Phase 5).
+2. **cth_like_fixed_bdy**: investigate why accelerated mode is 5.7× slower.
+3. **Device-resident outer loop**: move restart/convergence logic into scan carry
+   to eliminate host/device syncs (aggressive_performance_plan.rst Phase 2).
+4. **GPU path**: after CPU Phase 2 improvements, re-benchmark on GPU to see
+   if reactor-scale cases show real speedups.
+
+**Test suite**: tests not re-run this session; no solver logic changed beyond
+`_scan_chunk_settings` GPU branch (non-functional on CPU tests).

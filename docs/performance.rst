@@ -255,16 +255,45 @@ That example uses the same public Python driver entry point as library users,
 but it enables ``cli_fixed_boundary_mode=True`` on the optimized path so the
 controller matches the executable behavior exactly.
 
-Latest serial bundled fixed-boundary reassessment
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Latest serial bundled fixed-boundary reassessment (April 2026)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The current bundled fixed-boundary benchmark set uses the shipped QA/QH
-reactor-scale reference inputs in place of the retired internal stress cases.
+The current bundled fixed-boundary benchmark set uses NS=151 single-grid
+inputs (``examples_single_grid/data/``) and compares
+``solver_mode="accelerated"`` warm runtimes against VMEC2000.
+Results are in ``outputs/bench_accel_20260413/summary.json``.
 
-Current warmed fixed-boundary CPU reassessment on the optimized CLI track,
-using the same branch baseline as the comparator, is recorded in
-``outputs/accelerated_cli_fixed_boundary_full_20260311_r2/summary.json``:
+**vmec_jax accelerated mode (warm) vs VMEC2000 on NS=151 single-grid:**
 
+- ``ITERModel``: ``0.44s`` vs ``1.72s`` — **3.9x faster**
+- ``up_down_asymmetric_tokamak``: ``1.62s`` vs ``7.03s`` — **4.3x faster**
+- ``B2_A80``: ``0.16s`` vs ``0.81s`` — **5.1x faster**
+- ``LandremanSenguptaPlunk_section5p3_low_res``: ``0.23s`` vs ``1.00s`` — **4.3x faster**
+- ``circular_tokamak``: ``0.62s`` vs ``1.50s`` — **2.4x faster**
+- ``shaped_tokamak_pressure``: ``0.77s`` vs ``1.99s`` — **2.6x faster**
+- ``solovev``: ``0.26s`` vs ``1.23s`` — **4.7x faster**
+- ``nfp4_QH_warm_start``: ``0.96s`` vs ``1.71s`` — **1.8x faster**
+- ``basic_non_stellsym_pressure``: ``3.61s`` vs ``8.38s`` — **2.3x faster**
+- ``circular_tokamak_aspect_100``: ``0.43s`` vs ``0.84s`` — **2.0x faster**
+- ``purely_toroidal_field``: ``1.44s`` vs ``1.37s`` — roughly neutral
+- ``LandremanPaul2021_QA_lowres``: ``57.26s`` vs ``35.18s`` — 1.6x slower
+- ``LandremanPaul2021_QA_reactorScale_lowres``: ``53.81s`` vs ``34.57s`` — 1.6x slower
+- ``LandremanPaul2021_QH_reactorScale_lowres``: ``51.14s`` vs ``32.98s`` — 1.6x slower
+- ``LandremanPaul2021_QA_lowres1``: ``32.33s`` vs ``16.03s`` — 2.0x slower
+- ``cth_like_fixed_bdy``: ``23.66s`` vs ``4.19s`` — 5.7x slower
+
+**11 of 16 cases** are faster in warm accelerated mode than VMEC2000.
+The 5 slower cases (QA/QH reactor-scale and cth_like) are the main
+Phase 2 targets.
+
+Note: cold (first-run) times include XLA compilation and are
+5–30x the warm times. Cold compilation is a one-time cost per
+JIT-distinct input configuration.
+
+Earlier reassessments from March 2026:
+
+- results recorded in
+  ``outputs/accelerated_cli_fixed_boundary_full_20260311_r2/summary.json``
 - all 16 bundled fixed-boundary cases converge on both the baseline and
   optimized paths,
 - the optimized path is now faster on 13 of 16 cases and roughly neutral on
