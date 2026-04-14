@@ -139,6 +139,7 @@ from .discrete_adjoint import (
     ResidualIterationTrace,
     build_residual_checkpoint_tape,
     concat_residual_iteration_traces,
+    replay_residual_checkpoint_step,
     residual_iteration_trace_from_result,
 )
 from .solve import (
@@ -289,6 +290,7 @@ __all__ = [
     "ResidualIterationTrace",
     "build_residual_checkpoint_tape",
     "concat_residual_iteration_traces",
+    "replay_residual_checkpoint_step",
     "residual_iteration_trace_from_result",
     "SolveLambdaResult",
     "solve_lambda_gd",

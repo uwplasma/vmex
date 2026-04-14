@@ -226,12 +226,11 @@ def build_residual_checkpoint_tape(
     resume_states: list[dict[str, Any] | None] = []
 
     for _ in range(int(max_iter)):
-        result = solve_fixed_boundary_residual_iter(
+        result = replay_residual_checkpoint_step(
             state,
             static,
-            max_iter=1,
             resume_state=resume_state,
-            **solve_kwargs,
+            solve_kwargs=solve_kwargs,
         )
         state = result.state
         packed_states.append(np.asarray(pack_state(state), dtype=float))
@@ -253,10 +252,30 @@ def build_residual_checkpoint_tape(
     )
 
 
+def replay_residual_checkpoint_step(
+    state,
+    static,
+    *,
+    resume_state: dict[str, Any] | None,
+    solve_kwargs: dict[str, Any],
+):
+    """Replay exactly one residual-solver step from a stored checkpoint."""
+    from .solve import solve_fixed_boundary_residual_iter
+
+    return solve_fixed_boundary_residual_iter(
+        state,
+        static,
+        max_iter=1,
+        resume_state=resume_state,
+        **solve_kwargs,
+    )
+
+
 __all__ = [
     "ResidualIterationTrace",
     "ResidualCheckpointTape",
     "build_residual_checkpoint_tape",
     "concat_residual_iteration_traces",
+    "replay_residual_checkpoint_step",
     "residual_iteration_trace_from_result",
 ]

@@ -204,13 +204,13 @@ forces it.
 
 ### Phase 0: preserve a stable forward baseline
 
-- [ ] Define and freeze one differentiable primal mode for the QH benchmark.
+- [x] Define and freeze one differentiable primal mode for the QH benchmark.
 - [ ] Minimize optional control-path features during the new discrete-adjoint path:
   - no experimental solver fallbacks,
   - no scan-vs-nonscan ambiguity,
   - fixed restart policy,
   - fixed boundary enforcement path.
-- [ ] Record exactly which forward intermediates are needed for replay.
+- [~] Record exactly which forward intermediates are needed for replay.
 
 Acceptance:
 
@@ -227,13 +227,13 @@ Validation / runtime gates:
 
 ### Phase 1: add a committed regression harness
 
-- [ ] Add a small committed regression that compares AD against central FD on the exact
+- [~] Add a small committed regression that compares AD against central FD on the exact
   8-DOF QH benchmark start point.
-- [ ] Check:
+- [~] Check:
   - full objective gradient,
   - one or two problematic lambda-internal sensitivities,
   - at least one `R/Z` interior sensitivity.
-- [ ] Add a small-runtime directional-derivative test around the benchmark start.
+- [x] Add a small-runtime directional-derivative test around the benchmark start.
 
 Acceptance:
 
@@ -249,14 +249,14 @@ Validation / runtime gates:
 
 ### Phase 2: expose the primal iteration tape
 
-- [ ] Refactor `solve_fixed_boundary_residual_iter(...)` so one iteration step has a
+- [~] Refactor `solve_fixed_boundary_residual_iter(...)` so one iteration step has a
   clear functional boundary:
   - current state,
   - preconditioned residual/update quantities,
   - accepted step metadata,
   - next state.
-- [ ] Store or checkpoint only what the backward replay actually needs.
-- [ ] Separate diagnostics from adjoint-critical state.
+- [~] Store or checkpoint only what the backward replay actually needs.
+- [~] Separate diagnostics from adjoint-critical state.
 
 Acceptance:
 
@@ -454,8 +454,20 @@ Stop or reduce scope if:
 
 ## Immediate next tasks
 
-- [ ] Add the exact QH derivative regression on this clean branch.
-- [ ] Refactor the forward residual solver to expose a compact accepted-step tape.
+- [~] Add the exact QH derivative regression on this clean branch.
+- [~] Refactor the forward residual solver to expose a compact accepted-step tape.
 - [ ] Prototype a one-step discrete VJP for the fixed-boundary residual update.
-- [ ] Create a small runtime harness for step/tape/VJP costs before any large
+- [~] Create a small runtime harness for step/tape/VJP costs before any large
   consumer-side refactor.
+
+## Activity log
+
+- 2026-04-14:
+  - Added an exact QH warm-start fixture and QH-specific regression file.
+  - Locked Gate 1A for the current implicit path: the QH aspect directional derivative at `max_iter=1` matches central FD to machine precision.
+  - Confirmed the lambda branch is still the main local derivative outlier on the exact QH start point.
+  - Added `ResidualIterationTrace` plus extraction from the existing residual-solver diagnostics.
+  - Added `ResidualCheckpointTape` built from repeated one-step replay using `resume_state`.
+  - Validated Gate 2A and Gate 2B: one-step and two-step QH checkpoint replay recover the exact direct-solve final state.
+  - Established an important constraint for the next phase: exact multi-step replay currently requires `resume_state_mode='full'`; the existing minimal checkpoint is not sufficient once cached VMEC control/preconditioner state is reused.
+  - Added a QH diagnostic script that reports aspect/lambda AD-vs-FD plus direct-vs-replay runtime and final-state agreement.
