@@ -488,3 +488,13 @@ Stop or reduce scope if:
     - lambda scalar mismatch remains the primary local derivative defect,
     - replay/direct final state agreement remains exact,
     - checkpoint replay overhead remains negligible relative to direct one-step solve time.
+  - Composed the first solver-faithful accepted-step helper over the saved strict-update QH trace and locked new local Phase 3 gates:
+    - accepted-step reconstruction matches the solver state and post-update velocities exactly,
+    - local JVP/VJP identity passes for the composed accepted-step map,
+    - one-step Taylor remainder passes for the composed accepted-step map.
+  - Tightened the accepted-step map to include the velocity RMS limiter and the VMEC lambda-gauge enforcement that happens after fixed-boundary/axis projection in the primal solver.
+  - Added a direct local test for the velocity RMS limiter on an active clipped branch so that block is not only validated on the inactive QH first-step case.
+  - Re-benchmarked the exact QH one-step composed accepted-step helper:
+    - accepted-step block runtime is about `1.29e-1 s`,
+    - accepted-step block state reconstruction remains exact,
+    - lambda scalar mismatch is unchanged, confirming the remaining defect is still upstream of the accepted-step map.

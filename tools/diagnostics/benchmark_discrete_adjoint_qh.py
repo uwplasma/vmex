@@ -27,6 +27,7 @@ from vmec_jax._compat import enable_x64, has_jax, jax, jnp
 from vmec_jax.boundary import boundary_from_indata
 from vmec_jax.config import load_config
 from vmec_jax.discrete_adjoint import build_residual_checkpoint_tape
+from vmec_jax.discrete_adjoint import strict_update_accepted_step
 from vmec_jax.discrete_adjoint import strict_update_velocity_state_advance
 from vmec_jax.field import signgs_from_sqrtg
 from vmec_jax.geom import eval_geom
@@ -157,6 +158,8 @@ def main() -> None:
     ) if tape.packed_states.shape[0] else float("nan")
     strict_update_runtime_s = float("nan")
     strict_update_state_diff = float("nan")
+    strict_step_runtime_s = float("nan")
+    strict_step_state_diff = float("nan")
     if int(args.max_iter) >= 1 and tape.resume_states:
         resume = direct.diagnostics.get("resume_state")
         if resume is not None and len(np.asarray(direct.diagnostics.get("dt_eff_history", []))) >= 1:
@@ -179,6 +182,37 @@ def main() -> None:
             strict_update_runtime_s = time.perf_counter() - t0
             strict_update_state_diff = float(
                 np.max(np.abs(np.asarray(pack_state(reconstructed)) - np.asarray(pack_state(direct.state))))
+            )
+        if tape.step_traces:
+            trace = tape.step_traces[0]
+            t0 = time.perf_counter()
+            out = strict_update_accepted_step(
+                trace["state_pre"],
+                static,
+                dt_eff=trace["dt_eff"],
+                b1=trace["b1"],
+                fac=trace["fac"],
+                force_scale=trace["force_scale"],
+                flip_sign=trace["flip_sign"],
+                vRcc_before=trace["vRcc_before"],
+                vRss_before=trace["vRss_before"],
+                vZsc_before=trace["vZsc_before"],
+                vZcs_before=trace["vZcs_before"],
+                vLsc_before=trace["vLsc_before"],
+                vLcs_before=trace["vLcs_before"],
+                frcc_u=trace["frcc_u"],
+                frss_u=trace["frss_u"],
+                fzsc_u=trace["fzsc_u"],
+                fzcs_u=trace["fzcs_u"],
+                flsc_u=trace["flsc_u"],
+                flcs_u=trace["flcs_u"],
+                max_update_rms=trace["max_update_rms_pre"],
+                limit_update_rms=trace["limit_update_rms"],
+                divide_by_scalxc_for_update=trace["divide_by_scalxc_for_update"],
+            )
+            strict_step_runtime_s = time.perf_counter() - t0
+            strict_step_state_diff = float(
+                np.max(np.abs(np.asarray(pack_state(out["state_post"])) - np.asarray(pack_state(trace["state_post"]))))
             )
 
     out = {
@@ -211,6 +245,8 @@ def main() -> None:
             "final_state_linf": final_state_diff,
             "strict_update_block_runtime_s": strict_update_runtime_s,
             "strict_update_block_state_linf": strict_update_state_diff,
+            "strict_step_block_runtime_s": strict_step_runtime_s,
+            "strict_step_block_state_linf": strict_step_state_diff,
         },
     }
     print(json.dumps(out, indent=2, sort_keys=True))

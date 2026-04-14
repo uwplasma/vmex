@@ -718,3 +718,370 @@ def test_strict_update_velocity_block_vjp_identity_qh(load_case_qh_warm_start):
     lhs = float(jnp.vdot(jvp, cotangent))
     rhs = float(jnp.vdot(tangent, vjp))
     assert lhs == pytest.approx(rhs, rel=1.0e-10, abs=1.0e-10)
+
+
+def test_strict_update_velocity_limit_clips_and_vjp_identity():
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import enable_x64, jax, jnp
+    from vmec_jax.discrete_adjoint import strict_update_velocity_limit
+
+    enable_x64(True)
+
+    dt_eff = 0.4
+    max_update_rms = 0.02
+    pieces0 = [
+        jnp.ones((3, 2), dtype=jnp.float64) * 0.7,
+        jnp.ones((3, 2), dtype=jnp.float64) * -0.5,
+        jnp.ones((3, 2), dtype=jnp.float64) * 0.3,
+        jnp.ones((3, 2), dtype=jnp.float64) * -0.4,
+        jnp.ones((3, 2), dtype=jnp.float64) * 0.2,
+        jnp.ones((3, 2), dtype=jnp.float64) * -0.6,
+    ]
+    sizes = [int(p.size) for p in pieces0]
+    offsets = np.cumsum([0] + sizes)
+    x0 = jnp.concatenate([jnp.ravel(p) for p in pieces0], axis=0)
+    tangent = jnp.linspace(-0.2, 0.5, int(x0.size), dtype=x0.dtype)
+
+    def _unpack(x):
+        vals = []
+        for start, stop, ref in zip(offsets[:-1], offsets[1:], pieces0):
+            vals.append(jnp.reshape(x[start:stop], ref.shape))
+        return vals
+
+    def _f(x):
+        vals = _unpack(x)
+        out = strict_update_velocity_limit(
+            dt_eff=dt_eff,
+            max_update_rms=max_update_rms,
+            limit_update_rms=True,
+            vRcc=vals[0],
+            vRss=vals[1],
+            vZsc=vals[2],
+            vZcs=vals[3],
+            vLsc=vals[4],
+            vLcs=vals[5],
+        )
+        return jnp.concatenate(
+            [
+                jnp.ravel(out["vRcc"]),
+                jnp.ravel(out["vRss"]),
+                jnp.ravel(out["vZsc"]),
+                jnp.ravel(out["vZcs"]),
+                jnp.ravel(out["vLsc"]),
+                jnp.ravel(out["vLcs"]),
+            ],
+            axis=0,
+        )
+
+    out = strict_update_velocity_limit(
+        dt_eff=dt_eff,
+        max_update_rms=max_update_rms,
+        limit_update_rms=True,
+        vRcc=pieces0[0],
+        vRss=pieces0[1],
+        vZsc=pieces0[2],
+        vZcs=pieces0[3],
+        vLsc=pieces0[4],
+        vLcs=pieces0[5],
+    )
+    assert float(np.asarray(out["update_rms_scale"])) < 1.0
+
+    y_ref = _f(x0)
+    cotangent = jnp.linspace(-0.4, 0.3, int(y_ref.size), dtype=x0.dtype)
+    _, jvp = jax.jvp(_f, (x0,), (tangent,))
+    _, vjp_fun = jax.vjp(_f, x0)
+    vjp = vjp_fun(cotangent)[0]
+    lhs = float(jnp.vdot(jvp, cotangent))
+    rhs = float(jnp.vdot(tangent, vjp))
+    assert lhs == pytest.approx(rhs, rel=1.0e-10, abs=1.0e-10)
+
+
+def test_strict_update_accepted_step_reconstructs_first_qh_step(load_case_qh_warm_start):
+    pytest.importorskip("jax")
+
+    from vmec_jax.discrete_adjoint import strict_update_accepted_step
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.init_guess import initial_guess_from_boundary
+    from vmec_jax.solve import solve_fixed_boundary_residual_iter
+    from vmec_jax.state import pack_state
+
+    _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
+    state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
+    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state_guess, static).sqrtg), axis_index=1))
+    result = solve_fixed_boundary_residual_iter(
+        state_guess,
+        static,
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        reference_mode=False,
+        backtracking=True,
+        limit_dt_from_force=True,
+        limit_update_rms=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces="auto",
+        use_scan=False,
+        host_update_assembly=False,
+        light_history=False,
+        resume_state_mode="full",
+        adjoint_trace=True,
+    )
+    trace = result.diagnostics["adjoint_step_trace"][0]
+    out = strict_update_accepted_step(
+        trace["state_pre"],
+        static,
+        dt_eff=trace["dt_eff"],
+        b1=trace["b1"],
+        fac=trace["fac"],
+        force_scale=trace["force_scale"],
+        flip_sign=trace["flip_sign"],
+        vRcc_before=trace["vRcc_before"],
+        vRss_before=trace["vRss_before"],
+        vZsc_before=trace["vZsc_before"],
+        vZcs_before=trace["vZcs_before"],
+        vLsc_before=trace["vLsc_before"],
+        vLcs_before=trace["vLcs_before"],
+        frcc_u=trace["frcc_u"],
+        frss_u=trace["frss_u"],
+        fzsc_u=trace["fzsc_u"],
+        fzcs_u=trace["fzcs_u"],
+        flsc_u=trace["flsc_u"],
+        flcs_u=trace["flcs_u"],
+        max_update_rms=trace["max_update_rms_pre"],
+        limit_update_rms=trace["limit_update_rms"],
+        divide_by_scalxc_for_update=trace["divide_by_scalxc_for_update"],
+    )
+    assert np.asarray(pack_state(out["state_post"])) == pytest.approx(
+        np.asarray(pack_state(trace["state_post"])),
+        rel=0.0,
+        abs=1.0e-12,
+    )
+    for key in ["vRcc_after", "vRss_after", "vZsc_after", "vZcs_after", "vLsc_after", "vLcs_after"]:
+        assert np.asarray(out[key]) == pytest.approx(np.asarray(trace[key]), rel=0.0, abs=1.0e-12)
+
+
+def test_strict_update_accepted_step_vjp_identity_qh(load_case_qh_warm_start):
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import enable_x64, jax, jnp
+    from vmec_jax.discrete_adjoint import strict_update_accepted_step
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.init_guess import initial_guess_from_boundary
+    from vmec_jax.solve import solve_fixed_boundary_residual_iter
+    from vmec_jax.state import pack_state
+
+    enable_x64(True)
+
+    _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
+    state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
+    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state_guess, static).sqrtg), axis_index=1))
+    result = solve_fixed_boundary_residual_iter(
+        state_guess,
+        static,
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        reference_mode=False,
+        backtracking=True,
+        limit_dt_from_force=True,
+        limit_update_rms=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces="auto",
+        use_scan=False,
+        host_update_assembly=False,
+        light_history=False,
+        resume_state_mode="full",
+        adjoint_trace=True,
+    )
+    trace = result.diagnostics["adjoint_step_trace"][0]
+    pieces0 = [
+        jnp.asarray(trace["vRcc_before"]),
+        jnp.asarray(trace["vRss_before"]),
+        jnp.asarray(trace["vZsc_before"]),
+        jnp.asarray(trace["vZcs_before"]),
+        jnp.asarray(trace["vLsc_before"]),
+        jnp.asarray(trace["vLcs_before"]),
+        jnp.asarray(trace["frcc_u"]),
+        jnp.asarray(trace["frss_u"]),
+        jnp.asarray(trace["fzsc_u"]),
+        jnp.asarray(trace["fzcs_u"]),
+        jnp.asarray(trace["flsc_u"]),
+        jnp.asarray(trace["flcs_u"]),
+    ]
+    sizes = [int(p.size) for p in pieces0]
+    offsets = np.cumsum([0] + sizes)
+    x0 = jnp.concatenate([jnp.ravel(p) for p in pieces0], axis=0)
+    tangent = jnp.linspace(-0.25, 0.75, int(x0.size), dtype=x0.dtype)
+
+    def _unpack(x):
+        vals = []
+        for start, stop, ref in zip(offsets[:-1], offsets[1:], pieces0):
+            vals.append(jnp.reshape(x[start:stop], ref.shape))
+        return vals
+
+    def _f(x):
+        vals = _unpack(x)
+        out = strict_update_accepted_step(
+            trace["state_pre"],
+            static,
+            dt_eff=trace["dt_eff"],
+            b1=trace["b1"],
+            fac=trace["fac"],
+            force_scale=trace["force_scale"],
+            flip_sign=trace["flip_sign"],
+            vRcc_before=vals[0],
+            vRss_before=vals[1],
+            vZsc_before=vals[2],
+            vZcs_before=vals[3],
+            vLsc_before=vals[4],
+            vLcs_before=vals[5],
+            frcc_u=vals[6],
+            frss_u=vals[7],
+            fzsc_u=vals[8],
+            fzcs_u=vals[9],
+            flsc_u=vals[10],
+            flcs_u=vals[11],
+            max_update_rms=trace["max_update_rms_pre"],
+            limit_update_rms=trace["limit_update_rms"],
+            divide_by_scalxc_for_update=trace["divide_by_scalxc_for_update"],
+        )
+        y_pieces = [
+            jnp.ravel(out["vRcc_after"]),
+            jnp.ravel(out["vRss_after"]),
+            jnp.ravel(out["vZsc_after"]),
+            jnp.ravel(out["vZcs_after"]),
+            jnp.ravel(out["vLsc_after"]),
+            jnp.ravel(out["vLcs_after"]),
+            pack_state(out["state_post"]),
+        ]
+        return jnp.concatenate(y_pieces, axis=0)
+
+    y_ref = _f(x0)
+    cotangent = jnp.linspace(-0.6, 0.5, int(y_ref.size), dtype=x0.dtype)
+    _, jvp = jax.jvp(_f, (x0,), (tangent,))
+    _, vjp_fun = jax.vjp(_f, x0)
+    vjp = vjp_fun(cotangent)[0]
+    lhs = float(jnp.vdot(jvp, cotangent))
+    rhs = float(jnp.vdot(tangent, vjp))
+    assert lhs == pytest.approx(rhs, rel=1.0e-10, abs=1.0e-10)
+
+
+def test_strict_update_accepted_step_taylor_qh(load_case_qh_warm_start):
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import enable_x64, jax, jnp
+    from vmec_jax.discrete_adjoint import strict_update_accepted_step
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.init_guess import initial_guess_from_boundary
+    from vmec_jax.solve import solve_fixed_boundary_residual_iter
+    from vmec_jax.state import pack_state
+
+    enable_x64(True)
+
+    _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
+    state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
+    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state_guess, static).sqrtg), axis_index=1))
+    result = solve_fixed_boundary_residual_iter(
+        state_guess,
+        static,
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        reference_mode=False,
+        backtracking=True,
+        limit_dt_from_force=True,
+        limit_update_rms=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces="auto",
+        use_scan=False,
+        host_update_assembly=False,
+        light_history=False,
+        resume_state_mode="full",
+        adjoint_trace=True,
+    )
+    trace = result.diagnostics["adjoint_step_trace"][0]
+    pieces0 = [
+        jnp.asarray(trace["vRcc_before"]),
+        jnp.asarray(trace["vRss_before"]),
+        jnp.asarray(trace["vZsc_before"]),
+        jnp.asarray(trace["vZcs_before"]),
+        jnp.asarray(trace["vLsc_before"]),
+        jnp.asarray(trace["vLcs_before"]),
+        jnp.asarray(trace["frcc_u"]),
+        jnp.asarray(trace["frss_u"]),
+        jnp.asarray(trace["fzsc_u"]),
+        jnp.asarray(trace["fzcs_u"]),
+        jnp.asarray(trace["flsc_u"]),
+        jnp.asarray(trace["flcs_u"]),
+    ]
+    sizes = [int(p.size) for p in pieces0]
+    offsets = np.cumsum([0] + sizes)
+    x0 = jnp.concatenate([jnp.ravel(p) for p in pieces0], axis=0)
+    direction = jnp.linspace(-0.4, 0.6, int(x0.size), dtype=x0.dtype)
+
+    def _unpack(x):
+        vals = []
+        for start, stop, ref in zip(offsets[:-1], offsets[1:], pieces0):
+            vals.append(jnp.reshape(x[start:stop], ref.shape))
+        return vals
+
+    def _f(x):
+        vals = _unpack(x)
+        out = strict_update_accepted_step(
+            trace["state_pre"],
+            static,
+            dt_eff=trace["dt_eff"],
+            b1=trace["b1"],
+            fac=trace["fac"],
+            force_scale=trace["force_scale"],
+            flip_sign=trace["flip_sign"],
+            vRcc_before=vals[0],
+            vRss_before=vals[1],
+            vZsc_before=vals[2],
+            vZcs_before=vals[3],
+            vLsc_before=vals[4],
+            vLcs_before=vals[5],
+            frcc_u=vals[6],
+            frss_u=vals[7],
+            fzsc_u=vals[8],
+            fzcs_u=vals[9],
+            flsc_u=vals[10],
+            flcs_u=vals[11],
+            max_update_rms=trace["max_update_rms_pre"],
+            limit_update_rms=trace["limit_update_rms"],
+            divide_by_scalxc_for_update=trace["divide_by_scalxc_for_update"],
+        )
+        return jnp.concatenate(
+            [
+                jnp.ravel(out["vRcc_after"]),
+                jnp.ravel(out["vRss_after"]),
+                jnp.ravel(out["vZsc_after"]),
+                jnp.ravel(out["vZcs_after"]),
+                jnp.ravel(out["vLsc_after"]),
+                jnp.ravel(out["vLcs_after"]),
+                pack_state(out["state_post"]),
+            ],
+            axis=0,
+        )
+
+    y0, jvp = jax.jvp(_f, (x0,), (direction,))
+    eps = 1.0e-6
+    y1 = _f(x0 + eps * direction)
+    residual = np.asarray(y1 - y0 - eps * jvp)
+    assert np.max(np.abs(residual)) < 1.0e-8
