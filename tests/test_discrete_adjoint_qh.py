@@ -495,6 +495,85 @@ def test_checkpoint_tape_state_jvp_matches_direct_two_step_qh(load_case_qh_warm_
     assert np.asarray(replay) == pytest.approx(np.asarray(direct), rel=1.0e-10, abs=1.0e-10)
 
 
+def test_checkpoint_tape_state_jvp_columns_matches_single_column_qh(load_case_qh_warm_start):
+    pytest.importorskip("jax")
+    _require_slow()
+
+    from vmec_jax._compat import enable_x64, jnp
+    from vmec_jax.discrete_adjoint import (
+        build_residual_checkpoint_tape,
+        checkpoint_tape_state_jvp,
+        checkpoint_tape_state_jvp_columns,
+    )
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.init_guess import initial_guess_from_boundary
+    from vmec_jax.state import pack_state
+
+    enable_x64(True)
+
+    _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
+    state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
+    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state_guess, static).sqrtg), axis_index=1))
+    common_kwargs = dict(
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        reference_mode=False,
+        backtracking=True,
+        limit_dt_from_force=True,
+        limit_update_rms=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces="auto",
+        use_scan=False,
+        light_history=True,
+        resume_state_mode="full",
+    )
+    tape = build_residual_checkpoint_tape(
+        state_guess,
+        static,
+        max_iter=2,
+        solver_kwargs=common_kwargs,
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        step_size=float(indata.get_float("DELT", 1.0)),
+        light_history=True,
+        resume_state_mode="full",
+    )
+    assert len(tape.step_traces) == 2
+
+    x0 = jnp.asarray(pack_state(tape.step_traces[0]["state_pre"]))
+    tangents = jnp.stack(
+        (
+            jnp.linspace(-0.05, 0.05, int(x0.size), dtype=x0.dtype),
+            jnp.linspace(0.03, -0.03, int(x0.size), dtype=x0.dtype),
+        ),
+        axis=0,
+    )
+
+    batch = checkpoint_tape_state_jvp_columns(
+        tape=tape,
+        static=static,
+        initial_tangents=tangents,
+    )
+    single = jnp.stack(
+        [
+            checkpoint_tape_state_jvp(
+                tape=tape,
+                static=static,
+                initial_tangent=tangents[i],
+            )
+            for i in range(int(tangents.shape[0]))
+        ],
+        axis=0,
+    )
+    assert np.asarray(batch) == pytest.approx(np.asarray(single), rel=1.0e-10, abs=1.0e-10)
+
+
 def test_checkpoint_tape_param_vjp_matches_direct_two_step_qh(load_case_qh_warm_start):
     pytest.importorskip("jax")
     _require_slow()
