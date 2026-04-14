@@ -13,6 +13,8 @@ from typing import Any
 
 import numpy as np
 
+from .state import pack_state
+
 
 @dataclass(frozen=True)
 class ResidualIterationTrace:
@@ -36,6 +38,15 @@ class ResidualIterationTrace:
     wp: np.ndarray
     w_vmec: np.ndarray
     state_advanced: np.ndarray
+
+
+@dataclass(frozen=True)
+class ResidualCheckpointTape:
+    """Replay-friendly checkpoints from repeated one-step residual solves."""
+
+    packed_states: np.ndarray
+    trace: ResidualIterationTrace
+    resume_states: tuple[dict[str, Any] | None, ...]
 
 
 def _array_from_diag(diagnostics: dict[str, Any], key: str, *, dtype=None) -> np.ndarray:
@@ -124,4 +135,125 @@ def residual_iteration_trace_from_result(result) -> ResidualIterationTrace:
     )
 
 
-__all__ = ["ResidualIterationTrace", "residual_iteration_trace_from_result"]
+def concat_residual_iteration_traces(traces: list[ResidualIterationTrace]) -> ResidualIterationTrace:
+    """Concatenate per-call residual traces into one longer trace."""
+    if not traces:
+        empty_i = np.zeros((0,), dtype=int)
+        empty_f = np.zeros((0,), dtype=float)
+        empty_o = np.zeros((0,), dtype=object)
+        empty_b = np.zeros((0,), dtype=bool)
+        return ResidualIterationTrace(
+            iter2=empty_i,
+            step_status=empty_o,
+            restart_reason=empty_o,
+            pre_restart_reason=empty_o,
+            time_step=empty_f,
+            dt_eff=empty_f,
+            update_rms=empty_f,
+            include_edge=empty_i,
+            zero_m1=empty_i,
+            fsq_curr=empty_f,
+            fsq_try=empty_f,
+            fsq_prev=empty_f,
+            r00=empty_f,
+            z00=empty_f,
+            wb=empty_f,
+            wp=empty_f,
+            w_vmec=empty_f,
+            state_advanced=empty_b,
+        )
+
+    def _cat(name: str) -> np.ndarray:
+        parts = [np.asarray(getattr(trace, name)) for trace in traces]
+        return np.concatenate(parts, axis=0)
+
+    return ResidualIterationTrace(
+        iter2=_cat("iter2").astype(int, copy=False),
+        step_status=_cat("step_status").astype(object, copy=False),
+        restart_reason=_cat("restart_reason").astype(object, copy=False),
+        pre_restart_reason=_cat("pre_restart_reason").astype(object, copy=False),
+        time_step=_cat("time_step").astype(float, copy=False),
+        dt_eff=_cat("dt_eff").astype(float, copy=False),
+        update_rms=_cat("update_rms").astype(float, copy=False),
+        include_edge=_cat("include_edge").astype(int, copy=False),
+        zero_m1=_cat("zero_m1").astype(int, copy=False),
+        fsq_curr=_cat("fsq_curr").astype(float, copy=False),
+        fsq_try=_cat("fsq_try").astype(float, copy=False),
+        fsq_prev=_cat("fsq_prev").astype(float, copy=False),
+        r00=_cat("r00").astype(float, copy=False),
+        z00=_cat("z00").astype(float, copy=False),
+        wb=_cat("wb").astype(float, copy=False),
+        wp=_cat("wp").astype(float, copy=False),
+        w_vmec=_cat("w_vmec").astype(float, copy=False),
+        state_advanced=_cat("state_advanced").astype(bool, copy=False),
+    )
+
+
+def build_residual_checkpoint_tape(
+    state0,
+    static,
+    *,
+    indata,
+    signgs: int,
+    max_iter: int,
+    ftol: float | None = None,
+    step_size: float = 1.0,
+    resume_state_mode: str = "minimal",
+    light_history: bool = True,
+    solver_kwargs: dict[str, Any] | None = None,
+) -> ResidualCheckpointTape:
+    """Replay the residual solver in one-step chunks and collect checkpoints."""
+    from .solve import solve_fixed_boundary_residual_iter
+
+    solver_kwargs = dict(solver_kwargs or {})
+    solve_kwargs = dict(solver_kwargs)
+    solve_kwargs.setdefault("indata", indata)
+    solve_kwargs.setdefault("signgs", int(signgs))
+    solve_kwargs.setdefault("ftol", ftol)
+    solve_kwargs.setdefault("step_size", float(step_size))
+    # The checkpoint tape needs per-iteration scalar histories even when the
+    # caller wants minimal resume checkpoints, so force full history capture
+    # here and keep compactness in the saved resume_state dictionaries instead.
+    solve_kwargs["light_history"] = False
+    solve_kwargs.setdefault("resume_state_mode", str(resume_state_mode))
+    state = state0
+    resume_state = None
+    traces: list[ResidualIterationTrace] = []
+    packed_states: list[np.ndarray] = []
+    resume_states: list[dict[str, Any] | None] = []
+
+    for _ in range(int(max_iter)):
+        result = solve_fixed_boundary_residual_iter(
+            state,
+            static,
+            max_iter=1,
+            resume_state=resume_state,
+            **solve_kwargs,
+        )
+        state = result.state
+        packed_states.append(np.asarray(pack_state(state), dtype=float))
+        traces.append(residual_iteration_trace_from_result(result))
+        resume_state = result.diagnostics.get("resume_state")
+        resume_states.append(resume_state)
+        if bool(result.diagnostics.get("converged", False)):
+            break
+
+    if packed_states:
+        packed_states_arr = np.stack(packed_states, axis=0)
+    else:
+        packed_states_arr = np.zeros((0, int(state0.layout.size)), dtype=float)
+
+    return ResidualCheckpointTape(
+        packed_states=packed_states_arr,
+        trace=concat_residual_iteration_traces(traces),
+        resume_states=tuple(resume_states),
+    )
+
+
+__all__ = [
+    "ResidualIterationTrace",
+    "ResidualCheckpointTape",
+    "build_residual_checkpoint_tape",
+    "concat_residual_iteration_traces",
+    "residual_iteration_trace_from_result",
+]
