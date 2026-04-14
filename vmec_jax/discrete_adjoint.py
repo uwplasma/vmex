@@ -355,6 +355,205 @@ def strict_update_velocity_block(
     }
 
 
+def strict_update_velocity_limit(
+    *,
+    dt_eff,
+    max_update_rms,
+    limit_update_rms,
+    vRcc,
+    vRss,
+    vZsc,
+    vZcs,
+    vLsc,
+    vLcs,
+    vRsc=None,
+    vRcs=None,
+    vZcc=None,
+    vZss=None,
+    vLcc=None,
+    vLss=None,
+):
+    """Apply the strict-update velocity RMS limiter for one solver step."""
+    dt_eff = jnp.asarray(dt_eff, dtype=jnp.asarray(vRcc).dtype)
+    max_update_rms = jnp.asarray(max_update_rms, dtype=jnp.asarray(vRcc).dtype)
+    limit_update_rms = bool(limit_update_rms)
+    base = jnp.asarray(vRcc)
+    zeros = jnp.zeros_like(base)
+    pieces = [
+        base,
+        jnp.asarray(vRss),
+        jnp.asarray(vRsc) if vRsc is not None else zeros,
+        jnp.asarray(vRcs) if vRcs is not None else zeros,
+        jnp.asarray(vZsc),
+        jnp.asarray(vZcs),
+        jnp.asarray(vZcc) if vZcc is not None else zeros,
+        jnp.asarray(vZss) if vZss is not None else zeros,
+        jnp.asarray(vLsc),
+        jnp.asarray(vLcs),
+        jnp.asarray(vLcc) if vLcc is not None else zeros,
+        jnp.asarray(vLss) if vLss is not None else zeros,
+    ]
+    sq = sum((dt_eff * p) ** 2 for p in pieces)
+    update_rms = jnp.sqrt(jnp.mean(sq))
+    if limit_update_rms:
+        scale = jnp.where(
+            jnp.isfinite(update_rms) & (update_rms > max_update_rms),
+            max_update_rms / jnp.maximum(update_rms, jnp.asarray(1.0e-30, dtype=update_rms.dtype)),
+            jnp.asarray(1.0, dtype=update_rms.dtype),
+        )
+    else:
+        scale = jnp.asarray(1.0, dtype=update_rms.dtype)
+
+    def _scale(x):
+        return None if x is None else scale * jnp.asarray(x)
+
+    out = {
+        "vRcc": _scale(vRcc),
+        "vRss": _scale(vRss),
+        "vZsc": _scale(vZsc),
+        "vZcs": _scale(vZcs),
+        "vLsc": _scale(vLsc),
+        "vLcs": _scale(vLcs),
+        "vRsc": _scale(vRsc),
+        "vRcs": _scale(vRcs),
+        "vZcc": _scale(vZcc),
+        "vZss": _scale(vZss),
+        "vLcc": _scale(vLcc),
+        "vLss": _scale(vLss),
+        "update_rms_preclip": update_rms,
+        "update_rms_scale": scale,
+        "update_rms_postclip": scale * update_rms,
+    }
+    return out
+
+
+def strict_update_accepted_step(
+    state_pre,
+    static,
+    *,
+    dt_eff,
+    b1,
+    fac,
+    force_scale,
+    flip_sign,
+    vRcc_before,
+    vRss_before,
+    vZsc_before,
+    vZcs_before,
+    vLsc_before,
+    vLcs_before,
+    frcc_u,
+    frss_u,
+    fzsc_u,
+    fzcs_u,
+    flsc_u,
+    flcs_u,
+    vRsc_before=None,
+    vRcs_before=None,
+    vZcc_before=None,
+    vZss_before=None,
+    vLcc_before=None,
+    vLss_before=None,
+    frsc_u=None,
+    frcs_u=None,
+    fzcc_u=None,
+    fzss_u=None,
+    flcc_u=None,
+    flss_u=None,
+    max_update_rms=5.0e-3,
+    limit_update_rms: bool = True,
+    divide_by_scalxc_for_update: bool = False,
+):
+    """Compose the accepted strict-update velocity and state-advance blocks."""
+    velocity_raw = strict_update_velocity_block(
+        b1=b1,
+        fac=fac,
+        force_scale=force_scale,
+        flip_sign=flip_sign,
+        vRcc_before=vRcc_before,
+        vRss_before=vRss_before,
+        vZsc_before=vZsc_before,
+        vZcs_before=vZcs_before,
+        vLsc_before=vLsc_before,
+        vLcs_before=vLcs_before,
+        frcc_u=frcc_u,
+        frss_u=frss_u,
+        fzsc_u=fzsc_u,
+        fzcs_u=fzcs_u,
+        flsc_u=flsc_u,
+        flcs_u=flcs_u,
+        vRsc_before=vRsc_before,
+        vRcs_before=vRcs_before,
+        vZcc_before=vZcc_before,
+        vZss_before=vZss_before,
+        vLcc_before=vLcc_before,
+        vLss_before=vLss_before,
+        frsc_u=frsc_u,
+        frcs_u=frcs_u,
+        fzcc_u=fzcc_u,
+        fzss_u=fzss_u,
+        flcc_u=flcc_u,
+        flss_u=flss_u,
+    )
+    velocity_out = strict_update_velocity_limit(
+        dt_eff=dt_eff,
+        max_update_rms=max_update_rms,
+        limit_update_rms=limit_update_rms,
+        vRcc=velocity_raw["vRcc_after"],
+        vRss=velocity_raw["vRss_after"],
+        vZsc=velocity_raw["vZsc_after"],
+        vZcs=velocity_raw["vZcs_after"],
+        vLsc=velocity_raw["vLsc_after"],
+        vLcs=velocity_raw["vLcs_after"],
+        vRsc=velocity_raw["vRsc_after"],
+        vRcs=velocity_raw["vRcs_after"],
+        vZcc=velocity_raw["vZcc_after"],
+        vZss=velocity_raw["vZss_after"],
+        vLcc=velocity_raw["vLcc_after"],
+        vLss=velocity_raw["vLss_after"],
+    )
+    state_post = strict_update_velocity_state_advance(
+        state_pre,
+        static,
+        dt_eff=dt_eff,
+        vRcc=velocity_out["vRcc"],
+        vRss=velocity_out["vRss"],
+        vZsc=velocity_out["vZsc"],
+        vZcs=velocity_out["vZcs"],
+        vLsc=velocity_out["vLsc"],
+        vLcs=velocity_out["vLcs"],
+        vRsc=velocity_out["vRsc"],
+        vRcs=velocity_out["vRcs"],
+        vZcc=velocity_out["vZcc"],
+        vZss=velocity_out["vZss"],
+        vLcc=velocity_out["vLcc"],
+        vLss=velocity_out["vLss"],
+        edge_Rcos=jnp.asarray(state_pre.Rcos)[-1, :],
+        edge_Rsin=jnp.asarray(state_pre.Rsin)[-1, :],
+        edge_Zcos=jnp.asarray(state_pre.Zcos)[-1, :],
+        edge_Zsin=jnp.asarray(state_pre.Zsin)[-1, :],
+        divide_by_scalxc_for_update=divide_by_scalxc_for_update,
+    )
+    return {
+        "state_post": state_post,
+        "vRcc_after": velocity_out["vRcc"],
+        "vRss_after": velocity_out["vRss"],
+        "vZsc_after": velocity_out["vZsc"],
+        "vZcs_after": velocity_out["vZcs"],
+        "vLsc_after": velocity_out["vLsc"],
+        "vLcs_after": velocity_out["vLcs"],
+        "vRsc_after": velocity_out["vRsc"],
+        "vRcs_after": velocity_out["vRcs"],
+        "vZcc_after": velocity_out["vZcc"],
+        "vZss_after": velocity_out["vZss"],
+        "vLcc_after": velocity_out["vLcc"],
+        "vLss_after": velocity_out["vLss"],
+        "update_rms_preclip": velocity_out["update_rms_preclip"],
+        "update_rms_scale": velocity_out["update_rms_scale"],
+        "update_rms_postclip": velocity_out["update_rms_postclip"],
+    }
+
+
 def strict_update_velocity_state_advance(
     state,
     static,
@@ -385,7 +584,7 @@ def strict_update_velocity_state_advance(
     and acceptance/restart logic and is intended as the first local reverse-mode
     target for the discrete-adjoint refactor.
     """
-    from .solve import _enforce_fixed_boundary_and_axis, _mode00_index
+    from .solve import _enforce_fixed_boundary_and_axis, _enforce_lambda_gauge, _mode00_index
     from .vmec_parity import _mn_cos_to_signed_cached, _mn_sin_to_signed_cached, signed_maps_from_modes
     from .vmec_residue import vmec_scalxc_from_s
 
@@ -440,6 +639,20 @@ def strict_update_velocity_state_advance(
         enforce_lambda_axis=True,
         idx00=idx00,
     )
+    Lcos, Lsin = _enforce_lambda_gauge(
+        jnp.asarray(state_try.Lcos),
+        jnp.asarray(state_try.Lsin),
+        idx00=idx00,
+    )
+    return type(state_try)(
+        layout=state_try.layout,
+        Rcos=state_try.Rcos,
+        Rsin=state_try.Rsin,
+        Zcos=state_try.Zcos,
+        Zsin=state_try.Zsin,
+        Lcos=Lcos,
+        Lsin=Lsin,
+    )
 
 
 __all__ = [
@@ -448,6 +661,9 @@ __all__ = [
     "build_residual_checkpoint_tape",
     "concat_residual_iteration_traces",
     "replay_residual_checkpoint_step",
+    "strict_update_accepted_step",
+    "strict_update_velocity_limit",
+    "strict_update_velocity_block",
     "strict_update_velocity_state_advance",
     "residual_iteration_trace_from_result",
 ]

@@ -12420,6 +12420,8 @@ def solve_fixed_boundary_residual_iter(
                 trace_entry: dict[str, Any] = {
                     "branch": "strict_update",
                     "state_pre": state_backup,
+                    "max_update_rms_pre": float(max_update_rms),
+                    "divide_by_scalxc_for_update": bool(divide_by_scalxc_for_update),
                     "vRcc_before": np.asarray(vRcc),
                     "vRss_before": np.asarray(vRss),
                     "vZsc_before": np.asarray(vZsc),
@@ -12540,6 +12542,7 @@ def solve_fixed_boundary_residual_iter(
                 update_rms = _update_rms_float()
             else:
                 update_rms = None
+            update_rms_preclip = update_rms
             if bool(limit_update_rms) and np.isfinite(update_rms) and (update_rms > max_update_rms):
                 scl = max_update_rms / max(update_rms, 1e-30)
                 vRcc = vRcc * scl
@@ -12572,6 +12575,8 @@ def solve_fixed_boundary_residual_iter(
                 )
                 update_rms_host = float(np.asarray(update_rms_j))
                 update_rms = update_rms_host
+            else:
+                scl = 1.0
 
             dR = dt_eff * _mn_cos_to_signed_physical(vRcc, vRss)
             dZ = dt_eff * _mn_sin_to_signed_physical(vZsc, vZcs)
@@ -13004,6 +13009,9 @@ def solve_fixed_boundary_residual_iter(
                         "flip_sign": float(flip_sign),
                         "force_scale": float(force_scale),
                         "limit_update_rms": bool(limit_update_rms),
+                        "update_rms_preclip": None if update_rms_preclip is None else float(update_rms_preclip),
+                        "update_rms_postclip": None if update_rms is None else float(update_rms),
+                        "update_rms_scale": float(scl),
                         "state_post": state,
                         "vRcc_after": np.asarray(vRcc),
                         "vRss_after": np.asarray(vRss),
