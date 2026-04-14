@@ -134,6 +134,7 @@ from .implicit import (
     solve_fixed_boundary_state_implicit,
     solve_lambda_state_implicit,
 )
+from .discrete_adjoint import ResidualIterationTrace, residual_iteration_trace_from_result
 from .solve import (
     SolveFixedBoundaryResult,
     SolveLambdaResult,
@@ -278,6 +279,8 @@ __all__ = [
     "ImplicitFixedBoundaryOptions",
     "solve_lambda_state_implicit",
     "solve_fixed_boundary_state_implicit",
+    "ResidualIterationTrace",
+    "residual_iteration_trace_from_result",
     "SolveLambdaResult",
     "solve_lambda_gd",
     "SolveFixedBoundaryResult",
