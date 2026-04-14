@@ -76,9 +76,12 @@ def _collect_records(
         pp_ok = bool(pp is not None and pp.get("ok", True))
 
         vmec_rt = None if (vmec is None or not vmec_ok) else float(vmec.get("runtime_s", vmec.get("time_real_s", np.nan)))
-        cpu_rt = None if (cpu is None or not cpu_ok) else float(
+        cpu_cold_rt = None if (cpu is None or not cpu_ok) else float(
             cpu.get("runtime_cold_s", cpu.get("runtime_s", cpu.get("time_real_s", np.nan)))
         )
+        # Warm runtime is only present when --warm-runs >= 1 was passed to the benchmark.
+        _cpu_warm_raw = None if (cpu is None or not cpu_ok) else cpu.get("runtime_warm_s")
+        cpu_warm_rt = None if _cpu_warm_raw is None else float(_cpu_warm_raw)
         pp_rt = None if (pp is None or not pp_ok) else float(pp.get("runtime_s", pp.get("time_real_s", np.nan)))
         vmec_mem = _mem_bytes(vmec) if vmec_ok else None
         cpu_mem = _mem_bytes(cpu) if cpu_ok else None
@@ -93,7 +96,8 @@ def _collect_records(
                 "cpu": cpu,
                 "vmecpp": pp,
                 "vmec_runtime_s": vmec_rt,
-                "cpu_runtime_s": cpu_rt,
+                "cpu_runtime_s": cpu_cold_rt,
+                "cpu_warm_runtime_s": cpu_warm_rt,
                 "vmecpp_runtime_s": pp_rt,
                 "vmec_mem_bytes": vmec_mem,
                 "cpu_mem_bytes": cpu_mem,
@@ -121,10 +125,16 @@ def _speedup(value: float | int | None, baseline: float | int | None) -> float |
 
 def _write_markdown_table(rows: list[dict[str, Any]], outpath: Path) -> None:
     include_vmecpp = any(row.get("vmecpp_runtime_s") is not None or row.get("vmecpp_mem_bytes") is not None for row in rows)
+    include_warm = any(row.get("cpu_warm_runtime_s") is not None for row in rows)
     if include_vmecpp:
         header = [
-            "| Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax runtime (cold) | vmec_jax memory | VMEC++ runtime | VMEC++ memory |",
-            "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax runtime (cold) | vmec_jax runtime (warm) | vmec_jax memory | VMEC++ runtime | VMEC++ memory |",
+            "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    elif include_warm:
+        header = [
+            "| Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax runtime (cold) | vmec_jax runtime (warm) | vmec_jax memory |",
+            "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
         ]
     else:
         header = [
@@ -144,8 +154,10 @@ def _write_markdown_table(rows: list[dict[str, Any]], outpath: Path) -> None:
             _format_seconds(row["vmec_runtime_s"]),
             _format_gib(row["vmec_mem_bytes"]),
             _format_seconds(row["cpu_runtime_s"]),
-            _format_gib(row["cpu_mem_bytes"]),
         ]
+        if include_warm or include_vmecpp:
+            cols.append(_format_seconds(row.get("cpu_warm_runtime_s")))
+        cols.append(_format_gib(row["cpu_mem_bytes"]))
         if include_vmecpp:
             cols.extend([_format_seconds(row.get("vmecpp_runtime_s")), _format_gib(row.get("vmecpp_mem_bytes"))])
         lines.append("| " + " | ".join(cols) + " |")
@@ -184,6 +196,7 @@ def _write_runtime_figure(rows: list[dict[str, Any]], outpath: Path, *, figure_k
     if not rows:
         raise ValueError(f"No rows available for figure_kind={figure_kind!r}.")
     include_vmecpp = any(row.get("vmecpp_runtime_s") is not None for row in rows)
+    include_warm = any(row.get("cpu_warm_runtime_s") is not None for row in rows)
     rows = sorted(
         rows,
         key=lambda row: (
@@ -196,18 +209,23 @@ def _write_runtime_figure(rows: list[dict[str, Any]], outpath: Path, *, figure_k
     )
     labels = [row["id"] for row in rows]
     y = np.arange(len(rows), dtype=float)
-    n_series = 2 + int(include_vmecpp)
-    height = min(0.22, 0.9 / n_series)
-    offsets = np.linspace(-(n_series - 1) / 2 * height, (n_series - 1) / 2 * height, n_series)
-    fig, ax = plt.subplots(1, 1, figsize=(14.5, max(8.0, 0.42 * len(rows) + 1.6)))
     vmec = np.array([row["vmec_runtime_s"] if row["vmec_runtime_s"] is not None else np.nan for row in rows], dtype=float)
-    cpu = np.array([row["cpu_runtime_s"] if row["cpu_runtime_s"] is not None else np.nan for row in rows], dtype=float)
-    series = [("#1f77b4", "VMEC2000", vmec), ("#ff7f0e", "vmec_jax (cold)", cpu)]
+    cpu_cold = np.array([row["cpu_runtime_s"] if row["cpu_runtime_s"] is not None else np.nan for row in rows], dtype=float)
+    series = [("#1f77b4", "VMEC2000", vmec), ("#ff7f0e", "vmec_jax (cold, 1st run)", cpu_cold)]
+    if include_warm:
+        cpu_warm = np.array(
+            [row["cpu_warm_runtime_s"] if row.get("cpu_warm_runtime_s") is not None else np.nan for row in rows], dtype=float
+        )
+        series.append(("#2ca02c", "vmec_jax (warm, 2nd run)", cpu_warm))
     if include_vmecpp:
         pp = np.array(
             [row.get("vmecpp_runtime_s") if row.get("vmecpp_runtime_s") is not None else np.nan for row in rows], dtype=float
         )
-        series.append(("#2ca02c", "VMEC++", pp))
+        series.append(("#9467bd", "VMEC++", pp))
+    n_series = len(series)
+    height = min(0.22, 0.9 / n_series)
+    offsets = np.linspace(-(n_series - 1) / 2 * height, (n_series - 1) / 2 * height, n_series)
+    fig, ax = plt.subplots(1, 1, figsize=(14.5, max(8.0, 0.42 * len(rows) + 1.6)))
     for (color, label, vals), off in zip(series, offsets):
         ax.barh(y + off, vals, height=height, color=color, label=label)
     ax.set_xscale("log")
