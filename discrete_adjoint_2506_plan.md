@@ -613,3 +613,10 @@ Stop or reduce scope if:
     `QH_fixed_resolution_jax.py --max-mode 1 --max-nfev 2 --vmec-max-iter 1
     --method scipy --jac jax --residual-derivative-backend discrete_adjoint
     --jit`.
+  - The next wrapper-side optimization exposed a real traced NumPy path in the
+    Boozer/JXBFORCE low-pass helper used by QS residuals:
+    `_jxbforce_nyquist_limits_from_trig(...)` was converting traced trig arrays
+    with `np.asarray(...)`, and the same path also used `float(trig.r0scale)`.
+  - Made that QS/Boozer helper tracer-safe by switching those scalars/arrays to
+    `jnp.asarray(...)`, which unblocked JIT-compiling the residual-side
+    Jacobian block in the `simsopt` discrete-adjoint wrapper.
