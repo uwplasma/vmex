@@ -17,6 +17,38 @@ from ._compat import jnp
 from .state import pack_state, unpack_state
 from .vmec_tomnsp import TomnspsRZL
 
+_REPLAY_STEP_TRACE_KEYS = (
+    "state_pre",
+    "wout_like",
+    "trig",
+    "zero_m1",
+    "precond_mats",
+    "precond_jmax",
+    "lam_prec",
+    "w_mode_mn",
+    "lambda_update_scale",
+    "dt_eff",
+    "b1",
+    "fac",
+    "force_scale",
+    "flip_sign",
+    "vRcc_before",
+    "vRss_before",
+    "vZsc_before",
+    "vZcs_before",
+    "vLsc_before",
+    "vLcs_before",
+    "max_update_rms_pre",
+)
+
+_REPLAY_STEP_TRACE_STATIC_KEYS = (
+    "apply_lforbal",
+    "include_edge_residual",
+    "apply_m1_constraints",
+    "limit_update_rms",
+    "divide_by_scalxc_for_update",
+)
+
 
 @dataclass(frozen=True)
 class ResidualIterationTrace:
@@ -387,6 +419,64 @@ def checkpoint_tape_state_jvp(
     return tangent
 
 
+def _packed_replay_step_from_trace(
+    packed_state,
+    trace,
+    *,
+    static,
+    rebuild_preconditioner: bool,
+    apply_lforbal,
+    include_edge_residual,
+    apply_m1_constraints,
+    limit_update_rms,
+    divide_by_scalxc_for_update,
+):
+    state = unpack_state(packed_state, trace["state_pre"].layout)
+    out = strict_update_one_step_from_state(
+        state,
+        static,
+        wout_like=trace["wout_like"],
+        trig=trace["trig"],
+        apply_lforbal=apply_lforbal,
+        include_edge_residual=include_edge_residual,
+        apply_m1_constraints=apply_m1_constraints,
+        zero_m1=trace["zero_m1"],
+        mats=None if rebuild_preconditioner else trace["precond_mats"],
+        jmax=None if rebuild_preconditioner else trace["precond_jmax"],
+        lam_prec=None if rebuild_preconditioner else trace["lam_prec"],
+        w_mode_mn=None if rebuild_preconditioner else trace["w_mode_mn"],
+        lambda_update_scale=trace["lambda_update_scale"],
+        dt_eff=trace["dt_eff"],
+        b1=trace["b1"],
+        fac=trace["fac"],
+        force_scale=trace["force_scale"],
+        flip_sign=trace["flip_sign"],
+        vRcc_before=trace["vRcc_before"],
+        vRss_before=trace["vRss_before"],
+        vZsc_before=trace["vZsc_before"],
+        vZcs_before=trace["vZcs_before"],
+        vLsc_before=trace["vLsc_before"],
+        vLcs_before=trace["vLcs_before"],
+        max_update_rms=trace["max_update_rms_pre"],
+        limit_update_rms=limit_update_rms,
+        divide_by_scalxc_for_update=divide_by_scalxc_for_update,
+    )
+    return pack_state(out["step"]["state_post"])
+
+
+def _stack_replay_step_traces(step_traces: tuple[dict[str, Any], ...]):
+    from ._compat import jax
+
+    filtered = tuple({key: trace[key] for key in _REPLAY_STEP_TRACE_KEYS} for trace in step_traces)
+    stacked = jax.tree_util.tree_map(lambda *xs: jnp.stack([jnp.asarray(x) for x in xs], axis=0), *filtered)
+    static_flags = {key: step_traces[0][key] for key in _REPLAY_STEP_TRACE_STATIC_KEYS}
+    for trace in step_traces[1:]:
+        for key, value in static_flags.items():
+            if bool(trace[key]) != bool(value):
+                raise ValueError(f"Replay step trace key {key} must be constant across the tape for scan replay.")
+    return stacked, static_flags
+
+
 def checkpoint_tape_state_jvp_columns(
     *,
     tape: ResidualCheckpointTape,
@@ -401,44 +491,51 @@ def checkpoint_tape_state_jvp_columns(
     from ._compat import jax
 
     tangents = jnp.asarray(initial_tangents)
-    for trace in tape.step_traces:
+    if rebuild_preconditioner:
+        for trace in tape.step_traces:
+            x0 = jnp.asarray(pack_state(trace["state_pre"]))
+
+            def _step_map(x):
+                return _packed_replay_step_from_trace(
+                    x,
+                    trace,
+                    static=static,
+                    rebuild_preconditioner=True,
+                    apply_lforbal=trace["apply_lforbal"],
+                    include_edge_residual=trace["include_edge_residual"],
+                    apply_m1_constraints=trace["apply_m1_constraints"],
+                    limit_update_rms=trace["limit_update_rms"],
+                    divide_by_scalxc_for_update=trace["divide_by_scalxc_for_update"],
+                )
+
+            _, linear_step = jax.linearize(_step_map, x0)
+            tangents = jax.vmap(linear_step)(tangents)
+        return tangents
+
+    stacked, static_flags = _stack_replay_step_traces(tape.step_traces)
+
+    def _step_scan(carry, trace):
+        tangents = carry
         x0 = jnp.asarray(pack_state(trace["state_pre"]))
 
         def _step_map(x):
-            state = unpack_state(x, trace["state_pre"].layout)
-            out = strict_update_one_step_from_state(
-                state,
-                static,
-                wout_like=trace["wout_like"],
-                trig=trace["trig"],
-                apply_lforbal=trace["apply_lforbal"],
-                include_edge_residual=trace["include_edge_residual"],
-                apply_m1_constraints=trace["apply_m1_constraints"],
-                zero_m1=trace["zero_m1"],
-                mats=None if rebuild_preconditioner else trace["precond_mats"],
-                jmax=None if rebuild_preconditioner else trace["precond_jmax"],
-                lam_prec=None if rebuild_preconditioner else trace["lam_prec"],
-                w_mode_mn=None if rebuild_preconditioner else trace["w_mode_mn"],
-                lambda_update_scale=trace["lambda_update_scale"],
-                dt_eff=trace["dt_eff"],
-                b1=trace["b1"],
-                fac=trace["fac"],
-                force_scale=trace["force_scale"],
-                flip_sign=trace["flip_sign"],
-                vRcc_before=trace["vRcc_before"],
-                vRss_before=trace["vRss_before"],
-                vZsc_before=trace["vZsc_before"],
-                vZcs_before=trace["vZcs_before"],
-                vLsc_before=trace["vLsc_before"],
-                vLcs_before=trace["vLcs_before"],
-                max_update_rms=trace["max_update_rms_pre"],
-                limit_update_rms=trace["limit_update_rms"],
-                divide_by_scalxc_for_update=trace["divide_by_scalxc_for_update"],
+            return _packed_replay_step_from_trace(
+                x,
+                trace,
+                static=static,
+                rebuild_preconditioner=rebuild_preconditioner,
+                apply_lforbal=static_flags["apply_lforbal"],
+                include_edge_residual=static_flags["include_edge_residual"],
+                apply_m1_constraints=static_flags["apply_m1_constraints"],
+                limit_update_rms=static_flags["limit_update_rms"],
+                divide_by_scalxc_for_update=static_flags["divide_by_scalxc_for_update"],
             )
-            return pack_state(out["step"]["state_post"])
 
         _, linear_step = jax.linearize(_step_map, x0)
         tangents = jax.vmap(linear_step)(tangents)
+        return tangents, None
+
+    tangents, _ = jax.lax.scan(_step_scan, tangents, stacked)
     return tangents
 
 

@@ -572,3 +572,19 @@ Stop or reduce scope if:
   - Locked a new exact-QH slow regression showing the batched helper matches
     stacked single-column `checkpoint_tape_state_jvp(...)` results on the same
     2-step replay tape.
+  - Began the next replay-runtime cut: a scan-backed replay-column path for the
+    stored-preconditioner branch, so the tape can run over stacked step traces
+    instead of a Python loop of per-step closures.
+  - To support that path, registered two replay payload containers as pytrees:
+    `VmecTrigTables` and `_WoutLikeVmecForces`.
+  - Added a cheap circular-tokamak regression alongside the existing exact-QH
+    one to validate the new replay-column path.
+  - The scan-backed path now works for the stored-preconditioner branch, but
+    the rebuilt-preconditioner branch still hits traced host-concretization
+    sites (`int(jmax)` and related static-arg expectations in the 1D
+    preconditioner apply path).
+  - Production was kept stable on purpose:
+    `rebuild_preconditioner=True` still uses the proven per-step replay loop,
+    while the scan-backed implementation is currently restricted to the
+    stored-preconditioner branch until those rebuilt-preconditioner
+    concretization sites are cleaned up.
