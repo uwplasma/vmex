@@ -509,6 +509,7 @@ def _packed_replay_step_from_trace(
     preconditioner_jmax_override,
 ):
     state = unpack_state(packed_state, trace["state_pre"].layout)
+    stored_jmax = preconditioner_jmax_override if preconditioner_jmax_override is not None else trace["precond_jmax"]
     out = strict_update_one_step_from_state(
         state,
         static,
@@ -519,7 +520,7 @@ def _packed_replay_step_from_trace(
         apply_m1_constraints=apply_m1_constraints,
         zero_m1=trace["zero_m1"],
         mats=None if rebuild_preconditioner else trace["precond_mats"],
-        jmax=None if rebuild_preconditioner else trace["precond_jmax"],
+        jmax=None if rebuild_preconditioner else stored_jmax,
         lam_prec=None if rebuild_preconditioner else trace["lam_prec"],
         w_mode_mn=None if rebuild_preconditioner else trace["w_mode_mn"],
         preconditioner_jmax_override=preconditioner_jmax_override if rebuild_preconditioner else None,
@@ -654,7 +655,11 @@ def checkpoint_tape_state_jvp_columns(
                     apply_m1_constraints=trace["apply_m1_constraints"],
                     limit_update_rms=trace["limit_update_rms"],
                     divide_by_scalxc_for_update=trace["divide_by_scalxc_for_update"],
-                    preconditioner_jmax_override=int(trace["precond_jmax"]),
+                    preconditioner_jmax_override=(
+                        static_flags["precond_jmax"]
+                        if static_flags["precond_jmax"] is not None
+                        else int(trace["precond_jmax"])
+                    ),
                 )
 
             _, linear_step = jax.linearize(_step_map, x0)
