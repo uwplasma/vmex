@@ -48,6 +48,7 @@ _REPLAY_STEP_TRACE_STATIC_KEYS = (
     "limit_update_rms",
     "divide_by_scalxc_for_update",
 )
+_CHECKPOINT_TAPE_SCAN_CACHE: dict[tuple[Any, ...], Any] = {}
 
 
 @dataclass(frozen=True)
@@ -557,6 +558,62 @@ def _stack_replay_step_traces(step_traces: tuple[dict[str, Any], ...]):
     return stacked, static_flags
 
 
+def _stacked_trace_signature(stacked) -> tuple[tuple[tuple[int, ...], str], ...]:
+    from ._compat import jax
+
+    leaves = jax.tree_util.tree_leaves(stacked)
+    return tuple((tuple(np.asarray(leaf).shape), np.asarray(leaf).dtype.str) for leaf in leaves)
+
+
+def _checkpoint_tape_scan_runner(*, static, stacked, static_flags, rebuild_preconditioner: bool):
+    from ._compat import jax
+
+    key = (
+        id(static),
+        bool(rebuild_preconditioner),
+        bool(static_flags["apply_lforbal"]),
+        bool(static_flags["include_edge_residual"]),
+        bool(static_flags["apply_m1_constraints"]),
+        bool(static_flags["limit_update_rms"]),
+        bool(static_flags["divide_by_scalxc_for_update"]),
+        None if static_flags["precond_jmax"] is None else int(static_flags["precond_jmax"]),
+        _stacked_trace_signature(stacked),
+    )
+    cached = _CHECKPOINT_TAPE_SCAN_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    def _step_scan(carry, trace):
+        tangents = carry
+        x0 = jnp.asarray(pack_state(trace["state_pre"]))
+
+        def _step_map(x):
+            return _packed_replay_step_from_trace(
+                x,
+                trace,
+                static=static,
+                rebuild_preconditioner=rebuild_preconditioner,
+                apply_lforbal=static_flags["apply_lforbal"],
+                include_edge_residual=static_flags["include_edge_residual"],
+                apply_m1_constraints=static_flags["apply_m1_constraints"],
+                limit_update_rms=static_flags["limit_update_rms"],
+                divide_by_scalxc_for_update=static_flags["divide_by_scalxc_for_update"],
+                preconditioner_jmax_override=static_flags["precond_jmax"],
+            )
+
+        _, linear_step = jax.linearize(_step_map, x0)
+        tangents = jax.vmap(linear_step)(tangents)
+        return tangents, None
+
+    @jax.jit
+    def _run_scan(tangents, stacked_traces):
+        tangents, _ = jax.lax.scan(_step_scan, tangents, stacked_traces)
+        return tangents
+
+    _CHECKPOINT_TAPE_SCAN_CACHE[key] = _run_scan
+    return _run_scan
+
+
 def checkpoint_tape_state_jvp_columns(
     *,
     tape: ResidualCheckpointTape,
@@ -597,30 +654,13 @@ def checkpoint_tape_state_jvp_columns(
             tangents = jax.vmap(linear_step)(tangents)
         return tangents
 
-    def _step_scan(carry, trace):
-        tangents = carry
-        x0 = jnp.asarray(pack_state(trace["state_pre"]))
-
-        def _step_map(x):
-            return _packed_replay_step_from_trace(
-                x,
-                trace,
-                static=static,
-                rebuild_preconditioner=rebuild_preconditioner,
-                apply_lforbal=static_flags["apply_lforbal"],
-                include_edge_residual=static_flags["include_edge_residual"],
-                apply_m1_constraints=static_flags["apply_m1_constraints"],
-                limit_update_rms=static_flags["limit_update_rms"],
-                divide_by_scalxc_for_update=static_flags["divide_by_scalxc_for_update"],
-                preconditioner_jmax_override=static_flags["precond_jmax"],
-            )
-
-        _, linear_step = jax.linearize(_step_map, x0)
-        tangents = jax.vmap(linear_step)(tangents)
-        return tangents, None
-
-    tangents, _ = jax.lax.scan(_step_scan, tangents, stacked)
-    return tangents
+    run_scan = _checkpoint_tape_scan_runner(
+        static=static,
+        stacked=stacked,
+        static_flags=static_flags,
+        rebuild_preconditioner=rebuild_preconditioner,
+    )
+    return run_scan(tangents, stacked)
 
 
 def checkpoint_tape_param_vjp(
