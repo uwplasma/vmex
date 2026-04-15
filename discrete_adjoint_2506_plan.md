@@ -731,3 +731,15 @@ Stop or reduce scope if:
     on this exact QH CPU path, the NumPy-host force loop is still faster than
     the warmed JAX force kernels, so the current production default should stay
     on the NumPy-host path unless later kernel work changes that result.
+  - Ran a direct production-path derivative audit on the benchmark QH setup and
+    closed one major ambiguity:
+    the direct-tape state is not drifting away from the traced replay map.
+    On the exact benchmark wrapper path, the returned state, the tape's
+    `final_packed_state`, and the last `adjoint_step_trace["state_post"]`
+    agree exactly.
+  - The apparent AD-vs-FD mismatch comes from a different place:
+    the discrete-adjoint Jacobian linearizes a frozen-axis local map, while the
+    plain value callback re-seeds `axis_override` at perturbed points.
+    When finite differences are taken through the frozen-axis local map, the
+    first Jacobian column matches central FD closely on the benchmark QH start;
+    the large mismatch only appears against the moving-axis callback.
