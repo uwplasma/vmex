@@ -562,7 +562,14 @@ def _stacked_trace_signature(stacked) -> tuple[tuple[tuple[int, ...], str], ...]
     from ._compat import jax
 
     leaves = jax.tree_util.tree_leaves(stacked)
-    return tuple((tuple(np.asarray(leaf).shape), np.asarray(leaf).dtype.str) for leaf in leaves)
+    signature = []
+    for leaf in leaves:
+        shape = tuple(getattr(leaf, "shape", np.shape(leaf)))
+        dtype = getattr(leaf, "dtype", None)
+        if dtype is None:
+            dtype = np.asarray(leaf).dtype
+        signature.append((shape, np.dtype(dtype).str))
+    return tuple(signature)
 
 
 def _checkpoint_tape_scan_runner(*, static, stacked, static_flags, rebuild_preconditioner: bool):
