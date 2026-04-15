@@ -342,6 +342,7 @@ def checkpoint_tape_state_vjp(
                 jmax=None if rebuild_preconditioner else trace["precond_jmax"],
                 lam_prec=None if rebuild_preconditioner else trace["lam_prec"],
                 w_mode_mn=None if rebuild_preconditioner else trace["w_mode_mn"],
+                preconditioner_jmax_override=int(trace["precond_jmax"]) if rebuild_preconditioner else None,
                 lambda_update_scale=trace["lambda_update_scale"],
                 dt_eff=trace["dt_eff"],
                 b1=trace["b1"],
@@ -397,6 +398,7 @@ def checkpoint_tape_state_jvp(
                 jmax=None if rebuild_preconditioner else trace["precond_jmax"],
                 lam_prec=None if rebuild_preconditioner else trace["lam_prec"],
                 w_mode_mn=None if rebuild_preconditioner else trace["w_mode_mn"],
+                preconditioner_jmax_override=int(trace["precond_jmax"]) if rebuild_preconditioner else None,
                 lambda_update_scale=trace["lambda_update_scale"],
                 dt_eff=trace["dt_eff"],
                 b1=trace["b1"],
@@ -430,6 +432,7 @@ def _packed_replay_step_from_trace(
     apply_m1_constraints,
     limit_update_rms,
     divide_by_scalxc_for_update,
+    preconditioner_jmax_override,
 ):
     state = unpack_state(packed_state, trace["state_pre"].layout)
     out = strict_update_one_step_from_state(
@@ -445,6 +448,7 @@ def _packed_replay_step_from_trace(
         jmax=None if rebuild_preconditioner else trace["precond_jmax"],
         lam_prec=None if rebuild_preconditioner else trace["lam_prec"],
         w_mode_mn=None if rebuild_preconditioner else trace["w_mode_mn"],
+        preconditioner_jmax_override=preconditioner_jmax_override if rebuild_preconditioner else None,
         lambda_update_scale=trace["lambda_update_scale"],
         dt_eff=trace["dt_eff"],
         b1=trace["b1"],
@@ -474,6 +478,9 @@ def _stack_replay_step_traces(step_traces: tuple[dict[str, Any], ...]):
         for key, value in static_flags.items():
             if bool(trace[key]) != bool(value):
                 raise ValueError(f"Replay step trace key {key} must be constant across the tape for scan replay.")
+    precond_jmax0 = int(step_traces[0]["precond_jmax"])
+    precond_jmax_constant = all(int(trace["precond_jmax"]) == precond_jmax0 for trace in step_traces[1:])
+    static_flags["precond_jmax"] = precond_jmax0 if precond_jmax_constant else None
     return stacked, static_flags
 
 
@@ -491,7 +498,8 @@ def checkpoint_tape_state_jvp_columns(
     from ._compat import jax
 
     tangents = jnp.asarray(initial_tangents)
-    if rebuild_preconditioner:
+    stacked, static_flags = _stack_replay_step_traces(tape.step_traces)
+    if rebuild_preconditioner and static_flags["precond_jmax"] is None:
         for trace in tape.step_traces:
             x0 = jnp.asarray(pack_state(trace["state_pre"]))
 
@@ -506,13 +514,12 @@ def checkpoint_tape_state_jvp_columns(
                     apply_m1_constraints=trace["apply_m1_constraints"],
                     limit_update_rms=trace["limit_update_rms"],
                     divide_by_scalxc_for_update=trace["divide_by_scalxc_for_update"],
+                    preconditioner_jmax_override=int(trace["precond_jmax"]),
                 )
 
             _, linear_step = jax.linearize(_step_map, x0)
             tangents = jax.vmap(linear_step)(tangents)
         return tangents
-
-    stacked, static_flags = _stack_replay_step_traces(tape.step_traces)
 
     def _step_scan(carry, trace):
         tangents = carry
@@ -529,6 +536,7 @@ def checkpoint_tape_state_jvp_columns(
                 apply_m1_constraints=static_flags["apply_m1_constraints"],
                 limit_update_rms=static_flags["limit_update_rms"],
                 divide_by_scalxc_for_update=static_flags["divide_by_scalxc_for_update"],
+                preconditioner_jmax_override=static_flags["precond_jmax"],
             )
 
         _, linear_step = jax.linearize(_step_map, x0)
@@ -832,12 +840,11 @@ def preconditioned_force_channels_from_rz_output(
     fzss_u = fzss * w
     flcc_u = flcc * w
     flss_u = flss * w
-    if float(lambda_update_scale) != 1.0:
-        scale = jnp.asarray(lambda_update_scale, dtype=flsc_u.dtype)
-        flsc_u = flsc_u * scale
-        flcs_u = flcs_u * scale
-        flcc_u = flcc_u * scale
-        flss_u = flss_u * scale
+    scale = jnp.asarray(lambda_update_scale, dtype=flsc_u.dtype)
+    flsc_u = flsc_u * scale
+    flcs_u = flcs_u * scale
+    flcc_u = flcc_u * scale
+    flss_u = flss_u * scale
     return {
         "frzl_pre": frzl_pre,
         "frcc_u": frcc_u,
@@ -1005,6 +1012,7 @@ def state_dependent_preconditioner_from_forces(
     static,
     trig,
     dtype=None,
+    jmax_override: int | None = None,
 ):
     """Rebuild the solver's state-dependent preconditioner objects."""
     from .preconditioner_1d_jax import lambda_preconditioner, rz_preconditioner_matrices
@@ -1024,7 +1032,7 @@ def state_dependent_preconditioner_from_forces(
         trig=trig,
         s=s,
         cfg=cfg,
-        jmax_override=None,
+        jmax_override=jmax_override,
     )
     if dtype is None:
         dtype = jnp.asarray(lam_prec).dtype
@@ -1036,7 +1044,7 @@ def state_dependent_preconditioner_from_forces(
     return {
         "lam_prec": lam_prec,
         "mats": mats,
-        "jmax": int(jmax),
+        "jmax": int(jmax_override) if (jmax_override is not None) else int(jmax),
         "w_mode_mn": w_mode_mn,
     }
 
@@ -1070,6 +1078,7 @@ def strict_update_one_step_from_state(
     max_update_rms=5.0e-3,
     limit_update_rms: bool = True,
     divide_by_scalxc_for_update: bool = False,
+    preconditioner_jmax_override: int | None = None,
 ):
     """Compose the exact QH one-step map from state through accepted update."""
     residual_out = raw_force_residual_from_state(
@@ -1089,6 +1098,7 @@ def strict_update_one_step_from_state(
             static=static,
             trig=trig,
             dtype=jnp.asarray(state_pre.Rcos).dtype,
+            jmax_override=preconditioner_jmax_override,
         )
         mats = preconditioner_out["mats"]
         jmax = preconditioner_out["jmax"]

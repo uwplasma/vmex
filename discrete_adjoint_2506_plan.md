@@ -588,3 +588,28 @@ Stop or reduce scope if:
     while the scan-backed implementation is currently restricted to the
     stored-preconditioner branch until those rebuilt-preconditioner
     concretization sites are cleaned up.
+  - Recovered the next replay bottleneck without widening the architecture:
+    the tape already records `precond_jmax`, and on the fixed-boundary replay
+    path it is constant across the tape. Threaded that value back into the
+    rebuilt-preconditioner replay as a static override instead of trying to
+    make the whole 1D preconditioner stack dynamically indexed.
+  - Updated `state_dependent_preconditioner_from_forces(...)` /
+    `strict_update_one_step_from_state(...)` to accept a
+    `preconditioner_jmax_override`, and threaded the recorded `precond_jmax`
+    through replay JVP/VJP helpers.
+  - Re-enabled the scan-backed batched replay path for
+    `rebuild_preconditioner=True` whenever `precond_jmax` is constant across
+    the tape, with a safe fallback to the old per-step loop only for tapes
+    that genuinely vary `jmax`.
+  - The first follow-on concretization on that path was
+    `float(lambda_update_scale)` inside
+    `preconditioned_force_channels_from_rz_output(...)`; removed that host
+    conversion by keeping the lambda scaling purely in JAX arithmetic.
+  - Added a new exact-QH slow regression showing the rebuilt-preconditioner
+    batched replay path matches stacked single-column replay JVPs.
+  - Validated that the production `simsopt` microcase still gives the same
+    numerical result while dropping wall time from about `18.98 s` to
+    `16.93 s` on:
+    `QH_fixed_resolution_jax.py --max-mode 1 --max-nfev 2 --vmec-max-iter 1
+    --method scipy --jac jax --residual-derivative-backend discrete_adjoint
+    --jit`.
