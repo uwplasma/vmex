@@ -620,3 +620,20 @@ Stop or reduce scope if:
   - Made that QS/Boozer helper tracer-safe by switching those scalars/arrays to
     `jnp.asarray(...)`, which unblocked JIT-compiling the residual-side
     Jacobian block in the `simsopt` discrete-adjoint wrapper.
+  - Fresh-main comparison checkpoint:
+    - cloned `vmec_jax` main to `/Users/rogeriojorge/local/vmec_jax_main_fresh`
+      and installed it into an isolated comparison environment.
+  - Direct fixed-boundary forward-solve timings show no meaningful runtime
+    regression in the core `vmec_jax` branch relative to main:
+    - QA `max_iter=1`: branch `2.454 s`, main `2.429 s`
+    - QA `max_iter=20`: branch `0.334 s`, main `0.326 s`
+    - QH `max_iter=1`: branch `1.963 s`, main `1.912 s`
+    - QH `max_iter=20`: branch `0.238 s`, main `0.228 s`
+  - Full QA forward solve also matches main closely:
+    - branch `3.733 s`, main `3.622 s`,
+    - both stop after `113` iterations with `fsqz_last ≈ 4.39e-12`.
+  - Conclusion from this comparison:
+    - the current major runtime cost is not a low-level forward-solver slowdown
+      introduced in the `vmec_jax` branch,
+    - the remaining bottleneck sits above the core solver, in the
+      `simsopt`-side objective / Jacobian / reporting path.
