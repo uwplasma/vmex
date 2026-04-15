@@ -78,10 +78,38 @@ class ResidualIterationTrace:
 class ResidualCheckpointTape:
     """Replay-friendly checkpoints from repeated one-step residual solves."""
 
+    final_packed_state: np.ndarray
     packed_states: np.ndarray
     trace: ResidualIterationTrace
     resume_states: tuple[dict[str, Any] | None, ...]
     step_traces: tuple[dict[str, Any], ...]
+
+
+def _empty_trace() -> ResidualIterationTrace:
+    empty_i = np.zeros((0,), dtype=int)
+    empty_f = np.zeros((0,), dtype=float)
+    empty_o = np.zeros((0,), dtype=object)
+    empty_b = np.zeros((0,), dtype=bool)
+    return ResidualIterationTrace(
+        iter2=empty_i,
+        step_status=empty_o,
+        restart_reason=empty_o,
+        pre_restart_reason=empty_o,
+        time_step=empty_f,
+        dt_eff=empty_f,
+        update_rms=empty_f,
+        include_edge=empty_i,
+        zero_m1=empty_i,
+        fsq_curr=empty_f,
+        fsq_try=empty_f,
+        fsq_prev=empty_f,
+        r00=empty_f,
+        z00=empty_f,
+        wb=empty_f,
+        wp=empty_f,
+        w_vmec=empty_f,
+        state_advanced=empty_b,
+    )
 
 
 def _array_from_diag(diagnostics: dict[str, Any], key: str, *, dtype=None) -> np.ndarray:
@@ -173,30 +201,7 @@ def residual_iteration_trace_from_result(result) -> ResidualIterationTrace:
 def concat_residual_iteration_traces(traces: list[ResidualIterationTrace]) -> ResidualIterationTrace:
     """Concatenate per-call residual traces into one longer trace."""
     if not traces:
-        empty_i = np.zeros((0,), dtype=int)
-        empty_f = np.zeros((0,), dtype=float)
-        empty_o = np.zeros((0,), dtype=object)
-        empty_b = np.zeros((0,), dtype=bool)
-        return ResidualIterationTrace(
-            iter2=empty_i,
-            step_status=empty_o,
-            restart_reason=empty_o,
-            pre_restart_reason=empty_o,
-            time_step=empty_f,
-            dt_eff=empty_f,
-            update_rms=empty_f,
-            include_edge=empty_i,
-            zero_m1=empty_i,
-            fsq_curr=empty_f,
-            fsq_try=empty_f,
-            fsq_prev=empty_f,
-            r00=empty_f,
-            z00=empty_f,
-            wb=empty_f,
-            wp=empty_f,
-            w_vmec=empty_f,
-            state_advanced=empty_b,
-        )
+        return _empty_trace()
 
     def _cat(name: str) -> np.ndarray:
         parts = [np.asarray(getattr(trace, name)) for trace in traces]
@@ -235,6 +240,9 @@ def build_residual_checkpoint_tape(
     step_size: float = 1.0,
     resume_state_mode: str = "minimal",
     light_history: bool = True,
+    store_packed_states: bool = True,
+    store_trace: bool = True,
+    store_resume_states: bool = True,
     solver_kwargs: dict[str, Any] | None = None,
 ) -> ResidualCheckpointTape:
     """Replay the residual solver in one-step chunks and collect checkpoints."""
@@ -246,10 +254,11 @@ def build_residual_checkpoint_tape(
     solve_kwargs.setdefault("signgs", int(signgs))
     solve_kwargs.setdefault("ftol", ftol)
     solve_kwargs.setdefault("step_size", float(step_size))
-    # The checkpoint tape needs per-iteration scalar histories even when the
-    # caller wants minimal resume checkpoints, so force full history capture
-    # here and keep compactness in the saved resume_state dictionaries instead.
-    solve_kwargs["light_history"] = False
+    # Full scalar histories are only required when the caller intends to keep
+    # the compact trace diagnostics. The replay/JVP path only needs the
+    # step-level adjoint traces plus the internal resume checkpoint carried
+    # between one-step solves.
+    solve_kwargs["light_history"] = False if store_trace else bool(light_history)
     # Multi-step replay currently needs the cached preconditioner/control state
     # carried in the full resume checkpoint. A later optimization pass can
     # shrink this once exact replay coverage is in place.
@@ -269,24 +278,74 @@ def build_residual_checkpoint_tape(
             solve_kwargs=solve_kwargs,
         )
         state = result.state
-        packed_states.append(np.asarray(pack_state(state), dtype=float))
-        traces.append(residual_iteration_trace_from_result(result))
+        if store_packed_states:
+            packed_states.append(np.asarray(pack_state(state), dtype=float))
+        if store_trace:
+            traces.append(residual_iteration_trace_from_result(result))
         resume_state = result.diagnostics.get("resume_state")
-        resume_states.append(resume_state)
+        if store_resume_states:
+            resume_states.append(resume_state)
         step_traces.extend(list(result.diagnostics.get("adjoint_step_trace", [])))
         if bool(result.diagnostics.get("converged", False)):
             break
 
+    final_packed_state = np.asarray(pack_state(state), dtype=float)
     if packed_states:
         packed_states_arr = np.stack(packed_states, axis=0)
     else:
         packed_states_arr = np.zeros((0, int(state0.layout.size)), dtype=float)
 
+    trace = concat_residual_iteration_traces(traces)
+
     return ResidualCheckpointTape(
+        final_packed_state=final_packed_state,
         packed_states=packed_states_arr,
-        trace=concat_residual_iteration_traces(traces),
+        trace=trace,
         resume_states=tuple(resume_states),
         step_traces=tuple(step_traces),
+    )
+
+
+def build_residual_checkpoint_tape_direct(
+    state0,
+    static,
+    *,
+    indata,
+    signgs: int,
+    max_iter: int,
+    ftol: float | None = None,
+    step_size: float = 1.0,
+    light_history: bool = True,
+    store_trace: bool = False,
+    solver_kwargs: dict[str, Any] | None = None,
+) -> ResidualCheckpointTape:
+    """Build a replay tape from one direct residual solve with adjoint tracing."""
+    from .solve import solve_fixed_boundary_residual_iter
+
+    solver_kwargs = dict(solver_kwargs or {})
+    solve_kwargs = dict(solver_kwargs)
+    solve_kwargs.setdefault("indata", indata)
+    solve_kwargs.setdefault("signgs", int(signgs))
+    solve_kwargs.setdefault("ftol", ftol)
+    solve_kwargs.setdefault("step_size", float(step_size))
+    solve_kwargs["light_history"] = False if store_trace else bool(light_history)
+
+    result = solve_fixed_boundary_residual_iter(
+        state0,
+        static,
+        max_iter=int(max_iter),
+        adjoint_trace=True,
+        **solve_kwargs,
+    )
+    final_packed_state = np.asarray(pack_state(result.state), dtype=float)
+    step_traces = tuple(result.diagnostics.get("adjoint_step_trace", ()))
+    trace = residual_iteration_trace_from_result(result) if store_trace else _empty_trace()
+    return ResidualCheckpointTape(
+        final_packed_state=final_packed_state,
+        packed_states=np.zeros((0, int(state0.layout.size)), dtype=float),
+        trace=trace,
+        resume_states=(),
+        step_traces=step_traces,
     )
 
 

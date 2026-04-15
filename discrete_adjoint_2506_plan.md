@@ -637,3 +637,29 @@ Stop or reduce scope if:
       introduced in the `vmec_jax` branch,
     - the remaining bottleneck sits above the core solver, in the
       `simsopt`-side objective / Jacobian / reporting path.
+  - Returned to the exact full-inner QH bottleneck and found the next real
+    production issue: the wrapper was still building the discrete-adjoint tape
+    by replaying `solve_fixed_boundary_residual_iter(max_iter=1)` in a Python
+    loop, one solve call per accepted step.
+  - Added `build_residual_checkpoint_tape_direct(...)`, which runs one full
+    residual solve with `adjoint_trace=True` and extracts the complete
+    `adjoint_step_trace` history in one pass instead of chunked replay.
+  - Also added lean tape storage controls to the older replay builder:
+    - optional suppression of stored `packed_states`,
+    - optional suppression of scalar trace history,
+    - optional suppression of saved `resume_states`,
+    - explicit `final_packed_state` on the tape so consumers do not need a
+      stacked checkpoint history just to recover the final state.
+  - Added exact-QH slow regressions showing:
+    - the replay builder can skip debug storage and still preserve the exact
+      final state,
+    - the new direct builder matches the replay-built 2-step QH tape on final
+      state and step-trace count.
+  - Most important production result:
+    the exact full-inner QH SciPy path no longer dies in a compile storm before
+    the first iteration. With the new direct-tape path:
+    - `QH_fixed_resolution_jax.py --max-mode 1 --max-nfev 1 --timings
+      --method scipy --jac jax --residual-derivative-backend discrete_adjoint
+      --jit`
+      now reaches and finishes iteration 0 with solve wall time about
+      `16.58 s`, instead of exiting before the first SciPy iteration.
