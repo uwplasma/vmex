@@ -32,6 +32,7 @@ from ._compat import jnp, tree_util, has_jax
 from .grids import AngleGrid
 
 
+@tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class VmecTrigTables:
     """Trig/weight tables consistent with VMEC `fixaray.f`."""
@@ -90,6 +91,98 @@ class VmecTrigTables:
     phase_dzeta_stack: Any | None = None
     phase_stack_m: Any | None = None
     phase_stack_n: Any | None = None
+
+    def tree_flatten(self):
+        children = (
+            self.mscale,
+            self.nscale,
+            self.cosmu,
+            self.sinmu,
+            self.cosmum,
+            self.sinmum,
+            self.cosmui,
+            self.sinmui,
+            self.cosmumi,
+            self.sinmumi,
+            self.cosmui3,
+            self.cosmumi3,
+            self.cosnv,
+            self.sinnv,
+            self.cosnvn,
+            self.sinnvn,
+            self.wint3_precond,
+            self.cosmui_nt2,
+            self.sinmui_nt2,
+            self.cosmumi_nt2,
+            self.sinmumi_nt2,
+            self.basis_theta_cs_nt2,
+            self.basis_theta_mu_nt2,
+            self.basis_zeta_cs,
+            self.basis_zeta_all,
+            self.phase_stack,
+            self.phase_dtheta_stack,
+            self.phase_dzeta_stack,
+            self.phase_stack_m,
+            self.phase_stack_n,
+        )
+        aux = (
+            int(self.ntheta1),
+            int(self.ntheta2),
+            int(self.ntheta3),
+            float(self.dnorm),
+            float(self.dnorm3),
+            float(self.r0scale),
+        )
+        return children, aux
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        (
+            ntheta1,
+            ntheta2,
+            ntheta3,
+            dnorm,
+            dnorm3,
+            r0scale,
+        ) = aux_data
+        return cls(
+            ntheta1=int(ntheta1),
+            ntheta2=int(ntheta2),
+            ntheta3=int(ntheta3),
+            dnorm=float(dnorm),
+            dnorm3=float(dnorm3),
+            r0scale=float(r0scale),
+            mscale=children[0],
+            nscale=children[1],
+            cosmu=children[2],
+            sinmu=children[3],
+            cosmum=children[4],
+            sinmum=children[5],
+            cosmui=children[6],
+            sinmui=children[7],
+            cosmumi=children[8],
+            sinmumi=children[9],
+            cosmui3=children[10],
+            cosmumi3=children[11],
+            cosnv=children[12],
+            sinnv=children[13],
+            cosnvn=children[14],
+            sinnvn=children[15],
+            wint3_precond=children[16],
+            cosmui_nt2=children[17],
+            sinmui_nt2=children[18],
+            cosmumi_nt2=children[19],
+            sinmumi_nt2=children[20],
+            basis_theta_cs_nt2=children[21],
+            basis_theta_mu_nt2=children[22],
+            basis_zeta_cs=children[23],
+            basis_zeta_all=children[24],
+            phase_stack=children[25],
+            phase_dtheta_stack=children[26],
+            phase_dzeta_stack=children[27],
+            phase_stack_m=children[28],
+            phase_stack_n=children[29],
+        )
 
 
 @dataclass(frozen=True)
