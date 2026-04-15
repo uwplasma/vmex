@@ -682,3 +682,19 @@ Stop or reduce scope if:
     `max_mode=1`, `max_nfev=2` probe:
     - objective unchanged at `0.2651202937448159`
     - solve wall time improved from about `29.73 s` to about `24.51 s`.
+  - Traced the next remaining compile leak in the exact Jacobian path and found
+    it was no longer the helper-column functions, but the scan transport
+    closure itself: the replay-column path was recompiling `_run_scan` for the
+    same `786`-step tape because the scan body was being rebuilt on each call.
+  - Added a dedicated scan-runner cache in `checkpoint_tape_state_jvp_columns`
+    keyed by the static flags and stacked-trace signature, so the jitted
+    transport closure is reused across exact Jacobian calls with the same tape
+    shape.
+  - Exact replay regressions remain green on the rebuilt-preconditioner path.
+  - Compile logging now shows `_run_scan` compiles once for `786` steps and
+    once for `792` steps across the `x0 / x0 / x1` probe, instead of compiling
+    the `786`-step case twice.
+  - Updated exact callback timings after the scan-runner cache:
+    - `x0a`: solve about `7.95 s`, jac about `4.29 s`
+    - `x0b`: solve about `5.61 s`, jac about `2.64 s`
+    - `x1`: solve about `5.64 s`, jac about `3.48 s`
