@@ -83,6 +83,8 @@ class ResidualCheckpointTape:
     trace: ResidualIterationTrace
     resume_states: tuple[dict[str, Any] | None, ...]
     step_traces: tuple[dict[str, Any], ...]
+    stacked_step_traces: Any | None = None
+    step_trace_static_flags: dict[str, Any] | None = None
 
 
 def _empty_trace() -> ResidualIterationTrace:
@@ -297,12 +299,18 @@ def build_residual_checkpoint_tape(
 
     trace = concat_residual_iteration_traces(traces)
 
+    stacked_step_traces = None
+    step_trace_static_flags = None
+    if step_traces:
+        stacked_step_traces, step_trace_static_flags = _stack_replay_step_traces(tuple(step_traces))
     return ResidualCheckpointTape(
         final_packed_state=final_packed_state,
         packed_states=packed_states_arr,
         trace=trace,
         resume_states=tuple(resume_states),
         step_traces=tuple(step_traces),
+        stacked_step_traces=stacked_step_traces,
+        step_trace_static_flags=step_trace_static_flags,
     )
 
 
@@ -340,12 +348,18 @@ def build_residual_checkpoint_tape_direct(
     final_packed_state = np.asarray(pack_state(result.state), dtype=float)
     step_traces = tuple(result.diagnostics.get("adjoint_step_trace", ()))
     trace = residual_iteration_trace_from_result(result) if store_trace else _empty_trace()
+    stacked_step_traces = None
+    step_trace_static_flags = None
+    if step_traces:
+        stacked_step_traces, step_trace_static_flags = _stack_replay_step_traces(step_traces)
     return ResidualCheckpointTape(
         final_packed_state=final_packed_state,
         packed_states=np.zeros((0, int(state0.layout.size)), dtype=float),
         trace=trace,
         resume_states=(),
         step_traces=step_traces,
+        stacked_step_traces=stacked_step_traces,
+        step_trace_static_flags=step_trace_static_flags,
     )
 
 
@@ -531,7 +545,7 @@ def _stack_replay_step_traces(step_traces: tuple[dict[str, Any], ...]):
     from ._compat import jax
 
     filtered = tuple({key: trace[key] for key in _REPLAY_STEP_TRACE_KEYS} for trace in step_traces)
-    stacked = jax.tree_util.tree_map(lambda *xs: jnp.stack([jnp.asarray(x) for x in xs], axis=0), *filtered)
+    stacked = jax.tree_util.tree_map(lambda *xs: np.stack([np.asarray(x) for x in xs], axis=0), *filtered)
     static_flags = {key: step_traces[0][key] for key in _REPLAY_STEP_TRACE_STATIC_KEYS}
     for trace in step_traces[1:]:
         for key, value in static_flags.items():
@@ -557,7 +571,10 @@ def checkpoint_tape_state_jvp_columns(
     from ._compat import jax
 
     tangents = jnp.asarray(initial_tangents)
-    stacked, static_flags = _stack_replay_step_traces(tape.step_traces)
+    stacked = tape.stacked_step_traces
+    static_flags = tape.step_trace_static_flags
+    if stacked is None or static_flags is None:
+        stacked, static_flags = _stack_replay_step_traces(tape.step_traces)
     if rebuild_preconditioner and static_flags["precond_jmax"] is None:
         for trace in tape.step_traces:
             x0 = jnp.asarray(pack_state(trace["state_pre"]))

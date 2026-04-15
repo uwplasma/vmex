@@ -663,3 +663,22 @@ Stop or reduce scope if:
       --jit`
       now reaches and finishes iteration 0 with solve wall time about
       `16.58 s`, instead of exiting before the first SciPy iteration.
+  - Profiled the exact path again and found the next concrete Jacobian
+    bottleneck was not the replay math itself but rebuilding the stacked replay
+    tape from Python step dictionaries on every call.
+  - Refactored `ResidualCheckpointTape` to cache a NumPy-stacked replay trace
+    and its static flags once at tape-construction time, then reuse that cached
+    structure in `checkpoint_tape_state_jvp_columns(...)`.
+  - Exact-QH component timings after that refactor:
+    - `x0` exact solve about `8.58 s`, exact Jacobian about `6.55 s`
+      (previously about `7.72 s` + `7.64 s`);
+    - nearby `x1` exact solve about `6.35 s`, exact Jacobian about `6.12 s`
+      (previously about `5.61 s` + `8.54 s`).
+  - Same-process exact SciPy callback timings improved as well:
+    - `x0_cold`: `15.26 s -> 13.66 s`
+    - `x0_warm`: `11.39 s -> 10.11 s`
+    - nearby `x1_warm`: `12.62 s -> 10.68 s`
+  - End-to-end exact QH benchmark improvement on the apples-to-apples
+    `max_mode=1`, `max_nfev=2` probe:
+    - objective unchanged at `0.2651202937448159`
+    - solve wall time improved from about `29.73 s` to about `24.51 s`.
