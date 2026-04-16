@@ -812,3 +812,31 @@ Stop or reduce scope if:
   - The lean dynamic-only tape path is no longer exact enough to serve as the
     production tangent transport after the stepwise replay upgrade, so the
     production simsopt wrapper is back on full step traces for correctness.
+  - Full tape-size audit on the exact QH start point showed the retained tape
+    itself is not the 50 GB problem:
+    - full step traces are about `94 MB`
+    - stacked replay payload is about `71 MB`
+    - dynamic initial carry is negligible
+    - the large RSS spikes are coming from executable / transient callback
+      retention, not raw tape storage alone.
+  - The first lean exact scan refactor removed a large amount of compile churn
+    and memory, but a later accepted-point audit exposed a new failure mode:
+    the exact 10-evaluation QH benchmark ended at a point whose full-inner
+    tape contained exactly one `restart_bad_progress` /
+    `catastrophic_growth` step after 173 clean momentum steps.
+  - Because the previous production transport only supported the all-dynamic
+    case, that single restart forced the late-iteration Jacobian back onto the
+    older generic long-horizon replay path, and the derivative error exploded
+    again there.
+  - The replay transport now supports mixed tapes:
+    - contiguous momentum-accept segments use the exact stored-basepoint
+      dynamic scan;
+    - catastrophic restart steps use an exact carry reset map
+      (`state` identity, velocity reset, `inv_tau` reset, `fsq_prev` carry).
+  - Added a slow wrapper-side restart-point regression on the exact QH
+    benchmark branch point.
+  - Exact late-point audit on the benchmark QH final iterate after the mixed
+    replay fix:
+    - tested columns `0..3` now match central FD to about `1e-2` to `3e-2`
+      in objective-direction error instead of the earlier `~1e19` failure;
+    - the catastrophic late-iteration Jacobian blow-up is gone.

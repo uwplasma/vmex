@@ -499,7 +499,7 @@ def test_residual_checkpoint_tape_direct_dynamic_only_matches_two_step_qh(load_c
         initial_tangents=tangent,
         rebuild_preconditioner=True,
     )
-    np.testing.assert_allclose(np.asarray(lean_jvp), np.asarray(full_jvp), rtol=5.0e-2, atol=1.0e-4)
+    np.testing.assert_allclose(np.asarray(lean_jvp), np.asarray(full_jvp), rtol=1.0e-10, atol=1.0e-10)
 
 
 def test_residual_checkpoint_tape_matches_direct_two_step_qh(load_case_qh_warm_start):
