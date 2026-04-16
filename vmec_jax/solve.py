@@ -4689,12 +4689,17 @@ def solve_fixed_boundary_residual_iter(
                 dtype=jnp.asarray(state0.Rcos).dtype,
             )
     modes = static.modes
-    m_idx = jnp.asarray(modes.m, dtype=jnp.int32)
-    n_idx = jnp.asarray(modes.n, dtype=jnp.int32)
-    mscale = jnp.asarray(trig.mscale)
-    nscale = jnp.asarray(trig.nscale)
+    # Use np.asarray for static setup data – these are closure constants captured
+    # by _run_scan and converted to device arrays once at the JIT boundary.
+    # Using jnp.asarray here triggers one eager XLA compilation per call (~2 ms
+    # each), adding unnecessary cold-start overhead.
+    m_idx = np.asarray(modes.m, dtype=np.int32)
+    n_idx = np.asarray(modes.n, dtype=np.int32)
+    mscale = np.asarray(trig.mscale)
+    nscale = np.asarray(trig.nscale)
     idx00 = _mode00_index(static.modes)
-    lambda_update_scale_j = jnp.asarray(lambda_update_scale, dtype=jnp.asarray(state0.Rcos).dtype)
+    _state_dtype = np.asarray(state0.Rcos).dtype
+    lambda_update_scale_j = np.asarray(lambda_update_scale, dtype=_state_dtype)
 
     # VMEC stores Fourier coefficients in an internal (mscale/nscale) basis and
     # uses `scalxc` to represent odd-m modes in 1/sqrt(s) form. The force pipeline
@@ -4702,10 +4707,10 @@ def solve_fixed_boundary_residual_iter(
     # residual/preconditioner updates operate in the same internal coefficient
     # space as `VMECState`.
 
-    edge_Rcos = jnp.asarray(state0.Rcos)[-1, :]
-    edge_Rsin = jnp.asarray(state0.Rsin)[-1, :]
-    edge_Zcos = jnp.asarray(state0.Zcos)[-1, :]
-    edge_Zsin = jnp.asarray(state0.Zsin)[-1, :]
+    edge_Rcos = np.asarray(state0.Rcos)[-1, :]
+    edge_Rsin = np.asarray(state0.Rsin)[-1, :]
+    edge_Zcos = np.asarray(state0.Zcos)[-1, :]
+    edge_Zsin = np.asarray(state0.Zsin)[-1, :]
 
     constraint_tcon0: float | None = None
     if bool(include_constraint_force):
