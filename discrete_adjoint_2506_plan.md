@@ -743,3 +743,26 @@ Stop or reduce scope if:
     When finite differences are taken through the frozen-axis local map, the
     first Jacobian column matches central FD closely on the benchmark QH start;
     the large mismatch only appears against the moving-axis callback.
+  - A deeper full-inner audit narrowed the remaining bug further:
+    once `max_iter` is large, moving-axis FD and frozen-axis FD become almost
+    the same, and both disagree with the production Jacobian.
+  - Frozen-axis iteration sweep on the benchmark QH setup:
+    - `max_iter=1`: relative column error about `3.1e-4`
+    - `max_iter=2`: about `9.1e-4`
+    - `max_iter=5`: about `4.3e-3`
+    - `max_iter=10`: about `1.5e-2`
+    - `max_iter=20`: about `6.5e-2`
+    - `max_iter=50`: about `5.7e-1`
+    - `max_iter=100`: about `4.85`
+  - Exact QH trace audit at `max_iter=100` shows:
+    - all 100 steps are `momentum_accept`
+    - no restarts occur
+    - `time_step` stays fixed at `0.9`
+    - but `dt_eff`, `b1`, `fac`, and `force_scale` all vary at every step
+  - That shifts the main derivative hypothesis again:
+    the remaining long-horizon drift is likely from frozen solver-control
+    history (`dt_eff` / damping-control scalars and the residual-history state
+    that updates them), not from replaying the wrong accepted branch and not
+    from the initialization axis branch.
+  - I prototyped a velocity-carry replay transport locally. It was not enough
+    by itself to fix the long-horizon drift, so it was not kept on the branch.
