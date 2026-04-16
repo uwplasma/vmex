@@ -766,3 +766,26 @@ Stop or reduce scope if:
     from the initialization axis branch.
   - I prototyped a velocity-carry replay transport locally. It was not enough
     by itself to fix the long-horizon drift, so it was not kept on the branch.
+  - Full dynamic-carry replay fix implemented and validated on the strict
+    no-restart QH production path:
+    - trace now records `inv_tau_before`, `fsq_prev_before`,
+      `reset_inv_tau`, `limit_dt_from_force`, and
+      `max_coeff_delta_rms_pre` for each strict-update step;
+    - replay columns now carry packed state, velocity history, `inv_tau`,
+      and `fsq_prev`, and recompute `fsq1`, `dt_eff`, `b1`, `fac`, and
+      `force_scale` dynamically instead of freezing them from the base trace.
+  - During that implementation I found and fixed another concrete mismatch:
+    the rebuild path was reconstructing `w_mode_mn` with exponent `-1`,
+    while the exact production residual solve uses `mode_diag_exponent=0.0`
+    on this path. Reusing the traced `w_mode_mn` removed the first-step force
+    mismatch and made the dynamic replay primal-faithful.
+  - Exact primal replay check on the benchmark QH path at `max_iter=20` now
+    matches the direct tape final state with packed-state `linf` about
+    `3.8e-7`.
+  - Frozen-axis derivative sweep after the full carry fix:
+    - `max_iter=1`: relative column error about `3.0e-8`
+    - `max_iter=10`: about `1.5e-6`
+    - `max_iter=20`: about `2.6e-5`
+    - `max_iter=50`: about `1.15e-3`
+  - Added a slow regression locking the dynamic replay primal consistency on a
+    20-step QH tape.
