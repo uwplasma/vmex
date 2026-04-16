@@ -32,12 +32,23 @@ _REPLAY_STEP_TRACE_KEYS = (
     "fac",
     "force_scale",
     "flip_sign",
+    "time_step",
+    "fsq_prev_before",
+    "reset_inv_tau",
+    "inv_tau_before",
+    "max_coeff_delta_rms_pre",
     "vRcc_before",
     "vRss_before",
+    "vRsc_before",
+    "vRcs_before",
     "vZsc_before",
     "vZcs_before",
+    "vZcc_before",
+    "vZss_before",
     "vLsc_before",
     "vLcs_before",
+    "vLcc_before",
+    "vLss_before",
     "max_update_rms_pre",
 )
 
@@ -46,9 +57,13 @@ _REPLAY_STEP_TRACE_STATIC_KEYS = (
     "include_edge_residual",
     "apply_m1_constraints",
     "limit_update_rms",
+    "limit_dt_from_force",
+    "vmec2000_control",
     "divide_by_scalxc_for_update",
+    "signgs",
 )
 _CHECKPOINT_TAPE_SCAN_CACHE: dict[tuple[Any, ...], Any] = {}
+_CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE: dict[tuple[Any, ...], Any] = {}
 
 
 @dataclass(frozen=True)
@@ -448,6 +463,14 @@ def checkpoint_tape_state_jvp(
     rebuild_preconditioner: bool = False,
 ):
     """Push a packed-state tangent forward through the extracted step tape."""
+    if _dynamic_replay_supported(tape=tape, rebuild_preconditioner=rebuild_preconditioner):
+        tangents = checkpoint_tape_state_jvp_columns(
+            tape=tape,
+            static=static,
+            initial_tangents=jnp.asarray(initial_tangent)[None, :],
+            rebuild_preconditioner=rebuild_preconditioner,
+        )
+        return tangents[0]
     if not tape.step_traces:
         return jnp.asarray(initial_tangent)
 
@@ -551,7 +574,12 @@ def _stack_replay_step_traces(step_traces: tuple[dict[str, Any], ...]):
     static_flags = {key: step_traces[0][key] for key in _REPLAY_STEP_TRACE_STATIC_KEYS}
     for trace in step_traces[1:]:
         for key, value in static_flags.items():
-            if bool(trace[key]) != bool(value):
+            other = trace[key]
+            if isinstance(value, np.ndarray) or isinstance(other, np.ndarray):
+                same = np.array_equal(np.asarray(other), np.asarray(value))
+            else:
+                same = other == value
+            if not same:
                 raise ValueError(f"Replay step trace key {key} must be constant across the tape for scan replay.")
     precond_jmax0 = int(step_traces[0]["precond_jmax"])
     precond_jmax_constant = all(int(trace["precond_jmax"]) == precond_jmax0 for trace in step_traces[1:])
@@ -571,6 +599,277 @@ def _stacked_trace_signature(stacked) -> tuple[tuple[tuple[int, ...], str], ...]
             dtype = np.asarray(leaf).dtype
         signature.append((shape, np.dtype(dtype).str))
     return tuple(signature)
+
+
+def _dynamic_replay_supported(
+    *,
+    tape: ResidualCheckpointTape,
+    rebuild_preconditioner: bool,
+) -> bool:
+    if (not rebuild_preconditioner) or (not tape.step_traces):
+        return False
+    if tape.step_trace_static_flags is not None and tape.step_trace_static_flags.get("precond_jmax") is None:
+        return False
+    for trace in tape.step_traces:
+        if trace.get("branch") != "strict_update":
+            return False
+        if trace.get("step_status") != "momentum":
+            return False
+        if trace.get("restart_reason") != "none":
+            return False
+        if trace.get("restart_path") != "momentum_accept":
+            return False
+    return True
+
+
+def _dynamic_replay_initial_carry(trace):
+    packed_state = jnp.asarray(pack_state(trace["state_pre"]))
+    dtype = packed_state.dtype
+
+    def _arr(name: str):
+        value = trace.get(name)
+        if value is None:
+            return jnp.zeros_like(jnp.asarray(trace["vRcc_before"], dtype=dtype))
+        return jnp.asarray(value, dtype=dtype)
+
+    return (
+        packed_state,
+        jnp.asarray(trace["inv_tau_before"], dtype=dtype),
+        jnp.asarray(trace["fsq_prev_before"], dtype=dtype),
+        _arr("vRcc_before"),
+        _arr("vRss_before"),
+        _arr("vRsc_before"),
+        _arr("vRcs_before"),
+        _arr("vZsc_before"),
+        _arr("vZcs_before"),
+        _arr("vZcc_before"),
+        _arr("vZss_before"),
+        _arr("vLsc_before"),
+        _arr("vLcs_before"),
+        _arr("vLcc_before"),
+        _arr("vLss_before"),
+    )
+
+
+def _dynamic_safe_dt_from_force_arrays(
+    *,
+    dt_nominal,
+    max_coeff_delta_rms,
+    frcc,
+    frss,
+    fzsc,
+    fzcs,
+    flsc,
+    flcs,
+    frsc,
+    frcs,
+    fzcc,
+    fzss,
+    flcc,
+    flss,
+):
+    dtype = jnp.asarray(frcc).dtype
+    dt_nominal = jnp.asarray(dt_nominal, dtype=dtype)
+    max_coeff_delta_rms = jnp.asarray(max_coeff_delta_rms, dtype=dtype)
+    rms = jnp.sqrt(
+        jnp.mean(
+            jnp.asarray(frcc) * jnp.asarray(frcc)
+            + jnp.asarray(frss) * jnp.asarray(frss)
+            + jnp.asarray(frsc) * jnp.asarray(frsc)
+            + jnp.asarray(frcs) * jnp.asarray(frcs)
+            + jnp.asarray(fzsc) * jnp.asarray(fzsc)
+            + jnp.asarray(fzcs) * jnp.asarray(fzcs)
+            + jnp.asarray(fzcc) * jnp.asarray(fzcc)
+            + jnp.asarray(fzss) * jnp.asarray(fzss)
+            + jnp.asarray(flsc) * jnp.asarray(flsc)
+            + jnp.asarray(flcs) * jnp.asarray(flcs)
+            + jnp.asarray(flcc) * jnp.asarray(flcc)
+            + jnp.asarray(flss) * jnp.asarray(flss)
+        )
+    )
+    dt_lim = jnp.sqrt(max_coeff_delta_rms / jnp.maximum(rms, jnp.asarray(1.0e-30, dtype=dtype)))
+    dt_eff = jnp.where(
+        jnp.isfinite(rms) & (rms > 0.0),
+        jnp.minimum(dt_nominal, dt_lim),
+        dt_nominal,
+    )
+    return jnp.maximum(dt_eff, jnp.asarray(1.0e-12, dtype=dtype))
+
+
+def _dynamic_fsq1_from_force_channels(
+    *,
+    state_pre,
+    static,
+    vmec2000_control: bool,
+    frzl_pre,
+):
+    from .vmec_residue import vmec_gcx2_from_tomnsps, vmec_rz_norm_from_state
+
+    s = jnp.asarray(static.s)
+    gcr2_p, gcz2_p, gcl2_p = vmec_gcx2_from_tomnsps(
+        frzl=frzl_pre,
+        lconm1=bool(getattr(static.cfg, "lconm1", True)),
+        apply_m1_constraints=False,
+        include_edge=True,
+        apply_scalxc=False,
+        s=s,
+    )
+    rz_norm = vmec_rz_norm_from_state(
+        state=state_pre,
+        static=static,
+        s=s,
+        apply_scalxc=False,
+        ns_min=0,
+        ns_max=int(s.shape[0]),
+    )
+    f_norm1 = jnp.where(rz_norm != 0.0, 1.0 / rz_norm, jnp.asarray(float("inf"), dtype=rz_norm.dtype))
+    zero = jnp.asarray(0.0, dtype=jnp.asarray(gcr2_p).dtype)
+    finite_fnorm1 = jnp.isfinite(f_norm1)
+    fsqr1 = jnp.where(finite_fnorm1, gcr2_p * f_norm1, zero)
+    fsqz1 = jnp.where(finite_fnorm1, gcz2_p * f_norm1, zero)
+    delta_s = jnp.asarray(s[1] - s[0], dtype=jnp.asarray(gcr2_p).dtype) if int(s.shape[0]) >= 2 else jnp.asarray(1.0, dtype=jnp.asarray(gcr2_p).dtype)
+    if bool(vmec2000_control):
+        gcl2_full = jnp.sum(jnp.asarray(frzl_pre.flsc)[1:] ** 2)
+        if frzl_pre.flcs is not None:
+            gcl2_full = gcl2_full + jnp.sum(jnp.asarray(frzl_pre.flcs)[1:] ** 2)
+        if getattr(frzl_pre, "flcc", None) is not None:
+            gcl2_full = gcl2_full + jnp.sum(jnp.asarray(frzl_pre.flcc)[1:] ** 2)
+        if getattr(frzl_pre, "flss", None) is not None:
+            gcl2_full = gcl2_full + jnp.sum(jnp.asarray(frzl_pre.flss)[1:] ** 2)
+        fsql1 = gcl2_full * delta_s
+    else:
+        fsql1 = gcl2_p * delta_s
+    return fsqr1 + fsqz1 + fsql1
+
+
+def _packed_dynamic_replay_step_from_carry(
+    carry,
+    trace,
+    *,
+    static,
+    static_flags,
+    preconditioner_jmax_override,
+):
+    packed_state, inv_tau, fsq_prev, vRcc_before, vRss_before, vRsc_before, vRcs_before, vZsc_before, vZcs_before, vZcc_before, vZss_before, vLsc_before, vLcs_before, vLcc_before, vLss_before = carry
+    state_pre = unpack_state(packed_state, trace["state_pre"].layout)
+    residual_out = raw_force_residual_from_state(
+        state_pre,
+        static,
+        wout_like=trace["wout_like"],
+        trig=trace["trig"],
+        apply_lforbal=static_flags["apply_lforbal"],
+        include_edge_residual=static_flags["include_edge_residual"],
+        apply_m1_constraints=static_flags["apply_m1_constraints"],
+        zero_m1=trace["zero_m1"],
+    )
+    preconditioner_out = state_dependent_preconditioner_from_forces(
+        k=residual_out["k"],
+        static=static,
+        trig=trace["trig"],
+        dtype=jnp.asarray(packed_state).dtype,
+        jmax_override=preconditioner_jmax_override,
+        w_mode_mn=trace["w_mode_mn"],
+    )
+    force_out = preconditioned_force_channels_from_raw_forces(
+        frzl=residual_out["frzl"],
+        mats=preconditioner_out["mats"],
+        jmax=preconditioner_out["jmax"],
+        cfg=static.cfg,
+        lam_prec=preconditioner_out["lam_prec"],
+        w_mode_mn=preconditioner_out["w_mode_mn"],
+        lambda_update_scale=trace["lambda_update_scale"],
+    )
+    fsq1 = _dynamic_fsq1_from_force_channels(
+        state_pre=state_pre,
+        static=static,
+        vmec2000_control=bool(static_flags["vmec2000_control"]),
+        frzl_pre=force_out["frzl_pre"],
+    )
+    time_step = jnp.asarray(trace["time_step"], dtype=jnp.asarray(packed_state).dtype)
+    invtau_reset = jnp.full_like(inv_tau, jnp.asarray(0.15, dtype=time_step.dtype) / time_step)
+    invtau_num = jnp.where(
+        fsq1 == 0.0,
+        jnp.asarray(0.0, dtype=time_step.dtype),
+        jnp.minimum(jnp.abs(jnp.log(fsq1 / fsq_prev)), jnp.asarray(0.15, dtype=time_step.dtype)),
+    )
+    invtau_shift = jnp.concatenate([inv_tau[1:], (invtau_num / time_step)[None]], axis=0)
+    inv_tau_next = jnp.where(jnp.asarray(trace["reset_inv_tau"]), invtau_reset, invtau_shift)
+    otav = jnp.sum(inv_tau_next) / jnp.asarray(inv_tau_next.shape[0], dtype=time_step.dtype)
+    dtau = time_step * otav / jnp.asarray(2.0, dtype=time_step.dtype)
+    b1 = jnp.asarray(1.0, dtype=time_step.dtype) - dtau
+    fac = jnp.asarray(1.0, dtype=time_step.dtype) / (jnp.asarray(1.0, dtype=time_step.dtype) + dtau)
+    if bool(static_flags["limit_dt_from_force"]):
+        dt_eff = _dynamic_safe_dt_from_force_arrays(
+            dt_nominal=time_step,
+            max_coeff_delta_rms=trace["max_coeff_delta_rms_pre"],
+            frcc=force_out["frcc_u"],
+            frss=force_out["frss_u"],
+            fzsc=force_out["fzsc_u"],
+            fzcs=force_out["fzcs_u"],
+            flsc=force_out["flsc_u"],
+            flcs=force_out["flcs_u"],
+            frsc=force_out["frsc_u"],
+            frcs=force_out["frcs_u"],
+            fzcc=force_out["fzcc_u"],
+            fzss=force_out["fzss_u"],
+            flcc=force_out["flcc_u"],
+            flss=force_out["flss_u"],
+        )
+    else:
+        dt_eff = time_step
+    step_out = strict_update_accepted_step(
+        state_pre,
+        static,
+        dt_eff=dt_eff,
+        b1=b1,
+        fac=fac,
+        force_scale=dt_eff,
+        flip_sign=trace["flip_sign"],
+        vRcc_before=vRcc_before,
+        vRss_before=vRss_before,
+        vZsc_before=vZsc_before,
+        vZcs_before=vZcs_before,
+        vLsc_before=vLsc_before,
+        vLcs_before=vLcs_before,
+        frcc_u=force_out["frcc_u"],
+        frss_u=force_out["frss_u"],
+        fzsc_u=force_out["fzsc_u"],
+        fzcs_u=force_out["fzcs_u"],
+        flsc_u=force_out["flsc_u"],
+        flcs_u=force_out["flcs_u"],
+        vRsc_before=vRsc_before,
+        vRcs_before=vRcs_before,
+        vZcc_before=vZcc_before,
+        vZss_before=vZss_before,
+        vLcc_before=vLcc_before,
+        vLss_before=vLss_before,
+        frsc_u=force_out["frsc_u"],
+        frcs_u=force_out["frcs_u"],
+        fzcc_u=force_out["fzcc_u"],
+        fzss_u=force_out["fzss_u"],
+        flcc_u=force_out["flcc_u"],
+        flss_u=force_out["flss_u"],
+        max_update_rms=trace["max_update_rms_pre"],
+        limit_update_rms=static_flags["limit_update_rms"],
+        divide_by_scalxc_for_update=static_flags["divide_by_scalxc_for_update"],
+    )
+    return (
+        pack_state(step_out["state_post"]),
+        inv_tau_next,
+        fsq1,
+        step_out["vRcc_after"],
+        step_out["vRss_after"],
+        step_out["vRsc_after"],
+        step_out["vRcs_after"],
+        step_out["vZsc_after"],
+        step_out["vZcs_after"],
+        step_out["vZcc_after"],
+        step_out["vZss_after"],
+        step_out["vLsc_after"],
+        step_out["vLcs_after"],
+        step_out["vLcc_after"],
+        step_out["vLss_after"],
+    )
 
 
 def _checkpoint_tape_scan_runner(*, static, stacked, static_flags, rebuild_preconditioner: bool):
@@ -622,6 +921,45 @@ def _checkpoint_tape_scan_runner(*, static, stacked, static_flags, rebuild_preco
     return _run_scan
 
 
+def _checkpoint_tape_dynamic_scan_runner(*, static, stacked, static_flags):
+    from ._compat import jax
+
+    key = (
+        id(static),
+        bool(static_flags["apply_lforbal"]),
+        bool(static_flags["include_edge_residual"]),
+        bool(static_flags["apply_m1_constraints"]),
+        bool(static_flags["limit_update_rms"]),
+        bool(static_flags["limit_dt_from_force"]),
+        bool(static_flags["vmec2000_control"]),
+        bool(static_flags["divide_by_scalxc_for_update"]),
+        int(static_flags["signgs"]),
+        int(static_flags["precond_jmax"]),
+        _stacked_trace_signature(stacked),
+    )
+    cached = _CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    def _step_scan(carry, trace):
+        carry = _packed_dynamic_replay_step_from_carry(
+            carry,
+            trace,
+            static=static,
+            static_flags=static_flags,
+            preconditioner_jmax_override=int(static_flags["precond_jmax"]),
+        )
+        return carry, None
+
+    @jax.jit
+    def _run_scan(carry0, stacked_traces):
+        carry, _ = jax.lax.scan(_step_scan, carry0, stacked_traces)
+        return carry
+
+    _CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE[key] = _run_scan
+    return _run_scan
+
+
 def checkpoint_tape_state_jvp_columns(
     *,
     tape: ResidualCheckpointTape,
@@ -640,6 +978,38 @@ def checkpoint_tape_state_jvp_columns(
     static_flags = tape.step_trace_static_flags
     if stacked is None or static_flags is None:
         stacked, static_flags = _stack_replay_step_traces(tape.step_traces)
+    if _dynamic_replay_supported(tape=tape, rebuild_preconditioner=rebuild_preconditioner):
+        carry0 = _dynamic_replay_initial_carry(tape.step_traces[0])
+        zeros_like = lambda arr: jnp.zeros((tangents.shape[0],) + jnp.asarray(arr).shape, dtype=jnp.asarray(arr).dtype)
+        carry_tangents0 = (
+            tangents,
+            zeros_like(carry0[1]),
+            zeros_like(carry0[2]),
+            zeros_like(carry0[3]),
+            zeros_like(carry0[4]),
+            zeros_like(carry0[5]),
+            zeros_like(carry0[6]),
+            zeros_like(carry0[7]),
+            zeros_like(carry0[8]),
+            zeros_like(carry0[9]),
+            zeros_like(carry0[10]),
+            zeros_like(carry0[11]),
+            zeros_like(carry0[12]),
+            zeros_like(carry0[13]),
+            zeros_like(carry0[14]),
+        )
+        run_scan = _checkpoint_tape_dynamic_scan_runner(
+            static=static,
+            stacked=stacked,
+            static_flags=static_flags,
+        )
+
+        def _run(carry_init):
+            return run_scan(carry_init, stacked)
+
+        _, linear_step = jax.linearize(_run, carry0)
+        carry_tangents_final = jax.vmap(linear_step)(carry_tangents0)
+        return carry_tangents_final[0]
     if rebuild_preconditioner and static_flags["precond_jmax"] is None:
         for trace in tape.step_traces:
             x0 = jnp.asarray(pack_state(trace["state_pre"]))
@@ -1141,6 +1511,8 @@ def state_dependent_preconditioner_from_forces(
     trig,
     dtype=None,
     jmax_override: int | None = None,
+    w_mode_mn=None,
+    mode_diag_exponent: float = 0.0,
 ):
     """Rebuild the solver's state-dependent preconditioner objects."""
     from .preconditioner_1d_jax import lambda_preconditioner, rz_preconditioner_matrices
@@ -1164,11 +1536,14 @@ def state_dependent_preconditioner_from_forces(
     )
     if dtype is None:
         dtype = jnp.asarray(lam_prec).dtype
-    m = jnp.arange(int(cfg.mpol), dtype=jnp.float64)
-    n = jnp.arange(int(cfg.ntor) + 1, dtype=jnp.float64) * float(cfg.nfp)
-    k2 = (m[:, None] * m[:, None]) + (n[None, :] * n[None, :])
-    w_mode_mn = (1.0 + k2).astype(jnp.float64) ** (-1.0)
-    w_mode_mn = w_mode_mn.astype(dtype)
+    if w_mode_mn is None:
+        m = jnp.arange(int(cfg.mpol), dtype=jnp.float64)
+        n = jnp.arange(int(cfg.ntor) + 1, dtype=jnp.float64) * float(cfg.nfp)
+        k2 = (m[:, None] * m[:, None]) + (n[None, :] * n[None, :])
+        w_mode_mn = (1.0 + k2).astype(jnp.float64) ** (-float(mode_diag_exponent))
+        w_mode_mn = w_mode_mn.astype(dtype)
+    else:
+        w_mode_mn = jnp.asarray(w_mode_mn, dtype=dtype)
     return {
         "lam_prec": lam_prec,
         "mats": mats,

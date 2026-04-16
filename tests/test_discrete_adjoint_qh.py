@@ -791,6 +791,62 @@ def test_checkpoint_tape_state_jvp_columns_matches_single_column_qh_rebuild_prec
     assert np.asarray(batch) == pytest.approx(np.asarray(single), rel=1.0e-10, abs=1.0e-10)
 
 
+def test_dynamic_replay_scan_matches_primal_qh_full_inner(load_case_qh_warm_start):
+    pytest.importorskip("jax")
+    _require_slow()
+
+    import vmec_jax.discrete_adjoint as da
+    from vmec_jax._compat import enable_x64
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.init_guess import initial_guess_from_boundary
+
+    enable_x64(True)
+
+    _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
+    state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
+    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state_guess, static).sqrtg), axis_index=1))
+    common_kwargs = dict(
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        reference_mode=False,
+        backtracking=True,
+        limit_dt_from_force=True,
+        limit_update_rms=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces="auto",
+        use_scan=False,
+        light_history=True,
+        resume_state_mode="full",
+    )
+    tape = da.build_residual_checkpoint_tape_direct(
+        state_guess,
+        static,
+        max_iter=20,
+        solver_kwargs=common_kwargs,
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        step_size=float(indata.get_float("DELT", 1.0)),
+        light_history=True,
+        store_trace=False,
+    )
+    assert da._dynamic_replay_supported(tape=tape, rebuild_preconditioner=True)
+    carry0 = da._dynamic_replay_initial_carry(tape.step_traces[0])
+    run_scan = da._checkpoint_tape_dynamic_scan_runner(
+        static=static,
+        stacked=tape.stacked_step_traces,
+        static_flags=tape.step_trace_static_flags,
+    )
+    carryf = run_scan(carry0, tape.stacked_step_traces)
+    final_state_linf = float(np.max(np.abs(np.asarray(carryf[0]) - np.asarray(tape.final_packed_state))))
+    assert final_state_linf < 1.0e-5
+
+
 def test_checkpoint_tape_state_jvp_columns_matches_single_column_circular(load_case_circular_tokamak):
     pytest.importorskip("jax")
 
