@@ -1504,7 +1504,12 @@ def rz_preconditioner(
 ) -> TomnspsRZL:
     """Apply the VMEC R/Z radial preconditioner in JAX."""
     mats, _jmin, jmax = rz_preconditioner_matrices(bc=bc, k=k, trig=trig, s=s, cfg=cfg)
-    return rz_preconditioner_apply(frzl_in=frzl_in, mats=mats, jmax=jmax, cfg=cfg)
+    # Use the JIT-cached wrapper: resolves static booleans once per config and
+    # caches the compiled _apply_jit function via lru_cache.  This eliminates
+    # ~237 eager JAX dispatches per call that occurred with the plain
+    # rz_preconditioner_apply path, reducing cold-start overhead significantly
+    # when the preconditioner is called multiple times during setup.
+    return rz_preconditioner_apply_jit(frzl_in=frzl_in, mats=mats, jmax=jmax, cfg=cfg)
 
 
 # ---------------------------------------------------------------------------

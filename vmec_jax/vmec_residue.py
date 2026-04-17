@@ -46,12 +46,15 @@ def _scalxc_cache_key(*, s: Any, mpol: int) -> tuple:
     return (str(s_np.dtype), s_np.shape, s_np.tobytes(), int(mpol))
 
 
-def _wint_cache_key(trig: VmecTrigTables, *, nzeta: int) -> tuple[int, int]:
-    return (id(trig), int(nzeta))
+def _wint_cache_key(trig: VmecTrigTables, *, nzeta: int) -> tuple[int, int, int]:
+    # Include ntheta3 in the key so that a new trig object that happens to
+    # get the same id() as a previously garbage-collected object (with a
+    # different grid size) is not confused with the old cached entry.
+    return (id(trig), int(trig.ntheta3), int(nzeta))
 
 
-def _pwint_cache_key(trig: VmecTrigTables, *, ns: int, nzeta: int) -> tuple[int, int, int]:
-    return (id(trig), int(ns), int(nzeta))
+def _pwint_cache_key(trig: VmecTrigTables, *, ns: int, nzeta: int) -> tuple[int, int, int, int]:
+    return (id(trig), int(trig.ntheta3), int(ns), int(nzeta))
 
 
 def _cache_allowed() -> bool:

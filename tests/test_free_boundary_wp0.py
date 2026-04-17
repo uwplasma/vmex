@@ -542,7 +542,9 @@ def test_run_fixed_boundary_initial_guess_carries_mgrid_metadata(tmp_path: Path)
     )
     assert run.cfg.lfreeb is True
     assert run.static.mgrid_metadata is not None
-    assert int(run.static.mgrid_metadata.kp) == 4
+    # With NTOR=0, nzeta is collapsed to 1 (axisym optimisation), so the
+    # vacuum sampling uses 2*nzeta = 2 toroidal planes (kp_effective = 2).
+    assert int(run.static.mgrid_metadata.kp) == 2
     assert run.static.free_boundary_extcur == (3.5, 0.0)
 
 
@@ -670,7 +672,9 @@ def test_run_fixed_boundary_resolves_relative_mgrid_from_input_dir(tmp_path: Pat
     assert run.cfg.lfreeb is True
     assert run.cfg.mgrid_file == str(mg.resolve())
     assert run.static.mgrid_metadata is not None
-    assert int(run.static.mgrid_metadata.kp) == 4
+    # With NTOR=0, nzeta is collapsed to 1 (axisym optimisation), so the
+    # vacuum sampling uses 2*nzeta = 2 toroidal planes (kp_effective = 2).
+    assert int(run.static.mgrid_metadata.kp) == 2
     assert run.static.free_boundary_extcur == (2.5,)
 
 

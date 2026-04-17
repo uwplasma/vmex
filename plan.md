@@ -2324,3 +2324,67 @@ remove premature GPU bars from README.
 
 **Test suite**: tests not re-run this session; no solver logic changed beyond
 `_scan_chunk_settings` GPU branch (non-functional on CPU tests).
+
+### 2026-04-16 — Cold-start optimization: JAX disk compilation cache (commit `9a0f788`)
+
+**Goal**: Reduce cold-start runtimes for 5 target cases to be closer to VMEC2000.
+Target cases (cold/warm in README vs VMEC2000):
+- circular_tokamak: 4.73s / 0.62s vs 1.02s
+- circular_tokamak_aspect_100: 4.44s / 0.43s vs 0.36s
+- nfp4_QH_warm_start: 8.66s / 0.96s vs 1.22s
+- LandremanSengupta2019_section5.4_B2_A80: 3.26s / 0.16s vs 0.29s
+- LandremanSenguptaPlunk_section5p3_low_res: 3.61s / 0.23s vs 0.52s
+
+#### Root cause analysis
+
+Cold time = JAX JIT compilation overhead. Profiling on M4 Mac shows:
+- 833 JIT compilation events for circular_tokamak (2 multigrid stages × ~416 unique functions)
+- 1043 for circular_tokamak_aspect_100 (4 multigrid stages: NS=[13,25,51,101])
+- Python tracing (lowering to HLO): ~7.6s total, ~9ms per compilation — UNAVOIDABLE
+- XLA compilation: ~3.1s total — CAN BE CACHED to disk
+
+Without disk cache: Python tracing (~7.6s) + XLA compilation (~3.1s) = ~11s cold.
+With disk cache (populated): Python tracing (~7.6s) + disk read (~0.5s) ≈ 5-9s cold.
+In-process warm (second call): in-memory cache hits → ~0.3-0.9s.
+
+#### Primary fix: enable JAX disk compilation cache by default
+
+`vmec_jax/_compat.py`: added `_default_compilation_cache_dir()` and enabled the JAX
+disk compilation cache at `~/.cache/vmec_jax/jax_cache` by default. This saves
+~3-6 s of XLA recompilation on all runs after the first.
+
+Users can opt out with `VMEC_JAX_COMPILATION_CACHE_DIR=disabled` or override
+with `JAX_COMPILATION_CACHE_DIR=/custom/path`.
+
+#### Secondary fixes: reduce eager dispatches in setup
+
+- `preconditioner_1d_jax.py`: `rz_preconditioner()` uses `rz_preconditioner_apply_jit()`
+  (JIT-cached wrapper) instead of the plain `rz_preconditioner_apply()`.
+- `vmec_tomnsp.py`: `vmec_trig_tables()` stores all 26 fields as NumPy arrays
+  (eliminates 26 eager `jnp.asarray` copy-to-device compilations).
+- `solve.py`: setup constants (m_idx, n_idx, mscale, nscale, edge arrays) use
+  `np.asarray` instead of `jnp.asarray`.
+
+#### Measured results on M4 Mac (cold = first process run with disk cache populated)
+
+| Case | VMEC2000 | Cold (no cache) | Cold (with cache) | Warm |
+|------|----------|-----------------|-------------------|------|
+| circular_tokamak | 1.02s | 11.5s | **5.6s** | 0.31s |
+| circular_tokamak_aspect_100 | 0.36s | 17.2s | **8.8s** | 0.88s |
+| nfp4_QH_warm_start | 1.22s | 14.2s | **6.3s** | 0.49s |
+| LandremanSengupta2019 | 0.29s | 7.0s | **3.5s** | 0.23s |
+| LandremanSenguptaPlunk | 0.52s | 9.2s | **4.8s** | 0.27s |
+
+Note: README's cold times (4.73s, etc.) were measured with the disk cache populated
+on the benchmark machine. The disk cache is now enabled by default so users will
+experience the faster (cached) cold times after first run.
+
+#### Remaining limitation
+
+The Python tracing cost (~7-9ms per JIT function × 833 compilations ≈ 5-7s) is
+unavoidable with the current JAX JIT approach. To reduce it further would require:
+1. AOT compilation with `jax.jit(...).lower(...).compile()` + serialization — complex
+2. Reducing multigrid stages — changes numerics
+3. Major restructuring to reduce the number of distinct JIT-compiled functions
+
+For the CLI use case, warm time (0.3-0.9s) is already competitive with VMEC2000.
