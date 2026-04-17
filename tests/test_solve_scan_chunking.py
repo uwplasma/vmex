@@ -44,7 +44,10 @@ def test_scan_chunk_settings_accelerator_3d_default(monkeypatch):
         lthreed=True,
     )
 
-    assert chunk_size == 400
+    # GPU quiet runs now use the full iteration budget as a single chunk to
+    # eliminate host/device sync overhead in the Python chunk loop.
+    # Use VMEC_JAX_SCAN_CHUNK_SIZE to cap this when GPU memory is tight.
+    assert chunk_size == 5000
     assert cap_to_remaining is True
 
 
