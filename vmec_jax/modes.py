@@ -119,9 +119,13 @@ def default_grid_sizes(mpol: int, ntor: int, ntheta: int = 0, nzeta: int = 0) ->
     # VMEC makes ntheta1 = even
     ntheta1 = 2 * (ntheta // 2)
 
-    if ntor == 0 and nzeta == 0:
+    if ntor == 0:
+        # Axisymmetric: solution is constant in ζ, so NZETA=1 is always sufficient.
+        # VMEC2000 convention: user-specified NZETA is ignored when NTOR=0 (lthreed=False).
+        # This gives a large speedup when users specify NZETA>1 for historical reasons
+        # (e.g. cth_like with NZETA=36 but NTOR=0 runs ~26× faster with NZETA=1).
         nzeta = 1
-    if nzeta <= 0:
+    elif nzeta <= 0:
         nzeta = 2 * ntor + 4
 
     return ntheta1, int(nzeta)

@@ -62,11 +62,15 @@ def _lower(s: Any, default: str) -> str:
 
 def _power_series(coeffs, x):
     """Evaluate Σ_i coeffs[i] * x**i using Horner (coeffs in ascending order)."""
-    coeffs = jnp.asarray(coeffs)
+    # Use np.asarray so that coeffs[i] in the Python loop is a plain NumPy scalar,
+    # not a JAX dynamic_slice op.  Each JAX dynamic_slice triggers an eager XLA
+    # compilation event (~2 ms), so keeping coeffs as a NumPy array eliminates
+    # O(n_coeffs) eager compilations without changing any arithmetic.
+    coeffs = np.asarray(coeffs)
     x = jnp.asarray(x)
     y = jnp.zeros_like(x, dtype=coeffs.dtype)
     # Horner: iterate from high order to low order.
-    for i in range(int(coeffs.shape[0]) - 1, -1, -1):
+    for i in range(len(coeffs) - 1, -1, -1):
         y = y * x + coeffs[i]
     return y
 
@@ -78,10 +82,12 @@ def _pcurr_power_series_ip(ac, x):
       I'(x) = Σ_i ac(i) * x**i
       I(x)  = ∫_0^x I'(t) dt = Σ_i ac(i)/(i+1) * x**(i+1)
     """
-    ac = jnp.asarray(ac)
+    # Same rationale as _power_series: keep ac as NumPy so ac[i] is a free scalar
+    # rather than a JAX dynamic_slice that triggers an eager XLA compilation.
+    ac = np.asarray(ac)
     x = jnp.asarray(x)
     y = jnp.zeros_like(x, dtype=ac.dtype)
-    for i in range(int(ac.shape[0]) - 1, -1, -1):
+    for i in range(len(ac) - 1, -1, -1):
         y = y * x + ac[i] / (i + 1)
     return x * y
 

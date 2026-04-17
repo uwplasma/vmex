@@ -344,39 +344,45 @@ def vmec_trig_tables(
     wint = w_theta[:, None] * np.ones((nzeta,), dtype=float)[None, :]
     wint3_precond = wint[None, :, :]
 
-    # Convert to backend arrays.
+    # Store as plain NumPy arrays.  Every field was computed with np.* above,
+    # so wrapping with jnp.asarray here triggers 26 separate eager XLA
+    # compilations (one copy-to-device primitive per field, ~2 ms each).
+    # JAX automatically promotes NumPy arrays to device arrays when the trig
+    # tables are captured as closure constants inside _run_scan at JIT boundary,
+    # so the explicit conversion is both redundant and expensive on cold start.
+    _np_dtype = np.dtype(dtype) if not isinstance(dtype, np.dtype) else dtype
     tables = VmecTrigTables(
         ntheta1=ntheta1,
         ntheta2=ntheta2,
         ntheta3=ntheta3,
         dnorm=float(dnorm),
         dnorm3=float(dnorm3),
-        mscale=jnp.asarray(mscale, dtype=dtype),
-        nscale=jnp.asarray(nscale, dtype=dtype),
+        mscale=np.asarray(mscale, dtype=_np_dtype),
+        nscale=np.asarray(nscale, dtype=_np_dtype),
         r0scale=float(r0scale),
-        cosmu=jnp.asarray(cosmu, dtype=dtype),
-        sinmu=jnp.asarray(sinmu, dtype=dtype),
-        cosmum=jnp.asarray(cosmum, dtype=dtype),
-        sinmum=jnp.asarray(sinmum, dtype=dtype),
-        cosmui=jnp.asarray(cosmui, dtype=dtype),
-        sinmui=jnp.asarray(sinmui, dtype=dtype),
-        cosmumi=jnp.asarray(cosmumi, dtype=dtype),
-        sinmumi=jnp.asarray(sinmumi, dtype=dtype),
-        cosmui3=jnp.asarray(cosmui3, dtype=dtype),
-        cosmumi3=jnp.asarray(cosmumi3, dtype=dtype),
-        cosmui_nt2=jnp.asarray(cosmui_nt2, dtype=dtype),
-        sinmui_nt2=jnp.asarray(sinmui_nt2, dtype=dtype),
-        cosmumi_nt2=jnp.asarray(cosmumi_nt2, dtype=dtype),
-        sinmumi_nt2=jnp.asarray(sinmumi_nt2, dtype=dtype),
-        basis_theta_cs_nt2=jnp.asarray(basis_theta_cs_nt2, dtype=dtype),
-        basis_theta_mu_nt2=jnp.asarray(basis_theta_mu_nt2, dtype=dtype),
-        cosnv=jnp.asarray(cosnv, dtype=dtype),
-        sinnv=jnp.asarray(sinnv, dtype=dtype),
-        cosnvn=jnp.asarray(cosnvn, dtype=dtype),
-        sinnvn=jnp.asarray(sinnvn, dtype=dtype),
-        basis_zeta_cs=jnp.asarray(basis_zeta_cs, dtype=dtype),
-        basis_zeta_all=jnp.asarray(basis_zeta_all, dtype=dtype),
-        wint3_precond=jnp.asarray(wint3_precond, dtype=dtype),
+        cosmu=np.asarray(cosmu, dtype=_np_dtype),
+        sinmu=np.asarray(sinmu, dtype=_np_dtype),
+        cosmum=np.asarray(cosmum, dtype=_np_dtype),
+        sinmum=np.asarray(sinmum, dtype=_np_dtype),
+        cosmui=np.asarray(cosmui, dtype=_np_dtype),
+        sinmui=np.asarray(sinmui, dtype=_np_dtype),
+        cosmumi=np.asarray(cosmumi, dtype=_np_dtype),
+        sinmumi=np.asarray(sinmumi, dtype=_np_dtype),
+        cosmui3=np.asarray(cosmui3, dtype=_np_dtype),
+        cosmumi3=np.asarray(cosmumi3, dtype=_np_dtype),
+        cosmui_nt2=np.asarray(cosmui_nt2, dtype=_np_dtype),
+        sinmui_nt2=np.asarray(sinmui_nt2, dtype=_np_dtype),
+        cosmumi_nt2=np.asarray(cosmumi_nt2, dtype=_np_dtype),
+        sinmumi_nt2=np.asarray(sinmumi_nt2, dtype=_np_dtype),
+        basis_theta_cs_nt2=np.asarray(basis_theta_cs_nt2, dtype=_np_dtype),
+        basis_theta_mu_nt2=np.asarray(basis_theta_mu_nt2, dtype=_np_dtype),
+        cosnv=np.asarray(cosnv, dtype=_np_dtype),
+        sinnv=np.asarray(sinnv, dtype=_np_dtype),
+        cosnvn=np.asarray(cosnvn, dtype=_np_dtype),
+        sinnvn=np.asarray(sinnvn, dtype=_np_dtype),
+        basis_zeta_cs=np.asarray(basis_zeta_cs, dtype=_np_dtype),
+        basis_zeta_all=np.asarray(basis_zeta_all, dtype=_np_dtype),
+        wint3_precond=np.asarray(wint3_precond, dtype=_np_dtype),
     )
     if cache:
         _TRIG_CACHE[cache_key] = tables
