@@ -856,5 +856,14 @@ Stop or reduce scope if:
     1. reduced exact RSS / executable retention on repeated nearby solves, or
     2. lower exact residual solve wall time without giving back the fixed
        late-iteration Jacobian behavior.
-  - Draft PR opened for the vmec_jax-side branch state:
-    https://github.com/uwplasma/vmec_jax/pull/6
+  - The draft vmec_jax PR (`uwplasma/vmec_jax#6`) has been closed
+    intentionally.
+  - Do not reopen any vmec_jax PR until the exact JAX QH benchmark is
+    competitive with classic both in runtime and in final quasisymmetry.
+  - Consumer-side audit on 2026-04-17:
+    - nearby-point continuation through the exact SciPy callback path was
+      tested and rejected on the simsopt side because it regressed the QH
+      nearby-point callback pair instead of reducing it;
+    - that result reinforces the current vmec_jax-side direction: the next
+      meaningful win must come from the forward exact solve or replay
+      transport itself, not from wrapper-level warm-state plumbing.
