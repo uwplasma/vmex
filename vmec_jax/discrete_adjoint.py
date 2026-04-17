@@ -1167,6 +1167,7 @@ def checkpoint_tape_state_jvp_columns(
     static,
     initial_tangents,
     rebuild_preconditioner: bool = False,
+    _allow_chunking: bool = True,
 ):
     """Push multiple packed-state tangents forward through the extracted step tape."""
     if not tape.step_traces and tape.dynamic_initial_carry is None:
@@ -1175,6 +1176,23 @@ def checkpoint_tape_state_jvp_columns(
     from ._compat import jax
 
     tangents = jnp.asarray(initial_tangents)
+    if _allow_chunking:
+        chunk_env = os.environ.get("VMEC_JAX_REPLAY_COLUMN_CHUNK")
+        if chunk_env is not None:
+            column_chunk = max(1, int(chunk_env))
+            if tangents.shape[0] > column_chunk:
+                outputs = []
+                for start in range(0, int(tangents.shape[0]), column_chunk):
+                    outputs.append(
+                        checkpoint_tape_state_jvp_columns(
+                            tape=tape,
+                            static=static,
+                            initial_tangents=tangents[start : start + column_chunk],
+                            rebuild_preconditioner=rebuild_preconditioner,
+                            _allow_chunking=False,
+                        )
+                    )
+                return jnp.concatenate(outputs, axis=0)
     stacked = tape.stacked_step_traces
     static_flags = tape.step_trace_static_flags
     if (
