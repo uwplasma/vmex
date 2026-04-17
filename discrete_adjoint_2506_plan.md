@@ -895,3 +895,44 @@ Stop or reduce scope if:
       least-squares descent direction from the exact Jacobian, so the current
       mode-2 failure is now more likely an outer-solver policy issue than a
       replay-derivative issue.
+  - Exact QH tolerance audit on 2026-04-17:
+    - the simsopt-side comparison harness was upgraded so it can run the exact
+      JAX path at explicit `ftol/gtol/xtol`, stream iteration snapshots to disk
+      during the run, and optionally collect JAX compile logs / profiler traces;
+    - the streamed snapshots were necessary because long exact JAX children are
+      still being killed by the OS before writing summaries;
+    - full profiled runs (`JAX_LOG_COMPILES=1` plus `jax.profiler.start_trace`)
+      are too heavy on the exact path today: both `mode=1` and `mode=2`
+      children died with return code `-9`, and the trace dirs remained empty
+      because the children never reached `stop_trace()`;
+    - compile-log inspection from those failed profiled runs shows the replay
+      shape problem is not fully solved yet:
+      - `mode=1` still recompiles `_run_scan` for stacked lengths
+        `192`, `672`, and `768`;
+      - `mode=2` still recompiles `_run_scan` for stacked lengths
+        `896` and `928`;
+      - repeated `scan` / `_ptau_compute_jit` compilations are still present
+        late in the run;
+    - important memory audit on the vmec_jax side:
+      - the stored replay tape is not the `~20 GB` culprit;
+      - on the exact `mode=1` start point,
+        `dynamic_base_carries_stacked` is only about `47.7 MB` and
+        `stacked_step_traces` about `0.02 MB`;
+      - therefore the dominant memory spike must come from the live exact
+        forward solve / replay JVP / executable construction path, not from
+        retaining the serialized tape itself;
+    - coarse replay bucketing (`VMEC_JAX_DYNAMIC_REPLAY_BUCKET=1024`) helps but
+      is not sufficient:
+      - on exact `mode=1`, the accepted trajectory reaches
+        `0.2406365` by `nfev_observed=11`, but the child is still killed before
+        convergence;
+      - the cold coarse-bucket run peaked around `19.24 GB` RSS;
+      - a warmed rerun reduced the observed peak to about `17.22 GB`, which is
+        strong evidence that compilation/executable construction is still a
+        material component of the spike;
+      - exact `mode=2` with the same coarse bucket reaches accepted iterates at
+        `0.2262223` and `0.2016143`, then times out at 300 s while the outer
+        solver is evaluating a bad trial point rather than a new accepted step;
+    - rejected local experiment:
+      - chunking Jacobian columns at the simsopt wrapper level did not produce
+        a clear memory win and was reverted.
