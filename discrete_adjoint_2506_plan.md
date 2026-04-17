@@ -856,3 +856,5 @@ Stop or reduce scope if:
     1. reduced exact RSS / executable retention on repeated nearby solves, or
     2. lower exact residual solve wall time without giving back the fixed
        late-iteration Jacobian behavior.
+  - Draft PR opened for the vmec_jax-side branch state:
+    https://github.com/uwplasma/vmec_jax/pull/6
