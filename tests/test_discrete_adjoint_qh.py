@@ -502,6 +502,79 @@ def test_residual_checkpoint_tape_direct_dynamic_only_matches_two_step_qh(load_c
     np.testing.assert_allclose(np.asarray(lean_jvp), np.asarray(full_jvp), rtol=1.0e-10, atol=1.0e-10)
 
 
+def test_residual_checkpoint_tape_direct_buckets_dynamic_shapes_for_nearby_lengths(load_case_qh_warm_start):
+    pytest.importorskip("jax")
+    _require_slow()
+
+    from vmec_jax._compat import jax
+    from vmec_jax.discrete_adjoint import build_residual_checkpoint_tape_direct
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.init_guess import initial_guess_from_boundary
+
+    _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
+    state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
+    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state_guess, static).sqrtg), axis_index=1))
+    common_kwargs = dict(
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        step_size=float(indata.get_float("DELT", 1.0)),
+        vmec2000_control=True,
+        reference_mode=False,
+        backtracking=True,
+        limit_dt_from_force=True,
+        limit_update_rms=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces="auto",
+        use_scan=False,
+        light_history=True,
+        resume_state_mode="full",
+    )
+
+    tape2 = build_residual_checkpoint_tape_direct(
+        state_guess,
+        static,
+        max_iter=2,
+        solver_kwargs=common_kwargs,
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        step_size=float(indata.get_float("DELT", 1.0)),
+        light_history=True,
+        store_trace=False,
+        store_full_step_traces=False,
+    )
+    tape3 = build_residual_checkpoint_tape_direct(
+        state_guess,
+        static,
+        max_iter=3,
+        solver_kwargs=common_kwargs,
+        indata=indata,
+        signgs=signgs,
+        ftol=float(indata.get_float("FTOL", 1e-14)),
+        step_size=float(indata.get_float("DELT", 1.0)),
+        light_history=True,
+        store_trace=False,
+        store_full_step_traces=False,
+    )
+
+    assert tape2.stacked_step_traces is not None
+    assert tape3.stacked_step_traces is not None
+    assert tape2.dynamic_base_carries_stacked is not None
+    assert tape3.dynamic_base_carries_stacked is not None
+
+    trace2_leaves = jax.tree_util.tree_leaves(tape2.stacked_step_traces)
+    trace3_leaves = jax.tree_util.tree_leaves(tape3.stacked_step_traces)
+    carry2_leaves = jax.tree_util.tree_leaves(tape2.dynamic_base_carries_stacked)
+    carry3_leaves = jax.tree_util.tree_leaves(tape3.dynamic_base_carries_stacked)
+
+    assert trace2_leaves[0].shape[0] == trace3_leaves[0].shape[0]
+    assert carry2_leaves[0].shape[0] == carry3_leaves[0].shape[0]
+    assert trace2_leaves[0].shape[0] >= 3
+
+
 def test_residual_checkpoint_tape_matches_direct_two_step_qh(load_case_qh_warm_start):
     pytest.importorskip("jax")
     _require_slow()

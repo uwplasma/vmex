@@ -9,6 +9,7 @@ recorded in diagnostics.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from typing import Any
 
 import numpy as np
@@ -65,6 +66,24 @@ _REPLAY_STEP_TRACE_STATIC_KEYS = (
 _CHECKPOINT_TAPE_SCAN_CACHE: dict[tuple[Any, ...], Any] = {}
 _CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE: dict[tuple[Any, ...], Any] = {}
 _CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE: dict[tuple[Any, ...], Any] = {}
+
+
+def _dynamic_replay_bucket_size() -> int:
+    env = os.getenv("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", "").strip()
+    if not env:
+        return 32
+    try:
+        bucket = int(env)
+    except Exception:
+        return 32
+    return max(1, bucket)
+
+
+def _dynamic_replay_bucket_len(length: int) -> int:
+    bucket = _dynamic_replay_bucket_size()
+    if length <= 0:
+        return 0
+    return int(((int(length) + bucket - 1) // bucket) * bucket)
 
 
 @dataclass(frozen=True)
@@ -653,14 +672,22 @@ def _build_dynamic_replay_payload(step_traces: tuple[dict[str, Any], ...], stati
             dynamic_static_flags[key] = first
         else:
             varying_keys.append(key)
-    filtered = tuple({key: trace[key] for key in varying_keys} for trace in step_traces)
+    filtered = tuple({key: trace[key] for key in varying_keys} | {"active": True} for trace in step_traces)
+    target_len = _dynamic_replay_bucket_len(len(filtered))
+    if target_len > len(filtered):
+        pad_trace = dict(filtered[-1])
+        pad_trace["active"] = False
+        filtered = filtered + tuple(dict(pad_trace) for _ in range(target_len - len(filtered)))
     stacked = jax.tree_util.tree_map(lambda *xs: np.stack([np.asarray(x) for x in xs], axis=0), *filtered)
     base_carries = tuple(_dynamic_replay_initial_carry(trace) for trace in step_traces)
+    if target_len > len(base_carries):
+        pad_carry = base_carries[-1]
+        base_carries = base_carries + tuple(pad_carry for _ in range(target_len - len(base_carries)))
     stacked_base_carries = jax.tree_util.tree_map(
         lambda *xs: np.stack([np.asarray(x) for x in xs], axis=0),
         *base_carries,
     )
-    initial_carry = base_carries[0]
+    initial_carry = _dynamic_replay_initial_carry(step_traces[0])
     return stacked, dynamic_static_flags, initial_carry, stacked_base_carries
 
 
@@ -1059,13 +1086,18 @@ def _checkpoint_tape_dynamic_scan_runner(*, static, stacked, static_flags):
         return cached
 
     def _step_scan(carry, trace):
-        carry = _packed_dynamic_replay_step_from_carry(
-            carry,
-            trace,
-            static=static,
-            static_flags=static_flags,
-            preconditioner_jmax_override=int(static_flags["precond_jmax"]),
-        )
+        active = jnp.asarray(trace["active"], dtype=bool) if "active" in trace else jnp.asarray(True, dtype=bool)
+
+        def _advance(carry_in):
+            return _packed_dynamic_replay_step_from_carry(
+                carry_in,
+                trace,
+                static=static,
+                static_flags=static_flags,
+                preconditioner_jmax_override=int(static_flags["precond_jmax"]),
+            )
+
+        carry = jax.lax.cond(active, _advance, lambda carry_in: carry_in, carry)
         return carry, None
 
     @jax.jit
@@ -1100,6 +1132,7 @@ def _checkpoint_tape_dynamic_basepoint_scan_runner(*, static, stacked, stacked_b
 
     def _step_scan(carry_tangents, inputs):
         carry_base, trace = inputs
+        active = jnp.asarray(trace["active"], dtype=bool) if "active" in trace else jnp.asarray(True, dtype=bool)
 
         def _step(carry):
             return _packed_dynamic_replay_step_from_carry(
@@ -1113,7 +1146,10 @@ def _checkpoint_tape_dynamic_basepoint_scan_runner(*, static, stacked, stacked_b
         def _single_tangent_step(single_tangent):
             return jax.jvp(_step, (carry_base,), (single_tangent,))[1]
 
-        step_tangents = jax.vmap(_single_tangent_step)(carry_tangents)
+        def _advance(carry_tangents_in):
+            return jax.vmap(_single_tangent_step)(carry_tangents_in)
+
+        step_tangents = jax.lax.cond(active, _advance, lambda carry_tangents_in: carry_tangents_in, carry_tangents)
         return step_tangents, None
 
     @jax.jit
