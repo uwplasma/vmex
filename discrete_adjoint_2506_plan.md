@@ -840,3 +840,19 @@ Stop or reduce scope if:
     - tested columns `0..3` now match central FD to about `1e-2` to `3e-2`
       in objective-direction error instead of the earlier `~1e19` failure;
     - the catastrophic late-iteration Jacobian blow-up is gone.
+  - Stable direct comparison set generated on 2026-04-16 from the
+    simsopt-side harness in
+    `/Users/rogeriojorge/local/simsopt_discrete_adjoint/tools/diagnostics/qh_classic_vs_jax_compare.py`:
+    - JAX exact `max_mode=1`, 90 s cap: final total `0.24902495986882436`,
+      peak RSS `14.93 GB`
+    - JAX exact `max_mode=2`, 90 s cap: final total `0.22622233073571194`,
+      peak RSS `16.91 GB`
+  - That comparison reinforces the current vmec_jax-side diagnosis:
+    derivative quality is good enough to leave the critical path for now, while
+    the remaining blocker is forward exact solve cost plus executable/memory
+    retention on nearby boundary points.
+  - Any further vmec_jax change should therefore be justified by one of two
+    measurable wins on the new harness:
+    1. reduced exact RSS / executable retention on repeated nearby solves, or
+    2. lower exact residual solve wall time without giving back the fixed
+       late-iteration Jacobian behavior.
