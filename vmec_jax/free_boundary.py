@@ -257,7 +257,9 @@ class _FreeBoundarySampleSetup:
 def _freeb_boundary_sample_setup(*, static: Any, sample_nzeta: int) -> _FreeBoundarySampleSetup:
     """Return cached static data used by host-side free-boundary sampling."""
 
-    key = (id(static), int(sample_nzeta))
+    _trig_hint = getattr(static, "trig_vmec", None)
+    _ntheta3_hint = int(_trig_hint.ntheta3) if _trig_hint is not None else -1
+    key = (id(static), _ntheta3_hint, int(sample_nzeta))
     cached = _FREEB_BOUNDARY_SETUP_CACHE.get(key)
     if cached is not None:
         return cached

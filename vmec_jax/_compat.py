@@ -62,6 +62,36 @@ def _noop_jit(f=None, *args, **_kwargs):
     return f
 
 
+def _default_compilation_cache_dir() -> str | None:
+    """Return a default JAX compilation-cache directory under ~/.cache.
+
+    Returns None if the user explicitly disables caching via
+    ``VMEC_JAX_COMPILATION_CACHE_DIR=disabled`` (or ``0`` / ``false``).
+    Returns the value of ``JAX_COMPILATION_CACHE_DIR`` if already set by the
+    user (so we never override an explicit choice).
+    """
+    # Already set by the user — respect it.
+    if "JAX_COMPILATION_CACHE_DIR" in os.environ:
+        val = os.environ["JAX_COMPILATION_CACHE_DIR"].strip()
+        if val.lower() in ("", "disabled", "0", "false", "no"):
+            return None
+        return val
+
+    # User can opt out via VMEC_JAX_COMPILATION_CACHE_DIR=disabled
+    vmec_val = os.environ.get("VMEC_JAX_COMPILATION_CACHE_DIR", "").strip()
+    if vmec_val.lower() in ("disabled", "0", "false", "no"):
+        return None
+    if vmec_val:
+        return vmec_val
+
+    # Default: ~/.cache/vmec_jax/jax_cache
+    try:
+        import pathlib
+        return str(pathlib.Path.home() / ".cache" / "vmec_jax" / "jax_cache")
+    except Exception:
+        return None
+
+
 def _try_import_jax() -> Tuple[Any, Any, Callable[[Callable[..., Any]], Callable[..., Any]]]:
     try:
         # Enable x64 by default for VMEC parity unless the user opted out.
@@ -73,6 +103,15 @@ def _try_import_jax() -> Tuple[Any, Any, Callable[[Callable[..., Any]], Callable
         # Level 0=INFO, 1=WARNING, 2=ERROR — we default to ERROR-only
         # so that genuine errors still surface.
         os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+
+        # Enable the JAX disk compilation cache.  This dramatically reduces
+        # cold-start time: JIT compilations are serialised to disk on first
+        # run and loaded back on subsequent runs, skipping the expensive XLA
+        # recompilation step (~3–6 s per 833-compilation batch).
+        _cache_dir = _default_compilation_cache_dir()
+        if _cache_dir is not None:
+            os.environ.setdefault("JAX_COMPILATION_CACHE_DIR", _cache_dir)
+
         import jax
 
         # If Sphinx (or other tooling) has inserted a mock, treat JAX as unavailable.
@@ -85,6 +124,14 @@ def _try_import_jax() -> Tuple[Any, Any, Callable[[Callable[..., Any]], Callable
             jax.config.update("jax_enable_x64", os.environ.get("JAX_ENABLE_X64", "0") == "1")
         except Exception:
             pass
+
+        # Wire up the compilation cache via jax.config if the env-var approach
+        # didn't take effect (older JAX versions use the config key directly).
+        if _cache_dir is not None:
+            try:
+                jax.config.update("jax_compilation_cache_dir", _cache_dir)
+            except Exception:
+                pass
 
         import jax.numpy as jnp
 
