@@ -976,3 +976,26 @@ Stop or reduce scope if:
         - however, coarse consumer-side chunking alone is not enough to make
           the exact `mode=2` path finish, so the default branch behavior should
           stay unchunked while this remains an opt-in debugging knob.
+    - vmec_jax-side replay-column chunking audit on 2026-04-17:
+      - added an opt-in environment knob,
+        `VMEC_JAX_REPLAY_COLUMN_CHUNK`, to chunk the replay-column transport
+        inside `checkpoint_tape_state_jvp_columns(...)` itself, so the expensive
+        scan/JVP path can be chunked without redoing the outer initial-state and
+        residual linearizations in the simsopt wrapper;
+      - targeted vmec_jax replay regressions and the simsopt full-inner/moving-axis
+        Jacobian regressions remained green after this change;
+      - exact `mode=2` with `VMEC_JAX_REPLAY_COLUMN_CHUNK=8`:
+        - same accepted iterates `0.2262223 -> 0.2016143`;
+        - peak RSS reduced from about `23.10 GB` to about `20.32 GB`;
+        - second accepted iterate arrived later (`151.57 s` vs `103.80 s`);
+      - exact `mode=2` with `VMEC_JAX_REPLAY_COLUMN_CHUNK=12`:
+        - same accepted iterates through `0.1987163` by `nfev_observed=9`;
+        - cold run peak RSS dropped further to about `17.81 GB`, but the third
+          accepted iterate arrived much later (`237.54 s`);
+        - warmed rerun reached the same `0.1987163` by about `167.93 s` with
+          peak RSS about `21.56 GB`;
+      - conclusion:
+        - replay-side chunking is a better lever than wrapper-side chunking for
+          the exact `mode=2` memory spike;
+        - it is still a runtime/memory tradeoff, so it should remain opt-in for
+          now rather than being forced as the branch default.
