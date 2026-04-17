@@ -936,3 +936,43 @@ Stop or reduce scope if:
     - rejected local experiment:
       - chunking Jacobian columns at the simsopt wrapper level did not produce
         a clear memory win and was reverted.
+    - follow-up streamed audit after the explicit tolerance patch on the
+      consumer side:
+      - exact `mode=1` with `VMEC_JAX_DYNAMIC_REPLAY_BUCKET=1024` still exits
+        before summary/termination, but now reaches accepted iterates
+        `0.2605233`, `0.2490250`, `0.2440611`, `0.2417510`, and `0.2406365`
+        by `nfev_observed=11`;
+      - that latest `mode=1` run observed peak RSS of only about `9.06 GB`,
+        much lower than the earlier `17-19 GB` coarse-bucket probes, which
+        suggests the warmed executable path is materially cheaper than the cold
+        tolerance audit implied;
+      - exact `mode=2` on the same merged/warmed path reaches accepted
+        iterates `0.2262223`, `0.2016143`, and `0.1987163` by
+        `nfev_observed=9`, but still exits before writing a final summary;
+      - the latest `mode=2` exact run still spikes to about `23.10 GB` RSS,
+        so the remaining long-run memory problem is now more concentrated in
+        the higher-dimensional exact path than in the small `mode=1` case;
+      - updated diagnosis:
+        - dynamic replay bucketing plus warmed executables are sufficient to
+          get real exact descent in both `mode=1` and `mode=2`;
+        - the remaining vmec_jax-side blocker is long-run executable/live-JVP
+          memory retention on exact nearby points, not the earlier replay-tape
+          serialization or frozen-control derivative issues.
+    - consumer-side large-Jacobian chunking audit on 2026-04-17:
+      - the simsopt wrapper was temporarily taught to chunk the exact
+        discrete-adjoint Jacobian columns so large control spaces could be
+        tested without changing the vmec_jax replay algebra;
+      - this is a genuine memory/runtime tradeoff, not a derivative bug:
+        derivative regressions stayed green throughout the experiment;
+      - exact `mode=2` with chunk size `8` reduced observed peak RSS from
+        about `23.10 GB` to about `20.77 GB` but did not extend accepted
+        progress beyond the baseline trajectory;
+      - exact `mode=2` with chunk size `4` lowered peak RSS further to about
+        `19.35 GB`, but only two accepted iterates were reached within the
+        300 s wall-clock window;
+      - conclusion:
+        - the high-dimensional JVP column batch is indeed part of the live
+          memory spike;
+        - however, coarse consumer-side chunking alone is not enough to make
+          the exact `mode=2` path finish, so the default branch behavior should
+          stay unchunked while this remains an opt-in debugging knob.
