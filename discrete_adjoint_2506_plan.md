@@ -879,3 +879,19 @@ Stop or reduce scope if:
     - the next vmec_jax implementation target should therefore be padded or
       bucketed replay traces / base carries so nearby points reuse the same
       dynamic scan executable.
+  - Implemented replay bucketing on 2026-04-17:
+    - dynamic replay payloads are now padded to a stable bucket size
+      (default `32`) with an explicit `active` mask, so nearby exact QH points
+      reuse the same scan shape;
+    - added a slow regression that checks direct dynamic replay payloads for
+      nearby short lengths share the same padded leading dimension;
+    - post-fix exact QH nearby-point audit on the simsopt side now shows a
+      stable replay bucket length `800` for `x0/x1/x2`, and the jacobian time
+      at nearby points drops to about `2.50 s` / `2.37 s` instead of growing
+      with tape length;
+    - this moves the next blocker further toward the forward primal solve and
+      outer optimization behavior, rather than replay-executable churn.
+    - downstream audit also showed that `max_mode=2` still has a usable local
+      least-squares descent direction from the exact Jacobian, so the current
+      mode-2 failure is now more likely an outer-solver policy issue than a
+      replay-derivative issue.
