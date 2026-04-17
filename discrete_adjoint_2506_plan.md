@@ -867,3 +867,15 @@ Stop or reduce scope if:
     - that result reinforces the current vmec_jax-side direction: the next
       meaningful win must come from the forward exact solve or replay
       transport itself, not from wrapper-level warm-state plumbing.
+  - Merged `origin/main` through `16b9ed0` into
+    `codex/discrete-adjoint-2506` on 2026-04-17 and revalidated the
+    discrete-adjoint path:
+    - `tests/test_discrete_adjoint_qh.py -k 'dynamic_replay_scan_matches_primal_qh_full_inner or checkpoint_tape_state_jvp_columns_matches_single_column_qh_rebuild_preconditioner'`
+      still passes;
+    - the remaining exact runtime issue is now more explicit on the merged
+      branch: nearby QH points still build different dynamic replay lengths
+      (`786`, `792`, `794` on the exact mode-1 probe), so the replay scan sees
+      new shapes and can retain/compile fresh executables;
+    - the next vmec_jax implementation target should therefore be padded or
+      bucketed replay traces / base carries so nearby points reuse the same
+      dynamic scan executable.
