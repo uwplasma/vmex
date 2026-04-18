@@ -1140,3 +1140,22 @@ Stop or reduce scope if:
         - explicit or automatic force-kernel JIT should stay enabled on the
           QH exact route while the longer-horizon memory problem is being
           reduced.
+    - forward-only line-search follow-up on 2026-04-18:
+      - the next simsopt-side optimization profile showed that vmec_jax was
+        still paying exact replay-tape construction costs on pure line-search
+        trial points, even though those points only needed forward residuals;
+      - after exposing a forward-only residual callback from the objective
+        stage and routing the concrete exact GN line search through the normal
+        forward solve path, the vmec_jax backend delivered the same objective
+        with materially less memory pressure:
+        - exact `max_mode=2`, `nfev=2`:
+          - same estimated total objective `0.0620440`,
+          - max RSS reduced to about `13.47 GB`,
+          - line-search wall time reduced substantially;
+        - exact `max_mode=2`, `nfev=3`:
+          - streamed descent still reached the third accepted step,
+          - max RSS reduced to about `17.50 GB` before late-process failure;
+      - conclusion:
+        - replay/exact derivative quality is still not the bottleneck;
+        - the remaining problem is long-run forward-path retention after the
+          good optimizer step is already found.
