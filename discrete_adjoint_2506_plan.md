@@ -1083,3 +1083,25 @@ Stop or reduce scope if:
         - it does not by itself fix the remaining `mode=2` zero-step behavior,
           which is now clearly an outer-solver issue rather than a replay
           memory/executable issue.
+    - exact outer-solver follow-up on 2026-04-18:
+      - the resumed audit confirmed that the vmec_jax-side exact Jacobian was
+        already good enough for `max_mode=2`; the remaining zero-step failure
+        was in the outer SciPy policy, not in replay transport or derivative
+        assembly;
+      - the main supporting datapoint was the direct dense least-squares step
+        at `x0`, which reduced total objective from `0.3002458` to about
+        `0.1127546` at `alpha=0.5` using the exact concrete `J`;
+      - after the simsopt-side concrete Gauss-Newton path was enabled, the
+        same vmec_jax exact residual/Jacobian backend delivered real descent:
+        - `max_mode=2`, `max_nfev=2`,
+          `VMEC_JAX_DYNAMIC_REPLAY_BUCKET=1024`,
+          `VMEC_JAX_REPLAY_COLUMN_CHUNK=12`:
+          - final estimated total objective `0.0620440`;
+        - `max_mode=1`, `max_nfev=3`,
+          `VMEC_JAX_DYNAMIC_REPLAY_BUCKET=1024`:
+          - final estimated total objective `0.2321525`;
+      - conclusion:
+        - vmec_jax derivative quality is no longer the limiting factor for the
+          current QH exact runs;
+        - the remaining work is to reduce forward/replay memory retention so
+          the better optimizer can run longer without exhausting the machine.
