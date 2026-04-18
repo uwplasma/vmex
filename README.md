@@ -1,5 +1,11 @@
 # vmec-jax
 
+Install from PyPI:
+
+```bash
+pip install vmec-jax
+```
+
 End-to-end differentiable JAX implementation of **VMEC2000** for fixed-boundary
 and free-boundary ideal-MHD equilibria.
 
@@ -67,6 +73,12 @@ All figures below use the same **single-grid** run settings: `NS_ARRAY=151`, `NI
 - Differentiable optimization workflows are available through the Python API and bundled examples.
 
 ## Quickstart
+
+Install directly from PyPI:
+
+```bash
+pip install vmec-jax
+```
 
 Install and run the showcase:
 
