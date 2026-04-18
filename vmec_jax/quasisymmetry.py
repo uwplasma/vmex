@@ -58,7 +58,10 @@ def _interp_half_grid(samples, surfaces, s_half):
 
 
 def _as_jax_array(values, *, dtype=None):
-    arr = np.asarray(values)
+    try:
+        arr = np.asarray(values)
+    except Exception:
+        return jnp.asarray(values, dtype=dtype)
     if dtype is not None:
         arr = arr.astype(dtype, copy=False)
     elif arr.dtype.byteorder not in ("=", "|"):
