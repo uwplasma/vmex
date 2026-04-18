@@ -68,12 +68,12 @@ All figures below use the same **single-grid** run settings: `NS_ARRAY=151`, `NI
 
 ## Quickstart
 
-Install (editable) and run the showcase:
+Install and run the showcase:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install -e .
+python -m pip install .
 python examples/showcase_axisym_input_to_wout.py --suite
 ```
 
@@ -109,7 +109,7 @@ If the `vmec_jax` command is not found or raises `ModuleNotFoundError`, make sur
 you installed with the same interpreter and use the module entrypoint:
 
 ```bash
-python -m pip install -e .
+python -m pip install .
 python -m vmec_jax examples/data/input.circular_tokamak
 ```
 
@@ -205,4 +205,3 @@ host/device traffic. You can override this with:
 ```bash
 export VMEC_JAX_SCAN_MINIMAL=0  # keep full scan diagnostics even when quiet
 ```
-

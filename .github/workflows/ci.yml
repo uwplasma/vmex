@@ -35,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11"]
+        python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
 
@@ -48,7 +48,24 @@ jobs:
       - name: Install
         run: |
           python -m pip install -U pip
-          python -m pip install -e ".[dev,jax,netcdf,docs]"
+          python -m pip install .
+          python -m pip install pytest
+
+      - name: Console script smoke test
+        env:
+          JAX_ENABLE_X64: "1"
+        run: |
+          vmec_jax --help
+          rm -rf /tmp/vmec_jax_cli_smoke
+          mkdir -p /tmp/vmec_jax_cli_smoke
+          cd /tmp
+          vmec_jax "$GITHUB_WORKSPACE/examples/data/input.circular_tokamak" \
+            --max-iter 2 \
+            --no-multigrid \
+            --no-use-input-niter \
+            --quiet \
+            --outdir /tmp/vmec_jax_cli_smoke
+          test -f /tmp/vmec_jax_cli_smoke/wout_circular_tokamak.nc
 
       - name: Fetch large assets
         run: |
@@ -80,8 +97,8 @@ jobs:
       - name: Install build + docs deps
         run: |
           python -m pip install -U pip
-          python -m pip install build
-          python -m pip install -e ".[docs]"
+          python -m pip install .
+          python -m pip install build sphinx furo
 
       - name: Fetch large assets
         run: |

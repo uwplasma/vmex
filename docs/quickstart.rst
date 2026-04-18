@@ -16,6 +16,7 @@ and VMEC2000-style per-iteration **screen** output (FSQR/FSQZ/FSQL, RAX, DELT, W
 
   python -m venv .venv
   source .venv/bin/activate
+  python -m pip install .
   python examples/showcase_axisym_input_to_wout.py --suite
 
 Run the test suite::
@@ -42,7 +43,7 @@ Sanity check (verifies the console script is wired to the right interpreter)::
 If the ``vmec_jax`` command is not found or raises ``ModuleNotFoundError``,
 install and run via the module entrypoint::
 
-  python -m pip install -e .
+  python -m pip install .
   python -m vmec_jax examples/data/input.circular_tokamak
 
 This writes ``wout_circular_tokamak.nc`` next to the input file and prints the
