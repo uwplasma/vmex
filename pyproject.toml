@@ -15,7 +15,8 @@ dependencies = [
   "numpy",
   "jax",
   "jaxlib",
-  "netCDF4"
+  "netCDF4",
+  "tomli; python_version < '3.11'",
 ]
 
 [project.scripts]

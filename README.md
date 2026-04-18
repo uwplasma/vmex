@@ -73,8 +73,14 @@ Install and run the showcase:
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install .
+python -m pip install -e .
 python examples/showcase_axisym_input_to_wout.py --suite
+```
+
+If you want a release-style non-editable install instead, use:
+
+```bash
+python -m pip install .
 ```
 
 If you want the bundled reference outputs and mgrid files, fetch the assets once:
@@ -109,7 +115,7 @@ If the `vmec_jax` command is not found or raises `ModuleNotFoundError`, make sur
 you installed with the same interpreter and use the module entrypoint:
 
 ```bash
-python -m pip install .
+python -m pip install -e .
 python -m vmec_jax examples/data/input.circular_tokamak
 ```
 
