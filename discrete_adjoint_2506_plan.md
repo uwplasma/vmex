@@ -1044,3 +1044,21 @@ Stop or reduce scope if:
           attractive on the current branch;
         - the remaining effort should stay focused on the exact
           discrete-adjoint path.
+    - accelerated-MPI finite-difference follow-up on 2026-04-17:
+      - user then asked whether the MPI FD fallback could at least use the
+        same warmed accelerated primal path highlighted by the vmec_jax
+        runtime docs;
+      - the simsopt fallback script was refactored so its forward evaluations
+        bypass the conservative wrapper solve and instead use
+        `run_fixed_boundary(..., solver_mode="accelerated")` on a rewritten
+        input for each boundary point, while caching same-`x` residual/objective
+        work inside each rank;
+      - measured result on `mpirun -n 2` with `max_nfev=1`:
+        - cold accelerated run still did not finish the initial warm-up
+          objective within `120 s`;
+        - a warmed rerun again did not finish the same initial warm-up
+          objective within `120 s`;
+      - conclusion:
+        - accelerated warm vmec_jax is not enough to rescue the current MPI FD
+          QH workflow;
+        - the real work should remain on the exact discrete-adjoint path.
