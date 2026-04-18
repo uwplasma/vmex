@@ -99,3 +99,21 @@ def test_as_jax_array_is_tracer_safe():
 
     result = traced(jnp.asarray([1.0, 2.0, 3.0], dtype=jnp.float64))
     np.testing.assert_allclose(np.asarray(result), 14.0, rtol=0.0, atol=0.0)
+
+
+def test_scan_cache_lru_helpers_evict_oldest(monkeypatch):
+    from collections import OrderedDict
+
+    from vmec_jax.discrete_adjoint import _lru_cache_get, _lru_cache_put
+
+    monkeypatch.setenv("VMEC_JAX_SCAN_CACHE_LIMIT", "2")
+    cache = OrderedDict()
+    _lru_cache_put(cache, ("a",), 1)
+    _lru_cache_put(cache, ("b",), 2)
+    assert list(cache.keys()) == [("a",), ("b",)]
+
+    assert _lru_cache_get(cache, ("a",)) == 1
+    assert list(cache.keys()) == [("b",), ("a",)]
+
+    _lru_cache_put(cache, ("c",), 3)
+    assert list(cache.keys()) == [("a",), ("c",)]

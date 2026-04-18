@@ -1211,3 +1211,25 @@ Stop or reduce scope if:
           optimization path;
         - future derivative/runtime work can proceed without maintaining two
           diverging formulas.
+    - replay-scan cache-retention audit on 2026-04-18:
+      - the remaining exact mode-2 blocker was then narrowed further to
+        long-run executable retention, especially across nearby but not
+        identical replay-scan signatures;
+      - the three replay scan caches in `discrete_adjoint.py` were unbounded,
+        so once nearby exact points generated distinct scan executables they
+        were retained for the rest of the process;
+      - replaced those caches with bounded LRU caches and added an env knob:
+        - `VMEC_JAX_SCAN_CACHE_LIMIT` (default `8`);
+      - added a small regression for the new LRU helpers;
+      - exact long-run measurement with
+        `VMEC_JAX_SCAN_CACHE_LIMIT=2 VMEC_JAX_REPLAY_COLUMN_CHUNK=12`,
+        `max_mode=2`, `max_nfev=3`:
+        - run still terminated late before clean completion;
+        - elapsed about `179.74 s`;
+        - max RSS about `18.41 GB`;
+        - peak footprint about `56.38 GB`;
+      - conclusion:
+        - bounded replay caches are a real, safe retention control and they
+          reduce the retained replay/JVP executable set;
+        - but they do not eliminate the full long-run footprint by themselves,
+          so a broader XLA/runtime retention source remains on the exact path.
