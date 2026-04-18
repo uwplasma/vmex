@@ -1122,3 +1122,21 @@ Stop or reduce scope if:
           `59.04 GB` peak footprint;
         - so the next vmec_jax-side target remains executable/array retention
           on repeated nearby exact solves, not another derivative rewrite.
+    - exact `jit_forces` follow-up on 2026-04-18:
+      - the user-facing wrapper path was then checked against the earlier raw
+        vmec_jax primal audit, which had suggested `jit_forces=True` could be
+        materially faster on warm CPU solves;
+      - the wrapper did not previously expose that knob, even though the exact
+        discrete-adjoint path always flows through force-heavy residual solves;
+      - after exposing `jit_forces` on the simsopt side, the exact
+        `max_mode=2`, `nfev=1` Gauss-Newton benchmark showed:
+        - `jit_forces=False`: about `102.87 s`
+        - `jit_forces=True`: about `60.80 s`
+        - `jit_forces="auto"`: about `62.67 s`
+        - same objective in all three cases;
+      - conclusion:
+        - the earlier vmec_jax force-kernel audit does transfer to the exact
+          optimization path;
+        - explicit or automatic force-kernel JIT should stay enabled on the
+          QH exact route while the longer-horizon memory problem is being
+          reduced.
