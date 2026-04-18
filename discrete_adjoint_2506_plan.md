@@ -1062,3 +1062,24 @@ Stop or reduce scope if:
         - accelerated warm vmec_jax is not enough to rescue the current MPI FD
           QH workflow;
         - the real work should remain on the exact discrete-adjoint path.
+    - exact mode-2 replay-memory pass on 2026-04-17:
+      - added an automatic replay-column chunking fallback in
+        `checkpoint_tape_state_jvp_columns(...)` for large exact Jacobians when
+        the user has not set `VMEC_JAX_REPLAY_COLUMN_CHUNK` explicitly;
+      - the auto chunk size is computed from the dynamic replay carry size and
+        a target live-memory budget
+        (`VMEC_JAX_REPLAY_COLUMN_TARGET_MB`, default about `384 MB`);
+      - this keeps the current explicit chunk env as the highest-priority
+        override, so existing manual experiments still behave the same;
+      - together with the simsopt-side preallocated Jacobian assembly, the
+        exact `max_mode=2` Jacobian at `x0` now measures about:
+        - `30.56 s` wall time,
+        - `5.43 GB` max RSS,
+        - versus the earlier exact full-run memory spikes above `20 GB`;
+      - targeted discrete-adjoint replay regressions remained green;
+      - conclusion:
+        - this pass materially reduces the live memory term of the exact
+          `mode=2` Jacobian path;
+        - it does not by itself fix the remaining `mode=2` zero-step behavior,
+          which is now clearly an outer-solver issue rather than a replay
+          memory/executable issue.

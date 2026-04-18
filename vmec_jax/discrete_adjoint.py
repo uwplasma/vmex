@@ -14,7 +14,7 @@ from typing import Any
 
 import numpy as np
 
-from ._compat import jnp
+from ._compat import jax, jnp
 from .state import pack_state, unpack_state
 from .vmec_tomnsp import TomnspsRZL
 
@@ -84,6 +84,48 @@ def _dynamic_replay_bucket_len(length: int) -> int:
     if length <= 0:
         return 0
     return int(((int(length) + bucket - 1) // bucket) * bucket)
+
+
+def _replay_column_chunk_default(*, tape, tangents) -> int | None:
+    """Return an automatic replay-column chunk size for large exact Jacobians.
+
+    This is a memory-control fallback, not an accuracy feature. If the user
+    sets ``VMEC_JAX_REPLAY_COLUMN_CHUNK`` explicitly we always respect it.
+    """
+    target_env = os.environ.get("VMEC_JAX_REPLAY_COLUMN_TARGET_MB", "").strip()
+    if target_env == "":
+        target_mb = 384.0
+    else:
+        target_mb = float(target_env)
+    if target_mb <= 0.0:
+        return None
+
+    carry0 = getattr(tape, "dynamic_initial_carry", None)
+    if carry0 is None:
+        return None
+    try:
+        carry_leaves = jax.tree_util.tree_leaves(carry0)
+    except Exception:
+        return None
+    if not carry_leaves:
+        return None
+
+    bytes_per_col = 0
+    for leaf in carry_leaves:
+        arr = jnp.asarray(leaf)
+        bytes_per_col += int(arr.size) * max(1, int(arr.dtype.itemsize))
+    if bytes_per_col <= 0:
+        return None
+
+    ncols = int(tangents.shape[0])
+    if ncols <= 1:
+        return None
+
+    target_bytes = int(target_mb * (1024**2))
+    auto_chunk = max(1, min(ncols, target_bytes // bytes_per_col))
+    if auto_chunk >= ncols:
+        return None
+    return int(auto_chunk)
 
 
 @dataclass(frozen=True)
@@ -1178,21 +1220,24 @@ def checkpoint_tape_state_jvp_columns(
     tangents = jnp.asarray(initial_tangents)
     if _allow_chunking:
         chunk_env = os.environ.get("VMEC_JAX_REPLAY_COLUMN_CHUNK")
+        column_chunk = None
         if chunk_env is not None:
             column_chunk = max(1, int(chunk_env))
-            if tangents.shape[0] > column_chunk:
-                outputs = []
-                for start in range(0, int(tangents.shape[0]), column_chunk):
-                    outputs.append(
-                        checkpoint_tape_state_jvp_columns(
-                            tape=tape,
-                            static=static,
-                            initial_tangents=tangents[start : start + column_chunk],
-                            rebuild_preconditioner=rebuild_preconditioner,
-                            _allow_chunking=False,
-                        )
+        else:
+            column_chunk = _replay_column_chunk_default(tape=tape, tangents=tangents)
+        if column_chunk is not None and tangents.shape[0] > column_chunk:
+            outputs = []
+            for start in range(0, int(tangents.shape[0]), column_chunk):
+                outputs.append(
+                    checkpoint_tape_state_jvp_columns(
+                        tape=tape,
+                        static=static,
+                        initial_tangents=tangents[start : start + column_chunk],
+                        rebuild_preconditioner=rebuild_preconditioner,
+                        _allow_chunking=False,
                     )
-                return jnp.concatenate(outputs, axis=0)
+                )
+            return jnp.concatenate(outputs, axis=0)
     stacked = tape.stacked_step_traces
     static_flags = tape.step_trace_static_flags
     if (
