@@ -17,8 +17,12 @@ from pathlib import Path
 import subprocess
 import sys
 import time
-import tomllib
 from typing import Any
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover - exercised on Python 3.10 in CI
+    import tomli as tomllib
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
