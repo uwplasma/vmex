@@ -9,6 +9,7 @@ recorded in diagnostics.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections import OrderedDict
 import os
 from typing import Any
 
@@ -63,9 +64,36 @@ _REPLAY_STEP_TRACE_STATIC_KEYS = (
     "divide_by_scalxc_for_update",
     "signgs",
 )
-_CHECKPOINT_TAPE_SCAN_CACHE: dict[tuple[Any, ...], Any] = {}
-_CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE: dict[tuple[Any, ...], Any] = {}
-_CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE: dict[tuple[Any, ...], Any] = {}
+_CHECKPOINT_TAPE_SCAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
+_CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
+_CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
+
+
+def _scan_cache_limit() -> int:
+    env = os.getenv("VMEC_JAX_SCAN_CACHE_LIMIT", "").strip()
+    if not env:
+        return 8
+    try:
+        value = int(env)
+    except Exception:
+        return 8
+    return max(1, value)
+
+
+def _lru_cache_get(cache: OrderedDict[tuple[Any, ...], Any], key: tuple[Any, ...]):
+    value = cache.get(key)
+    if value is None:
+        return None
+    cache.move_to_end(key)
+    return value
+
+
+def _lru_cache_put(cache: OrderedDict[tuple[Any, ...], Any], key: tuple[Any, ...], value):
+    cache[key] = value
+    cache.move_to_end(key)
+    limit = _scan_cache_limit()
+    while len(cache) > limit:
+        cache.popitem(last=False)
 
 
 def _dynamic_replay_bucket_size() -> int:
@@ -1072,7 +1100,7 @@ def _checkpoint_tape_scan_runner(*, static, stacked, static_flags, rebuild_preco
         None if static_flags["precond_jmax"] is None else int(static_flags["precond_jmax"]),
         _stacked_trace_signature(stacked),
     )
-    cached = _CHECKPOINT_TAPE_SCAN_CACHE.get(key)
+    cached = _lru_cache_get(_CHECKPOINT_TAPE_SCAN_CACHE, key)
     if cached is not None:
         return cached
 
@@ -1103,7 +1131,7 @@ def _checkpoint_tape_scan_runner(*, static, stacked, static_flags, rebuild_preco
         tangents, _ = jax.lax.scan(_step_scan, tangents, stacked_traces)
         return tangents
 
-    _CHECKPOINT_TAPE_SCAN_CACHE[key] = _run_scan
+    _lru_cache_put(_CHECKPOINT_TAPE_SCAN_CACHE, key, _run_scan)
     return _run_scan
 
 
@@ -1123,7 +1151,7 @@ def _checkpoint_tape_dynamic_scan_runner(*, static, stacked, static_flags):
         int(static_flags["precond_jmax"]),
         _stacked_trace_signature(stacked),
     )
-    cached = _CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE.get(key)
+    cached = _lru_cache_get(_CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE, key)
     if cached is not None:
         return cached
 
@@ -1147,7 +1175,7 @@ def _checkpoint_tape_dynamic_scan_runner(*, static, stacked, static_flags):
         carry, _ = jax.lax.scan(_step_scan, carry0, stacked_traces)
         return carry
 
-    _CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE[key] = _run_scan
+    _lru_cache_put(_CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE, key, _run_scan)
     return _run_scan
 
 
@@ -1168,7 +1196,7 @@ def _checkpoint_tape_dynamic_basepoint_scan_runner(*, static, stacked, stacked_b
         _stacked_trace_signature(stacked),
         _stacked_trace_signature(stacked_base_carries),
     )
-    cached = _CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE.get(key)
+    cached = _lru_cache_get(_CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE, key)
     if cached is not None:
         return cached
 
@@ -1199,7 +1227,7 @@ def _checkpoint_tape_dynamic_basepoint_scan_runner(*, static, stacked, stacked_b
         carry_tangents, _ = jax.lax.scan(_step_scan, carry_tangents0, (stacked_base_carries_in, stacked_traces_in))
         return carry_tangents
 
-    _CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE[key] = _run_scan
+    _lru_cache_put(_CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE, key, _run_scan)
     return _run_scan
 
 
