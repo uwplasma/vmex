@@ -1,6 +1,10 @@
 Quickstart
 ==========
 
+Install directly from PyPI::
+
+  pip install vmec-jax
+
 Run the minimal showcase (recommended)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
