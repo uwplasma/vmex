@@ -999,3 +999,29 @@ Stop or reduce scope if:
           the exact `mode=2` memory spike;
         - it is still a runtime/memory tradeoff, so it should remain opt-in for
           now rather than being forced as the branch default.
+    - finite-difference vmec_jax audit on 2026-04-17:
+      - user asked whether vmec_jax could be used like classic vmec2000 with
+        outer finite differences, taking advantage of warm in-process JIT reuse
+        after the first forward solve;
+      - answer from the audit: yes in principle, but only through a true
+        forward-only residual callback; routing finite differences through the
+        discrete-adjoint SciPy residual path would wrongly build replay tapes
+        and is not a meaningful FD benchmark;
+      - the new simsopt teaching script
+        `QH_fixed_resolution_jaxfd.py` uses the corrected forward-only setup and
+        serial SciPy `2-point` finite differences so perturbed calls can reuse
+        the same warm executables;
+      - measured `max_mode=1`, `max_nfev=10`, `ftol=gtol=xtol=1e-4` results are
+        still poor:
+        - cold timed run died before the first accepted iterate after about
+          `156.38 s`, with max RSS about `22.69 GB` and peak footprint about
+          `49.30 GB`;
+        - warm timed rerun still died before the first accepted iterate after
+          about `169.01 s`, with max RSS about `19.16 GB` and peak footprint
+          about `45.68 GB`;
+        - one unbuffered run did reach SciPy iteration 1 / `nfev=3` with cost
+          `1.2958e-01`, so the approach can descend, but it is not stable;
+      - conclusion:
+        - warm-JIT forward solves alone do not make outer finite differences a
+          compelling fallback on the current QH path;
+        - the exact discrete-adjoint route remains the stronger path to ship.
