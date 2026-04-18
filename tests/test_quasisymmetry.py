@@ -82,3 +82,20 @@ def test_quasisymmetry_ratio_residual_from_state_is_self_consistent(load_case_qh
         atol=1.0e-12,
     )
     assert float(np.asarray(qs_state["total"])) > 0.0
+
+
+def test_as_jax_array_is_tracer_safe():
+    pytest.importorskip("jax")
+
+    import jax
+    import jax.numpy as jnp
+
+    from vmec_jax.quasisymmetry import _as_jax_array
+
+    @jax.jit
+    def traced(values):
+        arr = _as_jax_array(values, dtype=np.float64)
+        return jnp.sum(arr * arr)
+
+    result = traced(jnp.asarray([1.0, 2.0, 3.0], dtype=jnp.float64))
+    np.testing.assert_allclose(np.asarray(result), 14.0, rtol=0.0, atol=0.0)

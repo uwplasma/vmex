@@ -1189,3 +1189,25 @@ Stop or reduce scope if:
           but a full benchmark pass was not kept in this turn because the
           remaining blocker is still long-run runtime/memory rather than API
           correctness.
+    - quasisymmetry ownership / tracer-safety follow-up on 2026-04-18:
+      - consolidated quasisymmetry ownership in vmec_jax:
+        - simsopt now delegates to `vmec_jax.quasisymmetry` instead of
+          carrying its own second JAX implementation;
+      - this surfaced a real vmec_jax bug that had been masked by the
+        duplicate simsopt implementation:
+        - `_as_jax_array(...)` in `vmec_jax.quasisymmetry` used unconditional
+          `np.asarray(...)`, which is not tracer-safe inside the exact replay /
+          Jacobian path;
+      - fixed `_as_jax_array(...)` so traced values fall back to pure
+        `jnp.asarray(...)`;
+      - added a regression that jits `_as_jax_array(...)` directly and
+        confirms it works on traced inputs;
+      - production impact:
+        - the exact `max_mode=2` QH Gauss-Newton path in simsopt again takes
+          the first accepted step with the shared vmec_jax QS implementation,
+          reaching cost `5.637731e-02`;
+      - conclusion:
+        - the single-source QS implementation is now viable for the exact
+          optimization path;
+        - future derivative/runtime work can proceed without maintaining two
+          diverging formulas.
