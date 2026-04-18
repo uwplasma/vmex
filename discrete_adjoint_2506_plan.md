@@ -1025,3 +1025,22 @@ Stop or reduce scope if:
         - warm-JIT forward solves alone do not make outer finite differences a
           compelling fallback on the current QH path;
         - the exact discrete-adjoint route remains the stronger path to ship.
+    - MPI finite-difference vmec_jax fallback audit on 2026-04-17:
+      - user asked whether the classic
+        `least_squares_mpi_solve` finite-difference workflow could be reused
+        with vmec_jax as a minimal swap-in replacement for vmec2000;
+      - audit result:
+        - not as a direct drop-in, because the classic
+          `QuasisymmetryRatioResidual` / `LeastSquaresProblem.from_tuples`
+          path expects `Optimizable` parents, while `VmecJax` is not one;
+        - the simsopt side now has a tested teaching-script fallback,
+          `QH_fixed_resolution_jaxfd_mpi.py`, that wraps vmec_jax in a minimal
+          local `Optimizable` shim and uses `QuasisymmetryRatioResidualJax` to
+          avoid the Fortran-style parent graph assumptions;
+        - on `mpirun -n 2`, that corrected fallback still takes about `75 s`
+          just to reach SciPy iteration 0 / `nfev=1`;
+      - conclusion:
+        - warm vmec_jax forward solves do not make the classic MPI FD workflow
+          attractive on the current branch;
+        - the remaining effort should stay focused on the exact
+          discrete-adjoint path.
