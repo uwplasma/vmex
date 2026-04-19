@@ -74,3 +74,70 @@ def test_gauss_newton_least_squares_solves_linear_problem():
     np.testing.assert_allclose(result["x"], np.array([1.0, 1.0]), atol=1e-12, rtol=0.0)
     assert result["success"]
     assert result["objective"] <= 1e-20
+
+
+def test_gauss_newton_post_jacobian_callback():
+    """post_jacobian_callback is called once per jacobian evaluation."""
+    call_counts = [0]
+
+    def residual(x):
+        return np.array([float(x[0]) - 1.0], dtype=float)
+
+    def jacobian(_x):
+        return np.array([[1.0]], dtype=float)
+
+    def on_jac():
+        call_counts[0] += 1
+
+    result = gauss_newton_least_squares(
+        residual,
+        jacobian,
+        np.array([0.0], dtype=float),
+        max_nfev=5,
+        post_jacobian_callback=on_jac,
+        verbose=0,
+    )
+
+    assert result["success"]
+    assert call_counts[0] == result["njev"]
+
+
+def test_gauss_newton_exact_residual_after_jacobian():
+    """exact_residual_after_jacobian_fun replaces the residual used for gradient."""
+    # Set up a problem where forward_residual_fun gives a deliberately noisy
+    # residual, but exact_residual_after_jacobian_fun provides the correct one.
+    # The optimizer should still converge because the exact residual is used
+    # for the gradient computation after each Jacobian call.
+    rng = np.random.default_rng(42)
+    noise_scale = 0.5
+
+    def residual(x):
+        return np.array([float(x[0]) - 1.0], dtype=float)
+
+    def noisy_residual(x):
+        return residual(x) + noise_scale * rng.standard_normal(1)
+
+    # Track the most recent jacobian x so we can return the exact residual.
+    last_x = [None]
+
+    def jacobian(x):
+        last_x[0] = float(x[0])
+        return np.array([[1.0]], dtype=float)
+
+    def exact_residual():
+        if last_x[0] is None:
+            return None
+        return np.array([last_x[0] - 1.0], dtype=float)
+
+    result = gauss_newton_least_squares(
+        residual,
+        jacobian,
+        np.array([0.0], dtype=float),
+        forward_residual_fun=noisy_residual,
+        exact_residual_after_jacobian_fun=exact_residual,
+        max_nfev=20,
+        verbose=0,
+    )
+
+    assert result["success"]
+    np.testing.assert_allclose(result["x"], np.array([1.0]), atol=1e-3, rtol=0.0)

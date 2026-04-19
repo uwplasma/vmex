@@ -264,12 +264,35 @@ def main() -> None:
         vj.clear_replay_scan_caches()
         vj.clear_preconditioner_jit_caches()
 
+    # Tracks the most-recently-used params key so we can retrieve the exact
+    # residual from _exact_cache after jacobian_fun builds a new tape.
+    _last_jacobian_key: list = [None]
+
+    def _jacobian_fun_tracked(params):
+        _last_jacobian_key[0] = np.asarray(params, dtype=float).tobytes()
+        return jacobian_fun(params)
+
+    def _exact_residual_after_jacobian():
+        """Return the exact tight-solve residual for the last jacobian_fun x.
+
+        jacobian_fun calls solve_exact_state internally, which stores the
+        exact state in _exact_cache.  This callback retrieves that state and
+        computes the true residual so the GN gradient uses the tight value
+        instead of the relaxed forward-trial residual.
+        """
+        key = _last_jacobian_key[0]
+        if key is None or key not in _exact_cache:
+            return None
+        cached_state, _ = _exact_cache[key]
+        return np.asarray(residuals_from_state(cached_state), dtype=float)
+
     result = vj.gauss_newton_least_squares(
         residual_fun,
-        jacobian_fun,
+        _jacobian_fun_tracked,
         np.asarray(params0, dtype=float),
         forward_residual_fun=forward_residual_fun,
         post_jacobian_callback=_post_jacobian_clear,
+        exact_residual_after_jacobian_fun=_exact_residual_after_jacobian,
         max_nfev=max_nfev,
         ftol=ftol,
         gtol=gtol,

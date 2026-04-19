@@ -237,6 +237,7 @@ def gauss_newton_least_squares(
     x_scale=None,
     forward_residual_fun=None,
     post_jacobian_callback=None,
+    exact_residual_after_jacobian_fun=None,
     verbose: int = 1,
 ):
     """Solve a nonlinear least-squares problem with a concrete Gauss-Newton loop.
@@ -270,6 +271,14 @@ def gauss_newton_least_squares(
         ``jacobian_fun`` call.  Useful for releasing JIT caches between
         expensive Jacobian evaluations, e.g.
         ``post_jacobian_callback=jax.clear_caches``.
+    exact_residual_after_jacobian_fun:
+        Optional zero-argument callable returning an exact residual vector
+        that corresponds to the state used by the most recent ``jacobian_fun``
+        call.  When provided, the residual used for gradient computation and
+        convergence checks is replaced by this exact value after each Jacobian
+        evaluation.  This is useful when ``forward_residual_fun`` is a relaxed
+        solver and the exact state can be extracted from a side-effect cache
+        (e.g. the ``_exact_cache`` in the discrete-adjoint QH example).
     verbose:
         Verbosity level (0 = silent, 1 = iteration table).
     """
@@ -304,6 +313,11 @@ def gauss_newton_least_squares(
 
         jacobian = np.asarray(jacobian_fun(x), dtype=float)
         njev += 1
+        if exact_residual_after_jacobian_fun is not None:
+            _exact_res = exact_residual_after_jacobian_fun()
+            if _exact_res is not None:
+                residual = np.asarray(_exact_res, dtype=float).reshape(-1)
+                cost = 0.5 * float(np.dot(residual, residual))
         if post_jacobian_callback is not None:
             post_jacobian_callback()
         gradient = jacobian.T @ residual
