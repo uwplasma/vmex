@@ -929,3 +929,233 @@ def write_bsub_parity_figures(
     fig.savefig(outpath, dpi=150)
     plt.close(fig)
     return outpath
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QH optimisation result plots
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _lcfs_xyz(R: np.ndarray, Z: np.ndarray, phi: np.ndarray):
+    """Convert cylindrical (R, Z, phi) grids to Cartesian (X, Y, Z)."""
+    X = R * np.cos(phi[None, :])
+    Y = R * np.sin(phi[None, :])
+    return X, Y, Z
+
+
+def _plot_3d_boundary_comparison(wout_init, wout_final, outdir: Path) -> Path:
+    """3-D LCFS plots coloured by |B|, initial (left) vs optimised (right)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+    from matplotlib.colors import Normalize
+    from matplotlib.cm import ScalarMappable
+
+    ns_init = int(np.asarray(wout_init.ns))
+    ns_final = int(np.asarray(wout_final.ns))
+    theta_i, phi_i, R_i, Z_i, B_i = vmecplot2_lcfs_3d_grid(
+        wout_init, s_index=ns_init - 1, ntheta=60, nzeta=None
+    )
+    theta_f, phi_f, R_f, Z_f, B_f = vmecplot2_lcfs_3d_grid(
+        wout_final, s_index=ns_final - 1, ntheta=60, nzeta=None
+    )
+    X_i, Y_i, _ = _lcfs_xyz(R_i, Z_i, phi_i)
+    X_f, Y_f, _ = _lcfs_xyz(R_f, Z_f, phi_f)
+
+    Bmin = min(float(B_i.min()), float(B_f.min()))
+    Bmax = max(float(B_i.max()), float(B_f.max()))
+    norm = Normalize(vmin=Bmin, vmax=Bmax)
+    cmap = plt.cm.viridis
+
+    fig = plt.figure(figsize=(12, 5))
+    for col, (X, Y, Zp, B, title) in enumerate([
+        (X_i, Y_i, Z_i, B_i, "Initial boundary"),
+        (X_f, Y_f, Z_f, B_f, "Optimised boundary"),
+    ]):
+        ax = fig.add_subplot(1, 2, col + 1, projection="3d")
+        fcolors = cmap(norm(B))
+        ax.plot_surface(X, Y, Zp, facecolors=fcolors, rstride=1, cstride=1,
+                        linewidth=0, antialiased=False, shade=False)
+        ax.set_xlabel("X (m)")
+        ax.set_ylabel("Y (m)")
+        ax.set_zlabel("Z (m)")
+        ax.set_title(title, fontsize=11)
+        ax.set_box_aspect([1, 1, 0.5])
+
+    sm = ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    fig.colorbar(sm, ax=fig.axes, label="|B| (T)", shrink=0.6, pad=0.1)
+    fig.suptitle("QH LCFS coloured by |B| — nfp=4", fontsize=13, y=1.01)
+
+    out = outdir / "boundary_comparison.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def _plot_bmag_contours(wout_init, wout_final, outdir: Path) -> Path:
+    """Unrolled |B|(theta, phi) contour lines on LCFS — initial (top) vs final (bottom).
+
+    Contour lines (not filled) make it easy to see whether the field lines are
+    helically closed (quasi-helical symmetry).
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    ns_init = int(np.asarray(wout_init.ns))
+    ns_final = int(np.asarray(wout_final.ns))
+    nfp = int(np.asarray(wout_init.nfp))
+
+    theta_i, zeta_i, B_i = vmecplot2_bmag_grid(
+        wout_init, s_index=ns_init - 1, ntheta=128, nzeta=256
+    )
+    theta_f, zeta_f, B_f = vmecplot2_bmag_grid(
+        wout_final, s_index=ns_final - 1, ntheta=128, nzeta=256
+    )
+
+    vmin = min(float(B_i.min()), float(B_f.min()))
+    vmax = max(float(B_i.max()), float(B_f.max()))
+    nlevels = 20
+    levels = np.linspace(vmin, vmax, nlevels)
+
+    fig, axes = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
+    for ax, B, theta, zeta, title in [
+        (axes[0], B_i, theta_i, zeta_i, "Initial"),
+        (axes[1], B_f, theta_f, zeta_f, "Optimised"),
+    ]:
+        phi_deg = np.degrees(zeta) / nfp
+        theta_deg = np.degrees(theta)
+        cs = ax.contour(
+            phi_deg, theta_deg, B,
+            levels=levels,
+            cmap="viridis",
+            linewidths=1.0,
+        )
+        ax.clabel(cs, inline=False, fontsize=0)  # suppress labels, keep colours
+        ax.set_ylabel("Poloidal angle θ (°)")
+        ax.set_title(f"|B| on LCFS — {title}", fontsize=11)
+        fig.colorbar(
+            plt.cm.ScalarMappable(
+                norm=plt.Normalize(vmin=vmin, vmax=vmax), cmap="viridis"
+            ),
+            ax=ax,
+            label="|B| (T)",
+        )
+    axes[-1].set_xlabel("Toroidal angle φ/nfp (°)")
+    fig.suptitle("Magnetic field strength on LCFS (contour lines)", fontsize=13)
+    fig.tight_layout()
+
+    out = outdir / "bmag_surface.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
+    """Objective value and aspect ratio vs Jacobian evaluation."""
+    import json
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    with open(history_path) as f:
+        data = json.load(f)
+
+    hist = data["history"]
+    objectives = [h["objective"] for h in hist]
+    aspects = [h["aspect"] for h in hist]
+    iters = list(range(len(hist)))
+    total_time = data.get("total_wall_time_s", 0.0)
+    nfev = data.get("nfev", len(hist))
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(7, 6), sharex=True)
+
+    ax1.semilogy(iters, objectives, "o-", color="steelblue", linewidth=2, markersize=6)
+    ax1.set_ylabel("Objective  Σ residuals²", fontsize=11)
+    ax1.set_title(
+        f"QH optimisation  ({nfev} evals, {total_time:.0f} s)",
+        fontsize=11,
+    )
+    ax1.axhline(objectives[-1], color="steelblue", linestyle="--", alpha=0.4,
+                label=f"Final: {objectives[-1]:.4f}")
+    ax1.legend(fontsize=9)
+    ax1.grid(True, alpha=0.3)
+
+    ax2.plot(iters, aspects, "s-", color="darkorange", linewidth=2, markersize=6)
+    ax2.axhline(7.0, color="k", linestyle=":", alpha=0.5, label="Target A=7")
+    ax2.set_ylabel("Aspect ratio", fontsize=11)
+    ax2.set_xlabel("Jacobian evaluation index", fontsize=11)
+    ax2.legend(fontsize=9)
+    ax2.grid(True, alpha=0.3)
+
+    fig.tight_layout()
+    out = outdir / "objective_history.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def plot_qh_optimization(
+    wout_initial_path,
+    wout_final_path,
+    history_path,
+    *,
+    outdir=None,
+    show: bool = False,
+) -> dict:
+    """Generate all QH optimisation result plots and return their paths.
+
+    Produces three figures:
+
+    * ``boundary_comparison.png``  — 3-D LCFS coloured by |B| (before/after)
+    * ``bmag_surface.png``         — |B| contour lines on LCFS unrolled to (θ, φ)
+    * ``objective_history.png``    — Objective and aspect ratio vs iteration
+
+    Parameters
+    ----------
+    wout_initial_path, wout_final_path:
+        Paths to the initial and final ``wout_*.nc`` files.
+    history_path:
+        Path to the ``history.json`` file produced by
+        :meth:`~vmec_jax.FixedBoundaryExactOptimizer.save_history`.
+    outdir:
+        Directory for saved figures.  Defaults to the directory of *history_path*.
+    show:
+        If ``True``, call ``plt.show()`` after saving.
+
+    Returns
+    -------
+    dict
+        Mapping ``{"boundary_comparison", "bmag_surface", "objective_history"}``
+        to their saved :class:`~pathlib.Path` objects.
+    """
+    wout_initial_path = Path(wout_initial_path)
+    wout_final_path = Path(wout_final_path)
+    history_path = Path(history_path)
+
+    if outdir is None:
+        outdir = history_path.parent
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    from .wout import read_wout as _read_wout
+    wout_init = _read_wout(str(wout_initial_path))
+    wout_final = _read_wout(str(wout_final_path))
+
+    p1 = _plot_3d_boundary_comparison(wout_init, wout_final, outdir)
+    p2 = _plot_bmag_contours(wout_init, wout_final, outdir)
+    p3 = _plot_objective_history(history_path, outdir)
+
+    for p in (p1, p2, p3):
+        print(f"  Saved {p}")
+
+    if show:
+        import matplotlib.pyplot as plt
+        plt.show()
+
+    return {
+        "boundary_comparison": p1,
+        "bmag_surface": p2,
+        "objective_history": p3,
+    }
