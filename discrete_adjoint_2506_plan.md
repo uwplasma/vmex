@@ -1251,3 +1251,41 @@ Stop or reduce scope if:
         - `nfev=3`: still not fully solved, but the live RSS curve is lower
           than the earlier regime, which suggests the remaining late-run
           footprint is broader than just our local replay caches.
+    - exact mode-2 compile-audit and helper-hoist follow-up on 2026-04-18:
+      - ran a targeted compile-audit on the concrete exact Gauss-Newton path
+        for the production `max_mode=2` QH setup;
+      - the audit showed remaining tracing-cache misses from local helper
+        definitions inside hot vmec_jax kernels, including:
+        - `field.full_mesh_from_half_mesh_avg`;
+        - the local `_ptau_compute_jit` inside
+          `solve_fixed_boundary_residual_iter(...)`;
+        - deeper nested closures in replay and preconditioner paths;
+      - stable fixes kept from that audit:
+        - hoisted the `full_mesh_from_half_mesh_avg` loop body to module
+          scope in `field.py`;
+        - hoisted `_ptau_compute_jit` to a module-level jitted helper in
+          `solve.py`, with `pshalf` and `ohs` passed explicitly instead of
+          recreating the JIT inside every solve;
+      - representative compile-audit effect:
+        - one exact `max_mode=2`, `nfev=2` run dropped from about `82`
+          tracing-cache misses to about `60` after the stable helper-hoist
+          pass;
+      - runtime effect on the exact `max_mode=2`, `nfev=2` path:
+        - same accepted trajectory and final objective;
+        - wall time stayed in the same regime;
+        - live RSS dropped modestly but repeatably on the file-backed audit
+          run (`~23.65 GB -> ~21.84 GB`);
+      - late-run effect on exact `max_mode=2`, `nfev=3`:
+        - the run still terminates late with peak footprint in the mid-50 GB
+          range (about `54.74 GB` on the audited file-backed run);
+      - rejected experiment:
+        - a preconditioner refactor around
+          `_tridi_solve_batched_jmin0` was prototyped and reverted after it
+          triggered a runtime unpacking failure inside `jax.lax.scan`;
+      - conclusion:
+        - local helper hoists in hot vmec_jax kernels are a valid runtime
+          lever and should continue where low-risk;
+        - the remaining late-completion blocker is still broader executable /
+          buffer retention beyond the two easy helper-hoist wins, with the
+          next likely targets being replay and preconditioner internal
+          closures.

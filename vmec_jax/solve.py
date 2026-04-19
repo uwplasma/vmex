@@ -36,6 +36,45 @@ _SCAN_RUNNER_CACHE: dict[tuple, Any] = {}
 _COMPUTE_FORCES_CACHE: dict[tuple, Any] = {}
 
 
+if has_jax():
+    @jax.jit
+    def _ptau_compute_jit(
+        pru_even,
+        pru_odd,
+        pzu_even,
+        pzu_odd,
+        pr1_even,
+        pr1_odd,
+        pz1_even,
+        pz1_odd,
+        pshalf,
+        ohs,
+    ):
+        """Compute ptau min/max without redefining a hot JIT helper per solve."""
+        pshalf = pshalf.astype(pru_even.dtype)
+        ohs = ohs.astype(pru_even.dtype)
+        dphids = jnp.asarray(0.25, dtype=pru_even.dtype)
+        psh = pshalf[1:][:, None, None]
+        psh_safe = jnp.where(psh != 0.0, psh, jnp.ones_like(psh))
+        ru12 = 0.5 * (pru_even[1:] + pru_even[:-1] + psh * (pru_odd[1:] + pru_odd[:-1]))
+        pzs = ohs * ((pz1_even[1:] - pz1_even[:-1]) + psh * (pz1_odd[1:] - pz1_odd[:-1]))
+        ptau = ru12 * pzs + dphids * (
+            pru_odd[1:] * pz1_odd[1:]
+            + pru_odd[:-1] * pz1_odd[:-1]
+            + (pru_even[1:] * pz1_odd[1:] + pru_even[:-1] * pz1_odd[:-1]) / psh_safe
+        )
+        pzu12 = 0.5 * (pzu_even[1:] + pzu_even[:-1] + psh * (pzu_odd[1:] + pzu_odd[:-1]))
+        prs = ohs * ((pr1_even[1:] - pr1_even[:-1]) + psh * (pr1_odd[1:] - pr1_odd[:-1]))
+        ptau = ptau - prs * pzu12 - dphids * (
+            pzu_odd[1:] * pr1_odd[1:]
+            + pzu_odd[:-1] * pr1_odd[:-1]
+            + (pzu_even[1:] * pr1_odd[1:] + pzu_even[:-1] * pr1_odd[:-1]) / psh_safe
+        )
+        return jnp.min(ptau), jnp.max(ptau)
+else:
+    _ptau_compute_jit = None
+
+
 def _hash_array_bytes(a: Any) -> str:
     try:
         arr = np.asarray(a)
@@ -4980,33 +5019,6 @@ def solve_fixed_boundary_residual_iter(
             _ptau_pshalf_jax = jnp.asarray(_ptau_pshalf_np, dtype=jnp.float64)
             _ptau_ohs_jax = jnp.asarray(_ptau_ohs_scalar, dtype=jnp.float64)
 
-        @jax.jit
-        def _ptau_compute_jit(pru_even, pru_odd, pzu_even, pzu_odd,
-                              pr1_even, pr1_odd, pz1_even, pz1_odd):
-            """JIT-compiled ptau computation — avoids 8 large array materializations/iter."""
-            pshalf = _ptau_pshalf_jax.astype(pru_even.dtype)
-            ohs = _ptau_ohs_jax.astype(pru_even.dtype)
-            dphids = jnp.asarray(0.25, dtype=pru_even.dtype)
-            psh = pshalf[1:][:, None, None]
-            psh_safe = jnp.where(psh != 0.0, psh, jnp.ones_like(psh))
-            ru12 = 0.5 * (pru_even[1:] + pru_even[:-1] + psh * (pru_odd[1:] + pru_odd[:-1]))
-            pzs = ohs * ((pz1_even[1:] - pz1_even[:-1]) + psh * (pz1_odd[1:] - pz1_odd[:-1]))
-            ptau = ru12 * pzs + dphids * (
-                pru_odd[1:] * pz1_odd[1:]
-                + pru_odd[:-1] * pz1_odd[:-1]
-                + (pru_even[1:] * pz1_odd[1:] + pru_even[:-1] * pz1_odd[:-1]) / psh_safe
-            )
-            pzu12 = 0.5 * (pzu_even[1:] + pzu_even[:-1] + psh * (pzu_odd[1:] + pzu_odd[:-1]))
-            prs = ohs * ((pr1_even[1:] - pr1_even[:-1]) + psh * (pr1_odd[1:] - pr1_odd[:-1]))
-            ptau = ptau - prs * pzu12 - dphids * (
-                pzu_odd[1:] * pr1_odd[1:]
-                + pzu_odd[:-1] * pr1_odd[:-1]
-                + (pzu_even[1:] * pr1_odd[1:] + pzu_even[:-1] * pr1_odd[:-1]) / psh_safe
-            )
-            return jnp.min(ptau), jnp.max(ptau)
-    else:
-        _ptau_compute_jit = None
-
     def _ptau_minmax_from_k_host(k) -> tuple[Any | None, Any | None]:
         """Compute VMEC `ptau` min/max on the host for controller decisions."""
         try:
@@ -5031,6 +5043,7 @@ def solve_fixed_boundary_residual_iter(
                 ptau_min_j, ptau_max_j = _ptau_compute_jit(
                     pru_even, pru_odd, pzu_even, pzu_odd,
                     pr1_even, pr1_odd, pz1_even, pz1_odd,
+                    _ptau_pshalf_jax, _ptau_ohs_jax,
                 )
                 return float(ptau_min_j), float(ptau_max_j)
 
