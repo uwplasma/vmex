@@ -1386,6 +1386,33 @@ Stop or reduce scope if:
       - conclusion:
         - the remaining mode-2 work is now back to true long-run optimization
           runtime and step efficiency, not a hard late-run teardown failure.
+    - standalone example cache and memory management pass on 2026-04-19:
+      - audited `examples/optimization/qh_fixed_resolution_exact.py` and added
+        three coordinated improvements:
+        1. One-entry `_exact_cache` in `solve_exact_state`:
+           - on cache hit (same `params.tobytes()`), returns stored state/payload
+             without rebuilding the tape;
+           - halves the exact tape builds on iteration 0 where the GN driver calls
+             `residual_fun(x)` then `jacobian_fun(x)` at the same `x`;
+           - `_exact_cache.clear()` keeps at most one entry so tape memory
+             is bounded.
+        2. Initial/final display reuse:
+           - after `residual_fun(params0)` stores the tape in cache, the
+             initial QS display now retrieves the state from the cache instead
+             of doing a second forward solve;
+           - after the GN loop, the final display checks `_exact_cache` for the
+             last accepted `x` before falling back to `solve_forward_state`.
+        3. `post_jacobian_callback` hook in `gauss_newton_least_squares`:
+           - added an optional zero-argument callable invoked after each
+             `jacobian_fun` call;
+           - the standalone example wires `clear_replay_scan_caches()` and
+             `clear_preconditioner_jit_caches()` as that hook so JIT-compiled
+             function references are released between accepted GN steps;
+           - mirrors the simsopt-side cache-clear behavior documented in the
+             earlier log entries;
+           - added docstring listing all parameters, including the new hook.
+      - all 8 comprehensive wout parity tests continue to pass with `RUN_FULL=1`;
+      - 153 non-full tests pass.
     - standalone example double-tape-build fix on 2026-04-19:
       - audited `examples/optimization/qh_fixed_resolution_exact.py` and found
         that the concrete Gauss-Newton driver calls `residual_fun(x)` followed
