@@ -236,6 +236,7 @@ def gauss_newton_least_squares(
     xtol: float = 1e-4,
     x_scale=None,
     forward_residual_fun=None,
+    post_jacobian_callback=None,
     verbose: int = 1,
 ):
     """Solve a nonlinear least-squares problem with a concrete Gauss-Newton loop.
@@ -244,6 +245,33 @@ def gauss_newton_least_squares(
     problems that already provide concrete residual and Jacobian callbacks.
     Unlike generic traced solvers, it never asks JAX to differentiate through
     the outer least-squares algorithm itself.
+
+    Parameters
+    ----------
+    residual_fun:
+        Callable ``(x) -> residuals`` for accepted steps. May be expensive
+        (e.g. builds a discrete-adjoint tape).
+    jacobian_fun:
+        Callable ``(x) -> J`` where J has shape ``(n_residuals, n_params)``.
+    x0:
+        Initial parameter vector.
+    max_nfev:
+        Maximum total number of residual/Jacobian evaluations.
+    ftol, gtol, xtol:
+        Convergence tolerances on cost reduction, gradient, and step norm.
+    x_scale:
+        Optional per-parameter scaling vector.
+    forward_residual_fun:
+        Optional cheaper residual callback for line-search trial evaluations.
+        When provided, line-search trial points are evaluated with this
+        function instead of ``residual_fun``.
+    post_jacobian_callback:
+        Optional zero-argument callable invoked immediately after each
+        ``jacobian_fun`` call.  Useful for releasing JIT caches between
+        expensive Jacobian evaluations, e.g.
+        ``post_jacobian_callback=jax.clear_caches``.
+    verbose:
+        Verbosity level (0 = silent, 1 = iteration table).
     """
     x = np.asarray(x0, dtype=float).copy()
     scale = np.ones_like(x) if x_scale is None else np.asarray(x_scale, dtype=float).copy()
@@ -276,6 +304,8 @@ def gauss_newton_least_squares(
 
         jacobian = np.asarray(jacobian_fun(x), dtype=float)
         njev += 1
+        if post_jacobian_callback is not None:
+            post_jacobian_callback()
         gradient = jacobian.T @ residual
         optimality = float(np.linalg.norm(gradient, ord=np.inf))
         if not np.isfinite(optimality):

@@ -254,11 +254,22 @@ def main() -> None:
     print("Quasisymmetry objective before optimization:", float(np.asarray(qs0["total"])))
     print("Total objective before optimization:", total_from_residual(residual0))
 
+    def _post_jacobian_clear():
+        """Release replay/preconditioner JIT caches between Jacobian calls.
+
+        Dropping compiled-function references after each exact Jacobian call
+        reduces peak memory retention on long runs (mirrors what the simsopt
+        wrapper does after accepted large exact GN iterations).
+        """
+        vj.clear_replay_scan_caches()
+        vj.clear_preconditioner_jit_caches()
+
     result = vj.gauss_newton_least_squares(
         residual_fun,
         jacobian_fun,
         np.asarray(params0, dtype=float),
         forward_residual_fun=forward_residual_fun,
+        post_jacobian_callback=_post_jacobian_clear,
         max_nfev=max_nfev,
         ftol=ftol,
         gtol=gtol,
@@ -266,10 +277,8 @@ def main() -> None:
         verbose=1,
     )
 
-    # Release scan-runner and preconditioner JIT caches after the expensive GN
-    # loop to reduce peak memory before final reporting.
-    vj.clear_replay_scan_caches()
-    vj.clear_preconditioner_jit_caches()
+    # Final cache clear after the GN loop.
+    _post_jacobian_clear()
 
     # Try to reuse the cached exact state for the final display.  The last
     # accepted GN step will have stored the final x in _exact_cache.  If the
