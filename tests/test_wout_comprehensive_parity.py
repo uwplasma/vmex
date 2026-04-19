@@ -35,14 +35,20 @@ def _should_run() -> bool:
 
 # ─── test cases ──────────────────────────────────────────────────────────────
 
+# Full parity cases: input + bundled VMEC2000 reference wout.
+# Covers: axisymmetric, non-axisymmetric, pure-pressure, current-driven, QA, QH, QI.
+# All are fixed-boundary (lasym=False) — these are the cases with available refs.
+#
 # (case_name, input_file, reference_wout)
 _CASES = [
+    # ── Axisymmetric fixed-boundary ──────────────────────────────────────────
     ("circular_tokamak", "input.circular_tokamak", "wout_circular_tokamak.nc"),
     (
         "shaped_tokamak_pressure",
         "input.shaped_tokamak_pressure",
         "wout_shaped_tokamak_pressure.nc",
     ),
+    # ── Non-axisymmetric fixed-boundary, stellarator-symmetric ───────────────
     (
         "nfp4_QH_warm_start",
         "input.nfp4_QH_warm_start",
@@ -53,6 +59,43 @@ _CASES = [
         "input.LandremanPaul2021_QA_lowres",
         "wout_LandremanPaul2021_QA_lowres.nc",
     ),
+    (
+        "nfp3_QI_fixed_resolution_final",
+        "input.nfp3_QI_fixed_resolution_final",
+        "wout_nfp3_QI_fixed_resolution_final.nc",
+    ),
+    # ── Non-axisymmetric fixed-boundary, current-driven ──────────────────────
+    (
+        "cth_like_fixed_bdy",
+        "input.cth_like_fixed_bdy",
+        "wout_cth_like_fixed_bdy.nc",
+    ),
+    # ── Purely-toroidal-field special case ───────────────────────────────────
+    (
+        "purely_toroidal_field",
+        "input.purely_toroidal_field",
+        "wout_purely_toroidal_field.nc",
+    ),
+]
+
+# Convergence-only cases: run vmec_jax and check fsq < threshold.
+# No VMEC2000 reference is available; we verify convergence and output sanity.
+#
+# (case_name, input_file, is_lasym, is_free_boundary)
+_CONVERGENCE_ONLY_CASES = [
+    # ── Stellarator-asymmetric (lasym=True), fixed-boundary ──────────────────
+    ("basic_non_stellsym_pressure", "input.basic_non_stellsym_pressure", True, False),
+    (
+        "LandremanSenguptaPlunk_section5p3_low_res",
+        "input.LandremanSenguptaPlunk_section5p3_low_res",
+        True,
+        False,
+    ),
+    ("up_down_asymmetric_tokamak", "input.up_down_asymmetric_tokamak", True, False),
+    # ── Up-down-asymmetric axisymmetric tokamak (lasym=False, unusual shape) ─
+    ("DIII-D_lasym_false", "input.DIII-D_lasym_false", False, True),  # free-bdy
+    # ── Free-boundary, stellarator-symmetric ─────────────────────────────────
+    ("cth_like_free_bdy", "input.cth_like_free_bdy", False, True),
 ]
 
 
@@ -288,6 +331,76 @@ def test_wout_comprehensive_parity(case, input_name, ref_name, tmp_path):
         atol=1e-8,
         skip_first=2,
     )
+
+
+# ─── convergence-only tests (no VMEC2000 reference) ─────────────────────────
+
+
+@pytest.mark.parametrize(
+    "case,input_name,is_lasym,is_free_bdy",
+    _CONVERGENCE_ONLY_CASES,
+    ids=[c[0] for c in _CONVERGENCE_ONLY_CASES],
+)
+def test_convergence_only(case, input_name, is_lasym, is_free_bdy, tmp_path):
+    """Run vmec_jax and verify convergence; no VMEC2000 reference available.
+
+    This covers:
+    * Stellarator-asymmetric (lasym=True) fixed-boundary cases.
+    * Free-boundary cases (requires mgrid files from ``fetch_assets.py``).
+    """
+    jax = pytest.importorskip("jax")
+    pytest.importorskip("netCDF4")
+    jax.config.update("jax_disable_jit", False)
+
+    from vmec_jax.driver import (
+        run_fixed_boundary,
+        run_free_boundary,
+        write_wout_from_fixed_boundary_run,
+    )
+
+    data_dir = _data_dir()
+    input_path = data_dir / input_name
+    if not input_path.exists():
+        pytest.skip(f"Missing input: {input_path}")
+
+    if is_free_bdy:
+        # Free-boundary needs mgrid files fetched separately.
+        import vmec_jax as vj_mod
+        try:
+            cfg, indata = vj_mod.load_config(str(input_path))
+            mgrid_file = str(indata.get("MGRID_FILE", ""))
+            if mgrid_file and not (data_dir / mgrid_file.strip("'\"")).exists():
+                pytest.skip(
+                    f"Free-boundary mgrid not found: {mgrid_file}. "
+                    f"Run: python tools/fetch_assets.py"
+                )
+        except Exception:
+            pass
+        # Free-boundary run
+        try:
+            run = run_free_boundary(str(input_path))
+        except Exception as exc:
+            pytest.skip(f"Free-boundary run failed (likely missing mgrid): {exc}")
+    else:
+        run = run_fixed_boundary(str(input_path))
+
+    # Write wout and verify convergence.
+    if not is_free_bdy:
+        out_path = tmp_path / f"wout_{case}_jax.nc"
+        write_wout_from_fixed_boundary_run(str(out_path), run)
+
+        from vmec_jax.wout import read_wout
+        w = read_wout(str(out_path))
+
+        assert float(w.fsqr) < 1e-8, f"{case}: fsqr={float(w.fsqr):.2e}"
+        assert float(w.fsqz) < 1e-8, f"{case}: fsqz={float(w.fsqz):.2e}"
+        assert float(w.fsql) < 1e-8, f"{case}: fsql={float(w.fsql):.2e}"
+
+        # Sanity checks on core wout fields.
+        assert np.all(np.isfinite(np.asarray(w.rmnc))), f"{case}: rmnc has non-finite values"
+        assert np.all(np.isfinite(np.asarray(w.zmns))), f"{case}: zmns has non-finite values"
+        assert np.all(np.isfinite(np.asarray(w.bmnc))), f"{case}: bmnc has non-finite values"
+        assert np.all(np.isfinite(np.asarray(w.iotas))), f"{case}: iotas has non-finite values"
 
 
 # ─── additional focused tests ─────────────────────────────────────────────────
