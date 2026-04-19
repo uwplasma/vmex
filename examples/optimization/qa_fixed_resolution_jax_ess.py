@@ -179,6 +179,11 @@ if _obj0 is not None and _obj0 > 0.0:
 # ─────────────────────────────────────────────────────────────────────────────
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+# Annotate history dump with metadata for plotting
+_ess_tag = f"ESS α={ALPHA}" if USE_ESS else "no ESS"
+result["_history_dump"]["label"] = f"QA opt (max_mode={MAX_MODE}, {_ess_tag})"
+result["_history_dump"]["target_aspect"] = TARGET_ASPECT
+
 opt.save_wout(OUTPUT_DIR / "wout_initial.nc", params0)
 opt.save_wout(OUTPUT_DIR / "wout_final.nc", result["x"])
 opt.save_history(OUTPUT_DIR / "history.json", result)
