@@ -1325,3 +1325,42 @@ Stop or reduce scope if:
         - the next runtime target remains deeper retained executables / buffers
           in the exact mode-2 path beyond the local replay and preconditioner
           caches already under control.
+    - exact mode-2 forward-trial relaxation audit on 2026-04-19:
+      - wrapper-level exact-path auditing showed that the exact production
+        mode-2 solve at `x0` is still saturating the full VMEC inner budget:
+        - tape length `1500`;
+        - replay bucket length `1500`;
+        - `precond_jmax = 30`;
+        - consistent with `input.nfp4_QH_warm_start`
+          `NITER_ARRAY = 1500` and `FTOL_ARRAY = 1.0E-13`;
+      - rejected experiments:
+        - relaxing the full exact solve itself was not safe:
+          - `max_iter=600`, `ftol=1e-10` degraded the exact 2-eval mode-2
+            cost to about `6.08e-02`;
+          - `max_iter=1000`, `ftol=1e-12` was worse in both quality and wall
+            time than the current baseline;
+      - accepted consumer-side fix:
+        - preserved the exact Jacobian / accepted-step solve at the original
+          tight settings, but separated the forward-only trial residual solve
+          used by the exact Gauss-Newton line search;
+        - the QH profile now carries a relaxed forward trial budget
+          (`600`, `1e-10`) that applies only to
+          `VmecJax.solve_state_for_line_search(...)`;
+      - observed effect on the exact mode-2 path:
+        - direct audit runner:
+          - 2-eval cost stayed essentially unchanged while wall time and live
+            memory dropped materially;
+          - 3-eval run finished cleanly at total objective about
+            `5.87724e-02`, which is better than the earlier exact mode-2
+            three-eval regime;
+        - first in-tree production rerun:
+          - still terminated late, so the forward-trial split is not the only
+            remaining issue;
+          - but the live RSS curve was much healthier through the late phase,
+            which strengthens the diagnosis that the previous line-search path
+            was oversolving trial points and amplifying the exact mode-2
+            footprint unnecessarily;
+      - conclusion:
+        - the forward-trial split is a real improvement and should remain the
+          baseline while the remaining late-run abnormal termination is traced
+          deeper inside the exact path.
