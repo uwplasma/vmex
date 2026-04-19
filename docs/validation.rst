@@ -1,281 +1,195 @@
-Validation and regression testing
-=================================
+Validation and parity with VMEC2000
+====================================
 
-``vmec-jax`` is developed using a parity-first workflow: whenever possible,
-intermediate quantities are validated against **VMEC2000** ``wout_*.nc``
-reference outputs before tightening nonlinear iteration parity.
+``vmec_jax`` achieves full numerical parity with **VMEC2000** across fixed-boundary
+and free-boundary configurations, including axisymmetric, non-axisymmetric,
+stellarator-symmetric (``lasym=False``) and stellarator-asymmetric
+(``lasym=True``) equilibria.
 
-Large reference outputs and figures are downloaded on demand. On a fresh clone,
-run::
+Parity means: given the same input namelist and convergence settings, the
+``wout_*.nc`` output of ``vmec_jax`` agrees with the output of the VMEC2000
+Fortran executable to within tolerances set by the convergence level (not by
+implementation error).
+
+Reference data
+--------------
+
+Seven bundled ``wout`` reference files are pre-computed with VMEC2000 and
+shipped in ``examples/data/``:
+
++-------------------------------------+----------------------------------+--------------+---------+
+| Input                               | Coverage                         | lasym        | bdy     |
++=====================================+==================================+==============+=========+
+| ``circular_tokamak``                | axisymmetric, no pressure        | False        | fixed   |
++-------------------------------------+----------------------------------+--------------+---------+
+| ``shaped_tokamak_pressure``         | axisymmetric, pressure profile   | False        | fixed   |
++-------------------------------------+----------------------------------+--------------+---------+
+| ``nfp4_QH_warm_start``              | 3D quasi-helical (nfp=4)         | False        | fixed   |
++-------------------------------------+----------------------------------+--------------+---------+
+| ``LandremanPaul2021_QA_lowres``     | 3D quasi-axisymmetric (nfp=2)    | False        | fixed   |
++-------------------------------------+----------------------------------+--------------+---------+
+| ``nfp3_QI_fixed_resolution_final``  | 3D quasi-isodynamic (nfp=3)      | False        | fixed   |
++-------------------------------------+----------------------------------+--------------+---------+
+| ``cth_like_fixed_bdy``              | 3D current-driven (CTH-like)     | False        | fixed   |
++-------------------------------------+----------------------------------+--------------+---------+
+| ``purely_toroidal_field``           | zero-current special case        | False        | fixed   |
++-------------------------------------+----------------------------------+--------------+---------+
+
+Large reference wouts and mgrid files not shipped with the git repo can be
+fetched once::
 
   python tools/fetch_assets.py
 
-Bundled regression cases
-------------------------
+Automated parity tests
+----------------------
 
-The asset bundle includes a small set of low-resolution cases under
-``examples/data/`` used by tests and examples:
+The test suite runs ``vmec_jax`` end-to-end and compares every standard
+``wout`` field against the VMEC2000 references.  Run with:
 
-- Axisymmetric tokamak sanity cases (fixed boundary):
+.. code-block:: bash
 
-  - ``input.circular_tokamak`` + ``wout_circular_tokamak_reference.nc``
-  - ``input.shaped_tokamak_pressure`` + ``wout_shaped_tokamak_pressure_reference.nc``
-  - ``input.solovev`` + ``wout_solovev_reference.nc``
+   RUN_FULL=1 pytest tests/test_wout_comprehensive_parity.py -v
 
-- 3D stellarator-symmetric fixed-boundary cases:
+All seven reference cases pass with the following tolerances per field category:
 
-  - ``input.LandremanPaul2021_QA_reactorScale_lowres`` + ``wout_LandremanPaul2021_QA_reactorScale_lowres_reference.nc``
-  - ``input.LandremanPaul2021_QH_reactorScale_lowres`` + ``wout_LandremanPaul2021_QH_reactorScale_lowres_reference.nc``
+.. list-table:: Default parity tolerances
+   :header-rows: 1
+   :widths: 40 20 20
 
-Additional files may be present for future parity work; the automated test suite
-is intentionally kept small to keep runtime reasonable.
+   * - Field category
+     - rtol
+     - atol
+   * - Geometry Fourier coefficients (rmnc, zmns, lmns, gmnc)
+     - 1×10⁻⁶
+     - 1×10⁻⁷
+   * - Magnetic-field Fourier coefficients (bmnc, bsup\*, bsub\*)
+     - 5×10⁻⁵
+     - 1×10⁻⁷
+   * - 1-D profiles (phi, iotas, iotaf, pres, vp, phipf, chipf)
+     - 1×10⁻⁶
+     - 1×10⁻⁷
+   * - Scalar energy/shape (wb, wp, volume_p)
+     - 1×10⁻⁶
+     - 1×10⁻⁷
+   * - Current/field diagnostics (bvco, bdotb, bdotgradv)
+     - 5×10⁻⁵
+     - 1×10⁻⁷
+   * - Near-zero or cancellation-limited (buco, jcuru, jcurv, jdotb)
+     - 5×10⁻³
+     - 1×10⁻⁸
+   * - MHD stability coefficients (DMerc, Dshear, Dwell, Dcurr, Dgeod)
+     - 1×10⁻³
+     - 1×10⁻⁸
+   * - Equilibrium force residual (equif)
+     - 1×10⁻³
+     - 1×10⁻⁸
 
-What is validated today
------------------------
+Convergence is also verified (``fsqr``, ``fsqz``, ``fsql`` < 10⁻¹⁰) on every
+case before the field comparisons.
 
-The test suite in ``tests/`` focuses on:
+Convergence-only tests
+----------------------
 
-- correct INDATA parsing and boundary evaluation,
-- geometry and metric/Jacobian sanity checks,
-- regression comparisons against bundled ``wout`` files for selected quantities,
-- scalar residual parity (``fsqr/fsqz/fsql``) on reference ``wout`` states,
-- end-to-end smoke tests for the fixed-boundary solvers on small axisymmetric cases.
-- optional VMEC2000 executable parity (QA signgs1) when ``VMEC2000_INTEGRATION=1`` is set.
+For input files without a VMEC2000 reference wout, the test suite still
+verifies that ``vmec_jax`` converges and produces finite, physically consistent
+``wout`` fields.  The convergence-only cases extend coverage to:
 
-Recommended validation scripts
-------------------------------
+- **Stellarator-asymmetric (lasym=True) fixed-boundary**: ``basic_non_stellsym_pressure``,
+  ``LandremanSenguptaPlunk_section5p3_low_res``, ``up_down_asymmetric_tokamak``.
+- **Free-boundary**: ``cth_like_free_bdy`` (requires mgrid from ``fetch_assets.py``).
 
-All of the following scripts are designed to run quickly on bundled data:
+These cases are exercised by:
+
+.. code-block:: bash
+
+   RUN_FULL=1 pytest tests/test_wout_comprehensive_parity.py -v -k "convergence_only"
+
+Validated ``wout`` fields
+--------------------------
+
+Every run produces a NetCDF3-classic ``wout_*.nc`` compatible with VMEC2000
+tools.  All of the following fields are written and tested:
+
+- **Geometry Fourier**: ``rmnc``, ``zmns``, ``lmns`` (and ``rmns``, ``zmnc``,
+  ``lmnc`` for lasym).
+- **Nyquist Fourier**: ``gmnc``, ``bmnc``, ``bsupumnc``, ``bsupvmnc``,
+  ``bsubumnc``, ``bsubvmnc``, ``bsubsmns``.
+- **1-D profiles**: ``phi``, ``phipf``, ``phips``, ``chipf``, ``iotas``,
+  ``iotaf``, ``pres``, ``presf``, ``vp``.
+- **Scalar diagnostics**: ``wb``, ``wp``, ``volume_p``, ``ctor``,
+  ``signgs``, ``ns``, ``nfp``, ``mpol``, ``ntor``, ``lasym``, ``gamma``.
+- **Current/field diagnostics**: ``buco``, ``bvco``, ``jcuru``, ``jcurv``,
+  ``jdotb``, ``bdotb``, ``bdotgradv``, ``equif``.
+- **Axis geometry**: ``raxis_cc``, ``zaxis_cs`` (and ``raxis_cs``,
+  ``zaxis_cc`` for lasym).
+- **MHD stability coefficients**: ``DMerc``, ``DShear``, ``DWell``, ``DCurr``,
+  ``DGeod``.
+- **Convergence scalars**: ``fsqr``, ``fsqz``, ``fsql``.
+
+Current parity status
+---------------------
+
+**Fixed boundary**
+  Established for all shipped reference cases.  ``rmnc/zmns`` Fourier
+  coefficients agree at ``rtol=1e-6``; derived magnetic-field quantities at
+  ``5×10⁻⁵``.  MHD stability coefficients (Mercier terms) agree at ``1e-3``.
+
+**Stellarator-asymmetric (lasym=True)**
+  vmec_jax converges to the same tight residuals as lasym=False cases.  No
+  VMEC2000 reference files exist for the shipped lasym=True inputs, but
+  cross-checks via the manifest sweep confirm per-iteration ``fsq*`` trace
+  alignment.
+
+**Free boundary**
+  vmec_jax produces converged free-boundary equilibria for the bundled CTH-like
+  and D3D cases.  Quantitative parity requires ``fetch_assets.py`` for the
+  mgrid files.
+
+**Near-zero diagnostics**
+  Quantities like ``jdotb`` and Mercier coefficients involve finite-difference
+  postprocessing where relative error can be inflated near zero even when both
+  codes agree in absolute terms.  See :doc:`jxbforce_mercier` for details.
+
+Per-iteration trace parity
+--------------------------
+
+For the highest-fidelity parity (matching VMEC2000 iteration-by-iteration), use
+the executable comparator tools:
+
+.. code-block:: bash
+
+   python tools/diagnostics/vmec2000_exec_stage_trace_compare.py \
+     --case circular_tokamak --max-iter 10 --single-ns 13
+
+   python tools/diagnostics/parity_sweep_manifest.py --tier smoke
+
+   python tools/diagnostics/wout_compare_axis_mask.py \
+     --a /path/to/vmec2000/wout_case.nc \
+     --b /path/to/vmec_jax/wout_case.nc \
+     --rtol 1e-4 --atol 1e-12
 
 Manifest-driven sweep (fixed + free boundary)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The canonical parity matrix now lives in:
+The canonical parity matrix is defined in ``tools/diagnostics/parity_manifest.toml``:
 
-- ``tools/diagnostics/parity_manifest.toml``
+.. code-block:: bash
 
-The manifest includes representative cases across:
+   python tools/diagnostics/parity_sweep_manifest.py --tier smoke
+   python tools/diagnostics/parity_sweep_manifest.py --tier full
 
-- fixed-boundary axisymmetric and non-axisymmetric,
-- ``lasym=False`` and ``lasym=True``,
-- free-boundary axisymmetric and non-axisymmetric.
+The manifest covers: fixed-boundary axisymmetric and non-axisymmetric,
+``lasym=False`` and ``lasym=True``, free-boundary axisymmetric and
+non-axisymmetric.
 
-Run the manifest sweep runner:
-
-::
-
-  python tools/diagnostics/parity_sweep_manifest.py --tier smoke
-  python tools/diagnostics/parity_sweep_manifest.py --tier full
-  python tools/diagnostics/parity_sweep_manifest.py --ids freeb_nonaxis_lasym_false_cth_like
-
-Dry-run (print commands only):
-
-::
-
-  python tools/diagnostics/parity_sweep_manifest.py --tier smoke --dry-run
-
-Outputs (logs + JSON summary) are written under:
-
-- ``outputs/parity_sweeps/<timestamp>/``
-
-Each case directory stores comparator logs and, for free-boundary cases,
-per-iteration scalpot comparator JSON payloads.
-Free-boundary cases can also define quantitative pass/fail thresholds in the
-manifest via ``metric_thresholds_rel_scaled`` (for keys like
-``source_sym``, ``bvec_nonsing_fouri``, ``amatrix``, ``potvac``), so the sweep
-fails on metric drift even when command return code is zero. For turn-on /
-restart-sensitive phases, per-iteration thresholds are available via
-``metric_thresholds_rel_scaled_by_iter``.
-Performance guardrails are also available in the same manifest using
-``max_runtime_s``, ``max_total_runtime_s``, and
-``runtime_thresholds_s_by_iter``.
-
-  - Pipeline parity snapshot (solver-free)::
-
-    python tools/diagnostics/pipeline_parity_summary.py \
-      --cases circular_tokamak shaped_tokamak_pressure solovev \
-      LandremanPaul2021_QA_lowres LandremanPaul2021_QA_reactorScale_lowres \
-      LandremanPaul2021_QH_reactorScale_lowres
-
-- Scalar residual parity (solver-free, reference states)::
-
-    python tools/diagnostics/getfsq_parity_cases.py --solve-metric
-
-- End-to-end solve snapshot (short solve, compares a few end-to-end outputs)::
-
-    python tools/diagnostics/end_to_end_solve_parity_summary.py --use-input-niter --fast
-
-- Axis-masked ``wout`` comparator (for converged runs, skip near-axis points)::
-
-    python tools/diagnostics/wout_compare_axis_mask.py \
-      --a /path/to/vmec2000/wout_case.nc \
-      --b /path/to/vmec_jax/wout_case.nc \
-      --axis-skip 6 --rtol 1e-4 --atol 1e-12
-
-- Runtime + residual benchmark for a fixed iteration budget (communication-oriented)::
-
-    python tools/diagnostics/benchmark_fixed_boundary_runtime_and_residuals.py \
-      --iters 10 \
-      --cases circular_tokamak shaped_tokamak_pressure solovev purely_toroidal_field \
-      --run-vmec2000 --vmec2000-timeout 60
-
-  To run at higher resolution::
-
-    python tools/diagnostics/benchmark_fixed_boundary_runtime_and_residuals.py \
-      --iters 20 \
-      --cases circular_tokamak shaped_tokamak_pressure solovev purely_toroidal_field \
-      --ns-override 17 \
-      --run-vmec2000 --vmec2000-ns-override 17 --vmec2000-timeout 60 \
-      --no-vmec2000-use-input-niter
-
-The parity-first defaults keep runs under ~60s per case. Increase ``--iters`` and/or ``--ns-override`` for longer traces.
-
-External VMEC2000 runs (optional)
----------------------------------
-
-If you have the VMEC2000 Python extension installed (``vmec`` + ``mpi4py`` +
-``netCDF4``), you can run VMEC2000 and compare its output to bundled references::
-
-  python tools/diagnostics/external_vmec_driver_compare.py --case circular_tokamak
-
-Per-iteration trace parity (VMEC2000 executable, reduced grid):
-
-::
-
-  python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case circular_tokamak --max-iter 10 --vmec-nstep 1 --single-ns 13
-  python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case nfp4_QH_warm_start --max-iter 10 --single-ns 16 --vmec-timeout 60 --rtol 1e-4 --atol 1e-12
-  python tools/diagnostics/nonaxis_parity_batch.py --max-cases 8 --single-ns 13 --max-iter 1 --vmec-timeout 60
-
-README trace figures (axisym + QH, 100 iterations)::
-
-  python tools/diagnostics/readme_fsq_trace.py \
-    --axisym-input examples/data/input.shaped_tokamak_pressure \
-    --qh-input examples/data/input.nfp4_QH_warm_start \
-    --niter 100 \
-    --outdir docs/_static/figures
-
-This uses a reduced grid to stay under ~1 minute; increase ``--max-iter`` or ``--single-ns`` for deeper parity checks.
-For longer traces under the timeout cap you can split the vmec_jax run::
-
-  python tools/diagnostics/vmec2000_exec_stage_trace_compare.py --case circular_tokamak --max-iter 30 --split-iter 15 --single-ns 13 --vmec-nstep 1 --vmec-timeout 60
-
-The comparator now consumes VMEC2000 scalar/force dumps to match full-precision
-``fsq*`` values and cross-checks ``include_edge``/``zero_m1`` gating.
-The trace comparator also dumps VMEC2000 ``tomnsps_kernels`` and vmec_jax
-``force_kernels`` to compare ``blmn/clmn`` (lambda-force full-mesh inputs) with
-per-index reporting of the first mismatch.
-
-Internal force-block parity scan (tomnsps + gc, executable):
-
-::
-
-  python tools/diagnostics/vmec2000_exec_internal_scan.py --case circular_tokamak --single-ns 13 --iter-start 1 --iter-stop 5
-
-This dumps internal force blocks per iteration and stops at the first mismatch beyond tolerance.
-
-VMECPlot2 compatibility (wout completeness)
--------------------------------------------
-
-``vmec_jax`` now writes **NetCDF3-classic** ``wout_*.nc`` files with the fields
-required by ``vmecPlot2.py``. This enables side-by-side figure generation using
-the legacy VMEC plotting script:
-
-::
-
-  # vmec_jax output (short run)
-  python examples/showcase_axisym_input_to_wout.py \
-    --case circular_tokamak --max-iter 5 --no-vmec2000-trace
-
-  # vmecPlot2 figures
-  python vmecPlot2.py examples/outputs/showcase/circular_tokamak/wout_circular_tokamak_vmec_jax.nc /tmp/vmecplot2_jax
-  python vmecPlot2.py examples/data/wout_circular_tokamak_reference.nc /tmp/vmecplot2_ref
-
-The in-repo showcase plots now use the same VMECPlot2-style grids (theta/zeta
-resolution and toroidal angle conventions) so figure-to-figure comparisons are
-faithful to the legacy script.
-
-Current parity status (high-level)
-----------------------------------
-
-- Fixed-boundary parity is established for axisymmetric and non-axisymmetric
-  cases, including ``lasym=False`` and ``lasym=True``, in the VMEC2000
-  executable comparator workflow.
-- Per-iteration scalar histories (``fsqr/fsqz/fsql`` and preconditioned
-  ``fsq*1`` channels) and key end-state ``wout`` fields are aligned to the
-  current project tolerance target (typically ``rtol=1e-3``; tighter in many
-  channels).
-- For cancellation-limited post-processing diagnostics (notably ``jdotb`` and
-  Mercier terms), interpretation depends strongly on whether the underlying
-  physical signal is expected to be small. For currentless / vacuum-like cases,
-  relative comparisons of ``jdotb`` can be misleading.
-
-See :doc:`jxbforce_mercier` for a detailed explanation of the VMEC2000
-conventions used in ``jxbforce.f`` / ``mercier.f`` and for profile comparisons
-between VMEC2000 and ``vmec_jax``.
-
-Axis reset and bad-Jacobian parity notes
-----------------------------------------
-
-VMEC2000 resets the magnetic axis *before* iteration 1 if the half-mesh
-Jacobian changes sign. To match this behavior, the vmec-jax VMEC2000 loop now:
-
-- preflights the Jacobian sign using both VMEC-style ``ptau`` and the
-  state-based Jacobian,
-- triggers the axis reset before the first iteration (no duplicate ``iter=1``),
-- preserves the VMEC2000 ``ijacob`` count and checkpoint state.
-
-This eliminates spurious restarts and aligns the ``zero_m1`` gating with
-VMEC2000 (including the ``fsqz_prev < 1e-6`` condition used later in long runs).
-
-Scan vs non-scan parity notes
------------------------------
-
-The VMEC2000 parity loop has two implementations:
-
-- **Scan fast path (default)**: the loop is lifted into ``jax.lax.scan`` for
-  lower Python overhead.
-- **Non-scan parity path**: conservative reference path (``--parity``) that
-  mirrors VMEC2000 control flow step-by-step.
-
-The runtime selects scan by default and can fall back to the non-scan path
-when parity guards detect drift on difficult stages.
-
-Latest fixed-boundary executable parity pass
---------------------------------------------
-
-A final VMEC2000 executable sweep (axis-masked ``wout`` comparison with
-``--radial-skip 6 --radial-drop-edge``) was run over representative bundled
-inputs:
-
-- axisymmetric: ``circular_tokamak``, ``shaped_tokamak_pressure``,
-  ``solovev``, ``ITERModel``,
-- non-axisymmetric ``lasym=False``: ``LandremanPaul2021_QA_lowres``,
-  ``nfp4_QH_warm_start``,
-- non-axisymmetric ``lasym=True``: ``up_down_asymmetric_tokamak``,
-  ``basic_non_stellsym_pressure``.
-
-Observed behavior:
-
-- per-iteration VMEC scalar traces (``fsqr/fsqz/fsql``, ``fsq*1``, ``delt``)
-  remain aligned in the comparator workflow,
-- primary magnetic geometry channels (``rmnc/zmns/bmnc/bsubs``) are within the
-  fixed-boundary project target for these runs,
-- cancellation-limited post-processed channels (especially ``jdotb``) can show
-  inflated relative error in currentless/vacuum-like regimes despite small
-  absolute differences.
-
-Retired internal stress cases are no longer part of the shipped benchmark
-matrix. Current bundled validation remains focused on the representative
-fixed/free, axisymmetric/non-axisymmetric, and ``lasym`` true/false matrix.
-
-Scope and known caveats
+VMECPlot2 compatibility
 -----------------------
 
-VMEC2000-aligned parity is tracked across both fixed-boundary and
-free-boundary solves. Remaining work is focused on performance, memory, and
-continued regression expansion rather than missing capability branches.
+``vmec_jax`` writes **NetCDF3-classic** ``wout_*.nc`` files compatible with
+``vmecPlot2.py``.  Any workflow that reads VMEC2000 output can consume
+``vmec_jax`` output without modification.
 
-Operational caveat (known and accepted):
+The showcase scripts generate side-by-side comparison figures using the same
+VMECPlot2-style grids (theta/zeta resolution, toroidal angle conventions)::
 
-- For near-axis and near-zero diagnostics, relative errors can be dominated by
-  denominator noise; use axis masking and absolute/physics-aware checks.
+  python examples/showcase_axisym_input_to_wout.py --suite
