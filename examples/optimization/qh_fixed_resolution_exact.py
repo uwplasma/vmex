@@ -5,11 +5,31 @@
 This standalone example mirrors the SIMSOPT fixed-resolution QH workflow, but
 stays entirely inside vmec_jax. It uses the recovered exact discrete-adjoint
 Jacobian path, not finite differences.
+
+Usage
+-----
+Run with defaults (max_mode=1, max_nfev=10, ftol=gtol=xtol=1e-3)::
+
+    python examples/optimization/qh_fixed_resolution_exact.py
+
+Write wout files and objective history to a custom directory::
+
+    python examples/optimization/qh_fixed_resolution_exact.py \\
+        --output-dir results/qh_opt \\
+        --max-mode 1 --max-nfev 10
+
+The script saves:
+  - ``results/qh_opt/wout_initial.nc``   — equilibrium at the start point
+  - ``results/qh_opt/wout_final.nc``     — equilibrium at the optimized point
+  - ``results/qh_opt/history.json``      — objective/cost history per iteration
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 import os
+import time
 from pathlib import Path
 
 import numpy as np
@@ -17,14 +37,61 @@ import numpy as np
 import vmec_jax as vj
 
 
-max_nfev = 10  # Maximum number of function evaluations
-max_mode = 1  # Maximum poloidal and toroidal mode numbers to vary
-ftol = 1e-4  # Function tolerance for least-squares termination
-gtol = 1e-4  # Gradient tolerance for least-squares termination
-xtol = 1e-4  # Step tolerance for least-squares termination
+def _parse_args():
+    p = argparse.ArgumentParser(
+        description="QH fixed-resolution exact discrete-adjoint optimization"
+    )
+    p.add_argument("--max-nfev", type=int, default=10,
+                   help="Maximum number of function evaluations (default: 10)")
+    p.add_argument("--max-mode", type=int, default=1,
+                   help="Maximum |m|,|n| mode numbers for boundary DOFs (default: 1)")
+    p.add_argument("--ftol", type=float, default=1e-3,
+                   help="Relative cost reduction tolerance (default: 1e-3)")
+    p.add_argument("--gtol", type=float, default=1e-3,
+                   help="Gradient infinity-norm tolerance (default: 1e-3)")
+    p.add_argument("--xtol", type=float, default=1e-3,
+                   help="Step norm tolerance (default: 1e-3)")
+    p.add_argument("--output-dir", type=str, default=None,
+                   help="Directory for wout_initial.nc, wout_final.nc, history.json")
+    return p.parse_args()
+
+
+def _state_to_run(state, static, indata, flux, signgs):
+    """Wrap a bare VMECState in a minimal FixedBoundaryRun for wout writing."""
+    from vmec_jax.driver import FixedBoundaryRun
+    return FixedBoundaryRun(
+        cfg=static.cfg,
+        indata=indata,
+        static=static,
+        state=state,
+        result=None,
+        flux=flux,
+        profiles={},
+        signgs=signgs,
+    )
+
+
+def _write_wout(path: Path, state, static, indata, flux, signgs) -> None:
+    """Write a wout NetCDF file for the given converged state.
+
+    Uses fast_bcovar=True which calls vmec_bcovar_half_mesh instead of the
+    full force-constraint path, avoiding a grid-size mismatch on some inputs.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    run = _state_to_run(state, static, indata, flux, signgs)
+    vj.write_wout_from_fixed_boundary_run(str(path), run, include_fsq=False, fast_bcovar=True)
+    print(f"  Wrote {path}")
 
 
 def main() -> None:
+    args = _parse_args()
+    max_nfev = int(args.max_nfev)
+    max_mode = int(args.max_mode)
+    ftol = float(args.ftol)
+    gtol = float(args.gtol)
+    xtol = float(args.xtol)
+    outdir = Path(args.output_dir) if args.output_dir else None
+
     from vmec_jax._compat import enable_x64, jax, jnp
     from vmec_jax.field import signgs_from_sqrtg
     from vmec_jax.geom import eval_geom
@@ -36,6 +103,8 @@ def main() -> None:
 
     print("Running examples/optimization/qh_fixed_resolution_exact.py")
     print("==========================================================")
+    print(f"  max_mode={max_mode}  max_nfev={max_nfev}  "
+          f"ftol={ftol:.0e}  gtol={gtol:.0e}  xtol={xtol:.0e}")
 
     filename = Path(__file__).resolve().parents[1] / "data" / "input.nfp4_QH_warm_start"
     cfg, indata = vj.load_config(str(filename))
@@ -235,6 +304,47 @@ def main() -> None:
         columns = jax.vmap(residual_linear)(final_tangents)
         return np.asarray(columns, dtype=float).T
 
+    # ── Objective history tracking ─────────────────────────────────────────────
+    _history: list[dict] = []
+    _wall_t0 = time.perf_counter()
+
+    def _post_jacobian_clear():
+        """Release replay/preconditioner JIT caches between Jacobian calls."""
+        vj.clear_replay_scan_caches()
+        vj.clear_preconditioner_jit_caches()
+
+    _last_jacobian_key: list = [None]
+
+    def _jacobian_fun_tracked(params):
+        _last_jacobian_key[0] = np.asarray(params, dtype=float).tobytes()
+        jac = jacobian_fun(params)
+        # Record accepted-step info in history after Jacobian is computed.
+        key = _last_jacobian_key[0]
+        if key is not None and key in _exact_cache:
+            cached_state, _ = _exact_cache[key]
+            res = np.asarray(residuals_from_state(cached_state), dtype=float)
+            cost = float(0.5 * np.dot(res, res))
+            qs_total = float(np.dot(res[1:], res[1:]))
+            aspect = float(np.asarray(
+                vj.equilibrium_aspect_ratio_from_state(state=cached_state, static=static)
+            ))
+            _history.append({
+                "wall_time_s": time.perf_counter() - _wall_t0,
+                "cost": cost,
+                "objective": 2.0 * cost,
+                "qs_objective": qs_total,
+                "aspect": aspect,
+            })
+        return jac
+
+    def _exact_residual_after_jacobian():
+        key = _last_jacobian_key[0]
+        if key is None or key not in _exact_cache:
+            return None
+        cached_state, _ = _exact_cache[key]
+        return np.asarray(residuals_from_state(cached_state), dtype=float)
+
+    # ── Initial evaluation ─────────────────────────────────────────────────────
     residual0 = residual_fun(params0)
     # Reuse the exact state from the cache (residual_fun already built the tape).
     state0, _ = solve_exact_state(np.asarray(params0, dtype=float), return_payload=True)
@@ -250,41 +360,28 @@ def main() -> None:
         helicity_m=1,
         helicity_n=-1,
     )
+    aspect0 = float(np.asarray(vj.equilibrium_aspect_ratio_from_state(state=state0, static=static)))
+    cost0 = total_from_residual(residual0)
 
-    print("Quasisymmetry objective before optimization:", float(np.asarray(qs0["total"])))
-    print("Total objective before optimization:", total_from_residual(residual0))
+    print(f"Aspect ratio before optimization:        {aspect0:.4f}")
+    print(f"Quasisymmetry objective before:          {float(np.asarray(qs0['total'])):.6f}")
+    print(f"Total objective before optimization:     {cost0:.6f}")
 
-    def _post_jacobian_clear():
-        """Release replay/preconditioner JIT caches between Jacobian calls.
+    # Record the initial point.
+    _history.append({
+        "wall_time_s": 0.0,
+        "cost": 0.5 * cost0,
+        "objective": cost0,
+        "qs_objective": float(np.dot(np.asarray(residual0[1:]), np.asarray(residual0[1:]))),
+        "aspect": aspect0,
+    })
 
-        Dropping compiled-function references after each exact Jacobian call
-        reduces peak memory retention on long runs (mirrors what the simsopt
-        wrapper does after accepted large exact GN iterations).
-        """
-        vj.clear_replay_scan_caches()
-        vj.clear_preconditioner_jit_caches()
+    # Write initial wout if requested.
+    if outdir is not None:
+        _write_wout(outdir / "wout_initial.nc", state0, static, indata, flux, signgs)
 
-    # Tracks the most-recently-used params key so we can retrieve the exact
-    # residual from _exact_cache after jacobian_fun builds a new tape.
-    _last_jacobian_key: list = [None]
-
-    def _jacobian_fun_tracked(params):
-        _last_jacobian_key[0] = np.asarray(params, dtype=float).tobytes()
-        return jacobian_fun(params)
-
-    def _exact_residual_after_jacobian():
-        """Return the exact tight-solve residual for the last jacobian_fun x.
-
-        jacobian_fun calls solve_exact_state internally, which stores the
-        exact state in _exact_cache.  This callback retrieves that state and
-        computes the true residual so the GN gradient uses the tight value
-        instead of the relaxed forward-trial residual.
-        """
-        key = _last_jacobian_key[0]
-        if key is None or key not in _exact_cache:
-            return None
-        cached_state, _ = _exact_cache[key]
-        return np.asarray(residuals_from_state(cached_state), dtype=float)
+    # ── Gauss-Newton optimization ──────────────────────────────────────────────
+    t_opt_start = time.perf_counter()
 
     result = vj.gauss_newton_least_squares(
         residual_fun,
@@ -300,6 +397,8 @@ def main() -> None:
         verbose=1,
     )
 
+    t_opt_total = time.perf_counter() - t_opt_start
+
     # Final cache clear after the GN loop.
     _post_jacobian_clear()
 
@@ -309,12 +408,12 @@ def main() -> None:
     # fall back to a fresh forward solve (non-trial, tight budget).
     _final_key = np.asarray(result["x"], dtype=float).tobytes()
     if _final_key in _exact_cache:
-        state = _exact_cache[_final_key][0]
+        state_final = _exact_cache[_final_key][0]
     else:
-        state = solve_forward_state(result["x"], trial=False)
-    residual = np.asarray(residuals_from_state(state), dtype=float)
-    qs = vj.quasisymmetry_ratio_residual_from_state(
-        state=state,
+        state_final = solve_forward_state(result["x"], trial=False)
+    residual_final = np.asarray(residuals_from_state(state_final), dtype=float)
+    qs_final = vj.quasisymmetry_ratio_residual_from_state(
+        state=state_final,
         static=static,
         indata=indata,
         signgs=signgs,
@@ -325,12 +424,64 @@ def main() -> None:
         helicity_m=1,
         helicity_n=-1,
     )
+    aspect_final = float(np.asarray(
+        vj.equilibrium_aspect_ratio_from_state(state=state_final, static=static)
+    ))
+    cost_final = total_from_residual(residual_final)
 
-    print("Final aspect ratio:", float(np.asarray(vj.equilibrium_aspect_ratio_from_state(state=state, static=static))))
-    print("Quasisymmetry objective after optimization:", float(np.asarray(qs["total"])))
-    print("Total objective after optimization:", total_from_residual(residual))
+    print()
+    print(f"Optimization complete in {t_opt_total:.1f} s  "
+          f"({result['nfev']} residual evals, {result['njev']} Jacobian evals)")
+    print(f"Termination: {result['message']}")
+    print(f"Aspect ratio after optimization:         {aspect_final:.4f}")
+    print(f"Quasisymmetry objective after:           {float(np.asarray(qs_final['total'])):.6f}")
+    print(f"Total objective after optimization:      {cost_final:.6f}")
+    print(f"Objective reduction:                     "
+          f"{100.0 * (1.0 - cost_final / cost0):.1f}%")
     print("End of examples/optimization/qh_fixed_resolution_exact.py")
     print("=======================================================")
+
+    # Write final wout and history if requested.
+    if outdir is not None:
+        _write_wout(outdir / "wout_final.nc", state_final, static, indata, flux, signgs)
+
+        # Append final point to history (may duplicate last jacobian entry if
+        # the last accepted step is already there, but that's harmless).
+        _history.append({
+            "wall_time_s": t_opt_total,
+            "cost": 0.5 * cost_final,
+            "objective": cost_final,
+            "qs_objective": float(np.dot(residual_final[1:], residual_final[1:])),
+            "aspect": aspect_final,
+        })
+
+        hist_path = outdir / "history.json"
+        hist_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(hist_path, "w") as f:
+            json.dump(
+                {
+                    "max_mode": max_mode,
+                    "max_nfev": max_nfev,
+                    "ftol": ftol,
+                    "gtol": gtol,
+                    "xtol": xtol,
+                    "total_wall_time_s": t_opt_total,
+                    "nfev": result["nfev"],
+                    "njev": result["njev"],
+                    "success": result["success"],
+                    "message": result["message"],
+                    "objective_initial": cost0,
+                    "objective_final": cost_final,
+                    "qs_initial": float(np.asarray(qs0["total"])),
+                    "qs_final": float(np.asarray(qs_final["total"])),
+                    "aspect_initial": aspect0,
+                    "aspect_final": aspect_final,
+                    "history": _history,
+                },
+                f,
+                indent=2,
+            )
+        print(f"  Wrote {hist_path}")
 
 
 if __name__ == "__main__":
