@@ -1289,3 +1289,39 @@ Stop or reduce scope if:
           buffer retention beyond the two easy helper-hoist wins, with the
           next likely targets being replay and preconditioner internal
           closures.
+    - preconditioner-cache / profile tracer-safety follow-up on 2026-04-18:
+      - after the helper-hoist audit, the heaviest remaining local miss source
+        was still `preconditioner_1d_jax.py`;
+      - implemented two stable vmec_jax-side changes:
+        - bounded the local lambda-preconditioner JIT cache with an LRU policy
+          controlled by `VMEC_JAX_PRECOND_CACHE_LIMIT` (default `16`);
+        - added `clear_preconditioner_jit_caches()` and exported it so the
+          outer exact GN path can drop preconditioner-local executable
+          references between accepted large exact steps;
+      - also made the low-level profile-power-series helpers tracer-safe:
+        - `_power_series(...)` and `_pcurr_power_series_ip(...)` now use a
+          NumPy-fast path when coefficients are static but fall back to pure
+          JAX arrays for traced coefficients;
+        - added a regression that jits `eval_profiles(...)` with traced
+          `AM` coefficients;
+      - rejected experiment:
+        - a cached `polflux_deriv` helper in `energy.py` was prototyped after
+          the profiles fix, but it did not reduce the exact mode-2 compile
+          misses and was reverted;
+      - measured production effect:
+        - exact `max_mode=2`, `max_nfev=2` remained correct and finished in
+          about `94.19 s`, with max RSS about `19.78 GB` and peak footprint
+          about `27.99 GB`;
+        - exact `max_mode=2`, `max_nfev=3` still terminated late, but the
+          run stayed in a relatively low live-RSS regime for most of its life
+          and ended around:
+          - elapsed `170.76 s`;
+          - max RSS about `21.17 GB`;
+          - peak footprint about `56.52 GB`;
+      - conclusion:
+        - the preconditioner cache controls are safe and now available for the
+          exact cache-clear path;
+        - they do not solve late completion by themselves;
+        - the next runtime target remains deeper retained executables / buffers
+          in the exact mode-2 path beyond the local replay and preconditioner
+          caches already under control.

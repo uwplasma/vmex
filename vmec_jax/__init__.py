@@ -135,6 +135,7 @@ from .implicit import (
     solve_fixed_boundary_state_implicit,
     solve_lambda_state_implicit,
 )
+from .preconditioner_1d_jax import clear_preconditioner_jit_caches
 from .discrete_adjoint import (
     ResidualCheckpointTape,
     ResidualIterationTrace,
@@ -314,6 +315,7 @@ __all__ = [
     "ResidualIterationTrace",
     "build_residual_checkpoint_tape",
     "build_residual_checkpoint_tape_direct",
+    "clear_preconditioner_jit_caches",
     "clear_replay_scan_caches",
     "checkpoint_tape_param_jvp",
     "checkpoint_tape_param_vjp",
