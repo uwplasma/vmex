@@ -1233,3 +1233,21 @@ Stop or reduce scope if:
           reduce the retained replay/JVP executable set;
         - but they do not eliminate the full long-run footprint by themselves,
           so a broader XLA/runtime retention source remains on the exact path.
+    - cache-clear / persistent-cache runtime follow-up on 2026-04-18:
+      - after the bounded replay-cache pass, checked current JAX guidance and
+        aligned the exact solver path with it:
+        - JAX recommends `jax.clear_caches()` when compile/staging cache
+          pressure matters;
+        - persistent compilation cache should be used so cleared programs do
+          not require full recompilation;
+      - vmec_jax already enables persistent compilation cache, so the
+        implementation step here was to expose explicit local cache clears:
+        - added `clear_replay_scan_caches()` to drop replay-runner references;
+      - the simsopt exact GN path now pairs that with wrapper-side helper
+        cache clears and `jax.clear_caches()` after accepted large exact
+        iterations;
+      - measured effect carried through the exact mode-2 benchmark:
+        - `nfev=2`: same objective with materially lower RSS;
+        - `nfev=3`: still not fully solved, but the live RSS curve is lower
+          than the earlier regime, which suggests the remaining late-run
+          footprint is broader than just our local replay caches.

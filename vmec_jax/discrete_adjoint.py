@@ -96,6 +96,13 @@ def _lru_cache_put(cache: OrderedDict[tuple[Any, ...], Any], key: tuple[Any, ...
         cache.popitem(last=False)
 
 
+def clear_replay_scan_caches() -> None:
+    """Drop cached replay-scan runners to release compiled executable refs."""
+    _CHECKPOINT_TAPE_SCAN_CACHE.clear()
+    _CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE.clear()
+    _CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE.clear()
+
+
 def _dynamic_replay_bucket_size() -> int:
     env = os.getenv("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", "").strip()
     if not env:
