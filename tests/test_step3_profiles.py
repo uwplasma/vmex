@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from vmec_jax._compat import has_jax, jax, jnp
 
 from vmec_jax.geom import eval_geom
 from vmec_jax.integrals import cumtrapz_s, dvds_from_sqrtg
@@ -47,6 +48,38 @@ def test_power_series_profiles_against_manual():
     np.testing.assert_allclose(np.asarray(prof["pressure"]), MU0 * p, rtol=0, atol=1e-12)
     np.testing.assert_allclose(np.asarray(prof["iota"]), iota, rtol=0, atol=1e-12)
     np.testing.assert_allclose(np.asarray(prof["current"]), current, rtol=0, atol=1e-12)
+
+
+def test_power_series_profiles_support_traced_coefficients():
+    if not has_jax():
+        pytest.skip("JAX not available")
+
+    coeffs = jnp.asarray([2.0, -1.0, 0.5])
+    x = jnp.linspace(0.0, 1.0, 5)
+
+    @jax.jit
+    def _eval(am):
+        indata = InData(
+            scalars={
+                "PMASS_TYPE": "power_series",
+                "PIOTA_TYPE": "power_series",
+                "PCURR_TYPE": "power_series",
+                "AM": am,
+                "AI": [0.4, 0.2],
+                "AC": [1.0, 2.0],
+                "PRES_SCALE": 3.0,
+                "BLOAT": 1.5,
+                "SPRES_PED": 0.6,
+                "LRFP": False,
+                "NCURR": 0,
+            },
+            indexed={},
+        )
+        prof = eval_profiles(indata, x)
+        return prof["pressure_pa"]
+
+    pressure = _eval(coeffs)
+    assert np.all(np.isfinite(np.asarray(pressure)))
 
 
 def test_volume_total_matches_vmec2000_wout_reference(load_case_circular_tokamak):

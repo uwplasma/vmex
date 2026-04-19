@@ -60,13 +60,20 @@ def _lower(s: Any, default: str) -> str:
     return s
 
 
+def _coeffs_static_or_jax(coeffs):
+    """Prefer NumPy scalars for static coeff loops, but stay tracer-safe."""
+    try:
+        return np.asarray(coeffs)
+    except Exception:
+        return jnp.asarray(coeffs)
+
+
 def _power_series(coeffs, x):
     """Evaluate Σ_i coeffs[i] * x**i using Horner (coeffs in ascending order)."""
-    # Use np.asarray so that coeffs[i] in the Python loop is a plain NumPy scalar,
-    # not a JAX dynamic_slice op.  Each JAX dynamic_slice triggers an eager XLA
-    # compilation event (~2 ms), so keeping coeffs as a NumPy array eliminates
-    # O(n_coeffs) eager compilations without changing any arithmetic.
-    coeffs = np.asarray(coeffs)
+    # Prefer NumPy scalars so coeffs[i] in the Python loop is a plain scalar
+    # rather than a JAX dynamic_slice op, but fall back to JAX arrays if the
+    # coefficients are traced.
+    coeffs = _coeffs_static_or_jax(coeffs)
     x = jnp.asarray(x)
     y = jnp.zeros_like(x, dtype=coeffs.dtype)
     # Horner: iterate from high order to low order.
@@ -82,9 +89,8 @@ def _pcurr_power_series_ip(ac, x):
       I'(x) = Σ_i ac(i) * x**i
       I(x)  = ∫_0^x I'(t) dt = Σ_i ac(i)/(i+1) * x**(i+1)
     """
-    # Same rationale as _power_series: keep ac as NumPy so ac[i] is a free scalar
-    # rather than a JAX dynamic_slice that triggers an eager XLA compilation.
-    ac = np.asarray(ac)
+    # Same rationale as _power_series, with a tracer-safe fallback.
+    ac = _coeffs_static_or_jax(ac)
     x = jnp.asarray(x)
     y = jnp.zeros_like(x, dtype=ac.dtype)
     for i in range(len(ac) - 1, -1, -1):
