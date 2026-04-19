@@ -236,7 +236,8 @@ def main() -> None:
         return np.asarray(columns, dtype=float).T
 
     residual0 = residual_fun(params0)
-    state0 = solve_forward_state(params0)
+    # Reuse the exact state from the cache (residual_fun already built the tape).
+    state0, _ = solve_exact_state(np.asarray(params0, dtype=float), return_payload=True)
     qs0 = vj.quasisymmetry_ratio_residual_from_state(
         state=state0,
         static=static,
@@ -265,7 +266,15 @@ def main() -> None:
         verbose=1,
     )
 
-    state = solve_forward_state(result["x"], trial=False)
+    # Try to reuse the cached exact state for the final display.  The last
+    # accepted GN step will have stored the final x in _exact_cache.  If the
+    # cache key matches we skip the extra forward solve entirely; otherwise we
+    # fall back to a fresh forward solve (non-trial, tight budget).
+    _final_key = np.asarray(result["x"], dtype=float).tobytes()
+    if _final_key in _exact_cache:
+        state = _exact_cache[_final_key][0]
+    else:
+        state = solve_forward_state(result["x"], trial=False)
     residual = np.asarray(residuals_from_state(state), dtype=float)
     qs = vj.quasisymmetry_ratio_residual_from_state(
         state=state,
