@@ -1364,3 +1364,25 @@ Stop or reduce scope if:
         - the forward-trial split is a real improvement and should remain the
           baseline while the remaining late-run abnormal termination is traced
           deeper inside the exact path.
+    - exact mode-2 late-run teardown audit on 2026-04-19:
+      - the follow-up crash-only runs on the consumer branch showed that the
+        exact mode-2 optimization now returns a valid result at `nfev=3`;
+        the hard failure was occurring after the solve returned, during late
+        runtime teardown with retained exact state still live;
+      - stable consumer-side changes accepted from that audit:
+        - forward-only line-search solves now use `jit_forces=False`, while
+          the exact Jacobian path remains on `jit_forces=True`;
+        - the outer exact GN loop now predicts the next backtracking scale for
+          large exact problems after a multi-trial acceptance;
+        - the consumer now performs an explicit final exact-runtime cache clear
+          on solver return for large concrete exact GN runs;
+      - measured effect on the integrated exact mode-2 path:
+        - the 3-eval crash-only runner now exits cleanly (`EXIT:0`) at the
+          same final cost that had previously been reached just before the hard
+          kill;
+        - the remaining expensive behavior is still visible in the late step
+          (`bt_4` on the third exact GN iteration), but the process now
+          survives solver return and can continue to reporting / follow-on work;
+      - conclusion:
+        - the remaining mode-2 work is now back to true long-run optimization
+          runtime and step efficiency, not a hard late-run teardown failure.
