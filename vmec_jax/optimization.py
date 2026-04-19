@@ -1125,6 +1125,7 @@ class FixedBoundaryExactOptimizer:
 
         # ── assemble history dump ───────────────────────────────────────────
         history_dump = {
+            "label": "Optimisation",
             "max_nfev": max_nfev,
             "ftol": ftol,
             "gtol": gtol,

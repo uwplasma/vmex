@@ -1053,7 +1053,7 @@ def _plot_bmag_contours(wout_init, wout_final, outdir: Path) -> Path:
     axes[-1].set_xticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
     axes[-1].set_xticklabels(["0", "π/2", "π", "3π/2", "2π"])
     axes[-1].set_xlim(0, 2 * np.pi)
-    fig.suptitle("|B| on LCFS — contour lines (quasi-helical symmetry)", fontsize=13)
+    fig.suptitle("|B| on LCFS — contour lines", fontsize=13)
     fig.tight_layout()
 
     out = outdir / "bmag_surface.png"
@@ -1083,8 +1083,9 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
 
     ax1.semilogy(iters, objectives, "o-", color="steelblue", linewidth=2, markersize=6)
     ax1.set_ylabel("Objective  Σ residuals²", fontsize=11)
+    opt_label = data.get("label", "Optimisation")
     ax1.set_title(
-        f"QH optimisation  ({nfev} evals, {total_time:.0f} s)",
+        f"{opt_label}  ({nfev} evals, {total_time:.0f} s)",
         fontsize=11,
     )
     ax1.axhline(objectives[-1], color="steelblue", linestyle="--", alpha=0.4,
@@ -1093,7 +1094,10 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
     ax1.grid(True, alpha=0.3)
 
     ax2.plot(iters, aspects, "s-", color="darkorange", linewidth=2, markersize=6)
-    ax2.axhline(7.0, color="k", linestyle=":", alpha=0.5, label="Target A=7")
+    target_aspect = data.get("target_aspect", None)
+    if target_aspect is not None:
+        ax2.axhline(target_aspect, color="k", linestyle=":", alpha=0.5,
+                    label=f"Target A={target_aspect:.4g}")
     ax2.set_ylabel("Aspect ratio", fontsize=11)
     ax2.set_xlabel("Jacobian evaluation index", fontsize=11)
     ax2.legend(fontsize=9)
