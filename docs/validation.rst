@@ -14,26 +14,32 @@ implementation error).
 Reference data
 --------------
 
-Seven bundled ``wout`` reference files are pre-computed with VMEC2000 and
+Ten bundled ``wout`` reference files are pre-computed with VMEC2000 and
 shipped in ``examples/data/``:
 
-+-------------------------------------+----------------------------------+--------------+---------+
-| Input                               | Coverage                         | lasym        | bdy     |
-+=====================================+==================================+==============+=========+
-| ``circular_tokamak``                | axisymmetric, no pressure        | False        | fixed   |
-+-------------------------------------+----------------------------------+--------------+---------+
-| ``shaped_tokamak_pressure``         | axisymmetric, pressure profile   | False        | fixed   |
-+-------------------------------------+----------------------------------+--------------+---------+
-| ``nfp4_QH_warm_start``              | 3D quasi-helical (nfp=4)         | False        | fixed   |
-+-------------------------------------+----------------------------------+--------------+---------+
-| ``LandremanPaul2021_QA_lowres``     | 3D quasi-axisymmetric (nfp=2)    | False        | fixed   |
-+-------------------------------------+----------------------------------+--------------+---------+
-| ``nfp3_QI_fixed_resolution_final``  | 3D quasi-isodynamic (nfp=3)      | False        | fixed   |
-+-------------------------------------+----------------------------------+--------------+---------+
-| ``cth_like_fixed_bdy``              | 3D current-driven (CTH-like)     | False        | fixed   |
-+-------------------------------------+----------------------------------+--------------+---------+
-| ``purely_toroidal_field``           | zero-current special case        | False        | fixed   |
-+-------------------------------------+----------------------------------+--------------+---------+
++------------------------------------------+----------------------------------+--------------+---------+
+| Input                                    | Coverage                         | lasym        | bdy     |
++==========================================+==================================+==============+=========+
+| ``circular_tokamak``                     | axisymmetric, no pressure        | False        | fixed   |
++------------------------------------------+----------------------------------+--------------+---------+
+| ``shaped_tokamak_pressure``              | axisymmetric, pressure profile   | False        | fixed   |
++------------------------------------------+----------------------------------+--------------+---------+
+| ``DSHAPE``                               | axisymmetric D-shape (STELLOPT)  | False        | fixed   |
++------------------------------------------+----------------------------------+--------------+---------+
+| ``nfp4_QH_warm_start``                   | 3D quasi-helical (nfp=4)         | False        | fixed   |
++------------------------------------------+----------------------------------+--------------+---------+
+| ``LandremanPaul2021_QA_lowres``          | 3D quasi-axisymmetric (nfp=2)    | False        | fixed   |
++------------------------------------------+----------------------------------+--------------+---------+
+| ``nfp3_QI_fixed_resolution_final``       | 3D quasi-isodynamic (nfp=3)      | False        | fixed   |
++------------------------------------------+----------------------------------+--------------+---------+
+| ``li383_low_res``                        | 3D SIMSOPT reference (nfp=3)     | False        | fixed   |
++------------------------------------------+----------------------------------+--------------+---------+
+| ``cth_like_fixed_bdy``                   | 3D current-driven (CTH-like)     | False        | fixed   |
++------------------------------------------+----------------------------------+--------------+---------+
+| ``purely_toroidal_field``                | zero-current special case        | False        | fixed   |
++------------------------------------------+----------------------------------+--------------+---------+
+| ``basic_non_stellsym_simsopt``           | lasym=True SIMSOPT reference     | True         | fixed   |
++------------------------------------------+----------------------------------+--------------+---------+
 
 Large reference wouts and mgrid files not shipped with the git repo can be
 fetched once::
@@ -50,7 +56,7 @@ The test suite runs ``vmec_jax`` end-to-end and compares every standard
 
    RUN_FULL=1 pytest tests/test_wout_comprehensive_parity.py -v
 
-All seven reference cases pass with the following tolerances per field category:
+All ten reference cases pass with the following tolerances per field category:
 
 .. list-table:: Default parity tolerances
    :header-rows: 1
@@ -96,6 +102,8 @@ verifies that ``vmec_jax`` converges and produces finite, physically consistent
 
 - **Stellarator-asymmetric (lasym=True) fixed-boundary**: ``basic_non_stellsym_pressure``,
   ``LandremanSenguptaPlunk_section5p3_low_res``, ``up_down_asymmetric_tokamak``.
+  (Note: ``basic_non_stellsym_simsopt`` now has a VMEC2000 reference and is in
+  the full parity suite.)
 - **Free-boundary**: ``cth_like_free_bdy`` (requires mgrid from ``fetch_assets.py``).
 
 These cases are exercised by:
