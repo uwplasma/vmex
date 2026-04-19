@@ -94,32 +94,84 @@ def main() -> None:
     def _boundary_from_params(params):
         return vj.apply_boundary_params(boundary, specs, jnp.asarray(params, dtype=jnp.float64))
 
-    def solve_forward_state(params):
+    # ── Solver keyword arguments ──────────────────────────────────────────────
+    # These mirror the vmec_jax driver's vmec2000_iter path: strict_update=True,
+    # backtracking=False (standard VMEC algorithm without a line-search accept
+    # step — the adaptive time-step handles oscillations).  Using backtracking=True
+    # here causes the step to get stuck at dt ~ machine-epsilon for this problem,
+    # resulting in 1500 non-convergent iterations instead of ~500 tight ones.
+    _base_solver_kwargs = dict(
+        indata=indata,
+        signgs=signgs,
+        step_size=step_size,
+        include_constraint_force=True,
+        apply_m1_constraints=True,
+        precond_radial_alpha=0.5,
+        precond_lambda_alpha=0.5,
+        mode_diag_exponent=0.0,
+        auto_flip_force=False,
+        divide_by_scalxc_for_update=False,
+        lambda_update_scale=1.0,
+        enforce_vmec_lambda_axis=True,
+        vmec2000_control=True,
+        strict_update=True,
+        backtracking=False,
+        reference_mode=False,
+        use_restart_triggers=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces=True,
+        use_scan=False,
+        light_history=True,
+        resume_state_mode="full",
+    )
+    # Tight settings for the Jacobian / accepted-step solves.
+    # NOTE: max_iter and ftol are NOT included here — they are passed as explicit
+    # arguments to solve_fixed_boundary_residual_iter and
+    # build_residual_checkpoint_tape_direct.  Including them in solver_kwargs would
+    # cause a "multiple values" TypeError when the tape builder also passes max_iter.
+    _exact_solver_kwargs = dict(_base_solver_kwargs)
+    _exact_max_iter = inner_max_iter
+    _exact_ftol = inner_ftol
+    # Relaxed settings for forward-only trial residuals used in line search.
+    # The line search only needs a good enough equilibrium, not a fully converged
+    # one.  Using fewer iterations here halves the line-search overhead.
+    _trial_max_iter = min(inner_max_iter, 800)
+    _trial_ftol = max(inner_ftol, 1e-10)
+    _trial_solver_kwargs = dict(
+        _base_solver_kwargs,
+        jit_forces=False,  # Line-search trials don't need JIT warmup overhead
+    )
+
+    def solve_forward_state(params, *, trial: bool = False):
+        """Solve equilibrium for given boundary params.
+
+        When ``trial=True`` uses a relaxed budget suitable for Gauss-Newton
+        line-search forward evaluations.
+        """
         boundary_now = _boundary_from_params(params)
         state0 = initial_guess_from_boundary(static, boundary_now, indata, vmec_project=True)
-        result = vj.solve_fixed_boundary_residual_iter(
-            state0,
-            static,
-            indata=indata,
-            signgs=signgs,
-            ftol=inner_ftol,
-            max_iter=inner_max_iter,
-            step_size=step_size,
-            vmec2000_control=True,
-            reference_mode=False,
-            backtracking=True,
-            limit_dt_from_force=True,
-            limit_update_rms=True,
-            verbose=False,
-            verbose_vmec2000_table=False,
-            jit_forces=True,
-            use_scan=False,
-            light_history=True,
-            resume_state_mode="full",
-        )
+        if trial:
+            result = vj.solve_fixed_boundary_residual_iter(
+                state0, static, max_iter=_trial_max_iter, ftol=_trial_ftol, **_trial_solver_kwargs
+            )
+        else:
+            result = vj.solve_fixed_boundary_residual_iter(
+                state0, static, max_iter=_exact_max_iter, ftol=_exact_ftol, **_exact_solver_kwargs
+            )
         return result.state
 
+    # Cache for the last exact solve — avoids building the tape twice per accepted
+    # Gauss-Newton step (once in residual_fun and once in jacobian_fun at the same x).
+    _exact_cache: dict = {}
+
     def solve_exact_state(params, *, return_payload: bool = False):
+        params_arr = np.asarray(params, dtype=float)
+        cache_key = params_arr.tobytes()
+        if cache_key in _exact_cache:
+            state, payload = _exact_cache[cache_key]
+            return (state, payload) if return_payload else state
+
         boundary_now = _boundary_from_params(params)
         state0 = initial_guess_from_boundary(static, boundary_now, indata, vmec_project=True)
         axis_override = extract_axis_override_from_state(state0, static)
@@ -127,23 +179,7 @@ def main() -> None:
             state0,
             static,
             max_iter=inner_max_iter,
-            solver_kwargs=dict(
-                indata=indata,
-                signgs=signgs,
-                ftol=inner_ftol,
-                step_size=step_size,
-                vmec2000_control=True,
-                reference_mode=False,
-                backtracking=True,
-                limit_dt_from_force=True,
-                limit_update_rms=True,
-                verbose=False,
-                verbose_vmec2000_table=False,
-                jit_forces=True,
-                use_scan=False,
-                light_history=True,
-                resume_state_mode="full",
-            ),
+            solver_kwargs=_exact_solver_kwargs,
             indata=indata,
             signgs=signgs,
             ftol=inner_ftol,
@@ -153,16 +189,18 @@ def main() -> None:
             store_full_step_traces=False,
         )
         state = unpack_state(jnp.asarray(tape.final_packed_state, dtype=jnp.float64), layout)
-        if return_payload:
-            return state, {"tape": tape, "axis_override": axis_override}
-        return state
+        payload = {"tape": tape, "axis_override": axis_override}
+        _exact_cache.clear()  # keep only the last entry to bound memory usage
+        _exact_cache[cache_key] = (state, payload)
+        return (state, payload) if return_payload else state
 
     def residual_fun(params):
         state = solve_exact_state(params)
         return np.asarray(residuals_from_state(state), dtype=float)
 
     def forward_residual_fun(params):
-        state = solve_forward_state(params)
+        # Used for line-search trial points: relaxed solve budget is sufficient.
+        state = solve_forward_state(params, trial=True)
         return np.asarray(residuals_from_state(state), dtype=float)
 
     def jacobian_fun(params):
@@ -227,7 +265,7 @@ def main() -> None:
         verbose=1,
     )
 
-    state = solve_forward_state(result["x"])
+    state = solve_forward_state(result["x"], trial=False)
     residual = np.asarray(residuals_from_state(state), dtype=float)
     qs = vj.quasisymmetry_ratio_residual_from_state(
         state=state,

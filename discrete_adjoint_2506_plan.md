@@ -1386,3 +1386,17 @@ Stop or reduce scope if:
       - conclusion:
         - the remaining mode-2 work is now back to true long-run optimization
           runtime and step efficiency, not a hard late-run teardown failure.
+    - standalone example double-tape-build fix on 2026-04-19:
+      - audited `examples/optimization/qh_fixed_resolution_exact.py` and found
+        that the concrete Gauss-Newton driver calls `residual_fun(x)` followed
+        by `jacobian_fun(x)` at the same `x` for every accepted GN step;
+      - both callbacks previously called `solve_exact_state(params)` independently,
+        so each accepted step triggered two full exact tape builds instead of one;
+      - added a one-entry `_exact_cache` dict keyed by `params.tobytes()`:
+        - `solve_exact_state` checks the cache before doing any tape work;
+        - on cache hit it returns the stored `(state, payload)` directly;
+        - on cache miss it builds the tape, stores one entry, then clears the
+          old entry so memory is bounded by a single tape at any time;
+      - this halves the exact tape build count per accepted GN step and removes
+        an unnecessary second forward solve in the nominal
+        `residual_fun -> jacobian_fun` callback pair.
