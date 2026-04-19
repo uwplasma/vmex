@@ -994,14 +994,16 @@ def _plot_3d_boundary_comparison(wout_init, wout_final, outdir: Path) -> Path:
 
 
 def _plot_bmag_contours(wout_init, wout_final, outdir: Path) -> Path:
-    """Unrolled |B|(theta, phi) contour lines on LCFS — initial (top) vs final (bottom).
+    """Unrolled |B|(θ, φ) contour lines on LCFS — initial (top) vs optimised (bottom).
 
-    Contour lines (not filled) make it easy to see whether the field lines are
-    helically closed (quasi-helical symmetry).
+    Uses ``ax.contour`` (line contours only, no fill) so the helically-aligned
+    contours of a quasi-helically symmetric configuration are visually obvious.
+    Axes are in radians: θ ∈ [0, 2π], φ/nfp ∈ [0, 2π].
     """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    import matplotlib.ticker as mticker
 
     ns_init = int(np.asarray(wout_init.ns))
     ns_final = int(np.asarray(wout_final.ns))
@@ -1014,36 +1016,44 @@ def _plot_bmag_contours(wout_init, wout_final, outdir: Path) -> Path:
         wout_final, s_index=ns_final - 1, ntheta=128, nzeta=256
     )
 
+    # Shared contour levels from the combined range.
     vmin = min(float(B_i.min()), float(B_f.min()))
     vmax = max(float(B_i.max()), float(B_f.max()))
-    nlevels = 20
+    nlevels = 25
     levels = np.linspace(vmin, vmax, nlevels)
 
+    # φ/nfp in radians (one field period); θ in radians.
+    phi_rad_i = zeta_i / nfp        # (nzeta,)  0 → 2π
+    theta_rad_i = theta_i           # (ntheta,) 0 → 2π
+    phi_rad_f = zeta_f / nfp
+    theta_rad_f = theta_f
+
     fig, axes = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
-    for ax, B, theta, zeta, title in [
-        (axes[0], B_i, theta_i, zeta_i, "Initial"),
-        (axes[1], B_f, theta_f, zeta_f, "Optimised"),
+    for ax, B, phi_rad, theta_rad, title in [
+        (axes[0], B_i, phi_rad_i, theta_rad_i, "Initial"),
+        (axes[1], B_f, phi_rad_f, theta_rad_f, "Optimised"),
     ]:
-        phi_deg = np.degrees(zeta) / nfp
-        theta_deg = np.degrees(theta)
+        # B has shape (ntheta, nzeta); meshgrid for contour
+        PHI, THETA = np.meshgrid(phi_rad, theta_rad)
         cs = ax.contour(
-            phi_deg, theta_deg, B,
+            PHI, THETA, B,
             levels=levels,
             cmap="viridis",
-            linewidths=1.0,
+            linewidths=1.2,
         )
-        ax.clabel(cs, inline=False, fontsize=0)  # suppress labels, keep colours
-        ax.set_ylabel("Poloidal angle θ (°)")
+        ax.set_facecolor("white")
+        ax.set_ylabel("Poloidal angle θ (rad)")
         ax.set_title(f"|B| on LCFS — {title}", fontsize=11)
-        fig.colorbar(
-            plt.cm.ScalarMappable(
-                norm=plt.Normalize(vmin=vmin, vmax=vmax), cmap="viridis"
-            ),
-            ax=ax,
-            label="|B| (T)",
-        )
-    axes[-1].set_xlabel("Toroidal angle φ/nfp (°)")
-    fig.suptitle("Magnetic field strength on LCFS (contour lines)", fontsize=13)
+        ax.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
+        ax.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
+        ax.set_ylim(0, 2 * np.pi)
+        fig.colorbar(cs, ax=ax, label="|B| (T)")
+
+    axes[-1].set_xlabel("Toroidal angle φ/nfp (rad)")
+    axes[-1].set_xticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
+    axes[-1].set_xticklabels(["0", "π/2", "π", "3π/2", "2π"])
+    axes[-1].set_xlim(0, 2 * np.pi)
+    fig.suptitle("|B| on LCFS — contour lines (quasi-helical symmetry)", fontsize=13)
     fig.tight_layout()
 
     out = outdir / "bmag_surface.png"

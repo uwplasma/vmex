@@ -436,8 +436,55 @@ def gauss_newton_least_squares(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# QH residuals factory
+# Exponential spectral scaling helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+def create_x_scale(
+    specs: Sequence[BoundaryParamSpec],
+    *,
+    alpha: float = 1.0,
+) -> np.ndarray:
+    """Compute per-parameter exponential spectral scaling weights.
+
+    Assigns smaller weights to high-mode-number boundary DOFs so that the
+    optimizer penalises large perturbations in fine-scale modes more than in
+    coarse-scale modes.  The weight for parameter *i* is
+
+    .. math::
+
+        w_i = \\exp(-\\alpha \\cdot \\max(|m_i|, |n_i|)) \\;/\\; \\exp(-\\alpha)
+
+    so that the lowest non-trivial mode level (``max(|m|, |n|) = 1``) has
+    weight 1 and higher modes have decreasing weights.
+
+    Parameters
+    ----------
+    specs:
+        Parameter specification list from :func:`boundary_param_specs`.
+    alpha:
+        Decay rate.  Larger values suppress high modes more aggressively.
+        ``alpha=0`` gives equal weights (no scaling).
+
+    Returns
+    -------
+    np.ndarray
+        1-D array of shape ``(len(specs),)`` containing the per-DOF scales.
+        Pass this as ``x_scale`` to
+        :meth:`FixedBoundaryExactOptimizer.run`.
+    """
+    scales = np.empty(len(specs), dtype=float)
+    norm = math.exp(-alpha) if alpha > 0.0 else 1.0
+    for i, spec in enumerate(specs):
+        level = max(abs(spec.m), abs(spec.n))
+        scales[i] = math.exp(-alpha * level) / norm if alpha > 0.0 else 1.0
+    return scales
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QH/QA residuals factories
+# ─────────────────────────────────────────────────────────────────────────────
+
 
 def make_qh_residuals_fn(
     static: VMECStatic,
@@ -521,6 +568,110 @@ def make_qh_residuals_fn(
                                       dtype=jnp.float64)
         qs_residual = jnp.asarray(qs["residuals1d"], dtype=jnp.float64) * float(qs_weight)
         return jnp.concatenate([aspect_residual, qs_residual])
+
+    return residuals_from_state
+
+
+def make_qs_residuals_fn(
+    static: VMECStatic,
+    indata,
+    *,
+    signgs: int | None = None,
+    helicity_m: int = 1,
+    helicity_n: int = 0,
+    target_aspect: float | None = None,
+    target_iota: float | None = None,
+    surfaces=None,
+    aspect_weight: float = 1.0,
+    qs_weight: float = 1.0,
+    iota_weight: float = 1.0,
+) -> Callable:
+    """General quasisymmetry residuals factory supporting QH and QA objectives.
+
+    Builds a combined residual vector with optional aspect-ratio and mean-iota
+    targets.  This is the recommended factory for new workflows; use it for QA
+    (``helicity_m=1, helicity_n=0``) or QH (``helicity_m=1, helicity_n=-1``).
+
+    Parameters
+    ----------
+    static:
+        Pre-built :class:`~vmec_jax.static.VMECStatic`.
+    indata:
+        VMEC input namelist (used to derive flux profiles and for the QS kernel).
+    signgs:
+        Sign of the Jacobian.  Computed automatically when ``None``.
+    helicity_m, helicity_n:
+        Helicity of the target quasisymmetry.
+        QA: ``(1, 0)``, QH: ``(1, -1)`` or ``(1, 1)``.
+    target_aspect:
+        If given, adds one aspect-ratio residual
+        ``aspect_weight * (aspect - target_aspect)``.
+    target_iota:
+        If given, adds one mean-iota residual
+        ``iota_weight * (mean_iota - target_iota)``.
+    surfaces:
+        Surface coordinates (``s ∈ [0, 1]``) to evaluate quasisymmetry on.
+        Defaults to ``np.arange(0, 1.01, 0.1)``.
+    aspect_weight, qs_weight, iota_weight:
+        Scalar weights applied to the corresponding residual blocks.
+    """
+    from .boundary import boundary_from_indata
+    from .init_guess import initial_guess_from_boundary
+    from .quasisymmetry import quasisymmetry_ratio_residual_from_state
+    from .wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
+
+    if surfaces is None:
+        surfaces = np.arange(0.0, 1.01, 0.1)
+    surfaces = np.asarray(surfaces, dtype=float)
+
+    if signgs is None:
+        try:
+            boundary_init = boundary_from_indata(indata, static.modes)
+            state0 = initial_guess_from_boundary(static, boundary_init, indata)
+            from .geom import eval_geom as _eval_geom
+            geom = _eval_geom(state0, static)
+            signgs = int(signgs_from_sqrtg(np.asarray(geom.sqrtg), axis_index=1))
+        except Exception:
+            signgs = 1
+
+    flux = flux_profiles_from_indata(indata, static.s, signgs=signgs)
+    pressure = jnp.zeros_like(jnp.asarray(static.s))
+    _signgs = signgs
+    _indata = indata
+
+    def residuals_from_state(state: VMECState) -> jnp.ndarray:
+        parts: list[jnp.ndarray] = []
+
+        if target_aspect is not None:
+            aspect = equilibrium_aspect_ratio_from_state(state=state, static=static)
+            parts.append(jnp.asarray(
+                [float(aspect_weight) * (aspect - target_aspect)], dtype=jnp.float64
+            ))
+
+        if target_iota is not None:
+            _chips, _iotas, iotaf = equilibrium_iota_profiles_from_state(
+                state=state, static=static, indata=_indata, signgs=_signgs,
+            )
+            mean_iota = jnp.mean(jnp.asarray(iotaf, dtype=jnp.float64))
+            parts.append(jnp.asarray(
+                [float(iota_weight) * (mean_iota - target_iota)], dtype=jnp.float64
+            ))
+
+        qs = quasisymmetry_ratio_residual_from_state(
+            state=state,
+            static=static,
+            indata=indata,
+            signgs=signgs,
+            flux_local=flux,
+            prof_local={"pressure": pressure},
+            pressure_local=pressure,
+            surfaces=surfaces,
+            helicity_m=helicity_m,
+            helicity_n=helicity_n,
+        )
+        parts.append(jnp.asarray(qs["residuals1d"], dtype=jnp.float64) * float(qs_weight))
+
+        return jnp.concatenate(parts)
 
     return residuals_from_state
 
@@ -678,7 +829,7 @@ class FixedBoundaryExactOptimizer:
     def _solve_exact_with_tape(self, params, *, return_payload: bool = False):
         """Run exact solve + build adjoint tape, with caching."""
         from ._compat import jnp as _jnp
-        from .implicit import build_residual_checkpoint_tape_direct
+        from .discrete_adjoint import build_residual_checkpoint_tape_direct
         from .init_guess import extract_axis_override_from_state
         from .state import unpack_state
 
@@ -729,7 +880,7 @@ class FixedBoundaryExactOptimizer:
     def jacobian_fun(self, params) -> np.ndarray:
         """Exact discrete-adjoint Jacobian at *params*."""
         from ._compat import jax, jnp as _jnp
-        from .implicit import checkpoint_tape_state_jvp_columns
+        from .discrete_adjoint import checkpoint_tape_state_jvp_columns
         from .init_guess import initial_guess_from_boundary as _ig
         from .state import pack_state, unpack_state
 
@@ -795,7 +946,7 @@ class FixedBoundaryExactOptimizer:
 
     def _post_jacobian_clear(self):
         from .preconditioner_1d_jax import clear_preconditioner_jit_caches
-        from .replay_scan import clear_replay_scan_caches
+        from .discrete_adjoint import clear_replay_scan_caches
         clear_replay_scan_caches()
         clear_preconditioner_jit_caches()
 
@@ -875,6 +1026,7 @@ class FixedBoundaryExactOptimizer:
         ftol: float = 1e-3,
         gtol: float = 1e-3,
         xtol: float = 1e-3,
+        x_scale=None,
         verbose: int = 1,
     ) -> dict:
         """Run Gauss-Newton least-squares optimisation.
@@ -887,6 +1039,12 @@ class FixedBoundaryExactOptimizer:
             Maximum residual/Jacobian evaluations.
         ftol, gtol, xtol:
             Convergence tolerances.
+        x_scale:
+            Optional per-parameter scale vector.  When provided, parameter
+            *i* is divided by ``x_scale[i]`` in the internal optimisation
+            space.  Use :func:`create_x_scale` to build an exponential
+            spectral-scaling vector.  ``None`` (default) treats all
+            parameters uniformly.
         verbose:
             Verbosity (0 = silent, 1 = iteration table).
 
@@ -937,6 +1095,7 @@ class FixedBoundaryExactOptimizer:
             ftol=ftol,
             gtol=gtol,
             xtol=xtol,
+            x_scale=x_scale,
             verbose=verbose,
         )
         t_total = time.perf_counter() - t_start

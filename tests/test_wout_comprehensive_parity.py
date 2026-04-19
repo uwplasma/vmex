@@ -76,6 +76,24 @@ _CASES = [
         "input.purely_toroidal_field",
         "wout_purely_toroidal_field.nc",
     ),
+    # ── Axisymmetric D-shape (STELLOPT reference, nfp=1, mpol=12) ────────────
+    (
+        "DSHAPE",
+        "input.DSHAPE",
+        "wout_DSHAPE.nc",
+    ),
+    # ── Non-axisymmetric nfp=3 (SIMSOPT li383, mpol=4) ───────────────────────
+    (
+        "li383_low_res",
+        "input.li383_low_res",
+        "wout_li383_low_res.nc",
+    ),
+    # ── Stellarator-asymmetric (lasym=True), SIMSOPT reference ───────────────
+    (
+        "basic_non_stellsym_simsopt",
+        "input.basic_non_stellsym_simsopt",
+        "wout_basic_non_stellsym_simsopt.nc",
+    ),
 ]
 
 # Convergence-only cases: run vmec_jax and check fsq < threshold.
