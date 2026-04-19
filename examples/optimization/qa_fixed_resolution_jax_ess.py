@@ -45,7 +45,8 @@ enable_x64(True)
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.nfp2_QA"
 
 # Maximum |m|, |n| mode number for the boundary parameter space.
-MAX_MODE = 3
+# max_mode=2 → 24 DOFs; max_mode=3 → 48 DOFs (significantly longer JIT time).
+MAX_MODE = 2
 
 # Maximum number of residual + Jacobian evaluations combined.
 MAX_NFEV = 15
