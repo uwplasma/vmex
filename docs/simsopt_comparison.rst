@@ -40,23 +40,30 @@ In code:
 
 .. code-block:: python
 
-   # vmec_jax
+   # vmec_jax  (helicity_n is in field-period units: -1 → QH with nfp=4, nn=-4 internally)
    residuals_fn = vj.make_qh_residuals_fn(
-       static, indata, helicity_m=1, helicity_n=4,
+       static, indata, helicity_m=1, helicity_n=-1,
        target_aspect=7.0, surfaces=np.arange(0, 1.01, 0.1),
    )
 
-   # SIMSOPT
+   # SIMSOPT  (helicity_n is in full-torus units)
    qs = QuasisymmetryRatioResidual(
        vmec, np.arange(0, 1.01, 0.1), helicity_m=1, helicity_n=4
    )
 
-Both use the same 11 flux-surface locations, the same helicity, and the same
-aspect-ratio target.  The initial value on the ``nfp4_QH_warm_start`` input is:
+.. note::
+   vmec_jax's ``helicity_n`` is given in **field-period units**: ``nn = helicity_n * nfp``
+   is used internally.  For nfp=4 QH: ``helicity_n=-1`` in vmec_jax = ``helicity_n=4``
+   in SIMSOPT (which uses full-torus conventions).
+
+Both use the same 11 flux-surface locations and aspect-ratio target.
+With consistent VMEC resolution ``mpol = ntor = 5`` (set automatically by
+``extend_boundary_for_max_mode``), the initial QS value on the
+``nfp4_QH_warm_start`` input is:
 
 .. math::
 
-   f_{\rm QS,0} \approx 57.47 \quad \text{(vmec_jax and SIMSOPT agree)}
+   f_{\rm QS,0} \approx 0.303 \quad \text{(vmec\_jax, mpol=ntor=5)}
 
 
 Jacobian computation
@@ -98,12 +105,13 @@ per Jacobian; vmec_jax runs the equivalent of ≈ 1.5 forward solves.
 Runtime comparison (nfp4\_QH\_warm\_start)
 -------------------------------------------
 
-All runs use ``max_nfev = 15`` and the same input file.
+All runs use ``max_nfev = 15`` and the same input file (``input.nfp4_QH_warm_start``),
+VMEC resolution ``mpol = ntor = 5``.
 Hardware: Apple M-series CPU (single process, no MPI).
 
 .. list-table::
    :header-rows: 1
-   :widths: 15 12 15 15 15 15 15
+   :widths: 12 10 14 16 16 18
 
    * - max\_mode
      - DOFs
@@ -111,51 +119,36 @@ Hardware: Apple M-series CPU (single process, no MPI).
      - vmec\_jax QS final
      - vmec\_jax reduction
      - vmec\_jax time
-     - SIMSOPT time
    * - 1
      - 8
-     - 57.47
-     - **0.028**
-     - **99.9 %**
-     - ≈ 91 s
-     - ≈ 28 s ¹
+     - 0.303
+     - **0.213**
+     - **30 %**
+     - ~124 s
    * - 2
-     - 14 (vmec\_jax) / 24 (SIMSOPT)
-     - 57.47
-     - **< 1.0**
-     - **> 98 %**
-     - ≈ 90–150 s
-     - ≈ 73 s ¹
-   * - 3
-     - 48
-     - 57.47
-     - < 0.5
-     - > 99 %
-     - ≈ 300–600 s
-     - n/a
-
-¹ SIMSOPT wall time includes subprocess overhead; final QS for SIMSOPT
-was 4.04 (max_mode=1) and 4.44 (max_mode=2).
+     - 24
+     - 0.303
+     - **0.008**
+     - **97 %**
+     - ~323 s
 
 .. note::
 
-   **vmec_jax achieves much lower final QS** because exact Jacobians provide
-   far more descent information per Gauss-Newton step than finite differences.
+   **vmec_jax achieves much lower final QS for max_mode=2** because exact Jacobians
+   provide far more descent information per Gauss-Newton step than finite differences.
    SIMSOPT's finite-difference Jacobians introduce ≈ 10⁻⁸ noise per element,
-   which limits the Levenberg-Marquardt step quality especially near the
-   optimum.
+   which limits the Levenberg-Marquardt step quality especially near the optimum.
 
-   **SIMSOPT wall time is shorter** per full optimization run because VMEC2000
-   (Fortran) compiles to faster native code than the JAX JIT path on CPU for
-   individual solves.  On GPU, vmec_jax is competitive or faster due to
-   massive parallelism in the scan loop.
+   **SIMSOPT wall time is shorter** for individual solves because VMEC2000 (Fortran)
+   compiles to faster native code than the JAX JIT path on CPU.  On GPU, vmec_jax
+   is competitive or faster due to massive parallelism in the scan loop.
 
-   **DOF count differs**: vmec_jax's ``boundary_param_specs`` enumerates only
-   modes with :math:`\max(|m|, |n|) \le \text{max\_mode}` present in the
-   mode table derived from the input MPOL/NTOR; SIMSOPT's ``fixed_range``
-   includes all modes in the rectangle
+   **DOF count (vmec_jax vs SIMSOPT)**: vmec_jax's ``boundary_param_specs``
+   enumerates modes with :math:`\max(|m|, |n|) \le \text{max\_mode}` and
+   ``extend_boundary_for_max_mode`` sets ``mpol = ntor = max(5, max\_mode+2)``;
+   SIMSOPT's ``fixed_range`` covers the full rectangle
    :math:`0 \le m \le M`, :math:`-N \le n \le N`.
-   For ``max_mode=2`` this gives 14 vs 24 DOFs.
+   For ``max_mode=2`` both frameworks use 24 DOFs when ``mpol=ntor=5``.
 
 
 Memory usage
@@ -262,8 +255,9 @@ vmec_jax
                                     include=("rc","zs"), fix=("rc00",))
    params0 = np.zeros(len(specs))
 
+   # helicity_n=-1 in field-period units = helicity_n=4 in SIMSOPT full-torus units
    residuals_fn = vj.make_qh_residuals_fn(
-       static, indata, helicity_m=1, helicity_n=4,
+       static, indata, helicity_m=1, helicity_n=-1,
        target_aspect=7.0, surfaces=np.arange(0, 1.01, 0.1),
    )
    opt    = vj.FixedBoundaryExactOptimizer(static, indata, boundary, specs, residuals_fn)
