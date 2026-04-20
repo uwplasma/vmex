@@ -93,6 +93,9 @@ cfg, indata = vj.load_config(str(INPUT_FILE))
 static = vj.build_static(cfg)
 boundary = vj.boundary_from_indata(indata, static.modes)
 
+# Extend modes if MAX_MODE exceeds what the input file provides.
+indata, static, boundary = vj.extend_boundary_for_max_mode(indata, static, boundary, MAX_MODE)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 2.  Define boundary degrees of freedom (DOFs)
 # ─────────────────────────────────────────────────────────────────────────────

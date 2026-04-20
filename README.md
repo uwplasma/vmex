@@ -117,6 +117,26 @@ CLI (VMEC2000-style executable):
 vmec_jax examples/data/input.circular_tokamak
 ```
 
+Generate diagnostic plots from any `wout_*.nc` file (replicates `vmecPlot2.py`):
+
+```bash
+vmec_jax --plot wout_circular_tokamak.nc
+# Writes: wout_circular_tokamak_VMECparams.pdf  (9-panel: iota, pressure, buco, bvco, jcuru, jcurv, DMerc, |B|)
+#         wout_circular_tokamak_poloidal_plot.png  (R-Z cross-sections at multiple toroidal angles)
+#         wout_circular_tokamak_VMECsurfaces.pdf   (nested flux-surface cross-sections)
+#         wout_circular_tokamak_VMEC_3Dplot.png    (3-D LCFS surface coloured by |B|)
+
+# Optional: specify output directory
+vmec_jax --plot wout_nfp4_QH.nc --outdir figures/
+```
+
+Or from Python:
+
+```python
+import vmec_jax as vj
+vj.plot_wout("wout_nfp4_QH.nc", outdir="figures/")
+```
+
 Sanity check (verifies the console script is wired to the right interpreter):
 
 ```bash

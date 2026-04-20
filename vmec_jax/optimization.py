@@ -51,6 +51,82 @@ def _coeff_label(prefix: str, m: int, n: int) -> str:
     return f"{prefix}{m}{n_str}"
 
 
+def extend_boundary_for_max_mode(
+    indata,
+    static: "VMECStatic",
+    boundary: "BoundaryCoeffs",
+    max_mode: int,
+) -> tuple:
+    """Extend *indata*, *static*, and *boundary* to support ``max_mode`` DOFs.
+
+    When ``max_mode`` exceeds the modes already present in the VMEC input (i.e.
+    when ``mpol <= max_mode`` or ``ntor < max_mode``), this helper rebuilds the
+    static grid and boundary with a larger mode table — mirroring SIMSOPT's
+    behaviour where ``surf.fixed_range(mmax=max_mode, ...)`` silently unfixes
+    zero-valued harmonics that already exist in the surface's full Fourier grid.
+
+    The returned *boundary* has the same non-zero values as the original, with
+    all new high-mode entries initialised to zero.
+
+    Parameters
+    ----------
+    indata:
+        VMEC namelist input.  *Copied* before modification; the original is
+        untouched.
+    static:
+        Current :class:`~vmec_jax.static.VMECStatic`.  Replaced if extension
+        is needed.
+    boundary:
+        Current boundary coefficients.  Replaced if extension is needed.
+    max_mode:
+        Desired maximum mode number.  The extended mode table will have
+        ``mpol = max(mpol_cur, max_mode + 1)`` and
+        ``ntor = max(ntor_cur, max_mode)``.
+
+    Returns
+    -------
+    tuple
+        ``(new_indata, new_static, new_boundary)`` — identical to the inputs
+        when no extension is required.
+    """
+    from .config import config_from_indata
+    from .static import build_static
+    from .boundary import boundary_from_indata
+    from .namelist import InData
+
+    cur_mpol = int(indata.get_int("MPOL", 6))
+    cur_ntor = int(indata.get_int("NTOR", 0))
+    need_mpol = max_mode + 1   # VMEC mpol = max_m + 1
+    need_ntor = max_mode
+
+    if need_mpol <= cur_mpol and need_ntor <= cur_ntor:
+        return indata, static, boundary   # nothing to do
+
+    new_mpol = max(cur_mpol, need_mpol)
+    new_ntor = max(cur_ntor, need_ntor)
+
+    # Shallow-copy the scalars dict so we don't mutate the caller's indata.
+    new_scalars = dict(indata.scalars)
+    new_scalars["MPOL"] = new_mpol
+    new_scalars["NTOR"] = new_ntor
+    new_indata = InData(
+        scalars=new_scalars,
+        indexed=indata.indexed,
+        source_path=indata.source_path,
+    )
+
+    cfg = config_from_indata(new_indata)
+    new_static = build_static(cfg)
+    new_boundary = boundary_from_indata(new_indata, new_static.modes)
+
+    print(
+        f"  [extend_boundary_for_max_mode] extended mpol {cur_mpol}→{new_mpol}, "
+        f"ntor {cur_ntor}→{new_ntor}  "
+        f"(modes table size: {len(new_static.modes.m)})"
+    )
+    return new_indata, new_static, new_boundary
+
+
 def boundary_param_specs(
     boundary: BoundaryCoeffs,
     modes: ModeTable,

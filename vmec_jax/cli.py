@@ -49,11 +49,29 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="vmec_jax",
         description=(
-            "Run vmec_jax in a VMEC2000-like equilibrium mode. "
-            "Provide a single input.* file and a wout_*.nc will be written."
+            "Run vmec_jax equilibrium solver or plot a wout file.\n\n"
+            "  vmec_jax input.*           — run the solver\n"
+            "  vmec_jax --plot wout_*.nc  — generate diagnostic plots"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument(
+        "input",
+        type=str,
+        nargs="?",
+        default=None,
+        help=(
+            "Path to VMEC input file (input.*) when running the solver, "
+            "or omit when using --plot."
         ),
     )
-    p.add_argument("input", type=str, help="Path to VMEC input file (input.*).")
+    p.add_argument(
+        "--plot",
+        metavar="wout.nc",
+        type=str,
+        default=None,
+        help="Generate diagnostic plots from a wout_*.nc file (skips the solver).",
+    )
     p.add_argument("--outdir", type=str, default=None, help="Directory for wout_*.nc output.")
     p.add_argument("--output", type=str, default=None, help="Explicit wout_*.nc path.")
     p.add_argument("--max-iter", type=int, default=None, help="Total iteration budget (default: input NITER).")
@@ -113,6 +131,20 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    # ── --plot mode: generate diagnostic plots from a wout file ────────────────
+    if args.plot is not None:
+        wout_path = Path(args.plot).expanduser().resolve()
+        if not wout_path.exists():
+            parser.error(f"wout file not found: {wout_path}")
+        outdir = Path(args.outdir).expanduser().resolve() if getattr(args, "outdir", None) else wout_path.parent
+        from .plotting import plot_wout
+        print(f"Plotting {wout_path.name} → {outdir}/")
+        plot_wout(wout_path, outdir=outdir)
+        return 0
+
+    if args.input is None:
+        parser.error("provide a VMEC input file or use --plot wout.nc")
 
     input_path = Path(args.input).expanduser().resolve()
     if not input_path.exists():

@@ -87,6 +87,11 @@ cfg, indata = vj.load_config(str(INPUT_FILE))
 static = vj.build_static(cfg)
 boundary = vj.boundary_from_indata(indata, static.modes)
 
+# If MAX_MODE exceeds the modes available in the input file, extend the
+# static grid and boundary so that all requested DOFs actually exist
+# (initialised to zero), matching SIMSOPT's fixed_range() behaviour.
+indata, static, boundary = vj.extend_boundary_for_max_mode(indata, static, boundary, MAX_MODE)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 2.  Define boundary degrees of freedom (DOFs)
 #
