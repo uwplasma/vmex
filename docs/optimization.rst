@@ -11,7 +11,7 @@ This page covers:
 - the key source files and public API,
 - the algorithms (Gauss-Newton, line search, adjoint replay),
 - how to reproduce the quasi-helical symmetry (QH) and quasi-axisymmetric (QA) examples,
-- figures comparing ``max_mode=1, 2, 3`` optimisation results.
+- figures comparing ``max_mode=1, 2`` optimisation results.
 
 .. contents:: Table of contents
    :local:
@@ -82,15 +82,18 @@ Comparison with SIMSOPT
      - Yes (JAX autodiff)
      - No
    * - Wall time (QH, max\_mode=1, 15 evals)
-     - ≈ 118 s (CPU, Apple M-series)
+     - ≈ 124 s (CPU, Apple M-series)
      - ≈ 28 s (SIMSOPT + xvmec2000)
    * - QS objective (QH max\_mode=1, 15 evals)
-     - **57.47 → 0.028** (99.9% reduction)
-     - 57.47 → 4.04 (93% reduction)
+     - **0.303 → 0.213** (30% reduction)
+     - 0.303 → ~0.21 (similar)
+   * - QS objective (QH max\_mode=2, 15 evals)
+     - **0.303 → 0.008** (97% reduction)
+     - 0.303 → ~0.12 (60% reduction)
 
-``vmec_jax`` achieves dramatically lower final QS because exact Jacobians
-extract far more gradient information per step.  Individual VMEC2000 solves
-are faster on CPU, but the exact Jacobian more than compensates.
+``vmec_jax`` achieves dramatically lower final QS for max\_mode=2 because
+exact Jacobians extract far more gradient information per step.  Individual
+VMEC2000 solves are faster on CPU, but the exact Jacobian more than compensates.
 
 → See :doc:`simsopt_comparison` for a detailed runtime, memory, and
 algorithm comparison.
@@ -110,7 +113,7 @@ argparse — all parameters are top-level variables:
    MAX_MODE      = 2         # boundary DOF mode number cutoff
    MAX_NFEV      = 15        # maximum residual+Jacobian evaluations
    HELICITY_M    = 1         # QH helicity
-   HELICITY_N    = 4         # nfp=4 quasi-helical symmetry
+   HELICITY_N    = -1        # field-period units; nn = HELICITY_N * nfp = -4 internally
    TARGET_ASPECT = 7.0       # target aspect ratio
    SURFACES      = np.arange(0, 1.01, 0.1)
 
@@ -150,61 +153,45 @@ Run it with:
 Results by mode number
 -----------------------
 
-The table below summarises the QH optimisation results for three mode-number
+The table below summarises the QH optimisation results for two mode-number
 cutoffs, all starting from the same boundary (``input.nfp4_QH_warm_start``,
-nfp=4) and using 15 function evaluations.
-
-.. note::
-   The QS metric value depends on the Fourier mode table size (mpol/ntor).
-   ``max_mode=1`` uses the original mpol=2 mode table (QS initial ≈ 57.47);
-   ``max_mode=2, 3`` extend the mode table to mpol=4 which rescales the QS
-   metric (QS initial ≈ 0.311).  Within each row the reduction is self-consistent.
+nfp=4) and using 15 function evaluations.  All runs use VMEC resolution
+``mpol = ntor = 5`` (set automatically by ``extend_boundary_for_max_mode``)
+so the initial QS value is identical across ``max_mode`` values.
 
 .. list-table::
    :header-rows: 1
-   :widths: 12 10 14 14 14 18 18
+   :widths: 12 10 14 14 14 18
 
    * - max\_mode
      - DOFs
      - QS initial
      - QS final
      - Reduction
-     - vmec\_jax time
-     - SIMSOPT time ¹
+     - vmec\_jax time ¹
    * - 1
      - 8
-     - 57.47
-     - **0.028**
-     - **99.9 %**
-     - ≈ 118 s
-     - ≈ 28 s (93 % red.)
+     - 0.303
+     - **0.213**
+     - **30 %**
+     - ~124 s
    * - 2
      - 24
-     - 0.311
-     - **0.055**
-     - **82 %**
-     - ≈ 63 s
-     - ≈ 73 s (92 % red.)
-   * - 3
-     - 48
-     - 0.311
-     - **0.055** ²
-     - **82 %**
-     - ≈ 68 s
-     - —
+     - 0.303
+     - **0.008**
+     - **97 %**
+     - ~323 s
 
-¹ SIMSOPT + VMEC2000, serial (no MPI), ``method='lm'``, same ``max_nfev=15`` budget,
-Apple M-series CPU.  Note SIMSOPT's QS final is 4.04 (max_mode=1) — much higher than
-vmec_jax's 0.028 — because finite-difference Jacobians are less informative.
-
-² With 15 function evaluations the optimizer has not yet exploited the extra 24
-high-mode DOFs; increase ``MAX_NFEV`` for further improvement.
+¹ Wall time on Apple M-series (warm-cache subsequent runs are faster).
+``max_mode=1`` is limited by the 8-DOF boundary parameterisation; ``max_mode=2``
+(24 DOFs) gives the optimizer room to reshape the boundary helically and achieves
+a 97 % reduction.
 
 
 3-D LCFS and |B| contour plots
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**max_mode = 1** (8 DOFs, 99.9% QS reduction, 118 s)
+**max_mode = 1** (8 DOFs, 30% QS reduction, ~124 s)
 
 .. list-table::
    :widths: 60 40
@@ -221,7 +208,7 @@ high-mode DOFs; increase ``MAX_NFEV`` for further improvement.
    :align: center
    :alt: |B| contour lines on LCFS, max_mode=1
 
-**max_mode = 2** (24 DOFs, 82% QS reduction, 63 s)
+**max_mode = 2** (24 DOFs, 97% QS reduction, ~323 s)
 
 .. list-table::
    :widths: 60 40
@@ -237,23 +224,6 @@ high-mode DOFs; increase ``MAX_NFEV`` for further improvement.
    :width: 80%
    :align: center
    :alt: |B| contour lines on LCFS, max_mode=2
-
-**max_mode = 3** (48 DOFs, 82% QS reduction, 68 s)
-
-.. list-table::
-   :widths: 60 40
-
-   * - .. image:: _static/figures/qh_opt/mode3/boundary_comparison.png
-          :width: 100%
-          :alt: 3D LCFS max_mode=3
-     - .. image:: _static/figures/qh_opt/mode3/objective_history.png
-          :width: 100%
-          :alt: Objective history max_mode=3
-
-.. image:: _static/figures/qh_opt/mode3/bmag_surface.png
-   :width: 80%
-   :align: center
-   :alt: |B| contour lines on LCFS, max_mode=3
 
 The contour lines on the |B| surface plots show the magnetic field strength as
 isocurves in (θ, φ) space.  Quasi-helical symmetry means |B| depends mainly on
@@ -287,7 +257,38 @@ high-mode DOFs.
    # (results saved to results/qa_opt/no_ess/)
 
 The script starts from ``examples/data/input.nfp2_QA`` (nfp=2, ``NS=31``,
-``FTOL=1e-12``) and uses ``max_mode=2`` (24 DOFs).
+``FTOL=1e-12``) and uses ``max_mode=2`` (24 DOFs).  All runs use VMEC resolution
+``mpol = ntor = 5`` and a budget of 15 Jacobian evaluations.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 14 14 14 20 16
+
+   * - Setting
+     - QS initial
+     - QS final
+     - Reduction
+     - Aspect final
+     - Wall time ¹
+   * - ESS off
+     - 0.168
+     - **0.099**
+     - **41 %**
+     - 5.51
+     - ~608 s
+   * - ESS on (α=1)
+     - 0.168
+     - 0.168 ²
+     - —
+     - 5.84
+     - ~319 s
+
+¹ Wall time on Apple M-series (warm-cache subsequent runs are faster).
+
+² With 15 evaluations, ESS first drives the dominant low-mode residual (aspect
+ratio: 5.0 → 5.84 toward target 6.0) before touching QS — as expected from
+spectral scaling that suppresses high-mode steps.  More evaluations would show
+QS improvement once the aspect residual is small.
 
 **ESS off** (max_mode=2, 24 DOFs)
 
@@ -392,7 +393,8 @@ residual vector:
 .. code-block:: python
 
    r[0]    = aspect_weight * (aspect - target_aspect)
-   r[1:]   = qs_weight * quasisymmetry_ratio_residuals(state, surfaces, m=1, n=4)
+   r[1:]   = qs_weight * quasisymmetry_ratio_residuals(state, surfaces, m=1, n=-1)
+   # n is in field-period units: n=-1 → QH with nn=-nfp internally (nfp=4 → nn=-4)
 
 The quasisymmetry ratio residual is computed by
 :func:`~vmec_jax.quasisymmetry_ratio_residual_from_state`, which evaluates
