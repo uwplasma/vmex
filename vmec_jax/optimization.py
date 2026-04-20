@@ -80,8 +80,9 @@ def extend_boundary_for_max_mode(
         Current boundary coefficients.  Replaced if extension is needed.
     max_mode:
         Desired maximum mode number.  The extended mode table will have
-        ``mpol = max(mpol_cur, max_mode + 1)`` and
-        ``ntor = max(ntor_cur, max_mode)``.
+        ``mpol = ntor = max(max(mpol_cur, ntor_cur), max(5, max_mode + 2))``
+        so that the VMEC solver resolution (and hence the QS metric
+        normalisation) is independent of *max_mode*.
 
     Returns
     -------
@@ -96,8 +97,12 @@ def extend_boundary_for_max_mode(
 
     cur_mpol = int(indata.get_int("MPOL", 6))
     cur_ntor = int(indata.get_int("NTOR", 0))
-    need_mpol = max_mode + 1   # VMEC mpol = max_m + 1
-    need_ntor = max_mode
+    # Use at least mpol=ntor=5 so the VMEC solver resolution (and hence the
+    # QS metric normalisation) is independent of max_mode.  Without this floor
+    # max_mode=1 would run with mpol=3 and give a different initial QS value
+    # than max_mode=2/3, making cross-mode comparisons misleading.
+    need_mpol = max(5, max_mode + 2)   # VMEC mpol = max_m + 1; add extra headroom
+    need_ntor = max(5, max_mode + 2)
 
     if need_mpol <= cur_mpol and need_ntor <= cur_ntor:
         return indata, static, boundary   # nothing to do
@@ -864,6 +869,7 @@ class FixedBoundaryExactOptimizer:
         self._history: list[dict] = []
         self._wall_t0: float = 0.0
         self._last_jacobian_key: list = [None]
+        self._iota_fn = None  # set by run() when iota tracking is requested
 
     # ── private helpers ───────────────────────────────────────────────────────
 
@@ -1004,13 +1010,17 @@ class FixedBoundaryExactOptimizer:
             aspect = float(np.asarray(
                 equilibrium_aspect_ratio_from_state(state=cached_state, static=self._static)
             ))
-            self._history.append({
+            entry: dict = {
                 "wall_time_s": time.perf_counter() - self._wall_t0,
                 "cost": cost,
                 "objective": 2.0 * cost,
                 "qs_objective": qs_total,
                 "aspect": aspect,
-            })
+            }
+            iota_fn = getattr(self, "_iota_fn", None)
+            if iota_fn is not None:
+                entry["iota"] = float(iota_fn(cached_state))
+            self._history.append(entry)
         return jac
 
     def _exact_residual_after_jacobian(self):
@@ -1104,6 +1114,8 @@ class FixedBoundaryExactOptimizer:
         xtol: float = 1e-3,
         x_scale=None,
         verbose: int = 1,
+        iota_fn=None,
+        target_iota: float | None = None,
     ) -> dict:
         """Run Gauss-Newton least-squares optimisation.
 
@@ -1123,6 +1135,16 @@ class FixedBoundaryExactOptimizer:
             parameters uniformly.
         verbose:
             Verbosity (0 = silent, 1 = iteration table).
+        iota_fn:
+            Optional callable ``iota_fn(state) -> float`` that returns the
+            mean rotational transform for a solved state.  When provided,
+            the iota value is recorded in the per-iteration history under
+            the key ``"iota"`` and saved by :meth:`save_history`.  Use this
+            for QA runs where iota is a target quantity.
+        target_iota:
+            If provided alongside *iota_fn*, saved to the history dump
+            under ``"target_iota"`` so plotting code can draw the target
+            line.
 
         Returns
         -------
@@ -1138,6 +1160,7 @@ class FixedBoundaryExactOptimizer:
 
         self._history = []
         self._wall_t0 = time.perf_counter()
+        self._iota_fn = iota_fn  # stored so _jacobian_fun_tracked can use it
 
         params0_arr = np.asarray(params0, dtype=float)
 
@@ -1150,13 +1173,16 @@ class FixedBoundaryExactOptimizer:
         cost0 = float(0.5 * np.dot(res0, res0))
         qs_total0 = float(np.dot(res0[1:], res0[1:]))
 
-        self._history.append({
+        entry0: dict = {
             "wall_time_s": 0.0,
             "cost": cost0,
             "objective": 2.0 * cost0,
             "qs_objective": qs_total0,
             "aspect": aspect0,
-        })
+        }
+        if iota_fn is not None:
+            entry0["iota"] = float(iota_fn(state0))
+        self._history.append(entry0)
 
         # ── Gauss-Newton loop ───────────────────────────────────────────────
         t_start = time.perf_counter()
@@ -1191,16 +1217,19 @@ class FixedBoundaryExactOptimizer:
         cost_final = float(0.5 * np.dot(res_final, res_final))
         qs_total_final = float(np.dot(res_final[1:], res_final[1:]))
 
-        self._history.append({
+        entry_final: dict = {
             "wall_time_s": t_total,
             "cost": cost_final,
             "objective": 2.0 * cost_final,
             "qs_objective": qs_total_final,
             "aspect": aspect_final,
-        })
+        }
+        if iota_fn is not None:
+            entry_final["iota"] = float(iota_fn(state_final))
+        self._history.append(entry_final)
 
         # ── assemble history dump ───────────────────────────────────────────
-        history_dump = {
+        history_dump: dict = {
             "label": "Optimisation",
             "max_nfev": max_nfev,
             "ftol": ftol,
@@ -1219,6 +1248,8 @@ class FixedBoundaryExactOptimizer:
             "aspect_final": aspect_final,
             "history": self._history,
         }
+        if target_iota is not None:
+            history_dump["target_iota"] = float(target_iota)
 
         result["_history_dump"] = history_dump
         return result

@@ -990,7 +990,7 @@ def _plot_3d_boundary_comparison(wout_init, wout_final, outdir: Path) -> Path:
         ax.set_ylabel("Y (m)")
         ax.set_zlabel("Z (m)")
         ax.set_title(title, fontsize=11)
-        ax.set_box_aspect([1, 1, 0.5])
+        fix_matplotlib_3d(ax)
 
     sm = ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
@@ -1085,7 +1085,7 @@ def _plot_bmag_contours(wout_init, wout_final, outdir: Path) -> Path:
 
 
 def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
-    """Objective value and aspect ratio vs Jacobian evaluation."""
+    """Objective value, aspect ratio, and (optionally) iota vs Jacobian evaluation."""
     import json
     import matplotlib
     matplotlib.use("Agg")
@@ -1097,14 +1097,19 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
     hist = data["history"]
     objectives = [h["objective"] for h in hist]
     aspects = [h["aspect"] for h in hist]
+    # Iota history is present for QA runs but absent for QH runs
+    iotas = [h["iota"] for h in hist] if hist and "iota" in hist[0] else None
     iters = list(range(len(hist)))
     total_time = data.get("total_wall_time_s", 0.0)
     nfev = data.get("nfev", len(hist))
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(7, 6), sharex=True)
+    n_panels = 3 if iotas is not None else 2
+    fig, axes = plt.subplots(n_panels, 1, figsize=(7, 3 * n_panels), sharex=True)
+    ax1, ax2 = axes[0], axes[1]
+    ax3 = axes[2] if n_panels == 3 else None
 
     ax1.semilogy(iters, objectives, "o-", color="steelblue", linewidth=2, markersize=6)
-    ax1.set_ylabel("Objective  Σ residuals²", fontsize=11)
+    ax1.set_ylabel("QS residuals²", fontsize=11)
     opt_label = data.get("label", "Optimisation")
     ax1.set_title(
         f"{opt_label}  ({nfev} evals, {total_time:.0f} s)",
@@ -1121,9 +1126,21 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
         ax2.axhline(target_aspect, color="k", linestyle=":", alpha=0.5,
                     label=f"Target A={target_aspect:.4g}")
     ax2.set_ylabel("Aspect ratio", fontsize=11)
-    ax2.set_xlabel("Jacobian evaluation index", fontsize=11)
+    if ax3 is None:
+        ax2.set_xlabel("Jacobian evaluation index", fontsize=11)
     ax2.legend(fontsize=9)
     ax2.grid(True, alpha=0.3)
+
+    if ax3 is not None and iotas is not None:
+        ax3.plot(iters, iotas, "^-", color="forestgreen", linewidth=2, markersize=6)
+        target_iota = data.get("target_iota", None)
+        if target_iota is not None:
+            ax3.axhline(target_iota, color="k", linestyle=":", alpha=0.5,
+                        label=f"Target ι={target_iota:.4g}")
+        ax3.set_ylabel("Mean iota ι", fontsize=11)
+        ax3.set_xlabel("Jacobian evaluation index", fontsize=11)
+        ax3.legend(fontsize=9)
+        ax3.grid(True, alpha=0.3)
 
     fig.tight_layout()
     out = outdir / "objective_history.png"
