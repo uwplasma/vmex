@@ -49,7 +49,9 @@ INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.nfp2_QA"
 MAX_MODE = 2
 
 # Maximum number of residual + Jacobian evaluations combined.
-MAX_NFEV = 15
+# 25 evaluations gives the optimizer enough budget to meaningfully improve
+# QS symmetry (not just aspect ratio and iota) — especially important with ESS.
+MAX_NFEV = 25
 
 # Convergence tolerances (relative cost reduction / gradient / step norm).
 FTOL = 1e-3
@@ -159,6 +161,18 @@ print(f"QS objective (initial):        {opt.quasisymmetry_objective(params0):.6f
 # 6.  Run the optimisation
 # ─────────────────────────────────────────────────────────────────────────────
 print(f"\nRunning Gauss-Newton (max_nfev={MAX_NFEV}, ESS={USE_ESS}) …")
+
+# iota_fn lets the optimizer record mean iota at every Jacobian evaluation so
+# that the objective history plot shows an iota panel alongside aspect ratio.
+from vmec_jax.wout import equilibrium_iota_profiles_from_state
+import vmec_jax._compat as _compat
+_jnp = _compat.jnp
+
+def _iota_fn(state):
+    _chips, _iotas, iotaf = equilibrium_iota_profiles_from_state(
+        state=state, static=static, indata=indata, signgs=opt._signgs)
+    return float(_jnp.mean(_jnp.asarray(iotaf, dtype=_jnp.float64)))
+
 result = opt.run(
     params0,
     max_nfev=MAX_NFEV,
@@ -167,6 +181,8 @@ result = opt.run(
     xtol=XTOL,
     x_scale=x_scale,
     verbose=1,
+    iota_fn=_iota_fn,
+    target_iota=TARGET_IOTA,
 )
 
 print(f"\nTermination: {result['message']}")
@@ -174,8 +190,9 @@ print(f"Aspect ratio (final):          {opt.aspect_ratio(result['x']):.4f}")
 print(f"QS objective (final):          {opt.quasisymmetry_objective(result['x']):.6f}")
 _hist = result.get("_history_dump", {})
 _obj0 = _hist.get("objective_initial", None)
-if _obj0 is not None and _obj0 > 0.0:
-    print(f"Objective reduction:           {100*(1 - result['objective']/_obj0):.1f}%")
+_obj_f = _hist.get("objective_final", None)
+if _obj0 is not None and _obj0 > 0.0 and _obj_f is not None:
+    print(f"Objective reduction:           {100*(1 - _obj_f/_obj0):.1f}%")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 7.  Save outputs
@@ -186,6 +203,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 _ess_tag = f"ESS α={ALPHA}" if USE_ESS else "no ESS"
 result["_history_dump"]["label"] = f"QA opt (max_mode={MAX_MODE}, {_ess_tag})"
 result["_history_dump"]["target_aspect"] = TARGET_ASPECT
+result["_history_dump"]["target_iota"] = TARGET_IOTA
 
 opt.save_wout(OUTPUT_DIR / "wout_initial.nc", params0)
 opt.save_wout(OUTPUT_DIR / "wout_final.nc", result["x"])
