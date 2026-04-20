@@ -119,47 +119,43 @@ python examples/optimization/qh_fixed_resolution_jax.py   # MAX_MODE=2 by defaul
 When `max_mode` exceeds the modes present in the input file, vmec_jax automatically
 extends the boundary to include the requested harmonics at zero amplitude
 (`vj.extend_boundary_for_max_mode`), matching SIMSOPT's `fixed_range()` behaviour.
+All runs use consistent VMEC resolution `mpol = ntor = 5` so the initial QS metric
+is normalised identically across `max_mode` values.
 
-| `max_mode` | DOFs | QS initial | QS final | Reduction | Wall time | SIMSOPT time ¹ |
-|:----------:|:----:|:----------:|:--------:|:---------:|:---------:|:--------------:|
-| 1          |  8   |   57.47    |  **0.028** | **99.9 %** | ~118 s  | ~28 s (93 % red.) |
-| 2          | 24   |   0.311 ² |  **0.055** | **82 %**  | ~63 s   | ~73 s (92 % red.) |
-| 3          | 48   |   0.311 ² |  **0.055** ³ | **82 %** | ~68 s  | — |
+| `max_mode` | DOFs | QS initial | QS final | Reduction | Wall time ¹ |
+|:----------:|:----:|:----------:|:--------:|:---------:|:-----------:|
+| 1          |  8   |   0.303    |  0.213   |  30 %     | ~124 s      |
+| 2          | 24   |   0.303    |  **0.008** | **97 %** | ~323 s    |
 
-¹ SIMSOPT + VMEC2000 (serial, `method='lm'`, same `max_nfev=15` budget, Apple M-series CPU).
-² The QS metric depends on the mode-table size (mpol/ntor); extending the boundary for
-`max_mode=2,3` increases mpol, which normalises the metric differently from `max_mode=1`.
-³ With 15 function evaluations the optimizer does not yet use the extra 24 high-mode DOFs;
-increase `MAX_NFEV` to see further improvement.
+¹ Wall time on Apple M-series (warm-cache subsequent runs are faster).
 
-**vmec_jax vs SIMSOPT**: vmec_jax achieves far lower final QS (0.028 vs 4.04 for
-`max_mode=1`) with the same evaluation budget, because exact Jacobians extract orders
-of magnitude more gradient information per step than finite differences.  SIMSOPT's
-individual VMEC2000 solves are faster on CPU, but the exact Jacobian more than
-compensates — especially for large DOF counts where finite-difference cost scales
-linearly with the number of parameters.  For a detailed comparison of algorithms,
-runtimes, and memory, see [docs/simsopt_comparison.rst](docs/simsopt_comparison.rst).
+With only 8 DOFs (`max_mode=1`) the boundary deformation space is too limited
+to reach a deep quasi-helical minimum.  `max_mode=2` (24 DOFs) achieves a
+97 % reduction because the higher harmonics give the optimizer room to reshape
+the boundary helically.
+
+**vmec_jax vs SIMSOPT**: vmec_jax uses an exact discrete-adjoint Jacobian
+(one batched JVP pass ≈ 1–2 forward solves regardless of DOF count) while
+SIMSOPT + VMEC2000 uses finite differences (*n*_DOFs × 1 forward solve per
+Jacobian).  For a detailed comparison of algorithms, runtimes, and memory,
+see [docs/simsopt_comparison.rst](docs/simsopt_comparison.rst).
 
 <table>
   <tr>
-    <th align="center">max_mode = 1 &nbsp;(8 DOFs, 99.9 % QS reduction)</th>
-    <th align="center">max_mode = 2 &nbsp;(24 DOFs, 82 % QS reduction)</th>
-    <th align="center">max_mode = 3 &nbsp;(48 DOFs, 82 % QS reduction)</th>
+    <th align="center">max_mode = 1 &nbsp;(8 DOFs, 30 % QS reduction)</th>
+    <th align="center">max_mode = 2 &nbsp;(24 DOFs, 97 % QS reduction)</th>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/qh_opt/boundary_comparison.png" /></td>
     <td><img src="docs/_static/figures/qh_opt/mode2/boundary_comparison.png" /></td>
-    <td><img src="docs/_static/figures/qh_opt/mode3/boundary_comparison.png" /></td>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/qh_opt/bmag_surface.png" /></td>
     <td><img src="docs/_static/figures/qh_opt/mode2/bmag_surface.png" /></td>
-    <td><img src="docs/_static/figures/qh_opt/mode3/bmag_surface.png" /></td>
   </tr>
   <tr>
     <td align="center"><img src="docs/_static/figures/qh_opt/objective_history.png" /></td>
     <td align="center"><img src="docs/_static/figures/qh_opt/mode2/objective_history.png" /></td>
-    <td align="center"><img src="docs/_static/figures/qh_opt/mode3/objective_history.png" /></td>
   </tr>
 </table>
 
@@ -185,10 +181,18 @@ low-order harmonics.
 python examples/optimization/qa_fixed_resolution_jax_ess.py   # USE_ESS=True, MAX_MODE=2
 ```
 
-| Setting | DOFs | Objective targets |
-|:-------:|:----:|:-----------------:|
-| `max_mode=2`, ESS off | 24 | aspect ratio + mean iota + QA symmetry |
-| `max_mode=2`, ESS on  | 24 | same, with high-mode suppression |
+All runs use `max_mode=2` (24 DOFs, VMEC resolution `mpol = ntor = 5`).
+Objectives: aspect ratio + mean iota + QA symmetry residuals (15 Jacobian evals).
+
+| Setting | QS initial | QS final | Reduction | Aspect final | Wall time |
+|:-------:|:----------:|:--------:|:---------:|:------------:|:---------:|
+| ESS off | 0.168 | **0.099** | **41 %** | 5.51 | ~608 s |
+| ESS on (α=1) | 0.168 | 0.168 ¹ | — | 5.84 | ~319 s |
+
+¹ With 15 evaluations, ESS first drives the dominant low-mode residual (aspect
+  ratio: 5.0 → 5.84 toward target 6.0) before touching QS — as expected from
+  spectral scaling that suppresses high-mode steps.  More evaluations would show
+  QS improvement once the aspect residual is small.
 
 Boundary modes beyond those present in the input file are automatically added at
 zero amplitude via `extend_boundary_for_max_mode`.
