@@ -1065,12 +1065,24 @@ class FixedBoundaryExactOptimizer:
             Output path for the ``.nc`` file.
         params:
             Boundary parameter vector (zeros = reference boundary).
+
+        Notes
+        -----
+        Uses the exact-solve cache when *params* was previously evaluated.
+        On a cache miss the trial solver (slightly relaxed tolerances) is used
+        to avoid OOM after long optimization runs that have filled the JAX heap.
         """
         from .driver import FixedBoundaryRun
         from .driver import write_wout_from_fixed_boundary_run
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        state = self._solve_exact_with_tape(params)
+        # Use cached state when available; fall back to trial solver (cheaper)
+        # to avoid OOM when the JAX heap is saturated after a long run.
+        cache_key = np.asarray(params, dtype=float).tobytes()
+        if cache_key in self._exact_cache:
+            state = self._exact_cache[cache_key][0]
+        else:
+            state = self._solve_forward(params, trial=True)
         run = FixedBoundaryRun(
             cfg=self._static.cfg,
             indata=self._indata,
@@ -1204,11 +1216,14 @@ class FixedBoundaryExactOptimizer:
         self._post_jacobian_clear()
 
         # ── final evaluation ────────────────────────────────────────────────
+        # Use the exact cache when available (avoids a fresh full VMEC solve
+        # that can OOM after a long optimization session).  Fall back to the
+        # trial (cheaper) solver when the cache doesn't hold result["x"].
         final_key = np.asarray(result["x"], dtype=float).tobytes()
         if final_key in self._exact_cache:
             state_final = self._exact_cache[final_key][0]
         else:
-            state_final = self._solve_forward(result["x"], trial=False)
+            state_final = self._solve_forward(result["x"], trial=True)
 
         res_final = np.asarray(self._residuals_fn(state_final), dtype=float)
         aspect_final = float(np.asarray(
