@@ -12,7 +12,7 @@ pip install vmec-jax
 Developer (editable) install:
 
 ```bash
-git clone --filter=blob:none https://github.com/uwplasma/vmec_jax
+git clone https://github.com/uwplasma/vmec_jax
 pip install -e vmec_jax/
 ```
 
@@ -101,8 +101,16 @@ All figures below use the same **single-grid** run settings: `NS_ARRAY=151`, `NI
 ## Quasi-helical symmetry optimization (discrete-adjoint)
 
 `examples/optimization/qh_fixed_resolution_jax.py` demonstrates an end-to-end
-fixed-boundary QH optimization using the built-in exact discrete-adjoint Jacobian
+fixed-boundary QH optimization using the built-in **exact discrete-adjoint Jacobian**
 — no finite differences, no SIMSOPT dependency.
+
+> **Discrete adjoint**: rather than perturbing each boundary DOF separately (finite
+> differences), vmec_jax records a *checkpoint tape* of the VMEC iteration and
+> propagates all parameter tangents through it in one batched forward pass
+> (`jax.vmap(jax.jvp(...))`).  The Jacobian is exact (machine precision) and its
+> cost is roughly 1–2 forward solves regardless of the number of DOFs — vs.
+> *n*_DOFs forward solves for finite differences.
+> → [Detailed explanation](docs/discrete_adjoint.rst) · [SIMSOPT comparison](docs/simsopt_comparison.rst)
 
 ```bash
 python examples/optimization/qh_fixed_resolution_jax.py   # MAX_MODE=2 by default
@@ -112,32 +120,46 @@ When `max_mode` exceeds the modes present in the input file, vmec_jax automatica
 extends the boundary to include the requested harmonics at zero amplitude
 (`vj.extend_boundary_for_max_mode`), matching SIMSOPT's `fixed_range()` behaviour.
 
-| `max_mode` | DOFs | QS initial | QS final | Reduction | Wall time |
-|:----------:|:----:|:----------:|:--------:|:---------:|:---------:|
-| 1          |  4   |   0.311    |  0.212   |   32 %    |  ~33 s    |
-| 2          | 14   |   0.311    |  0.055   |   82 %    |  ~63 s    |
-| 3          | 48 ¹ |   0.311    |  —       |    —      |    —      |
+| `max_mode` | DOFs | QS initial | QS final | Reduction | Wall time | SIMSOPT time ¹ |
+|:----------:|:----:|:----------:|:--------:|:---------:|:---------:|:--------------:|
+| 1          |  8   |   57.47    |  **0.028** | **99.9 %** | ~118 s  | ~28 s (93 % red.) |
+| 2          | 24   |   0.311 ² |  **0.055** | **82 %**  | ~63 s   | ~73 s (92 % red.) |
+| 3          | 48   |   0.311 ² |  **0.055** ³ | **82 %** | ~68 s  | — |
 
-¹ `max_mode=3` now correctly gives 48 DOFs (extended from mpol=2 input via
-`extend_boundary_for_max_mode`); was incorrectly 14 DOFs (= max_mode=2)
-before this fix.
+¹ SIMSOPT + VMEC2000 (serial, `method='lm'`, same `max_nfev=15` budget, Apple M-series CPU).
+² The QS metric depends on the mode-table size (mpol/ntor); extending the boundary for
+`max_mode=2,3` increases mpol, which normalises the metric differently from `max_mode=1`.
+³ With 15 function evaluations the optimizer does not yet use the extra 24 high-mode DOFs;
+increase `MAX_NFEV` to see further improvement.
+
+**vmec_jax vs SIMSOPT**: vmec_jax achieves far lower final QS (0.028 vs 4.04 for
+`max_mode=1`) with the same evaluation budget, because exact Jacobians extract orders
+of magnitude more gradient information per step than finite differences.  SIMSOPT's
+individual VMEC2000 solves are faster on CPU, but the exact Jacobian more than
+compensates — especially for large DOF counts where finite-difference cost scales
+linearly with the number of parameters.  For a detailed comparison of algorithms,
+runtimes, and memory, see [docs/simsopt_comparison.rst](docs/simsopt_comparison.rst).
 
 <table>
   <tr>
-    <th align="center">max_mode = 1 &nbsp;(4 DOFs, 32 % reduction)</th>
-    <th align="center">max_mode = 2 &nbsp;(14 DOFs, 82 % reduction)</th>
+    <th align="center">max_mode = 1 &nbsp;(8 DOFs, 99.9 % QS reduction)</th>
+    <th align="center">max_mode = 2 &nbsp;(24 DOFs, 82 % QS reduction)</th>
+    <th align="center">max_mode = 3 &nbsp;(48 DOFs, 82 % QS reduction)</th>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/qh_opt/boundary_comparison.png" /></td>
     <td><img src="docs/_static/figures/qh_opt/mode2/boundary_comparison.png" /></td>
+    <td><img src="docs/_static/figures/qh_opt/mode3/boundary_comparison.png" /></td>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/qh_opt/bmag_surface.png" /></td>
     <td><img src="docs/_static/figures/qh_opt/mode2/bmag_surface.png" /></td>
+    <td><img src="docs/_static/figures/qh_opt/mode3/bmag_surface.png" /></td>
   </tr>
   <tr>
     <td align="center"><img src="docs/_static/figures/qh_opt/objective_history.png" /></td>
     <td align="center"><img src="docs/_static/figures/qh_opt/mode2/objective_history.png" /></td>
+    <td align="center"><img src="docs/_static/figures/qh_opt/mode3/objective_history.png" /></td>
   </tr>
 </table>
 
@@ -170,6 +192,25 @@ python examples/optimization/qa_fixed_resolution_jax_ess.py   # USE_ESS=True, MA
 
 Boundary modes beyond those present in the input file are automatically added at
 zero amplitude via `extend_boundary_for_max_mode`.
+
+<table>
+  <tr>
+    <th align="center">ESS off &nbsp;(max_mode=2, 24 DOFs)</th>
+    <th align="center">ESS on &nbsp;(max_mode=2, 24 DOFs, α=1)</th>
+  </tr>
+  <tr>
+    <td><img src="docs/_static/figures/qa_opt/no_ess/boundary_comparison.png" /></td>
+    <td><img src="docs/_static/figures/qa_opt/ess/boundary_comparison.png" /></td>
+  </tr>
+  <tr>
+    <td><img src="docs/_static/figures/qa_opt/no_ess/bmag_surface.png" /></td>
+    <td><img src="docs/_static/figures/qa_opt/ess/bmag_surface.png" /></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/_static/figures/qa_opt/no_ess/objective_history.png" /></td>
+    <td align="center"><img src="docs/_static/figures/qa_opt/ess/objective_history.png" /></td>
+  </tr>
+</table>
 
 ## Performance vs parity
 

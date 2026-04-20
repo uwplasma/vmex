@@ -1,0 +1,63 @@
+{
+  "label": "QA opt (max_mode=2, ESS \u03b1=1.0)",
+  "max_nfev": 15,
+  "ftol": 0.001,
+  "gtol": 0.001,
+  "xtol": 0.001,
+  "total_wall_time_s": 239.40605258300275,
+  "nfev": 15,
+  "njev": 4,
+  "success": false,
+  "message": "line search failed to reduce the objective",
+  "objective_initial": 1.1680999999999377,
+  "objective_final": 0.19221127372558414,
+  "qs_initial": 0.16809999999999997,
+  "qs_final": 0.16810032309473485,
+  "aspect_initial": 5.000000000000031,
+  "aspect_final": 5.844722987435843,
+  "history": [
+    {
+      "wall_time_s": 0.0,
+      "cost": 0.5840499999999689,
+      "objective": 1.1680999999999377,
+      "qs_objective": 0.16809999999999997,
+      "aspect": 5.000000000000031
+    },
+    {
+      "wall_time_s": 16.91718424999999,
+      "cost": 0.5840499999999689,
+      "objective": 1.1680999999999377,
+      "qs_objective": 0.16809999999999997,
+      "aspect": 5.000000000000031
+    },
+    {
+      "wall_time_s": 114.50743374999729,
+      "cost": 0.5824039211724101,
+      "objective": 1.1648078423448203,
+      "qs_objective": 0.16810000612501824,
+      "aspect": 5.001647438917592
+    },
+    {
+      "wall_time_s": 141.33674670799883,
+      "cost": 0.5514376690082308,
+      "objective": 1.1028753380164615,
+      "qs_objective": 0.16809999981409854,
+      "aspect": 5.033162196538445
+    },
+    {
+      "wall_time_s": 218.5794472919988,
+      "cost": 0.09610563686279207,
+      "objective": 0.19221127372558414,
+      "qs_objective": 0.16810032309473485,
+      "aspect": 5.844722987435843
+    },
+    {
+      "wall_time_s": 239.40605258300275,
+      "cost": 0.09610563686279207,
+      "objective": 0.19221127372558414,
+      "qs_objective": 0.16810032309473485,
+      "aspect": 5.844722987435843
+    }
+  ],
+  "target_aspect": 6.0
+}

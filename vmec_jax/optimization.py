@@ -1057,7 +1057,7 @@ class FixedBoundaryExactOptimizer:
             Boundary parameter vector (zeros = reference boundary).
         """
         from .driver import FixedBoundaryRun
-        from .wout import write_wout_from_fixed_boundary_run
+        from .driver import write_wout_from_fixed_boundary_run
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         state = self._solve_exact_with_tape(params)

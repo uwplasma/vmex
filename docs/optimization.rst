@@ -10,7 +10,7 @@ This page covers:
 - the mathematical approach and how it differs from SIMSOPT + VMEC2000,
 - the key source files and public API,
 - the algorithms (Gauss-Newton, line search, adjoint replay),
-- how to reproduce the quasi-helical symmetry (QH) example,
+- how to reproduce the quasi-helical symmetry (QH) and quasi-axisymmetric (QA) examples,
 - figures comparing ``max_mode=1, 2, 3`` optimisation results.
 
 .. contents:: Table of contents
@@ -30,7 +30,7 @@ subprocess and builds the Jacobian column by column using finite differences::
       run VMEC2000 subprocess            # one full solve per column
       J[:, i] = (f(x+ε·eᵢ) - f(x)) / ε
 
-For ``n_params = 14`` boundary DOFs this is 14 extra forward solves per
+For ``n_params = 24`` boundary DOFs this is 24 extra forward solves per
 Jacobian evaluation — expensive, and the result is only accurate to
 ``O(√ε_machine)`` due to finite-difference cancellation.
 
@@ -39,16 +39,18 @@ Jacobian evaluation — expensive, and the result is only accurate to
 1. Run one "exact" forward solve with the adjoint flag, storing a
    compressed checkpoint tape of the iteration trajectory.
 2. Propagate tangent vectors through the tape via batched JVP
-   (``jax.vmap(jax.jvp(...))``), visiting each recorded iteration step
+   (``jax.vmap(jax.jvp(...))``, visiting each recorded iteration step
    in forward order exactly once per tangent batch.
 
 The Jacobian is thereby computed to **machine precision** in a time roughly
 equal to ``1 + fraction-of-solve × n_params`` forward-solve equivalents,
 rather than ``n_params`` full forward solves.
 
-In practice, for ``n_params ≤ 14`` the Jacobian build takes roughly 0.5–1.5×
+In practice, for ``n_params ≤ 24`` the Jacobian build takes roughly 0.5–1.5×
 the cost of a single tight solve — comparable to SIMSOPT + finite differences
 with ``n_params = 1`` but covering the full parameter space at once.
+
+→ See :doc:`discrete_adjoint` for a full mathematical description.
 
 
 Comparison with SIMSOPT
@@ -79,16 +81,19 @@ Comparison with SIMSOPT
    * - Differentiable through optimizer
      - Yes (JAX autodiff)
      - No
-   * - Wall time (QH, max\_mode=1)
-     - ≈ 33 s (CPU, Apple M-series)
-     - ≈ 120 s (SIMSOPT reference)
-   * - QS objective (max\_mode=1)
-     - 0.311 → **0.212** (32% reduction)
-     - 0.311 → 0.214 (classic ref)
+   * - Wall time (QH, max\_mode=1, 15 evals)
+     - ≈ 118 s (CPU, Apple M-series)
+     - ≈ 28 s (SIMSOPT + xvmec2000)
+   * - QS objective (QH max\_mode=1, 15 evals)
+     - **57.47 → 0.028** (99.9% reduction)
+     - 57.47 → 4.04 (93% reduction)
 
-The ``vmec_jax`` result slightly outperforms the SIMSOPT reference at the same
-``max_mode=1``, ``max_nfev=10`` budget, because the exact Jacobian extracts
-more gradient information per evaluation.
+``vmec_jax`` achieves dramatically lower final QS because exact Jacobians
+extract far more gradient information per step.  Individual VMEC2000 solves
+are faster on CPU, but the exact Jacobian more than compensates.
+
+→ See :doc:`simsopt_comparison` for a detailed runtime, memory, and
+algorithm comparison.
 
 
 Quasi-helical symmetry example
@@ -104,8 +109,8 @@ argparse — all parameters are top-level variables:
    INPUT_FILE    = Path(".../input.nfp4_QH_warm_start")
    MAX_MODE      = 2         # boundary DOF mode number cutoff
    MAX_NFEV      = 15        # maximum residual+Jacobian evaluations
-   HELICITY_M    = 1         # QH: m=1, n=-1
-   HELICITY_N    = -1
+   HELICITY_M    = 1         # QH helicity
+   HELICITY_N    = 4         # nfp=4 quasi-helical symmetry
    TARGET_ASPECT = 7.0       # target aspect ratio
    SURFACES      = np.arange(0, 1.01, 0.1)
 
@@ -113,9 +118,11 @@ argparse — all parameters are top-level variables:
    cfg, indata  = vj.load_config(str(INPUT_FILE))
    static       = vj.build_static(cfg)
    boundary     = vj.boundary_from_indata(indata, static.modes)
+   indata, static, boundary = vj.extend_boundary_for_max_mode(indata, static, boundary, MAX_MODE)
 
    # ── DOFs ──────────────────────────────────────────────────────────────────
-   specs        = vj.boundary_param_specs(boundary, static.modes, max_mode=MAX_MODE)
+   specs        = vj.boundary_param_specs(boundary, static.modes, max_mode=MAX_MODE,
+                                          include=("rc","zs"), fix=("rc00",))
    params0      = np.zeros(len(specs))
 
    # ── Objective ─────────────────────────────────────────────────────────────
@@ -145,43 +152,59 @@ Results by mode number
 
 The table below summarises the QH optimisation results for three mode-number
 cutoffs, all starting from the same boundary (``input.nfp4_QH_warm_start``,
-nfp=4) and using 15 function evaluations:
+nfp=4) and using 15 function evaluations.
+
+.. note::
+   The QS metric value depends on the Fourier mode table size (mpol/ntor).
+   ``max_mode=1`` uses the original mpol=2 mode table (QS initial ≈ 57.47);
+   ``max_mode=2, 3`` extend the mode table to mpol=4 which rescales the QS
+   metric (QS initial ≈ 0.311).  Within each row the reduction is self-consistent.
 
 .. list-table::
    :header-rows: 1
-   :widths: 15 20 20 20 20
+   :widths: 12 10 14 14 14 18 18
 
    * - max\_mode
      - DOFs
      - QS initial
      - QS final
      - Reduction
+     - vmec\_jax time
+     - SIMSOPT time ¹
    * - 1
-     - 4
-     - 0.311
-     - 0.212
-     - 32%
+     - 8
+     - 57.47
+     - **0.028**
+     - **99.9 %**
+     - ≈ 118 s
+     - ≈ 28 s (93 % red.)
    * - 2
-     - 14
+     - 24
      - 0.311
-     - 0.055
-     - 82%
+     - **0.055**
+     - **82 %**
+     - ≈ 63 s
+     - ≈ 73 s (92 % red.)
    * - 3
-     - 14 (same as 2)
+     - 48
      - 0.311
-     - 0.055
-     - 82%
+     - **0.055** ²
+     - **82 %**
+     - ≈ 68 s
+     - —
 
-.. note::
-   The ``max_mode=3`` parameter space equals ``max_mode=2`` for this input
-   because the starting boundary only carries non-zero Fourier modes up to
-   ``|m| = 1``.  Higher mode numbers are only activated once the Gauss-Newton
-   step deposits amplitude in those harmonics.
+¹ SIMSOPT + VMEC2000, serial (no MPI), ``method='lm'``, same ``max_nfev=15`` budget,
+Apple M-series CPU.  Note SIMSOPT's QS final is 4.04 (max_mode=1) — much higher than
+vmec_jax's 0.028 — because finite-difference Jacobians are less informative.
+
+² With 15 function evaluations the optimizer has not yet exploited the extra 24
+high-mode DOFs; increase ``MAX_NFEV`` for further improvement.
+
 
 3-D LCFS and |B| contour plots
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**max_mode = 1** (32% QS reduction, 33 s)
+**max_mode = 1** (8 DOFs, 99.9% QS reduction, 118 s)
 
 .. list-table::
    :widths: 60 40
@@ -198,7 +221,7 @@ nfp=4) and using 15 function evaluations:
    :align: center
    :alt: |B| contour lines on LCFS, max_mode=1
 
-**max_mode = 2** (82% QS reduction, 63 s)
+**max_mode = 2** (24 DOFs, 82% QS reduction, 63 s)
 
 .. list-table::
    :widths: 60 40
@@ -215,7 +238,7 @@ nfp=4) and using 15 function evaluations:
    :align: center
    :alt: |B| contour lines on LCFS, max_mode=2
 
-**max_mode = 3** (82% QS reduction, 68 s — same parameter space as max_mode=2)
+**max_mode = 3** (48 DOFs, 82% QS reduction, 68 s)
 
 .. list-table::
    :widths: 60 40
@@ -236,6 +259,69 @@ The contour lines on the |B| surface plots show the magnetic field strength as
 isocurves in (θ, φ) space.  Quasi-helical symmetry means |B| depends mainly on
 ``m·θ − n·φ``; the optimised contours are clearly more helically aligned than
 the initial configuration.
+
+
+QA optimisation with exponential spectral scaling (ESS)
+--------------------------------------------------------
+
+``examples/optimization/qa_fixed_resolution_jax_ess.py`` demonstrates
+quasi-axisymmetric optimisation of an nfp=2 configuration with three objectives:
+
+* **Aspect ratio** target = 6.0
+* **Mean rotational transform** (iota) target = 0.41
+* **QA quasisymmetry** residuals (``helicity_m=1, helicity_n=0``)
+
+A top-level toggle ``USE_ESS = True/False`` enables exponential spectral scaling
+via :func:`create_x_scale`.  With ESS, boundary DOFs at mode number
+``max(|m|, |n|) = k`` are pre-scaled by ``exp(-α·k) / exp(-α)`` (``α=1``
+default), so the Gauss-Newton step naturally prefers coarse-scale shape changes
+over fine-scale ones.  This often improves convergence on inputs with many
+high-mode DOFs.
+
+.. code-block:: bash
+
+   # Run with ESS (results saved to results/qa_opt/ess/)
+   python examples/optimization/qa_fixed_resolution_jax_ess.py
+
+   # Edit USE_ESS = False at the top to compare without scaling
+   # (results saved to results/qa_opt/no_ess/)
+
+The script starts from ``examples/data/input.nfp2_QA`` (nfp=2, ``NS=31``,
+``FTOL=1e-12``) and uses ``max_mode=2`` (24 DOFs).
+
+**ESS off** (max_mode=2, 24 DOFs)
+
+.. list-table::
+   :widths: 60 40
+
+   * - .. image:: _static/figures/qa_opt/no_ess/boundary_comparison.png
+          :width: 100%
+          :alt: 3D LCFS QA ESS off
+     - .. image:: _static/figures/qa_opt/no_ess/objective_history.png
+          :width: 100%
+          :alt: Objective history QA ESS off
+
+.. image:: _static/figures/qa_opt/no_ess/bmag_surface.png
+   :width: 80%
+   :align: center
+   :alt: |B| contour lines on LCFS, QA ESS off
+
+**ESS on** (max_mode=2, 24 DOFs, α=1)
+
+.. list-table::
+   :widths: 60 40
+
+   * - .. image:: _static/figures/qa_opt/ess/boundary_comparison.png
+          :width: 100%
+          :alt: 3D LCFS QA ESS on
+     - .. image:: _static/figures/qa_opt/ess/objective_history.png
+          :width: 100%
+          :alt: Objective history QA ESS on
+
+.. image:: _static/figures/qa_opt/ess/bmag_surface.png
+   :width: 80%
+   :align: center
+   :alt: |B| contour lines on LCFS, QA ESS on
 
 
 Algorithms in detail
@@ -306,7 +392,7 @@ residual vector:
 .. code-block:: python
 
    r[0]    = aspect_weight * (aspect - target_aspect)
-   r[1:]   = qs_weight * quasisymmetry_ratio_residuals(state, surfaces, m=1, n=-1)
+   r[1:]   = qs_weight * quasisymmetry_ratio_residuals(state, surfaces, m=1, n=4)
 
 The quasisymmetry ratio residual is computed by
 :func:`~vmec_jax.quasisymmetry_ratio_residual_from_state`, which evaluates
@@ -332,7 +418,7 @@ The main entry point for differentiable fixed-boundary optimisation.
      - Description
    * - ``__init__(static, indata, boundary, specs, residuals_fn)``
      - Construct optimizer; derive solver settings from indata.
-   * - ``run(params0, *, max_nfev, ftol, gtol, xtol)``
+   * - ``run(params0, *, max_nfev, ftol, gtol, xtol, x_scale)``
      - Run Gauss-Newton loop; returns SciPy-like result dict.
    * - ``save_wout(path, params)``
      - Write a ``wout_*.nc`` for the equilibrium at ``params``.
@@ -422,9 +508,8 @@ Source files
      - QS residuals (``quasisymmetry_ratio_residual_from_state``).
    * - ``vmec_jax/plotting.py``
      - ``plot_qh_optimization`` and helper plotting functions.
-   * - ``vmec_jax/wout.py``
-     - ``equilibrium_aspect_ratio_from_state``,
-       ``equilibrium_iota_profiles_from_state``, wout writing.
+   * - ``vmec_jax/driver.py``
+     - ``write_wout_from_fixed_boundary_run``, ``wout_from_fixed_boundary_run``.
    * - ``examples/optimization/qh_fixed_resolution_jax.py``
      - QH SIMSOPT-style workflow script (no argparse, variables at top).
    * - ``examples/optimization/qa_fixed_resolution_jax_ess.py``
@@ -448,33 +533,6 @@ Running the QH example
 Increase ``MAX_MODE`` at the top of ``qh_fixed_resolution_jax.py`` for richer
 boundary parameterisation; increase ``MAX_NFEV`` for more optimisation budget.
 
-QA optimisation with exponential spectral scaling (ESS)
---------------------------------------------------------
-
-``examples/optimization/qa_fixed_resolution_jax_ess.py`` demonstrates
-quasi-axisymmetric optimisation of an nfp=2 configuration with three objectives:
-
-* **Aspect ratio** target
-* **Mean rotational transform** (iota) target ``= 0.41``
-* **QA quasisymmetry** residuals (``helicity_m=1, helicity_n=0``)
-
-A top-level toggle ``USE_ESS = True/False`` enables exponential spectral scaling
-via :func:`create_x_scale`.  With ESS, boundary DOFs at mode number
-``max(|m|, |n|) = k`` are pre-scaled by ``exp(-α·k) / exp(-α)`` (``α=1``
-default), so the Gauss-Newton step naturally prefers coarse-scale shape changes
-over fine-scale ones.  This often improves convergence on inputs with many
-high-mode DOFs.
-
-.. code-block:: bash
-
-   # Run with ESS (results saved to results/qa_opt/ess/)
-   python examples/optimization/qa_fixed_resolution_jax_ess.py
-
-   # Edit USE_ESS = False at the top to compare without scaling
-   # (results saved to results/qa_opt/no_ess/)
-
-The script starts from ``examples/data/input.nfp2_QA`` (nfp=2, ``NS=31``,
-``FTOL=1e-12``) and uses ``max_mode=3`` (48 DOFs).
 
 GPU acceleration
 -----------------
@@ -488,3 +546,13 @@ For GPU runs, the dynamic replay bucketing
 (``VMEC_JAX_DYNAMIC_REPLAY_BUCKET``) is especially important: it ensures that
 XLA reuses a single compiled scan kernel across Jacobian calls with slightly
 different tape lengths, amortising the JIT cost over the full optimisation.
+
+
+Further reading
+---------------
+
+.. toctree::
+   :maxdepth: 1
+
+   discrete_adjoint
+   simsopt_comparison

@@ -995,7 +995,8 @@ def _plot_3d_boundary_comparison(wout_init, wout_final, outdir: Path) -> Path:
     sm = ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     fig.colorbar(sm, ax=fig.axes, label="|B| (T)", shrink=0.6, pad=0.1)
-    fig.suptitle("QH LCFS coloured by |B| — nfp=4", fontsize=13, y=1.01)
+    nfp = int(np.asarray(wout_init.nfp)) if hasattr(wout_init, "nfp") else 4
+    fig.suptitle(f"LCFS coloured by |B| — nfp={nfp}", fontsize=13, y=1.01)
 
     out = outdir / "boundary_comparison.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
