@@ -22,30 +22,69 @@ from .namelist import InData
 MU0 = 4e-7 * np.pi  # N/A^2
 
 
-def _as_float_list(x: Any) -> list[float]:
+def _is_traced_array(x: Any) -> bool:
+    """Return True if *x* is a JAX array (possibly traced inside jit)."""
+    try:
+        import jax
+        return isinstance(x, jax.Array)
+    except Exception:
+        return False
+
+
+def _as_float_list(x: Any) -> Any:
+    """Convert *x* to a list of floats, or return it unchanged if it is a JAX array.
+
+    When called inside ``jax.jit`` with a traced array the value cannot be
+    converted to a Python list.  In that case we return it as-is so that
+    :func:`_coeff_array` can handle it through the JAX code-path.
+    """
     if x is None:
         return []
+    if _is_traced_array(x):
+        return x           # keep as traced array; _coeff_array handles padding
+    if hasattr(x, "shape") and hasattr(x, "dtype"):
+        # numpy / concrete JAX array — try converting, fall back to as-is
+        try:
+            return [float(v) for v in np.asarray(x).ravel()]
+        except Exception:
+            return x
     if isinstance(x, list):
         return [float(v) for v in x]
-    return [float(x)]
+    try:
+        return [float(x)]
+    except Exception:
+        return x
 
 
 def _coeff_array(
-    coeffs: Sequence[float],
+    coeffs,
     *,
     nmin: int = 21,
     dtype: Any = np.float64,
 ) -> Any:
-    """Convert a Python list of coefficients into a dense 1D array.
+    """Convert coefficients into a dense 1D JAX array of length ≥ ``nmin``.
 
-    VMEC's default arrays are 0:20 (21 coefficients). We pad with zeros to at
-    least ``nmin`` to match typical VMEC behavior and keep shapes stable.
+    Handles three cases:
+
+    * Python list / NumPy array  — converted via NumPy (static path).
+    * Concrete JAX array          — same as NumPy path (values are known).
+    * Traced JAX array (inside jit) — padding is done with JAX ops so that
+      the shape is static but the values may be traced.
     """
-    coeffs = list(coeffs)
-    n = max(int(nmin), len(coeffs))
+    if _is_traced_array(coeffs):
+        coeffs = jnp.asarray(coeffs)
+        k = coeffs.shape[0]        # static (known at trace time)
+        n = max(int(nmin), int(k))
+        if k < n:
+            coeffs = jnp.concatenate(
+                [coeffs, jnp.zeros(n - k, dtype=coeffs.dtype)]
+            )
+        return coeffs
+    coeffs_list = list(coeffs)
+    n = max(int(nmin), len(coeffs_list))
     out = np.zeros((n,), dtype=dtype)
-    if coeffs:
-        out[: len(coeffs)] = np.asarray(coeffs, dtype=dtype)
+    if coeffs_list:
+        out[: len(coeffs_list)] = np.asarray(coeffs_list, dtype=dtype)
     return jnp.asarray(out)
 
 
@@ -60,13 +99,20 @@ def _lower(s: Any, default: str) -> str:
     return s
 
 
+def _coeffs_static_or_jax(coeffs):
+    """Prefer NumPy scalars for static coeff loops, but stay tracer-safe."""
+    try:
+        return np.asarray(coeffs)
+    except Exception:
+        return jnp.asarray(coeffs)
+
+
 def _power_series(coeffs, x):
     """Evaluate Σ_i coeffs[i] * x**i using Horner (coeffs in ascending order)."""
-    # Use np.asarray so that coeffs[i] in the Python loop is a plain NumPy scalar,
-    # not a JAX dynamic_slice op.  Each JAX dynamic_slice triggers an eager XLA
-    # compilation event (~2 ms), so keeping coeffs as a NumPy array eliminates
-    # O(n_coeffs) eager compilations without changing any arithmetic.
-    coeffs = np.asarray(coeffs)
+    # Prefer NumPy scalars so coeffs[i] in the Python loop is a plain scalar
+    # rather than a JAX dynamic_slice op, but fall back to JAX arrays if the
+    # coefficients are traced.
+    coeffs = _coeffs_static_or_jax(coeffs)
     x = jnp.asarray(x)
     y = jnp.zeros_like(x, dtype=coeffs.dtype)
     # Horner: iterate from high order to low order.
@@ -82,9 +128,8 @@ def _pcurr_power_series_ip(ac, x):
       I'(x) = Σ_i ac(i) * x**i
       I(x)  = ∫_0^x I'(t) dt = Σ_i ac(i)/(i+1) * x**(i+1)
     """
-    # Same rationale as _power_series: keep ac as NumPy so ac[i] is a free scalar
-    # rather than a JAX dynamic_slice that triggers an eager XLA compilation.
-    ac = np.asarray(ac)
+    # Same rationale as _power_series, with a tracer-safe fallback.
+    ac = _coeffs_static_or_jax(ac)
     x = jnp.asarray(x)
     y = jnp.zeros_like(x, dtype=ac.dtype)
     for i in range(len(ac) - 1, -1, -1):

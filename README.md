@@ -1,13 +1,53 @@
 # vmec-jax
 
-Install from PyPI:
+End-to-end differentiable JAX implementation of **VMEC2000** for fixed-boundary
+and free-boundary ideal-MHD equilibria.
+
+## Install
 
 ```bash
 pip install vmec-jax
 ```
 
-End-to-end differentiable JAX implementation of **VMEC2000** for fixed-boundary
-and free-boundary ideal-MHD equilibria.
+Developer (editable) install:
+
+```bash
+git clone https://github.com/uwplasma/vmec_jax
+pip install -e vmec_jax/
+```
+
+## Usage
+
+Run the solver (VMEC2000-style CLI):
+
+```bash
+vmec_jax input.nfp4_QH_warm_start        # → wout_nfp4_QH_warm_start.nc
+```
+
+Generate diagnostic plots from any `wout_*.nc` (four-panel output, replicates `vmecPlot2.py`):
+
+```bash
+vmec_jax --plot wout_nfp4_QH_warm_start.nc           # saves in same directory
+vmec_jax --plot wout_nfp4_QH_warm_start.nc --outdir figures/
+```
+
+From Python:
+
+```python
+import vmec_jax as vj
+
+# Run solver
+run = vj.run_fixed_boundary("input.nfp4_QH_warm_start")
+
+# Plot any wout file (produces *_VMECparams.pdf, *_poloidal_plot.png, *_VMECsurfaces.pdf, *_VMEC_3Dplot.png)
+vj.plot_wout("wout_nfp4_QH_warm_start.nc", outdir="figures/")
+```
+
+Run tests:
+
+```bash
+pytest -q
+```
 
 ## Showcase (single-grid)
 
@@ -30,6 +70,22 @@ All figures below use the same **single-grid** run settings: `NS_ARRAY=151`, `NI
     <td align="center"><code>ITERModel</code> iota (VMEC2000 vs vmec_jax)</td>
     <td align="center"><code>LandremanPaul2021_QA_lowres</code> iota (VMEC2000 vs vmec_jax)</td>
   </tr>
+  <tr>
+    <td><img src="docs/_static/figures/axisym_compare_3d.png" width="420" /></td>
+    <td><img src="docs/_static/figures/qa_compare_3d.png" width="420" /></td>
+  </tr>
+  <tr>
+    <td align="center"><code>ITERModel</code> 3D LCFS</td>
+    <td align="center"><code>LandremanPaul2021_QA_lowres</code> 3D LCFS</td>
+  </tr>
+  <tr>
+    <td><img src="docs/_static/figures/axisym_compare_bmag_surface.png" width="420" /></td>
+    <td><img src="docs/_static/figures/qa_compare_bmag_surface.png" width="420" /></td>
+  </tr>
+  <tr>
+    <td align="center"><code>ITERModel</code> |B| on LCFS</td>
+    <td align="center"><code>LandremanPaul2021_QA_lowres</code> |B| on LCFS</td>
+  </tr>
 </table>
 
 <p align="center">
@@ -40,150 +96,144 @@ All figures below use the same **single-grid** run settings: `NS_ARRAY=151`, `NI
   <img src="docs/_static/figures/readme_runtime_compare.png" width="860" />
 </p>
 
-**Cold vs warm runtime**: the *cold* bar includes XLA JIT compilation on the first call (one-time cost per process); the *warm* bar is the steady-state solve time for all subsequent calls in the same process, with the compiled kernels already in-memory. VMEC2000 is a pre-compiled Fortran binary and therefore has no compilation overhead — it is always effectively "cold". The warm vmec_jax time is the fair comparison for repeated solves (e.g., in an optimization loop). Starting from v0.2, vmec_jax automatically caches compiled XLA kernels to disk (`~/.cache/vmec_jax/jax_cache`), so that *cold* runs in a fresh process on the same machine after the first invocation benefit from the on-disk cache and approach warm-run speed.
+**Cold vs warm runtime**: the *cold* bar includes XLA JIT compilation on the first call (one-time cost per process); the *warm* bar is the steady-state solve time for subsequent calls in the same process. VMEC2000 has no compilation overhead — it is always "cold". The warm vmec_jax time is the fair comparison for repeated solves (e.g., in an optimization loop). vmec_jax automatically caches compiled XLA kernels to disk (`~/.cache/vmec_jax/jax_cache`), so after the first run cold starts also approach warm speed.
 
-## More visuals (single-grid)
+## Quasi-helical symmetry optimization (discrete-adjoint)
+
+`examples/optimization/qh_fixed_resolution_jax.py` demonstrates an end-to-end
+fixed-boundary QH optimization using the built-in **exact discrete-adjoint Jacobian**
+— no finite differences, no SIMSOPT dependency.
+
+> **Discrete adjoint**: rather than perturbing each boundary DOF separately (finite
+> differences), vmec_jax records a *checkpoint tape* of the VMEC iteration and
+> propagates all parameter tangents through it in one batched forward pass
+> (`jax.vmap(jax.jvp(...))`).  The Jacobian is exact (machine precision) and its
+> cost is roughly 1–2 forward solves regardless of the number of DOFs — vs.
+> *n*_DOFs forward solves for finite differences.
+> → [Detailed explanation](docs/discrete_adjoint.rst) · [SIMSOPT comparison](docs/simsopt_comparison.rst)
+
+```bash
+python examples/optimization/qh_fixed_resolution_jax.py   # MAX_MODE=2 by default
+```
+
+When `max_mode` exceeds the modes present in the input file, vmec_jax automatically
+extends the boundary to include the requested harmonics at zero amplitude
+(`vj.extend_boundary_for_max_mode`), matching SIMSOPT's `fixed_range()` behaviour.
+All runs use consistent VMEC resolution `mpol = ntor = 5` so the initial QS metric
+is normalised identically across `max_mode` values.
+
+| `max_mode` | DOFs | QS initial | QS final | Reduction | Wall time ¹ |
+|:----------:|:----:|:----------:|:--------:|:---------:|:-----------:|
+| 1          |  8   |   0.303    |  0.213   |  30 %     | ~124 s      |
+| 2          | 24   |   0.303    |  **0.008** | **97 %** | ~323 s    |
+
+¹ Wall time on Apple M-series (warm-cache subsequent runs are faster).
+
+With only 8 DOFs (`max_mode=1`) the boundary deformation space is too limited
+to reach a deep quasi-helical minimum.  `max_mode=2` (24 DOFs) achieves a
+97 % reduction because the higher harmonics give the optimizer room to reshape
+the boundary helically.
+
+**vmec_jax vs SIMSOPT**: vmec_jax uses an exact discrete-adjoint Jacobian
+(one batched JVP pass ≈ 1–2 forward solves regardless of DOF count) while
+SIMSOPT + VMEC2000 uses finite differences (*n*_DOFs × 1 forward solve per
+Jacobian).  For a detailed comparison of algorithms, runtimes, and memory,
+see [docs/simsopt_comparison.rst](docs/simsopt_comparison.rst).
 
 <table>
   <tr>
-    <td><img src="docs/_static/figures/axisym_compare_3d.png" width="420" /></td>
-    <td><img src="docs/_static/figures/qa_compare_3d.png" width="420" /></td>
+    <th align="center">max_mode = 1 &nbsp;(8 DOFs, 30 % QS reduction)</th>
+    <th align="center">max_mode = 2 &nbsp;(24 DOFs, 97 % QS reduction)</th>
   </tr>
   <tr>
-    <td align="center"><code>ITERModel</code> 3D LCFS (VMEC2000 vs vmec_jax)</td>
-    <td align="center"><code>LandremanPaul2021_QA_lowres</code> 3D LCFS (VMEC2000 vs vmec_jax)</td>
+    <td><img src="docs/_static/figures/qh_opt/boundary_comparison.png" /></td>
+    <td><img src="docs/_static/figures/qh_opt/mode2/boundary_comparison.png" /></td>
   </tr>
   <tr>
-    <td><img src="docs/_static/figures/axisym_compare_bmag_surface.png" width="420" /></td>
-    <td><img src="docs/_static/figures/qa_compare_bmag_surface.png" width="420" /></td>
+    <td><img src="docs/_static/figures/qh_opt/bmag_surface.png" /></td>
+    <td><img src="docs/_static/figures/qh_opt/mode2/bmag_surface.png" /></td>
   </tr>
   <tr>
-    <td align="center"><code>ITERModel</code> |B| on LCFS (VMEC2000 vs vmec_jax)</td>
-    <td align="center"><code>LandremanPaul2021_QA_lowres</code> |B| on LCFS (VMEC2000 vs vmec_jax)</td>
+    <td align="center"><img src="docs/_static/figures/qh_opt/objective_history.png" /></td>
+    <td align="center"><img src="docs/_static/figures/qh_opt/mode2/objective_history.png" /></td>
   </tr>
 </table>
 
-## What it is
+The |B| contour plots show quasi-helical alignment after optimization: contour lines
+become increasingly helical (aligned with *m θ − n φ* = const). The ζ axis spans
+one field period (0 → 2π/nfp).
 
-- VMEC2000-parity solver for fixed-boundary and free-boundary equilibria.
-- Supports axisymmetric and non-axisymmetric configurations, with `lasym=False` and `lasym=True` for stellarator symmetry/asymmetry and up-down symmetry/asymmetry.
-- Default CLI path is `vmec_jax input.name`.
-- `wout_*.nc` outputs, iteration diagnostics, and manifest-based parity sweeps are built around VMEC2000-compatible workflows.
-- JAX-native kernels for geometry, transforms, and residual assembly.
-- Differentiable optimization workflows are available through the Python API and bundled examples.
-
-## Quickstart
-
-Install directly from PyPI:
+Regenerate plots after running the optimization:
 
 ```bash
-pip install vmec-jax
+python examples/optimization/plot_qh_optimization_results.py --output-dir results/qh_opt
 ```
 
-Install and run the showcase:
+## Quasi-axisymmetric optimization (fixed-boundary)
+
+`examples/optimization/qa_fixed_resolution_jax_ess.py` optimizes an nfp=2 QA
+equilibrium for aspect ratio, mean iota, and QA symmetry residuals.
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
-python examples/showcase_axisym_input_to_wout.py --suite
+python examples/optimization/qa_fixed_resolution_jax_ess.py   # MAX_MODE=2 by default
 ```
 
-If you want a release-style non-editable install instead, use:
+When `max_mode` exceeds the modes in the input file, vmec_jax automatically extends
+the boundary to include those harmonics at zero amplitude (`vj.extend_boundary_for_max_mode`).
+All runs use consistent VMEC resolution `mpol = ntor = 5`.
+Objectives: aspect ratio (target 6.0) + mean iota (target 0.41) + QA symmetry residuals.
 
-```bash
-python -m pip install .
-```
+| `max_mode` | DOFs | Aspect initial → final | Objective initial | Objective final | Wall time ¹ |
+|:----------:|:----:|:----------------------:|:-----------------:|:---------------:|:-----------:|
+| 1          |  8   | 5.0 → **6.0** ✓        |   1.168           |  0.168          | ~49 s       |
+| 2          | 24   | 5.0 → 5.51             |   1.168           |  **0.340**      | ~608 s      |
 
-If you want the bundled reference outputs and mgrid files, fetch the assets once:
+¹ Wall time on Apple M-series (warm-cache subsequent runs are faster).
 
-```bash
-python tools/fetch_assets.py
-```
+With 8 DOFs (`max_mode=1`) the optimizer satisfies the aspect ratio target
+(5.0 → 6.0) using only low-mode boundary harmonics — it solves the dominant
+residual but cannot independently shape iota or QS.  `max_mode=2` (24 DOFs)
+distributes effort across all three objectives simultaneously.
 
-Lightweight clone (keeps full history, downloads blobs lazily):
-
-```bash
-git clone --filter=blob:none https://github.com/uwplasma/vmec_jax
-```
-
-Note: the repo history was rewritten on 2026-03-16 to remove large assets from
-all commits. If you cloned before that date, please re-clone (or prune and
-reset) to get the smaller history.
-
-CLI (VMEC2000-style executable):
-
-```bash
-vmec_jax examples/data/input.circular_tokamak
-```
-
-Sanity check (verifies the console script is wired to the right interpreter):
-
-```bash
-vmec_jax --help
-```
-
-If the `vmec_jax` command is not found or raises `ModuleNotFoundError`, make sure
-you installed with the same interpreter and use the module entrypoint:
-
-```bash
-python -m pip install -e .
-python -m vmec_jax examples/data/input.circular_tokamak
-```
-
-For fixed-boundary inputs, the default CLI path now uses the optimized
-controller: it tries the fast final-grid scan route first, then escalates to
-staged continuation and strict parity finishing only when the input structure
-and residual history require it. Pass `--parity` to force the conservative
-VMEC2000 loop. Pass `--solver-mode accelerated` to request the optimized track
-explicitly.
-
-Python driver comparison (reference track vs optimized CLI-style track):
-
-```bash
-python examples/fixed_boundary_driver_tracks.py \
-  examples/data/input.circular_tokamak \
-  --quiet --json
-```
-
-Run tests:
-
-```bash
-pytest -q
-```
-
-Full test suite (requires netCDF assets):
-
-```bash
-python tools/fetch_assets.py
-RUN_FULL=1 pytest -q
-```
-
-Advanced optimization examples live in `examples/optimization/`. They are
-intended as deeper workflow templates rather than README quickstarts, so use
-the fixed-boundary driver example above as the validated copy/paste entry point
-and then adapt the optimization scripts for your target objective. The simplest
-starting point is:
-
-```bash
-python examples/optimization/target_iota_aspect_volume.py --opt-steps 2
-```
-
-That example keeps the boundary parameterization small (`max |m|,|n| <= 1`),
-targets equilibrium volume, aspect ratio, and mean iota, and defaults to the
-bundled current-driven `cth_like_fixed_bdy` case so the iota channel is active.
+<table>
+  <tr>
+    <th align="center">max_mode = 1 &nbsp;(8 DOFs, aspect 5.0→6.0)</th>
+    <th align="center">max_mode = 2 &nbsp;(24 DOFs, 41 % reduction)</th>
+  </tr>
+  <tr>
+    <td><img src="docs/_static/figures/qa_opt/boundary_comparison.png" /></td>
+    <td><img src="docs/_static/figures/qa_opt/mode2/boundary_comparison.png" /></td>
+  </tr>
+  <tr>
+    <td><img src="docs/_static/figures/qa_opt/bmag_surface.png" /></td>
+    <td><img src="docs/_static/figures/qa_opt/mode2/bmag_surface.png" /></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/_static/figures/qa_opt/objective_history.png" /></td>
+    <td align="center"><img src="docs/_static/figures/qa_opt/mode2/objective_history.png" /></td>
+  </tr>
+</table>
 
 ## Performance vs parity
 
-- Default runs aim for VMEC2000-compatible behavior while selecting the fastest stable path for the input.
+- Default runs select the fastest stable path for each input automatically.
 - Use `--parity` (or `performance_mode=False` in Python) to force the conservative VMEC2000 loop.
-- Use `--solver-mode accelerated` to force the optimized fixed-boundary controller explicitly.
+- Use `--solver-mode accelerated` to force the optimized fixed-boundary controller.
 
 Details, profiling guidance, and parity methodology:
 
 - `docs/performance.rst`
 - `docs/validation.rst`
 - `tools/diagnostics/parity_manifest.toml` + `tools/diagnostics/parity_sweep_manifest.py`
+
+## CLI reference
+
+```
+vmec_jax input.*                run the equilibrium solver → wout_*.nc
+vmec_jax --plot wout.nc         generate diagnostic plots (4 output files)
+vmec_jax --parity input.*       force conservative VMEC2000 loop
+vmec_jax --help                 full option list
+```
 
 ## VMEC++ notes
 
@@ -210,15 +260,14 @@ VMEC++ known non-convergence on these `lasym=False` cases under the same single-
 
 The VMEC-style iteration loop prints every `NSTEP` iterations. Larger `NSTEP` means fewer print callbacks and faster runs.
 
-To disable live printing, set:
+To disable live printing:
 
 ```bash
 export VMEC_JAX_SCAN_PRINT=0
 ```
 
-Quiet runs (`--quiet` or `verbose=False`) default the scan path to a minimal
-history mode (only `fsqr/fsqz/fsql` and `w_history` are kept) to reduce
-host/device traffic. You can override this with:
+Quiet runs (`--quiet` or `verbose=False`) default the scan path to minimal history
+mode to reduce host/device traffic. Override with:
 
 ```bash
 export VMEC_JAX_SCAN_MINIMAL=0  # keep full scan diagnostics even when quiet

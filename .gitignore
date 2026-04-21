@@ -224,6 +224,8 @@ __marimo__/
 .tmp/
 # Large netCDF assets are fetched on-demand (see tools/fetch_assets.py)
 examples/data/*.nc
+# Allow small bundled VMEC2000 reference wout files (used by parity tests)
+!examples/data/wout_*.nc
 examples_single_grid/data/*.nc
 .assets_installed
 

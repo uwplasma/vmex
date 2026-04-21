@@ -7,6 +7,7 @@ update loop stays JIT-able and differentiable.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import Any
 import os
 import functools
@@ -15,7 +16,7 @@ from functools import partial
 from ._compat import jax, jnp, jit, has_jax
 from .vmec_tomnsp import TomnspsRZL
 
-_LAMBDA_PRECOND_JIT_CACHE: dict[tuple, Any] = {}
+_LAMBDA_PRECOND_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 
 # Cache env-var flags at import time — these don't change during a run and
 # os.getenv() + .strip().lower() was being called 7000+ times per solve.
@@ -46,6 +47,35 @@ def _cache_allowed() -> bool:
         return bool(core.trace_ctx.is_top_level())
     except Exception:
         return False
+
+
+def _lambda_precond_cache_limit() -> int:
+    raw = os.getenv("VMEC_JAX_PRECOND_CACHE_LIMIT", "16").strip()
+    try:
+        return max(1, int(raw))
+    except Exception:
+        return 16
+
+
+def _lambda_precond_cache_get(key):
+    cached = _LAMBDA_PRECOND_JIT_CACHE.get(key)
+    if cached is not None:
+        _LAMBDA_PRECOND_JIT_CACHE.move_to_end(key)
+    return cached
+
+
+def _lambda_precond_cache_put(key, value) -> None:
+    _LAMBDA_PRECOND_JIT_CACHE[key] = value
+    _LAMBDA_PRECOND_JIT_CACHE.move_to_end(key)
+    limit = _lambda_precond_cache_limit()
+    while len(_LAMBDA_PRECOND_JIT_CACHE) > limit:
+        _LAMBDA_PRECOND_JIT_CACHE.popitem(last=False)
+
+
+def clear_preconditioner_jit_caches() -> None:
+    """Drop local preconditioner executable caches to limit late-run retention."""
+    _LAMBDA_PRECOND_JIT_CACHE.clear()
+    _make_rz_preconditioner_apply_jit.cache_clear()
 
 
 def _sqrt_profiles_from_ns(ns: int, *, dtype) -> tuple[Any, Any]:
@@ -285,7 +315,7 @@ def lambda_preconditioner_cached(
         bool(return_faclam),
         bool(return_debug),
     )
-    cached = _LAMBDA_PRECOND_JIT_CACHE.get(key)
+    cached = _lambda_precond_cache_get(key)
     if cached is None:
         def _fn(bc_in, s_in):
             return lambda_preconditioner(
@@ -300,7 +330,7 @@ def lambda_preconditioner_cached(
             )
 
         cached = jax.jit(_fn)
-        _LAMBDA_PRECOND_JIT_CACHE[key] = cached
+        _lambda_precond_cache_put(key, cached)
     return cached(bc, s)
 
 
