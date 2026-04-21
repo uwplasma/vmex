@@ -3,7 +3,7 @@
 This module intentionally re-exports a small set of functions that cover the
 common workflows:
 - I/O: load input, read/write wout
-- Solve: fixed-boundary driver
+- Solve: fixed- and free-boundary drivers
 - Plotting: VMEC-style surfaces and B magnitude
 
 Advanced users can import lower-level kernels directly from submodules.
@@ -16,6 +16,7 @@ from .driver import (
     load_example,
     load_input,
     load_wout,
+    run_free_boundary,
     run_fixed_boundary,
     residual_scalars_from_state,
     wout_from_fixed_boundary_run,
@@ -52,6 +53,7 @@ __all__ = [
     "load_example",
     "load_input",
     "load_wout",
+    "run_free_boundary",
     "run_fixed_boundary",
     "residual_scalars_from_state",
     "wout_from_fixed_boundary_run",

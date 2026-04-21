@@ -2897,3 +2897,19 @@ def run_fixed_boundary(
         initial_policy=cli_initial_policy,
         enabled=bool(cli_fixed_boundary_finish_enabled),
     )
+
+
+def run_free_boundary(input_path: str | Path, **kwargs):
+    """Run a free-boundary vmec_jax solve.
+
+    The implementation is shared with :func:`run_fixed_boundary`, but this
+    entry point makes the intended operating mode explicit and rejects
+    fixed-boundary inputs up front.
+    """
+    cfg, _ = load_config(str(input_path))
+    if not bool(cfg.lfreeb):
+        raise ValueError(
+            f"Input {input_path!s} is not a free-boundary case (LFREEB=F). "
+            "Use run_fixed_boundary(...) instead."
+        )
+    return run_fixed_boundary(input_path, **kwargs)

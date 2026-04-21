@@ -5,6 +5,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import vmec_jax as vj
+import vmec_jax.api as api_module
 import vmec_jax.cli as cli_module
 import vmec_jax.driver as driver_module
 import vmec_jax.solve as solve_module
@@ -13,6 +15,7 @@ from vmec_jax.config import load_config
 from vmec_jax.driver import (
     example_paths,
     load_example,
+    run_free_boundary,
     run_fixed_boundary,
     save_npz,
     wout_from_fixed_boundary_run,
@@ -436,6 +439,68 @@ def test_default_non_autodiff_solver_policy_keeps_free_boundary_on_robust_path()
     freeb_input = Path(__file__).resolve().parents[1] / "examples/data/input.cth_like_free_bdy"
     _cfg_freeb, indata_freeb = load_config(freeb_input)
     assert driver_module.default_non_autodiff_solver_policy(indata_freeb) == ("default", True)
+
+
+def test_run_free_boundary_rejects_fixed_boundary_input():
+    input_path = Path(__file__).resolve().parents[1] / "examples/data/input.circular_tokamak"
+    with pytest.raises(ValueError, match="not a free-boundary case"):
+        run_free_boundary(input_path, verbose=False, use_initial_guess=True)
+
+
+def test_run_free_boundary_delegates_to_shared_driver(monkeypatch, tmp_path):
+    input_path = tmp_path / "input.freeb"
+    input_path.write_text(
+        "&INDATA\n"
+        "  LFREEB = T\n"
+        "  MGRID_FILE = 'mgrid_test.nc'\n"
+        "/\n"
+    )
+    captured = {}
+    sentinel = object()
+
+    def _fake_run_fixed_boundary(input_path_arg, **kwargs):
+        captured["input_path"] = str(input_path_arg)
+        captured["kwargs"] = dict(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(driver_module, "run_fixed_boundary", _fake_run_fixed_boundary)
+
+    result = run_free_boundary(input_path, verbose=False, max_iter=3)
+    assert result is sentinel
+    assert captured["input_path"] == str(input_path)
+    assert captured["kwargs"]["verbose"] is False
+    assert captured["kwargs"]["max_iter"] == 3
+
+
+def test_run_free_boundary_smoke_on_bundled_small_case():
+    input_path = Path(__file__).resolve().parents[1] / "examples/data/input.cth_like_free_bdy_lasym_small"
+    run = run_free_boundary(
+        input_path,
+        use_initial_guess=True,
+        vmec_project=False,
+        verbose=False,
+    )
+    assert run.cfg.lfreeb is True
+    assert run.state is not None
+    assert run.result is None
+
+
+def test_run_fixed_boundary_keeps_supporting_free_boundary_inputs():
+    input_path = Path(__file__).resolve().parents[1] / "examples/data/input.cth_like_free_bdy_lasym_small"
+    run = run_fixed_boundary(
+        input_path,
+        use_initial_guess=True,
+        vmec_project=False,
+        verbose=False,
+    )
+    assert run.cfg.lfreeb is True
+    assert run.state is not None
+    assert run.result is None
+
+
+def test_public_api_reexports_run_free_boundary():
+    assert api_module.run_free_boundary is run_free_boundary
+    assert vj.run_free_boundary is run_free_boundary
 
 
 def test_python_default_fixed_boundary_uses_optimized_controller(tmp_path):
