@@ -784,7 +784,7 @@ def write_bmag_parity_figures(
     outdir: str | Path | None = None,
     s_index: int | None = None,
 ) -> Path:
-    """Write |B| parity figures comparing wout vs vmec_jax realspace synthesis."""
+    """Write magnetic-field-magnitude parity figures for wout vs vmec_jax."""
     plt = _import_matplotlib()
     cfg, indata = load_config(str(input_path))
     wout = read_wout(wout_path)

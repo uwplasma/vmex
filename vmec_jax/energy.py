@@ -168,10 +168,13 @@ def flux_profiles_from_indata(indata: InData, s, *, signgs: int) -> FluxProfiles
     """Construct simple flux profiles (phipf/chipf) from &INDATA.
 
     This is a deliberately minimal port:
-    - toroidal flux uses `PHIEDGE` and polynomial `APHI` (default: aphi=[1]),
-      following `magnetic_fluxes.f:torflux_deriv` and `profil1d.f`.
-    - poloidal flux derivative follows `magnetic_fluxes.f:polflux_deriv`,
-      i.e. `piota(tf)*torflux_deriv(s)` for non-RFP (RFP uses polflux_deriv=1).
+
+    - toroidal flux uses ``PHIEDGE`` and polynomial ``APHI`` (default
+      ``aphi=[1]``), following ``magnetic_fluxes.f:torflux_deriv`` and
+      ``profil1d.f``.
+    - poloidal flux derivative follows ``magnetic_fluxes.f:polflux_deriv``,
+      i.e. ``piota(tf) * torflux_deriv(s)`` for non-RFP
+      (RFP uses ``polflux_deriv = 1``).
     """
     s = jnp.asarray(s)
     ns = int(s.shape[0])

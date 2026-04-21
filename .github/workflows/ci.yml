@@ -165,5 +165,6 @@ jobs:
         env:
           LC_ALL: C.UTF-8
           LANG: C.UTF-8
+          READTHEDOCS: "True"
         run: |
-          python -m sphinx -j auto -b html docs docs/_build/html_full
+          python -m sphinx -W -j auto -b html docs docs/_build/html_full

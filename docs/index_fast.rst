@@ -1,3 +1,5 @@
+:orphan:
+
 vmec-jax documentation (fast build)
 =====================================
 

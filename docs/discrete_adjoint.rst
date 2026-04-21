@@ -1,11 +1,6 @@
 Discrete-adjoint differentiation
 ==================================
 
-.. contents:: Table of contents
-   :local:
-   :depth: 2
-
-
 Overview
 --------
 
@@ -229,38 +224,6 @@ which is approximated via CG + JVP.  The discrete-adjoint tape replay avoids
 this linear solve entirely and is the default in
 :class:`~vmec_jax.FixedBoundaryExactOptimizer`.
 
-
-References
------------
-
-.. [Dudt2023] Dudt, D., Conlin, R., Panici, D., and Kolemen, E. (2023).
-   *DESC: A Stellarator Equilibrium Solver*.
-   Journal of Plasma Physics, 89(3).
-   https://doi.org/10.1017/S0022377823000399
-
-.. [Griewank2008] Griewank, A. and Walther, A. (2008).
-   *Evaluating Derivatives: Principles and Techniques of Algorithmic
-   Differentiation* (2nd ed.). SIAM.
-   https://doi.org/10.1137/1.9780898717761
-
-.. [Baydin2018] Baydin, A. G., Pearlmutter, B. A., Radul, A. A., and Siskind, J. M. (2018).
-   *Automatic Differentiation in Machine Learning: a Survey*.
-   Journal of Machine Learning Research, 18(153), 1–43.
-   https://jmlr.org/papers/v18/17-468.html
-
-.. [Nocedal2006] Nocedal, J. and Wright, S. J. (2006).
-   *Numerical Optimization* (2nd ed.). Springer.
-   https://doi.org/10.1007/978-0-387-40065-5
-
-.. [Hegna2022] Hegna, C. C. et al. (2022).
-   *Improving the Stellarator through Advances in Plasma Theory*.
-   Nuclear Fusion, 62(4), 042012.
-   https://doi.org/10.1088/1741-4326/ac4af8
-
-.. [Landreman2021] Landreman, M. and Paul, E. (2021).
-   *Magnetic Fields with Precise Quasisymmetry for Plasma Confinement*.
-   Physical Review Letters, 128(3), 035001.
-   https://doi.org/10.1103/PhysRevLett.128.035001
 
 .. seealso::
 

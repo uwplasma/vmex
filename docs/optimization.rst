@@ -13,11 +13,6 @@ This page covers:
 - how to reproduce the quasi-helical symmetry (QH) and quasi-axisymmetric (QA) examples,
 - figures comparing ``max_mode=1, 2`` optimisation results.
 
-.. contents:: Table of contents
-   :local:
-   :depth: 2
-
-
 Motivation: differentiability without finite differences
 ---------------------------------------------------------
 
@@ -189,7 +184,7 @@ a 97 % reduction.
 
 
 3-D LCFS and :math:`|B|` contour plots
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **max_mode = 1** (8 DOFs, 30% QS reduction, ~124 s)
 
@@ -553,8 +548,7 @@ different tape lengths, amortising the JIT cost over the full optimisation.
 Further reading
 ---------------
 
-.. toctree::
-   :maxdepth: 1
+.. seealso::
 
-   discrete_adjoint
-   simsopt_comparison
+   * :doc:`discrete_adjoint`
+   * :doc:`simsopt_comparison`

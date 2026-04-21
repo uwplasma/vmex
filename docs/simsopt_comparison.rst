@@ -1,11 +1,6 @@
 Comparison with SIMSOPT
 ========================
 
-.. contents:: Table of contents
-   :local:
-   :depth: 2
-
-
 Overview
 --------
 
@@ -200,8 +195,8 @@ Algorithm comparison
      - Finite differences (m×1 VMEC runs per Jacobian)
    * - **Line search**
      - Armijo backtracking using *relaxed* forward solve
-     - SciPy internal (Levenberg-Marquardt damping or trust radius)
-     - VMEC run at each trial point
+     - SciPy internal (Levenberg-Marquardt damping or trust radius),
+       with a VMEC run at each trial point
    * - **Convergence**
      - Relative cost + gradient + step tolerance
      - Same (SciPy defaults)
@@ -326,16 +321,6 @@ References
    *Intrinsic ambipolarity and rotation in stellarators*.
    Physical Review Letters, 101, 145003.
    https://doi.org/10.1103/PhysRevLett.101.145003
-
-.. [Landreman2021b] Landreman, M. and Paul, E. (2021).
-   *Magnetic Fields with Precise Quasisymmetry for Plasma Confinement*.
-   Physical Review Letters, 128(3), 035001.
-   https://doi.org/10.1103/PhysRevLett.128.035001
-
-.. [SIMSOPT2021] Landreman, M. et al. (2021).
-   *SIMSOPT: A flexible framework for stellarator optimization*.
-   Journal of Open Source Software, 6(65), 3525.
-   https://doi.org/10.21105/joss.03525
 
 .. seealso::
 

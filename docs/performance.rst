@@ -443,8 +443,7 @@ For each case, record:
 
 This will tell us where the real optimization bottlenecks are, and it will
 also guide downstream integration work for ``booz_xform_jax`` and ``neo_jax``.
-  ``LandremanPaul2021_QH_reactorScale_lowres`` reaches about
-  ``rmnc 6.12e-05``, ``zmns 2.60e-04``, ``lmns 9.97e-03``,
+
 - the runtime picture is now favorable on the bundled CPU matrix, but the
   branch remains experimental because the non-parity scope and GPU/default
   policy questions are broader than this one fixed-boundary CPU result.
@@ -462,6 +461,9 @@ also guide downstream integration work for ``booz_xform_jax`` and ``neo_jax``.
   for 3-stage ``lasym=True`` current-driven runs, the first attempt used a
   mixed controller that kept the entry/final stages conservative and
   accelerated only the interior stage,
+- that same audit kept the remaining QH reactor-scale parity error bounded:
+  ``LandremanPaul2021_QH_reactorScale_lowres`` reached about
+  ``rmnc 6.12e-05``, ``zmns 2.60e-04``, ``lmns 9.97e-03``,
 - that change materially reduced the remaining non-axisymmetric lambda drift:
   ``basic_non_stellsym_pressure`` improved from about ``3.46e-01`` to
   ``3.46e-02`` max relRMS while still running faster than baseline
@@ -612,7 +614,8 @@ Current state:
 So the branch is useful and now converges across the shipped 21-case matrix,
 but any merge/default decision should be framed around vmec_jax usability and
 coverage rather than raw same-host VMEC2000 CPU speed.
-  boundary ``R/Z`` synthesis and first-derivative synthesis in
+
+- boundary ``R/Z`` synthesis and first-derivative synthesis in
   ``_sample_external_boundary_arrays`` cut the representative
   ``input.cth_like_free_bdy`` profile from about ``60.41s`` total wall time to
   about ``58.21s`` while keeping the direct NESTOR regression tests green,
