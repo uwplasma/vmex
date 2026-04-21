@@ -141,3 +141,32 @@ def test_gauss_newton_exact_residual_after_jacobian():
 
     assert result["success"]
     np.testing.assert_allclose(result["x"], np.array([1.0]), atol=1e-3, rtol=0.0)
+
+
+def test_gauss_newton_helper_matches_scipy_linear_problem():
+    """The standalone SciPy path should solve the same linear least-squares problem."""
+
+    try:
+        from scipy.optimize import least_squares
+    except Exception:  # pragma: no cover - optional dependency
+        return
+
+    def residual(x):
+        x = np.asarray(x, dtype=float)
+        return np.array([x[0] - 1.0, 2.0 * x[1] - 2.0], dtype=float)
+
+    def jacobian(_x):
+        return np.array([[1.0, 0.0], [0.0, 2.0]], dtype=float)
+
+    result = least_squares(
+        residual,
+        np.array([0.0, 0.0], dtype=float),
+        jac=jacobian,
+        method="trf",
+        ftol=1e-12,
+        gtol=1e-12,
+        xtol=1e-12,
+    )
+
+    np.testing.assert_allclose(result.x, np.array([1.0, 1.0]), atol=1e-12, rtol=0.0)
+    assert result.success

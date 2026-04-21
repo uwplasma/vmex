@@ -51,12 +51,22 @@ MAX_MODE = 2
 # Maximum number of residual + Jacobian evaluations combined.
 # 25 evaluations gives the optimizer enough budget to meaningfully improve
 # QS symmetry (not just aspect ratio and iota) — especially important with ESS.
-MAX_NFEV = 25
+MAX_NFEV = 15
+
+# Outer least-squares method. "scipy" uses exact residuals + exact
+# discrete-adjoint Jacobians through scipy.optimize.least_squares.
+METHOD = "scipy"
 
 # Convergence tolerances (relative cost reduction / gradient / step norm).
 FTOL = 1e-3
 GTOL = 1e-3
 XTOL = 1e-3
+
+# VMEC inner solve budget used for accepted points and line-search trials.
+INNER_MAX_ITER = 1
+INNER_FTOL = 1e-13
+TRIAL_MAX_ITER = 1
+TRIAL_FTOL = 1e-10
 
 # Quasi-axisymmetric symmetry helicity: |B| ~ B(m*theta - n*zeta), n=0 → QA.
 HELICITY_M = 1
@@ -93,16 +103,18 @@ OUTPUT_DIR = Path(f"results/qa_opt/{_tag}")
 print(f"Loading {INPUT_FILE.name} …")
 cfg, indata = vj.load_config(str(INPUT_FILE))
 static = vj.build_static(cfg)
-boundary = vj.boundary_from_indata(indata, static.modes)
+boundary_input = vj.boundary_input_from_indata(indata, static.modes)
+boundary = vj.boundary_from_indata(indata, static.modes, apply_m1_constraint=False)
 
 # Extend modes if MAX_MODE exceeds what the input file provides.
 indata, static, boundary = vj.extend_boundary_for_max_mode(indata, static, boundary, MAX_MODE)
+boundary_input = vj.boundary_input_from_indata(indata, static.modes)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2.  Define boundary degrees of freedom (DOFs)
 # ─────────────────────────────────────────────────────────────────────────────
 specs = vj.boundary_param_specs(
-    boundary,
+    boundary_input,
     static.modes,
     max_mode=MAX_MODE,
     min_coeff=0.0,
@@ -152,7 +164,18 @@ residuals_fn = vj.make_qs_residuals_fn(
 # ─────────────────────────────────────────────────────────────────────────────
 # 5.  Build the optimizer
 # ─────────────────────────────────────────────────────────────────────────────
-opt = vj.FixedBoundaryExactOptimizer(static, indata, boundary, specs, residuals_fn)
+opt = vj.FixedBoundaryExactOptimizer(
+    static,
+    indata,
+    boundary,
+    specs,
+    residuals_fn,
+    boundary_input=boundary_input,
+    inner_max_iter=INNER_MAX_ITER,
+    inner_ftol=INNER_FTOL,
+    trial_max_iter=TRIAL_MAX_ITER,
+    trial_ftol=TRIAL_FTOL,
+)
 
 print(f"\nAspect ratio (initial):        {opt.aspect_ratio(params0):.4f}")
 print(f"QS objective (initial):        {opt.quasisymmetry_objective(params0):.6f}")
@@ -160,7 +183,7 @@ print(f"QS objective (initial):        {opt.quasisymmetry_objective(params0):.6f
 # ─────────────────────────────────────────────────────────────────────────────
 # 6.  Run the optimisation
 # ─────────────────────────────────────────────────────────────────────────────
-print(f"\nRunning Gauss-Newton (max_nfev={MAX_NFEV}, ESS={USE_ESS}) …")
+print(f"\nRunning {METHOD} least-squares (max_nfev={MAX_NFEV}, ESS={USE_ESS}) …")
 
 # iota_fn lets the optimizer record mean iota at every Jacobian evaluation so
 # that the objective history plot shows an iota panel alongside aspect ratio.
@@ -169,12 +192,16 @@ import vmec_jax._compat as _compat
 _jnp = _compat.jnp
 
 def _iota_fn(state):
-    _chips, _iotas, iotaf = equilibrium_iota_profiles_from_state(
+    _chips, iotas, _iotaf = equilibrium_iota_profiles_from_state(
         state=state, static=static, indata=indata, signgs=opt._signgs)
-    return float(_jnp.mean(_jnp.asarray(iotaf, dtype=_jnp.float64)))
+    iotas = _jnp.asarray(iotas, dtype=_jnp.float64)
+    if int(iotas.shape[0]) <= 1:
+        return 0.0
+    return float(_jnp.mean(iotas[1:]))
 
 result = opt.run(
     params0,
+    method=METHOD,
     max_nfev=MAX_NFEV,
     ftol=FTOL,
     gtol=GTOL,

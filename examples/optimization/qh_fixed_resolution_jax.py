@@ -85,12 +85,14 @@ OUTPUT_DIR = Path("results/qh_opt")
 print(f"Loading {INPUT_FILE.name} …")
 cfg, indata = vj.load_config(str(INPUT_FILE))
 static = vj.build_static(cfg)
-boundary = vj.boundary_from_indata(indata, static.modes)
+boundary_input = vj.boundary_input_from_indata(indata, static.modes)
+boundary = vj.boundary_from_indata(indata, static.modes, apply_m1_constraint=False)
 
 # If MAX_MODE exceeds the modes available in the input file, extend the
 # static grid and boundary so that all requested DOFs actually exist
 # (initialised to zero), matching SIMSOPT's fixed_range() behaviour.
 indata, static, boundary = vj.extend_boundary_for_max_mode(indata, static, boundary, MAX_MODE)
+boundary_input = vj.boundary_input_from_indata(indata, static.modes)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2.  Define boundary degrees of freedom (DOFs)
@@ -101,7 +103,7 @@ indata, static, boundary = vj.extend_boundary_for_max_mode(indata, static, bound
 #   • max_mode=MAX_MODE     — limit to |m|, |n| ≤ MAX_MODE
 # ─────────────────────────────────────────────────────────────────────────────
 specs = vj.boundary_param_specs(
-    boundary,
+    boundary_input,
     static.modes,
     max_mode=MAX_MODE,
     min_coeff=0.0,          # include all coefficients, even zero-valued ones
@@ -140,7 +142,14 @@ residuals_fn = vj.make_qh_residuals_fn(
 #   • Single-entry cache to avoid double tape builds at the same x
 #   • History tracking per Jacobian evaluation
 # ─────────────────────────────────────────────────────────────────────────────
-opt = vj.FixedBoundaryExactOptimizer(static, indata, boundary, specs, residuals_fn)
+opt = vj.FixedBoundaryExactOptimizer(
+    static,
+    indata,
+    boundary,
+    specs,
+    residuals_fn,
+    boundary_input=boundary_input,
+)
 
 print(f"\nAspect ratio (initial):        {opt.aspect_ratio(params0):.4f}")
 print(f"QS objective (initial):        {opt.quasisymmetry_objective(params0):.6f}")
