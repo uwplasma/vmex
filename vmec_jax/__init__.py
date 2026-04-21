@@ -24,6 +24,8 @@ from .grids import AngleGrid, make_angle_grid
 from .boundary import (
     BoundaryCoeffs,
     boundary_from_indata,
+    boundary_input_from_indata,
+    boundary_from_input_convention,
     boundary_aspect_ratio,
     boundary_aspect_ratio_from_static,
 )
@@ -201,6 +203,8 @@ __all__ = [
     "make_angle_grid",
     "BoundaryCoeffs",
     "boundary_from_indata",
+    "boundary_input_from_indata",
+    "boundary_from_input_convention",
     "boundary_aspect_ratio",
     "boundary_aspect_ratio_from_static",
     "HelicalBasis",
