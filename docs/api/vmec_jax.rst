@@ -1,10 +1,12 @@
 vmec_jax package
 ================
 
-.. automodule:: vmec_jax
-   :members:
-   :undoc-members:
-   :show-inheritance:
+``vmec_jax`` re-exports a broad convenience surface for interactive use, but
+the stable user-facing entrypoints are documented in :doc:`public_api`.
+
+For lower-level work, import the specific submodule you need rather than
+depending on the full package re-export surface. The submodule reference below
+is the authoritative API documentation for those internal layers.
 
 Submodules
 ----------
