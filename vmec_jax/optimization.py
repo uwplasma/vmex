@@ -735,7 +735,12 @@ def make_qs_residuals_fn(
             _chips, _iotas, iotaf = equilibrium_iota_profiles_from_state(
                 state=state, static=static, indata=_indata, signgs=_signgs,
             )
-            mean_iota = jnp.mean(jnp.asarray(iotaf, dtype=jnp.float64))
+            iotas = jnp.asarray(_iotas, dtype=jnp.float64)
+            mean_iota = (
+                jnp.asarray(0.0, dtype=iotas.dtype)
+                if int(iotas.shape[0]) <= 1
+                else jnp.mean(iotas[1:])
+            )
             parts.append(jnp.asarray(
                 [float(iota_weight) * (mean_iota - target_iota)], dtype=jnp.float64
             ))
@@ -786,6 +791,15 @@ class FixedBoundaryExactOptimizer:
         Callable ``(VMECState) -> jnp.ndarray`` returning the residual vector
         to minimise.  Build with :func:`make_qh_residuals_fn` or supply your
         own.
+    boundary_input:
+        Optional boundary coefficients in VMEC input convention. When
+        provided, optimization parameters are applied in that convention and
+        then converted internally with ``apply_m1_constraint=False``.
+    inner_max_iter, inner_ftol:
+        Accepted-point VMEC residual solve budget.
+    trial_max_iter, trial_ftol:
+        Trial-point VMEC residual solve budget used by the relaxed forward
+        callback inside the optimizer.
 
     Example
     -------
@@ -815,10 +829,17 @@ class FixedBoundaryExactOptimizer:
         boundary: BoundaryCoeffs,
         specs: Sequence[BoundaryParamSpec],
         residuals_fn: Callable,
+        boundary_input: BoundaryCoeffs | None = None,
+        *,
+        inner_max_iter: int | None = None,
+        inner_ftol: float | None = None,
+        trial_max_iter: int | None = None,
+        trial_ftol: float | None = None,
     ) -> None:
         self._static = static
         self._indata = indata
         self._boundary = boundary
+        self._boundary_input = boundary_input
         self._specs = list(specs)
         self._residuals_fn = residuals_fn
         # Number of QS residuals (last _n_qs entries of the residual vector).
@@ -837,6 +858,10 @@ class FixedBoundaryExactOptimizer:
         self._inner_max_iter = self._read_last_array("NITER_ARRAY", "NITER", 1500, int)
         self._inner_ftol = self._read_last_array("FTOL_ARRAY", "FTOL", 1e-13, float)
         self._step_size = float(indata.get_float("DELT", 1.0))
+        if inner_max_iter is not None:
+            self._inner_max_iter = int(inner_max_iter)
+        if inner_ftol is not None:
+            self._inner_ftol = float(inner_ftol)
 
         _base = dict(
             indata=indata,
@@ -865,8 +890,8 @@ class FixedBoundaryExactOptimizer:
         )
         self._exact_solver_kwargs = dict(_base)
         self._trial_solver_kwargs = dict(_base, jit_forces=False)
-        self._trial_max_iter = min(self._inner_max_iter, 800)
-        self._trial_ftol = max(self._inner_ftol, 1e-10)
+        self._trial_max_iter = min(self._inner_max_iter, 800) if trial_max_iter is None else int(trial_max_iter)
+        self._trial_ftol = max(self._inner_ftol, 1e-10) if trial_ftol is None else float(trial_ftol)
 
         # Single-entry cache: avoids building the tape twice at the same x.
         self._exact_cache: dict = {}
@@ -887,8 +912,19 @@ class FixedBoundaryExactOptimizer:
 
     def _boundary_from_params(self, params):
         from ._compat import jnp as _jnp
-        return apply_boundary_params(
-            self._boundary, self._specs, _jnp.asarray(params, dtype=_jnp.float64)
+        boundary = apply_boundary_params(
+            self._boundary_input if self._boundary_input is not None else self._boundary,
+            self._specs,
+            _jnp.asarray(params, dtype=_jnp.float64),
+        )
+        if self._boundary_input is None:
+            return boundary
+        from .boundary import boundary_from_input_convention
+        return boundary_from_input_convention(
+            boundary,
+            self._static.modes,
+            lasym=bool(self._static.cfg.lasym),
+            apply_m1_constraint=False,
         )
 
     def _solve_forward(self, params, *, trial: bool = False):
@@ -1133,6 +1169,7 @@ class FixedBoundaryExactOptimizer:
         self,
         params0,
         *,
+        method: str = "gauss_newton",
         max_nfev: int = 10,
         ftol: float = 1e-3,
         gtol: float = 1e-3,
@@ -1142,12 +1179,17 @@ class FixedBoundaryExactOptimizer:
         iota_fn=None,
         target_iota: float | None = None,
     ) -> dict:
-        """Run Gauss-Newton least-squares optimisation.
+        """Run exact least-squares optimisation.
 
         Parameters
         ----------
         params0:
             Initial parameter vector (usually ``np.zeros(len(specs))``).
+        method:
+            Outer least-squares method. Supported values are ``"gauss_newton"``
+            and ``"scipy"``. ``"scipy"`` uses ``scipy.optimize.least_squares``
+            with the exact residual and discrete-adjoint Jacobian callbacks,
+            which is more robust on some QA/QH examples.
         max_nfev:
             Maximum residual/Jacobian evaluations.
         ftol, gtol, xtol:
@@ -1209,22 +1251,62 @@ class FixedBoundaryExactOptimizer:
             entry0["iota"] = float(iota_fn(state0))
         self._history.append(entry0)
 
-        # ── Gauss-Newton loop ───────────────────────────────────────────────
+        # ── outer least-squares loop ────────────────────────────────────────
         t_start = time.perf_counter()
-        result = gauss_newton_least_squares(
-            self.residual_fun,
-            self._jacobian_fun_tracked,
-            params0_arr,
-            forward_residual_fun=self.forward_residual_fun,
-            post_jacobian_callback=self._post_jacobian_clear,
-            exact_residual_after_jacobian_fun=self._exact_residual_after_jacobian,
-            max_nfev=max_nfev,
-            ftol=ftol,
-            gtol=gtol,
-            xtol=xtol,
-            x_scale=x_scale,
-            verbose=verbose,
-        )
+        method_key = str(method).strip().lower()
+        if method_key == "gauss_newton":
+            result = gauss_newton_least_squares(
+                self.residual_fun,
+                self._jacobian_fun_tracked,
+                params0_arr,
+                forward_residual_fun=self.forward_residual_fun,
+                post_jacobian_callback=self._post_jacobian_clear,
+                exact_residual_after_jacobian_fun=self._exact_residual_after_jacobian,
+                max_nfev=max_nfev,
+                ftol=ftol,
+                gtol=gtol,
+                xtol=xtol,
+                x_scale=x_scale,
+                verbose=verbose,
+            )
+        elif method_key == "scipy":
+            try:
+                from scipy.optimize import least_squares as _scipy_least_squares
+            except Exception as exc:  # pragma: no cover - optional dependency
+                raise ImportError(
+                    "method='scipy' requires scipy.optimize.least_squares"
+                ) from exc
+
+            scale = np.ones_like(params0_arr) if x_scale is None else np.asarray(x_scale, dtype=float)
+            scale[scale == 0.0] = 1.0
+            scipy_result = _scipy_least_squares(
+                lambda x: np.asarray(self.residual_fun(x), dtype=float),
+                params0_arr,
+                jac=lambda x: np.asarray(self._jacobian_fun_tracked(x), dtype=float),
+                method="trf",
+                x_scale=scale,
+                max_nfev=max_nfev,
+                ftol=ftol,
+                gtol=gtol,
+                xtol=xtol,
+                verbose=2 if int(verbose) > 0 else 0,
+            )
+            result = {
+                "x": np.asarray(scipy_result.x, dtype=float),
+                "cost": float(scipy_result.cost),
+                "objective": float(2.0 * scipy_result.cost),
+                "nfev": int(scipy_result.nfev),
+                "njev": 0 if scipy_result.njev is None else int(scipy_result.njev),
+                "nit": 0,
+                "success": bool(scipy_result.success),
+                "status": int(scipy_result.status),
+                "message": str(scipy_result.message),
+                "step_norm": 0.0,
+                "x_prev": None,
+                "cost_prev": None,
+            }
+        else:
+            raise ValueError(f"Unknown optimization method '{method}'.")
         t_total = time.perf_counter() - t_start
         self._post_jacobian_clear()
 
