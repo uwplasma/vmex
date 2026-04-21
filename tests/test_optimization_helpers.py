@@ -4,10 +4,12 @@ import jax.numpy as jnp
 from vmec_jax.boundary import BoundaryCoeffs
 from vmec_jax.modes import vmec_mode_table
 from vmec_jax.optimization import (
+    BoundaryParamSpec,
     apply_boundary_params,
     boundary_param_names,
     boundary_param_specs,
     gauss_newton_least_squares,
+    lift_boundary_params,
     surface_indices_from_s,
 )
 
@@ -50,6 +52,22 @@ def test_surface_indices_from_s():
     indices, selected = surface_indices_from_s(s_half, [0.28, 3])
     assert indices == [1, 2]
     np.testing.assert_allclose(selected, np.array([0.3, 0.5]))
+
+
+def test_lift_boundary_params_maps_shared_names_and_zeros_new_modes():
+    source_specs = [
+        BoundaryParamSpec("rc10", "rc", 0, 1, 0),
+        BoundaryParamSpec("zs10", "zs", 1, 1, 0),
+    ]
+    target_specs = [
+        BoundaryParamSpec("rc10", "rc", 0, 1, 0),
+        BoundaryParamSpec("zs10", "zs", 1, 1, 0),
+        BoundaryParamSpec("rc21", "rc", 2, 2, 1),
+    ]
+
+    lifted = lift_boundary_params(source_specs, np.array([0.25, -0.5]), target_specs)
+
+    np.testing.assert_allclose(lifted, np.array([0.25, -0.5, 0.0]))
 
 
 def test_gauss_newton_least_squares_solves_linear_problem():

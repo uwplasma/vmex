@@ -215,6 +215,34 @@ def boundary_param_names(specs: Sequence[BoundaryParamSpec]) -> list[str]:
     return [spec.name for spec in specs]
 
 
+def lift_boundary_params(
+    source_specs: Sequence[BoundaryParamSpec],
+    source_params,
+    target_specs: Sequence[BoundaryParamSpec],
+) -> np.ndarray:
+    """Lift a parameter vector defined on one boundary basis to another.
+
+    Parameters
+    ----------
+    source_specs:
+        Parameter specification list describing ``source_params``.
+    source_params:
+        1-D parameter vector aligned with ``source_specs``.
+    target_specs:
+        Target parameter specification list.
+
+    Returns
+    -------
+    np.ndarray
+        Parameter vector aligned with ``target_specs``. Parameters present in
+        both lists are copied by name; all others are initialised to zero.
+    """
+    source_vals = {
+        spec.name: float(value) for spec, value in zip(source_specs, np.asarray(source_params, dtype=float))
+    }
+    return np.asarray([source_vals.get(spec.name, 0.0) for spec in target_specs], dtype=float)
+
+
 def apply_boundary_params(
     boundary: BoundaryCoeffs,
     specs: Sequence[BoundaryParamSpec],
@@ -631,9 +659,8 @@ def make_qh_residuals_fn(
     flux = flux_profiles_from_indata(indata, static.s, signgs=signgs)
     pressure = jnp.zeros_like(jnp.asarray(static.s))
 
-    def residuals_from_state(state: VMECState) -> jnp.ndarray:
-        aspect = equilibrium_aspect_ratio_from_state(state=state, static=static)
-        qs = quasisymmetry_ratio_residual_from_state(
+    def _qs_eval_from_state(state: VMECState):
+        return quasisymmetry_ratio_residual_from_state(
             state=state,
             static=static,
             indata=indata,
@@ -645,12 +672,19 @@ def make_qh_residuals_fn(
             helicity_m=helicity_m,
             helicity_n=helicity_n,
         )
+
+    def residuals_from_state(state: VMECState) -> jnp.ndarray:
+        aspect = equilibrium_aspect_ratio_from_state(state=state, static=static)
+        qs = _qs_eval_from_state(state)
         aspect_residual = jnp.asarray([float(aspect_weight) * (aspect - target_aspect)],
                                       dtype=jnp.float64)
         qs_residual = jnp.asarray(qs["residuals1d"], dtype=jnp.float64) * float(qs_weight)
         return jnp.concatenate([aspect_residual, qs_residual])
 
-    residuals_from_state._n_qs = int(len(surfaces))
+    residuals_from_state._n_non_qs = 1
+    residuals_from_state._qs_total_from_state = (
+        lambda state: float(_qs_eval_from_state(state)["total"]) * float(qs_weight) ** 2
+    )
 
     return residuals_from_state
 
@@ -722,6 +756,20 @@ def make_qs_residuals_fn(
     _signgs = signgs
     _indata = indata
 
+    def _qs_eval_from_state(state: VMECState):
+        return quasisymmetry_ratio_residual_from_state(
+            state=state,
+            static=static,
+            indata=indata,
+            signgs=signgs,
+            flux_local=flux,
+            prof_local={"pressure": pressure},
+            pressure_local=pressure,
+            surfaces=surfaces,
+            helicity_m=helicity_m,
+            helicity_n=helicity_n,
+        )
+
     def residuals_from_state(state: VMECState) -> jnp.ndarray:
         parts: list[jnp.ndarray] = []
 
@@ -745,23 +793,15 @@ def make_qs_residuals_fn(
                 [float(iota_weight) * (mean_iota - target_iota)], dtype=jnp.float64
             ))
 
-        qs = quasisymmetry_ratio_residual_from_state(
-            state=state,
-            static=static,
-            indata=indata,
-            signgs=signgs,
-            flux_local=flux,
-            prof_local={"pressure": pressure},
-            pressure_local=pressure,
-            surfaces=surfaces,
-            helicity_m=helicity_m,
-            helicity_n=helicity_n,
-        )
+        qs = _qs_eval_from_state(state)
         parts.append(jnp.asarray(qs["residuals1d"], dtype=jnp.float64) * float(qs_weight))
 
         return jnp.concatenate(parts)
 
-    residuals_from_state._n_qs = int(len(surfaces))
+    residuals_from_state._n_non_qs = int(target_aspect is not None) + int(target_iota is not None)
+    residuals_from_state._qs_total_from_state = (
+        lambda state: float(_qs_eval_from_state(state)["total"]) * float(qs_weight) ** 2
+    )
     return residuals_from_state
 
 
@@ -842,9 +882,9 @@ class FixedBoundaryExactOptimizer:
         self._boundary_input = boundary_input
         self._specs = list(specs)
         self._residuals_fn = residuals_fn
-        # Number of QS residuals (last _n_qs entries of the residual vector).
-        # Stored so quasisymmetry_objective correctly excludes aspect/iota entries.
         self._n_qs: int | None = getattr(residuals_fn, "_n_qs", None)
+        self._n_non_qs: int = int(getattr(residuals_fn, "_n_non_qs", 1))
+        self._qs_total_from_state_fn = getattr(residuals_fn, "_qs_total_from_state", None)
 
         # Derive signgs from the initial guess.
         state0 = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
@@ -1047,7 +1087,7 @@ class FixedBoundaryExactOptimizer:
             cached_state, _ = self._exact_cache[key]
             res = np.asarray(self._residuals_fn(cached_state), dtype=float)
             cost = float(0.5 * np.dot(res, res))
-            qs_total = self._qs_from_res(res)
+            qs_total = self._qs_total_from_state(cached_state, res)
             from .wout import equilibrium_aspect_ratio_from_state
             aspect = float(np.asarray(
                 equilibrium_aspect_ratio_from_state(state=cached_state, static=self._static)
@@ -1097,13 +1137,22 @@ class FixedBoundaryExactOptimizer:
         """Sum of squared QS residuals only (excludes aspect and iota)."""
         if self._n_qs is not None:
             return float(np.dot(res[-self._n_qs:], res[-self._n_qs:]))
-        # Fallback for externally-supplied residuals_fn without _n_qs tag
-        return float(np.dot(res[1:], res[1:]))
+        start = max(0, min(int(self._n_non_qs), int(res.shape[0])))
+        return float(np.dot(res[start:], res[start:]))
+
+    def _qs_total_from_state(self, state: VMECState, res: np.ndarray | None = None) -> float:
+        """QS-only objective from a solved state, with metadata-aware fallback."""
+        if self._qs_total_from_state_fn is not None:
+            return float(self._qs_total_from_state_fn(state))
+        if res is None:
+            res = np.asarray(self._residuals_fn(state), dtype=float)
+        return self._qs_from_res(np.asarray(res, dtype=float))
 
     def quasisymmetry_objective(self, params) -> float:
         """Return the total QS objective at *params*."""
-        res = np.asarray(self.residual_fun(params), dtype=float)
-        return self._qs_from_res(res)
+        state = self._solve_exact_with_tape(params)
+        res = np.asarray(self._residuals_fn(state), dtype=float)
+        return self._qs_total_from_state(state, res)
 
     def save_wout(self, path, params) -> None:
         """Write a wout NetCDF file for the equilibrium at *params*.
@@ -1238,7 +1287,7 @@ class FixedBoundaryExactOptimizer:
             equilibrium_aspect_ratio_from_state(state=state0, static=self._static)
         ))
         cost0 = float(0.5 * np.dot(res0, res0))
-        qs_total0 = self._qs_from_res(res0)
+        qs_total0 = self._qs_total_from_state(state0, res0)
 
         entry0: dict = {
             "wall_time_s": 0.0,
@@ -1325,7 +1374,7 @@ class FixedBoundaryExactOptimizer:
             equilibrium_aspect_ratio_from_state(state=state_final, static=self._static)
         ))
         cost_final = float(0.5 * np.dot(res_final, res_final))
-        qs_total_final = self._qs_from_res(res_final)
+        qs_total_final = self._qs_total_from_state(state_final, res_final)
 
         entry_final: dict = {
             "wall_time_s": t_total,

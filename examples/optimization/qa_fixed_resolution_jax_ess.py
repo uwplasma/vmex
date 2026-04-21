@@ -14,6 +14,12 @@ DOF is pre-scaled by ``exp(-ALPHA * max(|m|, |n|)) / exp(-ALPHA)`` so that the
 Gauss-Newton step favours low-order harmonics over fine-scale ones.  This often
 improves convergence when the boundary has many DOFs at high mode numbers.
 
+When ``MAX_MODE > 1`` and ``USE_MODE_CONTINUATION = True``, the script first
+solves the lower-mode QA problem and then lifts that solution into the richer
+boundary space before running the final stage.  For the 24-DOF QA case this
+continuation is the difference between a worse local minimum and the expected
+improvement over ``max_mode=1``.
+
 All user-facing parameters are top-level variables — no argparse needed.
 
 Workflow
@@ -22,9 +28,10 @@ Workflow
 2. Define boundary DOFs up to ``MAX_MODE``.
 3. Build ``x_scale`` with/without ESS.
 4. Construct the least-squares problem via ``vj.make_qs_residuals_fn``.
-5. Build ``vj.FixedBoundaryExactOptimizer`` and run Gauss-Newton.
-6. Save wout + history JSON.
-7. Generate figures.
+5. Optionally solve lower-mode continuation stages.
+6. Build ``vj.FixedBoundaryExactOptimizer`` and run the final stage.
+7. Save wout + history JSON.
+8. Generate figures.
 """
 
 from pathlib import Path
@@ -49,9 +56,9 @@ INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.nfp2_QA"
 MAX_MODE = 2
 
 # Maximum number of residual + Jacobian evaluations combined.
-# 25 evaluations gives the optimizer enough budget to meaningfully improve
-# QS symmetry (not just aspect ratio and iota) — especially important with ESS.
-MAX_NFEV = 15
+# When MAX_MODE > 1, the final stage is warm-started from the previous mode.
+MAX_NFEV = 40
+CONTINUATION_NFEV = 15
 
 # Outer least-squares method. "scipy" uses exact residuals + exact
 # discrete-adjoint Jacobians through scipy.optimize.least_squares.
@@ -91,7 +98,8 @@ QS_WEIGHT     = 1.0
 # so that high-mode-number harmonics are smaller in the scaled parameter space,
 # encouraging the optimizer to first improve low-order shape.
 USE_ESS = True
-ALPHA   = 1.0   # ESS decay rate; larger → stronger suppression of high modes
+ALPHA   = 0.8   # Milder ESS helps the max_mode=2 QA case use added DOFs
+USE_MODE_CONTINUATION = True
 
 # Output directory — subdirectory name reflects whether ESS was used.
 _tag       = "ess" if USE_ESS else "no_ess"
@@ -102,115 +110,141 @@ OUTPUT_DIR = Path(f"results/qa_opt/{_tag}")
 # ─────────────────────────────────────────────────────────────────────────────
 print(f"Loading {INPUT_FILE.name} …")
 cfg, indata = vj.load_config(str(INPUT_FILE))
-static = vj.build_static(cfg)
-boundary_input = vj.boundary_input_from_indata(indata, static.modes)
-boundary = vj.boundary_from_indata(indata, static.modes, apply_m1_constraint=False)
-
-# Extend modes if MAX_MODE exceeds what the input file provides.
-indata, static, boundary = vj.extend_boundary_for_max_mode(indata, static, boundary, MAX_MODE)
-boundary_input = vj.boundary_input_from_indata(indata, static.modes)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 2.  Define boundary degrees of freedom (DOFs)
-# ─────────────────────────────────────────────────────────────────────────────
-specs = vj.boundary_param_specs(
-    boundary_input,
-    static.modes,
-    max_mode=MAX_MODE,
-    min_coeff=0.0,
-    include=("rc", "zs"),
-    fix=("rc00",),
-)
-params0 = np.zeros(len(specs))
-
-print(f"Parameter space ({len(specs)} DOFs): {vj.boundary_param_names(specs)}")
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 3.  Per-DOF scale vector (ESS or uniform)
-#
-# x_scale[i] controls the step size for parameter i in the Gauss-Newton loop.
-# With ESS=True, high-mode DOFs are down-weighted relative to low-mode ones.
-# With ESS=False, all DOFs are treated uniformly (x_scale = ones).
-# ─────────────────────────────────────────────────────────────────────────────
-if USE_ESS:
-    x_scale = vj.create_x_scale(specs, alpha=ALPHA)
-    print(f"ESS scales (alpha={ALPHA}): min={x_scale.min():.3f}  max={x_scale.max():.3f}")
-else:
-    x_scale = np.ones(len(specs))
-    print("ESS disabled — uniform scales.")
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 4.  Construct the least-squares problem
-#
-# make_qs_residuals_fn returns a residuals_from_state(VMECState) → 1-D array
-# combining:
-#   • one aspect-ratio residual (if target_aspect is not None)
-#   • one mean-iota residual   (if target_iota is not None)
-#   • one QS residual per surface
-# ─────────────────────────────────────────────────────────────────────────────
-residuals_fn = vj.make_qs_residuals_fn(
-    static,
-    indata,
-    helicity_m=HELICITY_M,
-    helicity_n=HELICITY_N,
-    target_aspect=TARGET_ASPECT,
-    target_iota=TARGET_IOTA,
-    surfaces=SURFACES,
-    aspect_weight=ASPECT_WEIGHT,
-    iota_weight=IOTA_WEIGHT,
-    qs_weight=QS_WEIGHT,
-)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 5.  Build the optimizer
-# ─────────────────────────────────────────────────────────────────────────────
-opt = vj.FixedBoundaryExactOptimizer(
-    static,
-    indata,
-    boundary,
-    specs,
-    residuals_fn,
-    boundary_input=boundary_input,
-    inner_max_iter=INNER_MAX_ITER,
-    inner_ftol=INNER_FTOL,
-    trial_max_iter=TRIAL_MAX_ITER,
-    trial_ftol=TRIAL_FTOL,
-)
-
-print(f"\nAspect ratio (initial):        {opt.aspect_ratio(params0):.4f}")
-print(f"QS objective (initial):        {opt.quasisymmetry_objective(params0):.6f}")
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 6.  Run the optimisation
-# ─────────────────────────────────────────────────────────────────────────────
-print(f"\nRunning {METHOD} least-squares (max_nfev={MAX_NFEV}, ESS={USE_ESS}) …")
-
-# iota_fn lets the optimizer record mean iota at every Jacobian evaluation so
-# that the objective history plot shows an iota panel alongside aspect ratio.
 from vmec_jax.wout import equilibrium_iota_profiles_from_state
 import vmec_jax._compat as _compat
 _jnp = _compat.jnp
 
-def _iota_fn(state):
+def _build_stage(max_mode: int):
+    stage_static = vj.build_static(cfg)
+    stage_boundary = vj.boundary_from_indata(indata, stage_static.modes, apply_m1_constraint=False)
+    stage_indata, stage_static, stage_boundary = vj.extend_boundary_for_max_mode(
+        indata, stage_static, stage_boundary, max_mode
+    )
+    stage_boundary_input = vj.boundary_input_from_indata(stage_indata, stage_static.modes)
+    stage_specs = vj.boundary_param_specs(
+        stage_boundary_input,
+        stage_static.modes,
+        max_mode=max_mode,
+        min_coeff=0.0,
+        include=("rc", "zs"),
+        fix=("rc00",),
+    )
+    stage_residuals_fn = vj.make_qs_residuals_fn(
+        stage_static,
+        stage_indata,
+        helicity_m=HELICITY_M,
+        helicity_n=HELICITY_N,
+        target_aspect=TARGET_ASPECT,
+        target_iota=TARGET_IOTA,
+        surfaces=SURFACES,
+        aspect_weight=ASPECT_WEIGHT,
+        iota_weight=IOTA_WEIGHT,
+        qs_weight=QS_WEIGHT,
+    )
+    stage_opt = vj.FixedBoundaryExactOptimizer(
+        stage_static,
+        stage_indata,
+        stage_boundary,
+        stage_specs,
+        stage_residuals_fn,
+        boundary_input=stage_boundary_input,
+        inner_max_iter=INNER_MAX_ITER,
+        inner_ftol=INNER_FTOL,
+        trial_max_iter=TRIAL_MAX_ITER,
+        trial_ftol=TRIAL_FTOL,
+    )
+    stage_x_scale = (
+        vj.create_x_scale(stage_specs, alpha=ALPHA) if USE_ESS else np.ones(len(stage_specs))
+    )
+    return stage_indata, stage_static, stage_boundary_input, stage_specs, stage_opt, stage_x_scale
+
+
+def _iota_fn(state, *, stage_static, stage_indata, stage_opt):
     _chips, iotas, _iotaf = equilibrium_iota_profiles_from_state(
-        state=state, static=static, indata=indata, signgs=opt._signgs)
+        state=state, static=stage_static, indata=stage_indata, signgs=stage_opt._signgs)
     iotas = _jnp.asarray(iotas, dtype=_jnp.float64)
     if int(iotas.shape[0]) <= 1:
         return 0.0
     return float(_jnp.mean(iotas[1:]))
 
-result = opt.run(
-    params0,
-    method=METHOD,
-    max_nfev=MAX_NFEV,
-    ftol=FTOL,
-    gtol=GTOL,
-    xtol=XTOL,
-    x_scale=x_scale,
-    verbose=1,
-    iota_fn=_iota_fn,
-    target_iota=TARGET_IOTA,
-)
+stage_results = []
+params_stage = None
+stage_modes = list(range(1, MAX_MODE + 1)) if (USE_MODE_CONTINUATION and MAX_MODE > 1) else [MAX_MODE]
+
+for stage_mode in stage_modes:
+    stage_indata, stage_static, stage_boundary_input, stage_specs, stage_opt, stage_x_scale = _build_stage(stage_mode)
+    params0_stage = np.zeros(len(stage_specs)) if params_stage is None else vj.lift_boundary_params(
+        prev_specs, params_stage, stage_specs
+    )
+    stage_budget = MAX_NFEV if stage_mode == MAX_MODE else CONTINUATION_NFEV
+
+    if stage_mode == MAX_MODE:
+        print(f"Parameter space ({len(stage_specs)} DOFs): {vj.boundary_param_names(stage_specs)}")
+        if USE_ESS:
+            print(f"ESS scales (alpha={ALPHA}): min={stage_x_scale.min():.3f}  max={stage_x_scale.max():.3f}")
+        else:
+            print("ESS disabled — uniform scales.")
+        print(f"\nAspect ratio (initial):        {stage_opt.aspect_ratio(params0_stage):.4f}")
+        print(f"QS objective (initial):        {stage_opt.quasisymmetry_objective(params0_stage):.6f}")
+        print(f"\nRunning {METHOD} least-squares (max_nfev={MAX_NFEV}, ESS={USE_ESS}) …")
+    else:
+        print(f"Stage {stage_mode} → {stage_mode + 1} continuation seed (budget={stage_budget}) …")
+
+    stage_result = stage_opt.run(
+        params0_stage,
+        method=METHOD,
+        max_nfev=stage_budget,
+        ftol=FTOL,
+        gtol=GTOL,
+        xtol=XTOL,
+        x_scale=stage_x_scale,
+        verbose=1 if stage_mode == MAX_MODE else 0,
+        iota_fn=lambda state, s=stage_static, i=stage_indata, o=stage_opt: _iota_fn(
+            state, stage_static=s, stage_indata=i, stage_opt=o
+        ),
+        target_iota=TARGET_IOTA,
+    )
+    stage_results.append((stage_mode, stage_specs, stage_opt, params0_stage, stage_result))
+    prev_specs = stage_specs
+    params_stage = stage_result["x"]
+
+stage_mode, specs, opt, params0, result = stage_results[-1]
+
+combined_history = None
+if USE_MODE_CONTINUATION and len(stage_results) > 1:
+    combined_entries = []
+    wall_offset = 0.0
+    nfev_total = 0
+    njev_total = 0
+    for idx, (_mode, _specs, _opt, _params0, _result) in enumerate(stage_results):
+        stage_hist = _result["_history_dump"]
+        entries = stage_hist["history"] if idx == 0 else stage_hist["history"][1:]
+        for entry in entries:
+            entry_copy = dict(entry)
+            entry_copy["wall_time_s"] = float(entry_copy["wall_time_s"]) + wall_offset
+            combined_entries.append(entry_copy)
+        wall_offset = combined_entries[-1]["wall_time_s"]
+        nfev_total += int(stage_hist["nfev"])
+        njev_total += int(stage_hist["njev"])
+    combined_history = {
+        "label": "Optimisation",
+        "max_nfev": int(sum(CONTINUATION_NFEV if m != MAX_MODE else MAX_NFEV for m in stage_modes)),
+        "ftol": FTOL,
+        "gtol": GTOL,
+        "xtol": XTOL,
+        "total_wall_time_s": float(wall_offset),
+        "nfev": int(nfev_total),
+        "njev": int(njev_total),
+        "success": bool(result["_history_dump"]["success"]),
+        "message": str(result["_history_dump"]["message"]),
+        "objective_initial": float(stage_results[0][4]["_history_dump"]["objective_initial"]),
+        "objective_final": float(result["_history_dump"]["objective_final"]),
+        "qs_initial": float(stage_results[0][4]["_history_dump"]["qs_initial"]),
+        "qs_final": float(result["_history_dump"]["qs_final"]),
+        "aspect_initial": float(stage_results[0][4]["_history_dump"]["aspect_initial"]),
+        "aspect_final": float(result["_history_dump"]["aspect_final"]),
+        "history": combined_entries,
+    }
 
 print(f"\nTermination: {result['message']}")
 print(f"Aspect ratio (final):          {opt.aspect_ratio(result['x']):.4f}")
@@ -228,11 +262,14 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Annotate history dump with metadata for plotting
 _ess_tag = f"ESS α={ALPHA}" if USE_ESS else "no ESS"
-result["_history_dump"]["label"] = f"QA opt (max_mode={MAX_MODE}, {_ess_tag})"
-result["_history_dump"]["target_aspect"] = TARGET_ASPECT
-result["_history_dump"]["target_iota"] = TARGET_IOTA
+history_dump = result["_history_dump"] if combined_history is None else combined_history
+label_suffix = ", continuation" if combined_history is not None else ""
+history_dump["label"] = f"QA opt (max_mode={MAX_MODE}, {_ess_tag}{label_suffix})"
+history_dump["target_aspect"] = TARGET_ASPECT
+history_dump["target_iota"] = TARGET_IOTA
+result["_history_dump"] = history_dump
 
-opt.save_wout(OUTPUT_DIR / "wout_initial.nc", params0)
+opt.save_wout(OUTPUT_DIR / "wout_initial.nc", np.zeros(len(specs)))
 opt.save_wout(OUTPUT_DIR / "wout_final.nc", result["x"])
 opt.save_history(OUTPUT_DIR / "history.json", result)
 

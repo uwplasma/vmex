@@ -193,25 +193,30 @@ When `max_mode` exceeds the modes in the input file, vmec_jax automatically exte
 the boundary to include those harmonics at zero amplitude (`vj.extend_boundary_for_max_mode`).
 All runs use consistent VMEC resolution `mpol = ntor = 5`.
 Objectives: aspect ratio (target 6.0) + mean iota (target 0.41) + QA symmetry residuals.
-The optimization history shows three panels: QS residuals, aspect ratio, and mean iota.
+The current standalone QA path uses exact residuals + exact discrete-adjoint
+Jacobians with `scipy.optimize.least_squares`, plus a milder ESS profile
+(`α = 0.8`). For `max_mode > 1`, the script now does staged mode continuation:
+it solves the lower-mode QA problem first, then lifts that solution into the
+richer boundary space before running the final stage.
 
-| `max_mode` | DOFs | Aspect initial → final | Mean iota initial → final | Wall time ¹ |
-|:----------:|:----:|:----------------------:|:-------------------------:|:-----------:|
-| 1          |  8   | 5.0 → **6.0** ✓        | 0 → 0 (axisymmetric DOFs) | ~23 s       |
-| 2          | 24   | 5.0 → 5.51             | 0 → **0.14** (3D modes)   | ~608 s      |
+| `max_mode` | DOFs | Start | Budget | Eval used | Aspect final | Mean iota final | QS final | Objective final | Wall time ¹ |
+|:----------:|:----:|:-----:|:------:|:---------:|:------------:|:---------------:|:--------:|:---------------:|:-----------:|
+| 1          |  8   | input deck | 15 | 15 | **6.0002** | **0.4086** | `1.22e-3` | `1.22e-3` | ~29 s |
+| 2          | 24   | `max_mode=1` continuation | 15 + 40 | 23 | **6.0000** | **0.4092** | **8.36e-4** | **8.37e-4** | ~40 s |
 
-¹ Wall time on Apple M-series (warm-cache subsequent runs are faster).
+¹ Wall time on Apple M-series.
 
-With 8 DOFs (`max_mode=1`) only axisymmetric (`n=0`) harmonics are free, so
-the optimizer hits the aspect ratio target (5.0 → 6.0) but cannot generate
-rotational transform — iota stays at 0.  `max_mode=2` (24 DOFs) unlocks 3D
-modes that generate iota (0 → 0.14 toward target 0.41) while partially
-improving aspect ratio, at the cost of introducing mild QS breaking.
+The earlier “mode 2 is worse than mode 1” result was not a derivative problem.
+It was a basin-selection problem: starting the 24-DOF QA solve directly from
+the raw input lands in a poorer local minimum. Staged continuation fixes that.
+With the `max_mode=1` solution used as the starting point, the 24-DOF run now
+improves the QA objective further, as expected for a richer nested boundary
+space.
 
 <table>
   <tr>
-    <th align="center">max_mode = 1 &nbsp;(8 DOFs, aspect hit target)</th>
-    <th align="center">max_mode = 2 &nbsp;(24 DOFs, iota 0→0.14)</th>
+    <th align="center">max_mode = 1 &nbsp;(8 DOFs, exact SciPy + adjoint)</th>
+    <th align="center">max_mode = 2 &nbsp;(24 DOFs, exact SciPy + adjoint, continuation)</th>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/qa_opt/boundary_comparison.png" /></td>
