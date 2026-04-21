@@ -18,3 +18,4 @@ The module exports the following user-facing helpers:
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:

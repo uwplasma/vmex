@@ -2,9 +2,10 @@
 
 This module intentionally re-exports a small set of functions that cover the
 common workflows:
+
 - I/O: load input, read/write wout
 - Solve: fixed- and free-boundary drivers
-- Plotting: VMEC-style surfaces and B magnitude
+- Plotting: VMEC-style surfaces and magnetic-field magnitude
 
 Advanced users can import lower-level kernels directly from submodules.
 """
