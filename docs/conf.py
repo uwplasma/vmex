@@ -43,7 +43,7 @@ def _truthy(value: str | None) -> bool:
     return value.strip().lower() not in ("", "0", "false", "no")
 
 
-_FAST = _truthy(os.environ.get("SPHINX_FAST"))
+_FAST = _truthy(os.environ.get("SPHINX_FAST")) or os.environ.get("READTHEDOCS") == "True"
 if _FAST:
     tags.add("fast")
     # In fast mode build only a minimal landing page to keep CI under minutes.
