@@ -47,3 +47,12 @@ Install doc dependencies::
 Then build docs::
 
   LANG=C LC_ALL=C python -m sphinx -b html docs docs/_build/html
+
+To reproduce the stricter CI / release build locally, use warnings as errors
+and nitpicky cross-reference checks::
+
+  LANG=C LC_ALL=C python -m sphinx -W -n -b html docs docs/_build/html
+
+Read the Docs intentionally uses the fast landing-page build to keep hosted
+build times short. The full user guide and API reference are checked in GitHub
+Actions.
