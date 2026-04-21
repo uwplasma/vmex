@@ -1,5 +1,12 @@
 # vmec-jax
 
+[![PyPI version](https://img.shields.io/pypi/v/vmec-jax.svg)](https://pypi.org/project/vmec-jax/)
+[![Python versions](https://img.shields.io/pypi/pyversions/vmec-jax.svg)](https://pypi.org/project/vmec-jax/)
+[![License](https://img.shields.io/github/license/uwplasma/vmec_jax)](https://github.com/uwplasma/vmec_jax/blob/main/LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/uwplasma/vmec_jax/ci.yml?branch=main&label=ci)](https://github.com/uwplasma/vmec_jax/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/readthedocs/vmec-jax/latest?label=docs)](https://vmec-jax.readthedocs.io/en/latest/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/vmec-jax)](https://pypi.org/project/vmec-jax/)
+
 End-to-end differentiable JAX implementation of **VMEC2000** for fixed-boundary
 and free-boundary ideal-MHD equilibria.
 
@@ -36,8 +43,11 @@ From Python:
 ```python
 import vmec_jax as vj
 
-# Run solver
+# Run a fixed-boundary solve
 run = vj.run_fixed_boundary("input.nfp4_QH_warm_start")
+
+# Run a free-boundary solve
+freeb = vj.run_free_boundary("input.cth_like_free_bdy_lasym_small")
 
 # Plot any wout file (produces *_VMECparams.pdf, *_poloidal_plot.png, *_VMECsurfaces.pdf, *_VMEC_3Dplot.png)
 vj.plot_wout("wout_nfp4_QH_warm_start.nc", outdir="figures/")
