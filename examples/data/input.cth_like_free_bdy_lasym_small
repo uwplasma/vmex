@@ -4,7 +4,7 @@
 ! This case is built from the convergent cth_like_free_bdy benchmark with a
 ! small but nonzero asymmetric perturbation so both VMEC2000 and vmec_jax
 ! converge cleanly while still exercising lasym=True free-boundary control.
-  MGRID_FILE = 'mgrid_cth_like.nc',
+  MGRID_FILE = 'mgrid_cth_like_lasym_small.nc',
   LFREEB = T,
   DELT = 0.7,
   TCON0 = 1.0,
@@ -17,7 +17,7 @@
   NSTEP = 100,
   NTOR = 4,
   MPOL = 5,
-  NZETA = 36,
+  NZETA = 20,
   NVACSKIP = 9,
   LASYM = T,
 

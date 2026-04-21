@@ -15,6 +15,10 @@ If you have a fresh clone, fetch the optional large assets first::
 
   python tools/fetch_assets.py
 
+For a small free-boundary smoke test that does not require the large asset
+bundle, use the bundled ``input.cth_like_free_bdy_lasym_small`` case together
+with the tracked ``mgrid_cth_like_lasym_small.nc`` file in ``examples/data``.
+
 By default the showcase uses a parity-first single-grid run (``--single-ns 13``)
 and VMEC2000-style per-iteration **screen** output (FSQR/FSQZ/FSQL, RAX, DELT, WMHD)::
 
