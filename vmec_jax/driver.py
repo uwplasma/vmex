@@ -907,10 +907,19 @@ def run_fixed_boundary(
             f.write("columns: i xc xcdot\n")
             for i, (x, xd) in enumerate(zip(xc, xcdot), start=1):
                 f.write(f"{i:8d}{x:24.16e}{xd:24.16e}\n")
-    """Run a fixed-boundary vmec_jax solve with minimal boilerplate.
+    """Run a vmec_jax solve from an ``input.*`` file.
+
+    This is the main public driver and remains backward compatible with older
+    scripts that called :func:`run_fixed_boundary` for both fixed-boundary and
+    free-boundary decks. If ``LFREEB = T`` in the input namelist, the shared
+    free-boundary path is used automatically. New code that wants to make the
+    operating mode explicit should prefer :func:`run_free_boundary` for
+    free-boundary decks.
 
     Parameters
     ----------
+    input_path:
+        Path to a VMEC-style ``input.*`` file.
     solver:
         ``"vmec2000_iter"`` (VMEC-style multigrid iteration; default),
         ``"gd"`` (gradient descent), ``"lbfgs"``, ``"vmec_lbfgs"``, or
@@ -952,6 +961,11 @@ def run_fixed_boundary(
         ``"parity"`` (strict VMEC2000-style control path), and
         ``"accelerated"`` (experimental non-parity path that prioritizes
         final residual/quality and device residency).
+
+    Returns
+    -------
+    FixedBoundaryRun
+        Shared run container for both fixed-boundary and free-boundary solves.
     """
     # Default to 64-bit for VMEC parity; users can opt out via JAX_ENABLE_X64=0.
     try:
@@ -2902,9 +2916,33 @@ def run_fixed_boundary(
 def run_free_boundary(input_path: str | Path, **kwargs):
     """Run a free-boundary vmec_jax solve.
 
-    The implementation is shared with :func:`run_fixed_boundary`, but this
-    entry point makes the intended operating mode explicit and rejects
-    fixed-boundary inputs up front.
+    Parameters
+    ----------
+    input_path:
+        Path to a VMEC-style ``input.*`` file with ``LFREEB = T`` and a valid
+        ``MGRID_FILE`` entry.
+    **kwargs:
+        Forwarded directly to :func:`run_fixed_boundary`. Common options include
+        ``max_iter``, ``verbose``, ``use_initial_guess``, ``vmec_project``,
+        ``solver_mode``, and ``jit_forces``.
+
+    Returns
+    -------
+    FixedBoundaryRun
+        Run container with the parsed input, static data, final state, and
+        solver diagnostics.
+
+    Raises
+    ------
+    ValueError
+        If the input deck is not a free-boundary case.
+
+    Notes
+    -----
+    This wrapper intentionally shares the internal implementation with
+    :func:`run_fixed_boundary`. The only behavioral difference is that
+    ``run_free_boundary`` validates the mode up front, which makes scripts and
+    examples clearer and avoids silently running the wrong branch.
     """
     cfg, _ = load_config(str(input_path))
     if not bool(cfg.lfreeb):

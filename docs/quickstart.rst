@@ -64,6 +64,20 @@ silence the iteration table, and ``--outdir`` or ``--output`` to control where
 the ``wout_*.nc`` file is written. If you only want a short debug run, pass
 ``--max-iter`` and ``--no-multigrid`` (single grid).
 
+Free-boundary CLI smoke test
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For a small bundled free-boundary case, run::
+
+  vmec_jax examples/data/input.cth_like_free_bdy_lasym_small
+
+This input references the tracked ``examples/data/mgrid_cth_like_lasym_small.nc``
+fixture, so it works in a fresh clone without downloading the large asset
+bundle. The resulting ``wout_cth_like_free_bdy_lasym_small.nc`` can be plotted
+with::
+
+  vmec_jax --plot examples/data/wout_cth_like_free_bdy_lasym_small.nc
+
 If you want to compare the conservative parity track against the optimized
 fixed-boundary CLI-style controller from Python, run::
 
@@ -137,6 +151,23 @@ Most users should start from the small public API in ``vmec_jax.api``::
   wref = vj.read_wout("examples/data/wout_shaped_tokamak_pressure_reference.nc")
   print("fsq_total(ref)=", float(wref.fsqr + wref.fsqz + wref.fsql))
   print("fsq_total(new)=", float(wout.fsqr + wout.fsqz + wout.fsql))
+
+For free-boundary decks, prefer the explicit entrypoint::
+
+  import vmec_jax.api as vj
+
+  freeb = vj.run_free_boundary(
+      "examples/data/input.cth_like_free_bdy_lasym_small",
+      verbose=False,
+      use_initial_guess=False,
+  )
+  wout_freeb = vj.wout_from_fixed_boundary_run(freeb, include_fsq=True)
+  print("wb =", float(wout_freeb.wb))
+  print("wp =", float(wout_freeb.wp))
+
+Use ``run_fixed_boundary(...)`` if you deliberately want one driver that
+accepts either mode. It remains backward compatible and will still dispatch to
+the free-boundary path when ``LFREEB = T`` in the input deck.
 
 Simple optimization example
 ---------------------------
