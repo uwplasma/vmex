@@ -182,23 +182,25 @@ When `max_mode` exceeds the modes in the input file, vmec_jax automatically exte
 the boundary to include those harmonics at zero amplitude (`vj.extend_boundary_for_max_mode`).
 All runs use consistent VMEC resolution `mpol = ntor = 5`.
 Objectives: aspect ratio (target 6.0) + mean iota (target 0.41) + QA symmetry residuals.
+The optimization history shows three panels: QS residuals, aspect ratio, and mean iota.
 
-| `max_mode` | DOFs | Aspect initial → final | Objective initial | Objective final | Wall time ¹ |
-|:----------:|:----:|:----------------------:|:-----------------:|:---------------:|:-----------:|
-| 1          |  8   | 5.0 → **6.0** ✓        |   1.168           |  0.168          | ~49 s       |
-| 2          | 24   | 5.0 → 5.51             |   1.168           |  **0.340**      | ~608 s      |
+| `max_mode` | DOFs | Aspect initial → final | Mean iota initial → final | Wall time ¹ |
+|:----------:|:----:|:----------------------:|:-------------------------:|:-----------:|
+| 1          |  8   | 5.0 → **6.0** ✓        | 0 → 0 (axisymmetric DOFs) | ~23 s       |
+| 2          | 24   | 5.0 → 5.51             | 0 → **0.14** (3D modes)   | ~608 s      |
 
 ¹ Wall time on Apple M-series (warm-cache subsequent runs are faster).
 
-With 8 DOFs (`max_mode=1`) the optimizer satisfies the aspect ratio target
-(5.0 → 6.0) using only low-mode boundary harmonics — it solves the dominant
-residual but cannot independently shape iota or QS.  `max_mode=2` (24 DOFs)
-distributes effort across all three objectives simultaneously.
+With 8 DOFs (`max_mode=1`) only axisymmetric (`n=0`) harmonics are free, so
+the optimizer hits the aspect ratio target (5.0 → 6.0) but cannot generate
+rotational transform — iota stays at 0.  `max_mode=2` (24 DOFs) unlocks 3D
+modes that generate iota (0 → 0.14 toward target 0.41) while partially
+improving aspect ratio, at the cost of introducing mild QS breaking.
 
 <table>
   <tr>
-    <th align="center">max_mode = 1 &nbsp;(8 DOFs, aspect 5.0→6.0)</th>
-    <th align="center">max_mode = 2 &nbsp;(24 DOFs, 41 % reduction)</th>
+    <th align="center">max_mode = 1 &nbsp;(8 DOFs, aspect hit target)</th>
+    <th align="center">max_mode = 2 &nbsp;(24 DOFs, iota 0→0.14)</th>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/qa_opt/boundary_comparison.png" /></td>

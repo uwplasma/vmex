@@ -1095,31 +1095,38 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
         data = json.load(f)
 
     hist = data["history"]
-    objectives = [h["objective"] for h in hist]
+    # Use qs_objective (QS residuals only) if available, else fall back to total objective
+    qs_vals = [h.get("qs_objective", h["objective"]) for h in hist]
     aspects = [h["aspect"] for h in hist]
-    # Iota history is present for QA runs but absent for QH runs
+    # Iota trajectory: present when iota_fn was passed to optimizer
     iotas = [h["iota"] for h in hist] if hist and "iota" in hist[0] else None
+    target_iota = data.get("target_iota", None)
+    # Also show iota panel when target_iota is specified even if trajectory is missing
+    show_iota = iotas is not None
     iters = list(range(len(hist)))
     total_time = data.get("total_wall_time_s", 0.0)
     nfev = data.get("nfev", len(hist))
 
-    n_panels = 3 if iotas is not None else 2
+    n_panels = 3 if show_iota else 2
     fig, axes = plt.subplots(n_panels, 1, figsize=(7, 3 * n_panels), sharex=True)
     ax1, ax2 = axes[0], axes[1]
     ax3 = axes[2] if n_panels == 3 else None
 
-    ax1.semilogy(iters, objectives, "o-", color="steelblue", linewidth=2, markersize=6)
-    ax1.set_ylabel("Objective ∑r²", fontsize=11)
+    # --- panel 1: QS residuals ---
+    qs_pos = [max(v, 1e-16) for v in qs_vals]  # avoid log(0)
+    ax1.semilogy(iters, qs_pos, "o-", color="steelblue", linewidth=2, markersize=6)
+    ax1.set_ylabel("QS residuals ∑r²", fontsize=11)
     opt_label = data.get("label", "Optimisation")
     ax1.set_title(
         f"{opt_label}  ({nfev} evals, {total_time:.0f} s)",
         fontsize=11,
     )
-    ax1.axhline(objectives[-1], color="steelblue", linestyle="--", alpha=0.4,
-                label=f"Final: {objectives[-1]:.4f}")
+    ax1.axhline(qs_pos[-1], color="steelblue", linestyle="--", alpha=0.4,
+                label=f"Final: {qs_vals[-1]:.2e}")
     ax1.legend(fontsize=9)
     ax1.grid(True, alpha=0.3)
 
+    # --- panel 2: aspect ratio ---
     ax2.plot(iters, aspects, "s-", color="darkorange", linewidth=2, markersize=6)
     target_aspect = data.get("target_aspect", None)
     if target_aspect is not None:
@@ -1131,9 +1138,9 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
     ax2.legend(fontsize=9)
     ax2.grid(True, alpha=0.3)
 
+    # --- panel 3: mean iota ---
     if ax3 is not None and iotas is not None:
         ax3.plot(iters, iotas, "^-", color="forestgreen", linewidth=2, markersize=6)
-        target_iota = data.get("target_iota", None)
         if target_iota is not None:
             ax3.axhline(target_iota, color="k", linestyle=":", alpha=0.5,
                         label=f"Target ι={target_iota:.4g}")
