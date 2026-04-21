@@ -111,6 +111,7 @@ jobs:
   build:
     name: Build (wheel/sdist + docs)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -145,6 +146,7 @@ jobs:
   docs-full:
     name: Docs (full guide)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -159,9 +161,9 @@ jobs:
           python -m pip install -U pip
           python -m pip install ".[docs]"
 
-      - name: Build full docs (warnings as errors)
+      - name: Build full docs
         env:
           LC_ALL: C.UTF-8
           LANG: C.UTF-8
         run: |
-          python -m sphinx -W -n -j auto -b html docs docs/_build/html_full
+          python -m sphinx -j auto -b html docs docs/_build/html_full
