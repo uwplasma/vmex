@@ -4,6 +4,9 @@ This example optimizes a small set of boundary coefficients (RBC/ZBS) while
 holding the major-radius mode R00 fixed. The equilibrium solve uses the
 implicit fixed-boundary solver so gradients do not backpropagate through the
 inner iterations.
+
+For the exact discrete-adjoint fixed-resolution quasisymmetry route used in the
+current QH optimization work, see ``qh_fixed_resolution_exact.py``.
 """
 
 from __future__ import annotations

@@ -36,6 +36,45 @@ _SCAN_RUNNER_CACHE: dict[tuple, Any] = {}
 _COMPUTE_FORCES_CACHE: dict[tuple, Any] = {}
 
 
+if has_jax():
+    @jax.jit
+    def _ptau_compute_jit(
+        pru_even,
+        pru_odd,
+        pzu_even,
+        pzu_odd,
+        pr1_even,
+        pr1_odd,
+        pz1_even,
+        pz1_odd,
+        pshalf,
+        ohs,
+    ):
+        """Compute ptau min/max without redefining a hot JIT helper per solve."""
+        pshalf = pshalf.astype(pru_even.dtype)
+        ohs = ohs.astype(pru_even.dtype)
+        dphids = jnp.asarray(0.25, dtype=pru_even.dtype)
+        psh = pshalf[1:][:, None, None]
+        psh_safe = jnp.where(psh != 0.0, psh, jnp.ones_like(psh))
+        ru12 = 0.5 * (pru_even[1:] + pru_even[:-1] + psh * (pru_odd[1:] + pru_odd[:-1]))
+        pzs = ohs * ((pz1_even[1:] - pz1_even[:-1]) + psh * (pz1_odd[1:] - pz1_odd[:-1]))
+        ptau = ru12 * pzs + dphids * (
+            pru_odd[1:] * pz1_odd[1:]
+            + pru_odd[:-1] * pz1_odd[:-1]
+            + (pru_even[1:] * pz1_odd[1:] + pru_even[:-1] * pz1_odd[:-1]) / psh_safe
+        )
+        pzu12 = 0.5 * (pzu_even[1:] + pzu_even[:-1] + psh * (pzu_odd[1:] + pzu_odd[:-1]))
+        prs = ohs * ((pr1_even[1:] - pr1_even[:-1]) + psh * (pr1_odd[1:] - pr1_odd[:-1]))
+        ptau = ptau - prs * pzu12 - dphids * (
+            pzu_odd[1:] * pr1_odd[1:]
+            + pzu_odd[:-1] * pr1_odd[:-1]
+            + (pzu_even[1:] * pr1_odd[1:] + pzu_even[:-1] * pr1_odd[:-1]) / psh_safe
+        )
+        return jnp.min(ptau), jnp.max(ptau)
+else:
+    _ptau_compute_jit = None
+
+
 def _hash_array_bytes(a: Any) -> str:
     try:
         arr = np.asarray(a)
@@ -2856,6 +2895,7 @@ def solve_fixed_boundary_lbfgs(
     )
 
 
+@jax.tree_util.register_pytree_node_class
 @dataclass(frozen=True)
 class _WoutLikeVmecForces:
     """Minimal `wout`-like container for VMEC force/residual kernels."""
@@ -2879,6 +2919,65 @@ class _WoutLikeVmecForces:
     phipf_internal: Any | None = None
     chipf_internal: Any | None = None
     chips_eff: Any | None = None
+
+    def tree_flatten(self):
+        children = (
+            self.phipf,
+            self.phips,
+            self.chipf,
+            self.pres,
+            self.mass,
+            self.icurv,
+            self.phipf_internal,
+            self.chipf_internal,
+            self.chips_eff,
+        )
+        aux = (
+            int(self.nfp),
+            int(self.mpol),
+            int(self.ntor),
+            bool(self.lasym),
+            int(self.signgs),
+            None if self.gamma is None else float(self.gamma),
+            int(self.ncurr),
+            bool(self.lcurrent),
+            bool(self.flux_is_internal),
+        )
+        return children, aux
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        (
+            nfp,
+            mpol,
+            ntor,
+            lasym,
+            signgs,
+            gamma,
+            ncurr,
+            lcurrent,
+            flux_is_internal,
+        ) = aux_data
+        return cls(
+            nfp=int(nfp),
+            mpol=int(mpol),
+            ntor=int(ntor),
+            lasym=bool(lasym),
+            signgs=int(signgs),
+            gamma=gamma,
+            ncurr=int(ncurr),
+            lcurrent=bool(lcurrent),
+            flux_is_internal=bool(flux_is_internal),
+            phipf=children[0],
+            phips=children[1],
+            chipf=children[2],
+            pres=children[3],
+            mass=children[4],
+            icurv=children[5],
+            phipf_internal=children[6],
+            chipf_internal=children[7],
+            chips_eff=children[8],
+        )
 
 
 def _vmec_force_flux_profiles(*, phipf, chipf, signgs: int, flux_is_internal: bool, iotaf=None, iotas=None):
@@ -4036,7 +4135,8 @@ def solve_fixed_boundary_residual_iter(
     light_history: bool | None = None,
     resume_state_mode: str | None = None,
     fsq_total_target: float | None = None,
-    host_update_assembly: bool = False,
+    host_update_assembly: bool | None = None,
+    adjoint_trace: bool = False,
 ) -> SolveVmecResidualResult:
     """VMEC-style fixed-point update loop using preconditioned force residuals."""
     if not has_jax():
@@ -4074,9 +4174,18 @@ def solve_fixed_boundary_residual_iter(
         raise ValueError("step_size must be positive")
     # Auto-enable host_update_assembly (NumPy-path) for non-scan CPU solves.
     # This avoids the _mn_sin_to_signed JAX-eager overhead (~2s for circular_tokamak).
-    # The caller can still force host_update_assembly=False to opt out.
-    _auto_host = (not bool(use_scan)) and (jax.default_backend() == "cpu")
-    host_update_assembly = (bool(host_update_assembly) or _auto_host) and (not bool(use_scan)) and (jax.default_backend() == "cpu")
+    # When host_update_assembly is explicitly True/False, respect that choice.
+    _auto_host = (
+        (not bool(use_scan))
+        and (jax.default_backend() == "cpu")
+        and (not _tree_has_tracer(state0))
+    )
+    if host_update_assembly is None:
+        host_update_assembly = _auto_host
+    else:
+        host_update_assembly = bool(host_update_assembly)
+    host_update_assembly = host_update_assembly and (not bool(use_scan)) and (jax.default_backend() == "cpu")
+    adjoint_trace = bool(adjoint_trace)
 
     signgs = int(signgs)
     fsq_total_target = None if fsq_total_target is None else max(0.0, float(fsq_total_target))
@@ -4881,41 +4990,34 @@ def solve_fixed_boundary_residual_iter(
         return jnp.sqrt(jnp.maximum(p, jnp.asarray(0.0, dtype=dtype)))
 
     # Precompute pshalf and ohs for the JIT-accelerated ptau check.
-    # These are fixed for the lifetime of this NS-stage closure.
-    _ptau_s_np = np.asarray(s)
-    _ptau_hs = float(_ptau_s_np[1] - _ptau_s_np[0]) if int(_ptau_s_np.shape[0]) > 1 else 1.0
-    _ptau_ohs_scalar = 0.0 if _ptau_hs == 0.0 else 1.0 / _ptau_hs
-    _ptau_pshalf_np = _pshalf_from_s(s)
-    if has_jax():
-        _ptau_pshalf_jax = jnp.asarray(_ptau_pshalf_np, dtype=jnp.float64)
-        _ptau_ohs_jax = jnp.asarray(_ptau_ohs_scalar, dtype=jnp.float64)
-
-        @jax.jit
-        def _ptau_compute_jit(pru_even, pru_odd, pzu_even, pzu_odd,
-                              pr1_even, pr1_odd, pz1_even, pz1_odd):
-            """JIT-compiled ptau computation — avoids 8 large array materializations/iter."""
-            pshalf = _ptau_pshalf_jax.astype(pru_even.dtype)
-            ohs = _ptau_ohs_jax.astype(pru_even.dtype)
-            dphids = jnp.asarray(0.25, dtype=pru_even.dtype)
-            psh = pshalf[1:][:, None, None]
-            psh_safe = jnp.where(psh != 0.0, psh, jnp.ones_like(psh))
-            ru12 = 0.5 * (pru_even[1:] + pru_even[:-1] + psh * (pru_odd[1:] + pru_odd[:-1]))
-            pzs = ohs * ((pz1_even[1:] - pz1_even[:-1]) + psh * (pz1_odd[1:] - pz1_odd[:-1]))
-            ptau = ru12 * pzs + dphids * (
-                pru_odd[1:] * pz1_odd[1:]
-                + pru_odd[:-1] * pz1_odd[:-1]
-                + (pru_even[1:] * pz1_odd[1:] + pru_even[:-1] * pz1_odd[:-1]) / psh_safe
-            )
-            pzu12 = 0.5 * (pzu_even[1:] + pzu_even[:-1] + psh * (pzu_odd[1:] + pzu_odd[:-1]))
-            prs = ohs * ((pr1_even[1:] - pr1_even[:-1]) + psh * (pr1_odd[1:] - pr1_odd[:-1]))
-            ptau = ptau - prs * pzu12 - dphids * (
-                pzu_odd[1:] * pr1_odd[1:]
-                + pzu_odd[:-1] * pr1_odd[:-1]
-                + (pzu_even[1:] * pr1_odd[1:] + pzu_even[:-1] * pr1_odd[:-1]) / psh_safe
-            )
-            return jnp.min(ptau), jnp.max(ptau)
+    # These are fixed for the lifetime of this NS-stage closure. Keep the
+    # cached constants tracer-safe so the residual solver can participate in a
+    # JIT-compiled forward-mode Jacobian build.
+    _ptau_s_is_traced = _tree_has_tracer(s)
+    if _ptau_s_is_traced and has_jax():
+        _ptau_s_jax = jnp.asarray(s, dtype=jnp.float64)
+        if int(_ptau_s_jax.shape[0]) > 1:
+            _ptau_hs_jax0 = _ptau_s_jax[1] - _ptau_s_jax[0]
+        else:
+            _ptau_hs_jax0 = jnp.asarray(1.0, dtype=jnp.float64)
+        _ptau_ohs_scalar = None
+        _ptau_pshalf_np = None
     else:
-        _ptau_compute_jit = None
+        _ptau_s_np = np.asarray(s)
+        _ptau_hs = float(_ptau_s_np[1] - _ptau_s_np[0]) if int(_ptau_s_np.shape[0]) > 1 else 1.0
+        _ptau_ohs_scalar = 0.0 if _ptau_hs == 0.0 else 1.0 / _ptau_hs
+        _ptau_pshalf_np = _pshalf_from_s(s)
+    if has_jax():
+        if _ptau_s_is_traced:
+            _ptau_pshalf_jax = _pshalf_from_s_jax(_ptau_s_jax, jnp.float64)
+            _ptau_ohs_jax = jnp.where(
+                _ptau_hs_jax0 == 0.0,
+                jnp.asarray(0.0, dtype=jnp.float64),
+                jnp.asarray(1.0, dtype=jnp.float64) / _ptau_hs_jax0,
+            )
+        else:
+            _ptau_pshalf_jax = jnp.asarray(_ptau_pshalf_np, dtype=jnp.float64)
+            _ptau_ohs_jax = jnp.asarray(_ptau_ohs_scalar, dtype=jnp.float64)
 
     def _ptau_minmax_from_k_host(k) -> tuple[Any | None, Any | None]:
         """Compute VMEC `ptau` min/max on the host for controller decisions."""
@@ -4941,6 +5043,7 @@ def solve_fixed_boundary_residual_iter(
                 ptau_min_j, ptau_max_j = _ptau_compute_jit(
                     pru_even, pru_odd, pzu_even, pzu_odd,
                     pr1_even, pr1_odd, pz1_even, pz1_odd,
+                    _ptau_pshalf_jax, _ptau_ohs_jax,
                 )
                 return float(ptau_min_j), float(ptau_max_j)
 
@@ -5954,9 +6057,12 @@ def solve_fixed_boundary_residual_iter(
         _n_half = 0
 
     if getattr(static, "mn_idx_m", None) is not None:
-        m_idx = jnp.asarray(np.asarray(static.mn_idx_m, dtype=np.int32))
-        n_idx = jnp.asarray(np.asarray(static.mn_idx_n, dtype=np.int32))
-        kp_idx = jnp.asarray(np.asarray(static.mn_idx_kp, dtype=np.int32))
+        m_idx_np = np.asarray(static.mn_idx_m, dtype=np.int32)
+        n_idx_np = np.asarray(static.mn_idx_n, dtype=np.int32)
+        kp_idx_np = np.asarray(static.mn_idx_kp, dtype=np.int32)
+        m_idx = jnp.asarray(m_idx_np)
+        n_idx = jnp.asarray(n_idx_np)
+        kp_idx = jnp.asarray(kp_idx_np)
         kn_idx_np = np.asarray(static.mn_idx_kn, dtype=np.int32)
         has_kn_np = np.asarray(static.mn_has_kn, dtype=bool) if static.mn_has_kn is not None else (kn_idx_np >= 0)
     else:
@@ -5974,18 +6080,21 @@ def solve_fixed_boundary_residual_iter(
                 kp_idx_list.append(kp)
                 kn_idx_list.append(int(idx_neg[m_i, n_i]))
 
-        m_idx = jnp.asarray(np.asarray(m_idx_list, dtype=np.int32))
-        n_idx = jnp.asarray(np.asarray(n_idx_list, dtype=np.int32))
-        kp_idx = jnp.asarray(np.asarray(kp_idx_list, dtype=np.int32))
+        m_idx_np = np.asarray(m_idx_list, dtype=np.int32)
+        n_idx_np = np.asarray(n_idx_list, dtype=np.int32)
+        kp_idx_np = np.asarray(kp_idx_list, dtype=np.int32)
+        m_idx = jnp.asarray(m_idx_np)
+        n_idx = jnp.asarray(n_idx_np)
+        kp_idx = jnp.asarray(kp_idx_np)
         kn_idx_np = np.asarray(kn_idx_list, dtype=np.int32)
         has_kn_np = kn_idx_np >= 0
     kn_idx = jnp.asarray(kn_idx_np)
     has_kn = jnp.asarray(has_kn_np)
     has_kn_any = bool(np.any(has_kn_np))
     # NumPy index arrays for _rz_norm_np (avoid JAX dispatch on preconditioner rebuilds).
-    _kp_idx_np = np.asarray(kp_idx, dtype=np.int32)
-    _m_idx_np = np.asarray(m_idx, dtype=np.int32)
-    _n_idx_np = np.asarray(n_idx, dtype=np.int32)
+    _kp_idx_np = kp_idx_np
+    _m_idx_np = m_idx_np
+    _n_idx_np = n_idx_np
     _include_rcc_np = (_m_idx_np > 0) | (_n_idx_np > 0)
     _is_m0_1d = (_m_idx_np == 0)
     _is_n0_1d = (_n_idx_np == 0)
@@ -6109,7 +6218,11 @@ def solve_fixed_boundary_residual_iter(
     scalxc_mn = vmec_scalxc_from_s(s=s, mpol=int(static.cfg.mpol)).astype(jnp.asarray(state0.Rcos).dtype)[:, :, None]
     if not bool(divide_by_scalxc_for_update):
         scalxc_mn = jnp.ones_like(scalxc_mn)
-    scalxc_mn_np = np.asarray(scalxc_mn, dtype=float)
+    scalxc_mn_np = (
+        np.asarray(scalxc_mn, dtype=float)
+        if bool(host_update_assembly) and (not _tree_has_tracer(scalxc_mn))
+        else None
+    )
 
     def _mn_cos_to_signed_host(cc, ss):
         # Single-DGEMM path: [cc, ss] @ _AB_cos (= vstack([A_cos, B_cos]))
@@ -6192,13 +6305,10 @@ def solve_fixed_boundary_residual_iter(
         """
         rpos = jnp.asarray(state.Rcos)[:, kp_idx]
         zpos = jnp.asarray(state.Zsin)[:, kp_idx]
-        rneg = jnp.zeros_like(rpos)
-        zneg = jnp.zeros_like(zpos)
-        if has_kn_any:
-            rneg = rneg.at[:, has_kn].set(jnp.asarray(state.Rcos)[:, kn_idx[has_kn]])
-            zneg = zneg.at[:, has_kn].set(jnp.asarray(state.Zsin)[:, kn_idx[has_kn]])
-
         has_kn_mask = has_kn[None, :]
+        kn_idx_safe = jnp.maximum(kn_idx, 0)
+        rneg = jnp.where(has_kn_mask, jnp.asarray(state.Rcos)[:, kn_idx_safe], 0.0)
+        zneg = jnp.where(has_kn_mask, jnp.asarray(state.Zsin)[:, kn_idx_safe], 0.0)
         is_m0 = (m_idx == 0)[None, :]
         rcc = rpos + jnp.where(has_kn_mask, rneg, 0.0)
         zsc = jnp.where(has_kn_mask, zpos + zneg, zpos)
@@ -6222,11 +6332,8 @@ def solve_fixed_boundary_residual_iter(
             # Asymmetric terms: include Rsin/Zcos internal components.
             rs_pos = jnp.asarray(state.Rsin)[:, kp_idx]
             zc_pos = jnp.asarray(state.Zcos)[:, kp_idx]
-            rs_neg = jnp.zeros_like(rs_pos)
-            zc_neg = jnp.zeros_like(zc_pos)
-            if has_kn_any:
-                rs_neg = rs_neg.at[:, has_kn].set(jnp.asarray(state.Rsin)[:, kn_idx[has_kn]])
-                zc_neg = zc_neg.at[:, has_kn].set(jnp.asarray(state.Zcos)[:, kn_idx[has_kn]])
+            rs_neg = jnp.where(has_kn_mask, jnp.asarray(state.Rsin)[:, kn_idx_safe], 0.0)
+            zc_neg = jnp.where(has_kn_mask, jnp.asarray(state.Zcos)[:, kn_idx_safe], 0.0)
 
             # Internal sin/cos blocks from signed coefficients.
             rsc = jnp.where(has_kn_mask, rs_pos + rs_neg, jnp.where(is_n0, rs_pos, jnp.where(is_m0, 0.0, rs_pos)))
@@ -6249,10 +6356,18 @@ def solve_fixed_boundary_residual_iter(
     # Precompute per-iteration constants once.
     w_mode_mn = _mode_diag_weights_mn(jnp.asarray(state0.Rcos).dtype)
     # NumPy copy for host-path mode-diagonal step (avoids 36 JAX dispatches/iter).
-    w_mode_mn_np = np.asarray(w_mode_mn)
+    w_mode_mn_np = (
+        np.asarray(w_mode_mn)
+        if bool(host_update_assembly) and (not _tree_has_tracer(w_mode_mn))
+        else None
+    )
     # Precompute axis mask for _enforce_fixed_boundary_and_axis_np (avoids 7000+
     # _axis_m0_mask JAX dispatches per solve — saves ~0.5s real).
-    _state0_dtype = np.asarray(state0.Rcos).dtype
+    _state0_dtype = (
+        np.asarray(state0.Rcos).dtype
+        if bool(host_update_assembly) and (not _tree_has_tracer(state0.Rcos))
+        else jnp.asarray(state0.Rcos).dtype
+    )
     _precomputed_axis_mask_np = (
         np.asarray(_axis_m0_mask(static, dtype=_state0_dtype))
         if host_update_assembly else None
@@ -9741,6 +9856,7 @@ def solve_fixed_boundary_residual_iter(
     w_try_history: list[float] = []
     w_try_ratio_history: list[float] = []
     restart_path_history: list[str] = []
+    adjoint_step_trace_history: list[dict[str, Any]] = []
     min_tau_history: list[float] = []
     max_tau_history: list[float] = []
     bad_jacobian_history: list[int] = []
@@ -11023,7 +11139,7 @@ def solve_fixed_boundary_residual_iter(
                         jmax_override=precond_jmax_override,
                     )
                     cache_prec_rz_mats = mats
-                    cache_prec_rz_jmax = int(jmax)
+                    cache_prec_rz_jmax = None if _tree_has_tracer(k) else int(jmax)
                 vmec2000_cache_valid = True
             if host_update_assembly:
                 # fsqr/fsqz/fsql are already Python floats from the NumPy path above.
@@ -11143,14 +11259,18 @@ def solve_fixed_boundary_residual_iter(
                     rz_preconditioner_matrices_reassemble,
                 )
 
+                precond_traced = _tree_has_tracer(k)
                 need_lam_prec = _env_dump_lam not in ("", "0")
                 need_lamcal = _env_dump_lamcal not in ("", "0")
                 need_prec_reassemble = (
-                    (cache_prec_rz_jmax is not None)
+                    (not precond_traced)
+                    and (cache_prec_rz_jmax is not None)
                     and (int(cache_prec_rz_jmax) != int(precond_expected_jmax))
                     and _can_reassemble_precond_mats(cache_prec_rz_mats)
                 )
                 need_prec_refresh = (
+                    precond_traced
+                    or
                     (not bool(vmec2000_cache_valid))
                     or (cache_prec_lam_prec is None)
                     or (cache_prec_rz_mats is None)
@@ -11191,7 +11311,7 @@ def solve_fixed_boundary_residual_iter(
                     cache_prec_faclam = faclam_dump
                     cache_prec_lam_debug = lam_debug
                     cache_prec_rz_mats = mats
-                    cache_prec_rz_jmax = int(jmax)
+                    cache_prec_rz_jmax = None if precond_traced else int(jmax)
                     if timing_enabled and t_prec_refresh_start is not None:
                         try:
                             if has_jax():
@@ -11210,18 +11330,19 @@ def solve_fixed_boundary_residual_iter(
                             jmax_override=precond_jmax_override,
                         )
                         cache_prec_rz_mats = mats
-                        cache_prec_rz_jmax = int(jmax)
+                        cache_prec_rz_jmax = None if precond_traced else int(jmax)
                     else:
                         mats = cache_prec_rz_mats
-                        jmax = int(cache_prec_rz_jmax)
+                        jmax = cache_prec_rz_jmax
                 _maybe_dump_lam_prec(lam_prec=lam_prec, faclam=faclam_dump, static=static, iter_idx=int(iter2))
-                _maybe_dump_precond_mats(
-                    mats=mats,
-                    static=static,
-                    iter_idx=int(iter2),
-                    jmax=int(jmax),
-                    used_cache=(not bool(need_prec_refresh)),
-                )
+                if not precond_traced:
+                    _maybe_dump_precond_mats(
+                        mats=mats,
+                        static=static,
+                        iter_idx=int(iter2),
+                        jmax=int(jmax),
+                        used_cache=(not bool(need_prec_refresh)),
+                    )
                 if lam_debug is not None:
                     _maybe_dump_lamcal(lam_debug=lam_debug, static=static, iter_idx=int(iter2))
                 frzl_rhs = _apply_vmec_scale_m1_precond_rhs(frzl, mats)
@@ -11282,14 +11403,18 @@ def solve_fixed_boundary_residual_iter(
                     rz_preconditioner_matrices_reassemble,
                 )
 
+                precond_traced = _tree_has_tracer(k)
                 need_lam_prec = _env_dump_lam not in ("", "0")
                 need_lamcal = _env_dump_lamcal not in ("", "0")
                 need_prec_reassemble = (
-                    (cache_prec_rz_jmax is not None)
+                    (not precond_traced)
+                    and (cache_prec_rz_jmax is not None)
                     and (int(cache_prec_rz_jmax) != int(precond_expected_jmax))
                     and _can_reassemble_precond_mats(cache_prec_rz_mats)
                 )
                 need_prec_refresh = (
+                    precond_traced
+                    or
                     (not bool(vmec2000_cache_valid))
                     or (cache_prec_lam_prec is None)
                     or (cache_prec_rz_mats is None)
@@ -11330,7 +11455,7 @@ def solve_fixed_boundary_residual_iter(
                     cache_prec_faclam = faclam_dump
                     cache_prec_lam_debug = lam_debug
                     cache_prec_rz_mats = mats
-                    cache_prec_rz_jmax = int(jmax)
+                    cache_prec_rz_jmax = None if precond_traced else int(jmax)
                     if timing_enabled and t_prec_refresh_start is not None:
                         try:
                             if has_jax():
@@ -11349,18 +11474,19 @@ def solve_fixed_boundary_residual_iter(
                             jmax_override=precond_jmax_override,
                         )
                         cache_prec_rz_mats = mats
-                        cache_prec_rz_jmax = int(jmax)
+                        cache_prec_rz_jmax = None if precond_traced else int(jmax)
                     else:
                         mats = cache_prec_rz_mats
-                        jmax = int(cache_prec_rz_jmax)
+                        jmax = cache_prec_rz_jmax
                 _maybe_dump_lam_prec(lam_prec=lam_prec, faclam=faclam_dump, static=static, iter_idx=int(iter2))
-                _maybe_dump_precond_mats(
-                    mats=mats,
-                    static=static,
-                    iter_idx=int(iter2),
-                    jmax=int(jmax),
-                    used_cache=(not bool(need_prec_refresh)),
-                )
+                if not precond_traced:
+                    _maybe_dump_precond_mats(
+                        mats=mats,
+                        static=static,
+                        iter_idx=int(iter2),
+                        jmax=int(jmax),
+                        used_cache=(not bool(need_prec_refresh)),
+                    )
                 if lam_debug is not None:
                     _maybe_dump_lamcal(lam_debug=lam_debug, static=static, iter_idx=int(iter2))
                 frzl_rhs = (
@@ -12418,6 +12544,79 @@ def solve_fixed_boundary_residual_iter(
             # iteration in (m, n>=0) storage, no line-search accept/reject.
             w_curr = fsqr_f + fsqz_f + fsql_f
             state_backup = state
+            if adjoint_trace:
+                trace_entry: dict[str, Any] = {
+                    "branch": "strict_update",
+                    "state_pre": state_backup,
+                    "max_update_rms_pre": float(max_update_rms),
+                    "max_coeff_delta_rms_pre": float(max_coeff_delta_rms),
+                    "divide_by_scalxc_for_update": bool(divide_by_scalxc_for_update),
+                    "lambda_update_scale": float(lambda_update_scale),
+                    "apply_lforbal": bool(apply_lforbal),
+                    "apply_m1_constraints": bool(apply_m1_constraints),
+                    "include_edge_residual": bool(include_edge_residual),
+                    "vmec2000_control": bool(vmec2000_control),
+                    "limit_dt_from_force": bool(limit_dt_from_force),
+                    "signgs": int(signgs),
+                    "zero_m1": np.asarray(zero_m1),
+                    "wout_like": wout_like,
+                    "trig": trig,
+                    "w_mode_mn": np.asarray(w_mode_mn),
+                    "lam_prec": np.asarray(lam_prec),
+                    "precond_mats": mats,
+                    "precond_jmax": int(jmax),
+                    "inv_tau_before": np.asarray(inv_tau, dtype=float),
+                    "fsq_prev_before": float(fsq_prev_before),
+                    "reset_inv_tau": bool(iter2 == iter1),
+                    "frzl_frcc": np.asarray(frzl.frcc),
+                    "frzl_frss": None if frzl.frss is None else np.asarray(frzl.frss),
+                    "frzl_fzsc": np.asarray(frzl.fzsc),
+                    "frzl_fzcs": None if frzl.fzcs is None else np.asarray(frzl.fzcs),
+                    "frzl_flsc": np.asarray(frzl.flsc),
+                    "frzl_flcs": None if frzl.flcs is None else np.asarray(frzl.flcs),
+                    "frzl_frsc": None if getattr(frzl, "frsc", None) is None else np.asarray(frzl.frsc),
+                    "frzl_frcs": None if getattr(frzl, "frcs", None) is None else np.asarray(frzl.frcs),
+                    "frzl_fzcc": None if getattr(frzl, "fzcc", None) is None else np.asarray(frzl.fzcc),
+                    "frzl_fzss": None if getattr(frzl, "fzss", None) is None else np.asarray(frzl.fzss),
+                    "frzl_flcc": None if getattr(frzl, "flcc", None) is None else np.asarray(frzl.flcc),
+                    "frzl_flss": None if getattr(frzl, "flss", None) is None else np.asarray(frzl.flss),
+                    "frzl_rz_frcc": np.asarray(frzl_rz.frcc),
+                    "frzl_rz_frss": None if frzl_rz.frss is None else np.asarray(frzl_rz.frss),
+                    "frzl_rz_fzsc": np.asarray(frzl_rz.fzsc),
+                    "frzl_rz_fzcs": None if frzl_rz.fzcs is None else np.asarray(frzl_rz.fzcs),
+                    "frzl_rz_flsc": np.asarray(frzl_rz.flsc),
+                    "frzl_rz_flcs": None if frzl_rz.flcs is None else np.asarray(frzl_rz.flcs),
+                    "frzl_rz_frsc": None if getattr(frzl_rz, "frsc", None) is None else np.asarray(frzl_rz.frsc),
+                    "frzl_rz_frcs": None if getattr(frzl_rz, "frcs", None) is None else np.asarray(frzl_rz.frcs),
+                    "frzl_rz_fzcc": None if getattr(frzl_rz, "fzcc", None) is None else np.asarray(frzl_rz.fzcc),
+                    "frzl_rz_fzss": None if getattr(frzl_rz, "fzss", None) is None else np.asarray(frzl_rz.fzss),
+                    "frzl_rz_flcc": None if getattr(frzl_rz, "flcc", None) is None else np.asarray(frzl_rz.flcc),
+                    "frzl_rz_flss": None if getattr(frzl_rz, "flss", None) is None else np.asarray(frzl_rz.flss),
+                    "vRcc_before": np.asarray(vRcc),
+                    "vRss_before": np.asarray(vRss),
+                    "vZsc_before": np.asarray(vZsc),
+                    "vZcs_before": np.asarray(vZcs),
+                    "vLsc_before": np.asarray(vLsc),
+                    "vLcs_before": np.asarray(vLcs),
+                    "vRsc_before": np.asarray(vRsc),
+                    "vRcs_before": np.asarray(vRcs),
+                    "vZcc_before": np.asarray(vZcc),
+                    "vZss_before": np.asarray(vZss),
+                    "vLcc_before": np.asarray(vLcc),
+                    "vLss_before": np.asarray(vLss),
+                    "frcc_u": np.asarray(frcc_u),
+                    "frss_u": np.asarray(frss_u),
+                    "fzsc_u": np.asarray(fzsc_u),
+                    "fzcs_u": np.asarray(fzcs_u),
+                    "flsc_u": np.asarray(flsc_u),
+                    "flcs_u": np.asarray(flcs_u),
+                    "frsc_u": np.asarray(frsc_u),
+                    "frcs_u": np.asarray(frcs_u),
+                    "fzcc_u": np.asarray(fzcc_u),
+                    "fzss_u": np.asarray(fzss_u),
+                    "flcc_u": np.asarray(flcc_u),
+                    "flss_u": np.asarray(flss_u),
+                }
             dt_eff = float(time_step)
             if bool(limit_dt_from_force):
                 dt_eff = _safe_dt_from_force(
@@ -12513,6 +12712,7 @@ def solve_fixed_boundary_residual_iter(
                 update_rms = _update_rms_float()
             else:
                 update_rms = None
+            update_rms_preclip = update_rms
             if bool(limit_update_rms) and np.isfinite(update_rms) and (update_rms > max_update_rms):
                 scl = max_update_rms / max(update_rms, 1e-30)
                 vRcc = vRcc * scl
@@ -12545,6 +12745,8 @@ def solve_fixed_boundary_residual_iter(
                 )
                 update_rms_host = float(np.asarray(update_rms_j))
                 update_rms = update_rms_host
+            else:
+                scl = 1.0
 
             dR = dt_eff * _mn_cos_to_signed_physical(vRcc, vRss)
             dZ = dt_eff * _mn_sin_to_signed_physical(vZsc, vZcs)
@@ -12860,6 +13062,8 @@ def solve_fixed_boundary_residual_iter(
                                 )
                             )
                         )
+                        if adjoint_trace:
+                            trace_entry["fallback_direct_dt"] = float(dt_direct)
                     else:
                         # Roll back state and zero velocity.
                         state = state_backup
@@ -12959,6 +13163,41 @@ def solve_fixed_boundary_residual_iter(
                         cache_prec_lam_prec = None
                         cache_prec_faclam = None
                         cache_prec_lam_debug = None
+            if adjoint_trace:
+                trace_entry.update(
+                    {
+                        "step_status": str(step_status),
+                        "restart_reason": str(restart_reason),
+                        "restart_path": str(restart_path),
+                        "dt_eff": float(dt_eff),
+                        "time_step": float(time_step),
+                        "w_curr": float(w_curr),
+                        "w_try": float(w_try),
+                        "w_try_ratio": float(w_try_ratio),
+                        "b1": float(b1),
+                        "fac": float(fac),
+                        "flip_sign": float(flip_sign),
+                        "force_scale": float(force_scale),
+                        "limit_update_rms": bool(limit_update_rms),
+                        "update_rms_preclip": None if update_rms_preclip is None else float(update_rms_preclip),
+                        "update_rms_postclip": None if update_rms is None else float(update_rms),
+                        "update_rms_scale": float(scl),
+                        "state_post": state,
+                        "vRcc_after": np.asarray(vRcc),
+                        "vRss_after": np.asarray(vRss),
+                        "vZsc_after": np.asarray(vZsc),
+                        "vZcs_after": np.asarray(vZcs),
+                        "vLsc_after": np.asarray(vLsc),
+                        "vLcs_after": np.asarray(vLcs),
+                        "vRsc_after": np.asarray(vRsc),
+                        "vRcs_after": np.asarray(vRcs),
+                        "vZcc_after": np.asarray(vZcc),
+                        "vZss_after": np.asarray(vZss),
+                        "vLcc_after": np.asarray(vLcc),
+                        "vLss_after": np.asarray(vLss),
+                    }
+                )
+                adjoint_step_trace_history.append(trace_entry)
             if timing_enabled and t_update_start is not None:
                 try:
                     if has_jax():
@@ -13280,6 +13519,7 @@ def solve_fixed_boundary_residual_iter(
         "w_try_history": np.asarray(w_try_history, dtype=float),
         "w_try_ratio_history": np.asarray(w_try_ratio_history, dtype=float),
         "restart_path_history": np.asarray(restart_path_history, dtype=object),
+        "adjoint_step_trace": adjoint_step_trace_history,
         "min_tau_history": np.asarray(min_tau_history, dtype=float),
         "max_tau_history": np.asarray(max_tau_history, dtype=float),
         "bad_jacobian_history": np.asarray(bad_jacobian_history, dtype=int),

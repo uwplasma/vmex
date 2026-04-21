@@ -1,0 +1,57 @@
+{
+  "label": "QA opt (max_mode=1)",
+  "max_nfev": 15,
+  "ftol": 0.001,
+  "gtol": 0.001,
+  "xtol": 0.001,
+  "total_wall_time_s": 48.69056304199876,
+  "nfev": 3,
+  "njev": 3,
+  "success": true,
+  "message": "`xtol` termination condition is satisfied.",
+  "objective_initial": 1.1680999999999377,
+  "objective_final": 0.1681924556213016,
+  "qs_initial": 0.16809999999999997,
+  "qs_final": 0.16809999999999997,
+  "aspect_initial": 5.000000000000031,
+  "aspect_final": 6.009615384615378,
+  "history": [
+    {
+      "wall_time_s": 0.0,
+      "cost": 0.5840499999999689,
+      "objective": 1.1680999999999377,
+      "qs_objective": 0.16809999999999997,
+      "aspect": 5.000000000000031
+    },
+    {
+      "wall_time_s": 23.455815541999982,
+      "cost": 0.5840499999999689,
+      "objective": 1.1680999999999377,
+      "qs_objective": 0.16809999999999997,
+      "aspect": 5.000000000000031
+    },
+    {
+      "wall_time_s": 35.635619374999806,
+      "cost": 0.11529999999997578,
+      "objective": 0.23059999999995157,
+      "qs_objective": 0.16809999999999997,
+      "aspect": 6.249999999999903
+    },
+    {
+      "wall_time_s": 48.662969832999806,
+      "cost": 0.0840962278106508,
+      "objective": 0.1681924556213016,
+      "qs_objective": 0.16809999999999997,
+      "aspect": 6.009615384615378
+    },
+    {
+      "wall_time_s": 48.69056304199876,
+      "cost": 0.0840962278106508,
+      "objective": 0.1681924556213016,
+      "qs_objective": 0.16809999999999997,
+      "aspect": 6.009615384615378
+    }
+  ],
+  "target_aspect": 6.0,
+  "target_iota": 0.41
+}

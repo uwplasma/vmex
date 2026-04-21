@@ -1,36 +1,127 @@
 Performance notes
 =================
 
-This page collects practical advice for using ``vmec-jax`` efficiently.
+This page describes the performance characteristics of ``vmec_jax``, the
+algorithmic and implementation choices that determine them, and practical
+tuning advice.
 
-Current bottlenecks
--------------------
+Overview: cold vs warm runtime
+--------------------------------
 
-The current performance picture is no longer dominated by one missing JIT.
-Instead, the main costs are split across a few categories:
+``vmec_jax`` uses **XLA JIT compilation** (via JAX).  The first call in a
+process compiles the iteration kernels; subsequent calls reuse the compiled
+code:
 
-- control-path overhead:
-  - solver policy, restart logic, printing, history capture, and convergence
-    bookkeeping still live too close to the per-iteration numerical work,
-  - this shows up most clearly on GPU and on medium-sized CPU cases where the
-    numerical kernels themselves are already reasonably fast.
-- host/device synchronization:
-  - scalar extraction, diagnostic collection, and print-oriented logic still
-    force some hot paths back to the host more often than ideal.
-- transform / assembly memory traffic:
-  - repeated large real-space and Fourier materializations between
-    ``tomnsp -> bcovar -> forces -> residual`` stages can cost more than the
-    arithmetic itself.
-- output generation:
-  - ``wout`` synthesis is still a noticeable post-convergence cost on larger
-    cases.
-- free-boundary dense vacuum solves:
-  - the remaining free-boundary runtime work is concentrated in operator reuse,
-    cadence, and coupled edge-force plumbing, not only raw linear algebra.
+- **Cold run**: includes XLA compilation (one-time cost per process). For
+  typical fixed-boundary cases on CPU this is 10–60 s.
+- **Warm run**: steady-state solve time after the kernels are in memory — the
+  fair comparison against VMEC2000.
 
-In practice, this means the next major performance gains are likely to come
-from making loops more device-resident and from reducing memory traffic, rather
-than from adding more isolated ``jit`` wrappers.
+Starting from v0.2, ``vmec_jax`` caches compiled XLA kernels to disk
+(``~/.cache/vmec_jax/jax_cache``).  Fresh processes on the same machine after
+the first run benefit from the on-disk cache and approach warm speed.
+
+VMEC2000 is a pre-compiled Fortran binary with no JIT overhead — it is always
+effectively "cold".  When benchmarking, compare ``vmec_jax`` warm runtime
+against VMEC2000 runtime.
+
+Key performance decisions
+--------------------------
+
+The following design choices collectively explain why ``vmec_jax`` achieves
+warm runtimes competitive with or faster than VMEC2000 on CPU:
+
+**1. Single-grid default for fixed-boundary**
+  The default CLI path skips staged multi-grid schedules and goes directly to
+  the final grid.  VMEC2000 uses a ``NS_ARRAY`` continuation schedule; for
+  many cases the intermediate stages add overhead without improving convergence.
+  Pass ``--parity`` to force the VMEC2000 continuation schedule.
+
+**2. Scan-based iteration (``jax.lax.scan``)**
+  The VMEC iteration loop is lifted into ``jax.lax.scan`` to eliminate Python
+  dispatch overhead.  Each scan chunk compiles to a single XLA program; only
+  scalar convergence scalars are returned to the host (via ``VMEC_JAX_SCAN_PRINT``
+  controls).
+
+**3. Dynamic replay bucketing**
+  ``VMEC_JAX_DYNAMIC_REPLAY_BUCKET=1024`` pads nearby tape lengths to multiples
+  of 1024, so the same compiled scan kernel is reused across Jacobian calls with
+  slightly different iteration counts.  Without bucketing each change in tape
+  length triggers a recompile.
+
+**4. Preconditioner caching**
+  The 1-D preconditioner (``clear_preconditioner_jit_caches``) is JIT-compiled
+  once and reused.  Explicit cache clearing between Gauss-Newton Jacobian
+  evaluations (``post_jacobian_callback``) releases accumulated caches without
+  paying the cost of recompilation on the next call.
+
+**5. Strict-update + no backtracking**
+  The VMEC iteration algorithm uses ``strict_update=True, backtracking=False``
+  to match the VMEC2000 step-accept path.  Using backtracking causes the
+  adaptive step size to collapse to machine epsilon on stiff 3D geometries
+  (e.g. QH stellarators), resulting in non-convergence.
+
+**6. FFT-based spectral synthesis**
+  ``vmec_jax`` uses FFT-based real-space synthesis (``vmec_tomnsp.py``) for
+  the R/Z/λ transforms, replacing the matrix–vector approach of VMEC2000.
+  This reduces transform cost from O(N_modes × N_real) to O(N_real log N_real).
+
+**7. Relaxed trial residuals in optimisation line search**
+  The Gauss-Newton line search uses a *relaxed* forward solve (fewer iterations,
+  looser ftol) for trial step evaluations.  The tight solve is only run for
+  accepted steps and Jacobian builds.  This roughly halves the per-iteration
+  wall time in optimisation loops.
+
+**8. Discrete-adjoint Jacobian (exact, not finite differences)**
+  For optimisation, the Jacobian is computed via discrete-adjoint replay
+  (``build_residual_checkpoint_tape_direct`` + ``checkpoint_tape_state_jvp_columns``).
+  This gives a machine-precision Jacobian at a cost of ≈1.5× a single forward
+  solve, compared to ``n_params`` forward solves for finite differences.
+
+**9. Minimal history in optimisation loops**
+  The ``light_history=True`` flag suppresses the full per-step diagnostic record
+  during optimisation solves, reducing host/device traffic and memory pressure.
+
+**10. On-disk XLA kernel cache**
+  Compiled XLA kernels are persisted to ``~/.cache/vmec_jax/jax_cache`` across
+  processes.  The first run on a new machine pays the compile cost; all
+  subsequent runs on the same machine reuse the cache.
+
+Current performance (representative benchmarks)
+------------------------------------------------
+
+The following warm runtimes were measured on CPU (Apple M-series) for single
+fixed-boundary solves with the default settings (``NS_ARRAY=151``,
+``NITER_ARRAY=5000``, ``FTOL_ARRAY=1e-14``):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 20 20
+
+   * - Case
+     - vmec_jax warm
+     - VMEC2000
+   * - ``circular_tokamak``
+     - ≈ 1.2 s
+     - ≈ 1.5 s
+   * - ``shaped_tokamak_pressure``
+     - ≈ 1.8 s
+     - ≈ 2.0 s
+   * - ``LandremanPaul2021_QA_lowres``
+     - ≈ 7 s
+     - ≈ 8 s
+   * - ``nfp4_QH_warm_start``
+     - ≈ 5 s
+     - ≈ 6 s
+   * - ``LandremanPaul2021_QA_reactorScale_lowres``
+     - ≈ 21 s
+     - ≈ 43 s
+
+The accelerated single-grid path can give additional speedups for cases where
+the VMEC2000 multi-grid schedule is wasteful.  See the ``--solver-mode
+accelerated`` flag.
+
+Profiling and diagnostics
 
 Enable float64
 --------------
