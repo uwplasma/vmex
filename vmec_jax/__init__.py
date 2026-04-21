@@ -2,6 +2,8 @@
 
 import os as _os
 
+from ._compat import _default_compilation_cache_dir as _default_jax_cache_dir
+
 # Suppress noisy C++ warnings from XLA/PjRt backend (e.g. repeated
 # "Assume version compatibility. PjRt-IFRT does not track XLA executable
 # versions." on persistent-cache hits). Must be set before *any* ``import
@@ -11,13 +13,13 @@ _os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 _os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "2")
 _os.environ.setdefault("GLOG_minloglevel", "2")
 
-# Enable JAX persistent XLA compilation cache.  Kernels compiled for a given
-# problem shape are stored on disk and reused across process invocations,
-# eliminating the ~9 s cold-compilation cost on warm runs.
+# Enable JAX persistent XLA compilation cache only when it has not been
+# explicitly disabled by the user environment.
 import jax as _jax
-_jax_cache_dir = _os.path.expanduser("~/.cache/vmec_jax/jax_compile_cache")
-_os.makedirs(_jax_cache_dir, exist_ok=True)
-_jax.config.update("jax_compilation_cache_dir", _jax_cache_dir)
+_jax_cache_dir = _default_jax_cache_dir()
+if _jax_cache_dir is not None:
+    _os.makedirs(_jax_cache_dir, exist_ok=True)
+    _jax.config.update("jax_compilation_cache_dir", _jax_cache_dir)
 
 from . import api
 from .namelist import read_indata, InData
