@@ -188,7 +188,7 @@ so the initial QS value is identical across ``max_mode`` values.
 a 97 % reduction.
 
 
-3-D LCFS and |B| contour plots
+3-D LCFS and :math:`|B|` contour plots
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **max_mode = 1** (8 DOFs, 30% QS reduction, ~124 s)
@@ -206,7 +206,7 @@ a 97 % reduction.
 .. image:: _static/figures/qh_opt/bmag_surface.png
    :width: 80%
    :align: center
-   :alt: |B| contour lines on LCFS, max_mode=1
+   :alt: B-magnitude contour lines on LCFS, max_mode=1
 
 **max_mode = 2** (24 DOFs, 97% QS reduction, ~323 s)
 
@@ -223,10 +223,10 @@ a 97 % reduction.
 .. image:: _static/figures/qh_opt/mode2/bmag_surface.png
    :width: 80%
    :align: center
-   :alt: |B| contour lines on LCFS, max_mode=2
+   :alt: B-magnitude contour lines on LCFS, max_mode=2
 
-The contour lines on the |B| surface plots show the magnetic field strength as
-isocurves in (θ, φ) space.  Quasi-helical symmetry means |B| depends mainly on
+The contour lines on the :math:`|B|` surface plots show the magnetic field strength as
+isocurves in (θ, φ) space.  Quasi-helical symmetry means :math:`|B|` depends mainly on
 ``m·θ − n·φ``; the optimised contours are clearly more helically aligned than
 the initial configuration.
 
@@ -248,40 +248,59 @@ via :func:`create_x_scale`.  See the script header for details.
 
    python examples/optimization/qa_fixed_resolution_jax_ess.py
 
-The script starts from ``examples/data/input.nfp2_QA`` (nfp=2, ``NS=31``).
-All runs use VMEC resolution ``mpol = ntor = 5`` (set automatically by
-``extend_boundary_for_max_mode``) and a budget of 15 Jacobian evaluations.
+The script starts from ``examples/data/input.nfp2_QA`` (nfp=2). All runs use
+VMEC resolution ``mpol = ntor = 5`` (set automatically by
+``extend_boundary_for_max_mode``). The current standalone QA workflow uses the
+exact discrete-adjoint residual/Jacobian callbacks inside
+``scipy.optimize.least_squares``. For ``max_mode > 1``, the script now uses
+staged continuation: it solves the lower-mode QA problem first, then lifts that
+solution into the richer boundary space before running the final stage.
 
 .. list-table::
    :header-rows: 1
-   :widths: 12 10 18 18 14 18
+   :widths: 10 8 14 10 10 14 14 14 14 14
 
    * - max\_mode
      - DOFs
-     - Objective initial
+     - Start
+     - Budget
+     - Eval used
+     - Aspect final
+     - Mean iota final
+     - QS final
      - Objective final
-     - Reduction
      - Wall time ¹
    * - 1
      - 8
-     - 0.168
-     - 0.168 ²
-     - 0 %
-     - ~49 s
+     - input deck
+     - 15
+     - 15
+     - 6.0002
+     - 0.4086
+     - ``1.22e-3``
+     - ``1.22e-3``
+     - ~29 s
    * - 2
      - 24
-     - 0.168
-     - **0.099**
-     - **41 %**
-     - ~608 s
+     - ``max_mode=1`` continuation
+     - 15 + 40
+     - 23
+     - 6.0000
+     - 0.4092
+     - ``8.36e-4``
+     - ``8.37e-4``
+     - ~40 s
 
 ¹ Wall time on Apple M-series.
 
-² With 8 DOFs, the optimizer satisfies the aspect ratio target (5.0 → 6.0)
-but the low-mode boundary space is too limited to improve the multi-objective
-residual further.  ``max_mode=2`` (24 DOFs) achieves a 41 % reduction.
+The earlier “mode 2 is worse than mode 1” result was not a derivative failure.
+It was a basin-selection problem: starting the 24-DOF QA solve directly from
+the raw input can land in a poorer local minimum. Staged continuation fixes
+that. With the ``max_mode=1`` solution used as the starting point, the 24-DOF
+run now improves the QA objective further, which is the expected behavior for a
+nested richer boundary space.
 
-**max_mode = 1** (8 DOFs, aspect 5.0 → 6.0)
+**max_mode = 1** (8 DOFs, exact SciPy + adjoint)
 
 .. list-table::
    :widths: 60 40
@@ -296,9 +315,9 @@ residual further.  ``max_mode=2`` (24 DOFs) achieves a 41 % reduction.
 .. image:: _static/figures/qa_opt/bmag_surface.png
    :width: 80%
    :align: center
-   :alt: |B| contour lines on LCFS, QA max_mode=1
+   :alt: B-magnitude contour lines on LCFS, QA max_mode=1
 
-**max_mode = 2** (24 DOFs, 41 % reduction)
+**max_mode = 2** (24 DOFs, exact SciPy + adjoint, continuation)
 
 .. list-table::
    :widths: 60 40
@@ -313,36 +332,26 @@ residual further.  ``max_mode=2`` (24 DOFs) achieves a 41 % reduction.
 .. image:: _static/figures/qa_opt/mode2/bmag_surface.png
    :width: 80%
    :align: center
-   :alt: |B| contour lines on LCFS, QA max_mode=2
+   :alt: B-magnitude contour lines on LCFS, QA max_mode=2
 
 
 Algorithms in detail
 ---------------------
 
-Gauss-Newton least squares
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Least-squares drivers
+~~~~~~~~~~~~~~~~~~~~~
 
-``vmec_jax`` uses a custom :func:`~vmec_jax.gauss_newton_least_squares` solver
-(``vmec_jax/optimization.py``) rather than SciPy's ``least_squares``.  This is
-necessary because:
+``vmec_jax`` provides two standalone outer least-squares drivers:
 
-- The Jacobian is expensive and must not be recomputed inside the line search.
-- Line-search trial residuals use a *relaxed* forward solve (fewer iterations,
-  looser ftol) to reduce overhead.
-- The "exact residual after Jacobian" hook allows the Gauss-Newton step to use
-  the precise converged residual from the tape-build call, avoiding a redundant
-  extra tight solve.
+- :func:`~vmec_jax.gauss_newton_least_squares`, a concrete custom
+  Gauss-Newton loop tuned for exact VMEC callbacks;
+- ``method="scipy"`` in :class:`~vmec_jax.FixedBoundaryExactOptimizer.run`,
+  which uses ``scipy.optimize.least_squares`` with the same exact residual and
+  discrete-adjoint Jacobian callbacks.
 
-The algorithm per iteration:
-
-1. **Jacobian**: build checkpoint tape at current ``x``, propagate ``n_params``
-   tangents via batched JVP → dense ``(n_residuals × n_params)`` matrix.
-2. **Newton step**: solve the normal equations ``J^T J Δx = -J^T r`` via
-   NumPy's ``lstsq`` (LAPACK DGELSD on CPU).
-3. **Line search**: Armijo backtracking — evaluate trial residual using the
-   *relaxed* forward solve; accept the first ``α`` that reduces cost.
-4. **Accept**: store the accepted residual in the cache; do not rebuild the
-   tape again at the new ``x`` until the next iteration's Jacobian call.
+The QA fixed-resolution example currently uses the SciPy route because it is
+more robust on the higher-dimensional QA problem. The custom Gauss-Newton path
+is still available for lower-level experiments and tighter callback control.
 
 Discrete-adjoint Jacobian
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -389,7 +398,7 @@ residual vector:
 
 The quasisymmetry ratio residual is computed by
 :func:`~vmec_jax.quasisymmetry_ratio_residual_from_state`, which evaluates
-``|B|`` on the specified surfaces, decomposes it into helical modes, and
+:math:`|B|` on the specified surfaces, decomposes it into helical modes, and
 returns the residuals of the off-helicity modes.
 
 
@@ -470,8 +479,8 @@ expensive outer loops.  See ``vmec_jax/optimization.py`` for full signature.
 
 Generate all three standard QH optimisation figures:
 
-- ``boundary_comparison.png`` — 3-D LCFS coloured by |B|.
-- ``bmag_surface.png`` — |B| contour lines on LCFS (θ, φ/nfp).
+- ``boundary_comparison.png`` — 3-D LCFS coloured by :math:`|B|`.
+- ``bmag_surface.png`` — :math:`|B|` contour lines on LCFS (θ, φ/nfp).
 - ``objective_history.png`` — Objective and aspect ratio vs Jacobian index.
 
 :func:`checkpoint_tape_state_jvp_columns`
