@@ -40,6 +40,13 @@ import numpy as np
 
 import vmec_jax as vj
 from vmec_jax._compat import enable_x64
+from vmec_jax.config import config_from_indata
+from vmec_jax.field import signgs_from_sqrtg
+from vmec_jax.geom import eval_geom
+from vmec_jax.init_guess import initial_guess_from_boundary
+from vmec_jax.optimization import rebuild_indata_with_resolution
+from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_state
+from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
 # ── 0.  Floating-point precision ──────────────────────────────────────────────
 enable_x64(True)
@@ -50,6 +57,10 @@ enable_x64(True)
 
 # Path to the VMEC namelist input file.
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.nfp2_QA"
+
+# Choose the VMEC solver resolution directly in the script.
+VMEC_MPOL = 5
+VMEC_NTOR = 5
 
 # Maximum |m|, |n| mode number for the boundary parameter space.
 # max_mode=2 → 24 DOFs; max_mode=3 → 48 DOFs (significantly longer JIT time).
@@ -92,6 +103,11 @@ SURFACES = np.arange(0.0, 1.01, 0.1)
 ASPECT_WEIGHT = 1.0
 IOTA_WEIGHT   = 1.0
 QS_WEIGHT     = 1.0
+OBJECTIVE_TUPLES = [
+    ("aspect", TARGET_ASPECT, ASPECT_WEIGHT),
+    ("iota", TARGET_IOTA, IOTA_WEIGHT),
+    ("qs", 0.0, QS_WEIGHT),
+]
 
 # ── ESS settings ──────────────────────────────────────────────────────────────
 # If True, boundary DOFs are scaled by exp(-ALPHA * max(|m|, |n|)) / exp(-ALPHA)
@@ -110,9 +126,10 @@ OUTPUT_DIR = Path(f"results/qa_opt/{_tag}")
 # ─────────────────────────────────────────────────────────────────────────────
 print(f"Loading {INPUT_FILE.name} …")
 cfg, indata = vj.load_config(str(INPUT_FILE))
-from vmec_jax.wout import equilibrium_iota_profiles_from_state
 import vmec_jax._compat as _compat
 _jnp = _compat.jnp
+indata = rebuild_indata_with_resolution(indata, mpol=VMEC_MPOL, ntor=VMEC_NTOR)
+cfg = config_from_indata(indata)
 
 def _build_stage(max_mode: int):
     stage_static = vj.build_static(cfg)
@@ -129,18 +146,48 @@ def _build_stage(max_mode: int):
         include=("rc", "zs"),
         fix=("rc00",),
     )
-    stage_residuals_fn = vj.make_qs_residuals_fn(
-        stage_static,
-        stage_indata,
-        helicity_m=HELICITY_M,
-        helicity_n=HELICITY_N,
-        target_aspect=TARGET_ASPECT,
-        target_iota=TARGET_IOTA,
-        surfaces=SURFACES,
-        aspect_weight=ASPECT_WEIGHT,
-        iota_weight=IOTA_WEIGHT,
-        qs_weight=QS_WEIGHT,
-    )
+    stage_guess = initial_guess_from_boundary(stage_static, stage_boundary, stage_indata, vmec_project=True)
+    stage_geom = eval_geom(stage_guess, stage_static)
+    stage_signgs = int(signgs_from_sqrtg(np.asarray(stage_geom.sqrtg), axis_index=1))
+    stage_flux = vj.flux_profiles_from_indata(stage_indata, stage_static.s, signgs=stage_signgs)
+    stage_pressure = _jnp.zeros_like(_jnp.asarray(stage_static.s))
+
+    def stage_qs_eval(state):
+        return quasisymmetry_ratio_residual_from_state(
+            state=state,
+            static=stage_static,
+            indata=stage_indata,
+            signgs=stage_signgs,
+            flux_local=stage_flux,
+            prof_local={"pressure": stage_pressure},
+            pressure_local=stage_pressure,
+            surfaces=SURFACES,
+            helicity_m=HELICITY_M,
+            helicity_n=HELICITY_N,
+        )
+
+    def stage_residuals_fn(state):
+        parts = []
+        for name, target, weight in OBJECTIVE_TUPLES:
+            if name == "aspect":
+                aspect = equilibrium_aspect_ratio_from_state(state=state, static=stage_static)
+                parts.append(_jnp.asarray([float(weight) * (aspect - float(target))], dtype=_jnp.float64))
+            elif name == "iota":
+                _chips, iotas, _iotaf = equilibrium_iota_profiles_from_state(
+                    state=state, static=stage_static, indata=stage_indata, signgs=stage_signgs
+                )
+                iotas = _jnp.asarray(iotas, dtype=_jnp.float64)
+                mean_iota = _jnp.asarray(0.0, dtype=iotas.dtype) if int(iotas.shape[0]) <= 1 else _jnp.mean(iotas[1:])
+                parts.append(_jnp.asarray([float(weight) * (mean_iota - float(target))], dtype=_jnp.float64))
+            elif name == "qs":
+                qs = stage_qs_eval(state)
+                parts.append(_jnp.asarray(qs["residuals1d"], dtype=_jnp.float64) * float(weight))
+            else:
+                raise ValueError(f"Unknown objective block '{name}'")
+        return _jnp.concatenate(parts)
+
+    stage_residuals_fn._n_non_qs = 2
+    stage_residuals_fn._qs_total_from_state = lambda state: float(QS_WEIGHT) ** 2 * float(stage_qs_eval(state)["total"])
     stage_opt = vj.FixedBoundaryExactOptimizer(
         stage_static,
         stage_indata,
@@ -203,6 +250,7 @@ for stage_mode in stage_modes:
             state, stage_static=s, stage_indata=i, stage_opt=o
         ),
         target_iota=TARGET_IOTA,
+        target_aspect=TARGET_ASPECT,
     )
     stage_results.append((stage_mode, stage_specs, stage_opt, params0_stage, stage_result))
     prev_specs = stage_specs

@@ -132,6 +132,20 @@ def extend_boundary_for_max_mode(
     return new_indata, new_static, new_boundary
 
 
+def rebuild_indata_with_resolution(indata, *, mpol: int, ntor: int):
+    """Return a copy of ``indata`` with updated VMEC spectral resolution."""
+    from .namelist import InData
+
+    new_scalars = dict(indata.scalars)
+    new_scalars["MPOL"] = int(mpol)
+    new_scalars["NTOR"] = int(ntor)
+    return InData(
+        scalars=new_scalars,
+        indexed=indata.indexed,
+        source_path=indata.source_path,
+    )
+
+
 def boundary_param_specs(
     boundary: BoundaryCoeffs,
     modes: ModeTable,
@@ -1227,6 +1241,7 @@ class FixedBoundaryExactOptimizer:
         verbose: int = 1,
         iota_fn=None,
         target_iota: float | None = None,
+        target_aspect: float | None = None,
     ) -> dict:
         """Run exact least-squares optimisation.
 
@@ -1409,6 +1424,8 @@ class FixedBoundaryExactOptimizer:
         }
         if target_iota is not None:
             history_dump["target_iota"] = float(target_iota)
+        if target_aspect is not None:
+            history_dump["target_aspect"] = float(target_aspect)
 
         result["_history_dump"] = history_dump
         return result
