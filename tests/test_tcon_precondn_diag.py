@@ -6,6 +6,17 @@ import numpy as np
 import pytest
 
 
+def test_clear_preconditioner_jit_caches_empties_lambda_cache():
+    from vmec_jax import preconditioner_1d_jax as p1d
+
+    p1d._lambda_precond_cache_put(("dummy",), object())
+    assert len(p1d._LAMBDA_PRECOND_JIT_CACHE) >= 1
+
+    p1d.clear_preconditioner_jit_caches()
+
+    assert len(p1d._LAMBDA_PRECOND_JIT_CACHE) == 0
+
+
 def _reference_preconditioning_matrix(
     *,
     xs,

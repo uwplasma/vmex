@@ -147,7 +147,7 @@ def _mode_scale(m: Any, n: Any) -> Any:
 
 def _jxbforce_nyquist_limits_from_trig(trig) -> tuple[int, int]:
     ntheta2 = int(getattr(trig, "ntheta2", 0))
-    cosnv = np.asarray(getattr(trig, "cosnv"))
+    cosnv = jnp.asarray(getattr(trig, "cosnv"))
     nzeta = int(cosnv.shape[0]) if cosnv.ndim >= 1 else 0
     return max(ntheta2 - 1, 0), max(nzeta // 2, 0)
 
@@ -191,8 +191,8 @@ def _filter_bsubuv_jxbforce_parity_jax(
     cosnv = jnp.asarray(trig.cosnv)[:, : nmax + 1]
     sinnv = jnp.asarray(trig.sinnv)[:, : nmax + 1]
 
-    r0scale = float(getattr(trig, "r0scale", 1.0))
-    dmult = jnp.full((mmax + 1, nmax + 1), 1.0 / (r0scale**2), dtype=bsubu_even.dtype)
+    r0scale = jnp.asarray(getattr(trig, "r0scale", 1.0), dtype=bsubu_even.dtype)
+    dmult = jnp.full((mmax + 1, nmax + 1), 1.0, dtype=bsubu_even.dtype) / (r0scale**2)
     mnyq, nnyq = _jxbforce_nyquist_limits_from_trig(trig)
     if mnyq > 0 and mnyq <= mmax:
         dmult = dmult.at[mnyq, :].multiply(0.5)

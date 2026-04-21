@@ -548,6 +548,32 @@ def _recompute_axis_from_boundary(
     return new_raxis_c, new_zaxis_s
 
 
+def extract_axis_override_from_state(state: VMECState, static: VMECStatic) -> dict[str, jnp.ndarray]:
+    """Extract m=0 axis coefficients from a state in VMEC internal scaling."""
+    m0_idx = getattr(static, "m0_n_index", None)
+    if m0_idx is None:
+        m0_idx = -np.ones((static.cfg.ntor + 1,), dtype=int)
+        for k, (m_k, n_k) in enumerate(zip(static.modes.m, static.modes.n)):
+            if int(m_k) == 0 and 0 <= int(n_k) < m0_idx.shape[0]:
+                m0_idx[int(n_k)] = int(k)
+    m0_idx = np.asarray(m0_idx, dtype=int)
+    valid = m0_idx >= 0
+    out = {
+        "raxis_cc": jnp.zeros((static.cfg.ntor + 1,), dtype=jnp.asarray(state.Rcos).dtype),
+        "raxis_cs": jnp.zeros((static.cfg.ntor + 1,), dtype=jnp.asarray(state.Rsin).dtype),
+        "zaxis_cc": jnp.zeros((static.cfg.ntor + 1,), dtype=jnp.asarray(state.Zcos).dtype),
+        "zaxis_cs": jnp.zeros((static.cfg.ntor + 1,), dtype=jnp.asarray(state.Zsin).dtype),
+    }
+    if np.any(valid):
+        n_idx = jnp.asarray(np.nonzero(valid)[0], dtype=jnp.int32)
+        k_idx = jnp.asarray(m0_idx[valid], dtype=jnp.int32)
+        out["raxis_cc"] = out["raxis_cc"].at[n_idx].set(jnp.asarray(state.Rcos)[0, k_idx])
+        out["raxis_cs"] = out["raxis_cs"].at[n_idx].set(jnp.asarray(state.Rsin)[0, k_idx])
+        out["zaxis_cc"] = out["zaxis_cc"].at[n_idx].set(jnp.asarray(state.Zcos)[0, k_idx])
+        out["zaxis_cs"] = out["zaxis_cs"].at[n_idx].set(jnp.asarray(state.Zsin)[0, k_idx])
+    return out
+
+
 def _recompute_axis_from_state_vmec(
     static: VMECStatic,
     *,
@@ -707,6 +733,148 @@ def _recompute_axis_from_state_vmec(
     return raxis_cc, raxis_cs, zaxis_cc, zaxis_cs
 
 
+def _recompute_axis_from_state_vmec_jax(
+    static: VMECStatic,
+    *,
+    pr1_even,
+    pr1_odd,
+    pz1_even,
+    pz1_odd,
+    pru_even,
+    pru_odd,
+    pzu_even,
+    pzu_odd,
+    signgs: int,
+    n_grid: int = 61,
+    trig=None,
+):
+    """JAX-compatible port of VMEC ``guess_axis`` from current parity fields."""
+    cfg = static.cfg
+    if trig is None:
+        trig = vmec_trig_tables(
+            ntheta=cfg.ntheta,
+            nzeta=cfg.nzeta,
+            nfp=cfg.nfp,
+            mmax=cfg.mpol - 1,
+            nmax=cfg.ntor,
+            lasym=cfg.lasym,
+        )
+    ntheta1, ntheta2, ntheta3 = int(trig.ntheta1), int(trig.ntheta2), int(trig.ntheta3)
+    ns = int(cfg.ns)
+    nzeta = int(cfg.nzeta)
+    if ns < 2:
+        raise ValueError("axis recompute requires ns >= 2")
+
+    dtype = jnp.asarray(pr1_even).dtype
+    pr1_even = jnp.asarray(pr1_even, dtype=dtype)
+    pr1_odd = jnp.asarray(pr1_odd, dtype=dtype)
+    pz1_even = jnp.asarray(pz1_even, dtype=dtype)
+    pz1_odd = jnp.asarray(pz1_odd, dtype=dtype)
+    pru_even = jnp.asarray(pru_even, dtype=dtype)
+    pru_odd = jnp.asarray(pru_odd, dtype=dtype)
+    pzu_even = jnp.asarray(pzu_even, dtype=dtype)
+    pzu_odd = jnp.asarray(pzu_odd, dtype=dtype)
+
+    hs = jnp.asarray(jnp.asarray(static.s)[1] - jnp.asarray(static.s)[0], dtype=dtype)
+    sqrts = jnp.sqrt(jnp.maximum(jnp.asarray(static.s, dtype=dtype), jnp.asarray(0.0, dtype=dtype)))
+    ns12 = (ns + 1) // 2 - 1
+    ds = jnp.asarray((ns - 1 - ns12), dtype=dtype) * hs
+
+    ru0 = pru_even + sqrts[:, None, None] * pru_odd
+    zu0 = pzu_even + sqrts[:, None, None] * pzu_odd
+
+    r1b_red = pr1_even[ns - 1, :ntheta3, :] + pr1_odd[ns - 1, :ntheta3, :]
+    z1b_red = pz1_even[ns - 1, :ntheta3, :] + pz1_odd[ns - 1, :ntheta3, :]
+    r12_red = pr1_even[ns12, :ntheta3, :] + sqrts[ns12] * pr1_odd[ns12, :ntheta3, :]
+    z12_red = pz1_even[ns12, :ntheta3, :] + sqrts[ns12] * pz1_odd[ns12, :ntheta3, :]
+    ru12_red = 0.5 * (ru0[ns - 1, :ntheta3, :] + ru0[ns12, :ntheta3, :])
+    zu12_red = 0.5 * (zu0[ns - 1, :ntheta3, :] + zu0[ns12, :ntheta3, :])
+
+    r1b = jnp.zeros((ntheta1, nzeta), dtype=dtype).at[:ntheta3, :].set(r1b_red)
+    z1b = jnp.zeros((ntheta1, nzeta), dtype=dtype).at[:ntheta3, :].set(z1b_red)
+    r12 = jnp.zeros((ntheta1, nzeta), dtype=dtype).at[:ntheta3, :].set(r12_red)
+    z12 = jnp.zeros((ntheta1, nzeta), dtype=dtype).at[:ntheta3, :].set(z12_red)
+    ru12 = jnp.zeros((ntheta1, nzeta), dtype=dtype).at[:ntheta3, :].set(ru12_red)
+    zu12 = jnp.zeros((ntheta1, nzeta), dtype=dtype).at[:ntheta3, :].set(zu12_red)
+
+    if not bool(cfg.lasym):
+        for iv in range(nzeta):
+            ivminus = (nzeta - iv) % nzeta
+            for iu in range(ntheta2, ntheta1):
+                iu_r = ntheta1 - iu
+                r1b = r1b.at[iu, iv].set(r1b_red[iu_r, ivminus])
+                z1b = z1b.at[iu, iv].set(-z1b_red[iu_r, ivminus])
+                r12 = r12.at[iu, iv].set(r12_red[iu_r, ivminus])
+                z12 = z12.at[iu, iv].set(-z12_red[iu_r, ivminus])
+                ru12 = ru12.at[iu, iv].set(-ru12_red[iu_r, ivminus])
+                zu12 = zu12.at[iu, iv].set(zu12_red[iu_r, ivminus])
+
+    rcom = jnp.zeros((nzeta,), dtype=dtype)
+    zcom = jnp.zeros((nzeta,), dtype=dtype)
+    axis_r0 = pr1_even[0, 0, :]
+    axis_z0 = pz1_even[0, 0, :]
+    signgs_arr = jnp.asarray(signgs, dtype=dtype)
+    grid_denom = max(int(n_grid) - 1, 1)
+    frac = jnp.arange(int(n_grid), dtype=dtype) / jnp.asarray(grid_denom, dtype=dtype)
+
+    planes_to_compute = range(nzeta) if bool(cfg.lasym) else range(nzeta // 2 + 1)
+    for iv in planes_to_compute:
+        rmin = jnp.min(r1b[:, iv])
+        rmax = jnp.max(r1b[:, iv])
+        zmin = jnp.min(z1b[:, iv])
+        zmax = jnp.max(z1b[:, iv])
+
+        r_grid = rmin + (rmax - rmin) * frac
+        special_plane = (not bool(cfg.lasym)) and (iv == 0 or iv == nzeta // 2)
+        if special_plane:
+            z_grid = jnp.zeros((1,), dtype=dtype)
+        else:
+            z_grid = zmin + (zmax - zmin) * frac
+
+        rs = (r1b[:, iv] - r12[:, iv]) / ds + axis_r0[iv]
+        zs = (z1b[:, iv] - z12[:, iv]) / ds + axis_z0[iv]
+        tau0 = ru12[:, iv] * zs - zu12[:, iv] * rs
+
+        tau = signgs_arr * (
+            tau0[None, None, :]
+            - ru12[:, iv][None, None, :] * z_grid[:, None, None]
+            + zu12[:, iv][None, None, :] * r_grid[None, :, None]
+        )
+        min_tau = jnp.min(tau, axis=2)
+        max_tau = jnp.max(min_tau)
+        best_mask = min_tau == max_tau
+        if not bool(cfg.lasym):
+            z_abs = jnp.abs(z_grid)[:, None]
+            best_z_abs = jnp.min(jnp.where(best_mask, z_abs, jnp.inf))
+            best_mask = jnp.logical_and(best_mask, z_abs == best_z_abs)
+        flat_idx = jnp.argmax(best_mask.reshape(-1).astype(jnp.int32))
+        iz_idx = flat_idx // int(r_grid.shape[0])
+        ir_idx = flat_idx % int(r_grid.shape[0])
+        rcom = rcom.at[iv].set(r_grid[ir_idx])
+        zcom = zcom.at[iv].set(z_grid[iz_idx])
+
+    if not bool(cfg.lasym):
+        for iv in range(1, nzeta // 2):
+            ivminus = (nzeta - iv) % nzeta
+            rcom = rcom.at[ivminus].set(rcom[iv])
+            zcom = zcom.at[ivminus].set(-zcom[iv])
+
+    cosnv = jnp.asarray(trig.cosnv, dtype=dtype)
+    sinnv = jnp.asarray(trig.sinnv, dtype=dtype)
+    nscale = jnp.asarray(trig.nscale, dtype=dtype)
+    dzeta = jnp.asarray(2.0 / float(nzeta), dtype=dtype)
+    raxis_cc = dzeta * (cosnv.T @ rcom) / nscale
+    zaxis_cs = -dzeta * (sinnv.T @ zcom) / nscale
+    raxis_cs = -dzeta * (sinnv.T @ rcom) / nscale
+    zaxis_cc = dzeta * (cosnv.T @ zcom) / nscale
+    raxis_cc = raxis_cc.at[0].set(0.5 * raxis_cc[0])
+    zaxis_cc = zaxis_cc.at[0].set(0.5 * zaxis_cc[0])
+    if (nzeta % 2 == 0) and (nzeta // 2 <= int(cfg.ntor)):
+        raxis_cc = raxis_cc.at[nzeta // 2].set(0.5 * raxis_cc[nzeta // 2])
+        zaxis_cc = zaxis_cc.at[nzeta // 2].set(0.5 * zaxis_cc[nzeta // 2])
+    return raxis_cc, raxis_cs, zaxis_cc, zaxis_cs
+
+
 def _axis_parity_from_state_lasym(
     *,
     state: VMECState,
@@ -824,6 +992,7 @@ def initial_guess_from_boundary(
     dtype=None,
     vmec_project: bool = False,
     infer_axis_if_missing: bool = True,
+    axis_override: dict[str, object] | None = None,
 ) -> VMECState:
     """Build a VMECState initial guess from boundary coefficients.
 
@@ -843,12 +1012,14 @@ def initial_guess_from_boundary(
         If True, re-project the initial guess through VMEC's internal real-space
         grid (via ``vmec_realspace_synthesis`` + ``vmec_realspace_analysis``).
         This matches the VMEC grid/weighting used in parity diagnostics.
+    axis_override:
+        Optional explicit axis coefficients in VMEC internal scaling with keys
+        ``raxis_cc``, ``raxis_cs``, ``zaxis_cc``, ``zaxis_cs``. When provided,
+        these coefficients are used directly and missing-axis inference is
+        skipped. This freezes the initialization branch choice for
+        differentiated replay paths.
     """
     cfg = static.cfg
-    if infer_axis_if_missing and _boundary_is_traced(boundary):
-        # Axis inference uses numpy-heavy logic; disable when tracing to keep
-        # the path differentiable. Provide explicit axis coefficients if needed.
-        infer_axis_if_missing = False
     K = static.modes.K
     layout = StateLayout(ns=cfg.ns, K=K, lasym=cfg.lasym)
 
@@ -972,17 +1143,25 @@ def initial_guess_from_boundary(
         if zaxis_cs is not None:
             zaxis_cs = zaxis_cs * axis_scale
 
-        # If axis arrays are all zero or missing, fall back to boundary-based axis.
-        have_axis = False
-        if raxis_cc is not None and np.any(np.asarray(raxis_cc) != 0.0):
+        if axis_override is not None:
+            raxis_cc = jnp.asarray(axis_override.get("raxis_cc", jnp.zeros((cfg.ntor + 1,), dtype=dtype)), dtype=dtype)
+            raxis_cs = jnp.asarray(axis_override.get("raxis_cs", jnp.zeros((cfg.ntor + 1,), dtype=dtype)), dtype=dtype)
+            zaxis_cc = jnp.asarray(axis_override.get("zaxis_cc", jnp.zeros((cfg.ntor + 1,), dtype=dtype)), dtype=dtype)
+            zaxis_cs = jnp.asarray(axis_override.get("zaxis_cs", jnp.zeros((cfg.ntor + 1,), dtype=dtype)), dtype=dtype)
             have_axis = True
-        if raxis_cs is not None and np.any(np.asarray(raxis_cs) != 0.0):
-            have_axis = True
-        if zaxis_cc is not None and np.any(np.asarray(zaxis_cc) != 0.0):
-            have_axis = True
-        if zaxis_cs is not None and np.any(np.asarray(zaxis_cs) != 0.0):
-            have_axis = True
-        axis_from_indata = bool(have_axis)
+            axis_from_indata = False
+        else:
+            # If axis arrays are all zero or missing, fall back to boundary-based axis.
+            have_axis = False
+            if raxis_cc is not None and np.any(np.asarray(raxis_cc) != 0.0):
+                have_axis = True
+            if raxis_cs is not None and np.any(np.asarray(raxis_cs) != 0.0):
+                have_axis = True
+            if zaxis_cc is not None and np.any(np.asarray(zaxis_cc) != 0.0):
+                have_axis = True
+            if zaxis_cs is not None and np.any(np.asarray(zaxis_cs) != 0.0):
+                have_axis = True
+            axis_from_indata = bool(have_axis)
 
         if not have_axis:
             if bool(infer_axis_if_missing):
@@ -1091,14 +1270,24 @@ def initial_guess_from_boundary(
                     pzu_even,
                     pzu_odd,
                 ):
-                    # The VMEC guess_axis port still relies on NumPy-heavy logic.
-                    # During tracing, keep a simple zero-axis seed instead of
-                    # failing the whole solve/JIT path.
-                    raxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
-                    raxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
-                    zaxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
-                    zaxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
-                    axis_from_indata = True
+                    raxis_cc, raxis_cs, zaxis_cc, zaxis_cs = _recompute_axis_from_state_vmec_jax(
+                        static,
+                        pr1_even=pr1_even,
+                        pr1_odd=pr1_odd,
+                        pz1_even=pz1_even,
+                        pz1_odd=pz1_odd,
+                        pru_even=pru_even,
+                        pru_odd=pru_odd,
+                        pzu_even=pzu_even,
+                        pzu_odd=pzu_odd,
+                        signgs=signgs_guess,
+                        trig=trig,
+                    )
+                    raxis_cc = jnp.asarray(raxis_cc, dtype=dtype) * axis_scale
+                    raxis_cs = jnp.asarray(raxis_cs, dtype=dtype) * axis_scale
+                    zaxis_cc = jnp.asarray(zaxis_cc, dtype=dtype) * axis_scale
+                    zaxis_cs = jnp.asarray(zaxis_cs, dtype=dtype) * axis_scale
+                    axis_from_indata = False
                 else:
                     raxis_cc, raxis_cs, zaxis_cc, zaxis_cs = _recompute_axis_from_state_vmec(
                         static,

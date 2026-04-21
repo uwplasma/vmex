@@ -139,6 +139,12 @@ def bsup_from_sqrtg_lambda(
     return bsupu, bsupv
 
 
+def _full_mesh_from_half_mesh_avg_body(js0, carry):
+    full_acc, half = carry
+    full_acc = full_acc.at[js0 + 1].set(2.0 * half[js0] - full_acc[js0])
+    return full_acc, half
+
+
 def full_mesh_from_half_mesh_avg(half):
     """Invert VMEC's 1D half-mesh averaging map.
 
@@ -181,10 +187,7 @@ def full_mesh_from_half_mesh_avg(half):
     full2 = 0.5 * (half[0] + half[1])
     full = full.at[1].set(full2)
 
-    def _body(js0, full_acc):
-        return full_acc.at[js0 + 1].set(2.0 * half[js0] - full_acc[js0])
-
-    full = jax.lax.fori_loop(1, ns - 1, _body, full)
+    full, _ = jax.lax.fori_loop(1, ns - 1, _full_mesh_from_half_mesh_avg_body, (full, half))
     return full
 
 

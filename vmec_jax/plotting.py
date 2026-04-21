@@ -498,10 +498,20 @@ def vmecplot2_bmag_grid(
     s_index: int,
     ntheta: int = 30,
     nzeta: int = 65,
+    zeta_max: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return (theta, zeta, B) on a grid matching vmecPlot2.py defaults."""
+    """Return (theta, zeta, B) on a grid matching vmecPlot2.py defaults.
+
+    Parameters
+    ----------
+    zeta_max:
+        Upper bound of the toroidal angle range.  Defaults to ``2π`` (full
+        toroidal circle).  Pass ``2π/nfp`` to restrict to one field period.
+    """
+    if zeta_max is None:
+        zeta_max = 2.0 * np.pi
     theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta))
-    zeta = np.linspace(0.0, 2.0 * np.pi, int(nzeta))
+    zeta = np.linspace(0.0, float(zeta_max), int(nzeta))
     zeta2d, theta2d = np.meshgrid(zeta, theta)
     xm_nyq = np.asarray(wout.xm_nyq, dtype=float)
     xn_nyq = np.asarray(wout.xn_nyq, dtype=float)
@@ -929,3 +939,591 @@ def write_bsub_parity_figures(
     fig.savefig(outpath, dpi=150)
     plt.close(fig)
     return outpath
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QH optimisation result plots
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _lcfs_xyz(R: np.ndarray, Z: np.ndarray, phi: np.ndarray):
+    """Convert cylindrical (R, Z, phi) grids to Cartesian (X, Y, Z)."""
+    X = R * np.cos(phi[None, :])
+    Y = R * np.sin(phi[None, :])
+    return X, Y, Z
+
+
+def _plot_3d_boundary_comparison(wout_init, wout_final, outdir: Path) -> Path:
+    """3-D LCFS plots coloured by |B|, initial (left) vs optimised (right)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+    from matplotlib.colors import Normalize
+    from matplotlib.cm import ScalarMappable
+
+    ns_init = int(np.asarray(wout_init.ns))
+    ns_final = int(np.asarray(wout_final.ns))
+    theta_i, phi_i, R_i, Z_i, B_i = vmecplot2_lcfs_3d_grid(
+        wout_init, s_index=ns_init - 1, ntheta=60, nzeta=None
+    )
+    theta_f, phi_f, R_f, Z_f, B_f = vmecplot2_lcfs_3d_grid(
+        wout_final, s_index=ns_final - 1, ntheta=60, nzeta=None
+    )
+    X_i, Y_i, _ = _lcfs_xyz(R_i, Z_i, phi_i)
+    X_f, Y_f, _ = _lcfs_xyz(R_f, Z_f, phi_f)
+
+    Bmin = min(float(B_i.min()), float(B_f.min()))
+    Bmax = max(float(B_i.max()), float(B_f.max()))
+    norm = Normalize(vmin=Bmin, vmax=Bmax)
+    cmap = plt.cm.viridis
+
+    fig = plt.figure(figsize=(12, 5))
+    for col, (X, Y, Zp, B, title) in enumerate([
+        (X_i, Y_i, Z_i, B_i, "Initial boundary"),
+        (X_f, Y_f, Z_f, B_f, "Optimised boundary"),
+    ]):
+        ax = fig.add_subplot(1, 2, col + 1, projection="3d")
+        fcolors = cmap(norm(B))
+        ax.plot_surface(X, Y, Zp, facecolors=fcolors, rstride=1, cstride=1,
+                        linewidth=0, antialiased=False, shade=False)
+        ax.set_xlabel("X (m)")
+        ax.set_ylabel("Y (m)")
+        ax.set_zlabel("Z (m)")
+        ax.set_title(title, fontsize=11)
+        fix_matplotlib_3d(ax)
+
+    sm = ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    fig.colorbar(sm, ax=fig.axes, label="|B| (T)", shrink=0.6, pad=0.1)
+    nfp = int(np.asarray(wout_init.nfp)) if hasattr(wout_init, "nfp") else 4
+    fig.suptitle(f"LCFS coloured by |B| — nfp={nfp}", fontsize=13, y=1.01)
+
+    out = outdir / "boundary_comparison.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def _pi_label(v: float) -> str:
+    """Format a radian value as a human-readable fraction of π (e.g. 'π/4')."""
+    from fractions import Fraction
+    if abs(v) < 1e-14:
+        return "0"
+    frac = Fraction(v / float(np.pi)).limit_denominator(128)
+    n, d = frac.numerator, frac.denominator
+    if d == 1:
+        return "π" if n == 1 else f"{n}π"
+    return f"π/{d}" if n == 1 else f"{n}π/{d}"
+
+
+def _plot_bmag_contours(wout_init, wout_final, outdir: Path) -> Path:
+    """Unrolled |B|(θ, ζ) contour lines on LCFS — initial (top) vs optimised (bottom).
+
+    Uses ``ax.contour`` (line contours only, no fill) so the helically-aligned
+    contours of a quasi-helically/quasi-axially symmetric configuration are
+    visually obvious.  The toroidal axis covers exactly **one field period**:
+    ζ ∈ [0, 2π/nfp].  Poloidal axis: θ ∈ [0, 2π].
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    ns_init = int(np.asarray(wout_init.ns))
+    ns_final = int(np.asarray(wout_final.ns))
+    nfp = int(np.asarray(wout_init.nfp))
+    zeta_max = 2.0 * np.pi / nfp   # one field period
+
+    theta_i, zeta_i, B_i = vmecplot2_bmag_grid(
+        wout_init, s_index=ns_init - 1, ntheta=128, nzeta=256, zeta_max=zeta_max
+    )
+    theta_f, zeta_f, B_f = vmecplot2_bmag_grid(
+        wout_final, s_index=ns_final - 1, ntheta=128, nzeta=256, zeta_max=zeta_max
+    )
+
+    # Shared contour levels from the combined range.
+    vmin = min(float(B_i.min()), float(B_f.min()))
+    vmax = max(float(B_i.max()), float(B_f.max()))
+    nlevels = 25
+    levels = np.linspace(vmin, vmax, nlevels)
+
+    # Dynamic ticks for ζ ∈ [0, 2π/nfp].
+    xtick_vals = np.linspace(0.0, zeta_max, 5)
+    xtick_lbls = [_pi_label(v) for v in xtick_vals]
+
+    fig, axes = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
+    for ax, B, zeta, theta, title in [
+        (axes[0], B_i, zeta_i, theta_i, "Initial"),
+        (axes[1], B_f, zeta_f, theta_f, "Optimised"),
+    ]:
+        # B has shape (ntheta, nzeta); meshgrid for contour
+        ZETA, THETA = np.meshgrid(zeta, theta)
+        cs = ax.contour(
+            ZETA, THETA, B,
+            levels=levels,
+            cmap="viridis",
+            linewidths=1.2,
+        )
+        ax.set_facecolor("white")
+        ax.set_ylabel("Poloidal angle θ (rad)")
+        ax.set_title(f"|B| on LCFS — {title}", fontsize=11)
+        ax.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
+        ax.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
+        ax.set_ylim(0, 2 * np.pi)
+        fig.colorbar(cs, ax=ax, label="|B| (T)")
+
+    axes[-1].set_xlabel(f"Toroidal angle ζ (rad, one field period = 2π/{nfp})")
+    axes[-1].set_xticks(xtick_vals)
+    axes[-1].set_xticklabels(xtick_lbls)
+    axes[-1].set_xlim(0, zeta_max)
+    fig.suptitle("|B| on LCFS — contour lines", fontsize=13)
+    fig.tight_layout()
+
+    out = outdir / "bmag_surface.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
+    """Objective value, aspect ratio, and (optionally) iota vs Jacobian evaluation."""
+    import json
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    with open(history_path) as f:
+        data = json.load(f)
+
+    hist = data["history"]
+    objectives = [h["objective"] for h in hist]
+    aspects = [h["aspect"] for h in hist]
+    # Iota history is present for QA runs but absent for QH runs
+    iotas = [h["iota"] for h in hist] if hist and "iota" in hist[0] else None
+    iters = list(range(len(hist)))
+    total_time = data.get("total_wall_time_s", 0.0)
+    nfev = data.get("nfev", len(hist))
+
+    n_panels = 3 if iotas is not None else 2
+    fig, axes = plt.subplots(n_panels, 1, figsize=(7, 3 * n_panels), sharex=True)
+    ax1, ax2 = axes[0], axes[1]
+    ax3 = axes[2] if n_panels == 3 else None
+
+    ax1.semilogy(iters, objectives, "o-", color="steelblue", linewidth=2, markersize=6)
+    ax1.set_ylabel("Objective ∑r²", fontsize=11)
+    opt_label = data.get("label", "Optimisation")
+    ax1.set_title(
+        f"{opt_label}  ({nfev} evals, {total_time:.0f} s)",
+        fontsize=11,
+    )
+    ax1.axhline(objectives[-1], color="steelblue", linestyle="--", alpha=0.4,
+                label=f"Final: {objectives[-1]:.4f}")
+    ax1.legend(fontsize=9)
+    ax1.grid(True, alpha=0.3)
+
+    ax2.plot(iters, aspects, "s-", color="darkorange", linewidth=2, markersize=6)
+    target_aspect = data.get("target_aspect", None)
+    if target_aspect is not None:
+        ax2.axhline(target_aspect, color="k", linestyle=":", alpha=0.5,
+                    label=f"Target A={target_aspect:.4g}")
+    ax2.set_ylabel("Aspect ratio", fontsize=11)
+    if ax3 is None:
+        ax2.set_xlabel("Jacobian evaluation index", fontsize=11)
+    ax2.legend(fontsize=9)
+    ax2.grid(True, alpha=0.3)
+
+    if ax3 is not None and iotas is not None:
+        ax3.plot(iters, iotas, "^-", color="forestgreen", linewidth=2, markersize=6)
+        target_iota = data.get("target_iota", None)
+        if target_iota is not None:
+            ax3.axhline(target_iota, color="k", linestyle=":", alpha=0.5,
+                        label=f"Target ι={target_iota:.4g}")
+        ax3.set_ylabel("Mean iota ι", fontsize=11)
+        ax3.set_xlabel("Jacobian evaluation index", fontsize=11)
+        ax3.legend(fontsize=9)
+        ax3.grid(True, alpha=0.3)
+
+    fig.tight_layout()
+    out = outdir / "objective_history.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def plot_qh_optimization(
+    wout_initial_path,
+    wout_final_path,
+    history_path,
+    *,
+    outdir=None,
+    show: bool = False,
+) -> dict:
+    """Generate all QH optimisation result plots and return their paths.
+
+    Produces three figures:
+
+    * ``boundary_comparison.png``  — 3-D LCFS coloured by |B| (before/after)
+    * ``bmag_surface.png``         — |B| contour lines on LCFS unrolled to (θ, φ)
+    * ``objective_history.png``    — Objective and aspect ratio vs iteration
+
+    Parameters
+    ----------
+    wout_initial_path, wout_final_path:
+        Paths to the initial and final ``wout_*.nc`` files.
+    history_path:
+        Path to the ``history.json`` file produced by
+        :meth:`~vmec_jax.FixedBoundaryExactOptimizer.save_history`.
+    outdir:
+        Directory for saved figures.  Defaults to the directory of *history_path*.
+    show:
+        If ``True``, call ``plt.show()`` after saving.
+
+    Returns
+    -------
+    dict
+        Mapping ``{"boundary_comparison", "bmag_surface", "objective_history"}``
+        to their saved :class:`~pathlib.Path` objects.
+    """
+    wout_initial_path = Path(wout_initial_path)
+    wout_final_path = Path(wout_final_path)
+    history_path = Path(history_path)
+
+    if outdir is None:
+        outdir = history_path.parent
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    from .wout import read_wout as _read_wout
+    wout_init = _read_wout(str(wout_initial_path))
+    wout_final = _read_wout(str(wout_final_path))
+
+    p1 = _plot_3d_boundary_comparison(wout_init, wout_final, outdir)
+    p2 = _plot_bmag_contours(wout_init, wout_final, outdir)
+    p3 = _plot_objective_history(history_path, outdir)
+
+    for p in (p1, p2, p3):
+        print(f"  Saved {p}")
+
+    if show:
+        import matplotlib.pyplot as plt
+        plt.show()
+
+    return {
+        "boundary_comparison": p1,
+        "bmag_surface": p2,
+        "objective_history": p3,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# plot_wout — standalone wout diagnostic viewer (replicates vmecPlot2.py)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_wout(
+    wout_path: str | Path,
+    outdir: str | Path | None = None,
+    *,
+    name: str | None = None,
+    s_plot_ignore: float = 0.2,
+    show: bool = False,
+) -> dict:
+    """Generate diagnostic plots from a VMEC ``wout_*.nc`` file.
+
+    Replicates the output of the standalone ``vmecPlot2.py`` script in a
+    vectorised, vmec_jax-native form.  Four figures are written:
+
+    * ``<name>_VMECparams.pdf``  — 9-panel profile + |B| overview
+    * ``<name>_poloidal_plot.png`` — LCFS cross-sections at multiple toroidal angles
+    * ``<name>_VMECsurfaces.pdf``  — nested flux-surface cross-sections (8 panels)
+    * ``<name>_VMEC_3Dplot.png``   — 3-D LCFS surface coloured by |B|
+
+    Parameters
+    ----------
+    wout_path:
+        Path to the ``wout_*.nc`` file.
+    outdir:
+        Directory to save figures.  Defaults to the directory containing
+        *wout_path*.
+    name:
+        Base name for output files.  Defaults to the wout stem with the
+        leading ``wout_`` stripped (e.g. ``wout_nfp4_QH.nc`` → ``nfp4_QH``).
+    s_plot_ignore:
+        Fraction of flux surfaces near the axis to ignore when plotting DMerc.
+    show:
+        If ``True``, call ``plt.show()`` after saving all figures.
+
+    Returns
+    -------
+    dict
+        ``{"vmec_params", "poloidal_plot", "vmec_surfaces", "3d_plot"}``
+        mapping to saved :class:`~pathlib.Path` objects.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib import cm
+    from matplotlib.colors import Normalize
+
+    from .wout import read_wout as _read_wout
+
+    wout_path = Path(wout_path)
+    if outdir is None:
+        outdir = wout_path.parent
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    if name is None:
+        stem = wout_path.stem  # e.g. "wout_nfp4_QH"
+        name = stem[5:] if stem.startswith("wout_") else stem
+
+    wout = _read_wout(str(wout_path))
+
+    ns = int(wout.ns)
+    nfp = int(wout.nfp)
+    ntor = int(wout.ntor)
+    lasym = bool(wout.lasym)
+
+    xm = np.asarray(wout.xm, dtype=float)
+    xn = np.asarray(wout.xn, dtype=float)
+    xm_nyq = np.asarray(wout.xm_nyq, dtype=float)
+    xn_nyq = np.asarray(wout.xn_nyq, dtype=float)
+    rmnc = np.asarray(wout.rmnc, dtype=float)
+    zmns = np.asarray(wout.zmns, dtype=float)
+    bmnc = np.asarray(wout.bmnc, dtype=float)
+    rmns = np.asarray(wout.rmns, dtype=float) if lasym else np.zeros_like(rmnc)
+    zmnc = np.asarray(wout.zmnc, dtype=float) if lasym else np.zeros_like(rmnc)
+    bmns = np.asarray(wout.bmns, dtype=float) if lasym else np.zeros_like(bmnc)
+
+    raxis_cc = np.asarray(wout.raxis_cc, dtype=float)
+    raxis_cs = np.asarray(wout.raxis_cs, dtype=float)
+    zaxis_cs = np.asarray(wout.zaxis_cs, dtype=float)
+    zaxis_cc = np.asarray(wout.zaxis_cc, dtype=float)
+
+    phi = np.asarray(wout.phi, dtype=float)
+    iotaf = np.asarray(wout.iotaf, dtype=float)
+    presf = np.asarray(wout.presf, dtype=float)
+    iotas = np.asarray(wout.iotas, dtype=float)
+    pres = np.asarray(wout.pres, dtype=float)
+    buco = np.asarray(wout.buco, dtype=float)
+    bvco = np.asarray(wout.bvco, dtype=float)
+    jcuru = np.asarray(wout.jcuru, dtype=float)
+    jcurv = np.asarray(wout.jcurv, dtype=float)
+    DMerc = np.asarray(wout.DMerc, dtype=float)
+
+    s = np.linspace(0.0, 1.0, ns)
+    s_half = [(i - 0.5) / (ns - 1) for i in range(1, ns)]
+    xLabel = r"$s = \psi/\psi_b$"
+
+    # ── Helper: evaluate Fourier series on a (ntheta, nzeta) grid ──────────────
+    def _eval_rz(isurf: int, theta: np.ndarray, zeta: np.ndarray):
+        """(ntheta, nzeta) R and Z arrays for surface isurf."""
+        zeta2d, theta2d = np.meshgrid(zeta, theta)
+        angles = (xm[:, None, None] * theta2d[None] - xn[:, None, None] * zeta2d[None])
+        R = np.tensordot(rmnc[isurf] + rmns[isurf], np.zeros_like(angles[0]), axes=0)
+        Z = np.zeros_like(R)
+        R = (np.tensordot(rmnc[isurf], np.cos(angles), axes=([0], [0]))
+             + np.tensordot(rmns[isurf], np.sin(angles), axes=([0], [0])))
+        Z = (np.tensordot(zmns[isurf], np.sin(angles), axes=([0], [0]))
+             + np.tensordot(zmnc[isurf], np.cos(angles), axes=([0], [0])))
+        return R, Z
+
+    def _eval_bmag(isurf: int, theta: np.ndarray, zeta: np.ndarray):
+        """(ntheta, nzeta) |B| array for surface isurf (Nyquist)."""
+        zeta2d, theta2d = np.meshgrid(zeta, theta)
+        angles = (xm_nyq[:, None, None] * theta2d[None] - xn_nyq[:, None, None] * zeta2d[None])
+        B = (np.tensordot(bmnc[isurf], np.cos(angles), axes=([0], [0]))
+             + np.tensordot(bmns[isurf], np.sin(angles), axes=([0], [0])))
+        return B
+
+    # ── Plot 1: VMECparams — 9-panel diagnostics ────────────────────────────────
+    ntheta_b = 30
+    nzeta_b = 65
+    theta_b = np.linspace(0.0, 2.0 * np.pi, ntheta_b)
+    zeta_b = np.linspace(0.0, 2.0 * np.pi, nzeta_b)
+
+    fig1, axes1 = plt.subplots(3, 3, figsize=(14, 7))
+    fig1.patch.set_facecolor("white")
+
+    ax = axes1[0, 0]
+    ax.plot(s, iotaf, ".-")
+    ax.set_xlabel(xLabel)
+    ax.set_ylabel(r"$\iota$")
+
+    ax = axes1[0, 1]
+    ax.plot(s, presf, ".-", label="presf")
+    ax.plot(s_half, pres[1:], ".-", label="pres")
+    ax.legend(fontsize="x-small")
+    ax.set_xlabel(xLabel)
+    ax.set_title("pressure")
+
+    ax = axes1[0, 2]
+    ax.plot(s_half, buco[1:], ".-")
+    ax.set_title("buco")
+    ax.set_xlabel(xLabel)
+
+    ax = axes1[1, 0]
+    ax.plot(s_half, bvco[1:], ".-")
+    ax.set_title("bvco")
+    ax.set_xlabel(xLabel)
+
+    ax = axes1[1, 1]
+    ax.plot(s, jcuru, ".-")
+    ax.set_title("jcuru")
+    ax.set_xlabel(xLabel)
+
+    ax = axes1[1, 2]
+    ax.plot(s, jcurv, ".-")
+    ax.set_title("jcurv")
+    ax.set_xlabel(xLabel)
+
+    ax = axes1[2, 0]
+    ign = int(s_plot_ignore * len(s))
+    ax.plot(s[ign:-2], DMerc[ign:-2], ".-")
+    ax.set_title("DMerc")
+    ax.set_xlabel(xLabel)
+
+    _titles_b = ["|B| at half radius", "|B| at LCFS"]
+    _iradii_b = [int(round(ns * 0.25)), ns - 1]
+    for _col, (_irad, _ttl) in enumerate(zip(_iradii_b, _titles_b)):
+        B_b = _eval_bmag(_irad, theta_b, zeta_b)
+        zeta2d_b, theta2d_b = np.meshgrid(zeta_b, theta_b)
+        ax = axes1[2, 1 + _col]
+        cf = ax.contourf(zeta2d_b, theta2d_b, B_b, 20)
+        ax.set_title(f"{_ttl}\n(1-based idx {_irad + 1})")
+        ax.set_xlabel("ζ")
+        ax.set_ylabel("θ")
+        fig1.colorbar(cf, ax=ax)
+        iota_val = float(iotaf[_irad])
+        if iota_val > 0:
+            ax.plot([0, zeta_b.max()], [0, zeta_b.max() * iota_val], "k")
+        else:
+            ax.plot([0, zeta_b.max()], [-zeta_b.max() * iota_val, 0], "k")
+        ax.set_xlim([0, 2 * np.pi])
+        ax.set_ylim([0, 2 * np.pi])
+
+    fig1.tight_layout()
+    fig1.text(0.5, 0.995, str(wout_path.resolve()), ha="center", va="top", fontsize=6)
+    out_params = outdir / f"{name}_VMECparams.pdf"
+    fig1.savefig(out_params, bbox_inches="tight", pad_inches=0)
+    plt.close(fig1)
+
+    # ── Plot 2: Poloidal cross-sections at LCFS ──────────────────────────────────
+    ntheta_p = 200
+    nzeta_p = 8
+    theta_p = np.linspace(0.0, 2.0 * np.pi, ntheta_p)
+    zeta_p = np.linspace(0.0, 2.0 * np.pi / nfp, nzeta_p, endpoint=False)
+    R_lcfs, Z_lcfs = _eval_rz(ns - 1, theta_p, zeta_p)
+
+    # Axis positions
+    nzeta_ax = nzeta_p
+    zeta_ax = zeta_p
+    n_arr = np.arange(ntor + 1)
+    angles_ax = -n_arr[:, None] * nfp * zeta_ax[None, :]  # (ntor+1, nzeta)
+    Raxis = (raxis_cc[:ntor + 1, None] * np.cos(angles_ax)
+             + raxis_cs[:ntor + 1, None] * np.sin(angles_ax)).sum(axis=0)
+    Zaxis = (zaxis_cs[:ntor + 1, None] * np.sin(angles_ax)
+             + zaxis_cc[:ntor + 1, None] * np.cos(angles_ax)).sum(axis=0)
+
+    fig2, ax2 = plt.subplots(1, 1, figsize=(6, 6))
+    fig2.patch.set_facecolor("white")
+    _zeta_lbls = [
+        (0, r"$\phi=0$"),
+        (2, r"$\phi=\pi/2$"),
+        (4, r"$\phi=\pi$"),
+        (6, r"$\phi=3\pi/2$"),
+    ]
+    for _iz, _lbl in _zeta_lbls:
+        if _iz < nzeta_p:
+            ax2.plot(R_lcfs[:, _iz], Z_lcfs[:, _iz], "-", label=_lbl)
+    ax2.set_aspect("equal", adjustable="box")
+    ax2.legend(fontsize=18)
+    ax2.set_xlabel("R", fontsize=22)
+    ax2.set_ylabel("Z", fontsize=22)
+    ax2.tick_params(axis="x", labelsize=16)
+    ax2.tick_params(axis="y", labelsize=16)
+    fig2.tight_layout()
+    out_poloidal = outdir / f"{name}_poloidal_plot.png"
+    fig2.savefig(out_poloidal)
+    plt.close(fig2)
+
+    # ── Plot 3: VMECsurfaces — 8 nested cross-section panels ─────────────────────
+    ntheta_s = 200
+    nzeta_s = 8
+    nradius_s = 8
+    theta_s = np.linspace(0.0, 2.0 * np.pi, ntheta_s)
+    zeta_s = np.linspace(0.0, 2.0 * np.pi / nfp, nzeta_s, endpoint=False)
+    iradii_s = np.round(np.linspace(0, ns - 1, nradius_s)).astype(int)
+
+    fig3, axes3 = plt.subplots(2, 4, figsize=(14, 7))
+    fig3.patch.set_facecolor("white")
+    axes3_flat = axes3.ravel()
+
+    for _iz in range(nzeta_s):
+        ax = axes3_flat[_iz]
+        for _ir, _irad in enumerate(iradii_s):
+            R_s, Z_s = _eval_rz(_irad, theta_s, zeta_s)
+            ax.plot(R_s[:, _iz], Z_s[:, _iz], "-")
+        ax.plot(Raxis[_iz], Zaxis[_iz], "xr")
+        ax.set_aspect("equal", adjustable="box")
+        ax.set_xlabel("R", fontsize=10)
+        ax.set_ylabel("Z", fontsize=10)
+        ax.set_title(rf"$\phi$ = {round(float(zeta_s[_iz]), 2)}")
+
+    fig3.tight_layout()
+    out_surfaces = outdir / f"{name}_VMECsurfaces.pdf"
+    fig3.savefig(out_surfaces, bbox_inches="tight", pad_inches=0)
+    plt.close(fig3)
+
+    # ── Plot 4: 3-D LCFS surface coloured by |B| ─────────────────────────────────
+    ntheta_3d = 80
+    nzeta_3d = max(500, int(150 * nfp))
+    theta_3d = np.linspace(0.0, 2.0 * np.pi, ntheta_3d)
+    zeta_3d = np.linspace(0.0, 2.0 * np.pi, nzeta_3d)
+
+    R_3d, Z_3d = _eval_rz(ns - 1, theta_3d, zeta_3d)
+    B_3d = _eval_bmag(ns - 1, theta_3d, zeta_3d)
+
+    zeta2d_3d, _ = np.meshgrid(zeta_3d, theta_3d)
+    X_3d = R_3d * np.cos(zeta2d_3d)
+    Y_3d = R_3d * np.sin(zeta2d_3d)
+
+    B_rescaled = (B_3d - B_3d.min()) / (B_3d.max() - B_3d.min() + 1e-30)
+
+    fig4 = plt.figure(figsize=(5, 4), frameon=False)
+    ax4 = fig4.add_subplot(111, projection="3d")
+    ax4.plot_surface(
+        X_3d, Y_3d, Z_3d,
+        facecolors=cm.jet(B_rescaled),
+        rstride=1, cstride=1, antialiased=False,
+    )
+    scale = 0.7 * max(abs(X_3d).max(), abs(Y_3d).max())
+    ax4.auto_scale_xyz(
+        [-scale, scale],
+        [-scale, scale],
+        [-scale, scale],
+    )
+    ax4.set_box_aspect([1, 1, 1])
+    ax4.axis("off")
+
+    cax4 = fig4.add_axes([0.21, 0.80, 0.60, 0.03])
+    norm4 = Normalize(vmin=float(B_3d.min()), vmax=float(B_3d.max()))
+    sm4 = cm.ScalarMappable(cmap=cm.jet, norm=norm4)
+    sm4.set_array([])
+    cbar4 = plt.colorbar(sm4, orientation="horizontal", cax=cax4)
+    cbar4.set_label("|B| [T]")
+
+    out_3d = outdir / f"{name}_VMEC_3Dplot.png"
+    fig4.savefig(out_3d, bbox_inches="tight", pad_inches=0, dpi=400)
+    plt.close(fig4)
+
+    if show:
+        plt.show()
+
+    results = {
+        "vmec_params": out_params,
+        "poloidal_plot": out_poloidal,
+        "vmec_surfaces": out_surfaces,
+        "3d_plot": out_3d,
+    }
+    for _k, _p in results.items():
+        print(f"  [{_k}] {_p}")
+    return results
