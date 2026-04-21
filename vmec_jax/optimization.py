@@ -650,6 +650,8 @@ def make_qh_residuals_fn(
         qs_residual = jnp.asarray(qs["residuals1d"], dtype=jnp.float64) * float(qs_weight)
         return jnp.concatenate([aspect_residual, qs_residual])
 
+    residuals_from_state._n_qs = int(len(surfaces))
+
     return residuals_from_state
 
 
@@ -754,6 +756,7 @@ def make_qs_residuals_fn(
 
         return jnp.concatenate(parts)
 
+    residuals_from_state._n_qs = int(len(surfaces))
     return residuals_from_state
 
 
@@ -818,6 +821,9 @@ class FixedBoundaryExactOptimizer:
         self._boundary = boundary
         self._specs = list(specs)
         self._residuals_fn = residuals_fn
+        # Number of QS residuals (last _n_qs entries of the residual vector).
+        # Stored so quasisymmetry_objective correctly excludes aspect/iota entries.
+        self._n_qs: int | None = getattr(residuals_fn, "_n_qs", None)
 
         # Derive signgs from the initial guess.
         state0 = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
@@ -1005,7 +1011,7 @@ class FixedBoundaryExactOptimizer:
             cached_state, _ = self._exact_cache[key]
             res = np.asarray(self._residuals_fn(cached_state), dtype=float)
             cost = float(0.5 * np.dot(res, res))
-            qs_total = float(np.dot(res[1:], res[1:]))
+            qs_total = self._qs_from_res(res)
             from .wout import equilibrium_aspect_ratio_from_state
             aspect = float(np.asarray(
                 equilibrium_aspect_ratio_from_state(state=cached_state, static=self._static)
@@ -1051,10 +1057,17 @@ class FixedBoundaryExactOptimizer:
             equilibrium_aspect_ratio_from_state(state=state, static=self._static)
         ))
 
+    def _qs_from_res(self, res: np.ndarray) -> float:
+        """Sum of squared QS residuals only (excludes aspect and iota)."""
+        if self._n_qs is not None:
+            return float(np.dot(res[-self._n_qs:], res[-self._n_qs:]))
+        # Fallback for externally-supplied residuals_fn without _n_qs tag
+        return float(np.dot(res[1:], res[1:]))
+
     def quasisymmetry_objective(self, params) -> float:
         """Return the total QS objective at *params*."""
         res = np.asarray(self.residual_fun(params), dtype=float)
-        return float(np.dot(res[1:], res[1:]))
+        return self._qs_from_res(res)
 
     def save_wout(self, path, params) -> None:
         """Write a wout NetCDF file for the equilibrium at *params*.
@@ -1183,7 +1196,7 @@ class FixedBoundaryExactOptimizer:
             equilibrium_aspect_ratio_from_state(state=state0, static=self._static)
         ))
         cost0 = float(0.5 * np.dot(res0, res0))
-        qs_total0 = float(np.dot(res0[1:], res0[1:]))
+        qs_total0 = self._qs_from_res(res0)
 
         entry0: dict = {
             "wall_time_s": 0.0,
@@ -1230,7 +1243,7 @@ class FixedBoundaryExactOptimizer:
             equilibrium_aspect_ratio_from_state(state=state_final, static=self._static)
         ))
         cost_final = float(0.5 * np.dot(res_final, res_final))
-        qs_total_final = float(np.dot(res_final[1:], res_final[1:]))
+        qs_total_final = self._qs_from_res(res_final)
 
         entry_final: dict = {
             "wall_time_s": t_total,

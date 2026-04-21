@@ -1109,7 +1109,7 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
     ax3 = axes[2] if n_panels == 3 else None
 
     ax1.semilogy(iters, objectives, "o-", color="steelblue", linewidth=2, markersize=6)
-    ax1.set_ylabel("QS residuals²", fontsize=11)
+    ax1.set_ylabel("Objective ∑r²", fontsize=11)
     opt_label = data.get("label", "Optimisation")
     ax1.set_title(
         f"{opt_label}  ({nfev} evals, {total_time:.0f} s)",

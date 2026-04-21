@@ -231,98 +231,89 @@ isocurves in (θ, φ) space.  Quasi-helical symmetry means |B| depends mainly on
 the initial configuration.
 
 
-QA optimisation with exponential spectral scaling (ESS)
---------------------------------------------------------
+QA optimisation (fixed-boundary)
+---------------------------------
 
-``examples/optimization/qa_fixed_resolution_jax_ess.py`` demonstrates
-quasi-axisymmetric optimisation of an nfp=2 configuration with three objectives:
+``examples/optimization/qa_fixed_resolution_jax_ess.py`` optimises an nfp=2
+quasi-axisymmetric equilibrium for three objectives simultaneously:
 
 * **Aspect ratio** target = 6.0
 * **Mean rotational transform** (iota) target = 0.41
 * **QA quasisymmetry** residuals (``helicity_m=1, helicity_n=0``)
 
 A top-level toggle ``USE_ESS = True/False`` enables exponential spectral scaling
-via :func:`create_x_scale`.  With ESS, boundary DOFs at mode number
-``max(|m|, |n|) = k`` are pre-scaled by ``exp(-α·k) / exp(-α)`` (``α=1``
-default), so the Gauss-Newton step naturally prefers coarse-scale shape changes
-over fine-scale ones.  This often improves convergence on inputs with many
-high-mode DOFs.
+via :func:`create_x_scale`.  See the script header for details.
 
 .. code-block:: bash
 
-   # Run with ESS (results saved to results/qa_opt/ess/)
    python examples/optimization/qa_fixed_resolution_jax_ess.py
 
-   # Edit USE_ESS = False at the top to compare without scaling
-   # (results saved to results/qa_opt/no_ess/)
-
-The script starts from ``examples/data/input.nfp2_QA`` (nfp=2, ``NS=31``,
-``FTOL=1e-12``) and uses ``max_mode=2`` (24 DOFs).  All runs use VMEC resolution
-``mpol = ntor = 5`` and a budget of 15 Jacobian evaluations.
+The script starts from ``examples/data/input.nfp2_QA`` (nfp=2, ``NS=31``).
+All runs use VMEC resolution ``mpol = ntor = 5`` (set automatically by
+``extend_boundary_for_max_mode``) and a budget of 15 Jacobian evaluations.
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 14 14 14 20 16
+   :widths: 12 10 18 18 14 18
 
-   * - Setting
-     - QS initial
-     - QS final
+   * - max\_mode
+     - DOFs
+     - Objective initial
+     - Objective final
      - Reduction
-     - Aspect final
      - Wall time ¹
-   * - ESS off
+   * - 1
+     - 8
+     - 0.168
+     - 0.168 ²
+     - 0 %
+     - ~49 s
+   * - 2
+     - 24
      - 0.168
      - **0.099**
      - **41 %**
-     - 5.51
      - ~608 s
-   * - ESS on (α=1)
-     - 0.168
-     - 0.168 ²
-     - —
-     - 5.84
-     - ~319 s
 
-¹ Wall time on Apple M-series (warm-cache subsequent runs are faster).
+¹ Wall time on Apple M-series.
 
-² With 15 evaluations, ESS first drives the dominant low-mode residual (aspect
-ratio: 5.0 → 5.84 toward target 6.0) before touching QS — as expected from
-spectral scaling that suppresses high-mode steps.  More evaluations would show
-QS improvement once the aspect residual is small.
+² With 8 DOFs, the optimizer satisfies the aspect ratio target (5.0 → 6.0)
+but the low-mode boundary space is too limited to improve the multi-objective
+residual further.  ``max_mode=2`` (24 DOFs) achieves a 41 % reduction.
 
-**ESS off** (max_mode=2, 24 DOFs)
+**max_mode = 1** (8 DOFs, aspect 5.0 → 6.0)
 
 .. list-table::
    :widths: 60 40
 
-   * - .. image:: _static/figures/qa_opt/no_ess/boundary_comparison.png
+   * - .. image:: _static/figures/qa_opt/boundary_comparison.png
           :width: 100%
-          :alt: 3D LCFS QA ESS off
-     - .. image:: _static/figures/qa_opt/no_ess/objective_history.png
+          :alt: 3D LCFS QA max_mode=1
+     - .. image:: _static/figures/qa_opt/objective_history.png
           :width: 100%
-          :alt: Objective history QA ESS off
+          :alt: Objective history QA max_mode=1
 
-.. image:: _static/figures/qa_opt/no_ess/bmag_surface.png
+.. image:: _static/figures/qa_opt/bmag_surface.png
    :width: 80%
    :align: center
-   :alt: |B| contour lines on LCFS, QA ESS off
+   :alt: |B| contour lines on LCFS, QA max_mode=1
 
-**ESS on** (max_mode=2, 24 DOFs, α=1)
+**max_mode = 2** (24 DOFs, 41 % reduction)
 
 .. list-table::
    :widths: 60 40
 
-   * - .. image:: _static/figures/qa_opt/ess/boundary_comparison.png
+   * - .. image:: _static/figures/qa_opt/mode2/boundary_comparison.png
           :width: 100%
-          :alt: 3D LCFS QA ESS on
-     - .. image:: _static/figures/qa_opt/ess/objective_history.png
+          :alt: 3D LCFS QA max_mode=2
+     - .. image:: _static/figures/qa_opt/mode2/objective_history.png
           :width: 100%
-          :alt: Objective history QA ESS on
+          :alt: Objective history QA max_mode=2
 
-.. image:: _static/figures/qa_opt/ess/bmag_surface.png
+.. image:: _static/figures/qa_opt/mode2/bmag_surface.png
    :width: 80%
    :align: center
-   :alt: |B| contour lines on LCFS, QA ESS on
+   :alt: |B| contour lines on LCFS, QA max_mode=2
 
 
 Algorithms in detail

@@ -169,50 +169,48 @@ Regenerate plots after running the optimization:
 python examples/optimization/plot_qh_optimization_results.py --output-dir results/qh_opt
 ```
 
-## Quasi-axisymmetric optimization with exponential spectral scaling (ESS)
+## Quasi-axisymmetric optimization (fixed-boundary)
 
 `examples/optimization/qa_fixed_resolution_jax_ess.py` optimizes an nfp=2 QA
-equilibrium for aspect ratio, mean iota, and QA symmetry residuals.  A toggle
-`USE_ESS` enables *exponential spectral scaling*: each boundary DOF is pre-weighted
-by `exp(−α · max(|m|,|n|))` so that the Gauss-Newton step naturally favours
-low-order harmonics.
+equilibrium for aspect ratio, mean iota, and QA symmetry residuals.
 
 ```bash
-python examples/optimization/qa_fixed_resolution_jax_ess.py   # USE_ESS=True, MAX_MODE=2
+python examples/optimization/qa_fixed_resolution_jax_ess.py   # MAX_MODE=2 by default
 ```
 
-All runs use `max_mode=2` (24 DOFs, VMEC resolution `mpol = ntor = 5`).
-Objectives: aspect ratio + mean iota + QA symmetry residuals (15 Jacobian evals).
+When `max_mode` exceeds the modes in the input file, vmec_jax automatically extends
+the boundary to include those harmonics at zero amplitude (`vj.extend_boundary_for_max_mode`).
+All runs use consistent VMEC resolution `mpol = ntor = 5`.
+Objectives: aspect ratio (target 6.0) + mean iota (target 0.41) + QA symmetry residuals.
 
-| Setting | QS initial | QS final | Reduction | Aspect final | Wall time |
-|:-------:|:----------:|:--------:|:---------:|:------------:|:---------:|
-| ESS off | 0.168 | **0.099** | **41 %** | 5.51 | ~608 s |
-| ESS on (α=1) | 0.168 | 0.168 ¹ | — | 5.84 | ~319 s |
+| `max_mode` | DOFs | Aspect initial → final | Objective initial | Objective final | Wall time ¹ |
+|:----------:|:----:|:----------------------:|:-----------------:|:---------------:|:-----------:|
+| 1          |  8   | 5.0 → **6.0** ✓        |   1.168           |  0.168          | ~49 s       |
+| 2          | 24   | 5.0 → 5.51             |   1.168           |  **0.340**      | ~608 s      |
 
-¹ With 15 evaluations, ESS first drives the dominant low-mode residual (aspect
-  ratio: 5.0 → 5.84 toward target 6.0) before touching QS — as expected from
-  spectral scaling that suppresses high-mode steps.  More evaluations would show
-  QS improvement once the aspect residual is small.
+¹ Wall time on Apple M-series (warm-cache subsequent runs are faster).
 
-Boundary modes beyond those present in the input file are automatically added at
-zero amplitude via `extend_boundary_for_max_mode`.
+With 8 DOFs (`max_mode=1`) the optimizer satisfies the aspect ratio target
+(5.0 → 6.0) using only low-mode boundary harmonics — it solves the dominant
+residual but cannot independently shape iota or QS.  `max_mode=2` (24 DOFs)
+distributes effort across all three objectives simultaneously.
 
 <table>
   <tr>
-    <th align="center">ESS off &nbsp;(max_mode=2, 24 DOFs)</th>
-    <th align="center">ESS on &nbsp;(max_mode=2, 24 DOFs, α=1)</th>
+    <th align="center">max_mode = 1 &nbsp;(8 DOFs, aspect 5.0→6.0)</th>
+    <th align="center">max_mode = 2 &nbsp;(24 DOFs, 41 % reduction)</th>
   </tr>
   <tr>
-    <td><img src="docs/_static/figures/qa_opt/no_ess/boundary_comparison.png" /></td>
-    <td><img src="docs/_static/figures/qa_opt/ess/boundary_comparison.png" /></td>
+    <td><img src="docs/_static/figures/qa_opt/boundary_comparison.png" /></td>
+    <td><img src="docs/_static/figures/qa_opt/mode2/boundary_comparison.png" /></td>
   </tr>
   <tr>
-    <td><img src="docs/_static/figures/qa_opt/no_ess/bmag_surface.png" /></td>
-    <td><img src="docs/_static/figures/qa_opt/ess/bmag_surface.png" /></td>
+    <td><img src="docs/_static/figures/qa_opt/bmag_surface.png" /></td>
+    <td><img src="docs/_static/figures/qa_opt/mode2/bmag_surface.png" /></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/_static/figures/qa_opt/no_ess/objective_history.png" /></td>
-    <td align="center"><img src="docs/_static/figures/qa_opt/ess/objective_history.png" /></td>
+    <td align="center"><img src="docs/_static/figures/qa_opt/objective_history.png" /></td>
+    <td align="center"><img src="docs/_static/figures/qa_opt/mode2/objective_history.png" /></td>
   </tr>
 </table>
 
