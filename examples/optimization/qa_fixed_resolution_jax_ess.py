@@ -35,6 +35,7 @@ Workflow
 """
 
 from pathlib import Path
+import os
 
 import numpy as np
 
@@ -120,6 +121,21 @@ USE_MODE_CONTINUATION = True
 # Output directory — subdirectory name reflects whether ESS was used.
 _tag       = "ess" if USE_ESS else "no_ess"
 OUTPUT_DIR = Path(f"results/qa_opt/{_tag}")
+
+# Optional environment overrides for benchmarking without editing the file.
+MAX_MODE = int(os.environ.get("VMEC_JAX_QA_MAX_MODE", str(MAX_MODE)))
+MAX_NFEV = int(os.environ.get("VMEC_JAX_QA_MAX_NFEV", str(MAX_NFEV)))
+CONTINUATION_NFEV = int(os.environ.get("VMEC_JAX_QA_CONTINUATION_NFEV", str(CONTINUATION_NFEV)))
+METHOD = os.environ.get("VMEC_JAX_QA_METHOD", METHOD)
+FTOL = float(os.environ.get("VMEC_JAX_QA_FTOL", str(FTOL)))
+GTOL = float(os.environ.get("VMEC_JAX_QA_GTOL", str(GTOL)))
+XTOL = float(os.environ.get("VMEC_JAX_QA_XTOL", str(XTOL)))
+USE_ESS = os.environ.get("VMEC_JAX_QA_USE_ESS", str(USE_ESS)).lower() in {"1", "true", "yes", "on"}
+ALPHA = float(os.environ.get("VMEC_JAX_QA_ALPHA", str(ALPHA)))
+USE_MODE_CONTINUATION = os.environ.get(
+    "VMEC_JAX_QA_USE_CONTINUATION", str(USE_MODE_CONTINUATION)
+).lower() in {"1", "true", "yes", "on"}
+OUTPUT_DIR = Path(os.environ.get("VMEC_JAX_QA_OUTPUT_DIR", str(OUTPUT_DIR)))
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1.  Load configuration

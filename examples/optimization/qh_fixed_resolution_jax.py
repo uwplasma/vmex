@@ -47,6 +47,7 @@ VMEC_NTOR = 5
 # Boundary parameterization.
 MAX_MODE = 2
 MAX_NFEV = 15
+CONTINUATION_NFEV = 15
 
 # Outer optimizer: "gauss_newton" or "scipy".
 METHOD = "gauss_newton"
@@ -67,108 +68,177 @@ OBJECTIVE_TUPLES = [
     ("qs", 0.0, QS_WEIGHT),
 ]
 
+# Optional exponential spectral scaling and staged continuation.  For QH,
+# continuation is mainly useful once MAX_MODE > 2.
+USE_ESS = False
+ALPHA = 0.8
+USE_MODE_CONTINUATION = True
+
 OUTPUT_DIR = Path("results/qh_opt")
 
 # Optional environment overrides for benchmarking without editing the file.
 MAX_MODE = int(os.environ.get("VMEC_JAX_QH_MAX_MODE", str(MAX_MODE)))
 MAX_NFEV = int(os.environ.get("VMEC_JAX_QH_MAX_NFEV", str(MAX_NFEV)))
+CONTINUATION_NFEV = int(os.environ.get("VMEC_JAX_QH_CONTINUATION_NFEV", str(CONTINUATION_NFEV)))
 METHOD = os.environ.get("VMEC_JAX_QH_METHOD", METHOD)
+FTOL = float(os.environ.get("VMEC_JAX_QH_FTOL", str(FTOL)))
+GTOL = float(os.environ.get("VMEC_JAX_QH_GTOL", str(GTOL)))
+XTOL = float(os.environ.get("VMEC_JAX_QH_XTOL", str(XTOL)))
+USE_ESS = os.environ.get("VMEC_JAX_QH_USE_ESS", str(USE_ESS)).lower() in {"1", "true", "yes", "on"}
+ALPHA = float(os.environ.get("VMEC_JAX_QH_ALPHA", str(ALPHA)))
+USE_MODE_CONTINUATION = os.environ.get(
+    "VMEC_JAX_QH_USE_CONTINUATION", str(USE_MODE_CONTINUATION)
+).lower() in {"1", "true", "yes", "on"}
 OUTPUT_DIR = Path(os.environ.get("VMEC_JAX_QH_OUTPUT_DIR", str(OUTPUT_DIR)))
 
 print(f"Loading {INPUT_FILE.name} …")
 cfg, indata = vj.load_config(str(INPUT_FILE))
 indata = rebuild_indata_with_resolution(indata, mpol=VMEC_MPOL, ntor=VMEC_NTOR)
 cfg = config_from_indata(indata)
-static = vj.build_static(cfg)
-boundary = vj.boundary_from_indata(indata, static.modes, apply_m1_constraint=False)
-indata, static, boundary = vj.extend_boundary_for_max_mode(indata, static, boundary, MAX_MODE)
-boundary_input = vj.boundary_input_from_indata(indata, static.modes)
-
-specs = vj.boundary_param_specs(
-    boundary_input,
-    static.modes,
-    max_mode=MAX_MODE,
-    min_coeff=0.0,
-    include=("rc", "zs"),
-    fix=("rc00",),
-)
-params0 = np.zeros(len(specs))
-print(f"Parameter space ({len(specs)} DOFs): {vj.boundary_param_names(specs)}")
-
-state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
-geom = eval_geom(state_guess, static)
-signgs = int(signgs_from_sqrtg(np.asarray(geom.sqrtg), axis_index=1))
-flux = vj.flux_profiles_from_indata(indata, static.s, signgs=signgs)
-pressure = jnp.zeros_like(jnp.asarray(static.s))
-
-
-def residuals_from_state(state):
-    parts = []
-    for name, target, weight in OBJECTIVE_TUPLES:
-        if name == "aspect":
-            aspect = equilibrium_aspect_ratio_from_state(state=state, static=static)
-            parts.append(jnp.asarray([float(weight) * (aspect - float(target))], dtype=jnp.float64))
-        elif name == "qs":
-            qs = quasisymmetry_ratio_residual_from_state(
-                state=state,
-                static=static,
-                indata=indata,
-                signgs=signgs,
-                flux_local=flux,
-                prof_local={"pressure": pressure},
-                pressure_local=pressure,
-                surfaces=SURFACES,
-                helicity_m=HELICITY_M,
-                helicity_n=HELICITY_N,
-            )
-            parts.append(jnp.asarray(qs["residuals1d"], dtype=jnp.float64) * float(weight))
-        else:
-            raise ValueError(f"Unknown objective block '{name}'")
-    return jnp.concatenate(parts)
-
-
-def qs_total_from_state(state):
-    qs = quasisymmetry_ratio_residual_from_state(
-        state=state,
-        static=static,
-        indata=indata,
-        signgs=signgs,
-        flux_local=flux,
-        prof_local={"pressure": pressure},
-        pressure_local=pressure,
-        surfaces=SURFACES,
-        helicity_m=HELICITY_M,
-        helicity_n=HELICITY_N,
+def _build_stage(max_mode: int):
+    stage_static = vj.build_static(cfg)
+    stage_boundary = vj.boundary_from_indata(indata, stage_static.modes, apply_m1_constraint=False)
+    stage_indata, stage_static, stage_boundary = vj.extend_boundary_for_max_mode(
+        indata, stage_static, stage_boundary, max_mode
     )
-    return float(OBJECTIVE_TUPLES[1][2]) ** 2 * float(qs["total"])
+    stage_boundary_input = vj.boundary_input_from_indata(stage_indata, stage_static.modes)
+    stage_specs = vj.boundary_param_specs(
+        stage_boundary_input,
+        stage_static.modes,
+        max_mode=max_mode,
+        min_coeff=0.0,
+        include=("rc", "zs"),
+        fix=("rc00",),
+    )
+    stage_guess = initial_guess_from_boundary(stage_static, stage_boundary, stage_indata, vmec_project=True)
+    stage_geom = eval_geom(stage_guess, stage_static)
+    stage_signgs = int(signgs_from_sqrtg(np.asarray(stage_geom.sqrtg), axis_index=1))
+    stage_flux = vj.flux_profiles_from_indata(stage_indata, stage_static.s, signgs=stage_signgs)
+    stage_pressure = jnp.zeros_like(jnp.asarray(stage_static.s))
+
+    def stage_qs_eval(state):
+        return quasisymmetry_ratio_residual_from_state(
+            state=state,
+            static=stage_static,
+            indata=stage_indata,
+            signgs=stage_signgs,
+            flux_local=stage_flux,
+            prof_local={"pressure": stage_pressure},
+            pressure_local=stage_pressure,
+            surfaces=SURFACES,
+            helicity_m=HELICITY_M,
+            helicity_n=HELICITY_N,
+        )
+
+    def stage_residuals_from_state(state):
+        parts = []
+        for name, target, weight in OBJECTIVE_TUPLES:
+            if name == "aspect":
+                aspect = equilibrium_aspect_ratio_from_state(state=state, static=stage_static)
+                parts.append(jnp.asarray([float(weight) * (aspect - float(target))], dtype=jnp.float64))
+            elif name == "qs":
+                qs = stage_qs_eval(state)
+                parts.append(jnp.asarray(qs["residuals1d"], dtype=jnp.float64) * float(weight))
+            else:
+                raise ValueError(f"Unknown objective block '{name}'")
+        return jnp.concatenate(parts)
+
+    stage_residuals_from_state._n_non_qs = 1
+    stage_residuals_from_state._qs_total_from_state = (
+        lambda state: float(QS_WEIGHT) ** 2 * float(stage_qs_eval(state)["total"])
+    )
+
+    stage_opt = vj.FixedBoundaryExactOptimizer(
+        stage_static,
+        stage_indata,
+        stage_boundary,
+        stage_specs,
+        stage_residuals_from_state,
+        boundary_input=stage_boundary_input,
+    )
+    stage_x_scale = vj.create_x_scale(stage_specs, alpha=ALPHA) if USE_ESS else np.ones(len(stage_specs))
+    return stage_indata, stage_static, stage_boundary_input, stage_specs, stage_opt, stage_x_scale
 
 
-residuals_from_state._n_non_qs = 1
-residuals_from_state._qs_total_from_state = qs_total_from_state
+stage_results = []
+params_stage = None
+prev_specs = None
+stage_modes = list(range(1, MAX_MODE + 1)) if (USE_MODE_CONTINUATION and MAX_MODE > 1) else [MAX_MODE]
 
-opt = vj.FixedBoundaryExactOptimizer(
-    static,
-    indata,
-    boundary,
-    specs,
-    residuals_from_state,
-    boundary_input=boundary_input,
-)
+for stage_mode in stage_modes:
+    stage_indata, stage_static, stage_boundary_input, stage_specs, stage_opt, stage_x_scale = _build_stage(stage_mode)
+    params0_stage = (
+        np.zeros(len(stage_specs))
+        if params_stage is None
+        else vj.lift_boundary_params(prev_specs, params_stage, stage_specs)
+    )
+    stage_budget = MAX_NFEV if stage_mode == MAX_MODE else CONTINUATION_NFEV
 
-print(f"\nAspect ratio (initial):        {opt.aspect_ratio(params0):.4f}")
-print(f"QS objective (initial):        {opt.quasisymmetry_objective(params0):.6f}")
-print(f"\nRunning {METHOD} (max_nfev={MAX_NFEV}) …")
+    if stage_mode == MAX_MODE:
+        print(f"Parameter space ({len(stage_specs)} DOFs): {vj.boundary_param_names(stage_specs)}")
+        if USE_ESS:
+            print(f"ESS scales (alpha={ALPHA}): min={stage_x_scale.min():.3f}  max={stage_x_scale.max():.3f}")
+        else:
+            print("ESS disabled — uniform scales.")
+        print(f"\nAspect ratio (initial):        {stage_opt.aspect_ratio(params0_stage):.4f}")
+        print(f"QS objective (initial):        {stage_opt.quasisymmetry_objective(params0_stage):.6f}")
+        print(f"\nRunning {METHOD} (max_nfev={MAX_NFEV}, continuation={USE_MODE_CONTINUATION}) …")
+    else:
+        print(f"Stage {stage_mode} → {stage_mode + 1} continuation seed (budget={stage_budget}) …")
 
-result = opt.run(
-    params0,
-    method=METHOD,
-    max_nfev=MAX_NFEV,
-    ftol=FTOL,
-    gtol=GTOL,
-    xtol=XTOL,
-    verbose=1,
-    target_aspect=TARGET_ASPECT,
-)
+    stage_result = stage_opt.run(
+        params0_stage,
+        method=METHOD,
+        max_nfev=stage_budget,
+        ftol=FTOL,
+        gtol=GTOL,
+        xtol=XTOL,
+        x_scale=stage_x_scale,
+        verbose=1 if stage_mode == MAX_MODE else 0,
+        target_aspect=TARGET_ASPECT,
+    )
+    stage_results.append((stage_mode, stage_specs, stage_opt, params0_stage, stage_result))
+    prev_specs = stage_specs
+    params_stage = stage_result["x"]
+
+stage_mode, specs, opt, params0, result = stage_results[-1]
+
+combined_history = None
+if USE_MODE_CONTINUATION and len(stage_results) > 1:
+    combined_entries = []
+    wall_offset = 0.0
+    nfev_total = 0
+    njev_total = 0
+    for idx, (_mode, _specs, _opt, _params0, _result) in enumerate(stage_results):
+        stage_hist = _result["_history_dump"]
+        entries = stage_hist["history"] if idx == 0 else stage_hist["history"][1:]
+        for entry in entries:
+            entry_copy = dict(entry)
+            entry_copy["wall_time_s"] = float(entry_copy["wall_time_s"]) + wall_offset
+            combined_entries.append(entry_copy)
+        wall_offset = combined_entries[-1]["wall_time_s"]
+        nfev_total += int(stage_hist["nfev"])
+        njev_total += int(stage_hist["njev"])
+    combined_history = {
+        "label": "Optimisation",
+        "max_nfev": int(sum(CONTINUATION_NFEV if m != MAX_MODE else MAX_NFEV for m in stage_modes)),
+        "ftol": FTOL,
+        "gtol": GTOL,
+        "xtol": XTOL,
+        "total_wall_time_s": float(wall_offset),
+        "nfev": int(nfev_total),
+        "njev": int(njev_total),
+        "success": bool(result["_history_dump"]["success"]),
+        "message": str(result["_history_dump"]["message"]),
+        "objective_initial": float(stage_results[0][4]["_history_dump"]["objective_initial"]),
+        "objective_final": float(result["_history_dump"]["objective_final"]),
+        "qs_initial": float(stage_results[0][4]["_history_dump"]["qs_initial"]),
+        "qs_final": float(result["_history_dump"]["qs_final"]),
+        "aspect_initial": float(stage_results[0][4]["_history_dump"]["aspect_initial"]),
+        "aspect_final": float(result["_history_dump"]["aspect_final"]),
+        "history": combined_entries,
+        "target_aspect": TARGET_ASPECT,
+    }
 
 print(f"\nTermination: {result['message']}")
 print(f"Aspect ratio (final):          {opt.aspect_ratio(result['x']):.4f}")
@@ -181,6 +251,8 @@ print(
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 opt.save_wout(OUTPUT_DIR / "wout_initial.nc", params0)
 opt.save_wout(OUTPUT_DIR / "wout_final.nc", result["x"])
+if combined_history is not None:
+    result["_history_dump"] = combined_history
 opt.save_history(OUTPUT_DIR / "history.json", result)
 
 print("\nGenerating plots …")
