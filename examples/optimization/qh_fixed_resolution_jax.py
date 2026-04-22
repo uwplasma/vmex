@@ -16,7 +16,6 @@ discrete-adjoint path through :class:`vmec_jax.FixedBoundaryExactOptimizer`.
 """
 
 from pathlib import Path
-import os
 
 import numpy as np
 
@@ -75,21 +74,6 @@ ALPHA = 0.8
 USE_MODE_CONTINUATION = True
 
 OUTPUT_DIR = Path("results/qh_opt")
-
-# Optional environment overrides for benchmarking without editing the file.
-MAX_MODE = int(os.environ.get("VMEC_JAX_QH_MAX_MODE", str(MAX_MODE)))
-MAX_NFEV = int(os.environ.get("VMEC_JAX_QH_MAX_NFEV", str(MAX_NFEV)))
-CONTINUATION_NFEV = int(os.environ.get("VMEC_JAX_QH_CONTINUATION_NFEV", str(CONTINUATION_NFEV)))
-METHOD = os.environ.get("VMEC_JAX_QH_METHOD", METHOD)
-FTOL = float(os.environ.get("VMEC_JAX_QH_FTOL", str(FTOL)))
-GTOL = float(os.environ.get("VMEC_JAX_QH_GTOL", str(GTOL)))
-XTOL = float(os.environ.get("VMEC_JAX_QH_XTOL", str(XTOL)))
-USE_ESS = os.environ.get("VMEC_JAX_QH_USE_ESS", str(USE_ESS)).lower() in {"1", "true", "yes", "on"}
-ALPHA = float(os.environ.get("VMEC_JAX_QH_ALPHA", str(ALPHA)))
-USE_MODE_CONTINUATION = os.environ.get(
-    "VMEC_JAX_QH_USE_CONTINUATION", str(USE_MODE_CONTINUATION)
-).lower() in {"1", "true", "yes", "on"}
-OUTPUT_DIR = Path(os.environ.get("VMEC_JAX_QH_OUTPUT_DIR", str(OUTPUT_DIR)))
 
 print(f"Loading {INPUT_FILE.name} …")
 cfg, indata = vj.load_config(str(INPUT_FILE))
