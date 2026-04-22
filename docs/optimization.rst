@@ -99,39 +99,47 @@ Quasi-helical symmetry example
 
 The ``examples/optimization/qh_fixed_resolution_jax.py`` script replicates the
 SIMSOPT QH fixed-resolution benchmark entirely within ``vmec_jax``.  It has no
-argparse — all parameters are top-level variables:
+argparse — all parameters are top-level variables, and the objective is built
+explicitly in the script:
 
 .. code-block:: python
 
    # ── User parameters ────────────────────────────────────────────────────────
    INPUT_FILE    = Path(".../input.nfp4_QH_warm_start")
+   VMEC_MPOL     = 5         # solver resolution
+   VMEC_NTOR     = 5
    MAX_MODE      = 2         # boundary DOF mode number cutoff
    MAX_NFEV      = 15        # maximum residual+Jacobian evaluations
+   METHOD        = "gauss_newton"
    HELICITY_M    = 1         # QH helicity
    HELICITY_N    = -1        # field-period units; nn = HELICITY_N * nfp = -4 internally
    TARGET_ASPECT = 7.0       # target aspect ratio
    SURFACES      = np.arange(0, 1.01, 0.1)
+   OBJECTIVE_TUPLES = [("aspect", 7.0, 1.0), ("qs", 0.0, 1.0)]
 
    # ── Load ──────────────────────────────────────────────────────────────────
    cfg, indata  = vj.load_config(str(INPUT_FILE))
+   indata       = vj.rebuild_indata_with_resolution(indata, mpol=VMEC_MPOL, ntor=VMEC_NTOR)
+   cfg          = vj.config_from_indata(indata)
    static       = vj.build_static(cfg)
-   boundary     = vj.boundary_from_indata(indata, static.modes)
+   boundary     = vj.boundary_from_indata(indata, static.modes, apply_m1_constraint=False)
    indata, static, boundary = vj.extend_boundary_for_max_mode(indata, static, boundary, MAX_MODE)
+   boundary_input = vj.boundary_input_from_indata(indata, static.modes)
 
    # ── DOFs ──────────────────────────────────────────────────────────────────
-   specs        = vj.boundary_param_specs(boundary, static.modes, max_mode=MAX_MODE,
+   specs        = vj.boundary_param_specs(boundary_input, static.modes, max_mode=MAX_MODE,
                                           include=("rc","zs"), fix=("rc00",))
    params0      = np.zeros(len(specs))
 
    # ── Objective ─────────────────────────────────────────────────────────────
-   residuals_fn = vj.make_qh_residuals_fn(
-       static, indata, helicity_m=HELICITY_M, helicity_n=HELICITY_N,
-       target_aspect=TARGET_ASPECT, surfaces=SURFACES,
-   )
+   def residuals_from_state(state):
+       ...
+       return jnp.concatenate([aspect_residual, qs_residuals])
 
    # ── Optimiser ─────────────────────────────────────────────────────────────
-   opt    = vj.FixedBoundaryExactOptimizer(static, indata, boundary, specs, residuals_fn)
-   result = opt.run(params0, max_nfev=MAX_NFEV)
+   opt    = vj.FixedBoundaryExactOptimizer(static, indata, boundary, specs,
+                                           residuals_from_state, boundary_input=boundary_input)
+   result = opt.run(params0, method=METHOD, max_nfev=MAX_NFEV, target_aspect=TARGET_ASPECT)
 
    # ── Save + plot ────────────────────────────────────────────────────────────
    opt.save_wout(OUTPUT_DIR / "wout_final.nc", result["x"])
@@ -181,6 +189,12 @@ so the initial QS value is identical across ``max_mode`` values.
 ``max_mode=1`` is limited by the 8-DOF boundary parameterisation; ``max_mode=2``
 (24 DOFs) gives the optimizer room to reshape the boundary helically and achieves
 a 97 % reduction.
+
+For ``max_mode > 2`` the script also supports staged continuation and optional
+exponential spectral scaling (ESS) through top-level toggles.  Current
+exploratory ``max_mode=3`` continuation runs reach roughly ``3e-3`` total
+objective on the standalone exact path, but mode 2 remains the documented
+default because it is already very strong and materially cheaper.
 
 
 3-D LCFS and :math:`|B|` contour plots
@@ -237,7 +251,9 @@ quasi-axisymmetric equilibrium for three objectives simultaneously:
 * **QA quasisymmetry** residuals (``helicity_m=1, helicity_n=0``)
 
 A top-level toggle ``USE_ESS = True/False`` enables exponential spectral scaling
-via :func:`create_x_scale`.  See the script header for details.
+via :func:`create_x_scale`.  The script also exposes the VMEC resolution, the
+explicit objective tuple list, continuation budget, and optimizer choice
+directly in the file.
 
 .. code-block:: bash
 
@@ -294,6 +310,11 @@ the raw input can land in a poorer local minimum. Staged continuation fixes
 that. With the ``max_mode=1`` solution used as the starting point, the 24-DOF
 run now improves the QA objective further, which is the expected behavior for a
 nested richer boundary space.
+
+For ``max_mode=3``, QA is more delicate than QH: some ESS settings reduce the
+QA symmetry residual below the mode-2 value, but the additional freedom can
+also pull the mean iota away from its target. So mode 3 is currently an
+experimental tuning path for QA rather than the recommended default.
 
 **max_mode = 1** (8 DOFs, exact SciPy + adjoint)
 
