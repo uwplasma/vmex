@@ -49,7 +49,12 @@ MAX_NFEV = 15
 CONTINUATION_NFEV = 15
 
 # Outer optimizer: "gauss_newton" or "scipy".
-METHOD = "gauss_newton"
+#
+# For standalone QH continuation, the exact SciPy trust-region path is the
+# robust default.  The cheaper Gauss-Newton branch can still be useful for
+# short experiments, but the seeded mode-2/mode-3 continuation path is more
+# reliable with SciPy on the current exact callbacks.
+METHOD = "scipy"
 
 FTOL = 1e-3
 GTOL = 1e-3

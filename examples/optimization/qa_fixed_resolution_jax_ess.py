@@ -124,11 +124,13 @@ USE_MODE_CONTINUATION = True
 _tag       = "ess" if USE_ESS else "no_ess"
 OUTPUT_DIR = Path(f"results/qa_opt/{_tag}")
 
-# The 48-DOF QA problem needs a stronger continuation seed than max_mode=2.
-# When the user switches MAX_MODE to 3, promote the continuation budget and
-# ESS alpha automatically so the script lands in the better basin instead of
-# the early shallow one.
-if MAX_MODE >= 3:
+# The direct 24-DOF and 48-DOF QA stages are both sensitive to the lifted
+# continuation seed.  With the very cheap inner VMEC budgets used here, the
+# raw mode-2 defaults can terminate early in a shallow basin (`xtol` after only
+# a few Jacobians).  Promote the continuation seed and ESS strength once we
+# leave max_mode=1 so the higher-mode stages start from a cleaner lower-mode
+# solution.
+if MAX_MODE >= 2:
     CONTINUATION_NFEV = max(CONTINUATION_NFEV, 25)
     if USE_ESS:
         ALPHA = max(ALPHA, 1.6)
