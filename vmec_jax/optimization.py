@@ -1432,7 +1432,10 @@ class FixedBoundaryExactOptimizer:
         if final_key in self._exact_cache:
             state_final = self._exact_cache[final_key][0]
         else:
-            state_final = self._solve_forward(result["x"], trial=True)
+            try:
+                state_final = self._solve_exact_with_tape(result["x"])
+            except Exception:
+                state_final = self._solve_forward(result["x"], trial=True)
 
         res_final = np.asarray(self._residuals_fn(state_final), dtype=float)
         aspect_final = float(np.asarray(

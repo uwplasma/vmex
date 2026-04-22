@@ -197,10 +197,45 @@ objective on the standalone exact path, but mode 2 remains the documented
 default because it is already very strong and materially cheaper.
 
 
+.. list-table::
+   :header-rows: 1
+   :widths: 10 8 12 12 12 12 12
+
+   * - max\_mode
+     - DOFs
+     - QS initial
+     - QS final
+     - Reduction
+     - Objective final
+     - Wall time ¹
+   * - 1
+     - 8
+     - 0.303
+     - 0.213
+     - 30 %
+     - 0.216
+     - ~118 s
+   * - 2
+     - 24
+     - 0.303
+     - ``8.61e-3``
+     - 97 %
+     - ``8.72e-3``
+     - ~220 s
+   * - 3
+     - 48
+     - 0.303
+     - ``2.91e-3``
+     - 99 %
+     - ``2.99e-3``
+     - ~324 s
+
+¹ Wall time on Apple M-series.
+
 3-D LCFS and :math:`|B|` contour plots
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**max_mode = 1** (8 DOFs, 30% QS reduction, ~124 s)
+**max_mode = 1** (8 DOFs, 30% QS reduction, ~118 s)
 
 .. list-table::
    :widths: 60 40
@@ -217,7 +252,7 @@ default because it is already very strong and materially cheaper.
    :align: center
    :alt: B-magnitude contour lines on LCFS, max_mode=1
 
-**max_mode = 2** (24 DOFs, 97% QS reduction, ~323 s)
+**max_mode = 2** (24 DOFs, 97% QS reduction, ~220 s)
 
 .. list-table::
    :widths: 60 40
@@ -234,10 +269,27 @@ default because it is already very strong and materially cheaper.
    :align: center
    :alt: B-magnitude contour lines on LCFS, max_mode=2
 
+**max_mode = 3** (48 DOFs, 99% QS reduction, ~324 s)
+
+.. list-table::
+   :widths: 60 40
+
+   * - .. image:: _static/figures/qh_opt/mode3/boundary_comparison.png
+          :width: 100%
+          :alt: 3D LCFS max_mode=3
+     - .. image:: _static/figures/qh_opt/mode3/objective_history.png
+          :width: 100%
+          :alt: Objective history max_mode=3
+
+.. image:: _static/figures/qh_opt/mode3/bmag_surface.png
+   :width: 80%
+   :align: center
+   :alt: B-magnitude contour lines on LCFS, max_mode=3
+
 The contour lines on the :math:`|B|` surface plots show the magnetic field strength as
-isocurves in (θ, φ) space.  Quasi-helical symmetry means :math:`|B|` depends mainly on
+isocurves in (θ, φ) space. Quasi-helical symmetry means :math:`|B|` depends mainly on
 ``m·θ − n·φ``; the optimised contours are clearly more helically aligned than
-the initial configuration.
+the initial configuration, and the 48-DOF run sharpens that alignment further.
 
 
 QA optimisation (fixed-boundary)
@@ -284,44 +336,43 @@ solution into the richer boundary space before running the final stage.
    * - 1
      - 8
      - input deck
-     - 15
-     - 15
-     - 6.0002
-     - 0.4086
-     - ``1.22e-3``
-     - ``1.22e-3``
-     - ~29 s
+     - 40
+     - 40
+     - 6.0001
+     - 0.4088
+     - ``5.91e-4``
+     - ``5.93e-4``
+     - ~26 s
    * - 2
      - 24
      - ``max_mode=1`` continuation
      - 15 + 40
      - 23
-     - 6.0000
+     - 6.0001
      - 0.4092
-     - ``8.36e-4``
-     - ``8.37e-4``
-     - ~40 s
+     - ``8.05e-4``
+     - ``8.06e-4``
+     - ~18 s
    * - 3
      - 48
      - ``max_mode=2`` continuation
      - 25 + 25 + 40
-     - 42
+     - 41
      - 6.0003
      - 0.4096
-     - ``4.97e-4``
-     - ``4.97e-4``
-     - ~86 s
+     - ``5.21e-4``
+     - ``5.21e-4``
+     - ~31 s
 
 ¹ Wall time on Apple M-series.
 
-The earlier “mode 2 is worse than mode 1” result was not a derivative failure.
-It was a basin-selection problem: starting the richer QA solve directly from
-the raw input can land in a poorer local minimum. Staged continuation fixes
-that. The same issue shows up again at ``max_mode=3`` unless the continuation
-seed and ESS profile are strengthened. The script now promotes those settings
-automatically for ``max_mode >= 3`` (unless the user overrides them), and with
-that policy the 48-DOF QA run improves further over the 24-DOF case while still
-keeping mean iota close to the target.
+On the latest fresh standalone rerun, the 48-DOF QA case is the clear best
+mode. The 24-DOF continuation case still keeps the aspect and iota targets,
+but it does not consistently beat the 8-DOF run on the full weighted
+objective under the cheap inner-solve settings used by this example. The
+strengthened continuation + ESS policy still matters for ``max_mode=3``: that
+is the case that reliably improves over the lower-mode runs while keeping
+mean iota near the target.
 
 **max_mode = 1** (8 DOFs, exact SciPy + adjoint)
 
@@ -356,6 +407,23 @@ keeping mean iota close to the target.
    :width: 80%
    :align: center
    :alt: B-magnitude contour lines on LCFS, QA max_mode=2
+
+**max_mode = 3** (48 DOFs, exact SciPy + adjoint, continuation)
+
+.. list-table::
+   :widths: 60 40
+
+   * - .. image:: _static/figures/qa_opt/mode3/boundary_comparison.png
+          :width: 100%
+          :alt: 3D LCFS QA max_mode=3
+     - .. image:: _static/figures/qa_opt/mode3/objective_history.png
+          :width: 100%
+          :alt: Objective history QA max_mode=3
+
+.. image:: _static/figures/qa_opt/mode3/bmag_surface.png
+   :width: 80%
+   :align: center
+   :alt: B-magnitude contour lines on LCFS, QA max_mode=3
 
 
 Algorithms in detail

@@ -148,17 +148,17 @@ extends the boundary to include the requested harmonics at zero amplitude
 All runs use consistent VMEC resolution `mpol = ntor = 5` so the initial QS metric
 is normalised identically across `max_mode` values.
 
-| `max_mode` | DOFs | QS initial | QS final | Reduction | Wall time ¹ |
-|:----------:|:----:|:----------:|:--------:|:---------:|:-----------:|
-| 1          |  8   |   0.303    |  0.213   |  30 %     | ~124 s      |
-| 2          | 24   |   0.303    |  **0.008** | **97 %** | ~323 s    |
+| `max_mode` | DOFs | QS initial | QS final | Reduction | Objective final | Wall time ¹ |
+|:----------:|:----:|:----------:|:--------:|:---------:|:---------------:|:-----------:|
+| 1          |  8   |   0.303    |  0.213   |  30 %     | `0.216`         | ~118 s      |
+| 2          | 24   |   0.303    |  `8.61e-3` | 97 %    | `8.72e-3`       | ~220 s      |
+| 3          | 48   |   0.303    |  **2.91e-3** | **99 %** | **2.99e-3** | ~324 s      |
 
 ¹ Wall time on Apple M-series (warm-cache subsequent runs are faster).
 
 With only 8 DOFs (`max_mode=1`) the boundary deformation space is too limited
-to reach a deep quasi-helical minimum.  `max_mode=2` (24 DOFs) achieves a
-97 % reduction because the higher harmonics give the optimizer room to reshape
-the boundary helically.
+to reach a deep quasi-helical minimum. `max_mode=2` already gives a strong QH
+solution, and `max_mode=3` improves it further on the exact standalone path.
 
 **vmec_jax vs SIMSOPT**: vmec_jax uses an exact discrete-adjoint Jacobian
 (one batched JVP pass ≈ 1–2 forward solves regardless of DOF count) while
@@ -170,18 +170,22 @@ see [docs/simsopt_comparison.rst](docs/simsopt_comparison.rst).
   <tr>
     <th align="center">max_mode = 1 &nbsp;(8 DOFs, 30 % QS reduction)</th>
     <th align="center">max_mode = 2 &nbsp;(24 DOFs, 97 % QS reduction)</th>
+    <th align="center">max_mode = 3 &nbsp;(48 DOFs, 99 % QS reduction)</th>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/qh_opt/boundary_comparison.png" /></td>
     <td><img src="docs/_static/figures/qh_opt/mode2/boundary_comparison.png" /></td>
+    <td><img src="docs/_static/figures/qh_opt/mode3/boundary_comparison.png" /></td>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/qh_opt/bmag_surface.png" /></td>
     <td><img src="docs/_static/figures/qh_opt/mode2/bmag_surface.png" /></td>
+    <td><img src="docs/_static/figures/qh_opt/mode3/bmag_surface.png" /></td>
   </tr>
   <tr>
     <td align="center"><img src="docs/_static/figures/qh_opt/objective_history.png" /></td>
     <td align="center"><img src="docs/_static/figures/qh_opt/mode2/objective_history.png" /></td>
+    <td align="center"><img src="docs/_static/figures/qh_opt/mode3/objective_history.png" /></td>
   </tr>
 </table>
 
@@ -189,10 +193,8 @@ The |B| contour plots show quasi-helical alignment after optimization: contour l
 become increasingly helical (aligned with *m θ − n φ* = const). The ζ axis spans
 one field period (0 → 2π/nfp).
 
-An exploratory `max_mode=3` continuation run on the current exact standalone
-path reaches a still lower QH objective (`~0.003` total, `~0.0029` QS) without
-finite differences, but the mode-2 case remains the documented default because
-it is substantially cheaper and already captures most of the gain.
+The current exact standalone path keeps improving through `max_mode=3`, with
+the 48-DOF run reaching `~0.0030` total objective and `~0.0029` QS.
 
 Regenerate plots after running the optimization:
 
@@ -226,37 +228,39 @@ richer boundary space before running the final stage.
 
 | `max_mode` | DOFs | Start | Budget | Eval used | Aspect final | Mean iota final | QS final | Objective final | Wall time ¹ |
 |:----------:|:----:|:-----:|:------:|:---------:|:------------:|:---------------:|:--------:|:---------------:|:-----------:|
-| 1          |  8   | input deck | 15 | 15 | **6.0002** | **0.4086** | `1.22e-3` | `1.22e-3` | ~29 s |
-| 2          | 24   | `max_mode=1` continuation | 15 + 40 | 23 | **6.0000** | **0.4092** | `8.36e-4` | `8.37e-4` | ~40 s |
-| 3          | 48   | `max_mode=2` continuation | 25 + 25 + 40 | 42 | **6.0003** | **0.4096** | **4.97e-4** | **4.97e-4** | ~86 s |
+| 1          |  8   | input deck | 40 | 40 | **6.0001** | 0.4088 | `5.91e-4` | `5.93e-4` | ~26 s |
+| 2          | 24   | `max_mode=1` continuation | 15 + 40 | 23 | **6.0001** | 0.4092 | `8.05e-4` | `8.06e-4` | ~18 s |
+| 3          | 48   | `max_mode=2` continuation | 25 + 25 + 40 | 41 | **6.0003** | **0.4096** | **5.21e-4** | **5.21e-4** | ~31 s |
 
 ¹ Wall time on Apple M-series.
 
-The earlier “mode 2 is worse than mode 1” result was not a derivative problem.
-It was a basin-selection problem: starting the richer QA solve directly from
-the raw input lands in a poorer local minimum. Staged continuation fixes that.
-For ``max_mode >= 3`` the script now automatically promotes the continuation
-budget and ESS alpha (unless the user overrides them), which is enough to keep
-the extra DOFs useful instead of letting them spoil the iota target. On the
-current standalone exact path, `max_mode=3` now beats `max_mode=2` on the full
-QA objective as well as on the QS block.
+On the latest fresh standalone rerun, `max_mode=3` is the best stable QA
+configuration. `max_mode=2` keeps the aspect and iota targets but does not
+consistently beat `max_mode=1` on the full weighted objective under the cheap
+inner-solve settings used by the example. The strengthened continuation +
+ESS policy still matters for `max_mode=3`: that is the case that clearly
+improves over the lower-mode runs.
 
 <table>
   <tr>
     <th align="center">max_mode = 1 &nbsp;(8 DOFs, exact SciPy + adjoint)</th>
     <th align="center">max_mode = 2 &nbsp;(24 DOFs, exact SciPy + adjoint, continuation)</th>
+    <th align="center">max_mode = 3 &nbsp;(48 DOFs, exact SciPy + adjoint, continuation)</th>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/qa_opt/boundary_comparison.png" /></td>
     <td><img src="docs/_static/figures/qa_opt/mode2/boundary_comparison.png" /></td>
+    <td><img src="docs/_static/figures/qa_opt/mode3/boundary_comparison.png" /></td>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/qa_opt/bmag_surface.png" /></td>
     <td><img src="docs/_static/figures/qa_opt/mode2/bmag_surface.png" /></td>
+    <td><img src="docs/_static/figures/qa_opt/mode3/bmag_surface.png" /></td>
   </tr>
   <tr>
     <td align="center"><img src="docs/_static/figures/qa_opt/objective_history.png" /></td>
     <td align="center"><img src="docs/_static/figures/qa_opt/mode2/objective_history.png" /></td>
+    <td align="center"><img src="docs/_static/figures/qa_opt/mode3/objective_history.png" /></td>
   </tr>
 </table>
 
