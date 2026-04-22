@@ -1202,16 +1202,29 @@ def run_fixed_boundary(
         ns_stage_list: list[int],
         niter_stage_list: list[int],
         ftol_stage_list: list[float],
+        start_stage_index: int = 0,
+        restart_state=None,
+        restart_static_prev=None,
+        restart_resume_state=None,
+        stage_mode_override: str | None = None,
+        use_scan_override: bool | None = None,
+        performance_mode_override: bool | None = None,
+        policy_name: str = "input_multigrid",
     ) -> FixedBoundaryRun:
         stage_runs: list[FixedBoundaryRun] = []
-        stage_state = None
-        stage_static_prev = None
+        stage_state = restart_state
+        stage_static_prev = restart_static_prev
+        stage_resume_state = restart_resume_state
         stage_modes: list[str] = []
         for idx, (ns_i, niter_i, ftol_i) in enumerate(zip(ns_stage_list, niter_stage_list, ftol_stage_list)):
+            if int(idx) < int(start_stage_index):
+                continue
             if int(niter_i) <= 0:
                 continue
             is_final_stage = idx == (len(ns_stage_list) - 1)
-            if bool(cfg.lthreed) and int(idx) == 0:
+            if stage_mode_override is not None:
+                stage_mode_i = str(stage_mode_override)
+            elif bool(cfg.lthreed) and int(idx) == 0:
                 # On staged 3D fixed-boundary cases, the coarsest continuation
                 # stage determines which solution branch the later continuation
                 # follows. Keep the entry stage on the conservative
@@ -1247,8 +1260,10 @@ def run_fixed_boundary(
                 verbose=bool(verbose),
                 jit_forces=jit_forces,
                 jit_precompile=jit_precompile,
-                use_scan=bool(use_scan),
-                performance_mode=True,
+                use_scan=bool(use_scan if use_scan_override is None else use_scan_override),
+                performance_mode=(
+                    True if performance_mode_override is None else bool(performance_mode_override)
+                ),
                 scan_wout_corrector=scan_wout_corrector,
                 stage_transition_heuristic=stage_transition_heuristic,
                 stage_transition_factor=float(stage_transition_factor),
@@ -1261,11 +1276,16 @@ def run_fixed_boundary(
                 kwargs["ns_override"] = int(ns_i)
             else:
                 kwargs["restart_state"] = stage_state
+                if stage_resume_state is not None:
+                    kwargs["restart_solver_state"] = stage_resume_state
             stage_run = run_fixed_boundary(input_path, **kwargs)
             stage_runs.append(stage_run)
             stage_modes.append(str(stage_mode_i))
             stage_state = stage_run.state
             stage_static_prev = stage_run.static
+            stage_resume_state = _sanitize_resume_state_for_stage(
+                stage_run.result.diagnostics.get("resume_state") if stage_run.result is not None else None
+            )
 
         final_run = stage_runs[-1]
         if final_run.result is None:
@@ -1274,10 +1294,19 @@ def run_fixed_boundary(
         diag["solver_mode"] = str(solver_mode_eff)
         diag["accelerated_mode"] = True
         diag["cli_fixed_boundary_mode"] = True
-        diag["cli_staged_followup_policy"] = "input_multigrid"
+        diag["cli_staged_followup_policy"] = str(policy_name)
         diag["cli_staged_followup_stage_ns"] = np.asarray(ns_stage_list, dtype=int)
         diag["cli_staged_followup_stage_niter"] = np.asarray(niter_stage_list, dtype=int)
+        diag["cli_staged_followup_executed_stage_ns"] = np.asarray(
+            [int(ns_stage_list[i]) for i in range(int(start_stage_index), len(ns_stage_list)) if int(niter_stage_list[i]) > 0],
+            dtype=int,
+        )
+        diag["cli_staged_followup_executed_stage_niter"] = np.asarray(
+            [int(niter_stage_list[i]) for i in range(int(start_stage_index), len(niter_stage_list)) if int(niter_stage_list[i]) > 0],
+            dtype=int,
+        )
         diag["cli_staged_followup_stage_modes"] = np.asarray(stage_modes, dtype=object)
+        diag["cli_staged_followup_start_stage_index"] = int(start_stage_index)
         diag["cli_staged_followup_stage_fsq"] = np.asarray(
             [float(np.asarray(stage_run.result.w_history)[-1]) for stage_run in stage_runs],
             dtype=float,
@@ -1349,6 +1378,7 @@ def run_fixed_boundary(
             return replace(run_in, result=replace(run_in.result, diagnostics=base_diag))
 
         base_total_budget = max(1, int(max_iter))
+        max_fallback_budget = int(2 * base_total_budget)
 
         best_run = run_in
         best_fsq = float(_result_final_fsq(run_in.result))
@@ -1357,6 +1387,7 @@ def run_fixed_boundary(
         attempt_converged: list[bool] = []
         attempt_modes: list[str] = []
         fallback_used = False
+        partial_fallback_used = False
         staged_followup_used = False
         staged_followup_policy = ""
         staged_followup_ns = np.zeros((0,), dtype=int)
@@ -1477,6 +1508,7 @@ def run_fixed_boundary(
                     ns_stage_list=[int(v) for v in ns_list_input],
                     niter_stage_list=explicit_niter_stages,
                     ftol_stage_list=explicit_ftol_stages,
+                    policy_name="input_multigrid",
                 )
                 staged_followup_used = True
                 staged_followup_policy = "input_multigrid"
@@ -1491,7 +1523,99 @@ def run_fixed_boundary(
                     best_run = staged_followup
                     best_fsq = float(staged_fsq_val)
 
-        max_fallback_budget = int(2 * base_total_budget)
+        # Accelerated multigrid can still miss the correct branch on some
+        # explicit staged inputs even though xvmec2000 converges with the same
+        # NS_ARRAY / NITER_ARRAY sequence. When that happens, fall back to the
+        # conservative parity controller on the same staged deck.
+        if (
+            bool(staged_input)
+            and bool(accelerated_mode)
+            and str(initial_policy) == "multigrid"
+            and (explicit_niter_stages is not None)
+            and (not bool(_result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol))))
+        ):
+            partial_start_stage = int(max(1, len(ns_list_input) - 1))
+            partial_restart_state = None
+            partial_restart_static_prev = None
+            partial_restart_resume_state = None
+            try:
+                if len(stage_results) >= int(partial_start_stage):
+                    prev_idx = int(partial_start_stage) - 1
+                    partial_restart_state = stage_results[prev_idx].state
+                    partial_restart_static_prev = stage_statics[prev_idx]
+                    partial_restart_resume_state = _sanitize_resume_state_for_stage(
+                        stage_results[prev_idx].diagnostics.get("resume_state")
+                    )
+            except Exception:
+                partial_restart_state = None
+                partial_restart_static_prev = None
+                partial_restart_resume_state = None
+
+            if (partial_restart_state is not None) and (partial_restart_static_prev is not None):
+                partial_fallback = _run_cli_explicit_staged_followup(
+                    ns_stage_list=[int(v) for v in ns_list_input],
+                    niter_stage_list=explicit_niter_stages,
+                    ftol_stage_list=(
+                        [float(v) for v in ftol_list_input]
+                        if (ftol_list_input is not None) and (len(ftol_list_input) == len(ns_list_input))
+                        else [float(indata.get_float("FTOL", 1.0e-13))] * len(ns_list_input)
+                    ),
+                    start_stage_index=int(partial_start_stage),
+                    restart_state=partial_restart_state,
+                    restart_static_prev=partial_restart_static_prev,
+                    restart_resume_state=partial_restart_resume_state,
+                    stage_mode_override="parity",
+                    use_scan_override=False,
+                    performance_mode_override=False,
+                    policy_name="partial_parity_multigrid",
+                )
+                partial_fallback_used = True
+                partial_fallback_fsq = float(_result_final_fsq(partial_fallback.result))
+                partial_fallback_conv = bool(
+                    _result_meets_requested_ftol(partial_fallback.result, ftol=float(requested_ftol))
+                )
+                if partial_fallback_conv or partial_fallback_fsq < best_fsq:
+                    best_run = partial_fallback
+                    best_fsq = float(partial_fallback_fsq)
+
+            if not bool(_result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol))):
+                fallback_used = True
+                fallback = run_fixed_boundary(
+                    input_path,
+                    solver="vmec2000_iter",
+                    solver_mode="parity",
+                    max_iter=int(max_fallback_budget),
+                    step_size=step_size,
+                    history_size=int(history_size),
+                    gn_damping=gn_damping,
+                    gn_cg_tol=gn_cg_tol,
+                    gn_cg_maxiter=int(gn_cg_maxiter),
+                    use_initial_guess=False,
+                    vmec_project=bool(vmec_project),
+                    use_restart_triggers=use_restart_triggers,
+                    vmecpp_restart=bool(vmecpp_restart),
+                    use_direct_fallback=use_direct_fallback,
+                    multigrid=True,
+                    multigrid_use_input_niter=bool(multigrid_use_input_niter),
+                    verbose=bool(verbose),
+                    jit_forces=jit_forces,
+                    jit_precompile=jit_precompile,
+                    use_scan=False,
+                    performance_mode=False,
+                    scan_wout_corrector=scan_wout_corrector,
+                    stage_transition_heuristic=stage_transition_heuristic,
+                    stage_transition_factor=float(stage_transition_factor),
+                    stage_transition_scale=float(stage_transition_scale),
+                    grid=grid,
+                    cli_fixed_boundary_mode=False,
+                    _auto_cli_fixed_boundary_mode=False,
+                )
+                fallback_fsq = float(_result_final_fsq(fallback.result))
+                fallback_conv = bool(_result_meets_requested_ftol(fallback.result, ftol=float(requested_ftol)))
+                if fallback_conv or fallback_fsq < best_fsq:
+                    best_run = fallback
+                    best_fsq = float(fallback_fsq)
+
         improvement_floor = np.finfo(float).eps * max(1.0, abs(float(best_fsq)), abs(float(target_fsq)))
         if (
             bool(accelerated_mode)
@@ -1615,6 +1739,7 @@ def run_fixed_boundary(
         diag["converged"] = bool(strict_converged)
         diag["converged_strict"] = bool(strict_converged)
         diag["converged_by_total_fsq"] = bool(total_converged)
+        diag["cli_fixed_boundary_partial_parity_fallback"] = bool(partial_fallback_used)
         diag["cli_fixed_boundary_finish_budgets"] = np.asarray(attempt_budgets, dtype=int)
         diag["cli_fixed_boundary_finish_fsq"] = np.asarray(attempt_fsq, dtype=float)
         diag["cli_fixed_boundary_finish_converged"] = np.asarray(attempt_converged, dtype=bool)
@@ -2045,6 +2170,7 @@ def run_fixed_boundary(
 
         # Run coarse -> fine stages with VMEC `interp.f` interpolation.
         stage_results: list[SolveVmecResidualResult] = []
+        stage_statics: list[VMECStatic] = []
         stage_offsets: list[int] = []
         from .modes import vmec_mode_table
 
@@ -2083,6 +2209,26 @@ def run_fixed_boundary(
             out["iter_offset"] = 0
             out["vmec2000_cache_valid"] = False
             return out
+
+        def _sanitize_resume_state_for_same_stage(resume_state):
+            if resume_state is None:
+                return None
+            time_step = resume_state.get("time_step", None)
+            if time_step is None:
+                return None
+            try:
+                time_step = min(float(time_step), float(step_size_val))
+            except Exception:
+                time_step = float(time_step)
+            out = {
+                "time_step": float(time_step),
+                "inv_tau": list(resume_state.get("inv_tau", [0.15 / max(float(time_step), 1.0e-12)] * 10)),
+                "iter_offset": int(resume_state.get("iter_offset", 0)),
+                "vmec2000_cache_valid": False,
+            }
+            if "flip_sign" in resume_state:
+                out["flip_sign"] = float(resume_state["flip_sign"])
+            return out
         def _resolve_jit_forces(flag: bool | str, static_i: VMECStatic, niter_i: int) -> bool:
             if isinstance(flag, str):
                 if flag.strip().lower() != "auto":
@@ -2099,6 +2245,131 @@ def run_fixed_boundary(
                     return True
                 return bool(work >= 2_000_000)
             return bool(flag)
+
+        _stage_chunk_diag_keys = (
+            "step_status_history",
+            "restart_reason_history",
+            "pre_restart_reason_history",
+            "time_step_history",
+            "res0_history",
+            "res1_history",
+            "fsq_prev_history",
+            "bad_growth_streak_history",
+            "iter1_history",
+            "bcovar_update_history",
+            "include_edge_history",
+            "zero_m1_history",
+            "dt_eff_history",
+            "update_rms_history",
+            "w_curr_history",
+            "w_try_history",
+            "w_try_ratio_history",
+            "restart_path_history",
+            "min_tau_history",
+            "max_tau_history",
+            "bad_jacobian_history",
+            "fsq1_history",
+            "fsqr1_history",
+            "fsqz1_history",
+            "fsql1_history",
+            "r00_history",
+            "z00_history",
+            "wb_history",
+            "wp_history",
+            "w_vmec_history",
+            "rz_norm_history",
+            "f_norm1_history",
+            "gcr2_p_history",
+            "gcz2_p_history",
+            "gcl2_p_history",
+        )
+
+        def _result_with_diag(result_i: SolveVmecResidualResult, **updates) -> SolveVmecResidualResult:
+            diag = dict(result_i.diagnostics)
+            diag.update(updates)
+            return SolveVmecResidualResult(
+                state=result_i.state,
+                n_iter=int(result_i.n_iter),
+                w_history=np.asarray(result_i.w_history),
+                fsqr2_history=np.asarray(result_i.fsqr2_history),
+                fsqz2_history=np.asarray(result_i.fsqz2_history),
+                fsql2_history=np.asarray(result_i.fsql2_history),
+                grad_rms_history=np.asarray(result_i.grad_rms_history),
+                step_history=np.asarray(result_i.step_history),
+                diagnostics=diag,
+            )
+
+        def _merge_stage_chunk_results(
+            results_i: list[SolveVmecResidualResult],
+            *,
+            mode_i: str,
+        ) -> SolveVmecResidualResult:
+            if len(results_i) == 1:
+                return _result_with_diag(
+                    results_i[0],
+                    accelerated_stage_chunked=False,
+                    accelerated_stage_effective_mode=str(mode_i),
+                )
+
+            def _cat_hist(attr: str) -> np.ndarray:
+                parts = [np.asarray(getattr(r, attr)) for r in results_i if getattr(r, attr) is not None]
+                return np.concatenate(parts, axis=0) if parts else np.zeros((0,), dtype=float)
+
+            last = results_i[-1]
+            diag = dict(last.diagnostics)
+            for key in _stage_chunk_diag_keys:
+                if any(key in r.diagnostics for r in results_i):
+                    diag[key] = np.concatenate(
+                        [np.asarray(r.diagnostics.get(key, np.zeros((0,), dtype=float))) for r in results_i]
+                    )
+            diag["accelerated_stage_chunked"] = True
+            diag["accelerated_stage_effective_mode"] = str(mode_i)
+            diag["accelerated_stage_chunk_count"] = int(len(results_i))
+            diag["accelerated_stage_chunk_iters"] = np.asarray(
+                [int(r.n_iter) + 1 for r in results_i],
+                dtype=int,
+            )
+            return SolveVmecResidualResult(
+                state=last.state,
+                n_iter=int(sum(int(r.n_iter) + 1 for r in results_i) - 1),
+                w_history=_cat_hist("w_history"),
+                fsqr2_history=_cat_hist("fsqr2_history"),
+                fsqz2_history=_cat_hist("fsqz2_history"),
+                fsql2_history=_cat_hist("fsql2_history"),
+                grad_rms_history=_cat_hist("grad_rms_history"),
+                step_history=_cat_hist("step_history"),
+                diagnostics=diag,
+            )
+
+        def _stage_switch_reason_from_progress(
+            *,
+            start_total_fsq: float,
+            best_total_fsq: float,
+            target_total_fsq: float,
+            chunk_iters: int,
+            remaining_budget: int,
+        ) -> str | None:
+            if remaining_budget <= 0:
+                return None
+            if (not np.isfinite(best_total_fsq)) or (not np.isfinite(start_total_fsq)):
+                return "nonfinite_total_fsq"
+            if best_total_fsq <= max(0.0, float(target_total_fsq)):
+                return None
+            if best_total_fsq >= start_total_fsq:
+                return "nondecreasing_total_fsq"
+            if best_total_fsq <= 0.0 or start_total_fsq <= 0.0:
+                return None
+            rate = (np.log(float(start_total_fsq)) - np.log(float(best_total_fsq))) / max(1, int(chunk_iters))
+            if (not np.isfinite(rate)) or rate <= 0.0:
+                return "nonpositive_decay_rate"
+            projected_iters = np.log(float(best_total_fsq) / max(float(target_total_fsq), 1.0e-300)) / rate
+            if (not np.isfinite(projected_iters)) or projected_iters > float(remaining_budget):
+                return (
+                    "projected_budget_miss:"
+                    f" projected_iters={float(projected_iters):.1f}"
+                    f" remaining_budget={int(remaining_budget)}"
+                )
+            return None
 
         env_precompile_stages = os.getenv("VMEC_JAX_PRECOMPILE_STAGES", "0")
         precompile_stages = env_precompile_stages.strip().lower() not in ("", "0", "false", "no")
@@ -2123,6 +2394,7 @@ def run_fixed_boundary(
                 # staged baseline. Keep this class fully on the conservative
                 # controller until the lambda mismatch is closed numerically.
                 stage_accelerated_mode = False
+            stage_mode_i = "accelerated" if bool(stage_accelerated_mode) else "parity"
             stage_mode_history.append("accelerated" if bool(stage_accelerated_mode) else "parity")
             if verbose:
                 print(
@@ -2549,76 +2821,199 @@ def run_fixed_boundary(
                     )
                 except Exception:
                     pass
-            if not bool(jit_forces_eff):
-                try:
-                    import jax
-                    with jax.disable_jit():
-                        res_i = solve_fixed_boundary_residual_iter(
-                            state,
+            def _run_stage_solve(
+                *,
+                state_i,
+                kwargs_i: dict,
+                jit_forces_flag: bool,
+            ) -> SolveVmecResidualResult:
+                if not bool(jit_forces_flag):
+                    try:
+                        import jax
+                        with jax.disable_jit():
+                            return solve_fixed_boundary_residual_iter(
+                                state_i,
+                                static_i,
+                                jit_forces=False,
+                                **kwargs_i,
+                            )
+                    except Exception:
+                        return solve_fixed_boundary_residual_iter(
+                            state_i,
                             static_i,
                             jit_forces=False,
-                            **solve_kwargs,
+                            **kwargs_i,
                         )
-                except Exception:
-                    res_i = solve_fixed_boundary_residual_iter(
-                        state,
-                        static_i,
-                        jit_forces=False,
-                        **solve_kwargs,
-                    )
-            else:
-                res_i = solve_fixed_boundary_residual_iter(
-                    state,
+                return solve_fixed_boundary_residual_iter(
+                    state_i,
                     static_i,
                     jit_forces=True,
-                    **solve_kwargs,
+                    **kwargs_i,
                 )
-            # Auto-fast fallback: if scan hits a bad-Jacobian path, rerun the stage
-            # in the parity-safe non-scan mode.
-            if (not accelerated_mode) and bool(performance_mode) and bool(scan_mode):
-                try:
-                    if bool(res_i.diagnostics.get("vmec2000_scan", False)) and bool(res_i.diagnostics.get("abort_scan", False)):
-                        if bool(verbose):
-                            print(
-                                "[vmec_jax] scan abort detected; rerunning stage in parity mode.",
-                                flush=True,
+
+            explicit_stage_monitor = (
+                bool(stage_accelerated_mode)
+                and (niter_stages_input is not None)
+                and int(nstep) > 1
+                and int(i) > 0
+            )
+            explicit_stage_chunk = min(int(niter_i), max(int(indata.get_int("NSTEP", 1)), 200))
+            explicit_stage_target = _accelerated_fsq_total_target_from_ftol(float(ftol_i))
+            explicit_stage_monitor_jit_forces = bool(jit_forces_base)
+
+            if bool(explicit_stage_monitor) and int(explicit_stage_chunk) < int(niter_i):
+                chunk_results: list[SolveVmecResidualResult] = []
+                chunk_state = state
+                chunk_resume_state = resume_state_stage
+                stage_switch_reason = None
+                stage_monitor_used = True
+                remaining_budget = int(niter_i)
+                stage_first_chunk = True
+
+                chunk_budget = min(int(explicit_stage_chunk), int(remaining_budget))
+                chunk_kwargs = dict(solve_kwargs)
+                chunk_kwargs.update(
+                    {
+                        "max_iter": int(chunk_budget),
+                        "resume_state": chunk_resume_state,
+                        "stage_prev_fsq": stage_prev_fsq if bool(stage_first_chunk) else None,
+                        "use_scan": False,
+                        "jit_warmup_iters": int(jit_warmup_noscan),
+                        "jit_precompile": bool(jit_precompile_noscan),
+                    }
+                )
+                res_chunk = _run_stage_solve(
+                    state_i=chunk_state,
+                    kwargs_i=chunk_kwargs,
+                    jit_forces_flag=bool(explicit_stage_monitor_jit_forces),
+                )
+                chunk_results.append(res_chunk)
+                stage_first_chunk = False
+
+                completed_chunk_iters = min(int(chunk_budget), int(res_chunk.n_iter) + 1)
+                remaining_budget = max(0, int(remaining_budget) - int(completed_chunk_iters))
+                chunk_state = res_chunk.state
+                chunk_resume_state = _sanitize_resume_state_for_same_stage(
+                    res_chunk.diagnostics.get("resume_state")
+                )
+
+                strict_chunk = bool(_result_meets_requested_ftol(res_chunk, ftol=float(ftol_i)))
+                if (not bool(strict_chunk)) and int(remaining_budget) > 0:
+                    try:
+                        chunk_w = np.asarray(res_chunk.w_history, dtype=float).reshape(-1)
+                        if chunk_w.size > 0:
+                            stage_switch_reason = _stage_switch_reason_from_progress(
+                                start_total_fsq=float(chunk_w[0]),
+                                best_total_fsq=float(np.min(chunk_w)),
+                                target_total_fsq=float(explicit_stage_target),
+                                chunk_iters=int(completed_chunk_iters),
+                                remaining_budget=int(remaining_budget),
                             )
-                        solve_kwargs_fallback = dict(solve_kwargs)
-                        solve_kwargs_fallback.update(
-                            {
-                                "use_scan": False,
-                                "resume_state": resume_state_stage,
-                                "jit_warmup_iters": int(jit_warmup_noscan),
-                                "jit_precompile": bool(jit_precompile_noscan),
-                            }
+                    except Exception:
+                        stage_switch_reason = None
+
+                if (stage_switch_reason is None) and (not bool(strict_chunk)) and int(remaining_budget) > 0:
+                    tail_kwargs = dict(solve_kwargs)
+                    tail_kwargs.update(
+                        {
+                            "max_iter": int(remaining_budget),
+                            "resume_state": chunk_resume_state,
+                            "stage_prev_fsq": None,
+                            "use_scan": False,
+                            "jit_warmup_iters": 0,
+                            "jit_precompile": False,
+                        }
+                    )
+                    res_tail = _run_stage_solve(
+                        state_i=chunk_state,
+                        kwargs_i=tail_kwargs,
+                        jit_forces_flag=bool(explicit_stage_monitor_jit_forces),
+                    )
+                    chunk_results.append(res_tail)
+                elif (stage_switch_reason is None) and (not bool(strict_chunk)):
+                    stage_switch_reason = "budget_exhausted"
+
+                if stage_switch_reason is not None:
+                    if bool(verbose):
+                        print(
+                            "[vmec_jax] accelerated staged solve cannot meet requested FTOL; "
+                            f"switching stage ns={int(ns_i)} to parity mode "
+                            f"({stage_switch_reason}).",
+                            flush=True,
                         )
-                        if not bool(jit_forces_base):
-                            try:
-                                import jax
-                                with jax.disable_jit():
-                                    res_i = solve_fixed_boundary_residual_iter(
-                                        state_stage_start,
-                                        static_i,
-                                        jit_forces=False,
-                                        **solve_kwargs_fallback,
-                                    )
-                            except Exception:
-                                res_i = solve_fixed_boundary_residual_iter(
-                                    state_stage_start,
-                                    static_i,
-                                    jit_forces=False,
-                                    **solve_kwargs_fallback,
+                    fallback_kwargs = dict(solve_kwargs)
+                    fallback_kwargs.update(
+                        {
+                            "use_scan": False,
+                            "resume_state": resume_state_stage,
+                            "max_iter": int(niter_i),
+                            "jit_warmup_iters": int(jit_warmup_noscan),
+                            "jit_precompile": bool(jit_precompile_noscan),
+                            "light_history": None,
+                            "resume_state_mode": None,
+                            "fsq_total_target": None,
+                            "host_update_assembly": False,
+                        }
+                    )
+                    res_i = _run_stage_solve(
+                        state_i=state_stage_start,
+                        kwargs_i=fallback_kwargs,
+                        jit_forces_flag=bool(jit_forces_base),
+                    )
+                    res_i = _result_with_diag(
+                        res_i,
+                        accelerated_stage_chunked=bool(stage_monitor_used or len(chunk_results) > 0),
+                        accelerated_stage_early_switch=True,
+                        accelerated_stage_switch_reason=str(stage_switch_reason),
+                        accelerated_stage_probe_chunk_iters=np.asarray(
+                            [int(r.n_iter) + 1 for r in chunk_results],
+                            dtype=int,
+                        ),
+                        accelerated_stage_effective_mode="parity",
+                    )
+                    stage_mode_i = "parity"
+                else:
+                    res_i = _merge_stage_chunk_results(
+                        chunk_results,
+                        mode_i=str(stage_mode_i),
+                    )
+            else:
+                res_i = _run_stage_solve(
+                    state_i=state,
+                    kwargs_i=solve_kwargs,
+                    jit_forces_flag=bool(jit_forces_eff),
+                )
+                # Auto-fast fallback: if scan hits a bad-Jacobian path, rerun the stage
+                # in the parity-safe non-scan mode.
+                if (not accelerated_mode) and bool(performance_mode) and bool(scan_mode):
+                    try:
+                        if bool(res_i.diagnostics.get("vmec2000_scan", False)) and bool(
+                            res_i.diagnostics.get("abort_scan", False)
+                        ):
+                            if bool(verbose):
+                                print(
+                                    "[vmec_jax] scan abort detected; rerunning stage in parity mode.",
+                                    flush=True,
                                 )
-                        else:
-                            res_i = solve_fixed_boundary_residual_iter(
-                                state_stage_start,
-                                static_i,
-                                jit_forces=True,
-                                **solve_kwargs_fallback,
+                            solve_kwargs_fallback = dict(solve_kwargs)
+                            solve_kwargs_fallback.update(
+                                {
+                                    "use_scan": False,
+                                    "resume_state": resume_state_stage,
+                                    "jit_warmup_iters": int(jit_warmup_noscan),
+                                    "jit_precompile": bool(jit_precompile_noscan),
+                                }
                             )
-                except Exception:
-                    pass
+                            res_i = _run_stage_solve(
+                                state_i=state_stage_start,
+                                kwargs_i=solve_kwargs_fallback,
+                                jit_forces_flag=bool(jit_forces_base),
+                            )
+                    except Exception:
+                        pass
+            stage_mode_history[-1] = str(stage_mode_i)
             stage_results.append(res_i)
+            stage_statics.append(static_i)
             try:
                 w_hist = np.asarray(res_i.w_history)
                 prev_stage_fsq = float(w_hist[-1]) if w_hist.size else None
