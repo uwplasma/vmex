@@ -115,6 +115,12 @@ All figures below use the same **single-grid** run settings: `NS_ARRAY=151`, `NI
 fixed-boundary QH optimization using the built-in **exact discrete-adjoint Jacobian**
 — no finite differences, no SIMSOPT dependency.
 
+The script is intentionally written in the same teaching style as SIMSOPT's
+`QH_fixed_resolution.py`: choose the VMEC resolution directly in Python, choose
+the active boundary coefficients directly, build the objective blocks directly
+in the script, and choose the outer optimizer explicitly. Nothing relies on a
+hidden SIMSOPT wrapper layer.
+
 > **Discrete adjoint**: rather than perturbing each boundary DOF separately (finite
 > differences), vmec_jax records a *checkpoint tape* of the VMEC iteration and
 > propagates all parameter tangents through it in one batched forward pass
@@ -126,6 +132,15 @@ fixed-boundary QH optimization using the built-in **exact discrete-adjoint Jacob
 ```bash
 python examples/optimization/qh_fixed_resolution_jax.py   # MAX_MODE=2 by default
 ```
+
+Key top-level controls in the script:
+
+- `VMEC_MPOL`, `VMEC_NTOR`: solver resolution
+- `MAX_MODE`: boundary parameterization richness
+- `OBJECTIVE_TUPLES`: explicit aspect + QS residual blocks
+- `METHOD`: `"gauss_newton"` or `"scipy"`
+- `USE_MODE_CONTINUATION`: staged solves for higher-mode runs
+- `USE_ESS`, `ALPHA`: optional exponential spectral scaling
 
 When `max_mode` exceeds the modes present in the input file, vmec_jax automatically
 extends the boundary to include the requested harmonics at zero amplitude
@@ -174,6 +189,11 @@ The |B| contour plots show quasi-helical alignment after optimization: contour l
 become increasingly helical (aligned with *m θ − n φ* = const). The ζ axis spans
 one field period (0 → 2π/nfp).
 
+An exploratory `max_mode=3` continuation run on the current exact standalone
+path reaches a still lower QH objective (`~0.003` total, `~0.0029` QS) without
+finite differences, but the mode-2 case remains the documented default because
+it is substantially cheaper and already captures most of the gain.
+
 Regenerate plots after running the optimization:
 
 ```bash
@@ -184,6 +204,11 @@ python examples/optimization/plot_qh_optimization_results.py --output-dir result
 
 `examples/optimization/qa_fixed_resolution_jax_ess.py` optimizes an nfp=2 QA
 equilibrium for aspect ratio, mean iota, and QA symmetry residuals.
+
+Like the QH script, it exposes the problem construction directly in Python:
+VMEC resolution, active boundary DOFs, the three objective blocks, weights,
+continuation policy, ESS settings, and the outer optimizer are all top-level
+variables in the file.
 
 ```bash
 python examples/optimization/qa_fixed_resolution_jax_ess.py   # MAX_MODE=2 by default
@@ -212,6 +237,11 @@ the raw input lands in a poorer local minimum. Staged continuation fixes that.
 With the `max_mode=1` solution used as the starting point, the 24-DOF run now
 improves the QA objective further, as expected for a richer nested boundary
 space.
+
+Current mode-3 QA experiments are more nuanced than QH: stronger ESS can reduce
+the QA symmetry residual below the mode-2 value, but the extra DOFs can also
+pull the mean iota away from its target. So mode 3 is still an experimental
+tuning path for QA rather than the recommended default.
 
 <table>
   <tr>
