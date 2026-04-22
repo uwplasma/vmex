@@ -301,20 +301,27 @@ solution into the richer boundary space before running the final stage.
      - ``8.36e-4``
      - ``8.37e-4``
      - ~40 s
+   * - 3
+     - 48
+     - ``max_mode=2`` continuation
+     - 25 + 25 + 40
+     - 42
+     - 6.0003
+     - 0.4096
+     - ``4.97e-4``
+     - ``4.97e-4``
+     - ~86 s
 
 ¹ Wall time on Apple M-series.
 
 The earlier “mode 2 is worse than mode 1” result was not a derivative failure.
-It was a basin-selection problem: starting the 24-DOF QA solve directly from
+It was a basin-selection problem: starting the richer QA solve directly from
 the raw input can land in a poorer local minimum. Staged continuation fixes
-that. With the ``max_mode=1`` solution used as the starting point, the 24-DOF
-run now improves the QA objective further, which is the expected behavior for a
-nested richer boundary space.
-
-For ``max_mode=3``, QA is more delicate than QH: some ESS settings reduce the
-QA symmetry residual below the mode-2 value, but the additional freedom can
-also pull the mean iota away from its target. So mode 3 is currently an
-experimental tuning path for QA rather than the recommended default.
+that. The same issue shows up again at ``max_mode=3`` unless the continuation
+seed and ESS profile are strengthened. The script now promotes those settings
+automatically for ``max_mode >= 3`` (unless the user overrides them), and with
+that policy the 48-DOF QA run improves further over the 24-DOF case while still
+keeping mean iota close to the target.
 
 **max_mode = 1** (8 DOFs, exact SciPy + adjoint)
 

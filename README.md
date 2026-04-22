@@ -227,21 +227,19 @@ richer boundary space before running the final stage.
 | `max_mode` | DOFs | Start | Budget | Eval used | Aspect final | Mean iota final | QS final | Objective final | Wall time ¹ |
 |:----------:|:----:|:-----:|:------:|:---------:|:------------:|:---------------:|:--------:|:---------------:|:-----------:|
 | 1          |  8   | input deck | 15 | 15 | **6.0002** | **0.4086** | `1.22e-3` | `1.22e-3` | ~29 s |
-| 2          | 24   | `max_mode=1` continuation | 15 + 40 | 23 | **6.0000** | **0.4092** | **8.36e-4** | **8.37e-4** | ~40 s |
+| 2          | 24   | `max_mode=1` continuation | 15 + 40 | 23 | **6.0000** | **0.4092** | `8.36e-4` | `8.37e-4` | ~40 s |
+| 3          | 48   | `max_mode=2` continuation | 25 + 25 + 40 | 42 | **6.0003** | **0.4096** | **4.97e-4** | **4.97e-4** | ~86 s |
 
 ¹ Wall time on Apple M-series.
 
 The earlier “mode 2 is worse than mode 1” result was not a derivative problem.
-It was a basin-selection problem: starting the 24-DOF QA solve directly from
+It was a basin-selection problem: starting the richer QA solve directly from
 the raw input lands in a poorer local minimum. Staged continuation fixes that.
-With the `max_mode=1` solution used as the starting point, the 24-DOF run now
-improves the QA objective further, as expected for a richer nested boundary
-space.
-
-Current mode-3 QA experiments are more nuanced than QH: stronger ESS can reduce
-the QA symmetry residual below the mode-2 value, but the extra DOFs can also
-pull the mean iota away from its target. So mode 3 is still an experimental
-tuning path for QA rather than the recommended default.
+For ``max_mode >= 3`` the script now automatically promotes the continuation
+budget and ESS alpha (unless the user overrides them), which is enough to keep
+the extra DOFs useful instead of letting them spoil the iota target. On the
+current standalone exact path, `max_mode=3` now beats `max_mode=2` on the full
+QA objective as well as on the QS block.
 
 <table>
   <tr>

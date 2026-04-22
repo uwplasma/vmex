@@ -113,9 +113,12 @@ OBJECTIVE_TUPLES = [
 # ── ESS settings ──────────────────────────────────────────────────────────────
 # If True, boundary DOFs are scaled by exp(-ALPHA * max(|m|, |n|)) / exp(-ALPHA)
 # so that high-mode-number harmonics are smaller in the scaled parameter space,
-# encouraging the optimizer to first improve low-order shape.
+# encouraging the optimizer to first improve low-order shape.  The max_mode=3
+# QA problem benefits from a stronger ESS profile than max_mode=2, so the
+# script automatically promotes ALPHA and continuation budget when MAX_MODE >= 3
+# unless the user overrides them explicitly.
 USE_ESS = True
-ALPHA   = 0.8   # Milder ESS helps the max_mode=2 QA case use added DOFs
+ALPHA   = 0.8
 USE_MODE_CONTINUATION = True
 
 # Output directory — subdirectory name reflects whether ESS was used.
@@ -136,6 +139,16 @@ USE_MODE_CONTINUATION = os.environ.get(
     "VMEC_JAX_QA_USE_CONTINUATION", str(USE_MODE_CONTINUATION)
 ).lower() in {"1", "true", "yes", "on"}
 OUTPUT_DIR = Path(os.environ.get("VMEC_JAX_QA_OUTPUT_DIR", str(OUTPUT_DIR)))
+
+# The 48-DOF QA problem needs a stronger continuation seed than max_mode=2.
+# When the user switches MAX_MODE to 3 without specifying tuning overrides,
+# promote the continuation budget and ESS alpha automatically so the script
+# lands in the better basin instead of the early shallow one.
+if MAX_MODE >= 3:
+    if "VMEC_JAX_QA_CONTINUATION_NFEV" not in os.environ:
+        CONTINUATION_NFEV = max(CONTINUATION_NFEV, 25)
+    if USE_ESS and "VMEC_JAX_QA_ALPHA" not in os.environ:
+        ALPHA = max(ALPHA, 1.6)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1.  Load configuration
