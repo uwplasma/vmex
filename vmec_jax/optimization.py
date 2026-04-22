@@ -949,6 +949,7 @@ class FixedBoundaryExactOptimizer:
 
         # Single-entry cache: avoids building the tape twice at the same x.
         self._exact_cache: dict = {}
+        self._discrete_jacobian_helper_cache: dict = {}
 
         # History collected during optimisation.
         self._history: list[dict] = []
@@ -1079,16 +1080,37 @@ class FixedBoundaryExactOptimizer:
             return self._residuals_fn(unpack_state(packed, self._layout))
 
         directions = _jnp.eye(int(params.size), dtype=params.dtype)
-        _, initial_linear = jax.linearize(_initial_state_packed, params)
-        initial_tangents = jax.vmap(initial_linear)(directions)
+        cache_key = (
+            int(params.size),
+            int(self._layout.size),
+            id(self._residuals_fn),
+        )
+        helper_cache = self._discrete_jacobian_helper_cache.get(cache_key)
+        if helper_cache is None:
+            @jax.jit
+            def _initial_tangent_columns(xf, directions):
+                _, initial_state_linear = jax.linearize(_initial_state_packed, xf)
+                return jax.vmap(initial_state_linear)(directions)
+
+            @jax.jit
+            def _residual_tangent_columns(packed_state, packed_tangents):
+                _, residual_linear = jax.linearize(_residuals_from_packed, packed_state)
+                return jax.vmap(residual_linear)(packed_tangents)
+
+            helper_cache = {
+                "initial_tangent_columns": _initial_tangent_columns,
+                "residual_tangent_columns": _residual_tangent_columns,
+            }
+            self._discrete_jacobian_helper_cache[cache_key] = helper_cache
+
+        initial_tangents = helper_cache["initial_tangent_columns"](params, directions)
         final_tangents = checkpoint_tape_state_jvp_columns(
             tape=payload["tape"],
             static=self._static,
             initial_tangents=initial_tangents,
             rebuild_preconditioner=True,
         )
-        _, residual_linear = jax.linearize(_residuals_from_packed, packed_final)
-        columns = jax.vmap(residual_linear)(final_tangents)
+        columns = helper_cache["residual_tangent_columns"](packed_final, final_tangents)
         return np.asarray(columns, dtype=float).T
 
     # ── tracked Jacobian for history + cache callbacks ────────────────────────
@@ -1343,20 +1365,30 @@ class FixedBoundaryExactOptimizer:
 
             scale = np.ones_like(params0_arr) if x_scale is None else np.asarray(x_scale, dtype=float)
             scale[scale == 0.0] = 1.0
+            y0 = params0_arr / scale
+
+            def _residuals_y(y):
+                x = np.asarray(y, dtype=float) * scale
+                return np.asarray(self.residual_fun(x), dtype=float)
+
+            def _jacobian_y(y):
+                x = np.asarray(y, dtype=float) * scale
+                return np.asarray(self._jacobian_fun_tracked(x), dtype=float) * scale[None, :]
+
             scipy_result = _scipy_least_squares(
-                lambda x: np.asarray(self.residual_fun(x), dtype=float),
-                params0_arr,
-                jac=lambda x: np.asarray(self._jacobian_fun_tracked(x), dtype=float),
+                _residuals_y,
+                y0,
+                jac=_jacobian_y,
                 method="trf",
-                x_scale=scale,
                 max_nfev=max_nfev,
                 ftol=ftol,
                 gtol=gtol,
                 xtol=xtol,
                 verbose=2 if int(verbose) > 0 else 0,
             )
+            x_result = np.asarray(scipy_result.x, dtype=float) * scale
             result = {
-                "x": np.asarray(scipy_result.x, dtype=float),
+                "x": x_result,
                 "cost": float(scipy_result.cost),
                 "objective": float(2.0 * scipy_result.cost),
                 "nfev": int(scipy_result.nfev),
