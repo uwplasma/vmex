@@ -102,6 +102,7 @@ _CONVERGENCE_ONLY_CASES = [
         False,
         False,
     ),
+    ("nfp2_QA_highres", "input.nfp2_QA_highres", False, False),
     ("cth_like_fixed_bdy", "input.cth_like_fixed_bdy", False, False),
     ("DSHAPE", "input.DSHAPE", False, False),
     ("li383_low_res", "input.li383_low_res", False, False),
