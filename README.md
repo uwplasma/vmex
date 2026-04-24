@@ -300,27 +300,78 @@ continuation case.
   </tr>
 </table>
 
-## QA/QH optimization policy sweep
+## QA/QH/QP optimization policy sweep
 
-The full benchmark panel below compares continuation versus direct-start mode
-expansion, with and without ESS, for QA and QH at `max_mode = 1, 2, 3`.
-Wall time is printed in each objective-history subplot. The renderer adds one
-set of rows per available backend label, so CPU and GPU runs can be reported in
-the same panel as soon as both result sets exist. By default, exact-optimizer
-workers inherit the active JAX backend. Use `JAX_PLATFORMS=cpu` or
-`--worker-jax-platforms cpu` only when you intentionally want CPU-only workers.
+The CPU panel below compares the exact standalone optimizer on three target
+symmetries: QA, QH, and QP. Columns increase the boundary space from
+`max_mode = 1` to `max_mode = 3`. Rows compare staged mode continuation against
+direct-start mode expansion. Blue curves use unscaled boundary DOFs; orange
+curves use ESS with `alpha = 2.5`.
+
+<p align="center">
+  <img src="docs/_static/figures/qs_ess_objective_panel_cpu_policies.png" width="980" />
+</p>
+
+The main QA lesson is that direct `max_mode=3` is not a VMEC convergence
+failure: rerunning its `input.final` with both `vmec_jax` and VMEC2000
+converges to `fsq ~ 1e-13`, but it is a zero-iota stationary branch. The
+target-iota residual therefore stays at `0.41^2 = 0.1681`. Staged continuation
+avoids that branch and reaches `iota ~= 0.410` with much lower objective.
+
+Recreate the continuation rows:
 
 ```bash
-JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation
-JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct
-JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation
-JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct
+JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp --modes 1,2,3 --ess both
+```
+
+Recreate the direct-start rows:
+
+```bash
+JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp --modes 1,2,3 --ess both
+```
+
+Render the README/docs panels and tables:
+
+```bash
 python examples/optimization/render_qs_ess_publication_panel.py
 ```
 
-<p align="center">
-  <img src="docs/_static/figures/qs_ess_publication_panel_full.png" width="980" />
-</p>
+CPU wall-time summary for the plotted runs:
+
+| Problem | Policy | max_mode | ESS | Status | Final J | Aspect | Iota | nfev | Wall min |
+|---|---|---:|---|---|---:|---:|---:|---:|---:|
+| QA | continuation | 1 | no | ok | 9.29e-03 | 6.002 | 0.3942 | 27 | 5.2 |
+| QA | continuation | 1 | yes | ok | 9.29e-03 | 6.002 | 0.3942 | 27 | 4.7 |
+| QA | continuation | 2 | no | ok | 1.46e-04 | 6.000 | 0.4095 | 52 | 13.3 |
+| QA | continuation | 2 | yes | ok | 1.51e-04 | 6.000 | 0.4095 | 50 | 13.5 |
+| QA | continuation | 3 | no | ok | 7.62e-06 | 6.000 | 0.4099 | 64 | 19.2 |
+| QA | continuation | 3 | yes | ok | 2.16e-05 | 6.000 | 0.4099 | 71 | 25.1 |
+| QA | direct | 2 | no | ok | 4.50e-04 | 5.999 | 0.4066 | 18 | 18.6 |
+| QA | direct | 2 | yes | stopped | 1.58e-04 | 6.000 | 0.4095 | 40 | 14.9 |
+| QA | direct | 3 | no | ok | 1.68e-01 | 6.000 | -0.0000 | 5 | 2.2 |
+| QA | direct | 3 | yes | ok | 1.68e-01 | 6.000 | 0.0000 | 5 | 1.2 |
+| QH | continuation | 1 | no | ok | 2.16e-01 | 7.049 | - | 9 | 2.2 |
+| QH | continuation | 1 | yes | ok | 2.16e-01 | 7.049 | - | 9 | 2.3 |
+| QH | continuation | 2 | no | ok | 3.72e-03 | 7.001 | - | 28 | 8.5 |
+| QH | continuation | 2 | yes | ok | 4.32e-03 | 7.000 | - | 29 | 6.3 |
+| QH | continuation | 3 | no | ok | 1.37e-03 | 7.000 | - | 32 | 10.7 |
+| QH | continuation | 3 | yes | ok | 1.38e-03 | 7.000 | - | 33 | 8.1 |
+| QH | direct | 2 | no | ok | 3.45e-03 | 7.001 | - | 28 | 10.2 |
+| QH | direct | 2 | yes | ok | 4.00e-03 | 7.001 | - | 20 | 5.6 |
+| QH | direct | 3 | no | ok | 4.29e-03 | 6.999 | - | 15 | 9.5 |
+| QH | direct | 3 | yes | ok | 3.27e-03 | 6.999 | - | 20 | 9.2 |
+| QP | continuation | 1 | no | stopped | 6.00e-01 | 7.089 | -0.3083 | 20 | 0.5 |
+| QP | continuation | 1 | yes | stopped | 6.00e-01 | 7.089 | -0.3083 | 20 | 0.5 |
+| QP | continuation | 2 | no | stopped | 2.97e-01 | 7.077 | -0.3097 | 28 | 0.9 |
+| QP | continuation | 2 | yes | stopped | 4.43e-01 | 7.087 | -0.3102 | 28 | 0.8 |
+| QP | continuation | 3 | no | ok | 3.20e-01 | 7.077 | -0.3023 | 26 | 1.0 |
+| QP | continuation | 3 | yes | stopped | 2.74e-01 | 7.063 | -0.3105 | 36 | 1.4 |
+| QP | direct | 1 | no | stopped | 6.00e-01 | 7.089 | -0.3083 | 20 | 0.5 |
+| QP | direct | 1 | yes | stopped | 6.00e-01 | 7.089 | -0.3083 | 20 | 0.5 |
+| QP | direct | 2 | no | ok | 4.60e-02 | 7.006 | -0.5828 | 19 | 0.7 |
+| QP | direct | 2 | yes | stopped | 5.67e-02 | 7.013 | -0.3097 | 20 | 0.7 |
+| QP | direct | 3 | no | ok | 5.35e-01 | 7.064 | -1.1401 | 17 | 0.7 |
+| QP | direct | 3 | yes | ok | 9.60e-02 | 7.057 | -0.3092 | 20 | 0.8 |
 
 ## Performance vs parity
 

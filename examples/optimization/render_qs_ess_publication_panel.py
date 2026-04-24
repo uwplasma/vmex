@@ -869,6 +869,13 @@ def main() -> None:
     panel_pdf = OUTPUT_ROOT / "publication_panel_full.pdf"
 
     _plot_objective_panel_all_policies(results, objective_png, objective_pdf)
+    for backend in sorted({result.backend for result in results}):
+        backend_results = [result for result in results if result.backend == backend]
+        _plot_objective_panel_all_policies(
+            backend_results,
+            OUTPUT_ROOT / f"objective_panel_{backend}_policies.png",
+            OUTPUT_ROOT / f"objective_panel_{backend}_policies.pdf",
+        )
     atlas_paths: list[tuple[Path, Path, str]] = []
     for backend in sorted({result.backend for result in results}):
         for policy in POLICIES:
@@ -893,6 +900,13 @@ def main() -> None:
                     )
                 )
     _plot_summary_tables(results, summary_png, summary_pdf)
+    for backend in sorted({result.backend for result in results}):
+        backend_results = [result for result in results if result.backend == backend]
+        _plot_summary_tables(
+            backend_results,
+            OUTPUT_ROOT / f"summary_tables_{backend}_policies.png",
+            OUTPUT_ROOT / f"summary_tables_{backend}_policies.pdf",
+        )
     image_paths = [objective_png] + [path for path, _pdf, _title in atlas_paths] + [summary_png]
     panel_titles = ["A. Objective histories: continuation and direct-start policies"]
     for index, (_path, _pdf, title) in enumerate(atlas_paths, start=1):
