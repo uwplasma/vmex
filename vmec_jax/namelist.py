@@ -233,3 +233,46 @@ def read_indata(path: str | Path) -> InData:
                 indexed[key_base][idx] = value
 
     return InData(scalars=scalars, indexed=indexed, source_path=str(path))
+
+
+def _format_scalar(value: Scalar) -> str:
+    """Format a scalar in VMEC-friendly namelist syntax."""
+    if isinstance(value, bool):
+        return ".TRUE." if value else ".FALSE."
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    if isinstance(value, float):
+        return f"{value:.16E}"
+    text = str(value).replace("'", "''")
+    return f"'{text}'"
+
+
+def _format_value(value: Value) -> str:
+    """Format a scalar or list value for namelist output."""
+    if isinstance(value, list):
+        return ", ".join(_format_scalar(item) for item in value)
+    return _format_scalar(value)
+
+
+def write_indata(path: str | Path, indata: InData) -> None:
+    """Write a VMEC ``&INDATA`` namelist block.
+
+    The output is intended for reproducible round-tripping through
+    :func:`read_indata`, not for preserving the exact original whitespace or
+    comments from the source file.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    lines: List[str] = ["&INDATA"]
+    for key, value in indata.scalars.items():
+        lines.append(f"  {key} = {_format_value(value)}")
+
+    for key in sorted(indata.indexed):
+        coeffs = indata.indexed[key]
+        for idx in sorted(coeffs):
+            idx_text = ",".join(str(int(i)) for i in idx)
+            lines.append(f"  {key}({idx_text}) = {_format_scalar(coeffs[idx])}")
+
+    lines.append("/")
+    path.write_text("\n".join(lines) + "\n")

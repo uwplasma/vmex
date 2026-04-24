@@ -53,7 +53,7 @@ from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_
 
 enable_x64(True)
 
-OUTPUT_ROOT = Path("results/qs_policy_matrix")
+OUTPUT_ROOT = Path("results/qs_policy_matrix_converged")
 
 VMEC_MPOL = 5
 VMEC_NTOR = 5
@@ -72,7 +72,8 @@ QH_CONTINUATION_NFEV = 15
 QH_FTOL = 1e-3
 QH_GTOL = 1e-3
 QH_XTOL = 1e-3
-QH_ESS_ALPHA = 0.8
+ESS_ALPHA = 2.5
+QH_ESS_ALPHA = ESS_ALPHA
 QH_TARGET_ASPECT = 7.0
 QH_SURFACES = np.arange(0.0, 1.01, 0.1)
 
@@ -81,13 +82,18 @@ QA_CONTINUATION_NFEV = 25
 QA_FTOL = 1e-3
 QA_GTOL = 1e-3
 QA_XTOL = 1e-3
-QA_ESS_ALPHA = 1.6
+QA_ESS_ALPHA = ESS_ALPHA
 QA_TARGET_ASPECT = 6.0
 QA_TARGET_IOTA = 0.41
 QA_SURFACES = np.arange(0.0, 1.01, 0.1)
-QA_INNER_MAX_ITER = 1
-QA_INNER_FTOL = 1e-13
-QA_TRIAL_MAX_ITER = 1
+QH_INNER_MAX_ITER = 0
+QH_INNER_FTOL = 0
+QH_TRIAL_MAX_ITER = 300
+QH_TRIAL_FTOL = 1e-10
+
+QA_INNER_MAX_ITER = 0
+QA_INNER_FTOL = 0
+QA_TRIAL_MAX_ITER = 300
 QA_TRIAL_FTOL = 1e-10
 
 
@@ -139,10 +145,10 @@ def _problem_constants(problem: str) -> dict:
             "target_iota": None,
             "helicity_m": 1,
             "helicity_n": -1,
-            "inner_max_iter": None,
-            "inner_ftol": None,
-            "trial_max_iter": None,
-            "trial_ftol": None,
+            "inner_max_iter": QH_INNER_MAX_ITER,
+            "inner_ftol": QH_INNER_FTOL,
+            "trial_max_iter": QH_TRIAL_MAX_ITER,
+            "trial_ftol": QH_TRIAL_FTOL,
         }
     if problem == "qa":
         return {
@@ -281,6 +287,9 @@ def _merge_stage_histories(stage_results: list[tuple[int, dict]], *, constants: 
     }
     if constants["target_iota"] is not None:
         merged["target_iota"] = float(constants["target_iota"])
+        if "iota" in combined_entries[0] and "iota" in combined_entries[-1]:
+            merged["iota_initial"] = float(combined_entries[0]["iota"])
+            merged["iota_final"] = float(combined_entries[-1]["iota"])
     return merged
 
 
@@ -337,8 +346,8 @@ def _run_case(problem: str, max_mode: int, policy: Policy, output_dir: Path) -> 
     if policy.use_mode_continuation and len(stage_results) > 1:
         final_result["_history_dump"] = _merge_stage_histories(stage_results, constants=constants)
 
-    final_opt.save_wout(output_dir / "wout_initial.nc", final_params0)
-    final_opt.save_wout(output_dir / "wout_final.nc", final_result["x"])
+    final_opt.save_wout(output_dir / "wout_initial.nc", final_params0, state=final_result.get("_state_initial"))
+    final_opt.save_wout(output_dir / "wout_final.nc", final_result["x"], state=final_result.get("_state_final"))
     final_opt.save_history(output_dir / "history.json", final_result)
     vj.plot_qh_optimization(
         output_dir / "wout_initial.nc",

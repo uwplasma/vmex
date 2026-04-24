@@ -273,7 +273,7 @@ def equilibrium_iota_profiles_from_state(*, state: VMECState, static, indata, si
     pres = jnp.asarray(prof.get("pressure", jnp.zeros_like(s_half)))
     if pres.shape[0] >= 1:
         pres = pres.at[0].set(0.0)
-    icurv = jnp.asarray(_icurv_full_mesh_from_indata(indata=indata, s_full=np.asarray(s), signgs=int(signgs)))
+    icurv = jnp.asarray(_icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=int(signgs)))
 
     trig = getattr(static, "trig_vmec", None)
     if trig is None:
@@ -529,7 +529,9 @@ def _compute_ctor_from_buco(*, buco: np.ndarray, signgs: int, indata) -> float:
         ctor = float(signgs) * (2.0 * np.pi) * (float(buco[-1]) + ctor_prec2d)
     else:
         ctor = float(signgs) * (2.0 * np.pi) * (1.5 * float(buco[-1]) - 0.5 * float(buco[-2]))
-    return float(ctor)
+    # VMEC wrout stores ctor in SI current units.  The buco edge integral is in
+    # VMEC magnetic units, so apply the same 1/mu0 conversion used by jxbforce.
+    return float(ctor / MU0)
 
 
 def _compute_bsubs_half_mesh(
@@ -4154,35 +4156,36 @@ def _chipf_from_chips(chips: np.ndarray) -> np.ndarray:
 def _icurv_full_mesh_from_indata(*, indata, s_full: np.ndarray, signgs: int) -> np.ndarray:
     from .profiles import eval_profiles
 
-    s_full = np.asarray(s_full, dtype=float)
+    s_full = jnp.asarray(s_full)
     ncurr = int(indata.get_int("NCURR", 0))
     if ncurr != 1:
-        return np.zeros_like(s_full)
+        return jnp.zeros_like(s_full)
 
     curtor = float(indata.get_float("CURTOR", 0.0))
     if abs(curtor) <= np.finfo(float).eps:
-        return np.zeros_like(s_full)
+        return jnp.zeros_like(s_full)
 
-    if s_full.size < 2:
+    ns = int(s_full.shape[0])
+    if ns < 2:
         s_half = s_full
     else:
-        s_half = np.concatenate([s_full[:1], 0.5 * (s_full[1:] + s_full[:-1])], axis=0)
+        s_half = jnp.concatenate([s_full[:1], 0.5 * (s_full[1:] + s_full[:-1])], axis=0)
     prof = eval_profiles(indata, s_half)
-    icurv_raw = np.asarray(prof.get("current", np.zeros_like(s_half)))
-    if int(icurv_raw.shape[0]) != int(s_full.shape[0]):
-        icurv_raw = np.zeros_like(s_half)
+    icurv_raw = jnp.asarray(prof.get("current", jnp.zeros_like(s_half)))
+    if int(icurv_raw.shape[0]) != ns:
+        icurv_raw = jnp.zeros_like(s_half)
 
-    pedge_prof = eval_profiles(indata, np.asarray([1.0], dtype=s_full.dtype))
-    pedge = float(np.asarray(pedge_prof.get("current", np.asarray([0.0], dtype=s_full.dtype)))[0])
-    if abs(pedge) <= abs(np.finfo(float).eps * curtor):
-        return np.zeros_like(s_full)
+    pedge_prof = eval_profiles(indata, jnp.asarray([1.0], dtype=s_full.dtype))
+    pedge = jnp.asarray(pedge_prof.get("current", jnp.asarray([0.0], dtype=s_full.dtype)))[0]
+    valid_pedge = jnp.abs(pedge) > jnp.asarray(abs(np.finfo(float).eps * curtor), dtype=s_full.dtype)
 
     mu0 = 4e-7 * np.pi
     currv = mu0 * curtor
-    scale = float(signgs) * currv / (2.0 * np.pi * pedge)
-    icurv = np.asarray(scale, dtype=icurv_raw.dtype) * icurv_raw
-    if int(icurv.shape[0]) > 0:
-        icurv[0] = 0.0
+    denom = jnp.where(valid_pedge, pedge, jnp.asarray(1.0, dtype=s_full.dtype))
+    scale = jnp.asarray(float(signgs) * currv / (2.0 * np.pi), dtype=icurv_raw.dtype) / denom
+    icurv = jnp.where(valid_pedge, scale * icurv_raw, jnp.zeros_like(s_full))
+    if ns > 0:
+        icurv = jnp.where(jnp.arange(ns) == 0, jnp.asarray(0.0, dtype=icurv.dtype), icurv)
     return icurv
 
 

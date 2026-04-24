@@ -67,6 +67,7 @@ _REPLAY_STEP_TRACE_STATIC_KEYS = (
 _CHECKPOINT_TAPE_SCAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
 _CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
 _CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
+_CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_VJP_SCAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
 
 
 def _scan_cache_limit() -> int:
@@ -101,6 +102,10 @@ def clear_replay_scan_caches() -> None:
     _CHECKPOINT_TAPE_SCAN_CACHE.clear()
     _CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE.clear()
     _CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE.clear()
+    _CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_VJP_SCAN_CACHE.clear()
+
+
+_DEFAULT_REPLAY_COLUMN_TARGET_MB = 4096.0
 
 
 def _dynamic_replay_bucket_size() -> int:
@@ -121,6 +126,21 @@ def _dynamic_replay_bucket_len(length: int) -> int:
     return int(((int(length) + bucket - 1) // bucket) * bucket)
 
 
+def _dynamic_replay_mode() -> str:
+    """Replay linearization strategy for compact dynamic tapes.
+
+    ``basepoint`` linearizes each VMEC step at the saved base carry inside the
+    scan.  ``whole_scan`` differentiates the entire replay scan at once.  The
+    default remains ``basepoint`` because it has been the most stable CPU path;
+    the alternate path is useful for GPU profiling where XLA may make different
+    fusion/transpose tradeoffs.
+    """
+    mode = os.environ.get("VMEC_JAX_DYNAMIC_REPLAY_MODE", "basepoint").strip().lower()
+    if mode in ("whole_scan", "scan", "full_scan"):
+        return "whole_scan"
+    return "basepoint"
+
+
 def _replay_column_chunk_default(*, tape, tangents) -> int | None:
     """Return an automatic replay-column chunk size for large exact Jacobians.
 
@@ -129,26 +149,33 @@ def _replay_column_chunk_default(*, tape, tangents) -> int | None:
     """
     target_env = os.environ.get("VMEC_JAX_REPLAY_COLUMN_TARGET_MB", "").strip()
     if target_env == "":
-        target_mb = 384.0
+        # The replay memory leak is fixed, so a 1 GB target is now too
+        # conservative for the common 24/48-DOF QA/QH exact Jacobians. A
+        # 4 GB heuristic keeps the seed mode-3 runs in the ~1-1.5 GB RSS range
+        # on CPU while materially reducing replay segmentation overhead.
+        target_mb = _DEFAULT_REPLAY_COLUMN_TARGET_MB
     else:
         target_mb = float(target_env)
     if target_mb <= 0.0:
         return None
 
-    carry0 = getattr(tape, "dynamic_initial_carry", None)
-    if carry0 is None:
-        return None
-    try:
-        carry_leaves = jax.tree_util.tree_leaves(carry0)
-    except Exception:
-        return None
-    if not carry_leaves:
-        return None
+    def _tree_nbytes(tree) -> int:
+        if tree is None:
+            return 0
+        try:
+            leaves = jax.tree_util.tree_leaves(tree)
+        except Exception:
+            return 0
+        total = 0
+        for leaf in leaves:
+            arr = jnp.asarray(leaf)
+            total += int(arr.size) * max(1, int(arr.dtype.itemsize))
+        return total
 
-    bytes_per_col = 0
-    for leaf in carry_leaves:
-        arr = jnp.asarray(leaf)
-        bytes_per_col += int(arr.size) * max(1, int(arr.dtype.itemsize))
+    bytes_per_col = max(
+        _tree_nbytes(getattr(tape, "dynamic_initial_carry", None)),
+        _tree_nbytes(getattr(tape, "dynamic_base_carries_stacked", None)),
+    )
     if bytes_per_col <= 0:
         return None
 
@@ -455,6 +482,10 @@ def build_residual_checkpoint_tape_direct(
     solve_kwargs.setdefault("ftol", ftol)
     solve_kwargs.setdefault("step_size", float(step_size))
     solve_kwargs["light_history"] = False if store_trace else bool(light_history)
+    solve_kwargs.setdefault(
+        "adjoint_trace_mode",
+        "full" if bool(store_full_step_traces) else "dynamic",
+    )
 
     result = solve_fixed_boundary_residual_iter(
         state0,
@@ -471,14 +502,14 @@ def build_residual_checkpoint_tape_direct(
     dynamic_initial_carry = None
     dynamic_base_carries_stacked = None
     if step_traces:
-        stacked_step_traces, step_trace_static_flags = _stack_replay_step_traces(step_traces)
+        step_trace_static_flags = _static_flags_from_replay_step_traces(step_traces)
         tentative_tape = ResidualCheckpointTape(
             final_packed_state=final_packed_state,
             packed_states=np.zeros((0, int(state0.layout.size)), dtype=float),
             trace=trace,
             resume_states=(),
             step_traces=step_traces,
-            stacked_step_traces=stacked_step_traces,
+            stacked_step_traces=None,
             step_trace_static_flags=step_trace_static_flags,
             dynamic_base_carries_stacked=dynamic_base_carries_stacked,
         )
@@ -491,6 +522,27 @@ def build_residual_checkpoint_tape_direct(
                 step_traces = ()
                 stacked_step_traces = dynamic_stacked
                 step_trace_static_flags = dynamic_static_flags
+            else:
+                stacked_step_traces, step_trace_static_flags = _stack_replay_step_traces(step_traces)
+        else:
+            if solve_kwargs.get("adjoint_trace_mode") == "dynamic":
+                # The compact dynamic trace intentionally omits the large
+                # force/preconditioner fields needed by the generic replay
+                # fallback. Rare restart/fallback paths therefore rerun once
+                # with a full trace to preserve exactness.
+                solve_kwargs_full = dict(solve_kwargs)
+                solve_kwargs_full["adjoint_trace_mode"] = "full"
+                result = solve_fixed_boundary_residual_iter(
+                    state0,
+                    static,
+                    max_iter=int(max_iter),
+                    adjoint_trace=True,
+                    **solve_kwargs_full,
+                )
+                final_packed_state = np.asarray(pack_state(result.state), dtype=float)
+                step_traces = tuple(result.diagnostics.get("adjoint_step_trace", ()))
+                trace = residual_iteration_trace_from_result(result) if store_trace else _empty_trace()
+            stacked_step_traces, step_trace_static_flags = _stack_replay_step_traces(step_traces)
     return ResidualCheckpointTape(
         final_packed_state=final_packed_state,
         packed_states=np.zeros((0, int(state0.layout.size)), dtype=float),
@@ -532,6 +584,58 @@ def checkpoint_tape_state_vjp(
     rebuild_preconditioner: bool = False,
 ):
     """Reverse a packed-state cotangent through the extracted step tape."""
+    from ._compat import jax
+
+    if (
+        _dynamic_replay_mode() == "whole_scan"
+        and rebuild_preconditioner
+        and tape.dynamic_initial_carry is not None
+        and tape.stacked_step_traces is not None
+        and tape.step_trace_static_flags is not None
+    ):
+        carry0 = tape.dynamic_initial_carry
+        final_carry_cotangents = (
+            jnp.asarray(final_cotangent, dtype=jnp.asarray(carry0[0]).dtype),
+            *(jnp.zeros_like(jnp.asarray(value)) for value in carry0[1:]),
+        )
+        run_scan = _checkpoint_tape_dynamic_scan_runner(
+            static=static,
+            stacked=tape.stacked_step_traces,
+            static_flags=tape.step_trace_static_flags,
+        )
+
+        def _run(carry_init):
+            return run_scan(carry_init, tape.stacked_step_traces)
+
+        _, vjp_fun = jax.vjp(_run, carry0)
+        initial_carry_cotangents = vjp_fun(final_carry_cotangents)[0]
+        return initial_carry_cotangents[0]
+
+    if (
+        rebuild_preconditioner
+        and tape.dynamic_initial_carry is not None
+        and tape.dynamic_base_carries_stacked is not None
+        and tape.stacked_step_traces is not None
+        and tape.step_trace_static_flags is not None
+    ):
+        carry0 = tape.dynamic_initial_carry
+        final_carry_cotangents = (
+            jnp.asarray(final_cotangent, dtype=jnp.asarray(carry0[0]).dtype),
+            *(jnp.zeros_like(jnp.asarray(value)) for value in carry0[1:]),
+        )
+        run_scan = _checkpoint_tape_dynamic_basepoint_vjp_scan_runner(
+            static=static,
+            stacked=tape.stacked_step_traces,
+            stacked_base_carries=tape.dynamic_base_carries_stacked,
+            static_flags=tape.step_trace_static_flags,
+        )
+        initial_carry_cotangents = run_scan(
+            final_carry_cotangents,
+            tape.dynamic_base_carries_stacked,
+            tape.stacked_step_traces,
+        )
+        return initial_carry_cotangents[0]
+
     if not tape.step_traces:
         return jnp.asarray(final_cotangent)
 
@@ -588,7 +692,10 @@ def checkpoint_tape_state_jvp(
     rebuild_preconditioner: bool = False,
 ):
     """Push a packed-state tangent forward through the extracted step tape."""
-    if _dynamic_replay_supported(tape=tape, rebuild_preconditioner=rebuild_preconditioner):
+    if (
+        tape.dynamic_initial_carry is not None
+        or _dynamic_replay_supported(tape=tape, rebuild_preconditioner=rebuild_preconditioner)
+    ):
         tangents = checkpoint_tape_state_jvp_columns(
             tape=tape,
             static=static,
@@ -691,11 +798,7 @@ def _packed_replay_step_from_trace(
     return pack_state(out["step"]["state_post"])
 
 
-def _stack_replay_step_traces(step_traces: tuple[dict[str, Any], ...]):
-    from ._compat import jax
-
-    filtered = tuple({key: trace[key] for key in _REPLAY_STEP_TRACE_KEYS} for trace in step_traces)
-    stacked = jax.tree_util.tree_map(lambda *xs: np.stack([np.asarray(x) for x in xs], axis=0), *filtered)
+def _static_flags_from_replay_step_traces(step_traces: tuple[dict[str, Any], ...]):
     static_flags = {key: step_traces[0][key] for key in _REPLAY_STEP_TRACE_STATIC_KEYS}
     for trace in step_traces[1:]:
         for key, value in static_flags.items():
@@ -709,6 +812,15 @@ def _stack_replay_step_traces(step_traces: tuple[dict[str, Any], ...]):
     precond_jmax0 = int(step_traces[0]["precond_jmax"])
     precond_jmax_constant = all(int(trace["precond_jmax"]) == precond_jmax0 for trace in step_traces[1:])
     static_flags["precond_jmax"] = precond_jmax0 if precond_jmax_constant else None
+    return static_flags
+
+
+def _stack_replay_step_traces(step_traces: tuple[dict[str, Any], ...]):
+    from ._compat import jax
+
+    filtered = tuple({key: trace[key] for key in _REPLAY_STEP_TRACE_KEYS} for trace in step_traces)
+    stacked = jax.tree_util.tree_map(lambda *xs: np.stack([np.asarray(x) for x in xs], axis=0), *filtered)
+    static_flags = _static_flags_from_replay_step_traces(step_traces)
     return stacked, static_flags
 
 
@@ -729,7 +841,10 @@ def _replay_values_equal(a, b) -> bool:
         return a == b
 
 
-def _build_dynamic_replay_payload(step_traces: tuple[dict[str, Any], ...], static_flags: dict[str, Any]):
+def _build_dynamic_replay_payload(
+    step_traces: tuple[dict[str, Any], ...],
+    static_flags: dict[str, Any],
+):
     from ._compat import jax
 
     dynamic_static_flags = dict(static_flags)
@@ -922,11 +1037,11 @@ def _dynamic_fsq1_from_force_channels(
         ns_min=0,
         ns_max=int(s.shape[0]),
     )
-    f_norm1 = jnp.where(rz_norm != 0.0, 1.0 / rz_norm, jnp.asarray(float("inf"), dtype=rz_norm.dtype))
-    zero = jnp.asarray(0.0, dtype=jnp.asarray(gcr2_p).dtype)
-    finite_fnorm1 = jnp.isfinite(f_norm1)
-    fsqr1 = jnp.where(finite_fnorm1, gcr2_p * f_norm1, zero)
-    fsqz1 = jnp.where(finite_fnorm1, gcz2_p * f_norm1, zero)
+    nonzero_norm = rz_norm != 0.0
+    safe_rz_norm = jnp.where(nonzero_norm, rz_norm, jnp.asarray(1.0, dtype=rz_norm.dtype))
+    f_norm1 = jnp.where(nonzero_norm, 1.0 / safe_rz_norm, jnp.asarray(0.0, dtype=rz_norm.dtype))
+    fsqr1 = gcr2_p * f_norm1
+    fsqz1 = gcz2_p * f_norm1
     delta_s = jnp.asarray(s[1] - s[0], dtype=jnp.asarray(gcr2_p).dtype) if int(s.shape[0]) >= 2 else jnp.asarray(1.0, dtype=jnp.asarray(gcr2_p).dtype)
     if bool(vmec2000_control):
         gcl2_full = jnp.sum(jnp.asarray(frzl_pre.flsc)[1:] ** 2)
@@ -1220,11 +1335,13 @@ def _checkpoint_tape_dynamic_basepoint_scan_runner(*, static, stacked, stacked_b
                 preconditioner_jmax_override=int(static_flags["precond_jmax"]),
             )
 
-        def _single_tangent_step(single_tangent):
-            return jax.jvp(_step, (carry_base,), (single_tangent,))[1]
-
         def _advance(carry_tangents_in):
-            return jax.vmap(_single_tangent_step)(carry_tangents_in)
+            # Linearize once at the current base carry, then apply the linear map
+            # to all tangent columns. The previous vmap(jvp(...)) formulation
+            # repeated the primal linearization work per column and was much
+            # heavier on converged QA runs.
+            _, linear_step = jax.linearize(_step, carry_base)
+            return jax.vmap(linear_step)(carry_tangents_in)
 
         step_tangents = jax.lax.cond(active, _advance, lambda carry_tangents_in: carry_tangents_in, carry_tangents)
         return step_tangents, None
@@ -1235,6 +1352,68 @@ def _checkpoint_tape_dynamic_basepoint_scan_runner(*, static, stacked, stacked_b
         return carry_tangents
 
     _lru_cache_put(_CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE, key, _run_scan)
+    return _run_scan
+
+
+def _checkpoint_tape_dynamic_basepoint_vjp_scan_runner(*, static, stacked, stacked_base_carries, static_flags):
+    from ._compat import jax
+
+    key = (
+        id(static),
+        bool(static_flags["apply_lforbal"]),
+        bool(static_flags["include_edge_residual"]),
+        bool(static_flags["apply_m1_constraints"]),
+        bool(static_flags["limit_update_rms"]),
+        bool(static_flags["limit_dt_from_force"]),
+        bool(static_flags["vmec2000_control"]),
+        bool(static_flags["divide_by_scalxc_for_update"]),
+        int(static_flags["signgs"]),
+        int(static_flags["precond_jmax"]),
+        _stacked_trace_signature(stacked),
+        _stacked_trace_signature(stacked_base_carries),
+    )
+    cached = _lru_cache_get(_CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_VJP_SCAN_CACHE, key)
+    if cached is not None:
+        return cached
+
+    def _step_scan(carry_cotangents, inputs):
+        carry_base, trace = inputs
+        active = jnp.asarray(trace["active"], dtype=bool) if "active" in trace else jnp.asarray(True, dtype=bool)
+
+        def _step(carry):
+            return _packed_dynamic_replay_step_from_carry(
+                carry,
+                trace,
+                static=static,
+                static_flags=static_flags,
+                preconditioner_jmax_override=int(static_flags["precond_jmax"]),
+            )
+
+        def _advance(cotangents_in):
+            _, vjp_fun = jax.vjp(_step, carry_base)
+            return vjp_fun(cotangents_in)[0]
+
+        carry_cotangents = jax.lax.cond(
+            active,
+            _advance,
+            lambda cotangents_in: cotangents_in,
+            carry_cotangents,
+        )
+        return carry_cotangents, None
+
+    @jax.jit
+    def _run_scan(final_cotangents, stacked_base_carries_in, stacked_traces_in):
+        reverse = lambda x: jnp.flip(x, axis=0)
+        reversed_base_carries = jax.tree_util.tree_map(reverse, stacked_base_carries_in)
+        reversed_traces = jax.tree_util.tree_map(reverse, stacked_traces_in)
+        initial_cotangents, _ = jax.lax.scan(
+            _step_scan,
+            final_cotangents,
+            (reversed_base_carries, reversed_traces),
+        )
+        return initial_cotangents
+
+    _lru_cache_put(_CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_VJP_SCAN_CACHE, key, _run_scan)
     return _run_scan
 
 
@@ -1276,7 +1455,8 @@ def checkpoint_tape_state_jvp_columns(
     stacked = tape.stacked_step_traces
     static_flags = tape.step_trace_static_flags
     if (
-        tape.dynamic_base_carries_stacked is not None
+        _dynamic_replay_mode() != "whole_scan"
+        and tape.dynamic_base_carries_stacked is not None
         and stacked is not None
         and static_flags is not None
         and rebuild_preconditioner

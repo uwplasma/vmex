@@ -89,9 +89,10 @@ def build_static(
     # Radial coordinate s = (i)/(ns-1). VMEC uses "s" = normalized toroidal flux.
     # Use a monotone [0,1] grid.
     if cfg.ns < 2:
-        s = jnp.asarray([0.0])
+        s = np.asarray([0.0], dtype=np.float64)
     else:
-        s = jnp.linspace(0.0, 1.0, cfg.ns)
+        s = np.linspace(0.0, 1.0, cfg.ns, dtype=np.float64)
+    static_dtype = np.asarray(s).dtype
     tomnsps_masks = None
     tomnsps_masks_edge = None
     vmec_phase_stack = None
@@ -107,21 +108,21 @@ def build_static(
             mmax=int(cfg.mpol) - 1,
             nmax=int(cfg.ntor),
             lasym=bool(cfg.lasym),
-            dtype=jnp.asarray(s).dtype,
+            dtype=static_dtype,
             cache=True,
         )
         tomnsps_masks = _tomnsps_masks(
             ns=int(cfg.ns),
             mpol=int(cfg.mpol),
             include_edge=False,
-            dtype=jnp.asarray(s).dtype,
+            dtype=static_dtype,
             cache=True,
         )
         tomnsps_masks_edge = _tomnsps_masks(
             ns=int(cfg.ns),
             mpol=int(cfg.mpol),
             include_edge=True,
-            dtype=jnp.asarray(s).dtype,
+            dtype=static_dtype,
             cache=True,
         )
         cache_phase = str(os.environ.get("VMEC_JAX_CACHE_VMEC_PHASE", "1")).lower() not in {"0", "false", "no"}
@@ -144,19 +145,28 @@ def build_static(
 
                 cos_phase = cosmu_m[:, :, None] * cosnv_n[:, None, :] + sgn[:, None, None] * sinmu_m[:, :, None] * sinnv_n[:, None, :]
                 sin_phase = sinmu_m[:, :, None] * cosnv_n[:, None, :] - sgn[:, None, None] * cosmu_m[:, :, None] * sinnv_n[:, None, :]
-                vmec_phase_stack = jnp.asarray(np.concatenate([cos_phase, sin_phase], axis=0), dtype=jnp.asarray(trig_vmec.cosmu).dtype)
+                vmec_phase_stack = np.asarray(
+                    np.concatenate([cos_phase, sin_phase], axis=0),
+                    dtype=np.asarray(trig_vmec.cosmu).dtype,
+                )
 
                 cosmum = np.asarray(trig_vmec.cosmum)
                 sinmum = np.asarray(trig_vmec.sinmum)
                 dcos_phase = sinmum[:, m].T[:, :, None] * cosnv_n[:, None, :] + sgn[:, None, None] * cosmum[:, m].T[:, :, None] * sinnv_n[:, None, :]
                 dsin_phase = cosmum[:, m].T[:, :, None] * cosnv_n[:, None, :] - sgn[:, None, None] * sinmum[:, m].T[:, :, None] * sinnv_n[:, None, :]
-                vmec_phase_dtheta_stack = jnp.asarray(np.concatenate([dcos_phase, dsin_phase], axis=0), dtype=jnp.asarray(trig_vmec.cosmu).dtype)
+                vmec_phase_dtheta_stack = np.asarray(
+                    np.concatenate([dcos_phase, dsin_phase], axis=0),
+                    dtype=np.asarray(trig_vmec.cosmu).dtype,
+                )
 
                 cosnvn = np.asarray(trig_vmec.cosnvn)
                 sinnvn = np.asarray(trig_vmec.sinnvn)
                 dzcos_phase = cosmu_m[:, :, None] * sinnvn[:, n1].T[:, None, :] + sgn[:, None, None] * sinmu_m[:, :, None] * cosnvn[:, n1].T[:, None, :]
                 dzsin_phase = sinmu_m[:, :, None] * sinnvn[:, n1].T[:, None, :] - sgn[:, None, None] * cosmu_m[:, :, None] * cosnvn[:, n1].T[:, None, :]
-                vmec_phase_dzeta_stack = jnp.asarray(np.concatenate([dzcos_phase, dzsin_phase], axis=0), dtype=jnp.asarray(trig_vmec.cosmu).dtype)
+                vmec_phase_dzeta_stack = np.asarray(
+                    np.concatenate([dzcos_phase, dzsin_phase], axis=0),
+                    dtype=np.asarray(trig_vmec.cosmu).dtype,
+                )
 
                 trig_vmec.phase_stack = vmec_phase_stack
                 trig_vmec.phase_dtheta_stack = vmec_phase_dtheta_stack
@@ -248,7 +258,17 @@ def build_static(
         mn_idx_kp=mn_idx_kp,
         mn_idx_kn=mn_idx_kn,
         mn_has_kn=mn_has_kn,
-        mode_scale_internal=None if trig_vmec is None else (1.0 / (jnp.asarray(trig_vmec.mscale)[m_np] * jnp.asarray(trig_vmec.nscale)[np.abs(n_np)])).astype(jnp.asarray(s).dtype),
+        mode_scale_internal=(
+            None
+            if trig_vmec is None
+            else (
+                1.0
+                / (
+                    np.asarray(trig_vmec.mscale, dtype=static_dtype)[m_np]
+                    * np.asarray(trig_vmec.nscale, dtype=static_dtype)[np.abs(n_np)]
+                )
+            ).astype(static_dtype)
+        ),
         free_boundary_state0=initial_free_boundary_state(cfg) if bool(cfg.lfreeb) else None,
         mgrid_metadata=mgrid_metadata,
         free_boundary_extcur=free_boundary_extcur,

@@ -1,10 +1,13 @@
 import numpy as np
 import jax.numpy as jnp
+from types import SimpleNamespace
 
+from vmec_jax.namelist import InData
 from vmec_jax.boundary import BoundaryCoeffs
 from vmec_jax.modes import vmec_mode_table
 from vmec_jax.optimization import (
     BoundaryParamSpec,
+    FixedBoundaryExactOptimizer,
     apply_boundary_params,
     boundary_param_names,
     boundary_param_specs,
@@ -161,6 +164,31 @@ def test_gauss_newton_exact_residual_after_jacobian():
     np.testing.assert_allclose(result["x"], np.array([1.0]), atol=1e-3, rtol=0.0)
 
 
+def test_gauss_newton_damped_fallback_recovers_from_oversized_step():
+    """Damping should rescue cases where the raw GN step is unusably large."""
+
+    def residual(x):
+        return np.array([float(x[0]) - 1.0], dtype=float)
+
+    def poor_scaled_jacobian(_x):
+        return np.array([[1.0e-6]], dtype=float)
+
+    result = gauss_newton_least_squares(
+        residual,
+        poor_scaled_jacobian,
+        np.array([0.0], dtype=float),
+        max_nfev=20,
+        ftol=1e-12,
+        gtol=1e-12,
+        xtol=1e-12,
+        verbose=0,
+    )
+
+    assert result["success"]
+    assert result["cost"] < 1e-10
+    np.testing.assert_allclose(result["x"], np.array([1.0]), atol=1e-5, rtol=0.0)
+
+
 def test_gauss_newton_helper_matches_scipy_linear_problem():
     """The standalone SciPy path should solve the same linear least-squares problem."""
 
@@ -188,3 +216,156 @@ def test_gauss_newton_helper_matches_scipy_linear_problem():
 
     np.testing.assert_allclose(result.x, np.array([1.0, 1.0]), atol=1e-12, rtol=0.0)
     assert result.success
+
+
+def test_fixed_boundary_optimizer_read_last_array_prefers_scalar_array_value():
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._indata = InData(
+        scalars={
+            "NITER_ARRAY": 1500,
+            "NITER": 10000,
+            "FTOL_ARRAY": 1e-13,
+            "FTOL": 1e-8,
+        },
+        indexed={},
+        source_path=None,
+    )
+
+    assert opt._read_last_array("NITER_ARRAY", "NITER", 42, int) == 1500
+    assert opt._read_last_array("FTOL_ARRAY", "FTOL", 1e-6, float) == 1e-13
+
+
+def test_fixed_boundary_optimizer_read_last_array_handles_sequence_values():
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._indata = InData(
+        scalars={
+            "NITER_ARRAY": [50, 75, 125],
+            "NITER": 10000,
+        },
+        indexed={},
+        source_path=None,
+    )
+
+    assert opt._read_last_array("NITER_ARRAY", "NITER", 42, int) == 125
+
+
+def test_fixed_boundary_optimizer_solver_device_inherits_by_default():
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+
+    assert opt._resolve_solver_device(None) is None
+    assert opt._resolve_solver_device("auto") is None
+    assert opt._resolve_solver_device("default") is None
+    assert opt._resolve_solver_device("cpu") == "cpu"
+    assert opt._resolve_solver_device("gpu") == "gpu"
+
+
+def test_fixed_boundary_optimizer_indata_from_params_updates_input_boundary(tmp_path):
+    modes = vmec_mode_table(mpol=2, ntor=1)
+
+    def _idx(m: int, n: int) -> int:
+        for idx, (mm, nn) in enumerate(zip(np.asarray(modes.m), np.asarray(modes.n))):
+            if int(mm) == m and int(nn) == n:
+                return idx
+        raise AssertionError((m, n))
+
+    k00 = _idx(0, 0)
+    k10 = _idx(1, 0)
+    k11 = _idx(1, 1)
+    r_cos = np.zeros(modes.K)
+    z_sin = np.zeros(modes.K)
+    r_cos[k00] = 1.0
+    z_sin[k10] = 0.2
+    boundary = BoundaryCoeffs(
+        R_cos=r_cos,
+        R_sin=np.zeros(modes.K),
+        Z_cos=np.zeros(modes.K),
+        Z_sin=z_sin,
+    )
+    specs = [
+        BoundaryParamSpec("rc10", "rc", k10, 1, 0),
+        BoundaryParamSpec("zs11", "zs", k11, 1, 1),
+    ]
+
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._boundary_input = boundary
+    opt._boundary = boundary
+    opt._specs = specs
+    opt._static = SimpleNamespace(modes=modes)
+    opt._indata = InData(
+        scalars={"NFP": 2, "MPOL": 2, "NTOR": 1},
+        indexed={"RBC": {(0, 0): 1.0}, "ZBS": {(0, 1): 0.2}},
+        source_path=None,
+    )
+
+    updated = opt._indata_from_params(np.array([3e-3, -4e-3]))
+
+    assert updated.indexed["RBC"][(0, 0)] == 1.0
+    assert updated.indexed["RBC"][(0, 1)] == 3e-3
+    assert updated.indexed["ZBS"][(1, 1)] == -4e-3
+
+
+def test_fixed_boundary_optimizer_save_wout_uses_provided_state(monkeypatch, tmp_path):
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._static = SimpleNamespace(cfg=SimpleNamespace())
+    opt._indata = InData(scalars={}, indexed={}, source_path=None)
+    opt._flux = object()
+    opt._signgs = 1
+    opt._exact_cache = {}
+
+    def fail_solve(*_args, **_kwargs):
+        raise AssertionError("save_wout should not solve when state is provided")
+
+    captured = {}
+
+    def fake_write(path, run, **kwargs):
+        captured["path"] = path
+        captured["state"] = run.state
+        captured["kwargs"] = kwargs
+
+    opt._solve_forward = fail_solve
+    monkeypatch.setattr("vmec_jax.driver.write_wout_from_fixed_boundary_run", fake_write)
+
+    solved_state = object()
+    out = tmp_path / "wout_final.nc"
+    opt.save_wout(out, state=solved_state)
+
+    assert captured["path"] == str(out)
+    assert captured["state"] is solved_state
+    assert captured["kwargs"]["fast_bcovar"] is True
+    assert opt._profile["write_wout"]["count"] == 1
+
+
+def test_fixed_boundary_optimizer_save_wout_reuses_state_cache(monkeypatch, tmp_path):
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._static = SimpleNamespace(cfg=SimpleNamespace())
+    opt._indata = InData(scalars={}, indexed={}, source_path=None)
+    opt._flux = object()
+    opt._signgs = 1
+    opt._profile = {}
+    params = np.array([0.1, -0.2])
+    key = opt._exact_cache_key(params)
+    solved_state = object()
+    opt._exact_cache = {}
+    opt._exact_state_cache = {key: solved_state}
+
+    def fail_solve(*_args, **_kwargs):
+        raise AssertionError("save_wout should reuse cached accepted state")
+
+    captured = {}
+
+    def fake_write(path, run, **kwargs):
+        captured["path"] = path
+        captured["state"] = run.state
+        captured["kwargs"] = kwargs
+
+    opt._solve_forward = fail_solve
+    monkeypatch.setattr("vmec_jax.driver.write_wout_from_fixed_boundary_run", fake_write)
+
+    out = tmp_path / "wout_cached.nc"
+    opt.save_wout(out, params=params)
+
+    assert captured["path"] == str(out)
+    assert captured["state"] is solved_state
+    assert captured["kwargs"]["fast_bcovar"] is True
+    assert opt._profile["exact_state_cache_hit"]["count"] == 1
+    assert opt._profile["write_wout"]["count"] == 1

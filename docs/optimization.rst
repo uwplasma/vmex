@@ -110,7 +110,8 @@ explicitly in the script:
    VMEC_NTOR     = 5
    MAX_MODE      = 2         # boundary DOF mode number cutoff
    MAX_NFEV      = 15        # maximum residual+Jacobian evaluations
-   METHOD        = "gauss_newton"
+   METHOD        = "scipy"
+   SCIPY_TR_SOLVER = "lsmr"
    HELICITY_M    = 1         # QH helicity
    HELICITY_N    = -1        # field-period units; nn = HELICITY_N * nfp = -4 internally
    TARGET_ASPECT = 7.0       # target aspect ratio
@@ -156,53 +157,19 @@ Run it with:
 Results by mode number
 -----------------------
 
-The table below summarises the QH optimisation results for two mode-number
-cutoffs, all starting from the same boundary (``input.nfp4_QH_warm_start``,
-nfp=4) and using 15 function evaluations.  All runs use VMEC resolution
-``mpol = ntor = 5`` (set automatically by ``extend_boundary_for_max_mode``)
+The table below summarises the QH optimisation results for ``max_mode = 1, 2,
+3``.  All runs start from the same boundary
+(``input.nfp4_QH_warm_start``, nfp=4) and use VMEC resolution
+``mpol = ntor = 5`` (set automatically by ``extend_boundary_for_max_mode``),
 so the initial QS value is identical across ``max_mode`` values.
 
 .. list-table::
    :header-rows: 1
-   :widths: 12 10 14 14 14 18
+   :widths: 10 8 18 12 12 12 14 14
 
    * - max\_mode
      - DOFs
-     - QS initial
-     - QS final
-     - Reduction
-     - vmec\_jax time ¹
-   * - 1
-     - 8
-     - 0.303
-     - **0.213**
-     - **30 %**
-     - ~124 s
-   * - 2
-     - 24
-     - 0.303
-     - **0.008**
-     - **97 %**
-     - ~323 s
-
-¹ Wall time on Apple M-series (warm-cache subsequent runs are faster).
-``max_mode=1`` is limited by the 8-DOF boundary parameterisation; ``max_mode=2``
-(24 DOFs) gives the optimizer room to reshape the boundary helically and achieves
-a 97 % reduction.
-
-For ``max_mode > 2`` the script also supports staged continuation and optional
-exponential spectral scaling (ESS) through top-level toggles.  Current
-exploratory ``max_mode=3`` continuation runs reach roughly ``3e-3`` total
-objective on the standalone exact path, but mode 2 remains the documented
-default because it is already very strong and materially cheaper.
-
-
-.. list-table::
-   :header-rows: 1
-   :widths: 10 8 12 12 12 12 12
-
-   * - max\_mode
-     - DOFs
+     - Policy
      - QS initial
      - QS final
      - Reduction
@@ -210,32 +177,38 @@ default because it is already very strong and materially cheaper.
      - Wall time ¹
    * - 1
      - 8
+     - continuation, no ESS
      - 0.303
-     - 0.213
+     - 0.214
      - 30 %
      - 0.216
-     - ~118 s
+     - ~133 s
    * - 2
      - 24
+     - continuation, no ESS
      - 0.303
-     - ``8.61e-3``
-     - 97 %
-     - ``8.72e-3``
-     - ~220 s
+     - ``3.19e-3``
+     - 99 %
+     - ``3.19e-3``
+     - ~746 s
    * - 3
      - 48
+     - continuation + ESS
      - 0.303
-     - ``2.91e-3``
-     - 99 %
-     - ``2.99e-3``
-     - ~324 s
+     - ``9.51e-4``
+     - 99.7 %
+     - ``9.51e-4``
+     - ~952 s
 
 ¹ Wall time on Apple M-series.
+``max_mode=1`` is limited by the 8-DOF boundary parameterisation. ``max_mode=2``
+gives the optimizer room to reshape the boundary helically, and the current
+``max_mode=3`` continuation+ESS run improves the QS residual further.
 
 3-D LCFS and :math:`|B|` contour plots
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**max_mode = 1** (8 DOFs, 30% QS reduction, ~118 s)
+**max_mode = 1** (8 DOFs, 30% QS reduction, ~133 s)
 
 .. list-table::
    :widths: 60 40
@@ -252,7 +225,7 @@ default because it is already very strong and materially cheaper.
    :align: center
    :alt: B-magnitude contour lines on LCFS, max_mode=1
 
-**max_mode = 2** (24 DOFs, 97% QS reduction, ~220 s)
+**max_mode = 2** (24 DOFs, 99% QS reduction, ~746 s)
 
 .. list-table::
    :widths: 60 40
@@ -269,7 +242,7 @@ default because it is already very strong and materially cheaper.
    :align: center
    :alt: B-magnitude contour lines on LCFS, max_mode=2
 
-**max_mode = 3** (48 DOFs, 99% QS reduction, ~324 s)
+**max_mode = 3** (48 DOFs, 99.7% QS reduction, ~952 s)
 
 .. list-table::
    :widths: 60 40
@@ -287,8 +260,8 @@ default because it is already very strong and materially cheaper.
    :alt: B-magnitude contour lines on LCFS, max_mode=3
 
 The contour lines on the :math:`|B|` surface plots show the magnetic field strength as
-isocurves in (θ, φ) space. Quasi-helical symmetry means :math:`|B|` depends mainly on
-``m·θ − n·φ``; the optimised contours are clearly more helically aligned than
+isocurves in (theta, phi) space. Quasi-helical symmetry means :math:`|B|` depends mainly on
+``m*theta - n*phi``; the optimised contours are clearly more helically aligned than
 the initial configuration, and the 48-DOF run sharpens that alignment further.
 
 
@@ -315,18 +288,18 @@ The script starts from ``examples/data/input.nfp2_QA`` (nfp=2). All runs use
 VMEC resolution ``mpol = ntor = 5`` (set automatically by
 ``extend_boundary_for_max_mode``). The current standalone QA workflow uses the
 exact discrete-adjoint residual/Jacobian callbacks inside
-``scipy.optimize.least_squares``. For ``max_mode > 1``, the script now uses
+``scipy.optimize.least_squares``. For ``max_mode > 1``, the script can use
 staged continuation: it solves the lower-mode QA problem first, then lifts that
-solution into the richer boundary space before running the final stage.
+solution into the richer boundary space before running the final stage. The
+full sweep also tests direct-start and ESS variants.
 
 .. list-table::
    :header-rows: 1
-   :widths: 10 8 14 10 10 14 14 14 14 14
+   :widths: 10 8 20 12 14 14 14 14 14
 
    * - max\_mode
      - DOFs
-     - Start
-     - Budget
+     - Policy
      - Eval used
      - Aspect final
      - Mean iota final
@@ -335,44 +308,38 @@ solution into the richer boundary space before running the final stage.
      - Wall time ¹
    * - 1
      - 8
-     - input deck
-     - 40
-     - 40
-     - 6.0001
-     - 0.4088
-     - ``5.91e-4``
-     - ``5.93e-4``
-     - ~26 s
+     - input deck, no ESS
+     - 27
+     - 6.0024
+     - 0.3942
+     - ``9.04e-3``
+     - ``9.29e-3``
+     - ~315 s
    * - 2
      - 24
-     - ``max_mode=1`` continuation
-     - 15 + 40
-     - 23
-     - 6.0001
-     - 0.4092
-     - ``8.05e-4``
-     - ``8.06e-4``
-     - ~18 s
+     - continuation, no ESS
+     - 52
+     - 6.0000
+     - 0.4095
+     - ``1.46e-4``
+     - ``1.46e-4``
+     - ~801 s
    * - 3
      - 48
-     - ``max_mode=2`` continuation
-     - 25 + 25 + 40
-     - 41
-     - 6.0003
-     - 0.4096
-     - ``5.21e-4``
-     - ``5.21e-4``
-     - ~31 s
+     - continuation, no ESS
+     - 64
+     - 6.0000
+     - 0.4099
+     - ``7.61e-6``
+     - ``7.62e-6``
+     - ~1150 s
 
 ¹ Wall time on Apple M-series.
 
-On the latest fresh standalone rerun, the 48-DOF QA case is the clear best
-mode. The 24-DOF continuation case still keeps the aspect and iota targets,
-but it does not consistently beat the 8-DOF run on the full weighted
-objective under the cheap inner-solve settings used by this example. The
-strengthened continuation + ESS policy still matters for ``max_mode=3``: that
-is the case that reliably improves over the lower-mode runs while keeping
-mean iota near the target.
+On the latest fresh standalone rerun, staged continuation is decisive for QA.
+Direct-start ``max_mode=3`` stays in a poor basin, while continuation reaches
+a deep QA minimum. The best displayed QA run is the no-ESS ``max_mode=3``
+continuation case.
 
 **max_mode = 1** (8 DOFs, exact SciPy + adjoint)
 
@@ -424,6 +391,32 @@ mean iota near the target.
    :width: 80%
    :align: center
    :alt: B-magnitude contour lines on LCFS, QA max_mode=3
+
+
+Full QA/QH policy sweep
+-----------------------
+
+The panel below compares continuation versus direct-start mode expansion, with
+and without ESS, for QA and QH at ``max_mode = 1, 2, 3``. Wall time is printed
+inside each objective-history subplot. The renderer adds one set of rows per
+available backend label, so CPU and GPU runs can be reported in the same panel
+after both result sets are generated. By default, exact-optimizer workers use
+the active JAX backend. Use ``JAX_PLATFORMS=cpu`` or
+``--worker-jax-platforms cpu`` only when you intentionally want CPU-only worker
+processes.
+
+.. code-block:: bash
+
+   JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation
+   JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct
+   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation
+   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct
+   python examples/optimization/render_qs_ess_publication_panel.py
+
+.. image:: _static/figures/qs_ess_publication_panel_full.png
+   :width: 100%
+   :align: center
+   :alt: QA and QH optimization policy sweep
 
 
 Algorithms in detail
@@ -630,10 +623,12 @@ boundary parameterisation; increase ``MAX_NFEV`` for more optimisation budget.
 GPU acceleration
 -----------------
 
-The same workflow runs on GPU without modification.  Set ``JAX_PLATFORMS=cuda``
-(or ``metal`` on Apple Silicon) before running.  The checkpoint tape is
-device-resident throughout; host/device traffic is limited to the final wout
-write.
+The same workflow runs on GPU without modification.  After installing
+GPU-enabled JAX, leave JAX's default platform selection active or set
+``JAX_PLATFORM_NAME=gpu`` before running.  For NVIDIA CUDA specifically,
+``JAX_PLATFORMS=cuda`` is also valid.  You can also pass
+``solver_device="gpu"`` to the Python optimizer/driver interfaces.  If
+``solver_device`` is unset, vmec_jax inherits JAX's active default backend.
 
 For GPU runs, the dynamic replay bucketing
 (``VMEC_JAX_DYNAMIC_REPLAY_BUCKET``) is especially important: it ensures that

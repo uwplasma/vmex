@@ -425,14 +425,101 @@ def test_normalize_solver_mode():
         driver_module._normalize_solver_mode(solver_mode="unknown-mode", performance_mode=True)
 
 
-def test_default_non_autodiff_solver_policy_matches_fixed_boundary_defaults(tmp_path):
+def test_default_non_autodiff_solver_policy_matches_fixed_boundary_defaults(tmp_path, monkeypatch):
+    monkeypatch.setattr(driver_module, "_default_backend_name", lambda: "cpu")
     simple_input = Path(__file__).resolve().parents[1] / "examples/data/input.circular_tokamak"
     _cfg_simple, indata_simple = load_config(simple_input)
-    assert driver_module.default_non_autodiff_solver_policy(indata_simple) == ("accelerated", True)
+    assert driver_module.default_non_autodiff_solver_policy(indata_simple) == ("default", True)
 
     staged_input = _write_staged_no_niter_input(tmp_path)
     _cfg_staged, indata_staged = load_config(staged_input)
     assert driver_module.default_non_autodiff_solver_policy(indata_staged) == ("parity", False)
+
+
+def test_default_non_autodiff_solver_policy_uses_accelerated_for_gpu(monkeypatch):
+    monkeypatch.setattr(driver_module, "_default_backend_name", lambda: "gpu")
+    simple_input = Path(__file__).resolve().parents[1] / "examples/data/input.circular_tokamak"
+    _cfg_simple, indata_simple = load_config(simple_input)
+    assert driver_module.default_non_autodiff_solver_policy(indata_simple) == ("accelerated", True)
+
+
+def test_default_non_autodiff_solver_policy_keeps_cpu_lasym_accelerated(monkeypatch):
+    monkeypatch.setattr(driver_module, "_default_backend_name", lambda: "cpu")
+    lasym_input = Path(__file__).resolve().parents[1] / "examples/data/input.up_down_asymmetric_tokamak"
+    _cfg_lasym, indata_lasym = load_config(lasym_input)
+    assert driver_module.default_non_autodiff_solver_policy(indata_lasym) == ("accelerated", True)
+
+
+def test_default_non_autodiff_solver_policy_keeps_cpu_current_multigrid_accelerated(monkeypatch):
+    monkeypatch.setattr(driver_module, "_default_backend_name", lambda: "cpu")
+    qa_input = Path(__file__).resolve().parents[1] / "examples/data/input.LandremanPaul2021_QA_lowres"
+    _cfg_qa, indata_qa = load_config(qa_input)
+    assert driver_module.default_non_autodiff_solver_policy(indata_qa) == ("accelerated", True)
+
+
+def test_gpu_lasym_current_staged_solver_device_auto_inherits_gpu_default():
+    input_path = Path(__file__).resolve().parents[1] / "examples/data/input.basic_non_stellsym_pressure"
+    cfg, indata = load_config(input_path)
+    ns_array = driver_module._as_list_like(indata.get("NS_ARRAY", None))
+    niter_array = driver_module._as_list_like(indata.get("NITER_ARRAY", None))
+
+    device = driver_module._resolve_fixed_boundary_solver_device_name(
+        solver_device=None,
+        backend="gpu",
+        cfg=cfg,
+        indata=indata,
+        solver_lower="vmec2000_iter",
+        cli_fixed_boundary_mode=True,
+        accelerated_mode=True,
+        ns_list_input=ns_array,
+        niter_list_input=niter_array,
+        restart_state_present=False,
+        restart_solver_state_present=False,
+    )
+
+    assert device is None
+
+
+def test_gpu_lasym_current_staged_solver_device_default_opts_out():
+    input_path = Path(__file__).resolve().parents[1] / "examples/data/input.basic_non_stellsym_pressure"
+    cfg, indata = load_config(input_path)
+
+    device = driver_module._resolve_fixed_boundary_solver_device_name(
+        solver_device="default",
+        backend="gpu",
+        cfg=cfg,
+        indata=indata,
+        solver_lower="vmec2000_iter",
+        cli_fixed_boundary_mode=True,
+        accelerated_mode=True,
+        ns_list_input=driver_module._as_list_like(indata.get("NS_ARRAY", None)),
+        niter_list_input=driver_module._as_list_like(indata.get("NITER_ARRAY", None)),
+        restart_state_present=False,
+        restart_solver_state_present=False,
+    )
+
+    assert device is None
+
+
+def test_gpu_lasym_current_staged_solver_device_cpu_is_explicit():
+    input_path = Path(__file__).resolve().parents[1] / "examples/data/input.basic_non_stellsym_pressure"
+    cfg, indata = load_config(input_path)
+
+    device = driver_module._resolve_fixed_boundary_solver_device_name(
+        solver_device="cpu",
+        backend="gpu",
+        cfg=cfg,
+        indata=indata,
+        solver_lower="vmec2000_iter",
+        cli_fixed_boundary_mode=True,
+        accelerated_mode=True,
+        ns_list_input=driver_module._as_list_like(indata.get("NS_ARRAY", None)),
+        niter_list_input=driver_module._as_list_like(indata.get("NITER_ARRAY", None)),
+        restart_state_present=False,
+        restart_solver_state_present=False,
+    )
+
+    assert device == "cpu"
 
 
 def test_default_non_autodiff_solver_policy_keeps_free_boundary_on_robust_path():
@@ -546,7 +633,7 @@ def test_cli_passes_cli_fixed_boundary_mode(monkeypatch, tmp_path):
     assert captured["cli_fixed_boundary_mode"] is True
 
 
-def test_cli_defaults_to_accelerated_on_simple_fixed_boundary(monkeypatch, tmp_path):
+def test_cli_defaults_to_cpu_default_on_simple_fixed_boundary(monkeypatch, tmp_path):
     input_path = Path(__file__).resolve().parents[1] / "examples/data/input.circular_tokamak"
     captured = {}
 
@@ -565,11 +652,11 @@ def test_cli_defaults_to_accelerated_on_simple_fixed_boundary(monkeypatch, tmp_p
 
     rc = cli_module.main([str(input_path), "--output", str(tmp_path / "wout_test.nc"), "--quiet"])
     assert rc == 0
-    assert captured["solver_mode"] == "accelerated"
+    assert captured["solver_mode"] == "default"
     assert captured["performance_mode"] is True
 
 
-def test_cli_defaults_to_accelerated_on_staged_fixed_boundary_with_niter_array(monkeypatch, tmp_path):
+def test_cli_defaults_to_cpu_default_on_staged_fixed_boundary_with_niter_array(monkeypatch, tmp_path):
     input_path = _write_staged_with_niter_input(tmp_path)
     captured = {}
 
@@ -588,8 +675,40 @@ def test_cli_defaults_to_accelerated_on_staged_fixed_boundary_with_niter_array(m
 
     rc = cli_module.main([str(input_path), "--output", str(tmp_path / "wout_test.nc"), "--quiet"])
     assert rc == 0
-    assert captured["solver_mode"] == "accelerated"
+    assert captured["solver_mode"] == "default"
     assert captured["performance_mode"] is True
+
+
+def test_cli_solver_device_cpu_uses_cpu_default_policy(monkeypatch, tmp_path):
+    input_path = Path(__file__).resolve().parents[1] / "examples/data/input.nfp4_QH_warm_start"
+    captured = {}
+
+    def _fake_run_fixed_boundary(input_path_arg, **kwargs):
+        captured["input_path"] = str(input_path_arg)
+        captured.update(kwargs)
+
+        class _Run:
+            state = type("S", (), {"Rcos": np.asarray([0.0])})()
+            result = None
+
+        return _Run()
+
+    monkeypatch.setattr(cli_module, "run_fixed_boundary", _fake_run_fixed_boundary)
+    monkeypatch.setattr(cli_module, "write_wout_from_fixed_boundary_run", lambda *args, **kwargs: None)
+
+    rc = cli_module.main(
+        [
+            str(input_path),
+            "--solver-device",
+            "cpu",
+            "--output",
+            str(tmp_path / "wout_test.nc"),
+            "--quiet",
+        ]
+    )
+    assert rc == 0
+    assert captured["solver_mode"] == "default"
+    assert captured["solver_device"] == "cpu"
 
 
 def test_cli_defaults_to_parity_on_staged_fixed_boundary_without_niter_array(monkeypatch, tmp_path):

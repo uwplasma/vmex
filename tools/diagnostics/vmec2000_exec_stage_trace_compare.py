@@ -310,6 +310,59 @@ def _workdir_context(path: Path | None):
         yield path
 
 
+def _copy_input_and_mgrid(input_path: Path, workdir: Path) -> Path:
+    """Copy a VMEC input deck and its referenced MGRID file into ``workdir``."""
+
+    from vmec_jax.namelist import read_indata
+
+    repo_root = Path(__file__).resolve().parents[2]
+    src = input_path.resolve()
+    dst = workdir / src.name
+    shutil.copy2(src, dst)
+    try:
+        indata = read_indata(src)
+        mg = str(indata.get("MGRID_FILE", "NONE")).strip().strip("'").strip('"')
+    except Exception:
+        mg = "NONE"
+    if not mg or mg.upper() == "NONE":
+        return dst
+
+    mg_src = Path(mg)
+    if not mg_src.is_absolute():
+        mg_src = src.parent / mg_src
+    if not mg_src.exists():
+        search_roots = [
+            repo_root / "examples" / "data",
+            repo_root / "examples_single_grid" / "data",
+            repo_root.parent / "STELLOPT" / "BENCHMARKS" / "VMEC_TEST",
+            repo_root.parent / "external",
+            repo_root / "outputs",
+        ]
+        for root in search_roots:
+            if not root.exists():
+                continue
+            exact = (root / Path(mg).name).resolve()
+            if exact.exists():
+                mg_src = exact
+                break
+            matches = list(root.rglob(Path(mg).name))
+            if matches:
+                mg_src = matches[0].resolve()
+                break
+    if mg_src.exists():
+        mg_dst = (workdir / Path(mg).name).resolve()
+        shutil.copy2(mg_src, mg_dst)
+        txt = dst.read_text(encoding="utf-8")
+        txt = re.sub(
+            r"(?im)^\s*MGRID_FILE\s*=.*$",
+            f"  MGRID_FILE = '{mg_dst}',",
+            txt,
+            count=1,
+        )
+        dst.write_text(txt, encoding="utf-8")
+    return dst
+
+
 def _parse_vmec_xc_dump(path: Path) -> tuple[np.ndarray, np.ndarray]:
     """Parse VMEC2000 xc/xcdot dump (text) -> (xc, v)."""
     xc_vals: list[float] = []
@@ -2779,8 +2832,7 @@ def main() -> None:
     threed1_stages: list[Vmec2000Threed1Stage] | None = None
     workdir_arg = Path(args.workdir).expanduser().resolve() if args.workdir is not None else None
     with _workdir_context(workdir_arg) as workdir:
-        input_local = workdir / input_path.name
-        shutil.copy2(input_path, input_local)
+        input_local = _copy_input_and_mgrid(input_path, workdir)
         vmec_dump_dir = workdir / "vmec_dumps"
         jax_dump_dir = workdir / "jax_dumps"
         vmec_dump_dir.mkdir(parents=True, exist_ok=True)

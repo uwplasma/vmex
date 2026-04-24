@@ -497,7 +497,13 @@ def main() -> int:
                 if rc != 0:
                     all_ok = False
                 case_rec["runs"].append(rec)
-            thresholds_ok, thresholds_report = _evaluate_freeb_thresholds(case, case_rec["runs"])
+            if args.dry_run:
+                # Dry-runs validate command construction only; no scalpot JSON
+                # exists yet, so metric-threshold evaluation would otherwise
+                # fail every free-boundary case for missing observations.
+                thresholds_ok, thresholds_report = True, {}
+            else:
+                thresholds_ok, thresholds_report = _evaluate_freeb_thresholds(case, case_rec["runs"])
             runtime_ok, runtime_report = _evaluate_runtime_thresholds(case, case_rec["runs"])
             if thresholds_report:
                 case_rec["metric_thresholds_rel_scaled"] = thresholds_report

@@ -64,16 +64,18 @@ VMEC_NTOR = 5
 
 # Maximum |m|, |n| mode number for the boundary parameter space.
 # max_mode=2 → 24 DOFs; max_mode=3 → 48 DOFs (significantly longer JIT time).
-MAX_MODE = 2
+MAX_MODE = 1
 
 # Maximum number of residual + Jacobian evaluations combined.
 # When MAX_MODE > 1, the final stage is warm-started from the previous mode.
-MAX_NFEV = 40
-CONTINUATION_NFEV = 15
+MAX_NFEV = 15
+CONTINUATION_NFEV = 10
 
 # Outer least-squares method. "scipy" uses exact residuals + exact
 # discrete-adjoint Jacobians through scipy.optimize.least_squares.
 METHOD = "scipy"
+SCIPY_TR_SOLVER = "lsmr"
+SCIPY_LSMR_MAXITER = None
 
 # Convergence tolerances (relative cost reduction / gradient / step norm).
 FTOL = 1e-3
@@ -81,9 +83,13 @@ GTOL = 1e-3
 XTOL = 1e-3
 
 # VMEC inner solve budget used for accepted points and line-search trials.
-INNER_MAX_ITER = 1
-INNER_FTOL = 1e-13
-TRIAL_MAX_ITER = 1
+# Accepted points use the input deck budget for accurate exact Jacobians. Trial
+# residuals use a relaxed budget because SciPy may evaluate several rejected
+# trust-region points per iteration; set either trial knob to 0 to force the
+# input deck budget there as well.
+INNER_MAX_ITER = 0 # do not override NITER of input file
+INNER_FTOL = 0
+TRIAL_MAX_ITER = 300
 TRIAL_FTOL = 1e-10
 
 # Quasi-axisymmetric symmetry helicity: |B| ~ B(m*theta - n*zeta), n=0 → QA.
@@ -116,8 +122,8 @@ OBJECTIVE_TUPLES = [
 # QA problem benefits from a stronger ESS profile than max_mode=2, so the
 # script automatically promotes ALPHA and continuation budget when MAX_MODE >= 3
 # unless the user overrides them explicitly.
-USE_ESS = True
-ALPHA   = 0.8
+USE_ESS = False
+ALPHA   = 2.5
 USE_MODE_CONTINUATION = True
 
 # Output directory — subdirectory name reflects whether ESS was used.
@@ -133,7 +139,14 @@ OUTPUT_DIR = Path(f"results/qa_opt/{_tag}")
 if MAX_MODE >= 2:
     CONTINUATION_NFEV = max(CONTINUATION_NFEV, 25)
     if USE_ESS:
-        ALPHA = max(ALPHA, 1.6)
+        ALPHA = max(ALPHA, 2.5)
+
+# Stage/debug artifact controls.  Writing input decks is cheap.  Writing wouts
+# is expensive unless the state has already been solved, so keep intermediate
+# stage wouts and validation reruns off for normal example runs.
+SAVE_STAGE_INPUTS = True
+SAVE_STAGE_WOUTS = False
+SAVE_RERUN_WOUTS = False
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1.  Load configuration
@@ -144,6 +157,45 @@ import vmec_jax._compat as _compat
 _jnp = _compat.jnp
 indata = rebuild_indata_with_resolution(indata, mpol=VMEC_MPOL, ntor=VMEC_NTOR)
 cfg = config_from_indata(indata)
+
+
+def _remove_stale(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _save_stage_artifacts(stage_dir: Path, stage_opt, params_initial, params_final, stage_result) -> None:
+    """Save per-stage VMEC inputs and wouts for debugging."""
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    if SAVE_STAGE_INPUTS:
+        stage_opt.save_input(stage_dir / "input.initial", params_initial)
+        stage_opt.save_input(stage_dir / "input.final", params_final)
+    if SAVE_STAGE_WOUTS:
+        stage_opt.save_wout(
+            stage_dir / "wout_initial.nc",
+            params_initial,
+            state=stage_result.get("_state_initial"),
+        )
+        stage_opt.save_wout(
+            stage_dir / "wout_final.nc",
+            params_final,
+            state=stage_result.get("_state_final"),
+        )
+    else:
+        _remove_stale(stage_dir / "wout_initial.nc")
+        _remove_stale(stage_dir / "wout_final.nc")
+    if SAVE_RERUN_WOUTS:
+        rerun = vj.run_fixed_boundary(str(stage_dir / "input.initial"), verbose=False)
+        vj.write_wout_from_fixed_boundary_run(str(stage_dir / "wout_initial_rerun.nc"), rerun)
+        print(f"  Wrote {stage_dir / 'wout_initial_rerun.nc'}")
+        rerun = vj.run_fixed_boundary(str(stage_dir / "input.final"), verbose=False)
+        vj.write_wout_from_fixed_boundary_run(str(stage_dir / "wout_final_rerun.nc"), rerun)
+        print(f"  Wrote {stage_dir / 'wout_final_rerun.nc'}")
+    else:
+        _remove_stale(stage_dir / "wout_initial_rerun.nc")
+        _remove_stale(stage_dir / "wout_final_rerun.nc")
 
 def _build_stage(max_mode: int):
     stage_static = vj.build_static(cfg)
@@ -265,6 +317,15 @@ for stage_mode in stage_modes:
         ),
         target_iota=TARGET_IOTA,
         target_aspect=TARGET_ASPECT,
+        scipy_tr_solver=SCIPY_TR_SOLVER,
+        scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
+    )
+    _save_stage_artifacts(
+        OUTPUT_DIR / f"stage_{stage_mode:02d}",
+        stage_opt,
+        params0_stage,
+        stage_result["x"],
+        stage_result,
     )
     stage_results.append((stage_mode, stage_specs, stage_opt, params0_stage, stage_result))
     prev_specs = stage_specs
@@ -307,11 +368,24 @@ if USE_MODE_CONTINUATION and len(stage_results) > 1:
         "aspect_final": float(result["_history_dump"]["aspect_final"]),
         "history": combined_entries,
     }
+    if "iota" in combined_entries[0] and "iota" in combined_entries[-1]:
+        combined_history["iota_initial"] = float(combined_entries[0]["iota"])
+        combined_history["iota_final"] = float(combined_entries[-1]["iota"])
 
+_hist = combined_history if combined_history is not None else result.get("_history_dump", {})
+_aspect_final = _hist.get("aspect_final")
+if _aspect_final is None:
+    _aspect_final = opt.aspect_ratio(result["x"])
+_qs_final = _hist.get("qs_final")
+if _qs_final is None:
+    _qs_final = opt.quasisymmetry_objective(result["x"])
+_objective_final = _hist.get("objective_final", result.get("objective", float("nan")))
 print(f"\nTermination: {result['message']}")
-print(f"Aspect ratio (final):          {opt.aspect_ratio(result['x']):.4f}")
-print(f"QS objective (final):          {opt.quasisymmetry_objective(result['x']):.6f}")
-_hist = result.get("_history_dump", {})
+print(f"Aspect ratio (final):          {_aspect_final:.6f}")
+if "iota_final" in _hist:
+    print(f"Mean iota (final):             {_hist['iota_final']:.6f}  target={TARGET_IOTA:.6f}")
+print(f"QS objective (final):          {_qs_final:.6e}")
+print(f"Total objective (final):       {_objective_final:.6e}")
 _obj0 = _hist.get("objective_initial", None)
 _obj_f = _hist.get("objective_final", None)
 if _obj0 is not None and _obj0 > 0.0 and _obj_f is not None:
@@ -321,6 +395,19 @@ if _obj0 is not None and _obj0 > 0.0 and _obj_f is not None:
 # 7.  Save outputs
 # ─────────────────────────────────────────────────────────────────────────────
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+initial_stage_mode, initial_specs, initial_opt, initial_params0, initial_result = stage_results[0]
+initial_opt.save_input(OUTPUT_DIR / "input.initial", initial_params0)
+initial_opt.save_wout(
+    OUTPUT_DIR / "wout_initial.nc",
+    initial_params0,
+    state=initial_result.get("_state_initial"),
+)
+if SAVE_RERUN_WOUTS:
+    rerun = vj.run_fixed_boundary(str(OUTPUT_DIR / "input.initial"), verbose=False)
+    vj.write_wout_from_fixed_boundary_run(str(OUTPUT_DIR / "wout_initial_rerun.nc"), rerun)
+    print(f"  Wrote {OUTPUT_DIR / 'wout_initial_rerun.nc'}")
+else:
+    _remove_stale(OUTPUT_DIR / "wout_initial_rerun.nc")
 
 # Annotate history dump with metadata for plotting
 _ess_tag = f"ESS α={ALPHA}" if USE_ESS else "no ESS"
@@ -331,8 +418,14 @@ history_dump["target_aspect"] = TARGET_ASPECT
 history_dump["target_iota"] = TARGET_IOTA
 result["_history_dump"] = history_dump
 
-opt.save_wout(OUTPUT_DIR / "wout_initial.nc", np.zeros(len(specs)))
-opt.save_wout(OUTPUT_DIR / "wout_final.nc", result["x"])
+opt.save_input(OUTPUT_DIR / "input.final", result["x"])
+opt.save_wout(OUTPUT_DIR / "wout_final.nc", result["x"], state=result.get("_state_final"))
+if SAVE_RERUN_WOUTS:
+    rerun = vj.run_fixed_boundary(str(OUTPUT_DIR / "input.final"), verbose=False)
+    vj.write_wout_from_fixed_boundary_run(str(OUTPUT_DIR / "wout_final_rerun.nc"), rerun)
+    print(f"  Wrote {OUTPUT_DIR / 'wout_final_rerun.nc'}")
+else:
+    _remove_stale(OUTPUT_DIR / "wout_final_rerun.nc")
 opt.save_history(OUTPUT_DIR / "history.json", result)
 
 # ─────────────────────────────────────────────────────────────────────────────

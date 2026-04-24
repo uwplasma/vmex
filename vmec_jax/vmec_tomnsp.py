@@ -253,13 +253,15 @@ def vmec_trig_tables(
         if cached is not None:
             return cached
 
-    # dnorm normalization in fixaray (always on reduced interval [0, pi]).
-    dnorm = 1.0 / (nzeta * (ntheta2 - 1))
-    # dnorm3 normalization for surface averages.
+    # VMEC fixaray.f normalizes LASYM transforms on the full theta grid:
+    #   dnorm = 1/(nzeta*ntheta3)  ! SPH012314
+    # while stellarator-symmetric transforms use endpoint-weighted [0, pi].
     if lasym:
-        dnorm3 = 1.0 / (nzeta * ntheta1)
+        dnorm = 1.0 / (nzeta * ntheta3)
     else:
-        dnorm3 = dnorm
+        dnorm = 1.0 / (nzeta * (ntheta2 - 1))
+    # dnorm3 normalization for surface averages.
+    dnorm3 = dnorm
 
     # VMEC uses `osqrt2 = 1/sqrt(2)` and sets:
     #   mscale(1:) = mscale(0)/osqrt2  => sqrt(2) for m>=1 (with mscale(0)=1)
@@ -478,7 +480,7 @@ class TomnspsRZL:
         return cls(*children)
 
 
-_MPARITY_CACHE: dict[tuple[int, str], jnp.ndarray] = {}
+_MPARITY_CACHE: dict[tuple[int, str], np.ndarray] = {}
 _JNP_EINSUM = jnp.einsum
 _DETERMINISTIC_REDUCE = bool(int(os.environ.get("VMEC_JAX_DETERMINISTIC_REDUCE", "0")))
 # FFT path for stellarator-symmetric cases.
@@ -662,14 +664,14 @@ def _cache_allowed() -> bool:
         return False
 
 
-def _mparity_mask(mpol: int, *, dtype) -> jnp.ndarray:
+def _mparity_mask(mpol: int, *, dtype) -> np.ndarray:
     key = (int(mpol), str(np.dtype(dtype)))
     if _cache_allowed():
         cached = _MPARITY_CACHE.get(key)
         if cached is not None:
             return cached
-    m = jnp.arange(int(mpol))
-    mask_even = jnp.asarray((m % 2) == 0, dtype=dtype)
+    m = np.arange(int(mpol))
+    mask_even = np.asarray((m % 2) == 0, dtype=np.dtype(dtype))
     if _cache_allowed():
         _MPARITY_CACHE[key] = mask_even
     return mask_even
@@ -706,17 +708,18 @@ def tomnsps_masks(
         if cached is not None:
             return cached
 
-    mask_even = _mparity_mask(mpol, dtype=dtype)
-    js_fortran = jnp.arange(ns, dtype=jnp.int32) + 1  # 1..ns
-    m_fortran = jnp.arange(mpol, dtype=jnp.int32)  # 0..mpol-1
-    jmin2 = jnp.where(m_fortran == 0, 1, 2)[None, :]
-    jlam = jnp.full((1, mpol), 2, dtype=jnp.int32)
+    np_dtype = np.dtype(dtype)
+    mask_even = _mparity_mask(mpol, dtype=np_dtype)
+    js_fortran = np.arange(ns, dtype=np.int32) + 1  # 1..ns
+    m_fortran = np.arange(mpol, dtype=np.int32)  # 0..mpol-1
+    jmin2 = np.where(m_fortran == 0, 1, 2)[None, :]
+    jlam = np.full((1, mpol), 2, dtype=np.int32)
     jsmax_rz = int(ns if include_edge else (ns - 1))
     mask_rz = (js_fortran[:, None] >= jmin2) & (js_fortran[:, None] <= jsmax_rz)
     mask_l = js_fortran[:, None] >= jlam
-    mask_rz = mask_rz.astype(jnp.asarray(mask_even).dtype)[:, :, None]
-    mask_l = mask_l.astype(jnp.asarray(mask_even).dtype)[:, :, None]
-    m_fortran_f = jnp.asarray(m_fortran, dtype=jnp.asarray(mask_even).dtype)
+    mask_rz = mask_rz.astype(mask_even.dtype)[:, :, None]
+    mask_l = mask_l.astype(mask_even.dtype)[:, :, None]
+    m_fortran_f = np.asarray(m_fortran, dtype=mask_even.dtype)
     xmpq1 = (m_fortran_f * (m_fortran_f - 1.0))[None, :, None]
     masks = TomnspsMasks(
         ns=ns,
@@ -726,10 +729,10 @@ def tomnsps_masks(
         mask_rz=mask_rz,
         mask_l=mask_l,
         xmpq1=xmpq1,
-        mask_even_j=jnp.asarray(mask_even, dtype=jnp.asarray(mask_even).dtype),
-        mask_rz_j=jnp.asarray(mask_rz, dtype=jnp.asarray(mask_rz).dtype),
-        mask_l_j=jnp.asarray(mask_l, dtype=jnp.asarray(mask_l).dtype),
-        xmpq1_j=jnp.asarray(xmpq1, dtype=jnp.asarray(xmpq1).dtype) if xmpq1 is not None else None,
+        mask_even_j=mask_even,
+        mask_rz_j=mask_rz,
+        mask_l_j=mask_l,
+        xmpq1_j=xmpq1,
     )
     if cache and _cache_allowed():
         _TOMNSPS_MASK_CACHE[cache_key] = masks
