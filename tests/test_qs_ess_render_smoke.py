@@ -6,6 +6,8 @@ import shutil
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def _load_renderer_module():
     root = Path(__file__).resolve().parents[1]
@@ -96,6 +98,8 @@ def _write_case(
 
 
 def test_qs_ess_renderer_handles_partial_direct_matrix(tmp_path):
+    pytest.importorskip("matplotlib")
+
     renderer = _load_renderer_module()
     root = Path(__file__).resolve().parents[1]
     wout_path = root / "examples" / "data" / "wout_circular_tokamak.nc"
