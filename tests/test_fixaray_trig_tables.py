@@ -78,3 +78,9 @@ def test_vmec_trig_tables_lasym_full_theta_grid():
 
     assert np.allclose(float(np.asarray(trig.cosmu[i, m])), expected_cos)
     assert np.allclose(float(np.asarray(trig.sinmu[i, m])), expected_sin)
+
+    # VMEC fixaray.f switches dnorm to 1/(nzeta*ntheta3) for LASYM=T.
+    # Using the symmetric-grid normalization here gives a 2x force-coefficient
+    # error and therefore a 4x residual-scalar error in LASYM stage parity.
+    assert np.allclose(float(trig.dnorm), 1.0 / float(nzeta * ntheta3))
+    assert np.allclose(float(trig.dnorm3), float(trig.dnorm))

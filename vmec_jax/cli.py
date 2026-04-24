@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 from .driver import (
+    _default_non_autodiff_solver_policy_for_backend,
     default_non_autodiff_solver_policy,
     run_fixed_boundary,
     write_wout_from_fixed_boundary_run,
@@ -81,6 +82,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Solver policy: default|parity|accelerated (default: current default path).",
+    )
+    p.add_argument(
+        "--solver-device",
+        type=str,
+        default=None,
+        help="JAX solver device override: auto|default|cpu|gpu (default: auto).",
     )
     p.add_argument("--step-size", type=float, default=None, help="Time step (DELT). Defaults to input DELT.")
     p.add_argument("--history-size", type=int, default=10, help="History size (LBFGS-style solvers).")
@@ -184,7 +191,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     solver_mode = args.solver_mode
     if solver_mode is None and (not bool(args.parity)) and (not bool(args.fast)):
-        solver_mode, performance_mode = default_non_autodiff_solver_policy(indata)
+        solver_device_arg = "" if args.solver_device is None else str(args.solver_device).strip().lower()
+        if solver_device_arg == "cpu":
+            solver_mode, performance_mode = _default_non_autodiff_solver_policy_for_backend(indata, "cpu")
+        else:
+            solver_mode, performance_mode = default_non_autodiff_solver_policy(indata)
     else:
         # Preserve explicit CLI override semantics:
         # - default to the fast scan loop,
@@ -238,6 +249,7 @@ def main(argv: list[str] | None = None) -> int:
             verbose=not bool(args.quiet),
             jit_forces=jit_forces,
             solver_mode=str(solver_mode),
+            solver_device=args.solver_device,
             performance_mode=bool(performance_mode),
             vmecpp_restart=bool(vmecpp_restart),
             cli_fixed_boundary_mode=True,

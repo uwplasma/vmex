@@ -24,6 +24,42 @@ git clone https://github.com/uwplasma/vmec_jax
 pip install -e vmec_jax/
 ```
 
+## Choosing CPU or GPU
+
+`vmec_jax` follows the JAX backend you select. If you installed CPU-only JAX,
+runs use CPU. If you installed GPU-enabled JAX and select a GPU backend, runs
+use GPU; vmec_jax does not silently force those runs back to CPU.
+
+```bash
+# Check what JAX will use.
+python -c "import jax; print(jax.default_backend()); print(jax.devices())"
+
+# Force CPU for one command.
+JAX_PLATFORMS=cpu vmec_jax input.nfp4_QH_warm_start
+
+# Force an accelerator backend after installing GPU-enabled JAX.
+JAX_PLATFORM_NAME=gpu vmec_jax input.nfp4_QH_warm_start
+
+# For NVIDIA CUDA specifically, this is also valid.
+JAX_PLATFORMS=cuda vmec_jax input.nfp4_QH_warm_start
+```
+
+From Python, leave `solver_device` unset to inherit JAX's default backend, or
+pass `solver_device="cpu"` / `solver_device="gpu"` explicitly:
+
+```python
+import vmec_jax as vj
+
+run_gpu = vj.run_fixed_boundary("input.nfp4_QH_warm_start", solver_device="gpu")
+run_cpu = vj.run_fixed_boundary("input.nfp4_QH_warm_start", solver_device="cpu")
+```
+
+For GPU runs, vmec_jax defaults `XLA_PYTHON_CLIENT_PREALLOCATE=false` before
+JAX import so the allocator grows on demand. This avoids GPU memory contention
+between optimization workers and was faster in the exact-Jacobian GPU profile.
+Set `XLA_PYTHON_CLIENT_PREALLOCATE=true` before import if you explicitly want
+JAX's default preallocation behavior.
+
 ## Usage
 
 Run the solver (VMEC2000-style CLI):
@@ -107,7 +143,7 @@ All figures below use the same **single-grid** run settings: `NS_ARRAY=151`, `NI
   <img src="docs/_static/figures/readme_runtime_compare.png" width="860" />
 </p>
 
-**Cold vs warm runtime**: the *cold* bar includes XLA JIT compilation on the first call (one-time cost per process); the *warm* bar is the steady-state solve time for subsequent calls in the same process. VMEC2000 has no compilation overhead — it is always "cold". The warm vmec_jax time is the fair comparison for repeated solves (e.g., in an optimization loop). vmec_jax automatically caches compiled XLA kernels to disk (`~/.cache/vmec_jax/jax_cache`), so after the first run cold starts also approach warm speed.
+**Cold vs warm runtime**: the *cold* bar includes XLA JIT compilation on the first call (one-time cost per process); the *warm* bar is the steady-state solve time for subsequent calls in the same process. VMEC2000 has no compilation overhead, so it is always effectively cold. `vmec_jax` enables JAX's persistent compilation cache by default under `~/.cache/vmec_jax/jax_cache` so repeated cold-process runs can reuse compiled kernels; set `VMEC_JAX_COMPILATION_CACHE=0` to disable it or `VMEC_JAX_COMPILATION_CACHE_DIR=/path/to/cache` to choose a different location.
 
 ## Quasi-helical symmetry optimization (discrete-adjoint)
 
@@ -139,6 +175,7 @@ Key top-level controls in the script:
 - `MAX_MODE`: boundary parameterization richness
 - `OBJECTIVE_TUPLES`: explicit aspect + QS residual blocks
 - `METHOD`: `"gauss_newton"` or `"scipy"`
+- `SCIPY_TR_SOLVER`: SciPy trust-region linear solver (`"lsmr"` by default for the QA/QH examples)
 - `USE_MODE_CONTINUATION`: staged solves for higher-mode runs
 - `USE_ESS`, `ALPHA`: optional exponential spectral scaling
 
@@ -148,17 +185,18 @@ extends the boundary to include the requested harmonics at zero amplitude
 All runs use consistent VMEC resolution `mpol = ntor = 5` so the initial QS metric
 is normalised identically across `max_mode` values.
 
-| `max_mode` | DOFs | QS initial | QS final | Reduction | Objective final | Wall time ¹ |
-|:----------:|:----:|:----------:|:--------:|:---------:|:---------------:|:-----------:|
-| 1          |  8   |   0.303    |  0.213   |  30 %     | `0.216`         | ~118 s      |
-| 2          | 24   |   0.303    |  `8.61e-3` | 97 %    | `8.72e-3`       | ~220 s      |
-| 3          | 48   |   0.303    |  **2.91e-3** | **99 %** | **2.99e-3** | ~324 s      |
+| `max_mode` | DOFs | Policy | QS initial | QS final | Reduction | Objective final | Wall time ¹ |
+|:----------:|:----:|:------:|:----------:|:--------:|:---------:|:---------------:|:-----------:|
+| 1          |  8   | continuation, no ESS | 0.303 | 0.214 | 30 % | `0.216` | ~133 s |
+| 2          | 24   | continuation, no ESS | 0.303 | `3.19e-3` | 99 % | `3.19e-3` | ~746 s |
+| 3          | 48   | continuation + ESS | 0.303 | **`9.51e-4`** | **99.7 %** | **`9.51e-4`** | ~952 s |
 
 ¹ Wall time on Apple M-series (warm-cache subsequent runs are faster).
 
 With only 8 DOFs (`max_mode=1`) the boundary deformation space is too limited
 to reach a deep quasi-helical minimum. `max_mode=2` already gives a strong QH
-solution, and `max_mode=3` improves it further on the exact standalone path.
+solution, and the current `max_mode=3` continuation+ESS run improves it further
+on the exact standalone path.
 
 **vmec_jax vs SIMSOPT**: vmec_jax uses an exact discrete-adjoint Jacobian
 (one batched JVP pass ≈ 1–2 forward solves regardless of DOF count) while
@@ -169,8 +207,8 @@ see [docs/simsopt_comparison.rst](docs/simsopt_comparison.rst).
 <table>
   <tr>
     <th align="center">max_mode = 1 &nbsp;(8 DOFs, 30 % QS reduction)</th>
-    <th align="center">max_mode = 2 &nbsp;(24 DOFs, 97 % QS reduction)</th>
-    <th align="center">max_mode = 3 &nbsp;(48 DOFs, 99 % QS reduction)</th>
+    <th align="center">max_mode = 2 &nbsp;(24 DOFs, 99 % QS reduction)</th>
+    <th align="center">max_mode = 3 &nbsp;(48 DOFs, 99.7 % QS reduction)</th>
   </tr>
   <tr>
     <td><img src="docs/_static/figures/qh_opt/boundary_comparison.png" /></td>
@@ -194,7 +232,7 @@ become increasingly helical (aligned with *m θ − n φ* = const). The ζ axis 
 one field period (0 → 2π/nfp).
 
 The current exact standalone path keeps improving through `max_mode=3`, with
-the 48-DOF run reaching `~0.0030` total objective and `~0.0029` QS.
+the 48-DOF continuation+ESS run reaching `~9.5e-4` total objective and QS.
 
 Regenerate plots after running the optimization:
 
@@ -221,25 +259,23 @@ the boundary to include those harmonics at zero amplitude (`vj.extend_boundary_f
 All runs use consistent VMEC resolution `mpol = ntor = 5`.
 Objectives: aspect ratio (target 6.0) + mean iota (target 0.41) + QA symmetry residuals.
 The current standalone QA path uses exact residuals + exact discrete-adjoint
-Jacobians with `scipy.optimize.least_squares`, plus a milder ESS profile
-(`α = 0.8`). For `max_mode > 1`, the script now does staged mode continuation:
-it solves the lower-mode QA problem first, then lifts that solution into the
-richer boundary space before running the final stage.
+Jacobians with `scipy.optimize.least_squares`. For `max_mode > 1`, the script
+can use staged mode continuation: it solves the lower-mode QA problem first,
+then lifts that solution into the richer boundary space before running the final
+stage. The full sweep also tests direct-start and ESS variants.
 
-| `max_mode` | DOFs | Start | Budget | Eval used | Aspect final | Mean iota final | QS final | Objective final | Wall time ¹ |
-|:----------:|:----:|:-----:|:------:|:---------:|:------------:|:---------------:|:--------:|:---------------:|:-----------:|
-| 1          |  8   | input deck | 40 | 40 | **6.0001** | 0.4088 | `5.91e-4` | `5.93e-4` | ~26 s |
-| 2          | 24   | `max_mode=1` continuation | 15 + 40 | 23 | **6.0001** | 0.4092 | `8.05e-4` | `8.06e-4` | ~18 s |
-| 3          | 48   | `max_mode=2` continuation | 25 + 25 + 40 | 41 | **6.0003** | **0.4096** | **5.21e-4** | **5.21e-4** | ~31 s |
+| `max_mode` | DOFs | Policy | Eval used | Aspect final | Mean iota final | QS final | Objective final | Wall time ¹ |
+|:----------:|:----:|:------:|:---------:|:------------:|:---------------:|:--------:|:---------------:|:-----------:|
+| 1          |  8   | input deck, no ESS | 27 | 6.0024 | 0.3942 | `9.04e-3` | `9.29e-3` | ~315 s |
+| 2          | 24   | continuation, no ESS | 52 | **6.0000** | 0.4095 | `1.46e-4` | `1.46e-4` | ~801 s |
+| 3          | 48   | continuation, no ESS | 64 | **6.0000** | **0.4099** | **`7.61e-6`** | **`7.62e-6`** | ~1150 s |
 
 ¹ Wall time on Apple M-series.
 
-On the latest fresh standalone rerun, `max_mode=3` is the best stable QA
-configuration. `max_mode=2` keeps the aspect and iota targets but does not
-consistently beat `max_mode=1` on the full weighted objective under the cheap
-inner-solve settings used by the example. The strengthened continuation +
-ESS policy still matters for `max_mode=3`: that is the case that clearly
-improves over the lower-mode runs.
+On the latest fresh standalone rerun, staged continuation is decisive for QA.
+Direct-start `max_mode=3` stays in a poor basin, while continuation reaches a
+deep QA minimum; the best displayed QA run is the no-ESS `max_mode=3`
+continuation case.
 
 <table>
   <tr>
@@ -264,11 +300,34 @@ improves over the lower-mode runs.
   </tr>
 </table>
 
+## QA/QH optimization policy sweep
+
+The full benchmark panel below compares continuation versus direct-start mode
+expansion, with and without ESS, for QA and QH at `max_mode = 1, 2, 3`.
+Wall time is printed in each objective-history subplot. The renderer adds one
+set of rows per available backend label, so CPU and GPU runs can be reported in
+the same panel as soon as both result sets exist. By default, exact-optimizer
+workers inherit the active JAX backend. Use `JAX_PLATFORMS=cpu` or
+`--worker-jax-platforms cpu` only when you intentionally want CPU-only workers.
+
+```bash
+JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation
+JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct
+JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation
+JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct
+python examples/optimization/render_qs_ess_publication_panel.py
+```
+
+<p align="center">
+  <img src="docs/_static/figures/qs_ess_publication_panel_full.png" width="980" />
+</p>
+
 ## Performance vs parity
 
 - Default runs select the fastest stable path for each input automatically.
 - Use `--parity` (or `performance_mode=False` in Python) to force the conservative VMEC2000 loop.
 - Use `--solver-mode accelerated` to force the optimized fixed-boundary controller.
+- For GPU benchmarking, compare both first-process and cache-warm timings; the first GPU process pays XLA compilation, while later processes reuse the persistent cache automatically.
 
 Details, profiling guidance, and parity methodology:
 

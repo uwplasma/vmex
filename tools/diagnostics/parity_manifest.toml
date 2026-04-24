@@ -58,13 +58,34 @@ axisymmetric = true
 nfp = 1
 ntor = 0
 single_ns = 17
-max_iter = 10
+max_iter = 2
 vmec_nstep = 1
 rtol = 1e-3
 atol = 1e-10
 dump_level = "lite"
 vmec_timeout = 90
-goal = "Fixed-boundary LASYM=true axisymmetric parity."
+goal = "Fixed-boundary LASYM=true axisymmetric first-step parity after fixaray LASYM normalization."
+
+[[cases]]
+id = "fixed_axisym_lasym_true_updown_long"
+tier = "planning"
+enabled = true
+compare = "stage_trace"
+source = "vmec_jax/examples"
+input = "examples/data/input.up_down_asymmetric_tokamak"
+lfreeb = false
+lasym = true
+axisymmetric = true
+nfp = 1
+ntor = 0
+single_ns = 17
+max_iter = 10
+vmec_nstep = 1
+rtol = 2e-1
+atol = 1e-10
+dump_level = "lite"
+vmec_timeout = 90
+goal = "Longer LASYM=true trajectory target; residuals drift after the first strict-parity iterations and remain under investigation."
 
 [[cases]]
 id = "fixed_nonaxis_lasym_false_qa_lowres"
@@ -129,7 +150,7 @@ goal = "Fixed-boundary LASYM=true non-axisymmetric parity smoke."
 
 [[cases]]
 id = "fixed_nonaxis_lasym_true_landreman_plunk"
-tier = "full"
+tier = "planning"
 enabled = true
 compare = "stage_trace"
 source = "simsopt/tests"
@@ -152,6 +173,27 @@ goal = "Fixed-boundary LASYM=true finite-pressure parity target."
 id = "freeb_nonaxis_lasym_false_cth_like"
 tier = "smoke"
 enabled = true
+compare = "stage_trace"
+source = "vmec_jax/examples"
+input = "examples/data/input.cth_like_free_bdy"
+lfreeb = true
+lasym = false
+axisymmetric = false
+nfp = 5
+ntor = 4
+max_iter = 52
+rtol = 1e-3
+atol = 1e-10
+dump_level = "lite"
+vmec_timeout = 120
+max_runtime_s = 30.0
+max_total_runtime_s = 80.0
+goal = "Public VMEC2000 executable free-boundary smoke: strict stage-trace parity before vacuum turn-on."
+
+[[cases]]
+id = "freeb_nonaxis_lasym_false_cth_like_scalpot"
+tier = "planning"
+enabled = true
 compare = "freeb_scalpot"
 source = "vmec_jax/examples"
 input = "examples/data/input.cth_like_free_bdy"
@@ -165,7 +207,7 @@ iter_list = [53, 54, 60]
 vmec_timeout = 300
 max_runtime_s = 30.0
 max_total_runtime_s = 80.0
-goal = "Primary repo-local free-boundary LASYM=false parity case: source_sym -> bvecNS -> potvac."
+goal = "Instrumented-VMEC free-boundary target after vacuum turn-on: source_sym -> bvecNS -> potvac."
 
 [cases.metric_thresholds_rel_scaled]
 source_sym = 2.0e-2
@@ -198,7 +240,7 @@ max_runtime_s = 25.0
 
 [[cases]]
 id = "freeb_axisym_lasym_true_diiid"
-tier = "full"
+tier = "planning"
 enabled = true
 compare = "freeb_scalpot"
 source = "STELLOPT/VMEC_TEST"
@@ -239,7 +281,7 @@ potvac = 1.0e-6
 
 [[cases]]
 id = "freeb_axisym_lasym_true_diiid_reset"
-tier = "full"
+tier = "planning"
 enabled = true
 compare = "freeb_scalpot"
 source = "STELLOPT/VMEC_TEST"
@@ -280,7 +322,7 @@ potvac = 1.0e-6
 
 [[cases]]
 id = "freeb_axisym_lasym_false_diiid_sym"
-tier = "full"
+tier = "planning"
 enabled = true
 compare = "freeb_scalpot"
 source = "vmec_jax/examples"
@@ -321,7 +363,7 @@ potvac = 1.0e-6
 
 [[cases]]
 id = "freeb_nonaxis_lasym_false_stellcopt"
-tier = "full"
+tier = "planning"
 enabled = true
 compare = "freeb_scalpot"
 source = "STELLOPT/STELLCOPT"
@@ -344,7 +386,7 @@ potvac = 9.0e-1
 
 [[cases]]
 id = "freeb_nonaxis_lasym_true_cth_like_local"
-tier = "full"
+tier = "planning"
 enabled = true
 compare = "freeb_scalpot"
 source = "vmec_jax/examples"

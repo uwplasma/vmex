@@ -12,6 +12,7 @@ Advanced users can import lower-level kernels directly from submodules.
 
 from __future__ import annotations
 
+from .namelist import read_indata, write_indata
 from .driver import (
     FixedBoundaryRun,
     load_example,
@@ -62,6 +63,8 @@ __all__ = [
     "write_wout_from_fixed_boundary_run",
     "boundary_input_from_indata",
     "boundary_from_input_convention",
+    "read_indata",
+    "write_indata",
     "booz_xform_inputs_from_state",
     # Plotting helpers
     "bmag_from_state_physical",

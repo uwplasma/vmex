@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 8 * * 1"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -12,6 +15,7 @@ concurrency:
 env:
   LC_ALL: C.UTF-8
   LANG: C.UTF-8
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 permissions:
   contents: read
@@ -34,8 +38,9 @@ jobs:
           python tools/diagnostics/parity_sweep_manifest.py --tier smoke --max-cases 4 --dry-run --vmec-exec /usr/bin/true
 
   test:
-    name: Tests (py${{ matrix.python-version }})
+    name: Fast Tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -72,6 +77,7 @@ jobs:
           test -f /tmp/vmec_jax_cli_smoke/wout_circular_tokamak.nc
 
       - name: Fetch large assets
+        if: matrix.python-version == '3.11'
         run: |
           python tools/fetch_assets.py
 
@@ -82,12 +88,11 @@ jobs:
       - name: Run tests
         env:
           JAX_ENABLE_X64: "1"
-          RUN_FULL: "1"
         run: |
           if [ "${{ matrix.python-version }}" = "3.11" ]; then
-            pytest -q --cov=vmec_jax --cov-report=xml --cov-report=term-missing:skip-covered
+            pytest -q -m "not full and not vmec2000" --cov=vmec_jax --cov-report=xml --cov-report=term-missing:skip-covered
           else
-            pytest -q
+            pytest -q -m "not full and not vmec2000"
           fi
 
       - name: Upload coverage artifact
@@ -107,6 +112,73 @@ jobs:
           name: py311-full
           fail_ci_if_error: false
           verbose: true
+
+  physics-smoke:
+    name: Physics Smoke (py3.11)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          python -m pip install .
+          python -m pip install pytest
+
+      - name: Fetch large assets
+        run: |
+          python tools/fetch_assets.py
+
+      - name: Run bounded physics smoke
+        env:
+          JAX_ENABLE_X64: "1"
+          RUN_FULL: "1"
+        run: |
+          pytest -q \
+            'tests/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[circular_tokamak]' \
+            'tests/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[nfp4_QH_warm_start]' \
+            'tests/test_wout_comprehensive_parity.py::test_convergence_only[cth_like_free_bdy]' \
+            'tests/test_wout_comprehensive_parity.py::test_convergence_only[nfp2_QA_highres]' \
+            tests/test_driver_api.py::test_run_free_boundary_smoke_on_bundled_small_case \
+            tests/test_qs_ess_render_smoke.py
+
+  physics-full:
+    name: Physics Full (manual/nightly)
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          python -m pip install .
+          python -m pip install pytest pytest-cov
+
+      - name: Fetch large assets
+        run: |
+          python tools/fetch_assets.py
+
+      - name: Run full physics suite
+        env:
+          JAX_ENABLE_X64: "1"
+          RUN_FULL: "1"
+        run: |
+          pytest -q -m "full and not vmec2000"
 
   build:
     name: Build (wheel/sdist + docs)

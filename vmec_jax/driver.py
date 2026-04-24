@@ -71,6 +71,34 @@ def _default_backend_name() -> str:
         return "cpu"
 
 
+def _resolve_fixed_boundary_solver_device_name(
+    *,
+    solver_device: str | None,
+    backend: str,
+    cfg: VMECConfig,
+    indata,
+    solver_lower: str,
+    cli_fixed_boundary_mode: bool,
+    accelerated_mode: bool,
+    ns_list_input,
+    niter_list_input,
+    restart_state_present: bool,
+    restart_solver_state_present: bool,
+) -> str | None:
+    """Return an optional JAX default-device override for a fixed-boundary run.
+
+    ``solver_device=None`` / ``"auto"`` / ``"default"`` inherit JAX's active
+    default device.  Pass ``"cpu"`` or ``"gpu"`` to explicitly run the solver
+    under that device context.  In particular, GPU-enabled JAX installations
+    are not silently routed back to CPU.
+    """
+
+    name = "auto" if solver_device is None else str(solver_device).strip().lower()
+    if name in ("", "none", "auto", "default"):
+        return None
+    return name
+
+
 def _dynamic_scan_probe_settings(niter_i: int) -> tuple[int, bool, str]:
     backend = _default_backend_name()
     timed_env = os.getenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", "").strip().lower()
@@ -162,16 +190,32 @@ def _as_list_like(value):
         return None
 
 
-def default_non_autodiff_solver_policy(indata) -> tuple[str, bool]:
-    """Choose the ordinary non-autodiff solver policy from input structure."""
-
+def _default_non_autodiff_solver_policy_for_backend(indata, backend: str) -> tuple[str, bool]:
     if bool(indata.get_bool("LFREEB", False)):
         return "default", True
     ns_array = _as_list_like(indata.get("NS_ARRAY", None))
     niter_array = _as_list_like(indata.get("NITER_ARRAY", None))
     if (ns_array is not None) and (len(ns_array) > 1) and (niter_array is None):
         return "parity", False
+
+    if str(backend).strip().lower() == "cpu":
+        # The accelerated scan path is still the right default for LASYM cases
+        # and current-driven multigrid inputs that need the stricter finish
+        # behavior. For ordinary CPU fixed-boundary solves, the VMEC-control
+        # host-update path has much lower first-process latency and memory use.
+        if bool(indata.get_bool("LASYM", False)):
+            return "accelerated", True
+        ncurr = int(indata.get_int("NCURR", 0))
+        if ncurr == 1 and (ns_array is not None) and (len(ns_array) > 1):
+            return "accelerated", True
+        return "default", True
     return "accelerated", True
+
+
+def default_non_autodiff_solver_policy(indata) -> tuple[str, bool]:
+    """Choose the ordinary non-autodiff solver policy from input structure."""
+
+    return _default_non_autodiff_solver_policy_for_backend(indata, _default_backend_name())
 
 
 def _result_final_residuals(result) -> tuple[float, float, float] | None:
@@ -813,25 +857,23 @@ def run_fixed_boundary(
     restart_wout_path: str | Path | None = None,
     restart_solver_state: dict | None = None,
     cli_fixed_boundary_mode: bool = False,
+    solver_device: str | None = None,
     _auto_cli_fixed_boundary_mode: bool = True,
+    _solver_device_context_active: bool = False,
 ):
     t_start = time.perf_counter()
     max_iter_overridden = max_iter is not _MAX_ITER_SENTINEL
 
     def _maybe_enable_compilation_cache() -> None:
-        cache_env = os.getenv("VMEC_JAX_COMPILATION_CACHE", "1").strip().lower()
-        if cache_env in ("", "0", "false", "no", "off"):
+        if os.getenv("VMEC_JAX_COMPILATION_CACHE", "").strip().lower() in ("0", "false", "no", "off"):
             return
         if os.getenv("VMEC_JAX_DISABLE_COMPILATION_CACHE", "") not in ("", "0"):
             return
-        cache_dir = os.getenv("VMEC_JAX_COMPILATION_CACHE_DIR") or os.getenv("JAX_COMPILATION_CACHE_DIR")
-        if not cache_dir:
-            # Default to a user-writable cache to reduce first-run JIT latency
-            # on repeated executions (especially in examples/CI runs).
-            try:
-                cache_dir = str(Path.home() / ".cache" / "vmec_jax" / "jax_compilation_cache")
-            except Exception:
-                cache_dir = ""
+        from ._compat import _default_compilation_cache_dir
+
+        cache_dir = _default_compilation_cache_dir()
+        if str(cache_dir).strip().lower() in ("disabled", "0", "false", "no", "off"):
+            return
         if not cache_dir:
             return
         try:
@@ -943,6 +985,11 @@ def run_fixed_boundary(
     cli_fixed_boundary_mode:
         Internal CLI-only flag for non-differentiable fixed-boundary policy
         overrides. Library callers should leave this as False.
+    solver_device:
+        Optional JAX default-device override for the solver body. ``None`` uses
+        the automatic policy, which routes known CPU-shaped conservative paths
+        away from a GPU default backend. Use ``"default"`` to opt out of
+        automatic rerouting, or ``"cpu"``/``"gpu"`` to force a device context.
     vmec_project:
         If True (default), re-project the initial guess through the VMEC
         internal grid/weights before returning or solving.
@@ -977,8 +1024,10 @@ def run_fixed_boundary(
     _maybe_enable_compilation_cache()
     cfg, indata = load_config(str(input_path))
     solver_mode_explicit = solver_mode is not None
+    requested_solver_device = "auto" if solver_device is None else str(solver_device).strip().lower()
+    policy_backend = "cpu" if requested_solver_device == "cpu" else _default_backend_name()
     if solver_mode is None and bool(performance_mode):
-        solver_mode, performance_mode = default_non_autodiff_solver_policy(indata)
+        solver_mode, performance_mode = _default_non_autodiff_solver_policy_for_backend(indata, policy_backend)
     solver_mode_eff = _normalize_solver_mode(solver_mode=solver_mode, performance_mode=bool(performance_mode))
     accelerated_mode = solver_mode_eff == "accelerated"
     performance_mode = solver_mode_eff != "parity"
@@ -1039,6 +1088,75 @@ def run_fixed_boundary(
             # axis guess is inferred up front. Keep the conservative VMEC-style
             # raw-axis start in parity mode.
             axis_infer_missing = True
+
+    ns_list_for_device = _as_list_like(indata.get("NS_ARRAY", None))
+    niter_list_for_device = _as_list_like(indata.get("NITER_ARRAY", None))
+    backend_for_device = _default_backend_name()
+    solver_device_name = _resolve_fixed_boundary_solver_device_name(
+        solver_device=solver_device,
+        backend=backend_for_device,
+        cfg=cfg,
+        indata=indata,
+        solver_lower=solver_lower,
+        cli_fixed_boundary_mode=bool(cli_fixed_boundary_mode),
+        accelerated_mode=bool(accelerated_mode),
+        ns_list_input=ns_list_for_device,
+        niter_list_input=niter_list_for_device,
+        restart_state_present=(restart_state_eff is not None) or (restart_wout_path is not None),
+        restart_solver_state_present=restart_solver_state is not None,
+    )
+    if (solver_device_name is not None) and (not bool(_solver_device_context_active)):
+        try:
+            import jax
+
+            devices = jax.devices(str(solver_device_name))
+        except Exception:
+            devices = []
+        if devices:
+            with jax.default_device(devices[0]):
+                routed_run = run_fixed_boundary(
+                    input_path,
+                    solver=solver,
+                    solver_mode=solver_mode_eff,
+                    max_iter=max_iter,
+                    step_size=step_size,
+                    history_size=int(history_size),
+                    gn_damping=gn_damping,
+                    gn_cg_tol=gn_cg_tol,
+                    gn_cg_maxiter=int(gn_cg_maxiter),
+                    use_initial_guess=bool(use_initial_guess),
+                    vmec_project=bool(vmec_project),
+                    use_restart_triggers=use_restart_triggers,
+                    vmecpp_restart=bool(vmecpp_restart),
+                    use_direct_fallback=use_direct_fallback,
+                    multigrid=multigrid,
+                    multigrid_use_input_niter=bool(multigrid_use_input_niter),
+                    verbose=bool(verbose),
+                    jit_forces=jit_forces,
+                    jit_precompile=jit_precompile,
+                    use_scan=bool(use_scan),
+                    performance_mode=bool(performance_mode),
+                    scan_wout_corrector=scan_wout_corrector,
+                    stage_transition_heuristic=stage_transition_heuristic,
+                    stage_transition_factor=float(stage_transition_factor),
+                    stage_transition_scale=float(stage_transition_scale),
+                    grid=grid,
+                    ns_override=ns_override,
+                    restart_state=restart_state,
+                    restart_wout_path=restart_wout_path,
+                    restart_solver_state=restart_solver_state,
+                    cli_fixed_boundary_mode=bool(cli_fixed_boundary_mode),
+                    solver_device=str(solver_device_name),
+                    _auto_cli_fixed_boundary_mode=bool(_auto_cli_fixed_boundary_mode),
+                    _solver_device_context_active=True,
+                )
+            if routed_run.result is not None:
+                diag = dict(getattr(routed_run.result, "diagnostics", {}) or {})
+                diag["solver_device"] = str(solver_device_name)
+                diag["solver_device_auto_reroute"] = (str(solver_device or "auto").strip().lower() == "auto")
+                diag["solver_device_requested_backend"] = str(backend_for_device)
+                routed_run = replace(routed_run, result=replace(routed_run.result, diagnostics=diag))
+            return routed_run
     if grid is None and solver_lower in ("vmec_lbfgs", "vmec_gn", "vmec2000_iter"):
         from .vmec_tomnsp import vmec_angle_grid
 

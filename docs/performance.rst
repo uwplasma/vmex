@@ -17,9 +17,11 @@ code:
 - **Warm run**: steady-state solve time after the kernels are in memory — the
   fair comparison against VMEC2000.
 
-Starting from v0.2, ``vmec_jax`` caches compiled XLA kernels to disk
-(``~/.cache/vmec_jax/jax_cache``).  Fresh processes on the same machine after
-the first run benefit from the on-disk cache and approach warm speed.
+Persistent XLA compilation caching is enabled by default for repeated starts.
+Compiled kernels are stored under ``~/.cache/vmec_jax/jax_cache`` unless the
+user sets ``VMEC_JAX_COMPILATION_CACHE_DIR`` or upstream
+``JAX_COMPILATION_CACHE_DIR``. Set ``VMEC_JAX_COMPILATION_CACHE=0`` to disable
+the persistent cache.
 
 VMEC2000 is a pre-compiled Fortran binary with no JIT overhead — it is always
 effectively "cold".  When benchmarking, compare ``vmec_jax`` warm runtime
@@ -75,17 +77,295 @@ warm runtimes competitive with or faster than VMEC2000 on CPU:
 **8. Discrete-adjoint Jacobian (exact, not finite differences)**
   For optimisation, the Jacobian is computed via discrete-adjoint replay
   (``build_residual_checkpoint_tape_direct`` + ``checkpoint_tape_state_jvp_columns``).
-  This gives a machine-precision Jacobian at a cost of ≈1.5× a single forward
-  solve, compared to ``n_params`` forward solves for finite differences.
+  This gives a machine-precision Jacobian without finite differences.  The
+  cost scales with the number of boundary degrees of freedom because all
+  parameter tangent columns must be propagated through the converged VMEC
+  iteration tape.
 
 **9. Minimal history in optimisation loops**
   The ``light_history=True`` flag suppresses the full per-step diagnostic record
   during optimisation solves, reducing host/device traffic and memory pressure.
 
 **10. On-disk XLA kernel cache**
-  Compiled XLA kernels are persisted to ``~/.cache/vmec_jax/jax_cache`` across
-  processes.  The first run on a new machine pays the compile cost; all
-  subsequent runs on the same machine reuse the cache.
+  The persistent XLA compilation cache is enabled by default for repeated
+  cold-process CPU and GPU runs. Set ``VMEC_JAX_COMPILATION_CACHE=0`` to
+  disable it, or ``VMEC_JAX_COMPILATION_CACHE_DIR`` to choose the cache
+  location.
+
+**11. GPU demand allocation**
+  Before importing JAX, vmec_jax defaults
+  ``XLA_PYTHON_CLIENT_PREALLOCATE=false`` unless the user already configured
+  the allocator.  This keeps GPU memory available for worker/profiling
+  processes and improved the exact-Jacobian replay profile on ``office``.
+  Set ``XLA_PYTHON_CLIENT_PREALLOCATE=true`` or
+  ``VMEC_JAX_GPU_PREALLOCATE=1`` before import to keep JAX's preallocation
+  default.
+
+Exact optimizer profiling
+-------------------------
+
+Use ``tools/diagnostics/profile_exact_optimizer.py`` to time the exact
+optimization callback stack:
+
+.. code-block:: bash
+
+   python tools/diagnostics/profile_exact_optimizer.py \
+     --problem qa --max-mode 2 --max-nfev 2 \
+     --trial-max-iter 300 --trial-ftol 1e-10
+
+The callback profile reports separate timings for relaxed trial solves, exact
+tape construction, checkpoint-tape JVP replay, residual tangent projection, and
+``wout`` writing.  On the current exact-adjoint implementation, the dominant
+term for ``max_mode=2`` and ``max_mode=3`` is
+``jacobian_tape_replay``.  Ordinary fixed-boundary solves can benefit from GPU
+``lax.scan`` after warmup, but the exact optimizer's accepted-point Jacobian
+path still needs the trace-capable non-scan loop.  ``solver_device=None``,
+``"auto"``, and ``"default"`` inherit JAX's active backend; pass
+``solver_device="cpu"`` or ``"gpu"`` only when you want an explicit override.
+
+For the standalone sweep scripts, worker subprocesses also inherit the parent
+JAX backend by default.  Use ``JAX_PLATFORMS=cpu`` or
+``--worker-jax-platforms cpu`` only when an explicit CPU-only worker process is
+desired.
+
+After each accepted-point Jacobian, the optimizer drops the heavy adjoint tape
+but keeps a single solved-state cache entry.  This keeps RSS bounded while
+avoiding a duplicate exact VMEC replay for final objective evaluation and
+``wout`` writing.  The SciPy callback path also reuses this solved-state cache
+when it asks for a residual at a point whose exact Jacobian was just built,
+avoiding an otherwise unnecessary relaxed forward replay.  If
+``save_wout(..., state=result["_state_final"])`` is used immediately after
+``run()``, no additional equilibrium solve is performed.
+
+The lowest accepted-point callback count currently comes from the custom
+``method="gauss_newton"`` loop: it uses relaxed residuals only for line-search
+trial points and one exact Jacobian per accepted point.  The SciPy trust-region
+path remains more robust for the documented full QA/QH continuation examples,
+but it may request additional Jacobians around trust-region updates.  A bounded
+CPU diagnostic on QH ``max_mode=1`` with ``inner_max_iter=trial_max_iter=80``
+and ``max_nfev=2`` gave:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 18 18 28
+
+   * - Method
+     - Wall time
+     - Jacobian calls
+     - Notes
+   * - ``scipy``
+     - ``6.55 s``
+     - 2
+     - one cached exact-state residual hit
+   * - ``gauss_newton``
+     - ``4.42 s``
+     - 1
+     - same first accepted step, fewer exact callbacks
+
+GPU exact-optimizer diagnostics
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The current GPU bottleneck is the exact Jacobian replay path, not ordinary
+fixed-boundary force evaluation.  The replay is a long sequence of
+linearized VMEC iteration steps, and cold GPU processes pay heavy XLA compile
+costs.  For GPU profiling, always separate the first run from cache-warm runs:
+
+.. code-block:: bash
+
+   JAX_PLATFORM_NAME=gpu python tools/diagnostics/profile_exact_optimizer.py \
+     --problem qa --max-mode 1 --inner-max-iter 20 \
+     --trial-max-iter 20 --solver-device default --max-nfev 1
+
+April 2026 callback diagnostics for the full input-deck QH ``max_mode=1`` case
+show where the GPU path loses today.  Local CPU used JAX 0.9.2 on an Apple
+workstation; ``office`` used JAX 0.6.2 on an NVIDIA RTX A4000 host.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 18 18 30
+
+   * - Callback / process
+     - Wall time
+     - Backend
+     - Dominant terms
+   * - Trial residual, local CPU
+     - ``3.35 s``
+     - CPU
+     - trial solve ``2.08 s``, residual ``1.16 s``
+   * - Trial residual, forced GPU
+     - ``18.32 s``
+     - GPU
+     - trial solve ``17.43 s``
+   * - Exact residual/tape, local CPU
+     - ``10.70 s``
+     - CPU
+     - tape build ``9.47 s``
+   * - Exact residual/tape, forced GPU
+     - ``93.92 s``
+     - GPU
+     - tape build ``93.06 s``
+   * - Exact residual/tape, GPU process with CPU device
+     - ``65.44 s``
+     - GPU process, CPU device
+     - tape build ``63.16 s``
+   * - Exact residual/tape, CPU-only process on ``office``
+     - ``28.47 s``
+     - CPU
+     - tape build ``28.00 s``
+   * - Dense Jacobian, local CPU
+     - ``18.48 s``
+     - CPU
+     - tape build ``7.49 s``, replay ``9.46 s``
+   * - Dense Jacobian, forced GPU
+     - ``136.65 s``
+     - GPU
+     - tape build ``96.53 s``, replay ``32.14 s``
+   * - Dense Jacobian, GPU with demand allocation, inner-10 QH smoke
+     - ``7.54 s``
+     - GPU
+     - replay ``3.72 s``; faster than same-host CPU smoke
+   * - Full QH ``max_mode=1`` optimizer, forced GPU
+     - ``676 s``
+     - GPU
+     - ``nfev=9``; still much slower than the CPU sweep case
+
+This makes the present conclusion narrower and more actionable: the exact
+optimizer is not GPU-ready just because the fixed-boundary force kernels are in
+JAX.  The bottleneck is the accepted-point tape build/replay path.  A CPU
+``jax.default_device`` context inside a GPU-initialized process is still much
+slower than a CPU-only process, but vmec_jax does not force CPU execution for
+GPU-enabled users.  Use explicit CPU-only workers for controlled CPU studies,
+and explicit GPU backends for GPU profiling.
+
+Fixed-boundary GPU diagnostics
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For fixed-boundary inputs, the GPU fast path only helps when the scan solver is
+both numerically safe and large enough to amortize XLA compilation.  For small
+example decks, the first GPU process is often slower than CPU; the persistent
+cache improves later processes, but CPU can still win.  April 2026 ``office``
+diagnostics on an NVIDIA RTX A4000 using the public default path:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 34 18 18 18 18
+
+   * - Case
+     - CPU
+     - CPU warm cache
+     - GPU empty cache
+     - GPU warm cache
+   * - ``input.nfp4_QH_warm_start``
+     - ``13.9 s``
+     - ``7.5 s``
+     - ``69.4 s``
+     - ``12.1 s``
+   * - ``input.up_down_asymmetric_tokamak``
+     - ``19.9 s``
+     - ``7.8 s``
+     - ``40.6 s``
+     - ``15.0 s``
+   * - ``input.basic_non_stellsym_pressure``
+     - ``73.5 s``
+     - ``46.5 s``
+     - ``73.1 s``
+     - ``43.3 s``
+
+The current practical policy is therefore:
+
+- keep GPU scan available for larger workloads and explicit experiments,
+- keep the persistent cache enabled by default so repeated GPU processes are
+  not dominated by recompilation,
+- expose ``--solver-device cpu`` / ``solver_device="cpu"`` for users who want
+  to force CPU execution inside a GPU-enabled process,
+- do not promise first-process GPU speedups on small fixed-boundary cases until
+  the scan-safe path is broadened and the GPU compile graph is reduced.
+
+For high-mode runs, also profile the experimental reverse-adjoint scalar
+gradient callback:
+
+.. code-block:: bash
+
+   python tools/diagnostics/profile_exact_optimizer.py \
+     --problem qa --max-mode 3 --inner-max-iter 300 \
+     --gradient-only --check-gradient
+
+This path computes the gradient of ``0.5 * ||r||^2`` with one reverse replay
+through the VMEC tape instead of propagating one tangent column per boundary
+degree of freedom.  It is exposed through
+``FixedBoundaryExactOptimizer.objective_and_gradient_fun`` and the opt-in
+``method="lbfgs_adjoint"`` optimizer.  It is currently a profiling/experimental
+lane, not the default QA/QH production path, because the current reverse
+products are comparable to, but not consistently faster than, the dense
+vectorized column replay for the present ``max_mode <= 3`` parameter counts.
+The next useful step is an optimizer-level scalar-adjoint method with better
+line-search/scaling behavior, not switching the default least-squares path.
+
+The same exact ``Jv``/``J.Tv`` products can be used in SciPy's trust-region
+least-squares solver with ``method="scipy_matrix_free"``:
+
+.. code-block:: bash
+
+   python tools/diagnostics/profile_exact_optimizer.py \
+     --problem qa --max-mode 3 --inner-max-iter 300 \
+     --method scipy_matrix_free --lsmr-maxiter 4 --max-nfev 2
+
+This matrix-free trust-region lane is useful for profiling, memory-pressure
+fallbacks, and future larger parameter-count cases, but it is not yet the
+default.  On current QA ``max_mode=3`` CPU diagnostics, dense vectorized column
+replay remains faster than matrix-free LSMR because LSMR still needs multiple
+reverse products per trust-region step.  The matrix-free path implements
+batched ``J @ X`` products and cached split residual-block ``J.Tv`` products,
+so the next optimization target is the reverse VMEC tape replay and the number
+of LSMR iterations, not replacing the production optimizer policy prematurely.
+
+April 2026 local CPU diagnostics with ``inner_max_iter=trial_max_iter=300`` and
+``max_nfev=2``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 20 20 20
+
+   * - Case
+     - Method
+     - Wall time
+     - Notes
+   * - QA ``max_mode=3``
+     - dense exact LSQ
+     - ``34.2 s`` warm
+     - ``14.3 s`` mean Jacobian
+   * - QA ``max_mode=3``
+     - matrix-free LSQ, ``lsmr_maxiter=2``
+     - ``49.2 s`` warm
+     - same objective as dense, slower wall time
+   * - QH ``max_mode=3``
+     - dense exact LSQ
+     - ``39.1 s`` warm
+     - ``16.4 s`` mean Jacobian
+   * - QA ``max_mode=3``
+     - reverse scalar gradient
+     - ``~14--19 s`` per callback
+     - experimental; current L-BFGS wrapper needs optimizer work
+
+The same QA dense run took ``110.6 s`` in a cold process, so benchmark reports
+must identify cold and warm timings separately.
+
+Before using this lane for production results, validate the products on the
+case of interest:
+
+.. code-block:: bash
+
+   python tools/diagnostics/profile_exact_optimizer.py \
+     --problem qa --max-mode 1 --inner-max-iter 20 \
+     --check-linear-operator
+
+The forward product ``Jv`` is covered by the same dynamic replay path as the
+dense exact Jacobian.  The reverse product ``J.Tv`` uses split residual-block
+transposes so inactive aspect/iota/QS blocks are not differentiated with zero
+cotangents through singular axis branches.  On current diagnostics,
+``Jv`` and ``J @ X`` match dense to near roundoff; QA ``J.Tv`` matches to
+about ``1e-6`` relative error because current-driven iota still needs
+axis-gauge cotangent cleanup, while QH ``J.Tv`` matches to near roundoff.
 
 Current performance (representative benchmarks)
 ------------------------------------------------
@@ -1159,10 +1439,12 @@ Control this behavior with:
 Compilation cache
 -----------------
 
-JAX can persist compiled executables to disk. Enable it with
+JAX can persist compiled executables to disk. ``vmec_jax`` enables this by
+default because cold-start compilation dominates short fixed-boundary and
+optimization diagnostics, especially on GPU. Use
 ``VMEC_JAX_COMPILATION_CACHE_DIR=/path/to/cache`` (or the upstream
-``JAX_COMPILATION_CACHE_DIR``) to drastically reduce *repeat* compile times
-across runs with the same shapes/static arguments.
+``JAX_COMPILATION_CACHE_DIR``) to choose the cache location, or set
+``VMEC_JAX_COMPILATION_CACHE=0`` to disable it.
 
 CLI profiling (pre-iteration overhead)
 --------------------------------------
@@ -1192,8 +1474,9 @@ guide for the exact invocation).
 Recent traces show that the pre-iteration time is dominated by JIT
 compilation/cache misses (``pjit cache_miss`` + backend compile) rather than
 the nonlinear iteration itself. This is expected for short runs on CPU.
-For repeated runs, the compilation cache (``VMEC_JAX_COMPILATION_CACHE_DIR``)
-can significantly reduce this overhead once the cache is warm.
+For repeated CPU or GPU runs, the default compilation cache can significantly
+reduce this overhead once the cache is warm. Set
+``VMEC_JAX_COMPILATION_CACHE=0`` to disable it.
 
 Persistent compilation cache tuning
 -----------------------------------

@@ -63,12 +63,12 @@ def _noop_jit(f=None, *args, **_kwargs):
 
 
 def _default_compilation_cache_dir() -> str | None:
-    """Return a default JAX compilation-cache directory under ~/.cache.
+    """Return the configured JAX compilation-cache directory.
 
-    Returns None if the user explicitly disables caching via
-    ``VMEC_JAX_COMPILATION_CACHE_DIR=disabled`` (or ``0`` / ``false``).
-    Returns the value of ``JAX_COMPILATION_CACHE_DIR`` if already set by the
-    user (so we never override an explicit choice).
+    The persistent cache is enabled by default so cold-process CLI/API runs can
+    reuse compiled kernels across invocations.  Users can opt out explicitly
+    with ``VMEC_JAX_COMPILATION_CACHE=0`` or by setting the cache directory to a
+    false/disabled value.
     """
     # Already set by the user — respect it.
     if "JAX_COMPILATION_CACHE_DIR" in os.environ:
@@ -84,7 +84,11 @@ def _default_compilation_cache_dir() -> str | None:
     if vmec_val:
         return vmec_val
 
-    # Default: ~/.cache/vmec_jax/jax_cache
+    cache_flag = os.environ.get("VMEC_JAX_COMPILATION_CACHE", "").strip().lower()
+    if cache_flag in ("disabled", "0", "false", "no", "off"):
+        return None
+
+    # Default cache location: ~/.cache/vmec_jax/jax_cache
     try:
         import pathlib
         return str(pathlib.Path.home() / ".cache" / "vmec_jax" / "jax_cache")
@@ -92,10 +96,67 @@ def _default_compilation_cache_dir() -> str | None:
         return None
 
 
+def _configure_compilation_cache(jax_module: Any, cache_dir: str | None) -> None:
+    """Apply vmec_jax's persistent-cache defaults to an imported JAX module."""
+    if cache_dir is None:
+        return
+    try:
+        jax_module.config.update("jax_enable_compilation_cache", True)
+    except Exception:
+        pass
+    try:
+        jax_module.config.update("jax_compilation_cache_dir", cache_dir)
+    except Exception:
+        pass
+    try:
+        min_compile = os.environ.get("VMEC_JAX_CACHE_MIN_COMPILE_TIME_SECS", "0")
+        jax_module.config.update("jax_persistent_cache_min_compile_time_secs", float(min_compile))
+    except Exception:
+        pass
+    try:
+        min_entry = os.environ.get("VMEC_JAX_CACHE_MIN_ENTRY_SIZE_BYTES", "-1")
+        jax_module.config.update("jax_persistent_cache_min_entry_size_bytes", int(min_entry))
+    except Exception:
+        pass
+    try:
+        xla_caches = os.environ.get("VMEC_JAX_PERSISTENT_CACHE_XLA_CACHES", "").strip()
+        if not xla_caches:
+            platform_name = os.environ.get("JAX_PLATFORM_NAME", "").strip().lower()
+            platforms = os.environ.get("JAX_PLATFORMS", "").strip().lower()
+            gpu_requested = platform_name in ("gpu", "cuda") or any(
+                part.strip() in ("gpu", "cuda") for part in platforms.split(",")
+            )
+            xla_caches = "xla_gpu_per_fusion_autotune_cache_dir" if gpu_requested else "none"
+        if xla_caches.lower() not in ("", "none", "0", "false", "no", "off"):
+            jax_module.config.update("jax_persistent_cache_enable_xla_caches", xla_caches)
+    except Exception:
+        pass
+    try:
+        max_size = os.environ.get("VMEC_JAX_COMPILATION_CACHE_MAX_SIZE", "")
+        if max_size:
+            jax_module.config.update("jax_compilation_cache_max_size", int(max_size))
+    except Exception:
+        pass
+    try:
+        explain = os.environ.get("VMEC_JAX_EXPLAIN_CACHE_MISSES", "")
+        if explain.strip().lower() not in ("", "0", "false", "no"):
+            jax_module.config.update("jax_explain_cache_misses", True)
+    except Exception:
+        pass
+
+
 def _try_import_jax() -> Tuple[Any, Any, Callable[[Callable[..., Any]], Callable[..., Any]]]:
     try:
         # Enable x64 by default for VMEC parity unless the user opted out.
         os.environ.setdefault("JAX_ENABLE_X64", "1")
+        # VMEC/JAX optimization callbacks immediately materialize most results
+        # on the host (SciPy residuals/Jacobians, history, wout writing).  On
+        # CPU, asynchronous dispatch can leave completed XLA/PjRt work and
+        # executable state queued across many exact-Jacobian callbacks in one
+        # long-lived process.  Default CPU dispatch to synchronous execution so
+        # memory is reclaimed at callback boundaries; users can still override
+        # this before import with JAX_CPU_ENABLE_ASYNC_DISPATCH=true.
+        os.environ.setdefault("JAX_CPU_ENABLE_ASYNC_DISPATCH", "false")
         # Suppress noisy C++ warnings from XLA/PjRt backend (e.g.
         # repeated "Assume version compatibility. PjRt-IFRT does not
         # track XLA executable versions." on persistent-cache hits).
@@ -105,11 +166,22 @@ def _try_import_jax() -> Tuple[Any, Any, Callable[[Callable[..., Any]], Callable
         os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
         os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "2")
         os.environ.setdefault("GLOG_minloglevel", "2")
+        # JAX's default GPU allocator preallocates most device memory.  That
+        # hurts vmec_jax's exact-optimizer workload in practice: it prevents
+        # concurrent profiling/worker processes from starting and can make the
+        # accepted-point replay path much slower.  Default to demand allocation
+        # unless the user already set JAX's allocator env var or explicitly
+        # asks vmec_jax to keep JAX's preallocation default.
+        _vmec_gpu_prealloc = os.environ.get("VMEC_JAX_GPU_PREALLOCATE", "").strip().lower()
+        if (
+            "XLA_PYTHON_CLIENT_PREALLOCATE" not in os.environ
+            and _vmec_gpu_prealloc not in ("1", "true", "yes", "on")
+        ):
+            os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
-        # Enable the JAX disk compilation cache.  This dramatically reduces
-        # cold-start time: JIT compilations are serialised to disk on first
-        # run and loaded back on subsequent runs, skipping the expensive XLA
-        # recompilation step (~3–6 s per 833-compilation batch).
+        # Enable the JAX disk compilation cache only when the user opted in.
+        # This avoids noisy PjRt-IFRT warning spam from persistent-cache hits
+        # in ordinary CLI/library runs.
         _cache_dir = _default_compilation_cache_dir()
         if _cache_dir is not None:
             os.environ.setdefault("JAX_COMPILATION_CACHE_DIR", _cache_dir)
@@ -126,14 +198,18 @@ def _try_import_jax() -> Tuple[Any, Any, Callable[[Callable[..., Any]], Callable
             jax.config.update("jax_enable_x64", os.environ.get("JAX_ENABLE_X64", "0") == "1")
         except Exception:
             pass
+        try:
+            _cpu_async = os.environ.get("JAX_CPU_ENABLE_ASYNC_DISPATCH", "true")
+            jax.config.update(
+                "jax_cpu_enable_async_dispatch",
+                _cpu_async.strip().lower() not in ("0", "false", "no", "off"),
+            )
+        except Exception:
+            pass
 
-        # Wire up the compilation cache via jax.config if the env-var approach
-        # didn't take effect (older JAX versions use the config key directly).
-        if _cache_dir is not None:
-            try:
-                jax.config.update("jax_compilation_cache_dir", _cache_dir)
-            except Exception:
-                pass
+        # Wire up the compilation cache via jax.config too; the env-var path
+        # alone does not cover all JAX/JAXLIB versions and cache thresholds.
+        _configure_compilation_cache(jax, _cache_dir)
 
         import jax.numpy as jnp
 

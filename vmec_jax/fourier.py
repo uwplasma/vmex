@@ -135,16 +135,20 @@ def build_helical_basis(modes: ModeTable, grid: AngleGrid, *, cache: bool = True
         if cached is not None:
             return cached
 
-    m = jnp.asarray(modes.m)
-    n = jnp.asarray(modes.n)
-    theta = jnp.asarray(grid.theta)
-    zeta = jnp.asarray(grid.zeta)
+    # Build static basis tables on the host.  Creating these with jnp at
+    # top-level eagerly compiles many tiny GPU programs before the real solver
+    # scan is even lowered.  NumPy leaves are promoted to device constants at
+    # the enclosing JIT boundary, which is the intended staging point.
+    m = np.asarray(modes.m)
+    n = np.asarray(modes.n)
+    theta = np.asarray(grid.theta)
+    zeta = np.asarray(grid.zeta)
 
     # phase[K, ntheta, nzeta] via broadcasting
     phase = m[:, None, None] * theta[None, :, None] - n[:, None, None] * zeta[None, None, :]
-    cos_phase = jnp.cos(phase)
-    sin_phase = jnp.sin(phase)
-    phase_stack = jnp.concatenate([cos_phase, sin_phase], axis=0)
+    cos_phase = np.cos(phase)
+    sin_phase = np.sin(phase)
+    phase_stack = np.concatenate([cos_phase, sin_phase], axis=0)
     basis = HelicalBasis(
         cos_phase=cos_phase,
         sin_phase=sin_phase,

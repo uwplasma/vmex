@@ -211,10 +211,17 @@ class _NpModule:
         # Cache by identity of each input array + axis.  For the common case
         # where input arrays are long-lived cached phase tables, this avoids
         # re-running np.stack on every iteration (~55 000 calls saved per run).
+        # Do not cache large force-path stacks: those inputs are short-lived,
+        # and retaining their outputs pins O(GB) host memory across exact
+        # Jacobian callbacks in long optimization processes.
         #
         # We validate cache entries with weakrefs so that Python id()-reuse
         # after garbage collection cannot produce stale (wrong) results.
         arr_list = list(arrays)
+        arr_np = [np.asarray(a) for a in arr_list]
+        total_bytes = sum(int(a.size) * int(a.dtype.itemsize) for a in arr_np)
+        if total_bytes > _NP_STACK_CACHE_MAX_BYTES:
+            return _wrap(np.stack(arr_np, axis=axis))
         key = tuple(id(a) for a in arr_list) + (axis,)
         entry = _NP_STACK_CACHE.get(key)
         if entry is not None:
@@ -224,10 +231,12 @@ class _NpModule:
             # a newly-allocated object that happens to share the same id().
             if all(r() is a for r, a in zip(refs, arr_list)):
                 return result
-        result = _wrap(np.stack([np.asarray(a) for a in arr_list], axis=axis))
+            _NP_STACK_CACHE.pop(key, None)
+        result = _wrap(np.stack(arr_np, axis=axis))
         try:
             refs = [weakref.ref(a) for a in arr_list]
             _NP_STACK_CACHE[key] = (refs, result)
+            _prune_np_stack_cache()
         except TypeError:
             pass  # not weakly referenceable — skip caching
         return result
@@ -553,6 +562,27 @@ _NP_HELICAL_BASIS_CACHE: dict = {}
 # calls (0.44 s in QA_lowres) where the input arrays don't change between
 # iterations.
 _NP_STACK_CACHE: dict = {}
+_NP_STACK_CACHE_LIMIT = 1024
+_NP_STACK_CACHE_MAX_BYTES = 64 * 1024
+
+
+def _prune_np_stack_cache() -> None:
+    """Drop dead and excess generic NumPy stack-cache entries."""
+    if not _NP_STACK_CACHE:
+        return
+    dead = []
+    for key, (refs, _result) in _NP_STACK_CACHE.items():
+        if any(ref() is None for ref in refs):
+            dead.append(key)
+    for key in dead:
+        _NP_STACK_CACHE.pop(key, None)
+    while len(_NP_STACK_CACHE) > _NP_STACK_CACHE_LIMIT:
+        _NP_STACK_CACHE.pop(next(iter(_NP_STACK_CACHE)), None)
+
+
+def clear_numpy_force_caches() -> None:
+    """Release per-process NumPy-mode force caches that can hold arrays."""
+    _NP_STACK_CACHE.clear()
 
 
 def _np_einsum(expr: str, *operands, **kwargs) -> _NpArray:

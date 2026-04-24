@@ -168,7 +168,8 @@ def _run_vmec_jax_case(
     timeout_s: float,
     env: dict[str, str],
     runner_label: str,
-    solver_mode: str,
+    solver_mode: str | None,
+    solver_device: str | None,
     cli_fixed_boundary_mode: bool,
 ) -> dict[str, Any]:
     case_workdir = REPO_ROOT / "outputs" / "_bench_stage" / f"work_vmec_jax_{case.id}"
@@ -183,14 +184,18 @@ import jax
 from vmec_jax.api import run_fixed_boundary
 
 input_path = Path(sys.argv[1])
-solver_mode = str(sys.argv[2])
-cli_fixed_boundary_mode = bool(int(sys.argv[3]))
-warm_runs = int(sys.argv[4])
+solver_mode_arg = str(sys.argv[2])
+solver_mode = None if solver_mode_arg in ("", "None", "none", "null") else solver_mode_arg
+solver_device_arg = str(sys.argv[3])
+solver_device = None if solver_device_arg in ("", "None", "none", "null") else solver_device_arg
+cli_fixed_boundary_mode = bool(int(sys.argv[4]))
+warm_runs = int(sys.argv[5])
 t0 = time.perf_counter()
 run = run_fixed_boundary(
     input_path,
     verbose=False,
     solver_mode=solver_mode,
+    solver_device=solver_device,
     cli_fixed_boundary_mode=bool(cli_fixed_boundary_mode),
 )
 dt = time.perf_counter() - t0
@@ -201,11 +206,17 @@ for _ in range(max(0, warm_runs)):
         input_path,
         verbose=False,
         solver_mode=solver_mode,
+        solver_device=solver_device,
         cli_fixed_boundary_mode=bool(cli_fixed_boundary_mode),
     )
     warm_times.append(time.perf_counter() - t1)
 res = getattr(run, "result", None)
 diag = {} if res is None else dict(getattr(res, "diagnostics", {}) or {})
+free_diag = diag.get("free_boundary", False)
+if isinstance(free_diag, dict):
+    free_boundary = bool(free_diag.get("enabled", False))
+else:
+    free_boundary = bool(free_diag)
 payload = {
     "backend": "vmec_jax",
     "runtime_s": float(dt),
@@ -215,8 +226,9 @@ payload = {
     "n_iter": -1 if res is None else int(getattr(res, "n_iter", -1)),
     "converged": bool(diag.get("converged", False)),
     "use_scan": bool(diag.get("use_scan", False)),
-    "free_boundary": bool(diag.get("free_boundary", False)),
-    "solver_mode": solver_mode,
+    "free_boundary": free_boundary,
+    "solver_mode": diag.get("solver_mode", solver_mode),
+    "solver_device": diag.get("solver_device", solver_device),
     "cli_fixed_boundary_mode": bool(cli_fixed_boundary_mode),
     "platform": str(jax.default_backend()),
     "device_kind": str(jax.devices()[0].device_kind) if jax.devices() else "unknown",
@@ -229,7 +241,8 @@ print(json.dumps(payload))
             "-c",
             code,
             str(staged),
-            str(solver_mode),
+            "" if solver_mode is None else str(solver_mode),
+            "" if solver_device is None else str(solver_device),
             "1" if bool(cli_fixed_boundary_mode) else "0",
             str(int(env.get("VMEC_JAX_BENCH_WARM_RUNS", "0"))),
         ],
@@ -260,7 +273,10 @@ print(json.dumps(payload))
         rec["n_iter"] = int(payload.get("n_iter", -1))
         rec["converged"] = bool(payload.get("converged", False))
         rec["use_scan"] = bool(payload.get("use_scan", False))
-        rec["solver_mode"] = str(payload.get("solver_mode", solver_mode))
+        payload_solver_mode = payload.get("solver_mode", solver_mode)
+        rec["solver_mode"] = None if payload_solver_mode is None else str(payload_solver_mode)
+        payload_solver_device = payload.get("solver_device", solver_device)
+        rec["solver_device"] = None if payload_solver_device is None else str(payload_solver_device)
         rec["cli_fixed_boundary_mode"] = bool(payload.get("cli_fixed_boundary_mode", cli_fixed_boundary_mode))
         rec["platform"] = str(payload.get("platform", "unknown"))
         rec["device_kind"] = str(payload.get("device_kind", "unknown"))
@@ -569,8 +585,14 @@ def main() -> int:
     p.add_argument(
         "--solver-mode",
         type=str,
-        default="default",
-        help="Solver mode passed to run_fixed_boundary (for example 'default' or 'accelerated').",
+        default=None,
+        help="Solver mode passed to run_fixed_boundary. Omit to benchmark the public default policy.",
+    )
+    p.add_argument(
+        "--solver-device",
+        type=str,
+        default=None,
+        help="Solver device passed to run_fixed_boundary: auto|default|cpu|gpu.",
     )
     p.add_argument(
         "--cli-fixed-boundary-mode",
@@ -632,7 +654,8 @@ def main() -> int:
                 timeout_s=float(args.timeout_s),
                 env=child_env,
                 runner_label=str(args.runner_label),
-                solver_mode=str(args.solver_mode),
+                solver_mode=args.solver_mode,
+                solver_device=args.solver_device,
                 cli_fixed_boundary_mode=bool(args.cli_fixed_boundary_mode),
             )
             results.append(rec)
@@ -676,7 +699,8 @@ def main() -> int:
         "results": results,
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "runner_label": str(args.runner_label),
-        "solver_mode": str(args.solver_mode),
+        "solver_mode": args.solver_mode,
+        "solver_device": args.solver_device,
         "cli_fixed_boundary_mode": bool(args.cli_fixed_boundary_mode),
         "warm_runs": int(args.warm_runs),
         "jax_platforms": str(args.jax_platforms),

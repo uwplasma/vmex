@@ -958,8 +958,8 @@ def _plot_3d_boundary_comparison(wout_init, wout_final, outdir: Path) -> Path:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
-    from matplotlib.colors import Normalize
     from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
 
     ns_init = int(np.asarray(wout_init.ns))
     ns_final = int(np.asarray(wout_final.ns))
@@ -972,9 +972,6 @@ def _plot_3d_boundary_comparison(wout_init, wout_final, outdir: Path) -> Path:
     X_i, Y_i, _ = _lcfs_xyz(R_i, Z_i, phi_i)
     X_f, Y_f, _ = _lcfs_xyz(R_f, Z_f, phi_f)
 
-    Bmin = min(float(B_i.min()), float(B_f.min()))
-    Bmax = max(float(B_i.max()), float(B_f.max()))
-    norm = Normalize(vmin=Bmin, vmax=Bmax)
     cmap = plt.cm.viridis
 
     fig = plt.figure(figsize=(12, 5))
@@ -983,6 +980,7 @@ def _plot_3d_boundary_comparison(wout_init, wout_final, outdir: Path) -> Path:
         (X_f, Y_f, Z_f, B_f, "Optimised boundary"),
     ]):
         ax = fig.add_subplot(1, 2, col + 1, projection="3d")
+        norm = Normalize(vmin=float(np.nanmin(B)), vmax=float(np.nanmax(B)))
         fcolors = cmap(norm(B))
         ax.plot_surface(X, Y, Zp, facecolors=fcolors, rstride=1, cstride=1,
                         linewidth=0, antialiased=False, shade=False)
@@ -991,10 +989,9 @@ def _plot_3d_boundary_comparison(wout_init, wout_final, outdir: Path) -> Path:
         ax.set_zlabel("Z (m)")
         ax.set_title(title, fontsize=11)
         fix_matplotlib_3d(ax)
-
-    sm = ScalarMappable(cmap=cmap, norm=norm)
-    sm.set_array([])
-    fig.colorbar(sm, ax=fig.axes, label="|B| (T)", shrink=0.6, pad=0.1)
+        sm = ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        fig.colorbar(sm, ax=ax, label="|B| (T)", shrink=0.62, pad=0.04)
     nfp = int(np.asarray(wout_init.nfp)) if hasattr(wout_init, "nfp") else 4
     fig.suptitle(f"LCFS coloured by |B| — nfp={nfp}", fontsize=13, y=1.01)
 
@@ -1040,12 +1037,6 @@ def _plot_bmag_contours(wout_init, wout_final, outdir: Path) -> Path:
         wout_final, s_index=ns_final - 1, ntheta=128, nzeta=256, zeta_max=zeta_max
     )
 
-    # Shared contour levels from the combined range.
-    vmin = min(float(B_i.min()), float(B_f.min()))
-    vmax = max(float(B_i.max()), float(B_f.max()))
-    nlevels = 25
-    levels = np.linspace(vmin, vmax, nlevels)
-
     # Dynamic ticks for ζ ∈ [0, 2π/nfp].
     xtick_vals = np.linspace(0.0, zeta_max, 5)
     xtick_lbls = [_pi_label(v) for v in xtick_vals]
@@ -1057,6 +1048,15 @@ def _plot_bmag_contours(wout_init, wout_final, outdir: Path) -> Path:
     ]:
         # B has shape (ntheta, nzeta); meshgrid for contour
         ZETA, THETA = np.meshgrid(zeta, theta)
+        vmin = float(np.nanmin(B))
+        vmax = float(np.nanmax(B))
+        if not np.isfinite(vmin) or not np.isfinite(vmax):
+            vmin, vmax = 0.0, 1.0
+        if vmax <= vmin:
+            pad = max(abs(vmin), 1.0) * 1e-12
+            vmin -= pad
+            vmax += pad
+        levels = np.linspace(vmin, vmax, 25)
         cs = ax.contour(
             ZETA, THETA, B,
             levels=levels,

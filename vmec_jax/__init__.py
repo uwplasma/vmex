@@ -13,16 +13,18 @@ _os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 _os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "2")
 _os.environ.setdefault("GLOG_minloglevel", "2")
 
-# Enable JAX persistent XLA compilation cache only when it has not been
-# explicitly disabled by the user environment.
+# Enable JAX persistent XLA compilation cache by default. This makes repeated
+# cold-process CLI/API runs much faster while preserving explicit opt-out via
+# VMEC_JAX_COMPILATION_CACHE=0 or VMEC_JAX_COMPILATION_CACHE_DIR=disabled.
 import jax as _jax
 _jax_cache_dir = _default_jax_cache_dir()
 if _jax_cache_dir is not None:
     _os.makedirs(_jax_cache_dir, exist_ok=True)
+    _jax.config.update("jax_enable_compilation_cache", True)
     _jax.config.update("jax_compilation_cache_dir", _jax_cache_dir)
 
 from . import api
-from .namelist import read_indata, InData
+from .namelist import read_indata, write_indata, InData
 from .config import FreeBoundaryConfig, VMECConfig, load_config
 from .modes import ModeTable, vmec_mode_table, nyquist_mode_table, default_grid_sizes
 from .grids import AngleGrid, make_angle_grid
@@ -197,6 +199,7 @@ from .visualization import export_vtk_surface_and_fieldline
 __all__ = [
     "api",
     "read_indata",
+    "write_indata",
     "InData",
     "FreeBoundaryConfig",
     "VMECConfig",

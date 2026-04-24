@@ -3067,14 +3067,14 @@ def _icurv_full_mesh_from_indata(*, indata, s_full, signgs: int):
 
     # VMEC scales by pcurr(1) (edge), not the last half-mesh value.
     pedge_prof = eval_profiles(indata, jnp.asarray([1.0], dtype=s_full.dtype))
-    pedge = float(np.asarray(pedge_prof.get("current", jnp.asarray([0.0], dtype=s_full.dtype)))[0])
-    if abs(pedge) <= abs(np.finfo(float).eps * curtor):
-        return jnp.zeros_like(s_full)
+    pedge = jnp.asarray(pedge_prof.get("current", jnp.asarray([0.0], dtype=s_full.dtype)))[0]
+    valid_pedge = jnp.abs(pedge) > jnp.asarray(abs(np.finfo(float).eps * curtor), dtype=s_full.dtype)
 
     mu0 = 4e-7 * np.pi
     currv = mu0 * curtor
-    scale = float(signgs) * currv / (2.0 * np.pi * pedge)
-    icurv = jnp.asarray(scale, dtype=icurv_raw.dtype) * icurv_raw
+    denom = jnp.where(valid_pedge, pedge, jnp.asarray(1.0, dtype=s_full.dtype))
+    scale = jnp.asarray(float(signgs) * currv / (2.0 * np.pi), dtype=icurv_raw.dtype) / denom
+    icurv = jnp.where(valid_pedge, scale * icurv_raw, jnp.zeros_like(s_full))
     if int(icurv.shape[0]) > 0:
         icurv = icurv.at[0].set(0.0)
     return icurv
@@ -4137,6 +4137,7 @@ def solve_fixed_boundary_residual_iter(
     fsq_total_target: float | None = None,
     host_update_assembly: bool | None = None,
     adjoint_trace: bool = False,
+    adjoint_trace_mode: str = "full",
 ) -> SolveVmecResidualResult:
     """VMEC-style fixed-point update loop using preconditioned force residuals."""
     if not has_jax():
@@ -4186,6 +4187,9 @@ def solve_fixed_boundary_residual_iter(
         host_update_assembly = bool(host_update_assembly)
     host_update_assembly = host_update_assembly and (not bool(use_scan)) and (jax.default_backend() == "cpu")
     adjoint_trace = bool(adjoint_trace)
+    adjoint_trace_mode = str(adjoint_trace_mode).strip().lower() or "full"
+    if adjoint_trace_mode not in ("full", "dynamic"):
+        raise ValueError("adjoint_trace_mode must be one of {'full', 'dynamic'}")
 
     signgs = int(signgs)
     fsq_total_target = None if fsq_total_target is None else max(0.0, float(fsq_total_target))
@@ -4310,8 +4314,15 @@ def solve_fixed_boundary_residual_iter(
     # Respect explicit non-scan requests (e.g., parity comparators).
     chunked_device_env = os.getenv("VMEC_JAX_VMEC2000_CHUNKED", "1").strip().lower()
     force_chunked_scan = chunked_device_env not in ("", "0", "false", "no")
+    differentiating_scan = bool(use_scan) and _tree_has_tracer(state0)
     if force_chunked_scan and (not use_scan):
         force_chunked_scan = False
+    if differentiating_scan:
+        # Differentiating the scan solve requires a single traceable lax.scan.
+        # Host-side chunking/fallback probes inspect tracer booleans with NumPy
+        # and are therefore only valid for ordinary primal runs.
+        force_chunked_scan = False
+        scan_fallback_enabled = False
     limit_dt_from_force = bool(limit_dt_from_force)
     limit_update_rms = bool(limit_update_rms)
     backtracking = bool(backtracking)
@@ -4807,8 +4818,13 @@ def solve_fixed_boundary_residual_iter(
     mscale = np.asarray(trig.mscale)
     nscale = np.asarray(trig.nscale)
     idx00 = _mode00_index(static.modes)
-    _state_dtype = np.asarray(state0.Rcos).dtype
-    lambda_update_scale_j = np.asarray(lambda_update_scale, dtype=_state_dtype)
+    _traced_state0 = _tree_has_tracer(state0)
+    _state_dtype = jnp.asarray(state0.Rcos).dtype if _traced_state0 else np.asarray(state0.Rcos).dtype
+    lambda_update_scale_j = (
+        jnp.asarray(lambda_update_scale, dtype=_state_dtype)
+        if _traced_state0
+        else np.asarray(lambda_update_scale, dtype=_state_dtype)
+    )
 
     # VMEC stores Fourier coefficients in an internal (mscale/nscale) basis and
     # uses `scalxc` to represent odd-m modes in 1/sqrt(s) form. The force pipeline
@@ -4816,10 +4832,16 @@ def solve_fixed_boundary_residual_iter(
     # residual/preconditioner updates operate in the same internal coefficient
     # space as `VMECState`.
 
-    edge_Rcos = np.asarray(state0.Rcos)[-1, :]
-    edge_Rsin = np.asarray(state0.Rsin)[-1, :]
-    edge_Zcos = np.asarray(state0.Zcos)[-1, :]
-    edge_Zsin = np.asarray(state0.Zsin)[-1, :]
+    if _traced_state0:
+        edge_Rcos = jnp.asarray(state0.Rcos)[-1, :]
+        edge_Rsin = jnp.asarray(state0.Rsin)[-1, :]
+        edge_Zcos = jnp.asarray(state0.Zcos)[-1, :]
+        edge_Zsin = jnp.asarray(state0.Zsin)[-1, :]
+    else:
+        edge_Rcos = np.asarray(state0.Rcos)[-1, :]
+        edge_Rsin = np.asarray(state0.Rsin)[-1, :]
+        edge_Zcos = np.asarray(state0.Zcos)[-1, :]
+        edge_Zsin = np.asarray(state0.Zsin)[-1, :]
 
     constraint_tcon0: float | None = None
     if bool(include_constraint_force):
@@ -5836,11 +5858,20 @@ def solve_fixed_boundary_residual_iter(
                 iter_idx=None,
             )
 
-        cached = _COMPUTE_FORCES_CACHE.get(compute_cache_key)
-        if cached is None:
-            cached = jit(_compute_forces_nodump, static_argnames=("include_edge", "include_edge_residual"))
-            _COMPUTE_FORCES_CACHE[compute_cache_key] = cached
-        _compute_forces = cached
+        if differentiating_scan:
+            # Do not store a jitted closure created while tracing the scan solve:
+            # it can retain traced closure constants and leak them out of the
+            # transformation. Primal solves still reuse the global cache.
+            _compute_forces = jit(
+                _compute_forces_nodump,
+                static_argnames=("include_edge", "include_edge_residual"),
+            )
+        else:
+            cached = _COMPUTE_FORCES_CACHE.get(compute_cache_key)
+            if cached is None:
+                cached = jit(_compute_forces_nodump, static_argnames=("include_edge", "include_edge_residual"))
+                _COMPUTE_FORCES_CACHE[compute_cache_key] = cached
+            _compute_forces = cached
 
     if bool(jit_forces) and bool(jit_precompile) and has_jax() and (jax is not None):
         try:
@@ -6434,6 +6465,9 @@ def solve_fixed_boundary_residual_iter(
         if bool(auto_flip_force):
             raise ValueError("vmec2000 scan does not yet support auto_flip_force=True.")
 
+        scan_differentiated = _tree_has_tracer(state_init)
+        scan_fallback_enabled_run = bool(scan_fallback_enabled) and (not bool(scan_differentiated))
+        force_chunked_scan_run = bool(force_chunked_scan) and (not bool(scan_differentiated))
         k_preconditioner_update_interval = 25
         restart_badjac_factor = 0.9
         restart_badprog_factor = 1.03
@@ -6539,7 +6573,7 @@ def solve_fixed_boundary_residual_iter(
             # Avoid host callbacks inside the scan: we'll print per chunk on host.
             chunked_print = True
             print_in_scan = False
-        if force_chunked_scan:
+        if force_chunked_scan_run:
             chunked_print = True
             print_in_scan = False
         if print_in_scan:
@@ -7031,7 +7065,10 @@ def solve_fixed_boundary_residual_iter(
             s=s,
             cfg=cfg,
         )
-        jmax0 = int(jmax0)
+        # `rz_preconditioner_matrices` is JIT-compiled, so the returned jmax
+        # may be a tracer when the scan solve is differentiated.  For fixed
+        # grids this value is purely shape-derived.
+        jmax0 = max(int(jnp.asarray(s).shape[0]) - 1, 1)
 
         if resume_state is not None:
             try:
@@ -8407,7 +8444,7 @@ def solve_fixed_boundary_residual_iter(
                 )
                 nan_fsq = (~jnp.isfinite(fsq_phys)) | (~jnp.isfinite(fsq1))
                 fallback_active = carry_adv.fallback_active
-                if scan_fallback_enabled and (not bool(scan_core)):
+                if scan_fallback_enabled_run and (not bool(scan_core)):
                     # Track the first N probe steps independent of iter2/iter_offset.
                     probe_active = (carry_adv.probe_count < scan_fallback_iters_j) & fallback_active
                     probe_inc = jnp.where(
@@ -8796,6 +8833,10 @@ def solve_fixed_boundary_residual_iter(
 
         def _get_scan_runner(seq_len: int):
             key = scan_cache_key + (int(seq_len),)
+            if scan_differentiated:
+                # A runner created during a JAX transform closes over traced
+                # constants from the solve setup. Keep it local to the transform.
+                return jit(_run_scan)
             cached_run = _SCAN_RUNNER_CACHE.get(key)
             if cached_run is None:
                 runner = jit(_run_scan)
@@ -8890,7 +8931,7 @@ def solve_fixed_boundary_residual_iter(
             carry = carry_init
             abort_scan_host = False
             fsq_min_global_j = jnp.asarray(jnp.inf, dtype=dtype)
-            early_fallback = bool(scan_fallback_enabled) and (int(cfg.ns) > int(scan_fallback_iters))
+            early_fallback = bool(scan_fallback_enabled_run) and (int(cfg.ns) > int(scan_fallback_iters))
             need_print = bool(scan_collect_print)
             chunk_size, chunk_cap_remaining = _scan_chunk_settings(
                 max_iter_scan=int(max_iter_scan),
@@ -8947,7 +8988,7 @@ def solve_fixed_boundary_residual_iter(
                     converged_now = False
                 start_idx = int(start_idx + int(chunk_len))
                 if (
-                    scan_fallback_enabled
+                    scan_fallback_enabled_run
                     and int(scan_fallback_iters) > 0
                     and start_idx >= int(scan_fallback_iters)
                     and bool(np.asarray(carry.fallback_active))
@@ -8956,12 +8997,12 @@ def solve_fixed_boundary_residual_iter(
                     carry = carry._replace(fallback_active=jnp.asarray(False))
                 if converged_now:
                     break
-                if scan_fallback_enabled and start_idx >= int(scan_fallback_iters):
+                if scan_fallback_enabled_run and start_idx >= int(scan_fallback_iters):
                     # Defer host sync for fsq_min_global until after the loop.
                     pass
                 if bool(np.asarray(carry.converged)) or bool(np.asarray(carry.abort_scan)):
                     break
-            if scan_fallback_enabled and start_idx >= int(scan_fallback_iters):
+            if scan_fallback_enabled_run and start_idx >= int(scan_fallback_iters):
                 try:
                     fsq_min_global = float(jax.device_get(fsq_min_global_j))
                 except Exception:
@@ -8991,7 +9032,7 @@ def solve_fixed_boundary_residual_iter(
                 except Exception:
                     carry_pre, hist_pre = _scan_step(carry_pre, jnp.asarray(0, dtype=jnp.int32))
                 if (
-                    scan_fallback_enabled
+                    scan_fallback_enabled_run
                     and int(scan_fallback_iters) > 0
                     and int(preflight_iters) >= int(scan_fallback_iters)
                 ):
@@ -9748,10 +9789,11 @@ def solve_fixed_boundary_residual_iter(
                 )
                 return jax.lax.scan(_scan_step, carry0, jnp.arange(max_iter, dtype=jnp.int32))
 
-            cached_run = _SCAN_RUNNER_CACHE.get(scan_cache_key)
+            cached_run = None if differentiating_scan else _SCAN_RUNNER_CACHE.get(scan_cache_key)
             if cached_run is None:
                 _run_scan = jit(_run_scan)
-                _SCAN_RUNNER_CACHE[scan_cache_key] = _run_scan
+                if not differentiating_scan:
+                    _SCAN_RUNNER_CACHE[scan_cache_key] = _run_scan
             else:
                 _run_scan = cached_run
 
@@ -12562,36 +12604,10 @@ def solve_fixed_boundary_residual_iter(
                     "wout_like": wout_like,
                     "trig": trig,
                     "w_mode_mn": np.asarray(w_mode_mn),
-                    "lam_prec": np.asarray(lam_prec),
-                    "precond_mats": mats,
                     "precond_jmax": int(jmax),
                     "inv_tau_before": np.asarray(inv_tau, dtype=float),
                     "fsq_prev_before": float(fsq_prev_before),
                     "reset_inv_tau": bool(iter2 == iter1),
-                    "frzl_frcc": np.asarray(frzl.frcc),
-                    "frzl_frss": None if frzl.frss is None else np.asarray(frzl.frss),
-                    "frzl_fzsc": np.asarray(frzl.fzsc),
-                    "frzl_fzcs": None if frzl.fzcs is None else np.asarray(frzl.fzcs),
-                    "frzl_flsc": np.asarray(frzl.flsc),
-                    "frzl_flcs": None if frzl.flcs is None else np.asarray(frzl.flcs),
-                    "frzl_frsc": None if getattr(frzl, "frsc", None) is None else np.asarray(frzl.frsc),
-                    "frzl_frcs": None if getattr(frzl, "frcs", None) is None else np.asarray(frzl.frcs),
-                    "frzl_fzcc": None if getattr(frzl, "fzcc", None) is None else np.asarray(frzl.fzcc),
-                    "frzl_fzss": None if getattr(frzl, "fzss", None) is None else np.asarray(frzl.fzss),
-                    "frzl_flcc": None if getattr(frzl, "flcc", None) is None else np.asarray(frzl.flcc),
-                    "frzl_flss": None if getattr(frzl, "flss", None) is None else np.asarray(frzl.flss),
-                    "frzl_rz_frcc": np.asarray(frzl_rz.frcc),
-                    "frzl_rz_frss": None if frzl_rz.frss is None else np.asarray(frzl_rz.frss),
-                    "frzl_rz_fzsc": np.asarray(frzl_rz.fzsc),
-                    "frzl_rz_fzcs": None if frzl_rz.fzcs is None else np.asarray(frzl_rz.fzcs),
-                    "frzl_rz_flsc": np.asarray(frzl_rz.flsc),
-                    "frzl_rz_flcs": None if frzl_rz.flcs is None else np.asarray(frzl_rz.flcs),
-                    "frzl_rz_frsc": None if getattr(frzl_rz, "frsc", None) is None else np.asarray(frzl_rz.frsc),
-                    "frzl_rz_frcs": None if getattr(frzl_rz, "frcs", None) is None else np.asarray(frzl_rz.frcs),
-                    "frzl_rz_fzcc": None if getattr(frzl_rz, "fzcc", None) is None else np.asarray(frzl_rz.fzcc),
-                    "frzl_rz_fzss": None if getattr(frzl_rz, "fzss", None) is None else np.asarray(frzl_rz.fzss),
-                    "frzl_rz_flcc": None if getattr(frzl_rz, "flcc", None) is None else np.asarray(frzl_rz.flcc),
-                    "frzl_rz_flss": None if getattr(frzl_rz, "flss", None) is None else np.asarray(frzl_rz.flss),
                     "vRcc_before": np.asarray(vRcc),
                     "vRss_before": np.asarray(vRss),
                     "vZsc_before": np.asarray(vZsc),
@@ -12604,19 +12620,50 @@ def solve_fixed_boundary_residual_iter(
                     "vZss_before": np.asarray(vZss),
                     "vLcc_before": np.asarray(vLcc),
                     "vLss_before": np.asarray(vLss),
-                    "frcc_u": np.asarray(frcc_u),
-                    "frss_u": np.asarray(frss_u),
-                    "fzsc_u": np.asarray(fzsc_u),
-                    "fzcs_u": np.asarray(fzcs_u),
-                    "flsc_u": np.asarray(flsc_u),
-                    "flcs_u": np.asarray(flcs_u),
-                    "frsc_u": np.asarray(frsc_u),
-                    "frcs_u": np.asarray(frcs_u),
-                    "fzcc_u": np.asarray(fzcc_u),
-                    "fzss_u": np.asarray(fzss_u),
-                    "flcc_u": np.asarray(flcc_u),
-                    "flss_u": np.asarray(flss_u),
                 }
+                if adjoint_trace_mode == "full":
+                    trace_entry.update(
+                        {
+                            "lam_prec": np.asarray(lam_prec),
+                            "precond_mats": mats,
+                            "frzl_frcc": np.asarray(frzl.frcc),
+                            "frzl_frss": None if frzl.frss is None else np.asarray(frzl.frss),
+                            "frzl_fzsc": np.asarray(frzl.fzsc),
+                            "frzl_fzcs": None if frzl.fzcs is None else np.asarray(frzl.fzcs),
+                            "frzl_flsc": np.asarray(frzl.flsc),
+                            "frzl_flcs": None if frzl.flcs is None else np.asarray(frzl.flcs),
+                            "frzl_frsc": None if getattr(frzl, "frsc", None) is None else np.asarray(frzl.frsc),
+                            "frzl_frcs": None if getattr(frzl, "frcs", None) is None else np.asarray(frzl.frcs),
+                            "frzl_fzcc": None if getattr(frzl, "fzcc", None) is None else np.asarray(frzl.fzcc),
+                            "frzl_fzss": None if getattr(frzl, "fzss", None) is None else np.asarray(frzl.fzss),
+                            "frzl_flcc": None if getattr(frzl, "flcc", None) is None else np.asarray(frzl.flcc),
+                            "frzl_flss": None if getattr(frzl, "flss", None) is None else np.asarray(frzl.flss),
+                            "frzl_rz_frcc": np.asarray(frzl_rz.frcc),
+                            "frzl_rz_frss": None if frzl_rz.frss is None else np.asarray(frzl_rz.frss),
+                            "frzl_rz_fzsc": np.asarray(frzl_rz.fzsc),
+                            "frzl_rz_fzcs": None if frzl_rz.fzcs is None else np.asarray(frzl_rz.fzcs),
+                            "frzl_rz_flsc": np.asarray(frzl_rz.flsc),
+                            "frzl_rz_flcs": None if frzl_rz.flcs is None else np.asarray(frzl_rz.flcs),
+                            "frzl_rz_frsc": None if getattr(frzl_rz, "frsc", None) is None else np.asarray(frzl_rz.frsc),
+                            "frzl_rz_frcs": None if getattr(frzl_rz, "frcs", None) is None else np.asarray(frzl_rz.frcs),
+                            "frzl_rz_fzcc": None if getattr(frzl_rz, "fzcc", None) is None else np.asarray(frzl_rz.fzcc),
+                            "frzl_rz_fzss": None if getattr(frzl_rz, "fzss", None) is None else np.asarray(frzl_rz.fzss),
+                            "frzl_rz_flcc": None if getattr(frzl_rz, "flcc", None) is None else np.asarray(frzl_rz.flcc),
+                            "frzl_rz_flss": None if getattr(frzl_rz, "flss", None) is None else np.asarray(frzl_rz.flss),
+                            "frcc_u": np.asarray(frcc_u),
+                            "frss_u": np.asarray(frss_u),
+                            "fzsc_u": np.asarray(fzsc_u),
+                            "fzcs_u": np.asarray(fzcs_u),
+                            "flsc_u": np.asarray(flsc_u),
+                            "flcs_u": np.asarray(flcs_u),
+                            "frsc_u": np.asarray(frsc_u),
+                            "frcs_u": np.asarray(frcs_u),
+                            "fzcc_u": np.asarray(fzcc_u),
+                            "fzss_u": np.asarray(fzss_u),
+                            "flcc_u": np.asarray(flcc_u),
+                            "flss_u": np.asarray(flss_u),
+                        }
+                    )
             dt_eff = float(time_step)
             if bool(limit_dt_from_force):
                 dt_eff = _safe_dt_from_force(
@@ -13169,34 +13216,39 @@ def solve_fixed_boundary_residual_iter(
                         "step_status": str(step_status),
                         "restart_reason": str(restart_reason),
                         "restart_path": str(restart_path),
-                        "dt_eff": float(dt_eff),
                         "time_step": float(time_step),
-                        "w_curr": float(w_curr),
-                        "w_try": float(w_try),
-                        "w_try_ratio": float(w_try_ratio),
-                        "b1": float(b1),
-                        "fac": float(fac),
                         "flip_sign": float(flip_sign),
-                        "force_scale": float(force_scale),
                         "limit_update_rms": bool(limit_update_rms),
-                        "update_rms_preclip": None if update_rms_preclip is None else float(update_rms_preclip),
-                        "update_rms_postclip": None if update_rms is None else float(update_rms),
-                        "update_rms_scale": float(scl),
-                        "state_post": state,
-                        "vRcc_after": np.asarray(vRcc),
-                        "vRss_after": np.asarray(vRss),
-                        "vZsc_after": np.asarray(vZsc),
-                        "vZcs_after": np.asarray(vZcs),
-                        "vLsc_after": np.asarray(vLsc),
-                        "vLcs_after": np.asarray(vLcs),
-                        "vRsc_after": np.asarray(vRsc),
-                        "vRcs_after": np.asarray(vRcs),
-                        "vZcc_after": np.asarray(vZcc),
-                        "vZss_after": np.asarray(vZss),
-                        "vLcc_after": np.asarray(vLcc),
-                        "vLss_after": np.asarray(vLss),
                     }
                 )
+                if adjoint_trace_mode == "full":
+                    trace_entry.update(
+                        {
+                            "dt_eff": float(dt_eff),
+                            "w_curr": float(w_curr),
+                            "w_try": float(w_try),
+                            "w_try_ratio": float(w_try_ratio),
+                            "b1": float(b1),
+                            "fac": float(fac),
+                            "force_scale": float(force_scale),
+                            "update_rms_preclip": None if update_rms_preclip is None else float(update_rms_preclip),
+                            "update_rms_postclip": None if update_rms is None else float(update_rms),
+                            "update_rms_scale": float(scl),
+                            "state_post": state,
+                            "vRcc_after": np.asarray(vRcc),
+                            "vRss_after": np.asarray(vRss),
+                            "vZsc_after": np.asarray(vZsc),
+                            "vZcs_after": np.asarray(vZcs),
+                            "vLsc_after": np.asarray(vLsc),
+                            "vLcs_after": np.asarray(vLcs),
+                            "vRsc_after": np.asarray(vRsc),
+                            "vRcs_after": np.asarray(vRcs),
+                            "vZcc_after": np.asarray(vZcc),
+                            "vZss_after": np.asarray(vZss),
+                            "vLcc_after": np.asarray(vLcc),
+                            "vLss_after": np.asarray(vLss),
+                        }
+                    )
                 adjoint_step_trace_history.append(trace_entry)
             if timing_enabled and t_update_start is not None:
                 try:
