@@ -78,7 +78,7 @@ USE_MODE_CONTINUATION = True
 BACKEND_LABEL = "cpu"
 SOLVER_DEVICE: str | None = None
 SKIP_EXISTING = True
-CASE_TIMEOUT_S: float | None = None
+CASE_TIMEOUT_S: float | None = 600.0
 ESS_ALPHA = 2.5
 
 
@@ -96,13 +96,57 @@ class CaseBudget:
 # This keeps full GPU panel regeneration finite while still recording the poor
 # policy as a failed or weak result instead of blocking the whole sweep.
 CASE_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
-    ("gpu", "direct", "qa", 2, False): CaseBudget(max_nfev=4, inner_max_iter=40, trial_max_iter=40, trial_ftol=1e-8),
-    ("gpu", "direct", "qa", 3, False): CaseBudget(max_nfev=4, inner_max_iter=40, trial_max_iter=40, trial_ftol=1e-8),
+    # QA needs a moderately converged inner solve before the iota residual has a
+    # useful derivative. The old 40-iteration GPU diagnostic cap kept QA on the
+    # zero-iota branch. These budgets were selected to keep each GPU QA case
+    # below the 600 s sweep timeout while moving continuation/ESS cases to the
+    # target-iota basin.
+    ("gpu", "continuation", "qa", 1, False): CaseBudget(
+        max_nfev=12, continuation_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
+    ),
+    ("gpu", "continuation", "qa", 1, True): CaseBudget(
+        max_nfev=12, continuation_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
+    ),
+    ("gpu", "continuation", "qa", 2, False): CaseBudget(
+        max_nfev=8, continuation_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
+    ),
+    ("gpu", "continuation", "qa", 2, True): CaseBudget(
+        max_nfev=8, continuation_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
+    ),
+    ("gpu", "continuation", "qa", 3, False): CaseBudget(
+        max_nfev=6, continuation_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
+    ),
+    ("gpu", "continuation", "qa", 3, True): CaseBudget(
+        max_nfev=6, continuation_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
+    ),
+    ("gpu", "direct", "qa", 1, False): CaseBudget(
+        max_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
+    ),
+    ("gpu", "direct", "qa", 1, True): CaseBudget(
+        max_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
+    ),
+    ("gpu", "direct", "qa", 2, False): CaseBudget(
+        max_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
+    ),
+    ("gpu", "direct", "qa", 2, True): CaseBudget(
+        max_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
+    ),
+    ("gpu", "direct", "qa", 3, False): CaseBudget(
+        max_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
+    ),
+    ("gpu", "direct", "qa", 3, True): CaseBudget(
+        max_nfev=24, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
+    ),
+    ("cpu", "direct", "qa", 3, False): CaseBudget(
+        max_nfev=24, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
+    ),
+    ("cpu", "direct", "qa", 3, True): CaseBudget(
+        max_nfev=24, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
+    ),
     ("gpu", "direct", "qh", 2, False): CaseBudget(max_nfev=4, inner_max_iter=40, trial_max_iter=40, trial_ftol=1e-8),
     ("gpu", "direct", "qh", 3, False): CaseBudget(max_nfev=4, inner_max_iter=40, trial_max_iter=40, trial_ftol=1e-8),
     ("gpu", "direct", "qp", 2, False): CaseBudget(max_nfev=4, inner_max_iter=40, trial_max_iter=40, trial_ftol=1e-8),
     ("gpu", "direct", "qp", 3, False): CaseBudget(max_nfev=4, inner_max_iter=40, trial_max_iter=40, trial_ftol=1e-8),
-    ("gpu", "direct", "qa", 3, True): CaseBudget(max_nfev=5, inner_max_iter=40, trial_max_iter=40, trial_ftol=1e-8),
     ("gpu", "direct", "qh", 3, True): CaseBudget(max_nfev=5, inner_max_iter=40, trial_max_iter=40, trial_ftol=1e-8),
     ("gpu", "direct", "qp", 3, True): CaseBudget(max_nfev=5, inner_max_iter=40, trial_max_iter=40, trial_ftol=1e-8),
 }
@@ -648,6 +692,7 @@ def _worker(
         )
         Path(result_path).write_text(json.dumps(asdict(case_result), indent=2))
     except Exception as exc:
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
         failed = CaseResult(
             backend=str(backend),
             problem=problem,
@@ -662,7 +707,6 @@ def _worker(
             jax_platforms=jax_platforms,
         )
         Path(result_path).write_text(json.dumps(asdict(failed), indent=2))
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
         Path(output_dir, "traceback.txt").write_text(traceback.format_exc())
         raise
 
@@ -900,8 +944,9 @@ def _parse_args() -> argparse.Namespace:
         type=float,
         default=CASE_TIMEOUT_S,
         help=(
-            "Optional wall-clock timeout per worker case. Timed-out cases are "
-            "recorded as crashed so large CPU/GPU sweeps can finish and render."
+            "Wall-clock timeout per worker case. Use 0 to disable. Timed-out "
+            "cases are recorded as crashed so large CPU/GPU sweeps can finish "
+            "and render. Defaults to 600 s."
         ),
     )
     parser.add_argument(

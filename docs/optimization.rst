@@ -407,13 +407,19 @@ expansion.  Each policy is run with and without ESS using ``alpha = 2.5``.
 Columns correspond to ``max_mode = 1, 2, 3``.  The vertical dotted lines mark
 continuation stage boundaries.
 
-The CPU objective panel is the README-facing result because it contains complete
-histories and no placeholder rows.  It also captures the most important QA
-diagnostic: direct QA ``max_mode=3`` converges to a real zero-iota stationary
-branch, not to a bad VMEC solve.  Rerunning the generated ``input.final`` with
-both ``vmec_jax`` and VMEC2000 gives ``fsqr/fsqz/fsql ~ 1e-13`` and mean iota
-near zero, so the final objective is dominated by the target-iota term
-``0.41^2 = 0.1681``.  Mode continuation avoids that branch.
+The objective panel below is the full CPU/GPU policy sweep.  Solid curves met
+the optimizer success criterion; dashed curves are finite diagnostic-budget
+stops, not timeouts.  The QA input carries ``1e-5`` seeds for the mode-1 boundary
+terms, and the GPU QA rows now use moderately converged bounded inner solves so
+the iota residual leaves the zero-iota branch.  QA continuation reaches the
+target-iota basin on both CPU and GPU; direct QA with ESS also reaches
+``iota ~= 0.409``.  Direct QA without ESS remains a weak policy for
+``max_mode=3``.
+
+.. image:: _static/figures/qs_ess_objective_panel_all_policies.png
+   :width: 100%
+   :align: center
+   :alt: Full CPU and GPU QA, QH, and QP optimization policy sweep
 
 .. image:: _static/figures/qs_ess_objective_panel_cpu_policies.png
    :width: 100%
@@ -424,7 +430,12 @@ near zero, so the final objective is dominated by the target-iota term
 
    JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp --modes 1,2,3 --ess both
    JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp --modes 1,2,3 --ess both
+   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp --modes 1,2,3 --ess both
+   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp --modes 1,2,3 --ess both
    python examples/optimization/render_qs_ess_publication_panel.py
+
+The default per-case timeout is ``600 s``.  Use ``--case-timeout-s 0`` only
+for an unbounded local diagnostic run.
 
 To recreate one row, restrict ``--policy`` and ``--problems``.  For example,
 this reruns only the QA direct-start row:
@@ -434,21 +445,22 @@ this reruns only the QA direct-start row:
    JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa --modes 1,2,3 --ess both --rerun
    python examples/optimization/render_qs_ess_publication_panel.py
 
-The full diagnostic panel includes the GPU bounded-timeout rows.  The current
-exact optimizer GPU path is not yet production-ready for these cold-start
-matrix runs: the sweep script records timeout case results rather than letting
-one GPU case block panel generation.
+The GPU rows are bounded-budget diagnostics.  They are useful for checking that
+the GPU exact path runs and that QA reaches finite iota, but the CPU rows remain
+the production-accuracy reference for this cold-start matrix.  The April 25,
+2026 rerun completed every GPU row within the 600 s per-case limit and produced
+no timeout records.
 
 .. code-block:: bash
 
-   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp --modes 1,2,3 --ess both --case-timeout-s 5
-   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp --modes 1,2,3 --ess both --case-timeout-s 5
+   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp --modes 1,2,3 --ess both
+   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp --modes 1,2,3 --ess both
    python examples/optimization/render_qs_ess_publication_panel.py
 
 .. image:: _static/figures/qs_ess_objective_panel_gpu_policies.png
    :width: 100%
    :align: center
-   :alt: GPU bounded-timeout QA, QH, and QP optimization status panel
+   :alt: GPU bounded-budget QA, QH, and QP optimization status panel
 
 .. image:: _static/figures/qs_ess_publication_panel_full.png
    :width: 100%
@@ -464,8 +476,26 @@ data as a Markdown table for readability.
    :align: center
    :alt: CPU QA, QH, and QP optimization wall-time summary tables
 
-Final equilibria for the successful CPU continuation/direct cases are rendered
-separately so the 3D surfaces and boundary-field colorbars remain readable.
+.. image:: _static/figures/qs_ess_summary_tables_gpu_policies.png
+   :width: 100%
+   :align: center
+   :alt: GPU QA, QH, and QP optimization wall-time summary tables
+
+Final equilibria for CPU/GPU continuation/direct cases are rendered separately
+so the 3D surfaces and boundary-field colorbars remain readable.  The
+``|B|`` panels use line contours on the LCFS, not filled contours.  The
+production CPU atlases are also emitted as
+``final_state_atlas_continuation.pdf`` and ``final_state_atlas_direct.pdf``.
+
+.. image:: _static/figures/qs_ess_final_state_atlas_continuation.png
+   :width: 100%
+   :align: center
+   :alt: CPU continuation final-state atlas for QA, QH, and QP
+
+.. image:: _static/figures/qs_ess_final_state_atlas_direct.png
+   :width: 100%
+   :align: center
+   :alt: CPU direct-start final-state atlas for QA, QH, and QP
 
 .. image:: _static/figures/qs_ess_final_state_atlas_cpu_continuation.png
    :width: 100%
@@ -476,6 +506,16 @@ separately so the 3D surfaces and boundary-field colorbars remain readable.
    :width: 100%
    :align: center
    :alt: CPU direct-start final-state atlas for QA, QH, and QP
+
+.. image:: _static/figures/qs_ess_final_state_atlas_gpu_continuation.png
+   :width: 100%
+   :align: center
+   :alt: GPU continuation final-state atlas for QA, QH, and QP
+
+.. image:: _static/figures/qs_ess_final_state_atlas_gpu_direct.png
+   :width: 100%
+   :align: center
+   :alt: GPU direct-start final-state atlas for QA, QH, and QP
 
 
 Algorithms in detail

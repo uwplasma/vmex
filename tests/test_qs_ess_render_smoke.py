@@ -61,7 +61,7 @@ def test_qs_ess_sweep_sets_missing_wall_time():
     assert result.total_wall_time_s == 12.5
 
 
-def test_qs_ess_renderer_prefers_explicit_backend_records(tmp_path, monkeypatch):
+def test_qs_ess_renderer_ignores_legacy_backendless_records(tmp_path, monkeypatch):
     renderer = _load_renderer_module()
     monkeypatch.setattr(renderer, "OUTPUT_ROOT", tmp_path)
 
@@ -117,11 +117,7 @@ def test_qs_ess_renderer_prefers_explicit_backend_records(tmp_path, monkeypatch)
     assert preferred.message == "explicit"
     assert preferred.objective_final == 0.2
 
-    direct = lookup[("cpu", "direct", "qa", 3, True)]
-    assert direct.crashed
-    assert "legacy result" in direct.message
-    assert direct.total_wall_time_s == 5.0
-    assert direct.output_dir == str(direct_legacy_dir)
+    assert ("cpu", "direct", "qa", 3, True) not in lookup
 
 
 def _write_case(

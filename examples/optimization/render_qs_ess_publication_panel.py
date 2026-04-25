@@ -8,6 +8,7 @@ import csv
 import json
 from pathlib import Path
 import re
+import shutil
 
 import numpy as np
 
@@ -231,6 +232,10 @@ def _discover_results() -> list[CaseResult]:
         priority = _discovery_priority(path, raw_record)
         record = dict(raw_record)
         backend, backend_explicit, backend_in_path = _infer_backend(path, raw_record)
+        if not backend_explicit and not backend_in_path:
+            # Ignore pre-backend-layout results. They caused stale timeout/zero-iota
+            # records to leak into regenerated CPU/GPU panels after new sweeps.
+            continue
         policy, _policy_explicit = _infer_policy(path, raw_record)
         record["backend"] = backend
         record["policy"] = policy
@@ -238,10 +243,6 @@ def _discover_results() -> list[CaseResult]:
         output_dir = record.get("output_dir")
         if output_dir is None or not Path(str(output_dir)).exists():
             record["output_dir"] = str(path.parent)
-        if not backend_explicit and not backend_in_path:
-            message = str(record.get("message", ""))
-            if "legacy result" not in message:
-                record["message"] = f"{message} [legacy result: backend inferred as CPU]".strip()
         result = CaseResult(**record)
         key = _result_key(result)
         mtime = path.stat().st_mtime
@@ -543,7 +544,10 @@ def _plot_objective_panel_all_policies(results: list[CaseResult], outpath_png: P
                 for use_ess, result in zip(ESS_OPTIONS, fallback_results, strict=True):
                     if result is None:
                         continue
-                    status = "timed out" if result.crashed else "no history"
+                    if result.crashed:
+                        status = "timed out" if "timed out" in result.message.lower() else "failed"
+                    else:
+                        status = "no history"
                     wall = _format_wall_minutes(result.total_wall_time_s)
                     if wall != "-":
                         status = f"{status}, {wall} min"
@@ -575,9 +579,22 @@ def _plot_objective_panel_all_policies(results: list[CaseResult], outpath_png: P
                     bbox={"boxstyle": "round,pad=0.24", "facecolor": "white", "edgecolor": "0.86", "alpha": 0.92},
                 )
 
+    from matplotlib.lines import Line2D
+
     handles, labels = axes[0, 0].get_legend_handles_labels()
+    status_handles = [
+        Line2D([0], [0], color="0.25", linestyle="-", linewidth=2.2, label="solid: optimizer success"),
+        Line2D([0], [0], color="0.25", linestyle="--", linewidth=2.2, label="dashed: stopped/diagnostic budget"),
+    ]
     if handles:
-        fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.985), ncol=2, frameon=False)
+        fig.legend(
+            handles + status_handles,
+            labels + [handle.get_label() for handle in status_handles],
+            loc="upper center",
+            bbox_to_anchor=(0.5, 0.985),
+            ncol=4,
+            frameon=False,
+        )
     fig.suptitle(
         "QA/QH/QP optimization histories by backend: continuation versus direct-start mode expansion",
         y=0.998,
@@ -727,25 +744,16 @@ def _plot_state_atlas(
             ax2d = fig.add_subplot(grid[row_contour, col_index])
             zeta_mesh, theta_mesh = np.meshgrid(payload.zeta, payload.theta)
             b2_min, b2_max = _finite_range(payload.B_contour)
-            contour_levels = np.linspace(b2_min, b2_max, 18)
-            filled = ax2d.contourf(
+            contour_levels = np.linspace(b2_min, b2_max, 22)
+            contours = ax2d.contour(
                 zeta_mesh,
                 theta_mesh,
                 payload.B_contour,
                 levels=contour_levels,
                 cmap="viridis",
-                extend="both",
+                linewidths=1.0,
             )
-            ax2d.contour(
-                zeta_mesh,
-                theta_mesh,
-                payload.B_contour,
-                levels=contour_levels[::2],
-                colors="white",
-                linewidths=0.35,
-                alpha=0.35,
-            )
-            _inset_colorbar(filled, ax2d, label="|B| (T)", height="78%")
+            _inset_colorbar(contours, ax2d, label="|B| (T)", height="78%")
             ax2d.set_ylim(0.0, 2.0 * np.pi)
             ax2d.set_xlim(0.0, float(np.max(payload.zeta)))
             ax2d.set_yticks([0.0, np.pi, 2.0 * np.pi])
@@ -989,6 +997,12 @@ def main() -> None:
                         f"Final-state atlas: {backend.upper()} {_policy_label(policy).lower()} policy",
                     )
                 )
+                if backend == "cpu":
+                    # Keep the backend-qualified files for CPU/GPU comparisons,
+                    # and also publish the concise filenames requested in the
+                    # README/docs for the production-accuracy CPU final states.
+                    shutil.copy2(atlas_png, OUTPUT_ROOT / f"final_state_atlas_{policy}.png")
+                    shutil.copy2(atlas_pdf, OUTPUT_ROOT / f"final_state_atlas_{policy}.pdf")
     _plot_summary_tables(results, summary_png, summary_pdf)
     for backend in sorted({result.backend for result in results}):
         backend_results = [result for result in results if result.backend == backend]

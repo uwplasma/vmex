@@ -302,29 +302,49 @@ continuation case.
 
 ## QA/QH/QP optimization policy sweep
 
-The CPU panel below compares the exact standalone optimizer on three target
-symmetries: QA, QH, and QP. Columns increase the boundary space from
-`max_mode = 1` to `max_mode = 3`. Rows compare staged mode continuation against
-direct-start mode expansion. Blue curves use unscaled boundary DOFs; orange
-curves use ESS with `alpha = 2.5`.
+The panel below compares the exact standalone optimizer on CPU and GPU for
+three target symmetries: QA, QH, and QP. Columns increase the boundary space
+from `max_mode = 1` to `max_mode = 3`. Rows compare staged mode continuation
+against direct-start mode expansion. Blue curves use unscaled boundary DOFs;
+orange curves use ESS with `alpha = 2.5`. Solid lines met the optimizer success
+criterion; dashed lines are finite diagnostic-budget stops, not timeouts.
 
 <p align="center">
-  <img src="docs/_static/figures/qs_ess_objective_panel_cpu_policies.png" width="980" />
+  <img src="docs/_static/figures/qs_ess_objective_panel_all_policies.png" width="980" />
 </p>
 
-The main QA lesson is that direct `max_mode=3` is not a VMEC convergence
-failure: rerunning its `input.final` with both `vmec_jax` and VMEC2000
-converges to `fsq ~ 1e-13`, but it is a zero-iota stationary branch. The
-target-iota residual therefore stays at `0.41^2 = 0.1681`. Staged continuation
-avoids that branch and reaches `iota ~= 0.410` with much lower objective.
+The QA input includes `1e-5` seeds for the mode-1 boundary terms so the iota
+residual has a useful direction. With the corrected bounded solve budgets, QA
+continuation reaches the target-iota basin on both CPU and GPU. Direct QA with
+ESS also reaches `iota ~= 0.409`; direct QA without ESS now leaves the zero-iota
+branch, but remains a weak policy for `max_mode=3`.
 
-Recreate the continuation rows:
+Final CPU states for the continuation and direct-start policies are shown
+below. The `|B|` panels use line contours on the LCFS, with a separate colorbar
+for each panel because the field ranges are not identical across aspect-ratio
+changes.
+
+<p align="center">
+  <img src="docs/_static/figures/qs_ess_final_state_atlas_continuation.png" width="980" />
+</p>
+
+<p align="center">
+  <img src="docs/_static/figures/qs_ess_final_state_atlas_direct.png" width="980" />
+</p>
+
+Recreate the full CPU/GPU sweep:
 
 ```bash
 JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp --modes 1,2,3 --ess both
+JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp --modes 1,2,3 --ess both
+JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp --modes 1,2,3 --ess both
+JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp --modes 1,2,3 --ess both
 ```
 
-Recreate the direct-start rows:
+The default per-case timeout is 600 s. Use `--case-timeout-s 0` only for an
+unbounded local diagnostic run.
+
+Recreate just the CPU direct-start rows:
 
 ```bash
 JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp --modes 1,2,3 --ess both
@@ -338,40 +358,85 @@ python examples/optimization/render_qs_ess_publication_panel.py
 
 CPU wall-time summary for the plotted runs:
 
-| Problem | Policy | max_mode | ESS | Status | Final J | Aspect | Iota | nfev | Wall min |
-|---|---|---:|---|---|---:|---:|---:|---:|---:|
-| QA | continuation | 1 | no | ok | 9.29e-03 | 6.002 | 0.3942 | 27 | 5.2 |
-| QA | continuation | 1 | yes | ok | 9.29e-03 | 6.002 | 0.3942 | 27 | 4.7 |
-| QA | continuation | 2 | no | ok | 1.46e-04 | 6.000 | 0.4095 | 52 | 13.3 |
-| QA | continuation | 2 | yes | ok | 1.51e-04 | 6.000 | 0.4095 | 50 | 13.5 |
-| QA | continuation | 3 | no | ok | 7.62e-06 | 6.000 | 0.4099 | 64 | 19.2 |
-| QA | continuation | 3 | yes | ok | 2.16e-05 | 6.000 | 0.4099 | 71 | 25.1 |
-| QA | direct | 2 | no | ok | 4.50e-04 | 5.999 | 0.4066 | 18 | 18.6 |
-| QA | direct | 2 | yes | stopped | 1.58e-04 | 6.000 | 0.4095 | 40 | 14.9 |
-| QA | direct | 3 | no | zero-iota | 1.68e-01 | 6.000 | -0.0000 | 5 | 2.2 |
-| QA | direct | 3 | yes | zero-iota | 1.68e-01 | 6.000 | 0.0000 | 5 | 1.2 |
-| QH | continuation | 1 | no | ok | 2.16e-01 | 7.049 | - | 9 | 2.2 |
-| QH | continuation | 1 | yes | ok | 2.16e-01 | 7.049 | - | 9 | 2.3 |
-| QH | continuation | 2 | no | ok | 3.72e-03 | 7.001 | - | 28 | 8.5 |
-| QH | continuation | 2 | yes | ok | 4.32e-03 | 7.000 | - | 29 | 6.3 |
-| QH | continuation | 3 | no | ok | 1.37e-03 | 7.000 | - | 32 | 10.7 |
-| QH | continuation | 3 | yes | ok | 1.38e-03 | 7.000 | - | 33 | 8.1 |
-| QH | direct | 2 | no | ok | 3.45e-03 | 7.001 | - | 28 | 10.2 |
-| QH | direct | 2 | yes | ok | 4.00e-03 | 7.001 | - | 20 | 5.6 |
-| QH | direct | 3 | no | ok | 4.29e-03 | 6.999 | - | 15 | 9.5 |
-| QH | direct | 3 | yes | ok | 3.27e-03 | 6.999 | - | 20 | 9.2 |
-| QP | continuation | 1 | no | stopped | 6.00e-01 | 7.089 | -0.3083 | 20 | 0.5 |
-| QP | continuation | 1 | yes | stopped | 6.00e-01 | 7.089 | -0.3083 | 20 | 0.5 |
-| QP | continuation | 2 | no | stopped | 2.97e-01 | 7.077 | -0.3097 | 28 | 0.9 |
-| QP | continuation | 2 | yes | stopped | 4.43e-01 | 7.087 | -0.3102 | 28 | 0.8 |
-| QP | continuation | 3 | no | ok | 3.20e-01 | 7.077 | -0.3023 | 26 | 1.0 |
-| QP | continuation | 3 | yes | stopped | 2.74e-01 | 7.063 | -0.3105 | 36 | 1.4 |
-| QP | direct | 1 | no | stopped | 6.00e-01 | 7.089 | -0.3083 | 20 | 0.5 |
-| QP | direct | 1 | yes | stopped | 6.00e-01 | 7.089 | -0.3083 | 20 | 0.5 |
-| QP | direct | 2 | no | ok | 4.60e-02 | 7.006 | -0.5828 | 19 | 0.7 |
-| QP | direct | 2 | yes | stopped | 5.67e-02 | 7.013 | -0.3097 | 20 | 0.7 |
-| QP | direct | 3 | no | ok | 5.35e-01 | 7.064 | -1.1401 | 17 | 0.7 |
-| QP | direct | 3 | yes | ok | 9.60e-02 | 7.057 | -0.3092 | 20 | 0.8 |
+| Backend | Problem | Policy | max_mode | ESS | Status | Final J | Aspect | Iota | nfev | Wall min |
+|---|---|---|---:|---|---|---:|---:|---:|---:|---:|
+| CPU | QA | continuation | 1 | no | ok | 9.29e-03 | 6.002 | 0.3940 | 20 | 2.5 |
+| CPU | QA | continuation | 1 | yes | ok | 9.29e-03 | 6.002 | 0.3940 | 20 | 2.7 |
+| CPU | QA | continuation | 2 | no | ok | 2.66e-04 | 6.000 | 0.4090 | 45 | 7.2 |
+| CPU | QA | continuation | 2 | yes | ok | 1.56e-04 | 6.000 | 0.4099 | 48 | 8.5 |
+| CPU | QA | continuation | 3 | no | ok | 7.62e-06 | 6.000 | 0.4099 | 64 | 19.2 |
+| CPU | QA | continuation | 3 | yes | ok | 2.16e-05 | 6.000 | 0.4099 | 71 | 25.1 |
+| CPU | QH | continuation | 1 | no | ok | 2.16e-01 | 7.049 | - | 9 | 2.2 |
+| CPU | QH | continuation | 1 | yes | ok | 2.16e-01 | 7.049 | - | 9 | 2.3 |
+| CPU | QH | continuation | 2 | no | ok | 3.72e-03 | 7.001 | - | 28 | 8.5 |
+| CPU | QH | continuation | 2 | yes | ok | 4.32e-03 | 7.000 | - | 29 | 6.3 |
+| CPU | QH | continuation | 3 | no | ok | 1.37e-03 | 7.000 | - | 32 | 10.7 |
+| CPU | QH | continuation | 3 | yes | ok | 1.38e-03 | 7.000 | - | 33 | 8.1 |
+| CPU | QP | continuation | 1 | no | stopped | 6.00e-01 | 7.089 | -0.3083 | 20 | 0.5 |
+| CPU | QP | continuation | 1 | yes | stopped | 6.00e-01 | 7.089 | -0.3083 | 20 | 0.5 |
+| CPU | QP | continuation | 2 | no | stopped | 2.97e-01 | 7.077 | -0.3097 | 28 | 0.9 |
+| CPU | QP | continuation | 2 | yes | stopped | 4.43e-01 | 7.087 | -0.3102 | 28 | 0.8 |
+| CPU | QP | continuation | 3 | no | ok | 3.20e-01 | 7.077 | -0.3023 | 26 | 1.0 |
+| CPU | QP | continuation | 3 | yes | stopped | 2.74e-01 | 7.063 | -0.3105 | 36 | 1.4 |
+| CPU | QA | direct | 1 | no | ok | 9.29e-03 | 6.002 | 0.3940 | 20 | 2.5 |
+| CPU | QA | direct | 1 | yes | ok | 9.29e-03 | 6.002 | 0.3940 | 20 | 2.7 |
+| CPU | QA | direct | 2 | no | ok | 4.50e-04 | 5.999 | 0.4066 | 18 | 18.6 |
+| CPU | QA | direct | 2 | yes | stopped | 1.58e-04 | 6.000 | 0.4095 | 40 | 14.9 |
+| CPU | QA | direct | 3 | no | ok | 1.76e-02 | 6.007 | 0.3228 | 24 | 1.4 |
+| CPU | QA | direct | 3 | yes | stopped | 1.46e-04 | 6.000 | 0.4093 | 24 | 1.6 |
+| CPU | QH | direct | 1 | no | ok | 2.16e-01 | 7.049 | - | 9 | 2.2 |
+| CPU | QH | direct | 1 | yes | ok | 2.16e-01 | 7.049 | - | 9 | 2.3 |
+| CPU | QH | direct | 2 | no | ok | 3.45e-03 | 7.001 | - | 28 | 10.2 |
+| CPU | QH | direct | 2 | yes | ok | 4.00e-03 | 7.001 | - | 20 | 5.6 |
+| CPU | QH | direct | 3 | no | ok | 4.29e-03 | 6.999 | - | 15 | 9.5 |
+| CPU | QH | direct | 3 | yes | ok | 3.27e-03 | 6.999 | - | 20 | 9.2 |
+| CPU | QP | direct | 1 | no | stopped | 6.00e-01 | 7.089 | -0.3083 | 20 | 0.5 |
+| CPU | QP | direct | 1 | yes | stopped | 6.00e-01 | 7.089 | -0.3083 | 20 | 0.5 |
+| CPU | QP | direct | 2 | no | ok | 4.60e-02 | 7.006 | -0.5828 | 19 | 0.7 |
+| CPU | QP | direct | 2 | yes | stopped | 5.67e-02 | 7.013 | -0.3097 | 20 | 0.7 |
+| CPU | QP | direct | 3 | no | ok | 5.35e-01 | 7.064 | -1.1401 | 17 | 0.7 |
+| CPU | QP | direct | 3 | yes | ok | 9.60e-02 | 7.057 | -0.3092 | 20 | 0.8 |
+
+GPU bounded-budget wall-time summary for the plotted runs:
+
+| Backend | Problem | Policy | max_mode | ESS | Status | Final J | Aspect | Iota | nfev | Wall min |
+|---|---|---|---:|---|---|---:|---:|---:|---:|---:|
+| GPU | QA | continuation | 1 | no | stopped | 9.19e-03 | 6.002 | 0.3950 | 12 | 2.3 |
+| GPU | QA | continuation | 1 | yes | stopped | 9.19e-03 | 6.002 | 0.3950 | 12 | 2.3 |
+| GPU | QA | continuation | 2 | no | stopped | 1.19e-03 | 6.007 | 0.4071 | 20 | 3.7 |
+| GPU | QA | continuation | 2 | yes | stopped | 8.19e-04 | 6.000 | 0.4054 | 20 | 4.0 |
+| GPU | QA | continuation | 3 | no | stopped | 1.38e-04 | 6.000 | 0.4088 | 30 | 5.7 |
+| GPU | QA | continuation | 3 | yes | stopped | 3.92e-04 | 6.003 | 0.4072 | 30 | 5.8 |
+| GPU | QH | continuation | 1 | no | stopped | 1.71e-01 | 7.027 | - | 5 | 1.2 |
+| GPU | QH | continuation | 1 | yes | stopped | 1.71e-01 | 7.027 | - | 5 | 0.6 |
+| GPU | QH | continuation | 2 | no | stopped | 5.31e-02 | 7.012 | - | 7 | 2.2 |
+| GPU | QH | continuation | 2 | yes | stopped | 5.58e-02 | 7.011 | - | 7 | 1.4 |
+| GPU | QH | continuation | 3 | no | stopped | 6.51e-02 | 7.010 | - | 9 | 2.3 |
+| GPU | QH | continuation | 3 | yes | stopped | 5.15e-02 | 7.003 | - | 9 | 1.8 |
+| GPU | QP | continuation | 1 | no | stopped | 6.87e-01 | 7.238 | -0.3151 | 5 | 1.3 |
+| GPU | QP | continuation | 1 | yes | stopped | 6.87e-01 | 7.238 | -0.3151 | 5 | 0.6 |
+| GPU | QP | continuation | 2 | no | stopped | 5.16e-01 | 7.060 | -0.6073 | 7 | 2.3 |
+| GPU | QP | continuation | 2 | yes | stopped | 4.21e-01 | 7.405 | -0.3375 | 7 | 1.6 |
+| GPU | QP | continuation | 3 | no | stopped | 6.27e-01 | 7.159 | -0.8721 | 9 | 2.0 |
+| GPU | QP | continuation | 3 | yes | stopped | 4.78e-01 | 7.151 | -0.3198 | 9 | 1.8 |
+| GPU | QA | direct | 1 | no | stopped | 9.19e-03 | 6.002 | 0.3950 | 12 | 2.3 |
+| GPU | QA | direct | 1 | yes | stopped | 9.19e-03 | 6.002 | 0.3950 | 12 | 2.3 |
+| GPU | QA | direct | 2 | no | stopped | 4.12e-02 | 6.110 | 0.3509 | 12 | 4.0 |
+| GPU | QA | direct | 2 | yes | stopped | 6.61e-04 | 6.006 | 0.4099 | 12 | 4.2 |
+| GPU | QA | direct | 3 | no | stopped | 6.81e-02 | 5.951 | 0.1732 | 12 | 2.8 |
+| GPU | QA | direct | 3 | yes | stopped | 1.43e-04 | 6.000 | 0.4084 | 24 | 4.7 |
+| GPU | QH | direct | 1 | no | stopped | 1.71e-01 | 7.027 | - | 5 | 0.7 |
+| GPU | QH | direct | 1 | yes | stopped | 1.71e-01 | 7.027 | - | 5 | 0.6 |
+| GPU | QH | direct | 2 | no | stopped | 5.56e-02 | 7.001 | - | 4 | 1.0 |
+| GPU | QH | direct | 2 | yes | stopped | 4.08e-02 | 7.012 | - | 5 | 1.3 |
+| GPU | QH | direct | 3 | no | stopped | 9.78e-02 | 7.051 | - | 4 | 1.0 |
+| GPU | QH | direct | 3 | yes | stopped | 4.83e-02 | 7.011 | - | 5 | 1.4 |
+| GPU | QP | direct | 1 | no | stopped | 6.87e-01 | 7.238 | -0.3151 | 5 | 0.6 |
+| GPU | QP | direct | 1 | yes | stopped | 6.87e-01 | 7.238 | -0.3151 | 5 | 0.6 |
+| GPU | QP | direct | 2 | no | stopped | 1.23e+00 | 6.918 | -1.2527 | 4 | 1.0 |
+| GPU | QP | direct | 2 | yes | stopped | 4.40e-01 | 7.110 | -0.8996 | 5 | 1.3 |
+| GPU | QP | direct | 3 | no | stopped | 1.10e+00 | 7.160 | -1.0789 | 4 | 1.0 |
+| GPU | QP | direct | 3 | yes | stopped | 6.62e-01 | 7.092 | -1.1608 | 5 | 1.2 |
 
 ## Performance vs parity
 
