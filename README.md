@@ -348,8 +348,8 @@ CPU wall-time summary for the plotted runs:
 | QA | continuation | 3 | yes | ok | 2.16e-05 | 6.000 | 0.4099 | 71 | 25.1 |
 | QA | direct | 2 | no | ok | 4.50e-04 | 5.999 | 0.4066 | 18 | 18.6 |
 | QA | direct | 2 | yes | stopped | 1.58e-04 | 6.000 | 0.4095 | 40 | 14.9 |
-| QA | direct | 3 | no | ok | 1.68e-01 | 6.000 | -0.0000 | 5 | 2.2 |
-| QA | direct | 3 | yes | ok | 1.68e-01 | 6.000 | 0.0000 | 5 | 1.2 |
+| QA | direct | 3 | no | zero-iota | 1.68e-01 | 6.000 | -0.0000 | 5 | 2.2 |
+| QA | direct | 3 | yes | zero-iota | 1.68e-01 | 6.000 | 0.0000 | 5 | 1.2 |
 | QH | continuation | 1 | no | ok | 2.16e-01 | 7.049 | - | 9 | 2.2 |
 | QH | continuation | 1 | yes | ok | 2.16e-01 | 7.049 | - | 9 | 2.3 |
 | QH | continuation | 2 | no | ok | 3.72e-03 | 7.001 | - | 28 | 8.5 |

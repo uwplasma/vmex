@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -39,6 +40,88 @@ def test_qs_ess_sweep_worker_jax_platform_policy():
     assert sweep._default_worker_jax_platforms("cpu") == "cpu"
     assert sweep._default_worker_jax_platforms("default") is None
     assert sweep._default_worker_jax_platforms("gpu") is None
+
+
+def test_qs_ess_sweep_sets_missing_wall_time():
+    sweep = _load_sweep_module()
+
+    result = sweep.CaseResult(
+        backend="cpu",
+        problem="qa",
+        max_mode=1,
+        use_ess=False,
+        success=False,
+        crashed=True,
+        message="timeout",
+    )
+
+    assert sweep._set_missing_wall_time(result, 12.5)
+    assert result.total_wall_time_s == 12.5
+    assert not sweep._set_missing_wall_time(result, 99.0)
+    assert result.total_wall_time_s == 12.5
+
+
+def test_qs_ess_renderer_prefers_explicit_backend_records(tmp_path, monkeypatch):
+    renderer = _load_renderer_module()
+    monkeypatch.setattr(renderer, "OUTPUT_ROOT", tmp_path)
+
+    legacy_dir = tmp_path / "qa" / "mode2" / "no_ess"
+    explicit_dir = tmp_path / "cpu" / "continuation" / "qa" / "mode2" / "no_ess"
+    direct_legacy_dir = tmp_path / "direct" / "qa" / "mode3" / "ess"
+    legacy_dir.mkdir(parents=True)
+    explicit_dir.mkdir(parents=True)
+    direct_legacy_dir.mkdir(parents=True)
+
+    legacy_record = {
+        "problem": "qa",
+        "max_mode": 2,
+        "use_ess": False,
+        "success": True,
+        "crashed": False,
+        "message": "legacy",
+        "objective_final": 1.0,
+    }
+    explicit_record = {
+        **legacy_record,
+        "backend": "cpu",
+        "policy": "continuation",
+        "message": "explicit",
+        "objective_final": 0.2,
+    }
+    direct_record = {
+        "problem": "qa",
+        "max_mode": 3,
+        "use_ess": True,
+        "success": False,
+        "crashed": True,
+        "message": "worker timed out after 5.0 s",
+        "objective_final": None,
+        "output_dir": "/remote/nonexistent/qs_case",
+    }
+
+    legacy_path = legacy_dir / "case_result.json"
+    explicit_path = explicit_dir / "case_result.json"
+    direct_path = direct_legacy_dir / "case_result.json"
+    legacy_path.write_text(json.dumps(legacy_record))
+    explicit_path.write_text(json.dumps(explicit_record))
+    direct_path.write_text(json.dumps(direct_record))
+
+    # Make the stale legacy file newer; explicit backend metadata should still win.
+    os.utime(explicit_path, (100.0, 100.0))
+    os.utime(legacy_path, (200.0, 200.0))
+
+    discovered = renderer._discover_results()
+    lookup = renderer._result_lookup(discovered)
+
+    preferred = lookup[("cpu", "continuation", "qa", 2, False)]
+    assert preferred.message == "explicit"
+    assert preferred.objective_final == 0.2
+
+    direct = lookup[("cpu", "direct", "qa", 3, True)]
+    assert direct.crashed
+    assert "legacy result" in direct.message
+    assert direct.total_wall_time_s == 5.0
+    assert direct.output_dir == str(direct_legacy_dir)
 
 
 def _write_case(
