@@ -46,6 +46,7 @@ import json
 import multiprocessing as mp
 import os
 from pathlib import Path
+import time
 import traceback
 
 import numpy as np
@@ -147,10 +148,10 @@ PROBLEM_CONFIGS = {
         ftol=1e-5,
         gtol=1e-5,
         xtol=1e-5,
-        # QA direct max_mode=3 otherwise falls into a zero-iota high-mode
-        # shortcut: aspect and QS converge, but the iota residual remains at
-        # -0.41.  A stronger ESS profile suppresses the high modes enough for
-        # direct-start QA to follow the finite-iota branch.
+        # QA direct max_mode=3 can fall into a zero-iota stationary branch:
+        # aspect and QS improve, but iota does not move.  ESS is still useful
+        # for conditioning, but staged mode continuation is the reliable path
+        # for the documented finite-iota QA minimum.
         ess_alpha=ESS_ALPHA,
         target_aspect=6.0,
         target_iota=0.41,
@@ -233,6 +234,14 @@ class CaseResult:
     jax_device_kind: str | None = None
     solver_device: str | None = None
     jax_platforms: str | None = None
+
+
+def _set_missing_wall_time(result: CaseResult, elapsed_s: float) -> bool:
+    """Record outer worker elapsed time when the inner run could not report it."""
+    if result.total_wall_time_s is not None:
+        return False
+    result.total_wall_time_s = float(elapsed_s)
+    return True
 
 
 def _ess_label(use_ess: bool) -> str:
@@ -967,6 +976,7 @@ def main() -> None:
                         worker_jax_platforms,
                     ),
                 )
+                case_t0 = time.perf_counter()
                 old_jax_platforms = os.environ.get("JAX_PLATFORMS")
                 if worker_jax_platforms is not None:
                     os.environ["JAX_PLATFORMS"] = worker_jax_platforms
@@ -978,6 +988,7 @@ def main() -> None:
                     else:
                         os.environ["JAX_PLATFORMS"] = old_jax_platforms
                 proc.join(timeout=case_timeout_s)
+                elapsed_s = time.perf_counter() - case_t0
                 timed_out = proc.is_alive()
                 if timed_out:
                     proc.terminate()
@@ -991,6 +1002,7 @@ def main() -> None:
 
                 if result_path.exists():
                     result = CaseResult(**json.loads(result_path.read_text()))
+                    result_needs_write = _set_missing_wall_time(result, elapsed_s)
                 elif timed_out:
                     result = CaseResult(
                         backend=backend_label,
@@ -1004,7 +1016,9 @@ def main() -> None:
                         output_dir=str(output_dir),
                         solver_device=solver_device,
                         jax_platforms=worker_jax_platforms,
+                        total_wall_time_s=elapsed_s,
                     )
+                    result_needs_write = True
                 else:
                     result = CaseResult(
                         backend=backend_label,
@@ -1018,12 +1032,15 @@ def main() -> None:
                         output_dir=str(output_dir),
                         solver_device=solver_device,
                         jax_platforms=worker_jax_platforms,
+                        total_wall_time_s=elapsed_s,
                     )
+                    result_needs_write = True
                 if proc.exitcode not in (0, None):
                     result.crashed = True
                     if "worker exit code" not in result.message:
                         result.message = f"exit code {proc.exitcode}; {result.message}"
-                if not result_path.exists():
+                    result_needs_write = True
+                if result_needs_write or not result_path.exists():
                     output_dir.mkdir(parents=True, exist_ok=True)
                     result_path.write_text(json.dumps(asdict(result), indent=2))
                 results.append(result)

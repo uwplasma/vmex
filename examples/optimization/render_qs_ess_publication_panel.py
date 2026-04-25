@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 import csv
 import json
 from pathlib import Path
+import re
 
 import numpy as np
 
@@ -31,6 +32,7 @@ MODES_BY_POLICY = {
     "continuation": (1, 2, 3),
     "direct": (1, 2, 3),
 }
+_TIMEOUT_SECONDS_RE = re.compile(r"timed out after\s+([0-9]+(?:\.[0-9]+)?)\s*s")
 
 
 @dataclass(frozen=True)
@@ -129,6 +131,26 @@ def _format_wall_minutes(value: float | None) -> str:
     return f"{float(value) / 60.0:.1f}"
 
 
+def _is_zero_iota_direct_limit(result: CaseResult) -> bool:
+    return (
+        result.problem == "qa"
+        and result.policy == "direct"
+        and int(result.max_mode) >= 3
+        and result.iota_final is not None
+        and abs(float(result.iota_final)) < 5.0e-2
+        and result.objective_final is not None
+        and float(result.objective_final) > 1.0e-2
+    )
+
+
+def _status_label(result: CaseResult) -> str:
+    if result.crashed:
+        return "failed"
+    if _is_zero_iota_direct_limit(result):
+        return "zero-iota"
+    return "ok" if result.success else "stopped"
+
+
 def _row_label(problem: str, policy: str, backend: str | None = None) -> str:
     prefix = "" if backend is None else f"{backend.upper()} | "
     return f"{prefix}{problem.upper()} {_policy_label(policy)}"
@@ -136,6 +158,52 @@ def _row_label(problem: str, policy: str, backend: str | None = None) -> str:
 
 def _result_key(result: CaseResult) -> tuple[str, str, str, int, bool]:
     return (result.backend, result.policy, result.problem, int(result.max_mode), bool(result.use_ess))
+
+
+def _relative_result_parts(path: Path) -> tuple[str, ...]:
+    try:
+        return path.relative_to(OUTPUT_ROOT).parts
+    except ValueError:
+        return path.parts
+
+
+def _infer_backend(path: Path, record: dict) -> tuple[str, bool, bool]:
+    if record.get("backend"):
+        return str(record["backend"]), True, True
+    parts = tuple(part.lower() for part in _relative_result_parts(path))
+    for backend in ("cpu", "gpu"):
+        if backend in parts:
+            return backend, False, True
+    return "cpu", False, False
+
+
+def _infer_policy(path: Path, record: dict) -> tuple[str, bool]:
+    if record.get("policy"):
+        return str(record["policy"]), True
+    parts = tuple(part.lower() for part in _relative_result_parts(path))
+    return ("direct", False) if "direct" in parts else ("continuation", False)
+
+
+def _discovery_priority(path: Path, raw_record: dict) -> int:
+    _backend, backend_explicit, backend_in_path = _infer_backend(path, raw_record)
+    _policy, policy_explicit = _infer_policy(path, raw_record)
+    priority = 0
+    if backend_in_path:
+        priority += 10
+    if policy_explicit:
+        priority += 2
+    if backend_explicit:
+        priority += 20
+    return priority
+
+
+def _infer_missing_wall_time(record: dict) -> None:
+    if record.get("total_wall_time_s") is not None:
+        return
+    match = _TIMEOUT_SECONDS_RE.search(str(record.get("message", "")))
+    if match is None:
+        return
+    record["total_wall_time_s"] = float(match.group(1))
 
 
 def _lcfs_xyz(R: np.ndarray, Z: np.ndarray, phi: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -157,22 +225,30 @@ def _pi_label(v: float) -> str:
 
 
 def _discover_results() -> list[CaseResult]:
-    results_by_key: dict[tuple[str, str, str, int, bool], tuple[float, CaseResult]] = {}
+    results_by_key: dict[tuple[str, str, str, int, bool], tuple[int, float, CaseResult]] = {}
     for path in sorted(OUTPUT_ROOT.glob("**/case_result.json")):
-        record = json.loads(path.read_text())
-        if "backend" not in record:
-            record["backend"] = "cpu"
-        if "policy" not in record:
-            record["policy"] = "direct" if "direct" in path.parts else "continuation"
-        if record.get("output_dir") is None:
+        raw_record = json.loads(path.read_text())
+        priority = _discovery_priority(path, raw_record)
+        record = dict(raw_record)
+        backend, backend_explicit, backend_in_path = _infer_backend(path, raw_record)
+        policy, _policy_explicit = _infer_policy(path, raw_record)
+        record["backend"] = backend
+        record["policy"] = policy
+        _infer_missing_wall_time(record)
+        output_dir = record.get("output_dir")
+        if output_dir is None or not Path(str(output_dir)).exists():
             record["output_dir"] = str(path.parent)
+        if not backend_explicit and not backend_in_path:
+            message = str(record.get("message", ""))
+            if "legacy result" not in message:
+                record["message"] = f"{message} [legacy result: backend inferred as CPU]".strip()
         result = CaseResult(**record)
         key = _result_key(result)
         mtime = path.stat().st_mtime
         previous = results_by_key.get(key)
-        if previous is None or mtime >= previous[0]:
-            results_by_key[key] = (mtime, result)
-    results = [result for _mtime, result in results_by_key.values()]
+        if previous is None or (priority, mtime) >= (previous[0], previous[1]):
+            results_by_key[key] = (priority, mtime, result)
+    results = [result for _priority, _mtime, result in results_by_key.values()]
     if not results:
         raise FileNotFoundError(f"No case_result.json files found under {OUTPUT_ROOT}")
     return results
@@ -428,6 +504,8 @@ def _plot_objective_panel_all_policies(results: list[CaseResult], outpath_png: P
                     meta += f", iota={float(result.iota_final):.4f}"
                 if result.solver_device:
                     meta += f", dev={result.solver_device}"
+                if _is_zero_iota_direct_limit(result):
+                    meta += ", zero-iota branch"
                 annotation_lines.append(meta)
 
             if baseline_note:
@@ -461,10 +539,17 @@ def _plot_objective_panel_all_policies(results: list[CaseResult], outpath_png: P
                     )
                     for use_ess in ESS_OPTIONS
                 ]
-                if any(result is not None and result.crashed for result in fallback_results):
-                    placeholder = "timed out"
-                elif any(result is not None for result in fallback_results):
-                    placeholder = "no history"
+                fallback_lines = []
+                for use_ess, result in zip(ESS_OPTIONS, fallback_results, strict=True):
+                    if result is None:
+                        continue
+                    status = "timed out" if result.crashed else "no history"
+                    wall = _format_wall_minutes(result.total_wall_time_s)
+                    if wall != "-":
+                        status = f"{status}, {wall} min"
+                    fallback_lines.append(f"{line_labels[use_ess]}: {status}")
+                if fallback_lines:
+                    placeholder = "\n".join(fallback_lines)
                 else:
                     placeholder = "pending"
                 _draw_placeholder(ax, placeholder)
@@ -689,6 +774,8 @@ def _plot_state_atlas(
             meta = f"A={float(result.aspect_final):.3f}\nwall={wall_min:.1f} min"
             if result.iota_final is not None:
                 meta = f"A={float(result.aspect_final):.3f}\niota={float(result.iota_final):.4f}\nwall={wall_min:.1f} min"
+            if _is_zero_iota_direct_limit(result):
+                meta += "\nzero-iota branch"
             ax2d.text(
                 0.02,
                 0.02,
@@ -762,7 +849,7 @@ def _plot_summary_tables(results: list[CaseResult], outpath_png: Path, outpath_p
             rows = [
                 [
                     f"mode {result.max_mode} | {_ess_label(result.use_ess)}",
-                    "failed" if result.crashed else ("ok" if result.success else "stopped"),
+                    _status_label(result),
                     _format_optional_float(result.objective_final, ".2e"),
                     _format_optional_float(result.aspect_final, ".4f"),
                     _format_optional_float(result.iota_final, ".4f"),
@@ -777,7 +864,7 @@ def _plot_summary_tables(results: list[CaseResult], outpath_png: Path, outpath_p
             rows = [
                 [
                     f"mode {result.max_mode} | {_ess_label(result.use_ess)}",
-                    "failed" if result.crashed else ("ok" if result.success else "stopped"),
+                    _status_label(result),
                     _format_optional_float(result.objective_final, ".2e"),
                     _format_optional_float(result.aspect_final, ".4f"),
                     "-" if result.nfev is None else f"{int(result.nfev)}",
@@ -804,10 +891,13 @@ def _plot_summary_tables(results: list[CaseResult], outpath_png: Path, outpath_p
                 cell.set_edgecolor("0.82")
                 is_ess_row = rows[row_index - 1][0].split("|", 1)[1].strip() == "ESS"
                 is_failed_row = rows[row_index - 1][1] == "failed"
+                is_limited_row = rows[row_index - 1][1] == "zero-iota"
                 if row_index - 1 == best_index:
                     cell.set_facecolor("#e6f4ea")
                 elif is_failed_row:
                     cell.set_facecolor("#f8d7da")
+                elif is_limited_row:
+                    cell.set_facecolor("#fff3cd")
                 elif is_ess_row:
                     cell.set_facecolor("#fff3e8")
                 else:

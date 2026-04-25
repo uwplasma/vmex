@@ -301,6 +301,24 @@ vectorized column replay for the present ``max_mode <= 3`` parameter counts.
 The next useful step is an optimizer-level scalar-adjoint method with better
 line-search/scaling behavior, not switching the default least-squares path.
 
+The accepted-point exact path remains the discrete-adjoint tape path on both
+CPU and GPU.  The scan-differentiated exact path is intentionally not selected
+automatically: on the April 2026 RTX A4000 diagnostics, a cold QA
+``max_mode=3`` scan exact Jacobian took about ``107 s`` before warm replay,
+whereas the tape path completed the same callback much sooner.  GPU trial-point
+residual solves are different because they do not need an adjoint tape.  For
+accelerator contexts the optimizer now uses scan only for these residual-only
+trial solves; the accepted Jacobian still uses the tape replay path.  A bounded
+QA ``max_mode=3`` GPU diagnostic with three SciPy evaluations improved from
+about ``83 s`` to about ``73 s`` after this split policy and replay-cache
+retention, but CPU remains faster for this small problem.
+
+Replay and preconditioner JIT helper caches are retained across accepted points
+and LRU-bounded.  Call ``FixedBoundaryExactOptimizer.clear_caches()`` to release
+compiled replay helpers explicitly after a long optimization batch.  The
+optimizer still clears heavyweight exact tapes between SciPy callbacks where
+needed to avoid RSS growth.
+
 The same exact ``Jv``/``J.Tv`` products can be used in SciPy's trust-region
 least-squares solver with ``method="scipy_matrix_free"``:
 

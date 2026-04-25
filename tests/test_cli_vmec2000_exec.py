@@ -46,19 +46,26 @@ def test_cli_matches_vmec2000_wout(tmp_path, input_path: Path, is_3d: bool):
         pytest.skip(f"Input file not found: {input_path}")
 
     cfg, _ = load_config(str(input_path))
-    niter = int(os.environ.get("VMEC2000_CLI_NITER", "2"))
+    niter_env = os.environ.get("VMEC2000_CLI_NITER", "").strip()
+    finite_step_mode = bool(niter_env)
 
-    # VMEC2000 reference (single stage, short run).
+    # VMEC2000 reference. By default this optional integration test compares
+    # converged equilibria using the input deck's own multigrid schedule.
+    # Setting VMEC2000_CLI_NITER switches to a short single-grid diagnostic.
+    indata_updates = {}
+    if finite_step_mode:
+        niter = int(niter_env)
+        indata_updates = {
+            "NITER": str(niter),
+            "NS_ARRAY": f"{int(cfg.ns)}",
+            "NITER_ARRAY": f"{niter}",
+        }
     vmec = run_xvmec2000(
         input_path,
         exec_path=exe,
         workdir=tmp_path / "vmec2000",
-        timeout_s=120.0,
-        indata_updates={
-            "NITER": str(niter),
-            "NS_ARRAY": f"{int(cfg.ns)}",
-            "NITER_ARRAY": f"{niter}",
-        },
+        timeout_s=240.0,
+        indata_updates=indata_updates,
         keep_workdir=True,
     )
 
@@ -74,14 +81,13 @@ def test_cli_matches_vmec2000_wout(tmp_path, input_path: Path, is_3d: bool):
         "-m",
         "vmec_jax",
         str(input_path),
-        "--max-iter",
-        str(niter),
-        "--no-multigrid",
-        "--no-use-input-niter",
+        "--parity",
         "--outdir",
         str(outdir),
         "--quiet",
     ]
+    if finite_step_mode:
+        cmd.extend(["--max-iter", str(niter), "--no-multigrid", "--no-use-input-niter"])
     subprocess.run(cmd, check=True)
 
     wout_cli_path = resolve_wout_path(input_path=input_path, outdir=outdir, output=None)
