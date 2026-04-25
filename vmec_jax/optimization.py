@@ -1171,11 +1171,11 @@ class FixedBoundaryExactOptimizer:
         self._exact_solver_kwargs = dict(_base)
         self._trial_solver_kwargs = dict(
             _base,
-            # Trial-point residuals should stay on the fast VMEC2000-style
-            # loop. On the QA/QH direct max_mode=3 cases, the scan path is
-            # much slower even for modest 48-DOF trial steps.
+            # Trial-point residuals do not need an adjoint tape.  On CPU the
+            # VMEC2000-style Python loop is still faster, while on GPU the scan
+            # loop avoids thousands of small host-dispatched kernels.
             jit_forces="auto",
-            use_scan=False,
+            use_scan=self._use_scan_for_trial_solves(),
         )
         self._trial_max_iter = min(self._inner_max_iter, 800)
         if trial_max_iter is not None:
@@ -1237,6 +1237,20 @@ class FixedBoundaryExactOptimizer:
         except Exception:
             backend = "cpu"
         return "tape"
+
+    def _use_scan_for_trial_solves(self) -> bool:
+        """Use the scan loop for residual-only trial solves on accelerators."""
+        if self._solver_device_name == "cpu":
+            return False
+        if self._solver_device_name in ("gpu", "tpu", "cuda", "rocm"):
+            return True
+        try:
+            from ._compat import jax as _jax
+
+            backend = str(_jax.default_backend()).strip().lower() if _jax is not None else "cpu"
+        except Exception:
+            backend = "cpu"
+        return backend not in ("cpu", "")
 
     def _solver_device_context(self):
         if self._solver_device_name is None:
@@ -1995,13 +2009,22 @@ class FixedBoundaryExactOptimizer:
         cached_state, _ = self._exact_cache[key]
         return np.asarray(self._residuals_fn(cached_state), dtype=float)
 
-    def _post_jacobian_clear(self):
+    def _post_jacobian_clear(self, *, clear_compiled: bool = False):
+        """Optionally release compiled replay helpers.
+
+        Exact tapes and solved states are managed by the optimizer caches.  The
+        replay/preconditioner JIT helpers are shape-keyed and LRU-bounded, so
+        keeping them across accepted points avoids repeated CPU/GPU
+        recompilation in long optimizations.  Full release is still available
+        through clear_caches().
+        """
         from .preconditioner_1d_jax import clear_preconditioner_jit_caches
         from .discrete_adjoint import clear_replay_scan_caches
         from .vmec_numpy_forces import clear_numpy_force_caches
-        clear_replay_scan_caches()
-        clear_preconditioner_jit_caches()
-        clear_numpy_force_caches()
+        if clear_compiled:
+            clear_replay_scan_caches()
+            clear_preconditioner_jit_caches()
+            clear_numpy_force_caches()
 
     # ── utilities ─────────────────────────────────────────────────────────────
 
@@ -2010,7 +2033,7 @@ class FixedBoundaryExactOptimizer:
         self._exact_cache.clear()
         self._exact_state_cache.clear()
         self._last_jacobian_residual = None
-        self._post_jacobian_clear()
+        self._post_jacobian_clear(clear_compiled=True)
 
     def aspect_ratio(self, params) -> float:
         """Return the aspect ratio at *params* (uses exact solve cache)."""
@@ -2200,8 +2223,6 @@ class FixedBoundaryExactOptimizer:
             :meth:`save_history`).
         """
         from .wout import equilibrium_aspect_ratio_from_state
-        from .quasisymmetry import quasisymmetry_ratio_residual_from_state
-
         os.environ.setdefault("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", "1024")
 
         self._history = []
