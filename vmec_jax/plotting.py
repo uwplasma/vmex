@@ -1099,7 +1099,7 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
     qs_vals = [h.get("qs_objective", h["objective"]) for h in hist]
     aspects = [h["aspect"] for h in hist]
     # Iota trajectory: present when iota_fn was passed to optimizer
-    iotas = [h["iota"] for h in hist] if hist and "iota" in hist[0] else None
+    iotas = [h.get("iota", np.nan) for h in hist] if hist and any("iota" in h for h in hist) else None
     target_iota = data.get("target_iota", None)
     # Also show iota panel when target_iota is specified even if trajectory is missing
     show_iota = iotas is not None
@@ -1146,7 +1146,8 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
                         label=f"Target ι={target_iota:.4g}")
         ax3.set_ylabel("Mean iota ι", fontsize=11)
         ax3.set_xlabel("Jacobian evaluation index", fontsize=11)
-        ax3.legend(fontsize=9)
+        if target_iota is not None:
+            ax3.legend(fontsize=9)
         ax3.grid(True, alpha=0.3)
 
     fig.tight_layout()

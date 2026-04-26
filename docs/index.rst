@@ -24,6 +24,7 @@ vmec-jax documentation
       algorithms
       validation
       optimization
+      optimization_sweep_results
       discrete_adjoint
       simsopt_comparison
       jxbforce_mercier

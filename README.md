@@ -17,11 +17,17 @@ and free-boundary ideal-MHD equilibria.
 pip install vmec-jax
 ```
 
+QI optimization uses `booz_xform_jax` for the differentiable Boozer transform:
+
+```bash
+pip install "vmec-jax[qi]"
+```
+
 Developer (editable) install:
 
 ```bash
 git clone https://github.com/uwplasma/vmec_jax
-pip install -e vmec_jax/
+pip install -e "vmec_jax[qi]"
 ```
 
 ## Choosing CPU or GPU
@@ -300,13 +306,13 @@ continuation case.
   </tr>
 </table>
 
-## QA/QH/QP optimization policy sweep
+## QA/QH/QP/QI optimization policy sweep
 
 The panel below compares the exact standalone optimizer on CPU and GPU for
-three target symmetries: QA, QH, and QP. Columns increase the boundary space
-from `max_mode = 1` to `max_mode = 3`. Rows compare staged mode continuation
-against direct-start mode expansion. Blue curves use unscaled boundary DOFs;
-orange curves use ESS with `alpha = 2.5`. Solid lines met the optimizer success
+four targets: QA, QH, QP, and QI. Columns increase the boundary space from
+`max_mode = 1` to `max_mode = 3`. Rows compare staged mode continuation against
+direct-start mode expansion. Blue curves use unscaled boundary DOFs; orange
+curves use ESS with `alpha = 2.5`. Solid lines met the optimizer success
 criterion; dashed lines are finite diagnostic-budget stops, not timeouts.
 
 <p align="center">
@@ -318,6 +324,12 @@ residual has a useful direction. With the corrected bounded solve budgets, QA
 continuation reaches the target-iota basin on both CPU and GPU. Direct QA with
 ESS also reaches `iota ~= 0.409`; direct QA without ESS now leaves the zero-iota
 branch, but remains a weak policy for `max_mode=3`.
+
+QH and QP use the quasisymmetry residual with different helicities. QI uses
+`vmec_jax.quasi_isodynamic`, a smooth Boozer-space residual built through
+`booz_xform_jax`. The QI rows first run a same-mode QP preseed and then refine
+with the QI residual; this avoids the QH warm-start basin and gives visibly
+non-QH `|B|` contours while keeping the objective differentiable.
 
 Final CPU states for the continuation and direct-start policies are shown
 below. The `|B|` panels use line contours on the LCFS, with a separate colorbar
@@ -335,10 +347,10 @@ changes.
 Recreate the full CPU/GPU sweep:
 
 ```bash
-JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp --modes 1,2,3 --ess both
-JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp --modes 1,2,3 --ess both
-JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp --modes 1,2,3 --ess both
-JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp --modes 1,2,3 --ess both
+JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both
+JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
+JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both
+JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
 ```
 
 The default per-case timeout is 600 s. Use `--case-timeout-s 0` only for an
@@ -347,7 +359,7 @@ unbounded local diagnostic run.
 Recreate just the CPU direct-start rows:
 
 ```bash
-JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp --modes 1,2,3 --ess both
+JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
 ```
 
 Render the README/docs panels and tables:
@@ -355,6 +367,18 @@ Render the README/docs panels and tables:
 ```bash
 python examples/optimization/render_qs_ess_publication_panel.py
 ```
+
+Run individual examples by editing top-level variables in each script:
+
+```bash
+python examples/optimization/qa_fixed_resolution_jax_ess.py
+python examples/optimization/qh_fixed_resolution_jax.py
+python examples/optimization/qp_fixed_resolution_jax_ess.py
+python examples/optimization/qi_fixed_resolution_jax_ess.py
+```
+
+More figures, CSV/JSON summaries, and reproduction notes are in
+[docs/optimization_sweep_results.rst](docs/optimization_sweep_results.rst).
 
 CPU wall-time summary for the plotted runs:
 
@@ -378,6 +402,12 @@ CPU wall-time summary for the plotted runs:
 | CPU | QP | continuation | 2 | yes | stopped | 4.43e-01 | 7.087 | -0.3102 | 28 | 0.8 |
 | CPU | QP | continuation | 3 | no | ok | 3.20e-01 | 7.077 | -0.3023 | 26 | 1.0 |
 | CPU | QP | continuation | 3 | yes | stopped | 2.74e-01 | 7.063 | -0.3105 | 36 | 1.4 |
+| CPU | QI | continuation | 1 | no | ok | 1.19e-02 | 7.001 | - | 28 | 0.7 |
+| CPU | QI | continuation | 1 | yes | ok | 1.19e-02 | 7.001 | - | 28 | 0.7 |
+| CPU | QI | continuation | 2 | no | stopped | 6.85e-04 | 7.000 | - | 40 | 1.4 |
+| CPU | QI | continuation | 2 | yes | ok | 2.37e-02 | 7.009 | - | 32 | 0.9 |
+| CPU | QI | continuation | 3 | no | stopped | 1.18e-02 | 6.996 | - | 38 | 1.6 |
+| CPU | QI | continuation | 3 | yes | stopped | 1.25e-03 | 7.001 | - | 48 | 1.9 |
 | CPU | QA | direct | 1 | no | ok | 9.29e-03 | 6.002 | 0.3940 | 20 | 2.5 |
 | CPU | QA | direct | 1 | yes | ok | 9.29e-03 | 6.002 | 0.3940 | 20 | 2.7 |
 | CPU | QA | direct | 2 | no | ok | 4.50e-04 | 5.999 | 0.4066 | 18 | 18.6 |
@@ -396,6 +426,12 @@ CPU wall-time summary for the plotted runs:
 | CPU | QP | direct | 2 | yes | stopped | 5.67e-02 | 7.013 | -0.3097 | 20 | 0.7 |
 | CPU | QP | direct | 3 | no | ok | 5.35e-01 | 7.064 | -1.1401 | 17 | 0.7 |
 | CPU | QP | direct | 3 | yes | ok | 9.60e-02 | 7.057 | -0.3092 | 20 | 0.8 |
+| CPU | QI | direct | 1 | no | ok | 1.19e-02 | 7.001 | - | 28 | 0.7 |
+| CPU | QI | direct | 1 | yes | ok | 1.19e-02 | 7.001 | - | 28 | 0.7 |
+| CPU | QI | direct | 2 | no | stopped | 3.93e-03 | 7.000 | - | 31 | 1.3 |
+| CPU | QI | direct | 2 | yes | ok | 5.39e-03 | 7.004 | - | 32 | 1.1 |
+| CPU | QI | direct | 3 | no | stopped | 1.46e-02 | 7.018 | - | 29 | 1.4 |
+| CPU | QI | direct | 3 | yes | ok | 4.21e-03 | 7.003 | - | 28 | 1.1 |
 
 GPU bounded-budget wall-time summary for the plotted runs:
 
@@ -419,6 +455,12 @@ GPU bounded-budget wall-time summary for the plotted runs:
 | GPU | QP | continuation | 2 | yes | stopped | 4.21e-01 | 7.405 | -0.3375 | 7 | 1.6 |
 | GPU | QP | continuation | 3 | no | stopped | 6.27e-01 | 7.159 | -0.8721 | 9 | 2.0 |
 | GPU | QP | continuation | 3 | yes | stopped | 4.78e-01 | 7.151 | -0.3198 | 9 | 1.8 |
+| GPU | QI | continuation | 1 | no | stopped | 4.70e-02 | 7.130 | - | 10 | 1.1 |
+| GPU | QI | continuation | 1 | yes | stopped | 4.70e-02 | 7.130 | - | 10 | 1.2 |
+| GPU | QI | continuation | 2 | no | stopped | 3.44e-02 | 7.032 | - | 12 | 2.1 |
+| GPU | QI | continuation | 2 | yes | stopped | 1.37e-02 | 7.002 | - | 12 | 2.2 |
+| GPU | QI | continuation | 3 | no | stopped | 3.86e-02 | 6.977 | - | 14 | 2.5 |
+| GPU | QI | continuation | 3 | yes | stopped | 7.35e-03 | 6.995 | - | 14 | 2.5 |
 | GPU | QA | direct | 1 | no | stopped | 9.19e-03 | 6.002 | 0.3950 | 12 | 2.3 |
 | GPU | QA | direct | 1 | yes | stopped | 9.19e-03 | 6.002 | 0.3950 | 12 | 2.3 |
 | GPU | QA | direct | 2 | no | stopped | 4.12e-02 | 6.110 | 0.3509 | 12 | 4.0 |
@@ -437,6 +479,12 @@ GPU bounded-budget wall-time summary for the plotted runs:
 | GPU | QP | direct | 2 | yes | stopped | 4.40e-01 | 7.110 | -0.8996 | 5 | 1.3 |
 | GPU | QP | direct | 3 | no | stopped | 1.10e+00 | 7.160 | -1.0789 | 4 | 1.0 |
 | GPU | QP | direct | 3 | yes | stopped | 6.62e-01 | 7.092 | -1.1608 | 5 | 1.2 |
+| GPU | QI | direct | 1 | no | stopped | 4.70e-02 | 7.130 | - | 10 | 1.8 |
+| GPU | QI | direct | 1 | yes | stopped | 4.70e-02 | 7.130 | - | 10 | 1.2 |
+| GPU | QI | direct | 2 | no | stopped | 3.36e-02 | 7.012 | - | 9 | 2.0 |
+| GPU | QI | direct | 2 | yes | stopped | 6.10e-03 | 6.985 | - | 10 | 2.0 |
+| GPU | QI | direct | 3 | no | stopped | 5.65e-02 | 6.973 | - | 9 | 1.9 |
+| GPU | QI | direct | 3 | yes | stopped | 1.46e-02 | 6.962 | - | 10 | 1.8 |
 
 ## Performance vs parity
 
