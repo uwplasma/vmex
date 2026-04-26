@@ -266,8 +266,8 @@ isocurves in (theta, phi) space. Quasi-helical symmetry means :math:`|B|` depend
 the initial configuration, and the 48-DOF run sharpens that alignment further.
 
 
-QA optimisation (fixed-boundary)
----------------------------------
+Quasi-axisymmetric optimisation
+-------------------------------
 
 ``examples/optimization/qa_fixed_resolution_jax_ess.py`` optimises an nfp=2
 quasi-axisymmetric equilibrium for three objectives simultaneously:
@@ -415,10 +415,10 @@ Columns correspond to ``max_mode = 1, 2, 3``.  The vertical dotted lines mark
 continuation stage boundaries.
 
 The objective panel below is the full CPU/GPU policy sweep.  Solid curves met
-the optimizer success criterion; dashed curves are finite diagnostic-budget
-stops, not timeouts.  The QA input carries ``1e-5`` seeds for the mode-1 boundary
-terms, and the GPU QA rows now use moderately converged bounded inner solves so
-the iota residual leaves the zero-iota branch.  QA continuation reaches the
+the optimizer success criterion; dashed curves reached the configured
+``max_nfev`` before satisfying the convergence tolerances, not wall-clock
+timeouts.  The QA input carries ``1e-5`` seeds for the mode-1 boundary terms so
+the iota residual has a useful derivative.  QA continuation reaches the
 target-iota basin on both CPU and GPU; direct QA with ESS also reaches
 ``iota ~= 0.409``.  Direct QA without ESS remains a weak policy for
 ``max_mode=3``.
@@ -441,8 +441,10 @@ target-iota basin on both CPU and GPU; direct QA with ESS also reaches
    JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
    python examples/optimization/render_qs_ess_publication_panel.py
 
-The default per-case timeout is ``600 s``.  Use ``--case-timeout-s 0`` only
-for an unbounded local diagnostic run.
+The default per-case timeout is ``600 s``.  GPU sweeps use the same production
+budgets as CPU by default.  Add ``--diagnostic-budgets`` only for bounded
+quick-look GPU diagnostics, and use ``--case-timeout-s 0`` only for an
+unbounded local diagnostic run.
 
 To recreate one row, restrict ``--policy`` and ``--problems``.  For example,
 this reruns only the QA direct-start row:
@@ -452,11 +454,10 @@ this reruns only the QA direct-start row:
    JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa --modes 1,2,3 --ess both --rerun
    python examples/optimization/render_qs_ess_publication_panel.py
 
-The GPU rows are bounded-budget diagnostics.  They are useful for checking that
-the GPU exact path runs and that QA reaches finite iota, but the CPU rows remain
-the production-accuracy reference for this cold-start matrix.  The April 25,
-2026 rerun completed every GPU row within the 600 s per-case limit and produced
-no timeout records.
+The GPU rows run through the same exact/replay path as CPU.  If you need a
+short diagnostic matrix, append ``--diagnostic-budgets``; otherwise the script
+uses the full problem budgets and records any non-converged case as a normal
+``max_nfev`` stop.
 
 .. code-block:: bash
 
@@ -467,7 +468,7 @@ no timeout records.
 .. image:: _static/figures/qs_ess_objective_panel_gpu_policies.png
    :width: 100%
    :align: center
-   :alt: GPU bounded-budget QA, QH, QP, and QI optimization status panel
+   :alt: GPU QA, QH, QP, and QI optimization status panel
 
 .. image:: _static/figures/qs_ess_publication_panel_full.png
    :width: 100%
@@ -518,6 +519,36 @@ production CPU atlases are also emitted as
    :width: 100%
    :align: center
    :alt: GPU continuation final-state atlas for QA, QH, QP, and QI
+
+
+Finite-beta stage-one examples
+------------------------------
+
+The finite-beta examples reproduce the VMEC-only stage-one part of the
+``single_stage_optimization_finite_beta`` workflows without SIMSOPT or coils.
+They use the finite-pressure/current input decks in ``examples/data`` and add
+JAX-differentiable global residuals for aspect ratio, iota bounds,
+volume-averaged field proxy, and total beta.  QA and QH then add the usual
+quasisymmetry residual; QI adds the smooth Boozer-space quasi-isodynamic
+residual through ``booz_xform_jax``.
+
+.. code-block:: bash
+
+   PYTHONPATH=. python examples/optimization/qa_optimization_finite_beta.py
+   PYTHONPATH=. python examples/optimization/qh_optimization_finite_beta.py
+   PYTHONPATH=. python examples/optimization/qi_optimization_finite_beta.py
+
+All controls are top-level variables in those scripts: ``MAX_MODE``,
+``MAX_NFEV``, ``USE_ESS``, ``USE_MODE_CONTINUATION``, and
+``SOLVER_DEVICE``.  Set ``SOLVER_DEVICE = "gpu"`` or run with
+``JAX_PLATFORM_NAME=gpu`` on a machine with a working JAX GPU install.
+
+The current implementation includes differentiable finite-beta global
+diagnostics and current-driven iota through ``PCURR_TYPE = "cubic_spline_ip"``.
+The full Redl bootstrap-current mismatch and Mercier ``DMerc`` residuals from
+the SIMSOPT finite-beta script remain open extensions; the examples keep the
+stage-one structure and write VMEC inputs/wouts/history so those terms can be
+added and regression-tested incrementally.
 
 .. image:: _static/figures/qs_ess_final_state_atlas_gpu_direct.png
    :width: 100%

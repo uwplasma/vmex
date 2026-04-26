@@ -43,7 +43,7 @@ Run the CPU production sweep:
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
-Run the GPU diagnostic sweep on a machine with a working JAX GPU install:
+Run the GPU production sweep on a machine with a working JAX GPU install:
 
 .. code-block:: bash
 
@@ -51,14 +51,17 @@ Run the GPU diagnostic sweep on a machine with a working JAX GPU install:
    PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
-The default per-case timeout is 600 seconds.  Use ``--case-timeout-s 0`` only
-for unbounded local diagnostics.
+The default per-case timeout is 600 seconds.  GPU uses the same production
+budgets as CPU by default.  Add ``--diagnostic-budgets`` only for bounded
+quick-look GPU diagnostics, and use ``--case-timeout-s 0`` only for unbounded
+local diagnostics.
 
 Objective Histories
 -------------------
 
 The all-policy panel contains every available backend/policy row.  Solid curves
-met the optimizer success criterion; dashed curves are bounded-budget stops.
+met the optimizer success criterion; dashed curves reached the configured
+``max_nfev`` before satisfying convergence tolerances.
 Vertical dotted lines mark continuation stage boundaries.
 
 .. image:: _static/figures/qs_ess_objective_panel_all_policies.png
@@ -194,9 +197,38 @@ minimizes the QI residual on five surfaces.  In this run, continuation
 no longer QH-like; the preseed moves them toward poloidally closed wells before
 the QI refinement.
 
-The GPU QI bounded sweep is included as a diagnostic matrix.  It completed
-without timeouts on an RTX A4000 system.  The best GPU QI entries in the
-current panel are continuation ``max_mode=3`` with ESS (``J = 7.35e-3``) and
-direct ``max_mode=2`` with ESS (``J = 6.10e-3``).  Those GPU rows use
-intentionally small diagnostic budgets; the CPU QI rows remain the
-production-accuracy reference until the GPU exact-replay path is tuned further.
+The GPU QI sweep is included as the accelerator matrix.  Bounded quick-look
+diagnostics can still be reproduced with ``--diagnostic-budgets``, but the
+default command path now uses production budgets so GPU results are not
+silently capped.
+
+Finite-beta Stage-One Examples
+------------------------------
+
+The finite-beta examples mirror the VMEC-only stage-one part of
+``/Users/rogeriojorge/local/single_stage_optimization_finite_beta`` without
+SIMSOPT or coils:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python examples/optimization/qa_optimization_finite_beta.py
+   PYTHONPATH=. python examples/optimization/qh_optimization_finite_beta.py
+   PYTHONPATH=. python examples/optimization/qi_optimization_finite_beta.py
+
+The input decks are bundled as:
+
+- ``examples/data/input.nfp2_QA_finite_beta``
+- ``examples/data/input.nfp4_QH_finite_beta``
+- ``examples/data/input.nfp4_QI_finite_beta``
+
+The shared helper ``examples/optimization/finite_beta_stage1_common.py`` adds
+JAX-differentiable residuals for aspect ratio, iota lower/mean/upper bounds,
+volume-averaged field proxy, and total beta.  QA/QH add quasisymmetry residuals
+and QI adds the smooth Boozer-space QI residual.  The scripts save
+``input.initial``, ``input.final``, ``wout_initial.nc``, ``wout_final.nc``, and
+``history.json`` for each run.
+
+Mercier ``DMerc`` and Redl bootstrap-current mismatch are not yet enabled as
+fully differentiable residual blocks in vmec_jax.  The finite-beta scaffolding
+is structured so those terms can be added next without changing the user-facing
+example workflow.

@@ -34,6 +34,7 @@ Examples:
 
   python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation
   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct
+  JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu_diag --solver-device gpu --policy direct --diagnostic-budgets
   python examples/optimization/render_qs_ess_publication_panel.py
 """
 
@@ -46,10 +47,15 @@ import json
 import multiprocessing as mp
 import os
 from pathlib import Path
+import sys
 import time
 import traceback
 
 import numpy as np
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import vmec_jax as vj
 from vmec_jax._compat import enable_x64, jnp
@@ -81,6 +87,7 @@ SOLVER_DEVICE: str | None = None
 SKIP_EXISTING = True
 CASE_TIMEOUT_S: float | None = 600.0
 ESS_ALPHA = 2.5
+DIAGNOSTIC_BUDGETS = False
 
 
 @dataclass(frozen=True)
@@ -93,9 +100,9 @@ class CaseBudget:
     trial_ftol: float | None = None
 
 
-# Bounded policies for cases that are known to be poor/runaway diagnostics.
-# This keeps full GPU panel regeneration finite while still recording the poor
-# policy as a failed or weak result instead of blocking the whole sweep.
+# Bounded policies for known poor/runaway diagnostic cases. These are opt-in via
+# ``--diagnostic-budgets``; production CPU/GPU sweeps use the full problem
+# budgets so GPU results are not silently capped.
 CASE_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
     # QA needs a moderately converged inner solve before the iota residual has a
     # useful derivative. The old 40-iteration GPU diagnostic cap kept QA on the
@@ -356,12 +363,12 @@ def _effective_problem_config(
     problem: str,
     max_mode: int,
     use_ess: bool,
+    diagnostic_budgets: bool = DIAGNOSTIC_BUDGETS,
 ) -> ProblemConfig:
     updates = {}
-    if str(backend).lower() == "gpu":
+    if diagnostic_budgets and str(backend).lower().startswith("gpu"):
         # GPU callbacks are still cold-compile/dispatch dominated. Keep the
-        # full panel finite and comparable by bounding every GPU case; use CPU
-        # runs for production-accuracy long budgets.
+        # diagnostic panel finite and comparable by bounding every GPU case.
         updates.update(
             max_nfev=min(int(problem_cfg.max_nfev), 5),
             continuation_nfev=min(int(problem_cfg.continuation_nfev), 2),
@@ -372,9 +379,11 @@ def _effective_problem_config(
             trial_max_iter=min(int(problem_cfg.trial_max_iter), 40),
             trial_ftol=max(float(problem_cfg.trial_ftol), 1e-8),
         )
-    budget = CASE_BUDGET_OVERRIDES.get(
-        (str(backend), str(policy), str(problem), int(max_mode), bool(use_ess))
-    )
+    budget = None
+    if diagnostic_budgets:
+        budget = CASE_BUDGET_OVERRIDES.get(
+            (str(backend), str(policy), str(problem), int(max_mode), bool(use_ess))
+        )
     if budget is None and not updates:
         return problem_cfg
     if budget is not None and budget.max_nfev is not None:
@@ -727,6 +736,7 @@ def _run_case(
     backend: str,
     solver_device: str | None,
     jax_platforms: str | None,
+    diagnostic_budgets: bool = DIAGNOSTIC_BUDGETS,
 ) -> CaseResult:
     problem_cfg = _effective_problem_config(
         PROBLEM_CONFIGS[problem],
@@ -735,6 +745,7 @@ def _run_case(
         problem=problem,
         max_mode=max_mode,
         use_ess=use_ess,
+        diagnostic_budgets=diagnostic_budgets,
     )
     cfg, indata = _load_problem(problem_cfg)
     jax_backend, jax_device_kind = _jax_runtime_info()
@@ -753,6 +764,7 @@ def _run_case(
             problem="qp",
             max_mode=max_mode,
             use_ess=use_ess,
+            diagnostic_budgets=diagnostic_budgets,
         )
         qp_stage_results, prev_specs, params_stage, qp_opt, qp_params0, qp_result = _run_problem_stages(
             problem_cfg=qp_cfg,
@@ -839,6 +851,7 @@ def _worker(
     backend: str,
     solver_device: str | None,
     jax_platforms: str | None,
+    diagnostic_budgets: bool,
 ):
     try:
         case_result = _run_case(
@@ -851,6 +864,7 @@ def _worker(
             backend=backend,
             solver_device=solver_device,
             jax_platforms=jax_platforms,
+            diagnostic_budgets=diagnostic_budgets,
         )
         Path(result_path).write_text(json.dumps(asdict(case_result), indent=2))
     except Exception as exc:
@@ -1057,6 +1071,7 @@ def _write_summary_csv(results: list[CaseResult], path: Path) -> None:
     with path.open("w", newline="") as f:
         writer = csv.DictWriter(
             f,
+            lineterminator="\n",
             fieldnames=[
                 "policy",
                 "backend",
@@ -1123,6 +1138,15 @@ def _parse_args() -> argparse.Namespace:
             "use 'cpu' only when an explicit CPU-only worker is desired."
         ),
     )
+    parser.add_argument(
+        "--diagnostic-budgets",
+        action="store_true",
+        default=DIAGNOSTIC_BUDGETS,
+        help=(
+            "Apply bounded per-case diagnostic budgets. By default CPU and GPU "
+            "sweeps use the full optimization budgets."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -1183,6 +1207,7 @@ def main() -> None:
                         backend_label,
                         solver_device,
                         worker_jax_platforms,
+                        bool(args.diagnostic_budgets),
                     ),
                 )
                 case_t0 = time.perf_counter()
