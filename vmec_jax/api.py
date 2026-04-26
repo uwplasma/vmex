@@ -28,6 +28,11 @@ from .boundary import boundary_from_input_convention, boundary_input_from_indata
 from .booz_input import booz_xform_inputs_from_state
 from .field import signgs_from_sqrtg
 from .energy import flux_profiles_from_indata
+from .quasi_isodynamic import (
+    quasi_isodynamic_residual_from_boozer_modes,
+    quasi_isodynamic_residual_from_boozer_output,
+    quasi_isodynamic_residual_from_state,
+)
 from .plotting import (
     bmag_from_state_physical,
     bmag_from_wout,
@@ -66,6 +71,9 @@ __all__ = [
     "read_indata",
     "write_indata",
     "booz_xform_inputs_from_state",
+    "quasi_isodynamic_residual_from_boozer_modes",
+    "quasi_isodynamic_residual_from_boozer_output",
+    "quasi_isodynamic_residual_from_state",
     # Plotting helpers
     "bmag_from_state_physical",
     "bmag_from_wout",

@@ -194,6 +194,11 @@ from .quasisymmetry import (
     quasisymmetry_ratio_residual_from_state,
     quasisymmetry_ratio_residual_from_wout,
 )
+from .quasi_isodynamic import (
+    quasi_isodynamic_residual_from_boozer_modes,
+    quasi_isodynamic_residual_from_boozer_output,
+    quasi_isodynamic_residual_from_state,
+)
 from .visualization import export_vtk_surface_and_fieldline
 
 __all__ = [
@@ -377,5 +382,8 @@ __all__ = [
     "quasisymmetry_diagnostics_from_state",
     "quasisymmetry_ratio_residual_from_state",
     "quasisymmetry_ratio_residual_from_wout",
+    "quasi_isodynamic_residual_from_boozer_modes",
+    "quasi_isodynamic_residual_from_boozer_output",
+    "quasi_isodynamic_residual_from_state",
     "export_vtk_surface_and_fieldline",
 ]
