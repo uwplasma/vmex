@@ -101,6 +101,53 @@ def test_as_jax_array_is_tracer_safe():
     np.testing.assert_allclose(np.asarray(result), 14.0, rtol=0.0, atol=0.0)
 
 
+def test_quasisymmetry_ratio_residual_returns_diagnostic_fields():
+    pytest.importorskip("jax")
+
+    from vmec_jax import load_wout
+    from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_wout
+
+    root = os.path.dirname(os.path.dirname(__file__))
+    wout = load_wout(os.path.join(root, "examples", "data", "wout_li383_low_res.nc"))
+    qs = quasisymmetry_ratio_residual_from_wout(
+        wout,
+        surfaces=[0.5],
+        helicity_m=1,
+        helicity_n=1,
+        ntheta=17,
+        nphi=18,
+    )
+
+    for key in (
+        "d_B_d_theta",
+        "d_B_d_phi",
+        "bsubu",
+        "bsubv",
+        "bsupu",
+        "bsupv",
+        "d_psi_d_s",
+        "V_prime",
+    ):
+        assert key in qs
+
+    np.testing.assert_allclose(
+        np.asarray(qs["bsupu"] * qs["d_B_d_theta"] + qs["bsupv"] * qs["d_B_d_phi"]),
+        np.asarray(qs["B_dot_grad_B"]),
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(
+            qs["d_psi_d_s"]
+            * (qs["bsubu"] * qs["d_B_d_phi"] - qs["bsubv"] * qs["d_B_d_theta"])
+            / qs["sqrtg"]
+        ),
+        np.asarray(qs["B_cross_grad_B_dot_grad_psi"]),
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+
+
 def test_scan_cache_lru_helpers_evict_oldest(monkeypatch):
     from collections import OrderedDict
 
