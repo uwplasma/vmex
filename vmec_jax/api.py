@@ -26,7 +26,7 @@ from .driver import (
 )
 from .boundary import boundary_from_input_convention, boundary_input_from_indata
 from .booz_input import booz_xform_inputs_from_state
-from .field import signgs_from_sqrtg
+from .field import b_cartesian_from_state, signgs_from_sqrtg
 from .energy import flux_profiles_from_indata
 from .plotting import (
     bmag_from_state_physical,
@@ -85,6 +85,7 @@ __all__ = [
     "zeta_grid",
     "zeta_grid_field_period",
     # Field helpers
+    "b_cartesian_from_state",
     "signgs_from_sqrtg",
     "flux_profiles_from_indata",
     # Visualization helpers
