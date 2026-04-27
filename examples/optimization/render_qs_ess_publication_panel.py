@@ -171,13 +171,22 @@ def _relative_result_parts(path: Path) -> tuple[str, ...]:
         return path.parts
 
 
+def _normalize_backend_label(value: str) -> str:
+    label = str(value).strip().lower()
+    if label.startswith("gpu"):
+        return "gpu"
+    if label.startswith("cpu"):
+        return "cpu"
+    return label
+
+
 def _infer_backend(path: Path, record: dict) -> tuple[str, bool, bool]:
     if record.get("backend"):
-        return str(record["backend"]), True, True
+        return _normalize_backend_label(str(record["backend"])), True, True
     parts = tuple(part.lower() for part in _relative_result_parts(path))
     for backend in ("cpu", "gpu"):
         if backend in parts:
-            return backend, False, True
+            return _normalize_backend_label(backend), False, True
     return "cpu", False, False
 
 

@@ -171,6 +171,16 @@ CASE_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
 # use these medium-accuracy budgets so cold GPU cases finish in the documented
 # 10-minute envelope.
 GPU_PRODUCTION_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
+    # Bound high-mode continuation so GPU sweeps complete under the documented
+    # per-case timeout. These are intentionally looser than the old diagnostic
+    # caps, but still use the medium-accuracy accepted/trial VMEC callback path.
+    ("gpu", "continuation", "qa", 2, False): CaseBudget(max_nfev=12, continuation_nfev=6),
+    ("gpu", "continuation", "qa", 2, True): CaseBudget(max_nfev=12, continuation_nfev=6),
+    ("gpu", "continuation", "qa", 3, False): CaseBudget(max_nfev=8, continuation_nfev=6),
+    ("gpu", "continuation", "qa", 3, True): CaseBudget(max_nfev=8, continuation_nfev=6),
+    ("gpu", "continuation", "qh", 2, False): CaseBudget(max_nfev=12, continuation_nfev=6),
+    ("gpu", "continuation", "qh", 3, False): CaseBudget(max_nfev=8, continuation_nfev=6),
+    ("gpu", "continuation", "qh", 3, True): CaseBudget(max_nfev=8, continuation_nfev=6),
     ("gpu", "direct", "qa", 3, False): CaseBudget(max_nfev=24),
     ("gpu", "direct", "qa", 3, True): CaseBudget(max_nfev=24),
     ("gpu", "direct", "qh", 2, False): CaseBudget(max_nfev=12),
@@ -407,6 +417,14 @@ def _effective_problem_config(
                 updates["max_nfev"] = min(int(problem_cfg.max_nfev), int(budget.max_nfev))
             if budget.continuation_nfev is not None:
                 updates["continuation_nfev"] = min(int(problem_cfg.continuation_nfev), int(budget.continuation_nfev))
+            if budget.inner_max_iter is not None:
+                updates["inner_max_iter"] = int(budget.inner_max_iter)
+            if budget.inner_ftol is not None:
+                updates["inner_ftol"] = float(budget.inner_ftol)
+            if budget.trial_max_iter is not None:
+                updates["trial_max_iter"] = int(budget.trial_max_iter)
+            if budget.trial_ftol is not None:
+                updates["trial_ftol"] = float(budget.trial_ftol)
     if diagnostic_budgets and backend_key == "gpu":
         # GPU callbacks are still cold-compile/dispatch dominated. Keep the
         # diagnostic panel finite and comparable by bounding every GPU case.
@@ -1235,6 +1253,8 @@ def main() -> None:
                         flush=True,
                     )
                     continue
+                if result_path.exists() and args.rerun:
+                    result_path.unlink()
                 proc = ctx.Process(
                     target=_worker,
                     args=(
