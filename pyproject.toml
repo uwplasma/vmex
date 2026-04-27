@@ -31,6 +31,8 @@ docs = [
   "furo",
 ]
 plots = ["matplotlib"]
+booz = ["booz_xform_jax"]
+qi = ["booz_xform_jax"]
 dev = ["pytest", "ruff", "mypy", "types-setuptools"]
 
 [tool.setuptools.packages.find]

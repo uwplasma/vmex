@@ -50,6 +50,31 @@ def test_power_series_profiles_against_manual():
     np.testing.assert_allclose(np.asarray(prof["current"]), current, rtol=0, atol=1e-12)
 
 
+def test_cubic_spline_ip_current_profile_integrates_aux_values():
+    indata = InData(
+        scalars={
+            "PMASS_TYPE": "power_series",
+            "PIOTA_TYPE": "power_series",
+            "PCURR_TYPE": "cubic_spline_ip",
+            "AM": [0.0],
+            "AI": [0.0],
+            "AC": [0.0],
+            "AC_AUX_S": [0.0, 0.25, 0.5, 0.75, 1.0, 0.0],
+            "AC_AUX_F": [2.0, 3.0, 4.0, 5.0, 6.0, 0.0],
+            "PRES_SCALE": 1.0,
+            "BLOAT": 1.0,
+            "SPRES_PED": 1.0,
+            "LRFP": False,
+            "NCURR": 1,
+        },
+        indexed={},
+    )
+    s = np.linspace(0.0, 1.0, 9)
+    prof = eval_profiles(indata, s)
+    expected = 2.0 * s + 2.0 * s**2
+    np.testing.assert_allclose(np.asarray(prof["current"]), expected, rtol=1e-12, atol=1e-12)
+
+
 def test_power_series_profiles_support_traced_coefficients():
     if not has_jax():
         pytest.skip("JAX not available")
