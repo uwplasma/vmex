@@ -517,11 +517,23 @@ def b_cartesian_from_state(
     from .geom import eval_geom
 
     geom = eval_geom(state, static)
+    bsupu = jnp.asarray(bc.bsupu)
+    bsupv = jnp.asarray(bc.bsupv)
+    ns = int(bsupu.shape[0])
+    radial_index = int(s_index)
+    if radial_index < 0:
+        radial_index += ns
+    if radial_index == ns - 1 and ns >= 2:
+        bsupu_edge = 1.5 * bsupu[-1] - 0.5 * bsupu[-2]
+        bsupv_edge = 1.5 * bsupv[-1] - 0.5 * bsupv[-2]
+        bsupu = bsupu.at[-1].set(bsupu_edge)
+        bsupv = bsupv.at[-1].set(bsupv_edge)
+
     bcart = b_cartesian_from_bsup(
         geom,
-        bc.bsupu,
-        bc.bsupv,
+        bsupu,
+        bsupv,
         zeta=static.grid.zeta,
         nfp=int(getattr(wout, "nfp", static.cfg.nfp)),
     )
-    return bcart[int(s_index)]
+    return bcart[radial_index]
