@@ -119,9 +119,13 @@ tape construction, checkpoint-tape JVP replay, residual tangent projection, and
 term for ``max_mode=2`` and ``max_mode=3`` is
 ``jacobian_tape_replay``.  Ordinary fixed-boundary solves can benefit from GPU
 ``lax.scan`` after warmup, but the exact optimizer's accepted-point Jacobian
-path still needs the trace-capable non-scan loop.  ``solver_device=None``,
-``"auto"``, and ``"default"`` inherit JAX's active backend; pass
-``solver_device="cpu"`` or ``"gpu"`` only when you want an explicit override.
+path uses the discrete-adjoint tape replay by default.  Relaxed trial residuals
+also default to the trace-compatible non-scan forward path because April 2026
+GPU profiling showed lower compile/dispatch overhead for the QA/QH/QP/QI
+optimization callbacks.  Set ``VMEC_JAX_OPT_TRIAL_SCAN=1`` only for explicit
+diagnostics.  ``solver_device=None``, ``"auto"``, and ``"default"`` inherit
+JAX's active backend; pass ``solver_device="cpu"`` or ``"gpu"`` only when you
+want an explicit override.
 
 For the standalone sweep scripts, worker subprocesses also inherit the parent
 JAX backend by default.  Use ``JAX_PLATFORMS=cpu`` or
@@ -306,12 +310,17 @@ CPU and GPU.  The scan-differentiated exact path is intentionally not selected
 automatically: on the April 2026 RTX A4000 diagnostics, a cold QA
 ``max_mode=3`` scan exact Jacobian took about ``107 s`` before warm replay,
 whereas the tape path completed the same callback much sooner.  GPU trial-point
-residual solves are different because they do not need an adjoint tape.  For
-accelerator contexts the optimizer now uses scan only for these residual-only
-trial solves; the accepted Jacobian still uses the tape replay path.  A bounded
-QA ``max_mode=3`` GPU diagnostic with three SciPy evaluations improved from
-about ``83 s`` to about ``73 s`` after this split policy and replay-cache
-retention, but CPU remains faster for this small problem.
+residual solves do not need an adjoint tape, but the scan graph was still slower
+for the current small/medium exact-optimization cases.  A QH ``max_mode=2`` GPU
+profile with four SciPy evaluations kept the same final objective and reduced
+mean trial-solve time from about ``11.2 s`` to about ``5.2 s`` after returning
+trial residuals to the non-scan path.  CPU remains faster for some small cold
+optimization cases.  GPU sweep production runs now use calibrated optimizer
+budgets (currently ``inner_max_iter = trial_max_iter = 120`` and
+``ftol = trial_ftol = 1e-8`` for deck-controlled QA/QH cases), rather than the
+old four-evaluation diagnostic caps.  This avoids differentiating through 1500
+strict VMEC iterations at every accepted point; final standalone verification
+runs can still use the VMEC input-deck ``NITER_ARRAY`` / ``FTOL_ARRAY``.
 
 Replay and preconditioner JIT helper caches are retained across accepted points
 and LRU-bounded.  Call ``FixedBoundaryExactOptimizer.clear_caches()`` to release

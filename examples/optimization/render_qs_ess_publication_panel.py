@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Render publication-style figures for the QA/QH/QP policy sweep."""
+"""Render publication-style figures for the QA/QH/QP/QI policy sweep."""
 
 from __future__ import annotations
 
@@ -18,7 +18,8 @@ from vmec_jax.wout import read_wout
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 OUTPUT_ROOT = SCRIPT_DIR / "results" / "qs_ess_sweep"
-PROBLEMS = ("qa", "qh", "qp")
+REPO_ROOT = SCRIPT_DIR.parents[1]
+PROBLEMS = ("qa", "qh", "qp", "qi")
 ESS_OPTIONS = (False, True)
 POLICIES = ("continuation", "direct")
 ROW_SPECS = (
@@ -28,6 +29,8 @@ ROW_SPECS = (
     ("qh", "direct"),
     ("qp", "continuation"),
     ("qp", "direct"),
+    ("qi", "continuation"),
+    ("qi", "direct"),
 )
 MODES_BY_POLICY = {
     "continuation": (1, 2, 3),
@@ -257,10 +260,12 @@ def _discover_results() -> list[CaseResult]:
 
 def _write_combined_summary(results: list[CaseResult]) -> None:
     ordered = sorted(results, key=lambda r: (r.backend, POLICIES.index(r.policy), r.problem, r.max_mode, r.use_ess))
-    (OUTPUT_ROOT / "summary_all.json").write_text(json.dumps([asdict(r) for r in ordered], indent=2))
+    records = [_summary_record(r) for r in ordered]
+    (OUTPUT_ROOT / "summary_all.json").write_text(json.dumps(records, indent=2))
     with (OUTPUT_ROOT / "summary_all.csv").open("w", newline="") as f:
         writer = csv.DictWriter(
             f,
+            lineterminator="\n",
             fieldnames=[
                 "policy",
                 "backend",
@@ -285,8 +290,19 @@ def _write_combined_summary(results: list[CaseResult]) -> None:
             ],
         )
         writer.writeheader()
-        for result in ordered:
-            writer.writerow(asdict(result))
+        for record in records:
+            writer.writerow(record)
+
+
+def _summary_record(result: CaseResult) -> dict:
+    record = asdict(result)
+    output_dir = record.get("output_dir")
+    if output_dir:
+        try:
+            record["output_dir"] = str(Path(str(output_dir)).resolve().relative_to(REPO_ROOT))
+        except ValueError:
+            record["output_dir"] = str(output_dir)
+    return record
 
 
 def _result_lookup(results: list[CaseResult]) -> dict[tuple[str, str, str, int, bool], CaseResult]:
@@ -596,7 +612,7 @@ def _plot_objective_panel_all_policies(results: list[CaseResult], outpath_png: P
             frameon=False,
         )
     fig.suptitle(
-        "QA/QH/QP optimization histories by backend: continuation versus direct-start mode expansion",
+        "QA/QH/QP/QI optimization histories by backend: continuation versus direct-start mode expansion",
         y=0.998,
         fontsize=16,
     )
@@ -947,11 +963,19 @@ def _assemble_full_panel(
         ax.imshow(image)
         ax.axis("off")
         ax.set_title(title, loc="left", fontsize=16, pad=10, fontweight="bold")
-    fig.suptitle("Reviewer-facing QA/QH/QP optimization policy sweep panel", y=0.996, fontsize=19)
+    fig.suptitle("Reviewer-facing QA/QH/QP/QI optimization policy sweep panel", y=0.996, fontsize=19)
     fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.99))
     fig.savefig(outpath_png, dpi=220, bbox_inches="tight")
     fig.savefig(outpath_pdf, bbox_inches="tight")
     plt.close(fig)
+
+
+def _copy_alias(src_stem: Path, dst_stem: Path) -> None:
+    """Copy a png/pdf figure pair so legacy names do not stay stale."""
+    for suffix in (".png", ".pdf"):
+        src = src_stem.with_suffix(suffix)
+        if src.exists():
+            shutil.copy2(src, dst_stem.with_suffix(suffix))
 
 
 def main() -> None:
@@ -967,6 +991,7 @@ def main() -> None:
     panel_pdf = OUTPUT_ROOT / "publication_panel_full.pdf"
 
     _plot_objective_panel_all_policies(results, objective_png, objective_pdf)
+    _copy_alias(OUTPUT_ROOT / "objective_panel_all_policies", OUTPUT_ROOT / "objective_panel")
     for backend in sorted({result.backend for result in results}):
         backend_results = [result for result in results if result.backend == backend]
         _plot_objective_panel_all_policies(
@@ -1003,7 +1028,10 @@ def main() -> None:
                     # README/docs for the production-accuracy CPU final states.
                     shutil.copy2(atlas_png, OUTPUT_ROOT / f"final_state_atlas_{policy}.png")
                     shutil.copy2(atlas_pdf, OUTPUT_ROOT / f"final_state_atlas_{policy}.pdf")
+                    if policy == "continuation":
+                        _copy_alias(OUTPUT_ROOT / f"final_state_atlas_{policy}", OUTPUT_ROOT / "geometry_atlas")
     _plot_summary_tables(results, summary_png, summary_pdf)
+    _copy_alias(OUTPUT_ROOT / "summary_tables_all_policies", OUTPUT_ROOT / "summary_table")
     for backend in sorted({result.backend for result in results}):
         backend_results = [result for result in results if result.backend == backend]
         _plot_summary_tables(
@@ -1022,6 +1050,7 @@ def main() -> None:
         panel_png,
         panel_pdf,
     )
+    _copy_alias(OUTPUT_ROOT / "publication_panel_full", OUTPUT_ROOT / "publication_panel")
 
     print(f"Wrote {objective_png}")
     for atlas_png, _atlas_pdf, _title in atlas_paths:
