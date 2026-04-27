@@ -17,11 +17,17 @@ and free-boundary ideal-MHD equilibria.
 pip install vmec-jax
 ```
 
+QI optimization uses `booz_xform_jax` for the differentiable Boozer transform:
+
+```bash
+pip install "vmec-jax[qi]"
+```
+
 Developer (editable) install:
 
 ```bash
 git clone https://github.com/uwplasma/vmec_jax
-pip install -e vmec_jax/
+pip install -e "vmec_jax[qi]"
 ```
 
 ## Choosing CPU or GPU
@@ -145,7 +151,27 @@ All figures below use the same **single-grid** run settings: `NS_ARRAY=151`, `NI
 
 **Cold vs warm runtime**: the *cold* bar includes XLA JIT compilation on the first call (one-time cost per process); the *warm* bar is the steady-state solve time for subsequent calls in the same process. VMEC2000 has no compilation overhead, so it is always effectively cold. `vmec_jax` enables JAX's persistent compilation cache by default under `~/.cache/vmec_jax/jax_cache` so repeated cold-process runs can reuse compiled kernels; set `VMEC_JAX_COMPILATION_CACHE=0` to disable it or `VMEC_JAX_COMPILATION_CACHE_DIR=/path/to/cache` to choose a different location.
 
-## Quasi-helical symmetry optimization (discrete-adjoint)
+## Optimization Internals
+
+The fixed-boundary optimization examples expose the problem construction
+directly in Python: VMEC resolution, active boundary coefficients, objective
+blocks, weights, continuation policy, ESS scaling, and the outer optimizer are
+all top-level variables in the scripts.  No SIMSOPT wrapper layer is required.
+
+For a boundary parameter vector `x`, vmec_jax solves the VMEC residual
+`F(y, x) = 0` for the equilibrium state `y`, then differentiates objective
+residuals `r(y(x), x)` with the exact discrete-adjoint/tape path.  Instead of
+finite-differencing each boundary DOF, vmec_jax records a checkpoint tape of
+the nonlinear VMEC iteration and replays it with JAX JVP/VJP rules.  The dense
+least-squares Jacobian used by the examples is exact to machine precision and
+has cost comparable to a small number of forward solves, not one VMEC solve per
+boundary DOF.
+
+Details: [discrete adjoint](docs/discrete_adjoint.rst),
+[optimization guide](docs/optimization.rst), and
+[SIMSOPT comparison](docs/simsopt_comparison.rst).
+
+## Quasi-helical Symmetry Optimization
 
 `examples/optimization/qh_fixed_resolution_jax.py` demonstrates an end-to-end
 fixed-boundary QH optimization using the built-in **exact discrete-adjoint Jacobian**
@@ -156,14 +182,6 @@ The script is intentionally written in the same teaching style as SIMSOPT's
 the active boundary coefficients directly, build the objective blocks directly
 in the script, and choose the outer optimizer explicitly. Nothing relies on a
 hidden SIMSOPT wrapper layer.
-
-> **Discrete adjoint**: rather than perturbing each boundary DOF separately (finite
-> differences), vmec_jax records a *checkpoint tape* of the VMEC iteration and
-> propagates all parameter tangents through it in one batched forward pass
-> (`jax.vmap(jax.jvp(...))`).  The Jacobian is exact (machine precision) and its
-> cost is roughly 1–2 forward solves regardless of the number of DOFs — vs.
-> *n*_DOFs forward solves for finite differences.
-> → [Detailed explanation](docs/discrete_adjoint.rst) · [SIMSOPT comparison](docs/simsopt_comparison.rst)
 
 ```bash
 python examples/optimization/qh_fixed_resolution_jax.py   # MAX_MODE=2 by default
@@ -187,16 +205,15 @@ is normalised identically across `max_mode` values.
 
 | `max_mode` | DOFs | Policy | QS initial | QS final | Reduction | Objective final | Wall time ¹ |
 |:----------:|:----:|:------:|:----------:|:--------:|:---------:|:---------------:|:-----------:|
-| 1          |  8   | continuation, no ESS | 0.303 | 0.214 | 30 % | `0.216` | ~133 s |
-| 2          | 24   | continuation, no ESS | 0.303 | `3.19e-3` | 99 % | `3.19e-3` | ~746 s |
-| 3          | 48   | continuation + ESS | 0.303 | **`9.51e-4`** | **99.7 %** | **`9.51e-4`** | ~952 s |
+| 1          |  8   | continuation, no ESS | 0.303 | 0.214 | 30 % | `0.216` | ~2.2 min |
+| 2          | 24   | continuation, no ESS | 0.303 | `3.72e-3` | 98.8 % | `3.72e-3` | ~8.5 min |
+| 3          | 48   | continuation, no ESS | 0.303 | **`1.37e-3`** | **99.5 %** | **`1.37e-3`** | ~10.7 min |
 
 ¹ Wall time on Apple M-series (warm-cache subsequent runs are faster).
 
 With only 8 DOFs (`max_mode=1`) the boundary deformation space is too limited
 to reach a deep quasi-helical minimum. `max_mode=2` already gives a strong QH
-solution, and the current `max_mode=3` continuation+ESS run improves it further
-on the exact standalone path.
+solution, and the current `max_mode=3` continuation run improves it further.
 
 **vmec_jax vs SIMSOPT**: vmec_jax uses an exact discrete-adjoint Jacobian
 (one batched JVP pass ≈ 1–2 forward solves regardless of DOF count) while
@@ -232,7 +249,7 @@ become increasingly helical (aligned with *m θ − n φ* = const). The ζ axis 
 one field period (0 → 2π/nfp).
 
 The current exact standalone path keeps improving through `max_mode=3`, with
-the 48-DOF continuation+ESS run reaching `~9.5e-4` total objective and QS.
+the 48-DOF continuation run reaching `~1.4e-3` total objective and QS.
 
 Regenerate plots after running the optimization:
 
@@ -240,7 +257,7 @@ Regenerate plots after running the optimization:
 python examples/optimization/plot_qh_optimization_results.py --output-dir results/qh_opt
 ```
 
-## Quasi-axisymmetric optimization (fixed-boundary)
+## Quasi-axisymmetric Optimization
 
 `examples/optimization/qa_fixed_resolution_jax_ess.py` optimizes an nfp=2 QA
 equilibrium for aspect ratio, mean iota, and QA symmetry residuals.
@@ -300,14 +317,82 @@ continuation case.
   </tr>
 </table>
 
-## QA/QH/QP optimization policy sweep
+## Quasi-poloidal Symmetry Optimization
+
+`examples/optimization/qp_fixed_resolution_jax_ess.py` uses the same exact
+fixed-boundary optimizer with helicity `(M, N) = (0, -1)`.  It starts from the
+QH warm-start input and targets aspect ratio 7 with an absolute-iota lower
+bound of 0.31.  Edit the top-level variables in the script to choose
+`MAX_MODE`, `USE_ESS`, `USE_MODE_CONTINUATION`, and the VMEC/optimizer budgets.
+
+```bash
+python examples/optimization/qp_fixed_resolution_jax_ess.py
+```
+
+In the current CPU sweep, QP is the least mature of the three quasisymmetry
+examples: `max_mode=2` direct-start/no-ESS gives the best objective in the
+small benchmark, while `max_mode=3` benefits from ESS but does not yet improve
+monotonically over mode 2.  The full policy matrix is kept in the docs so this
+regression remains visible instead of hidden.
+
+| `max_mode` | Best current policy | Objective final | QS/QP final | Aspect final | Iota final | Wall time |
+|:----------:|:--------------------|:---------------:|:-----------:|:------------:|:----------:|:---------:|
+| 1 | direct or continuation, no ESS | `0.600` | `0.591` | 7.089 | -0.308 | ~0.5 min |
+| 2 | direct, no ESS | **`4.60e-2`** | **`4.60e-2`** | 7.006 | -0.583 | ~0.7 min |
+| 3 | direct + ESS | `9.60e-2` | `9.25e-2` | 7.057 | -0.309 | ~0.8 min |
+
+## Quasi-isodynamic Optimization
+
+`examples/optimization/qi_fixed_resolution_jax_ess.py` uses
+`vmec_jax.quasi_isodynamic`, a smooth Boozer-space QI residual evaluated through
+`booz_xform_jax`.  The documented workflow first runs a same-mode QP preseed
+and then refines with the QI objective; this avoids leaving the solution in the
+QH warm-start basin and gives visibly non-QH `|B|` contours.
+
+```bash
+python examples/optimization/qi_fixed_resolution_jax_ess.py
+```
+
+The current QI objective is already differentiable end-to-end through VMEC and
+Boozer-space post-processing.  Several cases stop by the configured `max_nfev`
+before satisfying SciPy's convergence criterion, so the table reports the best
+objective values rather than claiming all rows are fully converged.
+
+| `max_mode` | Best current policy | Objective final | QI final | Aspect final | Wall time |
+|:----------:|:--------------------|:---------------:|:--------:|:------------:|:---------:|
+| 1 | direct or continuation, no ESS | `1.19e-2` | `1.19e-2` | 7.001 | ~0.7 min |
+| 2 | continuation, no ESS | **`6.85e-4`** | **`6.85e-4`** | 7.000 | ~1.4 min |
+| 3 | continuation + ESS | `1.25e-3` | `1.25e-3` | 7.001 | ~1.9 min |
+
+## Finite-beta Stage-one Optimization
+
+The finite-beta examples reproduce the VMEC-only stage-one finite-beta
+workflows without SIMSOPT and without coils.  They use bundled finite-pressure
+and current-driven input decks and add differentiable residuals for aspect
+ratio, iota bounds, volume-averaged field proxy, total beta, plus the field
+quality objective (QA/QH quasisymmetry or QI).
+
+```bash
+python examples/optimization/qa_optimization_finite_beta.py
+python examples/optimization/qh_optimization_finite_beta.py
+python examples/optimization/qi_optimization_finite_beta.py
+```
+
+The scripts save `input.initial`, `input.final`, `wout_initial.nc`,
+`wout_final.nc`, and `history.json`.  Full differentiable Mercier `DMerc` and
+Redl bootstrap-current mismatch residuals are the next finite-beta extensions;
+the current examples keep the stage-one structure and current-profile support
+in place so those terms can be added without changing the user workflow.
+
+## QA/QH/QP/QI Optimization Policy Sweep
 
 The panel below compares the exact standalone optimizer on CPU and GPU for
-three target symmetries: QA, QH, and QP. Columns increase the boundary space
-from `max_mode = 1` to `max_mode = 3`. Rows compare staged mode continuation
-against direct-start mode expansion. Blue curves use unscaled boundary DOFs;
-orange curves use ESS with `alpha = 2.5`. Solid lines met the optimizer success
-criterion; dashed lines are finite diagnostic-budget stops, not timeouts.
+four targets: QA, QH, QP, and QI. Columns increase the boundary space from
+`max_mode = 1` to `max_mode = 3`. Rows compare staged mode continuation against
+direct-start mode expansion. Blue curves use unscaled boundary DOFs; orange
+curves use ESS with `alpha = 2.5`. Solid lines met the optimizer success
+criterion; dashed lines reached the configured `max_nfev` before satisfying
+the optimizer convergence tolerances, not wall-clock timeouts.
 
 <p align="center">
   <img src="docs/_static/figures/qs_ess_objective_panel_all_policies.png" width="980" />
@@ -318,6 +403,12 @@ residual has a useful direction. With the corrected bounded solve budgets, QA
 continuation reaches the target-iota basin on both CPU and GPU. Direct QA with
 ESS also reaches `iota ~= 0.409`; direct QA without ESS now leaves the zero-iota
 branch, but remains a weak policy for `max_mode=3`.
+
+QH and QP use the quasisymmetry residual with different helicities. QI uses
+`vmec_jax.quasi_isodynamic`, a smooth Boozer-space residual built through
+`booz_xform_jax`. The QI rows first run a same-mode QP preseed and then refine
+with the QI residual; this avoids the QH warm-start basin and gives visibly
+non-QH `|B|` contours while keeping the objective differentiable.
 
 Final CPU states for the continuation and direct-start policies are shown
 below. The `|B|` panels use line contours on the LCFS, with a separate colorbar
@@ -335,19 +426,24 @@ changes.
 Recreate the full CPU/GPU sweep:
 
 ```bash
-JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp --modes 1,2,3 --ess both
-JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp --modes 1,2,3 --ess both
-JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp --modes 1,2,3 --ess both
-JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp --modes 1,2,3 --ess both
+JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both
+JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
+JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both
+JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
 ```
 
-The default per-case timeout is 600 s. Use `--case-timeout-s 0` only for an
-unbounded local diagnostic run.
+The default per-case timeout is 600 s. GPU sweeps use exact/replay callbacks
+with calibrated optimizer budgets (`inner_max_iter = trial_max_iter = 120`,
+`ftol = trial_ftol = 1e-8` for deck-controlled QA/QH cases) so production
+sweeps do not differentiate through 1500 strict VMEC iterations at every
+accepted point. Add `--diagnostic-budgets` only when you explicitly want the
+older bounded quick-look GPU diagnostics, and use `--case-timeout-s 0` only for
+an unbounded local diagnostic run.
 
 Recreate just the CPU direct-start rows:
 
 ```bash
-JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp --modes 1,2,3 --ess both
+JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
 ```
 
 Render the README/docs panels and tables:
@@ -355,6 +451,18 @@ Render the README/docs panels and tables:
 ```bash
 python examples/optimization/render_qs_ess_publication_panel.py
 ```
+
+Run individual examples by editing top-level variables in each script:
+
+```bash
+python examples/optimization/qa_fixed_resolution_jax_ess.py
+python examples/optimization/qh_fixed_resolution_jax.py
+python examples/optimization/qp_fixed_resolution_jax_ess.py
+python examples/optimization/qi_fixed_resolution_jax_ess.py
+```
+
+More figures, CSV/JSON summaries, and reproduction notes are in
+[docs/optimization_sweep_results.rst](docs/optimization_sweep_results.rst).
 
 CPU wall-time summary for the plotted runs:
 
@@ -378,6 +486,12 @@ CPU wall-time summary for the plotted runs:
 | CPU | QP | continuation | 2 | yes | stopped | 4.43e-01 | 7.087 | -0.3102 | 28 | 0.8 |
 | CPU | QP | continuation | 3 | no | ok | 3.20e-01 | 7.077 | -0.3023 | 26 | 1.0 |
 | CPU | QP | continuation | 3 | yes | stopped | 2.74e-01 | 7.063 | -0.3105 | 36 | 1.4 |
+| CPU | QI | continuation | 1 | no | ok | 1.19e-02 | 7.001 | - | 28 | 0.7 |
+| CPU | QI | continuation | 1 | yes | ok | 1.19e-02 | 7.001 | - | 28 | 0.7 |
+| CPU | QI | continuation | 2 | no | stopped | 6.85e-04 | 7.000 | - | 40 | 1.4 |
+| CPU | QI | continuation | 2 | yes | ok | 2.37e-02 | 7.009 | - | 32 | 0.9 |
+| CPU | QI | continuation | 3 | no | stopped | 1.18e-02 | 6.996 | - | 38 | 1.6 |
+| CPU | QI | continuation | 3 | yes | stopped | 1.25e-03 | 7.001 | - | 48 | 1.9 |
 | CPU | QA | direct | 1 | no | ok | 9.29e-03 | 6.002 | 0.3940 | 20 | 2.5 |
 | CPU | QA | direct | 1 | yes | ok | 9.29e-03 | 6.002 | 0.3940 | 20 | 2.7 |
 | CPU | QA | direct | 2 | no | ok | 4.50e-04 | 5.999 | 0.4066 | 18 | 18.6 |
@@ -396,8 +510,14 @@ CPU wall-time summary for the plotted runs:
 | CPU | QP | direct | 2 | yes | stopped | 5.67e-02 | 7.013 | -0.3097 | 20 | 0.7 |
 | CPU | QP | direct | 3 | no | ok | 5.35e-01 | 7.064 | -1.1401 | 17 | 0.7 |
 | CPU | QP | direct | 3 | yes | ok | 9.60e-02 | 7.057 | -0.3092 | 20 | 0.8 |
+| CPU | QI | direct | 1 | no | ok | 1.19e-02 | 7.001 | - | 28 | 0.7 |
+| CPU | QI | direct | 1 | yes | ok | 1.19e-02 | 7.001 | - | 28 | 0.7 |
+| CPU | QI | direct | 2 | no | stopped | 3.93e-03 | 7.000 | - | 31 | 1.3 |
+| CPU | QI | direct | 2 | yes | ok | 5.39e-03 | 7.004 | - | 32 | 1.1 |
+| CPU | QI | direct | 3 | no | stopped | 1.46e-02 | 7.018 | - | 29 | 1.4 |
+| CPU | QI | direct | 3 | yes | ok | 4.21e-03 | 7.003 | - | 28 | 1.1 |
 
-GPU bounded-budget wall-time summary for the plotted runs:
+GPU quick-look diagnostic wall-time summary for the plotted runs:
 
 | Backend | Problem | Policy | max_mode | ESS | Status | Final J | Aspect | Iota | nfev | Wall min |
 |---|---|---|---:|---|---|---:|---:|---:|---:|---:|
@@ -419,6 +539,12 @@ GPU bounded-budget wall-time summary for the plotted runs:
 | GPU | QP | continuation | 2 | yes | stopped | 4.21e-01 | 7.405 | -0.3375 | 7 | 1.6 |
 | GPU | QP | continuation | 3 | no | stopped | 6.27e-01 | 7.159 | -0.8721 | 9 | 2.0 |
 | GPU | QP | continuation | 3 | yes | stopped | 4.78e-01 | 7.151 | -0.3198 | 9 | 1.8 |
+| GPU | QI | continuation | 1 | no | stopped | 4.70e-02 | 7.130 | - | 10 | 1.1 |
+| GPU | QI | continuation | 1 | yes | stopped | 4.70e-02 | 7.130 | - | 10 | 1.2 |
+| GPU | QI | continuation | 2 | no | stopped | 3.44e-02 | 7.032 | - | 12 | 2.1 |
+| GPU | QI | continuation | 2 | yes | stopped | 1.37e-02 | 7.002 | - | 12 | 2.2 |
+| GPU | QI | continuation | 3 | no | stopped | 3.86e-02 | 6.977 | - | 14 | 2.5 |
+| GPU | QI | continuation | 3 | yes | stopped | 7.35e-03 | 6.995 | - | 14 | 2.5 |
 | GPU | QA | direct | 1 | no | stopped | 9.19e-03 | 6.002 | 0.3950 | 12 | 2.3 |
 | GPU | QA | direct | 1 | yes | stopped | 9.19e-03 | 6.002 | 0.3950 | 12 | 2.3 |
 | GPU | QA | direct | 2 | no | stopped | 4.12e-02 | 6.110 | 0.3509 | 12 | 4.0 |
@@ -437,6 +563,12 @@ GPU bounded-budget wall-time summary for the plotted runs:
 | GPU | QP | direct | 2 | yes | stopped | 4.40e-01 | 7.110 | -0.8996 | 5 | 1.3 |
 | GPU | QP | direct | 3 | no | stopped | 1.10e+00 | 7.160 | -1.0789 | 4 | 1.0 |
 | GPU | QP | direct | 3 | yes | stopped | 6.62e-01 | 7.092 | -1.1608 | 5 | 1.2 |
+| GPU | QI | direct | 1 | no | stopped | 4.70e-02 | 7.130 | - | 10 | 1.8 |
+| GPU | QI | direct | 1 | yes | stopped | 4.70e-02 | 7.130 | - | 10 | 1.2 |
+| GPU | QI | direct | 2 | no | stopped | 3.36e-02 | 7.012 | - | 9 | 2.0 |
+| GPU | QI | direct | 2 | yes | stopped | 6.10e-03 | 6.985 | - | 10 | 2.0 |
+| GPU | QI | direct | 3 | no | stopped | 5.65e-02 | 6.973 | - | 9 | 1.9 |
+| GPU | QI | direct | 3 | yes | stopped | 1.46e-02 | 6.962 | - | 10 | 1.8 |
 
 ## Performance vs parity
 
