@@ -2605,6 +2605,10 @@ class FixedBoundaryExactOptimizer:
                 None if scipy_lsmr_maxiter is None else int(scipy_lsmr_maxiter)
             ),
             "solver_device": self._solver_device_name or "default",
+            "inner_max_iter": int(self._inner_max_iter),
+            "inner_ftol": float(self._inner_ftol),
+            "trial_max_iter": int(self._trial_max_iter),
+            "trial_ftol": float(self._trial_ftol),
             "total_wall_time_s": t_total,
             "nfev": result["nfev"],
             "njev": result["njev"],

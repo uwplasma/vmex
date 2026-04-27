@@ -441,10 +441,14 @@ target-iota basin on both CPU and GPU; direct QA with ESS also reaches
    JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
    python examples/optimization/render_qs_ess_publication_panel.py
 
-The default per-case timeout is ``600 s``.  GPU sweeps use the same production
-budgets as CPU by default.  Add ``--diagnostic-budgets`` only for bounded
-quick-look GPU diagnostics, and use ``--case-timeout-s 0`` only for an
-unbounded local diagnostic run.
+The default per-case timeout is ``600 s``.  GPU sweeps use exact/replay
+callbacks with calibrated optimizer budgets
+(``inner_max_iter = trial_max_iter = 120`` and
+``ftol = trial_ftol = 1e-8`` for deck-controlled QA/QH cases) so production
+sweeps do not differentiate through 1500 strict VMEC iterations at every
+accepted point.  Add ``--diagnostic-budgets`` only for bounded quick-look GPU
+diagnostics, and use ``--case-timeout-s 0`` only for an unbounded local
+diagnostic run.
 
 To recreate one row, restrict ``--policy`` and ``--problems``.  For example,
 this reruns only the QA direct-start row:
@@ -454,10 +458,10 @@ this reruns only the QA direct-start row:
    JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa --modes 1,2,3 --ess both --rerun
    python examples/optimization/render_qs_ess_publication_panel.py
 
-The GPU rows run through the same exact/replay path as CPU.  If you need a
-short diagnostic matrix, append ``--diagnostic-budgets``; otherwise the script
-uses the full problem budgets and records any non-converged case as a normal
-``max_nfev`` stop.
+The GPU rows run through the same exact/replay path as CPU with GPU-calibrated
+optimizer budgets.  If you need a short diagnostic matrix, append
+``--diagnostic-budgets``; otherwise the script uses calibrated production
+budgets and records any non-converged case as a normal ``max_nfev`` stop.
 
 .. code-block:: bash
 

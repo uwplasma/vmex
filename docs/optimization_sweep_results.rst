@@ -51,10 +51,13 @@ Run the GPU production sweep on a machine with a working JAX GPU install:
    PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
-The default per-case timeout is 600 seconds.  GPU uses the same production
-budgets as CPU by default.  Add ``--diagnostic-budgets`` only for bounded
-quick-look GPU diagnostics, and use ``--case-timeout-s 0`` only for unbounded
-local diagnostics.
+The default per-case timeout is 600 seconds.  GPU uses exact/replay callbacks
+with calibrated optimizer budgets (``inner_max_iter = trial_max_iter = 120``
+and ``ftol = trial_ftol = 1e-8`` for deck-controlled QA/QH cases) so production
+sweeps do not differentiate through 1500 strict VMEC iterations at every
+accepted point.  Add ``--diagnostic-budgets`` only for bounded quick-look GPU
+diagnostics, and use ``--case-timeout-s 0`` only for unbounded local
+diagnostics.
 
 Objective Histories
 -------------------
@@ -199,7 +202,7 @@ the QI refinement.
 
 The GPU QI sweep is included as the accelerator matrix.  Bounded quick-look
 diagnostics can still be reproduced with ``--diagnostic-budgets``, but the
-default command path now uses production budgets so GPU results are not
+default command path now uses calibrated production budgets so GPU results are not
 silently capped.
 
 Finite-beta Stage-One Examples

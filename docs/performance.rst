@@ -315,8 +315,12 @@ for the current small/medium exact-optimization cases.  A QH ``max_mode=2`` GPU
 profile with four SciPy evaluations kept the same final objective and reduced
 mean trial-solve time from about ``11.2 s`` to about ``5.2 s`` after returning
 trial residuals to the non-scan path.  CPU remains faster for some small cold
-optimization cases, but GPU now runs the same production budgets rather than
-diagnostic-only caps.
+optimization cases.  GPU sweep production runs now use calibrated optimizer
+budgets (currently ``inner_max_iter = trial_max_iter = 120`` and
+``ftol = trial_ftol = 1e-8`` for deck-controlled QA/QH cases), rather than the
+old four-evaluation diagnostic caps.  This avoids differentiating through 1500
+strict VMEC iterations at every accepted point; final standalone verification
+runs can still use the VMEC input-deck ``NITER_ARRAY`` / ``FTOL_ARRAY``.
 
 Replay and preconditioner JIT helper caches are retained across accepted points
 and LRU-bounded.  Call ``FixedBoundaryExactOptimizer.clear_caches()`` to release

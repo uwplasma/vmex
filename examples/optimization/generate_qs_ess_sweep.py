@@ -88,6 +88,10 @@ SKIP_EXISTING = True
 CASE_TIMEOUT_S: float | None = 600.0
 ESS_ALPHA = 2.5
 DIAGNOSTIC_BUDGETS = False
+GPU_PRODUCTION_INNER_MAX_ITER = 120
+GPU_PRODUCTION_INNER_FTOL = 1e-8
+GPU_PRODUCTION_TRIAL_MAX_ITER = 120
+GPU_PRODUCTION_TRIAL_FTOL = 1e-8
 
 
 @dataclass(frozen=True)
@@ -101,8 +105,8 @@ class CaseBudget:
 
 
 # Bounded policies for known poor/runaway diagnostic cases. These are opt-in via
-# ``--diagnostic-budgets``; production CPU/GPU sweeps use the full problem
-# budgets so GPU results are not silently capped.
+# ``--diagnostic-budgets`` and intentionally very small, so they remain useful
+# for CI/render smoke tests without being mistaken for production results.
 CASE_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
     # QA needs a moderately converged inner solve before the iota residual has a
     # useful derivative. The old 40-iteration GPU diagnostic cap kept QA on the
@@ -157,6 +161,23 @@ CASE_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
     ("gpu", "direct", "qp", 3, False): CaseBudget(max_nfev=4, inner_max_iter=40, trial_max_iter=40, trial_ftol=1e-8),
     ("gpu", "direct", "qh", 3, True): CaseBudget(max_nfev=5, inner_max_iter=40, trial_max_iter=40, trial_ftol=1e-8),
     ("gpu", "direct", "qp", 3, True): CaseBudget(max_nfev=5, inner_max_iter=40, trial_max_iter=40, trial_ftol=1e-8),
+}
+
+
+# GPU production sweeps use exact discrete-adjoint callbacks, but they should
+# not differentiate through thousands of strict VMEC iterations at every
+# optimizer accepted point.  The final standalone VMEC run can still use the
+# input-deck NITER/FTOL for high-accuracy verification; the optimizer callbacks
+# use these medium-accuracy budgets so cold GPU cases finish in the documented
+# 10-minute envelope.
+GPU_PRODUCTION_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
+    ("gpu", "direct", "qa", 3, False): CaseBudget(max_nfev=24),
+    ("gpu", "direct", "qa", 3, True): CaseBudget(max_nfev=24),
+    ("gpu", "direct", "qh", 2, False): CaseBudget(max_nfev=12),
+    ("gpu", "direct", "qh", 3, False): CaseBudget(max_nfev=8),
+    ("gpu", "direct", "qp", 2, False): CaseBudget(max_nfev=12),
+    ("gpu", "direct", "qp", 3, False): CaseBudget(max_nfev=8),
+    ("gpu", "direct", "qi", 3, False): CaseBudget(max_nfev=8),
 }
 
 
@@ -366,7 +387,27 @@ def _effective_problem_config(
     diagnostic_budgets: bool = DIAGNOSTIC_BUDGETS,
 ) -> ProblemConfig:
     updates = {}
-    if diagnostic_budgets and str(backend).lower().startswith("gpu"):
+    backend_key = "gpu" if str(backend).lower().startswith("gpu") else str(backend).lower()
+    if (not diagnostic_budgets) and backend_key == "gpu":
+        updates.update(
+            inner_max_iter=(
+                GPU_PRODUCTION_INNER_MAX_ITER
+                if int(problem_cfg.inner_max_iter) <= 0
+                else min(int(problem_cfg.inner_max_iter), GPU_PRODUCTION_INNER_MAX_ITER)
+            ),
+            inner_ftol=max(float(problem_cfg.inner_ftol), GPU_PRODUCTION_INNER_FTOL),
+            trial_max_iter=min(int(problem_cfg.trial_max_iter), GPU_PRODUCTION_TRIAL_MAX_ITER),
+            trial_ftol=max(float(problem_cfg.trial_ftol), GPU_PRODUCTION_TRIAL_FTOL),
+        )
+        budget = GPU_PRODUCTION_BUDGET_OVERRIDES.get(
+            (backend_key, str(policy), str(problem), int(max_mode), bool(use_ess))
+        )
+        if budget is not None:
+            if budget.max_nfev is not None:
+                updates["max_nfev"] = min(int(problem_cfg.max_nfev), int(budget.max_nfev))
+            if budget.continuation_nfev is not None:
+                updates["continuation_nfev"] = min(int(problem_cfg.continuation_nfev), int(budget.continuation_nfev))
+    if diagnostic_budgets and backend_key == "gpu":
         # GPU callbacks are still cold-compile/dispatch dominated. Keep the
         # diagnostic panel finite and comparable by bounding every GPU case.
         updates.update(
@@ -382,7 +423,7 @@ def _effective_problem_config(
     budget = None
     if diagnostic_budgets:
         budget = CASE_BUDGET_OVERRIDES.get(
-            (str(backend), str(policy), str(problem), int(max_mode), bool(use_ess))
+            (backend_key, str(policy), str(problem), int(max_mode), bool(use_ess))
         )
     if budget is None and not updates:
         return problem_cfg
