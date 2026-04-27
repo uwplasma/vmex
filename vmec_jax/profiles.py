@@ -12,7 +12,7 @@ We intentionally keep this code:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Sequence
+from typing import Any, Dict
 
 import numpy as np
 
@@ -165,6 +165,108 @@ def _pcurr_two_power_ip(ac, x):
     return 0.5 * x * jnp.sum(_GL_W[None, :] * ip, axis=-1)
 
 
+def _aux_profile_arrays(indata: InData, prefix: str) -> tuple[Any, Any]:
+    """Return trimmed ``<prefix>_AUX_S/F`` arrays from an input namelist."""
+    s_values = _as_float_list(indata.get(f"{prefix}_AUX_S", []))
+    f_values = _as_float_list(indata.get(f"{prefix}_AUX_F", []))
+    try:
+        s_arr = np.asarray(s_values, dtype=np.float64).ravel()
+        f_arr = np.asarray(f_values, dtype=np.float64).ravel()
+    except Exception:
+        return jnp.asarray(s_values), jnp.asarray(f_values)
+    n = min(int(s_arr.size), int(f_arr.size))
+    if n <= 0:
+        return jnp.asarray([]), jnp.asarray([])
+    s_arr = s_arr[:n]
+    f_arr = f_arr[:n]
+    n_valid = n
+    for idx in range(1, n):
+        if s_arr[idx] <= s_arr[idx - 1]:
+            n_valid = idx
+            break
+    return jnp.asarray(s_arr[:n_valid]), jnp.asarray(f_arr[:n_valid])
+
+
+def _natural_cubic_second_derivatives(x_knots, y_knots):
+    """Natural cubic-spline second derivatives at knots."""
+    x_knots = jnp.asarray(x_knots)
+    y_knots = jnp.asarray(y_knots)
+    n = int(x_knots.shape[0])
+    if n <= 2:
+        return jnp.zeros_like(y_knots)
+    h = x_knots[1:] - x_knots[:-1]
+    dtype = y_knots.dtype
+    mat = jnp.zeros((n, n), dtype=dtype)
+    rhs = jnp.zeros((n,), dtype=dtype)
+    mat = mat.at[0, 0].set(1.0)
+    mat = mat.at[-1, -1].set(1.0)
+    for idx in range(1, n - 1):
+        hm = h[idx - 1]
+        hp = h[idx]
+        mat = mat.at[idx, idx - 1].set(hm)
+        mat = mat.at[idx, idx].set(2.0 * (hm + hp))
+        mat = mat.at[idx, idx + 1].set(hp)
+        slope_p = (y_knots[idx + 1] - y_knots[idx]) / hp
+        slope_m = (y_knots[idx] - y_knots[idx - 1]) / hm
+        rhs = rhs.at[idx].set(6.0 * (slope_p - slope_m))
+    return jnp.linalg.solve(mat, rhs)
+
+
+def _natural_cubic_interval_integral(y0, y1, m0, m1, h, dx):
+    """Integral of one natural-cubic interval from the left knot to ``dx``."""
+    a = y0 - m0 * h * h / 6.0
+    b = y1 - m1 * h * h / 6.0
+    return (
+        m0 * (h**4 - (h - dx) ** 4) / (24.0 * h)
+        + m1 * dx**4 / (24.0 * h)
+        + a * (dx - dx**2 / (2.0 * h))
+        + b * dx**2 / (2.0 * h)
+    )
+
+
+def _cubic_spline_profile(x_knots, y_knots, x, *, integrate: bool):
+    """Evaluate or integrate a natural cubic spline through static knots."""
+    x_knots = jnp.asarray(x_knots)
+    y_knots = jnp.asarray(y_knots)
+    x = jnp.asarray(x)
+    n = int(x_knots.shape[0])
+    if n == 0:
+        return jnp.zeros_like(x)
+    if n == 1:
+        return y_knots[0] * x if integrate else jnp.broadcast_to(y_knots[0], x.shape)
+
+    x_clipped = jnp.clip(x, x_knots[0], x_knots[-1])
+    idx_hi = jnp.searchsorted(x_knots, x_clipped, side="right")
+    idx_hi = jnp.clip(idx_hi, 1, n - 1)
+    idx = idx_hi - 1
+    h = x_knots[1:] - x_knots[:-1]
+    dx = x_clipped - x_knots[idx]
+    m = _natural_cubic_second_derivatives(x_knots, y_knots)
+    h_i = h[idx]
+    y0 = y_knots[idx]
+    y1 = y_knots[idx + 1]
+    m0 = m[idx]
+    m1 = m[idx + 1]
+    if not integrate:
+        left = m0 * (h_i - dx) ** 3 / (6.0 * h_i)
+        right = m1 * dx**3 / (6.0 * h_i)
+        linear_left = (y0 - m0 * h_i * h_i / 6.0) * (h_i - dx) / h_i
+        linear_right = (y1 - m1 * h_i * h_i / 6.0) * dx / h_i
+        return left + right + linear_left + linear_right
+
+    full_interval = _natural_cubic_interval_integral(
+        y_knots[:-1],
+        y_knots[1:],
+        m[:-1],
+        m[1:],
+        h,
+        h,
+    )
+    prefix = jnp.concatenate([jnp.zeros((1,), dtype=full_interval.dtype), jnp.cumsum(full_interval)])
+    partial = _natural_cubic_interval_integral(y0, y1, m0, m1, h_i, dx)
+    return prefix[idx] + partial
+
+
 @dataclass(frozen=True)
 class ProfileInputs:
     """Profile-related inputs extracted from &INDATA."""
@@ -176,6 +278,8 @@ class ProfileInputs:
     am: Any  # (n_am,)
     ai: Any  # (n_ai,)
     ac: Any  # (n_ac,)
+    ac_aux_s: Any  # current-profile spline knots
+    ac_aux_f: Any  # current-profile spline values
 
     pres_scale: float
     bloat: float
@@ -193,6 +297,7 @@ def profiles_from_indata(indata: InData) -> ProfileInputs:
     am = _coeff_array(_as_float_list(indata.get("AM", [])))
     ai = _coeff_array(_as_float_list(indata.get("AI", [])))
     ac = _coeff_array(_as_float_list(indata.get("AC", [])))
+    ac_aux_s, ac_aux_f = _aux_profile_arrays(indata, "AC")
 
     pres_scale = float(indata.get_float("PRES_SCALE", 1.0))
     bloat = float(indata.get_float("BLOAT", 1.0))
@@ -207,6 +312,8 @@ def profiles_from_indata(indata: InData) -> ProfileInputs:
         am=am,
         ai=ai,
         ac=ac,
+        ac_aux_s=ac_aux_s,
+        ac_aux_f=ac_aux_f,
         pres_scale=pres_scale,
         bloat=bloat,
         spres_ped=spres_ped,
@@ -286,9 +393,30 @@ def eval_profiles(cfg: ProfileInputs | InData, s_grid) -> Dict[str, Any]:
             out["current"] = _pcurr_power_series_ip(cfg.ac, x)
         elif cfg.pcurr_type == "two_power":
             out["current"] = _pcurr_two_power_ip(cfg.ac, x)
+        elif cfg.pcurr_type == "cubic_spline_ip":
+            if int(jnp.size(cfg.ac_aux_s)) == 0 or int(jnp.size(cfg.ac_aux_f)) == 0:
+                out["current"] = jnp.zeros_like(x)
+            else:
+                out["current"] = _cubic_spline_profile(
+                    cfg.ac_aux_s,
+                    cfg.ac_aux_f,
+                    x,
+                    integrate=True,
+                )
+        elif cfg.pcurr_type == "cubic_spline_i":
+            if int(jnp.size(cfg.ac_aux_s)) == 0 or int(jnp.size(cfg.ac_aux_f)) == 0:
+                out["current"] = jnp.zeros_like(x)
+            else:
+                out["current"] = _cubic_spline_profile(
+                    cfg.ac_aux_s,
+                    cfg.ac_aux_f,
+                    x,
+                    integrate=False,
+                )
         else:
             raise NotImplementedError(
-                f"pcurr_type={cfg.pcurr_type!r} not implemented (only 'power_series' and 'two_power')"
+                f"pcurr_type={cfg.pcurr_type!r} not implemented "
+                "(supported: power_series, two_power, cubic_spline_i, cubic_spline_ip)"
             )
 
     return out

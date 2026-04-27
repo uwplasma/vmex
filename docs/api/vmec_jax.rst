@@ -22,6 +22,7 @@ Submodules
    vmec_jax.energy
    vmec_jax.field
    vmec_jax.fieldlines
+   vmec_jax.finite_beta
    vmec_jax.fourier
    vmec_jax.geom
    vmec_jax.grids
@@ -32,6 +33,8 @@ Submodules
    vmec_jax.namelist
    vmec_jax.optimization
    vmec_jax.profiles
+   vmec_jax.quasi_isodynamic
+   vmec_jax.quasisymmetry
    vmec_jax.radial
    vmec_jax.residuals
    vmec_jax.solve

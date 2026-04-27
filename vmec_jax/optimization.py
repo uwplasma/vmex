@@ -22,6 +22,7 @@ from .geom import eval_geom
 from .init_guess import initial_guess_from_boundary
 from .namelist import InData, write_indata
 from .modes import ModeTable
+from .profiles import eval_profiles
 from .state import VMECState
 from .static import VMECStatic
 
@@ -367,7 +368,7 @@ def prepare_fixed_boundary_context(
     geom = eval_geom(st_guess, static)
     signgs = signgs_from_sqrtg(np.asarray(geom.sqrtg), axis_index=1)
     flux = flux_profiles_from_indata(indata, static.s, signgs=signgs)
-    pressure = jnp.zeros_like(jnp.asarray(static.s))
+    pressure = _pressure_profile_for_static(indata, static)
     booz_inputs = booz_xform_inputs_from_state(
         state=st_guess,
         static=static,
@@ -380,6 +381,15 @@ def prepare_fixed_boundary_context(
         flux=flux,
         pressure=pressure,
         booz_inputs=booz_inputs,
+    )
+
+
+def _pressure_profile_for_static(indata, static: VMECStatic):
+    """Evaluate the VMEC pressure profile on the optimization radial mesh."""
+    prof = eval_profiles(indata, jnp.asarray(static.s))
+    return jnp.asarray(
+        prof.get("pressure", jnp.zeros_like(jnp.asarray(static.s))),
+        dtype=jnp.asarray(static.s).dtype,
     )
 
 
@@ -744,7 +754,7 @@ def make_qh_residuals_fn(
             signgs = 1
 
     flux = flux_profiles_from_indata(indata, static.s, signgs=signgs)
-    pressure = jnp.zeros_like(jnp.asarray(static.s))
+    pressure = _pressure_profile_for_static(indata, static)
 
     def _qs_eval_from_state(state: VMECState):
         return quasisymmetry_ratio_residual_from_state(
@@ -884,7 +894,7 @@ def make_qs_residuals_fn(
             signgs = 1
 
     flux = flux_profiles_from_indata(indata, static.s, signgs=signgs)
-    pressure = jnp.zeros_like(jnp.asarray(static.s))
+    pressure = _pressure_profile_for_static(indata, static)
     _signgs = signgs
     _indata = indata
 
@@ -1239,18 +1249,24 @@ class FixedBoundaryExactOptimizer:
         return "tape"
 
     def _use_scan_for_trial_solves(self) -> bool:
-        """Use the scan loop for residual-only trial solves on accelerators."""
-        if self._solver_device_name == "cpu":
-            return False
-        if self._solver_device_name in ("gpu", "tpu", "cuda", "rocm"):
-            return True
-        try:
-            from ._compat import jax as _jax
+        """Return whether trial residual solves should use the scan loop.
 
-            backend = str(_jax.default_backend()).strip().lower() if _jax is not None else "cpu"
-        except Exception:
-            backend = "cpu"
-        return backend not in ("cpu", "")
+        Exact-optimizer trial residuals are short, trace-compatible VMEC solves
+        called repeatedly by SciPy's trust-region line search.  GPU profiling
+        showed the scan trial path was slower than the non-scan forward path
+        for the current QA/QH/QP/QI optimization cases because the scan graph
+        pays a larger compile/dispatch cost and does not reuse the exact replay
+        tape.  Keep scan opt-in for diagnostics and future larger cases, but do
+        not force it just because the solver device is an accelerator.
+        """
+        forced = os.getenv("VMEC_JAX_OPT_TRIAL_SCAN", "").strip().lower()
+        if forced in ("1", "true", "yes", "on", "scan"):
+            return True
+        if forced in ("0", "false", "no", "off", "loop", "none"):
+            return False
+        if self._solver_device_name in ("cpu", "gpu", "tpu", "cuda", "rocm"):
+            return False
+        return False
 
     def _solver_device_context(self):
         if self._solver_device_name is None:
@@ -2703,6 +2719,10 @@ class FixedBoundaryExactOptimizer:
                 None if scipy_lsmr_maxiter is None else int(scipy_lsmr_maxiter)
             ),
             "solver_device": self._solver_device_name or "default",
+            "inner_max_iter": int(self._inner_max_iter),
+            "inner_ftol": float(self._inner_ftol),
+            "trial_max_iter": int(self._trial_max_iter),
+            "trial_ftol": float(self._trial_ftol),
             "total_wall_time_s": t_total,
             "nfev": result["nfev"],
             "njev": result["njev"],

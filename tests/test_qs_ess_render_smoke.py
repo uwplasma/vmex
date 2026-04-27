@@ -61,6 +61,39 @@ def test_qs_ess_sweep_sets_missing_wall_time():
     assert result.total_wall_time_s == 12.5
 
 
+def test_qs_ess_sweep_gpu_production_budgets_are_not_diagnostic_caps():
+    sweep = _load_sweep_module()
+
+    cfg = sweep._effective_problem_config(
+        sweep.PROBLEM_CONFIGS["qh"],
+        backend="gpu_prod",
+        policy="direct",
+        problem="qh",
+        max_mode=2,
+        use_ess=False,
+    )
+
+    assert cfg.max_nfev == 12
+    assert cfg.inner_max_iter == sweep.GPU_PRODUCTION_INNER_MAX_ITER
+    assert cfg.inner_ftol == sweep.GPU_PRODUCTION_INNER_FTOL
+    assert cfg.trial_max_iter == sweep.GPU_PRODUCTION_TRIAL_MAX_ITER
+    assert cfg.trial_ftol == sweep.GPU_PRODUCTION_TRIAL_FTOL
+
+    diag_cfg = sweep._effective_problem_config(
+        sweep.PROBLEM_CONFIGS["qh"],
+        backend="gpu",
+        policy="direct",
+        problem="qh",
+        max_mode=2,
+        use_ess=False,
+        diagnostic_budgets=True,
+    )
+
+    assert diag_cfg.max_nfev == 4
+    assert diag_cfg.inner_max_iter == 40
+    assert diag_cfg.trial_max_iter == 40
+
+
 def test_qs_ess_renderer_ignores_legacy_backendless_records(tmp_path, monkeypatch):
     renderer = _load_renderer_module()
     monkeypatch.setattr(renderer, "OUTPUT_ROOT", tmp_path)

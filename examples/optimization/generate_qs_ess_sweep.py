@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 # ruff: noqa: E402
-"""Run QA/QH/QP ESS policy sweeps and build publication-style summary panels.
+"""Run QA/QH/QP/QI ESS policy sweeps and build publication-style summary panels.
 
 This script regenerates a reviewer-facing benchmark matrix for the standalone
 ``vmec_jax`` exact optimization path:
 
-- problems: QA, QH, and QP
+- problems: QA, QH, QP, and QI
 - policies: continuation and direct-start mode expansion
 - max_mode: 1, 2, 3 for continuation and direct start
 - ESS: off and on
@@ -34,6 +34,7 @@ Examples:
 
   python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation
   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct
+  JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu_diag --solver-device gpu --policy direct --diagnostic-budgets
   python examples/optimization/render_qs_ess_publication_panel.py
 """
 
@@ -46,10 +47,15 @@ import json
 import multiprocessing as mp
 import os
 from pathlib import Path
+import sys
 import time
 import traceback
 
 import numpy as np
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import vmec_jax as vj
 from vmec_jax._compat import enable_x64, jnp
@@ -58,6 +64,7 @@ from vmec_jax.field import signgs_from_sqrtg
 from vmec_jax.geom import eval_geom
 from vmec_jax.init_guess import initial_guess_from_boundary
 from vmec_jax.optimization import rebuild_indata_with_resolution
+from vmec_jax.quasi_isodynamic import _nearest_half_mesh_indices, quasi_isodynamic_residual_from_state
 from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_state
 from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
@@ -71,7 +78,7 @@ OUTPUT_ROOT = SCRIPT_DIR / "results" / "qs_ess_sweep"
 VMEC_MPOL = 5
 VMEC_NTOR = 5
 MODES = (1, 2, 3)
-PROBLEMS = ("qa", "qh", "qp")
+PROBLEMS = ("qa", "qh", "qp", "qi")
 ESS_OPTIONS = (False, True)
 
 USE_MODE_CONTINUATION = True
@@ -80,6 +87,11 @@ SOLVER_DEVICE: str | None = None
 SKIP_EXISTING = True
 CASE_TIMEOUT_S: float | None = 600.0
 ESS_ALPHA = 2.5
+DIAGNOSTIC_BUDGETS = False
+GPU_PRODUCTION_INNER_MAX_ITER = 120
+GPU_PRODUCTION_INNER_FTOL = 1e-8
+GPU_PRODUCTION_TRIAL_MAX_ITER = 120
+GPU_PRODUCTION_TRIAL_FTOL = 1e-8
 
 
 @dataclass(frozen=True)
@@ -92,9 +104,9 @@ class CaseBudget:
     trial_ftol: float | None = None
 
 
-# Bounded policies for cases that are known to be poor/runaway diagnostics.
-# This keeps full GPU panel regeneration finite while still recording the poor
-# policy as a failed or weak result instead of blocking the whole sweep.
+# Bounded policies for known poor/runaway diagnostic cases. These are opt-in via
+# ``--diagnostic-budgets`` and intentionally very small, so they remain useful
+# for CI/render smoke tests without being mistaken for production results.
 CASE_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
     # QA needs a moderately converged inner solve before the iota residual has a
     # useful derivative. The old 40-iteration GPU diagnostic cap kept QA on the
@@ -152,6 +164,23 @@ CASE_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
 }
 
 
+# GPU production sweeps use exact discrete-adjoint callbacks, but they should
+# not differentiate through thousands of strict VMEC iterations at every
+# optimizer accepted point.  The final standalone VMEC run can still use the
+# input-deck NITER/FTOL for high-accuracy verification; the optimizer callbacks
+# use these medium-accuracy budgets so cold GPU cases finish in the documented
+# 10-minute envelope.
+GPU_PRODUCTION_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
+    ("gpu", "direct", "qa", 3, False): CaseBudget(max_nfev=24),
+    ("gpu", "direct", "qa", 3, True): CaseBudget(max_nfev=24),
+    ("gpu", "direct", "qh", 2, False): CaseBudget(max_nfev=12),
+    ("gpu", "direct", "qh", 3, False): CaseBudget(max_nfev=8),
+    ("gpu", "direct", "qp", 2, False): CaseBudget(max_nfev=12),
+    ("gpu", "direct", "qp", 3, False): CaseBudget(max_nfev=8),
+    ("gpu", "direct", "qi", 3, False): CaseBudget(max_nfev=8),
+}
+
+
 @dataclass(frozen=True)
 class ProblemConfig:
     name: str
@@ -178,6 +207,15 @@ class ProblemConfig:
     aspect_weight: float = 1.0
     iota_weight: float = 1.0
     qs_weight: float = 1.0
+    objective_kind: str = "qs"
+    qi_mboz: int = 6
+    qi_nboz: int = 6
+    qi_nphi: int = 41
+    qi_nalpha: int = 13
+    qi_n_bounce: int = 11
+    qi_softness: float = 2.0e-2
+    qi_profile_weight: float = 1.0
+    qi_preseed_qp: bool = False
 
 
 PROBLEM_CONFIGS = {
@@ -253,6 +291,37 @@ PROBLEM_CONFIGS = {
         iota_abs_min=0.31,
         iota_weight=20.0,
     ),
+    "qi": ProblemConfig(
+        name="qi",
+        input_file=DATA_DIR / "input.nfp4_QH_warm_start",
+        method="scipy",
+        scipy_tr_solver="lsmr",
+        scipy_lsmr_maxiter=None,
+        max_nfev=12,
+        continuation_nfev=6,
+        ftol=1e-3,
+        gtol=1e-3,
+        xtol=1e-3,
+        ess_alpha=ESS_ALPHA,
+        target_aspect=7.0,
+        target_iota=None,
+        surfaces=np.linspace(0.2, 1.0, 5),
+        helicity_m=0,
+        helicity_n=0,
+        inner_max_iter=80,
+        inner_ftol=1e-8,
+        trial_max_iter=80,
+        trial_ftol=1e-8,
+        objective_kind="qi",
+        qi_mboz=6,
+        qi_nboz=6,
+        qi_nphi=41,
+        qi_nalpha=13,
+        qi_n_bounce=11,
+        qi_softness=2.0e-2,
+        qi_profile_weight=1.5,
+        qi_preseed_qp=True,
+    ),
 }
 
 
@@ -315,12 +384,32 @@ def _effective_problem_config(
     problem: str,
     max_mode: int,
     use_ess: bool,
+    diagnostic_budgets: bool = DIAGNOSTIC_BUDGETS,
 ) -> ProblemConfig:
     updates = {}
-    if str(backend).lower() == "gpu":
+    backend_key = "gpu" if str(backend).lower().startswith("gpu") else str(backend).lower()
+    if (not diagnostic_budgets) and backend_key == "gpu":
+        updates.update(
+            inner_max_iter=(
+                GPU_PRODUCTION_INNER_MAX_ITER
+                if int(problem_cfg.inner_max_iter) <= 0
+                else min(int(problem_cfg.inner_max_iter), GPU_PRODUCTION_INNER_MAX_ITER)
+            ),
+            inner_ftol=max(float(problem_cfg.inner_ftol), GPU_PRODUCTION_INNER_FTOL),
+            trial_max_iter=min(int(problem_cfg.trial_max_iter), GPU_PRODUCTION_TRIAL_MAX_ITER),
+            trial_ftol=max(float(problem_cfg.trial_ftol), GPU_PRODUCTION_TRIAL_FTOL),
+        )
+        budget = GPU_PRODUCTION_BUDGET_OVERRIDES.get(
+            (backend_key, str(policy), str(problem), int(max_mode), bool(use_ess))
+        )
+        if budget is not None:
+            if budget.max_nfev is not None:
+                updates["max_nfev"] = min(int(problem_cfg.max_nfev), int(budget.max_nfev))
+            if budget.continuation_nfev is not None:
+                updates["continuation_nfev"] = min(int(problem_cfg.continuation_nfev), int(budget.continuation_nfev))
+    if diagnostic_budgets and backend_key == "gpu":
         # GPU callbacks are still cold-compile/dispatch dominated. Keep the
-        # full panel finite and comparable by bounding every GPU case; use CPU
-        # runs for production-accuracy long budgets.
+        # diagnostic panel finite and comparable by bounding every GPU case.
         updates.update(
             max_nfev=min(int(problem_cfg.max_nfev), 5),
             continuation_nfev=min(int(problem_cfg.continuation_nfev), 2),
@@ -331,9 +420,11 @@ def _effective_problem_config(
             trial_max_iter=min(int(problem_cfg.trial_max_iter), 40),
             trial_ftol=max(float(problem_cfg.trial_ftol), 1e-8),
         )
-    budget = CASE_BUDGET_OVERRIDES.get(
-        (str(backend), str(policy), str(problem), int(max_mode), bool(use_ess))
-    )
+    budget = None
+    if diagnostic_budgets:
+        budget = CASE_BUDGET_OVERRIDES.get(
+            (backend_key, str(policy), str(problem), int(max_mode), bool(use_ess))
+        )
     if budget is None and not updates:
         return problem_cfg
     if budget is not None and budget.max_nfev is not None:
@@ -403,8 +494,58 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
     stage_signgs = int(signgs_from_sqrtg(np.asarray(stage_geom.sqrtg), axis_index=1))
     stage_flux = vj.flux_profiles_from_indata(stage_indata, stage_static.s, signgs=stage_signgs)
     stage_pressure = jnp.zeros_like(jnp.asarray(stage_static.s))
+    qi_booz_constants = None
+    qi_booz_grids = None
+    qi_surface_indices = None
+    if problem_cfg.objective_kind == "qi":
+        from booz_xform_jax import prepare_booz_xform_constants
+        from vmec_jax.modes import nyquist_mode_table_from_grid, vmec_mode_table
+
+        main_modes = vmec_mode_table(int(stage_static.cfg.mpol), int(stage_static.cfg.ntor))
+        nyq_modes = nyquist_mode_table_from_grid(
+            mpol=int(stage_static.cfg.mpol),
+            ntor=int(stage_static.cfg.ntor),
+            ntheta=int(stage_static.cfg.ntheta),
+            nzeta=int(stage_static.cfg.nzeta),
+        )
+        qi_booz_constants, qi_booz_grids = prepare_booz_xform_constants(
+            nfp=int(stage_static.cfg.nfp),
+            mboz=problem_cfg.qi_mboz,
+            nboz=problem_cfg.qi_nboz,
+            asym=bool(stage_static.cfg.lasym),
+            xm=np.asarray(main_modes.m, dtype=int),
+            xn=np.asarray(main_modes.n * int(stage_static.cfg.nfp), dtype=int),
+            xm_nyq=np.asarray(nyq_modes.m, dtype=int),
+            xn_nyq=np.asarray(nyq_modes.n * int(stage_static.cfg.nfp), dtype=int),
+        )
+        qi_surface_indices = _nearest_half_mesh_indices(
+            problem_cfg.surfaces,
+            n_half=max(int(np.asarray(stage_static.s).shape[0]) - 1, 1),
+        )
 
     def stage_qs_eval(state):
+        if problem_cfg.objective_kind == "qi":
+            return quasi_isodynamic_residual_from_state(
+                state=state,
+                static=stage_static,
+                indata=stage_indata,
+                signgs=stage_signgs,
+                flux_local=stage_flux,
+                prof_local={"pressure": stage_pressure},
+                pressure_local=stage_pressure,
+                surfaces=problem_cfg.surfaces,
+                mboz=problem_cfg.qi_mboz,
+                nboz=problem_cfg.qi_nboz,
+                nphi=problem_cfg.qi_nphi,
+                nalpha=problem_cfg.qi_nalpha,
+                n_bounce=problem_cfg.qi_n_bounce,
+                softness=problem_cfg.qi_softness,
+                profile_weight=problem_cfg.qi_profile_weight,
+                jit_booz=False,
+                booz_constants=qi_booz_constants,
+                booz_grids=qi_booz_grids,
+                surface_indices=qi_surface_indices,
+            )
         return quasisymmetry_ratio_residual_from_state(
             state=state,
             static=stage_static,
@@ -474,33 +615,35 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
     return stage_specs, stage_opt, iota_fn
 
 
-def _merge_stage_histories(stage_results: list[tuple[int, dict]], *, problem_cfg: ProblemConfig) -> dict:
+StageRecord = tuple[str, int, dict]
+
+
+def _merge_stage_histories(stage_results: list[StageRecord], *, problem_cfg: ProblemConfig) -> dict:
     combined_entries = []
     stage_boundaries = []
     wall_offset = 0.0
     nfev_total = 0
     njev_total = 0
-    for idx, (_mode, stage_result) in enumerate(stage_results):
+    max_nfev_total = 0
+    for idx, (stage_label, _mode, stage_result) in enumerate(stage_results):
         stage_hist = stage_result["_history_dump"]
         entries = stage_hist["history"] if idx == 0 else stage_hist["history"][1:]
         for entry in entries:
             entry_copy = dict(entry)
             entry_copy["wall_time_s"] = float(entry_copy["wall_time_s"]) + wall_offset
+            entry_copy["stage"] = stage_label
             combined_entries.append(entry_copy)
         wall_offset = combined_entries[-1]["wall_time_s"]
         nfev_total += int(stage_hist["nfev"])
         njev_total += int(stage_hist["njev"])
+        max_nfev_total += int(stage_hist.get("max_nfev", stage_hist["nfev"]))
         stage_boundaries.append(len(combined_entries) - 1)
 
-    final_hist = stage_results[-1][1]["_history_dump"]
+    final_hist = stage_results[-1][2]["_history_dump"]
+    first_hist = stage_results[0][2]["_history_dump"]
     merged = {
         "label": "Optimisation",
-        "max_nfev": int(
-            sum(
-                problem_cfg.continuation_nfev if mode != stage_results[-1][0] else problem_cfg.max_nfev
-                for mode, _ in stage_results
-            )
-        ),
+        "max_nfev": int(max_nfev_total),
         "ftol": problem_cfg.ftol,
         "gtol": problem_cfg.gtol,
         "xtol": problem_cfg.xtol,
@@ -509,16 +652,17 @@ def _merge_stage_histories(stage_results: list[tuple[int, dict]], *, problem_cfg
         "njev": int(njev_total),
         "success": bool(final_hist["success"]),
         "message": str(final_hist["message"]),
-        "objective_initial": float(stage_results[0][1]["_history_dump"]["objective_initial"]),
+        "objective_initial": float(first_hist["objective_initial"]),
         "objective_final": float(final_hist["objective_final"]),
-        "qs_initial": float(stage_results[0][1]["_history_dump"]["qs_initial"]),
+        "qs_initial": float(first_hist["qs_initial"]),
         "qs_final": float(final_hist["qs_final"]),
-        "aspect_initial": float(stage_results[0][1]["_history_dump"]["aspect_initial"]),
+        "aspect_initial": float(first_hist["aspect_initial"]),
         "aspect_final": float(final_hist["aspect_final"]),
         "history": combined_entries,
         "target_aspect": problem_cfg.target_aspect,
         "stage_boundaries": stage_boundaries,
-        "stage_modes": [int(mode) for mode, _ in stage_results],
+        "stage_modes": [int(mode) for _label, mode, _result in stage_results],
+        "stage_labels": [str(label) for label, _mode, _result in stage_results],
     }
     if problem_cfg.target_iota is not None:
         merged["target_iota"] = float(problem_cfg.target_iota)
@@ -550,33 +694,22 @@ def _save_case_outputs(output_dir: Path, opt, params_initial, params_final, resu
         print(f"  Skipped case plots: {type(exc).__name__}: {exc}", flush=True)
 
 
-def _run_case(
+def _run_problem_stages(
+    *,
+    problem_cfg: ProblemConfig,
     problem: str,
     max_mode: int,
     use_ess: bool,
-    output_dir: Path,
-    *,
     use_mode_continuation: bool,
-    policy: str,
-    backend: str,
     solver_device: str | None,
-    jax_platforms: str | None,
-) -> CaseResult:
-    problem_cfg = _effective_problem_config(
-        PROBLEM_CONFIGS[problem],
-        backend=backend,
-        policy=policy,
-        problem=problem,
-        max_mode=max_mode,
-        use_ess=use_ess,
-    )
-    cfg, indata = _load_problem(problem_cfg)
-    jax_backend, jax_device_kind = _jax_runtime_info()
-
+    cfg,
+    indata,
+    stage_label_prefix: str,
+    params_stage,
+    prev_specs,
+) -> tuple[list[StageRecord], object, object, object, object, dict]:
     stage_modes = list(range(1, max_mode + 1)) if (use_mode_continuation and max_mode > 1) else [max_mode]
-    stage_results: list[tuple[int, dict]] = []
-    params_stage = None
-    prev_specs = None
+    stage_results: list[StageRecord] = []
     final_opt = None
     final_params0 = None
     final_result = None
@@ -602,10 +735,7 @@ def _run_case(
             if params_stage is None
             else vj.lift_boundary_params(prev_specs, params_stage, stage_specs)
         )
-        if stage_mode == max_mode:
-            stage_budget = problem_cfg.max_nfev
-        else:
-            stage_budget = problem_cfg.continuation_nfev
+        stage_budget = problem_cfg.max_nfev if stage_mode == max_mode else problem_cfg.continuation_nfev
         stage_result = stage_opt.run(
             params0_stage,
             method=problem_cfg.method,
@@ -621,7 +751,7 @@ def _run_case(
             scipy_tr_solver=problem_cfg.scipy_tr_solver,
             scipy_lsmr_maxiter=problem_cfg.scipy_lsmr_maxiter,
         )
-        stage_results.append((stage_mode, stage_result))
+        stage_results.append((f"{stage_label_prefix} mode {stage_mode}", stage_mode, stage_result))
         prev_specs = stage_specs
         params_stage = stage_result["x"]
         final_opt = stage_opt
@@ -631,11 +761,96 @@ def _run_case(
     assert final_opt is not None
     assert final_params0 is not None
     assert final_result is not None
+    assert prev_specs is not None
+    assert params_stage is not None
+    return stage_results, prev_specs, params_stage, final_opt, final_params0, final_result
 
-    if use_mode_continuation and len(stage_results) > 1:
+
+def _run_case(
+    problem: str,
+    max_mode: int,
+    use_ess: bool,
+    output_dir: Path,
+    *,
+    use_mode_continuation: bool,
+    policy: str,
+    backend: str,
+    solver_device: str | None,
+    jax_platforms: str | None,
+    diagnostic_budgets: bool = DIAGNOSTIC_BUDGETS,
+) -> CaseResult:
+    problem_cfg = _effective_problem_config(
+        PROBLEM_CONFIGS[problem],
+        backend=backend,
+        policy=policy,
+        problem=problem,
+        max_mode=max_mode,
+        use_ess=use_ess,
+        diagnostic_budgets=diagnostic_budgets,
+    )
+    cfg, indata = _load_problem(problem_cfg)
+    jax_backend, jax_device_kind = _jax_runtime_info()
+
+    stage_results: list[StageRecord] = []
+    params_stage = None
+    prev_specs = None
+
+    original_stage = None
+    qp_seed_stage = None
+    if problem_cfg.objective_kind == "qi" and problem_cfg.qi_preseed_qp:
+        qp_cfg = _effective_problem_config(
+            PROBLEM_CONFIGS["qp"],
+            backend=backend,
+            policy=policy,
+            problem="qp",
+            max_mode=max_mode,
+            use_ess=use_ess,
+            diagnostic_budgets=diagnostic_budgets,
+        )
+        qp_stage_results, prev_specs, params_stage, qp_opt, qp_params0, qp_result = _run_problem_stages(
+            problem_cfg=qp_cfg,
+            problem="qp",
+            max_mode=max_mode,
+            use_ess=use_ess,
+            use_mode_continuation=use_mode_continuation,
+            solver_device=solver_device,
+            cfg=cfg,
+            indata=indata,
+            stage_label_prefix="QP preseed",
+            params_stage=params_stage,
+            prev_specs=prev_specs,
+        )
+        stage_results.extend(qp_stage_results)
+        original_stage = (qp_opt, qp_params0, qp_result)
+        qp_seed_stage = (qp_opt, qp_result["x"], qp_result)
+
+    qi_or_qs_stage_results, prev_specs, params_stage, final_opt, final_params0, final_result = _run_problem_stages(
+        problem_cfg=problem_cfg,
+        problem=problem,
+        max_mode=max_mode,
+        use_ess=use_ess,
+        use_mode_continuation=False if problem_cfg.objective_kind == "qi" and problem_cfg.qi_preseed_qp else use_mode_continuation,
+        solver_device=solver_device,
+        cfg=cfg,
+        indata=indata,
+        stage_label_prefix=problem.upper(),
+        params_stage=params_stage,
+        prev_specs=prev_specs,
+    )
+    stage_results.extend(qi_or_qs_stage_results)
+
+    if len(stage_results) > 1:
         final_result["_history_dump"] = _merge_stage_histories(stage_results, problem_cfg=problem_cfg)
 
     _save_case_outputs(output_dir, final_opt, final_params0, final_result["x"], final_result)
+    if original_stage is not None:
+        original_opt, original_params0, original_result = original_stage
+        original_opt.save_input(output_dir / "input.original", original_params0)
+        original_opt.save_wout(output_dir / "wout_original.nc", original_params0, state=original_result.get("_state_initial"))
+    if qp_seed_stage is not None:
+        qp_opt, qp_params, qp_result = qp_seed_stage
+        qp_opt.save_input(output_dir / "input.qp_seed", qp_params)
+        qp_opt.save_wout(output_dir / "wout_qp_seed.nc", qp_params, state=qp_result.get("_state_final"))
 
     hist = final_result["_history_dump"]
     final_iota = None
@@ -677,6 +892,7 @@ def _worker(
     backend: str,
     solver_device: str | None,
     jax_platforms: str | None,
+    diagnostic_budgets: bool,
 ):
     try:
         case_result = _run_case(
@@ -689,6 +905,7 @@ def _worker(
             backend=backend,
             solver_device=solver_device,
             jax_platforms=jax_platforms,
+            diagnostic_budgets=diagnostic_budgets,
         )
         Path(result_path).write_text(json.dumps(asdict(case_result), indent=2))
     except Exception as exc:
@@ -828,7 +1045,7 @@ def _plot_objective_panel(results: list[CaseResult], outpath_png: Path, outpath_
     handles, labels_list = axes[0, 0].get_legend_handles_labels()
     if handles:
         fig.legend(handles, labels_list, loc="upper center", ncol=2, frameon=False, bbox_to_anchor=(0.5, 1.01))
-    fig.suptitle("QA/QH/QP optimization sweep: objective histories with and without ESS", y=1.04, fontsize=14)
+    fig.suptitle("QA/QH/QP/QI optimization sweep: objective histories with and without ESS", y=1.04, fontsize=14)
     fig.tight_layout()
     outpath_png.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(outpath_png, dpi=220, bbox_inches="tight")
@@ -848,6 +1065,8 @@ def _plot_geometry_atlas(results: list[CaseResult], outpath_png: Path, outpath_p
         ("qh", "bmag_surface.png", "QH |B|"),
         ("qp", "boundary_comparison.png", "QP LCFS"),
         ("qp", "bmag_surface.png", "QP |B|"),
+        ("qi", "boundary_comparison.png", "QI LCFS"),
+        ("qi", "bmag_surface.png", "QI |B|"),
     ]
 
     fig, axes = plt.subplots(len(row_specs), len(columns), figsize=(19.0, 17.4))
@@ -880,7 +1099,7 @@ def _plot_geometry_atlas(results: list[CaseResult], outpath_png: Path, outpath_p
             ax.imshow(mpimg.imread(image_path))
             ax.axis("off")
 
-    fig.suptitle("Final equilibria across QA/QH/QP, max_mode, and ESS settings", y=0.995, fontsize=14)
+    fig.suptitle("Final equilibria across QA/QH/QP/QI, max_mode, and ESS settings", y=0.995, fontsize=14)
     fig.tight_layout()
     outpath_png.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(outpath_png, dpi=220, bbox_inches="tight")
@@ -893,6 +1112,7 @@ def _write_summary_csv(results: list[CaseResult], path: Path) -> None:
     with path.open("w", newline="") as f:
         writer = csv.DictWriter(
             f,
+            lineterminator="\n",
             fieldnames=[
                 "policy",
                 "backend",
@@ -959,6 +1179,15 @@ def _parse_args() -> argparse.Namespace:
             "use 'cpu' only when an explicit CPU-only worker is desired."
         ),
     )
+    parser.add_argument(
+        "--diagnostic-budgets",
+        action="store_true",
+        default=DIAGNOSTIC_BUDGETS,
+        help=(
+            "Apply bounded per-case diagnostic budgets. By default CPU and GPU "
+            "sweeps use the full optimization budgets."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -1019,6 +1248,7 @@ def main() -> None:
                         backend_label,
                         solver_device,
                         worker_jax_platforms,
+                        bool(args.diagnostic_budgets),
                     ),
                 )
                 case_t0 = time.perf_counter()

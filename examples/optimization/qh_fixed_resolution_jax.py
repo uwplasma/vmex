@@ -84,7 +84,7 @@ OBJECTIVE_TUPLES = [
 ]
 
 # Optional exponential spectral scaling and staged continuation.  The shared
-# QA/QH/QP sweep uses alpha=2.5 for ESS so single-example runs match the panel.
+# QA/QH/QP/QI sweep uses alpha=2.5 for ESS so single-example runs match the panel.
 USE_ESS = False
 ALPHA = 2.5
 USE_MODE_CONTINUATION = True

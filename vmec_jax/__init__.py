@@ -141,6 +141,7 @@ from .optimization import (
 from .coords import Coords, eval_coords
 from .geom import Geom, eval_geom
 from .profiles import ProfileInputs, profiles_from_indata, eval_profiles
+from .finite_beta import FiniteBetaTargets, finite_beta_global_residuals_from_state, finite_beta_scalars_from_state
 from .integrals import dvds_from_sqrtg, cumtrapz_s, volume_from_sqrtg
 from .field import (
     b_cartesian_from_state,
@@ -199,6 +200,11 @@ from .quasisymmetry import (
     quasisymmetry_diagnostics_from_state,
     quasisymmetry_ratio_residual_from_state,
     quasisymmetry_ratio_residual_from_wout,
+)
+from .quasi_isodynamic import (
+    quasi_isodynamic_residual_from_boozer_modes,
+    quasi_isodynamic_residual_from_boozer_output,
+    quasi_isodynamic_residual_from_state,
 )
 from .visualization import export_vtk_surface_and_fieldline
 
@@ -326,6 +332,9 @@ __all__ = [
     "ProfileInputs",
     "profiles_from_indata",
     "eval_profiles",
+    "FiniteBetaTargets",
+    "finite_beta_global_residuals_from_state",
+    "finite_beta_scalars_from_state",
     "dvds_from_sqrtg",
     "cumtrapz_s",
     "volume_from_sqrtg",
@@ -384,5 +393,8 @@ __all__ = [
     "quasisymmetry_diagnostics_from_state",
     "quasisymmetry_ratio_residual_from_state",
     "quasisymmetry_ratio_residual_from_wout",
+    "quasi_isodynamic_residual_from_boozer_modes",
+    "quasi_isodynamic_residual_from_boozer_output",
+    "quasi_isodynamic_residual_from_state",
     "export_vtk_surface_and_fieldline",
 ]
