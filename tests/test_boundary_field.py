@@ -101,3 +101,64 @@ def test_b_cartesian_from_state_jvp_matches_finite_difference():
         rtol=5.0e-6,
         atol=1.0e-9,
     )
+
+
+def test_exact_optimizer_b_cartesian_tangent_columns_match_jacobian():
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import jnp
+    from vmec_jax.boundary import boundary_from_indata
+    from vmec_jax.optimization import FixedBoundaryExactOptimizer, boundary_param_specs
+
+    enable_x64(True)
+
+    input_path, _wout_path = example_paths("circular_tokamak")
+    cfg, indata = load_config(str(input_path))
+    static = build_static(cfg)
+    field_static = _small_static(cfg, ntheta=5, nzeta=4)
+    boundary = boundary_from_indata(indata, static.modes)
+    specs = boundary_param_specs(
+        boundary,
+        static.modes,
+        max_mode=1,
+        min_coeff=0.0,
+        include=("rc", "zs"),
+        fix=("rc00",),
+    )[:2]
+    params = np.zeros(len(specs))
+
+    def residuals_fn(state):
+        field = b_cartesian_from_state(
+            state,
+            field_static,
+            indata=indata,
+            signgs=exact_opt._signgs,
+        )
+        return jnp.ravel(field)
+
+    exact_opt = FixedBoundaryExactOptimizer(
+        static,
+        indata,
+        boundary,
+        specs,
+        residuals_fn,
+        inner_max_iter=2,
+        inner_ftol=1.0e-5,
+    )
+    field, tangents = exact_opt.b_cartesian_tangent_columns_fun(params, field_static)
+    residuals = exact_opt.residual_fun(params)
+    jacobian = exact_opt.jacobian_fun(params)
+
+    np.testing.assert_allclose(
+        field.reshape(-1),
+        residuals,
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+    tangent_jacobian = tangents.reshape((-1, len(specs)))
+    np.testing.assert_allclose(
+        tangent_jacobian,
+        jacobian,
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
