@@ -383,6 +383,9 @@ The scripts save `input.initial`, `input.final`, `wout_initial.nc`,
 Redl bootstrap-current mismatch residuals are the next finite-beta extensions;
 the current examples keep the stage-one structure and current-profile support
 in place so those terms can be added without changing the user workflow.
+The QI script exposes `QI_MBOZ`, `QI_NBOZ`, `QI_NPHI`, `QI_NALPHA`, and
+`QI_N_BOUNCE` at the top; the defaults are first-run diagnostic settings, and
+should be increased for final research-quality QI refinements.
 
 ## QA/QH/QP/QI Optimization Policy Sweep
 
