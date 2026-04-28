@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from contextlib import nullcontext
 from dataclasses import dataclass, fields, is_dataclass, replace
 import json
@@ -1181,9 +1182,9 @@ class FixedBoundaryExactOptimizer:
         self._exact_solver_kwargs = dict(_base)
         self._trial_solver_kwargs = dict(
             _base,
-            # Trial-point residuals do not need an adjoint tape.  On CPU the
-            # VMEC2000-style Python loop is still faster, while on GPU the scan
-            # loop avoids thousands of small host-dispatched kernels.
+            # Trial-point residuals do not need an adjoint tape. Keep the
+            # solver on the measured fastest path by default; the scan loop is
+            # still available through VMEC_JAX_OPT_TRIAL_SCAN for diagnostics.
             jit_forces="auto",
             use_scan=self._use_scan_for_trial_solves(),
         )
@@ -1209,7 +1210,13 @@ class FixedBoundaryExactOptimizer:
         self._scan_exact_helper_cache: dict = {}
         self._scan_exact_path = self._select_exact_path()
         self._last_jacobian_residual: np.ndarray | None = None
+        self._trial_residual_cache: OrderedDict[bytes, np.ndarray] = OrderedDict()
+        self._trial_residual_cache_max = 8
         self._profile: dict[str, dict[str, float | int]] = {}
+        self._callback_trace_enabled = False
+        self._callback_trace: list[dict] = []
+        self._callback_point_ids: dict[bytes, int] = {}
+        self._callback_previous_key: bytes | None = None
 
         # History collected during optimisation.
         self._history: list[dict] = []
@@ -1361,6 +1368,57 @@ class FixedBoundaryExactOptimizer:
             }
         return out
 
+    def _callback_point_id(self, cache_key: bytes) -> int:
+        point_ids = getattr(self, "_callback_point_ids", None)
+        if point_ids is None:
+            self._callback_point_ids = {}
+            point_ids = self._callback_point_ids
+        point_id = point_ids.get(cache_key)
+        if point_id is None:
+            point_id = len(point_ids)
+            point_ids[cache_key] = point_id
+        return int(point_id)
+
+    def _trace_callback_event(
+        self,
+        kind: str,
+        params,
+        *,
+        source: str,
+        wall_time_s: float,
+    ) -> None:
+        if not getattr(self, "_callback_trace_enabled", False):
+            return
+        cache_key = self._exact_cache_key(params)
+        previous_key = getattr(self, "_callback_previous_key", None)
+        event = {
+            "index": len(self._callback_trace),
+            "kind": str(kind),
+            "source": str(source),
+            "point_id": self._callback_point_id(cache_key),
+            "same_as_previous": bool(previous_key == cache_key),
+            "wall_time_s": float(wall_time_s),
+        }
+        self._callback_trace.append(event)
+        self._callback_previous_key = cache_key
+
+    def _callback_trace_dump(self) -> dict:
+        events = list(getattr(self, "_callback_trace", []))
+        counts: dict[str, int] = {}
+        wall_time: dict[str, float] = {}
+        for event in events:
+            key = f"{event['kind']}:{event['source']}"
+            counts[key] = counts.get(key, 0) + 1
+            wall_time[key] = wall_time.get(key, 0.0) + float(event["wall_time_s"])
+        return {
+            "enabled": bool(getattr(self, "_callback_trace_enabled", False)),
+            "events": events,
+            "summary": {
+                key: {"count": counts[key], "wall_time_s": wall_time[key]}
+                for key in sorted(counts)
+            },
+        }
+
     def _exact_cache_key(self, params) -> bytes:
         return np.asarray(params, dtype=float).reshape(-1).tobytes()
 
@@ -1378,6 +1436,30 @@ class FixedBoundaryExactOptimizer:
             self._profile_add("exact_state_cache_hit", 0.0)
             return self._exact_state_cache[cache_key]
         return None
+
+    def _cached_trial_residual(self, params) -> np.ndarray | None:
+        cache_key = self._exact_cache_key(params)
+        cache = getattr(self, "_trial_residual_cache", None)
+        if cache is None or cache_key not in cache:
+            return None
+        residual = cache.pop(cache_key)
+        cache[cache_key] = residual
+        self._profile_add("trial_residual_cache_hit", 0.0)
+        return np.asarray(residual, dtype=float)
+
+    def _remember_trial_residual(self, params, residual: np.ndarray) -> None:
+        cache_key = self._exact_cache_key(params)
+        cache = getattr(self, "_trial_residual_cache", None)
+        if cache is None:
+            self._trial_residual_cache = OrderedDict()
+            cache = self._trial_residual_cache
+        cache[cache_key] = np.asarray(residual, dtype=float).copy()
+        cache.move_to_end(cache_key)
+        max_size = max(0, int(getattr(self, "_trial_residual_cache_max", 0)))
+        while max_size and len(cache) > max_size:
+            cache.popitem(last=False)
+        if max_size == 0:
+            cache.clear()
 
     def _boundary_from_params(self, params):
         from ._compat import jnp as _jnp
@@ -1635,10 +1717,14 @@ class FixedBoundaryExactOptimizer:
         """Relaxed residual for line-search trial evaluations."""
         if self._solver_device_name is not None and not self._inside_solver_device_context:
             return self._run_in_solver_device_context(self.forward_residual_fun, params)
+        cached = self._cached_trial_residual(params)
+        if cached is not None:
+            return cached
         state = self._solve_forward(params, trial=True)
         t_res = time.perf_counter()
         out = np.asarray(self._residuals_fn(state), dtype=float)
         self._profile_add("residual_eval_trial", time.perf_counter() - t_res)
+        self._remember_trial_residual(params, out)
         return out
 
     def _state_and_tangent_columns(self, params, *, profile_prefix: str):
@@ -2144,6 +2230,7 @@ class FixedBoundaryExactOptimizer:
         """Release JIT and exact-solve caches."""
         self._exact_cache.clear()
         self._exact_state_cache.clear()
+        self._trial_residual_cache.clear()
         self._last_jacobian_residual = None
         self._post_jacobian_clear(clear_compiled=True)
 
@@ -2275,6 +2362,7 @@ class FixedBoundaryExactOptimizer:
         target_aspect: float | None = None,
         scipy_tr_solver: str | None = "lsmr",
         scipy_lsmr_maxiter: int | None = None,
+        trace_callbacks: bool | None = None,
     ) -> dict:
         """Run exact least-squares optimisation.
 
@@ -2326,6 +2414,12 @@ class FixedBoundaryExactOptimizer:
             trust-region linear solve.  This is primarily useful for the
             matrix-free path, where every LSMR iteration costs one or more
             exact ``Jv``/``J.Tv`` products.
+        trace_callbacks:
+            When true, include a lightweight SciPy callback trace in the
+            history dump.  This is intended for CPU/GPU profiling of repeated
+            trial residuals, exact-state cache hits, and accepted-point
+            Jacobian replay.  ``None`` enables tracing only when
+            ``VMEC_JAX_OPT_TRACE_CALLBACKS`` is set to a truthy value.
 
         Returns
         -------
@@ -2339,6 +2433,16 @@ class FixedBoundaryExactOptimizer:
 
         self._history = []
         self._profile = {}
+        self._trial_residual_cache.clear()
+        self._callback_trace_enabled = (
+            os.getenv("VMEC_JAX_OPT_TRACE_CALLBACKS", "").strip().lower()
+            in ("1", "true", "yes", "on")
+            if trace_callbacks is None
+            else bool(trace_callbacks)
+        )
+        self._callback_trace = []
+        self._callback_point_ids = {}
+        self._callback_previous_key = None
         self._wall_t0 = time.perf_counter()
         self._iota_fn = iota_fn  # stored so _jacobian_fun_tracked can use it
 
@@ -2587,18 +2691,49 @@ class FixedBoundaryExactOptimizer:
 
             def _residuals_y(y):
                 x = np.asarray(y, dtype=float) * scale - base_params
+                t_cb = time.perf_counter()
                 cached_state = self._cached_exact_state(x)
                 if cached_state is not None:
-                    return np.asarray(self._residuals_fn(cached_state), dtype=float)
+                    out = np.asarray(self._residuals_fn(cached_state), dtype=float)
+                    self._trace_callback_event(
+                        "residual",
+                        x,
+                        source="exact_state_cache",
+                        wall_time_s=time.perf_counter() - t_cb,
+                    )
+                    return out
+                cached_trial = self._cached_trial_residual(x)
+                if cached_trial is not None:
+                    self._trace_callback_event(
+                        "residual",
+                        x,
+                        source="trial_residual_cache",
+                        wall_time_s=time.perf_counter() - t_cb,
+                    )
+                    return cached_trial
                 # Residual-only callbacks do not need an adjoint tape. Building one
                 # for every SciPy trial point bloats memory badly on converged QA/QH
                 # runs. Keep the Jacobian exact, but evaluate residuals through the
                 # converged forward solve only.
-                return _forward_residual_exact(x)
+                out = _forward_residual_exact(x)
+                self._trace_callback_event(
+                    "residual",
+                    x,
+                    source="trial_solve",
+                    wall_time_s=time.perf_counter() - t_cb,
+                )
+                return out
 
             def _jacobian_y(y):
                 x = np.asarray(y, dtype=float) * scale - base_params
+                t_cb = time.perf_counter()
                 jac = np.asarray(self._jacobian_fun_tracked(x), dtype=float) * scale[None, :]
+                self._trace_callback_event(
+                    "jacobian",
+                    x,
+                    source="exact_tape_replay",
+                    wall_time_s=time.perf_counter() - t_cb,
+                )
                 # SciPy residual callbacks above no longer consume the exact-tape cache.
                 # Drop the retained tape immediately after the Jacobian/history entry is
                 # materialized, otherwise later converged QA iterations keep a multi-GB
@@ -2726,6 +2861,8 @@ class FixedBoundaryExactOptimizer:
             history_dump["target_iota"] = float(target_iota)
         if target_aspect is not None:
             history_dump["target_aspect"] = float(target_aspect)
+        if self._callback_trace_enabled:
+            history_dump["callback_trace"] = self._callback_trace_dump()
 
         # Private, non-serializable convenience payload for scripts that want
         # to write wout files without rerunning the VMEC solve immediately after
