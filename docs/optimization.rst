@@ -101,52 +101,39 @@ Quasi-helical symmetry example
 The ``examples/optimization/qh_fixed_resolution_jax.py`` script replicates the
 SIMSOPT QH fixed-resolution benchmark entirely within ``vmec_jax``.  It has no
 argparse — all parameters are top-level variables, and the objective is built
-explicitly in the script:
+explicitly as a small list:
 
 .. code-block:: python
 
-   # ── User parameters ────────────────────────────────────────────────────────
-   INPUT_FILE    = Path(".../input.nfp4_QH_warm_start")
-   VMEC_MPOL     = 5         # solver resolution
-   VMEC_NTOR     = 5
-   MAX_MODE      = 2         # boundary DOF mode number cutoff
-   MAX_NFEV      = 15        # maximum residual+Jacobian evaluations
-   METHOD        = "scipy"
+   INPUT_FILE = DATA_DIR / "input.nfp4_QH_warm_start"
+   VMEC_MPOL = 5
+   VMEC_NTOR = 5
+   MAX_MODE = 2
+   MAX_NFEV = 15
+   METHOD = "scipy"
    SCIPY_TR_SOLVER = "lsmr"
-   HELICITY_M    = 1         # QH helicity
-   HELICITY_N    = -1        # field-period units; nn = HELICITY_N * nfp = -4 internally
+   HELICITY_M = 1
+   HELICITY_N = -1
    TARGET_ASPECT = 7.0       # target aspect ratio
-   SURFACES      = np.arange(0, 1.01, 0.1)
-   OBJECTIVE_TUPLES = [("aspect", 7.0, 1.0), ("qs", 0.0, 1.0)]
+   SURFACES = np.arange(0.0, 1.01, 0.1)
 
-   # ── Load ──────────────────────────────────────────────────────────────────
-   cfg, indata  = vj.load_config(str(INPUT_FILE))
-   indata       = vj.rebuild_indata_with_resolution(indata, mpol=VMEC_MPOL, ntor=VMEC_NTOR)
-   cfg          = vj.config_from_indata(indata)
-   static       = vj.build_static(cfg)
-   boundary     = vj.boundary_from_indata(indata, static.modes, apply_m1_constraint=False)
-   indata, static, boundary = vj.extend_boundary_for_max_mode(indata, static, boundary, MAX_MODE)
-   boundary_input = vj.boundary_input_from_indata(indata, static.modes)
+   OBJECTIVES = [
+       aspect_objective(TARGET_ASPECT, ASPECT_WEIGHT),
+       quasisymmetry_objective(
+           helicity_m=HELICITY_M,
+           helicity_n=HELICITY_N,
+           surfaces=SURFACES,
+           weight=QS_WEIGHT,
+       ),
+       # ObjectiveTerm("custom", lambda ctx, state: your_metric(ctx, state), target=0.0, weight=0.1),
+   ]
 
-   # ── DOFs ──────────────────────────────────────────────────────────────────
-   specs        = vj.boundary_param_specs(boundary_input, static.modes, max_mode=MAX_MODE,
-                                          include=("rc","zs"), fix=("rc00",))
-   params0      = np.zeros(len(specs))
+   CONFIG = FixedBoundaryQSConfig(...)
+   run_qs_optimization(CONFIG, OBJECTIVES)
 
-   # ── Objective ─────────────────────────────────────────────────────────────
-   def residuals_from_state(state):
-       ...
-       return jnp.concatenate([aspect_residual, qs_residuals])
-
-   # ── Optimiser ─────────────────────────────────────────────────────────────
-   opt    = vj.FixedBoundaryExactOptimizer(static, indata, boundary, specs,
-                                           residuals_from_state, boundary_input=boundary_input)
-   result = opt.run(params0, method=METHOD, max_nfev=MAX_NFEV, target_aspect=TARGET_ASPECT)
-
-   # ── Save + plot ────────────────────────────────────────────────────────────
-   opt.save_wout(OUTPUT_DIR / "wout_final.nc", result["x"])
-   opt.save_history(OUTPUT_DIR / "history.json", result)
-   vj.plot_qh_optimization(...)
+``ObjectiveTerm`` callbacks receive ``(ctx, state)`` and may return a scalar or
+vector.  The least-squares residual is ``weight * (value - target)``, so adding
+another objective is just adding another term to ``OBJECTIVES``.
 
 Run it with:
 
@@ -753,11 +740,14 @@ Source files
    * - ``vmec_jax/driver.py``
      - ``write_wout_from_fixed_boundary_run``, ``wout_from_fixed_boundary_run``.
    * - ``examples/optimization/qh_fixed_resolution_jax.py``
-     - QH SIMSOPT-style workflow script (no argparse, variables at top).
+     - QH SIMSOPT-style workflow script (no argparse, variables and objective list at top).
    * - ``examples/optimization/qa_fixed_resolution_jax_ess.py``
      - QA workflow with ESS toggle (aspect + mean iota + QA objectives).
    * - ``examples/optimization/qp_fixed_resolution_jax_ess.py``
      - QP workflow with helicity ``M=0`` quasisymmetry and iota lower bound.
+   * - ``examples/optimization/fixed_boundary_qs_common.py``
+     - Shared teaching helper for objective-list construction, continuation,
+       output writing, and plotting in the QA/QH/QP scripts.
    * - ``examples/optimization/qi_fixed_resolution_jax_ess.py``
      - QI workflow using a QP preseed plus ``booz_xform_jax`` and the smooth
        Boozer-space QI objective.
