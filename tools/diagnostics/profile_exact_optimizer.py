@@ -81,6 +81,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Force relaxed trial residual solves onto the lax.scan path; exact adjoint solves remain trace-capable non-scan.",
     )
+    p.add_argument(
+        "--trace-callbacks",
+        action="store_true",
+        help="Include SciPy residual/Jacobian callback source timings in the JSON history.",
+    )
     return p.parse_args()
 
 
@@ -374,6 +379,7 @@ def main() -> int:
             target_aspect=target_aspect,
             scipy_tr_solver=tr_solver,
             scipy_lsmr_maxiter=None if args.lsmr_maxiter <= 0 else int(args.lsmr_maxiter),
+            trace_callbacks=args.trace_callbacks,
         )
     finally:
         if trace_out is not None:
