@@ -231,6 +231,12 @@ and QI adds the smooth Boozer-space QI residual.  The scripts save
 ``input.initial``, ``input.final``, ``wout_initial.nc``, ``wout_final.nc``, and
 ``history.json`` for each run.
 
+All finite-beta controls are plain variables at the top of the scripts.  For
+QI, ``QI_MBOZ``, ``QI_NBOZ``, ``QI_NPHI``, ``QI_NALPHA``, and
+``QI_N_BOUNCE`` control the Boozer/QI residual grid.  The default QI grid is
+small enough for first-run diagnostics; increase it for final
+research-quality QI runs.
+
 Mercier ``DMerc`` and Redl bootstrap-current mismatch are not yet enabled as
 fully differentiable residual blocks in vmec_jax.  The finite-beta scaffolding
 is structured so those terms can be added next without changing the user-facing

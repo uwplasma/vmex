@@ -544,8 +544,16 @@ residual through ``booz_xform_jax``.
 
 All controls are top-level variables in those scripts: ``MAX_MODE``,
 ``MAX_NFEV``, ``USE_ESS``, ``USE_MODE_CONTINUATION``, and
-``SOLVER_DEVICE``.  Set ``SOLVER_DEVICE = "gpu"`` or run with
-``JAX_PLATFORM_NAME=gpu`` on a machine with a working JAX GPU install.
+``SOLVER_DEVICE``.  The scripts also expose ``INNER_MAX_ITER``,
+``INNER_FTOL``, ``TRIAL_MAX_ITER``, and ``TRIAL_FTOL`` so deck-controlled
+VMEC budgets can be kept or overridden explicitly.  Set
+``SOLVER_DEVICE = "gpu"`` or run with ``JAX_PLATFORM_NAME=gpu`` on a machine
+with a working JAX GPU install.
+
+The QI finite-beta script additionally exposes ``QI_MBOZ``, ``QI_NBOZ``,
+``QI_NPHI``, ``QI_NALPHA``, and ``QI_N_BOUNCE``.  Its defaults are intended as
+diagnostic first-run settings; increase these grid controls before treating a
+QI finite-beta refinement as a final research-quality result.
 
 The current implementation includes differentiable finite-beta global
 diagnostics and current-driven iota through ``PCURR_TYPE = "cubic_spline_ip"``.
