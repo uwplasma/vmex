@@ -11,6 +11,7 @@ Requirements
 Recommended:
 
 - ``netCDF4`` to read VMEC2000 ``wout_*.nc`` files for validation
+- ``booz_xform_jax`` for quasi-isodynamic (QI) optimization objectives
 
 Install from source
 -------------------
@@ -32,6 +33,10 @@ We recommend setting::
 Enable netCDF support::
 
   python -m pip install ".[netcdf]"
+
+Enable QI optimization support::
+
+  python -m pip install ".[qi]"
 
 Editable install (recommended for development)::
 

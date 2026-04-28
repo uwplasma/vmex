@@ -61,6 +61,53 @@ def test_qs_ess_sweep_sets_missing_wall_time():
     assert result.total_wall_time_s == 12.5
 
 
+def test_qs_ess_sweep_gpu_production_budgets_are_not_diagnostic_caps():
+    sweep = _load_sweep_module()
+
+    cfg = sweep._effective_problem_config(
+        sweep.PROBLEM_CONFIGS["qh"],
+        backend="gpu_prod",
+        policy="direct",
+        problem="qh",
+        max_mode=2,
+        use_ess=False,
+    )
+
+    assert cfg.max_nfev == 12
+    assert cfg.inner_max_iter == sweep.GPU_PRODUCTION_INNER_MAX_ITER
+    assert cfg.inner_ftol == sweep.GPU_PRODUCTION_INNER_FTOL
+    assert cfg.trial_max_iter == sweep.GPU_PRODUCTION_TRIAL_MAX_ITER
+    assert cfg.trial_ftol == sweep.GPU_PRODUCTION_TRIAL_FTOL
+
+    cont_cfg = sweep._effective_problem_config(
+        sweep.PROBLEM_CONFIGS["qa"],
+        backend="gpu_prod",
+        policy="continuation",
+        problem="qa",
+        max_mode=3,
+        use_ess=True,
+    )
+
+    assert cont_cfg.max_nfev == 8
+    assert cont_cfg.continuation_nfev == 6
+    assert cont_cfg.inner_max_iter == sweep.GPU_PRODUCTION_INNER_MAX_ITER
+    assert cont_cfg.inner_ftol == sweep.GPU_PRODUCTION_INNER_FTOL
+
+    diag_cfg = sweep._effective_problem_config(
+        sweep.PROBLEM_CONFIGS["qh"],
+        backend="gpu",
+        policy="direct",
+        problem="qh",
+        max_mode=2,
+        use_ess=False,
+        diagnostic_budgets=True,
+    )
+
+    assert diag_cfg.max_nfev == 4
+    assert diag_cfg.inner_max_iter == 40
+    assert diag_cfg.trial_max_iter == 40
+
+
 def test_qs_ess_renderer_ignores_legacy_backendless_records(tmp_path, monkeypatch):
     renderer = _load_renderer_module()
     monkeypatch.setattr(renderer, "OUTPUT_ROOT", tmp_path)
@@ -118,6 +165,34 @@ def test_qs_ess_renderer_ignores_legacy_backendless_records(tmp_path, monkeypatc
     assert preferred.objective_final == 0.2
 
     assert ("cpu", "direct", "qa", 3, True) not in lookup
+
+
+def test_qs_ess_renderer_normalizes_gpu_backend_labels(tmp_path, monkeypatch):
+    renderer = _load_renderer_module()
+    monkeypatch.setattr(renderer, "OUTPUT_ROOT", tmp_path)
+
+    case_dir = tmp_path / "gpu_prod" / "direct" / "qh" / "mode2" / "no_ess"
+    case_dir.mkdir(parents=True)
+    (case_dir / "case_result.json").write_text(
+        json.dumps(
+            {
+                "backend": "gpu_prod",
+                "policy": "direct",
+                "problem": "qh",
+                "max_mode": 2,
+                "use_ess": False,
+                "success": True,
+                "crashed": False,
+                "message": "ok",
+                "objective_final": 1.0,
+                "output_dir": str(case_dir),
+            }
+        )
+    )
+
+    discovered = renderer._discover_results()
+    assert discovered[0].backend == "gpu"
+    assert renderer._result_key(discovered[0]) == ("gpu", "direct", "qh", 2, False)
 
 
 def _write_case(

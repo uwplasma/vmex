@@ -22,6 +22,7 @@ from .geom import eval_geom
 from .init_guess import initial_guess_from_boundary
 from .namelist import InData, write_indata
 from .modes import ModeTable
+from .profiles import eval_profiles
 from .state import VMECState
 from .static import VMECStatic
 
@@ -367,7 +368,7 @@ def prepare_fixed_boundary_context(
     geom = eval_geom(st_guess, static)
     signgs = signgs_from_sqrtg(np.asarray(geom.sqrtg), axis_index=1)
     flux = flux_profiles_from_indata(indata, static.s, signgs=signgs)
-    pressure = jnp.zeros_like(jnp.asarray(static.s))
+    pressure = _pressure_profile_for_static(indata, static)
     booz_inputs = booz_xform_inputs_from_state(
         state=st_guess,
         static=static,
@@ -380,6 +381,15 @@ def prepare_fixed_boundary_context(
         flux=flux,
         pressure=pressure,
         booz_inputs=booz_inputs,
+    )
+
+
+def _pressure_profile_for_static(indata, static: VMECStatic):
+    """Evaluate the VMEC pressure profile on the optimization radial mesh."""
+    prof = eval_profiles(indata, jnp.asarray(static.s))
+    return jnp.asarray(
+        prof.get("pressure", jnp.zeros_like(jnp.asarray(static.s))),
+        dtype=jnp.asarray(static.s).dtype,
     )
 
 
@@ -744,7 +754,7 @@ def make_qh_residuals_fn(
             signgs = 1
 
     flux = flux_profiles_from_indata(indata, static.s, signgs=signgs)
-    pressure = jnp.zeros_like(jnp.asarray(static.s))
+    pressure = _pressure_profile_for_static(indata, static)
 
     def _qs_eval_from_state(state: VMECState):
         return quasisymmetry_ratio_residual_from_state(
@@ -884,7 +894,7 @@ def make_qs_residuals_fn(
             signgs = 1
 
     flux = flux_profiles_from_indata(indata, static.s, signgs=signgs)
-    pressure = jnp.zeros_like(jnp.asarray(static.s))
+    pressure = _pressure_profile_for_static(indata, static)
     _signgs = signgs
     _indata = indata
 
@@ -1239,18 +1249,24 @@ class FixedBoundaryExactOptimizer:
         return "tape"
 
     def _use_scan_for_trial_solves(self) -> bool:
-        """Use the scan loop for residual-only trial solves on accelerators."""
-        if self._solver_device_name == "cpu":
-            return False
-        if self._solver_device_name in ("gpu", "tpu", "cuda", "rocm"):
-            return True
-        try:
-            from ._compat import jax as _jax
+        """Return whether trial residual solves should use the scan loop.
 
-            backend = str(_jax.default_backend()).strip().lower() if _jax is not None else "cpu"
-        except Exception:
-            backend = "cpu"
-        return backend not in ("cpu", "")
+        Exact-optimizer trial residuals are short, trace-compatible VMEC solves
+        called repeatedly by SciPy's trust-region line search.  GPU profiling
+        showed the scan trial path was slower than the non-scan forward path
+        for the current QA/QH/QP/QI optimization cases because the scan graph
+        pays a larger compile/dispatch cost and does not reuse the exact replay
+        tape.  Keep scan opt-in for diagnostics and future larger cases, but do
+        not force it just because the solver device is an accelerator.
+        """
+        forced = os.getenv("VMEC_JAX_OPT_TRIAL_SCAN", "").strip().lower()
+        if forced in ("1", "true", "yes", "on", "scan"):
+            return True
+        if forced in ("0", "false", "no", "off", "loop", "none"):
+            return False
+        if self._solver_device_name in ("cpu", "gpu", "tpu", "cuda", "rocm"):
+            return False
+        return False
 
     def _solver_device_context(self):
         if self._solver_device_name is None:
@@ -1625,118 +1641,17 @@ class FixedBoundaryExactOptimizer:
         self._profile_add("residual_eval_trial", time.perf_counter() - t_res)
         return out
 
-    def jacobian_fun(self, params) -> np.ndarray:
-        """Exact discrete-adjoint Jacobian at *params*."""
-        if self._solver_device_name is not None and not self._inside_solver_device_context:
-            return self._run_in_solver_device_context(self.jacobian_fun, params)
-        if self._scan_exact_path == "scan":
-            from ._compat import jnp as _jnp
-
-            helpers = self._scan_exact_helpers()
-            t0 = time.perf_counter()
-            residuals, jac = helpers["residual_and_jacobian"](
-                _jnp.asarray(params, dtype=_jnp.float64)
-            )
-            self._last_jacobian_residual = np.asarray(residuals, dtype=float)
-            self._solve_scan_exact_state(params)
-            out = np.asarray(jac, dtype=float)
-            self._profile_add("scan_jacobian_total", time.perf_counter() - t0)
-            return out
-        from ._compat import jax, jnp as _jnp
-        from .discrete_adjoint import checkpoint_tape_state_jvp_columns
-        from .init_guess import initial_guess_from_boundary as _ig
-        from .state import pack_state, unpack_state
-
-        t_total = time.perf_counter()
-        params = _jnp.asarray(params, dtype=_jnp.float64)
-        state, payload = self._solve_exact_with_tape(params, return_payload=True)
-        tape = payload["tape"]
-        axis_override = {
-            key: _jnp.asarray(value, dtype=params.dtype)
-            for key, value in payload["axis_override"].items()
-        }
-        packed_final = _jnp.asarray(pack_state(state), dtype=_jnp.float64)
-
-        def _initial_state_packed(p, axis_override_arg):
-            bdy = self._boundary_from_params(p)
-            s0 = _ig(
-                self._static, bdy, self._indata,
-                vmec_project=True,
-                axis_override=axis_override_arg,
-            )
-            return _jnp.asarray(pack_state(s0), dtype=_jnp.float64)
-
-        def _residuals_from_packed(packed):
-            return self._residuals_fn(unpack_state(packed, self._layout))
-
-        directions = _jnp.eye(int(params.size), dtype=params.dtype)
-        cache_key = (
-            int(params.size),
-            int(self._layout.size),
-            id(self._residuals_fn),
-        )
-        helper_cache = self._discrete_jacobian_helper_cache.get(cache_key)
-        if helper_cache is None:
-            @jax.jit
-            def _initial_tangent_columns(xf, directions, axis_override_arg):
-                def _initial_state_at_axis(p):
-                    return _initial_state_packed(p, axis_override_arg)
-
-                _, initial_state_linear = jax.linearize(_initial_state_at_axis, xf)
-                return jax.vmap(initial_state_linear)(directions)
-
-            @jax.jit
-            def _residual_tangent_columns(packed_state, packed_tangents):
-                _, residual_linear = jax.linearize(_residuals_from_packed, packed_state)
-                return jax.vmap(residual_linear)(packed_tangents)
-
-            helper_cache = {
-                "initial_tangent_columns": _initial_tangent_columns,
-                "residual_tangent_columns": _residual_tangent_columns,
-            }
-            self._discrete_jacobian_helper_cache[cache_key] = helper_cache
-
-        t_initial = time.perf_counter()
-        initial_tangents = helper_cache["initial_tangent_columns"](params, directions, axis_override)
-        self._profile_add("jacobian_initial_tangents", time.perf_counter() - t_initial)
-        t_replay = time.perf_counter()
-        final_tangents = checkpoint_tape_state_jvp_columns(
-            tape=tape,
-            static=self._static,
-            initial_tangents=initial_tangents,
-            rebuild_preconditioner=True,
-        )
-        self._profile_add("jacobian_tape_replay", time.perf_counter() - t_replay)
-        t_res = time.perf_counter()
-        columns = helper_cache["residual_tangent_columns"](packed_final, final_tangents)
-        self._profile_add("jacobian_residual_tangents", time.perf_counter() - t_res)
-        out = np.asarray(columns, dtype=float).T
-        self._profile_add("jacobian_total", time.perf_counter() - t_total)
-        return out
-
-    def state_tangent_columns_fun(self, params) -> tuple[VMECState, np.ndarray]:
-        """Return the accepted-point state and packed state tangent columns.
-
-        The tangent columns use the same frozen-axis initial-state convention
-        and checkpoint tape replay as :meth:`jacobian_fun`. The returned array
-        has shape ``(n_parameters, state.layout.size)``.
-        """
-        if self._solver_device_name is not None and not self._inside_solver_device_context:
-            return self._run_in_solver_device_context(
-                self.state_tangent_columns_fun,
-                params,
-            )
+    def _state_and_tangent_columns(self, params, *, profile_prefix: str):
+        """Return accepted-point state and packed tangent columns as JAX arrays."""
         from ._compat import jax, jnp as _jnp
         from .discrete_adjoint import checkpoint_tape_state_jvp_columns
         from .init_guess import initial_guess_from_boundary as _ig
         from .state import pack_state
 
-        t_total = time.perf_counter()
         params = _jnp.asarray(params, dtype=_jnp.float64)
         state, payload = self._solve_exact_with_tape(params, return_payload=True)
         if int(params.size) == 0:
-            empty = np.zeros((0, int(self._layout.size)), dtype=float)
-            self._profile_add("state_tangent_columns_total", time.perf_counter() - t_total)
+            empty = _jnp.zeros((0, int(self._layout.size)), dtype=_jnp.float64)
             return state, empty
 
         axis_override = {
@@ -1756,13 +1671,95 @@ class FixedBoundaryExactOptimizer:
             return _jnp.asarray(pack_state(s0), dtype=_jnp.float64)
 
         directions = _jnp.eye(int(params.size), dtype=params.dtype)
+        t_initial = time.perf_counter()
         _, initial_state_linear = jax.linearize(_initial_state_packed, params)
         initial_tangents = jax.vmap(initial_state_linear)(directions)
+        self._profile_add(
+            f"{profile_prefix}_initial_tangents",
+            time.perf_counter() - t_initial,
+        )
+        t_replay = time.perf_counter()
         final_tangents = checkpoint_tape_state_jvp_columns(
             tape=payload["tape"],
             static=self._static,
             initial_tangents=initial_tangents,
             rebuild_preconditioner=True,
+        )
+        self._profile_add(f"{profile_prefix}_tape_replay", time.perf_counter() - t_replay)
+        return state, final_tangents
+
+    def jacobian_fun(self, params) -> np.ndarray:
+        """Exact discrete-adjoint Jacobian at *params*."""
+        if self._solver_device_name is not None and not self._inside_solver_device_context:
+            return self._run_in_solver_device_context(self.jacobian_fun, params)
+        if self._scan_exact_path == "scan":
+            from ._compat import jnp as _jnp
+
+            helpers = self._scan_exact_helpers()
+            t0 = time.perf_counter()
+            residuals, jac = helpers["residual_and_jacobian"](
+                _jnp.asarray(params, dtype=_jnp.float64)
+            )
+            self._last_jacobian_residual = np.asarray(residuals, dtype=float)
+            self._solve_scan_exact_state(params)
+            out = np.asarray(jac, dtype=float)
+            self._profile_add("scan_jacobian_total", time.perf_counter() - t0)
+            return out
+        from ._compat import jax, jnp as _jnp
+        from .state import pack_state, unpack_state
+
+        t_total = time.perf_counter()
+        params = _jnp.asarray(params, dtype=_jnp.float64)
+        state, final_tangents = self._state_and_tangent_columns(
+            params,
+            profile_prefix="jacobian",
+        )
+        packed_final = _jnp.asarray(pack_state(state), dtype=_jnp.float64)
+
+        def _residuals_from_packed(packed):
+            return self._residuals_fn(unpack_state(packed, self._layout))
+
+        cache_key = (
+            int(params.size),
+            int(self._layout.size),
+            id(self._residuals_fn),
+        )
+        helper_cache = self._discrete_jacobian_helper_cache.get(cache_key)
+        if helper_cache is None:
+            @jax.jit
+            def _residual_tangent_columns(packed_state, packed_tangents):
+                _, residual_linear = jax.linearize(_residuals_from_packed, packed_state)
+                return jax.vmap(residual_linear)(packed_tangents)
+
+            helper_cache = {
+                "residual_tangent_columns": _residual_tangent_columns,
+            }
+            self._discrete_jacobian_helper_cache[cache_key] = helper_cache
+
+        t_res = time.perf_counter()
+        columns = helper_cache["residual_tangent_columns"](packed_final, final_tangents)
+        self._profile_add("jacobian_residual_tangents", time.perf_counter() - t_res)
+        out = np.asarray(columns, dtype=float).T
+        self._profile_add("jacobian_total", time.perf_counter() - t_total)
+        return out
+
+    def state_tangent_columns_fun(self, params) -> tuple[VMECState, np.ndarray]:
+        """Return the accepted-point state and packed state tangent columns.
+
+        The tangent columns use the same frozen-axis initial-state convention
+        and checkpoint tape replay as :meth:`jacobian_fun`. The returned array
+        has shape ``(n_parameters, state.layout.size)``.
+        """
+        if self._solver_device_name is not None and not self._inside_solver_device_context:
+            return self._run_in_solver_device_context(
+                self.state_tangent_columns_fun,
+                params,
+            )
+
+        t_total = time.perf_counter()
+        state, final_tangents = self._state_and_tangent_columns(
+            params,
+            profile_prefix="state_tangent",
         )
         out = np.asarray(final_tangents, dtype=float)
         self._profile_add("state_tangent_columns_total", time.perf_counter() - t_total)
@@ -1796,7 +1793,10 @@ class FixedBoundaryExactOptimizer:
         if static is None:
             static = self._static
         params = _jnp.asarray(params, dtype=_jnp.float64)
-        state, state_tangents = self.state_tangent_columns_fun(params)
+        state, state_tangents = self._state_and_tangent_columns(
+            params,
+            profile_prefix="b_cartesian_tangent",
+        )
         packed_final = _jnp.asarray(pack_state(state), dtype=_jnp.float64)
 
         def _field_from_packed(packed):
@@ -1815,9 +1815,7 @@ class FixedBoundaryExactOptimizer:
         if nparams == 0:
             columns = _jnp.zeros((0, field_flat.size), dtype=field_flat.dtype)
         else:
-            columns = jax.vmap(field_linear)(
-                _jnp.asarray(state_tangents, dtype=_jnp.float64)
-            )
+            columns = jax.vmap(field_linear)(state_tangents)
 
         ntheta = int(static.grid.ntheta)
         nzeta = int(static.grid.nzeta)
@@ -2703,6 +2701,10 @@ class FixedBoundaryExactOptimizer:
                 None if scipy_lsmr_maxiter is None else int(scipy_lsmr_maxiter)
             ),
             "solver_device": self._solver_device_name or "default",
+            "inner_max_iter": int(self._inner_max_iter),
+            "inner_ftol": float(self._inner_ftol),
+            "trial_max_iter": int(self._trial_max_iter),
+            "trial_ftol": float(self._trial_ftol),
             "total_wall_time_s": t_total,
             "nfev": result["nfev"],
             "njev": result["njev"],
