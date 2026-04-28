@@ -141,6 +141,15 @@ avoiding an otherwise unnecessary relaxed forward replay.  If
 ``save_wout(..., state=result["_state_final"])`` is used immediately after
 ``run()``, no additional equilibrium solve is performed.
 
+SciPy can also revisit the same rejected trust-region trial point.  The
+optimizer therefore keeps a small residual-only LRU cache for relaxed trial
+callbacks.  The cache stores NumPy residual vectors, not VMEC states or JAX
+tapes, so it removes repeated forward solves without retaining large XLA
+buffers.  To audit the exact callback sequence, run the diagnostic script with
+``--trace-callbacks``; the JSON history then includes a ``callback_trace`` block
+that labels each residual/Jacobian callback as an exact-state cache hit, a
+trial-residual cache hit, a fresh trial solve, or an exact tape replay.
+
 The lowest accepted-point callback count currently comes from the custom
 ``method="gauss_newton"`` loop: it uses relaxed residuals only for line-search
 trial points and one exact Jacobian per accepted point.  The SciPy trust-region
@@ -178,7 +187,8 @@ costs.  For GPU profiling, always separate the first run from cache-warm runs:
 
    JAX_PLATFORM_NAME=gpu python tools/diagnostics/profile_exact_optimizer.py \
      --problem qa --max-mode 1 --inner-max-iter 20 \
-     --trial-max-iter 20 --solver-device default --max-nfev 1
+     --trial-max-iter 20 --solver-device default --max-nfev 1 \
+     --trace-callbacks --json-out gpu_trace.json
 
 April 2026 callback diagnostics for the full input-deck QH ``max_mode=1`` case
 show where the GPU path loses today.  Local CPU used JAX 0.9.2 on an Apple
@@ -240,6 +250,14 @@ JAX.  The bottleneck is the accepted-point tape build/replay path.  A CPU
 slower than a CPU-only process, but vmec_jax does not force CPU execution for
 GPU-enabled users.  Use explicit CPU-only workers for controlled CPU studies,
 and explicit GPU backends for GPU profiling.
+
+A follow-up QH ``max_mode=2`` GPU trace with ``max_nfev=4`` and
+``inner_max_iter=trial_max_iter=120`` showed the same bottleneck.  The warm
+run spent about ``74 s`` total: four accepted-point Jacobian callbacks consumed
+about ``49 s`` end-to-end, while three relaxed trial solves consumed about
+``24 s``.  The trace contained one exact-state residual cache hit and no
+repeated trial residuals, so the next GPU optimization lane is reducing
+accepted-point tape build/replay cost rather than adding more residual caching.
 
 Fixed-boundary GPU diagnostics
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
