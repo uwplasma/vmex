@@ -18,6 +18,20 @@ CONTINUATION_NFEV = 6
 USE_ESS = True
 USE_MODE_CONTINUATION = True
 SOLVER_DEVICE = None  # set to "cpu" or "gpu" to force one backend
+INNER_MAX_ITER = 0  # 0 uses NITER from the input deck
+INNER_FTOL = 0.0  # 0 uses FTOL from the input deck
+TRIAL_MAX_ITER = 300
+TRIAL_FTOL = 1.0e-10
+
+# Boozer/QI residual resolution. These defaults are diagnostic-friendly for a
+# first run; increase them for final research-quality QI refinements.
+QI_MBOZ = 10
+QI_NBOZ = 10
+QI_NPHI = 32
+QI_NALPHA = 8
+QI_N_BOUNCE = 12
+QI_SOFTNESS = 30.0
+QI_PROFILE_WEIGHT = 0.15
 
 
 CONFIG = FiniteBetaStage1Config(
@@ -37,6 +51,17 @@ CONFIG = FiniteBetaStage1Config(
     use_ess=USE_ESS,
     use_mode_continuation=USE_MODE_CONTINUATION,
     solver_device=SOLVER_DEVICE,
+    inner_max_iter=INNER_MAX_ITER,
+    inner_ftol=INNER_FTOL,
+    trial_max_iter=TRIAL_MAX_ITER,
+    trial_ftol=TRIAL_FTOL,
+    qi_mboz=QI_MBOZ,
+    qi_nboz=QI_NBOZ,
+    qi_nphi=QI_NPHI,
+    qi_nalpha=QI_NALPHA,
+    qi_n_bounce=QI_N_BOUNCE,
+    qi_softness=QI_SOFTNESS,
+    qi_profile_weight=QI_PROFILE_WEIGHT,
 )
 
 
