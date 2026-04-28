@@ -18,6 +18,10 @@ CONTINUATION_NFEV = 8
 USE_ESS = True
 USE_MODE_CONTINUATION = True
 SOLVER_DEVICE = None  # set to "cpu" or "gpu" to force one backend
+INNER_MAX_ITER = 0  # 0 uses NITER from the input deck
+INNER_FTOL = 0.0  # 0 uses FTOL from the input deck
+TRIAL_MAX_ITER = 300
+TRIAL_FTOL = 1.0e-10
 
 
 CONFIG = FiniteBetaStage1Config(
@@ -39,6 +43,10 @@ CONFIG = FiniteBetaStage1Config(
     use_ess=USE_ESS,
     use_mode_continuation=USE_MODE_CONTINUATION,
     solver_device=SOLVER_DEVICE,
+    inner_max_iter=INNER_MAX_ITER,
+    inner_ftol=INNER_FTOL,
+    trial_max_iter=TRIAL_MAX_ITER,
+    trial_ftol=TRIAL_FTOL,
 )
 
 
