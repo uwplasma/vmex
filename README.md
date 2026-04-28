@@ -179,9 +179,9 @@ fixed-boundary QH optimization using the built-in **exact discrete-adjoint Jacob
 
 The script is intentionally written in the same teaching style as SIMSOPT's
 `QH_fixed_resolution.py`: choose the VMEC resolution directly in Python, choose
-the active boundary coefficients directly, build an `OBJECTIVES` list, and
-choose the outer optimizer explicitly. Nothing relies on a hidden SIMSOPT
-wrapper layer.
+the active boundary coefficients directly, build an `OBJECTIVES` list, then run
+the visible setup → continuation stages → optimizer → save/plot workflow. It is
+a standalone script, not an argparse entry point or a hidden wrapper call.
 
 ```bash
 python examples/optimization/qh_fixed_resolution_jax.py   # edit MAX_MODE at the top
