@@ -354,6 +354,17 @@ remaining GPU term.  Explicit replay column chunks of 8 or 12 were much slower
 on this 24-DOF case because they segmented the replay into multiple GPU
 launch/compile groups; full-column replay remained best.
 
+The next smaller accepted-point cleanup caches the initial-state tangent matrix
+for each VMEC theta-flip branch.  With the magnetic-axis branch frozen by the
+accepted-point tape, the initial guess is affine in the boundary coefficients,
+so repeated Jacobian callbacks do not need to re-linearize that graph unless
+the discrete flip branch changes.  On the same QH ``max_mode=2`` GPU profile,
+three perturbed dense-Jacobian callbacks moved from about ``20.7 s`` total to
+about ``19.9 s`` total, with matching Jacobian norms.  Two attempted GPU replay
+shortcuts were rejected as defaults: precomputed tridiagonal coefficients are
+now correctness-tested but slower on this replay graph, and stopping gradients
+through solver time-control scalars nearly doubled replay time.
+
 Fixed-boundary GPU diagnostics
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
