@@ -317,6 +317,13 @@ compact replay payload is assembled.  On the warm ``office`` GPU QH
 ``3.02 s`` to ``2.70 s``.  It does not solve the main GPU gap; it narrows the
 next target to the update/preconditioner replay graph itself.
 
+Splitting the update timer confirmed that conclusion: on the same QH
+``max_mode=2`` GPU profile, ``exact_tape_solver_update_state`` accounted for
+essentially all of ``exact_tape_solver_update`` (about ``2.7 s`` per accepted
+point), while trace-build/finalize bookkeeping was below ``1 ms`` per point.
+The next implementation target is therefore fusing or scanning the primal
+state-update/replay work, not further reducing Python trace dictionary overhead.
+
 Fixed-boundary GPU diagnostics
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
