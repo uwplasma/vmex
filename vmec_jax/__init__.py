@@ -143,7 +143,13 @@ from .geom import Geom, eval_geom
 from .profiles import ProfileInputs, profiles_from_indata, eval_profiles
 from .finite_beta import FiniteBetaTargets, finite_beta_global_residuals_from_state, finite_beta_scalars_from_state
 from .integrals import dvds_from_sqrtg, cumtrapz_s, volume_from_sqrtg
-from .field import bsup_from_geom, bsup_from_sqrtg_lambda, b2_from_bsup, signgs_from_sqrtg
+from .field import (
+    b_cartesian_from_state,
+    b2_from_bsup,
+    bsup_from_geom,
+    bsup_from_sqrtg_lambda,
+    signgs_from_sqrtg,
+)
 from .energy import magnetic_wb_from_state, flux_profiles_from_indata
 from .diagnostics import Summary, print_jacobian_stats, print_summary, summarize_array, summarize_many
 from .vmec_jacobian import vmec_half_mesh_jacobian_from_state
@@ -336,6 +342,7 @@ __all__ = [
     "flux_profiles_from_indata",
     "bsup_from_geom",
     "bsup_from_sqrtg_lambda",
+    "b_cartesian_from_state",
     "b2_from_bsup",
     "magnetic_wb_from_state",
     "Summary",
