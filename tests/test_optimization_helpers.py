@@ -1,20 +1,26 @@
 import numpy as np
 import jax.numpy as jnp
+import pytest
 from types import SimpleNamespace
 
 from vmec_jax.namelist import InData
 from vmec_jax.boundary import BoundaryCoeffs
-from vmec_jax.modes import vmec_mode_table
+from vmec_jax.modes import ModeTable, vmec_mode_table
 from vmec_jax.optimization import (
     BoundaryParamSpec,
     FixedBoundaryExactOptimizer,
+    _indexed_boundary_maps_from_boundary,
     apply_boundary_params,
     boundary_param_names,
     boundary_param_specs,
+    create_x_scale,
     gauss_newton_least_squares,
     lift_boundary_params,
+    parse_surface_list,
+    rebuild_indata_with_resolution,
     smooth_min_abs_iota_residual,
     surface_indices_from_s,
+    surface_indices_from_static,
 )
 
 
@@ -51,11 +57,35 @@ def test_boundary_param_specs_and_apply():
     assert not np.allclose(np.asarray(updated.R_cos), np.asarray(boundary.R_cos))
 
 
+def test_apply_boundary_params_rejects_unknown_kind():
+    boundary = BoundaryCoeffs(
+        R_cos=np.array([1.0]),
+        R_sin=np.array([0.0]),
+        Z_cos=np.array([0.0]),
+        Z_sin=np.array([0.0]),
+    )
+    specs = [BoundaryParamSpec("bad", "bad", 0, 0, 0)]
+
+    with pytest.raises(ValueError, match="Unknown boundary parameter kind"):
+        apply_boundary_params(boundary, specs, jnp.asarray([1.0]))
+
+
 def test_surface_indices_from_s():
     s_half = np.array([0.1, 0.3, 0.5, 0.7])
     indices, selected = surface_indices_from_s(s_half, [0.28, 3])
     assert indices == [1, 2]
     np.testing.assert_allclose(selected, np.array([0.3, 0.5]))
+
+
+def test_parse_surface_list_and_surface_indices_from_static():
+    surfaces = parse_surface_list("1, 0.36, 3, 1e-1,")
+    assert surfaces == [1, 0.36, 3, 0.1]
+
+    static = SimpleNamespace(s=np.array([0.0, 0.2, 0.5, 1.0]))
+    indices, selected = surface_indices_from_static(static, [0.36, 2])
+
+    assert indices == [1, 1]
+    np.testing.assert_allclose(selected, np.array([0.35, 0.35]))
 
 
 def test_lift_boundary_params_maps_shared_names_and_zeros_new_modes():
@@ -72,6 +102,20 @@ def test_lift_boundary_params_maps_shared_names_and_zeros_new_modes():
     lifted = lift_boundary_params(source_specs, np.array([0.25, -0.5]), target_specs)
 
     np.testing.assert_allclose(lifted, np.array([0.25, -0.5, 0.0]))
+
+
+def test_create_x_scale_normalizes_lowest_level_and_decays_high_modes():
+    specs = [
+        BoundaryParamSpec("rc10", "rc", 0, 1, 0),
+        BoundaryParamSpec("rc20", "rc", 1, 2, 0),
+        BoundaryParamSpec("rc33", "rc", 2, 3, 3),
+    ]
+
+    np.testing.assert_allclose(create_x_scale(specs, alpha=0.0), np.ones(3))
+    np.testing.assert_allclose(
+        create_x_scale(specs, alpha=0.5),
+        np.array([1.0, np.exp(-0.5), np.exp(-1.0)]),
+    )
 
 
 def test_smooth_min_abs_iota_residual_is_differentiable_floor():
@@ -91,6 +135,46 @@ def test_smooth_min_abs_iota_residual_is_differentiable_floor():
     assert np.isfinite(float(grad_neg))
     assert float(grad_pos) < 0.0
     assert float(grad_neg) > 0.0
+
+
+def test_indexed_boundary_maps_from_boundary_keep_first_duplicate_mode():
+    modes = ModeTable(
+        m=np.array([0, 1, 1, 1], dtype=int),
+        n=np.array([0, 0, 0, -1], dtype=int),
+    )
+    boundary = BoundaryCoeffs(
+        R_cos=np.array([1.0, 2.0, 99.0, 3.0]),
+        R_sin=np.array([0.0, 0.2, 9.9, 0.3]),
+        Z_cos=np.array([0.0, 0.4, 9.8, 0.5]),
+        Z_sin=np.array([0.0, 0.6, 9.7, 0.7]),
+    )
+
+    maps = _indexed_boundary_maps_from_boundary(boundary, modes)
+
+    assert maps["RBC"][(0, 0)] == 1.0
+    assert maps["RBC"][(0, 1)] == 2.0
+    assert maps["RBS"][(0, 1)] == 0.2
+    assert maps["ZBC"][(0, 1)] == 0.4
+    assert maps["ZBS"][(0, 1)] == 0.6
+    assert maps["RBC"][(-1, 1)] == 3.0
+
+
+def test_rebuild_indata_with_resolution_copies_scalars_without_mutating_original():
+    indata = InData(
+        scalars={"MPOL": 2, "NTOR": 1, "NFP": 4},
+        indexed={"RBC": {(0, 0): 1.0}},
+        source_path="input.test",
+    )
+
+    rebuilt = rebuild_indata_with_resolution(indata, mpol=6, ntor=5)
+
+    assert indata.scalars["MPOL"] == 2
+    assert indata.scalars["NTOR"] == 1
+    assert rebuilt.scalars["MPOL"] == 6
+    assert rebuilt.scalars["NTOR"] == 5
+    assert rebuilt.scalars["NFP"] == 4
+    assert rebuilt.indexed == indata.indexed
+    assert rebuilt.source_path == indata.source_path
 
 
 def test_gauss_newton_least_squares_solves_linear_problem():
@@ -115,6 +199,47 @@ def test_gauss_newton_least_squares_solves_linear_problem():
     np.testing.assert_allclose(result["x"], np.array([1.0, 1.0]), atol=1e-12, rtol=0.0)
     assert result["success"]
     assert result["objective"] <= 1e-20
+
+
+def test_gauss_newton_reports_nonfinite_optimality():
+    def residual(x):
+        return np.array([float(x[0]) - 1.0], dtype=float)
+
+    def jacobian(_x):
+        return np.array([[np.nan]], dtype=float)
+
+    result = gauss_newton_least_squares(
+        residual,
+        jacobian,
+        np.array([0.0], dtype=float),
+        max_nfev=3,
+        verbose=0,
+    )
+
+    assert not result["success"]
+    assert result["message"] == "non-finite optimality encountered"
+    assert result["njev"] == 1
+    assert np.isfinite(result["cost"])
+
+
+def test_gauss_newton_reports_line_search_failure():
+    def residual(_x):
+        return np.array([1.0], dtype=float)
+
+    def jacobian(_x):
+        return np.array([[1.0]], dtype=float)
+
+    result = gauss_newton_least_squares(
+        residual,
+        jacobian,
+        np.array([0.0], dtype=float),
+        max_nfev=4,
+        verbose=0,
+    )
+
+    assert not result["success"]
+    assert result["message"] == "line search failed to reduce the objective"
+    assert result["cost"] == 0.5
 
 
 def test_gauss_newton_post_jacobian_callback():
