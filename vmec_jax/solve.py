@@ -128,6 +128,8 @@ def _strict_update_step_jit(static, *, limit_update_rms: bool, divide_by_scalxc_
         )
 
     compiled = jax.jit(_step)
+    if len(_STRICT_UPDATE_STEP_JIT_CACHE) >= 16:
+        _STRICT_UPDATE_STEP_JIT_CACHE.pop(next(iter(_STRICT_UPDATE_STEP_JIT_CACHE)))
     _STRICT_UPDATE_STEP_JIT_CACHE[key] = compiled
     return compiled
 
@@ -4537,6 +4539,10 @@ def solve_fixed_boundary_residual_iter(
         use_scan = False
     freeb_sample_env = os.getenv("VMEC_JAX_FREEB_SAMPLE_EXTERNAL", "1").strip().lower()
     freeb_sample_external = freeb_sample_env not in ("", "0", "false", "no")
+    jit_strict_update_env = os.getenv("VMEC_JAX_JIT_STRICT_UPDATE", "auto").strip().lower()
+    jit_strict_update_enabled = jit_strict_update_env not in ("", "0", "false", "no", "off")
+    if jit_strict_update_env == "auto":
+        jit_strict_update_enabled = _scan_backend_name() != "cpu"
 
     def _attach_freeb_diag(res: SolveVmecResidualResult) -> SolveVmecResidualResult:
         if not bool(free_boundary_enabled):
@@ -12803,10 +12809,6 @@ def solve_fixed_boundary_residual_iter(
                 or (bool(adjoint_trace) and adjoint_trace_mode == "full")
             )
             need_trial_eval = bool(backtracking) or bool(reference_mode) or bool(use_direct_fallback)
-            jit_strict_update_env = os.getenv("VMEC_JAX_JIT_STRICT_UPDATE", "auto").strip().lower()
-            jit_strict_update_enabled = jit_strict_update_env not in ("", "0", "false", "no", "off")
-            if jit_strict_update_env == "auto":
-                jit_strict_update_enabled = _scan_backend_name() != "cpu"
             use_jit_strict_update_step = (
                 bool(jit_strict_update_enabled)
                 and (not bool(host_update_assembly))
