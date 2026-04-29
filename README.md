@@ -475,8 +475,14 @@ and publication panels.
 ```bash
 JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
 JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
+JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
+JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
 python examples/optimization/render_qs_ess_publication_panel.py
 ```
+
+For NVIDIA-only JAX installations, `JAX_PLATFORMS=cuda` is also valid. Do not
+use `JAX_PLATFORMS=gpu`: some JAX versions interpret that as both CUDA and ROCm
+and fail if ROCm is not installed.
 
 Run individual examples by editing top-level variables in each script:
 
