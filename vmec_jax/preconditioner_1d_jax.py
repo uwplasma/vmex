@@ -886,14 +886,14 @@ def _tridi_precompute_coeffs(a, d, b) -> tuple[Any, Any]:
     eps = jnp.asarray(1.0e-12, dtype=d.dtype)
     d0 = jnp.where(d[0] != 0.0, d[0], eps)
     inv0 = jnp.asarray(1.0, dtype=d.dtype) / d0
-    cp0 = b[0] * inv0
+    cp0 = a[0] * inv0
 
     def fwd(cp_prev, inp):
         aj, dj, bj = inp
-        denom = dj - aj * cp_prev
+        denom = dj - cp_prev * bj
         denom = jnp.where(denom != 0.0, denom, eps)
         inv = jnp.asarray(1.0, dtype=d.dtype) / denom
-        cp = bj * inv
+        cp = aj * inv
         return cp, (cp, inv)
 
     if n == 1:
@@ -950,15 +950,15 @@ def _tridi_solve_batched_jmin0_lax_pretransposed(dl_t, d_t, du_t, rhs) -> Any:
 
 
 @jit
-def _tridi_solve_precomputed(a, cp, inv, rhs) -> Any:
+def _tridi_solve_precomputed(b, cp, inv, rhs) -> Any:
     """Solve tridiagonal using precomputed c' and inv_denom."""
-    a = jnp.asarray(a)
+    b = jnp.asarray(b)
     cp = jnp.asarray(cp)
     inv = jnp.asarray(inv)
     rhs = jnp.asarray(rhs)
     if rhs.ndim > inv.ndim:
         expand = (1,) * (rhs.ndim - inv.ndim)
-        a = a.reshape(a.shape + expand)
+        b = b.reshape(b.shape + expand)
         cp = cp.reshape(cp.shape + expand)
         inv = inv.reshape(inv.shape + expand)
     n = int(rhs.shape[0])
@@ -968,14 +968,14 @@ def _tridi_solve_precomputed(a, cp, inv, rhs) -> Any:
     dp0 = rhs[0] * inv[0]
 
     def fwd(dp_prev, inp):
-        aj, invj, rj = inp
-        dp = (rj - aj * dp_prev) * invj
+        bj, invj, rj = inp
+        dp = (rj - bj * dp_prev) * invj
         return dp, dp
 
     if n == 1:
         dp = dp0[None, ...]
     else:
-        inp = (a[1:], inv[1:], rhs[1:])
+        inp = (b[1:], inv[1:], rhs[1:])
         _, dp_rest = jax.lax.scan(fwd, dp0, inp)
         dp = jnp.concatenate([dp0[None, ...], dp_rest], axis=0)
 
@@ -1093,7 +1093,7 @@ def _rz_preconditioner_apply_arrays(
             sol_r0_stack = _tridi_solve_batched_jmin0_lax_pretransposed(dlr0, dr0, dur0, rhs_r0_stack)
         elif use_precomputed:
             sol_r0_stack = _tridi_solve_precomputed(
-                ar[:, 0, :], cr[:, 0, :], ir[:, 0, :], rhs_r0_stack
+                br[:, 0, :], cr[:, 0, :], ir[:, 0, :], rhs_r0_stack
             )
         else:
             sol_r0_stack = _tridi_solve_batched_jmin0(
@@ -1107,7 +1107,7 @@ def _rz_preconditioner_apply_arrays(
             sol_z0_stack = _tridi_solve_batched_jmin0_lax_pretransposed(dlz0, dz0, duz0, rhs_z0_stack)
         elif use_precomputed:
             sol_z0_stack = _tridi_solve_precomputed(
-                az[:, 0, :], cz[:, 0, :], iz[:, 0, :], rhs_z0_stack
+                bz[:, 0, :], cz[:, 0, :], iz[:, 0, :], rhs_z0_stack
             )
         else:
             sol_z0_stack = _tridi_solve_batched_jmin0(
@@ -1157,7 +1157,7 @@ def _rz_preconditioner_apply_arrays(
                 sol_rm = _tridi_solve_batched_jmin0_lax_pretransposed(dlr_m, dr_m, dur_m, rhs_rm_stack)
             elif use_precomputed:
                 sol_rm = _tridi_solve_precomputed(
-                    a_r, cr[1:jmax, 1:, :], ir[1:jmax, 1:, :], rhs_rm_stack
+                    b_r, cr[1:jmax, 1:, :], ir[1:jmax, 1:, :], rhs_rm_stack
                 )
             else:
                 sol_rm = _tridi_solve_batched_jmin0(a_r, d_r, b_r, rhs_rm_stack, use_lax_tridi=use_lax_tridi)
@@ -1172,7 +1172,7 @@ def _rz_preconditioner_apply_arrays(
                 sol_zm = _tridi_solve_batched_jmin0_lax_pretransposed(dlz_m, dz_m, duz_m, rhs_zm_stack)
             elif use_precomputed:
                 sol_zm = _tridi_solve_precomputed(
-                    a_z, cz[1:jmax, 1:, :], iz[1:jmax, 1:, :], rhs_zm_stack
+                    b_z, cz[1:jmax, 1:, :], iz[1:jmax, 1:, :], rhs_zm_stack
                 )
             else:
                 sol_zm = _tridi_solve_batched_jmin0(a_z, d_z, b_z, rhs_zm_stack, use_lax_tridi=use_lax_tridi)
@@ -1549,12 +1549,12 @@ def rz_preconditioner(
 import numpy as _np_prec  # local alias to avoid shadowing jnp
 
 
-def _tridi_fwd_np(a, inv, rhs) -> _np_prec.ndarray:
+def _tridi_fwd_np(b, inv, rhs) -> _np_prec.ndarray:
     """Forward sweep of Thomas algorithm (precomputed form) in pure NumPy.
 
     Parameters
     ----------
-    a   : (n, ...) superdiagonal coefficients (normalised)
+    b   : (n, ...) subdiagonal coefficients
     inv : (n, ...) inverse of reduced diagonal
     rhs : (n, ...) right-hand side
     Returns dp array of same shape as rhs.
@@ -1564,12 +1564,12 @@ def _tridi_fwd_np(a, inv, rhs) -> _np_prec.ndarray:
         return _np_prec.empty_like(rhs)
     if rhs.ndim > inv.ndim:
         extra = (1,) * (rhs.ndim - inv.ndim)
-        a   = a.reshape(a.shape + extra)
+        b   = b.reshape(b.shape + extra)
         inv = inv.reshape(inv.shape + extra)
     dp = _np_prec.empty_like(rhs)
     dp[0] = rhs[0] * inv[0]
     for j in range(1, n):
-        dp[j] = (rhs[j] - a[j] * dp[j - 1]) * inv[j]
+        dp[j] = (rhs[j] - b[j] * dp[j - 1]) * inv[j]
     return dp
 
 
@@ -1588,18 +1588,18 @@ def _tridi_bwd_np(cp, dp) -> _np_prec.ndarray:
     return x
 
 
-def _tridi_solve_precomputed_np(a, cp, inv, rhs) -> _np_prec.ndarray:
+def _tridi_solve_precomputed_np(b, cp, inv, rhs) -> _np_prec.ndarray:
     """Solve tridiagonal system using precomputed c'/inv coefficients (NumPy)."""
-    a   = _np_prec.asarray(a)
+    b   = _np_prec.asarray(b)
     cp  = _np_prec.asarray(cp)
     inv = _np_prec.asarray(inv)
     rhs = _np_prec.asarray(rhs)
     if rhs.ndim > inv.ndim:
         extra = (1,) * (rhs.ndim - inv.ndim)
-        a   = a.reshape(a.shape + extra)
+        b   = b.reshape(b.shape + extra)
         cp  = cp.reshape(cp.shape + extra)
         inv = inv.reshape(inv.shape + extra)
-    dp = _tridi_fwd_np(a, inv, rhs)
+    dp = _tridi_fwd_np(b, inv, rhs)
     return _tridi_bwd_np(cp, dp)
 
 
@@ -1726,8 +1726,8 @@ def rz_preconditioner_apply_numpy(
         rhs_z0 = np.stack(z_blocks, axis=-1)[:, 0, :]  # (jmax, nrange, nb_z)
 
         if use_precomputed:
-            sol_r0 = _tridi_solve_precomputed_np(ar[:, 0, :], cr[:, 0, :], ir[:, 0, :], rhs_r0)
-            sol_z0 = _tridi_solve_precomputed_np(az[:, 0, :], cz[:, 0, :], iz[:, 0, :], rhs_z0)
+            sol_r0 = _tridi_solve_precomputed_np(br[:, 0, :], cr[:, 0, :], ir[:, 0, :], rhs_r0)
+            sol_z0 = _tridi_solve_precomputed_np(bz[:, 0, :], cz[:, 0, :], iz[:, 0, :], rhs_z0)
         else:
             sol_r0 = _tridi_solve_np(ar[:, 0, :], dr[:, 0, :], br[:, 0, :], rhs_r0)
             sol_z0 = _tridi_solve_np(az[:, 0, :], dz[:, 0, :], bz[:, 0, :], rhs_z0)
@@ -1752,9 +1752,9 @@ def rz_preconditioner_apply_numpy(
 
             if use_precomputed:
                 sol_rm = _tridi_solve_precomputed_np(
-                    ar[1:jmax, 1:, :], cr[1:jmax, 1:, :], ir[1:jmax, 1:, :], rhs_rm)
+                    br[1:jmax, 1:, :], cr[1:jmax, 1:, :], ir[1:jmax, 1:, :], rhs_rm)
                 sol_zm = _tridi_solve_precomputed_np(
-                    az[1:jmax, 1:, :], cz[1:jmax, 1:, :], iz[1:jmax, 1:, :], rhs_zm)
+                    bz[1:jmax, 1:, :], cz[1:jmax, 1:, :], iz[1:jmax, 1:, :], rhs_zm)
             else:
                 sol_rm = _tridi_solve_np(
                     ar[1:jmax, 1:, :], dr[1:jmax, 1:, :], br[1:jmax, 1:, :], rhs_rm)
