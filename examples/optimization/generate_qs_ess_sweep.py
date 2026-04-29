@@ -1022,6 +1022,9 @@ def _worker(
             stellarator_asymmetric=stellarator_asymmetric,
         )
         Path(result_path).write_text(json.dumps(asdict(case_result), indent=2))
+        stale_traceback = Path(output_dir) / "traceback.txt"
+        if stale_traceback.exists():
+            stale_traceback.unlink()
     except Exception as exc:
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         failed = CaseResult(
@@ -1372,6 +1375,9 @@ def main() -> None:
                     continue
                 if result_path.exists() and args.rerun:
                     result_path.unlink()
+                stale_traceback = output_dir / "traceback.txt"
+                if stale_traceback.exists() and args.rerun:
+                    stale_traceback.unlink()
                 proc = ctx.Process(
                     target=_worker,
                     args=(
