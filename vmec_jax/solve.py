@@ -9857,6 +9857,9 @@ def solve_fixed_boundary_residual_iter(
         "compute_forces": 0.0,
         "preconditioner": 0.0,
         "update": 0.0,
+        "update_state": 0.0,
+        "update_trace_build": 0.0,
+        "update_trace_finalize": 0.0,
         "precond_refresh": 0.0,
         "iterations": 0,
     }
@@ -12591,6 +12594,7 @@ def solve_fixed_boundary_residual_iter(
             # iteration in (m, n>=0) storage, no line-search accept/reject.
             w_curr = fsqr_f + fsqz_f + fsql_f
             state_backup = state
+            t_trace_build_start = time.perf_counter() if timing_enabled and adjoint_trace else None
             if adjoint_trace:
                 trace_entry: dict[str, Any] = {
                     "branch": "strict_update",
@@ -12669,6 +12673,9 @@ def solve_fixed_boundary_residual_iter(
                             "flss_u": np.asarray(flss_u),
                         }
                     )
+            if timing_enabled and t_trace_build_start is not None:
+                timing_stats["update_trace_build"] += time.perf_counter() - float(t_trace_build_start)
+            t_state_update_start = time.perf_counter() if timing_enabled else None
             dt_eff = float(time_step)
             if bool(limit_dt_from_force):
                 dt_eff = _safe_dt_from_force(
@@ -13215,6 +13222,14 @@ def solve_fixed_boundary_residual_iter(
                         cache_prec_lam_prec = None
                         cache_prec_faclam = None
                         cache_prec_lam_debug = None
+            if timing_enabled and t_state_update_start is not None:
+                try:
+                    if has_jax():
+                        jax.block_until_ready(state.Rcos)
+                except Exception:
+                    pass
+                timing_stats["update_state"] += time.perf_counter() - float(t_state_update_start)
+            t_trace_finalize_start = time.perf_counter() if timing_enabled and adjoint_trace else None
             if adjoint_trace:
                 trace_entry.update(
                     {
@@ -13255,6 +13270,10 @@ def solve_fixed_boundary_residual_iter(
                         }
                     )
                 adjoint_step_trace_history.append(trace_entry)
+            if timing_enabled and t_trace_finalize_start is not None:
+                timing_stats["update_trace_finalize"] += (
+                    time.perf_counter() - float(t_trace_finalize_start)
+                )
             if timing_enabled and t_update_start is not None:
                 try:
                     if has_jax():
@@ -13619,9 +13638,15 @@ def solve_fixed_boundary_residual_iter(
             "preconditioner_s": float(timing_stats["preconditioner"]),
             "precond_refresh_s": float(timing_stats["precond_refresh"]),
             "update_s": float(timing_stats["update"]),
+            "update_state_s": float(timing_stats["update_state"]),
+            "update_trace_build_s": float(timing_stats["update_trace_build"]),
+            "update_trace_finalize_s": float(timing_stats["update_trace_finalize"]),
             "compute_forces_per_iter_s": float(timing_stats["compute_forces"]) / iters,
             "preconditioner_per_iter_s": float(timing_stats["preconditioner"]) / iters,
             "update_per_iter_s": float(timing_stats["update"]) / iters,
+            "update_state_per_iter_s": float(timing_stats["update_state"]) / iters,
+            "update_trace_build_per_iter_s": float(timing_stats["update_trace_build"]) / iters,
+            "update_trace_finalize_per_iter_s": float(timing_stats["update_trace_finalize"]) / iters,
         }
         diag["timing"] = timing_report
         try:
@@ -13632,6 +13657,9 @@ def solve_fixed_boundary_residual_iter(
                 f"precond={timing_report['preconditioner_s']:.3e}s "
                 f"precond_refresh={timing_report['precond_refresh_s']:.3e}s "
                 f"update={timing_report['update_s']:.3e}s "
+                f"update_state={timing_report['update_state_s']:.3e}s "
+                f"trace_build={timing_report['update_trace_build_s']:.3e}s "
+                f"trace_final={timing_report['update_trace_finalize_s']:.3e}s "
                 f"(per-iter: {timing_report['compute_forces_per_iter_s']:.3e}, "
                 f"{timing_report['preconditioner_per_iter_s']:.3e}, "
                 f"{timing_report['update_per_iter_s']:.3e})",
