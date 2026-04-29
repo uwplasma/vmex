@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -99,6 +100,82 @@ def test_as_jax_array_is_tracer_safe():
 
     result = traced(jnp.asarray([1.0, 2.0, 3.0], dtype=jnp.float64))
     np.testing.assert_allclose(np.asarray(result), 14.0, rtol=0.0, atol=0.0)
+
+
+def test_quasisymmetry_surface_and_weight_helpers():
+    pytest.importorskip("jax")
+
+    from vmec_jax.quasisymmetry import _as_surface_array, _as_weight_array, _half_grid, _interp_half_grid
+
+    np.testing.assert_allclose(np.asarray(_as_surface_array(0.5)), [0.5])
+    np.testing.assert_allclose(np.asarray(_as_surface_array([0.25, 0.75])), [0.25, 0.75])
+    np.testing.assert_allclose(np.asarray(_as_weight_array(None, 2)), [1.0, 1.0])
+    np.testing.assert_allclose(np.asarray(_as_weight_array([2.0, 3.0], 2)), [2.0, 3.0])
+    np.testing.assert_allclose(np.asarray(_half_grid(4, np.float64)), [1.0 / 6.0, 0.5, 5.0 / 6.0])
+
+    samples = np.array([[10.0, 20.0], [30.0, 60.0], [50.0, 100.0]])
+    s_half = np.array([0.0, 0.5, 1.0])
+    interp = _interp_half_grid(samples, [0.25, 0.75], s_half)
+    np.testing.assert_allclose(np.asarray(interp), [[20.0, 40.0], [40.0, 80.0]])
+
+    single = _interp_half_grid(np.array([[7.0, 9.0]]), [0.25, 0.75], np.array([0.5]))
+    np.testing.assert_allclose(np.asarray(single), [[7.0, 9.0], [7.0, 9.0]])
+
+    with pytest.raises(ValueError, match="half-grid interpolation"):
+        _interp_half_grid(np.zeros((0,)), [0.5], np.zeros((0,)))
+
+
+def test_quasisymmetry_coefficient_shape_helpers():
+    pytest.importorskip("jax")
+
+    from vmec_jax.quasisymmetry import _optional_radial_mode_matrix, _radial_mode_matrix
+
+    direct = _radial_mode_matrix(np.arange(6.0).reshape(3, 2), radial_count=3, mode_count=2)
+    transposed = _radial_mode_matrix(np.arange(6.0).reshape(2, 3), radial_count=3, mode_count=2)
+
+    np.testing.assert_allclose(np.asarray(direct), np.arange(6.0).reshape(3, 2))
+    np.testing.assert_allclose(np.asarray(transposed), np.arange(6.0).reshape(2, 3).T)
+
+    like = np.ones((3, 2))
+    zeros = _optional_radial_mode_matrix(
+        SimpleNamespace(lasym=False, bmns=np.ones((3, 2))),
+        "bmns",
+        radial_count=3,
+        mode_count=2,
+        like=like,
+    )
+    np.testing.assert_allclose(np.asarray(zeros), np.zeros((3, 2)))
+
+    values = _optional_radial_mode_matrix(
+        SimpleNamespace(lasym=True, bmns=np.arange(6.0).reshape(3, 2)),
+        "bmns",
+        radial_count=3,
+        mode_count=2,
+        like=like,
+    )
+    np.testing.assert_allclose(np.asarray(values), np.arange(6.0).reshape(3, 2))
+
+    with pytest.raises(ValueError, match="expected a rank-2"):
+        _radial_mode_matrix(np.ones((2, 2, 2)), radial_count=2, mode_count=2)
+    with pytest.raises(ValueError, match="unexpected coefficient shape"):
+        _radial_mode_matrix(np.ones((4, 4)), radial_count=3, mode_count=2)
+
+
+def test_quasisymmetry_symoutput_split_reconstructs_half_grid():
+    pytest.importorskip("jax")
+
+    from vmec_jax.quasisymmetry import _vmec_symoutput_split_jax
+
+    trig = SimpleNamespace(ntheta2=3, ntheta1=4)
+    f = np.arange(2 * 4 * 3, dtype=float).reshape(2, 4, 3)
+
+    sym, asym = _vmec_symoutput_split_jax(f=f, trig=trig)
+    rev_sym, rev_asym = _vmec_symoutput_split_jax(f=f, trig=trig, reversed_sym=True)
+
+    np.testing.assert_allclose(np.asarray(sym + asym), f[:, :3, :])
+    np.testing.assert_allclose(np.asarray(rev_sym + rev_asym), f[:, :3, :])
+    np.testing.assert_allclose(np.asarray(rev_sym), np.asarray(asym))
+    np.testing.assert_allclose(np.asarray(rev_asym), np.asarray(sym))
 
 
 def test_quasisymmetry_ratio_residual_returns_diagnostic_fields():
