@@ -145,7 +145,13 @@ trajectory more closely than same-point repeats:
    JAX_PLATFORM_NAME=gpu PYTHONPATH=. python tools/diagnostics/profile_exact_optimizer.py \
      --problem qh --max-mode 2 --callback jacobian --repeats 3 \
      --perturb-scale 1e-4 --inner-max-iter 80 --trial-max-iter 40 \
-     --solver-device gpu --json-out qh_m2_gpu_new_points.json
+     --solver-device gpu --vmec-timing --json-out qh_m2_gpu_new_points.json
+
+With ``--vmec-timing``, the callback profile also splits
+``exact_tape_build`` into solver compute-force, preconditioner, update, and
+unattributed tape-building overhead terms.  Use that mode when optimizing the
+accepted-point path; omit it for production sweeps to avoid extra console
+output.
 
 For the standalone sweep scripts, worker subprocesses also inherit the parent
 JAX backend by default.  Use ``JAX_PLATFORMS=cpu`` or

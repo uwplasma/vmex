@@ -102,6 +102,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Include SciPy residual/Jacobian callback source timings in the JSON history.",
     )
+    p.add_argument(
+        "--vmec-timing",
+        action="store_true",
+        help="Enable VMEC_JAX_TIMING so exact tape profiles include solver phase timings.",
+    )
     return p.parse_args()
 
 
@@ -149,6 +154,8 @@ def main() -> int:
     args = _parse_args()
     if args.gradient_only:
         args.callback = "gradient"
+    if args.vmec_timing:
+        os.environ["VMEC_JAX_TIMING"] = "1"
 
     import vmec_jax as vj
     from vmec_jax._compat import enable_x64

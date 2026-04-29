@@ -1356,6 +1356,33 @@ class FixedBoundaryExactOptimizer:
         rec["count"] = int(rec["count"]) + 1
         rec["wall_time_s"] = float(rec["wall_time_s"]) + float(dt)
 
+    def _profile_exact_tape_solver_timing(self, tape, tape_build_wall_s: float) -> None:
+        diagnostics = getattr(tape, "diagnostics", None)
+        if not isinstance(diagnostics, dict):
+            return
+        timing = diagnostics.get("timing")
+        if not isinstance(timing, dict):
+            return
+        solver_total = 0.0
+        timing_keys = (
+            ("compute_forces_s", "exact_tape_solver_compute_forces"),
+            ("preconditioner_s", "exact_tape_solver_preconditioner"),
+            ("precond_refresh_s", "exact_tape_solver_precond_refresh"),
+            ("update_s", "exact_tape_solver_update"),
+        )
+        for key, profile_name in timing_keys:
+            try:
+                value = float(timing.get(key, 0.0))
+            except Exception:
+                continue
+            self._profile_add(profile_name, value)
+            if key != "precond_refresh_s":
+                solver_total += max(0.0, value)
+        self._profile_add(
+            "exact_tape_build_unattributed",
+            max(0.0, float(tape_build_wall_s) - solver_total),
+        )
+
     def _profile_dump(self) -> dict[str, dict[str, float | int]]:
         out: dict[str, dict[str, float | int]] = {}
         for name, rec in sorted(self._profile.items()):
@@ -1678,7 +1705,9 @@ class FixedBoundaryExactOptimizer:
             store_trace=False,
             store_full_step_traces=False,
         )
-        self._profile_add("exact_tape_build", time.perf_counter() - t_tape)
+        tape_build_wall_s = time.perf_counter() - t_tape
+        self._profile_add("exact_tape_build", tape_build_wall_s)
+        self._profile_exact_tape_solver_timing(tape, tape_build_wall_s)
         t_unpack = time.perf_counter()
         state = unpack_state(
             _jnp.asarray(tape.final_packed_state, dtype=_jnp.float64), self._layout

@@ -227,6 +227,7 @@ class ResidualCheckpointTape:
     step_trace_static_flags: dict[str, Any] | None = None
     dynamic_initial_carry: Any | None = None
     dynamic_base_carries_stacked: Any | None = None
+    diagnostics: dict[str, Any] | None = None
 
 
 def _empty_trace() -> ResidualIterationTrace:
@@ -340,6 +341,39 @@ def residual_iteration_trace_from_result(result) -> ResidualIterationTrace:
         w_vmec=w_vmec,
         state_advanced=state_advanced,
     )
+
+
+def _compact_tape_diagnostics(diagnostics: dict[str, Any]) -> dict[str, Any]:
+    """Keep lightweight solver diagnostics needed by exact-tape profilers."""
+    out: dict[str, Any] = {}
+    timing = diagnostics.get("timing")
+    if isinstance(timing, dict):
+        compact_timing: dict[str, float | int] = {}
+        for key, value in timing.items():
+            if isinstance(value, (bool, str)):
+                continue
+            try:
+                if key == "iterations":
+                    compact_timing[str(key)] = int(value)
+                else:
+                    compact_timing[str(key)] = float(value)
+            except Exception:
+                continue
+        out["timing"] = compact_timing
+    for key in ("converged", "converged_iter", "final_fsq", "final_fsqz", "final_fsqr", "final_fsql"):
+        if key not in diagnostics:
+            continue
+        value = diagnostics[key]
+        try:
+            if isinstance(value, (bool, np.bool_)):
+                out[key] = bool(value)
+            elif isinstance(value, (int, np.integer)):
+                out[key] = int(value)
+            elif isinstance(value, (float, np.floating)):
+                out[key] = float(value)
+        except Exception:
+            continue
+    return out
 
 
 def concat_residual_iteration_traces(traces: list[ResidualIterationTrace]) -> ResidualIterationTrace:
@@ -494,6 +528,7 @@ def build_residual_checkpoint_tape_direct(
     )
     final_packed_state = np.asarray(pack_state(result.state), dtype=float)
     step_traces = tuple(result.diagnostics.get("adjoint_step_trace", ()))
+    compact_diagnostics = _compact_tape_diagnostics(result.diagnostics)
     trace = residual_iteration_trace_from_result(result) if store_trace else _empty_trace()
     stacked_step_traces = None
     step_trace_static_flags = None
@@ -539,6 +574,7 @@ def build_residual_checkpoint_tape_direct(
                 )
                 final_packed_state = np.asarray(pack_state(result.state), dtype=float)
                 step_traces = tuple(result.diagnostics.get("adjoint_step_trace", ()))
+                compact_diagnostics = _compact_tape_diagnostics(result.diagnostics)
                 trace = residual_iteration_trace_from_result(result) if store_trace else _empty_trace()
             stacked_step_traces, step_trace_static_flags = _stack_replay_step_traces(step_traces)
     return ResidualCheckpointTape(
@@ -551,6 +587,7 @@ def build_residual_checkpoint_tape_direct(
         step_trace_static_flags=step_trace_static_flags,
         dynamic_initial_carry=dynamic_initial_carry,
         dynamic_base_carries_stacked=dynamic_base_carries_stacked,
+        diagnostics=compact_diagnostics,
     )
 
 
