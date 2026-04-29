@@ -131,9 +131,9 @@ def _print_profile(profile: dict[str, dict]) -> None:
     )
     rows.sort(key=lambda row: row[2], reverse=True)
     print("\nCallback timing profile:")
-    print(f"{'name':34s} {'count':>7s} {'total_s':>12s} {'mean_s':>12s}")
+    print(f"{'name':48s} {'count':>7s} {'total_s':>12s} {'mean_s':>12s}")
     for name, count, total, mean in rows:
-        print(f"{name:34s} {count:7d} {total:12.3f} {mean:12.3f}")
+        print(f"{name:48s} {count:7d} {total:12.3f} {mean:12.3f}")
 
 
 def _runtime_info() -> dict[str, object]:

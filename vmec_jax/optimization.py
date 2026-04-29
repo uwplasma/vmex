@@ -1369,6 +1369,9 @@ class FixedBoundaryExactOptimizer:
             ("preconditioner_s", "exact_tape_solver_preconditioner"),
             ("precond_refresh_s", "exact_tape_solver_precond_refresh"),
             ("update_s", "exact_tape_solver_update"),
+            ("update_state_s", "exact_tape_solver_update_state"),
+            ("update_trace_build_s", "exact_tape_solver_update_trace_build"),
+            ("update_trace_finalize_s", "exact_tape_solver_update_trace_finalize"),
         )
         for key, profile_name in timing_keys:
             try:
@@ -1376,7 +1379,7 @@ class FixedBoundaryExactOptimizer:
             except Exception:
                 continue
             self._profile_add(profile_name, value)
-            if key != "precond_refresh_s":
+            if key in ("compute_forces_s", "preconditioner_s", "update_s"):
                 solver_total += max(0.0, value)
         self._profile_add(
             "exact_tape_build_unattributed",
