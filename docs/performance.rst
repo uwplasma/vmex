@@ -324,6 +324,14 @@ point), while trace-build/finalize bookkeeping was below ``1 ms`` per point.
 The next implementation target is therefore fusing or scanning the primal
 state-update/replay work, not further reducing Python trace dictionary overhead.
 
+The next production patch skips the ``update_rms`` reduction when it is not
+consumed.  Exact optimizer dynamic-tape solves run with light history, no update
+clipping, and non-verbose output, so that reduction was wasted work.  On the QH
+``max_mode=2`` GPU profile, this reduced mean tape-build time further to about
+``4.74 s`` per accepted point and update-state time to about ``2.30 s``.  The
+largest remaining per-point GPU costs are now replay (about ``2.67 s``),
+state update (about ``2.30 s``), and preconditioner work (about ``1.10 s``).
+
 Fixed-boundary GPU diagnostics
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
