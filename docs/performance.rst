@@ -285,6 +285,16 @@ about ``49 s`` end-to-end, while three relaxed trial solves consumed about
 repeated trial residuals, so the next GPU optimization lane is reducing
 accepted-point tape build/replay cost rather than adding more residual caching.
 
+The perturbed accepted-point profiler separates same-tape cache hits from real
+new optimizer points.  On ``office`` with QH ``max_mode=2``,
+``inner_max_iter=80``, ``trial_max_iter=40``, and ``--perturb-scale 1e-4``, the
+default tape path gave three GPU dense-Jacobian callbacks of about
+``13.8 s``, ``7.8 s``, and ``6.9 s``.  The mean profile was dominated by exact
+tape construction (``5.4 s`` per point), with tape replay around ``2.1 s`` per
+point.  The same CPU run gave about ``9.3 s``, ``5.8 s``, and ``5.6 s``.  The
+scan exact path remained unsuitable for this workload: the first perturbed GPU
+scan Jacobian took about ``118 s``.
+
 Fixed-boundary GPU diagnostics
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
