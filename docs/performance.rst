@@ -109,7 +109,7 @@ optimization callback stack:
 
 .. code-block:: bash
 
-   python tools/diagnostics/profile_exact_optimizer.py \
+   PYTHONPATH=. python tools/diagnostics/profile_exact_optimizer.py \
      --problem qa --max-mode 2 --max-nfev 2 \
      --trial-max-iter 300 --trial-ftol 1e-10
 
@@ -140,6 +140,12 @@ when it asks for a residual at a point whose exact Jacobian was just built,
 avoiding an otherwise unnecessary relaxed forward replay.  If
 ``save_wout(..., state=result["_state_final"])`` is used immediately after
 ``run()``, no additional equilibrium solve is performed.
+
+The tape Jacobian callback also returns the residual primal from the same
+``jax.linearize`` used for residual tangent projection.  History recording and
+the custom Gauss-Newton gradient path reuse that residual instead of evaluating
+the accepted-point residual block a second time after every dense exact
+Jacobian.
 
 SciPy can also revisit the same rejected trust-region trial point.  The
 optimizer therefore keeps a small residual-only LRU cache for relaxed trial

@@ -1,54 +1,266 @@
 #!/usr/bin/env python
-"""Finite-beta stage-one QA fixed-boundary optimization with vmec_jax."""
+"""Finite-beta stage-one QA fixed-boundary optimization with vmec_jax.
+
+This script is intentionally linear, like the SIMSOPT stage-one examples:
+choose top-level parameters, load the VMEC input, build the finite-beta
+objective directly, instantiate ``FixedBoundaryExactOptimizer``, run, and save
+outputs.  There is no argparse, no ``main()`` wrapper, and no config object.
+"""
 
 from pathlib import Path
 
-try:
-    from finite_beta_stage1_common import FiniteBetaStage1Config, run_stage1
-except ModuleNotFoundError:
-    from examples.optimization.finite_beta_stage1_common import FiniteBetaStage1Config, run_stage1
+import numpy as np
 
+import vmec_jax as vj
+from vmec_jax._compat import enable_x64, jnp
+from vmec_jax.config import config_from_indata
+from vmec_jax.field import signgs_from_sqrtg
+from vmec_jax.geom import eval_geom
+from vmec_jax.init_guess import initial_guess_from_boundary
+from vmec_jax.optimization import rebuild_indata_with_resolution
+from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_state
+
+try:
+    from finite_beta_stage1_common import (
+        finite_beta_stage_budget,
+        finite_beta_stage_modes,
+        mean_abs_iota,
+        pressure_profile,
+        print_final_summary,
+        save_final_outputs,
+        save_stage_artifacts,
+    )
+except ModuleNotFoundError:
+    from examples.optimization.finite_beta_stage1_common import (
+        finite_beta_stage_budget,
+        finite_beta_stage_modes,
+        mean_abs_iota,
+        pressure_profile,
+        print_final_summary,
+        save_final_outputs,
+        save_stage_artifacts,
+    )
+
+
+enable_x64(True)
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
-# User-editable parameters.
+# User parameters
+INPUT_FILE = DATA_DIR / "input.nfp2_QA_finite_beta"
+OUTPUT_DIR = Path("results/qa_finite_beta")
+
+VMEC_MPOL = 5
+VMEC_NTOR = 5
 MAX_MODE = 1
+
 MAX_NFEV = 8
 CONTINUATION_NFEV = 8
-USE_ESS = True
 USE_MODE_CONTINUATION = True
-SOLVER_DEVICE = None  # set to "cpu" or "gpu" to force one backend
+
+METHOD = "scipy"
+SCIPY_TR_SOLVER = "lsmr"
+SCIPY_LSMR_MAXITER = None
+FTOL = 1.0e-3
+GTOL = 1.0e-3
+XTOL = 1.0e-3
+
 INNER_MAX_ITER = 0  # 0 uses NITER from the input deck
 INNER_FTOL = 0.0  # 0 uses FTOL from the input deck
 TRIAL_MAX_ITER = 300
 TRIAL_FTOL = 1.0e-10
+SOLVER_DEVICE = None  # set to "cpu" or "gpu" to force one backend
+
+HELICITY_M = 1
+HELICITY_N = 0
+SURFACES = tuple(np.linspace(0.0, 1.0, 10, endpoint=True))
+
+TARGET_ASPECT = 5.0
+MIN_IOTA = 0.31
+MIN_AVERAGE_IOTA = 0.33
+MAX_IOTA = 0.49
+TARGET_VOLAVGB = 5.86461221551616
+TARGET_BETA = 0.025
+
+ASPECT_WEIGHT = 1.0e3
+IOTA_WEIGHT = 1.0e5
+MAX_IOTA_WEIGHT = 1.0e8
+VOLAVGB_WEIGHT = 1.0e3
+BETA_WEIGHT = 1.0e1
+FIELD_WEIGHT = 1.0e3
+
+USE_ESS = True
+ALPHA = 2.5
+SAVE_STAGE_INPUTS = True
+SAVE_STAGE_WOUTS = False
+PLOT = True
 
 
-CONFIG = FiniteBetaStage1Config(
-    input_file=DATA_DIR / "input.nfp2_QA_finite_beta",
-    output_dir=Path("results/qa_finite_beta"),
-    objective_kind="qa",
-    helicity_m=1,
-    helicity_n=0,
+# Problem setup
+print(f"Loading {INPUT_FILE.name} ...")
+base_cfg, indata = vj.load_config(str(INPUT_FILE))
+indata = rebuild_indata_with_resolution(indata, mpol=VMEC_MPOL, ntor=VMEC_NTOR)
+base_cfg = config_from_indata(indata)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+stage_modes = finite_beta_stage_modes(
     max_mode=MAX_MODE,
-    max_nfev=MAX_NFEV,
-    continuation_nfev=CONTINUATION_NFEV,
-    vmec_mpol=5,
-    vmec_ntor=5,
-    target_aspect=5.0,
-    min_iota=0.31,
-    min_average_iota=0.33,
-    max_iota=0.49,
-    field_weight=1.0e3,
-    use_ess=USE_ESS,
     use_mode_continuation=USE_MODE_CONTINUATION,
-    solver_device=SOLVER_DEVICE,
-    inner_max_iter=INNER_MAX_ITER,
-    inner_ftol=INNER_FTOL,
-    trial_max_iter=TRIAL_MAX_ITER,
-    trial_ftol=TRIAL_FTOL,
+    continuation_nfev=CONTINUATION_NFEV,
 )
 
 
-if __name__ == "__main__":
-    run_stage1(CONFIG)
+# Optimization
+stage_records = []
+params_stage = None
+prev_specs = None
+
+for stage_mode in stage_modes:
+    static = vj.build_static(base_cfg)
+    boundary = vj.boundary_from_indata(indata, static.modes, apply_m1_constraint=False)
+    stage_indata, static, boundary = vj.extend_boundary_for_max_mode(
+        indata,
+        static,
+        boundary,
+        stage_mode,
+    )
+    boundary_input = vj.boundary_input_from_indata(stage_indata, static.modes)
+    specs = vj.boundary_param_specs(
+        boundary_input,
+        static.modes,
+        max_mode=stage_mode,
+        min_coeff=0.0,
+        include=("rc", "zs"),
+        fix=("rc00",),
+    )
+
+    guess = initial_guess_from_boundary(static, boundary, stage_indata, vmec_project=True)
+    geom = eval_geom(guess, static)
+    signgs = int(signgs_from_sqrtg(np.asarray(geom.sqrtg), axis_index=1))
+    flux = vj.flux_profiles_from_indata(stage_indata, static.s, signgs=signgs)
+    pressure = pressure_profile(stage_indata, static)
+    global_targets = vj.FiniteBetaTargets(
+        aspect_ratio=TARGET_ASPECT,
+        min_iota=MIN_IOTA,
+        min_average_iota=MIN_AVERAGE_IOTA,
+        max_iota=MAX_IOTA,
+        volavgB=TARGET_VOLAVGB,
+        beta_total=TARGET_BETA,
+        aspect_weight=ASPECT_WEIGHT,
+        iota_weight=IOTA_WEIGHT,
+        max_iota_weight=MAX_IOTA_WEIGHT,
+        volavgB_weight=VOLAVGB_WEIGHT,
+        beta_weight=BETA_WEIGHT,
+    )
+
+    def field_residual(state, *, static=static, stage_indata=stage_indata, signgs=signgs, flux=flux, pressure=pressure):
+        return quasisymmetry_ratio_residual_from_state(
+            state=state,
+            static=static,
+            indata=stage_indata,
+            signgs=signgs,
+            flux_local=flux,
+            prof_local={"pressure": pressure},
+            pressure_local=pressure,
+            surfaces=SURFACES,
+            helicity_m=HELICITY_M,
+            helicity_n=HELICITY_N,
+        )
+
+    def residuals_from_state(
+        state,
+        *,
+        static=static,
+        stage_indata=stage_indata,
+        signgs=signgs,
+        global_targets=global_targets,
+        field_residual=field_residual,
+    ):
+        global_res = vj.finite_beta_global_residuals_from_state(
+            state=state,
+            static=static,
+            indata=stage_indata,
+            signgs=signgs,
+            targets=global_targets,
+        )
+        field = field_residual(state)
+        return jnp.concatenate(
+            [
+                global_res,
+                jnp.asarray(field["residuals1d"], dtype=jnp.float64) * FIELD_WEIGHT,
+            ]
+        )
+
+    residuals_from_state._n_non_qs = 6
+    residuals_from_state._qs_total_from_state = (
+        lambda state, field_residual=field_residual: FIELD_WEIGHT**2 * float(field_residual(state)["total"])
+    )
+
+    optimizer = vj.FixedBoundaryExactOptimizer(
+        static,
+        stage_indata,
+        boundary,
+        specs,
+        residuals_from_state,
+        boundary_input=boundary_input,
+        inner_max_iter=INNER_MAX_ITER,
+        inner_ftol=INNER_FTOL,
+        trial_max_iter=TRIAL_MAX_ITER,
+        trial_ftol=TRIAL_FTOL,
+        solver_device=SOLVER_DEVICE,
+    )
+    x_scale = vj.create_x_scale(specs, alpha=ALPHA) if USE_ESS else np.ones(len(specs), dtype=float)
+    params0 = (
+        np.zeros(len(specs), dtype=float)
+        if params_stage is None
+        else np.asarray(vj.lift_boundary_params(prev_specs, params_stage, specs), dtype=float)
+    )
+    nfev = finite_beta_stage_budget(
+        stage_mode=stage_mode,
+        max_mode=MAX_MODE,
+        max_nfev=MAX_NFEV,
+        continuation_nfev=CONTINUATION_NFEV,
+    )
+
+    def iota_fn(state, *, static=static, stage_indata=stage_indata, signgs=signgs):
+        return float(mean_abs_iota(state, static=static, indata=stage_indata, signgs=signgs))
+
+    print(f"Running finite-beta QA stage mode={stage_mode}, nfev={nfev}")
+    result = optimizer.run(
+        params0,
+        method=METHOD,
+        max_nfev=nfev,
+        ftol=FTOL,
+        gtol=GTOL,
+        xtol=XTOL,
+        x_scale=x_scale,
+        verbose=2,
+        iota_fn=iota_fn,
+        target_iota=MIN_AVERAGE_IOTA,
+        target_aspect=TARGET_ASPECT,
+        scipy_tr_solver=SCIPY_TR_SOLVER,
+        scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
+    )
+    save_stage_artifacts(
+        stage_dir=OUTPUT_DIR / f"stage_mode{stage_mode}",
+        optimizer=optimizer,
+        params_initial=params0,
+        params_final=result["x"],
+        result=result,
+        save_inputs=SAVE_STAGE_INPUTS,
+        save_wouts=SAVE_STAGE_WOUTS,
+    )
+    stage_records.append((stage_mode, optimizer, params0, result))
+    params_stage = result["x"]
+    prev_specs = specs
+
+
+final_optimizer = stage_records[-1][1]
+final_result = stage_records[-1][3]
+save_final_outputs(
+    output_dir=OUTPUT_DIR,
+    stage_records=stage_records,
+    final_optimizer=final_optimizer,
+    final_result=final_result,
+    plot=PLOT,
+)
+print_final_summary(final_result)

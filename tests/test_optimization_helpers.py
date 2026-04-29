@@ -164,6 +164,20 @@ def test_gauss_newton_exact_residual_after_jacobian():
     np.testing.assert_allclose(result["x"], np.array([1.0]), atol=1e-3, rtol=0.0)
 
 
+def test_fixed_boundary_optimizer_exact_residual_reuses_jacobian_primal():
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._last_jacobian_residual = np.array([3.0, 4.0])
+    opt._last_jacobian_key = [b"accepted"]
+    opt._exact_cache = {b"accepted": (object(), object())}
+
+    def fail_residual(_state):
+        raise AssertionError("cached Jacobian residual should be reused")
+
+    opt._residuals_fn = fail_residual
+
+    np.testing.assert_allclose(opt._exact_residual_after_jacobian(), [3.0, 4.0])
+
+
 def test_gauss_newton_damped_fallback_recovers_from_oversized_step():
     """Damping should rescue cases where the raw GN step is unusably large."""
 

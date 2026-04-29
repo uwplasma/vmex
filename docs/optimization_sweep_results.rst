@@ -224,10 +224,12 @@ The input decks are bundled as:
 - ``examples/data/input.nfp4_QH_finite_beta``
 - ``examples/data/input.nfp4_QI_finite_beta``
 
-The shared helper ``examples/optimization/finite_beta_stage1_common.py`` adds
-JAX-differentiable residuals for aspect ratio, iota lower/mean/upper bounds,
-volume-averaged field proxy, and total beta.  QA/QH add quasisymmetry residuals
-and QI adds the smooth Boozer-space QI residual.  The scripts save
+Each script builds the optimization problem explicitly: load the VMEC input,
+construct ``FiniteBetaTargets``, define the global residuals for aspect ratio,
+iota lower/mean/upper bounds, volume-averaged field proxy, and total beta, then
+append the field-quality residual.  QA/QH use quasisymmetry residuals and QI
+uses the smooth Boozer-space QI residual.  The small shared helper only keeps
+the stage bookkeeping and artifact writing consistent.  The scripts save
 ``input.initial``, ``input.final``, ``wout_initial.nc``, ``wout_final.nc``, and
 ``history.json`` for each run.
 

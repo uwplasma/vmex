@@ -1789,8 +1789,10 @@ class FixedBoundaryExactOptimizer:
 
             @jax.jit
             def _residual_tangent_columns(packed_state, packed_tangents):
-                _, residual_linear = jax.linearize(_residuals_from_packed, packed_state)
-                return jax.vmap(residual_linear)(packed_tangents)
+                residuals, residual_linear = jax.linearize(
+                    _residuals_from_packed, packed_state
+                )
+                return residuals, jax.vmap(residual_linear)(packed_tangents)
 
             helper_cache = {
                 "initial_tangent_columns": _initial_tangent_columns,
@@ -1810,7 +1812,10 @@ class FixedBoundaryExactOptimizer:
         )
         self._profile_add("jacobian_tape_replay", time.perf_counter() - t_replay)
         t_res = time.perf_counter()
-        columns = helper_cache["residual_tangent_columns"](packed_final, final_tangents)
+        residuals, columns = helper_cache["residual_tangent_columns"](
+            packed_final, final_tangents
+        )
+        self._last_jacobian_residual = np.asarray(residuals, dtype=float)
         self._profile_add("jacobian_residual_tangents", time.perf_counter() - t_res)
         out = np.asarray(columns, dtype=float).T
         self._profile_add("jacobian_total", time.perf_counter() - t_total)
@@ -2054,6 +2059,7 @@ class FixedBoundaryExactOptimizer:
 
     def _jacobian_fun_tracked(self, params):
         self._last_jacobian_key[0] = self._exact_cache_key(params)
+        self._last_jacobian_residual = None
         jac = self.jacobian_fun(params)
         key = self._last_jacobian_key[0]
         if self._scan_exact_path == "scan" and key is not None and key in self._exact_state_cache:
@@ -2082,7 +2088,11 @@ class FixedBoundaryExactOptimizer:
             self._history.append(entry)
         elif key is not None and key in self._exact_cache:
             cached_state, _ = self._exact_cache[key]
-            res = np.asarray(self._residuals_fn(cached_state), dtype=float)
+            res = (
+                np.asarray(self._last_jacobian_residual, dtype=float)
+                if self._last_jacobian_residual is not None
+                else np.asarray(self._residuals_fn(cached_state), dtype=float)
+            )
             cost = float(0.5 * np.dot(res, res))
             qs_total = self._qs_total_from_state(cached_state, res)
             from .wout import equilibrium_aspect_ratio_from_state
@@ -2103,7 +2113,7 @@ class FixedBoundaryExactOptimizer:
         return jac
 
     def _exact_residual_after_jacobian(self):
-        if self._scan_exact_path == "scan" and self._last_jacobian_residual is not None:
+        if self._last_jacobian_residual is not None:
             return np.asarray(self._last_jacobian_residual, dtype=float)
         key = self._last_jacobian_key[0]
         if key is None or key not in self._exact_cache:
