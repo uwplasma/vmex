@@ -13,10 +13,12 @@ JAX is imported, unless the user has explicitly set ``JAX_ENABLE_X64``.
 from __future__ import annotations
 
 from typing import Any, Callable, Tuple
+import hashlib
 import threading
 import types
 
 import os
+import platform
 
 import numpy as _np
 
@@ -62,6 +64,47 @@ def _noop_jit(f=None, *args, **_kwargs):
     return f
 
 
+def _cache_machine_fingerprint() -> str:
+    """Return a short cache key for host-specific XLA CPU executables.
+
+    XLA CPU persistent-cache entries are native executables.  On shared home
+    directories, reusing an entry compiled on another CPU can trigger XLA AOT
+    loader errors or even illegal-instruction failures.  The fingerprint keeps
+    vmec_jax's default cache portable by separating entries by OS, machine, and
+    CPU-feature/model signature.  Users who deliberately want a shared cache can
+    still set ``VMEC_JAX_COMPILATION_CACHE_DIR`` or ``JAX_COMPILATION_CACHE_DIR``.
+    """
+
+    parts = [
+        platform.system(),
+        platform.machine(),
+        platform.processor(),
+    ]
+    try:
+        if os.path.exists("/proc/cpuinfo"):
+            wanted = ("model name", "cpu family", "model", "stepping", "flags", "Features")
+            seen: set[str] = set()
+            with open("/proc/cpuinfo", encoding="utf-8", errors="ignore") as fh:
+                for line in fh:
+                    if ":" not in line:
+                        continue
+                    key, value = (part.strip() for part in line.split(":", 1))
+                    if key in wanted and key not in seen:
+                        parts.append(f"{key}={value}")
+                        seen.add(key)
+    except Exception:
+        pass
+    if len(parts) <= 3:
+        try:
+            parts.append(platform.node())
+        except Exception:
+            pass
+    digest = hashlib.sha256("|".join(parts).encode("utf-8", errors="ignore")).hexdigest()[:16]
+    system = platform.system().lower() or "unknown"
+    machine = platform.machine().lower() or "unknown"
+    return f"{system}-{machine}-{digest}"
+
+
 def _default_compilation_cache_dir() -> str | None:
     """Return the configured JAX compilation-cache directory.
 
@@ -88,10 +131,18 @@ def _default_compilation_cache_dir() -> str | None:
     if cache_flag in ("disabled", "0", "false", "no", "off"):
         return None
 
-    # Default cache location: ~/.cache/vmec_jax/jax_cache
+    # Default cache location: ~/.cache/vmec_jax/jax_cache/<machine-fingerprint>
+    # The host-specific suffix prevents unsafe XLA:CPU AOT reuse on shared home
+    # filesystems where different machines see the same ~/.cache directory.
     try:
         import pathlib
-        return str(pathlib.Path.home() / ".cache" / "vmec_jax" / "jax_cache")
+        return str(
+            pathlib.Path.home()
+            / ".cache"
+            / "vmec_jax"
+            / "jax_cache"
+            / _cache_machine_fingerprint()
+        )
     except Exception:
         return None
 
@@ -179,9 +230,9 @@ def _try_import_jax() -> Tuple[Any, Any, Callable[[Callable[..., Any]], Callable
         ):
             os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
-        # Enable the JAX disk compilation cache only when the user opted in.
-        # This avoids noisy PjRt-IFRT warning spam from persistent-cache hits
-        # in ordinary CLI/library runs.
+        # Enable the JAX disk compilation cache in a machine-scoped directory.
+        # This avoids unsafe XLA:CPU AOT reuse across hosts while preserving
+        # repeated cold-process speedups on the same machine.
         _cache_dir = _default_compilation_cache_dir()
         if _cache_dir is not None:
             os.environ.setdefault("JAX_COMPILATION_CACHE_DIR", _cache_dir)

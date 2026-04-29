@@ -464,10 +464,12 @@ The sweep below compares four target objectives:
 
 - QA: aspect ratio, mean iota, and quasi-axisymmetry.
 - QH: aspect ratio and quasi-helical symmetry.
-- QP: aspect ratio, quasi-poloidal symmetry, and an absolute-iota lower bound.
+- QP: aspect ratio, quasi-poloidal symmetry, and a smooth
+  ``abs(mean_iota) >= 0.41`` lower bound.
 - QI: aspect ratio and a differentiable smooth Boozer-space
   quasi-isodynamic residual evaluated through ``booz_xform_jax`` after a
-  same-mode QP preseed.
+  same-mode QP preseed, retaining the same smooth
+  ``abs(mean_iota) >= 0.41`` lower bound through the QI stage.
 
 Each problem is run with staged mode continuation and with direct-start mode
 expansion.  Each policy is run with and without ESS using ``alpha = 2.5``.

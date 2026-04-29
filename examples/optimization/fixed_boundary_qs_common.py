@@ -104,11 +104,20 @@ def mean_iota_objective(target: float, weight: float = 1.0) -> ObjectiveTerm:
     )
 
 
-def abs_mean_iota_floor_objective(target: float, weight: float = 1.0) -> ObjectiveTerm:
-    """Lower-bound penalty enforcing ``abs(mean_iota) >= target``."""
+def abs_mean_iota_floor_objective(
+    target: float,
+    weight: float = 1.0,
+    *,
+    softness: float = 1.0e-3,
+) -> ObjectiveTerm:
+    """Smooth lower-bound penalty enforcing ``abs(mean_iota) >= target``."""
 
     def _evaluate(ctx: StageContext, state):
-        return jnp.minimum(jnp.abs(mean_iota(ctx, state)) - float(target), 0.0)
+        return vj.smooth_min_abs_iota_residual(
+            mean_iota(ctx, state),
+            float(target),
+            softness=float(softness),
+        )
 
     return ObjectiveTerm(
         "abs_iota_floor",
@@ -228,14 +237,24 @@ def print_qs_problem_summary(
     print(f"Running {method} (max_nfev={max_nfev}, continuation={use_mode_continuation}) ...")
 
 
-def print_qs_final_summary(result: dict, *, target_iota: float | None = None) -> None:
+def print_qs_final_summary(
+    result: dict,
+    *,
+    target_iota: float | None = None,
+    iota_abs_min: float | None = None,
+) -> None:
     """Print the final scalar diagnostics from an optimization result."""
 
     hist = result.get("_history_dump", {})
     print(f"\nTermination: {result['message']}")
     print(f"Aspect ratio (final):          {float(hist.get('aspect_final', float('nan'))):.6f}")
     if "iota_final" in hist:
-        target = "" if target_iota is None else f"  target={target_iota:.6f}"
+        if target_iota is not None:
+            target = f"  target={target_iota:.6f}"
+        elif iota_abs_min is not None:
+            target = f"  min |iota|={iota_abs_min:.6f}"
+        else:
+            target = ""
         print(f"Mean iota (final):             {float(hist['iota_final']):.6f}{target}")
     print(f"Field objective (final):       {float(hist.get('qs_final', float('nan'))):.6e}")
     print(f"Total objective (final):       {float(hist.get('objective_final', float('nan'))):.6e}")
@@ -287,6 +306,7 @@ def save_qs_final_outputs(
     label: str,
     target_aspect: float | None = None,
     target_iota: float | None = None,
+    iota_abs_min: float | None = None,
     plot: bool = True,
     save_rerun_wouts: bool = False,
 ) -> None:
@@ -324,6 +344,8 @@ def save_qs_final_outputs(
         history["target_aspect"] = float(target_aspect)
     if target_iota is not None:
         history["target_iota"] = float(target_iota)
+    if iota_abs_min is not None:
+        history["iota_abs_min"] = float(iota_abs_min)
     final_optimizer.save_history(output_dir / "history.json", final_result)
 
     if plot:

@@ -150,6 +150,33 @@ def rebuild_indata_with_resolution(indata, *, mpol: int, ntor: int):
     )
 
 
+def smooth_min_abs_iota_residual(
+    iota,
+    minimum: float,
+    *,
+    softness: float = 1.0e-3,
+    abs_epsilon: float = 1.0e-12,
+):
+    """Smooth residual for the differentiable constraint ``abs(iota) >= minimum``.
+
+    The returned residual is approximately zero when ``abs(iota)`` is above the
+    requested lower bound and approximately ``minimum - abs(iota)`` below it.
+    A softplus shortfall avoids the non-differentiable kink of a hard hinge,
+    which is important when this term is used inside exact JAX Jacobians.
+    """
+
+    iota = jnp.asarray(iota, dtype=jnp.float64)
+    minimum = jnp.asarray(minimum, dtype=iota.dtype)
+    softness = jnp.maximum(
+        jnp.asarray(softness, dtype=iota.dtype),
+        jnp.asarray(1.0e-15, dtype=iota.dtype),
+    )
+    abs_epsilon = jnp.asarray(abs_epsilon, dtype=iota.dtype)
+    smooth_abs_iota = jnp.sqrt(iota * iota + abs_epsilon * abs_epsilon)
+    shortfall = minimum - smooth_abs_iota
+    return softness * jnp.logaddexp(jnp.asarray(0.0, dtype=iota.dtype), shortfall / softness)
+
+
 def boundary_param_specs(
     boundary: BoundaryCoeffs,
     modes: ModeTable,
@@ -841,10 +868,12 @@ def make_qs_residuals_fn(
     helicity_n: int = 0,
     target_aspect: float | None = None,
     target_iota: float | None = None,
+    min_abs_iota: float | None = None,
     surfaces=None,
     aspect_weight: float = 1.0,
     qs_weight: float = 1.0,
     iota_weight: float = 1.0,
+    iota_floor_softness: float = 1.0e-3,
 ) -> Callable:
     """General quasisymmetry residuals factory supporting QH and QA objectives.
 
@@ -869,6 +898,10 @@ def make_qs_residuals_fn(
     target_iota:
         If given, adds one mean-iota residual
         ``iota_weight * (mean_iota - target_iota)``.
+    min_abs_iota:
+        If given and ``target_iota`` is not given, adds one smooth lower-bound
+        residual enforcing ``abs(mean_iota) >= min_abs_iota``.  This is a
+        differentiable softplus hinge, not a hard target.
     surfaces:
         Surface coordinates (``s ∈ [0, 1]``) to evaluate quasisymmetry on.
         Defaults to ``np.arange(0, 1.01, 0.1)``.
@@ -922,7 +955,7 @@ def make_qs_residuals_fn(
                 [float(aspect_weight) * (aspect - target_aspect)], dtype=jnp.float64
             ))
 
-        if target_iota is not None:
+        if target_iota is not None or min_abs_iota is not None:
             _chips, _iotas, iotaf = equilibrium_iota_profiles_from_state(
                 state=state, static=static, indata=_indata, signgs=_signgs,
             )
@@ -932,9 +965,15 @@ def make_qs_residuals_fn(
                 if int(iotas.shape[0]) <= 1
                 else jnp.mean(iotas[1:])
             )
-            parts.append(jnp.asarray(
-                [float(iota_weight) * (mean_iota - target_iota)], dtype=jnp.float64
-            ))
+            if target_iota is not None:
+                iota_residual = mean_iota - target_iota
+            else:
+                iota_residual = smooth_min_abs_iota_residual(
+                    mean_iota,
+                    float(min_abs_iota),
+                    softness=float(iota_floor_softness),
+                )
+            parts.append(jnp.asarray([float(iota_weight) * iota_residual], dtype=jnp.float64))
 
         qs = _qs_eval_from_state(state)
         parts.append(jnp.asarray(qs["residuals1d"], dtype=jnp.float64) * float(qs_weight))
@@ -961,7 +1000,7 @@ def make_qs_residuals_fn(
             _, aspect_vjp = jax.vjp(_aspect_from_packed, packed_state)
             blocks.append((block_index, aspect_vjp, False))
 
-        if target_iota is not None:
+        if target_iota is not None or min_abs_iota is not None:
             block_index = offset
             offset += 1
 
@@ -977,7 +1016,15 @@ def make_qs_residuals_fn(
                     if int(iotas.shape[0]) <= 1
                     else _jnp.mean(iotas[1:])
                 )
-                return float(iota_weight) * (mean_iota - target_iota)
+                if target_iota is not None:
+                    iota_residual = mean_iota - target_iota
+                else:
+                    iota_residual = smooth_min_abs_iota_residual(
+                        mean_iota,
+                        float(min_abs_iota),
+                        softness=float(iota_floor_softness),
+                    )
+                return float(iota_weight) * iota_residual
 
             _, iota_vjp = jax.vjp(_iota_from_packed, packed_state)
             blocks.append((block_index, iota_vjp, True))
@@ -1023,7 +1070,9 @@ def make_qs_residuals_fn(
     def state_cotangent_from_packed(packed_state, layout, residual_cotangent):
         return state_cotangent_operator_from_packed(packed_state, layout)(residual_cotangent)
 
-    residuals_from_state._n_non_qs = int(target_aspect is not None) + int(target_iota is not None)
+    residuals_from_state._n_non_qs = int(target_aspect is not None) + int(
+        target_iota is not None or min_abs_iota is not None
+    )
     residuals_from_state._qs_total_from_state = (
         lambda state: float(_qs_eval_from_state(state)["total"]) * float(qs_weight) ** 2
     )
@@ -1834,15 +1883,50 @@ class FixedBoundaryExactOptimizer:
             f"{profile_prefix}_initial_tangents",
             time.perf_counter() - t_initial,
         )
+        column_chunk = self._lasym_replay_column_chunk(int(params.size))
+        if column_chunk is not None:
+            self._profile_add(f"{profile_prefix}_replay_column_chunk_{column_chunk}", 0.0)
         t_replay = time.perf_counter()
         final_tangents = checkpoint_tape_state_jvp_columns(
             tape=payload["tape"],
             static=self._static,
             initial_tangents=initial_tangents,
             rebuild_preconditioner=True,
+            column_chunk=column_chunk,
         )
         self._profile_add(f"{profile_prefix}_tape_replay", time.perf_counter() - t_replay)
         return state, final_tangents
+
+    def _lasym_replay_column_chunk(self, n_params: int) -> int | None:
+        """LASYM replay chunk heuristic for large dense exact Jacobians."""
+
+        env_override = os.environ.get("VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK")
+        if env_override is not None:
+            requested = int(env_override)
+            return None if requested <= 0 else requested
+        if os.environ.get("VMEC_JAX_REPLAY_COLUMN_CHUNK") is not None:
+            return None
+        if not bool(getattr(self._static.cfg, "lasym", False)):
+            return None
+        backend_name = None
+        if self._solver_device_name is not None:
+            backend_name = str(self._solver_device_name).lower()
+        else:
+            try:
+                from ._compat import jax as _jax
+
+                backend_name = str(_jax.default_backend()).lower()
+            except Exception:
+                backend_name = None
+        if backend_name in ("gpu", "cuda", "rocm"):
+            return 8 if int(n_params) >= 32 else None
+        if backend_name == "tpu":
+            return None
+        if int(n_params) >= 64:
+            return 8
+        if int(n_params) >= 32:
+            return 4
+        return None
 
     def jacobian_fun(self, params) -> np.ndarray:
         """Exact discrete-adjoint Jacobian at *params*."""
@@ -2182,6 +2266,7 @@ class FixedBoundaryExactOptimizer:
                 static=self._static,
                 initial_tangents=initial_tangents,
                 rebuild_preconditioner=True,
+                column_chunk=self._lasym_replay_column_chunk(int(directions_j.shape[0])),
             )
             out_columns = jax.vmap(residual_linear)(final_tangents)
             self._profile_add("linear_operator_matmat", time.perf_counter() - t_mm)

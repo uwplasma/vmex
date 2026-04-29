@@ -89,11 +89,11 @@ HELICITY_M = 0
 HELICITY_N = -1
 SURFACES = np.arange(0.0, 1.01, 0.1)
 TARGET_ASPECT = 7.0
-TARGET_ABS_IOTA_MIN = 0.31
-TARGET_IOTA = -TARGET_ABS_IOTA_MIN
+TARGET_ABS_IOTA_MIN = 0.41
+TARGET_IOTA = None  # QP uses a minimum-|iota| constraint, not a signed target.
 
 ASPECT_WEIGHT = 1.0
-IOTA_WEIGHT = 20.0
+IOTA_WEIGHT = 100.0
 QS_WEIGHT = 1.0
 
 USE_ESS = True
@@ -281,7 +281,7 @@ combined_history = combine_qs_stage_histories(
 if combined_history is not None:
     final_result["_history_dump"] = combined_history
 
-print_qs_final_summary(final_result, target_iota=TARGET_IOTA)
+print_qs_final_summary(final_result, target_iota=TARGET_IOTA, iota_abs_min=TARGET_ABS_IOTA_MIN)
 save_qs_final_outputs(
     output_dir=OUTPUT_DIR,
     stage_records=stage_records,
@@ -290,6 +290,7 @@ save_qs_final_outputs(
     label=LABEL,
     target_aspect=TARGET_ASPECT,
     target_iota=TARGET_IOTA,
+    iota_abs_min=TARGET_ABS_IOTA_MIN,
     plot=PLOT,
     save_rerun_wouts=SAVE_RERUN_WOUTS,
 )

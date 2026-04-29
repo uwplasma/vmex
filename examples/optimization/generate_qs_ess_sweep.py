@@ -217,6 +217,7 @@ class ProblemConfig:
     trial_max_iter: int
     trial_ftol: float
     iota_abs_min: float | None = None
+    iota_floor_softness: float = 1.0e-3
     aspect_weight: float = 1.0
     iota_weight: float = 1.0
     qs_weight: float = 1.0
@@ -293,7 +294,7 @@ PROBLEM_CONFIGS = {
         xtol=1e-4,
         ess_alpha=ESS_ALPHA,
         target_aspect=7.0,
-        target_iota=-0.31,
+        target_iota=None,
         surfaces=np.arange(0.0, 1.01, 0.1),
         helicity_m=0,
         helicity_n=-1,
@@ -301,8 +302,8 @@ PROBLEM_CONFIGS = {
         inner_ftol=1e-8,
         trial_max_iter=80,
         trial_ftol=1e-8,
-        iota_abs_min=0.31,
-        iota_weight=20.0,
+        iota_abs_min=0.41,
+        iota_weight=100.0,
     ),
     "qi": ProblemConfig(
         name="qi",
@@ -325,6 +326,8 @@ PROBLEM_CONFIGS = {
         inner_ftol=1e-8,
         trial_max_iter=80,
         trial_ftol=1e-8,
+        iota_abs_min=0.41,
+        iota_weight=100.0,
         objective_kind="qi",
         qi_mboz=6,
         qi_nboz=6,
@@ -711,6 +714,8 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
     def iota_fn(state):
         return float(mean_iota_raw(state))
 
+    track_iota = problem_cfg.target_iota is not None or problem_cfg.iota_abs_min is not None
+
     def stage_residuals_from_state(state):
         parts = []
         aspect = equilibrium_aspect_ratio_from_state(state=state, static=stage_static)
@@ -720,12 +725,16 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
                 dtype=jnp.float64,
             )
         )
-        if problem_cfg.target_iota is not None:
+        if track_iota:
             iota = mean_iota_raw(state)
             if problem_cfg.iota_abs_min is None:
                 iota_residual = iota - problem_cfg.target_iota
             else:
-                iota_residual = jnp.minimum(jnp.abs(iota) - problem_cfg.iota_abs_min, 0.0)
+                iota_residual = vj.smooth_min_abs_iota_residual(
+                    iota,
+                    problem_cfg.iota_abs_min,
+                    softness=problem_cfg.iota_floor_softness,
+                )
             parts.append(
                 jnp.asarray([problem_cfg.iota_weight * iota_residual], dtype=jnp.float64)
             )
@@ -733,7 +742,7 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
         parts.append(jnp.asarray(qs["residuals1d"], dtype=jnp.float64) * problem_cfg.qs_weight)
         return jnp.concatenate(parts)
 
-    stage_residuals_from_state._n_non_qs = 2 if problem_cfg.target_iota is not None else 1
+    stage_residuals_from_state._n_non_qs = 2 if track_iota else 1
     stage_residuals_from_state._qs_total_from_state = (
         lambda state: float(problem_cfg.qs_weight) ** 2 * float(stage_qs_eval(state)["total"])
     )
@@ -805,6 +814,9 @@ def _merge_stage_histories(stage_results: list[StageRecord], *, problem_cfg: Pro
     }
     if problem_cfg.target_iota is not None:
         merged["target_iota"] = float(problem_cfg.target_iota)
+    if problem_cfg.iota_abs_min is not None:
+        merged["iota_abs_min"] = float(problem_cfg.iota_abs_min)
+    if problem_cfg.target_iota is not None or problem_cfg.iota_abs_min is not None:
         if "iota" in combined_entries[0] and "iota" in combined_entries[-1]:
             merged["iota_initial"] = float(combined_entries[0]["iota"])
             merged["iota_final"] = float(combined_entries[-1]["iota"])
@@ -883,6 +895,7 @@ def _run_problem_stages(
                 seed=ASYMMETRIC_SEED,
             )
         stage_budget = problem_cfg.max_nfev if stage_mode == max_mode else problem_cfg.continuation_nfev
+        track_iota = problem_cfg.target_iota is not None or problem_cfg.iota_abs_min is not None
         stage_result = stage_opt.run(
             params0_stage,
             method=problem_cfg.method,
@@ -892,12 +905,14 @@ def _run_problem_stages(
             xtol=problem_cfg.xtol,
             x_scale=stage_x_scale,
             verbose=0,
-            iota_fn=iota_fn if problem_cfg.target_iota is not None else None,
+            iota_fn=iota_fn if track_iota else None,
             target_iota=problem_cfg.target_iota,
             target_aspect=problem_cfg.target_aspect,
             scipy_tr_solver=problem_cfg.scipy_tr_solver,
             scipy_lsmr_maxiter=problem_cfg.scipy_lsmr_maxiter,
         )
+        if problem_cfg.iota_abs_min is not None:
+            stage_result["_history_dump"]["iota_abs_min"] = float(problem_cfg.iota_abs_min)
         stage_results.append((f"{stage_label_prefix} mode {stage_mode}", stage_mode, stage_result))
         prev_specs = stage_specs
         params_stage = stage_result["x"]
@@ -1008,7 +1023,7 @@ def _run_case(
 
     hist = final_result["_history_dump"]
     final_iota = None
-    if problem_cfg.target_iota is not None and hist["history"]:
+    if (problem_cfg.target_iota is not None or problem_cfg.iota_abs_min is not None) and hist["history"]:
         final_iota = float(hist["history"][-1]["iota"])
     asym_stats = _asymmetric_param_stats(prev_specs, final_params0, final_result["x"])
 
