@@ -4191,6 +4191,11 @@ def solve_fixed_boundary_residual_iter(
     if adjoint_trace_mode not in ("full", "dynamic"):
         raise ValueError("adjoint_trace_mode must be one of {'full', 'dynamic'}")
 
+    def _adjoint_trace_array(value):
+        if adjoint_trace_mode == "dynamic":
+            return value
+        return np.asarray(value)
+
     signgs = int(signgs)
     fsq_total_target = None if fsq_total_target is None else max(0.0, float(fsq_total_target))
     lambda_update_scale = float(lambda_update_scale)
@@ -12600,26 +12605,26 @@ def solve_fixed_boundary_residual_iter(
                     "vmec2000_control": bool(vmec2000_control),
                     "limit_dt_from_force": bool(limit_dt_from_force),
                     "signgs": int(signgs),
-                    "zero_m1": np.asarray(zero_m1),
+                    "zero_m1": _adjoint_trace_array(zero_m1),
                     "wout_like": wout_like,
                     "trig": trig,
-                    "w_mode_mn": np.asarray(w_mode_mn),
+                    "w_mode_mn": _adjoint_trace_array(w_mode_mn),
                     "precond_jmax": int(jmax),
-                    "inv_tau_before": np.asarray(inv_tau, dtype=float),
+                    "inv_tau_before": _adjoint_trace_array(inv_tau),
                     "fsq_prev_before": float(fsq_prev_before),
                     "reset_inv_tau": bool(iter2 == iter1),
-                    "vRcc_before": np.asarray(vRcc),
-                    "vRss_before": np.asarray(vRss),
-                    "vZsc_before": np.asarray(vZsc),
-                    "vZcs_before": np.asarray(vZcs),
-                    "vLsc_before": np.asarray(vLsc),
-                    "vLcs_before": np.asarray(vLcs),
-                    "vRsc_before": np.asarray(vRsc),
-                    "vRcs_before": np.asarray(vRcs),
-                    "vZcc_before": np.asarray(vZcc),
-                    "vZss_before": np.asarray(vZss),
-                    "vLcc_before": np.asarray(vLcc),
-                    "vLss_before": np.asarray(vLss),
+                    "vRcc_before": _adjoint_trace_array(vRcc),
+                    "vRss_before": _adjoint_trace_array(vRss),
+                    "vZsc_before": _adjoint_trace_array(vZsc),
+                    "vZcs_before": _adjoint_trace_array(vZcs),
+                    "vLsc_before": _adjoint_trace_array(vLsc),
+                    "vLcs_before": _adjoint_trace_array(vLcs),
+                    "vRsc_before": _adjoint_trace_array(vRsc),
+                    "vRcs_before": _adjoint_trace_array(vRcs),
+                    "vZcc_before": _adjoint_trace_array(vZcc),
+                    "vZss_before": _adjoint_trace_array(vZss),
+                    "vLcc_before": _adjoint_trace_array(vLcc),
+                    "vLss_before": _adjoint_trace_array(vLss),
                 }
                 if adjoint_trace_mode == "full":
                     trace_entry.update(

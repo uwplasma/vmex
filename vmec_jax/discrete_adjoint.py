@@ -833,12 +833,18 @@ def _packed_replay_step_from_trace(
     return pack_state(out["step"]["state_post"])
 
 
+def _looks_array_like(value) -> bool:
+    return isinstance(value, np.ndarray) or (
+        hasattr(value, "shape") and hasattr(value, "dtype")
+    )
+
+
 def _static_flags_from_replay_step_traces(step_traces: tuple[dict[str, Any], ...]):
     static_flags = {key: step_traces[0][key] for key in _REPLAY_STEP_TRACE_STATIC_KEYS}
     for trace in step_traces[1:]:
         for key, value in static_flags.items():
             other = trace[key]
-            if isinstance(value, np.ndarray) or isinstance(other, np.ndarray):
+            if _looks_array_like(value) or _looks_array_like(other):
                 same = np.array_equal(np.asarray(other), np.asarray(value))
             else:
                 same = other == value
@@ -905,13 +911,13 @@ def _build_dynamic_replay_payload(
         pad_trace = dict(filtered[-1])
         pad_trace["active"] = False
         filtered = filtered + tuple(dict(pad_trace) for _ in range(target_len - len(filtered)))
-    stacked = jax.tree_util.tree_map(lambda *xs: np.stack([np.asarray(x) for x in xs], axis=0), *filtered)
+    stacked = jax.tree_util.tree_map(lambda *xs: jnp.stack([jnp.asarray(x) for x in xs], axis=0), *filtered)
     base_carries = tuple(_dynamic_replay_initial_carry(trace) for trace in step_traces)
     if target_len > len(base_carries):
         pad_carry = base_carries[-1]
         base_carries = base_carries + tuple(pad_carry for _ in range(target_len - len(base_carries)))
     stacked_base_carries = jax.tree_util.tree_map(
-        lambda *xs: np.stack([np.asarray(x) for x in xs], axis=0),
+        lambda *xs: jnp.stack([jnp.asarray(x) for x in xs], axis=0),
         *base_carries,
     )
     initial_carry = _dynamic_replay_initial_carry(step_traces[0])
