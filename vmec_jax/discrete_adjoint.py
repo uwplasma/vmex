@@ -888,6 +888,13 @@ def _build_dynamic_replay_payload(
 ):
     from ._compat import jax
 
+    use_device_stack = jax.default_backend() == "gpu"
+
+    def _stack_dynamic_values(*xs):
+        if use_device_stack:
+            return jnp.stack([jnp.asarray(x) for x in xs], axis=0)
+        return np.stack([np.asarray(x) for x in xs], axis=0)
+
     dynamic_static_flags = dict(static_flags)
     dynamic_static_flags["layout"] = step_traces[0]["state_pre"].layout
     constant_candidates = (
@@ -911,15 +918,12 @@ def _build_dynamic_replay_payload(
         pad_trace = dict(filtered[-1])
         pad_trace["active"] = False
         filtered = filtered + tuple(dict(pad_trace) for _ in range(target_len - len(filtered)))
-    stacked = jax.tree_util.tree_map(lambda *xs: jnp.stack([jnp.asarray(x) for x in xs], axis=0), *filtered)
+    stacked = jax.tree_util.tree_map(_stack_dynamic_values, *filtered)
     base_carries = tuple(_dynamic_replay_initial_carry(trace) for trace in step_traces)
     if target_len > len(base_carries):
         pad_carry = base_carries[-1]
         base_carries = base_carries + tuple(pad_carry for _ in range(target_len - len(base_carries)))
-    stacked_base_carries = jax.tree_util.tree_map(
-        lambda *xs: jnp.stack([jnp.asarray(x) for x in xs], axis=0),
-        *base_carries,
-    )
+    stacked_base_carries = jax.tree_util.tree_map(_stack_dynamic_values, *base_carries)
     initial_carry = _dynamic_replay_initial_carry(step_traces[0])
     return stacked, dynamic_static_flags, initial_carry, stacked_base_carries
 
