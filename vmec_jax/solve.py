@@ -12699,6 +12699,13 @@ def solve_fixed_boundary_residual_iter(
             # scale like O(dt) instead of O(dt^2) and can immediately blow up.
             force_scale = float(dt_eff)
 
+            need_update_rms = (
+                bool(limit_update_rms)
+                or bool(track_history)
+                or bool(verbose)
+                or bool(backtracking)
+                or (bool(adjoint_trace) and adjoint_trace_mode == "full")
+            )
             if host_update_assembly:
                 # Stack all 12 velocity/force arrays → single NumPy fused op.
                 # Eliminates 12 JAX dispatches (~0.20ms) + update_rms JAX (~0.26ms).
@@ -12725,10 +12732,13 @@ def solve_fixed_boundary_residual_iter(
                 (vRcc, vRss, vRsc, vRcs,
                  vZsc, vZcs, vZcc, vZss,
                  vLsc, vLcs, vLcc, vLss) = _V
-                # RMS via dot-product avoids 2 extra temp arrays.
-                update_rms_j = abs(dt_eff) * np.sqrt(
-                    np.dot(_V.ravel(), _V.ravel()) / _V.size
-                )
+                if need_update_rms:
+                    # RMS via dot-product avoids 2 extra temp arrays.
+                    update_rms_j = abs(dt_eff) * np.sqrt(
+                        np.dot(_V.ravel(), _V.ravel()) / _V.size
+                    )
+                else:
+                    update_rms_j = jnp.asarray(0.0, dtype=jnp.asarray(vRcc).dtype)
             else:
                 vRcc = fac * (b1 * vRcc + force_scale * (flip_sign * jnp.asarray(frcc_u)))
                 vRss = fac * (b1 * vRss + force_scale * (flip_sign * jnp.asarray(frss_u)))
@@ -12742,22 +12752,25 @@ def solve_fixed_boundary_residual_iter(
                 vLcs = fac * (b1 * vLcs + force_scale * (flip_sign * jnp.asarray(flcs_u)))
                 vLcc = fac * (b1 * vLcc + force_scale * (flip_sign * jnp.asarray(flcc_u)))
                 vLss = fac * (b1 * vLss + force_scale * (flip_sign * jnp.asarray(flss_u)))
-                update_rms_j = jnp.sqrt(
-                    jnp.mean(
-                        (dt_eff * vRcc) ** 2
-                        + (dt_eff * vRss) ** 2
-                        + (dt_eff * vRsc) ** 2
-                        + (dt_eff * vRcs) ** 2
-                        + (dt_eff * vZsc) ** 2
-                        + (dt_eff * vZcs) ** 2
-                        + (dt_eff * vZcc) ** 2
-                        + (dt_eff * vZss) ** 2
-                        + (dt_eff * vLsc) ** 2
-                        + (dt_eff * vLcs) ** 2
-                        + (dt_eff * vLcc) ** 2
-                        + (dt_eff * vLss) ** 2
+                if need_update_rms:
+                    update_rms_j = jnp.sqrt(
+                        jnp.mean(
+                            (dt_eff * vRcc) ** 2
+                            + (dt_eff * vRss) ** 2
+                            + (dt_eff * vRsc) ** 2
+                            + (dt_eff * vRcs) ** 2
+                            + (dt_eff * vZsc) ** 2
+                            + (dt_eff * vZcs) ** 2
+                            + (dt_eff * vZcc) ** 2
+                            + (dt_eff * vZss) ** 2
+                            + (dt_eff * vLsc) ** 2
+                            + (dt_eff * vLcs) ** 2
+                            + (dt_eff * vLcc) ** 2
+                            + (dt_eff * vLss) ** 2
+                        )
                     )
-                )
+                else:
+                    update_rms_j = jnp.asarray(0.0, dtype=jnp.asarray(vRcc).dtype)
 
             update_rms_host: float | None = None
 
@@ -12767,7 +12780,9 @@ def solve_fixed_boundary_residual_iter(
                     update_rms_host = float(np.asarray(update_rms_j))
                 return update_rms_host
 
-            if bool(limit_update_rms):
+            if bool(limit_update_rms) or bool(backtracking) or (
+                bool(adjoint_trace) and adjoint_trace_mode == "full"
+            ):
                 update_rms = _update_rms_float()
             else:
                 update_rms = None
