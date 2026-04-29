@@ -310,6 +310,13 @@ evaluation (``1.26 s`` per point).  This identifies the next GPU target more
 precisely: reduce host-dispatched update/preconditioner/tape bookkeeping and
 replay overhead, not the already-fast GPU force kernels.
 
+The first mitigation keeps dynamic exact-tape trace arrays on device until the
+compact replay payload is assembled.  On the warm ``office`` GPU QH
+``max_mode=2`` profile above, that reduced mean tape-build time from about
+``5.75 s`` to ``5.32 s`` per accepted point and update bookkeeping from about
+``3.02 s`` to ``2.70 s``.  It does not solve the main GPU gap; it narrows the
+next target to the update/preconditioner replay graph itself.
+
 Fixed-boundary GPU diagnostics
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
