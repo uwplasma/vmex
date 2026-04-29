@@ -127,6 +127,26 @@ diagnostics.  ``solver_device=None``, ``"auto"``, and ``"default"`` inherit
 JAX's active backend; pass ``solver_device="cpu"`` or ``"gpu"`` only when you
 want an explicit override.
 
+For same-process warmup studies, repeat a callback at the same point:
+
+.. code-block:: bash
+
+   JAX_PLATFORM_NAME=gpu PYTHONPATH=. python tools/diagnostics/profile_exact_optimizer.py \
+     --problem qh --max-mode 2 --callback jacobian --repeats 2 \
+     --inner-max-iter 80 --trial-max-iter 40 --solver-device gpu
+
+For realistic accepted-point studies, perturb the parameter vector on each
+repeat.  This keeps compiled helper shapes warm while forcing a new equilibrium
+tape/state at each point, matching the cost structure of a real optimizer
+trajectory more closely than same-point repeats:
+
+.. code-block:: bash
+
+   JAX_PLATFORM_NAME=gpu PYTHONPATH=. python tools/diagnostics/profile_exact_optimizer.py \
+     --problem qh --max-mode 2 --callback jacobian --repeats 3 \
+     --perturb-scale 1e-4 --inner-max-iter 80 --trial-max-iter 40 \
+     --solver-device gpu --json-out qh_m2_gpu_new_points.json
+
 For the standalone sweep scripts, worker subprocesses also inherit the parent
 JAX backend by default.  Use ``JAX_PLATFORMS=cpu`` or
 ``--worker-jax-platforms cpu`` only when an explicit CPU-only worker process is

@@ -51,6 +51,22 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument("--repeats", type=int, default=1, help="Callback repetitions for --callback modes.")
     p.add_argument(
+        "--perturb-scale",
+        type=float,
+        default=0.0,
+        help=(
+            "When profiling callback modes, use deterministic distinct parameter "
+            "vectors with this RMS perturbation scale. This measures realistic "
+            "new accepted-point tape/replay cost instead of same-point cache hits."
+        ),
+    )
+    p.add_argument(
+        "--perturb-seed",
+        type=int,
+        default=1234,
+        help="Random seed for --perturb-scale callback points.",
+    )
+    p.add_argument(
         "--clear-between-repeats",
         action="store_true",
         help="Clear exact optimizer caches between callback repetitions.",
@@ -209,25 +225,31 @@ def main() -> int:
 
     if args.callback != "run":
         repeats = max(1, int(args.repeats))
+        perturb_scale = float(args.perturb_scale)
+        rng = np.random.default_rng(int(args.perturb_seed))
         samples: list[dict[str, object]] = []
         for repeat in range(repeats):
             if repeat > 0 and args.clear_between_repeats:
                 opt.clear_caches()
+            if perturb_scale > 0.0:
+                params = params0 + perturb_scale * rng.standard_normal(params0.shape)
+            else:
+                params = params0
             t0 = time.perf_counter()
             if args.callback == "trial":
-                value = opt.forward_residual_fun(params0)
+                value = opt.forward_residual_fun(params)
                 metric = float(np.linalg.norm(value))
                 shape = list(np.asarray(value).shape)
             elif args.callback == "exact":
-                value = opt.residual_fun(params0)
+                value = opt.residual_fun(params)
                 metric = float(np.linalg.norm(value))
                 shape = list(np.asarray(value).shape)
             elif args.callback == "jacobian":
-                value = opt.jacobian_fun(params0)
+                value = opt.jacobian_fun(params)
                 metric = float(np.linalg.norm(value))
                 shape = list(np.asarray(value).shape)
             elif args.callback == "gradient":
-                cost, grad = opt.objective_and_gradient_fun(params0)
+                cost, grad = opt.objective_and_gradient_fun(params)
                 metric = float(np.linalg.norm(grad))
                 shape = [int(np.asarray(grad).size)]
                 samples.append(
@@ -236,12 +258,13 @@ def main() -> int:
                         "wall_time_s": time.perf_counter() - t0,
                         "cost": float(cost),
                         "metric_norm": metric,
+                        "param_step_norm": float(np.linalg.norm(params - params0)),
                         "shape": shape,
                     }
                 )
                 continue
             elif args.callback == "linear":
-                op = opt.residual_linear_operator(params0)
+                op = opt.residual_linear_operator(params)
                 direction = np.ones(len(specs), dtype=float)
                 cotangent = np.ones(op.shape[0], dtype=float)
                 jv = op.matvec(direction)
@@ -255,6 +278,7 @@ def main() -> int:
                     "repeat": repeat,
                     "wall_time_s": time.perf_counter() - t0,
                     "metric_norm": metric,
+                    "param_step_norm": float(np.linalg.norm(params - params0)),
                     "shape": shape,
                 }
             )
@@ -263,7 +287,9 @@ def main() -> int:
         for sample in samples:
             print(
                 f"  repeat={sample['repeat']} wall={float(sample['wall_time_s']):.3f}s "
-                f"norm={float(sample['metric_norm']):.6e} shape={sample['shape']}"
+                f"norm={float(sample['metric_norm']):.6e} "
+                f"||dx||={float(sample['param_step_norm']):.3e} "
+                f"shape={sample['shape']}"
             )
         _print_profile(profile)
         if args.json_out:
@@ -276,6 +302,8 @@ def main() -> int:
                         "max_mode": int(args.max_mode),
                         "dofs": len(specs),
                         "callback": args.callback,
+                        "perturb_scale": perturb_scale,
+                        "perturb_seed": int(args.perturb_seed),
                         "solver_device_requested": args.solver_device,
                         "solver_device_resolved": opt._solver_device_name or "default",
                         "runtime": _runtime_info(),
