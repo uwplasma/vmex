@@ -17,6 +17,33 @@ def test_clear_preconditioner_jit_caches_empties_lambda_cache():
     assert len(p1d._LAMBDA_PRECOND_JIT_CACHE) == 0
 
 
+def test_precomputed_tridiagonal_solve_matches_full_thomas():
+    jnp = pytest.importorskip("jax.numpy")
+    from vmec_jax.preconditioner_1d_jax import (
+        _tridi_precompute_coeffs,
+        _tridi_solve_batched_jmin0,
+        _tridi_solve_precomputed,
+        _tridi_solve_np,
+        _tridi_solve_precomputed_np,
+    )
+
+    rng = np.random.default_rng(123)
+    shape = (7, 3, 2)
+    a = 0.05 * rng.normal(size=shape)
+    b = 0.05 * rng.normal(size=shape)
+    d = 2.0 + 0.2 * rng.random(size=shape)
+    rhs = rng.normal(size=shape + (4,))
+
+    cp, inv = _tridi_precompute_coeffs(jnp.asarray(a), jnp.asarray(d), jnp.asarray(b))
+    full = _tridi_solve_batched_jmin0(jnp.asarray(a), jnp.asarray(d), jnp.asarray(b), jnp.asarray(rhs))
+    precomputed = _tridi_solve_precomputed(jnp.asarray(b), cp, inv, jnp.asarray(rhs))
+    np.testing.assert_allclose(np.asarray(precomputed), np.asarray(full), rtol=1e-11, atol=1e-11)
+
+    full_np = _tridi_solve_np(a, d, b, rhs)
+    precomputed_np = _tridi_solve_precomputed_np(b, np.asarray(cp), np.asarray(inv), rhs)
+    np.testing.assert_allclose(precomputed_np, full_np, rtol=1e-11, atol=1e-11)
+
+
 def _reference_preconditioning_matrix(
     *,
     xs,
