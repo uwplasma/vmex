@@ -67,6 +67,10 @@ class CaseResult:
     asymmetric_param_norm_initial: float | None = None
     asymmetric_param_norm_final: float | None = None
     asymmetric_param_norm_delta: float | None = None
+    bmag_min: float | None = None
+    bmag_max: float | None = None
+    bmag_nonpositive_fraction: float | None = None
+    bmag_finite: bool | None = None
 
 
 @dataclass
@@ -156,6 +160,13 @@ def _is_zero_iota_direct_limit(result: CaseResult) -> bool:
 def _status_label(result: CaseResult) -> str:
     if result.crashed:
         return "failed"
+    if result.bmag_finite is False:
+        return "bad |B|"
+    if (
+        result.bmag_nonpositive_fraction is not None
+        and float(result.bmag_nonpositive_fraction) > 0.0
+    ):
+        return "bad |B|"
     if _is_zero_iota_direct_limit(result):
         return "zero-iota"
     return "ok" if result.success else "stopped"
@@ -333,6 +344,10 @@ def _write_combined_summary(results: list[CaseResult]) -> None:
                 "asymmetric_param_norm_initial",
                 "asymmetric_param_norm_final",
                 "asymmetric_param_norm_delta",
+                "bmag_min",
+                "bmag_max",
+                "bmag_nonpositive_fraction",
+                "bmag_finite",
                 "problem",
                 "max_mode",
                 "use_ess",

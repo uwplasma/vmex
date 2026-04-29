@@ -275,6 +275,26 @@ def test_qs_ess_renderer_separates_lasym_records(tmp_path, monkeypatch):
     assert asym.asymmetric_dof_count == 8
 
 
+def test_qs_ess_renderer_flags_nonpositive_bmag():
+    renderer = _load_renderer_module()
+    result = renderer.CaseResult(
+        backend="cpu",
+        policy="direct",
+        problem="qi",
+        max_mode=1,
+        use_ess=False,
+        success=True,
+        crashed=False,
+        message="ok",
+        bmag_min=-1.0,
+        bmag_max=2.0,
+        bmag_nonpositive_fraction=0.1,
+        bmag_finite=True,
+    )
+
+    assert renderer._status_label(result) == "bad |B|"
+
+
 def _write_case(
     case_dir: Path,
     *,

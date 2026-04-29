@@ -366,6 +366,10 @@ class CaseResult:
     asymmetric_param_norm_initial: float | None = None
     asymmetric_param_norm_final: float | None = None
     asymmetric_param_norm_delta: float | None = None
+    bmag_min: float | None = None
+    bmag_max: float | None = None
+    bmag_nonpositive_fraction: float | None = None
+    bmag_finite: bool | None = None
 
 
 def _set_missing_wall_time(result: CaseResult, elapsed_s: float) -> bool:
@@ -532,6 +536,47 @@ def _asymmetric_param_stats(specs, params_initial, params_final) -> dict[str, fl
         "asymmetric_param_norm_final": float(np.linalg.norm(final)),
         "asymmetric_param_norm_delta": float(np.linalg.norm(final - initial)),
     }
+
+
+def _bmag_lcfs_stats(wout_path: Path) -> dict[str, float | bool | None]:
+    """Return basic LCFS |B| reconstruction health metrics for a saved wout."""
+
+    try:
+        from vmec_jax.plotting import vmecplot2_bmag_grid
+        from vmec_jax.wout import read_wout
+
+        wout = read_wout(str(wout_path))
+        ns = int(np.asarray(wout.ns))
+        zeta_max = 2.0 * np.pi / int(np.asarray(wout.nfp))
+        _theta, _zeta, bmag = vmecplot2_bmag_grid(
+            wout,
+            s_index=ns - 1,
+            ntheta=64,
+            nzeta=96,
+            zeta_max=zeta_max,
+        )
+        finite = np.isfinite(bmag)
+        if not bool(np.any(finite)):
+            return {
+                "bmag_min": None,
+                "bmag_max": None,
+                "bmag_nonpositive_fraction": None,
+                "bmag_finite": False,
+            }
+        bmag_finite = np.asarray(bmag[finite], dtype=float)
+        return {
+            "bmag_min": float(np.min(bmag_finite)),
+            "bmag_max": float(np.max(bmag_finite)),
+            "bmag_nonpositive_fraction": float(np.mean(bmag_finite <= 0.0)),
+            "bmag_finite": bool(np.all(finite)),
+        }
+    except Exception:
+        return {
+            "bmag_min": None,
+            "bmag_max": None,
+            "bmag_nonpositive_fraction": None,
+            "bmag_finite": None,
+        }
 
 
 def _load_problem(cfg: ProblemConfig, *, stellarator_asymmetric: bool = STELLARATOR_ASYMMETRIC):
@@ -951,6 +996,7 @@ def _run_case(
         final_result["_history_dump"] = _merge_stage_histories(stage_results, problem_cfg=problem_cfg)
 
     _save_case_outputs(output_dir, final_opt, final_params0, final_result["x"], final_result)
+    bmag_stats = _bmag_lcfs_stats(output_dir / "wout_final.nc")
     if original_stage is not None:
         original_opt, original_params0, original_result = original_stage
         original_opt.save_input(output_dir / "input.original", original_params0)
@@ -990,6 +1036,7 @@ def _run_case(
         stellarator_asymmetric=bool(stellarator_asymmetric),
         asymmetry_seed=float(ASYMMETRIC_SEED if stellarator_asymmetric else 0.0),
         **asym_stats,
+        **bmag_stats,
     )
 
 
@@ -1257,6 +1304,10 @@ def _write_summary_csv(results: list[CaseResult], path: Path) -> None:
                 "asymmetric_param_norm_initial",
                 "asymmetric_param_norm_final",
                 "asymmetric_param_norm_delta",
+                "bmag_min",
+                "bmag_max",
+                "bmag_nonpositive_fraction",
+                "bmag_finite",
                 "message",
                 "output_dir",
             ],
