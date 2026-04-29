@@ -1232,6 +1232,7 @@ def _packed_dynamic_replay_step_from_carry(
         flss_u=force_out["flss_u"],
         max_update_rms=max_update_rms_pre,
         limit_update_rms=static_flags["limit_update_rms"],
+        compute_update_rms=False,
         divide_by_scalxc_for_update=static_flags["divide_by_scalxc_for_update"],
     )
     return (
@@ -1813,6 +1814,7 @@ def strict_update_velocity_limit(
     dt_eff,
     max_update_rms,
     limit_update_rms,
+    compute_update_rms: bool = True,
     vRcc,
     vRss,
     vZsc,
@@ -1830,24 +1832,28 @@ def strict_update_velocity_limit(
     dt_eff = jnp.asarray(dt_eff, dtype=jnp.asarray(vRcc).dtype)
     max_update_rms = jnp.asarray(max_update_rms, dtype=jnp.asarray(vRcc).dtype)
     limit_update_rms = bool(limit_update_rms)
+    compute_update_rms = bool(compute_update_rms) or limit_update_rms
     base = jnp.asarray(vRcc)
     zeros = jnp.zeros_like(base)
-    pieces = [
-        base,
-        jnp.asarray(vRss),
-        jnp.asarray(vRsc) if vRsc is not None else zeros,
-        jnp.asarray(vRcs) if vRcs is not None else zeros,
-        jnp.asarray(vZsc),
-        jnp.asarray(vZcs),
-        jnp.asarray(vZcc) if vZcc is not None else zeros,
-        jnp.asarray(vZss) if vZss is not None else zeros,
-        jnp.asarray(vLsc),
-        jnp.asarray(vLcs),
-        jnp.asarray(vLcc) if vLcc is not None else zeros,
-        jnp.asarray(vLss) if vLss is not None else zeros,
-    ]
-    sq = sum((dt_eff * p) ** 2 for p in pieces)
-    update_rms = jnp.sqrt(jnp.mean(sq))
+    if compute_update_rms:
+        pieces = [
+            base,
+            jnp.asarray(vRss),
+            jnp.asarray(vRsc) if vRsc is not None else zeros,
+            jnp.asarray(vRcs) if vRcs is not None else zeros,
+            jnp.asarray(vZsc),
+            jnp.asarray(vZcs),
+            jnp.asarray(vZcc) if vZcc is not None else zeros,
+            jnp.asarray(vZss) if vZss is not None else zeros,
+            jnp.asarray(vLsc),
+            jnp.asarray(vLcs),
+            jnp.asarray(vLcc) if vLcc is not None else zeros,
+            jnp.asarray(vLss) if vLss is not None else zeros,
+        ]
+        sq = sum((dt_eff * p) ** 2 for p in pieces)
+        update_rms = jnp.sqrt(jnp.mean(sq))
+    else:
+        update_rms = jnp.asarray(0.0, dtype=base.dtype)
     if limit_update_rms:
         scale = jnp.where(
             jnp.isfinite(update_rms) & (update_rms > max_update_rms),
@@ -2285,6 +2291,7 @@ def strict_update_accepted_step(
     flss_u=None,
     max_update_rms=5.0e-3,
     limit_update_rms: bool = True,
+    compute_update_rms: bool = True,
     divide_by_scalxc_for_update: bool = False,
 ):
     """Compose the accepted strict-update velocity and state-advance blocks."""
@@ -2334,6 +2341,7 @@ def strict_update_accepted_step(
         vZss=velocity_raw["vZss_after"],
         vLcc=velocity_raw["vLcc_after"],
         vLss=velocity_raw["vLss_after"],
+        compute_update_rms=compute_update_rms,
     )
     state_post = strict_update_velocity_state_advance(
         state_pre,
