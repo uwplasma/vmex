@@ -148,6 +148,31 @@ def test_quasisymmetry_ratio_residual_returns_diagnostic_fields():
     )
 
 
+def test_quasisymmetry_ratio_residual_supports_lasym_wout():
+    pytest.importorskip("jax")
+
+    from vmec_jax import load_wout
+    from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_wout
+
+    root = os.path.dirname(os.path.dirname(__file__))
+    wout = load_wout(os.path.join(root, "examples", "data", "wout_basic_non_stellsym_simsopt.nc"))
+    assert bool(wout.lasym)
+
+    qs = quasisymmetry_ratio_residual_from_wout(
+        wout,
+        surfaces=[0.5],
+        helicity_m=1,
+        helicity_n=0,
+        ntheta=13,
+        nphi=14,
+    )
+
+    assert np.asarray(qs["residuals1d"]).ndim == 1
+    assert np.all(np.isfinite(np.asarray(qs["residuals1d"])))
+    assert np.isfinite(float(np.asarray(qs["total"])))
+    assert float(np.linalg.norm(np.asarray(wout.bmns))) > 0.0
+
+
 def test_scan_cache_lru_helpers_evict_oldest(monkeypatch):
     from collections import OrderedDict
 

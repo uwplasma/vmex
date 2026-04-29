@@ -83,6 +83,12 @@ def _radial_mode_matrix(values, *, radial_count: int, mode_count: int) -> jnp.nd
     )
 
 
+def _optional_radial_mode_matrix(wout, name: str, *, radial_count: int, mode_count: int, like) -> jnp.ndarray:
+    if not bool(getattr(wout, "lasym", False)) or getattr(wout, name, None) is None:
+        return jnp.zeros_like(jnp.asarray(like))
+    return _radial_mode_matrix(getattr(wout, name), radial_count=radial_count, mode_count=mode_count)
+
+
 def _vmec_wrout_nyquist_cos_coeffs_jax(*, f, modes, trig):
     f = jnp.asarray(f)
     if f.ndim != 3:
@@ -124,6 +130,77 @@ def _vmec_wrout_nyquist_cos_coeffs_jax(*, f, modes, trig):
     dmult = mscale[m] * nscale[n_abs] * jnp.asarray(0.5 / float(getattr(trig, "r0scale", 1.0)) ** 2, dtype=f.dtype)
     dmult = jnp.where((m == 0) | (n == 0), 2.0 * dmult, dmult)
     return coeff * dmult[None, :]
+
+
+def _vmec_wrout_nyquist_sin_coeffs_jax(*, f, modes, trig):
+    f = jnp.asarray(f)
+    if f.ndim != 3:
+        raise ValueError(f"Expected f with shape (ns, ntheta, nzeta), got {f.shape}")
+
+    m = jnp.asarray(modes.m, dtype=jnp.int32)
+    n = jnp.asarray(modes.n, dtype=jnp.int32)
+    if int(m.shape[0]) == 0:
+        return jnp.zeros((int(f.shape[0]), 0), dtype=f.dtype)
+
+    nt2 = int(trig.ntheta2)
+    if int(f.shape[1]) < nt2:
+        raise ValueError("Input theta grid is smaller than VMEC ntheta2")
+    f = f[:, :nt2, :]
+
+    cosmui = jnp.asarray(trig.cosmui, dtype=f.dtype)[:nt2, :]
+    sinmui = jnp.asarray(trig.sinmui, dtype=f.dtype)[:nt2, :]
+    cosnv = jnp.asarray(trig.cosnv, dtype=f.dtype)
+    sinnv = jnp.asarray(trig.sinnv, dtype=f.dtype)
+
+    mnyq = int(cosmui.shape[1] - 1)
+    if mnyq > 0:
+        cosmui = cosmui.at[:, mnyq].multiply(jnp.asarray(0.5, dtype=f.dtype))
+    nnyq = int(cosnv.shape[1] - 1)
+    if nnyq > 0:
+        cosnv = cosnv.at[:, nnyq].multiply(jnp.asarray(0.5, dtype=f.dtype))
+
+    f_theta_sin = jnp.einsum("sik,im->smk", f, sinmui, optimize=True)
+    f_theta_cos = jnp.einsum("sik,im->smk", f, cosmui, optimize=True)
+    cos_zeta = jnp.einsum("smk,kn->smn", f_theta_sin, cosnv, optimize=True)
+    sin_zeta = jnp.einsum("smk,kn->smn", f_theta_cos, sinnv, optimize=True)
+
+    n_abs = jnp.abs(n)
+    sgn = jnp.where(n < 0, -1.0, 1.0).astype(f.dtype)
+    coeff = cos_zeta[:, m, n_abs] - sgn[None, :] * sin_zeta[:, m, n_abs]
+
+    mscale = jnp.asarray(trig.mscale, dtype=f.dtype)
+    nscale = jnp.asarray(trig.nscale, dtype=f.dtype)
+    dmult = mscale[m] * nscale[n_abs] * jnp.asarray(0.5 / float(getattr(trig, "r0scale", 1.0)) ** 2, dtype=f.dtype)
+    dmult = jnp.where((m == 0) | (n == 0), 2.0 * dmult, dmult)
+    return coeff * dmult[None, :]
+
+
+def _vmec_symoutput_split_jax(*, f, trig, reversed_sym: bool = False):
+    f = jnp.asarray(f)
+    if f.ndim != 3:
+        raise ValueError(f"Expected f with shape (ns, ntheta, nzeta), got {f.shape}")
+    nt2 = int(trig.ntheta2)
+    nt1 = int(trig.ntheta1)
+    if int(f.shape[1]) < nt2:
+        raise ValueError("Input theta grid is smaller than VMEC ntheta2")
+    nzeta = int(f.shape[2])
+
+    i0 = jnp.arange(nt2, dtype=jnp.int32)
+    ir0 = jnp.where(i0 == 0, 0, nt1 - i0)
+    kk = (nzeta - jnp.arange(nzeta, dtype=jnp.int32)) % nzeta
+    f_half = f[:, :nt2, :]
+    f_ref = jnp.take(jnp.take(f, ir0, axis=1), kk, axis=2)
+    if bool(reversed_sym):
+        sym = 0.5 * (f_half - f_ref)
+        asym = 0.5 * (f_half + f_ref)
+    else:
+        sym = 0.5 * (f_half + f_ref)
+        asym = 0.5 * (f_half - f_ref)
+    return sym, asym
+
+
+def _zero_like_coeffs(coeffs):
+    return jnp.zeros_like(jnp.asarray(coeffs))
 
 
 def quasisymmetry_diagnostics_from_state(
@@ -258,17 +335,49 @@ def quasisymmetry_diagnostics_from_state(
             s=s_full,
         )
 
-    gmnc = _vmec_wrout_nyquist_cos_coeffs_jax(f=jnp.asarray(bc.jac.sqrtg), modes=nyq_modes, trig=trig)
-    bmnc = _vmec_wrout_nyquist_cos_coeffs_jax(f=bmod, modes=nyq_modes, trig=trig)
-    bsubumnc = _vmec_wrout_nyquist_cos_coeffs_jax(f=bsubu, modes=nyq_modes, trig=trig)
-    bsubvmnc = _vmec_wrout_nyquist_cos_coeffs_jax(f=bsubv, modes=nyq_modes, trig=trig)
-    bsupumnc = _vmec_wrout_nyquist_cos_coeffs_jax(f=jnp.asarray(bc.bsupu), modes=nyq_modes, trig=trig)
-    bsupvmnc = _vmec_wrout_nyquist_cos_coeffs_jax(f=jnp.asarray(bc.bsupv), modes=nyq_modes, trig=trig)
+    if bool(cfg.lasym):
+        sqrtg_sym, sqrtg_asym = _vmec_symoutput_split_jax(f=jnp.asarray(bc.jac.sqrtg), trig=trig)
+        bmod_sym, bmod_asym = _vmec_symoutput_split_jax(f=bmod, trig=trig)
+        bsubu_sym, bsubu_asym = _vmec_symoutput_split_jax(f=bsubu, trig=trig)
+        bsubv_sym, bsubv_asym = _vmec_symoutput_split_jax(f=bsubv, trig=trig)
+        bsupu_sym, bsupu_asym = _vmec_symoutput_split_jax(f=jnp.asarray(bc.bsupu), trig=trig)
+        bsupv_sym, bsupv_asym = _vmec_symoutput_split_jax(f=jnp.asarray(bc.bsupv), trig=trig)
+        gmnc = _vmec_wrout_nyquist_cos_coeffs_jax(f=sqrtg_sym, modes=nyq_modes, trig=trig)
+        bmnc = _vmec_wrout_nyquist_cos_coeffs_jax(f=bmod_sym, modes=nyq_modes, trig=trig)
+        bsubumnc = _vmec_wrout_nyquist_cos_coeffs_jax(f=bsubu_sym, modes=nyq_modes, trig=trig)
+        bsubvmnc = _vmec_wrout_nyquist_cos_coeffs_jax(f=bsubv_sym, modes=nyq_modes, trig=trig)
+        bsupumnc = _vmec_wrout_nyquist_cos_coeffs_jax(f=bsupu_sym, modes=nyq_modes, trig=trig)
+        bsupvmnc = _vmec_wrout_nyquist_cos_coeffs_jax(f=bsupv_sym, modes=nyq_modes, trig=trig)
+        gmns = _vmec_wrout_nyquist_sin_coeffs_jax(f=sqrtg_asym, modes=nyq_modes, trig=trig)
+        bmns = _vmec_wrout_nyquist_sin_coeffs_jax(f=bmod_asym, modes=nyq_modes, trig=trig)
+        bsubumns = _vmec_wrout_nyquist_sin_coeffs_jax(f=bsubu_asym, modes=nyq_modes, trig=trig)
+        bsubvmns = _vmec_wrout_nyquist_sin_coeffs_jax(f=bsubv_asym, modes=nyq_modes, trig=trig)
+        bsupumns = _vmec_wrout_nyquist_sin_coeffs_jax(f=bsupu_asym, modes=nyq_modes, trig=trig)
+        bsupvmns = _vmec_wrout_nyquist_sin_coeffs_jax(f=bsupv_asym, modes=nyq_modes, trig=trig)
+    else:
+        gmnc = _vmec_wrout_nyquist_cos_coeffs_jax(f=jnp.asarray(bc.jac.sqrtg), modes=nyq_modes, trig=trig)
+        bmnc = _vmec_wrout_nyquist_cos_coeffs_jax(f=bmod, modes=nyq_modes, trig=trig)
+        bsubumnc = _vmec_wrout_nyquist_cos_coeffs_jax(f=bsubu, modes=nyq_modes, trig=trig)
+        bsubvmnc = _vmec_wrout_nyquist_cos_coeffs_jax(f=bsubv, modes=nyq_modes, trig=trig)
+        bsupumnc = _vmec_wrout_nyquist_cos_coeffs_jax(f=jnp.asarray(bc.bsupu), modes=nyq_modes, trig=trig)
+        bsupvmnc = _vmec_wrout_nyquist_cos_coeffs_jax(f=jnp.asarray(bc.bsupv), modes=nyq_modes, trig=trig)
+        gmns = _zero_like_coeffs(gmnc)
+        bmns = _zero_like_coeffs(bmnc)
+        bsubumns = _zero_like_coeffs(bsubumnc)
+        bsubvmns = _zero_like_coeffs(bsubvmnc)
+        bsupumns = _zero_like_coeffs(bsupumnc)
+        bsupvmns = _zero_like_coeffs(bsupvmnc)
 
     if not bool(cfg.lasym):
         mask_bsub = (jnp.asarray(nyq_modes.m) >= int(cfg.mpol)) | (jnp.abs(jnp.asarray(nyq_modes.n)) > int(cfg.ntor))
         bsubumnc = jnp.where(mask_bsub[None, :], 0.0, jnp.asarray(bsubumnc))
         bsubvmnc = jnp.where(mask_bsub[None, :], 0.0, jnp.asarray(bsubvmnc))
+    else:
+        mask_bsub = (jnp.asarray(nyq_modes.m) >= int(cfg.mpol)) | (jnp.abs(jnp.asarray(nyq_modes.n)) > int(cfg.ntor))
+        bsubumnc = jnp.where(mask_bsub[None, :], 0.0, jnp.asarray(bsubumnc))
+        bsubumns = jnp.where(mask_bsub[None, :], 0.0, jnp.asarray(bsubumns))
+        bsubvmnc = jnp.where(mask_bsub[None, :], 0.0, jnp.asarray(bsubvmnc))
+        bsubvmns = jnp.where(mask_bsub[None, :], 0.0, jnp.asarray(bsubvmns))
 
     phi = cumrect_s_halfmesh(jnp.asarray(flux.phipf) * float(2.0 * np.pi * int(signgs)), s_full)
     return SimpleNamespace(
@@ -278,11 +387,17 @@ def quasisymmetry_diagnostics_from_state(
         buco=jnp.asarray(buco),
         bvco=jnp.asarray(bvco),
         gmnc=jnp.asarray(gmnc),
+        gmns=jnp.asarray(gmns),
         bmnc=jnp.asarray(bmnc),
+        bmns=jnp.asarray(bmns),
         bsubumnc=jnp.asarray(bsubumnc),
+        bsubumns=jnp.asarray(bsubumns),
         bsubvmnc=jnp.asarray(bsubvmnc),
+        bsubvmns=jnp.asarray(bsubvmns),
         bsupumnc=jnp.asarray(bsupumnc),
+        bsupumns=jnp.asarray(bsupumns),
         bsupvmnc=jnp.asarray(bsupvmnc),
+        bsupvmns=jnp.asarray(bsupvmns),
         xm_nyq=jnp.asarray(nyq_modes.m, dtype=jnp.float64),
         xn_nyq=jnp.asarray(nyq_modes.n * int(cfg.nfp), dtype=jnp.float64),
         phi=jnp.asarray(phi),
@@ -301,9 +416,6 @@ def quasisymmetry_ratio_residual_from_wout(
 ):
     """Evaluate the VMEC-only quasisymmetry residual from wout-like data."""
     _require_jax()
-
-    if bool(getattr(wout, "lasym", False)):
-        raise RuntimeError("quasisymmetry_ratio_residual_from_wout does not yet support lasym=True")
 
     surfaces = _as_surface_array(surfaces)
     weights = _as_weight_array(weights, int(surfaces.shape[0]))
@@ -326,33 +438,88 @@ def quasisymmetry_ratio_residual_from_wout(
     G = _interp_half_grid(_as_jax_array(getattr(wout, "bvco"), dtype=np.float64)[1:], surfaces, s_half)
     I = _interp_half_grid(_as_jax_array(getattr(wout, "buco"), dtype=np.float64)[1:], surfaces, s_half)
 
+    gmnc_full = _radial_mode_matrix(getattr(wout, "gmnc"), radial_count=radial_count, mode_count=mode_count)
+    bmnc_full = _radial_mode_matrix(getattr(wout, "bmnc"), radial_count=radial_count, mode_count=mode_count)
+    bsubumnc_full = _radial_mode_matrix(getattr(wout, "bsubumnc"), radial_count=radial_count, mode_count=mode_count)
+    bsubvmnc_full = _radial_mode_matrix(getattr(wout, "bsubvmnc"), radial_count=radial_count, mode_count=mode_count)
+    bsupumnc_full = _radial_mode_matrix(getattr(wout, "bsupumnc"), radial_count=radial_count, mode_count=mode_count)
+    bsupvmnc_full = _radial_mode_matrix(getattr(wout, "bsupvmnc"), radial_count=radial_count, mode_count=mode_count)
+    gmns_full = _optional_radial_mode_matrix(
+        wout, "gmns", radial_count=radial_count, mode_count=mode_count, like=gmnc_full
+    )
+    bmns_full = _optional_radial_mode_matrix(
+        wout, "bmns", radial_count=radial_count, mode_count=mode_count, like=bmnc_full
+    )
+    bsubumns_full = _optional_radial_mode_matrix(
+        wout, "bsubumns", radial_count=radial_count, mode_count=mode_count, like=bsubumnc_full
+    )
+    bsubvmns_full = _optional_radial_mode_matrix(
+        wout, "bsubvmns", radial_count=radial_count, mode_count=mode_count, like=bsubvmnc_full
+    )
+    bsupumns_full = _optional_radial_mode_matrix(
+        wout, "bsupumns", radial_count=radial_count, mode_count=mode_count, like=bsupumnc_full
+    )
+    bsupvmns_full = _optional_radial_mode_matrix(
+        wout, "bsupvmns", radial_count=radial_count, mode_count=mode_count, like=bsupvmnc_full
+    )
+
     gmnc = _interp_half_grid(
-        _radial_mode_matrix(getattr(wout, "gmnc"), radial_count=radial_count, mode_count=mode_count)[1:],
+        gmnc_full[1:],
+        surfaces,
+        s_half,
+    )
+    gmns = _interp_half_grid(
+        gmns_full[1:],
         surfaces,
         s_half,
     )
     bmnc = _interp_half_grid(
-        _radial_mode_matrix(getattr(wout, "bmnc"), radial_count=radial_count, mode_count=mode_count)[1:],
+        bmnc_full[1:],
+        surfaces,
+        s_half,
+    )
+    bmns = _interp_half_grid(
+        bmns_full[1:],
         surfaces,
         s_half,
     )
     bsubumnc = _interp_half_grid(
-        _radial_mode_matrix(getattr(wout, "bsubumnc"), radial_count=radial_count, mode_count=mode_count)[1:],
+        bsubumnc_full[1:],
+        surfaces,
+        s_half,
+    )
+    bsubumns = _interp_half_grid(
+        bsubumns_full[1:],
         surfaces,
         s_half,
     )
     bsubvmnc = _interp_half_grid(
-        _radial_mode_matrix(getattr(wout, "bsubvmnc"), radial_count=radial_count, mode_count=mode_count)[1:],
+        bsubvmnc_full[1:],
+        surfaces,
+        s_half,
+    )
+    bsubvmns = _interp_half_grid(
+        bsubvmns_full[1:],
         surfaces,
         s_half,
     )
     bsupumnc = _interp_half_grid(
-        _radial_mode_matrix(getattr(wout, "bsupumnc"), radial_count=radial_count, mode_count=mode_count)[1:],
+        bsupumnc_full[1:],
+        surfaces,
+        s_half,
+    )
+    bsupumns = _interp_half_grid(
+        bsupumns_full[1:],
         surfaces,
         s_half,
     )
     bsupvmnc = _interp_half_grid(
-        _radial_mode_matrix(getattr(wout, "bsupvmnc"), radial_count=radial_count, mode_count=mode_count)[1:],
+        bsupvmnc_full[1:],
+        surfaces,
+        s_half,
+    )
+    bsupvmns = _interp_half_grid(
+        bsupvmns_full[1:],
         surfaces,
         s_half,
     )
@@ -367,14 +534,26 @@ def quasisymmetry_ratio_residual_from_wout(
     cosangle = jnp.cos(angle)
     sinangle = jnp.sin(angle)
 
-    modB = jnp.einsum("sm,tpm->stp", bmnc, cosangle)
-    d_B_d_theta = jnp.einsum("sm,tpm,m->stp", bmnc, -sinangle, xm_nyq)
-    d_B_d_phi = jnp.einsum("sm,tpm,m->stp", bmnc, sinangle, xn_nyq)
-    sqrtg = jnp.einsum("sm,tpm->stp", gmnc, cosangle)
-    bsubu = jnp.einsum("sm,tpm->stp", bsubumnc, cosangle)
-    bsubv = jnp.einsum("sm,tpm->stp", bsubvmnc, cosangle)
-    bsupu = jnp.einsum("sm,tpm->stp", bsupumnc, cosangle)
-    bsupv = jnp.einsum("sm,tpm->stp", bsupvmnc, cosangle)
+    modB = jnp.einsum("sm,tpm->stp", bmnc, cosangle) + jnp.einsum("sm,tpm->stp", bmns, sinangle)
+    d_B_d_theta = jnp.einsum("sm,tpm,m->stp", bmnc, -sinangle, xm_nyq) + jnp.einsum(
+        "sm,tpm,m->stp", bmns, cosangle, xm_nyq
+    )
+    d_B_d_phi = jnp.einsum("sm,tpm,m->stp", bmnc, sinangle, xn_nyq) + jnp.einsum(
+        "sm,tpm,m->stp", bmns, -cosangle, xn_nyq
+    )
+    sqrtg = jnp.einsum("sm,tpm->stp", gmnc, cosangle) + jnp.einsum("sm,tpm->stp", gmns, sinangle)
+    bsubu = jnp.einsum("sm,tpm->stp", bsubumnc, cosangle) + jnp.einsum(
+        "sm,tpm->stp", bsubumns, sinangle
+    )
+    bsubv = jnp.einsum("sm,tpm->stp", bsubvmnc, cosangle) + jnp.einsum(
+        "sm,tpm->stp", bsubvmns, sinangle
+    )
+    bsupu = jnp.einsum("sm,tpm->stp", bsupumnc, cosangle) + jnp.einsum(
+        "sm,tpm->stp", bsupumns, sinangle
+    )
+    bsupv = jnp.einsum("sm,tpm->stp", bsupvmnc, cosangle) + jnp.einsum(
+        "sm,tpm->stp", bsupvmns, sinangle
+    )
 
     d_psi_d_s = -_as_jax_array(getattr(wout, "phi"), dtype=np.float64)[-1] / (2.0 * jnp.pi)
     sqrtg_safe = jnp.where(sqrtg != 0.0, sqrtg, jnp.ones_like(sqrtg))

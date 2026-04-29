@@ -61,6 +61,12 @@ class CaseResult:
     jax_device_kind: str | None = None
     solver_device: str | None = None
     jax_platforms: str | None = None
+    stellarator_asymmetric: bool = False
+    asymmetry_seed: float = 0.0
+    asymmetric_dof_count: int = 0
+    asymmetric_param_norm_initial: float | None = None
+    asymmetric_param_norm_final: float | None = None
+    asymmetric_param_norm_delta: float | None = None
 
 
 @dataclass
@@ -155,13 +161,34 @@ def _status_label(result: CaseResult) -> str:
     return "ok" if result.success else "stopped"
 
 
-def _row_label(problem: str, policy: str, backend: str | None = None) -> str:
+def _symmetry_label(stellarator_asymmetric: bool) -> str:
+    return "LASYM" if bool(stellarator_asymmetric) else "Sym"
+
+
+def _symmetry_file_label(stellarator_asymmetric: bool) -> str:
+    return "asymmetric" if bool(stellarator_asymmetric) else "symmetric"
+
+
+def _row_label(
+    problem: str,
+    policy: str,
+    backend: str | None = None,
+    *,
+    stellarator_asymmetric: bool = False,
+) -> str:
     prefix = "" if backend is None else f"{backend.upper()} | "
-    return f"{prefix}{problem.upper()} {_policy_label(policy)}"
+    return f"{prefix}{_symmetry_label(stellarator_asymmetric)} | {problem.upper()} {_policy_label(policy)}"
 
 
-def _result_key(result: CaseResult) -> tuple[str, str, str, int, bool]:
-    return (result.backend, result.policy, result.problem, int(result.max_mode), bool(result.use_ess))
+def _result_key(result: CaseResult) -> tuple[str, bool, str, str, int, bool]:
+    return (
+        result.backend,
+        bool(result.stellarator_asymmetric),
+        result.policy,
+        result.problem,
+        int(result.max_mode),
+        bool(result.use_ess),
+    )
 
 
 def _relative_result_parts(path: Path) -> tuple[str, ...]:
@@ -197,9 +224,17 @@ def _infer_policy(path: Path, record: dict) -> tuple[str, bool]:
     return ("direct", False) if "direct" in parts else ("continuation", False)
 
 
+def _infer_stellarator_asymmetric(path: Path, record: dict) -> tuple[bool, bool]:
+    if "stellarator_asymmetric" in record:
+        return bool(record["stellarator_asymmetric"]), True
+    parts = tuple(part.lower() for part in _relative_result_parts(path))
+    return "asymmetric" in parts or "lasym" in parts, False
+
+
 def _discovery_priority(path: Path, raw_record: dict) -> int:
     _backend, backend_explicit, backend_in_path = _infer_backend(path, raw_record)
     _policy, policy_explicit = _infer_policy(path, raw_record)
+    _asym, asym_explicit = _infer_stellarator_asymmetric(path, raw_record)
     priority = 0
     if backend_in_path:
         priority += 10
@@ -207,6 +242,8 @@ def _discovery_priority(path: Path, raw_record: dict) -> int:
         priority += 2
     if backend_explicit:
         priority += 20
+    if asym_explicit:
+        priority += 4
     return priority
 
 
@@ -238,7 +275,7 @@ def _pi_label(v: float) -> str:
 
 
 def _discover_results() -> list[CaseResult]:
-    results_by_key: dict[tuple[str, str, str, int, bool], tuple[int, float, CaseResult]] = {}
+    results_by_key: dict[tuple[str, bool, str, str, int, bool], tuple[int, float, CaseResult]] = {}
     for path in sorted(OUTPUT_ROOT.glob("**/case_result.json")):
         raw_record = json.loads(path.read_text())
         priority = _discovery_priority(path, raw_record)
@@ -251,6 +288,8 @@ def _discover_results() -> list[CaseResult]:
         policy, _policy_explicit = _infer_policy(path, raw_record)
         record["backend"] = backend
         record["policy"] = policy
+        asym, _asym_explicit = _infer_stellarator_asymmetric(path, raw_record)
+        record["stellarator_asymmetric"] = asym
         _infer_missing_wall_time(record)
         output_dir = record.get("output_dir")
         if output_dir is None or not Path(str(output_dir)).exists():
@@ -268,7 +307,17 @@ def _discover_results() -> list[CaseResult]:
 
 
 def _write_combined_summary(results: list[CaseResult]) -> None:
-    ordered = sorted(results, key=lambda r: (r.backend, POLICIES.index(r.policy), r.problem, r.max_mode, r.use_ess))
+    ordered = sorted(
+        results,
+        key=lambda r: (
+            r.backend,
+            bool(r.stellarator_asymmetric),
+            POLICIES.index(r.policy),
+            r.problem,
+            r.max_mode,
+            r.use_ess,
+        ),
+    )
     records = [_summary_record(r) for r in ordered]
     (OUTPUT_ROOT / "summary_all.json").write_text(json.dumps(records, indent=2))
     with (OUTPUT_ROOT / "summary_all.csv").open("w", newline="") as f:
@@ -278,6 +327,12 @@ def _write_combined_summary(results: list[CaseResult]) -> None:
             fieldnames=[
                 "policy",
                 "backend",
+                "stellarator_asymmetric",
+                "asymmetry_seed",
+                "asymmetric_dof_count",
+                "asymmetric_param_norm_initial",
+                "asymmetric_param_norm_final",
+                "asymmetric_param_norm_delta",
                 "problem",
                 "max_mode",
                 "use_ess",
@@ -314,7 +369,7 @@ def _summary_record(result: CaseResult) -> dict:
     return record
 
 
-def _result_lookup(results: list[CaseResult]) -> dict[tuple[str, str, str, int, bool], CaseResult]:
+def _result_lookup(results: list[CaseResult]) -> dict[tuple[str, bool, str, str, int, bool], CaseResult]:
     return {_result_key(result): result for result in results}
 
 
@@ -351,27 +406,29 @@ def _history_for(result: CaseResult) -> dict | None:
 
 
 def _lookup_result(
-    lookup: dict[tuple[str, str, str, int, bool], CaseResult],
+    lookup: dict[tuple[str, bool, str, str, int, bool], CaseResult],
     *,
     backend: str,
+    stellarator_asymmetric: bool,
     problem: str,
     max_mode: int,
     use_ess: bool,
     policy: str,
     allow_mode1_baseline: bool = False,
 ) -> CaseResult | None:
-    result = lookup.get((backend, policy, problem, max_mode, use_ess))
+    result = lookup.get((backend, bool(stellarator_asymmetric), policy, problem, max_mode, use_ess))
     if result is not None:
         return result
     if allow_mode1_baseline and policy == "direct" and max_mode == 1:
-        return lookup.get((backend, "continuation", problem, 1, use_ess))
+        return lookup.get((backend, bool(stellarator_asymmetric), "continuation", problem, 1, use_ess))
     return None
 
 
 def _row_has_history(
-    lookup: dict[tuple[str, str, str, int, bool], CaseResult],
+    lookup: dict[tuple[str, bool, str, str, int, bool], CaseResult],
     *,
     backend: str,
+    stellarator_asymmetric: bool,
     problem: str,
     policy: str,
 ) -> bool:
@@ -380,6 +437,7 @@ def _row_has_history(
             result = _lookup_result(
                 lookup,
                 backend=backend,
+                stellarator_asymmetric=stellarator_asymmetric,
                 problem=problem,
                 max_mode=max_mode,
                 use_ess=use_ess,
@@ -391,33 +449,46 @@ def _row_has_history(
     return False
 
 
-def _available_row_specs(results: list[CaseResult]) -> list[tuple[str, str, str]]:
+def _available_row_specs(results: list[CaseResult]) -> list[tuple[str, bool, str, str]]:
     lookup = _result_lookup(results)
     backends = sorted({result.backend for result in results})
+    symmetries = sorted({bool(result.stellarator_asymmetric) for result in results})
     return [
-        (backend, problem, policy)
+        (backend, stellarator_asymmetric, problem, policy)
         for backend in backends
+        for stellarator_asymmetric in symmetries
         for problem, policy in ROW_SPECS
-        if _row_has_history(lookup, backend=backend, problem=problem, policy=policy)
+        if _row_has_history(
+            lookup,
+            backend=backend,
+            stellarator_asymmetric=stellarator_asymmetric,
+            problem=problem,
+            policy=policy,
+        )
     ]
 
 
 def _problems_with_payloads(
-    payloads: dict[tuple[str, str, str, int, bool], PlotPayload],
+    payloads: dict[tuple[str, bool, str, str, int, bool], PlotPayload],
     *,
     backend: str,
+    stellarator_asymmetric: bool,
     policy: str,
 ) -> tuple[str, ...]:
     modes = MODES_BY_POLICY[policy]
     return tuple(
         problem
         for problem in PROBLEMS
-        if any((backend, policy, problem, mode, use_ess) in payloads for mode in modes for use_ess in ESS_OPTIONS)
+        if any(
+            (backend, bool(stellarator_asymmetric), policy, problem, mode, use_ess) in payloads
+            for mode in modes
+            for use_ess in ESS_OPTIONS
+        )
     )
 
 
-def _load_payloads(results: list[CaseResult]) -> dict[tuple[str, str, str, int, bool], PlotPayload]:
-    payloads: dict[tuple[str, str, str, int, bool], PlotPayload] = {}
+def _load_payloads(results: list[CaseResult]) -> dict[tuple[str, bool, str, str, int, bool], PlotPayload]:
+    payloads: dict[tuple[str, bool, str, str, int, bool], PlotPayload] = {}
     for result in results:
         if result.crashed or result.output_dir is None:
             continue
@@ -469,7 +540,7 @@ def _plot_objective_panel_all_policies(results: list[CaseResult], outpath_png: P
     line_labels = {False: "No ESS", True: "ESS"}
     mode_titles = ("Mode 1 baseline", "Mode 2", "Mode 3")
 
-    for row_index, (backend, problem, policy) in enumerate(row_specs):
+    for row_index, (backend, stellarator_asymmetric, problem, policy) in enumerate(row_specs):
         for col_index, max_mode in enumerate((1, 2, 3)):
             ax = axes[row_index, col_index]
             panel_label = _panel_label(row_index * 3 + col_index)
@@ -492,6 +563,7 @@ def _plot_objective_panel_all_policies(results: list[CaseResult], outpath_png: P
                 result = _lookup_result(
                     lookup,
                     backend=backend,
+                    stellarator_asymmetric=stellarator_asymmetric,
                     problem=problem,
                     max_mode=max_mode,
                     use_ess=use_ess,
@@ -545,7 +617,12 @@ def _plot_objective_panel_all_policies(results: list[CaseResult], outpath_png: P
                     fontsize=8.5,
                     color="0.35",
                 )
-            row_title = _row_label(problem, policy, backend)
+            row_title = _row_label(
+                problem,
+                policy,
+                backend,
+                stellarator_asymmetric=stellarator_asymmetric,
+            )
             if col_index == 0:
                 ax.set_ylabel(f"{row_title}\nTotal objective", fontsize=11)
             if row_index == len(row_specs) - 1:
@@ -557,6 +634,7 @@ def _plot_objective_panel_all_policies(results: list[CaseResult], outpath_png: P
                     _lookup_result(
                         lookup,
                         backend=backend,
+                        stellarator_asymmetric=stellarator_asymmetric,
                         problem=problem,
                         max_mode=max_mode,
                         use_ess=use_ess,
@@ -621,7 +699,7 @@ def _plot_objective_panel_all_policies(results: list[CaseResult], outpath_png: P
             frameon=False,
         )
     fig.suptitle(
-        "QA/QH/QP/QI optimization histories by backend: continuation versus direct-start mode expansion",
+        "QA/QH/QP/QI optimization histories by backend and boundary symmetry",
         y=0.998,
         fontsize=16,
     )
@@ -633,10 +711,11 @@ def _plot_objective_panel_all_policies(results: list[CaseResult], outpath_png: P
 
 def _plot_state_atlas(
     results: list[CaseResult],
-    payloads: dict[tuple[str, str, str, int, bool], PlotPayload],
+    payloads: dict[tuple[str, bool, str, str, int, bool], PlotPayload],
     *,
     policy: str,
     backend: str = "cpu",
+    stellarator_asymmetric: bool = False,
     outpath_png: Path,
     outpath_pdf: Path,
 ) -> bool:
@@ -648,7 +727,12 @@ def _plot_state_atlas(
 
     lookup = _result_lookup(results)
     modes = MODES_BY_POLICY[policy]
-    problems = _problems_with_payloads(payloads, backend=backend, policy=policy)
+    problems = _problems_with_payloads(
+        payloads,
+        backend=backend,
+        stellarator_asymmetric=stellarator_asymmetric,
+        policy=policy,
+    )
     if not problems:
         return False
     columns = [(mode, use_ess) for mode in modes for use_ess in ESS_OPTIONS]
@@ -681,6 +765,7 @@ def _plot_state_atlas(
             result = _lookup_result(
                 lookup,
                 backend=backend,
+                stellarator_asymmetric=stellarator_asymmetric,
                 problem=problem,
                 max_mode=max_mode,
                 use_ess=use_ess,
@@ -821,7 +906,10 @@ def _plot_state_atlas(
             )
 
     fig.suptitle(
-        f"Final-state atlas: {backend.upper()} {_policy_label(policy)} policy",
+        (
+            f"Final-state atlas: {backend.upper()} {_symmetry_label(stellarator_asymmetric)} "
+            f"{_policy_label(policy)} policy"
+        ),
         y=0.995,
         fontsize=16,
     )
@@ -844,7 +932,7 @@ def _plot_summary_tables(results: list[CaseResult], outpath_png: Path, outpath_p
     axes_arr = np.asarray(axes).ravel()
     for ax in axes_arr[len(row_specs):]:
         ax.axis("off")
-    for ax, (backend, problem, policy) in zip(axes_arr, row_specs):
+    for ax, (backend, stellarator_asymmetric, problem, policy) in zip(axes_arr, row_specs):
         ax.axis("off")
         lookup = _result_lookup(results)
         group = [
@@ -855,6 +943,7 @@ def _plot_summary_tables(results: list[CaseResult], outpath_png: Path, outpath_p
                 result := _lookup_result(
                     lookup,
                     backend=backend,
+                    stellarator_asymmetric=stellarator_asymmetric,
                     problem=problem,
                     max_mode=max_mode,
                     use_ess=use_ess,
@@ -866,7 +955,11 @@ def _plot_summary_tables(results: list[CaseResult], outpath_png: Path, outpath_p
         ]
         if not group:
             _draw_placeholder(ax, "pending")
-            ax.set_title(_row_label(problem, policy, backend), fontsize=12, pad=8)
+            ax.set_title(
+                _row_label(problem, policy, backend, stellarator_asymmetric=stellarator_asymmetric),
+                fontsize=12,
+                pad=8,
+            )
             continue
         finite_objective_indices = [
             i for i, result in enumerate(group) if result.objective_final is not None and not result.crashed
@@ -935,7 +1028,11 @@ def _plot_summary_tables(results: list[CaseResult], outpath_png: Path, outpath_p
                     cell.set_facecolor("#fff3e8")
                 else:
                     cell.set_facecolor("#eef5ff")
-        ax.set_title(_row_label(problem, policy, backend), fontsize=12, pad=8)
+        ax.set_title(
+            _row_label(problem, policy, backend, stellarator_asymmetric=stellarator_asymmetric),
+            fontsize=12,
+            pad=8,
+        )
 
     fig.suptitle("Sweep summary tables", y=0.99, fontsize=16)
     fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.97))
@@ -979,6 +1076,94 @@ def _assemble_full_panel(
     plt.close(fig)
 
 
+def _render_publication_set(
+    *,
+    results: list[CaseResult],
+    payloads: dict[tuple[str, bool, str, str, int, bool], PlotPayload],
+    output_suffix: str,
+    title_suffix: str,
+    alias_legacy: bool = False,
+) -> None:
+    objective_stem = "objective_panel_all_policies" if not output_suffix else f"objective_panel_{output_suffix}_all_policies"
+    summary_stem = "summary_tables_all_policies" if not output_suffix else f"summary_tables_{output_suffix}_all_policies"
+    panel_stem = "publication_panel_full" if not output_suffix else f"publication_panel_{output_suffix}_full"
+    objective_png = OUTPUT_ROOT / f"{objective_stem}.png"
+    objective_pdf = OUTPUT_ROOT / f"{objective_stem}.pdf"
+    summary_png = OUTPUT_ROOT / f"{summary_stem}.png"
+    summary_pdf = OUTPUT_ROOT / f"{summary_stem}.pdf"
+    panel_png = OUTPUT_ROOT / f"{panel_stem}.png"
+    panel_pdf = OUTPUT_ROOT / f"{panel_stem}.pdf"
+
+    _plot_objective_panel_all_policies(results, objective_png, objective_pdf)
+    atlas_paths: list[tuple[Path, Path, str]] = []
+    for backend in sorted({result.backend for result in results}):
+        for stellarator_asymmetric in sorted({bool(result.stellarator_asymmetric) for result in results}):
+            symmetry_file_label = _symmetry_file_label(stellarator_asymmetric)
+            for policy in POLICIES:
+                if not _problems_with_payloads(
+                    payloads,
+                    backend=backend,
+                    stellarator_asymmetric=stellarator_asymmetric,
+                    policy=policy,
+                ):
+                    continue
+                atlas_stem = (
+                    f"final_state_atlas_{backend}_{policy}"
+                    if not stellarator_asymmetric
+                    else f"final_state_atlas_{backend}_{symmetry_file_label}_{policy}"
+                )
+                if output_suffix:
+                    atlas_stem = f"final_state_atlas_{output_suffix}_{backend}_{policy}"
+                atlas_png = OUTPUT_ROOT / f"{atlas_stem}.png"
+                atlas_pdf = OUTPUT_ROOT / f"{atlas_stem}.pdf"
+                wrote_atlas = _plot_state_atlas(
+                    results,
+                    payloads,
+                    policy=policy,
+                    backend=backend,
+                    stellarator_asymmetric=stellarator_asymmetric,
+                    outpath_png=atlas_png,
+                    outpath_pdf=atlas_pdf,
+                )
+                if not wrote_atlas:
+                    continue
+                atlas_paths.append(
+                    (
+                        atlas_png,
+                        atlas_pdf,
+                        (
+                            f"Final-state atlas: {backend.upper()} "
+                            f"{_symmetry_label(stellarator_asymmetric)} "
+                            f"{_policy_label(policy).lower()} policy"
+                        ),
+                    )
+                )
+                if alias_legacy and backend == "cpu" and not stellarator_asymmetric:
+                    shutil.copy2(atlas_png, OUTPUT_ROOT / f"final_state_atlas_{policy}.png")
+                    shutil.copy2(atlas_pdf, OUTPUT_ROOT / f"final_state_atlas_{policy}.pdf")
+                    if policy == "continuation":
+                        _copy_alias(OUTPUT_ROOT / f"final_state_atlas_{policy}", OUTPUT_ROOT / "geometry_atlas")
+
+    _plot_summary_tables(results, summary_png, summary_pdf)
+    image_paths = [objective_png] + [path for path, _pdf, _title in atlas_paths] + [summary_png]
+    panel_titles = [f"A. Objective histories: {title_suffix}"]
+    for index, (_path, _pdf, title) in enumerate(atlas_paths, start=1):
+        panel_titles.append(f"{chr(ord('A') + index)}. {title}")
+    panel_titles.append(f"{chr(ord('A') + len(panel_titles))}. Sweep summary tables")
+    _assemble_full_panel(image_paths, panel_titles, panel_png, panel_pdf)
+
+    if alias_legacy:
+        _copy_alias(OUTPUT_ROOT / "objective_panel_all_policies", OUTPUT_ROOT / "objective_panel")
+        _copy_alias(OUTPUT_ROOT / "summary_tables_all_policies", OUTPUT_ROOT / "summary_table")
+        _copy_alias(OUTPUT_ROOT / "publication_panel_full", OUTPUT_ROOT / "publication_panel")
+
+    print(f"Wrote {objective_png}")
+    for atlas_png, _atlas_pdf, _title in atlas_paths:
+        print(f"Wrote {atlas_png}")
+    print(f"Wrote {summary_png}")
+    print(f"Wrote {panel_png}")
+
+
 def _copy_alias(src_stem: Path, dst_stem: Path) -> None:
     """Copy a png/pdf figure pair so legacy names do not stay stale."""
     for suffix in (".png", ".pdf"):
@@ -992,15 +1177,13 @@ def main() -> None:
     _write_combined_summary(results)
     payloads = _load_payloads(results)
 
-    objective_png = OUTPUT_ROOT / "objective_panel_all_policies.png"
-    objective_pdf = OUTPUT_ROOT / "objective_panel_all_policies.pdf"
-    summary_png = OUTPUT_ROOT / "summary_tables_all_policies.png"
-    summary_pdf = OUTPUT_ROOT / "summary_tables_all_policies.pdf"
-    panel_png = OUTPUT_ROOT / "publication_panel_full.png"
-    panel_pdf = OUTPUT_ROOT / "publication_panel_full.pdf"
-
-    _plot_objective_panel_all_policies(results, objective_png, objective_pdf)
-    _copy_alias(OUTPUT_ROOT / "objective_panel_all_policies", OUTPUT_ROOT / "objective_panel")
+    _render_publication_set(
+        results=results,
+        payloads=payloads,
+        output_suffix="",
+        title_suffix="all symmetric and LASYM policies",
+        alias_legacy=True,
+    )
     for backend in sorted({result.backend for result in results}):
         backend_results = [result for result in results if result.backend == backend]
         _plot_objective_panel_all_policies(
@@ -1008,64 +1191,23 @@ def main() -> None:
             OUTPUT_ROOT / f"objective_panel_{backend}_policies.png",
             OUTPUT_ROOT / f"objective_panel_{backend}_policies.pdf",
         )
-    atlas_paths: list[tuple[Path, Path, str]] = []
-    for backend in sorted({result.backend for result in results}):
-        for policy in POLICIES:
-            if not _problems_with_payloads(payloads, backend=backend, policy=policy):
-                continue
-            atlas_png = OUTPUT_ROOT / f"final_state_atlas_{backend}_{policy}.png"
-            atlas_pdf = OUTPUT_ROOT / f"final_state_atlas_{backend}_{policy}.pdf"
-            wrote_atlas = _plot_state_atlas(
-                results,
-                payloads,
-                policy=policy,
-                backend=backend,
-                outpath_png=atlas_png,
-                outpath_pdf=atlas_pdf,
-            )
-            if wrote_atlas:
-                atlas_paths.append(
-                    (
-                        atlas_png,
-                        atlas_pdf,
-                        f"Final-state atlas: {backend.upper()} {_policy_label(policy).lower()} policy",
-                    )
-                )
-                if backend == "cpu":
-                    # Keep the backend-qualified files for CPU/GPU comparisons,
-                    # and also publish the concise filenames requested in the
-                    # README/docs for the production-accuracy CPU final states.
-                    shutil.copy2(atlas_png, OUTPUT_ROOT / f"final_state_atlas_{policy}.png")
-                    shutil.copy2(atlas_pdf, OUTPUT_ROOT / f"final_state_atlas_{policy}.pdf")
-                    if policy == "continuation":
-                        _copy_alias(OUTPUT_ROOT / f"final_state_atlas_{policy}", OUTPUT_ROOT / "geometry_atlas")
-    _plot_summary_tables(results, summary_png, summary_pdf)
-    _copy_alias(OUTPUT_ROOT / "summary_tables_all_policies", OUTPUT_ROOT / "summary_table")
-    for backend in sorted({result.backend for result in results}):
-        backend_results = [result for result in results if result.backend == backend]
         _plot_summary_tables(
             backend_results,
             OUTPUT_ROOT / f"summary_tables_{backend}_policies.png",
             OUTPUT_ROOT / f"summary_tables_{backend}_policies.pdf",
         )
-    image_paths = [objective_png] + [path for path, _pdf, _title in atlas_paths] + [summary_png]
-    panel_titles = ["A. Objective histories: continuation and direct-start policies"]
-    for index, (_path, _pdf, title) in enumerate(atlas_paths, start=1):
-        panel_titles.append(f"{chr(ord('A') + index)}. {title}")
-    panel_titles.append(f"{chr(ord('A') + len(panel_titles))}. Sweep summary tables")
-    _assemble_full_panel(
-        image_paths,
-        panel_titles,
-        panel_png,
-        panel_pdf,
-    )
-    _copy_alias(OUTPUT_ROOT / "publication_panel_full", OUTPUT_ROOT / "publication_panel")
-
-    print(f"Wrote {objective_png}")
-    for atlas_png, _atlas_pdf, _title in atlas_paths:
-        print(f"Wrote {atlas_png}")
-    print(f"Wrote {summary_png}")
-    print(f"Wrote {panel_png}")
+    for stellarator_asymmetric in sorted({bool(result.stellarator_asymmetric) for result in results}):
+        if not stellarator_asymmetric:
+            continue
+        subset = [result for result in results if bool(result.stellarator_asymmetric) is stellarator_asymmetric]
+        subset_payloads = {key: payload for key, payload in payloads.items() if key[1] is stellarator_asymmetric}
+        _render_publication_set(
+            results=subset,
+            payloads=subset_payloads,
+            output_suffix=_symmetry_file_label(stellarator_asymmetric),
+            title_suffix="non-stellarator-symmetric LASYM policies",
+            alias_legacy=False,
+        )
 
 
 if __name__ == "__main__":

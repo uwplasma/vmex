@@ -465,6 +465,19 @@ Render the README/docs panels and tables:
 python examples/optimization/render_qs_ess_publication_panel.py
 ```
 
+To run the non-stellarator-symmetric matrix, append
+`--stellarator-asymmetric`. This sets `LASYM = T` in memory, optimizes
+`RBC/ZBS/RBS/ZBC`, seeds zero asymmetric `RBS/ZBC` modes with `1e-7`, and
+writes separate LASYM outputs under `results/qs_ess_sweep/<backend>/asymmetric/`.
+The renderer then creates additional `*_asymmetric_*` objective, atlas, summary,
+and publication panels.
+
+```bash
+JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
+JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
+python examples/optimization/render_qs_ess_publication_panel.py
+```
+
 Run individual examples by editing top-level variables in each script:
 
 ```bash

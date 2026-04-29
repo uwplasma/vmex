@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -59,6 +60,44 @@ def test_qs_ess_sweep_sets_missing_wall_time():
     assert result.total_wall_time_s == 12.5
     assert not sweep._set_missing_wall_time(result, 99.0)
     assert result.total_wall_time_s == 12.5
+
+
+def test_qs_ess_sweep_lasym_copy_and_zero_asymmetric_seed():
+    sweep = _load_sweep_module()
+    indata = sweep.InData(
+        scalars={"LASYM": False},
+        indexed={"RBC": {(0, 0): 1.0}},
+        source_path=Path("input.test"),
+    )
+
+    copied = sweep._copy_indata_with_lasym(indata, lasym=True)
+
+    assert indata.get_bool("LASYM", True) is False
+    assert copied.get_bool("LASYM", False) is True
+    assert copied.indexed == indata.indexed
+    assert sweep._boundary_include_for_indata(copied) == ("rc", "zs", "rs", "zc")
+
+    boundary = SimpleNamespace(
+        R_cos=[1.0, 0.0],
+        R_sin=[0.0, 0.2],
+        Z_cos=[0.0, 0.0],
+        Z_sin=[0.0, 0.3],
+    )
+    specs = [
+        SimpleNamespace(kind="rc", index=1),
+        SimpleNamespace(kind="rs", index=0),
+        SimpleNamespace(kind="rs", index=1),
+        SimpleNamespace(kind="zc", index=0),
+        SimpleNamespace(kind="zs", index=1),
+    ]
+    seeded = sweep._seed_zero_asymmetric_params(
+        boundary_input=boundary,
+        specs=specs,
+        params=[0.0, 0.0, 0.0, 0.0, 0.0],
+        seed=1.0e-7,
+    )
+
+    assert seeded.tolist() == [0.0, 1.0e-7, 0.0, 1.0e-7, 0.0]
 
 
 def test_qs_ess_sweep_gpu_production_budgets_are_not_diagnostic_caps():
@@ -160,11 +199,11 @@ def test_qs_ess_renderer_ignores_legacy_backendless_records(tmp_path, monkeypatc
     discovered = renderer._discover_results()
     lookup = renderer._result_lookup(discovered)
 
-    preferred = lookup[("cpu", "continuation", "qa", 2, False)]
+    preferred = lookup[("cpu", False, "continuation", "qa", 2, False)]
     assert preferred.message == "explicit"
     assert preferred.objective_final == 0.2
 
-    assert ("cpu", "direct", "qa", 3, True) not in lookup
+    assert ("cpu", False, "direct", "qa", 3, True) not in lookup
 
 
 def test_qs_ess_renderer_normalizes_gpu_backend_labels(tmp_path, monkeypatch):
@@ -192,7 +231,48 @@ def test_qs_ess_renderer_normalizes_gpu_backend_labels(tmp_path, monkeypatch):
 
     discovered = renderer._discover_results()
     assert discovered[0].backend == "gpu"
-    assert renderer._result_key(discovered[0]) == ("gpu", "direct", "qh", 2, False)
+    assert renderer._result_key(discovered[0]) == ("gpu", False, "direct", "qh", 2, False)
+
+
+def test_qs_ess_renderer_separates_lasym_records(tmp_path, monkeypatch):
+    renderer = _load_renderer_module()
+    monkeypatch.setattr(renderer, "OUTPUT_ROOT", tmp_path)
+
+    sym_dir = tmp_path / "cpu" / "continuation" / "qa" / "mode1" / "no_ess"
+    asym_dir = tmp_path / "cpu" / "asymmetric" / "continuation" / "qa" / "mode1" / "no_ess"
+    sym_dir.mkdir(parents=True)
+    asym_dir.mkdir(parents=True)
+    base_record = {
+        "backend": "cpu",
+        "policy": "continuation",
+        "problem": "qa",
+        "max_mode": 1,
+        "use_ess": False,
+        "success": True,
+        "crashed": False,
+        "message": "ok",
+        "output_dir": str(sym_dir),
+    }
+    (sym_dir / "case_result.json").write_text(json.dumps({**base_record, "objective_final": 1.0}))
+    (asym_dir / "case_result.json").write_text(
+        json.dumps(
+            {
+                **base_record,
+                "stellarator_asymmetric": True,
+                "objective_final": 0.25,
+                "asymmetric_dof_count": 8,
+                "output_dir": str(asym_dir),
+            }
+        )
+    )
+
+    discovered = renderer._discover_results()
+    lookup = renderer._result_lookup(discovered)
+
+    assert lookup[("cpu", False, "continuation", "qa", 1, False)].objective_final == 1.0
+    asym = lookup[("cpu", True, "continuation", "qa", 1, False)]
+    assert asym.objective_final == 0.25
+    assert asym.asymmetric_dof_count == 8
 
 
 def _write_case(

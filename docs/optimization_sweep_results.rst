@@ -59,6 +59,18 @@ accepted point.  Add ``--diagnostic-budgets`` only for bounded quick-look GPU
 diagnostics, and use ``--case-timeout-s 0`` only for unbounded local
 diagnostics.
 
+Run the non-stellarator-symmetric sweep by adding
+``--stellarator-asymmetric``.  This sets ``LASYM = T`` in memory, includes
+``RBS`` and ``ZBC`` boundary degrees of freedom, seeds initially-zero
+asymmetric modes with ``1e-7``, and writes separate outputs under the
+``asymmetric`` backend subdirectory.
+
+.. code-block:: bash
+
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
+   PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
+
 Objective Histories
 -------------------
 

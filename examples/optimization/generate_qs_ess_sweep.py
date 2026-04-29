@@ -63,6 +63,7 @@ from vmec_jax.config import config_from_indata
 from vmec_jax.field import signgs_from_sqrtg
 from vmec_jax.geom import eval_geom
 from vmec_jax.init_guess import initial_guess_from_boundary
+from vmec_jax.namelist import InData
 from vmec_jax.optimization import rebuild_indata_with_resolution
 from vmec_jax.quasi_isodynamic import _nearest_half_mesh_indices, quasi_isodynamic_residual_from_state
 from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_state
@@ -87,6 +88,8 @@ SOLVER_DEVICE: str | None = None
 SKIP_EXISTING = True
 CASE_TIMEOUT_S: float | None = 600.0
 ESS_ALPHA = 2.5
+STELLARATOR_ASYMMETRIC = False
+ASYMMETRIC_SEED = 1.0e-7
 DIAGNOSTIC_BUDGETS = False
 GPU_PRODUCTION_INNER_MAX_ITER = 120
 GPU_PRODUCTION_INNER_FTOL = 1e-8
@@ -357,6 +360,12 @@ class CaseResult:
     jax_device_kind: str | None = None
     solver_device: str | None = None
     jax_platforms: str | None = None
+    stellarator_asymmetric: bool = False
+    asymmetry_seed: float = 0.0
+    asymmetric_dof_count: int = 0
+    asymmetric_param_norm_initial: float | None = None
+    asymmetric_param_norm_final: float | None = None
+    asymmetric_param_norm_delta: float | None = None
 
 
 def _set_missing_wall_time(result: CaseResult, elapsed_s: float) -> bool:
@@ -460,10 +469,77 @@ def _effective_problem_config(
     return replace(problem_cfg, **updates)
 
 
-def _load_problem(cfg: ProblemConfig):
+def _copy_indata_with_lasym(indata: InData, *, lasym: bool) -> InData:
+    """Return an input-deck copy with ``LASYM`` set explicitly."""
+
+    scalars = dict(indata.scalars)
+    scalars["LASYM"] = bool(lasym)
+    indexed = {key: dict(values) for key, values in indata.indexed.items()}
+    return InData(scalars=scalars, indexed=indexed, source_path=indata.source_path)
+
+
+def _boundary_include_for_indata(indata: InData) -> tuple[str, ...]:
+    """Boundary coefficient families to optimize for the input symmetry."""
+
+    return ("rc", "zs", "rs", "zc") if bool(indata.get_bool("LASYM", False)) else ("rc", "zs")
+
+
+def _spec_base_value(boundary, spec) -> float:
+    arrays = {
+        "rc": boundary.R_cos,
+        "rs": boundary.R_sin,
+        "zc": boundary.Z_cos,
+        "zs": boundary.Z_sin,
+    }
+    return float(np.asarray(arrays[spec.kind], dtype=float)[int(spec.index)])
+
+
+def _seed_zero_asymmetric_params(
+    *,
+    boundary_input,
+    specs,
+    params,
+    seed: float,
+) -> np.ndarray:
+    """Deterministically excite zero ``RBS``/``ZBC`` modes for LASYM runs."""
+
+    out = np.asarray(params, dtype=float).copy()
+    if float(seed) == 0.0:
+        return out
+    for index, spec in enumerate(specs):
+        if spec.kind not in ("rs", "zc"):
+            continue
+        if abs(_spec_base_value(boundary_input, spec) + float(out[index])) == 0.0:
+            out[index] = float(seed)
+    return out
+
+
+def _asymmetric_param_stats(specs, params_initial, params_final) -> dict[str, float | int | None]:
+    indices = [index for index, spec in enumerate(specs) if spec.kind in ("rs", "zc")]
+    if not indices:
+        return {
+            "asymmetric_dof_count": 0,
+            "asymmetric_param_norm_initial": None,
+            "asymmetric_param_norm_final": None,
+            "asymmetric_param_norm_delta": None,
+        }
+    idx = np.asarray(indices, dtype=int)
+    initial = np.asarray(params_initial, dtype=float)[idx]
+    final = np.asarray(params_final, dtype=float)[idx]
+    return {
+        "asymmetric_dof_count": int(idx.size),
+        "asymmetric_param_norm_initial": float(np.linalg.norm(initial)),
+        "asymmetric_param_norm_final": float(np.linalg.norm(final)),
+        "asymmetric_param_norm_delta": float(np.linalg.norm(final - initial)),
+    }
+
+
+def _load_problem(cfg: ProblemConfig, *, stellarator_asymmetric: bool = STELLARATOR_ASYMMETRIC):
     cfg0, indata = vj.load_config(str(cfg.input_file))
     del cfg0
     indata = rebuild_indata_with_resolution(indata, mpol=VMEC_MPOL, ntor=VMEC_NTOR)
+    if bool(stellarator_asymmetric):
+        indata = _copy_indata_with_lasym(indata, lasym=True)
     config = config_from_indata(indata)
     return config, indata
 
@@ -503,7 +579,7 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
         stage_static.modes,
         max_mode=max_mode,
         min_coeff=0.0,
-        include=("rc", "zs"),
+        include=_boundary_include_for_indata(stage_indata),
         fix=("rc00",),
     )
 
@@ -630,7 +706,7 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
         trial_ftol=problem_cfg.trial_ftol,
         solver_device=solver_device,
     )
-    return stage_specs, stage_opt, iota_fn
+    return stage_specs, stage_opt, iota_fn, stage_boundary_input
 
 
 StageRecord = tuple[str, int, dict]
@@ -725,6 +801,7 @@ def _run_problem_stages(
     stage_label_prefix: str,
     params_stage,
     prev_specs,
+    stellarator_asymmetric: bool,
 ) -> tuple[list[StageRecord], object, object, object, object, dict]:
     stage_modes = list(range(1, max_mode + 1)) if (use_mode_continuation and max_mode > 1) else [max_mode]
     stage_results: list[StageRecord] = []
@@ -733,7 +810,7 @@ def _run_problem_stages(
     final_result = None
 
     for stage_mode in stage_modes:
-        stage_specs, stage_opt, iota_fn = _build_stage(
+        stage_specs, stage_opt, iota_fn, stage_boundary_input = _build_stage(
             problem_cfg,
             cfg,
             indata,
@@ -753,6 +830,13 @@ def _run_problem_stages(
             if params_stage is None
             else vj.lift_boundary_params(prev_specs, params_stage, stage_specs)
         )
+        if bool(stellarator_asymmetric):
+            params0_stage = _seed_zero_asymmetric_params(
+                boundary_input=stage_boundary_input,
+                specs=stage_specs,
+                params=params0_stage,
+                seed=ASYMMETRIC_SEED,
+            )
         stage_budget = problem_cfg.max_nfev if stage_mode == max_mode else problem_cfg.continuation_nfev
         stage_result = stage_opt.run(
             params0_stage,
@@ -796,6 +880,7 @@ def _run_case(
     solver_device: str | None,
     jax_platforms: str | None,
     diagnostic_budgets: bool = DIAGNOSTIC_BUDGETS,
+    stellarator_asymmetric: bool = STELLARATOR_ASYMMETRIC,
 ) -> CaseResult:
     problem_cfg = _effective_problem_config(
         PROBLEM_CONFIGS[problem],
@@ -806,7 +891,10 @@ def _run_case(
         use_ess=use_ess,
         diagnostic_budgets=diagnostic_budgets,
     )
-    cfg, indata = _load_problem(problem_cfg)
+    cfg, indata = _load_problem(
+        problem_cfg,
+        stellarator_asymmetric=stellarator_asymmetric,
+    )
     jax_backend, jax_device_kind = _jax_runtime_info()
 
     stage_results: list[StageRecord] = []
@@ -837,6 +925,7 @@ def _run_case(
             stage_label_prefix="QP preseed",
             params_stage=params_stage,
             prev_specs=prev_specs,
+            stellarator_asymmetric=stellarator_asymmetric,
         )
         stage_results.extend(qp_stage_results)
         original_stage = (qp_opt, qp_params0, qp_result)
@@ -854,6 +943,7 @@ def _run_case(
         stage_label_prefix=problem.upper(),
         params_stage=params_stage,
         prev_specs=prev_specs,
+        stellarator_asymmetric=stellarator_asymmetric,
     )
     stage_results.extend(qi_or_qs_stage_results)
 
@@ -874,6 +964,7 @@ def _run_case(
     final_iota = None
     if problem_cfg.target_iota is not None and hist["history"]:
         final_iota = float(hist["history"][-1]["iota"])
+    asym_stats = _asymmetric_param_stats(prev_specs, final_params0, final_result["x"])
 
     return CaseResult(
         backend=str(backend),
@@ -896,6 +987,9 @@ def _run_case(
         jax_device_kind=jax_device_kind,
         solver_device=solver_device,
         jax_platforms=jax_platforms,
+        stellarator_asymmetric=bool(stellarator_asymmetric),
+        asymmetry_seed=float(ASYMMETRIC_SEED if stellarator_asymmetric else 0.0),
+        **asym_stats,
     )
 
 
@@ -911,6 +1005,7 @@ def _worker(
     solver_device: str | None,
     jax_platforms: str | None,
     diagnostic_budgets: bool,
+    stellarator_asymmetric: bool,
 ):
     try:
         case_result = _run_case(
@@ -924,6 +1019,7 @@ def _worker(
             solver_device=solver_device,
             jax_platforms=jax_platforms,
             diagnostic_budgets=diagnostic_budgets,
+            stellarator_asymmetric=stellarator_asymmetric,
         )
         Path(result_path).write_text(json.dumps(asdict(case_result), indent=2))
     except Exception as exc:
@@ -940,6 +1036,8 @@ def _worker(
             output_dir=str(output_dir),
             solver_device=solver_device,
             jax_platforms=jax_platforms,
+            stellarator_asymmetric=bool(stellarator_asymmetric),
+            asymmetry_seed=float(ASYMMETRIC_SEED if stellarator_asymmetric else 0.0),
         )
         Path(result_path).write_text(json.dumps(asdict(failed), indent=2))
         Path(output_dir, "traceback.txt").write_text(traceback.format_exc())
@@ -1150,6 +1248,12 @@ def _write_summary_csv(results: list[CaseResult], path: Path) -> None:
                 "jax_device_kind",
                 "solver_device",
                 "jax_platforms",
+                "stellarator_asymmetric",
+                "asymmetry_seed",
+                "asymmetric_dof_count",
+                "asymmetric_param_norm_initial",
+                "asymmetric_param_norm_final",
+                "asymmetric_param_norm_delta",
                 "message",
                 "output_dir",
             ],
@@ -1176,6 +1280,15 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--problems", type=str, default=",".join(PROBLEMS))
     parser.add_argument("--modes", type=str, default=",".join(str(m) for m in MODES))
     parser.add_argument("--ess", choices=("both", "on", "off"), default="both")
+    parser.add_argument(
+        "--stellarator-asymmetric",
+        action="store_true",
+        default=STELLARATOR_ASYMMETRIC,
+        help=(
+            "Set LASYM=T in the in-memory VMEC input, optimize RBS/ZBC along "
+            "with RBC/ZBS, and seed zero asymmetric modes by 1e-7."
+        ),
+    )
     parser.add_argument("--rerun", action="store_true", help="Recompute cases even if case_result.json exists.")
     parser.add_argument(
         "--case-timeout-s",
@@ -1222,6 +1335,7 @@ def main() -> None:
         "on": (True,),
         "off": (False,),
     }[str(args.ess)]
+    symmetry_label = "asymmetric" if bool(args.stellarator_asymmetric) else "symmetric"
     case_timeout_s = None if args.case_timeout_s in (None, 0) else float(args.case_timeout_s)
     worker_jax_platforms_arg = str(args.worker_jax_platforms).strip()
     if worker_jax_platforms_arg.lower() in ("", "none", "inherit"):
@@ -1238,7 +1352,10 @@ def main() -> None:
     for problem in problems:
         for max_mode in modes:
             for use_ess in ess_options:
-                output_dir = output_root / backend_label / args.policy / problem / f"mode{max_mode}" / _ess_label(use_ess)
+                output_base = output_root / backend_label
+                if bool(args.stellarator_asymmetric):
+                    output_base = output_base / symmetry_label
+                output_dir = output_base / args.policy / problem / f"mode{max_mode}" / _ess_label(use_ess)
                 result_path = output_dir / "case_result.json"
                 if result_path.exists() and (not args.rerun):
                     record = json.loads(result_path.read_text())
@@ -1247,7 +1364,7 @@ def main() -> None:
                     result = CaseResult(**record)
                     results.append(result)
                     print(
-                        f"[{backend_label} {args.policy} {problem} mode={max_mode} ess={use_ess}] "
+                        f"[{backend_label} {symmetry_label} {args.policy} {problem} mode={max_mode} ess={use_ess}] "
                         f"skip existing success={result.success} crashed={result.crashed} "
                         f"objective={result.objective_final}",
                         flush=True,
@@ -1269,6 +1386,7 @@ def main() -> None:
                         solver_device,
                         worker_jax_platforms,
                         bool(args.diagnostic_budgets),
+                        bool(args.stellarator_asymmetric),
                     ),
                 )
                 case_t0 = time.perf_counter()
@@ -1312,6 +1430,8 @@ def main() -> None:
                         solver_device=solver_device,
                         jax_platforms=worker_jax_platforms,
                         total_wall_time_s=elapsed_s,
+                        stellarator_asymmetric=bool(args.stellarator_asymmetric),
+                        asymmetry_seed=float(ASYMMETRIC_SEED if args.stellarator_asymmetric else 0.0),
                     )
                     result_needs_write = True
                 else:
@@ -1328,6 +1448,8 @@ def main() -> None:
                         solver_device=solver_device,
                         jax_platforms=worker_jax_platforms,
                         total_wall_time_s=elapsed_s,
+                        stellarator_asymmetric=bool(args.stellarator_asymmetric),
+                        asymmetry_seed=float(ASYMMETRIC_SEED if args.stellarator_asymmetric else 0.0),
                     )
                     result_needs_write = True
                 if proc.exitcode not in (0, None):
@@ -1340,25 +1462,30 @@ def main() -> None:
                     result_path.write_text(json.dumps(asdict(result), indent=2))
                 results.append(result)
                 print(
-                    f"[{backend_label} {args.policy} {problem} mode={max_mode} ess={use_ess}] "
+                    f"[{backend_label} {symmetry_label} {args.policy} {problem} mode={max_mode} ess={use_ess}] "
                     f"success={result.success} crashed={result.crashed} "
                     f"objective={result.objective_final}"
                 )
 
     summary = [asdict(r) for r in results]
-    summary_name = f"summary_{backend_label}_{args.policy}.json"
-    csv_name = f"summary_{backend_label}_{args.policy}.csv"
+    name_suffix = (
+        f"{backend_label}_{symmetry_label}_{args.policy}"
+        if bool(args.stellarator_asymmetric)
+        else f"{backend_label}_{args.policy}"
+    )
+    summary_name = f"summary_{name_suffix}.json"
+    csv_name = f"summary_{name_suffix}.csv"
     (output_root / summary_name).write_text(json.dumps(summary, indent=2))
     _write_summary_csv(results, output_root / csv_name)
     _plot_objective_panel(
         results,
-        outpath_png=output_root / f"objective_panel_{backend_label}_{args.policy}.png",
-        outpath_pdf=output_root / f"objective_panel_{backend_label}_{args.policy}.pdf",
+        outpath_png=output_root / f"objective_panel_{name_suffix}.png",
+        outpath_pdf=output_root / f"objective_panel_{name_suffix}.pdf",
     )
     _plot_geometry_atlas(
         results,
-        outpath_png=output_root / f"geometry_atlas_{backend_label}_{args.policy}.png",
-        outpath_pdf=output_root / f"geometry_atlas_{backend_label}_{args.policy}.pdf",
+        outpath_png=output_root / f"geometry_atlas_{name_suffix}.png",
+        outpath_pdf=output_root / f"geometry_atlas_{name_suffix}.pdf",
     )
     print(f"Wrote {output_root}")
 

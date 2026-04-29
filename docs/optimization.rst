@@ -532,6 +532,24 @@ budgets and records any non-converged case as a normal ``max_nfev`` stop.
    JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
    python examples/optimization/render_qs_ess_publication_panel.py
 
+Non-Stellarator-Symmetric Sweeps
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Append ``--stellarator-asymmetric`` to set ``LASYM = T`` in the in-memory VMEC
+input and optimize ``RBC/ZBS/RBS/ZBC`` instead of only the stellarator-symmetric
+``RBC/ZBS`` families.  The sweep deterministically seeds zero asymmetric
+``RBS/ZBC`` degrees of freedom with ``1e-7`` so exact Jacobians do not start
+from a completely inactive asymmetric subspace.  Results are written under
+``results/qs_ess_sweep/<backend>/asymmetric/`` and the renderer creates
+additional ``*_asymmetric_*`` objective panels, state atlases, summary tables,
+and full publication panels when those cases are present.
+
+.. code-block:: bash
+
+   JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
+   JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
+   python examples/optimization/render_qs_ess_publication_panel.py
+
 .. image:: _static/figures/qs_ess_objective_panel_gpu_policies.png
    :width: 100%
    :align: center
