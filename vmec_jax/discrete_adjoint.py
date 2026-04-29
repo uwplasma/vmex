@@ -1468,6 +1468,7 @@ def checkpoint_tape_state_jvp_columns(
     static,
     initial_tangents,
     rebuild_preconditioner: bool = False,
+    column_chunk: int | None = None,
     _allow_chunking: bool = True,
 ):
     """Push multiple packed-state tangents forward through the extracted step tape."""
@@ -1479,20 +1480,22 @@ def checkpoint_tape_state_jvp_columns(
     tangents = jnp.asarray(initial_tangents)
     if _allow_chunking:
         chunk_env = os.environ.get("VMEC_JAX_REPLAY_COLUMN_CHUNK")
-        column_chunk = None
         if chunk_env is not None:
-            column_chunk = max(1, int(chunk_env))
+            active_column_chunk = max(1, int(chunk_env))
+        elif column_chunk is not None:
+            active_column_chunk = max(1, int(column_chunk))
         else:
-            column_chunk = _replay_column_chunk_default(tape=tape, tangents=tangents)
-        if column_chunk is not None and tangents.shape[0] > column_chunk:
+            active_column_chunk = _replay_column_chunk_default(tape=tape, tangents=tangents)
+        if active_column_chunk is not None and tangents.shape[0] > active_column_chunk:
             outputs = []
-            for start in range(0, int(tangents.shape[0]), column_chunk):
+            for start in range(0, int(tangents.shape[0]), active_column_chunk):
                 outputs.append(
                     checkpoint_tape_state_jvp_columns(
                         tape=tape,
                         static=static,
-                        initial_tangents=tangents[start : start + column_chunk],
+                        initial_tangents=tangents[start : start + active_column_chunk],
                         rebuild_preconditioner=rebuild_preconditioner,
+                        column_chunk=active_column_chunk,
                         _allow_chunking=False,
                     )
                 )

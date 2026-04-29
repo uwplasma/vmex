@@ -83,8 +83,8 @@ QP_PRESEED_CONTINUATION_NFEV = 8
 QP_HELICITY_M = 0
 QP_HELICITY_N = -1
 QP_SURFACES = np.arange(0.0, 1.01, 0.1)
-QP_TARGET_ABS_IOTA_MIN = 0.31
-QP_IOTA_WEIGHT = 20.0
+TARGET_ABS_IOTA_MIN = 0.41
+IOTA_WEIGHT = 100.0
 
 OUTPUT_DIR = Path(f"results/qi_opt/mode{MAX_MODE}/{'ess' if USE_ESS else 'no_ess'}")
 SAVE_STAGE_INPUTS = True
@@ -219,14 +219,17 @@ def _build_stage(max_mode: int, *, objective_kind: str):
         aspect = equilibrium_aspect_ratio_from_state(state=state, static=stage_static)
         field = stage_field_eval(state)
         parts = [jnp.asarray([ASPECT_WEIGHT * (aspect - TARGET_ASPECT)], dtype=jnp.float64)]
-        if objective_kind == "qp":
+        if objective_kind in ("qp", "qi"):
             iota = _mean_iota(state, static=stage_static, indata=stage_indata, signgs=stage_signgs)
-            iota_shortfall = jnp.minimum(jnp.abs(iota) - QP_TARGET_ABS_IOTA_MIN, 0.0)
-            parts.append(jnp.asarray([QP_IOTA_WEIGHT * iota_shortfall], dtype=jnp.float64))
+            iota_shortfall = vj.smooth_min_abs_iota_residual(
+                iota,
+                TARGET_ABS_IOTA_MIN,
+            )
+            parts.append(jnp.asarray([IOTA_WEIGHT * iota_shortfall], dtype=jnp.float64))
         parts.append(jnp.asarray(field["residuals1d"], dtype=jnp.float64) * QI_WEIGHT)
         return jnp.concatenate(parts)
 
-    stage_residuals_from_state._n_non_qs = 2 if objective_kind == "qp" else 1
+    stage_residuals_from_state._n_non_qs = 2
     stage_residuals_from_state._qs_total_from_state = (
         lambda state: float(QI_WEIGHT) ** 2 * float(stage_field_eval(state)["total"])
     )
@@ -275,11 +278,11 @@ if USE_QP_PRESEED:
             x_scale=stage_x_scale,
             verbose=0,
             iota_fn=iota_fn,
-            target_iota=-QP_TARGET_ABS_IOTA_MIN,
             target_aspect=TARGET_ASPECT,
             scipy_tr_solver=SCIPY_TR_SOLVER,
             scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
         )
+        stage_result["_history_dump"]["iota_abs_min"] = float(TARGET_ABS_IOTA_MIN)
         _save_stage_artifacts(
             OUTPUT_DIR / f"stage_qp_{stage_mode:02d}",
             stage_opt,
@@ -292,7 +295,7 @@ if USE_QP_PRESEED:
         params_stage = stage_result["x"]
 
 for stage_mode in [MAX_MODE] if USE_QP_PRESEED else stage_modes:
-    stage_specs, stage_opt, stage_x_scale, _iota_fn = _build_stage(stage_mode, objective_kind="qi")
+    stage_specs, stage_opt, stage_x_scale, iota_fn = _build_stage(stage_mode, objective_kind="qi")
     params0_stage = (
         np.zeros(len(stage_specs), dtype=float)
         if params_stage is None
@@ -320,10 +323,12 @@ for stage_mode in [MAX_MODE] if USE_QP_PRESEED else stage_modes:
         xtol=XTOL,
         x_scale=stage_x_scale,
         verbose=1 if stage_mode == MAX_MODE else 0,
+        iota_fn=iota_fn,
         target_aspect=TARGET_ASPECT,
         scipy_tr_solver=SCIPY_TR_SOLVER,
         scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
     )
+    stage_result["_history_dump"]["iota_abs_min"] = float(TARGET_ABS_IOTA_MIN)
     _save_stage_artifacts(
         OUTPUT_DIR / f"stage_qi_{stage_mode:02d}",
         stage_opt,
@@ -341,6 +346,8 @@ hist = result["_history_dump"]
 
 print(f"\nTermination: {result['message']}")
 print(f"Aspect ratio (final):          {hist['aspect_final']:.6f}")
+if "iota_final" in hist:
+    print(f"Mean iota (final):             {hist['iota_final']:.6f}  min |iota|={TARGET_ABS_IOTA_MIN:.6f}")
 print(f"QI objective (final):          {hist['qs_final']:.6e}")
 print(f"Total objective (final):       {hist['objective_final']:.6e}")
 

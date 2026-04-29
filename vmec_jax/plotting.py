@@ -1101,6 +1101,7 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
     # Iota trajectory: present when iota_fn was passed to optimizer
     iotas = [h.get("iota", np.nan) for h in hist] if hist and any("iota" in h for h in hist) else None
     target_iota = data.get("target_iota", None)
+    iota_abs_min = data.get("iota_abs_min", None)
     # Also show iota panel when target_iota is specified even if trajectory is missing
     show_iota = iotas is not None
     iters = list(range(len(hist)))
@@ -1144,9 +1145,13 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
         if target_iota is not None:
             ax3.axhline(target_iota, color="k", linestyle=":", alpha=0.5,
                         label=f"Target ι={target_iota:.4g}")
+        if iota_abs_min is not None:
+            ax3.axhline(iota_abs_min, color="k", linestyle=":", alpha=0.45,
+                        label=f"Min |ι|={iota_abs_min:.4g}")
+            ax3.axhline(-float(iota_abs_min), color="k", linestyle=":", alpha=0.45)
         ax3.set_ylabel("Mean iota ι", fontsize=11)
         ax3.set_xlabel("Jacobian evaluation index", fontsize=11)
-        if target_iota is not None:
+        if target_iota is not None or iota_abs_min is not None:
             ax3.legend(fontsize=9)
         ax3.grid(True, alpha=0.3)
 
