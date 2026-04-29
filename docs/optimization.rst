@@ -102,7 +102,8 @@ The ``examples/optimization/qh_fixed_resolution_jax.py`` script replicates the
 SIMSOPT QH fixed-resolution benchmark entirely within ``vmec_jax``.  It has no
 argparse — all parameters are top-level variables, and the objective is built
 explicitly as a small list.  After the objective definition, the script shows
-the same setup and solve flow that SIMSOPT users expect:
+the actual setup and solve flow instead of hiding it behind a high-level
+configuration wrapper:
 
 .. code-block:: python
 
@@ -129,22 +130,82 @@ the same setup and solve flow that SIMSOPT users expect:
        # ObjectiveTerm("custom", lambda ctx, state: your_metric(ctx, state), target=0.0, weight=0.1),
    ]
 
-   RUN = FixedBoundaryQSConfig(...)
-   cfg, indata = load_qs_input(INPUT_FILE, vmec_mpol=VMEC_MPOL, vmec_ntor=VMEC_NTOR)
-   stage_modes = stage_mode_sequence(RUN)
+   cfg, indata = vj.load_config(str(INPUT_FILE))
+   indata = rebuild_indata_with_resolution(indata, mpol=VMEC_MPOL, ntor=VMEC_NTOR)
+   cfg = config_from_indata(indata)
+   stage_modes = qs_stage_modes(
+       max_mode=MAX_MODE,
+       use_mode_continuation=USE_MODE_CONTINUATION,
+       continuation_nfev=CONTINUATION_NFEV,
+   )
 
    stage_records = []
    params_stage = None
    prev_specs = None
    for stage_mode in stage_modes:
-       stage = build_qs_stage(RUN, cfg, indata, stage_mode, OBJECTIVES)
-       params0 = stage_params_from_previous(stage, params_stage=params_stage, prev_specs=prev_specs)
-       result = run_qs_stage(RUN, stage, params0, nfev=stage_budget(RUN, stage_mode), verbose=1)
-       stage_records.append((stage_mode, stage, params0, result))
-       prev_specs = stage.ctx.specs
+       static = vj.build_static(cfg)
+       boundary = vj.boundary_from_indata(indata, static.modes, apply_m1_constraint=False)
+       stage_indata, static, boundary = vj.extend_boundary_for_max_mode(
+           indata, static, boundary, stage_mode
+       )
+       boundary_input = vj.boundary_input_from_indata(stage_indata, static.modes)
+       specs = vj.boundary_param_specs(
+           boundary_input,
+           static.modes,
+           max_mode=stage_mode,
+           min_coeff=0.0,
+           include=("rc", "zs"),
+           fix=("rc00",),
+       )
+
+       ctx = StageContext(...)
+       def residuals_from_state(state, *, ctx=ctx):
+           return jnp.concatenate([term.residual(ctx, state) for term in OBJECTIVES])
+
+       optimizer = vj.FixedBoundaryExactOptimizer(
+           static,
+           stage_indata,
+           boundary,
+           specs,
+           residuals_from_state,
+           boundary_input=boundary_input,
+           inner_max_iter=INNER_MAX_ITER,
+           inner_ftol=INNER_FTOL,
+           trial_max_iter=TRIAL_MAX_ITER,
+           trial_ftol=TRIAL_FTOL,
+           solver_device=SOLVER_DEVICE,
+       )
+       x_scale = vj.create_x_scale(specs, alpha=ALPHA) if USE_ESS else np.ones(len(specs))
+       params0 = (
+           np.zeros(len(specs))
+           if params_stage is None
+           else vj.lift_boundary_params(prev_specs, params_stage, specs)
+       )
+       result = optimizer.run(
+           params0,
+           method=METHOD,
+           max_nfev=qs_stage_budget(
+               stage_mode=stage_mode,
+               max_mode=MAX_MODE,
+               max_nfev=MAX_NFEV,
+               continuation_nfev=CONTINUATION_NFEV,
+           ),
+           x_scale=x_scale,
+           target_aspect=TARGET_ASPECT,
+           scipy_tr_solver=SCIPY_TR_SOLVER,
+       )
+       stage_records.append((stage_mode, optimizer, params0, result))
+       prev_specs = specs
        params_stage = result["x"]
 
-   save_final_outputs(RUN, stage_records, stage_records[-1][1], stage_records[-1][3])
+   save_qs_final_outputs(
+       output_dir=OUTPUT_DIR,
+       stage_records=stage_records,
+       final_optimizer=stage_records[-1][1],
+       final_result=stage_records[-1][3],
+       label=f"QH opt (max_mode={MAX_MODE})",
+       target_aspect=TARGET_ASPECT,
+   )
 
 ``ObjectiveTerm`` callbacks receive ``(ctx, state)`` and may return a scalar or
 vector.  The least-squares residual is ``weight * (value - target)``, so adding

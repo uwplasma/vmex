@@ -25,19 +25,11 @@ import numpy as np
 
 import vmec_jax as vj
 from vmec_jax._compat import enable_x64, jnp
-from vmec_jax.config import config_from_indata
-from vmec_jax.field import signgs_from_sqrtg
-from vmec_jax.geom import eval_geom
-from vmec_jax.init_guess import initial_guess_from_boundary
-from vmec_jax.optimization import rebuild_indata_with_resolution
 from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_state
 from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
 
 enable_x64(True)
-
-
-StageRecord = tuple[int, "_StageBundle", np.ndarray, dict]
 
 
 @dataclass(frozen=True)
@@ -89,49 +81,6 @@ class ObjectiveTerm:
         else:
             target = jnp.ravel(target)
         return float(self.weight) * (value - target)
-
-
-@dataclass(frozen=True)
-class FixedBoundaryQSConfig:
-    """Run controls shared by the fixed-boundary QA/QH/QP examples."""
-
-    input_file: Path
-    output_dir: Path
-    max_mode: int
-    max_nfev: int
-    vmec_mpol: int = 5
-    vmec_ntor: int = 5
-    continuation_nfev: int = 10
-    use_mode_continuation: bool = True
-    use_ess: bool = False
-    ess_alpha: float = 2.5
-    method: str = "scipy"
-    scipy_tr_solver: str | None = "lsmr"
-    scipy_lsmr_maxiter: int | None = None
-    ftol: float = 1.0e-3
-    gtol: float = 1.0e-3
-    xtol: float = 1.0e-3
-    inner_max_iter: int = 0
-    inner_ftol: float = 0.0
-    trial_max_iter: int = 300
-    trial_ftol: float = 1.0e-10
-    solver_device: str | None = None
-    target_aspect: float | None = None
-    target_iota: float | None = None
-    label: str = "Optimisation"
-    save_stage_inputs: bool = True
-    save_stage_wouts: bool = False
-    save_rerun_wouts: bool = False
-    plot: bool = True
-
-
-@dataclass(frozen=True)
-class _StageBundle:
-    mode: int
-    ctx: StageContext
-    optimizer: vj.FixedBoundaryExactOptimizer
-    x_scale: np.ndarray
-    iota_fn: Callable | None
 
 
 def aspect_objective(target: float, weight: float = 1.0) -> ObjectiveTerm:
@@ -215,257 +164,78 @@ def mean_iota(ctx: StageContext, state):
     return jnp.asarray(0.0, dtype=iotas.dtype) if int(iotas.shape[0]) <= 1 else jnp.mean(iotas[1:])
 
 
-def run_qs_optimization(
-    config: FixedBoundaryQSConfig,
-    objectives: Sequence[ObjectiveTerm],
-) -> dict:
-    """Run a fixed-boundary exact optimization from a compact objective list.
-
-    This convenience wrapper is kept for tests and internal automation.  The
-    user-facing examples intentionally call the smaller functions below in a
-    linear SIMSOPT-style workflow so the setup and optimization steps are
-    visible in the script.
-    """
-
-    if not objectives:
-        raise ValueError("At least one objective term is required.")
-
-    cfg, indata = load_qs_input(
-        config.input_file,
-        vmec_mpol=config.vmec_mpol,
-        vmec_ntor=config.vmec_ntor,
-    )
-    stage_modes = stage_mode_sequence(config)
-    stage_records: list[StageRecord] = []
-    params_stage = None
-    prev_specs = None
-
-    for stage_mode in stage_modes:
-        stage = build_qs_stage(config, cfg, indata, stage_mode, objectives)
-        params0 = stage_params_from_previous(stage, params_stage=params_stage, prev_specs=prev_specs)
-        nfev = stage_budget(config, stage_mode)
-
-        if stage_mode == int(config.max_mode):
-            print_problem_summary(config, objectives, stage, params0)
-        else:
-            print(f"Stage {stage_mode} -> {stage_mode + 1} continuation seed (budget={nfev}) ...")
-
-        result = run_qs_stage(
-            config,
-            stage,
-            params0,
-            nfev=nfev,
-            verbose=1 if stage_mode == int(config.max_mode) else 0,
-        )
-        save_stage_artifacts(
-            config,
-            config.output_dir / f"stage_{stage_mode:02d}",
-            stage.optimizer,
-            params0,
-            result["x"],
-            result,
-        )
-        stage_records.append((stage_mode, stage, params0, result))
-        prev_specs = stage.ctx.specs
-        params_stage = result["x"]
-
-    final_mode, final_stage, _final_params0, final_result = stage_records[-1]
-    del final_mode
-    history = combine_stage_histories(config, stage_modes, stage_records)
-    if history is not None:
-        final_result["_history_dump"] = history
-
-    print_final_summary(config, final_result)
-    save_final_outputs(config, stage_records, final_stage, final_result)
-    return final_result
-
-
-def load_qs_input(input_file: Path, *, vmec_mpol: int, vmec_ntor: int):
-    """Load a VMEC input and rebuild it at the requested fixed resolution."""
-
-    print(f"Loading {Path(input_file).name} ...")
-    cfg, indata = vj.load_config(str(input_file))
-    indata = rebuild_indata_with_resolution(
-        indata,
-        mpol=int(vmec_mpol),
-        ntor=int(vmec_ntor),
-    )
-    return config_from_indata(indata), indata
-
-
-def stage_mode_sequence(config: FixedBoundaryQSConfig) -> list[int]:
-    """Return the mode-continuation sequence for the requested run controls."""
-
-    if (
-        bool(config.use_mode_continuation)
-        and int(config.max_mode) > 1
-        and int(config.continuation_nfev) > 0
-    ):
-        return list(range(1, int(config.max_mode) + 1))
-    return [int(config.max_mode)]
-
-
-def stage_budget(config: FixedBoundaryQSConfig, stage_mode: int) -> int:
-    """Outer residual/Jacobian budget for one stage."""
-
-    return int(config.max_nfev) if int(stage_mode) == int(config.max_mode) else int(config.continuation_nfev)
-
-
-def build_qs_stage(
-    config: FixedBoundaryQSConfig,
-    cfg,
-    indata,
-    max_mode: int,
-    objectives: Sequence[ObjectiveTerm],
-) -> _StageBundle:
-    static = vj.build_static(cfg)
-    boundary = vj.boundary_from_indata(indata, static.modes, apply_m1_constraint=False)
-    stage_indata, static, boundary = vj.extend_boundary_for_max_mode(
-        indata,
-        static,
-        boundary,
-        int(max_mode),
-    )
-    boundary_input = vj.boundary_input_from_indata(stage_indata, static.modes)
-    specs = vj.boundary_param_specs(
-        boundary_input,
-        static.modes,
-        max_mode=int(max_mode),
-        min_coeff=0.0,
-        include=("rc", "zs"),
-        fix=("rc00",),
-    )
-    guess = initial_guess_from_boundary(static, boundary, stage_indata, vmec_project=True)
-    geom = eval_geom(guess, static)
-    signgs = int(signgs_from_sqrtg(np.asarray(geom.sqrtg), axis_index=1))
-    flux = vj.flux_profiles_from_indata(stage_indata, static.s, signgs=signgs)
-    pressure = jnp.zeros_like(jnp.asarray(static.s))
-    ctx = StageContext(
-        static=static,
-        indata=stage_indata,
-        boundary_input=boundary_input,
-        specs=specs,
-        signgs=signgs,
-        flux=flux,
-        pressure=pressure,
-    )
-
-    def residuals_from_state(state):
-        return jnp.concatenate([term.residual(ctx, state) for term in objectives])
-
-    totals = [term.total for term in objectives if term.total is not None]
-    residuals_from_state._n_non_qs = 0
-    residuals_from_state._qs_total_from_state = (
-        lambda state: float(sum(float(total(ctx, state)) for total in totals))
-        if totals
-        else lambda state: 0.0
-    )
-
-    optimizer = vj.FixedBoundaryExactOptimizer(
-        static,
-        stage_indata,
-        boundary,
-        specs,
-        residuals_from_state,
-        boundary_input=boundary_input,
-        inner_max_iter=config.inner_max_iter,
-        inner_ftol=config.inner_ftol,
-        trial_max_iter=config.trial_max_iter,
-        trial_ftol=config.trial_ftol,
-        solver_device=config.solver_device,
-    )
-    x_scale = (
-        vj.create_x_scale(specs, alpha=float(config.ess_alpha))
-        if config.use_ess
-        else np.ones(len(specs), dtype=float)
-    )
-    iota_fn = (lambda state: float(mean_iota(ctx, state))) if _tracks_iota(objectives, config) else None
-    return _StageBundle(
-        mode=int(max_mode),
-        ctx=ctx,
-        optimizer=optimizer,
-        x_scale=np.asarray(x_scale, dtype=float),
-        iota_fn=iota_fn,
-    )
-
-
-def stage_params_from_previous(
-    stage: _StageBundle,
-    *,
-    params_stage: np.ndarray | None,
-    prev_specs: Sequence[vj.BoundaryParamSpec] | None,
-) -> np.ndarray:
-    """Initial parameter vector for a continuation stage."""
-
-    if params_stage is None:
-        return np.zeros(len(stage.ctx.specs), dtype=float)
-    if prev_specs is None:
-        raise ValueError("prev_specs is required when params_stage is provided.")
-    return np.asarray(vj.lift_boundary_params(prev_specs, params_stage, stage.ctx.specs), dtype=float)
-
-
-def run_qs_stage(
-    config: FixedBoundaryQSConfig,
-    stage: _StageBundle,
-    params0: np.ndarray,
-    *,
-    nfev: int,
-    verbose: int,
-) -> dict:
-    """Run one fixed-boundary optimization stage."""
-
-    return stage.optimizer.run(
-        params0,
-        method=config.method,
-        max_nfev=int(nfev),
-        ftol=config.ftol,
-        gtol=config.gtol,
-        xtol=config.xtol,
-        x_scale=stage.x_scale,
-        verbose=int(verbose),
-        iota_fn=stage.iota_fn,
-        target_iota=config.target_iota,
-        target_aspect=config.target_aspect,
-        scipy_tr_solver=config.scipy_tr_solver,
-        scipy_lsmr_maxiter=config.scipy_lsmr_maxiter,
-    )
-
-
 def _as_vector(value):
     arr = jnp.asarray(value, dtype=jnp.float64)
     return arr.reshape((1,)) if int(arr.ndim) == 0 else jnp.ravel(arr)
 
 
-def _tracks_iota(objectives: Sequence[ObjectiveTerm], config: FixedBoundaryQSConfig) -> bool:
-    return config.target_iota is not None or any(term.track_iota for term in objectives)
+def objectives_track_iota(objectives: Sequence[ObjectiveTerm], target_iota: float | None = None) -> bool:
+    """Return true when optimization history should record mean iota."""
+
+    return target_iota is not None or any(term.track_iota for term in objectives)
 
 
-def print_problem_summary(config, objectives, stage: _StageBundle, params0) -> None:
-    print(f"Parameter space ({len(stage.ctx.specs)} DOFs): {vj.boundary_param_names(stage.ctx.specs)}")
+def qs_stage_modes(
+    *,
+    max_mode: int,
+    use_mode_continuation: bool,
+    continuation_nfev: int,
+) -> list[int]:
+    """Mode-continuation sequence for a user-facing fixed-boundary script."""
+
+    if bool(use_mode_continuation) and int(max_mode) > 1 and int(continuation_nfev) > 0:
+        return list(range(1, int(max_mode) + 1))
+    return [int(max_mode)]
+
+
+def qs_stage_budget(
+    *,
+    stage_mode: int,
+    max_mode: int,
+    max_nfev: int,
+    continuation_nfev: int,
+) -> int:
+    """Outer residual/Jacobian budget for one fixed-boundary stage."""
+
+    return int(max_nfev) if int(stage_mode) == int(max_mode) else int(continuation_nfev)
+
+
+def print_qs_problem_summary(
+    *,
+    method: str,
+    max_nfev: int,
+    use_mode_continuation: bool,
+    use_ess: bool,
+    ess_alpha: float,
+    objectives: Sequence[ObjectiveTerm],
+    specs: Sequence[vj.BoundaryParamSpec],
+    x_scale: np.ndarray,
+    optimizer,
+    params0,
+) -> None:
+    """Print the problem summary used by the standalone examples."""
+
+    print(f"Parameter space ({len(specs)} DOFs): {vj.boundary_param_names(specs)}")
     print("Objectives:")
     for term in objectives:
         print(f"  - {term.name}: target={term.target}, weight={term.weight}")
-    if config.use_ess:
-        print(
-            f"ESS scales (alpha={config.ess_alpha}): "
-            f"min={stage.x_scale.min():.3f}  max={stage.x_scale.max():.3f}"
-        )
+    if use_ess:
+        print(f"ESS scales (alpha={ess_alpha}): min={x_scale.min():.3f}  max={x_scale.max():.3f}")
     else:
         print("ESS disabled - uniform scales.")
-    print(f"Aspect ratio (initial):        {stage.optimizer.aspect_ratio(params0):.6f}")
-    print(f"Field objective (initial):     {stage.optimizer.quasisymmetry_objective(params0):.6e}")
-    print(
-        f"Running {config.method} "
-        f"(max_nfev={config.max_nfev}, continuation={config.use_mode_continuation}) ..."
-    )
+    print(f"Aspect ratio (initial):        {optimizer.aspect_ratio(params0):.6f}")
+    print(f"Field objective (initial):     {optimizer.quasisymmetry_objective(params0):.6e}")
+    print(f"Running {method} (max_nfev={max_nfev}, continuation={use_mode_continuation}) ...")
 
 
-def print_final_summary(config: FixedBoundaryQSConfig, result: dict) -> None:
+def print_qs_final_summary(result: dict, *, target_iota: float | None = None) -> None:
+    """Print the final scalar diagnostics from an optimization result."""
+
     hist = result.get("_history_dump", {})
     print(f"\nTermination: {result['message']}")
     print(f"Aspect ratio (final):          {float(hist.get('aspect_final', float('nan'))):.6f}")
     if "iota_final" in hist:
-        target = "" if config.target_iota is None else f"  target={config.target_iota:.6f}"
+        target = "" if target_iota is None else f"  target={target_iota:.6f}"
         print(f"Mean iota (final):             {float(hist['iota_final']):.6f}{target}")
     print(f"Field objective (final):       {float(hist.get('qs_final', float('nan'))):.6e}")
     print(f"Total objective (final):       {float(hist.get('objective_final', float('nan'))):.6e}")
@@ -475,25 +245,30 @@ def print_final_summary(config: FixedBoundaryQSConfig, result: dict) -> None:
         print(f"Objective reduction:           {100.0 * (1.0 - float(objf) / float(obj0)):.1f}%")
 
 
-def save_stage_artifacts(
-    config: FixedBoundaryQSConfig,
+def save_qs_stage_artifacts(
+    *,
     stage_dir: Path,
-    opt,
+    optimizer,
     params_initial,
     params_final,
     result,
+    save_inputs: bool = True,
+    save_wouts: bool = False,
+    save_rerun_wouts: bool = False,
 ) -> None:
+    """Save stage input files and optionally wout files."""
+
     stage_dir.mkdir(parents=True, exist_ok=True)
-    if config.save_stage_inputs:
-        opt.save_input(stage_dir / "input.initial", params_initial)
-        opt.save_input(stage_dir / "input.final", params_final)
-    if config.save_stage_wouts:
-        opt.save_wout(stage_dir / "wout_initial.nc", params_initial, state=result.get("_state_initial"))
-        opt.save_wout(stage_dir / "wout_final.nc", params_final, state=result.get("_state_final"))
+    if save_inputs:
+        optimizer.save_input(stage_dir / "input.initial", params_initial)
+        optimizer.save_input(stage_dir / "input.final", params_final)
+    if save_wouts:
+        optimizer.save_wout(stage_dir / "wout_initial.nc", params_initial, state=result.get("_state_initial"))
+        optimizer.save_wout(stage_dir / "wout_final.nc", params_final, state=result.get("_state_final"))
     else:
         _remove_stale(stage_dir / "wout_initial.nc")
         _remove_stale(stage_dir / "wout_final.nc")
-    if config.save_rerun_wouts:
+    if save_rerun_wouts:
         rerun = vj.run_fixed_boundary(str(stage_dir / "input.initial"), verbose=False)
         vj.write_wout_from_fixed_boundary_run(str(stage_dir / "wout_initial_rerun.nc"), rerun)
         rerun = vj.run_fixed_boundary(str(stage_dir / "input.final"), verbose=False)
@@ -503,58 +278,76 @@ def save_stage_artifacts(
         _remove_stale(stage_dir / "wout_final_rerun.nc")
 
 
-def save_final_outputs(
-    config: FixedBoundaryQSConfig,
+def save_qs_final_outputs(
+    *,
+    output_dir: Path,
     stage_records,
-    final_stage: _StageBundle,
+    final_optimizer,
     final_result: dict,
+    label: str,
+    target_aspect: float | None = None,
+    target_iota: float | None = None,
+    plot: bool = True,
+    save_rerun_wouts: bool = False,
 ) -> None:
-    config.output_dir.mkdir(parents=True, exist_ok=True)
-    _initial_mode, initial_stage, initial_params0, initial_result = stage_records[0]
-    initial_stage.optimizer.save_input(config.output_dir / "input.initial", initial_params0)
-    initial_stage.optimizer.save_wout(
-        config.output_dir / "wout_initial.nc",
+    """Save initial/final inputs, wouts, history, and plots."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _initial_mode, initial_optimizer, initial_params0, initial_result = stage_records[0]
+    initial_optimizer.save_input(output_dir / "input.initial", initial_params0)
+    initial_optimizer.save_wout(
+        output_dir / "wout_initial.nc",
         initial_params0,
         state=initial_result.get("_state_initial"),
     )
-    if config.save_rerun_wouts:
-        rerun = vj.run_fixed_boundary(str(config.output_dir / "input.initial"), verbose=False)
-        vj.write_wout_from_fixed_boundary_run(str(config.output_dir / "wout_initial_rerun.nc"), rerun)
+    if save_rerun_wouts:
+        rerun = vj.run_fixed_boundary(str(output_dir / "input.initial"), verbose=False)
+        vj.write_wout_from_fixed_boundary_run(str(output_dir / "wout_initial_rerun.nc"), rerun)
     else:
-        _remove_stale(config.output_dir / "wout_initial_rerun.nc")
+        _remove_stale(output_dir / "wout_initial_rerun.nc")
 
-    final_stage.optimizer.save_input(config.output_dir / "input.final", final_result["x"])
-    final_stage.optimizer.save_wout(
-        config.output_dir / "wout_final.nc",
+    final_optimizer.save_input(output_dir / "input.final", final_result["x"])
+    final_optimizer.save_wout(
+        output_dir / "wout_final.nc",
         final_result["x"],
         state=final_result.get("_state_final"),
     )
-    if config.save_rerun_wouts:
-        rerun = vj.run_fixed_boundary(str(config.output_dir / "input.final"), verbose=False)
-        vj.write_wout_from_fixed_boundary_run(str(config.output_dir / "wout_final_rerun.nc"), rerun)
+    if save_rerun_wouts:
+        rerun = vj.run_fixed_boundary(str(output_dir / "input.final"), verbose=False)
+        vj.write_wout_from_fixed_boundary_run(str(output_dir / "wout_final_rerun.nc"), rerun)
     else:
-        _remove_stale(config.output_dir / "wout_final_rerun.nc")
+        _remove_stale(output_dir / "wout_final_rerun.nc")
 
     history = final_result["_history_dump"]
-    history["label"] = config.label
-    if config.target_aspect is not None:
-        history["target_aspect"] = float(config.target_aspect)
-    if config.target_iota is not None:
-        history["target_iota"] = float(config.target_iota)
-    final_stage.optimizer.save_history(config.output_dir / "history.json", final_result)
+    history["label"] = label
+    if target_aspect is not None:
+        history["target_aspect"] = float(target_aspect)
+    if target_iota is not None:
+        history["target_iota"] = float(target_iota)
+    final_optimizer.save_history(output_dir / "history.json", final_result)
 
-    if config.plot:
+    if plot:
         print("\nGenerating plots ...")
         vj.plot_qh_optimization(
-            config.output_dir / "wout_initial.nc",
-            config.output_dir / "wout_final.nc",
-            config.output_dir / "history.json",
-            outdir=config.output_dir,
+            output_dir / "wout_initial.nc",
+            output_dir / "wout_final.nc",
+            output_dir / "history.json",
+            outdir=output_dir,
         )
-        print(f"Done. Results saved to {config.output_dir}/")
+        print(f"Done. Results saved to {output_dir}/")
 
 
-def combine_stage_histories(config: FixedBoundaryQSConfig, stage_modes, stage_records) -> dict | None:
+def combine_qs_stage_histories(
+    *,
+    label: str,
+    max_mode: int,
+    max_nfev: int,
+    continuation_nfev: int,
+    stage_modes,
+    stage_records,
+) -> dict | None:
+    """Merge per-stage histories into one optimization history."""
+
     if len(stage_records) <= 1:
         return None
 
@@ -563,7 +356,7 @@ def combine_stage_histories(config: FixedBoundaryQSConfig, stage_modes, stage_re
     wall_offset = 0.0
     nfev_total = 0
     njev_total = 0
-    for idx, (_mode, _stage, _params0, result) in enumerate(stage_records):
+    for idx, (_mode, _optimizer, _params0, result) in enumerate(stage_records):
         stage_hist = result["_history_dump"]
         entries = stage_hist["history"] if idx == 0 else stage_hist["history"][1:]
         for entry in entries:
@@ -580,10 +373,10 @@ def combine_stage_histories(config: FixedBoundaryQSConfig, stage_modes, stage_re
     out = dict(final_hist)
     out.update(
         {
-            "label": config.label,
+            "label": label,
             "max_nfev": int(
                 sum(
-                    int(config.max_nfev) if mode == int(config.max_mode) else int(config.continuation_nfev)
+                    int(max_nfev) if int(mode) == int(max_mode) else int(continuation_nfev)
                     for mode in stage_modes
                 )
             ),
