@@ -301,6 +301,15 @@ point.  The same CPU run gave about ``9.3 s``, ``5.8 s``, and ``5.6 s``.  The
 scan exact path remained unsuitable for this workload: the first perturbed GPU
 scan Jacobian took about ``118 s``.
 
+After adding solver-phase timing to the same perturbed callback, the GPU
+accepted-point tape build split into about ``3.0 s`` of VMEC update work,
+``1.3 s`` of preconditioner work, ``1.4 s`` of unattributed trace/build
+overhead, and only ``0.10 s`` of force evaluation per new point.  The matching
+CPU tape build was about ``2.0 s`` per point and was instead dominated by force
+evaluation (``1.26 s`` per point).  This identifies the next GPU target more
+precisely: reduce host-dispatched update/preconditioner/tape bookkeeping and
+replay overhead, not the already-fast GPU force kernels.
+
 Fixed-boundary GPU diagnostics
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
