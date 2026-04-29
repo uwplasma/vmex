@@ -13,6 +13,7 @@ from vmec_jax.optimization import (
     boundary_param_specs,
     gauss_newton_least_squares,
     lift_boundary_params,
+    smooth_min_abs_iota_residual,
     surface_indices_from_s,
 )
 
@@ -71,6 +72,25 @@ def test_lift_boundary_params_maps_shared_names_and_zeros_new_modes():
     lifted = lift_boundary_params(source_specs, np.array([0.25, -0.5]), target_specs)
 
     np.testing.assert_allclose(lifted, np.array([0.25, -0.5, 0.0]))
+
+
+def test_smooth_min_abs_iota_residual_is_differentiable_floor():
+    import jax
+
+    floor = 0.41
+    low = smooth_min_abs_iota_residual(jnp.asarray(0.30), floor, softness=1.0e-3)
+    high = smooth_min_abs_iota_residual(jnp.asarray(0.43), floor, softness=1.0e-3)
+
+    assert float(low) > 0.10
+    assert float(high) < 1.0e-8
+
+    grad_pos = jax.grad(lambda x: smooth_min_abs_iota_residual(x, floor, softness=1.0e-3))(0.30)
+    grad_neg = jax.grad(lambda x: smooth_min_abs_iota_residual(x, floor, softness=1.0e-3))(-0.30)
+
+    assert np.isfinite(float(grad_pos))
+    assert np.isfinite(float(grad_neg))
+    assert float(grad_pos) < 0.0
+    assert float(grad_neg) > 0.0
 
 
 def test_gauss_newton_least_squares_solves_linear_problem():

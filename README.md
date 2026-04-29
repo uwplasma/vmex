@@ -30,6 +30,42 @@ git clone https://github.com/uwplasma/vmec_jax
 pip install -e "vmec_jax[qi]"
 ```
 
+## Usage
+
+Run the solver (VMEC2000-style CLI):
+
+```bash
+vmec_jax input.nfp4_QH_warm_start        # → wout_nfp4_QH_warm_start.nc
+```
+
+Generate diagnostic plots from any `wout_*.nc` (four-panel output, replicates `vmecPlot2.py`):
+
+```bash
+vmec_jax --plot wout_nfp4_QH_warm_start.nc           # saves in same directory
+vmec_jax --plot wout_nfp4_QH_warm_start.nc --outdir figures/
+```
+
+From Python:
+
+```python
+import vmec_jax as vj
+
+# Run a fixed-boundary solve
+run = vj.run_fixed_boundary("input.nfp4_QH_warm_start")
+
+# Run a free-boundary solve
+freeb = vj.run_free_boundary("input.cth_like_free_bdy_lasym_small")
+
+# Plot any wout file (produces *_VMECparams.pdf, *_poloidal_plot.png, *_VMECsurfaces.pdf, *_VMEC_3Dplot.png)
+vj.plot_wout("wout_nfp4_QH_warm_start.nc", outdir="figures/")
+```
+
+Run tests:
+
+```bash
+pytest -q
+```
+
 ## Choosing CPU or GPU
 
 `vmec_jax` follows the JAX backend you select. If you installed CPU-only JAX,
@@ -66,41 +102,11 @@ between optimization workers and was faster in the exact-Jacobian GPU profile.
 Set `XLA_PYTHON_CLIENT_PREALLOCATE=true` before import if you explicitly want
 JAX's default preallocation behavior.
 
-## Usage
-
-Run the solver (VMEC2000-style CLI):
-
-```bash
-vmec_jax input.nfp4_QH_warm_start        # → wout_nfp4_QH_warm_start.nc
-```
-
-Generate diagnostic plots from any `wout_*.nc` (four-panel output, replicates `vmecPlot2.py`):
-
-```bash
-vmec_jax --plot wout_nfp4_QH_warm_start.nc           # saves in same directory
-vmec_jax --plot wout_nfp4_QH_warm_start.nc --outdir figures/
-```
-
-From Python:
-
-```python
-import vmec_jax as vj
-
-# Run a fixed-boundary solve
-run = vj.run_fixed_boundary("input.nfp4_QH_warm_start")
-
-# Run a free-boundary solve
-freeb = vj.run_free_boundary("input.cth_like_free_bdy_lasym_small")
-
-# Plot any wout file (produces *_VMECparams.pdf, *_poloidal_plot.png, *_VMECsurfaces.pdf, *_VMEC_3Dplot.png)
-vj.plot_wout("wout_nfp4_QH_warm_start.nc", outdir="figures/")
-```
-
-Run tests:
-
-```bash
-pytest -q
-```
+`vmec_jax` enables JAX's persistent compilation cache by default, but its
+default cache path is machine/CPU-feature scoped to avoid reusing CPU AOT
+executables compiled on a different host. Set `VMEC_JAX_COMPILATION_CACHE=0` to
+disable the persistent cache or `VMEC_JAX_COMPILATION_CACHE_DIR=/path/to/cache`
+to choose a custom location.
 
 ## Showcase (single-grid)
 
@@ -149,7 +155,7 @@ All figures below use the same **single-grid** run settings: `NS_ARRAY=151`, `NI
   <img src="docs/_static/figures/readme_runtime_compare.png" width="860" />
 </p>
 
-**Cold vs warm runtime**: the *cold* bar includes XLA JIT compilation on the first call (one-time cost per process); the *warm* bar is the steady-state solve time for subsequent calls in the same process. VMEC2000 has no compilation overhead, so it is always effectively cold. `vmec_jax` enables JAX's persistent compilation cache by default under `~/.cache/vmec_jax/jax_cache` so repeated cold-process runs can reuse compiled kernels; set `VMEC_JAX_COMPILATION_CACHE=0` to disable it or `VMEC_JAX_COMPILATION_CACHE_DIR=/path/to/cache` to choose a different location.
+**Cold vs warm runtime**: the *cold* bar includes XLA JIT compilation on the first call (one-time cost per process); the *warm* bar is the steady-state solve time for subsequent calls in the same process. VMEC2000 has no compilation overhead, so it is always effectively cold. `vmec_jax` enables JAX's persistent compilation cache by default under `~/.cache/vmec_jax/jax_cache/<machine-fingerprint>` so repeated cold-process runs on the same host can reuse compiled kernels without sharing CPU AOT executables across incompatible machines; set `VMEC_JAX_COMPILATION_CACHE=0` to disable it or `VMEC_JAX_COMPILATION_CACHE_DIR=/path/to/cache` to choose a different location.
 
 ## Optimization Internals
 
@@ -331,8 +337,8 @@ continuation case.
 
 `examples/optimization/qp_fixed_resolution_jax_ess.py` uses the same exact
 fixed-boundary optimizer with helicity `(M, N) = (0, -1)`.  It starts from the
-QH warm-start input and targets aspect ratio 7 with an absolute-iota lower
-bound of 0.31.  Edit the top-level variables in the script to choose
+QH warm-start input and targets aspect ratio 7 with a smooth absolute-iota
+lower bound of 0.41.  Edit the top-level variables in the script to choose
 `MAX_MODE`, `USE_ESS`, `USE_MODE_CONTINUATION`, and the VMEC/optimizer budgets.
 
 ```bash
@@ -340,16 +346,16 @@ python examples/optimization/qp_fixed_resolution_jax_ess.py
 ```
 
 In the current CPU sweep, QP is the least mature of the three quasisymmetry
-examples: `max_mode=2` direct-start/no-ESS gives the best objective in the
-small benchmark, while `max_mode=3` benefits from ESS but does not yet improve
-monotonically over mode 2.  The full policy matrix is kept in the docs so this
-regression remains visible instead of hidden.
+examples.  The smooth `|iota| >= 0.41` floor is now enforced in every listed
+case; `max_mode=2` direct-start/no-ESS gives the lowest objective, while
+`max_mode=3` continuation/no-ESS is the best high-mode result.  The full policy
+matrix is kept in the docs so these tradeoffs remain visible instead of hidden.
 
 | `max_mode` | Best current policy | Objective final | QS/QP final | Aspect final | Iota final | Wall time |
 |:----------:|:--------------------|:---------------:|:-----------:|:------------:|:----------:|:---------:|
-| 1 | direct or continuation, no ESS | `0.600` | `0.591` | 7.089 | -0.308 | ~0.5 min |
-| 2 | direct, no ESS | **`4.60e-2`** | **`4.60e-2`** | 7.006 | -0.583 | ~0.7 min |
-| 3 | direct + ESS | `9.60e-2` | `9.25e-2` | 7.057 | -0.309 | ~0.8 min |
+| 1 | direct or continuation | `5.18e-1` | `5.08e-1` | 7.101 | -0.415 | ~0.5 min |
+| 2 | direct, no ESS | **`7.38e-2`** | **`7.31e-2`** | 6.975 | -0.709 | ~0.7 min |
+| 3 | continuation, no ESS | `8.26e-2` | `8.20e-2` | 7.021 | -0.412 | ~2.5 min |
 
 ## Quasi-isodynamic Optimization
 
@@ -364,15 +370,17 @@ python examples/optimization/qi_fixed_resolution_jax_ess.py
 ```
 
 The current QI objective is already differentiable end-to-end through VMEC and
-Boozer-space post-processing.  Several cases stop by the configured `max_nfev`
-before satisfying SciPy's convergence criterion, so the table reports the best
-objective values rather than claiming all rows are fully converged.
+Boozer-space post-processing.  The same smooth `|iota| >= 0.41` floor is
+retained through the QI refinement stage, not just the QP preseed.  Several
+cases stop by the configured `max_nfev` before satisfying SciPy's convergence
+criterion, so the table reports the best objective values rather than claiming
+all rows are fully converged.
 
-| `max_mode` | Best current policy | Objective final | QI final | Aspect final | Wall time |
-|:----------:|:--------------------|:---------------:|:--------:|:------------:|:---------:|
-| 1 | direct or continuation, no ESS | `1.19e-2` | `1.19e-2` | 7.001 | ~0.7 min |
-| 2 | continuation, no ESS | **`6.85e-4`** | **`6.85e-4`** | 7.000 | ~1.4 min |
-| 3 | continuation + ESS | `1.25e-3` | `1.25e-3` | 7.001 | ~1.9 min |
+| `max_mode` | Best current policy | Objective final | QI final | Aspect final | Iota final | Wall time |
+|:----------:|:--------------------|:---------------:|:--------:|:------------:|:----------:|:---------:|
+| 1 | direct or continuation | `1.17e-2` | `1.16e-2` | 6.988 | -0.418 | ~0.9 min |
+| 2 | direct + ESS | **`4.90e-3`** | **`4.90e-3`** | 7.001 | -0.581 | ~1.4 min |
+| 3 | continuation, no ESS | `5.49e-3` | `5.24e-3` | 7.003 | -0.412 | ~1.8 min |
 
 ## Finite-beta Stage-one Optimization
 
@@ -512,18 +520,18 @@ CPU wall-time summary for the plotted runs:
 | CPU | QH | continuation | 2 | yes | ok | 4.32e-03 | 7.000 | - | 29 | 6.3 |
 | CPU | QH | continuation | 3 | no | ok | 1.37e-03 | 7.000 | - | 32 | 10.7 |
 | CPU | QH | continuation | 3 | yes | ok | 1.38e-03 | 7.000 | - | 33 | 8.1 |
-| CPU | QP | continuation | 1 | no | stopped | 6.00e-01 | 7.089 | -0.3083 | 20 | 0.5 |
-| CPU | QP | continuation | 1 | yes | stopped | 6.00e-01 | 7.089 | -0.3083 | 20 | 0.5 |
-| CPU | QP | continuation | 2 | no | stopped | 2.97e-01 | 7.077 | -0.3097 | 28 | 0.9 |
-| CPU | QP | continuation | 2 | yes | stopped | 4.43e-01 | 7.087 | -0.3102 | 28 | 0.8 |
-| CPU | QP | continuation | 3 | no | ok | 3.20e-01 | 7.077 | -0.3023 | 26 | 1.0 |
-| CPU | QP | continuation | 3 | yes | stopped | 2.74e-01 | 7.063 | -0.3105 | 36 | 1.4 |
-| CPU | QI | continuation | 1 | no | ok | 1.19e-02 | 7.001 | - | 28 | 0.7 |
-| CPU | QI | continuation | 1 | yes | ok | 1.19e-02 | 7.001 | - | 28 | 0.7 |
-| CPU | QI | continuation | 2 | no | stopped | 6.85e-04 | 7.000 | - | 40 | 1.4 |
-| CPU | QI | continuation | 2 | yes | ok | 2.37e-02 | 7.009 | - | 32 | 0.9 |
-| CPU | QI | continuation | 3 | no | stopped | 1.18e-02 | 6.996 | - | 38 | 1.6 |
-| CPU | QI | continuation | 3 | yes | stopped | 1.25e-03 | 7.001 | - | 48 | 1.9 |
+| CPU | QP | continuation | 1 | no | stopped | 5.18e-01 | 7.101 | -0.4149 | 20 | 0.6 |
+| CPU | QP | continuation | 1 | yes | stopped | 5.18e-01 | 7.101 | -0.4149 | 20 | 0.5 |
+| CPU | QP | continuation | 2 | no | stopped | 8.12e-02 | 7.018 | -0.4112 | 28 | 0.9 |
+| CPU | QP | continuation | 2 | yes | ok | 2.49e-01 | 6.984 | -0.4302 | 17 | 0.4 |
+| CPU | QP | continuation | 3 | no | ok | 8.26e-02 | 7.021 | -0.4120 | 33 | 2.5 |
+| CPU | QP | continuation | 3 | yes | ok | 2.49e-01 | 6.984 | -0.4302 | 25 | 0.7 |
+| CPU | QI | continuation | 1 | no | stopped | 1.17e-02 | 6.988 | -0.4184 | 32 | 0.9 |
+| CPU | QI | continuation | 1 | yes | stopped | 1.17e-02 | 6.988 | -0.4184 | 32 | 0.9 |
+| CPU | QI | continuation | 2 | no | ok | 1.97e-02 | 7.016 | -0.4127 | 36 | 1.3 |
+| CPU | QI | continuation | 2 | yes | ok | 3.46e-02 | 6.984 | -0.4158 | 26 | 0.7 |
+| CPU | QI | continuation | 3 | no | ok | 5.49e-03 | 7.003 | -0.4118 | 43 | 1.8 |
+| CPU | QI | continuation | 3 | yes | stopped | 2.23e-02 | 7.000 | -0.4242 | 37 | 1.3 |
 | CPU | QA | direct | 1 | no | ok | 9.29e-03 | 6.002 | 0.3940 | 20 | 2.5 |
 | CPU | QA | direct | 1 | yes | ok | 9.29e-03 | 6.002 | 0.3940 | 20 | 2.7 |
 | CPU | QA | direct | 2 | no | ok | 4.50e-04 | 5.999 | 0.4066 | 18 | 18.6 |
@@ -536,71 +544,71 @@ CPU wall-time summary for the plotted runs:
 | CPU | QH | direct | 2 | yes | ok | 4.00e-03 | 7.001 | - | 20 | 5.6 |
 | CPU | QH | direct | 3 | no | ok | 4.29e-03 | 6.999 | - | 15 | 9.5 |
 | CPU | QH | direct | 3 | yes | ok | 3.27e-03 | 6.999 | - | 20 | 9.2 |
-| CPU | QP | direct | 1 | no | stopped | 6.00e-01 | 7.089 | -0.3083 | 20 | 0.5 |
-| CPU | QP | direct | 1 | yes | stopped | 6.00e-01 | 7.089 | -0.3083 | 20 | 0.5 |
-| CPU | QP | direct | 2 | no | ok | 4.60e-02 | 7.006 | -0.5828 | 19 | 0.7 |
-| CPU | QP | direct | 2 | yes | stopped | 5.67e-02 | 7.013 | -0.3097 | 20 | 0.7 |
-| CPU | QP | direct | 3 | no | ok | 5.35e-01 | 7.064 | -1.1401 | 17 | 0.7 |
-| CPU | QP | direct | 3 | yes | ok | 9.60e-02 | 7.057 | -0.3092 | 20 | 0.8 |
-| CPU | QI | direct | 1 | no | ok | 1.19e-02 | 7.001 | - | 28 | 0.7 |
-| CPU | QI | direct | 1 | yes | ok | 1.19e-02 | 7.001 | - | 28 | 0.7 |
-| CPU | QI | direct | 2 | no | stopped | 3.93e-03 | 7.000 | - | 31 | 1.3 |
-| CPU | QI | direct | 2 | yes | ok | 5.39e-03 | 7.004 | - | 32 | 1.1 |
-| CPU | QI | direct | 3 | no | stopped | 1.46e-02 | 7.018 | - | 29 | 1.4 |
-| CPU | QI | direct | 3 | yes | ok | 4.21e-03 | 7.003 | - | 28 | 1.1 |
+| CPU | QP | direct | 1 | no | stopped | 5.18e-01 | 7.101 | -0.4149 | 20 | 0.6 |
+| CPU | QP | direct | 1 | yes | stopped | 5.18e-01 | 7.101 | -0.4149 | 20 | 0.6 |
+| CPU | QP | direct | 2 | no | ok | 7.38e-02 | 6.975 | -0.7090 | 16 | 0.7 |
+| CPU | QP | direct | 2 | yes | stopped | 9.41e-02 | 7.017 | -0.4133 | 20 | 0.9 |
+| CPU | QP | direct | 3 | no | ok | 5.61e-01 | 7.075 | -1.1451 | 15 | 0.7 |
+| CPU | QP | direct | 3 | yes | ok | 1.77e-01 | 7.035 | -0.4187 | 19 | 1.1 |
+| CPU | QI | direct | 1 | no | stopped | 1.17e-02 | 6.988 | -0.4184 | 32 | 1.5 |
+| CPU | QI | direct | 1 | yes | stopped | 1.17e-02 | 6.988 | -0.4184 | 32 | 1.7 |
+| CPU | QI | direct | 2 | no | ok | 1.66e-02 | 7.000 | -0.7590 | 24 | 1.6 |
+| CPU | QI | direct | 2 | yes | ok | 4.90e-03 | 7.001 | -0.5808 | 31 | 1.4 |
+| CPU | QI | direct | 3 | no | ok | 2.12e-02 | 7.011 | -1.1975 | 26 | 1.4 |
+| CPU | QI | direct | 3 | yes | ok | 1.71e-02 | 7.035 | -0.4194 | 27 | 1.1 |
 
 GPU quick-look diagnostic wall-time summary for the plotted runs:
 
 | Backend | Problem | Policy | max_mode | ESS | Status | Final J | Aspect | Iota | nfev | Wall min |
 |---|---|---|---:|---|---|---:|---:|---:|---:|---:|
-| GPU | QA | continuation | 1 | no | stopped | 9.19e-03 | 6.002 | 0.3950 | 12 | 2.3 |
-| GPU | QA | continuation | 1 | yes | stopped | 9.19e-03 | 6.002 | 0.3950 | 12 | 2.3 |
-| GPU | QA | continuation | 2 | no | stopped | 1.19e-03 | 6.007 | 0.4071 | 20 | 3.7 |
-| GPU | QA | continuation | 2 | yes | stopped | 8.19e-04 | 6.000 | 0.4054 | 20 | 4.0 |
-| GPU | QA | continuation | 3 | no | stopped | 1.38e-04 | 6.000 | 0.4088 | 30 | 5.7 |
-| GPU | QA | continuation | 3 | yes | stopped | 3.92e-04 | 6.003 | 0.4072 | 30 | 5.8 |
-| GPU | QH | continuation | 1 | no | stopped | 1.71e-01 | 7.027 | - | 5 | 1.2 |
-| GPU | QH | continuation | 1 | yes | stopped | 1.71e-01 | 7.027 | - | 5 | 0.6 |
-| GPU | QH | continuation | 2 | no | stopped | 5.31e-02 | 7.012 | - | 7 | 2.2 |
-| GPU | QH | continuation | 2 | yes | stopped | 5.58e-02 | 7.011 | - | 7 | 1.4 |
-| GPU | QH | continuation | 3 | no | stopped | 6.51e-02 | 7.010 | - | 9 | 2.3 |
-| GPU | QH | continuation | 3 | yes | stopped | 5.15e-02 | 7.003 | - | 9 | 1.8 |
-| GPU | QP | continuation | 1 | no | stopped | 6.87e-01 | 7.238 | -0.3151 | 5 | 1.3 |
-| GPU | QP | continuation | 1 | yes | stopped | 6.87e-01 | 7.238 | -0.3151 | 5 | 0.6 |
-| GPU | QP | continuation | 2 | no | stopped | 5.16e-01 | 7.060 | -0.6073 | 7 | 2.3 |
-| GPU | QP | continuation | 2 | yes | stopped | 4.21e-01 | 7.405 | -0.3375 | 7 | 1.6 |
-| GPU | QP | continuation | 3 | no | stopped | 6.27e-01 | 7.159 | -0.8721 | 9 | 2.0 |
-| GPU | QP | continuation | 3 | yes | stopped | 4.78e-01 | 7.151 | -0.3198 | 9 | 1.8 |
-| GPU | QI | continuation | 1 | no | stopped | 4.70e-02 | 7.130 | - | 10 | 1.1 |
-| GPU | QI | continuation | 1 | yes | stopped | 4.70e-02 | 7.130 | - | 10 | 1.2 |
-| GPU | QI | continuation | 2 | no | stopped | 3.44e-02 | 7.032 | - | 12 | 2.1 |
-| GPU | QI | continuation | 2 | yes | stopped | 1.37e-02 | 7.002 | - | 12 | 2.2 |
-| GPU | QI | continuation | 3 | no | stopped | 3.86e-02 | 6.977 | - | 14 | 2.5 |
-| GPU | QI | continuation | 3 | yes | stopped | 7.35e-03 | 6.995 | - | 14 | 2.5 |
-| GPU | QA | direct | 1 | no | stopped | 9.19e-03 | 6.002 | 0.3950 | 12 | 2.3 |
-| GPU | QA | direct | 1 | yes | stopped | 9.19e-03 | 6.002 | 0.3950 | 12 | 2.3 |
-| GPU | QA | direct | 2 | no | stopped | 4.12e-02 | 6.110 | 0.3509 | 12 | 4.0 |
-| GPU | QA | direct | 2 | yes | stopped | 6.61e-04 | 6.006 | 0.4099 | 12 | 4.2 |
-| GPU | QA | direct | 3 | no | stopped | 6.81e-02 | 5.951 | 0.1732 | 12 | 2.8 |
-| GPU | QA | direct | 3 | yes | stopped | 1.43e-04 | 6.000 | 0.4084 | 24 | 4.7 |
-| GPU | QH | direct | 1 | no | stopped | 1.71e-01 | 7.027 | - | 5 | 0.7 |
-| GPU | QH | direct | 1 | yes | stopped | 1.71e-01 | 7.027 | - | 5 | 0.6 |
-| GPU | QH | direct | 2 | no | stopped | 5.56e-02 | 7.001 | - | 4 | 1.0 |
-| GPU | QH | direct | 2 | yes | stopped | 4.08e-02 | 7.012 | - | 5 | 1.3 |
-| GPU | QH | direct | 3 | no | stopped | 9.78e-02 | 7.051 | - | 4 | 1.0 |
-| GPU | QH | direct | 3 | yes | stopped | 4.83e-02 | 7.011 | - | 5 | 1.4 |
-| GPU | QP | direct | 1 | no | stopped | 6.87e-01 | 7.238 | -0.3151 | 5 | 0.6 |
-| GPU | QP | direct | 1 | yes | stopped | 6.87e-01 | 7.238 | -0.3151 | 5 | 0.6 |
-| GPU | QP | direct | 2 | no | stopped | 1.23e+00 | 6.918 | -1.2527 | 4 | 1.0 |
-| GPU | QP | direct | 2 | yes | stopped | 4.40e-01 | 7.110 | -0.8996 | 5 | 1.3 |
-| GPU | QP | direct | 3 | no | stopped | 1.10e+00 | 7.160 | -1.0789 | 4 | 1.0 |
-| GPU | QP | direct | 3 | yes | stopped | 6.62e-01 | 7.092 | -1.1608 | 5 | 1.2 |
-| GPU | QI | direct | 1 | no | stopped | 4.70e-02 | 7.130 | - | 10 | 1.8 |
-| GPU | QI | direct | 1 | yes | stopped | 4.70e-02 | 7.130 | - | 10 | 1.2 |
-| GPU | QI | direct | 2 | no | stopped | 3.36e-02 | 7.012 | - | 9 | 2.0 |
-| GPU | QI | direct | 2 | yes | stopped | 6.10e-03 | 6.985 | - | 10 | 2.0 |
-| GPU | QI | direct | 3 | no | stopped | 5.65e-02 | 6.973 | - | 9 | 1.9 |
-| GPU | QI | direct | 3 | yes | stopped | 1.46e-02 | 6.962 | - | 10 | 1.8 |
+| GPU | QA | continuation | 1 | no | ok | 9.19e-03 | 6.002 | 0.3939 | 22 | 5.7 |
+| GPU | QA | continuation | 1 | yes | ok | 9.19e-03 | 6.002 | 0.3939 | 22 | 5.7 |
+| GPU | QA | continuation | 2 | no | stopped | 6.43e-04 | 6.001 | 0.4082 | 18 | 5.1 |
+| GPU | QA | continuation | 2 | yes | stopped | 5.42e-04 | 6.004 | 0.4064 | 18 | 4.9 |
+| GPU | QA | continuation | 3 | no | stopped | 2.76e-04 | 6.000 | 0.4070 | 20 | 5.5 |
+| GPU | QA | continuation | 3 | yes | stopped | 1.85e-04 | 5.999 | 0.4082 | 20 | 5.3 |
+| GPU | QH | continuation | 1 | no | ok | 2.09e-01 | 7.050 | - | 14 | 3.3 |
+| GPU | QH | continuation | 1 | yes | ok | 2.09e-01 | 7.050 | - | 14 | 3.4 |
+| GPU | QH | continuation | 2 | no | stopped | 6.96e-03 | 6.999 | - | 18 | 4.9 |
+| GPU | QH | continuation | 2 | yes | ok | 8.04e-03 | 6.999 | - | 29 | 7.3 |
+| GPU | QH | continuation | 3 | no | stopped | 6.24e-03 | 6.997 | - | 20 | 5.5 |
+| GPU | QH | continuation | 3 | yes | stopped | 4.54e-03 | 6.993 | - | 20 | 5.6 |
+| GPU | QP | continuation | 1 | no | stopped | 9.38e-01 | 7.510 | -0.5787 | 5 | 1.1 |
+| GPU | QP | continuation | 1 | yes | stopped | 9.38e-01 | 7.510 | -0.5787 | 5 | 0.5 |
+| GPU | QP | continuation | 2 | no | stopped | 5.18e-01 | 7.059 | -0.6082 | 7 | 1.9 |
+| GPU | QP | continuation | 2 | yes | stopped | 6.28e-01 | 7.094 | -0.6296 | 7 | 1.0 |
+| GPU | QP | continuation | 3 | no | stopped | 6.84e-01 | 7.161 | -0.8731 | 9 | 2.1 |
+| GPU | QP | continuation | 3 | yes | stopped | 5.30e-01 | 7.085 | -0.4126 | 9 | 1.3 |
+| GPU | QI | continuation | 1 | no | stopped | 1.30e-02 | 7.006 | -0.6719 | 10 | 1.4 |
+| GPU | QI | continuation | 1 | yes | stopped | 1.30e-02 | 7.006 | -0.6719 | 10 | 1.3 |
+| GPU | QI | continuation | 2 | no | stopped | 1.72e-02 | 7.057 | -0.9187 | 12 | 2.0 |
+| GPU | QI | continuation | 2 | yes | stopped | 4.09e-03 | 6.998 | -0.5107 | 12 | 1.7 |
+| GPU | QI | continuation | 3 | no | stopped | 3.65e-02 | 6.997 | -0.9760 | 14 | 2.5 |
+| GPU | QI | continuation | 3 | yes | stopped | 1.30e-02 | 7.003 | -0.4143 | 14 | 2.3 |
+| GPU | QA | direct | 1 | no | ok | 9.19e-03 | 6.002 | 0.3939 | 22 | 5.7 |
+| GPU | QA | direct | 1 | yes | ok | 9.19e-03 | 6.002 | 0.3939 | 22 | 5.6 |
+| GPU | QA | direct | 2 | no | ok | 3.54e-04 | 5.999 | 0.4078 | 32 | 8.5 |
+| GPU | QA | direct | 2 | yes | ok | 5.05e-04 | 6.000 | 0.4071 | 27 | 6.8 |
+| GPU | QA | direct | 3 | no | ok | 4.55e-02 | 5.989 | 0.2516 | 21 | 6.4 |
+| GPU | QA | direct | 3 | yes | stopped | 1.30e-04 | 6.000 | 0.4096 | 24 | 7.7 |
+| GPU | QH | direct | 1 | no | ok | 2.09e-01 | 7.050 | - | 14 | 3.4 |
+| GPU | QH | direct | 1 | yes | ok | 2.09e-01 | 7.050 | - | 14 | 3.4 |
+| GPU | QH | direct | 2 | no | stopped | 6.89e-03 | 6.999 | - | 12 | 3.4 |
+| GPU | QH | direct | 2 | yes | ok | 5.57e-03 | 7.001 | - | 25 | 7.2 |
+| GPU | QH | direct | 3 | no | stopped | 1.44e-02 | 7.002 | - | 8 | 2.4 |
+| GPU | QH | direct | 3 | yes | ok | 1.98e-03 | 6.999 | - | 19 | 5.9 |
+| GPU | QP | direct | 1 | no | stopped | 9.38e-01 | 7.510 | -0.5787 | 5 | 0.5 |
+| GPU | QP | direct | 1 | yes | stopped | 9.38e-01 | 7.510 | -0.5787 | 5 | 0.5 |
+| GPU | QP | direct | 2 | no | stopped | 5.26e-01 | 7.070 | -1.1959 | 4 | 0.6 |
+| GPU | QP | direct | 2 | yes | stopped | 4.40e-01 | 7.110 | -0.8996 | 5 | 0.8 |
+| GPU | QP | direct | 3 | no | stopped | 1.55e+00 | 7.155 | -1.0779 | 4 | 0.8 |
+| GPU | QP | direct | 3 | yes | stopped | 6.62e-01 | 7.092 | -1.1608 | 5 | 0.7 |
+| GPU | QI | direct | 1 | no | stopped | 1.30e-02 | 7.006 | -0.6719 | 10 | 1.3 |
+| GPU | QI | direct | 1 | yes | stopped | 1.30e-02 | 7.006 | -0.6719 | 10 | 1.2 |
+| GPU | QI | direct | 2 | no | stopped | 1.93e-02 | 7.033 | -1.2420 | 9 | 1.4 |
+| GPU | QI | direct | 2 | yes | stopped | 3.65e-02 | 6.968 | -0.8613 | 10 | 1.3 |
+| GPU | QI | direct | 3 | no | stopped | 8.81e-02 | 7.013 | -1.1697 | 9 | 1.7 |
+| GPU | QI | direct | 3 | yes | stopped | 2.82e-02 | 7.023 | -1.3839 | 10 | 1.5 |
 
 ## Performance vs parity
 
