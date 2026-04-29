@@ -179,23 +179,33 @@ fixed-boundary QH optimization using the built-in **exact discrete-adjoint Jacob
 
 The script is intentionally written in the same teaching style as SIMSOPT's
 `QH_fixed_resolution.py`: choose the VMEC resolution directly in Python, choose
-the active boundary coefficients directly, build the objective blocks directly
-in the script, and choose the outer optimizer explicitly. Nothing relies on a
-hidden SIMSOPT wrapper layer.
+the active boundary coefficients directly, build an `OBJECTIVES` list, then run
+the visible setup → continuation stages → optimizer → save/plot workflow. It is
+a standalone script, not an argparse entry point or a hidden wrapper call.
 
 ```bash
-python examples/optimization/qh_fixed_resolution_jax.py   # MAX_MODE=2 by default
+python examples/optimization/qh_fixed_resolution_jax.py   # edit MAX_MODE at the top
 ```
 
 Key top-level controls in the script:
 
 - `VMEC_MPOL`, `VMEC_NTOR`: solver resolution
 - `MAX_MODE`: boundary parameterization richness
-- `OBJECTIVE_TUPLES`: explicit aspect + QS residual blocks
+- `OBJECTIVES`: explicit aspect + QS residual blocks
 - `METHOD`: `"gauss_newton"` or `"scipy"`
 - `SCIPY_TR_SOLVER`: SciPy trust-region linear solver (`"lsmr"` by default for the QA/QH examples)
 - `USE_MODE_CONTINUATION`: staged solves for higher-mode runs
 - `USE_ESS`, `ALPHA`: optional exponential spectral scaling
+
+Add a new target by appending an objective term:
+
+```python
+OBJECTIVES = [
+    aspect_objective(TARGET_ASPECT, ASPECT_WEIGHT),
+    quasisymmetry_objective(helicity_m=1, helicity_n=-1, surfaces=SURFACES, weight=QS_WEIGHT),
+    ObjectiveTerm("custom", lambda ctx, state: your_metric(ctx, state), target=0.0, weight=0.1),
+]
+```
 
 When `max_mode` exceeds the modes present in the input file, vmec_jax automatically
 extends the boundary to include the requested harmonics at zero amplitude
@@ -268,7 +278,7 @@ continuation policy, ESS settings, and the outer optimizer are all top-level
 variables in the file.
 
 ```bash
-python examples/optimization/qa_fixed_resolution_jax_ess.py   # MAX_MODE=2 by default
+python examples/optimization/qa_fixed_resolution_jax_ess.py   # edit MAX_MODE at the top
 ```
 
 When `max_mode` exceeds the modes in the input file, vmec_jax automatically extends

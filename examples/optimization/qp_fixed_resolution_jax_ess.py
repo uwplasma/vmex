@@ -1,11 +1,10 @@
 #!/usr/bin/env python
-# ruff: noqa: E402
 """Quasi-poloidal symmetry optimization with vmec_jax.
 
-This example starts from the QH warm-start input deck and targets a
-quasi-poloidal symmetry residual with ``HELICITY_M = 0`` and user-selectable
-``HELICITY_N``.  All controls are top-level Python variables, matching the
-style of the QA/QH examples.
+QP is still a quasisymmetry problem: ``HELICITY_M = 0`` targets
+``|B| ~ B(N zeta)``.  This standalone script follows a linear SIMSOPT-style
+workflow and leaves the VMEC/JAX setup visible rather than hiding it behind a
+large configuration object.
 """
 
 from pathlib import Path
@@ -19,253 +18,278 @@ from vmec_jax.field import signgs_from_sqrtg
 from vmec_jax.geom import eval_geom
 from vmec_jax.init_guess import initial_guess_from_boundary
 from vmec_jax.optimization import rebuild_indata_with_resolution
-from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_state
-from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
+
+try:
+    from fixed_boundary_qs_common import (
+        ObjectiveTerm,  # noqa: F401 - shown in the commented custom-objective example.
+        StageContext,
+        abs_mean_iota_floor_objective,
+        aspect_objective,
+        combine_qs_stage_histories,
+        mean_iota,
+        objectives_track_iota,
+        print_qs_final_summary,
+        print_qs_problem_summary,
+        qs_stage_budget,
+        qs_stage_modes,
+        quasisymmetry_objective,
+        save_qs_final_outputs,
+        save_qs_stage_artifacts,
+    )
+except ModuleNotFoundError:
+    from examples.optimization.fixed_boundary_qs_common import (
+        ObjectiveTerm,  # noqa: F401 - shown in the commented custom-objective example.
+        StageContext,
+        abs_mean_iota_floor_objective,
+        aspect_objective,
+        combine_qs_stage_histories,
+        mean_iota,
+        objectives_track_iota,
+        print_qs_final_summary,
+        print_qs_problem_summary,
+        qs_stage_budget,
+        qs_stage_modes,
+        quasisymmetry_objective,
+        save_qs_final_outputs,
+        save_qs_stage_artifacts,
+    )
 
 
 enable_x64(True)
 
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
-# ─────────────────────────────────────────────────────────────────────────────
-# USER PARAMETERS
-# ─────────────────────────────────────────────────────────────────────────────
-
-INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.nfp4_QH_warm_start"
+# User parameters
+INPUT_FILE = DATA_DIR / "input.nfp4_QH_warm_start"
 
 VMEC_MPOL = 5
 VMEC_NTOR = 5
-
 MAX_MODE = 3
+
 MAX_NFEV = 20
 CONTINUATION_NFEV = 0
+USE_MODE_CONTINUATION = False
 
 METHOD = "scipy"
 SCIPY_TR_SOLVER = "lsmr"
 SCIPY_LSMR_MAXITER = None
+FTOL = 1.0e-4
+GTOL = 1.0e-4
+XTOL = 1.0e-4
 
-FTOL = 1e-4
-GTOL = 1e-4
-XTOL = 1e-4
-
-# Exploratory QP runs are currently more robust with a fixed moderate VMEC
-# budget.  Full input-deck accepted solves can trigger an early ``xtol`` stop
-# from a poor QP trial step on this QH seed.
+# QP remains exploratory; bounded VMEC budgets avoid spending minutes on poor
+# rejected trial points from the QH seed.
 INNER_MAX_ITER = 80
-INNER_FTOL = 1e-8
+INNER_FTOL = 1.0e-8
 TRIAL_MAX_ITER = 80
-TRIAL_FTOL = 1e-8
+TRIAL_FTOL = 1.0e-8
+SOLVER_DEVICE = None  # set to "cpu" or "gpu" to force one backend
 
-# Quasi-poloidal target: |B| ~ B(n*zeta).  HELICITY_N = +1 gives the same
-# short-run objective as -1 for this stellarator-symmetric QH seed; keep -1 as
-# the default and change this variable if you want to test the opposite sign.
 HELICITY_M = 0
 HELICITY_N = -1
 SURFACES = np.arange(0.0, 1.01, 0.1)
-
 TARGET_ASPECT = 7.0
 TARGET_ABS_IOTA_MIN = 0.31
-TARGET_IOTA_SIGN = -1  # display/plot branch; objective uses |iota| lower bound.
-TARGET_IOTA_DISPLAY = TARGET_IOTA_SIGN * TARGET_ABS_IOTA_MIN
+TARGET_IOTA = -TARGET_ABS_IOTA_MIN
 
 ASPECT_WEIGHT = 1.0
-IOTA_WEIGHT = 20.0  # lower-bound penalty for |mean iota| >= TARGET_ABS_IOTA_MIN
+IOTA_WEIGHT = 20.0
 QS_WEIGHT = 1.0
 
 USE_ESS = True
-ALPHA = 2.5  # short sweeps found this robust for the mode-3 QP direct start.
-# Start directly from the QH warm-start boundary.  A low-mode QP continuation
-# stage can move the seed away from its good aspect and |iota| before the
-# higher-mode QP DOFs are available.
-USE_MODE_CONTINUATION = False
+ALPHA = 2.5
 
 OUTPUT_DIR = Path(f"results/qp_opt/n{HELICITY_N:+d}/mode{MAX_MODE}/{'ess' if USE_ESS else 'no_ess'}")
+LABEL = f"QP opt (max_mode={MAX_MODE}, {'ESS' if USE_ESS else 'no ESS'})"
+
 SAVE_STAGE_INPUTS = True
 SAVE_STAGE_WOUTS = False
+SAVE_RERUN_WOUTS = False
+PLOT = True
 
 
-print(f"Loading {INPUT_FILE.name} …")
+# Objective function
+# Add an objective by appending another ObjectiveTerm.  The callback receives
+# (ctx, state) and returns a scalar or vector; vmec_jax minimizes
+# weight * (value - target) in least-squares form.
+OBJECTIVES = [
+    aspect_objective(TARGET_ASPECT, ASPECT_WEIGHT),
+    abs_mean_iota_floor_objective(TARGET_ABS_IOTA_MIN, IOTA_WEIGHT),
+    quasisymmetry_objective(
+        helicity_m=HELICITY_M,
+        helicity_n=HELICITY_N,
+        surfaces=SURFACES,
+        weight=QS_WEIGHT,
+    ),
+    # ObjectiveTerm("custom_vector", lambda ctx, state: your_vector(ctx, state), target=0.0, weight=0.1),
+]
+
+
+# Problem setup
+print(f"Loading {INPUT_FILE.name} ...")
 cfg, indata = vj.load_config(str(INPUT_FILE))
 indata = rebuild_indata_with_resolution(indata, mpol=VMEC_MPOL, ntor=VMEC_NTOR)
 cfg = config_from_indata(indata)
+stage_modes = qs_stage_modes(
+    max_mode=MAX_MODE,
+    use_mode_continuation=USE_MODE_CONTINUATION,
+    continuation_nfev=CONTINUATION_NFEV,
+)
 
 
-def _remove_stale(path: Path) -> None:
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        pass
+# Optimization
+stage_records = []
+params_stage = None
+prev_specs = None
 
-
-def _mean_iota(state, *, static, indata, signgs):
-    _chips, iotas, _iotaf = equilibrium_iota_profiles_from_state(
-        state=state,
-        static=static,
-        indata=indata,
-        signgs=signgs,
+for stage_mode in stage_modes:
+    # Build the fixed-boundary VMEC problem for this mode-continuation stage.
+    static = vj.build_static(cfg)
+    boundary = vj.boundary_from_indata(indata, static.modes, apply_m1_constraint=False)
+    stage_indata, static, boundary = vj.extend_boundary_for_max_mode(
+        indata,
+        static,
+        boundary,
+        stage_mode,
     )
-    iotas = jnp.asarray(iotas, dtype=jnp.float64)
-    return jnp.asarray(0.0, dtype=iotas.dtype) if int(iotas.shape[0]) <= 1 else jnp.mean(iotas[1:])
-
-
-def _save_stage_artifacts(stage_dir: Path, stage_opt, params_initial, params_final, stage_result) -> None:
-    stage_dir.mkdir(parents=True, exist_ok=True)
-    if SAVE_STAGE_INPUTS:
-        stage_opt.save_input(stage_dir / "input.initial", params_initial)
-        stage_opt.save_input(stage_dir / "input.final", params_final)
-    if SAVE_STAGE_WOUTS:
-        stage_opt.save_wout(stage_dir / "wout_initial.nc", params_initial, state=stage_result.get("_state_initial"))
-        stage_opt.save_wout(stage_dir / "wout_final.nc", params_final, state=stage_result.get("_state_final"))
-    else:
-        _remove_stale(stage_dir / "wout_initial.nc")
-        _remove_stale(stage_dir / "wout_final.nc")
-
-
-def _build_stage(max_mode: int):
-    stage_static = vj.build_static(cfg)
-    stage_boundary = vj.boundary_from_indata(indata, stage_static.modes, apply_m1_constraint=False)
-    stage_indata, stage_static, stage_boundary = vj.extend_boundary_for_max_mode(
-        indata, stage_static, stage_boundary, max_mode
-    )
-    stage_boundary_input = vj.boundary_input_from_indata(stage_indata, stage_static.modes)
-    stage_specs = vj.boundary_param_specs(
-        stage_boundary_input,
-        stage_static.modes,
-        max_mode=max_mode,
+    boundary_input = vj.boundary_input_from_indata(stage_indata, static.modes)
+    specs = vj.boundary_param_specs(
+        boundary_input,
+        static.modes,
+        max_mode=stage_mode,
         min_coeff=0.0,
         include=("rc", "zs"),
         fix=("rc00",),
     )
 
-    stage_guess = initial_guess_from_boundary(stage_static, stage_boundary, stage_indata, vmec_project=True)
-    stage_geom = eval_geom(stage_guess, stage_static)
-    stage_signgs = int(signgs_from_sqrtg(np.asarray(stage_geom.sqrtg), axis_index=1))
-    stage_flux = vj.flux_profiles_from_indata(stage_indata, stage_static.s, signgs=stage_signgs)
-    stage_pressure = jnp.zeros_like(jnp.asarray(stage_static.s))
-
-    def stage_qs_eval(state):
-        return quasisymmetry_ratio_residual_from_state(
-            state=state,
-            static=stage_static,
-            indata=stage_indata,
-            signgs=stage_signgs,
-            flux_local=stage_flux,
-            prof_local={"pressure": stage_pressure},
-            pressure_local=stage_pressure,
-            surfaces=SURFACES,
-            helicity_m=HELICITY_M,
-            helicity_n=HELICITY_N,
-        )
-
-    def stage_residuals_from_state(state):
-        aspect = equilibrium_aspect_ratio_from_state(state=state, static=stage_static)
-        iota = _mean_iota(state, static=stage_static, indata=stage_indata, signgs=stage_signgs)
-        iota_shortfall = jnp.minimum(jnp.abs(iota) - TARGET_ABS_IOTA_MIN, 0.0)
-        qs = stage_qs_eval(state)
-        return jnp.concatenate(
-            [
-                jnp.asarray([ASPECT_WEIGHT * (aspect - TARGET_ASPECT)], dtype=jnp.float64),
-                jnp.asarray([IOTA_WEIGHT * iota_shortfall], dtype=jnp.float64),
-                jnp.asarray(qs["residuals1d"], dtype=jnp.float64) * QS_WEIGHT,
-            ]
-        )
-
-    stage_residuals_from_state._n_non_qs = 2
-    stage_residuals_from_state._qs_total_from_state = (
-        lambda state: float(QS_WEIGHT) ** 2 * float(stage_qs_eval(state)["total"])
+    guess = initial_guess_from_boundary(static, boundary, stage_indata, vmec_project=True)
+    geom = eval_geom(guess, static)
+    signgs = int(signgs_from_sqrtg(np.asarray(geom.sqrtg), axis_index=1))
+    flux = vj.flux_profiles_from_indata(stage_indata, static.s, signgs=signgs)
+    pressure = jnp.zeros_like(jnp.asarray(static.s))
+    ctx = StageContext(
+        static=static,
+        indata=stage_indata,
+        boundary_input=boundary_input,
+        specs=specs,
+        signgs=signgs,
+        flux=flux,
+        pressure=pressure,
     )
 
-    stage_opt = vj.FixedBoundaryExactOptimizer(
-        stage_static,
+    def residuals_from_state(state, *, ctx=ctx):
+        return jnp.concatenate([term.residual(ctx, state) for term in OBJECTIVES])
+
+    qs_totals = tuple(term.total for term in OBJECTIVES if term.total is not None)
+    residuals_from_state._n_non_qs = 0
+    residuals_from_state._qs_total_from_state = (
+        lambda state, ctx=ctx, qs_totals=qs_totals: float(
+            sum(float(total(ctx, state)) for total in qs_totals)
+        )
+        if qs_totals
+        else lambda _state: 0.0
+    )
+
+    optimizer = vj.FixedBoundaryExactOptimizer(
+        static,
         stage_indata,
-        stage_boundary,
-        stage_specs,
-        stage_residuals_from_state,
-        boundary_input=stage_boundary_input,
+        boundary,
+        specs,
+        residuals_from_state,
+        boundary_input=boundary_input,
         inner_max_iter=INNER_MAX_ITER,
         inner_ftol=INNER_FTOL,
         trial_max_iter=TRIAL_MAX_ITER,
         trial_ftol=TRIAL_FTOL,
+        solver_device=SOLVER_DEVICE,
     )
-    stage_x_scale = vj.create_x_scale(stage_specs, alpha=ALPHA) if USE_ESS else np.ones(len(stage_specs))
 
-    def iota_fn(state):
-        return float(_mean_iota(state, static=stage_static, indata=stage_indata, signgs=stage_signgs))
-
-    return stage_specs, stage_opt, stage_x_scale, iota_fn
-
-
-stage_results = []
-params_stage = None
-prev_specs = None
-stage_modes = list(range(1, MAX_MODE + 1)) if (USE_MODE_CONTINUATION and MAX_MODE > 1) else [MAX_MODE]
-
-for stage_mode in stage_modes:
-    stage_specs, stage_opt, stage_x_scale, iota_fn = _build_stage(stage_mode)
-    params0_stage = (
-        np.zeros(len(stage_specs), dtype=float)
-        if params_stage is None
-        else vj.lift_boundary_params(prev_specs, params_stage, stage_specs)
-    )
-    stage_budget = MAX_NFEV if stage_mode == MAX_MODE else CONTINUATION_NFEV
-    if stage_mode == MAX_MODE:
-        print(f"Parameter space ({len(stage_specs)} DOFs): {vj.boundary_param_names(stage_specs)}")
-        print(f"Helicity: M={HELICITY_M}, N={HELICITY_N}")
-        print(f"ESS: {USE_ESS}, alpha={ALPHA}")
-        print(f"Aspect ratio (initial):        {stage_opt.aspect_ratio(params0_stage):.4f}")
-        print(f"QS objective (initial):        {stage_opt.quasisymmetry_objective(params0_stage):.6f}")
-        print(f"Running {METHOD} (max_nfev={stage_budget}, continuation={USE_MODE_CONTINUATION}) …")
+    x_scale = vj.create_x_scale(specs, alpha=ALPHA) if USE_ESS else np.ones(len(specs), dtype=float)
+    if params_stage is None:
+        params0 = np.zeros(len(specs), dtype=float)
     else:
-        print(f"Stage {stage_mode} → {stage_mode + 1} continuation seed (budget={stage_budget}) …")
+        params0 = np.asarray(vj.lift_boundary_params(prev_specs, params_stage, specs), dtype=float)
+    nfev = qs_stage_budget(
+        stage_mode=stage_mode,
+        max_mode=MAX_MODE,
+        max_nfev=MAX_NFEV,
+        continuation_nfev=CONTINUATION_NFEV,
+    )
+    iota_fn = (
+        (lambda state, ctx=ctx: float(mean_iota(ctx, state)))
+        if objectives_track_iota(OBJECTIVES, target_iota=TARGET_IOTA)
+        else None
+    )
 
-    stage_result = stage_opt.run(
-        params0_stage,
+    if stage_mode == MAX_MODE:
+        print_qs_problem_summary(
+            method=METHOD,
+            max_nfev=MAX_NFEV,
+            use_mode_continuation=USE_MODE_CONTINUATION,
+            use_ess=USE_ESS,
+            ess_alpha=ALPHA,
+            objectives=OBJECTIVES,
+            specs=specs,
+            x_scale=np.asarray(x_scale, dtype=float),
+            optimizer=optimizer,
+            params0=params0,
+        )
+    else:
+        print(f"Stage {stage_mode} -> {stage_mode + 1} continuation seed (budget={nfev}) ...")
+
+    result = optimizer.run(
+        params0,
         method=METHOD,
-        max_nfev=stage_budget,
+        max_nfev=nfev,
         ftol=FTOL,
         gtol=GTOL,
         xtol=XTOL,
-        x_scale=stage_x_scale,
+        x_scale=x_scale,
         verbose=1 if stage_mode == MAX_MODE else 0,
         iota_fn=iota_fn,
-        target_iota=TARGET_IOTA_DISPLAY,
+        target_iota=TARGET_IOTA,
         target_aspect=TARGET_ASPECT,
         scipy_tr_solver=SCIPY_TR_SOLVER,
         scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
     )
-    _save_stage_artifacts(
-        OUTPUT_DIR / f"stage_{stage_mode:02d}",
-        stage_opt,
-        params0_stage,
-        stage_result["x"],
-        stage_result,
+    save_qs_stage_artifacts(
+        stage_dir=OUTPUT_DIR / f"stage_{stage_mode:02d}",
+        optimizer=optimizer,
+        params_initial=params0,
+        params_final=result["x"],
+        result=result,
+        save_inputs=SAVE_STAGE_INPUTS,
+        save_wouts=SAVE_STAGE_WOUTS,
+        save_rerun_wouts=SAVE_RERUN_WOUTS,
     )
-    stage_results.append((stage_mode, stage_specs, stage_opt, params0_stage, stage_result))
-    prev_specs = stage_specs
-    params_stage = stage_result["x"]
+    stage_records.append((stage_mode, optimizer, params0, result))
+    prev_specs = specs
+    params_stage = result["x"]
 
 
-stage_mode, specs, opt, params0, result = stage_results[-1]
-hist = result["_history_dump"]
-
-print(f"\nTermination: {result['message']}")
-print(f"Aspect ratio (final):          {hist['aspect_final']:.6f}")
-print(f"Mean iota (final):             {hist['iota_final']:.6f}  |iota| minimum={TARGET_ABS_IOTA_MIN:.6f}")
-print(f"QS objective (final):          {hist['qs_final']:.6e}")
-print(f"Total objective (final):       {hist['objective_final']:.6e}")
-
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-initial_stage_mode, initial_specs, initial_opt, initial_params0, initial_result = stage_results[0]
-initial_opt.save_input(OUTPUT_DIR / "input.initial", initial_params0)
-initial_opt.save_wout(OUTPUT_DIR / "wout_initial.nc", initial_params0, state=initial_result.get("_state_initial"))
-opt.save_input(OUTPUT_DIR / "input.final", result["x"])
-opt.save_wout(OUTPUT_DIR / "wout_final.nc", result["x"], state=result.get("_state_final"))
-opt.save_history(OUTPUT_DIR / "history.json", result)
-
-print("\nGenerating plots …")
-vj.plot_qh_optimization(
-    OUTPUT_DIR / "wout_initial.nc",
-    OUTPUT_DIR / "wout_final.nc",
-    OUTPUT_DIR / "history.json",
-    outdir=OUTPUT_DIR,
+# Output
+final_optimizer = stage_records[-1][1]
+final_result = stage_records[-1][3]
+combined_history = combine_qs_stage_histories(
+    label=LABEL,
+    max_mode=MAX_MODE,
+    max_nfev=MAX_NFEV,
+    continuation_nfev=CONTINUATION_NFEV,
+    stage_modes=stage_modes,
+    stage_records=stage_records,
 )
-print("Done.")
+if combined_history is not None:
+    final_result["_history_dump"] = combined_history
+
+print_qs_final_summary(final_result, target_iota=TARGET_IOTA)
+save_qs_final_outputs(
+    output_dir=OUTPUT_DIR,
+    stage_records=stage_records,
+    final_optimizer=final_optimizer,
+    final_result=final_result,
+    label=LABEL,
+    target_aspect=TARGET_ASPECT,
+    target_iota=TARGET_IOTA,
+    plot=PLOT,
+    save_rerun_wouts=SAVE_RERUN_WOUTS,
+)
