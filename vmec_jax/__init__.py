@@ -13,9 +13,10 @@ _os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 _os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "2")
 _os.environ.setdefault("GLOG_minloglevel", "2")
 
-# Enable JAX persistent XLA compilation cache by default. This makes repeated
-# cold-process CLI/API runs much faster while preserving explicit opt-out via
-# VMEC_JAX_COMPILATION_CACHE=0 or VMEC_JAX_COMPILATION_CACHE_DIR=disabled.
+# Enable JAX persistent XLA compilation cache by default in a machine-scoped
+# directory. This makes repeated cold-process CLI/API runs much faster while
+# preserving explicit opt-out via VMEC_JAX_COMPILATION_CACHE=0 or
+# VMEC_JAX_COMPILATION_CACHE_DIR=disabled.
 import jax as _jax
 _jax_cache_dir = _default_jax_cache_dir()
 if _jax_cache_dir is not None:
@@ -135,6 +136,7 @@ from .optimization import (
     make_qs_residuals_fn,
     parse_surface_list,
     prepare_fixed_boundary_context,
+    smooth_min_abs_iota_residual,
     surface_indices_from_s,
     surface_indices_from_static,
 )
@@ -323,6 +325,7 @@ __all__ = [
     "make_qs_residuals_fn",
     "parse_surface_list",
     "prepare_fixed_boundary_context",
+    "smooth_min_abs_iota_residual",
     "surface_indices_from_s",
     "surface_indices_from_static",
     "Coords",

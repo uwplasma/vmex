@@ -7,11 +7,13 @@ and QI targets:
 
 - QA: aspect ratio, mean iota, and quasi-axisymmetry.
 - QH: aspect ratio and quasi-helical symmetry.
-- QP: aspect ratio, quasi-poloidal symmetry, and an absolute-iota lower bound.
+- QP: aspect ratio, quasi-poloidal symmetry, and a smooth
+  ``abs(mean_iota) >= 0.41`` lower bound.
 - QI: aspect ratio and a differentiable smooth Boozer-space
   quasi-isodynamic residual evaluated through ``booz_xform_jax``.  The sweep
-  first runs a same-mode QP preseed and then applies the QI residual so the
-  final state does not remain trapped in the QH warm-start basin.
+  first runs a same-mode QP preseed and then applies the QI residual, with the
+  same smooth ``abs(mean_iota) >= 0.41`` lower bound retained through the QI
+  stage so the final state does not remain trapped in the QH warm-start basin.
 
 Individual Examples
 -------------------
@@ -212,11 +214,12 @@ Current QI Snapshot
 
 The current CPU QI bounded sweep uses ``input.nfp4_QH_warm_start`` as the
 input deck, applies a QP preseed for the requested mode/policy, and then
-minimizes the QI residual on five surfaces.  In this run, continuation
-``max_mode=2`` without ESS reached ``J = 6.85e-4`` and continuation
-``max_mode=3`` with ESS reached ``J = 1.25e-3``.  The final ``|B|`` panels are
-no longer QH-like; the preseed moves them toward poloidally closed wells before
-the QI refinement.
+minimizes the QI residual on five surfaces while retaining
+``abs(mean_iota) >= 0.41`` through the final QI stage.  In this run, direct
+``max_mode=2`` with ESS reached ``J = 4.90e-3`` and continuation
+``max_mode=3`` without ESS reached ``J = 5.49e-3``.  The final ``|B|`` panels
+are no longer QH-like; the preseed moves them toward poloidally closed wells
+before the QI refinement.
 
 The GPU QI sweep is included as the accelerator matrix.  Bounded quick-look
 diagnostics can still be reproduced with ``--diagnostic-budgets``, but the

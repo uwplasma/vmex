@@ -13,7 +13,7 @@ def test_compilation_cache_is_enabled_by_default(monkeypatch):
     cache_dir = _default_compilation_cache_dir()
 
     assert cache_dir is not None
-    assert cache_dir.endswith(".cache/vmec_jax/jax_cache")
+    assert ".cache/vmec_jax/jax_cache/" in cache_dir
 
 
 def test_compilation_cache_dir_env_enables_cache(monkeypatch, tmp_path):
@@ -32,7 +32,7 @@ def test_compilation_cache_flag_uses_default_cache(monkeypatch):
     cache_dir = _default_compilation_cache_dir()
 
     assert cache_dir is not None
-    assert cache_dir.endswith(".cache/vmec_jax/jax_cache")
+    assert ".cache/vmec_jax/jax_cache/" in cache_dir
 
 
 def test_compilation_cache_auto_enables_for_requested_gpu(monkeypatch):
@@ -44,7 +44,7 @@ def test_compilation_cache_auto_enables_for_requested_gpu(monkeypatch):
     cache_dir = _default_compilation_cache_dir()
 
     assert cache_dir is not None
-    assert cache_dir.endswith(".cache/vmec_jax/jax_cache")
+    assert ".cache/vmec_jax/jax_cache/" in cache_dir
 
 
 def test_compilation_cache_auto_enables_for_requested_gpu_platforms(monkeypatch):
@@ -57,7 +57,7 @@ def test_compilation_cache_auto_enables_for_requested_gpu_platforms(monkeypatch)
     cache_dir = _default_compilation_cache_dir()
 
     assert cache_dir is not None
-    assert cache_dir.endswith(".cache/vmec_jax/jax_cache")
+    assert ".cache/vmec_jax/jax_cache/" in cache_dir
 
 
 def test_compilation_cache_disable_overrides_default(monkeypatch):
