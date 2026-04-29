@@ -178,6 +178,39 @@ def test_fixed_boundary_optimizer_exact_residual_reuses_jacobian_primal():
     np.testing.assert_allclose(opt._exact_residual_after_jacobian(), [3.0, 4.0])
 
 
+def test_initial_tangent_cache_key_tracks_vmec_flip_branch():
+    modes = vmec_mode_table(mpol=2, ntor=0)
+    idx_m1 = int(np.nonzero(np.asarray(modes.m) == 1)[0][0])
+    r_cos = np.zeros(modes.K)
+    z_sin = np.zeros(modes.K)
+    r_cos[idx_m1] = 1.0
+    z_sin[idx_m1] = 1.0
+    boundary = BoundaryCoeffs(
+        R_cos=r_cos,
+        R_sin=np.zeros(modes.K),
+        Z_cos=np.zeros(modes.K),
+        Z_sin=z_sin,
+    )
+
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._boundary = boundary
+    opt._boundary_input = None
+    opt._static = SimpleNamespace(
+        modes=modes,
+        cfg=SimpleNamespace(lasym=False, ns=8),
+    )
+    opt._specs = [BoundaryParamSpec("rc10", "rc", idx_m1, 1, 0)]
+
+    no_flip = opt._initial_tangent_cache_key(np.array([0.0]))
+    flip = opt._initial_tangent_cache_key(np.array([-2.0]))
+
+    assert no_flip is not None
+    assert flip is not None
+    assert no_flip != flip
+    assert no_flip[1] is False
+    assert flip[1] is True
+
+
 def test_gauss_newton_damped_fallback_recovers_from_oversized_step():
     """Damping should rescue cases where the raw GN step is unusably large."""
 

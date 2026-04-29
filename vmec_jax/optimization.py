@@ -1209,6 +1209,7 @@ class FixedBoundaryExactOptimizer:
         self._discrete_jacobian_helper_cache: dict = {}
         self._scan_exact_helper_cache: dict = {}
         self._scan_exact_path = self._select_exact_path()
+        self._initial_tangent_cache: dict = {}
         self._last_jacobian_residual: np.ndarray | None = None
         self._trial_residual_cache: OrderedDict[bytes, np.ndarray] = OrderedDict()
         self._trial_residual_cache_max = 8
@@ -1519,6 +1520,32 @@ class FixedBoundaryExactOptimizer:
             _jnp.asarray(params, dtype=_jnp.float64),
         )
 
+    def _initial_tangent_cache_key(self, params):
+        """Cache key for affine initial-state tangent maps.
+
+        With the accepted-point magnetic axis frozen, VMEC's initial state is
+        affine in the boundary coefficients except for the discrete theta-flip
+        branch.  Keep one tangent map per flip branch so Jacobian callbacks do
+        not re-linearize the same initialization graph at every accepted point.
+        """
+        from .init_guess import _vmec_lflip_from_boundary
+
+        try:
+            boundary = self._boundary_from_params(np.asarray(params, dtype=float))
+            lflip = _vmec_lflip_from_boundary(self._static, boundary)
+        except Exception:
+            return None
+        if lflip is None:
+            lflip = False
+        return (
+            int(np.asarray(params).size),
+            bool(lflip),
+            bool(self._boundary_input is not None),
+            bool(self._static.cfg.lasym),
+            int(self._static.cfg.ns),
+            int(self._static.modes.K),
+        )
+
     def _indata_from_params(self, params) -> InData:
         """Return a VMEC namelist with boundary coefficients updated for ``params``."""
         boundary_input = self._boundary_input_from_params(params)
@@ -1790,8 +1817,19 @@ class FixedBoundaryExactOptimizer:
 
         directions = _jnp.eye(int(params.size), dtype=params.dtype)
         t_initial = time.perf_counter()
-        _, initial_state_linear = jax.linearize(_initial_state_packed, params)
-        initial_tangents = jax.vmap(initial_state_linear)(directions)
+        cache_key = self._initial_tangent_cache_key(params)
+        initial_tangents = (
+            self._initial_tangent_cache.get(cache_key)
+            if cache_key is not None
+            else None
+        )
+        if initial_tangents is None:
+            _, initial_state_linear = jax.linearize(_initial_state_packed, params)
+            initial_tangents = jax.vmap(initial_state_linear)(directions)
+            if cache_key is not None:
+                self._initial_tangent_cache[cache_key] = initial_tangents
+        else:
+            self._profile_add(f"{profile_prefix}_initial_tangents_cache_hit", 0.0)
         self._profile_add(
             f"{profile_prefix}_initial_tangents",
             time.perf_counter() - t_initial,
@@ -2273,6 +2311,7 @@ class FixedBoundaryExactOptimizer:
         self._exact_cache.clear()
         self._exact_state_cache.clear()
         self._trial_residual_cache.clear()
+        self._initial_tangent_cache.clear()
         self._last_jacobian_residual = None
         self._post_jacobian_clear(clear_compiled=True)
 
