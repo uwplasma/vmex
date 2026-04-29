@@ -101,52 +101,115 @@ Quasi-helical symmetry example
 The ``examples/optimization/qh_fixed_resolution_jax.py`` script replicates the
 SIMSOPT QH fixed-resolution benchmark entirely within ``vmec_jax``.  It has no
 argparse — all parameters are top-level variables, and the objective is built
-explicitly in the script:
+explicitly as a small list.  After the objective definition, the script shows
+the actual setup and solve flow instead of hiding it behind a high-level
+configuration wrapper:
 
 .. code-block:: python
 
-   # ── User parameters ────────────────────────────────────────────────────────
-   INPUT_FILE    = Path(".../input.nfp4_QH_warm_start")
-   VMEC_MPOL     = 5         # solver resolution
-   VMEC_NTOR     = 5
-   MAX_MODE      = 2         # boundary DOF mode number cutoff
-   MAX_NFEV      = 15        # maximum residual+Jacobian evaluations
-   METHOD        = "scipy"
+   INPUT_FILE = DATA_DIR / "input.nfp4_QH_warm_start"
+   VMEC_MPOL = 5
+   VMEC_NTOR = 5
+   MAX_MODE = 2
+   MAX_NFEV = 15
+   METHOD = "scipy"
    SCIPY_TR_SOLVER = "lsmr"
-   HELICITY_M    = 1         # QH helicity
-   HELICITY_N    = -1        # field-period units; nn = HELICITY_N * nfp = -4 internally
+   HELICITY_M = 1
+   HELICITY_N = -1
    TARGET_ASPECT = 7.0       # target aspect ratio
-   SURFACES      = np.arange(0, 1.01, 0.1)
-   OBJECTIVE_TUPLES = [("aspect", 7.0, 1.0), ("qs", 0.0, 1.0)]
+   SURFACES = np.arange(0.0, 1.01, 0.1)
 
-   # ── Load ──────────────────────────────────────────────────────────────────
-   cfg, indata  = vj.load_config(str(INPUT_FILE))
-   indata       = vj.rebuild_indata_with_resolution(indata, mpol=VMEC_MPOL, ntor=VMEC_NTOR)
-   cfg          = vj.config_from_indata(indata)
-   static       = vj.build_static(cfg)
-   boundary     = vj.boundary_from_indata(indata, static.modes, apply_m1_constraint=False)
-   indata, static, boundary = vj.extend_boundary_for_max_mode(indata, static, boundary, MAX_MODE)
-   boundary_input = vj.boundary_input_from_indata(indata, static.modes)
+   OBJECTIVES = [
+       aspect_objective(TARGET_ASPECT, ASPECT_WEIGHT),
+       quasisymmetry_objective(
+           helicity_m=HELICITY_M,
+           helicity_n=HELICITY_N,
+           surfaces=SURFACES,
+           weight=QS_WEIGHT,
+       ),
+       # ObjectiveTerm("custom", lambda ctx, state: your_metric(ctx, state), target=0.0, weight=0.1),
+   ]
 
-   # ── DOFs ──────────────────────────────────────────────────────────────────
-   specs        = vj.boundary_param_specs(boundary_input, static.modes, max_mode=MAX_MODE,
-                                          include=("rc","zs"), fix=("rc00",))
-   params0      = np.zeros(len(specs))
+   cfg, indata = vj.load_config(str(INPUT_FILE))
+   indata = rebuild_indata_with_resolution(indata, mpol=VMEC_MPOL, ntor=VMEC_NTOR)
+   cfg = config_from_indata(indata)
+   stage_modes = qs_stage_modes(
+       max_mode=MAX_MODE,
+       use_mode_continuation=USE_MODE_CONTINUATION,
+       continuation_nfev=CONTINUATION_NFEV,
+   )
 
-   # ── Objective ─────────────────────────────────────────────────────────────
-   def residuals_from_state(state):
-       ...
-       return jnp.concatenate([aspect_residual, qs_residuals])
+   stage_records = []
+   params_stage = None
+   prev_specs = None
+   for stage_mode in stage_modes:
+       static = vj.build_static(cfg)
+       boundary = vj.boundary_from_indata(indata, static.modes, apply_m1_constraint=False)
+       stage_indata, static, boundary = vj.extend_boundary_for_max_mode(
+           indata, static, boundary, stage_mode
+       )
+       boundary_input = vj.boundary_input_from_indata(stage_indata, static.modes)
+       specs = vj.boundary_param_specs(
+           boundary_input,
+           static.modes,
+           max_mode=stage_mode,
+           min_coeff=0.0,
+           include=("rc", "zs"),
+           fix=("rc00",),
+       )
 
-   # ── Optimiser ─────────────────────────────────────────────────────────────
-   opt    = vj.FixedBoundaryExactOptimizer(static, indata, boundary, specs,
-                                           residuals_from_state, boundary_input=boundary_input)
-   result = opt.run(params0, method=METHOD, max_nfev=MAX_NFEV, target_aspect=TARGET_ASPECT)
+       ctx = StageContext(...)
+       def residuals_from_state(state, *, ctx=ctx):
+           return jnp.concatenate([term.residual(ctx, state) for term in OBJECTIVES])
 
-   # ── Save + plot ────────────────────────────────────────────────────────────
-   opt.save_wout(OUTPUT_DIR / "wout_final.nc", result["x"])
-   opt.save_history(OUTPUT_DIR / "history.json", result)
-   vj.plot_qh_optimization(...)
+       optimizer = vj.FixedBoundaryExactOptimizer(
+           static,
+           stage_indata,
+           boundary,
+           specs,
+           residuals_from_state,
+           boundary_input=boundary_input,
+           inner_max_iter=INNER_MAX_ITER,
+           inner_ftol=INNER_FTOL,
+           trial_max_iter=TRIAL_MAX_ITER,
+           trial_ftol=TRIAL_FTOL,
+           solver_device=SOLVER_DEVICE,
+       )
+       x_scale = vj.create_x_scale(specs, alpha=ALPHA) if USE_ESS else np.ones(len(specs))
+       params0 = (
+           np.zeros(len(specs))
+           if params_stage is None
+           else vj.lift_boundary_params(prev_specs, params_stage, specs)
+       )
+       result = optimizer.run(
+           params0,
+           method=METHOD,
+           max_nfev=qs_stage_budget(
+               stage_mode=stage_mode,
+               max_mode=MAX_MODE,
+               max_nfev=MAX_NFEV,
+               continuation_nfev=CONTINUATION_NFEV,
+           ),
+           x_scale=x_scale,
+           target_aspect=TARGET_ASPECT,
+           scipy_tr_solver=SCIPY_TR_SOLVER,
+       )
+       stage_records.append((stage_mode, optimizer, params0, result))
+       prev_specs = specs
+       params_stage = result["x"]
+
+   save_qs_final_outputs(
+       output_dir=OUTPUT_DIR,
+       stage_records=stage_records,
+       final_optimizer=stage_records[-1][1],
+       final_result=stage_records[-1][3],
+       label=f"QH opt (max_mode={MAX_MODE})",
+       target_aspect=TARGET_ASPECT,
+   )
+
+``ObjectiveTerm`` callbacks receive ``(ctx, state)`` and may return a scalar or
+vector.  The least-squares residual is ``weight * (value - target)``, so adding
+another objective is just adding another term to ``OBJECTIVES``.
 
 Run it with:
 
@@ -753,11 +816,14 @@ Source files
    * - ``vmec_jax/driver.py``
      - ``write_wout_from_fixed_boundary_run``, ``wout_from_fixed_boundary_run``.
    * - ``examples/optimization/qh_fixed_resolution_jax.py``
-     - QH SIMSOPT-style workflow script (no argparse, variables at top).
+     - QH SIMSOPT-style workflow script (no argparse, variables and objective list at top).
    * - ``examples/optimization/qa_fixed_resolution_jax_ess.py``
      - QA workflow with ESS toggle (aspect + mean iota + QA objectives).
    * - ``examples/optimization/qp_fixed_resolution_jax_ess.py``
      - QP workflow with helicity ``M=0`` quasisymmetry and iota lower bound.
+   * - ``examples/optimization/fixed_boundary_qs_common.py``
+     - Shared mechanics for objective terms, stage construction, continuation,
+       output writing, and plotting while keeping the QA/QH/QP scripts linear.
    * - ``examples/optimization/qi_fixed_resolution_jax_ess.py``
      - QI workflow using a QP preseed plus ``booz_xform_jax`` and the smooth
        Boozer-space QI objective.
