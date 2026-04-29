@@ -390,8 +390,6 @@ def build_residual_checkpoint_tape(
     solver_kwargs: dict[str, Any] | None = None,
 ) -> ResidualCheckpointTape:
     """Replay the residual solver in one-step chunks and collect checkpoints."""
-    from .solve import solve_fixed_boundary_residual_iter
-
     solver_kwargs = dict(solver_kwargs or {})
     solve_kwargs = dict(solver_kwargs)
     solve_kwargs.setdefault("indata", indata)

@@ -19,7 +19,6 @@ from dataclasses import dataclass
 import os
 import numpy as np
 
-from ._compat import jnp
 from .config import VMECConfig
 from .free_boundary import (
     FreeBoundaryRuntimeState,
