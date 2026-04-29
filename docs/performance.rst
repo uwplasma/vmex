@@ -331,6 +331,10 @@ clipping, and non-verbose output, so that reduction was wasted work.  On the QH
 ``4.74 s`` per accepted point and update-state time to about ``2.30 s``.  The
 largest remaining per-point GPU costs are now replay (about ``2.67 s``),
 state update (about ``2.30 s``), and preconditioner work (about ``1.10 s``).
+Dynamic replay payload stacking is backend-aware: GPU uses on-device JAX stacks
+to avoid unnecessary host materialization, while CPU keeps the lower-overhead
+NumPy stack path.  This avoids the CPU replay regression seen with unconditional
+device stacking.
 
 Fixed-boundary GPU diagnostics
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
