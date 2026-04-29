@@ -27,6 +27,8 @@ where ``overg = 1 / (signgs * sqrtg)`` following VMEC's `bcovar` convention.
 from __future__ import annotations
 
 
+from types import SimpleNamespace
+
 import numpy as np
 
 from ._compat import jax, jnp
@@ -409,3 +411,129 @@ def b_cartesian_from_bsup(geom, bsupu, bsupv, *, zeta, nfp: int):
     )
 
     return bsupu[..., None] * e_t + bsupv[..., None] * e_p
+
+
+def b_cartesian_from_state(
+    state,
+    static,
+    indata=None,
+    *,
+    wout=None,
+    signgs: int | None = None,
+    s_index: int = -1,
+    use_wout_bsup: bool = False,
+    use_vmec_synthesis: bool = False,
+):
+    """Compute Cartesian magnetic field from a solved VMEC state.
+
+    The returned array is evaluated on ``static.grid`` and has shape
+    ``(ntheta, nzeta, 3)`` for the selected radial index. The helper is pure
+    JAX-compatible when ``indata`` is supplied, so callers can use it inside
+    ``jax.jvp`` or as a residual function for ``FixedBoundaryExactOptimizer``.
+
+    Parameters
+    ----------
+    state:
+        Solved :class:`~vmec_jax.state.VMECState`.
+    static:
+        Static object whose grid defines the angular points.
+    indata:
+        VMEC input data. Required unless ``wout`` is supplied.
+    wout:
+        Optional WoutData or wout-like object providing flux/current fields.
+    signgs:
+        VMEC orientation sign. If omitted, uses ``wout.signgs`` when available
+        and otherwise defaults to ``1``.
+    s_index:
+        Radial index to return. ``-1`` is the boundary surface.
+    use_wout_bsup:
+        If True and ``wout`` is supplied, use stored ``bsup*`` Fourier data.
+        This is a reference-parity mode rather than an optimization path.
+    use_vmec_synthesis:
+        Forwarded to ``vmec_bcovar_half_mesh_from_wout``.
+    """
+    from .energy import flux_profiles_from_indata
+    from .profiles import eval_profiles
+    from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
+    from .wout import _icurv_full_mesh_from_indata
+
+    if signgs is None:
+        signgs = int(getattr(wout, "signgs", 1))
+    else:
+        signgs = int(signgs)
+
+    pressure = None
+    if wout is None:
+        if indata is None:
+            raise ValueError("indata is required when wout is not supplied")
+
+        s = jnp.asarray(static.s)
+        if int(s.shape[0]) < 2:
+            s_half = s
+        else:
+            s_half = jnp.concatenate([s[:1], 0.5 * (s[1:] + s[:-1])], axis=0)
+        flux = flux_profiles_from_indata(indata, s, signgs=signgs)
+        prof = eval_profiles(indata, s_half)
+        pressure = prof.get("pressure", jnp.zeros_like(s))
+
+        from .driver import _final_flux_profiles_from_state
+
+        flux, prof = _final_flux_profiles_from_state(
+            indata=indata,
+            static_in=static,
+            state=state,
+            signgs=signgs,
+            flux_local=flux,
+            prof_local=prof,
+            pressure_local=pressure,
+        )
+        pressure = prof.get("pressure", pressure)
+
+        wout = SimpleNamespace(
+            phipf=flux.phipf,
+            phips=flux.phips,
+            chipf=flux.chipf,
+            signgs=signgs,
+            nfp=int(static.cfg.nfp),
+            mpol=int(static.cfg.mpol),
+            ntor=int(static.cfg.ntor),
+            lasym=bool(static.cfg.lasym),
+            ncurr=int(indata.get_int("NCURR", 0)),
+            lcurrent=bool(indata.get_int("NCURR", 0) == 1),
+            icurv=_icurv_full_mesh_from_indata(indata=indata, s_full=s, signgs=signgs),
+            flux_is_internal=True,
+        )
+    elif pressure is None:
+        pressure = getattr(wout, "pres", None)
+
+    bc = vmec_bcovar_half_mesh_from_wout(
+        state=state,
+        static=static,
+        wout=wout,
+        pres=pressure,
+        use_wout_bsup=use_wout_bsup,
+        use_vmec_synthesis=use_vmec_synthesis,
+    )
+    from .geom import eval_geom
+
+    geom = eval_geom(state, static)
+    bsupu = jnp.asarray(bc.bsupu)
+    bsupv = jnp.asarray(bc.bsupv)
+    ns = int(bsupu.shape[0])
+    radial_index = int(s_index)
+    if radial_index < 0:
+        radial_index += ns
+    if radial_index == ns - 1 and ns >= 2:
+        bsupu_edge = 1.5 * bsupu[-1] - 0.5 * bsupu[-2]
+        bsupv_edge = 1.5 * bsupv[-1] - 0.5 * bsupv[-2]
+        bsupu = bsupu.at[-1].set(bsupu_edge)
+        bsupv = bsupv.at[-1].set(bsupv_edge)
+
+    bcart = b_cartesian_from_bsup(
+        geom,
+        bsupu,
+        bsupv,
+        zeta=static.grid.zeta,
+        nfp=int(getattr(wout, "nfp", static.cfg.nfp)),
+    )
+    return bcart[radial_index]
