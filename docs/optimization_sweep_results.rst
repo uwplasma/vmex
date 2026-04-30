@@ -112,6 +112,20 @@ Backend-specific objective panels:
    :align: center
    :alt: GPU optimization policy sweep
 
+Non-stellarator-symmetric LASYM objective panel:
+
+.. image:: _static/figures/qs_ess_objective_panel_asymmetric_all_policies.png
+   :width: 100%
+   :align: center
+   :alt: GPU LASYM optimization policy sweep
+
+The LASYM matrix shown here is the completed GPU matrix.  All non-crashed rows
+report nonzero ``RBS/ZBC`` movement relative to the deterministic ``1e-7``
+asymmetric seed.  The QI continuation, ``max_mode=3``, no-ESS row is retained
+as a failed row because the GPU trust-region solve produced non-finite values;
+that failure is visible in the histories and summary tables instead of being
+removed from the benchmark.
+
 Final-State Atlases
 -------------------
 
@@ -151,6 +165,18 @@ Backend-qualified atlases:
    :align: center
    :alt: GPU direct final-state atlas
 
+GPU LASYM atlases:
+
+.. image:: _static/figures/qs_ess_final_state_atlas_gpu_asymmetric_continuation.png
+   :width: 100%
+   :align: center
+   :alt: GPU LASYM continuation final-state atlas
+
+.. image:: _static/figures/qs_ess_final_state_atlas_gpu_asymmetric_direct.png
+   :width: 100%
+   :align: center
+   :alt: GPU LASYM direct final-state atlas
+
 The legacy ``geometry_atlas`` alias is regenerated from the CPU continuation
 atlas:
 
@@ -185,6 +211,11 @@ JSON are better for analysis scripts.
    :align: center
    :alt: GPU optimization sweep summary tables
 
+.. image:: _static/figures/qs_ess_summary_tables_asymmetric_all_policies.png
+   :width: 100%
+   :align: center
+   :alt: GPU LASYM optimization sweep summary tables
+
 Downloadable summaries:
 
 - :download:`summary_all.csv <_static/figures/qs_ess_summary_all.csv>`
@@ -208,6 +239,14 @@ The legacy ``publication_panel`` alias is regenerated from the same full panel:
    :width: 100%
    :align: center
    :alt: Legacy publication panel alias generated from current sweep data
+
+The LASYM-only publication panel combines the GPU LASYM histories, final-state
+atlases, and summary table:
+
+.. image:: _static/figures/qs_ess_publication_panel_asymmetric_full.png
+   :width: 100%
+   :align: center
+   :alt: GPU LASYM publication panel
 
 Current QI Snapshot
 -------------------
