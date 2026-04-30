@@ -78,7 +78,7 @@ OUTPUT_ROOT = SCRIPT_DIR / "results" / "qs_ess_sweep"
 
 VMEC_MPOL = 5
 VMEC_NTOR = 5
-MODES = (1, 2, 3)
+MODES = (1, 2, 3, 4)
 PROBLEMS = ("qa", "qh", "qp", "qi")
 ESS_OPTIONS = (False, True)
 
@@ -86,15 +86,15 @@ USE_MODE_CONTINUATION = True
 BACKEND_LABEL = "cpu"
 SOLVER_DEVICE: str | None = None
 SKIP_EXISTING = True
-CASE_TIMEOUT_S: float | None = 600.0
+CASE_TIMEOUT_S: float | None = 1200.0
 ESS_ALPHA = 2.5
 STELLARATOR_ASYMMETRIC = False
 ASYMMETRIC_SEED = 1.0e-7
 DIAGNOSTIC_BUDGETS = False
-GPU_PRODUCTION_INNER_MAX_ITER = 120
-GPU_PRODUCTION_INNER_FTOL = 1e-8
-GPU_PRODUCTION_TRIAL_MAX_ITER = 120
-GPU_PRODUCTION_TRIAL_FTOL = 1e-8
+GPU_PRODUCTION_INNER_MAX_ITER = 180
+GPU_PRODUCTION_INNER_FTOL = 1e-9
+GPU_PRODUCTION_TRIAL_MAX_ITER = 180
+GPU_PRODUCTION_TRIAL_FTOL = 1e-9
 
 
 @dataclass(frozen=True)
@@ -114,7 +114,7 @@ CASE_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
     # QA needs a moderately converged inner solve before the iota residual has a
     # useful derivative. The old 40-iteration GPU diagnostic cap kept QA on the
     # zero-iota branch. These budgets were selected to keep each GPU QA case
-    # below the 600 s sweep timeout while moving continuation/ESS cases to the
+    # below the old short sweep timeout while moving continuation/ESS cases to the
     # target-iota basin.
     ("gpu", "continuation", "qa", 1, False): CaseBudget(
         max_nfev=12, continuation_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
@@ -167,47 +167,12 @@ CASE_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
 }
 
 
-# GPU production sweeps use exact discrete-adjoint callbacks, but they should
-# not differentiate through thousands of strict VMEC iterations at every
-# optimizer accepted point.  The final standalone VMEC run can still use the
-# input-deck NITER/FTOL for high-accuracy verification; the optimizer callbacks
-# use these medium-accuracy budgets so cold GPU cases finish in the documented
-# 10-minute envelope.
-GPU_PRODUCTION_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
-    # Bound high-mode continuation so GPU sweeps complete under the documented
-    # per-case timeout. These are intentionally looser than the old diagnostic
-    # caps, but still use the medium-accuracy accepted/trial VMEC callback path.
-    ("gpu", "continuation", "qa", 2, False): CaseBudget(max_nfev=12, continuation_nfev=6),
-    ("gpu", "continuation", "qa", 2, True): CaseBudget(max_nfev=12, continuation_nfev=6),
-    ("gpu", "continuation", "qa", 3, False): CaseBudget(max_nfev=8, continuation_nfev=6),
-    ("gpu", "continuation", "qa", 3, True): CaseBudget(max_nfev=8, continuation_nfev=6),
-    ("gpu", "continuation", "qh", 2, False): CaseBudget(max_nfev=12, continuation_nfev=6),
-    ("gpu", "continuation", "qh", 3, False): CaseBudget(max_nfev=8, continuation_nfev=6),
-    ("gpu", "continuation", "qh", 3, True): CaseBudget(max_nfev=8, continuation_nfev=6),
-    ("gpu", "continuation", "qp", 2, False): CaseBudget(max_nfev=12, continuation_nfev=6),
-    ("gpu", "continuation", "qp", 2, True): CaseBudget(max_nfev=12, continuation_nfev=6),
-    ("gpu", "continuation", "qp", 3, False): CaseBudget(max_nfev=8, continuation_nfev=6),
-    ("gpu", "continuation", "qp", 3, True): CaseBudget(max_nfev=8, continuation_nfev=6),
-    ("gpu", "continuation", "qi", 2, False): CaseBudget(max_nfev=12, continuation_nfev=6),
-    ("gpu", "continuation", "qi", 2, True): CaseBudget(max_nfev=12, continuation_nfev=6),
-    ("gpu", "continuation", "qi", 3, False): CaseBudget(max_nfev=8, continuation_nfev=6),
-    ("gpu", "continuation", "qi", 3, True): CaseBudget(max_nfev=8, continuation_nfev=6),
-    ("gpu", "direct", "qa", 2, False): CaseBudget(max_nfev=12),
-    ("gpu", "direct", "qa", 2, True): CaseBudget(max_nfev=12),
-    ("gpu", "direct", "qa", 3, False): CaseBudget(max_nfev=12),
-    ("gpu", "direct", "qa", 3, True): CaseBudget(max_nfev=12),
-    ("gpu", "direct", "qh", 2, False): CaseBudget(max_nfev=12),
-    ("gpu", "direct", "qh", 3, False): CaseBudget(max_nfev=8),
-    ("gpu", "direct", "qh", 3, True): CaseBudget(max_nfev=8),
-    ("gpu", "direct", "qp", 2, False): CaseBudget(max_nfev=12),
-    ("gpu", "direct", "qp", 2, True): CaseBudget(max_nfev=12),
-    ("gpu", "direct", "qp", 3, False): CaseBudget(max_nfev=8),
-    ("gpu", "direct", "qp", 3, True): CaseBudget(max_nfev=8),
-    ("gpu", "direct", "qi", 2, False): CaseBudget(max_nfev=12),
-    ("gpu", "direct", "qi", 2, True): CaseBudget(max_nfev=12),
-    ("gpu", "direct", "qi", 3, False): CaseBudget(max_nfev=8),
-    ("gpu", "direct", "qi", 3, True): CaseBudget(max_nfev=8),
-}
+# GPU production sweeps use exact discrete-adjoint callbacks with moderately
+# strict accepted/trial VMEC solves, but production quality should not be
+# controlled by small per-case nfev caps.  Let the 20-minute case timeout decide
+# whether high-mode LASYM cases are affordable; keep explicit low nfev caps only
+# in ``CASE_BUDGET_OVERRIDES`` for opt-in ``--diagnostic-budgets`` runs.
+GPU_PRODUCTION_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {}
 
 
 @dataclass(frozen=True)
@@ -255,11 +220,11 @@ PROBLEM_CONFIGS = {
         method="scipy",
         scipy_tr_solver="lsmr",
         scipy_lsmr_maxiter=None,
-        max_nfev=40,
-        continuation_nfev=25,
-        ftol=1e-5,
-        gtol=1e-5,
-        xtol=1e-5,
+        max_nfev=60,
+        continuation_nfev=30,
+        ftol=1e-6,
+        gtol=1e-6,
+        xtol=1e-6,
         # QA direct max_mode=3 can fall into a zero-iota stationary branch:
         # aspect and QS improve, but iota does not move.  ESS is still useful
         # for conditioning, but staged mode continuation is the reliable path
@@ -281,11 +246,11 @@ PROBLEM_CONFIGS = {
         method="scipy",
         scipy_tr_solver="lsmr",
         scipy_lsmr_maxiter=None,
-        max_nfev=30,
-        continuation_nfev=15,
-        ftol=1e-3,
-        gtol=1e-3,
-        xtol=1e-3,
+        max_nfev=60,
+        continuation_nfev=30,
+        ftol=1e-6,
+        gtol=1e-6,
+        xtol=1e-6,
         ess_alpha=ESS_ALPHA,
         target_aspect=7.0,
         target_iota=None,
@@ -303,22 +268,22 @@ PROBLEM_CONFIGS = {
         method="scipy",
         scipy_tr_solver="lsmr",
         scipy_lsmr_maxiter=None,
-        max_nfev=20,
-        continuation_nfev=8,
-        ftol=1e-4,
-        gtol=1e-4,
-        xtol=1e-4,
+        max_nfev=50,
+        continuation_nfev=20,
+        ftol=1e-5,
+        gtol=1e-5,
+        xtol=1e-5,
         ess_alpha=ESS_ALPHA,
         target_aspect=7.0,
         target_iota=None,
         surfaces=np.arange(0.0, 1.01, 0.1),
         helicity_m=0,
         helicity_n=-1,
-        inner_max_iter=80,
-        inner_ftol=1e-8,
-        trial_max_iter=80,
-        trial_ftol=1e-8,
-        iota_abs_min=0.41,
+        inner_max_iter=120,
+        inner_ftol=1e-9,
+        trial_max_iter=120,
+        trial_ftol=1e-9,
+        iota_abs_min=0.4,
         iota_weight=100.0,
     ),
     "qi": ProblemConfig(
@@ -327,22 +292,22 @@ PROBLEM_CONFIGS = {
         method="scipy",
         scipy_tr_solver="lsmr",
         scipy_lsmr_maxiter=None,
-        max_nfev=12,
-        continuation_nfev=6,
-        ftol=1e-3,
-        gtol=1e-3,
-        xtol=1e-3,
+        max_nfev=30,
+        continuation_nfev=12,
+        ftol=1e-4,
+        gtol=1e-4,
+        xtol=1e-4,
         ess_alpha=ESS_ALPHA,
         target_aspect=7.0,
         target_iota=None,
         surfaces=np.linspace(0.2, 1.0, 5),
         helicity_m=0,
         helicity_n=0,
-        inner_max_iter=80,
-        inner_ftol=1e-8,
-        trial_max_iter=80,
-        trial_ftol=1e-8,
-        iota_abs_min=0.41,
+        inner_max_iter=120,
+        inner_ftol=1e-9,
+        trial_max_iter=120,
+        trial_ftol=1e-9,
+        iota_abs_min=0.4,
         iota_weight=100.0,
         objective_kind="qi",
         qi_mboz=6,
@@ -1176,7 +1141,13 @@ def _style_publication():
 def _plot_objective_panel(results: list[CaseResult], outpath_png: Path, outpath_pdf: Path) -> None:
     plt = _style_publication()
 
-    fig, axes = plt.subplots(len(PROBLEMS), 3, figsize=(16.5, 4.3 * len(PROBLEMS)), sharey="row")
+    fig, axes = plt.subplots(
+        len(PROBLEMS),
+        len(MODES),
+        figsize=(5.5 * len(MODES), 4.3 * len(PROBLEMS)),
+        sharey="row",
+        squeeze=False,
+    )
     colors = {False: "#1f77b4", True: "#d95f02"}
     labels = {False: "No ESS", True: "ESS"}
 
@@ -1274,7 +1245,12 @@ def _plot_geometry_atlas(results: list[CaseResult], outpath_png: Path, outpath_p
         ("qi", "bmag_surface.png", "QI |B|"),
     ]
 
-    fig, axes = plt.subplots(len(row_specs), len(columns), figsize=(19.0, 17.4))
+    fig, axes = plt.subplots(
+        len(row_specs),
+        len(columns),
+        figsize=(3.1 * len(columns), 2.2 * len(row_specs)),
+        squeeze=False,
+    )
     for row, (problem, image_name, row_label) in enumerate(row_specs):
         for col, (mode, use_ess) in enumerate(columns):
             ax = axes[row, col]
@@ -1390,7 +1366,7 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Wall-clock timeout per worker case. Use 0 to disable. Timed-out "
             "cases are recorded as crashed so large CPU/GPU sweeps can finish "
-            "and render. Defaults to 600 s."
+            "and render. Defaults to 1200 s."
         ),
     )
     parser.add_argument(

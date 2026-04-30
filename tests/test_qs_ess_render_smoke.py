@@ -120,7 +120,7 @@ def test_qs_ess_sweep_gpu_production_budgets_are_not_diagnostic_caps():
         use_ess=False,
     )
 
-    assert cfg.max_nfev == 12
+    assert cfg.max_nfev == sweep.PROBLEM_CONFIGS["qh"].max_nfev
     assert cfg.inner_max_iter == sweep.GPU_PRODUCTION_INNER_MAX_ITER
     assert cfg.inner_ftol == sweep.GPU_PRODUCTION_INNER_FTOL
     assert cfg.trial_max_iter == sweep.GPU_PRODUCTION_TRIAL_MAX_ITER
@@ -135,8 +135,8 @@ def test_qs_ess_sweep_gpu_production_budgets_are_not_diagnostic_caps():
         use_ess=True,
     )
 
-    assert cont_cfg.max_nfev == 8
-    assert cont_cfg.continuation_nfev == 6
+    assert cont_cfg.max_nfev == sweep.PROBLEM_CONFIGS["qa"].max_nfev
+    assert cont_cfg.continuation_nfev == sweep.PROBLEM_CONFIGS["qa"].continuation_nfev
     assert cont_cfg.inner_max_iter == sweep.GPU_PRODUCTION_INNER_MAX_ITER
     assert cont_cfg.inner_ftol == sweep.GPU_PRODUCTION_INNER_FTOL
 
@@ -149,7 +149,7 @@ def test_qs_ess_sweep_gpu_production_budgets_are_not_diagnostic_caps():
         use_ess=False,
     )
 
-    assert direct_qa_cfg.max_nfev == 12
+    assert direct_qa_cfg.max_nfev == sweep.PROBLEM_CONFIGS["qa"].max_nfev
 
     direct_qh_ess_cfg = sweep._effective_problem_config(
         sweep.PROBLEM_CONFIGS["qh"],
@@ -160,7 +160,7 @@ def test_qs_ess_sweep_gpu_production_budgets_are_not_diagnostic_caps():
         use_ess=True,
     )
 
-    assert direct_qh_ess_cfg.max_nfev == 8
+    assert direct_qh_ess_cfg.max_nfev == sweep.PROBLEM_CONFIGS["qh"].max_nfev
 
     diag_cfg = sweep._effective_problem_config(
         sweep.PROBLEM_CONFIGS["qh"],
