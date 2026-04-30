@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 from dataclasses import asdict, dataclass
 import csv
 import json
@@ -33,8 +34,8 @@ ROW_SPECS = (
     ("qi", "direct"),
 )
 MODES_BY_POLICY = {
-    "continuation": (1, 2, 3),
-    "direct": (1, 2, 3),
+    "continuation": (1, 2, 3, 4),
+    "direct": (1, 2, 3, 4),
 }
 _TIMEOUT_SECONDS_RE = re.compile(r"timed out after\s+([0-9]+(?:\.[0-9]+)?)\s*s")
 
@@ -1241,7 +1242,22 @@ def _copy_alias(src_stem: Path, dst_stem: Path) -> None:
             shutil.copy2(src, dst_stem.with_suffix(suffix))
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--output-root",
+        type=Path,
+        default=OUTPUT_ROOT,
+        help="Sweep result root to read and write rendered panels. Defaults to examples/optimization/results/qs_ess_sweep.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    global OUTPUT_ROOT
+    args = _parse_args()
+    OUTPUT_ROOT = args.output_root.resolve()
+
     results = _discover_results()
     results = _publication_results(results)
     _write_combined_summary(results)
