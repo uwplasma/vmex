@@ -462,8 +462,9 @@ Full QA/QH/QP/QI policy sweep
 
 The sweep below compares four target objectives:
 
-- QA: aspect ratio, mean iota, and quasi-axisymmetry.
-- QH: aspect ratio and quasi-helical symmetry.
+- QA: aspect ratio, signed mean iota target, and quasi-axisymmetry.
+- QH: aspect ratio, a smooth ``abs(mean_iota) >= 0.40`` lower bound, and
+  quasi-helical symmetry.
 - QP: aspect ratio, quasi-poloidal symmetry, and a smooth
   ``abs(mean_iota) >= 0.40`` lower bound.
 - QI: aspect ratio and a differentiable smooth Boozer-space
