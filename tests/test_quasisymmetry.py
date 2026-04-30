@@ -225,6 +225,60 @@ def test_quasisymmetry_ratio_residual_returns_diagnostic_fields():
     )
 
 
+@pytest.mark.parametrize(
+    ("filename", "helicity_m", "helicity_n", "expected_total", "expected_profile"),
+    [
+        (
+            "wout_li383_low_res.nc",
+            1,
+            1,
+            0.20657479140083462,
+            [0.026328741242275744, 0.06337277437029094, 0.11687327578826792],
+        ),
+        (
+            "wout_nfp4_QH_warm_start.nc",
+            1,
+            -1,
+            0.06535102501039897,
+            [0.004964336247390136, 0.017396361463970656, 0.042990327299038164],
+        ),
+        (
+            "wout_LandremanPaul2021_QA_lowres.nc",
+            1,
+            0,
+            7.800132285797323e-08,
+            [1.8742987587697922e-08, 2.3570159194276813e-08, 3.568817607599847e-08],
+        ),
+    ],
+)
+def test_quasisymmetry_ratio_residual_regression_on_bundled_wouts(
+    filename,
+    helicity_m,
+    helicity_n,
+    expected_total,
+    expected_profile,
+):
+    pytest.importorskip("jax")
+
+    from vmec_jax import load_wout
+    from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_wout
+
+    root = os.path.dirname(os.path.dirname(__file__))
+    wout = load_wout(os.path.join(root, "examples", "data", filename))
+    qs = quasisymmetry_ratio_residual_from_wout(
+        wout,
+        surfaces=[0.25, 0.5, 0.75],
+        helicity_m=helicity_m,
+        helicity_n=helicity_n,
+        ntheta=13,
+        nphi=14,
+    )
+
+    assert np.asarray(qs["residuals1d"]).shape == (3 * 13 * 14,)
+    np.testing.assert_allclose(np.asarray(qs["total"]), expected_total, rtol=1.0e-8, atol=1.0e-12)
+    np.testing.assert_allclose(np.asarray(qs["profile"]), expected_profile, rtol=1.0e-7, atol=1.0e-12)
+
+
 def test_quasisymmetry_ratio_residual_supports_lasym_wout():
     pytest.importorskip("jax")
 
