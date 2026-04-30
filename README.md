@@ -323,8 +323,11 @@ PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 The LASYM panels are published as a partial 1200 s snapshot. This is useful
 because the failures are informative: current mode-4 GPU LASYM lanes include
-timeout and GPU-memory limits in the exact tangent replay path. In the snapshot
-used here, the partial LASYM table contains 8 CPU rows and 55 GPU rows.
+timeout and GPU-memory limits in the exact tangent replay path. In the frozen
+snapshot used here, the partial LASYM table contains 13 CPU rows and 61 GPU
+rows. The CPU subset has 6 successful rows, 6 crashed rows, and 1 budgeted
+stop; the GPU subset has 19 successful rows, 10 crashed rows, and 32 budgeted
+stops.
 
 <p align="center">
   <img src="docs/_static/figures/qs_ess_objective_panel_asymmetric_all_policies.png" width="980" />

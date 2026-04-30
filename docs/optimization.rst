@@ -335,7 +335,9 @@ and full publication panels when those cases are present.
 The published LASYM figures are partial 1200 second lanes rather than a
 complete matrix.  This is intentional: timeout and GPU-memory failures are
 useful performance data for the asymmetric exact/replay path.  The current
-snapshot contains 8 CPU LASYM rows and 55 GPU LASYM rows.
+frozen snapshot contains 13 CPU LASYM rows and 61 GPU LASYM rows.  The CPU
+subset has 6 successful rows, 6 crashed rows, and 1 budgeted stop; the GPU
+subset has 19 successful rows, 10 crashed rows, and 32 budgeted stops.
 
 For NVIDIA-only JAX installations, ``JAX_PLATFORMS=cuda`` is also valid.  Do
 not use ``JAX_PLATFORMS=gpu``: some JAX versions interpret that as both CUDA

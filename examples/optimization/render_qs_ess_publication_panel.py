@@ -410,10 +410,11 @@ def _draw_placeholder(ax, message: str, *, title: str | None = None) -> None:
         "color": "0.42",
         "style": "italic",
     }
-    if hasattr(ax, "text2D"):
-        ax.text2D(0.5, 0.5, message, **text_kwargs)
-    else:
-        ax.text(0.5, 0.5, message, **text_kwargs)
+    if message:
+        if hasattr(ax, "text2D"):
+            ax.text2D(0.5, 0.5, message, **text_kwargs)
+        else:
+            ax.text(0.5, 0.5, message, **text_kwargs)
     if title is not None:
         ax.set_title(title, fontsize=11)
 
@@ -473,9 +474,9 @@ def _row_has_history(
             mode_results.append(result)
         if all(result is not None for result in mode_results):
             return True
-    # Partial LASYM matrices are publishable: a 1200 s timeout, OOM, or
-    # still-pending lane is itself useful sweep information.  The plotter marks
-    # missing/failed cells explicitly instead of hiding the whole row.
+    # Partial LASYM matrices are publishable: a 1200 s timeout or OOM is useful
+    # sweep information.  Missing lanes are kept as blank cells instead of
+    # emitting stale "pending" labels into README figures.
     return has_any
 
 
@@ -725,11 +726,7 @@ def _plot_objective_panel_all_policies(results: list[CaseResult], outpath_png: P
                     if wall != "-":
                         status = f"{status}, {wall} min"
                     fallback_lines.append(f"{line_labels[use_ess]}: {status}")
-                if fallback_lines:
-                    placeholder = "\n".join(fallback_lines)
-                else:
-                    placeholder = "pending"
-                _draw_placeholder(ax, placeholder)
+                _draw_placeholder(ax, "\n".join(fallback_lines))
                 ax.text(
                     0.01,
                     0.99,
@@ -848,7 +845,7 @@ def _plot_state_atlas(
                 title = f"mode {max_mode} | {_ess_label(use_ess)}"
             if result is None or payload is None:
                 ax3d = fig.add_subplot(grid[row_surface, col_index], projection="3d")
-                _draw_placeholder(ax3d, "pending", title=title)
+                _draw_placeholder(ax3d, "", title=title)
                 if col_index == 0:
                     ax3d.text2D(
                         -0.16,
@@ -862,7 +859,7 @@ def _plot_state_atlas(
                         fontweight="bold",
                     )
                 ax2d = fig.add_subplot(grid[row_contour, col_index])
-                _draw_placeholder(ax2d, "pending")
+                _draw_placeholder(ax2d, "")
                 if col_index == 0:
                     ax2d.set_ylabel("theta")
                     ax2d.text(
@@ -1024,7 +1021,7 @@ def _plot_summary_tables(results: list[CaseResult], outpath_png: Path, outpath_p
             is not None
         ]
         if not group:
-            _draw_placeholder(ax, "pending")
+            _draw_placeholder(ax, "")
             ax.set_title(
                 _row_label(problem, policy, backend, stellarator_asymmetric=stellarator_asymmetric),
                 fontsize=12,

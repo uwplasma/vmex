@@ -118,6 +118,7 @@ Non-stellarator-symmetric LASYM runs use the same script with
 ``--stellarator-asymmetric``.  The current LASYM artifacts are intentionally
 published as partial 1200 second lanes.  Timeout and OOM rows are kept because
 they document the current cost envelope of the asymmetric exact/replay path.
+The frozen snapshot has 13 CPU LASYM rows and 61 GPU LASYM rows.
 
 .. image:: _static/figures/qs_ess_objective_panel_asymmetric_all_policies.png
    :width: 100%
