@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
+from types import ModuleType
 from types import SimpleNamespace
 
 import numpy as np
@@ -18,6 +20,7 @@ from vmec_jax.plotting import (
     bsup_from_wout,
     closed_theta_grid,
     fix_matplotlib_3d,
+    prepare_matplotlib_3d,
     profiles_from_wout,
     select_zeta_slices,
     surface_data_from_wout,
@@ -209,3 +212,22 @@ def test_fix_matplotlib_3d_sets_equal_radius_limits():
     assert axis.xlim == (-1.0, 3.0)
     assert axis.ylim == (-2.0, 2.0)
     assert axis.zlim == (8.5, 12.5)
+
+
+def test_prepare_matplotlib_3d_replaces_mixed_system_toolkit(tmp_path, monkeypatch):
+    toolkit = tmp_path / "mpl_toolkits"
+    (toolkit / "mplot3d").mkdir(parents=True)
+    (toolkit / "mplot3d" / "axes3d.py").write_text("class Axes3D: pass\n")
+
+    system_toolkit = ModuleType("mpl_toolkits")
+    system_toolkit.__file__ = "/usr/lib/python3/dist-packages/mpl_toolkits/__init__.py"
+    system_toolkit.__path__ = ["/usr/lib/python3/dist-packages/mpl_toolkits"]
+    monkeypatch.setitem(sys.modules, "mpl_toolkits", system_toolkit)
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    prepare_matplotlib_3d()
+
+    prepared = sys.modules["mpl_toolkits"]
+    prepared_paths = list(prepared.__path__)
+    assert all("/usr/lib/python3/dist-packages" not in path for path in prepared_paths)
+    assert any((Path(path) / "mplot3d" / "axes3d.py").exists() for path in prepared_paths)

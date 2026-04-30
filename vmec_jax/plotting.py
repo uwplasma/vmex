@@ -9,7 +9,11 @@ matplotlib) can be layered on top.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import importlib.machinery
 from pathlib import Path
+import site
+import sys
+import types
 from typing import Iterable
 
 import numpy as np
@@ -69,6 +73,67 @@ def fix_matplotlib_3d(ax):
     ax.set_xlim3d([x_middle - plot_radius, x_middle + plot_radius])
     ax.set_ylim3d([y_middle - plot_radius, y_middle + plot_radius])
     ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
+
+
+def prepare_matplotlib_3d() -> None:
+    """Prefer the Matplotlib-matched ``mpl_toolkits`` namespace before plotting.
+
+    Some Linux installations preload ``mpl_toolkits`` from the system
+    ``dist-packages`` while importing a newer pip-installed ``matplotlib`` from
+    user site-packages.  That mixed state makes ``projection="3d"`` fail with
+    errors such as ``cannot import name 'docstring' from 'matplotlib'``.  If we
+    detect that state and a user/site ``mpl_toolkits.mplot3d`` is available,
+    replace the preloaded namespace before ``pyplot`` imports Matplotlib
+    projections.
+    """
+
+    loaded = sys.modules.get("mpl_toolkits")
+    loaded_file = str(getattr(loaded, "__file__", "")) if loaded is not None else ""
+    loaded_paths = [str(path) for path in getattr(loaded, "__path__", [])] if loaded is not None else []
+    loaded_from_system_dist = "/usr/lib/python3/dist-packages" in loaded_file or any(
+        "/usr/lib/python3/dist-packages" in path for path in loaded_paths
+    )
+    if loaded is not None and not loaded_from_system_dist:
+        return
+
+    candidate_bases: list[str] = []
+    for getter in (site.getusersitepackages, site.getsitepackages):
+        try:
+            value = getter()
+        except Exception:
+            continue
+        if isinstance(value, str):
+            candidate_bases.append(value)
+        else:
+            candidate_bases.extend(value)
+    candidate_bases.extend(sys.path)
+
+    toolkit_path: Path | None = None
+    for base in candidate_bases:
+        if not base:
+            continue
+        candidate = Path(base) / "mpl_toolkits"
+        if "/usr/lib/python3/dist-packages" in str(candidate):
+            continue
+        if (candidate / "mplot3d" / "axes3d.py").exists():
+            toolkit_path = candidate
+            break
+
+    if toolkit_path is None:
+        return
+
+    for name in list(sys.modules):
+        if name == "mpl_toolkits" or name.startswith("mpl_toolkits."):
+            del sys.modules[name]
+
+    module = types.ModuleType("mpl_toolkits")
+    module.__path__ = [str(toolkit_path)]
+    module.__package__ = "mpl_toolkits"
+    module.__file__ = str(toolkit_path / "__init__.py")
+    spec = importlib.machinery.ModuleSpec("mpl_toolkits", loader=None, is_package=True)
+    spec.submodule_search_locations = [str(toolkit_path)]
+    module.__spec__ = spec
+    sys.modules["mpl_toolkits"] = module
 
 
 def _mode_table_from_wout(wout, *, nyq: bool, physical: bool = False) -> ModeTable:
@@ -704,6 +769,7 @@ def surface_stack(
 
 def _import_matplotlib():
     try:
+        prepare_matplotlib_3d()
         import matplotlib
 
         matplotlib.use("Agg", force=True)
@@ -954,6 +1020,7 @@ def _lcfs_xyz(R: np.ndarray, Z: np.ndarray, phi: np.ndarray):
 
 def _plot_3d_boundary_comparison(wout_init, wout_final, outdir: Path) -> Path:
     """3-D LCFS plots coloured by |B|, initial (left) vs optimised (right)."""
+    prepare_matplotlib_3d()
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -1021,6 +1088,7 @@ def _plot_bmag_contours(wout_init, wout_final, outdir: Path) -> Path:
     visually obvious.  The toroidal axis covers exactly **one field period**:
     ζ ∈ [0, 2π/nfp].  Poloidal axis: θ ∈ [0, 2π].
     """
+    prepare_matplotlib_3d()
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -1087,6 +1155,7 @@ def _plot_bmag_contours(wout_init, wout_final, outdir: Path) -> Path:
 def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
     """Objective value, aspect ratio, and (optionally) iota vs Jacobian evaluation."""
     import json
+    prepare_matplotlib_3d()
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -1270,6 +1339,7 @@ def plot_wout(
         ``{"vmec_params", "poloidal_plot", "vmec_surfaces", "3d_plot"}``
         mapping to saved :class:`~pathlib.Path` objects.
     """
+    prepare_matplotlib_3d()
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
