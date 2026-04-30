@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # ruff: noqa: E402
-"""Benchmark QA/QH optimisation policies across max_mode=1/2/3.
+"""Benchmark QA/QH optimisation policies across configured ``max_mode`` values.
 
 This script runs a small benchmark matrix for the standalone vmec_jax exact
 optimisation path.  It compares three boundary-parameterisation policies:
@@ -45,6 +45,7 @@ from vmec_jax.geom import eval_geom
 from vmec_jax.init_guess import initial_guess_from_boundary
 from vmec_jax.optimization import rebuild_indata_with_resolution
 from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_state
+from vmec_jax.plotting import prepare_matplotlib_3d
 from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -395,6 +396,7 @@ def _worker(problem: str, max_mode: int, policy: Policy, output_dir: str, result
 
 
 def _plot_policy_matrix(results: list[CaseResult], *, problem: str, outpath: Path) -> None:
+    prepare_matplotlib_3d()
     import matplotlib
 
     matplotlib.use("Agg")
@@ -431,6 +433,7 @@ def _plot_policy_matrix(results: list[CaseResult], *, problem: str, outpath: Pat
 
 
 def _plot_policy_matrix_all(results: list[CaseResult], *, outpath: Path) -> None:
+    prepare_matplotlib_3d()
     import matplotlib
 
     matplotlib.use("Agg")
@@ -470,6 +473,7 @@ def _plot_policy_matrix_all(results: list[CaseResult], *, outpath: Path) -> None
 
 
 def _plot_best_equilibria(results: list[CaseResult], *, outpath: Path) -> None:
+    prepare_matplotlib_3d()
     import matplotlib
 
     matplotlib.use("Agg")

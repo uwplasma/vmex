@@ -1286,6 +1286,7 @@ def plot_qh_optimization(
         print(f"  Saved {p}")
 
     if show:
+        prepare_matplotlib_3d()
         import matplotlib.pyplot as plt
         plt.show()
 
