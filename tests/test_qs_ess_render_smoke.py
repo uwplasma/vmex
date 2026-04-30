@@ -303,10 +303,10 @@ def test_qs_ess_renderer_separates_lasym_records(tmp_path, monkeypatch):
     asym = lookup[("cpu", True, "continuation", "qa", 1, False)]
     assert asym.objective_final == 0.25
     assert asym.asymmetric_dof_count == 8
-    assert ("cpu", True, "qa", "continuation") not in renderer._available_row_specs(discovered)
+    assert ("cpu", True, "qa", "continuation") in renderer._available_row_specs(discovered)
 
 
-def test_qs_ess_renderer_drops_incomplete_lasym_publication_groups():
+def test_qs_ess_renderer_keeps_partial_lasym_publication_groups():
     renderer = _load_renderer_module()
 
     sym = renderer.CaseResult(
@@ -352,7 +352,7 @@ def test_qs_ess_renderer_drops_incomplete_lasym_publication_groups():
     lookup = renderer._result_lookup(filtered)
 
     assert ("cpu", False, "continuation", "qa", 1, False) in lookup
-    assert ("cpu", True, "direct", "qa", 1, False) not in lookup
+    assert ("cpu", True, "direct", "qa", 1, False) in lookup
     assert ("gpu", True, "direct", "qa", 1, False) in lookup
 
 

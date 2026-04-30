@@ -473,11 +473,10 @@ def _row_has_history(
             mode_results.append(result)
         if all(result is not None for result in mode_results):
             return True
-    # Avoid publishing stale one-off asymmetric smoke rows.  The plotting
-    # routines still support partial matrices when called directly in tests or
-    # notebooks; discovery-based publication panels require at least one full
-    # ESS/no-ESS pair for the row.
-    return has_any and not bool(stellarator_asymmetric)
+    # Partial LASYM matrices are publishable: a 1200 s timeout, OOM, or
+    # still-pending lane is itself useful sweep information.  The plotter marks
+    # missing/failed cells explicitly instead of hiding the whole row.
+    return has_any
 
 
 def _available_row_specs(results: list[CaseResult]) -> list[tuple[str, bool, str, str]]:
@@ -527,21 +526,9 @@ def _policy_matrix_complete(
 
 
 def _publication_results(results: list[CaseResult]) -> list[CaseResult]:
-    """Drop incomplete LASYM smoke matrices from publication artifacts."""
+    """Return all discovered results, including partial LASYM lanes."""
 
-    filtered: list[CaseResult] = []
-    for result in results:
-        if not bool(result.stellarator_asymmetric):
-            filtered.append(result)
-            continue
-        if _policy_matrix_complete(
-            results,
-            backend=result.backend,
-            stellarator_asymmetric=True,
-            policy=result.policy,
-        ):
-            filtered.append(result)
-    return filtered
+    return list(results)
 
 
 def _problems_with_payloads(
@@ -770,7 +757,7 @@ def _plot_objective_panel_all_policies(results: list[CaseResult], outpath_png: P
     handles, labels = axes[0, 0].get_legend_handles_labels()
     status_handles = [
         Line2D([0], [0], color="0.25", linestyle="-", linewidth=2.2, label="solid: optimizer success"),
-        Line2D([0], [0], color="0.25", linestyle="--", linewidth=2.2, label="dashed: stopped/diagnostic budget"),
+        Line2D([0], [0], color="0.25", linestyle="--", linewidth=2.2, label="dashed: stopped, failed, or budgeted"),
     ]
     if handles:
         fig.legend(

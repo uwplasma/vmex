@@ -84,8 +84,9 @@ Objective Histories
 -------------------
 
 The all-policy panel contains every available backend/policy row.  Solid curves
-met the optimizer success criterion; dashed curves reached the configured
-``max_nfev`` before satisfying convergence tolerances.
+met the optimizer success criterion; dashed curves are stopped, failed, or
+budgeted lanes.  The summary tables distinguish ``max_nfev`` stops from
+1200 second timeouts and GPU-memory failures.
 Vertical dotted lines mark continuation stage boundaries.
 
 .. image:: _static/figures/qs_ess_objective_panel_all_policies.png
@@ -114,9 +115,14 @@ Backend-specific objective panels:
    :alt: GPU optimization policy sweep
 
 Non-stellarator-symmetric LASYM runs use the same script with
-``--stellarator-asymmetric``.  LASYM mode-4 results are not included in the
-current published artifact set until the CPU/GPU LASYM matrix is rerun
-end-to-end with the same 1200 second per-case budget as the symmetric sweep.
+``--stellarator-asymmetric``.  The current LASYM artifacts are intentionally
+published as partial 1200 second lanes.  Timeout and OOM rows are kept because
+they document the current cost envelope of the asymmetric exact/replay path.
+
+.. image:: _static/figures/qs_ess_objective_panel_asymmetric_all_policies.png
+   :width: 100%
+   :align: center
+   :alt: Partial LASYM optimization policy sweep
 
 Final-State Atlases
 -------------------
@@ -157,6 +163,30 @@ Backend-qualified atlases:
    :align: center
    :alt: GPU direct final-state atlas
 
+Partial LASYM atlases are rendered separately.  Missing or failed lanes are
+shown as placeholders, while successful lanes include one colorbar per 3-D
+surface and one colorbar per LCFS ``|B|`` contour panel.
+
+.. image:: _static/figures/qs_ess_final_state_atlas_asymmetric_cpu_continuation.png
+   :width: 100%
+   :align: center
+   :alt: Partial CPU LASYM continuation final-state atlas
+
+.. image:: _static/figures/qs_ess_final_state_atlas_asymmetric_cpu_direct.png
+   :width: 100%
+   :align: center
+   :alt: Partial CPU LASYM direct final-state atlas
+
+.. image:: _static/figures/qs_ess_final_state_atlas_asymmetric_gpu_continuation.png
+   :width: 100%
+   :align: center
+   :alt: Partial GPU LASYM continuation final-state atlas
+
+.. image:: _static/figures/qs_ess_final_state_atlas_asymmetric_gpu_direct.png
+   :width: 100%
+   :align: center
+   :alt: Partial GPU LASYM direct final-state atlas
+
 The legacy ``geometry_atlas`` alias is regenerated from the CPU continuation
 atlas:
 
@@ -191,6 +221,11 @@ JSON are better for analysis scripts.
    :align: center
    :alt: GPU optimization sweep summary tables
 
+.. image:: _static/figures/qs_ess_summary_tables_asymmetric_all_policies.png
+   :width: 100%
+   :align: center
+   :alt: Partial LASYM optimization sweep summary tables
+
 Downloadable summaries:
 
 - :download:`summary_all.csv <_static/figures/qs_ess_summary_all.csv>`
@@ -214,6 +249,13 @@ The legacy ``publication_panel`` alias is regenerated from the same full panel:
    :width: 100%
    :align: center
    :alt: Legacy publication panel alias generated from current sweep data
+
+The LASYM-only full panel is also generated from the partial asymmetric lanes:
+
+.. image:: _static/figures/qs_ess_publication_panel_asymmetric_full.png
+   :width: 100%
+   :align: center
+   :alt: Partial LASYM publication panel
 
 Current QI Snapshot
 -------------------
