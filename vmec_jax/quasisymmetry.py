@@ -29,6 +29,45 @@ def _as_weight_array(weights, nsurf: int) -> jnp.ndarray:
     return jnp.asarray(list(weights), dtype=jnp.float64)
 
 
+def _quasisymmetry_angle_cache(
+    *,
+    nfp: int,
+    xm_nyq,
+    xn_nyq,
+    ntheta: int = 63,
+    nphi: int = 64,
+) -> dict[str, object]:
+    """Precompute the fixed angular grid used by QS residuals.
+
+    Optimisation callbacks evaluate the same QS grid many times at different
+    VMEC states.  Keeping these arrays outside the residual trace avoids
+    rebuilding the mesh and trigonometric tables for every residual/Jacobian
+    callback while preserving the public uncached API.
+    """
+    ntheta = int(ntheta)
+    nphi = int(nphi)
+    nfp = int(nfp)
+    theta1d = jnp.linspace(0.0, 2.0 * jnp.pi, ntheta, endpoint=False, dtype=jnp.float64)
+    phi1d = jnp.linspace(0.0, 2.0 * jnp.pi / nfp, nphi, endpoint=False, dtype=jnp.float64)
+    theta2d, phi2d = jnp.meshgrid(theta1d, phi1d, indexing="ij")
+    xm_nyq = _as_jax_array(xm_nyq, dtype=np.float64)
+    xn_nyq = _as_jax_array(xn_nyq, dtype=np.float64)
+    angle = theta2d[:, :, None] * xm_nyq[None, None, :] - phi2d[:, :, None] * xn_nyq[None, None, :]
+    return {
+        "ntheta": ntheta,
+        "nphi": nphi,
+        "nfp": nfp,
+        "theta1d": theta1d,
+        "phi1d": phi1d,
+        "theta2d": theta2d,
+        "phi2d": phi2d,
+        "dtheta": theta1d[1] - theta1d[0],
+        "dphi": phi1d[1] - phi1d[0],
+        "cosangle": jnp.cos(angle),
+        "sinangle": jnp.sin(angle),
+    }
+
+
 def _half_grid(radial_count: int, dtype) -> jnp.ndarray:
     if radial_count < 2:
         return jnp.zeros((0,), dtype=dtype)
@@ -413,6 +452,7 @@ def quasisymmetry_ratio_residual_from_wout(
     weights: Iterable[float] | None = None,
     ntheta: int = 63,
     nphi: int = 64,
+    angle_cache: dict[str, object] | None = None,
 ):
     """Evaluate the VMEC-only quasisymmetry residual from wout-like data."""
     _require_jax()
@@ -432,7 +472,9 @@ def quasisymmetry_ratio_residual_from_wout(
     radial_count = int(iotas_full.shape[0])
     s_half = _half_grid(radial_count, iotas_full.dtype)
     half_count = int(s_half.shape[0])
-    mode_count = int(_as_jax_array(getattr(wout, "xm_nyq"), dtype=np.float64).shape[0])
+    xm_nyq = _as_jax_array(getattr(wout, "xm_nyq"), dtype=np.float64)
+    xn_nyq = _as_jax_array(getattr(wout, "xn_nyq"), dtype=np.float64)
+    mode_count = int(xm_nyq.shape[0])
 
     iota = _interp_half_grid(iotas_full[1:], surfaces, s_half)
     G = _interp_half_grid(_as_jax_array(getattr(wout, "bvco"), dtype=np.float64)[1:], surfaces, s_half)
@@ -524,15 +566,25 @@ def quasisymmetry_ratio_residual_from_wout(
         s_half,
     )
 
-    theta1d = jnp.linspace(0.0, 2.0 * jnp.pi, ntheta, endpoint=False, dtype=jnp.float64)
-    phi1d = jnp.linspace(0.0, 2.0 * jnp.pi / nfp, nphi, endpoint=False, dtype=jnp.float64)
-    theta2d, phi2d = jnp.meshgrid(theta1d, phi1d, indexing="ij")
-
-    xm_nyq = _as_jax_array(getattr(wout, "xm_nyq"), dtype=np.float64)
-    xn_nyq = _as_jax_array(getattr(wout, "xn_nyq"), dtype=np.float64)
-    angle = theta2d[:, :, None] * xm_nyq[None, None, :] - phi2d[:, :, None] * xn_nyq[None, None, :]
-    cosangle = jnp.cos(angle)
-    sinangle = jnp.sin(angle)
+    if angle_cache is None:
+        angle_cache = _quasisymmetry_angle_cache(
+            nfp=nfp,
+            xm_nyq=xm_nyq,
+            xn_nyq=xn_nyq,
+            ntheta=ntheta,
+            nphi=nphi,
+        )
+    else:
+        ntheta = int(angle_cache["ntheta"])
+        nphi = int(angle_cache["nphi"])
+    theta1d = angle_cache["theta1d"]
+    phi1d = angle_cache["phi1d"]
+    theta2d = angle_cache["theta2d"]
+    phi2d = angle_cache["phi2d"]
+    dtheta = angle_cache["dtheta"]
+    dphi = angle_cache["dphi"]
+    cosangle = angle_cache["cosangle"]
+    sinangle = angle_cache["sinangle"]
 
     modB = jnp.einsum("sm,tpm->stp", bmnc, cosangle) + jnp.einsum("sm,tpm->stp", bmns, sinangle)
     d_B_d_theta = jnp.einsum("sm,tpm,m->stp", bmnc, -sinangle, xm_nyq) + jnp.einsum(
@@ -560,8 +612,6 @@ def quasisymmetry_ratio_residual_from_wout(
     B_dot_grad_B = bsupu * d_B_d_theta + bsupv * d_B_d_phi
     B_cross_grad_B_dot_grad_psi = d_psi_d_s * (bsubu * d_B_d_phi - bsubv * d_B_d_theta) / sqrtg_safe
 
-    dtheta = theta1d[1] - theta1d[0]
-    dphi = phi1d[1] - phi1d[0]
     sqrtg_abs = jnp.abs(sqrtg)
     sqrtg_abs_safe = jnp.maximum(sqrtg_abs, jnp.asarray(jnp.finfo(sqrtg.dtype).tiny, dtype=sqrtg.dtype))
     modB_safe = jnp.maximum(jnp.abs(modB), jnp.asarray(jnp.finfo(modB.dtype).tiny, dtype=modB.dtype))
@@ -628,6 +678,7 @@ def quasisymmetry_ratio_residual_from_state(
     flux_local=None,
     prof_local=None,
     pressure_local=None,
+    angle_cache: dict[str, object] | None = None,
 ):
     """Evaluate the VMEC-only QS residual directly from a solved state."""
     data = quasisymmetry_diagnostics_from_state(
@@ -647,4 +698,5 @@ def quasisymmetry_ratio_residual_from_state(
         weights=weights,
         ntheta=ntheta,
         nphi=nphi,
+        angle_cache=angle_cache,
     )
