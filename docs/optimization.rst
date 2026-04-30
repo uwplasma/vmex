@@ -555,31 +555,11 @@ and full publication panels when those cases are present.
    JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --stellarator-asymmetric
    python examples/optimization/render_qs_ess_publication_panel.py
 
-The current published LASYM result is the completed GPU matrix.  Every
-non-crashed row has nonzero ``RBS/ZBC`` movement relative to the seeded
-asymmetric subspace.  The QI continuation, ``max_mode=3``, no-ESS row is kept
-as a failed benchmark row because the GPU trust-region matrix became
-non-finite; the final-state atlas marks that panel as pending.
-
-.. image:: _static/figures/qs_ess_objective_panel_asymmetric_all_policies.png
-   :width: 100%
-   :align: center
-   :alt: GPU LASYM QA, QH, QP, and QI optimization histories
-
-.. image:: _static/figures/qs_ess_final_state_atlas_gpu_asymmetric_continuation.png
-   :width: 100%
-   :align: center
-   :alt: GPU LASYM continuation final-state atlas
-
-.. image:: _static/figures/qs_ess_final_state_atlas_gpu_asymmetric_direct.png
-   :width: 100%
-   :align: center
-   :alt: GPU LASYM direct-start final-state atlas
-
-.. image:: _static/figures/qs_ess_summary_tables_asymmetric_all_policies.png
-   :width: 100%
-   :align: center
-   :alt: GPU LASYM wall-time summary tables
+The current published optimization figures below show the complete
+stellarator-symmetric CPU/GPU matrix through ``max_mode=4``.  The LASYM command
+path is retained here for reproducibility, but LASYM figures are intentionally
+not published until the mode-4 CPU/GPU LASYM matrix is rerun end-to-end with the
+same 1200 second per-case budget.
 
 For NVIDIA-only JAX installations, ``JAX_PLATFORMS=cuda`` is also valid.  Do
 not use ``JAX_PLATFORMS=gpu``: some JAX versions interpret that as both CUDA

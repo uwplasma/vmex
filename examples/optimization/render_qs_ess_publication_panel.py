@@ -609,17 +609,24 @@ def _plot_objective_panel_all_policies(results: list[CaseResult], outpath_png: P
     row_specs = _available_row_specs(results)
     if not row_specs:
         raise ValueError("No optimization histories are available to plot")
-    fig, axes = plt.subplots(len(row_specs), 3, figsize=(18.2, 3.65 * len(row_specs)), sharey="row")
+    modes_to_plot = tuple(sorted({mode for modes in MODES_BY_POLICY.values() for mode in modes}))
+    ncols = len(modes_to_plot)
+    fig, axes = plt.subplots(
+        len(row_specs),
+        ncols,
+        figsize=(5.9 * ncols, 3.65 * len(row_specs)),
+        sharey="row",
+    )
     if len(row_specs) == 1:
         axes = np.asarray([axes])
     colors = {False: "#1f77b4", True: "#d95f02"}
     line_labels = {False: "No ESS", True: "ESS"}
-    mode_titles = ("Mode 1 baseline", "Mode 2", "Mode 3")
+    mode_titles = {mode: ("Mode 1 baseline" if mode == 1 else f"Mode {mode}") for mode in modes_to_plot}
 
     for row_index, (backend, stellarator_asymmetric, problem, policy) in enumerate(row_specs):
-        for col_index, max_mode in enumerate((1, 2, 3)):
+        for col_index, max_mode in enumerate(modes_to_plot):
             ax = axes[row_index, col_index]
-            panel_label = _panel_label(row_index * 3 + col_index)
+            panel_label = _panel_label(row_index * ncols + col_index)
             ax.text(
                 0.01,
                 0.99,
@@ -631,7 +638,7 @@ def _plot_objective_panel_all_policies(results: list[CaseResult], outpath_png: P
                 fontweight="bold",
             )
             if row_index == 0:
-                ax.set_title(mode_titles[col_index], fontsize=12)
+                ax.set_title(mode_titles[max_mode], fontsize=12)
             annotation_lines = []
             plotted_any = False
             baseline_note = policy == "direct" and max_mode == 1
