@@ -151,6 +151,17 @@ def test_qs_ess_sweep_gpu_production_budgets_are_not_diagnostic_caps():
 
     assert direct_qa_cfg.max_nfev == 12
 
+    direct_qh_ess_cfg = sweep._effective_problem_config(
+        sweep.PROBLEM_CONFIGS["qh"],
+        backend="gpu",
+        policy="direct",
+        problem="qh",
+        max_mode=3,
+        use_ess=True,
+    )
+
+    assert direct_qh_ess_cfg.max_nfev == 8
+
     diag_cfg = sweep._effective_problem_config(
         sweep.PROBLEM_CONFIGS["qh"],
         backend="gpu",
