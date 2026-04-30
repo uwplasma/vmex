@@ -1970,7 +1970,12 @@ class FixedBoundaryExactOptimizer:
             except Exception:
                 backend_name = None
         if backend_name in ("gpu", "cuda", "rocm"):
-            return 8 if int(n_params) >= 32 else None
+            # On current CUDA/XLA, chunking small LASYM Jacobians adds launch and
+            # residual-tangent overhead.  Keep full-column replay through the
+            # common mode-2 case, and only chunk larger mode-3-style matrices
+            # where it avoids excessive peak memory and is neutral-to-slightly
+            # faster in cold GPU profiling.
+            return 8 if int(n_params) >= 96 else None
         if backend_name == "tpu":
             return None
         if int(n_params) >= 64:

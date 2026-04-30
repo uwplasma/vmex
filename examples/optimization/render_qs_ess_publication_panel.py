@@ -447,7 +447,9 @@ def _row_has_history(
     problem: str,
     policy: str,
 ) -> bool:
+    has_any = False
     for max_mode in MODES_BY_POLICY[policy]:
+        mode_results = []
         for use_ess in ESS_OPTIONS:
             result = _lookup_result(
                 lookup,
@@ -460,8 +462,15 @@ def _row_has_history(
                 allow_mode1_baseline=True,
             )
             if result is not None:
-                return True
-    return False
+                has_any = True
+            mode_results.append(result)
+        if all(result is not None for result in mode_results):
+            return True
+    # Avoid publishing stale one-off asymmetric smoke rows.  The plotting
+    # routines still support partial matrices when called directly in tests or
+    # notebooks; discovery-based publication panels require at least one full
+    # ESS/no-ESS pair for the row.
+    return has_any and not bool(stellarator_asymmetric)
 
 
 def _available_row_specs(results: list[CaseResult]) -> list[tuple[str, bool, str, str]]:

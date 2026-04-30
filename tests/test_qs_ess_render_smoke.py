@@ -99,6 +99,14 @@ def test_qs_ess_sweep_lasym_copy_and_zero_asymmetric_seed():
 
     assert seeded.tolist() == [0.0, 1.0e-7, 0.0, 1.0e-7, 0.0]
 
+    moved = seeded.copy()
+    moved[1] += 2.0e-6
+    moved[3] -= 3.0e-6
+    stats = sweep._asymmetric_param_stats(specs, seeded, moved)
+
+    assert stats["asymmetric_dof_count"] == 3
+    assert stats["asymmetric_param_norm_delta"] > 0.0
+
 
 def test_qs_ess_sweep_gpu_production_budgets_are_not_diagnostic_caps():
     sweep = _load_sweep_module()
@@ -131,6 +139,17 @@ def test_qs_ess_sweep_gpu_production_budgets_are_not_diagnostic_caps():
     assert cont_cfg.continuation_nfev == 6
     assert cont_cfg.inner_max_iter == sweep.GPU_PRODUCTION_INNER_MAX_ITER
     assert cont_cfg.inner_ftol == sweep.GPU_PRODUCTION_INNER_FTOL
+
+    direct_qa_cfg = sweep._effective_problem_config(
+        sweep.PROBLEM_CONFIGS["qa"],
+        backend="gpu",
+        policy="direct",
+        problem="qa",
+        max_mode=2,
+        use_ess=False,
+    )
+
+    assert direct_qa_cfg.max_nfev == 12
 
     diag_cfg = sweep._effective_problem_config(
         sweep.PROBLEM_CONFIGS["qh"],
@@ -273,6 +292,7 @@ def test_qs_ess_renderer_separates_lasym_records(tmp_path, monkeypatch):
     asym = lookup[("cpu", True, "continuation", "qa", 1, False)]
     assert asym.objective_final == 0.25
     assert asym.asymmetric_dof_count == 8
+    assert ("cpu", True, "qa", "continuation") not in renderer._available_row_specs(discovered)
 
 
 def test_qs_ess_renderer_flags_nonpositive_bmag():

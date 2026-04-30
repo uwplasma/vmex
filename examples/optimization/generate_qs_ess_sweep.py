@@ -184,8 +184,10 @@ GPU_PRODUCTION_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudge
     ("gpu", "continuation", "qh", 2, False): CaseBudget(max_nfev=12, continuation_nfev=6),
     ("gpu", "continuation", "qh", 3, False): CaseBudget(max_nfev=8, continuation_nfev=6),
     ("gpu", "continuation", "qh", 3, True): CaseBudget(max_nfev=8, continuation_nfev=6),
-    ("gpu", "direct", "qa", 3, False): CaseBudget(max_nfev=24),
-    ("gpu", "direct", "qa", 3, True): CaseBudget(max_nfev=24),
+    ("gpu", "direct", "qa", 2, False): CaseBudget(max_nfev=12),
+    ("gpu", "direct", "qa", 2, True): CaseBudget(max_nfev=12),
+    ("gpu", "direct", "qa", 3, False): CaseBudget(max_nfev=12),
+    ("gpu", "direct", "qa", 3, True): CaseBudget(max_nfev=12),
     ("gpu", "direct", "qh", 2, False): CaseBudget(max_nfev=12),
     ("gpu", "direct", "qh", 3, False): CaseBudget(max_nfev=8),
     ("gpu", "direct", "qp", 2, False): CaseBudget(max_nfev=12),
@@ -1025,7 +1027,15 @@ def _run_case(
     final_iota = None
     if (problem_cfg.target_iota is not None or problem_cfg.iota_abs_min is not None) and hist["history"]:
         final_iota = float(hist["history"][-1]["iota"])
-    asym_stats = _asymmetric_param_stats(prev_specs, final_params0, final_result["x"])
+    params_initial_for_stats = np.zeros(len(prev_specs), dtype=float)
+    if bool(stellarator_asymmetric):
+        params_initial_for_stats = _seed_zero_asymmetric_params(
+            boundary_input=final_opt._boundary_input,
+            specs=prev_specs,
+            params=params_initial_for_stats,
+            seed=ASYMMETRIC_SEED,
+        )
+    asym_stats = _asymmetric_param_stats(prev_specs, params_initial_for_stats, final_result["x"])
 
     return CaseResult(
         backend=str(backend),

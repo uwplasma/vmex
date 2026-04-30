@@ -29,6 +29,17 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--solver-device", choices=("auto", "cpu", "gpu", "default"), default="auto")
     p.add_argument("--mpol", type=int, default=5)
     p.add_argument("--ntor", type=int, default=5)
+    p.add_argument(
+        "--stellarator-asymmetric",
+        action="store_true",
+        help="Set LASYM=T, include RBS/ZBC boundary parameters, and seed zero asymmetric modes.",
+    )
+    p.add_argument(
+        "--asymmetric-seed",
+        type=float,
+        default=1.0e-7,
+        help="Seed value applied to zero RBS/ZBC optimization parameters when --stellarator-asymmetric is set.",
+    )
     p.add_argument("--ess", action="store_true")
     p.add_argument("--alpha", type=float, default=0.8)
     p.add_argument(
@@ -174,6 +185,13 @@ def main() -> int:
 
     cfg, indata = vj.load_config(str(input_file))
     indata = rebuild_indata_with_resolution(indata, mpol=args.mpol, ntor=args.ntor)
+    if args.stellarator_asymmetric:
+        scalars = dict(indata.scalars)
+        scalars["LASYM"] = True
+        indexed = {key: dict(value) for key, value in indata.indexed.items()}
+        from vmec_jax.namelist import InData
+
+        indata = InData(scalars=scalars, indexed=indexed, source_path=indata.source_path)
     cfg = config_from_indata(indata)
     static = vj.build_static(cfg)
     boundary = vj.boundary_from_indata(indata, static.modes, apply_m1_constraint=False)
@@ -186,7 +204,7 @@ def main() -> int:
         static.modes,
         max_mode=int(args.max_mode),
         min_coeff=0.0,
-        include=("rc", "zs"),
+        include=("rc", "zs", "rs", "zc") if args.stellarator_asymmetric else ("rc", "zs"),
         fix=("rc00",),
     )
     residuals_fn = vj.make_qs_residuals_fn(
@@ -217,10 +235,15 @@ def main() -> int:
     if args.trial_use_scan:
         opt._trial_solver_kwargs["use_scan"] = True
     params0 = np.zeros(len(specs))
+    if args.stellarator_asymmetric and float(args.asymmetric_seed) != 0.0:
+        for index, spec in enumerate(specs):
+            if spec.kind in ("rs", "zc"):
+                params0[index] = float(args.asymmetric_seed)
     x_scale = vj.create_x_scale(specs, alpha=float(args.alpha)) if args.ess else np.ones(len(specs))
 
     print(
         f"Problem={args.problem} max_mode={args.max_mode} dofs={len(specs)} "
+        f"lasym={args.stellarator_asymmetric} "
         f"inner=({args.inner_max_iter}, {args.inner_ftol:g}) "
         f"trial=({args.trial_max_iter}, {args.trial_ftol:g})"
     )
