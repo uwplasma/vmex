@@ -181,6 +181,14 @@ GPU_PRODUCTION_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudge
 # that final polish to keep the matrix complete and reproducible.
 CPU_PRODUCTION_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
     ("cpu", "continuation", "qa", 4, True): CaseBudget(max_nfev=8),
+    ("cpu", "direct", "qa", 4, False): CaseBudget(max_nfev=8),
+    ("cpu", "direct", "qa", 4, True): CaseBudget(max_nfev=8),
+    ("cpu", "direct", "qh", 4, False): CaseBudget(max_nfev=8),
+    ("cpu", "direct", "qh", 4, True): CaseBudget(max_nfev=8),
+    ("cpu", "direct", "qp", 4, False): CaseBudget(max_nfev=8),
+    ("cpu", "direct", "qp", 4, True): CaseBudget(max_nfev=8),
+    ("cpu", "direct", "qi", 4, False): CaseBudget(max_nfev=8),
+    ("cpu", "direct", "qi", 4, True): CaseBudget(max_nfev=8),
 }
 
 
