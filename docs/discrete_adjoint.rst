@@ -163,13 +163,18 @@ slightly from one Gauss-Newton step to the next.  A different :math:`K`
 would trigger XLA recompilation of the replay scan.
 
 vmec_jax pads short tapes to the nearest multiple of
-``VMEC_JAX_DYNAMIC_REPLAY_BUCKET`` (default: 1024) so that the same compiled
-XLA kernel is reused across steps:
+``VMEC_JAX_DYNAMIC_REPLAY_BUCKET`` (default: 32) so that the same compiled
+XLA kernel is reused across nearby steps without padding every run to an
+overly long replay:
 
 .. code-block:: bash
 
-   export VMEC_JAX_DYNAMIC_REPLAY_BUCKET=512   # finer bucketing (more memory)
-   export VMEC_JAX_DYNAMIC_REPLAY_BUCKET=2048  # coarser (fewer recompiles)
+   export VMEC_JAX_DYNAMIC_REPLAY_BUCKET=16    # finer bucketing
+   export VMEC_JAX_DYNAMIC_REPLAY_BUCKET=128   # coarser bucketing
+
+Large buckets can reduce recompiles for some long trajectories, but they can
+also make each replay substantially more expensive, especially on GPU.  Treat
+this variable as a profiling control rather than a recommended user setting.
 
 
 Comparison with other approaches

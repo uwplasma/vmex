@@ -2627,7 +2627,6 @@ class FixedBoundaryExactOptimizer:
             :meth:`save_history`).
         """
         from .wout import equilibrium_aspect_ratio_from_state
-        os.environ.setdefault("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", "1024")
 
         self._history = []
         self._profile = {}

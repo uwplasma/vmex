@@ -48,10 +48,11 @@ warm runtimes competitive with or faster than VMEC2000 on CPU:
   controls).
 
 **3. Dynamic replay bucketing**
-  ``VMEC_JAX_DYNAMIC_REPLAY_BUCKET=1024`` pads nearby tape lengths to multiples
-  of 1024, so the same compiled scan kernel is reused across Jacobian calls with
-  slightly different iteration counts.  Without bucketing each change in tape
-  length triggers a recompile.
+  ``VMEC_JAX_DYNAMIC_REPLAY_BUCKET`` pads nearby exact-adjoint tape lengths so
+  compiled replay kernels can be reused across Jacobian calls with slightly
+  different iteration counts.  The default is intentionally modest
+  (``32`` iterations); larger buckets are an explicit profiling knob and can be
+  much slower for GPU accepted-point replay.
 
 **4. Preconditioner caching**
   The 1-D preconditioner (``clear_preconditioner_jit_caches``) is JIT-compiled
@@ -374,6 +375,15 @@ about ``19.9 s`` total, with matching Jacobian norms.  Two attempted GPU replay
 shortcuts were rejected as defaults: precomputed tridiagonal coefficients are
 now correctness-tested but slower on this replay graph, and stopping gradients
 through solver time-control scalars nearly doubled replay time.
+
+After caching the fixed quasisymmetry angular quadrature grid, the same
+``office`` QH ``max_mode=2`` accepted-point callback profile gave two perturbed
+GPU dense-Jacobian callbacks of about ``11.8 s`` and ``4.3 s`` with the default
+dynamic replay bucket.  Forcing ``VMEC_JAX_DYNAMIC_REPLAY_BUCKET=1024`` made the
+same profile much worse (about ``53.9 s`` and ``7.2 s``).  The production
+optimizer therefore no longer sets a coarse replay bucket automatically; use
+large buckets only for controlled experiments on workloads where recompilation
+dominates replay execution.
 
 Fixed-boundary GPU diagnostics
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

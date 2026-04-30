@@ -39,6 +39,20 @@ def test_replay_column_target_default_is_relaxed_after_memory_fix():
     assert da._DEFAULT_REPLAY_COLUMN_TARGET_MB == 4096.0
 
 
+def test_dynamic_replay_bucket_default_is_modest(monkeypatch):
+    monkeypatch.delenv("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", raising=False)
+
+    assert da._dynamic_replay_bucket_size() == 32
+    assert da._dynamic_replay_bucket_len(33) == 64
+
+
+def test_dynamic_replay_bucket_honors_env(monkeypatch):
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", "128")
+
+    assert da._dynamic_replay_bucket_size() == 128
+    assert da._dynamic_replay_bucket_len(129) == 256
+
+
 def test_single_state_jvp_uses_dynamic_column_replay(monkeypatch):
     calls = []
 

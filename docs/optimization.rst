@@ -703,9 +703,10 @@ Key implementation choices:
 - **``backtracking=False, strict_update=True``**: matches the VMEC2000 iteration
   path.  Using ``backtracking=True`` collapses the step size to machine epsilon
   on QH geometry and kills convergence.
-- **``VMEC_JAX_DYNAMIC_REPLAY_BUCKET=1024``**: pads nearby solve trajectories so
-  the same XLA scan executable is reused across Jacobian evaluations with
-  slightly different tape lengths.
+- **``VMEC_JAX_DYNAMIC_REPLAY_BUCKET``**: pads nearby solve trajectories so the
+  same XLA scan executable is reused across Jacobian evaluations with slightly
+  different tape lengths.  The default is ``32``; larger values are profiling
+  controls, not a universal GPU speedup.
 - **Single-entry cache** (``_exact_cache``): stores the last tape by parameter
   hash.  Avoids rebuilding the tape when ``residual_fun`` then ``jacobian_fun``
   are called at the same ``x`` (which Gauss-Newton always does).
@@ -883,10 +884,10 @@ GPU-enabled JAX, leave JAX's default platform selection active or set
 ``solver_device="gpu"`` to the Python optimizer/driver interfaces.  If
 ``solver_device`` is unset, vmec_jax inherits JAX's active default backend.
 
-For GPU runs, the dynamic replay bucketing
-(``VMEC_JAX_DYNAMIC_REPLAY_BUCKET``) is especially important: it ensures that
-XLA reuses a single compiled scan kernel across Jacobian calls with slightly
-different tape lengths, amortising the JIT cost over the full optimisation.
+For GPU runs, the dynamic replay bucket
+(``VMEC_JAX_DYNAMIC_REPLAY_BUCKET``) should be tuned only during profiling.
+The default keeps padding modest.  Coarser buckets can reduce recompilation in
+some trajectories, but they can also make accepted-point replay much slower.
 
 
 Further reading
