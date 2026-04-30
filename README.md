@@ -488,6 +488,24 @@ JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --ba
 python examples/optimization/render_qs_ess_publication_panel.py
 ```
 
+The published LASYM panel below is the completed GPU matrix.  Every non-crashed
+row has nonzero `RBS/ZBC` movement relative to the seeded `1e-7` asymmetric
+subspace.  The QI continuation, `max_mode=3`, no-ESS row is kept as a failed
+case because the GPU trust-region step produced non-finite values; it appears
+as a pending final state rather than being silently dropped.
+
+<p align="center">
+  <img src="docs/_static/figures/qs_ess_objective_panel_asymmetric_all_policies.png" width="980" />
+</p>
+
+<p align="center">
+  <img src="docs/_static/figures/qs_ess_final_state_atlas_gpu_asymmetric_continuation.png" width="980" />
+</p>
+
+<p align="center">
+  <img src="docs/_static/figures/qs_ess_final_state_atlas_gpu_asymmetric_direct.png" width="980" />
+</p>
+
 For NVIDIA-only JAX installations, `JAX_PLATFORMS=cuda` is also valid. Do not
 use `JAX_PLATFORMS=gpu`: some JAX versions interpret that as both CUDA and ROCm
 and fail if ROCm is not installed.
