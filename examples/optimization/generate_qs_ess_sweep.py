@@ -1125,6 +1125,9 @@ def _history_for(result: CaseResult) -> dict | None:
 
 
 def _style_publication():
+    from vmec_jax.plotting import prepare_matplotlib_3d
+
+    prepare_matplotlib_3d()
     import matplotlib
 
     matplotlib.use("Agg")

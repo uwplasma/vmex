@@ -13,7 +13,12 @@ import shutil
 
 import numpy as np
 
-from vmec_jax.plotting import fix_matplotlib_3d, vmecplot2_bmag_grid, vmecplot2_lcfs_3d_grid
+from vmec_jax.plotting import (
+    fix_matplotlib_3d,
+    prepare_matplotlib_3d,
+    vmecplot2_bmag_grid,
+    vmecplot2_lcfs_3d_grid,
+)
 from vmec_jax.wout import read_wout
 
 
@@ -88,6 +93,7 @@ class PlotPayload:
 
 
 def _style_publication():
+    prepare_matplotlib_3d()
     import matplotlib
 
     matplotlib.use("Agg")
