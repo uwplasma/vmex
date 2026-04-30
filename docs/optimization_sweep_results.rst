@@ -8,11 +8,11 @@ and QI targets:
 - QA: aspect ratio, mean iota, and quasi-axisymmetry.
 - QH: aspect ratio and quasi-helical symmetry.
 - QP: aspect ratio, quasi-poloidal symmetry, and a smooth
-  ``abs(mean_iota) >= 0.41`` lower bound.
+  ``abs(mean_iota) >= 0.40`` lower bound.
 - QI: aspect ratio and a differentiable smooth Boozer-space
   quasi-isodynamic residual evaluated through ``booz_xform_jax``.  The sweep
   first runs a same-mode QP preseed and then applies the QI residual, with the
-  same smooth ``abs(mean_iota) >= 0.41`` lower bound retained through the QI
+  same smooth ``abs(mean_iota) >= 0.40`` lower bound retained through the QI
   stage so the final state does not remain trapped in the QH warm-start basin.
 
 Individual Examples
@@ -41,23 +41,23 @@ Run the CPU production sweep:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 Run the GPU production sweep on a machine with a working JAX GPU install:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
-The default per-case timeout is 600 seconds.  GPU uses exact/replay callbacks
-with calibrated optimizer budgets (``inner_max_iter = trial_max_iter = 120``
-and ``ftol = trial_ftol = 1e-8`` for deck-controlled QA/QH cases) so production
-sweeps do not differentiate through 1500 strict VMEC iterations at every
-accepted point.  Add ``--diagnostic-budgets`` only for bounded quick-look GPU
+The default per-case timeout is 1200 seconds.  GPU uses exact/replay callbacks
+with calibrated optimizer budgets (``inner_max_iter = trial_max_iter = 180``
+and ``ftol = trial_ftol = 1e-9`` for deck-controlled QA/QH cases) so production
+sweeps have enough room to converge high-mode/LASYM cases while still bounding
+runaway rows.  Add ``--diagnostic-budgets`` only for bounded quick-look GPU
 diagnostics, and use ``--case-timeout-s 0`` only for unbounded local
 diagnostics.
 
@@ -69,10 +69,10 @@ asymmetric modes with ``1e-7``, and writes separate outputs under the
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --stellarator-asymmetric
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --stellarator-asymmetric
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --stellarator-asymmetric
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --stellarator-asymmetric
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 For NVIDIA-only JAX installations, ``JAX_PLATFORMS=cuda`` is also valid.  Do
@@ -254,7 +254,7 @@ Current QI Snapshot
 The current CPU QI bounded sweep uses ``input.nfp4_QH_warm_start`` as the
 input deck, applies a QP preseed for the requested mode/policy, and then
 minimizes the QI residual on five surfaces while retaining
-``abs(mean_iota) >= 0.41`` through the final QI stage.  In this run, direct
+``abs(mean_iota) >= 0.40`` through the final QI stage.  In this run, direct
 ``max_mode=2`` with ESS reached ``J = 4.90e-3`` and continuation
 ``max_mode=3`` without ESS reached ``J = 5.49e-3``.  The final ``|B|`` panels
 are no longer QH-like; the preseed moves them toward poloidally closed wells

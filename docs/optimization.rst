@@ -465,18 +465,18 @@ The sweep below compares four target objectives:
 - QA: aspect ratio, mean iota, and quasi-axisymmetry.
 - QH: aspect ratio and quasi-helical symmetry.
 - QP: aspect ratio, quasi-poloidal symmetry, and a smooth
-  ``abs(mean_iota) >= 0.41`` lower bound.
+  ``abs(mean_iota) >= 0.40`` lower bound.
 - QI: aspect ratio and a differentiable smooth Boozer-space
   quasi-isodynamic residual evaluated through ``booz_xform_jax`` after a
   same-mode QP preseed, retaining the same smooth
-  ``abs(mean_iota) >= 0.41`` lower bound through the QI stage.
+  ``abs(mean_iota) >= 0.40`` lower bound through the QI stage.
 
 Each problem is run with staged mode continuation and with direct-start mode
 expansion.  Each policy is run with and without ESS using ``alpha = 2.5``.
 For QI, the sweep first optimizes the same mode/policy as QP and then refines
 the result with the QI residual; this avoids leaving the QI row in the original
 QH warm-start basin.
-Columns correspond to ``max_mode = 1, 2, 3``.  The vertical dotted lines mark
+Columns correspond to ``max_mode = 1, 2, 3, 4``.  The vertical dotted lines mark
 continuation stage boundaries.
 
 The objective panel below is the full CPU/GPU policy sweep.  Solid curves met
@@ -500,18 +500,18 @@ target-iota basin on both CPU and GPU; direct QA with ESS also reaches
 
 .. code-block:: bash
 
-   JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both
-   JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
-   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both
-   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
+   JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
+   JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
+   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
+   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
    python examples/optimization/render_qs_ess_publication_panel.py
 
-The default per-case timeout is ``600 s``.  GPU sweeps use exact/replay
+The default per-case timeout is ``1200 s``.  GPU sweeps use exact/replay
 callbacks with calibrated optimizer budgets
-(``inner_max_iter = trial_max_iter = 120`` and
-``ftol = trial_ftol = 1e-8`` for deck-controlled QA/QH cases) so production
-sweeps do not differentiate through 1500 strict VMEC iterations at every
-accepted point.  Add ``--diagnostic-budgets`` only for bounded quick-look GPU
+(``inner_max_iter = trial_max_iter = 180`` and
+``ftol = trial_ftol = 1e-9`` for deck-controlled QA/QH cases) so production
+sweeps have enough room to converge high-mode/LASYM cases while still bounding
+runaway rows.  Add ``--diagnostic-budgets`` only for bounded quick-look GPU
 diagnostics, and use ``--case-timeout-s 0`` only for an unbounded local
 diagnostic run.
 
@@ -520,7 +520,7 @@ this reruns only the QA direct-start row:
 
 .. code-block:: bash
 
-   JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa --modes 1,2,3 --ess both --rerun
+   JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa --modes 1,2,3,4 --ess both --rerun
    python examples/optimization/render_qs_ess_publication_panel.py
 
 The GPU rows run through the same exact/replay path as CPU with GPU-calibrated
@@ -530,8 +530,8 @@ budgets and records any non-converged case as a normal ``max_nfev`` stop.
 
 .. code-block:: bash
 
-   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both
-   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
+   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
+   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
    python examples/optimization/render_qs_ess_publication_panel.py
 
 Non-Stellarator-Symmetric Sweeps
@@ -548,10 +548,10 @@ and full publication panels when those cases are present.
 
 .. code-block:: bash
 
-   JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
-   JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
-   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
-   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
+   JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --stellarator-asymmetric
+   JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --stellarator-asymmetric
+   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --stellarator-asymmetric
+   JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --stellarator-asymmetric
    python examples/optimization/render_qs_ess_publication_panel.py
 
 The current published LASYM result is the completed GPU matrix.  Every

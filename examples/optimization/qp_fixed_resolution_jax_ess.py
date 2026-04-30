@@ -66,30 +66,28 @@ VMEC_MPOL = 5
 VMEC_NTOR = 5
 MAX_MODE = 3
 
-MAX_NFEV = 20
-CONTINUATION_NFEV = 0
-USE_MODE_CONTINUATION = False
+MAX_NFEV = 50
+CONTINUATION_NFEV = 20
+USE_MODE_CONTINUATION = True
 
 METHOD = "scipy"
 SCIPY_TR_SOLVER = "lsmr"
 SCIPY_LSMR_MAXITER = None
-FTOL = 1.0e-4
-GTOL = 1.0e-4
-XTOL = 1.0e-4
+FTOL = 1.0e-5
+GTOL = 1.0e-5
+XTOL = 1.0e-5
 
-# QP remains exploratory; bounded VMEC budgets avoid spending minutes on poor
-# rejected trial points from the QH seed.
-INNER_MAX_ITER = 80
-INNER_FTOL = 1.0e-8
-TRIAL_MAX_ITER = 80
-TRIAL_FTOL = 1.0e-8
+INNER_MAX_ITER = 120
+INNER_FTOL = 1.0e-9
+TRIAL_MAX_ITER = 120
+TRIAL_FTOL = 1.0e-9
 SOLVER_DEVICE = None  # set to "cpu" or "gpu" to force one backend
 
 HELICITY_M = 0
 HELICITY_N = -1
 SURFACES = np.arange(0.0, 1.01, 0.1)
 TARGET_ASPECT = 7.0
-TARGET_ABS_IOTA_MIN = 0.41
+TARGET_ABS_IOTA_MIN = 0.40
 TARGET_IOTA = None  # QP uses a minimum-|iota| constraint, not a signed target.
 
 ASPECT_WEIGHT = 1.0
