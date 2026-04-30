@@ -492,6 +492,51 @@ def _available_row_specs(results: list[CaseResult]) -> list[tuple[str, bool, str
     ]
 
 
+def _policy_matrix_complete(
+    results: list[CaseResult],
+    *,
+    backend: str,
+    stellarator_asymmetric: bool,
+    policy: str,
+) -> bool:
+    if not bool(stellarator_asymmetric):
+        return True
+    expected = {
+        (problem, mode, use_ess)
+        for problem in PROBLEMS
+        for mode in MODES_BY_POLICY[policy]
+        for use_ess in ESS_OPTIONS
+    }
+    present = {
+        (result.problem, int(result.max_mode), bool(result.use_ess))
+        for result in results
+        if (
+            result.backend == backend
+            and bool(result.stellarator_asymmetric) is True
+            and result.policy == policy
+        )
+    }
+    return expected <= present
+
+
+def _publication_results(results: list[CaseResult]) -> list[CaseResult]:
+    """Drop incomplete LASYM smoke matrices from publication artifacts."""
+
+    filtered: list[CaseResult] = []
+    for result in results:
+        if not bool(result.stellarator_asymmetric):
+            filtered.append(result)
+            continue
+        if _policy_matrix_complete(
+            results,
+            backend=result.backend,
+            stellarator_asymmetric=True,
+            policy=result.policy,
+        ):
+            filtered.append(result)
+    return filtered
+
+
 def _problems_with_payloads(
     payloads: dict[tuple[str, bool, str, str, int, bool], PlotPayload],
     *,
@@ -1198,6 +1243,7 @@ def _copy_alias(src_stem: Path, dst_stem: Path) -> None:
 
 def main() -> None:
     results = _discover_results()
+    results = _publication_results(results)
     _write_combined_summary(results)
     payloads = _load_payloads(results)
 

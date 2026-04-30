@@ -306,6 +306,56 @@ def test_qs_ess_renderer_separates_lasym_records(tmp_path, monkeypatch):
     assert ("cpu", True, "qa", "continuation") not in renderer._available_row_specs(discovered)
 
 
+def test_qs_ess_renderer_drops_incomplete_lasym_publication_groups():
+    renderer = _load_renderer_module()
+
+    sym = renderer.CaseResult(
+        backend="cpu",
+        policy="continuation",
+        problem="qa",
+        max_mode=1,
+        use_ess=False,
+        success=True,
+        crashed=False,
+        message="ok",
+        stellarator_asymmetric=False,
+    )
+    partial_asym = renderer.CaseResult(
+        backend="cpu",
+        policy="direct",
+        problem="qa",
+        max_mode=1,
+        use_ess=False,
+        success=True,
+        crashed=False,
+        message="ok",
+        stellarator_asymmetric=True,
+    )
+    complete_gpu_asym = [
+        renderer.CaseResult(
+            backend="gpu",
+            policy="direct",
+            problem=problem,
+            max_mode=mode,
+            use_ess=use_ess,
+            success=True,
+            crashed=False,
+            message="ok",
+            stellarator_asymmetric=True,
+        )
+        for problem in renderer.PROBLEMS
+        for mode in renderer.MODES_BY_POLICY["direct"]
+        for use_ess in renderer.ESS_OPTIONS
+    ]
+
+    filtered = renderer._publication_results([sym, partial_asym, *complete_gpu_asym])
+    lookup = renderer._result_lookup(filtered)
+
+    assert ("cpu", False, "continuation", "qa", 1, False) in lookup
+    assert ("cpu", True, "direct", "qa", 1, False) not in lookup
+    assert ("gpu", True, "direct", "qa", 1, False) in lookup
+
+
 def test_qs_ess_renderer_flags_nonpositive_bmag():
     renderer = _load_renderer_module()
     result = renderer.CaseResult(
