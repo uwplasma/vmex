@@ -7,7 +7,7 @@ This script regenerates a reviewer-facing benchmark matrix for the standalone
 
 - problems: QA, QH, QP, and QI
 - policies: continuation and direct-start mode expansion
-- max_mode: 1, 2, 3 for continuation and direct start
+- max_mode: 1, 2, 3, 4 for continuation and direct start
 - ESS: off and on
 - backends: encoded by ``--backend-label`` (for example ``cpu`` or ``gpu``)
 
