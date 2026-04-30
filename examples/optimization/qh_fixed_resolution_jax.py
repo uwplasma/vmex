@@ -23,6 +23,7 @@ try:
     from fixed_boundary_qs_common import (
         ObjectiveTerm,  # noqa: F401 - shown in the commented custom-objective example.
         StageContext,
+        abs_mean_iota_floor_objective,
         aspect_objective,
         combine_qs_stage_histories,
         mean_iota,
@@ -39,6 +40,7 @@ except ModuleNotFoundError:
     from examples.optimization.fixed_boundary_qs_common import (
         ObjectiveTerm,  # noqa: F401 - shown in the commented custom-objective example.
         StageContext,
+        abs_mean_iota_floor_objective,
         aspect_objective,
         combine_qs_stage_histories,
         mean_iota,
@@ -88,7 +90,9 @@ HELICITY_N = -1
 SURFACES = np.arange(0.0, 1.01, 0.1)
 TARGET_ASPECT = 7.0
 TARGET_IOTA = None
+TARGET_ABS_IOTA_MIN = 0.40
 ASPECT_WEIGHT = 1.0
+IOTA_WEIGHT = 100.0
 QS_WEIGHT = 1.0
 
 USE_ESS = False
@@ -107,6 +111,7 @@ PLOT = True
 # weight * (value - target) in least-squares form.
 OBJECTIVES = [
     aspect_objective(TARGET_ASPECT, ASPECT_WEIGHT),
+    abs_mean_iota_floor_objective(TARGET_ABS_IOTA_MIN, IOTA_WEIGHT),
     quasisymmetry_objective(
         helicity_m=HELICITY_M,
         helicity_n=HELICITY_N,
@@ -269,7 +274,7 @@ combined_history = combine_qs_stage_histories(
 if combined_history is not None:
     final_result["_history_dump"] = combined_history
 
-print_qs_final_summary(final_result, target_iota=TARGET_IOTA)
+print_qs_final_summary(final_result, target_iota=TARGET_IOTA, iota_abs_min=TARGET_ABS_IOTA_MIN)
 save_qs_final_outputs(
     output_dir=OUTPUT_DIR,
     stage_records=stage_records,
@@ -278,6 +283,7 @@ save_qs_final_outputs(
     label=LABEL,
     target_aspect=TARGET_ASPECT,
     target_iota=TARGET_IOTA,
+    iota_abs_min=TARGET_ABS_IOTA_MIN,
     plot=PLOT,
     save_rerun_wouts=SAVE_RERUN_WOUTS,
 )

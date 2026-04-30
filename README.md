@@ -197,7 +197,7 @@ Key top-level controls in the script:
 
 - `VMEC_MPOL`, `VMEC_NTOR`: solver resolution
 - `MAX_MODE`: boundary parameterization richness
-- `OBJECTIVES`: explicit aspect + QS residual blocks
+- `OBJECTIVES`: explicit aspect + smooth `|iota| >= 0.40` floor + QS residual blocks
 - `METHOD`: `"gauss_newton"` or `"scipy"`
 - `SCIPY_TR_SOLVER`: SciPy trust-region linear solver (`"lsmr"` by default for the QA/QH examples)
 - `USE_MODE_CONTINUATION`: staged solves for higher-mode runs
@@ -208,6 +208,7 @@ Add a new target by appending an objective term:
 ```python
 OBJECTIVES = [
     aspect_objective(TARGET_ASPECT, ASPECT_WEIGHT),
+    abs_mean_iota_floor_objective(TARGET_ABS_IOTA_MIN, IOTA_WEIGHT),
     quasisymmetry_objective(helicity_m=1, helicity_n=-1, surfaces=SURFACES, weight=QS_WEIGHT),
     ObjectiveTerm("custom", lambda ctx, state: your_metric(ctx, state), target=0.0, weight=0.1),
 ]
@@ -217,7 +218,9 @@ When `max_mode` exceeds the modes present in the input file, vmec_jax automatica
 extends the boundary to include the requested harmonics at zero amplitude
 (`vj.extend_boundary_for_max_mode`), matching SIMSOPT's `fixed_range()` behaviour.
 All runs use consistent VMEC resolution `mpol = ntor = 5` so the initial QS metric
-is normalised identically across `max_mode` values.
+is normalised identically across `max_mode` values. Current sweeps also enforce
+a smooth, sign-independent `|iota| >= 0.40` floor for QH, matching the QP/QI
+constraint.
 
 | `max_mode` | DOFs | Policy | QS initial | QS final | Reduction | Objective final | Wall time ¹ |
 |:----------:|:----:|:------:|:----------:|:--------:|:---------:|:---------------:|:-----------:|

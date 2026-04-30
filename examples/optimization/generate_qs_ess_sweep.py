@@ -201,6 +201,7 @@ class ProblemConfig:
     iota_floor_softness: float = 1.0e-3
     aspect_weight: float = 1.0
     iota_weight: float = 1.0
+    iota_floor_weight: float | None = None
     qs_weight: float = 1.0
     objective_kind: str = "qs"
     qi_mboz: int = 6
@@ -232,6 +233,7 @@ PROBLEM_CONFIGS = {
         ess_alpha=ESS_ALPHA,
         target_aspect=6.0,
         target_iota=0.41,
+        iota_weight=10.0,
         surfaces=np.arange(0.0, 1.01, 0.1),
         helicity_m=1,
         helicity_n=0,
@@ -254,6 +256,8 @@ PROBLEM_CONFIGS = {
         ess_alpha=ESS_ALPHA,
         target_aspect=7.0,
         target_iota=None,
+        iota_abs_min=0.4,
+        iota_weight=100.0,
         surfaces=np.arange(0.0, 1.01, 0.1),
         helicity_m=1,
         helicity_n=-1,
@@ -708,22 +712,31 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
         )
         if track_iota:
             iota = mean_iota_raw(state)
-            if problem_cfg.iota_abs_min is None:
-                iota_residual = iota - problem_cfg.target_iota
-            else:
+            if problem_cfg.target_iota is not None:
+                parts.append(
+                    jnp.asarray(
+                        [problem_cfg.iota_weight * (iota - float(problem_cfg.target_iota))],
+                        dtype=jnp.float64,
+                    )
+                )
+            if problem_cfg.iota_abs_min is not None:
+                iota_floor_weight = (
+                    problem_cfg.iota_weight
+                    if problem_cfg.iota_floor_weight is None
+                    else float(problem_cfg.iota_floor_weight)
+                )
                 iota_residual = vj.smooth_min_abs_iota_residual(
                     iota,
                     problem_cfg.iota_abs_min,
                     softness=problem_cfg.iota_floor_softness,
                 )
-            parts.append(
-                jnp.asarray([problem_cfg.iota_weight * iota_residual], dtype=jnp.float64)
-            )
+                parts.append(jnp.asarray([iota_floor_weight * iota_residual], dtype=jnp.float64))
         qs = stage_qs_eval(state)
         parts.append(jnp.asarray(qs["residuals1d"], dtype=jnp.float64) * problem_cfg.qs_weight)
         return jnp.concatenate(parts)
 
-    stage_residuals_from_state._n_non_qs = 2 if track_iota else 1
+    n_iota_terms = int(problem_cfg.target_iota is not None) + int(problem_cfg.iota_abs_min is not None)
+    stage_residuals_from_state._n_non_qs = 1 + n_iota_terms
     stage_residuals_from_state._qs_total_from_state = (
         lambda state: float(problem_cfg.qs_weight) ** 2 * float(stage_qs_eval(state)["total"])
     )
