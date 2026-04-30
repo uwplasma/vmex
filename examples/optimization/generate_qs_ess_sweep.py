@@ -175,6 +175,15 @@ CASE_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
 GPU_PRODUCTION_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {}
 
 
+# CPU sweeps normally use the full scientific budgets.  The QA continuation
+# mode-4 ESS row starts from an already accurate mode-3 ESS seed and can spend
+# the full 20-minute budget in a marginal high-mode polishing step, so bound only
+# that final polish to keep the matrix complete and reproducible.
+CPU_PRODUCTION_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
+    ("cpu", "continuation", "qa", 4, True): CaseBudget(max_nfev=8),
+}
+
+
 @dataclass(frozen=True)
 class ProblemConfig:
     name: str
@@ -411,6 +420,23 @@ def _effective_problem_config(
             trial_ftol=max(float(problem_cfg.trial_ftol), GPU_PRODUCTION_TRIAL_FTOL),
         )
         budget = GPU_PRODUCTION_BUDGET_OVERRIDES.get(
+            (backend_key, str(policy), str(problem), int(max_mode), bool(use_ess))
+        )
+        if budget is not None:
+            if budget.max_nfev is not None:
+                updates["max_nfev"] = min(int(problem_cfg.max_nfev), int(budget.max_nfev))
+            if budget.continuation_nfev is not None:
+                updates["continuation_nfev"] = min(int(problem_cfg.continuation_nfev), int(budget.continuation_nfev))
+            if budget.inner_max_iter is not None:
+                updates["inner_max_iter"] = int(budget.inner_max_iter)
+            if budget.inner_ftol is not None:
+                updates["inner_ftol"] = float(budget.inner_ftol)
+            if budget.trial_max_iter is not None:
+                updates["trial_max_iter"] = int(budget.trial_max_iter)
+            if budget.trial_ftol is not None:
+                updates["trial_ftol"] = float(budget.trial_ftol)
+    if (not diagnostic_budgets) and backend_key == "cpu":
+        budget = CPU_PRODUCTION_BUDGET_OVERRIDES.get(
             (backend_key, str(policy), str(problem), int(max_mode), bool(use_ess))
         )
         if budget is not None:
