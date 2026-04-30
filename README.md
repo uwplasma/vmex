@@ -177,31 +177,26 @@ Details: [discrete adjoint](docs/discrete_adjoint.rst),
 [optimization guide](docs/optimization.rst), and
 [SIMSOPT comparison](docs/simsopt_comparison.rst).
 
-## Quasi-helical Symmetry Optimization
+## Individual Fixed-Boundary Optimization Scripts
 
-`examples/optimization/qh_fixed_resolution_jax.py` demonstrates an end-to-end
-fixed-boundary QH optimization using the built-in **exact discrete-adjoint Jacobian**
-— no finite differences, no SIMSOPT dependency.
-
-The script is intentionally written in the same teaching style as SIMSOPT's
-`QH_fixed_resolution.py`: choose the VMEC resolution directly in Python, choose
-the active boundary coefficients directly, build an `OBJECTIVES` list, then run
-the visible setup → continuation stages → optimizer → save/plot workflow. It is
-a standalone script, not an argparse entry point or a hidden wrapper call.
+The standalone examples teach the same workflow as the SIMSOPT examples without
+depending on SIMSOPT: choose VMEC resolution, active boundary coefficients,
+objective terms, weights, continuation policy, ESS scaling, and optimizer
+directly in Python.  They are intentionally plain scripts with top-level
+variables, not argparse wrappers.
 
 ```bash
-python examples/optimization/qh_fixed_resolution_jax.py   # edit MAX_MODE at the top
+python examples/optimization/qa_fixed_resolution_jax_ess.py
+python examples/optimization/qh_fixed_resolution_jax.py
+python examples/optimization/qp_fixed_resolution_jax_ess.py
+python examples/optimization/qi_fixed_resolution_jax_ess.py
 ```
 
-Key top-level controls in the script:
-
-- `VMEC_MPOL`, `VMEC_NTOR`: solver resolution
-- `MAX_MODE`: boundary parameterization richness
-- `OBJECTIVES`: explicit aspect + smooth `|iota| >= 0.40` floor + QS residual blocks
-- `METHOD`: `"gauss_newton"` or `"scipy"`
-- `SCIPY_TR_SOLVER`: SciPy trust-region linear solver (`"lsmr"` by default for the QA/QH examples)
-- `USE_MODE_CONTINUATION`: staged solves for higher-mode runs
-- `USE_ESS`, `ALPHA`: optional exponential spectral scaling
+Key top-level controls are `VMEC_MPOL`, `VMEC_NTOR`, `MAX_MODE`,
+`OBJECTIVES`, `METHOD`, `USE_MODE_CONTINUATION`, `USE_ESS`, and `ALPHA`.
+When `MAX_MODE` exceeds the modes present in the input file, vmec_jax extends
+the boundary with `vj.extend_boundary_for_max_mode`, matching SIMSOPT's
+`fixed_range()` workflow.
 
 Add a new target by appending an objective term:
 
@@ -214,176 +209,9 @@ OBJECTIVES = [
 ]
 ```
 
-When `max_mode` exceeds the modes present in the input file, vmec_jax automatically
-extends the boundary to include the requested harmonics at zero amplitude
-(`vj.extend_boundary_for_max_mode`), matching SIMSOPT's `fixed_range()` behaviour.
-All runs use consistent VMEC resolution `mpol = ntor = 5` so the initial QS metric
-is normalised identically across `max_mode` values. Current sweeps also enforce
-a smooth, sign-independent `|iota| >= 0.40` floor for QH, matching the QP/QI
-constraint.
-
-| `max_mode` | DOFs | Policy | QS initial | QS final | Reduction | Objective final | Wall time ¹ |
-|:----------:|:----:|:------:|:----------:|:--------:|:---------:|:---------------:|:-----------:|
-| 1          |  8   | continuation, no ESS | 0.303 | 0.214 | 30 % | `0.216` | ~2.2 min |
-| 2          | 24   | continuation, no ESS | 0.303 | `3.72e-3` | 98.8 % | `3.72e-3` | ~8.5 min |
-| 3          | 48   | continuation, no ESS | 0.303 | **`1.37e-3`** | **99.5 %** | **`1.37e-3`** | ~10.7 min |
-
-¹ Wall time on Apple M-series (warm-cache subsequent runs are faster).
-
-With only 8 DOFs (`max_mode=1`) the boundary deformation space is too limited
-to reach a deep quasi-helical minimum. `max_mode=2` already gives a strong QH
-solution, and the current `max_mode=3` continuation run improves it further.
-
-**vmec_jax vs SIMSOPT**: vmec_jax uses an exact discrete-adjoint Jacobian
-(one batched JVP pass ≈ 1–2 forward solves regardless of DOF count) while
-SIMSOPT + VMEC2000 uses finite differences (*n*_DOFs × 1 forward solve per
-Jacobian).  For a detailed comparison of algorithms, runtimes, and memory,
-see [docs/simsopt_comparison.rst](docs/simsopt_comparison.rst).
-
-<table>
-  <tr>
-    <th align="center">max_mode = 1 &nbsp;(8 DOFs, 30 % QS reduction)</th>
-    <th align="center">max_mode = 2 &nbsp;(24 DOFs, 99 % QS reduction)</th>
-    <th align="center">max_mode = 3 &nbsp;(48 DOFs, 99.7 % QS reduction)</th>
-  </tr>
-  <tr>
-    <td><img src="docs/_static/figures/qh_opt/boundary_comparison.png" /></td>
-    <td><img src="docs/_static/figures/qh_opt/mode2/boundary_comparison.png" /></td>
-    <td><img src="docs/_static/figures/qh_opt/mode3/boundary_comparison.png" /></td>
-  </tr>
-  <tr>
-    <td><img src="docs/_static/figures/qh_opt/bmag_surface.png" /></td>
-    <td><img src="docs/_static/figures/qh_opt/mode2/bmag_surface.png" /></td>
-    <td><img src="docs/_static/figures/qh_opt/mode3/bmag_surface.png" /></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/_static/figures/qh_opt/objective_history.png" /></td>
-    <td align="center"><img src="docs/_static/figures/qh_opt/mode2/objective_history.png" /></td>
-    <td align="center"><img src="docs/_static/figures/qh_opt/mode3/objective_history.png" /></td>
-  </tr>
-</table>
-
-The |B| contour plots show quasi-helical alignment after optimization: contour lines
-become increasingly helical (aligned with *m θ − n φ* = const). The ζ axis spans
-one field period (0 → 2π/nfp).
-
-The current exact standalone path keeps improving through `max_mode=3`, with
-the 48-DOF continuation run reaching `~1.4e-3` total objective and QS.
-
-Regenerate plots after running the optimization:
-
-```bash
-python examples/optimization/plot_qh_optimization_results.py --output-dir results/qh_opt
-```
-
-## Quasi-axisymmetric Optimization
-
-`examples/optimization/qa_fixed_resolution_jax_ess.py` optimizes an nfp=2 QA
-equilibrium for aspect ratio, mean iota, and QA symmetry residuals.
-
-Like the QH script, it exposes the problem construction directly in Python:
-VMEC resolution, active boundary DOFs, the three objective blocks, weights,
-continuation policy, ESS settings, and the outer optimizer are all top-level
-variables in the file.
-
-```bash
-python examples/optimization/qa_fixed_resolution_jax_ess.py   # edit MAX_MODE at the top
-```
-
-When `max_mode` exceeds the modes in the input file, vmec_jax automatically extends
-the boundary to include those harmonics at zero amplitude (`vj.extend_boundary_for_max_mode`).
-All runs use consistent VMEC resolution `mpol = ntor = 5`.
-Objectives: aspect ratio (target 6.0) + mean iota (target 0.41) + QA symmetry residuals.
-The current standalone QA path uses exact residuals + exact discrete-adjoint
-Jacobians with `scipy.optimize.least_squares`. For `max_mode > 1`, the script
-can use staged mode continuation: it solves the lower-mode QA problem first,
-then lifts that solution into the richer boundary space before running the final
-stage. The full sweep also tests direct-start and ESS variants.
-
-| `max_mode` | DOFs | Policy | Eval used | Aspect final | Mean iota final | QS final | Objective final | Wall time ¹ |
-|:----------:|:----:|:------:|:---------:|:------------:|:---------------:|:--------:|:---------------:|:-----------:|
-| 1          |  8   | input deck, no ESS | 27 | 6.0024 | 0.3942 | `9.04e-3` | `9.29e-3` | ~315 s |
-| 2          | 24   | continuation, no ESS | 52 | **6.0000** | 0.4095 | `1.46e-4` | `1.46e-4` | ~801 s |
-| 3          | 48   | continuation, no ESS | 64 | **6.0000** | **0.4099** | **`7.61e-6`** | **`7.62e-6`** | ~1150 s |
-
-¹ Wall time on Apple M-series.
-
-On the latest fresh standalone rerun, staged continuation is decisive for QA.
-Direct-start `max_mode=3` stays in a poor basin, while continuation reaches a
-deep QA minimum; the best displayed QA run is the no-ESS `max_mode=3`
-continuation case.
-
-<table>
-  <tr>
-    <th align="center">max_mode = 1 &nbsp;(8 DOFs, exact SciPy + adjoint)</th>
-    <th align="center">max_mode = 2 &nbsp;(24 DOFs, exact SciPy + adjoint, continuation)</th>
-    <th align="center">max_mode = 3 &nbsp;(48 DOFs, exact SciPy + adjoint, continuation)</th>
-  </tr>
-  <tr>
-    <td><img src="docs/_static/figures/qa_opt/boundary_comparison.png" /></td>
-    <td><img src="docs/_static/figures/qa_opt/mode2/boundary_comparison.png" /></td>
-    <td><img src="docs/_static/figures/qa_opt/mode3/boundary_comparison.png" /></td>
-  </tr>
-  <tr>
-    <td><img src="docs/_static/figures/qa_opt/bmag_surface.png" /></td>
-    <td><img src="docs/_static/figures/qa_opt/mode2/bmag_surface.png" /></td>
-    <td><img src="docs/_static/figures/qa_opt/mode3/bmag_surface.png" /></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/_static/figures/qa_opt/objective_history.png" /></td>
-    <td align="center"><img src="docs/_static/figures/qa_opt/mode2/objective_history.png" /></td>
-    <td align="center"><img src="docs/_static/figures/qa_opt/mode3/objective_history.png" /></td>
-  </tr>
-</table>
-
-## Quasi-poloidal Symmetry Optimization
-
-`examples/optimization/qp_fixed_resolution_jax_ess.py` uses the same exact
-fixed-boundary optimizer with helicity `(M, N) = (0, -1)`.  It starts from the
-QH warm-start input and targets aspect ratio 7 with a smooth absolute-iota
-lower bound of 0.40.  Edit the top-level variables in the script to choose
-`MAX_MODE`, `USE_ESS`, `USE_MODE_CONTINUATION`, and the VMEC/optimizer budgets.
-
-```bash
-python examples/optimization/qp_fixed_resolution_jax_ess.py
-```
-
-In the current CPU sweep, QP is the least mature of the three quasisymmetry
-examples.  The smooth `|iota| >= 0.40` floor is now enforced in every listed
-case; `max_mode=2` direct-start/no-ESS gives the lowest objective, while
-`max_mode=3` continuation/no-ESS is the best high-mode result.  The full policy
-matrix is kept in the docs so these tradeoffs remain visible instead of hidden.
-
-| `max_mode` | Best current policy | Objective final | QS/QP final | Aspect final | Iota final | Wall time |
-|:----------:|:--------------------|:---------------:|:-----------:|:------------:|:----------:|:---------:|
-| 1 | direct or continuation | `5.18e-1` | `5.08e-1` | 7.101 | -0.415 | ~0.5 min |
-| 2 | direct, no ESS | **`7.38e-2`** | **`7.31e-2`** | 6.975 | -0.709 | ~0.7 min |
-| 3 | continuation, no ESS | `8.26e-2` | `8.20e-2` | 7.021 | -0.412 | ~2.5 min |
-
-## Quasi-isodynamic Optimization
-
-`examples/optimization/qi_fixed_resolution_jax_ess.py` uses
-`vmec_jax.quasi_isodynamic`, a smooth Boozer-space QI residual evaluated through
-`booz_xform_jax`.  The documented workflow first runs a same-mode QP preseed
-and then refines with the QI objective; this avoids leaving the solution in the
-QH warm-start basin and gives visibly non-QH `|B|` contours.
-
-```bash
-python examples/optimization/qi_fixed_resolution_jax_ess.py
-```
-
-The current QI objective is already differentiable end-to-end through VMEC and
-Boozer-space post-processing.  The same smooth `|iota| >= 0.40` floor is
-retained through the QI refinement stage, not just the QP preseed.  Several
-cases stop by the configured `max_nfev` before satisfying SciPy's convergence
-criterion, so the table reports the best objective values rather than claiming
-all rows are fully converged.
-
-| `max_mode` | Best current policy | Objective final | QI final | Aspect final | Iota final | Wall time |
-|:----------:|:--------------------|:---------------:|:--------:|:------------:|:----------:|:---------:|
-| 1 | direct or continuation | `1.17e-2` | `1.16e-2` | 6.988 | -0.418 | ~0.9 min |
-| 2 | direct + ESS | **`4.90e-3`** | **`4.90e-3`** | 7.001 | -0.581 | ~1.4 min |
-| 3 | continuation, no ESS | `5.49e-3` | `5.24e-3` | 7.003 | -0.412 | ~1.8 min |
+For current QA/QH/QP/QI results, use the policy sweep below. It is the only
+optimization benchmark table shown in the README so stale single-script results
+do not drift from the generated sweep artifacts.
 
 ## Finite-beta Stage-one Optimization
 
