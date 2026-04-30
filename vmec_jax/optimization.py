@@ -1210,6 +1210,7 @@ class FixedBoundaryExactOptimizer:
         self._boundary_input = boundary_input
         self._specs = list(specs)
         self._residuals_fn = residuals_fn
+        self._residuals_eval_fn = self._make_residuals_eval_fn(residuals_fn)
         self._n_qs: int | None = getattr(residuals_fn, "_n_qs", None)
         self._n_non_qs: int = int(getattr(residuals_fn, "_n_non_qs", 1))
         self._qs_total_from_state_fn = getattr(residuals_fn, "_qs_total_from_state", None)
@@ -1479,6 +1480,24 @@ class FixedBoundaryExactOptimizer:
                 "mean_wall_time_s": total / count if count else 0.0,
             }
         return out
+
+    def _make_residuals_eval_fn(self, residuals_fn: Callable) -> Callable:
+        """Return the non-differentiating residual evaluator used by callbacks."""
+        flag = os.getenv("VMEC_JAX_OPT_JIT_RESIDUALS", "1").strip().lower()
+        if flag in ("", "0", "false", "no", "off"):
+            return residuals_fn
+
+        from ._compat import jax, jnp as _jnp
+
+        @jax.jit
+        def _eval(state):
+            return _jnp.asarray(residuals_fn(state), dtype=_jnp.float64)
+
+        return _eval
+
+    def _evaluate_residuals_from_state(self, state: VMECState) -> np.ndarray:
+        fn = getattr(self, "_residuals_eval_fn", self._residuals_fn)
+        return np.asarray(fn(state), dtype=float)
 
     def _callback_point_id(self, cache_key: bytes) -> int:
         point_ids = getattr(self, "_callback_point_ids", None)
@@ -1844,12 +1863,12 @@ class FixedBoundaryExactOptimizer:
             # that state.
             state = self._solve_scan_exact_state(params)
             t0 = time.perf_counter()
-            out = np.asarray(self._residuals_fn(state), dtype=float)
+            out = self._evaluate_residuals_from_state(state)
             self._profile_add("scan_residual_eval_exact", time.perf_counter() - t0)
             return out
         state = self._solve_exact_with_tape(params)
         t_res = time.perf_counter()
-        out = np.asarray(self._residuals_fn(state), dtype=float)
+        out = self._evaluate_residuals_from_state(state)
         self._profile_add("residual_eval_exact", time.perf_counter() - t_res)
         return out
 
@@ -1862,7 +1881,7 @@ class FixedBoundaryExactOptimizer:
             return cached
         state = self._solve_forward(params, trial=True)
         t_res = time.perf_counter()
-        out = np.asarray(self._residuals_fn(state), dtype=float)
+        out = self._evaluate_residuals_from_state(state)
         self._profile_add("residual_eval_trial", time.perf_counter() - t_res)
         self._remember_trial_residual(params, out)
         return out
@@ -2350,7 +2369,7 @@ class FixedBoundaryExactOptimizer:
             res = (
                 np.asarray(self._last_jacobian_residual, dtype=float)
                 if self._last_jacobian_residual is not None
-                else np.asarray(self._residuals_fn(cached_state), dtype=float)
+                else self._evaluate_residuals_from_state(cached_state)
             )
             cost = float(0.5 * np.dot(res, res))
             qs_total = self._qs_total_from_state(cached_state, res)
@@ -2374,7 +2393,7 @@ class FixedBoundaryExactOptimizer:
             res = (
                 np.asarray(self._last_jacobian_residual, dtype=float)
                 if self._last_jacobian_residual is not None
-                else np.asarray(self._residuals_fn(cached_state), dtype=float)
+                else self._evaluate_residuals_from_state(cached_state)
             )
             cost = float(0.5 * np.dot(res, res))
             qs_total = self._qs_total_from_state(cached_state, res)
@@ -2402,7 +2421,7 @@ class FixedBoundaryExactOptimizer:
         if key is None or key not in self._exact_cache:
             return None
         cached_state, _ = self._exact_cache[key]
-        return np.asarray(self._residuals_fn(cached_state), dtype=float)
+        return self._evaluate_residuals_from_state(cached_state)
 
     def _post_jacobian_clear(self, *, clear_compiled: bool = False):
         """Optionally release compiled replay helpers.
@@ -2453,10 +2472,11 @@ class FixedBoundaryExactOptimizer:
 
     def _qs_total_from_state(self, state: VMECState, res: np.ndarray | None = None) -> float:
         """QS-only objective from a solved state, with metadata-aware fallback."""
+        if res is not None:
+            return self._qs_from_res(np.asarray(res, dtype=float))
         if self._qs_total_from_state_fn is not None:
             return float(self._qs_total_from_state_fn(state))
-        if res is None:
-            res = np.asarray(self._residuals_fn(state), dtype=float)
+        res = self._evaluate_residuals_from_state(state)
         return self._qs_from_res(np.asarray(res, dtype=float))
 
     def quasisymmetry_objective(self, params) -> float:
@@ -2466,7 +2486,7 @@ class FixedBoundaryExactOptimizer:
             if self._scan_exact_path == "scan"
             else self._solve_exact_with_tape(params)
         )
-        res = np.asarray(self._residuals_fn(state), dtype=float)
+        res = self._evaluate_residuals_from_state(state)
         return self._qs_total_from_state(state, res)
 
     def save_wout(self, path, params=None, *, state: VMECState | None = None) -> None:
@@ -2705,7 +2725,7 @@ class FixedBoundaryExactOptimizer:
                 if key == last_history_key[0] or key not in self._exact_cache:
                     return
                 cached_state, _ = self._exact_cache[key]
-                res = np.asarray(self._residuals_fn(cached_state), dtype=float)
+                res = self._evaluate_residuals_from_state(cached_state)
                 qs_total = self._qs_total_from_state(cached_state, res)
                 aspect = float(np.asarray(
                     equilibrium_aspect_ratio_from_state(state=cached_state, static=self._static)
@@ -2775,7 +2795,7 @@ class FixedBoundaryExactOptimizer:
                 if key == last_history_key[0] or key not in self._exact_cache:
                     return
                 cached_state, _ = self._exact_cache[key]
-                res = np.asarray(self._residuals_fn(cached_state), dtype=float)
+                res = self._evaluate_residuals_from_state(cached_state)
                 cost = float(0.5 * np.dot(res, res))
                 qs_total = self._qs_total_from_state(cached_state, res)
                 aspect = float(np.asarray(
@@ -2797,7 +2817,7 @@ class FixedBoundaryExactOptimizer:
                 x = np.asarray(y, dtype=float) * scale - base_params
                 cached_state = self._cached_exact_state(x)
                 if cached_state is not None:
-                    return np.asarray(self._residuals_fn(cached_state), dtype=float)
+                    return self._evaluate_residuals_from_state(cached_state)
                 return self.forward_residual_fun(x)
 
             def _jacobian_y(y):
@@ -2891,7 +2911,7 @@ class FixedBoundaryExactOptimizer:
                 t_cb = time.perf_counter()
                 cached_state = self._cached_exact_state(x)
                 if cached_state is not None:
-                    out = np.asarray(self._residuals_fn(cached_state), dtype=float)
+                    out = self._evaluate_residuals_from_state(cached_state)
                     self._trace_callback_event(
                         "residual",
                         x,
@@ -2995,7 +3015,7 @@ class FixedBoundaryExactOptimizer:
             except Exception:
                 state_final = self._solve_forward(result["x"], trial=True)
 
-        res_final = np.asarray(self._residuals_fn(state_final), dtype=float)
+        res_final = self._evaluate_residuals_from_state(state_final)
         aspect_final = float(np.asarray(
             equilibrium_aspect_ratio_from_state(state=state_final, static=self._static)
         ))

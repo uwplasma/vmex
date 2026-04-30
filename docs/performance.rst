@@ -385,6 +385,14 @@ optimizer therefore no longer sets a coarse replay bucket automatically; use
 large buckets only for controlled experiments on workloads where recompilation
 dominates replay execution.
 
+The next optimization keeps a cached JIT residual evaluator for
+non-differentiating optimizer callbacks and avoids recomputing the QS objective
+when the residual vector is already available.  On the same ``office`` GPU QH
+``max_mode=2`` short production path (``max_nfev=2``), wall time dropped from
+about ``15.3 s`` to ``11.2 s``.  This does not change the discrete-adjoint
+Jacobian path, which still linearizes the raw residual function where
+derivatives are required.
+
 Fixed-boundary GPU diagnostics
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

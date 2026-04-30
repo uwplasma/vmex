@@ -323,6 +323,27 @@ def test_fixed_boundary_optimizer_exact_residual_reuses_jacobian_primal():
     np.testing.assert_allclose(opt._exact_residual_after_jacobian(), [3.0, 4.0])
 
 
+def test_qs_total_prefers_supplied_residual_vector():
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._n_qs = None
+    opt._n_non_qs = 1
+
+    def fail_qs_total(_state):
+        raise AssertionError("residual vector should avoid recomputing QS")
+
+    opt._qs_total_from_state_fn = fail_qs_total
+
+    assert opt._qs_total_from_state(object(), np.array([10.0, 2.0, 3.0])) == 13.0
+
+
+def test_evaluate_residuals_from_state_uses_cached_eval_function():
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._residuals_fn = lambda _state: np.array([-1.0])
+    opt._residuals_eval_fn = lambda state: jnp.asarray([2.0, 3.0])
+
+    np.testing.assert_allclose(opt._evaluate_residuals_from_state(object()), [2.0, 3.0])
+
+
 def test_initial_tangent_cache_key_tracks_vmec_flip_branch():
     modes = vmec_mode_table(mpol=2, ntor=0)
     idx_m1 = int(np.nonzero(np.asarray(modes.m) == 1)[0][0])
