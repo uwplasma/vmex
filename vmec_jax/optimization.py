@@ -764,7 +764,11 @@ def make_qh_residuals_fn(
     """
     from .init_guess import initial_guess_from_boundary
     from .boundary import boundary_from_indata
-    from .quasisymmetry import quasisymmetry_ratio_residual_from_state
+    from .modes import nyquist_mode_table_from_grid
+    from .quasisymmetry import (
+        _quasisymmetry_angle_cache,
+        quasisymmetry_ratio_residual_from_state,
+    )
     from .wout import equilibrium_aspect_ratio_from_state
 
     if surfaces is None:
@@ -783,6 +787,17 @@ def make_qh_residuals_fn(
 
     flux = flux_profiles_from_indata(indata, static.s, signgs=signgs)
     pressure = _pressure_profile_for_static(indata, static)
+    nyq_modes = nyquist_mode_table_from_grid(
+        mpol=int(static.cfg.mpol),
+        ntor=int(static.cfg.ntor),
+        ntheta=int(static.cfg.ntheta),
+        nzeta=int(static.cfg.nzeta),
+    )
+    angle_cache = _quasisymmetry_angle_cache(
+        nfp=int(static.cfg.nfp),
+        xm_nyq=nyq_modes.m,
+        xn_nyq=nyq_modes.n * int(static.cfg.nfp),
+    )
 
     def _qs_eval_from_state(state: VMECState):
         return quasisymmetry_ratio_residual_from_state(
@@ -796,6 +811,7 @@ def make_qh_residuals_fn(
             surfaces=surfaces,
             helicity_m=helicity_m,
             helicity_n=helicity_n,
+            angle_cache=angle_cache,
         )
 
     def residuals_from_state(state: VMECState) -> jnp.ndarray:
@@ -910,7 +926,11 @@ def make_qs_residuals_fn(
     """
     from .boundary import boundary_from_indata
     from .init_guess import initial_guess_from_boundary
-    from .quasisymmetry import quasisymmetry_ratio_residual_from_state
+    from .modes import nyquist_mode_table_from_grid
+    from .quasisymmetry import (
+        _quasisymmetry_angle_cache,
+        quasisymmetry_ratio_residual_from_state,
+    )
     from .wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
     if surfaces is None:
@@ -929,6 +949,17 @@ def make_qs_residuals_fn(
 
     flux = flux_profiles_from_indata(indata, static.s, signgs=signgs)
     pressure = _pressure_profile_for_static(indata, static)
+    nyq_modes = nyquist_mode_table_from_grid(
+        mpol=int(static.cfg.mpol),
+        ntor=int(static.cfg.ntor),
+        ntheta=int(static.cfg.ntheta),
+        nzeta=int(static.cfg.nzeta),
+    )
+    angle_cache = _quasisymmetry_angle_cache(
+        nfp=int(static.cfg.nfp),
+        xm_nyq=nyq_modes.m,
+        xn_nyq=nyq_modes.n * int(static.cfg.nfp),
+    )
     _signgs = signgs
     _indata = indata
 
@@ -944,6 +975,7 @@ def make_qs_residuals_fn(
             surfaces=surfaces,
             helicity_m=helicity_m,
             helicity_n=helicity_n,
+            angle_cache=angle_cache,
         )
 
     def residuals_from_state(state: VMECState) -> jnp.ndarray:

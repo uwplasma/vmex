@@ -225,6 +225,50 @@ def test_quasisymmetry_ratio_residual_returns_diagnostic_fields():
     )
 
 
+def test_quasisymmetry_angle_cache_matches_uncached_wout():
+    pytest.importorskip("jax")
+
+    from vmec_jax import load_wout
+    from vmec_jax.quasisymmetry import (
+        _quasisymmetry_angle_cache,
+        quasisymmetry_ratio_residual_from_wout,
+    )
+
+    root = os.path.dirname(os.path.dirname(__file__))
+    wout = load_wout(os.path.join(root, "examples", "data", "wout_nfp4_QH_warm_start.nc"))
+    cache = _quasisymmetry_angle_cache(
+        nfp=int(wout.nfp),
+        xm_nyq=wout.xm_nyq,
+        xn_nyq=wout.xn_nyq,
+        ntheta=13,
+        nphi=14,
+    )
+    uncached = quasisymmetry_ratio_residual_from_wout(
+        wout,
+        surfaces=[0.25, 0.5, 0.75],
+        helicity_m=1,
+        helicity_n=-1,
+        ntheta=13,
+        nphi=14,
+    )
+    cached = quasisymmetry_ratio_residual_from_wout(
+        wout,
+        surfaces=[0.25, 0.5, 0.75],
+        helicity_m=1,
+        helicity_n=-1,
+        angle_cache=cache,
+    )
+
+    assert np.asarray(cached["residuals1d"]).shape == (3 * 13 * 14,)
+    np.testing.assert_allclose(
+        np.asarray(cached["residuals1d"]),
+        np.asarray(uncached["residuals1d"]),
+        rtol=0.0,
+        atol=0.0,
+    )
+    np.testing.assert_allclose(np.asarray(cached["total"]), np.asarray(uncached["total"]), rtol=0.0, atol=0.0)
+
+
 @pytest.mark.parametrize(
     ("filename", "helicity_m", "helicity_n", "expected_total", "expected_profile"),
     [

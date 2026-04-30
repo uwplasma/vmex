@@ -84,17 +84,25 @@ warm runtimes competitive with or faster than VMEC2000 on CPU:
   parameter tangent columns must be propagated through the converged VMEC
   iteration tape.
 
-**9. Minimal history in optimisation loops**
+**9. Cached quasisymmetry angular grids**
+  QS optimisation callbacks reuse the same angular quadrature grid and
+  trigonometric tables across residual and Jacobian calls.  The public
+  ``quasisymmetry_ratio_residual_from_wout`` API still builds these arrays on
+  demand, but ``make_qs_residuals_fn`` / ``make_qh_residuals_fn`` precompute
+  them once for the fixed optimisation problem.  This reduces cold
+  residual/Jacobian trace overhead without changing the residual values.
+
+**10. Minimal history in optimisation loops**
   The ``light_history=True`` flag suppresses the full per-step diagnostic record
   during optimisation solves, reducing host/device traffic and memory pressure.
 
-**10. On-disk XLA kernel cache**
+**11. On-disk XLA kernel cache**
   The persistent XLA compilation cache is enabled by default for repeated
   cold-process CPU and GPU runs. Set ``VMEC_JAX_COMPILATION_CACHE=0`` to
   disable it, or ``VMEC_JAX_COMPILATION_CACHE_DIR`` to choose the cache
   location.
 
-**11. GPU demand allocation**
+**12. GPU demand allocation**
   Before importing JAX, vmec_jax defaults
   ``XLA_PYTHON_CLIENT_PREALLOCATE=false`` unless the user already configured
   the allocator.  This keeps GPU memory available for worker/profiling
@@ -103,7 +111,7 @@ warm runtimes competitive with or faster than VMEC2000 on CPU:
   ``VMEC_JAX_GPU_PREALLOCATE=1`` before import to keep JAX's preallocation
   default.
 
-**12. Fused accelerator update step**
+**13. Fused accelerator update step**
   The exact optimizer's strict fixed-boundary accepted-point solve uses a
   cached JIT helper for the velocity/state update on non-CPU backends.  This
   removes many small eager GPU dispatches per VMEC iteration while leaving the
