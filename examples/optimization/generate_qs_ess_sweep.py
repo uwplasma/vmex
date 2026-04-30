@@ -172,7 +172,12 @@ CASE_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
 # controlled by small per-case nfev caps.  Let the 20-minute case timeout decide
 # whether high-mode LASYM cases are affordable; keep explicit low nfev caps only
 # in ``CASE_BUDGET_OVERRIDES`` for opt-in ``--diagnostic-budgets`` runs.
-GPU_PRODUCTION_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {}
+GPU_PRODUCTION_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
+    ("gpu", "continuation", "qi", 4, False): CaseBudget(max_nfev=8),
+    ("gpu", "continuation", "qi", 4, True): CaseBudget(max_nfev=8),
+    ("gpu", "direct", "qi", 4, False): CaseBudget(max_nfev=8),
+    ("gpu", "direct", "qi", 4, True): CaseBudget(max_nfev=8),
+}
 
 
 # CPU sweeps normally use the full scientific budgets.  The QA continuation
