@@ -150,6 +150,40 @@ def rebuild_indata_with_resolution(indata, *, mpol: int, ntor: int):
     )
 
 
+def truncate_indata_boundary_modes(indata, *, max_mode: int | None):
+    """Return a copy of ``indata`` with boundary modes above ``max_mode`` zeroed.
+
+    VMEC inputs can contain non-zero harmonics outside the active optimization
+    space.  Parameter specs only decide which coefficients are free; they do
+    not alter the fixed coefficients already present in the input.  Use this
+    helper when a ``max_mode=N`` optimization should start from the boundary
+    projected onto ``max(abs(m), abs(n)) <= N`` rather than keeping higher
+    harmonics fixed in the background.
+    """
+    from .namelist import InData
+
+    if max_mode is None:
+        return indata
+    limit = int(max_mode)
+    boundary_names = {"RBC", "RBS", "ZBC", "ZBS"}
+    indexed = {}
+    for name, values in indata.indexed.items():
+        upper = str(name).upper()
+        copied = dict(values)
+        if upper in boundary_names:
+            copied = {
+                tuple(key): float(value)
+                for key, value in copied.items()
+                if len(tuple(key)) >= 2 and max(abs(int(tuple(key)[0])), abs(int(tuple(key)[1]))) <= limit
+            }
+        indexed[name] = copied
+    return InData(
+        scalars=dict(indata.scalars),
+        indexed=indexed,
+        source_path=indata.source_path,
+    )
+
+
 def smooth_min_abs_iota_residual(
     iota,
     minimum: float,

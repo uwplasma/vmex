@@ -13,7 +13,7 @@ and QI targets:
 - QI: aspect ratio, a differentiable smooth Boozer-space quasi-isodynamic
   residual evaluated through ``booz_xform_jax``, maximum mirror-ratio penalty,
   maximum-LCFS-elongation penalty, and a smooth ``abs(mean_iota) >= 0.40``
-  lower bound.  The default QI run starts from the bundled ``input.nfp1_QI``
+  lower bound.  The default QI run starts from the bundled ``input.nfp2_QI``
   omnigenity seed, runs a QI-only preseed, then activates the mirror and
   elongation penalties for the final QI refinement.  The constrained sweep can
   also run a same-mode QP preseed to measure whether that optional seed helps.
@@ -151,8 +151,12 @@ Constrained QI Matrix
 
 The constrained QI matrix compares CPU and available GPU rows for
 ``max_mode = 1, 2, 3``, ESS on/off, continuation/direct, and QP-preseed
-on/off.  The QI objective is intentionally not ranked by scalar objective
-alone: rows are also evaluated by raw QI residual, maximum mirror ratio,
+on/off using the bundled NFP=2 ``input.nfp2_QI`` seed.  For each requested
+``max_mode``, the input boundary is projected onto
+``max(abs(m), abs(n)) <= max_mode`` before the stage is built, so the
+``max_mode=1`` rows zero the mode-2 coefficients present in the warm start.
+The QI objective is intentionally not ranked by scalar objective alone: rows
+are also evaluated by raw QI residual, maximum mirror ratio,
 maximum LCFS elongation, ``abs(mean_iota) >= 0.40``, and aspect ratio near 7.
 Rows that stop at ``max_nfev`` but have valid VMEC solves and satisfy the
 physics gates are kept as valid stopped rows.
@@ -169,13 +173,13 @@ Downloadable constrained-QI summaries:
 - :download:`qi_constrained_best.json <_static/figures/qi_constrained_best.json>`
 
 In the current snapshot, the best available constrained QI row is CPU direct,
-``max_mode=1``, ESS on, without QP preseed.  It reaches raw QI ``5.56e-2``,
-maximum mirror ratio ``0.213`` for a target ``0.21``, maximum elongation
-``7.88`` for a target ``8.0``, aspect ratio ``7.006``, mean iota ``0.419``,
-and wall time ``1.1 min``.  Mode-2 and mode-3 QI rows remain useful
-diagnostics but currently expose a trust-region/Jacobian robustness issue in
-the constrained Boozer objective; those rows are retained in the table instead
-of hidden.
+``max_mode=3``, ESS off, without QP preseed.  It reaches raw QI ``8.30e-2``,
+maximum mirror ratio ``0.215`` for a target ``0.21``, maximum elongation
+``4.37`` for a target ``8.0``, aspect ratio ``7.012``, mean iota ``-0.415``,
+and wall time ``1.5 min``.  Several higher-mode ESS or QP-preseed rows remain
+useful diagnostics but currently expose a trust-region/Jacobian robustness
+issue in the constrained Boozer objective; those rows are retained in the table
+instead of hidden.
 
 Non-stellarator-symmetric LASYM runs use the same script with
 ``--stellarator-asymmetric``.  The current LASYM artifacts are intentionally

@@ -253,7 +253,12 @@ Each problem is run with staged mode continuation and with direct-start mode
 expansion.  Each policy is run with and without ESS using ``alpha = 2.5``.
 For QI, the focused constrained sweep additionally compares starting from a
 same-mode QP preseed against starting directly from the bundled
-``input.nfp1_QI`` omnigenity seed.
+``input.nfp2_QI`` omnigenity seed.
+That NFP=2 seed contains mode-2 boundary harmonics, so QI stages first project
+the input boundary to the requested active space:
+``max(abs(m), abs(n)) <= max_mode``.  Thus a ``max_mode=1`` QI run explicitly
+zeros the mode-2 seed before solving, while ``max_mode=2`` and ``max_mode=3``
+retain and optimize the corresponding larger active spaces.
 When enabled, the QP preseed is followed by a QI-only preseed, then a final
 refinement with the full QI + mirror-ratio + elongation objective.  This keeps
 QP as an explicit optional experiment while still measuring whether the preseed

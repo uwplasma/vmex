@@ -43,7 +43,9 @@ MODES_BY_POLICY = {
     "continuation": (1, 2, 3),
     "direct": (1, 2, 3),
 }
+QI_INPUT_NFP = 2
 _TIMEOUT_SECONDS_RE = re.compile(r"timed out after\s+([0-9]+(?:\.[0-9]+)?)\s*s")
+_NFP_RE = re.compile(r"^\s*NFP\s*=\s*([0-9]+)", re.IGNORECASE | re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -70,6 +72,9 @@ class CaseResult:
     jax_platforms: str | None = None
     stellarator_asymmetric: bool = False
     asymmetry_seed: float = 0.0
+    input_file: str | None = None
+    input_nfp: int | None = None
+    project_input_boundary_to_max_mode: bool | None = None
     asymmetric_dof_count: int = 0
     asymmetric_param_norm_initial: float | None = None
     asymmetric_param_norm_final: float | None = None
@@ -285,6 +290,35 @@ def _infer_missing_wall_time(record: dict) -> None:
     record["total_wall_time_s"] = float(match.group(1))
 
 
+def _path_from_record_output(record: dict, path: Path) -> Path:
+    output_dir = record.get("output_dir")
+    if output_dir:
+        candidate = Path(str(output_dir))
+        if not candidate.is_absolute():
+            candidate = REPO_ROOT / candidate
+        if candidate.exists():
+            return candidate
+    return path.parent
+
+
+def _input_nfp_from_result(record: dict, path: Path) -> int | None:
+    value = record.get("input_nfp")
+    if value not in (None, ""):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            pass
+    output_dir = _path_from_record_output(record, path)
+    for name in ("input.initial", "input.final"):
+        candidate = output_dir / name
+        if not candidate.exists():
+            continue
+        match = _NFP_RE.search(candidate.read_text(errors="ignore"))
+        if match is not None:
+            return int(match.group(1))
+    return None
+
+
 def _lcfs_xyz(R: np.ndarray, Z: np.ndarray, phi: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     X = R * np.cos(phi[None, :])
     Y = R * np.sin(phi[None, :])
@@ -314,6 +348,14 @@ def _discover_results() -> list[CaseResult]:
             # Ignore pre-backend-layout results. They caused stale timeout/zero-iota
             # records to leak into regenerated CPU/GPU panels after new sweeps.
             continue
+        if record.get("problem") == "qi":
+            input_nfp = _input_nfp_from_result(record, path)
+            if input_nfp != QI_INPUT_NFP:
+                continue
+            record["input_file"] = record.get("input_file") or "examples/data/input.nfp2_QI"
+            record["input_nfp"] = input_nfp
+            if record.get("project_input_boundary_to_max_mode") in (None, ""):
+                record["project_input_boundary_to_max_mode"] = True
         policy, _policy_explicit = _infer_policy(path, raw_record)
         record["backend"] = backend
         record["policy"] = policy
@@ -394,6 +436,9 @@ def _write_combined_summary(results: list[CaseResult]) -> None:
                 "jax_device_kind",
                 "solver_device",
                 "jax_platforms",
+                "input_file",
+                "input_nfp",
+                "project_input_boundary_to_max_mode",
                 "message",
                 "output_dir",
             ],
