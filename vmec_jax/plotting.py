@@ -228,6 +228,9 @@ def surface_rz_from_wout(
     rmns = np.asarray(getattr(wout, "rmns", np.zeros_like(rmnc)))
     zmns = np.asarray(wout.zmns)
     zmnc = np.asarray(getattr(wout, "zmnc", np.zeros_like(zmns)))
+    if not bool(getattr(wout, "lasym", False)):
+        rmns = np.zeros_like(rmnc)
+        zmnc = np.zeros_like(zmns)
 
     R = np.asarray(eval_fourier(rmnc[s_index], rmns[s_index], basis))
     Z = np.asarray(eval_fourier(zmnc[s_index], zmns[s_index], basis))
@@ -252,6 +255,9 @@ def surface_rz_from_wout_physical(
     rmns = np.asarray(getattr(wout, "rmns", np.zeros_like(rmnc)))
     zmns = np.asarray(wout.zmns)
     zmnc = np.asarray(getattr(wout, "zmnc", np.zeros_like(zmns)))
+    if not bool(getattr(wout, "lasym", False)):
+        rmns = np.zeros_like(rmnc)
+        zmnc = np.zeros_like(zmns)
 
     R = np.asarray(eval_fourier(rmnc[s_index], rmns[s_index], basis))
     Z = np.asarray(eval_fourier(zmnc[s_index], zmns[s_index], basis))

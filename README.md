@@ -66,6 +66,24 @@ Run tests:
 pytest -q
 ```
 
+## Validation and tests
+
+Required CI is split into fast unit/physics kernels, bounded physics smoke,
+docs/build checks, and parity-manifest dry runs. The required fast suite is
+kept short enough for routine development while the manual/nightly jobs cover
+larger VMEC2000 and GPU matrices.
+
+<p align="center">
+  <img src="docs/_static/figures/readme_validation_status.png" width="980" />
+</p>
+
+Recreate the local coverage gate and this panel:
+
+```bash
+pytest -q -m "not full and not vmec2000" --cov=vmec_jax --cov-report=term-missing:skip-covered --cov-fail-under=58
+python tools/diagnostics/readme_validation_panel.py
+```
+
 ## Choosing CPU or GPU
 
 `vmec_jax` follows the JAX backend you select. If you installed CPU-only JAX,
