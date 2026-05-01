@@ -141,8 +141,8 @@ tests execute long workflows incidentally.
    coverage gates.  Coverage runs should not require downloading presentation
    artifacts.
 5. Raise ``--cov-fail-under`` in stages after the corresponding tests are
-   merged.  The current required fast-suite gate is ``57%``; the next planned
-   ratchets are 70%, 80%, 90%, then 95%.
+   merged.  The current required fast-suite gate is ``58%``; the next planned
+   ratchets are 60%, 70%, 80%, 90%, then 95%.
 
 
 Repository Size Plan
