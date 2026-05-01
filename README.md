@@ -166,9 +166,9 @@ policy matrix, LASYM panels, finite-beta examples, and all tables live in the
 [optimization guide](docs/optimization.rst) and
 [optimization sweep results](docs/optimization_sweep_results.rst).
 
-Each row below shows the initial LCFS, final LCFS, total objective history, and
-the final outer-surface `|B|` in Boozer coordinates computed with
-`booz_xform_jax`.
+Each row below shows the original deck LCFS before any `max_mode=1`
+optimization work, the final LCFS, total objective history, and the final
+outer-surface `|B|` in Boozer coordinates computed with `booz_xform_jax`.
 
 | Target | Policy | max_mode | ESS | Final J | Aspect | Iota | CPU wall time |
 |---|---|---:|---|---:|---:|---:|---:|

@@ -33,6 +33,17 @@ def _load_sweep_module():
     return module
 
 
+def _load_readme_renderer_module():
+    root = Path(__file__).resolve().parents[1]
+    script = root / "examples" / "optimization" / "render_readme_best_optimizations.py"
+    spec = importlib.util.spec_from_file_location("render_readme_best_optimizations", script)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_qs_ess_sweep_worker_jax_platform_policy():
     sweep = _load_sweep_module()
 
@@ -304,6 +315,58 @@ def test_qs_ess_renderer_separates_lasym_records(tmp_path, monkeypatch):
     assert asym.objective_final == 0.25
     assert asym.asymmetric_dof_count == 8
     assert ("cpu", True, "qa", "continuation") in renderer._available_row_specs(discovered)
+
+
+def test_readme_renderer_uses_preoptimization_initial_wout(tmp_path):
+    renderer = _load_readme_renderer_module()
+
+    continuation_dir = tmp_path / "cpu" / "continuation" / "qh" / "mode4" / "ess"
+    mode1_dir = tmp_path / "cpu" / "continuation" / "qh" / "mode1" / "ess"
+    direct_qi_dir = tmp_path / "cpu" / "direct" / "qi" / "mode2" / "ess"
+    direct_qa_dir = tmp_path / "cpu" / "direct" / "qa" / "mode3" / "ess"
+    for directory in (continuation_dir, mode1_dir, direct_qi_dir, direct_qa_dir):
+        directory.mkdir(parents=True)
+        (directory / "wout_initial.nc").write_text("stage-local")
+    (mode1_dir / "wout_initial.nc").write_text("pre-mode-1")
+    (direct_qi_dir / "wout_original.nc").write_text("original")
+
+    continuation = renderer.BestRun(
+        problem="qh",
+        policy="continuation",
+        max_mode=4,
+        use_ess=True,
+        objective_final=1.0,
+        aspect_final=7.0,
+        iota_final=0.4,
+        total_wall_time_s=1.0,
+        output_dir=continuation_dir,
+    )
+    qi = renderer.BestRun(
+        problem="qi",
+        policy="direct",
+        max_mode=2,
+        use_ess=True,
+        objective_final=1.0,
+        aspect_final=7.0,
+        iota_final=0.4,
+        total_wall_time_s=1.0,
+        output_dir=direct_qi_dir,
+    )
+    qa = renderer.BestRun(
+        problem="qa",
+        policy="direct",
+        max_mode=3,
+        use_ess=True,
+        objective_final=1.0,
+        aspect_final=6.0,
+        iota_final=0.4,
+        total_wall_time_s=1.0,
+        output_dir=direct_qa_dir,
+    )
+
+    assert renderer._preoptimization_wout_path(continuation) == mode1_dir / "wout_initial.nc"
+    assert renderer._preoptimization_wout_path(qi) == direct_qi_dir / "wout_original.nc"
+    assert renderer._preoptimization_wout_path(qa) == direct_qa_dir / "wout_initial.nc"
 
 
 def test_qs_ess_renderer_keeps_partial_lasym_publication_groups():

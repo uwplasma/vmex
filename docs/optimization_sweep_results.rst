@@ -90,9 +90,10 @@ README Best Rows
 ----------------
 
 The README intentionally shows only one best CPU, ``LASYM = F`` result per
-target.  These panels include the initial LCFS, final LCFS, objective history,
-and final outer-surface ``|B|`` in Boozer coordinates evaluated with
-``booz_xform_jax``.  The source table is also available as
+target.  These panels include the original deck LCFS before any
+``max_mode=1`` optimization work, final LCFS, objective history, and final
+outer-surface ``|B|`` in Boozer coordinates evaluated with ``booz_xform_jax``.
+The source table is also available as
 :download:`readme_best_optimizations.csv <_static/figures/readme_best_optimizations.csv>`.
 
 .. image:: _static/figures/readme_best_optimization_qa.png

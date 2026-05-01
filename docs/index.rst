@@ -23,6 +23,7 @@ vmec-jax documentation
       vmec_wiki_primer
       algorithms
       validation
+      testing_strategy
       optimization
       optimization_sweep_results
       discrete_adjoint
