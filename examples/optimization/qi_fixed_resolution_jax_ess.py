@@ -3,8 +3,9 @@
 """Quasi-isodynamic optimization with vmec_jax.
 
 This example uses the differentiable smooth QI residual in
-``vmec_jax.quasi_isodynamic``.  It first runs a same-mode QP preseed from the
-QH warm-start input, then refines with the QI objective.  The QI residual
+``vmec_jax.quasi_isodynamic``.  It starts from the bundled QI seed used for
+the reference omnigenity workflow and can optionally run a same-mode QP preseed
+before refining with the QI objective.  The QI residual
 follows the same physical target as the branch/spline diagnostic in
 ``omnigenity_optimization``: magnetic well widths and normalized well profiles
 should be weakly dependent on field-line label.  The implementation here uses
@@ -26,7 +27,12 @@ from vmec_jax.field import signgs_from_sqrtg
 from vmec_jax.geom import eval_geom
 from vmec_jax.init_guess import initial_guess_from_boundary
 from vmec_jax.optimization import rebuild_indata_with_resolution
-from vmec_jax.quasi_isodynamic import _nearest_half_mesh_indices, quasi_isodynamic_residual_from_state
+from vmec_jax.quasi_isodynamic import (
+    _nearest_half_mesh_indices,
+    max_elongation_penalty_from_state,
+    mirror_ratio_penalty_from_boozer_output,
+    quasi_isodynamic_residual_from_state,
+)
 from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_state
 from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
@@ -38,12 +44,11 @@ enable_x64(True)
 # USER PARAMETERS
 # ─────────────────────────────────────────────────────────────────────────────
 
-INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.nfp4_QH_warm_start"
-
-VMEC_MPOL = 5
-VMEC_NTOR = 5
+INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.nfp1_QI"
 
 MAX_MODE = 1
+VMEC_MPOL = max(5, MAX_MODE + 2)
+VMEC_NTOR = VMEC_MPOL
 MAX_NFEV = 30
 CONTINUATION_NFEV = 12
 
@@ -73,13 +78,26 @@ QI_NALPHA = 13
 QI_N_BOUNCE = 11
 QI_SOFTNESS = 2.0e-2
 QI_PROFILE_WEIGHT = 1.5
+MAX_MIRROR_RATIO = 0.21
+MIRROR_LEAST_SQUARES_WEIGHT = 10.0
+MIRROR_WEIGHT = MIRROR_LEAST_SQUARES_WEIGHT
+MIRROR_NTHETA = 96
+MIRROR_NPHI = 96
+MIRROR_SURFACE_INDEX = 0
+MAX_ELONGATION = 8.0
+ELONGATION_LEAST_SQUARES_WEIGHT = 10.0
+ELONGATION_WEIGHT = ELONGATION_LEAST_SQUARES_WEIGHT
+ELONGATION_NTHETA = 48
+ELONGATION_NPHI = 16
 
 USE_ESS = True
 ALPHA = 2.5
 USE_MODE_CONTINUATION = True
-USE_QP_PRESEED = True
+USE_QP_PRESEED = False
 QP_PRESEED_MAX_NFEV = 50
 QP_PRESEED_CONTINUATION_NFEV = 20
+USE_QI_PRESEED = True
+QI_PRESEED_MAX_NFEV = 30
 QP_HELICITY_M = 0
 QP_HELICITY_N = -1
 QP_SURFACES = np.arange(0.0, 1.01, 0.1)
@@ -128,6 +146,21 @@ def _mean_iota(state, *, static, indata, signgs):
     return jnp.asarray(0.0, dtype=iotas.dtype) if int(iotas.shape[0]) <= 1 else jnp.mean(iotas[1:])
 
 
+def _as_residual_block(value):
+    arr = jnp.asarray(value, dtype=jnp.float64)
+    return arr.reshape((1,)) if int(arr.ndim) == 0 else jnp.ravel(arr)
+
+
+def _slice_boozer_surfaces(booz: dict, surface_index: int) -> dict:
+    index = int(surface_index)
+    out = dict(booz)
+    for key in ("bmnc_b", "bmns_b", "iota_b", "s_b"):
+        value = out.get(key)
+        if value is not None:
+            out[key] = value[index : index + 1]
+    return out
+
+
 def _build_stage(max_mode: int, *, objective_kind: str):
     stage_static = vj.build_static(cfg)
     stage_boundary = vj.boundary_from_indata(indata, stage_static.modes, apply_m1_constraint=False)
@@ -150,7 +183,7 @@ def _build_stage(max_mode: int, *, objective_kind: str):
     stage_flux = vj.flux_profiles_from_indata(stage_indata, stage_static.s, signgs=stage_signgs)
     stage_pressure = jnp.zeros_like(jnp.asarray(stage_static.s))
 
-    if objective_kind == "qi":
+    if objective_kind in ("qi", "qi_preseed"):
         from booz_xform_jax import prepare_booz_xform_constants
         from vmec_jax.modes import nyquist_mode_table_from_grid, vmec_mode_table
 
@@ -215,6 +248,44 @@ def _build_stage(max_mode: int, *, objective_kind: str):
                 helicity_n=QP_HELICITY_N,
             )
 
+    def _qi_field_objective_blocks(state, field):
+        """QI field-quality blocks.
+
+        Add new QI-specific field objectives here.  Each entry returns a
+        least-squares residual block, so adding a future term such as LgradB or
+        magnetic-well depth is just another ``(name, callback)`` in this list,
+        without changing ``vmec_jax`` internals.
+        """
+
+        mirror_booz = _slice_boozer_surfaces(field["booz"], MIRROR_SURFACE_INDEX)
+        mirror = mirror_ratio_penalty_from_boozer_output(
+            mirror_booz,
+            nfp=int(stage_static.cfg.nfp),
+            threshold=MAX_MIRROR_RATIO,
+            ntheta=MIRROR_NTHETA,
+            nphi=MIRROR_NPHI,
+        )
+        elongation = max_elongation_penalty_from_state(
+            state=state,
+            static=stage_static,
+            threshold=MAX_ELONGATION,
+            ntheta=ELONGATION_NTHETA,
+            nphi=ELONGATION_NPHI,
+        )
+        return [
+            ("qi", QI_WEIGHT * _as_residual_block(field["residuals1d"]), QI_WEIGHT**2 * field["total"]),
+            (
+                "mirror_ratio",
+                MIRROR_WEIGHT * _as_residual_block(mirror["residuals1d"]),
+                MIRROR_WEIGHT**2 * mirror["total"],
+            ),
+            (
+                "max_elongation",
+                ELONGATION_WEIGHT * _as_residual_block(elongation["residuals1d"]),
+                ELONGATION_WEIGHT**2 * elongation["total"],
+            ),
+        ]
+
     def stage_residuals_from_state(state):
         aspect = equilibrium_aspect_ratio_from_state(state=state, static=stage_static)
         field = stage_field_eval(state)
@@ -226,13 +297,23 @@ def _build_stage(max_mode: int, *, objective_kind: str):
                 TARGET_ABS_IOTA_MIN,
             )
             parts.append(jnp.asarray([IOTA_WEIGHT * iota_shortfall], dtype=jnp.float64))
-        parts.append(jnp.asarray(field["residuals1d"], dtype=jnp.float64) * QI_WEIGHT)
+        if objective_kind == "qi":
+            parts.extend(residuals for _name, residuals, _total in _qi_field_objective_blocks(state, field))
+        elif objective_kind == "qi_preseed":
+            parts.append(jnp.asarray(field["residuals1d"], dtype=jnp.float64) * QI_WEIGHT)
+        else:
+            parts.append(jnp.asarray(field["residuals1d"], dtype=jnp.float64) * QI_WEIGHT)
         return jnp.concatenate(parts)
 
     stage_residuals_from_state._n_non_qs = 2
-    stage_residuals_from_state._qs_total_from_state = (
-        lambda state: float(QI_WEIGHT) ** 2 * float(stage_field_eval(state)["total"])
-    )
+
+    def _stage_field_total_from_state(state):
+        field = stage_field_eval(state)
+        if objective_kind == "qi":
+            return float(sum(float(total) for _name, _residuals, total in _qi_field_objective_blocks(state, field)))
+        return float(QI_WEIGHT) ** 2 * float(field["total"])
+
+    stage_residuals_from_state._qs_total_from_state = _stage_field_total_from_state
 
     stage_opt = vj.FixedBoundaryExactOptimizer(
         stage_static,
@@ -294,6 +375,40 @@ if USE_QP_PRESEED:
         prev_specs = stage_specs
         params_stage = stage_result["x"]
 
+if USE_QI_PRESEED:
+    print("Running QI-residual preseed before mirror/elongation refinement …")
+    stage_specs, stage_opt, stage_x_scale, iota_fn = _build_stage(MAX_MODE, objective_kind="qi_preseed")
+    params0_stage = (
+        np.zeros(len(stage_specs), dtype=float)
+        if params_stage is None
+        else vj.lift_boundary_params(prev_specs, params_stage, stage_specs)
+    )
+    stage_result = stage_opt.run(
+        params0_stage,
+        method=METHOD,
+        max_nfev=QI_PRESEED_MAX_NFEV,
+        ftol=FTOL,
+        gtol=GTOL,
+        xtol=XTOL,
+        x_scale=stage_x_scale,
+        verbose=0,
+        iota_fn=iota_fn,
+        target_aspect=TARGET_ASPECT,
+        scipy_tr_solver=SCIPY_TR_SOLVER,
+        scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
+    )
+    stage_result["_history_dump"]["iota_abs_min"] = float(TARGET_ABS_IOTA_MIN)
+    _save_stage_artifacts(
+        OUTPUT_DIR / f"stage_qi_preseed_{MAX_MODE:02d}",
+        stage_opt,
+        params0_stage,
+        stage_result["x"],
+        stage_result,
+    )
+    stage_results.append((f"qi_preseed{MAX_MODE}", MAX_MODE, stage_specs, stage_opt, params0_stage, stage_result))
+    prev_specs = stage_specs
+    params_stage = stage_result["x"]
+
 for stage_mode in [MAX_MODE] if USE_QP_PRESEED else stage_modes:
     stage_specs, stage_opt, stage_x_scale, iota_fn = _build_stage(stage_mode, objective_kind="qi")
     params0_stage = (
@@ -305,6 +420,16 @@ for stage_mode in [MAX_MODE] if USE_QP_PRESEED else stage_modes:
     if stage_mode == MAX_MODE:
         print(f"Parameter space ({len(stage_specs)} DOFs): {vj.boundary_param_names(stage_specs)}")
         print(f"ESS: {USE_ESS}, alpha={ALPHA}")
+        print("QI field objectives:")
+        print(f"  - smooth QI residual: weight={QI_WEIGHT}")
+        print(
+            f"  - mirror ratio <= {MAX_MIRROR_RATIO}: "
+            f"least-squares weight={MIRROR_LEAST_SQUARES_WEIGHT}"
+        )
+        print(
+            f"  - max elongation <= {MAX_ELONGATION}: "
+            f"least-squares weight={ELONGATION_LEAST_SQUARES_WEIGHT} on normalized excess"
+        )
         print(f"Aspect ratio (initial):        {stage_opt.aspect_ratio(params0_stage):.4f}")
         print(f"QI objective (initial):        {stage_opt.quasisymmetry_objective(params0_stage):.6e}")
         print(
@@ -356,7 +481,9 @@ _initial_label, initial_stage_mode, initial_specs, initial_opt, initial_params0,
 initial_opt.save_input(OUTPUT_DIR / "input.initial", initial_params0)
 initial_opt.save_wout(OUTPUT_DIR / "wout_initial.nc", initial_params0, state=initial_result.get("_state_initial"))
 if USE_QP_PRESEED:
-    qp_label, qp_stage_mode, qp_specs, qp_opt, qp_params0, qp_result = stage_results[-2]
+    qp_label, qp_stage_mode, qp_specs, qp_opt, qp_params0, qp_result = next(
+        record for record in reversed(stage_results) if record[0].startswith("qp")
+    )
     del qp_label, qp_stage_mode, qp_specs, qp_params0
     qp_opt.save_input(OUTPUT_DIR / "input.qp_seed", qp_result["x"])
     qp_opt.save_wout(OUTPUT_DIR / "wout_qp_seed.nc", qp_result["x"], state=qp_result.get("_state_final"))

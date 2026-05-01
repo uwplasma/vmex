@@ -2,9 +2,11 @@
 """Render the compact README panel of best symmetric QA/QH/QP/QI runs.
 
 The full optimization matrix lives in the documentation.  This script keeps the
-README focused on one representative CPU, stellarator-symmetric result for each
+README focused on one representative stellarator-symmetric result for each
 target and evaluates the final |B| contours in Boozer coordinates through
-``booz_xform_jax``.
+``booz_xform_jax``.  QA/QH/QP use the best CPU rows from the all-policy sweep;
+QI uses the constrained QI matrix when available so mirror ratio and elongation
+diagnostics enter the selection.
 """
 
 from __future__ import annotations
@@ -25,6 +27,8 @@ REPO_ROOT = SCRIPT_DIR.parents[1]
 SWEEP_ROOT = SCRIPT_DIR / "results" / "qs_ess_sweep"
 FIGURE_DIR = REPO_ROOT / "docs" / "_static" / "figures"
 SUMMARY_CSV = FIGURE_DIR / "qs_ess_summary_all.csv"
+QI_CONSTRAINED_CSV = FIGURE_DIR / "qi_constrained_summary.csv"
+QI_CONSTRAINED_BEST_JSON = FIGURE_DIR / "qi_constrained_best.json"
 OUT_CSV = FIGURE_DIR / "readme_best_optimizations.csv"
 
 PROBLEMS = ("qa", "qh", "qp", "qi")
@@ -34,7 +38,6 @@ PROBLEM_TITLES = {
     "qp": "QP",
     "qi": "QI",
 }
-
 
 @dataclass(frozen=True)
 class BestRun:
@@ -47,11 +50,26 @@ class BestRun:
     iota_final: float
     total_wall_time_s: float
     output_dir: Path
+    backend: str = "cpu"
+    qi_qp_preseed: bool | None = None
+    qi_raw_total: float | None = None
+    qi_mirror_ratio_max: float | None = None
+    qi_max_elongation: float | None = None
 
 
 def _read_summary_rows() -> list[dict[str, str]]:
     with SUMMARY_CSV.open(newline="") as f:
         return list(csv.DictReader(f))
+
+
+def _read_qi_constrained_rows() -> list[dict[str, str]]:
+    if not QI_CONSTRAINED_CSV.exists():
+        return []
+    with QI_CONSTRAINED_CSV.open(newline="") as f:
+        rows = list(csv.DictReader(f))
+    for row in rows:
+        row["problem"] = "qi"
+    return rows
 
 
 def _bool_value(value: str | bool | None) -> bool:
@@ -67,6 +85,67 @@ def _path_from_summary(value: str) -> Path:
     return (REPO_ROOT / path).resolve()
 
 
+def _float_value(row: dict[str, str], key: str, default: float | None = None) -> float | None:
+    value = row.get(key)
+    if value in (None, ""):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _qi_selection_score(row: dict[str, str]) -> tuple:
+    failed = 1 if _bool_value(row.get("crashed")) else 0
+    mirror = _float_value(row, "qi_mirror_ratio_max", np.inf) or np.inf
+    mirror_target = _float_value(row, "qi_mirror_ratio_target", 0.21) or 0.21
+    elong = _float_value(row, "qi_max_elongation", np.inf) or np.inf
+    elong_target = _float_value(row, "qi_elongation_target", 8.0) or 8.0
+    iota = abs(_float_value(row, "iota_final", 0.0) or 0.0)
+    aspect = _float_value(row, "aspect_final", np.inf) or np.inf
+    qi_raw = _float_value(row, "qi_raw_total", np.inf) or np.inf
+    objective = _float_value(row, "objective_final", np.inf) or np.inf
+    mirror_violation = max(0.0, mirror - mirror_target) / max(mirror_target, 1.0e-12)
+    elong_violation = max(0.0, elong - elong_target) / max(elong_target, 1.0e-12)
+    iota_violation = max(0.0, 0.40 - iota) / 0.40
+    aspect_violation = abs(aspect - 7.0) / 7.0
+    hard_ok = int(
+        mirror_violation <= 0.10
+        and elong_violation <= 0.05
+        and iota_violation <= 0.025
+        and aspect_violation <= 0.05
+    )
+    return (
+        failed,
+        1 - hard_ok,
+        objective,
+        qi_raw,
+        mirror_violation + elong_violation + iota_violation + 0.25 * aspect_violation,
+        _float_value(row, "total_wall_time_s", np.inf),
+    )
+
+
+def _run_from_row(row: dict[str, str]) -> BestRun:
+    return BestRun(
+        problem=row.get("problem", "qi"),
+        backend=row.get("backend", "cpu"),
+        policy=row["policy"],
+        max_mode=int(row["max_mode"]),
+        use_ess=_bool_value(row["use_ess"]),
+        objective_final=float(row["objective_final"]),
+        aspect_final=float(row["aspect_final"]),
+        iota_final=float(_float_value(row, "iota_final", np.nan)),
+        total_wall_time_s=float(row["total_wall_time_s"]),
+        output_dir=_path_from_summary(row["output_dir"]),
+        qi_qp_preseed=(
+            _bool_value(row.get("qi_qp_preseed")) if row.get("problem") == "qi" and row.get("qi_qp_preseed") else None
+        ),
+        qi_raw_total=_float_value(row, "qi_raw_total"),
+        qi_mirror_ratio_max=_float_value(row, "qi_mirror_ratio_max"),
+        qi_max_elongation=_float_value(row, "qi_max_elongation"),
+    )
+
+
 def _best_runs() -> list[BestRun]:
     rows = [
         row
@@ -78,24 +157,29 @@ def _best_runs() -> list[BestRun]:
         and row.get("output_dir")
     ]
     best: list[BestRun] = []
-    for problem in PROBLEMS:
+    for problem in ("qa", "qh", "qp"):
         candidates = [row for row in rows if row.get("problem") == problem]
         if not candidates:
             raise RuntimeError(f"No successful CPU symmetric rows found for {problem!r}")
         row = min(candidates, key=lambda item: float(item["objective_final"]))
-        best.append(
-            BestRun(
-                problem=problem,
-                policy=row["policy"],
-                max_mode=int(row["max_mode"]),
-                use_ess=_bool_value(row["use_ess"]),
-                objective_final=float(row["objective_final"]),
-                aspect_final=float(row["aspect_final"]),
-                iota_final=float(row["iota_final"]),
-                total_wall_time_s=float(row["total_wall_time_s"]),
-                output_dir=_path_from_summary(row["output_dir"]),
-            )
-        )
+        best.append(_run_from_row(row))
+
+    qi_rows = [
+        row
+        for row in _read_qi_constrained_rows()
+        if row.get("output_dir")
+        and row.get("qi_raw_total") not in (None, "")
+        and not _bool_value(row.get("stellarator_asymmetric"))
+    ]
+    if qi_rows:
+        row = min(qi_rows, key=_qi_selection_score)
+        best.append(_run_from_row(row))
+    else:
+        candidates = [row for row in rows if row.get("problem") == "qi"]
+        if not candidates:
+            raise RuntimeError("No successful symmetric rows found for 'qi'")
+        row = min(candidates, key=lambda item: float(item["objective_final"]))
+        best.append(_run_from_row(row))
     return best
 
 
@@ -169,22 +253,46 @@ def _plot_history(ax, run: BestRun) -> None:
     history = data.get("history", [])
     if not history:
         raise RuntimeError(f"Missing history entries in {run.output_dir / 'history.json'}")
-    wall_min = np.asarray([float(item.get("wall_time_s", 0.0)) / 60.0 for item in history])
-    objective = np.asarray([float(item.get("objective", item.get("cost", np.nan))) for item in history])
-    ax.plot(wall_min, objective, color="#1f4e79", linewidth=1.8)
-    ax.scatter(wall_min[-1], objective[-1], s=18, color="#d95f02", zorder=3)
+    last_wall = None
+    last_objective = None
+    for segment in _history_stage_segments(history):
+        wall_min = np.asarray([float(item.get("wall_time_s", 0.0)) / 60.0 for item in segment])
+        objective = np.minimum.accumulate(
+            np.asarray([max(float(item.get("objective", item.get("cost", np.nan))), 1.0e-16) for item in segment])
+        )
+        ax.plot(wall_min, objective, color="#1f4e79", linewidth=1.8)
+        last_wall = wall_min[-1]
+        last_objective = objective[-1]
+    if last_wall is not None and last_objective is not None:
+        ax.scatter(last_wall, last_objective, s=18, color="#d95f02", zorder=3)
     for boundary in data.get("stage_boundaries", []) or []:
         try:
             idx = int(boundary)
         except (TypeError, ValueError):
             continue
-        if 0 <= idx < len(wall_min):
-            ax.axvline(wall_min[idx], color="0.65", linestyle=":", linewidth=0.9)
+        if 0 <= idx < len(history):
+            ax.axvline(float(history[idx].get("wall_time_s", 0.0)) / 60.0, color="0.65", linestyle=":", linewidth=0.9)
     ax.set_yscale("log")
     ax.set_xlabel("Wall time (min)")
     ax.set_ylabel("Total objective")
     ax.set_title("Objective history", fontsize=9, pad=4)
     ax.grid(True, alpha=0.22, linestyle=":")
+
+
+def _history_stage_segments(history: list[dict]) -> list[list[dict]]:
+    segments: list[list[dict]] = []
+    current: list[dict] = []
+    current_stage = object()
+    for item in history:
+        stage = item.get("stage", "")
+        if current and stage != current_stage:
+            segments.append(current)
+            current = []
+        current.append(item)
+        current_stage = stage
+    if current:
+        segments.append(current)
+    return segments
 
 
 def _booz_xform_on_outer_surface(wout_path: Path):
@@ -252,17 +360,22 @@ def _plot_boozer_bmag(ax, run: BestRun) -> None:
 
 def _write_readme_summary(runs: list[BestRun]) -> None:
     with OUT_CSV.open("w", newline="") as f:
-        writer = csv.writer(f)
+        writer = csv.writer(f, lineterminator="\n")
         writer.writerow(
             [
                 "problem",
+                "backend",
                 "policy",
                 "max_mode",
                 "ess",
+                "qi_qp_preseed",
                 "objective_final",
+                "qi_raw_total",
+                "qi_mirror_ratio_max",
+                "qi_max_elongation",
                 "aspect_final",
                 "iota_final",
-                "cpu_wall_time_min",
+                "wall_time_min",
                 "output_dir",
             ]
         )
@@ -270,10 +383,15 @@ def _write_readme_summary(runs: list[BestRun]) -> None:
             writer.writerow(
                 [
                     run.problem,
+                    run.backend,
                     run.policy,
                     run.max_mode,
                     "yes" if run.use_ess else "no",
+                    "" if run.qi_qp_preseed is None else ("yes" if run.qi_qp_preseed else "no"),
                     f"{run.objective_final:.16e}",
+                    "" if run.qi_raw_total is None else f"{run.qi_raw_total:.16e}",
+                    "" if run.qi_mirror_ratio_max is None else f"{run.qi_mirror_ratio_max:.16e}",
+                    "" if run.qi_max_elongation is None else f"{run.qi_max_elongation:.16e}",
                     f"{run.aspect_final:.16e}",
                     f"{run.iota_final:.16e}",
                     f"{run.total_wall_time_s / 60.0:.6f}",
@@ -283,14 +401,26 @@ def _write_readme_summary(runs: list[BestRun]) -> None:
 
 
 def _run_title(run: BestRun) -> str:
+    extras = ""
+    if run.problem == "qi":
+        qi_raw = float("nan") if run.qi_raw_total is None else run.qi_raw_total
+        mirror = float("nan") if run.qi_mirror_ratio_max is None else run.qi_mirror_ratio_max
+        elong = float("nan") if run.qi_max_elongation is None else run.qi_max_elongation
+        extras = (
+            f", QP preseed={'yes' if run.qi_qp_preseed else 'no'}, "
+            f"QI={qi_raw:.2e}, "
+            f"mirror={mirror:.2f}, "
+            f"elong={elong:.1f}"
+        )
     return (
-        f"{PROBLEM_TITLES[run.problem]} best symmetric CPU run: "
+        f"{PROBLEM_TITLES[run.problem]} best symmetric {run.backend.upper()} run: "
         f"{run.policy}, max_mode={run.max_mode}, "
         f"{'ESS' if run.use_ess else 'no ESS'}, "
         f"J={run.objective_final:.2e}, "
         f"A={run.aspect_final:.3f}, "
         f"iota={run.iota_final:.4f}, "
         f"{run.total_wall_time_s / 60.0:.1f} min"
+        f"{extras}"
     )
 
 

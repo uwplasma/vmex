@@ -1204,8 +1204,19 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
     ax3 = axes[2] if n_panels == 3 else None
 
     # --- panel 1: QS residuals ---
+    # Stage-preseeded optimizations can switch objective definitions (for
+    # example QP preseed -> QI preseed -> full constrained QI). Plot each stage
+    # separately and show the best-so-far value within that stage so rejected
+    # trial points or objective switches are not drawn as false increases.
+    start = 0
+    for stop in [int(b) + 1 for b in data.get("stage_boundaries", []) if int(b) + 1 < len(hist)] + [len(hist)]:
+        if stop <= start:
+            continue
+        x_segment = np.arange(start, stop, dtype=int)
+        y_segment = np.minimum.accumulate([max(float(v), 1e-16) for v in qs_vals[start:stop]])
+        ax1.semilogy(x_segment, y_segment, "o-", color="steelblue", linewidth=2, markersize=6)
+        start = stop
     qs_pos = [max(v, 1e-16) for v in qs_vals]  # avoid log(0)
-    ax1.semilogy(iters, qs_pos, "o-", color="steelblue", linewidth=2, markersize=6)
     ax1.set_ylabel("QS residuals ∑r²", fontsize=11)
     opt_label = data.get("label", "Optimisation")
     ax1.set_title(

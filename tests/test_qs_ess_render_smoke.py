@@ -320,7 +320,7 @@ def test_qs_ess_renderer_separates_lasym_records(tmp_path, monkeypatch):
 def test_readme_renderer_uses_preoptimization_initial_wout(tmp_path):
     renderer = _load_readme_renderer_module()
 
-    continuation_dir = tmp_path / "cpu" / "continuation" / "qh" / "mode4" / "ess"
+    continuation_dir = tmp_path / "cpu" / "continuation" / "qh" / "mode3" / "ess"
     mode1_dir = tmp_path / "cpu" / "continuation" / "qh" / "mode1" / "ess"
     direct_qi_dir = tmp_path / "cpu" / "direct" / "qi" / "mode2" / "ess"
     direct_qa_dir = tmp_path / "cpu" / "direct" / "qa" / "mode3" / "ess"
@@ -333,7 +333,7 @@ def test_readme_renderer_uses_preoptimization_initial_wout(tmp_path):
     continuation = renderer.BestRun(
         problem="qh",
         policy="continuation",
-        max_mode=4,
+        max_mode=3,
         use_ess=True,
         objective_final=1.0,
         aspect_final=7.0,

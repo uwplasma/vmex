@@ -129,6 +129,58 @@ def test_qi_boozer_output_wrapper_matches_mode_residual_regression():
     assert np.asarray(wrapped["profile_residuals1d"]).shape == (2 * 21 * 7,)
 
 
+def test_qi_mirror_ratio_penalty_from_boozer_modes():
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import jnp
+    from vmec_jax.quasi_isodynamic import mirror_ratio_penalty_from_boozer_modes
+
+    flat = mirror_ratio_penalty_from_boozer_modes(
+        bmnc_b=jnp.asarray([[1.0]]),
+        xm_b=jnp.asarray([0]),
+        xn_b=jnp.asarray([0]),
+        nfp=1,
+        threshold=0.05,
+        ntheta=16,
+        nphi=16,
+    )
+    np.testing.assert_allclose(np.asarray(flat["mirror_ratio"]), 0.0, atol=1.0e-14)
+    np.testing.assert_allclose(np.asarray(flat["residuals1d"]), 0.0, atol=1.0e-14)
+
+    rippled = mirror_ratio_penalty_from_boozer_modes(
+        bmnc_b=jnp.asarray([[1.0, 0.2]]),
+        xm_b=jnp.asarray([0, 0]),
+        xn_b=jnp.asarray([0, 1]),
+        nfp=1,
+        threshold=0.05,
+        ntheta=16,
+        nphi=64,
+    )
+    assert float(np.asarray(rippled["mirror_ratio"][0])) > 0.19
+    assert float(np.asarray(rippled["total"])) > 0.0
+
+
+def test_qi_boundary_elongation_penalty_is_differentiable():
+    pytest.importorskip("jax")
+
+    import jax
+
+    from vmec_jax._compat import jnp
+    from vmec_jax.quasi_isodynamic import boundary_max_elongation_from_rz
+
+    theta = jnp.linspace(0.0, 2.0 * jnp.pi, 64, endpoint=False)
+    phi = jnp.linspace(0.0, 0.5 * jnp.pi, 5, endpoint=False)
+
+    def max_elongation(vertical_scale):
+        R = 1.0 + 0.1 * jnp.cos(theta)[:, None] * jnp.ones_like(phi)[None, :]
+        Z = vertical_scale * 0.1 * jnp.sin(theta)[:, None] * jnp.ones_like(phi)[None, :]
+        return boundary_max_elongation_from_rz(R, Z, phi=phi)["max_elongation"]
+
+    value, grad = jax.value_and_grad(max_elongation)(jnp.asarray(3.0))
+    np.testing.assert_allclose(np.asarray(value), 3.0, rtol=3.0e-2, atol=3.0e-2)
+    assert float(np.asarray(grad)) > 0.5
+
+
 def test_qi_boozer_mode_residual_validates_shapes_and_resolution():
     pytest.importorskip("jax")
 

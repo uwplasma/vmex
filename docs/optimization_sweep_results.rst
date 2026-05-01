@@ -10,11 +10,13 @@ and QI targets:
   quasi-helical symmetry.
 - QP: aspect ratio, quasi-poloidal symmetry, and a smooth
   ``abs(mean_iota) >= 0.40`` lower bound.
-- QI: aspect ratio and a differentiable smooth Boozer-space
-  quasi-isodynamic residual evaluated through ``booz_xform_jax``.  The sweep
-  first runs a same-mode QP preseed and then applies the QI residual, with the
-  same smooth ``abs(mean_iota) >= 0.40`` lower bound retained through the QI
-  stage so the final state does not remain trapped in the QH warm-start basin.
+- QI: aspect ratio, a differentiable smooth Boozer-space quasi-isodynamic
+  residual evaluated through ``booz_xform_jax``, maximum mirror-ratio penalty,
+  maximum-LCFS-elongation penalty, and a smooth ``abs(mean_iota) >= 0.40``
+  lower bound.  The default QI run starts from the bundled ``input.nfp1_QI``
+  omnigenity seed, runs a QI-only preseed, then activates the mirror and
+  elongation penalties for the final QI refinement.  The constrained sweep can
+  also run a same-mode QP preseed to measure whether that optional seed helps.
 
 Individual Examples
 -------------------
@@ -29,11 +31,15 @@ Each standalone example keeps all user controls as top-level Python variables:
    PYTHONPATH=. python examples/optimization/qi_fixed_resolution_jax_ess.py
 
 The QP script is quasisymmetry with ``HELICITY_M = 0``.  The QI script is a
-different objective: it builds Boozer spectra with ``booz_xform_jax``, first
-uses QP as a preseed, and then penalizes field-line variation in smooth
-magnetic-well widths and normalized well profiles.  Install the optional
-dependency set with ``python -m pip install ".[qi]"`` before running QI cases
-from a source checkout.
+different objective: it builds Boozer spectra with ``booz_xform_jax``, improves
+the smooth QI residual, and then adds mirror-ratio and LCFS-elongation
+penalties.  A QP preseed is available as a top-level switch, but is not the
+default for the bundled QI seed.  The extra terms are imported from
+``vmec_jax.quasi_isodynamic`` and assembled explicitly in the script, so users
+can add terms such as ``LgradB`` or magnetic-well depth by appending another
+residual block in the same section.  Install the optional dependency set with
+``python -m pip install ".[qi]"`` before running QI cases from a source
+checkout.
 
 Sweep Reproduction
 ------------------
@@ -42,19 +48,28 @@ Run the CPU production sweep:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
+
+The constrained QI study has one extra axis: whether the QI solve starts from a
+same-mode QP preseed.  Regenerate that focused matrix with:
+
+.. code-block:: bash
+
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both
+   PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
 
 Run the GPU production sweep on a machine with a working JAX GPU install:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
-Render the compact README panels from the best CPU, stellarator-symmetric rows:
+Render the compact README panels from the best stellarator-symmetric rows:
 
 .. code-block:: bash
 
@@ -76,10 +91,10 @@ asymmetric modes with ``1e-7``, and writes separate outputs under the
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --stellarator-asymmetric
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --stellarator-asymmetric
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --stellarator-asymmetric
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --stellarator-asymmetric
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 For NVIDIA-only JAX installations, ``JAX_PLATFORMS=cuda`` is also valid.  Do
@@ -89,10 +104,13 @@ and ROCm and fail if ROCm is not installed.
 README Best Rows
 ----------------
 
-The README intentionally shows only one best CPU, ``LASYM = F`` result per
-target.  These panels include the original deck LCFS before any
-``max_mode=1`` optimization work, final LCFS, objective history, and final
-outer-surface ``|B|`` in Boozer coordinates evaluated with ``booz_xform_jax``.
+The README intentionally shows only one best ``LASYM = F`` result per target.
+QA/QH/QP are selected from the CPU matrix.  QI is selected from the constrained
+QI CPU/GPU matrix using the QI residual, mirror-ratio, elongation, iota, and
+aspect-ratio gates.  These panels include the original deck LCFS before any
+``max_mode=1`` optimization work, final LCFS, per-stage objective history, and
+final outer-surface ``|B|`` in Boozer coordinates evaluated with
+``booz_xform_jax``.
 The source table is also available as
 :download:`readme_best_optimizations.csv <_static/figures/readme_best_optimizations.csv>`.
 
@@ -122,8 +140,42 @@ Objective Histories
 The all-policy panel contains every available backend/policy row.  Solid curves
 met the optimizer success criterion; dashed curves are stopped, failed, or
 budgeted lanes.  The summary tables distinguish ``max_nfev`` stops from
-1200 second timeouts and GPU-memory failures.
-Vertical dotted lines mark continuation stage boundaries.
+1200 second timeouts and GPU-memory failures.  Curves are split by objective
+stage and plotted as best-so-far values within that stage, so QP preseed,
+QI-only preseed, and full constrained QI refinement are not treated as one
+continuous scalar objective.  Vertical dotted lines mark continuation stage
+boundaries.
+
+Constrained QI Matrix
+---------------------
+
+The constrained QI matrix compares CPU and available GPU rows for
+``max_mode = 1, 2, 3``, ESS on/off, continuation/direct, and QP-preseed
+on/off.  The QI objective is intentionally not ranked by scalar objective
+alone: rows are also evaluated by raw QI residual, maximum mirror ratio,
+maximum LCFS elongation, ``abs(mean_iota) >= 0.40``, and aspect ratio near 7.
+Rows that stop at ``max_nfev`` but have valid VMEC solves and satisfy the
+physics gates are kept as valid stopped rows.
+
+.. image:: _static/figures/qi_constrained_objective_panel.png
+   :width: 100%
+   :align: center
+   :alt: Constrained QI objective matrix
+
+Downloadable constrained-QI summaries:
+
+- :download:`qi_constrained_summary.csv <_static/figures/qi_constrained_summary.csv>`
+- :download:`qi_constrained_summary.json <_static/figures/qi_constrained_summary.json>`
+- :download:`qi_constrained_best.json <_static/figures/qi_constrained_best.json>`
+
+In the current snapshot, the best available constrained QI row is CPU direct,
+``max_mode=1``, ESS on, without QP preseed.  It reaches raw QI ``5.56e-2``,
+maximum mirror ratio ``0.213`` for a target ``0.21``, maximum elongation
+``7.88`` for a target ``8.0``, aspect ratio ``7.006``, mean iota ``0.419``,
+and wall time ``1.1 min``.  Mode-2 and mode-3 QI rows remain useful
+diagnostics but currently expose a trust-region/Jacobian robustness issue in
+the constrained Boozer objective; those rows are retained in the table instead
+of hidden.
 
 Non-stellarator-symmetric LASYM runs use the same script with
 ``--stellarator-asymmetric``.  The current LASYM artifacts are intentionally
@@ -191,23 +243,6 @@ Generated full-panel filenames include ``publication_panel_full.png/.pdf``,
 legacy alias ``publication_panel.png/.pdf``, and
 ``publication_panel_asymmetric_full.png/.pdf`` for the partial LASYM lanes.
 
-Current QI Snapshot
--------------------
-
-The current CPU QI bounded sweep uses ``input.nfp4_QH_warm_start`` as the
-input deck, applies a QP preseed for the requested mode/policy, and then
-minimizes the QI residual on five surfaces while retaining
-``abs(mean_iota) >= 0.40`` through the final QI stage.  In this run, direct
-``max_mode=2`` with ESS reached ``J = 4.90e-3`` and continuation
-``max_mode=3`` without ESS reached ``J = 5.49e-3``.  The final ``|B|`` panels
-are no longer QH-like; the preseed moves them toward poloidally closed wells
-before the QI refinement.
-
-The GPU QI sweep is included as the accelerator matrix.  Bounded quick-look
-diagnostics can still be reproduced with ``--diagnostic-budgets``, but the
-default command path now uses calibrated production budgets so GPU results are not
-silently capped.
-
 Finite-beta Stage-One Examples
 ------------------------------
 
@@ -238,8 +273,9 @@ the stage bookkeeping and artifact writing consistent.  The scripts save
 
 All finite-beta controls are plain variables at the top of the scripts.  For
 QI, ``QI_MBOZ``, ``QI_NBOZ``, ``QI_NPHI``, ``QI_NALPHA``, and
-``QI_N_BOUNCE`` control the Boozer/QI residual grid.  The default QI grid is
-small enough for first-run diagnostics; increase it for final
+``QI_N_BOUNCE`` control the Boozer/QI residual grid. ``MAX_MIRROR_RATIO`` and
+``MAX_ELONGATION`` control the two engineering penalties.  The default QI grid
+is small enough for first-run diagnostics; increase it for final
 research-quality QI runs.
 
 Mercier ``DMerc`` and Redl bootstrap-current mismatch are not yet enabled as

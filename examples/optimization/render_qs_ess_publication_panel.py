@@ -25,6 +25,7 @@ from vmec_jax.wout import read_wout
 SCRIPT_DIR = Path(__file__).resolve().parent
 OUTPUT_ROOT = SCRIPT_DIR / "results" / "qs_ess_sweep"
 REPO_ROOT = SCRIPT_DIR.parents[1]
+FIGURE_DIR = REPO_ROOT / "docs" / "_static" / "figures"
 PROBLEMS = ("qa", "qh", "qp", "qi")
 ESS_OPTIONS = (False, True)
 POLICIES = ("continuation", "direct")
@@ -39,8 +40,8 @@ ROW_SPECS = (
     ("qi", "direct"),
 )
 MODES_BY_POLICY = {
-    "continuation": (1, 2, 3, 4),
-    "direct": (1, 2, 3, 4),
+    "continuation": (1, 2, 3),
+    "direct": (1, 2, 3),
 }
 _TIMEOUT_SECONDS_RE = re.compile(r"timed out after\s+([0-9]+(?:\.[0-9]+)?)\s*s")
 
@@ -77,6 +78,16 @@ class CaseResult:
     bmag_max: float | None = None
     bmag_nonpositive_fraction: float | None = None
     bmag_finite: bool | None = None
+    qi_qp_preseed: bool | None = None
+    qi_qi_preseed: bool | None = None
+    qi_raw_total: float | None = None
+    qi_mirror_ratio_max: float | None = None
+    qi_mirror_ratio_target: float | None = None
+    qi_mirror_excess_max: float | None = None
+    qi_max_elongation: float | None = None
+    qi_elongation_target: float | None = None
+    qi_elongation_excess: float | None = None
+    qi_diagnostic_error: str | None = None
 
 
 @dataclass
@@ -337,8 +348,10 @@ def _write_combined_summary(results: list[CaseResult]) -> None:
         ),
     )
     records = [_summary_record(r) for r in ordered]
-    (OUTPUT_ROOT / "summary_all.json").write_text(json.dumps(records, indent=2))
-    with (OUTPUT_ROOT / "summary_all.csv").open("w", newline="") as f:
+    summary_json = OUTPUT_ROOT / "summary_all.json"
+    summary_csv = OUTPUT_ROOT / "summary_all.csv"
+    summary_json.write_text(json.dumps(records, indent=2))
+    with summary_csv.open("w", newline="") as f:
         writer = csv.DictWriter(
             f,
             lineterminator="\n",
@@ -355,6 +368,16 @@ def _write_combined_summary(results: list[CaseResult]) -> None:
                 "bmag_max",
                 "bmag_nonpositive_fraction",
                 "bmag_finite",
+                "qi_qp_preseed",
+                "qi_qi_preseed",
+                "qi_raw_total",
+                "qi_mirror_ratio_max",
+                "qi_mirror_ratio_target",
+                "qi_mirror_excess_max",
+                "qi_max_elongation",
+                "qi_elongation_target",
+                "qi_elongation_excess",
+                "qi_diagnostic_error",
                 "problem",
                 "max_mode",
                 "use_ess",
@@ -378,6 +401,9 @@ def _write_combined_summary(results: list[CaseResult]) -> None:
         writer.writeheader()
         for record in records:
             writer.writerow(record)
+    FIGURE_DIR.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(summary_csv, FIGURE_DIR / "qs_ess_summary_all.csv")
+    shutil.copy2(summary_json, FIGURE_DIR / "qs_ess_summary_all.json")
 
 
 def _summary_record(result: CaseResult) -> dict:
@@ -426,6 +452,22 @@ def _history_for(result: CaseResult) -> dict | None:
     if not path.exists():
         return None
     return json.loads(path.read_text())
+
+
+def _history_stage_segments(history: list[dict]) -> list[list[dict]]:
+    segments: list[list[dict]] = []
+    current: list[dict] = []
+    current_stage = object()
+    for item in history:
+        stage = item.get("stage", "")
+        if current and stage != current_stage:
+            segments.append(current)
+            current = []
+        current.append(item)
+        current_stage = stage
+    if current:
+        segments.append(current)
+    return segments
 
 
 def _lookup_result(
@@ -527,9 +569,9 @@ def _policy_matrix_complete(
 
 
 def _publication_results(results: list[CaseResult]) -> list[CaseResult]:
-    """Return all discovered results, including partial LASYM lanes."""
+    """Return rows for the currently published mode policy."""
 
-    return list(results)
+    return [result for result in results if int(result.max_mode) in MODES_BY_POLICY[result.policy]]
 
 
 def _problems_with_payloads(
@@ -646,23 +688,45 @@ def _plot_objective_panel_all_policies(results: list[CaseResult], outpath_png: P
                 history = _history_for(result)
                 if history is None:
                     continue
-                objective = np.asarray([max(float(entry["objective"]), 1e-16) for entry in history["history"]], dtype=float)
-                x = np.arange(len(objective), dtype=float)
+                segments = []
+                start_index = 0
+                for segment in _history_stage_segments(history["history"]):
+                    stop_index = start_index + len(segment)
+                    segments.append(
+                        (
+                            np.arange(start_index, stop_index, dtype=float),
+                            np.minimum.accumulate(
+                                np.asarray(
+                                    [max(float(entry["objective"]), 1e-16) for entry in segment],
+                                    dtype=float,
+                                )
+                            ),
+                        )
+                    )
+                    start_index = stop_index
                 linestyle = "-" if result.success and not result.crashed else "--"
                 alpha = 0.70 if baseline_note else 1.0
                 linewidth = 2.5 if use_ess else 2.1
                 label = line_labels[use_ess] if (row_index == 0 and col_index == 0) else None
-                ax.semilogy(
-                    x,
-                    objective,
-                    color=colors[use_ess],
-                    linestyle=linestyle,
-                    linewidth=linewidth,
-                    alpha=alpha,
-                    label=label,
-                )
+                first_segment = True
+                last_x = None
+                last_objective = None
+                for x, objective in segments:
+                    ax.semilogy(
+                        x,
+                        objective,
+                        color=colors[use_ess],
+                        linestyle=linestyle,
+                        linewidth=linewidth,
+                        alpha=alpha,
+                        label=label if first_segment else None,
+                    )
+                    first_segment = False
+                    last_x = x[-1]
+                    last_objective = objective[-1]
                 plotted_any = True
-                ax.scatter(x[-1], objective[-1], color=colors[use_ess], s=28, zorder=4, alpha=alpha)
+                if last_x is not None and last_objective is not None:
+                    ax.scatter(last_x, last_objective, color=colors[use_ess], s=28, zorder=4, alpha=alpha)
                 for boundary in history.get("stage_boundaries", [])[:-1]:
                     ax.axvline(float(boundary), color="0.75", linestyle=":", linewidth=1.0, zorder=0)
 
@@ -1247,6 +1311,14 @@ def _parse_args() -> argparse.Namespace:
         default=OUTPUT_ROOT,
         help="Sweep result root to read and write rendered panels. Defaults to examples/optimization/results/qs_ess_sweep.",
     )
+    parser.add_argument(
+        "--summary-only",
+        action="store_true",
+        help=(
+            "Only regenerate summary_all.csv/json and the docs copies. "
+            "This avoids loading all final wout files for heavyweight atlas rendering."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -1258,6 +1330,12 @@ def main() -> None:
     results = _discover_results()
     results = _publication_results(results)
     _write_combined_summary(results)
+    if args.summary_only:
+        print(f"Wrote {OUTPUT_ROOT / 'summary_all.csv'}")
+        print(f"Wrote {OUTPUT_ROOT / 'summary_all.json'}")
+        print(f"Wrote {FIGURE_DIR / 'qs_ess_summary_all.csv'}")
+        print(f"Wrote {FIGURE_DIR / 'qs_ess_summary_all.json'}")
+        return
     payloads = _load_payloads(results)
 
     _render_publication_set(
