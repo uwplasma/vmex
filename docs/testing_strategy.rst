@@ -141,7 +141,8 @@ tests execute long workflows incidentally.
    coverage gates.  Coverage runs should not require downloading presentation
    artifacts.
 5. Raise ``--cov-fail-under`` in stages after the corresponding tests are
-   merged: 70%, 80%, 90%, then 95%.
+   merged.  The current required fast-suite gate is ``57%``; the next planned
+   ratchets are 70%, 80%, 90%, then 95%.
 
 
 Repository Size Plan
@@ -155,9 +156,9 @@ Actions:
 
 - Keep generated optimization sweeps under ``examples/optimization/results/``
   ignored and out of the repository.
-- Keep only README-critical PNGs in ``docs/_static/figures``.  Move large
-  publication panels, PDFs, and historical atlases to release assets or an
-  external artifact bucket fetched by ``tools/fetch_assets.py``.
+- Keep only README-critical PNGs in ``docs/_static/figures``.  Keep large
+  publication panels, PDFs, and historical atlases as generated local artifacts
+  under ``examples/optimization/results`` or attach them to GitHub releases.
 - Replace committed large ``wout`` references with small compressed fixtures
   or generated-on-demand assets where runtime permits.
 - Add a size audit to every release checklist and eventually to CI with a
@@ -170,6 +171,10 @@ Run the current audit with:
 .. code-block:: bash
 
    python tools/diagnostics/repo_size_audit.py --top 40
+
+Required CI also runs the audit with an initial source-tree ceiling of
+``60 MiB`` total and ``5 MiB`` per tracked file.  Increase those limits only
+when a new small reference fixture has a documented physics-test purpose.
 
 
 Refactoring Plan

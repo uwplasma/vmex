@@ -125,41 +125,22 @@ budgeted lanes.  The summary tables distinguish ``max_nfev`` stops from
 1200 second timeouts and GPU-memory failures.
 Vertical dotted lines mark continuation stage boundaries.
 
-.. image:: _static/figures/qs_ess_objective_panel_all_policies.png
-   :width: 100%
-   :align: center
-   :alt: Full QA, QH, QP, and QI optimization policy sweep
-
-The legacy-compatible objective panel filename is also regenerated from the
-same current data, so older links no longer point at stale pre-QP/QI figures:
-
-.. image:: _static/figures/qs_ess_objective_panel.png
-   :width: 100%
-   :align: center
-   :alt: Legacy objective panel alias generated from current sweep data
-
-Backend-specific objective panels:
-
-.. image:: _static/figures/qs_ess_objective_panel_cpu_policies.png
-   :width: 100%
-   :align: center
-   :alt: CPU optimization policy sweep
-
-.. image:: _static/figures/qs_ess_objective_panel_gpu_policies.png
-   :width: 100%
-   :align: center
-   :alt: GPU optimization policy sweep
-
 Non-stellarator-symmetric LASYM runs use the same script with
 ``--stellarator-asymmetric``.  The current LASYM artifacts are intentionally
 published as partial 1200 second lanes.  Timeout and OOM rows are kept because
 they document the current cost envelope of the asymmetric exact/replay path.
 The frozen snapshot has 13 CPU LASYM rows and 61 GPU LASYM rows.
 
-.. image:: _static/figures/qs_ess_objective_panel_asymmetric_all_policies.png
-   :width: 100%
-   :align: center
-   :alt: Partial LASYM optimization policy sweep
+The objective-history figures are generated artifacts.  They are not tracked in
+git; regenerate them with
+``PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py``
+after producing or fetching the sweep results.  The renderer writes:
+
+- ``objective_panel_all_policies.png/.pdf``
+- ``objective_panel_cpu_policies.png/.pdf``
+- ``objective_panel_gpu_policies.png/.pdf``
+- ``objective_panel_asymmetric_all_policies.png/.pdf``
+- legacy aliases ``objective_panel.png/.pdf``
 
 Final-State Atlases
 -------------------
@@ -168,69 +149,20 @@ The final-state atlases show the LCFS and line contours of ``|B|`` on the LCFS.
 Each 3-D panel has its own colorbar because the aspect-ratio constraint changes
 the absolute ``|B|`` range.
 
-.. image:: _static/figures/qs_ess_final_state_atlas_continuation.png
-   :width: 100%
-   :align: center
-   :alt: CPU continuation final-state atlas
-
-.. image:: _static/figures/qs_ess_final_state_atlas_direct.png
-   :width: 100%
-   :align: center
-   :alt: CPU direct final-state atlas
-
-Backend-qualified atlases:
-
-.. image:: _static/figures/qs_ess_final_state_atlas_cpu_continuation.png
-   :width: 100%
-   :align: center
-   :alt: CPU continuation final-state atlas
-
-.. image:: _static/figures/qs_ess_final_state_atlas_cpu_direct.png
-   :width: 100%
-   :align: center
-   :alt: CPU direct final-state atlas
-
-.. image:: _static/figures/qs_ess_final_state_atlas_gpu_continuation.png
-   :width: 100%
-   :align: center
-   :alt: GPU continuation final-state atlas
-
-.. image:: _static/figures/qs_ess_final_state_atlas_gpu_direct.png
-   :width: 100%
-   :align: center
-   :alt: GPU direct final-state atlas
-
 Partial LASYM atlases are rendered separately.  Missing or failed lanes are
 shown as placeholders, while successful lanes include one colorbar per 3-D
 surface and one colorbar per LCFS ``|B|`` contour panel.
 
-.. image:: _static/figures/qs_ess_final_state_atlas_asymmetric_cpu_continuation.png
-   :width: 100%
-   :align: center
-   :alt: Partial CPU LASYM continuation final-state atlas
+Generated atlas filenames include:
 
-.. image:: _static/figures/qs_ess_final_state_atlas_asymmetric_cpu_direct.png
-   :width: 100%
-   :align: center
-   :alt: Partial CPU LASYM direct final-state atlas
-
-.. image:: _static/figures/qs_ess_final_state_atlas_asymmetric_gpu_continuation.png
-   :width: 100%
-   :align: center
-   :alt: Partial GPU LASYM continuation final-state atlas
-
-.. image:: _static/figures/qs_ess_final_state_atlas_asymmetric_gpu_direct.png
-   :width: 100%
-   :align: center
-   :alt: Partial GPU LASYM direct final-state atlas
-
-The legacy ``geometry_atlas`` alias is regenerated from the CPU continuation
-atlas:
-
-.. image:: _static/figures/qs_ess_geometry_atlas.png
-   :width: 100%
-   :align: center
-   :alt: Legacy geometry atlas alias generated from current sweep data
+- ``final_state_atlas_continuation.png/.pdf``
+- ``final_state_atlas_direct.png/.pdf``
+- ``final_state_atlas_cpu_continuation.png/.pdf``
+- ``final_state_atlas_cpu_direct.png/.pdf``
+- ``final_state_atlas_gpu_continuation.png/.pdf``
+- ``final_state_atlas_gpu_direct.png/.pdf``
+- ``final_state_atlas_asymmetric_*``
+- legacy alias ``geometry_atlas.png/.pdf``
 
 Summary Tables
 --------------
@@ -238,35 +170,15 @@ Summary Tables
 The summary-table image is intended for reports and presentations.  The CSV and
 JSON are better for analysis scripts.
 
-.. image:: _static/figures/qs_ess_summary_tables_all_policies.png
-   :width: 100%
-   :align: center
-   :alt: Full optimization sweep summary tables
-
-.. image:: _static/figures/qs_ess_summary_table.png
-   :width: 100%
-   :align: center
-   :alt: Legacy summary table alias generated from current sweep data
-
-.. image:: _static/figures/qs_ess_summary_tables_cpu_policies.png
-   :width: 100%
-   :align: center
-   :alt: CPU optimization sweep summary tables
-
-.. image:: _static/figures/qs_ess_summary_tables_gpu_policies.png
-   :width: 100%
-   :align: center
-   :alt: GPU optimization sweep summary tables
-
-.. image:: _static/figures/qs_ess_summary_tables_asymmetric_all_policies.png
-   :width: 100%
-   :align: center
-   :alt: Partial LASYM optimization sweep summary tables
-
 Downloadable summaries:
 
 - :download:`summary_all.csv <_static/figures/qs_ess_summary_all.csv>`
 - :download:`summary_all.json <_static/figures/qs_ess_summary_all.json>`
+
+Generated summary-table figures include ``summary_tables_all_policies``,
+``summary_tables_cpu_policies``, ``summary_tables_gpu_policies``,
+``summary_tables_asymmetric_all_policies``, and legacy alias
+``summary_table``.
 
 Publication Panel
 -----------------
@@ -275,24 +187,9 @@ The full panel combines objective histories, final-state atlases, and summary
 tables.  It is large by design and should be used for review, not as the only
 README figure.
 
-.. image:: _static/figures/qs_ess_publication_panel_full.png
-   :width: 100%
-   :align: center
-   :alt: Full publication panel
-
-The legacy ``publication_panel`` alias is regenerated from the same full panel:
-
-.. image:: _static/figures/qs_ess_publication_panel.png
-   :width: 100%
-   :align: center
-   :alt: Legacy publication panel alias generated from current sweep data
-
-The LASYM-only full panel is also generated from the partial asymmetric lanes:
-
-.. image:: _static/figures/qs_ess_publication_panel_asymmetric_full.png
-   :width: 100%
-   :align: center
-   :alt: Partial LASYM publication panel
+Generated full-panel filenames include ``publication_panel_full.png/.pdf``,
+legacy alias ``publication_panel.png/.pdf``, and
+``publication_panel_asymmetric_full.png/.pdf`` for the partial LASYM lanes.
 
 Current QI Snapshot
 -------------------
