@@ -157,227 +157,56 @@ All figures below use the same **single-grid** run settings: `NS_ARRAY=151`, `NI
 
 **Cold vs warm runtime**: the *cold* bar includes XLA JIT compilation on the first call (one-time cost per process); the *warm* bar is the steady-state solve time for subsequent calls in the same process. VMEC2000 has no compilation overhead, so it is always effectively cold. `vmec_jax` enables JAX's persistent compilation cache by default under `~/.cache/vmec_jax/jax_cache/<machine-fingerprint>` so repeated cold-process runs on the same host can reuse compiled kernels without sharing CPU AOT executables across incompatible machines; set `VMEC_JAX_COMPILATION_CACHE=0` to disable it or `VMEC_JAX_COMPILATION_CACHE_DIR=/path/to/cache` to choose a different location.
 
-## Optimization Internals
+## Best Stellarator-Symmetric Optimizations
 
-The fixed-boundary optimization examples expose the problem construction
-directly in Python: VMEC resolution, active boundary coefficients, objective
-blocks, weights, continuation policy, ESS scaling, and the outer optimizer are
-all top-level variables in the scripts.  No SIMSOPT wrapper layer is required.
+The fixed-boundary optimization examples solve VMEC equilibria and differentiate
+the objective with the exact discrete-adjoint/tape path. The README only shows
+the current best CPU, `LASYM = F` result for each target; the full CPU/GPU
+policy matrix, LASYM panels, finite-beta examples, and all tables live in the
+[optimization guide](docs/optimization.rst) and
+[optimization sweep results](docs/optimization_sweep_results.rst).
 
-For a boundary parameter vector `x`, vmec_jax solves the VMEC residual
-`F(y, x) = 0` for the equilibrium state `y`, then differentiates objective
-residuals `r(y(x), x)` with the exact discrete-adjoint/tape path.  Instead of
-finite-differencing each boundary DOF, vmec_jax records a checkpoint tape of
-the nonlinear VMEC iteration and replays it with JAX JVP/VJP rules.  The dense
-least-squares Jacobian used by the examples is exact to machine precision and
-has cost comparable to a small number of forward solves, not one VMEC solve per
-boundary DOF.
+Each row below shows the initial LCFS, final LCFS, total objective history, and
+the final outer-surface `|B|` in Boozer coordinates computed with
+`booz_xform_jax`.
 
-Details: [discrete adjoint](docs/discrete_adjoint.rst),
-[optimization guide](docs/optimization.rst), and
-[SIMSOPT comparison](docs/simsopt_comparison.rst).
-
-## Individual Fixed-Boundary Optimization Scripts
-
-The standalone examples teach the same workflow as the SIMSOPT examples without
-depending on SIMSOPT: choose VMEC resolution, active boundary coefficients,
-objective terms, weights, continuation policy, ESS scaling, and optimizer
-directly in Python.  They are intentionally plain scripts with top-level
-variables, not argparse wrappers.
-
-```bash
-python examples/optimization/qa_fixed_resolution_jax_ess.py
-python examples/optimization/qh_fixed_resolution_jax.py
-python examples/optimization/qp_fixed_resolution_jax_ess.py
-python examples/optimization/qi_fixed_resolution_jax_ess.py
-```
-
-Key top-level controls are `VMEC_MPOL`, `VMEC_NTOR`, `MAX_MODE`,
-`OBJECTIVES`, `METHOD`, `USE_MODE_CONTINUATION`, `USE_ESS`, and `ALPHA`.
-When `MAX_MODE` exceeds the modes present in the input file, vmec_jax extends
-the boundary with `vj.extend_boundary_for_max_mode`, matching SIMSOPT's
-`fixed_range()` workflow.
-
-Add a new target by appending an objective term:
-
-```python
-OBJECTIVES = [
-    aspect_objective(TARGET_ASPECT, ASPECT_WEIGHT),
-    abs_mean_iota_floor_objective(TARGET_ABS_IOTA_MIN, IOTA_WEIGHT),
-    quasisymmetry_objective(helicity_m=1, helicity_n=-1, surfaces=SURFACES, weight=QS_WEIGHT),
-    ObjectiveTerm("custom", lambda ctx, state: your_metric(ctx, state), target=0.0, weight=0.1),
-]
-```
-
-For current QA/QH/QP/QI results, use the policy sweep below. It is the only
-optimization benchmark table shown in the README so stale single-script results
-do not drift from the generated sweep artifacts.
-
-## Finite-beta Stage-one Optimization
-
-The finite-beta examples reproduce the VMEC-only stage-one finite-beta
-workflows without SIMSOPT and without coils.  They use bundled finite-pressure
-and current-driven input decks and add differentiable residuals for aspect
-ratio, iota bounds, volume-averaged field proxy, total beta, plus the field
-quality objective (QA/QH quasisymmetry or QI).
-
-```bash
-python examples/optimization/qa_optimization_finite_beta.py
-python examples/optimization/qh_optimization_finite_beta.py
-python examples/optimization/qi_optimization_finite_beta.py
-```
-
-The scripts save `input.initial`, `input.final`, `wout_initial.nc`,
-`wout_final.nc`, and `history.json`.  Full differentiable Mercier `DMerc` and
-Redl bootstrap-current mismatch residuals are the next finite-beta extensions;
-the current examples keep the stage-one structure and current-profile support
-in place so those terms can be added without changing the user workflow.
-The QI script exposes `QI_MBOZ`, `QI_NBOZ`, `QI_NPHI`, `QI_NALPHA`, and
-`QI_N_BOUNCE` at the top; the defaults are first-run diagnostic settings, and
-should be increased for final research-quality QI refinements.
-
-## QA/QH/QP/QI Optimization Policy Sweep
-
-The panel below compares the exact standalone optimizer on CPU and GPU for
-four targets: QA, QH, QP, and QI. It includes the complete
-stellarator-symmetric matrix and the currently available partial LASYM lanes.
-Columns increase the boundary space from `max_mode = 1` to `max_mode = 4`.
-Rows compare staged mode continuation against direct-start mode expansion.
-Blue curves use unscaled boundary DOFs; orange curves use ESS with
-`alpha = 2.5`. Solid lines met the optimizer success criterion; dashed lines
-mark stopped, failed, or budgeted lanes. Timeout/OOM details are recorded in
-the summary tables.
+| Target | Policy | max_mode | ESS | Final J | Aspect | Iota | CPU wall time |
+|---|---|---:|---|---:|---:|---:|---:|
+| QA | direct | 3 | yes | 3.13e-05 | 6.000 | 0.4102 | 19.3 min |
+| QH | continuation | 4 | yes | 5.87e-04 | 7.000 | -1.2182 | 18.6 min |
+| QP | continuation | 4 | no | 3.65e-02 | 7.002 | -0.4218 | 5.0 min |
+| QI | direct | 2 | yes | 4.90e-03 | 7.001 | -0.5808 | 1.4 min |
 
 <p align="center">
-  <img src="docs/_static/figures/qs_ess_objective_panel_all_policies.png" width="980" />
-</p>
-
-The QA input includes `1e-5` seeds for the mode-1 boundary terms so the iota
-residual has a useful direction. With the corrected bounded solve budgets, QA
-continuation reaches the target-iota basin on both CPU and GPU. Direct QA with
-ESS also reaches `iota ~= 0.409`; direct QA without ESS now leaves the zero-iota
-branch for modes 2 and 3, but direct high-mode starts remain weak for mode 4.
-
-QH and QP use the quasisymmetry residual with different helicities. QI uses
-`vmec_jax.quasi_isodynamic`, a smooth Boozer-space residual built through
-`booz_xform_jax`. The QI rows first run a same-mode QP preseed and then refine
-with the QI residual; this avoids the QH warm-start basin and gives visibly
-non-QH `|B|` contours while keeping the objective differentiable.
-
-Final CPU states for the continuation and direct-start policies are shown
-below. The `|B|` panels use line contours on the LCFS, with a separate colorbar
-for each panel because the field ranges are not identical across aspect-ratio
-changes.
-
-<p align="center">
-  <img src="docs/_static/figures/qs_ess_final_state_atlas_continuation.png" width="980" />
+  <img src="docs/_static/figures/readme_best_optimization_qa.png" width="980" />
 </p>
 
 <p align="center">
-  <img src="docs/_static/figures/qs_ess_final_state_atlas_direct.png" width="980" />
-</p>
-
-Recreate the full CPU/GPU sweep:
-
-```bash
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
-PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
-PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
-```
-
-The default per-case timeout is 1200 s. GPU sweeps use exact/replay callbacks
-with calibrated optimizer budgets (`inner_max_iter = trial_max_iter = 180`,
-`ftol = trial_ftol = 1e-9` for deck-controlled QA/QH cases) so production
-sweeps have enough room to converge high-mode/LASYM cases while still bounding
-runaway rows. Add `--diagnostic-budgets` only when you explicitly want bounded
-quick-look GPU diagnostics, and use `--case-timeout-s 0` only for an unbounded
-local diagnostic run.
-
-Recreate just the CPU direct-start rows:
-
-```bash
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
-```
-
-Render the README/docs panels and tables:
-
-```bash
-PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
-```
-
-To run the non-stellarator-symmetric matrix, append
-`--stellarator-asymmetric`. This sets `LASYM = T` in memory, optimizes
-`RBC/ZBS/RBS/ZBC`, seeds zero asymmetric `RBS/ZBC` modes with `1e-7`, and
-writes separate LASYM outputs under `results/qs_ess_sweep/<backend>/asymmetric/`.
-The renderer then creates additional `*_asymmetric_*` objective, atlas, summary,
-and publication panels.
-
-```bash
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --stellarator-asymmetric
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --stellarator-asymmetric
-PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --stellarator-asymmetric
-PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both --stellarator-asymmetric
-PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
-```
-
-The LASYM panels are published as a partial 1200 s snapshot. This is useful
-because the failures are informative: current mode-4 GPU LASYM lanes include
-timeout and GPU-memory limits in the exact tangent replay path. In the frozen
-snapshot used here, the partial LASYM table contains 13 CPU rows and 61 GPU
-rows. The CPU subset has 6 successful rows, 6 crashed rows, and 1 budgeted
-stop; the GPU subset has 19 successful rows, 10 crashed rows, and 32 budgeted
-stops.
-
-<p align="center">
-  <img src="docs/_static/figures/qs_ess_objective_panel_asymmetric_all_policies.png" width="980" />
+  <img src="docs/_static/figures/readme_best_optimization_qh.png" width="980" />
 </p>
 
 <p align="center">
-  <img src="docs/_static/figures/qs_ess_summary_tables_asymmetric_all_policies.png" width="980" />
+  <img src="docs/_static/figures/readme_best_optimization_qp.png" width="980" />
 </p>
 
-For NVIDIA-only JAX installations, `JAX_PLATFORMS=cuda` is also valid. Do not
-use `JAX_PLATFORMS=gpu`: some JAX versions interpret that as both CUDA and ROCm
-and fail if ROCm is not installed.
+<p align="center">
+  <img src="docs/_static/figures/readme_best_optimization_qi.png" width="980" />
+</p>
 
-Run individual examples by editing top-level variables in each script:
+Recreate the four CPU runs:
 
 ```bash
-python examples/optimization/qa_fixed_resolution_jax_ess.py
-python examples/optimization/qh_fixed_resolution_jax.py
-python examples/optimization/qp_fixed_resolution_jax_ess.py
-python examples/optimization/qi_fixed_resolution_jax_ess.py
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa --modes 3 --ess on
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qh --modes 4 --ess on
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qp --modes 4 --ess off
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qi --modes 2 --ess on
 ```
 
-More figures, CSV/JSON summaries, and reproduction notes are in
-[docs/optimization_sweep_results.rst](docs/optimization_sweep_results.rst).
+Regenerate the README panels and the compact CSV used for the table:
 
-Best row per backend/problem/policy in the plotted symmetric sweep:
-
-| Backend | Problem | Policy | Best max_mode | ESS | Status | Final J | Aspect | Iota | nfev | Wall min |
-|---|---|---|---:|---|---|---:|---:|---:|---:|---:|
-| CPU | QA | continuation | 4 | yes | stopped | 2.84e-05 | 5.999 | 0.4100 | 79 | 19.8 |
-| CPU | QA | direct | 3 | yes | ok | 3.13e-05 | 6.000 | 0.4102 | 51 | 19.3 |
-| CPU | QH | continuation | 4 | yes | ok | 5.87e-04 | 7.000 | -1.2182 | 46 | 18.6 |
-| CPU | QH | direct | 3 | yes | ok | 3.27e-03 | 6.999 | - | 20 | 9.2 |
-| CPU | QP | continuation | 4 | no | ok | 3.65e-02 | 7.002 | -0.4218 | 51 | 5.0 |
-| CPU | QP | direct | 2 | yes | ok | 3.74e-02 | 7.004 | -0.4037 | 30 | 1.1 |
-| CPU | QI | continuation | 4 | no | ok | 5.20e-03 | 7.002 | -0.4148 | 80 | 4.5 |
-| CPU | QI | direct | 2 | yes | ok | 4.90e-03 | 7.001 | -0.5808 | 31 | 1.4 |
-| GPU | QA | continuation | 4 | no | ok | 9.74e-05 | 6.000 | 0.4100 | 94 | 19.4 |
-| GPU | QA | direct | 4 | yes | stopped | 6.77e-05 | 6.000 | 0.4100 | 60 | 15.1 |
-| GPU | QH | continuation | 4 | yes | ok | 9.38e-04 | 7.000 | -1.2528 | 91 | 19.5 |
-| GPU | QH | direct | 4 | yes | ok | 1.30e-03 | 7.000 | -1.2280 | 20 | 5.0 |
-| GPU | QP | continuation | 4 | no | ok | 6.46e-02 | 7.011 | -0.4012 | 87 | 14.8 |
-| GPU | QP | direct | 2 | yes | ok | 3.72e-02 | 7.005 | -0.4028 | 30 | 4.4 |
-| GPU | QI | continuation | 4 | no | ok | 1.66e-03 | 7.000 | -0.4096 | 93 | 17.1 |
-| GPU | QI | direct | 3 | yes | ok | 2.72e-03 | 6.999 | -0.4025 | 45 | 7.4 |
-
-The generated CSV includes the complete 128-row symmetric CPU/GPU table plus
-the current partial LASYM rows. Filter `stellarator_asymmetric=False` for the
-symmetric benchmark subset:
-[`docs/_static/figures/qs_ess_summary_all.csv`](docs/_static/figures/qs_ess_summary_all.csv).
+```bash
+PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
+```
 
 ## Performance vs parity
 
