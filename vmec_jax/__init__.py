@@ -204,6 +204,9 @@ from .quasisymmetry import (
     quasisymmetry_ratio_residual_from_wout,
 )
 from .quasi_isodynamic import (
+    max_elongation_penalty_from_state,
+    mirror_ratio_penalty_from_boozer_modes,
+    mirror_ratio_penalty_from_boozer_output,
     quasi_isodynamic_residual_from_boozer_modes,
     quasi_isodynamic_residual_from_boozer_output,
     quasi_isodynamic_residual_from_state,
@@ -396,6 +399,9 @@ __all__ = [
     "quasisymmetry_diagnostics_from_state",
     "quasisymmetry_ratio_residual_from_state",
     "quasisymmetry_ratio_residual_from_wout",
+    "max_elongation_penalty_from_state",
+    "mirror_ratio_penalty_from_boozer_modes",
+    "mirror_ratio_penalty_from_boozer_output",
     "quasi_isodynamic_residual_from_boozer_modes",
     "quasi_isodynamic_residual_from_boozer_output",
     "quasi_isodynamic_residual_from_state",
