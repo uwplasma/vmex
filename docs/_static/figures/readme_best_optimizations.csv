@@ -1,0 +1,5 @@
+problem,policy,max_mode,ess,objective_final,aspect_final,iota_final,cpu_wall_time_min,output_dir
+qa,direct,3,yes,3.1330244063702570e-05,6.0000220171644854e+00,4.1017391024212840e-01,19.305885,/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/direct/qa/mode3/ess
+qh,continuation,4,yes,5.8745216233484525e-04,7.0000349201665166e+00,-1.2181901285763692e+00,18.624023,/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/continuation/qh/mode4/ess
+qp,continuation,4,no,3.6530544758000952e-02,7.0018991042486025e+00,-4.2184566818389690e-01,5.044014,/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/continuation/qp/mode4/no_ess
+qi,direct,2,yes,4.9009269464635064e-03,7.0006908307705986e+00,-5.8082265840265612e-01,1.411729,/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/direct/qi/mode2/ess

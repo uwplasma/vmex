@@ -54,6 +54,12 @@ Run the GPU production sweep on a machine with a working JAX GPU install:
    PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3,4 --ess both
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
+Render the compact README panels from the best CPU, stellarator-symmetric rows:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
+
 The default per-case timeout is 1200 seconds.  GPU uses exact/replay callbacks
 with calibrated optimizer budgets (``inner_max_iter = trial_max_iter = 180``
 and ``ftol = trial_ftol = 1e-9`` for deck-controlled QA/QH cases) so production
@@ -79,6 +85,35 @@ asymmetric modes with ``1e-7``, and writes separate outputs under the
 For NVIDIA-only JAX installations, ``JAX_PLATFORMS=cuda`` is also valid.  Do
 not use ``JAX_PLATFORMS=gpu``: some JAX versions interpret that as both CUDA
 and ROCm and fail if ROCm is not installed.
+
+README Best Rows
+----------------
+
+The README intentionally shows only one best CPU, ``LASYM = F`` result per
+target.  These panels include the initial LCFS, final LCFS, objective history,
+and final outer-surface ``|B|`` in Boozer coordinates evaluated with
+``booz_xform_jax``.  The source table is also available as
+:download:`readme_best_optimizations.csv <_static/figures/readme_best_optimizations.csv>`.
+
+.. image:: _static/figures/readme_best_optimization_qa.png
+   :width: 100%
+   :align: center
+   :alt: Best README QA optimization panel
+
+.. image:: _static/figures/readme_best_optimization_qh.png
+   :width: 100%
+   :align: center
+   :alt: Best README QH optimization panel
+
+.. image:: _static/figures/readme_best_optimization_qp.png
+   :width: 100%
+   :align: center
+   :alt: Best README QP optimization panel
+
+.. image:: _static/figures/readme_best_optimization_qi.png
+   :width: 100%
+   :align: center
+   :alt: Best README QI optimization panel
 
 Objective Histories
 -------------------
