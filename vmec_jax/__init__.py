@@ -139,6 +139,7 @@ from .optimization import (
     smooth_min_abs_iota_residual,
     surface_indices_from_s,
     surface_indices_from_static,
+    truncate_indata_boundary_modes,
 )
 from .coords import Coords, eval_coords
 from .geom import Geom, eval_geom
@@ -331,6 +332,7 @@ __all__ = [
     "smooth_min_abs_iota_residual",
     "surface_indices_from_s",
     "surface_indices_from_static",
+    "truncate_indata_boundary_modes",
     "Coords",
     "eval_coords",
     "Geom",

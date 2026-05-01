@@ -21,6 +21,7 @@ from vmec_jax.optimization import (
     smooth_min_abs_iota_residual,
     surface_indices_from_s,
     surface_indices_from_static,
+    truncate_indata_boundary_modes,
 )
 
 
@@ -175,6 +176,26 @@ def test_rebuild_indata_with_resolution_copies_scalars_without_mutating_original
     assert rebuilt.scalars["NFP"] == 4
     assert rebuilt.indexed == indata.indexed
     assert rebuilt.source_path == indata.source_path
+
+
+def test_truncate_indata_boundary_modes_projects_inactive_harmonics():
+    indata = InData(
+        scalars={"MPOL": 6, "NTOR": 6, "NFP": 2},
+        indexed={
+            "RBC": {(0, 0): 1.0, (1, 0): 0.2, (2, 0): 0.3, (-2, 1): 0.4},
+            "ZBS": {(0, 1): 0.5, (1, 1): 0.6, (2, 2): 0.7},
+            "AC": {(0,): 1.23},
+        },
+        source_path="input.nfp2_QI",
+    )
+
+    projected = truncate_indata_boundary_modes(indata, max_mode=1)
+
+    assert projected.indexed["RBC"] == {(0, 0): 1.0, (1, 0): 0.2}
+    assert projected.indexed["ZBS"] == {(0, 1): 0.5, (1, 1): 0.6}
+    assert projected.indexed["AC"] == {(0,): 1.23}
+    assert indata.indexed["RBC"][(2, 0)] == 0.3
+    assert projected.source_path == indata.source_path
 
 
 def test_gauss_newton_least_squares_solves_linear_problem():

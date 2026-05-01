@@ -167,13 +167,15 @@ outer-surface `|B|` in Boozer coordinates computed with `booz_xform_jax`.
 The QI row uses the constrained QI objective: optional QP preseed, QI-only
 preseed, then QI residual plus mirror-ratio and LCFS-elongation penalties.  Its
 selection is based on the QI physics gates, not only on the scalar objective.
+The bundled NFP=2 QI seed is projected to each active `max_mode`, so
+`max_mode=1` zeroes the seed's mode-2 boundary harmonics before optimizing.
 
 | Target | Backend | Policy | max_mode | ESS | QP preseed | Final J | QI raw | Mirror | Elong. | Aspect | Iota | Wall time |
 |---|---|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|
 | QA | CPU | direct | 3 | yes |  | 3.13e-05 |  |  |  | 6.000 | 0.4102 | 19.3 min |
 | QH | CPU | continuation | 3 | no |  | 1.37e-03 |  |  |  | 7.000 |  | 10.7 min |
 | QP | CPU | direct | 2 | yes |  | 3.74e-02 |  |  |  | 7.004 | -0.4037 | 1.1 min |
-| QI | CPU | direct | 1 | yes | no | 5.66e-02 | 5.56e-02 | 0.213 | 7.88 | 7.006 | 0.4194 | 1.1 min |
+| QI | CPU | direct | 3 | no | no | 8.59e-02 | 8.30e-02 | 0.215 | 4.37 | 7.012 | -0.4147 | 1.5 min |
 
 <p align="center">
   <img src="docs/_static/figures/readme_best_optimization_qa.png" width="980" />
@@ -197,7 +199,7 @@ Recreate the four displayed runs:
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa --modes 3 --ess on
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qh --modes 3 --ess off
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qp --modes 2 --ess on
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qi --modes 1 --ess on --qi-qp-preseed off
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qi --modes 3 --ess off --qi-qp-preseed off
 ```
 
 Regenerate the README panels and the compact CSV used for the table:

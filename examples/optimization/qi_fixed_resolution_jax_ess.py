@@ -44,7 +44,7 @@ enable_x64(True)
 # USER PARAMETERS
 # ─────────────────────────────────────────────────────────────────────────────
 
-INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.nfp1_QI"
+INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.nfp2_QI"
 
 MAX_MODE = 1
 VMEC_MPOL = max(5, MAX_MODE + 2)
@@ -162,10 +162,11 @@ def _slice_boozer_surfaces(booz: dict, surface_index: int) -> dict:
 
 
 def _build_stage(max_mode: int, *, objective_kind: str):
+    stage_indata0 = vj.truncate_indata_boundary_modes(indata, max_mode=max_mode)
     stage_static = vj.build_static(cfg)
-    stage_boundary = vj.boundary_from_indata(indata, stage_static.modes, apply_m1_constraint=False)
+    stage_boundary = vj.boundary_from_indata(stage_indata0, stage_static.modes, apply_m1_constraint=False)
     stage_indata, stage_static, stage_boundary = vj.extend_boundary_for_max_mode(
-        indata, stage_static, stage_boundary, max_mode
+        stage_indata0, stage_static, stage_boundary, max_mode
     )
     stage_boundary_input = vj.boundary_input_from_indata(stage_indata, stage_static.modes)
     stage_specs = vj.boundary_param_specs(

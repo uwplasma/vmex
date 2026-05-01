@@ -12,6 +12,7 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
+import re
 
 import numpy as np
 
@@ -26,6 +27,7 @@ POLICIES = ("continuation", "direct")
 PRESEED_OPTIONS = (True, False)
 MODES = (1, 2, 3)
 ESS_OPTIONS = (False, True)
+QI_INPUT_NFP = 2
 
 SUMMARY_CSV = FIGURE_DIR / "qi_constrained_summary.csv"
 SUMMARY_JSON = FIGURE_DIR / "qi_constrained_summary.json"
@@ -57,9 +59,15 @@ SUMMARY_FIELDS = [
     "total_wall_time_s",
     "jax_backend",
     "jax_device_kind",
+    "input_file",
+    "input_nfp",
+    "project_input_boundary_to_max_mode",
     "message",
     "output_dir",
 ]
+
+
+_NFP_RE = re.compile(r"^\s*NFP\s*=\s*([0-9]+)", re.IGNORECASE | re.MULTILINE)
 
 
 def _bool_value(value) -> bool:
@@ -85,6 +93,24 @@ def _path_from_record(value: str | None, fallback: Path) -> Path:
     return resolved if resolved.exists() else fallback
 
 
+def _input_nfp_from_output_dir(record: dict, path: Path) -> int | None:
+    value = record.get("input_nfp")
+    if value not in (None, ""):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            pass
+    output_dir = _path_from_record(record.get("output_dir"), path.parent)
+    for name in ("input.initial", "input.final"):
+        candidate = output_dir / name
+        if not candidate.exists():
+            continue
+        match = _NFP_RE.search(candidate.read_text(errors="ignore"))
+        if match is not None:
+            return int(match.group(1))
+    return None
+
+
 def _infer_qp_preseed(record: dict, path: Path) -> bool | None:
     value = record.get("qi_qp_preseed")
     if value not in (None, ""):
@@ -102,6 +128,9 @@ def _discover_qi_results() -> list[dict]:
     for path in sorted(OUTPUT_ROOT.glob("**/case_result.json")):
         record = json.loads(path.read_text())
         if record.get("problem") != "qi":
+            continue
+        input_nfp = _input_nfp_from_output_dir(record, path)
+        if input_nfp != QI_INPUT_NFP:
             continue
         if _bool_value(record.get("stellarator_asymmetric")):
             continue
@@ -122,6 +151,13 @@ def _discover_qi_results() -> list[dict]:
         row["use_ess"] = bool(_bool_value(record.get("use_ess")))
         row["success"] = bool(_bool_value(record.get("success")))
         row["crashed"] = bool(_bool_value(record.get("crashed")))
+        row["input_file"] = row.get("input_file") or "examples/data/input.nfp2_QI"
+        row["input_nfp"] = input_nfp
+        row["project_input_boundary_to_max_mode"] = (
+            row.get("project_input_boundary_to_max_mode")
+            if row.get("project_input_boundary_to_max_mode") not in (None, "")
+            else True
+        )
         row["output_dir"] = str(_path_from_record(record.get("output_dir"), path.parent))
         if int(row["max_mode"]) not in MODES:
             continue

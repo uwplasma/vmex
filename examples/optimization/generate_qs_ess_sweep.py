@@ -233,6 +233,7 @@ class ProblemConfig:
     qi_preseed_qp: bool = False
     qi_preseed_qi: bool = False
     qi_preseed_qi_nfev: int = 30
+    project_input_boundary_to_max_mode: bool = False
 
 
 PROBLEM_CONFIGS = {
@@ -313,7 +314,7 @@ PROBLEM_CONFIGS = {
     ),
     "qi": ProblemConfig(
         name="qi",
-        input_file=DATA_DIR / "input.nfp1_QI",
+        input_file=DATA_DIR / "input.nfp2_QI",
         method="scipy",
         scipy_tr_solver="lsmr",
         scipy_lsmr_maxiter=None,
@@ -351,6 +352,7 @@ PROBLEM_CONFIGS = {
         qi_preseed_qp=False,
         qi_preseed_qi=True,
         qi_preseed_qi_nfev=30,
+        project_input_boundary_to_max_mode=True,
     ),
 }
 
@@ -379,6 +381,9 @@ class CaseResult:
     jax_platforms: str | None = None
     stellarator_asymmetric: bool = False
     asymmetry_seed: float = 0.0
+    input_file: str | None = None
+    input_nfp: int | None = None
+    project_input_boundary_to_max_mode: bool | None = None
     asymmetric_dof_count: int = 0
     asymmetric_param_norm_initial: float | None = None
     asymmetric_param_norm_final: float | None = None
@@ -777,6 +782,8 @@ def _default_worker_jax_platforms(solver_device: str | None) -> str | None:
 
 
 def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, solver_device: str | None):
+    if bool(problem_cfg.project_input_boundary_to_max_mode):
+        indata0 = vj.truncate_indata_boundary_modes(indata0, max_mode=max_mode)
     stage_static = vj.build_static(cfg)
     stage_boundary = vj.boundary_from_indata(indata0, stage_static.modes, apply_m1_constraint=False)
     stage_indata, stage_static, stage_boundary = vj.extend_boundary_for_max_mode(
@@ -1430,6 +1437,9 @@ def _run_case(
         jax_platforms=jax_platforms,
         stellarator_asymmetric=bool(stellarator_asymmetric),
         asymmetry_seed=float(ASYMMETRIC_SEED if stellarator_asymmetric else 0.0),
+        input_file=str(problem_cfg.input_file),
+        input_nfp=int(cfg.nfp),
+        project_input_boundary_to_max_mode=bool(problem_cfg.project_input_boundary_to_max_mode),
         qi_qp_preseed=(bool(problem_cfg.qi_preseed_qp) if problem_cfg.objective_kind == "qi" else None),
         qi_qi_preseed=(bool(problem_cfg.qi_preseed_qi) if problem_cfg.objective_kind == "qi" else None),
         **asym_stats,
@@ -1488,6 +1498,13 @@ def _worker(
             jax_platforms=jax_platforms,
             stellarator_asymmetric=bool(stellarator_asymmetric),
             asymmetry_seed=float(ASYMMETRIC_SEED if stellarator_asymmetric else 0.0),
+            input_file=str(PROBLEM_CONFIGS[problem].input_file) if problem in PROBLEM_CONFIGS else None,
+            input_nfp=None,
+            project_input_boundary_to_max_mode=(
+                bool(PROBLEM_CONFIGS[problem].project_input_boundary_to_max_mode)
+                if problem in PROBLEM_CONFIGS
+                else None
+            ),
             qi_qp_preseed=(bool(qi_qp_preseed) if problem == "qi" and qi_qp_preseed is not None else None),
         )
         Path(result_path).write_text(json.dumps(asdict(failed), indent=2))
