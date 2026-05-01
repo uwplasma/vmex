@@ -77,6 +77,11 @@ docs/api/generated/
 docs/_static/figures/**/wout_*.nc
 docs/_static/figures/readme_*_vmec2000_trace/
 docs/_static/figures/readme_*_wout_audit.json
+docs/_static/figures/readme_best_optimization_*.pdf
+docs/_static/figures/readme_best_optimizations.*
+!docs/_static/figures/readme_best_optimizations.csv
+docs/_static/figures/qs_ess_*.png
+docs/_static/figures/qs_ess_*.pdf
 examples/outputs/
 examples/optimization/results/
 examples_single_grid/data/wout_*.nc

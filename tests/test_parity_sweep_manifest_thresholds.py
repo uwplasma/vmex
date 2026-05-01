@@ -1,6 +1,55 @@
 from __future__ import annotations
 
-from tools.diagnostics.parity_sweep_manifest import _evaluate_freeb_thresholds, _evaluate_runtime_thresholds
+from tools.diagnostics.parity_sweep_manifest import (
+    DEFAULT_MANIFEST,
+    _evaluate_freeb_thresholds,
+    _evaluate_runtime_thresholds,
+    _parse_manifest,
+)
+
+
+def test_parity_manifest_smoke_tier_covers_required_physics_classes() -> None:
+    """Guard the required parity matrix against accidental case removal."""
+
+    _, cases = _parse_manifest(DEFAULT_MANIFEST)
+    smoke_cases = [case for case in cases if case.get("enabled", True) and case.get("tier") == "smoke"]
+
+    def has_case(*, lfreeb: bool, lasym: bool, axisymmetric: bool | None = None) -> bool:
+        for case in smoke_cases:
+            if bool(case.get("lfreeb")) != lfreeb:
+                continue
+            if bool(case.get("lasym")) != lasym:
+                continue
+            if axisymmetric is not None and bool(case.get("axisymmetric")) != axisymmetric:
+                continue
+            return True
+        return False
+
+    assert has_case(lfreeb=False, lasym=False, axisymmetric=True)
+    assert has_case(lfreeb=False, lasym=True, axisymmetric=True)
+    assert has_case(lfreeb=False, lasym=False, axisymmetric=False)
+    assert has_case(lfreeb=False, lasym=True, axisymmetric=False)
+    assert has_case(lfreeb=True, lasym=False)
+
+
+def test_parity_manifest_smoke_cases_define_accuracy_and_runtime_contracts() -> None:
+    """Keep fast parity cases explicit about tolerances, inputs, and cost gates."""
+
+    _, cases = _parse_manifest(DEFAULT_MANIFEST)
+    smoke_cases = [case for case in cases if case.get("enabled", True) and case.get("tier") == "smoke"]
+    assert smoke_cases
+
+    for case in smoke_cases:
+        assert case["input"], case["id"]
+        assert case.get("goal"), case["id"]
+        assert case["compare"] in {"stage_trace", "freeb_scalpot"}, case["id"]
+        assert float(case.get("atol", 0.0)) >= 0.0, case["id"]
+        if case["compare"] == "stage_trace":
+            assert float(case.get("rtol", 0.0)) > 0.0, case["id"]
+            assert int(case.get("max_iter", 0)) > 0 or case.get("use_input_niter"), case["id"]
+        if bool(case.get("lfreeb")):
+            assert float(case.get("max_runtime_s", 0.0)) > 0.0, case["id"]
+            assert float(case.get("max_total_runtime_s", 0.0)) > 0.0, case["id"]
 
 
 def test_evaluate_freeb_thresholds_global_pass() -> None:
