@@ -76,25 +76,20 @@ jobs:
             --outdir /tmp/vmec_jax_cli_smoke
           test -f /tmp/vmec_jax_cli_smoke/wout_circular_tokamak.nc
 
-      - name: Fetch large assets
-        if: matrix.python-version == '3.11'
-        run: |
-          python tools/fetch_assets.py
-
       - name: Compile (Python)
         run: |
           python -m compileall -q vmec_jax
 
       - name: Repository size audit
         run: |
-          python tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 300 --max-file-mib 25
+          python tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 60 --max-file-mib 5
 
       - name: Run tests
         env:
           JAX_ENABLE_X64: "1"
         run: |
           if [ "${{ matrix.python-version }}" = "3.11" ]; then
-            pytest -q -m "not full and not vmec2000" --cov=vmec_jax --cov-report=xml --cov-report=term-missing:skip-covered --cov-fail-under=55
+            pytest -q -m "not full and not vmec2000" --cov=vmec_jax --cov-report=xml --cov-report=term-missing:skip-covered --cov-fail-under=57
           else
             pytest -q -m "not full and not vmec2000"
           fi
@@ -202,10 +197,6 @@ jobs:
           python -m pip install -U pip
           python -m pip install .
           python -m pip install build sphinx furo
-
-      - name: Fetch large assets
-        run: |
-          python tools/fetch_assets.py
 
       - name: Build wheel and sdist
         run: |

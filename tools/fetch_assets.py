@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Download large example assets (figures + netCDF reference data).
+"""Download large example/reference netCDF assets.
 
-This keeps the git repo small while letting users pull full assets on demand.
+Generated optimization figures are intentionally not part of this asset bundle:
+rerun the optimization renderers when report-quality panels are needed.
 """
 from __future__ import annotations
 

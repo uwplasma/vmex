@@ -257,24 +257,19 @@ QH warm-start basin.
 Columns correspond to ``max_mode = 1, 2, 3, 4``.  The vertical dotted lines mark
 continuation stage boundaries.
 
-The objective panel below is the full CPU/GPU policy sweep.  Solid curves met
-the optimizer success criterion; dashed curves are stopped, failed, or
-budgeted lanes.  The summary tables identify whether a dashed lane reached
+The generated objective panels contain the full CPU/GPU policy sweep.  Solid
+curves met the optimizer success criterion; dashed curves are stopped, failed,
+or budgeted lanes.  The summary tables identify whether a dashed lane reached
 ``max_nfev``, hit the 1200 second timeout, or failed earlier such as from GPU
 OOM.  The QA input carries ``1e-5`` seeds for the mode-1 boundary terms so the
 iota residual has a useful derivative.  QA continuation reaches the target-iota
 basin on both CPU and GPU; direct QA with ESS also reaches ``iota ~= 0.409``.
 Direct QA without ESS remains a weak policy for high direct-start modes.
 
-.. image:: _static/figures/qs_ess_objective_panel_all_policies.png
-   :width: 100%
-   :align: center
-   :alt: Full CPU and GPU QA, QH, QP, and QI optimization policy sweep
-
-.. image:: _static/figures/qs_ess_objective_panel_cpu_policies.png
-   :width: 100%
-   :align: center
-   :alt: CPU QA, QH, QP, and QI optimization policy sweep
+The large all-policy panels, atlases, and PDF snapshots are generated assets,
+not source files.  They are intentionally not tracked in git.  Recreate them
+from the sweep results with the commands below; the README keeps only the four
+compact best-result PNGs.
 
 .. code-block:: bash
 
@@ -343,70 +338,17 @@ For NVIDIA-only JAX installations, ``JAX_PLATFORMS=cuda`` is also valid.  Do
 not use ``JAX_PLATFORMS=gpu``: some JAX versions interpret that as both CUDA
 and ROCm and fail if ROCm is not installed.
 
-.. image:: _static/figures/qs_ess_objective_panel_gpu_policies.png
-   :width: 100%
-   :align: center
-   :alt: GPU QA, QH, QP, and QI optimization status panel
-
-.. image:: _static/figures/qs_ess_objective_panel_asymmetric_all_policies.png
-   :width: 100%
-   :align: center
-   :alt: Partial LASYM QA, QH, QP, and QI optimization status panel
-
-.. image:: _static/figures/qs_ess_publication_panel_full.png
-   :width: 100%
-   :align: center
-   :alt: Full CPU and GPU QA, QH, QP, and QI optimization policy sweep
-
-The summary-table image is intentionally large; use it for reports where the
-full wall-time/status table is needed as a figure.  The README keeps the same
-data as a Markdown table for readability.
-
-.. image:: _static/figures/qs_ess_summary_tables_cpu_policies.png
-   :width: 100%
-   :align: center
-   :alt: CPU QA, QH, QP, and QI optimization wall-time summary tables
-
-.. image:: _static/figures/qs_ess_summary_tables_gpu_policies.png
-   :width: 100%
-   :align: center
-   :alt: GPU QA, QH, QP, and QI optimization wall-time summary tables
-
-.. image:: _static/figures/qs_ess_summary_tables_asymmetric_all_policies.png
-   :width: 100%
-   :align: center
-   :alt: Partial LASYM optimization wall-time summary tables
+The renderer writes these report artifacts under
+``examples/optimization/results/qs_ess_sweep``.  Copy only the small README
+figures into ``docs/_static/figures`` before committing.  Leave the large
+publication panels, state atlases, summary-table images, and PDFs as generated
+local artifacts or attach them to a GitHub release.
 
 Final equilibria for CPU/GPU continuation/direct cases are rendered separately
 so the 3D surfaces and boundary-field colorbars remain readable.  The
 ``|B|`` panels use line contours on the LCFS, not filled contours.  The
-production CPU atlases are also emitted as
-``final_state_atlas_continuation.pdf`` and ``final_state_atlas_direct.pdf``.
-
-.. image:: _static/figures/qs_ess_final_state_atlas_continuation.png
-   :width: 100%
-   :align: center
-   :alt: CPU continuation final-state atlas for QA, QH, QP, and QI
-
-.. image:: _static/figures/qs_ess_final_state_atlas_direct.png
-   :width: 100%
-   :align: center
-   :alt: CPU direct-start final-state atlas for QA, QH, QP, and QI
-
-.. image:: _static/figures/qs_ess_final_state_atlas_cpu_continuation.png
-   :width: 100%
-   :align: center
-   :alt: CPU continuation final-state atlas for QA, QH, QP, and QI
-
-.. image:: _static/figures/qs_ess_final_state_atlas_cpu_direct.png
-   :width: 100%
-   :align: center
-   :alt: CPU direct-start final-state atlas for QA, QH, QP, and QI
-
-.. image:: _static/figures/qs_ess_final_state_atlas_gpu_continuation.png
-   :width: 100%
-   :align: center
-   :alt: GPU continuation final-state atlas for QA, QH, QP, and QI
+renderer emits ``final_state_atlas_*.png/.pdf`` files locally for reports; they
+are excluded from git so a fresh clone stays lightweight.
 
 
 Finite-beta stage-one examples
@@ -445,11 +387,6 @@ The full Redl bootstrap-current mismatch and Mercier ``DMerc`` residuals from
 the SIMSOPT finite-beta script remain open extensions; the examples keep the
 stage-one structure and write VMEC inputs/wouts/history so those terms can be
 added and regression-tested incrementally.
-
-.. image:: _static/figures/qs_ess_final_state_atlas_gpu_direct.png
-   :width: 100%
-   :align: center
-   :alt: GPU direct-start final-state atlas for QA, QH, QP, and QI
 
 The full multi-page artifact inventory, including legacy aliases, CSV/JSON
 summary downloads, and exact reproduction commands for each standalone example,
