@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>VMEC AI Assistant</title>
+</head>
+<body>
+
+<h2>VMEC AI Assistant</h2>
+
+<input id="msg" placeholder="Ask something..." style="width:300px;">
+<button onclick="send()">Send</button>
+
+<pre id="response"></pre>
+
+<script>
+async function send() {
+    const message = document.getElementById("msg").value;
+
+    const res = await fetch("http://127.0.0.1:5000/chat", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ message })
+    });
+
+    const data = await res.json();
+    document.getElementById("response").innerText = data.response;
+}
+</script>
+<h3>Run VMEC Simulation</h3>
+
+ns: <input id="ns"><br>
+mpol: <input id="mpol"><br>
+ntor: <input id="ntor"><br>
+
+<button onclick="runVMEC()">Run Simulation</button>
+
+<h3>Plots</h3>
+<div id="plots"></div>
+
+<script>
+async function runVMEC() {
+    const res = await fetch("/run_vmec_ui", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+            ns: document.getElementById("ns").value,
+            mpol: document.getElementById("mpol").value,
+            ntor: document.getElementById("ntor").value,
+        })
+    });
+
+    const data = await res.json();
+
+    // ✅ SHOW TEXT RESULT (this was missing)
+    document.getElementById("response").innerText = data.result.text;
+
+    // ❌ REMOVE ALERT
+    // alert(data.result);
+
+    // ✅ SHOW PLOTS
+    const container = document.getElementById("plots");
+    container.innerHTML = "";
+
+    data.result.plots.forEach(name => {
+        const img = document.createElement("img");
+        img.src = "/plot/" + name + "?t=" + Date.now();
+        img.width = 300;
+        img.style.margin = "10px";
+        container.appendChild(img);
+    });
+}
+</script>
+
+
+
+</body>
+</html>
