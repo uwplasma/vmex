@@ -63,9 +63,9 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 INPUT_FILE = DATA_DIR / "input.nfp4_QH_warm_start"
 OUTPUT_DIR = Path("results/qh_opt")
 
-VMEC_MPOL = 5
-VMEC_NTOR = 5
 MAX_MODE = 1
+VMEC_MPOL = max(5, MAX_MODE + 2)
+VMEC_NTOR = VMEC_MPOL
 
 MAX_NFEV = 15
 CONTINUATION_NFEV = 10

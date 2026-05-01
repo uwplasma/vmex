@@ -7,7 +7,7 @@ This script regenerates a reviewer-facing benchmark matrix for the standalone
 
 - problems: QA, QH, QP, and QI
 - policies: continuation and direct-start mode expansion
-- max_mode: 1, 2, 3, 4 for continuation and direct start
+- max_mode: 1, 2, 3 for continuation and direct start
 - ESS: off and on
 - backends: encoded by ``--backend-label`` (for example ``cpu`` or ``gpu``)
 
@@ -65,7 +65,12 @@ from vmec_jax.geom import eval_geom
 from vmec_jax.init_guess import initial_guess_from_boundary
 from vmec_jax.namelist import InData
 from vmec_jax.optimization import rebuild_indata_with_resolution
-from vmec_jax.quasi_isodynamic import _nearest_half_mesh_indices, quasi_isodynamic_residual_from_state
+from vmec_jax.quasi_isodynamic import (
+    _nearest_half_mesh_indices,
+    max_elongation_penalty_from_state,
+    mirror_ratio_penalty_from_boozer_output,
+    quasi_isodynamic_residual_from_state,
+)
 from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_state
 from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
@@ -76,9 +81,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DATA_DIR = SCRIPT_DIR.parents[1] / "examples" / "data"
 OUTPUT_ROOT = SCRIPT_DIR / "results" / "qs_ess_sweep"
 
-VMEC_MPOL = 5
-VMEC_NTOR = 5
-MODES = (1, 2, 3, 4)
+MIN_VMEC_MODE = 5
+VMEC_MPOL = MIN_VMEC_MODE
+VMEC_NTOR = MIN_VMEC_MODE
+MODES = (1, 2, 3)
 PROBLEMS = ("qa", "qh", "qp", "qi")
 ESS_OPTIONS = (False, True)
 
@@ -172,29 +178,11 @@ CASE_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
 # controlled by small per-case nfev caps.  Let the 20-minute case timeout decide
 # whether high-mode LASYM cases are affordable; keep explicit low nfev caps only
 # in ``CASE_BUDGET_OVERRIDES`` for opt-in ``--diagnostic-budgets`` runs.
-GPU_PRODUCTION_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
-    ("gpu", "continuation", "qi", 4, False): CaseBudget(max_nfev=8),
-    ("gpu", "continuation", "qi", 4, True): CaseBudget(max_nfev=8),
-    ("gpu", "direct", "qi", 4, False): CaseBudget(max_nfev=8),
-    ("gpu", "direct", "qi", 4, True): CaseBudget(max_nfev=8),
-}
+GPU_PRODUCTION_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {}
 
 
-# CPU sweeps normally use the full scientific budgets.  The QA continuation
-# mode-4 ESS row starts from an already accurate mode-3 ESS seed and can spend
-# the full 20-minute budget in a marginal high-mode polishing step, so bound only
-# that final polish to keep the matrix complete and reproducible.
-CPU_PRODUCTION_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
-    ("cpu", "continuation", "qa", 4, True): CaseBudget(max_nfev=8),
-    ("cpu", "direct", "qa", 4, False): CaseBudget(max_nfev=8),
-    ("cpu", "direct", "qa", 4, True): CaseBudget(max_nfev=8),
-    ("cpu", "direct", "qh", 4, False): CaseBudget(max_nfev=8),
-    ("cpu", "direct", "qh", 4, True): CaseBudget(max_nfev=8),
-    ("cpu", "direct", "qp", 4, False): CaseBudget(max_nfev=8),
-    ("cpu", "direct", "qp", 4, True): CaseBudget(max_nfev=8),
-    ("cpu", "direct", "qi", 4, False): CaseBudget(max_nfev=8),
-    ("cpu", "direct", "qi", 4, True): CaseBudget(max_nfev=8),
-}
+# CPU sweeps normally use the full scientific budgets for the published modes.
+CPU_PRODUCTION_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {}
 
 
 @dataclass(frozen=True)
@@ -233,7 +221,18 @@ class ProblemConfig:
     qi_n_bounce: int = 11
     qi_softness: float = 2.0e-2
     qi_profile_weight: float = 1.0
+    qi_max_mirror_ratio: float = 0.21
+    qi_mirror_weight: float = 10.0
+    qi_mirror_ntheta: int = 96
+    qi_mirror_nphi: int = 96
+    qi_mirror_surface_index: int = 0
+    qi_max_elongation: float = 8.0
+    qi_elongation_weight: float = 10.0
+    qi_elongation_ntheta: int = 48
+    qi_elongation_nphi: int = 16
     qi_preseed_qp: bool = False
+    qi_preseed_qi: bool = False
+    qi_preseed_qi_nfev: int = 30
 
 
 PROBLEM_CONFIGS = {
@@ -314,7 +313,7 @@ PROBLEM_CONFIGS = {
     ),
     "qi": ProblemConfig(
         name="qi",
-        input_file=DATA_DIR / "input.nfp4_QH_warm_start",
+        input_file=DATA_DIR / "input.nfp1_QI",
         method="scipy",
         scipy_tr_solver="lsmr",
         scipy_lsmr_maxiter=None,
@@ -343,7 +342,15 @@ PROBLEM_CONFIGS = {
         qi_n_bounce=11,
         qi_softness=2.0e-2,
         qi_profile_weight=1.5,
-        qi_preseed_qp=True,
+        qi_max_mirror_ratio=0.21,
+        # Match the reference SIMSOPT QI script: MirrorRatioPen and
+        # MaxElongationPen are scalar residuals with least-squares weight 1e1.
+        qi_mirror_weight=10.0,
+        qi_max_elongation=8.0,
+        qi_elongation_weight=10.0,
+        qi_preseed_qp=False,
+        qi_preseed_qi=True,
+        qi_preseed_qi_nfev=30,
     ),
 }
 
@@ -380,6 +387,16 @@ class CaseResult:
     bmag_max: float | None = None
     bmag_nonpositive_fraction: float | None = None
     bmag_finite: bool | None = None
+    qi_qp_preseed: bool | None = None
+    qi_qi_preseed: bool | None = None
+    qi_raw_total: float | None = None
+    qi_mirror_ratio_max: float | None = None
+    qi_mirror_ratio_target: float | None = None
+    qi_mirror_excess_max: float | None = None
+    qi_max_elongation: float | None = None
+    qi_elongation_target: float | None = None
+    qi_elongation_excess: float | None = None
+    qi_diagnostic_error: str | None = None
 
 
 def _set_missing_wall_time(result: CaseResult, elapsed_s: float) -> bool:
@@ -606,10 +623,130 @@ def _bmag_lcfs_stats(wout_path: Path) -> dict[str, float | bool | None]:
         }
 
 
-def _load_problem(cfg: ProblemConfig, *, stellarator_asymmetric: bool = STELLARATOR_ASYMMETRIC):
+def _slice_boozer_surfaces(booz: dict, surface_index: int) -> dict:
+    """Return a Boozer output dict restricted to one radial surface."""
+
+    index = int(surface_index)
+    out = dict(booz)
+    for key in ("bmnc_b", "bmns_b", "iota_b", "s_b"):
+        value = out.get(key)
+        if value is not None:
+            out[key] = value[index : index + 1]
+    return out
+
+
+def _qi_diagnostics_from_state(problem_cfg: ProblemConfig, opt, state) -> dict[str, float | bool | None]:
+    """Evaluate unweighted QI, mirror-ratio, and elongation diagnostics."""
+
+    if problem_cfg.objective_kind != "qi" or state is None:
+        return {}
+    try:
+        from booz_xform_jax import prepare_booz_xform_constants
+        from vmec_jax.modes import nyquist_mode_table_from_grid, vmec_mode_table
+
+        static = opt._static
+        indata = opt._indata
+        geom = eval_geom(state, static)
+        signgs = int(signgs_from_sqrtg(np.asarray(geom.sqrtg), axis_index=1))
+        flux = vj.flux_profiles_from_indata(indata, static.s, signgs=signgs)
+        pressure = jnp.zeros_like(jnp.asarray(static.s))
+        main_modes = vmec_mode_table(int(static.cfg.mpol), int(static.cfg.ntor))
+        nyq_modes = nyquist_mode_table_from_grid(
+            mpol=int(static.cfg.mpol),
+            ntor=int(static.cfg.ntor),
+            ntheta=int(static.cfg.ntheta),
+            nzeta=int(static.cfg.nzeta),
+        )
+        constants, grids = prepare_booz_xform_constants(
+            nfp=int(static.cfg.nfp),
+            mboz=problem_cfg.qi_mboz,
+            nboz=problem_cfg.qi_nboz,
+            asym=bool(static.cfg.lasym),
+            xm=np.asarray(main_modes.m, dtype=int),
+            xn=np.asarray(main_modes.n * int(static.cfg.nfp), dtype=int),
+            xm_nyq=np.asarray(nyq_modes.m, dtype=int),
+            xn_nyq=np.asarray(nyq_modes.n * int(static.cfg.nfp), dtype=int),
+        )
+        surface_indices = _nearest_half_mesh_indices(
+            problem_cfg.surfaces,
+            n_half=max(int(np.asarray(static.s).shape[0]) - 1, 1),
+        )
+        qi = quasi_isodynamic_residual_from_state(
+            state=state,
+            static=static,
+            indata=indata,
+            signgs=signgs,
+            flux_local=flux,
+            prof_local={"pressure": pressure},
+            pressure_local=pressure,
+            surfaces=problem_cfg.surfaces,
+            mboz=problem_cfg.qi_mboz,
+            nboz=problem_cfg.qi_nboz,
+            nphi=problem_cfg.qi_nphi,
+            nalpha=problem_cfg.qi_nalpha,
+            n_bounce=problem_cfg.qi_n_bounce,
+            softness=problem_cfg.qi_softness,
+            profile_weight=problem_cfg.qi_profile_weight,
+            jit_booz=False,
+            booz_constants=constants,
+            booz_grids=grids,
+            surface_indices=surface_indices,
+        )
+        mirror_booz = _slice_boozer_surfaces(qi["booz"], int(problem_cfg.qi_mirror_surface_index))
+        mirror = mirror_ratio_penalty_from_boozer_output(
+            mirror_booz,
+            nfp=int(static.cfg.nfp),
+            threshold=problem_cfg.qi_max_mirror_ratio,
+            ntheta=problem_cfg.qi_mirror_ntheta,
+            nphi=problem_cfg.qi_mirror_nphi,
+        )
+        elongation = max_elongation_penalty_from_state(
+            state=state,
+            static=static,
+            threshold=problem_cfg.qi_max_elongation,
+            ntheta=problem_cfg.qi_elongation_ntheta,
+            nphi=problem_cfg.qi_elongation_nphi,
+        )
+        mirror_values = np.asarray(mirror["mirror_ratio"], dtype=float)
+        mirror_max = float(np.max(mirror_values))
+        elongation_max = float(np.asarray(elongation["max_elongation"]))
+        return {
+            "qi_raw_total": float(np.asarray(qi["total"])),
+            "qi_mirror_ratio_max": mirror_max,
+            "qi_mirror_ratio_target": float(problem_cfg.qi_max_mirror_ratio),
+            "qi_mirror_excess_max": max(0.0, mirror_max - float(problem_cfg.qi_max_mirror_ratio)),
+            "qi_max_elongation": elongation_max,
+            "qi_elongation_target": float(problem_cfg.qi_max_elongation),
+            "qi_elongation_excess": max(0.0, elongation_max - float(problem_cfg.qi_max_elongation)),
+        }
+    except Exception as exc:
+        return {
+            "qi_raw_total": None,
+            "qi_mirror_ratio_max": None,
+            "qi_mirror_ratio_target": float(problem_cfg.qi_max_mirror_ratio),
+            "qi_mirror_excess_max": None,
+            "qi_max_elongation": None,
+            "qi_elongation_target": float(problem_cfg.qi_max_elongation),
+            "qi_elongation_excess": None,
+            "qi_diagnostic_error": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def _vmec_resolution_for_max_mode(max_mode: int) -> tuple[int, int]:
+    resolution = max(MIN_VMEC_MODE, int(max_mode) + 2)
+    return resolution, resolution
+
+
+def _load_problem(
+    cfg: ProblemConfig,
+    *,
+    max_mode: int,
+    stellarator_asymmetric: bool = STELLARATOR_ASYMMETRIC,
+):
     cfg0, indata = vj.load_config(str(cfg.input_file))
     del cfg0
-    indata = rebuild_indata_with_resolution(indata, mpol=VMEC_MPOL, ntor=VMEC_NTOR)
+    mpol, ntor = _vmec_resolution_for_max_mode(max_mode)
+    indata = rebuild_indata_with_resolution(indata, mpol=mpol, ntor=ntor)
     if bool(stellarator_asymmetric):
         indata = _copy_indata_with_lasym(indata, lasym=True)
     config = config_from_indata(indata)
@@ -740,6 +877,44 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
 
     track_iota = problem_cfg.target_iota is not None or problem_cfg.iota_abs_min is not None
 
+    def qi_field_quality_blocks(state, qi):
+        blocks = [
+            (
+                jnp.asarray(qi["residuals1d"], dtype=jnp.float64) * problem_cfg.qs_weight,
+                problem_cfg.qs_weight**2 * qi["total"],
+            )
+        ]
+        if float(problem_cfg.qi_mirror_weight) != 0.0:
+            mirror_booz = _slice_boozer_surfaces(qi["booz"], int(problem_cfg.qi_mirror_surface_index))
+            mirror = mirror_ratio_penalty_from_boozer_output(
+                mirror_booz,
+                nfp=int(stage_static.cfg.nfp),
+                threshold=problem_cfg.qi_max_mirror_ratio,
+                ntheta=problem_cfg.qi_mirror_ntheta,
+                nphi=problem_cfg.qi_mirror_nphi,
+            )
+            blocks.append(
+                (
+                    jnp.asarray(mirror["residuals1d"], dtype=jnp.float64) * problem_cfg.qi_mirror_weight,
+                    problem_cfg.qi_mirror_weight**2 * mirror["total"],
+                )
+            )
+        if float(problem_cfg.qi_elongation_weight) != 0.0:
+            elongation = max_elongation_penalty_from_state(
+                state=state,
+                static=stage_static,
+                threshold=problem_cfg.qi_max_elongation,
+                ntheta=problem_cfg.qi_elongation_ntheta,
+                nphi=problem_cfg.qi_elongation_nphi,
+            )
+            blocks.append(
+                (
+                    jnp.asarray(elongation["residuals1d"], dtype=jnp.float64) * problem_cfg.qi_elongation_weight,
+                    problem_cfg.qi_elongation_weight**2 * elongation["total"],
+                )
+            )
+        return tuple(blocks)
+
     def stage_residuals_from_state(state):
         parts = []
         aspect = equilibrium_aspect_ratio_from_state(state=state, static=stage_static)
@@ -771,14 +946,22 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
                 )
                 parts.append(jnp.asarray([iota_floor_weight * iota_residual], dtype=jnp.float64))
         qs = stage_qs_eval(state)
-        parts.append(jnp.asarray(qs["residuals1d"], dtype=jnp.float64) * problem_cfg.qs_weight)
+        if problem_cfg.objective_kind == "qi":
+            parts.extend(residuals for residuals, _total in qi_field_quality_blocks(state, qs))
+        else:
+            parts.append(jnp.asarray(qs["residuals1d"], dtype=jnp.float64) * problem_cfg.qs_weight)
         return jnp.concatenate(parts)
 
     n_iota_terms = int(problem_cfg.target_iota is not None) + int(problem_cfg.iota_abs_min is not None)
     stage_residuals_from_state._n_non_qs = 1 + n_iota_terms
-    stage_residuals_from_state._qs_total_from_state = (
-        lambda state: float(problem_cfg.qs_weight) ** 2 * float(stage_qs_eval(state)["total"])
-    )
+
+    def stage_field_total_from_state(state):
+        qs = stage_qs_eval(state)
+        if problem_cfg.objective_kind == "qi":
+            return float(sum(float(total) for _residuals, total in qi_field_quality_blocks(state, qs)))
+        return float(problem_cfg.qs_weight) ** 2 * float(qs["total"])
+
+    stage_residuals_from_state._qs_total_from_state = stage_field_total_from_state
 
     stage_opt = vj.FixedBoundaryExactOptimizer(
         stage_static,
@@ -1071,6 +1254,7 @@ def _run_case(
     jax_platforms: str | None,
     diagnostic_budgets: bool = DIAGNOSTIC_BUDGETS,
     stellarator_asymmetric: bool = STELLARATOR_ASYMMETRIC,
+    qi_qp_preseed: bool | None = None,
 ) -> CaseResult:
     problem_cfg = _effective_problem_config(
         PROBLEM_CONFIGS[problem],
@@ -1081,8 +1265,11 @@ def _run_case(
         use_ess=use_ess,
         diagnostic_budgets=diagnostic_budgets,
     )
+    if problem_cfg.objective_kind == "qi" and qi_qp_preseed is not None:
+        problem_cfg = replace(problem_cfg, qi_preseed_qp=bool(qi_qp_preseed))
     cfg, indata = _load_problem(
         problem_cfg,
+        max_mode=max_mode,
         stellarator_asymmetric=stellarator_asymmetric,
     )
     jax_backend, jax_device_kind = _jax_runtime_info()
@@ -1145,6 +1332,34 @@ def _run_case(
         original_stage = (qp_opt, qp_params0, qp_result)
         qp_seed_stage = (qp_opt, qp_result["x"], qp_result)
 
+    if problem_cfg.objective_kind == "qi" and problem_cfg.qi_preseed_qi:
+        qi_seed_cfg = replace(
+            problem_cfg,
+            max_nfev=int(problem_cfg.qi_preseed_qi_nfev),
+            continuation_nfev=min(int(problem_cfg.continuation_nfev), int(problem_cfg.qi_preseed_qi_nfev)),
+            qi_mirror_weight=0.0,
+            qi_elongation_weight=0.0,
+            qi_preseed_qp=False,
+            qi_preseed_qi=False,
+        )
+        qi_seed_stage_results, prev_specs, params_stage, _qi_seed_opt, _qi_seed_params0, _qi_seed_result = (
+            _run_problem_stages(
+                problem_cfg=qi_seed_cfg,
+                problem="qi",
+                max_mode=max_mode,
+                use_ess=use_ess,
+                use_mode_continuation=use_mode_continuation,
+                solver_device=solver_device,
+                cfg=cfg,
+                indata=indata,
+                stage_label_prefix="QI preseed",
+                params_stage=params_stage,
+                prev_specs=prev_specs,
+                stellarator_asymmetric=stellarator_asymmetric,
+            )
+        )
+        stage_results.extend(qi_seed_stage_results)
+
     qi_or_qs_stage_results, prev_specs, params_stage, final_opt, final_params0, final_result = _run_problem_stages(
         problem_cfg=problem_cfg,
         problem=problem,
@@ -1168,6 +1383,7 @@ def _run_case(
 
     _save_case_outputs(output_dir, final_opt, final_params0, final_result["x"], final_result)
     bmag_stats = _bmag_lcfs_stats(output_dir / "wout_final.nc")
+    qi_stats = _qi_diagnostics_from_state(problem_cfg, final_opt, final_result.get("_state_final"))
     if original_stage is not None:
         original_opt, original_params0, original_result = original_stage
         original_opt.save_input(output_dir / "input.original", original_params0)
@@ -1214,8 +1430,11 @@ def _run_case(
         jax_platforms=jax_platforms,
         stellarator_asymmetric=bool(stellarator_asymmetric),
         asymmetry_seed=float(ASYMMETRIC_SEED if stellarator_asymmetric else 0.0),
+        qi_qp_preseed=(bool(problem_cfg.qi_preseed_qp) if problem_cfg.objective_kind == "qi" else None),
+        qi_qi_preseed=(bool(problem_cfg.qi_preseed_qi) if problem_cfg.objective_kind == "qi" else None),
         **asym_stats,
         **bmag_stats,
+        **qi_stats,
     )
 
 
@@ -1232,6 +1451,7 @@ def _worker(
     jax_platforms: str | None,
     diagnostic_budgets: bool,
     stellarator_asymmetric: bool,
+    qi_qp_preseed: bool | None,
 ):
     try:
         case_result = _run_case(
@@ -1246,6 +1466,7 @@ def _worker(
             jax_platforms=jax_platforms,
             diagnostic_budgets=diagnostic_budgets,
             stellarator_asymmetric=stellarator_asymmetric,
+            qi_qp_preseed=qi_qp_preseed,
         )
         Path(result_path).write_text(json.dumps(asdict(case_result), indent=2))
         stale_traceback = Path(output_dir) / "traceback.txt"
@@ -1267,6 +1488,7 @@ def _worker(
             jax_platforms=jax_platforms,
             stellarator_asymmetric=bool(stellarator_asymmetric),
             asymmetry_seed=float(ASYMMETRIC_SEED if stellarator_asymmetric else 0.0),
+            qi_qp_preseed=(bool(qi_qp_preseed) if problem == "qi" and qi_qp_preseed is not None else None),
         )
         Path(result_path).write_text(json.dumps(asdict(failed), indent=2))
         Path(output_dir, "traceback.txt").write_text(traceback.format_exc())
@@ -1284,6 +1506,22 @@ def _history_for(result: CaseResult) -> dict | None:
     if not hist_path.exists():
         return None
     return json.loads(hist_path.read_text())
+
+
+def _history_stage_segments(history: list[dict]) -> list[list[dict]]:
+    segments: list[list[dict]] = []
+    current: list[dict] = []
+    current_stage = object()
+    for item in history:
+        stage = item.get("stage", "")
+        if current and stage != current_stage:
+            segments.append(current)
+            current = []
+        current.append(item)
+        current_stage = stage
+    if current:
+        segments.append(current)
+    return segments
 
 
 def _style_publication():
@@ -1352,19 +1590,38 @@ def _plot_objective_panel(results: list[CaseResult], outpath_png: Path, outpath_
                 hist = _history_for(rec)
                 if hist is None:
                     continue
-                y = np.asarray([max(float(entry["objective"]), 1e-16) for entry in hist["history"]], dtype=float)
-                x = np.arange(len(y), dtype=int)
+                segments = []
+                start_index = 0
+                for segment in _history_stage_segments(hist["history"]):
+                    stop_index = start_index + len(segment)
+                    segments.append(
+                        (
+                            np.arange(start_index, stop_index, dtype=float),
+                            np.minimum.accumulate(
+                                np.asarray([max(float(entry["objective"]), 1e-16) for entry in segment], dtype=float)
+                            ),
+                        )
+                    )
+                    start_index = stop_index
                 linestyle = "-" if rec.success and not rec.crashed else "--"
                 linewidth = 2.6 if use_ess else 2.1
-                ax.semilogy(
-                    x,
-                    y,
-                    color=colors[use_ess],
-                    linestyle=linestyle,
-                    linewidth=linewidth,
-                    label=labels[use_ess] if (row == 0 and col == 0) else None,
-                )
-                ax.scatter(x[-1], y[-1], color=colors[use_ess], s=30, zorder=4)
+                first_segment = True
+                last_x = None
+                last_y = None
+                for x, y in segments:
+                    ax.semilogy(
+                        x,
+                        y,
+                        color=colors[use_ess],
+                        linestyle=linestyle,
+                        linewidth=linewidth,
+                        label=labels[use_ess] if first_segment and (row == 0 and col == 0) else None,
+                    )
+                    first_segment = False
+                    last_x = x[-1]
+                    last_y = y[-1]
+                if last_x is not None and last_y is not None:
+                    ax.scatter(last_x, last_y, color=colors[use_ess], s=30, zorder=4)
                 for boundary in hist.get("stage_boundaries", [])[:-1]:
                     ax.axvline(float(boundary), color="0.75", linestyle=":", linewidth=1.0, zorder=0)
 
@@ -1501,6 +1758,16 @@ def _write_summary_csv(results: list[CaseResult], path: Path) -> None:
                 "bmag_max",
                 "bmag_nonpositive_fraction",
                 "bmag_finite",
+                "qi_qp_preseed",
+                "qi_qi_preseed",
+                "qi_raw_total",
+                "qi_mirror_ratio_max",
+                "qi_mirror_ratio_target",
+                "qi_mirror_excess_max",
+                "qi_max_elongation",
+                "qi_elongation_target",
+                "qi_elongation_excess",
+                "qi_diagnostic_error",
                 "message",
                 "output_dir",
             ],
@@ -1527,6 +1794,15 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--problems", type=str, default=",".join(PROBLEMS))
     parser.add_argument("--modes", type=str, default=",".join(str(m) for m in MODES))
     parser.add_argument("--ess", choices=("both", "on", "off"), default="both")
+    parser.add_argument(
+        "--qi-qp-preseed",
+        choices=("both", "on", "off"),
+        default="on",
+        help=(
+            "For QI cases, choose whether to start from a same-mode QP preseed. "
+            "Use 'both' to compare QP-preseed and direct-QI starts."
+        ),
+    )
     parser.add_argument(
         "--stellarator-asymmetric",
         action="store_true",
@@ -1582,6 +1858,11 @@ def main() -> None:
         "on": (True,),
         "off": (False,),
     }[str(args.ess)]
+    qi_qp_preseed_options = {
+        "both": (True, False),
+        "on": (True,),
+        "off": (False,),
+    }[str(args.qi_qp_preseed)]
     symmetry_label = "asymmetric" if bool(args.stellarator_asymmetric) else "symmetric"
     case_timeout_s = None if args.case_timeout_s in (None, 0) else float(args.case_timeout_s)
     worker_jax_platforms_arg = str(args.worker_jax_platforms).strip()
@@ -1597,132 +1878,150 @@ def main() -> None:
     results: list[CaseResult] = []
 
     for problem in problems:
-        for max_mode in modes:
-            for use_ess in ess_options:
-                output_base = output_root / backend_label
-                if bool(args.stellarator_asymmetric):
-                    output_base = output_base / symmetry_label
-                output_dir = output_base / args.policy / problem / f"mode{max_mode}" / _ess_label(use_ess)
-                result_path = output_dir / "case_result.json"
-                if result_path.exists() and (not args.rerun):
-                    record = json.loads(result_path.read_text())
-                    if "backend" not in record:
-                        record["backend"] = backend_label
-                    result = CaseResult(**record)
-                    if bool(result.success) and not bool(result.crashed):
-                        results.append(result)
+        problem_qi_preseed_options: tuple[bool | None, ...] = (
+            qi_qp_preseed_options if problem == "qi" else (None,)
+        )
+        for qi_qp_preseed in problem_qi_preseed_options:
+            for max_mode in modes:
+                for use_ess in ess_options:
+                    output_base = output_root / backend_label
+                    if bool(args.stellarator_asymmetric):
+                        output_base = output_base / symmetry_label
+                    output_dir = output_base / args.policy / problem
+                    if problem == "qi":
+                        output_dir = output_dir / ("qp_preseed" if qi_qp_preseed else "no_qp_preseed")
+                    output_dir = output_dir / f"mode{max_mode}" / _ess_label(use_ess)
+                    case_label = (
+                        f"{backend_label} {symmetry_label} {args.policy} {problem}"
+                        f"{' qp_preseed=' + str(qi_qp_preseed) if problem == 'qi' else ''} "
+                        f"mode={max_mode} ess={use_ess}"
+                    )
+                    result_path = output_dir / "case_result.json"
+                    if result_path.exists() and (not args.rerun):
+                        record = json.loads(result_path.read_text())
+                        if "backend" not in record:
+                            record["backend"] = backend_label
+                        result = CaseResult(**record)
+                        if not bool(result.crashed):
+                            results.append(result)
+                            print(
+                                f"[{case_label}] skip existing success={result.success} "
+                                f"crashed={result.crashed} objective={result.objective_final}",
+                                flush=True,
+                            )
+                            continue
                         print(
-                            f"[{backend_label} {symmetry_label} {args.policy} {problem} mode={max_mode} ess={use_ess}] "
-                            f"skip existing success={result.success} crashed={result.crashed} "
-                            f"objective={result.objective_final}",
+                            f"[{case_label}] rerun crashed existing success={result.success} "
+                            f"crashed={result.crashed}",
                             flush=True,
                         )
-                        continue
+                        result_path.unlink()
+                    if result_path.exists() and args.rerun:
+                        result_path.unlink()
+                    stale_traceback = output_dir / "traceback.txt"
+                    if stale_traceback.exists() and (args.rerun or not result_path.exists()):
+                        stale_traceback.unlink()
+                    proc = ctx.Process(
+                        target=_worker,
+                        args=(
+                            problem,
+                            max_mode,
+                            use_ess,
+                            str(output_dir),
+                            str(result_path),
+                            use_mode_continuation,
+                            args.policy,
+                            backend_label,
+                            solver_device,
+                            worker_jax_platforms,
+                            bool(args.diagnostic_budgets),
+                            bool(args.stellarator_asymmetric),
+                            qi_qp_preseed,
+                        ),
+                    )
+                    case_t0 = time.perf_counter()
+                    old_jax_platforms = os.environ.get("JAX_PLATFORMS")
+                    if worker_jax_platforms is not None:
+                        os.environ["JAX_PLATFORMS"] = worker_jax_platforms
+                    try:
+                        proc.start()
+                    finally:
+                        if old_jax_platforms is None:
+                            os.environ.pop("JAX_PLATFORMS", None)
+                        else:
+                            os.environ["JAX_PLATFORMS"] = old_jax_platforms
+                    proc.join(timeout=case_timeout_s)
+                    elapsed_s = time.perf_counter() - case_t0
+                    timed_out = proc.is_alive()
+                    if timed_out:
+                        proc.terminate()
+                        proc.join(timeout=10.0)
+                        if proc.is_alive():
+                            try:
+                                os.kill(proc.pid, 9)
+                            except (OSError, TypeError):
+                                pass
+                            proc.join()
+
+                    if result_path.exists():
+                        result = CaseResult(**json.loads(result_path.read_text()))
+                        result_needs_write = _set_missing_wall_time(result, elapsed_s)
+                    elif timed_out:
+                        result = CaseResult(
+                            backend=backend_label,
+                            problem=problem,
+                            max_mode=max_mode,
+                            use_ess=bool(use_ess),
+                            success=False,
+                            crashed=True,
+                            message=f"worker timed out after {case_timeout_s:.1f} s",
+                            policy=args.policy,
+                            output_dir=str(output_dir),
+                            solver_device=solver_device,
+                            jax_platforms=worker_jax_platforms,
+                            total_wall_time_s=elapsed_s,
+                            stellarator_asymmetric=bool(args.stellarator_asymmetric),
+                            asymmetry_seed=float(ASYMMETRIC_SEED if args.stellarator_asymmetric else 0.0),
+                            qi_qp_preseed=(
+                                bool(qi_qp_preseed) if problem == "qi" and qi_qp_preseed is not None else None
+                            ),
+                        )
+                        result_needs_write = True
+                    else:
+                        result = CaseResult(
+                            backend=backend_label,
+                            problem=problem,
+                            max_mode=max_mode,
+                            use_ess=bool(use_ess),
+                            success=False,
+                            crashed=True,
+                            message=f"worker exit code {proc.exitcode} without result file",
+                            policy=args.policy,
+                            output_dir=str(output_dir),
+                            solver_device=solver_device,
+                            jax_platforms=worker_jax_platforms,
+                            total_wall_time_s=elapsed_s,
+                            stellarator_asymmetric=bool(args.stellarator_asymmetric),
+                            asymmetry_seed=float(ASYMMETRIC_SEED if args.stellarator_asymmetric else 0.0),
+                            qi_qp_preseed=(
+                                bool(qi_qp_preseed) if problem == "qi" and qi_qp_preseed is not None else None
+                            ),
+                        )
+                        result_needs_write = True
+                    if proc.exitcode not in (0, None):
+                        result.crashed = True
+                        if "worker exit code" not in result.message:
+                            result.message = f"exit code {proc.exitcode}; {result.message}"
+                        result_needs_write = True
+                    if result_needs_write or not result_path.exists():
+                        output_dir.mkdir(parents=True, exist_ok=True)
+                        result_path.write_text(json.dumps(asdict(result), indent=2))
+                    results.append(result)
                     print(
-                        f"[{backend_label} {symmetry_label} {args.policy} {problem} mode={max_mode} ess={use_ess}] "
-                        f"rerun failed existing success={result.success} crashed={result.crashed}",
+                        f"[{case_label}] success={result.success} crashed={result.crashed} "
+                        f"objective={result.objective_final}",
                         flush=True,
                     )
-                    result_path.unlink()
-                if result_path.exists() and args.rerun:
-                    result_path.unlink()
-                stale_traceback = output_dir / "traceback.txt"
-                if stale_traceback.exists() and (args.rerun or not result_path.exists()):
-                    stale_traceback.unlink()
-                proc = ctx.Process(
-                    target=_worker,
-                    args=(
-                        problem,
-                        max_mode,
-                        use_ess,
-                        str(output_dir),
-                        str(result_path),
-                        use_mode_continuation,
-                        args.policy,
-                        backend_label,
-                        solver_device,
-                        worker_jax_platforms,
-                        bool(args.diagnostic_budgets),
-                        bool(args.stellarator_asymmetric),
-                    ),
-                )
-                case_t0 = time.perf_counter()
-                old_jax_platforms = os.environ.get("JAX_PLATFORMS")
-                if worker_jax_platforms is not None:
-                    os.environ["JAX_PLATFORMS"] = worker_jax_platforms
-                try:
-                    proc.start()
-                finally:
-                    if old_jax_platforms is None:
-                        os.environ.pop("JAX_PLATFORMS", None)
-                    else:
-                        os.environ["JAX_PLATFORMS"] = old_jax_platforms
-                proc.join(timeout=case_timeout_s)
-                elapsed_s = time.perf_counter() - case_t0
-                timed_out = proc.is_alive()
-                if timed_out:
-                    proc.terminate()
-                    proc.join(timeout=10.0)
-                    if proc.is_alive():
-                        try:
-                            os.kill(proc.pid, 9)
-                        except (OSError, TypeError):
-                            pass
-                        proc.join()
-
-                if result_path.exists():
-                    result = CaseResult(**json.loads(result_path.read_text()))
-                    result_needs_write = _set_missing_wall_time(result, elapsed_s)
-                elif timed_out:
-                    result = CaseResult(
-                        backend=backend_label,
-                        problem=problem,
-                        max_mode=max_mode,
-                        use_ess=bool(use_ess),
-                        success=False,
-                        crashed=True,
-                        message=f"worker timed out after {case_timeout_s:.1f} s",
-                        policy=args.policy,
-                        output_dir=str(output_dir),
-                        solver_device=solver_device,
-                        jax_platforms=worker_jax_platforms,
-                        total_wall_time_s=elapsed_s,
-                        stellarator_asymmetric=bool(args.stellarator_asymmetric),
-                        asymmetry_seed=float(ASYMMETRIC_SEED if args.stellarator_asymmetric else 0.0),
-                    )
-                    result_needs_write = True
-                else:
-                    result = CaseResult(
-                        backend=backend_label,
-                        problem=problem,
-                        max_mode=max_mode,
-                        use_ess=bool(use_ess),
-                        success=False,
-                        crashed=True,
-                        message=f"worker exit code {proc.exitcode} without result file",
-                        policy=args.policy,
-                        output_dir=str(output_dir),
-                        solver_device=solver_device,
-                        jax_platforms=worker_jax_platforms,
-                        total_wall_time_s=elapsed_s,
-                        stellarator_asymmetric=bool(args.stellarator_asymmetric),
-                        asymmetry_seed=float(ASYMMETRIC_SEED if args.stellarator_asymmetric else 0.0),
-                    )
-                    result_needs_write = True
-                if proc.exitcode not in (0, None):
-                    result.crashed = True
-                    if "worker exit code" not in result.message:
-                        result.message = f"exit code {proc.exitcode}; {result.message}"
-                    result_needs_write = True
-                if result_needs_write or not result_path.exists():
-                    output_dir.mkdir(parents=True, exist_ok=True)
-                    result_path.write_text(json.dumps(asdict(result), indent=2))
-                results.append(result)
-                print(
-                    f"[{backend_label} {symmetry_label} {args.policy} {problem} mode={max_mode} ess={use_ess}] "
-                    f"success={result.success} crashed={result.crashed} "
-                    f"objective={result.objective_final}"
-                )
 
     summary = [asdict(r) for r in results]
     name_suffix = (

@@ -60,30 +60,6 @@ freeb = vj.run_free_boundary("input.cth_like_free_bdy_lasym_small")
 vj.plot_wout("wout_nfp4_QH_warm_start.nc", outdir="figures/")
 ```
 
-Run tests:
-
-```bash
-pytest -q
-```
-
-## Validation and tests
-
-Required CI is split into fast unit/physics kernels, bounded physics smoke,
-docs/build checks, and parity-manifest dry runs. The required fast suite is
-kept short enough for routine development while the manual/nightly jobs cover
-larger VMEC2000 and GPU matrices.
-
-<p align="center">
-  <img src="docs/_static/figures/readme_validation_status.png" width="980" />
-</p>
-
-Recreate the local coverage gate and this panel:
-
-```bash
-pytest -q -m "not full and not vmec2000" --cov=vmec_jax --cov-report=term-missing:skip-covered --cov-fail-under=58
-python tools/diagnostics/readme_validation_panel.py
-```
-
 ## Choosing CPU or GPU
 
 `vmec_jax` follows the JAX backend you select. If you installed CPU-only JAX,
@@ -179,21 +155,25 @@ All figures below use the same **single-grid** run settings: `NS_ARRAY=151`, `NI
 
 The fixed-boundary optimization examples solve VMEC equilibria and differentiate
 the objective with the exact discrete-adjoint/tape path. The README only shows
-the current best CPU, `LASYM = F` result for each target; the full CPU/GPU
-policy matrix, LASYM panels, finite-beta examples, and all tables live in the
+one current best `LASYM = F` result for each target; the full CPU/GPU policy
+matrix, LASYM panels, finite-beta examples, QI constraint sweep, and all tables
+live in the
 [optimization guide](docs/optimization.rst) and
 [optimization sweep results](docs/optimization_sweep_results.rst).
 
 Each row below shows the original deck LCFS before any `max_mode=1`
-optimization work, the final LCFS, total objective history, and the final
+optimization work, the final LCFS, per-stage objective history, and the final
 outer-surface `|B|` in Boozer coordinates computed with `booz_xform_jax`.
+The QI row uses the constrained QI objective: optional QP preseed, QI-only
+preseed, then QI residual plus mirror-ratio and LCFS-elongation penalties.  Its
+selection is based on the QI physics gates, not only on the scalar objective.
 
-| Target | Policy | max_mode | ESS | Final J | Aspect | Iota | CPU wall time |
-|---|---|---:|---|---:|---:|---:|---:|
-| QA | direct | 3 | yes | 3.13e-05 | 6.000 | 0.4102 | 19.3 min |
-| QH | continuation | 4 | yes | 5.87e-04 | 7.000 | -1.2182 | 18.6 min |
-| QP | continuation | 4 | no | 3.65e-02 | 7.002 | -0.4218 | 5.0 min |
-| QI | direct | 2 | yes | 4.90e-03 | 7.001 | -0.5808 | 1.4 min |
+| Target | Backend | Policy | max_mode | ESS | QP preseed | Final J | QI raw | Mirror | Elong. | Aspect | Iota | Wall time |
+|---|---|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|
+| QA | CPU | direct | 3 | yes |  | 3.13e-05 |  |  |  | 6.000 | 0.4102 | 19.3 min |
+| QH | CPU | continuation | 3 | no |  | 1.37e-03 |  |  |  | 7.000 |  | 10.7 min |
+| QP | CPU | direct | 2 | yes |  | 3.74e-02 |  |  |  | 7.004 | -0.4037 | 1.1 min |
+| QI | CPU | direct | 1 | yes | no | 5.66e-02 | 5.56e-02 | 0.213 | 7.88 | 7.006 | 0.4194 | 1.1 min |
 
 <p align="center">
   <img src="docs/_static/figures/readme_best_optimization_qa.png" width="980" />
@@ -211,13 +191,13 @@ outer-surface `|B|` in Boozer coordinates computed with `booz_xform_jax`.
   <img src="docs/_static/figures/readme_best_optimization_qi.png" width="980" />
 </p>
 
-Recreate the four CPU runs:
+Recreate the four displayed runs:
 
 ```bash
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa --modes 3 --ess on
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qh --modes 4 --ess on
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qp --modes 4 --ess off
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qi --modes 2 --ess on
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qh --modes 3 --ess off
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qp --modes 2 --ess on
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qi --modes 1 --ess on --qi-qp-preseed off
 ```
 
 Regenerate the README panels and the compact CSV used for the table:

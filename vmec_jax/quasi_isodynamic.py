@@ -25,6 +25,10 @@ import numpy as np
 from ._compat import jnp
 
 __all__ = [
+    "boundary_max_elongation_from_rz",
+    "max_elongation_penalty_from_state",
+    "mirror_ratio_penalty_from_boozer_modes",
+    "mirror_ratio_penalty_from_boozer_output",
     "quasi_isodynamic_residual_from_boozer_modes",
     "quasi_isodynamic_residual_from_boozer_output",
     "quasi_isodynamic_residual_from_state",
@@ -58,12 +62,282 @@ def _as_weight_array(weights, nsurf: int) -> jnp.ndarray:
     return jnp.asarray(list(weights), dtype=jnp.float64)
 
 
+def _smooth_reduce_max(values, *, axis=None, softness: float = 0.0):
+    """Return a hard or smooth maximum with stable normalization."""
+    values = jnp.asarray(values)
+    if float(softness) <= 0.0:
+        return jnp.max(values, axis=axis)
+    eps = jnp.asarray(float(softness), dtype=values.dtype)
+    vmax = jnp.max(values, axis=axis, keepdims=True)
+    shifted = jnp.exp((values - vmax) / eps)
+    out = jnp.squeeze(vmax, axis=axis) + eps * jnp.log(jnp.mean(shifted, axis=axis))
+    return out
+
+
+def _smooth_reduce_min(values, *, axis=None, softness: float = 0.0):
+    return -_smooth_reduce_max(-jnp.asarray(values), axis=axis, softness=softness)
+
+
+def _positive_part(value, *, softness: float = 0.0):
+    value = jnp.asarray(value)
+    if float(softness) <= 0.0:
+        return jnp.maximum(value, jnp.asarray(0.0, dtype=value.dtype))
+    eps = jnp.asarray(float(softness), dtype=value.dtype)
+    return eps * jnp.log1p(jnp.exp(value / eps))
+
+
 def _nearest_half_mesh_indices(surfaces: Iterable[float], *, n_half: int) -> np.ndarray:
     if int(n_half) < 1:
         raise ValueError("QI residual requires at least one half-mesh Boozer surface")
     surf = np.asarray(list(surfaces), dtype=float)
     s_half = 0.5 * (np.arange(int(n_half), dtype=float) + np.arange(1, int(n_half) + 1, dtype=float)) / float(n_half)
     return np.asarray([int(np.argmin(np.abs(s_half - value))) for value in surf], dtype=np.int32)
+
+
+def mirror_ratio_penalty_from_boozer_modes(
+    *,
+    bmnc_b,
+    xm_b,
+    xn_b,
+    nfp: int,
+    bmns_b=None,
+    threshold: float = 0.21,
+    weights: Iterable[float] | None = None,
+    ntheta: int = 128,
+    nphi: int = 128,
+    phimin: float = 0.0,
+    smooth_extrema: float = 0.0,
+    smooth_penalty: float = 0.0,
+):
+    """Penalize the maximum mirror ratio from Boozer ``|B|`` modes.
+
+    This is the JAX-native analogue of the ``MirrorRatioPen`` diagnostic used
+    in the reference ``omnigenity_optimization`` QI script.  For every supplied
+    Boozer surface it evaluates ``|B|(theta_B, phi_B)`` on a uniform grid and
+    computes
+
+    ``M = (Bmax - Bmin) / (Bmax + Bmin)``.
+
+    The least-squares residual is ``max(0, M - threshold)`` per surface.  Set
+    ``smooth_extrema`` and/or ``smooth_penalty`` to positive values when a fully
+    smooth softmax/softplus surrogate is preferred.
+    """
+    _require_jax()
+
+    bmnc_b = jnp.asarray(bmnc_b, dtype=jnp.float64)
+    if bmnc_b.ndim == 1:
+        bmnc_b = bmnc_b[None, :]
+    bmns_b = jnp.zeros_like(bmnc_b) if bmns_b is None else jnp.asarray(bmns_b, dtype=jnp.float64)
+    if bmns_b.ndim == 1:
+        bmns_b = bmns_b[None, :]
+    xm_b = jnp.asarray(xm_b, dtype=jnp.float64)
+    xn_b = jnp.asarray(xn_b, dtype=jnp.float64)
+    if int(bmnc_b.shape[1]) != int(xm_b.shape[0]) or int(xm_b.shape[0]) != int(xn_b.shape[0]):
+        raise ValueError("Boozer mode arrays must have the same mode dimension as bmnc_b")
+    if bmns_b.shape != bmnc_b.shape:
+        raise ValueError("bmns_b must have the same shape as bmnc_b")
+    if int(ntheta) < 4 or int(nphi) < 4:
+        raise ValueError("mirror-ratio penalty requires ntheta >= 4 and nphi >= 4")
+
+    nsurf = int(bmnc_b.shape[0])
+    weights_arr = _as_weight_array(weights, nsurf)
+    if int(weights_arr.shape[0]) != nsurf:
+        raise ValueError("weights must have the same length as the number of Boozer surfaces")
+
+    dtype = bmnc_b.dtype
+    theta = jnp.linspace(0.0, 2.0 * jnp.pi, int(ntheta), endpoint=False, dtype=dtype)
+    phi = jnp.linspace(
+        float(phimin),
+        float(phimin) + 2.0 * jnp.pi / float(nfp),
+        int(nphi),
+        endpoint=False,
+        dtype=dtype,
+    )
+    angle = theta[None, :, None, None] * xm_b[None, None, None, :] - phi[None, None, :, None] * xn_b[
+        None, None, None, :
+    ]
+    bmag = jnp.sum(
+        bmnc_b[:, None, None, :] * jnp.cos(angle) + bmns_b[:, None, None, :] * jnp.sin(angle),
+        axis=-1,
+    )
+    bmax = _smooth_reduce_max(bmag, axis=(1, 2), softness=float(smooth_extrema))
+    bmin = _smooth_reduce_min(bmag, axis=(1, 2), softness=float(smooth_extrema))
+    tiny = jnp.asarray(jnp.finfo(dtype).tiny, dtype=dtype)
+    # Truncated Boozer |B| spectra can undershoot and produce nonpositive
+    # pointwise values during intermediate optimizer steps.  The physical
+    # mirror-ratio target should then become a large finite penalty, not an
+    # Inf/NaN that breaks the trust-region linear algebra.
+    bmin_positive = jnp.maximum(bmin, tiny)
+    denom = jnp.maximum(bmax + bmin_positive, tiny)
+    mirror_ratio = (bmax - bmin_positive) / denom
+    penalty = _positive_part(mirror_ratio - float(threshold), softness=float(smooth_penalty))
+    residuals1d = penalty * jnp.sqrt(weights_arr)
+    total = jnp.sum(residuals1d * residuals1d)
+    return {
+        "residuals1d": residuals1d,
+        "total": total,
+        "penalty": penalty,
+        "mirror_ratio": mirror_ratio,
+        "bmax": bmax,
+        "bmin": bmin,
+        "bmag": bmag,
+        "theta": theta,
+        "phi": phi,
+        "threshold": jnp.asarray(float(threshold), dtype=dtype),
+    }
+
+
+def mirror_ratio_penalty_from_boozer_output(
+    booz,
+    *,
+    nfp: int | None = None,
+    threshold: float = 0.21,
+    weights: Iterable[float] | None = None,
+    ntheta: int = 128,
+    nphi: int = 128,
+    phimin: float = 0.0,
+    smooth_extrema: float = 0.0,
+    smooth_penalty: float = 0.0,
+):
+    """Evaluate :func:`mirror_ratio_penalty_from_boozer_modes` from Boozer output."""
+    nfp_local = int(nfp) if nfp is not None else int(np.asarray(booz["nfp_b"]))
+    bmns_b = booz.get("bmns_b")
+    return mirror_ratio_penalty_from_boozer_modes(
+        bmnc_b=booz["bmnc_b"],
+        bmns_b=bmns_b,
+        xm_b=booz["ixm_b"],
+        xn_b=booz["ixn_b"],
+        nfp=nfp_local,
+        threshold=threshold,
+        weights=weights,
+        ntheta=ntheta,
+        nphi=nphi,
+        phimin=phimin,
+        smooth_extrema=smooth_extrema,
+        smooth_penalty=smooth_penalty,
+    )
+
+
+def boundary_max_elongation_from_rz(
+    R,
+    Z,
+    *,
+    phi=None,
+    smooth_extrema: float = 0.0,
+):
+    """Estimate maximum LCFS cross-section elongation from ``R(theta, phi), Z``.
+
+    The reference SIMSOPT QI script computes an effective elongation by solving
+    for normal-plane cross-sections and fitting an ellipse from perimeter and
+    area.  That path uses root finding and is not a good JAX objective.  This
+    differentiable proxy computes, for each fixed toroidal angle, the covariance
+    of the 3-D boundary curve and returns ``sqrt(lambda_major/lambda_minor)``
+    using the two largest covariance eigenvalues.  It tracks the same geometric
+    failure mode (very stretched boundary cross-sections) while remaining cheap
+    and compatible with autodiff.
+    """
+    _require_jax()
+
+    R = jnp.asarray(R, dtype=jnp.float64)
+    Z = jnp.asarray(Z, dtype=jnp.float64)
+    if R.shape != Z.shape or R.ndim != 2:
+        raise ValueError("R and Z must both have shape (ntheta, nphi)")
+    nphi = int(R.shape[1])
+    dtype = R.dtype
+    if phi is None:
+        phi_arr = jnp.linspace(0.0, 2.0 * jnp.pi, nphi, endpoint=False, dtype=dtype)
+    else:
+        phi_arr = jnp.asarray(phi, dtype=dtype)
+        if int(phi_arr.shape[0]) != nphi:
+            raise ValueError("phi must have one value per toroidal grid point")
+
+    X = R * jnp.cos(phi_arr)[None, :]
+    Y = R * jnp.sin(phi_arr)[None, :]
+    points = jnp.stack([X, Y, Z], axis=-1)  # (ntheta, nphi, 3)
+    points = jnp.swapaxes(points, 0, 1)  # (nphi, ntheta, 3)
+    centered = points - jnp.mean(points, axis=1, keepdims=True)
+    cov = jnp.einsum("pti,ptj->pij", centered, centered) / jnp.asarray(R.shape[0], dtype=dtype)
+    eigvals = jnp.linalg.eigvalsh(cov)
+    tiny = jnp.asarray(jnp.finfo(dtype).tiny, dtype=dtype)
+    elongation = jnp.sqrt(jnp.maximum(eigvals[:, -1], tiny) / jnp.maximum(eigvals[:, -2], tiny))
+    max_elongation = _smooth_reduce_max(elongation, axis=0, softness=float(smooth_extrema))
+    return {
+        "max_elongation": max_elongation,
+        "elongation": elongation,
+        "phi": phi_arr,
+    }
+
+
+def max_elongation_penalty_from_state(
+    *,
+    state,
+    static,
+    threshold: float = 8.0,
+    ntheta: int = 64,
+    nphi: int = 24,
+    s_index: int = -1,
+    smooth_extrema: float = 0.0,
+    smooth_penalty: float = 0.0,
+):
+    """Penalize excessive LCFS elongation from a solved VMEC state."""
+    _require_jax()
+    if int(ntheta) < 4 or int(nphi) < 3:
+        raise ValueError("elongation penalty requires ntheta >= 4 and nphi >= 3")
+
+    from .fourier import build_helical_basis, eval_fourier
+    from .grids import AngleGrid
+    from .state import VMECState
+    from .vmec_parity import vmec_m1_internal_to_physical_signed
+
+    nfp = int(static.cfg.nfp)
+    # Keep the angular grid host-static. ``build_helical_basis`` intentionally
+    # uses NumPy to cache static Fourier tables; feeding it traced JAX arrays
+    # would fail when this objective is evaluated inside the optimizer JIT.
+    theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta), endpoint=False, dtype=float)
+    phi = np.linspace(0.0, 2.0 * np.pi / float(nfp), int(nphi), endpoint=False, dtype=float)
+    zeta = phi * float(nfp)
+    grid = AngleGrid(theta=theta, zeta=zeta, nfp=nfp)
+    basis = build_helical_basis(static.modes, grid, cache=False)
+
+    cfg = static.cfg
+    lconm1 = bool(getattr(cfg, "lconm1", True))
+    lthreed = bool(getattr(cfg, "lthreed", int(getattr(cfg, "ntor", 0)) > 0))
+    lasym = bool(getattr(cfg, "lasym", False))
+    state_use = state
+    if lconm1 and (lthreed or lasym) and int(getattr(cfg, "mpol", 0)) > 1:
+        Rcos, Zsin, Rsin, Zcos = vmec_m1_internal_to_physical_signed(
+            Rcos=state.Rcos,
+            Zsin=state.Zsin,
+            Rsin=state.Rsin,
+            Zcos=state.Zcos,
+            modes=static.modes,
+            lthreed=lthreed,
+            lasym=lasym,
+            lconm1=lconm1,
+        )
+        state_use = VMECState(
+            layout=state.layout,
+            Rcos=Rcos,
+            Rsin=Rsin,
+            Zcos=Zcos,
+            Zsin=Zsin,
+            Lcos=state.Lcos,
+            Lsin=state.Lsin,
+        )
+
+    s_idx = int(s_index)
+    R = eval_fourier(state_use.Rcos[s_idx], state_use.Rsin[s_idx], basis, coeffs_internal=True)
+    Z = eval_fourier(state_use.Zcos[s_idx], state_use.Zsin[s_idx], basis, coeffs_internal=True)
+    out = boundary_max_elongation_from_rz(R, Z, phi=phi, smooth_extrema=smooth_extrema)
+    penalty = _positive_part(out["max_elongation"] - float(threshold), softness=float(smooth_penalty))
+    residuals1d = jnp.asarray([penalty], dtype=jnp.float64)
+    return {
+        **out,
+        "residuals1d": residuals1d,
+        "total": jnp.sum(residuals1d * residuals1d),
+        "penalty": penalty,
+        "threshold": jnp.asarray(float(threshold), dtype=jnp.float64),
+    }
 
 
 def quasi_isodynamic_residual_from_boozer_modes(
@@ -314,4 +588,9 @@ def quasi_isodynamic_residual_from_state(
         profile_weight=profile_weight,
         phimin=phimin,
     )
-    return {**out, "surfaces": surface_values, "surface_indices": jnp.asarray(surface_indices)}
+    return {
+        **out,
+        "booz": booz,
+        "surfaces": surface_values,
+        "surface_indices": jnp.asarray(surface_indices),
+    }
