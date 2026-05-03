@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -50,6 +52,44 @@ def test_qi_boozer_mode_residual_rejects_single_helicity_phase_shift():
 
     assert float(np.asarray(out["total"])) > 1.0e-4
     assert np.linalg.norm(np.asarray(out["profile_residuals1d"])) > 0.0
+
+
+def test_qi_branch_width_residual_rejects_misaligned_wells():
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import jnp
+    from vmec_jax.quasi_isodynamic import quasi_isodynamic_residual_from_boozer_modes
+
+    qi_like = quasi_isodynamic_residual_from_boozer_modes(
+        bmnc_b=jnp.asarray([[1.0, 0.1]]),
+        xm_b=jnp.asarray([0, 0]),
+        xn_b=jnp.asarray([0, 1]),
+        iota_b=jnp.asarray([0.4]),
+        nfp=1,
+        nphi=33,
+        nalpha=9,
+        n_bounce=7,
+        width_weight=0.0,
+        branch_width_weight=1.0,
+        profile_weight=0.0,
+    )
+    qh_like = quasi_isodynamic_residual_from_boozer_modes(
+        bmnc_b=jnp.asarray([[1.0, 0.1]]),
+        xm_b=jnp.asarray([0, 1]),
+        xn_b=jnp.asarray([0, 1]),
+        iota_b=jnp.asarray([0.4]),
+        nfp=1,
+        nphi=33,
+        nalpha=9,
+        n_bounce=7,
+        width_weight=0.0,
+        branch_width_weight=1.0,
+        profile_weight=0.0,
+    )
+
+    np.testing.assert_allclose(np.asarray(qi_like["total"]), 0.0, atol=1.0e-28, rtol=0.0)
+    assert float(np.asarray(qh_like["total"])) > 1.0e-4
+    assert np.asarray(qh_like["branch_width_residuals1d"]).shape == (9 * 7,)
 
 
 def test_qi_boozer_mode_residual_is_differentiable():
@@ -104,6 +144,9 @@ def test_qi_boozer_output_wrapper_matches_mode_residual_regression():
         nalpha=7,
         n_bounce=5,
         softness=1.0e-2,
+        width_weight=0.7,
+        branch_width_weight=0.2,
+        branch_width_softness=2.0e-2,
         profile_weight=0.8,
     )
     direct = quasi_isodynamic_residual_from_boozer_modes(**kwargs)
@@ -120,11 +163,14 @@ def test_qi_boozer_output_wrapper_matches_mode_residual_regression():
         nalpha=kwargs["nalpha"],
         n_bounce=kwargs["n_bounce"],
         softness=kwargs["softness"],
+        width_weight=kwargs["width_weight"],
+        branch_width_weight=kwargs["branch_width_weight"],
+        branch_width_softness=kwargs["branch_width_softness"],
         profile_weight=kwargs["profile_weight"],
     )
 
     np.testing.assert_allclose(np.asarray(direct["residuals1d"]), np.asarray(wrapped["residuals1d"]))
-    np.testing.assert_allclose(np.asarray(wrapped["total"]), 0.4720832188870966, rtol=1.0e-12, atol=1.0e-14)
+    np.testing.assert_allclose(np.asarray(wrapped["total"]), 0.31178185777401074, rtol=1.0e-12, atol=1.0e-14)
     assert np.asarray(wrapped["width_residuals1d"]).shape == (2 * 7 * 5,)
     assert np.asarray(wrapped["profile_residuals1d"]).shape == (2 * 21 * 7,)
 
@@ -244,3 +290,71 @@ def test_qi_state_residual_smoke(load_case_qh_warm_start):
     assert np.asarray(out["profile_residuals1d"]).shape == (17 * 7,)
     assert np.asarray(out["residuals1d"]).shape == (7 * 5 + 17 * 7,)
     assert np.isfinite(np.asarray(out["total"]))
+
+
+def test_qi_lgradb_penalty_from_state_smoke(load_case_qh_warm_start):
+    pytest.importorskip("jax")
+
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.quasi_isodynamic import lgradb_penalty_from_state
+
+    _cfg, indata, static, _boundary, state = load_case_qh_warm_start
+    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state, static).sqrtg), axis_index=1))
+    out = lgradb_penalty_from_state(
+        state=state,
+        static=static,
+        indata=indata,
+        signgs=signgs,
+        threshold=0.30,
+        ntheta=5,
+        nphi=5,
+    )
+
+    assert np.asarray(out["residuals1d"]).shape == (25,)
+    assert np.asarray(out["L_grad_B"]).shape == (5, 5)
+    assert np.all(np.isfinite(np.asarray(out["L_grad_B"])))
+    assert float(np.asarray(out["min_L_grad_B"])) > 0.0
+
+    loose = lgradb_penalty_from_state(
+        state=state,
+        static=static,
+        indata=indata,
+        signgs=signgs,
+        threshold=1.0e-8,
+        ntheta=5,
+        nphi=5,
+    )
+    np.testing.assert_allclose(np.asarray(loose["total"]), 0.0, atol=1.0e-14)
+
+
+def test_qi_lgradb_penalty_from_state_is_differentiable(load_case_qh_warm_start):
+    pytest.importorskip("jax")
+
+    import jax
+
+    from vmec_jax._compat import jnp
+    from vmec_jax.field import signgs_from_sqrtg
+    from vmec_jax.geom import eval_geom
+    from vmec_jax.quasi_isodynamic import lgradb_penalty_from_state
+
+    _cfg, indata, static, _boundary, state = load_case_qh_warm_start
+    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state, static).sqrtg), axis_index=1))
+    Rcos0 = jnp.asarray(state.Rcos, dtype=jnp.float64)
+
+    def objective(scale):
+        trial_state = replace(state, Rcos=Rcos0 * scale)
+        out = lgradb_penalty_from_state(
+            state=trial_state,
+            static=static,
+            indata=indata,
+            signgs=signgs,
+            threshold=0.30,
+            ntheta=5,
+            nphi=5,
+        )
+        return out["total"]
+
+    value, grad = jax.value_and_grad(objective)(jnp.asarray(1.0, dtype=jnp.float64))
+    assert np.isfinite(np.asarray(value))
+    assert np.isfinite(np.asarray(grad))

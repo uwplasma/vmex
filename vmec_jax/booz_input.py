@@ -29,9 +29,6 @@ def _equilibrium_flux_profiles(
     profiles_half: dict | None,
 ):
     """Build Boozer inputs from equilibrium-consistent profiles when needed."""
-    if flux is not None and profiles_half is not None:
-        return flux, profiles_half
-
     s_full = np.asarray(static.s)
     if int(s_full.shape[0]) < 2:
         s_half = s_full
@@ -39,7 +36,17 @@ def _equilibrium_flux_profiles(
         s_half = np.concatenate([s_full[:1], 0.5 * (s_full[1:] + s_full[:-1])], axis=0)
 
     flux_local = flux if flux is not None else flux_profiles_from_indata(indata, s_full, signgs=signgs)
-    prof_local = profiles_half if profiles_half is not None else eval_profiles(indata, s_half)
+    # ``profiles_half`` is often used by optimization objectives to override
+    # only pressure.  Do not treat it as a complete profile dictionary: Boozer
+    # needs the equilibrium iota/current profiles too.  Merge caller-provided
+    # values over the VMEC defaults so partial overrides cannot silently zero
+    # iota and make field-line objectives evaluate the wrong trajectories.
+    prof_default = eval_profiles(indata, s_half)
+    if profiles_half is None:
+        prof_local = prof_default
+    else:
+        prof_local = dict(prof_default)
+        prof_local.update(profiles_half)
     pressure_local = prof_local.get("pressure", np.zeros_like(s_half))
 
     if int(indata.get_int("NCURR", 0)) != 1:

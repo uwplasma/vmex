@@ -10,8 +10,13 @@ import json
 from pathlib import Path
 import re
 import shutil
+import sys
 
 import numpy as np
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from vmec_jax.plotting import (
     fix_matplotlib_3d,
@@ -44,6 +49,7 @@ MODES_BY_POLICY = {
     "direct": (1, 2, 3),
 }
 QI_INPUT_NFP = 2
+TARGET_ASPECT = 7.0
 _TIMEOUT_SECONDS_RE = re.compile(r"timed out after\s+([0-9]+(?:\.[0-9]+)?)\s*s")
 _NFP_RE = re.compile(r"^\s*NFP\s*=\s*([0-9]+)", re.IGNORECASE | re.MULTILINE)
 
@@ -75,6 +81,12 @@ class CaseResult:
     input_file: str | None = None
     input_nfp: int | None = None
     project_input_boundary_to_max_mode: bool | None = None
+    target_aspect: float | None = None
+    target_iota: float | None = None
+    iota_abs_min: float | None = None
+    iota_weight: float | None = None
+    lgradb_weight: float | None = None
+    qi_lgradb_weight: float | None = None
     asymmetric_dof_count: int = 0
     asymmetric_param_norm_initial: float | None = None
     asymmetric_param_norm_final: float | None = None
@@ -83,6 +95,10 @@ class CaseResult:
     bmag_max: float | None = None
     bmag_nonpositive_fraction: float | None = None
     bmag_finite: bool | None = None
+    lgradb_min: float | None = None
+    lgradb_threshold: float | None = None
+    lgradb_excess_max: float | None = None
+    lgradb_diagnostic_error: str | None = None
     qi_qp_preseed: bool | None = None
     qi_qi_preseed: bool | None = None
     qi_raw_total: float | None = None
@@ -92,6 +108,9 @@ class CaseResult:
     qi_max_elongation: float | None = None
     qi_elongation_target: float | None = None
     qi_elongation_excess: float | None = None
+    qi_lgradb_min: float | None = None
+    qi_lgradb_threshold: float | None = None
+    qi_lgradb_excess_max: float | None = None
     qi_diagnostic_error: str | None = None
 
 
@@ -341,6 +360,9 @@ def _discover_results() -> list[CaseResult]:
     results_by_key: dict[tuple[str, bool, str, str, int, bool], tuple[int, float, CaseResult]] = {}
     for path in sorted(OUTPUT_ROOT.glob("**/case_result.json")):
         raw_record = json.loads(path.read_text())
+        target_aspect = raw_record.get("target_aspect")
+        if target_aspect not in (None, "") and abs(float(target_aspect) - TARGET_ASPECT) > 1.0e-8:
+            continue
         priority = _discovery_priority(path, raw_record)
         record = dict(raw_record)
         backend, backend_explicit, backend_in_path = _infer_backend(path, raw_record)
@@ -410,6 +432,10 @@ def _write_combined_summary(results: list[CaseResult]) -> None:
                 "bmag_max",
                 "bmag_nonpositive_fraction",
                 "bmag_finite",
+                "lgradb_min",
+                "lgradb_threshold",
+                "lgradb_excess_max",
+                "lgradb_diagnostic_error",
                 "qi_qp_preseed",
                 "qi_qi_preseed",
                 "qi_raw_total",
@@ -419,6 +445,9 @@ def _write_combined_summary(results: list[CaseResult]) -> None:
                 "qi_max_elongation",
                 "qi_elongation_target",
                 "qi_elongation_excess",
+                "qi_lgradb_min",
+                "qi_lgradb_threshold",
+                "qi_lgradb_excess_max",
                 "qi_diagnostic_error",
                 "problem",
                 "max_mode",
@@ -439,6 +468,12 @@ def _write_combined_summary(results: list[CaseResult]) -> None:
                 "input_file",
                 "input_nfp",
                 "project_input_boundary_to_max_mode",
+                "target_aspect",
+                "target_iota",
+                "iota_abs_min",
+                "iota_weight",
+                "lgradb_weight",
+                "qi_lgradb_weight",
                 "message",
                 "output_dir",
             ],
@@ -776,8 +811,12 @@ def _plot_objective_panel_all_policies(results: list[CaseResult], outpath_png: P
                     ax.axvline(float(boundary), color="0.75", linestyle=":", linewidth=1.0, zorder=0)
 
                 wall_min = float(result.total_wall_time_s) / 60.0
-                meta = f"{line_labels[use_ess]}: J={float(result.objective_final):.2e}, {wall_min:.1f}m"
-                meta += f", A={float(result.aspect_final):.3f}"
+                objective_text = (
+                    f"{float(result.objective_final):.2e}" if result.objective_final is not None else "n/a"
+                )
+                meta = f"{line_labels[use_ess]}: J={objective_text}, {wall_min:.1f}m"
+                if result.aspect_final is not None:
+                    meta += f", A={float(result.aspect_final):.3f}"
                 if result.iota_final is not None:
                     meta += f", iota={float(result.iota_final):.4f}"
                 if result.solver_device:
@@ -1010,8 +1049,11 @@ def _plot_state_atlas(
             _inset_colorbar(sm, ax3d, label="|B| (T)", height="46%")
             if problem_index == 0:
                 wall_min = float(result.total_wall_time_s) / 60.0
+                objective_text = (
+                    f"{float(result.objective_final):.2e}" if result.objective_final is not None else "n/a"
+                )
                 ax3d.set_title(
-                    f"mode {max_mode} | {_ess_label(use_ess)}\nJ={float(result.objective_final):.2e}, {wall_min:.1f} min",
+                    f"mode {max_mode} | {_ess_label(use_ess)}\nJ={objective_text}, {wall_min:.1f} min",
                     pad=10,
                 )
             if col_index == 0:

@@ -61,46 +61,44 @@ enable_x64(True)
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
 # User parameters
-INPUT_FILE = DATA_DIR / "input.nfp2_QA"
+INPUT_FILE = DATA_DIR / "input.nfp2_QA_omnigenity"
 
 MAX_MODE = 1
-VMEC_MPOL = max(5, MAX_MODE + 2)
+VMEC_MPOL = max(6, MAX_MODE + 2)
 VMEC_NTOR = VMEC_MPOL
 
-MAX_NFEV = 15
-CONTINUATION_NFEV = 10
+MAX_NFEV = 60
+CONTINUATION_NFEV = 60
 USE_MODE_CONTINUATION = True
 
 METHOD = "scipy"
 SCIPY_TR_SOLVER = "lsmr"
 SCIPY_LSMR_MAXITER = None
-FTOL = 1.0e-3
-GTOL = 1.0e-3
-XTOL = 1.0e-3
+FTOL = 1.0e-4
+GTOL = 1.0e-4
+XTOL = 1.0e-4
 
-# 0 means use NITER/FTOL from the VMEC input deck for accepted exact points.
-INNER_MAX_ITER = 0
-INNER_FTOL = 0.0
-TRIAL_MAX_ITER = 300
-TRIAL_FTOL = 1.0e-10
+INNER_MAX_ITER = 120
+INNER_FTOL = 1.0e-9
+TRIAL_MAX_ITER = 120
+TRIAL_FTOL = 1.0e-9
 SOLVER_DEVICE = None  # set to "cpu" or "gpu" to force one backend
 
 HELICITY_M = 1
 HELICITY_N = 0
 SURFACES = np.arange(0.0, 1.01, 0.1)
-TARGET_ASPECT = 6.0
-TARGET_IOTA = 0.41
+TARGET_ASPECT = 7.0
+TARGET_IOTA = 0.42
 
 ASPECT_WEIGHT = 1.0
-IOTA_WEIGHT = 10.0
+IOTA_WEIGHT = 200.0
 QS_WEIGHT = 1.0
 
 USE_ESS = False
-ALPHA = 2.5
+ALPHA = 1.2
 
 if MAX_MODE >= 2:
-    # The higher-mode QA problem is sensitive to the lower-mode seed.
-    CONTINUATION_NFEV = max(CONTINUATION_NFEV, 25)
+    CONTINUATION_NFEV = max(CONTINUATION_NFEV, 60)
 
 OUTPUT_DIR = Path(f"results/qa_opt/{'ess' if USE_ESS else 'no_ess'}")
 LABEL = f"QA opt (max_mode={MAX_MODE}, {'ESS' if USE_ESS else 'no ESS'})"
@@ -124,6 +122,9 @@ OBJECTIVES = [
         surfaces=SURFACES,
         weight=QS_WEIGHT,
     ),
+    # Optional LgradB penalty:
+    # import lgradb_objective from fixed_boundary_qs_common and append
+    # lgradb_objective(threshold=0.30, weight=0.1)
     # ObjectiveTerm("custom", lambda ctx, state: your_metric(ctx, state), target=0.0, weight=1.0),
 ]
 
@@ -145,7 +146,7 @@ stage_records = []
 params_stage = None
 prev_specs = None
 
-for stage_mode in stage_modes:
+for stage_index, stage_mode in enumerate(stage_modes, start=1):
     # Build the fixed-boundary VMEC problem for this mode-continuation stage.
     static = vj.build_static(cfg)
     boundary = vj.boundary_from_indata(indata, static.modes, apply_m1_constraint=False)
@@ -256,7 +257,7 @@ for stage_mode in stage_modes:
         scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
     )
     save_qs_stage_artifacts(
-        stage_dir=OUTPUT_DIR / f"stage_{stage_mode:02d}",
+        stage_dir=OUTPUT_DIR / f"stage_{stage_index:02d}_mode{stage_mode:02d}",
         optimizer=optimizer,
         params_initial=params0,
         params_final=result["x"],

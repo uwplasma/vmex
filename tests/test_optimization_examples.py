@@ -26,7 +26,10 @@ def test_fixed_boundary_qs_examples_are_standalone_workflows() -> None:
         assert "def residuals_from_state" in text
         assert "vj.FixedBoundaryExactOptimizer(" in text
         assert "optimizer.run(" in text
-        assert "for stage_mode in stage_modes:" in text
+        assert (
+            "for stage_mode in stage_modes:" in text
+            or "for stage_index, stage_mode in enumerate(stage_modes" in text
+        )
         assert "save_qs_final_outputs(" in text
 
 

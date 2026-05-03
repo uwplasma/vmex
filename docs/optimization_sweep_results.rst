@@ -5,18 +5,21 @@ This page collects the generated optimization sweep artifacts used by the
 README and the main optimization guide.  The current sweep covers QA, QH, QP,
 and QI targets:
 
-- QA: aspect ratio, signed mean iota target, and quasi-axisymmetry.
-- QH: aspect ratio, a smooth ``abs(mean_iota) >= 0.40`` lower bound, and
-  quasi-helical symmetry.
+- QA: aspect ratio near 7, signed mean iota target, and quasi-axisymmetry.
+- QH: the bundled NFP=4 warm start, aspect ratio near 7, quasi-helical
+  symmetry, and a smooth ``abs(mean_iota) >= 0.41`` lower bound.
 - QP: aspect ratio, quasi-poloidal symmetry, and a smooth
-  ``abs(mean_iota) >= 0.40`` lower bound.
+  ``abs(mean_iota) >= 0.41`` lower bound, using the same bundled NFP=2 seed as
+  the QI runs.
 - QI: aspect ratio, a differentiable smooth Boozer-space quasi-isodynamic
   residual evaluated through ``booz_xform_jax``, maximum mirror-ratio penalty,
-  maximum-LCFS-elongation penalty, and a smooth ``abs(mean_iota) >= 0.40``
-  lower bound.  The default QI run starts from the bundled ``input.nfp2_QI``
-  omnigenity seed, runs a QI-only preseed, then activates the mirror and
-  elongation penalties for the final QI refinement.  The constrained sweep can
-  also run a same-mode QP preseed to measure whether that optional seed helps.
+  maximum-LCFS-elongation penalty, and a smooth ``abs(mean_iota) >= 0.41``
+  lower bound.  ``LgradB`` is available as an optional commented term in the
+  example script but is not active by default.
+  The QI rows use the bundled ``input.nfp2_QI`` omnigenity seed.
+  The production CLI can optionally use a same-mode QP preseed; the current
+  best gated QI row starts the constrained QI refinement directly from the seed
+  with ``--qi-qp-preseed off``.
 
 Individual Examples
 -------------------
@@ -33,11 +36,13 @@ Each standalone example keeps all user controls as top-level Python variables:
 The QP script is quasisymmetry with ``HELICITY_M = 0``.  The QI script is a
 different objective: it builds Boozer spectra with ``booz_xform_jax``, improves
 the smooth QI residual, and then adds mirror-ratio and LCFS-elongation
-penalties.  A QP preseed is available as a top-level switch, but is not the
-default for the bundled QI seed.  The extra terms are imported from
+penalties.  A commented ``LgradB`` block is included for users who want that
+extra regularization term.  A QP preseed is available as a top-level switch, but the
+README-best QI row currently starts directly from the bundled NFP=2 QI seed.
+The extra terms are imported from
 ``vmec_jax.quasi_isodynamic`` and assembled explicitly in the script, so users
-can add terms such as ``LgradB`` or magnetic-well depth by appending another
-residual block in the same section.  Install the optional dependency set with
+can change weights or add terms such as magnetic-well depth by appending
+another residual block in the same section.  Install the optional dependency set with
 ``python -m pip install ".[qi]"`` before running QI cases from a source
 checkout.
 
@@ -48,8 +53,8 @@ Run the CPU production sweep:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed both
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed both
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 The constrained QI study has one extra axis: whether the QI solve starts from a
@@ -65,8 +70,8 @@ Run the GPU production sweep on a machine with a working JAX GPU install:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed both
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed both
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 Render the compact README panels from the best stellarator-symmetric rows:
@@ -75,13 +80,14 @@ Render the compact README panels from the best stellarator-symmetric rows:
 
    PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 
-The default per-case timeout is 1200 seconds.  GPU uses exact/replay callbacks
-with calibrated optimizer budgets (``inner_max_iter = trial_max_iter = 180``
-and ``ftol = trial_ftol = 1e-9`` for deck-controlled QA/QH cases) so production
-sweeps have enough room to converge high-mode/LASYM cases while still bounding
-runaway rows.  Add ``--diagnostic-budgets`` only for bounded quick-look GPU
-diagnostics, and use ``--case-timeout-s 0`` only for unbounded local
-diagnostics.
+The default per-case timeout is 1200 seconds.  The current science configs use
+NFP=4 for QH, aspect targets near 7, and high-priority
+``abs(mean_iota) >= 0.41`` constraints.
+They use ``inner_max_iter = trial_max_iter = 120`` and
+``ftol = trial_ftol = 1e-9``; GPU production sweeps cap those values at 180
+if a future problem config requests a larger replay budget.  Add
+``--diagnostic-budgets`` only for bounded quick-look GPU diagnostics, and use
+``--case-timeout-s 0`` only for unbounded local diagnostics.
 
 Run the non-stellarator-symmetric sweep by adding
 ``--stellarator-asymmetric``.  This sets ``LASYM = T`` in memory, includes
@@ -91,10 +97,10 @@ asymmetric modes with ``1e-7``, and writes separate outputs under the
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed both --stellarator-asymmetric
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed both --stellarator-asymmetric
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed both --stellarator-asymmetric
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed both --stellarator-asymmetric
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 For NVIDIA-only JAX installations, ``JAX_PLATFORMS=cuda`` is also valid.  Do
@@ -141,23 +147,25 @@ The all-policy panel contains every available backend/policy row.  Solid curves
 met the optimizer success criterion; dashed curves are stopped, failed, or
 budgeted lanes.  The summary tables distinguish ``max_nfev`` stops from
 1200 second timeouts and GPU-memory failures.  Curves are split by objective
-stage and plotted as best-so-far values within that stage, so QP preseed,
-QI-only preseed, and full constrained QI refinement are not treated as one
-continuous scalar objective.  Vertical dotted lines mark continuation stage
-boundaries.
+stage and plotted as best-so-far values within that stage, so QP preseed and
+full constrained QI refinement are not treated as one continuous scalar
+objective.  Vertical dotted lines mark continuation stage boundaries.
 
 Constrained QI Matrix
 ---------------------
 
-The constrained QI matrix compares CPU and available GPU rows for
+The constrained QI renderer compares CPU and available GPU rows for
 ``max_mode = 1, 2, 3``, ESS on/off, continuation/direct, and QP-preseed
-on/off using the bundled NFP=2 ``input.nfp2_QI`` seed.  For each requested
+on/off using the bundled NFP=2 ``input.nfp2_QI`` seed.  The current tracked
+snapshot only includes the restored aspect-7 CPU continuation ``max_mode=3``
+rows; rerun the commands above to repopulate the full CPU/GPU/direct/asymmetric
+matrix under the current objective policy.  For each requested
 ``max_mode``, the input boundary is projected onto
 ``max(abs(m), abs(n)) <= max_mode`` before the stage is built, so the
 ``max_mode=1`` rows zero the mode-2 coefficients present in the warm start.
 The QI objective is intentionally not ranked by scalar objective alone: rows
 are also evaluated by raw QI residual, maximum mirror ratio,
-maximum LCFS elongation, ``abs(mean_iota) >= 0.40``, and aspect ratio near 7.
+maximum LCFS elongation, ``abs(mean_iota) >= 0.41``, and aspect ratio near 7.
 Rows that stop at ``max_nfev`` but have valid VMEC solves and satisfy the
 physics gates are kept as valid stopped rows.
 
@@ -172,14 +180,15 @@ Downloadable constrained-QI summaries:
 - :download:`qi_constrained_summary.json <_static/figures/qi_constrained_summary.json>`
 - :download:`qi_constrained_best.json <_static/figures/qi_constrained_best.json>`
 
-In the current snapshot, the best available constrained QI row is CPU direct,
-``max_mode=3``, ESS off, without QP preseed.  It reaches raw QI ``8.30e-2``,
-maximum mirror ratio ``0.215`` for a target ``0.21``, maximum elongation
-``4.37`` for a target ``8.0``, aspect ratio ``7.012``, mean iota ``-0.415``,
-and wall time ``1.5 min``.  Several higher-mode ESS or QP-preseed rows remain
-useful diagnostics but currently expose a trust-region/Jacobian robustness
-issue in the constrained Boozer objective; those rows are retained in the table
-instead of hidden.
+In the current snapshot, the best available constrained QI row is CPU
+continuation, ``max_mode=3``, ESS on, with a same-mode QP preseed.  It
+reaches raw QI ``8.18e-4``, maximum mirror ratio ``0.2079`` for a target
+``0.21``, maximum elongation ``7.93`` for a target ``8.0``, aspect ratio
+``6.999``, mean iota ``-0.770``, and wall time ``4.0 min``.  This row uses the
+branch-width QI residual, which follows the reference omnigenity workflow more
+closely by penalizing equal-``|B|`` bounce-width variation across field-line
+label.  Iota, aspect, mirror ratio, elongation, and raw QI quality are
+prioritized in this pass.
 
 Non-stellarator-symmetric LASYM runs use the same script with
 ``--stellarator-asymmetric``.  The current LASYM artifacts are intentionally

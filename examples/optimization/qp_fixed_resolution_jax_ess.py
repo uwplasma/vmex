@@ -60,22 +60,22 @@ enable_x64(True)
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
 # User parameters
-INPUT_FILE = DATA_DIR / "input.nfp4_QH_warm_start"
+INPUT_FILE = DATA_DIR / "input.nfp2_QI"
 
-MAX_MODE = 3
-VMEC_MPOL = max(5, MAX_MODE + 2)
+MAX_MODE = 2
+VMEC_MPOL = max(6, MAX_MODE + 2)
 VMEC_NTOR = VMEC_MPOL
 
-MAX_NFEV = 50
-CONTINUATION_NFEV = 20
+MAX_NFEV = 40
+CONTINUATION_NFEV = 30
 USE_MODE_CONTINUATION = True
 
 METHOD = "scipy"
 SCIPY_TR_SOLVER = "lsmr"
 SCIPY_LSMR_MAXITER = None
-FTOL = 1.0e-5
-GTOL = 1.0e-5
-XTOL = 1.0e-5
+FTOL = 1.0e-4
+GTOL = 1.0e-4
+XTOL = 1.0e-4
 
 INNER_MAX_ITER = 120
 INNER_FTOL = 1.0e-9
@@ -87,15 +87,15 @@ HELICITY_M = 0
 HELICITY_N = -1
 SURFACES = np.arange(0.0, 1.01, 0.1)
 TARGET_ASPECT = 7.0
-TARGET_ABS_IOTA_MIN = 0.40
+TARGET_ABS_IOTA_MIN = 0.41
 TARGET_IOTA = None  # QP uses a minimum-|iota| constraint, not a signed target.
 
 ASPECT_WEIGHT = 1.0
-IOTA_WEIGHT = 100.0
+IOTA_WEIGHT = 200.0
 QS_WEIGHT = 1.0
 
 USE_ESS = True
-ALPHA = 2.5
+ALPHA = 1.2
 
 OUTPUT_DIR = Path(f"results/qp_opt/n{HELICITY_N:+d}/mode{MAX_MODE}/{'ess' if USE_ESS else 'no_ess'}")
 LABEL = f"QP opt (max_mode={MAX_MODE}, {'ESS' if USE_ESS else 'no ESS'})"
@@ -119,6 +119,9 @@ OBJECTIVES = [
         surfaces=SURFACES,
         weight=QS_WEIGHT,
     ),
+    # Optional LgradB penalty:
+    # import lgradb_objective from fixed_boundary_qs_common and append
+    # lgradb_objective(threshold=0.30, weight=0.1)
     # ObjectiveTerm("custom_vector", lambda ctx, state: your_vector(ctx, state), target=0.0, weight=0.1),
 ]
 
@@ -140,12 +143,13 @@ stage_records = []
 params_stage = None
 prev_specs = None
 
-for stage_mode in stage_modes:
+for stage_index, stage_mode in enumerate(stage_modes, start=1):
     # Build the fixed-boundary VMEC problem for this mode-continuation stage.
+    stage_input = vj.truncate_indata_boundary_modes(indata, max_mode=stage_mode)
     static = vj.build_static(cfg)
-    boundary = vj.boundary_from_indata(indata, static.modes, apply_m1_constraint=False)
+    boundary = vj.boundary_from_indata(stage_input, static.modes, apply_m1_constraint=False)
     stage_indata, static, boundary = vj.extend_boundary_for_max_mode(
-        indata,
+        stage_input,
         static,
         boundary,
         stage_mode,
@@ -251,7 +255,7 @@ for stage_mode in stage_modes:
         scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
     )
     save_qs_stage_artifacts(
-        stage_dir=OUTPUT_DIR / f"stage_{stage_mode:02d}",
+        stage_dir=OUTPUT_DIR / f"stage_{stage_index:02d}_mode{stage_mode:02d}",
         optimizer=optimizer,
         params_initial=params0,
         params_final=result["x"],

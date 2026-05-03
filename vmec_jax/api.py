@@ -29,6 +29,8 @@ from .booz_input import booz_xform_inputs_from_state
 from .field import b_cartesian_from_state, signgs_from_sqrtg
 from .energy import flux_profiles_from_indata
 from .quasi_isodynamic import (
+    lgradb_from_state,
+    lgradb_penalty_from_state,
     max_elongation_penalty_from_state,
     mirror_ratio_penalty_from_boozer_modes,
     mirror_ratio_penalty_from_boozer_output,
@@ -74,6 +76,8 @@ __all__ = [
     "read_indata",
     "write_indata",
     "booz_xform_inputs_from_state",
+    "lgradb_from_state",
+    "lgradb_penalty_from_state",
     "max_elongation_penalty_from_state",
     "mirror_ratio_penalty_from_boozer_modes",
     "mirror_ratio_penalty_from_boozer_output",

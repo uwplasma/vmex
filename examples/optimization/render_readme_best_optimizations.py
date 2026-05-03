@@ -38,6 +38,9 @@ PROBLEM_TITLES = {
     "qp": "QP",
     "qi": "QI",
 }
+TARGET_ASPECT = 7.0
+TARGET_ABS_IOTA_MIN = 0.41
+TARGET_QA_IOTA = 0.42
 
 @dataclass(frozen=True)
 class BestRun:
@@ -55,6 +58,8 @@ class BestRun:
     qi_raw_total: float | None = None
     qi_mirror_ratio_max: float | None = None
     qi_max_elongation: float | None = None
+    lgradb_min: float | None = None
+    qi_lgradb_min: float | None = None
 
 
 def _read_summary_rows() -> list[dict[str, str]]:
@@ -96,7 +101,7 @@ def _float_value(row: dict[str, str], key: str, default: float | None = None) ->
 
 
 def _qi_selection_score(row: dict[str, str]) -> tuple:
-    failed = 1 if _bool_value(row.get("crashed")) else 0
+    failed = 1 if _bool_value(row.get("crashed")) or not _bool_value(row.get("success")) else 0
     mirror = _float_value(row, "qi_mirror_ratio_max", np.inf) or np.inf
     mirror_target = _float_value(row, "qi_mirror_ratio_target", 0.21) or 0.21
     elong = _float_value(row, "qi_max_elongation", np.inf) or np.inf
@@ -107,8 +112,9 @@ def _qi_selection_score(row: dict[str, str]) -> tuple:
     objective = _float_value(row, "objective_final", np.inf) or np.inf
     mirror_violation = max(0.0, mirror - mirror_target) / max(mirror_target, 1.0e-12)
     elong_violation = max(0.0, elong - elong_target) / max(elong_target, 1.0e-12)
-    iota_violation = max(0.0, 0.40 - iota) / 0.40
-    aspect_violation = abs(aspect - 7.0) / 7.0
+    iota_violation = max(0.0, TARGET_ABS_IOTA_MIN - iota) / TARGET_ABS_IOTA_MIN
+    aspect_target = TARGET_ASPECT
+    aspect_violation = abs(aspect - aspect_target) / aspect_target
     hard_ok = int(
         mirror_violation <= 0.10
         and elong_violation <= 0.05
@@ -118,11 +124,73 @@ def _qi_selection_score(row: dict[str, str]) -> tuple:
     return (
         failed,
         1 - hard_ok,
-        objective,
+        iota_violation + mirror_violation + elong_violation + 0.25 * aspect_violation,
         qi_raw,
-        mirror_violation + elong_violation + iota_violation + 0.25 * aspect_violation,
+        objective,
         _float_value(row, "total_wall_time_s", np.inf),
     )
+
+
+def _qs_selection_score(row: dict[str, str]) -> tuple:
+    """Rank QA/QH/QP rows by field quality before secondary penalties."""
+
+    failed = 1 if _bool_value(row.get("crashed")) or not _bool_value(row.get("success")) else 0
+    problem = row.get("problem", "")
+    qs = _float_value(row, "qs_final", np.inf) or np.inf
+    objective = _float_value(row, "objective_final", np.inf) or np.inf
+    aspect = _float_value(row, "aspect_final", np.inf) or np.inf
+    aspect_target = TARGET_ASPECT
+    aspect_violation = abs(aspect - aspect_target) / max(aspect_target, 1.0e-12)
+    iota_violation = 0.0
+    if problem == "qa":
+        iota = _float_value(row, "iota_final", np.nan)
+        iota_violation = (
+            abs((iota or 0.0) - TARGET_QA_IOTA) / TARGET_QA_IOTA if np.isfinite(iota or np.nan) else 1.0
+        )
+    elif problem in {"qh", "qp"}:
+        iota = abs(_float_value(row, "iota_final", 0.0) or 0.0)
+        iota_violation = max(0.0, TARGET_ABS_IOTA_MIN - iota) / TARGET_ABS_IOTA_MIN
+    hard_ok = int(aspect_violation <= 0.10 and iota_violation <= 0.10)
+    return (
+        failed,
+        1 - hard_ok,
+        qs,
+        objective,
+        iota_violation,
+        aspect_violation,
+        _float_value(row, "total_wall_time_s", np.inf),
+    )
+
+
+def _is_current_qs_row(row: dict[str, str]) -> bool:
+    problem = row.get("problem", "")
+    input_name = Path(row.get("input_file", "")).name
+    if problem == "qh" and input_name != "input.nfp4_QH_warm_start":
+        return False
+    target_aspect = _float_value(row, "target_aspect", None)
+    if target_aspect is not None and abs(target_aspect - TARGET_ASPECT) > 1.0e-8:
+        return False
+    if problem in {"qh", "qp"}:
+        target_floor = _float_value(row, "iota_abs_min", None)
+        if target_floor is not None and abs(target_floor - TARGET_ABS_IOTA_MIN) > 1.0e-8:
+            return False
+    aspect = _float_value(row, "aspect_final", None)
+    if aspect is not None and abs(aspect - TARGET_ASPECT) / TARGET_ASPECT > 0.25:
+        return False
+    return True
+
+
+def _is_current_qi_row(row: dict[str, str]) -> bool:
+    target_aspect = _float_value(row, "target_aspect", None)
+    if target_aspect is not None and abs(target_aspect - TARGET_ASPECT) > 1.0e-8:
+        return False
+    target_floor = _float_value(row, "iota_abs_min", None)
+    if target_floor is not None and abs(target_floor - TARGET_ABS_IOTA_MIN) > 1.0e-8:
+        return False
+    aspect = _float_value(row, "aspect_final", None)
+    if aspect is not None and abs(aspect - TARGET_ASPECT) / TARGET_ASPECT > 0.30:
+        return False
+    return True
 
 
 def _run_from_row(row: dict[str, str]) -> BestRun:
@@ -143,6 +211,8 @@ def _run_from_row(row: dict[str, str]) -> BestRun:
         qi_raw_total=_float_value(row, "qi_raw_total"),
         qi_mirror_ratio_max=_float_value(row, "qi_mirror_ratio_max"),
         qi_max_elongation=_float_value(row, "qi_max_elongation"),
+        lgradb_min=_float_value(row, "lgradb_min"),
+        qi_lgradb_min=_float_value(row, "qi_lgradb_min"),
     )
 
 
@@ -158,10 +228,10 @@ def _best_runs() -> list[BestRun]:
     ]
     best: list[BestRun] = []
     for problem in ("qa", "qh", "qp"):
-        candidates = [row for row in rows if row.get("problem") == problem]
+        candidates = [row for row in rows if row.get("problem") == problem and _is_current_qs_row(row)]
         if not candidates:
             raise RuntimeError(f"No successful CPU symmetric rows found for {problem!r}")
-        row = min(candidates, key=lambda item: float(item["objective_final"]))
+        row = min(candidates, key=_qs_selection_score)
         best.append(_run_from_row(row))
 
     qi_rows = [
@@ -170,12 +240,13 @@ def _best_runs() -> list[BestRun]:
         if row.get("output_dir")
         and row.get("qi_raw_total") not in (None, "")
         and not _bool_value(row.get("stellarator_asymmetric"))
+        and _is_current_qi_row(row)
     ]
     if qi_rows:
         row = min(qi_rows, key=_qi_selection_score)
         best.append(_run_from_row(row))
     else:
-        candidates = [row for row in rows if row.get("problem") == "qi"]
+        candidates = [row for row in rows if row.get("problem") == "qi" and _is_current_qi_row(row)]
         if not candidates:
             raise RuntimeError("No successful symmetric rows found for 'qi'")
         row = min(candidates, key=lambda item: float(item["objective_final"]))
@@ -255,7 +326,15 @@ def _plot_history(ax, run: BestRun) -> None:
         raise RuntimeError(f"Missing history entries in {run.output_dir / 'history.json'}")
     last_wall = None
     last_objective = None
-    for segment in _history_stage_segments(history):
+    segments = _history_stage_segments(history)
+    if run.problem == "qi" and run.qi_qp_preseed:
+        qi_segments = [
+            segment
+            for segment in segments
+            if segment and str(segment[0].get("stage", "")).startswith("QI ")
+        ]
+        segments = qi_segments or segments
+    for segment in segments:
         wall_min = np.asarray([float(item.get("wall_time_s", 0.0)) / 60.0 for item in segment])
         objective = np.minimum.accumulate(
             np.asarray([max(float(item.get("objective", item.get("cost", np.nan))), 1.0e-16) for item in segment])
@@ -275,7 +354,8 @@ def _plot_history(ax, run: BestRun) -> None:
     ax.set_yscale("log")
     ax.set_xlabel("Wall time (min)")
     ax.set_ylabel("Total objective")
-    ax.set_title("Objective history", fontsize=9, pad=4)
+    title = "QI refinement objective" if run.problem == "qi" and run.qi_qp_preseed else "Objective history"
+    ax.set_title(title, fontsize=9, pad=4)
     ax.grid(True, alpha=0.22, linestyle=":")
 
 

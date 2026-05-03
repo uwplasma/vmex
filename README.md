@@ -164,18 +164,24 @@ live in the
 Each row below shows the original deck LCFS before any `max_mode=1`
 optimization work, the final LCFS, per-stage objective history, and the final
 outer-surface `|B|` in Boozer coordinates computed with `booz_xform_jax`.
-The QI row uses the constrained QI objective: optional QP preseed, QI-only
-preseed, then QI residual plus mirror-ratio and LCFS-elongation penalties.  Its
-selection is based on the QI physics gates, not only on the scalar objective.
-The bundled NFP=2 QI seed is projected to each active `max_mode`, so
+This sweep uses NFP=2 seeds for QA/QP/QI and the standard bundled NFP=4 warm
+start for QH.  The current objective priority is primary symmetry/QI quality
+and `abs(mean_iota) >= 0.41`, followed by aspect ratio near 7.  `LgradB`
+remains available as an optional script-level term, but it is not active in
+the default README examples or best-row selection.
+
+The QP and QI rows both start from the bundled NFP=2 QI seed.  QP is a
+quasi-poloidal-symmetry target using that same input deck; QI can optionally
+start from a same-mode QP preseed before the constrained QI refinement.
+The bundled NFP=2 seed is projected to each active `max_mode`, so
 `max_mode=1` zeroes the seed's mode-2 boundary harmonics before optimizing.
 
 | Target | Backend | Policy | max_mode | ESS | QP preseed | Final J | QI raw | Mirror | Elong. | Aspect | Iota | Wall time |
 |---|---|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|
-| QA | CPU | direct | 3 | yes |  | 3.13e-05 |  |  |  | 6.000 | 0.4102 | 19.3 min |
-| QH | CPU | continuation | 3 | no |  | 1.37e-03 |  |  |  | 7.000 |  | 10.7 min |
-| QP | CPU | direct | 2 | yes |  | 3.74e-02 |  |  |  | 7.004 | -0.4037 | 1.1 min |
-| QI | CPU | direct | 3 | no | no | 8.59e-02 | 8.30e-02 | 0.215 | 4.37 | 7.012 | -0.4147 | 1.5 min |
+| QA | CPU | continuation | 3 | no |  | 2.39e-02 |  |  |  | 7.002 | 0.4200 | 5.4 min |
+| QH | CPU | continuation | 3 | yes |  | 1.30e-03 |  |  |  | 7.000 | -1.1813 | 2.4 min |
+| QP | CPU | continuation | 3 | no |  | 3.00e-02 |  |  |  | 7.006 | -0.7401 | 2.1 min |
+| QI | CPU | continuation | 3 | yes | yes | 8.19e-04 | 8.18e-04 | 0.208 | 7.93 | 6.999 | -0.7698 | 4.0 min |
 
 <p align="center">
   <img src="docs/_static/figures/readme_best_optimization_qa.png" width="980" />
@@ -196,10 +202,10 @@ The bundled NFP=2 QI seed is projected to each active `max_mode`, so
 Recreate the four displayed runs:
 
 ```bash
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa --modes 3 --ess on
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qh --modes 3 --ess off
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qp --modes 2 --ess on
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qi --modes 3 --ess off --qi-qp-preseed off
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa --modes 3 --ess off
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qh --modes 3 --ess on
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qp --modes 3 --ess off
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qi --modes 3 --ess on --qi-qp-preseed on
 ```
 
 Regenerate the README panels and the compact CSV used for the table:

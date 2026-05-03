@@ -44,6 +44,17 @@ def _load_readme_renderer_module():
     return module
 
 
+def _load_qi_renderer_module():
+    root = Path(__file__).resolve().parents[1]
+    script = root / "examples" / "optimization" / "render_qi_constrained_sweep.py"
+    spec = importlib.util.spec_from_file_location("render_qi_constrained_sweep", script)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_qs_ess_sweep_worker_jax_platform_policy():
     sweep = _load_sweep_module()
 
@@ -132,9 +143,9 @@ def test_qs_ess_sweep_gpu_production_budgets_are_not_diagnostic_caps():
     )
 
     assert cfg.max_nfev == sweep.PROBLEM_CONFIGS["qh"].max_nfev
-    assert cfg.inner_max_iter == sweep.GPU_PRODUCTION_INNER_MAX_ITER
+    assert cfg.inner_max_iter == min(sweep.PROBLEM_CONFIGS["qh"].inner_max_iter, sweep.GPU_PRODUCTION_INNER_MAX_ITER)
     assert cfg.inner_ftol == sweep.GPU_PRODUCTION_INNER_FTOL
-    assert cfg.trial_max_iter == sweep.GPU_PRODUCTION_TRIAL_MAX_ITER
+    assert cfg.trial_max_iter == min(sweep.PROBLEM_CONFIGS["qh"].trial_max_iter, sweep.GPU_PRODUCTION_TRIAL_MAX_ITER)
     assert cfg.trial_ftol == sweep.GPU_PRODUCTION_TRIAL_FTOL
 
     cont_cfg = sweep._effective_problem_config(
@@ -148,7 +159,10 @@ def test_qs_ess_sweep_gpu_production_budgets_are_not_diagnostic_caps():
 
     assert cont_cfg.max_nfev == sweep.PROBLEM_CONFIGS["qa"].max_nfev
     assert cont_cfg.continuation_nfev == sweep.PROBLEM_CONFIGS["qa"].continuation_nfev
-    assert cont_cfg.inner_max_iter == sweep.GPU_PRODUCTION_INNER_MAX_ITER
+    assert cont_cfg.inner_max_iter == min(
+        sweep.PROBLEM_CONFIGS["qa"].inner_max_iter,
+        sweep.GPU_PRODUCTION_INNER_MAX_ITER,
+    )
     assert cont_cfg.inner_ftol == sweep.GPU_PRODUCTION_INNER_FTOL
 
     direct_qa_cfg = sweep._effective_problem_config(
@@ -186,6 +200,90 @@ def test_qs_ess_sweep_gpu_production_budgets_are_not_diagnostic_caps():
     assert diag_cfg.max_nfev == 4
     assert diag_cfg.inner_max_iter == 40
     assert diag_cfg.trial_max_iter == 40
+
+
+def test_problem_configs_follow_current_seed_and_priority_policy():
+    sweep = _load_sweep_module()
+
+    qa_cfg = sweep.PROBLEM_CONFIGS["qa"]
+    qh_cfg = sweep.PROBLEM_CONFIGS["qh"]
+    qp_cfg = sweep.PROBLEM_CONFIGS["qp"]
+    qi_cfg = sweep.PROBLEM_CONFIGS["qi"]
+
+    assert qa_cfg.input_file.name == "input.nfp2_QA_omnigenity"
+    assert qa_cfg.target_aspect == pytest.approx(7.0)
+    assert qa_cfg.target_iota == pytest.approx(0.42)
+    assert qa_cfg.iota_weight == pytest.approx(200.0)
+    assert qa_cfg.lgradb_threshold == pytest.approx(0.30)
+    assert qa_cfg.lgradb_weight == pytest.approx(0.0)
+    assert qh_cfg.input_file.name == "input.nfp4_QH_warm_start"
+    assert qh_cfg.target_aspect == pytest.approx(7.0)
+    assert qh_cfg.iota_abs_min == pytest.approx(0.41)
+    assert qh_cfg.iota_weight == pytest.approx(200.0)
+    assert qh_cfg.lgradb_threshold == pytest.approx(0.30)
+    assert qh_cfg.lgradb_weight == pytest.approx(0.0)
+    assert qp_cfg.input_file.name == "input.nfp2_QI"
+    assert qp_cfg.target_aspect == pytest.approx(7.0)
+    assert qp_cfg.iota_abs_min == pytest.approx(0.41)
+    assert qp_cfg.iota_weight == pytest.approx(200.0)
+    assert qp_cfg.lgradb_threshold == pytest.approx(0.30)
+    assert qp_cfg.lgradb_weight == pytest.approx(0.0)
+    assert qp_cfg.project_input_boundary_to_max_mode
+    assert qi_cfg.input_file.name == "input.nfp2_QI"
+    assert qi_cfg.target_aspect == pytest.approx(7.0)
+    assert qi_cfg.iota_abs_min == pytest.approx(0.41)
+    assert qi_cfg.iota_weight == pytest.approx(200.0)
+    assert qi_cfg.aspect_weight == pytest.approx(1.0)
+    assert qi_cfg.qi_lgradb_weight == pytest.approx(0.0)
+    assert qi_cfg.project_input_boundary_to_max_mode
+    assert qi_cfg.qi_mboz == 18
+    assert qi_cfg.qi_nboz == 18
+    assert qi_cfg.qi_nphi == 151
+    assert qi_cfg.qi_nalpha == 31
+    assert qi_cfg.qi_n_bounce == 51
+    assert qi_cfg.qi_profile_weight == 0.0
+    assert not qi_cfg.qi_preseed_qi
+
+
+def test_continuation_stage_modes_follow_omnigenity_repeated_policy():
+    sweep = _load_sweep_module()
+
+    assert sweep._stage_modes_for_problem(
+        sweep.PROBLEM_CONFIGS["qa"],
+        max_mode=3,
+        use_mode_continuation=True,
+    ) == [1, 2, 2, 3, 3]
+    assert sweep._stage_modes_for_problem(
+        sweep.PROBLEM_CONFIGS["qh"],
+        max_mode=2,
+        use_mode_continuation=True,
+    ) == [1, 2, 2]
+    assert sweep._stage_modes_for_problem(
+        sweep.PROBLEM_CONFIGS["qi"],
+        max_mode=3,
+        use_mode_continuation=True,
+    ) == [3, 3, 3, 3, 3]
+    assert sweep._stage_modes_for_problem(
+        sweep.PROBLEM_CONFIGS["qa"],
+        max_mode=3,
+        use_mode_continuation=False,
+    ) == [3]
+
+
+def test_qi_renderer_plots_only_qi_refinement_after_qp_preseed():
+    renderer = _load_qi_renderer_module()
+
+    history = [
+        {"stage": "QP preseed max_mode=1", "objective": 10.0},
+        {"stage": "QP preseed max_mode=1", "objective": 1.0},
+        {"stage": "QI max_mode=1", "objective": 0.2},
+        {"stage": "QI max_mode=1", "objective": 0.05},
+    ]
+
+    segments = renderer._plotted_history_segments({"qi_qp_preseed": True}, history)
+
+    assert len(segments) == 1
+    assert [item["stage"] for item in segments[0]] == ["QI max_mode=1", "QI max_mode=1"]
 
 
 def test_qs_ess_renderer_ignores_legacy_backendless_records(tmp_path, monkeypatch):

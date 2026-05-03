@@ -11,9 +11,12 @@ level-set widths:
 
 where ``H`` is a logistic approximation to the step function.  A QI surface has
 widths that are independent of ``alpha`` for every level ``B_j``.  The residual
-also includes a smooth profile-consistency term at fixed toroidal angle.  This
-prevents single-helicity QH-like fields from scoring artificially well just
-because changing ``alpha`` phase-shifts a well without changing its width.
+can also include two profile-consistency terms. ``profile_weight`` compares
+profiles at fixed toroidal angle, while ``aligned_profile_weight`` first aligns
+each field line by a smooth estimate of its well minimum and then compares only
+the trapped-well part of the profile.  The aligned term is closer to the
+branch/shuffle diagnostic used in the reference ``omnigenity_optimization``
+workflow while remaining differentiable.
 """
 
 from __future__ import annotations
@@ -26,6 +29,8 @@ from ._compat import jnp
 
 __all__ = [
     "boundary_max_elongation_from_rz",
+    "lgradb_from_state",
+    "lgradb_penalty_from_state",
     "max_elongation_penalty_from_state",
     "mirror_ratio_penalty_from_boozer_modes",
     "mirror_ratio_penalty_from_boozer_output",
@@ -340,6 +345,189 @@ def max_elongation_penalty_from_state(
     }
 
 
+def _state_with_physical_m1_modes(state, static):
+    """Return a state whose m=1 modes use the public VMEC convention."""
+    from .state import VMECState
+    from .vmec_parity import vmec_m1_internal_to_physical_signed
+
+    cfg = static.cfg
+    lconm1 = bool(getattr(cfg, "lconm1", True))
+    lthreed = bool(getattr(cfg, "lthreed", int(getattr(cfg, "ntor", 0)) > 0))
+    lasym = bool(getattr(cfg, "lasym", False))
+    if not (lconm1 and (lthreed or lasym) and int(getattr(cfg, "mpol", 0)) > 1):
+        return state
+    Rcos, Zsin, Rsin, Zcos = vmec_m1_internal_to_physical_signed(
+        Rcos=state.Rcos,
+        Zsin=state.Zsin,
+        Rsin=state.Rsin,
+        Zcos=state.Zcos,
+        modes=static.modes,
+        lthreed=lthreed,
+        lasym=lasym,
+        lconm1=lconm1,
+    )
+    return VMECState(
+        layout=state.layout,
+        Rcos=Rcos,
+        Rsin=Rsin,
+        Zcos=Zcos,
+        Zsin=Zsin,
+        Lcos=state.Lcos,
+        Lsin=state.Lsin,
+    )
+
+
+def _periodic_central_diff(values, *, spacing: float, axis: int):
+    spacing_arr = jnp.asarray(float(spacing), dtype=jnp.asarray(values).dtype)
+    return (jnp.roll(values, -1, axis=axis) - jnp.roll(values, 1, axis=axis)) / (2.0 * spacing_arr)
+
+
+def _metric_inverse_at_surface(geom, *, s_index: int):
+    g = jnp.stack(
+        [
+            jnp.stack([geom.g_ss[s_index], geom.g_st[s_index], geom.g_sp[s_index]], axis=-1),
+            jnp.stack([geom.g_st[s_index], geom.g_tt[s_index], geom.g_tp[s_index]], axis=-1),
+            jnp.stack([geom.g_sp[s_index], geom.g_tp[s_index], geom.g_pp[s_index]], axis=-1),
+        ],
+        axis=-2,
+    )
+    return jnp.linalg.inv(g)
+
+
+def lgradb_from_state(
+    *,
+    state,
+    static,
+    indata,
+    signgs: int,
+    s_index: int = -1,
+    ntheta: int = 9,
+    nphi: int = 7,
+    flux_local=None,
+):
+    """Evaluate the magnetic-gradient scale length on a VMEC surface.
+
+    This is the JAX-native analogue of the ``L_grad_B`` diagnostic used in the
+    reference SIMSOPT/``omnigenity_optimization`` examples.  It computes
+
+    ``L_grad_B = |B| sqrt(2 / (nabla B : nabla B))``
+
+    from the Cartesian magnetic field vector on a small VMEC grid.  Angular
+    derivatives use periodic centered differences and the radial derivative
+    uses the same differentiable finite-difference operator as the geometry
+    kernel.  The returned arrays are differentiable with respect to the VMEC
+    state and boundary parameters.
+    """
+    _require_jax()
+    if int(ntheta) < 4 or int(nphi) < 4:
+        raise ValueError("LgradB requires ntheta >= 4 and nphi >= 4")
+
+    from .energy import flux_profiles_from_indata
+    from .field import b_cartesian_from_bsup, bsup_from_geom
+    from .fourier import build_helical_basis
+    from .geom import _eval_geom_jit
+    from .grids import AngleGrid
+    from .radial import d_ds_coeffs
+
+    nfp = int(static.cfg.nfp)
+    theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta), endpoint=False, dtype=float)
+    phi = np.linspace(0.0, 2.0 * np.pi / float(nfp), int(nphi), endpoint=False, dtype=float)
+    zeta = phi * float(nfp)
+    grid = AngleGrid(theta=theta, zeta=zeta, nfp=nfp)
+    basis = build_helical_basis(static.modes, grid, cache=False)
+    s_grid = jnp.asarray(static.s, dtype=jnp.float64)
+
+    state_use = _state_with_physical_m1_modes(state, static)
+    geom = _eval_geom_jit(state_use, basis, s_grid, jnp.asarray(zeta, dtype=jnp.float64))
+    flux = flux_profiles_from_indata(indata, s_grid, signgs=int(signgs)) if flux_local is None else flux_local
+    bsupu, bsupv = bsup_from_geom(
+        geom,
+        phipf=flux.phipf,
+        chipf=flux.chipf,
+        nfp=nfp,
+        signgs=int(signgs),
+        lamscale=flux.lamscale,
+        flux_is_internal=True,
+    )
+    bcart = b_cartesian_from_bsup(geom, bsupu, bsupv, zeta=jnp.asarray(zeta, dtype=jnp.float64), nfp=nfp)
+
+    ns = int(bcart.shape[0])
+    s_idx = int(s_index)
+    if s_idx < 0:
+        s_idx += ns
+    if s_idx < 0 or s_idx >= ns:
+        raise ValueError(f"s_index {s_index} is outside the radial grid with ns={ns}")
+
+    db_ds = d_ds_coeffs(bcart, s_grid)[s_idx]
+    db_dtheta = _periodic_central_diff(bcart, spacing=2.0 * np.pi / int(ntheta), axis=1)[s_idx]
+    db_dphi = _periodic_central_diff(bcart, spacing=2.0 * np.pi / float(nfp) / int(nphi), axis=2)[s_idx]
+    db_dcoords = jnp.stack([db_ds, db_dtheta, db_dphi], axis=-2)
+
+    ginv = _metric_inverse_at_surface(geom, s_index=s_idx)
+    grad_b_cart_sq = jnp.einsum("...ic,...ij,...jc->...c", db_dcoords, ginv, db_dcoords)
+    grad_b_double_dot_grad_b = jnp.sum(grad_b_cart_sq, axis=-1)
+    tiny = jnp.asarray(jnp.finfo(bcart.dtype).tiny, dtype=bcart.dtype)
+    bmag = jnp.sqrt(jnp.maximum(jnp.sum(bcart[s_idx] * bcart[s_idx], axis=-1), tiny))
+    lgradb = bmag * jnp.sqrt(2.0 / jnp.maximum(grad_b_double_dot_grad_b, tiny))
+    return {
+        "L_grad_B": lgradb,
+        "grad_B_double_dot_grad_B": grad_b_double_dot_grad_b,
+        "B_cartesian": bcart[s_idx],
+        "Bmag": bmag,
+        "theta": jnp.asarray(theta, dtype=jnp.float64),
+        "phi": jnp.asarray(phi, dtype=jnp.float64),
+        "s_index": jnp.asarray(s_idx, dtype=jnp.int32),
+    }
+
+
+def lgradb_penalty_from_state(
+    *,
+    state,
+    static,
+    indata,
+    signgs: int,
+    threshold: float = 0.30,
+    s_index: int = -1,
+    ntheta: int = 9,
+    nphi: int = 7,
+    smooth_penalty: float = 0.0,
+    flux_local=None,
+):
+    """Penalize short magnetic-gradient scale length on a VMEC surface.
+
+    The residual follows the reference omnigenity scripts:
+
+    ``max(1/L_grad_B - 1/threshold, 0) / sqrt(ntheta*nphi)``.
+
+    Use this as an independent least-squares block, e.g. with residual weight
+    ``sqrt(0.01)`` to match the QI reference script.
+    """
+    out = lgradb_from_state(
+        state=state,
+        static=static,
+        indata=indata,
+        signgs=signgs,
+        s_index=s_index,
+        ntheta=ntheta,
+        nphi=nphi,
+        flux_local=flux_local,
+    )
+    lgradb = jnp.asarray(out["L_grad_B"], dtype=jnp.float64)
+    tiny = jnp.asarray(jnp.finfo(lgradb.dtype).tiny, dtype=lgradb.dtype)
+    excess = 1.0 / jnp.maximum(lgradb, tiny) - 1.0 / jnp.asarray(float(threshold), dtype=lgradb.dtype)
+    penalty = _positive_part(excess, softness=float(smooth_penalty))
+    residuals1d = jnp.ravel(penalty) / jnp.sqrt(jnp.asarray(int(ntheta) * int(nphi), dtype=lgradb.dtype))
+    return {
+        **out,
+        "residuals1d": residuals1d,
+        "total": jnp.sum(residuals1d * residuals1d),
+        "penalty": penalty,
+        "threshold": jnp.asarray(float(threshold), dtype=lgradb.dtype),
+        "excess": excess,
+        "min_L_grad_B": jnp.min(lgradb),
+    }
+
+
 def quasi_isodynamic_residual_from_boozer_modes(
     *,
     bmnc_b,
@@ -352,7 +540,14 @@ def quasi_isodynamic_residual_from_boozer_modes(
     nalpha: int = 31,
     n_bounce: int = 51,
     softness: float = 2.0e-2,
+    width_weight: float = 1.0,
+    branch_width_weight: float = 0.0,
+    branch_width_softness: float = 1.0e-2,
     profile_weight: float = 1.0,
+    aligned_profile_weight: float = 0.0,
+    aligned_profile_softness: float = 2.0e-2,
+    aligned_profile_trap_level: float = 0.65,
+    aligned_profile_trap_softness: float = 5.0e-2,
     phimin: float = 0.0,
 ):
     """Evaluate a smooth QI residual from Boozer ``|B|`` Fourier modes.
@@ -377,9 +572,31 @@ def quasi_isodynamic_residual_from_boozer_modes(
     softness:
         Logistic smoothing width in normalized ``|B|`` units. Smaller values
         approach hard branch widths but increase stiffness.
+    width_weight:
+        Relative weight for the smooth level-set occupancy width residual.
+    branch_width_weight:
+        Relative weight for a branch-based trapped-well width residual.  This
+        follows the reference omnigenity objective more closely than the
+        occupancy width: each field line is split at its well minimum, each
+        side is made monotone with a cumulative maximum, and level crossings
+        are computed with a smooth inverse.
+    branch_width_softness:
+        Normalized ``|B|`` smoothing width for branch level crossings.
     profile_weight:
         Relative weight for the field-line profile consistency residual.  Set
         to 0 to recover the width-only surrogate.
+    aligned_profile_weight:
+        Relative weight for a differentiable trapped-well profile residual.
+        Each field-line profile is circularly shifted by its smooth minimum
+        before comparing against the mean over field-line label.  This is a
+        smooth surrogate for the branch/shuffle profile comparison in the
+        reference QI scripts.
+    aligned_profile_softness:
+        Temperature used for the smooth circular argmin that locates each well
+        minimum in normalized ``|B|`` units.
+    aligned_profile_trap_level, aligned_profile_trap_softness:
+        Logistic trapped-region window applied to the aligned profiles.  Values
+        below ``aligned_profile_trap_level`` receive the most weight.
     phimin:
         Start of the toroidal interval. The interval length is one field period.
 
@@ -436,8 +653,60 @@ def quasi_isodynamic_residual_from_boozer_modes(
     # to the bounce width used in the branch-based diagnostic.
     widths = jnp.mean(occupancy, axis=1)
     widths_mean = jnp.mean(widths, axis=1, keepdims=True)
-    width_residuals3d = (widths - widths_mean) * jnp.sqrt(weights_arr)[:, None, None]
+    width_residuals3d = (
+        (widths - widths_mean)
+        * jnp.sqrt(weights_arr)[:, None, None]
+        * jnp.asarray(float(width_weight), dtype=dtype)
+    )
     width_residuals1d = jnp.ravel(width_residuals3d) / jnp.sqrt(jnp.asarray(nalpha * n_bounce, dtype=dtype))
+
+    branch_width_residuals1d = jnp.zeros((0,), dtype=dtype)
+    branch_width_residuals3d = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
+    branch_widths = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
+    branch_widths_mean = jnp.zeros((nsurf, 1, 0), dtype=dtype)
+    if float(branch_width_weight) != 0.0:
+        bperiodic = jnp.swapaxes(bnorm[:, :-1, :], 1, 2)  # (nsurf, nalpha, nperiodic)
+        nperiodic = int(nphi - 1)
+        half_period = max(1, nperiodic // 2)
+        offsets = jnp.arange(half_period + 1, dtype=jnp.int32)
+        min_index = jnp.argmin(bperiodic, axis=-1)
+        left_index = jnp.mod(min_index[:, :, None] - offsets[None, None, :], nperiodic)
+        right_index = jnp.mod(min_index[:, :, None] + offsets[None, None, :], nperiodic)
+        left_raw = jnp.take_along_axis(bperiodic, left_index, axis=-1)
+        right_raw = jnp.take_along_axis(bperiodic, right_index, axis=-1)
+
+        left_branch = jnp.maximum.accumulate(left_raw, axis=-1)
+        right_branch = jnp.maximum.accumulate(right_raw, axis=-1)
+        tiny = jnp.asarray(jnp.finfo(dtype).tiny, dtype=dtype)
+        left_branch = (left_branch - left_branch[..., :1]) / jnp.maximum(left_branch[..., -1:] - left_branch[..., :1], tiny)
+        right_branch = (right_branch - right_branch[..., :1]) / jnp.maximum(
+            right_branch[..., -1:] - right_branch[..., :1], tiny
+        )
+        distance = jnp.asarray(offsets, dtype=dtype) / jnp.asarray(nperiodic, dtype=dtype)
+        branch_eps = jnp.maximum(
+            jnp.asarray(float(branch_width_softness), dtype=dtype),
+            jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype),
+        )
+
+        def _smooth_branch_crossing(branch):
+            logits = -((branch[:, :, :, None] - levels[None, None, None, :]) / branch_eps) ** 2
+            logits = logits - jnp.max(logits, axis=2, keepdims=True)
+            crossing_weights = jnp.exp(logits)
+            crossing_weights = crossing_weights / jnp.sum(crossing_weights, axis=2, keepdims=True)
+            return jnp.sum(crossing_weights * distance[None, None, :, None], axis=2)
+
+        left_crossing = _smooth_branch_crossing(left_branch)
+        right_crossing = _smooth_branch_crossing(right_branch)
+        branch_widths = left_crossing + right_crossing
+        branch_widths_mean = jnp.mean(branch_widths, axis=1, keepdims=True)
+        branch_width_residuals3d = (
+            (branch_widths - branch_widths_mean)
+            * jnp.sqrt(weights_arr)[:, None, None]
+            * jnp.asarray(float(branch_width_weight), dtype=dtype)
+        )
+        branch_width_residuals1d = jnp.ravel(branch_width_residuals3d) / jnp.sqrt(
+            jnp.asarray(nalpha * n_bounce, dtype=dtype)
+        )
 
     profile_mean = jnp.mean(bnorm, axis=2, keepdims=True)
     profile_residuals3d = (
@@ -446,19 +715,77 @@ def quasi_isodynamic_residual_from_boozer_modes(
         * jnp.asarray(float(profile_weight), dtype=dtype)
     )
     profile_residuals1d = jnp.ravel(profile_residuals3d) / jnp.sqrt(jnp.asarray(nalpha * nphi, dtype=dtype))
-    residuals1d = jnp.concatenate([width_residuals1d, profile_residuals1d])
+    aligned_profile_residuals1d = jnp.zeros((0,), dtype=dtype)
+    aligned_profile_residuals3d = jnp.zeros((nsurf, 0, nalpha), dtype=dtype)
+    aligned_profile = jnp.zeros((nsurf, 0, nalpha), dtype=dtype)
+    aligned_profile_mean = jnp.zeros((nsurf, 0, 1), dtype=dtype)
+    aligned_profile_trap_weight = jnp.zeros((nsurf, 0, nalpha), dtype=dtype)
+    aligned_min_phi = jnp.zeros((nsurf, nalpha), dtype=dtype)
+    if float(aligned_profile_weight) != 0.0:
+        # The base phi grid includes both endpoints for the width integral.
+        # Drop the repeated endpoint before using FFT-based periodic shifts.
+        bperiodic = bnorm[:, :-1, :]
+        nperiodic = int(nphi - 1)
+        period = jnp.asarray(2.0 * np.pi / nfp, dtype=dtype)
+        min_temperature = jnp.maximum(
+            jnp.asarray(float(aligned_profile_softness), dtype=dtype),
+            jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype),
+        )
+        shifted_for_weights = bperiodic - jnp.min(bperiodic, axis=1, keepdims=True)
+        argmin_weights = jnp.exp(-shifted_for_weights / min_temperature)
+        argmin_weights = argmin_weights / jnp.sum(argmin_weights, axis=1, keepdims=True)
+        grid_angle = 2.0 * jnp.pi * jnp.arange(nperiodic, dtype=dtype) / jnp.asarray(nperiodic, dtype=dtype)
+        z = jnp.sum(argmin_weights * jnp.exp(1j * grid_angle)[None, :, None], axis=1)
+        min_angle = jnp.mod(jnp.angle(z), 2.0 * jnp.pi)
+        aligned_min_phi = min_angle * period / (2.0 * jnp.pi) + phi0
+
+        # g(phi) = f(phi + phi_min) aligns the minimum near phi=0.
+        coeffs = jnp.fft.fft(bperiodic, axis=1)
+        mode_numbers = jnp.fft.fftfreq(nperiodic) * jnp.asarray(nperiodic, dtype=dtype)
+        phase = jnp.exp(1j * 2.0 * jnp.pi * mode_numbers[None, :, None] * (aligned_min_phi - phi0)[:, None, :] / period)
+        aligned_profile = jnp.real(jnp.fft.ifft(coeffs * phase, axis=1))
+        aligned_profile_mean = jnp.mean(aligned_profile, axis=2, keepdims=True)
+        trap_eps = jnp.maximum(
+            jnp.asarray(float(aligned_profile_trap_softness), dtype=dtype),
+            jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype),
+        )
+        aligned_profile_trap_weight = jax_sigmoid(
+            (jnp.asarray(float(aligned_profile_trap_level), dtype=dtype) - aligned_profile) / trap_eps
+        )
+        aligned_profile_residuals3d = (
+            (aligned_profile - aligned_profile_mean)
+            * aligned_profile_trap_weight
+            * jnp.sqrt(weights_arr)[:, None, None]
+            * jnp.asarray(float(aligned_profile_weight), dtype=dtype)
+        )
+        aligned_profile_residuals1d = jnp.ravel(aligned_profile_residuals3d) / jnp.sqrt(
+            jnp.asarray(nalpha * nperiodic, dtype=dtype)
+        )
+    residuals1d = jnp.concatenate(
+        [width_residuals1d, branch_width_residuals1d, profile_residuals1d, aligned_profile_residuals1d]
+    )
     total = jnp.sum(residuals1d * residuals1d)
     return {
         "residuals1d": residuals1d,
         "residuals3d": width_residuals3d,
         "width_residuals1d": width_residuals1d,
         "width_residuals3d": width_residuals3d,
+        "branch_width_residuals1d": branch_width_residuals1d,
+        "branch_width_residuals3d": branch_width_residuals3d,
         "profile_residuals1d": profile_residuals1d,
         "profile_residuals3d": profile_residuals3d,
+        "aligned_profile_residuals1d": aligned_profile_residuals1d,
+        "aligned_profile_residuals3d": aligned_profile_residuals3d,
         "total": total,
         "widths": widths,
         "widths_mean": widths_mean,
+        "branch_widths": branch_widths,
+        "branch_widths_mean": branch_widths_mean,
         "profile_mean": profile_mean,
+        "aligned_profile": aligned_profile,
+        "aligned_profile_mean": aligned_profile_mean,
+        "aligned_profile_trap_weight": aligned_profile_trap_weight,
+        "aligned_min_phi": aligned_min_phi,
         "bmag": bmag,
         "bnorm": bnorm,
         "levels": levels,
@@ -482,7 +809,14 @@ def quasi_isodynamic_residual_from_boozer_output(
     nalpha: int = 31,
     n_bounce: int = 51,
     softness: float = 2.0e-2,
+    width_weight: float = 1.0,
+    branch_width_weight: float = 0.0,
+    branch_width_softness: float = 1.0e-2,
     profile_weight: float = 1.0,
+    aligned_profile_weight: float = 0.0,
+    aligned_profile_softness: float = 2.0e-2,
+    aligned_profile_trap_level: float = 0.65,
+    aligned_profile_trap_softness: float = 5.0e-2,
     phimin: float = 0.0,
 ):
     """Evaluate the smooth QI residual from a ``booz_xform_jax`` output dict."""
@@ -498,7 +832,14 @@ def quasi_isodynamic_residual_from_boozer_output(
         nalpha=nalpha,
         n_bounce=n_bounce,
         softness=softness,
+        width_weight=width_weight,
+        branch_width_weight=branch_width_weight,
+        branch_width_softness=branch_width_softness,
         profile_weight=profile_weight,
+        aligned_profile_weight=aligned_profile_weight,
+        aligned_profile_softness=aligned_profile_softness,
+        aligned_profile_trap_level=aligned_profile_trap_level,
+        aligned_profile_trap_softness=aligned_profile_trap_softness,
         phimin=phimin,
     )
 
@@ -517,7 +858,14 @@ def quasi_isodynamic_residual_from_state(
     nalpha: int = 31,
     n_bounce: int = 51,
     softness: float = 2.0e-2,
+    width_weight: float = 1.0,
+    branch_width_weight: float = 0.0,
+    branch_width_softness: float = 1.0e-2,
     profile_weight: float = 1.0,
+    aligned_profile_weight: float = 0.0,
+    aligned_profile_softness: float = 2.0e-2,
+    aligned_profile_trap_level: float = 0.65,
+    aligned_profile_trap_softness: float = 5.0e-2,
     phimin: float = 0.0,
     flux_local=None,
     prof_local=None,
@@ -585,7 +933,14 @@ def quasi_isodynamic_residual_from_state(
         nalpha=nalpha,
         n_bounce=n_bounce,
         softness=softness,
+        width_weight=width_weight,
+        branch_width_weight=branch_width_weight,
+        branch_width_softness=branch_width_softness,
         profile_weight=profile_weight,
+        aligned_profile_weight=aligned_profile_weight,
+        aligned_profile_softness=aligned_profile_softness,
+        aligned_profile_trap_level=aligned_profile_trap_level,
+        aligned_profile_trap_softness=aligned_profile_trap_softness,
         phimin=phimin,
     )
     return {

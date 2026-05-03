@@ -25,6 +25,7 @@ import numpy as np
 
 import vmec_jax as vj
 from vmec_jax._compat import enable_x64, jnp
+from vmec_jax.quasi_isodynamic import lgradb_penalty_from_state
 from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_state
 from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
@@ -160,6 +161,46 @@ def quasisymmetry_objective(
     )
 
 
+def lgradb_objective(
+    *,
+    threshold: float,
+    weight: float = 1.0,
+    s_index: int = -1,
+    ntheta: int = 9,
+    nphi: int = 7,
+    smooth_penalty: float = 0.0,
+) -> ObjectiveTerm:
+    """Minimum ``L_grad_B`` objective used by the omnigenity examples.
+
+    This objective penalizes locations where the local magnetic-field scale
+    length is below ``threshold``.  It is a differentiable JAX objective, so it
+    can be appended to the same least-squares list as quasisymmetry, aspect
+    ratio, or iota terms.
+    """
+
+    def _lgradb(ctx: StageContext, state):
+        return lgradb_penalty_from_state(
+            state=state,
+            static=ctx.static,
+            indata=ctx.indata,
+            signgs=ctx.signgs,
+            flux_local=ctx.flux,
+            threshold=float(threshold),
+            s_index=int(s_index),
+            ntheta=int(ntheta),
+            nphi=int(nphi),
+            smooth_penalty=float(smooth_penalty),
+        )
+
+    return ObjectiveTerm(
+        "LgradB",
+        lambda ctx, state: _lgradb(ctx, state)["residuals1d"],
+        target=0.0,
+        weight=weight,
+        total=lambda ctx, state: float(weight) ** 2 * _lgradb(ctx, state)["total"],
+    )
+
+
 def mean_iota(ctx: StageContext, state):
     """Mean rotational transform on full-mesh surfaces, excluding the axis."""
 
@@ -190,10 +231,18 @@ def qs_stage_modes(
     use_mode_continuation: bool,
     continuation_nfev: int,
 ) -> list[int]:
-    """Mode-continuation sequence for a user-facing fixed-boundary script."""
+    """Mode-continuation sequence for a user-facing fixed-boundary script.
+
+    The omnigenity reference examples repeatedly optimize at a given active
+    mode before increasing the boundary space.  We keep a mode-1 seed pass and
+    then repeat the higher modes, so max-mode 3 gives ``[1, 2, 2, 3, 3]``.
+    """
 
     if bool(use_mode_continuation) and int(max_mode) > 1 and int(continuation_nfev) > 0:
-        return list(range(1, int(max_mode) + 1))
+        modes: list[int] = [1]
+        for mode in range(2, int(max_mode) + 1):
+            modes.extend([mode, mode])
+        return modes
     return [int(max_mode)]
 
 

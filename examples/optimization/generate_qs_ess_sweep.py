@@ -44,6 +44,7 @@ import argparse
 from dataclasses import asdict, dataclass, replace
 import csv
 import json
+import math
 import multiprocessing as mp
 import os
 from pathlib import Path
@@ -67,6 +68,7 @@ from vmec_jax.namelist import InData
 from vmec_jax.optimization import rebuild_indata_with_resolution
 from vmec_jax.quasi_isodynamic import (
     _nearest_half_mesh_indices,
+    lgradb_penalty_from_state,
     max_elongation_penalty_from_state,
     mirror_ratio_penalty_from_boozer_output,
     quasi_isodynamic_residual_from_state,
@@ -93,7 +95,13 @@ BACKEND_LABEL = "cpu"
 SOLVER_DEVICE: str | None = None
 SKIP_EXISTING = True
 CASE_TIMEOUT_S: float | None = 1200.0
-ESS_ALPHA = 2.5
+ESS_ALPHA = 1.2
+TARGET_ASPECT = 7.0
+TARGET_ABS_IOTA_MIN = 0.41
+HIGH_PRIORITY_IOTA_WEIGHT = 200.0
+OPTIONAL_LGRADB_THRESHOLD = 0.30
+OPTIONAL_LGRADB_WEIGHT = 0.0
+OPTIONAL_QI_LGRADB_WEIGHT = 0.0
 STELLARATOR_ASYMMETRIC = False
 ASYMMETRIC_SEED = 1.0e-7
 DIAGNOSTIC_BUDGETS = False
@@ -213,14 +221,27 @@ class ProblemConfig:
     iota_weight: float = 1.0
     iota_floor_weight: float | None = None
     qs_weight: float = 1.0
+    lgradb_threshold: float = 0.30
+    lgradb_weight: float = 0.0
+    lgradb_ntheta: int = 9
+    lgradb_nphi: int = 7
+    lgradb_surface_index: int = -1
+    lgradb_smooth_penalty: float = 0.0
     objective_kind: str = "qs"
-    qi_mboz: int = 6
-    qi_nboz: int = 6
-    qi_nphi: int = 41
-    qi_nalpha: int = 13
-    qi_n_bounce: int = 11
+    qi_mboz: int = 12
+    qi_nboz: int = 12
+    qi_nphi: int = 101
+    qi_nalpha: int = 21
+    qi_n_bounce: int = 31
     qi_softness: float = 2.0e-2
-    qi_profile_weight: float = 1.0
+    qi_width_weight: float = 1.0
+    qi_branch_width_weight: float = 0.0
+    qi_branch_width_softness: float = 1.0e-2
+    qi_profile_weight: float = 0.0
+    qi_aligned_profile_weight: float = 0.0
+    qi_aligned_profile_softness: float = 2.0e-2
+    qi_aligned_profile_trap_level: float = 0.65
+    qi_aligned_profile_trap_softness: float = 5.0e-2
     qi_max_mirror_ratio: float = 0.21
     qi_mirror_weight: float = 10.0
     qi_mirror_ntheta: int = 96
@@ -230,39 +251,45 @@ class ProblemConfig:
     qi_elongation_weight: float = 10.0
     qi_elongation_ntheta: int = 48
     qi_elongation_nphi: int = 16
+    qi_lgradb_threshold: float = 0.30
+    qi_lgradb_weight: float = 0.0
+    qi_lgradb_ntheta: int = 9
+    qi_lgradb_nphi: int = 7
+    qi_lgradb_surface_index: int = -1
+    qi_lgradb_smooth_penalty: float = 0.0
     qi_preseed_qp: bool = False
     qi_preseed_qi: bool = False
     qi_preseed_qi_nfev: int = 30
     project_input_boundary_to_max_mode: bool = False
+    min_vmec_mode: int = MIN_VMEC_MODE
 
 
 PROBLEM_CONFIGS = {
     "qa": ProblemConfig(
         name="qa",
-        input_file=DATA_DIR / "input.nfp2_QA",
+        input_file=DATA_DIR / "input.nfp2_QA_omnigenity",
         method="scipy",
         scipy_tr_solver="lsmr",
         scipy_lsmr_maxiter=None,
         max_nfev=60,
-        continuation_nfev=30,
-        ftol=1e-6,
-        gtol=1e-6,
-        xtol=1e-6,
-        # QA direct max_mode=3 can fall into a zero-iota stationary branch:
-        # aspect and QS improve, but iota does not move.  ESS is still useful
-        # for conditioning, but staged mode continuation is the reliable path
-        # for the documented finite-iota QA minimum.
+        continuation_nfev=60,
+        ftol=1e-4,
+        gtol=1e-4,
+        xtol=1e-4,
         ess_alpha=ESS_ALPHA,
-        target_aspect=6.0,
-        target_iota=0.41,
-        iota_weight=10.0,
+        target_aspect=TARGET_ASPECT,
+        target_iota=0.42,
+        iota_weight=HIGH_PRIORITY_IOTA_WEIGHT,
         surfaces=np.arange(0.0, 1.01, 0.1),
         helicity_m=1,
         helicity_n=0,
-        inner_max_iter=0,
-        inner_ftol=0.0,
-        trial_max_iter=300,
-        trial_ftol=1e-10,
+        inner_max_iter=120,
+        inner_ftol=1e-9,
+        trial_max_iter=120,
+        trial_ftol=1e-9,
+        lgradb_threshold=OPTIONAL_LGRADB_THRESHOLD,
+        lgradb_weight=OPTIONAL_LGRADB_WEIGHT,
+        min_vmec_mode=6,
     ),
     "qh": ProblemConfig(
         name="qh",
@@ -270,37 +297,40 @@ PROBLEM_CONFIGS = {
         method="scipy",
         scipy_tr_solver="lsmr",
         scipy_lsmr_maxiter=None,
-        max_nfev=60,
+        max_nfev=30,
         continuation_nfev=30,
-        ftol=1e-6,
-        gtol=1e-6,
-        xtol=1e-6,
+        ftol=1e-4,
+        gtol=1e-4,
+        xtol=1e-4,
         ess_alpha=ESS_ALPHA,
-        target_aspect=7.0,
+        target_aspect=TARGET_ASPECT,
         target_iota=None,
-        iota_abs_min=0.4,
-        iota_weight=100.0,
+        iota_abs_min=TARGET_ABS_IOTA_MIN,
         surfaces=np.arange(0.0, 1.01, 0.1),
         helicity_m=1,
         helicity_n=-1,
-        inner_max_iter=0,
-        inner_ftol=0.0,
-        trial_max_iter=300,
-        trial_ftol=1e-10,
+        inner_max_iter=120,
+        inner_ftol=1e-9,
+        trial_max_iter=120,
+        trial_ftol=1e-9,
+        lgradb_threshold=OPTIONAL_LGRADB_THRESHOLD,
+        iota_weight=HIGH_PRIORITY_IOTA_WEIGHT,
+        lgradb_weight=OPTIONAL_LGRADB_WEIGHT,
+        min_vmec_mode=6,
     ),
     "qp": ProblemConfig(
         name="qp",
-        input_file=DATA_DIR / "input.nfp4_QH_warm_start",
+        input_file=DATA_DIR / "input.nfp2_QI",
         method="scipy",
         scipy_tr_solver="lsmr",
         scipy_lsmr_maxiter=None,
-        max_nfev=50,
-        continuation_nfev=20,
-        ftol=1e-5,
-        gtol=1e-5,
-        xtol=1e-5,
+        max_nfev=40,
+        continuation_nfev=30,
+        ftol=1e-4,
+        gtol=1e-4,
+        xtol=1e-4,
         ess_alpha=ESS_ALPHA,
-        target_aspect=7.0,
+        target_aspect=TARGET_ASPECT,
         target_iota=None,
         surfaces=np.arange(0.0, 1.01, 0.1),
         helicity_m=0,
@@ -309,8 +339,12 @@ PROBLEM_CONFIGS = {
         inner_ftol=1e-9,
         trial_max_iter=120,
         trial_ftol=1e-9,
-        iota_abs_min=0.4,
-        iota_weight=100.0,
+        iota_abs_min=TARGET_ABS_IOTA_MIN,
+        iota_weight=HIGH_PRIORITY_IOTA_WEIGHT,
+        project_input_boundary_to_max_mode=True,
+        lgradb_threshold=OPTIONAL_LGRADB_THRESHOLD,
+        lgradb_weight=OPTIONAL_LGRADB_WEIGHT,
+        min_vmec_mode=6,
     ),
     "qi": ProblemConfig(
         name="qi",
@@ -319,40 +353,59 @@ PROBLEM_CONFIGS = {
         scipy_tr_solver="lsmr",
         scipy_lsmr_maxiter=None,
         max_nfev=30,
-        continuation_nfev=12,
+        continuation_nfev=30,
         ftol=1e-4,
         gtol=1e-4,
         xtol=1e-4,
-        ess_alpha=ESS_ALPHA,
-        target_aspect=7.0,
+        # The reference omnigenity workflow uses a gentler alpha than the QS
+        # examples.  Aspect 7 is less restrictive than the aspect-5 pass and
+        # better preserves the QI/QS minima found before adding LgradB.
+        ess_alpha=1.2,
+        target_aspect=TARGET_ASPECT,
+        aspect_weight=1.0,
         target_iota=None,
-        surfaces=np.linspace(0.2, 1.0, 5),
+        surfaces=np.linspace(0.1, 1.0, 6),
         helicity_m=0,
         helicity_n=0,
         inner_max_iter=120,
         inner_ftol=1e-9,
         trial_max_iter=120,
         trial_ftol=1e-9,
-        iota_abs_min=0.4,
-        iota_weight=100.0,
+        iota_abs_min=TARGET_ABS_IOTA_MIN,
+        iota_weight=HIGH_PRIORITY_IOTA_WEIGHT,
         objective_kind="qi",
-        qi_mboz=6,
-        qi_nboz=6,
-        qi_nphi=41,
-        qi_nalpha=13,
-        qi_n_bounce=11,
+        qi_mboz=18,
+        qi_nboz=18,
+        qi_nphi=151,
+        qi_nalpha=31,
+        qi_n_bounce=51,
         qi_softness=2.0e-2,
-        qi_profile_weight=1.5,
+        qi_width_weight=1.0,
+        qi_branch_width_weight=1.0,
+        qi_branch_width_softness=2.0e-2,
+        qi_profile_weight=0.0,
+        qi_aligned_profile_weight=0.0,
+        qi_aligned_profile_softness=2.0e-2,
+        qi_aligned_profile_trap_level=0.65,
+        qi_aligned_profile_trap_softness=5.0e-2,
         qi_max_mirror_ratio=0.21,
         # Match the reference SIMSOPT QI script: MirrorRatioPen and
         # MaxElongationPen are scalar residuals with least-squares weight 1e1.
-        qi_mirror_weight=10.0,
+        qi_mirror_weight=math.sqrt(10.0),
         qi_max_elongation=8.0,
-        qi_elongation_weight=10.0,
+        qi_elongation_weight=math.sqrt(10.0),
+        # Optional LgradB term.  Keep it inactive by default so symmetry/QI,
+        # iota, aspect, mirror ratio, and elongation set the optimization path.
+        qi_lgradb_threshold=OPTIONAL_LGRADB_THRESHOLD,
+        qi_lgradb_weight=OPTIONAL_QI_LGRADB_WEIGHT,
+        qi_lgradb_ntheta=9,
+        qi_lgradb_nphi=7,
+        qi_lgradb_surface_index=-1,
         qi_preseed_qp=False,
-        qi_preseed_qi=True,
+        qi_preseed_qi=False,
         qi_preseed_qi_nfev=30,
         project_input_boundary_to_max_mode=True,
+        min_vmec_mode=6,
     ),
 }
 
@@ -384,6 +437,12 @@ class CaseResult:
     input_file: str | None = None
     input_nfp: int | None = None
     project_input_boundary_to_max_mode: bool | None = None
+    target_aspect: float | None = None
+    target_iota: float | None = None
+    iota_abs_min: float | None = None
+    iota_weight: float | None = None
+    lgradb_weight: float | None = None
+    qi_lgradb_weight: float | None = None
     asymmetric_dof_count: int = 0
     asymmetric_param_norm_initial: float | None = None
     asymmetric_param_norm_final: float | None = None
@@ -392,6 +451,10 @@ class CaseResult:
     bmag_max: float | None = None
     bmag_nonpositive_fraction: float | None = None
     bmag_finite: bool | None = None
+    lgradb_min: float | None = None
+    lgradb_threshold: float | None = None
+    lgradb_excess_max: float | None = None
+    lgradb_diagnostic_error: str | None = None
     qi_qp_preseed: bool | None = None
     qi_qi_preseed: bool | None = None
     qi_raw_total: float | None = None
@@ -401,6 +464,9 @@ class CaseResult:
     qi_max_elongation: float | None = None
     qi_elongation_target: float | None = None
     qi_elongation_excess: float | None = None
+    qi_lgradb_min: float | None = None
+    qi_lgradb_threshold: float | None = None
+    qi_lgradb_excess_max: float | None = None
     qi_diagnostic_error: str | None = None
 
 
@@ -428,7 +494,7 @@ def _panel_label(index: int) -> str:
 def _ess_alpha_for_case(problem_cfg: ProblemConfig, problem: str, max_mode: int, use_ess: bool) -> float:
     if not use_ess:
         return 0.0
-    return ESS_ALPHA
+    return float(problem_cfg.ess_alpha)
 
 
 def _effective_problem_config(
@@ -640,6 +706,45 @@ def _slice_boozer_surfaces(booz: dict, surface_index: int) -> dict:
     return out
 
 
+def _lgradb_diagnostics_from_state(problem_cfg: ProblemConfig, opt, state) -> dict[str, float | str | None]:
+    """Evaluate the independent LgradB diagnostic for QS targets."""
+
+    if problem_cfg.objective_kind == "qi" or state is None or float(problem_cfg.lgradb_weight) == 0.0:
+        return {}
+    try:
+        static = opt._static
+        indata = opt._indata
+        geom = eval_geom(state, static)
+        signgs = int(signgs_from_sqrtg(np.asarray(geom.sqrtg), axis_index=1))
+        flux = vj.flux_profiles_from_indata(indata, static.s, signgs=signgs)
+        lgradb = lgradb_penalty_from_state(
+            state=state,
+            static=static,
+            indata=indata,
+            signgs=signgs,
+            flux_local=flux,
+            threshold=problem_cfg.lgradb_threshold,
+            s_index=problem_cfg.lgradb_surface_index,
+            ntheta=problem_cfg.lgradb_ntheta,
+            nphi=problem_cfg.lgradb_nphi,
+            smooth_penalty=problem_cfg.lgradb_smooth_penalty,
+        )
+        lgradb_values = np.asarray(lgradb["L_grad_B"], dtype=float)
+        lgradb_excess = np.asarray(lgradb["excess"], dtype=float)
+        return {
+            "lgradb_min": float(np.min(lgradb_values)),
+            "lgradb_threshold": float(problem_cfg.lgradb_threshold),
+            "lgradb_excess_max": max(0.0, float(np.max(lgradb_excess))),
+        }
+    except Exception as exc:
+        return {
+            "lgradb_min": None,
+            "lgradb_threshold": float(problem_cfg.lgradb_threshold),
+            "lgradb_excess_max": None,
+            "lgradb_diagnostic_error": f"{type(exc).__name__}: {exc}",
+        }
+
+
 def _qi_diagnostics_from_state(problem_cfg: ProblemConfig, opt, state) -> dict[str, float | bool | None]:
     """Evaluate unweighted QI, mirror-ratio, and elongation diagnostics."""
 
@@ -691,7 +796,14 @@ def _qi_diagnostics_from_state(problem_cfg: ProblemConfig, opt, state) -> dict[s
             nalpha=problem_cfg.qi_nalpha,
             n_bounce=problem_cfg.qi_n_bounce,
             softness=problem_cfg.qi_softness,
+            width_weight=problem_cfg.qi_width_weight,
+            branch_width_weight=problem_cfg.qi_branch_width_weight,
+            branch_width_softness=problem_cfg.qi_branch_width_softness,
             profile_weight=problem_cfg.qi_profile_weight,
+            aligned_profile_weight=problem_cfg.qi_aligned_profile_weight,
+            aligned_profile_softness=problem_cfg.qi_aligned_profile_softness,
+            aligned_profile_trap_level=problem_cfg.qi_aligned_profile_trap_level,
+            aligned_profile_trap_softness=problem_cfg.qi_aligned_profile_trap_softness,
             jit_booz=False,
             booz_constants=constants,
             booz_grids=grids,
@@ -712,9 +824,24 @@ def _qi_diagnostics_from_state(problem_cfg: ProblemConfig, opt, state) -> dict[s
             ntheta=problem_cfg.qi_elongation_ntheta,
             nphi=problem_cfg.qi_elongation_nphi,
         )
+        lgradb = lgradb_penalty_from_state(
+            state=state,
+            static=static,
+            indata=indata,
+            signgs=signgs,
+            flux_local=flux,
+            threshold=problem_cfg.qi_lgradb_threshold,
+            s_index=problem_cfg.qi_lgradb_surface_index,
+            ntheta=problem_cfg.qi_lgradb_ntheta,
+            nphi=problem_cfg.qi_lgradb_nphi,
+            smooth_penalty=problem_cfg.qi_lgradb_smooth_penalty,
+        )
         mirror_values = np.asarray(mirror["mirror_ratio"], dtype=float)
         mirror_max = float(np.max(mirror_values))
         elongation_max = float(np.asarray(elongation["max_elongation"]))
+        lgradb_values = np.asarray(lgradb["L_grad_B"], dtype=float)
+        lgradb_min = float(np.min(lgradb_values))
+        lgradb_excess = np.asarray(lgradb["excess"], dtype=float)
         return {
             "qi_raw_total": float(np.asarray(qi["total"])),
             "qi_mirror_ratio_max": mirror_max,
@@ -723,6 +850,9 @@ def _qi_diagnostics_from_state(problem_cfg: ProblemConfig, opt, state) -> dict[s
             "qi_max_elongation": elongation_max,
             "qi_elongation_target": float(problem_cfg.qi_max_elongation),
             "qi_elongation_excess": max(0.0, elongation_max - float(problem_cfg.qi_max_elongation)),
+            "qi_lgradb_min": lgradb_min,
+            "qi_lgradb_threshold": float(problem_cfg.qi_lgradb_threshold),
+            "qi_lgradb_excess_max": max(0.0, float(np.max(lgradb_excess))),
         }
     except Exception as exc:
         return {
@@ -733,13 +863,43 @@ def _qi_diagnostics_from_state(problem_cfg: ProblemConfig, opt, state) -> dict[s
             "qi_max_elongation": None,
             "qi_elongation_target": float(problem_cfg.qi_max_elongation),
             "qi_elongation_excess": None,
+            "qi_lgradb_min": None,
+            "qi_lgradb_threshold": float(problem_cfg.qi_lgradb_threshold),
+            "qi_lgradb_excess_max": None,
             "qi_diagnostic_error": f"{type(exc).__name__}: {exc}",
         }
 
 
-def _vmec_resolution_for_max_mode(max_mode: int) -> tuple[int, int]:
-    resolution = max(MIN_VMEC_MODE, int(max_mode) + 2)
+def _vmec_resolution_for_max_mode(max_mode: int, *, minimum: int = MIN_VMEC_MODE) -> tuple[int, int]:
+    resolution = max(int(minimum), int(max_mode) + 2)
     return resolution, resolution
+
+
+def _stage_modes_for_problem(
+    problem_cfg: ProblemConfig,
+    *,
+    max_mode: int,
+    use_mode_continuation: bool,
+) -> list[int]:
+    """Return the mode policy used by the standalone optimization sweep.
+
+    The omnigenity reference scripts do not use a single 1->2->3 pass.  Their
+    robust path repeatedly re-solves at the same active mode before increasing
+    the boundary space.  This reproduces that behavior for the continuation
+    lane while keeping direct-start cases as a single max-mode solve.
+    """
+
+    max_mode = int(max_mode)
+    if (not bool(use_mode_continuation)) or max_mode <= 1:
+        return [max_mode]
+    if problem_cfg.name in {"qa", "qh", "qp"}:
+        modes: list[int] = [1]
+        for mode in range(2, max_mode + 1):
+            modes.extend([mode, mode])
+        return modes
+    if problem_cfg.name == "qi":
+        return [max_mode] * 5
+    return list(range(1, max_mode + 1))
 
 
 def _load_problem(
@@ -750,7 +910,7 @@ def _load_problem(
 ):
     cfg0, indata = vj.load_config(str(cfg.input_file))
     del cfg0
-    mpol, ntor = _vmec_resolution_for_max_mode(max_mode)
+    mpol, ntor = _vmec_resolution_for_max_mode(max_mode, minimum=cfg.min_vmec_mode)
     indata = rebuild_indata_with_resolution(indata, mpol=mpol, ntor=ntor)
     if bool(stellarator_asymmetric):
         indata = _copy_indata_with_lasym(indata, lasym=True)
@@ -850,7 +1010,14 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
                 nalpha=problem_cfg.qi_nalpha,
                 n_bounce=problem_cfg.qi_n_bounce,
                 softness=problem_cfg.qi_softness,
+                width_weight=problem_cfg.qi_width_weight,
+                branch_width_weight=problem_cfg.qi_branch_width_weight,
+                branch_width_softness=problem_cfg.qi_branch_width_softness,
                 profile_weight=problem_cfg.qi_profile_weight,
+                aligned_profile_weight=problem_cfg.qi_aligned_profile_weight,
+                aligned_profile_softness=problem_cfg.qi_aligned_profile_softness,
+                aligned_profile_trap_level=problem_cfg.qi_aligned_profile_trap_level,
+                aligned_profile_trap_softness=problem_cfg.qi_aligned_profile_trap_softness,
                 jit_booz=False,
                 booz_constants=qi_booz_constants,
                 booz_grids=qi_booz_grids,
@@ -920,7 +1087,46 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
                     problem_cfg.qi_elongation_weight**2 * elongation["total"],
                 )
             )
+        if float(problem_cfg.qi_lgradb_weight) != 0.0:
+            lgradb = lgradb_penalty_from_state(
+                state=state,
+                static=stage_static,
+                indata=stage_indata,
+                signgs=stage_signgs,
+                flux_local=stage_flux,
+                threshold=problem_cfg.qi_lgradb_threshold,
+                s_index=problem_cfg.qi_lgradb_surface_index,
+                ntheta=problem_cfg.qi_lgradb_ntheta,
+                nphi=problem_cfg.qi_lgradb_nphi,
+                smooth_penalty=problem_cfg.qi_lgradb_smooth_penalty,
+            )
+            blocks.append(
+                (
+                    jnp.asarray(lgradb["residuals1d"], dtype=jnp.float64) * problem_cfg.qi_lgradb_weight,
+                    problem_cfg.qi_lgradb_weight**2 * lgradb["total"],
+                )
+            )
         return tuple(blocks)
+
+    def lgradb_quality_block(state):
+        if float(problem_cfg.lgradb_weight) == 0.0:
+            return None
+        lgradb = lgradb_penalty_from_state(
+            state=state,
+            static=stage_static,
+            indata=stage_indata,
+            signgs=stage_signgs,
+            flux_local=stage_flux,
+            threshold=problem_cfg.lgradb_threshold,
+            s_index=problem_cfg.lgradb_surface_index,
+            ntheta=problem_cfg.lgradb_ntheta,
+            nphi=problem_cfg.lgradb_nphi,
+            smooth_penalty=problem_cfg.lgradb_smooth_penalty,
+        )
+        return (
+            jnp.asarray(lgradb["residuals1d"], dtype=jnp.float64) * problem_cfg.lgradb_weight,
+            problem_cfg.lgradb_weight**2 * lgradb["total"],
+        )
 
     def stage_residuals_from_state(state):
         parts = []
@@ -957,6 +1163,9 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
             parts.extend(residuals for residuals, _total in qi_field_quality_blocks(state, qs))
         else:
             parts.append(jnp.asarray(qs["residuals1d"], dtype=jnp.float64) * problem_cfg.qs_weight)
+            lgradb_block = lgradb_quality_block(state)
+            if lgradb_block is not None:
+                parts.append(lgradb_block[0])
         return jnp.concatenate(parts)
 
     n_iota_terms = int(problem_cfg.target_iota is not None) + int(problem_cfg.iota_abs_min is not None)
@@ -1180,7 +1389,11 @@ def _run_problem_stages(
     prev_specs,
     stellarator_asymmetric: bool,
 ) -> tuple[list[StageRecord], object, object, object, object, dict]:
-    stage_modes = list(range(1, max_mode + 1)) if (use_mode_continuation and max_mode > 1) else [max_mode]
+    stage_modes = _stage_modes_for_problem(
+        problem_cfg,
+        max_mode=max_mode,
+        use_mode_continuation=use_mode_continuation,
+    )
     stage_results: list[StageRecord] = []
     final_opt = None
     final_params0 = None
@@ -1295,6 +1508,12 @@ def _run_case(
         use_mode_continuation
         and int(max_mode) > 1
         and problem_cfg.objective_kind != "qi"
+        and _stage_modes_for_problem(
+            problem_cfg,
+            max_mode=max_mode,
+            use_mode_continuation=use_mode_continuation,
+        )
+        == list(range(1, max_mode + 1))
     ):
         resume = _resume_from_previous_continuation_case(
             problem_cfg=problem_cfg,
@@ -1346,6 +1565,7 @@ def _run_case(
             continuation_nfev=min(int(problem_cfg.continuation_nfev), int(problem_cfg.qi_preseed_qi_nfev)),
             qi_mirror_weight=0.0,
             qi_elongation_weight=0.0,
+            qi_lgradb_weight=0.0,
             qi_preseed_qp=False,
             qi_preseed_qi=False,
         )
@@ -1372,9 +1592,7 @@ def _run_case(
         problem=problem,
         max_mode=max_mode,
         use_ess=use_ess,
-        use_mode_continuation=False
-        if problem_cfg.objective_kind == "qi" and problem_cfg.qi_preseed_qp
-        else use_mode_continuation_for_main,
+        use_mode_continuation=use_mode_continuation_for_main,
         solver_device=solver_device,
         cfg=cfg,
         indata=indata,
@@ -1390,6 +1608,7 @@ def _run_case(
 
     _save_case_outputs(output_dir, final_opt, final_params0, final_result["x"], final_result)
     bmag_stats = _bmag_lcfs_stats(output_dir / "wout_final.nc")
+    lgradb_stats = _lgradb_diagnostics_from_state(problem_cfg, final_opt, final_result.get("_state_final"))
     qi_stats = _qi_diagnostics_from_state(problem_cfg, final_opt, final_result.get("_state_final"))
     if original_stage is not None:
         original_opt, original_params0, original_result = original_stage
@@ -1440,10 +1659,17 @@ def _run_case(
         input_file=str(problem_cfg.input_file),
         input_nfp=int(cfg.nfp),
         project_input_boundary_to_max_mode=bool(problem_cfg.project_input_boundary_to_max_mode),
+        target_aspect=float(problem_cfg.target_aspect),
+        target_iota=(None if problem_cfg.target_iota is None else float(problem_cfg.target_iota)),
+        iota_abs_min=(None if problem_cfg.iota_abs_min is None else float(problem_cfg.iota_abs_min)),
+        iota_weight=float(problem_cfg.iota_weight),
+        lgradb_weight=float(problem_cfg.lgradb_weight),
+        qi_lgradb_weight=float(problem_cfg.qi_lgradb_weight),
         qi_qp_preseed=(bool(problem_cfg.qi_preseed_qp) if problem_cfg.objective_kind == "qi" else None),
         qi_qi_preseed=(bool(problem_cfg.qi_preseed_qi) if problem_cfg.objective_kind == "qi" else None),
         **asym_stats,
         **bmag_stats,
+        **lgradb_stats,
         **qi_stats,
     )
 
@@ -1767,6 +1993,15 @@ def _write_summary_csv(results: list[CaseResult], path: Path) -> None:
                 "jax_platforms",
                 "stellarator_asymmetric",
                 "asymmetry_seed",
+                "input_file",
+                "input_nfp",
+                "project_input_boundary_to_max_mode",
+                "target_aspect",
+                "target_iota",
+                "iota_abs_min",
+                "iota_weight",
+                "lgradb_weight",
+                "qi_lgradb_weight",
                 "asymmetric_dof_count",
                 "asymmetric_param_norm_initial",
                 "asymmetric_param_norm_final",
@@ -1775,6 +2010,10 @@ def _write_summary_csv(results: list[CaseResult], path: Path) -> None:
                 "bmag_max",
                 "bmag_nonpositive_fraction",
                 "bmag_finite",
+                "lgradb_min",
+                "lgradb_threshold",
+                "lgradb_excess_max",
+                "lgradb_diagnostic_error",
                 "qi_qp_preseed",
                 "qi_qi_preseed",
                 "qi_raw_total",
@@ -1784,6 +2023,9 @@ def _write_summary_csv(results: list[CaseResult], path: Path) -> None:
                 "qi_max_elongation",
                 "qi_elongation_target",
                 "qi_elongation_excess",
+                "qi_lgradb_min",
+                "qi_lgradb_threshold",
+                "qi_lgradb_excess_max",
                 "qi_diagnostic_error",
                 "message",
                 "output_dir",
@@ -1814,7 +2056,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--qi-qp-preseed",
         choices=("both", "on", "off"),
-        default="on",
+        default="off",
         help=(
             "For QI cases, choose whether to start from a same-mode QP preseed. "
             "Use 'both' to compare QP-preseed and direct-QI starts."

@@ -101,24 +101,28 @@ configuration wrapper:
 
    INPUT_FILE = DATA_DIR / "input.nfp4_QH_warm_start"
    MAX_MODE = 2
-   VMEC_MPOL = max(5, MAX_MODE + 2)
+   VMEC_MPOL = max(6, MAX_MODE + 2)
    VMEC_NTOR = VMEC_MPOL
-   MAX_NFEV = 15
+   MAX_NFEV = 30
    METHOD = "scipy"
    SCIPY_TR_SOLVER = "lsmr"
    HELICITY_M = 1
    HELICITY_N = -1
-   TARGET_ASPECT = 7.0       # target aspect ratio
+   TARGET_ASPECT = 7.0
+   TARGET_ABS_IOTA_MIN = 0.41
    SURFACES = np.arange(0.0, 1.01, 0.1)
 
    OBJECTIVES = [
        aspect_objective(TARGET_ASPECT, ASPECT_WEIGHT),
+       abs_mean_iota_floor_objective(TARGET_ABS_IOTA_MIN, IOTA_WEIGHT),
        quasisymmetry_objective(
            helicity_m=HELICITY_M,
            helicity_n=HELICITY_N,
            surfaces=SURFACES,
            weight=QS_WEIGHT,
        ),
+       # Optional LgradB term:
+       # lgradb_objective(threshold=0.30, weight=0.1),
        # ObjectiveTerm("custom", lambda ctx, state: your_metric(ctx, state), target=0.0, weight=0.1),
    ]
 
@@ -239,44 +243,65 @@ Full QA/QH/QP/QI policy sweep
 
 The sweep below compares four target objectives:
 
-- QA: aspect ratio, signed mean iota target, and quasi-axisymmetry.
-- QH: aspect ratio, a smooth ``abs(mean_iota) >= 0.40`` lower bound, and
-  quasi-helical symmetry.
+- QA: aspect ratio near 7, signed mean iota target, and quasi-axisymmetry.
+- QH: the bundled NFP=4 warm start, aspect ratio near 7, quasi-helical
+  symmetry, and a smooth ``abs(mean_iota) >= 0.41`` lower bound.
 - QP: aspect ratio, quasi-poloidal symmetry, and a smooth
-  ``abs(mean_iota) >= 0.40`` lower bound.
+  ``abs(mean_iota) >= 0.41`` lower bound, using the same bundled NFP=2 seed as
+  the QI runs.
 - QI: aspect ratio, a differentiable smooth Boozer-space quasi-isodynamic
   residual evaluated through ``booz_xform_jax``, maximum mirror-ratio penalty,
   maximum-LCFS-elongation penalty, and the same smooth
-  ``abs(mean_iota) >= 0.40`` lower bound.
+  ``abs(mean_iota) >= 0.41`` lower bound.  ``LgradB`` is available as an
+  optional commented term in the example scripts.
+
+The current objective priority is primary symmetry/QI quality and
+``abs(mean_iota) >= 0.41`` first, then aspect ratio near 7.  ``LgradB`` remains
+available for users who want extra magnetic-gradient regularization, but it is
+not active in the default sweeps or best-row selection.
 
 Each problem is run with staged mode continuation and with direct-start mode
-expansion.  Each policy is run with and without ESS using ``alpha = 2.5``.
+expansion.  Each policy is run with and without ESS using ``alpha = 1.2``,
+matching the gentler scaling used by the local omnigenity optimization
+workflows.
 For QI, the focused constrained sweep additionally compares starting from a
 same-mode QP preseed against starting directly from the bundled
-``input.nfp2_QI`` omnigenity seed.
+``input.nfp2_QI`` omnigenity seed.  This QP preseed is useful as a controlled
+warm start, but its scalar objective is different from the QI refinement
+objective and is therefore not stitched into the plotted QI history.  The CLI
+default is ``--qi-qp-preseed off``; use ``--qi-qp-preseed on`` or
+``--qi-qp-preseed both`` to run the QP-preseed diagnostic rows.
 That NFP=2 seed contains mode-2 boundary harmonics, so QI stages first project
 the input boundary to the requested active space:
 ``max(abs(m), abs(n)) <= max_mode``.  Thus a ``max_mode=1`` QI run explicitly
 zeros the mode-2 seed before solving, while ``max_mode=2`` and ``max_mode=3``
 retain and optimize the corresponding larger active spaces.
-When enabled, the QP preseed is followed by a QI-only preseed, then a final
-refinement with the full QI + mirror-ratio + elongation objective.  This keeps
-QP as an explicit optional experiment while still measuring whether the preseed
-helps or hurts the constrained QI solve.
+When enabled, the QP preseed is followed by a final refinement with the full
+QI + mirror-ratio + elongation + ``LgradB`` objective.  The previous QI-only
+preseed and profile-locking penalty are disabled by default because the local
+reference QI workflow optimizes bounce/well-width label dependence directly,
+plus mirror, elongation, and magnetic-gradient scale-length penalties, rather
+than forcing a prescribed Boozer ``|B|`` profile.
+This keeps QP as an explicit optional experiment while still measuring whether
+the preseed helps or hurts the constrained QI solve.
 Columns correspond to ``max_mode = 1, 2, 3``.  The vertical dotted lines mark
-continuation stage boundaries.
+continuation stage boundaries.  QA/QH/QP continuation uses a repeated hybrid
+policy, ``[1, 2, 2]`` for ``max_mode=2`` and ``[1, 2, 2, 3, 3]`` for
+``max_mode=3``.  QI repeats the requested active space five times, matching
+the reference omnigenity workflow.
 
 The generated objective panels contain the full CPU/GPU policy sweep.  Solid
 curves met the optimizer success criterion; dashed curves are stopped, failed,
 or budgeted lanes.  The summary tables identify whether a dashed lane reached
 ``max_nfev``, hit the 1200 second timeout, or failed earlier such as from GPU
 OOM.  Curves are split by objective stage and plotted as best-so-far values
-within that stage, so QP preseed, QI-only preseed, and full constrained QI
-refinement are not treated as one continuous scalar objective.  The QA input
+within that stage, so QP preseed and full constrained QI refinement are not
+treated as one continuous scalar objective.  The QA input
 carries ``1e-5`` seeds for the mode-1 boundary terms so the
-iota residual has a useful derivative.  QA continuation reaches the target-iota
-basin on both CPU and GPU; direct QA with ESS also reaches ``iota ~= 0.409``.
-Direct QA without ESS remains a weak policy for high direct-start modes.
+iota residual has a useful derivative.  In the current CPU sweep, QA
+continuation reaches the target-iota basin with the best scalar objective, and
+direct QA with ESS also reaches the target-iota basin.  Direct QA without ESS
+remains a weak policy for high direct-start modes.
 
 The large all-policy panels, atlases, and PDF snapshots are generated assets,
 not source files.  They are intentionally not tracked in git.  Recreate them
@@ -285,10 +310,10 @@ compact best-result PNGs.
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed both
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed both
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed both
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed both
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 Run the constrained QI preseed/no-preseed matrix explicitly with:
@@ -299,21 +324,20 @@ Run the constrained QI preseed/no-preseed matrix explicitly with:
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both
    PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
 
-The default per-case timeout is ``1200 s``.  GPU sweeps use exact/replay
-callbacks with calibrated optimizer budgets
-(``inner_max_iter = trial_max_iter = 180`` and
-``ftol = trial_ftol = 1e-9`` for deck-controlled QA/QH cases) so production
-sweeps have enough room to converge high-mode/LASYM cases while still bounding
-runaway rows.  Add ``--diagnostic-budgets`` only for bounded quick-look GPU
-diagnostics, and use ``--case-timeout-s 0`` only for an unbounded local
-diagnostic run.
+The default per-case timeout is ``1200 s``.  The current omnigenity-style
+science configs use ``inner_max_iter = trial_max_iter = 120`` and
+``ftol = trial_ftol = 1e-9``.  GPU production sweeps cap those values at 180
+if a future config requests a larger replay budget, so high-mode/LASYM cases
+are bounded without silently switching to diagnostic budgets.  Add
+``--diagnostic-budgets`` only for bounded quick-look GPU diagnostics, and use
+``--case-timeout-s 0`` only for an unbounded local diagnostic run.
 
 To recreate one row, restrict ``--policy`` and ``--problems``.  For example,
-this reruns only the QA direct-start row:
+this reruns the current README-best QA row:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa --modes 1,2,3 --ess both --rerun
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa --modes 3 --ess on --rerun
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 The GPU rows run through the same exact/replay path as CPU with GPU-calibrated
@@ -323,8 +347,8 @@ budgets and records any non-converged case as a normal ``max_nfev`` stop.
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed both
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed both
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 Non-Stellarator-Symmetric Sweeps
@@ -341,10 +365,10 @@ and full publication panels when those cases are present.
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --stellarator-asymmetric
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed both --stellarator-asymmetric
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed both --stellarator-asymmetric
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed both --stellarator-asymmetric
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed both --stellarator-asymmetric
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 The published LASYM figures are partial 1200 second lanes rather than a
@@ -590,7 +614,7 @@ Source files
    * - ``vmec_jax/quasi_isodynamic.py``
      - Differentiable smooth Boozer-space QI residuals
        (``quasi_isodynamic_residual_from_state``), mirror-ratio penalty, and
-       LCFS elongation penalty.
+       LCFS elongation and ``LgradB`` penalties.
    * - ``vmec_jax/plotting.py``
      - ``plot_qh_optimization`` and helper plotting functions.
    * - ``vmec_jax/driver.py``
@@ -606,9 +630,8 @@ Source files
        output writing, and plotting while keeping the QA/QH/QP scripts linear.
    * - ``examples/optimization/qi_fixed_resolution_jax_ess.py``
      - QI workflow using ``booz_xform_jax``, a bundled omnigenity seed,
-       optional QP preseed, QI-only preconditioning, and explicit
-       mirror-ratio/elongation objective blocks that users can extend in the
-       script.
+       optional QP preseed, and explicit mirror-ratio/elongation/``LgradB``
+       objective blocks that users can extend in the script.
    * - ``examples/optimization/plot_qh_optimization_results.py``
      - Standalone plotting helper (regenerates figures from saved wout+JSON).
    * - ``examples/optimization/target_iota_aspect_volume.py``

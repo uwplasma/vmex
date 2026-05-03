@@ -46,11 +46,11 @@ enable_x64(True)
 
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.nfp2_QI"
 
-MAX_MODE = 1
-VMEC_MPOL = max(5, MAX_MODE + 2)
+MAX_MODE = 3
+VMEC_MPOL = max(6, MAX_MODE + 2)
 VMEC_NTOR = VMEC_MPOL
 MAX_NFEV = 30
-CONTINUATION_NFEV = 12
+CONTINUATION_NFEV = 30
 
 METHOD = "scipy"
 SCIPY_TR_SOLVER = "lsmr"
@@ -65,44 +65,61 @@ INNER_FTOL = 1e-9
 TRIAL_MAX_ITER = 120
 TRIAL_FTOL = 1e-9
 
-SURFACES = np.linspace(0.2, 1.0, 5)
+SURFACES = np.linspace(0.1, 1.0, 6)
 TARGET_ASPECT = 7.0
 ASPECT_WEIGHT = 1.0
 QI_WEIGHT = 1.0
 
 # Boozer transform and smooth QI residual resolution.
-QI_MBOZ = 6
-QI_NBOZ = 6
-QI_NPHI = 41
-QI_NALPHA = 13
-QI_N_BOUNCE = 11
+QI_MBOZ = 18
+QI_NBOZ = 18
+QI_NPHI = 151
+QI_NALPHA = 31
+QI_N_BOUNCE = 51
 QI_SOFTNESS = 2.0e-2
-QI_PROFILE_WEIGHT = 1.5
+QI_WIDTH_WEIGHT = 1.0
+QI_BRANCH_WIDTH_WEIGHT = 1.0
+QI_BRANCH_WIDTH_SOFTNESS = 2.0e-2
+QI_PROFILE_WEIGHT = 0.0
+# The branch-width term follows the reference omnigenity workflow more closely:
+# each field line is split around its well minimum and equal-|B| bounce widths
+# are made independent of field-line label.
+QI_ALIGNED_PROFILE_WEIGHT = 0.0
+QI_ALIGNED_PROFILE_SOFTNESS = 2.0e-2
+QI_ALIGNED_PROFILE_TRAP_LEVEL = 0.65
+QI_ALIGNED_PROFILE_TRAP_SOFTNESS = 5.0e-2
 MAX_MIRROR_RATIO = 0.21
 MIRROR_LEAST_SQUARES_WEIGHT = 10.0
-MIRROR_WEIGHT = MIRROR_LEAST_SQUARES_WEIGHT
+MIRROR_WEIGHT = np.sqrt(MIRROR_LEAST_SQUARES_WEIGHT)
 MIRROR_NTHETA = 96
 MIRROR_NPHI = 96
 MIRROR_SURFACE_INDEX = 0
 MAX_ELONGATION = 8.0
 ELONGATION_LEAST_SQUARES_WEIGHT = 10.0
-ELONGATION_WEIGHT = ELONGATION_LEAST_SQUARES_WEIGHT
+ELONGATION_WEIGHT = np.sqrt(ELONGATION_LEAST_SQUARES_WEIGHT)
 ELONGATION_NTHETA = 48
 ELONGATION_NPHI = 16
+# Optional LgradB penalty:
+# from vmec_jax.quasi_isodynamic import lgradb_penalty_from_state
+# LGRADB_THRESHOLD = 0.30
+# LGRADB_WEIGHT = np.sqrt(0.001)
+# LGRADB_NTHETA = 9
+# LGRADB_NPHI = 7
+# LGRADB_SURFACE_INDEX = -1
 
 USE_ESS = True
-ALPHA = 2.5
+ALPHA = 1.2
 USE_MODE_CONTINUATION = True
 USE_QP_PRESEED = False
-QP_PRESEED_MAX_NFEV = 50
-QP_PRESEED_CONTINUATION_NFEV = 20
-USE_QI_PRESEED = True
+QP_PRESEED_MAX_NFEV = 40
+QP_PRESEED_CONTINUATION_NFEV = 30
+USE_QI_PRESEED = False
 QI_PRESEED_MAX_NFEV = 30
 QP_HELICITY_M = 0
 QP_HELICITY_N = -1
 QP_SURFACES = np.arange(0.0, 1.01, 0.1)
-TARGET_ABS_IOTA_MIN = 0.40
-IOTA_WEIGHT = 100.0
+TARGET_ABS_IOTA_MIN = 0.41
+IOTA_WEIGHT = 200.0
 
 OUTPUT_DIR = Path(f"results/qi_opt/mode{MAX_MODE}/{'ess' if USE_ESS else 'no_ess'}")
 SAVE_STAGE_INPUTS = True
@@ -226,7 +243,14 @@ def _build_stage(max_mode: int, *, objective_kind: str):
                 nalpha=QI_NALPHA,
                 n_bounce=QI_N_BOUNCE,
                 softness=QI_SOFTNESS,
+                width_weight=QI_WIDTH_WEIGHT,
+                branch_width_weight=QI_BRANCH_WIDTH_WEIGHT,
+                branch_width_softness=QI_BRANCH_WIDTH_SOFTNESS,
                 profile_weight=QI_PROFILE_WEIGHT,
+                aligned_profile_weight=QI_ALIGNED_PROFILE_WEIGHT,
+                aligned_profile_softness=QI_ALIGNED_PROFILE_SOFTNESS,
+                aligned_profile_trap_level=QI_ALIGNED_PROFILE_TRAP_LEVEL,
+                aligned_profile_trap_softness=QI_ALIGNED_PROFILE_TRAP_SOFTNESS,
                 jit_booz=False,
                 booz_constants=qi_booz_constants,
                 booz_grids=qi_booz_grids,
@@ -253,9 +277,8 @@ def _build_stage(max_mode: int, *, objective_kind: str):
         """QI field-quality blocks.
 
         Add new QI-specific field objectives here.  Each entry returns a
-        least-squares residual block, so adding a future term such as LgradB or
-        magnetic-well depth is just another ``(name, callback)`` in this list,
-        without changing ``vmec_jax`` internals.
+        least-squares residual block, so adding a future term such as magnetic
+        well depth is just another ``(name, callback)`` in this list.
         """
 
         mirror_booz = _slice_boozer_surfaces(field["booz"], MIRROR_SURFACE_INDEX)
@@ -273,7 +296,7 @@ def _build_stage(max_mode: int, *, objective_kind: str):
             ntheta=ELONGATION_NTHETA,
             nphi=ELONGATION_NPHI,
         )
-        return [
+        blocks = [
             ("qi", QI_WEIGHT * _as_residual_block(field["residuals1d"]), QI_WEIGHT**2 * field["total"]),
             (
                 "mirror_ratio",
@@ -286,6 +309,12 @@ def _build_stage(max_mode: int, *, objective_kind: str):
                 ELONGATION_WEIGHT**2 * elongation["total"],
             ),
         ]
+        # Optional LgradB block:
+        # lgradb = lgradb_penalty_from_state(...)
+        # blocks.append(
+        #     ("LgradB", LGRADB_WEIGHT * _as_residual_block(lgradb["residuals1d"]), LGRADB_WEIGHT**2 * lgradb["total"])
+        # )
+        return blocks
 
     def stage_residuals_from_state(state):
         aspect = equilibrium_aspect_ratio_from_state(state=state, static=stage_static)
@@ -338,11 +367,11 @@ def _build_stage(max_mode: int, *, objective_kind: str):
 stage_results = []
 params_stage = None
 prev_specs = None
-stage_modes = list(range(1, MAX_MODE + 1)) if (USE_MODE_CONTINUATION and MAX_MODE > 1) else [MAX_MODE]
+stage_modes = [MAX_MODE] * 5 if (USE_MODE_CONTINUATION and MAX_MODE > 1) else [MAX_MODE]
 
 if USE_QP_PRESEED:
     print("Running QP preseed before QI refinement …")
-    for stage_mode in stage_modes:
+    for stage_index, stage_mode in enumerate(stage_modes, start=1):
         stage_specs, stage_opt, stage_x_scale, iota_fn = _build_stage(stage_mode, objective_kind="qp")
         params0_stage = (
             np.zeros(len(stage_specs), dtype=float)
@@ -366,7 +395,7 @@ if USE_QP_PRESEED:
         )
         stage_result["_history_dump"]["iota_abs_min"] = float(TARGET_ABS_IOTA_MIN)
         _save_stage_artifacts(
-            OUTPUT_DIR / f"stage_qp_{stage_mode:02d}",
+            OUTPUT_DIR / f"stage_qp_{stage_index:02d}_mode{stage_mode:02d}",
             stage_opt,
             params0_stage,
             stage_result["x"],
@@ -410,7 +439,7 @@ if USE_QI_PRESEED:
     prev_specs = stage_specs
     params_stage = stage_result["x"]
 
-for stage_mode in [MAX_MODE] if USE_QP_PRESEED else stage_modes:
+for stage_index, stage_mode in enumerate(stage_modes, start=1):
     stage_specs, stage_opt, stage_x_scale, iota_fn = _build_stage(stage_mode, objective_kind="qi")
     params0_stage = (
         np.zeros(len(stage_specs), dtype=float)
@@ -456,7 +485,7 @@ for stage_mode in [MAX_MODE] if USE_QP_PRESEED else stage_modes:
     )
     stage_result["_history_dump"]["iota_abs_min"] = float(TARGET_ABS_IOTA_MIN)
     _save_stage_artifacts(
-        OUTPUT_DIR / f"stage_qi_{stage_mode:02d}",
+        OUTPUT_DIR / f"stage_qi_{stage_index:02d}_mode{stage_mode:02d}",
         stage_opt,
         params0_stage,
         stage_result["x"],

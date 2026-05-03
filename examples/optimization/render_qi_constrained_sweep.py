@@ -28,6 +28,8 @@ PRESEED_OPTIONS = (True, False)
 MODES = (1, 2, 3)
 ESS_OPTIONS = (False, True)
 QI_INPUT_NFP = 2
+TARGET_ASPECT = 7.0
+TARGET_ABS_IOTA_MIN = 0.41
 
 SUMMARY_CSV = FIGURE_DIR / "qi_constrained_summary.csv"
 SUMMARY_JSON = FIGURE_DIR / "qi_constrained_summary.json"
@@ -52,6 +54,9 @@ SUMMARY_FIELDS = [
     "qi_max_elongation",
     "qi_elongation_target",
     "qi_elongation_excess",
+    "qi_lgradb_min",
+    "qi_lgradb_threshold",
+    "qi_lgradb_excess_max",
     "aspect_final",
     "iota_final",
     "nfev",
@@ -62,6 +67,11 @@ SUMMARY_FIELDS = [
     "input_file",
     "input_nfp",
     "project_input_boundary_to_max_mode",
+    "target_aspect",
+    "target_iota",
+    "iota_abs_min",
+    "iota_weight",
+    "qi_lgradb_weight",
     "message",
     "output_dir",
 ]
@@ -127,6 +137,9 @@ def _discover_qi_results() -> list[dict]:
     rows_by_key: dict[tuple[str, str, bool, int, bool], tuple[float, dict]] = {}
     for path in sorted(OUTPUT_ROOT.glob("**/case_result.json")):
         record = json.loads(path.read_text())
+        target_aspect = record.get("target_aspect")
+        if target_aspect in (None, "") or abs(float(target_aspect) - TARGET_ASPECT) > 1.0e-8:
+            continue
         if record.get("problem") != "qi":
             continue
         input_nfp = _input_nfp_from_output_dir(record, path)
@@ -212,6 +225,20 @@ def _history_stage_segments(history: list[dict]) -> list[list[dict]]:
         current_stage = stage
     if current:
         segments.append(current)
+    return segments
+
+
+def _plotted_history_segments(row: dict, history: list[dict]) -> list[list[dict]]:
+    """Return objective-history segments with a consistent objective definition."""
+
+    segments = _history_stage_segments(history)
+    if _bool_value(row.get("qi_qp_preseed")):
+        qi_segments = [
+            segment
+            for segment in segments
+            if segment and str(segment[0].get("stage", "")).startswith("QI ")
+        ]
+        return qi_segments or segments
     return segments
 
 
@@ -305,7 +332,7 @@ def _plot_objective_panel(rows: list[dict]) -> None:
                     annotation.append(f"{labels[use_ess]}: missing history")
                     continue
                 segments = []
-                for segment in _history_stage_segments(hist["history"]):
+                for segment in _plotted_history_segments(result, hist["history"]):
                     values = np.minimum.accumulate(
                         np.asarray(
                             [
@@ -380,7 +407,7 @@ def _plot_objective_panel(rows: list[dict]) -> None:
 
 
 def _best_score(row: dict) -> tuple:
-    failed = 1 if _bool_value(row.get("crashed")) else 0
+    failed = 1 if _bool_value(row.get("crashed")) or not _bool_value(row.get("success")) else 0
     mirror = _float_value(row.get("qi_mirror_ratio_max"), np.inf) or np.inf
     mirror_target = _float_value(row.get("qi_mirror_ratio_target"), 0.21) or 0.21
     elong = _float_value(row.get("qi_max_elongation"), np.inf) or np.inf
@@ -391,16 +418,17 @@ def _best_score(row: dict) -> tuple:
     objective = _float_value(row.get("objective_final"), np.inf) or np.inf
     mirror_violation = max(0.0, mirror - mirror_target) / max(mirror_target, 1e-12)
     elong_violation = max(0.0, elong - elong_target) / max(elong_target, 1e-12)
-    iota_violation = max(0.0, 0.40 - iota) / 0.40
-    aspect_violation = abs(aspect - 7.0) / 7.0
+    iota_violation = max(0.0, TARGET_ABS_IOTA_MIN - iota) / TARGET_ABS_IOTA_MIN
+    aspect_target = TARGET_ASPECT
+    aspect_violation = abs(aspect - aspect_target) / aspect_target
     hard_ok = int(
         mirror_violation <= 0.10
         and elong_violation <= 0.05
         and iota_violation <= 0.025
         and aspect_violation <= 0.05
     )
-    total_violation = mirror_violation + elong_violation + iota_violation + 0.25 * aspect_violation
-    return (failed, 1 - hard_ok, objective, qi_raw, total_violation, _float_value(row.get("total_wall_time_s"), np.inf))
+    total_violation = iota_violation + mirror_violation + elong_violation + 0.25 * aspect_violation
+    return (failed, 1 - hard_ok, total_violation, qi_raw, objective, _float_value(row.get("total_wall_time_s"), np.inf))
 
 
 def _write_best(rows: list[dict]) -> dict:
