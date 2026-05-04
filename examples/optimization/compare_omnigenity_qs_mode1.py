@@ -38,15 +38,41 @@ from vmec_jax.optimization_workflow import build_fixed_boundary_objective_stage
 # User-editable study parameters
 # ---------------------------------------------------------------------------
 
-INPUT_FILE = Path("~/local/omnigenity_optimization/inputs/input.nfp20_QA").expanduser()
-OUTPUT_DIR = Path("results/omnigenity_compare/qa_mode1")
-
+CASES_TO_RUN = ("QA", "QH")
 MAX_MODE = 1
-MIN_VMEC_MODE = 5
 MAX_NFEV = 6
 
-ASPECT_TARGET = 2.5
-IOTA_TARGET = 0.71
+CASE_CONFIGS = {
+    "QA": {
+        "input_file": Path("~/local/omnigenity_optimization/inputs/input.nfp20_QA").expanduser(),
+        "output_dir": Path("results/omnigenity_compare/qa_mode1"),
+        # The current SIMSOPT/VMEC executable fails this input at mpol=6 for
+        # max_mode=1, so use the highest common converged resolution.
+        "min_vmec_mode": 5,
+        "aspect_target": 2.5,
+        "iota_target": 0.71,
+        "helicity_m": 1,
+        "helicity_n": 0,
+    },
+    "QH": {
+        "input_file": Path("~/local/omnigenity_optimization/inputs/input.nfp2_QH").expanduser(),
+        "output_dir": Path("results/omnigenity_compare/qh_mode1"),
+        "min_vmec_mode": 6,
+        "aspect_target": 2.5,
+        "iota_target": None,
+        "helicity_m": 1,
+        "helicity_n": -1,
+    },
+}
+
+CASE = "QA"
+INPUT_FILE = CASE_CONFIGS[CASE]["input_file"]
+OUTPUT_DIR = CASE_CONFIGS[CASE]["output_dir"]
+MIN_VMEC_MODE = CASE_CONFIGS[CASE]["min_vmec_mode"]
+ASPECT_TARGET = CASE_CONFIGS[CASE]["aspect_target"]
+IOTA_TARGET = CASE_CONFIGS[CASE]["iota_target"]
+HELICITY_M = CASE_CONFIGS[CASE]["helicity_m"]
+HELICITY_N = CASE_CONFIGS[CASE]["helicity_n"]
 LGRADB_THRESHOLD = 0.35
 QS_SURFACES = np.arange(0.0, 1.01, 0.1)
 
@@ -68,6 +94,24 @@ RUN_FINITE_DIFFERENCE = True
 # Leave as ``None`` to use the active Python environment.  Set to a local
 # source tree if you want to force a specific SIMSOPT checkout.
 SIMSOPT_SOURCE = None
+
+
+def _select_case(case: str) -> None:
+    global CASE, INPUT_FILE, OUTPUT_DIR, MIN_VMEC_MODE
+    global ASPECT_TARGET, IOTA_TARGET, HELICITY_M, HELICITY_N
+
+    name = str(case).upper()
+    if name not in CASE_CONFIGS:
+        raise KeyError(f"Unknown comparison case {case!r}. Available: {sorted(CASE_CONFIGS)}")
+    config = CASE_CONFIGS[name]
+    CASE = name
+    INPUT_FILE = config["input_file"]
+    OUTPUT_DIR = config["output_dir"]
+    MIN_VMEC_MODE = int(config["min_vmec_mode"])
+    ASPECT_TARGET = float(config["aspect_target"])
+    IOTA_TARGET = None if config["iota_target"] is None else float(config["iota_target"])
+    HELICITY_M = int(config["helicity_m"])
+    HELICITY_N = int(config["helicity_n"])
 
 
 def _json_default(value):
@@ -186,7 +230,7 @@ def _vmec_jax_term_report(problem: vj.LeastSquaresProblem, ctx, state) -> list[d
 
 
 def run_vmec_jax(outdir: Path) -> dict:
-    print("\n=== vmec_jax QA max_mode=1 ===")
+    print(f"\n=== vmec_jax {CASE} max_mode=1 ===")
     vmec = vj.FixedBoundaryVMEC.from_input(
         INPUT_FILE,
         max_mode=MAX_MODE,
@@ -196,22 +240,26 @@ def run_vmec_jax(outdir: Path) -> dict:
     )
 
     aspect = vj.AspectRatio()
-    qs = vj.QuasisymmetryRatioResidual(helicity_m=1, helicity_n=0, surfaces=QS_SURFACES)
-    iota = vj.MeanIota()
+    qs = vj.QuasisymmetryRatioResidual(
+        helicity_m=HELICITY_M,
+        helicity_n=HELICITY_N,
+        surfaces=QS_SURFACES,
+    )
     lgradb = vj.LgradB(
         threshold=LGRADB_THRESHOLD,
         s_index=-1,
         ntheta=9,
         nphi=7,
     )
-    problem = vj.LeastSquaresProblem.from_tuples(
-        [
-            (aspect.J, ASPECT_TARGET, 1.0),
-            (qs.J, 0.0, 1.0),
-            (iota.J, IOTA_TARGET, 1.0e2),
-            (lgradb.J, 0.0, 1.0),
-        ]
-    )
+    tuples = [
+        (aspect.J, ASPECT_TARGET, 1.0),
+        (qs.J, 0.0, 1.0),
+        (lgradb.J, 0.0, 1.0),
+    ]
+    if IOTA_TARGET is not None:
+        iota = vj.MeanIota()
+        tuples.insert(2, (iota.J, IOTA_TARGET, 1.0e2))
+    problem = vj.LeastSquaresProblem.from_tuples(tuples)
 
     stage = build_fixed_boundary_objective_stage(
         vmec.cfg,
@@ -303,6 +351,7 @@ def run_vmec_jax(outdir: Path) -> dict:
 
     summary = {
         "backend": "vmec_jax",
+        "case": CASE,
         "input_file": INPUT_FILE,
         "dof_names": names,
         "x0": x0,
@@ -356,7 +405,7 @@ def _simsopt_x_scale(dof_names, alpha: float = 1.2, min_scale: float = 1.0e-9):
 
 
 def run_simsopt(outdir: Path) -> dict:
-    print("\n=== SIMSOPT/omnigenity QA max_mode=1 ===")
+    print(f"\n=== SIMSOPT/omnigenity {CASE} max_mode=1 ===")
     _maybe_prepend_simsopt_source()
     import simsopt
     from simsopt._core.optimizable import Optimizable
@@ -410,16 +459,21 @@ def run_simsopt(outdir: Path) -> dict:
     surf.fixed_range(mmin=0, mmax=MAX_MODE, nmin=-MAX_MODE, nmax=MAX_MODE, fixed=False)
     surf.fix("rc(0,0)")
 
-    qs = QuasisymmetryRatioResidual(vmec, QS_SURFACES, helicity_m=1, helicity_n=0)
-    lgradb = LgradBresidual(vmec, s=1, ntheta=9, nphi=7, LgradBthreshold=LGRADB_THRESHOLD)
-    problem = LeastSquaresProblem.from_tuples(
-        [
-            (vmec.aspect, ASPECT_TARGET, 1.0),
-            (qs.residuals, 0.0, 1.0),
-            (vmec.mean_iota, IOTA_TARGET, 1.0e2),
-            (lgradb.residuals, 0.0, 1.0),
-        ]
+    qs = QuasisymmetryRatioResidual(
+        vmec,
+        QS_SURFACES,
+        helicity_m=HELICITY_M,
+        helicity_n=HELICITY_N,
     )
+    lgradb = LgradBresidual(vmec, s=1, ntheta=9, nphi=7, LgradBthreshold=LGRADB_THRESHOLD)
+    tuples = [
+        (vmec.aspect, ASPECT_TARGET, 1.0),
+        (qs.residuals, 0.0, 1.0),
+        (lgradb.residuals, 0.0, 1.0),
+    ]
+    if IOTA_TARGET is not None:
+        tuples.insert(2, (vmec.mean_iota, IOTA_TARGET, 1.0e2))
+    problem = LeastSquaresProblem.from_tuples(tuples)
     x0 = np.asarray(problem.x, dtype=float)
     names = list(problem.dof_names)
     x_scale = _simsopt_x_scale(names, alpha=ESS_ALPHA, min_scale=1.0e-9)
@@ -487,6 +541,7 @@ def run_simsopt(outdir: Path) -> dict:
 
     summary = {
         "backend": "simsopt",
+        "case": CASE,
         "simsopt_module": getattr(simsopt, "__file__", "unknown"),
         "input_file": INPUT_FILE,
         "dof_names": names,
@@ -559,7 +614,8 @@ def compare_summaries(outdir: Path, vmec_jax: dict | None, simsopt: dict | None)
     _write_json(outdir / "comparison_summary.json", comparison)
 
 
-if __name__ == "__main__":
+def run_case(case: str) -> None:
+    _select_case(case)
     if not INPUT_FILE.exists():
         raise FileNotFoundError(INPUT_FILE)
 
@@ -582,3 +638,8 @@ if __name__ == "__main__":
             print(f"SIMSOPT comparison failed: {type(exc).__name__}: {exc}")
     compare_summaries(OUTPUT_DIR, vmec_jax_summary, simsopt_summary)
     print(f"\nComparison outputs: {OUTPUT_DIR.resolve()}")
+
+
+if __name__ == "__main__":
+    for _case in CASES_TO_RUN:
+        run_case(_case)
