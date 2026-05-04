@@ -1111,7 +1111,6 @@ def run_fixed_boundary_objective_optimization(
         target_aspect=target_aspect,
         target_iota=target_iota,
         iota_abs_min=iota_abs_min,
-        plot=plot,
         save_rerun_wouts=save_rerun_wouts,
     )
     return FixedBoundaryOptimizationResult(
@@ -1328,7 +1327,6 @@ def run_quasi_isodynamic_objective_optimization(
     scipy_lsmr_maxiter: int | None = None,
     save_stage_inputs: bool = True,
     save_stage_wouts: bool = False,
-    plot: bool = True,
 ) -> FixedBoundaryOptimizationResult:
     """Run a QI objective list through repeated or direct mode stages."""
 
@@ -1458,7 +1456,6 @@ def run_quasi_isodynamic_objective_optimization(
         label=label,
         target_aspect=target_aspect,
         iota_abs_min=iota_abs_min,
-        plot=plot,
     )
     return FixedBoundaryOptimizationResult(
         stage_records=stage_records,
@@ -1493,7 +1490,6 @@ def least_squares_solve(
     save_stage_inputs: bool = True,
     save_stage_wouts: bool = False,
     save_rerun_wouts: bool = False,
-    plot: bool = True,
 ) -> FixedBoundaryOptimizationResult:
     """Solve a SIMSOPT-style fixed-boundary least-squares problem.
 
@@ -1565,7 +1561,6 @@ def least_squares_solve(
             scipy_lsmr_maxiter=scipy_lsmr_maxiter,
             save_stage_inputs=save_stage_inputs,
             save_stage_wouts=save_stage_wouts,
-            plot=False,
         )
 
     return run_fixed_boundary_objective_optimization(
@@ -1601,7 +1596,6 @@ def least_squares_solve(
         save_stage_inputs=save_stage_inputs,
         save_stage_wouts=save_stage_wouts,
         save_rerun_wouts=save_rerun_wouts,
-        plot=False,
     )
 
 
@@ -1703,10 +1697,9 @@ def save_qs_final_outputs(
     target_aspect: float | None = None,
     target_iota: float | None = None,
     iota_abs_min: float | None = None,
-    plot: bool = True,
     save_rerun_wouts: bool = False,
 ) -> None:
-    """Save initial/final inputs, wouts, history, and plots."""
+    """Save initial/final inputs, wouts, and history."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
     _initial_mode, initial_optimizer, initial_params0, initial_result = stage_records[0]
@@ -1743,16 +1736,6 @@ def save_qs_final_outputs(
     if iota_abs_min is not None:
         history["iota_abs_min"] = float(iota_abs_min)
     final_optimizer.save_history(output_dir / "history.json", final_result)
-
-    if plot:
-        print("\nGenerating plots ...")
-        plot_qh_optimization(
-            output_dir / "wout_initial.nc",
-            output_dir / "wout_final.nc",
-            output_dir / "history.json",
-            outdir=output_dir,
-        )
-        print(f"Done. Results saved to {output_dir}/")
 
 
 def combine_qs_stage_histories(
