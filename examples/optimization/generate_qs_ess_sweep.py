@@ -96,8 +96,7 @@ SOLVER_DEVICE: str | None = None
 SKIP_EXISTING = True
 CASE_TIMEOUT_S: float | None = 1200.0
 ESS_ALPHA = 1.2
-TARGET_ASPECT = 7.0
-QA_TARGET_ASPECT = 2.5
+TARGET_ASPECT = 5.0
 TARGET_ABS_IOTA_MIN = 0.41
 HIGH_PRIORITY_IOTA_WEIGHT = 200.0
 OPTIONAL_LGRADB_THRESHOLD = 0.30
@@ -278,10 +277,7 @@ PROBLEM_CONFIGS = {
         gtol=1e-4,
         xtol=1e-4,
         ess_alpha=ESS_ALPHA,
-        # Match the reference omnigenity QA deck (input.nfp22_QA).  Forcing
-        # this case to aspect 7 reaches the target iota but visibly degrades
-        # the Boozer |B| contours.
-        target_aspect=QA_TARGET_ASPECT,
+        target_aspect=TARGET_ASPECT,
         target_iota=0.42,
         iota_weight=100.0,
         surfaces=np.arange(0.0, 1.01, 0.1),

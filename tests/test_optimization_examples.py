@@ -8,9 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_fixed_boundary_qs_examples_are_standalone_workflows() -> None:
     scripts = [
-        ROOT / "examples" / "optimization" / "qh_fixed_resolution_jax.py",
-        ROOT / "examples" / "optimization" / "qa_fixed_resolution_jax_ess.py",
-        ROOT / "examples" / "optimization" / "qp_fixed_resolution_jax_ess.py",
+        ROOT / "examples" / "optimization" / "QH_optimization.py",
+        ROOT / "examples" / "optimization" / "QA_optimization.py",
+        ROOT / "examples" / "optimization" / "QP_optimization.py",
     ]
     for script in scripts:
         text = script.read_text()
@@ -21,20 +21,12 @@ def test_fixed_boundary_qs_examples_are_standalone_workflows() -> None:
         assert "run_qs_optimization(" not in text
         assert "OBJECTIVES = [" in text
         assert "cfg, indata = vj.load_config" in text
-        assert "vj.build_static(" in text
-        assert "vj.boundary_param_specs(" in text
-        assert "def residuals_from_state" in text
-        assert "vj.FixedBoundaryExactOptimizer(" in text
-        assert "optimizer.run(" in text
-        assert (
-            "for stage_mode in stage_modes:" in text
-            or "for stage_index, stage_mode in enumerate(stage_modes" in text
-        )
-        assert "save_qs_final_outputs(" in text
+        assert "run_fixed_boundary_objective_optimization(" in text
+        assert "ObjectiveTerm" in text
 
 
 def test_custom_objective_term_residual_shape() -> None:
-    from examples.optimization.fixed_boundary_qs_common import ObjectiveTerm
+    from vmec_jax.optimization_workflow import ObjectiveTerm
 
     term = ObjectiveTerm(
         "custom",

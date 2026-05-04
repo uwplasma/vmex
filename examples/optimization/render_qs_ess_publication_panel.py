@@ -49,9 +49,9 @@ MODES_BY_POLICY = {
     "direct": (1, 2, 3),
 }
 QI_INPUT_NFP = 2
-TARGET_ASPECT = 7.0
+TARGET_ASPECT = 5.0
 PROBLEM_TARGET_ASPECT = {
-    "qa": 2.5,
+    "qa": TARGET_ASPECT,
     "qh": TARGET_ASPECT,
     "qp": TARGET_ASPECT,
     "qi": TARGET_ASPECT,

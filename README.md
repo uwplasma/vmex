@@ -167,8 +167,8 @@ outer-surface `|B|` in Boozer coordinates computed with `booz_xform_jax`.
 This sweep uses NFP=2 seeds for QA/QP/QI and the standard bundled NFP=4 warm
 start for QH.  The current objective priority is primary symmetry/QI quality
 and rotational-transform control.  QA follows the reference omnigenity QA deck
-with aspect ratio near 2.5 and signed mean iota target 0.42; QH/QP/QI use
-aspect ratio near 7 and `abs(mean_iota) >= 0.41`.  `LgradB` remains available
+with aspect ratio near 5 and signed mean iota target 0.42; QH/QP/QI also use
+aspect ratio near 5 and `abs(mean_iota) >= 0.41`.  `LgradB` remains available
 as an optional script-level term, but it is not active in the default README
 examples or best-row selection.
 
@@ -180,10 +180,10 @@ The bundled NFP=2 seed is projected to each active `max_mode`, so
 
 | Target | Backend | Policy | max_mode | ESS | QP preseed | Final J | QI raw | Mirror | Elong. | Aspect | Iota | Wall time |
 |---|---|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|
-| QA | CPU | continuation | 3 | no |  | 1.03e-03 |  |  |  | 2.501 | 0.4200 | 4.3 min |
-| QH | CPU | continuation | 3 | yes |  | 1.30e-03 |  |  |  | 7.000 | -1.1813 | 3.1 min |
-| QP | CPU | continuation | 3 | no |  | 3.00e-02 |  |  |  | 7.006 | -0.7401 | 2.8 min |
-| QI | CPU | continuation | 3 | no | no | 1.09e-04 | 1.09e-04 | 0.210 | 3.49 | 7.000 | -0.5005 | 2.6 min |
+| QA | CPU | continuation | 3 | yes |  | 2.33e-04 |  |  |  | 5.000 | 0.4200 | 6.1 min |
+| QH | CPU | continuation | 3 | yes |  | 9.68e-03 |  |  |  | 4.999 | -1.6595 | 4.0 min |
+| QP | CPU | continuation | 3 | no |  | 6.76e-02 |  |  |  | 5.019 | -0.6255 | 3.7 min |
+| QI | CPU | continuation | 3 | yes | no | 1.05e-03 | 1.04e-03 | 0.211 | 4.78 | 5.000 | -0.4553 | 6.6 min |
 
 <p align="center">
   <img src="docs/_static/figures/readme_best_optimization_qa.png" width="980" />

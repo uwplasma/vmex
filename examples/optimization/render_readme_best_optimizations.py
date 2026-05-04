@@ -38,9 +38,9 @@ PROBLEM_TITLES = {
     "qp": "QP",
     "qi": "QI",
 }
-TARGET_ASPECT = 7.0
+TARGET_ASPECT = 5.0
 PROBLEM_TARGET_ASPECT = {
-    "qa": 2.5,
+    "qa": TARGET_ASPECT,
     "qh": TARGET_ASPECT,
     "qp": TARGET_ASPECT,
     "qi": TARGET_ASPECT,

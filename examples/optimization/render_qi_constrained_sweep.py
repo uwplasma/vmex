@@ -28,7 +28,7 @@ PRESEED_OPTIONS = (True, False)
 MODES = (1, 2, 3)
 ESS_OPTIONS = (False, True)
 QI_INPUT_NFP = 2
-TARGET_ASPECT = 7.0
+TARGET_ASPECT = 5.0
 TARGET_ABS_IOTA_MIN = 0.41
 
 SUMMARY_CSV = FIGURE_DIR / "qi_constrained_summary.csv"

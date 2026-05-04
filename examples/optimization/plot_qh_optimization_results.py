@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
-"""Plot results from the QH fixed-resolution exact-adjoint optimization.
+"""Plot results from the QH exact-adjoint optimization.
 
 Reads the wout files and history JSON produced by
-``qh_fixed_resolution_jax.py`` (or the legacy ``qh_fixed_resolution_exact.py``)
+``QH_optimization.py`` (or the legacy ``qh_fixed_resolution_exact.py``)
 and generates three figures in the output directory:
 
   - ``boundary_comparison.png``   3D LCFS coloured by |B| (initial vs final)
@@ -14,7 +14,7 @@ Usage
 -----
 Run the optimisation first::
 
-    python examples/optimization/qh_fixed_resolution_jax.py
+    python examples/optimization/QH_optimization.py
 
 Then plot (or regenerate after editing the plotting code)::
 
@@ -54,8 +54,8 @@ def main() -> None:
     for p in (wout_init_path, wout_final_path, history_path):
         if not p.exists():
             raise FileNotFoundError(
-                f"{p} not found.  Run qh_fixed_resolution_jax.py first:\n"
-                f"  python examples/optimization/qh_fixed_resolution_jax.py"
+                f"{p} not found.  Run QH_optimization.py first:\n"
+                f"  python examples/optimization/QH_optimization.py"
             )
 
     print(f"Generating plots from {outdir} …")

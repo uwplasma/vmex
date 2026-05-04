@@ -211,26 +211,26 @@ def test_problem_configs_follow_current_seed_and_priority_policy():
     qi_cfg = sweep.PROBLEM_CONFIGS["qi"]
 
     assert qa_cfg.input_file.name == "input.nfp2_QA_omnigenity"
-    assert qa_cfg.target_aspect == pytest.approx(2.5)
+    assert qa_cfg.target_aspect == pytest.approx(5.0)
     assert qa_cfg.target_iota == pytest.approx(0.42)
     assert qa_cfg.iota_weight == pytest.approx(100.0)
     assert qa_cfg.lgradb_threshold == pytest.approx(0.30)
     assert qa_cfg.lgradb_weight == pytest.approx(0.0)
     assert qh_cfg.input_file.name == "input.nfp4_QH_warm_start"
-    assert qh_cfg.target_aspect == pytest.approx(7.0)
+    assert qh_cfg.target_aspect == pytest.approx(5.0)
     assert qh_cfg.iota_abs_min == pytest.approx(0.41)
     assert qh_cfg.iota_weight == pytest.approx(200.0)
     assert qh_cfg.lgradb_threshold == pytest.approx(0.30)
     assert qh_cfg.lgradb_weight == pytest.approx(0.0)
     assert qp_cfg.input_file.name == "input.nfp2_QI"
-    assert qp_cfg.target_aspect == pytest.approx(7.0)
+    assert qp_cfg.target_aspect == pytest.approx(5.0)
     assert qp_cfg.iota_abs_min == pytest.approx(0.41)
     assert qp_cfg.iota_weight == pytest.approx(200.0)
     assert qp_cfg.lgradb_threshold == pytest.approx(0.30)
     assert qp_cfg.lgradb_weight == pytest.approx(0.0)
     assert qp_cfg.project_input_boundary_to_max_mode
     assert qi_cfg.input_file.name == "input.nfp2_QI"
-    assert qi_cfg.target_aspect == pytest.approx(7.0)
+    assert qi_cfg.target_aspect == pytest.approx(5.0)
     assert qi_cfg.iota_abs_min == pytest.approx(0.41)
     assert qi_cfg.iota_weight == pytest.approx(200.0)
     assert qi_cfg.aspect_weight == pytest.approx(1.0)

@@ -5,14 +5,14 @@ This page collects the generated optimization sweep artifacts used by the
 README and the main optimization guide.  The current sweep covers QA, QH, QP,
 and QI targets:
 
-- QA: the reference omnigenity NFP=2 QA deck, aspect ratio near 2.5,
+- QA: the reference omnigenity NFP=2 QA deck, aspect ratio near 5,
   signed mean iota target 0.42, and quasi-axisymmetry.
-- QH: the bundled NFP=4 warm start, aspect ratio near 7, quasi-helical
+- QH: the bundled NFP=4 warm start, aspect ratio near 5, quasi-helical
   symmetry, and a smooth ``abs(mean_iota) >= 0.41`` lower bound.
-- QP: aspect ratio, quasi-poloidal symmetry, and a smooth
+- QP: aspect ratio near 5, quasi-poloidal symmetry, and a smooth
   ``abs(mean_iota) >= 0.41`` lower bound, using the same bundled NFP=2 seed as
   the QI runs.
-- QI: aspect ratio, a differentiable smooth Boozer-space quasi-isodynamic
+- QI: aspect ratio near 5, a differentiable smooth Boozer-space quasi-isodynamic
   residual evaluated through ``booz_xform_jax``, maximum mirror-ratio penalty,
   maximum-LCFS-elongation penalty, and a smooth ``abs(mean_iota) >= 0.41``
   lower bound.  ``LgradB`` is available as an optional commented term in the
@@ -29,20 +29,18 @@ Each standalone example keeps all user controls as top-level Python variables:
 
 .. code-block:: bash
 
-   PYTHONPATH=. python examples/optimization/qa_fixed_resolution_jax_ess.py
-   PYTHONPATH=. python examples/optimization/qh_fixed_resolution_jax.py
-   PYTHONPATH=. python examples/optimization/qp_fixed_resolution_jax_ess.py
-   PYTHONPATH=. python examples/optimization/qi_fixed_resolution_jax_ess.py
+   PYTHONPATH=. python examples/optimization/QA_optimization.py
+   PYTHONPATH=. python examples/optimization/QH_optimization.py
+   PYTHONPATH=. python examples/optimization/QP_optimization.py
+   PYTHONPATH=. python examples/optimization/QI_optimization.py
 
 The QP script is quasisymmetry with ``HELICITY_M = 0``.  The QI script is a
 different objective: it builds Boozer spectra with ``booz_xform_jax``, improves
 the smooth QI residual, and then adds mirror-ratio and LCFS-elongation
 penalties.  A commented ``LgradB`` block is included for users who want that
-extra regularization term.  A QP preseed is available as a top-level switch, but the
-README-best QI row currently starts directly from the bundled NFP=2 QI seed.
-The extra terms are imported from
-``vmec_jax.quasi_isodynamic`` and assembled explicitly in the script, so users
-can change weights or add terms such as magnetic-well depth by appending
+extra regularization term.  The extra terms are imported from
+``vmec_jax.optimization_workflow`` and assembled explicitly in the script, so
+users can change weights or add terms such as magnetic-well depth by appending
 another residual block in the same section.  Install the optional dependency set with
 ``python -m pip install ".[qi]"`` before running QI cases from a source
 checkout.
@@ -82,7 +80,7 @@ Render the compact README panels from the best stellarator-symmetric rows:
    PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 
 The default per-case timeout is 1200 seconds.  The current science configs use
-NFP=4 for QH, aspect target 2.5 for QA, aspect targets near 7 for QH/QP/QI,
+NFP=4 for QH, aspect targets near 5 for QA/QH/QP/QI, signed iota 0.42 for QA,
 and high-priority ``abs(mean_iota) >= 0.41`` constraints for QH/QP/QI.
 They use ``inner_max_iter = trial_max_iter = 120`` and
 ``ftol = trial_ftol = 1e-9``; GPU production sweeps cap those values at 180
@@ -112,8 +110,8 @@ README Best Rows
 ----------------
 
 The README intentionally shows only one best ``LASYM = F`` result per target.
-QA/QH/QP are selected from the CPU matrix.  QA is filtered against the
-reference aspect-2.5 target; QH/QP are filtered against aspect 7.  QI is
+QA/QH/QP are selected from the CPU matrix and filtered against the common
+aspect-5 target.  QI is
 selected from the constrained QI CPU/GPU matrix using the QI residual,
 mirror-ratio, elongation, iota, and aspect-ratio gates.  These panels include
 the original deck LCFS before any ``max_mode=1`` optimization work, final LCFS,
@@ -167,7 +165,7 @@ matrix under the current objective policy.  For each requested
 ``max_mode=1`` rows zero the mode-2 coefficients present in the warm start.
 The QI objective is intentionally not ranked by scalar objective alone: rows
 are also evaluated by raw QI residual, maximum mirror ratio,
-maximum LCFS elongation, ``abs(mean_iota) >= 0.41``, and aspect ratio near 7.
+maximum LCFS elongation, ``abs(mean_iota) >= 0.41``, and aspect ratio near 5.
 Rows that stop at ``max_nfev`` but have valid VMEC solves and satisfy the
 physics gates are kept as valid stopped rows.
 

@@ -90,25 +90,23 @@ algorithm comparison.
 Quasi-helical symmetry example
 --------------------------------
 
-The ``examples/optimization/qh_fixed_resolution_jax.py`` script replicates the
-SIMSOPT QH fixed-resolution benchmark entirely within ``vmec_jax``.  It has no
+The ``examples/optimization/QH_optimization.py`` script replicates the
+SIMSOPT QH benchmark entirely within ``vmec_jax``.  It has no
 argparse — all parameters are top-level variables, and the objective is built
 explicitly as a small list.  After the objective definition, the script shows
-the actual setup and solve flow instead of hiding it behind a high-level
-configuration wrapper:
+the same setup-and-solve flow used by the QA/QP/QI examples:
 
 .. code-block:: python
 
    INPUT_FILE = DATA_DIR / "input.nfp4_QH_warm_start"
-   MAX_MODE = 2
-   VMEC_MPOL = max(6, MAX_MODE + 2)
-   VMEC_NTOR = VMEC_MPOL
+   MAX_MODE = 3
+   MIN_VMEC_MODE = 6
    MAX_NFEV = 30
    METHOD = "scipy"
    SCIPY_TR_SOLVER = "lsmr"
    HELICITY_M = 1
    HELICITY_N = -1
-   TARGET_ASPECT = 7.0
+   TARGET_ASPECT = 5.0
    TARGET_ABS_IOTA_MIN = 0.41
    SURFACES = np.arange(0.0, 1.01, 0.1)
 
@@ -127,7 +125,9 @@ configuration wrapper:
    ]
 
    cfg, indata = vj.load_config(str(INPUT_FILE))
-   indata = rebuild_indata_with_resolution(indata, mpol=VMEC_MPOL, ntor=VMEC_NTOR)
+   indata = rebuild_for_optimization_resolution(
+       indata, max_mode=MAX_MODE, min_vmec_mode=MIN_VMEC_MODE
+   )
    cfg = config_from_indata(indata)
    stage_modes = qs_stage_modes(
        max_mode=MAX_MODE,
@@ -135,72 +135,31 @@ configuration wrapper:
        continuation_nfev=CONTINUATION_NFEV,
    )
 
-   stage_records = []
-   params_stage = None
-   prev_specs = None
-   for stage_mode in stage_modes:
-       static = vj.build_static(cfg)
-       boundary = vj.boundary_from_indata(indata, static.modes, apply_m1_constraint=False)
-       stage_indata, static, boundary = vj.extend_boundary_for_max_mode(
-           indata, static, boundary, stage_mode
-       )
-       boundary_input = vj.boundary_input_from_indata(stage_indata, static.modes)
-       specs = vj.boundary_param_specs(
-           boundary_input,
-           static.modes,
-           max_mode=stage_mode,
-           min_coeff=0.0,
-           include=("rc", "zs"),
-           fix=("rc00",),
-       )
-
-       ctx = StageContext(...)
-       def residuals_from_state(state, *, ctx=ctx):
-           return jnp.concatenate([term.residual(ctx, state) for term in OBJECTIVES])
-
-       optimizer = vj.FixedBoundaryExactOptimizer(
-           static,
-           stage_indata,
-           boundary,
-           specs,
-           residuals_from_state,
-           boundary_input=boundary_input,
-           inner_max_iter=INNER_MAX_ITER,
-           inner_ftol=INNER_FTOL,
-           trial_max_iter=TRIAL_MAX_ITER,
-           trial_ftol=TRIAL_FTOL,
-           solver_device=SOLVER_DEVICE,
-       )
-       x_scale = vj.create_x_scale(specs, alpha=ALPHA) if USE_ESS else np.ones(len(specs))
-       params0 = (
-           np.zeros(len(specs))
-           if params_stage is None
-           else vj.lift_boundary_params(prev_specs, params_stage, specs)
-       )
-       result = optimizer.run(
-           params0,
-           method=METHOD,
-           max_nfev=qs_stage_budget(
-               stage_mode=stage_mode,
-               max_mode=MAX_MODE,
-               max_nfev=MAX_NFEV,
-               continuation_nfev=CONTINUATION_NFEV,
-           ),
-           x_scale=x_scale,
-           target_aspect=TARGET_ASPECT,
-           scipy_tr_solver=SCIPY_TR_SOLVER,
-       )
-       stage_records.append((stage_mode, optimizer, params0, result))
-       prev_specs = specs
-       params_stage = result["x"]
-
-   save_qs_final_outputs(
+   run_fixed_boundary_objective_optimization(
+       cfg=cfg,
+       indata=indata,
+       objectives=OBJECTIVES,
+       stage_modes=stage_modes,
+       max_mode=MAX_MODE,
+       max_nfev=MAX_NFEV,
+       continuation_nfev=CONTINUATION_NFEV,
+       method=METHOD,
+       ftol=FTOL,
+       gtol=GTOL,
+       xtol=XTOL,
+       use_ess=USE_ESS,
+       ess_alpha=ALPHA,
        output_dir=OUTPUT_DIR,
-       stage_records=stage_records,
-       final_optimizer=stage_records[-1][1],
-       final_result=stage_records[-1][3],
-       label=f"QH opt (max_mode={MAX_MODE})",
+       label=LABEL,
+       use_mode_continuation=USE_MODE_CONTINUATION,
        target_aspect=TARGET_ASPECT,
+       iota_abs_min=TARGET_ABS_IOTA_MIN,
+       inner_max_iter=INNER_MAX_ITER,
+       inner_ftol=INNER_FTOL,
+       trial_max_iter=TRIAL_MAX_ITER,
+       trial_ftol=TRIAL_FTOL,
+       solver_device=SOLVER_DEVICE,
+       scipy_tr_solver=SCIPY_TR_SOLVER,
    )
 
 ``ObjectiveTerm`` callbacks receive ``(ctx, state)`` and may return a scalar or
@@ -211,7 +170,7 @@ Run it with:
 
 .. code-block:: bash
 
-   python examples/optimization/qh_fixed_resolution_jax.py
+   python examples/optimization/QH_optimization.py
 
 
 Standalone QA/QH/QP/QI scripts
@@ -225,10 +184,10 @@ continuation policy, and optimizer options.
 
 .. code-block:: bash
 
-   python examples/optimization/qa_fixed_resolution_jax_ess.py
-   python examples/optimization/qh_fixed_resolution_jax.py
-   python examples/optimization/qp_fixed_resolution_jax_ess.py
-   python examples/optimization/qi_fixed_resolution_jax_ess.py
+   python examples/optimization/QA_optimization.py
+   python examples/optimization/QH_optimization.py
+   python examples/optimization/QP_optimization.py
+   python examples/optimization/QI_optimization.py
 
 Those scripts write ``input.initial``, ``input.final``, ``wout_initial.nc``,
 ``wout_final.nc``, ``history.json``, and per-case diagnostic plots.  Current
@@ -243,22 +202,22 @@ Full QA/QH/QP/QI policy sweep
 
 The sweep below compares four target objectives:
 
-- QA: the reference omnigenity NFP=2 QA deck, aspect ratio near 2.5,
+- QA: the reference omnigenity NFP=2 QA deck, aspect ratio near 5,
   signed mean iota target 0.42, and quasi-axisymmetry.
-- QH: the bundled NFP=4 warm start, aspect ratio near 7, quasi-helical
+- QH: the bundled NFP=4 warm start, aspect ratio near 5, quasi-helical
   symmetry, and a smooth ``abs(mean_iota) >= 0.41`` lower bound.
-- QP: aspect ratio, quasi-poloidal symmetry, and a smooth
+- QP: aspect ratio near 5, quasi-poloidal symmetry, and a smooth
   ``abs(mean_iota) >= 0.41`` lower bound, using the same bundled NFP=2 seed as
   the QI runs.
-- QI: aspect ratio, a differentiable smooth Boozer-space quasi-isodynamic
+- QI: aspect ratio near 5, a differentiable smooth Boozer-space quasi-isodynamic
   residual evaluated through ``booz_xform_jax``, maximum mirror-ratio penalty,
   maximum-LCFS-elongation penalty, and the same smooth
   ``abs(mean_iota) >= 0.41`` lower bound.  ``LgradB`` is available as an
   optional commented term in the example scripts.
 
 The current objective priority is primary symmetry/QI quality and rotational
-transform control first.  QA follows the reference aspect-2.5/iota-0.42
-target; QH/QP/QI use aspect ratio near 7 with
+transform control first.  All four default targets use aspect ratio near 5;
+QA also uses the signed iota-0.42 target, while QH/QP/QI use
 ``abs(mean_iota) >= 0.41``.  ``LgradB`` remains available for users who want
 extra magnetic-gradient regularization, but it is not active in the default
 sweeps or best-row selection.
@@ -303,11 +262,9 @@ OOM.  Curves are split by objective stage and plotted as best-so-far values
 within that stage, so QP preseed and full constrained QI refinement are not
 treated as one continuous scalar objective.  The QA input follows the
 omnigenity ``input.nfp22_QA`` deck and carries nonzero mode-1 boundary terms so
-the iota residual has a useful derivative.  Under the reference aspect-2.5
-target, continuation gives clean quasi-axisymmetric Boozer contours; forcing
-the same target to aspect 7 is a separate design choice and gives visibly
-weaker QA field quality.  Direct QA without ESS remains a weak policy for high
-direct-start modes.
+the iota residual has a useful derivative.  Direct QA without ESS remains a
+weak policy for high direct-start modes; staged continuation is the default
+research-grade policy for QA.
 
 The large all-policy panels, atlases, and PDF snapshots are generated assets,
 not source files.  They are intentionally not tracked in git.  Recreate them
@@ -625,18 +582,18 @@ Source files
      - ``plot_qh_optimization`` and helper plotting functions.
    * - ``vmec_jax/driver.py``
      - ``write_wout_from_fixed_boundary_run``, ``wout_from_fixed_boundary_run``.
-   * - ``examples/optimization/qh_fixed_resolution_jax.py``
+   * - ``examples/optimization/QH_optimization.py``
      - QH SIMSOPT-style workflow script (no argparse, variables and objective list at top).
-   * - ``examples/optimization/qa_fixed_resolution_jax_ess.py``
+   * - ``examples/optimization/QA_optimization.py``
      - QA workflow with ESS toggle (aspect + mean iota + QA objectives).
-   * - ``examples/optimization/qp_fixed_resolution_jax_ess.py``
+   * - ``examples/optimization/QP_optimization.py``
      - QP workflow with helicity ``M=0`` quasisymmetry and iota lower bound.
-   * - ``examples/optimization/fixed_boundary_qs_common.py``
+   * - ``vmec_jax/optimization_workflow.py``
      - Shared mechanics for objective terms, stage construction, continuation,
        output writing, and plotting while keeping the QA/QH/QP scripts linear.
-   * - ``examples/optimization/qi_fixed_resolution_jax_ess.py``
+   * - ``examples/optimization/QI_optimization.py``
      - QI workflow using ``booz_xform_jax``, a bundled omnigenity seed,
-       optional QP preseed, and explicit mirror-ratio/elongation/``LgradB``
+       and explicit mirror-ratio/elongation/``LgradB``
        objective blocks that users can extend in the script.
    * - ``examples/optimization/plot_qh_optimization_results.py``
      - Standalone plotting helper (regenerates figures from saved wout+JSON).
@@ -649,12 +606,12 @@ Running the QH example
 .. code-block:: bash
 
    # Run optimisation (saves wout files + history.json + figures to results/qh_opt)
-   python examples/optimization/qh_fixed_resolution_jax.py
+   python examples/optimization/QH_optimization.py
 
    # Regenerate figures from saved outputs
    python examples/optimization/plot_qh_optimization_results.py --output-dir results/qh_opt
 
-Increase ``MAX_MODE`` at the top of ``qh_fixed_resolution_jax.py`` for richer
+Increase ``MAX_MODE`` at the top of ``QH_optimization.py`` for richer
 boundary parameterisation; increase ``MAX_NFEV`` for more optimisation budget.
 
 
