@@ -36,7 +36,6 @@ from .optimization import (
     smooth_min_abs_iota_residual,
     truncate_indata_boundary_modes,
 )
-from .plotting import plot_qh_optimization
 from .modes import nyquist_mode_table_from_grid, vmec_mode_table
 from .quasi_isodynamic import (
     _nearest_half_mesh_indices,

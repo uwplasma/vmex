@@ -1360,12 +1360,17 @@ def _save_case_outputs(output_dir: Path, opt, params_initial, params_final, resu
     opt.save_wout(output_dir / "wout_final.nc", params_final, state=result.get("_state_final"))
     opt.save_history(output_dir / "history.json", result)
     try:
-        vj.plot_qh_optimization(
+        vj.plot_3d_boundary_comparison(
             output_dir / "wout_initial.nc",
             output_dir / "wout_final.nc",
-            output_dir / "history.json",
             outdir=output_dir,
         )
+        vj.plot_bmag_contours(
+            output_dir / "wout_initial.nc",
+            output_dir / "wout_final.nc",
+            outdir=output_dir,
+        )
+        vj.plot_objective_history(output_dir / "history.json", outdir=output_dir)
     except Exception as exc:
         # Plotting is a post-processing convenience.  Do not mark an otherwise
         # valid optimization as failed because a remote/headless Matplotlib

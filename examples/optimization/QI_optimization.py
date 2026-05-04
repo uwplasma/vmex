@@ -26,17 +26,17 @@ CONTINUATION_NFEV = 50
 STAGE_REPEATS = 1
 STAGE_MODES = [MAX_MODE] * STAGE_REPEATS if USE_MODE_CONTINUATION and MAX_MODE > 1 else [MAX_MODE]
 
-METHOD = "scipy"
-SCIPY_TR_SOLVER = "lsmr"
-SCIPY_LSMR_MAXITER = None
-FTOL = 1.0e-4
-GTOL = 1.0e-4
-XTOL = 1.0e-8
-INNER_MAX_ITER = 120
-INNER_FTOL = 1.0e-9
-TRIAL_MAX_ITER = 120
-TRIAL_FTOL = 1.0e-9
-SOLVER_DEVICE = None
+METHOD = "scipy"  # Try also "gauss_newton", "scipy_matrix_free", or "lbfgs_adjoint".
+SCIPY_TR_SOLVER = "lsmr"  # For METHOD="scipy": "lsmr" is memory-light; "exact" is dense.
+SCIPY_LSMR_MAXITER = None  # None lets SciPy choose; set an int to cap LSMR iterations.
+FTOL = 1.0e-4  # Relative cost-reduction tolerance for the outer optimizer.
+GTOL = 1.0e-4  # Gradient optimality tolerance for the outer optimizer.
+XTOL = 1.0e-8  # Step-size tolerance; QI often benefits from a tighter value.
+INNER_MAX_ITER = 120  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
+INNER_FTOL = 1.0e-9  # Accepted-point VMEC tolerance; 0 uses FTOL from the input deck.
+TRIAL_MAX_ITER = 120  # Trial-point VMEC iterations; 0 follows the accepted/input budget.
+TRIAL_FTOL = 1.0e-9  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
+SOLVER_DEVICE = None  # None uses JAX default; set "cpu" or "gpu" to force one backend.
 
 # Scalar and field-quality targets.  The mirror/elongation terms are soft
 # upper-bound penalties; uncomment LgradB if needed for additional shaping.
@@ -162,12 +162,22 @@ print(f"  theta grid: {theta.shape}, zeta grid: {zeta.shape}, B grid: {b_lcfs.sh
 print(f"  Bmin/Bmax:  {np.min(b_lcfs):.6g} / {np.max(b_lcfs):.6g}")
 
 if MAKE_PLOTS:
-    plot_paths = vj.plot_qh_optimization(
-        OUTPUT_DIR / "wout_initial.nc",
-        OUTPUT_DIR / "wout_final.nc",
-        OUTPUT_DIR / "history.json",
-        outdir=OUTPUT_DIR,
-    )
+    plot_paths = {
+        "boundary_comparison": vj.plot_3d_boundary_comparison(
+            OUTPUT_DIR / "wout_initial.nc",
+            OUTPUT_DIR / "wout_final.nc",
+            outdir=OUTPUT_DIR,
+        ),
+        "bmag_contours": vj.plot_bmag_contours(
+            OUTPUT_DIR / "wout_initial.nc",
+            OUTPUT_DIR / "wout_final.nc",
+            outdir=OUTPUT_DIR,
+        ),
+        "objective_history": vj.plot_objective_history(
+            OUTPUT_DIR / "history.json",
+            outdir=OUTPUT_DIR,
+        ),
+    }
     print("\nPlot files selected by this script:")
     for name, path in plot_paths.items():
         print(f"  {name}: {path}")

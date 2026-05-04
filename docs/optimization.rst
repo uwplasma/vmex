@@ -102,8 +102,9 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
    MAX_MODE = 3
    MIN_VMEC_MODE = 6
    MAX_NFEV = 30
-   METHOD = "scipy"
-   SCIPY_TR_SOLVER = "lsmr"
+   METHOD = "scipy"            # also: "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint"
+   SCIPY_TR_SOLVER = "lsmr"    # also: "exact" for small dense trust-region solves
+   SOLVER_DEVICE = None        # set to "cpu" or "gpu" to force one backend
    HELICITY_M = 1
    HELICITY_N = -1
    TARGET_ASPECT = 5.0
@@ -181,12 +182,22 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
    )
    print(f"LCFS |B| grid shape: {b_lcfs.shape}, Bmax={np.max(b_lcfs):.6g}")
 
-   plot_paths = vj.plot_qh_optimization(
-       OUTPUT_DIR / "wout_initial.nc",
-       OUTPUT_DIR / "wout_final.nc",
-       OUTPUT_DIR / "history.json",
-       outdir=OUTPUT_DIR,
-   )
+   plot_paths = {
+       "boundary_comparison": vj.plot_3d_boundary_comparison(
+           OUTPUT_DIR / "wout_initial.nc",
+           OUTPUT_DIR / "wout_final.nc",
+           outdir=OUTPUT_DIR,
+       ),
+       "bmag_contours": vj.plot_bmag_contours(
+           OUTPUT_DIR / "wout_initial.nc",
+           OUTPUT_DIR / "wout_final.nc",
+           outdir=OUTPUT_DIR,
+       ),
+       "objective_history": vj.plot_objective_history(
+           OUTPUT_DIR / "history.json",
+           outdir=OUTPUT_DIR,
+       ),
+   }
    print(plot_paths)
 
 Objective callbacks receive ``(ctx, state)`` and may return a scalar or vector.
@@ -602,14 +613,18 @@ Parameters: ``specs``, ``alpha`` (default 1.0).
 Bare Gauss-Newton solver with exact Jacobian, Armijo line search, and hooks for
 expensive outer loops.  See ``vmec_jax/optimization.py`` for full signature.
 
-:func:`plot_qh_optimization`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+:func:`plot_3d_boundary_comparison`, :func:`plot_bmag_contours`, :func:`plot_objective_history`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Generate all three standard QH optimisation figures:
+Generate the standard optimization figures independently, so user scripts can
+choose only the plots they need:
 
 - ``boundary_comparison.png`` — 3-D LCFS coloured by :math:`|B|`.
 - ``bmag_surface.png`` — :math:`|B|` contour lines on LCFS (θ, φ/nfp).
 - ``objective_history.png`` — Objective and aspect ratio vs Jacobian index.
+
+``plot_qh_optimization`` remains as a compatibility wrapper, but new examples
+use the three explicit functions above.
 
 :func:`checkpoint_tape_state_jvp_columns`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -641,7 +656,9 @@ Source files
        (``quasi_isodynamic_residual_from_state``), mirror-ratio penalty, and
        LCFS elongation and ``LgradB`` penalties.
    * - ``vmec_jax/plotting.py``
-     - ``plot_qh_optimization`` and helper plotting functions.
+     - ``plot_3d_boundary_comparison``, ``plot_bmag_contours``,
+       ``plot_objective_history``, and the compatibility wrapper
+       ``plot_qh_optimization``.
    * - ``vmec_jax/driver.py``
      - ``write_wout_from_fixed_boundary_run``, ``wout_from_fixed_boundary_run``.
    * - ``examples/optimization/QH_optimization.py``
@@ -657,7 +674,7 @@ Source files
      - QI workflow using ``booz_xform_jax``, a bundled omnigenity seed,
        and explicit mirror-ratio/elongation/``LgradB``
        objective blocks that users can extend in the script.
-   * - ``examples/optimization/plot_qh_optimization_results.py``
+   * - ``examples/optimization/plot_optimization_results.py``
      - Standalone plotting helper (regenerates figures from saved wout+JSON).
    * - ``examples/optimization/target_iota_aspect_volume.py``
      - Simpler optimisation targeting iota, aspect, volume.
@@ -671,7 +688,7 @@ Running the QH example
    python examples/optimization/QH_optimization.py
 
    # Regenerate figures from saved outputs
-   python examples/optimization/plot_qh_optimization_results.py --output-dir results/qh_opt
+   python examples/optimization/plot_optimization_results.py --output-dir results/qh_opt
 
 Increase ``MAX_MODE`` at the top of ``QH_optimization.py`` for richer
 boundary parameterisation; increase ``MAX_NFEV`` for more optimisation budget.

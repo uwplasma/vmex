@@ -350,12 +350,17 @@ def _run_case(problem: str, max_mode: int, policy: Policy, output_dir: Path) -> 
     final_opt.save_wout(output_dir / "wout_initial.nc", final_params0, state=final_result.get("_state_initial"))
     final_opt.save_wout(output_dir / "wout_final.nc", final_result["x"], state=final_result.get("_state_final"))
     final_opt.save_history(output_dir / "history.json", final_result)
-    vj.plot_qh_optimization(
+    vj.plot_3d_boundary_comparison(
         output_dir / "wout_initial.nc",
         output_dir / "wout_final.nc",
-        output_dir / "history.json",
         outdir=output_dir,
     )
+    vj.plot_bmag_contours(
+        output_dir / "wout_initial.nc",
+        output_dir / "wout_final.nc",
+        outdir=output_dir,
+    )
+    vj.plot_objective_history(output_dir / "history.json", outdir=output_dir)
 
     hist = final_result["_history_dump"]
     return CaseResult(

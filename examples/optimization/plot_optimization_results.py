@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 
-"""Plot results from the QH exact-adjoint optimization.
+"""Plot results from a fixed-boundary optimization.
 
 Reads the wout files and history JSON produced by
-``QH_optimization.py`` (or the legacy ``qh_fixed_resolution_exact.py``)
-and generates three figures in the output directory:
+the QA/QH/QP/QI optimization examples and generates three figures in the output
+directory:
 
   - ``boundary_comparison.png``   3D LCFS coloured by |B| (initial vs final)
   - ``bmag_surface.png``          |B| contour lines on LCFS (initial vs final)
@@ -18,7 +18,7 @@ Run the optimisation first::
 
 Then plot (or regenerate after editing the plotting code)::
 
-    python examples/optimization/plot_qh_optimization_results.py \\
+    python examples/optimization/plot_optimization_results.py \\
         --output-dir results/qh_opt
 
 All figures are saved inside ``--output-dir``.
@@ -33,7 +33,7 @@ import vmec_jax as vj
 
 
 def _parse_args():
-    p = argparse.ArgumentParser(description="Plot QH optimization results")
+    p = argparse.ArgumentParser(description="Plot fixed-boundary optimization results")
     p.add_argument(
         "--output-dir",
         type=str,
@@ -54,17 +54,29 @@ def main() -> None:
     for p in (wout_init_path, wout_final_path, history_path):
         if not p.exists():
             raise FileNotFoundError(
-                f"{p} not found.  Run QH_optimization.py first:\n"
+                f"{p} not found. Run one of the optimization examples first, e.g.:\n"
                 f"  python examples/optimization/QH_optimization.py"
             )
 
     print(f"Generating plots from {outdir} …")
-    paths = vj.plot_qh_optimization(
-        wout_init_path,
-        wout_final_path,
-        history_path,
-        outdir=outdir,
-    )
+    paths = {
+        "boundary_comparison": vj.plot_3d_boundary_comparison(
+            wout_init_path,
+            wout_final_path,
+            outdir=outdir,
+        ),
+        "bmag_contours": vj.plot_bmag_contours(
+            wout_init_path,
+            wout_final_path,
+            outdir=outdir,
+        ),
+        "objective_history": vj.plot_objective_history(
+            history_path,
+            outdir=outdir,
+        ),
+    }
+    for name, path in paths.items():
+        print(f"  {name}: {path}")
 
     import json
     with open(history_path) as f:

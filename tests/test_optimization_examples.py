@@ -33,6 +33,9 @@ def test_fixed_boundary_qs_examples_are_standalone_workflows() -> None:
         assert "print_optimization_outputs" not in text
         assert "result.final_result" in text
         assert "vmecplot2_bmag_grid(" in text
+        assert "plot_3d_boundary_comparison(" in text
+        assert "plot_bmag_contours(" in text
+        assert "plot_objective_history(" in text
 
 
 def test_qi_example_uses_qi_problem_api() -> None:
@@ -49,6 +52,9 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "print_optimization_outputs" not in text
     assert "result.final_result" in text
     assert "vmecplot2_bmag_grid(" in text
+    assert "plot_3d_boundary_comparison(" in text
+    assert "plot_bmag_contours(" in text
+    assert "plot_objective_history(" in text
 
 
 def test_finite_beta_examples_plot_explicitly_after_solve() -> None:
@@ -61,7 +67,9 @@ def test_finite_beta_examples_plot_explicitly_after_solve() -> None:
         text = script.read_text()
         assert "save_final_outputs(" in text
         assert "plot=" not in text
-        assert "vj.plot_qh_optimization(" in text
+        assert "vj.plot_3d_boundary_comparison(" in text
+        assert "vj.plot_bmag_contours(" in text
+        assert "vj.plot_objective_history(" in text
 
 
 def test_custom_objective_term_residual_shape() -> None:
