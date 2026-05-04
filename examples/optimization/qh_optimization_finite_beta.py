@@ -261,6 +261,20 @@ save_final_outputs(
     stage_records=stage_records,
     final_optimizer=final_optimizer,
     final_result=final_result,
-    plot=PLOT,
 )
 print_final_summary(final_result)
+
+if PLOT:
+    try:
+        plot_paths = vj.plot_qh_optimization(
+            OUTPUT_DIR / "wout_initial.nc",
+            OUTPUT_DIR / "wout_final.nc",
+            OUTPUT_DIR / "history.json",
+            outdir=OUTPUT_DIR,
+        )
+        print("Plot files:")
+        for path in plot_paths.values():
+            print(f"  {path}")
+    except Exception as exc:
+        (OUTPUT_DIR / "plotting_error.txt").write_text(f"{type(exc).__name__}: {exc}\n")
+        print(f"Plotting failed: {type(exc).__name__}: {exc}")
