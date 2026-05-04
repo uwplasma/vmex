@@ -10,6 +10,7 @@ live here instead of being repeated in every example.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -120,6 +121,336 @@ class QIObjectiveTerm:
     def residual_and_total(self, ctx: StageContext, state, field: dict) -> tuple[object, object]:
         residuals, total = self.evaluate(ctx, state, field)
         return _as_vector(residuals), total
+
+
+@dataclass(frozen=True)
+class FixedBoundaryVMEC:
+    """Small fixed-boundary optimization object used by the examples.
+
+    This object is intentionally lighter than SIMSOPT's full ``Vmec`` graph,
+    but it plays the same role in the example workflow: it owns the VMEC input
+    deck, resolution policy, active boundary parameterization, and output path.
+    Objective objects are then assembled into a :class:`LeastSquaresProblem`
+    and solved by :func:`least_squares_solve`.
+    """
+
+    input_file: Path
+    cfg: object
+    indata: object
+    max_mode: int
+    min_vmec_mode: int = 5
+    output_dir: Path = Path("results/optimization")
+    project_input_boundary_to_max_mode: bool = False
+    include: tuple[str, ...] = ("rc", "zs")
+    fix: tuple[str, ...] = ("rc00",)
+
+    @classmethod
+    def from_input(
+        cls,
+        input_file,
+        *,
+        max_mode: int,
+        min_vmec_mode: int = 5,
+        output_dir: Path | str = Path("results/optimization"),
+        project_input_boundary_to_max_mode: bool = False,
+        include: Sequence[str] = ("rc", "zs"),
+        fix: Sequence[str] = ("rc00",),
+    ) -> "FixedBoundaryVMEC":
+        """Load a VMEC input file and apply the optimization resolution policy."""
+
+        from . import load_config
+        from .config import config_from_indata
+
+        input_path = Path(input_file)
+        cfg, indata = load_config(str(input_path))
+        indata = rebuild_for_optimization_resolution(
+            indata,
+            max_mode=max_mode,
+            min_vmec_mode=min_vmec_mode,
+        )
+        return cls(
+            input_file=input_path,
+            cfg=config_from_indata(indata),
+            indata=indata,
+            max_mode=int(max_mode),
+            min_vmec_mode=int(min_vmec_mode),
+            output_dir=Path(output_dir),
+            project_input_boundary_to_max_mode=bool(project_input_boundary_to_max_mode),
+            include=tuple(include),
+            fix=tuple(fix),
+        )
+
+
+@dataclass(frozen=True)
+class QuasiIsodynamicOptions:
+    """Boozer/QI sampling options shared by QI objective terms."""
+
+    surfaces: object
+    mboz: int = 18
+    nboz: int = 18
+    nphi: int = 151
+    nalpha: int = 31
+    n_bounce: int = 51
+    softness: float = 2.0e-2
+    width_weight: float = 1.0
+    branch_width_weight: float = 1.0
+    branch_width_softness: float = 2.0e-2
+    profile_weight: float = 0.0
+    aligned_profile_weight: float = 0.0
+    aligned_profile_softness: float = 2.0e-2
+    aligned_profile_trap_level: float = 0.65
+    aligned_profile_trap_softness: float = 5.0e-2
+
+
+@dataclass(frozen=True)
+class LeastSquaresProblem:
+    """Least-squares objective assembled from ``(function, target, weight)`` tuples.
+
+    As in SIMSOPT, tuple ``weight`` is an objective weight.  Internally the
+    residual is ``sqrt(weight) * (function - target)``.
+    """
+
+    objective_terms: tuple[ObjectiveTerm, ...] = ()
+    qi_objective_terms: tuple[QIObjectiveTerm, ...] = ()
+
+    @classmethod
+    def from_tuples(cls, tuples: Sequence[tuple[Callable, float | np.ndarray, float]]):
+        """Create a problem from ``(callable, target, weight)`` tuples."""
+
+        objective_terms: list[ObjectiveTerm] = []
+        qi_terms: list[QIObjectiveTerm] = []
+        for fn, target, weight in tuples:
+            residual_weight = math.sqrt(float(weight))
+            owner = getattr(fn, "__self__", None)
+            if getattr(owner, "requires_qi_field", False):
+                if not _target_is_zero(target):
+                    raise ValueError("QI field objectives currently require target=0.")
+                qi_terms.append(owner.to_qi_term(residual_weight))
+            elif hasattr(owner, "to_objective_term"):
+                objective_terms.append(owner.to_objective_term(target=target, residual_weight=residual_weight))
+            else:
+                name = getattr(fn, "__name__", "objective")
+                objective_terms.append(
+                    ObjectiveTerm(
+                        name,
+                        lambda ctx, state, fn=fn: fn(ctx, state),
+                        target=target,
+                        weight=residual_weight,
+                    )
+                )
+        return cls(tuple(objective_terms), tuple(qi_terms))
+
+    @property
+    def is_qi(self) -> bool:
+        """Whether the problem contains Boozer-space QI field objectives."""
+
+        return bool(self.qi_objective_terms)
+
+
+class AspectRatio:
+    """Aspect-ratio objective object."""
+
+    name = "aspect"
+
+    def J(self, ctx: StageContext, state):
+        return equilibrium_aspect_ratio_from_state(state=state, static=ctx.static)
+
+    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight)
+
+
+class MeanIota:
+    """Mean rotational-transform objective object."""
+
+    name = "iota"
+
+    def J(self, ctx: StageContext, state):
+        return mean_iota(ctx, state)
+
+    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight, track_iota=True)
+
+
+class AbsMeanIotaFloor:
+    """Smooth lower-bound objective for ``abs(mean_iota)``."""
+
+    name = "abs_iota_floor"
+
+    def __init__(self, target: float, *, softness: float = 1.0e-3):
+        self.target = float(target)
+        self.softness = float(softness)
+
+    def J(self, ctx: StageContext, state):
+        return smooth_min_abs_iota_residual(mean_iota(ctx, state), self.target, softness=self.softness)
+
+    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        del target
+        return ObjectiveTerm(self.name, self.J, target=0.0, weight=residual_weight, track_iota=True)
+
+
+class QuasisymmetryRatioResidual:
+    """QS residual object for QA/QH/QP objectives."""
+
+    name = "qs"
+
+    def __init__(self, *, helicity_m: int, helicity_n: int, surfaces):
+        self.helicity_m = int(helicity_m)
+        self.helicity_n = int(helicity_n)
+        self.surfaces = surfaces
+
+    def _evaluate(self, ctx: StageContext, state):
+        return quasisymmetry_ratio_residual_from_state(
+            state=state,
+            static=ctx.static,
+            indata=ctx.indata,
+            signgs=ctx.signgs,
+            flux_local=ctx.flux,
+            prof_local={"pressure": ctx.pressure},
+            pressure_local=ctx.pressure,
+            surfaces=self.surfaces,
+            helicity_m=self.helicity_m,
+            helicity_n=self.helicity_n,
+        )
+
+    def J(self, ctx: StageContext, state):
+        return self._evaluate(ctx, state)["residuals1d"]
+
+    def total(self, ctx: StageContext, state):
+        return self._evaluate(ctx, state)["total"]
+
+    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        if not _target_is_zero(target):
+            raise ValueError("Quasisymmetry residual objectives require target=0.")
+        return ObjectiveTerm(
+            self.name,
+            self.J,
+            target=0.0,
+            weight=residual_weight,
+            total=lambda ctx, state: float(residual_weight) ** 2 * self.total(ctx, state),
+        )
+
+
+class QuasiIsodynamicResidual:
+    """Smooth QI residual object using a shared Boozer field evaluation."""
+
+    name = "qi"
+    requires_qi_field = True
+
+    def J(self, _ctx: StageContext, _state):
+        raise RuntimeError("QuasiIsodynamicResidual must be evaluated inside a QI solve.")
+
+    def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
+        return quasi_isodynamic_field_objective(weight=residual_weight)
+
+
+class MirrorRatio:
+    """Maximum mirror-ratio penalty object for QI solves."""
+
+    name = "mirror_ratio"
+    requires_qi_field = True
+
+    def __init__(self, *, threshold: float, ntheta: int = 96, nphi: int = 96, surface_index: int = 0):
+        self.threshold = float(threshold)
+        self.ntheta = int(ntheta)
+        self.nphi = int(nphi)
+        self.surface_index = int(surface_index)
+
+    def J(self, _ctx: StageContext, _state):
+        raise RuntimeError("MirrorRatio must be evaluated inside a QI solve.")
+
+    def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
+        return qi_mirror_ratio_objective(
+            threshold=self.threshold,
+            weight=residual_weight,
+            ntheta=self.ntheta,
+            nphi=self.nphi,
+            surface_index=self.surface_index,
+        )
+
+
+class MaxElongation:
+    """Maximum LCFS elongation penalty object for QI solves."""
+
+    name = "max_elongation"
+    requires_qi_field = True
+
+    def __init__(self, *, threshold: float, ntheta: int = 48, nphi: int = 16):
+        self.threshold = float(threshold)
+        self.ntheta = int(ntheta)
+        self.nphi = int(nphi)
+
+    def J(self, _ctx: StageContext, _state):
+        raise RuntimeError("MaxElongation must be evaluated inside a QI solve.")
+
+    def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
+        return qi_max_elongation_objective(
+            threshold=self.threshold,
+            weight=residual_weight,
+            ntheta=self.ntheta,
+            nphi=self.nphi,
+        )
+
+
+class LgradB:
+    """Minimum-``L_grad_B`` penalty object usable in QS or QI examples."""
+
+    name = "LgradB"
+
+    def __init__(
+        self,
+        *,
+        threshold: float,
+        s_index: int = -1,
+        ntheta: int = 9,
+        nphi: int = 7,
+        smooth_penalty: float = 0.0,
+    ):
+        self.threshold = float(threshold)
+        self.s_index = int(s_index)
+        self.ntheta = int(ntheta)
+        self.nphi = int(nphi)
+        self.smooth_penalty = float(smooth_penalty)
+
+    def _evaluate(self, ctx: StageContext, state):
+        return lgradb_penalty_from_state(
+            state=state,
+            static=ctx.static,
+            indata=ctx.indata,
+            signgs=ctx.signgs,
+            flux_local=ctx.flux,
+            threshold=self.threshold,
+            s_index=self.s_index,
+            ntheta=self.ntheta,
+            nphi=self.nphi,
+            smooth_penalty=self.smooth_penalty,
+        )
+
+    def J(self, ctx: StageContext, state):
+        return self._evaluate(ctx, state)["residuals1d"]
+
+    def total(self, ctx: StageContext, state):
+        return self._evaluate(ctx, state)["total"]
+
+    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        if not _target_is_zero(target):
+            raise ValueError("LgradB penalty objectives require target=0.")
+        return ObjectiveTerm(
+            self.name,
+            self.J,
+            target=0.0,
+            weight=residual_weight,
+            total=lambda ctx, state: float(residual_weight) ** 2 * self.total(ctx, state),
+        )
+
+    def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
+        return qi_lgradb_objective(
+            threshold=self.threshold,
+            weight=residual_weight,
+            s_index=self.s_index,
+            ntheta=self.ntheta,
+            nphi=self.nphi,
+            smooth_penalty=self.smooth_penalty,
+        )
 
 
 def aspect_objective(target: float, weight: float = 1.0) -> ObjectiveTerm:
@@ -1000,6 +1331,138 @@ def run_quasi_isodynamic_objective_optimization(
     )
 
 
+def least_squares_solve(
+    vmec: FixedBoundaryVMEC,
+    problem: LeastSquaresProblem,
+    *,
+    stage_modes: Sequence[int],
+    max_nfev: int,
+    continuation_nfev: int,
+    method: str = "scipy",
+    ftol: float = 1.0e-4,
+    gtol: float = 1.0e-4,
+    xtol: float = 1.0e-4,
+    use_ess: bool = False,
+    ess_alpha: float = 1.2,
+    label: str = "Fixed-boundary optimization",
+    use_mode_continuation: bool = True,
+    target_aspect: float | None = None,
+    target_iota: float | None = None,
+    iota_abs_min: float | None = None,
+    qi_options: QuasiIsodynamicOptions | None = None,
+    inner_max_iter: int = 120,
+    inner_ftol: float = 1.0e-9,
+    trial_max_iter: int = 120,
+    trial_ftol: float = 1.0e-9,
+    solver_device: str | None = None,
+    scipy_tr_solver: str | None = "lsmr",
+    scipy_lsmr_maxiter: int | None = None,
+    save_stage_inputs: bool = True,
+    save_stage_wouts: bool = False,
+    save_rerun_wouts: bool = False,
+    plot: bool = True,
+) -> FixedBoundaryOptimizationResult:
+    """Solve a SIMSOPT-style fixed-boundary least-squares problem.
+
+    The examples use this as the common public workflow:
+
+    1. create a :class:`FixedBoundaryVMEC`,
+    2. assemble a :class:`LeastSquaresProblem` from ``(J, target, weight)``
+       tuples,
+    3. choose stage modes and optimizer settings,
+    4. call this function.
+    """
+
+    if problem.is_qi:
+        if qi_options is None:
+            raise ValueError("QI objectives require qi_options=QuasiIsodynamicOptions(...).")
+        return run_quasi_isodynamic_objective_optimization(
+            cfg=vmec.cfg,
+            indata=vmec.indata,
+            scalar_objectives=problem.objective_terms,
+            qi_objectives=problem.qi_objective_terms,
+            stage_modes=stage_modes,
+            max_mode=vmec.max_mode,
+            max_nfev=max_nfev,
+            continuation_nfev=continuation_nfev,
+            method=method,
+            ftol=ftol,
+            gtol=gtol,
+            xtol=xtol,
+            use_ess=use_ess,
+            ess_alpha=ess_alpha,
+            output_dir=vmec.output_dir,
+            label=label,
+            use_mode_continuation=use_mode_continuation,
+            surfaces=qi_options.surfaces,
+            mboz=qi_options.mboz,
+            nboz=qi_options.nboz,
+            nphi=qi_options.nphi,
+            nalpha=qi_options.nalpha,
+            n_bounce=qi_options.n_bounce,
+            softness=qi_options.softness,
+            width_weight=qi_options.width_weight,
+            branch_width_weight=qi_options.branch_width_weight,
+            branch_width_softness=qi_options.branch_width_softness,
+            profile_weight=qi_options.profile_weight,
+            aligned_profile_weight=qi_options.aligned_profile_weight,
+            aligned_profile_softness=qi_options.aligned_profile_softness,
+            aligned_profile_trap_level=qi_options.aligned_profile_trap_level,
+            aligned_profile_trap_softness=qi_options.aligned_profile_trap_softness,
+            target_aspect=target_aspect,
+            iota_abs_min=iota_abs_min,
+            include=vmec.include,
+            fix=vmec.fix,
+            project_input_boundary_to_max_mode=vmec.project_input_boundary_to_max_mode,
+            inner_max_iter=inner_max_iter,
+            inner_ftol=inner_ftol,
+            trial_max_iter=trial_max_iter,
+            trial_ftol=trial_ftol,
+            solver_device=solver_device,
+            scipy_tr_solver=scipy_tr_solver,
+            scipy_lsmr_maxiter=scipy_lsmr_maxiter,
+            save_stage_inputs=save_stage_inputs,
+            save_stage_wouts=save_stage_wouts,
+            plot=plot,
+        )
+
+    return run_fixed_boundary_objective_optimization(
+        cfg=vmec.cfg,
+        indata=vmec.indata,
+        objectives=problem.objective_terms,
+        stage_modes=stage_modes,
+        max_mode=vmec.max_mode,
+        max_nfev=max_nfev,
+        continuation_nfev=continuation_nfev,
+        method=method,
+        ftol=ftol,
+        gtol=gtol,
+        xtol=xtol,
+        use_ess=use_ess,
+        ess_alpha=ess_alpha,
+        output_dir=vmec.output_dir,
+        label=label,
+        use_mode_continuation=use_mode_continuation,
+        target_aspect=target_aspect,
+        target_iota=target_iota,
+        iota_abs_min=iota_abs_min,
+        include=vmec.include,
+        fix=vmec.fix,
+        project_input_boundary_to_max_mode=vmec.project_input_boundary_to_max_mode,
+        inner_max_iter=inner_max_iter,
+        inner_ftol=inner_ftol,
+        trial_max_iter=trial_max_iter,
+        trial_ftol=trial_ftol,
+        solver_device=solver_device,
+        scipy_tr_solver=scipy_tr_solver,
+        scipy_lsmr_maxiter=scipy_lsmr_maxiter,
+        save_stage_inputs=save_stage_inputs,
+        save_stage_wouts=save_stage_wouts,
+        save_rerun_wouts=save_rerun_wouts,
+        plot=plot,
+    )
+
+
 def print_qs_problem_summary(
     *,
     method: str,
@@ -1217,6 +1680,10 @@ def _as_vector(value):
     return arr.reshape((1,)) if int(arr.ndim) == 0 else jnp.ravel(arr)
 
 
+def _target_is_zero(target) -> bool:
+    return bool(np.allclose(np.asarray(target, dtype=float), 0.0))
+
+
 def _remove_stale(path: Path) -> None:
     try:
         path.unlink()
@@ -1235,9 +1702,20 @@ def _slice_boozer_surfaces(booz: dict, surface_index: int) -> dict:
 
 
 __all__ = [
+    "AbsMeanIotaFloor",
+    "AspectRatio",
+    "FixedBoundaryVMEC",
     "FixedBoundaryObjectiveStage",
     "FixedBoundaryOptimizationResult",
+    "LeastSquaresProblem",
+    "LgradB",
+    "MaxElongation",
+    "MeanIota",
+    "MirrorRatio",
     "ObjectiveTerm",
+    "QuasiIsodynamicOptions",
+    "QuasiIsodynamicResidual",
+    "QuasisymmetryRatioResidual",
     "QIObjectiveTerm",
     "StageContext",
     "abs_mean_iota_floor_objective",
@@ -1246,6 +1724,7 @@ __all__ = [
     "build_quasi_isodynamic_objective_stage",
     "combine_qs_stage_histories",
     "lgradb_objective",
+    "least_squares_solve",
     "mean_iota",
     "mean_iota_objective",
     "objectives_track_iota",

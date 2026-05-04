@@ -1,10 +1,5 @@
 #!/usr/bin/env python
-"""Quasi-axisymmetric optimization with vmec_jax.
-
-This is a SIMSOPT-style standalone script: edit the parameters, assemble the
-objective list, and call the optimizer.  Add a new objective by appending
-another ``ObjectiveTerm`` to ``OBJECTIVES``.
-"""
+"""Quasi-axisymmetric optimization with vmec_jax."""
 
 from pathlib import Path
 
@@ -12,100 +7,92 @@ import numpy as np
 
 import vmec_jax as vj
 from vmec_jax._compat import enable_x64
-from vmec_jax.config import config_from_indata
-from vmec_jax.optimization_workflow import (
-    ObjectiveTerm,  # noqa: F401 - useful for custom terms below.
-    aspect_objective,
-    mean_iota_objective,
-    qs_stage_modes,
-    quasisymmetry_objective,
-    rebuild_for_optimization_resolution,
-    run_fixed_boundary_objective_optimization,
-)
 
 
 enable_x64(True)
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
-# User parameters
+# Problem parameters.  These are intended to be edited directly, as in the
+# SIMSOPT examples.
 INPUT_FILE = DATA_DIR / "input.nfp2_QA_omnigenity"
 OUTPUT_DIR = Path("results/qa_opt/ess")
-
 MAX_MODE = 3
 MIN_VMEC_MODE = 6
+USE_MODE_CONTINUATION = True
 MAX_NFEV = 60
 CONTINUATION_NFEV = 60
-USE_MODE_CONTINUATION = True
+STAGE_MODES = vj.qs_stage_modes(
+    max_mode=MAX_MODE,
+    use_mode_continuation=USE_MODE_CONTINUATION,
+    continuation_nfev=CONTINUATION_NFEV,
+)
 
+# Optimizer parameters.
 METHOD = "scipy"
 SCIPY_TR_SOLVER = "lsmr"
 SCIPY_LSMR_MAXITER = None
 FTOL = 1.0e-4
 GTOL = 1.0e-4
 XTOL = 1.0e-4
-
 INNER_MAX_ITER = 120
 INNER_FTOL = 1.0e-9
 TRIAL_MAX_ITER = 120
 TRIAL_FTOL = 1.0e-9
 SOLVER_DEVICE = None  # set to "cpu" or "gpu" to force one backend
 
+# Physics targets and least-squares objective weights.  These are SIMSOPT-style
+# tuple weights, so vmec_jax minimizes sqrt(weight) * (J - target).
+TARGET_ASPECT = 5.0
+TARGET_IOTA = 0.42
 HELICITY_M = 1
 HELICITY_N = 0
 SURFACES = np.arange(0.0, 1.01, 0.1)
-TARGET_ASPECT = 5.0
-TARGET_IOTA = 0.42
-
 ASPECT_WEIGHT = 1.0
-IOTA_WEIGHT = 100.0
+IOTA_WEIGHT = 10_000.0
 QS_WEIGHT = 1.0
 
+# ESS scales high-mode boundary variables.  Set USE_ESS=False for an unscaled
+# trust-region solve.
 USE_ESS = True
 ALPHA = 1.2
-LABEL = f"QA optimization (max_mode={MAX_MODE}, {'ESS' if USE_ESS else 'no ESS'})"
-
-SAVE_STAGE_INPUTS = True
-SAVE_STAGE_WOUTS = False
-SAVE_RERUN_WOUTS = False
 PLOT = True
 
 
-# Objective function
-OBJECTIVES = [
-    aspect_objective(TARGET_ASPECT, ASPECT_WEIGHT),
-    mean_iota_objective(TARGET_IOTA, IOTA_WEIGHT),
-    quasisymmetry_objective(
-        helicity_m=HELICITY_M,
-        helicity_n=HELICITY_N,
-        surfaces=SURFACES,
-        weight=QS_WEIGHT,
-    ),
-    # Optional examples:
-    # lgradb_objective(threshold=0.30, weight=0.1)
-    # ObjectiveTerm("custom", lambda ctx, state: your_metric(ctx, state), target=0.0, weight=1.0)
-]
-
-
-# Problem setup
-print(f"Loading {INPUT_FILE.name} ...")
-cfg, indata = vj.load_config(str(INPUT_FILE))
-indata = rebuild_for_optimization_resolution(indata, max_mode=MAX_MODE, min_vmec_mode=MIN_VMEC_MODE)
-cfg = config_from_indata(indata)
-stage_modes = qs_stage_modes(
+# Optimizable VMEC object.
+vmec = vj.FixedBoundaryVMEC.from_input(
+    INPUT_FILE,
     max_mode=MAX_MODE,
-    use_mode_continuation=USE_MODE_CONTINUATION,
-    continuation_nfev=CONTINUATION_NFEV,
+    min_vmec_mode=MIN_VMEC_MODE,
+    output_dir=OUTPUT_DIR,
 )
 
 
-# Optimization
-run_fixed_boundary_objective_optimization(
-    cfg=cfg,
-    indata=indata,
-    objectives=OBJECTIVES,
-    stage_modes=stage_modes,
-    max_mode=MAX_MODE,
+# Objective function.  Add new terms by appending another
+# (objective.J, target, weight) tuple.
+aspect = vj.AspectRatio()
+iota = vj.MeanIota()
+qs = vj.QuasisymmetryRatioResidual(
+    helicity_m=HELICITY_M,
+    helicity_n=HELICITY_N,
+    surfaces=SURFACES,
+)
+problem = vj.LeastSquaresProblem.from_tuples(
+    [
+        (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
+        (iota.J, TARGET_IOTA, IOTA_WEIGHT),
+        (qs.J, 0.0, QS_WEIGHT),
+        # Optional:
+        # (vj.LgradB(threshold=0.30).J, 0.0, 0.01),
+    ]
+)
+
+
+# Optimization.
+result = vj.least_squares_solve(
+    vmec,
+    problem,
+    stage_modes=STAGE_MODES,
     max_nfev=MAX_NFEV,
     continuation_nfev=CONTINUATION_NFEV,
     method=METHOD,
@@ -114,8 +101,7 @@ run_fixed_boundary_objective_optimization(
     xtol=XTOL,
     use_ess=USE_ESS,
     ess_alpha=ALPHA,
-    output_dir=OUTPUT_DIR,
-    label=LABEL,
+    label=f"QA optimization (max_mode={MAX_MODE}, {'ESS' if USE_ESS else 'no ESS'})",
     use_mode_continuation=USE_MODE_CONTINUATION,
     target_aspect=TARGET_ASPECT,
     target_iota=TARGET_IOTA,
@@ -126,8 +112,5 @@ run_fixed_boundary_objective_optimization(
     solver_device=SOLVER_DEVICE,
     scipy_tr_solver=SCIPY_TR_SOLVER,
     scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
-    save_stage_inputs=SAVE_STAGE_INPUTS,
-    save_stage_wouts=SAVE_STAGE_WOUTS,
-    save_rerun_wouts=SAVE_RERUN_WOUTS,
     plot=PLOT,
 )
