@@ -76,6 +76,12 @@ problem = vj.LeastSquaresProblem.from_tuples(
         (qs.J, 0.0, QS_WEIGHT),
         # Optional:
         # (vj.LgradB(threshold=0.30).J, 0.0, 0.01),
+        # (vj.MagneticWell(minimum=0.0).J, 0.0, 1.0),
+        # Finite-beta examples can also add:
+        # (vj.VolavgB().J, TARGET_VOLAVGB, VOLAVGB_WEIGHT),
+        # (vj.BetaTotal().J, TARGET_BETA, BETA_WEIGHT),
+        # DMerc is currently a wout diagnostic/parity gate; a differentiable
+        # DMerc objective should be added in vmec_jax before uncommenting it.
     ]
 )
 
@@ -93,8 +99,6 @@ result = vj.least_squares_solve(
     ess_alpha=ALPHA,
     label=f"QP optimization (max_mode={MAX_MODE}, {'ESS' if USE_ESS else 'no ESS'})",
     use_mode_continuation=USE_MODE_CONTINUATION,
-    target_aspect=TARGET_ASPECT,
-    iota_abs_min=TARGET_ABS_IOTA_MIN,
     inner_max_iter=INNER_MAX_ITER,
     inner_ftol=INNER_FTOL,
     trial_max_iter=TRIAL_MAX_ITER,
@@ -104,3 +108,5 @@ result = vj.least_squares_solve(
     scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
     plot=PLOT,
 )
+
+vj.print_optimization_outputs(result, OUTPUT_DIR, plot=PLOT)
