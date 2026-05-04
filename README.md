@@ -166,9 +166,11 @@ optimization work, the final LCFS, per-stage objective history, and the final
 outer-surface `|B|` in Boozer coordinates computed with `booz_xform_jax`.
 This sweep uses NFP=2 seeds for QA/QP/QI and the standard bundled NFP=4 warm
 start for QH.  The current objective priority is primary symmetry/QI quality
-and `abs(mean_iota) >= 0.41`, followed by aspect ratio near 7.  `LgradB`
-remains available as an optional script-level term, but it is not active in
-the default README examples or best-row selection.
+and rotational-transform control.  QA follows the reference omnigenity QA deck
+with aspect ratio near 2.5 and signed mean iota target 0.42; QH/QP/QI use
+aspect ratio near 7 and `abs(mean_iota) >= 0.41`.  `LgradB` remains available
+as an optional script-level term, but it is not active in the default README
+examples or best-row selection.
 
 The QP and QI rows both start from the bundled NFP=2 QI seed.  QP is a
 quasi-poloidal-symmetry target using that same input deck; QI can optionally
@@ -178,10 +180,10 @@ The bundled NFP=2 seed is projected to each active `max_mode`, so
 
 | Target | Backend | Policy | max_mode | ESS | QP preseed | Final J | QI raw | Mirror | Elong. | Aspect | Iota | Wall time |
 |---|---|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|
-| QA | CPU | continuation | 3 | no |  | 2.39e-02 |  |  |  | 7.002 | 0.4200 | 5.4 min |
-| QH | CPU | continuation | 3 | yes |  | 1.30e-03 |  |  |  | 7.000 | -1.1813 | 2.4 min |
-| QP | CPU | continuation | 3 | no |  | 3.00e-02 |  |  |  | 7.006 | -0.7401 | 2.1 min |
-| QI | CPU | continuation | 3 | yes | yes | 8.19e-04 | 8.18e-04 | 0.208 | 7.93 | 6.999 | -0.7698 | 4.0 min |
+| QA | CPU | continuation | 3 | no |  | 1.03e-03 |  |  |  | 2.501 | 0.4200 | 4.3 min |
+| QH | CPU | continuation | 3 | yes |  | 1.30e-03 |  |  |  | 7.000 | -1.1813 | 3.1 min |
+| QP | CPU | continuation | 3 | no |  | 3.00e-02 |  |  |  | 7.006 | -0.7401 | 2.8 min |
+| QI | CPU | continuation | 3 | no | no | 1.09e-04 | 1.09e-04 | 0.210 | 3.49 | 7.000 | -0.5005 | 2.6 min |
 
 <p align="center">
   <img src="docs/_static/figures/readme_best_optimization_qa.png" width="980" />
@@ -205,7 +207,7 @@ Recreate the four displayed runs:
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa --modes 3 --ess off
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qh --modes 3 --ess on
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qp --modes 3 --ess off
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qi --modes 3 --ess on --qi-qp-preseed on
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qi --modes 3 --ess off --qi-qp-preseed off
 ```
 
 Regenerate the README panels and the compact CSV used for the table:

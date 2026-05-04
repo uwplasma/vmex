@@ -2511,10 +2511,10 @@ class FixedBoundaryExactOptimizer:
 
     def _qs_total_from_state(self, state: VMECState, res: np.ndarray | None = None) -> float:
         """QS-only objective from a solved state, with metadata-aware fallback."""
-        if res is not None:
-            return self._qs_from_res(np.asarray(res, dtype=float))
         if self._qs_total_from_state_fn is not None:
             return float(self._qs_total_from_state_fn(state))
+        if res is not None:
+            return self._qs_from_res(np.asarray(res, dtype=float))
         res = self._evaluate_residuals_from_state(state)
         return self._qs_from_res(np.asarray(res, dtype=float))
 

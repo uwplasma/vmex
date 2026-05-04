@@ -211,9 +211,9 @@ def test_problem_configs_follow_current_seed_and_priority_policy():
     qi_cfg = sweep.PROBLEM_CONFIGS["qi"]
 
     assert qa_cfg.input_file.name == "input.nfp2_QA_omnigenity"
-    assert qa_cfg.target_aspect == pytest.approx(7.0)
+    assert qa_cfg.target_aspect == pytest.approx(2.5)
     assert qa_cfg.target_iota == pytest.approx(0.42)
-    assert qa_cfg.iota_weight == pytest.approx(200.0)
+    assert qa_cfg.iota_weight == pytest.approx(100.0)
     assert qa_cfg.lgradb_threshold == pytest.approx(0.30)
     assert qa_cfg.lgradb_weight == pytest.approx(0.0)
     assert qh_cfg.input_file.name == "input.nfp4_QH_warm_start"
@@ -252,12 +252,12 @@ def test_continuation_stage_modes_follow_omnigenity_repeated_policy():
         sweep.PROBLEM_CONFIGS["qa"],
         max_mode=3,
         use_mode_continuation=True,
-    ) == [1, 2, 2, 3, 3]
+    ) == [1, 1, 2, 2, 2, 3, 3, 3]
     assert sweep._stage_modes_for_problem(
         sweep.PROBLEM_CONFIGS["qh"],
         max_mode=2,
         use_mode_continuation=True,
-    ) == [1, 2, 2]
+    ) == [1, 1, 2, 2, 2]
     assert sweep._stage_modes_for_problem(
         sweep.PROBLEM_CONFIGS["qi"],
         max_mode=3,

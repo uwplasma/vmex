@@ -5,7 +5,8 @@ This page collects the generated optimization sweep artifacts used by the
 README and the main optimization guide.  The current sweep covers QA, QH, QP,
 and QI targets:
 
-- QA: aspect ratio near 7, signed mean iota target, and quasi-axisymmetry.
+- QA: the reference omnigenity NFP=2 QA deck, aspect ratio near 2.5,
+  signed mean iota target 0.42, and quasi-axisymmetry.
 - QH: the bundled NFP=4 warm start, aspect ratio near 7, quasi-helical
   symmetry, and a smooth ``abs(mean_iota) >= 0.41`` lower bound.
 - QP: aspect ratio, quasi-poloidal symmetry, and a smooth
@@ -81,8 +82,8 @@ Render the compact README panels from the best stellarator-symmetric rows:
    PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 
 The default per-case timeout is 1200 seconds.  The current science configs use
-NFP=4 for QH, aspect targets near 7, and high-priority
-``abs(mean_iota) >= 0.41`` constraints.
+NFP=4 for QH, aspect target 2.5 for QA, aspect targets near 7 for QH/QP/QI,
+and high-priority ``abs(mean_iota) >= 0.41`` constraints for QH/QP/QI.
 They use ``inner_max_iter = trial_max_iter = 120`` and
 ``ftol = trial_ftol = 1e-9``; GPU production sweeps cap those values at 180
 if a future problem config requests a larger replay budget.  Add
@@ -111,12 +112,13 @@ README Best Rows
 ----------------
 
 The README intentionally shows only one best ``LASYM = F`` result per target.
-QA/QH/QP are selected from the CPU matrix.  QI is selected from the constrained
-QI CPU/GPU matrix using the QI residual, mirror-ratio, elongation, iota, and
-aspect-ratio gates.  These panels include the original deck LCFS before any
-``max_mode=1`` optimization work, final LCFS, per-stage objective history, and
-final outer-surface ``|B|`` in Boozer coordinates evaluated with
-``booz_xform_jax``.
+QA/QH/QP are selected from the CPU matrix.  QA is filtered against the
+reference aspect-2.5 target; QH/QP are filtered against aspect 7.  QI is
+selected from the constrained QI CPU/GPU matrix using the QI residual,
+mirror-ratio, elongation, iota, and aspect-ratio gates.  These panels include
+the original deck LCFS before any ``max_mode=1`` optimization work, final LCFS,
+per-stage objective history, and final outer-surface ``|B|`` in Boozer
+coordinates evaluated with ``booz_xform_jax``.
 The source table is also available as
 :download:`readme_best_optimizations.csv <_static/figures/readme_best_optimizations.csv>`.
 
@@ -157,7 +159,7 @@ Constrained QI Matrix
 The constrained QI renderer compares CPU and available GPU rows for
 ``max_mode = 1, 2, 3``, ESS on/off, continuation/direct, and QP-preseed
 on/off using the bundled NFP=2 ``input.nfp2_QI`` seed.  The current tracked
-snapshot only includes the restored aspect-7 CPU continuation ``max_mode=3``
+snapshot only includes the current CPU continuation ``max_mode=3``
 rows; rerun the commands above to repopulate the full CPU/GPU/direct/asymmetric
 matrix under the current objective policy.  For each requested
 ``max_mode``, the input boundary is projected onto
@@ -181,14 +183,13 @@ Downloadable constrained-QI summaries:
 - :download:`qi_constrained_best.json <_static/figures/qi_constrained_best.json>`
 
 In the current snapshot, the best available constrained QI row is CPU
-continuation, ``max_mode=3``, ESS on, with a same-mode QP preseed.  It
-reaches raw QI ``8.18e-4``, maximum mirror ratio ``0.2079`` for a target
-``0.21``, maximum elongation ``7.93`` for a target ``8.0``, aspect ratio
-``6.999``, mean iota ``-0.770``, and wall time ``4.0 min``.  This row uses the
-branch-width QI residual, which follows the reference omnigenity workflow more
-closely by penalizing equal-``|B|`` bounce-width variation across field-line
-label.  Iota, aspect, mirror ratio, elongation, and raw QI quality are
-prioritized in this pass.
+continuation, ``max_mode=3``, no ESS, without a same-mode QP preseed.  It
+reaches raw QI ``1.09e-4``, maximum mirror ratio ``0.2101`` for a target
+``0.21``, maximum elongation ``3.49`` for a target ``8.0``, aspect ratio
+``7.000``, mean iota ``-0.501``, and wall time ``2.6 min``.  Ranking now
+prioritizes raw QI quality after the mirror, elongation, iota, and aspect gates
+are satisfied; otherwise QP-preseeded rows can win due to tiny secondary gate
+differences while still looking more QP-like than QI.
 
 Non-stellarator-symmetric LASYM runs use the same script with
 ``--stellarator-asymmetric``.  The current LASYM artifacts are intentionally
