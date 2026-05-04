@@ -133,6 +133,35 @@ def _summarize_jacobian(jac_ad: np.ndarray | None, jac_fd: np.ndarray | None) ->
     }
 
 
+def _summarize_jacobian_blocks(
+    term_report: list[dict],
+    jac_ad: np.ndarray | None,
+    jac_fd: np.ndarray | None,
+) -> list[dict]:
+    if jac_ad is None or jac_fd is None:
+        return []
+    rows = []
+    offset = 0
+    for term in term_report:
+        size = int(term["residual_size"])
+        block_ad = np.asarray(jac_ad[offset : offset + size], dtype=float)
+        block_fd = np.asarray(jac_fd[offset : offset + size], dtype=float)
+        diff = block_ad - block_fd
+        denom = max(float(np.linalg.norm(block_fd)), np.finfo(float).tiny)
+        rows.append(
+            {
+                "name": term["name"],
+                "residual_size": size,
+                "relative_frobenius_error": float(np.linalg.norm(diff) / denom),
+                "max_abs_error": float(np.max(np.abs(diff))) if diff.size else 0.0,
+                "ad_norm": float(np.linalg.norm(block_ad)),
+                "fd_norm": float(np.linalg.norm(block_fd)),
+            }
+        )
+        offset += size
+    return rows
+
+
 def _vmec_jax_term_report(problem: vj.LeastSquaresProblem, ctx, state) -> list[dict]:
     rows = []
     for term in problem.objective_terms:
@@ -284,6 +313,7 @@ def run_vmec_jax(outdir: Path) -> dict:
         "initial_terms": terms0,
         "final_terms": terms_final,
         "jacobian_summary": _summarize_jacobian(jac_ad, jac_fd),
+        "jacobian_block_summary": _summarize_jacobian_blocks(terms0, jac_ad, jac_fd),
         "timing_s": {
             "initial_residual": residual_wall_s,
             "exact_jacobian": jac_wall_s,
