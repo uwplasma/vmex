@@ -153,6 +153,7 @@ def finite_beta_scalars_from_state(*, state, static, indata, signgs: int) -> dic
         "betatotal": beta_total,
         "wb": norms.wb,
         "wp": norms.wp,
+        "vp": getattr(norms, "vp", jnp.zeros_like(jnp.asarray(static.s))),
         "volume": norms.volume,
     }
 

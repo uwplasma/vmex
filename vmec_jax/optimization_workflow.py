@@ -9,7 +9,7 @@ live here instead of being repeated in every example.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from pathlib import Path
 from typing import Callable, Sequence
@@ -21,6 +21,7 @@ from .boundary import boundary_from_indata, boundary_input_from_indata
 from .driver import run_fixed_boundary, write_wout_from_fixed_boundary_run
 from .energy import flux_profiles_from_indata
 from .field import signgs_from_sqrtg
+from .finite_beta import finite_beta_scalars_from_state
 from .geom import eval_geom
 from .init_guess import initial_guess_from_boundary
 from .optimization import (
@@ -79,6 +80,7 @@ class ObjectiveTerm:
     weight: float = 1.0
     total: Callable[[StageContext, object], object] | None = None
     track_iota: bool = False
+    metadata: dict[str, object] = field(default_factory=dict)
 
     def residual(self, ctx: StageContext, state) -> object:
         value = _as_vector(self.evaluate(ctx, state))
@@ -117,6 +119,7 @@ class QIObjectiveTerm:
 
     name: str
     evaluate: Callable[[StageContext, object, dict], tuple[object, object]]
+    qi_options: "QuasiIsodynamicOptions | None" = None
 
     def residual_and_total(self, ctx: StageContext, state, field: dict) -> tuple[object, object]:
         residuals, total = self.evaluate(ctx, state, field)
@@ -212,6 +215,8 @@ class LeastSquaresProblem:
 
     objective_terms: tuple[ObjectiveTerm, ...] = ()
     qi_objective_terms: tuple[QIObjectiveTerm, ...] = ()
+    metadata: dict[str, object] = field(default_factory=dict)
+    qi_options: QuasiIsodynamicOptions | None = None
 
     @classmethod
     def from_tuples(cls, tuples: Sequence[tuple[Callable, float | np.ndarray, float]]):
@@ -219,15 +224,24 @@ class LeastSquaresProblem:
 
         objective_terms: list[ObjectiveTerm] = []
         qi_terms: list[QIObjectiveTerm] = []
+        metadata: dict[str, object] = {}
+        qi_options: QuasiIsodynamicOptions | None = None
         for fn, target, weight in tuples:
             residual_weight = math.sqrt(float(weight))
             owner = getattr(fn, "__self__", None)
             if getattr(owner, "requires_qi_field", False):
                 if not _target_is_zero(target):
                     raise ValueError("QI field objectives currently require target=0.")
-                qi_terms.append(owner.to_qi_term(residual_weight))
+                qi_term = owner.to_qi_term(residual_weight)
+                if qi_term.qi_options is not None:
+                    if qi_options is not None and qi_term.qi_options is not qi_options:
+                        raise ValueError("QI field objectives in one problem must share one QuasiIsodynamicOptions object.")
+                    qi_options = qi_term.qi_options
+                qi_terms.append(qi_term)
             elif hasattr(owner, "to_objective_term"):
-                objective_terms.append(owner.to_objective_term(target=target, residual_weight=residual_weight))
+                term = owner.to_objective_term(target=target, residual_weight=residual_weight)
+                metadata.update(term.metadata)
+                objective_terms.append(term)
             else:
                 name = getattr(fn, "__name__", "objective")
                 objective_terms.append(
@@ -238,7 +252,7 @@ class LeastSquaresProblem:
                         weight=residual_weight,
                     )
                 )
-        return cls(tuple(objective_terms), tuple(qi_terms))
+        return cls(tuple(objective_terms), tuple(qi_terms), metadata=metadata, qi_options=qi_options)
 
     @property
     def is_qi(self) -> bool:
@@ -256,7 +270,13 @@ class AspectRatio:
         return equilibrium_aspect_ratio_from_state(state=state, static=ctx.static)
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
-        return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight)
+        return ObjectiveTerm(
+            self.name,
+            self.J,
+            target=target,
+            weight=residual_weight,
+            metadata={"target_aspect": float(target)},
+        )
 
 
 class MeanIota:
@@ -268,7 +288,14 @@ class MeanIota:
         return mean_iota(ctx, state)
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
-        return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight, track_iota=True)
+        return ObjectiveTerm(
+            self.name,
+            self.J,
+            target=target,
+            weight=residual_weight,
+            track_iota=True,
+            metadata={"target_iota": float(target)},
+        )
 
 
 class AbsMeanIotaFloor:
@@ -285,7 +312,14 @@ class AbsMeanIotaFloor:
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
         del target
-        return ObjectiveTerm(self.name, self.J, target=0.0, weight=residual_weight, track_iota=True)
+        return ObjectiveTerm(
+            self.name,
+            self.J,
+            target=0.0,
+            weight=residual_weight,
+            track_iota=True,
+            metadata={"iota_abs_min": self.target},
+        )
 
 
 class QuasisymmetryRatioResidual:
@@ -336,11 +370,14 @@ class QuasiIsodynamicResidual:
     name = "qi"
     requires_qi_field = True
 
+    def __init__(self, options: QuasiIsodynamicOptions):
+        self.options = options
+
     def J(self, _ctx: StageContext, _state):
         raise RuntimeError("QuasiIsodynamicResidual must be evaluated inside a QI solve.")
 
     def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
-        return quasi_isodynamic_field_objective(weight=residual_weight)
+        return quasi_isodynamic_field_objective(weight=residual_weight, qi_options=self.options)
 
 
 class MirrorRatio:
@@ -349,11 +386,20 @@ class MirrorRatio:
     name = "mirror_ratio"
     requires_qi_field = True
 
-    def __init__(self, *, threshold: float, ntheta: int = 96, nphi: int = 96, surface_index: int = 0):
+    def __init__(
+        self,
+        *,
+        threshold: float,
+        ntheta: int = 96,
+        nphi: int = 96,
+        surface_index: int = 0,
+        qi_options: QuasiIsodynamicOptions | None = None,
+    ):
         self.threshold = float(threshold)
         self.ntheta = int(ntheta)
         self.nphi = int(nphi)
         self.surface_index = int(surface_index)
+        self.qi_options = qi_options
 
     def J(self, _ctx: StageContext, _state):
         raise RuntimeError("MirrorRatio must be evaluated inside a QI solve.")
@@ -365,6 +411,7 @@ class MirrorRatio:
             ntheta=self.ntheta,
             nphi=self.nphi,
             surface_index=self.surface_index,
+            qi_options=self.qi_options,
         )
 
 
@@ -374,10 +421,18 @@ class MaxElongation:
     name = "max_elongation"
     requires_qi_field = True
 
-    def __init__(self, *, threshold: float, ntheta: int = 48, nphi: int = 16):
+    def __init__(
+        self,
+        *,
+        threshold: float,
+        ntheta: int = 48,
+        nphi: int = 16,
+        qi_options: QuasiIsodynamicOptions | None = None,
+    ):
         self.threshold = float(threshold)
         self.ntheta = int(ntheta)
         self.nphi = int(nphi)
+        self.qi_options = qi_options
 
     def J(self, _ctx: StageContext, _state):
         raise RuntimeError("MaxElongation must be evaluated inside a QI solve.")
@@ -388,7 +443,84 @@ class MaxElongation:
             weight=residual_weight,
             ntheta=self.ntheta,
             nphi=self.nphi,
+            qi_options=self.qi_options,
         )
+
+
+class MagneticWell:
+    """Smooth lower-bound objective for the vacuum magnetic-well proxy.
+
+    The well follows the SIMSOPT/VMEC convention
+    ``(dV/ds(0) - dV/ds(1)) / dV/ds(0)`` using the differentiable half-mesh
+    volume derivative reconstructed from the VMEC state.  Positive values are
+    favorable; this objective returns a smooth penalty when the well falls
+    below ``minimum``.
+    """
+
+    name = "magnetic_well"
+
+    def __init__(self, *, minimum: float = 0.0, softness: float = 1.0e-3):
+        self.minimum = float(minimum)
+        self.softness = float(softness)
+
+    def well(self, ctx: StageContext, state):
+        scalars = finite_beta_scalars_from_state(
+            state=state,
+            static=ctx.static,
+            indata=ctx.indata,
+            signgs=ctx.signgs,
+        )
+        vp = jnp.abs(jnp.asarray(scalars["vp"], dtype=jnp.float64))
+        dvol = vp[1:]
+        if int(dvol.shape[0]) < 2:
+            return jnp.asarray(0.0, dtype=jnp.float64)
+        dvol_s0 = 1.5 * dvol[0] - 0.5 * dvol[1]
+        dvol_s1 = 1.5 * dvol[-1] - 0.5 * dvol[-2]
+        return jnp.where(dvol_s0 != 0.0, (dvol_s0 - dvol_s1) / dvol_s0, 0.0)
+
+    def J(self, ctx: StageContext, state):
+        deficit = float(self.minimum) - self.well(ctx, state)
+        softness = jnp.asarray(float(self.softness), dtype=jnp.float64)
+        return softness * jnp.logaddexp(jnp.asarray(0.0, dtype=jnp.float64), deficit / softness)
+
+    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        if not _target_is_zero(target):
+            raise ValueError("MagneticWell is a lower-bound penalty and requires target=0.")
+        return ObjectiveTerm(self.name, self.J, target=0.0, weight=residual_weight)
+
+
+class VolavgB:
+    """Volume-averaged magnetic-field objective for finite-beta studies."""
+
+    name = "volavgB"
+
+    def J(self, ctx: StageContext, state):
+        return finite_beta_scalars_from_state(
+            state=state,
+            static=ctx.static,
+            indata=ctx.indata,
+            signgs=ctx.signgs,
+        )["volavgB"]
+
+    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight)
+
+
+class BetaTotal:
+    """Total-beta objective for finite-beta studies."""
+
+    name = "betatotal"
+
+    def J(self, ctx: StageContext, state):
+        return finite_beta_scalars_from_state(
+            state=state,
+            static=ctx.static,
+            indata=ctx.indata,
+            signgs=ctx.signgs,
+        )["betatotal"]
+
+    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight)
 
 
 class LgradB:
@@ -564,7 +696,10 @@ def lgradb_objective(
     )
 
 
-def quasi_isodynamic_field_objective(weight: float = 1.0) -> QIObjectiveTerm:
+def quasi_isodynamic_field_objective(
+    weight: float = 1.0,
+    qi_options: QuasiIsodynamicOptions | None = None,
+) -> QIObjectiveTerm:
     """Smooth QI residual term from ``quasi_isodynamic_residual_from_state``."""
 
     def _evaluate(_ctx: StageContext, _state, field: dict):
@@ -573,7 +708,7 @@ def quasi_isodynamic_field_objective(weight: float = 1.0) -> QIObjectiveTerm:
             float(weight) ** 2 * field["total"],
         )
 
-    return QIObjectiveTerm("qi", _evaluate)
+    return QIObjectiveTerm("qi", _evaluate, qi_options=qi_options)
 
 
 def qi_mirror_ratio_objective(
@@ -583,6 +718,7 @@ def qi_mirror_ratio_objective(
     ntheta: int = 96,
     nphi: int = 96,
     surface_index: int = 0,
+    qi_options: QuasiIsodynamicOptions | None = None,
 ) -> QIObjectiveTerm:
     """Mirror-ratio upper-bound objective evaluated from Boozer |B| modes."""
 
@@ -600,7 +736,7 @@ def qi_mirror_ratio_objective(
             float(weight) ** 2 * mirror["total"],
         )
 
-    return QIObjectiveTerm("mirror_ratio", _evaluate)
+    return QIObjectiveTerm("mirror_ratio", _evaluate, qi_options=qi_options)
 
 
 def qi_max_elongation_objective(
@@ -609,6 +745,7 @@ def qi_max_elongation_objective(
     weight: float = 1.0,
     ntheta: int = 48,
     nphi: int = 16,
+    qi_options: QuasiIsodynamicOptions | None = None,
 ) -> QIObjectiveTerm:
     """Boundary elongation upper-bound objective."""
 
@@ -625,7 +762,7 @@ def qi_max_elongation_objective(
             float(weight) ** 2 * elongation["total"],
         )
 
-    return QIObjectiveTerm("max_elongation", _evaluate)
+    return QIObjectiveTerm("max_elongation", _evaluate, qi_options=qi_options)
 
 
 def qi_lgradb_objective(
@@ -636,6 +773,7 @@ def qi_lgradb_objective(
     ntheta: int = 9,
     nphi: int = 7,
     smooth_penalty: float = 0.0,
+    qi_options: QuasiIsodynamicOptions | None = None,
 ) -> QIObjectiveTerm:
     """QI field-quality term penalizing small local ``L_grad_B``."""
 
@@ -657,7 +795,7 @@ def qi_lgradb_objective(
             float(weight) ** 2 * lgradb["total"],
         )
 
-    return QIObjectiveTerm("LgradB", _evaluate)
+    return QIObjectiveTerm("LgradB", _evaluate, qi_options=qi_options)
 
 
 def mean_iota(ctx: StageContext, state):
@@ -1346,10 +1484,6 @@ def least_squares_solve(
     ess_alpha: float = 1.2,
     label: str = "Fixed-boundary optimization",
     use_mode_continuation: bool = True,
-    target_aspect: float | None = None,
-    target_iota: float | None = None,
-    iota_abs_min: float | None = None,
-    qi_options: QuasiIsodynamicOptions | None = None,
     inner_max_iter: int = 120,
     inner_ftol: float = 1.0e-9,
     trial_max_iter: int = 120,
@@ -1373,9 +1507,18 @@ def least_squares_solve(
     4. call this function.
     """
 
+    metadata = dict(problem.metadata)
+    target_aspect = _metadata_float(metadata, "target_aspect")
+    target_iota = _metadata_float(metadata, "target_iota")
+    iota_abs_min = _metadata_float(metadata, "iota_abs_min")
+
     if problem.is_qi:
+        qi_options = problem.qi_options
         if qi_options is None:
-            raise ValueError("QI objectives require qi_options=QuasiIsodynamicOptions(...).")
+            raise ValueError(
+                "QI objectives require QuasiIsodynamicOptions on a QI objective, "
+                "for example QuasiIsodynamicResidual(QI_OPTIONS)."
+            )
         return run_quasi_isodynamic_objective_optimization(
             cfg=vmec.cfg,
             indata=vmec.indata,
@@ -1613,6 +1756,40 @@ def save_qs_final_outputs(
         print(f"Done. Results saved to {output_dir}/")
 
 
+def print_optimization_outputs(result: FixedBoundaryOptimizationResult, output_dir: Path | str, *, plot: bool = True) -> None:
+    """Print the files and diagnostics a standalone optimization just produced."""
+
+    hist = result.final_result.get("_history_dump", {})
+    output_dir = Path(output_dir)
+    print("\nSaved outputs:")
+    for path in (
+        output_dir / "input.initial",
+        output_dir / "input.final",
+        output_dir / "wout_initial.nc",
+        output_dir / "wout_final.nc",
+        output_dir / "history.json",
+    ):
+        print(f"  {path}")
+    if plot:
+        for name in (
+            "objective_history.png",
+            "final_surface_3d.png",
+            "final_bmag_lcfs.png",
+        ):
+            candidate = output_dir / name
+            if candidate.exists():
+                print(f"  {candidate}")
+
+    if hist:
+        print("\nFinal diagnostics:")
+        print(f"  aspect ratio:     {float(hist.get('aspect_final', float('nan'))):.6g}")
+        if "iota_final" in hist:
+            print(f"  mean iota:        {float(hist['iota_final']):.6g}")
+        print(f"  field objective:  {float(hist.get('qs_final', float('nan'))):.6e}")
+        print(f"  total objective:  {float(hist.get('objective_final', float('nan'))):.6e}")
+        print(f"  wall time:        {float(hist.get('total_wall_time_s', float('nan'))):.2f} s")
+
+
 def combine_qs_stage_histories(
     *,
     label: str,
@@ -1684,6 +1861,11 @@ def _target_is_zero(target) -> bool:
     return bool(np.allclose(np.asarray(target, dtype=float), 0.0))
 
 
+def _metadata_float(metadata: dict[str, object], key: str) -> float | None:
+    value = metadata.get(key)
+    return None if value is None else float(value)
+
+
 def _remove_stale(path: Path) -> None:
     try:
         path.unlink()
@@ -1704,11 +1886,13 @@ def _slice_boozer_surfaces(booz: dict, surface_index: int) -> dict:
 __all__ = [
     "AbsMeanIotaFloor",
     "AspectRatio",
+    "BetaTotal",
     "FixedBoundaryVMEC",
     "FixedBoundaryObjectiveStage",
     "FixedBoundaryOptimizationResult",
     "LeastSquaresProblem",
     "LgradB",
+    "MagneticWell",
     "MaxElongation",
     "MeanIota",
     "MirrorRatio",
@@ -1738,8 +1922,10 @@ __all__ = [
     "rebuild_for_optimization_resolution",
     "repeated_stage_modes",
     "residuals_from_objectives",
+    "print_optimization_outputs",
     "run_fixed_boundary_objective_optimization",
     "run_quasi_isodynamic_objective_optimization",
     "save_qs_final_outputs",
     "save_qs_stage_artifacts",
+    "VolavgB",
 ]

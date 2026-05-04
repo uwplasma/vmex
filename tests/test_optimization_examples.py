@@ -25,15 +25,22 @@ def test_fixed_boundary_qs_examples_are_standalone_workflows() -> None:
         assert "LeastSquaresProblem.from_tuples(" in text
         assert "least_squares_solve(" in text
         assert "problem =" in text
+        assert "target_aspect=" not in text
+        assert "target_iota=" not in text
+        assert "iota_abs_min=" not in text
+        assert "qi_options=" not in text
 
 
 def test_qi_example_uses_qi_problem_api() -> None:
     text = (ROOT / "examples" / "optimization" / "QI_optimization.py").read_text()
     assert "run_quasi_isodynamic_objective_optimization(" not in text
     assert "QuasiIsodynamicOptions(" in text
-    assert "QuasiIsodynamicResidual()" in text
+    assert "QuasiIsodynamicResidual(QI_OPTIONS)" in text
     assert "LeastSquaresProblem.from_tuples(" in text
     assert "least_squares_solve(" in text
+    assert "target_aspect=" not in text
+    assert "iota_abs_min=" not in text
+    assert "qi_options=" not in text
 
 
 def test_custom_objective_term_residual_shape() -> None:
@@ -63,15 +70,35 @@ def test_least_squares_problem_uses_simsopt_weight_semantics() -> None:
 
 
 def test_least_squares_problem_routes_qi_terms() -> None:
-    from vmec_jax.optimization_workflow import LeastSquaresProblem, QuasiIsodynamicResidual
+    from vmec_jax.optimization_workflow import LeastSquaresProblem, QuasiIsodynamicOptions, QuasiIsodynamicResidual
 
-    qi = QuasiIsodynamicResidual()
+    qi_options = QuasiIsodynamicOptions(surfaces=[0.5])
+    qi = QuasiIsodynamicResidual(qi_options)
     problem = LeastSquaresProblem.from_tuples([(qi.J, 0.0, 9.0)])
 
     assert problem.is_qi
     assert len(problem.objective_terms) == 0
     assert len(problem.qi_objective_terms) == 1
     assert problem.qi_objective_terms[0].name == "qi"
+    assert problem.qi_options is qi_options
+
+
+def test_least_squares_problem_collects_problem_metadata() -> None:
+    from vmec_jax.optimization_workflow import AbsMeanIotaFloor, AspectRatio, LeastSquaresProblem, MeanIota
+
+    problem = LeastSquaresProblem.from_tuples(
+        [
+            (AspectRatio().J, 5.0, 1.0),
+            (MeanIota().J, 0.42, 100.0),
+            (AbsMeanIotaFloor(0.41).J, 0.0, 1.0),
+        ]
+    )
+
+    assert problem.metadata == {
+        "target_aspect": 5.0,
+        "target_iota": 0.42,
+        "iota_abs_min": 0.41,
+    }
 
 
 def test_lgradb_tuple_stays_regular_state_objective() -> None:

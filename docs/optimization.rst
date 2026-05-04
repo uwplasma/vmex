@@ -110,37 +110,44 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
    TARGET_ABS_IOTA_MIN = 0.41
    SURFACES = np.arange(0.0, 1.01, 0.1)
 
-   OBJECTIVES = [
-       aspect_objective(TARGET_ASPECT, ASPECT_WEIGHT),
-       abs_mean_iota_floor_objective(TARGET_ABS_IOTA_MIN, IOTA_WEIGHT),
-       quasisymmetry_objective(
-           helicity_m=HELICITY_M,
-           helicity_n=HELICITY_N,
-           surfaces=SURFACES,
-           weight=QS_WEIGHT,
-       ),
-       # Optional LgradB term:
-       # lgradb_objective(threshold=0.30, weight=0.1),
-       # ObjectiveTerm("custom", lambda ctx, state: your_metric(ctx, state), target=0.0, weight=0.1),
-   ]
-
-   cfg, indata = vj.load_config(str(INPUT_FILE))
-   indata = rebuild_for_optimization_resolution(
-       indata, max_mode=MAX_MODE, min_vmec_mode=MIN_VMEC_MODE
+   vmec = vj.FixedBoundaryVMEC.from_input(
+       INPUT_FILE,
+       max_mode=MAX_MODE,
+       min_vmec_mode=MIN_VMEC_MODE,
+       output_dir=OUTPUT_DIR,
    )
-   cfg = config_from_indata(indata)
    stage_modes = qs_stage_modes(
        max_mode=MAX_MODE,
        use_mode_continuation=USE_MODE_CONTINUATION,
        continuation_nfev=CONTINUATION_NFEV,
    )
 
-   run_fixed_boundary_objective_optimization(
-       cfg=cfg,
-       indata=indata,
-       objectives=OBJECTIVES,
+   aspect = vj.AspectRatio()
+   iota_floor = vj.AbsMeanIotaFloor(TARGET_ABS_IOTA_MIN)
+   qs = vj.QuasisymmetryRatioResidual(
+       helicity_m=HELICITY_M,
+       helicity_n=HELICITY_N,
+       surfaces=SURFACES,
+   )
+   problem = vj.LeastSquaresProblem.from_tuples(
+       [
+           (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
+           (iota_floor.J, 0.0, IOTA_WEIGHT),
+           (qs.J, 0.0, QS_WEIGHT),
+           # Optional physics terms:
+           # (vj.LgradB(threshold=0.30).J, 0.0, 0.01),
+           # (vj.MagneticWell(minimum=0.0).J, 0.0, 1.0),
+           # (vj.VolavgB().J, TARGET_VOLAVGB, VOLAVGB_WEIGHT),
+           # (vj.BetaTotal().J, TARGET_BETA, BETA_WEIGHT),
+           # DMerc is currently a wout diagnostic/parity gate; a differentiable
+           # DMerc objective should be added before using it in this adjoint path.
+       ]
+   )
+
+   result = vj.least_squares_solve(
+       vmec,
+       problem,
        stage_modes=stage_modes,
-       max_mode=MAX_MODE,
        max_nfev=MAX_NFEV,
        continuation_nfev=CONTINUATION_NFEV,
        method=METHOD,
@@ -149,11 +156,8 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
        xtol=XTOL,
        use_ess=USE_ESS,
        ess_alpha=ALPHA,
-       output_dir=OUTPUT_DIR,
        label=LABEL,
        use_mode_continuation=USE_MODE_CONTINUATION,
-       target_aspect=TARGET_ASPECT,
-       iota_abs_min=TARGET_ABS_IOTA_MIN,
        inner_max_iter=INNER_MAX_ITER,
        inner_ftol=INNER_FTOL,
        trial_max_iter=TRIAL_MAX_ITER,
@@ -161,10 +165,13 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
        solver_device=SOLVER_DEVICE,
        scipy_tr_solver=SCIPY_TR_SOLVER,
    )
+   vj.print_optimization_outputs(result, OUTPUT_DIR, plot=True)
 
-``ObjectiveTerm`` callbacks receive ``(ctx, state)`` and may return a scalar or
-vector.  The least-squares residual is ``weight * (value - target)``, so adding
-another objective is just adding another term to ``OBJECTIVES``.
+Objective callbacks receive ``(ctx, state)`` and may return a scalar or vector.
+The tuple weight follows SIMSOPT semantics: vmec_jax minimizes
+``sqrt(weight) * (J - target)``.  Problem-specific targets and QI sampling
+options live on the objective objects/problem, while ``least_squares_solve``
+only receives optimizer, continuation, device, and output controls.
 
 Run it with:
 
@@ -398,6 +405,39 @@ added and regression-tested incrementally.
 The full multi-page artifact inventory, including legacy aliases, CSV/JSON
 summary downloads, and exact reproduction commands for each standalone example,
 is collected in :doc:`optimization_sweep_results`.
+
+
+QI objective tuning
+-------------------
+
+The current standalone ``QI_optimization.py`` defaults encode the best
+public-API QI lane from the parameter study:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python examples/optimization/QI_optimization.py
+
+The study compared direct versus repeated-stage continuation, QP pre-seeding,
+aspect-ratio weights, mirror/elongation soft-wall weights, QI branch-width
+weights, and termination tolerances against the nfp=2
+``examples/data/input.nfp2_QI`` seed.  The robust lane is direct
+``max_mode = 3`` with ESS, ``target_aspect = 3.5``, ``abs(mean_iota) >= 0.40``,
+``branch_width_weight = 0.5``, and a tighter ``XTOL = 1e-8``.  In the local
+CPU validation run this reached total objective ``7.63e-4`` with raw QI field
+objective ``7.57e-4``, aspect ratio ``3.5346``, mean iota ``-0.4990``, and a
+monotonically decreasing accepted-point objective over 29 function evaluations
+in 167 s.
+
+Two practical lessons from that study are now reflected in the example:
+
+- ``least_squares_solve`` uses SIMSOPT tuple semantics, so tuple weights are
+  ``sqrt(weight)`` residual multipliers.  Mirror/elongation soft-wall weights
+  should be strong enough to prevent pathological shapes but not so dominant
+  that they block the lower-QI basin.
+- The QI branch-width term smooths the well matching enough to avoid the noisy
+  objective jumps seen in earlier direct QI attempts.  LgradB remains available
+  as a commented optional shaping term, but it is not part of the default best
+  QI lane.
 
 
 Algorithms in detail
