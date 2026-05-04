@@ -165,7 +165,29 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
        solver_device=SOLVER_DEVICE,
        scipy_tr_solver=SCIPY_TR_SOLVER,
    )
-   vj.print_optimization_outputs(result, OUTPUT_DIR, plot=True)
+
+   history = result.final_result["_history_dump"]
+   print(f"Final aspect ratio:    {history['aspect_final']:.6g}")
+   print(f"Final mean iota:       {history['iota_final']:.6g}")
+   print(f"Final field objective: {history['qs_final']:.6e}")
+
+   wout_final = vj.load_wout(OUTPUT_DIR / "wout_final.nc")
+   theta, zeta, b_lcfs = vj.vmecplot2_bmag_grid(
+       wout_final,
+       s_index=-1,
+       ntheta=64,
+       nzeta=64,
+       zeta_max=2.0 * np.pi / float(wout_final.nfp),
+   )
+   print(f"LCFS |B| grid shape: {b_lcfs.shape}, Bmax={np.max(b_lcfs):.6g}")
+
+   plot_paths = vj.plot_qh_optimization(
+       OUTPUT_DIR / "wout_initial.nc",
+       OUTPUT_DIR / "wout_final.nc",
+       OUTPUT_DIR / "history.json",
+       outdir=OUTPUT_DIR,
+   )
+   print(plot_paths)
 
 Objective callbacks receive ``(ctx, state)`` and may return a scalar or vector.
 The tuple weight follows SIMSOPT semantics: vmec_jax minimizes

@@ -29,6 +29,10 @@ def test_fixed_boundary_qs_examples_are_standalone_workflows() -> None:
         assert "target_iota=" not in text
         assert "iota_abs_min=" not in text
         assert "qi_options=" not in text
+        assert "plot=" not in text
+        assert "print_optimization_outputs" not in text
+        assert "result.final_result" in text
+        assert "vmecplot2_bmag_grid(" in text
 
 
 def test_qi_example_uses_qi_problem_api() -> None:
@@ -41,6 +45,10 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "target_aspect=" not in text
     assert "iota_abs_min=" not in text
     assert "qi_options=" not in text
+    assert "plot=" not in text
+    assert "print_optimization_outputs" not in text
+    assert "result.final_result" in text
+    assert "vmecplot2_bmag_grid(" in text
 
 
 def test_custom_objective_term_residual_shape() -> None:

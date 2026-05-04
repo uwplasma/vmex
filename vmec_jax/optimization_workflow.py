@@ -997,7 +997,6 @@ def run_fixed_boundary_objective_optimization(
     save_stage_inputs: bool = True,
     save_stage_wouts: bool = False,
     save_rerun_wouts: bool = False,
-    plot: bool = True,
 ) -> FixedBoundaryOptimizationResult:
     """Run a fixed-boundary objective list through one or more mode stages."""
 
@@ -1566,7 +1565,7 @@ def least_squares_solve(
             scipy_lsmr_maxiter=scipy_lsmr_maxiter,
             save_stage_inputs=save_stage_inputs,
             save_stage_wouts=save_stage_wouts,
-            plot=plot,
+            plot=False,
         )
 
     return run_fixed_boundary_objective_optimization(
@@ -1602,7 +1601,7 @@ def least_squares_solve(
         save_stage_inputs=save_stage_inputs,
         save_stage_wouts=save_stage_wouts,
         save_rerun_wouts=save_rerun_wouts,
-        plot=plot,
+        plot=False,
     )
 
 
@@ -1756,40 +1755,6 @@ def save_qs_final_outputs(
         print(f"Done. Results saved to {output_dir}/")
 
 
-def print_optimization_outputs(result: FixedBoundaryOptimizationResult, output_dir: Path | str, *, plot: bool = True) -> None:
-    """Print the files and diagnostics a standalone optimization just produced."""
-
-    hist = result.final_result.get("_history_dump", {})
-    output_dir = Path(output_dir)
-    print("\nSaved outputs:")
-    for path in (
-        output_dir / "input.initial",
-        output_dir / "input.final",
-        output_dir / "wout_initial.nc",
-        output_dir / "wout_final.nc",
-        output_dir / "history.json",
-    ):
-        print(f"  {path}")
-    if plot:
-        for name in (
-            "objective_history.png",
-            "final_surface_3d.png",
-            "final_bmag_lcfs.png",
-        ):
-            candidate = output_dir / name
-            if candidate.exists():
-                print(f"  {candidate}")
-
-    if hist:
-        print("\nFinal diagnostics:")
-        print(f"  aspect ratio:     {float(hist.get('aspect_final', float('nan'))):.6g}")
-        if "iota_final" in hist:
-            print(f"  mean iota:        {float(hist['iota_final']):.6g}")
-        print(f"  field objective:  {float(hist.get('qs_final', float('nan'))):.6e}")
-        print(f"  total objective:  {float(hist.get('objective_final', float('nan'))):.6e}")
-        print(f"  wall time:        {float(hist.get('total_wall_time_s', float('nan'))):.2f} s")
-
-
 def combine_qs_stage_histories(
     *,
     label: str,
@@ -1922,7 +1887,6 @@ __all__ = [
     "rebuild_for_optimization_resolution",
     "repeated_stage_modes",
     "residuals_from_objectives",
-    "print_optimization_outputs",
     "run_fixed_boundary_objective_optimization",
     "run_quasi_isodynamic_objective_optimization",
     "save_qs_final_outputs",

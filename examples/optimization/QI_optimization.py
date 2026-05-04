@@ -72,7 +72,7 @@ QI_OPTIONS = vj.QuasiIsodynamicOptions(
 
 USE_ESS = True
 ALPHA = 1.2
-PLOT = True
+MAKE_PLOTS = True
 
 
 vmec = vj.FixedBoundaryVMEC.from_input(
@@ -127,7 +127,47 @@ result = vj.least_squares_solve(
     solver_device=SOLVER_DEVICE,
     scipy_tr_solver=SCIPY_TR_SOLVER,
     scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
-    plot=PLOT,
 )
 
-vj.print_optimization_outputs(result, OUTPUT_DIR, plot=PLOT)
+history = result.final_result["_history_dump"]
+objective_history = np.asarray([entry["objective"] for entry in history["history"]])
+print("\nFinal diagnostics from result.final_result['_history_dump']:")
+print(f"  aspect ratio:     {history['aspect_final']:.6g}")
+print(f"  mean iota:        {history['iota_final']:.6g}")
+print(f"  QI objective:     {history['qs_final']:.6e}")
+print(f"  total objective:  {history['objective_final']:.6e}")
+print(f"  wall time:        {history['total_wall_time_s']:.2f} s")
+print(f"  objective samples: {objective_history[:5]} ... {objective_history[-3:]}")
+
+print("\nSaved files written by the solve:")
+for path in (
+    OUTPUT_DIR / "input.initial",
+    OUTPUT_DIR / "input.final",
+    OUTPUT_DIR / "wout_initial.nc",
+    OUTPUT_DIR / "wout_final.nc",
+    OUTPUT_DIR / "history.json",
+):
+    print(f"  {path}")
+
+wout_final = vj.load_wout(OUTPUT_DIR / "wout_final.nc")
+theta, zeta, b_lcfs = vj.vmecplot2_bmag_grid(
+    wout_final,
+    s_index=-1,
+    ntheta=64,
+    nzeta=64,
+    zeta_max=2.0 * np.pi / float(wout_final.nfp),
+)
+print("\nLCFS |B| data from vmecplot2_bmag_grid:")
+print(f"  theta grid: {theta.shape}, zeta grid: {zeta.shape}, B grid: {b_lcfs.shape}")
+print(f"  Bmin/Bmax:  {np.min(b_lcfs):.6g} / {np.max(b_lcfs):.6g}")
+
+if MAKE_PLOTS:
+    plot_paths = vj.plot_qh_optimization(
+        OUTPUT_DIR / "wout_initial.nc",
+        OUTPUT_DIR / "wout_final.nc",
+        OUTPUT_DIR / "history.json",
+        outdir=OUTPUT_DIR,
+    )
+    print("\nPlot files selected by this script:")
+    for name, path in plot_paths.items():
+        print(f"  {name}: {path}")
