@@ -51,6 +51,19 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "vmecplot2_bmag_grid(" in text
 
 
+def test_finite_beta_examples_plot_explicitly_after_solve() -> None:
+    scripts = [
+        ROOT / "examples" / "optimization" / "qa_optimization_finite_beta.py",
+        ROOT / "examples" / "optimization" / "qh_optimization_finite_beta.py",
+        ROOT / "examples" / "optimization" / "qi_optimization_finite_beta.py",
+    ]
+    for script in scripts:
+        text = script.read_text()
+        assert "save_final_outputs(" in text
+        assert "plot=" not in text
+        assert "vj.plot_qh_optimization(" in text
+
+
 def test_custom_objective_term_residual_shape() -> None:
     from vmec_jax.optimization_workflow import ObjectiveTerm
 
