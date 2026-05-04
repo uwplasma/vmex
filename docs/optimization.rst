@@ -243,7 +243,8 @@ Full QA/QH/QP/QI policy sweep
 
 The sweep below compares four target objectives:
 
-- QA: aspect ratio near 7, signed mean iota target, and quasi-axisymmetry.
+- QA: the reference omnigenity NFP=2 QA deck, aspect ratio near 2.5,
+  signed mean iota target 0.42, and quasi-axisymmetry.
 - QH: the bundled NFP=4 warm start, aspect ratio near 7, quasi-helical
   symmetry, and a smooth ``abs(mean_iota) >= 0.41`` lower bound.
 - QP: aspect ratio, quasi-poloidal symmetry, and a smooth
@@ -255,10 +256,12 @@ The sweep below compares four target objectives:
   ``abs(mean_iota) >= 0.41`` lower bound.  ``LgradB`` is available as an
   optional commented term in the example scripts.
 
-The current objective priority is primary symmetry/QI quality and
-``abs(mean_iota) >= 0.41`` first, then aspect ratio near 7.  ``LgradB`` remains
-available for users who want extra magnetic-gradient regularization, but it is
-not active in the default sweeps or best-row selection.
+The current objective priority is primary symmetry/QI quality and rotational
+transform control first.  QA follows the reference aspect-2.5/iota-0.42
+target; QH/QP/QI use aspect ratio near 7 with
+``abs(mean_iota) >= 0.41``.  ``LgradB`` remains available for users who want
+extra magnetic-gradient regularization, but it is not active in the default
+sweeps or best-row selection.
 
 Each problem is run with staged mode continuation and with direct-start mode
 expansion.  Each policy is run with and without ESS using ``alpha = 1.2``,
@@ -277,7 +280,9 @@ the input boundary to the requested active space:
 zeros the mode-2 seed before solving, while ``max_mode=2`` and ``max_mode=3``
 retain and optimize the corresponding larger active spaces.
 When enabled, the QP preseed is followed by a final refinement with the full
-QI + mirror-ratio + elongation + ``LgradB`` objective.  The previous QI-only
+QI + mirror-ratio + elongation objective.  ``LgradB`` remains an optional
+commented objective term in the scripts, but it is not active in the default
+sweeps.  The previous QI-only
 preseed and profile-locking penalty are disabled by default because the local
 reference QI workflow optimizes bounce/well-width label dependence directly,
 plus mirror, elongation, and magnetic-gradient scale-length penalties, rather
@@ -285,10 +290,10 @@ than forcing a prescribed Boozer ``|B|`` profile.
 This keeps QP as an explicit optional experiment while still measuring whether
 the preseed helps or hurts the constrained QI solve.
 Columns correspond to ``max_mode = 1, 2, 3``.  The vertical dotted lines mark
-continuation stage boundaries.  QA/QH/QP continuation uses a repeated hybrid
-policy, ``[1, 2, 2]`` for ``max_mode=2`` and ``[1, 2, 2, 3, 3]`` for
-``max_mode=3``.  QI repeats the requested active space five times, matching
-the reference omnigenity workflow.
+continuation stage boundaries.  QA/QH/QP continuation uses the repeated
+omnigenity-style policy ``[1, 1, 2, 2, 2]`` for ``max_mode=2`` and
+``[1, 1, 2, 2, 2, 3, 3, 3]`` for ``max_mode=3``.  QI repeats the requested
+active space five times, matching the reference omnigenity workflow.
 
 The generated objective panels contain the full CPU/GPU policy sweep.  Solid
 curves met the optimizer success criterion; dashed curves are stopped, failed,
@@ -296,12 +301,13 @@ or budgeted lanes.  The summary tables identify whether a dashed lane reached
 ``max_nfev``, hit the 1200 second timeout, or failed earlier such as from GPU
 OOM.  Curves are split by objective stage and plotted as best-so-far values
 within that stage, so QP preseed and full constrained QI refinement are not
-treated as one continuous scalar objective.  The QA input
-carries ``1e-5`` seeds for the mode-1 boundary terms so the
-iota residual has a useful derivative.  In the current CPU sweep, QA
-continuation reaches the target-iota basin with the best scalar objective, and
-direct QA with ESS also reaches the target-iota basin.  Direct QA without ESS
-remains a weak policy for high direct-start modes.
+treated as one continuous scalar objective.  The QA input follows the
+omnigenity ``input.nfp22_QA`` deck and carries nonzero mode-1 boundary terms so
+the iota residual has a useful derivative.  Under the reference aspect-2.5
+target, continuation gives clean quasi-axisymmetric Boozer contours; forcing
+the same target to aspect 7 is a separate design choice and gives visibly
+weaker QA field quality.  Direct QA without ESS remains a weak policy for high
+direct-start modes.
 
 The large all-policy panels, atlases, and PDF snapshots are generated assets,
 not source files.  They are intentionally not tracked in git.  Recreate them
@@ -337,7 +343,7 @@ this reruns the current README-best QA row:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa --modes 3 --ess on --rerun
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa --modes 3 --ess off --rerun
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 The GPU rows run through the same exact/replay path as CPU with GPU-calibrated

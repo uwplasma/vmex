@@ -87,11 +87,11 @@ SOLVER_DEVICE = None  # set to "cpu" or "gpu" to force one backend
 HELICITY_M = 1
 HELICITY_N = 0
 SURFACES = np.arange(0.0, 1.01, 0.1)
-TARGET_ASPECT = 7.0
+TARGET_ASPECT = 2.5
 TARGET_IOTA = 0.42
 
 ASPECT_WEIGHT = 1.0
-IOTA_WEIGHT = 200.0
+IOTA_WEIGHT = 100.0
 QS_WEIGHT = 1.0
 
 USE_ESS = False

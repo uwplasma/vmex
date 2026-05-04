@@ -50,6 +50,12 @@ MODES_BY_POLICY = {
 }
 QI_INPUT_NFP = 2
 TARGET_ASPECT = 7.0
+PROBLEM_TARGET_ASPECT = {
+    "qa": 2.5,
+    "qh": TARGET_ASPECT,
+    "qp": TARGET_ASPECT,
+    "qi": TARGET_ASPECT,
+}
 _TIMEOUT_SECONDS_RE = re.compile(r"timed out after\s+([0-9]+(?:\.[0-9]+)?)\s*s")
 _NFP_RE = re.compile(r"^\s*NFP\s*=\s*([0-9]+)", re.IGNORECASE | re.MULTILINE)
 
@@ -360,8 +366,10 @@ def _discover_results() -> list[CaseResult]:
     results_by_key: dict[tuple[str, bool, str, str, int, bool], tuple[int, float, CaseResult]] = {}
     for path in sorted(OUTPUT_ROOT.glob("**/case_result.json")):
         raw_record = json.loads(path.read_text())
+        problem_name = str(raw_record.get("problem", ""))
+        expected_aspect = float(PROBLEM_TARGET_ASPECT.get(problem_name, TARGET_ASPECT))
         target_aspect = raw_record.get("target_aspect")
-        if target_aspect not in (None, "") and abs(float(target_aspect) - TARGET_ASPECT) > 1.0e-8:
+        if target_aspect not in (None, "") and abs(float(target_aspect) - expected_aspect) > 1.0e-8:
             continue
         priority = _discovery_priority(path, raw_record)
         record = dict(raw_record)

@@ -234,14 +234,15 @@ def qs_stage_modes(
     """Mode-continuation sequence for a user-facing fixed-boundary script.
 
     The omnigenity reference examples repeatedly optimize at a given active
-    mode before increasing the boundary space.  We keep a mode-1 seed pass and
-    then repeat the higher modes, so max-mode 3 gives ``[1, 2, 2, 3, 3]``.
+    mode before increasing the boundary space.  We keep two mode-1 seed passes
+    and then repeat the higher modes three times, so max-mode 3 gives
+    ``[1, 1, 2, 2, 2, 3, 3, 3]``.
     """
 
     if bool(use_mode_continuation) and int(max_mode) > 1 and int(continuation_nfev) > 0:
-        modes: list[int] = [1]
-        for mode in range(2, int(max_mode) + 1):
-            modes.extend([mode, mode])
+        modes: list[int] = []
+        for mode in range(1, int(max_mode) + 1):
+            modes.extend([mode] * (2 if mode == 1 else 3))
         return modes
     return [int(max_mode)]
 

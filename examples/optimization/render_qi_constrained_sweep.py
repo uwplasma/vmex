@@ -427,8 +427,21 @@ def _best_score(row: dict) -> tuple:
         and iota_violation <= 0.025
         and aspect_violation <= 0.05
     )
+    # Rank physically admissible rows by the raw QI residual first.  Mirror,
+    # elongation, iota, and aspect gates reject pathological rows, but using
+    # tiny secondary gate differences ahead of raw QI made the QP-preseeded
+    # cases win even when they were visibly more QP-like than QI.
+    qp_preseed = 1 if _bool_value(row.get("qi_qp_preseed")) else 0
     total_violation = iota_violation + mirror_violation + elong_violation + 0.25 * aspect_violation
-    return (failed, 1 - hard_ok, total_violation, qi_raw, objective, _float_value(row.get("total_wall_time_s"), np.inf))
+    return (
+        failed,
+        1 - hard_ok,
+        qi_raw,
+        objective,
+        qp_preseed,
+        total_violation,
+        _float_value(row.get("total_wall_time_s"), np.inf),
+    )
 
 
 def _write_best(rows: list[dict]) -> dict:

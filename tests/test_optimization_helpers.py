@@ -344,15 +344,21 @@ def test_fixed_boundary_optimizer_exact_residual_reuses_jacobian_primal():
     np.testing.assert_allclose(opt._exact_residual_after_jacobian(), [3.0, 4.0])
 
 
-def test_qs_total_prefers_supplied_residual_vector():
+def test_qs_total_prefers_metadata_function_over_residual_vector():
     opt = object.__new__(FixedBoundaryExactOptimizer)
     opt._n_qs = None
     opt._n_non_qs = 1
 
-    def fail_qs_total(_state):
-        raise AssertionError("residual vector should avoid recomputing QS")
+    opt._qs_total_from_state_fn = lambda _state: 7.0
 
-    opt._qs_total_from_state_fn = fail_qs_total
+    assert opt._qs_total_from_state(object(), np.array([10.0, 2.0, 3.0])) == 7.0
+
+
+def test_qs_total_uses_supplied_residual_vector_without_metadata_function():
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._n_qs = None
+    opt._n_non_qs = 1
+    opt._qs_total_from_state_fn = None
 
     assert opt._qs_total_from_state(object(), np.array([10.0, 2.0, 3.0])) == 13.0
 
