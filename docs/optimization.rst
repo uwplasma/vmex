@@ -136,7 +136,7 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
            (iota_floor.J, 0.0, IOTA_WEIGHT),
            (qs.J, 0.0, QS_WEIGHT),
            # Optional physics terms:
-           # (vj.LgradB(threshold=0.30).J, 0.0, 0.01),
+           # (vj.LgradB(threshold=0.30, smooth_penalty=1.0e-3).J, 0.0, 0.01),
            # (vj.MagneticWell(minimum=0.0).J, 0.0, 1.0),
            # (vj.VolavgB().J, TARGET_VOLAVGB, VOLAVGB_WEIGHT),
            # (vj.BetaTotal().J, TARGET_BETA, BETA_WEIGHT),
@@ -260,7 +260,9 @@ transform control first.  All four default targets use aspect ratio near 5;
 QA also uses the signed iota-0.42 target, while QH/QP/QI use
 ``abs(mean_iota) >= 0.41``.  ``LgradB`` remains available for users who want
 extra magnetic-gradient regularization, but it is not active in the default
-sweeps or best-row selection.
+sweeps or best-row selection.  When enabling ``LgradB`` in an adjoint
+optimization, use a small ``smooth_penalty`` so the softplus penalty remains
+differentiable near the threshold.
 
 Each problem is run with staged mode continuation and with direct-start mode
 expansion.  Each policy is run with and without ESS using ``alpha = 1.2``,

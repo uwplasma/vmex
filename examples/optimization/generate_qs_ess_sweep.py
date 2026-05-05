@@ -226,7 +226,7 @@ class ProblemConfig:
     lgradb_ntheta: int = 9
     lgradb_nphi: int = 7
     lgradb_surface_index: int = -1
-    lgradb_smooth_penalty: float = 0.0
+    lgradb_smooth_penalty: float = 1.0e-3
     objective_kind: str = "qs"
     qi_mboz: int = 12
     qi_nboz: int = 12
@@ -257,7 +257,7 @@ class ProblemConfig:
     qi_lgradb_ntheta: int = 9
     qi_lgradb_nphi: int = 7
     qi_lgradb_surface_index: int = -1
-    qi_lgradb_smooth_penalty: float = 0.0
+    qi_lgradb_smooth_penalty: float = 1.0e-3
     qi_preseed_qp: bool = False
     qi_preseed_qi: bool = False
     qi_preseed_qi_nfev: int = 30

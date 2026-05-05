@@ -83,7 +83,7 @@ problem = vj.LeastSquaresProblem.from_tuples(
         (iota.J, TARGET_IOTA, IOTA_WEIGHT),
         (qs.J, 0.0, QS_WEIGHT),
         # Optional:
-        # (vj.LgradB(threshold=0.30).J, 0.0, 0.01),
+        # (vj.LgradB(threshold=0.30, smooth_penalty=1.0e-3).J, 0.0, 0.01),
         # (vj.MagneticWell(minimum=0.0).J, 0.0, 1.0),
         # Finite-beta examples can also add:
         # (vj.VolavgB().J, TARGET_VOLAVGB, VOLAVGB_WEIGHT),

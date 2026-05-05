@@ -97,7 +97,7 @@ problem = vj.LeastSquaresProblem.from_tuples(
         (mirror.J, 0.0, MIRROR_WEIGHT),
         (elongation.J, 0.0, ELONGATION_WEIGHT),
         # Optional:
-        # (vj.LgradB(threshold=0.30).J, 0.0, 0.001),
+        # (vj.LgradB(threshold=0.30, smooth_penalty=1.0e-3).J, 0.0, 0.001),
         # (vj.MagneticWell(minimum=0.0).J, 0.0, 1.0),
         # Finite-beta examples can also add:
         # (vj.VolavgB().J, TARGET_VOLAVGB, VOLAVGB_WEIGHT),
