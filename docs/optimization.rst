@@ -711,7 +711,10 @@ under ``results/omnigenity_compare/qi_objective`` and should be used before
 changing the smooth QI objective weights or the ``phimin`` well interval.  The
 local SIMSOPT/``omnigenity_optimization`` reference leg is off by default to
 avoid expensive accidental runs; set ``RUN_REFERENCE_OMNIGENITY = True`` in the
-script when an apples-to-apples reference residual is needed.
+script when an apples-to-apples reference residual is needed.  The reference
+leg runs in a child process with ``REFERENCE_TIMEOUT_S`` so crashes, memory
+pressure, or timeouts are reported in the JSON summary without killing the
+vmec_jax diagnostic.
 
 
 GPU acceleration
