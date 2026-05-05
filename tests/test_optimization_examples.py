@@ -67,6 +67,17 @@ def test_qi_objective_comparison_is_top_level_diagnostic() -> None:
     assert "quasi_isodynamic_residual_from_state(" in text
 
 
+def test_policy_matrix_plots_single_problem(tmp_path, monkeypatch) -> None:
+    from examples.optimization import compare_qs_policy_matrix as matrix
+
+    monkeypatch.setattr(matrix, "PROBLEMS", ("qa",))
+
+    outpath = tmp_path / "one_problem_matrix.png"
+    matrix._plot_policy_matrix_all([], outpath=outpath)
+
+    assert outpath.exists()
+
+
 def test_finite_beta_examples_plot_explicitly_after_solve() -> None:
     scripts = [
         ROOT / "examples" / "optimization" / "qa_optimization_finite_beta.py",
