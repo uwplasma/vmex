@@ -65,37 +65,37 @@ QA_INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.nfp2_QA"
 MODES = (1, 2, 3)
 PROBLEMS = ("qh", "qa")
 
-QH_METHOD = "scipy"
-QA_METHOD = "scipy"
+QH_METHOD = "scipy"  # Try also "gauss_newton", "scipy_matrix_free", or "lbfgs_adjoint".
+QA_METHOD = "scipy"  # Same optimizer choices as QH; keep both explicit for per-case tests.
 
-QH_MAX_NFEV = 15
-QH_CONTINUATION_NFEV = 15
-QH_FTOL = 1e-3
-QH_GTOL = 1e-3
-QH_XTOL = 1e-3
+QH_MAX_NFEV = 15  # Outer least-squares budget for the final stage.
+QH_CONTINUATION_NFEV = 15  # Per-stage budget when mode continuation is enabled.
+QH_FTOL = 1e-3  # Relative cost-reduction tolerance for the outer optimizer.
+QH_GTOL = 1e-3  # Gradient optimality tolerance for the outer optimizer.
+QH_XTOL = 1e-3  # Step-size tolerance for the outer optimizer.
 ESS_ALPHA = 2.5
 QH_ESS_ALPHA = ESS_ALPHA
 QH_TARGET_ASPECT = 5.0
 QH_SURFACES = np.arange(0.0, 1.01, 0.1)
 
-QA_MAX_NFEV = 40
-QA_CONTINUATION_NFEV = 25
-QA_FTOL = 1e-3
-QA_GTOL = 1e-3
-QA_XTOL = 1e-3
+QA_MAX_NFEV = 40  # QA usually needs more steps because iota is also constrained.
+QA_CONTINUATION_NFEV = 25  # Per-stage budget for max_mode continuation.
+QA_FTOL = 1e-3  # Relative cost-reduction tolerance for the outer optimizer.
+QA_GTOL = 1e-3  # Gradient optimality tolerance for the outer optimizer.
+QA_XTOL = 1e-3  # Step-size tolerance for the outer optimizer.
 QA_ESS_ALPHA = ESS_ALPHA
 QA_TARGET_ASPECT = 5.0
 QA_TARGET_IOTA = 0.41
 QA_SURFACES = np.arange(0.0, 1.01, 0.1)
-QH_INNER_MAX_ITER = 0
-QH_INNER_FTOL = 0
-QH_TRIAL_MAX_ITER = 300
-QH_TRIAL_FTOL = 1e-10
+QH_INNER_MAX_ITER = 0  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
+QH_INNER_FTOL = 0  # Accepted-point VMEC tolerance; 0 uses FTOL_ARRAY from the input deck.
+QH_TRIAL_MAX_ITER = 300  # Trial-point VMEC iterations; lower this for faster diagnostics.
+QH_TRIAL_FTOL = 1e-10  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
 
-QA_INNER_MAX_ITER = 0
-QA_INNER_FTOL = 0
-QA_TRIAL_MAX_ITER = 300
-QA_TRIAL_FTOL = 1e-10
+QA_INNER_MAX_ITER = 0  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
+QA_INNER_FTOL = 0  # Accepted-point VMEC tolerance; 0 uses FTOL_ARRAY from the input deck.
+QA_TRIAL_MAX_ITER = 300  # Trial-point VMEC iterations; lower this for faster diagnostics.
+QA_TRIAL_FTOL = 1e-10  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
 
 
 @dataclass(frozen=True)

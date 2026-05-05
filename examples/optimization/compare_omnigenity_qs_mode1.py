@@ -41,7 +41,7 @@ from vmec_jax.optimization_workflow import build_fixed_boundary_objective_stage
 
 CASES_TO_RUN = ("QA", "QH")
 MAX_MODE = 1
-MAX_NFEV = 6
+MAX_NFEV = 6  # Outer least-squares budget for the diagnostic trajectory.
 
 CASE_CONFIGS = {
     "QA": {
@@ -78,15 +78,15 @@ LGRADB_THRESHOLD = 0.35
 QS_SURFACES = np.arange(0.0, 1.01, 0.1)
 
 ESS_ALPHA = 1.2
-FTOL = 1.0e-4
-GTOL = 1.0e-4
-XTOL = 1.0e-4
-FINITE_DIFF_STEP = 1.0e-6
+FTOL = 1.0e-4  # Relative cost-reduction tolerance for scipy least_squares.
+GTOL = 1.0e-4  # Gradient optimality tolerance for scipy least_squares.
+XTOL = 1.0e-4  # Step-size tolerance for scipy least_squares.
+FINITE_DIFF_STEP = 1.0e-6  # Try 1e-5 or 1e-7 if finite-difference checks look noisy.
 
-INNER_MAX_ITER = 120
-INNER_FTOL = 1.0e-9
-TRIAL_MAX_ITER = 120
-TRIAL_FTOL = 1.0e-9
+INNER_MAX_ITER = 120  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
+INNER_FTOL = 1.0e-9  # Accepted-point VMEC tolerance; 0 uses FTOL_ARRAY from the input deck.
+TRIAL_MAX_ITER = 120  # Trial-point VMEC iterations; lower this for quicker trajectory audits.
+TRIAL_FTOL = 1.0e-9  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
 
 RUN_VMEC_JAX = True
 RUN_SIMSOPT = True
