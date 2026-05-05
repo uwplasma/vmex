@@ -629,9 +629,6 @@ choose only the plots they need:
 - ``bmag_surface.png`` — :math:`|B|` contour lines on LCFS (θ, φ/nfp).
 - ``objective_history.png`` — Objective and aspect ratio vs Jacobian index.
 
-``plot_qh_optimization`` remains as a compatibility wrapper, but new examples
-use the three explicit functions above.
-
 :func:`checkpoint_tape_state_jvp_columns`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -663,8 +660,7 @@ Source files
        LCFS elongation and ``LgradB`` penalties.
    * - ``vmec_jax/plotting.py``
      - ``plot_3d_boundary_comparison``, ``plot_bmag_contours``,
-       ``plot_objective_history``, and the compatibility wrapper
-       ``plot_qh_optimization``.
+       and ``plot_objective_history``.
    * - ``vmec_jax/driver.py``
      - ``write_wout_from_fixed_boundary_run``, ``wout_from_fixed_boundary_run``.
    * - ``examples/optimization/QH_optimization.py``
