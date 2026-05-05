@@ -202,6 +202,7 @@ class QuasiIsodynamicOptions:
     aligned_profile_softness: float = 2.0e-2
     aligned_profile_trap_level: float = 0.65
     aligned_profile_trap_softness: float = 5.0e-2
+    phimin: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -1142,6 +1143,7 @@ def build_quasi_isodynamic_objective_stage(
     aligned_profile_softness: float,
     aligned_profile_trap_level: float,
     aligned_profile_trap_softness: float,
+    phimin: float,
     project_input_boundary_to_max_mode: bool = True,
     include: Sequence[str] = ("rc", "zs"),
     fix: Sequence[str] = ("rc00",),
@@ -1239,6 +1241,7 @@ def build_quasi_isodynamic_objective_stage(
             aligned_profile_softness=float(aligned_profile_softness),
             aligned_profile_trap_level=float(aligned_profile_trap_level),
             aligned_profile_trap_softness=float(aligned_profile_trap_softness),
+            phimin=float(phimin),
             jit_booz=False,
             booz_constants=booz_constants,
             booz_grids=booz_grids,
@@ -1312,6 +1315,7 @@ def run_quasi_isodynamic_objective_optimization(
     aligned_profile_softness: float,
     aligned_profile_trap_level: float,
     aligned_profile_trap_softness: float,
+    phimin: float,
     target_aspect: float | None = None,
     iota_abs_min: float | None = None,
     include: Sequence[str] = ("rc", "zs"),
@@ -1355,6 +1359,7 @@ def run_quasi_isodynamic_objective_optimization(
             aligned_profile_softness=aligned_profile_softness,
             aligned_profile_trap_level=aligned_profile_trap_level,
             aligned_profile_trap_softness=aligned_profile_trap_softness,
+            phimin=phimin,
             project_input_boundary_to_max_mode=project_input_boundary_to_max_mode,
             include=include,
             fix=fix,
@@ -1546,6 +1551,7 @@ def least_squares_solve(
             aligned_profile_softness=qi_options.aligned_profile_softness,
             aligned_profile_trap_level=qi_options.aligned_profile_trap_level,
             aligned_profile_trap_softness=qi_options.aligned_profile_trap_softness,
+            phimin=qi_options.phimin,
             target_aspect=target_aspect,
             iota_abs_min=iota_abs_min,
             include=vmec.include,

@@ -242,6 +242,7 @@ class ProblemConfig:
     qi_aligned_profile_softness: float = 2.0e-2
     qi_aligned_profile_trap_level: float = 0.65
     qi_aligned_profile_trap_softness: float = 5.0e-2
+    qi_phimin: float = 0.0
     qi_max_mirror_ratio: float = 0.21
     qi_mirror_weight: float = 10.0
     qi_mirror_ntheta: int = 96
@@ -804,6 +805,7 @@ def _qi_diagnostics_from_state(problem_cfg: ProblemConfig, opt, state) -> dict[s
             aligned_profile_softness=problem_cfg.qi_aligned_profile_softness,
             aligned_profile_trap_level=problem_cfg.qi_aligned_profile_trap_level,
             aligned_profile_trap_softness=problem_cfg.qi_aligned_profile_trap_softness,
+            phimin=problem_cfg.qi_phimin,
             jit_booz=False,
             booz_constants=constants,
             booz_grids=grids,
@@ -1018,6 +1020,7 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
                 aligned_profile_softness=problem_cfg.qi_aligned_profile_softness,
                 aligned_profile_trap_level=problem_cfg.qi_aligned_profile_trap_level,
                 aligned_profile_trap_softness=problem_cfg.qi_aligned_profile_trap_softness,
+                phimin=problem_cfg.qi_phimin,
                 jit_booz=False,
                 booz_constants=qi_booz_constants,
                 booz_grids=qi_booz_grids,

@@ -288,6 +288,10 @@ plus mirror, elongation, and magnetic-gradient scale-length penalties, rather
 than forcing a prescribed Boozer ``|B|`` profile.
 This keeps QP as an explicit optional experiment while still measuring whether
 the preseed helps or hurts the constrained QI solve.
+``QI_OPTIONS.phimin`` selects the beginning of the one-field-period well
+interval used by the smooth QI residual.  The bundled NFP=2 seed uses the
+default ``0.0``; set it to ``np.pi / nfp`` when comparing against a reference
+configuration whose well starts one half-period later.
 Columns correspond to ``max_mode = 1, 2, 3``.  The vertical dotted lines mark
 continuation stage boundaries.  QA/QH/QP continuation uses the repeated
 omnigenity-style policy ``[1, 1, 2, 2, 2]`` for ``max_mode=2`` and
@@ -674,6 +678,10 @@ Source files
      - QI workflow using ``booz_xform_jax``, a bundled omnigenity seed,
        and explicit mirror-ratio/elongation/``LgradB``
        objective blocks that users can extend in the script.
+   * - ``examples/optimization/compare_omnigenity_qi_objective.py``
+     - Diagnostic QI objective comparison against the local
+       ``omnigenity_optimization`` reference scripts, including ``phimin``
+       interval scans and residual-block timings.
    * - ``examples/optimization/plot_optimization_results.py``
      - Standalone plotting helper (regenerates figures from saved wout+JSON).
    * - ``examples/optimization/target_iota_aspect_volume.py``
@@ -692,6 +700,20 @@ Running the QH example
 
 Increase ``MAX_MODE`` at the top of ``QH_optimization.py`` for richer
 boundary parameterisation; increase ``MAX_NFEV`` for more optimisation budget.
+
+Running the QI objective comparison
+------------------------------------
+
+.. code-block:: bash
+
+   PYTHONPATH=. python examples/optimization/compare_omnigenity_qi_objective.py
+
+This script is intentionally diagnostic. It writes JSON and ``wout`` artifacts
+under ``results/omnigenity_compare/qi_objective`` and should be used before
+changing the smooth QI objective weights or the ``phimin`` well interval.  The
+local SIMSOPT/``omnigenity_optimization`` reference leg is off by default to
+avoid expensive accidental runs; set ``RUN_REFERENCE_OMNIGENITY = True`` in the
+script when an apples-to-apples reference residual is needed.
 
 
 GPU acceleration

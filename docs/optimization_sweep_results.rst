@@ -288,7 +288,9 @@ QI, ``QI_MBOZ``, ``QI_NBOZ``, ``QI_NPHI``, ``QI_NALPHA``, and
 ``QI_N_BOUNCE`` control the Boozer/QI residual grid. ``MAX_MIRROR_RATIO`` and
 ``MAX_ELONGATION`` control the two engineering penalties.  The default QI grid
 is small enough for first-run diagnostics; increase it for final
-research-quality QI runs.
+research-quality QI runs. ``QI_OPTIONS.phimin`` controls the start of the
+one-field-period well interval; keep ``0.0`` for the bundled NFP=2 seed, or set
+``np.pi / nfp`` when auditing a reference field whose first well starts there.
 
 Mercier ``DMerc`` and Redl bootstrap-current mismatch are not yet enabled as
 fully differentiable residual blocks in vmec_jax.  The finite-beta scaffolding

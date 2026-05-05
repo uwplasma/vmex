@@ -97,6 +97,7 @@ QI_NALPHA = 8
 QI_N_BOUNCE = 12
 QI_SOFTNESS = 30.0
 QI_PROFILE_WEIGHT = 0.15
+QI_PHIMIN = 0.0  # Set to np.pi / nfp if the reference QI well starts there.
 
 USE_ESS = True
 ALPHA = 2.5
@@ -211,6 +212,7 @@ for stage_mode in stage_modes:
             n_bounce=QI_N_BOUNCE,
             softness=QI_SOFTNESS,
             profile_weight=QI_PROFILE_WEIGHT,
+            phimin=QI_PHIMIN,
             jit_booz=False,
             booz_constants=booz_constants,
             booz_grids=booz_grids,

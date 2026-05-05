@@ -68,6 +68,7 @@ QI_OPTIONS = vj.QuasiIsodynamicOptions(
     aligned_profile_softness=2.0e-2,
     aligned_profile_trap_level=0.65,
     aligned_profile_trap_softness=5.0e-2,
+    phimin=0.0,  # Set to np.pi / nfp if auditing a seed whose well starts there.
 )
 
 USE_ESS = True

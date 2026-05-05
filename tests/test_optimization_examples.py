@@ -57,6 +57,16 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "plot_objective_history(" in text
 
 
+def test_qi_objective_comparison_is_top_level_diagnostic() -> None:
+    text = (ROOT / "examples" / "optimization" / "compare_omnigenity_qi_objective.py").read_text()
+
+    assert "argparse" not in text
+    assert "QI_VARIANTS" in text
+    assert "PHIMIN_FACTORS" in text
+    assert "QuasiIsodynamicResidual" in text
+    assert "quasi_isodynamic_residual_from_state(" in text
+
+
 def test_finite_beta_examples_plot_explicitly_after_solve() -> None:
     scripts = [
         ROOT / "examples" / "optimization" / "qa_optimization_finite_beta.py",
