@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import contextlib
 import json
+import multiprocessing as mp
 from pathlib import Path
+import queue as queue_module
 import sys
 import time
 
@@ -107,6 +109,7 @@ QI_VARIANTS = (
 
 RUN_REFERENCE_OMNIGENITY = False  # Set True for the slower SIMSOPT/omnigenity leg.
 REFERENCE_NPHI_OUT = 401  # Increase to 2000 to match the original reference script.
+REFERENCE_TIMEOUT_S = 300.0  # Child-process timeout for the optional reference leg.
 
 
 def _json_default(value):
@@ -299,9 +302,7 @@ def evaluate_vmec_jax() -> dict:
     }
 
 
-def evaluate_reference_omnigenity() -> dict:
-    if not RUN_REFERENCE_OMNIGENITY:
-        return {"backend": "omnigenity_reference", "skipped": True}
+def _evaluate_reference_omnigenity_impl() -> dict:
     if not OMNIGENITY_ROOT.exists():
         return {
             "backend": "omnigenity_reference",
@@ -364,6 +365,66 @@ def evaluate_reference_omnigenity() -> dict:
             "elongation": elongation_wall_s,
         },
     }
+
+
+def _reference_omnigenity_worker(result_queue: mp.Queue) -> None:
+    try:
+        result_queue.put({"ok": True, "payload": _evaluate_reference_omnigenity_impl()})
+    except BaseException as exc:
+        result_queue.put(
+            {
+                "ok": False,
+                "payload": {
+                    "backend": "omnigenity_reference",
+                    "skipped": True,
+                    "reason": f"{type(exc).__name__}: {exc}",
+                },
+            }
+        )
+
+
+def evaluate_reference_omnigenity() -> dict:
+    if not RUN_REFERENCE_OMNIGENITY:
+        return {"backend": "omnigenity_reference", "skipped": True}
+
+    ctx = mp.get_context("spawn")
+    result_queue = ctx.Queue()
+    process = ctx.Process(
+        target=_reference_omnigenity_worker,
+        args=(result_queue,),
+        name="omnigenity_qi_reference",
+    )
+    process.start()
+    process.join(REFERENCE_TIMEOUT_S)
+
+    if process.is_alive():
+        process.terminate()
+        process.join(5.0)
+        return {
+            "backend": "omnigenity_reference",
+            "skipped": True,
+            "reason": f"timeout after {REFERENCE_TIMEOUT_S:.1f} s",
+        }
+
+    if process.exitcode != 0:
+        return {
+            "backend": "omnigenity_reference",
+            "skipped": True,
+            "reason": f"child process exited with code {process.exitcode}",
+        }
+
+    try:
+        message = result_queue.get(timeout=5.0)
+    except queue_module.Empty:
+        return {
+            "backend": "omnigenity_reference",
+            "skipped": True,
+            "reason": "child process produced no result",
+        }
+
+    if message.get("ok", False):
+        return message["payload"]
+    return message["payload"]
 
 
 def main() -> None:
