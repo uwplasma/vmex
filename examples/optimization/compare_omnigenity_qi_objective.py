@@ -106,6 +106,20 @@ QI_VARIANTS = (
         "profile_weight": 0.0,
         "aligned_profile_weight": 0.5,
     },
+    {
+        "name": "profile_only",
+        "width_weight": 0.0,
+        "branch_width_weight": 0.0,
+        "profile_weight": 1.0,
+        "aligned_profile_weight": 0.0,
+    },
+    {
+        "name": "width_profile",
+        "width_weight": 1.0,
+        "branch_width_weight": 0.0,
+        "profile_weight": 1.0,
+        "aligned_profile_weight": 0.0,
+    },
 )
 
 RUN_REFERENCE_OMNIGENITY = False  # Set True for the slower SIMSOPT/omnigenity leg.
