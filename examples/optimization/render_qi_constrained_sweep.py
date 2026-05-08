@@ -42,12 +42,14 @@ SUMMARY_FIELDS = [
     "backend",
     "policy",
     "qi_qp_preseed",
+    "qi_qi_preseed",
     "max_mode",
     "use_ess",
     "success",
     "crashed",
     "objective_final",
     "qi_raw_total",
+    "qi_legacy_total",
     "qi_mirror_ratio_max",
     "qi_mirror_ratio_target",
     "qi_mirror_excess_max",
@@ -93,6 +95,19 @@ def _float_value(value, default: float | None = None) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _qi_metric(row: dict, default: float | None = None) -> float | None:
+    """Return the explicitly labeled legacy-ranked QI metric.
+
+    Older sweep artifacts used ``qi_raw_total`` for this value.  New artifacts
+    also write ``qi_legacy_total`` so tables do not hide what is being ranked.
+    """
+
+    value = row.get("qi_legacy_total")
+    if value in (None, ""):
+        value = row.get("qi_raw_total")
+    return _float_value(value, default)
 
 
 def _path_from_record(value: str | None, fallback: Path) -> Path:
@@ -157,6 +172,8 @@ def _discover_qi_results() -> list[dict]:
         if qp_preseed is None:
             continue
         row = {field: record.get(field) for field in SUMMARY_FIELDS}
+        if row.get("qi_legacy_total") in (None, ""):
+            row["qi_legacy_total"] = record.get("qi_raw_total")
         row["backend"] = backend
         row["policy"] = policy
         row["qi_qp_preseed"] = bool(qp_preseed)
@@ -196,7 +213,7 @@ def _discover_qi_results() -> list[dict]:
 
 def _write_summaries(rows: list[dict]) -> None:
     FIGURE_DIR.mkdir(parents=True, exist_ok=True)
-    SUMMARY_JSON.write_text(json.dumps(rows, indent=2))
+    SUMMARY_JSON.write_text(json.dumps(rows, indent=2) + "\n")
     with SUMMARY_CSV.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=SUMMARY_FIELDS, lineterminator="\n")
         writer.writeheader()
@@ -246,7 +263,7 @@ def _case_label(row: dict) -> str:
     return (
         f"{'ESS' if _bool_value(row['use_ess']) else 'No ESS'}: "
         f"J={_float_value(row.get('objective_final'), np.nan):.2e}, "
-        f"QI={_float_value(row.get('qi_raw_total'), np.nan):.2e}, "
+        f"QI={_qi_metric(row, np.nan):.2e}, "
         f"M={_float_value(row.get('qi_mirror_ratio_max'), np.nan):.2f}, "
         f"E={_float_value(row.get('qi_max_elongation'), np.nan):.1f}, "
         f"|i|={abs(_float_value(row.get('iota_final'), 0.0) or 0.0):.2f}, "
@@ -414,7 +431,7 @@ def _best_score(row: dict) -> tuple:
     elong_target = _float_value(row.get("qi_elongation_target"), 8.0) or 8.0
     aspect = _float_value(row.get("aspect_final"), np.inf) or np.inf
     iota = abs(_float_value(row.get("iota_final"), 0.0) or 0.0)
-    qi_raw = _float_value(row.get("qi_raw_total"), np.inf) or np.inf
+    qi_raw = _qi_metric(row, np.inf) or np.inf
     objective = _float_value(row.get("objective_final"), np.inf) or np.inf
     mirror_violation = max(0.0, mirror - mirror_target) / max(mirror_target, 1e-12)
     elong_violation = max(0.0, elong - elong_target) / max(elong_target, 1e-12)
@@ -450,7 +467,7 @@ def _write_best(rows: list[dict]) -> dict:
     best = min(rows, key=_best_score)
     payload = dict(best)
     payload["selection_score"] = list(_best_score(best))
-    BEST_JSON.write_text(json.dumps(payload, indent=2))
+    BEST_JSON.write_text(json.dumps(payload, indent=2) + "\n")
     return payload
 
 
@@ -465,7 +482,7 @@ def main() -> None:
         "Best QI: "
         f"{best['backend']} {best['policy']} qp_preseed={best['qi_qp_preseed']} "
         f"mode={best['max_mode']} ess={best['use_ess']} "
-        f"J={best.get('objective_final')} QI={best.get('qi_raw_total')} "
+        f"J={best.get('objective_final')} QI={best.get('qi_legacy_total', best.get('qi_raw_total'))} "
         f"mirror={best.get('qi_mirror_ratio_max')} elong={best.get('qi_max_elongation')}"
     )
 

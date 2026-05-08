@@ -183,13 +183,12 @@ Downloadable constrained-QI summaries:
 - :download:`qi_constrained_summary.json <_static/figures/qi_constrained_summary.json>`
 - :download:`qi_constrained_best.json <_static/figures/qi_constrained_best.json>`
 
-In the current snapshot, the best available constrained QI row is CPU direct,
-``max_mode=3``, ESS, without a same-mode QP preseed.  It first runs a QI-only
-pre-refinement and then applies the aspect/iota/mirror/elongation constraints.
-It reaches legacy branch diagnostic ``1.35e-3``, maximum mirror ratio
-``0.226`` for a target ``0.21``, maximum elongation ``5.83`` for a target
-``8.0``, aspect ratio ``4.402``, mean iota ``-0.5465``, and total two-stage
-wall time ``4.0 min``.  Ranking now prioritizes the legacy QI diagnostic after
+In the current snapshot, the best available constrained QI row is CPU
+repeated-stage continuation, ``max_mode=3``, ESS, without a same-mode QP
+preseed.  It reaches legacy-ranked QI diagnostic ``1.04e-3``, maximum mirror
+ratio ``0.211`` for a target ``0.21``, maximum elongation ``4.78`` for a
+target ``8.0``, aspect ratio ``5.000``, mean iota ``-0.4553``, and total wall
+time ``6.6 min``.  Ranking now prioritizes the legacy QI diagnostic after
 the mirror, elongation, iota, and aspect gates are satisfied; otherwise smooth
 width-only surrogates can win while still looking more QP-like than QI.
 

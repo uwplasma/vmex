@@ -463,6 +463,7 @@ class CaseResult:
     qi_qp_preseed: bool | None = None
     qi_qi_preseed: bool | None = None
     qi_raw_total: float | None = None
+    qi_legacy_total: float | None = None
     qi_mirror_ratio_max: float | None = None
     qi_mirror_ratio_target: float | None = None
     qi_mirror_excess_max: float | None = None
@@ -850,8 +851,14 @@ def _qi_diagnostics_from_state(problem_cfg: ProblemConfig, opt, state) -> dict[s
         lgradb_values = np.asarray(lgradb["L_grad_B"], dtype=float)
         lgradb_min = float(np.min(lgradb_values))
         lgradb_excess = np.asarray(lgradb["excess"], dtype=float)
+        qi_total = float(np.asarray(qi["total"]))
         return {
-            "qi_raw_total": float(np.asarray(qi["total"])),
+            "qi_raw_total": qi_total,
+            # The current smooth QI objective includes the branch-shuffle profile
+            # term calibrated to rank designs like the Goodman et al. legacy
+            # diagnostic.  Keep the old key for compatibility and expose the
+            # physics meaning explicitly for new tables/plots.
+            "qi_legacy_total": qi_total,
             "qi_mirror_ratio_max": mirror_max,
             "qi_mirror_ratio_target": float(problem_cfg.qi_max_mirror_ratio),
             "qi_mirror_excess_max": max(0.0, mirror_max - float(problem_cfg.qi_max_mirror_ratio)),
@@ -865,6 +872,7 @@ def _qi_diagnostics_from_state(problem_cfg: ProblemConfig, opt, state) -> dict[s
     except Exception as exc:
         return {
             "qi_raw_total": None,
+            "qi_legacy_total": None,
             "qi_mirror_ratio_max": None,
             "qi_mirror_ratio_target": float(problem_cfg.qi_max_mirror_ratio),
             "qi_mirror_excess_max": None,
@@ -2038,6 +2046,7 @@ def _write_summary_csv(results: list[CaseResult], path: Path) -> None:
                 "qi_qp_preseed",
                 "qi_qi_preseed",
                 "qi_raw_total",
+                "qi_legacy_total",
                 "qi_mirror_ratio_max",
                 "qi_mirror_ratio_target",
                 "qi_mirror_excess_max",

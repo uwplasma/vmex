@@ -459,10 +459,11 @@ public-API QI lane from the parameter study:
 The study compared direct versus repeated-stage continuation, QP pre-seeding,
 aspect-ratio weights, mirror/elongation soft-wall weights, QI branch-width
 weights, the branch-shuffle profile residual, and termination tolerances against the nfp=2
-``examples/data/input.nfp2_QI`` seed.  The robust lane is direct
-``max_mode = 3`` with ESS, ``target_aspect = 3.5``, ``abs(mean_iota) >= 0.40``,
-``branch_width_weight = 0.5``, ``profile_weight = 0.1``,
-``shuffle_profile_weight = 1.0``, and a tighter ``XTOL = 1e-8``.  The
+``examples/data/input.nfp2_QI`` seed.  The robust lane is repeated same-mode
+continuation at ``max_mode = 3`` with ESS, ``target_aspect = 5.0``,
+``abs(mean_iota) >= 0.41``, ``branch_width_weight = 0.5``,
+``profile_weight = 0.1``, ``shuffle_profile_weight = 1.0``, and a tighter
+``XTOL = 1e-8``.  The
 shuffle-profile term is intentionally retained because width-only and
 branch-width-only smooth surrogates can rank QH/QP-like false positives ahead
 of the branch-squash/stretch/shuffle diagnostic used in the reference Goodman

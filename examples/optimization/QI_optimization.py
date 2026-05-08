@@ -27,13 +27,18 @@ INPUT_FILE = DATA_DIR / "input.nfp2_QI"
 OUTPUT_DIR = Path("results/qi_opt/ess")
 MAX_MODE = 3
 MIN_VMEC_MODE = 6
-USE_MODE_CONTINUATION = False
-MAX_NFEV = 50
-CONTINUATION_NFEV = 50
-QI_PREFINE = True
-QI_PREFINE_NFEV = 20
-STAGE_REPEATS = 1
-STAGE_MODES = [MAX_MODE] * STAGE_REPEATS if USE_MODE_CONTINUATION and MAX_MODE > 1 else [MAX_MODE]
+USE_MODE_CONTINUATION = True
+MAX_NFEV = 30
+CONTINUATION_NFEV = 30
+QI_PREFINE = False
+QI_PREFINE_NFEV = 30
+STAGE_REPEATS = 5
+STAGE_MODES = vj.repeated_stage_modes(
+    max_mode=MAX_MODE,
+    use_mode_continuation=USE_MODE_CONTINUATION,
+    continuation_nfev=CONTINUATION_NFEV,
+    repeats=STAGE_REPEATS,
+)
 
 METHOD = "scipy"  # Try also "gauss_newton", "scipy_matrix_free", or "lbfgs_adjoint".
 SCIPY_TR_SOLVER = "lsmr"  # For METHOD="scipy": "lsmr" is memory-light; "exact" is dense.
@@ -49,14 +54,14 @@ SOLVER_DEVICE = None  # None uses JAX default; set "cpu" or "gpu" to force one b
 
 # Scalar and field-quality targets.  The mirror/elongation terms are soft
 # upper-bound penalties; uncomment LgradB if needed for additional shaping.
-TARGET_ASPECT = 3.5
-TARGET_ABS_IOTA_MIN = 0.40
+TARGET_ASPECT = 5.0
+TARGET_ABS_IOTA_MIN = 0.41
 MAX_MIRROR_RATIO = 0.21
 MAX_ELONGATION = 8.0
 SURFACES = np.linspace(0.1, 1.0, 6)
-ASPECT_WEIGHT = 0.005
+ASPECT_WEIGHT = 1.0
 IOTA_FLOOR_WEIGHT = 200.0**2
-QI_WEIGHT = 10.0
+QI_WEIGHT = 1.0
 MIRROR_WEIGHT = 10.0
 ELONGATION_WEIGHT = 10.0
 
@@ -86,14 +91,6 @@ USE_ESS = True
 ALPHA = 1.2
 MAKE_PLOTS = True
 
-
-preseed_vmec = vj.FixedBoundaryVMEC.from_input(
-    INPUT_FILE,
-    max_mode=MAX_MODE,
-    min_vmec_mode=MIN_VMEC_MODE,
-    output_dir=OUTPUT_DIR / "qi_preseed",
-    project_input_boundary_to_max_mode=True,
-)
 
 aspect = vj.AspectRatio()
 iota_floor = vj.AbsMeanIotaFloor(TARGET_ABS_IOTA_MIN)
@@ -129,6 +126,13 @@ problem = vj.LeastSquaresProblem.from_tuples(
 
 active_input_file = INPUT_FILE
 if QI_PREFINE:
+    preseed_vmec = vj.FixedBoundaryVMEC.from_input(
+        INPUT_FILE,
+        max_mode=MAX_MODE,
+        min_vmec_mode=MIN_VMEC_MODE,
+        output_dir=OUTPUT_DIR / "qi_preseed",
+        project_input_boundary_to_max_mode=True,
+    )
     print("Running QI-only pre-refinement before applying scalar constraints ...")
     preseed_result = vj.least_squares_solve(
         preseed_vmec,
