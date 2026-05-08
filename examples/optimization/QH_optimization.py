@@ -2,8 +2,13 @@
 """Quasi-helical symmetry optimization with vmec_jax."""
 
 from pathlib import Path
+import sys
 
 import numpy as np
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 import vmec_jax as vj
 from vmec_jax._compat import enable_x64

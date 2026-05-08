@@ -11,12 +11,11 @@ level-set widths:
 
 where ``H`` is a logistic approximation to the step function.  A QI surface has
 widths that are independent of ``alpha`` for every level ``B_j``.  The residual
-can also include two profile-consistency terms. ``profile_weight`` compares
-profiles at fixed toroidal angle, while ``aligned_profile_weight`` first aligns
-each field line by a smooth estimate of its well minimum and then compares only
-the trapped-well part of the profile.  The aligned term is closer to the
-branch/shuffle diagnostic used in the reference ``omnigenity_optimization``
-workflow while remaining differentiable.
+can also include branch-width and profile-consistency terms.  The default
+weights are calibrated so the smooth metric ranks the seed, the published
+``omnigenity_optimization`` QI result, and current vmec_jax candidates in the
+same order as the branch-squash/stretch/shuffle diagnostic from the reference
+Goodman et al. omnigenity workflow, while remaining differentiable.
 """
 
 from __future__ import annotations
@@ -541,9 +540,9 @@ def quasi_isodynamic_residual_from_boozer_modes(
     n_bounce: int = 51,
     softness: float = 2.0e-2,
     width_weight: float = 1.0,
-    branch_width_weight: float = 0.0,
+    branch_width_weight: float = 0.5,
     branch_width_softness: float = 1.0e-2,
-    profile_weight: float = 1.0,
+    profile_weight: float = 0.1,
     aligned_profile_weight: float = 0.0,
     aligned_profile_softness: float = 2.0e-2,
     aligned_profile_trap_level: float = 0.65,
@@ -583,8 +582,10 @@ def quasi_isodynamic_residual_from_boozer_modes(
     branch_width_softness:
         Normalized ``|B|`` smoothing width for branch level crossings.
     profile_weight:
-        Relative weight for the field-line profile consistency residual.  Set
-        to 0 to recover the width-only surrogate.
+        Small relative weight for field-line profile consistency.  Width-only
+        and branch-width-only surrogates can rank some QH-like candidates too
+        favorably; keeping a small profile term restores the legacy
+        branch-shuffle ranking without making this term dominate the objective.
     aligned_profile_weight:
         Relative weight for a differentiable trapped-well profile residual.
         Each field-line profile is circularly shifted by its smooth minimum
@@ -810,9 +811,9 @@ def quasi_isodynamic_residual_from_boozer_output(
     n_bounce: int = 51,
     softness: float = 2.0e-2,
     width_weight: float = 1.0,
-    branch_width_weight: float = 0.0,
+    branch_width_weight: float = 0.5,
     branch_width_softness: float = 1.0e-2,
-    profile_weight: float = 1.0,
+    profile_weight: float = 0.1,
     aligned_profile_weight: float = 0.0,
     aligned_profile_softness: float = 2.0e-2,
     aligned_profile_trap_level: float = 0.65,

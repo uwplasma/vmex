@@ -241,7 +241,7 @@ def test_problem_configs_follow_current_seed_and_priority_policy():
     assert qi_cfg.qi_nphi == 151
     assert qi_cfg.qi_nalpha == 31
     assert qi_cfg.qi_n_bounce == 51
-    assert qi_cfg.qi_profile_weight == 0.0
+    assert qi_cfg.qi_profile_weight == pytest.approx(0.1)
     assert not qi_cfg.qi_preseed_qi
 
 

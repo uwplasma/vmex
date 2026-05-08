@@ -461,11 +461,11 @@ aspect-ratio weights, mirror/elongation soft-wall weights, QI branch-width
 weights, and termination tolerances against the nfp=2
 ``examples/data/input.nfp2_QI`` seed.  The robust lane is direct
 ``max_mode = 3`` with ESS, ``target_aspect = 3.5``, ``abs(mean_iota) >= 0.40``,
-``branch_width_weight = 0.5``, and a tighter ``XTOL = 1e-8``.  In the local
-CPU validation run this reached total objective ``7.63e-4`` with raw QI field
-objective ``7.57e-4``, aspect ratio ``3.5346``, mean iota ``-0.4990``, and a
-monotonically decreasing accepted-point objective over 29 function evaluations
-in 167 s.
+``branch_width_weight = 0.5``, ``profile_weight = 0.1``, and a tighter
+``XTOL = 1e-8``.  The small profile term is intentionally retained because the
+width-only and branch-width-only smooth surrogates can rank QH/QP-like false
+positives ahead of the branch-squash/stretch/shuffle diagnostic used in the
+reference Goodman et al. omnigenity workflow.
 
 Two practical lessons from that study are now reflected in the example:
 

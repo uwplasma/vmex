@@ -2,8 +2,13 @@
 """Quasi-isodynamic optimization with vmec_jax and booz_xform_jax."""
 
 from pathlib import Path
+import sys
 
 import numpy as np
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 import vmec_jax as vj
 from vmec_jax._compat import enable_x64
@@ -13,9 +18,10 @@ enable_x64(True)
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
-# QI uses the nfp=2 warm start from the omnigenity optimization examples.  The
-# default is the best current QI lane: direct max_mode=3 with ESS, a low aspect
-# weight, and the branch-width term active in the smooth QI residual.
+# QI uses the nfp=2 warm start from the omnigenity optimization examples.
+# The smooth metric is calibrated against the Goodman et al. branch-shuffle
+# diagnostic: the branch-width term tracks bounce-width invariance and a small
+# profile term keeps QH/QP-like false positives from ranking too favorably.
 INPUT_FILE = DATA_DIR / "input.nfp2_QI"
 OUTPUT_DIR = Path("results/qi_opt/ess")
 MAX_MODE = 3
@@ -63,7 +69,7 @@ QI_OPTIONS = vj.QuasiIsodynamicOptions(
     width_weight=1.0,
     branch_width_weight=0.5,
     branch_width_softness=2.0e-2,
-    profile_weight=0.0,
+    profile_weight=0.1,
     aligned_profile_weight=0.0,
     aligned_profile_softness=2.0e-2,
     aligned_profile_trap_level=0.65,
