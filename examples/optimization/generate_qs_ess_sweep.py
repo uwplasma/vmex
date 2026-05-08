@@ -1511,6 +1511,12 @@ def _run_case(
     )
     if problem_cfg.objective_kind == "qi" and qi_qp_preseed is not None:
         problem_cfg = replace(problem_cfg, qi_preseed_qp=bool(qi_qp_preseed))
+    if problem_cfg.objective_kind == "qi" and problem_cfg.qi_preseed_qi and not bool(use_ess):
+        # The QI-only preseed is an ESS-stabilized helper stage.  Running that
+        # hidden stage without ESS can create ill-conditioned LSMR trust-region
+        # subproblems before the visible QI stage starts, so keep no-ESS rows as
+        # a true no-ESS baseline.
+        problem_cfg = replace(problem_cfg, qi_preseed_qi=False)
     cfg, indata = _load_problem(
         problem_cfg,
         max_mode=max_mode,

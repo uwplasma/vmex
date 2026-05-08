@@ -129,6 +129,41 @@ def test_qi_boozer_mode_residual_is_differentiable():
     assert np.linalg.norm(np.asarray(grad[1:])) > 0.0
 
 
+def test_qi_boozer_mode_residual_has_finite_saturated_sigmoid_adjoint():
+    pytest.importorskip("jax")
+
+    import jax
+
+    from vmec_jax._compat import jnp
+    from vmec_jax.quasi_isodynamic import quasi_isodynamic_residual_from_boozer_modes
+
+    xm_b = jnp.asarray([0, 1, 2, 1])
+    xn_b = jnp.asarray([0, 0, 1, 2])
+
+    def objective(coeffs):
+        out = quasi_isodynamic_residual_from_boozer_modes(
+            bmnc_b=coeffs[None, :],
+            xm_b=xm_b,
+            xn_b=xn_b,
+            iota_b=jnp.asarray([0.43]),
+            nfp=2,
+            nphi=33,
+            nalpha=9,
+            n_bounce=7,
+            softness=1.0e-6,
+            branch_width_softness=1.0e-6,
+            shuffle_profile_softness=1.0e-6,
+            profile_weight=0.1,
+            shuffle_profile_weight=1.0,
+        )
+        return out["total"]
+
+    value, grad = jax.value_and_grad(objective)(jnp.asarray([1.0, 0.3, -0.2, 0.15]))
+
+    assert np.isfinite(np.asarray(value))
+    assert np.all(np.isfinite(np.asarray(grad)))
+
+
 def test_qi_boozer_output_wrapper_matches_mode_residual_regression():
     pytest.importorskip("jax")
 

@@ -87,7 +87,7 @@ def _positive_part(value, *, softness: float = 0.0):
     if float(softness) <= 0.0:
         return jnp.maximum(value, jnp.asarray(0.0, dtype=value.dtype))
     eps = jnp.asarray(float(softness), dtype=value.dtype)
-    return eps * jnp.log1p(jnp.exp(value / eps))
+    return eps * jax.nn.softplus(value / eps)
 
 
 def _nearest_half_mesh_indices(surfaces: Iterable[float], *, n_half: int) -> np.ndarray:
@@ -919,8 +919,8 @@ def quasi_isodynamic_residual_from_boozer_modes(
 
 
 def jax_sigmoid(x):
-    """Small wrapper to keep this module importable without importing jax eagerly."""
-    return 1.0 / (1.0 + jnp.exp(-x))
+    """Stable logistic used by QI objectives and their adjoints."""
+    return jax.nn.sigmoid(x)
 
 
 def quasi_isodynamic_residual_from_boozer_output(
