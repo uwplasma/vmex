@@ -23,6 +23,7 @@ from __future__ import annotations
 import contextlib
 import json
 import multiprocessing as mp
+import os
 from pathlib import Path
 import queue as queue_module
 import sys
@@ -144,7 +145,14 @@ QI_VARIANTS = (
     },
 )
 
-RUN_REFERENCE_OMNIGENITY = False  # Set True for the slower SIMSOPT/omnigenity leg.
+def _truthy(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() not in {"", "0", "false", "no"}
+
+
+RUN_REFERENCE_OMNIGENITY = _truthy(os.environ.get("VMEC_JAX_RUN_REFERENCE_OMNIGENITY"))
+# Or set True here for the slower SIMSOPT/omnigenity leg.
 REFERENCE_NPHI_OUT = 401  # Increase to 2000 to match the original reference script.
 REFERENCE_TIMEOUT_S = 300.0  # Child-process timeout for the optional reference leg.
 
