@@ -20,8 +20,9 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
 # QI uses the nfp=2 warm start from the omnigenity optimization examples.
 # The smooth metric is calibrated against the Goodman et al. branch-shuffle
-# diagnostic: the branch-width term tracks bounce-width invariance and a small
-# profile term keeps QH/QP-like false positives from ranking too favorably.
+# diagnostic: branch-width tracks bounce-width invariance, shuffle-profile
+# compares against the branch-equalized well, and a small profile term keeps
+# QH/QP-like false positives from ranking too favorably.
 INPUT_FILE = DATA_DIR / "input.nfp2_QI"
 OUTPUT_DIR = Path("results/qi_opt/ess")
 MAX_MODE = 3
@@ -72,6 +73,8 @@ QI_OPTIONS = vj.QuasiIsodynamicOptions(
     branch_width_weight=0.5,
     branch_width_softness=2.0e-2,
     profile_weight=0.1,
+    shuffle_profile_weight=1.0,
+    shuffle_profile_softness=2.0e-2,
     aligned_profile_weight=0.0,
     aligned_profile_softness=2.0e-2,
     aligned_profile_trap_level=0.65,

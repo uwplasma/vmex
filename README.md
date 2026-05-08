@@ -177,13 +177,17 @@ quasi-poloidal-symmetry target using that same input deck; QI can optionally
 start from a same-mode QP preseed before the constrained QI refinement.
 The bundled NFP=2 seed is projected to each active `max_mode`, so
 `max_mode=1` zeroes the seed's mode-2 boundary harmonics before optimizing.
+For QI, the listed wall time includes the QI-only pre-refinement and the
+constrained refinement; the objective-history panel shows the constrained
+refinement objective because the two stages intentionally use different
+least-squares residual definitions.
 
-| Target | Backend | Policy | max_mode | ESS | QP preseed | Final J | QI raw | Mirror | Elong. | Aspect | Iota | Wall time |
+| Target | Backend | Policy | max_mode | ESS | QP preseed | Final J | QI legacy | Mirror | Elong. | Aspect | Iota | Wall time |
 |---|---|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|
 | QA | CPU | continuation | 3 | yes |  | 2.33e-04 |  |  |  | 5.000 | 0.4200 | 6.1 min |
 | QH | CPU | continuation | 3 | yes |  | 9.68e-03 |  |  |  | 4.999 | -1.6595 | 4.0 min |
 | QP | CPU | continuation | 3 | no |  | 6.76e-02 |  |  |  | 5.019 | -0.6255 | 3.7 min |
-| QI | CPU | continuation | 3 | yes | no | 1.05e-03 | 1.04e-03 | 0.211 | 4.78 | 5.000 | -0.4553 | 6.6 min |
+| QI | CPU | direct | 3 | yes | no | 4.20e-02 | 1.35e-03 | 0.226 | 5.83 | 4.402 | -0.5465 | 4.0 min |
 
 <p align="center">
   <img src="docs/_static/figures/readme_best_optimization_qa.png" width="980" />
@@ -207,7 +211,7 @@ Recreate the four displayed runs:
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa --modes 3 --ess off
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qh --modes 3 --ess on
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qp --modes 3 --ess off
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qi --modes 3 --ess off --qi-qp-preseed off
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py
 ```
 
 Regenerate the README panels and the compact CSV used for the table:

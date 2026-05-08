@@ -238,6 +238,8 @@ class ProblemConfig:
     qi_branch_width_weight: float = 0.5
     qi_branch_width_softness: float = 1.0e-2
     qi_profile_weight: float = 0.1
+    qi_shuffle_profile_weight: float = 0.0
+    qi_shuffle_profile_softness: float = 2.0e-2
     qi_aligned_profile_weight: float = 0.0
     qi_aligned_profile_softness: float = 2.0e-2
     qi_aligned_profile_trap_level: float = 0.65
@@ -385,6 +387,8 @@ PROBLEM_CONFIGS = {
         qi_branch_width_weight=0.5,
         qi_branch_width_softness=2.0e-2,
         qi_profile_weight=0.1,
+        qi_shuffle_profile_weight=1.0,
+        qi_shuffle_profile_softness=2.0e-2,
         qi_aligned_profile_weight=0.0,
         qi_aligned_profile_softness=2.0e-2,
         qi_aligned_profile_trap_level=0.65,
@@ -801,6 +805,8 @@ def _qi_diagnostics_from_state(problem_cfg: ProblemConfig, opt, state) -> dict[s
             branch_width_weight=problem_cfg.qi_branch_width_weight,
             branch_width_softness=problem_cfg.qi_branch_width_softness,
             profile_weight=problem_cfg.qi_profile_weight,
+            shuffle_profile_weight=problem_cfg.qi_shuffle_profile_weight,
+            shuffle_profile_softness=problem_cfg.qi_shuffle_profile_softness,
             aligned_profile_weight=problem_cfg.qi_aligned_profile_weight,
             aligned_profile_softness=problem_cfg.qi_aligned_profile_softness,
             aligned_profile_trap_level=problem_cfg.qi_aligned_profile_trap_level,
@@ -1016,6 +1022,8 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
                 branch_width_weight=problem_cfg.qi_branch_width_weight,
                 branch_width_softness=problem_cfg.qi_branch_width_softness,
                 profile_weight=problem_cfg.qi_profile_weight,
+                shuffle_profile_weight=problem_cfg.qi_shuffle_profile_weight,
+                shuffle_profile_softness=problem_cfg.qi_shuffle_profile_softness,
                 aligned_profile_weight=problem_cfg.qi_aligned_profile_weight,
                 aligned_profile_softness=problem_cfg.qi_aligned_profile_softness,
                 aligned_profile_trap_level=problem_cfg.qi_aligned_profile_trap_level,

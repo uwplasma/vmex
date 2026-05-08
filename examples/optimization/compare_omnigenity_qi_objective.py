@@ -72,6 +72,7 @@ QI_NALPHA = 13  # Increase to 31+ for production comparisons.
 QI_N_BOUNCE = 21  # Increase to 51+ for production comparisons.
 QI_SOFTNESS = 2.0e-2
 QI_BRANCH_WIDTH_SOFTNESS = 2.0e-2
+QI_SHUFFLE_PROFILE_SOFTNESS = 2.0e-2
 QI_ALIGNED_PROFILE_SOFTNESS = 2.0e-2
 QI_ALIGNED_PROFILE_TRAP_LEVEL = 0.65
 QI_ALIGNED_PROFILE_TRAP_SOFTNESS = 5.0e-2
@@ -90,6 +91,7 @@ QI_VARIANTS = (
         "width_weight": 1.0,
         "branch_width_weight": 0.0,
         "profile_weight": 0.0,
+        "shuffle_profile_weight": 0.0,
         "aligned_profile_weight": 0.0,
     },
     {
@@ -97,6 +99,7 @@ QI_VARIANTS = (
         "width_weight": 1.0,
         "branch_width_weight": 1.0,
         "profile_weight": 0.0,
+        "shuffle_profile_weight": 0.0,
         "aligned_profile_weight": 0.0,
     },
     {
@@ -104,6 +107,7 @@ QI_VARIANTS = (
         "width_weight": 1.0,
         "branch_width_weight": 1.0,
         "profile_weight": 0.0,
+        "shuffle_profile_weight": 0.0,
         "aligned_profile_weight": 0.5,
     },
     {
@@ -111,6 +115,15 @@ QI_VARIANTS = (
         "width_weight": 1.0,
         "branch_width_weight": 0.5,
         "profile_weight": 0.1,
+        "shuffle_profile_weight": 1.0,
+        "aligned_profile_weight": 0.0,
+    },
+    {
+        "name": "shuffle_profile_only",
+        "width_weight": 0.0,
+        "branch_width_weight": 0.0,
+        "profile_weight": 0.0,
+        "shuffle_profile_weight": 1.0,
         "aligned_profile_weight": 0.0,
     },
     {
@@ -118,6 +131,7 @@ QI_VARIANTS = (
         "width_weight": 0.0,
         "branch_width_weight": 0.0,
         "profile_weight": 1.0,
+        "shuffle_profile_weight": 0.0,
         "aligned_profile_weight": 0.0,
     },
     {
@@ -125,6 +139,7 @@ QI_VARIANTS = (
         "width_weight": 1.0,
         "branch_width_weight": 0.0,
         "profile_weight": 1.0,
+        "shuffle_profile_weight": 0.0,
         "aligned_profile_weight": 0.0,
     },
 )
@@ -413,6 +428,8 @@ def evaluate_vmec_jax() -> dict:
             branch_width_weight=0.0,
             branch_width_softness=QI_BRANCH_WIDTH_SOFTNESS,
             profile_weight=0.0,
+            shuffle_profile_weight=0.0,
+            shuffle_profile_softness=QI_SHUFFLE_PROFILE_SOFTNESS,
             aligned_profile_weight=0.0,
             aligned_profile_softness=QI_ALIGNED_PROFILE_SOFTNESS,
             aligned_profile_trap_level=QI_ALIGNED_PROFILE_TRAP_LEVEL,
@@ -449,6 +466,7 @@ def evaluate_vmec_jax() -> dict:
                 "branch_width_total": None,
                 "profile_total": None,
                 "aligned_profile_total": None,
+                "shuffle_profile_total": None,
                 "surface_totals": legacy_qi["surface_totals"],
                 "mirror_ratio": None,
                 "wall_time_s": legacy_wall_s,
@@ -471,6 +489,8 @@ def evaluate_vmec_jax() -> dict:
                     branch_width_weight=variant["branch_width_weight"],
                     branch_width_softness=QI_BRANCH_WIDTH_SOFTNESS,
                     profile_weight=variant["profile_weight"],
+                    shuffle_profile_weight=variant["shuffle_profile_weight"],
+                    shuffle_profile_softness=QI_SHUFFLE_PROFILE_SOFTNESS,
                     aligned_profile_weight=variant["aligned_profile_weight"],
                     aligned_profile_softness=QI_ALIGNED_PROFILE_SOFTNESS,
                     aligned_profile_trap_level=QI_ALIGNED_PROFILE_TRAP_LEVEL,
@@ -505,6 +525,12 @@ def evaluate_vmec_jax() -> dict:
                         np.dot(
                             np.asarray(qi["aligned_profile_residuals1d"]),
                             np.asarray(qi["aligned_profile_residuals1d"]),
+                        )
+                    ),
+                    "shuffle_profile_total": float(
+                        np.dot(
+                            np.asarray(qi["shuffle_profile_residuals1d"]),
+                            np.asarray(qi["shuffle_profile_residuals1d"]),
                         )
                     ),
                     "mirror_ratio": float(np.max(np.asarray(mirror["mirror_ratio"]))),

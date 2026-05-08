@@ -198,6 +198,8 @@ class QuasiIsodynamicOptions:
     branch_width_weight: float = 0.5
     branch_width_softness: float = 2.0e-2
     profile_weight: float = 0.1
+    shuffle_profile_weight: float = 1.0
+    shuffle_profile_softness: float = 2.0e-2
     aligned_profile_weight: float = 0.0
     aligned_profile_softness: float = 2.0e-2
     aligned_profile_trap_level: float = 0.65
@@ -1139,6 +1141,8 @@ def build_quasi_isodynamic_objective_stage(
     branch_width_weight: float,
     branch_width_softness: float,
     profile_weight: float,
+    shuffle_profile_weight: float,
+    shuffle_profile_softness: float,
     aligned_profile_weight: float,
     aligned_profile_softness: float,
     aligned_profile_trap_level: float,
@@ -1237,6 +1241,8 @@ def build_quasi_isodynamic_objective_stage(
             branch_width_weight=float(branch_width_weight),
             branch_width_softness=float(branch_width_softness),
             profile_weight=float(profile_weight),
+            shuffle_profile_weight=float(shuffle_profile_weight),
+            shuffle_profile_softness=float(shuffle_profile_softness),
             aligned_profile_weight=float(aligned_profile_weight),
             aligned_profile_softness=float(aligned_profile_softness),
             aligned_profile_trap_level=float(aligned_profile_trap_level),
@@ -1311,6 +1317,8 @@ def run_quasi_isodynamic_objective_optimization(
     branch_width_weight: float,
     branch_width_softness: float,
     profile_weight: float,
+    shuffle_profile_weight: float,
+    shuffle_profile_softness: float,
     aligned_profile_weight: float,
     aligned_profile_softness: float,
     aligned_profile_trap_level: float,
@@ -1355,6 +1363,8 @@ def run_quasi_isodynamic_objective_optimization(
             branch_width_weight=branch_width_weight,
             branch_width_softness=branch_width_softness,
             profile_weight=profile_weight,
+            shuffle_profile_weight=shuffle_profile_weight,
+            shuffle_profile_softness=shuffle_profile_softness,
             aligned_profile_weight=aligned_profile_weight,
             aligned_profile_softness=aligned_profile_softness,
             aligned_profile_trap_level=aligned_profile_trap_level,
@@ -1547,6 +1557,8 @@ def least_squares_solve(
             branch_width_weight=qi_options.branch_width_weight,
             branch_width_softness=qi_options.branch_width_softness,
             profile_weight=qi_options.profile_weight,
+            shuffle_profile_weight=qi_options.shuffle_profile_weight,
+            shuffle_profile_softness=qi_options.shuffle_profile_softness,
             aligned_profile_weight=qi_options.aligned_profile_weight,
             aligned_profile_softness=qi_options.aligned_profile_softness,
             aligned_profile_trap_level=qi_options.aligned_profile_trap_level,

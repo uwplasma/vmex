@@ -458,14 +458,15 @@ public-API QI lane from the parameter study:
 
 The study compared direct versus repeated-stage continuation, QP pre-seeding,
 aspect-ratio weights, mirror/elongation soft-wall weights, QI branch-width
-weights, and termination tolerances against the nfp=2
+weights, the branch-shuffle profile residual, and termination tolerances against the nfp=2
 ``examples/data/input.nfp2_QI`` seed.  The robust lane is direct
 ``max_mode = 3`` with ESS, ``target_aspect = 3.5``, ``abs(mean_iota) >= 0.40``,
-``branch_width_weight = 0.5``, ``profile_weight = 0.1``, and a tighter
-``XTOL = 1e-8``.  The small profile term is intentionally retained because the
-width-only and branch-width-only smooth surrogates can rank QH/QP-like false
-positives ahead of the branch-squash/stretch/shuffle diagnostic used in the
-reference Goodman et al. omnigenity workflow.
+``branch_width_weight = 0.5``, ``profile_weight = 0.1``,
+``shuffle_profile_weight = 1.0``, and a tighter ``XTOL = 1e-8``.  The
+shuffle-profile term is intentionally retained because width-only and
+branch-width-only smooth surrogates can rank QH/QP-like false positives ahead
+of the branch-squash/stretch/shuffle diagnostic used in the reference Goodman
+et al. omnigenity workflow.
 
 Two practical lessons from that study are now reflected in the example:
 
@@ -473,10 +474,12 @@ Two practical lessons from that study are now reflected in the example:
   ``sqrt(weight)`` residual multipliers.  Mirror/elongation soft-wall weights
   should be strong enough to prevent pathological shapes but not so dominant
   that they block the lower-QI basin.
-- The QI branch-width term smooths the well matching enough to avoid the noisy
-  objective jumps seen in earlier direct QI attempts.  LgradB remains available
-  as a commented optional shaping term, but it is not part of the default best
-  QI lane.
+- The QI branch-width and shuffle-profile terms smooth the well matching
+  enough to avoid the noisy objective jumps seen in earlier direct QI attempts,
+  while preserving the same design ranking as the legacy branch diagnostic on
+  the seed, the reference omnigenity result, and recent vmec_jax candidates.
+  LgradB remains available as a commented optional shaping term, but it is not
+  part of the default best QI lane.
 
 
 Algorithms in detail
@@ -708,7 +711,8 @@ Running the QI objective comparison
 
 This script is intentionally diagnostic. It writes JSON and ``wout`` artifacts
 under ``results/omnigenity_compare/qi_objective`` and should be used before
-changing the smooth QI objective weights or the ``phimin`` well interval.  The
+changing the smooth QI objective weights, especially
+``shuffle_profile_weight``, or the ``phimin`` well interval.  The
 local SIMSOPT/``omnigenity_optimization`` reference leg is off by default to
 avoid expensive accidental runs; set ``RUN_REFERENCE_OMNIGENITY = True`` in the
 script when an apples-to-apples reference residual is needed.  The reference

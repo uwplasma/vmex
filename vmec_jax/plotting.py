@@ -107,7 +107,8 @@ def prepare_matplotlib_3d() -> None:
     loaded_from_system_dist = "/usr/lib/python3/dist-packages" in loaded_file or any(
         "/usr/lib/python3/dist-packages" in path for path in loaded_paths
     )
-    if loaded is not None and not loaded_from_system_dist and _register_projection():
+    loaded_has_mplot3d = any((Path(path) / "mplot3d" / "axes3d.py").exists() for path in loaded_paths)
+    if loaded is not None and loaded_has_mplot3d and not loaded_from_system_dist and _register_projection():
         return
 
     candidate_bases: list[str] = []
