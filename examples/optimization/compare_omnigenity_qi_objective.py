@@ -107,6 +107,13 @@ QI_VARIANTS = (
         "aligned_profile_weight": 0.5,
     },
     {
+        "name": "legacy_ranked_smooth",
+        "width_weight": 1.0,
+        "branch_width_weight": 0.5,
+        "profile_weight": 0.1,
+        "aligned_profile_weight": 0.0,
+    },
+    {
         "name": "profile_only",
         "width_weight": 0.0,
         "branch_width_weight": 0.0,

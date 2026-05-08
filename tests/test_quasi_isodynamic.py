@@ -26,8 +26,9 @@ def test_qi_boozer_mode_residual_is_zero_for_alpha_independent_wells():
 
     np.testing.assert_allclose(np.asarray(out["total"]), 0.0, atol=1e-28, rtol=0.0)
     assert np.asarray(out["width_residuals1d"]).shape == (9 * 7,)
+    assert np.asarray(out["branch_width_residuals1d"]).shape == (9 * 7,)
     assert np.asarray(out["profile_residuals1d"]).shape == (33 * 9,)
-    assert np.asarray(out["residuals1d"]).shape == (9 * 7 + 33 * 9,)
+    assert np.asarray(out["residuals1d"]).shape == (2 * 9 * 7 + 33 * 9,)
 
 
 def test_qi_boozer_mode_residual_rejects_single_helicity_phase_shift():

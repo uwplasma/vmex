@@ -195,9 +195,9 @@ class QuasiIsodynamicOptions:
     n_bounce: int = 51
     softness: float = 2.0e-2
     width_weight: float = 1.0
-    branch_width_weight: float = 1.0
+    branch_width_weight: float = 0.5
     branch_width_softness: float = 2.0e-2
-    profile_weight: float = 0.0
+    profile_weight: float = 0.1
     aligned_profile_weight: float = 0.0
     aligned_profile_softness: float = 2.0e-2
     aligned_profile_trap_level: float = 0.65
