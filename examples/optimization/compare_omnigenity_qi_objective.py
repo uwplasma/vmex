@@ -339,6 +339,9 @@ def _legacy_qi_residual_from_boozer_output(
                     right_crossings[-idx - 2] = right_crossings[-idx - 1] - 1.0e-12
             shuffled_crossings[ialpha, : int(n_bounce)] = left_crossings
             shuffled_crossings[ialpha, int(n_bounce) - 1 :] = right_crossings
+            for idx in range(1, shuffled_crossings.shape[1]):
+                if shuffled_crossings[ialpha, idx] <= shuffled_crossings[ialpha, idx - 1]:
+                    shuffled_crossings[ialpha, idx] = shuffled_crossings[ialpha, idx - 1] + 1.0e-12
 
             original = UnivariateSpline(phis2d[:, ialpha], bnorm[:, ialpha], k=1, s=0)
             shuffled = UnivariateSpline(shuffled_crossings[ialpha, :], shuffled_levels, k=1, s=0)
