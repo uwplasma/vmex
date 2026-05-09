@@ -107,6 +107,12 @@ some JAX versions. Set
 The default cache path is scoped by machine, CPU features, Python version, and
 JAX/JAXLIB versions.
 
+For the current small/medium fixed-boundary examples, CPU is often faster after
+JIT warmup. GPU support is production-enabled and useful to profile, but the
+exact optimizer now uses GPU-specific scan exact callbacks only when a GPU is
+actually selected. See the performance guide for current CPU/GPU timings and
+profiling commands.
+
 ## Showcase (single-grid)
 
 All figures below use the same **single-grid** run settings: `NS_ARRAY=151`, `NITER_ARRAY=5000`, `FTOL_ARRAY=1e-14`, `NSTEP=500`.
