@@ -2260,7 +2260,22 @@ class FixedBoundaryExactOptimizer:
             None,
         )
         if objective_cotangent_factory is not None:
-            cost, final_cotangent = objective_cotangent_factory(packed_final, self._layout)
+            helper_key = (
+                "objective_value_and_cotangent",
+                int(self._layout.size),
+                id(self._residuals_fn),
+            )
+            helper_cache = self._discrete_jacobian_helper_cache.get(helper_key)
+            if helper_cache is None:
+                @jax.jit
+                def _objective_value_and_cotangent_helper(packed_state_arg):
+                    return objective_cotangent_factory(packed_state_arg, self._layout)
+
+                helper_cache = {
+                    "objective_value_and_cotangent": _objective_value_and_cotangent_helper
+                }
+                self._discrete_jacobian_helper_cache[helper_key] = helper_cache
+            cost, final_cotangent = helper_cache["objective_value_and_cotangent"](packed_final)
         else:
             residuals = self._residuals_fn(state)
             residuals = _jnp.asarray(residuals, dtype=_jnp.float64)
