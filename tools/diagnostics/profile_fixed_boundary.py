@@ -8,9 +8,18 @@ Example:
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 import numpy as np
+
+# Match vmec_jax's import-time defaults before this diagnostics tool imports
+# JAX directly.  Otherwise persistent-cache hits can emit repeated harmless
+# PjRt/XLA compatibility warnings before vmec_jax has a chance to configure the
+# logging environment.
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "2")
+os.environ.setdefault("GLOG_minloglevel", "2")
 
 
 def _parse_args() -> argparse.Namespace:
