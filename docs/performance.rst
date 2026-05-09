@@ -379,6 +379,52 @@ shortcuts were rejected as defaults: precomputed tridiagonal coefficients are
 now correctness-tested but slower on this replay graph, and stopping gradients
 through solver time-control scalars nearly doubled replay time.
 
+May 2026 follow-up profiling used Python 3.11.15, JAX 0.10.0, and
+``jax[cuda13]`` on the same ``office`` RTX A4000 host.  The GPU backend is
+working, but it is still not a clear win for these small/medium exact
+optimization callbacks.  The important split is raw fixed-boundary throughput
+versus accepted-point optimization replay:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 16 16 30
+
+   * - Callback / case
+     - CPU warm
+     - GPU warm
+     - Dominant GPU terms
+   * - Raw QH fixed-boundary, 100 iterations
+     - ``0.93 s``
+     - ``2.06 s``
+     - fixed launch/compile overhead dominates
+   * - QA ``max_mode=1`` dense Jacobian, 8 DOFs
+     - ``2.92 s``
+     - ``3.94 s``
+     - replay and residual tangent projection
+   * - QA ``max_mode=1`` scalar gradient, 8 DOFs
+     - ``4.79 s``
+     - ``7.72 s``
+     - residual/state cotangent and replay
+   * - QA ``max_mode=3`` dense Jacobian, 48 DOFs
+     - ``4.12 s``
+     - ``3.80 s``
+     - replay and residual tangent projection
+   * - QA ``max_mode=3`` scalar gradient, 48 DOFs
+     - ``3.81 s``
+     - ``5.79 s``
+     - replay and scalar objective cotangent
+
+Those numbers are perturbed accepted-point repeats with warm compiled helper
+shapes, ``inner_max_iter`` of 40--80, and relaxed ``ftol`` appropriate for
+profiling.  They are not full production optimization timings.  The scalar
+reverse-adjoint gradient now uses a direct scalar-objective cotangent hook for
+the built-in QS residual factories rather than VJP-ing the full residual vector.
+That reduced the QA ``max_mode=1`` GPU gradient callback from about ``9.8 s`` to
+``7.7 s`` after warmup and reduced the cold+warm pair from about ``93 s`` to
+``33 s``.  Dense Jacobians remain competitive at low and moderate DOF counts;
+the scalar-adjoint path becomes more relevant for higher-mode or memory-limited
+optimizations.
+
 After caching the fixed quasisymmetry angular quadrature grid, the same
 ``office`` QH ``max_mode=2`` accepted-point callback profile gave two perturbed
 GPU dense-Jacobian callbacks of about ``11.8 s`` and ``4.3 s`` with the default
