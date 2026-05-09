@@ -2,8 +2,13 @@
 """Quasi-axisymmetric optimization with vmec_jax."""
 
 from pathlib import Path
+import sys
 
 import numpy as np
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 import vmec_jax as vj
 from vmec_jax._compat import enable_x64
@@ -29,17 +34,17 @@ STAGE_MODES = vj.qs_stage_modes(
 )
 
 # Optimizer parameters.
-METHOD = "scipy"
-SCIPY_TR_SOLVER = "lsmr"
-SCIPY_LSMR_MAXITER = None
-FTOL = 1.0e-4
-GTOL = 1.0e-4
-XTOL = 1.0e-4
-INNER_MAX_ITER = 120
-INNER_FTOL = 1.0e-9
-TRIAL_MAX_ITER = 120
-TRIAL_FTOL = 1.0e-9
-SOLVER_DEVICE = None  # set to "cpu" or "gpu" to force one backend
+METHOD = "scipy"  # Try also "gauss_newton", "scipy_matrix_free", or "lbfgs_adjoint".
+SCIPY_TR_SOLVER = "lsmr"  # For METHOD="scipy": "lsmr" is memory-light; "exact" is dense.
+SCIPY_LSMR_MAXITER = None  # None lets SciPy choose; set an int to cap LSMR iterations.
+FTOL = 1.0e-4  # Relative cost-reduction tolerance for the outer optimizer.
+GTOL = 1.0e-4  # Gradient optimality tolerance for the outer optimizer.
+XTOL = 1.0e-4  # Step-size tolerance for the outer optimizer.
+INNER_MAX_ITER = 120  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
+INNER_FTOL = 1.0e-9  # Accepted-point VMEC tolerance; 0 uses FTOL from the input deck.
+TRIAL_MAX_ITER = 120  # Trial-point VMEC iterations; 0 follows the accepted/input budget.
+TRIAL_FTOL = 1.0e-9  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
+SOLVER_DEVICE = None  # None uses JAX default; set "cpu" or "gpu" to force one backend.
 
 # Physics targets and least-squares objective weights.  These are SIMSOPT-style
 # tuple weights, so vmec_jax minimizes sqrt(weight) * (J - target).
@@ -56,7 +61,7 @@ QS_WEIGHT = 1.0
 # trust-region solve.
 USE_ESS = True
 ALPHA = 1.2
-PLOT = True
+MAKE_PLOTS = True
 
 
 # Optimizable VMEC object.
@@ -83,7 +88,7 @@ problem = vj.LeastSquaresProblem.from_tuples(
         (iota.J, TARGET_IOTA, IOTA_WEIGHT),
         (qs.J, 0.0, QS_WEIGHT),
         # Optional:
-        # (vj.LgradB(threshold=0.30).J, 0.0, 0.01),
+        # (vj.LgradB(threshold=0.30, smooth_penalty=1.0e-3).J, 0.0, 0.01),
         # (vj.MagneticWell(minimum=0.0).J, 0.0, 1.0),
         # Finite-beta examples can also add:
         # (vj.VolavgB().J, TARGET_VOLAVGB, VOLAVGB_WEIGHT),
@@ -116,7 +121,59 @@ result = vj.least_squares_solve(
     solver_device=SOLVER_DEVICE,
     scipy_tr_solver=SCIPY_TR_SOLVER,
     scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
-    plot=PLOT,
 )
 
-vj.print_optimization_outputs(result, OUTPUT_DIR, plot=PLOT)
+# Results are plain Python data.  Users can print, save, or plot whichever
+# diagnostics matter for their study.
+history = result.final_result["_history_dump"]
+objective_history = np.asarray([entry["objective"] for entry in history["history"]])
+print("\nFinal diagnostics from result.final_result['_history_dump']:")
+print(f"  aspect ratio:     {history['aspect_final']:.6g}")
+print(f"  mean iota:        {history['iota_final']:.6g}")
+print(f"  QS objective:     {history['qs_final']:.6e}")
+print(f"  total objective:  {history['objective_final']:.6e}")
+print(f"  wall time:        {history['total_wall_time_s']:.2f} s")
+print(f"  objective samples: {objective_history[:5]} ... {objective_history[-3:]}")
+
+print("\nSaved files written by the solve:")
+for path in (
+    OUTPUT_DIR / "input.initial",
+    OUTPUT_DIR / "input.final",
+    OUTPUT_DIR / "wout_initial.nc",
+    OUTPUT_DIR / "wout_final.nc",
+    OUTPUT_DIR / "history.json",
+):
+    print(f"  {path}")
+
+wout_final = vj.load_wout(OUTPUT_DIR / "wout_final.nc")
+theta, zeta, b_lcfs = vj.vmecplot2_bmag_grid(
+    wout_final,
+    s_index=-1,
+    ntheta=64,
+    nzeta=64,
+    zeta_max=2.0 * np.pi / float(wout_final.nfp),
+)
+print("\nLCFS |B| data from vmecplot2_bmag_grid:")
+print(f"  theta grid: {theta.shape}, zeta grid: {zeta.shape}, B grid: {b_lcfs.shape}")
+print(f"  Bmin/Bmax:  {np.min(b_lcfs):.6g} / {np.max(b_lcfs):.6g}")
+
+if MAKE_PLOTS:
+    plot_paths = {
+        "boundary_comparison": vj.plot_3d_boundary_comparison(
+            OUTPUT_DIR / "wout_initial.nc",
+            OUTPUT_DIR / "wout_final.nc",
+            outdir=OUTPUT_DIR,
+        ),
+        "bmag_contours": vj.plot_bmag_contours(
+            OUTPUT_DIR / "wout_initial.nc",
+            OUTPUT_DIR / "wout_final.nc",
+            outdir=OUTPUT_DIR,
+        ),
+        "objective_history": vj.plot_objective_history(
+            OUTPUT_DIR / "history.json",
+            outdir=OUTPUT_DIR,
+        ),
+    }
+    print("\nPlot files selected by this script:")
+    for name, path in plot_paths.items():
+        print(f"  {name}: {path}")

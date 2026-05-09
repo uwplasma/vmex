@@ -60,18 +60,18 @@ MAX_NFEV = 6
 CONTINUATION_NFEV = 6
 USE_MODE_CONTINUATION = True
 
-METHOD = "scipy"
-SCIPY_TR_SOLVER = "lsmr"
-SCIPY_LSMR_MAXITER = None
-FTOL = 1.0e-3
-GTOL = 1.0e-3
-XTOL = 1.0e-3
+METHOD = "scipy"  # Try also "gauss_newton", "scipy_matrix_free", or "lbfgs_adjoint".
+SCIPY_TR_SOLVER = "lsmr"  # For METHOD="scipy": "lsmr" is memory-light; "exact" is dense.
+SCIPY_LSMR_MAXITER = None  # None lets SciPy choose; set an int to cap LSMR iterations.
+FTOL = 1.0e-3  # Relative cost-reduction tolerance for the outer optimizer.
+GTOL = 1.0e-3  # Gradient optimality tolerance for the outer optimizer.
+XTOL = 1.0e-3  # Step-size tolerance for the outer optimizer.
 
-INNER_MAX_ITER = 0  # 0 uses NITER from the input deck
-INNER_FTOL = 0.0  # 0 uses FTOL from the input deck
-TRIAL_MAX_ITER = 300
-TRIAL_FTOL = 1.0e-10
-SOLVER_DEVICE = None  # set to "cpu" or "gpu" to force one backend
+INNER_MAX_ITER = 0  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
+INNER_FTOL = 0.0  # Accepted-point VMEC tolerance; 0 uses FTOL from the input deck.
+TRIAL_MAX_ITER = 300  # Trial-point VMEC iterations; 0 follows the accepted/input budget.
+TRIAL_FTOL = 1.0e-10  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
+SOLVER_DEVICE = None  # None uses JAX default; set "cpu" or "gpu" to force one backend.
 
 SURFACES = tuple(np.linspace(0.0, 1.0, 10, endpoint=True))
 TARGET_ASPECT = 6.0
@@ -97,6 +97,7 @@ QI_NALPHA = 8
 QI_N_BOUNCE = 12
 QI_SOFTNESS = 30.0
 QI_PROFILE_WEIGHT = 0.15
+QI_PHIMIN = 0.0  # Set to np.pi / nfp if the reference QI well starts there.
 
 USE_ESS = True
 ALPHA = 2.5
@@ -211,6 +212,7 @@ for stage_mode in stage_modes:
             n_bounce=QI_N_BOUNCE,
             softness=QI_SOFTNESS,
             profile_weight=QI_PROFILE_WEIGHT,
+            phimin=QI_PHIMIN,
             jit_booz=False,
             booz_constants=booz_constants,
             booz_grids=booz_grids,
@@ -312,6 +314,30 @@ save_final_outputs(
     stage_records=stage_records,
     final_optimizer=final_optimizer,
     final_result=final_result,
-    plot=PLOT,
 )
 print_final_summary(final_result)
+
+if PLOT:
+    try:
+        plot_paths = {
+            "boundary_comparison": vj.plot_3d_boundary_comparison(
+                OUTPUT_DIR / "wout_initial.nc",
+                OUTPUT_DIR / "wout_final.nc",
+                outdir=OUTPUT_DIR,
+            ),
+            "bmag_contours": vj.plot_bmag_contours(
+                OUTPUT_DIR / "wout_initial.nc",
+                OUTPUT_DIR / "wout_final.nc",
+                outdir=OUTPUT_DIR,
+            ),
+            "objective_history": vj.plot_objective_history(
+                OUTPUT_DIR / "history.json",
+                outdir=OUTPUT_DIR,
+            ),
+        }
+        print("Plot files:")
+        for path in plot_paths.values():
+            print(f"  {path}")
+    except Exception as exc:
+        (OUTPUT_DIR / "plotting_error.txt").write_text(f"{type(exc).__name__}: {exc}\n")
+        print(f"Plotting failed: {type(exc).__name__}: {exc}")

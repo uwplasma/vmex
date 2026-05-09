@@ -36,7 +36,6 @@ from .optimization import (
     smooth_min_abs_iota_residual,
     truncate_indata_boundary_modes,
 )
-from .plotting import plot_qh_optimization
 from .modes import nyquist_mode_table_from_grid, vmec_mode_table
 from .quasi_isodynamic import (
     _nearest_half_mesh_indices,
@@ -196,13 +195,16 @@ class QuasiIsodynamicOptions:
     n_bounce: int = 51
     softness: float = 2.0e-2
     width_weight: float = 1.0
-    branch_width_weight: float = 1.0
+    branch_width_weight: float = 0.5
     branch_width_softness: float = 2.0e-2
-    profile_weight: float = 0.0
+    profile_weight: float = 0.1
+    shuffle_profile_weight: float = 1.0
+    shuffle_profile_softness: float = 2.0e-2
     aligned_profile_weight: float = 0.0
     aligned_profile_softness: float = 2.0e-2
     aligned_profile_trap_level: float = 0.65
     aligned_profile_trap_softness: float = 5.0e-2
+    phimin: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -997,7 +999,6 @@ def run_fixed_boundary_objective_optimization(
     save_stage_inputs: bool = True,
     save_stage_wouts: bool = False,
     save_rerun_wouts: bool = False,
-    plot: bool = True,
 ) -> FixedBoundaryOptimizationResult:
     """Run a fixed-boundary objective list through one or more mode stages."""
 
@@ -1112,7 +1113,6 @@ def run_fixed_boundary_objective_optimization(
         target_aspect=target_aspect,
         target_iota=target_iota,
         iota_abs_min=iota_abs_min,
-        plot=plot,
         save_rerun_wouts=save_rerun_wouts,
     )
     return FixedBoundaryOptimizationResult(
@@ -1141,10 +1141,13 @@ def build_quasi_isodynamic_objective_stage(
     branch_width_weight: float,
     branch_width_softness: float,
     profile_weight: float,
+    shuffle_profile_weight: float,
+    shuffle_profile_softness: float,
     aligned_profile_weight: float,
     aligned_profile_softness: float,
     aligned_profile_trap_level: float,
     aligned_profile_trap_softness: float,
+    phimin: float,
     project_input_boundary_to_max_mode: bool = True,
     include: Sequence[str] = ("rc", "zs"),
     fix: Sequence[str] = ("rc00",),
@@ -1238,10 +1241,13 @@ def build_quasi_isodynamic_objective_stage(
             branch_width_weight=float(branch_width_weight),
             branch_width_softness=float(branch_width_softness),
             profile_weight=float(profile_weight),
+            shuffle_profile_weight=float(shuffle_profile_weight),
+            shuffle_profile_softness=float(shuffle_profile_softness),
             aligned_profile_weight=float(aligned_profile_weight),
             aligned_profile_softness=float(aligned_profile_softness),
             aligned_profile_trap_level=float(aligned_profile_trap_level),
             aligned_profile_trap_softness=float(aligned_profile_trap_softness),
+            phimin=float(phimin),
             jit_booz=False,
             booz_constants=booz_constants,
             booz_grids=booz_grids,
@@ -1311,10 +1317,13 @@ def run_quasi_isodynamic_objective_optimization(
     branch_width_weight: float,
     branch_width_softness: float,
     profile_weight: float,
+    shuffle_profile_weight: float,
+    shuffle_profile_softness: float,
     aligned_profile_weight: float,
     aligned_profile_softness: float,
     aligned_profile_trap_level: float,
     aligned_profile_trap_softness: float,
+    phimin: float,
     target_aspect: float | None = None,
     iota_abs_min: float | None = None,
     include: Sequence[str] = ("rc", "zs"),
@@ -1329,7 +1338,6 @@ def run_quasi_isodynamic_objective_optimization(
     scipy_lsmr_maxiter: int | None = None,
     save_stage_inputs: bool = True,
     save_stage_wouts: bool = False,
-    plot: bool = True,
 ) -> FixedBoundaryOptimizationResult:
     """Run a QI objective list through repeated or direct mode stages."""
 
@@ -1355,10 +1363,13 @@ def run_quasi_isodynamic_objective_optimization(
             branch_width_weight=branch_width_weight,
             branch_width_softness=branch_width_softness,
             profile_weight=profile_weight,
+            shuffle_profile_weight=shuffle_profile_weight,
+            shuffle_profile_softness=shuffle_profile_softness,
             aligned_profile_weight=aligned_profile_weight,
             aligned_profile_softness=aligned_profile_softness,
             aligned_profile_trap_level=aligned_profile_trap_level,
             aligned_profile_trap_softness=aligned_profile_trap_softness,
+            phimin=phimin,
             project_input_boundary_to_max_mode=project_input_boundary_to_max_mode,
             include=include,
             fix=fix,
@@ -1459,7 +1470,6 @@ def run_quasi_isodynamic_objective_optimization(
         label=label,
         target_aspect=target_aspect,
         iota_abs_min=iota_abs_min,
-        plot=plot,
     )
     return FixedBoundaryOptimizationResult(
         stage_records=stage_records,
@@ -1494,7 +1504,6 @@ def least_squares_solve(
     save_stage_inputs: bool = True,
     save_stage_wouts: bool = False,
     save_rerun_wouts: bool = False,
-    plot: bool = True,
 ) -> FixedBoundaryOptimizationResult:
     """Solve a SIMSOPT-style fixed-boundary least-squares problem.
 
@@ -1548,10 +1557,13 @@ def least_squares_solve(
             branch_width_weight=qi_options.branch_width_weight,
             branch_width_softness=qi_options.branch_width_softness,
             profile_weight=qi_options.profile_weight,
+            shuffle_profile_weight=qi_options.shuffle_profile_weight,
+            shuffle_profile_softness=qi_options.shuffle_profile_softness,
             aligned_profile_weight=qi_options.aligned_profile_weight,
             aligned_profile_softness=qi_options.aligned_profile_softness,
             aligned_profile_trap_level=qi_options.aligned_profile_trap_level,
             aligned_profile_trap_softness=qi_options.aligned_profile_trap_softness,
+            phimin=qi_options.phimin,
             target_aspect=target_aspect,
             iota_abs_min=iota_abs_min,
             include=vmec.include,
@@ -1566,7 +1578,6 @@ def least_squares_solve(
             scipy_lsmr_maxiter=scipy_lsmr_maxiter,
             save_stage_inputs=save_stage_inputs,
             save_stage_wouts=save_stage_wouts,
-            plot=plot,
         )
 
     return run_fixed_boundary_objective_optimization(
@@ -1602,7 +1613,6 @@ def least_squares_solve(
         save_stage_inputs=save_stage_inputs,
         save_stage_wouts=save_stage_wouts,
         save_rerun_wouts=save_rerun_wouts,
-        plot=plot,
     )
 
 
@@ -1704,10 +1714,9 @@ def save_qs_final_outputs(
     target_aspect: float | None = None,
     target_iota: float | None = None,
     iota_abs_min: float | None = None,
-    plot: bool = True,
     save_rerun_wouts: bool = False,
 ) -> None:
-    """Save initial/final inputs, wouts, history, and plots."""
+    """Save initial/final inputs, wouts, and history."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
     _initial_mode, initial_optimizer, initial_params0, initial_result = stage_records[0]
@@ -1744,50 +1753,6 @@ def save_qs_final_outputs(
     if iota_abs_min is not None:
         history["iota_abs_min"] = float(iota_abs_min)
     final_optimizer.save_history(output_dir / "history.json", final_result)
-
-    if plot:
-        print("\nGenerating plots ...")
-        plot_qh_optimization(
-            output_dir / "wout_initial.nc",
-            output_dir / "wout_final.nc",
-            output_dir / "history.json",
-            outdir=output_dir,
-        )
-        print(f"Done. Results saved to {output_dir}/")
-
-
-def print_optimization_outputs(result: FixedBoundaryOptimizationResult, output_dir: Path | str, *, plot: bool = True) -> None:
-    """Print the files and diagnostics a standalone optimization just produced."""
-
-    hist = result.final_result.get("_history_dump", {})
-    output_dir = Path(output_dir)
-    print("\nSaved outputs:")
-    for path in (
-        output_dir / "input.initial",
-        output_dir / "input.final",
-        output_dir / "wout_initial.nc",
-        output_dir / "wout_final.nc",
-        output_dir / "history.json",
-    ):
-        print(f"  {path}")
-    if plot:
-        for name in (
-            "objective_history.png",
-            "final_surface_3d.png",
-            "final_bmag_lcfs.png",
-        ):
-            candidate = output_dir / name
-            if candidate.exists():
-                print(f"  {candidate}")
-
-    if hist:
-        print("\nFinal diagnostics:")
-        print(f"  aspect ratio:     {float(hist.get('aspect_final', float('nan'))):.6g}")
-        if "iota_final" in hist:
-            print(f"  mean iota:        {float(hist['iota_final']):.6g}")
-        print(f"  field objective:  {float(hist.get('qs_final', float('nan'))):.6e}")
-        print(f"  total objective:  {float(hist.get('objective_final', float('nan'))):.6e}")
-        print(f"  wall time:        {float(hist.get('total_wall_time_s', float('nan'))):.2f} s")
 
 
 def combine_qs_stage_histories(
@@ -1922,7 +1887,6 @@ __all__ = [
     "rebuild_for_optimization_resolution",
     "repeated_stage_modes",
     "residuals_from_objectives",
-    "print_optimization_outputs",
     "run_fixed_boundary_objective_optimization",
     "run_quasi_isodynamic_objective_optimization",
     "save_qs_final_outputs",

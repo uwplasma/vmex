@@ -108,6 +108,7 @@ class CaseResult:
     qi_qp_preseed: bool | None = None
     qi_qi_preseed: bool | None = None
     qi_raw_total: float | None = None
+    qi_legacy_total: float | None = None
     qi_mirror_ratio_max: float | None = None
     qi_mirror_ratio_target: float | None = None
     qi_mirror_excess_max: float | None = None
@@ -447,6 +448,7 @@ def _write_combined_summary(results: list[CaseResult]) -> None:
                 "qi_qp_preseed",
                 "qi_qi_preseed",
                 "qi_raw_total",
+                "qi_legacy_total",
                 "qi_mirror_ratio_max",
                 "qi_mirror_ratio_target",
                 "qi_mirror_excess_max",
@@ -496,6 +498,8 @@ def _write_combined_summary(results: list[CaseResult]) -> None:
 
 def _summary_record(result: CaseResult) -> dict:
     record = asdict(result)
+    if record.get("qi_legacy_total") in (None, ""):
+        record["qi_legacy_total"] = record.get("qi_raw_total")
     output_dir = record.get("output_dir")
     if output_dir:
         try:

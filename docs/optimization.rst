@@ -102,8 +102,9 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
    MAX_MODE = 3
    MIN_VMEC_MODE = 6
    MAX_NFEV = 30
-   METHOD = "scipy"
-   SCIPY_TR_SOLVER = "lsmr"
+   METHOD = "scipy"            # also: "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint"
+   SCIPY_TR_SOLVER = "lsmr"    # also: "exact" for small dense trust-region solves
+   SOLVER_DEVICE = None        # set to "cpu" or "gpu" to force one backend
    HELICITY_M = 1
    HELICITY_N = -1
    TARGET_ASPECT = 5.0
@@ -135,7 +136,7 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
            (iota_floor.J, 0.0, IOTA_WEIGHT),
            (qs.J, 0.0, QS_WEIGHT),
            # Optional physics terms:
-           # (vj.LgradB(threshold=0.30).J, 0.0, 0.01),
+           # (vj.LgradB(threshold=0.30, smooth_penalty=1.0e-3).J, 0.0, 0.01),
            # (vj.MagneticWell(minimum=0.0).J, 0.0, 1.0),
            # (vj.VolavgB().J, TARGET_VOLAVGB, VOLAVGB_WEIGHT),
            # (vj.BetaTotal().J, TARGET_BETA, BETA_WEIGHT),
@@ -165,7 +166,39 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
        solver_device=SOLVER_DEVICE,
        scipy_tr_solver=SCIPY_TR_SOLVER,
    )
-   vj.print_optimization_outputs(result, OUTPUT_DIR, plot=True)
+
+   history = result.final_result["_history_dump"]
+   print(f"Final aspect ratio:    {history['aspect_final']:.6g}")
+   print(f"Final mean iota:       {history['iota_final']:.6g}")
+   print(f"Final field objective: {history['qs_final']:.6e}")
+
+   wout_final = vj.load_wout(OUTPUT_DIR / "wout_final.nc")
+   theta, zeta, b_lcfs = vj.vmecplot2_bmag_grid(
+       wout_final,
+       s_index=-1,
+       ntheta=64,
+       nzeta=64,
+       zeta_max=2.0 * np.pi / float(wout_final.nfp),
+   )
+   print(f"LCFS |B| grid shape: {b_lcfs.shape}, Bmax={np.max(b_lcfs):.6g}")
+
+   plot_paths = {
+       "boundary_comparison": vj.plot_3d_boundary_comparison(
+           OUTPUT_DIR / "wout_initial.nc",
+           OUTPUT_DIR / "wout_final.nc",
+           outdir=OUTPUT_DIR,
+       ),
+       "bmag_contours": vj.plot_bmag_contours(
+           OUTPUT_DIR / "wout_initial.nc",
+           OUTPUT_DIR / "wout_final.nc",
+           outdir=OUTPUT_DIR,
+       ),
+       "objective_history": vj.plot_objective_history(
+           OUTPUT_DIR / "history.json",
+           outdir=OUTPUT_DIR,
+       ),
+   }
+   print(plot_paths)
 
 Objective callbacks receive ``(ctx, state)`` and may return a scalar or vector.
 The tuple weight follows SIMSOPT semantics: vmec_jax minimizes
@@ -227,7 +260,9 @@ transform control first.  All four default targets use aspect ratio near 5;
 QA also uses the signed iota-0.42 target, while QH/QP/QI use
 ``abs(mean_iota) >= 0.41``.  ``LgradB`` remains available for users who want
 extra magnetic-gradient regularization, but it is not active in the default
-sweeps or best-row selection.
+sweeps or best-row selection.  When enabling ``LgradB`` in an adjoint
+optimization, use a small ``smooth_penalty`` so the softplus penalty remains
+differentiable near the threshold.
 
 Each problem is run with staged mode continuation and with direct-start mode
 expansion.  Each policy is run with and without ESS using ``alpha = 1.2``,
@@ -255,6 +290,10 @@ plus mirror, elongation, and magnetic-gradient scale-length penalties, rather
 than forcing a prescribed Boozer ``|B|`` profile.
 This keeps QP as an explicit optional experiment while still measuring whether
 the preseed helps or hurts the constrained QI solve.
+``QI_OPTIONS.phimin`` selects the beginning of the one-field-period well
+interval used by the smooth QI residual.  The bundled NFP=2 seed uses the
+default ``0.0``; set it to ``np.pi / nfp`` when comparing against a reference
+configuration whose well starts one half-period later.
 Columns correspond to ``max_mode = 1, 2, 3``.  The vertical dotted lines mark
 continuation stage boundaries.  QA/QH/QP continuation uses the repeated
 omnigenity-style policy ``[1, 1, 2, 2, 2]`` for ``max_mode=2`` and
@@ -419,14 +458,16 @@ public-API QI lane from the parameter study:
 
 The study compared direct versus repeated-stage continuation, QP pre-seeding,
 aspect-ratio weights, mirror/elongation soft-wall weights, QI branch-width
-weights, and termination tolerances against the nfp=2
-``examples/data/input.nfp2_QI`` seed.  The robust lane is direct
-``max_mode = 3`` with ESS, ``target_aspect = 3.5``, ``abs(mean_iota) >= 0.40``,
-``branch_width_weight = 0.5``, and a tighter ``XTOL = 1e-8``.  In the local
-CPU validation run this reached total objective ``7.63e-4`` with raw QI field
-objective ``7.57e-4``, aspect ratio ``3.5346``, mean iota ``-0.4990``, and a
-monotonically decreasing accepted-point objective over 29 function evaluations
-in 167 s.
+weights, the branch-shuffle profile residual, and termination tolerances against the nfp=2
+``examples/data/input.nfp2_QI`` seed.  The robust lane is repeated same-mode
+continuation at ``max_mode = 3`` with ESS, ``target_aspect = 5.0``,
+``abs(mean_iota) >= 0.41``, ``branch_width_weight = 0.5``,
+``profile_weight = 0.1``, ``shuffle_profile_weight = 1.0``, and a tighter
+``XTOL = 1e-8``.  The
+shuffle-profile term is intentionally retained because width-only and
+branch-width-only smooth surrogates can rank QH/QP-like false positives ahead
+of the branch-squash/stretch/shuffle diagnostic used in the reference Goodman
+et al. omnigenity workflow.
 
 Two practical lessons from that study are now reflected in the example:
 
@@ -434,10 +475,12 @@ Two practical lessons from that study are now reflected in the example:
   ``sqrt(weight)`` residual multipliers.  Mirror/elongation soft-wall weights
   should be strong enough to prevent pathological shapes but not so dominant
   that they block the lower-QI basin.
-- The QI branch-width term smooths the well matching enough to avoid the noisy
-  objective jumps seen in earlier direct QI attempts.  LgradB remains available
-  as a commented optional shaping term, but it is not part of the default best
-  QI lane.
+- The QI branch-width and shuffle-profile terms smooth the well matching
+  enough to avoid the noisy objective jumps seen in earlier direct QI attempts,
+  while preserving the same design ranking as the legacy branch diagnostic on
+  the seed, the reference omnigenity result, and recent vmec_jax candidates.
+  LgradB remains available as a commented optional shaping term, but it is not
+  part of the default best QI lane.
 
 
 Algorithms in detail
@@ -580,10 +623,11 @@ Parameters: ``specs``, ``alpha`` (default 1.0).
 Bare Gauss-Newton solver with exact Jacobian, Armijo line search, and hooks for
 expensive outer loops.  See ``vmec_jax/optimization.py`` for full signature.
 
-:func:`plot_qh_optimization`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+:func:`plot_3d_boundary_comparison`, :func:`plot_bmag_contours`, :func:`plot_objective_history`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Generate all three standard QH optimisation figures:
+Generate the standard optimization figures independently, so user scripts can
+choose only the plots they need:
 
 - ``boundary_comparison.png`` — 3-D LCFS coloured by :math:`|B|`.
 - ``bmag_surface.png`` — :math:`|B|` contour lines on LCFS (θ, φ/nfp).
@@ -619,7 +663,8 @@ Source files
        (``quasi_isodynamic_residual_from_state``), mirror-ratio penalty, and
        LCFS elongation and ``LgradB`` penalties.
    * - ``vmec_jax/plotting.py``
-     - ``plot_qh_optimization`` and helper plotting functions.
+     - ``plot_3d_boundary_comparison``, ``plot_bmag_contours``,
+       and ``plot_objective_history``.
    * - ``vmec_jax/driver.py``
      - ``write_wout_from_fixed_boundary_run``, ``wout_from_fixed_boundary_run``.
    * - ``examples/optimization/QH_optimization.py``
@@ -635,7 +680,11 @@ Source files
      - QI workflow using ``booz_xform_jax``, a bundled omnigenity seed,
        and explicit mirror-ratio/elongation/``LgradB``
        objective blocks that users can extend in the script.
-   * - ``examples/optimization/plot_qh_optimization_results.py``
+   * - ``examples/optimization/compare_omnigenity_qi_objective.py``
+     - Diagnostic QI objective comparison against the local
+       ``omnigenity_optimization`` reference scripts, including ``phimin``
+       interval scans and residual-block timings.
+   * - ``examples/optimization/plot_optimization_results.py``
      - Standalone plotting helper (regenerates figures from saved wout+JSON).
    * - ``examples/optimization/target_iota_aspect_volume.py``
      - Simpler optimisation targeting iota, aspect, volume.
@@ -649,10 +698,28 @@ Running the QH example
    python examples/optimization/QH_optimization.py
 
    # Regenerate figures from saved outputs
-   python examples/optimization/plot_qh_optimization_results.py --output-dir results/qh_opt
+   python examples/optimization/plot_optimization_results.py --output-dir results/qh_opt
 
 Increase ``MAX_MODE`` at the top of ``QH_optimization.py`` for richer
 boundary parameterisation; increase ``MAX_NFEV`` for more optimisation budget.
+
+Running the QI objective comparison
+------------------------------------
+
+.. code-block:: bash
+
+   PYTHONPATH=. python examples/optimization/compare_omnigenity_qi_objective.py
+
+This script is intentionally diagnostic. It writes JSON and ``wout`` artifacts
+under ``results/omnigenity_compare/qi_objective`` and should be used before
+changing the smooth QI objective weights, especially
+``shuffle_profile_weight``, or the ``phimin`` well interval.  The
+local SIMSOPT/``omnigenity_optimization`` reference leg is off by default to
+avoid expensive accidental runs; set ``RUN_REFERENCE_OMNIGENITY = True`` in the
+script when an apples-to-apples reference residual is needed.  The reference
+leg runs in a child process with ``REFERENCE_TIMEOUT_S`` so crashes, memory
+pressure, or timeouts are reported in the JSON summary without killing the
+vmec_jax diagnostic.
 
 
 GPU acceleration

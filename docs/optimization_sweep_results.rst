@@ -111,12 +111,12 @@ README Best Rows
 
 The README intentionally shows only one best ``LASYM = F`` result per target.
 QA/QH/QP are selected from the CPU matrix and filtered against the common
-aspect-5 target.  QI is
-selected from the constrained QI CPU/GPU matrix using the QI residual,
-mirror-ratio, elongation, iota, and aspect-ratio gates.  These panels include
-the original deck LCFS before any ``max_mode=1`` optimization work, final LCFS,
-per-stage objective history, and final outer-surface ``|B|`` in Boozer
-coordinates evaluated with ``booz_xform_jax``.
+aspect-5 target.  QI is selected from the constrained QI study using the
+legacy branch diagnostic, mirror-ratio, elongation, iota, and aspect-ratio
+gates.  These panels include the original deck LCFS before any ``max_mode=1``
+optimization work, final LCFS, per-stage objective history, and final
+outer-surface ``|B|`` in Boozer coordinates evaluated with
+``booz_xform_jax``.
 The source table is also available as
 :download:`readme_best_optimizations.csv <_static/figures/readme_best_optimizations.csv>`.
 
@@ -164,10 +164,13 @@ matrix under the current objective policy.  For each requested
 ``max(abs(m), abs(n)) <= max_mode`` before the stage is built, so the
 ``max_mode=1`` rows zero the mode-2 coefficients present in the warm start.
 The QI objective is intentionally not ranked by scalar objective alone: rows
-are also evaluated by raw QI residual, maximum mirror ratio,
-maximum LCFS elongation, ``abs(mean_iota) >= 0.41``, and aspect ratio near 5.
-Rows that stop at ``max_nfev`` but have valid VMEC solves and satisfy the
-physics gates are kept as valid stopped rows.
+are also evaluated by the legacy branch-squash/stretch/shuffle diagnostic,
+raw smooth QI residual, maximum mirror ratio, maximum LCFS elongation,
+``abs(mean_iota) >= 0.41``, and aspect ratio near 5.  The default smooth QI
+objective includes ``shuffle_profile_weight = 1.0`` so the optimizer follows
+the same ranking as the legacy diagnostic on the seed and reference
+omnigenity cases.  Rows that stop at ``max_nfev`` but have valid VMEC solves
+and satisfy the physics gates are kept as valid stopped rows.
 
 .. image:: _static/figures/qi_constrained_objective_panel.png
    :width: 100%
@@ -181,13 +184,13 @@ Downloadable constrained-QI summaries:
 - :download:`qi_constrained_best.json <_static/figures/qi_constrained_best.json>`
 
 In the current snapshot, the best available constrained QI row is CPU
-continuation, ``max_mode=3``, no ESS, without a same-mode QP preseed.  It
-reaches raw QI ``1.09e-4``, maximum mirror ratio ``0.2101`` for a target
-``0.21``, maximum elongation ``3.49`` for a target ``8.0``, aspect ratio
-``7.000``, mean iota ``-0.501``, and wall time ``2.6 min``.  Ranking now
-prioritizes raw QI quality after the mirror, elongation, iota, and aspect gates
-are satisfied; otherwise QP-preseeded rows can win due to tiny secondary gate
-differences while still looking more QP-like than QI.
+repeated-stage continuation, ``max_mode=3``, ESS, without a same-mode QP
+preseed.  It reaches legacy-ranked QI diagnostic ``1.04e-3``, maximum mirror
+ratio ``0.211`` for a target ``0.21``, maximum elongation ``4.78`` for a
+target ``8.0``, aspect ratio ``5.000``, mean iota ``-0.4553``, and total wall
+time ``6.6 min``.  Ranking now prioritizes the legacy QI diagnostic after
+the mirror, elongation, iota, and aspect gates are satisfied; otherwise smooth
+width-only surrogates can win while still looking more QP-like than QI.
 
 Non-stellarator-symmetric LASYM runs use the same script with
 ``--stellarator-asymmetric``.  The current LASYM artifacts are intentionally
@@ -288,7 +291,9 @@ QI, ``QI_MBOZ``, ``QI_NBOZ``, ``QI_NPHI``, ``QI_NALPHA``, and
 ``QI_N_BOUNCE`` control the Boozer/QI residual grid. ``MAX_MIRROR_RATIO`` and
 ``MAX_ELONGATION`` control the two engineering penalties.  The default QI grid
 is small enough for first-run diagnostics; increase it for final
-research-quality QI runs.
+research-quality QI runs. ``QI_OPTIONS.phimin`` controls the start of the
+one-field-period well interval; keep ``0.0`` for the bundled NFP=2 seed, or set
+``np.pi / nfp`` when auditing a reference field whose first well starts there.
 
 Mercier ``DMerc`` and Redl bootstrap-current mismatch are not yet enabled as
 fully differentiable residual blocks in vmec_jax.  The finite-beta scaffolding

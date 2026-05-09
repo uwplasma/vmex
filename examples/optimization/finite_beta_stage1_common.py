@@ -93,9 +93,8 @@ def save_final_outputs(
     stage_records,
     final_optimizer,
     final_result: dict,
-    plot: bool = True,
 ) -> None:
-    """Save initial/final inputs, wouts, history, and optional plots."""
+    """Save initial/final inputs, wouts, and history."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
     _initial_mode, initial_optimizer, initial_params0, initial_result = stage_records[0]
@@ -112,17 +111,6 @@ def save_final_outputs(
         state=final_result.get("_state_final"),
     )
     final_optimizer.save_history(output_dir / "history.json", final_result)
-
-    if plot:
-        try:
-            vj.plot_qh_optimization(
-                output_dir / "wout_initial.nc",
-                output_dir / "wout_final.nc",
-                output_dir / "history.json",
-                outdir=output_dir,
-            )
-        except Exception as exc:
-            (output_dir / "plotting_error.txt").write_text(f"{type(exc).__name__}: {exc}\n")
 
 
 def print_final_summary(result: dict) -> None:

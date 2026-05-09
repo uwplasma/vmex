@@ -11,12 +11,11 @@ level-set widths:
 
 where ``H`` is a logistic approximation to the step function.  A QI surface has
 widths that are independent of ``alpha`` for every level ``B_j``.  The residual
-can also include two profile-consistency terms. ``profile_weight`` compares
-profiles at fixed toroidal angle, while ``aligned_profile_weight`` first aligns
-each field line by a smooth estimate of its well minimum and then compares only
-the trapped-well part of the profile.  The aligned term is closer to the
-branch/shuffle diagnostic used in the reference ``omnigenity_optimization``
-workflow while remaining differentiable.
+can also include branch-width and profile-consistency terms.  The default
+weights are calibrated so the smooth metric ranks the seed, the published
+``omnigenity_optimization`` QI result, and current vmec_jax candidates in the
+same order as the branch-squash/stretch/shuffle diagnostic from the reference
+Goodman et al. omnigenity workflow, while remaining differentiable.
 """
 
 from __future__ import annotations
@@ -25,7 +24,7 @@ from typing import Iterable
 
 import numpy as np
 
-from ._compat import jnp
+from ._compat import jax, jnp
 
 __all__ = [
     "boundary_max_elongation_from_rz",
@@ -88,7 +87,7 @@ def _positive_part(value, *, softness: float = 0.0):
     if float(softness) <= 0.0:
         return jnp.maximum(value, jnp.asarray(0.0, dtype=value.dtype))
     eps = jnp.asarray(float(softness), dtype=value.dtype)
-    return eps * jnp.log1p(jnp.exp(value / eps))
+    return eps * jax.nn.softplus(value / eps)
 
 
 def _nearest_half_mesh_indices(surfaces: Iterable[float], *, n_half: int) -> np.ndarray:
@@ -541,9 +540,11 @@ def quasi_isodynamic_residual_from_boozer_modes(
     n_bounce: int = 51,
     softness: float = 2.0e-2,
     width_weight: float = 1.0,
-    branch_width_weight: float = 0.0,
+    branch_width_weight: float = 0.5,
     branch_width_softness: float = 1.0e-2,
-    profile_weight: float = 1.0,
+    profile_weight: float = 0.1,
+    shuffle_profile_weight: float = 1.0,
+    shuffle_profile_softness: float = 2.0e-2,
     aligned_profile_weight: float = 0.0,
     aligned_profile_softness: float = 2.0e-2,
     aligned_profile_trap_level: float = 0.65,
@@ -583,8 +584,20 @@ def quasi_isodynamic_residual_from_boozer_modes(
     branch_width_softness:
         Normalized ``|B|`` smoothing width for branch level crossings.
     profile_weight:
-        Relative weight for the field-line profile consistency residual.  Set
-        to 0 to recover the width-only surrogate.
+        Small relative weight for field-line profile consistency.  Width-only
+        and branch-width-only surrogates can rank some QH-like candidates too
+        favorably; keeping a small profile term restores the legacy
+        branch-shuffle ranking without making this term dominate the objective.
+    shuffle_profile_weight:
+        Relative weight for a differentiable branch-shuffle profile residual.
+        This term follows the reference Goodman/``omnigenity_optimization``
+        diagnostic more directly than the occupancy-width residual: it builds
+        left/right trapped-branch crossings, shifts them so every field-line
+        label has the mean bounce width, and compares that shuffled well to the
+        original profile.
+    shuffle_profile_softness:
+        Logistic smoothing width used to estimate branch crossing locations for
+        ``shuffle_profile_weight``.
     aligned_profile_weight:
         Relative weight for a differentiable trapped-well profile residual.
         Each field-line profile is circularly shifted by its smooth minimum
@@ -761,8 +774,113 @@ def quasi_isodynamic_residual_from_boozer_modes(
         aligned_profile_residuals1d = jnp.ravel(aligned_profile_residuals3d) / jnp.sqrt(
             jnp.asarray(nalpha * nperiodic, dtype=dtype)
         )
+
+    shuffle_profile_residuals1d = jnp.zeros((0,), dtype=dtype)
+    shuffle_profile_residuals3d = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
+    shuffle_profile = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
+    shuffle_branch_widths = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
+    shuffle_branch_widths_mean = jnp.zeros((nsurf, 1, 0), dtype=dtype)
+    if float(shuffle_profile_weight) != 0.0:
+        if jax is None:  # pragma: no cover - guarded by _require_jax()
+            raise ImportError("shuffle-profile QI residual requires JAX")
+        b_by_alpha = jnp.swapaxes(bnorm, 1, 2)  # (nsurf, nalpha, nphi)
+        offsets = jnp.arange(nphi, dtype=jnp.int32)
+        offsets_float = jnp.asarray(offsets, dtype=dtype)
+        dphi = (phi1 - phi0) / jnp.asarray(max(nphi - 1, 1), dtype=dtype)
+        period = phi1 - phi0
+        min_index = jnp.argmin(b_by_alpha, axis=-1)
+
+        left_index_raw = min_index[:, :, None] - offsets[None, None, :]
+        right_index_raw = min_index[:, :, None] + offsets[None, None, :]
+        left_valid = left_index_raw >= 0
+        right_valid = right_index_raw < nphi
+        left_index = jnp.clip(left_index_raw, 0, nphi - 1)
+        right_index = jnp.clip(right_index_raw, 0, nphi - 1)
+        left_raw = jnp.take_along_axis(b_by_alpha, left_index, axis=-1)
+        right_raw = jnp.take_along_axis(b_by_alpha, right_index, axis=-1)
+        left_raw = jnp.where(left_valid, left_raw, jnp.asarray(1.0, dtype=dtype))
+        right_raw = jnp.where(right_valid, right_raw, jnp.asarray(1.0, dtype=dtype))
+
+        left_branch = jnp.maximum.accumulate(left_raw, axis=-1)
+        right_branch = jnp.maximum.accumulate(right_raw, axis=-1)
+        shuffle_levels = jnp.linspace(0.0, 1.0, n_bounce + 2, endpoint=True, dtype=dtype)[1:-1]
+        shuffle_eps = jnp.maximum(
+            jnp.asarray(float(shuffle_profile_softness), dtype=dtype),
+            jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype),
+        )
+        trapz_weights = jnp.ones((nphi,), dtype=dtype)
+        trapz_weights = trapz_weights.at[0].set(0.5)
+        trapz_weights = trapz_weights.at[-1].set(0.5)
+
+        def _branch_crossing(branch):
+            occupancy_local = jax_sigmoid(
+                (shuffle_levels[None, None, None, :] - branch[:, :, :, None]) / shuffle_eps
+            )
+            return jnp.sum(occupancy_local * trapz_weights[None, None, :, None], axis=2) * dphi
+
+        left_crossing = _branch_crossing(left_branch)
+        right_crossing = _branch_crossing(right_branch)
+        shuffle_branch_widths = left_crossing + right_crossing
+        shuffle_branch_widths_mean = jnp.mean(shuffle_branch_widths, axis=1, keepdims=True)
+
+        delta_width = 0.5 * (shuffle_branch_widths - shuffle_branch_widths_mean)
+        min_phi = phi0 + jnp.asarray(min_index, dtype=dtype) * dphi
+        left_endpoint = jnp.maximum(min_phi - phi0, jnp.asarray(0.0, dtype=dtype))
+        right_endpoint = jnp.maximum(phi1 - min_phi, jnp.asarray(0.0, dtype=dtype))
+        left_target = jnp.clip(left_crossing - delta_width, 0.0, left_endpoint[:, :, None])
+        right_target = jnp.clip(right_crossing - delta_width, 0.0, right_endpoint[:, :, None])
+        left_full = jnp.concatenate(
+            [
+                jnp.zeros((nsurf, nalpha, 1), dtype=dtype),
+                left_target,
+                left_endpoint[:, :, None],
+            ],
+            axis=-1,
+        )
+        right_full = jnp.concatenate(
+            [
+                jnp.zeros((nsurf, nalpha, 1), dtype=dtype),
+                right_target,
+                right_endpoint[:, :, None],
+            ],
+            axis=-1,
+        )
+        left_full = jnp.maximum.accumulate(left_full, axis=-1)
+        right_full = jnp.maximum.accumulate(right_full, axis=-1)
+        level_full = jnp.linspace(0.0, 1.0, n_bounce + 2, endpoint=True, dtype=dtype)
+        x_target = jnp.concatenate([-jnp.flip(left_full, axis=-1), right_full[:, :, 1:]], axis=-1)
+        y_target = jnp.concatenate([jnp.flip(level_full, axis=0), level_full[1:]], axis=0)
+        signed_phi = (offsets_float[None, None, :] - jnp.asarray(min_index[:, :, None], dtype=dtype)) * dphi
+        # ``jnp.interp`` requires strictly increasing xp.  The cumulative-max
+        # monotonicity correction can leave repeated crossings in flat wells, so
+        # add a tiny deterministic ramp that is far below the sampling error.
+        ramp = jnp.arange(x_target.shape[-1], dtype=dtype) * jnp.asarray(1.0e-14, dtype=dtype) * period
+        x_target = x_target + ramp[None, None, :]
+
+        def _interp_one(xp, x):
+            return jnp.interp(x, xp, y_target)
+
+        shuffle_profile = jax.vmap(
+            jax.vmap(_interp_one, in_axes=(0, 0), out_axes=0),
+            in_axes=(0, 0),
+            out_axes=0,
+        )(x_target, signed_phi)
+        shuffle_profile_residuals3d = (
+            (shuffle_profile - b_by_alpha)
+            * jnp.sqrt(weights_arr)[:, None, None]
+            * jnp.asarray(float(shuffle_profile_weight), dtype=dtype)
+        )
+        shuffle_profile_residuals1d = jnp.ravel(shuffle_profile_residuals3d) / jnp.sqrt(
+            jnp.asarray(nalpha * nphi, dtype=dtype)
+        )
     residuals1d = jnp.concatenate(
-        [width_residuals1d, branch_width_residuals1d, profile_residuals1d, aligned_profile_residuals1d]
+        [
+            width_residuals1d,
+            branch_width_residuals1d,
+            profile_residuals1d,
+            aligned_profile_residuals1d,
+            shuffle_profile_residuals1d,
+        ]
     )
     total = jnp.sum(residuals1d * residuals1d)
     return {
@@ -776,6 +894,8 @@ def quasi_isodynamic_residual_from_boozer_modes(
         "profile_residuals3d": profile_residuals3d,
         "aligned_profile_residuals1d": aligned_profile_residuals1d,
         "aligned_profile_residuals3d": aligned_profile_residuals3d,
+        "shuffle_profile_residuals1d": shuffle_profile_residuals1d,
+        "shuffle_profile_residuals3d": shuffle_profile_residuals3d,
         "total": total,
         "widths": widths,
         "widths_mean": widths_mean,
@@ -786,6 +906,9 @@ def quasi_isodynamic_residual_from_boozer_modes(
         "aligned_profile_mean": aligned_profile_mean,
         "aligned_profile_trap_weight": aligned_profile_trap_weight,
         "aligned_min_phi": aligned_min_phi,
+        "shuffle_profile": shuffle_profile,
+        "shuffle_branch_widths": shuffle_branch_widths,
+        "shuffle_branch_widths_mean": shuffle_branch_widths_mean,
         "bmag": bmag,
         "bnorm": bnorm,
         "levels": levels,
@@ -796,8 +919,8 @@ def quasi_isodynamic_residual_from_boozer_modes(
 
 
 def jax_sigmoid(x):
-    """Small wrapper to keep this module importable without importing jax eagerly."""
-    return 1.0 / (1.0 + jnp.exp(-x))
+    """Stable logistic used by QI objectives and their adjoints."""
+    return jax.nn.sigmoid(x)
 
 
 def quasi_isodynamic_residual_from_boozer_output(
@@ -810,9 +933,11 @@ def quasi_isodynamic_residual_from_boozer_output(
     n_bounce: int = 51,
     softness: float = 2.0e-2,
     width_weight: float = 1.0,
-    branch_width_weight: float = 0.0,
+    branch_width_weight: float = 0.5,
     branch_width_softness: float = 1.0e-2,
-    profile_weight: float = 1.0,
+    profile_weight: float = 0.1,
+    shuffle_profile_weight: float = 1.0,
+    shuffle_profile_softness: float = 2.0e-2,
     aligned_profile_weight: float = 0.0,
     aligned_profile_softness: float = 2.0e-2,
     aligned_profile_trap_level: float = 0.65,
@@ -836,6 +961,8 @@ def quasi_isodynamic_residual_from_boozer_output(
         branch_width_weight=branch_width_weight,
         branch_width_softness=branch_width_softness,
         profile_weight=profile_weight,
+        shuffle_profile_weight=shuffle_profile_weight,
+        shuffle_profile_softness=shuffle_profile_softness,
         aligned_profile_weight=aligned_profile_weight,
         aligned_profile_softness=aligned_profile_softness,
         aligned_profile_trap_level=aligned_profile_trap_level,
@@ -859,9 +986,11 @@ def quasi_isodynamic_residual_from_state(
     n_bounce: int = 51,
     softness: float = 2.0e-2,
     width_weight: float = 1.0,
-    branch_width_weight: float = 0.0,
+    branch_width_weight: float = 0.5,
     branch_width_softness: float = 1.0e-2,
-    profile_weight: float = 1.0,
+    profile_weight: float = 0.1,
+    shuffle_profile_weight: float = 1.0,
+    shuffle_profile_softness: float = 2.0e-2,
     aligned_profile_weight: float = 0.0,
     aligned_profile_softness: float = 2.0e-2,
     aligned_profile_trap_level: float = 0.65,
@@ -937,6 +1066,8 @@ def quasi_isodynamic_residual_from_state(
         branch_width_weight=branch_width_weight,
         branch_width_softness=branch_width_softness,
         profile_weight=profile_weight,
+        shuffle_profile_weight=shuffle_profile_weight,
+        shuffle_profile_softness=shuffle_profile_softness,
         aligned_profile_weight=aligned_profile_weight,
         aligned_profile_softness=aligned_profile_softness,
         aligned_profile_trap_level=aligned_profile_trap_level,

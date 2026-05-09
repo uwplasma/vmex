@@ -107,7 +107,8 @@ def prepare_matplotlib_3d() -> None:
     loaded_from_system_dist = "/usr/lib/python3/dist-packages" in loaded_file or any(
         "/usr/lib/python3/dist-packages" in path for path in loaded_paths
     )
-    if loaded is not None and not loaded_from_system_dist and _register_projection():
+    loaded_has_mplot3d = any((Path(path) / "mplot3d" / "axes3d.py").exists() for path in loaded_paths)
+    if loaded is not None and loaded_has_mplot3d and not loaded_from_system_dist and _register_projection():
         return
 
     candidate_bases: list[str] = []
@@ -1089,6 +1090,36 @@ def _plot_3d_boundary_comparison(wout_init, wout_final, outdir: Path) -> Path:
     return out
 
 
+def _load_wout_if_path(wout_or_path):
+    if isinstance(wout_or_path, (str, Path)):
+        from .wout import read_wout as _read_wout
+
+        return _read_wout(str(wout_or_path))
+    return wout_or_path
+
+
+def plot_3d_boundary_comparison(
+    wout_initial,
+    wout_final,
+    *,
+    outdir=None,
+) -> Path:
+    """Plot initial/final LCFS 3-D surfaces colored by ``|B|``.
+
+    ``wout_initial`` and ``wout_final`` can be loaded ``WoutData`` objects or
+    paths to ``wout_*.nc`` files.  The returned path points to
+    ``boundary_comparison.png`` in *outdir*.
+    """
+
+    wout_init = _load_wout_if_path(wout_initial)
+    wout_final_obj = _load_wout_if_path(wout_final)
+    if outdir is None:
+        outdir = Path(".")
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    return _plot_3d_boundary_comparison(wout_init, wout_final_obj, outdir)
+
+
 def _pi_label(v: float) -> str:
     """Format a radian value as a human-readable fraction of π (e.g. 'π/4')."""
     from fractions import Fraction
@@ -1171,6 +1202,28 @@ def _plot_bmag_contours(wout_init, wout_final, outdir: Path) -> Path:
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return out
+
+
+def plot_bmag_contours(
+    wout_initial,
+    wout_final,
+    *,
+    outdir=None,
+) -> Path:
+    """Plot line contours of ``|B|`` on the initial/final LCFS.
+
+    ``wout_initial`` and ``wout_final`` can be loaded ``WoutData`` objects or
+    paths to ``wout_*.nc`` files.  The returned path points to
+    ``bmag_surface.png`` in *outdir*.
+    """
+
+    wout_init = _load_wout_if_path(wout_initial)
+    wout_final_obj = _load_wout_if_path(wout_final)
+    if outdir is None:
+        outdir = Path(".")
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    return _plot_bmag_contours(wout_init, wout_final_obj, outdir)
 
 
 def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
@@ -1263,6 +1316,21 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
     return out
 
 
+def plot_objective_history(
+    history_path,
+    *,
+    outdir=None,
+) -> Path:
+    """Plot objective, aspect-ratio, and optional iota history from JSON."""
+
+    history_path = Path(history_path)
+    if outdir is None:
+        outdir = history_path.parent
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    return _plot_objective_history(history_path, outdir)
+
+
 def plot_qh_optimization(
     wout_initial_path,
     wout_final_path,
@@ -1271,7 +1339,12 @@ def plot_qh_optimization(
     outdir=None,
     show: bool = False,
 ) -> dict:
-    """Generate all QH optimisation result plots and return their paths.
+    """Generate optimization result plots and return their paths.
+
+    This compatibility wrapper calls :func:`plot_3d_boundary_comparison`,
+    :func:`plot_bmag_contours`, and :func:`plot_objective_history`.  New
+    examples call those functions directly so users can choose which plots to
+    create for QA/QH/QP/QI or custom objectives.
 
     Produces three figures:
 
@@ -1306,13 +1379,9 @@ def plot_qh_optimization(
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    from .wout import read_wout as _read_wout
-    wout_init = _read_wout(str(wout_initial_path))
-    wout_final = _read_wout(str(wout_final_path))
-
-    p1 = _plot_3d_boundary_comparison(wout_init, wout_final, outdir)
-    p2 = _plot_bmag_contours(wout_init, wout_final, outdir)
-    p3 = _plot_objective_history(history_path, outdir)
+    p1 = plot_3d_boundary_comparison(wout_initial_path, wout_final_path, outdir=outdir)
+    p2 = plot_bmag_contours(wout_initial_path, wout_final_path, outdir=outdir)
+    p3 = plot_objective_history(history_path, outdir=outdir)
 
     for p in (p1, p2, p3):
         print(f"  Saved {p}")

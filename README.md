@@ -173,12 +173,14 @@ as an optional script-level term, but it is not active in the default README
 examples or best-row selection.
 
 The QP and QI rows both start from the bundled NFP=2 QI seed.  QP is a
-quasi-poloidal-symmetry target using that same input deck; QI can optionally
-start from a same-mode QP preseed before the constrained QI refinement.
+quasi-poloidal-symmetry target using that same input deck; the current best QI
+row uses repeated same-mode continuation at `max_mode=3` without a QP preseed.
 The bundled NFP=2 seed is projected to each active `max_mode`, so
 `max_mode=1` zeroes the seed's mode-2 boundary harmonics before optimizing.
+For QI, the listed wall time includes all repeated stages using the same
+constrained least-squares residual definition.
 
-| Target | Backend | Policy | max_mode | ESS | QP preseed | Final J | QI raw | Mirror | Elong. | Aspect | Iota | Wall time |
+| Target | Backend | Policy | max_mode | ESS | QP preseed | Final J | QI legacy | Mirror | Elong. | Aspect | Iota | Wall time |
 |---|---|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|
 | QA | CPU | continuation | 3 | yes |  | 2.33e-04 |  |  |  | 5.000 | 0.4200 | 6.1 min |
 | QH | CPU | continuation | 3 | yes |  | 9.68e-03 |  |  |  | 4.999 | -1.6595 | 4.0 min |
@@ -207,7 +209,7 @@ Recreate the four displayed runs:
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa --modes 3 --ess off
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qh --modes 3 --ess on
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qp --modes 3 --ess off
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qi --modes 3 --ess off --qi-qp-preseed off
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py
 ```
 
 Regenerate the README panels and the compact CSV used for the table:

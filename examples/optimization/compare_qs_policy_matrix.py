@@ -10,8 +10,10 @@ optimisation path.  It compares three boundary-parameterisation policies:
 3. Continuation+ESS  : combine both
 
 Each case is executed in a spawned subprocess so that a low-level crash in one
-JAX/XLA run does not abort the entire matrix.  For successful cases, the script
-stores:
+JAX/XLA run does not abort the entire matrix.  Existing ``case_result.json``
+files are reused when ``SKIP_EXISTING`` is true, so interrupted matrices can be
+resumed without rerunning completed expensive cases.  For successful cases, the
+script stores:
 
 - ``wout_initial.nc`` and ``wout_final.nc``
 - ``history.json`` with the full optimisation trajectory
@@ -55,47 +57,49 @@ from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_
 enable_x64(True)
 
 OUTPUT_ROOT = Path("results/qs_policy_matrix_converged")
+SKIP_EXISTING = True  # Reuse completed case_result.json files when resuming an interrupted matrix.
 
-VMEC_MPOL = 5
-VMEC_NTOR = 5
+VMEC_MPOL = 6
+VMEC_NTOR = 6
 
 QH_INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.nfp4_QH_warm_start"
-QA_INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.nfp2_QA"
+QA_INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.nfp2_QA_omnigenity"
 
 MODES = (1, 2, 3)
 PROBLEMS = ("qh", "qa")
 
-QH_METHOD = "scipy"
-QA_METHOD = "scipy"
+QH_METHOD = "scipy"  # Try also "gauss_newton", "scipy_matrix_free", or "lbfgs_adjoint".
+QA_METHOD = "scipy"  # Same optimizer choices as QH; keep both explicit for per-case tests.
 
-QH_MAX_NFEV = 15
-QH_CONTINUATION_NFEV = 15
-QH_FTOL = 1e-3
-QH_GTOL = 1e-3
-QH_XTOL = 1e-3
+QH_MAX_NFEV = 15  # Outer least-squares budget for the final stage.
+QH_CONTINUATION_NFEV = 15  # Per-stage budget when mode continuation is enabled.
+QH_FTOL = 1e-3  # Relative cost-reduction tolerance for the outer optimizer.
+QH_GTOL = 1e-3  # Gradient optimality tolerance for the outer optimizer.
+QH_XTOL = 1e-3  # Step-size tolerance for the outer optimizer.
 ESS_ALPHA = 2.5
 QH_ESS_ALPHA = ESS_ALPHA
 QH_TARGET_ASPECT = 5.0
 QH_SURFACES = np.arange(0.0, 1.01, 0.1)
 
-QA_MAX_NFEV = 40
-QA_CONTINUATION_NFEV = 25
-QA_FTOL = 1e-3
-QA_GTOL = 1e-3
-QA_XTOL = 1e-3
+QA_MAX_NFEV = 40  # QA usually needs more steps because iota is also constrained.
+QA_CONTINUATION_NFEV = 25  # Per-stage budget for max_mode continuation.
+QA_FTOL = 1e-3  # Relative cost-reduction tolerance for the outer optimizer.
+QA_GTOL = 1e-3  # Gradient optimality tolerance for the outer optimizer.
+QA_XTOL = 1e-3  # Step-size tolerance for the outer optimizer.
 QA_ESS_ALPHA = ESS_ALPHA
 QA_TARGET_ASPECT = 5.0
-QA_TARGET_IOTA = 0.41
+QA_TARGET_IOTA = 0.42
+QA_IOTA_WEIGHT = 10_000.0
 QA_SURFACES = np.arange(0.0, 1.01, 0.1)
-QH_INNER_MAX_ITER = 0
-QH_INNER_FTOL = 0
-QH_TRIAL_MAX_ITER = 300
-QH_TRIAL_FTOL = 1e-10
+QH_INNER_MAX_ITER = 0  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
+QH_INNER_FTOL = 0  # Accepted-point VMEC tolerance; 0 uses FTOL_ARRAY from the input deck.
+QH_TRIAL_MAX_ITER = 300  # Trial-point VMEC iterations; lower this for faster diagnostics.
+QH_TRIAL_FTOL = 1e-10  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
 
-QA_INNER_MAX_ITER = 0
-QA_INNER_FTOL = 0
-QA_TRIAL_MAX_ITER = 300
-QA_TRIAL_FTOL = 1e-10
+QA_INNER_MAX_ITER = 0  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
+QA_INNER_FTOL = 0  # Accepted-point VMEC tolerance; 0 uses FTOL_ARRAY from the input deck.
+QA_TRIAL_MAX_ITER = 300  # Trial-point VMEC iterations; lower this for faster diagnostics.
+QA_TRIAL_FTOL = 1e-10  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
 
 
 @dataclass(frozen=True)
@@ -142,6 +146,9 @@ def _problem_constants(problem: str) -> dict:
             "xtol": QH_XTOL,
             "alpha": QH_ESS_ALPHA,
             "surfaces": QH_SURFACES,
+            "aspect_weight": 1.0,
+            "iota_weight": 1.0,
+            "qs_weight": 1.0,
             "target_aspect": QH_TARGET_ASPECT,
             "target_iota": None,
             "helicity_m": 1,
@@ -162,6 +169,9 @@ def _problem_constants(problem: str) -> dict:
             "xtol": QA_XTOL,
             "alpha": QA_ESS_ALPHA,
             "surfaces": QA_SURFACES,
+            "aspect_weight": 1.0,
+            "iota_weight": QA_IOTA_WEIGHT,
+            "qs_weight": 1.0,
             "target_aspect": QA_TARGET_ASPECT,
             "target_iota": QA_TARGET_IOTA,
             "helicity_m": 1,
@@ -225,11 +235,20 @@ def _build_stage(problem: str, cfg, indata0, max_mode: int, constants: dict):
     def stage_residuals_fn(state):
         parts = []
         aspect = equilibrium_aspect_ratio_from_state(state=state, static=stage_static)
-        parts.append(jnp.asarray([aspect - constants["target_aspect"]], dtype=jnp.float64))
+        parts.append(
+            jnp.sqrt(jnp.asarray(constants["aspect_weight"], dtype=jnp.float64))
+            * jnp.asarray([aspect - constants["target_aspect"]], dtype=jnp.float64)
+        )
         if constants["target_iota"] is not None:
-            parts.append(jnp.asarray([mean_iota_raw(state) - constants["target_iota"]], dtype=jnp.float64))
+            parts.append(
+                jnp.sqrt(jnp.asarray(constants["iota_weight"], dtype=jnp.float64))
+                * jnp.asarray([mean_iota_raw(state) - constants["target_iota"]], dtype=jnp.float64)
+            )
         qs = stage_qs_eval(state)
-        parts.append(jnp.asarray(qs["residuals1d"], dtype=jnp.float64))
+        parts.append(
+            jnp.sqrt(jnp.asarray(constants["qs_weight"], dtype=jnp.float64))
+            * jnp.asarray(qs["residuals1d"], dtype=jnp.float64)
+        )
         return jnp.concatenate(parts)
 
     stage_residuals_fn._n_non_qs = 2 if constants["target_iota"] is not None else 1
@@ -350,12 +369,17 @@ def _run_case(problem: str, max_mode: int, policy: Policy, output_dir: Path) -> 
     final_opt.save_wout(output_dir / "wout_initial.nc", final_params0, state=final_result.get("_state_initial"))
     final_opt.save_wout(output_dir / "wout_final.nc", final_result["x"], state=final_result.get("_state_final"))
     final_opt.save_history(output_dir / "history.json", final_result)
-    vj.plot_qh_optimization(
+    vj.plot_3d_boundary_comparison(
         output_dir / "wout_initial.nc",
         output_dir / "wout_final.nc",
-        output_dir / "history.json",
         outdir=output_dir,
     )
+    vj.plot_bmag_contours(
+        output_dir / "wout_initial.nc",
+        output_dir / "wout_final.nc",
+        outdir=output_dir,
+    )
+    vj.plot_objective_history(output_dir / "history.json", outdir=output_dir)
 
     hist = final_result["_history_dump"]
     return CaseResult(
@@ -439,8 +463,13 @@ def _plot_policy_matrix_all(results: list[CaseResult], *, outpath: Path) -> None
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig, axes = plt.subplots(len(PROBLEMS), len(MODES), figsize=(5.5 * len(MODES), 4.4 * len(PROBLEMS)), sharey="row")
-    axes = np.asarray(axes)
+    fig, axes = plt.subplots(
+        len(PROBLEMS),
+        len(MODES),
+        figsize=(5.5 * len(MODES), 4.4 * len(PROBLEMS)),
+        sharey="row",
+        squeeze=False,
+    )
     for row, problem in enumerate(PROBLEMS):
         for col, mode in enumerate(MODES):
             ax = axes[row, col]
@@ -521,28 +550,35 @@ def main():
             for policy in POLICIES:
                 output_dir = OUTPUT_ROOT / problem / f"mode{max_mode}" / policy.name
                 result_path = output_dir / "case_result.json"
-                proc = ctx.Process(
-                    target=_worker,
-                    args=(problem, max_mode, policy, str(output_dir), str(result_path)),
-                )
-                proc.start()
-                proc.join()
-                if result_path.exists():
+                if SKIP_EXISTING and result_path.exists():
                     result = CaseResult(**json.loads(result_path.read_text()))
-                else:
-                    result = CaseResult(
-                        problem=problem,
-                        max_mode=max_mode,
-                        policy=policy.name,
-                        success=False,
-                        crashed=True,
-                        message=f"worker exit code {proc.exitcode} without result file",
-                        output_dir=str(output_dir),
+                    print(
+                        f"[{problem} mode={max_mode} policy={policy.name}] "
+                        f"reusing existing result objective={result.objective_final}"
                     )
-                if proc.exitcode not in (0, None):
-                    result.crashed = True
-                    if "worker exit code" not in result.message:
-                        result.message = f"exit code {proc.exitcode}; {result.message}"
+                else:
+                    proc = ctx.Process(
+                        target=_worker,
+                        args=(problem, max_mode, policy, str(output_dir), str(result_path)),
+                    )
+                    proc.start()
+                    proc.join()
+                    if result_path.exists():
+                        result = CaseResult(**json.loads(result_path.read_text()))
+                    else:
+                        result = CaseResult(
+                            problem=problem,
+                            max_mode=max_mode,
+                            policy=policy.name,
+                            success=False,
+                            crashed=True,
+                            message=f"worker exit code {proc.exitcode} without result file",
+                            output_dir=str(output_dir),
+                        )
+                    if proc.exitcode not in (0, None):
+                        result.crashed = True
+                        if "worker exit code" not in result.message:
+                            result.message = f"exit code {proc.exitcode}; {result.message}"
                 results.append(result)
                 print(
                     f"[{problem} mode={max_mode} policy={policy.name}] "

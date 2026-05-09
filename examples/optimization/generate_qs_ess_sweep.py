@@ -92,10 +92,10 @@ ESS_OPTIONS = (False, True)
 
 USE_MODE_CONTINUATION = True
 BACKEND_LABEL = "cpu"
-SOLVER_DEVICE: str | None = None
+SOLVER_DEVICE: str | None = None  # None uses JAX default; set "cpu" or "gpu" to force one backend.
 SKIP_EXISTING = True
 CASE_TIMEOUT_S: float | None = 1200.0
-ESS_ALPHA = 1.2
+ESS_ALPHA = 1.2  # Try 1.2 for gentle ESS or 2.5 for stronger high-mode scaling.
 TARGET_ASPECT = 5.0
 TARGET_ABS_IOTA_MIN = 0.41
 HIGH_PRIORITY_IOTA_WEIGHT = 200.0
@@ -226,7 +226,7 @@ class ProblemConfig:
     lgradb_ntheta: int = 9
     lgradb_nphi: int = 7
     lgradb_surface_index: int = -1
-    lgradb_smooth_penalty: float = 0.0
+    lgradb_smooth_penalty: float = 1.0e-3
     objective_kind: str = "qs"
     qi_mboz: int = 12
     qi_nboz: int = 12
@@ -235,13 +235,16 @@ class ProblemConfig:
     qi_n_bounce: int = 31
     qi_softness: float = 2.0e-2
     qi_width_weight: float = 1.0
-    qi_branch_width_weight: float = 0.0
+    qi_branch_width_weight: float = 0.5
     qi_branch_width_softness: float = 1.0e-2
-    qi_profile_weight: float = 0.0
+    qi_profile_weight: float = 0.1
+    qi_shuffle_profile_weight: float = 0.0
+    qi_shuffle_profile_softness: float = 2.0e-2
     qi_aligned_profile_weight: float = 0.0
     qi_aligned_profile_softness: float = 2.0e-2
     qi_aligned_profile_trap_level: float = 0.65
     qi_aligned_profile_trap_softness: float = 5.0e-2
+    qi_phimin: float = 0.0
     qi_max_mirror_ratio: float = 0.21
     qi_mirror_weight: float = 10.0
     qi_mirror_ntheta: int = 96
@@ -256,7 +259,7 @@ class ProblemConfig:
     qi_lgradb_ntheta: int = 9
     qi_lgradb_nphi: int = 7
     qi_lgradb_surface_index: int = -1
-    qi_lgradb_smooth_penalty: float = 0.0
+    qi_lgradb_smooth_penalty: float = 1.0e-3
     qi_preseed_qp: bool = False
     qi_preseed_qi: bool = False
     qi_preseed_qi_nfev: int = 30
@@ -268,14 +271,14 @@ PROBLEM_CONFIGS = {
     "qa": ProblemConfig(
         name="qa",
         input_file=DATA_DIR / "input.nfp2_QA_omnigenity",
-        method="scipy",
-        scipy_tr_solver="lsmr",
-        scipy_lsmr_maxiter=None,
-        max_nfev=60,
-        continuation_nfev=60,
-        ftol=1e-4,
-        gtol=1e-4,
-        xtol=1e-4,
+        method="scipy",  # Try also "gauss_newton", "scipy_matrix_free", or "lbfgs_adjoint".
+        scipy_tr_solver="lsmr",  # For method="scipy": "lsmr" is memory-light; "exact" is dense.
+        scipy_lsmr_maxiter=None,  # None lets SciPy choose; set an int to cap LSMR work per step.
+        max_nfev=60,  # Outer least-squares budget for the final stage.
+        continuation_nfev=60,  # Per-stage budget when mode continuation is enabled.
+        ftol=1e-4,  # Relative cost-reduction tolerance for the outer optimizer.
+        gtol=1e-4,  # Gradient optimality tolerance for the outer optimizer.
+        xtol=1e-4,  # Step-size tolerance for the outer optimizer.
         ess_alpha=ESS_ALPHA,
         target_aspect=TARGET_ASPECT,
         target_iota=0.42,
@@ -283,10 +286,10 @@ PROBLEM_CONFIGS = {
         surfaces=np.arange(0.0, 1.01, 0.1),
         helicity_m=1,
         helicity_n=0,
-        inner_max_iter=120,
-        inner_ftol=1e-9,
-        trial_max_iter=120,
-        trial_ftol=1e-9,
+        inner_max_iter=120,  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
+        inner_ftol=1e-9,  # Accepted-point VMEC tolerance; 0 uses FTOL_ARRAY from the input deck.
+        trial_max_iter=120,  # Trial-point VMEC iterations; lower this for faster diagnostics.
+        trial_ftol=1e-9,  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
         lgradb_threshold=OPTIONAL_LGRADB_THRESHOLD,
         lgradb_weight=OPTIONAL_LGRADB_WEIGHT,
         min_vmec_mode=6,
@@ -294,14 +297,14 @@ PROBLEM_CONFIGS = {
     "qh": ProblemConfig(
         name="qh",
         input_file=DATA_DIR / "input.nfp4_QH_warm_start",
-        method="scipy",
-        scipy_tr_solver="lsmr",
-        scipy_lsmr_maxiter=None,
-        max_nfev=30,
-        continuation_nfev=30,
-        ftol=1e-4,
-        gtol=1e-4,
-        xtol=1e-4,
+        method="scipy",  # Try also "gauss_newton", "scipy_matrix_free", or "lbfgs_adjoint".
+        scipy_tr_solver="lsmr",  # For method="scipy": "lsmr" is memory-light; "exact" is dense.
+        scipy_lsmr_maxiter=None,  # None lets SciPy choose; set an int to cap LSMR work per step.
+        max_nfev=30,  # Outer least-squares budget for the final stage.
+        continuation_nfev=30,  # Per-stage budget when mode continuation is enabled.
+        ftol=1e-4,  # Relative cost-reduction tolerance for the outer optimizer.
+        gtol=1e-4,  # Gradient optimality tolerance for the outer optimizer.
+        xtol=1e-4,  # Step-size tolerance for the outer optimizer.
         ess_alpha=ESS_ALPHA,
         target_aspect=TARGET_ASPECT,
         target_iota=None,
@@ -309,10 +312,10 @@ PROBLEM_CONFIGS = {
         surfaces=np.arange(0.0, 1.01, 0.1),
         helicity_m=1,
         helicity_n=-1,
-        inner_max_iter=120,
-        inner_ftol=1e-9,
-        trial_max_iter=120,
-        trial_ftol=1e-9,
+        inner_max_iter=120,  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
+        inner_ftol=1e-9,  # Accepted-point VMEC tolerance; 0 uses FTOL_ARRAY from the input deck.
+        trial_max_iter=120,  # Trial-point VMEC iterations; lower this for faster diagnostics.
+        trial_ftol=1e-9,  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
         lgradb_threshold=OPTIONAL_LGRADB_THRESHOLD,
         iota_weight=HIGH_PRIORITY_IOTA_WEIGHT,
         lgradb_weight=OPTIONAL_LGRADB_WEIGHT,
@@ -321,24 +324,24 @@ PROBLEM_CONFIGS = {
     "qp": ProblemConfig(
         name="qp",
         input_file=DATA_DIR / "input.nfp2_QI",
-        method="scipy",
-        scipy_tr_solver="lsmr",
-        scipy_lsmr_maxiter=None,
-        max_nfev=40,
-        continuation_nfev=30,
-        ftol=1e-4,
-        gtol=1e-4,
-        xtol=1e-4,
+        method="scipy",  # Try also "gauss_newton", "scipy_matrix_free", or "lbfgs_adjoint".
+        scipy_tr_solver="lsmr",  # For method="scipy": "lsmr" is memory-light; "exact" is dense.
+        scipy_lsmr_maxiter=None,  # None lets SciPy choose; set an int to cap LSMR work per step.
+        max_nfev=40,  # Outer least-squares budget for the final stage.
+        continuation_nfev=30,  # Per-stage budget when mode continuation is enabled.
+        ftol=1e-4,  # Relative cost-reduction tolerance for the outer optimizer.
+        gtol=1e-4,  # Gradient optimality tolerance for the outer optimizer.
+        xtol=1e-4,  # Step-size tolerance for the outer optimizer.
         ess_alpha=ESS_ALPHA,
         target_aspect=TARGET_ASPECT,
         target_iota=None,
         surfaces=np.arange(0.0, 1.01, 0.1),
         helicity_m=0,
         helicity_n=-1,
-        inner_max_iter=120,
-        inner_ftol=1e-9,
-        trial_max_iter=120,
-        trial_ftol=1e-9,
+        inner_max_iter=120,  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
+        inner_ftol=1e-9,  # Accepted-point VMEC tolerance; 0 uses FTOL_ARRAY from the input deck.
+        trial_max_iter=120,  # Trial-point VMEC iterations; lower this for faster diagnostics.
+        trial_ftol=1e-9,  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
         iota_abs_min=TARGET_ABS_IOTA_MIN,
         iota_weight=HIGH_PRIORITY_IOTA_WEIGHT,
         project_input_boundary_to_max_mode=True,
@@ -349,14 +352,14 @@ PROBLEM_CONFIGS = {
     "qi": ProblemConfig(
         name="qi",
         input_file=DATA_DIR / "input.nfp2_QI",
-        method="scipy",
-        scipy_tr_solver="lsmr",
-        scipy_lsmr_maxiter=None,
-        max_nfev=30,
-        continuation_nfev=30,
-        ftol=1e-4,
-        gtol=1e-4,
-        xtol=1e-4,
+        method="scipy",  # Try also "gauss_newton", "scipy_matrix_free", or "lbfgs_adjoint".
+        scipy_tr_solver="lsmr",  # For method="scipy": "lsmr" is memory-light; "exact" is dense.
+        scipy_lsmr_maxiter=None,  # None lets SciPy choose; set an int to cap LSMR work per step.
+        max_nfev=30,  # Outer least-squares budget for the final stage.
+        continuation_nfev=30,  # Per-stage budget when mode continuation is enabled.
+        ftol=1e-4,  # Relative cost-reduction tolerance for the outer optimizer.
+        gtol=1e-4,  # Gradient optimality tolerance for the outer optimizer.
+        xtol=1e-4,  # Step-size tolerance for the outer optimizer.
         # The reference omnigenity workflow uses a gentler alpha than the QS
         # examples.  Aspect 7 is less restrictive than the aspect-5 pass and
         # better preserves the QI/QS minima found before adding LgradB.
@@ -367,10 +370,10 @@ PROBLEM_CONFIGS = {
         surfaces=np.linspace(0.1, 1.0, 6),
         helicity_m=0,
         helicity_n=0,
-        inner_max_iter=120,
-        inner_ftol=1e-9,
-        trial_max_iter=120,
-        trial_ftol=1e-9,
+        inner_max_iter=120,  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
+        inner_ftol=1e-9,  # Accepted-point VMEC tolerance; 0 uses FTOL_ARRAY from the input deck.
+        trial_max_iter=120,  # Trial-point VMEC iterations; lower this for faster diagnostics.
+        trial_ftol=1e-9,  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
         iota_abs_min=TARGET_ABS_IOTA_MIN,
         iota_weight=HIGH_PRIORITY_IOTA_WEIGHT,
         objective_kind="qi",
@@ -381,9 +384,11 @@ PROBLEM_CONFIGS = {
         qi_n_bounce=51,
         qi_softness=2.0e-2,
         qi_width_weight=1.0,
-        qi_branch_width_weight=1.0,
+        qi_branch_width_weight=0.5,
         qi_branch_width_softness=2.0e-2,
-        qi_profile_weight=0.0,
+        qi_profile_weight=0.1,
+        qi_shuffle_profile_weight=1.0,
+        qi_shuffle_profile_softness=2.0e-2,
         qi_aligned_profile_weight=0.0,
         qi_aligned_profile_softness=2.0e-2,
         qi_aligned_profile_trap_level=0.65,
@@ -402,7 +407,7 @@ PROBLEM_CONFIGS = {
         qi_lgradb_nphi=7,
         qi_lgradb_surface_index=-1,
         qi_preseed_qp=False,
-        qi_preseed_qi=False,
+        qi_preseed_qi=True,
         qi_preseed_qi_nfev=30,
         project_input_boundary_to_max_mode=True,
         min_vmec_mode=6,
@@ -458,6 +463,7 @@ class CaseResult:
     qi_qp_preseed: bool | None = None
     qi_qi_preseed: bool | None = None
     qi_raw_total: float | None = None
+    qi_legacy_total: float | None = None
     qi_mirror_ratio_max: float | None = None
     qi_mirror_ratio_target: float | None = None
     qi_mirror_excess_max: float | None = None
@@ -800,10 +806,13 @@ def _qi_diagnostics_from_state(problem_cfg: ProblemConfig, opt, state) -> dict[s
             branch_width_weight=problem_cfg.qi_branch_width_weight,
             branch_width_softness=problem_cfg.qi_branch_width_softness,
             profile_weight=problem_cfg.qi_profile_weight,
+            shuffle_profile_weight=problem_cfg.qi_shuffle_profile_weight,
+            shuffle_profile_softness=problem_cfg.qi_shuffle_profile_softness,
             aligned_profile_weight=problem_cfg.qi_aligned_profile_weight,
             aligned_profile_softness=problem_cfg.qi_aligned_profile_softness,
             aligned_profile_trap_level=problem_cfg.qi_aligned_profile_trap_level,
             aligned_profile_trap_softness=problem_cfg.qi_aligned_profile_trap_softness,
+            phimin=problem_cfg.qi_phimin,
             jit_booz=False,
             booz_constants=constants,
             booz_grids=grids,
@@ -842,8 +851,14 @@ def _qi_diagnostics_from_state(problem_cfg: ProblemConfig, opt, state) -> dict[s
         lgradb_values = np.asarray(lgradb["L_grad_B"], dtype=float)
         lgradb_min = float(np.min(lgradb_values))
         lgradb_excess = np.asarray(lgradb["excess"], dtype=float)
+        qi_total = float(np.asarray(qi["total"]))
         return {
-            "qi_raw_total": float(np.asarray(qi["total"])),
+            "qi_raw_total": qi_total,
+            # The current smooth QI objective includes the branch-shuffle profile
+            # term calibrated to rank designs like the Goodman et al. legacy
+            # diagnostic.  Keep the old key for compatibility and expose the
+            # physics meaning explicitly for new tables/plots.
+            "qi_legacy_total": qi_total,
             "qi_mirror_ratio_max": mirror_max,
             "qi_mirror_ratio_target": float(problem_cfg.qi_max_mirror_ratio),
             "qi_mirror_excess_max": max(0.0, mirror_max - float(problem_cfg.qi_max_mirror_ratio)),
@@ -857,6 +872,7 @@ def _qi_diagnostics_from_state(problem_cfg: ProblemConfig, opt, state) -> dict[s
     except Exception as exc:
         return {
             "qi_raw_total": None,
+            "qi_legacy_total": None,
             "qi_mirror_ratio_max": None,
             "qi_mirror_ratio_target": float(problem_cfg.qi_max_mirror_ratio),
             "qi_mirror_excess_max": None,
@@ -1014,10 +1030,13 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
                 branch_width_weight=problem_cfg.qi_branch_width_weight,
                 branch_width_softness=problem_cfg.qi_branch_width_softness,
                 profile_weight=problem_cfg.qi_profile_weight,
+                shuffle_profile_weight=problem_cfg.qi_shuffle_profile_weight,
+                shuffle_profile_softness=problem_cfg.qi_shuffle_profile_softness,
                 aligned_profile_weight=problem_cfg.qi_aligned_profile_weight,
                 aligned_profile_softness=problem_cfg.qi_aligned_profile_softness,
                 aligned_profile_trap_level=problem_cfg.qi_aligned_profile_trap_level,
                 aligned_profile_trap_softness=problem_cfg.qi_aligned_profile_trap_softness,
+                phimin=problem_cfg.qi_phimin,
                 jit_booz=False,
                 booz_constants=qi_booz_constants,
                 booz_grids=qi_booz_grids,
@@ -1203,12 +1222,51 @@ def _merge_stage_histories(stage_results: list[StageRecord], *, problem_cfg: Pro
     stage_boundaries = []
     stage_modes = []
     stage_labels = []
+    stage_profiles = []
+    profile_totals: dict[str, dict[str, float | int]] = {}
+    callback_events = []
+    callback_summary: dict[str, dict[str, float | int]] = {}
+    callback_trace_enabled = False
     wall_offset = 0.0
     nfev_total = 0
     njev_total = 0
     max_nfev_total = 0
     for idx, (stage_label, _mode, stage_result) in enumerate(stage_results):
         stage_hist = stage_result["_history_dump"]
+        stage_profile = stage_hist.get("profile")
+        if isinstance(stage_profile, dict):
+            stage_profiles.append(
+                {
+                    "stage": str(stage_label),
+                    "mode": int(_mode),
+                    "profile": dict(stage_profile),
+                }
+            )
+            for key, value in stage_profile.items():
+                entry = profile_totals.setdefault(str(key), {"count": 0, "wall_time_s": 0.0})
+                if isinstance(value, dict):
+                    entry["count"] = int(entry["count"]) + int(value.get("count", 0))
+                    entry["wall_time_s"] = float(entry["wall_time_s"]) + float(value.get("wall_time_s", 0.0))
+                elif isinstance(value, (int, float)):
+                    entry["count"] = int(entry["count"]) + 1
+                    entry["wall_time_s"] = float(entry["wall_time_s"]) + float(value)
+        stage_trace = stage_hist.get("callback_trace")
+        if isinstance(stage_trace, dict):
+            callback_trace_enabled = callback_trace_enabled or bool(stage_trace.get("enabled", False))
+            for event in stage_trace.get("events", []):
+                if not isinstance(event, dict):
+                    continue
+                event_copy = dict(event)
+                event_copy["index"] = len(callback_events)
+                event_copy["stage"] = str(stage_label)
+                event_copy["mode"] = int(_mode)
+                callback_events.append(event_copy)
+            for key, value in stage_trace.get("summary", {}).items():
+                if not isinstance(value, dict):
+                    continue
+                entry = callback_summary.setdefault(str(key), {"count": 0, "wall_time_s": 0.0})
+                entry["count"] = int(entry["count"]) + int(value.get("count", 0))
+                entry["wall_time_s"] = float(entry["wall_time_s"]) + float(value.get("wall_time_s", 0.0))
         start_index = len(combined_entries)
         skip_first = idx != 0
         entries = stage_hist["history"] if idx == 0 else stage_hist["history"][1:]
@@ -1269,6 +1327,24 @@ def _merge_stage_histories(stage_results: list[StageRecord], *, problem_cfg: Pro
         if "iota" in combined_entries[0] and "iota" in combined_entries[-1]:
             merged["iota_initial"] = float(combined_entries[0]["iota"])
             merged["iota_final"] = float(combined_entries[-1]["iota"])
+    if profile_totals:
+        merged["profile"] = {
+            key: {
+                "count": int(value["count"]),
+                "wall_time_s": float(value["wall_time_s"]),
+                "mean_wall_time_s": float(value["wall_time_s"]) / int(value["count"])
+                if int(value["count"])
+                else 0.0,
+            }
+            for key, value in sorted(profile_totals.items())
+        }
+        merged["stage_profiles"] = stage_profiles
+    if callback_trace_enabled or callback_events:
+        merged["callback_trace"] = {
+            "enabled": bool(callback_trace_enabled),
+            "events": callback_events,
+            "summary": dict(sorted(callback_summary.items())),
+        }
     return merged
 
 
@@ -1360,12 +1436,17 @@ def _save_case_outputs(output_dir: Path, opt, params_initial, params_final, resu
     opt.save_wout(output_dir / "wout_final.nc", params_final, state=result.get("_state_final"))
     opt.save_history(output_dir / "history.json", result)
     try:
-        vj.plot_qh_optimization(
+        vj.plot_3d_boundary_comparison(
             output_dir / "wout_initial.nc",
             output_dir / "wout_final.nc",
-            output_dir / "history.json",
             outdir=output_dir,
         )
+        vj.plot_bmag_contours(
+            output_dir / "wout_initial.nc",
+            output_dir / "wout_final.nc",
+            outdir=output_dir,
+        )
+        vj.plot_objective_history(output_dir / "history.json", outdir=output_dir)
     except Exception as exc:
         # Plotting is a post-processing convenience.  Do not mark an otherwise
         # valid optimization as failed because a remote/headless Matplotlib
@@ -1487,6 +1568,12 @@ def _run_case(
     )
     if problem_cfg.objective_kind == "qi" and qi_qp_preseed is not None:
         problem_cfg = replace(problem_cfg, qi_preseed_qp=bool(qi_qp_preseed))
+    if problem_cfg.objective_kind == "qi" and problem_cfg.qi_preseed_qi and not bool(use_ess):
+        # The QI-only preseed is an ESS-stabilized helper stage.  Running that
+        # hidden stage without ESS can create ill-conditioned LSMR trust-region
+        # subproblems before the visible QI stage starts, so keep no-ESS rows as
+        # a true no-ESS baseline.
+        problem_cfg = replace(problem_cfg, qi_preseed_qi=False)
     cfg, indata = _load_problem(
         problem_cfg,
         max_mode=max_mode,
@@ -1563,6 +1650,11 @@ def _run_case(
             problem_cfg,
             max_nfev=int(problem_cfg.qi_preseed_qi_nfev),
             continuation_nfev=min(int(problem_cfg.continuation_nfev), int(problem_cfg.qi_preseed_qi_nfev)),
+            aspect_weight=0.0,
+            target_iota=None,
+            iota_abs_min=None,
+            iota_weight=0.0,
+            iota_floor_weight=0.0,
             qi_mirror_weight=0.0,
             qi_elongation_weight=0.0,
             qi_lgradb_weight=0.0,
@@ -2017,6 +2109,7 @@ def _write_summary_csv(results: list[CaseResult], path: Path) -> None:
                 "qi_qp_preseed",
                 "qi_qi_preseed",
                 "qi_raw_total",
+                "qi_legacy_total",
                 "qi_mirror_ratio_max",
                 "qi_mirror_ratio_target",
                 "qi_mirror_excess_max",

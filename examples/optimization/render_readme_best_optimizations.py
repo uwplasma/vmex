@@ -62,6 +62,7 @@ class BestRun:
     backend: str = "cpu"
     qi_qp_preseed: bool | None = None
     qi_raw_total: float | None = None
+    qi_legacy_total: float | None = None
     qi_mirror_ratio_max: float | None = None
     qi_max_elongation: float | None = None
     lgradb_min: float | None = None
@@ -106,6 +107,18 @@ def _float_value(row: dict[str, str], key: str, default: float | None = None) ->
         return default
 
 
+def _qi_metric(row: dict[str, str], default: float | None = None) -> float | None:
+    value = row.get("qi_legacy_total")
+    if value in (None, ""):
+        value = row.get("qi_raw_total")
+    if value in (None, ""):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _target_aspect_for(problem: str) -> float:
     return float(PROBLEM_TARGET_ASPECT.get(problem, TARGET_ASPECT))
 
@@ -118,7 +131,7 @@ def _qi_selection_score(row: dict[str, str]) -> tuple:
     elong_target = _float_value(row, "qi_elongation_target", 8.0) or 8.0
     iota = abs(_float_value(row, "iota_final", 0.0) or 0.0)
     aspect = _float_value(row, "aspect_final", np.inf) or np.inf
-    qi_raw = _float_value(row, "qi_raw_total", np.inf) or np.inf
+    qi_raw = _qi_metric(row, np.inf) or np.inf
     objective = _float_value(row, "objective_final", np.inf) or np.inf
     mirror_violation = max(0.0, mirror - mirror_target) / max(mirror_target, 1.0e-12)
     elong_violation = max(0.0, elong - elong_target) / max(elong_target, 1.0e-12)
@@ -223,6 +236,7 @@ def _run_from_row(row: dict[str, str]) -> BestRun:
             _bool_value(row.get("qi_qp_preseed")) if row.get("problem") == "qi" and row.get("qi_qp_preseed") else None
         ),
         qi_raw_total=_float_value(row, "qi_raw_total"),
+        qi_legacy_total=_qi_metric(row),
         qi_mirror_ratio_max=_float_value(row, "qi_mirror_ratio_max"),
         qi_max_elongation=_float_value(row, "qi_max_elongation"),
         lgradb_min=_float_value(row, "lgradb_min"),
@@ -252,7 +266,7 @@ def _best_runs() -> list[BestRun]:
         row
         for row in _read_qi_constrained_rows()
         if row.get("output_dir")
-        and row.get("qi_raw_total") not in (None, "")
+        and (row.get("qi_legacy_total") not in (None, "") or row.get("qi_raw_total") not in (None, ""))
         and not _bool_value(row.get("stellarator_asymmetric"))
         and _is_current_qi_row(row)
     ]
@@ -464,6 +478,7 @@ def _write_readme_summary(runs: list[BestRun]) -> None:
                 "ess",
                 "qi_qp_preseed",
                 "objective_final",
+                "qi_legacy_total",
                 "qi_raw_total",
                 "qi_mirror_ratio_max",
                 "qi_max_elongation",
@@ -483,6 +498,7 @@ def _write_readme_summary(runs: list[BestRun]) -> None:
                     "yes" if run.use_ess else "no",
                     "" if run.qi_qp_preseed is None else ("yes" if run.qi_qp_preseed else "no"),
                     f"{run.objective_final:.16e}",
+                    "" if run.qi_legacy_total is None else f"{run.qi_legacy_total:.16e}",
                     "" if run.qi_raw_total is None else f"{run.qi_raw_total:.16e}",
                     "" if run.qi_mirror_ratio_max is None else f"{run.qi_mirror_ratio_max:.16e}",
                     "" if run.qi_max_elongation is None else f"{run.qi_max_elongation:.16e}",
@@ -497,7 +513,11 @@ def _write_readme_summary(runs: list[BestRun]) -> None:
 def _run_title(run: BestRun) -> str:
     extras = ""
     if run.problem == "qi":
-        qi_raw = float("nan") if run.qi_raw_total is None else run.qi_raw_total
+        qi_raw = (
+            float("nan")
+            if (run.qi_legacy_total is None and run.qi_raw_total is None)
+            else (run.qi_legacy_total if run.qi_legacy_total is not None else run.qi_raw_total)
+        )
         mirror = float("nan") if run.qi_mirror_ratio_max is None else run.qi_mirror_ratio_max
         elong = float("nan") if run.qi_max_elongation is None else run.qi_max_elongation
         extras = (

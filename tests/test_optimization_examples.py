@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -29,6 +31,13 @@ def test_fixed_boundary_qs_examples_are_standalone_workflows() -> None:
         assert "target_iota=" not in text
         assert "iota_abs_min=" not in text
         assert "qi_options=" not in text
+        assert "plot=" not in text
+        assert "print_optimization_outputs" not in text
+        assert "result.final_result" in text
+        assert "vmecplot2_bmag_grid(" in text
+        assert "plot_3d_boundary_comparison(" in text
+        assert "plot_bmag_contours(" in text
+        assert "plot_objective_history(" in text
 
 
 def test_qi_example_uses_qi_problem_api() -> None:
@@ -41,6 +50,102 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "target_aspect=" not in text
     assert "iota_abs_min=" not in text
     assert "qi_options=" not in text
+    assert "plot=" not in text
+    assert "print_optimization_outputs" not in text
+    assert "result.final_result" in text
+    assert "vmecplot2_bmag_grid(" in text
+    assert "plot_3d_boundary_comparison(" in text
+    assert "plot_bmag_contours(" in text
+    assert "plot_objective_history(" in text
+
+
+def test_qi_objective_comparison_is_top_level_diagnostic() -> None:
+    text = (ROOT / "examples" / "optimization" / "compare_omnigenity_qi_objective.py").read_text()
+
+    assert "argparse" not in text
+    assert "QI_VARIANTS" in text
+    assert "PHIMIN_FACTORS" in text
+    assert "QuasiIsodynamicResidual" in text
+    assert "quasi_isodynamic_residual_from_state(" in text
+
+
+def test_policy_matrix_plots_single_problem(tmp_path, monkeypatch) -> None:
+    pytest.importorskip("matplotlib")
+
+    from examples.optimization import compare_qs_policy_matrix as matrix
+
+    monkeypatch.setattr(matrix, "PROBLEMS", ("qa",))
+
+    outpath = tmp_path / "one_problem_matrix.png"
+    matrix._plot_policy_matrix_all([], outpath=outpath)
+
+    assert outpath.exists()
+
+
+def test_qs_sweep_history_merge_preserves_stage_profiles_and_traces() -> None:
+    from examples.optimization.generate_qs_ess_sweep import PROBLEM_CONFIGS, _merge_stage_histories
+
+    def stage_result(label: str, wall: float) -> dict:
+        return {
+            "_history_dump": {
+                "history": [
+                    {"wall_time_s": 0.0, "objective": 2.0, "qs_objective": 1.0, "aspect": 5.0},
+                    {"wall_time_s": wall, "objective": 1.0, "qs_objective": 0.5, "aspect": 5.1},
+                ],
+                "nfev": 2,
+                "njev": 1,
+                "success": True,
+                "message": label,
+                "objective_initial": 2.0,
+                "objective_final": 1.0,
+                "qs_initial": 1.0,
+                "qs_final": 0.5,
+                "aspect_initial": 5.0,
+                "aspect_final": 5.1,
+                "max_nfev": 3,
+                "profile": {
+                    "exact_tape_build": {"count": 1, "wall_time_s": wall, "mean_wall_time_s": wall},
+                    "trial_solve": {"count": 2, "wall_time_s": 2.0 * wall, "mean_wall_time_s": wall},
+                },
+                "callback_trace": {
+                    "enabled": True,
+                    "events": [{"index": 0, "kind": "jacobian", "source": "exact_tape_replay", "wall_time_s": wall}],
+                    "summary": {"jacobian:exact_tape_replay": {"count": 1, "wall_time_s": wall}},
+                },
+            }
+        }
+
+    merged = _merge_stage_histories(
+        [
+            ("stage 1", 1, stage_result("one", 0.25)),
+            ("stage 2", 2, stage_result("two", 0.5)),
+        ],
+        problem_cfg=PROBLEM_CONFIGS["qa"],
+    )
+
+    assert merged["profile"]["exact_tape_build"]["count"] == 2
+    assert merged["profile"]["exact_tape_build"]["wall_time_s"] == 0.75
+    assert merged["profile"]["trial_solve"]["count"] == 4
+    assert merged["profile"]["trial_solve"]["wall_time_s"] == 1.5
+    assert len(merged["stage_profiles"]) == 2
+    assert merged["callback_trace"]["summary"]["jacobian:exact_tape_replay"]["count"] == 2
+    assert merged["callback_trace"]["summary"]["jacobian:exact_tape_replay"]["wall_time_s"] == 0.75
+    assert [event["stage"] for event in merged["callback_trace"]["events"]] == ["stage 1", "stage 2"]
+
+
+def test_finite_beta_examples_plot_explicitly_after_solve() -> None:
+    scripts = [
+        ROOT / "examples" / "optimization" / "qa_optimization_finite_beta.py",
+        ROOT / "examples" / "optimization" / "qh_optimization_finite_beta.py",
+        ROOT / "examples" / "optimization" / "qi_optimization_finite_beta.py",
+    ]
+    for script in scripts:
+        text = script.read_text()
+        assert "save_final_outputs(" in text
+        assert "plot=" not in text
+        assert "vj.plot_3d_boundary_comparison(" in text
+        assert "vj.plot_bmag_contours(" in text
+        assert "vj.plot_objective_history(" in text
 
 
 def test_custom_objective_term_residual_shape() -> None:

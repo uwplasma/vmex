@@ -22,12 +22,15 @@ def test_qi_boozer_mode_residual_is_zero_for_alpha_independent_wells():
         nphi=33,
         nalpha=9,
         n_bounce=7,
+        shuffle_profile_weight=0.0,
     )
 
     np.testing.assert_allclose(np.asarray(out["total"]), 0.0, atol=1e-28, rtol=0.0)
     assert np.asarray(out["width_residuals1d"]).shape == (9 * 7,)
+    assert np.asarray(out["branch_width_residuals1d"]).shape == (9 * 7,)
     assert np.asarray(out["profile_residuals1d"]).shape == (33 * 9,)
-    assert np.asarray(out["residuals1d"]).shape == (9 * 7 + 33 * 9,)
+    assert np.asarray(out["shuffle_profile_residuals1d"]).shape == (0,)
+    assert np.asarray(out["residuals1d"]).shape == (2 * 9 * 7 + 33 * 9,)
 
 
 def test_qi_boozer_mode_residual_rejects_single_helicity_phase_shift():
@@ -72,6 +75,7 @@ def test_qi_branch_width_residual_rejects_misaligned_wells():
         width_weight=0.0,
         branch_width_weight=1.0,
         profile_weight=0.0,
+        shuffle_profile_weight=0.0,
     )
     qh_like = quasi_isodynamic_residual_from_boozer_modes(
         bmnc_b=jnp.asarray([[1.0, 0.1]]),
@@ -85,6 +89,7 @@ def test_qi_branch_width_residual_rejects_misaligned_wells():
         width_weight=0.0,
         branch_width_weight=1.0,
         profile_weight=0.0,
+        shuffle_profile_weight=0.0,
     )
 
     np.testing.assert_allclose(np.asarray(qi_like["total"]), 0.0, atol=1.0e-28, rtol=0.0)
@@ -122,6 +127,41 @@ def test_qi_boozer_mode_residual_is_differentiable():
     assert np.isfinite(np.asarray(value))
     assert np.all(np.isfinite(np.asarray(grad)))
     assert np.linalg.norm(np.asarray(grad[1:])) > 0.0
+
+
+def test_qi_boozer_mode_residual_has_finite_saturated_sigmoid_adjoint():
+    pytest.importorskip("jax")
+
+    import jax
+
+    from vmec_jax._compat import jnp
+    from vmec_jax.quasi_isodynamic import quasi_isodynamic_residual_from_boozer_modes
+
+    xm_b = jnp.asarray([0, 1, 2, 1])
+    xn_b = jnp.asarray([0, 0, 1, 2])
+
+    def objective(coeffs):
+        out = quasi_isodynamic_residual_from_boozer_modes(
+            bmnc_b=coeffs[None, :],
+            xm_b=xm_b,
+            xn_b=xn_b,
+            iota_b=jnp.asarray([0.43]),
+            nfp=2,
+            nphi=33,
+            nalpha=9,
+            n_bounce=7,
+            softness=1.0e-6,
+            branch_width_softness=1.0e-6,
+            shuffle_profile_softness=1.0e-6,
+            profile_weight=0.1,
+            shuffle_profile_weight=1.0,
+        )
+        return out["total"]
+
+    value, grad = jax.value_and_grad(objective)(jnp.asarray([1.0, 0.3, -0.2, 0.15]))
+
+    assert np.isfinite(np.asarray(value))
+    assert np.all(np.isfinite(np.asarray(grad)))
 
 
 def test_qi_boozer_output_wrapper_matches_mode_residual_regression():
@@ -170,9 +210,10 @@ def test_qi_boozer_output_wrapper_matches_mode_residual_regression():
     )
 
     np.testing.assert_allclose(np.asarray(direct["residuals1d"]), np.asarray(wrapped["residuals1d"]))
-    np.testing.assert_allclose(np.asarray(wrapped["total"]), 0.31178185777401074, rtol=1.0e-12, atol=1.0e-14)
+    np.testing.assert_allclose(np.asarray(wrapped["total"]), 0.53924353395480018, rtol=1.0e-12, atol=1.0e-14)
     assert np.asarray(wrapped["width_residuals1d"]).shape == (2 * 7 * 5,)
     assert np.asarray(wrapped["profile_residuals1d"]).shape == (2 * 21 * 7,)
+    assert np.asarray(wrapped["shuffle_profile_residuals1d"]).shape == (2 * 21 * 7,)
 
 
 def test_qi_mirror_ratio_penalty_from_boozer_modes():
@@ -288,7 +329,8 @@ def test_qi_state_residual_smoke(load_case_qh_warm_start):
 
     assert np.asarray(out["width_residuals1d"]).shape == (7 * 5,)
     assert np.asarray(out["profile_residuals1d"]).shape == (17 * 7,)
-    assert np.asarray(out["residuals1d"]).shape == (7 * 5 + 17 * 7,)
+    assert np.asarray(out["shuffle_profile_residuals1d"]).shape == (17 * 7,)
+    assert np.asarray(out["residuals1d"]).shape == (2 * 7 * 5 + 2 * 17 * 7,)
     assert np.isfinite(np.asarray(out["total"]))
 
 
