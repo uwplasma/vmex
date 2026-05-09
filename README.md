@@ -97,8 +97,10 @@ Set `XLA_PYTHON_CLIENT_PREALLOCATE=true` before import if you explicitly want
 JAX's default preallocation behavior.
 
 `vmec_jax` enables JAX's persistent compilation cache automatically for
-accelerator-selected runs. CPU cache use is explicit opt-in because XLA:CPU AOT
-cache hits can emit host-feature mismatch errors on some JAX versions. Set
+accelerator-selected runs, including runs where `CUDA_VISIBLE_DEVICES` or the
+ROCm equivalents expose an accelerator before import. CPU cache use is explicit
+opt-in because XLA:CPU AOT cache hits can emit host-feature mismatch errors on
+some JAX versions. Set
 `VMEC_JAX_COMPILATION_CACHE=1` to enable the default cache for CPU runs, set
 `VMEC_JAX_COMPILATION_CACHE=0` to disable it, or set
 `VMEC_JAX_COMPILATION_CACHE_DIR=/path/to/cache` to choose a custom location.

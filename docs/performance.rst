@@ -102,9 +102,12 @@ warm runtimes competitive with or faster than VMEC2000 on CPU:
 
 **11. On-disk XLA kernel cache**
   The persistent XLA compilation cache is enabled by default for repeated
-  cold-process CPU and GPU runs. Set ``VMEC_JAX_COMPILATION_CACHE=0`` to
-  disable it, or ``VMEC_JAX_COMPILATION_CACHE_DIR`` to choose the cache
-  location.
+  cold-process accelerator runs, including jobs that expose GPUs through
+  ``CUDA_VISIBLE_DEVICES`` or the ROCm equivalents before import. CPU cache use
+  remains opt-in to avoid XLA:CPU AOT host-feature mismatch warnings. Set
+  ``VMEC_JAX_COMPILATION_CACHE=1`` to enable it for CPU runs,
+  ``VMEC_JAX_COMPILATION_CACHE=0`` to disable it, or
+  ``VMEC_JAX_COMPILATION_CACHE_DIR`` to choose the cache location.
 
 **12. GPU demand allocation**
   Before importing JAX, vmec_jax defaults

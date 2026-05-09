@@ -144,8 +144,17 @@ def _default_compilation_cache_dir() -> str | None:
 
     platform_name = os.environ.get("JAX_PLATFORM_NAME", "").strip().lower()
     platforms = os.environ.get("JAX_PLATFORMS", "").strip().lower()
-    accelerator_requested = platform_name in ("gpu", "cuda", "rocm", "tpu") or any(
-        part.strip() in ("gpu", "cuda", "rocm", "tpu") for part in platforms.split(",")
+    visible_accelerator = any(
+        os.environ.get(name, "").strip().lower() not in ("", "-1", "none", "no")
+        for name in ("CUDA_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES")
+    )
+    accelerator_requested = (
+        platform_name in ("gpu", "cuda", "rocm", "tpu")
+        or any(
+            part.strip() in ("gpu", "cuda", "rocm", "tpu")
+            for part in platforms.split(",")
+        )
+        or visible_accelerator
     )
     if not (cache_forced or accelerator_requested):
         return None
@@ -193,8 +202,11 @@ def _configure_compilation_cache(jax_module: Any, cache_dir: str | None) -> None
         if not xla_caches:
             platform_name = os.environ.get("JAX_PLATFORM_NAME", "").strip().lower()
             platforms = os.environ.get("JAX_PLATFORMS", "").strip().lower()
-            gpu_requested = platform_name in ("gpu", "cuda") or any(
-                part.strip() in ("gpu", "cuda") for part in platforms.split(",")
+            visible_cuda = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip().lower()
+            gpu_requested = (
+                platform_name in ("gpu", "cuda")
+                or any(part.strip() in ("gpu", "cuda") for part in platforms.split(","))
+                or visible_cuda not in ("", "-1", "none", "no")
             )
             xla_caches = "xla_gpu_per_fusion_autotune_cache_dir" if gpu_requested else "none"
         if xla_caches.lower() not in ("", "none", "0", "false", "no", "off"):
