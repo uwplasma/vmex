@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -68,6 +70,8 @@ def test_qi_objective_comparison_is_top_level_diagnostic() -> None:
 
 
 def test_policy_matrix_plots_single_problem(tmp_path, monkeypatch) -> None:
+    pytest.importorskip("matplotlib")
+
     from examples.optimization import compare_qs_policy_matrix as matrix
 
     monkeypatch.setattr(matrix, "PROBLEMS", ("qa",))
