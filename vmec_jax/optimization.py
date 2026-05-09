@@ -1193,7 +1193,14 @@ def make_qs_residuals_fn(
             qs_total = _jnp.asarray(qs["total"], dtype=_jnp.float64) * float(qs_weight) ** 2
             return total + 0.5 * qs_total
 
-        return jax.value_and_grad(_objective)(packed_state)
+        value, cotangent = jax.value_and_grad(_objective)(packed_state)
+        if target_iota is not None or min_abs_iota is not None:
+            # Match state_cotangent_operator_from_packed: the current-driven
+            # iota path has gauge-null state entries that can produce NaNs in
+            # reverse mode but do not contribute on the boundary-parameter
+            # tangent subspace.
+            cotangent = _jnp.nan_to_num(cotangent, nan=0.0, posinf=0.0, neginf=0.0)
+        return value, cotangent
 
     residuals_from_state._n_non_qs = int(target_aspect is not None) + int(
         target_iota is not None or min_abs_iota is not None

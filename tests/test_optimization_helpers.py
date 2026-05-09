@@ -16,6 +16,8 @@ from vmec_jax.optimization import (
     create_x_scale,
     gauss_newton_least_squares,
     lift_boundary_params,
+    make_qh_residuals_fn,
+    make_qs_residuals_fn,
     parse_surface_list,
     rebuild_indata_with_resolution,
     smooth_min_abs_iota_residual,
@@ -23,6 +25,7 @@ from vmec_jax.optimization import (
     surface_indices_from_static,
     truncate_indata_boundary_modes,
 )
+from vmec_jax.state import pack_state
 
 
 def test_boundary_param_specs_and_apply():
@@ -136,6 +139,78 @@ def test_smooth_min_abs_iota_residual_is_differentiable_floor():
     assert np.isfinite(float(grad_neg))
     assert float(grad_pos) < 0.0
     assert float(grad_neg) > 0.0
+
+
+def _assert_scalar_objective_hook_matches_residual_vector(residuals_fn, state):
+    residuals = np.asarray(residuals_fn(state), dtype=float)
+    packed = pack_state(state)
+    value, cotangent = residuals_fn._state_objective_value_and_cotangent_from_packed(
+        packed,
+        state.layout,
+    )
+
+    expected_value = 0.5 * float(np.dot(residuals, residuals))
+    assert float(value) == pytest.approx(expected_value, rel=1.0e-11, abs=1.0e-12)
+
+    cotangent = np.asarray(cotangent)
+    assert cotangent.shape == np.asarray(packed).shape
+    assert np.all(np.isfinite(cotangent))
+
+
+def test_qh_residual_factory_scalar_objective_hook_matches_residual_vector(
+    load_case_qh_warm_start,
+):
+    _cfg, indata, static, _boundary, state = load_case_qh_warm_start
+    residuals_fn = make_qh_residuals_fn(
+        static,
+        indata,
+        helicity_m=1,
+        helicity_n=-1,
+        target_aspect=7.0,
+        surfaces=[0.5],
+        aspect_weight=0.3,
+        qs_weight=2.0,
+    )
+
+    _assert_scalar_objective_hook_matches_residual_vector(residuals_fn, state)
+
+
+def test_qs_residual_factory_scalar_objective_hook_sanitizes_iota_cotangent(
+    load_case_qh_warm_start,
+):
+    _cfg, indata, static, _boundary, state = load_case_qh_warm_start
+    residuals_fn = make_qs_residuals_fn(
+        static,
+        indata,
+        helicity_m=1,
+        helicity_n=-1,
+        target_aspect=7.0,
+        target_iota=0.41,
+        surfaces=[0.5],
+        aspect_weight=0.3,
+        qs_weight=2.0,
+        iota_weight=4.0,
+    )
+
+    _assert_scalar_objective_hook_matches_residual_vector(residuals_fn, state)
+
+
+def test_qs_residual_factory_scalar_objective_hook_handles_iota_floor(
+    load_case_qh_warm_start,
+):
+    _cfg, indata, static, _boundary, state = load_case_qh_warm_start
+    residuals_fn = make_qs_residuals_fn(
+        static,
+        indata,
+        helicity_m=0,
+        helicity_n=1,
+        min_abs_iota=0.41,
+        surfaces=[0.5],
+        qs_weight=2.0,
+        iota_weight=4.0,
+    )
+
+    _assert_scalar_objective_hook_matches_residual_vector(residuals_fn, state)
 
 
 def test_indexed_boundary_maps_from_boundary_keep_first_duplicate_mode():
