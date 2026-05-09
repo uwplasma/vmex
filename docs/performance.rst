@@ -402,28 +402,28 @@ versus accepted-point optimization replay:
      - ``3.94 s``
      - replay and residual tangent projection
    * - QA ``max_mode=1`` scalar gradient, 8 DOFs
-     - ``4.79 s``
-     - ``7.72 s``
-     - residual/state cotangent and replay
+     - ``2.56 s``
+     - ``4.56 s``
+     - cached scalar cotangent and replay
    * - QA ``max_mode=3`` dense Jacobian, 48 DOFs
      - ``4.12 s``
      - ``3.80 s``
      - replay and residual tangent projection
    * - QA ``max_mode=3`` scalar gradient, 48 DOFs
-     - ``3.81 s``
-     - ``5.79 s``
-     - replay and scalar objective cotangent
+     - ``1.73 s``
+     - ``3.03 s``
+     - cached scalar cotangent and replay
 
 Those numbers are perturbed accepted-point repeats with warm compiled helper
 shapes, ``inner_max_iter`` of 40--80, and relaxed ``ftol`` appropriate for
 profiling.  They are not full production optimization timings.  The scalar
-reverse-adjoint gradient now uses a direct scalar-objective cotangent hook for
-the built-in QS residual factories rather than VJP-ing the full residual vector.
-That reduced the QA ``max_mode=1`` GPU gradient callback from about ``9.8 s`` to
-``7.7 s`` after warmup and reduced the cold+warm pair from about ``93 s`` to
-``33 s``.  Dense Jacobians remain competitive at low and moderate DOF counts;
-the scalar-adjoint path becomes more relevant for higher-mode or memory-limited
-optimizations.
+reverse-adjoint gradient now uses a cached JIT scalar-objective cotangent hook
+for the built-in QS residual factories rather than VJP-ing the full residual
+vector from Python on every callback.  That reduced the QA ``max_mode=1`` GPU
+gradient callback from about ``9.8 s`` to ``4.6 s`` after warmup, and reduced
+the QA ``max_mode=3`` GPU gradient callback from about ``5.8 s`` to ``3.0 s``.
+Dense Jacobians remain competitive at low DOF counts; the scalar-adjoint path is
+now the better candidate for higher-mode or memory-limited optimizations.
 
 After caching the fixed quasisymmetry angular quadrature grid, the same
 ``office`` QH ``max_mode=2`` accepted-point callback profile gave two perturbed
