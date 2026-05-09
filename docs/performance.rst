@@ -573,8 +573,13 @@ degree of freedom.  It is exposed through
 lane, not the default QA/QH production path, because the current reverse
 products are comparable to, but not consistently faster than, the dense
 vectorized column replay for the present ``max_mode <= 3`` parameter counts.
-The next useful step is an optimizer-level scalar-adjoint method with better
-line-search/scaling behavior, not switching the default least-squares path.
+The ``lbfgs_adjoint`` wrapper now enforces a hard scalar-gradient callback
+budget because SciPy's internal L-BFGS-B line search can otherwise exceed the
+requested ``max_nfev``.  A May 2026 QH ``max_mode=1`` diagnostic with
+``max_nfev=2`` confirms the budget is respected, but the scalar-adjoint
+optimizer was still slower and less effective than dense exact least-squares on
+that small case.  The next useful step is therefore better line-search/scaling
+behavior, not switching the default least-squares path.
 
 The accepted-point exact path remains the discrete-adjoint tape path on both
 CPU and GPU.  The scan-differentiated exact path is intentionally not selected

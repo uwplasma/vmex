@@ -419,6 +419,79 @@ def test_fixed_boundary_optimizer_exact_residual_reuses_jacobian_primal():
     np.testing.assert_allclose(opt._exact_residual_after_jacobian(), [3.0, 4.0])
 
 
+def test_lbfgs_adjoint_respects_scalar_evaluation_budget(monkeypatch):
+    import scipy.optimize
+
+    state = object()
+    last_x = [np.array([0.0])]
+
+    def fake_minimize(fun, y0, *, jac, method, options):
+        assert jac is True
+        assert method == "L-BFGS-B"
+        assert options["maxfun"] == 2
+        fun(np.asarray(y0, dtype=float))
+        fun(np.asarray([0.4], dtype=float))
+        # The third line-search probe must be blocked by vmec_jax's hard
+        # budget guard, not left to SciPy's soft maxfun accounting.
+        fun(np.asarray([0.8], dtype=float))
+        raise AssertionError("budget guard did not stop L-BFGS-B")
+
+    monkeypatch.setattr(scipy.optimize, "minimize", fake_minimize)
+    monkeypatch.setattr(
+        "vmec_jax.wout.equilibrium_aspect_ratio_from_state",
+        lambda **_kwargs: 1.0,
+    )
+
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._scan_exact_path = "tape"
+    opt._trial_residual_cache = {}
+    opt._exact_cache = {}
+    opt._static = SimpleNamespace()
+    opt._solver_device_name = None
+    opt._inner_max_iter = 0
+    opt._inner_ftol = 0.0
+    opt._trial_max_iter = 0
+    opt._trial_ftol = 0.0
+    opt._post_jacobian_clear = lambda *args, **kwargs: None
+    opt._profile_dump = lambda: {}
+    opt._cached_exact_state = lambda _x: None
+    opt._base_params_vector = lambda: np.zeros(1)
+    opt._exact_cache_key = lambda x: tuple(np.asarray(x, dtype=float).round(12))
+    opt._qs_total_from_state = lambda _state, res: float(np.dot(res, res))
+
+    def residual_fun(x):
+        return np.asarray([float(np.asarray(x)[0]) - 1.0], dtype=float)
+
+    def solve_exact(x, return_payload=False):
+        last_x[0] = np.asarray(x, dtype=float)
+        return (state, {}) if return_payload else state
+
+    opt.residual_fun = residual_fun
+    opt._evaluate_residuals_from_state = lambda _state: residual_fun(last_x[0])
+    opt._solve_exact_with_tape = solve_exact
+    opt._solve_forward = lambda x, trial=True: solve_exact(x, return_payload=False)
+
+    objective_calls = []
+
+    def objective_and_gradient(x):
+        x = np.asarray(x, dtype=float)
+        objective_calls.append(float(x[0]))
+        residual = float(x[0]) - 1.0
+        return 0.5 * residual * residual, np.asarray([residual], dtype=float)
+
+    opt.objective_and_gradient_fun = objective_and_gradient
+
+    result = opt.run(np.asarray([0.0]), method="lbfgs_adjoint", max_nfev=2, verbose=0)
+
+    assert objective_calls == [0.0, 0.4]
+    assert result["nfev"] == 2
+    assert result["njev"] == 2
+    assert not result["success"]
+    assert result["message"] == "maximum number of scalar objective evaluations is exceeded"
+    np.testing.assert_allclose(result["x"], np.asarray([0.4]))
+    assert result["_history_dump"]["objective_final"] == pytest.approx(0.36)
+
+
 def test_qs_total_prefers_metadata_function_over_residual_vector():
     opt = object.__new__(FixedBoundaryExactOptimizer)
     opt._n_qs = None
