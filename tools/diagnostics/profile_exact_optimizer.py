@@ -137,6 +137,17 @@ def _parse_args() -> argparse.Namespace:
         help="Include SciPy residual/Jacobian callback source timings in the JSON history.",
     )
     p.add_argument(
+        "--run-repeats",
+        type=int,
+        default=1,
+        help=(
+            "Repeat the short optimizer run in the same Python process. Between "
+            "repeats, point/tape caches are cleared while compiled JAX/XLA "
+            "executables remain warm. This separates in-process warm runtime "
+            "from first-run compilation overhead."
+        ),
+    )
+    p.add_argument(
         "--vmec-timing",
         action="store_true",
         help="Enable VMEC_JAX_TIMING so exact tape profiles include solver phase timings.",
@@ -182,6 +193,15 @@ def _runtime_info() -> dict[str, object]:
         }
     except Exception as exc:  # pragma: no cover - diagnostics only
         return {"error": repr(exc)}
+
+
+def _clear_optimizer_point_caches(opt) -> None:
+    """Clear solved-state/tape caches without dropping compiled executables."""
+    opt._exact_cache.clear()
+    opt._exact_state_cache.clear()
+    opt._trial_residual_cache.clear()
+    opt._initial_tangent_cache.clear()
+    opt._last_jacobian_residual = None
 
 
 def main() -> int:
@@ -440,30 +460,42 @@ def main() -> int:
         trace_out.mkdir(parents=True, exist_ok=True)
         jax.profiler.start_trace(str(trace_out))
 
+    run_repeats = max(1, int(args.run_repeats))
+    histories: list[dict[str, object]] = []
+    result = None
     try:
         tr_solver = None if args.scipy_tr_solver == "none" else args.scipy_tr_solver
-        result = opt.run(
-            params0,
-            method=args.method,
-            max_nfev=args.max_nfev,
-            ftol=1e-3,
-            gtol=1e-3,
-            xtol=1e-3,
-            x_scale=x_scale,
-            verbose=1,
-            iota_fn=(
-                None
-                if args.problem != "qa"
-                else lambda state: _iota_mean_fn(vj, state, static=static, indata=indata, signgs=opt._signgs)
-            ),
-            target_iota=target_iota,
-            target_aspect=target_aspect,
-            scipy_tr_solver=tr_solver,
-            scipy_lsmr_maxiter=None if args.lsmr_maxiter <= 0 else int(args.lsmr_maxiter),
-            lbfgs_step_bound=float(args.lbfgs_step_bound),
-            scalar_step_bound=float(args.scalar_step_bound),
-            trace_callbacks=args.trace_callbacks,
-        )
+        for repeat in range(run_repeats):
+            if repeat > 0:
+                _clear_optimizer_point_caches(opt)
+                opt._profile = {}
+            if run_repeats > 1:
+                print(f"\n=== optimizer run repeat {repeat + 1}/{run_repeats} ===")
+            result = opt.run(
+                params0,
+                method=args.method,
+                max_nfev=args.max_nfev,
+                ftol=1e-3,
+                gtol=1e-3,
+                xtol=1e-3,
+                x_scale=x_scale,
+                verbose=1,
+                iota_fn=(
+                    None
+                    if args.problem != "qa"
+                    else lambda state: _iota_mean_fn(vj, state, static=static, indata=indata, signgs=opt._signgs)
+                ),
+                target_iota=target_iota,
+                target_aspect=target_aspect,
+                scipy_tr_solver=tr_solver,
+                scipy_lsmr_maxiter=None if args.lsmr_maxiter <= 0 else int(args.lsmr_maxiter),
+                lbfgs_step_bound=float(args.lbfgs_step_bound),
+                scalar_step_bound=float(args.scalar_step_bound),
+                trace_callbacks=args.trace_callbacks,
+            )
+            hist_repeat = dict(result["_history_dump"])
+            hist_repeat["repeat"] = repeat
+            histories.append(hist_repeat)
     finally:
         if trace_out is not None:
             import jax
@@ -471,6 +503,8 @@ def main() -> int:
             jax.profiler.stop_trace()
             print(f"Trace written to {trace_out}")
 
+    if result is None:  # pragma: no cover - defensive
+        raise RuntimeError("optimizer run did not produce a result")
     hist = result["_history_dump"]
     print(
         f"\nFinal objective={hist['objective_final']:.6e} qs={hist['qs_final']:.6e} "
@@ -484,7 +518,18 @@ def main() -> int:
     if args.json_out:
         out = Path(args.json_out).expanduser().resolve()
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(hist, indent=2), encoding="utf-8")
+        payload = hist if run_repeats == 1 else {
+            "problem": args.problem,
+            "max_mode": int(args.max_mode),
+            "dofs": len(specs),
+            "method": args.method,
+            "solver_device_requested": args.solver_device,
+            "solver_device_resolved": opt._solver_device_name or "default",
+            "runtime": _runtime_info(),
+            "run_repeats": run_repeats,
+            "runs": histories,
+        }
+        out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(f"Wrote {out}")
 
     return 0

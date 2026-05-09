@@ -1367,9 +1367,12 @@ class FixedBoundaryExactOptimizer:
         self._exact_solver_kwargs = dict(_base)
         self._trial_solver_kwargs = dict(
             _base,
-            # Trial-point residuals do not need an adjoint tape. Keep the
-            # solver on the measured fastest path by default; the scan loop is
-            # still available through VMEC_JAX_OPT_TRIAL_SCAN for diagnostics.
+            # Trial-point residuals do not need an adjoint tape. Use the scan
+            # loop by default because May 2026 CPU/GPU exact-optimizer profiles
+            # showed lower warm trial-solve cost for QH mode-1/mode-3. The
+            # accepted-point exact Jacobian path remains the discrete-adjoint
+            # tape path; VMEC_JAX_OPT_TRIAL_SCAN=0 keeps the old non-scan trial
+            # path available for diagnostics.
             jit_forces="auto",
             use_scan=self._use_scan_for_trial_solves(),
         )
@@ -1445,21 +1448,18 @@ class FixedBoundaryExactOptimizer:
         """Return whether trial residual solves should use the scan loop.
 
         Exact-optimizer trial residuals are short, trace-compatible VMEC solves
-        called repeatedly by SciPy's trust-region line search.  GPU profiling
-        showed the scan trial path was slower than the non-scan forward path
-        for the current QA/QH/QP/QI optimization cases because the scan graph
-        pays a larger compile/dispatch cost and does not reuse the exact replay
-        tape.  Keep scan opt-in for diagnostics and future larger cases, but do
-        not force it just because the solver device is an accelerator.
+        called repeatedly by SciPy's trust-region line search.  They do not need
+        an adjoint tape.  May 2026 repeat-run diagnostics showed the scan trial
+        path has materially lower warm cost than the non-scan path on QH mode-1
+        and mode-3 for both CPU and GPU, while the accepted-point exact
+        differentiation path remains the non-scan discrete-adjoint tape.
         """
         forced = os.getenv("VMEC_JAX_OPT_TRIAL_SCAN", "").strip().lower()
         if forced in ("1", "true", "yes", "on", "scan"):
             return True
         if forced in ("0", "false", "no", "off", "loop", "none"):
             return False
-        if self._solver_device_name in ("cpu", "gpu", "tpu", "cuda", "rocm"):
-            return False
-        return False
+        return True
 
     def _solver_device_context(self):
         if self._solver_device_name is None:

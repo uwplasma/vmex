@@ -144,20 +144,25 @@ term for ``max_mode=2`` and ``max_mode=3`` is
 ``jacobian_tape_replay``.  Ordinary fixed-boundary solves can benefit from GPU
 ``lax.scan`` after warmup, but the exact optimizer's accepted-point Jacobian
 path uses the discrete-adjoint tape replay by default.  Relaxed trial residuals
-also default to the trace-compatible non-scan forward path because April 2026
-GPU profiling showed lower compile/dispatch overhead for the QA/QH/QP/QI
-optimization callbacks.  Set ``VMEC_JAX_OPT_TRIAL_SCAN=1`` only for explicit
-diagnostics.  ``solver_device=None``, ``"auto"``, and ``"default"`` inherit
+default to the trace-compatible scan forward path because May 2026 repeat-run
+profiling showed lower warm trial-solve cost for QH mode-1/mode-3 on both CPU
+and GPU.  Set ``VMEC_JAX_OPT_TRIAL_SCAN=0`` to force the old non-scan trial path
+for diagnostics.  ``solver_device=None``, ``"auto"``, and ``"default"`` inherit
 JAX's active backend; pass ``solver_device="cpu"`` or ``"gpu"`` only when you
 want an explicit override.
 
-For same-process warmup studies, repeat a callback at the same point:
+For same-process warmup studies, repeat a callback at the same point or repeat
+the whole short optimizer run while keeping compiled executables warm:
 
 .. code-block:: bash
 
    JAX_PLATFORM_NAME=gpu PYTHONPATH=. python tools/diagnostics/profile_exact_optimizer.py \
      --problem qh --max-mode 2 --callback jacobian --repeats 2 \
      --inner-max-iter 80 --trial-max-iter 40 --solver-device gpu
+
+   JAX_PLATFORM_NAME=gpu PYTHONPATH=. python tools/diagnostics/profile_exact_optimizer.py \
+     --problem qh --max-mode 3 --max-nfev 2 --run-repeats 3 \
+     --inner-max-iter 120 --trial-max-iter 120 --solver-device gpu
 
 For realistic accepted-point studies, perturb the parameter vector on each
 repeat.  This keeps compiled helper shapes warm while forcing a new equilibrium
