@@ -899,12 +899,31 @@ def make_qh_residuals_fn(
     def state_cotangent_from_packed(packed_state, layout, residual_cotangent):
         return state_cotangent_operator_from_packed(packed_state, layout)(residual_cotangent)
 
+    def state_objective_value_and_cotangent_from_packed(packed_state, layout):
+        from ._compat import jax, jnp as _jnp
+        from .state import unpack_state
+
+        packed_state = _jnp.asarray(packed_state, dtype=_jnp.float64)
+
+        def _objective(packed):
+            state = unpack_state(packed, layout)
+            aspect = equilibrium_aspect_ratio_from_state(state=state, static=static)
+            aspect_residual = float(aspect_weight) * (aspect - target_aspect)
+            qs = _qs_eval_from_state(state)
+            qs_total = _jnp.asarray(qs["total"], dtype=_jnp.float64) * float(qs_weight) ** 2
+            return 0.5 * aspect_residual * aspect_residual + 0.5 * qs_total
+
+        return jax.value_and_grad(_objective)(packed_state)
+
     residuals_from_state._n_non_qs = 1
     residuals_from_state._qs_total_from_state = (
         lambda state: float(_qs_eval_from_state(state)["total"]) * float(qs_weight) ** 2
     )
     residuals_from_state._state_cotangent_from_packed = state_cotangent_from_packed
     residuals_from_state._state_cotangent_operator_from_packed = state_cotangent_operator_from_packed
+    residuals_from_state._state_objective_value_and_cotangent_from_packed = (
+        state_objective_value_and_cotangent_from_packed
+    )
 
     return residuals_from_state
 
@@ -1136,6 +1155,53 @@ def make_qs_residuals_fn(
     def state_cotangent_from_packed(packed_state, layout, residual_cotangent):
         return state_cotangent_operator_from_packed(packed_state, layout)(residual_cotangent)
 
+    def state_objective_value_and_cotangent_from_packed(packed_state, layout):
+        from ._compat import jax, jnp as _jnp
+        from .state import unpack_state
+
+        packed_state = _jnp.asarray(packed_state, dtype=_jnp.float64)
+
+        def _objective(packed):
+            state = unpack_state(packed, layout)
+            total = _jnp.asarray(0.0, dtype=_jnp.float64)
+            if target_aspect is not None:
+                aspect = equilibrium_aspect_ratio_from_state(state=state, static=static)
+                aspect_residual = float(aspect_weight) * (aspect - target_aspect)
+                total = total + 0.5 * aspect_residual * aspect_residual
+            if target_iota is not None or min_abs_iota is not None:
+                _chips, _iotas, _iotaf = equilibrium_iota_profiles_from_state(
+                    state=state, static=static, indata=_indata, signgs=_signgs,
+                )
+                del _chips, _iotaf
+                iotas = _jnp.asarray(_iotas, dtype=_jnp.float64)
+                mean_iota = (
+                    _jnp.asarray(0.0, dtype=iotas.dtype)
+                    if int(iotas.shape[0]) <= 1
+                    else _jnp.mean(iotas[1:])
+                )
+                if target_iota is not None:
+                    iota_residual = mean_iota - target_iota
+                else:
+                    iota_residual = smooth_min_abs_iota_residual(
+                        mean_iota,
+                        float(min_abs_iota),
+                        softness=float(iota_floor_softness),
+                    )
+                iota_residual = float(iota_weight) * iota_residual
+                total = total + 0.5 * iota_residual * iota_residual
+            qs = _qs_eval_from_state(state)
+            qs_total = _jnp.asarray(qs["total"], dtype=_jnp.float64) * float(qs_weight) ** 2
+            return total + 0.5 * qs_total
+
+        value, cotangent = jax.value_and_grad(_objective)(packed_state)
+        if target_iota is not None or min_abs_iota is not None:
+            # Match state_cotangent_operator_from_packed: the current-driven
+            # iota path has gauge-null state entries that can produce NaNs in
+            # reverse mode but do not contribute on the boundary-parameter
+            # tangent subspace.
+            cotangent = _jnp.nan_to_num(cotangent, nan=0.0, posinf=0.0, neginf=0.0)
+        return value, cotangent
+
     residuals_from_state._n_non_qs = int(target_aspect is not None) + int(
         target_iota is not None or min_abs_iota is not None
     )
@@ -1144,6 +1210,9 @@ def make_qs_residuals_fn(
     )
     residuals_from_state._state_cotangent_from_packed = state_cotangent_from_packed
     residuals_from_state._state_cotangent_operator_from_packed = state_cotangent_operator_from_packed
+    residuals_from_state._state_objective_value_and_cotangent_from_packed = (
+        state_objective_value_and_cotangent_from_packed
+    )
     return residuals_from_state
 
 
@@ -2192,17 +2261,42 @@ class FixedBoundaryExactOptimizer:
             return self._residuals_fn(unpack_state(packed, self._layout))
 
         t_res_vjp = time.perf_counter()
-        residuals = self._residuals_fn(state)
-        residuals = _jnp.asarray(residuals, dtype=_jnp.float64)
-        cost = 0.5 * _jnp.vdot(residuals, residuals)
-        state_cotangent_operator_factory = getattr(
-            self._residuals_fn, "_state_cotangent_operator_from_packed", None
+        objective_cotangent_factory = getattr(
+            self._residuals_fn,
+            "_state_objective_value_and_cotangent_from_packed",
+            None,
         )
-        if state_cotangent_operator_factory is not None:
-            final_cotangent = state_cotangent_operator_factory(packed_final, self._layout)(residuals)
+        if objective_cotangent_factory is not None:
+            helper_key = (
+                "objective_value_and_cotangent",
+                int(self._layout.size),
+                id(self._residuals_fn),
+            )
+            helper_cache = self._discrete_jacobian_helper_cache.get(helper_key)
+            if helper_cache is None:
+                @jax.jit
+                def _objective_value_and_cotangent_helper(packed_state_arg):
+                    return objective_cotangent_factory(packed_state_arg, self._layout)
+
+                helper_cache = {
+                    "objective_value_and_cotangent": _objective_value_and_cotangent_helper
+                }
+                self._discrete_jacobian_helper_cache[helper_key] = helper_cache
+            cost, final_cotangent = helper_cache["objective_value_and_cotangent"](packed_final)
         else:
-            _, residual_vjp = jax.vjp(_residuals_from_packed, packed_final)
-            final_cotangent = residual_vjp(residuals)[0]
+            residuals = self._residuals_fn(state)
+            residuals = _jnp.asarray(residuals, dtype=_jnp.float64)
+            cost = 0.5 * _jnp.vdot(residuals, residuals)
+            state_cotangent_operator_factory = getattr(
+                self._residuals_fn, "_state_cotangent_operator_from_packed", None
+            )
+            if state_cotangent_operator_factory is not None:
+                final_cotangent = state_cotangent_operator_factory(packed_final, self._layout)(
+                    residuals
+                )
+            else:
+                _, residual_vjp = jax.vjp(_residuals_from_packed, packed_final)
+                final_cotangent = residual_vjp(residuals)[0]
         # Some state directions are intentionally inactive/gauge-null for a
         # given VMEC symmetry. Reverse-mode rules for sqrt/atan2-style geometry
         # kernels can return NaN cotangents in those unused directions even
