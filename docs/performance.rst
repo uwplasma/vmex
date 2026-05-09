@@ -142,14 +142,44 @@ tape construction, checkpoint-tape JVP replay, residual tangent projection, and
 ``wout`` writing.  On the current exact-adjoint implementation, the dominant
 term for ``max_mode=2`` and ``max_mode=3`` is
 ``jacobian_tape_replay``.  Ordinary fixed-boundary solves can benefit from GPU
-``lax.scan`` after warmup, but the exact optimizer's accepted-point Jacobian
-path uses the discrete-adjoint tape replay by default.  Relaxed trial residuals
-default to the trace-compatible scan forward path because May 2026 repeat-run
-profiling showed lower warm trial-solve cost for QH mode-1/mode-3 on both CPU
-and GPU.  Set ``VMEC_JAX_OPT_TRIAL_SCAN=0`` to force the old non-scan trial path
-for diagnostics.  ``solver_device=None``, ``"auto"``, and ``"default"`` inherit
-JAX's active backend; pass ``solver_device="cpu"`` or ``"gpu"`` only when you
-want an explicit override.
+``lax.scan`` after warmup.  For exact optimization, accepted-point Jacobians use
+the discrete-adjoint tape path on CPU and the scan-differentiated path on GPU by
+default.  May 2026 repeat-run profiling showed that this device-aware policy
+keeps the faster CPU path while reducing warm GPU QH mode-1/mode-3 callback
+time.  Set ``VMEC_JAX_OPT_EXACT_PATH=tape`` or
+``VMEC_JAX_OPT_EXACT_PATH=scan`` to force one accepted-point path for parity or
+profiling.  Relaxed trial residuals default to the trace-compatible scan forward
+path because the same profiling showed lower warm trial-solve cost for QH
+mode-1/mode-3 on both CPU and GPU.  Set ``VMEC_JAX_OPT_TRIAL_SCAN=0`` to force
+the old non-scan trial path for diagnostics.  ``solver_device=None``, ``"auto"``,
+and ``"default"`` inherit JAX's active backend; pass ``solver_device="cpu"`` or
+``"gpu"`` only when you want an explicit override.
+
+Representative May 2026 warm-repeat timings on the QH warm-start diagnostic
+(``max_nfev=2``, ``inner/trial_max_iter=120``) were:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Case
+     - CPU policy
+     - CPU wall time
+     - GPU policy
+     - GPU wall time
+   * - QH ``max_mode=1``
+     - tape exact + scan trial
+     - ``2.36 s``
+     - scan exact + scan trial
+     - ``5.40 s``
+   * - QH ``max_mode=3``
+     - tape exact + scan trial
+     - ``3.54 s``
+     - scan exact + scan trial
+     - ``4.92 s``
+
+These short cases are still CPU-faster overall, but the GPU policy materially
+improves over the previous GPU tape/trial-loop path (``11.25 s`` for QH
+``max_mode=1`` and ``8.18 s`` for QH ``max_mode=3`` in the same diagnostic).
 
 For same-process warmup studies, repeat a callback at the same point or repeat
 the whole short optimizer run while keeping compiled executables warm:

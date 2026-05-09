@@ -1424,10 +1424,12 @@ class FixedBoundaryExactOptimizer:
     def _select_exact_path(self) -> str:
         """Choose the accepted-point differentiation path.
 
-        The established non-scan discrete-adjoint tape is currently the fastest
-        cold path on both CPU and GPU for QA/QH optimization callbacks.  The
-        scan-differentiated path remains available via
-        ``VMEC_JAX_OPT_EXACT_PATH=scan`` for diagnostics and future GPU work.
+        The established non-scan discrete-adjoint tape remains the fastest
+        warm path on CPU.  On GPU, May 2026 repeat-run profiles showed the
+        scan-differentiated exact path lowers accepted-point Jacobian wall time
+        for QH/QA mode-1 and QH mode-3 diagnostics.  The environment override
+        ``VMEC_JAX_OPT_EXACT_PATH={tape,scan}`` remains available for profiling
+        and parity studies.
         """
         forced = os.getenv("VMEC_JAX_OPT_EXACT_PATH", "").strip().lower()
         if forced in ("scan", "tape"):
@@ -1435,13 +1437,15 @@ class FixedBoundaryExactOptimizer:
         if self._solver_device_name == "cpu":
             return "tape"
         if self._solver_device_name in ("gpu", "tpu", "cuda", "rocm"):
-            return "tape"
+            return "scan"
         try:
             from ._compat import jax as _jax
 
             backend = str(_jax.default_backend()).strip().lower() if _jax is not None else "cpu"
         except Exception:
             backend = "cpu"
+        if backend in ("gpu", "cuda", "tpu", "rocm"):
+            return "scan"
         return "tape"
 
     def _use_scan_for_trial_solves(self) -> bool:
