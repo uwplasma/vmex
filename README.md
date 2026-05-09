@@ -96,11 +96,14 @@ between optimization workers and was faster in the exact-Jacobian GPU profile.
 Set `XLA_PYTHON_CLIENT_PREALLOCATE=true` before import if you explicitly want
 JAX's default preallocation behavior.
 
-`vmec_jax` enables JAX's persistent compilation cache by default, but its
-default cache path is machine/CPU-feature scoped to avoid reusing CPU AOT
-executables compiled on a different host. Set `VMEC_JAX_COMPILATION_CACHE=0` to
-disable the persistent cache or `VMEC_JAX_COMPILATION_CACHE_DIR=/path/to/cache`
-to choose a custom location.
+`vmec_jax` enables JAX's persistent compilation cache automatically for
+accelerator-selected runs. CPU cache use is explicit opt-in because XLA:CPU AOT
+cache hits can emit host-feature mismatch errors on some JAX versions. Set
+`VMEC_JAX_COMPILATION_CACHE=1` to enable the default cache for CPU runs, set
+`VMEC_JAX_COMPILATION_CACHE=0` to disable it, or set
+`VMEC_JAX_COMPILATION_CACHE_DIR=/path/to/cache` to choose a custom location.
+The default cache path is scoped by machine, CPU features, Python version, and
+JAX/JAXLIB versions.
 
 ## Showcase (single-grid)
 
@@ -149,7 +152,7 @@ All figures below use the same **single-grid** run settings: `NS_ARRAY=151`, `NI
   <img src="docs/_static/figures/readme_runtime_compare.png" width="860" />
 </p>
 
-**Cold vs warm runtime**: the *cold* bar includes XLA JIT compilation on the first call (one-time cost per process); the *warm* bar is the steady-state solve time for subsequent calls in the same process. VMEC2000 has no compilation overhead, so it is always effectively cold. `vmec_jax` enables JAX's persistent compilation cache by default under `~/.cache/vmec_jax/jax_cache/<machine-fingerprint>` so repeated cold-process runs on the same host can reuse compiled kernels without sharing CPU AOT executables across incompatible machines; set `VMEC_JAX_COMPILATION_CACHE=0` to disable it or `VMEC_JAX_COMPILATION_CACHE_DIR=/path/to/cache` to choose a different location.
+**Cold vs warm runtime**: the *cold* bar includes XLA JIT compilation on the first call (one-time cost per process); the *warm* bar is the steady-state solve time for subsequent calls in the same process. VMEC2000 has no compilation overhead, so it is always effectively cold. `vmec_jax` uses JAX's persistent compilation cache automatically for accelerator-selected runs under `~/.cache/vmec_jax/jax_cache/<machine-fingerprint>`. CPU cache use is opt-in with `VMEC_JAX_COMPILATION_CACHE=1` to avoid XLA:CPU AOT host-feature mismatch warnings on some JAX versions.
 
 ## Best Stellarator-Symmetric Optimizations
 
@@ -223,7 +226,8 @@ PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 - Default runs select the fastest stable path for each input automatically.
 - Use `--parity` (or `performance_mode=False` in Python) to force the conservative VMEC2000 loop.
 - Use `--solver-mode accelerated` to force the optimized fixed-boundary controller.
-- For GPU benchmarking, compare both first-process and cache-warm timings; the first GPU process pays XLA compilation, while later processes reuse the persistent cache automatically.
+- For GPU benchmarking, separate raw solver throughput from public policy overhead. For example, use `tools/diagnostics/profile_fixed_boundary.py --no-auto-cli-policy --solver-mode accelerated --no-multigrid --use-scan --solver-device gpu`.
+- Compare both first-process and in-process warm timings. The first GPU process pays XLA/runtime setup; persistent cache effectiveness depends on the JAX version, backend, and machine features.
 
 Details, profiling guidance, and parity methodology:
 

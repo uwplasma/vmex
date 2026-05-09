@@ -17,13 +17,16 @@ code:
 - **Warm run**: steady-state solve time after the kernels are in memory — the
   fair comparison against VMEC2000.
 
-Persistent XLA compilation caching is enabled by default for repeated starts.
-Compiled kernels are stored under
+Persistent XLA compilation caching is enabled automatically for
+accelerator-selected runs.  CPU cache use is opt-in because XLA:CPU persistent
+cache entries are native AOT executables and can emit host-feature mismatch
+errors on some JAX versions.  Compiled kernels are stored under
 ``~/.cache/vmec_jax/jax_cache/<machine-fingerprint>`` unless the user sets
 ``VMEC_JAX_COMPILATION_CACHE_DIR`` or upstream ``JAX_COMPILATION_CACHE_DIR``.
-The machine-specific suffix avoids reusing native XLA:CPU AOT executables
-compiled on a different host CPU. Set ``VMEC_JAX_COMPILATION_CACHE=0`` to
-disable the persistent cache.
+The suffix includes host CPU details plus Python/JAX/JAXLIB versions to avoid
+reusing native XLA:CPU AOT executables compiled for an incompatible runtime.
+Set ``VMEC_JAX_COMPILATION_CACHE=1`` to opt in for CPU runs, or
+``VMEC_JAX_COMPILATION_CACHE=0`` to disable the persistent cache.
 
 VMEC2000 is a pre-compiled Fortran binary with no JIT overhead — it is always
 effectively "cold".  When benchmarking, compare ``vmec_jax`` warm runtime
@@ -376,6 +379,52 @@ shortcuts were rejected as defaults: precomputed tridiagonal coefficients are
 now correctness-tested but slower on this replay graph, and stopping gradients
 through solver time-control scalars nearly doubled replay time.
 
+May 2026 follow-up profiling used Python 3.11.15, JAX 0.10.0, and
+``jax[cuda13]`` on the same ``office`` RTX A4000 host.  The GPU backend is
+working, but it is still not a clear win for these small/medium exact
+optimization callbacks.  The important split is raw fixed-boundary throughput
+versus accepted-point optimization replay:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 16 16 30
+
+   * - Callback / case
+     - CPU warm
+     - GPU warm
+     - Dominant GPU terms
+   * - Raw QH fixed-boundary, 100 iterations
+     - ``0.93 s``
+     - ``2.06 s``
+     - fixed launch/compile overhead dominates
+   * - QA ``max_mode=1`` dense Jacobian, 8 DOFs
+     - ``2.92 s``
+     - ``3.94 s``
+     - replay and residual tangent projection
+   * - QA ``max_mode=1`` scalar gradient, 8 DOFs
+     - ``2.56 s``
+     - ``4.56 s``
+     - cached scalar cotangent and replay
+   * - QA ``max_mode=3`` dense Jacobian, 48 DOFs
+     - ``4.12 s``
+     - ``3.80 s``
+     - replay and residual tangent projection
+   * - QA ``max_mode=3`` scalar gradient, 48 DOFs
+     - ``1.73 s``
+     - ``3.03 s``
+     - cached scalar cotangent and replay
+
+Those numbers are perturbed accepted-point repeats with warm compiled helper
+shapes, ``inner_max_iter`` of 40--80, and relaxed ``ftol`` appropriate for
+profiling.  They are not full production optimization timings.  The scalar
+reverse-adjoint gradient now uses a cached JIT scalar-objective cotangent hook
+for the built-in QS residual factories rather than VJP-ing the full residual
+vector from Python on every callback.  That reduced the QA ``max_mode=1`` GPU
+gradient callback from about ``9.8 s`` to ``4.6 s`` after warmup, and reduced
+the QA ``max_mode=3`` GPU gradient callback from about ``5.8 s`` to ``3.0 s``.
+Dense Jacobians remain competitive at low DOF counts; the scalar-adjoint path is
+now the better candidate for higher-mode or memory-limited optimizations.
+
 After caching the fixed quasisymmetry angular quadrature grid, the same
 ``office`` QH ``max_mode=2`` accepted-point callback profile gave two perturbed
 GPU dense-Jacobian callbacks of about ``11.8 s`` and ``4.3 s`` with the default
@@ -436,6 +485,76 @@ The current practical policy is therefore:
   to force CPU execution inside a GPU-enabled process,
 - do not promise first-process GPU speedups on small fixed-boundary cases until
   the scan-safe path is broadened and the GPU compile graph is reduced.
+
+Raw solver throughput vs public policy overhead
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The fixed-boundary profiler can now separate the requested raw solver path from
+the public CLI-style policy.  This matters because public defaults may add
+dynamic scan probes, staged follow-up, or finish attempts around the requested
+iteration budget.  To benchmark the raw accelerated scan path, use:
+
+.. code-block:: bash
+
+   JAX_ENABLE_X64=1 python tools/diagnostics/profile_fixed_boundary.py \
+     --input examples/data/input.nfp4_QH_warm_start \
+     --iters 20 \
+     --simple-profile \
+     --no-multigrid \
+     --no-auto-cli-policy \
+     --solver-mode accelerated \
+     --use-scan \
+     --solver-device gpu \
+     --json-out /tmp/vmec_jax_qh20_raw_gpu.json
+
+May 2026 raw-path diagnostics showed:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 34 16 16 16 16
+
+   * - Case
+     - Device
+     - Iterations
+     - Timing
+     - Notes
+   * - ``input.nfp4_QH_warm_start``
+     - local CPU, JAX 0.9.2
+     - 20
+     - ``4.43 s`` cold, ``0.31 s`` warm
+     - raw accelerated scan
+   * - ``input.nfp4_QH_warm_start``
+     - ``office`` GPU, JAX 0.6.2
+     - 20
+     - ``12.1 s`` cold, ``1.70 s`` warm
+     - old Python 3.10/JAX stack
+   * - ``input.nfp4_QH_warm_start``
+     - ``office`` CPU, JAX 0.6.2
+     - 100
+     - ``0.97 s`` warm
+     - same host as GPU
+   * - ``input.nfp4_QH_warm_start``
+     - ``office`` GPU, JAX 0.6.2
+     - 100
+     - ``1.77 s`` warm
+     - fixed overhead dominates
+   * - ``input.LandremanPaul2021_QA_lowres``
+     - ``office`` CPU/GPU, JAX 0.6.2
+     - 20
+     - ``1.29 s`` CPU, ``1.87 s`` GPU
+     - warmed raw path
+   * - ``input.nfp2_QI``
+     - ``office`` CPU/GPU, JAX 0.6.2
+     - 20
+     - ``0.99 s`` CPU, ``1.65 s`` GPU
+     - warmed raw path
+
+The conclusion is narrower than “GPU is slow”: raw force iterations are fast
+once warmed, but the available ``office`` stack still has high GPU fixed
+overhead and uses Python 3.10 / JAX 0.6.2.  The next GPU lane should use a
+Python 3.11+ environment with current JAX, then target the remaining
+compile/launch/replay overhead rather than changing physics tolerances or
+forcing CPU fallback.
 
 For high-mode runs, also profile the experimental reverse-adjoint scalar
 gradient callback:
@@ -1618,11 +1737,14 @@ Control this behavior with:
 Compilation cache
 -----------------
 
-JAX can persist compiled executables to disk. ``vmec_jax`` enables this by
-default because cold-start compilation dominates short fixed-boundary and
-optimization diagnostics, especially on GPU. By default, the cache directory is
-machine/CPU-feature scoped so shared home directories do not reuse incompatible
-CPU AOT artifacts across different hosts. Use
+JAX can persist compiled executables to disk. ``vmec_jax`` enables this
+automatically for accelerator-selected runs because cold-start compilation
+dominates short fixed-boundary and optimization diagnostics, especially on GPU.
+CPU cache use is explicit opt-in with ``VMEC_JAX_COMPILATION_CACHE=1`` because
+XLA:CPU AOT cache hits can emit host-feature mismatch errors on some JAX
+versions.  By default, the cache directory is machine/CPU-feature/Python/JAX
+scoped so shared home directories do not reuse incompatible CPU AOT artifacts
+across different hosts or runtime versions. Use
 ``VMEC_JAX_COMPILATION_CACHE_DIR=/path/to/cache`` (or the upstream
 ``JAX_COMPILATION_CACHE_DIR``) to choose the cache location, or set
 ``VMEC_JAX_COMPILATION_CACHE=0`` to disable it.
@@ -1630,9 +1752,9 @@ CPU AOT artifacts across different hosts. Use
 If XLA prints a message such as ``Loading XLA:CPU AOT result`` followed by a
 target-machine feature mismatch, it means an existing persistent-cache entry was
 compiled for another CPU. Do not suppress that message blindly: clear the old
-cache directory or rerun once with ``VMEC_JAX_COMPILATION_CACHE=0``. New default
-``vmec_jax`` cache directories avoid this by including the machine fingerprint
-in the path.
+cache directory or rerun once with ``VMEC_JAX_COMPILATION_CACHE=0``. Current
+``vmec_jax`` defaults avoid enabling the CPU persistent cache unless the user
+opts in explicitly or provides a cache directory.
 
 CLI profiling (pre-iteration overhead)
 --------------------------------------

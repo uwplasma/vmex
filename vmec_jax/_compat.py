@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Tuple
 import hashlib
+from importlib import metadata as importlib_metadata
+import sys
 import threading
 import types
 
@@ -79,7 +81,13 @@ def _cache_machine_fingerprint() -> str:
         platform.system(),
         platform.machine(),
         platform.processor(),
+        f"python={sys.version_info.major}.{sys.version_info.minor}",
     ]
+    for package in ("jax", "jaxlib"):
+        try:
+            parts.append(f"{package}={importlib_metadata.version(package)}")
+        except Exception:
+            pass
     try:
         if os.path.exists("/proc/cpuinfo"):
             wanted = ("model name", "cpu family", "model", "stepping", "flags", "Features")
@@ -108,10 +116,12 @@ def _cache_machine_fingerprint() -> str:
 def _default_compilation_cache_dir() -> str | None:
     """Return the configured JAX compilation-cache directory.
 
-    The persistent cache is enabled by default so cold-process CLI/API runs can
-    reuse compiled kernels across invocations.  Users can opt out explicitly
-    with ``VMEC_JAX_COMPILATION_CACHE=0`` or by setting the cache directory to a
-    false/disabled value.
+    The persistent cache is enabled automatically for accelerator-requested
+    runs so cold-process CLI/API runs can reuse compiled kernels across
+    invocations.  CPU persistent-cache entries are native AOT executables and
+    can emit host-feature mismatch errors on some XLA/JAX versions, so CPU cache
+    use is opt-in with ``VMEC_JAX_COMPILATION_CACHE=1`` unless the user provides
+    an explicit cache directory.
     """
     # Already set by the user — respect it.
     if "JAX_COMPILATION_CACHE_DIR" in os.environ:
@@ -129,6 +139,15 @@ def _default_compilation_cache_dir() -> str | None:
 
     cache_flag = os.environ.get("VMEC_JAX_COMPILATION_CACHE", "").strip().lower()
     if cache_flag in ("disabled", "0", "false", "no", "off"):
+        return None
+    cache_forced = cache_flag in ("1", "true", "yes", "on")
+
+    platform_name = os.environ.get("JAX_PLATFORM_NAME", "").strip().lower()
+    platforms = os.environ.get("JAX_PLATFORMS", "").strip().lower()
+    accelerator_requested = platform_name in ("gpu", "cuda", "rocm", "tpu") or any(
+        part.strip() in ("gpu", "cuda", "rocm", "tpu") for part in platforms.split(",")
+    )
+    if not (cache_forced or accelerator_requested):
         return None
 
     # Default cache location: ~/.cache/vmec_jax/jax_cache/<machine-fingerprint>

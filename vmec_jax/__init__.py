@@ -13,10 +13,10 @@ _os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 _os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "2")
 _os.environ.setdefault("GLOG_minloglevel", "2")
 
-# Enable JAX persistent XLA compilation cache by default in a machine-scoped
-# directory. This makes repeated cold-process CLI/API runs much faster while
-# preserving explicit opt-out via VMEC_JAX_COMPILATION_CACHE=0 or
-# VMEC_JAX_COMPILATION_CACHE_DIR=disabled.
+# Enable JAX persistent XLA compilation cache in a machine-scoped directory
+# when requested by the backend/env policy in _compat. Accelerator runs use the
+# cache by default; CPU runs are opt-in to avoid XLA:CPU AOT feature-mismatch
+# warnings on shared or changing runtime environments.
 import jax as _jax
 _jax_cache_dir = _default_jax_cache_dir()
 if _jax_cache_dir is not None:
