@@ -3,17 +3,14 @@ from pathlib import Path
 from vmec_jax._compat import _default_compilation_cache_dir
 
 
-def test_compilation_cache_is_enabled_by_default(monkeypatch):
+def test_compilation_cache_is_disabled_by_default_on_cpu(monkeypatch):
     monkeypatch.delenv("JAX_COMPILATION_CACHE_DIR", raising=False)
     monkeypatch.delenv("VMEC_JAX_COMPILATION_CACHE_DIR", raising=False)
     monkeypatch.delenv("VMEC_JAX_COMPILATION_CACHE", raising=False)
     monkeypatch.delenv("JAX_PLATFORM_NAME", raising=False)
     monkeypatch.delenv("JAX_PLATFORMS", raising=False)
 
-    cache_dir = _default_compilation_cache_dir()
-
-    assert cache_dir is not None
-    assert ".cache/vmec_jax/jax_cache/" in cache_dir
+    assert _default_compilation_cache_dir() is None
 
 
 def test_compilation_cache_dir_env_enables_cache(monkeypatch, tmp_path):
