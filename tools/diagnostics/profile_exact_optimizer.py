@@ -73,6 +73,15 @@ def _parse_args() -> argparse.Namespace:
         help="Initial/max scaled-space trust radius for method=scalar_trust.",
     )
     p.add_argument("--trace-outdir", type=str, default="")
+    p.add_argument(
+        "--device-memory-profile-out",
+        type=str,
+        default="",
+        help=(
+            "Optional path for jax.profiler.save_device_memory_profile(). "
+            "Use with pprof/XProf to inspect live device buffers after the run."
+        ),
+    )
     p.add_argument("--json-out", type=str, default="")
     p.add_argument(
         "--callback",
@@ -531,6 +540,14 @@ def main() -> int:
         }
         out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(f"Wrote {out}")
+
+    if args.device_memory_profile_out:
+        import jax
+
+        mem_out = Path(args.device_memory_profile_out).expanduser().resolve()
+        mem_out.parent.mkdir(parents=True, exist_ok=True)
+        jax.profiler.save_device_memory_profile(str(mem_out))
+        print(f"Device memory profile written to {mem_out}")
 
     return 0
 
