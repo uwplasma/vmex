@@ -493,6 +493,74 @@ def test_lbfgs_adjoint_respects_scalar_evaluation_budget(monkeypatch):
     assert result["_history_dump"]["objective_final"] == pytest.approx(0.36)
 
 
+def test_scalar_trust_improves_quadratic_with_hard_budget(monkeypatch):
+    state = object()
+    last_x = [np.array([0.0])]
+
+    monkeypatch.setattr(
+        "vmec_jax.wout.equilibrium_aspect_ratio_from_state",
+        lambda **_kwargs: 1.0,
+    )
+
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._scan_exact_path = "tape"
+    opt._trial_residual_cache = {}
+    opt._exact_cache = {}
+    opt._static = SimpleNamespace()
+    opt._solver_device_name = None
+    opt._inner_max_iter = 0
+    opt._inner_ftol = 0.0
+    opt._trial_max_iter = 0
+    opt._trial_ftol = 0.0
+    opt._post_jacobian_clear = lambda *args, **kwargs: None
+    opt._profile_dump = lambda: {}
+    opt._cached_exact_state = lambda _x: None
+    opt._base_params_vector = lambda: np.zeros(1)
+    opt._exact_cache_key = lambda x: tuple(np.asarray(x, dtype=float).round(12))
+    opt._qs_total_from_state = lambda _state, res: float(np.dot(res, res))
+
+    def residual_fun(x):
+        return np.asarray([float(np.asarray(x)[0]) - 1.0], dtype=float)
+
+    def solve_exact(x, return_payload=False):
+        last_x[0] = np.asarray(x, dtype=float)
+        return (state, {}) if return_payload else state
+
+    opt.residual_fun = residual_fun
+    opt._evaluate_residuals_from_state = lambda _state: residual_fun(last_x[0])
+    opt._solve_exact_with_tape = solve_exact
+    opt._solve_forward = lambda x, trial=True: solve_exact(x, return_payload=False)
+
+    objective_calls = []
+
+    def objective_and_gradient(x):
+        x = np.asarray(x, dtype=float)
+        objective_calls.append(float(x[0]))
+        residual = float(x[0]) - 1.0
+        return 0.5 * residual * residual, np.asarray([residual], dtype=float)
+
+    opt.objective_and_gradient_fun = objective_and_gradient
+
+    result = opt.run(
+        np.asarray([0.0]),
+        method="scalar_trust",
+        max_nfev=5,
+        scalar_step_bound=0.25,
+        ftol=0.0,
+        gtol=1e-12,
+        verbose=0,
+    )
+
+    assert result["nfev"] <= 5
+    assert result["njev"] == result["nfev"]
+    assert result["cost"] < 1e-12
+    assert result["nit"] == 4
+    np.testing.assert_allclose(result["x"], np.asarray([1.0]), atol=1e-12, rtol=0.0)
+    assert objective_calls == [0.0, 0.25, 0.5, 0.75, 1.0]
+    assert result["_history_dump"]["method"] == "scalar_trust"
+    assert result["_history_dump"]["scalar_step_bound"] == pytest.approx(0.25)
+
+
 def test_qs_total_prefers_metadata_function_over_residual_vector():
     opt = object.__new__(FixedBoundaryExactOptimizer)
     opt._n_qs = None

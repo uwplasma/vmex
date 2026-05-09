@@ -2714,6 +2714,7 @@ class FixedBoundaryExactOptimizer:
         scipy_tr_solver: str | None = "lsmr",
         scipy_lsmr_maxiter: int | None = None,
         lbfgs_step_bound: float | None = 0.01,
+        scalar_step_bound: float | None = 0.01,
         trace_callbacks: bool | None = None,
     ) -> dict:
         """Run exact least-squares optimisation.
@@ -2734,6 +2735,10 @@ class FixedBoundaryExactOptimizer:
             minimizes the same scalar objective using one reverse discrete
             adjoint gradient per callback; it is experimental but scales much
             better with boundary-parameter count on mode-2/3 diagnostics.
+            ``"scalar_trust"`` is a safeguarded scalar-adjoint steepest-descent
+            path with monotone accepted steps and a hard evaluation budget.  It
+            is intended for profiling high-parameter-count cases before a full
+            matrix-free least-squares trust-region implementation is available.
         max_nfev:
             Maximum residual/Jacobian evaluations.
         ftol, gtol, xtol:
@@ -2772,6 +2777,10 @@ class FixedBoundaryExactOptimizer:
             not a least-squares trust-region method; this bound prevents the
             line search from probing extremely distorted boundaries. Set to
             ``None`` or a non-positive value to run unbounded L-BFGS-B.
+        scalar_step_bound:
+            Initial and maximum trust radius in scaled parameter space when
+            ``method="scalar_trust"``. Set to ``None`` or a non-positive value
+            to use a unit initial radius.
         trace_callbacks:
             When true, include a lightweight SciPy callback trace in the
             history dump.  This is intended for CPU/GPU profiling of repeated
@@ -2846,6 +2855,139 @@ class FixedBoundaryExactOptimizer:
                 x_scale=x_scale,
                 verbose=verbose,
             )
+        elif method_key in ("scalar_trust", "adjoint_trust", "gradient_trust"):
+            scale = np.ones_like(params0_arr) if x_scale is None else np.asarray(x_scale, dtype=float)
+            scale[scale == 0.0] = 1.0
+            base_params = self._base_params_vector()
+            y_current = (params0_arr + base_params) / scale
+            x_current = params0_arr.copy()
+            last_history_key = [self._exact_cache_key(params0_arr)]
+            max_scalar_evals = max(1, int(max_nfev))
+            initial_radius = (
+                1.0
+                if scalar_step_bound is None or float(scalar_step_bound) <= 0.0
+                else float(scalar_step_bound)
+            )
+            radius = initial_radius
+            min_radius = max(1.0e-12, initial_radius * 1.0e-8)
+            eval_count = 0
+            accepted_steps = 0
+            best_eval: dict[str, object] = {
+                "cost": float("inf"),
+                "x": x_current.copy(),
+                "y": y_current.copy(),
+                "grad_x": np.zeros_like(params0_arr),
+                "grad_y": np.zeros_like(y_current),
+            }
+
+            def _record_history_from_cached_state(x, cost):
+                key = self._exact_cache_key(x)
+                if key == last_history_key[0] or key not in self._exact_cache:
+                    return
+                cached_state, _ = self._exact_cache[key]
+                res = self._evaluate_residuals_from_state(cached_state)
+                qs_total = self._qs_total_from_state(cached_state, res)
+                aspect = float(np.asarray(
+                    equilibrium_aspect_ratio_from_state(state=cached_state, static=self._static)
+                ))
+                entry: dict = {
+                    "wall_time_s": time.perf_counter() - self._wall_t0,
+                    "cost": float(cost),
+                    "objective": float(2.0 * cost),
+                    "qs_objective": qs_total,
+                    "aspect": aspect,
+                }
+                if iota_fn is not None:
+                    entry["iota"] = float(iota_fn(cached_state))
+                self._history.append(entry)
+                last_history_key[0] = key
+
+            def _evaluate_y(y):
+                nonlocal eval_count
+                eval_count += 1
+                x = np.asarray(y, dtype=float) * scale - base_params
+                cost, grad_x = self.objective_and_gradient_fun(x)
+                grad_y = np.asarray(grad_x, dtype=float) * scale
+                if float(cost) < float(best_eval["cost"]):
+                    best_eval.update(
+                        {
+                            "cost": float(cost),
+                            "x": np.asarray(x, dtype=float).copy(),
+                            "y": np.asarray(y, dtype=float).copy(),
+                            "grad_x": np.asarray(grad_x, dtype=float).copy(),
+                            "grad_y": grad_y.copy(),
+                        }
+                    )
+                return float(cost), np.asarray(x, dtype=float), grad_y
+
+            cost_current, x_current, grad_y = _evaluate_y(y_current)
+            grad_norm = float(np.linalg.norm(grad_y, ord=np.inf))
+            success_result = bool(grad_norm <= float(gtol))
+            status_result = 1 if success_result else 0
+            message_result = (
+                "`gtol` termination condition is satisfied."
+                if success_result
+                else "maximum number of scalar objective evaluations is exceeded"
+            )
+
+            while not success_result and eval_count < max_scalar_evals:
+                grad_norm_2 = float(np.linalg.norm(grad_y))
+                if not np.isfinite(grad_norm_2) or grad_norm_2 <= 0.0:
+                    message_result = "zero or non-finite scalar-adjoint gradient"
+                    break
+
+                accepted = False
+                while eval_count < max_scalar_evals and radius >= min_radius:
+                    step_y = -grad_y * min(1.0, radius / grad_norm_2)
+                    y_trial = y_current + step_y
+                    cost_trial, x_trial, grad_trial = _evaluate_y(y_trial)
+                    if np.isfinite(cost_trial) and cost_trial < cost_current:
+                        y_current = y_trial
+                        x_current = x_trial
+                        cost_previous = cost_current
+                        cost_current = cost_trial
+                        grad_y = grad_trial
+                        grad_norm = float(np.linalg.norm(grad_y, ord=np.inf))
+                        accepted_steps += 1
+                        accepted = True
+                        _record_history_from_cached_state(x_current, cost_current)
+                        radius = min(initial_radius, max(radius * 1.5, radius))
+                        if abs(cost_previous - cost_current) <= float(ftol) * max(1.0, abs(cost_current)):
+                            success_result = True
+                            status_result = 2
+                            message_result = "`ftol` termination condition is satisfied."
+                        elif grad_norm <= float(gtol):
+                            success_result = True
+                            status_result = 1
+                            message_result = "`gtol` termination condition is satisfied."
+                        break
+                    radius *= 0.5
+
+                if success_result:
+                    break
+                if not accepted:
+                    message_result = "scalar trust-region radius became too small"
+                    break
+
+            if not success_result and eval_count >= max_scalar_evals:
+                message_result = "maximum number of scalar objective evaluations is exceeded"
+
+            x_result = np.asarray(best_eval["x"], dtype=float)
+            cost_result = float(best_eval["cost"])
+            result = {
+                "x": x_result,
+                "cost": cost_result,
+                "objective": 2.0 * cost_result,
+                "nfev": int(eval_count),
+                "njev": int(eval_count),
+                "nit": int(accepted_steps),
+                "success": success_result,
+                "status": status_result,
+                "message": message_result,
+                "step_norm": float(np.linalg.norm(x_result - params0_arr)),
+                "x_prev": None,
+                "cost_prev": None,
+            }
         elif method_key in ("lbfgs", "lbfgs_adjoint"):
             try:
                 from scipy.optimize import minimize as _scipy_minimize
@@ -3241,6 +3383,9 @@ class FixedBoundaryExactOptimizer:
             ),
             "lbfgs_step_bound": (
                 None if lbfgs_step_bound is None else float(lbfgs_step_bound)
+            ),
+            "scalar_step_bound": (
+                None if scalar_step_bound is None else float(scalar_step_bound)
             ),
             "solver_device": self._solver_device_name or "default",
             "inner_max_iter": int(self._inner_max_iter),
