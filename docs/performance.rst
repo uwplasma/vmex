@@ -21,9 +21,9 @@ Persistent XLA compilation caching is enabled by default for repeated starts.
 Compiled kernels are stored under
 ``~/.cache/vmec_jax/jax_cache/<machine-fingerprint>`` unless the user sets
 ``VMEC_JAX_COMPILATION_CACHE_DIR`` or upstream ``JAX_COMPILATION_CACHE_DIR``.
-The machine-specific suffix avoids reusing native XLA:CPU AOT executables
-compiled on a different host CPU. Set ``VMEC_JAX_COMPILATION_CACHE=0`` to
-disable the persistent cache.
+The suffix includes host CPU details plus Python/JAX/JAXLIB versions to avoid
+reusing native XLA:CPU AOT executables compiled for an incompatible runtime.
+Set ``VMEC_JAX_COMPILATION_CACHE=0`` to disable the persistent cache.
 
 VMEC2000 is a pre-compiled Fortran binary with no JIT overhead — it is always
 effectively "cold".  When benchmarking, compare ``vmec_jax`` warm runtime
@@ -1691,8 +1691,8 @@ Compilation cache
 JAX can persist compiled executables to disk. ``vmec_jax`` enables this by
 default because cold-start compilation dominates short fixed-boundary and
 optimization diagnostics, especially on GPU. By default, the cache directory is
-machine/CPU-feature scoped so shared home directories do not reuse incompatible
-CPU AOT artifacts across different hosts. Use
+machine/CPU-feature/Python/JAX scoped so shared home directories do not reuse
+incompatible CPU AOT artifacts across different hosts or runtime versions. Use
 ``VMEC_JAX_COMPILATION_CACHE_DIR=/path/to/cache`` (or the upstream
 ``JAX_COMPILATION_CACHE_DIR``) to choose the cache location, or set
 ``VMEC_JAX_COMPILATION_CACHE=0`` to disable it.
@@ -1701,8 +1701,8 @@ If XLA prints a message such as ``Loading XLA:CPU AOT result`` followed by a
 target-machine feature mismatch, it means an existing persistent-cache entry was
 compiled for another CPU. Do not suppress that message blindly: clear the old
 cache directory or rerun once with ``VMEC_JAX_COMPILATION_CACHE=0``. New default
-``vmec_jax`` cache directories avoid this by including the machine fingerprint
-in the path.
+``vmec_jax`` cache directories avoid this by including the machine, CPU feature
+signature, Python version, and JAX/JAXLIB versions in the path.
 
 CLI profiling (pre-iteration overhead)
 --------------------------------------

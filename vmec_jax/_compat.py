@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Tuple
 import hashlib
+from importlib import metadata as importlib_metadata
+import sys
 import threading
 import types
 
@@ -79,7 +81,13 @@ def _cache_machine_fingerprint() -> str:
         platform.system(),
         platform.machine(),
         platform.processor(),
+        f"python={sys.version_info.major}.{sys.version_info.minor}",
     ]
+    for package in ("jax", "jaxlib"):
+        try:
+            parts.append(f"{package}={importlib_metadata.version(package)}")
+        except Exception:
+            pass
     try:
         if os.path.exists("/proc/cpuinfo"):
             wanted = ("model name", "cpu family", "model", "stepping", "flags", "Features")
