@@ -716,6 +716,19 @@ def test_fixed_boundary_optimizer_solver_device_inherits_by_default():
     assert opt._resolve_solver_device("gpu") == "gpu"
 
 
+def test_fixed_boundary_optimizer_trial_scan_default_and_env_override(monkeypatch):
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+
+    monkeypatch.delenv("VMEC_JAX_OPT_TRIAL_SCAN", raising=False)
+    assert opt._use_scan_for_trial_solves() is True
+
+    monkeypatch.setenv("VMEC_JAX_OPT_TRIAL_SCAN", "0")
+    assert opt._use_scan_for_trial_solves() is False
+
+    monkeypatch.setenv("VMEC_JAX_OPT_TRIAL_SCAN", "1")
+    assert opt._use_scan_for_trial_solves() is True
+
+
 def test_lasym_gpu_replay_chunk_avoids_mode2_overchunk(monkeypatch):
     monkeypatch.delenv("VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK", raising=False)
     monkeypatch.delenv("VMEC_JAX_REPLAY_COLUMN_CHUNK", raising=False)
