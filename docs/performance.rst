@@ -125,6 +125,13 @@ warm runtimes competitive with or faster than VMEC2000 on CPU:
   CPU host-update path unchanged.  Set ``VMEC_JAX_JIT_STRICT_UPDATE=0`` only
   for diagnostics.
 
+**14. Residual-derived GPU history**
+  For standard QS residual factories, accepted-point scan Jacobians reconstruct
+  aspect-ratio and QS history metrics directly from the residual vector.  This
+  avoids a second accepted-point GPU solve after every Jacobian callback.  The
+  conservative state-backed path is still used for custom residuals and
+  histories that request an explicit ``iota_fn``.
+
 Exact optimizer profiling
 -------------------------
 
@@ -170,16 +177,18 @@ Representative May 2026 warm-repeat timings on the QH warm-start diagnostic
      - tape exact + scan trial
      - ``2.36 s``
      - scan exact + scan trial
-     - ``5.40 s``
+     - ``3.71 s``
    * - QH ``max_mode=3``
      - tape exact + scan trial
      - ``3.54 s``
      - scan exact + scan trial
-     - ``4.92 s``
+     - ``4.02 s``
 
 These short cases are still CPU-faster overall, but the GPU policy materially
 improves over the previous GPU tape/trial-loop path (``11.25 s`` for QH
 ``max_mode=1`` and ``8.18 s`` for QH ``max_mode=3`` in the same diagnostic).
+The final GPU history shortcut also improves over the earlier scan-exact GPU
+policy, which took ``5.40 s`` and ``4.92 s`` respectively on these two cases.
 
 For same-process warmup studies, repeat a callback at the same point or repeat
 the whole short optimizer run while keeping compiled executables warm:
@@ -626,22 +635,22 @@ least-squares on that small case.  The next useful step is therefore better
 matrix-free/scalar trust-region behavior, not switching the default
 least-squares path.
 
-The accepted-point exact path remains the discrete-adjoint tape path on both
-CPU and GPU.  The scan-differentiated exact path is intentionally not selected
-automatically: on the April 2026 RTX A4000 diagnostics, a cold QA
-``max_mode=3`` scan exact Jacobian took about ``107 s`` before warm replay,
-whereas the tape path completed the same callback much sooner.  GPU trial-point
-residual solves do not need an adjoint tape, but the scan graph was still slower
-for the current small/medium exact-optimization cases.  A QH ``max_mode=2`` GPU
-profile with four SciPy evaluations kept the same final objective and reduced
-mean trial-solve time from about ``11.2 s`` to about ``5.2 s`` after returning
-trial residuals to the non-scan path.  CPU remains faster for some small cold
-optimization cases.  GPU sweep production runs now use calibrated optimizer
-budgets (currently ``inner_max_iter = trial_max_iter = 120`` and
-``ftol = trial_ftol = 1e-8`` for deck-controlled QA/QH cases), rather than the
-old four-evaluation diagnostic caps.  This avoids differentiating through 1500
-strict VMEC iterations at every accepted point; final standalone verification
-runs can still use the VMEC input-deck ``NITER_ARRAY`` / ``FTOL_ARRAY``.
+The accepted-point exact path is device-aware: CPU uses the discrete-adjoint
+tape path, while GPU uses the scan-differentiated exact path.  April 2026
+diagnostics showed that a naive cold scan exact Jacobian could be very slow, so
+the GPU path now avoids redundant residual-only scan executables, uses scan
+trial residuals, and reconstructs standard QS history metrics from residuals
+instead of re-solving the accepted state after every Jacobian.  On the May 2026
+RTX A4000 QH warm-start diagnostic, this reduced QH ``max_mode=1`` GPU warm
+runtime from ``11.25 s`` on the old tape/trial-loop path to ``3.71 s``; QH
+``max_mode=3`` went from ``8.18 s`` to ``4.02 s``.  CPU remains faster for the
+small/medium warm diagnostics, so production runs still document both CPU and
+GPU timings rather than claiming blanket GPU speedups.  GPU sweep production
+runs use calibrated optimizer budgets (currently ``inner_max_iter =
+trial_max_iter = 120`` and ``ftol = trial_ftol = 1e-8`` for deck-controlled
+QA/QH cases), rather than the old four-evaluation diagnostic caps.  Final
+standalone verification runs can still use the VMEC input-deck ``NITER_ARRAY`` /
+``FTOL_ARRAY``.
 
 Replay and preconditioner JIT helper caches are retained across accepted points
 and LRU-bounded.  Call ``FixedBoundaryExactOptimizer.clear_caches()`` to release

@@ -798,6 +798,38 @@ def test_fixed_boundary_optimizer_exact_path_is_device_aware(monkeypatch):
     assert opt._select_exact_path() == "scan"
 
 
+def test_scan_exact_history_can_be_reconstructed_from_residuals():
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._scan_exact_path = "scan"
+    opt._last_jacobian_key = [None]
+    opt._last_jacobian_residual = None
+    opt._exact_state_cache = {}
+    opt._exact_cache = {}
+    opt._history = []
+    opt._wall_t0 = 0.0
+    opt._iota_fn = None
+    opt._aspect_target = 7.0
+    opt._aspect_weight = 2.0
+    opt._n_non_qs = 1
+    opt._n_qs = None
+    opt._exact_cache_key = lambda _params: b"accepted"
+
+    def fake_jacobian(_params):
+        opt._last_jacobian_residual = np.asarray([0.5, 3.0, 4.0], dtype=float)
+        return np.asarray([[1.0], [2.0], [3.0]], dtype=float)
+
+    opt.jacobian_fun = fake_jacobian
+
+    jac = opt._jacobian_fun_tracked(np.asarray([1.0]))
+
+    np.testing.assert_allclose(jac, np.asarray([[1.0], [2.0], [3.0]]))
+    assert len(opt._history) == 1
+    entry = opt._history[0]
+    assert entry["aspect"] == pytest.approx(7.25)
+    assert entry["cost"] == pytest.approx(0.5 * (0.5**2 + 3.0**2 + 4.0**2))
+    assert entry["qs_objective"] == pytest.approx(25.0)
+
+
 def test_lasym_gpu_replay_chunk_avoids_mode2_overchunk(monkeypatch):
     monkeypatch.delenv("VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK", raising=False)
     monkeypatch.delenv("VMEC_JAX_REPLAY_COLUMN_CHUNK", raising=False)

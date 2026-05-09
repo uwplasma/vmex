@@ -916,6 +916,8 @@ def make_qh_residuals_fn(
         return jax.value_and_grad(_objective)(packed_state)
 
     residuals_from_state._n_non_qs = 1
+    residuals_from_state._aspect_target = float(target_aspect)
+    residuals_from_state._aspect_weight = float(aspect_weight)
     residuals_from_state._qs_total_from_state = (
         lambda state: float(_qs_eval_from_state(state)["total"]) * float(qs_weight) ** 2
     )
@@ -1205,6 +1207,8 @@ def make_qs_residuals_fn(
     residuals_from_state._n_non_qs = int(target_aspect is not None) + int(
         target_iota is not None or min_abs_iota is not None
     )
+    residuals_from_state._aspect_target = None if target_aspect is None else float(target_aspect)
+    residuals_from_state._aspect_weight = float(aspect_weight)
     residuals_from_state._qs_total_from_state = (
         lambda state: float(_qs_eval_from_state(state)["total"]) * float(qs_weight) ** 2
     )
@@ -1317,6 +1321,8 @@ class FixedBoundaryExactOptimizer:
         self._n_qs: int | None = getattr(residuals_fn, "_n_qs", None)
         self._n_non_qs: int = int(getattr(residuals_fn, "_n_non_qs", 1))
         self._qs_total_from_state_fn = getattr(residuals_fn, "_qs_total_from_state", None)
+        self._aspect_target = getattr(residuals_fn, "_aspect_target", None)
+        self._aspect_weight = float(getattr(residuals_fn, "_aspect_weight", 1.0))
 
         # Derive signgs from the initial guess.
         state0 = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
@@ -2104,7 +2110,12 @@ class FixedBoundaryExactOptimizer:
                 _jnp.asarray(params, dtype=_jnp.float64)
             )
             self._last_jacobian_residual = np.asarray(residuals, dtype=float)
-            self._solve_scan_exact_state(params)
+            # Avoid a second accepted-point scan solve when the history metrics
+            # can be reconstructed from the residual vector.  This is the common
+            # QA/QH/QP/QI fixed-boundary optimization path; the state cache is
+            # still populated for custom residuals or iota-tracked histories.
+            if not self._can_build_history_from_residuals():
+                self._solve_scan_exact_state(params)
             out = np.asarray(jac, dtype=float)
             self._profile_add("scan_jacobian_total", time.perf_counter() - t0)
             return out
@@ -2501,7 +2512,17 @@ class FixedBoundaryExactOptimizer:
         self._last_jacobian_residual = None
         jac = self.jacobian_fun(params)
         key = self._last_jacobian_key[0]
-        if self._scan_exact_path == "scan" and key is not None and key in self._exact_state_cache:
+        if (
+            self._scan_exact_path == "scan"
+            and self._last_jacobian_residual is not None
+            and self._can_build_history_from_residuals()
+        ):
+            entry = self._history_entry_from_residuals(
+                self._last_jacobian_residual,
+                wall_time_s=time.perf_counter() - self._wall_t0,
+            )
+            self._history.append(entry)
+        elif self._scan_exact_path == "scan" and key is not None and key in self._exact_state_cache:
             cached_state = self._exact_state_cache[key]
             res = (
                 np.asarray(self._last_jacobian_residual, dtype=float)
@@ -2606,6 +2627,29 @@ class FixedBoundaryExactOptimizer:
             return float(np.dot(res[-self._n_qs:], res[-self._n_qs:]))
         start = max(0, min(int(self._n_non_qs), int(res.shape[0])))
         return float(np.dot(res[start:], res[start:]))
+
+    def _can_build_history_from_residuals(self) -> bool:
+        """Return true when residual metadata is enough for history metrics."""
+        if getattr(self, "_iota_fn", None) is not None:
+            return False
+        if self._aspect_target is None:
+            return False
+        if not np.isfinite(float(self._aspect_weight)) or float(self._aspect_weight) == 0.0:
+            return False
+        return True
+
+    def _history_entry_from_residuals(self, res: np.ndarray, *, wall_time_s: float) -> dict:
+        """Build a history row without re-solving the accepted scan state."""
+        res = np.asarray(res, dtype=float).reshape(-1)
+        aspect = float(self._aspect_target) + float(res[0]) / float(self._aspect_weight)
+        cost = float(0.5 * np.dot(res, res))
+        return {
+            "wall_time_s": float(wall_time_s),
+            "cost": cost,
+            "objective": 2.0 * cost,
+            "qs_objective": self._qs_from_res(res),
+            "aspect": aspect,
+        }
 
     def _qs_total_from_state(self, state: VMECState, res: np.ndarray | None = None) -> float:
         """QS-only objective from a solved state, with metadata-aware fallback."""
