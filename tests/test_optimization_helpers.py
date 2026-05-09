@@ -213,6 +213,58 @@ def test_qs_residual_factory_scalar_objective_hook_handles_iota_floor(
     _assert_scalar_objective_hook_matches_residual_vector(residuals_fn, state)
 
 
+@pytest.mark.full
+def test_fixed_boundary_scan_exact_matches_tape_jacobian(load_case_circular_tokamak):
+    from vmec_jax.wout import equilibrium_aspect_ratio_from_state
+
+    _cfg, indata, static, boundary, _state0 = load_case_circular_tokamak
+    specs = boundary_param_specs(
+        boundary,
+        static.modes,
+        max_mode=1,
+        min_coeff=0.0,
+        include=("rc", "zs"),
+        fix=("rc00",),
+    )[:1]
+    params = np.asarray([1.0e-4], dtype=float)
+
+    def residuals_fn(state):
+        aspect = equilibrium_aspect_ratio_from_state(state=state, static=static)
+        return jnp.asarray([aspect], dtype=jnp.float64)
+
+    def _optimizer(path: str):
+        opt = FixedBoundaryExactOptimizer(
+            static,
+            indata,
+            boundary,
+            specs,
+            residuals_fn,
+            inner_max_iter=1,
+            inner_ftol=1.0e-5,
+            trial_max_iter=1,
+            trial_ftol=1.0e-5,
+            solver_device="cpu",
+        )
+        opt._scan_exact_path = path
+        return opt
+
+    tape_opt = _optimizer("tape")
+    scan_opt = _optimizer("scan")
+
+    np.testing.assert_allclose(
+        scan_opt.residual_fun(params),
+        tape_opt.residual_fun(params),
+        rtol=1.0e-10,
+        atol=1.0e-10,
+    )
+    np.testing.assert_allclose(
+        scan_opt.jacobian_fun(params),
+        tape_opt.jacobian_fun(params),
+        rtol=1.0e-7,
+        atol=1.0e-8,
+    )
+
+
 def test_indexed_boundary_maps_from_boundary_keep_first_duplicate_mode():
     modes = ModeTable(
         m=np.array([0, 1, 1, 1], dtype=int),

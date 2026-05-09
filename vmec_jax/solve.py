@@ -178,7 +178,8 @@ def _hash_array_bytes(a: Any) -> str:
         arr = np.asarray(a)
     except Exception:
         try:
-            aval = jax.core.get_aval(a)
+            typeof = getattr(jax, "typeof", None)
+            aval = typeof(a) if typeof is not None else jax.core.get_aval(a)
         except Exception:
             aval = None
         if aval is None:
