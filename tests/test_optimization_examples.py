@@ -271,6 +271,108 @@ def test_workflow_stage_policy_helpers_are_explicit() -> None:
     assert objectives_track_iota([plain, tracked])
 
 
+def test_fixed_boundary_vmec_from_input_applies_resolution_policy(monkeypatch, tmp_path) -> None:
+    import vmec_jax as package
+    import vmec_jax.config as config_module
+    import vmec_jax.optimization_workflow as workflow
+
+    captured = {}
+
+    def fake_rebuild(indata, *, mpol, ntor):
+        captured.update({"indata": indata, "mpol": mpol, "ntor": ntor})
+        return "resolved-indata"
+
+    monkeypatch.setattr(package, "load_config", lambda path: ("raw-cfg", f"raw:{Path(path).name}"))
+    monkeypatch.setattr(workflow, "rebuild_indata_with_resolution", fake_rebuild)
+    monkeypatch.setattr(config_module, "config_from_indata", lambda indata: {"cfg_from": indata})
+
+    vmec = workflow.FixedBoundaryVMEC.from_input(
+        tmp_path / "input.test_case",
+        max_mode=4,
+        min_vmec_mode=5,
+        output_dir=tmp_path / "out",
+        project_input_boundary_to_max_mode=True,
+        include=("rc", "zs", "rs", "zc"),
+        fix=("rc00", "zs00"),
+    )
+
+    assert captured == {"indata": "raw:input.test_case", "mpol": 6, "ntor": 6}
+    assert vmec.input_file == tmp_path / "input.test_case"
+    assert vmec.cfg == {"cfg_from": "resolved-indata"}
+    assert vmec.indata == "resolved-indata"
+    assert vmec.max_mode == 4
+    assert vmec.min_vmec_mode == 5
+    assert vmec.output_dir == tmp_path / "out"
+    assert vmec.project_input_boundary_to_max_mode is True
+    assert vmec.include == ("rc", "zs", "rs", "zc")
+    assert vmec.fix == ("rc00", "zs00")
+
+
+def test_workflow_objective_wrappers_dispatch_to_state_helpers(monkeypatch) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    ctx = SimpleNamespace(
+        static="static",
+        indata="indata",
+        signgs=-1,
+        flux="flux",
+        pressure="pressure",
+    )
+
+    monkeypatch.setattr(
+        workflow,
+        "equilibrium_aspect_ratio_from_state",
+        lambda *, state, static: 7.0 if (state, static) == ("state", "static") else -1.0,
+    )
+    monkeypatch.setattr(workflow, "mean_iota", lambda ctx_arg, state: 0.35 if (ctx_arg, state) == (ctx, "state") else -1.0)
+
+    def fake_iota_floor(value, target, *, softness):
+        assert value == 0.35
+        assert target == 0.41
+        assert softness == 0.02
+        return np.asarray([0.06])
+
+    monkeypatch.setattr(workflow, "smooth_min_abs_iota_residual", fake_iota_floor)
+
+    assert workflow.AspectRatio().J(ctx, "state") == 7.0
+    assert workflow.MeanIota().J(ctx, "state") == 0.35
+    np.testing.assert_allclose(workflow.AbsMeanIotaFloor(0.41, softness=0.02).J(ctx, "state"), [0.06])
+
+    def fake_qs_residual_from_state(**kwargs):
+        assert kwargs == {
+            "state": "state",
+            "static": "static",
+            "indata": "indata",
+            "signgs": -1,
+            "flux_local": "flux",
+            "prof_local": {"pressure": "pressure"},
+            "pressure_local": "pressure",
+            "surfaces": [0.25, 0.75],
+            "helicity_m": 1,
+            "helicity_n": -4,
+        }
+        return {"residuals1d": np.asarray([1.0, 2.0]), "total": 5.0}
+
+    monkeypatch.setattr(workflow, "quasisymmetry_ratio_residual_from_state", fake_qs_residual_from_state)
+    qs = workflow.QuasisymmetryRatioResidual(helicity_m=1, helicity_n=-4, surfaces=[0.25, 0.75])
+    np.testing.assert_allclose(qs.J(ctx, "state"), [1.0, 2.0])
+    assert qs.total(ctx, "state") == 5.0
+    term = qs.to_objective_term(target=0.0, residual_weight=2.0)
+    np.testing.assert_allclose(term.residual(ctx, "state"), [2.0, 4.0])
+    assert term.total(ctx, "state") == 20.0
+    with pytest.raises(ValueError, match="target=0"):
+        qs.to_objective_term(target=1.0, residual_weight=1.0)
+
+    factory_term = workflow.quasisymmetry_objective(
+        helicity_m=1,
+        helicity_n=-4,
+        surfaces=[0.25, 0.75],
+        weight=3.0,
+    )
+    np.testing.assert_allclose(factory_term.residual(ctx, "state"), [3.0, 6.0])
+    assert factory_term.total(ctx, "state") == 45.0
+
+
 def test_qi_objective_factories_apply_weights_and_slice_shared_fields(monkeypatch) -> None:
     import vmec_jax.optimization_workflow as workflow
 
@@ -362,6 +464,40 @@ def test_qi_objective_factories_apply_weights_and_slice_shared_fields(monkeypatc
     residual, total = lgradb_term.residual_and_total(ctx, "state", {})
     np.testing.assert_allclose(residual, [1.0])
     assert total == 1.0
+
+
+def test_lower_bound_and_lgradb_objective_edge_paths(monkeypatch) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    ctx = SimpleNamespace(static="static", indata="indata", signgs=1, flux="flux")
+    monkeypatch.setattr(
+        workflow,
+        "finite_beta_scalars_from_state",
+        lambda **_kwargs: {"vp": np.asarray([1.0, 2.0])},
+    )
+    well = workflow.MagneticWell(minimum=0.1, softness=0.01)
+    assert float(well.well(ctx, "state")) == 0.0
+    with pytest.raises(ValueError, match="target=0"):
+        well.to_objective_term(target=1.0, residual_weight=1.0)
+    with pytest.raises(ValueError, match="target=0"):
+        workflow.DMerc().to_objective_term(target=1.0, residual_weight=1.0)
+    with pytest.raises(ValueError, match="target=0"):
+        workflow.LgradB(threshold=0.3).to_objective_term(target=1.0, residual_weight=1.0)
+
+    def fake_lgradb_penalty_from_state(**kwargs):
+        assert kwargs["state"] == "state"
+        assert kwargs["threshold"] == 0.3
+        assert kwargs["s_index"] == -1
+        assert kwargs["ntheta"] == 9
+        assert kwargs["nphi"] == 7
+        assert kwargs["smooth_penalty"] == 0.02
+        return {"residuals1d": np.asarray([2.0]), "total": 4.0}
+
+    monkeypatch.setattr(workflow, "lgradb_penalty_from_state", fake_lgradb_penalty_from_state)
+    term = workflow.LgradB(threshold=0.3, smooth_penalty=0.02).to_qi_term(residual_weight=5.0)
+    residual, total = term.residual_and_total(ctx, "state", {})
+    np.testing.assert_allclose(residual, [10.0])
+    assert total == 100.0
 
 
 def test_least_squares_solve_dispatches_regular_problem(monkeypatch, tmp_path) -> None:
