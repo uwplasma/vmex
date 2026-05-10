@@ -186,6 +186,7 @@ from .finite_beta import (
     finite_beta_global_residuals_from_state,
     finite_beta_scalars_from_state,
     mercier_bdotk_from_covariant_derivatives,
+    mercier_gpp_from_realspace_geometry,
     mercier_surface_integrals_from_realspace,
     mercier_terms_from_profile_integrals,
 )
@@ -424,6 +425,7 @@ __all__ = [
     "finite_beta_global_residuals_from_state",
     "finite_beta_scalars_from_state",
     "mercier_bdotk_from_covariant_derivatives",
+    "mercier_gpp_from_realspace_geometry",
     "mercier_surface_integrals_from_realspace",
     "mercier_terms_from_profile_integrals",
     "dvds_from_sqrtg",
