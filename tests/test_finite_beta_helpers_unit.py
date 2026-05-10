@@ -10,6 +10,7 @@ from vmec_jax.boundary import BoundaryCoeffs
 from vmec_jax.finite_beta import FiniteBetaTargets
 from vmec_jax.modes import ModeTable
 from vmec_jax.namelist import InData
+from vmec_jax.vmec_realspace import vmec_realspace_synthesis_multi
 from vmec_jax.vmec_tomnsp import vmec_trig_tables
 
 
@@ -497,6 +498,127 @@ def test_mercier_gpp_from_realspace_geometry_is_differentiable():
             Zv_odd=0.01 * ones,
         )
         return jnp.sum(gpp[1:-1])
+
+    value, grad = jax.value_and_grad(objective)(jnp.asarray(1.0))
+    assert np.isfinite(np.asarray(value))
+    assert np.isfinite(np.asarray(grad))
+    assert abs(float(np.asarray(grad))) > 0.0
+
+
+def test_mercier_realspace_geometry_channels_from_state_matches_synthesis():
+    modes = ModeTable(m=np.array([0, 1, 2]), n=np.array([0, 0, 1]))
+    trig = vmec_trig_tables(ntheta=8, nzeta=5, nfp=2, mmax=2, nmax=1, lasym=False, cache=False)
+    s = jnp.linspace(0.0, 1.0, 4)
+    state = SimpleNamespace(
+        Rcos=jnp.asarray(
+            [
+                [1.0, 0.2, 0.0],
+                [1.1, 0.2, 0.03],
+                [1.2, 0.25, 0.04],
+                [1.3, 0.3, 0.05],
+            ],
+            dtype=jnp.float64,
+        ),
+        Rsin=jnp.asarray(
+            [
+                [0.0, 0.02, 0.0],
+                [0.0, 0.02, 0.01],
+                [0.0, 0.03, 0.015],
+                [0.0, 0.04, 0.02],
+            ],
+            dtype=jnp.float64,
+        ),
+        Zcos=jnp.asarray(
+            [
+                [0.0, 0.015, 0.0],
+                [0.0, 0.015, 0.008],
+                [0.0, 0.02, 0.010],
+                [0.0, 0.025, 0.012],
+            ],
+            dtype=jnp.float64,
+        ),
+        Zsin=jnp.asarray(
+            [
+                [0.0, 0.18, 0.0],
+                [0.0, 0.18, 0.02],
+                [0.0, 0.22, 0.03],
+                [0.0, 0.26, 0.04],
+            ],
+            dtype=jnp.float64,
+        ),
+    )
+
+    actual = finite_beta.mercier_realspace_geometry_channels_from_state(
+        state=state,
+        modes=modes,
+        trig=trig,
+        s=s,
+        lconm1=False,
+        lthreed=True,
+        lasym=False,
+        apply_scalxc=True,
+    )
+
+    mask_even = jnp.asarray([1.0, 0.0, 1.0], dtype=jnp.float64)
+    mask_odd = 1.0 - mask_even
+    coeff_cos_stack = jnp.stack([state.Rcos, state.Zcos], axis=0)
+    coeff_sin_stack = jnp.stack([state.Rsin, state.Zsin], axis=0)
+    mask_stack = jnp.stack([mask_even, mask_odd], axis=0)
+    coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
+    coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
+    stack, stack_t, stack_p = vmec_realspace_synthesis_multi(
+        coeff_cos=coeff_cos,
+        coeff_sin=coeff_sin,
+        modes=modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=True,
+        s=s,
+        derivs=("base", "dtheta", "dzeta"),
+    )
+
+    expected = {
+        "R_even": stack[0, 0],
+        "R_odd": stack[1, 0],
+        "Z_even": stack[0, 1],
+        "Z_odd": stack[1, 1],
+        "Ru_even": stack_t[0, 0],
+        "Ru_odd": stack_t[1, 0],
+        "Zu_even": stack_t[0, 1],
+        "Zu_odd": stack_t[1, 1],
+        "Rv_even": stack_p[0, 0],
+        "Rv_odd": stack_p[1, 0],
+        "Zv_even": stack_p[0, 1],
+        "Zv_odd": stack_p[1, 1],
+    }
+    for key, value in expected.items():
+        np.testing.assert_allclose(np.asarray(actual[key]), np.asarray(value), rtol=1e-13, atol=1e-13)
+
+
+def test_mercier_realspace_geometry_channels_from_state_is_differentiable():
+    import jax
+
+    modes = ModeTable(m=np.array([0, 1]), n=np.array([0, 0]))
+    trig = vmec_trig_tables(ntheta=8, nzeta=3, nfp=1, mmax=1, nmax=0, lasym=False, cache=False)
+    s = jnp.linspace(0.0, 1.0, 4)
+    zeros = jnp.zeros((4, 2), dtype=jnp.float64)
+
+    def objective(scale):
+        state = SimpleNamespace(
+            Rcos=jnp.stack([jnp.ones(4), scale * jnp.asarray([0.0, 0.2, 0.3, 0.4])], axis=1),
+            Rsin=zeros,
+            Zcos=zeros,
+            Zsin=jnp.stack([jnp.zeros(4), jnp.asarray([0.0, 0.1, 0.2, 0.3])], axis=1),
+        )
+        channels = finite_beta.mercier_realspace_geometry_channels_from_state(
+            state=state,
+            modes=modes,
+            trig=trig,
+            s=s,
+            lconm1=False,
+            apply_scalxc=True,
+        )
+        return jnp.sum(channels["R_odd"] * channels["Zu_odd"])
 
     value, grad = jax.value_and_grad(objective)(jnp.asarray(1.0))
     assert np.isfinite(np.asarray(value))

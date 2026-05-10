@@ -264,6 +264,95 @@ def mercier_gpp_from_realspace_geometry(
     return zeros.at[1:-1].set(gpp_inner)
 
 
+def mercier_realspace_geometry_channels_from_state(
+    *,
+    state,
+    modes,
+    trig,
+    s,
+    lconm1: bool = True,
+    lthreed: bool = True,
+    lasym: bool = False,
+    apply_scalxc: bool = True,
+) -> dict[str, Any]:
+    """Return VMEC even/odd real-space R/Z geometry channels for Mercier.
+
+    This mirrors the geometry synthesis used by the NumPy ``wout`` Mercier
+    parity path: VMEC internal Fourier coefficients are split by even/odd
+    poloidal mode number, axis rules are applied, and base/theta/zeta
+    derivatives are synthesized on the VMEC angular grid.  The odd channels are
+    VMEC-internal channels; physical fields are recovered as
+    ``X_even + sqrt(s) * X_odd``.
+    """
+    from .vmec_jacobian import _apply_vmec_axis_rules
+    from .vmec_parity import vmec_m1_internal_to_physical_signed
+    from .vmec_realspace import vmec_realspace_synthesis_multi
+
+    s = jnp.asarray(s, dtype=jnp.float64)
+    m_np = np.asarray(modes.m, dtype=int)
+    Rcos = jnp.asarray(state.Rcos, dtype=jnp.float64)
+    Rsin = jnp.asarray(state.Rsin, dtype=jnp.float64)
+    Zcos = jnp.asarray(state.Zcos, dtype=jnp.float64)
+    Zsin = jnp.asarray(state.Zsin, dtype=jnp.float64)
+
+    if bool(lconm1):
+        Rcos, Zsin, Rsin, Zcos = vmec_m1_internal_to_physical_signed(
+            Rcos=Rcos,
+            Zsin=Zsin,
+            Rsin=Rsin,
+            Zcos=Zcos,
+            modes=modes,
+            lthreed=bool(lthreed),
+            lasym=bool(lasym),
+            lconm1=bool(lconm1),
+        )
+
+    Rcos = _apply_vmec_axis_rules(Rcos, m_np)
+    Rsin = _apply_vmec_axis_rules(Rsin, m_np)
+    Zcos = _apply_vmec_axis_rules(Zcos, m_np)
+    Zsin = _apply_vmec_axis_rules(Zsin, m_np)
+
+    dtype = Rcos.dtype
+    mask_even = jnp.asarray((m_np % 2) == 0, dtype=dtype)
+    mask_odd = 1.0 - mask_even
+    coeff_cos_stack = jnp.stack([Rcos, Zcos], axis=0)
+    coeff_sin_stack = jnp.stack([Rsin, Zsin], axis=0)
+    mask_stack = jnp.stack([mask_even, mask_odd], axis=0)
+    coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
+    coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
+
+    stack, stack_t, stack_p = vmec_realspace_synthesis_multi(
+        coeff_cos=coeff_cos,
+        coeff_sin=coeff_sin,
+        modes=modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=bool(apply_scalxc),
+        s=s,
+        derivs=("base", "dtheta", "dzeta"),
+    )
+    even = stack[0]
+    odd = stack[1]
+    even_t = stack_t[0]
+    odd_t = stack_t[1]
+    even_p = stack_p[0]
+    odd_p = stack_p[1]
+    return {
+        "R_even": even[0],
+        "R_odd": odd[0],
+        "Z_even": even[1],
+        "Z_odd": odd[1],
+        "Ru_even": even_t[0],
+        "Ru_odd": odd_t[0],
+        "Zu_even": even_t[1],
+        "Zu_odd": odd_t[1],
+        "Rv_even": even_p[0],
+        "Rv_odd": odd_p[0],
+        "Zv_even": even_p[1],
+        "Zv_odd": odd_p[1],
+    }
+
+
 def mercier_bsubs_derivatives_lasym_false(
     *,
     bsubs,
