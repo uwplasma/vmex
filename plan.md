@@ -176,7 +176,11 @@ Acceptance:
    diagnostic.
 4. [x] Add the LASYM=True derivative branch to the AD-safe state-level `DMerc`
    diagnostic and keep the user-facing `DMerc` objective on that shared path.
-5. [ ] Start the first refactor with a low-risk extraction from the largest
+5. [x] Add the first differentiable Redl/bootstrap-current mismatch objective
+   on the state-level finite-beta path.
+6. [ ] Compare the new Redl residual against SIMSOPT's RedlGeomVmec and
+   RedlGeomBoozer paths on converged finite-beta equilibria.
+7. [ ] Start the first refactor with a low-risk extraction from the largest
    modules after the new tests are green.
 
 ## Activity Log
@@ -254,3 +258,8 @@ Acceptance:
   `vj.JVector` for VMEC-coordinate current-density targeting
   `(itheta/sqrtg, izeta/sqrtg)`, with docs, example comments, and derivative
   tests.  This closes the first finite-beta vector-diagnostics API lane.
+- 2026-05-10: Added a differentiable `vj.RedlBootstrapMismatch` objective.
+  The Redl algebra follows SIMSOPT/Redl et al.; vmec_jax evaluates the needed
+  geometry from state-level VMEC channels using fixed trapped-fraction
+  quadrature. Added tests, docs, and example wiring. The next lane is parity
+  against SIMSOPT RedlGeomVmec/RedlGeomBoozer on finite-beta equilibria.

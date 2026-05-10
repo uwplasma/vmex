@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from vmec_jax._compat import jnp
 from vmec_jax import finite_beta
@@ -675,6 +676,55 @@ def test_jxbforce_profiles_from_realspace_are_differentiable():
     assert np.isfinite(np.asarray(value))
     assert np.isfinite(np.asarray(grad))
     assert abs(float(np.asarray(grad))) > 0.0
+
+
+def test_redl_polynomial_profile_and_trapped_fraction_helpers():
+    s = jnp.asarray([0.25, 0.5, 0.75], dtype=jnp.float64)
+    values, derivs = finite_beta.polynomial_profile_and_derivative([1.0, 2.0, 3.0], s)
+    np.testing.assert_allclose(np.asarray(values), 1.0 + 2.0 * np.asarray(s) + 3.0 * np.asarray(s) ** 2)
+    np.testing.assert_allclose(np.asarray(derivs), 2.0 + 6.0 * np.asarray(s))
+
+    modB = 2.0 * jnp.ones((3, 4, 5), dtype=jnp.float64)
+    sqrtg = 7.0 * jnp.ones_like(modB)
+    trapped = finite_beta.trapped_fraction_from_modb_sqrtg(modB=modB, sqrtg=sqrtg)
+    np.testing.assert_allclose(np.asarray(trapped["Bmin"]), 2.0)
+    np.testing.assert_allclose(np.asarray(trapped["Bmax"]), 2.0)
+    np.testing.assert_allclose(np.asarray(trapped["epsilon"]), 0.0)
+    np.testing.assert_allclose(np.asarray(trapped["f_t"]), 0.0, atol=1.0e-12)
+
+
+def test_redl_bootstrap_mismatch_normalization_and_grad():
+    pytest.importorskip("jax")
+    import jax
+
+    vmec = jnp.asarray([0.0, 0.0, 0.0], dtype=jnp.float64)
+    redl = jnp.asarray([1.0, -2.0, 3.0], dtype=jnp.float64)
+    residuals = finite_beta.redl_bootstrap_mismatch_from_profiles(jdotB_vmec=vmec, jdotB_redl=redl)
+    np.testing.assert_allclose(np.sum(np.asarray(residuals) ** 2), 1.0)
+
+    s = jnp.asarray([0.2, 0.5, 0.8], dtype=jnp.float64)
+
+    def objective(scale):
+        jdotB, details = finite_beta.redl_bootstrap_jdotb(
+            s=s,
+            G=jnp.asarray([2.0, 2.1, 2.2]),
+            R=jnp.asarray([1.7, 1.8, 1.9]),
+            iota=jnp.asarray([0.42, 0.44, 0.46]),
+            epsilon=jnp.asarray([0.10, 0.11, 0.12]),
+            f_t=jnp.asarray([0.20, 0.22, 0.24]),
+            psi_edge=-1.0,
+            nfp=2,
+            helicity_n=0,
+            ne_coeffs=scale * jnp.asarray([3.0e20, 0.0, -2.0e20]),
+            Te_coeffs=jnp.asarray([8.0e3, -5.0e3]),
+            Zeff_coeffs=1.0,
+        )
+        assert set(("L31", "L32", "alpha", "jdotB")).issubset(details)
+        return jnp.sum(jdotB * jdotB)
+
+    value, grad = jax.value_and_grad(objective)(jnp.asarray(1.0, dtype=jnp.float64))
+    assert np.isfinite(np.asarray(value))
+    assert np.isfinite(np.asarray(grad))
 
 
 def _mercier_gpp_numpy_reference(
