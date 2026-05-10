@@ -332,3 +332,7 @@ Acceptance:
   `mpol/ntor >= max(min_vmec_mode, max_mode+2)` resolution policy, QS objective
   wrappers, and lower-bound/QI helper edge paths. These protect the
   SIMSOPT-like example API and the high-mode optimization resolution policy.
+- 2026-05-10: Added synthetic rendering tests for bundled overview and
+  `|B|`/contravariant/covariant parity plot writers. The tests monkeypatch
+  VMEC/JAX kernels and use toy `wout` data, so docs/validation plotting entry
+  points are covered without adding solver runtime.

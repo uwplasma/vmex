@@ -38,6 +38,10 @@ from vmec_jax.plotting import (
     vmecplot2_cross_section_indices,
     vmecplot2_lcfs_3d_grid,
     vmecplot2_surface_grid,
+    write_axisym_overview,
+    write_bmag_parity_figures,
+    write_bsub_parity_figures,
+    write_bsup_parity_figures,
     zeta_grid,
     zeta_grid_field_period,
 )
@@ -95,6 +99,15 @@ def _toy_wout(*, lasym: bool = False):
         zaxis_cs=np.asarray([0.0, 0.3]),
         zaxis_cc=np.asarray([0.0, 0.4]),
     )
+
+
+def _toy_wout_with_flux(*, lasym: bool = False):
+    wout = _toy_wout(lasym=lasym)
+    wout.phips = 1.0
+    wout.phipf = np.asarray([1.0, 1.0])
+    wout.chipf = np.asarray([0.2, 0.2])
+    wout.signgs = 1
+    return wout
 
 
 def test_grids_slices_and_path_helpers():
@@ -278,6 +291,68 @@ def test_plot_qh_optimization_wrapper_dispatches_to_public_helpers(tmp_path, mon
     ]
     assert calls[-2:] == [("prepare",), ("show",)]
     assert "Saved" in capsys.readouterr().out
+
+
+def test_axisym_and_parity_plot_writers_render_with_synthetic_wout(tmp_path, monkeypatch):
+    pytest.importorskip("matplotlib")
+    import vmec_jax.plotting as plotting
+
+    wout = _toy_wout_with_flux(lasym=True)
+    theta = np.asarray([0.0, np.pi / 2.0])
+    zeta = np.asarray([0.0, 0.2])
+    static = SimpleNamespace(
+        grid=SimpleNamespace(theta=theta, zeta=zeta),
+        cfg=SimpleNamespace(nfp=wout.nfp),
+        s=np.asarray([0.0, 1.0]),
+    )
+
+    monkeypatch.setattr(plotting, "example_paths", lambda case: (Path(f"input.{case}"), Path(f"wout_{case}.nc")))
+    monkeypatch.setattr(plotting, "read_wout", lambda path: wout)
+    monkeypatch.setattr(plotting, "load_config", lambda path: ("cfg", "indata"))
+    monkeypatch.setattr(plotting, "build_static", lambda cfg: static)
+    monkeypatch.setattr(plotting, "state_from_wout", lambda loaded_wout: "state")
+    monkeypatch.setattr(
+        plotting,
+        "bmag_from_state_physical",
+        lambda *args, **kwargs: np.ones((len(theta), len(zeta))) * 3.0,
+    )
+    monkeypatch.setattr(
+        plotting,
+        "eval_geom",
+        lambda state, static_arg: SimpleNamespace(dummy=True),
+    )
+    monkeypatch.setattr(plotting, "lamscale_from_phips", lambda phips, s: 1.0)
+    monkeypatch.setattr(
+        plotting,
+        "bsup_from_geom",
+        lambda *args, **kwargs: (
+            np.ones((2, len(theta), len(zeta))) * 4.0,
+            np.ones((2, len(theta), len(zeta))) * 5.0,
+        ),
+    )
+    monkeypatch.setattr(
+        plotting,
+        "bsub_from_bsup",
+        lambda geom, bsupu, bsupv: (np.asarray(bsupu) + 1.0, np.asarray(bsupv) + 1.0),
+    )
+
+    overview = write_axisym_overview("toy", outdir=tmp_path / "overview")
+    bmag = write_bmag_parity_figures(input_path=tmp_path / "input.toy", wout_path=tmp_path / "wout_toy.nc", outdir=tmp_path / "bmag")
+    bsup = write_bsup_parity_figures(input_path=tmp_path / "input.toy", wout_path=tmp_path / "wout_toy.nc", outdir=tmp_path / "bsup")
+    bsub = write_bsub_parity_figures(input_path=tmp_path / "input.toy", wout_path=tmp_path / "wout_toy.nc", outdir=tmp_path / "bsub")
+
+    for path in (overview, bmag, bsup, bsub):
+        assert path.exists()
+        assert path.stat().st_size > 0
+
+
+def test_axisym_overview_requires_reference_wout(monkeypatch, tmp_path):
+    pytest.importorskip("matplotlib")
+    import vmec_jax.plotting as plotting
+
+    monkeypatch.setattr(plotting, "example_paths", lambda case: (Path(f"input.{case}"), None))
+    with pytest.raises(FileNotFoundError, match="Reference wout"):
+        write_axisym_overview("missing", outdir=tmp_path)
 
 
 def test_fix_matplotlib_3d_sets_equal_radius_limits():
