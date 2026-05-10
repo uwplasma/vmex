@@ -727,6 +727,44 @@ def test_redl_bootstrap_mismatch_normalization_and_grad():
     assert np.isfinite(np.asarray(grad))
 
 
+def test_redl_bootstrap_formula_matches_simsopt_when_available():
+    simsopt_bootstrap = pytest.importorskip("simsopt.mhd.bootstrap")
+    simsopt_profiles = pytest.importorskip("simsopt.mhd.profiles")
+
+    s = np.asarray([0.2, 0.5, 0.8])
+    ne_coeffs = np.asarray([3.0e20, 0.0, -2.0e20])
+    te_coeffs = np.asarray([8.0e3, -5.0e3])
+    kwargs = {
+        "helicity_n": 0,
+        "s": s,
+        "G": np.asarray([2.0, 2.1, 2.2]),
+        "R": np.asarray([1.7, 1.8, 1.9]),
+        "iota": np.asarray([0.42, 0.44, 0.46]),
+        "epsilon": np.asarray([0.10, 0.11, 0.12]),
+        "f_t": np.asarray([0.20, 0.22, 0.24]),
+        "psi_edge": -1.0,
+        "nfp": 2,
+    }
+    expected, _details = simsopt_bootstrap.j_dot_B_Redl(
+        simsopt_profiles.ProfilePolynomial(ne_coeffs),
+        simsopt_profiles.ProfilePolynomial(te_coeffs),
+        simsopt_profiles.ProfilePolynomial(te_coeffs),
+        1.0,
+        **kwargs,
+    )
+    actual, actual_details = finite_beta.redl_bootstrap_jdotb(
+        ne_coeffs=ne_coeffs,
+        Te_coeffs=te_coeffs,
+        Ti_coeffs=te_coeffs,
+        Zeff_coeffs=1.0,
+        **{key: jnp.asarray(value) if isinstance(value, np.ndarray) else value for key, value in kwargs.items()},
+    )
+
+    np.testing.assert_allclose(np.asarray(actual), expected, rtol=1.0e-13, atol=1.0e-8)
+    np.testing.assert_allclose(np.asarray(actual_details["L31"]), np.asarray(_details.L31), rtol=1.0e-13, atol=1.0e-14)
+    np.testing.assert_allclose(np.asarray(actual_details["L32"]), np.asarray(_details.L32), rtol=1.0e-13, atol=1.0e-14)
+
+
 def _mercier_gpp_numpy_reference(
     *,
     s,
