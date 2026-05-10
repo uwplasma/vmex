@@ -27,6 +27,10 @@ scripts through JAX-differentiable helpers:
   flux-coordinate current-density components ``(J^theta, J^zeta)``.  Use
   ``vmec_jax.BVector`` for Cartesian ``(Bx, By, Bz)`` targeting on one radial
   surface.
+- ``vmec_jax.RedlBootstrapMismatch`` compares VMEC's state-derived
+  ``<J.B>`` profile with the Redl bootstrap-current fit formula using
+  polynomial density/temperature profiles and differentiable trapped-fraction
+  quadrature.
 
 Example:
 
@@ -37,6 +41,12 @@ Example:
            (vj.DMerc(minimum=0.0, softness=1.0e-3).J, 0.0, 1.0),
            (vj.JDotB(surfaces=(0.25, 0.50, 0.75)).J, 0.0, 1.0e-4),
            (vj.ToroidalCurrent(surfaces=(0.25, 0.50, 0.75)).J, target_torcur, 1.0e-4),
+           (vj.RedlBootstrapMismatch(
+               helicity_n=0,
+               ne_coeffs=[3.0e20, 0, 0, 0, 0, -2.97e20],
+               Te_coeffs=[15.0e3, -14.85e3],
+               surfaces=(0.25, 0.50, 0.75),
+           ).J, 0.0, 1.0e2),
            (vj.JVector(surfaces=(0.50,)).J, target_j_vector, 1.0e-6),
        ]
    )

@@ -457,10 +457,30 @@ surface and ``vj.JVector(surfaces=...)`` returns VMEC flux-coordinate current
 density components ``(J^theta, J^zeta) = (itheta/sqrtg, izeta/sqrtg)`` on the
 selected surfaces.  These are flattened residual blocks; users should choose
 their own target arrays and normalizations before adding them to a problem.
-The full Redl bootstrap-current mismatch from the SIMSOPT finite-beta script
-remains an open extension; the examples keep the stage-one structure and write
-VMEC inputs/wouts/history so additional terms can be added and
-regression-tested incrementally.
+
+The Redl bootstrap-current mismatch is available as
+``vj.RedlBootstrapMismatch``:
+
+.. code-block:: python
+
+   ne_coeffs = [3.0e20, 0.0, 0.0, 0.0, 0.0, -2.97e20]  # m^-3
+   te_coeffs = [15.0e3, -14.85e3]                      # eV
+   redl = vj.RedlBootstrapMismatch(
+       helicity_n=HELICITY_N,
+       ne_coeffs=ne_coeffs,
+       Te_coeffs=te_coeffs,
+       Ti_coeffs=te_coeffs,
+       Zeff_coeffs=1.0,
+       surfaces=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9),
+   )
+   objective_tuples.append((redl.J, 0.0, BOOTSTRAP_WEIGHT))
+
+The Redl algebra follows the SIMSOPT/Redl et al. fit formula.  vmec_jax
+evaluates the geometry from differentiable VMEC state channels on nearest
+full-mesh surfaces using fixed quadrature for the trapped-particle fraction.
+This keeps the term differentiable and usable in the discrete-adjoint
+least-squares workflow; final validation against a Boozer-space Redl geometry
+choice should still be part of any publication-quality finite-beta study.
 
 The full multi-page artifact inventory, including legacy aliases, CSV/JSON
 summary downloads, and exact reproduction commands for each standalone example,

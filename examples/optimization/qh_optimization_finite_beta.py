@@ -88,6 +88,10 @@ MAX_IOTA_WEIGHT = 1.0e8
 VOLAVGB_WEIGHT = 1.0e3
 BETA_WEIGHT = 1.0e1
 FIELD_WEIGHT = 1.0e3
+BOOTSTRAP_WEIGHT = 0.0  # Set >0 to add the Redl bootstrap-current mismatch.
+BOOTSTRAP_SURFACES = (0.25, 0.50, 0.75)
+NE_COEFFS = [3.0e20, 0.0, 0.0, 0.0, 0.0, -2.97e20]  # m^-3, polynomial in s.
+TE_COEFFS = [15.0e3, -14.85e3]  # eV; Ti defaults to Te in the residual below.
 
 USE_ESS = True
 ALPHA = 2.5
@@ -183,14 +187,27 @@ for stage_mode in stage_modes:
             targets=global_targets,
         )
         field = field_residual(state)
+        residual_blocks = [
+            global_res,
+            jnp.asarray(field["residuals1d"], dtype=jnp.float64) * FIELD_WEIGHT,
+        ]
+        if BOOTSTRAP_WEIGHT > 0.0:
+            redl = vj.redl_bootstrap_mismatch_from_state(
+                state=state,
+                static=static,
+                indata=stage_indata,
+                signgs=signgs,
+                helicity_n=HELICITY_N,
+                ne_coeffs=NE_COEFFS,
+                Te_coeffs=TE_COEFFS,
+                surfaces=BOOTSTRAP_SURFACES,
+            )
+            residual_blocks.append(jnp.asarray(redl["residuals1d"], dtype=jnp.float64) * BOOTSTRAP_WEIGHT)
         return jnp.concatenate(
-            [
-                global_res,
-                jnp.asarray(field["residuals1d"], dtype=jnp.float64) * FIELD_WEIGHT,
-            ]
+            residual_blocks
         )
 
-    residuals_from_state._n_non_qs = 6
+    residuals_from_state._n_non_qs = 6 + (len(BOOTSTRAP_SURFACES) if BOOTSTRAP_WEIGHT > 0.0 else 0)
     residuals_from_state._qs_total_from_state = (
         lambda state, field_residual=field_residual: FIELD_WEIGHT**2 * float(field_residual(state)["total"])
     )

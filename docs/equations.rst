@@ -308,6 +308,40 @@ flux-coordinate components flattened over the selected surfaces and angular
 grid.  ``vj.BVector`` returns the corresponding Cartesian magnetic-field vector
 ``(B_x,B_y,B_z)`` on one selected radial surface.
 
+Redl Bootstrap-Current Mismatch
+-------------------------------
+
+For finite-beta stage-one studies, ``vmec_jax`` exposes a differentiable Redl
+bootstrap-current residual.  The residual follows the normalized SIMSOPT form
+
+.. math::
+
+   R_j =
+   \frac{\langle\mathbf{J}\cdot\mathbf{B}\rangle_{\mathrm{VMEC}}(s_j)
+       - \langle\mathbf{J}\cdot\mathbf{B}\rangle_{\mathrm{Redl}}(s_j)}
+        {\left[\sum_k
+        \left(\langle\mathbf{J}\cdot\mathbf{B}\rangle_{\mathrm{VMEC}}(s_k)
+            + \langle\mathbf{J}\cdot\mathbf{B}\rangle_{\mathrm{Redl}}(s_k)
+        \right)^2\right]^{1/2}}.
+
+The Redl term uses polynomial density and temperature profiles in the same
+ascending-coefficient convention as SIMSOPT ``ProfilePolynomial``.  The
+effective trapped-particle fraction is evaluated with fixed Gauss-Legendre
+quadrature using the substitution
+:math:`y = \sqrt{1-\lambda B_{\max}}`, which removes the endpoint singularity
+in the standard integral
+
+.. math::
+
+   f_t = 1 - \frac{3}{4}\langle B^2\rangle
+         \int_0^{1/B_{\max}}
+         \frac{\lambda\,d\lambda}
+              {\left\langle\sqrt{1-\lambda B}\right\rangle}.
+
+This differs from SIMSOPT's post-processing routine, which refines angular
+extrema with splines.  The vmec_jax form is intentionally fixed-shape and
+differentiable for use inside exact-Jacobian optimization.
+
 Force balance in VMEC (residual form)
 -------------------------------------
 
