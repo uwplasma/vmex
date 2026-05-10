@@ -192,6 +192,7 @@ from .finite_beta import (
     mercier_gpp_from_realspace_geometry,
     mercier_realspace_geometry_channels_from_state,
     mercier_surface_integrals_from_realspace,
+    mercier_terms_from_state,
     mercier_terms_from_profile_integrals,
     mercier_zeta_half_mesh_from_realspace_geometry,
 )
@@ -436,6 +437,7 @@ __all__ = [
     "mercier_gpp_from_realspace_geometry",
     "mercier_realspace_geometry_channels_from_state",
     "mercier_surface_integrals_from_realspace",
+    "mercier_terms_from_state",
     "mercier_terms_from_profile_integrals",
     "mercier_zeta_half_mesh_from_realspace_geometry",
     "dvds_from_sqrtg",

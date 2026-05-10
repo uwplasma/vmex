@@ -169,9 +169,8 @@ Acceptance:
    (`qi_legacy_total`).
 3. [x] Run a small QI one-DOF noise/ranking audit with the source-level
    diagnostic.
-4. [ ] Compose the AD-safe state-synthesized geometry, gpp, bsubs, bdotk,
-   surface-integral, and algebra kernels into a state-level `DMerc` residual;
-   then add the LASYM=True derivative branch.
+4. [ ] Wrap the AD-safe state-level `DMerc` diagnostic as a user-facing
+   optimization residual/objective; then add the LASYM=True derivative branch.
 5. [ ] Start the first refactor with a low-risk extraction from the largest
    modules after the new tests are green.
 
@@ -223,3 +222,8 @@ Acceptance:
   source-level JAX synthesis helper for the VMEC even/odd R/Z geometry channels
   used by Mercier. Remaining work is composing the state-level `DMerc` residual
   and adding LASYM=True derivative reconstruction.
+- 2026-05-10: Added `mercier_terms_from_state`, a differentiable state-level
+  Mercier diagnostic for stellarator-symmetric equilibria. It composes the
+  JAX geometry, `gpp`, `bsubs`, derivative, `bdotk`, surface-integral, and
+  algebra kernels. Remaining work is a user-facing objective wrapper plus
+  LASYM=True derivative reconstruction.

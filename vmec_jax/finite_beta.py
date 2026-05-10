@@ -619,6 +619,171 @@ def _wout_like_for_state(*, state, static, indata, signgs: int):
     return wout_like, pres
 
 
+def mercier_terms_from_state(
+    *,
+    state,
+    static,
+    indata,
+    signgs: int,
+    mmax_force: int | None = None,
+    nmax_force: int | None = None,
+    include_channels: bool = False,
+) -> dict[str, Any]:
+    """Return differentiable VMEC Mercier terms from a VMEC state.
+
+    This state-level composition currently supports stellarator-symmetric
+    equilibria.  The LASYM=True spectral derivative branch is kept explicit
+    rather than silently falling back to the NumPy ``wout`` path.
+    """
+    if bool(getattr(static.cfg, "lasym", False)):
+        raise NotImplementedError("State-based DMerc is not wired for LASYM=True yet")
+
+    from .vmec_tomnsp import vmec_trig_tables
+    from .wout import _vmec_wint_from_trig_jax
+
+    s = jnp.asarray(static.s, dtype=jnp.float64)
+    trig = getattr(static, "trig_vmec", None)
+    if trig is None:
+        trig = vmec_trig_tables(
+            ntheta=int(static.cfg.ntheta),
+            nzeta=int(static.cfg.nzeta),
+            nfp=int(static.cfg.nfp),
+            mmax=int(static.cfg.mpol) - 1,
+            nmax=int(static.cfg.ntor),
+            lasym=False,
+            dtype=jnp.asarray(state.Rcos).dtype,
+        )
+    mmax = int(static.cfg.mpol) - 1 if mmax_force is None else int(mmax_force)
+    nmax = int(static.cfg.ntor) if nmax_force is None else int(nmax_force)
+
+    wout_like, pres = _wout_like_for_state(state=state, static=static, indata=indata, signgs=int(signgs))
+    bc = vmec_bcovar_half_mesh_from_wout(
+        state=state,
+        static=static,
+        wout=wout_like,
+        pres=pres,
+        use_wout_bsup=False,
+        use_wout_bsub_for_lambda=False,
+        use_wout_bmag_for_bsq=False,
+        use_vmec_synthesis=True,
+        trig=trig,
+    )
+    norms = vmec_force_norms_from_bcovar_dynamic(
+        bc=bc,
+        trig=trig,
+        s=s,
+        signgs=int(signgs),
+    )
+    geom = mercier_realspace_geometry_channels_from_state(
+        state=state,
+        modes=static.modes,
+        trig=trig,
+        s=s,
+        lconm1=bool(getattr(static.cfg, "lconm1", True)),
+        lthreed=bool(getattr(static.cfg, "lthreed", True)),
+        lasym=False,
+        apply_scalxc=True,
+    )
+    zeta_half = mercier_zeta_half_mesh_from_realspace_geometry(
+        s=s,
+        Rv_even=geom["Rv_even"],
+        Rv_odd=geom["Rv_odd"],
+        Zv_even=geom["Zv_even"],
+        Zv_odd=geom["Zv_odd"],
+    )
+    bsubs_half = mercier_bsubs_half_mesh_from_geometry(
+        bsupu=bc.bsupu,
+        bsupv=bc.bsupv,
+        rs12=bc.jac.rs,
+        zs12=bc.jac.zs,
+        ru12=bc.jac.ru12,
+        zu12=bc.jac.zu12,
+        rv12=zeta_half["rv12"],
+        zv12=zeta_half["zv12"],
+    )
+    bsubs_full = mercier_bsubs_full_mesh_from_half_mesh(bsubs_half=bsubs_half["bsubs"])
+    bsubs_derivs = mercier_bsubs_derivatives_lasym_false(
+        bsubs=bsubs_full,
+        trig=trig,
+        mmax_force=mmax,
+        nmax_force=nmax,
+    )
+    bdotk = mercier_bdotk_from_covariant_derivatives(
+        bsubu=bc.bsubu,
+        bsubv=bc.bsubv,
+        bsubsu=bsubs_derivs["bsubsu"],
+        bsubsv=bsubs_derivs["bsubsv"],
+        s=s,
+    )
+    gpp = mercier_gpp_from_realspace_geometry(
+        s=s,
+        phips=wout_like.phips,
+        sqrtg=bc.jac.sqrtg,
+        R_even=geom["R_even"],
+        R_odd=geom["R_odd"],
+        Ru_even=geom["Ru_even"],
+        Ru_odd=geom["Ru_odd"],
+        Zu_even=geom["Zu_even"],
+        Zu_odd=geom["Zu_odd"],
+        Rv_even=geom["Rv_even"],
+        Rv_odd=geom["Rv_odd"],
+        Zv_even=geom["Zv_even"],
+        Zv_odd=geom["Zv_odd"],
+        signgs=int(signgs),
+    )
+    b2 = 2.0 * (jnp.asarray(bc.bsq, dtype=jnp.float64) - jnp.asarray(pres, dtype=jnp.float64)[:, None, None])
+    surface = mercier_surface_integrals_from_realspace(
+        phips=wout_like.phips,
+        sqrtg=bc.jac.sqrtg,
+        b2=b2,
+        gpp=gpp,
+        bdotk_merc=bdotk["bdotk_merc"],
+        wint=_vmec_wint_from_trig_jax(trig),
+        signgs=int(signgs),
+    )
+    wint = _vmec_wint_from_trig_jax(trig)
+    torcur = jnp.zeros_like(s, dtype=jnp.float64)
+    if int(s.shape[0]) > 1:
+        torcur_inner = jnp.asarray(float(signgs) * 2.0 * np.pi, dtype=jnp.float64) * jnp.sum(
+            jnp.asarray(bc.bsubu, dtype=jnp.float64)[1:] * wint[None, :, :],
+            axis=(1, 2),
+        )
+        torcur = torcur.at[1:].set(torcur_inner)
+
+    terms = mercier_terms_from_profile_integrals(
+        s=s,
+        phips=wout_like.phips,
+        iotas=wout_like.iotas,
+        vp=norms.vp,
+        pres=pres,
+        torcur=torcur,
+        tpp=surface["tpp"],
+        tbb=surface["tbb"],
+        tjb=surface["tjb"],
+        tjj=surface["tjj"],
+        signgs=int(signgs),
+    )
+    out = {
+        **terms,
+        **surface,
+        "torcur": torcur,
+        "vp": norms.vp,
+    }
+    if include_channels:
+        out.update(
+            {
+                "gpp": gpp,
+                "bsubs_half": bsubs_half["bsubs"],
+                "bsubs_full": bsubs_full,
+                "bsubsu": bsubs_derivs["bsubsu"],
+                "bsubsv": bsubs_derivs["bsubsv"],
+                "bdotk": bdotk["bdotk"],
+                "bdotk_merc": bdotk["bdotk_merc"],
+            }
+        )
+    return out
+
+
 def finite_beta_scalars_from_state(*, state, static, indata, signgs: int) -> dict[str, Any]:
     """Return JAX-differentiable finite-beta scalar diagnostics from a VMEC state."""
     aspect = equilibrium_aspect_ratio_from_state(state=state, static=static)
