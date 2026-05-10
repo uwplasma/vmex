@@ -36,6 +36,7 @@ Submodules
    vmec_jax.quasi_isodynamic
    vmec_jax.quasisymmetry
    vmec_jax.radial
+   vmec_jax.redl_bootstrap
    vmec_jax.residuals
    vmec_jax.solve
    vmec_jax.state

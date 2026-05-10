@@ -274,3 +274,7 @@ Acceptance:
   vmec_jax state-geometry path is held to a 2% envelope. The Boozer geometry
   lane remains subprocess-isolated because the local SIMSOPT Boozer path exits
   the Python process in this environment.
+- 2026-05-10: Started the source-organization refactor by splitting pure Redl
+  bootstrap profile, trapped-fraction, current-fit, and mismatch algebra into
+  `vmec_jax.redl_bootstrap`. `finite_beta` keeps the state-dependent geometry
+  and Mercier/JXBFORCE plumbing while preserving existing public imports.
