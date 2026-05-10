@@ -295,9 +295,11 @@ research-quality QI runs. ``QI_OPTIONS.phimin`` controls the start of the
 one-field-period well interval; keep ``0.0`` for the bundled NFP=2 seed, or set
 ``np.pi / nfp`` when auditing a reference field whose first well starts there.
 
-Redl bootstrap-current mismatch is not yet enabled as a fully differentiable
-residual block in vmec_jax.  Mercier ``DMerc`` is now available as
-``vj.DMerc``, a smooth lower-bound objective backed by the differentiable
+Redl bootstrap-current mismatch is now available as ``vj.RedlBootstrapMismatch``.
+The implementation ports the SIMSOPT/Redl et al. bootstrap algebra and uses a
+differentiable VMEC-state geometry approximation with fixed trapped-fraction
+quadrature on nearest full-mesh surfaces.  Mercier ``DMerc`` is also available
+as ``vj.DMerc``, a smooth lower-bound objective backed by the differentiable
 ``mercier_terms_from_state`` path for stellarator-symmetric and LASYM
 equilibria.  VMEC/JXBFORCE profile accessors ``vj.JDotB``, ``vj.BDotB`` and
 ``vj.BDotGradV`` are also available for finite-beta targeting or
@@ -323,7 +325,6 @@ reconstruction, LASYM derivative reconstruction, ``itheta/izeta/bdotk``,
 ``jdotb/bdotb/bdotgradv`` profile blocks, and ``torcur/ip`` current-profile
 blocks.  The ``RUN_FULL=1`` finite-beta test suite compares this state-level
 path against the existing VMEC/wout Mercier/JXBFORCE implementation on the
-bundled finite-beta QI input.  The remaining finite-beta objective work is
-wiring the Redl bootstrap-current mismatch.  The finite-beta scaffolding is
-structured so that term can be added next without changing the user-facing
-example workflow.
+bundled finite-beta QI input.  The next finite-beta validation lane is comparing
+the new Redl residual against SIMSOPT's Boozer-geometry and VMEC-geometry Redl
+paths on converged finite-beta equilibria.

@@ -247,6 +247,7 @@ def test_jxbforce_profile_tuple_stays_regular_state_objective() -> None:
         JDotB,
         JVector,
         LeastSquaresProblem,
+        RedlBootstrapMismatch,
         ToroidalCurrent,
         ToroidalCurrentGradient,
     )
@@ -260,6 +261,16 @@ def test_jxbforce_profile_tuple_stays_regular_state_objective() -> None:
             (JVector(surfaces=(0.25,)).J, 0.0, 0.05),
             (ToroidalCurrent(surfaces=(0.75,)).J, 0.0, 0.20),
             (ToroidalCurrentGradient().J, 0.0, 0.30),
+            (
+                RedlBootstrapMismatch(
+                    helicity_n=0,
+                    ne_coeffs=[3.0e20, 0.0, -2.5e20],
+                    Te_coeffs=[8.0e3, -6.0e3],
+                    surfaces=(0.25, 0.75),
+                ).J,
+                0.0,
+                0.40,
+            ),
         ]
     )
 
@@ -272,6 +283,7 @@ def test_jxbforce_profile_tuple_stays_regular_state_objective() -> None:
         "J_vector",
         "torcur",
         "torcur_prime",
+        "redl_bootstrap_mismatch",
     ]
     assert len(problem.qi_objective_terms) == 0
 
@@ -291,6 +303,7 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
         JDotB,
         JVector,
         MagneticWell,
+        RedlBootstrapMismatch,
         ToroidalCurrent,
         ToroidalCurrentGradient,
         VolavgB,
@@ -321,8 +334,14 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
             "sqrtg": 4.0 * jnp.ones((4, 2, 3), dtype=jnp.float64),
         }
 
+    def fake_redl_bootstrap_mismatch_from_state(*, state, **_kwargs):
+        scale = jnp.asarray(state, dtype=jnp.float64)
+        residuals = jnp.asarray([0.2 + 0.02 * scale, -0.1 + 0.01 * scale], dtype=jnp.float64)
+        return {"residuals1d": residuals, "total": jnp.dot(residuals, residuals)}
+
     monkeypatch.setattr(workflow, "finite_beta_scalars_from_state", fake_scalars_from_state)
     monkeypatch.setattr(workflow, "mercier_terms_from_state", fake_mercier_terms_from_state)
+    monkeypatch.setattr(workflow, "redl_bootstrap_mismatch_from_state", fake_redl_bootstrap_mismatch_from_state)
     monkeypatch.setattr(
         workflow,
         "b_cartesian_from_state",
@@ -351,6 +370,16 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
     torcur_prime_value, torcur_prime_grad = jax.value_and_grad(
         lambda x: jnp.sum(ToroidalCurrentGradient(surfaces=(0.25, 0.75)).J(ctx, x))
     )(jnp.asarray(1.0))
+    redl_value, redl_grad = jax.value_and_grad(
+        lambda x: jnp.sum(
+            RedlBootstrapMismatch(
+                helicity_n=0,
+                ne_coeffs=[3.0e20, 0.0, -2.5e20],
+                Te_coeffs=[8.0e3, -6.0e3],
+                surfaces=(0.25, 0.75),
+            ).J(ctx, x)
+        )
+    )(jnp.asarray(1.0))
 
     np.testing.assert_allclose(np.asarray(vol_value), 2.5)
     np.testing.assert_allclose(np.asarray(vol_grad), 0.5)
@@ -375,6 +404,8 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
     np.testing.assert_allclose(np.asarray(torcur_grad), 0.10)
     np.testing.assert_allclose(np.asarray(torcur_prime_value), 3.30)
     np.testing.assert_allclose(np.asarray(torcur_prime_grad), 0.30)
+    np.testing.assert_allclose(np.asarray(redl_value), 0.13)
+    np.testing.assert_allclose(np.asarray(redl_grad), 0.03)
 
 
 def test_jxbforce_and_current_objective_gradients_match_finite_difference(monkeypatch) -> None:
