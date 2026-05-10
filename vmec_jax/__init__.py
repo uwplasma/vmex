@@ -192,6 +192,7 @@ from .finite_beta import (
     mercier_gpp_from_realspace_geometry,
     mercier_surface_integrals_from_realspace,
     mercier_terms_from_profile_integrals,
+    mercier_zeta_half_mesh_from_realspace_geometry,
 )
 from .integrals import dvds_from_sqrtg, cumtrapz_s, volume_from_sqrtg
 from .field import (
@@ -434,6 +435,7 @@ __all__ = [
     "mercier_gpp_from_realspace_geometry",
     "mercier_surface_integrals_from_realspace",
     "mercier_terms_from_profile_integrals",
+    "mercier_zeta_half_mesh_from_realspace_geometry",
     "dvds_from_sqrtg",
     "cumtrapz_s",
     "volume_from_sqrtg",

@@ -364,6 +364,36 @@ def mercier_bsubs_half_mesh_from_geometry(
     return {"bsubs": bsubs, "g_su": g_su, "g_sv": g_sv}
 
 
+def mercier_zeta_half_mesh_from_realspace_geometry(
+    *,
+    s,
+    Rv_even,
+    Rv_odd,
+    Zv_even,
+    Zv_odd,
+) -> dict[str, Any]:
+    """Return VMEC half-mesh ``rv12``/``zv12`` from parity geometry channels."""
+    s = jnp.asarray(s, dtype=jnp.float64)
+    Rv_even = jnp.asarray(Rv_even, dtype=jnp.float64)
+    Rv_odd = jnp.asarray(Rv_odd, dtype=jnp.float64)
+    Zv_even = jnp.asarray(Zv_even, dtype=jnp.float64)
+    Zv_odd = jnp.asarray(Zv_odd, dtype=jnp.float64)
+
+    zeros = jnp.zeros_like(Rv_even, dtype=jnp.float64)
+    ns = int(s.shape[0])
+    if ns < 2:
+        return {"rv12": zeros, "zv12": zeros}
+
+    sh = jnp.sqrt(jnp.maximum(0.5 * (s[1:] + s[:-1]), 0.0))[:, None, None]
+    rv_inner = 0.5 * (Rv_even[1:] + Rv_even[:-1] + sh * (Rv_odd[1:] + Rv_odd[:-1]))
+    zv_inner = 0.5 * (Zv_even[1:] + Zv_even[:-1] + sh * (Zv_odd[1:] + Zv_odd[:-1]))
+    rv12 = zeros.at[1:].set(rv_inner)
+    zv12 = zeros.at[1:].set(zv_inner)
+    rv12 = rv12.at[0].set(rv_inner[0])
+    zv12 = zv12.at[0].set(zv_inner[0])
+    return {"rv12": rv12, "zv12": zv12}
+
+
 def mercier_bsubs_full_mesh_from_half_mesh(*, bsubs_half) -> Any:
     """Average half-mesh ``bsubs`` to VMEC's jxbforce full-mesh convention."""
     bsubs_half = jnp.asarray(bsubs_half, dtype=jnp.float64)
