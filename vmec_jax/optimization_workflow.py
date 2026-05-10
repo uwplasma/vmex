@@ -21,7 +21,7 @@ from .boundary import boundary_from_indata, boundary_input_from_indata
 from .driver import run_fixed_boundary, write_wout_from_fixed_boundary_run
 from .energy import flux_profiles_from_indata
 from .field import b_cartesian_from_state, signgs_from_sqrtg
-from .finite_beta import finite_beta_scalars_from_state, mercier_terms_from_state
+from .finite_beta import finite_beta_scalars_from_state, mercier_terms_from_state, redl_bootstrap_mismatch_from_state
 from .geom import eval_geom
 from .init_guess import initial_guess_from_boundary
 from .optimization import (
@@ -715,6 +715,76 @@ class ToroidalCurrentGradient(_MercierProfileObjective):
 
     name = "torcur_prime"
     profile_key = "ip"
+
+
+class RedlBootstrapMismatch(_MercierProfileObjective):
+    """Redl bootstrap-current mismatch objective for finite-beta studies.
+
+    Polynomial profile coefficients follow SIMSOPT ``ProfilePolynomial``
+    ordering.  ``ne_coeffs`` are in ``m^-3`` and ``Te_coeffs``/``Ti_coeffs`` in
+    eV.  The residual block is normalized as in SIMSOPT's
+    ``VmecRedlBootstrapMismatch`` objective.
+    """
+
+    name = "redl_bootstrap_mismatch"
+
+    def __init__(
+        self,
+        *,
+        helicity_n: int,
+        ne_coeffs,
+        Te_coeffs,
+        Ti_coeffs=None,
+        Zeff_coeffs=1.0,
+        surfaces: Sequence[float] | None = None,
+        n_lambda: int = 32,
+        mmax_force: int | None = None,
+        nmax_force: int | None = None,
+    ):
+        super().__init__(surfaces=surfaces, normalize=1.0, mmax_force=mmax_force, nmax_force=nmax_force)
+        self.helicity_n = int(helicity_n)
+        self.ne_coeffs = tuple(float(x) for x in np.ravel(np.asarray(ne_coeffs, dtype=float)))
+        self.Te_coeffs = tuple(float(x) for x in np.ravel(np.asarray(Te_coeffs, dtype=float)))
+        if Ti_coeffs is None:
+            self.Ti_coeffs = None
+        else:
+            self.Ti_coeffs = tuple(float(x) for x in np.ravel(np.asarray(Ti_coeffs, dtype=float)))
+        self.Zeff_coeffs = tuple(float(x) for x in np.ravel(np.atleast_1d(np.asarray(Zeff_coeffs, dtype=float))))
+        self.n_lambda = int(n_lambda)
+
+    def _evaluate(self, ctx: StageContext, state):
+        return redl_bootstrap_mismatch_from_state(
+            state=state,
+            static=ctx.static,
+            indata=ctx.indata,
+            signgs=ctx.signgs,
+            helicity_n=self.helicity_n,
+            ne_coeffs=self.ne_coeffs,
+            Te_coeffs=self.Te_coeffs,
+            Ti_coeffs=self.Ti_coeffs,
+            Zeff_coeffs=self.Zeff_coeffs,
+            surfaces=self.surfaces,
+            n_lambda=self.n_lambda,
+            mmax_force=self.mmax_force,
+            nmax_force=self.nmax_force,
+        )
+
+    def J(self, ctx: StageContext, state):
+        return self._evaluate(ctx, state)["residuals1d"]
+
+    def total(self, ctx: StageContext, state):
+        return self._evaluate(ctx, state)["total"]
+
+    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        if not _target_is_zero(target):
+            raise ValueError("RedlBootstrapMismatch is already normalized and requires target=0.")
+        return ObjectiveTerm(
+            self.name,
+            self.J,
+            target=0.0,
+            weight=residual_weight,
+            total=lambda ctx, state: float(residual_weight) ** 2 * self.total(ctx, state),
+        )
 
 
 class LgradB:
@@ -2064,6 +2134,7 @@ __all__ = [
     "QuasiIsodynamicResidual",
     "QuasisymmetryRatioResidual",
     "QIObjectiveTerm",
+    "RedlBootstrapMismatch",
     "StageContext",
     "ToroidalCurrent",
     "ToroidalCurrentGradient",
