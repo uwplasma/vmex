@@ -29,6 +29,7 @@ Submodules
    vmec_jax.implicit
    vmec_jax.init_guess
    vmec_jax.integrals
+   vmec_jax.mercier
    vmec_jax.modes
    vmec_jax.namelist
    vmec_jax.optimization

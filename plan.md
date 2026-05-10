@@ -182,7 +182,7 @@ Acceptance:
    committed finite-pressure wout fixture.
 7. [ ] Add subprocess-isolated RedlGeomBoozer comparison where booz_xform is
    available and stable.
-8. [ ] Start the first refactor with a low-risk extraction from the largest
+8. [x] Start the first refactor with a low-risk extraction from the largest
    modules after the new tests are green.
 
 ## Activity Log
@@ -278,3 +278,7 @@ Acceptance:
   bootstrap profile, trapped-fraction, current-fit, and mismatch algebra into
   `vmec_jax.redl_bootstrap`. `finite_beta` keeps the state-dependent geometry
   and Mercier/JXBFORCE plumbing while preserving existing public imports.
+- 2026-05-10: Continued the source split by extracting pure Mercier algebra,
+  Mercier surface-integral reductions, and JXBFORCE profile reductions into
+  `vmec_jax.mercier`. State-level VMEC composition remains in `finite_beta`,
+  and the existing public `finite_beta`/top-level imports are preserved.
