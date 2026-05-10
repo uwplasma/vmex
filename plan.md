@@ -178,9 +178,11 @@ Acceptance:
    diagnostic and keep the user-facing `DMerc` objective on that shared path.
 5. [x] Add the first differentiable Redl/bootstrap-current mismatch objective
    on the state-level finite-beta path.
-6. [ ] Compare the new Redl residual against SIMSOPT's RedlGeomVmec and
-   RedlGeomBoozer paths on converged finite-beta equilibria.
-7. [ ] Start the first refactor with a low-risk extraction from the largest
+6. [x] Compare the new Redl residual against SIMSOPT's RedlGeomVmec path on a
+   committed finite-pressure wout fixture.
+7. [ ] Add subprocess-isolated RedlGeomBoozer comparison where booz_xform is
+   available and stable.
+8. [ ] Start the first refactor with a low-risk extraction from the largest
    modules after the new tests are green.
 
 ## Activity Log
@@ -266,3 +268,9 @@ Acceptance:
 - 2026-05-10: Added an optional SIMSOPT parity test for the Redl algebra
   itself, comparing `jdotB`, `L31`, and `L32` against
   `simsopt.mhd.bootstrap.j_dot_B_Redl` when SIMSOPT is installed.
+- 2026-05-10: Added an optional SIMSOPT `RedlGeomVmec` parity test on the
+  committed `wout_shaped_tokamak_pressure.nc` fixture. With shared SIMSOPT
+  Redl geometry the residuals agree tightly; the public differentiable
+  vmec_jax state-geometry path is held to a 2% envelope. The Boozer geometry
+  lane remains subprocess-isolated because the local SIMSOPT Boozer path exits
+  the Python process in this environment.
