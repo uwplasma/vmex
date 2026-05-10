@@ -312,3 +312,7 @@ Acceptance:
   total coverage `61.44%`, runtime about `6:57`. Raised the CI floor from 60%
   to 61%; the next material coverage step is 65% and should still come from
   targeted tests/refactors, not synthetic coverage padding.
+- 2026-05-10: Added focused optimization-workflow tests for mode-continuation
+  policy helpers and QI objective factories. These cover QI residual weighting,
+  Boozer surface slicing for mirror-ratio penalties, elongation penalties, and
+  LgradB state-objective plumbing without executing VMEC or Boozer solves.

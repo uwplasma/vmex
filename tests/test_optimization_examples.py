@@ -252,6 +252,118 @@ def test_least_squares_problem_collects_problem_metadata() -> None:
     }
 
 
+def test_workflow_stage_policy_helpers_are_explicit() -> None:
+    from vmec_jax.optimization_workflow import objectives_track_iota, qs_stage_budget, qs_stage_modes, repeated_stage_modes
+    from vmec_jax.optimization_workflow import ObjectiveTerm
+
+    assert qs_stage_modes(max_mode=3, use_mode_continuation=True, continuation_nfev=2) == [1, 1, 2, 2, 2, 3, 3, 3]
+    assert qs_stage_modes(max_mode=3, use_mode_continuation=True, continuation_nfev=0) == [3]
+    assert qs_stage_modes(max_mode=1, use_mode_continuation=True, continuation_nfev=2) == [1]
+    assert repeated_stage_modes(max_mode=3, use_mode_continuation=True, continuation_nfev=2, repeats=4) == [3, 3, 3, 3]
+    assert repeated_stage_modes(max_mode=3, use_mode_continuation=False, continuation_nfev=2, repeats=4) == [3]
+    assert qs_stage_budget(stage_mode=2, max_mode=3, max_nfev=30, continuation_nfev=5) == 5
+    assert qs_stage_budget(stage_mode=3, max_mode=3, max_nfev=30, continuation_nfev=5) == 30
+
+    plain = ObjectiveTerm("plain", lambda _ctx, _state: 0.0)
+    tracked = ObjectiveTerm("iota", lambda _ctx, _state: 0.0, track_iota=True)
+    assert not objectives_track_iota([plain])
+    assert objectives_track_iota([plain], target_iota=0.41)
+    assert objectives_track_iota([plain, tracked])
+
+
+def test_qi_objective_factories_apply_weights_and_slice_shared_fields(monkeypatch) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    ctx = SimpleNamespace(static=SimpleNamespace(cfg=SimpleNamespace(nfp=5)), indata="indata", signgs=-1, flux="flux")
+    qi_options = workflow.QuasiIsodynamicOptions(surfaces=[0.25, 0.75])
+
+    field_term = workflow.quasi_isodynamic_field_objective(weight=2.0, qi_options=qi_options)
+    residual, total = field_term.residual_and_total(
+        ctx,
+        "state",
+        {"residuals1d": np.asarray([1.0, 2.0]), "total": 3.0},
+    )
+    np.testing.assert_allclose(residual, [2.0, 4.0])
+    assert total == 12.0
+    assert field_term.qi_options is qi_options
+
+    def fake_mirror_ratio_penalty_from_boozer_output(booz, *, nfp, threshold, ntheta, nphi):
+        assert nfp == 5
+        assert threshold == 1.2
+        assert ntheta == 8
+        assert nphi == 9
+        np.testing.assert_array_equal(booz["s_b"], [0.75])
+        np.testing.assert_array_equal(booz["iota_b"], [0.3])
+        assert booz["untouched"] == "kept"
+        return {"residuals1d": np.asarray([0.5]), "total": 0.25}
+
+    monkeypatch.setattr(workflow, "mirror_ratio_penalty_from_boozer_output", fake_mirror_ratio_penalty_from_boozer_output)
+    mirror_term = workflow.qi_mirror_ratio_objective(
+        threshold=1.2,
+        weight=3.0,
+        ntheta=8,
+        nphi=9,
+        surface_index=1,
+        qi_options=qi_options,
+    )
+    residual, total = mirror_term.residual_and_total(
+        ctx,
+        "state",
+        {
+            "booz": {
+                "bmnc_b": np.zeros((2, 3)),
+                "bmns_b": np.ones((2, 3)),
+                "iota_b": np.asarray([0.2, 0.3]),
+                "s_b": np.asarray([0.25, 0.75]),
+                "untouched": "kept",
+            }
+        },
+    )
+    np.testing.assert_allclose(residual, [1.5])
+    assert total == 2.25
+    assert mirror_term.qi_options is qi_options
+
+    def fake_max_elongation_penalty_from_state(*, state, static, threshold, ntheta, nphi):
+        assert state == "state"
+        assert static is ctx.static
+        assert threshold == 4.0
+        assert ntheta == 10
+        assert nphi == 11
+        return {"residuals1d": np.asarray([2.0]), "total": 4.0}
+
+    monkeypatch.setattr(workflow, "max_elongation_penalty_from_state", fake_max_elongation_penalty_from_state)
+    elongation_term = workflow.qi_max_elongation_objective(threshold=4.0, weight=0.5, ntheta=10, nphi=11)
+    residual, total = elongation_term.residual_and_total(ctx, "state", {})
+    np.testing.assert_allclose(residual, [1.0])
+    assert total == 1.0
+
+    def fake_lgradb_penalty_from_state(*, state, static, indata, signgs, flux_local, threshold, s_index, ntheta, nphi, smooth_penalty):
+        assert state == "state"
+        assert static is ctx.static
+        assert indata == "indata"
+        assert signgs == -1
+        assert flux_local == "flux"
+        assert threshold == 0.3
+        assert s_index == -2
+        assert ntheta == 12
+        assert nphi == 13
+        assert smooth_penalty == 0.01
+        return {"residuals1d": np.asarray([4.0]), "total": 16.0}
+
+    monkeypatch.setattr(workflow, "lgradb_penalty_from_state", fake_lgradb_penalty_from_state)
+    lgradb_term = workflow.qi_lgradb_objective(
+        threshold=0.3,
+        weight=0.25,
+        s_index=-2,
+        ntheta=12,
+        nphi=13,
+        smooth_penalty=0.01,
+    )
+    residual, total = lgradb_term.residual_and_total(ctx, "state", {})
+    np.testing.assert_allclose(residual, [1.0])
+    assert total == 1.0
+
+
 def test_least_squares_solve_dispatches_regular_problem(monkeypatch, tmp_path) -> None:
     import vmec_jax.optimization_workflow as workflow
     from vmec_jax.optimization_workflow import AbsMeanIotaFloor, AspectRatio, LeastSquaresProblem, MeanIota
