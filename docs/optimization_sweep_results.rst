@@ -301,7 +301,8 @@ residual block in vmec_jax.  Mercier ``DMerc`` is now available as
 ``mercier_terms_from_state`` path for stellarator-symmetric and LASYM
 equilibria.  VMEC/JXBFORCE profile accessors ``vj.JDotB``, ``vj.BDotB`` and
 ``vj.BDotGradV`` are also available for finite-beta targeting or
-regularization.  The JAX
+regularization, together with state-derived ``vj.ToroidalCurrent`` and
+``vj.ToroidalCurrentGradient`` current-profile objectives.  The JAX
 ``mercier_gpp_from_realspace_geometry``,
 ``mercier_surface_integrals_from_realspace``, and
 ``mercier_terms_from_profile_integrals`` helpers now cover the VMEC-style
@@ -315,10 +316,11 @@ are available.  ``mercier_realspace_geometry_channels_from_state``,
 ``mercier_bdotk_from_covariant_derivatives`` also port state synthesis of the
 even/odd geometry channels, half-mesh toroidal geometry, radial covariant field
 assembly, jxbforce full-mesh averaging, stellarator-symmetric derivative
-reconstruction, LASYM derivative reconstruction, ``itheta/izeta/bdotk``, and
-``jdotb/bdotb/bdotgradv`` profile blocks.  The ``RUN_FULL=1`` finite-beta test
-suite compares this state-level path against the existing VMEC/wout
-Mercier/JXBFORCE implementation on the bundled finite-beta QI input.  The
-remaining finite-beta objective work is wiring the Redl bootstrap-current
-mismatch.  The finite-beta scaffolding is structured so that term can be added
-next without changing the user-facing example workflow.
+reconstruction, LASYM derivative reconstruction, ``itheta/izeta/bdotk``,
+``jdotb/bdotb/bdotgradv`` profile blocks, and ``torcur/ip`` current-profile
+blocks.  The ``RUN_FULL=1`` finite-beta test suite compares this state-level
+path against the existing VMEC/wout Mercier/JXBFORCE implementation on the
+bundled finite-beta QI input.  The remaining finite-beta objective work is
+wiring the Redl bootstrap-current mismatch.  The finite-beta scaffolding is
+structured so that term can be added next without changing the user-facing
+example workflow.
