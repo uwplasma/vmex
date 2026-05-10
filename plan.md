@@ -303,3 +303,7 @@ Acceptance:
   problems. These verify SIMSOPT-like objective tuple metadata and shared
   `QuasiIsodynamicOptions` are routed to the correct low-level optimization
   path without executing expensive optimization runs.
+- 2026-05-10: Added synthetic rendering coverage for the public optimization
+  plotting helpers: 3-D LCFS comparison, LCFS `|B|` contour panels, and
+  objective-history plots. This protects README/docs plot wrappers without
+  adding real VMEC output fixtures.
