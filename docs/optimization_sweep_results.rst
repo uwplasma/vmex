@@ -314,6 +314,8 @@ are available.  ``mercier_realspace_geometry_channels_from_state``,
 even/odd geometry channels, half-mesh toroidal geometry, radial covariant field
 assembly, jxbforce full-mesh averaging, stellarator-symmetric derivative
 reconstruction, LASYM derivative reconstruction, and ``itheta/izeta/bdotk``
-block.  The remaining finite-beta objective work is wiring the Redl
+block.  The ``RUN_FULL=1`` finite-beta test suite compares this state-level path
+against the existing VMEC/wout Mercier implementation on the bundled finite-beta
+QI input.  The remaining finite-beta objective work is wiring the Redl
 bootstrap-current mismatch.  The finite-beta scaffolding is structured so that
 term can be added next without changing the user-facing example workflow.
