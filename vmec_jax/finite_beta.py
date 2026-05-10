@@ -174,7 +174,9 @@ def mercier_surface_integrals_from_realspace(
     phip_real = twopi * phips * sign_jac
     phip_full = 0.5 * (phip_real[2:] + phip_real[1:-1])
     gsqrt_raw = 0.5 * (sqrtg[2:] + sqrtg[1:-1])
-    gsqrt_full = jnp.where(phip_full[:, None, None] != 0.0, gsqrt_raw / phip_full[:, None, None], 0.0)
+    phip_full = phip_full[:, None, None]
+    phip_safe = jnp.where(phip_full != 0.0, phip_full, 1.0)
+    gsqrt_full = jnp.where(phip_full != 0.0, gsqrt_raw / phip_safe, 0.0)
     b2i = 0.5 * (b2[2:] + b2[1:-1])
     b2_safe = jnp.where(b2i != 0.0, b2i, jnp.asarray(1.0, dtype=jnp.float64))
     norm = twopi * twopi
@@ -193,6 +195,71 @@ def mercier_surface_integrals_from_realspace(
         "tjb": zeros.at[1:-1].set(tjb_inner),
         "tjj": zeros.at[1:-1].set(tjj_inner),
     }
+
+
+def mercier_gpp_from_realspace_geometry(
+    *,
+    s,
+    phips,
+    sqrtg,
+    R_even,
+    R_odd,
+    Ru_even,
+    Ru_odd,
+    Zu_even,
+    Zu_odd,
+    Rv_even,
+    Rv_odd,
+    Zv_even,
+    Zv_odd,
+    signgs: int = 1,
+) -> Any:
+    """Return VMEC Mercier contravariant ``gpp`` from real-space geometry.
+
+    The inputs are the even/odd VMEC real-space channels used in the Mercier
+    path after the internal parity conversion:
+    ``X(s,theta,zeta) = X_even + sqrt(s) * X_odd``.  The returned array has the
+    same ``(ns, ntheta, nzeta)`` shape as the input geometry and is populated on
+    interior full-mesh surfaces.  Endpoints are zero because Mercier terms are
+    only defined on ``1 <= js <= ns-2`` in VMEC's convention.
+    """
+    s = jnp.asarray(s, dtype=jnp.float64)
+    phips = jnp.asarray(phips, dtype=jnp.float64)
+    sqrtg = jnp.asarray(sqrtg, dtype=jnp.float64)
+    R_even = jnp.asarray(R_even, dtype=jnp.float64)
+    R_odd = jnp.asarray(R_odd, dtype=jnp.float64)
+    Ru_even = jnp.asarray(Ru_even, dtype=jnp.float64)
+    Ru_odd = jnp.asarray(Ru_odd, dtype=jnp.float64)
+    Zu_even = jnp.asarray(Zu_even, dtype=jnp.float64)
+    Zu_odd = jnp.asarray(Zu_odd, dtype=jnp.float64)
+    Rv_even = jnp.asarray(Rv_even, dtype=jnp.float64)
+    Rv_odd = jnp.asarray(Rv_odd, dtype=jnp.float64)
+    Zv_even = jnp.asarray(Zv_even, dtype=jnp.float64)
+    Zv_odd = jnp.asarray(Zv_odd, dtype=jnp.float64)
+
+    ns = int(s.shape[0])
+    zeros = jnp.zeros_like(sqrtg, dtype=jnp.float64)
+    if ns < 3:
+        return zeros
+
+    sign_jac = jnp.asarray(1.0 if int(signgs) >= 0 else -1.0, dtype=jnp.float64)
+    twopi = jnp.asarray(2.0 * np.pi, dtype=jnp.float64)
+    phip_real = twopi * phips * sign_jac
+    phip_full = 0.5 * (phip_real[2:] + phip_real[1:-1])
+    gsqrt_raw = 0.5 * (sqrtg[2:] + sqrtg[1:-1])
+    gsqrt_full = jnp.where(phip_full[:, None, None] != 0.0, gsqrt_raw / phip_full[:, None, None], 0.0)
+
+    sqs = jnp.sqrt(jnp.maximum(s[1:-1], 0.0))[:, None, None]
+    r1f = R_even[1:-1] + sqs * R_odd[1:-1]
+    rtf = Ru_even[1:-1] + sqs * Ru_odd[1:-1]
+    ztf = Zu_even[1:-1] + sqs * Zu_odd[1:-1]
+    rzf = Rv_even[1:-1] + sqs * Rv_odd[1:-1]
+    zzf = Zv_even[1:-1] + sqs * Zv_odd[1:-1]
+    gtt = rtf * rtf + ztf * ztf
+    denom = gtt * r1f * r1f + (rtf * zzf - rzf * ztf) ** 2
+    denom_safe = jnp.where(denom != 0.0, denom, 1.0)
+    gpp_inner = jnp.where(denom != 0.0, (gsqrt_full * gsqrt_full) / denom_safe, 0.0)
+    return zeros.at[1:-1].set(gpp_inner)
 
 
 def mercier_bdotk_from_covariant_derivatives(
