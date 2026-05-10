@@ -367,3 +367,8 @@ Acceptance:
   and wout helper slices: `420 passed, 21 skipped, 85 deselected`, total coverage
   `63.15%`, runtime about `6:32`. Kept the CI floor at 62%; the current 63%
   margin is still too narrow for a platform-safe threshold bump.
+- 2026-05-10: Added CLI dispatch coverage for CPU default policy selection,
+  explicit parity/fast modes, VMEC++ restart flags, profiling hooks, explicit
+  output paths, missing-input errors, invalid `--jit-forces`, and read failures.
+  Verified with `python -m pytest tests/test_cli_helpers.py -q` (`11 passed`)
+  and `ruff check tests/test_cli_helpers.py`.
