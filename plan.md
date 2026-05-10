@@ -429,3 +429,8 @@ Acceptance:
   reuse. Verified with
   `python -m pytest tests/test_grid_radial_nyquist_helpers.py -q` (`3 passed`)
   and `ruff check tests/test_grid_radial_nyquist_helpers.py`.
+- 2026-05-10: Re-ran the CI-equivalent fast coverage gate after the
+  radial/grid/Nyquist helper slice: `447 passed, 21 skipped, 85 deselected`,
+  total coverage `64.15%`, runtime about `6:28`. Kept the CI floor at 62%;
+  next meaningful target is enough coverage margin to raise the gate directly to
+  65% without CI flakiness.
