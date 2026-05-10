@@ -30,7 +30,6 @@ import sys
 import time
 
 import numpy as np
-from scipy.interpolate import UnivariateSpline
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -48,6 +47,7 @@ from vmec_jax.quasi_isodynamic import (
     quasi_isodynamic_residual_from_boozer_output,
     quasi_isodynamic_residual_from_state,
 )
+from vmec_jax.qi_legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
 
 
 enable_x64(True)
@@ -212,199 +212,6 @@ def _slice_boozer_surface(booz: dict, surface_index: int) -> dict:
     return out
 
 
-def _legacy_get_branches(phi_b: np.ndarray, b_alpha: np.ndarray, b_level: float) -> tuple[float, float]:
-    """Return the first and last bounce crossings used by qi_functions.py.
-
-    This is intentionally NumPy/SciPy-only and non-differentiable.  It is a
-    diagnostic copy of the legacy omnigenity metric so we can score the same
-    booz_xform_jax spectrum without relying on the SIMSOPT Boozer subprocess.
-    """
-    diffs = b_alpha - float(b_level)
-    diffsgn = diffs[:-1] * diffs[1:]
-    inds = np.where(diffsgn < 0)[0]
-    if b_level <= np.min(b_alpha):
-        phi_min = float(phi_b[int(np.argmin(b_alpha))])
-        return phi_min, phi_min
-    if b_level >= np.max(b_alpha):
-        return float(phi_b[0]), float(phi_b[-1])
-    if len(inds) < 2:
-        inds = np.where(diffsgn <= 0)[0]
-        split = None
-        for idx in range(1, len(inds)):
-            if inds[idx] != inds[idx - 1] + 1:
-                split = [inds[idx - 1], inds[-1]]
-                break
-        if split is not None:
-            inds = np.asarray(split, dtype=int)
-    if len(inds) > 2:
-        inds = np.asarray([inds[0], inds[-1]], dtype=int)
-    if len(inds) < 2:
-        return float(phi_b[0]), float(phi_b[-1])
-
-    def _crossing(ind: int, *, right_endpoint: bool) -> float:
-        dy = b_alpha[ind] - b_alpha[ind + 1]
-        dx = phi_b[ind] - phi_b[ind + 1]
-        slope = dy / dx
-        intercept = b_alpha[ind] - slope * phi_b[ind]
-        if slope == 0.0:
-            return float(phi_b[ind + int(right_endpoint)])
-        return float((b_level - intercept) / slope)
-
-    return _crossing(int(inds[0]), right_endpoint=False), _crossing(int(inds[1]), right_endpoint=True)
-
-
-def _legacy_qi_residual_from_boozer_output(
-    booz: dict,
-    *,
-    nfp: int,
-    nphi: int,
-    nalpha: int,
-    n_bounce: int,
-    nphi_out: int,
-    phimin: float,
-    weights=None,
-) -> dict:
-    """Evaluate the branch-squash/stretch/shuffle QI diagnostic on Boozer modes."""
-    bmnc_b = np.asarray(booz["bmnc_b"], dtype=float)
-    xm_b = np.asarray(booz["ixm_b"], dtype=float)
-    xn_b = np.asarray(booz["ixn_b"], dtype=float)
-    iota_b = np.asarray(booz["iota_b"], dtype=float)
-    if bmnc_b.ndim != 2:
-        raise ValueError(f"bmnc_b must have shape (nsurf, nmodes), got {bmnc_b.shape}")
-    nsurf = bmnc_b.shape[0]
-    if weights is None:
-        weights_arr = np.ones(nsurf)
-    else:
-        weights_arr = np.sqrt(np.asarray(weights, dtype=float))
-    if weights_arr.shape[0] != nsurf:
-        raise ValueError("weights must have one value per Boozer surface")
-
-    phimax = float(phimin) + 2.0 * np.pi / float(nfp)
-    phi_1d = np.linspace(float(phimin), phimax, int(nphi))
-    phis2d = np.tile(phi_1d, (int(nalpha), 1)).T
-    b_levels = np.linspace(0.0, 1.0, int(n_bounce))
-    out = np.zeros((nsurf, int(nalpha), int(nphi_out)))
-    surface_totals = []
-
-    for surf in range(nsurf):
-        iota = float(iota_b[surf])
-        theta_min = -iota * float(phimin)
-        theta_max = theta_min + 2.0 * np.pi
-        thetas2d = np.tile(np.linspace(theta_min, theta_max, int(nalpha)), (int(nphi), 1)) + iota * phis2d
-        angle = thetas2d[:, :, None] * xm_b[None, None, :] - phis2d[:, :, None] * xn_b[None, None, :]
-        bmag = np.sum(bmnc_b[surf][None, None, :] * np.cos(angle), axis=-1)
-        bmin = float(np.min(bmag))
-        bmax = float(np.max(bmag))
-        denom = max(bmax - bmin, np.finfo(float).tiny)
-        bnorm = (bmag - bmin) / denom
-
-        bounce_widths = np.zeros((int(nalpha), int(n_bounce)))
-        phi_crossings = np.zeros((int(nalpha), 2 * int(n_bounce) - 1))
-        shuffled_crossings = np.zeros_like(phi_crossings)
-        weights_alpha = np.zeros(int(nalpha))
-
-        for ialpha in range(int(nalpha)):
-            profile = np.array(bnorm[:, ialpha], copy=True)
-            phi_profile = phis2d[:, ialpha]
-            min_index = int(np.argmin(profile))
-
-            left = np.array(profile[: min_index + 1], copy=True)
-            phi_left = phi_profile[: min_index + 1]
-            right = np.array(profile[min_index:], copy=True)
-            phi_right = phi_profile[min_index:]
-
-            left_max = int(np.argmax(left))
-            left[:left_max] = left[left_max]
-            for idx in range(len(left) - 1):
-                if left[idx] <= left[idx + 1]:
-                    stop = len(left) - 1
-                    for jdx in range(idx + 1, len(left)):
-                        if left[jdx] < left[idx]:
-                            stop = jdx
-                            break
-                    left[idx:stop] = left[idx]
-
-            right_max = int(np.argmax(right))
-            right[right_max:] = right[right_max]
-            for jdx in range(len(right) - 1, 1, -1):
-                if right[jdx - 1] >= right[jdx]:
-                    stop = 0
-                    for kdx in range(jdx - 1, 1, -1):
-                        if right[kdx] < right[jdx]:
-                            stop = kdx
-                            break
-                    right[stop + 1 : jdx] = right[jdx]
-
-            pmax = 50
-            pmin = 15
-            if len(left) > 1:
-                x_left = (phi_left - phi_left[0]) / max(phi_left[-1] - phi_left[0], np.finfo(float).eps)
-                left_half = x_left < 0.5
-                f_left = left_half * (1.0 - left[0]) * ((np.cos(2 * np.pi * x_left) + 1.0) / 2.0) ** pmax
-                f_left += (~left_half) * (-left[-1]) * ((np.cos(2 * np.pi * x_left) + 1.0) / 2.0) ** pmin
-                left = left + f_left
-            if len(right) > 1:
-                x_right = (phi_right - phi_right[0]) / max(phi_right[-1] - phi_right[0], np.finfo(float).eps)
-                right_half = x_right < 0.5
-                f_right = right_half * (-right[0]) * ((np.cos(2 * np.pi * x_right) + 1.0) / 2.0) ** pmin
-                f_right += (~right_half) * (1.0 - right[-1]) * ((np.cos(2 * np.pi * x_right) + 1.0) / 2.0) ** pmax
-                right = right + f_right
-
-            squashed = np.concatenate((left[:-1], right))
-            diff = profile - squashed
-            weights_alpha[ialpha] = (phimax - float(phimin)) / max(
-                float(UnivariateSpline(phi_profile, diff * diff, k=1, s=0).integral(float(phimin), phimax)),
-                np.finfo(float).eps,
-            )
-
-            for jlevel, level in enumerate(b_levels):
-                phi_left_cross, phi_right_cross = _legacy_get_branches(phi_profile, squashed, float(level))
-                bounce_widths[ialpha, jlevel] = phi_right_cross - phi_left_cross
-                phi_crossings[ialpha, int(n_bounce) - jlevel - 1] = phi_left_cross
-                phi_crossings[ialpha, int(n_bounce) + jlevel - 1] = phi_right_cross
-
-        weights_alpha = weights_alpha / max(float(np.sum(weights_alpha)), np.finfo(float).eps)
-        mean_widths = np.sum(bounce_widths * weights_alpha[:, None], axis=0)
-        shuffled_levels = np.concatenate((np.flip(b_levels), b_levels[1:]))
-        phi_eval = np.linspace(float(phimin), phimax, int(nphi_out))
-
-        for ialpha in range(int(nalpha)):
-            delta_widths = 0.5 * (bounce_widths[ialpha, :] - mean_widths)
-            left_crossings = np.array(phi_crossings[ialpha, : int(n_bounce)], copy=True)
-            right_crossings = np.array(phi_crossings[ialpha, int(n_bounce) - 1 :], copy=True)
-            left_crossings += np.flip(delta_widths)
-            right_crossings -= delta_widths
-            for idx in range(int(n_bounce) - 1):
-                if left_crossings[idx + 1] - left_crossings[idx] < 0:
-                    right_crossings[-idx - 2] += left_crossings[idx] - left_crossings[idx + 1] + 1.0e-12
-                    left_crossings[idx + 1] = left_crossings[idx] + 1.0e-12
-                if right_crossings[-idx - 1] - right_crossings[-idx - 2] < 0:
-                    left_crossings[idx + 1] += right_crossings[-idx - 1] - right_crossings[-idx - 2] - 1.0e-12
-                    right_crossings[-idx - 2] = right_crossings[-idx - 1] - 1.0e-12
-            shuffled_crossings[ialpha, : int(n_bounce)] = left_crossings
-            shuffled_crossings[ialpha, int(n_bounce) - 1 :] = right_crossings
-            for idx in range(1, shuffled_crossings.shape[1]):
-                if shuffled_crossings[ialpha, idx] <= shuffled_crossings[ialpha, idx - 1]:
-                    shuffled_crossings[ialpha, idx] = shuffled_crossings[ialpha, idx - 1] + 1.0e-12
-
-            original = UnivariateSpline(phis2d[:, ialpha], bnorm[:, ialpha], k=1, s=0)
-            shuffled = UnivariateSpline(shuffled_crossings[ialpha, :], shuffled_levels, k=1, s=0)
-            out[surf, ialpha, :] = weights_arr[surf] * (shuffled(phi_eval) - original(phi_eval)) / np.sqrt(
-                int(nphi_out)
-            )
-
-        out[surf, :, :] = out[surf, :, :] / np.sqrt(int(nalpha))
-        surface_totals.append(float(np.dot(out[surf].ravel(), out[surf].ravel())))
-
-    residuals = out.ravel()
-    return {
-        "residuals1d": residuals,
-        "total": float(np.dot(residuals, residuals)),
-        "surface_totals": surface_totals,
-        "residual_size": int(residuals.size),
-    }
-
-
 def evaluate_vmec_jax() -> dict:
     run, solve_wall_s = _run_vmec_jax_equilibrium()
     wout = vj.write_wout_from_fixed_boundary_run(OUTPUT_DIR / "wout_vmec_jax.nc", run)
@@ -454,7 +261,7 @@ def evaluate_vmec_jax() -> dict:
         print(f"Evaluating legacy branch-shuffle QI diagnostic phimin={phimin:.6g} ...")
         legacy_qi, legacy_wall_s = _timed(
             f"legacy branch-shuffle phimin={phimin_factor}",
-            lambda phimin=phimin: _legacy_qi_residual_from_boozer_output(
+            lambda phimin=phimin: legacy_qi_branch_shuffle_diagnostic_from_boozer_output(
                 booz,
                 nfp=int(run.static.cfg.nfp),
                 nphi=QI_NPHI,

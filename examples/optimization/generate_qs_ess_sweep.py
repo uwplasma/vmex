@@ -73,6 +73,7 @@ from vmec_jax.quasi_isodynamic import (
     mirror_ratio_penalty_from_boozer_output,
     quasi_isodynamic_residual_from_state,
 )
+from vmec_jax.qi_legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
 from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_state
 from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
@@ -852,13 +853,18 @@ def _qi_diagnostics_from_state(problem_cfg: ProblemConfig, opt, state) -> dict[s
         lgradb_min = float(np.min(lgradb_values))
         lgradb_excess = np.asarray(lgradb["excess"], dtype=float)
         qi_total = float(np.asarray(qi["total"]))
+        legacy_qi = legacy_qi_branch_shuffle_diagnostic_from_boozer_output(
+            qi["booz"],
+            nfp=int(static.cfg.nfp),
+            nphi=problem_cfg.qi_nphi,
+            nalpha=problem_cfg.qi_nalpha,
+            n_bounce=problem_cfg.qi_n_bounce,
+            nphi_out=max(401, int(problem_cfg.qi_nphi)),
+            phimin=problem_cfg.qi_phimin,
+        )
         return {
             "qi_raw_total": qi_total,
-            # The current smooth QI objective includes the branch-shuffle profile
-            # term calibrated to rank designs like the Goodman et al. legacy
-            # diagnostic.  Keep the old key for compatibility and expose the
-            # physics meaning explicitly for new tables/plots.
-            "qi_legacy_total": qi_total,
+            "qi_legacy_total": float(legacy_qi["total"]),
             "qi_mirror_ratio_max": mirror_max,
             "qi_mirror_ratio_target": float(problem_cfg.qi_max_mirror_ratio),
             "qi_mirror_excess_max": max(0.0, mirror_max - float(problem_cfg.qi_max_mirror_ratio)),

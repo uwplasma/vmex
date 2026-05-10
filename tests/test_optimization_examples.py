@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 
@@ -66,7 +68,15 @@ def test_qi_objective_comparison_is_top_level_diagnostic() -> None:
     assert "QI_VARIANTS" in text
     assert "PHIMIN_FACTORS" in text
     assert "QuasiIsodynamicResidual" in text
+    assert "legacy_qi_branch_shuffle_diagnostic_from_boozer_output" in text
     assert "quasi_isodynamic_residual_from_state(" in text
+
+
+def test_qs_sweep_reports_true_legacy_qi_metric() -> None:
+    text = (ROOT / "examples" / "optimization" / "generate_qs_ess_sweep.py").read_text()
+
+    assert "legacy_qi_branch_shuffle_diagnostic_from_boozer_output" in text
+    assert '"qi_legacy_total": qi_total' not in text
 
 
 def test_policy_matrix_plots_single_problem(tmp_path, monkeypatch) -> None:
@@ -216,3 +226,35 @@ def test_lgradb_tuple_stays_regular_state_objective() -> None:
     assert len(problem.objective_terms) == 1
     assert problem.objective_terms[0].name == "LgradB"
     assert len(problem.qi_objective_terms) == 0
+
+
+def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> None:
+    pytest.importorskip("jax")
+    import jax
+
+    from vmec_jax._compat import jnp
+    import vmec_jax.optimization_workflow as workflow
+    from vmec_jax.optimization_workflow import BetaTotal, MagneticWell, VolavgB
+
+    def fake_scalars_from_state(*, state, **_kwargs):
+        scale = jnp.asarray(state, dtype=jnp.float64)
+        return {
+            "volavgB": 2.0 + 0.5 * scale,
+            "betatotal": 0.03 + 0.01 * scale,
+            "vp": jnp.asarray([0.0, 1.0 + scale, 0.8, 0.6], dtype=jnp.float64),
+        }
+
+    monkeypatch.setattr(workflow, "finite_beta_scalars_from_state", fake_scalars_from_state)
+    ctx = SimpleNamespace(static=None, indata=None, signgs=1)
+
+    vol_value, vol_grad = jax.value_and_grad(lambda x: VolavgB().J(ctx, x))(jnp.asarray(1.0))
+    beta_value, beta_grad = jax.value_and_grad(lambda x: BetaTotal().J(ctx, x))(jnp.asarray(1.0))
+    well = MagneticWell(minimum=0.7, softness=1.0e-2)
+    well_value, well_grad = jax.value_and_grad(lambda x: well.J(ctx, x))(jnp.asarray(1.0))
+
+    np.testing.assert_allclose(np.asarray(vol_value), 2.5)
+    np.testing.assert_allclose(np.asarray(vol_grad), 0.5)
+    np.testing.assert_allclose(np.asarray(beta_value), 0.04)
+    np.testing.assert_allclose(np.asarray(beta_grad), 0.01)
+    assert np.isfinite(np.asarray(well_value))
+    assert np.isfinite(np.asarray(well_grad))

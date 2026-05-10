@@ -709,8 +709,9 @@ Running the QI objective comparison
 .. code-block:: bash
 
    PYTHONPATH=. python examples/optimization/compare_omnigenity_qi_objective.py
+   PYTHONPATH=. python examples/optimization/scan_qi_boozer_mode.py
 
-This script is intentionally diagnostic. It writes JSON and ``wout`` artifacts
+These scripts are intentionally diagnostic. The comparison script writes JSON and ``wout`` artifacts
 under ``results/omnigenity_compare/qi_objective`` and should be used before
 changing the smooth QI objective weights, especially
 ``shuffle_profile_weight``, or the ``phimin`` well interval.  The
@@ -720,6 +721,14 @@ script when an apples-to-apples reference residual is needed.  The reference
 leg runs in a child process with ``REFERENCE_TIMEOUT_S`` so crashes, memory
 pressure, or timeouts are reported in the JSON summary without killing the
 vmec_jax diagnostic.
+
+The Boozer-mode scan script writes
+``results/omnigenity_compare/qi_boozer_mode_scan/qi_boozer_mode_scan.json`` and
+``.png``. It runs one equilibrium/Boozer transform, then scales one selected
+``bmnc`` coefficient and compares the smooth differentiable QI objective against
+the legacy Goodman-style branch/shuffle diagnostic. Use this before launching a
+large QI sweep when objective changes appear noisy or when the optimized
+configuration looks visually QP/QH-like despite a small smooth QI objective.
 
 
 GPU acceleration
