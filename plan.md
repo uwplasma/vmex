@@ -409,3 +409,8 @@ Acceptance:
   fallback instead of moving to the least-bad grid point. Verified with
   `python -m pytest tests/test_init_guess.py -q` (`8 passed`) and
   `ruff check vmec_jax/init_guess.py tests/test_init_guess.py`.
+- 2026-05-10: Re-ran the CI-equivalent fast coverage gate after the
+  initial-guess parity fix: `438 passed, 21 skipped, 85 deselected`, total
+  coverage `64.08%`, runtime about `6:27`. Kept the CI floor at 62%; the next
+  threshold bump should wait for a wider margin from additional physics-kernel
+  or solver-control coverage.
