@@ -28,6 +28,7 @@ from vmec_jax.plotting import (
     plot_bmag_contours,
     plot_objective_history,
     plot_qh_optimization,
+    plot_wout,
     profiles_from_wout,
     select_zeta_slices,
     surface_data_from_wout,
@@ -103,10 +104,17 @@ def _toy_wout(*, lasym: bool = False):
 
 def _toy_wout_with_flux(*, lasym: bool = False):
     wout = _toy_wout(lasym=lasym)
+    wout.ntor = 1
+    wout.phi = np.linspace(0.0, 1.0, int(wout.ns))
     wout.phips = 1.0
     wout.phipf = np.asarray([1.0, 1.0])
     wout.chipf = np.asarray([0.2, 0.2])
     wout.signgs = 1
+    wout.buco = np.asarray([0.0, 0.1])
+    wout.bvco = np.asarray([0.0, 0.2])
+    wout.jcuru = np.asarray([0.0, 0.3])
+    wout.jcurv = np.asarray([0.0, 0.4])
+    wout.DMerc = np.asarray([0.0, 0.5])
     return wout
 
 
@@ -353,6 +361,21 @@ def test_axisym_overview_requires_reference_wout(monkeypatch, tmp_path):
     monkeypatch.setattr(plotting, "example_paths", lambda case: (Path(f"input.{case}"), None))
     with pytest.raises(FileNotFoundError, match="Reference wout"):
         write_axisym_overview("missing", outdir=tmp_path)
+
+
+def test_plot_wout_renders_cli_diagnostic_outputs(monkeypatch, tmp_path, capsys):
+    pytest.importorskip("matplotlib")
+    import vmec_jax.wout as wout_module
+
+    monkeypatch.setattr(wout_module, "read_wout", lambda path: _toy_wout_with_flux(lasym=True))
+
+    paths = plot_wout(tmp_path / "wout_toy_case.nc", outdir=tmp_path / "plots", name="toy_case")
+
+    assert set(paths) == {"vmec_params", "poloidal_plot", "vmec_surfaces", "3d_plot"}
+    for path in paths.values():
+        assert path.exists()
+        assert path.stat().st_size > 0
+    assert "[vmec_params]" in capsys.readouterr().out
 
 
 def test_fix_matplotlib_3d_sets_equal_radius_limits():
