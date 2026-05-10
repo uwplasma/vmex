@@ -346,3 +346,7 @@ Acceptance:
 - 2026-05-10: Added CLI entrypoint coverage for `python -m vmec_jax`, including
   the XLA/PjRt warning-suppression environment defaults and the module-level
   dispatch to `vmec_jax.cli.main`.
+- 2026-05-10: Expanded `_compat` coverage around NumPy-mode dispatch, no-op JIT
+  fallback behavior, compilation-cache environment policy, and best-effort JAX
+  cache configuration updates. This protects the CPU/GPU cache and warning
+  suppression defaults that affect first-run user experience.
