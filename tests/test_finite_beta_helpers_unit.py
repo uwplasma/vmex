@@ -647,6 +647,55 @@ def test_mercier_bsubs_half_mesh_from_geometry_is_differentiable():
     assert abs(float(np.asarray(grad))) > 0.0
 
 
+def test_mercier_zeta_half_mesh_from_realspace_geometry_matches_vmec_formula():
+    rng = np.random.default_rng(1357)
+    shape = (5, 3, 2)
+    data = dict(
+        s=np.linspace(0.0, 1.0, shape[0]),
+        Rv_even=rng.normal(size=shape),
+        Rv_odd=rng.normal(size=shape),
+        Zv_even=rng.normal(size=shape),
+        Zv_odd=rng.normal(size=shape),
+    )
+
+    actual = finite_beta.mercier_zeta_half_mesh_from_realspace_geometry(**data)
+    sh = np.sqrt(0.5 * (data["s"][1:] + data["s"][:-1]))[:, None, None]
+    rv_inner = 0.5 * (data["Rv_even"][1:] + data["Rv_even"][:-1] + sh * (data["Rv_odd"][1:] + data["Rv_odd"][:-1]))
+    zv_inner = 0.5 * (data["Zv_even"][1:] + data["Zv_even"][:-1] + sh * (data["Zv_odd"][1:] + data["Zv_odd"][:-1]))
+    rv_expected = np.zeros(shape)
+    zv_expected = np.zeros(shape)
+    rv_expected[1:] = rv_inner
+    zv_expected[1:] = zv_inner
+    rv_expected[0] = rv_inner[0]
+    zv_expected[0] = zv_inner[0]
+
+    np.testing.assert_allclose(np.asarray(actual["rv12"]), rv_expected, rtol=1e-13, atol=1e-13)
+    np.testing.assert_allclose(np.asarray(actual["zv12"]), zv_expected, rtol=1e-13, atol=1e-13)
+
+
+def test_mercier_zeta_half_mesh_from_realspace_geometry_is_differentiable():
+    import jax
+
+    shape = (5, 3, 2)
+    s = jnp.linspace(0.0, 1.0, shape[0])
+    base = jnp.ones(shape, dtype=jnp.float64)
+
+    def objective(scale):
+        channels = finite_beta.mercier_zeta_half_mesh_from_realspace_geometry(
+            s=s,
+            Rv_even=scale * base,
+            Rv_odd=0.2 * base,
+            Zv_even=0.3 * base,
+            Zv_odd=0.4 * base,
+        )
+        return jnp.sum(channels["rv12"] + channels["zv12"])
+
+    value, grad = jax.value_and_grad(objective)(jnp.asarray(1.0))
+    assert np.isfinite(np.asarray(value))
+    assert np.isfinite(np.asarray(grad))
+    assert abs(float(np.asarray(grad))) > 0.0
+
+
 def test_mercier_bsubs_full_mesh_from_half_mesh_matches_jxbforce_convention():
     bsubs_half = np.arange(5 * 2 * 3, dtype=float).reshape((5, 2, 3))
     expected = bsubs_half.copy()

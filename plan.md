@@ -169,7 +169,7 @@ Acceptance:
    (`qi_legacy_total`).
 3. [x] Run a small QI one-DOF noise/ranking audit with the source-level
    diagnostic.
-4. [ ] Wire state-synthesized half-mesh geometry channels and the LASYM=True
+4. [ ] Wire state-synthesized even/odd geometry channels and the LASYM=True
    derivative branch into the new AD-safe gpp, bsubs, bdotk, surface-integral,
    and algebra kernels, then wrap the result as a `DMerc` objective.
 5. [ ] Start the first refactor with a low-risk extraction from the largest
@@ -215,3 +215,7 @@ Acceptance:
   `mercier_bsubs_full_mesh_from_half_mesh`, covering the VMEC `bss.f` radial
   covariant field assembly and jxbforce full-mesh averaging. Remaining DMerc
   wiring needs state-synthesized `rv12/zv12` geometry and the LASYM=True branch.
+- 2026-05-10: Added `mercier_zeta_half_mesh_from_realspace_geometry`, covering
+  the VMEC half-mesh `rv12/zv12` toroidal derivative geometry from even/odd
+  channels. Remaining DMerc wiring needs state synthesis of those channels and
+  the LASYM=True derivative branch.
