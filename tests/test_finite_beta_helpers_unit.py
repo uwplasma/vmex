@@ -516,6 +516,50 @@ def test_mercier_terms_from_profile_integrals_are_differentiable():
     assert abs(float(np.asarray(grad))) > 0.0
 
 
+def test_mercier_short_mesh_helpers_return_zero_profiles():
+    s = jnp.asarray([0.0, 1.0], dtype=jnp.float64)
+    zeros_1d = jnp.zeros_like(s)
+    terms = finite_beta.mercier_terms_from_profile_integrals(
+        s=s,
+        phips=zeros_1d,
+        iotas=zeros_1d,
+        vp=zeros_1d,
+        pres=zeros_1d,
+        torcur=zeros_1d,
+        tpp=zeros_1d,
+        tbb=zeros_1d,
+        tjb=zeros_1d,
+        tjj=zeros_1d,
+    )
+    for key in ("DMerc", "Dshear", "Dcurr", "Dwell", "Dgeod", "shear", "vpp", "presp", "ip"):
+        np.testing.assert_allclose(np.asarray(terms[key]), 0.0)
+
+    shape = (2, 2, 2)
+    zeros_3d = jnp.zeros(shape, dtype=jnp.float64)
+    integrals = finite_beta.mercier_surface_integrals_from_realspace(
+        phips=zeros_1d,
+        sqrtg=zeros_3d,
+        b2=zeros_3d,
+        gpp=zeros_3d,
+        bdotk_merc=zeros_3d,
+        wint=jnp.ones(shape[1:], dtype=jnp.float64),
+    )
+    for key in ("tpp", "tbb", "tjb", "tjj"):
+        np.testing.assert_allclose(np.asarray(integrals[key]), 0.0)
+
+    profiles = finite_beta.jxbforce_profiles_from_realspace(
+        phips=zeros_1d,
+        sqrtg=zeros_3d,
+        bsq=zeros_3d,
+        pres=zeros_1d,
+        vp=zeros_1d,
+        bdotk=zeros_3d,
+        wint=jnp.ones(shape[1:], dtype=jnp.float64),
+    )
+    for key in ("jdotb", "bdotb", "bdotgradv"):
+        np.testing.assert_allclose(np.asarray(profiles[key]), 0.0)
+
+
 def _mercier_integrals_numpy_reference(*, phips, sqrtg, b2, gpp, bdotk_merc, wint, signgs=1):
     phips = np.asarray(phips, dtype=float)
     sqrtg = np.asarray(sqrtg, dtype=float)
@@ -691,6 +735,18 @@ def test_redl_polynomial_profile_and_trapped_fraction_helpers():
     np.testing.assert_allclose(np.asarray(trapped["Bmax"]), 2.0)
     np.testing.assert_allclose(np.asarray(trapped["epsilon"]), 0.0)
     np.testing.assert_allclose(np.asarray(trapped["f_t"]), 0.0, atol=1.0e-12)
+
+
+def test_trapped_fraction_rejects_invalid_shapes():
+    modB = jnp.ones((2, 3), dtype=jnp.float64)
+    sqrtg = jnp.ones_like(modB)
+    with pytest.raises(ValueError, match="shape"):
+        finite_beta.trapped_fraction_from_modb_sqrtg(modB=modB, sqrtg=sqrtg)
+
+    modB = jnp.ones((2, 3, 4), dtype=jnp.float64)
+    sqrtg = jnp.ones((2, 3, 5), dtype=jnp.float64)
+    with pytest.raises(ValueError, match="shape mismatch"):
+        finite_beta.trapped_fraction_from_modb_sqrtg(modB=modB, sqrtg=sqrtg)
 
 
 def test_redl_bootstrap_mismatch_normalization_and_grad():

@@ -291,3 +291,7 @@ Acceptance:
   semantics: nonzero QI targets are rejected, mixed `QuasiIsodynamicOptions`
   objects are rejected, and QI field objectives fail clearly outside the shared
   QI solve path.
+- 2026-05-10: Added edge-case tests for the split finite-beta kernels: Mercier,
+  Mercier surface-integral, and JXBFORCE helpers return zero profiles on
+  too-short radial meshes, and trapped-fraction geometry rejects invalid array
+  shapes explicitly.
