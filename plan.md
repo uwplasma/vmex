@@ -169,9 +169,9 @@ Acceptance:
    (`qi_legacy_total`).
 3. [x] Run a small QI one-DOF noise/ranking audit with the source-level
    diagnostic.
-4. [ ] Wire Mercier real-space `gpp` and `bdotk` channels from state into the
-   new AD-safe surface-integral and algebra kernels, then wrap the result as a
-   `DMerc` objective.
+4. [ ] Wire Mercier real-space `gpp` and filtered covariant derivative channels
+   from state into the new AD-safe bdotk, surface-integral, and algebra
+   kernels, then wrap the result as a `DMerc` objective.
 5. [ ] Start the first refactor with a low-risk extraction from the largest
    modules after the new tests are green.
 
@@ -199,3 +199,7 @@ Acceptance:
   implementation of the VMEC Mercier `tpp/tbb/tjb/tjj` reductions from
   real-space channels. The remaining `DMerc` objective work is state wiring for
   `gpp` and `bdotk`.
+- 2026-05-10: Added `mercier_bdotk_from_covariant_derivatives`, a JAX
+  implementation of the VMEC jxbforce `itheta/izeta/bdotk` block from filtered
+  covariant-field derivatives. The remaining hard part is deriving those
+  filtered derivative channels from the state path without falling back to wout.

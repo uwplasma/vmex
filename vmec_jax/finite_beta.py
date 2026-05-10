@@ -22,6 +22,8 @@ from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
 from .vmec_residue import vmec_force_norms_from_bcovar_dynamic
 from .wout import _chipf_from_chips, equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
+MU0 = 4e-7 * np.pi
+
 
 @dataclass(frozen=True)
 class FiniteBetaTargets:
@@ -190,6 +192,59 @@ def mercier_surface_integrals_from_realspace(
         "tbb": zeros.at[1:-1].set(tbb_inner),
         "tjb": zeros.at[1:-1].set(tjb_inner),
         "tjj": zeros.at[1:-1].set(tjj_inner),
+    }
+
+
+def mercier_bdotk_from_covariant_derivatives(
+    *,
+    bsubu,
+    bsubv,
+    bsubsu,
+    bsubsv,
+    s,
+) -> dict[str, Any]:
+    """Return VMEC Mercier ``bdotk`` channels from covariant field derivatives.
+
+    This is the JAX equivalent of the small jxbforce block that forms
+    ``itheta``, ``izeta``, ``bdotk``, and ``bdotk_merc`` once the filtered
+    covariant fields and their angular derivatives are available.
+    """
+    bsubu = jnp.asarray(bsubu, dtype=jnp.float64)
+    bsubv = jnp.asarray(bsubv, dtype=jnp.float64)
+    bsubsu = jnp.asarray(bsubsu, dtype=jnp.float64)
+    bsubsv = jnp.asarray(bsubsv, dtype=jnp.float64)
+    s = jnp.asarray(s, dtype=jnp.float64)
+    ns = int(s.shape[0])
+    zeros = jnp.zeros_like(bsubu, dtype=jnp.float64)
+    if ns < 3:
+        return {
+            "itheta": zeros,
+            "izeta": zeros,
+            "bdotk": zeros,
+            "bdotk_merc": zeros,
+        }
+
+    hs = jnp.asarray(1.0 / float(ns - 1), dtype=jnp.float64)
+    ohs = 1.0 / hs
+    itheta_inner = bsubsv[1:-1] - ohs * (bsubv[2:] - bsubv[1:-1])
+    izeta_inner = -bsubsu[1:-1] + ohs * (bsubu[2:] - bsubu[1:-1])
+    itheta = zeros.at[1:-1].set(itheta_inner)
+    izeta = zeros.at[1:-1].set(izeta_inner)
+    izeta = izeta.at[0].set(2.0 * izeta[1] - izeta[2])
+    izeta = izeta.at[-1].set(2.0 * izeta[-2] - izeta[-3])
+
+    itheta = itheta / jnp.asarray(MU0, dtype=jnp.float64)
+    izeta = izeta / jnp.asarray(MU0, dtype=jnp.float64)
+    bsubu1 = 0.5 * (bsubu[2:] + bsubu[1:-1])
+    bsubv1 = 0.5 * (bsubv[2:] + bsubv[1:-1])
+    bdotk_inner = itheta[1:-1] * bsubu1 + izeta[1:-1] * bsubv1
+    bdotk = zeros.at[1:-1].set(bdotk_inner)
+    bdotk_merc = jnp.asarray(MU0, dtype=jnp.float64) * bdotk
+    return {
+        "itheta": itheta,
+        "izeta": izeta,
+        "bdotk": bdotk,
+        "bdotk_merc": bdotk_merc,
     }
 
 

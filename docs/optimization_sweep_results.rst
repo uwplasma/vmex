@@ -301,7 +301,10 @@ fully differentiable residual blocks in vmec_jax.  The JAX
 ``mercier_terms_from_profile_integrals`` helpers now cover the VMEC-style
 surface reductions and the algebraic
 ``DMerc = DShear + DCurr + DWell + DGeod`` step once real-space ``gpp`` and
-``bdotk`` channels are available.  The remaining work is wiring those channels
-from the state-based covariant-field path instead of the current NumPy ``wout``
-parity path.  The finite-beta scaffolding is structured so those terms can be
-added next without changing the user-facing example workflow.
+``bdotk`` channels are available.  ``mercier_bdotk_from_covariant_derivatives``
+also ports the jxbforce ``itheta/izeta/bdotk`` block once filtered covariant
+field derivatives are available.  The remaining work is wiring ``gpp`` and the
+filtered covariant derivative channels from the state-based path instead of the
+current NumPy ``wout`` parity path.  The finite-beta scaffolding is structured
+so those terms can be added next without changing the user-facing example
+workflow.

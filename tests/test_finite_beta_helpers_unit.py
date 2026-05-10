@@ -403,3 +403,71 @@ def test_mercier_surface_integrals_from_realspace_are_differentiable():
     assert np.isfinite(np.asarray(value))
     assert np.isfinite(np.asarray(grad))
     assert abs(float(np.asarray(grad))) > 0.0
+
+
+def _mercier_bdotk_numpy_reference(*, bsubu, bsubv, bsubsu, bsubsv, s):
+    bsubu = np.asarray(bsubu, dtype=float)
+    bsubv = np.asarray(bsubv, dtype=float)
+    bsubsu = np.asarray(bsubsu, dtype=float)
+    bsubsv = np.asarray(bsubsv, dtype=float)
+    s = np.asarray(s, dtype=float)
+    ns = s.shape[0]
+    out = {key: np.zeros_like(bsubu) for key in ("itheta", "izeta", "bdotk", "bdotk_merc")}
+    if ns < 3:
+        return out
+    hs = 1.0 / float(ns - 1)
+    ohs = 1.0 / hs
+    out["itheta"][1:-1] = bsubsv[1:-1] - ohs * (bsubv[2:] - bsubv[1:-1])
+    out["izeta"][1:-1] = -bsubsu[1:-1] + ohs * (bsubu[2:] - bsubu[1:-1])
+    out["izeta"][0] = 2.0 * out["izeta"][1] - out["izeta"][2]
+    out["izeta"][-1] = 2.0 * out["izeta"][-2] - out["izeta"][-3]
+    out["itheta"] = out["itheta"] / finite_beta.MU0
+    out["izeta"] = out["izeta"] / finite_beta.MU0
+    bsubu1 = 0.5 * (bsubu[2:] + bsubu[1:-1])
+    bsubv1 = 0.5 * (bsubv[2:] + bsubv[1:-1])
+    out["bdotk"][1:-1] = out["itheta"][1:-1] * bsubu1 + out["izeta"][1:-1] * bsubv1
+    out["bdotk_merc"] = finite_beta.MU0 * out["bdotk"]
+    return out
+
+
+def test_mercier_bdotk_from_covariant_derivatives_matches_vmec_block():
+    rng = np.random.default_rng(5678)
+    data = dict(
+        bsubu=0.1 + rng.random((5, 3, 4)),
+        bsubv=0.2 + rng.random((5, 3, 4)),
+        bsubsu=0.03 * rng.random((5, 3, 4)),
+        bsubsv=0.04 * rng.random((5, 3, 4)),
+        s=np.linspace(0.0, 1.0, 5),
+    )
+
+    actual = finite_beta.mercier_bdotk_from_covariant_derivatives(**data)
+    expected = _mercier_bdotk_numpy_reference(**data)
+
+    for key in ("itheta", "izeta", "bdotk", "bdotk_merc"):
+        np.testing.assert_allclose(np.asarray(actual[key]), expected[key], rtol=1e-13, atol=1e-13)
+
+
+def test_mercier_bdotk_from_covariant_derivatives_is_differentiable():
+    import jax
+
+    s = jnp.linspace(0.0, 1.0, 5)
+    base = jnp.ones((5, 3, 4), dtype=jnp.float64)
+    bsubu = 0.2 * base
+    bsubv = 0.3 * base
+    bsubsu = 0.01 * base
+    bsubsv = 0.02 * base
+
+    def objective(scale):
+        channels = finite_beta.mercier_bdotk_from_covariant_derivatives(
+            bsubu=scale * bsubu,
+            bsubv=bsubv,
+            bsubsu=bsubsu,
+            bsubsv=bsubsv,
+            s=s,
+        )
+        return jnp.sum(channels["bdotk_merc"][1:-1])
+
+    value, grad = jax.value_and_grad(objective)(jnp.asarray(1.0))
+    assert np.isfinite(np.asarray(value))
+    assert np.isfinite(np.asarray(grad))
+    assert abs(float(np.asarray(grad))) > 0.0
