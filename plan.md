@@ -414,3 +414,9 @@ Acceptance:
   coverage `64.08%`, runtime about `6:27`. Kept the CI floor at 62%; the next
   threshold bump should wait for a wider margin from additional physics-kernel
   or solver-control coverage.
+- 2026-05-10: Added runtime-neutral helper coverage for state pack/unpack,
+  `VMECState` and `Coords` PyTree roundtrips, VMEC mode ordering, Nyquist mode
+  padding, and VMEC default grid sizing including axisymmetric `NZETA=1`
+  collapse. Verified with
+  `python -m pytest tests/test_state_coords_helpers.py tests/test_modes_helpers.py -q`
+  (`6 passed`) and `ruff check tests/test_state_coords_helpers.py tests/test_modes_helpers.py`.
