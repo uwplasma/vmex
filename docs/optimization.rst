@@ -140,8 +140,7 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
            # (vj.MagneticWell(minimum=0.0).J, 0.0, 1.0),
            # (vj.VolavgB().J, TARGET_VOLAVGB, VOLAVGB_WEIGHT),
            # (vj.BetaTotal().J, TARGET_BETA, BETA_WEIGHT),
-           # DMerc is currently a wout diagnostic/parity gate; a differentiable
-           # DMerc objective should be added before using it in this adjoint path.
+           # (vj.DMerc(minimum=0.0, softness=1.0e-3).J, 0.0, DMERC_WEIGHT),
        ]
    )
 
@@ -435,11 +434,12 @@ diagnostic first-run settings; increase these grid controls before treating a
 QI finite-beta refinement as a final research-quality result.
 
 The current implementation includes differentiable finite-beta global
-diagnostics and current-driven iota through ``PCURR_TYPE = "cubic_spline_ip"``.
-The full Redl bootstrap-current mismatch and Mercier ``DMerc`` residuals from
-the SIMSOPT finite-beta script remain open extensions; the examples keep the
-stage-one structure and write VMEC inputs/wouts/history so those terms can be
-added and regression-tested incrementally.
+diagnostics, current-driven iota through ``PCURR_TYPE = "cubic_spline_ip"``,
+and a stellarator-symmetric ``vj.DMerc`` lower-bound residual.  The full Redl
+bootstrap-current mismatch from the SIMSOPT finite-beta script remains an open
+extension; the examples keep the stage-one structure and write VMEC
+inputs/wouts/history so additional terms can be added and regression-tested
+incrementally.
 
 The full multi-page artifact inventory, including legacy aliases, CSV/JSON
 summary downloads, and exact reproduction commands for each standalone example,

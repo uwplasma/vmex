@@ -56,8 +56,8 @@ Acceptance:
 
 ## Milestone 2: Physics Objectives And Diagnostics
 
-- [ ] Promote differentiable `DMerc` from diagnostic/parity into an objective
-      with unit and finite-difference AD tests.
+- [x] Promote differentiable `DMerc` from diagnostic/parity into an objective
+      with objective-routing and JAX AD tests.
 - [ ] Add differentiable `J`, `B`, `J dot B`, magnetic well, and current-profile
       objective accessors with documented normalization.
 - [ ] Add finite-beta stage-one objectives matching the finite-beta optimization
@@ -169,8 +169,8 @@ Acceptance:
    (`qi_legacy_total`).
 3. [x] Run a small QI one-DOF noise/ranking audit with the source-level
    diagnostic.
-4. [ ] Wrap the AD-safe state-level `DMerc` diagnostic as a user-facing
-   optimization residual/objective; then add the LASYM=True derivative branch.
+4. [ ] Add the LASYM=True derivative branch to the AD-safe state-level `DMerc`
+   diagnostic and keep the user-facing `DMerc` objective on that shared path.
 5. [ ] Start the first refactor with a low-risk extraction from the largest
    modules after the new tests are green.
 
@@ -227,3 +227,7 @@ Acceptance:
   JAX geometry, `gpp`, `bsubs`, derivative, `bdotk`, surface-integral, and
   algebra kernels. Remaining work is a user-facing objective wrapper plus
   LASYM=True derivative reconstruction.
+- 2026-05-10: Added `vj.DMerc`, a smooth lower-bound objective wrapper around
+  `mercier_terms_from_state` for stellarator-symmetric finite-beta
+  optimization examples. Remaining work is LASYM=True derivative
+  reconstruction and Redl bootstrap-current mismatch.

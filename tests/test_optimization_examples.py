@@ -228,13 +228,24 @@ def test_lgradb_tuple_stays_regular_state_objective() -> None:
     assert len(problem.qi_objective_terms) == 0
 
 
+def test_dmerc_tuple_stays_regular_state_objective() -> None:
+    from vmec_jax.optimization_workflow import DMerc, LeastSquaresProblem
+
+    problem = LeastSquaresProblem.from_tuples([(DMerc().J, 0.0, 0.25)])
+
+    assert not problem.is_qi
+    assert len(problem.objective_terms) == 1
+    assert problem.objective_terms[0].name == "DMerc"
+    assert len(problem.qi_objective_terms) == 0
+
+
 def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> None:
     pytest.importorskip("jax")
     import jax
 
     from vmec_jax._compat import jnp
     import vmec_jax.optimization_workflow as workflow
-    from vmec_jax.optimization_workflow import BetaTotal, MagneticWell, VolavgB
+    from vmec_jax.optimization_workflow import BetaTotal, DMerc, MagneticWell, VolavgB
 
     def fake_scalars_from_state(*, state, **_kwargs):
         scale = jnp.asarray(state, dtype=jnp.float64)
@@ -244,13 +255,25 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
             "vp": jnp.asarray([0.0, 1.0 + scale, 0.8, 0.6], dtype=jnp.float64),
         }
 
+    def fake_mercier_terms_from_state(*, state, **_kwargs):
+        scale = jnp.asarray(state, dtype=jnp.float64)
+        return {
+            "DMerc": jnp.asarray(
+                [0.0, 0.02 + 0.01 * scale, -0.03 + 0.02 * scale, 0.0],
+                dtype=jnp.float64,
+            )
+        }
+
     monkeypatch.setattr(workflow, "finite_beta_scalars_from_state", fake_scalars_from_state)
+    monkeypatch.setattr(workflow, "mercier_terms_from_state", fake_mercier_terms_from_state)
     ctx = SimpleNamespace(static=None, indata=None, signgs=1)
 
     vol_value, vol_grad = jax.value_and_grad(lambda x: VolavgB().J(ctx, x))(jnp.asarray(1.0))
     beta_value, beta_grad = jax.value_and_grad(lambda x: BetaTotal().J(ctx, x))(jnp.asarray(1.0))
     well = MagneticWell(minimum=0.7, softness=1.0e-2)
     well_value, well_grad = jax.value_and_grad(lambda x: well.J(ctx, x))(jnp.asarray(1.0))
+    dmerc = DMerc(minimum=0.0, softness=1.0e-2)
+    dmerc_value, dmerc_grad = jax.value_and_grad(lambda x: jnp.sum(dmerc.J(ctx, x)))(jnp.asarray(1.0))
 
     np.testing.assert_allclose(np.asarray(vol_value), 2.5)
     np.testing.assert_allclose(np.asarray(vol_grad), 0.5)
@@ -258,3 +281,6 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
     np.testing.assert_allclose(np.asarray(beta_grad), 0.01)
     assert np.isfinite(np.asarray(well_value))
     assert np.isfinite(np.asarray(well_grad))
+    assert np.isfinite(np.asarray(dmerc_value))
+    assert np.isfinite(np.asarray(dmerc_grad))
+    assert abs(float(np.asarray(dmerc_grad))) > 0.0

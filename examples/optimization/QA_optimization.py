@@ -93,8 +93,7 @@ problem = vj.LeastSquaresProblem.from_tuples(
         # Finite-beta examples can also add:
         # (vj.VolavgB().J, TARGET_VOLAVGB, VOLAVGB_WEIGHT),
         # (vj.BetaTotal().J, TARGET_BETA, BETA_WEIGHT),
-        # DMerc is currently a wout diagnostic/parity gate; a differentiable
-        # DMerc objective should be added in vmec_jax before uncommenting it.
+        # (vj.DMerc(minimum=0.0, softness=1.0e-3).J, 0.0, DMERC_WEIGHT),
     ]
 )
 
