@@ -58,6 +58,17 @@ This page documents:
   cases (so *relative* differences can be misleading), and
 - what was required to match VMEC2000 parity in practice.
 
+The Redl algebra and residual normalization are regression-tested against
+SIMSOPT when SIMSOPT is installed:
+
+.. code-block:: bash
+
+   python -m pytest tests/test_redl_bootstrap_simsopt_parity.py -q
+
+That test uses the committed shaped-tokamak pressure fixture and compares both
+the strict shared-geometry residual and the public vmec_jax state-geometry
+approximation.
+
 .. note::
 
    A large fraction of the logic below is parity-driven rather than
