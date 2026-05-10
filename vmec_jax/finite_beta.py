@@ -247,7 +247,9 @@ def mercier_gpp_from_realspace_geometry(
     phip_real = twopi * phips * sign_jac
     phip_full = 0.5 * (phip_real[2:] + phip_real[1:-1])
     gsqrt_raw = 0.5 * (sqrtg[2:] + sqrtg[1:-1])
-    gsqrt_full = jnp.where(phip_full[:, None, None] != 0.0, gsqrt_raw / phip_full[:, None, None], 0.0)
+    phip_full = phip_full[:, None, None]
+    phip_safe = jnp.where(phip_full != 0.0, phip_full, 1.0)
+    gsqrt_full = jnp.where(phip_full != 0.0, gsqrt_raw / phip_safe, 0.0)
 
     sqs = jnp.sqrt(jnp.maximum(s[1:-1], 0.0))[:, None, None]
     r1f = R_even[1:-1] + sqs * R_odd[1:-1]
