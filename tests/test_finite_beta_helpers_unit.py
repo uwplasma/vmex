@@ -405,6 +405,104 @@ def test_mercier_surface_integrals_from_realspace_are_differentiable():
     assert abs(float(np.asarray(grad))) > 0.0
 
 
+def _mercier_gpp_numpy_reference(
+    *,
+    s,
+    phips,
+    sqrtg,
+    R_even,
+    R_odd,
+    Ru_even,
+    Ru_odd,
+    Zu_even,
+    Zu_odd,
+    Rv_even,
+    Rv_odd,
+    Zv_even,
+    Zv_odd,
+    signgs=1,
+):
+    s = np.asarray(s, dtype=float)
+    phips = np.asarray(phips, dtype=float)
+    sqrtg = np.asarray(sqrtg, dtype=float)
+    out = np.zeros_like(sqrtg)
+    sign_jac = 1.0 if signgs >= 0 else -1.0
+    phip_real = (2.0 * np.pi) * phips * sign_jac
+    for i in range(1, s.shape[0] - 1):
+        phip_full = 0.5 * (phip_real[i + 1] + phip_real[i])
+        gsqrt_raw = 0.5 * (sqrtg[i] + sqrtg[i + 1])
+        gsqrt_full = np.zeros_like(gsqrt_raw) if phip_full == 0.0 else gsqrt_raw / phip_full
+        sqs = np.sqrt(s[i])
+        r1f = R_even[i] + sqs * R_odd[i]
+        rtf = Ru_even[i] + sqs * Ru_odd[i]
+        ztf = Zu_even[i] + sqs * Zu_odd[i]
+        rzf = Rv_even[i] + sqs * Rv_odd[i]
+        zzf = Zv_even[i] + sqs * Zv_odd[i]
+        gtt = rtf * rtf + ztf * ztf
+        denom = gtt * r1f * r1f + (rtf * zzf - rzf * ztf) ** 2
+        out[i] = np.where(denom != 0.0, (gsqrt_full * gsqrt_full) / denom, 0.0)
+    return out
+
+
+def test_mercier_gpp_from_realspace_geometry_matches_vmec_formula():
+    rng = np.random.default_rng(4321)
+    shape = (5, 3, 4)
+    data = dict(
+        s=np.linspace(0.0, 1.0, shape[0]),
+        phips=np.array([0.0, 0.8, 0.9, 1.0, 1.1]),
+        sqrtg=1.0 + 0.2 * rng.random(shape),
+        R_even=1.2 + 0.1 * rng.random(shape),
+        R_odd=0.05 * rng.random(shape),
+        Ru_even=0.2 + 0.1 * rng.random(shape),
+        Ru_odd=0.04 * rng.random(shape),
+        Zu_even=0.25 + 0.1 * rng.random(shape),
+        Zu_odd=0.04 * rng.random(shape),
+        Rv_even=0.1 + 0.05 * rng.random(shape),
+        Rv_odd=0.02 * rng.random(shape),
+        Zv_even=0.1 + 0.05 * rng.random(shape),
+        Zv_odd=0.02 * rng.random(shape),
+        signgs=1,
+    )
+
+    actual = finite_beta.mercier_gpp_from_realspace_geometry(**data)
+    expected = _mercier_gpp_numpy_reference(**data)
+
+    np.testing.assert_allclose(np.asarray(actual), expected, rtol=1e-13, atol=1e-13)
+
+
+def test_mercier_gpp_from_realspace_geometry_is_differentiable():
+    import jax
+
+    shape = (5, 3, 4)
+    s = jnp.linspace(0.0, 1.0, shape[0])
+    phips = jnp.asarray([0.0, 0.8, 0.9, 1.0, 1.1])
+    sqrtg = jnp.ones(shape, dtype=jnp.float64)
+    ones = jnp.ones(shape, dtype=jnp.float64)
+
+    def objective(scale):
+        gpp = finite_beta.mercier_gpp_from_realspace_geometry(
+            s=s,
+            phips=phips,
+            sqrtg=sqrtg,
+            R_even=scale * (1.2 * ones),
+            R_odd=0.05 * ones,
+            Ru_even=0.2 * ones,
+            Ru_odd=0.03 * ones,
+            Zu_even=0.25 * ones,
+            Zu_odd=0.02 * ones,
+            Rv_even=0.1 * ones,
+            Rv_odd=0.01 * ones,
+            Zv_even=0.15 * ones,
+            Zv_odd=0.01 * ones,
+        )
+        return jnp.sum(gpp[1:-1])
+
+    value, grad = jax.value_and_grad(objective)(jnp.asarray(1.0))
+    assert np.isfinite(np.asarray(value))
+    assert np.isfinite(np.asarray(grad))
+    assert abs(float(np.asarray(grad))) > 0.0
+
+
 def _mercier_bdotk_numpy_reference(*, bsubu, bsubv, bsubsu, bsubsv, s):
     bsubu = np.asarray(bsubu, dtype=float)
     bsubv = np.asarray(bsubv, dtype=float)
