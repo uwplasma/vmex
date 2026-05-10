@@ -198,6 +198,42 @@ def test_least_squares_problem_routes_qi_terms() -> None:
     assert problem.qi_options is qi_options
 
 
+def test_least_squares_problem_rejects_nonzero_qi_targets() -> None:
+    from vmec_jax.optimization_workflow import LeastSquaresProblem, QuasiIsodynamicOptions, QuasiIsodynamicResidual
+
+    qi = QuasiIsodynamicResidual(QuasiIsodynamicOptions(surfaces=[0.5]))
+
+    with pytest.raises(ValueError, match="target=0"):
+        LeastSquaresProblem.from_tuples([(qi.J, 1.0, 1.0)])
+
+
+def test_least_squares_problem_rejects_mixed_qi_options() -> None:
+    from vmec_jax.optimization_workflow import LeastSquaresProblem, MirrorRatio, QuasiIsodynamicOptions, QuasiIsodynamicResidual
+
+    qi_options = QuasiIsodynamicOptions(surfaces=[0.5])
+    other_options = QuasiIsodynamicOptions(surfaces=[0.75])
+    qi = QuasiIsodynamicResidual(qi_options)
+    mirror = MirrorRatio(threshold=1.2, qi_options=other_options)
+
+    with pytest.raises(ValueError, match="share one QuasiIsodynamicOptions"):
+        LeastSquaresProblem.from_tuples([(qi.J, 0.0, 1.0), (mirror.J, 0.0, 1.0)])
+
+
+def test_qi_field_objectives_raise_outside_qi_solve() -> None:
+    from vmec_jax.optimization_workflow import MaxElongation, MirrorRatio, QuasiIsodynamicOptions, QuasiIsodynamicResidual
+
+    qi_options = QuasiIsodynamicOptions(surfaces=[0.5])
+    objectives = [
+        QuasiIsodynamicResidual(qi_options),
+        MirrorRatio(threshold=1.2, qi_options=qi_options),
+        MaxElongation(threshold=4.0, qi_options=qi_options),
+    ]
+
+    for objective in objectives:
+        with pytest.raises(RuntimeError, match="inside a QI solve"):
+            objective.J(None, None)
+
+
 def test_least_squares_problem_collects_problem_metadata() -> None:
     from vmec_jax.optimization_workflow import AbsMeanIotaFloor, AspectRatio, LeastSquaresProblem, MeanIota
 
