@@ -10,6 +10,7 @@ from vmec_jax.visualization import (
     _vtk_int_array,
     write_vtp_polyline,
     write_vts_structured_grid,
+    export_vtk_surface_and_fieldline,
 )
 
 
@@ -125,3 +126,98 @@ def test_vtp_polyline_writer_validates_shapes_and_vector_data(tmp_path):
         write_vtp_polyline(tmp_path / "bad.vtp", points=np.ones((1, 3)))
     with pytest.raises(ValueError, match="PointData"):
         write_vtp_polyline(tmp_path / "bad.vtp", points=pts, point_data={"bad": np.ones((3,))})
+
+
+def test_export_vtk_surface_fieldline_and_volume_with_synthetic_kernels(monkeypatch, tmp_path):
+    import vmec_jax.config as config_module
+    import vmec_jax.field as field_module
+    import vmec_jax.fieldlines as fieldlines_module
+    import vmec_jax.geom as geom_module
+    import vmec_jax.static as static_module
+    import vmec_jax.wout as wout_module
+
+    input_path = tmp_path / "input.case"
+    wout_path = tmp_path / "wout_case.nc"
+    input_path.write_text("&INDATA\n/\n")
+    wout_path.write_text("placeholder")
+
+    cfg = type("Cfg", (), {"ntheta": 2, "nzeta": 3, "nfp": 1})()
+    static_holder = {}
+
+    def fake_build_static(cfg_arg, *, grid):
+        static = type("Static", (), {"cfg": cfg_arg, "grid": grid, "s": np.asarray([0.0, 1.0])})()
+        static_holder["static"] = static
+        return static
+
+    wout = type(
+        "Wout",
+        (),
+        {
+            "ns": 2,
+            "nfp": 1,
+            "signgs": 1,
+            "phips": np.asarray([0.0, 1.0]),
+            "phipf": np.asarray([1.0, 1.0]),
+            "chipf": np.asarray([0.0, 0.0]),
+        },
+    )()
+    state = object()
+    geom = type(
+        "Geom",
+        (),
+        {
+            "R": np.ones((2, 2, 3)),
+            "Z": np.zeros((2, 2, 3)),
+        },
+    )()
+    bsupu = np.ones((2, 2, 3)) * 0.2
+    bsupv = np.ones((2, 2, 3)) * 0.3
+    bcart = np.zeros((2, 2, 3, 3))
+    bcart[..., 0] = 1.0
+    bcart[..., 1] = 2.0
+    bcart[..., 2] = 3.0
+
+    monkeypatch.setattr(config_module, "load_config", lambda _path: (cfg, object()))
+    monkeypatch.setattr(static_module, "build_static", fake_build_static)
+    monkeypatch.setattr(wout_module, "read_wout", lambda _path: wout)
+    monkeypatch.setattr(wout_module, "state_from_wout", lambda _wout: state)
+    monkeypatch.setattr(geom_module, "eval_geom", lambda _state, _static: geom)
+    monkeypatch.setattr(field_module, "lamscale_from_phips", lambda _phips, _s: 1.0)
+    monkeypatch.setattr(field_module, "bsup_from_geom", lambda *_args, **_kwargs: (bsupu, bsupv))
+    monkeypatch.setattr(field_module, "b2_from_bsup", lambda *_args, **_kwargs: np.ones((2, 2, 3)) * 4.0)
+    monkeypatch.setattr(field_module, "b_cartesian_from_bsup", lambda *_args, **_kwargs: bcart)
+    monkeypatch.setattr(
+        fieldlines_module,
+        "trace_fieldline_on_surface",
+        lambda **_kwargs: type(
+            "Line",
+            (),
+            {
+                "x": np.asarray([0.0, 1.0, 2.0]),
+                "y": np.asarray([0.0, 0.5, 1.0]),
+                "z": np.asarray([0.0, 0.0, 0.0]),
+                "Bmag": np.asarray([2.0, 2.0, 2.0]),
+            },
+        )(),
+    )
+
+    paths = export_vtk_surface_and_fieldline(
+        input_path=input_path,
+        wout_path=wout_path,
+        outdir=tmp_path / "vtk",
+        export_volume=True,
+    )
+
+    assert set(paths) == {"surface", "fieldline", "volume"}
+    assert paths["surface"].read_text().count('Name="Bmag"') == 1
+    assert 'Name="Bmag"' in paths["fieldline"].read_text()
+    assert 'WholeExtent="0 1 0 1 0 2"' in paths["volume"].read_text()
+    assert static_holder["static"].grid.theta.shape[0] == 2
+
+    with pytest.raises(ValueError, match="out of range"):
+        export_vtk_surface_and_fieldline(
+            input_path=input_path,
+            wout_path=wout_path,
+            outdir=tmp_path / "vtk_bad",
+            s_index=99,
+        )
