@@ -6,10 +6,13 @@ import numpy as np
 import pytest
 
 from vmec_jax.modes import ModeTable
+from vmec_jax.namelist import InData
 from vmec_jax.wout import (
     _apply_nyquist_half_weight,
+    _apply_bsubv_equif_correction,
     _bool_from_nc,
     _compute_aspectratio,
+    _compute_ctor_from_buco,
     _compute_eqfor_beta,
     _compute_eqfor_betaxis,
     _jxbforce_nyquist_limits,
@@ -21,6 +24,7 @@ from vmec_jax.wout import (
     _vmec_symoutput_expand,
     _vmec_symoutput_split,
     _vmec_wint_from_trig,
+    _vmec_wint_from_trig_jax,
 )
 
 
@@ -48,6 +52,19 @@ def test_mesh_weight_and_safe_divide_helpers():
     with pytest.raises(ValueError, match="non-empty"):
         _vmec_wint_from_trig(SimpleNamespace(cosmui3=np.asarray([[1.0]]), mscale=np.asarray([]), cosnv=np.zeros((1, 1))))
 
+    np.testing.assert_allclose(
+        np.asarray(_vmec_wint_from_trig_jax(trig)),
+        np.asarray([[1.0, 1.0, 1.0], [2.0, 2.0, 2.0]]),
+    )
+    with pytest.raises(ValueError, match="cosmui3"):
+        _vmec_wint_from_trig_jax(
+            SimpleNamespace(cosmui3=np.asarray([1.0]), mscale=np.asarray([1.0]), cosnv=np.zeros((1, 1)))
+        )
+    with pytest.raises(ValueError, match="non-empty"):
+        _vmec_wint_from_trig_jax(
+            SimpleNamespace(cosmui3=np.asarray([[1.0]]), mscale=np.asarray([]), cosnv=np.zeros((1, 1)))
+        )
+
 
 def test_eqfor_beta_and_aspectratio_helpers_are_finite_and_guard_shapes():
     ns = 4
@@ -72,6 +89,16 @@ def test_eqfor_beta_and_aspectratio_helpers_are_finite_and_guard_shapes():
     )
     assert len(betas) == 4
     assert np.all(np.isfinite(betas))
+    assert _compute_eqfor_beta(
+        pres=pres[:2],
+        vp=vp[:2],
+        bsq=bsq[:2],
+        r12=r12[:2],
+        bsupv=bsupv[:2],
+        sqrtg=sqrtg[:2],
+        wint=wint,
+        signgs=1,
+    ) == (0.0, 0.0, 0.0, 0.0)
     assert _compute_eqfor_betaxis(pres=pres[:2], vp=vp[:2], bsq=bsq[:2], sqrtg=sqrtg[:2], wint=wint, signgs=1) == 0.0
     assert np.isfinite(_compute_eqfor_betaxis(pres=pres, vp=vp, bsq=bsq, sqrtg=sqrtg, wint=wint, signgs=1))
 
@@ -88,6 +115,52 @@ def test_eqfor_beta_and_aspectratio_helpers_are_finite_and_guard_shapes():
         _compute_aspectratio(R=np.ones((2, 2)), Zu=Zu, wint=wint)
     with pytest.raises(ValueError, match="wint shape"):
         _compute_aspectratio(R=R, Zu=Zu, wint=np.ones((2, 2)))
+    assert _compute_aspectratio(R=R, Zu=np.zeros_like(Zu), wint=wint) == (0.0, 0.0, 0.0, 0.0, 0.0)
+
+
+def test_bsubv_equif_correction_and_ctor_branches(monkeypatch):
+    import vmec_jax.wout as wout_module
+
+    bsubv_short = np.ones((2, 2, 1))
+    np.testing.assert_allclose(
+        _apply_bsubv_equif_correction(bsubv=bsubv_short, bsubv_e=bsubv_short, trig=SimpleNamespace()),
+        bsubv_short,
+    )
+
+    bsubv = np.arange(3 * 2 * 1, dtype=float).reshape(3, 2, 1)
+    bsubv_e = np.ones_like(bsubv) * 2.0
+    pwint = np.ones_like(bsubv) * 0.5
+    monkeypatch.setattr(wout_module, "vmec_pwint_from_trig", lambda _trig, *, ns, nzeta: pwint)
+
+    corrected = _apply_bsubv_equif_correction(bsubv=bsubv, bsubv_e=bsubv_e, trig=SimpleNamespace())
+
+    assert corrected.shape == bsubv.shape
+    np.testing.assert_allclose(np.sum(corrected[1] * pwint[1]), np.sum(bsubv[1] * pwint[1]))
+    np.testing.assert_allclose(np.sum(corrected[2] * pwint[2]), np.sum(bsubv[2] * pwint[2]))
+
+    monkeypatch.setattr(wout_module, "vmec_pwint_from_trig", lambda _trig, *, ns, nzeta: np.ones((1, 1, 1)))
+    with pytest.raises(ValueError, match="pwint shape mismatch"):
+        _apply_bsubv_equif_correction(bsubv=bsubv, bsubv_e=bsubv_e, trig=SimpleNamespace())
+
+    assert _compute_ctor_from_buco(buco=np.asarray([3.0]), signgs=1, indata=InData(scalars={}, indexed={})) == 0.0
+
+    fixed = InData(scalars={"LFREEB": False}, indexed={})
+    np.testing.assert_allclose(
+        _compute_ctor_from_buco(buco=np.asarray([1.0, 3.0]), signgs=-1, indata=fixed),
+        -2.0 * np.pi * (1.5 * 3.0 - 0.5 * 1.0) / wout_module.MU0,
+    )
+
+    free_prec = InData(scalars={"LFREEB": True, "ICTRL_PREC2D": 2, "LHESS_EXACT": False}, indexed={})
+    np.testing.assert_allclose(
+        _compute_ctor_from_buco(buco=np.asarray([1.0, 3.0]), signgs=1, indata=free_prec),
+        2.0 * np.pi * 3.0 / wout_module.MU0,
+    )
+
+    free_exact_no_prec = InData(scalars={"LFREEB": True, "ICTRL_PREC2D": 0, "LHESS_EXACT": True}, indexed={})
+    np.testing.assert_allclose(
+        _compute_ctor_from_buco(buco=np.asarray([1.0, 3.0]), signgs=1, indata=free_exact_no_prec),
+        2.0 * np.pi * (1.5 * 3.0 - 0.5 * 1.0) / wout_module.MU0,
+    )
 
 
 def test_nyquist_limits_and_half_weighting():
