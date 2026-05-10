@@ -181,7 +181,13 @@ from .optimization_workflow import (
 from .coords import Coords, eval_coords
 from .geom import Geom, eval_geom
 from .profiles import ProfileInputs, profiles_from_indata, eval_profiles
-from .finite_beta import FiniteBetaTargets, finite_beta_global_residuals_from_state, finite_beta_scalars_from_state
+from .finite_beta import (
+    FiniteBetaTargets,
+    finite_beta_global_residuals_from_state,
+    finite_beta_scalars_from_state,
+    mercier_surface_integrals_from_realspace,
+    mercier_terms_from_profile_integrals,
+)
 from .integrals import dvds_from_sqrtg, cumtrapz_s, volume_from_sqrtg
 from .field import (
     b_cartesian_from_state,
@@ -249,6 +255,7 @@ from .quasi_isodynamic import (
     quasi_isodynamic_residual_from_boozer_output,
     quasi_isodynamic_residual_from_state,
 )
+from .qi_legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
 from .visualization import export_vtk_surface_and_fieldline
 
 __all__ = [
@@ -415,6 +422,8 @@ __all__ = [
     "FiniteBetaTargets",
     "finite_beta_global_residuals_from_state",
     "finite_beta_scalars_from_state",
+    "mercier_surface_integrals_from_realspace",
+    "mercier_terms_from_profile_integrals",
     "dvds_from_sqrtg",
     "cumtrapz_s",
     "volume_from_sqrtg",
@@ -479,5 +488,6 @@ __all__ = [
     "quasi_isodynamic_residual_from_boozer_modes",
     "quasi_isodynamic_residual_from_boozer_output",
     "quasi_isodynamic_residual_from_state",
+    "legacy_qi_branch_shuffle_diagnostic_from_boozer_output",
     "export_vtk_surface_and_fieldline",
 ]

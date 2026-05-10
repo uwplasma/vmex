@@ -40,6 +40,159 @@ class FiniteBetaTargets:
     beta_weight: float = 1.0
 
 
+def mercier_terms_from_profile_integrals(
+    *,
+    s,
+    phips,
+    iotas,
+    vp,
+    pres,
+    torcur,
+    tpp,
+    tbb,
+    tjb,
+    tjj,
+    signgs: int = 1,
+) -> dict[str, Any]:
+    """Return JAX-differentiable Mercier terms from 1D VMEC profile integrals.
+
+    This is the algebraic core of VMEC's ``mercier.f`` calculation after the
+    geometric surface averages have been assembled:
+
+    ``DMerc = DShear + DCurr + DWell + DGeod``.
+
+    The inputs ``tpp``, ``tbb``, ``tjb``, and ``tjj`` are the per-surface
+    geometry/current integrals in the same normalization used by the Mercier
+    formula, i.e. after the ``(2*pi)^2`` factor applied in ``wout._compute_mercier``.
+    This helper is intentionally small and differentiable; the next porting
+    step is to replace the remaining NumPy surface-integral assembly with a JAX
+    path that feeds this function.
+    """
+    s = jnp.asarray(s, dtype=jnp.float64)
+    phips = jnp.asarray(phips, dtype=jnp.float64)
+    iotas = jnp.asarray(iotas, dtype=jnp.float64)
+    vp = jnp.asarray(vp, dtype=jnp.float64)
+    pres = jnp.asarray(pres, dtype=jnp.float64)
+    torcur = jnp.asarray(torcur, dtype=jnp.float64)
+    tpp = jnp.asarray(tpp, dtype=jnp.float64)
+    tbb = jnp.asarray(tbb, dtype=jnp.float64)
+    tjb = jnp.asarray(tjb, dtype=jnp.float64)
+    tjj = jnp.asarray(tjj, dtype=jnp.float64)
+
+    ns = int(s.shape[0])
+    zeros = jnp.zeros_like(s, dtype=jnp.float64)
+    if ns < 3:
+        return {
+            "DMerc": zeros,
+            "Dshear": zeros,
+            "Dcurr": zeros,
+            "Dwell": zeros,
+            "Dgeod": zeros,
+            "shear": zeros,
+            "vpp": zeros,
+            "presp": zeros,
+            "ip": zeros,
+        }
+
+    sign_jac = jnp.asarray(1.0 if int(signgs) >= 0 else -1.0, dtype=jnp.float64)
+    twopi = jnp.asarray(2.0 * np.pi, dtype=jnp.float64)
+    hs = jnp.asarray(1.0 / float(ns - 1), dtype=jnp.float64)
+    phip_real = twopi * phips * sign_jac
+    vp_real = jnp.where(phip_real != 0.0, sign_jac * twopi * twopi * vp / phip_real, 0.0)
+    vp_real = vp_real.at[0].set(0.0)
+
+    phip_full = 0.5 * (phip_real[2:] + phip_real[1:-1])
+    denom = jnp.where(phip_full != 0.0, 1.0 / (hs * phip_full), 0.0)
+    shear_inner = (iotas[2:] - iotas[1:-1]) * denom
+    vpp_inner = (vp_real[2:] - vp_real[1:-1]) * denom
+    presp_inner = (pres[2:] - pres[1:-1]) * denom
+    ip_inner = (torcur[2:] - torcur[1:-1]) * denom
+
+    dshear_inner = 0.25 * shear_inner * shear_inner
+    dcurr_inner = -shear_inner * (tjb[1:-1] - ip_inner * tbb[1:-1])
+    dwell_inner = presp_inner * (vpp_inner - presp_inner * tpp[1:-1]) * tbb[1:-1]
+    dgeod_inner = tjb[1:-1] * tjb[1:-1] - tbb[1:-1] * tjj[1:-1]
+
+    Dshear = zeros.at[1:-1].set(dshear_inner)
+    Dcurr = zeros.at[1:-1].set(dcurr_inner)
+    Dwell = zeros.at[1:-1].set(dwell_inner)
+    Dgeod = zeros.at[1:-1].set(dgeod_inner)
+    shear = zeros.at[1:-1].set(shear_inner)
+    vpp = zeros.at[1:-1].set(vpp_inner)
+    presp = zeros.at[1:-1].set(presp_inner)
+    ip = zeros.at[1:-1].set(ip_inner)
+    return {
+        "DMerc": Dshear + Dcurr + Dwell + Dgeod,
+        "Dshear": Dshear,
+        "Dcurr": Dcurr,
+        "Dwell": Dwell,
+        "Dgeod": Dgeod,
+        "shear": shear,
+        "vpp": vpp,
+        "presp": presp,
+        "ip": ip,
+    }
+
+
+def mercier_surface_integrals_from_realspace(
+    *,
+    phips,
+    sqrtg,
+    b2,
+    gpp,
+    bdotk_merc,
+    wint,
+    signgs: int = 1,
+) -> dict[str, Any]:
+    """Return JAX-differentiable Mercier surface integrals.
+
+    Inputs are real-space arrays on the full radial mesh.  ``b2`` is the
+    pressure-subtracted field strength used by VMEC's Mercier formula
+    (``2 * (bsq - pressure)`` in the wout path), ``gpp`` is the contravariant
+    metric component on the half-mesh surface, ``bdotk_merc`` is VMEC's
+    ``mu0 * sqrt(g) J.B`` channel, and ``wint`` are the VMEC quadrature weights
+    over ``(theta, zeta)``.
+
+    The returned ``tpp``, ``tbb``, ``tjb``, and ``tjj`` arrays feed directly into
+    :func:`mercier_terms_from_profile_integrals`.
+    """
+    phips = jnp.asarray(phips, dtype=jnp.float64)
+    sqrtg = jnp.asarray(sqrtg, dtype=jnp.float64)
+    b2 = jnp.asarray(b2, dtype=jnp.float64)
+    gpp = jnp.asarray(gpp, dtype=jnp.float64)
+    bdotk_merc = jnp.asarray(bdotk_merc, dtype=jnp.float64)
+    wint = jnp.asarray(wint, dtype=jnp.float64)
+    ns = int(phips.shape[0])
+    zeros = jnp.zeros_like(phips, dtype=jnp.float64)
+    if ns < 3:
+        return {"tpp": zeros, "tbb": zeros, "tjb": zeros, "tjj": zeros}
+
+    sign_jac = jnp.asarray(1.0 if int(signgs) >= 0 else -1.0, dtype=jnp.float64)
+    twopi = jnp.asarray(2.0 * np.pi, dtype=jnp.float64)
+    phip_real = twopi * phips * sign_jac
+    phip_full = 0.5 * (phip_real[2:] + phip_real[1:-1])
+    gsqrt_raw = 0.5 * (sqrtg[2:] + sqrtg[1:-1])
+    gsqrt_full = jnp.where(phip_full[:, None, None] != 0.0, gsqrt_raw / phip_full[:, None, None], 0.0)
+    b2i = 0.5 * (b2[2:] + b2[1:-1])
+    b2_safe = jnp.where(b2i != 0.0, b2i, jnp.asarray(1.0, dtype=jnp.float64))
+    norm = twopi * twopi
+
+    weighted_sum = lambda arr: jnp.sum(arr * wint[None, :, :], axis=(1, 2))
+    tpp_inner = weighted_sum(gsqrt_full / b2_safe) * norm
+    tbb_inner = weighted_sum(b2i * gsqrt_full * gpp[1:-1]) * norm
+    bdotj_norm = jnp.where(gsqrt_raw != 0.0, bdotk_merc[1:-1] / gsqrt_raw, 0.0)
+    jdotb = bdotj_norm * gpp[1:-1] * gsqrt_full
+    tjb_inner = weighted_sum(jdotb) * norm
+    tjj_inner = weighted_sum(jdotb * bdotj_norm / b2_safe) * norm
+
+    return {
+        "tpp": zeros.at[1:-1].set(tpp_inner),
+        "tbb": zeros.at[1:-1].set(tbb_inner),
+        "tjb": zeros.at[1:-1].set(tjb_inner),
+        "tjj": zeros.at[1:-1].set(tjj_inner),
+    }
+
+
 def _s_half_from_static(static):
     s = jnp.asarray(static.s)
     if int(s.shape[0]) < 2:

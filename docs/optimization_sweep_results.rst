@@ -296,6 +296,12 @@ one-field-period well interval; keep ``0.0`` for the bundled NFP=2 seed, or set
 ``np.pi / nfp`` when auditing a reference field whose first well starts there.
 
 Mercier ``DMerc`` and Redl bootstrap-current mismatch are not yet enabled as
-fully differentiable residual blocks in vmec_jax.  The finite-beta scaffolding
-is structured so those terms can be added next without changing the user-facing
-example workflow.
+fully differentiable residual blocks in vmec_jax.  The JAX
+``mercier_surface_integrals_from_realspace`` and
+``mercier_terms_from_profile_integrals`` helpers now cover the VMEC-style
+surface reductions and the algebraic
+``DMerc = DShear + DCurr + DWell + DGeod`` step once real-space ``gpp`` and
+``bdotk`` channels are available.  The remaining work is wiring those channels
+from the state-based covariant-field path instead of the current NumPy ``wout``
+parity path.  The finite-beta scaffolding is structured so those terms can be
+added next without changing the user-facing example workflow.
