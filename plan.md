@@ -363,3 +363,7 @@ Acceptance:
   cases, bsubv equilibrium correction guards, and ctor branch selection. Verified
   with `python -m pytest tests/test_wout_helpers.py -q` (`6 passed`) and
   `ruff check tests/test_wout_helpers.py`.
+- 2026-05-10: Re-ran the CI-equivalent fast coverage gate after the optimization
+  and wout helper slices: `420 passed, 21 skipped, 85 deselected`, total coverage
+  `63.15%`, runtime about `6:32`. Kept the CI floor at 62%; the current 63%
+  margin is still too narrow for a platform-safe threshold bump.
