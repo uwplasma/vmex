@@ -197,6 +197,69 @@ def mercier_surface_integrals_from_realspace(
     }
 
 
+def jxbforce_profiles_from_realspace(
+    *,
+    phips,
+    sqrtg,
+    bsq,
+    pres,
+    vp,
+    bdotk,
+    wint,
+    sigma_an=None,
+    signgs: int = 1,
+) -> dict[str, Any]:
+    """Return JAX-differentiable JXBFORCE 1D field/current profiles.
+
+    This is the state-level counterpart of VMEC's ``jxbforce`` reductions for
+    ``jdotb``, ``bdotb`` and ``bdotgradv``.  Inputs are full-radial-mesh
+    real-space arrays in the same normalization used by VMEC's Mercier path.
+    The returned arrays live on the full radial mesh, with VMEC's endpoint
+    extrapolation convention.
+    """
+    phips = jnp.asarray(phips, dtype=jnp.float64)
+    sqrtg = jnp.asarray(sqrtg, dtype=jnp.float64)
+    bsq = jnp.asarray(bsq, dtype=jnp.float64)
+    pres = jnp.asarray(pres, dtype=jnp.float64)
+    vp = jnp.asarray(vp, dtype=jnp.float64)
+    bdotk = jnp.asarray(bdotk, dtype=jnp.float64)
+    wint = jnp.asarray(wint, dtype=jnp.float64)
+    sigma = jnp.ones_like(sqrtg, dtype=jnp.float64) if sigma_an is None else jnp.asarray(sigma_an, dtype=jnp.float64)
+
+    ns = int(phips.shape[0])
+    zeros = jnp.zeros_like(phips, dtype=jnp.float64)
+    if ns < 3:
+        return {"jdotb": zeros, "bdotb": zeros, "bdotgradv": zeros}
+
+    dnorm1 = jnp.asarray((2.0 * np.pi) ** 2, dtype=jnp.float64)
+    sign_jac = jnp.asarray(1.0 if int(signgs) >= 0 else -1.0, dtype=jnp.float64)
+    denom = vp[2:] + vp[1:-1]
+    ovp = jnp.where(denom != 0.0, 2.0 / denom / dnorm1, 0.0)
+    tjnorm = ovp * sign_jac
+    weighted_sum = lambda arr: jnp.sum(arr * wint[None, :, :], axis=(1, 2))
+
+    sqgb2 = sqrtg[2:] * (bsq[2:] - pres[2:, None, None]) + sqrtg[1:-1] * (
+        bsq[1:-1] - pres[1:-1, None, None]
+    )
+    sigma_inner = sigma[1:-1]
+    jdotb_inner = dnorm1 * tjnorm * weighted_sum(bdotk[1:-1] / sigma_inner)
+    bdotb_inner = dnorm1 * tjnorm * weighted_sum(sqgb2 / sigma_inner)
+    bdotgradv_inner = 0.5 * dnorm1 * tjnorm * (phips[1:-1] + phips[2:])
+
+    jdotb = zeros.at[1:-1].set(jdotb_inner)
+    bdotb = zeros.at[1:-1].set(bdotb_inner)
+    bdotgradv = zeros.at[1:-1].set(bdotgradv_inner)
+
+    jdotb = jdotb.at[0].set(2.0 * jdotb[1] - jdotb[2])
+    jdotb = jdotb.at[-1].set(2.0 * jdotb[-2] - jdotb[-3])
+    bdotb = bdotb.at[0].set(2.0 * bdotb[2] - bdotb[1])
+    bdotb = bdotb.at[-1].set(2.0 * bdotb[-2] - bdotb[-3])
+    bdotgradv = bdotgradv.at[0].set(2.0 * bdotgradv[1] - bdotgradv[2])
+    bdotgradv = bdotgradv.at[-1].set(2.0 * bdotgradv[-2] - bdotgradv[-3])
+
+    return {"jdotb": jdotb, "bdotb": bdotb, "bdotgradv": bdotgradv}
+
+
 def mercier_gpp_from_realspace_geometry(
     *,
     s,
@@ -1032,6 +1095,16 @@ def mercier_terms_from_state(
         signgs=int(signgs),
     )
     wint = _vmec_wint_from_trig_jax(trig)
+    jxb = jxbforce_profiles_from_realspace(
+        phips=wout_like.phips,
+        sqrtg=bc.jac.sqrtg,
+        bsq=bc.bsq,
+        pres=pres,
+        vp=norms.vp,
+        bdotk=bdotk["bdotk"],
+        wint=wint,
+        signgs=int(signgs),
+    )
     torcur = jnp.zeros_like(s, dtype=jnp.float64)
     if int(s.shape[0]) > 1:
         torcur_inner = jnp.asarray(float(signgs) * 2.0 * np.pi, dtype=jnp.float64) * jnp.sum(
@@ -1056,6 +1129,7 @@ def mercier_terms_from_state(
     out = {
         **terms,
         **surface,
+        **jxb,
         "torcur": torcur,
         "vp": norms.vp,
     }

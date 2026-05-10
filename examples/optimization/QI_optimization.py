@@ -120,6 +120,9 @@ problem = vj.LeastSquaresProblem.from_tuples(
         # (vj.VolavgB().J, TARGET_VOLAVGB, VOLAVGB_WEIGHT),
         # (vj.BetaTotal().J, TARGET_BETA, BETA_WEIGHT),
         # (vj.DMerc(minimum=0.0, softness=1.0e-3).J, 0.0, DMERC_WEIGHT),
+        # (vj.JDotB(surfaces=(0.25, 0.50, 0.75)).J, 0.0, JDOTB_WEIGHT),
+        # (vj.BDotB(surfaces=(0.25, 0.50, 0.75)).J, TARGET_BDOTB, BDOTB_WEIGHT),
+        # (vj.BDotGradV(surfaces=(0.25, 0.50, 0.75)).J, TARGET_BDOTGRADV, BDOTGRADV_WEIGHT),
     ]
 )
 

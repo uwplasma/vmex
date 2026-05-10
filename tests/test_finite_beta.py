@@ -137,5 +137,8 @@ def test_mercier_terms_from_state_matches_wout_mercier_path_on_bundled_qi_input(
         signgs=signgs,
     )
 
-    for key, reference in zip(("DMerc", "Dshear", "Dcurr", "Dwell", "Dgeod"), expected[:5]):
+    for key, reference in zip(
+        ("DMerc", "Dshear", "Dcurr", "Dwell", "Dgeod", "jdotb", "bdotb", "bdotgradv"),
+        expected,
+    ):
         np.testing.assert_allclose(np.asarray(actual[key]), reference, rtol=1e-11, atol=1e-10)

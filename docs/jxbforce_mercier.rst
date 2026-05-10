@@ -11,6 +11,27 @@ quantities are computed primarily in:
 
 In ``vmec_jax``, these quantities are computed during ``wout_*.nc`` generation
 using a parity-first port of the VMEC2000 algorithms and conventions.
+The same finite-beta channel reconstruction is also available to optimization
+scripts through JAX-differentiable helpers:
+
+- ``vmec_jax.mercier_terms_from_state`` returns ``DMerc`` and the component
+  terms, plus ``jdotb``, ``bdotb`` and ``bdotgradv`` on the full radial mesh.
+- ``vmec_jax.jxbforce_profiles_from_realspace`` exposes the small algebraic
+  reduction from real-space channels to those 1D profiles.
+- ``vmec_jax.DMerc``, ``vmec_jax.JDotB``, ``vmec_jax.BDotB`` and
+  ``vmec_jax.BDotGradV`` are objective objects that can be added directly to
+  ``LeastSquaresProblem.from_tuples``.
+
+Example:
+
+.. code-block:: python
+
+   problem = vj.LeastSquaresProblem.from_tuples(
+       [
+           (vj.DMerc(minimum=0.0, softness=1.0e-3).J, 0.0, 1.0),
+           (vj.JDotB(surfaces=(0.25, 0.50, 0.75)).J, 0.0, 1.0e-4),
+       ]
+   )
 
 This page documents:
 

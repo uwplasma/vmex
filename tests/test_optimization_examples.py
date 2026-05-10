@@ -239,13 +239,29 @@ def test_dmerc_tuple_stays_regular_state_objective() -> None:
     assert len(problem.qi_objective_terms) == 0
 
 
+def test_jxbforce_profile_tuple_stays_regular_state_objective() -> None:
+    from vmec_jax.optimization_workflow import BDotB, BDotGradV, JDotB, LeastSquaresProblem
+
+    problem = LeastSquaresProblem.from_tuples(
+        [
+            (JDotB(surfaces=(0.25, 0.75)).J, 0.0, 0.25),
+            (BDotB(surfaces=(0.5,)).J, 1.0, 0.10),
+            (BDotGradV().J, 0.0, 0.05),
+        ]
+    )
+
+    assert not problem.is_qi
+    assert [term.name for term in problem.objective_terms] == ["jdotb", "bdotb", "bdotgradv"]
+    assert len(problem.qi_objective_terms) == 0
+
+
 def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> None:
     pytest.importorskip("jax")
     import jax
 
     from vmec_jax._compat import jnp
     import vmec_jax.optimization_workflow as workflow
-    from vmec_jax.optimization_workflow import BetaTotal, DMerc, MagneticWell, VolavgB
+    from vmec_jax.optimization_workflow import BDotB, BDotGradV, BetaTotal, DMerc, JDotB, MagneticWell, VolavgB
 
     def fake_scalars_from_state(*, state, **_kwargs):
         scale = jnp.asarray(state, dtype=jnp.float64)
@@ -261,12 +277,15 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
             "DMerc": jnp.asarray(
                 [0.0, 0.02 + 0.01 * scale, -0.03 + 0.02 * scale, 0.0],
                 dtype=jnp.float64,
-            )
+            ),
+            "jdotb": jnp.asarray([0.0, 0.10 + 0.01 * scale, 0.20 + 0.02 * scale, 0.0], dtype=jnp.float64),
+            "bdotb": jnp.asarray([0.0, 1.00 + 0.10 * scale, 1.20 + 0.20 * scale, 0.0], dtype=jnp.float64),
+            "bdotgradv": jnp.asarray([0.0, 2.00 + 0.20 * scale, 2.20 + 0.30 * scale, 0.0], dtype=jnp.float64),
         }
 
     monkeypatch.setattr(workflow, "finite_beta_scalars_from_state", fake_scalars_from_state)
     monkeypatch.setattr(workflow, "mercier_terms_from_state", fake_mercier_terms_from_state)
-    ctx = SimpleNamespace(static=None, indata=None, signgs=1)
+    ctx = SimpleNamespace(static=SimpleNamespace(s=np.asarray([0.0, 0.25, 0.75, 1.0])), indata=None, signgs=1)
 
     vol_value, vol_grad = jax.value_and_grad(lambda x: VolavgB().J(ctx, x))(jnp.asarray(1.0))
     beta_value, beta_grad = jax.value_and_grad(lambda x: BetaTotal().J(ctx, x))(jnp.asarray(1.0))
@@ -274,6 +293,13 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
     well_value, well_grad = jax.value_and_grad(lambda x: well.J(ctx, x))(jnp.asarray(1.0))
     dmerc = DMerc(minimum=0.0, softness=1.0e-2)
     dmerc_value, dmerc_grad = jax.value_and_grad(lambda x: jnp.sum(dmerc.J(ctx, x)))(jnp.asarray(1.0))
+    jdotb_value, jdotb_grad = jax.value_and_grad(lambda x: jnp.sum(JDotB(surfaces=(0.25, 0.75)).J(ctx, x)))(
+        jnp.asarray(1.0)
+    )
+    bdotb_value, bdotb_grad = jax.value_and_grad(lambda x: jnp.sum(BDotB().J(ctx, x)))(jnp.asarray(1.0))
+    bdotgradv_value, bdotgradv_grad = jax.value_and_grad(lambda x: jnp.sum(BDotGradV().J(ctx, x)))(
+        jnp.asarray(1.0)
+    )
 
     np.testing.assert_allclose(np.asarray(vol_value), 2.5)
     np.testing.assert_allclose(np.asarray(vol_grad), 0.5)
@@ -284,3 +310,9 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
     assert np.isfinite(np.asarray(dmerc_value))
     assert np.isfinite(np.asarray(dmerc_grad))
     assert abs(float(np.asarray(dmerc_grad))) > 0.0
+    np.testing.assert_allclose(np.asarray(jdotb_value), 0.33)
+    np.testing.assert_allclose(np.asarray(jdotb_grad), 0.03)
+    np.testing.assert_allclose(np.asarray(bdotb_value), 2.5)
+    np.testing.assert_allclose(np.asarray(bdotb_grad), 0.3)
+    np.testing.assert_allclose(np.asarray(bdotgradv_value), 4.7)
+    np.testing.assert_allclose(np.asarray(bdotgradv_grad), 0.5)

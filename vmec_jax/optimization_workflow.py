@@ -571,6 +571,73 @@ class DMerc:
         return ObjectiveTerm(self.name, self.J, target=0.0, weight=residual_weight)
 
 
+class _MercierProfileObjective:
+    """Base object for differentiable VMEC JXBFORCE profile objectives."""
+
+    name = "mercier_profile"
+    profile_key = ""
+
+    def __init__(
+        self,
+        *,
+        surfaces: Sequence[float] | None = None,
+        normalize: float = 1.0,
+        mmax_force: int | None = None,
+        nmax_force: int | None = None,
+    ):
+        self.surfaces = None if surfaces is None else tuple(float(s) for s in surfaces)
+        self.normalize = float(normalize)
+        self.mmax_force = None if mmax_force is None else int(mmax_force)
+        self.nmax_force = None if nmax_force is None else int(nmax_force)
+
+    def terms(self, ctx: StageContext, state):
+        return mercier_terms_from_state(
+            state=state,
+            static=ctx.static,
+            indata=ctx.indata,
+            signgs=ctx.signgs,
+            mmax_force=self.mmax_force,
+            nmax_force=self.nmax_force,
+        )
+
+    def _select_profile(self, ctx: StageContext, profile):
+        profile = jnp.asarray(profile, dtype=jnp.float64)
+        if self.surfaces is None:
+            return profile[1:-1] if int(profile.shape[0]) > 2 else jnp.zeros((0,), dtype=profile.dtype)
+        s = np.asarray(getattr(ctx.static, "s"), dtype=float)
+        indices = [int(np.argmin(np.abs(s - float(surface)))) for surface in self.surfaces]
+        return profile[jnp.asarray(indices, dtype=jnp.int32)]
+
+    def J(self, ctx: StageContext, state):
+        profile = self.terms(ctx, state)[self.profile_key]
+        values = self._select_profile(ctx, profile)
+        return values / float(self.normalize)
+
+    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight)
+
+
+class JDotB(_MercierProfileObjective):
+    """VMEC ``jdotb`` profile objective from the differentiable JXBFORCE path."""
+
+    name = "jdotb"
+    profile_key = "jdotb"
+
+
+class BDotB(_MercierProfileObjective):
+    """VMEC ``bdotb`` profile objective from the differentiable JXBFORCE path."""
+
+    name = "bdotb"
+    profile_key = "bdotb"
+
+
+class BDotGradV(_MercierProfileObjective):
+    """VMEC ``bdotgradv`` profile objective from the differentiable JXBFORCE path."""
+
+    name = "bdotgradv"
+    profile_key = "bdotgradv"
+
+
 class LgradB:
     """Minimum-``L_grad_B`` penalty object usable in QS or QI examples."""
 
@@ -1897,11 +1964,14 @@ def _slice_boozer_surfaces(booz: dict, surface_index: int) -> dict:
 __all__ = [
     "AbsMeanIotaFloor",
     "AspectRatio",
+    "BDotB",
+    "BDotGradV",
     "BetaTotal",
     "DMerc",
     "FixedBoundaryVMEC",
     "FixedBoundaryObjectiveStage",
     "FixedBoundaryOptimizationResult",
+    "JDotB",
     "LeastSquaresProblem",
     "LgradB",
     "MagneticWell",

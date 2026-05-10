@@ -320,7 +320,21 @@ def test_mercier_terms_from_state_composes_stellarator_symmetric_channels(monkey
         include_channels=True,
     )
 
-    for key in ("DMerc", "Dshear", "Dcurr", "Dwell", "Dgeod", "tpp", "tbb", "tjb", "tjj", "torcur"):
+    for key in (
+        "DMerc",
+        "Dshear",
+        "Dcurr",
+        "Dwell",
+        "Dgeod",
+        "tpp",
+        "tbb",
+        "tjb",
+        "tjj",
+        "jdotb",
+        "bdotb",
+        "bdotgradv",
+        "torcur",
+    ):
         assert terms[key].shape == (4,)
         assert np.all(np.isfinite(np.asarray(terms[key])))
     for key in ("gpp", "bsubs_half", "bsubs_full", "bsubsu", "bsubsv", "bdotk", "bdotk_merc"):
@@ -372,7 +386,21 @@ def test_mercier_terms_from_state_composes_lasym_channels(monkeypatch):
         include_channels=True,
     )
 
-    for key in ("DMerc", "Dshear", "Dcurr", "Dwell", "Dgeod", "tpp", "tbb", "tjb", "tjj", "torcur"):
+    for key in (
+        "DMerc",
+        "Dshear",
+        "Dcurr",
+        "Dwell",
+        "Dgeod",
+        "tpp",
+        "tbb",
+        "tjb",
+        "tjj",
+        "jdotb",
+        "bdotb",
+        "bdotgradv",
+        "torcur",
+    ):
         assert terms[key].shape == (4,)
         assert np.all(np.isfinite(np.asarray(terms[key])))
     for key in ("gpp", "bsubs_half", "bsubs_full", "bsubsu", "bsubsv", "bdotk", "bdotk_merc"):
@@ -556,6 +584,90 @@ def test_mercier_surface_integrals_from_realspace_are_differentiable():
             wint=wint,
         )
         return jnp.sum(integrals["tpp"][1:-1] + integrals["tbb"][1:-1])
+
+    value, grad = jax.value_and_grad(objective)(jnp.asarray(1.0))
+    assert np.isfinite(np.asarray(value))
+    assert np.isfinite(np.asarray(grad))
+    assert abs(float(np.asarray(grad))) > 0.0
+
+
+def _jxbforce_profiles_numpy_reference(*, phips, sqrtg, bsq, pres, vp, bdotk, wint, sigma_an=None, signgs=1):
+    phips = np.asarray(phips, dtype=float)
+    sqrtg = np.asarray(sqrtg, dtype=float)
+    bsq = np.asarray(bsq, dtype=float)
+    pres = np.asarray(pres, dtype=float)
+    vp = np.asarray(vp, dtype=float)
+    bdotk = np.asarray(bdotk, dtype=float)
+    wint = np.asarray(wint, dtype=float)
+    sigma_an = np.ones_like(sqrtg) if sigma_an is None else np.asarray(sigma_an, dtype=float)
+    ns = phips.shape[0]
+    out = {key: np.zeros(ns) for key in ("jdotb", "bdotb", "bdotgradv")}
+    if ns < 3:
+        return out
+    dnorm1 = float((2.0 * np.pi) ** 2)
+    sign_jac = 1.0 if signgs >= 0 else -1.0
+    for js in range(1, ns - 1):
+        denom = vp[js + 1] + vp[js]
+        if denom == 0.0:
+            continue
+        tjnorm = 2.0 / denom / dnorm1 * sign_jac
+        sqgb2 = sqrtg[js + 1] * (bsq[js + 1] - pres[js + 1]) + sqrtg[js] * (bsq[js] - pres[js])
+        out["jdotb"][js] = dnorm1 * tjnorm * np.sum((bdotk[js] / sigma_an[js]) * wint)
+        out["bdotb"][js] = dnorm1 * tjnorm * np.sum((sqgb2 / sigma_an[js]) * wint)
+        out["bdotgradv"][js] = 0.5 * dnorm1 * tjnorm * (phips[js] + phips[js + 1])
+    out["jdotb"][0] = 2.0 * out["jdotb"][1] - out["jdotb"][2]
+    out["jdotb"][-1] = 2.0 * out["jdotb"][-2] - out["jdotb"][-3]
+    out["bdotb"][0] = 2.0 * out["bdotb"][2] - out["bdotb"][1]
+    out["bdotb"][-1] = 2.0 * out["bdotb"][-2] - out["bdotb"][-3]
+    out["bdotgradv"][0] = 2.0 * out["bdotgradv"][1] - out["bdotgradv"][2]
+    out["bdotgradv"][-1] = 2.0 * out["bdotgradv"][-2] - out["bdotgradv"][-3]
+    return out
+
+
+def test_jxbforce_profiles_from_realspace_match_vmec_reduction():
+    rng = np.random.default_rng(5678)
+    shape = (5, 4, 3)
+    data = dict(
+        phips=np.array([0.0, 0.7, 0.8, 0.9, 1.0]),
+        sqrtg=1.0 + 0.2 * rng.random(shape),
+        bsq=1.5 + 0.1 * rng.random(shape),
+        pres=np.array([0.0, 0.04, 0.03, 0.02, 0.0]),
+        vp=np.array([0.0, 1.0, 1.1, 1.2, 1.3]),
+        bdotk=0.05 * rng.random(shape),
+        wint=np.full(shape[1:], 1.0 / np.prod(shape[1:])),
+        sigma_an=0.9 + 0.2 * rng.random(shape),
+        signgs=-1,
+    )
+
+    actual = finite_beta.jxbforce_profiles_from_realspace(**data)
+    expected = _jxbforce_profiles_numpy_reference(**data)
+
+    for key in ("jdotb", "bdotb", "bdotgradv"):
+        np.testing.assert_allclose(np.asarray(actual[key]), expected[key], rtol=1e-13, atol=1e-13)
+
+
+def test_jxbforce_profiles_from_realspace_are_differentiable():
+    import jax
+
+    phips = jnp.asarray([0.0, 0.7, 0.8, 0.9, 1.0])
+    sqrtg = jnp.ones((5, 3, 4))
+    bsq_base = 1.5 + 0.1 * jnp.arange(60, dtype=jnp.float64).reshape((5, 3, 4)) / 60.0
+    pres = jnp.asarray([0.0, 0.04, 0.03, 0.02, 0.0])
+    vp = jnp.asarray([0.0, 1.0, 1.1, 1.2, 1.3])
+    bdotk = 0.05 * jnp.ones((5, 3, 4))
+    wint = jnp.full((3, 4), 1.0 / 12.0)
+
+    def objective(scale):
+        profiles = finite_beta.jxbforce_profiles_from_realspace(
+            phips=phips,
+            sqrtg=sqrtg,
+            bsq=scale * bsq_base,
+            pres=pres,
+            vp=vp,
+            bdotk=bdotk,
+            wint=wint,
+        )
+        return jnp.sum(profiles["bdotb"][1:-1])
 
     value, grad = jax.value_and_grad(objective)(jnp.asarray(1.0))
     assert np.isfinite(np.asarray(value))

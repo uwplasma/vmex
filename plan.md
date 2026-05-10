@@ -25,7 +25,8 @@ acceptance criteria or evidence changes.
 - Fixed-boundary and free-boundary CLI/API paths exist and have parity fixtures.
 - Optimization examples cover QA, QH, QP, and QI with continuation/ESS policies.
 - Smooth differentiable QI, mirror ratio, elongation, LgradB, aspect, iota, beta,
-  volavgB, and magnetic-well objectives exist in the workflow layer.
+  volavgB, magnetic-well, DMerc, and JXBFORCE profile objectives exist in the
+  workflow layer.
 - GPU execution works, but small/medium optimization cases are still often CPU
   faster because replay/compile/host overhead dominates.
 - Required CI coverage is still far below the long-term 95% goal.
@@ -58,8 +59,10 @@ Acceptance:
 
 - [x] Promote differentiable `DMerc` from diagnostic/parity into an objective
       with objective-routing and JAX AD tests.
-- [ ] Add differentiable `J`, `B`, `J dot B`, magnetic well, and current-profile
-      objective accessors with documented normalization.
+- [x] Add differentiable `J dot B`/JXBFORCE profile objective accessors with
+      documented normalization and VMEC/wout parity tests.
+- [ ] Add differentiable vector `J`, vector `B`, and current-profile objective
+      accessors with documented normalization.
 - [ ] Add finite-beta stage-one objectives matching the finite-beta optimization
       references: pressure/current profiles, beta, volavgB, iota, aspect,
       Mercier, and quasisymmetry/omnigenity terms.
@@ -237,3 +240,7 @@ Acceptance:
 - 2026-05-10: Added VMEC/wout parity coverage for state-level `DMerc` on the
   bundled finite-beta QI input. This also fixed the bss half-mesh geometry path
   so `rs12/zs12` include VMEC's odd-channel correction before forming `B_s`.
+- 2026-05-10: Added differentiable VMEC/JXBFORCE profile accessors
+  (`jdotb`, `bdotb`, `bdotgradv`) to the state-level Mercier path, exposed
+  them as `vj.JDotB`, `vj.BDotB`, and `vj.BDotGradV` objectives, and added
+  unit plus full-gated VMEC/wout parity tests.
