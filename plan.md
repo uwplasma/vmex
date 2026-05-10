@@ -295,3 +295,7 @@ Acceptance:
   Mercier surface-integral, and JXBFORCE helpers return zero profiles on
   too-short radial meshes, and trapped-fraction geometry rejects invalid array
   shapes explicitly.
+- 2026-05-10: Added cheap driver-policy unit tests for solver-mode aliases,
+  scalar/list parsing, final-FTOL selection, integer budget allocation, residual
+  convergence checks, and history-based final residual extraction. This targets
+  CI-relevant control-flow branches without adding additional VMEC solves.

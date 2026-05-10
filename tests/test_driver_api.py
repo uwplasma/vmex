@@ -421,8 +421,29 @@ def test_normalize_solver_mode():
     assert driver_module._normalize_solver_mode(solver_mode=None, performance_mode=False) == "parity"
     assert driver_module._normalize_solver_mode(solver_mode="accelerated", performance_mode=False) == "accelerated"
     assert driver_module._normalize_solver_mode(solver_mode="fast", performance_mode=False) == "default"
+    assert driver_module._normalize_solver_mode(solver_mode="safe", performance_mode=True) == "parity"
+    assert driver_module._normalize_solver_mode(solver_mode="reference", performance_mode=True) == "parity"
+    assert driver_module._normalize_solver_mode(solver_mode="perf", performance_mode=False) == "accelerated"
     with pytest.raises(ValueError):
         driver_module._normalize_solver_mode(solver_mode="unknown-mode", performance_mode=True)
+
+
+def test_driver_scalar_list_and_ftol_helpers():
+    class _Input:
+        def get_float(self, key, default):
+            assert key == "FTOL"
+            return 1.0e-9 if default is not None else 1.0e-9
+
+    assert driver_module._as_float_list(None) is None
+    assert driver_module._as_float_list(["1.0", 2]) == [1.0, 2.0]
+    assert driver_module._as_float_list(object()) is None
+    assert driver_module._as_list_like(None) is None
+    assert driver_module._as_list_like((1, 2)) == [1, 2]
+    assert driver_module._as_list_like(np.asarray([3, 4])).count(3) == 1
+    assert driver_module._as_list_like(5) == [5]
+    assert driver_module._as_list_like(object()) is None
+    assert driver_module._requested_final_ftol(indata=_Input(), ftol_list_input=[1.0e-6, -2.0]) == 0.0
+    assert driver_module._requested_final_ftol(indata=_Input(), ftol_list_input=None) == 1.0e-9
 
 
 def test_default_non_autodiff_solver_policy_matches_fixed_boundary_defaults(tmp_path, monkeypatch):
@@ -606,6 +627,50 @@ def test_accelerated_cli_budgeted_stage_iters():
     total = driver_module._accelerated_cli_budgeted_total_iters(total_budget=5000, ns_stages=[16, 49, 100])
     assert total == 2000
     assert driver_module._accelerated_cli_budgeted_stage_iters(total_budget=total, ns_stages=[16, 49, 100]) == [130, 552, 1318]
+
+
+def test_driver_budget_and_residual_target_helpers():
+    result = type(
+        "Result",
+        (),
+        {
+            "diagnostics": {"final_fsqr": "1e-8", "final_fsqz": 2.0e-8, "final_fsql": 3.0e-8, "ftol": 3.0e-8},
+            "w_history": np.asarray([]),
+        },
+    )()
+    assert driver_module._allocate_integer_budget(total=0, weights=[1, 2]) == [0, 0]
+    assert driver_module._allocate_integer_budget(total=5, weights=[]) == []
+    assert driver_module._allocate_integer_budget(total=5, weights=[0, 0, 0]) == [0, 0, 5]
+    assert sum(driver_module._allocate_integer_budget(total=7, weights=[1, 1, 1])) == 7
+    assert driver_module._accelerated_fsq_total_target_from_ftol(1.0e-8) == pytest.approx(3.0e-8)
+    assert driver_module._result_final_residuals(result) == (1.0e-8, 2.0e-8, 3.0e-8)
+    assert driver_module._result_final_fsq(result) == pytest.approx(6.0e-8)
+    assert driver_module._result_meets_requested_ftol(result, ftol=3.0e-8) is True
+    assert driver_module._result_meets_requested_ftol(result, ftol=1.0e-8) is False
+    assert driver_module._result_hits_total_target(result, fsq_total_target=7.0e-8) is True
+    assert driver_module._result_hits_total_target(result, fsq_total_target=5.0e-8) is False
+    assert driver_module._result_hits_total_target(None, fsq_total_target=1.0) is False
+
+
+def test_driver_result_helpers_use_history_and_convergence_flags():
+    strict = type("Result", (), {"diagnostics": {"converged_strict": True}})()
+    loose = type("Result", (), {"diagnostics": {"converged": True}})()
+    history = type(
+        "Result",
+        (),
+        {
+            "diagnostics": {},
+            "fsqr2_history": np.asarray([4.0, 1.0]),
+            "fsqz2_history": np.asarray([5.0, 2.0]),
+            "fsql2_history": np.asarray([6.0, 3.0]),
+            "w_history": np.asarray([10.0, 0.5]),
+        },
+    )()
+
+    assert driver_module._result_meets_requested_ftol(strict, ftol=0.0) is True
+    assert driver_module._result_meets_requested_ftol(loose, ftol=0.0) is True
+    assert driver_module._result_final_residuals(history) == (1.0, 2.0, 3.0)
+    assert driver_module._result_final_fsq(history) == 0.5
 
 
 def test_cli_solver_mode_conflicts_with_fast_flags():
