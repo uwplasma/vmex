@@ -331,6 +331,51 @@ def mercier_bsubs_derivatives_lasym_false(
     return {"bsubsu": bsubsu, "bsubsv": bsubsv}
 
 
+def mercier_bsubs_half_mesh_from_geometry(
+    *,
+    bsupu,
+    bsupv,
+    rs12,
+    zs12,
+    ru12,
+    zu12,
+    rv12,
+    zv12,
+) -> dict[str, Any]:
+    """Return VMEC half-mesh ``bsubs`` from geometry and contravariant B.
+
+    This is the differentiable core of VMEC's ``bss.f`` radial covariant field
+    assembly once the half-mesh geometric channels have been synthesized:
+
+    ``B_s = B^u (R_s R_u + Z_s Z_u) + B^v (R_s R_v + Z_s Z_v)``.
+    """
+    bsupu = jnp.asarray(bsupu, dtype=jnp.float64)
+    bsupv = jnp.asarray(bsupv, dtype=jnp.float64)
+    rs12 = jnp.asarray(rs12, dtype=jnp.float64)
+    zs12 = jnp.asarray(zs12, dtype=jnp.float64)
+    ru12 = jnp.asarray(ru12, dtype=jnp.float64)
+    zu12 = jnp.asarray(zu12, dtype=jnp.float64)
+    rv12 = jnp.asarray(rv12, dtype=jnp.float64)
+    zv12 = jnp.asarray(zv12, dtype=jnp.float64)
+
+    g_su = rs12 * ru12 + zs12 * zu12
+    g_sv = rs12 * rv12 + zs12 * zv12
+    bsubs = bsupu * g_su + bsupv * g_sv
+    return {"bsubs": bsubs, "g_su": g_su, "g_sv": g_sv}
+
+
+def mercier_bsubs_full_mesh_from_half_mesh(*, bsubs_half) -> Any:
+    """Average half-mesh ``bsubs`` to VMEC's jxbforce full-mesh convention."""
+    bsubs_half = jnp.asarray(bsubs_half, dtype=jnp.float64)
+    ns = int(bsubs_half.shape[0])
+    bsubs_full = jnp.array(bsubs_half)
+    if ns > 2:
+        bsubs_full = bsubs_full.at[1:-1].set(0.5 * (bsubs_half[1:-1] + bsubs_half[2:]))
+    if ns > 0:
+        bsubs_full = bsubs_full.at[0].set(jnp.zeros_like(bsubs_full[0]))
+    return bsubs_full
+
+
 def mercier_bdotk_from_covariant_derivatives(
     *,
     bsubu,

@@ -302,10 +302,13 @@ fully differentiable residual blocks in vmec_jax.  The JAX
 ``mercier_terms_from_profile_integrals`` helpers now cover the VMEC-style
 geometry channel, surface reductions, and algebraic
 ``DMerc = DShear + DCurr + DWell + DGeod`` step once real-space field channels
-are available.  ``mercier_bsubs_derivatives_lasym_false`` and
-``mercier_bdotk_from_covariant_derivatives`` also port the
-stellarator-symmetric jxbforce derivative reconstruction and
-``itheta/izeta/bdotk`` block.  The remaining work is wiring the state-based
-``bsubs`` channel and the LASYM=True derivative branch instead of the current
-NumPy ``wout`` parity path.  The finite-beta scaffolding is structured so those
-terms can be added next without changing the user-facing example workflow.
+are available.  ``mercier_bsubs_half_mesh_from_geometry``,
+``mercier_bsubs_full_mesh_from_half_mesh``,
+``mercier_bsubs_derivatives_lasym_false``, and
+``mercier_bdotk_from_covariant_derivatives`` also port the radial covariant
+field assembly, jxbforce full-mesh averaging, stellarator-symmetric derivative
+reconstruction, and ``itheta/izeta/bdotk`` block.  The remaining work is wiring
+the state-synthesized half-mesh geometry channels and the LASYM=True derivative
+branch instead of the current NumPy ``wout`` parity path.  The finite-beta
+scaffolding is structured so those terms can be added next without changing the
+user-facing example workflow.
