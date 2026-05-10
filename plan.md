@@ -336,3 +336,6 @@ Acceptance:
   `|B|`/contravariant/covariant parity plot writers. The tests monkeypatch
   VMEC/JAX kernels and use toy `wout` data, so docs/validation plotting entry
   points are covered without adding solver runtime.
+- 2026-05-10: Added synthetic coverage for the `plot_wout()` CLI diagnostic
+  renderer. This protects the four-output `vmec_jax --plot wout_*.nc` workflow
+  used in docs and user-facing examples.
