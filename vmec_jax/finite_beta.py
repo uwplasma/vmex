@@ -264,6 +264,73 @@ def mercier_gpp_from_realspace_geometry(
     return zeros.at[1:-1].set(gpp_inner)
 
 
+def mercier_bsubs_derivatives_lasym_false(
+    *,
+    bsubs,
+    trig,
+    mmax_force: int,
+    nmax_force: int,
+) -> dict[str, Any]:
+    """Return VMEC jxbforce ``bsubsu``/``bsubsv`` for stellarator symmetry.
+
+    ``bsubs`` must be the VMEC full-mesh covariant radial field channel after
+    the jxbforce radial averaging/filtering convention.  This helper ports the
+    vectorized stellarator-symmetric branch in :mod:`vmec_jax.wout` to JAX so
+    the Mercier ``bdotk`` path can be assembled without NumPy postprocessing.
+    """
+    bsubs = jnp.asarray(bsubs, dtype=jnp.float64)
+    ns, ntheta, nzeta = bsubs.shape
+    nt2 = int(trig.ntheta2)
+    if int(ntheta) < nt2:
+        raise ValueError("bsubs grid smaller than trig.ntheta2")
+
+    mmax = int(mmax_force)
+    nmax = int(nmax_force)
+    if mmax < 0 or nmax < 0:
+        zeros = jnp.zeros((int(ns), nt2, int(nzeta)), dtype=jnp.float64)
+        return {"bsubsu": zeros, "bsubsv": zeros}
+
+    cosmui = jnp.asarray(trig.cosmui, dtype=jnp.float64)[:nt2, : mmax + 1]
+    sinmui = jnp.asarray(trig.sinmui, dtype=jnp.float64)[:nt2, : mmax + 1]
+    cosmu = jnp.asarray(trig.cosmu, dtype=jnp.float64)[:nt2, : mmax + 1]
+    sinmu = jnp.asarray(trig.sinmu, dtype=jnp.float64)[:nt2, : mmax + 1]
+    cosmum = jnp.asarray(trig.cosmum, dtype=jnp.float64)[:nt2, : mmax + 1]
+    sinmum = jnp.asarray(trig.sinmum, dtype=jnp.float64)[:nt2, : mmax + 1]
+    cosnv = jnp.asarray(trig.cosnv, dtype=jnp.float64)[:, : nmax + 1]
+    sinnv = jnp.asarray(trig.sinnv, dtype=jnp.float64)[:, : nmax + 1]
+    cosnvn = jnp.asarray(trig.cosnvn, dtype=jnp.float64)[:, : nmax + 1]
+    sinnvn = jnp.asarray(trig.sinnvn, dtype=jnp.float64)[:, : nmax + 1]
+
+    r0scale = float(getattr(trig, "r0scale", 1.0))
+    dnorm = jnp.asarray(1.0 / (r0scale**2), dtype=jnp.float64)
+    dmult = jnp.full((mmax + 1, nmax + 1), dnorm, dtype=jnp.float64)
+    mnyq = int(np.asarray(trig.cosmui).shape[1] - 1)
+    nnyq = int(np.asarray(trig.cosnv).shape[1] - 1)
+    if mnyq > 0 and mnyq <= mmax:
+        dmult = dmult.at[mnyq, :].multiply(0.5)
+    if nnyq > 0 and nnyq <= nmax:
+        dmult = dmult.at[:, nnyq].multiply(0.5)
+
+    bsubs_nt2 = bsubs[:, :nt2, :]
+    f_theta_sin = jnp.einsum("sik,im->smk", bsubs_nt2, sinmui, optimize=True)
+    f_theta_cos = jnp.einsum("sik,im->smk", bsubs_nt2, cosmui, optimize=True)
+    bsubsmn1 = jnp.einsum("smk,kn->smn", f_theta_sin, cosnv, optimize=True) * dmult[None, :, :]
+    bsubsmn2 = jnp.einsum("smk,kn->smn", f_theta_cos, sinnv, optimize=True) * dmult[None, :, :]
+
+    tmp_su_1 = jnp.einsum("smn,im->sin", bsubsmn1, cosmum, optimize=True)
+    tmp_su_2 = jnp.einsum("smn,im->sin", bsubsmn2, sinmum, optimize=True)
+    bsubsu = jnp.einsum("sin,kn->sik", tmp_su_1, cosnv, optimize=True) + jnp.einsum(
+        "sin,kn->sik", tmp_su_2, sinnv, optimize=True
+    )
+
+    tmp_sv_1 = jnp.einsum("smn,im->sin", bsubsmn1, sinmu, optimize=True)
+    tmp_sv_2 = jnp.einsum("smn,im->sin", bsubsmn2, cosmu, optimize=True)
+    bsubsv = jnp.einsum("sin,kn->sik", tmp_sv_1, sinnvn, optimize=True) + jnp.einsum(
+        "sin,kn->sik", tmp_sv_2, cosnvn, optimize=True
+    )
+    return {"bsubsu": bsubsu, "bsubsv": bsubsv}
+
+
 def mercier_bdotk_from_covariant_derivatives(
     *,
     bsubu,

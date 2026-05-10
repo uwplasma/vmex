@@ -10,6 +10,7 @@ from vmec_jax.boundary import BoundaryCoeffs
 from vmec_jax.finite_beta import FiniteBetaTargets
 from vmec_jax.modes import ModeTable
 from vmec_jax.namelist import InData
+from vmec_jax.vmec_tomnsp import vmec_trig_tables
 
 
 def test_s_half_from_static_matches_vmec_half_mesh_convention():
@@ -496,6 +497,106 @@ def test_mercier_gpp_from_realspace_geometry_is_differentiable():
             Zv_odd=0.01 * ones,
         )
         return jnp.sum(gpp[1:-1])
+
+    value, grad = jax.value_and_grad(objective)(jnp.asarray(1.0))
+    assert np.isfinite(np.asarray(value))
+    assert np.isfinite(np.asarray(grad))
+    assert abs(float(np.asarray(grad))) > 0.0
+
+
+def _mercier_bsubs_derivatives_lasym_false_numpy_reference(
+    *,
+    bsubs,
+    trig,
+    mmax_force,
+    nmax_force,
+):
+    bsubs = np.asarray(bsubs, dtype=float)
+    ns, _ntheta, nzeta = bsubs.shape
+    nt2 = int(trig.ntheta2)
+    mmax = int(mmax_force)
+    nmax = int(nmax_force)
+    if mmax < 0 or nmax < 0:
+        zeros = np.zeros((ns, nt2, nzeta), dtype=float)
+        return {"bsubsu": zeros, "bsubsv": zeros}
+
+    cosmui = np.asarray(trig.cosmui, dtype=float)[:nt2, : mmax + 1]
+    sinmui = np.asarray(trig.sinmui, dtype=float)[:nt2, : mmax + 1]
+    cosmu = np.asarray(trig.cosmu, dtype=float)[:nt2, : mmax + 1]
+    sinmu = np.asarray(trig.sinmu, dtype=float)[:nt2, : mmax + 1]
+    cosmum = np.asarray(trig.cosmum, dtype=float)[:nt2, : mmax + 1]
+    sinmum = np.asarray(trig.sinmum, dtype=float)[:nt2, : mmax + 1]
+    cosnv = np.asarray(trig.cosnv, dtype=float)[:, : nmax + 1]
+    sinnv = np.asarray(trig.sinnv, dtype=float)[:, : nmax + 1]
+    cosnvn = np.asarray(trig.cosnvn, dtype=float)[:, : nmax + 1]
+    sinnvn = np.asarray(trig.sinnvn, dtype=float)[:, : nmax + 1]
+
+    dmult = np.full((mmax + 1, nmax + 1), 1.0 / float(trig.r0scale) ** 2)
+    mnyq = np.asarray(trig.cosmui).shape[1] - 1
+    nnyq = np.asarray(trig.cosnv).shape[1] - 1
+    if mnyq > 0 and mnyq <= mmax:
+        dmult[mnyq, :] *= 0.5
+    if nnyq > 0 and nnyq <= nmax:
+        dmult[:, nnyq] *= 0.5
+
+    bsubs_nt2 = bsubs[:, :nt2, :]
+    f_theta_sin = np.einsum("sik,im->smk", bsubs_nt2, sinmui, optimize=True)
+    f_theta_cos = np.einsum("sik,im->smk", bsubs_nt2, cosmui, optimize=True)
+    bsubsmn1 = np.einsum("smk,kn->smn", f_theta_sin, cosnv, optimize=True) * dmult[None, :, :]
+    bsubsmn2 = np.einsum("smk,kn->smn", f_theta_cos, sinnv, optimize=True) * dmult[None, :, :]
+
+    tmp_su_1 = np.einsum("smn,im->sin", bsubsmn1, cosmum, optimize=True)
+    tmp_su_2 = np.einsum("smn,im->sin", bsubsmn2, sinmum, optimize=True)
+    bsubsu = np.einsum("sin,kn->sik", tmp_su_1, cosnv, optimize=True) + np.einsum(
+        "sin,kn->sik", tmp_su_2, sinnv, optimize=True
+    )
+
+    tmp_sv_1 = np.einsum("smn,im->sin", bsubsmn1, sinmu, optimize=True)
+    tmp_sv_2 = np.einsum("smn,im->sin", bsubsmn2, cosmu, optimize=True)
+    bsubsv = np.einsum("sin,kn->sik", tmp_sv_1, sinnvn, optimize=True) + np.einsum(
+        "sin,kn->sik", tmp_sv_2, cosnvn, optimize=True
+    )
+    return {"bsubsu": bsubsu, "bsubsv": bsubsv}
+
+
+def test_mercier_bsubs_derivatives_lasym_false_matches_vmec_transform():
+    rng = np.random.default_rng(8765)
+    trig = vmec_trig_tables(ntheta=8, nzeta=5, nfp=3, mmax=4, nmax=3, lasym=False, cache=False)
+    bsubs = rng.normal(size=(4, int(trig.ntheta2), 5))
+
+    actual = finite_beta.mercier_bsubs_derivatives_lasym_false(
+        bsubs=bsubs,
+        trig=trig,
+        mmax_force=2,
+        nmax_force=2,
+    )
+    expected = _mercier_bsubs_derivatives_lasym_false_numpy_reference(
+        bsubs=bsubs,
+        trig=trig,
+        mmax_force=2,
+        nmax_force=2,
+    )
+
+    for key in ("bsubsu", "bsubsv"):
+        np.testing.assert_allclose(np.asarray(actual[key]), expected[key], rtol=1e-13, atol=1e-13)
+
+
+def test_mercier_bsubs_derivatives_lasym_false_is_differentiable():
+    import jax
+
+    trig = vmec_trig_tables(ntheta=8, nzeta=5, nfp=3, mmax=4, nmax=3, lasym=False, cache=False)
+    base = jnp.linspace(0.1, 1.0, 4 * int(trig.ntheta2) * 5, dtype=jnp.float64).reshape(
+        (4, int(trig.ntheta2), 5)
+    )
+
+    def objective(scale):
+        channels = finite_beta.mercier_bsubs_derivatives_lasym_false(
+            bsubs=scale * base,
+            trig=trig,
+            mmax_force=2,
+            nmax_force=2,
+        )
+        return jnp.sum(channels["bsubsu"] ** 2) + jnp.sum(channels["bsubsv"] ** 2)
 
     value, grad = jax.value_and_grad(objective)(jnp.asarray(1.0))
     assert np.isfinite(np.asarray(value))

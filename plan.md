@@ -169,9 +169,9 @@ Acceptance:
    (`qi_legacy_total`).
 3. [x] Run a small QI one-DOF noise/ranking audit with the source-level
    diagnostic.
-4. [ ] Wire filtered covariant derivative channels from state into the new
-   AD-safe gpp, bdotk, surface-integral, and algebra kernels, then wrap the
-   result as a `DMerc` objective.
+4. [ ] Wire the state-based `bsubs` channel and LASYM=True derivative branch
+   into the new AD-safe gpp, bsubs-derivative, bdotk, surface-integral, and
+   algebra kernels, then wrap the result as a `DMerc` objective.
 5. [ ] Start the first refactor with a low-risk extraction from the largest
    modules after the new tests are green.
 
@@ -207,3 +207,7 @@ Acceptance:
   implementation of the VMEC Mercier contravariant `gpp` geometry channel from
   even/odd real-space geometry. The remaining `DMerc` wiring is now focused on
   filtered covariant-field derivatives.
+- 2026-05-10: Added `mercier_bsubs_derivatives_lasym_false`, a JAX
+  implementation of the stellarator-symmetric jxbforce spectral derivative
+  reconstruction for `bsubsu`/`bsubsv`. The next DMerc step is state-based
+  `bsubs` wiring plus the LASYM=True branch.
