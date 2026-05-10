@@ -21,7 +21,7 @@ from .boundary import boundary_from_indata, boundary_input_from_indata
 from .driver import run_fixed_boundary, write_wout_from_fixed_boundary_run
 from .energy import flux_profiles_from_indata
 from .field import signgs_from_sqrtg
-from .finite_beta import finite_beta_scalars_from_state
+from .finite_beta import finite_beta_scalars_from_state, mercier_terms_from_state
 from .geom import eval_geom
 from .init_guess import initial_guess_from_boundary
 from .optimization import (
@@ -523,6 +523,53 @@ class BetaTotal:
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
         return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight)
+
+
+class DMerc:
+    """Smooth lower-bound objective for VMEC Mercier stability.
+
+    The residual is a per-surface smooth penalty for ``DMerc < minimum`` on
+    interior radial surfaces.  It currently uses the differentiable
+    stellarator-symmetric Mercier path; LASYM=True raises until that spectral
+    derivative branch is wired.
+    """
+
+    name = "DMerc"
+
+    def __init__(
+        self,
+        *,
+        minimum: float = 0.0,
+        softness: float = 1.0e-3,
+        mmax_force: int | None = None,
+        nmax_force: int | None = None,
+    ):
+        self.minimum = float(minimum)
+        self.softness = float(softness)
+        self.mmax_force = None if mmax_force is None else int(mmax_force)
+        self.nmax_force = None if nmax_force is None else int(nmax_force)
+
+    def terms(self, ctx: StageContext, state):
+        return mercier_terms_from_state(
+            state=state,
+            static=ctx.static,
+            indata=ctx.indata,
+            signgs=ctx.signgs,
+            mmax_force=self.mmax_force,
+            nmax_force=self.nmax_force,
+        )
+
+    def J(self, ctx: StageContext, state):
+        dmerc = jnp.asarray(self.terms(ctx, state)["DMerc"], dtype=jnp.float64)
+        active = dmerc[1:-1] if int(dmerc.shape[0]) > 2 else jnp.zeros((0,), dtype=dmerc.dtype)
+        deficit = float(self.minimum) - active
+        softness = jnp.asarray(float(self.softness), dtype=jnp.float64)
+        return softness * jnp.logaddexp(jnp.asarray(0.0, dtype=jnp.float64), deficit / softness)
+
+    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        if not _target_is_zero(target):
+            raise ValueError("DMerc is a lower-bound penalty and requires target=0.")
+        return ObjectiveTerm(self.name, self.J, target=0.0, weight=residual_weight)
 
 
 class LgradB:
@@ -1852,6 +1899,7 @@ __all__ = [
     "AbsMeanIotaFloor",
     "AspectRatio",
     "BetaTotal",
+    "DMerc",
     "FixedBoundaryVMEC",
     "FixedBoundaryObjectiveStage",
     "FixedBoundaryOptimizationResult",
