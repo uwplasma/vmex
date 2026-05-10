@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import site
 import sys
@@ -22,6 +23,9 @@ from vmec_jax.plotting import (
     closed_theta_grid,
     fix_matplotlib_3d,
     prepare_matplotlib_3d,
+    plot_3d_boundary_comparison,
+    plot_bmag_contours,
+    plot_objective_history,
     profiles_from_wout,
     select_zeta_slices,
     surface_data_from_wout,
@@ -192,6 +196,41 @@ def test_vmecplot2_grid_helpers_return_vmecplot2_shapes():
     assert theta_3d.shape == (5,)
     assert phi_3d.shape == (7,)
     assert R_3d.shape == Z_3d.shape == B_3d.shape == (5, 7)
+
+
+def test_public_optimization_plot_helpers_render_synthetic_outputs(tmp_path):
+    pytest.importorskip("matplotlib")
+
+    initial = _toy_wout(lasym=False)
+    final = _toy_wout(lasym=True)
+    history_path = tmp_path / "history.json"
+    history_path.write_text(
+        json.dumps(
+            {
+                "label": "Synthetic optimization",
+                "target_aspect": 5.0,
+                "target_iota": 0.42,
+                "total_wall_time_s": 1.5,
+                "nfev": 3,
+                "history": [
+                    {"objective": 3.0, "qs_objective": 2.0, "aspect": 6.0, "iota": 0.1},
+                    {"objective": 2.0, "qs_objective": 1.5, "aspect": 5.5, "iota": 0.3},
+                    {"objective": 1.0, "qs_objective": 0.5, "aspect": 5.0, "iota": 0.42},
+                ],
+            }
+        )
+    )
+
+    boundary_path = plot_3d_boundary_comparison(initial, final, outdir=tmp_path)
+    bmag_path = plot_bmag_contours(initial, final, outdir=tmp_path)
+    history_plot_path = plot_objective_history(history_path, outdir=tmp_path)
+
+    assert boundary_path.name == "boundary_comparison.png"
+    assert bmag_path.name == "bmag_surface.png"
+    assert history_plot_path.name == "objective_history.png"
+    assert boundary_path.stat().st_size > 0
+    assert bmag_path.stat().st_size > 0
+    assert history_plot_path.stat().st_size > 0
 
 
 def test_fix_matplotlib_3d_sets_equal_radius_limits():
