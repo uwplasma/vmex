@@ -295,6 +295,19 @@ these in the force kernels. The parallel and perpendicular currents satisfy:
    \mathbf{J} = \mathbf{J}_{\parallel} + \mathbf{J}_{\perp}, \qquad
    \nabla p = \mathbf{J}_{\perp} \times \mathbf{B}.
 
+For optimization diagnostics, ``vmec_jax`` also exposes the JXBFORCE
+real-space current channels as
+
+.. math::
+
+   J^\theta = \frac{\texttt{itheta}}{\sqrt{g}}, \qquad
+   J^\zeta = \frac{\texttt{izeta}}{\sqrt{g}},
+
+on the full radial mesh.  The ``vj.JVector`` objective returns these
+flux-coordinate components flattened over the selected surfaces and angular
+grid.  ``vj.BVector`` returns the corresponding Cartesian magnetic-field vector
+``(B_x,B_y,B_z)`` on one selected radial surface.
+
 Force balance in VMEC (residual form)
 -------------------------------------
 

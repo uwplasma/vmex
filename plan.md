@@ -63,7 +63,7 @@ Acceptance:
       documented normalization and VMEC/wout parity tests.
 - [x] Add differentiable state-derived toroidal current-profile objective
       accessors with documented normalization.
-- [ ] Add differentiable vector `J` and vector `B` objective accessors with
+- [x] Add differentiable vector `J` and vector `B` objective accessors with
       documented normalization.
 - [ ] Add finite-beta stage-one objectives matching the finite-beta optimization
       references: pressure/current profiles, beta, volavgB, iota, aspect,
@@ -250,3 +250,7 @@ Acceptance:
   objective objects for the state-derived VMEC/Mercier `torcur` and `ip`
   profiles, with example comments, documentation, AD checks, and finite-
   difference derivative coverage.
+- 2026-05-10: Added `vj.BVector` for Cartesian magnetic-field targeting and
+  `vj.JVector` for VMEC-coordinate current-density targeting
+  `(itheta/sqrtg, izeta/sqrtg)`, with docs, example comments, and derivative
+  tests.  This closes the first finite-beta vector-diagnostics API lane.

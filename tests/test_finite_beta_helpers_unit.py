@@ -338,7 +338,7 @@ def test_mercier_terms_from_state_composes_stellarator_symmetric_channels(monkey
     ):
         assert terms[key].shape == (4,)
         assert np.all(np.isfinite(np.asarray(terms[key])))
-    for key in ("gpp", "bsubs_half", "bsubs_full", "bsubsu", "bsubsv", "bdotk", "bdotk_merc"):
+    for key in ("gpp", "bsubs_half", "bsubs_full", "bsubsu", "bsubsv", "itheta", "izeta", "bdotk", "bdotk_merc", "sqrtg"):
         assert terms[key].shape == shape
         assert np.all(np.isfinite(np.asarray(terms[key])))
 
@@ -405,7 +405,7 @@ def test_mercier_terms_from_state_composes_lasym_channels(monkeypatch):
     ):
         assert terms[key].shape == (4,)
         assert np.all(np.isfinite(np.asarray(terms[key])))
-    for key in ("gpp", "bsubs_half", "bsubs_full", "bsubsu", "bsubsv", "bdotk", "bdotk_merc"):
+    for key in ("gpp", "bsubs_half", "bsubs_full", "bsubsu", "bsubsv", "itheta", "izeta", "bdotk", "bdotk_merc", "sqrtg"):
         assert terms[key].shape == shape
         assert np.all(np.isfinite(np.asarray(terms[key])))
 
