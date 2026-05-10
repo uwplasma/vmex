@@ -15,12 +15,14 @@ The same finite-beta channel reconstruction is also available to optimization
 scripts through JAX-differentiable helpers:
 
 - ``vmec_jax.mercier_terms_from_state`` returns ``DMerc`` and the component
-  terms, plus ``jdotb``, ``bdotb`` and ``bdotgradv`` on the full radial mesh.
+  terms, plus ``jdotb``, ``bdotb``, ``bdotgradv``, ``torcur`` and ``ip`` on
+  the full radial mesh.
 - ``vmec_jax.jxbforce_profiles_from_realspace`` exposes the small algebraic
   reduction from real-space channels to those 1D profiles.
-- ``vmec_jax.DMerc``, ``vmec_jax.JDotB``, ``vmec_jax.BDotB`` and
-  ``vmec_jax.BDotGradV`` are objective objects that can be added directly to
-  ``LeastSquaresProblem.from_tuples``.
+- ``vmec_jax.DMerc``, ``vmec_jax.JDotB``, ``vmec_jax.BDotB``,
+  ``vmec_jax.BDotGradV``, ``vmec_jax.ToroidalCurrent`` and
+  ``vmec_jax.ToroidalCurrentGradient`` are objective objects that can be added
+  directly to ``LeastSquaresProblem.from_tuples``.
 
 Example:
 
@@ -30,6 +32,7 @@ Example:
        [
            (vj.DMerc(minimum=0.0, softness=1.0e-3).J, 0.0, 1.0),
            (vj.JDotB(surfaces=(0.25, 0.50, 0.75)).J, 0.0, 1.0e-4),
+           (vj.ToroidalCurrent(surfaces=(0.25, 0.50, 0.75)).J, target_torcur, 1.0e-4),
        ]
    )
 

@@ -15,7 +15,7 @@ from vmec_jax.init_guess import initial_guess_from_boundary
 from vmec_jax.static import build_static
 from vmec_jax.vmec_bcovar import vmec_bcovar_half_mesh_from_wout
 from vmec_jax.vmec_residue import vmec_force_norms_from_bcovar_dynamic
-from vmec_jax.wout import _compute_mercier
+from vmec_jax.wout import _compute_mercier, _vmec_wint_from_trig_jax
 
 
 pytestmark = pytest.mark.full
@@ -142,3 +142,24 @@ def test_mercier_terms_from_state_matches_wout_mercier_path_on_bundled_qi_input(
         expected,
     ):
         np.testing.assert_allclose(np.asarray(actual[key]), reference, rtol=1e-11, atol=1e-10)
+
+    wint = np.asarray(_vmec_wint_from_trig_jax(static.trig_vmec))
+    expected_torcur = np.zeros_like(np.asarray(static.s, dtype=float))
+    expected_torcur[1:] = float(signgs) * 2.0 * np.pi * np.sum(np.asarray(bc.bsubu)[1:] * wint[None, :, :], axis=(1, 2))
+    expected_ip = np.asarray(
+        finite_beta.mercier_terms_from_profile_integrals(
+            s=np.asarray(static.s),
+            phips=np.asarray(wout_like.phips),
+            iotas=np.asarray(wout_like.iotas),
+            vp=np.asarray(norms.vp),
+            pres=np.asarray(pres),
+            torcur=expected_torcur,
+            tpp=np.asarray(actual["tpp"]),
+            tbb=np.asarray(actual["tbb"]),
+            tjb=np.asarray(actual["tjb"]),
+            tjj=np.asarray(actual["tjj"]),
+            signgs=signgs,
+        )["ip"]
+    )
+    np.testing.assert_allclose(np.asarray(actual["torcur"]), expected_torcur, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(np.asarray(actual["ip"]), expected_ip, rtol=1e-12, atol=1e-12)

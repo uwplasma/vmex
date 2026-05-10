@@ -61,8 +61,10 @@ Acceptance:
       with objective-routing and JAX AD tests.
 - [x] Add differentiable `J dot B`/JXBFORCE profile objective accessors with
       documented normalization and VMEC/wout parity tests.
-- [ ] Add differentiable vector `J`, vector `B`, and current-profile objective
+- [x] Add differentiable state-derived toroidal current-profile objective
       accessors with documented normalization.
+- [ ] Add differentiable vector `J` and vector `B` objective accessors with
+      documented normalization.
 - [ ] Add finite-beta stage-one objectives matching the finite-beta optimization
       references: pressure/current profiles, beta, volavgB, iota, aspect,
       Mercier, and quasisymmetry/omnigenity terms.
@@ -244,3 +246,7 @@ Acceptance:
   (`jdotb`, `bdotb`, `bdotgradv`) to the state-level Mercier path, exposed
   them as `vj.JDotB`, `vj.BDotB`, and `vj.BDotGradV` objectives, and added
   unit plus full-gated VMEC/wout parity tests.
+- 2026-05-10: Added `vj.ToroidalCurrent` and `vj.ToroidalCurrentGradient`
+  objective objects for the state-derived VMEC/Mercier `torcur` and `ip`
+  profiles, with example comments, documentation, AD checks, and finite-
+  difference derivative coverage.
