@@ -823,6 +823,8 @@ def _recompute_axis_from_state_vmec_jax(
         rmax = jnp.max(r1b[:, iv])
         zmin = jnp.min(z1b[:, iv])
         zmax = jnp.max(z1b[:, iv])
+        r_mid = 0.5 * (rmax + rmin)
+        z_mid = 0.5 * (zmax + zmin)
 
         r_grid = rmin + (rmax - rmin) * frac
         special_plane = (not bool(cfg.lasym)) and (iv == 0 or iv == nzeta // 2)
@@ -850,8 +852,16 @@ def _recompute_axis_from_state_vmec_jax(
         flat_idx = jnp.argmax(best_mask.reshape(-1).astype(jnp.int32))
         iz_idx = flat_idx // int(r_grid.shape[0])
         ir_idx = flat_idx % int(r_grid.shape[0])
-        rcom = rcom.at[iv].set(r_grid[ir_idx])
-        zcom = zcom.at[iv].set(z_grid[iz_idx])
+        # VMEC initializes each plane at the LCFS bounding-box midpoint and only
+        # accepts scan points that improve the min-Jacobian proxy above zero. If
+        # the best grid point is still negative, keep that midpoint instead of
+        # moving to the least-bad point. Exact-zero ties may adjust z only.
+        candidate_r = r_grid[ir_idx]
+        candidate_z = z_grid[iz_idx]
+        rbest = jnp.where(max_tau > 0.0, candidate_r, r_mid)
+        zbest = jnp.where(max_tau >= 0.0, candidate_z, z_mid)
+        rcom = rcom.at[iv].set(rbest)
+        zcom = zcom.at[iv].set(zbest)
 
     if not bool(cfg.lasym):
         for iv in range(1, nzeta // 2):

@@ -401,3 +401,11 @@ Acceptance:
   coverage `63.67%`, runtime about `6:21`. Kept the CI floor at 62%; 64% still
   has too little cross-platform margin, and the next safe threshold bump remains
   65% after more meaningful coverage/refactor work.
+- 2026-05-10: Added initial-guess helper coverage for axis alias parsing,
+  VMEC theta-flip logic, frozen zero-axis initialization, axis override
+  extraction, and NumPy/JAX axis-recompute parity. This exposed and fixed a
+  real JAX-path mismatch: when the axis scan finds no positive min-Jacobian
+  improvement, `_recompute_axis_from_state_vmec_jax` now keeps VMEC's midpoint
+  fallback instead of moving to the least-bad grid point. Verified with
+  `python -m pytest tests/test_init_guess.py -q` (`8 passed`) and
+  `ruff check vmec_jax/init_guess.py tests/test_init_guess.py`.
