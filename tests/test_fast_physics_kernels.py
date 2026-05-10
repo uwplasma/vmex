@@ -25,7 +25,7 @@ from vmec_jax.integrals import (
 )
 from vmec_jax.modes import ModeTable
 from vmec_jax.namelist import InData
-from vmec_jax.profiles import MU0, eval_profiles
+from vmec_jax.profiles import MU0, eval_profiles, profiles_from_indata
 from vmec_jax.residuals import _rms, _sum_squares_state, force_residuals_from_state
 from vmec_jax.state import StateLayout, VMECState
 from vmec_jax.vmec2000_exec import (
@@ -166,6 +166,71 @@ def test_profile_two_power_and_cubic_spline_current_contracts() -> None:
     )
     spline_profiles = eval_profiles(spline, s)
     np.testing.assert_allclose(np.asarray(spline_profiles["current"]), 3.0 + 4.0 * s_np, rtol=1e-12, atol=1e-12)
+
+
+def test_profile_error_paths_lrfp_and_empty_spline_auxiliaries() -> None:
+    s = jnp.asarray([0.0, 0.5, 1.0])
+
+    lrfp = InData(
+        scalars={
+            "PMASS_TYPE": "power_series",
+            "PIOTA_TYPE": "power_series",
+            "PCURR_TYPE": "power_series",
+            "AM": [0.0],
+            "AI": [0.0, 2.0],
+            "AC": [],
+            "LRFP": True,
+        },
+        indexed={},
+    )
+    iota = np.asarray(eval_profiles(lrfp, s)["iota"])
+    assert np.isinf(iota[0])
+    np.testing.assert_allclose(iota[1:], [1.0, 0.5])
+
+    empty_spline_i = InData(
+        scalars={"PMASS_TYPE": "power_series", "PCURR_TYPE": "cubic_spline_i", "AM": [0.0], "AI": [], "AC": [0.0]},
+        indexed={},
+    )
+    np.testing.assert_allclose(np.asarray(eval_profiles(empty_spline_i, s)["current"]), 0.0)
+
+    empty_spline_ip = InData(
+        scalars={"PMASS_TYPE": "power_series", "PCURR_TYPE": "cubic_spline_ip", "AM": [0.0], "AI": [], "AC": [0.0]},
+        indexed={},
+    )
+    np.testing.assert_allclose(np.asarray(eval_profiles(empty_spline_ip, s)["current"]), 0.0)
+
+    aux = profiles_from_indata(
+        InData(
+            scalars={
+                "AC_AUX_S": [0.0, 0.4, 0.3, 1.0],
+                "AC_AUX_F": [1.0, 2.0, 99.0, 100.0],
+                "SPRES_PED": -0.2,
+            },
+            indexed={},
+        )
+    )
+    np.testing.assert_allclose(np.asarray(aux.ac_aux_s), [0.0, 0.4])
+    np.testing.assert_allclose(np.asarray(aux.ac_aux_f), [1.0, 2.0])
+    assert aux.spres_ped == pytest.approx(0.2)
+
+    with pytest.raises(NotImplementedError, match="pmass_type"):
+        eval_profiles(InData(scalars={"PMASS_TYPE": "unsupported", "AM": [0.0], "AI": [], "AC": []}, indexed={}), s)
+    with pytest.raises(NotImplementedError, match="piota_type"):
+        eval_profiles(
+            InData(
+                scalars={"PMASS_TYPE": "power_series", "PIOTA_TYPE": "unsupported", "AM": [0.0], "AI": [0.1], "AC": []},
+                indexed={},
+            ),
+            s,
+        )
+    with pytest.raises(NotImplementedError, match="pcurr_type"):
+        eval_profiles(
+            InData(
+                scalars={"PMASS_TYPE": "power_series", "PCURR_TYPE": "unsupported", "AM": [0.0], "AI": [], "AC": [1.0]},
+                indexed={},
+            ),
+            s,
+        )
 
 
 def test_energy_polynomial_helpers_are_derivative_consistent() -> None:
