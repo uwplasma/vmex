@@ -386,3 +386,8 @@ Acceptance:
   and visualization slices: `429 passed, 21 skipped, 85 deselected`, total
   coverage `63.53%`, runtime about `6:25`. Kept the CI floor at 62%; the next
   safe bump remains 65% after more meaningful coverage/refactor work.
+- 2026-05-10: Added VMEC2000 helper coverage for executable discovery, missing
+  executable errors, fake subprocess execution, namelist patching inside
+  `run_xvmec2000`, threed1 discovery, trace parsing, and runtime capture.
+  Verified with `python -m pytest tests/test_fast_physics_kernels.py -q`
+  (`12 passed`) and `ruff check tests/test_fast_physics_kernels.py`.

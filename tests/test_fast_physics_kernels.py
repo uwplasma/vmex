@@ -33,7 +33,9 @@ from vmec_jax.vmec2000_exec import (
     _infer_case_name,
     _parse_vmec2000_threed1,
     _patch_indata,
+    find_vmec2000_exec,
     flatten_threed1,
+    run_xvmec2000,
     threed1_fsq_total,
 )
 
@@ -290,3 +292,68 @@ def test_vmec2000_indata_patch_and_file_discovery(tmp_path: Path) -> None:
     direct = tmp_path / "threed1.case"
     direct.write_text("")
     assert _find_threed1_file(tmp_path, case="case") == direct
+
+
+def test_vmec2000_exec_discovery_and_fake_run(monkeypatch, tmp_path: Path) -> None:
+    import vmec_jax.vmec2000_exec as vx
+
+    env_exec = tmp_path / "xvmec_env"
+    env_exec.write_text("#!/bin/sh\n")
+    monkeypatch.setenv("VMEC2000_EXEC", str(env_exec))
+    assert find_vmec2000_exec(root=tmp_path / "empty") == env_exec
+
+    monkeypatch.setenv("VMEC2000_EXEC", str(tmp_path / "missing"))
+    default_exec = tmp_path / "STELLOPT" / "VMEC2000" / "Release" / "xvmec2000"
+    default_exec.parent.mkdir(parents=True)
+    default_exec.write_text("#!/bin/sh\n")
+    assert find_vmec2000_exec(root=tmp_path) == default_exec
+
+    monkeypatch.delenv("VMEC2000_EXEC", raising=False)
+    assert find_vmec2000_exec(root=tmp_path / "none" / "child") is None
+
+    input_path = tmp_path / "input.case"
+    input_path.write_text("&INDATA\n  NITER = 20\n/\n")
+    workdir = tmp_path / "work"
+
+    with pytest.raises(FileNotFoundError, match="VMEC2000 executable"):
+        run_xvmec2000(input_path, exec_path=tmp_path / "no_exec")
+
+    def fake_run(cmd, *, cwd, capture_output, text, timeout, check):
+        assert cmd == [str(default_exec), "input.case"]
+        assert capture_output is True
+        assert text is True
+        assert timeout == 12.0
+        assert check is False
+        (Path(cwd) / "threed1.case").write_text(
+            "\n".join(
+                [
+                    " NS =  3 NO. FOURIER MODES =  1 FTOLV =  1.0E-10 NITER =  2",
+                    " ITER FSQR FSQZ FSQL fsqr1 fsqz1 fsql1 DELT0R",
+                    " 1 1.0E-2 2.0E-2 3.0E-2 4.0E-2 5.0E-2 6.0E-2 7.0E-1",
+                ]
+            )
+        )
+        return SimpleNamespace(stdout="ok", stderr="")
+
+    times = iter([10.0, 12.5])
+    monkeypatch.setattr(vx.time, "perf_counter", lambda: next(times))
+    monkeypatch.setattr(vx.subprocess, "run", fake_run)
+
+    result = run_xvmec2000(
+        input_path,
+        exec_path=default_exec,
+        workdir=workdir,
+        timeout_s=12.0,
+        indata_updates={"NITER": "2"},
+        keep_workdir=True,
+    )
+
+    assert result.workdir == workdir
+    assert result.input_path == workdir / "input.case"
+    assert "NITER = 2" in result.input_path.read_text()
+    assert result.stdout == "ok"
+    assert result.stderr == ""
+    assert result.runtime_s == pytest.approx(2.5)
+    assert result.threed1_path == workdir / "threed1.case"
+    assert len(result.stages) == 1
+    assert threed1_fsq_total(flatten_threed1(result.stages))[0] == pytest.approx(0.06)
