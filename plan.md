@@ -424,3 +424,8 @@ Acceptance:
   and mode helper tests: `444 passed, 21 skipped, 85 deselected`, total coverage
   `64.13%`, runtime about `6:26`. Kept the CI floor at 62%; 64% remains too
   tight for a threshold bump.
+- 2026-05-10: Added cheap helper coverage for radial derivative edge cases
+  (`ns=1`, `ns=2`), periodic angle-step validation, and Nyquist mode/basis cache
+  reuse. Verified with
+  `python -m pytest tests/test_grid_radial_nyquist_helpers.py -q` (`3 passed`)
+  and `ruff check tests/test_grid_radial_nyquist_helpers.py`.
