@@ -297,14 +297,14 @@ one-field-period well interval; keep ``0.0`` for the bundled NFP=2 seed, or set
 
 Mercier ``DMerc`` and Redl bootstrap-current mismatch are not yet enabled as
 fully differentiable residual blocks in vmec_jax.  The JAX
-``mercier_surface_integrals_from_realspace`` and
+``mercier_gpp_from_realspace_geometry``,
+``mercier_surface_integrals_from_realspace``, and
 ``mercier_terms_from_profile_integrals`` helpers now cover the VMEC-style
-surface reductions and the algebraic
-``DMerc = DShear + DCurr + DWell + DGeod`` step once real-space ``gpp`` and
-``bdotk`` channels are available.  ``mercier_bdotk_from_covariant_derivatives``
-also ports the jxbforce ``itheta/izeta/bdotk`` block once filtered covariant
-field derivatives are available.  The remaining work is wiring ``gpp`` and the
-filtered covariant derivative channels from the state-based path instead of the
-current NumPy ``wout`` parity path.  The finite-beta scaffolding is structured
-so those terms can be added next without changing the user-facing example
-workflow.
+geometry channel, surface reductions, and algebraic
+``DMerc = DShear + DCurr + DWell + DGeod`` step once real-space field channels
+are available.  ``mercier_bdotk_from_covariant_derivatives`` also ports the
+jxbforce ``itheta/izeta/bdotk`` block once filtered covariant field derivatives
+are available.  The remaining work is wiring the filtered covariant derivative
+channels from the state-based path instead of the current NumPy ``wout`` parity
+path.  The finite-beta scaffolding is structured so those terms can be added
+next without changing the user-facing example workflow.
