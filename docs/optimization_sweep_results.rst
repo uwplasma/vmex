@@ -295,8 +295,10 @@ research-quality QI runs. ``QI_OPTIONS.phimin`` controls the start of the
 one-field-period well interval; keep ``0.0`` for the bundled NFP=2 seed, or set
 ``np.pi / nfp`` when auditing a reference field whose first well starts there.
 
-Mercier ``DMerc`` and Redl bootstrap-current mismatch are not yet enabled as
-fully differentiable residual blocks in vmec_jax.  The JAX
+Redl bootstrap-current mismatch is not yet enabled as a fully differentiable
+residual block in vmec_jax.  Mercier ``DMerc`` is now available as a
+state-level differentiable diagnostic for stellarator-symmetric equilibria via
+``mercier_terms_from_state``.  The JAX
 ``mercier_gpp_from_realspace_geometry``,
 ``mercier_surface_integrals_from_realspace``, and
 ``mercier_terms_from_profile_integrals`` helpers now cover the VMEC-style
@@ -311,7 +313,7 @@ are available.  ``mercier_realspace_geometry_channels_from_state``,
 even/odd geometry channels, half-mesh toroidal geometry, radial covariant field
 assembly, jxbforce full-mesh averaging, stellarator-symmetric derivative
 reconstruction, and ``itheta/izeta/bdotk`` block.  The remaining work is
-composing these channels into a state-level ``DMerc`` residual and adding the
-LASYM=True derivative branch instead of the current NumPy ``wout`` parity path.
-The finite-beta scaffolding is structured so those terms can be added next
-without changing the user-facing example workflow.
+wrapping this diagnostic as a user-facing residual/objective term and adding
+the LASYM=True derivative branch instead of the current NumPy ``wout`` parity
+path.  The finite-beta scaffolding is structured so those terms can be added
+next without changing the user-facing example workflow.

@@ -224,6 +224,141 @@ def test_finite_beta_global_residuals_are_zero_for_satisfied_one_sided_constrain
     np.testing.assert_allclose(np.asarray(residuals), np.zeros(6))
 
 
+def _make_fake_mercier_state_inputs(scale=1.0):
+    trig = vmec_trig_tables(ntheta=6, nzeta=3, nfp=1, mmax=0, nmax=0, lasym=False, cache=False)
+    s = jnp.linspace(0.0, 1.0, 4)
+    shape = (4, int(trig.ntheta2), 3)
+    cfg = SimpleNamespace(
+        ntheta=6,
+        nzeta=3,
+        nfp=1,
+        mpol=1,
+        ntor=0,
+        lasym=False,
+        lconm1=False,
+        lthreed=False,
+    )
+    static = SimpleNamespace(s=s, trig_vmec=trig, cfg=cfg, modes=ModeTable(m=np.array([0]), n=np.array([0])))
+    state = SimpleNamespace(Rcos=jnp.asarray([[scale], [1.0], [1.0], [1.0]], dtype=jnp.float64))
+    return state, static, shape
+
+
+def _patch_fake_mercier_state_dependencies(monkeypatch, shape):
+    one = jnp.ones(shape, dtype=jnp.float64)
+    s = jnp.linspace(0.0, 1.0, shape[0])
+
+    monkeypatch.setattr(
+        finite_beta,
+        "_wout_like_for_state",
+        lambda **_kwargs: (
+            SimpleNamespace(
+                phips=jnp.asarray([0.0, 1.0, 1.0, 1.0], dtype=jnp.float64),
+                iotas=jnp.asarray([0.0, 0.1, 0.2, 0.3], dtype=jnp.float64),
+            ),
+            jnp.asarray([0.0, 0.1, 0.1, 0.1], dtype=jnp.float64),
+        ),
+    )
+    monkeypatch.setattr(
+        finite_beta,
+        "vmec_force_norms_from_bcovar_dynamic",
+        lambda **_kwargs: SimpleNamespace(vp=jnp.asarray([0.0, 1.0, 1.1, 1.2], dtype=jnp.float64)),
+    )
+
+    def fake_bcovar(*, state, **_kwargs):
+        scale = jnp.asarray(state.Rcos[0, 0], dtype=jnp.float64)
+        return SimpleNamespace(
+            bsupu=0.2 * one,
+            bsupv=0.3 * one,
+            bsubu=scale * (0.4 * one + 0.05 * s[:, None, None]),
+            bsubv=0.5 * one + 0.03 * s[:, None, None],
+            bsq=1.0 + 0.2 * one,
+            jac=SimpleNamespace(
+                sqrtg=one,
+                rs=0.11 * one,
+                zs=0.12 * one,
+                ru12=0.2 * one,
+                zu12=0.3 * one,
+            ),
+        )
+
+    monkeypatch.setattr(finite_beta, "vmec_bcovar_half_mesh_from_wout", fake_bcovar)
+    monkeypatch.setattr(
+        finite_beta,
+        "mercier_realspace_geometry_channels_from_state",
+        lambda **_kwargs: {
+            "R_even": one,
+            "R_odd": jnp.zeros_like(one),
+            "Z_even": 0.1 * one,
+            "Z_odd": jnp.zeros_like(one),
+            "Ru_even": 0.2 * one,
+            "Ru_odd": jnp.zeros_like(one),
+            "Zu_even": 0.3 * one,
+            "Zu_odd": jnp.zeros_like(one),
+            "Rv_even": 0.1 * one,
+            "Rv_odd": jnp.zeros_like(one),
+            "Zv_even": 0.2 * one,
+            "Zv_odd": jnp.zeros_like(one),
+        },
+    )
+
+
+def test_mercier_terms_from_state_composes_stellarator_symmetric_channels(monkeypatch):
+    state, static, shape = _make_fake_mercier_state_inputs()
+    _patch_fake_mercier_state_dependencies(monkeypatch, shape)
+
+    terms = finite_beta.mercier_terms_from_state(
+        state=state,
+        static=static,
+        indata=object(),
+        signgs=1,
+        include_channels=True,
+    )
+
+    for key in ("DMerc", "Dshear", "Dcurr", "Dwell", "Dgeod", "tpp", "tbb", "tjb", "tjj", "torcur"):
+        assert terms[key].shape == (4,)
+        assert np.all(np.isfinite(np.asarray(terms[key])))
+    for key in ("gpp", "bsubs_half", "bsubs_full", "bsubsu", "bsubsv", "bdotk", "bdotk_merc"):
+        assert terms[key].shape == shape
+        assert np.all(np.isfinite(np.asarray(terms[key])))
+
+
+def test_mercier_terms_from_state_is_differentiable(monkeypatch):
+    import jax
+
+    _state, static, shape = _make_fake_mercier_state_inputs()
+    _patch_fake_mercier_state_dependencies(monkeypatch, shape)
+
+    def objective(scale):
+        state = SimpleNamespace(Rcos=jnp.asarray([[scale], [1.0], [1.0], [1.0]], dtype=jnp.float64))
+        terms = finite_beta.mercier_terms_from_state(
+            state=state,
+            static=static,
+            indata=object(),
+            signgs=1,
+        )
+        return jnp.sum(terms["DMerc"][1:-1])
+
+    value, grad = jax.value_and_grad(objective)(jnp.asarray(1.0))
+    assert np.isfinite(np.asarray(value))
+    assert np.isfinite(np.asarray(grad))
+    assert abs(float(np.asarray(grad))) > 0.0
+
+
+def test_mercier_terms_from_state_rejects_lasym_until_branch_is_wired():
+    state, static, _shape = _make_fake_mercier_state_inputs()
+    static.cfg.lasym = True
+
+    import pytest
+
+    with pytest.raises(NotImplementedError, match="LASYM=True"):
+        finite_beta.mercier_terms_from_state(
+            state=state,
+            static=static,
+            indata=object(),
+            signgs=1,
+        )
+
+
 def _mercier_terms_numpy_reference(*, s, phips, iotas, vp, pres, torcur, tpp, tbb, tjb, tjj, signgs=1):
     s = np.asarray(s, dtype=float)
     phips = np.asarray(phips, dtype=float)
