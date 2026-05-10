@@ -396,3 +396,8 @@ Acceptance:
   `SPRES_PED` normalization, and unsupported profile-type errors. Verified with
   `python -m pytest tests/test_fast_physics_kernels.py -q` (`13 passed`) and
   `ruff check tests/test_fast_physics_kernels.py`.
+- 2026-05-10: Re-ran the CI-equivalent fast coverage gate after VMEC2000 helper
+  and profile edge-case slices: `431 passed, 21 skipped, 85 deselected`, total
+  coverage `63.67%`, runtime about `6:21`. Kept the CI floor at 62%; 64% still
+  has too little cross-platform margin, and the next safe threshold bump remains
+  65% after more meaningful coverage/refactor work.
