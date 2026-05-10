@@ -120,6 +120,150 @@ def test_cli_run_mode_wires_solver_kwargs_and_output(monkeypatch, tmp_path: Path
     assert (outdir / "wout_case.nc").read_text() == "wout"
 
 
+def test_cli_run_mode_uses_cpu_default_policy_and_explicit_output(monkeypatch, tmp_path: Path) -> None:
+    input_path = tmp_path / "input.case"
+    input_path.write_text("&INDATA\n  NITER = 12\n/\n")
+    output = tmp_path / "custom_wout.nc"
+    indata = InData(scalars={"NITER": 12}, indexed={})
+    calls = {}
+
+    monkeypatch.setattr(cli, "read_indata", lambda path: indata)
+    monkeypatch.setattr(
+        cli,
+        "_default_non_autodiff_solver_policy_for_backend",
+        lambda _indata, backend: ("cpu_policy", False) if backend == "cpu" else ("wrong", True),
+    )
+
+    def fake_run_fixed_boundary(path: str, **kwargs):
+        calls["path"] = path
+        calls["kwargs"] = kwargs
+        return SimpleNamespace(state=SimpleNamespace(Rcos=0.0))
+
+    def fake_write_wout(path: Path, run, *, include_fsq: bool):
+        calls["wout_path"] = path
+        calls["include_fsq"] = include_fsq
+        path.write_text("wout")
+
+    monkeypatch.setattr(cli, "run_fixed_boundary", fake_run_fixed_boundary)
+    monkeypatch.setattr(cli, "write_wout_from_fixed_boundary_run", fake_write_wout)
+
+    rc = cli.main(
+        [
+            str(input_path),
+            "--solver-device",
+            "cpu",
+            "--output",
+            str(output),
+            "--max-iter",
+            "3",
+        ]
+    )
+
+    assert rc == 0
+    assert calls["wout_path"] == output.resolve()
+    assert calls["kwargs"]["solver_device"] == "cpu"
+    assert calls["kwargs"]["solver_mode"] == "cpu_policy"
+    assert calls["kwargs"]["performance_mode"] is False
+    assert calls["kwargs"]["max_iter"] == 3
+
+
+def test_cli_run_mode_explicit_solver_flags_and_vmecpp_restart(monkeypatch, tmp_path: Path) -> None:
+    input_path = tmp_path / "input.case"
+    input_path.write_text("&INDATA\n/\n")
+    indata = InData(scalars={}, indexed={})
+    calls = {}
+
+    monkeypatch.setattr(cli, "read_indata", lambda path: indata)
+
+    def fake_run_fixed_boundary(path: str, **kwargs):
+        calls["kwargs"] = kwargs
+        return SimpleNamespace(state=SimpleNamespace(Rcos=0.0))
+
+    monkeypatch.setattr(cli, "run_fixed_boundary", fake_run_fixed_boundary)
+    monkeypatch.setattr(cli, "write_wout_from_fixed_boundary_run", lambda path, run, *, include_fsq: path.write_text("wout"))
+
+    assert cli.main([str(input_path), "--parity", "--vmecpp-restart"]) == 0
+    assert calls["kwargs"]["solver_mode"] == "parity"
+    assert calls["kwargs"]["performance_mode"] is False
+    assert calls["kwargs"]["vmecpp_restart"] is True
+
+    assert cli.main([str(input_path), "--fast", "--no-vmecpp-restart"]) == 0
+    assert calls["kwargs"]["solver_mode"] == "default"
+    assert calls["kwargs"]["performance_mode"] is True
+    assert calls["kwargs"]["vmecpp_restart"] is False
+
+
+def test_cli_profile_hooks_are_best_effort(monkeypatch, tmp_path: Path) -> None:
+    input_path = tmp_path / "input.case"
+    input_path.write_text("&INDATA\n/\n")
+    profile_dir = tmp_path / "profile"
+    indata = InData(scalars={}, indexed={})
+    calls: list[tuple[str, object]] = []
+
+    class FakeProfiler:
+        @staticmethod
+        def start_server(port: int):
+            calls.append(("start_server", port))
+            return object()
+
+        @staticmethod
+        def stop_server():
+            calls.append(("stop_server", None))
+
+        @staticmethod
+        def start_trace(path: str, *, create_perfetto_trace: bool):
+            calls.append(("start_trace", (Path(path), create_perfetto_trace)))
+
+        @staticmethod
+        def stop_trace():
+            calls.append(("stop_trace", None))
+
+    fake_jax = SimpleNamespace(
+        profiler=FakeProfiler,
+        block_until_ready=lambda value: calls.append(("block_until_ready", value)),
+    )
+
+    monkeypatch.setitem(sys.modules, "jax", fake_jax)
+    monkeypatch.setenv("VMEC_JAX_PROFILE_DIR", str(profile_dir))
+    monkeypatch.setenv("VMEC_JAX_PROFILE_SERVER", "1")
+    monkeypatch.setenv("VMEC_JAX_PROFILE_SERVER_PORT", "12345")
+    monkeypatch.setenv("VMEC_JAX_PROFILE_PERFETTO", "0")
+    monkeypatch.setattr(cli, "read_indata", lambda path: indata)
+    monkeypatch.setattr(cli, "default_non_autodiff_solver_policy", lambda _: ("default", True))
+    monkeypatch.setattr(
+        cli,
+        "run_fixed_boundary",
+        lambda path, **kwargs: SimpleNamespace(state=SimpleNamespace(Rcos="ready")),
+    )
+    monkeypatch.setattr(cli, "write_wout_from_fixed_boundary_run", lambda path, run, *, include_fsq: path.write_text("wout"))
+
+    assert cli.main([str(input_path)]) == 0
+
+    assert ("start_server", 12345) in calls
+    assert ("start_trace", (profile_dir.resolve(), False)) in calls
+    assert ("block_until_ready", "ready") in calls
+    assert ("stop_trace", None) in calls
+    assert ("stop_server", None) in calls
+
+
+def test_cli_errors_for_missing_input_invalid_jit_and_read_failure(monkeypatch, tmp_path: Path) -> None:
+    with pytest.raises(SystemExit) as missing_input:
+        cli.main([str(tmp_path / "missing.input")])
+    assert missing_input.value.code == 2
+
+    input_path = tmp_path / "input.case"
+    input_path.write_text("&INDATA\n/\n")
+
+    with pytest.raises(SystemExit) as invalid_jit:
+        cli.main([str(input_path), "--jit-forces", "maybe"])
+    assert invalid_jit.value.code == 2
+
+    monkeypatch.setattr(cli, "read_indata", lambda path: (_ for _ in ()).throw(RuntimeError("bad input")))
+    with pytest.raises(SystemExit) as read_failure:
+        cli.main([str(input_path)])
+    assert read_failure.value.code == 2
+
+
 def test_cli_rejects_conflicting_solver_flags(tmp_path: Path) -> None:
     input_path = tmp_path / "input.case"
     input_path.write_text("&INDATA\n/\n")
