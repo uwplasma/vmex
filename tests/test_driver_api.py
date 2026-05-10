@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from pathlib import Path
 
 import numpy as np
@@ -416,6 +417,33 @@ def test_dynamic_scan_probe_settings_env_override(monkeypatch):
     assert backend == "gpu"
 
 
+def test_default_backend_and_dynamic_scan_env_fallbacks(monkeypatch):
+    original_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "jax":
+            raise RuntimeError("jax unavailable")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    assert driver_module._default_backend_name() == "cpu"
+
+    monkeypatch.setattr(driver_module, "_default_backend_name", lambda: "cpu")
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", "not-an-int")
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", "maybe")
+    pre_iters, timed_probe, backend = driver_module._dynamic_scan_probe_settings(4)
+    assert pre_iters == 3
+    assert timed_probe is True
+    assert backend == "cpu"
+
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", "0")
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", "0")
+    pre_iters, timed_probe, backend = driver_module._dynamic_scan_probe_settings(10)
+    assert pre_iters == 1
+    assert timed_probe is False
+    assert backend == "cpu"
+
+
 def test_normalize_solver_mode():
     assert driver_module._normalize_solver_mode(solver_mode=None, performance_mode=True) == "default"
     assert driver_module._normalize_solver_mode(solver_mode=None, performance_mode=False) == "parity"
@@ -671,6 +699,33 @@ def test_driver_result_helpers_use_history_and_convergence_flags():
     assert driver_module._result_meets_requested_ftol(loose, ftol=0.0) is True
     assert driver_module._result_final_residuals(history) == (1.0, 2.0, 3.0)
     assert driver_module._result_final_fsq(history) == 0.5
+
+
+def test_driver_result_helpers_fall_back_to_diagnostic_histories():
+    diag_history = type(
+        "Result",
+        (),
+        {
+            "diagnostics": {
+                "final_fsqr": "not-a-number",
+                "final_fsqz": 2.0,
+                "final_fsql": 3.0,
+                "fsqr_full": np.asarray([4.0, 1.0]),
+                "fsqz_full": np.asarray([5.0, 2.0]),
+                "fsql_full": np.asarray([6.0, 3.0]),
+                "ftol": 3.0,
+            },
+            "w_history": np.asarray([]),
+        },
+    )()
+    no_residuals = type("Result", (), {"diagnostics": {"ftol": 1.0}})()
+
+    assert driver_module._result_final_residuals(diag_history) == (1.0, 2.0, 3.0)
+    assert driver_module._result_final_fsq(diag_history) == 6.0
+    assert driver_module._result_meets_requested_ftol(diag_history, ftol=3.0) is True
+    assert driver_module._result_final_residuals(no_residuals) is None
+    assert driver_module._result_final_fsq(no_residuals) == float("inf")
+    assert driver_module._result_meets_requested_ftol(no_residuals, ftol=1.0) is False
 
 
 def test_cli_solver_mode_conflicts_with_fast_flags():
