@@ -391,3 +391,8 @@ Acceptance:
   `run_xvmec2000`, threed1 discovery, trace parsing, and runtime capture.
   Verified with `python -m pytest tests/test_fast_physics_kernels.py -q`
   (`12 passed`) and `ruff check tests/test_fast_physics_kernels.py`.
+- 2026-05-10: Added profile edge-case coverage for LRFP iota inversion, empty
+  cubic-spline current auxiliary arrays, non-monotone AUX trimming, signed
+  `SPRES_PED` normalization, and unsupported profile-type errors. Verified with
+  `python -m pytest tests/test_fast_physics_kernels.py -q` (`13 passed`) and
+  `ruff check tests/test_fast_physics_kernels.py`.
