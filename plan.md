@@ -139,7 +139,7 @@ Acceptance:
 ## Milestone 7: Tests And Coverage
 
 - [ ] Raise required CI coverage from the current fast gate toward 95% in staged
-      steps: 65%, 75%, 85%, 95%.
+      steps: 60%, 65%, 75%, 85%, 95%.
 - [ ] Add targeted tests before coverage-only tests: physics gates first, branch
       logic second, I/O/schema third.
 - [ ] Keep required CI under 10 minutes by using small fixtures and nightly heavy
@@ -282,3 +282,8 @@ Acceptance:
   Mercier surface-integral reductions, and JXBFORCE profile reductions into
   `vmec_jax.mercier`. State-level VMEC composition remains in `finite_beta`,
   and the existing public `finite_beta`/top-level imports are preserved.
+- 2026-05-10: Ran the CI-equivalent fast coverage gate locally:
+  `389 passed, 21 skipped, 85 deselected`, total coverage `60.77%`, runtime
+  about `6:07`. Raised the CI floor from 58% to 60%; the next coverage step
+  should be targeted tests for `driver`, `optimization_workflow`, `plotting`,
+  and selected solver branch logic before moving to 65%.
