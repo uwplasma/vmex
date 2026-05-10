@@ -320,3 +320,7 @@ Acceptance:
   `plot_qh_optimization` wrapper and angle-label formatting. The examples use
   the generic plotting helpers directly, while the wrapper remains protected for
   downstream scripts that still call it.
+- 2026-05-10: Added driver-policy tests for JAX backend fallback, dynamic-scan
+  environment parsing, and diagnostic-history convergence fallbacks. These
+  target CPU/GPU runtime-policy control flow and convergence reporting without
+  adding new heavy solve cases.
