@@ -312,14 +312,23 @@ def mercier_realspace_geometry_channels_from_state(
     Zcos = _apply_vmec_axis_rules(Zcos, m_np)
     Zsin = _apply_vmec_axis_rules(Zsin, m_np)
 
-    dtype = Rcos.dtype
-    mask_even = jnp.asarray((m_np % 2) == 0, dtype=dtype)
-    mask_odd = 1.0 - mask_even
     coeff_cos_stack = jnp.stack([Rcos, Zcos], axis=0)
     coeff_sin_stack = jnp.stack([Rsin, Zsin], axis=0)
-    mask_stack = jnp.stack([mask_even, mask_odd], axis=0)
-    coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
-    coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
+    if bool(lasym):
+        # LASYM bss/Mercier geometry uses VMEC cos/sin phase channels, not the
+        # stellarator-symmetric even/odd poloidal-mode split.
+        zeros = jnp.zeros_like(coeff_cos_stack)
+        coeff_cos = jnp.stack([coeff_cos_stack, zeros], axis=0)
+        coeff_sin = jnp.stack([zeros, coeff_sin_stack], axis=0)
+        apply_scalxc_local = False
+    else:
+        dtype = Rcos.dtype
+        mask_even = jnp.asarray((m_np % 2) == 0, dtype=dtype)
+        mask_odd = 1.0 - mask_even
+        mask_stack = jnp.stack([mask_even, mask_odd], axis=0)
+        coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
+        coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
+        apply_scalxc_local = bool(apply_scalxc)
 
     stack, stack_t, stack_p = vmec_realspace_synthesis_multi(
         coeff_cos=coeff_cos,
@@ -327,7 +336,7 @@ def mercier_realspace_geometry_channels_from_state(
         modes=modes,
         trig=trig,
         coeffs_internal=True,
-        apply_scalxc=bool(apply_scalxc),
+        apply_scalxc=apply_scalxc_local,
         s=s,
         derivs=("base", "dtheta", "dzeta"),
     )
@@ -351,6 +360,56 @@ def mercier_realspace_geometry_channels_from_state(
         "Zv_even": even_p[1],
         "Zv_odd": odd_p[1],
     }
+
+
+def _mercier_symoutput_split_jax(*, f, trig, reversed_sym: bool = False) -> tuple[Any, Any]:
+    """JAX VMEC symoutput split into reduced-grid sym/asym channels."""
+    f = jnp.asarray(f, dtype=jnp.float64)
+    if f.ndim != 3:
+        raise ValueError("Expected f with shape (ns, ntheta, nzeta)")
+    nt2 = int(trig.ntheta2)
+    nt1 = int(trig.ntheta1)
+    if int(f.shape[1]) < nt2:
+        raise ValueError("Input theta grid is smaller than VMEC ntheta2")
+    nzeta = int(f.shape[2])
+    i0 = jnp.arange(nt2)
+    ir0 = jnp.where(i0 == 0, 0, nt1 - i0)
+    kk = jnp.mod(nzeta - jnp.arange(nzeta), nzeta)
+    f_half = f[:, :nt2, :]
+    f_ref = jnp.take(jnp.take(f, ir0, axis=1), kk, axis=2)
+    if bool(reversed_sym):
+        sym = 0.5 * (f_half - f_ref)
+        asym = 0.5 * (f_half + f_ref)
+    else:
+        sym = 0.5 * (f_half + f_ref)
+        asym = 0.5 * (f_half - f_ref)
+    return sym, asym
+
+
+def _mercier_extend_parity_to_full_jax(*, par0, par1, trig) -> Any:
+    """Expand reduced-grid VMEC parity channels to the full LASYM theta grid."""
+    par0 = jnp.asarray(par0, dtype=jnp.float64)
+    par1 = jnp.asarray(par1, dtype=jnp.float64)
+    if par0.shape != par1.shape:
+        raise ValueError("parity channel shape mismatch")
+    ns, nt2, nzeta = par0.shape
+    nt1 = int(trig.ntheta1)
+    nt3 = int(getattr(trig, "ntheta3", nt2))
+    full = jnp.zeros((int(ns), nt3, int(nzeta)), dtype=par0.dtype)
+    full = full.at[:, :nt2, :].set(par0 + par1)
+    if nt3 == int(nt2):
+        return full
+
+    i0 = np.arange(int(nt2), dtype=int)
+    ir0 = np.where(i0 == 0, 0, nt1 - i0)
+    mask = ir0 >= int(nt2)
+    if not np.any(mask):
+        return full
+    ir = jnp.asarray(ir0[mask], dtype=jnp.int32)
+    kk = jnp.asarray((int(nzeta) - np.arange(int(nzeta), dtype=int)) % int(nzeta), dtype=jnp.int32)
+    ref0 = jnp.take(jnp.take(par0, jnp.asarray(np.nonzero(mask)[0], dtype=jnp.int32), axis=1), kk, axis=2)
+    ref1 = jnp.take(jnp.take(par1, jnp.asarray(np.nonzero(mask)[0], dtype=jnp.int32), axis=1), kk, axis=2)
+    return full.at[:, ir, :].set(ref0 - ref1)
 
 
 def mercier_bsubs_derivatives_lasym_false(
@@ -418,6 +477,90 @@ def mercier_bsubs_derivatives_lasym_false(
         "sin,kn->sik", tmp_sv_2, cosnvn, optimize=True
     )
     return {"bsubsu": bsubsu, "bsubsv": bsubsv}
+
+
+def mercier_bsubs_derivatives_lasym_true(
+    *,
+    bsubs,
+    trig,
+    mmax_force: int,
+    nmax_force: int,
+) -> dict[str, Any]:
+    """Return VMEC jxbforce ``bsubsu``/``bsubsv`` for LASYM equilibria."""
+    bsubs = jnp.asarray(bsubs, dtype=jnp.float64)
+    ns, ntheta, nzeta = bsubs.shape
+    nt2 = int(trig.ntheta2)
+    nt3 = int(getattr(trig, "ntheta3", nt2))
+    if int(ntheta) < nt3:
+        raise ValueError("LASYM bsubs grid smaller than trig.ntheta3")
+
+    mmax = int(mmax_force)
+    nmax = int(nmax_force)
+    if mmax < 0 or nmax < 0:
+        zeros = jnp.zeros((int(ns), nt3, int(nzeta)), dtype=jnp.float64)
+        return {"bsubsu": zeros, "bsubsv": zeros}
+
+    cosmui = jnp.asarray(trig.cosmui, dtype=jnp.float64)[:nt2, : mmax + 1]
+    sinmui = jnp.asarray(trig.sinmui, dtype=jnp.float64)[:nt2, : mmax + 1]
+    cosmu = jnp.asarray(trig.cosmu, dtype=jnp.float64)[:nt2, : mmax + 1]
+    sinmu = jnp.asarray(trig.sinmu, dtype=jnp.float64)[:nt2, : mmax + 1]
+    cosmum = jnp.asarray(trig.cosmum, dtype=jnp.float64)[:nt2, : mmax + 1]
+    sinmum = jnp.asarray(trig.sinmum, dtype=jnp.float64)[:nt2, : mmax + 1]
+    cosnv = jnp.asarray(trig.cosnv, dtype=jnp.float64)[:, : nmax + 1]
+    sinnv = jnp.asarray(trig.sinnv, dtype=jnp.float64)[:, : nmax + 1]
+    cosnvn = jnp.asarray(trig.cosnvn, dtype=jnp.float64)[:, : nmax + 1]
+    sinnvn = jnp.asarray(trig.sinnvn, dtype=jnp.float64)[:, : nmax + 1]
+
+    r0scale = float(getattr(trig, "r0scale", 1.0))
+    dnorm = jnp.asarray(1.0 / (r0scale**2), dtype=jnp.float64)
+    dmult = jnp.full((mmax + 1, nmax + 1), dnorm, dtype=jnp.float64)
+    mnyq = int(np.asarray(trig.cosmui).shape[1] - 1)
+    nnyq = int(np.asarray(trig.cosnv).shape[1] - 1)
+    if mnyq > 0 and mnyq <= mmax:
+        dmult = dmult.at[mnyq, :].multiply(0.5)
+    if nnyq > 0 and nnyq <= nmax:
+        dmult = dmult.at[:, nnyq].multiply(0.5)
+
+    bsubs_sym, bsubs_asym = _mercier_symoutput_split_jax(f=bsubs, trig=trig, reversed_sym=True)
+
+    f_theta_sin = jnp.einsum("sik,im->smk", bsubs_sym[:, :nt2, :], sinmui, optimize=True)
+    f_theta_cos = jnp.einsum("sik,im->smk", bsubs_sym[:, :nt2, :], cosmui, optimize=True)
+    bsubsmn1 = jnp.einsum("smk,kn->smn", f_theta_sin, cosnv, optimize=True) * dmult[None, :, :]
+    bsubsmn2 = jnp.einsum("smk,kn->smn", f_theta_cos, sinnv, optimize=True) * dmult[None, :, :]
+
+    tmp_su_1 = jnp.einsum("smn,im->sin", bsubsmn1, cosmum, optimize=True)
+    tmp_su_2 = jnp.einsum("smn,im->sin", bsubsmn2, sinmum, optimize=True)
+    bsubsu_s = jnp.einsum("sin,kn->sik", tmp_su_1, cosnv, optimize=True) + jnp.einsum(
+        "sin,kn->sik", tmp_su_2, sinnv, optimize=True
+    )
+
+    tmp_sv_1 = jnp.einsum("smn,im->sin", bsubsmn1, sinmu, optimize=True)
+    tmp_sv_2 = jnp.einsum("smn,im->sin", bsubsmn2, cosmu, optimize=True)
+    bsubsv_s = jnp.einsum("sin,kn->sik", tmp_sv_1, sinnvn, optimize=True) + jnp.einsum(
+        "sin,kn->sik", tmp_sv_2, cosnvn, optimize=True
+    )
+
+    f_theta_cos_a = jnp.einsum("sik,im->smk", bsubs_asym[:, :nt2, :], cosmui, optimize=True)
+    f_theta_sin_a = jnp.einsum("sik,im->smk", bsubs_asym[:, :nt2, :], sinmui, optimize=True)
+    bsubsmn3 = jnp.einsum("smk,kn->smn", f_theta_cos_a, cosnv, optimize=True) * dmult[None, :, :]
+    bsubsmn4 = jnp.einsum("smk,kn->smn", f_theta_sin_a, sinnv, optimize=True) * dmult[None, :, :]
+
+    tmp_su_3 = jnp.einsum("smn,im->sin", bsubsmn3, sinmum, optimize=True)
+    tmp_su_4 = jnp.einsum("smn,im->sin", bsubsmn4, cosmum, optimize=True)
+    bsubsu_a = jnp.einsum("sin,kn->sik", tmp_su_3, cosnv, optimize=True) + jnp.einsum(
+        "sin,kn->sik", tmp_su_4, sinnv, optimize=True
+    )
+
+    tmp_sv_3 = jnp.einsum("smn,im->sin", bsubsmn3, cosmu, optimize=True)
+    tmp_sv_4 = jnp.einsum("smn,im->sin", bsubsmn4, sinmu, optimize=True)
+    bsubsv_a = jnp.einsum("sin,kn->sik", tmp_sv_3, sinnvn, optimize=True) + jnp.einsum(
+        "sin,kn->sik", tmp_sv_4, cosnvn, optimize=True
+    )
+
+    return {
+        "bsubsu": _mercier_extend_parity_to_full_jax(par0=bsubsu_s, par1=bsubsu_a, trig=trig),
+        "bsubsv": _mercier_extend_parity_to_full_jax(par0=bsubsv_s, par1=bsubsv_a, trig=trig),
+    }
 
 
 def mercier_bsubs_half_mesh_from_geometry(
@@ -631,16 +774,13 @@ def mercier_terms_from_state(
 ) -> dict[str, Any]:
     """Return differentiable VMEC Mercier terms from a VMEC state.
 
-    This state-level composition currently supports stellarator-symmetric
-    equilibria.  The LASYM=True spectral derivative branch is kept explicit
-    rather than silently falling back to the NumPy ``wout`` path.
+    This state-level composition uses the JAX Mercier geometry and jxbforce
+    derivative paths for both stellarator-symmetric and LASYM equilibria.
     """
-    if bool(getattr(static.cfg, "lasym", False)):
-        raise NotImplementedError("State-based DMerc is not wired for LASYM=True yet")
-
     from .vmec_tomnsp import vmec_trig_tables
     from .wout import _vmec_wint_from_trig_jax
 
+    lasym = bool(getattr(static.cfg, "lasym", False))
     s = jnp.asarray(static.s, dtype=jnp.float64)
     trig = getattr(static, "trig_vmec", None)
     if trig is None:
@@ -650,7 +790,7 @@ def mercier_terms_from_state(
             nfp=int(static.cfg.nfp),
             mmax=int(static.cfg.mpol) - 1,
             nmax=int(static.cfg.ntor),
-            lasym=False,
+            lasym=lasym,
             dtype=jnp.asarray(state.Rcos).dtype,
         )
     mmax = int(static.cfg.mpol) - 1 if mmax_force is None else int(mmax_force)
@@ -681,7 +821,7 @@ def mercier_terms_from_state(
         s=s,
         lconm1=bool(getattr(static.cfg, "lconm1", True)),
         lthreed=bool(getattr(static.cfg, "lthreed", True)),
-        lasym=False,
+        lasym=lasym,
         apply_scalxc=True,
     )
     zeta_half = mercier_zeta_half_mesh_from_realspace_geometry(
@@ -702,12 +842,20 @@ def mercier_terms_from_state(
         zv12=zeta_half["zv12"],
     )
     bsubs_full = mercier_bsubs_full_mesh_from_half_mesh(bsubs_half=bsubs_half["bsubs"])
-    bsubs_derivs = mercier_bsubs_derivatives_lasym_false(
-        bsubs=bsubs_full,
-        trig=trig,
-        mmax_force=mmax,
-        nmax_force=nmax,
-    )
+    if lasym:
+        bsubs_derivs = mercier_bsubs_derivatives_lasym_true(
+            bsubs=bsubs_full,
+            trig=trig,
+            mmax_force=mmax,
+            nmax_force=nmax,
+        )
+    else:
+        bsubs_derivs = mercier_bsubs_derivatives_lasym_false(
+            bsubs=bsubs_full,
+            trig=trig,
+            mmax_force=mmax,
+            nmax_force=nmax,
+        )
     bdotk = mercier_bdotk_from_covariant_derivatives(
         bsubu=bc.bsubu,
         bsubv=bc.bsubv,

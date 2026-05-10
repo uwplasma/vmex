@@ -529,9 +529,8 @@ class DMerc:
     """Smooth lower-bound objective for VMEC Mercier stability.
 
     The residual is a per-surface smooth penalty for ``DMerc < minimum`` on
-    interior radial surfaces.  It currently uses the differentiable
-    stellarator-symmetric Mercier path; LASYM=True raises until that spectral
-    derivative branch is wired.
+    interior radial surfaces.  It uses the differentiable state-level Mercier
+    path for both stellarator-symmetric and LASYM equilibria.
     """
 
     name = "DMerc"

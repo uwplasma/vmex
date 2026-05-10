@@ -435,11 +435,11 @@ QI finite-beta refinement as a final research-quality result.
 
 The current implementation includes differentiable finite-beta global
 diagnostics, current-driven iota through ``PCURR_TYPE = "cubic_spline_ip"``,
-and a stellarator-symmetric ``vj.DMerc`` lower-bound residual.  The full Redl
-bootstrap-current mismatch from the SIMSOPT finite-beta script remains an open
-extension; the examples keep the stage-one structure and write VMEC
-inputs/wouts/history so additional terms can be added and regression-tested
-incrementally.
+and a ``vj.DMerc`` lower-bound residual for stellarator-symmetric and LASYM
+equilibria.  The full Redl bootstrap-current mismatch from the SIMSOPT
+finite-beta script remains an open extension; the examples keep the stage-one
+structure and write VMEC inputs/wouts/history so additional terms can be added
+and regression-tested incrementally.
 
 The full multi-page artifact inventory, including legacy aliases, CSV/JSON
 summary downloads, and exact reproduction commands for each standalone example,

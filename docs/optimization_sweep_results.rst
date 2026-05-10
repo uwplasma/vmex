@@ -297,9 +297,9 @@ one-field-period well interval; keep ``0.0`` for the bundled NFP=2 seed, or set
 
 Redl bootstrap-current mismatch is not yet enabled as a fully differentiable
 residual block in vmec_jax.  Mercier ``DMerc`` is now available as
-``vj.DMerc``, a smooth lower-bound objective for stellarator-symmetric
-equilibria backed by the differentiable ``mercier_terms_from_state`` path.  The
-JAX
+``vj.DMerc``, a smooth lower-bound objective backed by the differentiable
+``mercier_terms_from_state`` path for stellarator-symmetric and LASYM
+equilibria.  The JAX
 ``mercier_gpp_from_realspace_geometry``,
 ``mercier_surface_integrals_from_realspace``, and
 ``mercier_terms_from_profile_integrals`` helpers now cover the VMEC-style
@@ -313,8 +313,7 @@ are available.  ``mercier_realspace_geometry_channels_from_state``,
 ``mercier_bdotk_from_covariant_derivatives`` also port state synthesis of the
 even/odd geometry channels, half-mesh toroidal geometry, radial covariant field
 assembly, jxbforce full-mesh averaging, stellarator-symmetric derivative
-reconstruction, and ``itheta/izeta/bdotk`` block.  The remaining work is adding
-the LASYM=True derivative branch instead of the current NumPy ``wout`` parity
-path and wiring the Redl bootstrap-current mismatch.  The finite-beta
-scaffolding is structured so those terms can be added next without changing the
-user-facing example workflow.
+reconstruction, LASYM derivative reconstruction, and ``itheta/izeta/bdotk``
+block.  The remaining finite-beta objective work is wiring the Redl
+bootstrap-current mismatch.  The finite-beta scaffolding is structured so that
+term can be added next without changing the user-facing example workflow.

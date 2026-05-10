@@ -169,7 +169,7 @@ Acceptance:
    (`qi_legacy_total`).
 3. [x] Run a small QI one-DOF noise/ranking audit with the source-level
    diagnostic.
-4. [ ] Add the LASYM=True derivative branch to the AD-safe state-level `DMerc`
+4. [x] Add the LASYM=True derivative branch to the AD-safe state-level `DMerc`
    diagnostic and keep the user-facing `DMerc` objective on that shared path.
 5. [ ] Start the first refactor with a low-risk extraction from the largest
    modules after the new tests are green.
@@ -225,9 +225,12 @@ Acceptance:
 - 2026-05-10: Added `mercier_terms_from_state`, a differentiable state-level
   Mercier diagnostic for stellarator-symmetric equilibria. It composes the
   JAX geometry, `gpp`, `bsubs`, derivative, `bdotk`, surface-integral, and
-  algebra kernels. Remaining work is a user-facing objective wrapper plus
-  LASYM=True derivative reconstruction.
+  algebra kernels. This was the base path later wrapped by `vj.DMerc`.
 - 2026-05-10: Added `vj.DMerc`, a smooth lower-bound objective wrapper around
   `mercier_terms_from_state` for stellarator-symmetric finite-beta
-  optimization examples. Remaining work is LASYM=True derivative
-  reconstruction and Redl bootstrap-current mismatch.
+  optimization examples. The same wrapper now also covers LASYM=True after the
+  derivative branch below.
+- 2026-05-10: Added the JAX LASYM=True `bsubs` derivative reconstruction and
+  LASYM cos/sin phase geometry branch for state-level `DMerc`, with transform
+  parity and AD tests. Remaining finite-beta source objective work is Redl
+  bootstrap-current mismatch plus higher-level parity gates.
