@@ -604,6 +604,76 @@ def test_mercier_bsubs_derivatives_lasym_false_is_differentiable():
     assert abs(float(np.asarray(grad))) > 0.0
 
 
+def test_mercier_bsubs_half_mesh_from_geometry_matches_bss_formula():
+    rng = np.random.default_rng(2468)
+    shape = (4, 3, 2)
+    data = {
+        name: rng.normal(size=shape)
+        for name in ("bsupu", "bsupv", "rs12", "zs12", "ru12", "zu12", "rv12", "zv12")
+    }
+
+    actual = finite_beta.mercier_bsubs_half_mesh_from_geometry(**data)
+    g_su = data["rs12"] * data["ru12"] + data["zs12"] * data["zu12"]
+    g_sv = data["rs12"] * data["rv12"] + data["zs12"] * data["zv12"]
+    expected = data["bsupu"] * g_su + data["bsupv"] * g_sv
+
+    np.testing.assert_allclose(np.asarray(actual["g_su"]), g_su, rtol=1e-13, atol=1e-13)
+    np.testing.assert_allclose(np.asarray(actual["g_sv"]), g_sv, rtol=1e-13, atol=1e-13)
+    np.testing.assert_allclose(np.asarray(actual["bsubs"]), expected, rtol=1e-13, atol=1e-13)
+
+
+def test_mercier_bsubs_half_mesh_from_geometry_is_differentiable():
+    import jax
+
+    shape = (4, 3, 2)
+    base = jnp.ones(shape, dtype=jnp.float64)
+
+    def objective(scale):
+        channels = finite_beta.mercier_bsubs_half_mesh_from_geometry(
+            bsupu=scale * base,
+            bsupv=0.5 * base,
+            rs12=0.2 * base,
+            zs12=0.3 * base,
+            ru12=0.4 * base,
+            zu12=0.5 * base,
+            rv12=0.6 * base,
+            zv12=0.7 * base,
+        )
+        return jnp.sum(channels["bsubs"])
+
+    value, grad = jax.value_and_grad(objective)(jnp.asarray(1.0))
+    assert np.isfinite(np.asarray(value))
+    assert np.isfinite(np.asarray(grad))
+    assert abs(float(np.asarray(grad))) > 0.0
+
+
+def test_mercier_bsubs_full_mesh_from_half_mesh_matches_jxbforce_convention():
+    bsubs_half = np.arange(5 * 2 * 3, dtype=float).reshape((5, 2, 3))
+    expected = bsubs_half.copy()
+    expected[1:-1] = 0.5 * (bsubs_half[1:-1] + bsubs_half[2:])
+    expected[0] = 0.0
+
+    actual = finite_beta.mercier_bsubs_full_mesh_from_half_mesh(bsubs_half=bsubs_half)
+    np.testing.assert_allclose(np.asarray(actual), expected, rtol=1e-13, atol=1e-13)
+
+
+def test_mercier_bsubs_full_mesh_from_half_mesh_is_differentiable():
+    import jax
+
+    bsubs_half = jnp.arange(5 * 2 * 3, dtype=jnp.float64).reshape((5, 2, 3))
+
+    def objective(scale):
+        bsubs_full = finite_beta.mercier_bsubs_full_mesh_from_half_mesh(
+            bsubs_half=scale * bsubs_half
+        )
+        return jnp.sum(bsubs_full[1:])
+
+    value, grad = jax.value_and_grad(objective)(jnp.asarray(1.0))
+    assert np.isfinite(np.asarray(value))
+    assert np.isfinite(np.asarray(grad))
+    assert abs(float(np.asarray(grad))) > 0.0
+
+
 def _mercier_bdotk_numpy_reference(*, bsubu, bsubv, bsubsu, bsubsv, s):
     bsubu = np.asarray(bsubu, dtype=float)
     bsubv = np.asarray(bsubv, dtype=float)
