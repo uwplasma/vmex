@@ -287,3 +287,7 @@ Acceptance:
   about `6:07`. Raised the CI floor from 58% to 60%; the next coverage step
   should be targeted tests for `driver`, `optimization_workflow`, `plotting`,
   and selected solver branch logic before moving to 65%.
+- 2026-05-10: Added focused optimization-workflow API tests for QI tuple
+  semantics: nonzero QI targets are rejected, mixed `QuasiIsodynamicOptions`
+  objects are rejected, and QI field objectives fail clearly outside the shared
+  QI solve path.
