@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,6 +10,19 @@ import pytest
 
 from vmec_jax import cli
 from vmec_jax.namelist import InData
+
+
+def test_python_module_entrypoint_sets_warning_suppression_env(monkeypatch) -> None:
+    for key in ("TF_CPP_MIN_LOG_LEVEL", "ABSL_MIN_LOG_LEVEL", "GLOG_minloglevel"):
+        monkeypatch.delenv(key, raising=False)
+    sys.modules.pop("vmec_jax.__main__", None)
+
+    module = importlib.import_module("vmec_jax.__main__")
+
+    assert os.environ["TF_CPP_MIN_LOG_LEVEL"] == "2"
+    assert os.environ["ABSL_MIN_LOG_LEVEL"] == "2"
+    assert os.environ["GLOG_minloglevel"] == "2"
+    assert module.main is cli.main
 
 
 def test_cli_case_and_wout_path_conventions(tmp_path: Path) -> None:

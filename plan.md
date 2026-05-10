@@ -343,3 +343,6 @@ Acceptance:
   plotting coverage slices: `411 passed, 21 skipped, 85 deselected`, total
   coverage `62.74%`, runtime about `6:31`. Raised the CI floor from 61% to 62%;
   63% is still too close to the local value for platform-safe CI gating.
+- 2026-05-10: Added CLI entrypoint coverage for `python -m vmec_jax`, including
+  the XLA/PjRt warning-suppression environment defaults and the module-level
+  dispatch to `vmec_jax.cli.main`.
