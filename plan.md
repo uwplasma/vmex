@@ -382,3 +382,7 @@ Acceptance:
   workflow using synthetic kernels. Verified with
   `python -m pytest tests/test_visualization_vtk.py -q` (`6 passed`) and
   `ruff check tests/test_visualization_vtk.py`.
+- 2026-05-10: Re-ran the CI-equivalent fast coverage gate after CLI, residuals,
+  and visualization slices: `429 passed, 21 skipped, 85 deselected`, total
+  coverage `63.53%`, runtime about `6:25`. Kept the CI floor at 62%; the next
+  safe bump remains 65% after more meaningful coverage/refactor work.
