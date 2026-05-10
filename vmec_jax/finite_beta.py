@@ -1141,8 +1141,11 @@ def mercier_terms_from_state(
                 "bsubs_full": bsubs_full,
                 "bsubsu": bsubs_derivs["bsubsu"],
                 "bsubsv": bsubs_derivs["bsubsv"],
+                "itheta": bdotk["itheta"],
+                "izeta": bdotk["izeta"],
                 "bdotk": bdotk["bdotk"],
                 "bdotk_merc": bdotk["bdotk_merc"],
+                "sqrtg": bc.jac.sqrtg,
             }
         )
     return out

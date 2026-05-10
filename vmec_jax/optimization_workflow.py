@@ -20,7 +20,7 @@ from ._compat import enable_x64, jnp
 from .boundary import boundary_from_indata, boundary_input_from_indata
 from .driver import run_fixed_boundary, write_wout_from_fixed_boundary_run
 from .energy import flux_profiles_from_indata
-from .field import signgs_from_sqrtg
+from .field import b_cartesian_from_state, signgs_from_sqrtg
 from .finite_beta import finite_beta_scalars_from_state, mercier_terms_from_state
 from .geom import eval_geom
 from .init_guess import initial_guess_from_boundary
@@ -636,6 +636,66 @@ class BDotGradV(_MercierProfileObjective):
 
     name = "bdotgradv"
     profile_key = "bdotgradv"
+
+
+class BVector:
+    """Cartesian magnetic-field vector objective on one radial surface.
+
+    The residual vector is ``(Bx, By, Bz)`` flattened over ``(theta, zeta)`` on
+    ``ctx.static.grid``.  ``s_index=-1`` targets the boundary surface.
+    """
+
+    name = "B_vector"
+
+    def __init__(self, *, s_index: int = -1, normalize: float = 1.0):
+        self.s_index = int(s_index)
+        self.normalize = float(normalize)
+
+    def J(self, ctx: StageContext, state):
+        field = b_cartesian_from_state(
+            state,
+            ctx.static,
+            indata=ctx.indata,
+            signgs=ctx.signgs,
+            s_index=self.s_index,
+        )
+        return jnp.ravel(jnp.asarray(field, dtype=jnp.float64)) / float(self.normalize)
+
+    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight)
+
+
+class JVector(_MercierProfileObjective):
+    """Flux-coordinate current-density vector objective from JXBFORCE channels.
+
+    The returned vector contains ``(J^theta, J^zeta) = (itheta/sqrtg,
+    izeta/sqrtg)`` flattened over the selected full-mesh surfaces and angular
+    grid.  It is a VMEC-coordinate current-density diagnostic, not a Cartesian
+    vector.
+    """
+
+    name = "J_vector"
+
+    def J(self, ctx: StageContext, state):
+        terms = mercier_terms_from_state(
+            state=state,
+            static=ctx.static,
+            indata=ctx.indata,
+            signgs=ctx.signgs,
+            mmax_force=self.mmax_force,
+            nmax_force=self.nmax_force,
+            include_channels=True,
+        )
+        sqrtg = jnp.asarray(terms["sqrtg"], dtype=jnp.float64)
+        sqrtg_safe = jnp.where(sqrtg != 0.0, sqrtg, jnp.asarray(1.0, dtype=sqrtg.dtype))
+        jtheta = jnp.where(sqrtg != 0.0, jnp.asarray(terms["itheta"], dtype=jnp.float64) / sqrtg_safe, 0.0)
+        jzeta = jnp.where(sqrtg != 0.0, jnp.asarray(terms["izeta"], dtype=jnp.float64) / sqrtg_safe, 0.0)
+        vector = jnp.stack([jtheta, jzeta], axis=-1)
+        values = self._select_profile(ctx, vector)
+        return jnp.ravel(values) / float(self.normalize)
+
+    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight)
 
 
 class ToroidalCurrent(_MercierProfileObjective):
@@ -1983,6 +2043,7 @@ def _slice_boozer_surfaces(booz: dict, surface_index: int) -> dict:
 __all__ = [
     "AbsMeanIotaFloor",
     "AspectRatio",
+    "BVector",
     "BDotB",
     "BDotGradV",
     "BetaTotal",
@@ -1991,6 +2052,7 @@ __all__ = [
     "FixedBoundaryObjectiveStage",
     "FixedBoundaryOptimizationResult",
     "JDotB",
+    "JVector",
     "LeastSquaresProblem",
     "LgradB",
     "MagneticWell",

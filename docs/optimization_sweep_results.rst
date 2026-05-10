@@ -302,7 +302,10 @@ residual block in vmec_jax.  Mercier ``DMerc`` is now available as
 equilibria.  VMEC/JXBFORCE profile accessors ``vj.JDotB``, ``vj.BDotB`` and
 ``vj.BDotGradV`` are also available for finite-beta targeting or
 regularization, together with state-derived ``vj.ToroidalCurrent`` and
-``vj.ToroidalCurrentGradient`` current-profile objectives.  The JAX
+``vj.ToroidalCurrentGradient`` current-profile objectives.  Advanced vector
+targeting is available through ``vj.BVector`` for Cartesian magnetic field on a
+single radial surface and ``vj.JVector`` for flattened VMEC-coordinate
+``(J^theta, J^zeta)`` current-density components.  The JAX
 ``mercier_gpp_from_realspace_geometry``,
 ``mercier_surface_integrals_from_realspace``, and
 ``mercier_terms_from_profile_integrals`` helpers now cover the VMEC-style

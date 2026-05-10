@@ -243,7 +243,9 @@ def test_jxbforce_profile_tuple_stays_regular_state_objective() -> None:
     from vmec_jax.optimization_workflow import (
         BDotB,
         BDotGradV,
+        BVector,
         JDotB,
+        JVector,
         LeastSquaresProblem,
         ToroidalCurrent,
         ToroidalCurrentGradient,
@@ -254,6 +256,8 @@ def test_jxbforce_profile_tuple_stays_regular_state_objective() -> None:
             (JDotB(surfaces=(0.25, 0.75)).J, 0.0, 0.25),
             (BDotB(surfaces=(0.5,)).J, 1.0, 0.10),
             (BDotGradV().J, 0.0, 0.05),
+            (BVector(s_index=-1).J, 0.0, 0.05),
+            (JVector(surfaces=(0.25,)).J, 0.0, 0.05),
             (ToroidalCurrent(surfaces=(0.75,)).J, 0.0, 0.20),
             (ToroidalCurrentGradient().J, 0.0, 0.30),
         ]
@@ -264,6 +268,8 @@ def test_jxbforce_profile_tuple_stays_regular_state_objective() -> None:
         "jdotb",
         "bdotb",
         "bdotgradv",
+        "B_vector",
+        "J_vector",
         "torcur",
         "torcur_prime",
     ]
@@ -279,9 +285,11 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
     from vmec_jax.optimization_workflow import (
         BDotB,
         BDotGradV,
+        BVector,
         BetaTotal,
         DMerc,
         JDotB,
+        JVector,
         MagneticWell,
         ToroidalCurrent,
         ToroidalCurrentGradient,
@@ -308,10 +316,18 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
             "bdotgradv": jnp.asarray([0.0, 2.00 + 0.20 * scale, 2.20 + 0.30 * scale, 0.0], dtype=jnp.float64),
             "torcur": jnp.asarray([0.0, 0.40 + 0.04 * scale, 0.60 + 0.06 * scale, 0.0], dtype=jnp.float64),
             "ip": jnp.asarray([0.0, 1.40 + 0.14 * scale, 1.60 + 0.16 * scale, 0.0], dtype=jnp.float64),
+            "itheta": scale * jnp.ones((4, 2, 3), dtype=jnp.float64),
+            "izeta": (2.0 * scale) * jnp.ones((4, 2, 3), dtype=jnp.float64),
+            "sqrtg": 4.0 * jnp.ones((4, 2, 3), dtype=jnp.float64),
         }
 
     monkeypatch.setattr(workflow, "finite_beta_scalars_from_state", fake_scalars_from_state)
     monkeypatch.setattr(workflow, "mercier_terms_from_state", fake_mercier_terms_from_state)
+    monkeypatch.setattr(
+        workflow,
+        "b_cartesian_from_state",
+        lambda state, *_args, **_kwargs: jnp.asarray(state, dtype=jnp.float64) * jnp.ones((2, 3, 3), dtype=jnp.float64),
+    )
     ctx = SimpleNamespace(static=SimpleNamespace(s=np.asarray([0.0, 0.25, 0.75, 1.0])), indata=None, signgs=1)
 
     vol_value, vol_grad = jax.value_and_grad(lambda x: VolavgB().J(ctx, x))(jnp.asarray(1.0))
@@ -325,6 +341,10 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
     )
     bdotb_value, bdotb_grad = jax.value_and_grad(lambda x: jnp.sum(BDotB().J(ctx, x)))(jnp.asarray(1.0))
     bdotgradv_value, bdotgradv_grad = jax.value_and_grad(lambda x: jnp.sum(BDotGradV().J(ctx, x)))(
+        jnp.asarray(1.0)
+    )
+    b_vector_value, b_vector_grad = jax.value_and_grad(lambda x: jnp.sum(BVector().J(ctx, x)))(jnp.asarray(1.0))
+    j_vector_value, j_vector_grad = jax.value_and_grad(lambda x: jnp.sum(JVector(surfaces=(0.25,)).J(ctx, x)))(
         jnp.asarray(1.0)
     )
     torcur_value, torcur_grad = jax.value_and_grad(lambda x: jnp.sum(ToroidalCurrent().J(ctx, x)))(jnp.asarray(1.0))
@@ -347,6 +367,10 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
     np.testing.assert_allclose(np.asarray(bdotb_grad), 0.3)
     np.testing.assert_allclose(np.asarray(bdotgradv_value), 4.7)
     np.testing.assert_allclose(np.asarray(bdotgradv_grad), 0.5)
+    np.testing.assert_allclose(np.asarray(b_vector_value), 18.0)
+    np.testing.assert_allclose(np.asarray(b_vector_grad), 18.0)
+    np.testing.assert_allclose(np.asarray(j_vector_value), 4.5)
+    np.testing.assert_allclose(np.asarray(j_vector_grad), 4.5)
     np.testing.assert_allclose(np.asarray(torcur_value), 1.10)
     np.testing.assert_allclose(np.asarray(torcur_grad), 0.10)
     np.testing.assert_allclose(np.asarray(torcur_prime_value), 3.30)
@@ -358,16 +382,25 @@ def test_jxbforce_and_current_objective_gradients_match_finite_difference(monkey
 
     from vmec_jax._compat import jnp
     import vmec_jax.optimization_workflow as workflow
-    from vmec_jax.optimization_workflow import JDotB, ToroidalCurrent
+    from vmec_jax.optimization_workflow import BVector, JDotB, JVector, ToroidalCurrent
 
     def fake_mercier_terms_from_state(*, state, **_kwargs):
         x = jnp.asarray(state, dtype=jnp.float64)
         return {
             "jdotb": jnp.asarray([0.0, 0.1 + 0.02 * x**2, 0.2 + 0.03 * x**2, 0.0], dtype=jnp.float64),
             "torcur": jnp.asarray([0.0, 0.4 + 0.04 * x**2, 0.6 + 0.06 * x**2, 0.0], dtype=jnp.float64),
+            "itheta": x**2 * jnp.ones((4, 2, 3), dtype=jnp.float64),
+            "izeta": 2.0 * x**2 * jnp.ones((4, 2, 3), dtype=jnp.float64),
+            "sqrtg": 4.0 * jnp.ones((4, 2, 3), dtype=jnp.float64),
         }
 
     monkeypatch.setattr(workflow, "mercier_terms_from_state", fake_mercier_terms_from_state)
+    monkeypatch.setattr(
+        workflow,
+        "b_cartesian_from_state",
+        lambda state, *_args, **_kwargs: jnp.asarray(state, dtype=jnp.float64) ** 2
+        * jnp.ones((2, 3, 3), dtype=jnp.float64),
+    )
     ctx = SimpleNamespace(static=SimpleNamespace(s=np.asarray([0.0, 0.25, 0.75, 1.0])), indata=None, signgs=1)
 
     def centered_fd(fn, x0, eps=1.0e-6):
@@ -375,7 +408,12 @@ def test_jxbforce_and_current_objective_gradients_match_finite_difference(monkey
 
     import jax
 
-    for objective in (JDotB(surfaces=(0.25, 0.75)), ToroidalCurrent(surfaces=(0.25, 0.75))):
+    for objective in (
+        JDotB(surfaces=(0.25, 0.75)),
+        ToroidalCurrent(surfaces=(0.25, 0.75)),
+        BVector(),
+        JVector(surfaces=(0.25,)),
+    ):
         fn = lambda x, objective=objective: jnp.sum(objective.J(ctx, jnp.asarray(x, dtype=jnp.float64)))
         ad_grad = float(jax.grad(fn)(jnp.asarray(1.3, dtype=jnp.float64)))
         fd_grad = centered_fd(fn, 1.3)

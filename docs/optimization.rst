@@ -146,6 +146,8 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
            # (vj.BDotGradV(surfaces=(0.25, 0.50, 0.75)).J, TARGET_BDOTGRADV, BDOTGRADV_WEIGHT),
            # (vj.ToroidalCurrent(surfaces=(0.25, 0.50, 0.75)).J, TARGET_TORCUR, TORCUR_WEIGHT),
            # (vj.ToroidalCurrentGradient(surfaces=(0.25, 0.50, 0.75)).J, TARGET_TORCUR_PRIME, TORCUR_PRIME_WEIGHT),
+           # (vj.BVector(s_index=-1).J, TARGET_B_VECTOR, B_VECTOR_WEIGHT),
+           # (vj.JVector(surfaces=(0.25, 0.50, 0.75)).J, TARGET_J_VECTOR, J_VECTOR_WEIGHT),
        ]
    )
 
@@ -447,11 +449,18 @@ equilibria, VMEC/JXBFORCE profile accessors ``vj.JDotB``, ``vj.BDotB`` and
 ``surfaces=(...)`` to those profile objects to select nearest full-mesh
 surfaces, or omit it to use all interior radial surfaces.  ``ToroidalCurrent``
 uses VMEC's Mercier normalization ``signgs * 2*pi * <B_u>``; its gradient is
-the radial derivative ``ip`` used in ``DMerc``.  The full Redl
-bootstrap-current mismatch from the SIMSOPT finite-beta script remains an open
-extension; the examples keep the stage-one structure and write VMEC
-inputs/wouts/history so additional terms can be added and regression-tested
-incrementally.
+the radial derivative ``ip`` used in ``DMerc``.
+
+Two vector-valued accessors are also available for advanced targeting:
+``vj.BVector(s_index=...)`` returns Cartesian ``(Bx, By, Bz)`` on one radial
+surface and ``vj.JVector(surfaces=...)`` returns VMEC flux-coordinate current
+density components ``(J^theta, J^zeta) = (itheta/sqrtg, izeta/sqrtg)`` on the
+selected surfaces.  These are flattened residual blocks; users should choose
+their own target arrays and normalizations before adding them to a problem.
+The full Redl bootstrap-current mismatch from the SIMSOPT finite-beta script
+remains an open extension; the examples keep the stage-one structure and write
+VMEC inputs/wouts/history so additional terms can be added and
+regression-tested incrementally.
 
 The full multi-page artifact inventory, including legacy aliases, CSV/JSON
 summary downloads, and exact reproduction commands for each standalone example,
