@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -22,9 +23,10 @@ from vmec_jax.integrals import (
     volume_from_sqrtg,
     volume_from_sqrtg_vmec,
 )
+from vmec_jax.modes import ModeTable
 from vmec_jax.namelist import InData
 from vmec_jax.profiles import MU0, eval_profiles
-from vmec_jax.residuals import _rms, _sum_squares_state
+from vmec_jax.residuals import _rms, _sum_squares_state, force_residuals_from_state
 from vmec_jax.state import StateLayout, VMECState
 from vmec_jax.vmec2000_exec import (
     _find_threed1_file,
@@ -194,6 +196,43 @@ def test_residual_bookkeeping_sums_all_state_blocks() -> None:
     assert gL == 9.0**2 + 10.0**2 + 11.0**2 + 12.0**2
     assert _rms(np.asarray([3.0, 4.0])) == 3.5355339059327378
     assert _rms(np.asarray([])) == 0.0
+
+
+def test_force_residuals_validate_jax_gamma_and_pressure_shape(monkeypatch) -> None:
+    import vmec_jax.residuals as residuals_module
+
+    monkeypatch.setattr(residuals_module, "has_jax", lambda: False)
+    with pytest.raises(ImportError, match="requires JAX"):
+        force_residuals_from_state(
+            None,
+            None,
+            flux=None,
+            pressure=np.asarray([0.0]),
+            gamma=0.0,
+        )
+
+    monkeypatch.setattr(residuals_module, "has_jax", lambda: True)
+    with pytest.raises(ValueError, match="gamma=1"):
+        force_residuals_from_state(
+            None,
+            None,
+            flux=None,
+            pressure=np.asarray([0.0]),
+            gamma=1.0,
+        )
+
+    static = SimpleNamespace(
+        s=np.asarray([0.0, 1.0]),
+        modes=ModeTable(m=np.asarray([0]), n=np.asarray([0])),
+    )
+    with pytest.raises(ValueError, match="pressure must have shape"):
+        force_residuals_from_state(
+            None,
+            static,
+            flux=None,
+            pressure=np.asarray([0.0, 0.5, 1.0]),
+            gamma=0.0,
+        )
 
 
 def test_vmec2000_trace_parser_handles_multiple_stages_and_d_exponents(tmp_path: Path) -> None:
