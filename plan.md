@@ -350,3 +350,7 @@ Acceptance:
   fallback behavior, compilation-cache environment policy, and best-effort JAX
   cache configuration updates. This protects the CPU/GPU cache and warning
   suppression defaults that affect first-run user experience.
+- 2026-05-10: Re-ran the CI-equivalent fast coverage gate after the module
+  entrypoint and `_compat` tests: `409 passed, 21 skipped, 85 deselected`, total
+  coverage `62.91%`, runtime about `6:28`. Kept the CI floor at 62%; 63% still
+  needs more margin before it is safe to enforce in CI.
