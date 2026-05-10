@@ -139,7 +139,7 @@ Acceptance:
 ## Milestone 7: Tests And Coverage
 
 - [ ] Raise required CI coverage from the current fast gate toward 95% in staged
-      steps: 61%, 65%, 75%, 85%, 95%.
+      steps: 62%, 65%, 75%, 85%, 95%.
 - [ ] Add targeted tests before coverage-only tests: physics gates first, branch
       logic second, I/O/schema third.
 - [ ] Keep required CI under 10 minutes by using small fixtures and nightly heavy
@@ -339,3 +339,7 @@ Acceptance:
 - 2026-05-10: Added synthetic coverage for the `plot_wout()` CLI diagnostic
   renderer. This protects the four-output `vmec_jax --plot wout_*.nc` workflow
   used in docs and user-facing examples.
+- 2026-05-10: Re-ran the CI-equivalent fast coverage gate after workflow and
+  plotting coverage slices: `411 passed, 21 skipped, 85 deselected`, total
+  coverage `62.74%`, runtime about `6:31`. Raised the CI floor from 61% to 62%;
+  63% is still too close to the local value for platform-safe CI gating.

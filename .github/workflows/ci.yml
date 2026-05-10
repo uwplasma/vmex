@@ -89,7 +89,7 @@ jobs:
           JAX_ENABLE_X64: "1"
         run: |
           if [ "${{ matrix.python-version }}" = "3.11" ]; then
-            pytest -q -m "not full and not vmec2000" --cov=vmec_jax --cov-report=xml --cov-report=term-missing:skip-covered --cov-fail-under=61
+            pytest -q -m "not full and not vmec2000" --cov=vmec_jax --cov-report=xml --cov-report=term-missing:skip-covered --cov-fail-under=62
           else
             pytest -q -m "not full and not vmec2000"
           fi
