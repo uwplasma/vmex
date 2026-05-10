@@ -234,3 +234,6 @@ Acceptance:
   LASYM cos/sin phase geometry branch for state-level `DMerc`, with transform
   parity and AD tests. Remaining finite-beta source objective work is Redl
   bootstrap-current mismatch plus higher-level parity gates.
+- 2026-05-10: Added VMEC/wout parity coverage for state-level `DMerc` on the
+  bundled finite-beta QI input. This also fixed the bss half-mesh geometry path
+  so `rs12/zs12` include VMEC's odd-channel correction before forming `B_s`.

@@ -239,7 +239,13 @@ def _make_fake_mercier_state_inputs(scale=1.0):
         lthreed=False,
     )
     static = SimpleNamespace(s=s, trig_vmec=trig, cfg=cfg, modes=ModeTable(m=np.array([0]), n=np.array([0])))
-    state = SimpleNamespace(Rcos=jnp.asarray([[scale], [1.0], [1.0], [1.0]], dtype=jnp.float64))
+    zeros = jnp.zeros((4, 1), dtype=jnp.float64)
+    state = SimpleNamespace(
+        Rcos=jnp.asarray([[scale], [1.0], [1.0], [1.0]], dtype=jnp.float64),
+        Rsin=zeros,
+        Zcos=zeros,
+        Zsin=zeros,
+    )
     return state, static, shape
 
 
@@ -329,7 +335,13 @@ def test_mercier_terms_from_state_is_differentiable(monkeypatch):
     _patch_fake_mercier_state_dependencies(monkeypatch, shape)
 
     def objective(scale):
-        state = SimpleNamespace(Rcos=jnp.asarray([[scale], [1.0], [1.0], [1.0]], dtype=jnp.float64))
+        zeros = jnp.zeros((4, 1), dtype=jnp.float64)
+        state = SimpleNamespace(
+            Rcos=jnp.asarray([[scale], [1.0], [1.0], [1.0]], dtype=jnp.float64),
+            Rsin=zeros,
+            Zcos=zeros,
+            Zsin=zeros,
+        )
         terms = finite_beta.mercier_terms_from_state(
             state=state,
             static=static,
@@ -759,6 +771,7 @@ def test_mercier_realspace_geometry_channels_from_state_lasym_uses_phase_split()
         lthreed=True,
         lasym=True,
         apply_scalxc=True,
+        phase_split=True,
     )
 
     coeff_cos_stack = jnp.stack([state.Rcos, state.Zcos], axis=0)
@@ -1148,6 +1161,44 @@ def test_mercier_zeta_half_mesh_from_realspace_geometry_matches_vmec_formula():
 
     np.testing.assert_allclose(np.asarray(actual["rv12"]), rv_expected, rtol=1e-13, atol=1e-13)
     np.testing.assert_allclose(np.asarray(actual["zv12"]), zv_expected, rtol=1e-13, atol=1e-13)
+
+
+def test_mercier_bss_half_mesh_geometry_from_realspace_matches_vmec_formula():
+    rng = np.random.default_rng(97531)
+    shape = (5, 3, 2)
+    data = dict(
+        s=np.linspace(0.0, 1.0, shape[0]),
+        rs=rng.normal(size=shape),
+        zs=rng.normal(size=shape),
+        R_odd=rng.normal(size=shape),
+        Z_odd=rng.normal(size=shape),
+        Rv_even=rng.normal(size=shape),
+        Rv_odd=rng.normal(size=shape),
+        Zv_even=rng.normal(size=shape),
+        Zv_odd=rng.normal(size=shape),
+    )
+
+    actual = finite_beta.mercier_bss_half_mesh_geometry_from_realspace(**data)
+    sh = np.sqrt(0.5 * (data["s"][1:] + data["s"][:-1]))[:, None, None]
+    rs_expected = np.zeros(shape)
+    zs_expected = np.zeros(shape)
+    rs_expected[1:] = data["rs"][1:] + 0.25 * (data["R_odd"][1:] + data["R_odd"][:-1]) / sh
+    zs_expected[1:] = data["zs"][1:] + 0.25 * (data["Z_odd"][1:] + data["Z_odd"][:-1]) / sh
+    rs_expected[0] = rs_expected[1]
+    zs_expected[0] = zs_expected[1]
+
+    zeta_expected = finite_beta.mercier_zeta_half_mesh_from_realspace_geometry(
+        s=data["s"],
+        Rv_even=data["Rv_even"],
+        Rv_odd=data["Rv_odd"],
+        Zv_even=data["Zv_even"],
+        Zv_odd=data["Zv_odd"],
+    )
+
+    np.testing.assert_allclose(np.asarray(actual["rs12"]), rs_expected, rtol=1e-13, atol=1e-13)
+    np.testing.assert_allclose(np.asarray(actual["zs12"]), zs_expected, rtol=1e-13, atol=1e-13)
+    np.testing.assert_allclose(np.asarray(actual["rv12"]), np.asarray(zeta_expected["rv12"]), rtol=1e-13, atol=1e-13)
+    np.testing.assert_allclose(np.asarray(actual["zv12"]), np.asarray(zeta_expected["zv12"]), rtol=1e-13, atol=1e-13)
 
 
 def test_mercier_zeta_half_mesh_from_realspace_geometry_is_differentiable():

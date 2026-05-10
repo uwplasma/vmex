@@ -274,6 +274,7 @@ def mercier_realspace_geometry_channels_from_state(
     lthreed: bool = True,
     lasym: bool = False,
     apply_scalxc: bool = True,
+    phase_split: bool = False,
 ) -> dict[str, Any]:
     """Return VMEC even/odd real-space R/Z geometry channels for Mercier.
 
@@ -314,9 +315,9 @@ def mercier_realspace_geometry_channels_from_state(
 
     coeff_cos_stack = jnp.stack([Rcos, Zcos], axis=0)
     coeff_sin_stack = jnp.stack([Rsin, Zsin], axis=0)
-    if bool(lasym):
-        # LASYM bss/Mercier geometry uses VMEC cos/sin phase channels, not the
-        # stellarator-symmetric even/odd poloidal-mode split.
+    if bool(lasym) and bool(phase_split):
+        # LASYM bss half-mesh geometry uses VMEC cos/sin phase channels, not
+        # the Mercier/totzsps even/odd poloidal-mode split used for gpp.
         zeros = jnp.zeros_like(coeff_cos_stack)
         coeff_cos = jnp.stack([coeff_cos_stack, zeros], axis=0)
         coeff_sin = jnp.stack([zeros, coeff_sin_stack], axis=0)
@@ -410,6 +411,89 @@ def _mercier_extend_parity_to_full_jax(*, par0, par1, trig) -> Any:
     ref0 = jnp.take(jnp.take(par0, jnp.asarray(np.nonzero(mask)[0], dtype=jnp.int32), axis=1), kk, axis=2)
     ref1 = jnp.take(jnp.take(par1, jnp.asarray(np.nonzero(mask)[0], dtype=jnp.int32), axis=1), kk, axis=2)
     return full.at[:, ir, :].set(ref0 - ref1)
+
+
+def mercier_bss_geometry_channels_from_state(
+    *,
+    state,
+    modes,
+    trig,
+    s,
+    lthreed: bool = True,
+    lasym: bool = False,
+    apply_scalxc: bool = True,
+) -> dict[str, Any]:
+    """Return VMEC bss.f geometry channels for covariant ``B_s`` assembly."""
+    if bool(lasym):
+        return mercier_realspace_geometry_channels_from_state(
+            state=state,
+            modes=modes,
+            trig=trig,
+            s=s,
+            lconm1=False,
+            lthreed=bool(lthreed),
+            lasym=True,
+            apply_scalxc=False,
+            phase_split=True,
+        )
+
+    from .vmec_jacobian import _apply_vmec_axis_rules
+    from .vmec_realspace import vmec_realspace_synthesis_multi
+
+    s = jnp.asarray(s, dtype=jnp.float64)
+    m_np = np.asarray(modes.m, dtype=int)
+    Rcos = _apply_vmec_axis_rules(jnp.asarray(state.Rcos, dtype=jnp.float64), m_np)
+    Rsin = _apply_vmec_axis_rules(jnp.asarray(state.Rsin, dtype=jnp.float64), m_np)
+    Zcos = _apply_vmec_axis_rules(jnp.asarray(state.Zcos, dtype=jnp.float64), m_np)
+    Zsin = _apply_vmec_axis_rules(jnp.asarray(state.Zsin, dtype=jnp.float64), m_np)
+
+    coeff_cos_stack = jnp.stack([Rcos, Zcos], axis=0)
+    coeff_sin_stack = jnp.stack([Rsin, Zsin], axis=0)
+    zeros = jnp.zeros_like(coeff_cos_stack)
+    mask_even = jnp.asarray((m_np % 2) == 0, dtype=jnp.float64)
+    mask_m1 = jnp.asarray(m_np == 1, dtype=jnp.float64)
+    mask_odd_rest = jnp.asarray(((m_np % 2) == 1) & (m_np != 1), dtype=jnp.float64)
+
+    def _synth(mask, *, apply_scalxc_local: bool):
+        coeff_cos = coeff_cos_stack[None, ...] * mask[None, None, None, :]
+        coeff_sin = coeff_sin_stack[None, ...] * mask[None, None, None, :]
+        base, theta, zeta = vmec_realspace_synthesis_multi(
+            coeff_cos=coeff_cos,
+            coeff_sin=coeff_sin,
+            modes=modes,
+            trig=trig,
+            coeffs_internal=True,
+            apply_scalxc=bool(apply_scalxc_local),
+            s=s,
+            derivs=("base", "dtheta", "dzeta"),
+        )
+        return base[0], theta[0], zeta[0]
+
+    even_base, even_t, even_p = _synth(mask_even, apply_scalxc_local=False)
+    odd_m1_base, odd_m1_t, odd_m1_p = _synth(mask_m1, apply_scalxc_local=bool(apply_scalxc))
+    odd_rest_base, odd_rest_t, odd_rest_p = _synth(mask_odd_rest, apply_scalxc_local=bool(apply_scalxc))
+    odd_base = odd_m1_base + odd_rest_base
+    odd_t = odd_m1_t + odd_rest_t
+    odd_p = odd_m1_p + odd_rest_p
+    if int(odd_base.shape[0]) >= 2:
+        odd_base = odd_base.at[0].set(odd_m1_base[1])
+        odd_t = odd_t.at[0].set(odd_m1_t[1])
+        odd_p = odd_p.at[0].set(odd_m1_p[1])
+
+    return {
+        "R_even": even_base[0],
+        "R_odd": odd_base[0],
+        "Z_even": even_base[1],
+        "Z_odd": odd_base[1],
+        "Ru_even": even_t[0],
+        "Ru_odd": odd_t[0],
+        "Zu_even": even_t[1],
+        "Zu_odd": odd_t[1],
+        "Rv_even": even_p[0],
+        "Rv_odd": odd_p[0],
+        "Zv_even": even_p[1],
+        "Zv_odd": odd_p[1],
+    }
 
 
 def mercier_bsubs_derivatives_lasym_false(
@@ -626,6 +710,50 @@ def mercier_zeta_half_mesh_from_realspace_geometry(
     return {"rv12": rv12, "zv12": zv12}
 
 
+def mercier_bss_half_mesh_geometry_from_realspace(
+    *,
+    s,
+    rs,
+    zs,
+    R_odd,
+    Z_odd,
+    Rv_even,
+    Rv_odd,
+    Zv_even,
+    Zv_odd,
+) -> dict[str, Any]:
+    """Return VMEC bss half-mesh geometry corrections used for ``B_s``."""
+    s = jnp.asarray(s, dtype=jnp.float64)
+    rs = jnp.asarray(rs, dtype=jnp.float64)
+    zs = jnp.asarray(zs, dtype=jnp.float64)
+    R_odd = jnp.asarray(R_odd, dtype=jnp.float64)
+    Z_odd = jnp.asarray(Z_odd, dtype=jnp.float64)
+    zeta = mercier_zeta_half_mesh_from_realspace_geometry(
+        s=s,
+        Rv_even=Rv_even,
+        Rv_odd=Rv_odd,
+        Zv_even=Zv_even,
+        Zv_odd=Zv_odd,
+    )
+
+    ns = int(s.shape[0])
+    rs12 = jnp.zeros_like(rs, dtype=jnp.float64)
+    zs12 = jnp.zeros_like(zs, dtype=jnp.float64)
+    if ns < 2:
+        return {"rs12": rs12, "zs12": zs12, **zeta}
+
+    sh = jnp.sqrt(jnp.maximum(0.5 * (s[1:] + s[:-1]), 0.0))[:, None, None]
+    sh_safe = jnp.where(sh != 0.0, sh, 1.0)
+    dphids = jnp.asarray(0.25, dtype=jnp.float64)
+    rs_inner = rs[1:] + dphids * (R_odd[1:] + R_odd[:-1]) / sh_safe
+    zs_inner = zs[1:] + dphids * (Z_odd[1:] + Z_odd[:-1]) / sh_safe
+    rs12 = rs12.at[1:].set(rs_inner)
+    zs12 = zs12.at[1:].set(zs_inner)
+    rs12 = rs12.at[0].set(rs_inner[0])
+    zs12 = zs12.at[0].set(zs_inner[0])
+    return {"rs12": rs12, "zs12": zs12, **zeta}
+
+
 def mercier_bsubs_full_mesh_from_half_mesh(*, bsubs_half) -> Any:
     """Average half-mesh ``bsubs`` to VMEC's jxbforce full-mesh convention."""
     bsubs_half = jnp.asarray(bsubs_half, dtype=jnp.float64)
@@ -823,23 +951,37 @@ def mercier_terms_from_state(
         lthreed=bool(getattr(static.cfg, "lthreed", True)),
         lasym=lasym,
         apply_scalxc=True,
+        phase_split=False,
     )
-    zeta_half = mercier_zeta_half_mesh_from_realspace_geometry(
+    bss_geom = mercier_bss_geometry_channels_from_state(
+        state=state,
+        modes=static.modes,
+        trig=trig,
         s=s,
-        Rv_even=geom["Rv_even"],
-        Rv_odd=geom["Rv_odd"],
-        Zv_even=geom["Zv_even"],
-        Zv_odd=geom["Zv_odd"],
+        lthreed=bool(getattr(static.cfg, "lthreed", True)),
+        lasym=lasym,
+        apply_scalxc=True,
+    )
+    bss_half_geom = mercier_bss_half_mesh_geometry_from_realspace(
+        s=s,
+        rs=bc.jac.rs,
+        zs=bc.jac.zs,
+        R_odd=bss_geom["R_odd"],
+        Z_odd=bss_geom["Z_odd"],
+        Rv_even=bss_geom["Rv_even"],
+        Rv_odd=bss_geom["Rv_odd"],
+        Zv_even=bss_geom["Zv_even"],
+        Zv_odd=bss_geom["Zv_odd"],
     )
     bsubs_half = mercier_bsubs_half_mesh_from_geometry(
         bsupu=bc.bsupu,
         bsupv=bc.bsupv,
-        rs12=bc.jac.rs,
-        zs12=bc.jac.zs,
+        rs12=bss_half_geom["rs12"],
+        zs12=bss_half_geom["zs12"],
         ru12=bc.jac.ru12,
         zu12=bc.jac.zu12,
-        rv12=zeta_half["rv12"],
-        zv12=zeta_half["zv12"],
+        rv12=bss_half_geom["rv12"],
+        zv12=bss_half_geom["zv12"],
     )
     bsubs_full = mercier_bsubs_full_mesh_from_half_mesh(bsubs_half=bsubs_half["bsubs"])
     if lasym:
