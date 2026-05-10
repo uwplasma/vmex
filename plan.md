@@ -359,3 +359,7 @@ Acceptance:
   context precomputation, no-op boundary truncation, and Gauss-Newton edge
   exits. Verified with `python -m pytest tests/test_optimization_helpers.py -q`
   (`48 passed, 1 skipped`) and `ruff check tests/test_optimization_helpers.py`.
+- 2026-05-10: Added wout helper coverage for JAX VMEC weights, beta/aspect edge
+  cases, bsubv equilibrium correction guards, and ctor branch selection. Verified
+  with `python -m pytest tests/test_wout_helpers.py -q` (`6 passed`) and
+  `ruff check tests/test_wout_helpers.py`.
