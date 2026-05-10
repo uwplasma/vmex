@@ -240,18 +240,33 @@ def test_dmerc_tuple_stays_regular_state_objective() -> None:
 
 
 def test_jxbforce_profile_tuple_stays_regular_state_objective() -> None:
-    from vmec_jax.optimization_workflow import BDotB, BDotGradV, JDotB, LeastSquaresProblem
+    from vmec_jax.optimization_workflow import (
+        BDotB,
+        BDotGradV,
+        JDotB,
+        LeastSquaresProblem,
+        ToroidalCurrent,
+        ToroidalCurrentGradient,
+    )
 
     problem = LeastSquaresProblem.from_tuples(
         [
             (JDotB(surfaces=(0.25, 0.75)).J, 0.0, 0.25),
             (BDotB(surfaces=(0.5,)).J, 1.0, 0.10),
             (BDotGradV().J, 0.0, 0.05),
+            (ToroidalCurrent(surfaces=(0.75,)).J, 0.0, 0.20),
+            (ToroidalCurrentGradient().J, 0.0, 0.30),
         ]
     )
 
     assert not problem.is_qi
-    assert [term.name for term in problem.objective_terms] == ["jdotb", "bdotb", "bdotgradv"]
+    assert [term.name for term in problem.objective_terms] == [
+        "jdotb",
+        "bdotb",
+        "bdotgradv",
+        "torcur",
+        "torcur_prime",
+    ]
     assert len(problem.qi_objective_terms) == 0
 
 
@@ -261,7 +276,17 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
 
     from vmec_jax._compat import jnp
     import vmec_jax.optimization_workflow as workflow
-    from vmec_jax.optimization_workflow import BDotB, BDotGradV, BetaTotal, DMerc, JDotB, MagneticWell, VolavgB
+    from vmec_jax.optimization_workflow import (
+        BDotB,
+        BDotGradV,
+        BetaTotal,
+        DMerc,
+        JDotB,
+        MagneticWell,
+        ToroidalCurrent,
+        ToroidalCurrentGradient,
+        VolavgB,
+    )
 
     def fake_scalars_from_state(*, state, **_kwargs):
         scale = jnp.asarray(state, dtype=jnp.float64)
@@ -281,6 +306,8 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
             "jdotb": jnp.asarray([0.0, 0.10 + 0.01 * scale, 0.20 + 0.02 * scale, 0.0], dtype=jnp.float64),
             "bdotb": jnp.asarray([0.0, 1.00 + 0.10 * scale, 1.20 + 0.20 * scale, 0.0], dtype=jnp.float64),
             "bdotgradv": jnp.asarray([0.0, 2.00 + 0.20 * scale, 2.20 + 0.30 * scale, 0.0], dtype=jnp.float64),
+            "torcur": jnp.asarray([0.0, 0.40 + 0.04 * scale, 0.60 + 0.06 * scale, 0.0], dtype=jnp.float64),
+            "ip": jnp.asarray([0.0, 1.40 + 0.14 * scale, 1.60 + 0.16 * scale, 0.0], dtype=jnp.float64),
         }
 
     monkeypatch.setattr(workflow, "finite_beta_scalars_from_state", fake_scalars_from_state)
@@ -300,6 +327,10 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
     bdotgradv_value, bdotgradv_grad = jax.value_and_grad(lambda x: jnp.sum(BDotGradV().J(ctx, x)))(
         jnp.asarray(1.0)
     )
+    torcur_value, torcur_grad = jax.value_and_grad(lambda x: jnp.sum(ToroidalCurrent().J(ctx, x)))(jnp.asarray(1.0))
+    torcur_prime_value, torcur_prime_grad = jax.value_and_grad(
+        lambda x: jnp.sum(ToroidalCurrentGradient(surfaces=(0.25, 0.75)).J(ctx, x))
+    )(jnp.asarray(1.0))
 
     np.testing.assert_allclose(np.asarray(vol_value), 2.5)
     np.testing.assert_allclose(np.asarray(vol_grad), 0.5)
@@ -316,3 +347,36 @@ def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> 
     np.testing.assert_allclose(np.asarray(bdotb_grad), 0.3)
     np.testing.assert_allclose(np.asarray(bdotgradv_value), 4.7)
     np.testing.assert_allclose(np.asarray(bdotgradv_grad), 0.5)
+    np.testing.assert_allclose(np.asarray(torcur_value), 1.10)
+    np.testing.assert_allclose(np.asarray(torcur_grad), 0.10)
+    np.testing.assert_allclose(np.asarray(torcur_prime_value), 3.30)
+    np.testing.assert_allclose(np.asarray(torcur_prime_grad), 0.30)
+
+
+def test_jxbforce_and_current_objective_gradients_match_finite_difference(monkeypatch) -> None:
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import jnp
+    import vmec_jax.optimization_workflow as workflow
+    from vmec_jax.optimization_workflow import JDotB, ToroidalCurrent
+
+    def fake_mercier_terms_from_state(*, state, **_kwargs):
+        x = jnp.asarray(state, dtype=jnp.float64)
+        return {
+            "jdotb": jnp.asarray([0.0, 0.1 + 0.02 * x**2, 0.2 + 0.03 * x**2, 0.0], dtype=jnp.float64),
+            "torcur": jnp.asarray([0.0, 0.4 + 0.04 * x**2, 0.6 + 0.06 * x**2, 0.0], dtype=jnp.float64),
+        }
+
+    monkeypatch.setattr(workflow, "mercier_terms_from_state", fake_mercier_terms_from_state)
+    ctx = SimpleNamespace(static=SimpleNamespace(s=np.asarray([0.0, 0.25, 0.75, 1.0])), indata=None, signgs=1)
+
+    def centered_fd(fn, x0, eps=1.0e-6):
+        return (float(fn(x0 + eps)) - float(fn(x0 - eps))) / (2.0 * eps)
+
+    import jax
+
+    for objective in (JDotB(surfaces=(0.25, 0.75)), ToroidalCurrent(surfaces=(0.25, 0.75))):
+        fn = lambda x, objective=objective: jnp.sum(objective.J(ctx, jnp.asarray(x, dtype=jnp.float64)))
+        ad_grad = float(jax.grad(fn)(jnp.asarray(1.3, dtype=jnp.float64)))
+        fd_grad = centered_fd(fn, 1.3)
+        np.testing.assert_allclose(ad_grad, fd_grad, rtol=1e-6, atol=1e-8)

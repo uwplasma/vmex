@@ -144,6 +144,8 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
            # (vj.JDotB(surfaces=(0.25, 0.50, 0.75)).J, 0.0, JDOTB_WEIGHT),
            # (vj.BDotB(surfaces=(0.25, 0.50, 0.75)).J, TARGET_BDOTB, BDOTB_WEIGHT),
            # (vj.BDotGradV(surfaces=(0.25, 0.50, 0.75)).J, TARGET_BDOTGRADV, BDOTGRADV_WEIGHT),
+           # (vj.ToroidalCurrent(surfaces=(0.25, 0.50, 0.75)).J, TARGET_TORCUR, TORCUR_WEIGHT),
+           # (vj.ToroidalCurrentGradient(surfaces=(0.25, 0.50, 0.75)).J, TARGET_TORCUR_PRIME, TORCUR_PRIME_WEIGHT),
        ]
    )
 
@@ -439,13 +441,17 @@ QI finite-beta refinement as a final research-quality result.
 The current implementation includes differentiable finite-beta global
 diagnostics, current-driven iota through ``PCURR_TYPE = "cubic_spline_ip"``,
 a ``vj.DMerc`` lower-bound residual for stellarator-symmetric and LASYM
-equilibria, and VMEC/JXBFORCE profile accessors ``vj.JDotB``, ``vj.BDotB`` and
-``vj.BDotGradV``.  Pass ``surfaces=(...)`` to those profile objects to select
-nearest full-mesh surfaces, or omit it to use all interior radial surfaces.
-The full Redl bootstrap-current mismatch from the SIMSOPT finite-beta script
-remains an open extension; the examples keep the stage-one structure and write
-VMEC inputs/wouts/history so additional terms can be added and
-regression-tested incrementally.
+equilibria, VMEC/JXBFORCE profile accessors ``vj.JDotB``, ``vj.BDotB`` and
+``vj.BDotGradV``, and state-derived current-profile accessors
+``vj.ToroidalCurrent`` and ``vj.ToroidalCurrentGradient``.  Pass
+``surfaces=(...)`` to those profile objects to select nearest full-mesh
+surfaces, or omit it to use all interior radial surfaces.  ``ToroidalCurrent``
+uses VMEC's Mercier normalization ``signgs * 2*pi * <B_u>``; its gradient is
+the radial derivative ``ip`` used in ``DMerc``.  The full Redl
+bootstrap-current mismatch from the SIMSOPT finite-beta script remains an open
+extension; the examples keep the stage-one structure and write VMEC
+inputs/wouts/history so additional terms can be added and regression-tested
+incrementally.
 
 The full multi-page artifact inventory, including legacy aliases, CSV/JSON
 summary downloads, and exact reproduction commands for each standalone example,

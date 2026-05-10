@@ -334,6 +334,7 @@ def test_mercier_terms_from_state_composes_stellarator_symmetric_channels(monkey
         "bdotb",
         "bdotgradv",
         "torcur",
+        "ip",
     ):
         assert terms[key].shape == (4,)
         assert np.all(np.isfinite(np.asarray(terms[key])))
@@ -400,6 +401,7 @@ def test_mercier_terms_from_state_composes_lasym_channels(monkeypatch):
         "bdotb",
         "bdotgradv",
         "torcur",
+        "ip",
     ):
         assert terms[key].shape == (4,)
         assert np.all(np.isfinite(np.asarray(terms[key])))

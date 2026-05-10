@@ -638,6 +638,25 @@ class BDotGradV(_MercierProfileObjective):
     profile_key = "bdotgradv"
 
 
+class ToroidalCurrent(_MercierProfileObjective):
+    """Integrated toroidal-current profile from VMEC's Mercier path.
+
+    The profile key is ``torcur`` and follows VMEC's Mercier normalization:
+    ``signgs * 2*pi * <B_u>`` on the full radial mesh.  This is a
+    state-derived current profile, not just the prescribed input ``ICURV``.
+    """
+
+    name = "torcur"
+    profile_key = "torcur"
+
+
+class ToroidalCurrentGradient(_MercierProfileObjective):
+    """Radial derivative of ``ToroidalCurrent`` used by VMEC Mercier terms."""
+
+    name = "torcur_prime"
+    profile_key = "ip"
+
+
 class LgradB:
     """Minimum-``L_grad_B`` penalty object usable in QS or QI examples."""
 
@@ -1984,6 +2003,8 @@ __all__ = [
     "QuasisymmetryRatioResidual",
     "QIObjectiveTerm",
     "StageContext",
+    "ToroidalCurrent",
+    "ToroidalCurrentGradient",
     "abs_mean_iota_floor_objective",
     "aspect_objective",
     "build_fixed_boundary_objective_stage",
