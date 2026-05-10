@@ -420,3 +420,7 @@ Acceptance:
   collapse. Verified with
   `python -m pytest tests/test_state_coords_helpers.py tests/test_modes_helpers.py -q`
   (`6 passed`) and `ruff check tests/test_state_coords_helpers.py tests/test_modes_helpers.py`.
+- 2026-05-10: Re-ran the CI-equivalent fast coverage gate after state/coords
+  and mode helper tests: `444 passed, 21 skipped, 85 deselected`, total coverage
+  `64.13%`, runtime about `6:26`. Kept the CI floor at 62%; 64% remains too
+  tight for a threshold bump.
