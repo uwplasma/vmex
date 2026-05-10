@@ -328,3 +328,7 @@ Acceptance:
   plotting-wrapper, and driver-policy test slices: `405 passed, 21 skipped,
   85 deselected`, total coverage `61.65%`, runtime about `7:01`. Kept the CI
   floor at 61%; there is not enough platform margin yet to raise it to 62%.
+- 2026-05-10: Added workflow tests for `FixedBoundaryVMEC.from_input`, the
+  `mpol/ntor >= max(min_vmec_mode, max_mode+2)` resolution policy, QS objective
+  wrappers, and lower-bound/QI helper edge paths. These protect the
+  SIMSOPT-like example API and the high-mode optimization resolution policy.
