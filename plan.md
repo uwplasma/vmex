@@ -461,3 +461,14 @@ Acceptance:
   `456 passed, 21 skipped, 85 deselected`, total coverage `64.84%`, runtime
   about `6:29`. This is progress but still not enough margin to raise the
   enforced CI floor above 62%.
+- 2026-05-11: Added fast VMEC half-mesh and residual-diagnostic coverage for
+  pshalf staggering, even/odd metric decompositions, one-surface half-mesh
+  behavior, and the normalized `force_residuals_from_state` path using a
+  controlled differentiable synthetic geometry. Verified the targeted slice with
+  `python -m pytest tests/test_fast_physics_kernels.py tests/test_bcovar_lambda_axis_closure.py -q`
+  (`19 passed`) and `ruff check tests/test_fast_physics_kernels.py tests/test_bcovar_lambda_axis_closure.py`.
+  Re-ran the CI-equivalent fast coverage gate:
+  `459 passed, 21 skipped, 85 deselected`, total coverage `65.00%`, runtime
+  about `7:11`. Keep the enforced CI floor at 62% for now: local coverage only
+  barely rounds to 65%, and previous GitHub jobs have reported lower coverage
+  for the same tree due to optional-test/platform differences.

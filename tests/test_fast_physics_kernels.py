@@ -9,6 +9,7 @@ import pytest
 from vmec_jax._compat import jnp
 from vmec_jax.energy import (
     TWOPI,
+    FluxProfiles,
     _iotaf_from_iotas,
     _poly_no_const,
     _poly_no_const_deriv,
@@ -300,6 +301,82 @@ def test_force_residuals_validate_jax_gamma_and_pressure_shape(monkeypatch) -> N
             pressure=np.asarray([0.0, 0.5, 1.0]),
             gamma=0.0,
         )
+
+
+def test_force_residuals_compute_normalized_gradient_diagnostics(monkeypatch) -> None:
+    import vmec_jax.residuals as residuals_module
+
+    layout = StateLayout(ns=2, K=1, lasym=False)
+    state = VMECState(
+        layout=layout,
+        Rcos=jnp.asarray([[1.0], [1.5]]),
+        Rsin=jnp.zeros((2, 1)),
+        Zcos=jnp.zeros((2, 1)),
+        Zsin=jnp.asarray([[0.0], [0.2]]),
+        Lcos=jnp.zeros((2, 1)),
+        Lsin=jnp.zeros((2, 1)),
+    )
+    static = SimpleNamespace(
+        s=jnp.asarray([0.0, 1.0]),
+        grid=SimpleNamespace(theta=jnp.asarray([0.0, np.pi]), zeta=jnp.asarray([0.0, np.pi])),
+        cfg=SimpleNamespace(nfp=1, ntheta=2, nzeta=2),
+        modes=ModeTable(m=np.asarray([0]), n=np.asarray([0])),
+    )
+    flux = FluxProfiles(
+        phipf=jnp.asarray([1.0, 1.0]),
+        chipf=jnp.asarray([0.25, 0.25]),
+        phips=jnp.asarray([0.0, 1.0]),
+        signgs=1,
+        lamscale=jnp.asarray(2.0),
+    )
+
+    def fake_eval_geom(st, _static):
+        shape = (2, 2, 2)
+        r = st.Rcos[:, :1, None]
+        z = st.Zsin[:, :1, None]
+        return SimpleNamespace(
+            sqrtg=jnp.ones(shape) * (2.0 + 0.1 * r + 0.05 * z),
+            g_tt=jnp.ones(shape) * 3.0,
+        )
+
+    def fake_bsup_from_geom(g, **_kwargs):
+        return jnp.ones_like(g.sqrtg) * 2.0, jnp.ones_like(g.sqrtg) * 3.0
+
+    def fake_b2_from_bsup(_g, bsupu, bsupv):
+        return bsupu * bsupu + 0.25 * bsupv * bsupv
+
+    def fake_bsub_from_bsup(g, _bsupu, _bsupv):
+        return jnp.ones_like(g.sqrtg) * 4.0, jnp.ones_like(g.sqrtg) * 5.0
+
+    monkeypatch.setattr(residuals_module, "eval_geom", fake_eval_geom)
+    monkeypatch.setattr(residuals_module, "bsup_from_geom", fake_bsup_from_geom)
+    monkeypatch.setattr(residuals_module, "b2_from_bsup", fake_b2_from_bsup)
+    monkeypatch.setattr(residuals_module, "bsub_from_bsup", fake_bsub_from_bsup)
+    monkeypatch.setattr(residuals_module, "_mask_grad_for_constraints", lambda grad, _static, idx00: grad)
+
+    residuals = residuals_module.force_residuals_from_state(
+        state,
+        static,
+        flux=flux,
+        pressure=jnp.asarray([0.0, 0.5]),
+        gamma=5.0 / 3.0,
+        jacobian_penalty=0.0,
+    )
+
+    assert residuals.diagnostics["idx00"] == 0
+    assert residuals.diagnostics["objective"] > 0.0
+    assert residuals.diagnostics["volume"] > 0.0
+    assert residuals.diagnostics["wb"] > 0.0
+    assert residuals.diagnostics["wp"] > 0.0
+    assert residuals.diagnostics["fnorm"] > 0.0
+    assert residuals.diagnostics["fnormL"] > 0.0
+    assert residuals.fsqr_like > 0.0
+    assert residuals.fsqz_like > 0.0
+    assert residuals.fsql_like == 0.0
+    assert residuals.fsq_like == pytest.approx(residuals.fsqr_like + residuals.fsqz_like)
+    assert residuals.grad_rms > 0.0
+    assert residuals.grad_rms_rz > 0.0
+    assert residuals.grad_rms_l == 0.0
 
 
 def test_vmec2000_trace_parser_handles_multiple_stages_and_d_exponents(tmp_path: Path) -> None:
