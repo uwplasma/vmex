@@ -197,9 +197,10 @@ Acceptance:
    `qi_diagnostics_from_state` on available solved `input`/`wout` pairs. It
    compares smooth QI, legacy QI, mirror ratio, elongation, iota, and aspect
    ratio before launching a full optimization sweep.
-10. [ ] Prepare the deferred seed-robust QI sweep design: explicit QI/QP/QH/QA
-    and simple non-omnigenous seeds, fixed acceptance gates, artifact locations,
-    and a renderer that makes failed/timeout lanes visible.
+10. [x] Prepare the first deferred seed-robust QI sweep design artifact:
+    explicit ranked seeds, hard-capped QI-prefine probe settings, run commands,
+    and output locations via the prefine manifest. Full QI/QP/QH/QA/simple
+    optimization rows and Boozer contour curation remain open.
 
 ## Reassessment After 2026-05-11 Push
 
@@ -607,3 +608,12 @@ Defer beyond the current cycle:
   `vmec_jax._solve_runtime` owns scan runtime helpers previously embedded in
   `solve.py`, and `vmec_jax.wout_schema` owns `WoutData` plus low-level wout
   schema helpers while `vmec_jax.wout` keeps compatibility re-exports.
+- 2026-05-11: Extended the QI seed audit with `--prefine-probes plan|run`.
+  The default remains audit-only. The plan mode writes a hard-capped manifest
+  for tiny QI-only prefine probes, including selected seeds, commands, expected
+  artifacts, and objective settings before any expensive seed-robust run.
+- 2026-05-11: Continued the refactor with additional narrow seams:
+  `vmec_jax.wout_io` owns low-level netCDF mode/string/variable helpers, and
+  `_solve_runtime` now also owns dump iteration parsing plus simple dump gate
+  policy. Public compatibility through `vmec_jax.wout` and `vmec_jax.solve`
+  was preserved.

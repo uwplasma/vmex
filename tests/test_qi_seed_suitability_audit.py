@@ -4,6 +4,7 @@ import csv
 import importlib.util
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -143,3 +144,135 @@ def test_build_seed_audit_ranks_and_writes_csv(monkeypatch, tmp_path):
     assert rows[0]["label"] == "better_qi"
     assert float(rows[0]["qi_seed_score"]) < float(rows[1]["qi_seed_score"])
     assert rows[1]["failed_constraints"] == "mirror"
+
+
+def test_prefine_probe_manifest_selects_top_rows_and_stays_dry(tmp_path):
+    mod = _load_module()
+    report = {
+        "cases": [
+            {
+                "suitability_rank": 1,
+                "label": "better qi",
+                "family": "qi",
+                "input": "/tmp/input_qi",
+                "wout": "/tmp/wout_qi.nc",
+                "qi_seed_score": 0.2,
+                "qi_smooth_total": 0.1,
+                "qi_legacy_total": 0.1,
+                "failed_constraints": [],
+            },
+            {
+                "suitability_rank": 2,
+                "label": "rough/qh",
+                "family": "qh",
+                "input": "/tmp/input_qh",
+                "wout": "/tmp/wout_qh.nc",
+                "qi_seed_score": 1.5,
+                "failed_constraints": ["mirror"],
+            },
+        ]
+    }
+    config = mod.QIPrefineProbeConfig(top_n=2, output_dir=tmp_path / "probes")
+
+    manifest = mod.build_qi_prefine_probe_manifest(
+        report,
+        config=config,
+        manifest_path=tmp_path / "manifest.json",
+        dry_run=True,
+    )
+
+    assert manifest["dry_run"] is True
+    assert manifest["selection"]["planned_rows"] == 2
+    assert [plan["status"] for plan in manifest["plans"]] == ["planned", "planned"]
+    assert manifest["plans"][0]["label"] == "better qi"
+    assert manifest["plans"][0]["output_dir"].endswith("01_better_qi")
+    assert "--prefine-probes run" in manifest["plans"][0]["run_command"]
+    assert manifest["plans"][0]["optimization"]["max_nfev"] <= mod.MAX_PREFINE_MAX_NFEV
+    assert manifest["plans"][0]["qi_options"]["nphi"] <= mod.MAX_PREFINE_QI_NPHI
+
+    bad_config = mod.QIPrefineProbeConfig(top_n=mod.MAX_PREFINE_TOP_N + 1)
+    with pytest.raises(ValueError, match="top_n"):
+        mod.build_qi_prefine_probe_manifest(
+            report,
+            config=bad_config,
+            manifest_path=tmp_path / "bad.json",
+            dry_run=True,
+        )
+
+
+def test_run_qi_prefine_probe_dispatches_tiny_qi_solve(tmp_path):
+    mod = _load_module()
+    report = {
+        "cases": [
+            {
+                "suitability_rank": 1,
+                "label": "candidate_qi",
+                "family": "qi",
+                "input": "/tmp/input_qi",
+                "wout": "/tmp/wout_qi.nc",
+                "qi_seed_score": 0.2,
+            },
+        ]
+    }
+    manifest = mod.build_qi_prefine_probe_manifest(
+        report,
+        config=mod.QIPrefineProbeConfig(output_dir=tmp_path / "probes"),
+        manifest_path=tmp_path / "manifest.json",
+        dry_run=False,
+    )
+    calls = {}
+
+    class FakeQuasiIsodynamicOptions:
+        def __init__(self, **kwargs):
+            calls["qi_options"] = kwargs
+
+    class FakeQuasiIsodynamicResidual:
+        def __init__(self, options):
+            self.options = options
+
+        def J(self, _ctx, _state):
+            return 0.0
+
+    class FakeLeastSquaresProblem:
+        @classmethod
+        def from_tuples(cls, tuples):
+            calls["tuples"] = tuples
+            return "problem"
+
+    class FakeFixedBoundaryVMEC:
+        @classmethod
+        def from_input(cls, input_file, **kwargs):
+            calls["from_input"] = {"input_file": input_file, **kwargs}
+            return "vmec"
+
+    def fake_least_squares_solve(vmec, problem, **kwargs):
+        calls["solve"] = {"vmec": vmec, "problem": problem, **kwargs}
+        return SimpleNamespace(
+            final_result={
+                "_history_dump": {
+                    "objective_initial": 3.0,
+                    "objective_final": 1.0,
+                    "qs_final": 0.4,
+                    "total_wall_time_s": 0.5,
+                }
+            },
+            stage_modes=[1],
+        )
+
+    fake_workflow = SimpleNamespace(
+        QuasiIsodynamicOptions=FakeQuasiIsodynamicOptions,
+        QuasiIsodynamicResidual=FakeQuasiIsodynamicResidual,
+        LeastSquaresProblem=FakeLeastSquaresProblem,
+        FixedBoundaryVMEC=FakeFixedBoundaryVMEC,
+        least_squares_solve=fake_least_squares_solve,
+    )
+
+    completed = mod.run_qi_prefine_probe(manifest["plans"][0], workflow=fake_workflow)
+
+    assert completed["status"] == "completed"
+    assert completed["result"]["objective_final"] == 1.0
+    assert calls["qi_options"]["nphi"] == 31
+    assert calls["from_input"]["max_mode"] == 1
+    assert calls["solve"]["max_nfev"] == 2
+    assert calls["solve"]["stage_modes"] == (1,)
+    assert calls["solve"]["save_stage_wouts"] is False

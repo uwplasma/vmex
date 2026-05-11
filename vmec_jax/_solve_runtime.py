@@ -95,3 +95,40 @@ def _default_scan_core(*, scan_core_env: str, scan_minimal: bool, fsq_total_targ
     if scan_core_env:
         return scan_core_env not in ("", "0", "false", "no")
     return bool(scan_minimal) and (fsq_total_target is not None)
+
+
+def _parse_iter_list(val: str) -> set[int] | None:
+    """Parse a comma-separated list of ints/ranges like '1,2,5-7'."""
+    if not val:
+        return None
+    out: set[int] = set()
+    for chunk in val.replace(" ", "").split(","):
+        if not chunk:
+            continue
+        if "-" in chunk:
+            a, b = chunk.split("-", 1)
+            try:
+                lo = int(a)
+                hi = int(b)
+            except ValueError:
+                continue
+            if hi < lo:
+                lo, hi = hi, lo
+            out.update(range(lo, hi + 1))
+        else:
+            try:
+                out.add(int(chunk))
+            except ValueError:
+                continue
+    return out if out else None
+
+
+def _dump_env_enabled(val: str) -> bool:
+    """Match solve.py's legacy debug-dump enablement check exactly."""
+    return bool(val) and val != "0"
+
+
+def _dump_iter_selected(*, iter_idx: int, iter_env: str) -> bool:
+    """Return whether a dump should run for an iteration env selector."""
+    iters = _parse_iter_list(iter_env)
+    return iters is None or int(iter_idx) in iters

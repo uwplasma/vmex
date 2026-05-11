@@ -95,6 +95,7 @@ def test_solve_reexports_runtime_helpers():
     assert solve_module._tree_has_tracer is solve_runtime._tree_has_tracer
     assert solve_module._scan_backend_name is solve_runtime._scan_backend_name
     assert solve_module._default_scan_core is solve_runtime._default_scan_core
+    assert solve_module._parse_iter_list is solve_runtime._parse_iter_list
 
 
 def test_solve_scan_chunk_settings_keeps_backend_monkeypatch_compat(monkeypatch):
@@ -120,3 +121,23 @@ def test_hash_array_bytes_includes_shape_and_dtype():
     assert solve_runtime._hash_array_bytes(a) != solve_runtime._hash_array_bytes(b)
     assert solve_runtime._hash_array_bytes(a) != solve_runtime._hash_array_bytes(c)
     assert solve_runtime._hash_array_bytes(a) == solve_runtime._hash_array_bytes(a.copy())
+
+
+def test_runtime_iter_list_parsing_matches_legacy_edges():
+    assert solve_runtime._parse_iter_list("") is None
+    assert solve_runtime._parse_iter_list(" 1, 3-5, 9 , bad, 8-6 ") == {1, 3, 4, 5, 6, 7, 8, 9}
+    assert solve_runtime._parse_iter_list("bad, nope") is None
+
+
+def test_runtime_dump_env_policy_preserves_legacy_truthiness():
+    assert not solve_runtime._dump_env_enabled("")
+    assert not solve_runtime._dump_env_enabled("0")
+    assert solve_runtime._dump_env_enabled("1")
+    assert solve_runtime._dump_env_enabled("false")
+    assert solve_runtime._dump_env_enabled(" 0 ")
+
+
+def test_runtime_dump_iter_selected_uses_optional_allowlist():
+    assert solve_runtime._dump_iter_selected(iter_idx=3, iter_env="")
+    assert solve_runtime._dump_iter_selected(iter_idx=3, iter_env="1,3-4")
+    assert not solve_runtime._dump_iter_selected(iter_idx=5, iter_env="1,3-4")

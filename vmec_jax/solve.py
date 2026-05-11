@@ -176,6 +176,9 @@ else:
 _hash_array_bytes = _solve_runtime._hash_array_bytes
 _tree_has_tracer = _solve_runtime._tree_has_tracer
 _scan_backend_name = _solve_runtime._scan_backend_name
+_parse_iter_list = _solve_runtime._parse_iter_list
+_dump_env_enabled = _solve_runtime._dump_env_enabled
+_dump_iter_selected = _solve_runtime._dump_iter_selected
 
 
 def _scan_chunk_settings(
@@ -299,31 +302,6 @@ class _ScanCarry(NamedTuple):
     fsql1_checkpoint: Any
 
 
-def _parse_iter_list(val: str) -> set[int] | None:
-    if not val:
-        return None
-    out: set[int] = set()
-    for chunk in val.replace(" ", "").split(","):
-        if not chunk:
-            continue
-        if "-" in chunk:
-            a, b = chunk.split("-", 1)
-            try:
-                lo = int(a)
-                hi = int(b)
-            except ValueError:
-                continue
-            if hi < lo:
-                lo, hi = hi, lo
-            out.update(range(lo, hi + 1))
-        else:
-            try:
-                out.add(int(chunk))
-            except ValueError:
-                continue
-    return out if out else None
-
-
 def _free_boundary_iter_controls(iter2: int, iter1: int, nvacskip: int) -> tuple[int, int]:
     """Simple free-boundary cadence helper (legacy/diagnostics path).
 
@@ -433,10 +411,9 @@ def _sample_free_boundary_external_field(*, state: VMECState, static) -> dict[st
 
 def _maybe_dump_tomnsps(*, frzl, static, iter_idx: int, label: str = "raw") -> None:
     env = os.getenv("VMEC_JAX_DUMP_TOMNSPS", "")
-    if not env or env == "0":
+    if not _dump_env_enabled(env):
         return
-    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
-    if iters is not None and int(iter_idx) not in iters:
+    if not _dump_iter_selected(iter_idx=iter_idx, iter_env=os.getenv("VMEC_JAX_DUMP_ITER", "")):
         return
     outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
@@ -469,10 +446,9 @@ def _maybe_dump_tomnsps(*, frzl, static, iter_idx: int, label: str = "raw") -> N
 
 def _maybe_dump_force_kernels(*, k, static, iter_idx: int, label: str = "raw") -> None:
     env = os.getenv("VMEC_JAX_DUMP_FORCE_KERNELS", "")
-    if not env or env == "0":
+    if not _dump_env_enabled(env):
         return
-    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
-    if iters is not None and int(iter_idx) not in iters:
+    if not _dump_iter_selected(iter_idx=iter_idx, iter_env=os.getenv("VMEC_JAX_DUMP_ITER", "")):
         return
     outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
@@ -564,10 +540,9 @@ def _maybe_dump_force_kernels(*, k, static, iter_idx: int, label: str = "raw") -
 
 def _maybe_dump_scalars(*, norms, iter_idx: int, ns: int) -> None:
     env = os.getenv("VMEC_JAX_DUMP_SCALARS", "")
-    if not env or env == "0":
+    if not _dump_env_enabled(env):
         return
-    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
-    if iters is not None and int(iter_idx) not in iters:
+    if not _dump_iter_selected(iter_idx=iter_idx, iter_env=os.getenv("VMEC_JAX_DUMP_ITER", "")):
         return
     outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
@@ -593,10 +568,9 @@ def _maybe_dump_scalars(*, norms, iter_idx: int, ns: int) -> None:
 
 def _maybe_dump_gcx2(*, gcr2, gcz2, gcl2, iter_idx: int, include_edge: bool, ns: int) -> None:
     env = os.getenv("VMEC_JAX_DUMP_GCX2", "")
-    if not env or env == "0":
+    if not _dump_env_enabled(env):
         return
-    iters = _parse_iter_list(os.getenv("VMEC_JAX_DUMP_ITER", ""))
-    if iters is not None and int(iter_idx) not in iters:
+    if not _dump_iter_selected(iter_idx=iter_idx, iter_env=os.getenv("VMEC_JAX_DUMP_ITER", "")):
         return
     outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)

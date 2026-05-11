@@ -27,6 +27,14 @@ from .vmec_realspace import (
 )
 from .vmec_residue import vmec_pwint_from_trig
 from .wout_schema import WoutData, _bool_from_nc, _nc_scalar, assert_main_modes_match_wout
+from .wout_io import (
+    read_mode_table,
+    read_optional_int_scalar,
+    read_type_field,
+    write_fixed_width_string_variable,
+    write_float_variable,
+    write_int_variable,
+)
 from .vmec_tomnsp import vmec_trig_tables
 
 
@@ -4207,41 +4215,16 @@ def read_wout(path: str | Path) -> WoutData:
         if ns <= 0 or mpol <= 0 or ntor < 0 or nfp <= 0:
             raise ValueError(f"Incomplete or masked wout scalar metadata in {path}")
 
-        xm_raw = ds.variables["xm"][:]
-        xn_raw = ds.variables["xn"][:]
-        xm_nyq_raw = ds.variables["xm_nyq"][:]
-        xn_nyq_raw = ds.variables["xn_nyq"][:]
-        for raw_name, raw in (
-            ("xm", xm_raw),
-            ("xn", xn_raw),
-            ("xm_nyq", xm_nyq_raw),
-            ("xn_nyq", xn_nyq_raw),
-        ):
-            if np.ma.isMaskedArray(raw):
-                mask = np.asarray(raw.mask)
-                if mask.size > 0 and bool(np.all(mask)):
-                    raise ValueError(f"Incomplete or masked wout mode metadata ({raw_name}) in {path}")
-
-        xm = np.asarray(np.ma.filled(xm_raw, 0.0), dtype=int)
-        xn = np.asarray(np.ma.filled(xn_raw, 0.0), dtype=int)
-        xm_nyq = np.asarray(np.ma.filled(xm_nyq_raw, 0.0), dtype=int)
-        xn_nyq = np.asarray(np.ma.filled(xn_nyq_raw, 0.0), dtype=int)
-        mnmax = int(_nc_scalar(ds.variables.get("mnmax", xm.size)[:], xm.size, as_int=True)) if "mnmax" in ds.variables else int(xm.size)
-        mnmax_nyq = (
-            int(_nc_scalar(ds.variables.get("mnmax_nyq", xm_nyq.size)[:], xm_nyq.size, as_int=True))
-            if "mnmax_nyq" in ds.variables
-            else int(xm_nyq.size)
-        )
-        mpol_nyq = (
-            int(_nc_scalar(ds.variables.get("mpol_nyq", np.max(xm_nyq) if xm_nyq.size else 0)[:], np.max(xm_nyq) if xm_nyq.size else 0, as_int=True))
-            if "mpol_nyq" in ds.variables
-            else int(np.max(xm_nyq)) if xm_nyq.size else 0
-        )
-        ntor_nyq = (
-            int(_nc_scalar(ds.variables.get("ntor_nyq", np.max(np.abs(xn_nyq // nfp)) if xn_nyq.size else 0)[:], np.max(np.abs(xn_nyq // nfp)) if xn_nyq.size else 0, as_int=True))
-            if "ntor_nyq" in ds.variables
-            else int(np.max(np.abs(xn_nyq // nfp))) if xn_nyq.size else 0
-        )
+        xm = read_mode_table(ds.variables, "xm", path=path)
+        xn = read_mode_table(ds.variables, "xn", path=path)
+        xm_nyq = read_mode_table(ds.variables, "xm_nyq", path=path)
+        xn_nyq = read_mode_table(ds.variables, "xn_nyq", path=path)
+        mpol_nyq_default = int(np.max(xm_nyq)) if xm_nyq.size else 0
+        ntor_nyq_default = int(np.max(np.abs(xn_nyq // nfp))) if xn_nyq.size else 0
+        mnmax = read_optional_int_scalar(ds.variables, "mnmax", xm.size)
+        mnmax_nyq = read_optional_int_scalar(ds.variables, "mnmax_nyq", xm_nyq.size)
+        mpol_nyq = read_optional_int_scalar(ds.variables, "mpol_nyq", mpol_nyq_default)
+        ntor_nyq = read_optional_int_scalar(ds.variables, "ntor_nyq", ntor_nyq_default)
 
         rmnc = np.asarray(ds.variables["rmnc"][:])
         rmns = np.asarray(ds.variables.get("rmns", np.zeros_like(rmnc))[:])
@@ -4337,24 +4320,8 @@ def read_wout(path: str | Path) -> WoutData:
         ac_aux_s = np.asarray(ds.variables.get("ac_aux_s", -np.ones((101,), dtype=float))[:])
         ac_aux_f = np.asarray(ds.variables.get("ac_aux_f", np.zeros((101,), dtype=float))[:])
 
-        def _read_type_field(name: str) -> str:
-            if name not in ds.variables:
-                return ""
-            raw = np.asarray(ds.variables[name][:])
-            if raw.dtype.kind in ("S", "U"):
-                if raw.ndim == 0:
-                    out = str(raw)
-                else:
-                    out = b"".join(raw.astype("S1")).decode("utf-8", "ignore")
-            else:
-                try:
-                    out = "".join(raw.tolist())
-                except Exception:
-                    out = str(raw)
-            return out.rstrip()
-
-        pcurr_type = _read_type_field("pcurr_type")
-        piota_type = _read_type_field("piota_type")
+        pcurr_type = read_type_field(ds.variables, "pcurr_type")
+        piota_type = read_type_field(ds.variables, "piota_type")
 
     return WoutData(
         path=path,
@@ -4506,130 +4473,116 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
         ds.createDimension("preset", preset)
         ds.createDimension("dim_00020", 20)
 
-        def _var_i(name: str, dims: tuple[str, ...], data: np.ndarray) -> None:
-            v = ds.createVariable(name, "i4", dims)
-            v[:] = np.asarray(data, dtype=np.int32)
-
-        def _var_f(name: str, dims: tuple[str, ...], data: np.ndarray) -> None:
-            v = ds.createVariable(name, "f8", dims)
-            v[:] = np.asarray(data, dtype=np.float64)
-
         # Scalars.
-        _var_i("ns", (), np.asarray(ns))
-        _var_i("mpol", (), np.asarray(int(wout.mpol)))
-        _var_i("ntor", (), np.asarray(int(wout.ntor)))
-        _var_i("nfp", (), np.asarray(int(wout.nfp)))
-        _var_i("signgs", (), np.asarray(int(wout.signgs)))
-        _var_i("lasym__logical__", (), np.asarray(int(bool(wout.lasym))))
-        _var_i("mnmax", (), np.asarray(int(getattr(wout, "mnmax", mnmax))))
-        _var_i("mpol_nyq", (), np.asarray(int(getattr(wout, "mpol_nyq", np.max(np.asarray(wout.xm_nyq)) if mnmax_nyq > 0 else 0))))
-        _var_i(
+        write_int_variable(ds, "ns", (), np.asarray(ns))
+        write_int_variable(ds, "mpol", (), np.asarray(int(wout.mpol)))
+        write_int_variable(ds, "ntor", (), np.asarray(int(wout.ntor)))
+        write_int_variable(ds, "nfp", (), np.asarray(int(wout.nfp)))
+        write_int_variable(ds, "signgs", (), np.asarray(int(wout.signgs)))
+        write_int_variable(ds, "lasym__logical__", (), np.asarray(int(bool(wout.lasym))))
+        write_int_variable(ds, "mnmax", (), np.asarray(int(getattr(wout, "mnmax", mnmax))))
+        write_int_variable(ds, "mpol_nyq", (), np.asarray(int(getattr(wout, "mpol_nyq", np.max(np.asarray(wout.xm_nyq)) if mnmax_nyq > 0 else 0))))
+        write_int_variable(
+            ds,
             "ntor_nyq",
             (),
             np.asarray(int(getattr(wout, "ntor_nyq", np.max(np.abs(np.asarray(wout.xn_nyq) // int(wout.nfp))) if mnmax_nyq > 0 else 0))),
         )
-        _var_i("mnmax_nyq", (), np.asarray(int(getattr(wout, "mnmax_nyq", mnmax_nyq))))
+        write_int_variable(ds, "mnmax_nyq", (), np.asarray(int(getattr(wout, "mnmax_nyq", mnmax_nyq))))
 
-        _var_f("wb", (), np.asarray(float(wout.wb)))
-        _var_f("volume_p", (), np.asarray(float(wout.volume_p)))
-        _var_f("gamma", (), np.asarray(float(wout.gamma)))
-        _var_f("wp", (), np.asarray(float(wout.wp)))
-        _var_f("fsqr", (), np.asarray(float(wout.fsqr)))
-        _var_f("fsqz", (), np.asarray(float(wout.fsqz)))
-        _var_f("fsql", (), np.asarray(float(wout.fsql)))
+        write_float_variable(ds, "wb", (), np.asarray(float(wout.wb)))
+        write_float_variable(ds, "volume_p", (), np.asarray(float(wout.volume_p)))
+        write_float_variable(ds, "gamma", (), np.asarray(float(wout.gamma)))
+        write_float_variable(ds, "wp", (), np.asarray(float(wout.wp)))
+        write_float_variable(ds, "fsqr", (), np.asarray(float(wout.fsqr)))
+        write_float_variable(ds, "fsqz", (), np.asarray(float(wout.fsqz)))
+        write_float_variable(ds, "fsql", (), np.asarray(float(wout.fsql)))
 
         # Mode tables.
         # Keep the scalar mode-count metadata as integers, but store the mode
         # tables themselves as floats to match the legacy libstell/SFINCS wout
         # convention while remaining readable by integer-oriented consumers.
-        _var_f("xm", ("mn_mode",), np.asarray(wout.xm))
-        _var_f("xn", ("mn_mode",), np.asarray(wout.xn))
-        _var_f("xm_nyq", ("mn_mode_nyq",), np.asarray(wout.xm_nyq))
-        _var_f("xn_nyq", ("mn_mode_nyq",), np.asarray(wout.xn_nyq))
+        write_float_variable(ds, "xm", ("mn_mode",), np.asarray(wout.xm))
+        write_float_variable(ds, "xn", ("mn_mode",), np.asarray(wout.xn))
+        write_float_variable(ds, "xm_nyq", ("mn_mode_nyq",), np.asarray(wout.xm_nyq))
+        write_float_variable(ds, "xn_nyq", ("mn_mode_nyq",), np.asarray(wout.xn_nyq))
 
         # Geometry coefficients (full mesh).
-        _var_f("rmnc", ("radius", "mn_mode"), np.asarray(wout.rmnc))
-        _var_f("rmns", ("radius", "mn_mode"), np.asarray(wout.rmns))
-        _var_f("zmnc", ("radius", "mn_mode"), np.asarray(wout.zmnc))
-        _var_f("zmns", ("radius", "mn_mode"), np.asarray(wout.zmns))
-        _var_f("lmnc", ("radius", "mn_mode"), np.asarray(wout.lmnc))
-        _var_f("lmns", ("radius", "mn_mode"), np.asarray(wout.lmns))
+        write_float_variable(ds, "rmnc", ("radius", "mn_mode"), np.asarray(wout.rmnc))
+        write_float_variable(ds, "rmns", ("radius", "mn_mode"), np.asarray(wout.rmns))
+        write_float_variable(ds, "zmnc", ("radius", "mn_mode"), np.asarray(wout.zmnc))
+        write_float_variable(ds, "zmns", ("radius", "mn_mode"), np.asarray(wout.zmns))
+        write_float_variable(ds, "lmnc", ("radius", "mn_mode"), np.asarray(wout.lmnc))
+        write_float_variable(ds, "lmns", ("radius", "mn_mode"), np.asarray(wout.lmns))
 
         # Flux functions / profiles.
-        _var_f("phipf", ("radius",), np.asarray(wout.phipf))
-        _var_f("chipf", ("radius",), np.asarray(wout.chipf))
-        _var_f("phips", ("radius",), np.asarray(wout.phips))
-        _var_f("iotaf", ("radius",), np.asarray(wout.iotaf))
-        _var_f("iotas", ("radius",), np.asarray(wout.iotas))
-        _var_f("phi", ("radius",), np.asarray(getattr(wout, "phi", np.zeros((ns,), dtype=float))))
+        write_float_variable(ds, "phipf", ("radius",), np.asarray(wout.phipf))
+        write_float_variable(ds, "chipf", ("radius",), np.asarray(wout.chipf))
+        write_float_variable(ds, "phips", ("radius",), np.asarray(wout.phips))
+        write_float_variable(ds, "iotaf", ("radius",), np.asarray(wout.iotaf))
+        write_float_variable(ds, "iotas", ("radius",), np.asarray(wout.iotas))
+        write_float_variable(ds, "phi", ("radius",), np.asarray(getattr(wout, "phi", np.zeros((ns,), dtype=float))))
 
         # Nyquist Fourier fields.
-        _var_f("gmnc", ("radius", "mn_mode_nyq"), np.asarray(wout.gmnc))
-        _var_f("gmns", ("radius", "mn_mode_nyq"), np.asarray(wout.gmns))
-        _var_f("bsupumnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bsupumnc))
-        _var_f("bsupumns", ("radius", "mn_mode_nyq"), np.asarray(wout.bsupumns))
-        _var_f("bsupvmnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bsupvmnc))
-        _var_f("bsupvmns", ("radius", "mn_mode_nyq"), np.asarray(wout.bsupvmns))
+        write_float_variable(ds, "gmnc", ("radius", "mn_mode_nyq"), np.asarray(wout.gmnc))
+        write_float_variable(ds, "gmns", ("radius", "mn_mode_nyq"), np.asarray(wout.gmns))
+        write_float_variable(ds, "bsupumnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bsupumnc))
+        write_float_variable(ds, "bsupumns", ("radius", "mn_mode_nyq"), np.asarray(wout.bsupumns))
+        write_float_variable(ds, "bsupvmnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bsupvmnc))
+        write_float_variable(ds, "bsupvmns", ("radius", "mn_mode_nyq"), np.asarray(wout.bsupvmns))
 
-        _var_f("bsubumnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubumnc))
-        _var_f("bsubumns", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubumns))
-        _var_f("bsubvmnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubvmnc))
-        _var_f("bsubvmns", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubvmns))
-        _var_f("bsubsmns", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubsmns))
-        _var_f("bsubsmnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubsmnc))
+        write_float_variable(ds, "bsubumnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubumnc))
+        write_float_variable(ds, "bsubumns", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubumns))
+        write_float_variable(ds, "bsubvmnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubvmnc))
+        write_float_variable(ds, "bsubvmns", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubvmns))
+        write_float_variable(ds, "bsubsmns", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubsmns))
+        write_float_variable(ds, "bsubsmnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubsmnc))
 
-        _var_f("bmnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bmnc))
-        _var_f("bmns", ("radius", "mn_mode_nyq"), np.asarray(wout.bmns))
+        write_float_variable(ds, "bmnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bmnc))
+        write_float_variable(ds, "bmns", ("radius", "mn_mode_nyq"), np.asarray(wout.bmns))
 
         # 1D radial fields.
-        _var_f("vp", ("radius",), np.asarray(wout.vp))
-        _var_f("pres", ("radius",), np.asarray(pres_pa))
-        _var_f("presf", ("radius",), np.asarray(presf_pa))
-        _var_f("equif", ("radius",), np.asarray(getattr(wout, "equif", np.zeros((ns,), dtype=float))))
-        _var_f("buco", ("radius",), np.asarray(getattr(wout, "buco", np.zeros((ns,), dtype=float))))
-        _var_f("bvco", ("radius",), np.asarray(getattr(wout, "bvco", np.zeros((ns,), dtype=float))))
-        _var_f("jcuru", ("radius",), np.asarray(getattr(wout, "jcuru", np.zeros((ns,), dtype=float))))
-        _var_f("jcurv", ("radius",), np.asarray(getattr(wout, "jcurv", np.zeros((ns,), dtype=float))))
-        _var_f("jdotb", ("radius",), np.asarray(getattr(wout, "jdotb", np.zeros((ns,), dtype=float))))
-        _var_f("bdotb", ("radius",), np.asarray(getattr(wout, "bdotb", np.zeros((ns,), dtype=float))))
-        _var_f("bdotgradv", ("radius",), np.asarray(getattr(wout, "bdotgradv", np.zeros((ns,), dtype=float))))
-        _var_f("DMerc", ("radius",), np.asarray(getattr(wout, "DMerc", np.zeros((ns,), dtype=float))))
-        _var_f("DShear", ("radius",), np.asarray(getattr(wout, "Dshear", np.zeros((ns,), dtype=float))))
-        _var_f("DWell", ("radius",), np.asarray(getattr(wout, "Dwell", np.zeros((ns,), dtype=float))))
-        _var_f("DCurr", ("radius",), np.asarray(getattr(wout, "Dcurr", np.zeros((ns,), dtype=float))))
-        _var_f("DGeod", ("radius",), np.asarray(getattr(wout, "Dgeod", np.zeros((ns,), dtype=float))))
+        write_float_variable(ds, "vp", ("radius",), np.asarray(wout.vp))
+        write_float_variable(ds, "pres", ("radius",), np.asarray(pres_pa))
+        write_float_variable(ds, "presf", ("radius",), np.asarray(presf_pa))
+        write_float_variable(ds, "equif", ("radius",), np.asarray(getattr(wout, "equif", np.zeros((ns,), dtype=float))))
+        write_float_variable(ds, "buco", ("radius",), np.asarray(getattr(wout, "buco", np.zeros((ns,), dtype=float))))
+        write_float_variable(ds, "bvco", ("radius",), np.asarray(getattr(wout, "bvco", np.zeros((ns,), dtype=float))))
+        write_float_variable(ds, "jcuru", ("radius",), np.asarray(getattr(wout, "jcuru", np.zeros((ns,), dtype=float))))
+        write_float_variable(ds, "jcurv", ("radius",), np.asarray(getattr(wout, "jcurv", np.zeros((ns,), dtype=float))))
+        write_float_variable(ds, "jdotb", ("radius",), np.asarray(getattr(wout, "jdotb", np.zeros((ns,), dtype=float))))
+        write_float_variable(ds, "bdotb", ("radius",), np.asarray(getattr(wout, "bdotb", np.zeros((ns,), dtype=float))))
+        write_float_variable(ds, "bdotgradv", ("radius",), np.asarray(getattr(wout, "bdotgradv", np.zeros((ns,), dtype=float))))
+        write_float_variable(ds, "DMerc", ("radius",), np.asarray(getattr(wout, "DMerc", np.zeros((ns,), dtype=float))))
+        write_float_variable(ds, "DShear", ("radius",), np.asarray(getattr(wout, "Dshear", np.zeros((ns,), dtype=float))))
+        write_float_variable(ds, "DWell", ("radius",), np.asarray(getattr(wout, "Dwell", np.zeros((ns,), dtype=float))))
+        write_float_variable(ds, "DCurr", ("radius",), np.asarray(getattr(wout, "Dcurr", np.zeros((ns,), dtype=float))))
+        write_float_variable(ds, "DGeod", ("radius",), np.asarray(getattr(wout, "Dgeod", np.zeros((ns,), dtype=float))))
 
         # Iteration trace (optional).
-        _var_f("fsqt", ("nstore_seq",), np.asarray(wout.fsqt))
+        write_float_variable(ds, "fsqt", ("nstore_seq",), np.asarray(wout.fsqt))
 
         # Axis coefficients and geometric scalars.
-        _var_f("raxis_cc", ("n_tor",), np.asarray(getattr(wout, "raxis_cc", np.zeros((n_tor,), dtype=float))))
-        _var_f("zaxis_cs", ("n_tor",), np.asarray(getattr(wout, "zaxis_cs", np.zeros((n_tor,), dtype=float))))
-        _var_f("raxis_cs", ("n_tor",), np.asarray(getattr(wout, "raxis_cs", np.zeros((n_tor,), dtype=float))))
-        _var_f("zaxis_cc", ("n_tor",), np.asarray(getattr(wout, "zaxis_cc", np.zeros((n_tor,), dtype=float))))
+        write_float_variable(ds, "raxis_cc", ("n_tor",), np.asarray(getattr(wout, "raxis_cc", np.zeros((n_tor,), dtype=float))))
+        write_float_variable(ds, "zaxis_cs", ("n_tor",), np.asarray(getattr(wout, "zaxis_cs", np.zeros((n_tor,), dtype=float))))
+        write_float_variable(ds, "raxis_cs", ("n_tor",), np.asarray(getattr(wout, "raxis_cs", np.zeros((n_tor,), dtype=float))))
+        write_float_variable(ds, "zaxis_cc", ("n_tor",), np.asarray(getattr(wout, "zaxis_cc", np.zeros((n_tor,), dtype=float))))
 
-        _var_f("Aminor_p", (), np.asarray(float(getattr(wout, "Aminor_p", 0.0))))
-        _var_f("Rmajor_p", (), np.asarray(float(getattr(wout, "Rmajor_p", 0.0))))
-        _var_f("aspect", (), np.asarray(float(getattr(wout, "aspect", 0.0))))
-        _var_f("betatotal", (), np.asarray(float(getattr(wout, "betatotal", 0.0))))
-        _var_f("betapol", (), np.asarray(float(getattr(wout, "betapol", 0.0))))
-        _var_f("betator", (), np.asarray(float(getattr(wout, "betator", 0.0))))
-        _var_f("betaxis", (), np.asarray(float(getattr(wout, "betaxis", 0.0))))
-        _var_f("ctor", (), np.asarray(float(getattr(wout, "ctor", 0.0))))
+        write_float_variable(ds, "Aminor_p", (), np.asarray(float(getattr(wout, "Aminor_p", 0.0))))
+        write_float_variable(ds, "Rmajor_p", (), np.asarray(float(getattr(wout, "Rmajor_p", 0.0))))
+        write_float_variable(ds, "aspect", (), np.asarray(float(getattr(wout, "aspect", 0.0))))
+        write_float_variable(ds, "betatotal", (), np.asarray(float(getattr(wout, "betatotal", 0.0))))
+        write_float_variable(ds, "betapol", (), np.asarray(float(getattr(wout, "betapol", 0.0))))
+        write_float_variable(ds, "betator", (), np.asarray(float(getattr(wout, "betator", 0.0))))
+        write_float_variable(ds, "betaxis", (), np.asarray(float(getattr(wout, "betaxis", 0.0))))
+        write_float_variable(ds, "ctor", (), np.asarray(float(getattr(wout, "ctor", 0.0))))
 
-        _var_f("ac_aux_s", ("ndfmax",), np.asarray(ac_aux_s))
-        _var_f("ac_aux_f", ("ndfmax",), np.asarray(ac_aux_f))
-        _var_f("ac", ("preset",), np.asarray(ac))
+        write_float_variable(ds, "ac_aux_s", ("ndfmax",), np.asarray(ac_aux_s))
+        write_float_variable(ds, "ac_aux_f", ("ndfmax",), np.asarray(ac_aux_f))
+        write_float_variable(ds, "ac", ("preset",), np.asarray(ac))
 
-        pcurr = str(getattr(wout, "pcurr_type", "") or "")
-        pcurr = (pcurr[:20]).ljust(20)
-        v = ds.createVariable("pcurr_type", "S1", ("dim_00020",))
-        v[:] = np.asarray(list(pcurr), dtype="S1")
-
-        piota = str(getattr(wout, "piota_type", "") or "")
-        piota = (piota[:20]).ljust(20)
-        v = ds.createVariable("piota_type", "S1", ("dim_00020",))
-        v[:] = np.asarray(list(piota), dtype="S1")
+        write_fixed_width_string_variable(ds, "pcurr_type", getattr(wout, "pcurr_type", ""))
+        write_fixed_width_string_variable(ds, "piota_type", getattr(wout, "piota_type", ""))
 
 
 def wout_minimal_from_fixed_boundary(

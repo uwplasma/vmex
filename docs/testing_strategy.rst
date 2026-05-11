@@ -52,9 +52,9 @@ the recommended local escalation path.
      - After changing QI diagnostics, Boozer input handling, smooth-QI residual
        settings, or first-class QI diagnostic record fields.
    * - QI ranking/report smoke
-     - ``pytest -q tests/test_qi_objective_component_report.py tests/test_qs_ess_render_smoke.py``
-     - After changing QI branch-ranking metrics, sweep summary fields, or
-       renderer selection rules.
+     - ``pytest -q tests/test_qi_objective_component_report.py tests/test_qi_seed_suitability_audit.py tests/test_qs_ess_render_smoke.py``
+     - After changing QI branch-ranking metrics, seed audit/prefine manifests,
+       sweep summary fields, or renderer selection rules.
    * - Bounded physics smoke
      - ``RUN_FULL=1 pytest -q tests/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[circular_tokamak] tests/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[nfp4_QH_warm_start] tests/test_driver_api.py::test_run_free_boundary_smoke_on_bundled_small_case``
      - Before merging solver changes that affect fixed/free-boundary physics.
@@ -207,6 +207,10 @@ QI seed-robustness gates:
   no-optimization preflight before a multi-seed QI sweep.  It ranks existing
   solved seeds and records missing optional reference checkouts instead of
   making the default gate machine-specific.
+- Use ``--prefine-probes plan`` to write a hard-capped QI-only probe manifest
+  before any actual seed-robustness run.  The manifest is a review artifact:
+  it makes selected seeds, run commands, and output paths explicit before
+  expensive probes start.
 - A full seed-robust QI claim requires starting constrained QI from QI, QP, QH,
   QA, and a simple non-omnigenous seed, then auditing convergence, legacy QI
   score, engineering constraints, and Boozer contour plots.  That matrix is
