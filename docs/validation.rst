@@ -121,7 +121,7 @@ possible seed.  The fast local QI gate is:
 
 .. code-block:: bash
 
-   pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_qi_objective_component_report.py tests/test_booz_input.py
+   pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_qi_objective_component_report.py tests/test_qi_seed_suitability_audit.py tests/test_booz_input.py
 
 This gate covers smooth Boozer-space QI residuals, the legacy branch/shuffle
 diagnostic used for ranking, mirror-ratio and elongation records, Boozer input
@@ -153,6 +153,18 @@ Rows are ranked by the combined smooth-plus-legacy QI score, while engineering
 constraint failures are reported separately so a QI-like seed with a fixable
 mirror/aspect violation is not hidden behind a non-QI seed that merely satisfies
 the engineering constraints.
+
+To turn the audit into a bounded seed-robustness worklist without launching a
+full sweep, add a dry-run prefine manifest:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --prefine-probes plan --prefine-manifest results/qi_seed_audit/prefine_manifest.json
+
+The manifest records top-ranked seeds, hard-capped QI-only prefine settings,
+expected output files, and exact commands for running one tiny probe at a time.
+Use ``--prefine-probes run`` only when deliberately executing those capped
+probes.
 
 Validated ``wout`` fields
 --------------------------
