@@ -125,12 +125,87 @@ warm runtimes competitive with or faster than VMEC2000 on CPU:
   CPU host-update path unchanged.  Set ``VMEC_JAX_JIT_STRICT_UPDATE=0`` only
   for diagnostics.
 
-**14. Residual-derived GPU history**
-  For standard QS residual factories, accepted-point scan Jacobians reconstruct
-  aspect-ratio and QS history metrics directly from the residual vector.  This
-  avoids a second accepted-point GPU solve after every Jacobian callback.  The
-  conservative state-backed path is still used for custom residuals and
-  histories that request an explicit ``iota_fn``.
+**14. Residual-derived accepted-point history**
+  For standard QS residual factories, accepted-point Jacobian callbacks
+  reconstruct aspect-ratio and QS history metrics directly from the cached
+  residual vector.  This avoids a second accepted-point solve after every
+  Jacobian callback.  The conservative state-backed path is still used for
+  custom residuals and histories that request an explicit ``iota_fn``.
+
+CPU/GPU profiling playbook
+--------------------------
+
+Use the diagnostics scripts from the repository root.  Always record whether a
+timing is cold or warm, the selected JAX backend, JAX/JAXLIB versions, input
+deck, ``max_mode`` or iteration budget, and whether the command is measuring
+raw solver throughput or optimization callback overhead.
+
+For CPU-only timings, force a CPU process with ``JAX_PLATFORMS=cpu`` or an
+explicit ``--solver-device cpu``.  For GPU timings, use
+``JAX_PLATFORM_NAME=gpu`` plus ``--solver-device gpu``.  On NVIDIA-only JAX
+installs, ``JAX_PLATFORMS=cuda`` is also valid; avoid ``JAX_PLATFORMS=gpu`` on
+mixed CUDA/ROCm installations because some JAX versions try to initialize both
+backends.
+
+Raw fixed-boundary throughput:
+
+.. code-block:: bash
+
+   JAX_PLATFORMS=cpu JAX_ENABLE_X64=1 PYTHONPATH=. python tools/diagnostics/profile_fixed_boundary.py \
+     --input examples/data/input.nfp4_QH_warm_start \
+     --iters 20 \
+     --simple-profile \
+     --no-multigrid \
+     --no-auto-cli-policy \
+     --solver-mode accelerated \
+     --use-scan \
+     --solver-device cpu \
+     --json-out /tmp/vmec_jax_qh20_raw_cpu.json
+
+   JAX_PLATFORM_NAME=gpu JAX_ENABLE_X64=1 PYTHONPATH=. python tools/diagnostics/profile_fixed_boundary.py \
+     --input examples/data/input.nfp4_QH_warm_start \
+     --iters 20 \
+     --simple-profile \
+     --no-multigrid \
+     --no-auto-cli-policy \
+     --solver-mode accelerated \
+     --use-scan \
+     --solver-device gpu \
+     --json-out /tmp/vmec_jax_qh20_raw_gpu.json
+
+Short exact-optimizer runs:
+
+.. code-block:: bash
+
+   JAX_PLATFORMS=cpu PYTHONPATH=. python tools/diagnostics/profile_exact_optimizer.py \
+     --problem qh --max-mode 3 --max-nfev 2 --run-repeats 3 \
+     --inner-max-iter 120 --trial-max-iter 120 --solver-device cpu \
+     --json-out /tmp/vmec_jax_qh_m3_cpu.json
+
+   JAX_PLATFORM_NAME=gpu PYTHONPATH=. python tools/diagnostics/profile_exact_optimizer.py \
+     --problem qh --max-mode 3 --max-nfev 2 --run-repeats 3 \
+     --inner-max-iter 120 --trial-max-iter 120 --solver-device gpu \
+     --vmec-timing --json-out /tmp/vmec_jax_qh_m3_gpu.json
+
+Accepted-point Jacobian callback cost at realistic new optimizer points:
+
+.. code-block:: bash
+
+   JAX_PLATFORMS=cpu PYTHONPATH=. python tools/diagnostics/profile_exact_optimizer.py \
+     --problem qh --max-mode 2 --callback jacobian --repeats 3 \
+     --perturb-scale 1e-4 --inner-max-iter 80 --trial-max-iter 40 \
+     --solver-device cpu --vmec-timing --json-out /tmp/qh_m2_cpu_jacobian.json
+
+   JAX_PLATFORM_NAME=gpu PYTHONPATH=. python tools/diagnostics/profile_exact_optimizer.py \
+     --problem qh --max-mode 2 --callback jacobian --repeats 3 \
+     --perturb-scale 1e-4 --inner-max-iter 80 --trial-max-iter 40 \
+     --solver-device gpu --vmec-timing --json-out /tmp/qh_m2_gpu_jacobian.json
+
+Use ``--trace-outdir`` for TensorBoard/XProf traces and
+``--device-memory-profile-out`` for JAX device-memory snapshots when GPU memory
+or launch overhead is the bottleneck.  Use ``--no-auto-cli-policy`` only when
+you want raw solver throughput; omit it when measuring the public
+``run_fixed_boundary`` policy that users see through the CLI/API.
 
 Exact optimizer profiling
 -------------------------
@@ -150,45 +225,44 @@ tape construction, checkpoint-tape JVP replay, residual tangent projection, and
 term for ``max_mode=2`` and ``max_mode=3`` is
 ``jacobian_tape_replay``.  Ordinary fixed-boundary solves can benefit from GPU
 ``lax.scan`` after warmup.  For exact optimization, accepted-point Jacobians use
-the discrete-adjoint tape path on CPU and the scan-differentiated path on GPU by
-default.  May 2026 repeat-run profiling showed that this device-aware policy
-keeps the faster CPU path while reducing warm GPU QH mode-1/mode-3 callback
-time.  Set ``VMEC_JAX_OPT_EXACT_PATH=tape`` or
-``VMEC_JAX_OPT_EXACT_PATH=scan`` to force one accepted-point path for parity or
-profiling.  Relaxed trial residuals default to the trace-compatible scan forward
+the discrete-adjoint tape path on both CPU and GPU by default.  May 2026
+``office`` RTX A4000 profiling showed that forced scan accepted-point Jacobians
+are still useful for parity/profiling experiments but can be much slower than
+tape on production-like cold GPU callbacks.  Set
+``VMEC_JAX_OPT_EXACT_PATH=tape`` or ``VMEC_JAX_OPT_EXACT_PATH=scan`` to force
+one accepted-point path for parity or profiling.  Relaxed trial residuals
+default to the trace-compatible scan forward
 path because the same profiling showed lower warm trial-solve cost for QH
 mode-1/mode-3 on both CPU and GPU.  Set ``VMEC_JAX_OPT_TRIAL_SCAN=0`` to force
 the old non-scan trial path for diagnostics.  ``solver_device=None``, ``"auto"``,
 and ``"default"`` inherit JAX's active backend; pass ``solver_device="cpu"`` or
 ``"gpu"`` only when you want an explicit override.
 
-Representative May 2026 warm-repeat timings on the QH warm-start diagnostic
-(``max_nfev=2``, ``inner/trial_max_iter=120``) were:
+Representative May 2026 callback timings were:
 
 .. list-table::
    :header-rows: 1
 
    * - Case
-     - CPU policy
-     - CPU wall time
-     - GPU policy
-     - GPU wall time
-   * - QH ``max_mode=1``
-     - tape exact + scan trial
-     - ``2.36 s``
-     - scan exact + scan trial
-     - ``3.71 s``
-   * - QH ``max_mode=3``
-     - tape exact + scan trial
-     - ``3.54 s``
-     - scan exact + scan trial
-     - ``4.02 s``
+     - Device/path
+     - Budget
+     - Wall time
+   * - QA ``max_mode=2`` dense Jacobian callback
+     - local CPU, tape exact
+     - ``inner_max_iter=40``, ``trial_max_iter=20``
+     - ``9.54 s``
+   * - QH ``max_mode=1`` dense Jacobian callback
+     - ``office`` RTX A4000, forced tape exact
+     - ``inner_max_iter=20``, ``trial_max_iter=20``
+     - ``36.70 s``
+   * - QH ``max_mode=1`` dense Jacobian callback
+     - ``office`` RTX A4000, forced scan exact
+     - ``inner_max_iter=20``, ``trial_max_iter=20``
+     - ``102.95 s``
 
-These short cases are still CPU-faster overall, but the GPU policy materially
-improves over the previous GPU tape/trial-loop path (``11.25 s`` for QH
-``max_mode=1`` and ``8.18 s`` for QH ``max_mode=3`` in the same diagnostic).
-The final GPU history shortcut also improves over the earlier scan-exact GPU
-policy, which took ``5.40 s`` and ``4.92 s`` respectively on these two cases.
+These short cases are still CPU-faster overall.  The production default is
+therefore the tape exact path on GPU; scan exact remains available through
+``VMEC_JAX_OPT_EXACT_PATH=scan`` for targeted diagnostics.
 
 For same-process warmup studies, repeat a callback at the same point or repeat
 the whole short optimizer run while keeping compiled executables warm:
@@ -635,18 +709,21 @@ least-squares on that small case.  The next useful step is therefore better
 matrix-free/scalar trust-region behavior, not switching the default
 least-squares path.
 
-The accepted-point exact path is device-aware: CPU uses the discrete-adjoint
-tape path, while GPU uses the scan-differentiated exact path.  April 2026
-diagnostics showed that a naive cold scan exact Jacobian could be very slow, so
-the GPU path now avoids redundant residual-only scan executables, uses scan
-trial residuals, and reconstructs standard QS history metrics from residuals
-instead of re-solving the accepted state after every Jacobian.  On the May 2026
-RTX A4000 QH warm-start diagnostic, this reduced QH ``max_mode=1`` GPU warm
-runtime from ``11.25 s`` on the old tape/trial-loop path to ``3.71 s``; QH
-``max_mode=3`` went from ``8.18 s`` to ``4.02 s``.  CPU remains faster for the
-small/medium warm diagnostics, so production runs still document both CPU and
-GPU timings rather than claiming blanket GPU speedups.  GPU sweep production
-runs use calibrated optimizer budgets (currently ``inner_max_iter =
+The accepted-point exact path uses the discrete-adjoint tape path by default on
+both CPU and GPU.  April and May 2026 diagnostics showed that a naive cold scan
+exact Jacobian can be very slow, so scan remains an explicit
+``VMEC_JAX_OPT_EXACT_PATH=scan`` diagnostic path rather than the GPU default.
+The production optimizer now avoids redundant residual-only exact executables,
+uses scan trial residuals, and reconstructs standard QS history metrics from
+cached accepted-point residuals instead of re-solving the accepted state after
+every Jacobian.  In a fresh May 2026 ``office`` RTX A4000 profile of QH
+``max_mode=1`` with ``inner_max_iter=trial_max_iter=20``, forced scan took
+``102.9 s`` for one dense Jacobian callback while forced tape took ``36.7 s``;
+the same local CPU-style QA ``max_mode=2`` tape callback was ``9.5 s``.  CPU
+therefore remains faster for the small/medium diagnostics, so production runs
+still document both CPU and GPU timings rather than claiming blanket GPU
+speedups.  GPU sweep production runs use calibrated optimizer budgets
+(currently ``inner_max_iter =
 trial_max_iter = 120`` and ``ftol = trial_ftol = 1e-8`` for deck-controlled
 QA/QH cases), rather than the old four-evaluation diagnostic caps.  Final
 standalone verification runs can still use the VMEC input-deck ``NITER_ARRAY`` /

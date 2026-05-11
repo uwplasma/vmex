@@ -28,7 +28,7 @@ def test_qi_wout_parity_ns35_ns111():
     if not input_path.exists():
         pytest.skip("Missing examples/data/input.QI_nfp2")
 
-    vmec_exe_env = os.getenv("VMEC2000_EXE", "")
+    vmec_exe_env = os.getenv("VMEC2000_EXEC", "") or os.getenv("VMEC2000_EXE", "")
     vmec_exe = Path(vmec_exe_env) if vmec_exe_env else find_vmec2000_exec(root=root.parent)
     if vmec_exe is None or not vmec_exe.exists():
         pytest.skip(f"Missing VMEC2000 executable: {vmec_exe}")

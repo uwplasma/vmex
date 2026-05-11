@@ -87,6 +87,88 @@ that benchmark values do not drift from the generated CSV/JSON artifacts.
 algorithm comparison.
 
 
+SIMSOPT-style objective tuples
+------------------------------
+
+The recommended public workflow mirrors the SIMSOPT ``LeastSquaresProblem``
+style: create objective objects, then pass explicit
+``(objective_function, target, weight)`` tuples to
+``vj.LeastSquaresProblem.from_tuples``.  The objective function should be the
+``.J`` method on the objective object, or any callable with signature
+``(ctx, state)`` returning a scalar or vector.
+
+.. code-block:: python
+
+   vmec = vj.FixedBoundaryVMEC.from_input(
+       INPUT_FILE,
+       max_mode=MAX_MODE,
+       min_vmec_mode=MIN_VMEC_MODE,
+       output_dir=OUTPUT_DIR,
+   )
+
+   aspect = vj.AspectRatio()
+   iota_floor = vj.AbsMeanIotaFloor(TARGET_ABS_IOTA_MIN)
+   qs = vj.QuasisymmetryRatioResidual(
+       helicity_m=HELICITY_M,
+       helicity_n=HELICITY_N,
+       surfaces=SURFACES,
+   )
+
+   problem = vj.LeastSquaresProblem.from_tuples(
+       [
+           (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
+           (iota_floor.J, 0.0, IOTA_FLOOR_WEIGHT),
+           (qs.J, 0.0, QS_WEIGHT),
+       ]
+   )
+
+The tuple weight follows SIMSOPT semantics.  ``vmec_jax`` minimizes the
+least-squares residual
+
+.. code-block:: text
+
+   sqrt(weight) * (objective(ctx, state) - target)
+
+for each scalar entry returned by the objective.  Do not pre-apply
+``sqrt(weight)`` inside the callback.  Put physics targets and regularization
+strengths in the tuple list, and put optimizer controls such as continuation
+stages, ESS scaling, tolerances, device selection, and output directories in
+``least_squares_solve``.
+
+QI objectives use the same tuple syntax, but the QI field-quality terms are
+routed through the Boozer/QI problem path so they can share one Boozer
+transform.  QI tuple targets must be ``0.0``; encode thresholds and smoothing
+inside the objective object, for example ``QuasiIsodynamicOptions``,
+``MirrorRatio(threshold=...)``, or ``MaxElongation(threshold=...)``.
+
+.. code-block:: python
+
+   qi_options = vj.QuasiIsodynamicOptions(
+       surfaces=np.linspace(0.1, 1.0, 6),
+       mboz=18,
+       nboz=18,
+       nphi=151,
+       nalpha=31,
+       n_bounce=51,
+       branch_width_weight=0.5,
+       profile_weight=0.1,
+       shuffle_profile_weight=1.0,
+   )
+   qi = vj.QuasiIsodynamicResidual(qi_options)
+   mirror = vj.MirrorRatio(threshold=0.21, ntheta=96, nphi=96, surface_index=0)
+   elongation = vj.MaxElongation(threshold=8.0, ntheta=48, nphi=16)
+
+   qi_problem = vj.LeastSquaresProblem.from_tuples(
+       [
+           (vj.AspectRatio().J, 5.0, 1.0),
+           (vj.AbsMeanIotaFloor(0.41).J, 0.0, 200.0**2),
+           (qi.J, 0.0, 1.0),
+           (mirror.J, 0.0, 10.0),
+           (elongation.J, 0.0, 10.0),
+       ]
+   )
+
+
 Quasi-helical symmetry example
 --------------------------------
 
@@ -219,7 +301,7 @@ Run it with:
    python examples/optimization/QH_optimization.py
 
 
-Standalone QA/QH/QP/QI scripts
+Recommended standalone scripts
 ------------------------------
 
 The individual scripts are workflow examples, not the canonical benchmark
@@ -228,12 +310,43 @@ variables, so users can edit the file exactly as in the SIMSOPT examples:
 VMEC resolution, active boundary modes, objective terms, weights, ESS scaling,
 continuation policy, and optimizer options.
 
+Use these four scripts as the current starting points for fixed-boundary
+optimization:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 28 54
+
+   * - Target
+     - Script
+     - Default objective tuple set
+   * - QA
+     - ``examples/optimization/QA_optimization.py``
+     - ``AspectRatio``, signed ``MeanIota`` target, and
+       ``QuasisymmetryRatioResidual(helicity_m=1, helicity_n=0)``.  This is the
+       recommended public QA example.
+   * - QH
+     - ``examples/optimization/QH_optimization.py``
+     - ``AspectRatio``, ``AbsMeanIotaFloor``, and
+       ``QuasisymmetryRatioResidual(helicity_m=1, helicity_n=-1)`` on the NFP=4
+       warm start.
+   * - QP
+     - ``examples/optimization/QP_optimization.py``
+     - ``AspectRatio``, ``AbsMeanIotaFloor``, and
+       ``QuasisymmetryRatioResidual(helicity_m=0, helicity_n=-1)`` from the
+       bundled NFP=2 QI seed.
+   * - QI
+     - ``examples/optimization/QI_optimization.py``
+     - ``AspectRatio``, ``AbsMeanIotaFloor``, ``QuasiIsodynamicResidual``,
+       ``MirrorRatio``, and ``MaxElongation`` with repeated same-mode
+       continuation and ESS.
+
 .. code-block:: bash
 
-   python examples/optimization/QA_optimization.py
-   python examples/optimization/QH_optimization.py
-   python examples/optimization/QP_optimization.py
-   python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QA_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QH_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QP_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py
 
 Those scripts write ``input.initial``, ``input.final``, ``wout_initial.nc``,
 ``wout_final.nc``, ``history.json``, and per-case diagnostic plots.  Current
@@ -522,6 +635,66 @@ Two practical lessons from that study are now reflected in the example:
   the seed, the reference omnigenity result, and recent vmec_jax candidates.
   LgradB remains available as a commented optional shaping term, but it is not
   part of the default best QI lane.
+
+
+QI diagnostics and validation plan
+----------------------------------
+
+QI optimization has more ways to get a plausible but wrong answer than QA/QH
+because the smooth QI residual is a differentiable proxy for the legacy branch
+diagnostic.  The public audit helpers are ``vj.QIDiagnosticOptions``,
+``vj.qi_diagnostics_from_boozer_output``, and
+``vj.qi_diagnostics_from_state``; they return one unweighted record with smooth
+QI, legacy branch, mirror-ratio, elongation, optional ``LgradB``, and
+resolution metadata.  Treat the standalone QI script as a candidate generator,
+then run the following validation ladder before promoting a result.
+
+1. Confirm the objective definition on the seed and any final candidate.  The
+   diagnostic compares smooth QI variants, mirror ratio, elongation, ``phimin``
+   shifts, and optionally the reference omnigenity implementation:
+
+   .. code-block:: bash
+
+      PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/compare_omnigenity_qi_objective.py
+      VMEC_JAX_RUN_REFERENCE_OMNIGENITY=1 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/compare_omnigenity_qi_objective.py
+
+2. Run the constrained QI matrix before declaring a best policy.  This keeps
+   direct QI, repeated same-mode continuation, ESS, and QP-preseed rows
+   comparable:
+
+   .. code-block:: bash
+
+      PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both
+      PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both
+      PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
+
+3. Re-evaluate the final candidate at higher Boozer/QI resolution before using
+   it as a science result.  Increase ``QI_MBOZ``, ``QI_NBOZ``, ``QI_NPHI``,
+   ``QI_NALPHA``, and ``QI_N_BOUNCE`` in
+   ``compare_omnigenity_qi_objective.py`` or ``QI_optimization.py`` and check
+   that the ranking, mirror ratio, elongation, and branch-shuffle metrics do
+   not change qualitatively.
+
+4. Run the QI-specific unit and workflow tests after changing the QI objective
+   construction:
+
+   .. code-block:: bash
+
+      pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_booz_input.py
+      pytest -q tests/test_optimization_examples.py -k "qi or LeastSquaresProblem"
+
+5. For parity-grade QI validation, compare against a local VMEC2000 executable
+   when the external deck is available:
+
+   .. code-block:: bash
+
+      VMEC_JAX_RUN_QI_PARITY=1 VMEC2000_EXEC=/path/to/xvmec2000 pytest -q tests/test_qi_wout_parity.py
+
+The acceptance criteria are not just a lower scalar objective.  Keep the final
+aspect ratio and signed/absolute iota in bounds, verify mirror ratio and LCFS
+elongation stay below their soft-wall thresholds, inspect ``|B|`` contours, and
+prefer candidates whose smooth QI metrics preserve the same ranking as the
+legacy branch diagnostic under the higher-resolution audit.
 
 
 Algorithms in detail

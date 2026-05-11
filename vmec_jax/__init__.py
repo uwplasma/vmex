@@ -283,6 +283,12 @@ from .quasi_isodynamic import (
     quasi_isodynamic_residual_from_state,
 )
 from .qi_legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
+from .qi_diagnostics import (
+    QI_DIAGNOSTIC_VERSION,
+    QIDiagnosticOptions,
+    qi_diagnostics_from_boozer_output,
+    qi_diagnostics_from_state,
+)
 from .visualization import export_vtk_surface_and_fieldline
 
 __all__ = [
@@ -543,5 +549,9 @@ __all__ = [
     "quasi_isodynamic_residual_from_boozer_output",
     "quasi_isodynamic_residual_from_state",
     "legacy_qi_branch_shuffle_diagnostic_from_boozer_output",
+    "QI_DIAGNOSTIC_VERSION",
+    "QIDiagnosticOptions",
+    "qi_diagnostics_from_boozer_output",
+    "qi_diagnostics_from_state",
     "export_vtk_surface_and_fieldline",
 ]

@@ -1320,6 +1320,9 @@ class FixedBoundaryExactOptimizer:
         self._residuals_eval_fn = self._make_residuals_eval_fn(residuals_fn)
         self._n_qs: int | None = getattr(residuals_fn, "_n_qs", None)
         self._n_non_qs: int = int(getattr(residuals_fn, "_n_non_qs", 1))
+        self._has_residual_block_metadata = (
+            hasattr(residuals_fn, "_n_qs") or hasattr(residuals_fn, "_n_non_qs")
+        )
         self._qs_total_from_state_fn = getattr(residuals_fn, "_qs_total_from_state", None)
         self._aspect_target = getattr(residuals_fn, "_aspect_target", None)
         self._aspect_weight = float(getattr(residuals_fn, "_aspect_weight", 1.0))
@@ -1400,6 +1403,7 @@ class FixedBoundaryExactOptimizer:
         # solved state so final metrics/wout writing do not rerun VMEC.
         self._exact_cache: dict = {}
         self._exact_state_cache: dict = {}
+        self._exact_residual_cache: dict = {}
         self._discrete_jacobian_helper_cache: dict = {}
         self._scan_exact_helper_cache: dict = {}
         self._scan_exact_path = self._select_exact_path()
@@ -1430,12 +1434,12 @@ class FixedBoundaryExactOptimizer:
     def _select_exact_path(self) -> str:
         """Choose the accepted-point differentiation path.
 
-        The established non-scan discrete-adjoint tape remains the fastest
-        warm path on CPU.  On GPU, May 2026 repeat-run profiles showed the
-        scan-differentiated exact path lowers accepted-point Jacobian wall time
-        for QH/QA mode-1 and QH mode-3 diagnostics.  The environment override
-        ``VMEC_JAX_OPT_EXACT_PATH={tape,scan}`` remains available for profiling
-        and parity studies.
+        The established non-scan discrete-adjoint tape is the default on CPU
+        and GPU. May 2026 cold and warm ``office`` RTX A4000 profiling showed
+        the scan-differentiated exact path can be useful for targeted parity
+        studies but is not a robust GPU default for accepted-point Jacobians.
+        The environment override ``VMEC_JAX_OPT_EXACT_PATH={tape,scan}``
+        remains available for profiling and parity studies.
         """
         forced = os.getenv("VMEC_JAX_OPT_EXACT_PATH", "").strip().lower()
         if forced in ("scan", "tape"):
@@ -1443,7 +1447,7 @@ class FixedBoundaryExactOptimizer:
         if self._solver_device_name == "cpu":
             return "tape"
         if self._solver_device_name in ("gpu", "tpu", "cuda", "rocm"):
-            return "scan"
+            return "tape"
         try:
             from ._compat import jax as _jax
 
@@ -1451,7 +1455,7 @@ class FixedBoundaryExactOptimizer:
         except Exception:
             backend = "cpu"
         if backend in ("gpu", "cuda", "tpu", "rocm"):
-            return "scan"
+            return "tape"
         return "tape"
 
     def _use_scan_for_trial_solves(self) -> bool:
@@ -1668,6 +1672,33 @@ class FixedBoundaryExactOptimizer:
 
     def _remember_exact_state(self, cache_key: bytes, state: VMECState) -> None:
         self._exact_state_cache = {cache_key: state}
+        residual_cache = getattr(self, "_exact_residual_cache", None)
+        if residual_cache is not None and cache_key not in residual_cache:
+            residual_cache.clear()
+
+    def _remember_exact_residual(self, cache_key: bytes, residual: np.ndarray) -> None:
+        self._exact_residual_cache = {
+            cache_key: np.asarray(residual, dtype=float).reshape(-1).copy()
+        }
+
+    def _cached_exact_residual(
+        self,
+        params=None,
+        *,
+        cache_key: bytes | None = None,
+    ) -> np.ndarray | None:
+        if cache_key is None:
+            if params is None:
+                return None
+            cache_key = self._exact_cache_key(params)
+        last_key = getattr(self, "_last_jacobian_key", [None])[0]
+        if last_key == cache_key and getattr(self, "_last_jacobian_residual", None) is not None:
+            return np.asarray(self._last_jacobian_residual, dtype=float).reshape(-1)
+        cache = getattr(self, "_exact_residual_cache", None)
+        if cache is not None and cache_key in cache:
+            self._profile_add("exact_residual_cache_hit", 0.0)
+            return np.asarray(cache[cache_key], dtype=float).reshape(-1)
+        return None
 
     def _cached_exact_state(self, params):
         cache_key = self._exact_cache_key(params)
@@ -1969,6 +2000,7 @@ class FixedBoundaryExactOptimizer:
         """Exact residual at *params* (builds adjoint tape, cached)."""
         if self._solver_device_name is not None and not self._inside_solver_device_context:
             return self._run_in_solver_device_context(self.residual_fun, params)
+        cache_key = self._exact_cache_key(params)
         if self._scan_exact_path == "scan":
             # Avoid compiling a second residual-only scan executable.  The exact
             # optimizer immediately needs the same accepted-point state for
@@ -1978,11 +2010,13 @@ class FixedBoundaryExactOptimizer:
             t0 = time.perf_counter()
             out = self._evaluate_residuals_from_state(state)
             self._profile_add("scan_residual_eval_exact", time.perf_counter() - t0)
+            self._remember_exact_residual(cache_key, out)
             return out
         state = self._solve_exact_with_tape(params)
         t_res = time.perf_counter()
         out = self._evaluate_residuals_from_state(state)
         self._profile_add("residual_eval_exact", time.perf_counter() - t_res)
+        self._remember_exact_residual(cache_key, out)
         return out
 
     def forward_residual_fun(self, params) -> np.ndarray:
@@ -2101,6 +2135,7 @@ class FixedBoundaryExactOptimizer:
         """Exact discrete-adjoint Jacobian at *params*."""
         if self._solver_device_name is not None and not self._inside_solver_device_context:
             return self._run_in_solver_device_context(self.jacobian_fun, params)
+        cache_key = self._exact_cache_key(params)
         if self._scan_exact_path == "scan":
             from ._compat import jnp as _jnp
 
@@ -2110,6 +2145,7 @@ class FixedBoundaryExactOptimizer:
                 _jnp.asarray(params, dtype=_jnp.float64)
             )
             self._last_jacobian_residual = np.asarray(residuals, dtype=float)
+            self._remember_exact_residual(cache_key, self._last_jacobian_residual)
             # Avoid a second accepted-point scan solve when the history metrics
             # can be reconstructed from the residual vector.  This is the common
             # QA/QH/QP/QI fixed-boundary optimization path; the state cache is
@@ -2157,6 +2193,7 @@ class FixedBoundaryExactOptimizer:
             packed_final, final_tangents
         )
         self._last_jacobian_residual = np.asarray(residuals, dtype=float)
+        self._remember_exact_residual(cache_key, self._last_jacobian_residual)
         self._profile_add("jacobian_residual_tangents", time.perf_counter() - t_res)
         out = np.asarray(columns, dtype=float).T
         self._profile_add("jacobian_total", time.perf_counter() - t_total)
@@ -2434,6 +2471,7 @@ class FixedBoundaryExactOptimizer:
         if state_cotangent_from_packed is None:
             _, residual_vjp = jax.vjp(_residuals_from_packed, packed_final)
         residuals_np = np.asarray(residuals, dtype=float)
+        self._remember_exact_residual(self._exact_cache_key(params), residuals_np)
         self._profile_add("linear_operator_setup", time.perf_counter() - t_setup)
 
         n_res = int(residuals_np.size)
@@ -2513,8 +2551,7 @@ class FixedBoundaryExactOptimizer:
         jac = self.jacobian_fun(params)
         key = self._last_jacobian_key[0]
         if (
-            self._scan_exact_path == "scan"
-            and self._last_jacobian_residual is not None
+            self._last_jacobian_residual is not None
             and self._can_build_history_from_residuals()
         ):
             entry = self._history_entry_from_residuals(
@@ -2527,59 +2564,44 @@ class FixedBoundaryExactOptimizer:
             res = (
                 np.asarray(self._last_jacobian_residual, dtype=float)
                 if self._last_jacobian_residual is not None
-                else self._evaluate_residuals_from_state(cached_state)
+                else self._cached_exact_residual(cache_key=key)
             )
-            cost = float(0.5 * np.dot(res, res))
-            qs_total = self._qs_total_from_state(cached_state, res)
-            from .wout import equilibrium_aspect_ratio_from_state
-            aspect = float(np.asarray(
-                equilibrium_aspect_ratio_from_state(state=cached_state, static=self._static)
-            ))
-            entry: dict = {
-                "wall_time_s": time.perf_counter() - self._wall_t0,
-                "cost": cost,
-                "objective": 2.0 * cost,
-                "qs_objective": qs_total,
-                "aspect": aspect,
-            }
-            iota_fn = getattr(self, "_iota_fn", None)
-            if iota_fn is not None:
-                entry["iota"] = float(iota_fn(cached_state))
+            entry = self._history_entry_from_state_or_residual(
+                cached_state,
+                res,
+                wall_time_s=time.perf_counter() - self._wall_t0,
+                cache_key=key,
+            )
             self._history.append(entry)
         elif key is not None and key in self._exact_cache:
             cached_state, _ = self._exact_cache[key]
             res = (
                 np.asarray(self._last_jacobian_residual, dtype=float)
                 if self._last_jacobian_residual is not None
-                else self._evaluate_residuals_from_state(cached_state)
+                else self._cached_exact_residual(cache_key=key)
             )
-            cost = float(0.5 * np.dot(res, res))
-            qs_total = self._qs_total_from_state(cached_state, res)
-            from .wout import equilibrium_aspect_ratio_from_state
-            aspect = float(np.asarray(
-                equilibrium_aspect_ratio_from_state(state=cached_state, static=self._static)
-            ))
-            entry: dict = {
-                "wall_time_s": time.perf_counter() - self._wall_t0,
-                "cost": cost,
-                "objective": 2.0 * cost,
-                "qs_objective": qs_total,
-                "aspect": aspect,
-            }
-            iota_fn = getattr(self, "_iota_fn", None)
-            if iota_fn is not None:
-                entry["iota"] = float(iota_fn(cached_state))
+            entry = self._history_entry_from_state_or_residual(
+                cached_state,
+                res,
+                wall_time_s=time.perf_counter() - self._wall_t0,
+                cache_key=key,
+            )
             self._history.append(entry)
         return jac
 
     def _exact_residual_after_jacobian(self):
-        if self._last_jacobian_residual is not None:
-            return np.asarray(self._last_jacobian_residual, dtype=float)
         key = self._last_jacobian_key[0]
+        if key is None and self._last_jacobian_residual is not None:
+            return np.asarray(self._last_jacobian_residual, dtype=float)
+        cached_residual = self._cached_exact_residual(cache_key=key)
+        if cached_residual is not None:
+            return cached_residual
         if key is None or key not in self._exact_cache:
             return None
         cached_state, _ = self._exact_cache[key]
-        return self._evaluate_residuals_from_state(cached_state)
+        residual = self._evaluate_residuals_from_state(cached_state)
+        self._remember_exact_residual(key, residual)
+        return residual
 
     def _post_jacobian_clear(self, *, clear_compiled: bool = False):
         """Optionally release compiled replay helpers.
@@ -2604,6 +2626,8 @@ class FixedBoundaryExactOptimizer:
         """Release JIT and exact-solve caches."""
         self._exact_cache.clear()
         self._exact_state_cache.clear()
+        if hasattr(self, "_exact_residual_cache"):
+            self._exact_residual_cache.clear()
         self._trial_residual_cache.clear()
         self._initial_tangent_cache.clear()
         self._last_jacobian_residual = None
@@ -2623,18 +2647,38 @@ class FixedBoundaryExactOptimizer:
 
     def _qs_from_res(self, res: np.ndarray) -> float:
         """Sum of squared QS residuals only (excludes aspect and iota)."""
-        if self._n_qs is not None:
-            return float(np.dot(res[-self._n_qs:], res[-self._n_qs:]))
-        start = max(0, min(int(self._n_non_qs), int(res.shape[0])))
+        n_qs = getattr(self, "_n_qs", None)
+        if n_qs is not None:
+            return float(np.dot(res[-n_qs:], res[-n_qs:]))
+        start = max(0, min(int(getattr(self, "_n_non_qs", 1)), int(res.shape[0])))
         return float(np.dot(res[start:], res[start:]))
+
+    def _has_qs_residual_block_metadata(self) -> bool:
+        flag = getattr(self, "_has_residual_block_metadata", None)
+        if flag is not None:
+            return bool(flag)
+        return hasattr(self, "_n_non_qs") or getattr(self, "_n_qs", None) is not None
+
+    def _can_build_qs_from_residuals(self) -> bool:
+        """Return true when residual block metadata identifies QS/objective blocks."""
+        return self._has_qs_residual_block_metadata()
+
+    def _can_build_aspect_from_residuals(self) -> bool:
+        """Return true when the first residual encodes weighted aspect error."""
+        if getattr(self, "_aspect_target", None) is None:
+            return False
+        aspect_weight = float(getattr(self, "_aspect_weight", 1.0))
+        if not np.isfinite(aspect_weight) or aspect_weight == 0.0:
+            return False
+        return True
 
     def _can_build_history_from_residuals(self) -> bool:
         """Return true when residual metadata is enough for history metrics."""
         if getattr(self, "_iota_fn", None) is not None:
             return False
-        if self._aspect_target is None:
+        if not self._can_build_aspect_from_residuals():
             return False
-        if not np.isfinite(float(self._aspect_weight)) or float(self._aspect_weight) == 0.0:
+        if not self._can_build_qs_from_residuals():
             return False
         return True
 
@@ -2650,6 +2694,59 @@ class FixedBoundaryExactOptimizer:
             "qs_objective": self._qs_from_res(res),
             "aspect": aspect,
         }
+
+    def _qs_total_from_residual_or_state(
+        self,
+        state: VMECState,
+        res: np.ndarray | None = None,
+    ) -> float:
+        """Use residual block metadata for QS totals before expensive state callbacks."""
+        if res is not None and self._can_build_qs_from_residuals():
+            return self._qs_from_res(np.asarray(res, dtype=float).reshape(-1))
+        return self._qs_total_from_state(state, res)
+
+    def _history_entry_from_state_or_residual(
+        self,
+        state: VMECState,
+        res: np.ndarray | None = None,
+        *,
+        wall_time_s: float,
+        cost: float | None = None,
+        cache_key: bytes | None = None,
+    ) -> dict:
+        """Build a history row, preferring exact cached residual data when safe."""
+        res_arr = None if res is None else np.asarray(res, dtype=float).reshape(-1)
+        if res_arr is not None and self._can_build_history_from_residuals():
+            return self._history_entry_from_residuals(res_arr, wall_time_s=wall_time_s)
+
+        if res_arr is None:
+            res_arr = self._evaluate_residuals_from_state(state)
+            if cache_key is not None:
+                self._remember_exact_residual(cache_key, res_arr)
+
+        cost_val = float(0.5 * np.dot(res_arr, res_arr)) if cost is None else float(cost)
+        if self._can_build_aspect_from_residuals():
+            aspect = float(getattr(self, "_aspect_target")) + float(res_arr[0]) / float(
+                getattr(self, "_aspect_weight", 1.0)
+            )
+        else:
+            from .wout import equilibrium_aspect_ratio_from_state
+
+            aspect = float(np.asarray(
+                equilibrium_aspect_ratio_from_state(state=state, static=self._static)
+            ))
+
+        entry: dict = {
+            "wall_time_s": float(wall_time_s),
+            "cost": cost_val,
+            "objective": 2.0 * cost_val,
+            "qs_objective": self._qs_total_from_residual_or_state(state, res_arr),
+            "aspect": aspect,
+        }
+        iota_fn = getattr(self, "_iota_fn", None)
+        if iota_fn is not None:
+            entry["iota"] = float(iota_fn(state))
+        return entry
 
     def _qs_total_from_state(self, state: VMECState, res: np.ndarray | None = None) -> float:
         """QS-only objective from a solved state, with metadata-aware fallback."""
@@ -2843,8 +2940,6 @@ class FixedBoundaryExactOptimizer:
             ``_history_dump`` (the full per-iteration history suitable for
             :meth:`save_history`).
         """
-        from .wout import equilibrium_aspect_ratio_from_state
-
         self._history = []
         self._profile = {}
         self._trial_residual_cache.clear()
@@ -2868,21 +2963,15 @@ class FixedBoundaryExactOptimizer:
             state0 = self._solve_scan_exact_state(params0_arr)
         else:
             state0, _ = self._solve_exact_with_tape(params0_arr, return_payload=True)
-        aspect0 = float(np.asarray(
-            equilibrium_aspect_ratio_from_state(state=state0, static=self._static)
-        ))
-        cost0 = float(0.5 * np.dot(res0, res0))
-        qs_total0 = self._qs_total_from_state(state0, res0)
-
-        entry0: dict = {
-            "wall_time_s": 0.0,
-            "cost": cost0,
-            "objective": 2.0 * cost0,
-            "qs_objective": qs_total0,
-            "aspect": aspect0,
-        }
-        if iota_fn is not None:
-            entry0["iota"] = float(iota_fn(state0))
+        entry0 = self._history_entry_from_state_or_residual(
+            state0,
+            res0,
+            wall_time_s=0.0,
+            cache_key=self._exact_cache_key(params0_arr),
+        )
+        cost0 = float(entry0["cost"])
+        qs_total0 = float(entry0["qs_objective"])
+        aspect0 = float(entry0["aspect"])
         self._history.append(entry0)
 
         # ── outer least-squares loop ────────────────────────────────────────
@@ -2933,20 +3022,13 @@ class FixedBoundaryExactOptimizer:
                 if key == last_history_key[0] or key not in self._exact_cache:
                     return
                 cached_state, _ = self._exact_cache[key]
-                res = self._evaluate_residuals_from_state(cached_state)
-                qs_total = self._qs_total_from_state(cached_state, res)
-                aspect = float(np.asarray(
-                    equilibrium_aspect_ratio_from_state(state=cached_state, static=self._static)
-                ))
-                entry: dict = {
-                    "wall_time_s": time.perf_counter() - self._wall_t0,
-                    "cost": float(cost),
-                    "objective": float(2.0 * cost),
-                    "qs_objective": qs_total,
-                    "aspect": aspect,
-                }
-                if iota_fn is not None:
-                    entry["iota"] = float(iota_fn(cached_state))
+                entry = self._history_entry_from_state_or_residual(
+                    cached_state,
+                    self._cached_exact_residual(cache_key=key),
+                    wall_time_s=time.perf_counter() - self._wall_t0,
+                    cost=float(cost),
+                    cache_key=key,
+                )
                 self._history.append(entry)
                 last_history_key[0] = key
 
@@ -3067,20 +3149,13 @@ class FixedBoundaryExactOptimizer:
                 if key == last_history_key[0] or key not in self._exact_cache:
                     return
                 cached_state, _ = self._exact_cache[key]
-                res = self._evaluate_residuals_from_state(cached_state)
-                qs_total = self._qs_total_from_state(cached_state, res)
-                aspect = float(np.asarray(
-                    equilibrium_aspect_ratio_from_state(state=cached_state, static=self._static)
-                ))
-                entry: dict = {
-                    "wall_time_s": time.perf_counter() - self._wall_t0,
-                    "cost": float(cost),
-                    "objective": float(2.0 * cost),
-                    "qs_objective": qs_total,
-                    "aspect": aspect,
-                }
-                if iota_fn is not None:
-                    entry["iota"] = float(iota_fn(cached_state))
+                entry = self._history_entry_from_state_or_residual(
+                    cached_state,
+                    self._cached_exact_residual(cache_key=key),
+                    wall_time_s=time.perf_counter() - self._wall_t0,
+                    cost=float(cost),
+                    cache_key=key,
+                )
                 self._history.append(entry)
                 last_history_key[0] = key
 
@@ -3172,26 +3247,20 @@ class FixedBoundaryExactOptimizer:
                 if key == last_history_key[0] or key not in self._exact_cache:
                     return
                 cached_state, _ = self._exact_cache[key]
-                res = self._evaluate_residuals_from_state(cached_state)
-                cost = float(0.5 * np.dot(res, res))
-                qs_total = self._qs_total_from_state(cached_state, res)
-                aspect = float(np.asarray(
-                    equilibrium_aspect_ratio_from_state(state=cached_state, static=self._static)
-                ))
-                entry: dict = {
-                    "wall_time_s": time.perf_counter() - self._wall_t0,
-                    "cost": cost,
-                    "objective": 2.0 * cost,
-                    "qs_objective": qs_total,
-                    "aspect": aspect,
-                }
-                if iota_fn is not None:
-                    entry["iota"] = float(iota_fn(cached_state))
+                entry = self._history_entry_from_state_or_residual(
+                    cached_state,
+                    self._cached_exact_residual(cache_key=key),
+                    wall_time_s=time.perf_counter() - self._wall_t0,
+                    cache_key=key,
+                )
                 self._history.append(entry)
                 last_history_key[0] = key
 
             def _residuals_y(y):
                 x = np.asarray(y, dtype=float) * scale - base_params
+                cached_residual = self._cached_exact_residual(x)
+                if cached_residual is not None:
+                    return cached_residual
                 cached_state = self._cached_exact_state(x)
                 if cached_state is not None:
                     return self._evaluate_residuals_from_state(cached_state)
@@ -3286,6 +3355,16 @@ class FixedBoundaryExactOptimizer:
             def _residuals_y(y):
                 x = np.asarray(y, dtype=float) * scale - base_params
                 t_cb = time.perf_counter()
+                cache_key = self._exact_cache_key(x)
+                cached_residual = self._cached_exact_residual(cache_key=cache_key)
+                if cached_residual is not None:
+                    self._trace_callback_event(
+                        "residual",
+                        x,
+                        source="exact_residual_cache",
+                        wall_time_s=time.perf_counter() - t_cb,
+                    )
+                    return cached_residual
                 cached_state = self._cached_exact_state(x)
                 if cached_state is not None:
                     out = self._evaluate_residuals_from_state(cached_state)
@@ -3381,6 +3460,8 @@ class FixedBoundaryExactOptimizer:
         # Use the exact cache when available (avoids a fresh full VMEC solve
         # that can OOM after a long optimization session).  Fall back to the
         # trial (cheaper) solver when the cache doesn't hold result["x"].
+        final_key = self._exact_cache_key(result["x"])
+        res_final = self._cached_exact_residual(cache_key=final_key)
         state_final = self._cached_exact_state(result["x"])
         if state_final is None:
             try:
@@ -3392,22 +3473,15 @@ class FixedBoundaryExactOptimizer:
             except Exception:
                 state_final = self._solve_forward(result["x"], trial=True)
 
-        res_final = self._evaluate_residuals_from_state(state_final)
-        aspect_final = float(np.asarray(
-            equilibrium_aspect_ratio_from_state(state=state_final, static=self._static)
-        ))
-        cost_final = float(0.5 * np.dot(res_final, res_final))
-        qs_total_final = self._qs_total_from_state(state_final, res_final)
-
-        entry_final: dict = {
-            "wall_time_s": t_total,
-            "cost": cost_final,
-            "objective": 2.0 * cost_final,
-            "qs_objective": qs_total_final,
-            "aspect": aspect_final,
-        }
-        if iota_fn is not None:
-            entry_final["iota"] = float(iota_fn(state_final))
+        entry_final = self._history_entry_from_state_or_residual(
+            state_final,
+            res_final,
+            wall_time_s=t_total,
+            cache_key=final_key,
+        )
+        cost_final = float(entry_final["cost"])
+        qs_total_final = float(entry_final["qs_objective"])
+        aspect_final = float(entry_final["aspect"])
         self._history.append(entry_final)
 
         # ── assemble history dump ───────────────────────────────────────────

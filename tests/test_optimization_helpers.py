@@ -1036,7 +1036,7 @@ def test_fixed_boundary_optimizer_exact_path_is_device_aware(monkeypatch):
     assert opt._select_exact_path() == "tape"
 
     opt._solver_device_name = "gpu"
-    assert opt._select_exact_path() == "scan"
+    assert opt._select_exact_path() == "tape"
 
     monkeypatch.setenv("VMEC_JAX_OPT_EXACT_PATH", "tape")
     assert opt._select_exact_path() == "tape"
@@ -1075,6 +1075,148 @@ def test_scan_exact_history_can_be_reconstructed_from_residuals():
     assert entry["aspect"] == pytest.approx(7.25)
     assert entry["cost"] == pytest.approx(0.5 * (0.5**2 + 3.0**2 + 4.0**2))
     assert entry["qs_objective"] == pytest.approx(25.0)
+
+
+def test_tape_exact_history_reuses_jacobian_residual_metadata_without_qs_callback():
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._scan_exact_path = "tape"
+    opt._last_jacobian_key = [None]
+    opt._last_jacobian_residual = None
+    opt._exact_state_cache = {}
+    opt._exact_cache = {b"accepted": (object(), object())}
+    opt._exact_residual_cache = {}
+    opt._history = []
+    opt._wall_t0 = 0.0
+    opt._iota_fn = None
+    opt._aspect_target = 7.0
+    opt._aspect_weight = 2.0
+    opt._n_non_qs = 1
+    opt._n_qs = None
+    opt._has_residual_block_metadata = True
+    opt._exact_cache_key = lambda _params: b"accepted"
+    opt._qs_total_from_state_fn = lambda _state: (_ for _ in ()).throw(
+        AssertionError("QS total callback should not rerun for accepted history")
+    )
+    opt._evaluate_residuals_from_state = lambda _state: (_ for _ in ()).throw(
+        AssertionError("residual callback should not rerun for accepted history")
+    )
+
+    def fake_jacobian(_params):
+        opt._last_jacobian_residual = np.asarray([0.5, 3.0, 4.0], dtype=float)
+        return np.asarray([[1.0], [2.0], [3.0]], dtype=float)
+
+    opt.jacobian_fun = fake_jacobian
+
+    jac = opt._jacobian_fun_tracked(np.asarray([1.0]))
+
+    np.testing.assert_allclose(jac, np.asarray([[1.0], [2.0], [3.0]]))
+    assert len(opt._history) == 1
+    entry = opt._history[0]
+    assert entry["aspect"] == pytest.approx(7.25)
+    assert entry["cost"] == pytest.approx(0.5 * (0.5**2 + 3.0**2 + 4.0**2))
+    assert entry["qs_objective"] == pytest.approx(25.0)
+
+
+def test_exact_residual_after_jacobian_uses_cached_residual_without_state_eval():
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._last_jacobian_key = [b"accepted"]
+    opt._last_jacobian_residual = None
+    opt._exact_residual_cache = {b"accepted": np.asarray([3.0, 4.0], dtype=float)}
+    opt._exact_cache = {b"accepted": (object(), object())}
+    opt._profile = {}
+    opt._evaluate_residuals_from_state = lambda _state: (_ for _ in ()).throw(
+        AssertionError("state residual callback should not run on residual-cache hit")
+    )
+
+    np.testing.assert_allclose(opt._exact_residual_after_jacobian(), [3.0, 4.0])
+
+
+def test_history_entry_uses_residual_block_metadata_for_qs_total(monkeypatch):
+    monkeypatch.setattr(
+        "vmec_jax.wout.equilibrium_aspect_ratio_from_state",
+        lambda **_kwargs: 6.0,
+    )
+
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._static = SimpleNamespace()
+    opt._iota_fn = None
+    opt._aspect_target = None
+    opt._aspect_weight = 1.0
+    opt._n_non_qs = 1
+    opt._n_qs = None
+    opt._has_residual_block_metadata = True
+    opt._qs_total_from_state_fn = lambda _state: (_ for _ in ()).throw(
+        AssertionError("QS total callback should not rerun when residual blocks are known")
+    )
+
+    entry = opt._history_entry_from_state_or_residual(
+        object(),
+        np.asarray([10.0, 3.0, 4.0], dtype=float),
+        wall_time_s=1.25,
+    )
+
+    assert entry["aspect"] == pytest.approx(6.0)
+    assert entry["cost"] == pytest.approx(0.5 * (10.0**2 + 3.0**2 + 4.0**2))
+    assert entry["qs_objective"] == pytest.approx(25.0)
+
+
+def test_run_final_history_reuses_cached_jacobian_residual_metadata():
+    state = object()
+    residual = np.asarray([0.5, 3.0, 4.0], dtype=float)
+
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._scan_exact_path = "tape"
+    opt._solver_device_name = None
+    opt._inside_solver_device_context = False
+    opt._trial_residual_cache = {}
+    opt._exact_cache = {b"accepted": (state, {})}
+    opt._exact_state_cache = {b"accepted": state}
+    opt._exact_residual_cache = {}
+    opt._initial_tangent_cache = {}
+    opt._last_jacobian_key = [None]
+    opt._last_jacobian_residual = None
+    opt._static = SimpleNamespace()
+    opt._inner_max_iter = 0
+    opt._inner_ftol = 0.0
+    opt._trial_max_iter = 0
+    opt._trial_ftol = 0.0
+    opt._post_jacobian_clear = lambda *args, **kwargs: None
+    opt._exact_cache_key = lambda _params: b"accepted"
+    opt._aspect_target = 7.0
+    opt._aspect_weight = 2.0
+    opt._n_non_qs = 1
+    opt._n_qs = None
+    opt._has_residual_block_metadata = True
+    opt._qs_total_from_state_fn = lambda _state: (_ for _ in ()).throw(
+        AssertionError("QS total callback should not rerun for final history")
+    )
+    opt._evaluate_residuals_from_state = lambda _state: (_ for _ in ()).throw(
+        AssertionError("residual callback should not rerun for final history")
+    )
+    opt._solve_exact_with_tape = (
+        lambda _params, return_payload=False: (state, {})
+        if return_payload
+        else state
+    )
+    opt.residual_fun = lambda _params: residual.copy()
+    opt.forward_residual_fun = lambda _params: (_ for _ in ()).throw(
+        AssertionError("line-search trial residual should not run")
+    )
+
+    def fake_jacobian(_params):
+        opt._last_jacobian_residual = residual.copy()
+        opt._remember_exact_residual(b"accepted", residual)
+        return np.zeros((3, 1), dtype=float)
+
+    opt.jacobian_fun = fake_jacobian
+
+    result = opt.run(np.asarray([0.0]), method="gauss_newton", max_nfev=1, verbose=0)
+
+    assert result["success"]
+    assert result["_history_dump"]["objective_final"] == pytest.approx(float(np.dot(residual, residual)))
+    assert result["_history_dump"]["qs_final"] == pytest.approx(25.0)
+    assert result["_history_dump"]["aspect_final"] == pytest.approx(7.25)
+    assert result["_history_dump"]["history"][-1]["qs_objective"] == pytest.approx(25.0)
 
 
 def test_lasym_gpu_replay_chunk_avoids_mode2_overchunk(monkeypatch):

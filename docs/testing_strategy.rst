@@ -12,14 +12,60 @@ Target State
 
 - Required CI wall time: under ten minutes for the required test, docs, and
   build jobs on GitHub-hosted CPU runners.
-- Required coverage: 95% line coverage for ``vmec_jax`` package code.
-- Required local command: ``pytest -q -m "not full and not vmec2000"`` should
-  be fast enough for routine development.
+- Long-term required coverage: 95% line coverage for ``vmec_jax`` package
+  code.  The current Python 3.11 required coverage gate is ``63%``.
+- Required local command: ``pytest -q -m "not full and not vmec2000"`` remains
+  the routine development gate.
 - Nightly/manual coverage: larger VMEC2000, GPU, and full-resolution physics
   checks run outside the required PR gate.
 - Repository checkout size: keep the tracked source tree small enough that a
   fresh clone and ``pip install .`` are not dominated by generated figures,
   optimization outputs, or bulky reference ``wout`` files.
+
+
+Current Command Map
+-------------------
+
+Run these from the repository root.  They mirror the current CI split and are
+the recommended local escalation path.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 52 24
+
+   * - Scope
+     - Command
+     - When to run
+   * - Fast local gate
+     - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000"``
+     - Before pushing ordinary code or docs-adjacent changes that touch tested
+       APIs.
+   * - Coverage gate
+     - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000" --cov=vmec_jax --cov-report=xml --cov-report=term-missing:skip-covered --cov-fail-under=63``
+     - Python 3.11 required CI coverage job.
+   * - Optimization workflow smoke
+     - ``pytest -q tests/test_optimization_examples.py tests/test_qs_ess_render_smoke.py``
+     - After changing objective tuple construction, examples, or sweep
+       rendering docs.
+   * - QI objective checks
+     - ``pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_booz_input.py``
+     - After changing QI diagnostics, Boozer input handling, or smooth-QI
+       residual settings.
+   * - Bounded physics smoke
+     - ``RUN_FULL=1 pytest -q tests/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[circular_tokamak] tests/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[nfp4_QH_warm_start] tests/test_driver_api.py::test_run_free_boundary_smoke_on_bundled_small_case``
+     - Before merging solver changes that affect fixed/free-boundary physics.
+   * - Full physics tier
+     - ``python tools/fetch_assets.py`` then ``RUN_FULL=1 JAX_ENABLE_X64=1 pytest -q -m "full and not vmec2000"``
+     - Manual/nightly parity and high-cost physics validation.
+   * - External VMEC2000 tier
+     - ``VMEC2000_EXEC=/path/to/xvmec2000 VMEC2000_INTEGRATION=1 pytest -q -m vmec2000``
+     - Local or scheduled executable-backed parity validation.
+   * - Docs fast build
+     - ``SPHINX_FAST=1 LC_ALL=C.UTF-8 LANG=C.UTF-8 python -m sphinx -W -j auto -b html docs docs/_build/html``
+     - Required build job, minimal landing page.
+   * - Docs full build
+     - ``READTHEDOCS=True LC_ALL=C.UTF-8 LANG=C.UTF-8 python -m sphinx -W -j auto -b html docs docs/_build/html_full``
+     - Required full guide/API docs job.
 
 
 Test Tiers
@@ -45,6 +91,12 @@ The suite is split by execution cost and external dependencies:
        convergence, Jacobian sign, force residual, surface geometry, field
        positivity, and selected ``wout`` scalar/profile parity.
      - 5-8 minutes total
+   * - Workflow and docs artifacts
+     - unmarked required selections
+     - CLI smoke tests, optimization objective tuple construction, example
+       workflow assembly, sweep rendering smoke tests, and repository size
+       audit.
+     - seconds to a few minutes
    * - Full physics
      - ``full``
      - Larger reference assets, multigrid cases, high-resolution regression
@@ -119,6 +171,11 @@ Optimization gates:
 - The examples should include tiny callback-budget regressions that verify
   construction, objective assembly, ESS scaling, continuation seeding, and
   artifact writing.
+- ``LeastSquaresProblem.from_tuples`` should preserve SIMSOPT weight semantics:
+  tuple ``weight`` means a residual multiplier of ``sqrt(weight)``.
+- QI workflow tests should cover routing of ``QuasiIsodynamicResidual`` terms,
+  rejection of invalid nonzero QI targets, and compatibility of smooth QI
+  metrics with the legacy branch-ranking diagnostics.
 - Full optimization sweeps are not required PR tests; they remain generated
   benchmark artifacts documented in :doc:`optimization_sweep_results`.
 
@@ -141,8 +198,8 @@ tests execute long workflows incidentally.
    coverage gates.  Coverage runs should not require downloading presentation
    artifacts.
 5. Raise ``--cov-fail-under`` in stages after the corresponding tests are
-   merged.  The current required fast-suite gate is ``58%``; the next planned
-   ratchets are 60%, 70%, 80%, 90%, then 95%.
+   merged.  The current required fast-suite gate is ``63%``; the next planned
+   ratchets are 70%, 80%, 90%, then 95%.
 
 
 Repository Size Plan
