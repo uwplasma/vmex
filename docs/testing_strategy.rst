@@ -51,6 +51,10 @@ the recommended local escalation path.
      - ``pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_booz_input.py``
      - After changing QI diagnostics, Boozer input handling, smooth-QI residual
        settings, or first-class QI diagnostic record fields.
+   * - QI ranking/report smoke
+     - ``pytest -q tests/test_qi_objective_component_report.py tests/test_qs_ess_render_smoke.py``
+     - After changing QI branch-ranking metrics, sweep summary fields, or
+       renderer selection rules.
    * - Bounded physics smoke
      - ``RUN_FULL=1 pytest -q tests/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[circular_tokamak] tests/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[nfp4_QH_warm_start] tests/test_driver_api.py::test_run_free_boundary_smoke_on_bundled_small_case``
      - Before merging solver changes that affect fixed/free-boundary physics.
@@ -189,6 +193,26 @@ Optimization gates:
 - Full optimization sweeps are not required PR tests; they remain generated
   benchmark artifacts documented in :doc:`optimization_sweep_results`.
 
+QI seed-robustness gates:
+
+- Required PR tests protect the metric semantics, not global optimizer
+  robustness.  The cheap QI gates use synthetic Boozer spectra and mocked
+  state diagnostics to ensure smooth QI, legacy branch/shuffle QI, mirror
+  ratio, elongation, optional ``LgradB``, and summary metadata stay compatible.
+- The next realistic validation step is a small solved-state diagnostic fixture
+  using ``qi_diagnostics_from_state``.  It should compare smooth QI, legacy QI,
+  mirror ratio, elongation, iota, aspect ratio, and Boozer ``|B|`` contour
+  quality on one bounded case without launching a full optimization sweep.
+- Use ``examples/optimization/audit_qi_seed_suitability.py --quick`` as the
+  no-optimization preflight before a multi-seed QI sweep.  It ranks existing
+  solved seeds and records missing optional reference checkouts instead of
+  making the default gate machine-specific.
+- A full seed-robust QI claim requires starting constrained QI from QI, QP, QH,
+  QA, and a simple non-omnigenous seed, then auditing convergence, legacy QI
+  score, engineering constraints, and Boozer contour plots.  That matrix is
+  manual/nightly validation until it is cheap enough to summarize as curated
+  artifacts.
+
 
 Coverage Plan to 95%
 --------------------
@@ -254,6 +278,11 @@ changing reference behavior.
   CLI behavior, ``wout`` writing, and optimization example workflows.
 - Extract small pure functions from large numerical routines only when the
   extracted function has a clear mathematical contract and a targeted test.
+- Prefer seam extractions that already have parity evidence: VMEC force
+  helpers, residual normalization, Mercier/Redl algebra, wout schema helpers,
+  and optimization tuple/routing policy.  Do not split solve orchestration,
+  free-boundary coupling, or accepted-point replay as a broad cleanup without a
+  narrow benchmark or parity gate.
 - Add docstrings to public and semi-public functions that state conventions:
   radial mesh, VMEC vs physical toroidal angle, Fourier signs, symmetry
   assumptions, and units.

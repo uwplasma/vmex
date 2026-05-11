@@ -112,6 +112,48 @@ These cases are exercised by:
 
    RUN_FULL=1 pytest tests/test_wout_comprehensive_parity.py -v -k "convergence_only"
 
+QI diagnostics and seed robustness
+----------------------------------
+
+The required QI tests currently validate the diagnostic definitions and
+metadata contracts rather than claiming global optimizer robustness from every
+possible seed.  The fast local QI gate is:
+
+.. code-block:: bash
+
+   pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_qi_objective_component_report.py tests/test_booz_input.py
+
+This gate covers smooth Boozer-space QI residuals, the legacy branch/shuffle
+diagnostic used for ranking, mirror-ratio and elongation records, Boozer input
+handling, and synthetic ranking consistency.  It is intentionally cheap enough
+for ordinary development.
+
+The current constrained-QI sweep artifacts document one successful bundled
+NFP=2 ``input.nfp2_QI`` lane.  A seed-robust QI claim is deferred until the
+same constrained objective has been run and visually audited from QI, QP, QH,
+QA, and simple non-omnigenous starting boundaries.  For that audit, accept a
+row only when the final state satisfies all of: low legacy QI diagnostic,
+closed-looking Boozer ``|B|`` contours, mirror ratio at target, acceptable
+elongation, ``abs(mean_iota) >= 0.41``, and aspect ratio near the configured
+target.
+
+Before launching expensive optimization sweeps, rank available solved seeds
+with:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --csv results/qi_seed_audit.csv
+
+The audit performs no optimization.  It reads solved ``input``/``wout`` pairs
+and reports smooth QI, legacy QI, mirror ratio, elongation, aspect ratio, and
+mean iota.  Optional reference cases from ``omnigenity_optimization`` are used
+when ``OMNIGENITY_OPTIMIZATION_ROOT`` points to that checkout; missing optional
+cases are recorded as skipped rather than failing the audit.
+Rows are ranked by the combined smooth-plus-legacy QI score, while engineering
+constraint failures are reported separately so a QI-like seed with a fixable
+mirror/aspect violation is not hidden behind a non-QI seed that merely satisfies
+the engineering constraints.
+
 Validated ``wout`` fields
 --------------------------
 
