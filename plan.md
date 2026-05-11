@@ -528,3 +528,11 @@ Acceptance:
   workflows, and make scalar-adjoint trial acceptance cheaper while exact-checking
   accepted states. These are intentionally deferred from the docs/validation
   patch because they touch discrete-adjoint replay semantics.
+- 2026-05-11: Implemented the first narrow replay-cost reduction: replay-only
+  VJP/JVP maps pass `need_update_rms=False`, while the default accepted-solve
+  path still reports update RMS diagnostics and any solve with
+  `limit_update_rms=True` still computes RMS for clipping. Verified with
+  `python -m pytest tests/test_discrete_adjoint_qh.py tests/test_discrete_adjoint_chunking.py tests/test_optimization_helpers.py -q`
+  (`76 passed, 19 skipped`). A small CPU exact-Jacobian diagnostic on QH
+  `max_mode=1`, 8 DOFs, 20 inner iterations completed in `7.707 s`
+  (`jacobian_tape_replay=2.924 s`, `exact_tape_build=0.319 s`).
