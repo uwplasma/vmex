@@ -1,6 +1,6 @@
 # VMEC-JAX Research-Grade Roadmap
 
-Last updated: 2026-05-10
+Last updated: 2026-05-11
 Primary branch: `main`
 Baseline release: `v0.0.7`
 
@@ -184,6 +184,36 @@ Acceptance:
    available and stable.
 8. [x] Start the first refactor with a low-risk extraction from the largest
    modules after the new tests are green.
+
+## Reassessment After 2026-05-11 Push
+
+Realistic next targets for this development cycle:
+
+1. Raise required CI coverage from 63% toward 65% using fast, physics-relevant
+   branch tests in `vmec_bcovar`, `vmec_realspace`, `finite_beta`, `wout`, and
+   `optimization_workflow`.  Do not raise the CI floor again until GitHub's
+   measured coverage has clear margin above the target.
+2. Add real solved-state QI diagnostics using `qi_diagnostics_from_state` on a
+   small bundled or generated fixture, then compare smooth QI, legacy QI,
+   mirror ratio, elongation, and Boozer `|B|` contour quality at higher
+   resolution.
+3. Continue GPU optimization only where profiling points to a concrete source
+   change.  Current evidence says exact tape build is subsecond in bounded CPU
+   cases; the bottleneck is replay/residual linearization/VJP in
+   `checkpoint_tape_state_jvp_columns` and related dynamic-basepoint replay.
+4. Keep optional VMEC2000/SIMSOPT validation expanding, but keep required CI
+   under 10 minutes by default.
+
+Defer beyond the current cycle:
+
+1. Full seed-robust QI from QA/QH/simple non-omnigenous starting points.  This
+   needs multiple long sweeps plus visual Boozer audits, not just unit tests.
+2. Large module refactors of `solve.py`, `wout.py`, and `free_boundary.py`.
+   These should follow higher parity/coverage gates to avoid destabilizing the
+   solver.
+3. A fully GPU-native replay architecture.  The next step is narrower
+   profiling-driven replay reduction; replacing the differentiation architecture
+   is a larger design project.
 
 ## Activity Log
 
