@@ -13,8 +13,34 @@ Recommended:
 - ``netCDF4`` to read VMEC2000 ``wout_*.nc`` files for validation
 - ``booz_xform_jax`` for quasi-isodynamic (QI) optimization objectives
 
-Install from source
--------------------
+From PyPI
+---------
+
+``vmec-jax`` is available on `PyPI <https://pypi.org/project/vmec-jax/>`_::
+
+  python -m pip install vmec-jax
+
+and has an extra for QI optimization, using ``booz_xform_jax`` for the
+differentiable Boozer transform::
+
+  python -m pip install "vmec-jax[qi]"
+
+From conda-forge
+----------------
+
+``vmec-jax`` can be installed as a conda package from `conda-forge
+<https://github.com/conda-forge/vmec-jax-feedstock>`_ into a particular project
+with `Pixi <https://pixi.prefix.dev/>`_::
+
+  pixi add vmec-jax
+
+or into a conda environment with `conda
+<https://docs.conda.io/projects/conda/>`_::
+
+  conda install --channel conda-forge vmec-jax
+
+From source
+-----------
 
 From the repo root (non-editable install)::
 
