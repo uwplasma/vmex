@@ -2053,6 +2053,22 @@ def test_strict_update_velocity_limit_clips_and_vjp_identity():
     )
     assert float(np.asarray(out["update_rms_scale"])) < 1.0
 
+    no_diag = strict_update_velocity_limit(
+        dt_eff=dt_eff,
+        max_update_rms=max_update_rms,
+        limit_update_rms=False,
+        need_update_rms=False,
+        vRcc=pieces0[0],
+        vRss=pieces0[1],
+        vZsc=pieces0[2],
+        vZcs=pieces0[3],
+        vLsc=pieces0[4],
+        vLcs=pieces0[5],
+    )
+    assert float(np.asarray(no_diag["update_rms_preclip"])) == pytest.approx(0.0)
+    assert float(np.asarray(no_diag["update_rms_scale"])) == pytest.approx(1.0)
+    np.testing.assert_allclose(np.asarray(no_diag["vRcc"]), np.asarray(pieces0[0]))
+
     y_ref = _f(x0)
     cotangent = jnp.linspace(-0.4, 0.3, int(y_ref.size), dtype=x0.dtype)
     _, jvp = jax.jvp(_f, (x0,), (tangent,))
