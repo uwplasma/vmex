@@ -352,7 +352,7 @@ this reruns the current README-best QA row:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa --modes 3 --ess off --rerun
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa --modes 3 --ess on --rerun
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 The GPU rows run through the same exact/replay path as CPU with GPU-calibrated

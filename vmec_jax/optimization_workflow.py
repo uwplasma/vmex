@@ -984,7 +984,7 @@ def qi_mirror_ratio_objective(
     surface_index: int = 0,
     qi_options: QuasiIsodynamicOptions | None = None,
 ) -> QIObjectiveTerm:
-    """Mirror-ratio upper-bound objective evaluated from Boozer |B| modes."""
+    """Mirror-ratio upper-bound objective evaluated from Boozer ``|B|`` modes."""
 
     def _evaluate(ctx: StageContext, _state, field: dict):
         mirror_booz = _slice_boozer_surfaces(field["booz"], int(surface_index))

@@ -23,6 +23,17 @@ from vmec_jax.wout import read_wout, state_from_wout
 pytestmark = pytest.mark.full
 
 
+def _resolve_wout(root: Path, wout_rel: str) -> Path:
+    """Prefer downloaded reference assets, but allow bundled VMEC2000 wouts."""
+    wout_path = root / wout_rel
+    if wout_path.exists():
+        return wout_path
+    bundled = root / wout_rel.replace("_reference.nc", ".nc")
+    if bundled.exists():
+        return bundled
+    pytest.skip(f"Missing wout fixture: {wout_path}")
+
+
 @pytest.mark.parametrize(
     "case_name,input_rel,wout_rel,rtol_rz,rtol_l",
     [
@@ -36,9 +47,8 @@ def test_getfsq_parity_against_wout(case_name: str, input_rel: str, wout_rel: st
 
     root = Path(__file__).resolve().parents[1]
     input_path = root / input_rel
-    wout_path = root / wout_rel
+    wout_path = _resolve_wout(root, wout_rel)
     assert input_path.exists()
-    assert wout_path.exists()
 
     cfg, indata = load_config(str(input_path))
     wout = read_wout(wout_path)

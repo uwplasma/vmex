@@ -495,3 +495,36 @@ Acceptance:
   `474 passed, 20 skipped, 85 deselected`, total coverage `65.65%`, runtime
   about `6:19`. Keep the enforced CI floor at 63% until GitHub py3.11 has
   enough margin for a safe 64-65% bump.
+- 2026-05-11: Added optional local validation gates against VMEC2000 and
+  SIMSOPT without making required CI depend on either package. The VMEC2000
+  gate runs two short executable stage-trace comparisons (`input.circular_tokamak`
+  and `input.basic_non_stellsym_pressure`) behind `VMEC2000_INTEGRATION=1`;
+  the SIMSOPT gate compares the VMEC-only QH quasisymmetry residual formula on
+  `wout_nfp4_QH_warm_start.nc` behind `RUN_SIMSOPT_VALIDATION=1`. Added
+  deterministic `vmec_residue` helper coverage for VMEC m=1 constraints,
+  constrained Z-force zeroing, `scalxc`, getfsq radial edge policy, and dynamic
+  scalar residual normalization. Verified locally with the optional validation
+  commands, full docs build, and the CI-equivalent fast gate:
+  `476 passed, 21 skipped, 86 deselected`, total coverage `65.80%`, runtime
+  about `7:08`; GitHub Actions run `25660215594` passed.
+- 2026-05-11: Hardened the `RUN_FULL=1` scalar-residual parity test so it
+  prefers downloaded `_reference.nc` assets but falls back to the bundled
+  VMEC2000 `wout_circular_tokamak.nc` when the larger asset bundle has not been
+  fetched. Verified with
+  `RUN_FULL=1 python -m pytest tests/test_residue_getfsq_parity.py -q`
+  (`1 passed`).
+- 2026-05-11: Added a synthetic-only `vmec_realspace` invariant slice covering
+  LASYM full-grid synth/analyze round-trip, helical mixed-partial commutation
+  with physical zeta derivatives, and circular axisymmetric geometry identities.
+  This raises targeted `vmec_realspace.py` statement coverage from about 47% to
+  about 80% without adding large fixtures or slow VMEC solves. Verified with
+  `python -m pytest tests/test_vmec_realspace.py tests/test_vmec_realspace_invariants.py -q`
+  and `python -m ruff check tests/test_vmec_realspace_invariants.py`; the
+  CI-equivalent fast gate now reports `479 passed, 21 skipped, 86 deselected`,
+  total coverage `65.83%`, runtime about `6:24`.
+- 2026-05-11: Performance lane next targets after profiling review: avoid
+  replay-only `update_rms` work unless update limiting or diagnostics need it,
+  reuse residual-derived accepted-point objective totals for generic/QI
+  workflows, and make scalar-adjoint trial acceptance cheaper while exact-checking
+  accepted states. These are intentionally deferred from the docs/validation
+  patch because they touch discrete-adjoint replay semantics.

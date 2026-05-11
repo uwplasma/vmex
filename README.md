@@ -196,7 +196,7 @@ constrained least-squares residual definition.
 | QA | CPU | continuation | 3 | yes |  | 2.33e-04 |  |  |  | 5.000 | 0.4200 | 6.1 min |
 | QH | CPU | continuation | 3 | yes |  | 9.68e-03 |  |  |  | 4.999 | -1.6595 | 4.0 min |
 | QP | CPU | continuation | 3 | no |  | 6.76e-02 |  |  |  | 5.019 | -0.6255 | 3.7 min |
-| QI | CPU | continuation | 3 | yes | no | 1.05e-03 | 1.04e-03 | 0.211 | 4.78 | 5.000 | -0.4553 | 6.6 min |
+| QI | CPU | continuation | 3 | yes | no | 2.17e-03 | 2.17e-03 | 0.211 | 4.30 | 5.001 | -0.5494 | 11.3 min |
 
 <p align="center">
   <img src="docs/_static/figures/readme_best_optimization_qa.png" width="980" />
@@ -217,7 +217,7 @@ constrained least-squares residual definition.
 Recreate the four displayed runs:
 
 ```bash
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa --modes 3 --ess off
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa --modes 3 --ess on
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qh --modes 3 --ess on
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qp --modes 3 --ess off
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py

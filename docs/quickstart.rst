@@ -172,10 +172,14 @@ the free-boundary path when ``LFREEB = T`` in the input deck.
 Simple optimization example
 ---------------------------
 
-For a minimal VMEC-JAX-only optimization workflow, run::
+For a VMEC-JAX-only optimization workflow with explicit SIMSOPT-style
+objective construction, run::
 
-  python examples/optimization/target_iota_aspect_volume.py --opt-steps 2
+  PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QH_optimization.py
 
-This example keeps the boundary DOF set small (``|m|, |n| <= 1``) and targets
-equilibrium aspect ratio, total volume, and mean iota on the bundled
-``cth_like_fixed_bdy`` fixed-boundary case.
+The script builds a ``FixedBoundaryVMEC`` object, constructs objective tuples
+such as aspect ratio, iota floor, and quasisymmetry residuals, runs
+``least_squares_solve``, then shows how to save and plot the resulting
+equilibrium.  The companion ``examples/optimization/README.md`` file lists the
+recommended standalone examples, sweep/rendering tools, and older comparison
+scripts.
