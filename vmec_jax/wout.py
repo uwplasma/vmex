@@ -29,11 +29,13 @@ from .vmec_residue import vmec_pwint_from_trig
 from .wout_schema import WoutData, _bool_from_nc, _nc_scalar, assert_main_modes_match_wout
 from .wout_io import (
     read_mode_table,
+    read_nyquist_fourier_fields,
     read_optional_int_scalar,
     read_type_field,
     write_fixed_width_string_variable,
     write_float_variable,
     write_int_variable,
+    write_nyquist_fourier_fields,
 )
 from .vmec_tomnsp import vmec_trig_tables
 
@@ -160,6 +162,7 @@ def _compute_eqfor_betaxis(
         if denom != 0.0:
             beta_vol[i] = float(pres[i]) / denom
     return float(1.5 * beta_vol[1] - 0.5 * beta_vol[2])
+
 
 def _compute_aspectratio(
     *,
@@ -424,7 +427,9 @@ def _compute_equif_wout(
     return buco, bvco, jcuru, jcurv, equif
 
 
-def _vmec_realspace_geom_light_from_state(*, state: VMECState, modes, trig, lasym: bool | None = None) -> dict[str, Any]:
+def _vmec_realspace_geom_light_from_state(
+    *, state: VMECState, modes, trig, lasym: bool | None = None
+) -> dict[str, Any]:
     """Compute minimal geometry (R, Z, Zu) needed for wout diagnostics."""
     from ._compat import jnp
 
@@ -520,6 +525,7 @@ def _apply_bsubv_equif_correction(
         bsubv_h[js] = bsubv_h[js] + curpol
 
     return bsubv_h
+
 
 def _compute_ctor_from_buco(*, buco: np.ndarray, signgs: int, indata) -> float:
     ns = int(buco.shape[0])
@@ -790,14 +796,9 @@ def _compute_bsubs_half_mesh(
     # Prefer parity-geometry inputs for bss when available. VMEC's bss.f
     # uses the realspace (symforce) parity fields directly, so default to
     # that behavior unless explicitly disabled.
-    use_parity_bss = use_parity_geom_full and (
-        os.getenv("VMEC_JAX_BSS_FROM_PARITY_GEOM", "1") not in ("", "0")
-    )
+    use_parity_bss = use_parity_geom_full and (os.getenv("VMEC_JAX_BSS_FROM_PARITY_GEOM", "1") not in ("", "0"))
     use_force_terms = (
-        force_rs is not None
-        and force_zs is not None
-        and force_ru12 is not None
-        and force_zu12 is not None
+        force_rs is not None and force_zs is not None and force_ru12 is not None and force_zu12 is not None
     )
     if use_force_terms:
         use_parity_bss = False
@@ -827,23 +828,14 @@ def _compute_bsubs_half_mesh(
             pru_odd = pru_odd * scalxc_inv
             pzu_odd = pzu_odd * scalxc_inv
 
-
         ru12 = np.zeros_like(R_even, dtype=float)
         zu12 = np.zeros_like(Z_even, dtype=float)
         rs = np.zeros_like(R_even, dtype=float)
         zs = np.zeros_like(Z_even, dtype=float)
-        ru12[1:] = 0.5 * (
-            pru_even[1:] + pru_even[:-1] + sh[1:] * (pru_odd[1:] + pru_odd[:-1])
-        )
-        zu12[1:] = 0.5 * (
-            pzu_even[1:] + pzu_even[:-1] + sh[1:] * (pzu_odd[1:] + pzu_odd[:-1])
-        )
-        rs[1:] = ohs * (
-            pr1_even[1:] - pr1_even[:-1] + sh[1:] * (pr1_odd[1:] - pr1_odd[:-1])
-        )
-        zs[1:] = ohs * (
-            pz1_even[1:] - pz1_even[:-1] + sh[1:] * (pz1_odd[1:] - pz1_odd[:-1])
-        )
+        ru12[1:] = 0.5 * (pru_even[1:] + pru_even[:-1] + sh[1:] * (pru_odd[1:] + pru_odd[:-1]))
+        zu12[1:] = 0.5 * (pzu_even[1:] + pzu_even[:-1] + sh[1:] * (pzu_odd[1:] + pzu_odd[:-1]))
+        rs[1:] = ohs * (pr1_even[1:] - pr1_even[:-1] + sh[1:] * (pr1_odd[1:] - pr1_odd[:-1]))
+        zs[1:] = ohs * (pz1_even[1:] - pz1_even[:-1] + sh[1:] * (pz1_odd[1:] - pz1_odd[:-1]))
     elif use_force_terms:
         ru12 = np.array(force_ru12, dtype=float, copy=True)
         zu12 = np.array(force_zu12, dtype=float, copy=True)
@@ -894,13 +886,8 @@ def _compute_bsubs_half_mesh(
             prv_odd = prv_odd * scalxc_inv
             pzv_odd = pzv_odd * scalxc_inv
 
-
-        rv12[1:] = 0.5 * (
-            prv_even[1:] + prv_even[:-1] + sh[1:] * (prv_odd[1:] + prv_odd[:-1])
-        )
-        zv12[1:] = 0.5 * (
-            pzv_even[1:] + pzv_even[:-1] + sh[1:] * (pzv_odd[1:] + pzv_odd[:-1])
-        )
+        rv12[1:] = 0.5 * (prv_even[1:] + prv_even[:-1] + sh[1:] * (prv_odd[1:] + prv_odd[:-1]))
+        zv12[1:] = 0.5 * (pzv_even[1:] + pzv_even[:-1] + sh[1:] * (pzv_odd[1:] + pzv_odd[:-1]))
         rs12[1:] = rs[1:] + dphids * (pr1_odd[1:] + pr1_odd[:-1]) / sh[1:]
         zs12[1:] = zs[1:] + dphids * (pz1_odd[1:] + pz1_odd[:-1]) / sh[1:]
     else:
@@ -952,7 +939,7 @@ def _compute_bsubs_half_mesh(
                         bsupu_val = float(np.asarray(bsupu, dtype=float)[js, lt, lz])
                         bsupv_val = float(np.asarray(bsupv, dtype=float)[js, lt, lz])
                         f.write(
-                            f"{js+1:6d}{lt+1:6d}{lz+1:6d}"
+                            f"{js + 1:6d}{lt + 1:6d}{lz + 1:6d}"
                             f"{r12[js, lt, lz]:24.16E}{rs[js, lt, lz]:24.16E}{zs[js, lt, lz]:24.16E}"
                             f"{ru12[js, lt, lz]:24.16E}{zu12[js, lt, lz]:24.16E}"
                             f"{bsupu_val:24.16E}{bsupv_val:24.16E}\n"
@@ -963,14 +950,46 @@ def _compute_bsubs_half_mesh(
         outdir.mkdir(parents=True, exist_ok=True)
         tag = os.getenv("VMEC_JAX_DUMP_TAG", "").strip()
         name = "bss_terms_jax" + (f"_{tag}" if tag else "") + ".npz"
-        pr1_even = np.asarray(geom.get("pr1_even"), dtype=float) if isinstance(geom, dict) and "pr1_even" in geom else np.zeros_like(R_even, dtype=float)
-        pr1_odd = np.asarray(geom.get("pr1_odd"), dtype=float) if isinstance(geom, dict) and "pr1_odd" in geom else np.zeros_like(R_even, dtype=float)
-        prv_even = np.asarray(geom.get("prv_even"), dtype=float) if isinstance(geom, dict) and "prv_even" in geom else np.zeros_like(R_even, dtype=float)
-        prv_odd = np.asarray(geom.get("prv_odd"), dtype=float) if isinstance(geom, dict) and "prv_odd" in geom else np.zeros_like(R_even, dtype=float)
-        pru_even = np.asarray(geom.get("pru_even"), dtype=float) if isinstance(geom, dict) and "pru_even" in geom else np.zeros_like(R_even, dtype=float)
-        pru_odd = np.asarray(geom.get("pru_odd"), dtype=float) if isinstance(geom, dict) and "pru_odd" in geom else np.zeros_like(R_even, dtype=float)
-        pzu_even = np.asarray(geom.get("pzu_even"), dtype=float) if isinstance(geom, dict) and "pzu_even" in geom else np.zeros_like(R_even, dtype=float)
-        pzu_odd = np.asarray(geom.get("pzu_odd"), dtype=float) if isinstance(geom, dict) and "pzu_odd" in geom else np.zeros_like(R_even, dtype=float)
+        pr1_even = (
+            np.asarray(geom.get("pr1_even"), dtype=float)
+            if isinstance(geom, dict) and "pr1_even" in geom
+            else np.zeros_like(R_even, dtype=float)
+        )
+        pr1_odd = (
+            np.asarray(geom.get("pr1_odd"), dtype=float)
+            if isinstance(geom, dict) and "pr1_odd" in geom
+            else np.zeros_like(R_even, dtype=float)
+        )
+        prv_even = (
+            np.asarray(geom.get("prv_even"), dtype=float)
+            if isinstance(geom, dict) and "prv_even" in geom
+            else np.zeros_like(R_even, dtype=float)
+        )
+        prv_odd = (
+            np.asarray(geom.get("prv_odd"), dtype=float)
+            if isinstance(geom, dict) and "prv_odd" in geom
+            else np.zeros_like(R_even, dtype=float)
+        )
+        pru_even = (
+            np.asarray(geom.get("pru_even"), dtype=float)
+            if isinstance(geom, dict) and "pru_even" in geom
+            else np.zeros_like(R_even, dtype=float)
+        )
+        pru_odd = (
+            np.asarray(geom.get("pru_odd"), dtype=float)
+            if isinstance(geom, dict) and "pru_odd" in geom
+            else np.zeros_like(R_even, dtype=float)
+        )
+        pzu_even = (
+            np.asarray(geom.get("pzu_even"), dtype=float)
+            if isinstance(geom, dict) and "pzu_even" in geom
+            else np.zeros_like(R_even, dtype=float)
+        )
+        pzu_odd = (
+            np.asarray(geom.get("pzu_odd"), dtype=float)
+            if isinstance(geom, dict) and "pzu_odd" in geom
+            else np.zeros_like(R_even, dtype=float)
+        )
         np.savez(
             outdir / name,
             r1_even=np.asarray(R_even, dtype=float),
@@ -1125,29 +1144,13 @@ def _bsubuv_parity_from_state(
         bsupv_even = bsupv_even - pshalf * bsupv_odd
 
     bsubu_even = (
-        guu_even * bsupu_even
-        + s_term * guu_odd * bsupu_odd
-        + guv_even * bsupv_even
-        + s_term * guv_odd * bsupv_odd
+        guu_even * bsupu_even + s_term * guu_odd * bsupu_odd + guv_even * bsupv_even + s_term * guv_odd * bsupv_odd
     )
-    bsubu_odd = (
-        guu_even * bsupu_odd
-        + guu_odd * bsupu_even
-        + guv_even * bsupv_odd
-        + guv_odd * bsupv_even
-    )
+    bsubu_odd = guu_even * bsupu_odd + guu_odd * bsupu_even + guv_even * bsupv_odd + guv_odd * bsupv_even
     bsubv_even = (
-        guv_even * bsupu_even
-        + s_term * guv_odd * bsupu_odd
-        + gvv_even * bsupv_even
-        + s_term * gvv_odd * bsupv_odd
+        guv_even * bsupu_even + s_term * guv_odd * bsupu_odd + gvv_even * bsupv_even + s_term * gvv_odd * bsupv_odd
     )
-    bsubv_odd = (
-        guv_even * bsupu_odd
-        + guv_odd * bsupu_even
-        + gvv_even * bsupv_odd
-        + gvv_odd * bsupv_even
-    )
+    bsubv_odd = guv_even * bsupu_odd + guv_odd * bsupu_even + gvv_even * bsupv_odd + gvv_odd * bsupv_even
 
     return bsubu_even, bsubu_odd, bsubv_even, bsubv_odd
 
@@ -1334,6 +1337,7 @@ def _filter_bsubuv_jxbforce(
     # For parity-critical diagnostics we prefer the explicit VMEC loop
     # ordering, which matches the Fortran summation order more closely.
     import os
+
     # Default to the vectorized path for performance; the loop-based path is
     # retained for parity debugging.
     use_loop = os.getenv("VMEC_JAX_BSUB_FILTER_LOOP", "0") not in ("", "0")
@@ -1914,10 +1918,7 @@ def _filter_bsubuv_jxbforce_lasym_loop(
     if bsubu.shape != bsubv.shape:
         raise ValueError("bsubu/bsubv shape mismatch")
     have_parity_channels = (
-        (bsubu_even is not None)
-        and (bsubu_odd is not None)
-        and (bsubv_even is not None)
-        and (bsubv_odd is not None)
+        (bsubu_even is not None) and (bsubu_odd is not None) and (bsubv_even is not None) and (bsubv_odd is not None)
     )
     if have_parity_channels:
         bsubu_even = np.asarray(bsubu_even, dtype=acc_dtype)
@@ -2476,9 +2477,7 @@ def _jxbforce_apply_bsubs_correction_lasym_false(
         bsupu1 = 0.5 * (bsupu[js] * sqrtg[js] + bsupu[js + 1] * sqrtg[js + 1])
         bsupv1 = 0.5 * (bsupv[js] * sqrtg[js] + bsupv[js + 1] * sqrtg[js + 1])
 
-        brho = ohs * (
-            bsupu1 * (bsubu[js + 1] - bsubu[js]) + bsupv1 * (bsubv[js + 1] - bsubv[js])
-        )
+        brho = ohs * (bsupu1 * (bsubu[js + 1] - bsubu[js]) + bsupv1 * (bsubv[js + 1] - bsubv[js]))
         brho = brho + (pres[js + 1] - pres[js]) * ohs * jxb
 
         brho00 = float(sum_w(brho))
@@ -2629,8 +2628,7 @@ def _jxbforce_apply_bsubs_correction_lasym_true(
         bsupv1 = 0.5 * (bsupv_full[js] * sqrtg_full[js] + bsupv_full[js + 1] * sqrtg_full[js + 1])
 
         brho_full = ohs * (
-            bsupu1 * (bsubu_full[js + 1] - bsubu_full[js])
-            + bsupv1 * (bsubv_full[js + 1] - bsubv_full[js])
+            bsupu1 * (bsubu_full[js + 1] - bsubu_full[js]) + bsupv1 * (bsubv_full[js + 1] - bsubv_full[js])
         )
         brho_full = brho_full + (pres[js + 1] - pres[js]) * ohs * jxb
 
@@ -3052,9 +3050,7 @@ def _compute_mercier(
             dmult[:, nnyq] *= 0.5
 
         if bool(lasym):
-            bsubs_sym, bsubs_asym = _vmec_symoutput_split(
-                f=bsubs_use, trig=trig, reversed_sym=True
-            )
+            bsubs_sym, bsubs_asym = _vmec_symoutput_split(f=bsubs_use, trig=trig, reversed_sym=True)
 
             # Symmetric (sin) channel.
             f_theta_sin = np.einsum("sik,im->smk", bsubs_sym[:, :nt2, :], sinmui, optimize=True)
@@ -3097,6 +3093,7 @@ def _compute_mercier(
             nt2 = int(trig.ntheta2)
             nt3 = int(getattr(trig, "ntheta3", nt2))
             nzeta = int(np.asarray(bsubsu_s).shape[2])
+
             def _extend_parity_to_full(par0: np.ndarray, par1: np.ndarray) -> np.ndarray:
                 full = np.zeros((par0.shape[0], nt3, nzeta), dtype=float)
                 full[:, :nt2, :] = par0 + par1
@@ -3177,6 +3174,7 @@ def _compute_mercier(
 
     if os.getenv("VMEC_JAX_DUMP_JXB_CHANNELS", "") not in ("", "0"):
         from pathlib import Path
+
         tag = os.getenv("VMEC_JAX_DUMP_TAG", "").strip()
         dump_dir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
         dump_dir.mkdir(parents=True, exist_ok=True)
@@ -3202,6 +3200,7 @@ def _compute_mercier(
         )
     if os.getenv("VMEC_JAX_DUMP_JXBOUT", "") not in ("", "0"):
         from pathlib import Path
+
         tag = os.getenv("VMEC_JAX_DUMP_TAG", "").strip()
         dump_dir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
         dump_dir.mkdir(parents=True, exist_ok=True)
@@ -3240,6 +3239,7 @@ def _compute_mercier(
     # Optional debug dump for parity work.
     if os.getenv("VMEC_JAX_DUMP_JDOTB", "") not in ("", "0"):
         from pathlib import Path
+
         tag = os.getenv("VMEC_JAX_DUMP_TAG", "").strip()
         name = "jdotb_debug" + (f"_{tag}" if tag else "") + ".npz"
         outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
@@ -3302,9 +3302,7 @@ def _compute_mercier(
         rzf = Rv_even[i] + sqs * Rv_odd[i]
         zzf = Zv_even[i] + sqs * Zv_odd[i]
         gtt = rtf * rtf + ztf * ztf
-        gpp = (gsqrt_full * gsqrt_full) / (
-            gtt * r1f * r1f + (rtf * zzf - rzf * ztf) ** 2
-        )
+        gpp = (gsqrt_full * gsqrt_full) / (gtt * r1f * r1f + (rtf * zzf - rzf * ztf) ** 2)
         b2i = 0.5 * (b2[i + 1] + b2[i])
         ob2 = gsqrt_full / b2i
         tpp = _sum_w(ob2)
@@ -3393,9 +3391,9 @@ def _apply_nyquist_half_weight(
 
     mask = np.zeros_like(m, dtype=bool)
     if m_nyq > 0:
-        mask |= (m == m_nyq)
+        mask |= m == m_nyq
     if n_nyq > 0:
-        mask |= (np.abs(n) == n_nyq)
+        mask |= np.abs(n) == n_nyq
     if not np.any(mask):
         return coeff_cos, coeff_sin
 
@@ -3573,7 +3571,7 @@ def _vmec_symforce_antisym(
         raise ValueError("Input theta grid is smaller than VMEC ntheta2")
     nzeta = int(f.shape[2])
     if nzeta <= 0:
-        return (np.asarray(base, dtype=float).copy() if base is not None else f.copy())
+        return np.asarray(base, dtype=float).copy() if base is not None else f.copy()
 
     if base is None:
         out = np.zeros_like(f)
@@ -3894,6 +3892,7 @@ def _vmec_wrout_nyquist_lasym_loop(
         bsupvmns=bsupvmns,
     )
 
+
 def _vmec_wrout_nyquist_synthesis(
     *,
     coeff_c: np.ndarray,
@@ -3943,9 +3942,7 @@ def _vmec_wrout_nyquist_synthesis(
     term_c = cosmu_m[:, None, :] * cosnv_n[None, :, :] + sinmu_m[:, None, :] * sinnv_n[None, :, :]
     term_s = sinmu_m[:, None, :] * cosnv_n[None, :, :] - cosmu_m[:, None, :] * sinnv_n[None, :, :]
 
-    f = np.einsum("sk,ijk->sij", raw_c, term_c, optimize=True) + np.einsum(
-        "sk,ijk->sij", raw_s, term_s, optimize=True
-    )
+    f = np.einsum("sk,ijk->sij", raw_c, term_c, optimize=True) + np.einsum("sk,ijk->sij", raw_s, term_s, optimize=True)
     return np.asarray(f, dtype=float)
 
 
@@ -4008,9 +4005,7 @@ def _vmec_wrout_nyquist_sin_coeffs_loop(
             acc = 0.0
             for k in range(nzeta):
                 for j in range(nt2):
-                    tsini = dmult * (
-                        sinmui[j, m] * cosnv[k, n1] - sgn * cosmui[j, m] * sinnv[k, n1]
-                    )
+                    tsini = dmult * (sinmui[j, m] * cosnv[k, n1] - sgn * cosmui[j, m] * sinnv[k, n1])
                     acc += tsini * f_js[j, k]
             coeff[js, idx] = acc
 
@@ -4131,9 +4126,7 @@ def _vmec_jxbforce_sin_coeffs(
 
 def _chipf_from_chips(chips: np.ndarray) -> np.ndarray:
     """VMEC add_fluxes: build half-mesh chipf from chips on full mesh."""
-    is_traced = bool(has_jax()) and (
-        isinstance(chips, jax.core.Tracer) or isinstance(chips, jax.Array)
-    )
+    is_traced = bool(has_jax()) and (isinstance(chips, jax.core.Tracer) or isinstance(chips, jax.Array))
     if is_traced:
         chips = jnp.asarray(chips, dtype=jnp.float64)
         ns = int(chips.shape[0])
@@ -4239,22 +4232,7 @@ def read_wout(path: str | Path) -> WoutData:
         iotaf = np.asarray(ds.variables.get("iotaf", np.zeros_like(phips))[:])
         iotas = np.asarray(ds.variables.get("iotas", np.zeros_like(phips))[:])
 
-        gmnc = np.asarray(ds.variables["gmnc"][:])
-        gmns = np.asarray(ds.variables.get("gmns", np.zeros_like(gmnc))[:])
-        bsupumnc = np.asarray(ds.variables["bsupumnc"][:])
-        bsupumns = np.asarray(ds.variables.get("bsupumns", np.zeros_like(bsupumnc))[:])
-        bsupvmnc = np.asarray(ds.variables["bsupvmnc"][:])
-        bsupvmns = np.asarray(ds.variables.get("bsupvmns", np.zeros_like(bsupvmnc))[:])
-
-        bsubumnc = np.asarray(ds.variables.get("bsubumnc", np.zeros_like(bsupumnc))[:])
-        bsubumns = np.asarray(ds.variables.get("bsubumns", np.zeros_like(bsupumnc))[:])
-        bsubvmnc = np.asarray(ds.variables.get("bsubvmnc", np.zeros_like(bsupvmnc))[:])
-        bsubvmns = np.asarray(ds.variables.get("bsubvmns", np.zeros_like(bsupvmnc))[:])
-        bsubsmns = np.asarray(ds.variables.get("bsubsmns", np.zeros_like(bsupvmnc))[:])
-        bsubsmnc = np.asarray(ds.variables.get("bsubsmnc", np.zeros_like(bsupvmnc))[:])
-
-        bmnc = np.asarray(ds.variables.get("bmnc", np.zeros_like(gmnc))[:])
-        bmns = np.asarray(ds.variables.get("bmns", np.zeros_like(gmnc))[:])
+        nyquist_fields = read_nyquist_fourier_fields(ds.variables)
 
         wb = float(_nc_scalar(ds.variables["wb"][:], 0.0))
         volume_p = float(_nc_scalar(ds.variables["volume_p"][:], 0.0))
@@ -4301,7 +4279,9 @@ def read_wout(path: str | Path) -> WoutData:
         Aminor_p = float(_nc_scalar(ds.variables.get("Aminor_p", 0.0)[:], 0.0)) if "Aminor_p" in ds.variables else 0.0
         Rmajor_p = float(_nc_scalar(ds.variables.get("Rmajor_p", 0.0)[:], 0.0)) if "Rmajor_p" in ds.variables else 0.0
         aspect = float(_nc_scalar(ds.variables.get("aspect", 0.0)[:], 0.0)) if "aspect" in ds.variables else 0.0
-        betatotal = float(_nc_scalar(ds.variables.get("betatotal", 0.0)[:], 0.0)) if "betatotal" in ds.variables else 0.0
+        betatotal = (
+            float(_nc_scalar(ds.variables.get("betatotal", 0.0)[:], 0.0)) if "betatotal" in ds.variables else 0.0
+        )
         betapol = float(_nc_scalar(ds.variables.get("betapol", 0.0)[:], 0.0)) if "betapol" in ds.variables else 0.0
         betator = float(_nc_scalar(ds.variables.get("betator", 0.0)[:], 0.0)) if "betator" in ds.variables else 0.0
         betaxis = float(_nc_scalar(ds.variables.get("betaxis", 0.0)[:], 0.0)) if "betaxis" in ds.variables else 0.0
@@ -4350,20 +4330,7 @@ def read_wout(path: str | Path) -> WoutData:
         phips=phips,
         iotaf=iotaf,
         iotas=iotas,
-        gmnc=gmnc,
-        gmns=gmns,
-        bsupumnc=bsupumnc,
-        bsupumns=bsupumns,
-        bsupvmnc=bsupvmnc,
-        bsupvmns=bsupvmns,
-        bsubumnc=bsubumnc,
-        bsubumns=bsubumns,
-        bsubvmnc=bsubvmnc,
-        bsubvmns=bsubvmns,
-        bsubsmns=bsubsmns,
-        bsubsmnc=bsubsmnc,
-        bmnc=bmnc,
-        bmns=bmns,
+        **nyquist_fields,
         wb=wb,
         volume_p=volume_p,
         gamma=gamma,
@@ -4481,12 +4448,25 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
         write_int_variable(ds, "signgs", (), np.asarray(int(wout.signgs)))
         write_int_variable(ds, "lasym__logical__", (), np.asarray(int(bool(wout.lasym))))
         write_int_variable(ds, "mnmax", (), np.asarray(int(getattr(wout, "mnmax", mnmax))))
-        write_int_variable(ds, "mpol_nyq", (), np.asarray(int(getattr(wout, "mpol_nyq", np.max(np.asarray(wout.xm_nyq)) if mnmax_nyq > 0 else 0))))
+        write_int_variable(
+            ds,
+            "mpol_nyq",
+            (),
+            np.asarray(int(getattr(wout, "mpol_nyq", np.max(np.asarray(wout.xm_nyq)) if mnmax_nyq > 0 else 0))),
+        )
         write_int_variable(
             ds,
             "ntor_nyq",
             (),
-            np.asarray(int(getattr(wout, "ntor_nyq", np.max(np.abs(np.asarray(wout.xn_nyq) // int(wout.nfp))) if mnmax_nyq > 0 else 0))),
+            np.asarray(
+                int(
+                    getattr(
+                        wout,
+                        "ntor_nyq",
+                        np.max(np.abs(np.asarray(wout.xn_nyq) // int(wout.nfp))) if mnmax_nyq > 0 else 0,
+                    )
+                )
+            ),
         )
         write_int_variable(ds, "mnmax_nyq", (), np.asarray(int(getattr(wout, "mnmax_nyq", mnmax_nyq))))
 
@@ -4524,22 +4504,7 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
         write_float_variable(ds, "phi", ("radius",), np.asarray(getattr(wout, "phi", np.zeros((ns,), dtype=float))))
 
         # Nyquist Fourier fields.
-        write_float_variable(ds, "gmnc", ("radius", "mn_mode_nyq"), np.asarray(wout.gmnc))
-        write_float_variable(ds, "gmns", ("radius", "mn_mode_nyq"), np.asarray(wout.gmns))
-        write_float_variable(ds, "bsupumnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bsupumnc))
-        write_float_variable(ds, "bsupumns", ("radius", "mn_mode_nyq"), np.asarray(wout.bsupumns))
-        write_float_variable(ds, "bsupvmnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bsupvmnc))
-        write_float_variable(ds, "bsupvmns", ("radius", "mn_mode_nyq"), np.asarray(wout.bsupvmns))
-
-        write_float_variable(ds, "bsubumnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubumnc))
-        write_float_variable(ds, "bsubumns", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubumns))
-        write_float_variable(ds, "bsubvmnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubvmnc))
-        write_float_variable(ds, "bsubvmns", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubvmns))
-        write_float_variable(ds, "bsubsmns", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubsmns))
-        write_float_variable(ds, "bsubsmnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bsubsmnc))
-
-        write_float_variable(ds, "bmnc", ("radius", "mn_mode_nyq"), np.asarray(wout.bmnc))
-        write_float_variable(ds, "bmns", ("radius", "mn_mode_nyq"), np.asarray(wout.bmns))
+        write_nyquist_fourier_fields(ds, wout)
 
         # 1D radial fields.
         write_float_variable(ds, "vp", ("radius",), np.asarray(wout.vp))
@@ -4552,9 +4517,13 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
         write_float_variable(ds, "jcurv", ("radius",), np.asarray(getattr(wout, "jcurv", np.zeros((ns,), dtype=float))))
         write_float_variable(ds, "jdotb", ("radius",), np.asarray(getattr(wout, "jdotb", np.zeros((ns,), dtype=float))))
         write_float_variable(ds, "bdotb", ("radius",), np.asarray(getattr(wout, "bdotb", np.zeros((ns,), dtype=float))))
-        write_float_variable(ds, "bdotgradv", ("radius",), np.asarray(getattr(wout, "bdotgradv", np.zeros((ns,), dtype=float))))
+        write_float_variable(
+            ds, "bdotgradv", ("radius",), np.asarray(getattr(wout, "bdotgradv", np.zeros((ns,), dtype=float)))
+        )
         write_float_variable(ds, "DMerc", ("radius",), np.asarray(getattr(wout, "DMerc", np.zeros((ns,), dtype=float))))
-        write_float_variable(ds, "DShear", ("radius",), np.asarray(getattr(wout, "Dshear", np.zeros((ns,), dtype=float))))
+        write_float_variable(
+            ds, "DShear", ("radius",), np.asarray(getattr(wout, "Dshear", np.zeros((ns,), dtype=float)))
+        )
         write_float_variable(ds, "DWell", ("radius",), np.asarray(getattr(wout, "Dwell", np.zeros((ns,), dtype=float))))
         write_float_variable(ds, "DCurr", ("radius",), np.asarray(getattr(wout, "Dcurr", np.zeros((ns,), dtype=float))))
         write_float_variable(ds, "DGeod", ("radius",), np.asarray(getattr(wout, "Dgeod", np.zeros((ns,), dtype=float))))
@@ -4563,10 +4532,18 @@ def write_wout(path: str | Path, wout: WoutData, *, overwrite: bool = False) -> 
         write_float_variable(ds, "fsqt", ("nstore_seq",), np.asarray(wout.fsqt))
 
         # Axis coefficients and geometric scalars.
-        write_float_variable(ds, "raxis_cc", ("n_tor",), np.asarray(getattr(wout, "raxis_cc", np.zeros((n_tor,), dtype=float))))
-        write_float_variable(ds, "zaxis_cs", ("n_tor",), np.asarray(getattr(wout, "zaxis_cs", np.zeros((n_tor,), dtype=float))))
-        write_float_variable(ds, "raxis_cs", ("n_tor",), np.asarray(getattr(wout, "raxis_cs", np.zeros((n_tor,), dtype=float))))
-        write_float_variable(ds, "zaxis_cc", ("n_tor",), np.asarray(getattr(wout, "zaxis_cc", np.zeros((n_tor,), dtype=float))))
+        write_float_variable(
+            ds, "raxis_cc", ("n_tor",), np.asarray(getattr(wout, "raxis_cc", np.zeros((n_tor,), dtype=float)))
+        )
+        write_float_variable(
+            ds, "zaxis_cs", ("n_tor",), np.asarray(getattr(wout, "zaxis_cs", np.zeros((n_tor,), dtype=float)))
+        )
+        write_float_variable(
+            ds, "raxis_cs", ("n_tor",), np.asarray(getattr(wout, "raxis_cs", np.zeros((n_tor,), dtype=float)))
+        )
+        write_float_variable(
+            ds, "zaxis_cc", ("n_tor",), np.asarray(getattr(wout, "zaxis_cc", np.zeros((n_tor,), dtype=float)))
+        )
 
         write_float_variable(ds, "Aminor_p", (), np.asarray(float(getattr(wout, "Aminor_p", 0.0))))
         write_float_variable(ds, "Rmajor_p", (), np.asarray(float(getattr(wout, "Rmajor_p", 0.0))))
@@ -4950,6 +4927,7 @@ def wout_minimal_from_fixed_boundary(
     # avoid force-parity geometry unless explicitly requested.
     use_parity_geom_bss = os.getenv("VMEC_JAX_BSS_FROM_PARITY_GEOM", "1") not in ("", "0")
     geom_bss = geom if use_parity_geom_bss else {}
+
     def _force_sym(arr, kind: str):
         arr_np = np.asarray(arr, dtype=float)
         # For LASYM there is no symmetry reduction; keep full-grid values.
@@ -4961,6 +4939,7 @@ def wout_minimal_from_fixed_boundary(
             return arr_np
         # Enforce stellarator symmetry on the full grid when lasym=False.
         return _vmec_symforce_apply(f=arr_np, trig=trig, kind=kind)
+
     if use_force_bss and (k_force is not None):
         if hasattr(k_force, "crmn_e") and hasattr(k_force, "czmn_e"):
             crmn_e_sym = _force_sym(k_force.crmn_e, "crs")
@@ -5180,9 +5159,7 @@ def wout_minimal_from_fixed_boundary(
             # Default to vectorized LASYM Nyquist transforms. The explicit
             # loop path is retained for parity debugging via env toggle.
             use_lasym_loop = os.getenv("VMEC_JAX_WROUT_LASYM_LOOP", "0") not in ("", "0", "false", "no")
-        if (not skip_bsub_filter) and (
-            os.getenv("VMEC_JAX_WROUT_LASYM_FILTER", "1") not in ("", "0")
-        ):
+        if (not skip_bsub_filter) and (os.getenv("VMEC_JAX_WROUT_LASYM_FILTER", "1") not in ("", "0")):
             use_parity_channels = os.getenv("VMEC_JAX_LASYM_FILTER_USE_PARITY_CHANNELS", "0") not in (
                 "",
                 "0",
@@ -5233,7 +5210,7 @@ def wout_minimal_from_fixed_boundary(
                     for lz in range(nzeta_d):
                         for js in range(ns_d):
                             f.write(
-                                f"{js+1:6d}{lt+1:6d}{lz+1:6d}"
+                                f"{js + 1:6d}{lt + 1:6d}{lz + 1:6d}"
                                 f"{bsubu_dump[js, lt, lz]:24.16E}"
                                 f"{bsubv_dump[js, lt, lz]:24.16E}"
                                 f"{bsupu_dump[js, lt, lz]:24.16E}"
@@ -5335,9 +5312,7 @@ def wout_minimal_from_fixed_boundary(
             bsubsmns[0, :] = 2.0 * bsubsmns[1, :] - bsubsmns[2, :]
             bsubsmnc[0, :] = 2.0 * bsubsmnc[1, :] - bsubsmnc[2, :]
     else:
-        gmnc = _vmec_wrout_nyquist_cos_coeffs(
-            f=np.asarray(bc.jac.sqrtg), modes=nyq_modes, trig=trig
-        )
+        gmnc = _vmec_wrout_nyquist_cos_coeffs(f=np.asarray(bc.jac.sqrtg), modes=nyq_modes, trig=trig)
         bsupu_out = np.asarray(bc.bsupu)
         bsupv_out = np.asarray(bc.bsupv)
         bsupumnc = _vmec_wrout_nyquist_cos_coeffs(f=bsupu_out, modes=nyq_modes, trig=trig)
@@ -5711,9 +5686,7 @@ def wout_minimal_from_fixed_boundary(
         odd_mask = ~even_mask
         for js_idx in range(ns - 1, 0, -1):
             if np.any(even_mask):
-                lam_half[js_idx, even_mask] = 0.5 * (
-                    lam_half[js_idx, even_mask] + lam_half[js_idx - 1, even_mask]
-                )
+                lam_half[js_idx, even_mask] = 0.5 * (lam_half[js_idx, even_mask] + lam_half[js_idx - 1, even_mask])
             if np.any(odd_mask):
                 sm_val = sm_f[js_idx + 1]
                 sp_val = sp_f[js_idx]
@@ -5924,7 +5897,9 @@ def state_from_wout(wout: WoutData) -> VMECState:
     # uses the unscaled phipf (= phipf_internal). Align the reconstruction with
     # bcovar's bsupv formula by undoing the 2π*signgs factor here.
     scale = float(2.0 * np.pi * float(getattr(wout, "signgs", 1)))
-    phipf_internal = np.asarray(wout.phipf, dtype=float) / scale if scale != 0.0 else np.asarray(wout.phipf, dtype=float)
+    phipf_internal = (
+        np.asarray(wout.phipf, dtype=float) / scale if scale != 0.0 else np.asarray(wout.phipf, dtype=float)
+    )
     if lamscale == 0.0:
         lam_scale = np.zeros((ns,), dtype=float)
     else:
@@ -5939,7 +5914,9 @@ def state_from_wout(wout: WoutData) -> VMECState:
     #
     # This yields lambda coefficients that are consistent with VMEC's internal
     # `bcovar` formulas when used with our `lamscale` scaling.
-    def _lambda_full_from_wout(*, lam_wout: np.ndarray, m_modes: np.ndarray, phipf: np.ndarray, lamscale: float) -> np.ndarray:
+    def _lambda_full_from_wout(
+        *, lam_wout: np.ndarray, m_modes: np.ndarray, phipf: np.ndarray, lamscale: float
+    ) -> np.ndarray:
         lam_wout = np.asarray(lam_wout, dtype=float)
         if lam_wout.ndim != 2 or lam_wout.shape[0] != ns:
             raise ValueError("Expected lam_wout with shape (ns, K)")
@@ -5998,7 +5975,9 @@ def state_from_wout(wout: WoutData) -> VMECState:
                     if denom == 0.0:
                         lam_full[js - 1, mask] = 0.0
                     else:
-                        lam_full[js - 1, mask] = (2.0 * lam_wout[js - 1, mask] - sp_f[js - 1] * lam_full[js - 2, mask]) / denom
+                        lam_full[js - 1, mask] = (
+                            2.0 * lam_wout[js - 1, mask] - sp_f[js - 1] * lam_full[js - 2, mask]
+                        ) / denom
 
         # Undo the old-style `phipf` division and `lamscale` multiply done in `wrout.f`.
         #

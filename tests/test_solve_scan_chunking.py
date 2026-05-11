@@ -96,6 +96,10 @@ def test_solve_reexports_runtime_helpers():
     assert solve_module._scan_backend_name is solve_runtime._scan_backend_name
     assert solve_module._default_scan_core is solve_runtime._default_scan_core
     assert solve_module._parse_iter_list is solve_runtime._parse_iter_list
+    assert solve_module._runtime_env_enabled is solve_runtime._runtime_env_enabled
+    assert solve_module._scan_fallback_policy is solve_runtime._scan_fallback_policy
+    assert solve_module._residual_convergence_flags is solve_runtime._residual_convergence_flags
+    assert solve_module._scalar_history_array is solve_runtime._scalar_history_array
 
 
 def test_solve_scan_chunk_settings_keeps_backend_monkeypatch_compat(monkeypatch):
@@ -141,3 +145,98 @@ def test_runtime_dump_iter_selected_uses_optional_allowlist():
     assert solve_runtime._dump_iter_selected(iter_idx=3, iter_env="")
     assert solve_runtime._dump_iter_selected(iter_idx=3, iter_env="1,3-4")
     assert not solve_runtime._dump_iter_selected(iter_idx=5, iter_env="1,3-4")
+
+
+def test_runtime_env_enabled_uses_modern_false_tokens():
+    assert not solve_runtime._runtime_env_enabled("")
+    assert not solve_runtime._runtime_env_enabled("0")
+    assert not solve_runtime._runtime_env_enabled(" false ")
+    assert not solve_runtime._runtime_env_enabled("NO")
+    assert solve_runtime._runtime_env_enabled("1")
+    assert solve_runtime._runtime_env_enabled("yes")
+
+
+def test_scan_fallback_policy_backend_defaults():
+    cpu = solve_runtime._scan_fallback_policy(
+        backend_name="cpu",
+        enabled_env=None,
+        iters_env="50",
+        badjac_limit_env="10",
+        fsq_abs_env="1.0e-2",
+        accept_frac_env="0.5",
+        fsq_factor_env="50",
+        improve_env="0.1",
+    )
+    gpu = solve_runtime._scan_fallback_policy(
+        backend_name="gpu",
+        enabled_env=None,
+        iters_env="50",
+        badjac_limit_env="10",
+        fsq_abs_env="1.0e-2",
+        accept_frac_env="0.5",
+        fsq_factor_env="50",
+        improve_env="0.1",
+    )
+
+    assert cpu.enabled is True
+    assert gpu.enabled is False
+    assert cpu.iters == 50
+    assert cpu.badjac_limit == 10
+    assert cpu.fsq_abs == 1.0e-2
+    assert cpu.accept_frac == 0.5
+    assert cpu.fsq_factor == 50.0
+    assert cpu.improve == 0.1
+
+
+def test_scan_fallback_policy_preserves_legacy_parse_fallbacks_and_clamps():
+    policy = solve_runtime._scan_fallback_policy(
+        backend_name="gpu",
+        enabled_env="yes",
+        iters_env="bad",
+        badjac_limit_env="-3",
+        fsq_abs_env="-1",
+        accept_frac_env="2",
+        fsq_factor_env="0.25",
+        improve_env="bad",
+    )
+
+    assert policy.enabled is True
+    assert policy.iters == 20
+    assert policy.badjac_limit == 0
+    assert policy.fsq_abs == 0.0
+    assert policy.accept_frac == 1.0
+    assert policy.fsq_factor == 1.0
+    assert policy.improve == 0.9
+
+
+def test_residual_convergence_flags_support_strict_and_total_target():
+    assert solve_runtime._residual_convergence_flags(
+        fsqr=1.0,
+        fsqz=2.0,
+        fsql=3.0,
+        ftol=3.0,
+        fsq_total_target=None,
+    ) == (True, False, True)
+    assert solve_runtime._residual_convergence_flags(
+        fsqr=4.0,
+        fsqz=1.0,
+        fsql=1.0,
+        ftol=3.0,
+        fsq_total_target=6.0,
+    ) == (False, True, True)
+    assert solve_runtime._residual_convergence_flags(
+        fsqr=4.0,
+        fsqz=1.0,
+        fsql=1.0,
+        ftol=3.0,
+        fsq_total_target=5.0,
+    ) == (False, False, False)
+
+
+def test_scalar_history_array_materializes_float_array():
+    empty = solve_runtime._scalar_history_array([])
+    assert empty.shape == (0,)
+    assert empty.dtype == np.dtype(float)
+
+    got = solve_runtime._scalar_history_array([np.asarray(1), np.asarray(2.5)])
+    np.testing.assert_allclose(got, np.asarray([1.0, 2.5], dtype=float))

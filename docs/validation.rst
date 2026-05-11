@@ -161,10 +161,14 @@ full sweep, add a dry-run prefine manifest:
 
    PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --prefine-probes plan --prefine-manifest results/qi_seed_audit/prefine_manifest.json
 
-The manifest records top-ranked seeds, hard-capped QI-only prefine settings,
-expected output files, and exact commands for running one tiny probe at a time.
-Use ``--prefine-probes run`` only when deliberately executing those capped
-probes.
+The manifest records top-ranked seeds plus one best-ranked representative from
+each available seed family, hard-capped QI-only prefine settings, expected
+output files, and exact commands for running one tiny probe at a time.  Use
+``--prefine-probes run`` only when deliberately executing those capped probes.
+
+For the current optional validation plan, including the verified green CI
+baseline, family-representative QI probe workflow, VMEC2000/SIMSOPT optional
+lanes, and deferred parity gates, see :doc:`optional_validation_plan`.
 
 Validated ``wout`` fields
 --------------------------

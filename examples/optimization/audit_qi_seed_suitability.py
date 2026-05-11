@@ -60,8 +60,10 @@ DEFAULT_MAX_MIRROR_RATIO = 0.21
 DEFAULT_MAX_ELONGATION = 8.0
 DEFAULT_SURFACES = (0.1, 0.35, 0.6, 0.85)
 DEFAULT_PREFINE_SURFACES = (0.35, 0.65)
+SEED_FAMILY_ORDER = ("qi", "qp", "qh", "qa", "simple")
 
 MAX_PREFINE_TOP_N = 5
+MAX_PREFINE_FAMILY_REPRESENTATIVES = len(SEED_FAMILY_ORDER)
 MAX_PREFINE_MAX_NFEV = 5
 MAX_PREFINE_CONTINUATION_NFEV = 3
 MAX_PREFINE_STAGE_COUNT = 3
@@ -95,6 +97,8 @@ class QIPrefineProbeConfig:
     """Hard-capped settings for tiny optional QI-only prefine probes."""
 
     top_n: int = 1
+    include_family_representatives: bool = True
+    representative_families: tuple[str, ...] = SEED_FAMILY_ORDER
     max_nfev: int = 2
     continuation_nfev: int = 1
     max_mode: int = 1
@@ -182,11 +186,7 @@ def default_seed_cases() -> tuple[list[SeedCase], list[dict[str, str]]]:
     available: list[SeedCase] = []
     skipped: list[dict[str, str]] = []
     for case in cases:
-        missing = [
-            str(path)
-            for path in (case.input_path, case.wout_path)
-            if not path.expanduser().exists()
-        ]
+        missing = [str(path) for path in (case.input_path, case.wout_path) if not path.expanduser().exists()]
         if missing:
             skipped.append({"label": case.label, "family": case.family, "missing": ";".join(missing)})
         else:
@@ -197,9 +197,7 @@ def default_seed_cases() -> tuple[list[SeedCase], list[dict[str, str]]]:
 def parse_case(raw: str) -> SeedCase:
     parts = raw.split(":")
     if len(parts) != 4:
-        raise argparse.ArgumentTypeError(
-            "--case must have format label:family:input_path:wout_path"
-        )
+        raise argparse.ArgumentTypeError("--case must have format label:family:input_path:wout_path")
     label, family, input_path, wout_path = parts
     if not label:
         raise argparse.ArgumentTypeError("--case label must be non-empty")
@@ -225,6 +223,18 @@ def parse_stage_modes(raw: str) -> tuple[int, ...]:
     if any(mode <= 0 for mode in modes):
         raise argparse.ArgumentTypeError("stage modes must be positive integers")
     return modes
+
+
+def parse_seed_families(raw: str) -> tuple[str, ...]:
+    families = tuple(part.strip().lower() for part in raw.split(",") if part.strip())
+    if not families:
+        raise argparse.ArgumentTypeError("seed families must contain at least one value")
+    unknown = sorted(set(families) - set(SEED_FAMILY_ORDER))
+    if unknown:
+        raise argparse.ArgumentTypeError(
+            f"seed families must be drawn from {', '.join(SEED_FAMILY_ORDER)}; got {', '.join(unknown)}"
+        )
+    return families
 
 
 def _first_float(value: Any) -> float | None:
@@ -262,11 +272,7 @@ def _constraint_status(record: dict[str, Any], targets: SuitabilityTargets) -> d
     legacy = _finite_or_none(record.get("qi_legacy_total"))
 
     aspect_relative_error = None if aspect is None else abs(aspect - targets.target_aspect) / targets.target_aspect
-    iota_shortfall = (
-        None
-        if mean_iota is None
-        else max(0.0, targets.abs_iota_min - abs(mean_iota))
-    )
+    iota_shortfall = None if mean_iota is None else max(0.0, targets.abs_iota_min - abs(mean_iota))
     mirror_excess = None if mirror is None else max(0.0, mirror - targets.max_mirror_ratio)
     elongation_excess = None if elongation is None else max(0.0, elongation - targets.max_elongation)
     diagnostic_errors = sorted(key for key in record if key.endswith("_error"))
@@ -432,10 +438,21 @@ def _validate_prefine_probe_config(config: QIPrefineProbeConfig) -> None:
         raise ValueError("prefine stage_modes must contain at least one mode")
     if not config.surfaces:
         raise ValueError("prefine surfaces must contain at least one value")
+    if not config.representative_families:
+        raise ValueError("prefine representative_families must contain at least one family")
     if any(surface <= 0.0 or surface > 1.0 for surface in config.surfaces):
         raise ValueError("prefine surfaces must be in (0, 1]")
+    if len(set(config.representative_families)) != len(config.representative_families):
+        raise ValueError("prefine representative_families must not contain duplicates")
+    unknown_families = sorted(set(config.representative_families) - set(SEED_FAMILY_ORDER))
+    if unknown_families:
+        raise ValueError(f"prefine representative_families contains unsupported families: {unknown_families}")
     checks = [
         (1 <= config.top_n <= MAX_PREFINE_TOP_N, f"prefine top_n must be in [1, {MAX_PREFINE_TOP_N}]"),
+        (
+            len(config.representative_families) <= MAX_PREFINE_FAMILY_REPRESENTATIVES,
+            f"prefine representative_families must contain at most {MAX_PREFINE_FAMILY_REPRESENTATIVES} families",
+        ),
         (
             1 <= config.max_nfev <= MAX_PREFINE_MAX_NFEV,
             f"prefine max_nfev must be in [1, {MAX_PREFINE_MAX_NFEV}]",
@@ -487,6 +504,7 @@ def _prefine_probe_config_dict(config: QIPrefineProbeConfig) -> dict[str, Any]:
     row["output_dir"] = str(config.output_dir)
     row["surfaces"] = [float(surface) for surface in config.surfaces]
     row["stage_modes"] = [int(mode) for mode in config.stage_modes]
+    row["representative_families"] = [str(family) for family in config.representative_families]
     return row
 
 
@@ -520,6 +538,59 @@ def _prefine_run_command(record: dict[str, Any], config: QIPrefineProbeConfig, m
     return " ".join(shlex.quote(part) for part in command)
 
 
+def _prefine_selection_key(record: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        str(record.get("label", "")),
+        str(record.get("family", "")),
+        str(record.get("input", "")),
+        str(record.get("wout", "")),
+    )
+
+
+def _select_prefine_probe_records(
+    audit_report: dict[str, Any],
+    config: QIPrefineProbeConfig,
+) -> list[dict[str, Any]]:
+    """Select top-ranked seeds plus one best-ranked representative per family."""
+
+    cases = list(audit_report.get("cases", []))
+    selected: list[dict[str, Any]] = []
+    by_key: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+
+    def add_record(record: dict[str, Any], *, reason: str, representative_family: str | None = None) -> None:
+        key = _prefine_selection_key(record)
+        selection = by_key.get(key)
+        if selection is None:
+            selection = {
+                "record": record,
+                "selection_reasons": [],
+                "representative_families": [],
+            }
+            by_key[key] = selection
+            selected.append(selection)
+        selection["selection_reasons"].append(reason)
+        if representative_family is not None:
+            selection["representative_families"].append(representative_family)
+
+    for record in cases[: config.top_n]:
+        add_record(record, reason="top_n")
+
+    if config.include_family_representatives:
+        for family in config.representative_families:
+            representative = next(
+                (record for record in cases if str(record.get("family", "")).lower() == family),
+                None,
+            )
+            if representative is not None:
+                add_record(
+                    representative,
+                    reason="family_representative",
+                    representative_family=family,
+                )
+
+    return selected
+
+
 def build_qi_prefine_probe_manifest(
     audit_report: dict[str, Any],
     *,
@@ -527,17 +598,20 @@ def build_qi_prefine_probe_manifest(
     manifest_path: Path,
     dry_run: bool,
 ) -> dict[str, Any]:
-    """Build a bounded manifest from the top-ranked audit rows."""
+    """Build a bounded manifest from top-ranked and family-representative audit rows."""
 
     _validate_prefine_probe_config(config)
-    selected = audit_report.get("cases", [])[: config.top_n]
+    selected = _select_prefine_probe_records(audit_report, config)
     plans = []
-    for index, record in enumerate(selected, start=1):
+    for index, selection in enumerate(selected, start=1):
+        record = selection["record"]
         label = str(record.get("label", f"seed_{index}"))
         probe_dir = config.output_dir / f"{index:02d}_{_safe_label(label)}"
         plan = {
             "status": "planned" if dry_run else "pending",
             "audit_rank": record.get("suitability_rank", index),
+            "selection_reasons": selection["selection_reasons"],
+            "representative_families": selection["representative_families"],
             "label": label,
             "family": record.get("family"),
             "input": record.get("input"),
@@ -598,6 +672,7 @@ def build_qi_prefine_probe_manifest(
         "dry_run": bool(dry_run),
         "hard_caps": {
             "top_n": MAX_PREFINE_TOP_N,
+            "family_representatives": MAX_PREFINE_FAMILY_REPRESENTATIVES,
             "max_nfev": MAX_PREFINE_MAX_NFEV,
             "continuation_nfev": MAX_PREFINE_CONTINUATION_NFEV,
             "stage_count": MAX_PREFINE_STAGE_COUNT,
@@ -612,7 +687,16 @@ def build_qi_prefine_probe_manifest(
         "config": _prefine_probe_config_dict(config),
         "selection": {
             "requested_top_n": int(config.top_n),
+            "include_family_representatives": bool(config.include_family_representatives),
+            "requested_representative_families": [str(family) for family in config.representative_families],
             "available_rows": len(audit_report.get("cases", [])),
+            "top_rows": min(int(config.top_n), len(audit_report.get("cases", []))),
+            "family_representative_rows": sum(
+                1 for plan in plans if "family_representative" in plan.get("selection_reasons", [])
+            ),
+            "covered_families": sorted(
+                {str(family) for plan in plans for family in plan.get("representative_families", [])}
+            ),
             "planned_rows": len(plans),
         },
         "plans": plans,
@@ -884,6 +968,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prefine-manifest", type=Path, default=DEFAULT_PREFINE_MANIFEST)
     parser.add_argument("--prefine-output-dir", type=Path, default=DEFAULT_PREFINE_OUTPUT_DIR)
     parser.add_argument("--prefine-top-n", type=int, default=1)
+    parser.add_argument(
+        "--prefine-family-representatives",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Also select the best-ranked available representative from each requested seed family.",
+    )
+    parser.add_argument(
+        "--prefine-representative-families",
+        type=parse_seed_families,
+        default=SEED_FAMILY_ORDER,
+        help="Comma-separated families to cover with representative prefine probes.",
+    )
     parser.add_argument("--prefine-max-nfev", type=int, default=2)
     parser.add_argument("--prefine-continuation-nfev", type=int, default=1)
     parser.add_argument("--prefine-max-mode", type=int, default=1)
@@ -956,6 +1052,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.prefine_probes != "none":
         prefine_config = QIPrefineProbeConfig(
             top_n=args.prefine_top_n,
+            include_family_representatives=args.prefine_family_representatives,
+            representative_families=args.prefine_representative_families,
             max_nfev=args.prefine_max_nfev,
             continuation_nfev=args.prefine_continuation_nfev,
             max_mode=args.prefine_max_mode,

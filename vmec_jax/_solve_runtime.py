@@ -8,11 +8,21 @@ from __future__ import annotations
 
 import hashlib
 import os
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 
 from ._compat import has_jax, jax
+
+
+class ScanFallbackPolicy(NamedTuple):
+    enabled: bool
+    iters: int
+    badjac_limit: int
+    fsq_abs: float
+    accept_frac: float
+    fsq_factor: float
+    improve: float
 
 
 def _hash_array_bytes(a: Any) -> str:
@@ -132,3 +142,102 @@ def _dump_iter_selected(*, iter_idx: int, iter_env: str) -> bool:
     """Return whether a dump should run for an iteration env selector."""
     iters = _parse_iter_list(iter_env)
     return iters is None or int(iter_idx) in iters
+
+
+def _runtime_env_enabled(val: str) -> bool:
+    """Parse modern runtime env flags that use strip/lower false tokens."""
+    return str(val).strip().lower() not in ("", "0", "false", "no")
+
+
+def _scan_fallback_policy(
+    *,
+    backend_name: str,
+    enabled_env: str | None,
+    iters_env: str,
+    badjac_limit_env: str,
+    fsq_abs_env: str,
+    accept_frac_env: str,
+    fsq_factor_env: str,
+    improve_env: str,
+) -> ScanFallbackPolicy:
+    """Parse scan fallback env policy while preserving legacy defaults/clamps."""
+    backend = str(backend_name).strip().lower()
+    default_enabled = "1" if backend == "cpu" else "0"
+    enabled = _runtime_env_enabled(default_enabled if enabled_env is None else enabled_env)
+
+    try:
+        iters = max(1, int(str(iters_env).strip()))
+    except Exception:
+        iters = 20
+    try:
+        badjac_limit = max(0, int(str(badjac_limit_env).strip()))
+    except Exception:
+        badjac_limit = 10
+    try:
+        fsq_abs = float(str(fsq_abs_env).strip())
+    except Exception:
+        fsq_abs = 1.0e-2
+    if fsq_abs < 0.0:
+        fsq_abs = 0.0
+
+    try:
+        accept_frac = float(str(accept_frac_env).strip())
+    except Exception:
+        accept_frac = 0.5
+    try:
+        fsq_factor = float(str(fsq_factor_env).strip())
+    except Exception:
+        fsq_factor = 50.0
+    try:
+        improve = float(str(improve_env).strip())
+    except Exception:
+        improve = 0.9
+
+    if accept_frac < 0.0:
+        accept_frac = 0.0
+    if accept_frac > 1.0:
+        accept_frac = 1.0
+    if fsq_factor < 1.0:
+        fsq_factor = 1.0
+    if improve <= 0.0 or improve >= 1.0:
+        improve = 0.9
+
+    return ScanFallbackPolicy(
+        enabled=enabled,
+        iters=iters,
+        badjac_limit=badjac_limit,
+        fsq_abs=fsq_abs,
+        accept_frac=accept_frac,
+        fsq_factor=fsq_factor,
+        improve=improve,
+    )
+
+
+def _residual_convergence_flags(
+    *,
+    fsqr: float,
+    fsqz: float,
+    fsql: float,
+    ftol: float,
+    fsq_total_target: float | None,
+) -> tuple[bool, bool, bool]:
+    """Return strict, total-FSQ, and combined host convergence flags."""
+    fsqr_f = float(fsqr)
+    fsqz_f = float(fsqz)
+    fsql_f = float(fsql)
+    ftol_f = float(ftol)
+    strict = (fsqr_f <= ftol_f) and (fsqz_f <= ftol_f) and (fsql_f <= ftol_f)
+    total = bool((fsq_total_target is not None) and ((fsqr_f + fsqz_f + fsql_f) <= float(fsq_total_target)))
+    return bool(strict), bool(total), bool(strict or total)
+
+
+def _scalar_history_array(vals: Any) -> np.ndarray:
+    """Materialize deferred scalar histories in one batch."""
+    if not vals:
+        return np.zeros((0,), dtype=float)
+    if has_jax() and jax is not None:
+        try:
+            vals = jax.device_get(tuple(vals))
+        except Exception:
+            pass
+    return np.asarray(vals, dtype=float)

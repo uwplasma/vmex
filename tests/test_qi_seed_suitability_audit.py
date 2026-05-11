@@ -27,11 +27,13 @@ def test_parse_case_and_default_families_cover_seed_types():
     mod = _load_module()
 
     case = mod.parse_case("candidate_qi:QI:/tmp/input:/tmp/wout.nc")
+    families = mod.parse_seed_families("QI,qp,simple")
 
     assert case.label == "candidate_qi"
     assert case.family == "qi"
     assert case.input_path == Path("/tmp/input")
     assert case.wout_path == Path("/tmp/wout.nc")
+    assert families == ("qi", "qp", "simple")
 
     default_cases, _skipped = mod.default_seed_cases()
     families = {case.family for case in default_cases}
@@ -183,8 +185,11 @@ def test_prefine_probe_manifest_selects_top_rows_and_stays_dry(tmp_path):
 
     assert manifest["dry_run"] is True
     assert manifest["selection"]["planned_rows"] == 2
+    assert manifest["selection"]["covered_families"] == ["qh", "qi"]
     assert [plan["status"] for plan in manifest["plans"]] == ["planned", "planned"]
     assert manifest["plans"][0]["label"] == "better qi"
+    assert manifest["plans"][0]["selection_reasons"] == ["top_n", "family_representative"]
+    assert manifest["plans"][0]["representative_families"] == ["qi"]
     assert manifest["plans"][0]["output_dir"].endswith("01_better_qi")
     assert "--prefine-probes run" in manifest["plans"][0]["run_command"]
     assert manifest["plans"][0]["optimization"]["max_nfev"] <= mod.MAX_PREFINE_MAX_NFEV
@@ -198,6 +203,96 @@ def test_prefine_probe_manifest_selects_top_rows_and_stays_dry(tmp_path):
             manifest_path=tmp_path / "bad.json",
             dry_run=True,
         )
+
+
+def test_prefine_probe_manifest_adds_family_representatives_after_top_n(tmp_path):
+    mod = _load_module()
+    report = {
+        "cases": [
+            {
+                "suitability_rank": 1,
+                "label": "best_qi",
+                "family": "qi",
+                "input": "/tmp/input_qi",
+                "wout": "/tmp/wout_qi.nc",
+                "qi_seed_score": 0.1,
+            },
+            {
+                "suitability_rank": 2,
+                "label": "second_qi",
+                "family": "qi",
+                "input": "/tmp/input_qi2",
+                "wout": "/tmp/wout_qi2.nc",
+                "qi_seed_score": 0.2,
+            },
+            {
+                "suitability_rank": 3,
+                "label": "best_qp",
+                "family": "qp",
+                "input": "/tmp/input_qp",
+                "wout": "/tmp/wout_qp.nc",
+                "qi_seed_score": 0.3,
+            },
+            {
+                "suitability_rank": 4,
+                "label": "best_qh",
+                "family": "qh",
+                "input": "/tmp/input_qh",
+                "wout": "/tmp/wout_qh.nc",
+                "qi_seed_score": 0.4,
+            },
+            {
+                "suitability_rank": 5,
+                "label": "best_qa",
+                "family": "qa",
+                "input": "/tmp/input_qa",
+                "wout": "/tmp/wout_qa.nc",
+                "qi_seed_score": 0.5,
+            },
+            {
+                "suitability_rank": 6,
+                "label": "best_simple",
+                "family": "simple",
+                "input": "/tmp/input_simple",
+                "wout": "/tmp/wout_simple.nc",
+                "qi_seed_score": 0.6,
+            },
+        ]
+    }
+
+    manifest = mod.build_qi_prefine_probe_manifest(
+        report,
+        config=mod.QIPrefineProbeConfig(top_n=1, output_dir=tmp_path / "probes"),
+        manifest_path=tmp_path / "manifest.json",
+        dry_run=True,
+    )
+
+    assert [plan["label"] for plan in manifest["plans"]] == [
+        "best_qi",
+        "best_qp",
+        "best_qh",
+        "best_qa",
+        "best_simple",
+    ]
+    assert manifest["selection"]["planned_rows"] == 5
+    assert manifest["selection"]["top_rows"] == 1
+    assert manifest["selection"]["covered_families"] == ["qa", "qh", "qi", "qp", "simple"]
+    assert manifest["plans"][0]["selection_reasons"] == ["top_n", "family_representative"]
+    assert manifest["plans"][1]["selection_reasons"] == ["family_representative"]
+    assert manifest["plans"][1]["representative_families"] == ["qp"]
+
+    top_only = mod.build_qi_prefine_probe_manifest(
+        report,
+        config=mod.QIPrefineProbeConfig(
+            top_n=2,
+            include_family_representatives=False,
+            output_dir=tmp_path / "top_only",
+        ),
+        manifest_path=tmp_path / "top_only_manifest.json",
+        dry_run=True,
+    )
+    assert [plan["label"] for plan in top_only["plans"]] == ["best_qi", "second_qi"]
+    assert top_only["selection"]["covered_families"] == []
 
 
 def test_run_qi_prefine_probe_dispatches_tiny_qi_solve(tmp_path):

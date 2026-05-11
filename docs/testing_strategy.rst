@@ -12,6 +12,9 @@ Target State
 
 - Required CI wall time: under ten minutes for the required test, docs, and
   build jobs on GitHub-hosted CPU runners.
+- Current ``main`` CI baseline: the latest verified run during this update was
+  green on ``2026-05-11T17:14:59Z`` at
+  ``5ca8216699c766621a1fe30e47db9b68befd36c2``.
 - Long-term required coverage: 95% line coverage for ``vmec_jax`` package
   code.  The current Python 3.11 required coverage gate is ``63%``.
 - Required local command: ``pytest -q -m "not full and not vmec2000"`` remains
@@ -55,6 +58,10 @@ the recommended local escalation path.
      - ``pytest -q tests/test_qi_objective_component_report.py tests/test_qi_seed_suitability_audit.py tests/test_qs_ess_render_smoke.py``
      - After changing QI branch-ranking metrics, seed audit/prefine manifests,
        sweep summary fields, or renderer selection rules.
+   * - Optional validation plan helper
+     - ``python validation/qi_seed_robustness_plan.py --output results/qi_seed_audit/validation_plan.json``
+     - To record the current non-required VMEC2000/SIMSOPT/QI seed-robustness
+       lanes before a local or scheduled validation run.
    * - Bounded physics smoke
      - ``RUN_FULL=1 pytest -q tests/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[circular_tokamak] tests/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[nfp4_QH_warm_start] tests/test_driver_api.py::test_run_free_boundary_smoke_on_bundled_small_case``
      - Before merging solver changes that affect fixed/free-boundary physics.
@@ -211,11 +218,20 @@ QI seed-robustness gates:
   before any actual seed-robustness run.  The manifest is a review artifact:
   it makes selected seeds, run commands, and output paths explicit before
   expensive probes start.
+- Use ``validation/qi_seed_robustness_plan.py`` to record the optional
+  validation lanes and acceptance criteria.  The plan includes required CI
+  baseline checks, family-representative QI solved-state audit, dry-run prefine
+  manifests, explicit tiny prefine runs, SIMSOPT formula parity, and VMEC2000
+  executable smoke.  It is intentionally declarative and must not become a
+  heavy required CI lane.
 - A full seed-robust QI claim requires starting constrained QI from QI, QP, QH,
   QA, and a simple non-omnigenous seed, then auditing convergence, legacy QI
   score, engineering constraints, and Boozer contour plots.  That matrix is
   manual/nightly validation until it is cheap enough to summarize as curated
   artifacts.
+
+The current detailed lane list and next parity gates are in
+:doc:`optional_validation_plan`.
 
 
 Coverage Plan to 95%

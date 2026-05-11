@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from vmec_jax.wout_io import (
     read_mode_table,
+    read_nyquist_fourier_fields,
     read_optional_int_scalar,
     read_type_field,
     write_fixed_width_string_variable,
     write_float_variable,
     write_int_variable,
+    write_nyquist_fourier_fields,
 )
 
 
@@ -76,6 +79,29 @@ def test_read_type_field_decodes_fixed_width_character_arrays() -> None:
     assert read_type_field(variables, "missing") == ""
 
 
+def test_read_nyquist_fourier_fields_uses_same_shape_defaults() -> None:
+    gmnc = np.arange(6.0).reshape(2, 3)
+    bsupumnc = gmnc + 10.0
+    bsupvmnc = gmnc + 20.0
+    variables = {
+        "gmnc": _FakeReadVar(gmnc),
+        "bsupumnc": _FakeReadVar(bsupumnc),
+        "bsupvmnc": _FakeReadVar(bsupvmnc),
+        "bmns": _FakeReadVar(gmnc + 30.0),
+    }
+
+    fields = read_nyquist_fourier_fields(variables)
+
+    np.testing.assert_array_equal(fields["gmnc"], gmnc)
+    np.testing.assert_array_equal(fields["bsupumnc"], bsupumnc)
+    np.testing.assert_array_equal(fields["bsupvmnc"], bsupvmnc)
+    np.testing.assert_array_equal(fields["gmns"], np.zeros_like(gmnc))
+    np.testing.assert_array_equal(fields["bsupumns"], np.zeros_like(bsupumnc))
+    np.testing.assert_array_equal(fields["bsubvmns"], np.zeros_like(bsupvmnc))
+    np.testing.assert_array_equal(fields["bmnc"], np.zeros_like(gmnc))
+    np.testing.assert_array_equal(fields["bmns"], gmnc + 30.0)
+
+
 def test_write_helpers_create_expected_netcdf_dtypes_and_fixed_width_strings() -> None:
     ds = _FakeDataset()
 
@@ -92,3 +118,32 @@ def test_write_helpers_create_expected_netcdf_dtypes_and_fixed_width_strings() -
     assert ds.variables["pcurr_type"].dtype == "S1"
     assert ds.variables["pcurr_type"].dims == ("dim_00012",)
     assert b"".join(ds.variables["pcurr_type"].value).decode("utf-8") == "power_series"
+
+
+def test_write_nyquist_fourier_fields_writes_expected_group() -> None:
+    names = (
+        "gmnc",
+        "gmns",
+        "bsupumnc",
+        "bsupumns",
+        "bsupvmnc",
+        "bsupvmns",
+        "bsubumnc",
+        "bsubumns",
+        "bsubvmnc",
+        "bsubvmns",
+        "bsubsmns",
+        "bsubsmnc",
+        "bmnc",
+        "bmns",
+    )
+    wout = SimpleNamespace(**{name: np.full((2, 3), i, dtype=float) for i, name in enumerate(names)})
+    ds = _FakeDataset()
+
+    write_nyquist_fourier_fields(ds, wout)
+
+    assert tuple(ds.variables) == names
+    for i, name in enumerate(names):
+        assert ds.variables[name].dtype == "f8"
+        assert ds.variables[name].dims == ("radius", "mn_mode_nyq")
+        np.testing.assert_array_equal(ds.variables[name].value, np.full((2, 3), i, dtype=float))
