@@ -472,3 +472,15 @@ Acceptance:
   about `7:11`. Keep the enforced CI floor at 62% for now: local coverage only
   barely rounds to 65%, and previous GitHub jobs have reported lower coverage
   for the same tree due to optional-test/platform differences.
+- 2026-05-11: Added fast VMEC force-balance and force-helper coverage for
+  `lforbal` radial weights, VMEC current/equif/plascur formulas, lforbal
+  m=1,n=0 correction application, synthetic preconditioner-derived factors,
+  VMEC force radial stencils, parity coefficient selection, and R/Z residual
+  scalar normalization. Verified with
+  `python -m pytest tests/test_vmec_forces_fast_helpers.py tests/test_lforbal_fast_helpers.py -q`
+  (`9 passed`) and `ruff check tests/test_vmec_forces_fast_helpers.py tests/test_lforbal_fast_helpers.py`.
+  Re-ran the CI-equivalent fast coverage gate:
+  `468 passed, 21 skipped, 85 deselected`, total coverage `65.61%`, runtime
+  about `7:06`. Raised the enforced py3.11 CI coverage floor conservatively
+  from 62% to 63%; do not raise to 65% until GitHub's measured coverage has
+  enough cross-platform margin.
