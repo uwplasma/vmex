@@ -445,6 +445,8 @@ Acceptance:
   `ruff check tests/test_driver_api.py tests/test_wout_helpers.py`.
 - 2026-05-10: Re-ran the CI-equivalent fast coverage gate after the transform
   and driver-helper slice: `450 passed, 21 skipped, 85 deselected`, total
-  coverage `64.66%`, runtime about `6:29`. Raised the CI coverage floor from
-  62% to 64%; keep the next threshold target at 65% only after more meaningful
-  solver/physics-kernel coverage creates a wider margin.
+  coverage `64.66%`, runtime about `6:29`. The GitHub py3.11 job on commit
+  `7ec28db` ran a slightly different optional-test mix (`440 passed, 31 skipped,
+  85 deselected`) and reported `62.99%`, so the enforced CI floor stays at 62%
+  until solver/physics-kernel coverage creates a wider CI-side margin. Keep the
+  next threshold target at 65% only after that margin exists.
