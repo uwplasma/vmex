@@ -14,6 +14,7 @@ implementation uses gradient descent with a simple backtracking line search.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from contextlib import nullcontext
 import time
@@ -32,9 +33,37 @@ from .grids import angle_steps
 from .state import VMECState, pack_state, unpack_state
 
 
-_SCAN_RUNNER_CACHE: dict[tuple, Any] = {}
-_COMPUTE_FORCES_CACHE: dict[tuple, Any] = {}
-_STRICT_UPDATE_STEP_JIT_CACHE: dict[tuple, Any] = {}
+_SCAN_RUNNER_CACHE: OrderedDict[tuple, Any] = OrderedDict()
+_COMPUTE_FORCES_CACHE: OrderedDict[tuple, Any] = OrderedDict()
+_STRICT_UPDATE_STEP_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
+
+
+def _jit_cache_limit(env_name: str, default: int) -> int:
+    """Return a non-negative JIT-cache size limit from an environment variable."""
+
+    raw = os.getenv(env_name, str(default)).strip()
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return max(0, int(default))
+
+
+def _jit_cache_get(cache: OrderedDict[tuple, Any], key: tuple):
+    cached = cache.get(key)
+    if cached is not None:
+        cache.move_to_end(key)
+    return cached
+
+
+def _jit_cache_put(cache: OrderedDict[tuple, Any], key: tuple, value, *, env_name: str, default: int):
+    limit = _jit_cache_limit(env_name, default)
+    if limit == 0:
+        return value
+    cache[key] = value
+    cache.move_to_end(key)
+    while len(cache) > limit:
+        cache.popitem(last=False)
+    return value
 
 
 def _strict_update_step_jit(static, *, limit_update_rms: bool, divide_by_scalxc_for_update: bool):
@@ -51,7 +80,7 @@ def _strict_update_step_jit(static, *, limit_update_rms: bool, divide_by_scalxc_
         bool(limit_update_rms),
         bool(divide_by_scalxc_for_update),
     )
-    cached = _STRICT_UPDATE_STEP_JIT_CACHE.get(key)
+    cached = _jit_cache_get(_STRICT_UPDATE_STEP_JIT_CACHE, key)
     if cached is not None:
         return cached
 
@@ -128,10 +157,13 @@ def _strict_update_step_jit(static, *, limit_update_rms: bool, divide_by_scalxc_
         )
 
     compiled = jax.jit(_step)
-    if len(_STRICT_UPDATE_STEP_JIT_CACHE) >= 16:
-        _STRICT_UPDATE_STEP_JIT_CACHE.pop(next(iter(_STRICT_UPDATE_STEP_JIT_CACHE)))
-    _STRICT_UPDATE_STEP_JIT_CACHE[key] = compiled
-    return compiled
+    return _jit_cache_put(
+        _STRICT_UPDATE_STEP_JIT_CACHE,
+        key,
+        compiled,
+        env_name="VMEC_JAX_STRICT_UPDATE_CACHE_SIZE",
+        default=16,
+    )
 
 
 if has_jax():
@@ -5890,10 +5922,16 @@ def solve_fixed_boundary_residual_iter(
                 static_argnames=("include_edge", "include_edge_residual"),
             )
         else:
-            cached = _COMPUTE_FORCES_CACHE.get(compute_cache_key)
+            cached = _jit_cache_get(_COMPUTE_FORCES_CACHE, compute_cache_key)
             if cached is None:
                 cached = jit(_compute_forces_nodump, static_argnames=("include_edge", "include_edge_residual"))
-                _COMPUTE_FORCES_CACHE[compute_cache_key] = cached
+                cached = _jit_cache_put(
+                    _COMPUTE_FORCES_CACHE,
+                    compute_cache_key,
+                    cached,
+                    env_name="VMEC_JAX_COMPUTE_FORCES_CACHE_SIZE",
+                    default=32,
+                )
             _compute_forces = cached
 
     if bool(jit_forces) and bool(jit_precompile) and has_jax() and (jax is not None):
@@ -8892,11 +8930,16 @@ def solve_fixed_boundary_residual_iter(
                 # A runner created during a JAX transform closes over traced
                 # constants from the solve setup. Keep it local to the transform.
                 return jit(_run_scan)
-            cached_run = _SCAN_RUNNER_CACHE.get(key)
+            cached_run = _jit_cache_get(_SCAN_RUNNER_CACHE, key)
             if cached_run is None:
                 runner = jit(_run_scan)
-                _SCAN_RUNNER_CACHE[key] = runner
-                return runner
+                return _jit_cache_put(
+                    _SCAN_RUNNER_CACHE,
+                    key,
+                    runner,
+                    env_name="VMEC_JAX_SCAN_RUNNER_CACHE_SIZE",
+                    default=32,
+                )
             return cached_run
 
         def _emit_scan_prints(
@@ -9843,11 +9886,17 @@ def solve_fixed_boundary_residual_iter(
                 )
                 return jax.lax.scan(_scan_step, carry0, jnp.arange(max_iter, dtype=jnp.int32))
 
-            cached_run = None if differentiating_scan else _SCAN_RUNNER_CACHE.get(scan_cache_key)
+            cached_run = None if differentiating_scan else _jit_cache_get(_SCAN_RUNNER_CACHE, scan_cache_key)
             if cached_run is None:
                 _run_scan = jit(_run_scan)
                 if not differentiating_scan:
-                    _SCAN_RUNNER_CACHE[scan_cache_key] = _run_scan
+                    _run_scan = _jit_cache_put(
+                        _SCAN_RUNNER_CACHE,
+                        scan_cache_key,
+                        _run_scan,
+                        env_name="VMEC_JAX_SCAN_RUNNER_CACHE_SIZE",
+                        default=32,
+                    )
             else:
                 _run_scan = cached_run
 

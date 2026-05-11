@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import OrderedDict
+
 import numpy as np
 
 import vmec_jax._solve_runtime as solve_runtime
@@ -240,3 +242,30 @@ def test_scalar_history_array_materializes_float_array():
 
     got = solve_runtime._scalar_history_array([np.asarray(1), np.asarray(2.5)])
     np.testing.assert_allclose(got, np.asarray([1.0, 2.5], dtype=float))
+
+
+def test_jit_cache_put_bounds_and_marks_recent(monkeypatch):
+    from vmec_jax import solve
+
+    cache = OrderedDict()
+    monkeypatch.setenv("VMEC_JAX_TEST_CACHE_SIZE", "2")
+
+    solve._jit_cache_put(cache, ("a",), "A", env_name="VMEC_JAX_TEST_CACHE_SIZE", default=4)
+    solve._jit_cache_put(cache, ("b",), "B", env_name="VMEC_JAX_TEST_CACHE_SIZE", default=4)
+    assert solve._jit_cache_get(cache, ("a",)) == "A"
+    solve._jit_cache_put(cache, ("c",), "C", env_name="VMEC_JAX_TEST_CACHE_SIZE", default=4)
+
+    assert list(cache.keys()) == [("a",), ("c",)]
+    assert solve._jit_cache_get(cache, ("b",)) is None
+
+
+def test_jit_cache_limit_zero_disables_retention(monkeypatch):
+    from vmec_jax import solve
+
+    cache = OrderedDict()
+    monkeypatch.setenv("VMEC_JAX_TEST_CACHE_SIZE", "0")
+
+    value = solve._jit_cache_put(cache, ("a",), "A", env_name="VMEC_JAX_TEST_CACHE_SIZE", default=4)
+
+    assert value == "A"
+    assert cache == OrderedDict()
