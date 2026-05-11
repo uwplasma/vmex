@@ -286,3 +286,63 @@ def test_lambda_full_mesh_branch_averages_half_mesh_and_scales_interior_only():
     expected_bsubv_e = bdamp * np.asarray(bc.bsubv_preblend) + (1.0 - bdamp) * expected_bsubv_avg
     np.testing.assert_allclose(np.asarray(bc.bsubv_avg), expected_bsubv_avg, rtol=1.0e-13, atol=1.0e-13)
     np.testing.assert_allclose(np.asarray(bc.bsubv_e), expected_bsubv_e, rtol=1.0e-13, atol=1.0e-13)
+
+
+def test_wout_nyquist_reference_branches_override_bsup_bsub_and_bmag():
+    static, state, wout = _circular_axisymmetric_case()
+    ns = static.s.size
+    shape = (ns, 1)
+    bsupu_ref = np.arange(ns, dtype=float)[:, None]
+    bsupv_ref = (10.0 + np.arange(ns, dtype=float))[:, None]
+    bsubu_ref = (20.0 + np.arange(ns, dtype=float))[:, None]
+    bsubv_ref = (30.0 + np.arange(ns, dtype=float))[:, None]
+    bmag_ref = (40.0 + np.arange(ns, dtype=float))[:, None]
+    bmag_ref[0] = 0.0
+    wout_ref = SimpleNamespace(
+        **{
+            **wout.__dict__,
+            "xm_nyq": np.array([0]),
+            "xn_nyq": np.array([0]),
+            "bsupumnc": bsupu_ref,
+            "bsupumns": np.zeros(shape),
+            "bsupvmnc": bsupv_ref,
+            "bsupvmns": np.zeros(shape),
+            "bsubumnc": bsubu_ref,
+            "bsubumns": np.zeros(shape),
+            "bsubvmnc": bsubv_ref,
+            "bsubvmns": np.zeros(shape),
+            "bmnc": bmag_ref,
+            "bmns": np.zeros(shape),
+        }
+    )
+
+    bc = vmec_bcovar_half_mesh_from_wout(
+        state=state,
+        static=static,
+        wout=wout_ref,
+        use_wout_bsup=True,
+        use_wout_bsub_for_lambda=True,
+        use_wout_bmag_for_bsq=True,
+    )
+
+    expected_bsupu = np.broadcast_to(bsupu_ref[:, :, None], bc.bsupu.shape).copy()
+    expected_bsupv = np.broadcast_to(bsupv_ref[:, :, None], bc.bsupv.shape).copy()
+    expected_bsupu[0] = 0.0
+    expected_bsupv[0] = 0.0
+    np.testing.assert_allclose(np.asarray(bc.bsupu), expected_bsupu, rtol=0.0, atol=1.0e-14)
+    np.testing.assert_allclose(np.asarray(bc.bsupv), expected_bsupv, rtol=0.0, atol=1.0e-14)
+
+    bsubu_grid = np.broadcast_to(bsubu_ref[:, :, None], bc.bsubu_e.shape)
+    bsubv_grid = np.broadcast_to(bsubv_ref[:, :, None], bc.bsubv_e.shape)
+    expected_bsubu_e = np.zeros_like(np.asarray(bc.bsubu_e))
+    expected_bsubv_e = np.zeros_like(np.asarray(bc.bsubv_e))
+    expected_bsubu_e[:-1] = 0.5 * (bsubu_grid[:-1] + bsubu_grid[1:])
+    expected_bsubu_e[-1] = 0.5 * bsubu_grid[-1]
+    expected_bsubv_e[:-1] = 0.5 * (bsubv_grid[:-1] + bsubv_grid[1:])
+    expected_bsubv_e[-1] = 0.5 * bsubv_grid[-1]
+    np.testing.assert_allclose(np.asarray(bc.bsubu_e), expected_bsubu_e, rtol=0.0, atol=1.0e-14)
+    np.testing.assert_allclose(np.asarray(bc.bsubv_e), expected_bsubv_e, rtol=0.0, atol=1.0e-14)
+    np.testing.assert_allclose(np.asarray(bc.bsubv_avg), expected_bsubv_e, rtol=0.0, atol=1.0e-14)
+
+    expected_bsq = 0.5 * np.broadcast_to((bmag_ref * bmag_ref)[:, :, None], bc.bsq.shape)
+    np.testing.assert_allclose(np.asarray(bc.bsq), expected_bsq, rtol=0.0, atol=1.0e-14)
