@@ -150,6 +150,54 @@ def test_helical_mixed_partials_commute_on_physical_zeta_derivative():
     np.testing.assert_allclose(np.asarray(dzeta_dtheta), np.asarray(dtheta_dzeta), rtol=1e-13, atol=1e-13)
 
 
+def test_single_surface_multiderivative_fallback_matches_stacked_scalxc_path():
+    enable_x64()
+
+    ns = 1
+    mpol = 3
+    ntor = 1
+    nfp = 2
+    modes = vmec_mode_table(mpol, ntor)
+    trig = vmec_trig_tables(
+        ntheta=12,
+        nzeta=5,
+        nfp=nfp,
+        mmax=mpol - 1,
+        nmax=ntor,
+        lasym=True,
+        dtype=np.float64,
+        cache=False,
+    )
+    coeff_cos, coeff_sin = _deterministic_coefficients(ns, modes.K)
+
+    stacked = vmec_realspace_synthesis_multi(
+        coeff_cos=coeff_cos,
+        coeff_sin=coeff_sin,
+        modes=modes,
+        trig=trig,
+        derivs=("base", "dtheta", "dzeta"),
+        apply_scalxc=True,
+        use_stacked_dot=True,
+    )
+    fallback = vmec_realspace_synthesis_multi(
+        coeff_cos=coeff_cos,
+        coeff_sin=coeff_sin,
+        modes=modes,
+        trig=trig,
+        derivs=("base", "dtheta", "dzeta"),
+        apply_scalxc=True,
+        use_stacked_dot=False,
+    )
+
+    for actual, expected in zip(fallback, stacked, strict=True):
+        np.testing.assert_allclose(np.asarray(actual), np.asarray(expected), rtol=1e-13, atol=1e-13)
+
+    base, dtheta, dzeta = stacked
+    assert np.max(np.abs(np.asarray(dtheta))) > 0.0
+    assert np.max(np.abs(np.asarray(dzeta))) > 0.0
+    assert np.asarray(base).shape == (ns, trig.ntheta3, trig.cosnv.shape[0])
+
+
 def test_geom_from_state_preserves_circular_axisymmetric_identities():
     enable_x64()
 
