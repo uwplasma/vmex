@@ -450,3 +450,14 @@ Acceptance:
   85 deselected`) and reported `62.99%`, so the enforced CI floor stays at 62%
   until solver/physics-kernel coverage creates a wider CI-side margin. Keep the
   next threshold target at 65% only after that margin exists.
+- 2026-05-11: Added fast numerical-helper coverage for Fourier projection
+  roundtrips, non-stacked helical-basis fallback evaluation, VMEC-style
+  angle/radial integral conventions, two-power and cubic-spline profile
+  variants, LRFP iota inversion, pedestal clipping, and unsupported-profile
+  guards. Verified with
+  `python -m pytest tests/test_numerics_helper_edges.py -q` (`6 passed`),
+  `ruff check tests/test_numerics_helper_edges.py`, and a combined helper slice
+  (`63 passed, 1 skipped`). Re-ran the CI-equivalent fast coverage gate:
+  `456 passed, 21 skipped, 85 deselected`, total coverage `64.84%`, runtime
+  about `6:29`. This is progress but still not enough margin to raise the
+  enforced CI floor above 62%.
