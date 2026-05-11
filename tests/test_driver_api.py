@@ -655,6 +655,8 @@ def test_accelerated_cli_budgeted_stage_iters():
     total = driver_module._accelerated_cli_budgeted_total_iters(total_budget=5000, ns_stages=[16, 49, 100])
     assert total == 2000
     assert driver_module._accelerated_cli_budgeted_stage_iters(total_budget=total, ns_stages=[16, 49, 100]) == [130, 552, 1318]
+    assert driver_module._accelerated_cli_budgeted_total_iters(total_budget=17, ns_stages=[]) == 17
+    assert driver_module._accelerated_cli_budgeted_stage_iters(total_budget=17, ns_stages=[]) == [17]
 
 
 def test_driver_budget_and_residual_target_helpers():
@@ -719,12 +721,25 @@ def test_driver_result_helpers_fall_back_to_diagnostic_histories():
         },
     )()
     no_residuals = type("Result", (), {"diagnostics": {"ftol": 1.0}})()
+    bad_history = type(
+        "Result",
+        (),
+        {
+            "diagnostics": {},
+            "fsqr2_history": object(),
+            "fsqz2_history": object(),
+            "fsql2_history": object(),
+        },
+    )()
 
     assert driver_module._result_final_residuals(diag_history) == (1.0, 2.0, 3.0)
     assert driver_module._result_final_fsq(diag_history) == 6.0
     assert driver_module._result_meets_requested_ftol(diag_history, ftol=3.0) is True
+    assert driver_module._result_final_residuals(None) is None
     assert driver_module._result_final_residuals(no_residuals) is None
-    assert driver_module._result_final_fsq(no_residuals) == float("inf")
+    assert driver_module._result_final_residuals(bad_history) is None
+    assert np.isinf(driver_module._result_final_fsq(no_residuals))
+    assert driver_module._result_meets_requested_ftol(None, ftol=1.0) is False
     assert driver_module._result_meets_requested_ftol(no_residuals, ftol=1.0) is False
 
 
