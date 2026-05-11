@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from vmec_jax.namelist import InData
+import vmec_jax.wout as wout_module
 from vmec_jax.wout import (
     MU0,
     _bool_from_nc,
@@ -17,6 +18,10 @@ from vmec_jax.wout import (
     _safe_divide,
     assert_main_modes_match_wout,
 )
+from vmec_jax.wout_schema import WoutData as SchemaWoutData
+from vmec_jax.wout_schema import _bool_from_nc as schema_bool_from_nc
+from vmec_jax.wout_schema import _nc_scalar as schema_nc_scalar
+from vmec_jax.wout_schema import assert_main_modes_match_wout as schema_assert_main_modes_match_wout
 
 
 def test_wout_half_mesh_and_flux_derivative_conventions() -> None:
@@ -88,3 +93,10 @@ def test_wout_main_mode_order_contract_detects_mismatches() -> None:
     )
     with pytest.raises(ValueError, match="xn ordering"):
         assert_main_modes_match_wout(wout=bad_order)
+
+
+def test_wout_schema_symbols_remain_reexported_from_wout() -> None:
+    assert wout_module.WoutData is SchemaWoutData
+    assert wout_module._bool_from_nc is schema_bool_from_nc
+    assert wout_module._nc_scalar is schema_nc_scalar
+    assert wout_module.assert_main_modes_match_wout is schema_assert_main_modes_match_wout

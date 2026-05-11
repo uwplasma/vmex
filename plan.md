@@ -43,8 +43,10 @@ acceptance criteria or evidence changes.
       `omnigenity_optimization` on the same Boozer spectra.
 - [x] Make QI sweeps report both optimizer objective and legacy diagnostic so
       visually bad QI fields cannot pass unnoticed.
-- [ ] Prove seed robustness: start QI from QI, QP, QH, QA, and a simple
-      non-omnigenous seed; document which policies reliably converge.
+- [ ] Prove seed robustness with a curated multi-seed matrix: start QI from QI,
+      QP, QH, QA, and a simple non-omnigenous seed; document which policies
+      reliably converge. This is deferred validation, not a required PR gate,
+      until the rows and Boozer contour audits are generated.
 - [x] Diagnose remaining QI noisiness by one-DOF scans of Boozer/QI metrics and
       choose default resolutions/weights that preserve ranking while remaining
       differentiable.
@@ -54,6 +56,9 @@ Acceptance:
 - Best QI has poloidally closed Boozer `|B|` contours, low legacy QI diagnostic,
   mirror ratio at target, acceptable elongation, `abs(iota) >= 0.41`, and aspect
   near the chosen target.
+- Seed-robust QI is not accepted from scalar objectives alone; every accepted
+  seed lane needs the numerical gates above plus visual Boozer `|B|` contour
+  review or an equivalent committed diagnostic artifact.
 
 ## Milestone 2: Physics Objectives And Diagnostics
 
@@ -121,11 +126,15 @@ Acceptance:
 
 ## Milestone 6: Refactoring And API Hygiene
 
-- [ ] Split `solve.py` into solver orchestration, residual kernels, convergence,
-      fallback policy, tracing, and output modules.
-- [ ] Split `wout.py` into schema, writer, reader, and derived diagnostics.
-- [ ] Split `free_boundary.py` into mgrid I/O, Nestor kernels, runtime state, and
-      diagnostics.
+- [ ] Continue narrow seam extractions that already have parity evidence:
+      force/residual helpers, Mercier/Redl algebra, wout schema helpers, and
+      optimization tuple/routing policy.
+- [ ] Defer broad `solve.py` decomposition into orchestration, residual kernels,
+      convergence, fallback policy, tracing, and output modules until solver
+      parity and coverage have enough margin to catch regressions.
+- [ ] Defer broad `wout.py` and `free_boundary.py` splits until each proposed
+      seam has a targeted test and, for free-boundary coupling, a parity or
+      executable-backed validation command.
 - [ ] Keep compatibility imports in `vmec_jax.__init__`, but move implementation
       to smaller documented modules.
 - [ ] Add docstrings and comments where they clarify physics, numerical method, or
@@ -184,6 +193,13 @@ Acceptance:
    available and stable.
 8. [x] Start the first refactor with a low-risk extraction from the largest
    modules after the new tests are green.
+9. [x] Add a bounded no-optimization QI seed audit using
+   `qi_diagnostics_from_state` on available solved `input`/`wout` pairs. It
+   compares smooth QI, legacy QI, mirror ratio, elongation, iota, and aspect
+   ratio before launching a full optimization sweep.
+10. [ ] Prepare the deferred seed-robust QI sweep design: explicit QI/QP/QH/QA
+    and simple non-omnigenous seeds, fixed acceptance gates, artifact locations,
+    and a renderer that makes failed/timeout lanes visible.
 
 ## Reassessment After 2026-05-11 Push
 
@@ -201,7 +217,12 @@ Realistic next targets for this development cycle:
    change.  Current evidence says exact tape build is subsecond in bounded CPU
    cases; the bottleneck is replay/residual linearization/VJP in
    `checkpoint_tape_state_jvp_columns` and related dynamic-basepoint replay.
-4. Keep optional VMEC2000/SIMSOPT validation expanding, but keep required CI
+4. Keep refactors small and test-backed.  Good next seams are pure helper
+   extractions or schema/routing cleanup already covered by fast tests.  Broad
+   rewrites of `solve.py`, `wout.py`, `free_boundary.py`, and replay
+   architecture stay deferred until they have a concrete validation command and
+   rollback plan.
+5. Keep optional VMEC2000/SIMSOPT validation expanding, but keep required CI
    under 10 minutes by default.
 
 Defer beyond the current cycle:
@@ -214,6 +235,9 @@ Defer beyond the current cycle:
 3. A fully GPU-native replay architecture.  The next step is narrower
    profiling-driven replay reduction; replacing the differentiation architecture
    is a larger design project.
+4. Turning multi-seed QI sweeps into required CI.  Keep them manual/nightly
+   until the matrix is reliable, bounded, and summarized as lightweight
+   artifacts.
 
 ## Activity Log
 
@@ -566,3 +590,20 @@ Defer beyond the current cycle:
   (`76 passed, 19 skipped`). A small CPU exact-Jacobian diagnostic on QH
   `max_mode=1`, 8 DOFs, 20 inner iterations completed in `7.707 s`
   (`jacobian_tape_replay=2.924 s`, `exact_tape_build=0.319 s`).
+- 2026-05-11: Reassessed the QI validation and refactor roadmap from the
+  current docs/tests. Fast QI tests now cover metric semantics and synthetic
+  ranking, but not multi-seed optimizer robustness. The next validation step is
+  a small solved-state `qi_diagnostics_from_state` gate; the full QI/QP/QH/QA
+  and simple non-omnigenous seed matrix remains deferred manual/nightly work.
+  Refactoring stays limited to narrow tested seams until solver/free-boundary
+  parity gates have more margin.
+- 2026-05-11: Added a bounded no-optimization QI seed audit CLI at
+  `examples/optimization/audit_qi_seed_suitability.py`. It ranks solved
+  `input`/`wout` seed pairs by QI diagnostics and engineering constraints,
+  uses `OMNIGENITY_OPTIMIZATION_ROOT` for optional external reference seeds,
+  and writes JSON/CSV summaries for selecting QI/QP/QH/QA/simple starts before
+  expensive seed-robust optimization sweeps.
+- 2026-05-11: Started the large-module refactor with narrow tested seams:
+  `vmec_jax._solve_runtime` owns scan runtime helpers previously embedded in
+  `solve.py`, and `vmec_jax.wout_schema` owns `WoutData` plus low-level wout
+  schema helpers while `vmec_jax.wout` keeps compatibility re-exports.

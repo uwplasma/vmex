@@ -65,6 +65,28 @@ same-mode QP preseed.  Regenerate that focused matrix with:
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both
    PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
 
+Seed-robust QI is a larger validation matrix than the tracked constrained-QI
+snapshot.  The current artifacts use the bundled NFP=2 QI seed and optional
+same-mode QP preseed.  Before documenting QI as robust to arbitrary starts,
+run the constrained objective from QI, QP, QH, QA, and a simple
+non-omnigenous boundary seed, then inspect both numerical gates and Boozer
+``|B|`` contour plots.  Until those rows are generated and curated, treat the
+full multi-seed matrix as deferred validation rather than a required
+reproduction command.
+
+Use the bounded seed preflight to choose and document starting points before
+launching that matrix:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --csv results/qi_seed_audit.csv
+
+The preflight ranks seeds by smooth-plus-legacy QI score and leaves mirror,
+elongation, aspect, and iota gates as explicit columns.  This is deliberate:
+for QI robustness work, a seed that is already QI-like but violates mirror or
+aspect slightly is usually more informative than a non-QI seed that satisfies
+the engineering constraints.
+
 Run the GPU production sweep on a machine with a working JAX GPU install:
 
 .. code-block:: bash
@@ -191,6 +213,8 @@ target ``8.0``, aspect ratio ``5.000``, mean iota ``-0.4553``, and total wall
 time ``6.6 min``.  Ranking now prioritizes the legacy QI diagnostic after
 the mirror, elongation, iota, and aspect gates are satisfied; otherwise smooth
 width-only surrogates can win while still looking more QP-like than QI.
+This is a best-row report for the bundled QI-seeded lane, not evidence that
+the optimizer is seed-robust across unrelated QA/QH/QP/simple starts.
 
 Non-stellarator-symmetric LASYM runs use the same script with
 ``--stellarator-asymmetric``.  The current LASYM artifacts are intentionally
