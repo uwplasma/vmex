@@ -61,7 +61,8 @@ the recommended local escalation path.
    * - Optional validation plan helper
      - ``python validation/qi_seed_robustness_plan.py --output results/qi_seed_audit/validation_plan.json``
      - To record the current non-required VMEC2000/SIMSOPT/QI seed-robustness
-       lanes before a local or scheduled validation run.
+       lanes and concrete bounded parity commands before a local or scheduled
+       validation run.
    * - Bounded physics smoke
      - ``RUN_FULL=1 pytest -q tests/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[circular_tokamak] tests/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[nfp4_QH_warm_start] tests/test_driver_api.py::test_run_free_boundary_smoke_on_bundled_small_case``
      - Before merging solver changes that affect fixed/free-boundary physics.
@@ -69,8 +70,12 @@ the recommended local escalation path.
      - ``python tools/fetch_assets.py`` then ``RUN_FULL=1 JAX_ENABLE_X64=1 pytest -q -m "full and not vmec2000"``
      - Manual/nightly parity and high-cost physics validation.
    * - External VMEC2000 tier
-     - ``VMEC2000_EXEC=/path/to/xvmec2000 VMEC2000_INTEGRATION=1 pytest -q -m vmec2000``
-     - Local or scheduled executable-backed parity validation.
+     - ``VMEC2000_EXEC=/path/to/xvmec2000 VMEC2000_INTEGRATION=1 pytest -q tests/test_vmec2000_exec_fast_validation.py::test_fast_vmec2000_stage_trace_validation_cases``
+     - First executable-backed parity gate; broaden to ``pytest -q -m vmec2000``
+       only after the bounded smoke is green.
+   * - External SIMSOPT tier
+     - ``RUN_SIMSOPT_VALIDATION=1 pytest -q tests/test_simsopt_optional_validation.py::test_qh_quasisymmetry_residual_matches_simsopt_wout_formula``
+     - Optional formula-level diagnostic parity when SIMSOPT is installed.
    * - Docs fast build
      - ``SPHINX_FAST=1 LC_ALL=C.UTF-8 LANG=C.UTF-8 python -m sphinx -W -j auto -b html docs docs/_build/html``
      - Required build job, minimal landing page.

@@ -148,6 +148,64 @@ def test_build_seed_audit_ranks_and_writes_csv(monkeypatch, tmp_path):
     assert rows[1]["failed_constraints"] == "mirror"
 
 
+def test_build_seed_audit_can_select_best_well_phase(monkeypatch):
+    mod = _load_module()
+    targets = mod.SuitabilityTargets()
+    case = mod.SeedCase("phase_sensitive_qi", "qi", Path("/tmp/input_qi"), Path("/tmp/wout_qi.nc"))
+
+    monkeypatch.setattr(
+        mod,
+        "_phimin_candidates_for_case",
+        lambda case, *, phimin, phimin_policy: (0.0, 0.5),
+    )
+
+    def fake_evaluate(case, **kwargs):
+        phimin = float(kwargs["phimin"])
+        smooth = 0.5 if phimin == 0.0 else 0.05
+        record = {
+            "label": case.label,
+            "family": case.family,
+            "input": str(case.input_path),
+            "wout": str(case.wout_path),
+            "aspect": 5.0,
+            "mean_iota": 0.45,
+            "qi_phimin": phimin,
+            "qi_smooth_total": smooth,
+            "qi_legacy_total": smooth,
+            "qi_mirror_ratio_max": 0.18,
+            "qi_max_elongation": 7.0,
+        }
+        record.update(mod._constraint_status(record, targets))
+        return record
+
+    monkeypatch.setattr(mod, "evaluate_seed_case", fake_evaluate)
+
+    report = mod.build_seed_audit(
+        cases=[case],
+        skipped_defaults=[],
+        surfaces=(0.5,),
+        targets=targets,
+        nphi=11,
+        nalpha=5,
+        n_bounce=5,
+        nphi_out=21,
+        mboz=6,
+        nboz=6,
+        phimin=0.0,
+        mirror_ntheta=8,
+        mirror_nphi=8,
+        elongation_ntheta=8,
+        elongation_nphi=4,
+        phimin_policy="well-phase",
+    )
+
+    selected = report["cases"][0]
+    assert selected["selected_phimin"] == 0.5
+    assert selected["qi_seed_score"] == pytest.approx(0.1)
+    assert selected["phimin_candidates"] == [0.0, 0.5]
+    assert [row["qi_phimin"] for row in selected["phimin_candidate_metrics"]] == [0.0, 0.5]
+
+
 def test_prefine_probe_manifest_selects_top_rows_and_stays_dry(tmp_path):
     mod = _load_module()
     report = {

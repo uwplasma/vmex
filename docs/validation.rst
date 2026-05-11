@@ -165,6 +165,10 @@ The manifest records top-ranked seeds plus one best-ranked representative from
 each available seed family, hard-capped QI-only prefine settings, expected
 output files, and exact commands for running one tiny probe at a time.  Use
 ``--prefine-probes run`` only when deliberately executing those capped probes.
+By default the audit uses ``--phimin-policy well-phase``: each seed is scored at
+both ``phimin=0`` and ``phimin=pi/nfp`` and the better QI well phase is used for
+ranking and prefine planning.  Use ``--phimin-policy fixed --phimin VALUE`` when
+you need a strict single-phase comparison against a legacy run.
 
 For the current optional validation plan, including the verified green CI
 baseline, family-representative QI probe workflow, VMEC2000/SIMSOPT optional
@@ -261,21 +265,19 @@ bundled ``wout`` references and should be run during routine development with:
 
 Direct executable comparisons are opt-in because they require a VMEC2000
 Fortran executable, and some checks also require ``mpi4py`` and the VMEC2000
-Python extension.  A local run looks like:
+Python extension.  Prefer the bounded commands below before broadening to the
+full marker suite.
+
+The fastest executable-backed stage-trace validation is:
 
 .. code-block:: bash
 
    VMEC2000_EXEC=/path/to/xvmec2000 \
    VMEC2000_INTEGRATION=1 \
-   pytest -q -m vmec2000
+   pytest -q tests/test_vmec2000_exec_fast_validation.py::test_fast_vmec2000_stage_trace_validation_cases
 
-The fastest executable-backed validation module is:
-
-.. code-block:: bash
-
-   VMEC2000_EXEC=/path/to/xvmec2000 \
-   VMEC2000_INTEGRATION=1 \
-   pytest -q tests/test_vmec2000_exec_fast_validation.py
+This command uses bundled fixed-boundary inputs, a single ``ns=13`` grid,
+``max_iter=2``, lite dump output, and a 60 second VMEC2000 timeout per case.
 
 For a short CLI comparison against the executable:
 
@@ -285,6 +287,28 @@ For a short CLI comparison against the executable:
    VMEC2000_INTEGRATION=1 \
    VMEC2000_CLI_NITER=5 \
    pytest -q tests/test_cli_vmec2000_exec.py
+
+This caps both VMEC2000 and ``vmec_jax`` CLI runs at five iterations.  To run
+the whole executable-backed suite after the bounded checks are green:
+
+.. code-block:: bash
+
+   VMEC2000_EXEC=/path/to/xvmec2000 \
+   VMEC2000_INTEGRATION=1 \
+   pytest -q -m vmec2000
+
+Optional SIMSOPT formula parity is similarly guarded and targeted:
+
+.. code-block:: bash
+
+   RUN_SIMSOPT_VALIDATION=1 \
+   pytest -q tests/test_simsopt_optional_validation.py::test_qh_quasisymmetry_residual_matches_simsopt_wout_formula
+
+The machine-readable list of these bounded parity commands is emitted by:
+
+.. code-block:: bash
+
+   python validation/qi_seed_robustness_plan.py --output results/qi_seed_audit/validation_plan.json
 
 Skip behavior is intentional.  Tests marked ``vmec2000`` skip unless
 ``VMEC2000_INTEGRATION=1`` is set.  They also skip, rather than fail, when the

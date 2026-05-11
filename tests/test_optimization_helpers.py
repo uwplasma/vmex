@@ -966,6 +966,43 @@ def test_state_tangent_columns_cache_hit_skips_initial_linearization_setup(monke
     assert opt._profile["jacobian_initial_tangents_cache_hit"]["count"] == 1
 
 
+def test_tape_jacobian_remembers_residual_under_parameter_cache_key(monkeypatch):
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._solver_device_name = None
+    opt._inside_solver_device_context = False
+    opt._scan_exact_path = "tape"
+    opt._layout = SimpleNamespace(size=2)
+    opt._discrete_jacobian_helper_cache = {}
+    opt._exact_residual_cache = {}
+    opt._last_jacobian_key = [b"accepted"]
+    opt._last_jacobian_residual = None
+    opt._profile = {}
+    opt._exact_cache_key = lambda _params: b"accepted"
+    opt._state_and_tangent_columns = lambda _params, profile_prefix: (
+        SimpleNamespace(),
+        jnp.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=jnp.float64),
+    )
+    opt._residuals_fn = lambda state: jnp.asarray(
+        [state.foo + 1.0, 2.0 * state.bar],
+        dtype=jnp.float64,
+    )
+
+    monkeypatch.setattr(
+        "vmec_jax.state.pack_state",
+        lambda _state: jnp.asarray([3.0, 4.0], dtype=jnp.float64),
+    )
+    monkeypatch.setattr(
+        "vmec_jax.state.unpack_state",
+        lambda packed, _layout: SimpleNamespace(foo=packed[0], bar=packed[1]),
+    )
+
+    jac = opt.jacobian_fun(np.asarray([0.1, 0.2], dtype=float))
+
+    np.testing.assert_allclose(jac, np.asarray([[1.0, 0.0], [0.0, 2.0]]))
+    np.testing.assert_allclose(opt._exact_residual_cache[b"accepted"], [4.0, 8.0])
+    assert all(not isinstance(key, tuple) for key in opt._exact_residual_cache)
+
+
 def test_gauss_newton_damped_fallback_recovers_from_oversized_step():
     """Damping should rescue cases where the raw GN step is unusably large."""
 
@@ -1239,11 +1276,7 @@ def test_run_final_history_reuses_cached_jacobian_residual_metadata():
     opt._evaluate_residuals_from_state = lambda _state: (_ for _ in ()).throw(
         AssertionError("residual callback should not rerun for final history")
     )
-    opt._solve_exact_with_tape = (
-        lambda _params, return_payload=False: (state, {})
-        if return_payload
-        else state
-    )
+    opt._solve_exact_with_tape = lambda _params, return_payload=False: (state, {}) if return_payload else state
     opt.residual_fun = lambda _params: residual.copy()
     opt.forward_residual_fun = lambda _params: (_ for _ in ()).throw(
         AssertionError("line-search trial residual should not run")

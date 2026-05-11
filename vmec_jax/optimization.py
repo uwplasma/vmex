@@ -105,11 +105,11 @@ def extend_boundary_for_max_mode(
     # QS metric normalisation) is independent of max_mode.  Without this floor
     # max_mode=1 would run with mpol=3 and give a different initial QS value
     # than max_mode=2/3, making cross-mode comparisons misleading.
-    need_mpol = max(5, max_mode + 2)   # VMEC mpol = max_m + 1; add extra headroom
+    need_mpol = max(5, max_mode + 2)  # VMEC mpol = max_m + 1; add extra headroom
     need_ntor = max(5, max_mode + 2)
 
     if need_mpol <= cur_mpol and need_ntor <= cur_ntor:
-        return indata, static, boundary   # nothing to do
+        return indata, static, boundary  # nothing to do
 
     new_mpol = max(cur_mpol, need_mpol)
     new_ntor = max(cur_ntor, need_ntor)
@@ -316,9 +316,7 @@ def lift_boundary_params(
         Parameter vector aligned with ``target_specs``. Parameters present in
         both lists are copied by name; all others are initialised to zero.
     """
-    source_vals = {
-        spec.name: float(value) for spec, value in zip(source_specs, np.asarray(source_params, dtype=float))
-    }
+    source_vals = {spec.name: float(value) for spec, value in zip(source_specs, np.asarray(source_params, dtype=float))}
     return np.asarray([source_vals.get(spec.name, 0.0) for spec in target_specs], dtype=float)
 
 
@@ -523,9 +521,7 @@ def gauss_newton_least_squares(
     scale[scale == 0.0] = 1.0
     trial_residual_fun = residual_fun if forward_residual_fun is None else forward_residual_fun
     damping_schedule = (
-        (1e-6, 1e-4, 1e-2, 1.0, 100.0)
-        if damping_factors is None
-        else tuple(float(value) for value in damping_factors)
+        (1e-6, 1e-4, 1e-2, 1.0, 100.0) if damping_factors is None else tuple(float(value) for value in damping_factors)
     )
 
     nfev = 0
@@ -572,9 +568,7 @@ def gauss_newton_least_squares(
             accepted_cost = cost
             accepted_step_norm = 0.0
             if verbose:
-                print(
-                    f"{iteration:12d}{nfev:16d}{cost:13.4e}{0.0:18.2e}{0.0:16.2e}{optimality:16.2e}"
-                )
+                print(f"{iteration:12d}{nfev:16d}{cost:13.4e}{0.0:18.2e}{0.0:16.2e}{optimality:16.2e}")
             break
 
         jacobian_scaled = jacobian * scale[None, :]
@@ -596,9 +590,7 @@ def gauss_newton_least_squares(
             accepted_cost = cost
             accepted_step_norm = step_norm
             if verbose:
-                print(
-                    f"{iteration:12d}{nfev:16d}{cost:13.4e}{0.0:18.2e}{step_norm:16.2e}{optimality:16.2e}"
-                )
+                print(f"{iteration:12d}{nfev:16d}{cost:13.4e}{0.0:18.2e}{step_norm:16.2e}{optimality:16.2e}")
             break
 
         accepted = False
@@ -655,9 +647,7 @@ def gauss_newton_least_squares(
             accepted_cost = cost
             accepted_step_norm = 0.0
             if verbose:
-                print(
-                    f"{iteration:12d}{nfev:16d}{cost:13.4e}{0.0:18.2e}{0.0:16.2e}{optimality:16.2e}"
-                )
+                print(f"{iteration:12d}{nfev:16d}{cost:13.4e}{0.0:18.2e}{0.0:16.2e}{optimality:16.2e}")
             break
 
         cost_reduction = cost - cost_trial
@@ -814,6 +804,7 @@ def make_qh_residuals_fn(
             boundary_init = boundary_from_indata(indata, static.modes)
             state0 = initial_guess_from_boundary(static, boundary_init, indata)
             from .geom import eval_geom as _eval_geom
+
             geom = _eval_geom(state0, static)
             signgs = int(signgs_from_sqrtg(np.asarray(geom.sqrtg), axis_index=1))
         except Exception:
@@ -851,8 +842,7 @@ def make_qh_residuals_fn(
     def residuals_from_state(state: VMECState) -> jnp.ndarray:
         aspect = equilibrium_aspect_ratio_from_state(state=state, static=static)
         qs = _qs_eval_from_state(state)
-        aspect_residual = jnp.asarray([float(aspect_weight) * (aspect - target_aspect)],
-                                      dtype=jnp.float64)
+        aspect_residual = jnp.asarray([float(aspect_weight) * (aspect - target_aspect)], dtype=jnp.float64)
         qs_residual = jnp.asarray(qs["residuals1d"], dtype=jnp.float64) * float(qs_weight)
         return jnp.concatenate([aspect_residual, qs_residual])
 
@@ -997,6 +987,7 @@ def make_qs_residuals_fn(
             boundary_init = boundary_from_indata(indata, static.modes)
             state0 = initial_guess_from_boundary(static, boundary_init, indata)
             from .geom import eval_geom as _eval_geom
+
             geom = _eval_geom(state0, static)
             signgs = int(signgs_from_sqrtg(np.asarray(geom.sqrtg), axis_index=1))
         except Exception:
@@ -1038,20 +1029,17 @@ def make_qs_residuals_fn(
 
         if target_aspect is not None:
             aspect = equilibrium_aspect_ratio_from_state(state=state, static=static)
-            parts.append(jnp.asarray(
-                [float(aspect_weight) * (aspect - target_aspect)], dtype=jnp.float64
-            ))
+            parts.append(jnp.asarray([float(aspect_weight) * (aspect - target_aspect)], dtype=jnp.float64))
 
         if target_iota is not None or min_abs_iota is not None:
             _chips, _iotas, iotaf = equilibrium_iota_profiles_from_state(
-                state=state, static=static, indata=_indata, signgs=_signgs,
+                state=state,
+                static=static,
+                indata=_indata,
+                signgs=_signgs,
             )
             iotas = jnp.asarray(_iotas, dtype=jnp.float64)
-            mean_iota = (
-                jnp.asarray(0.0, dtype=iotas.dtype)
-                if int(iotas.shape[0]) <= 1
-                else jnp.mean(iotas[1:])
-            )
+            mean_iota = jnp.asarray(0.0, dtype=iotas.dtype) if int(iotas.shape[0]) <= 1 else jnp.mean(iotas[1:])
             if target_iota is not None:
                 iota_residual = mean_iota - target_iota
             else:
@@ -1094,15 +1082,14 @@ def make_qs_residuals_fn(
             def _iota_from_packed(packed):
                 state = unpack_state(packed, layout)
                 _chips, _iotas, _iotaf = equilibrium_iota_profiles_from_state(
-                    state=state, static=static, indata=_indata, signgs=_signgs,
+                    state=state,
+                    static=static,
+                    indata=_indata,
+                    signgs=_signgs,
                 )
                 del _chips, _iotaf
                 iotas = _jnp.asarray(_iotas, dtype=_jnp.float64)
-                mean_iota = (
-                    _jnp.asarray(0.0, dtype=iotas.dtype)
-                    if int(iotas.shape[0]) <= 1
-                    else _jnp.mean(iotas[1:])
-                )
+                mean_iota = _jnp.asarray(0.0, dtype=iotas.dtype) if int(iotas.shape[0]) <= 1 else _jnp.mean(iotas[1:])
                 if target_iota is not None:
                     iota_residual = mean_iota - target_iota
                 else:
@@ -1139,9 +1126,7 @@ def make_qs_residuals_fn(
                         # cotangent entries. Dense JVP columns are finite there;
                         # zeroing the null reverse entries gives the matching
                         # transpose on the boundary-parameter subspace.
-                        contribution = _jnp.nan_to_num(
-                            contribution, nan=0.0, posinf=0.0, neginf=0.0
-                        )
+                        contribution = _jnp.nan_to_num(contribution, nan=0.0, posinf=0.0, neginf=0.0)
                     return contribution
 
                 total = total + jax.lax.cond(
@@ -1172,15 +1157,14 @@ def make_qs_residuals_fn(
                 total = total + 0.5 * aspect_residual * aspect_residual
             if target_iota is not None or min_abs_iota is not None:
                 _chips, _iotas, _iotaf = equilibrium_iota_profiles_from_state(
-                    state=state, static=static, indata=_indata, signgs=_signgs,
+                    state=state,
+                    static=static,
+                    indata=_indata,
+                    signgs=_signgs,
                 )
                 del _chips, _iotaf
                 iotas = _jnp.asarray(_iotas, dtype=_jnp.float64)
-                mean_iota = (
-                    _jnp.asarray(0.0, dtype=iotas.dtype)
-                    if int(iotas.shape[0]) <= 1
-                    else _jnp.mean(iotas[1:])
-                )
+                mean_iota = _jnp.asarray(0.0, dtype=iotas.dtype) if int(iotas.shape[0]) <= 1 else _jnp.mean(iotas[1:])
                 if target_iota is not None:
                     iota_residual = mean_iota - target_iota
                 else:
@@ -1223,6 +1207,7 @@ def make_qs_residuals_fn(
 # ─────────────────────────────────────────────────────────────────────────────
 # FixedBoundaryExactOptimizer
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class FixedBoundaryExactOptimizer:
     """End-to-end optimizer for fixed-boundary VMEC equilibria.
@@ -1320,9 +1305,7 @@ class FixedBoundaryExactOptimizer:
         self._residuals_eval_fn = self._make_residuals_eval_fn(residuals_fn)
         self._n_qs: int | None = getattr(residuals_fn, "_n_qs", None)
         self._n_non_qs: int = int(getattr(residuals_fn, "_n_non_qs", 1))
-        self._has_residual_block_metadata = (
-            hasattr(residuals_fn, "_n_qs") or hasattr(residuals_fn, "_n_non_qs")
-        )
+        self._has_residual_block_metadata = hasattr(residuals_fn, "_n_qs") or hasattr(residuals_fn, "_n_non_qs")
         self._qs_total_from_state_fn = getattr(residuals_fn, "_qs_total_from_state", None)
         self._aspect_target = getattr(residuals_fn, "_aspect_target", None)
         self._aspect_weight = float(getattr(residuals_fn, "_aspect_weight", 1.0))
@@ -1661,10 +1644,7 @@ class FixedBoundaryExactOptimizer:
         return {
             "enabled": bool(getattr(self, "_callback_trace_enabled", False)),
             "events": events,
-            "summary": {
-                key: {"count": counts[key], "wall_time_s": wall_time[key]}
-                for key in sorted(counts)
-            },
+            "summary": {key: {"count": counts[key], "wall_time_s": wall_time[key]} for key in sorted(counts)},
         }
 
     def _exact_cache_key(self, params) -> bytes:
@@ -1677,9 +1657,7 @@ class FixedBoundaryExactOptimizer:
             residual_cache.clear()
 
     def _remember_exact_residual(self, cache_key: bytes, residual: np.ndarray) -> None:
-        self._exact_residual_cache = {
-            cache_key: np.asarray(residual, dtype=float).reshape(-1).copy()
-        }
+        self._exact_residual_cache = {cache_key: np.asarray(residual, dtype=float).reshape(-1).copy()}
 
     def _cached_exact_residual(
         self,
@@ -1738,6 +1716,7 @@ class FixedBoundaryExactOptimizer:
 
     def _boundary_from_params(self, params):
         from ._compat import jnp as _jnp
+
         boundary = apply_boundary_params(
             self._boundary_input if self._boundary_input is not None else self._boundary,
             self._specs,
@@ -1746,6 +1725,7 @@ class FixedBoundaryExactOptimizer:
         if self._boundary_input is None:
             return boundary
         from .boundary import boundary_from_input_convention
+
         return boundary_from_input_convention(
             boundary,
             self._static.modes,
@@ -1823,11 +1803,10 @@ class FixedBoundaryExactOptimizer:
         if self._solver_device_name is not None and not self._inside_solver_device_context:
             return self._run_in_solver_device_context(self._solve_forward, params, trial=trial)
         from .solve import solve_fixed_boundary_residual_iter  # noqa: PLC0415
+
         t_total = time.perf_counter()
         boundary_now = self._boundary_from_params(params)
-        state0 = initial_guess_from_boundary(
-            self._static, boundary_now, self._indata, vmec_project=True
-        )
+        state0 = initial_guess_from_boundary(self._static, boundary_now, self._indata, vmec_project=True)
         self._profile_add(
             "initial_guess_trial" if trial else "initial_guess_forward",
             time.perf_counter() - t_total,
@@ -1835,14 +1814,16 @@ class FixedBoundaryExactOptimizer:
         t_solve = time.perf_counter()
         if trial:
             result = solve_fixed_boundary_residual_iter(
-                state0, self._static,
+                state0,
+                self._static,
                 max_iter=self._trial_max_iter,
                 ftol=self._trial_ftol,
                 **self._trial_solver_kwargs,
             )
         else:
             result = solve_fixed_boundary_residual_iter(
-                state0, self._static,
+                state0,
+                self._static,
                 max_iter=self._inner_max_iter,
                 ftol=self._inner_ftol,
                 **self._exact_solver_kwargs,
@@ -1885,9 +1866,7 @@ class FixedBoundaryExactOptimizer:
 
         def _scan_state_from_params(p):
             boundary_now = self._boundary_from_params(p)
-            state0 = initial_guess_from_boundary(
-                self._static, boundary_now, self._indata, vmec_project=True
-            )
+            state0 = initial_guess_from_boundary(self._static, boundary_now, self._indata, vmec_project=True)
             result = solve_fixed_boundary_residual_iter(
                 state0,
                 self._static,
@@ -1960,9 +1939,7 @@ class FixedBoundaryExactOptimizer:
         t_total = time.perf_counter()
         t_guess = time.perf_counter()
         boundary_now = self._boundary_from_params(params)
-        state0 = initial_guess_from_boundary(
-            self._static, boundary_now, self._indata, vmec_project=True
-        )
+        state0 = initial_guess_from_boundary(self._static, boundary_now, self._indata, vmec_project=True)
         axis_override = extract_axis_override_from_state(state0, self._static)
         self._profile_add("initial_guess_exact", time.perf_counter() - t_guess)
         t_tape = time.perf_counter()
@@ -1983,9 +1960,7 @@ class FixedBoundaryExactOptimizer:
         self._profile_add("exact_tape_build", tape_build_wall_s)
         self._profile_exact_tape_solver_timing(tape, tape_build_wall_s)
         t_unpack = time.perf_counter()
-        state = unpack_state(
-            _jnp.asarray(tape.final_packed_state, dtype=_jnp.float64), self._layout
-        )
+        state = unpack_state(_jnp.asarray(tape.final_packed_state, dtype=_jnp.float64), self._layout)
         payload = {"tape": tape, "axis_override": axis_override}
         self._exact_cache.clear()
         self._exact_cache[cache_key] = (state, payload)
@@ -2048,15 +2023,10 @@ class FixedBoundaryExactOptimizer:
 
         t_initial = time.perf_counter()
         cache_key = self._initial_tangent_cache_key(params)
-        initial_tangents = (
-            self._initial_tangent_cache.get(cache_key)
-            if cache_key is not None
-            else None
-        )
+        initial_tangents = self._initial_tangent_cache.get(cache_key) if cache_key is not None else None
         if initial_tangents is None:
             axis_override = {
-                key: _jnp.asarray(value, dtype=params.dtype)
-                for key, value in payload["axis_override"].items()
+                key: _jnp.asarray(value, dtype=params.dtype) for key, value in payload["axis_override"].items()
             }
 
             def _initial_state_packed(p):
@@ -2135,17 +2105,15 @@ class FixedBoundaryExactOptimizer:
         """Exact discrete-adjoint Jacobian at *params*."""
         if self._solver_device_name is not None and not self._inside_solver_device_context:
             return self._run_in_solver_device_context(self.jacobian_fun, params)
-        cache_key = self._exact_cache_key(params)
+        exact_param_key = self._exact_cache_key(params)
         if self._scan_exact_path == "scan":
             from ._compat import jnp as _jnp
 
             helpers = self._scan_exact_helpers()
             t0 = time.perf_counter()
-            residuals, jac = helpers["residual_and_jacobian"](
-                _jnp.asarray(params, dtype=_jnp.float64)
-            )
+            residuals, jac = helpers["residual_and_jacobian"](_jnp.asarray(params, dtype=_jnp.float64))
             self._last_jacobian_residual = np.asarray(residuals, dtype=float)
-            self._remember_exact_residual(cache_key, self._last_jacobian_residual)
+            self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
             # Avoid a second accepted-point scan solve when the history metrics
             # can be reconstructed from the residual vector.  This is the common
             # QA/QH/QP/QI fixed-boundary optimization path; the state cache is
@@ -2169,31 +2137,28 @@ class FixedBoundaryExactOptimizer:
         def _residuals_from_packed(packed):
             return self._residuals_fn(unpack_state(packed, self._layout))
 
-        cache_key = (
+        helper_key = (
             int(params.size),
             int(self._layout.size),
             id(self._residuals_fn),
         )
-        helper_cache = self._discrete_jacobian_helper_cache.get(cache_key)
+        helper_cache = self._discrete_jacobian_helper_cache.get(helper_key)
         if helper_cache is None:
+
             @jax.jit
             def _residual_tangent_columns(packed_state, packed_tangents):
-                residuals, residual_linear = jax.linearize(
-                    _residuals_from_packed, packed_state
-                )
+                residuals, residual_linear = jax.linearize(_residuals_from_packed, packed_state)
                 return residuals, jax.vmap(residual_linear)(packed_tangents)
 
             helper_cache = {
                 "residual_tangent_columns": _residual_tangent_columns,
             }
-            self._discrete_jacobian_helper_cache[cache_key] = helper_cache
+            self._discrete_jacobian_helper_cache[helper_key] = helper_cache
 
         t_res = time.perf_counter()
-        residuals, columns = helper_cache["residual_tangent_columns"](
-            packed_final, final_tangents
-        )
+        residuals, columns = helper_cache["residual_tangent_columns"](packed_final, final_tangents)
         self._last_jacobian_residual = np.asarray(residuals, dtype=float)
-        self._remember_exact_residual(cache_key, self._last_jacobian_residual)
+        self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
         self._profile_add("jacobian_residual_tangents", time.perf_counter() - t_res)
         out = np.asarray(columns, dtype=float).T
         self._profile_add("jacobian_total", time.perf_counter() - t_total)
@@ -2276,9 +2241,7 @@ class FixedBoundaryExactOptimizer:
         ntheta = int(static.grid.ntheta)
         nzeta = int(static.grid.nzeta)
         field = np.asarray(field_flat).reshape((ntheta, nzeta, 3))
-        tangent_columns = np.asarray(columns, dtype=float).reshape(
-            (nparams, ntheta, nzeta, 3)
-        )
+        tangent_columns = np.asarray(columns, dtype=float).reshape((nparams, ntheta, nzeta, 3))
         tangent_columns = np.transpose(tangent_columns, (1, 2, 3, 0))
         return field, tangent_columns
 
@@ -2304,8 +2267,7 @@ class FixedBoundaryExactOptimizer:
         state, payload = self._solve_exact_with_tape(params, return_payload=True)
         tape = payload["tape"]
         axis_override = {
-            key: _jnp.asarray(value, dtype=params.dtype)
-            for key, value in payload["axis_override"].items()
+            key: _jnp.asarray(value, dtype=params.dtype) for key, value in payload["axis_override"].items()
         }
         packed_final = _jnp.asarray(pack_state(state), dtype=_jnp.float64)
 
@@ -2326,13 +2288,12 @@ class FixedBoundaryExactOptimizer:
             )
             helper_cache = self._discrete_jacobian_helper_cache.get(helper_key)
             if helper_cache is None:
+
                 @jax.jit
                 def _objective_value_and_cotangent_helper(packed_state_arg):
                     return objective_cotangent_factory(packed_state_arg, self._layout)
 
-                helper_cache = {
-                    "objective_value_and_cotangent": _objective_value_and_cotangent_helper
-                }
+                helper_cache = {"objective_value_and_cotangent": _objective_value_and_cotangent_helper}
                 self._discrete_jacobian_helper_cache[helper_key] = helper_cache
             cost, final_cotangent = helper_cache["objective_value_and_cotangent"](packed_final)
         else:
@@ -2343,9 +2304,7 @@ class FixedBoundaryExactOptimizer:
                 self._residuals_fn, "_state_cotangent_operator_from_packed", None
             )
             if state_cotangent_operator_factory is not None:
-                final_cotangent = state_cotangent_operator_factory(packed_final, self._layout)(
-                    residuals
-                )
+                final_cotangent = state_cotangent_operator_factory(packed_final, self._layout)(residuals)
             else:
                 _, residual_vjp = jax.vjp(_residuals_from_packed, packed_final)
                 final_cotangent = residual_vjp(residuals)[0]
@@ -2422,8 +2381,7 @@ class FixedBoundaryExactOptimizer:
         state, payload = self._solve_exact_with_tape(params, return_payload=True)
         tape = payload["tape"]
         axis_override = {
-            key: _jnp.asarray(value, dtype=params.dtype)
-            for key, value in payload["axis_override"].items()
+            key: _jnp.asarray(value, dtype=params.dtype) for key, value in payload["axis_override"].items()
         }
         packed_final = _jnp.asarray(pack_state(state), dtype=_jnp.float64)
 
@@ -2445,9 +2403,7 @@ class FixedBoundaryExactOptimizer:
         _, initial_linear = jax.linearize(_initial_state_packed, params)
         residuals, residual_linear = jax.linearize(_residuals_from_packed, packed_final)
         _, initial_vjp = jax.vjp(_initial_state_packed, params)
-        state_cotangent_from_packed = getattr(
-            self._residuals_fn, "_state_cotangent_from_packed", None
-        )
+        state_cotangent_from_packed = getattr(self._residuals_fn, "_state_cotangent_from_packed", None)
         residual_cotangent_helper = None
         if state_cotangent_from_packed is not None:
             residual_cotangent_key = (
@@ -2458,11 +2414,10 @@ class FixedBoundaryExactOptimizer:
             )
             helper_cache = self._discrete_jacobian_helper_cache.get(residual_cotangent_key)
             if helper_cache is None:
+
                 @jax.jit
                 def _residual_cotangent_helper(packed_state_arg, cotangent_arg):
-                    return state_cotangent_from_packed(
-                        packed_state_arg, self._layout, cotangent_arg
-                    )
+                    return state_cotangent_from_packed(packed_state_arg, self._layout, cotangent_arg)
 
                 helper_cache = {"residual_cotangent": _residual_cotangent_helper}
                 self._discrete_jacobian_helper_cache[residual_cotangent_key] = helper_cache
@@ -2550,10 +2505,7 @@ class FixedBoundaryExactOptimizer:
         self._last_jacobian_residual = None
         jac = self.jacobian_fun(params)
         key = self._last_jacobian_key[0]
-        if (
-            self._last_jacobian_residual is not None
-            and self._can_build_history_from_residuals()
-        ):
+        if self._last_jacobian_residual is not None and self._can_build_history_from_residuals():
             entry = self._history_entry_from_residuals(
                 self._last_jacobian_residual,
                 wall_time_s=time.perf_counter() - self._wall_t0,
@@ -2615,6 +2567,7 @@ class FixedBoundaryExactOptimizer:
         from .preconditioner_1d_jax import clear_preconditioner_jit_caches
         from .discrete_adjoint import clear_replay_scan_caches
         from .vmec_numpy_forces import clear_numpy_force_caches
+
         if clear_compiled:
             clear_replay_scan_caches()
             clear_preconditioner_jit_caches()
@@ -2636,14 +2589,13 @@ class FixedBoundaryExactOptimizer:
     def aspect_ratio(self, params) -> float:
         """Return the aspect ratio at *params* (uses exact solve cache)."""
         from .wout import equilibrium_aspect_ratio_from_state
+
         state = (
             self._solve_scan_exact_state(params)
             if self._scan_exact_path == "scan"
             else self._solve_exact_with_tape(params)
         )
-        return float(np.asarray(
-            equilibrium_aspect_ratio_from_state(state=state, static=self._static)
-        ))
+        return float(np.asarray(equilibrium_aspect_ratio_from_state(state=state, static=self._static)))
 
     def _qs_from_res(self, res: np.ndarray) -> float:
         """Sum of squared QS residuals only (excludes aspect and iota)."""
@@ -2732,9 +2684,7 @@ class FixedBoundaryExactOptimizer:
         else:
             from .wout import equilibrium_aspect_ratio_from_state
 
-            aspect = float(np.asarray(
-                equilibrium_aspect_ratio_from_state(state=state, static=self._static)
-            ))
+            aspect = float(np.asarray(equilibrium_aspect_ratio_from_state(state=state, static=self._static)))
 
         entry: dict = {
             "wall_time_s": float(wall_time_s),
@@ -2791,6 +2741,7 @@ class FixedBoundaryExactOptimizer:
         t0 = time.perf_counter()
         from .driver import FixedBoundaryRun
         from .driver import write_wout_from_fixed_boundary_run
+
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         if state is None:
@@ -2811,9 +2762,7 @@ class FixedBoundaryExactOptimizer:
             profiles={},
             signgs=self._signgs,
         )
-        write_wout_from_fixed_boundary_run(
-            str(path), run, include_fsq=False, fast_bcovar=True
-        )
+        write_wout_from_fixed_boundary_run(str(path), run, include_fsq=False, fast_bcovar=True)
         self._profile_add("write_wout", time.perf_counter() - t0)
         print(f"  Wrote {path}")
 
@@ -2944,8 +2893,7 @@ class FixedBoundaryExactOptimizer:
         self._profile = {}
         self._trial_residual_cache.clear()
         self._callback_trace_enabled = (
-            os.getenv("VMEC_JAX_OPT_TRACE_CALLBACKS", "").strip().lower()
-            in ("1", "true", "yes", "on")
+            os.getenv("VMEC_JAX_OPT_TRACE_CALLBACKS", "").strip().lower() in ("1", "true", "yes", "on")
             if trace_callbacks is None
             else bool(trace_callbacks)
         )
@@ -3001,9 +2949,7 @@ class FixedBoundaryExactOptimizer:
             last_history_key = [self._exact_cache_key(params0_arr)]
             max_scalar_evals = max(1, int(max_nfev))
             initial_radius = (
-                1.0
-                if scalar_step_bound is None or float(scalar_step_bound) <= 0.0
-                else float(scalar_step_bound)
+                1.0 if scalar_step_bound is None or float(scalar_step_bound) <= 0.0 else float(scalar_step_bound)
             )
             radius = initial_radius
             min_radius = max(1.0e-12, initial_radius * 1.0e-8)
@@ -3122,9 +3068,7 @@ class FixedBoundaryExactOptimizer:
             try:
                 from scipy.optimize import minimize as _scipy_minimize
             except Exception as exc:  # pragma: no cover - optional dependency
-                raise ImportError(
-                    "method='lbfgs_adjoint' requires scipy.optimize.minimize"
-                ) from exc
+                raise ImportError("method='lbfgs_adjoint' requires scipy.optimize.minimize") from exc
 
             scale = np.ones_like(params0_arr) if x_scale is None else np.asarray(x_scale, dtype=float)
             scale[scale == 0.0] = 1.0
@@ -3184,8 +3128,7 @@ class FixedBoundaryExactOptimizer:
                 if lbfgs_step_bound is not None and float(lbfgs_step_bound) > 0.0:
                     bound = float(lbfgs_step_bound)
                     lbfgs_bounds = [
-                        (float(center) - bound, float(center) + bound)
-                        for center in np.asarray(y0, dtype=float)
+                        (float(center) - bound, float(center) + bound) for center in np.asarray(y0, dtype=float)
                     ]
                 minimize_result = _scipy_minimize(
                     _objective_and_gradient_y,
@@ -3232,9 +3175,7 @@ class FixedBoundaryExactOptimizer:
             try:
                 from scipy.optimize import least_squares as _scipy_least_squares
             except Exception as exc:  # pragma: no cover - optional dependency
-                raise ImportError(
-                    "method='scipy_matrix_free' requires scipy.optimize.least_squares"
-                ) from exc
+                raise ImportError("method='scipy_matrix_free' requires scipy.optimize.least_squares") from exc
 
             scale = np.ones_like(params0_arr) if x_scale is None else np.asarray(x_scale, dtype=float)
             scale[scale == 0.0] = 1.0
@@ -3304,11 +3245,7 @@ class FixedBoundaryExactOptimizer:
                 jac=_jacobian_y,
                 method="trf",
                 tr_solver="lsmr",
-                tr_options=(
-                    {"maxiter": int(scipy_lsmr_maxiter)}
-                    if scipy_lsmr_maxiter is not None
-                    else None
-                ),
+                tr_options=({"maxiter": int(scipy_lsmr_maxiter)} if scipy_lsmr_maxiter is not None else None),
                 max_nfev=max_nfev,
                 ftol=ftol,
                 gtol=gtol,
@@ -3334,9 +3271,7 @@ class FixedBoundaryExactOptimizer:
             try:
                 from scipy.optimize import least_squares as _scipy_least_squares
             except Exception as exc:  # pragma: no cover - optional dependency
-                raise ImportError(
-                    "method='scipy' requires scipy.optimize.least_squares"
-                ) from exc
+                raise ImportError("method='scipy' requires scipy.optimize.least_squares") from exc
 
             scale = np.ones_like(params0_arr) if x_scale is None else np.asarray(x_scale, dtype=float)
             scale[scale == 0.0] = 1.0
@@ -3500,15 +3435,9 @@ class FixedBoundaryExactOptimizer:
                 if method_key in ("scipy_matrix_free", "matrix_free", "scipy_mf")
                 else None
             ),
-            "scipy_lsmr_maxiter": (
-                None if scipy_lsmr_maxiter is None else int(scipy_lsmr_maxiter)
-            ),
-            "lbfgs_step_bound": (
-                None if lbfgs_step_bound is None else float(lbfgs_step_bound)
-            ),
-            "scalar_step_bound": (
-                None if scalar_step_bound is None else float(scalar_step_bound)
-            ),
+            "scipy_lsmr_maxiter": (None if scipy_lsmr_maxiter is None else int(scipy_lsmr_maxiter)),
+            "lbfgs_step_bound": (None if lbfgs_step_bound is None else float(lbfgs_step_bound)),
+            "scalar_step_bound": (None if scalar_step_bound is None else float(scalar_step_bound)),
             "solver_device": self._solver_device_name or "default",
             "inner_max_iter": int(self._inner_max_iter),
             "inner_ftol": float(self._inner_ftol),
