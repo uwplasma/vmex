@@ -5,16 +5,20 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from vmec_jax._compat import jnp
 from vmec_jax.modes import ModeTable
 from vmec_jax.namelist import InData
 from vmec_jax.wout import (
     _apply_nyquist_half_weight,
     _apply_bsubv_equif_correction,
     _bool_from_nc,
+    _chipf_from_chips,
     _compute_aspectratio,
     _compute_ctor_from_buco,
     _compute_eqfor_beta,
     _compute_eqfor_betaxis,
+    _vmec_jxbforce_cos_coeffs,
+    _vmec_jxbforce_sin_coeffs,
     _jxbforce_nyquist_limits,
     _nc_scalar,
     _pshalf_from_s,
@@ -25,7 +29,59 @@ from vmec_jax.wout import (
     _vmec_symoutput_split,
     _vmec_wint_from_trig,
     _vmec_wint_from_trig_jax,
+    _vmec_wrout_nyquist_cos_coeffs,
+    _vmec_wrout_nyquist_sin_coeffs,
+    _vmec_wrout_nyquist_sin_coeffs_loop,
+    _vmec_wrout_nyquist_synthesis,
 )
+from vmec_jax.vmec_tomnsp import vmec_trig_tables
+
+
+def _reference_mode_coeffs(*, f, modes, trig, kind: str, wrout: bool) -> np.ndarray:
+    f = np.asarray(f, dtype=float)[:, : int(trig.ntheta2), :]
+    m_arr = np.asarray(modes.m, dtype=int)
+    n_arr = np.asarray(modes.n, dtype=int)
+    cosmui = np.asarray(trig.cosmui, dtype=float)[: int(trig.ntheta2), :]
+    sinmui = np.asarray(trig.sinmui, dtype=float)[: int(trig.ntheta2), :]
+    cosnv = np.asarray(trig.cosnv, dtype=float)
+    sinnv = np.asarray(trig.sinnv, dtype=float)
+    if wrout:
+        cosmui = cosmui.copy()
+        cosnv = cosnv.copy()
+        if cosmui.shape[1] > 1:
+            cosmui[:, -1] *= 0.5
+        if cosnv.shape[1] > 1:
+            cosnv[:, -1] *= 0.5
+        mscale = np.asarray(trig.mscale, dtype=float)
+        nscale = np.asarray(trig.nscale, dtype=float)
+
+    out = np.zeros((f.shape[0], m_arr.size), dtype=float)
+    for js in range(f.shape[0]):
+        for idx, (m, n) in enumerate(zip(m_arr, n_arr)):
+            n_abs = abs(int(n))
+            sgn = -1.0 if n < 0 else 1.0
+            if wrout:
+                dmult = 0.5 * mscale[m] * nscale[n_abs] / float(trig.r0scale) ** 2
+                if m == 0 or n == 0:
+                    dmult *= 2.0
+            else:
+                dmult = 1.0 / float(trig.r0scale) ** 2
+                if m == cosmui.shape[1] - 1 and m > 0:
+                    dmult *= 0.5
+                if n_abs == cosnv.shape[1] - 1 and n_abs != 0:
+                    dmult *= 0.5
+            acc = 0.0
+            for j in range(f.shape[1]):
+                for k in range(f.shape[2]):
+                    if kind == "cos":
+                        basis = cosmui[j, m] * cosnv[k, n_abs] + sgn * sinmui[j, m] * sinnv[k, n_abs]
+                    elif kind == "sin":
+                        basis = sinmui[j, m] * cosnv[k, n_abs] - sgn * cosmui[j, m] * sinnv[k, n_abs]
+                    else:
+                        raise ValueError(kind)
+                    acc += dmult * basis * f[js, j, k]
+            out[js, idx] = acc
+    return out
 
 
 def test_scalar_and_boolean_netcdf_helpers_handle_masked_and_bad_inputs():
@@ -209,3 +265,130 @@ def test_symmetry_split_apply_antisym_and_expand():
     np.testing.assert_allclose(expanded[:, :3, :], f[:, :3, :])
     with pytest.raises(ValueError, match="sym/asym shape"):
         _vmec_symoutput_expand(sym=sym, asym=asym[:, :2, :], trig=trig)
+
+
+def test_wrout_nyquist_coefficients_match_reference_loops():
+    trig = vmec_trig_tables(ntheta=8, nzeta=5, nfp=2, mmax=3, nmax=2, lasym=False, cache=False)
+    modes = ModeTable(m=np.asarray([0, 1, 2, 3, 1]), n=np.asarray([0, 0, 1, -2, -1]))
+    f = np.linspace(-0.7, 1.1, 2 * int(trig.ntheta2) * 5).reshape(2, int(trig.ntheta2), 5)
+
+    cos_coeff = _vmec_wrout_nyquist_cos_coeffs(f=f, modes=modes, trig=trig)
+    sin_coeff = _vmec_wrout_nyquist_sin_coeffs(f=f, modes=modes, trig=trig)
+
+    np.testing.assert_allclose(
+        cos_coeff,
+        _reference_mode_coeffs(f=f, modes=modes, trig=trig, kind="cos", wrout=True),
+        rtol=2e-14,
+        atol=2e-14,
+    )
+    np.testing.assert_allclose(
+        sin_coeff,
+        _reference_mode_coeffs(f=f, modes=modes, trig=trig, kind="sin", wrout=True),
+        rtol=2e-14,
+        atol=2e-14,
+    )
+    np.testing.assert_allclose(
+        sin_coeff,
+        _vmec_wrout_nyquist_sin_coeffs_loop(f=f, modes=modes, trig=trig),
+        rtol=2e-14,
+        atol=2e-14,
+    )
+
+    empty = ModeTable(m=np.asarray([], dtype=int), n=np.asarray([], dtype=int))
+    assert _vmec_wrout_nyquist_cos_coeffs(f=f, modes=empty, trig=trig).shape == (2, 0)
+    assert _vmec_wrout_nyquist_sin_coeffs(f=f, modes=empty, trig=trig).shape == (2, 0)
+    assert _vmec_wrout_nyquist_sin_coeffs_loop(f=f, modes=empty, trig=trig).shape == (2, 0)
+    with pytest.raises(ValueError, match="shape"):
+        _vmec_wrout_nyquist_cos_coeffs(f=f[0], modes=modes, trig=trig)
+    with pytest.raises(ValueError, match="smaller"):
+        _vmec_wrout_nyquist_sin_coeffs(f=f[:, :2, :], modes=modes, trig=trig)
+    with pytest.raises(ValueError, match="mode limits"):
+        _vmec_wrout_nyquist_sin_coeffs(
+            f=f,
+            modes=ModeTable(m=np.asarray([4]), n=np.asarray([0])),
+            trig=trig,
+        )
+
+
+def test_jxbforce_coefficients_match_reference_loops():
+    trig = vmec_trig_tables(ntheta=8, nzeta=5, nfp=2, mmax=3, nmax=2, lasym=False, cache=False)
+    modes = ModeTable(m=np.asarray([0, 1, 2, 3, 1]), n=np.asarray([0, 0, 1, -2, -1]))
+    f = np.cos(np.linspace(0.0, 2.0, 2 * int(trig.ntheta2) * 5)).reshape(2, int(trig.ntheta2), 5)
+
+    np.testing.assert_allclose(
+        _vmec_jxbforce_cos_coeffs(f=f, modes=modes, trig=trig),
+        _reference_mode_coeffs(f=f, modes=modes, trig=trig, kind="cos", wrout=False),
+        rtol=2e-14,
+        atol=2e-14,
+    )
+    np.testing.assert_allclose(
+        _vmec_jxbforce_sin_coeffs(f=f, modes=modes, trig=trig),
+        _reference_mode_coeffs(f=f, modes=modes, trig=trig, kind="sin", wrout=False),
+        rtol=2e-14,
+        atol=2e-14,
+    )
+
+    empty = ModeTable(m=np.asarray([], dtype=int), n=np.asarray([], dtype=int))
+    assert _vmec_jxbforce_cos_coeffs(f=f, modes=empty, trig=trig).shape == (2, 0)
+    assert _vmec_jxbforce_sin_coeffs(f=f, modes=empty, trig=trig).shape == (2, 0)
+    with pytest.raises(ValueError, match="shape"):
+        _vmec_jxbforce_cos_coeffs(f=f[0], modes=modes, trig=trig)
+    with pytest.raises(ValueError, match="smaller"):
+        _vmec_jxbforce_sin_coeffs(f=f[:, :2, :], modes=modes, trig=trig)
+    with pytest.raises(ValueError, match="mode limits"):
+        _vmec_jxbforce_cos_coeffs(
+            f=f,
+            modes=ModeTable(m=np.asarray([4]), n=np.asarray([0])),
+            trig=trig,
+        )
+
+
+def test_wrout_nyquist_synthesis_and_chipf_edges():
+    trig = vmec_trig_tables(ntheta=8, nzeta=5, nfp=2, mmax=3, nmax=2, lasym=False, cache=False)
+    modes = ModeTable(m=np.asarray([0, 1, 3, 1]), n=np.asarray([0, 0, -2, -1]))
+    coeff_c = np.asarray([[1.0, -0.5, 0.25, 0.75], [0.1, 0.2, -0.3, 0.4]])
+    coeff_s = np.asarray([[0.0, 0.2, -0.4, 0.6], [0.3, -0.1, 0.5, -0.7]])
+
+    synth = _vmec_wrout_nyquist_synthesis(coeff_c=coeff_c, coeff_s=coeff_s, modes=modes, trig=trig)
+    assert synth.shape == (2, int(trig.ntheta2), 5)
+
+    m = modes.m
+    n = modes.n
+    n_abs = np.abs(n)
+    sgn = np.where(n < 0, -1.0, 1.0)
+    dmult = 0.5 * np.asarray(trig.mscale)[m] * np.asarray(trig.nscale)[n_abs] / float(trig.r0scale) ** 2
+    dmult = np.where((m == 0) | (n == 0), 2.0 * dmult, dmult)
+    raw_c = coeff_c / dmult[None, :]
+    raw_s = coeff_s / dmult[None, :]
+    expected = np.zeros_like(synth)
+    for js in range(coeff_c.shape[0]):
+        for j in range(int(trig.ntheta2)):
+            for k in range(5):
+                for idx, (mi, ni) in enumerate(zip(m, n)):
+                    n1 = abs(int(ni))
+                    sign = -1.0 if ni < 0 else 1.0
+                    cos_basis = trig.cosmu[j, mi] * trig.cosnv[k, n1] + sign * trig.sinmu[j, mi] * trig.sinnv[k, n1]
+                    sin_basis = trig.sinmu[j, mi] * trig.cosnv[k, n1] - sign * trig.cosmu[j, mi] * trig.sinnv[k, n1]
+                    expected[js, j, k] += raw_c[js, idx] * cos_basis + raw_s[js, idx] * sin_basis
+    np.testing.assert_allclose(synth, expected)
+
+    empty = ModeTable(m=np.asarray([], dtype=int), n=np.asarray([], dtype=int))
+    assert _vmec_wrout_nyquist_synthesis(coeff_c=np.zeros((2, 0)), coeff_s=np.zeros((2, 0)), modes=empty, trig=trig).shape == (
+        2,
+        0,
+        0,
+    )
+    with pytest.raises(ValueError, match="shape"):
+        _vmec_wrout_nyquist_synthesis(coeff_c=coeff_c[0], coeff_s=coeff_s, modes=modes, trig=trig)
+    with pytest.raises(ValueError, match="mode limits"):
+        _vmec_wrout_nyquist_synthesis(
+            coeff_c=np.ones((1, 1)),
+            coeff_s=np.ones((1, 1)),
+            modes=ModeTable(m=np.asarray([4]), n=np.asarray([0])),
+            trig=trig,
+        )
+
+    np.testing.assert_allclose(_chipf_from_chips(np.asarray([2.0])), [2.0])
+    np.testing.assert_allclose(_chipf_from_chips(np.asarray([2.0, 4.0])), [4.0, 5.0])
+    np.testing.assert_allclose(_chipf_from_chips(np.asarray([0.0, 2.0, 4.0, 8.0])), [1.0, 3.0, 6.0, 10.0])
+    np.testing.assert_allclose(np.asarray(_chipf_from_chips(jnp.asarray([0.0, 2.0, 4.0, 8.0]))), [1.0, 3.0, 6.0, 10.0])

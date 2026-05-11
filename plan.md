@@ -434,3 +434,17 @@ Acceptance:
   total coverage `64.15%`, runtime about `6:28`. Kept the CI floor at 62%;
   next meaningful target is enough coverage margin to raise the gate directly to
   65% without CI flakiness.
+- 2026-05-10: Added VMEC transform-helper coverage for wrout Nyquist cosine/sine
+  coefficients, jxbforce cosine/sine coefficients, Nyquist synthesis, JAX/NumPy
+  `chipf` edge cases, and pure driver budget/residual helper edge cases. These
+  tests compare vectorized paths against explicit loop formulas using synthetic
+  VMEC trig tables, so they are physics-relevant without running a solve.
+  Verified with
+  `python -m pytest tests/test_wout_helpers.py tests/test_driver_api.py -q`
+  (`57 passed, 1 skipped`) and
+  `ruff check tests/test_driver_api.py tests/test_wout_helpers.py`.
+- 2026-05-10: Re-ran the CI-equivalent fast coverage gate after the transform
+  and driver-helper slice: `450 passed, 21 skipped, 85 deselected`, total
+  coverage `64.66%`, runtime about `6:29`. Raised the CI coverage floor from
+  62% to 64%; keep the next threshold target at 65% only after more meaningful
+  solver/physics-kernel coverage creates a wider margin.
