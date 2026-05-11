@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 
+from vmec_jax.config import VMECConfig
+from vmec_jax.static import build_static
 from vmec_jax.vmec_bcovar import (
     _apply_vmec_lambda_axis_closure,
     _half_mesh_from_even_odd,
     _metric_cross_even_odd,
     _metric_even_odd,
     _pshalf_from_s,
+    vmec_bcovar_half_mesh_from_wout,
 )
 
 
@@ -123,3 +128,67 @@ def test_lambda_axis_closure_noop_when_ns_one():
         )
     )
     np.testing.assert_allclose(out, lsin)
+
+
+def test_circular_axisymmetric_bcovar_pure_toroidal_field_identities():
+    cfg = VMECConfig(
+        mpol=2,
+        ntor=0,
+        ns=4,
+        nfp=1,
+        lasym=False,
+        lthreed=False,
+        lconm1=False,
+        ntheta=12,
+        nzeta=1,
+    )
+    static = build_static(cfg)
+    modes = static.modes
+    idx_m0 = int(np.flatnonzero((modes.m == 0) & (modes.n == 0))[0])
+    idx_m1 = int(np.flatnonzero((modes.m == 1) & (modes.n == 0))[0])
+    ns = int(cfg.ns)
+    nmodes = int(modes.K)
+    s = np.asarray(static.s)
+
+    zeros = np.zeros((ns, nmodes), dtype=float)
+    rcos = zeros.copy()
+    rsin = zeros.copy()
+    zcos = zeros.copy()
+    zsin = zeros.copy()
+    lcos = zeros.copy()
+    lsin = zeros.copy()
+    rcos[:, idx_m0] = 3.0
+    rcos[:, idx_m1] = np.sqrt(s) / np.sqrt(2.0)
+    zsin[:, idx_m1] = np.sqrt(s) / np.sqrt(2.0)
+    state = SimpleNamespace(Rcos=rcos, Rsin=rsin, Zcos=zcos, Zsin=zsin, Lcos=lcos, Lsin=lsin)
+    wout = SimpleNamespace(
+        phipf=np.ones(ns),
+        phips=np.r_[0.0, np.ones(ns - 1)],
+        chipf=np.zeros(ns),
+        iotaf=np.zeros(ns),
+        iotas=np.zeros(ns),
+        signgs=1,
+        nfp=1,
+        mpol=2,
+        ntor=0,
+        lasym=False,
+        flux_is_internal=True,
+        ncurr=0,
+        lcurrent=False,
+        icurv=np.zeros(ns),
+        pres=np.zeros(ns),
+    )
+
+    bc = vmec_bcovar_half_mesh_from_wout(state=state, static=static, wout=wout)
+    pshalf = np.asarray(_pshalf_from_s(static.s))[:, None, None]
+    bsubu_recombined = np.asarray(bc.bsubu_parity_even) + pshalf * np.asarray(bc.bsubu_parity_odd)
+    bsubv_recombined = np.asarray(bc.bsubv_parity_even) + pshalf * np.asarray(bc.bsubv_parity_odd)
+
+    np.testing.assert_allclose(np.asarray(bc.guv), 0.0, rtol=0.0, atol=1.0e-13)
+    np.testing.assert_allclose(np.asarray(bc.bsupu), 0.0, rtol=0.0, atol=1.0e-13)
+    np.testing.assert_allclose(np.asarray(bc.bsubu), 0.0, rtol=0.0, atol=1.0e-13)
+    np.testing.assert_allclose(np.asarray(bc.bsubu), bsubu_recombined, rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(np.asarray(bc.bsubv), bsubv_recombined, rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(np.asarray(bc.bsupu * bc.bsubu + bc.bsupv * bc.bsubv)[1:], 4.0, rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(np.asarray(bc.bsq)[0], 0.0, rtol=0.0, atol=1.0e-13)
+    np.testing.assert_allclose(np.asarray(bc.bsq)[1:], 2.0, rtol=1.0e-13, atol=1.0e-13)

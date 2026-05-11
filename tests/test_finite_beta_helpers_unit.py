@@ -1184,6 +1184,36 @@ def _extend_parity_to_full_numpy(*, par0, par1, trig):
     return full
 
 
+def test_mercier_symoutput_split_separates_vmec_reflection_parity():
+    trig = vmec_trig_tables(ntheta=8, nzeta=5, nfp=2, mmax=2, nmax=2, lasym=True, cache=False)
+    nt2 = int(trig.ntheta2)
+    nt3 = int(trig.ntheta3)
+    nzeta = 5
+    theta = 2.0 * np.pi * np.arange(nt3, dtype=float) / float(trig.ntheta1)
+    zeta = 2.0 * np.pi * np.arange(nzeta, dtype=float) / float(nzeta)
+    radial = np.asarray([1.0, 1.3], dtype=float)[:, None, None]
+    cos_theta = np.cos(theta)[None, :, None]
+    sin_theta = np.sin(theta)[None, :, None]
+    cos_zeta = np.cos(zeta)[None, None, :]
+    sin_zeta = np.sin(zeta)[None, None, :]
+
+    sym_full = radial * (1.0 + 0.20 * cos_theta + 0.05 * cos_zeta + 0.03 * cos_theta * cos_zeta)
+    asym_full = radial * (0.11 * sin_theta + 0.07 * sin_zeta + 0.04 * sin_theta * cos_zeta)
+    full = sym_full + asym_full
+
+    sym, asym = finite_beta._mercier_symoutput_split_jax(f=full, trig=trig)
+    reversed_sym, reversed_asym = finite_beta._mercier_symoutput_split_jax(
+        f=full,
+        trig=trig,
+        reversed_sym=True,
+    )
+
+    np.testing.assert_allclose(np.asarray(sym), sym_full[:, :nt2, :], rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(np.asarray(asym), asym_full[:, :nt2, :], rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(np.asarray(reversed_sym), asym_full[:, :nt2, :], rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(np.asarray(reversed_asym), sym_full[:, :nt2, :], rtol=1.0e-13, atol=1.0e-13)
+
+
 def _mercier_bsubs_derivatives_lasym_true_numpy_reference(
     *,
     bsubs,
