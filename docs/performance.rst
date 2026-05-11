@@ -742,10 +742,14 @@ standalone verification runs can still use the VMEC input-deck ``NITER_ARRAY`` /
 ``FTOL_ARRAY``.
 
 Replay and preconditioner JIT helper caches are retained across accepted points
-and LRU-bounded.  Call ``FixedBoundaryExactOptimizer.clear_caches()`` to release
-compiled replay helpers explicitly after a long optimization batch.  The
-optimizer still clears heavyweight exact tapes between SciPy callbacks where
-needed to avoid RSS growth.
+and LRU-bounded.  ``VMEC_JAX_SCAN_RUNNER_CACHE_SIZE`` and
+``VMEC_JAX_COMPUTE_FORCES_CACHE_SIZE`` default to ``32`` entries;
+``VMEC_JAX_STRICT_UPDATE_CACHE_SIZE`` defaults to ``16`` entries.  Set any of
+these to ``0`` to disable in-process retention when profiling RSS growth.  Call
+``FixedBoundaryExactOptimizer.clear_caches()`` to release compiled replay
+helpers explicitly after a long optimization batch.  The optimizer still clears
+heavyweight exact tapes between SciPy callbacks where needed to avoid RSS
+growth.
 
 The same exact ``Jv``/``J.Tv`` products can be used in SciPy's trust-region
 least-squares solver with ``method="scipy_matrix_free"``:
