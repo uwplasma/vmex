@@ -288,6 +288,39 @@ The vmec_jax version is self-contained (no Fortran binary, no subprocess),
 runs in a single Python process, and produces a more accurate result in fewer
 effective evaluations.
 
+Optional local SIMSOPT checks
+-----------------------------
+
+SIMSOPT comparisons are optional integration checks, not required PR gates.
+They are intended for developers who have SIMSOPT installed locally and want to
+verify shared formulas or reproduce cross-backend optimization diagnostics.
+
+Formula-level checks can be run with:
+
+.. code-block:: bash
+
+   RUN_SIMSOPT_VALIDATION=1 pytest -q tests/test_simsopt_optional_validation.py
+   pytest -q tests/test_redl_bootstrap_simsopt_parity.py
+   pytest -q tests/test_finite_beta_helpers_unit.py -k simsopt
+
+The dedicated SIMSOPT validation test is additionally gated by
+``RUN_SIMSOPT_VALIDATION=1`` so that required CI remains independent of a local
+SIMSOPT checkout.  These tests use ``pytest.importorskip`` for SIMSOPT modules,
+so they skip when SIMSOPT is not installed.  They may also skip if optional
+runtime dependencies such as ``jax`` or ``netCDF4`` are unavailable.
+
+The heavier optimization comparison script is local-only by default:
+
+.. code-block:: bash
+
+   python examples/optimization/compare_omnigenity_qs_mode1.py
+
+That script writes summaries under its configured output directory and catches
+SIMSOPT-side failures into a failure JSON so the vmec_jax leg can still be
+inspected.  Do not put this workflow in required CI; if CI coverage is desired,
+run it from a scheduled/manual job with a pinned SIMSOPT environment and the
+VMEC2000 executable available through SIMSOPT.
+
 
 Practical guidance: when to use which
 ---------------------------------------

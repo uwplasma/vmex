@@ -157,14 +157,17 @@ def _patch_indata(text: str, *, updates: dict[str, str]) -> str:
     return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
 
 
-def _default_exec_candidates(root: Path) -> list[Path]:
-    return [
+def _default_exec_candidates(root: Path, *, include_user_bin: bool = True) -> list[Path]:
+    candidates = [
         root / "STELLOPT" / "VMEC2000" / "Release" / "xvmec2000",
         # Common local layout: STELLOPT cloned next to vmec_jax.
         root.parent / "STELLOPT" / "VMEC2000" / "Release" / "xvmec2000",
         root / "vmec2000" / "build" / "xvmec2000",
         root / "vmec2000" / "build" / "Release" / "xvmec2000",
     ]
+    if include_user_bin:
+        candidates.append(Path.home() / "bin" / "xvmec2000")
+    return candidates
 
 
 def find_vmec2000_exec(*, root: Path | None = None) -> Path | None:
@@ -174,7 +177,7 @@ def find_vmec2000_exec(*, root: Path | None = None) -> Path | None:
         if p.exists():
             return p
     base = root or Path(__file__).resolve().parents[2]
-    for cand in _default_exec_candidates(base):
+    for cand in _default_exec_candidates(base, include_user_bin=root is None):
         if cand.exists():
             return cand
     return None

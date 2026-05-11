@@ -190,6 +190,51 @@ The manifest covers: fixed-boundary axisymmetric and non-axisymmetric,
 ``lasym=False`` and ``lasym=True``, free-boundary axisymmetric and
 non-axisymmetric.
 
+Optional VMEC2000 executable checks
+-----------------------------------
+
+The default required test suite does not need a local VMEC2000 build.  It uses
+bundled ``wout`` references and should be run during routine development with:
+
+.. code-block:: bash
+
+   pytest -q -m "not full and not vmec2000"
+   RUN_FULL=1 pytest tests/test_wout_comprehensive_parity.py -v
+
+Direct executable comparisons are opt-in because they require a VMEC2000
+Fortran executable, and some checks also require ``mpi4py`` and the VMEC2000
+Python extension.  A local run looks like:
+
+.. code-block:: bash
+
+   VMEC2000_EXEC=/path/to/xvmec2000 \
+   VMEC2000_INTEGRATION=1 \
+   pytest -q -m vmec2000
+
+The fastest executable-backed validation module is:
+
+.. code-block:: bash
+
+   VMEC2000_EXEC=/path/to/xvmec2000 \
+   VMEC2000_INTEGRATION=1 \
+   pytest -q tests/test_vmec2000_exec_fast_validation.py
+
+For a short CLI comparison against the executable:
+
+.. code-block:: bash
+
+   VMEC2000_EXEC=/path/to/xvmec2000 \
+   VMEC2000_INTEGRATION=1 \
+   VMEC2000_CLI_NITER=5 \
+   pytest -q tests/test_cli_vmec2000_exec.py
+
+Skip behavior is intentional.  Tests marked ``vmec2000`` skip unless
+``VMEC2000_INTEGRATION=1`` is set.  They also skip, rather than fail, when the
+VMEC2000 executable, VMEC2000 Python extension, ``mpi4py``, ``netCDF4``, an
+input deck, or a VMEC2000-produced ``wout`` is unavailable.  Required PR CI
+therefore excludes ``vmec2000`` tests; optional scheduled/manual CI can enable
+them after installing VMEC2000 and exporting ``VMEC2000_EXEC``.
+
 VMECPlot2 compatibility
 -----------------------
 
