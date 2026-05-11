@@ -2046,23 +2046,6 @@ class FixedBoundaryExactOptimizer:
             empty = _jnp.zeros((0, int(self._layout.size)), dtype=_jnp.float64)
             return state, empty
 
-        axis_override = {
-            key: _jnp.asarray(value, dtype=params.dtype)
-            for key, value in payload["axis_override"].items()
-        }
-
-        def _initial_state_packed(p):
-            bdy = self._boundary_from_params(p)
-            s0 = _ig(
-                self._static,
-                bdy,
-                self._indata,
-                vmec_project=True,
-                axis_override=axis_override,
-            )
-            return _jnp.asarray(pack_state(s0), dtype=_jnp.float64)
-
-        directions = _jnp.eye(int(params.size), dtype=params.dtype)
         t_initial = time.perf_counter()
         cache_key = self._initial_tangent_cache_key(params)
         initial_tangents = (
@@ -2071,6 +2054,23 @@ class FixedBoundaryExactOptimizer:
             else None
         )
         if initial_tangents is None:
+            axis_override = {
+                key: _jnp.asarray(value, dtype=params.dtype)
+                for key, value in payload["axis_override"].items()
+            }
+
+            def _initial_state_packed(p):
+                bdy = self._boundary_from_params(p)
+                s0 = _ig(
+                    self._static,
+                    bdy,
+                    self._indata,
+                    vmec_project=True,
+                    axis_override=axis_override,
+                )
+                return _jnp.asarray(pack_state(s0), dtype=_jnp.float64)
+
+            directions = _jnp.eye(int(params.size), dtype=params.dtype)
             _, initial_state_linear = jax.linearize(_initial_state_packed, params)
             initial_tangents = jax.vmap(initial_state_linear)(directions)
             if cache_key is not None:

@@ -118,14 +118,25 @@ warm runtimes competitive with or faster than VMEC2000 on CPU:
   ``VMEC_JAX_GPU_PREALLOCATE=1`` before import to keep JAX's preallocation
   default.
 
-**13. Fused accelerator update step**
+**13. Tape exact default**
+  Accepted-point exact optimizer callbacks use the discrete-adjoint tape path by
+  default on both CPU and GPU.  The scan exact path is still available through
+  ``VMEC_JAX_OPT_EXACT_PATH=scan`` for targeted profiling and parity studies, but
+  it is not the GPU default.
+
+**14. Scan trial residuals**
+  Relaxed trial residual solves in optimization loops use the trace-compatible
+  scan forward path by default.  Set ``VMEC_JAX_OPT_TRIAL_SCAN=0`` only when
+  comparing against the older non-scan trial path.
+
+**15. Fused accelerator update step**
   The exact optimizer's strict fixed-boundary accepted-point solve uses a
   cached JIT helper for the velocity/state update on non-CPU backends.  This
   removes many small eager GPU dispatches per VMEC iteration while leaving the
   CPU host-update path unchanged.  Set ``VMEC_JAX_JIT_STRICT_UPDATE=0`` only
   for diagnostics.
 
-**14. Residual-derived accepted-point history**
+**16. Residual-derived accepted-point history**
   For standard QS residual factories, accepted-point Jacobian callbacks
   reconstruct aspect-ratio and QS history metrics directly from the cached
   residual vector.  This avoids a second accepted-point solve after every
@@ -536,9 +547,10 @@ versus accepted-point optimization replay:
      - cached scalar cotangent and replay
 
 Those numbers are perturbed accepted-point repeats with warm compiled helper
-shapes, ``inner_max_iter`` of 40--80, and relaxed ``ftol`` appropriate for
-profiling.  They are not full production optimization timings.  The scalar
-reverse-adjoint gradient now uses a cached JIT scalar-objective cotangent hook
+shapes, ``inner_max_iter`` of 40--80, relaxed ``ftol`` appropriate for
+profiling, and the default tape exact path unless explicitly marked otherwise.
+They are not full production optimization timings.  The scalar reverse-adjoint
+gradient now uses a cached JIT scalar-objective cotangent hook
 for the built-in QS residual factories rather than VJP-ing the full residual
 vector from Python on every callback.  That reduced the QA ``max_mode=1`` GPU
 gradient callback from about ``9.8 s`` to ``4.6 s`` after warmup, and reduced

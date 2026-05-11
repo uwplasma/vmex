@@ -468,10 +468,13 @@ this reruns the current README-best QA row:
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa --modes 3 --ess on --rerun
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
-The GPU rows run through the same exact/replay path as CPU with GPU-calibrated
-optimizer budgets.  If you need a short diagnostic matrix, append
-``--diagnostic-budgets``; otherwise the script uses calibrated production
-budgets and records any non-converged case as a normal ``max_nfev`` stop.
+The GPU rows run through the same accepted-point tape exact/replay path as CPU
+with GPU-calibrated optimizer budgets; vmec_jax does not silently switch GPU
+optimization callbacks to CPU or to scan exact.  If you need a short diagnostic
+matrix, append ``--diagnostic-budgets``; otherwise the script uses calibrated
+production budgets and records any non-converged case as a normal ``max_nfev``
+stop.  Force ``VMEC_JAX_OPT_EXACT_PATH=scan`` only for a targeted scan-exact
+profiling or parity experiment.
 
 .. code-block:: bash
 
@@ -612,7 +615,8 @@ public-API QI lane from the parameter study:
 
 The study compared direct versus repeated-stage continuation, QP pre-seeding,
 aspect-ratio weights, mirror/elongation soft-wall weights, QI branch-width
-weights, the branch-shuffle profile residual, and termination tolerances against the nfp=2
+weights, the branch-shuffle profile residual, ``phimin`` well-interval choices,
+and termination tolerances against the nfp=2
 ``examples/data/input.nfp2_QI`` seed.  The robust lane is repeated same-mode
 continuation at ``max_mode = 3`` with ESS, ``target_aspect = 5.0``,
 ``abs(mean_iota) >= 0.41``, ``branch_width_weight = 0.5``,
@@ -645,18 +649,26 @@ because the smooth QI residual is a differentiable proxy for the legacy branch
 diagnostic.  The public audit helpers are ``vj.QIDiagnosticOptions``,
 ``vj.qi_diagnostics_from_boozer_output``, and
 ``vj.qi_diagnostics_from_state``; they return one unweighted record with smooth
-QI, legacy branch, mirror-ratio, elongation, optional ``LgradB``, and
-resolution metadata.  Treat the standalone QI script as a candidate generator,
-then run the following validation ladder before promoting a result.
+QI, raw QI, legacy branch, mirror-ratio, elongation, optional ``LgradB``,
+resolution metadata, and diagnostic error fields.  Treat the standalone QI
+script as a candidate generator, then run the following validation ladder before
+promoting a result.
 
 1. Confirm the objective definition on the seed and any final candidate.  The
-   diagnostic compares smooth QI variants, mirror ratio, elongation, ``phimin``
-   shifts, and optionally the reference omnigenity implementation:
+   diagnostics compare smooth QI variants, component totals, mirror ratio,
+   elongation, ``phimin`` shifts, and optionally the reference omnigenity
+   implementation:
 
    .. code-block:: bash
 
+      PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_objective_component_report.py
       PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/compare_omnigenity_qi_objective.py
       VMEC_JAX_RUN_REFERENCE_OMNIGENITY=1 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/compare_omnigenity_qi_objective.py
+
+   ``qi_objective_component_report.py`` is intentionally cheap: it does not run
+   VMEC or BOOZ_XFORM.  It uses controlled synthetic Boozer spectra to verify
+   that the differentiable smooth-QI surrogate ranks QI-like, mixed, and
+   QH-like spectra in the same order as the legacy branch-shuffle diagnostic.
 
 2. Run the constrained QI matrix before declaring a best policy.  This keeps
    direct QI, repeated same-mode continuation, ESS, and QP-preseed rows
@@ -680,7 +692,7 @@ then run the following validation ladder before promoting a result.
 
    .. code-block:: bash
 
-      pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_booz_input.py
+      pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_qi_objective_component_report.py tests/test_booz_input.py
       pytest -q tests/test_optimization_examples.py -k "qi or LeastSquaresProblem"
 
 5. For parity-grade QI validation, compare against a local VMEC2000 executable

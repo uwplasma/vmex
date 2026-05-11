@@ -49,8 +49,8 @@ the recommended local escalation path.
        rendering docs.
    * - QI objective checks
      - ``pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_booz_input.py``
-     - After changing QI diagnostics, Boozer input handling, or smooth-QI
-       residual settings.
+     - After changing QI diagnostics, Boozer input handling, smooth-QI residual
+       settings, or first-class QI diagnostic record fields.
    * - Bounded physics smoke
      - ``RUN_FULL=1 pytest -q tests/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[circular_tokamak] tests/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[nfp4_QH_warm_start] tests/test_driver_api.py::test_run_free_boundary_smoke_on_bundled_small_case``
      - Before merging solver changes that affect fixed/free-boundary physics.
@@ -175,7 +175,17 @@ Optimization gates:
   tuple ``weight`` means a residual multiplier of ``sqrt(weight)``.
 - QI workflow tests should cover routing of ``QuasiIsodynamicResidual`` terms,
   rejection of invalid nonzero QI targets, and compatibility of smooth QI
-  metrics with the legacy branch-ranking diagnostics.
+  metrics with the legacy branch-ranking diagnostics.  The cheap synthetic
+  Boozer ranking guard is
+  ``pytest -q tests/test_qi_objective_component_report.py``; it must stay fast
+  enough to run in ordinary PR checks.
+- QI diagnostic-record tests should keep smooth/raw/legacy QI totals,
+  mirror-ratio, elongation, optional ``LgradB``, resolution metadata, and
+  diagnostic error fields stable enough for sweep renderers and downstream audit
+  scripts.
+- GPU optimization tests should assert the device-aware defaults separately:
+  accepted-point exact callbacks default to tape on CPU and GPU, while relaxed
+  trial residuals default to scan unless ``VMEC_JAX_OPT_TRIAL_SCAN=0`` is set.
 - Full optimization sweeps are not required PR tests; they remain generated
   benchmark artifacts documented in :doc:`optimization_sweep_results`.
 

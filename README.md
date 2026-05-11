@@ -109,8 +109,10 @@ JAX/JAXLIB versions.
 
 For the current small/medium fixed-boundary examples, CPU is often faster after
 JIT warmup. GPU support is production-enabled and useful to profile, but the
-exact optimizer now uses GPU-specific scan exact callbacks only when a GPU is
-actually selected. See the performance guide for current CPU/GPU timings and
+exact optimizer defaults accepted-point Jacobians to the discrete-adjoint tape
+path on both CPU and GPU. The scan exact path is an explicit diagnostic override
+via `VMEC_JAX_OPT_EXACT_PATH=scan`; relaxed trial residuals use the scan forward
+path by default. See the performance guide for current CPU/GPU timings and
 profiling commands.
 
 ## Showcase (single-grid)

@@ -920,6 +920,52 @@ def test_initial_tangent_cache_key_tracks_vmec_flip_branch():
     assert flip[1] is True
 
 
+def test_state_tangent_columns_cache_hit_skips_initial_linearization_setup(monkeypatch):
+    import vmec_jax.discrete_adjoint as discrete_adjoint
+
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._layout = SimpleNamespace(size=3)
+    opt._static = object()
+    opt._profile = {}
+    opt._initial_tangent_cache = {"cached": jnp.asarray([[1.0, 2.0, 3.0]])}
+    opt._initial_tangent_cache_key = lambda _params: "cached"
+    opt._solve_exact_with_tape = lambda _params, return_payload=False: (
+        "state",
+        {
+            "tape": "tape",
+            # This would fail if the cache-hit path still converted the axis
+            # override while setting up an unused initial-state linearization.
+            "axis_override": {"bad": object()},
+        },
+    )
+    opt._boundary_from_params = lambda _params: (_ for _ in ()).throw(
+        AssertionError("cache hit should not rebuild the boundary")
+    )
+    opt._lasym_replay_column_chunk = lambda _n_params: None
+
+    calls = []
+
+    def fake_replay_columns(*, tape, static, initial_tangents, rebuild_preconditioner, column_chunk):
+        calls.append((tape, static, bool(rebuild_preconditioner), column_chunk))
+        return jnp.asarray(initial_tangents) + 1.0
+
+    monkeypatch.setattr(
+        discrete_adjoint,
+        "checkpoint_tape_state_jvp_columns",
+        fake_replay_columns,
+    )
+
+    state, final_tangents = opt._state_and_tangent_columns(
+        np.asarray([0.0]),
+        profile_prefix="jacobian",
+    )
+
+    assert state == "state"
+    np.testing.assert_allclose(np.asarray(final_tangents), [[2.0, 3.0, 4.0]])
+    assert calls == [("tape", opt._static, True, None)]
+    assert opt._profile["jacobian_initial_tangents_cache_hit"]["count"] == 1
+
+
 def test_gauss_newton_damped_fallback_recovers_from_oversized_step():
     """Damping should rescue cases where the raw GN step is unusably large."""
 
