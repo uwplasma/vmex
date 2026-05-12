@@ -28,6 +28,8 @@ from .boundary import boundary_from_input_convention, boundary_input_from_indata
 from .booz_input import booz_xform_inputs_from_state
 from .field import b_cartesian_from_state, signgs_from_sqrtg
 from .energy import flux_profiles_from_indata
+from .finite_beta import magnetic_well_from_state
+from .optimization_workflow import DMerc, MagneticWell
 from .quasi_isodynamic import (
     lgradb_from_state,
     lgradb_penalty_from_state,
@@ -106,6 +108,9 @@ __all__ = [
     "b_cartesian_from_state",
     "signgs_from_sqrtg",
     "flux_profiles_from_indata",
+    "magnetic_well_from_state",
+    "MagneticWell",
+    "DMerc",
     # Visualization helpers
     "export_vtk_surface_and_fieldline",
     # Low-friction wout access for plotting

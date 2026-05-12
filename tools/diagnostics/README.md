@@ -24,6 +24,12 @@ Common parity/validation scripts (moved from `examples/validation/`):
 - `axisym_first_step_diagnostics.py`
 - `parity_sweep_manifest.py` + `parity_manifest.toml` (fixed/free boundary matrix)
 
+Performance profiling:
+
+- `profile_exact_optimizer.py --callback jacobian --perturb-scale ...`
+  measures accepted-point optimizer callback phases, optimizer/global cache
+  growth, RSS growth, and JSON budget status for CPU/GPU production profiling.
+
 Free-boundary manifest notes:
 
 - each free-boundary case can define quantitative pass/fail limits via

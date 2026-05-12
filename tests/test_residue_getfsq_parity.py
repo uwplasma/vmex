@@ -20,7 +20,6 @@ from vmec_jax.vmec_forces import (
 )
 from vmec_jax.vmec_tomnsp import TomnspsRZL, vmec_angle_grid, vmec_trig_tables
 from vmec_jax.wout import read_wout, state_from_wout
-pytestmark = pytest.mark.full
 
 
 def _resolve_wout(root: Path, wout_rel: str) -> Path:
@@ -37,12 +36,31 @@ def _resolve_wout(root: Path, wout_rel: str) -> Path:
 @pytest.mark.parametrize(
     "case_name,input_rel,wout_rel,rtol_rz,rtol_l",
     [
-        # Keep CI fast: one axisymmetric reference case is enough to catch
-        # convention regressions in the scalar residual pipeline.
-        ("circular_tokamak", "examples/data/input.circular_tokamak", "examples/data/wout_circular_tokamak_reference.nc", 1e-3, 1e-4),
+        # Required CI gate: small VMEC2000 references that exercise the scalar
+        # residual path without launching a full solve or external executable.
+        (
+            "circular_tokamak",
+            "examples/data/input.circular_tokamak",
+            "examples/data/wout_circular_tokamak_reference.nc",
+            5e-4,
+            1e-4,
+        ),
+        (
+            "shaped_tokamak_pressure",
+            "examples/data/input.shaped_tokamak_pressure",
+            "examples/data/wout_shaped_tokamak_pressure_reference.nc",
+            5e-5,
+            1e-4,
+        ),
     ],
 )
 def test_getfsq_parity_against_wout(case_name: str, input_rel: str, wout_rel: str, rtol_rz: float, rtol_l: float):
+    """Recompute VMEC2000 force residual scalars from bundled solved equilibria.
+
+    This is a required, no-executable parity gate. It protects the internal
+    ``bcovar -> forces -> tomnsps -> getfsq`` pipeline against VMEC2000's
+    stored ``fsqr/fsqz/fsql`` values on small axisymmetric fixtures.
+    """
     pytest.importorskip("netCDF4")
 
     root = Path(__file__).resolve().parents[1]
@@ -65,7 +83,7 @@ def test_getfsq_parity_against_wout(case_name: str, input_rel: str, wout_rel: st
         lasym=bool(wout.lasym),
     )
 
-    k = vmec_forces_rz_from_wout(state=st, static=static, wout=wout, indata=indata, use_wout_bsup=True)
+    k = vmec_forces_rz_from_wout(state=st, static=static, wout=wout, indata=indata, use_wout_bsup=False)
     rzl = vmec_residual_internal_from_kernels(k, cfg_ntheta=int(cfg.ntheta), cfg_nzeta=int(cfg.nzeta), wout=wout, trig=trig)
     frzl = TomnspsRZL(
         frcc=rzl.frcc,

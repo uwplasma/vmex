@@ -1139,6 +1139,29 @@ def finite_beta_scalars_from_state(*, state, static, indata, signgs: int) -> dic
     }
 
 
+def magnetic_well_from_vp(vp) -> Any:
+    """Return the VMEC/SIMSOPT magnetic-well proxy from half-mesh ``vp``.
+
+    The convention is ``(dV/ds(0) - dV/ds(1)) / dV/ds(0)`` using linear
+    endpoint extrapolations from the half-mesh volume derivative.  Positive
+    values correspond to a favorable magnetic well.
+    """
+    vp = jnp.abs(jnp.asarray(vp, dtype=jnp.float64))
+    dvol = vp[1:]
+    if int(dvol.shape[0]) < 2:
+        return jnp.asarray(0.0, dtype=jnp.float64)
+    dvol_s0 = 1.5 * dvol[0] - 0.5 * dvol[1]
+    dvol_s1 = 1.5 * dvol[-1] - 0.5 * dvol[-2]
+    dvol_s0_safe = jnp.where(dvol_s0 != 0.0, dvol_s0, jnp.asarray(1.0, dtype=dvol.dtype))
+    return jnp.where(dvol_s0 != 0.0, (dvol_s0 - dvol_s1) / dvol_s0_safe, 0.0)
+
+
+def magnetic_well_from_state(*, state, static, indata, signgs: int) -> Any:
+    """Return the differentiable VMEC magnetic-well proxy for an equilibrium."""
+    scalars = finite_beta_scalars_from_state(state=state, static=static, indata=indata, signgs=int(signgs))
+    return magnetic_well_from_vp(scalars["vp"])
+
+
 def finite_beta_global_residuals_from_state(
     *,
     state,

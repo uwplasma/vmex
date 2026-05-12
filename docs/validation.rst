@@ -49,6 +49,21 @@ fetched once::
 Automated parity tests
 ----------------------
 
+Required CI includes a no-executable residual parity gate:
+
+.. code-block:: bash
+
+   JAX_ENABLE_X64=1 pytest -q tests/test_residue_getfsq_parity.py tests/test_vmec2000_exec_threed1.py
+
+``tests/test_residue_getfsq_parity.py`` reads small bundled VMEC2000 ``wout``
+files, reconstructs the solved state, recomputes the
+``bcovar -> forces -> tomnsps -> getfsq`` scalar-residual path, and compares
+``fsqr``, ``fsqz``, and ``fsql`` to the VMEC2000-stored values.  It currently
+covers ``circular_tokamak`` and ``shaped_tokamak_pressure`` without running
+VMEC2000 or a full ``vmec_jax`` solve.  ``tests/test_vmec2000_exec_threed1.py``
+keeps the executable trace parser covered with a bundled ``threed1`` fixture
+when ``xvmec2000`` is absent from CI.
+
 The test suite runs ``vmec_jax`` end-to-end and compares every standard
 ``wout`` field against the VMEC2000 references.  Run with:
 
@@ -167,10 +182,19 @@ full sweep, add a dry-run prefine manifest:
 
 The manifest records top-ranked seeds plus one best-ranked representative from
 each available seed family, hard-capped QI-only prefine settings, expected
-output files, and exact commands for running one tiny probe at a time.  Use
-``--prefine-probes run`` only when deliberately executing those capped probes.
-Prefine probe manifests also record whether ``include_bounce_endpoints`` is
-enabled, so seed ranking and the tiny QI-only probe use the same smooth metric.
+output files, and exact commands for running one tiny probe at a time.  The
+default probe is now a bounded repeated-stage continuation,
+``--prefine-stage-modes 1,1,2,2,3``, with explicit per-stage and total
+``nfev`` caps recorded in the manifest.  Each plan also records the selected
+``phimin`` value, its source, the endpoint mode, and the QI options used by the
+probe.
+Use ``--prefine-probes run --prefine-reviewed`` only after reviewing the
+manifest and deliberately executing those capped probes.  Unless explicitly
+overridden, prefine probes inherit the audit endpoint setting and record the
+alignment in the manifest; by default this is
+``endpoint_mode=include_bounce_endpoints``.  Passing
+``--no-prefine-include-bounce-endpoints`` is an explicit interior-level
+ablation, not the seed-robustness default.
 By default the audit uses ``--phimin-policy well-phase``: each seed is scored at
 both ``phimin=0`` and ``phimin=pi/nfp`` and the better QI well phase is used for
 ranking and prefine planning.  Use ``--phimin-policy fixed --phimin VALUE`` when

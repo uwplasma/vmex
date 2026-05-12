@@ -151,6 +151,59 @@ def test_finite_beta_scalars_from_state_uses_iota_and_energy_diagnostics(monkeyp
     assert float(scalars["volume"]) == 4.0
 
 
+def test_magnetic_well_from_vp_uses_vmec_endpoint_extrapolation():
+    vp = jnp.asarray([0.0, 2.0, 1.5, 1.0], dtype=jnp.float64)
+
+    well = finite_beta.magnetic_well_from_vp(vp)
+
+    np.testing.assert_allclose(np.asarray(well), 2.0 / 3.0)
+    np.testing.assert_allclose(np.asarray(finite_beta.magnetic_well_from_vp([1.0, 2.0])), 0.0)
+    np.testing.assert_allclose(np.asarray(finite_beta.magnetic_well_from_vp([0.0, 1.0, 3.0])), 0.0)
+
+
+def test_magnetic_well_from_vp_is_differentiable():
+    import jax
+
+    def objective(scale):
+        vp = jnp.asarray([0.0, 1.0 + scale, 0.9, 0.8], dtype=jnp.float64)
+        return finite_beta.magnetic_well_from_vp(vp)
+
+    value, grad = jax.value_and_grad(objective)(jnp.asarray(0.2, dtype=jnp.float64))
+
+    assert np.isfinite(np.asarray(value))
+    assert np.isfinite(np.asarray(grad))
+    assert abs(float(np.asarray(grad))) > 0.0
+
+
+def test_magnetic_well_from_state_uses_finite_beta_vp(monkeypatch):
+    captured = {}
+
+    def _fake_scalars_from_state(**kwargs):
+        captured.update(kwargs)
+        return {"vp": jnp.asarray([0.0, 2.0, 1.5, 1.0], dtype=jnp.float64)}
+
+    monkeypatch.setattr(finite_beta, "finite_beta_scalars_from_state", _fake_scalars_from_state)
+
+    well = finite_beta.magnetic_well_from_state(
+        state="state",
+        static="static",
+        indata="indata",
+        signgs=-1,
+    )
+
+    assert captured == {"state": "state", "static": "static", "indata": "indata", "signgs": -1}
+    np.testing.assert_allclose(np.asarray(well), 2.0 / 3.0)
+
+
+def test_magnetic_well_helpers_are_public_exports():
+    import vmec_jax as vj
+    from vmec_jax import api
+
+    np.testing.assert_allclose(np.asarray(vj.magnetic_well_from_vp([0.0, 2.0, 1.5, 1.0])), 2.0 / 3.0)
+    assert vj.magnetic_well_from_state is finite_beta.magnetic_well_from_state
+    assert api.magnetic_well_from_state is finite_beta.magnetic_well_from_state
+
+
 def test_finite_beta_global_residuals_apply_one_sided_constraints(monkeypatch):
     def _fake_scalars_from_state(**_kwargs):
         return {

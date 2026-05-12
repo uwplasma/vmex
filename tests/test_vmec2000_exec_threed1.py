@@ -4,26 +4,28 @@ from pathlib import Path
 
 import numpy as np
 
-from vmec_jax.vmec2000_exec import flatten_threed1, threed1_fsq_total
+from tools.diagnostics.vmec2000_exec_stage_trace_compare import _parse_vmec2000_threed1
 
 
-def test_parse_threed1_trace_smoke() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    threed1_path = repo_root / "threed1.circular_tokamak"
-    if not threed1_path.exists():
-        return
+def test_parse_bundled_threed1_trace_compares_physical_and_preconditioned_fsq() -> None:
+    fixture = Path(__file__).resolve().parent / "fixtures" / "vmec2000_threed1_short_trace.txt"
+    stages = _parse_vmec2000_threed1(fixture)
 
-    from vmec_jax.vmec2000_exec import _parse_vmec2000_threed1  # local import for test visibility
+    assert [stage.ns for stage in stages] == [13, 25]
+    assert [stage.niter for stage in stages] == [2, 3]
+    np.testing.assert_allclose([stage.ftolv for stage in stages], [1e-10, 1e-12])
+    assert [len(stage.rows) for stage in stages] == [2, 2]
 
-    import vmec_jax.vmec2000_exec as vx
+    rows = [row for stage in stages for row in stage.rows]
+    fsq_physical = np.asarray([row.fsqr + row.fsqz + row.fsql for row in rows])
+    fsq_preconditioned = np.asarray([row.fsqr1 + row.fsqz1 + row.fsql1 for row in rows])
 
-    text = threed1_path.read_text()
-    if not any(vx._RE_STAGE.match(line) for line in text.splitlines()):
-        return
-    stages = _parse_vmec2000_threed1(threed1_path)
-    assert stages, "expected at least one stage in threed1"
-    rows = flatten_threed1(stages)
-    assert rows, "expected at least one iteration row"
-    fsq = threed1_fsq_total(rows)
-    assert fsq.size == len(rows)
-    assert np.all(np.isfinite(fsq[:5]))
+    np.testing.assert_allclose(fsq_physical, [3.534e-2, 3.03e-3, 1.77e-3, 1.14e-3])
+    np.testing.assert_allclose(fsq_preconditioned, [1.0167e-1, 9.06e-3, 1.104e-2, 5.01e-3])
+    assert rows[0].r00 == 1.234
+    assert rows[0].w == 7.89
+    assert rows[2].r00 == 1.236
+    assert rows[2].w == 7.7
+    assert np.all(np.isfinite(fsq_physical))
+    assert fsq_physical[1] < fsq_physical[0]
+    assert fsq_physical[3] < fsq_physical[2]

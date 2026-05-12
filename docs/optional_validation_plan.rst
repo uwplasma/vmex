@@ -117,8 +117,11 @@ Before running even tiny optimizer probes, write a dry-run manifest:
      --prefine-manifest results/qi_seed_audit/prefine_manifest.json
 
 This manifest is the review artifact.  It lists selected rows, hard caps,
-expected output files, and exact commands.  Only after review should a local
-operator use ``--prefine-probes run``.
+expected output files, exact commands, selected ``phimin`` values, endpoint
+mode, and the repeated-stage prefine plan.  The default prefine plan is capped
+at ``--prefine-stage-modes 1,1,2,2,3`` with per-stage and total ``nfev`` caps
+recorded for each selected seed.  Only after review should a local operator use
+``--prefine-probes run --prefine-reviewed``.
 
 Optional external lanes
 -----------------------
@@ -156,7 +159,8 @@ The next parity gates are:
 
 - Add one small solved-state QI fixture around ``qi_diagnostics_from_state``
   before making optimizer seed-robustness claims.
-- Run reviewed family-prefine probes across QI, QP, QH, QA, and simple seeds.
+- Run reviewed repeated-stage family-prefine probes across QI, QP, QH, QA, and
+  simple seeds.
 - Keep VMEC2000 executable smoke green before broadening the executable-backed
   manifest matrix.
 - Keep SIMSOPT formula-level comparisons green where SIMSOPT is installed.

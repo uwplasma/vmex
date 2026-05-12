@@ -61,6 +61,8 @@ ALPHA = 1.2  # ESS high-mode scaling strength.
 # USE_ESS = False
 
 # Output controls.
+SAVE_STAGE_INPUTS = True  # Keep per-stage input decks for continuation/debugging.
+SAVE_STAGE_WOUTS = False  # Set True to also write per-stage WOUT files.
 MAKE_PLOTS = True
 
 # Scalar and field-quality targets.  The mirror/elongation terms are soft
@@ -100,6 +102,8 @@ QI_OPTIONS = vj.QuasiIsodynamicOptions(
 )
 
 
+# Objective function.  Add new terms by appending another
+# (objective.J, target, weight) tuple.
 aspect = vj.AspectRatio()
 iota_floor = vj.AbsMeanIotaFloor(TARGET_ABS_IOTA_MIN)
 qi = vj.QuasiIsodynamicResidual(QI_OPTIONS)
@@ -177,6 +181,8 @@ if QI_PREFINE:
         solver_device=SOLVER_DEVICE,
         scipy_tr_solver=SCIPY_TR_SOLVER,
         scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
+        save_stage_inputs=SAVE_STAGE_INPUTS,
+        save_stage_wouts=SAVE_STAGE_WOUTS,
     )
     preseed_final_result = preseed_result.final_result
     preseed_history = preseed_final_result["_history_dump"]
@@ -212,11 +218,42 @@ result = vj.least_squares_solve(
     solver_device=SOLVER_DEVICE,
     scipy_tr_solver=SCIPY_TR_SOLVER,
     scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
+    save_stage_inputs=SAVE_STAGE_INPUTS,
+    save_stage_wouts=SAVE_STAGE_WOUTS,
 )
 
+# Results are plain Python objects.  The solve writes these default artifacts
+# for convenience; the explicit calls below show where to customize filenames
+# or add additional exports in a SIMSOPT-style workflow.
+stage_records = result.stage_records
+_initial_mode, initial_optimizer, initial_params0, initial_result = stage_records[0]
+final_optimizer = result.final_optimizer
 final_result = result.final_result
 history = final_result["_history_dump"]
 objective_history = np.asarray([entry["objective"] for entry in history["history"]])
+
+saved_paths = {
+    "initial_input": OUTPUT_DIR / "input.initial",
+    "final_input": OUTPUT_DIR / "input.final",
+    "initial_wout": OUTPUT_DIR / "wout_initial.nc",
+    "final_wout": OUTPUT_DIR / "wout_final.nc",
+    "history": OUTPUT_DIR / "history.json",
+}
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+initial_optimizer.save_input(saved_paths["initial_input"], initial_params0)
+initial_optimizer.save_wout(
+    saved_paths["initial_wout"],
+    initial_params0,
+    state=initial_result.get("_state_initial"),
+)
+final_optimizer.save_input(saved_paths["final_input"], final_result["x"])
+final_optimizer.save_wout(
+    saved_paths["final_wout"],
+    final_result["x"],
+    state=final_result.get("_state_final"),
+)
+final_optimizer.save_history(saved_paths["history"], final_result)
+
 print("\nFinal diagnostics from result.final_result['_history_dump']:")
 print(f"  aspect ratio:     {history['aspect_final']:.6g}")
 print(f"  mean iota:        {history['iota_final']:.6g}")
@@ -225,17 +262,11 @@ print(f"  total objective:  {history['objective_final']:.6e}")
 print(f"  wall time:        {history['total_wall_time_s']:.2f} s")
 print(f"  objective samples: {objective_history[:5]} ... {objective_history[-3:]}")
 
-print("\nSaved files written by the solve:")
-for path in (
-    OUTPUT_DIR / "input.initial",
-    OUTPUT_DIR / "input.final",
-    OUTPUT_DIR / "wout_initial.nc",
-    OUTPUT_DIR / "wout_final.nc",
-    OUTPUT_DIR / "history.json",
-):
-    print(f"  {path}")
+print("\nFiles saved from result objects:")
+for name, path in saved_paths.items():
+    print(f"  {name}: {path}")
 
-wout_final = vj.load_wout(OUTPUT_DIR / "wout_final.nc")
+wout_final = vj.load_wout(saved_paths["final_wout"])
 theta, zeta, b_lcfs = vj.vmecplot2_bmag_grid(
     wout_final,
     s_index=-1,
@@ -250,17 +281,17 @@ print(f"  Bmin/Bmax:  {np.min(b_lcfs):.6g} / {np.max(b_lcfs):.6g}")
 if MAKE_PLOTS:
     plot_paths = {
         "boundary_comparison": vj.plot_3d_boundary_comparison(
-            OUTPUT_DIR / "wout_initial.nc",
-            OUTPUT_DIR / "wout_final.nc",
+            saved_paths["initial_wout"],
+            saved_paths["final_wout"],
             outdir=OUTPUT_DIR,
         ),
         "bmag_contours": vj.plot_bmag_contours(
-            OUTPUT_DIR / "wout_initial.nc",
-            OUTPUT_DIR / "wout_final.nc",
+            saved_paths["initial_wout"],
+            saved_paths["final_wout"],
             outdir=OUTPUT_DIR,
         ),
         "objective_history": vj.plot_objective_history(
-            OUTPUT_DIR / "history.json",
+            saved_paths["history"],
             outdir=OUTPUT_DIR,
         ),
     }

@@ -7,20 +7,19 @@ inspect, save, or plot the returned result.
 
 ## Objective Tuple Pattern
 
-Use explicit SIMSOPT-style tuples:
+Use explicit SIMSOPT-style tuples and keep the list visible:
 
 ```python
 aspect = vj.AspectRatio()
 iota_floor = vj.AbsMeanIotaFloor(0.41)
 qs = vj.QuasisymmetryRatioResidual(helicity_m=1, helicity_n=-1, surfaces=SURFACES)
 
-problem = vj.LeastSquaresProblem.from_tuples(
-    [
-        (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
-        (iota_floor.J, 0.0, IOTA_FLOOR_WEIGHT),
-        (qs.J, 0.0, QS_WEIGHT),
-    ]
-)
+objective_tuples = [
+    (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
+    (iota_floor.J, 0.0, IOTA_FLOOR_WEIGHT),
+    (qs.J, 0.0, QS_WEIGHT),
+]
+problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
 ```
 
 `weight` follows SIMSOPT semantics: the residual is
@@ -28,6 +27,49 @@ problem = vj.LeastSquaresProblem.from_tuples(
 use the same tuple form, but encode QI thresholds and smoothing in
 `QuasiIsodynamicOptions`, `MirrorRatio`, and `MaxElongation`; QI tuple targets
 should remain `0.0`.
+
+## Result Object Pattern
+
+The standalone scripts also show how to work from the returned result object
+instead of relying on hidden plotting or printing helpers:
+
+```python
+result = vj.least_squares_solve(vmec, problem, ...)
+
+stage_records = result.stage_records
+_initial_mode, initial_optimizer, initial_params0, initial_result = stage_records[0]
+final_optimizer = result.final_optimizer
+final_result = result.final_result
+history = final_result["_history_dump"]
+
+saved_paths = {
+    "initial_input": OUTPUT_DIR / "input.initial",
+    "final_input": OUTPUT_DIR / "input.final",
+    "initial_wout": OUTPUT_DIR / "wout_initial.nc",
+    "final_wout": OUTPUT_DIR / "wout_final.nc",
+    "history": OUTPUT_DIR / "history.json",
+}
+initial_optimizer.save_input(saved_paths["initial_input"], initial_params0)
+initial_optimizer.save_wout(
+    saved_paths["initial_wout"],
+    initial_params0,
+    state=initial_result.get("_state_initial"),
+)
+final_optimizer.save_input(saved_paths["final_input"], final_result["x"])
+final_optimizer.save_wout(
+    saved_paths["final_wout"],
+    final_result["x"],
+    state=final_result.get("_state_final"),
+)
+final_optimizer.save_history(saved_paths["history"], final_result)
+
+print(history["objective_final"])
+vj.plot_objective_history(saved_paths["history"], outdir=OUTPUT_DIR)
+```
+
+`least_squares_solve` still writes the default final artifacts for convenience;
+the explicit calls are the editable pattern for custom filenames, extra
+exports, and local diagnostics.
 
 ## Recommended Standalone Examples
 
@@ -45,6 +87,9 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QH_optimization.py
 
 Set `SOLVER_DEVICE = "gpu"` inside the script, or run with
 `JAX_PLATFORM_NAME=gpu`, to use a GPU-enabled JAX installation.
+Optimizer and output controls are also top-level variables, including
+`METHOD`, `SCIPY_TR_SOLVER`, `FTOL`, `GTOL`, `XTOL`, `INNER_MAX_ITER`,
+`TRIAL_MAX_ITER`, `SAVE_STAGE_INPUTS`, `SAVE_STAGE_WOUTS`, and `MAKE_PLOTS`.
 
 ## QI Diagnostics
 

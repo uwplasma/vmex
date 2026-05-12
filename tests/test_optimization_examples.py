@@ -26,20 +26,39 @@ def test_fixed_boundary_qs_examples_are_standalone_workflows() -> None:
         assert "run_qs_stage(" not in text
         assert "run_qs_optimization(" not in text
         assert "FixedBoundaryVMEC.from_input(" in text
+        assert "objective_tuples = [" in text
         assert "LeastSquaresProblem.from_tuples(" in text
+        assert "problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)" in text
         assert "least_squares_solve(" in text
         assert "problem =" in text
+        assert "SAVE_STAGE_INPUTS = True" in text
+        assert "SAVE_STAGE_WOUTS = False" in text
+        assert "save_stage_inputs=SAVE_STAGE_INPUTS" in text
+        assert "save_stage_wouts=SAVE_STAGE_WOUTS" in text
         assert "target_aspect=" not in text
         assert "target_iota=" not in text
         assert "iota_abs_min=" not in text
         assert "qi_options=" not in text
         assert "plot=" not in text
         assert "print_optimization_outputs" not in text
+        assert "stage_records = result.stage_records" in text
+        assert "_initial_mode, initial_optimizer, initial_params0, initial_result = stage_records[0]" in text
+        assert "final_optimizer = result.final_optimizer" in text
         assert "result.final_result" in text
+        assert "saved_paths = {" in text
+        assert "initial_optimizer.save_input(" in text
+        assert "initial_optimizer.save_wout(" in text
+        assert "final_optimizer.save_input(" in text
+        assert "final_optimizer.save_wout(" in text
+        assert "final_optimizer.save_history(" in text
+        assert "Files saved from result objects" in text
+        assert 'vj.load_wout(saved_paths["final_wout"])' in text
         assert "vmecplot2_bmag_grid(" in text
         assert "plot_3d_boundary_comparison(" in text
         assert "plot_bmag_contours(" in text
         assert "plot_objective_history(" in text
+        assert 'saved_paths["initial_wout"]' in text
+        assert 'saved_paths["history"]' in text
 
 
 def test_qi_example_uses_qi_problem_api() -> None:
@@ -47,18 +66,37 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "run_quasi_isodynamic_objective_optimization(" not in text
     assert "QuasiIsodynamicOptions(" in text
     assert "QuasiIsodynamicResidual(QI_OPTIONS)" in text
+    assert "objective_tuples = [" in text
     assert "LeastSquaresProblem.from_tuples(" in text
+    assert "problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)" in text
     assert "least_squares_solve(" in text
+    assert "SAVE_STAGE_INPUTS = True" in text
+    assert "SAVE_STAGE_WOUTS = False" in text
+    assert "save_stage_inputs=SAVE_STAGE_INPUTS" in text
+    assert "save_stage_wouts=SAVE_STAGE_WOUTS" in text
     assert "target_aspect=" not in text
     assert "iota_abs_min=" not in text
     assert "qi_options=" not in text
     assert "plot=" not in text
     assert "print_optimization_outputs" not in text
+    assert "stage_records = result.stage_records" in text
+    assert "_initial_mode, initial_optimizer, initial_params0, initial_result = stage_records[0]" in text
+    assert "final_optimizer = result.final_optimizer" in text
     assert "result.final_result" in text
+    assert "saved_paths = {" in text
+    assert "initial_optimizer.save_input(" in text
+    assert "initial_optimizer.save_wout(" in text
+    assert "final_optimizer.save_input(" in text
+    assert "final_optimizer.save_wout(" in text
+    assert "final_optimizer.save_history(" in text
+    assert "Files saved from result objects" in text
+    assert 'vj.load_wout(saved_paths["final_wout"])' in text
     assert "vmecplot2_bmag_grid(" in text
     assert "plot_3d_boundary_comparison(" in text
     assert "plot_bmag_contours(" in text
     assert "plot_objective_history(" in text
+    assert 'saved_paths["initial_wout"]' in text
+    assert 'saved_paths["history"]' in text
 
 
 def test_qi_objective_comparison_is_top_level_diagnostic() -> None:
@@ -655,6 +693,29 @@ def test_dmerc_tuple_stays_regular_state_objective() -> None:
     assert len(problem.objective_terms) == 1
     assert problem.objective_terms[0].name == "DMerc"
     assert len(problem.qi_objective_terms) == 0
+
+
+def test_magnetic_well_tuple_stays_regular_state_objective(monkeypatch) -> None:
+    import vmec_jax.optimization_workflow as workflow
+    from vmec_jax import api
+    from vmec_jax.optimization_workflow import LeastSquaresProblem, MagneticWell
+
+    assert api.MagneticWell is MagneticWell
+    assert api.DMerc is workflow.DMerc
+
+    monkeypatch.setattr(
+        workflow,
+        "finite_beta_scalars_from_state",
+        lambda **_kwargs: {"vp": np.asarray([0.0, 2.0, 1.5, 1.0])},
+    )
+    objective = MagneticWell(minimum=0.8, softness=1.0e-3)
+    problem = LeastSquaresProblem.from_tuples([(objective.J, 0.0, 4.0)])
+    term = problem.objective_terms[0]
+
+    assert not problem.is_qi
+    assert term.name == "magnetic_well"
+    assert len(problem.qi_objective_terms) == 0
+    assert float(term.residual(SimpleNamespace(static="static", indata="indata", signgs=1), "state")[0]) > 0.0
 
 
 def test_jxbforce_profile_tuple_stays_regular_state_objective() -> None:

@@ -114,13 +114,12 @@ style: create objective objects, then pass explicit
        surfaces=SURFACES,
    )
 
-   problem = vj.LeastSquaresProblem.from_tuples(
-       [
-           (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
-           (iota_floor.J, 0.0, IOTA_FLOOR_WEIGHT),
-           (qs.J, 0.0, QS_WEIGHT),
-       ]
-   )
+   objective_tuples = [
+       (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
+       (iota_floor.J, 0.0, IOTA_FLOOR_WEIGHT),
+       (qs.J, 0.0, QS_WEIGHT),
+   ]
+   problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
 
 The tuple weight follows SIMSOPT semantics.  ``vmec_jax`` minimizes the
 least-squares residual
@@ -134,6 +133,31 @@ for each scalar entry returned by the objective.  Do not pre-apply
 strengths in the tuple list, and put optimizer controls such as continuation
 stages, ESS scaling, tolerances, device selection, and output directories in
 ``least_squares_solve``.
+
+Finite-beta physics metrics use the same tuple form.  For example, a smooth
+magnetic-well floor and a Mercier-stability floor can be added alongside QS or
+QI terms without changing the optimizer setup:
+
+.. code-block:: python
+
+   well = vj.MagneticWell(minimum=0.0, softness=1.0e-3)
+   dmerc = vj.DMerc(minimum=0.0, softness=1.0e-3)
+
+   objective_tuples = [
+       (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
+       (iota_floor.J, 0.0, IOTA_FLOOR_WEIGHT),
+       (qs.J, 0.0, QS_WEIGHT),
+       (well.J, 0.0, MAGNETIC_WELL_WEIGHT),
+       (dmerc.J, 0.0, DMERC_WEIGHT),
+   ]
+   problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
+
+``MagneticWell`` evaluates the VMEC/SIMSOPT magnetic-well proxy from the
+state-derived half-mesh volume derivative, also available directly as
+``vj.magnetic_well_from_state(...)``.  ``DMerc`` uses the differentiable
+state-level Mercier/JXBFORCE path and returns one smooth lower-bound residual
+per interior full-mesh surface.  Both are lower-bound penalties, so their tuple
+target must be ``0.0``.
 
 QI objectives use the same tuple syntax, but the QI field-quality terms are
 routed through the Boozer/QI problem path so they can share one Boozer
@@ -162,15 +186,14 @@ branch-shuffle diagnostic.
    mirror = vj.MirrorRatio(threshold=0.21, ntheta=96, nphi=96, surface_index=0)
    elongation = vj.MaxElongation(threshold=8.0, ntheta=48, nphi=16)
 
-   qi_problem = vj.LeastSquaresProblem.from_tuples(
-       [
-           (vj.AspectRatio().J, 5.0, 1.0),
-           (vj.AbsMeanIotaFloor(0.41).J, 0.0, 200.0**2),
-           (qi.J, 0.0, 1.0),
-           (mirror.J, 0.0, 10.0),
-           (elongation.J, 0.0, 10.0),
-       ]
-   )
+   objective_tuples = [
+       (vj.AspectRatio().J, 5.0, 1.0),
+       (vj.AbsMeanIotaFloor(0.41).J, 0.0, 200.0**2),
+       (qi.J, 0.0, 1.0),
+       (mirror.J, 0.0, 10.0),
+       (elongation.J, 0.0, 10.0),
+   ]
+   qi_problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
 
 
 Quasi-helical symmetry example
@@ -191,6 +214,8 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
    METHOD = "scipy"            # also: "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", "scalar_trust"
    SCIPY_TR_SOLVER = "lsmr"    # also: "exact" for small dense trust-region solves
    SOLVER_DEVICE = None        # set to "cpu" or "gpu" to force one backend
+   SAVE_STAGE_INPUTS = True    # keep per-stage input decks
+   SAVE_STAGE_WOUTS = False    # set True to write per-stage WOUT files
    HELICITY_M = 1
    HELICITY_N = -1
    TARGET_ASPECT = 5.0
@@ -203,7 +228,7 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
        min_vmec_mode=MIN_VMEC_MODE,
        output_dir=OUTPUT_DIR,
    )
-   stage_modes = qs_stage_modes(
+   STAGE_MODES = vj.qs_stage_modes(
        max_mode=MAX_MODE,
        use_mode_continuation=USE_MODE_CONTINUATION,
        continuation_nfev=CONTINUATION_NFEV,
@@ -216,31 +241,30 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
        helicity_n=HELICITY_N,
        surfaces=SURFACES,
    )
-   problem = vj.LeastSquaresProblem.from_tuples(
-       [
-           (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
-           (iota_floor.J, 0.0, IOTA_WEIGHT),
-           (qs.J, 0.0, QS_WEIGHT),
-           # Optional physics terms:
-           # (vj.LgradB(threshold=0.30, smooth_penalty=1.0e-3).J, 0.0, 0.01),
-           # (vj.MagneticWell(minimum=0.0).J, 0.0, 1.0),
-           # (vj.VolavgB().J, TARGET_VOLAVGB, VOLAVGB_WEIGHT),
-           # (vj.BetaTotal().J, TARGET_BETA, BETA_WEIGHT),
-           # (vj.DMerc(minimum=0.0, softness=1.0e-3).J, 0.0, DMERC_WEIGHT),
-           # (vj.JDotB(surfaces=(0.25, 0.50, 0.75)).J, 0.0, JDOTB_WEIGHT),
-           # (vj.BDotB(surfaces=(0.25, 0.50, 0.75)).J, TARGET_BDOTB, BDOTB_WEIGHT),
-           # (vj.BDotGradV(surfaces=(0.25, 0.50, 0.75)).J, TARGET_BDOTGRADV, BDOTGRADV_WEIGHT),
-           # (vj.ToroidalCurrent(surfaces=(0.25, 0.50, 0.75)).J, TARGET_TORCUR, TORCUR_WEIGHT),
-           # (vj.ToroidalCurrentGradient(surfaces=(0.25, 0.50, 0.75)).J, TARGET_TORCUR_PRIME, TORCUR_PRIME_WEIGHT),
-           # (vj.BVector(s_index=-1).J, TARGET_B_VECTOR, B_VECTOR_WEIGHT),
-           # (vj.JVector(surfaces=(0.25, 0.50, 0.75)).J, TARGET_J_VECTOR, J_VECTOR_WEIGHT),
-       ]
-   )
+   objective_tuples = [
+       (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
+       (iota_floor.J, 0.0, IOTA_WEIGHT),
+       (qs.J, 0.0, QS_WEIGHT),
+       # Optional physics terms:
+       # (vj.LgradB(threshold=0.30, smooth_penalty=1.0e-3).J, 0.0, 0.01),
+       # (vj.MagneticWell(minimum=0.0).J, 0.0, 1.0),
+       # (vj.VolavgB().J, TARGET_VOLAVGB, VOLAVGB_WEIGHT),
+       # (vj.BetaTotal().J, TARGET_BETA, BETA_WEIGHT),
+       # (vj.DMerc(minimum=0.0, softness=1.0e-3).J, 0.0, DMERC_WEIGHT),
+       # (vj.JDotB(surfaces=(0.25, 0.50, 0.75)).J, 0.0, JDOTB_WEIGHT),
+       # (vj.BDotB(surfaces=(0.25, 0.50, 0.75)).J, TARGET_BDOTB, BDOTB_WEIGHT),
+       # (vj.BDotGradV(surfaces=(0.25, 0.50, 0.75)).J, TARGET_BDOTGRADV, BDOTGRADV_WEIGHT),
+       # (vj.ToroidalCurrent(surfaces=(0.25, 0.50, 0.75)).J, TARGET_TORCUR, TORCUR_WEIGHT),
+       # (vj.ToroidalCurrentGradient(surfaces=(0.25, 0.50, 0.75)).J, TARGET_TORCUR_PRIME, TORCUR_PRIME_WEIGHT),
+       # (vj.BVector(s_index=-1).J, TARGET_B_VECTOR, B_VECTOR_WEIGHT),
+       # (vj.JVector(surfaces=(0.25, 0.50, 0.75)).J, TARGET_J_VECTOR, J_VECTOR_WEIGHT),
+   ]
+   problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
 
    result = vj.least_squares_solve(
        vmec,
        problem,
-       stage_modes=stage_modes,
+       stage_modes=STAGE_MODES,
        max_nfev=MAX_NFEV,
        continuation_nfev=CONTINUATION_NFEV,
        method=METHOD,
@@ -257,14 +281,41 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
        trial_ftol=TRIAL_FTOL,
        solver_device=SOLVER_DEVICE,
        scipy_tr_solver=SCIPY_TR_SOLVER,
+       save_stage_inputs=SAVE_STAGE_INPUTS,
+       save_stage_wouts=SAVE_STAGE_WOUTS,
    )
 
-   history = result.final_result["_history_dump"]
+   stage_records = result.stage_records
+   _initial_mode, initial_optimizer, initial_params0, initial_result = stage_records[0]
+   final_optimizer = result.final_optimizer
+   final_result = result.final_result
+   history = final_result["_history_dump"]
+   saved_paths = {
+       "initial_input": OUTPUT_DIR / "input.initial",
+       "final_input": OUTPUT_DIR / "input.final",
+       "initial_wout": OUTPUT_DIR / "wout_initial.nc",
+       "final_wout": OUTPUT_DIR / "wout_final.nc",
+       "history": OUTPUT_DIR / "history.json",
+   }
+   initial_optimizer.save_input(saved_paths["initial_input"], initial_params0)
+   initial_optimizer.save_wout(
+       saved_paths["initial_wout"],
+       initial_params0,
+       state=initial_result.get("_state_initial"),
+   )
+   final_optimizer.save_input(saved_paths["final_input"], final_result["x"])
+   final_optimizer.save_wout(
+       saved_paths["final_wout"],
+       final_result["x"],
+       state=final_result.get("_state_final"),
+   )
+   final_optimizer.save_history(saved_paths["history"], final_result)
+
    print(f"Final aspect ratio:    {history['aspect_final']:.6g}")
    print(f"Final mean iota:       {history['iota_final']:.6g}")
    print(f"Final field objective: {history['qs_final']:.6e}")
 
-   wout_final = vj.load_wout(OUTPUT_DIR / "wout_final.nc")
+   wout_final = vj.load_wout(saved_paths["final_wout"])
    theta, zeta, b_lcfs = vj.vmecplot2_bmag_grid(
        wout_final,
        s_index=-1,
@@ -276,17 +327,17 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
 
    plot_paths = {
        "boundary_comparison": vj.plot_3d_boundary_comparison(
-           OUTPUT_DIR / "wout_initial.nc",
-           OUTPUT_DIR / "wout_final.nc",
+           saved_paths["initial_wout"],
+           saved_paths["final_wout"],
            outdir=OUTPUT_DIR,
        ),
        "bmag_contours": vj.plot_bmag_contours(
-           OUTPUT_DIR / "wout_initial.nc",
-           OUTPUT_DIR / "wout_final.nc",
+           saved_paths["initial_wout"],
+           saved_paths["final_wout"],
            outdir=OUTPUT_DIR,
        ),
        "objective_history": vj.plot_objective_history(
-           OUTPUT_DIR / "history.json",
+           saved_paths["history"],
            outdir=OUTPUT_DIR,
        ),
    }

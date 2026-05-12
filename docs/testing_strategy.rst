@@ -43,6 +43,11 @@ the recommended local escalation path.
      - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000"``
      - Before pushing ordinary code or docs-adjacent changes that touch tested
        APIs.
+   * - Bundled residual parity gate
+     - ``JAX_ENABLE_X64=1 pytest -q tests/test_residue_getfsq_parity.py tests/test_vmec2000_exec_threed1.py``
+     - Required no-executable physics gate: recompute VMEC2000 ``fsqr/fsqz/fsql``
+       from bundled solved ``wout`` files and verify the VMEC2000 trace parser
+       against a bundled ``threed1`` fixture.
    * - Coverage gate
      - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000" --cov=vmec_jax --cov-report=xml --cov-report=term-missing:skip-covered --cov-fail-under=63``
      - Python 3.11 required CI coverage job.
@@ -152,6 +157,16 @@ Core solve gates:
 
 VMEC2000 parity gates:
 
+- Required CI includes ``tests/test_residue_getfsq_parity.py``.  This reads
+  small bundled VMEC2000 ``wout`` files, reconstructs the equilibrium state,
+  recomputes the scalar residual pipeline
+  ``bcovar -> forces -> tomnsps -> getfsq``, and compares ``fsqr/fsqz/fsql``
+  to the values stored by VMEC2000.  It is not a smoke test: it fails on force
+  normalization, Fourier convention, or residual assembly drift while avoiding
+  a full solve.
+- Required CI also includes ``tests/test_vmec2000_exec_threed1.py`` so the
+  ``threed1`` parser used by executable-backed diagnostics is covered by a
+  bundled fixture even when ``xvmec2000`` is unavailable.
 - Compare converged equilibria, not arbitrary finite-step transient states,
   unless the test is explicitly a short-trace regression.
 - For each small reference deck, compare key scalars and profiles:

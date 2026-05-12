@@ -67,7 +67,7 @@ MAX_PREFINE_TOP_N = 5
 MAX_PREFINE_FAMILY_REPRESENTATIVES = len(SEED_FAMILY_ORDER)
 MAX_PREFINE_MAX_NFEV = 5
 MAX_PREFINE_CONTINUATION_NFEV = 3
-MAX_PREFINE_STAGE_COUNT = 3
+MAX_PREFINE_STAGE_COUNT = 5
 MAX_PREFINE_MODE = 3
 MAX_PREFINE_VMEC_MODE = 5
 MAX_PREFINE_INNER_ITER = 40
@@ -75,6 +75,7 @@ MAX_PREFINE_QI_NPHI = 51
 MAX_PREFINE_QI_NALPHA = 11
 MAX_PREFINE_QI_N_BOUNCE = 15
 MAX_PREFINE_BOOZ_MODE = 10
+DEFAULT_PREFINE_STAGE_MODES = (1, 1, 2, 2, 3)
 
 
 @dataclass(frozen=True)
@@ -102,9 +103,9 @@ class QIPrefineProbeConfig:
     representative_families: tuple[str, ...] = SEED_FAMILY_ORDER
     max_nfev: int = 2
     continuation_nfev: int = 1
-    max_mode: int = 1
+    max_mode: int = 3
     min_vmec_mode: int = 3
-    stage_modes: tuple[int, ...] = (1,)
+    stage_modes: tuple[int, ...] = DEFAULT_PREFINE_STAGE_MODES
     output_dir: Path = DEFAULT_PREFINE_OUTPUT_DIR
     surfaces: tuple[float, ...] = DEFAULT_PREFINE_SURFACES
     mboz: int = 8
@@ -544,6 +545,10 @@ def _validate_prefine_probe_config(config: QIPrefineProbeConfig) -> None:
     unknown_families = sorted(set(config.representative_families) - set(SEED_FAMILY_ORDER))
     if unknown_families:
         raise ValueError(f"prefine representative_families contains unsupported families: {unknown_families}")
+    if any(mode <= 0 for mode in config.stage_modes):
+        raise ValueError("prefine stage_modes must be positive integers")
+    if any(next_mode < mode for mode, next_mode in zip(config.stage_modes, config.stage_modes[1:], strict=False)):
+        raise ValueError("prefine stage_modes must be nondecreasing")
     checks = [
         (1 <= config.top_n <= MAX_PREFINE_TOP_N, f"prefine top_n must be in [1, {MAX_PREFINE_TOP_N}]"),
         (
@@ -570,6 +575,14 @@ def _validate_prefine_probe_config(config: QIPrefineProbeConfig) -> None:
         (
             max(config.stage_modes) <= config.max_mode,
             "prefine stage_modes must not exceed prefine max_mode",
+        ),
+        (
+            max(config.stage_modes) == config.max_mode,
+            "prefine stage_modes must include prefine max_mode",
+        ),
+        (
+            int(config.stage_modes[-1]) == int(config.max_mode),
+            "prefine stage_modes must end at prefine max_mode",
         ),
         (
             1 <= config.inner_max_iter <= MAX_PREFINE_INNER_ITER,
@@ -602,12 +615,84 @@ def _prefine_probe_config_dict(config: QIPrefineProbeConfig) -> dict[str, Any]:
     row["surfaces"] = [float(surface) for surface in config.surfaces]
     row["stage_modes"] = [int(mode) for mode in config.stage_modes]
     row["representative_families"] = [str(family) for family in config.representative_families]
+    row["endpoint_mode"] = _prefine_endpoint_mode(config.include_bounce_endpoints)
+    row["total_nfev_cap"] = _prefine_total_nfev_cap(config)
     return row
+
+
+def _prefine_endpoint_mode(include_bounce_endpoints: bool) -> str:
+    return "include_bounce_endpoints" if bool(include_bounce_endpoints) else "interior_only"
+
+
+def _prefine_stage_budget(config: QIPrefineProbeConfig, *, stage_mode: int) -> int:
+    if int(stage_mode) == int(config.max_mode):
+        return int(config.max_nfev)
+    return int(config.continuation_nfev)
+
+
+def _prefine_total_nfev_cap(config: QIPrefineProbeConfig) -> int:
+    return sum(_prefine_stage_budget(config, stage_mode=int(mode)) for mode in config.stage_modes)
+
+
+def _prefine_stage_plan(config: QIPrefineProbeConfig, *, probe_dir: Path | None = None) -> list[dict[str, Any]]:
+    repeat_counts: dict[int, int] = {}
+    stages: list[dict[str, Any]] = []
+    for index, raw_mode in enumerate(config.stage_modes, start=1):
+        mode = int(raw_mode)
+        repeat_counts[mode] = repeat_counts.get(mode, 0) + 1
+        stage = {
+            "index": index,
+            "mode": mode,
+            "repeat_index_for_mode": repeat_counts[mode],
+            "is_final_mode": mode == int(config.max_mode),
+            "nfev_cap": _prefine_stage_budget(config, stage_mode=mode),
+        }
+        if probe_dir is not None:
+            stage["output_dir"] = str(probe_dir / f"stage_{index:02d}_mode{mode:02d}")
+        stages.append(stage)
+    return stages
+
+
+def _prefine_effective_caps(config: QIPrefineProbeConfig) -> dict[str, Any]:
+    return {
+        "per_probe_stage_count": len(config.stage_modes),
+        "per_probe_total_nfev": _prefine_total_nfev_cap(config),
+        "per_final_stage_nfev": int(config.max_nfev),
+        "per_continuation_stage_nfev": int(config.continuation_nfev),
+        "max_mode": int(config.max_mode),
+        "min_vmec_mode": int(config.min_vmec_mode),
+        "inner_max_iter": int(config.inner_max_iter),
+        "trial_max_iter": int(config.trial_max_iter),
+        "mboz": int(config.mboz),
+        "nboz": int(config.nboz),
+        "nphi": int(config.nphi),
+        "nalpha": int(config.nalpha),
+        "n_bounce": int(config.n_bounce),
+    }
+
+
+def _prefine_phimin_for_record(record: dict[str, Any], config: QIPrefineProbeConfig) -> tuple[float, str]:
+    selected_phimin = record.get("selected_phimin")
+    if selected_phimin is None:
+        return float(config.phimin), "prefine_config_phimin"
+    return float(selected_phimin), "audit_selected_phimin"
+
+
+def _prefine_endpoint_alignment(audit_report: dict[str, Any], config: QIPrefineProbeConfig) -> dict[str, Any]:
+    audit_value = audit_report.get("resolution", {}).get("include_bounce_endpoints")
+    prefine_value = bool(config.include_bounce_endpoints)
+    aligned = None if audit_value is None else bool(audit_value) == prefine_value
+    return {
+        "audit_include_bounce_endpoints": None if audit_value is None else bool(audit_value),
+        "prefine_include_bounce_endpoints": prefine_value,
+        "aligned": aligned,
+        "endpoint_mode": _prefine_endpoint_mode(prefine_value),
+    }
 
 
 def _prefine_run_command(record: dict[str, Any], config: QIPrefineProbeConfig, manifest_path: Path) -> str:
     case = f"{record['label']}:{record['family']}:{record['input']}:{record['wout']}"
-    selected_phimin = float(record.get("selected_phimin", config.phimin))
+    selected_phimin, _phimin_source = _prefine_phimin_for_record(record, config)
     command = [
         sys.executable,
         str(Path(__file__).relative_to(REPO_ROOT)),
@@ -618,8 +703,10 @@ def _prefine_run_command(record: dict[str, Any], config: QIPrefineProbeConfig, m
         "fixed",
         "--phimin",
         str(selected_phimin),
+        "--include-bounce-endpoints" if bool(config.include_bounce_endpoints) else "--no-include-bounce-endpoints",
         "--prefine-probes",
         "run",
+        "--prefine-reviewed",
         "--prefine-top-n",
         "1",
         "--prefine-manifest",
@@ -636,11 +723,32 @@ def _prefine_run_command(record: dict[str, Any], config: QIPrefineProbeConfig, m
         str(config.min_vmec_mode),
         "--prefine-stage-modes",
         ",".join(str(mode) for mode in config.stage_modes),
+        "--prefine-surfaces",
+        ",".join(str(surface) for surface in config.surfaces),
+        "--prefine-mboz",
+        str(config.mboz),
+        "--prefine-nboz",
+        str(config.nboz),
+        "--prefine-nphi",
+        str(config.nphi),
+        "--prefine-nalpha",
+        str(config.nalpha),
+        "--prefine-n-bounce",
+        str(config.n_bounce),
         "--prefine-phimin",
         str(selected_phimin),
+        "--prefine-inner-max-iter",
+        str(config.inner_max_iter),
+        "--prefine-trial-max-iter",
+        str(config.trial_max_iter),
     ]
-    if not bool(config.include_bounce_endpoints):
-        command.append("--no-prefine-include-bounce-endpoints")
+    if config.scipy_lsmr_maxiter is not None:
+        command.extend(["--prefine-scipy-lsmr-maxiter", str(config.scipy_lsmr_maxiter)])
+    command.append(
+        "--prefine-include-bounce-endpoints"
+        if bool(config.include_bounce_endpoints)
+        else "--no-prefine-include-bounce-endpoints"
+    )
     return " ".join(shlex.quote(part) for part in command)
 
 
@@ -703,18 +811,29 @@ def build_qi_prefine_probe_manifest(
     config: QIPrefineProbeConfig,
     manifest_path: Path,
     dry_run: bool,
+    reviewed: bool = False,
 ) -> dict[str, Any]:
     """Build a bounded manifest from top-ranked and family-representative audit rows."""
 
     _validate_prefine_probe_config(config)
     selected = _select_prefine_probe_records(audit_report, config)
+    effective_caps = _prefine_effective_caps(config)
+    endpoint_mode = _prefine_endpoint_mode(config.include_bounce_endpoints)
+    endpoint_alignment = _prefine_endpoint_alignment(audit_report, config)
     plans = []
     for index, selection in enumerate(selected, start=1):
         record = selection["record"]
         label = str(record.get("label", f"seed_{index}"))
         probe_dir = config.output_dir / f"{index:02d}_{_safe_label(label)}"
+        selected_phimin, phimin_source = _prefine_phimin_for_record(record, config)
+        stage_plan = _prefine_stage_plan(config, probe_dir=probe_dir)
         plan = {
             "status": "planned" if dry_run else "pending",
+            "review": {
+                "required_before_run": True,
+                "operator_confirmed": bool(reviewed),
+                "status": "reviewed" if bool(reviewed) else "requires_review",
+            },
             "audit_rank": record.get("suitability_rank", index),
             "selection_reasons": selection["selection_reasons"],
             "representative_families": selection["representative_families"],
@@ -723,6 +842,16 @@ def build_qi_prefine_probe_manifest(
             "input": record.get("input"),
             "wout": record.get("wout"),
             "output_dir": str(probe_dir),
+            "phimin": {
+                "value": selected_phimin,
+                "source": phimin_source,
+                "audit_policy": record.get("phimin_policy"),
+                "audit_candidates": [float(value) for value in record.get("phimin_candidates") or []],
+            },
+            "endpoint_mode": endpoint_mode,
+            "endpoint_alignment": endpoint_alignment,
+            "stages": stage_plan,
+            "caps": effective_caps,
             "audit_metrics": {
                 "qi_seed_score": record.get("qi_seed_score"),
                 "qi_smooth_total": record.get("qi_smooth_total"),
@@ -740,6 +869,9 @@ def build_qi_prefine_probe_manifest(
                 "max_mode": int(config.max_mode),
                 "min_vmec_mode": int(config.min_vmec_mode),
                 "stage_modes": [int(mode) for mode in config.stage_modes],
+                "stage_count": len(config.stage_modes),
+                "stage_plan": stage_plan,
+                "total_nfev_cap": _prefine_total_nfev_cap(config),
                 "method": config.method,
                 "ftol": float(config.ftol),
                 "gtol": float(config.gtol),
@@ -761,7 +893,9 @@ def build_qi_prefine_probe_manifest(
                 "nalpha": int(config.nalpha),
                 "n_bounce": int(config.n_bounce),
                 "include_bounce_endpoints": bool(config.include_bounce_endpoints),
-                "phimin": float(record.get("selected_phimin", config.phimin)),
+                "endpoint_mode": endpoint_mode,
+                "phimin": selected_phimin,
+                "phimin_source": phimin_source,
                 "weight": float(config.qi_weight),
             },
             "would_write": [
@@ -771,6 +905,7 @@ def build_qi_prefine_probe_manifest(
                 str(probe_dir / "wout_final.nc"),
                 str(probe_dir / "history.json"),
             ],
+            "would_write_stage_dirs": [str(probe_dir / f"stage_{stage['index']:02d}_mode{stage['mode']:02d}") for stage in stage_plan],
             "run_command": _prefine_run_command(record, config, manifest_path),
         }
         plans.append(plan)
@@ -778,12 +913,18 @@ def build_qi_prefine_probe_manifest(
     return {
         "mode": "qi_prefine_probe_manifest",
         "dry_run": bool(dry_run),
+        "review": {
+            "required_before_run": True,
+            "operator_confirmed": bool(reviewed),
+            "status": "reviewed" if bool(reviewed) else "requires_review",
+        },
         "hard_caps": {
             "top_n": MAX_PREFINE_TOP_N,
             "family_representatives": MAX_PREFINE_FAMILY_REPRESENTATIVES,
             "max_nfev": MAX_PREFINE_MAX_NFEV,
             "continuation_nfev": MAX_PREFINE_CONTINUATION_NFEV,
             "stage_count": MAX_PREFINE_STAGE_COUNT,
+            "total_nfev_per_probe": MAX_PREFINE_STAGE_COUNT * MAX_PREFINE_MAX_NFEV,
             "max_mode": MAX_PREFINE_MODE,
             "min_vmec_mode": MAX_PREFINE_VMEC_MODE,
             "inner_iter": MAX_PREFINE_INNER_ITER,
@@ -792,6 +933,8 @@ def build_qi_prefine_probe_manifest(
             "n_bounce": MAX_PREFINE_QI_N_BOUNCE,
             "booz_mode": MAX_PREFINE_BOOZ_MODE,
         },
+        "effective_caps": effective_caps,
+        "endpoint_alignment": endpoint_alignment,
         "config": _prefine_probe_config_dict(config),
         "selection": {
             "requested_top_n": int(config.top_n),
@@ -819,6 +962,7 @@ def run_qi_prefine_probe(plan: dict[str, Any], *, workflow: Any | None = None) -
 
     qi_options_raw = plan["qi_options"]
     opt = plan["optimization"]
+    requested_stage_modes = tuple(int(mode) for mode in opt["stage_modes"])
     qi_options = workflow.QuasiIsodynamicOptions(
         surfaces=tuple(float(surface) for surface in qi_options_raw["surfaces"]),
         mboz=int(qi_options_raw["mboz"]),
@@ -841,7 +985,7 @@ def run_qi_prefine_probe(plan: dict[str, Any], *, workflow: Any | None = None) -
     result = workflow.least_squares_solve(
         vmec,
         problem,
-        stage_modes=tuple(int(mode) for mode in opt["stage_modes"]),
+        stage_modes=requested_stage_modes,
         max_nfev=int(opt["max_nfev"]),
         continuation_nfev=int(opt["continuation_nfev"]),
         method=str(opt["method"]),
@@ -862,28 +1006,51 @@ def run_qi_prefine_probe(plan: dict[str, Any], *, workflow: Any | None = None) -
         save_stage_wouts=False,
     )
     history = dict(result.final_result.get("_history_dump", {}))
+    completed_stage_modes = [int(mode) for mode in getattr(result, "stage_modes", requested_stage_modes)]
     completed = dict(plan)
     completed["status"] = "completed"
+    completed["review"] = {
+        **dict(plan.get("review", {})),
+        "operator_confirmed": bool(plan.get("review", {}).get("operator_confirmed", False)),
+    }
     completed["result"] = {
         "objective_initial": history.get("objective_initial"),
         "objective_final": history.get("objective_final"),
         "qi_final": history.get("qs_final"),
         "wall_time_s": history.get("total_wall_time_s"),
-        "stage_modes": list(getattr(result, "stage_modes", opt["stage_modes"])),
+        "requested_stage_modes": list(requested_stage_modes),
+        "completed_stage_modes": completed_stage_modes,
+        "stage_count_requested": len(requested_stage_modes),
+        "stage_count_completed": len(completed_stage_modes),
+        "stage_plan": plan.get("stages", opt.get("stage_plan")),
+        "total_nfev_cap": opt.get("total_nfev_cap"),
+        "endpoint_mode": qi_options_raw.get(
+            "endpoint_mode",
+            _prefine_endpoint_mode(bool(qi_options_raw.get("include_bounce_endpoints", False))),
+        ),
+        "phimin": float(qi_options_raw["phimin"]),
         "history_path": str(Path(plan["output_dir"]) / "history.json"),
         "wout_final": str(Path(plan["output_dir"]) / "wout_final.nc"),
     }
     return completed
 
 
+def _prefine_manifest_has_review(manifest: dict[str, Any]) -> bool:
+    review = manifest.get("review", {})
+    return bool(review.get("operator_confirmed", False) and review.get("status") == "reviewed")
+
+
 def run_qi_prefine_probe_manifest(
     manifest: dict[str, Any],
     *,
     fail_on_error: bool = False,
+    require_review: bool = False,
     workflow: Any | None = None,
 ) -> dict[str, Any]:
     """Execute all pending plans in a manifest and record bounded outcomes."""
 
+    if bool(require_review) and not _prefine_manifest_has_review(manifest):
+        raise ValueError("prefine probe execution requires a reviewed manifest")
     executed = dict(manifest)
     executed["dry_run"] = False
     plans = []
@@ -1122,9 +1289,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--prefine-max-nfev", type=int, default=2)
     parser.add_argument("--prefine-continuation-nfev", type=int, default=1)
-    parser.add_argument("--prefine-max-mode", type=int, default=1)
+    parser.add_argument("--prefine-max-mode", type=int, default=3)
     parser.add_argument("--prefine-min-vmec-mode", type=int, default=3)
-    parser.add_argument("--prefine-stage-modes", type=parse_stage_modes, default=(1,))
+    parser.add_argument("--prefine-stage-modes", type=parse_stage_modes, default=DEFAULT_PREFINE_STAGE_MODES)
     parser.add_argument("--prefine-surfaces", type=parse_surfaces, default=DEFAULT_PREFINE_SURFACES)
     parser.add_argument("--prefine-mboz", type=int, default=8)
     parser.add_argument("--prefine-nboz", type=int, default=8)
@@ -1134,8 +1301,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--prefine-include-bounce-endpoints",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Use legacy-style bounce endpoint levels in bounded QI prefine probes.",
+        default=None,
+        help=(
+            "Use legacy-style bounce endpoint levels in bounded QI prefine probes. "
+            "Defaults to the audit --include-bounce-endpoints setting."
+        ),
     )
     parser.add_argument("--prefine-phimin", type=float, default=0.0)
     parser.add_argument("--prefine-inner-max-iter", type=int, default=20)
@@ -1146,11 +1316,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Raise immediately if an explicit prefine probe run fails.",
     )
+    parser.add_argument(
+        "--prefine-reviewed",
+        action="store_true",
+        help="Confirm that the prefine manifest/run command has been reviewed before executing probes.",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
+    if args.prefine_probes == "run" and not args.prefine_reviewed:
+        raise SystemExit("Refusing to run prefine probes without --prefine-reviewed.")
     default_cases, skipped_defaults = default_seed_cases()
     if args.list_defaults:
         _print_defaults(default_cases, skipped_defaults)
@@ -1198,6 +1375,11 @@ def main(argv: list[str] | None = None) -> int:
 
     prefine_manifest = None
     if args.prefine_probes != "none":
+        prefine_include_bounce_endpoints = (
+            args.include_bounce_endpoints
+            if args.prefine_include_bounce_endpoints is None
+            else args.prefine_include_bounce_endpoints
+        )
         prefine_config = QIPrefineProbeConfig(
             top_n=args.prefine_top_n,
             include_family_representatives=args.prefine_family_representatives,
@@ -1214,7 +1396,7 @@ def main(argv: list[str] | None = None) -> int:
             nphi=args.prefine_nphi,
             nalpha=args.prefine_nalpha,
             n_bounce=args.prefine_n_bounce,
-            include_bounce_endpoints=args.prefine_include_bounce_endpoints,
+            include_bounce_endpoints=prefine_include_bounce_endpoints,
             phimin=args.prefine_phimin,
             inner_max_iter=args.prefine_inner_max_iter,
             trial_max_iter=args.prefine_trial_max_iter,
@@ -1226,6 +1408,7 @@ def main(argv: list[str] | None = None) -> int:
                 config=prefine_config,
                 manifest_path=args.prefine_manifest,
                 dry_run=args.prefine_probes == "plan",
+                reviewed=args.prefine_reviewed,
             )
         except ValueError as exc:
             raise SystemExit(str(exc)) from exc
@@ -1233,6 +1416,7 @@ def main(argv: list[str] | None = None) -> int:
             prefine_manifest = run_qi_prefine_probe_manifest(
                 prefine_manifest,
                 fail_on_error=args.prefine_fail_on_error,
+                require_review=True,
             )
             report["no_optimization"] = False
         report["prefine_probe_mode"] = args.prefine_probes

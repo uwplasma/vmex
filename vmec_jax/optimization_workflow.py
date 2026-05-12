@@ -21,7 +21,12 @@ from .boundary import boundary_from_indata, boundary_input_from_indata
 from .driver import run_fixed_boundary, write_wout_from_fixed_boundary_run
 from .energy import flux_profiles_from_indata
 from .field import b_cartesian_from_state, signgs_from_sqrtg
-from .finite_beta import finite_beta_scalars_from_state, mercier_terms_from_state, redl_bootstrap_mismatch_from_state
+from .finite_beta import (
+    finite_beta_scalars_from_state,
+    magnetic_well_from_vp,
+    mercier_terms_from_state,
+    redl_bootstrap_mismatch_from_state,
+)
 from .geom import eval_geom
 from .init_guess import initial_guess_from_boundary
 from .optimization import (
@@ -473,13 +478,7 @@ class MagneticWell:
             indata=ctx.indata,
             signgs=ctx.signgs,
         )
-        vp = jnp.abs(jnp.asarray(scalars["vp"], dtype=jnp.float64))
-        dvol = vp[1:]
-        if int(dvol.shape[0]) < 2:
-            return jnp.asarray(0.0, dtype=jnp.float64)
-        dvol_s0 = 1.5 * dvol[0] - 0.5 * dvol[1]
-        dvol_s1 = 1.5 * dvol[-1] - 0.5 * dvol[-2]
-        return jnp.where(dvol_s0 != 0.0, (dvol_s0 - dvol_s1) / dvol_s0, 0.0)
+        return magnetic_well_from_vp(scalars["vp"])
 
     def J(self, ctx: StageContext, state):
         deficit = float(self.minimum) - self.well(ctx, state)

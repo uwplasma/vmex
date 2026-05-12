@@ -76,7 +76,7 @@ class Vmec2000Threed1Stage:
 
 
 _RE_STAGE = re.compile(
-    r"^\s*NS\s*=\s*(\d+)\s+NO\.\s+FOURIER\s+MODES\s*=\s*(\d+)\s+FTOLV\s*=\s*([0-9.Ee+-]+)\s+NITER\s*=\s*(\d+)"
+    r"^\s*NS\s*=\s*(\d+)\s+NO\.\s+FOURIER\s+MODES\s*=\s*(\d+)\s+FTOLV\s*=\s*([0-9.DdEe+-]+)\s+NITER\s*=\s*(\d+)"
 )
 _RE_ROW = re.compile(r"^\s*(\d+)\s+([0-9.DdEe+-]+)\s+([0-9.DdEe+-]+)\s+([0-9.DdEe+-]+)\s+")
 _RE_XC = re.compile(r"xc_.*_ns(\d+)_iter(\d+)\.dat$")

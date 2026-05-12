@@ -12,8 +12,10 @@ import argparse
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import time
+from typing import Any
 
 import numpy as np
 
@@ -22,7 +24,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
-def _parse_args() -> argparse.Namespace:
+def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser()
     p.add_argument("--problem", choices=("qa", "qh"), default="qa")
     p.add_argument("--max-mode", type=int, default=1)
@@ -85,11 +87,12 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--json-out", type=str, default="")
     p.add_argument(
         "--callback",
-        choices=("trial", "exact", "jacobian", "gradient", "linear", "run"),
+        choices=("trial", "exact", "accepted", "jacobian", "gradient", "linear", "run"),
         default="run",
         help=(
             "Profile one callback family and exit. 'run' executes the short "
-            "optimizer run controlled by --max-nfev."
+            "optimizer run controlled by --max-nfev. 'accepted' is an alias "
+            "for the exact accepted-point residual/tape callback."
         ),
     )
     p.add_argument("--repeats", type=int, default=1, help="Callback repetitions for --callback modes.")
@@ -161,7 +164,47 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable VMEC_JAX_TIMING so exact tape profiles include solver phase timings.",
     )
-    return p.parse_args()
+    p.add_argument(
+        "--budget-total-wall-s",
+        type=float,
+        default=0.0,
+        help="Fail/warn when total measured callback wall time exceeds this many seconds.",
+    )
+    p.add_argument(
+        "--budget-repeat-wall-s",
+        type=float,
+        default=0.0,
+        help="Fail/warn when any single callback repeat exceeds this many seconds.",
+    )
+    p.add_argument(
+        "--budget-rss-growth-mb",
+        type=float,
+        default=0.0,
+        help="Fail/warn when process RSS grows by more than this many MiB during callback profiling.",
+    )
+    p.add_argument(
+        "--budget-cache-entries",
+        type=int,
+        default=None,
+        help="Fail/warn when final observed in-process cache entries exceed this total.",
+    )
+    p.add_argument(
+        "--budget-cache-entry-growth",
+        type=int,
+        default=None,
+        help="Fail/warn when observed in-process cache entries grow by more than this amount.",
+    )
+    p.add_argument(
+        "--budget-action",
+        choices=("fail", "warn"),
+        default="fail",
+        help="Whether exceeded callback/cache budgets should fail the process or only warn.",
+    )
+    return p
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    return _build_parser().parse_args(argv)
 
 
 def _iota_mean_fn(vj, state, *, static, indata, signgs):
@@ -204,10 +247,290 @@ def _runtime_info() -> dict[str, object]:
         return {"error": repr(exc)}
 
 
+def _cache_len(value: Any) -> int:
+    try:
+        return int(len(value))
+    except Exception:
+        return 0
+
+
+def _cache_info_currsize(fn: Any) -> int:
+    try:
+        info = fn.cache_info()
+        return int(getattr(info, "currsize", 0))
+    except Exception:
+        return 0
+
+
+def _module_cache_lengths(module_name: str, names: tuple[str, ...]) -> dict[str, int]:
+    module = sys.modules.get(module_name)
+    if module is None:
+        return {}
+    return {name: _cache_len(getattr(module, name, None)) for name in names}
+
+
+def _sum_cache_entries(tree: Any) -> int:
+    if isinstance(tree, dict):
+        return int(sum(_sum_cache_entries(value) for key, value in tree.items() if key != "total_entries"))
+    if isinstance(tree, bool):
+        return 0
+    if isinstance(tree, int):
+        return int(tree)
+    return 0
+
+
+def _cache_snapshot(opt: Any | None = None, *, include_global: bool = True) -> dict[str, Any]:
+    """Return small cache cardinalities without retaining cache contents."""
+    out: dict[str, Any] = {}
+    if opt is not None:
+        out["optimizer"] = {
+            "exact_cache": _cache_len(getattr(opt, "_exact_cache", None)),
+            "exact_state_cache": _cache_len(getattr(opt, "_exact_state_cache", None)),
+            "exact_residual_cache": _cache_len(getattr(opt, "_exact_residual_cache", None)),
+            "trial_residual_cache": _cache_len(getattr(opt, "_trial_residual_cache", None)),
+            "initial_tangent_cache": _cache_len(getattr(opt, "_initial_tangent_cache", None)),
+            "discrete_jacobian_helper_cache": _cache_len(
+                getattr(opt, "_discrete_jacobian_helper_cache", None)
+            ),
+            "scan_exact_helper_cache": _cache_len(getattr(opt, "_scan_exact_helper_cache", None)),
+        }
+    if include_global:
+        out["solve"] = _module_cache_lengths(
+            "vmec_jax.solve",
+            (
+                "_SCAN_RUNNER_CACHE",
+                "_COMPUTE_FORCES_CACHE",
+                "_STRICT_UPDATE_STEP_JIT_CACHE",
+            ),
+        )
+        out["discrete_adjoint"] = _module_cache_lengths(
+            "vmec_jax.discrete_adjoint",
+            (
+                "_CHECKPOINT_TAPE_SCAN_CACHE",
+                "_CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE",
+                "_CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE",
+                "_CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_VJP_SCAN_CACHE",
+            ),
+        )
+        precond = _module_cache_lengths(
+            "vmec_jax.preconditioner_1d_jax",
+            ("_LAMBDA_PRECOND_JIT_CACHE",),
+        )
+        precond_module = sys.modules.get("vmec_jax.preconditioner_1d_jax")
+        if precond_module is not None:
+            precond["_make_rz_preconditioner_apply_jit"] = _cache_info_currsize(
+                getattr(precond_module, "_make_rz_preconditioner_apply_jit", None)
+            )
+        out["preconditioner_1d_jax"] = precond
+        out["vmec_numpy_forces"] = _module_cache_lengths(
+            "vmec_jax.vmec_numpy_forces",
+            ("_NP_STACK_CACHE",),
+        )
+    out["total_entries"] = _sum_cache_entries(out)
+    return out
+
+
+def _flatten_ints(tree: Any, *, prefix: str = "") -> dict[str, int]:
+    if isinstance(tree, dict):
+        out: dict[str, int] = {}
+        for key, value in tree.items():
+            child_prefix = f"{prefix}.{key}" if prefix else str(key)
+            out.update(_flatten_ints(value, prefix=child_prefix))
+        return out
+    if isinstance(tree, bool):
+        return {}
+    if isinstance(tree, int):
+        return {prefix: int(tree)}
+    return {}
+
+
+def _cache_growth(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    before_flat = _flatten_ints(before)
+    after_flat = _flatten_ints(after)
+    keys = sorted(set(before_flat) | set(after_flat))
+    entries = {
+        key: {
+            "before": int(before_flat.get(key, 0)),
+            "after": int(after_flat.get(key, 0)),
+            "delta": int(after_flat.get(key, 0) - before_flat.get(key, 0)),
+        }
+        for key in keys
+        if key != "total_entries"
+    }
+    return {
+        "total_entries_before": int(before.get("total_entries", 0)),
+        "total_entries_after": int(after.get("total_entries", 0)),
+        "total_entries_delta": int(after.get("total_entries", 0) - before.get("total_entries", 0)),
+        "entries": entries,
+    }
+
+
+def _profile_delta(
+    before: dict[str, dict[str, float | int]],
+    after: dict[str, dict[str, float | int]],
+) -> dict[str, dict[str, float | int]]:
+    out: dict[str, dict[str, float | int]] = {}
+    for name in sorted(set(before) | set(after)):
+        rec_before = before.get(name, {})
+        rec_after = after.get(name, {})
+        count = int(rec_after.get("count", 0)) - int(rec_before.get("count", 0))
+        wall = float(rec_after.get("wall_time_s", 0.0)) - float(rec_before.get("wall_time_s", 0.0))
+        if count or abs(wall) > 0.0:
+            out[name] = {
+                "count": count,
+                "wall_time_s": wall,
+                "mean_wall_time_s": wall / count if count else 0.0,
+            }
+    return out
+
+
+def _current_rss_bytes() -> int | None:
+    try:
+        import psutil  # type: ignore
+
+        return int(psutil.Process().memory_info().rss)
+    except Exception:
+        pass
+    proc_statm = Path("/proc/self/statm")
+    if proc_statm.exists():
+        try:
+            pages = int(proc_statm.read_text(encoding="utf-8").split()[1])
+            return pages * int(os.sysconf("SC_PAGE_SIZE"))
+        except Exception:
+            pass
+    try:
+        rss_kb = subprocess.check_output(
+            ["ps", "-o", "rss=", "-p", str(os.getpid())],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        return int(rss_kb) * 1024
+    except Exception:
+        pass
+    try:
+        import resource
+
+        maxrss = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        if sys.platform == "darwin":
+            return maxrss
+        return maxrss * 1024
+    except Exception:
+        return None
+
+
+def _budget_limits(args: argparse.Namespace) -> dict[str, float | int | None]:
+    cache_entries = args.budget_cache_entries
+    cache_entry_growth = args.budget_cache_entry_growth
+    return {
+        "total_wall_s": float(args.budget_total_wall_s) if float(args.budget_total_wall_s) > 0.0 else None,
+        "repeat_wall_s": float(args.budget_repeat_wall_s) if float(args.budget_repeat_wall_s) > 0.0 else None,
+        "rss_growth_mb": float(args.budget_rss_growth_mb) if float(args.budget_rss_growth_mb) > 0.0 else None,
+        "cache_entries": cache_entries if cache_entries is not None and int(cache_entries) >= 0 else None,
+        "cache_entry_growth": (
+            cache_entry_growth if cache_entry_growth is not None and int(cache_entry_growth) >= 0 else None
+        ),
+    }
+
+
+def _evaluate_budgets(
+    *,
+    args: argparse.Namespace,
+    samples: list[dict[str, Any]],
+    total_wall_s: float,
+    cache_growth: dict[str, Any],
+    rss_before_bytes: int | None,
+    rss_after_bytes: int | None,
+) -> dict[str, Any]:
+    limits = _budget_limits(args)
+    max_repeat_wall_s = max((float(sample.get("wall_time_s", 0.0)) for sample in samples), default=0.0)
+    rss_growth_mb = None
+    if rss_before_bytes is not None and rss_after_bytes is not None:
+        rss_growth_mb = (int(rss_after_bytes) - int(rss_before_bytes)) / (1024.0 * 1024.0)
+    measurements = {
+        "total_wall_s": float(total_wall_s),
+        "max_repeat_wall_s": float(max_repeat_wall_s),
+        "rss_growth_mb": rss_growth_mb,
+        "cache_entries": int(cache_growth.get("total_entries_after", 0)),
+        "cache_entry_growth": int(cache_growth.get("total_entries_delta", 0)),
+    }
+    exceeded: list[dict[str, float | int | str]] = []
+
+    def _check(name: str, value: float | int | None, limit: float | int | None) -> None:
+        if value is None or limit is None:
+            return
+        if float(value) > float(limit):
+            exceeded.append({"name": name, "value": value, "limit": limit})
+
+    _check("total_wall_s", measurements["total_wall_s"], limits["total_wall_s"])
+    _check("repeat_wall_s", measurements["max_repeat_wall_s"], limits["repeat_wall_s"])
+    _check("rss_growth_mb", measurements["rss_growth_mb"], limits["rss_growth_mb"])
+    _check("cache_entries", measurements["cache_entries"], limits["cache_entries"])
+    _check("cache_entry_growth", measurements["cache_entry_growth"], limits["cache_entry_growth"])
+    return {
+        "ok": not exceeded,
+        "action": str(args.budget_action),
+        "limits": limits,
+        "measurements": measurements,
+        "exceeded": exceeded,
+    }
+
+
+def _build_callback_payload(
+    *,
+    args: argparse.Namespace,
+    specs_count: int,
+    solver_device_resolved: str,
+    samples: list[dict[str, Any]],
+    profile: dict[str, dict[str, float | int]],
+    cache_before: dict[str, Any],
+    cache_after: dict[str, Any],
+    rss_before_bytes: int | None,
+    rss_after_bytes: int | None,
+    total_wall_s: float,
+    runtime: dict[str, object] | None = None,
+) -> dict[str, Any]:
+    growth = _cache_growth(cache_before, cache_after)
+    budget_status = _evaluate_budgets(
+        args=args,
+        samples=samples,
+        total_wall_s=total_wall_s,
+        cache_growth=growth,
+        rss_before_bytes=rss_before_bytes,
+        rss_after_bytes=rss_after_bytes,
+    )
+    return {
+        "schema_version": 2,
+        "report_kind": "exact_optimizer_callback_profile",
+        "problem": args.problem,
+        "max_mode": int(args.max_mode),
+        "dofs": int(specs_count),
+        "callback": "exact" if args.callback == "accepted" else args.callback,
+        "perturb_scale": float(args.perturb_scale),
+        "perturb_seed": int(args.perturb_seed),
+        "clear_between_repeats": bool(args.clear_between_repeats),
+        "solver_device_requested": args.solver_device,
+        "solver_device_resolved": solver_device_resolved,
+        "runtime": _runtime_info() if runtime is None else runtime,
+        "total_wall_time_s": float(total_wall_s),
+        "rss_before_bytes": rss_before_bytes,
+        "rss_after_bytes": rss_after_bytes,
+        "samples": samples,
+        "profile": profile,
+        "cache": {
+            "before": cache_before,
+            "after": cache_after,
+            "growth": growth,
+        },
+        "budget_status": budget_status,
+    }
+
+
 def _clear_optimizer_point_caches(opt) -> None:
     """Clear solved-state/tape caches without dropping compiled executables."""
     opt._exact_cache.clear()
     opt._exact_state_cache.clear()
+    if hasattr(opt, "_exact_residual_cache"):
+        opt._exact_residual_cache.clear()
     opt._trial_residual_cache.clear()
     opt._initial_tangent_cache.clear()
     opt._last_jacobian_residual = None
@@ -299,8 +622,9 @@ def main() -> int:
         f"inner=({args.inner_max_iter}, {args.inner_ftol:g}) "
         f"trial=({args.trial_max_iter}, {args.trial_ftol:g})"
     )
+    runtime_info = _runtime_info()
     print(f"Requested solver_device={args.solver_device} resolved={opt._solver_device_name or 'default'}")
-    print(f"Runtime={json.dumps(_runtime_info(), sort_keys=True)}")
+    print(f"Runtime={json.dumps(runtime_info, sort_keys=True)}")
     print(f"Initial aspect={opt.aspect_ratio(params0):.6f} qs={opt.quasisymmetry_objective(params0):.6e}")
     opt.clear_caches()
     opt._profile = {}
@@ -309,7 +633,10 @@ def main() -> int:
         repeats = max(1, int(args.repeats))
         perturb_scale = float(args.perturb_scale)
         rng = np.random.default_rng(int(args.perturb_seed))
-        samples: list[dict[str, object]] = []
+        samples: list[dict[str, Any]] = []
+        cache_before = _cache_snapshot(opt)
+        rss_before = _current_rss_bytes()
+        total_t0 = time.perf_counter()
         for repeat in range(repeats):
             if repeat > 0 and args.clear_between_repeats:
                 opt.clear_caches()
@@ -317,34 +644,30 @@ def main() -> int:
                 params = params0 + perturb_scale * rng.standard_normal(params0.shape)
             else:
                 params = params0
+            profile_before = opt._profile_dump()
+            repeat_cache_before = _cache_snapshot(opt)
+            repeat_rss_before = _current_rss_bytes()
             t0 = time.perf_counter()
             if args.callback == "trial":
                 value = opt.forward_residual_fun(params)
                 metric = float(np.linalg.norm(value))
                 shape = list(np.asarray(value).shape)
-            elif args.callback == "exact":
+                extra: dict[str, Any] = {}
+            elif args.callback in ("exact", "accepted"):
                 value = opt.residual_fun(params)
                 metric = float(np.linalg.norm(value))
                 shape = list(np.asarray(value).shape)
+                extra = {}
             elif args.callback == "jacobian":
                 value = opt.jacobian_fun(params)
                 metric = float(np.linalg.norm(value))
                 shape = list(np.asarray(value).shape)
+                extra = {}
             elif args.callback == "gradient":
                 cost, grad = opt.objective_and_gradient_fun(params)
                 metric = float(np.linalg.norm(grad))
                 shape = [int(np.asarray(grad).size)]
-                samples.append(
-                    {
-                        "repeat": repeat,
-                        "wall_time_s": time.perf_counter() - t0,
-                        "cost": float(cost),
-                        "metric_norm": metric,
-                        "param_step_norm": float(np.linalg.norm(params - params0)),
-                        "shape": shape,
-                    }
-                )
-                continue
+                extra = {"cost": float(cost)}
             elif args.callback == "linear":
                 op = opt.residual_linear_operator(params)
                 direction = np.ones(len(specs), dtype=float)
@@ -353,50 +676,78 @@ def main() -> int:
                 jtw = op.rmatvec(cotangent)
                 metric = float(np.linalg.norm(jv) + np.linalg.norm(jtw))
                 shape = [int(op.shape[0]), int(op.shape[1])]
+                extra = {}
             else:  # pragma: no cover - guarded by argparse
                 raise ValueError(args.callback)
-            samples.append(
-                {
-                    "repeat": repeat,
-                    "wall_time_s": time.perf_counter() - t0,
-                    "metric_norm": metric,
-                    "param_step_norm": float(np.linalg.norm(params - params0)),
-                    "shape": shape,
-                }
-            )
+            wall_time_s = time.perf_counter() - t0
+            profile_after = opt._profile_dump()
+            repeat_cache_after = _cache_snapshot(opt)
+            repeat_rss_after = _current_rss_bytes()
+            repeat_growth = _cache_growth(repeat_cache_before, repeat_cache_after)
+            sample = {
+                "repeat": repeat,
+                "wall_time_s": wall_time_s,
+                "metric_norm": metric,
+                "param_step_norm": float(np.linalg.norm(params - params0)),
+                "shape": shape,
+                "profile_delta": _profile_delta(profile_before, profile_after),
+                "cache_before": repeat_cache_before,
+                "cache_after": repeat_cache_after,
+                "cache_growth": repeat_growth,
+                "rss_before_bytes": repeat_rss_before,
+                "rss_after_bytes": repeat_rss_after,
+            }
+            sample.update(extra)
+            samples.append(sample)
         profile = opt._profile_dump()
-        print(f"\nCallback={args.callback} repeats={repeats}")
+        total_wall_s = time.perf_counter() - total_t0
+        cache_after = _cache_snapshot(opt)
+        rss_after = _current_rss_bytes()
+        callback_payload = _build_callback_payload(
+            args=args,
+            specs_count=len(specs),
+            solver_device_resolved=opt._solver_device_name or "default",
+            samples=samples,
+            profile=profile,
+            cache_before=cache_before,
+            cache_after=cache_after,
+            rss_before_bytes=rss_before,
+            rss_after_bytes=rss_after,
+            total_wall_s=total_wall_s,
+            runtime=runtime_info,
+        )
+        effective_callback = callback_payload["callback"]
+        print(f"\nCallback={effective_callback} repeats={repeats}")
         for sample in samples:
             print(
                 f"  repeat={sample['repeat']} wall={float(sample['wall_time_s']):.3f}s "
                 f"norm={float(sample['metric_norm']):.6e} "
                 f"||dx||={float(sample['param_step_norm']):.3e} "
-                f"shape={sample['shape']}"
+                f"shape={sample['shape']} "
+                f"cache_delta={sample['cache_growth']['total_entries_delta']}"
             )
         _print_profile(profile)
+        cache_growth = callback_payload["cache"]["growth"]
+        budget_status = callback_payload["budget_status"]
+        print(
+            "\nCache growth: "
+            f"entries {cache_growth['total_entries_before']} -> "
+            f"{cache_growth['total_entries_after']} "
+            f"(delta {cache_growth['total_entries_delta']})"
+        )
+        if budget_status["exceeded"]:
+            print("\nBudget exceeded:")
+            for item in budget_status["exceeded"]:
+                print(f"  {item['name']}: value={item['value']} limit={item['limit']}")
+        elif any(value is not None for value in budget_status["limits"].values()):
+            print("\nBudgets OK")
         if args.json_out:
             out = Path(args.json_out).expanduser().resolve()
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(
-                json.dumps(
-                    {
-                        "problem": args.problem,
-                        "max_mode": int(args.max_mode),
-                        "dofs": len(specs),
-                        "callback": args.callback,
-                        "perturb_scale": perturb_scale,
-                        "perturb_seed": int(args.perturb_seed),
-                        "solver_device_requested": args.solver_device,
-                        "solver_device_resolved": opt._solver_device_name or "default",
-                        "runtime": _runtime_info(),
-                        "samples": samples,
-                        "profile": profile,
-                    },
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
+            out.write_text(json.dumps(callback_payload, indent=2), encoding="utf-8")
             print(f"Wrote {out}")
+        if budget_status["exceeded"] and budget_status["action"] == "fail":
+            return 2
         return 0
 
     if args.check_linear_operator:

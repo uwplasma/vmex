@@ -7,6 +7,7 @@ import numpy as np
 
 import vmec_jax.optimization as opt_module
 from vmec_jax.optimization import FixedBoundaryExactOptimizer
+from tools.diagnostics import profile_exact_optimizer as exact_profile_tool
 
 
 def _bare_optimizer() -> FixedBoundaryExactOptimizer:
@@ -118,3 +119,123 @@ def test_run_does_not_force_dynamic_replay_bucket(monkeypatch) -> None:
 
     assert result["_history_dump"]["success"] is True
     assert "VMEC_JAX_DYNAMIC_REPLAY_BUCKET" not in os.environ
+
+
+def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:
+    args = exact_profile_tool._parse_args(
+        [
+            "--callback",
+            "accepted",
+            "--repeats",
+            "3",
+            "--perturb-scale",
+            "1e-4",
+            "--budget-total-wall-s",
+            "30",
+            "--budget-repeat-wall-s",
+            "12",
+            "--budget-rss-growth-mb",
+            "256",
+            "--budget-cache-entries",
+            "40",
+            "--budget-cache-entry-growth",
+            "8",
+            "--budget-action",
+            "warn",
+        ]
+    )
+
+    assert args.callback == "accepted"
+    assert args.repeats == 3
+    assert args.perturb_scale == 1.0e-4
+    assert args.budget_total_wall_s == 30.0
+    assert args.budget_repeat_wall_s == 12.0
+    assert args.budget_rss_growth_mb == 256.0
+    assert args.budget_cache_entries == 40
+    assert args.budget_cache_entry_growth == 8
+    assert args.budget_action == "warn"
+
+
+def test_exact_optimizer_profile_cache_snapshot_and_delta_schema() -> None:
+    opt = FixedBoundaryExactOptimizer.__new__(FixedBoundaryExactOptimizer)
+    opt._exact_cache = {"a": object()}
+    opt._exact_state_cache = {}
+    opt._exact_residual_cache = {"a": np.asarray([1.0])}
+    opt._trial_residual_cache = OrderedDict([("b", np.asarray([2.0]))])
+    opt._initial_tangent_cache = {}
+    opt._discrete_jacobian_helper_cache = {"j": object()}
+    opt._scan_exact_helper_cache = {}
+
+    snapshot = exact_profile_tool._cache_snapshot(opt, include_global=False)
+    assert snapshot["optimizer"]["exact_cache"] == 1
+    assert snapshot["optimizer"]["trial_residual_cache"] == 1
+    assert snapshot["total_entries"] == 4
+
+    delta = exact_profile_tool._profile_delta(
+        {"exact_tape_build": {"count": 1, "wall_time_s": 2.0}},
+        {
+            "exact_tape_build": {"count": 3, "wall_time_s": 7.0},
+            "jacobian_tape_replay": {"count": 1, "wall_time_s": 4.0},
+        },
+    )
+    assert delta["exact_tape_build"]["count"] == 2
+    assert delta["exact_tape_build"]["wall_time_s"] == 5.0
+    assert delta["jacobian_tape_replay"]["mean_wall_time_s"] == 4.0
+
+
+def test_exact_optimizer_callback_report_schema_and_budget_status() -> None:
+    args = exact_profile_tool._parse_args(
+        [
+            "--problem",
+            "qh",
+            "--max-mode",
+            "2",
+            "--callback",
+            "accepted",
+            "--perturb-scale",
+            "1e-4",
+            "--budget-total-wall-s",
+            "1.0",
+            "--budget-repeat-wall-s",
+            "0.5",
+            "--budget-rss-growth-mb",
+            "1.0",
+            "--budget-cache-entry-growth",
+            "0",
+        ]
+    )
+    cache_before = {"optimizer": {"exact_cache": 0}, "total_entries": 0}
+    cache_after = {"optimizer": {"exact_cache": 2}, "total_entries": 2}
+
+    report = exact_profile_tool._build_callback_payload(
+        args=args,
+        specs_count=24,
+        solver_device_resolved="cpu",
+        samples=[
+            {
+                "repeat": 0,
+                "wall_time_s": 0.75,
+                "metric_norm": 1.0,
+                "param_step_norm": 1.0e-4,
+                "shape": [3],
+                "profile_delta": {},
+                "cache_growth": {"total_entries_delta": 2},
+            }
+        ],
+        profile={"exact_tape_build": {"count": 1, "wall_time_s": 0.4, "mean_wall_time_s": 0.4}},
+        cache_before=cache_before,
+        cache_after=cache_after,
+        rss_before_bytes=100 * 1024 * 1024,
+        rss_after_bytes=103 * 1024 * 1024,
+        total_wall_s=1.25,
+        runtime={"default_backend": "cpu"},
+    )
+
+    assert report["schema_version"] == 2
+    assert report["report_kind"] == "exact_optimizer_callback_profile"
+    assert report["callback"] == "exact"
+    assert report["cache"]["growth"]["total_entries_delta"] == 2
+    assert report["budget_status"]["ok"] is False
+    assert {
+        item["name"] for item in report["budget_status"]["exceeded"]
+    } == {"total_wall_s", "repeat_wall_s", "rss_growth_mb", "cache_entry_growth"}

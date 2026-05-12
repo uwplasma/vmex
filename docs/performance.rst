@@ -306,6 +306,36 @@ unattributed tape-building overhead terms.  Use that mode when optimizing the
 accepted-point path; omit it for production sweeps to avoid extra console
 output.
 
+For production cache-growth audits, use the same accepted-point callback mode
+with JSON output and explicit budgets.  The report records per-repeat phase
+deltas, optimizer/global JIT cache cardinalities before and after each repeat,
+RSS growth, cumulative callback profile, and a ``budget_status`` block.  A
+budget breach exits with status ``2`` by default; pass ``--budget-action warn``
+to keep the run informational:
+
+.. code-block:: bash
+
+   JAX_PLATFORMS=cpu PYTHONPATH=. python tools/diagnostics/profile_exact_optimizer.py \
+     --problem qh --max-mode 2 --callback jacobian --repeats 3 \
+     --perturb-scale 1e-4 --inner-max-iter 80 --trial-max-iter 40 \
+     --solver-device cpu --vmec-timing \
+     --budget-total-wall-s 45 --budget-repeat-wall-s 20 \
+     --budget-cache-entry-growth 12 --budget-rss-growth-mb 1024 \
+     --json-out /tmp/qh_m2_cpu_callback_cache.json
+
+   JAX_PLATFORM_NAME=gpu PYTHONPATH=. python tools/diagnostics/profile_exact_optimizer.py \
+     --problem qh --max-mode 2 --callback jacobian --repeats 3 \
+     --perturb-scale 1e-4 --inner-max-iter 80 --trial-max-iter 40 \
+     --solver-device gpu --vmec-timing \
+     --budget-total-wall-s 90 --budget-repeat-wall-s 45 \
+     --budget-cache-entry-growth 12 --budget-rss-growth-mb 4096 \
+     --json-out /tmp/qh_m2_gpu_callback_cache.json
+
+Use ``--callback accepted`` when you only want the accepted-point residual/tape
+build without dense Jacobian replay.  Keep ``--clear-between-repeats`` off for
+cache-growth audits; enabling it intentionally drops optimizer/JIT caches
+between repeats and measures cold callback behavior instead.
+
 For the standalone sweep scripts, worker subprocesses also inherit the parent
 JAX backend by default.  Use ``JAX_PLATFORMS=cpu`` or
 ``--worker-jax-platforms cpu`` only when an explicit CPU-only worker process is

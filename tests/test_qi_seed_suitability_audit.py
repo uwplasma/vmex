@@ -28,12 +28,14 @@ def test_parse_case_and_default_families_cover_seed_types():
 
     case = mod.parse_case("candidate_qi:QI:/tmp/input:/tmp/wout.nc")
     families = mod.parse_seed_families("QI,qp,simple")
+    stage_modes = mod.parse_stage_modes("1,1,2,2,3")
 
     assert case.label == "candidate_qi"
     assert case.family == "qi"
     assert case.input_path == Path("/tmp/input")
     assert case.wout_path == Path("/tmp/wout.nc")
     assert families == ("qi", "qp", "simple")
+    assert stage_modes == (1, 1, 2, 2, 3)
 
     default_cases, _skipped = mod.default_seed_cases()
     families = {case.family for case in default_cases}
@@ -210,6 +212,7 @@ def test_build_seed_audit_can_select_best_well_phase(monkeypatch):
 def test_prefine_probe_manifest_selects_top_rows_and_stays_dry(tmp_path):
     mod = _load_module()
     report = {
+        "resolution": {"include_bounce_endpoints": True},
         "cases": [
             {
                 "suitability_rank": 1,
@@ -220,6 +223,9 @@ def test_prefine_probe_manifest_selects_top_rows_and_stays_dry(tmp_path):
                 "qi_seed_score": 0.2,
                 "qi_smooth_total": 0.1,
                 "qi_legacy_total": 0.1,
+                "selected_phimin": 0.5,
+                "phimin_policy": "well-phase",
+                "phimin_candidates": [0.0, 0.5],
                 "failed_constraints": [],
             },
             {
@@ -251,9 +257,37 @@ def test_prefine_probe_manifest_selects_top_rows_and_stays_dry(tmp_path):
     assert manifest["plans"][0]["representative_families"] == ["qi"]
     assert manifest["plans"][0]["output_dir"].endswith("01_better_qi")
     assert "--prefine-probes run" in manifest["plans"][0]["run_command"]
+    assert "--prefine-reviewed" in manifest["plans"][0]["run_command"]
     assert manifest["plans"][0]["optimization"]["max_nfev"] <= mod.MAX_PREFINE_MAX_NFEV
+    assert manifest["plans"][0]["optimization"]["stage_modes"] == [1, 1, 2, 2, 3]
+    assert manifest["plans"][0]["optimization"]["stage_count"] == 5
+    assert manifest["plans"][0]["optimization"]["total_nfev_cap"] == 6
     assert manifest["plans"][0]["qi_options"]["nphi"] <= mod.MAX_PREFINE_QI_NPHI
     assert manifest["plans"][0]["qi_options"]["include_bounce_endpoints"] is True
+    assert manifest["plans"][0]["qi_options"]["endpoint_mode"] == "include_bounce_endpoints"
+    assert manifest["plans"][0]["qi_options"]["phimin"] == 0.5
+    assert manifest["plans"][0]["phimin"] == {
+        "value": 0.5,
+        "source": "audit_selected_phimin",
+        "audit_policy": "well-phase",
+        "audit_candidates": [0.0, 0.5],
+    }
+    assert manifest["plans"][0]["endpoint_mode"] == "include_bounce_endpoints"
+    assert manifest["plans"][0]["endpoint_alignment"] == {
+        "audit_include_bounce_endpoints": True,
+        "prefine_include_bounce_endpoints": True,
+        "aligned": True,
+        "endpoint_mode": "include_bounce_endpoints",
+    }
+    assert manifest["plans"][0]["stages"][0]["mode"] == 1
+    assert manifest["plans"][0]["stages"][1]["repeat_index_for_mode"] == 2
+    assert manifest["plans"][0]["stages"][-1]["mode"] == 3
+    assert manifest["plans"][0]["stages"][-1]["nfev_cap"] == 2
+    assert manifest["plans"][0]["caps"]["per_probe_total_nfev"] == 6
+    assert manifest["hard_caps"]["stage_count"] == mod.MAX_PREFINE_STAGE_COUNT
+    assert manifest["effective_caps"]["per_probe_total_nfev"] == 6
+    assert manifest["endpoint_alignment"]["aligned"] is True
+    assert manifest["review"]["status"] == "requires_review"
 
     bad_config = mod.QIPrefineProbeConfig(top_n=mod.MAX_PREFINE_TOP_N + 1)
     with pytest.raises(ValueError, match="top_n"):
@@ -261,6 +295,15 @@ def test_prefine_probe_manifest_selects_top_rows_and_stays_dry(tmp_path):
             report,
             config=bad_config,
             manifest_path=tmp_path / "bad.json",
+            dry_run=True,
+        )
+
+    reversed_stage_config = mod.QIPrefineProbeConfig(stage_modes=(1, 2, 1), max_mode=2)
+    with pytest.raises(ValueError, match="nondecreasing"):
+        mod.build_qi_prefine_probe_manifest(
+            report,
+            config=reversed_stage_config,
+            manifest_path=tmp_path / "bad_stages.json",
             dry_run=True,
         )
 
@@ -411,7 +454,7 @@ def test_run_qi_prefine_probe_dispatches_tiny_qi_solve(tmp_path):
                     "total_wall_time_s": 0.5,
                 }
             },
-            stage_modes=[1],
+            stage_modes=[1, 1, 2, 2, 3],
         )
 
     fake_workflow = SimpleNamespace(
@@ -426,9 +469,38 @@ def test_run_qi_prefine_probe_dispatches_tiny_qi_solve(tmp_path):
 
     assert completed["status"] == "completed"
     assert completed["result"]["objective_final"] == 1.0
+    assert completed["result"]["requested_stage_modes"] == [1, 1, 2, 2, 3]
+    assert completed["result"]["completed_stage_modes"] == [1, 1, 2, 2, 3]
+    assert completed["result"]["stage_count_requested"] == 5
+    assert completed["result"]["total_nfev_cap"] == 6
+    assert completed["result"]["endpoint_mode"] == "include_bounce_endpoints"
     assert calls["qi_options"]["nphi"] == 31
     assert calls["qi_options"]["include_bounce_endpoints"] is True
-    assert calls["from_input"]["max_mode"] == 1
+    assert calls["from_input"]["max_mode"] == 3
     assert calls["solve"]["max_nfev"] == 2
-    assert calls["solve"]["stage_modes"] == (1,)
+    assert calls["solve"]["stage_modes"] == (1, 1, 2, 2, 3)
     assert calls["solve"]["save_stage_wouts"] is False
+
+
+def test_prefine_probe_manifest_run_can_require_review(tmp_path):
+    mod = _load_module()
+    manifest = mod.build_qi_prefine_probe_manifest(
+        {
+            "cases": [
+                {
+                    "suitability_rank": 1,
+                    "label": "candidate_qi",
+                    "family": "qi",
+                    "input": "/tmp/input_qi",
+                    "wout": "/tmp/wout_qi.nc",
+                    "qi_seed_score": 0.2,
+                },
+            ]
+        },
+        config=mod.QIPrefineProbeConfig(output_dir=tmp_path / "probes"),
+        manifest_path=tmp_path / "manifest.json",
+        dry_run=False,
+    )
+
+    with pytest.raises(ValueError, match="reviewed manifest"):
+        mod.run_qi_prefine_probe_manifest(manifest, require_review=True, workflow=SimpleNamespace())
