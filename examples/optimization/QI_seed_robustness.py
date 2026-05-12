@@ -44,9 +44,15 @@ ALPHA = 1.2
 MAKE_PLOTS = True
 TARGET_ASPECT = 5.0
 TARGET_ABS_IOTA_MIN = 0.41
+MAX_MIRROR_RATIO = 0.21
+MAX_ELONGATION = 8.0
 ASPECT_WEIGHT = 0.25
 IOTA_FLOOR_WEIGHT = 200.0**2
 QI_WEIGHT = 10.0
+MIRROR_WEIGHT = 10.0
+ELONGATION_WEIGHT = 10.0
+MIRROR_SMOOTH_EXTREMA = 2.0e-2
+MIRROR_SMOOTH_PENALTY = 2.0e-2
 QI_GATE_SMOOTH_MAX = 2.0e-3
 QI_GATE_LEGACY_MAX = 1.0e-3
 
@@ -84,9 +90,16 @@ objective_tuples = [
 
 # Optional engineering cleanup.  Mirror/elongation can be included after the
 # QI+iota branch is established, but too much scalar pressure can destroy QI.
-# mirror = vj.MirrorRatio(threshold=0.21, ntheta=96, nphi=96, surface_index=0)
-# elongation = vj.MaxElongation(threshold=8.0, ntheta=48, nphi=16)
-# objective_tuples += [(mirror.J, 0.0, 1.0), (elongation.J, 0.0, 1.0)]
+# mirror = vj.MirrorRatio(
+#     threshold=MAX_MIRROR_RATIO,
+#     ntheta=96,
+#     nphi=96,
+#     surface_index=None,  # all QI surfaces, matching the diagnostic gate
+#     smooth_extrema=MIRROR_SMOOTH_EXTREMA,
+#     smooth_penalty=MIRROR_SMOOTH_PENALTY,
+# )
+# elongation = vj.MaxElongation(threshold=MAX_ELONGATION, ntheta=48, nphi=16)
+# objective_tuples += [(mirror.J, 0.0, MIRROR_WEIGHT), (elongation.J, 0.0, ELONGATION_WEIGHT)]
 
 problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
 vmec = vj.FixedBoundaryVMEC.from_input(
@@ -160,6 +173,8 @@ diagnostic_options = vj.QIDiagnosticOptions(
     n_bounce=51,
     include_bounce_endpoints=True,
     phimin=0.0,
+    mirror_threshold=MAX_MIRROR_RATIO,
+    elongation_threshold=MAX_ELONGATION,
 )
 diagnostics = vj.qi_diagnostics_from_state(
     state=result.final_state,
@@ -172,16 +187,27 @@ diagnostics = vj.qi_diagnostics_from_state(
 smooth_qi = float(diagnostics["qi_smooth_total"])
 legacy_qi = float(diagnostics["qi_legacy_total"])
 abs_iota = abs(float(history.get("iota_final", 0.0)))
+mirror_ratio = float(diagnostics["qi_mirror_ratio_max"])
+max_elongation = float(diagnostics["qi_max_elongation"])
 qi_gate_passed = (
     smooth_qi <= QI_GATE_SMOOTH_MAX
     and legacy_qi <= QI_GATE_LEGACY_MAX
     and abs_iota >= TARGET_ABS_IOTA_MIN
 )
+engineering_gate_passed = (
+    qi_gate_passed
+    and mirror_ratio <= MAX_MIRROR_RATIO
+    and max_elongation <= MAX_ELONGATION
+)
 print("\nIndependent QI promotion gate:")
 print(f"  smooth QI:       {smooth_qi:.6e}  (limit {QI_GATE_SMOOTH_MAX:.1e})")
 print(f"  legacy QI:       {legacy_qi:.6e}  (limit {QI_GATE_LEGACY_MAX:.1e})")
 print(f"  abs(mean iota):  {abs_iota:.6g}  (minimum {TARGET_ABS_IOTA_MIN:.3g})")
-print(f"  promoted:        {qi_gate_passed}")
+print(f"  mirror ratio:    {mirror_ratio:.6g}  (target {MAX_MIRROR_RATIO:.3g})")
+print(f"  mirror by surf:  {diagnostics.get('qi_mirror_ratio_by_surface')}")
+print(f"  max elongation:  {max_elongation:.6g}  (target {MAX_ELONGATION:.3g})")
+print(f"  QI+iota gate:    {qi_gate_passed}")
+print(f"  full eng. gate:  {engineering_gate_passed}")
 print("\nSaved files:")
 for name, path in paths.items():
     print(f"  {name}: {path}")

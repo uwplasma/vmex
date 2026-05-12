@@ -110,6 +110,8 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "plot_boozer_bmag_contours_from_state(" in text
     assert "qi_diagnostics_from_state(" in text
     assert "qi_gate_passed" in text
+    assert "engineering_gate_passed" in text
+    assert "qi_mirror_ratio_by_surface" in text
     assert 'saved_paths["initial_wout"]' in text
     assert 'saved_paths["history"]' in text
 
@@ -358,6 +360,28 @@ def test_qi_field_objectives_raise_outside_qi_solve() -> None:
             objective.J(None, None)
 
 
+def test_mirror_ratio_objective_records_all_surface_smoothing_options() -> None:
+    from vmec_jax.optimization_workflow import MirrorRatio, QuasiIsodynamicOptions
+
+    qi_options = QuasiIsodynamicOptions(surfaces=[0.2, 0.8])
+    mirror = MirrorRatio(
+        threshold=0.21,
+        ntheta=48,
+        nphi=64,
+        surface_index=None,
+        smooth_extrema=2.0e-2,
+        smooth_penalty=1.0e-2,
+        qi_options=qi_options,
+    )
+    term = mirror.to_qi_term(3.0)
+
+    assert mirror.surface_index is None
+    assert mirror.smooth_extrema == pytest.approx(2.0e-2)
+    assert mirror.smooth_penalty == pytest.approx(1.0e-2)
+    assert term.name == "mirror_ratio"
+    assert term.qi_options is qi_options
+
+
 def test_least_squares_problem_collects_problem_metadata() -> None:
     from vmec_jax.optimization_workflow import AbsMeanIotaFloor, AspectRatio, LeastSquaresProblem, MeanIota
 
@@ -513,11 +537,22 @@ def test_qi_objective_factories_apply_weights_and_slice_shared_fields(monkeypatc
     assert total == 12.0
     assert field_term.qi_options is qi_options
 
-    def fake_mirror_ratio_penalty_from_boozer_output(booz, *, nfp, threshold, ntheta, nphi):
+    def fake_mirror_ratio_penalty_from_boozer_output(
+        booz,
+        *,
+        nfp,
+        threshold,
+        ntheta,
+        nphi,
+        smooth_extrema,
+        smooth_penalty,
+    ):
         assert nfp == 5
         assert threshold == 1.2
         assert ntheta == 8
         assert nphi == 9
+        assert smooth_extrema == 0.0
+        assert smooth_penalty == 0.0
         np.testing.assert_array_equal(booz["s_b"], [0.75])
         np.testing.assert_array_equal(booz["iota_b"], [0.3])
         assert booz["untouched"] == "kept"

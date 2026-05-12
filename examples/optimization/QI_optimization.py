@@ -71,8 +71,9 @@ MAKE_PLOTS = True
 
 # Scalar and field-quality targets.  The default objective optimizes QI,
 # aspect, and a nonzero-transform floor.  Mirror/elongation terms are useful
-# engineering cleanup terms, but they are not part of the default promotion
-# gate because they can destroy the low-QI branch if imposed too early.
+# engineering cleanup terms, but they are intentionally staged: the first solve
+# should find a QI+iota basin, and mirror cleanup should then be added without
+# dropping the QI and iota gates.
 TARGET_ASPECT = 5.0
 TARGET_ABS_IOTA_MIN = 0.41
 MAX_MIRROR_RATIO = 0.21
@@ -83,6 +84,8 @@ IOTA_FLOOR_WEIGHT = 200.0**2
 QI_WEIGHT = 10.0
 MIRROR_WEIGHT = 10.0
 ELONGATION_WEIGHT = 10.0
+MIRROR_SMOOTH_EXTREMA = 2.0e-2
+MIRROR_SMOOTH_PENALTY = 2.0e-2
 QI_GATE_SMOOTH_MAX = 2.0e-3
 QI_GATE_LEGACY_MAX = 1.0e-3
 
@@ -119,7 +122,11 @@ mirror = vj.MirrorRatio(
     threshold=MAX_MIRROR_RATIO,
     ntheta=96,
     nphi=96,
-    surface_index=0,
+    # None means "all QI surfaces", matching QIDiagnosticOptions'
+    # mirror-ratio gate.  Set an integer to optimize one surface only.
+    surface_index=None,
+    smooth_extrema=MIRROR_SMOOTH_EXTREMA,
+    smooth_penalty=MIRROR_SMOOTH_PENALTY,
 )
 elongation = vj.MaxElongation(
     threshold=MAX_ELONGATION,
@@ -136,7 +143,8 @@ objective_tuples = [
     (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
     (iota_floor.J, 0.0, IOTA_FLOOR_WEIGHT),
     (qi.J, 0.0, QI_WEIGHT),
-    # Optional:
+    # Optional mirror/shape cleanup.  Enable this after the QI+iota branch is
+    # found, and keep the QI/iota terms active so mirror does not destroy QI.
     # (mirror.J, 0.0, MIRROR_WEIGHT),
     # (elongation.J, 0.0, ELONGATION_WEIGHT),
     # (vj.LgradB(threshold=0.30, smooth_penalty=1.0e-3).J, 0.0, 0.001),
@@ -312,13 +320,22 @@ qi_gate_passed = (
     and legacy_qi <= QI_GATE_LEGACY_MAX
     and abs_iota >= TARGET_ABS_IOTA_MIN
 )
+mirror_ratio = float(diagnostics["qi_mirror_ratio_max"])
+max_elongation = float(diagnostics["qi_max_elongation"])
+engineering_gate_passed = (
+    qi_gate_passed
+    and mirror_ratio <= MAX_MIRROR_RATIO
+    and max_elongation <= MAX_ELONGATION
+)
 print("\nIndependent QI promotion gate:")
 print(f"  smooth QI:       {smooth_qi:.6e}  (limit {QI_GATE_SMOOTH_MAX:.1e})")
 print(f"  legacy QI:       {legacy_qi:.6e}  (limit {QI_GATE_LEGACY_MAX:.1e})")
 print(f"  abs(mean iota):  {abs_iota:.6g}  (minimum {TARGET_ABS_IOTA_MIN:.3g})")
-print(f"  mirror ratio:    {diagnostics['qi_mirror_ratio_max']:.6g}  (target {MAX_MIRROR_RATIO:.3g})")
-print(f"  max elongation:  {diagnostics['qi_max_elongation']:.6g}  (target {MAX_ELONGATION:.3g})")
-print(f"  promoted:        {qi_gate_passed}")
+print(f"  mirror ratio:    {mirror_ratio:.6g}  (target {MAX_MIRROR_RATIO:.3g})")
+print(f"  mirror by surf:  {diagnostics.get('qi_mirror_ratio_by_surface')}")
+print(f"  max elongation:  {max_elongation:.6g}  (target {MAX_ELONGATION:.3g})")
+print(f"  QI+iota gate:    {qi_gate_passed}")
+print(f"  full eng. gate:  {engineering_gate_passed}")
 
 if MAKE_PLOTS:
     plot_paths = {

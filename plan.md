@@ -112,6 +112,15 @@ acceptance criteria or evidence changes.
       deltas, and flags for scalar-objective improvement that worsens smooth or
       legacy QI. A capped end-to-end QP/NFP2 probe now writes these diagnostics
       from final `input`/`wout` artifacts, preventing scalar-only promotion.
+- [x] Make the public QI example and diagnostics distinguish the QI+iota gate
+      from the full engineering gate. `MirrorRatio` can now target all sampled
+      QI surfaces with smooth extrema/softplus smoothing, and diagnostics report
+      per-surface mirror ratios so high-mirror candidates cannot be promoted as
+      final QI designs.
+- [ ] Find a QI-preserving mirror cleanup schedule. The current near-axis seed
+      result passes smooth/legacy/iota gates but has mirror ratio about `0.97`;
+      direct mirror penalties reduce mirror but currently degrade the legacy QI
+      metric by one to two orders of magnitude.
 
 Acceptance:
 
@@ -872,3 +881,10 @@ Defer beyond the current cycle:
   Boozer-coordinate `|B|` line-contour plot. The local CPU run reached smooth
   QI `9.15e-4`, legacy QI `4.46e-4`, aspect `4.99`, and `|iota| = 0.897` in
   about 93 s; mirror ratio remains the next constrained-cleanup target.
+- 2026-05-12: Confirmed that the near-axis QI candidate fails the engineering
+  mirror gate on every sampled surface (`0.94-0.97`, target `0.21`). Added
+  all-surface/smoothed `MirrorRatio` support, per-surface mirror diagnostics,
+  and explicit `QI+iota` versus full-engineering gate reporting in the public
+  QI examples. Probe runs showed hard/smooth mirror penalties can reduce mirror
+  (`~0.39-0.69`) but currently destroy precise QI (`legacy QI ~5e-3-3e-2`),
+  so the open lane is a staged or alternative QI-preserving mirror objective.

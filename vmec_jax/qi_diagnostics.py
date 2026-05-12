@@ -356,6 +356,8 @@ def _record_mirror(
             phimin=float(options.phimin),
         )
         mirror_max = _max_float(mirror.get("mirror_ratio"))
+        record["qi_mirror_ratio_by_surface"] = _list_or_none(mirror.get("mirror_ratio"))
+        record["qi_mirror_surface_index"] = options.mirror_surface_index
         record["qi_mirror_ratio_max"] = mirror_max
         record["qi_mirror_excess_max"] = None if mirror_max is None else max(
             0.0,
