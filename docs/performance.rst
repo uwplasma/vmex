@@ -1491,6 +1491,30 @@ This narrows the GPU lane: optimizing residual convergence alone will not fix
 optimization runtime.  The next GPU work should target accepted-point tape
 replay and tangent batching/reuse, while keeping the CPU exact path unchanged.
 
+Backend-adaptive replay bucketing
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The first concrete GPU fix from that profile is backend-adaptive dynamic tape
+bucketing.  CPU replay remains fastest with the previous bucket size ``32``.
+On the ``office`` RTX A4000, the same dense exact-Jacobian profile is much
+faster when GPU replay pads dynamic tapes to bucket size ``128``.  This is now
+the default for CUDA/ROCm/GPU backends; users can still override it with
+``VMEC_JAX_DYNAMIC_REPLAY_BUCKET`` for experiments.
+
+Validation used the same QH ``max_mode=2`` accepted-point profile as above:
+
+- previous GPU default: ``54.83 s`` for two perturbed Jacobian points,
+  ``jacobian_tape_replay=23.79 s``;
+- backend-adaptive GPU default: ``15.79 s`` for two perturbed Jacobian points,
+  ``jacobian_tape_replay=5.43 s``;
+- CPU baseline remains ``11.29 s`` for the same profile, so the optimized GPU
+  profile is now about ``1.40x`` CPU overall and ``1.11x`` CPU in replay time.
+
+This does not make GPU universally faster yet.  It removes the largest replay
+regression for small/medium exact optimizations and leaves tape construction,
+residual tangent projection, and accepted-point replay fusion as the next GPU
+targets.
+
 Additional controller finding from March 2026:
 
 - the existing fully non-VMEC scan path was re-probed as a possible next

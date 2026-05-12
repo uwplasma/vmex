@@ -46,6 +46,14 @@ def test_dynamic_replay_bucket_default_is_modest(monkeypatch):
     assert da._dynamic_replay_bucket_len(33) == 64
 
 
+def test_dynamic_replay_bucket_default_is_larger_on_gpu(monkeypatch):
+    monkeypatch.delenv("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", raising=False)
+    monkeypatch.setattr(da.jax, "default_backend", lambda: "gpu")
+
+    assert da._dynamic_replay_bucket_size() == 128
+    assert da._dynamic_replay_bucket_len(129) == 256
+
+
 def test_dynamic_replay_bucket_honors_env(monkeypatch):
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", "128")
 

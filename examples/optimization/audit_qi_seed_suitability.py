@@ -78,6 +78,7 @@ MAX_PREFINE_BOOZ_MODE = 10
 DEFAULT_PREFINE_STAGE_MODES = (1, 1, 2, 2, 3)
 OBJECTIVE_REGRESSION_RTOL = 1.0e-12
 OBJECTIVE_REGRESSION_ATOL = 1.0e-14
+PREFINE_STABLE_LOW_OBJECTIVE_THRESHOLD = 5.0e-2
 
 
 @dataclass(frozen=True)
@@ -1196,6 +1197,16 @@ def _prefine_plan_acceptance(row: dict[str, Any]) -> dict[str, Any]:
         float(row.get("objective_initial") or 0.0),
         float(row.get("objective_final") or 0.0),
     ):
+        objective_final = _finite_float(row.get("objective_final"))
+        if objective_final is not None and objective_final <= PREFINE_STABLE_LOW_OBJECTIVE_THRESHOLD:
+            return {
+                "accepted": True,
+                "decision": "accepted_stable_low_objective",
+                "reasons": [
+                    "completed with finite stable low objective",
+                    f"objective_final <= {PREFINE_STABLE_LOW_OBJECTIVE_THRESHOLD:g}",
+                ],
+            }
         reasons.append("no positive objective improvement")
 
     if reasons:

@@ -27,8 +27,9 @@ acceptance criteria or evidence changes.
 - Smooth differentiable QI, mirror ratio, elongation, LgradB, aspect, iota, beta,
   volavgB, magnetic-well, DMerc, and JXBFORCE profile objectives exist in the
   workflow layer.
-- GPU execution works, but small/medium optimization cases are still often CPU
-  faster because accepted-point tape replay and tangent setup dominate.
+- GPU execution works. Small/medium optimization cases are now much closer to
+  CPU after the backend-adaptive replay-bucket fix, but accepted-point tape
+  replay and tape build still dominate on GPU.
 - Required CI coverage is 66.60% locally on the Python 3.11 CI-equivalent
   required suite, above the current 63% gate but still far below the long-term
   95% goal.
@@ -57,6 +58,11 @@ acceptance criteria or evidence changes.
       and recommend the next reviewed probe. A 2026-05-12 top-seed smoke
       probe from the optional NFP=2 QP/QI seed reduced the mode-1 QI objective
       by 5.0% with no summary regression flags.
+- [x] Fix prefine acceptance so a completed, monotone, finite probe with an
+      already-low final QI objective can be promoted even if a tiny
+      two-evaluation smoke does not move. Re-summarizing the 2026-05-12
+      seven-seed smoke now promotes `qi_omnigenity_nfp1` as the accepted
+      stable-low-objective candidate (`objective_final=2.70e-2`).
 
 Acceptance:
 
@@ -117,6 +123,12 @@ Acceptance:
       54.83 s. GPU was 4.86x slower overall, with the ratio tracking
       `jacobian_tape_replay` almost exactly; the next GPU optimization target
       is replay/tangent batching, not residual convergence.
+- [x] Make dynamic replay bucketing backend-adaptive. CPU keeps the smaller
+      bucket (`32`) because profiling showed it remains faster there; GPU uses
+      bucket `128` by default. On the same QH max_mode=2 accepted-point
+      Jacobian profile, RTX A4000 runtime dropped to about 15.8 s for two
+      perturbed Jacobian points, only 1.40x the 11.29 s CPU baseline, with
+      replay time only 1.11x CPU.
 
 Acceptance:
 

@@ -609,6 +609,57 @@ def test_prefine_probe_summary_ranks_acceptance_failures_and_regressions():
     assert summary["recommendation"]["label"] == "timeout_qa"
 
 
+def test_prefine_probe_summary_accepts_stable_low_objective_seed():
+    mod = _load_module()
+    manifest = {
+        "dry_run": False,
+        "selection": {"planned_rows": 2},
+        "plans": [
+            {
+                "status": "completed",
+                "label": "already_good_qi",
+                "family": "qi",
+                "audit_rank": 2,
+                "optimization": {"stage_modes": [1]},
+                "result": {
+                    "objective_initial": 2.5e-2,
+                    "objective_final": 2.5e-2,
+                    "requested_stage_modes": [1],
+                    "completed_stage_modes": [1],
+                    "history": [
+                        {"objective": 2.5e-2},
+                        {"objective": 2.5e-2},
+                    ],
+                },
+            },
+            {
+                "status": "completed",
+                "label": "improved_but_worse_qp",
+                "family": "qp",
+                "audit_rank": 1,
+                "optimization": {"stage_modes": [1]},
+                "result": {
+                    "objective_initial": 1.0e-1,
+                    "objective_final": 6.0e-2,
+                    "requested_stage_modes": [1],
+                    "completed_stage_modes": [1],
+                    "history": [
+                        {"objective": 1.0e-1},
+                        {"objective": 6.0e-2},
+                    ],
+                },
+            },
+        ],
+    }
+
+    summary = mod.summarize_qi_prefine_probe_manifest(manifest)
+
+    assert summary["accepted_candidate"]["label"] == "already_good_qi"
+    assert summary["accepted_candidate"]["acceptance"]["decision"] == "accepted_stable_low_objective"
+    assert summary["acceptance"]["accepted"] is True
+    assert summary["recommendation"]["action"] == "promote_best_candidate"
+
+
 def test_prefine_result_summary_ranks_and_flags_regressions():
     mod = _load_module()
     manifest = {

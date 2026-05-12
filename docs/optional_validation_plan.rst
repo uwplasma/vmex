@@ -136,6 +136,9 @@ objective improvement, failed and timed-out probes, objective-history
 regressions when compact histories are present, acceptance status, and a
 recommended next action.  These summaries are promotion gates for the next
 probe only; longer QI sweeps still require final diagnostics and plot review.
+Completed monotone probes with final QI objective at or below ``5e-2`` are
+accepted as stable low-objective seeds even if the tiny smoke budget leaves
+them unchanged.
 
 Optional external lanes
 -----------------------
