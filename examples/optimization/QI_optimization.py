@@ -18,7 +18,8 @@ enable_x64(True)
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
-# QI uses the nfp=2 warm start from the omnigenity optimization examples.
+# Problem parameters.  QI uses the nfp=2 warm start from the omnigenity
+# optimization examples.
 # The smooth metric is calibrated against the Goodman et al. branch-shuffle
 # diagnostic: branch-width tracks bounce-width invariance, shuffle-profile
 # compares against the branch-equalized well, and a small profile term keeps
@@ -40,6 +41,7 @@ STAGE_MODES = vj.repeated_stage_modes(
     repeats=STAGE_REPEATS,
 )
 
+# Optimizer parameters.
 METHOD = "scipy"  # Try also "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
 SCIPY_TR_SOLVER = "lsmr"  # For METHOD="scipy": "lsmr" is memory-light; "exact" is dense.
 SCIPY_LSMR_MAXITER = None  # None lets SciPy choose; set an int to cap LSMR iterations.

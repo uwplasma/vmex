@@ -53,9 +53,9 @@ warm runtimes competitive with or faster than VMEC2000 on CPU:
 **3. Dynamic replay bucketing**
   ``VMEC_JAX_DYNAMIC_REPLAY_BUCKET`` pads nearby exact-adjoint tape lengths so
   compiled replay kernels can be reused across Jacobian calls with slightly
-  different iteration counts.  The default is intentionally modest
-  (``32`` iterations); larger buckets are an explicit profiling knob and can be
-  much slower for GPU accepted-point replay.
+  different iteration counts.  The default is backend-adaptive: ``32`` on CPU
+  and ``128`` on CUDA/ROCm/GPU backends.  Override it only as a profiling knob;
+  larger buckets can still be slower if they pad a workload too aggressively.
 
 **4. Preconditioner caching**
   The 1-D preconditioner (``clear_preconditioner_jit_caches``) is JIT-compiled
@@ -1514,6 +1514,16 @@ This does not make GPU universally faster yet.  It removes the largest replay
 regression for small/medium exact optimizations and leaves tape construction,
 residual tangent projection, and accepted-point replay fusion as the next GPU
 targets.
+
+Follow-up profiling on 2026-05-12 confirmed the same bottleneck split.  A tiny
+cold fixed-boundary smoke case on ``office`` still favored CPU
+(``13.80 s`` CPU versus ``68.86 s`` GPU), so cold single solves remain a CPU
+use case.  A local CPU exact-Jacobian smoke spent about ``96%`` of callback time
+in replay/tangent work: ``jacobian_tape_replay`` ``3.34 s``,
+``jacobian_initial_tangents`` ``2.85 s``, and
+``jacobian_residual_tangents`` ``2.75 s`` out of a ``9.31 s`` callback.  The
+next GPU and CPU target is therefore accepted-point tangent fusion/reuse, not
+ordinary force-kernel optimization.
 
 Additional controller finding from March 2026:
 

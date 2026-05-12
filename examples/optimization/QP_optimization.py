@@ -18,8 +18,8 @@ enable_x64(True)
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
-# QP is a quasisymmetry target with HELICITY_M=0.  We use the nfp=2 QI seed so
-# QP and QI start from the same boundary family.
+# Problem parameters.  QP is a quasisymmetry target with HELICITY_M=0.  We use
+# the nfp=2 QI seed so QP and QI start from the same boundary family.
 INPUT_FILE = DATA_DIR / "input.nfp2_QI"
 OUTPUT_DIR = Path("results/qp_opt/no_ess")
 MAX_MODE = 3
@@ -33,6 +33,7 @@ STAGE_MODES = vj.qs_stage_modes(
     continuation_nfev=CONTINUATION_NFEV,
 )
 
+# Optimizer parameters.
 METHOD = "scipy"  # Try also "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
 SCIPY_TR_SOLVER = "lsmr"  # For METHOD="scipy": "lsmr" is memory-light; "exact" is dense.
 SCIPY_LSMR_MAXITER = None  # None lets SciPy choose; set an int to cap LSMR iterations.

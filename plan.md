@@ -30,6 +30,13 @@ acceptance criteria or evidence changes.
 - GPU execution works. Small/medium optimization cases are now much closer to
   CPU after the backend-adaptive replay-bucket fix, but accepted-point tape
   replay and tape build still dominate on GPU.
+- Continuation correctness is now protected by both synthetic control-flow tests
+  and a real projected-boundary stage test. Repeated stage schedules such as
+  ``[1, 1, 2]`` carry the optimized VMEC input forward and keep projected
+  high-mode coefficients zero.
+- Exact-history correctness is now protected against relaxed trial-solve drift:
+  final ``input.final`` and ``wout_final.nc`` use the best exact accepted point
+  when the last trial-accepted point replays worse.
 - Required CI coverage is 66.60% locally on the Python 3.11 CI-equivalent
   required suite, above the current 63% gate but still far below the long-term
   95% goal.
@@ -83,6 +90,11 @@ acceptance criteria or evidence changes.
       objective history. The bounded `qi_omnigenity_nfp1` mode-3 smoke
       (`1,1,2,2,3`) reached `3.05e-4` final QI objective in about 63 s with
       monotone exact objective history and one rejected trial-exact replay row.
+- [x] Add regression coverage for repeated and higher continuation stages using
+      both synthetic workflow tests and a real boundary-projection stage test.
+      These tests verify that later stages rebuild from the previous optimized
+      input, restart with zero increments, and do not resurrect high-order seed
+      modes that were intentionally projected out.
 
 Acceptance:
 
@@ -149,6 +161,13 @@ Acceptance:
       Jacobian profile, RTX A4000 runtime dropped to about 15.8 s for two
       perturbed Jacobian points, only 1.40x the 11.29 s CPU baseline, with
       replay time only 1.11x CPU.
+- [x] Re-profile the remaining exact-Jacobian cost after backend-adaptive
+      bucketing. A 2026-05-12 local CPU smoke spent about 96% of callback time
+      in `jacobian_tape_replay`, `jacobian_initial_tangents`, and
+      `jacobian_residual_tangents`; an `office` cold fixed-boundary smoke still
+      favored CPU (`13.80 s` versus `68.86 s` GPU). The next concrete
+      performance target is tangent fusion/reuse, not fixed-boundary force
+      kernels.
 
 Acceptance:
 
@@ -163,6 +182,38 @@ Acceptance:
       unless the test is explicitly a solver-trace regression.
 - [ ] Add efficient wout-field parity gates for geometry, profiles, B, J, iota,
       aspect, Mercier, and force residuals.
+- [x] Add a required-tier bundled VMEC2000 `chipf` parity gate for QA/QH/QI,
+      circular, and finite-beta shaped-tokamak wout fixtures. This locks the
+      half-mesh `chipf` convention and the `chips_from_wout_chipf` round-trip
+      without running VMEC2000 in required CI.
+
+## Progress Snapshot
+
+Updated 2026-05-12 after the continuation-correctness and validation push:
+
+- Continuation correctness: 98%. Source fix is implemented and covered by
+  synthetic repeated-stage tests plus a real boundary-projection stage test.
+- Exact accepted-point history/output correctness: 93%. Best-exact selection is
+  implemented and tested; remaining risk is rare exact-state unavailability on
+  failed replay paths.
+- Seed-robust QI: 72%. Five-family bounded prefine smoke completed with finite
+  monotone histories, but the budgets were intentionally too small to claim
+  robust convergence from QA/QH/simple seeds.
+- CPU/GPU performance: 67%. Backend-adaptive replay bucketing removed the
+  largest GPU replay regression for small/medium exact optimizations; tangent
+  fusion/reuse and cold GPU solve cost remain open.
+- VMEC parity and physics gates: 79%. Required-tier wout `chipf` parity is now
+  broader; full fixed/free/LASYM/finite-beta converged-equilibrium parity is
+  still open.
+- Refactor/API/examples: 82%. Examples are SIMSOPT-like and clearer; large
+  solver/wout/free-boundary module splits remain deferred behind parity gates.
+- Docs/release hygiene: 78%. Performance/discrete-adjoint docs reflect the
+  current replay policy; detailed seed-robust QI and GPU-production guidance
+  still need final curated artifacts.
+
+Overall average across these active lanes: about 81%. The continuation lane is
+near done, but reaching a defensible 90% overall requires the remaining
+performance/QI/parity work, not just more unit tests.
 
 Acceptance:
 
@@ -662,3 +713,17 @@ Defer beyond the current cycle:
   `_solve_runtime` now also owns dump iteration parsing plus simple dump gate
   policy. Public compatibility through `vmec_jax.wout` and `vmec_jax.solve`
   was preserved.
+- 2026-05-12: Added continuation regression tests for repeated and higher mode
+  schedules, including synthetic workflow control-flow and a real
+  boundary-projection stage gate. These protect the fix that carries optimized
+  VMEC inputs forward between continuation stages and keeps projected high
+  modes zero.
+- 2026-05-12: Added bundled wout `chipf` parity tests across circular,
+  finite-beta shaped tokamak, QH, QA, and QI fixtures. The tests verify the
+  VMEC2000 half-mesh convention and the `chips_from_wout_chipf` round-trip in
+  required-tier CI without running an external executable.
+- 2026-05-12: Re-profiled performance lanes after backend-adaptive replay
+  bucketing. `office` cold fixed-boundary smoke still favors CPU (`13.80 s`
+  CPU versus `68.86 s` GPU), while local exact-Jacobian callback time is
+  dominated by replay and tangent construction/projection. The next performance
+  patch should target accepted-point tangent fusion/reuse.
