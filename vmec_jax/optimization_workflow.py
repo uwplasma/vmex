@@ -18,6 +18,7 @@ import numpy as np
 
 from ._compat import enable_x64, jnp
 from .boundary import boundary_from_indata, boundary_input_from_indata
+from .config import config_from_indata
 from .driver import run_fixed_boundary, write_wout_from_fixed_boundary_run
 from .energy import flux_profiles_from_indata
 from .field import b_cartesian_from_state, signgs_from_sqrtg
@@ -36,7 +37,6 @@ from .optimization import (
     boundary_param_specs,
     create_x_scale,
     extend_boundary_for_max_mode,
-    lift_boundary_params,
     rebuild_indata_with_resolution,
     smooth_min_abs_iota_residual,
     truncate_indata_boundary_modes,
@@ -1366,13 +1366,13 @@ def run_fixed_boundary_objective_optimization(
     """Run a fixed-boundary objective list through one or more mode stages."""
 
     stage_records: list[tuple[int, FixedBoundaryExactOptimizer, np.ndarray, dict]] = []
-    params_stage = None
-    prev_specs = None
+    current_cfg = cfg
+    current_indata = indata
 
     for stage_index, stage_mode in enumerate(stage_modes, start=1):
         stage = build_fixed_boundary_objective_stage(
-            cfg,
-            indata,
+            current_cfg,
+            current_indata,
             stage_mode=int(stage_mode),
             objectives=objectives,
             include=include,
@@ -1389,11 +1389,11 @@ def run_fixed_boundary_objective_optimization(
             if bool(use_ess)
             else np.ones(len(stage.specs), dtype=float)
         )
-        params0 = (
-            np.zeros(len(stage.specs), dtype=float)
-            if params_stage is None
-            else np.asarray(lift_boundary_params(prev_specs, params_stage, stage.specs), dtype=float)
-        )
+        # Each continuation stage is built from the previous stage's optimized
+        # VMEC input, so the new optimization vector starts at zero increment.
+        # This avoids reintroducing higher modes from the original deck when a
+        # lower-mode stage intentionally projected them out.
+        params0 = np.zeros(len(stage.specs), dtype=float)
         nfev = qs_stage_budget(
             stage_mode=int(stage_mode),
             max_mode=int(max_mode),
@@ -1450,8 +1450,8 @@ def run_fixed_boundary_objective_optimization(
             save_rerun_wouts=save_rerun_wouts,
         )
         stage_records.append((int(stage_mode), stage.optimizer, params0, result))
-        prev_specs = stage.specs
-        params_stage = result["x"]
+        current_indata = stage.optimizer._indata_from_params(result["x"])
+        current_cfg = config_from_indata(current_indata)
 
     final_optimizer = stage_records[-1][1]
     final_result = stage_records[-1][3]
@@ -1710,13 +1710,13 @@ def run_quasi_isodynamic_objective_optimization(
     """Run a QI objective list through repeated or direct mode stages."""
 
     stage_records: list[tuple[int, FixedBoundaryExactOptimizer, np.ndarray, dict]] = []
-    params_stage = None
-    prev_specs = None
+    current_cfg = cfg
+    current_indata = indata
 
     for stage_index, stage_mode in enumerate(stage_modes, start=1):
         stage = build_quasi_isodynamic_objective_stage(
-            cfg,
-            indata,
+            current_cfg,
+            current_indata,
             stage_mode=int(stage_mode),
             scalar_objectives=scalar_objectives,
             qi_objectives=qi_objectives,
@@ -1753,11 +1753,10 @@ def run_quasi_isodynamic_objective_optimization(
             if bool(use_ess)
             else np.ones(len(stage.specs), dtype=float)
         )
-        params0 = (
-            np.zeros(len(stage.specs), dtype=float)
-            if params_stage is None
-            else np.asarray(lift_boundary_params(prev_specs, params_stage, stage.specs), dtype=float)
-        )
+        # The stage input already contains the previous optimized boundary.
+        # New modes therefore start from their deck values (usually zero after
+        # projection) and all active coefficients are represented as increments.
+        params0 = np.zeros(len(stage.specs), dtype=float)
         nfev = qs_stage_budget(
             stage_mode=int(stage_mode),
             max_mode=int(max_mode),
@@ -1814,8 +1813,8 @@ def run_quasi_isodynamic_objective_optimization(
             save_wouts=save_stage_wouts,
         )
         stage_records.append((int(stage_mode), stage.optimizer, params0, result))
-        prev_specs = stage.specs
-        params_stage = result["x"]
+        current_indata = stage.optimizer._indata_from_params(result["x"])
+        current_cfg = config_from_indata(current_indata)
 
     final_optimizer = stage_records[-1][1]
     final_result = stage_records[-1][3]

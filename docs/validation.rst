@@ -210,6 +210,11 @@ Prefine manifests also record ESS controls.  Use ``--no-prefine-use-ess`` and
 ``--prefine-ess-alpha VALUE`` for bounded ablations when a seed fails at a
 higher continuation mode; the selected settings are written into both the
 manifest and generated run command.
+Mode-continuation stages are stateful: every repeated or higher-mode stage is
+rebuilt from the previous stage's optimized VMEC input and starts with a zero
+increment vector.  This is part of the validation contract because lower-mode
+QI probes can intentionally project high-order seed modes out; later stages
+must not silently reintroduce those original high modes from the deck.
 By default the audit uses ``--phimin-policy well-phase``: each seed is scored at
 both ``phimin=0`` and ``phimin=pi/nfp`` and the better QI well phase is used for
 ranking and prefine planning.  Use ``--phimin-policy fixed --phimin VALUE`` when

@@ -164,6 +164,203 @@ def test_lift_boundary_params_maps_shared_names_and_zeros_new_modes():
     np.testing.assert_allclose(lifted, np.array([0.25, -0.5, 0.0]))
 
 
+def test_mode_continuation_rebuilds_from_previous_stage_input(monkeypatch, tmp_path):
+    import vmec_jax.optimization_workflow as workflow
+
+    calls = []
+    configs = []
+
+    class FakeOptimizer:
+        def __init__(self, stage_index):
+            self.stage_index = int(stage_index)
+
+        def run(self, params0, **_kwargs):
+            objective = float(self.stage_index)
+            return {
+                "x": np.asarray([10.0 + self.stage_index], dtype=float),
+                "message": "synthetic",
+                "_history_dump": {
+                    "history": [{"objective": objective, "wall_time_s": objective}],
+                    "nfev": 1,
+                    "njev": 1,
+                    "objective_initial": objective,
+                    "objective_final": objective,
+                    "qs_initial": objective,
+                    "qs_final": objective,
+                    "aspect_initial": objective,
+                    "aspect_final": objective,
+                },
+            }
+
+        def _indata_from_params(self, params):
+            return InData(
+                scalars={"MPOL": 5, "NTOR": 5},
+                indexed={"RBC": {(0, 0): 1.0}},
+                source_path=f"stage-{self.stage_index}-final-{float(np.asarray(params)[0]):.1f}",
+            )
+
+    def fake_config_from_indata(indata):
+        configs.append(indata.source_path)
+        return SimpleNamespace(source_path=indata.source_path)
+
+    def fake_build_stage(cfg, indata, *, stage_mode, **_kwargs):
+        calls.append((cfg.source_path, indata.source_path, int(stage_mode)))
+        spec = BoundaryParamSpec(f"rc{stage_mode}0", "rc", 0, int(stage_mode), 0)
+        return SimpleNamespace(
+            mode=int(stage_mode),
+            ctx=SimpleNamespace(),
+            optimizer=FakeOptimizer(len(calls)),
+            specs=[spec],
+            boundary_input=None,
+        )
+
+    monkeypatch.setattr(workflow, "config_from_indata", fake_config_from_indata)
+    monkeypatch.setattr(workflow, "build_fixed_boundary_objective_stage", fake_build_stage)
+    monkeypatch.setattr(workflow, "print_qs_problem_summary", lambda **_kwargs: None)
+    monkeypatch.setattr(workflow, "print_qs_final_summary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(workflow, "save_qs_stage_artifacts", lambda **_kwargs: None)
+    monkeypatch.setattr(workflow, "save_qs_final_outputs", lambda **_kwargs: None)
+
+    original = InData(
+        scalars={"MPOL": 5, "NTOR": 5},
+        indexed={"RBC": {(0, 0): 1.0, (2, 0): 0.5}},
+        source_path="original-input",
+    )
+
+    result = workflow.run_fixed_boundary_objective_optimization(
+        cfg=SimpleNamespace(source_path="original-cfg"),
+        indata=original,
+        objectives=[],
+        stage_modes=[1, 2],
+        max_mode=2,
+        max_nfev=3,
+        continuation_nfev=1,
+        method="scipy",
+        ftol=1.0e-6,
+        gtol=1.0e-6,
+        xtol=1.0e-6,
+        use_ess=False,
+        ess_alpha=0.0,
+        output_dir=tmp_path,
+        label="synthetic",
+        use_mode_continuation=True,
+    )
+
+    assert calls == [
+        ("original-cfg", "original-input", 1),
+        ("stage-1-final-11.0", "stage-1-final-11.0", 2),
+    ]
+    assert configs == ["stage-1-final-11.0", "stage-2-final-12.0"]
+    assert [record[2].tolist() for record in result.stage_records] == [[0.0], [0.0]]
+
+
+def test_qi_mode_continuation_rebuilds_from_previous_stage_input(monkeypatch, tmp_path):
+    import vmec_jax.optimization_workflow as workflow
+
+    calls = []
+
+    class FakeOptimizer:
+        def __init__(self, stage_index):
+            self.stage_index = int(stage_index)
+
+        def run(self, params0, **_kwargs):
+            objective = float(self.stage_index)
+            return {
+                "x": np.asarray([20.0 + self.stage_index], dtype=float),
+                "message": "synthetic",
+                "_history_dump": {
+                    "history": [{"objective": objective, "wall_time_s": objective}],
+                    "nfev": 1,
+                    "njev": 1,
+                    "objective_initial": objective,
+                    "objective_final": objective,
+                    "qs_initial": objective,
+                    "qs_final": objective,
+                    "aspect_initial": objective,
+                    "aspect_final": objective,
+                },
+            }
+
+        def _indata_from_params(self, params):
+            return InData(
+                scalars={"MPOL": 5, "NTOR": 5},
+                indexed={"RBC": {(0, 0): 1.0}},
+                source_path=f"qi-stage-{self.stage_index}-final-{float(np.asarray(params)[0]):.1f}",
+            )
+
+    def fake_config_from_indata(indata):
+        return SimpleNamespace(source_path=indata.source_path)
+
+    def fake_build_stage(cfg, indata, *, stage_mode, **_kwargs):
+        calls.append((cfg.source_path, indata.source_path, int(stage_mode)))
+        spec = BoundaryParamSpec(f"rc{stage_mode}0", "rc", 0, int(stage_mode), 0)
+        return SimpleNamespace(
+            mode=int(stage_mode),
+            ctx=SimpleNamespace(),
+            optimizer=FakeOptimizer(len(calls)),
+            specs=[spec],
+            boundary_input=None,
+        )
+
+    monkeypatch.setattr(workflow, "config_from_indata", fake_config_from_indata)
+    monkeypatch.setattr(workflow, "build_quasi_isodynamic_objective_stage", fake_build_stage)
+    monkeypatch.setattr(workflow, "print_qs_problem_summary", lambda **_kwargs: None)
+    monkeypatch.setattr(workflow, "print_qs_final_summary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(workflow, "save_qs_stage_artifacts", lambda **_kwargs: None)
+    monkeypatch.setattr(workflow, "save_qs_final_outputs", lambda **_kwargs: None)
+
+    original = InData(
+        scalars={"MPOL": 5, "NTOR": 5},
+        indexed={"RBC": {(0, 0): 1.0, (2, 0): 0.5}},
+        source_path="qi-original-input",
+    )
+
+    result = workflow.run_quasi_isodynamic_objective_optimization(
+        cfg=SimpleNamespace(source_path="qi-original-cfg"),
+        indata=original,
+        scalar_objectives=[],
+        qi_objectives=[],
+        stage_modes=[1, 2],
+        max_mode=2,
+        max_nfev=3,
+        continuation_nfev=1,
+        method="scipy",
+        ftol=1.0e-6,
+        gtol=1.0e-6,
+        xtol=1.0e-6,
+        use_ess=False,
+        ess_alpha=0.0,
+        output_dir=tmp_path,
+        label="synthetic_qi",
+        use_mode_continuation=True,
+        surfaces=(0.5,),
+        mboz=4,
+        nboz=4,
+        nphi=9,
+        nalpha=5,
+        n_bounce=5,
+        include_bounce_endpoints=True,
+        softness=2.0e-2,
+        width_weight=1.0,
+        branch_width_weight=0.5,
+        branch_width_softness=2.0e-2,
+        profile_weight=0.1,
+        shuffle_profile_weight=1.0,
+        shuffle_profile_softness=2.0e-2,
+        aligned_profile_weight=0.0,
+        aligned_profile_softness=2.0e-2,
+        aligned_profile_trap_level=0.65,
+        aligned_profile_trap_softness=5.0e-2,
+        phimin=0.0,
+    )
+
+    assert calls == [
+        ("qi-original-cfg", "qi-original-input", 1),
+        ("qi-stage-1-final-21.0", "qi-stage-1-final-21.0", 2),
+    ]
+    assert [record[2].tolist() for record in result.stage_records] == [[0.0], [0.0]]
+
+
 def test_create_x_scale_normalizes_lowest_level_and_decays_high_modes():
     specs = [
         BoundaryParamSpec("rc10", "rc", 0, 1, 0),

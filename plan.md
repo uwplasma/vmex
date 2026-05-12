@@ -69,6 +69,13 @@ acceptance criteria or evidence changes.
       `qi_omnigenity_nfp1` failed with the same NaN error with ESS enabled and
       disabled, so the next QI bug is in the mode-2 continuation/objective
       derivative path rather than ESS scaling alone.
+- [x] Fix mode-continuation stage seeding so each next stage starts from the
+      previous stage's optimized VMEC input instead of rebuilding from the
+      original deck plus lifted parameter increments. This prevents projected
+      high-order seed modes from reappearing at later stages. The failing
+      `qi_omnigenity_nfp1` smoke (`1,1,2`, mode 2) now completes with ESS and
+      without ESS; the mode-2 initial exact Jacobian is finite with max entry
+      about `3.9e8` instead of the prior `1e120` derivative blow-up.
 
 Acceptance:
 

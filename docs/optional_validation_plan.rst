@@ -139,6 +139,10 @@ probe only; longer QI sweeps still require final diagnostics and plot review.
 Completed monotone probes with final QI objective at or below ``5e-2`` are
 accepted as stable low-objective seeds even if the tiny smoke budget leaves
 them unchanged.
+Continuation probes carry the optimized VMEC input between stages.  In
+particular, a mode-1 projection that zeros higher boundary modes remains the
+seed for the next mode-2 stage unless the stage itself reintroduces those modes
+as active zero-increment degrees of freedom.
 
 Optional external lanes
 -----------------------
