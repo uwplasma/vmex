@@ -1,6 +1,6 @@
 # VMEC-JAX Research-Grade Roadmap
 
-Last updated: 2026-05-11
+Last updated: 2026-05-12
 Primary branch: `main`
 Baseline release: `v0.0.7`
 
@@ -28,8 +28,10 @@ acceptance criteria or evidence changes.
   volavgB, magnetic-well, DMerc, and JXBFORCE profile objectives exist in the
   workflow layer.
 - GPU execution works, but small/medium optimization cases are still often CPU
-  faster because replay/compile/host overhead dominates.
-- Required CI coverage is still far below the long-term 95% goal.
+  faster because accepted-point tape replay and tangent setup dominate.
+- Required CI coverage is 66.60% locally on the Python 3.11 CI-equivalent
+  required suite, above the current 63% gate but still far below the long-term
+  95% goal.
 - `solve.py`, `wout.py`, `free_boundary.py`, `driver.py`, and optimization
   modules are too large and need staged refactoring after parity gates are locked.
 
@@ -50,6 +52,11 @@ acceptance criteria or evidence changes.
 - [x] Diagnose remaining QI noisiness by one-DOF scans of Boozer/QI metrics and
       choose default resolutions/weights that preserve ranking while remaining
       differentiable.
+- [x] Add and exercise bounded prefine-manifest summaries that rank candidate
+      seeds by final objective/improvement, flag objective-history regressions,
+      and recommend the next reviewed probe. A 2026-05-12 top-seed smoke
+      probe from the optional NFP=2 QP/QI seed reduced the mode-1 QI objective
+      by 5.0% with no summary regression flags.
 
 Acceptance:
 
@@ -104,6 +111,12 @@ Acceptance:
 - [ ] Build a GPU-native tape/replay path that avoids excessive host transfer and
       recompilation.
 - [ ] Benchmark LASYM true/false, max_mode 1/2/3, QA/QH/QP/QI, CPU/GPU.
+- [x] Add real JSON comparison tooling for exact-optimizer CPU/GPU reports.
+      A 2026-05-12 QH max_mode=2 Jacobian profile on commit `f0225ff` measured
+      local CPU at 11.29 s for two new Jacobian points and RTX A4000 GPU at
+      54.83 s. GPU was 4.86x slower overall, with the ratio tracking
+      `jacobian_tape_replay` almost exactly; the next GPU optimization target
+      is replay/tangent batching, not residual convergence.
 
 Acceptance:
 

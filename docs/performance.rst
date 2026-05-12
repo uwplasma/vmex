@@ -1463,6 +1463,34 @@ benchmark story:
 - automatic backend selection is now the remaining step before the GPU story
   becomes uniformly stronger than CPU on mixed-size workloads.
 
+Exact-optimizer replay profiling on ``f0225ff``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The exact optimizer has a different performance profile from a standalone
+fixed-boundary solve because accepted-point Jacobians replay a differentiated
+VMEC tape for every active boundary direction.  A fresh 2026-05-12 QH
+``max_mode=2`` profile used
+``tools/diagnostics/profile_exact_optimizer.py --callback jacobian --repeats 2
+--perturb-scale 1e-4`` on CPU and on an RTX A4000 GPU, then compared the JSON
+reports with ``tools/diagnostics/compare_profile_reports.py``.
+
+The local CPU report took ``11.29 s`` for two new Jacobian points.  The GPU
+report took ``54.83 s`` for the same two points, with the first GPU point
+dominated by cold accepted-point setup and the second warm point taking
+``4.44 s``.  The GPU/CPU ratio was ``4.86x`` overall and ``4.87x`` for replay
+time; RSS was similar.  The largest profile terms were:
+
+- CPU: ``jacobian_tape_replay`` ``4.89 s`` (``43%``),
+  ``jacobian_initial_tangents`` ``2.75 s`` (``24%``),
+  ``jacobian_residual_tangents`` ``2.21 s`` (``20%``).
+- GPU: ``jacobian_tape_replay`` ``23.79 s`` (``43%``),
+  ``exact_solve_with_tape_total`` ``12.89 s`` (``24%``),
+  ``exact_tape_build`` ``11.34 s`` (``21%``).
+
+This narrows the GPU lane: optimizing residual convergence alone will not fix
+optimization runtime.  The next GPU work should target accepted-point tape
+replay and tangent batching/reuse, while keeping the CPU exact path unchanged.
+
 Additional controller finding from March 2026:
 
 - the existing fully non-VMEC scan path was re-probed as a possible next
