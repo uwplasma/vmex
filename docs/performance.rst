@@ -1525,6 +1525,16 @@ in replay/tangent work: ``jacobian_tape_replay`` ``3.34 s``,
 next GPU and CPU target is therefore accepted-point tangent fusion/reuse, not
 ordinary force-kernel optimization.
 
+The first narrow tangent-reuse patch was applied to the scalar-gradient path:
+``objective_and_gradient_fun`` now projects reverse tape cotangents through the
+same cached affine initial-state tangent map used by dense exact Jacobians,
+instead of rebuilding an initial-state VJP for every scalar-gradient callback.
+On a local QA ``max_mode=1`` CPU smoke with three perturbed gradient callbacks,
+the same-branch warm callback dropped from about ``0.279 s`` to ``0.188 s``.
+This helps scalar-adjoint/L-BFGS-style methods; dense least-squares Jacobians
+are unchanged.  Cold callbacks still pay compilation, and a theta-flip branch
+change still needs a second tangent map.
+
 Additional controller finding from March 2026:
 
 - the existing fully non-VMEC scan path was re-probed as a possible next

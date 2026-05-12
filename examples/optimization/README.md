@@ -72,9 +72,11 @@ vj.plot_objective_history(saved_paths["history"], outdir=OUTPUT_DIR)
 
 `least_squares_solve` still writes the default final artifacts for convenience;
 the explicit calls are the editable pattern for custom filenames, extra
-exports, and local diagnostics.  For continuation details, inspect
-`result.stage_records`, `result.stage_histories`, or
-`result.stage_timing_summaries` directly.
+exports, and local diagnostics.  For continuation details, start with
+`result.initial_stage` and `result.final_stage`; use
+`result.stage_histories` and `result.stage_timing_summaries` for per-stage
+accepted exact-replay history and timing.  The raw `result.stage_records`
+remain available for custom inspection.
 
 ## Recommended Standalone Examples
 

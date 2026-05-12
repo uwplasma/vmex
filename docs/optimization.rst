@@ -347,9 +347,12 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
    print(plot_paths)
 
 Objective callbacks receive ``(ctx, state)`` and may return a scalar or vector.
-The raw continuation records remain available as ``result.stage_records``;
-``result.stage_histories`` and ``result.stage_timing_summaries`` expose the
-per-stage history/timing data without hiding any saving or plotting decisions.
+For continuation runs, use ``result.initial_stage`` and ``result.final_stage``
+for the common endpoints, and ``result.stage_histories`` or
+``result.stage_timing_summaries`` for per-stage accepted exact-replay history
+and timing.  The raw records remain available as ``result.stage_records`` for
+custom inspection, but user scripts do not need to unpack them just to save,
+plot, or report final outputs.
 The tuple weight follows SIMSOPT semantics: vmec_jax minimizes
 ``sqrt(weight) * (J - target)``.  Problem-specific targets and QI sampling
 options live on the objective objects/problem, while ``least_squares_solve``
@@ -858,8 +861,9 @@ The main entry point for differentiable fixed-boundary optimisation.
      - Construct optimizer; derive solver settings from indata.
    * - ``run(params0, *, max_nfev, ftol, gtol, xtol, x_scale)``
      - Run Gauss-Newton loop; returns SciPy-like result dict.
-   * - ``save_wout(path, params)``
-     - Write a ``wout_*.nc`` for the equilibrium at ``params``.
+   * - ``save_wout(path, params, state=None)``
+     - Write a ``wout_*.nc`` for the equilibrium at ``params``; pass a cached
+       solved state from the result object to avoid an extra replay.
    * - ``save_history(path, result)``
      - Write per-iteration history to JSON.
    * - ``aspect_ratio(params)``
