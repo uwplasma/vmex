@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from collections import OrderedDict
 import os
+from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 import vmec_jax.optimization as opt_module
 from vmec_jax.optimization import FixedBoundaryExactOptimizer
@@ -142,6 +144,7 @@ def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:
             "8",
             "--budget-action",
             "warn",
+            "--vmec-timing-detail",
         ]
     )
 
@@ -154,6 +157,7 @@ def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:
     assert args.budget_cache_entries == 40
     assert args.budget_cache_entry_growth == 8
     assert args.budget_action == "warn"
+    assert args.vmec_timing_detail is True
 
 
 def test_exact_optimizer_profile_cache_snapshot_and_delta_schema() -> None:
@@ -181,6 +185,32 @@ def test_exact_optimizer_profile_cache_snapshot_and_delta_schema() -> None:
     assert delta["exact_tape_build"]["count"] == 2
     assert delta["exact_tape_build"]["wall_time_s"] == 5.0
     assert delta["jacobian_tape_replay"]["mean_wall_time_s"] == 4.0
+
+
+def test_exact_optimizer_profile_timing_includes_preconditioner_subphases() -> None:
+    opt = FixedBoundaryExactOptimizer.__new__(FixedBoundaryExactOptimizer)
+    opt._profile = {}
+    tape = SimpleNamespace(
+        diagnostics={
+            "timing": {
+                "compute_forces_s": 0.10,
+                "preconditioner_s": 0.40,
+                "precond_refresh_s": 0.05,
+                "precond_apply_s": 0.25,
+                "precond_mode_scale_s": 0.10,
+                "update_s": 0.20,
+            }
+        }
+    )
+
+    opt._profile_exact_tape_solver_timing(tape, tape_build_wall_s=1.0)
+    profile = opt._profile_dump()
+
+    assert profile["exact_tape_solver_preconditioner"]["wall_time_s"] == 0.40
+    assert profile["exact_tape_solver_preconditioner_apply"]["wall_time_s"] == 0.25
+    assert profile["exact_tape_solver_preconditioner_mode_scale"]["wall_time_s"] == 0.10
+    assert profile["exact_tape_solver_precond_refresh"]["wall_time_s"] == 0.05
+    assert profile["exact_tape_build_unattributed"]["wall_time_s"] == pytest.approx(0.30)
 
 
 def test_exact_optimizer_callback_report_schema_and_budget_status() -> None:

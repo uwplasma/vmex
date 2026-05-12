@@ -1,11 +1,14 @@
 #!/usr/bin/env python
 """Small utilities for finite-beta stage-one optimization examples.
 
-The finite-beta example scripts keep the optimization workflow visible:
-load the input deck, build VMEC static data, choose boundary DOFs, define
-``residuals_from_state``, instantiate ``FixedBoundaryExactOptimizer``, run, and
-save outputs.  This module only contains lightweight diagnostics and file I/O
-helpers so the scripts do not hide the scientific setup behind a config object.
+The finite-beta example scripts intentionally use
+``FixedBoundaryExactOptimizer`` directly instead of ``least_squares_solve``:
+each stage builds local finite-pressure/current residual closures before the
+shared workflow-object abstraction is useful.  The scripts still keep the
+SIMSOPT-like flow visible: load the input deck, build VMEC static data, choose
+boundary DOFs, define ``residuals_from_state``, run, and save outputs.  This
+module only contains lightweight diagnostics and file I/O helpers so the
+scripts do not hide the scientific setup behind a config object.
 """
 
 from __future__ import annotations

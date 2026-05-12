@@ -601,6 +601,15 @@ volume-averaged field proxy, and total beta.  QA and QH then add the usual
 quasisymmetry residual; QI adds the smooth Boozer-space quasi-isodynamic
 residual through ``booz_xform_jax``.
 
+Unlike the public QA/QH/QP/QI teaching scripts above, these finite-beta stage-one
+examples call ``FixedBoundaryExactOptimizer`` directly rather than
+``least_squares_solve``.  That is intentional: each continuation stage builds
+stage-local pressure/current profile data, finite-beta global residual blocks,
+and optional Redl/QI residual closures before running the optimizer.  The
+shared ``finite_beta_stage1_common.py`` helper only standardizes stage budgets,
+saved inputs/wouts, histories, and plots; it does not hide objective assembly
+behind a config object.
+
 .. code-block:: bash
 
    PYTHONPATH=. python examples/optimization/qa_optimization_finite_beta.py

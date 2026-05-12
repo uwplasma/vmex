@@ -503,6 +503,121 @@ def test_run_qi_prefine_probe_dispatches_tiny_qi_solve(tmp_path):
     assert calls["solve"]["save_stage_wouts"] is False
 
 
+def test_run_qi_prefine_probe_can_dispatch_constrained_qi_terms(tmp_path):
+    mod = _load_module()
+    report = {
+        "cases": [
+            {
+                "suitability_rank": 1,
+                "label": "candidate_qp",
+                "family": "qp",
+                "input": "/tmp/input_qp",
+                "wout": "/tmp/wout_qp.nc",
+                "qi_seed_score": 0.2,
+            },
+        ]
+    }
+    manifest = mod.build_qi_prefine_probe_manifest(
+        report,
+        config=mod.QIPrefineProbeConfig(
+            output_dir=tmp_path / "probes",
+            mirror_weight=2.0,
+            mirror_threshold=0.21,
+            mirror_ntheta=12,
+            mirror_nphi=10,
+            elongation_weight=0.5,
+            elongation_threshold=8.0,
+            elongation_ntheta=14,
+            elongation_nphi=6,
+        ),
+        manifest_path=tmp_path / "manifest.json",
+        dry_run=False,
+    )
+    plan = manifest["plans"][0]
+    assert plan["optimization"]["objective"] == "qi_constrained_prefine_probe"
+    assert plan["qi_options"]["mirror_weight"] == 2.0
+    assert plan["qi_options"]["elongation_weight"] == 0.5
+
+    calls = {}
+
+    class FakeQuasiIsodynamicOptions:
+        def __init__(self, **kwargs):
+            calls["qi_options"] = kwargs
+
+    class FakeObjective:
+        requires_qi_field = True
+
+        def __init__(self, name, **kwargs):
+            self.name = name
+            self.kwargs = kwargs
+
+        def J(self, _ctx, _state):
+            return 0.0
+
+    class FakeQuasiIsodynamicResidual(FakeObjective):
+        def __init__(self, options):
+            super().__init__("qi", options=options)
+
+    class FakeMirrorRatio(FakeObjective):
+        def __init__(self, **kwargs):
+            super().__init__("mirror", **kwargs)
+            calls["mirror"] = kwargs
+
+    class FakeMaxElongation(FakeObjective):
+        def __init__(self, **kwargs):
+            super().__init__("elongation", **kwargs)
+            calls["elongation"] = kwargs
+
+    class FakeLeastSquaresProblem:
+        @classmethod
+        def from_tuples(cls, tuples):
+            calls["tuples"] = tuples
+            return "problem"
+
+    class FakeFixedBoundaryVMEC:
+        @classmethod
+        def from_input(cls, input_file, **kwargs):
+            calls["from_input"] = {"input_file": input_file, **kwargs}
+            return "vmec"
+
+    def fake_least_squares_solve(vmec, problem, **kwargs):
+        calls["solve"] = {"vmec": vmec, "problem": problem, **kwargs}
+        return SimpleNamespace(
+            final_result={
+                "_history_dump": {
+                    "objective_initial": 3.0,
+                    "objective_final": 2.0,
+                    "qs_final": 2.0,
+                    "total_wall_time_s": 0.5,
+                    "history": [{"objective": 3.0}, {"objective": 2.0}],
+                }
+            },
+            stage_modes=[1, 1, 2, 2, 3],
+        )
+
+    fake_workflow = SimpleNamespace(
+        QuasiIsodynamicOptions=FakeQuasiIsodynamicOptions,
+        QuasiIsodynamicResidual=FakeQuasiIsodynamicResidual,
+        MirrorRatio=FakeMirrorRatio,
+        MaxElongation=FakeMaxElongation,
+        LeastSquaresProblem=FakeLeastSquaresProblem,
+        FixedBoundaryVMEC=FakeFixedBoundaryVMEC,
+        least_squares_solve=fake_least_squares_solve,
+    )
+
+    completed = mod.run_qi_prefine_probe(plan, workflow=fake_workflow)
+
+    assert completed["status"] == "completed"
+    assert len(calls["tuples"]) == 3
+    assert [entry[2] for entry in calls["tuples"]] == [1.0, 2.0, 0.5]
+    assert calls["mirror"]["threshold"] == 0.21
+    assert calls["mirror"]["ntheta"] == 12
+    assert calls["mirror"]["nphi"] == 10
+    assert calls["elongation"]["threshold"] == 8.0
+    assert calls["elongation"]["ntheta"] == 14
+    assert calls["elongation"]["nphi"] == 6
+
+
 def test_prefine_probe_manifest_run_can_require_review(tmp_path):
     mod = _load_module()
     manifest = mod.build_qi_prefine_probe_manifest(
