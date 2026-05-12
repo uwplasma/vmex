@@ -125,6 +125,7 @@ def test_qi_diagnostics_from_state_wraps_existing_components_without_solves(monk
         nphi=21,
         nalpha=7,
         n_bounce=5,
+        include_bounce_endpoints=True,
         legacy_nphi_out=61,
         mirror_threshold=0.21,
         mirror_surface_index=1,
@@ -149,6 +150,7 @@ def test_qi_diagnostics_from_state_wraps_existing_components_without_solves(monk
 
     assert calls["smooth"]["mboz"] == 18
     assert calls["smooth"]["nboz"] == 19
+    assert calls["smooth"]["include_bounce_endpoints"] is True
     assert calls["smooth"]["surfaces"] == [0.5]
     assert calls["smooth"]["surface_indices"] == [3]
     assert calls["smooth"]["flux_local"] == "flux"
@@ -170,5 +172,6 @@ def test_qi_diagnostics_from_state_wraps_existing_components_without_solves(monk
     assert record["qi_lgradb_excess_max"] == 1.0
     assert record["qi_mboz"] == 18
     assert record["qi_nboz"] == 19
+    assert record["qi_include_bounce_endpoints"] is True
     assert record["qi_surfaces"] == [0.5]
     assert record["qi_surface_indices"] == [3]

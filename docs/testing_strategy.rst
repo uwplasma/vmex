@@ -218,7 +218,9 @@ QI seed-robustness gates:
 - Use ``examples/optimization/audit_qi_seed_suitability.py --quick`` as the
   no-optimization preflight before a multi-seed QI sweep.  It ranks existing
   solved seeds and records missing optional reference checkouts instead of
-  making the default gate machine-specific.
+  making the default gate machine-specific.  The audit defaults to
+  ``include_bounce_endpoints=True`` so smooth-QI seed ranking uses the same
+  normalized level range as the legacy Goodman-style branch/shuffle diagnostic.
 - Use ``--prefine-probes plan`` to write a hard-capped QI-only probe manifest
   before any actual seed-robustness run.  The manifest is a review artifact:
   it makes selected seeds, run commands, and output paths explicit before

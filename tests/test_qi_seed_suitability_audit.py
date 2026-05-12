@@ -139,6 +139,7 @@ def test_build_seed_audit_ranks_and_writes_csv(monkeypatch, tmp_path):
     assert report["cases"][0]["qi_seed_score"] < report["cases"][1]["qi_seed_score"]
     assert report["cases"][1]["seed_suitability"] == "needs_attention"
     assert report["skipped_defaults"][0]["family"] == "qp"
+    assert report["resolution"]["include_bounce_endpoints"] is True
 
     csv_path = tmp_path / "audit.csv"
     mod._write_csv(report["cases"], csv_path)
@@ -252,6 +253,7 @@ def test_prefine_probe_manifest_selects_top_rows_and_stays_dry(tmp_path):
     assert "--prefine-probes run" in manifest["plans"][0]["run_command"]
     assert manifest["plans"][0]["optimization"]["max_nfev"] <= mod.MAX_PREFINE_MAX_NFEV
     assert manifest["plans"][0]["qi_options"]["nphi"] <= mod.MAX_PREFINE_QI_NPHI
+    assert manifest["plans"][0]["qi_options"]["include_bounce_endpoints"] is True
 
     bad_config = mod.QIPrefineProbeConfig(top_n=mod.MAX_PREFINE_TOP_N + 1)
     with pytest.raises(ValueError, match="top_n"):
@@ -425,6 +427,7 @@ def test_run_qi_prefine_probe_dispatches_tiny_qi_solve(tmp_path):
     assert completed["status"] == "completed"
     assert completed["result"]["objective_final"] == 1.0
     assert calls["qi_options"]["nphi"] == 31
+    assert calls["qi_options"]["include_bounce_endpoints"] is True
     assert calls["from_input"]["max_mode"] == 1
     assert calls["solve"]["max_nfev"] == 2
     assert calls["solve"]["stage_modes"] == (1,)

@@ -103,6 +103,8 @@ Acceptance for this lane:
   it is recorded in ``skipped_defaults`` rather than failing.
 - Each row records smooth QI, legacy QI, mirror ratio, elongation, aspect
   ratio, mean iota, failed constraints, and ranks.
+- Smooth-QI rows use ``include_bounce_endpoints=True`` by default, matching the
+  normalized level endpoints used by the legacy branch-shuffle diagnostic.
 - No optimization is launched.
 
 Before running even tiny optimizer probes, write a dry-run manifest:

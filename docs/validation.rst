@@ -149,6 +149,10 @@ and reports smooth QI, legacy QI, mirror ratio, elongation, aspect ratio, and
 mean iota.  Optional reference cases from ``omnigenity_optimization`` are used
 when ``OMNIGENITY_OPTIMIZATION_ROOT`` points to that checkout; missing optional
 cases are recorded as skipped rather than failing the audit.
+The smooth QI diagnostic includes normalized bounce endpoints by default so the
+ranked smooth metric samples the same level range as the legacy Goodman-style
+branch-shuffle diagnostic; pass ``--no-include-bounce-endpoints`` only for
+interior-level ablation studies.
 Rows are ranked by the combined smooth-plus-legacy QI score, while engineering
 constraint failures are reported separately so a QI-like seed with a fixable
 mirror/aspect violation is not hidden behind a non-QI seed that merely satisfies
@@ -165,6 +169,8 @@ The manifest records top-ranked seeds plus one best-ranked representative from
 each available seed family, hard-capped QI-only prefine settings, expected
 output files, and exact commands for running one tiny probe at a time.  Use
 ``--prefine-probes run`` only when deliberately executing those capped probes.
+Prefine probe manifests also record whether ``include_bounce_endpoints`` is
+enabled, so seed ranking and the tiny QI-only probe use the same smooth metric.
 By default the audit uses ``--phimin-policy well-phase``: each seed is scored at
 both ``phimin=0`` and ``phimin=pi/nfp`` and the better QI well phase is used for
 ranking and prefine planning.  Use ``--phimin-policy fixed --phimin VALUE`` when
