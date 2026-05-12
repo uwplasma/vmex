@@ -18,20 +18,22 @@ enable_x64(True)
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
-# Problem parameters.  The default uses the bundled near-axis QI seed; users can
-# point INPUT_FILE to any VMEC input deck and keep the same workflow.
+# Problem parameters.  The default uses the bundled NFP=2 omnigenity seed
+# because it gives the current best mirror-aware QI result in this repository.
+# Users can point INPUT_FILE to any VMEC input deck and keep the same workflow.
 # The smooth metric is calibrated against the Goodman et al. branch-shuffle
 # diagnostic: branch-width tracks bounce-width invariance, shuffle-profile
 # compares against the branch-equalized well, and a small profile term keeps
 # QH/QP-like false positives from ranking too favorably.
-INPUT_FILE = DATA_DIR / "input.QI_stel_seed_3127"
-# Alternative bundled omnigenity seed:
-# INPUT_FILE = DATA_DIR / "input.nfp2_QI"
+INPUT_FILE = DATA_DIR / "input.nfp2_QI"
+# Alternative bundled near-axis seed.  This reaches a lower smooth QI value, but
+# the current mirror-aware cleanup still needs more work from this basin.
+# INPUT_FILE = DATA_DIR / "input.QI_stel_seed_3127"
 OUTPUT_DIR = Path("results/qi_opt/ess")
 MAX_MODE = 3
 MIN_VMEC_MODE = 6
 USE_MODE_CONTINUATION = False
-MAX_NFEV = 8
+MAX_NFEV = 12
 CONTINUATION_NFEV = 0
 QI_PREFINE = False
 QI_PREFINE_NFEV = 30
@@ -100,7 +102,9 @@ QI_OPTIONS = vj.QuasiIsodynamicOptions(
     include_bounce_endpoints=True,  # Matches the legacy Goodman-style QI level sampling.
     softness=2.0e-2,
     width_weight=1.0,
-    branch_width_weight=0.5,
+    # A branch-heavy QI residual tracks the Goodman-style branch diagnostic
+    # better for the current mirror-aware QI lane than the historical 0.5 value.
+    branch_width_weight=5.0,
     branch_width_softness=2.0e-2,
     profile_weight=0.1,
     shuffle_profile_weight=1.0,
@@ -143,10 +147,11 @@ objective_tuples = [
     (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
     (iota_floor.J, 0.0, IOTA_FLOOR_WEIGHT),
     (qi.J, 0.0, QI_WEIGHT),
-    # Optional mirror/shape cleanup.  Enable this after the QI+iota branch is
-    # found, and keep the QI/iota terms active so mirror does not destroy QI.
-    # (mirror.J, 0.0, MIRROR_WEIGHT),
-    # (elongation.J, 0.0, ELONGATION_WEIGHT),
+    # Mirror/shape cleanup.  Keep the QI/iota terms active so mirror does not
+    # destroy QI.  The all-surface Boozer mirror target is stricter than the
+    # legacy single-surface VMEC mirror diagnostic used in older scripts.
+    (mirror.J, 0.0, MIRROR_WEIGHT),
+    (elongation.J, 0.0, ELONGATION_WEIGHT),
     # (vj.LgradB(threshold=0.30, smooth_penalty=1.0e-3).J, 0.0, 0.001),
     # (vj.MagneticWell(minimum=0.0).J, 0.0, 1.0),
     # Finite-beta examples can also add:

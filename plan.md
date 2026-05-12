@@ -888,3 +888,15 @@ Defer beyond the current cycle:
   QI examples. Probe runs showed hard/smooth mirror penalties can reduce mirror
   (`~0.39-0.69`) but currently destroy precise QI (`legacy QI ~5e-3-3e-2`),
   so the open lane is a staged or alternative QI-preserving mirror objective.
+- 2026-05-12: Added and tested a differentiable `BoozerBTarget` steering term
+  for QI basin homotopy experiments. It can match a reference Boozer `|B|`
+  spectrum but is not a final QI diagnostic. The first NFP3 target probe from
+  `input.QI_stel_seed_3127` reduced mirror to about `0.405` but degraded
+  smooth/legacy QI to about `5.9e-2`/`4.5e-2`, so it was not promoted.
+- 2026-05-12: Re-tuned the standalone QI example toward the current best
+  mirror-aware NFP2 lane. A branch-heavy smooth-QI residual
+  (`branch_width_weight=5`) from `input.nfp2_QI` reached smooth/legacy QI
+  about `2.0e-3`/`2.7e-4`, aspect `5.00`, `mean_iota=-0.50`, elongation
+  about `7.2`, and all-surface Boozer mirror about `0.30`. Dense stronger
+  mirror cleanup was stopped for high memory; a lighter matrix-free cleanup
+  preserved QI but only improved mirror from `0.304` to `0.300`.
