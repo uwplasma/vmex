@@ -1143,6 +1143,7 @@ def test_state_tangent_columns_cache_hit_skips_initial_linearization_setup(monke
     opt._layout = SimpleNamespace(size=3)
     opt._static = object()
     opt._profile = {}
+    opt._discrete_jacobian_helper_cache = {}
     opt._initial_tangent_cache = {"cached": jnp.asarray([[1.0, 2.0, 3.0]])}
     opt._initial_tangent_cache_key = lambda _params: "cached"
     opt._solve_exact_with_tape = lambda _params, return_payload=False: (
@@ -1180,6 +1181,69 @@ def test_state_tangent_columns_cache_hit_skips_initial_linearization_setup(monke
     np.testing.assert_allclose(np.asarray(final_tangents), [[2.0, 3.0, 4.0]])
     assert calls == [("tape", opt._static, True, None)]
     assert opt._profile["jacobian_initial_tangents_cache_hit"]["count"] == 1
+
+
+def test_gradient_callback_reuses_cached_initial_tangents(monkeypatch):
+    import vmec_jax.discrete_adjoint as discrete_adjoint
+
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._solver_device_name = None
+    opt._inside_solver_device_context = False
+    opt._layout = SimpleNamespace(size=3)
+    opt._static = object()
+    opt._profile = {}
+    opt._discrete_jacobian_helper_cache = {}
+    opt._initial_tangent_cache = {
+        "cached": jnp.asarray(
+            [
+                [1.0, 2.0, 3.0],
+                [4.0, 5.0, 6.0],
+            ],
+            dtype=jnp.float64,
+        )
+    }
+    opt._initial_tangent_cache_key = lambda _params: "cached"
+    opt._solve_exact_with_tape = lambda _params, return_payload=False: (
+        "state",
+        {
+            "tape": "tape",
+            # This would fail if the gradient path rebuilt an unused
+            # initial-state VJP instead of using the cached tangent map.
+            "axis_override": {"bad": object()},
+        },
+    )
+    opt._boundary_from_params = lambda _params: (_ for _ in ()).throw(
+        AssertionError("cache hit should not rebuild the boundary")
+    )
+
+    def residuals_fn(_state):
+        raise AssertionError("objective cotangent hook should avoid residual VJP")
+
+    def objective_value_and_cotangent_from_packed(packed_state, layout):
+        np.testing.assert_allclose(np.asarray(packed_state), [7.0, 8.0, 9.0])
+        assert layout is opt._layout
+        return jnp.asarray(1.25, dtype=jnp.float64), jnp.asarray([10.0, 11.0, 12.0], dtype=jnp.float64)
+
+    residuals_fn._state_objective_value_and_cotangent_from_packed = objective_value_and_cotangent_from_packed
+    opt._residuals_fn = residuals_fn
+
+    monkeypatch.setattr("vmec_jax.state.pack_state", lambda _state: jnp.asarray([7.0, 8.0, 9.0]))
+
+    vjp_calls = []
+
+    def fake_checkpoint_vjp(*, tape, static, final_cotangent, rebuild_preconditioner):
+        vjp_calls.append((tape, static, bool(rebuild_preconditioner), np.asarray(final_cotangent)))
+        return jnp.asarray([0.5, 1.0, 2.0], dtype=jnp.float64)
+
+    monkeypatch.setattr(discrete_adjoint, "checkpoint_tape_state_vjp", fake_checkpoint_vjp)
+
+    cost, grad = opt.objective_and_gradient_fun(np.asarray([0.0, 0.0]))
+
+    assert cost == pytest.approx(1.25)
+    np.testing.assert_allclose(grad, [8.5, 19.0])
+    assert len(vjp_calls) == 1
+    np.testing.assert_allclose(vjp_calls[0][3], [10.0, 11.0, 12.0])
+    assert opt._profile["gradient_initial_tangents_cache_hit"]["count"] == 1
 
 
 def test_tape_jacobian_remembers_residual_under_parameter_cache_key(monkeypatch):
