@@ -1555,12 +1555,16 @@ class FixedBoundaryExactOptimizer:
             ("compute_forces_s", "exact_tape_solver_compute_forces"),
             ("preconditioner_s", "exact_tape_solver_preconditioner"),
             ("precond_refresh_s", "exact_tape_solver_precond_refresh"),
+            ("precond_apply_s", "exact_tape_solver_preconditioner_apply"),
+            ("precond_mode_scale_s", "exact_tape_solver_preconditioner_mode_scale"),
             ("update_s", "exact_tape_solver_update"),
             ("update_state_s", "exact_tape_solver_update_state"),
             ("update_trace_build_s", "exact_tape_solver_update_trace_build"),
             ("update_trace_finalize_s", "exact_tape_solver_update_trace_finalize"),
         )
         for key, profile_name in timing_keys:
+            if key not in timing:
+                continue
             try:
                 value = float(timing.get(key, 0.0))
             except Exception:
