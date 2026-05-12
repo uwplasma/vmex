@@ -316,7 +316,11 @@ construct ``FiniteBetaTargets``, define the global residuals for aspect ratio,
 iota lower/mean/upper bounds, volume-averaged field proxy, and total beta, then
 append the field-quality residual.  QA/QH use quasisymmetry residuals and QI
 uses the smooth Boozer-space QI residual.  The small shared helper only keeps
-the stage bookkeeping and artifact writing consistent.  The scripts save
+the stage bookkeeping, structured stage/final summaries, and artifact writing
+consistent.  After the direct ``FixedBoundaryExactOptimizer`` calls complete,
+``stage1_result.stage_summaries`` and ``stage1_result.final_summary`` expose
+JSON-friendly diagnostics such as objective, aspect, iota, function counts,
+termination status, method, device, and wall time.  The scripts save
 ``input.initial``, ``input.final``, ``wout_initial.nc``, ``wout_final.nc``, and
 ``history.json`` for each run.
 

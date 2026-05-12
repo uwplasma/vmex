@@ -44,6 +44,61 @@ def test_precomputed_tridiagonal_solve_matches_full_thomas():
     np.testing.assert_allclose(precomputed_np, full_np, rtol=1e-11, atol=1e-11)
 
 
+def test_preconditioner_output_scaling_jit_matches_unfused_algebra():
+    jnp = pytest.importorskip("jax.numpy")
+
+    from vmec_jax.solve import _preconditioner_output_scaling_jit
+    from vmec_jax.vmec_tomnsp import TomnspsRZL
+
+    shape = (2, 2, 2)
+    base = np.arange(np.prod(shape), dtype=float).reshape(shape) / 10.0 + 0.1
+    frzl = TomnspsRZL(
+        frcc=jnp.asarray(base + 1.0),
+        frss=jnp.asarray(base + 2.0),
+        fzsc=jnp.asarray(base + 3.0),
+        fzcs=jnp.asarray(base + 4.0),
+        flsc=jnp.asarray(base + 5.0),
+        flcs=jnp.asarray(base + 6.0),
+        frsc=jnp.asarray(base + 7.0),
+        frcs=jnp.asarray(base + 8.0),
+        fzcc=jnp.asarray(base + 9.0),
+        fzss=jnp.asarray(base + 10.0),
+        flcc=jnp.asarray(base + 11.0),
+        flss=jnp.asarray(base + 12.0),
+    )
+    lam_prec = jnp.asarray(base + 0.5)
+    w_mode_mn = jnp.asarray([[1.0, 1.5], [2.0, 2.5]])
+    lambda_update_scale = 0.25
+
+    scale_outputs = _preconditioner_output_scaling_jit(apply_lambda_update_scale=True)
+    raw, scaled = scale_outputs(frzl, lam_prec, w_mode_mn, lambda_update_scale)
+
+    expected_raw = (
+        base + 1.0,
+        base + 2.0,
+        base + 3.0,
+        base + 4.0,
+        (base + 5.0) * (base + 0.5),
+        (base + 6.0) * (base + 0.5),
+        base + 7.0,
+        base + 8.0,
+        base + 9.0,
+        base + 10.0,
+        (base + 11.0) * (base + 0.5),
+        (base + 12.0) * (base + 0.5),
+    )
+    weight = np.asarray(w_mode_mn)[None, :, :]
+    expected_scaled = tuple(
+        value * weight * (lambda_update_scale if index in (4, 5, 10, 11) else 1.0)
+        for index, value in enumerate(expected_raw)
+    )
+
+    for got, want in zip(raw, expected_raw, strict=True):
+        np.testing.assert_allclose(np.asarray(got), want, rtol=1e-12, atol=1e-12)
+    for got, want in zip(scaled, expected_scaled, strict=True):
+        np.testing.assert_allclose(np.asarray(got), want, rtol=1e-12, atol=1e-12)
+
+
 def _reference_preconditioning_matrix(
     *,
     xs,

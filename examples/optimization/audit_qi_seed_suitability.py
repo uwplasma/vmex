@@ -904,7 +904,15 @@ def build_qi_prefine_probe_manifest(
                 "qi_smooth_total": record.get("qi_smooth_total"),
                 "qi_legacy_total": record.get("qi_legacy_total"),
                 "qi_mirror_ratio_max": record.get("qi_mirror_ratio_max"),
+                "qi_mirror_ratio_target": record.get("qi_mirror_ratio_target", config.mirror_threshold),
+                "qi_mirror_excess_max": record.get("qi_mirror_excess_max"),
                 "qi_max_elongation": record.get("qi_max_elongation"),
+                "qi_elongation_target": record.get("qi_elongation_target", config.elongation_threshold),
+                "qi_elongation_excess": record.get("qi_elongation_excess"),
+                "aspect": record.get("aspect"),
+                "target_aspect": record.get("target_aspect"),
+                "mean_iota": record.get("mean_iota"),
+                "abs_iota_min": record.get("abs_iota_min"),
                 "selected_phimin": record.get("selected_phimin"),
                 "constraint_score": record.get("constraint_score"),
                 "failed_constraints": record.get("failed_constraints", []),
@@ -1024,6 +1032,266 @@ def _finite_float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return out if np.isfinite(out) else None
+
+
+def _prefine_metric_delta(initial: float | None, final: float | None) -> float | None:
+    if initial is None or final is None:
+        return None
+    return float(final - initial)
+
+
+def _prefine_metric_worsened(initial: float | None, final: float | None) -> bool | None:
+    delta = _prefine_metric_delta(initial, final)
+    if delta is None:
+        return None
+    return bool(delta > _prefine_objective_regression_tolerance(initial, final))
+
+
+def _prefine_first_finite(record: dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        if key in record:
+            value = _finite_float(record.get(key))
+            if value is not None:
+                return value
+    return None
+
+
+def _prefine_excess(
+    record: dict[str, Any],
+    *,
+    value_keys: tuple[str, ...],
+    target_keys: tuple[str, ...],
+    explicit_keys: tuple[str, ...],
+    target_default: Any = None,
+) -> float | None:
+    explicit = _prefine_first_finite(record, *explicit_keys)
+    if explicit is not None:
+        return max(0.0, explicit)
+    value = _prefine_first_finite(record, *value_keys)
+    target = _prefine_first_finite(record, *target_keys)
+    if target is None:
+        target = _finite_float(target_default)
+    if value is None or target is None:
+        return None
+    return max(0.0, value - target)
+
+
+def _prefine_snapshot_from_record(record: dict[str, Any] | None, qi_options_raw: dict[str, Any]) -> dict[str, Any]:
+    record = {} if record is None else dict(record)
+    mirror_threshold = _prefine_first_finite(
+        record,
+        "mirror_threshold",
+        "qi_mirror_ratio_target",
+        "mirror_ratio_target",
+    )
+    if mirror_threshold is None:
+        mirror_threshold = _finite_float(qi_options_raw.get("mirror_threshold"))
+    elongation_threshold = _prefine_first_finite(
+        record,
+        "elongation_threshold",
+        "qi_elongation_target",
+        "elongation_target",
+    )
+    if elongation_threshold is None:
+        elongation_threshold = _finite_float(qi_options_raw.get("elongation_threshold"))
+    mirror_excess = _prefine_excess(
+        record,
+        value_keys=("mirror_ratio", "qi_mirror_ratio_max", "qi_mirror_ratio"),
+        target_keys=("mirror_threshold", "qi_mirror_ratio_target", "mirror_ratio_target"),
+        explicit_keys=("mirror_excess", "qi_mirror_excess_max"),
+        target_default=mirror_threshold,
+    )
+    elongation_excess = _prefine_excess(
+        record,
+        value_keys=("elongation", "qi_max_elongation", "qi_elongation"),
+        target_keys=("elongation_threshold", "qi_elongation_target", "elongation_target"),
+        explicit_keys=("elongation_excess", "qi_elongation_excess"),
+        target_default=elongation_threshold,
+    )
+    mirror_weight = _finite_float(qi_options_raw.get("mirror_weight")) or 0.0
+    elongation_weight = _finite_float(qi_options_raw.get("elongation_weight")) or 0.0
+    snapshot = {
+        "qi_residual": _prefine_first_finite(record, "qi_residual", "qi_smooth_total", "smooth_qi"),
+        "qi_legacy_total": _prefine_first_finite(record, "qi_legacy_total", "legacy_qi"),
+        "mirror_ratio": _prefine_first_finite(record, "mirror_ratio", "qi_mirror_ratio_max", "qi_mirror_ratio"),
+        "mirror_threshold": mirror_threshold,
+        "mirror_excess": mirror_excess,
+        "mirror_penalty": None if mirror_excess is None else float(mirror_excess**2),
+        "mirror_weighted_penalty": None if mirror_excess is None else float(mirror_weight * mirror_excess**2),
+        "elongation": _prefine_first_finite(record, "elongation", "qi_max_elongation", "qi_elongation"),
+        "elongation_threshold": elongation_threshold,
+        "elongation_excess": elongation_excess,
+        "elongation_penalty": None if elongation_excess is None else float(elongation_excess**2),
+        "elongation_weighted_penalty": None
+        if elongation_excess is None
+        else float(elongation_weight * elongation_excess**2),
+        "aspect": _finite_float(record.get("aspect")),
+        "target_aspect": _finite_float(record.get("target_aspect")),
+        "mean_iota": _finite_float(record.get("mean_iota")),
+        "abs_iota_min": _finite_float(record.get("abs_iota_min")),
+    }
+    return {key: value for key, value in snapshot.items() if value is not None}
+
+
+def _prefine_snapshot_delta(initial: dict[str, Any], final: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "qi_residual",
+        "qi_legacy_total",
+        "mirror_ratio",
+        "mirror_excess",
+        "mirror_penalty",
+        "mirror_weighted_penalty",
+        "elongation",
+        "elongation_excess",
+        "elongation_penalty",
+        "elongation_weighted_penalty",
+        "aspect",
+        "mean_iota",
+    )
+    delta = {}
+    for key in keys:
+        value = _prefine_metric_delta(_finite_float(initial.get(key)), _finite_float(final.get(key)))
+        if value is not None:
+            delta[key] = value
+    return delta
+
+
+def _prefine_record_from_flat_result(result: dict[str, Any], prefix: str) -> dict[str, Any]:
+    aliases = {
+        "qi_smooth_total": (f"qi_smooth_{prefix}", f"qi_residual_{prefix}", f"smooth_qi_{prefix}"),
+        "qi_legacy_total": (f"qi_legacy_{prefix}", f"legacy_qi_{prefix}"),
+        "qi_mirror_ratio_max": (f"mirror_ratio_{prefix}", f"qi_mirror_ratio_{prefix}"),
+        "qi_mirror_excess_max": (f"mirror_excess_{prefix}", f"qi_mirror_excess_{prefix}"),
+        "qi_max_elongation": (f"elongation_{prefix}", f"qi_elongation_{prefix}"),
+        "qi_elongation_excess": (f"elongation_excess_{prefix}", f"qi_elongation_excess_{prefix}"),
+        "aspect": (f"aspect_{prefix}",),
+        "mean_iota": (f"mean_iota_{prefix}", f"iota_{prefix}"),
+    }
+    out: dict[str, Any] = {}
+    for target_key, source_keys in aliases.items():
+        for source_key in source_keys:
+            if source_key in result:
+                out[target_key] = result[source_key]
+                break
+    return out
+
+
+def _prefine_normalized_objective_diagnostics(
+    plan: dict[str, Any],
+    result: dict[str, Any],
+    *,
+    objective_initial: float | None,
+    objective_final: float | None,
+) -> dict[str, Any]:
+    raw_qi_options = plan.get("qi_options", {})
+    qi_options_raw = raw_qi_options if isinstance(raw_qi_options, dict) else {}
+    existing = result.get("objective_diagnostics") or result.get("diagnostic_decomposition")
+    existing_initial = existing.get("initial") if isinstance(existing, dict) else None
+    existing_final = existing.get("final") if isinstance(existing, dict) else None
+
+    raw_audit_metrics = plan.get("audit_metrics", {})
+    initial_record = dict(raw_audit_metrics) if isinstance(raw_audit_metrics, dict) else {}
+    initial_record.update(_prefine_record_from_flat_result(result, "initial"))
+    if isinstance(existing_initial, dict):
+        initial_record.update(existing_initial)
+
+    raw_final_diagnostics = result.get("final_diagnostics", {})
+    final_record = dict(raw_final_diagnostics) if isinstance(raw_final_diagnostics, dict) else {}
+    final_record.update(_prefine_record_from_flat_result(result, "final"))
+    if isinstance(existing_final, dict):
+        final_record.update(existing_final)
+
+    initial = _prefine_snapshot_from_record(initial_record, qi_options_raw)
+    final = _prefine_snapshot_from_record(final_record, qi_options_raw)
+
+    delta = _prefine_snapshot_delta(initial, final)
+    scalar_improved = None
+    if objective_initial is not None and objective_final is not None:
+        scalar_improved = bool(
+            objective_initial > objective_final + _prefine_objective_regression_tolerance(objective_initial, objective_final)
+        )
+    smooth_worsened = _prefine_metric_worsened(
+        _finite_float(initial.get("qi_residual")),
+        _finite_float(final.get("qi_residual")),
+    )
+    legacy_worsened = _prefine_metric_worsened(
+        _finite_float(initial.get("qi_legacy_total")),
+        _finite_float(final.get("qi_legacy_total")),
+    )
+    worsened_terms = []
+    if smooth_worsened is True:
+        worsened_terms.append("smooth_qi")
+    if legacy_worsened is True:
+        worsened_terms.append("legacy_qi")
+    scalar_improved_qi_worsened = bool(scalar_improved is True and worsened_terms)
+    return {
+        "initial": initial,
+        "final": final,
+        "delta": delta,
+        "flags": {
+            "scalar_objective_improved": scalar_improved,
+            "smooth_qi_worsened": smooth_worsened,
+            "legacy_qi_worsened": legacy_worsened,
+            "worsened_qi_terms": worsened_terms,
+            "scalar_improved_but_qi_worsened": scalar_improved_qi_worsened,
+        },
+    }
+
+
+def _prefine_probe_diagnostic_record_from_files(
+    *,
+    input_path: Path,
+    wout_path: Path,
+    qi_options_raw: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Evaluate final probe diagnostics from already-written artifacts only."""
+
+    if not input_path.exists() or not wout_path.exists():
+        return None
+    indata = read_indata(input_path)
+    cfg = config_from_indata(indata)
+    static = build_static(cfg)
+    wout = read_wout(wout_path)
+    state = state_from_wout(wout)
+    signgs = int(wout.signgs)
+    flux = flux_profiles_from_indata(indata, static.s, signgs=signgs)
+    options = QIDiagnosticOptions(
+        surfaces=tuple(float(surface) for surface in qi_options_raw.get("surfaces", ())),
+        mboz=int(qi_options_raw.get("mboz", 8)),
+        nboz=int(qi_options_raw.get("nboz", 8)),
+        nphi=int(qi_options_raw.get("nphi", 31)),
+        nalpha=int(qi_options_raw.get("nalpha", 7)),
+        n_bounce=int(qi_options_raw.get("n_bounce", 9)),
+        include_bounce_endpoints=bool(qi_options_raw.get("include_bounce_endpoints", False)),
+        mirror_threshold=float(qi_options_raw.get("mirror_threshold", DEFAULT_MAX_MIRROR_RATIO)),
+        mirror_ntheta=int(qi_options_raw.get("mirror_ntheta", 32)),
+        mirror_nphi=int(qi_options_raw.get("mirror_nphi", 32)),
+        mirror_surface_index=int(qi_options_raw.get("mirror_surface_index", 0)),
+        elongation_threshold=float(qi_options_raw.get("elongation_threshold", DEFAULT_MAX_ELONGATION)),
+        elongation_ntheta=int(qi_options_raw.get("elongation_ntheta", 24)),
+        elongation_nphi=int(qi_options_raw.get("elongation_nphi", 8)),
+        phimin=float(qi_options_raw.get("phimin", 0.0)),
+        fail_on_error=False,
+    )
+    qi_record = qi_diagnostics_from_state(
+        state=state,
+        static=static,
+        indata=indata,
+        signgs=signgs,
+        options=options,
+        flux_local=flux,
+    )
+    _chips, iotas, _iotaf = equilibrium_iota_profiles_from_state(
+        state=state,
+        static=static,
+        indata=indata,
+        signgs=signgs,
+    )
+    return {
+        "aspect": _first_float(equilibrium_aspect_ratio_from_state(state=state, static=static)),
+        "mean_iota": _mean_iota(iotas),
+        **qi_record,
+    }
 
 
 def _int_list(value: Any) -> list[int]:
@@ -1242,6 +1510,8 @@ def _prefine_plan_acceptance(row: dict[str, Any]) -> dict[str, Any]:
         reasons.append("did not complete all requested stage modes")
     if row.get("objective_final_regressed") is True:
         reasons.append("final objective is worse than initial objective")
+    if bool(row.get("scalar_improved_but_qi_worsened", False)):
+        reasons.append("scalar objective improved while smooth/legacy QI worsened")
 
     history = row.get("history_summary", {})
     if bool(history.get("nonfinite_objective_sample_count", 0)):
@@ -1294,6 +1564,13 @@ def _prefine_plan_result_summary(plan: dict[str, Any], *, index: int) -> dict[st
             objective_initial=objective_initial,
             objective_final=objective_final,
         )
+    objective_diagnostics = _prefine_normalized_objective_diagnostics(
+        plan,
+        result,
+        objective_initial=objective_initial,
+        objective_final=objective_final,
+    )
+    diagnostic_flags = objective_diagnostics.get("flags", {})
 
     requested_stage_modes = _prefine_stage_modes_from_plan(plan, result, "requested")
     completed_stage_modes = _prefine_stage_modes_from_plan(plan, result, "completed")
@@ -1328,6 +1605,9 @@ def _prefine_plan_result_summary(plan: dict[str, Any], *, index: int) -> dict[st
         "stage_count_completed": stage_count_completed,
         "completed_all_requested_stages": completed_all_requested_stages,
         "history_summary": history_summary,
+        "objective_diagnostics": objective_diagnostics,
+        "scalar_improved_but_qi_worsened": bool(diagnostic_flags.get("scalar_improved_but_qi_worsened", False)),
+        "worsened_qi_terms": diagnostic_flags.get("worsened_qi_terms", []),
         "output_dir": plan.get("output_dir"),
         "phimin": result.get("phimin", plan.get("qi_options", {}).get("phimin")),
         "endpoint_mode": result.get("endpoint_mode", plan.get("endpoint_mode")),
@@ -1349,6 +1629,9 @@ def _compact_prefine_summary_row(row: dict[str, Any] | None) -> dict[str, Any] |
         "objective_final": row.get("objective_final"),
         "objective_improvement": row.get("objective_improvement"),
         "objective_relative_improvement": row.get("objective_relative_improvement"),
+        "objective_diagnostics": row.get("objective_diagnostics"),
+        "scalar_improved_but_qi_worsened": row.get("scalar_improved_but_qi_worsened"),
+        "worsened_qi_terms": row.get("worsened_qi_terms", []),
         "requested_stage_modes": row.get("requested_stage_modes", []),
         "completed_stage_modes": row.get("completed_stage_modes", []),
         "completed_all_requested_stages": row.get("completed_all_requested_stages"),
@@ -1385,6 +1668,7 @@ def _prefine_probe_recommendation(
     failures: list[dict[str, Any]],
     timeouts: list[dict[str, Any]],
     regression_rows: list[dict[str, Any]],
+    qi_worsening_rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
     pending = _prefine_next_pending_row(rows)
     if bool(manifest.get("dry_run", True)):
@@ -1415,6 +1699,17 @@ def _prefine_probe_recommendation(
             "action": "review_objective_regression",
             "label": label,
             "message": f"Review objective history for '{label}' because it contains objective regressions.",
+        }
+    if qi_worsening_rows:
+        label = str(qi_worsening_rows[0]["label"])
+        terms = ", ".join(str(term) for term in qi_worsening_rows[0].get("worsened_qi_terms", []))
+        return {
+            "action": "review_qi_worsening",
+            "label": label,
+            "message": (
+                f"Review '{label}' because the scalar objective improved while "
+                f"{terms or 'smooth/legacy QI'} worsened."
+            ),
         }
     if accepted_candidate is not None:
         label = str(accepted_candidate["label"])
@@ -1480,6 +1775,7 @@ def summarize_qi_prefine_probe_manifest(manifest: dict[str, Any]) -> dict[str, A
         if bool(row.get("objective_final_regressed", False))
         or int(row.get("history_summary", {}).get("objective_regression_count") or 0) > 0
     ]
+    qi_worsening_rows = [row for row in rows if bool(row.get("scalar_improved_but_qi_worsened", False))]
     accepted_rows = [row for row in finite_completed if bool(row.get("acceptance", {}).get("accepted", False))]
     accepted_candidate = min(accepted_rows, key=_prefine_best_final_key) if accepted_rows else None
     best_final = finite_completed[0] if finite_completed else None
@@ -1492,6 +1788,7 @@ def summarize_qi_prefine_probe_manifest(manifest: dict[str, Any]) -> dict[str, A
         failures=failures,
         timeouts=timeouts,
         regression_rows=regression_rows,
+        qi_worsening_rows=qi_worsening_rows,
     )
     blocking_issues = []
     if timeouts:
@@ -1500,6 +1797,8 @@ def summarize_qi_prefine_probe_manifest(manifest: dict[str, Any]) -> dict[str, A
         blocking_issues.append(f"{len(failures)} failed probe(s)")
     if regression_rows:
         blocking_issues.append(f"{len(regression_rows)} objective-regression probe(s)")
+    if qi_worsening_rows:
+        blocking_issues.append(f"{len(qi_worsening_rows)} scalar-improved QI-worsening probe(s)")
 
     return {
         "schema_version": 1,
@@ -1532,6 +1831,8 @@ def summarize_qi_prefine_probe_manifest(manifest: dict[str, Any]) -> dict[str, A
             }
             for row in regression_rows
         ],
+        "scalar_improved_qi_worsened_count": len(qi_worsening_rows),
+        "scalar_improved_qi_worsened": [_compact_prefine_summary_row(row) for row in qi_worsening_rows],
         "accepted_candidate": _compact_prefine_summary_row(accepted_candidate),
         "acceptance": {
             "decision": "accepted" if accepted_candidate is not None and not blocking_issues else "needs_review",
@@ -1618,6 +1919,19 @@ def run_qi_prefine_probe(plan: dict[str, Any], *, workflow: Any | None = None) -
     completed_stage_modes = [int(mode) for mode in getattr(result, "stage_modes", requested_stage_modes)]
     objective_initial = history.get("objective_initial")
     objective_final = history.get("objective_final")
+    final_diagnostics = None
+    diagnostic_error = None
+    try:
+        final_diagnostics = _prefine_probe_diagnostic_record_from_files(
+            input_path=Path(plan["output_dir"]) / "input.final",
+            wout_path=Path(plan["output_dir"]) / "wout_final.nc",
+            qi_options_raw=qi_options_raw,
+        )
+    except Exception as exc:
+        diagnostic_error = _format_error(exc)
+    history_objective_diagnostics = (
+        history.get("objective_diagnostics") if isinstance(history.get("objective_diagnostics"), dict) else None
+    )
     completed = dict(plan)
     completed["status"] = "completed"
     completed["review"] = {
@@ -1652,6 +1966,12 @@ def run_qi_prefine_probe(plan: dict[str, Any], *, workflow: Any | None = None) -
             objective_final=objective_final,
         ),
     }
+    if history_objective_diagnostics is not None:
+        completed["result"]["objective_diagnostics"] = history_objective_diagnostics
+    if final_diagnostics is not None:
+        completed["result"]["final_diagnostics"] = final_diagnostics
+    if diagnostic_error is not None:
+        completed["result"]["diagnostic_error"] = diagnostic_error
     return completed
 
 
@@ -1712,12 +2032,25 @@ def summarize_qi_prefine_results(manifest: dict[str, Any]) -> dict[str, Any]:
         for row in summary.get("plan_summaries", [])
         if int(row.get("history_summary", {}).get("objective_regression_count") or 0) > 0
     ]
+    qi_worsening = [
+        {
+            "index": row.get("index"),
+            "label": row.get("label"),
+            "family": row.get("family"),
+            "worsened_qi_terms": row.get("worsened_qi_terms", []),
+            "objective_diagnostics": row.get("objective_diagnostics", {}),
+        }
+        for row in summary.get("plan_summaries", [])
+        if bool(row.get("scalar_improved_but_qi_worsened", False))
+    ]
     completed_count = int(summary.get("completed_count", 0))
     failure_count = int(summary.get("failure_count", 0))
     if completed_count == 0:
         legacy_recommendation = "run_reviewed_prefine_probes" if manifest.get("plans") else "build_prefine_manifest"
     elif objective_regressions:
         legacy_recommendation = "inspect_nonmonotone_histories_before_promoting_seed"
+    elif qi_worsening:
+        legacy_recommendation = "inspect_scalar_improved_qi_worsening_before_promoting_seed"
     elif failure_count:
         legacy_recommendation = "rerun_failed_probe_or_lower_probe_budget"
     else:
@@ -1730,6 +2063,7 @@ def summarize_qi_prefine_results(manifest: dict[str, Any]) -> dict[str, Any]:
             "best_by_final_objective": summary.get("best_candidate_by_final_objective"),
             "best_by_objective_improvement": summary.get("best_improvement"),
             "objective_regressions": objective_regressions,
+            "scalar_improved_qi_worsened": qi_worsening,
             "legacy_recommendation": legacy_recommendation,
         }
     )

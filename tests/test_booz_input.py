@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import replace as dc_replace
+from pathlib import Path
 
+import numpy as np
 import pytest
 
 from vmec_jax.booz_input import booz_xform_inputs_from_state
@@ -11,6 +13,68 @@ from vmec_jax.profiles import eval_profiles
 from vmec_jax.static import build_static
 from vmec_jax.wout import read_wout, state_from_wout
 from vmec_jax.config import load_config
+
+
+BOOZ_INPUT_PARITY_CASES = (
+    pytest.param(
+        "axisym_pressure",
+        "input.shaped_tokamak_pressure",
+        "wout_shaped_tokamak_pressure.nc",
+        {
+            "bmnc": (2.0e-6, 2.0e-5),
+            "bsubumnc": (5.0e-12, 1.0e-12),
+            "bsubvmnc": (2.0e-5, 3.0e-3),
+        },
+        id="axisym_pressure",
+    ),
+    pytest.param(
+        "qa",
+        "input.LandremanPaul2021_QA_lowres",
+        "wout_LandremanPaul2021_QA_lowres.nc",
+        {
+            "bmnc": (1.0e-5, 1.0e-5),
+            "bsubumnc": (5.0e-12, 1.0e-12),
+            "bsubvmnc": (1.0e-5, 3.0e-5),
+        },
+        id="qa",
+    ),
+    pytest.param(
+        "qh",
+        "input.nfp4_QH_warm_start",
+        "wout_nfp4_QH_warm_start.nc",
+        {
+            "bmnc": (8.0e-4, 1.0e-3),
+            "bsubumnc": (5.0e-12, 1.0e-12),
+            "bsubvmnc": (3.0e-5, 2.0e-4),
+        },
+        id="qh",
+    ),
+)
+
+
+def _data_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "examples" / "data"
+
+
+def _relative_rms(a: np.ndarray, b: np.ndarray) -> float:
+    scale = max(float(np.sqrt(np.mean(np.asarray(b, dtype=float) ** 2))), 1.0e-30)
+    return float(np.sqrt(np.mean((np.asarray(a, dtype=float) - np.asarray(b, dtype=float)) ** 2)) / scale)
+
+
+def _assert_spectral_field_close(
+    *,
+    case_name: str,
+    field_name: str,
+    actual: np.ndarray,
+    expected: np.ndarray,
+    rel_rms_limit: float,
+    max_abs_limit: float,
+) -> None:
+    np.testing.assert_equal(actual.shape, expected.shape)
+    rel_rms = _relative_rms(actual, expected)
+    max_abs = float(np.max(np.abs(np.asarray(actual, dtype=float) - np.asarray(expected, dtype=float))))
+    errors = {"rel_rms": rel_rms, "max_abs": max_abs}
+    assert rel_rms < rel_rms_limit and max_abs < max_abs_limit, f"{case_name}.{field_name}: {errors}"
 
 
 def test_booz_xform_inputs_from_state_shapes():
@@ -95,3 +159,64 @@ def test_booz_xform_inputs_from_state_jit_tracer_safe():
 
     bmnc = _bmnc_from_rcos(jnp.asarray(state.Rcos))
     assert bmnc.shape[0] == cfg.ns - 1
+
+
+@pytest.mark.parametrize(
+    ("case_name", "input_name", "wout_name", "field_tolerances"),
+    BOOZ_INPUT_PARITY_CASES,
+)
+def test_booz_xform_inputs_match_bundled_vmec2000_spectral_fields(
+    case_name: str,
+    input_name: str,
+    wout_name: str,
+    field_tolerances: dict[str, tuple[float, float]],
+) -> None:
+    """Boozer inputs should preserve VMEC2000 half-mesh spectral field conventions."""
+    pytest.importorskip("jax")
+    pytest.importorskip("netCDF4")
+
+    enable_x64(True)
+    data_dir = _data_dir()
+    cfg, indata = load_config(str(data_dir / input_name))
+    wout = read_wout(data_dir / wout_name)
+    cfg = dc_replace(
+        cfg,
+        ns=int(wout.ns),
+        mpol=int(wout.mpol),
+        ntor=int(wout.ntor),
+        nfp=int(wout.nfp),
+        lasym=bool(wout.lasym),
+        lthreed=bool(int(wout.ntor) > 0),
+        ntheta=2 * int(wout.mpol) + 6,
+        nzeta=1 if int(wout.ntor) == 0 else 2 * int(wout.ntor) + 4,
+    )
+    static = build_static(cfg)
+
+    inputs = booz_xform_inputs_from_state(
+        state=state_from_wout(wout),
+        static=static,
+        indata=indata,
+        signgs=wout.signgs,
+        use_nyq_from_grid=False,
+    )
+
+    np.testing.assert_array_equal(np.asarray(inputs.xm), np.asarray(wout.xm))
+    np.testing.assert_array_equal(np.asarray(inputs.xn), np.asarray(wout.xn))
+    np.testing.assert_array_equal(np.asarray(inputs.xm_nyq), np.asarray(wout.xm_nyq))
+    np.testing.assert_array_equal(np.asarray(inputs.xn_nyq), np.asarray(wout.xn_nyq))
+
+    np.testing.assert_allclose(np.asarray(inputs.lmns), np.asarray(wout.lmns)[1:], rtol=5.0e-13, atol=5.0e-13)
+    np.testing.assert_allclose(np.asarray(inputs.iota), np.asarray(wout.iotas)[1:], rtol=5.0e-12, atol=5.0e-12)
+    assert inputs.bmns is None
+    assert inputs.bsubumns is None
+    assert inputs.bsubvmns is None
+
+    for field_name, (rel_rms_limit, max_abs_limit) in field_tolerances.items():
+        _assert_spectral_field_close(
+            case_name=case_name,
+            field_name=field_name,
+            actual=np.asarray(getattr(inputs, field_name)),
+            expected=np.asarray(getattr(wout, field_name))[1:],
+            rel_rms_limit=rel_rms_limit,
+            max_abs_limit=max_abs_limit,
+        )

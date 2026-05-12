@@ -22,6 +22,7 @@ from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_state
 
 try:
     from finite_beta_stage1_common import (
+        finite_beta_stage1_result,
         finite_beta_stage_budget,
         finite_beta_stage_modes,
         mean_abs_iota,
@@ -32,6 +33,7 @@ try:
     )
 except ModuleNotFoundError:
     from examples.optimization.finite_beta_stage1_common import (
+        finite_beta_stage1_result,
         finite_beta_stage_budget,
         finite_beta_stage_modes,
         mean_abs_iota,
@@ -273,6 +275,9 @@ for stage_mode in stage_modes:
 
 final_optimizer = stage_records[-1][1]
 final_result = stage_records[-1][3]
+stage1_result = finite_beta_stage1_result(stage_records)
+stage_summaries = stage1_result.stage_summaries
+final_summary = stage1_result.final_summary
 save_final_outputs(
     output_dir=OUTPUT_DIR,
     stage_records=stage_records,

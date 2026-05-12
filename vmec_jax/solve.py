@@ -36,6 +36,7 @@ from .state import VMECState, pack_state, unpack_state
 _SCAN_RUNNER_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 _COMPUTE_FORCES_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 _STRICT_UPDATE_STEP_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
+_PRECOND_OUTPUT_SCALE_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 
 
 def _jit_cache_limit(env_name: str, default: int) -> int:
@@ -163,6 +164,93 @@ def _strict_update_step_jit(static, *, limit_update_rms: bool, divide_by_scalxc_
         compiled,
         env_name="VMEC_JAX_STRICT_UPDATE_CACHE_SIZE",
         default=16,
+    )
+
+
+def _preconditioner_output_scaling_jit(*, apply_lambda_update_scale: bool):
+    """Return a cached fused scaler for R/Z/lambda preconditioner outputs."""
+    if not has_jax():
+        return None
+    key = (bool(apply_lambda_update_scale),)
+    cached = _jit_cache_get(_PRECOND_OUTPUT_SCALE_JIT_CACHE, key)
+    if cached is not None:
+        return cached
+
+    def _scale(frzl_rz, lam_prec, w_mode_mn, lambda_update_scale_j):
+        w = jnp.asarray(w_mode_mn)[None, :, :]
+        lam_prec_j = jnp.asarray(lam_prec)
+
+        frcc = jnp.asarray(frzl_rz.frcc)
+        frss = frzl_rz.frss
+        fzsc = jnp.asarray(frzl_rz.fzsc)
+        fzcs = frzl_rz.fzcs
+
+        flsc = jnp.asarray(frzl_rz.flsc) * lam_prec_j
+        flcs = None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * lam_prec_j)
+
+        frsc = (
+            jnp.asarray(frzl_rz.frsc)
+            if getattr(frzl_rz, "frsc", None) is not None
+            else jnp.zeros_like(frcc)
+        )
+        frcs = (
+            jnp.asarray(frzl_rz.frcs)
+            if getattr(frzl_rz, "frcs", None) is not None
+            else jnp.zeros_like(frcc)
+        )
+        fzcc = (
+            jnp.asarray(frzl_rz.fzcc)
+            if getattr(frzl_rz, "fzcc", None) is not None
+            else jnp.zeros_like(fzsc)
+        )
+        fzss = (
+            jnp.asarray(frzl_rz.fzss)
+            if getattr(frzl_rz, "fzss", None) is not None
+            else jnp.zeros_like(fzsc)
+        )
+        flcc = (
+            jnp.asarray(frzl_rz.flcc) * lam_prec_j
+            if getattr(frzl_rz, "flcc", None) is not None
+            else jnp.zeros_like(flsc)
+        )
+        flss = (
+            jnp.asarray(frzl_rz.flss) * lam_prec_j
+            if getattr(frzl_rz, "flss", None) is not None
+            else jnp.zeros_like(flsc)
+        )
+
+        frcc_u = frcc * w
+        frss_u = (frss if frss is not None else jnp.zeros_like(frcc_u)) * w
+        fzsc_u = fzsc * w
+        fzcs_u = (fzcs if fzcs is not None else jnp.zeros_like(fzsc_u)) * w
+        flsc_u = flsc * w
+        flcs_u = (flcs if flcs is not None else jnp.zeros_like(flsc_u)) * w
+        frsc_u = frsc * w
+        frcs_u = frcs * w
+        fzcc_u = fzcc * w
+        fzss_u = fzss * w
+        flcc_u = flcc * w
+        flss_u = flss * w
+
+        if bool(apply_lambda_update_scale):
+            lambda_update_scale_j = jnp.asarray(lambda_update_scale_j, dtype=flsc_u.dtype)
+            flsc_u = flsc_u * lambda_update_scale_j
+            flcs_u = flcs_u * lambda_update_scale_j
+            flcc_u = flcc_u * lambda_update_scale_j
+            flss_u = flss_u * lambda_update_scale_j
+
+        return (
+            (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss),
+            (frcc_u, frss_u, fzsc_u, fzcs_u, flsc_u, flcs_u, frsc_u, frcs_u, fzcc_u, fzss_u, flcc_u, flss_u),
+        )
+
+    compiled = jax.jit(_scale)
+    return _jit_cache_put(
+        _PRECOND_OUTPUT_SCALE_JIT_CACHE,
+        key,
+        compiled,
+        env_name="VMEC_JAX_PRECOND_OUTPUT_SCALE_CACHE_SIZE",
+        default=4,
     )
 
 
@@ -11424,6 +11512,8 @@ def solve_fixed_boundary_residual_iter(
             # Precondition forces.
             t_precond_start = time.perf_counter() if timing_enabled else None
             frzl_lam_pre = None
+            preconditioner_outputs_scaled = False
+            use_fused_precond_output_scaling = (not bool(host_update_assembly)) and jax.default_backend() != "cpu"
             if bool(vmec2000_control) and bool(cfg.lthreed):
                 from .preconditioner_1d_jax import (
                     rz_preconditioner_matrices,
@@ -11544,6 +11634,28 @@ def solve_fixed_boundary_residual_iter(
                     fzss = None if getattr(frzl_rz, "fzss", None) is None else np.asarray(frzl_rz.fzss)
                     flcc = None if getattr(frzl_rz, "flcc", None) is None else (np.asarray(frzl_rz.flcc) * _lp)
                     flss = None if getattr(frzl_rz, "flss", None) is None else (np.asarray(frzl_rz.flss) * _lp)
+                elif use_fused_precond_output_scaling:
+                    scale_outputs = _preconditioner_output_scaling_jit(
+                        apply_lambda_update_scale=(lambda_update_scale != 1.0)
+                    )
+                    (
+                        (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss),
+                        (
+                            frcc_u,
+                            frss_u,
+                            fzsc_u,
+                            fzcs_u,
+                            flsc_u,
+                            flcs_u,
+                            frsc_u,
+                            frcs_u,
+                            fzcc_u,
+                            fzss_u,
+                            flcc_u,
+                            flss_u,
+                        ),
+                    ) = scale_outputs(frzl_rz, lam_prec, w_mode_mn, lambda_update_scale_j)
+                    preconditioner_outputs_scaled = True
                 else:
                     frcc = jnp.asarray(frzl_rz.frcc)
                     frss = frzl_rz.frss
@@ -11696,6 +11808,28 @@ def solve_fixed_boundary_residual_iter(
                     fzss = None if getattr(frzl_rz, "fzss", None) is None else np.asarray(frzl_rz.fzss)
                     flcc = None if getattr(frzl_rz, "flcc", None) is None else (np.asarray(frzl_rz.flcc) * _lp)
                     flss = None if getattr(frzl_rz, "flss", None) is None else (np.asarray(frzl_rz.flss) * _lp)
+                elif use_fused_precond_output_scaling:
+                    scale_outputs = _preconditioner_output_scaling_jit(
+                        apply_lambda_update_scale=(lambda_update_scale != 1.0)
+                    )
+                    (
+                        (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss),
+                        (
+                            frcc_u,
+                            frss_u,
+                            fzsc_u,
+                            fzcs_u,
+                            flsc_u,
+                            flcs_u,
+                            frsc_u,
+                            frcs_u,
+                            fzcc_u,
+                            fzss_u,
+                            flcc_u,
+                            flss_u,
+                        ),
+                    ) = scale_outputs(frzl_rz, lam_prec, w_mode_mn, lambda_update_scale_j)
+                    preconditioner_outputs_scaled = True
                 else:
                     frcc = jnp.asarray(frzl_rz.frcc)
                     frss = frzl_rz.frss
@@ -11812,7 +11946,9 @@ def solve_fixed_boundary_residual_iter(
 
             # Mode-diagonal preconditioning in (m, n>=0) storage.
             t_precond_mode_start = time.perf_counter() if timing_detail_enabled else None
-            if host_update_assembly:
+            if preconditioner_outputs_scaled:
+                pass
+            elif host_update_assembly:
                 # NumPy path: avoids 36 JAX dispatches (expand_dims + broadcast + mul per array).
                 # _zeros_coeff_np replaces np.zeros_like (pre-allocated, avoids 6+ allocs/iter).
                 _w = w_mode_mn_np[None, :, :]
@@ -11861,7 +11997,7 @@ def solve_fixed_boundary_residual_iter(
             # conventions (e.g. restart vs. `wout` vs. internal). Allow parity drivers
             # to apply a constant scale to the lambda residual channel before mapping
             # it into coefficient updates.
-            if lambda_update_scale != 1.0:
+            if (lambda_update_scale != 1.0) and (not preconditioner_outputs_scaled):
                 flsc_u = flsc_u * lambda_update_scale_j
                 flcs_u = flcs_u * lambda_update_scale_j
                 flcc_u = flcc_u * lambda_update_scale_j

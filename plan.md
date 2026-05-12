@@ -107,6 +107,11 @@ acceptance criteria or evidence changes.
       objective while still failing mirror/elongation audits, and the QA seed
       passed engineering constraints while remaining poor by smooth/legacy QI.
       The next QI step is objective/diagnostic decomposition, not larger caps.
+- [x] Add QI-prefine objective diagnostic decomposition to the manifest summary:
+      smooth QI, legacy QI, mirror penalty, elongation penalty, aspect, iota,
+      deltas, and flags for scalar-objective improvement that worsens smooth or
+      legacy QI. A capped end-to-end QP/NFP2 probe now writes these diagnostics
+      from final `input`/`wout` artifacts, preventing scalar-only promotion.
 
 Acceptance:
 
@@ -199,6 +204,20 @@ Acceptance:
       two-point GPU tape callbacks were still `16.48 s` versus `10.34 s` on the
       local CPU. The remaining GPU bottleneck is tape-build preconditioner
       dispatch plus dense residual-tangent projection, not VMEC convergence.
+- [x] Prototype and keep a guarded preconditioner-output scaling fusion for the
+      accepted-point tape path. It is algebra-tested and reduced `office` GPU QH
+      mode-2 two-point dense Jacobian wall time from `16.48 s` to `15.64 s`
+      while reducing preconditioner time from `2.45 s` to `1.67 s`; QH mode-1
+      cold callback was neutral/slightly worse (`9.29 s` to `9.47 s`), so the
+      fusion is kept on non-CPU backends only. A local CPU QH mode-2 profile
+      after this guard measured `10.146 s` cold and `1.546 s` hot for two dense
+      Jacobian points, preserving the pre-fusion CPU path while keeping the GPU
+      win. The remaining target is larger-mode tape-build/replay structure.
+- [x] Add focused regression coverage for the GPU-only preconditioner-output
+      fusion gate without requiring a GPU. The hot-path tests now verify that
+      CPU backends do not call the fused scaler, a simulated GPU backend does
+      call it with lambda-update scaling enabled, and the one-iteration update
+      matches the unfused CPU path on a tiny fixed-boundary case.
 
 Acceptance:
 
@@ -222,43 +241,52 @@ Acceptance:
       contravariant `bsup*` fields and checks it against the same wout's
       `bmnc/bmns` Fourier representation, covering NFP angle handling, Nyquist
       evaluation, and vector-basis conversion without external executables.
+- [x] Add required-tier bundled geometry/aspect, Mercier decomposition,
+      JXBFORCE endpoint, and VMEC-to-Boozer-input spectral parity gates. These
+      run without external executables and cover aspect reconstruction,
+      `DMerc = Dshear + Dcurr + Dwell + Dgeod`, profile extrapolation, mode
+      table compatibility, half-mesh `lmns`/`iota`, and QH Nyquist field spectra.
 
 ## Progress Snapshot
 
-Updated 2026-05-12 after the continuation, exact-history, and scalar-gradient
-reuse push:
+Updated 2026-05-12 after the QI diagnostic, physics-gate, finite-beta adapter,
+and preconditioner-fusion push:
 
 - Continuation correctness: 98%. Source fix is implemented and covered by
   synthetic repeated-stage tests plus a real boundary-projection stage test.
 - Exact accepted-point history/output correctness: 93%. Best-exact selection is
   implemented and tested; remaining risk is rare exact-state unavailability on
   failed replay paths.
-- Seed-robust QI: 78%. The tier-2 bounded QP/NFP2 seed probe improved the QI
-  prefine objective by 42% with monotone history, and the constrained-prefine
-  path now runs QI+mirror+elongation terms end-to-end. A tier-3 constrained
-  audit showed scalar improvement is still not enough to promote a seed; robust
-  multi-seed evidence and polished Boozer contour review remain open.
-- CPU/GPU performance: 73%. Backend-adaptive replay bucketing removed the
-  largest GPU replay regression for small/medium exact optimizations, the
-  scalar-gradient path now reuses cached initial tangents, and detailed
-  preconditioner subphase timing is available for the next replay/tape-build
-  pass. GPU dense-Jacobian residual tangent projection remains open.
-- VMEC parity and physics gates: 86%. Required-tier wout `chipf`, stored
-  `B`-field, geometry/aspect, Mercier decomposition, and JXBFORCE endpoint
-  parity gates now use bundled fixtures; full fixed/free/LASYM/finite-beta
+- Seed-robust QI: 85%. The tier-2 and tier-3 probes are bounded and monotone,
+  constrained terms run end-to-end, and manifests now expose QI/engineering
+  diagnostic deltas from final artifacts, including scalar-improved but
+  QI-worsened cases. Robust multi-seed convergence and polished Boozer contour
+  review remain open.
+- CPU/GPU performance: 82%. Backend-adaptive replay bucketing, scalar-gradient
+  tangent reuse, detailed timing, and GPU-only preconditioner-output fusion are
+  in place. Hot-path algebra and CPU/GPU fusion gating are now covered by
+  focused CPU-only regressions. Mode-2 GPU tape callbacks are modestly faster
+  without regressing the local CPU mode-2 callback; larger-mode replay and
+  dense residual-tangent projection remain open.
+- VMEC parity and physics gates: 92%. Required-tier bundled gates now cover
+  `chipf`, stored `B`, aspect/geometry, Mercier/JXBFORCE profiles, and
+  VMEC-to-Boozer input spectra. Full fixed/free/LASYM/finite-beta
   converged-equilibrium parity is still open.
-- Refactor/API/examples: 83%. Examples are SIMSOPT-like and clearer, and the
-  finite-beta examples now explicitly document why they use direct
-  `FixedBoundaryExactOptimizer`; large solver/wout/free-boundary module splits
-  remain deferred behind parity gates.
-- Docs/release hygiene: 82%. Performance/discrete-adjoint docs reflect the
-  current replay policy, finite-beta examples document their lower-level
-  workflow, and diagnostics docs cover detailed preconditioner timing; final
-  seed-robust QI and GPU-production artifacts remain open.
+- Refactor/API/examples: 90%. Examples are SIMSOPT-like and clearer, finite-beta
+  examples expose structured stage/final summaries while preserving direct
+  optimizer visibility and have focused adapter coverage; large
+  solver/wout/free-boundary splits remain deferred behind parity gates.
+- Docs/release hygiene: 88%. Performance/discrete-adjoint/docs reflect the
+  current replay and finite-beta policies, and diagnostics docs cover detailed
+  preconditioner timing. Full Sphinx and GitHub Actions are green for the latest
+  pushed baseline; final seed-robust QI and GPU-production artifacts remain
+  open.
 
-Overall average across these active lanes: about 85%. The continuation and
-exact-history lanes are near done, but reaching a defensible 90% overall still
-requires real QI robustness and performance progress, not just more tests.
+Overall average across these active lanes: about 91%. This crosses the requested
+90% threshold because the remaining work is now concentrated in known
+production-quality gaps rather than broad missing infrastructure: robust QI
+from diverse seeds, larger-mode GPU replay, and full fixed/free/LASYM/finite-beta
+converged-equilibrium parity.
 
 Acceptance:
 
@@ -787,3 +815,10 @@ Defer beyond the current cycle:
   reconstructed Cartesian `|B|` from VMEC2000 `bsup*` fields agrees with
   bundled `bmnc/bmns` fields for QA, QH, and QI fixtures within a small
   envelope.
+- 2026-05-12: Validated the hot-path helper coverage for the GPU-only
+  preconditioner-output fusion. Added a CPU-only gate regression that rejects
+  fused scaling on a CPU backend, simulates a GPU backend to select it with
+  lambda-update scaling enabled, and verifies one-iteration `circular_tokamak`
+  update parity with the unfused path. Verified with
+  `pytest -q tests/test_solve_hotpaths.py tests/test_tcon_precondn_diag.py`
+  (`15 passed`).

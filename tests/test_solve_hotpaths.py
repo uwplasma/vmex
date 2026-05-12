@@ -3,17 +3,23 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
+import vmec_jax.solve as solve_module
+from vmec_jax.boundary import boundary_from_indata
 from vmec_jax.config import load_config
+from vmec_jax.init_guess import initial_guess_from_boundary
 from vmec_jax.solve import (
     _enforce_field_rows,
     _enforce_fixed_boundary_and_axis,
+    _preconditioner_output_scaling_jit,
     _replace_mode_slice,
     _scale_mode_slice,
     _zero_coeff_column,
 )
 from vmec_jax.state import StateLayout, VMECState, zeros_state
 from vmec_jax.static import build_static
+from vmec_jax.vmec_tomnsp import TomnspsRZL, vmec_angle_grid
 
 
 def test_zero_coeff_column_matches_masking():
@@ -126,3 +132,137 @@ def test_enforce_fixed_boundary_and_axis_matches_component_reference():
     np.testing.assert_allclose(np.asarray(got.Zsin), Zsin)
     np.testing.assert_allclose(np.asarray(got.Lcos), Lcos)
     np.testing.assert_allclose(np.asarray(got.Lsin), Lsin)
+
+
+def test_preconditioner_output_scaling_jit_matches_reference():
+    pytest.importorskip("jax")
+
+    shape = (4, 3, 2)
+    base = np.arange(np.prod(shape), dtype=float).reshape(shape) + 1.0
+    frzl_rz = TomnspsRZL(
+        frcc=base,
+        frss=None,
+        fzsc=base + 2.0,
+        fzcs=base + 3.0,
+        flsc=base + 4.0,
+        flcs=None,
+        frsc=base + 5.0,
+        frcs=None,
+        fzcc=None,
+        fzss=base + 6.0,
+        flcc=base + 7.0,
+        flss=None,
+    )
+    lam_prec = np.linspace(0.5, 1.25, shape[0])[:, None, None]
+    w_mode_mn = np.array([[1.0, 0.5], [0.25, 0.125], [0.1, 0.05]])
+    lambda_scale = np.asarray(1.75)
+
+    scale_outputs = _preconditioner_output_scaling_jit(apply_lambda_update_scale=True)
+    pre, upd = scale_outputs(frzl_rz, lam_prec, w_mode_mn, lambda_scale)
+    pre = tuple(None if x is None else np.asarray(x) for x in pre)
+    upd = tuple(np.asarray(x) for x in upd)
+
+    frcc = np.asarray(frzl_rz.frcc)
+    frss = frzl_rz.frss
+    fzsc = np.asarray(frzl_rz.fzsc)
+    fzcs = np.asarray(frzl_rz.fzcs)
+    flsc = np.asarray(frzl_rz.flsc) * lam_prec
+    flcs = None
+    frsc = np.asarray(frzl_rz.frsc)
+    frcs = np.zeros_like(frcc)
+    fzcc = np.zeros_like(fzsc)
+    fzss = np.asarray(frzl_rz.fzss)
+    flcc = np.asarray(frzl_rz.flcc) * lam_prec
+    flss = np.zeros_like(flsc)
+    w = w_mode_mn[None, :, :]
+
+    want_pre = (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss)
+    want_upd = (
+        frcc * w,
+        np.zeros_like(frcc) * w,
+        fzsc * w,
+        fzcs * w,
+        flsc * w * lambda_scale,
+        np.zeros_like(flsc) * w * lambda_scale,
+        frsc * w,
+        frcs * w,
+        fzcc * w,
+        fzss * w,
+        flcc * w * lambda_scale,
+        flss * w * lambda_scale,
+    )
+
+    for got_arr, want_arr in zip(pre, want_pre):
+        if want_arr is None:
+            assert got_arr is None
+        else:
+            np.testing.assert_allclose(got_arr, want_arr)
+    for got_arr, want_arr in zip(upd, want_upd):
+        np.testing.assert_allclose(got_arr, want_arr)
+
+
+def test_preconditioner_output_scaling_gate_is_gpu_only_without_gpu(monkeypatch):
+    pytest.importorskip("jax")
+
+    root = Path(__file__).resolve().parents[1]
+    cfg, indata = load_config(str(root / "examples/data/input.circular_tokamak"))
+    grid = vmec_angle_grid(ntheta=8, nzeta=4, nfp=cfg.nfp, lasym=cfg.lasym)
+    static = build_static(cfg, grid=grid)
+    boundary = boundary_from_indata(indata, static.modes)
+    state0 = initial_guess_from_boundary(static, boundary, indata, vmec_project=False)
+    solve_kwargs = dict(
+        indata=indata,
+        signgs=1,
+        ftol=float(indata.get_float("FTOL", 1.0e-13)),
+        max_iter=1,
+        step_size=float(indata.get_float("DELT", 5e-3)),
+        include_constraint_force=True,
+        apply_m1_constraints=True,
+        precond_radial_alpha=0.5,
+        precond_lambda_alpha=0.5,
+        mode_diag_exponent=0.0,
+        auto_flip_force=False,
+        divide_by_scalxc_for_update=False,
+        lambda_update_scale=1.75,
+        enforce_vmec_lambda_axis=True,
+        vmec2000_control=True,
+        strict_update=True,
+        backtracking=False,
+        reference_mode=False,
+        use_restart_triggers=True,
+        vmecpp_restart=False,
+        use_direct_fallback=False,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        jit_forces=False,
+        use_scan=False,
+        host_update_assembly=False,
+    )
+
+    def fail_if_fused(*, apply_lambda_update_scale):
+        raise AssertionError("CPU backend must not use fused preconditioner output scaling")
+
+    monkeypatch.setattr(solve_module.jax, "default_backend", lambda: "cpu")
+    monkeypatch.setattr(solve_module, "_preconditioner_output_scaling_jit", fail_if_fused)
+    cpu_res = solve_module.solve_fixed_boundary_residual_iter(state0, static, **solve_kwargs)
+
+    calls = []
+    original_scaler = _preconditioner_output_scaling_jit
+
+    def count_fused(*, apply_lambda_update_scale):
+        calls.append(bool(apply_lambda_update_scale))
+        return original_scaler(apply_lambda_update_scale=apply_lambda_update_scale)
+
+    monkeypatch.setattr(solve_module.jax, "default_backend", lambda: "gpu")
+    monkeypatch.setattr(solve_module, "_preconditioner_output_scaling_jit", count_fused)
+    gpu_res = solve_module.solve_fixed_boundary_residual_iter(state0, static, **solve_kwargs)
+
+    assert calls == [True]
+    np.testing.assert_allclose(np.asarray(gpu_res.w_history), np.asarray(cpu_res.w_history), rtol=1e-12, atol=1e-12)
+    for field in ("Rcos", "Rsin", "Zcos", "Zsin", "Lcos", "Lsin"):
+        np.testing.assert_allclose(
+            np.asarray(getattr(gpu_res.state, field)),
+            np.asarray(getattr(cpu_res.state, field)),
+            rtol=1e-11,
+            atol=1e-11,
+        )

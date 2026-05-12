@@ -469,6 +469,10 @@ def test_run_qi_prefine_probe_dispatches_tiny_qi_solve(tmp_path):
                         {"objective": 2.0},
                         {"objective": 1.0},
                     ],
+                    "objective_diagnostics": {
+                        "initial": {"qi_residual": 0.3, "qi_legacy_total": 0.4},
+                        "final": {"qi_residual": 0.2, "qi_legacy_total": 0.3},
+                    },
                 }
             },
             stage_modes=[1, 1, 2, 2, 3],
@@ -494,6 +498,7 @@ def test_run_qi_prefine_probe_dispatches_tiny_qi_solve(tmp_path):
     assert completed["result"]["history_summary"]["history_present"] is True
     assert completed["result"]["history_summary"]["objective_monotonic_nonincreasing"] is True
     assert completed["result"]["history_summary"]["objective_regression_count"] == 0
+    assert completed["result"]["objective_diagnostics"]["final"]["qi_residual"] == 0.2
     assert completed["result"]["nfev"] == 3
     assert calls["qi_options"]["nphi"] == 31
     assert calls["qi_options"]["include_bounce_endpoints"] is True
@@ -830,6 +835,152 @@ def test_prefine_result_summary_ranks_and_flags_regressions():
     assert summary["best_improvement"]["label"] == "qp_seed"
     assert summary["history_regressions"][0]["label"] == "qp_seed"
     assert summary["recommendation"]["action"] == "inspect_failure"
+
+
+def test_prefine_summary_decomposes_objective_and_flags_qi_worsening():
+    mod = _load_module()
+    manifest = {
+        "dry_run": False,
+        "selection": {"planned_rows": 1},
+        "plans": [
+            {
+                "status": "completed",
+                "label": "scalar_better_qi_worse",
+                "family": "qi",
+                "audit_rank": 1,
+                "audit_metrics": {
+                    "qi_smooth_total": 0.2,
+                    "qi_legacy_total": 0.25,
+                    "qi_mirror_ratio_max": 0.18,
+                    "qi_mirror_ratio_target": 0.21,
+                    "qi_max_elongation": 7.5,
+                    "qi_elongation_target": 8.0,
+                    "aspect": 5.1,
+                    "target_aspect": 5.0,
+                    "mean_iota": -0.45,
+                    "abs_iota_min": 0.41,
+                },
+                "qi_options": {
+                    "mirror_weight": 2.0,
+                    "mirror_threshold": 0.21,
+                    "elongation_weight": 0.5,
+                    "elongation_threshold": 8.0,
+                },
+                "optimization": {"stage_modes": [1]},
+                "result": {
+                    "objective_initial": 10.0,
+                    "objective_final": 4.0,
+                    "requested_stage_modes": [1],
+                    "completed_stage_modes": [1],
+                    "final_diagnostics": {
+                        "qi_smooth_total": 0.35,
+                        "qi_legacy_total": 0.4,
+                        "qi_mirror_ratio_max": 0.25,
+                        "qi_mirror_ratio_target": 0.21,
+                        "qi_mirror_excess_max": 0.04,
+                        "qi_max_elongation": 8.5,
+                        "qi_elongation_target": 8.0,
+                        "qi_elongation_excess": 0.5,
+                        "aspect": 5.3,
+                        "mean_iota": -0.42,
+                    },
+                    "history": [{"objective": 10.0}, {"objective": 4.0}],
+                },
+            }
+        ],
+    }
+
+    summary = mod.summarize_qi_prefine_probe_manifest(manifest)
+    row = summary["plan_summaries"][0]
+    diagnostics = row["objective_diagnostics"]
+
+    assert diagnostics["initial"]["qi_residual"] == pytest.approx(0.2)
+    assert diagnostics["final"]["qi_residual"] == pytest.approx(0.35)
+    assert diagnostics["final"]["mirror_penalty"] == pytest.approx(0.04**2)
+    assert diagnostics["final"]["mirror_weighted_penalty"] == pytest.approx(2.0 * 0.04**2)
+    assert diagnostics["final"]["elongation_penalty"] == pytest.approx(0.5**2)
+    assert diagnostics["final"]["elongation_weighted_penalty"] == pytest.approx(0.5 * 0.5**2)
+    assert diagnostics["final"]["aspect"] == pytest.approx(5.3)
+    assert diagnostics["final"]["mean_iota"] == pytest.approx(-0.42)
+    assert diagnostics["delta"]["qi_residual"] == pytest.approx(0.15)
+    assert diagnostics["flags"]["scalar_improved_but_qi_worsened"] is True
+    assert diagnostics["flags"]["worsened_qi_terms"] == ["smooth_qi", "legacy_qi"]
+    assert row["acceptance"]["accepted"] is False
+    assert "smooth/legacy QI worsened" in row["acceptance"]["reasons"][0]
+    assert summary["scalar_improved_qi_worsened_count"] == 1
+    assert summary["scalar_improved_qi_worsened"][0]["label"] == "scalar_better_qi_worse"
+    assert summary["acceptance"]["accepted"] is False
+    assert summary["recommendation"]["action"] == "review_qi_worsening"
+
+    result_summary = mod.summarize_qi_prefine_results(manifest)
+    assert result_summary["scalar_improved_qi_worsened"][0]["label"] == "scalar_better_qi_worse"
+    assert result_summary["legacy_recommendation"] == "inspect_scalar_improved_qi_worsening_before_promoting_seed"
+
+
+def test_prefine_summary_merges_history_diagnostics_with_final_artifacts():
+    mod = _load_module()
+    manifest = {
+        "dry_run": False,
+        "selection": {"planned_rows": 1},
+        "plans": [
+            {
+                "status": "completed",
+                "label": "merged_diagnostics",
+                "family": "qi",
+                "audit_rank": 1,
+                "audit_metrics": {
+                    "qi_smooth_total": 0.8,
+                    "qi_legacy_total": 0.9,
+                    "qi_mirror_ratio_max": 0.18,
+                    "qi_max_elongation": 7.7,
+                    "aspect": 5.0,
+                    "mean_iota": -0.45,
+                },
+                "qi_options": {
+                    "mirror_weight": 2.0,
+                    "mirror_threshold": 0.21,
+                    "elongation_weight": 0.5,
+                    "elongation_threshold": 8.0,
+                },
+                "optimization": {"stage_modes": [1]},
+                "result": {
+                    "objective_initial": 3.0,
+                    "objective_final": 1.0,
+                    "requested_stage_modes": [1],
+                    "completed_stage_modes": [1],
+                    "objective_diagnostics": {
+                        "initial": {"qi_residual": 0.3, "qi_legacy_total": 0.4},
+                        "final": {"qi_residual": 0.2, "qi_legacy_total": 0.35},
+                    },
+                    "final_diagnostics": {
+                        "mirror_ratio": 0.31,
+                        "elongation": 8.4,
+                        "aspect": 5.4,
+                        "mean_iota": -0.39,
+                    },
+                    "history": [{"objective": 3.0}, {"objective": 1.0}],
+                },
+            }
+        ],
+    }
+
+    summary = mod.summarize_qi_prefine_probe_manifest(manifest)
+    diagnostics = summary["plan_summaries"][0]["objective_diagnostics"]
+
+    assert diagnostics["initial"]["qi_residual"] == pytest.approx(0.3)
+    assert diagnostics["final"]["qi_residual"] == pytest.approx(0.2)
+    assert diagnostics["final"]["mirror_ratio"] == pytest.approx(0.31)
+    assert diagnostics["final"]["mirror_threshold"] == pytest.approx(0.21)
+    assert diagnostics["final"]["mirror_excess"] == pytest.approx(0.1)
+    assert diagnostics["final"]["mirror_weighted_penalty"] == pytest.approx(2.0 * 0.1**2)
+    assert diagnostics["final"]["elongation"] == pytest.approx(8.4)
+    assert diagnostics["final"]["elongation_threshold"] == pytest.approx(8.0)
+    assert diagnostics["final"]["elongation_excess"] == pytest.approx(0.4)
+    assert diagnostics["final"]["elongation_weighted_penalty"] == pytest.approx(0.5 * 0.4**2)
+    assert diagnostics["final"]["aspect"] == pytest.approx(5.4)
+    assert diagnostics["final"]["mean_iota"] == pytest.approx(-0.39)
+    assert diagnostics["flags"]["scalar_improved_but_qi_worsened"] is False
+    assert summary["accepted_candidate"]["label"] == "merged_diagnostics"
 
 
 def test_prefine_manifest_run_attaches_summary_on_success(tmp_path):
