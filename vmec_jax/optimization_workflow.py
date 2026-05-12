@@ -530,6 +530,48 @@ class MirrorRatio:
         )
 
 
+class BoozerBTarget:
+    """Boozer ``|B|`` spectrum-matching objective for QI steering.
+
+    This term is intended as a differentiable homotopy/steering objective, not
+    as a final QI diagnostic.  It compares the current Boozer ``|B|`` spectrum
+    against a reference spectrum on the same Boozer mode grid.  By default each
+    surface is normalized by its ``(m,n)=(0,0)`` coefficient so the term matches
+    field shape rather than absolute field strength.
+    """
+
+    name = "boozer_b_target"
+    requires_qi_field = True
+
+    def __init__(
+        self,
+        *,
+        target_bmnc,
+        target_bmns=None,
+        normalize: bool = True,
+        include_b00: bool = False,
+        qi_options: QuasiIsodynamicOptions | None = None,
+    ):
+        self.target_bmnc = np.asarray(target_bmnc, dtype=float)
+        self.target_bmns = None if target_bmns is None else np.asarray(target_bmns, dtype=float)
+        self.normalize = bool(normalize)
+        self.include_b00 = bool(include_b00)
+        self.qi_options = qi_options
+
+    def J(self, _ctx: StageContext, _state):
+        raise RuntimeError("BoozerBTarget must be evaluated inside a QI solve.")
+
+    def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
+        return qi_boozer_b_target_objective(
+            target_bmnc=self.target_bmnc,
+            target_bmns=self.target_bmns,
+            weight=residual_weight,
+            normalize=self.normalize,
+            include_b00=self.include_b00,
+            qi_options=self.qi_options,
+        )
+
+
 class MaxElongation:
     """Maximum LCFS elongation penalty object for QI solves."""
 
@@ -1114,6 +1156,60 @@ def qi_mirror_ratio_objective(
     return QIObjectiveTerm("mirror_ratio", _evaluate, qi_options=qi_options)
 
 
+def qi_boozer_b_target_objective(
+    *,
+    target_bmnc,
+    target_bmns=None,
+    weight: float = 1.0,
+    normalize: bool = True,
+    include_b00: bool = False,
+    qi_options: QuasiIsodynamicOptions | None = None,
+) -> QIObjectiveTerm:
+    """Boozer ``|B|`` spectrum target evaluated on the shared QI field."""
+
+    target_bmnc_arr = np.asarray(target_bmnc, dtype=float)
+    target_bmns_arr = None if target_bmns is None else np.asarray(target_bmns, dtype=float)
+
+    def _evaluate(_ctx: StageContext, _state, field: dict):
+        booz = field["booz"]
+        bmnc = jnp.asarray(booz["bmnc_b"], dtype=jnp.float64)
+        target_c = jnp.asarray(target_bmnc_arr, dtype=jnp.float64)
+        if bmnc.shape != target_c.shape:
+            raise ValueError(
+                "BoozerBTarget target_bmnc must have the same shape as the current Boozer bmnc_b "
+                f"({target_c.shape} != {bmnc.shape})."
+            )
+
+        bmns_raw = booz.get("bmns_b")
+        bmns = jnp.zeros_like(bmnc) if bmns_raw is None else jnp.asarray(bmns_raw, dtype=jnp.float64)
+        target_s = jnp.zeros_like(target_c) if target_bmns_arr is None else jnp.asarray(target_bmns_arr, dtype=jnp.float64)
+        if target_s.shape != bmnc.shape:
+            raise ValueError(
+                "BoozerBTarget target_bmns must have the same shape as the current Boozer bmnc_b "
+                f"({target_s.shape} != {bmnc.shape})."
+            )
+
+        if bool(normalize):
+            tiny = jnp.asarray(jnp.finfo(bmnc.dtype).tiny, dtype=bmnc.dtype)
+            scale = jnp.maximum(jnp.abs(bmnc[:, :1]), tiny)
+            target_scale = jnp.maximum(jnp.abs(target_c[:, :1]), tiny)
+            bmnc = bmnc / scale
+            bmns = bmns / scale
+            target_c = target_c / target_scale
+            target_s = target_s / target_scale
+
+        diff_c = bmnc - target_c
+        diff_s = bmns - target_s
+        if not bool(include_b00):
+            diff_c = diff_c.at[:, 0].set(0.0)
+            diff_s = diff_s.at[:, 0].set(0.0)
+        residuals = jnp.concatenate([jnp.ravel(diff_c), jnp.ravel(diff_s)])
+        residuals = residuals * float(weight) / jnp.sqrt(jnp.asarray(max(int(residuals.size), 1), dtype=jnp.float64))
+        return residuals, jnp.sum(residuals * residuals)
+
+    return QIObjectiveTerm("boozer_b_target", _evaluate, qi_options=qi_options)
+
+
 def qi_max_elongation_objective(
     *,
     threshold: float,
@@ -1220,6 +1316,45 @@ def repeated_stage_modes(
     if bool(use_mode_continuation) and int(max_mode) > 1 and int(continuation_nfev) > 0:
         return [int(max_mode)] * int(repeats)
     return [int(max_mode)]
+
+
+def boozer_b_target_from_wout(
+    wout_path: str | Path,
+    *,
+    surfaces,
+    mboz: int,
+    nboz: int,
+) -> dict[str, np.ndarray | int]:
+    """Return Boozer ``|B|`` target spectra from a VMEC ``wout`` file.
+
+    The returned ``bmnc_b``/``bmns_b`` arrays use the same surface-major shape
+    as ``booz_xform_jax``'s differentiable API, so they can be passed directly
+    to :class:`BoozerBTarget`.
+    """
+
+    from booz_xform_jax import Booz_xform
+
+    bx = Booz_xform(verbose=0)
+    bx.read_wout(str(wout_path), flux=False)
+    s_in = np.asarray(bx.s_in, dtype=float)
+    surface_indices = sorted({int(np.argmin(np.abs(s_in - float(surface)))) for surface in surfaces})
+    bx.compute_surfs = surface_indices
+    bx.mboz = int(mboz)
+    bx.nboz = int(nboz)
+    bx.mnboz = None
+    bx.xm_b = None
+    bx.xn_b = None
+    bx._prepared = False
+    bx.run()
+    bmns_b = getattr(bx, "bmns_b", None)
+    return {
+        "bmnc_b": np.asarray(bx.bmnc_b, dtype=float).T,
+        "bmns_b": None if bmns_b is None else np.asarray(bmns_b, dtype=float).T,
+        "xm_b": np.asarray(bx.xm_b, dtype=int),
+        "xn_b": np.asarray(bx.xn_b, dtype=int),
+        "s_b": np.asarray(bx.s_b, dtype=float),
+        "nfp": int(bx.nfp),
+    }
 
 
 def qs_stage_budget(
@@ -2246,6 +2381,7 @@ __all__ = [
     "BDotB",
     "BDotGradV",
     "BetaTotal",
+    "BoozerBTarget",
     "DMerc",
     "FixedBoundaryVMEC",
     "FixedBoundaryObjectiveStage",
@@ -2269,6 +2405,7 @@ __all__ = [
     "ToroidalCurrentGradient",
     "abs_mean_iota_floor_objective",
     "aspect_objective",
+    "boozer_b_target_from_wout",
     "build_fixed_boundary_objective_stage",
     "build_quasi_isodynamic_objective_stage",
     "combine_qs_stage_histories",
@@ -2280,6 +2417,7 @@ __all__ = [
     "qs_stage_budget",
     "qs_stage_modes",
     "qi_lgradb_objective",
+    "qi_boozer_b_target_objective",
     "qi_max_elongation_objective",
     "qi_mirror_ratio_objective",
     "quasi_isodynamic_field_objective",
