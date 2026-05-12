@@ -1410,6 +1410,30 @@ class FixedBoundaryExactOptimizer:
         self._best_exact_cost: float = math.inf
         self._exact_history_rejected_count: int = 0
 
+    @property
+    def static(self):
+        """VMEC static configuration used by this optimizer stage."""
+
+        return self._static
+
+    @property
+    def indata(self):
+        """VMEC input data used by this optimizer stage."""
+
+        return self._indata
+
+    @property
+    def signgs(self) -> int:
+        """VMEC Jacobian sign used for profile and Boozer adapters."""
+
+        return int(self._signgs)
+
+    @property
+    def flux(self):
+        """Half/full-mesh flux-profile data used by objective callbacks."""
+
+        return self._flux
+
     # ── private helpers ───────────────────────────────────────────────────────
 
     def _resolve_solver_device(self, solver_device: str | None) -> str | None:

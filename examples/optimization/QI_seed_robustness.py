@@ -22,13 +22,15 @@ enable_x64(True)
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
-# Seed and optimizer settings.
+# Seed and optimizer settings.  This default is the first short policy that
+# gets the bundled seed onto a low-QI, nonzero-iota branch.
 INPUT_FILE = DATA_DIR / "input.QI_stel_seed_3127"
-OUTPUT_DIR = Path("results/qi_seed_robustness/qi_stel_seed_3127/qionly_mode2")
-MAX_MODE = 2
+OUTPUT_DIR = Path("results/qi_seed_robustness/qi_stel_seed_3127/qiiota_aspect_mode3")
+MAX_MODE = 3
 MIN_VMEC_MODE = 6
-MAX_NFEV = 10
-METHOD = "scalar_trust"  # Try "scipy" for faster but less fault-tolerant trust-region steps.
+MAX_NFEV = 8
+METHOD = "scipy"  # Try "scalar_trust" for stricter monotone line-search probes.
+SCIPY_TR_SOLVER = "lsmr"  # For METHOD="scipy": "lsmr" is memory-light; "exact" is dense.
 FTOL = 1.0e-4
 GTOL = 1.0e-4
 XTOL = 1.0e-8
@@ -40,6 +42,13 @@ SOLVER_DEVICE = None  # Set "cpu" or "gpu" to force one backend.
 USE_ESS = True
 ALPHA = 1.2
 MAKE_PLOTS = True
+TARGET_ASPECT = 5.0
+TARGET_ABS_IOTA_MIN = 0.41
+ASPECT_WEIGHT = 0.25
+IOTA_FLOOR_WEIGHT = 200.0**2
+QI_WEIGHT = 10.0
+QI_GATE_SMOOTH_MAX = 2.0e-3
+QI_GATE_LEGACY_MAX = 1.0e-3
 
 # QI residual settings.  These are the low-mode settings used for the bounded
 # seed probe; increase mboz/nboz/nphi/nalpha/n_bounce for final publication runs.
@@ -62,26 +71,22 @@ qi_options = vj.QuasiIsodynamicOptions(
     phimin=0.0,
 )
 
-# Pure QI pre-refinement: this gets the new seed onto a precise QI branch.
+# Robust QI candidate objective.  QI alone can find a low-QI branch with
+# near-zero transform, which is not an acceptable stellarator target.
+aspect = vj.AspectRatio()
+iota_floor = vj.AbsMeanIotaFloor(TARGET_ABS_IOTA_MIN)
 qi = vj.QuasiIsodynamicResidual(qi_options)
 objective_tuples = [
-    (qi.J, 0.0, 1.0),
+    (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
+    (iota_floor.J, 0.0, IOTA_FLOOR_WEIGHT),
+    (qi.J, 0.0, QI_WEIGHT),
 ]
 
-# Optional engineering cleanup.  This is deliberately commented out because a
-# scalar weighted cleanup can destroy QI if imposed too early; use it as a
-# second run after inspecting the pure-QI result.
-# aspect = vj.AspectRatio()
-# iota_floor = vj.AbsMeanIotaFloor(0.41)
+# Optional engineering cleanup.  Mirror/elongation can be included after the
+# QI+iota branch is established, but too much scalar pressure can destroy QI.
 # mirror = vj.MirrorRatio(threshold=0.21, ntheta=96, nphi=96, surface_index=0)
 # elongation = vj.MaxElongation(threshold=8.0, ntheta=48, nphi=16)
-# objective_tuples = [
-#     (aspect.J, 3.5, 0.005),
-#     (iota_floor.J, 0.0, 200.0**2),
-#     (qi.J, 0.0, 1.0),
-#     (mirror.J, 0.0, 10.0),
-#     (elongation.J, 0.0, 10.0),
-# ]
+# objective_tuples += [(mirror.J, 0.0, 1.0), (elongation.J, 0.0, 1.0)]
 
 problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
 vmec = vj.FixedBoundaryVMEC.from_input(
@@ -110,6 +115,7 @@ result = vj.least_squares_solve(
     trial_max_iter=TRIAL_MAX_ITER,
     trial_ftol=TRIAL_FTOL,
     solver_device=SOLVER_DEVICE,
+    scipy_tr_solver=SCIPY_TR_SOLVER,
 )
 
 history = result.history
@@ -144,6 +150,38 @@ print(f"  final aspect:      {history['aspect_final']:.6g}")
 if "iota_final" in history:
     print(f"  final mean iota:   {history['iota_final']:.6g}")
 print(f"  wall time:         {result.timing_summary['total_wall_time_s']:.2f} s")
+
+diagnostic_options = vj.QIDiagnosticOptions(
+    surfaces=surfaces,
+    mboz=18,
+    nboz=18,
+    nphi=151,
+    nalpha=31,
+    n_bounce=51,
+    include_bounce_endpoints=True,
+    phimin=0.0,
+)
+diagnostics = vj.qi_diagnostics_from_state(
+    state=result.final_state,
+    static=result.final_optimizer.static,
+    indata=result.final_optimizer.indata,
+    signgs=result.final_optimizer.signgs,
+    surfaces=surfaces,
+    options=diagnostic_options,
+)
+smooth_qi = float(diagnostics["qi_smooth_total"])
+legacy_qi = float(diagnostics["qi_legacy_total"])
+abs_iota = abs(float(history.get("iota_final", 0.0)))
+qi_gate_passed = (
+    smooth_qi <= QI_GATE_SMOOTH_MAX
+    and legacy_qi <= QI_GATE_LEGACY_MAX
+    and abs_iota >= TARGET_ABS_IOTA_MIN
+)
+print("\nIndependent QI promotion gate:")
+print(f"  smooth QI:       {smooth_qi:.6e}  (limit {QI_GATE_SMOOTH_MAX:.1e})")
+print(f"  legacy QI:       {legacy_qi:.6e}  (limit {QI_GATE_LEGACY_MAX:.1e})")
+print(f"  abs(mean iota):  {abs_iota:.6g}  (minimum {TARGET_ABS_IOTA_MIN:.3g})")
+print(f"  promoted:        {qi_gate_passed}")
 print("\nSaved files:")
 for name, path in paths.items():
     print(f"  {name}: {path}")
@@ -163,6 +201,17 @@ if MAKE_PLOTS:
         "objective_history": vj.plot_objective_history(
             paths["history"],
             outdir=OUTPUT_DIR,
+        ),
+        "boozer_bmag_contours": vj.plot_boozer_bmag_contours_from_state(
+            result.final_state,
+            static=result.final_optimizer.static,
+            indata=result.final_optimizer.indata,
+            signgs=result.final_optimizer.signgs,
+            outdir=OUTPUT_DIR,
+            surfaces=(1.0,),
+            mboz=18,
+            nboz=18,
+            title=f"{INPUT_FILE.name}: Boozer |B| contours on LCFS",
         ),
     }
     print("\nPlot files:")

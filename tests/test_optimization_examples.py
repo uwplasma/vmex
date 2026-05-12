@@ -107,6 +107,9 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "plot_3d_boundary_comparison(" in text
     assert "plot_bmag_contours(" in text
     assert "plot_objective_history(" in text
+    assert "plot_boozer_bmag_contours_from_state(" in text
+    assert "qi_diagnostics_from_state(" in text
+    assert "qi_gate_passed" in text
     assert 'saved_paths["initial_wout"]' in text
     assert 'saved_paths["history"]' in text
 

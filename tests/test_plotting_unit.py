@@ -17,6 +17,7 @@ from vmec_jax.plotting import (
     _pi_label,
     axis_rz_from_wout,
     axis_rz_from_wout_physical,
+    boozer_bmag_grid_from_state,
     bmag_from_wout,
     bmag_from_wout_physical,
     bsub_from_wout,
@@ -26,6 +27,7 @@ from vmec_jax.plotting import (
     prepare_matplotlib_3d,
     plot_3d_boundary_comparison,
     plot_bmag_contours,
+    plot_boozer_bmag_contours_from_state,
     plot_objective_history,
     plot_qh_optimization,
     plot_wout,
@@ -255,6 +257,56 @@ def test_public_optimization_plot_helpers_render_synthetic_outputs(tmp_path):
     assert boundary_path.stat().st_size > 0
     assert bmag_path.stat().st_size > 0
     assert history_plot_path.stat().st_size > 0
+
+
+def test_boozer_bmag_contour_helper_uses_line_contours(tmp_path, monkeypatch):
+    pytest.importorskip("matplotlib")
+    import vmec_jax.booz_input as booz_input
+
+    fake_booz_module = ModuleType("booz_xform_jax")
+    fake_booz_module.prepare_booz_xform_constants_from_inputs = (
+        lambda *, inputs, mboz, nboz, asym: ("constants", "grids")
+    )
+    fake_booz_module.booz_xform_from_inputs = lambda **_kwargs: {
+        "bmnc_b": np.asarray([[1.0, 0.2]], dtype=float),
+        "bmns_b": np.asarray([[0.0, 0.1]], dtype=float),
+        "ixm_b": np.asarray([0, 1], dtype=int),
+        "ixn_b": np.asarray([0, 0], dtype=int),
+        "nfp_b": np.asarray(1, dtype=int),
+        "iota_b": np.asarray([0.5], dtype=float),
+    }
+    monkeypatch.setitem(sys.modules, "booz_xform_jax", fake_booz_module)
+    monkeypatch.setattr(
+        booz_input,
+        "booz_xform_inputs_from_state",
+        lambda **_kwargs: SimpleNamespace(rmnc=np.zeros((3, 2)), nfp=1),
+    )
+
+    static = SimpleNamespace(cfg=SimpleNamespace(lasym=False, nfp=1))
+    theta, phi, bmag, _booz = boozer_bmag_grid_from_state(
+        object(),
+        static=static,
+        indata=object(),
+        signgs=1,
+        ntheta=8,
+        nphi=9,
+    )
+    assert theta.shape == (8,)
+    assert phi.shape == (9,)
+    assert bmag.shape == (8, 9)
+    assert np.ptp(bmag) > 0.0
+
+    out = plot_boozer_bmag_contours_from_state(
+        object(),
+        static=static,
+        indata=object(),
+        signgs=1,
+        outdir=tmp_path,
+        ntheta=8,
+        nphi=9,
+    )
+    assert out.name == "boozer_bmag_surface.png"
+    assert out.stat().st_size > 0
 
 
 def test_plot_qh_optimization_wrapper_dispatches_to_public_helpers(tmp_path, monkeypatch, capsys):

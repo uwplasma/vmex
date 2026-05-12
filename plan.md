@@ -277,13 +277,14 @@ LASYM-Boozer parity, and release-checklist push:
   gate are covered on small required-tier cases. Full QA/QH/QP/QI max_mode=1
   objective derivative gates and matrix-free/scalar-adjoint production paths
   remain open.
-- Seed-robust QI: 88%. The tier-2 and tier-3 probes are bounded and monotone,
+- Seed-robust QI: 91%. The tier-2 and tier-3 probes are bounded and monotone,
   constrained terms run end-to-end, and manifests now expose QI/engineering
   diagnostic deltas from final artifacts, including scalar-improved but
   QI-worsened cases. A new bundled near-axis seed, `input.QI_stel_seed_3127`,
-  is part of the default audit and can be driven to low smooth/legacy QI by a
-  mode-2 QI-only prefine. The constrained cleanup that preserves QI while
-  repairing aspect, iota, mirror, and elongation remains open.
+  is part of the default audit and can be driven by the public QI script to
+  smooth/legacy QI below `1e-3` while satisfying `abs(mean_iota) >= 0.41` and
+  aspect ratio near 5. The remaining open cleanup is reducing mirror ratio
+  without destroying the low-QI, high-iota branch.
 - CPU/GPU performance: 82%. Backend-adaptive replay bucketing, scalar-gradient
   tangent reuse, detailed timing, and GPU-only preconditioner-output fusion are
   in place. Hot-path algebra and CPU/GPU fusion gating are now covered by
@@ -310,7 +311,7 @@ LASYM-Boozer parity, and release-checklist push:
 Release-critical average across the lanes requested in this push
 (continuation, exact accepted-point output, VMEC parity/physics gates, and
 docs/release hygiene): about 98%. Broader roadmap average across all open lanes:
-about 91%, because differentiation architecture, seed-robust QI, and
+about 92%, because differentiation architecture, seed-robust QI, and
 larger-mode GPU replay remain real research-grade work rather than release
 hygiene.
 
@@ -863,3 +864,11 @@ Defer beyond the current cycle:
   state (aspect about `5.67`, elongation passing) but only legacy QI about
   `1.5e-2` and a slightly high mirror ratio, so QI-preserving constrained
   cleanup remains the next physics task.
+- 2026-05-12: Fixed the QI example policy after visual review showed that the
+  pure-QI mode-2 branch had too-small iota and misleading VMEC-angle contours.
+  `QI_optimization.py` now defaults to direct mode-3 ESS on
+  `input.QI_stel_seed_3127` with aspect + `abs(mean_iota) >= 0.41` + QI terms,
+  prints an independent smooth/legacy/iota promotion gate, and writes a
+  Boozer-coordinate `|B|` line-contour plot. The local CPU run reached smooth
+  QI `9.15e-4`, legacy QI `4.46e-4`, aspect `4.99`, and `|iota| = 0.897` in
+  about 93 s; mirror ratio remains the next constrained-cleanup target.

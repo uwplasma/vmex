@@ -1226,6 +1226,159 @@ def plot_bmag_contours(
     return _plot_bmag_contours(wout_init, wout_final_obj, outdir)
 
 
+def boozer_bmag_grid_from_state(
+    state,
+    *,
+    static,
+    indata,
+    signgs: int,
+    surfaces=(1.0,),
+    surface_index: int = -1,
+    mboz: int = 18,
+    nboz: int = 18,
+    ntheta: int = 128,
+    nphi: int = 256,
+    phimin: float = 0.0,
+    jit_booz: bool = False,
+):
+    """Evaluate Boozer-coordinate ``|B|(theta_B, phi_B)`` from a VMEC state.
+
+    This is the visual diagnostic needed for QI/omnigenity review.  VMEC-angle
+    ``plot_bmag_contours`` is useful for VMEC parity, but QI contour closure
+    must be judged in Boozer coordinates.
+    """
+
+    try:
+        from booz_xform_jax import booz_xform_from_inputs, prepare_booz_xform_constants_from_inputs
+    except Exception as exc:  # pragma: no cover - depends on optional package
+        raise ImportError(
+            "boozer_bmag_grid_from_state requires booz_xform_jax. "
+            "Install it with `pip install booz_xform_jax` or from github.com/uwplasma/booz_xform_jax."
+        ) from exc
+
+    from .booz_input import booz_xform_inputs_from_state
+    from .quasi_isodynamic import _nearest_half_mesh_indices
+
+    surface_values = tuple(float(s) for s in surfaces)
+    if not surface_values:
+        raise ValueError("surfaces must contain at least one value")
+    if int(ntheta) < 4 or int(nphi) < 4:
+        raise ValueError("ntheta and nphi must both be at least 4")
+
+    inputs = booz_xform_inputs_from_state(
+        state=state,
+        static=static,
+        indata=indata,
+        signgs=int(signgs),
+    )
+    constants, grids = prepare_booz_xform_constants_from_inputs(
+        inputs=inputs,
+        mboz=int(mboz),
+        nboz=int(nboz),
+        asym=bool(static.cfg.lasym),
+    )
+    surface_indices = _nearest_half_mesh_indices(surface_values, n_half=int(inputs.rmnc.shape[0]))
+    booz = booz_xform_from_inputs(
+        inputs=inputs,
+        constants=constants,
+        grids=grids,
+        surface_indices=jnp.asarray(surface_indices, dtype=jnp.int32),
+        jit=bool(jit_booz),
+    )
+
+    bmnc = np.asarray(booz["bmnc_b"], dtype=float)
+    bmns_value = booz.get("bmns_b")
+    bmns = np.zeros_like(bmnc) if bmns_value is None else np.asarray(bmns_value, dtype=float)
+    xm = np.asarray(booz["ixm_b"], dtype=float)
+    xn = np.asarray(booz["ixn_b"], dtype=float)
+    nfp_arr = np.asarray(booz.get("nfp_b", getattr(static.cfg, "nfp", 1)))
+    nfp = int(nfp_arr.ravel()[0]) if nfp_arr.size else int(static.cfg.nfp)
+
+    nsurf = int(bmnc.shape[0])
+    selected = int(surface_index)
+    if selected < 0:
+        selected += nsurf
+    if selected < 0 or selected >= nsurf:
+        raise IndexError(f"surface_index {surface_index} is outside Boozer surface range 0..{nsurf - 1}")
+
+    theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta), endpoint=True)
+    phi = np.linspace(float(phimin), float(phimin) + 2.0 * np.pi / float(nfp), int(nphi), endpoint=True)
+    angle = theta[:, None, None] * xm[None, None, :] - phi[None, :, None] * xn[None, None, :]
+    bmag = np.sum(
+        bmnc[selected][None, None, :] * np.cos(angle)
+        + bmns[selected][None, None, :] * np.sin(angle),
+        axis=-1,
+    )
+    return theta, phi, bmag, booz
+
+
+def plot_boozer_bmag_contours_from_state(
+    state,
+    *,
+    static,
+    indata,
+    signgs: int,
+    outdir: str | Path,
+    filename: str = "boozer_bmag_surface.png",
+    surfaces=(1.0,),
+    surface_index: int = -1,
+    mboz: int = 18,
+    nboz: int = 18,
+    ntheta: int = 128,
+    nphi: int = 256,
+    phimin: float = 0.0,
+    title: str = "Boozer |B| contours",
+):
+    """Write a Boozer-coordinate line-contour plot of ``|B|`` for QI review."""
+
+    prepare_matplotlib_3d()
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    theta, phi, bmag, _booz = boozer_bmag_grid_from_state(
+        state,
+        static=static,
+        indata=indata,
+        signgs=signgs,
+        surfaces=surfaces,
+        surface_index=surface_index,
+        mboz=mboz,
+        nboz=nboz,
+        ntheta=ntheta,
+        nphi=nphi,
+        phimin=phimin,
+    )
+    phi2d, theta2d = np.meshgrid(phi, theta)
+    bmin = float(np.nanmin(bmag))
+    bmax = float(np.nanmax(bmag))
+    if not np.isfinite(bmin) or not np.isfinite(bmax):
+        bmin, bmax = 0.0, 1.0
+    if bmax <= bmin:
+        pad = max(abs(bmin), 1.0) * 1.0e-12
+        bmin -= pad
+        bmax += pad
+    levels = np.linspace(bmin, bmax, 25)
+
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(1, 1, figsize=(8, 4.5))
+    cs = ax.contour(phi2d, theta2d, bmag, levels=levels, cmap="viridis", linewidths=1.0)
+    fig.colorbar(cs, ax=ax, label="|B| (T)")
+    ax.set_title(title)
+    ax.set_xlabel("Boozer toroidal angle φ_B (rad)")
+    ax.set_ylabel("Boozer poloidal angle θ_B (rad)")
+    ax.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
+    ax.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
+    ax.set_ylim(0, 2.0 * np.pi)
+    fig.tight_layout()
+    out = outdir / filename
+    fig.savefig(out, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
 def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
     """Objective value, aspect ratio, and (optionally) iota vs Jacobian evaluation."""
     import json

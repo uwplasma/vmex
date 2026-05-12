@@ -18,21 +18,21 @@ enable_x64(True)
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
-# Problem parameters.  QI uses the nfp=2 warm start from the omnigenity
-# optimization examples.
+# Problem parameters.  The default uses the bundled near-axis QI seed; users can
+# point INPUT_FILE to any VMEC input deck and keep the same workflow.
 # The smooth metric is calibrated against the Goodman et al. branch-shuffle
 # diagnostic: branch-width tracks bounce-width invariance, shuffle-profile
 # compares against the branch-equalized well, and a small profile term keeps
 # QH/QP-like false positives from ranking too favorably.
-INPUT_FILE = DATA_DIR / "input.nfp2_QI"
-# Alternative near-axis QI seed used by the seed-robustness audit:
-# INPUT_FILE = DATA_DIR / "input.QI_stel_seed_3127"
+INPUT_FILE = DATA_DIR / "input.QI_stel_seed_3127"
+# Alternative bundled omnigenity seed:
+# INPUT_FILE = DATA_DIR / "input.nfp2_QI"
 OUTPUT_DIR = Path("results/qi_opt/ess")
 MAX_MODE = 3
 MIN_VMEC_MODE = 6
-USE_MODE_CONTINUATION = True
-MAX_NFEV = 30
-CONTINUATION_NFEV = 30
+USE_MODE_CONTINUATION = False
+MAX_NFEV = 8
+CONTINUATION_NFEV = 0
 QI_PREFINE = False
 QI_PREFINE_NFEV = 30
 STAGE_REPEATS = 5
@@ -69,18 +69,22 @@ SAVE_STAGE_INPUTS = True  # Keep per-stage input decks for continuation/debuggin
 SAVE_STAGE_WOUTS = False  # Set True to also write per-stage WOUT files.
 MAKE_PLOTS = True
 
-# Scalar and field-quality targets.  The mirror/elongation terms are soft
-# upper-bound penalties; uncomment LgradB if needed for additional shaping.
+# Scalar and field-quality targets.  The default objective optimizes QI,
+# aspect, and a nonzero-transform floor.  Mirror/elongation terms are useful
+# engineering cleanup terms, but they are not part of the default promotion
+# gate because they can destroy the low-QI branch if imposed too early.
 TARGET_ASPECT = 5.0
 TARGET_ABS_IOTA_MIN = 0.41
 MAX_MIRROR_RATIO = 0.21
 MAX_ELONGATION = 8.0
 SURFACES = np.linspace(0.1, 1.0, 6)
-ASPECT_WEIGHT = 1.0
+ASPECT_WEIGHT = 0.25
 IOTA_FLOOR_WEIGHT = 200.0**2
-QI_WEIGHT = 1.0
+QI_WEIGHT = 10.0
 MIRROR_WEIGHT = 10.0
 ELONGATION_WEIGHT = 10.0
+QI_GATE_SMOOTH_MAX = 2.0e-3
+QI_GATE_LEGACY_MAX = 1.0e-3
 
 # Boozer transform and smooth-QI residual resolution.
 QI_OPTIONS = vj.QuasiIsodynamicOptions(
@@ -124,18 +128,17 @@ elongation = vj.MaxElongation(
 )
 
 qi_only_objective_tuples = [
-    # This stage intentionally optimizes only the legacy-ranked smooth QI
-    # residual.  The scalar constraints are imposed in the second solve so
-    # they do not pull the seed away from the branch-shuffle QI basin.
+    # Optional diagnostic-only pre-refinement.  Do not promote this stage by
+    # itself: QI-only can converge to a low-QI branch with near-zero iota.
     (qi.J, 0.0, QI_WEIGHT),
 ]
 objective_tuples = [
     (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
     (iota_floor.J, 0.0, IOTA_FLOOR_WEIGHT),
     (qi.J, 0.0, QI_WEIGHT),
-    (mirror.J, 0.0, MIRROR_WEIGHT),
-    (elongation.J, 0.0, ELONGATION_WEIGHT),
     # Optional:
+    # (mirror.J, 0.0, MIRROR_WEIGHT),
+    # (elongation.J, 0.0, ELONGATION_WEIGHT),
     # (vj.LgradB(threshold=0.30, smooth_penalty=1.0e-3).J, 0.0, 0.001),
     # (vj.MagneticWell(minimum=0.0).J, 0.0, 1.0),
     # Finite-beta examples can also add:
@@ -281,6 +284,42 @@ print("\nLCFS |B| data from vmecplot2_bmag_grid:")
 print(f"  theta grid: {theta.shape}, zeta grid: {zeta.shape}, B grid: {b_lcfs.shape}")
 print(f"  Bmin/Bmax:  {np.min(b_lcfs):.6g} / {np.max(b_lcfs):.6g}")
 
+diagnostic_options = vj.QIDiagnosticOptions(
+    surfaces=SURFACES,
+    mboz=18,
+    nboz=18,
+    nphi=151,
+    nalpha=31,
+    n_bounce=51,
+    include_bounce_endpoints=True,
+    phimin=float(QI_OPTIONS.phimin),
+    mirror_threshold=MAX_MIRROR_RATIO,
+    elongation_threshold=MAX_ELONGATION,
+)
+diagnostics = vj.qi_diagnostics_from_state(
+    state=result.final_state,
+    static=final_optimizer.static,
+    indata=final_optimizer.indata,
+    signgs=final_optimizer.signgs,
+    surfaces=SURFACES,
+    options=diagnostic_options,
+)
+smooth_qi = float(diagnostics["qi_smooth_total"])
+legacy_qi = float(diagnostics["qi_legacy_total"])
+abs_iota = abs(float(history.get("iota_final", 0.0)))
+qi_gate_passed = (
+    smooth_qi <= QI_GATE_SMOOTH_MAX
+    and legacy_qi <= QI_GATE_LEGACY_MAX
+    and abs_iota >= TARGET_ABS_IOTA_MIN
+)
+print("\nIndependent QI promotion gate:")
+print(f"  smooth QI:       {smooth_qi:.6e}  (limit {QI_GATE_SMOOTH_MAX:.1e})")
+print(f"  legacy QI:       {legacy_qi:.6e}  (limit {QI_GATE_LEGACY_MAX:.1e})")
+print(f"  abs(mean iota):  {abs_iota:.6g}  (minimum {TARGET_ABS_IOTA_MIN:.3g})")
+print(f"  mirror ratio:    {diagnostics['qi_mirror_ratio_max']:.6g}  (target {MAX_MIRROR_RATIO:.3g})")
+print(f"  max elongation:  {diagnostics['qi_max_elongation']:.6g}  (target {MAX_ELONGATION:.3g})")
+print(f"  promoted:        {qi_gate_passed}")
+
 if MAKE_PLOTS:
     plot_paths = {
         "boundary_comparison": vj.plot_3d_boundary_comparison(
@@ -296,6 +335,17 @@ if MAKE_PLOTS:
         "objective_history": vj.plot_objective_history(
             saved_paths["history"],
             outdir=OUTPUT_DIR,
+        ),
+        "boozer_bmag_contours": vj.plot_boozer_bmag_contours_from_state(
+            result.final_state,
+            static=final_optimizer.static,
+            indata=final_optimizer.indata,
+            signgs=final_optimizer.signgs,
+            outdir=OUTPUT_DIR,
+            surfaces=(1.0,),
+            mboz=18,
+            nboz=18,
+            title=f"{INPUT_FILE.name}: Boozer |B| contours on LCFS",
         ),
     }
     print("\nPlot files selected by this script:")

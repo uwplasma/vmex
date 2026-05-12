@@ -679,34 +679,36 @@ is collected in :doc:`optimization_sweep_results`.
 QI objective tuning
 -------------------
 
-The current standalone ``QI_optimization.py`` defaults encode the best
-public-API QI lane from the parameter study:
+The current standalone ``QI_optimization.py`` defaults encode a short
+seed-robust QI lane from the bundled ``input.QI_stel_seed_3127`` deck:
 
 .. code-block:: bash
 
    PYTHONPATH=. python examples/optimization/QI_optimization.py
 
-For a focused robustness probe from the bundled near-axis seed
-``input.QI_stel_seed_3127``, run the pure-QI mode-2 example:
+For the same policy in a smaller focused script, run:
 
 .. code-block:: bash
 
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_seed_robustness.py
 
-That script intentionally starts with only the QI residual in the objective
-tuple list.  On the 2026-05-12 local CPU probe it drove the new seed from
-smooth/legacy QI of about ``5e-2``/``5e-2`` to order ``1e-3`` QI diagnostics.
-The commented aspect, iota-floor, mirror, and elongation tuples show the next
-cleanup problem explicitly; they should be applied as a separate reviewed stage
-because an overly aggressive scalar cleanup can destroy the low-QI branch.
+Both scripts optimize QI, aspect ratio, and a differentiable
+``abs(mean_iota) >= 0.41`` floor at ``max_mode = 3``.  On the 2026-05-12 local
+CPU probe, ``QI_optimization.py`` drove ``input.QI_stel_seed_3127`` to
+smooth/legacy QI of about ``9.2e-4``/``4.5e-4`` with
+``abs(mean_iota) = 0.90`` and aspect ratio ``4.99`` in about 93 seconds.  The
+script now prints an independent promotion gate and writes a Boozer-coordinate
+``|B|`` line-contour plot; VMEC-angle contour plots alone are not accepted as a
+QI visual gate.
 
 The study compared direct versus repeated-stage continuation, QP pre-seeding,
 aspect-ratio weights, mirror/elongation soft-wall weights, QI branch-width
 weights, the branch-shuffle profile residual, ``phimin`` well-interval choices,
 and termination tolerances against the nfp=2
-``examples/data/input.nfp2_QI`` seed.  The robust lane is repeated same-mode
-continuation at ``max_mode = 3`` with ESS, ``target_aspect = 5.0``,
-``abs(mean_iota) >= 0.41``, ``branch_width_weight = 0.5``,
+``examples/data/input.nfp2_QI`` seed and the bundled near-axis
+``input.QI_stel_seed_3127`` seed.  The current robust near-axis lane is direct
+``max_mode = 3`` with ESS, ``target_aspect = 5.0``,
+``abs(mean_iota) >= 0.41``, ``QI_WEIGHT = 10``, ``branch_width_weight = 0.5``,
 ``profile_weight = 0.1``, ``shuffle_profile_weight = 1.0``, and a tighter
 ``XTOL = 1e-8``.  The
 shuffle-profile term is intentionally retained because width-only and
@@ -726,6 +728,12 @@ Two practical lessons from that study are now reflected in the example:
   the seed, the reference omnigenity result, and recent vmec_jax candidates.
   LgradB remains available as a commented optional shaping term, but it is not
   part of the default best QI lane.
+- A QI-only objective is not a robust optimization policy.  It can make the
+  branch/shuffle diagnostic small while leaving ``mean_iota`` near zero.  The
+  default examples therefore include the iota floor and only promote a result
+  when the independent smooth-QI, legacy-QI, and iota gates all pass.  Mirror
+  ratio is reported separately; the current near-axis seed result is precise
+  QI by the QI+iota gate but still needs a QI-preserving mirror-ratio cleanup.
 
 
 QI diagnostics and validation plan
@@ -995,8 +1003,8 @@ Source files
        and explicit mirror-ratio/elongation/``LgradB``
        objective blocks that users can extend in the script.
    * - ``examples/optimization/QI_seed_robustness.py``
-     - Focused pure-QI seed-refinement workflow for
-       ``input.QI_stel_seed_3127`` with commented engineering cleanup terms.
+     - Focused QI + aspect + iota-floor seed-refinement workflow for
+       ``input.QI_stel_seed_3127`` with a Boozer contour promotion gate.
    * - ``examples/optimization/compare_omnigenity_qi_objective.py``
      - Diagnostic QI objective comparison against the local
        ``omnigenity_optimization`` reference scripts, including ``phimin``
