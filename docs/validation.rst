@@ -206,6 +206,10 @@ movement if the seed is already stable and has low objective: a completed,
 monotone, finite probe with final QI objective at or below ``5e-2`` is marked
 ``accepted_stable_low_objective`` rather than rejected for having no measurable
 two-evaluation improvement.
+Prefine manifests also record ESS controls.  Use ``--no-prefine-use-ess`` and
+``--prefine-ess-alpha VALUE`` for bounded ablations when a seed fails at a
+higher continuation mode; the selected settings are written into both the
+manifest and generated run command.
 By default the audit uses ``--phimin-policy well-phase``: each seed is scored at
 both ``phimin=0`` and ``phimin=pi/nfp`` and the better QI well phase is used for
 ranking and prefine planning.  Use ``--phimin-policy fixed --phimin VALUE`` when
