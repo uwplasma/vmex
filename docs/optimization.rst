@@ -686,8 +686,8 @@ is collected in :doc:`optimization_sweep_results`.
 QI objective tuning
 -------------------
 
-The current standalone ``QI_optimization.py`` defaults encode a short
-seed-robust QI lane from the bundled ``input.QI_stel_seed_3127`` deck:
+The current standalone ``QI_optimization.py`` defaults encode the best
+mirror-aware QI lane from the bundled NFP=2 ``input.nfp2_QI`` omnigenity seed:
 
 .. code-block:: bash
 
@@ -701,26 +701,27 @@ For the same policy in a smaller focused script, run:
 
 Both scripts optimize QI, aspect ratio, and a differentiable
 ``abs(mean_iota) >= 0.41`` floor at ``max_mode = 3``.  On the 2026-05-12 local
-CPU probe, ``QI_optimization.py`` drove ``input.QI_stel_seed_3127`` to
-smooth/legacy QI of about ``9.2e-4``/``4.5e-4`` with
-``abs(mean_iota) = 0.90`` and aspect ratio ``4.99`` in about 93 seconds.  That
-candidate is not yet an engineering-quality QI surface because its all-surface
-mirror-ratio diagnostic is still about ``0.97`` against a target of ``0.21``.
-The script therefore prints both a ``QI+iota`` gate and a stricter engineering
-gate that also includes mirror ratio and elongation.  It also writes a
-Boozer-coordinate ``|B|`` line-contour plot; VMEC-angle contour plots alone are
-not accepted as a QI visual gate.
+CPU probe, the branch-heavy mirror-aware policy drove ``input.nfp2_QI`` to
+smooth/legacy QI of about ``2.0e-3``/``2.7e-4`` with
+``abs(mean_iota) = 0.50``, aspect ratio ``5.00``, maximum elongation ``7.2``,
+and all-surface Boozer mirror ratio about ``0.30``.  A lighter matrix-free
+cleanup preserved QI while only reducing mirror from ``0.304`` to ``0.300``;
+stronger dense cleanups were stopped because they used high memory before
+printing the first optimizer row.  The script therefore prints both a
+``QI+iota`` gate and a stricter engineering gate that also includes mirror
+ratio and elongation.  It also writes a Boozer-coordinate ``|B|`` line-contour
+plot; VMEC-angle contour plots alone are not accepted as a QI visual gate.
 
 The study compared direct versus repeated-stage continuation, QP pre-seeding,
 aspect-ratio weights, mirror/elongation soft-wall weights, QI branch-width
 weights, the branch-shuffle profile residual, ``phimin`` well-interval choices,
 and termination tolerances against the nfp=2
 ``examples/data/input.nfp2_QI`` seed and the bundled near-axis
-``input.QI_stel_seed_3127`` seed.  The current robust near-axis lane is direct
+``input.QI_stel_seed_3127`` seed.  The current best mirror-aware lane is direct
 ``max_mode = 3`` with ESS, ``target_aspect = 5.0``,
-``abs(mean_iota) >= 0.41``, ``QI_WEIGHT = 10``, ``branch_width_weight = 0.5``,
-``profile_weight = 0.1``, ``shuffle_profile_weight = 1.0``, and a tighter
-``XTOL = 1e-8``.  The
+``abs(mean_iota) >= 0.41``, ``QI_WEIGHT = 10``, ``branch_width_weight = 5.0``,
+``profile_weight = 0.1``, ``shuffle_profile_weight = 1.0``, mirror and
+elongation soft-wall terms enabled, and a tighter ``XTOL = 1e-8``.  The
 shuffle-profile term is intentionally retained because width-only and
 branch-width-only smooth surrogates can rank QH/QP-like false positives ahead
 of the branch-squash/stretch/shuffle diagnostic used in the reference Goodman
@@ -744,9 +745,30 @@ Two practical lessons from that study are now reflected in the example:
   branch/shuffle diagnostic small while leaving ``mean_iota`` near zero.  The
   default examples therefore include the iota floor and only promote a result
   when the independent smooth-QI, legacy-QI, and iota gates all pass.  Mirror
-  ratio is reported separately and is not yet solved for the current near-axis
-  seed; direct hard mirror penalties reduce mirror but currently destroy QI, so
-  the open lane is a QI-preserving mirror cleanup schedule.
+  ratio is reported separately.  The bundled near-axis
+  ``input.QI_stel_seed_3127`` lane reaches low QI and large transform but still
+  has all-surface mirror ratio near ``0.97``; direct hard mirror penalties from
+  that basin reduce mirror but destroy QI.  The open lane is therefore a
+  QI-preserving mirror cleanup schedule that is robust across unrelated seeds.
+- ``BoozerBTarget`` is available as a differentiable steering or homotopy term
+  when a known reference Boozer ``|B|`` spectrum should guide a run toward a
+  specific basin.  It is a steering objective, not a final acceptance
+  diagnostic.  For example:
+
+  .. code-block:: python
+
+     target = vj.boozer_b_target_from_wout(
+         "wout_reference_qi.nc",
+         surfaces=SURFACES,
+         mboz=QI_OPTIONS.mboz,
+         nboz=QI_OPTIONS.nboz,
+     )
+     b_target = vj.BoozerBTarget(
+         target_bmnc=target["bmnc_b"],
+         target_bmns=target["bmns_b"],
+         qi_options=QI_OPTIONS,
+     )
+     objective_tuples.append((b_target.J, 0.0, 100.0))
 
 
 QI diagnostics and validation plan

@@ -382,6 +382,34 @@ def test_mirror_ratio_objective_records_all_surface_smoothing_options() -> None:
     assert term.qi_options is qi_options
 
 
+def test_boozer_b_target_objective_matches_normalized_spectrum() -> None:
+    from vmec_jax.optimization_workflow import BoozerBTarget, QuasiIsodynamicOptions
+
+    qi_options = QuasiIsodynamicOptions(surfaces=[0.5])
+    target = BoozerBTarget(
+        target_bmnc=np.asarray([[2.0, 0.4, 0.2]]),
+        target_bmns=np.asarray([[0.0, 0.2, 0.0]]),
+        normalize=True,
+        qi_options=qi_options,
+    )
+    term = target.to_qi_term(2.0)
+    residual, total = term.residual_and_total(
+        SimpleNamespace(static=SimpleNamespace(cfg=SimpleNamespace(nfp=2))),
+        "state",
+        {
+            "booz": {
+                "bmnc_b": np.asarray([[1.0, 0.1, 0.1]]),
+                "bmns_b": np.asarray([[0.0, 0.1, 0.0]]),
+            }
+        },
+    )
+
+    expected = np.asarray([0.0, -0.1, 0.0, 0.0, 0.0, 0.0]) * 2.0 / np.sqrt(6.0)
+    np.testing.assert_allclose(residual, expected)
+    assert total == pytest.approx(float(np.sum(expected * expected)))
+    assert term.qi_options is qi_options
+
+
 def test_least_squares_problem_collects_problem_metadata() -> None:
     from vmec_jax.optimization_workflow import AbsMeanIotaFloor, AspectRatio, LeastSquaresProblem, MeanIota
 
