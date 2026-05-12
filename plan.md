@@ -251,6 +251,11 @@ Acceptance:
       run without external executables and cover aspect reconstruction,
       `DMerc = Dshear + Dcurr + Dwell + Dgeod`, profile extrapolation, mode
       table compatibility, half-mesh `lmns`/`iota`, and QH Nyquist field spectra.
+- [x] Preserve stellarator-asymmetric geometry through the in-memory
+      VMEC-to-Boozer adapter. `booz_xform_inputs_from_state` now exports
+      `rmns`, `zmnc`, and `lmnc` alongside asymmetric magnetic sine channels,
+      and the required tests verify both channel presence and propagation into
+      `booz_xform_jax` on a bundled `lasym=True` reference.
 
 ## Progress Snapshot
 
@@ -278,9 +283,10 @@ and preconditioner-fusion push:
   focused CPU-only regressions. Mode-2 GPU tape callbacks are modestly faster
   without regressing the local CPU mode-2 callback; larger-mode replay and
   dense residual-tangent projection remain open.
-- VMEC parity and physics gates: 92%. Required-tier bundled gates now cover
+- VMEC parity and physics gates: 93%. Required-tier bundled gates now cover
   `chipf`, stored `B`, aspect/geometry, Mercier/JXBFORCE profiles, and
-  VMEC-to-Boozer input spectra. Full fixed/free/LASYM/finite-beta
+  VMEC-to-Boozer input spectra, including asymmetric Boozer geometry-channel
+  propagation for `lasym=True`. Full fixed/free/LASYM/finite-beta
   converged-equilibrium parity is still open.
 - Refactor/API/examples: 90%. Examples are SIMSOPT-like and clearer, finite-beta
   examples expose structured stage/final summaries while preserving direct
@@ -292,7 +298,7 @@ and preconditioner-fusion push:
   pushed baseline; final seed-robust QI and GPU-production artifacts remain
   open.
 
-Overall average across these active lanes: about 92%. This crosses the requested
+Overall average across these active lanes: about 93%. This crosses the requested
 90% threshold because the remaining work is now concentrated in known
 production-quality gaps rather than broad missing infrastructure: robust QI
 from diverse seeds, larger-mode GPU replay, and full fixed/free/LASYM/finite-beta

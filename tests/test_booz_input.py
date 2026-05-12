@@ -98,6 +98,9 @@ def test_booz_xform_inputs_from_state_shapes():
     assert inputs.bsubumnc.shape[0] == cfg.ns - 1
     assert inputs.bsubvmnc.shape[0] == cfg.ns - 1
     assert inputs.iota.shape[0] == cfg.ns - 1
+    assert inputs.rmns is None
+    assert inputs.zmnc is None
+    assert inputs.lmnc is None
 
 
 def test_booz_xform_inputs_merge_partial_profile_overrides():
@@ -159,6 +162,114 @@ def test_booz_xform_inputs_from_state_jit_tracer_safe():
 
     bmnc = _bmnc_from_rcos(jnp.asarray(state.Rcos))
     assert bmnc.shape[0] == cfg.ns - 1
+
+
+def test_booz_xform_inputs_lasym_exports_asymmetric_geometry_channels():
+    """LASYM Boozer pipelines must pass geometry sine/cosine channels through."""
+    pytest.importorskip("jax")
+    pytest.importorskip("netCDF4")
+
+    enable_x64(True)
+    data_dir = _data_dir()
+    cfg, indata = load_config(str(data_dir / "input.basic_non_stellsym_simsopt"))
+    wout = read_wout(data_dir / "wout_basic_non_stellsym_simsopt.nc")
+    cfg = dc_replace(
+        cfg,
+        ns=int(wout.ns),
+        mpol=int(wout.mpol),
+        ntor=int(wout.ntor),
+        nfp=int(wout.nfp),
+        lasym=bool(wout.lasym),
+        lthreed=bool(int(wout.ntor) > 0),
+    )
+    static = build_static(cfg)
+
+    inputs = booz_xform_inputs_from_state(
+        state=state_from_wout(wout),
+        static=static,
+        indata=indata,
+        signgs=wout.signgs,
+        use_nyq_from_grid=True,
+    )
+
+    assert bool(wout.lasym) is True
+    np.testing.assert_array_equal(np.asarray(inputs.xm), np.asarray(wout.xm))
+    np.testing.assert_array_equal(np.asarray(inputs.xn), np.asarray(wout.xn))
+    np.testing.assert_array_equal(np.asarray(inputs.xm_nyq), np.asarray(wout.xm_nyq))
+    np.testing.assert_array_equal(np.asarray(inputs.xn_nyq), np.asarray(wout.xn_nyq))
+
+    for field_name in ("rmns", "zmnc", "lmnc"):
+        field = getattr(inputs, field_name)
+        assert field is not None, f"{field_name} must be exported for LASYM Boozer runs"
+        np.testing.assert_equal(np.asarray(field).shape, np.asarray(inputs.rmnc).shape)
+        assert float(np.linalg.norm(np.asarray(field))) > 0.0
+
+    for field_name in ("bmns", "bsubumns", "bsubvmns"):
+        field = getattr(inputs, field_name)
+        assert field is not None, f"{field_name} must be exported for LASYM Boozer runs"
+        np.testing.assert_equal(np.asarray(field).shape, np.asarray(inputs.bmnc).shape)
+        assert float(np.linalg.norm(np.asarray(field))) > 0.0
+
+
+def test_booz_xform_inputs_lasym_feed_asymmetric_boozer_geometry():
+    """The optional LASYM channels must reach booz_xform_jax, not only exist."""
+    pytest.importorskip("jax")
+    pytest.importorskip("netCDF4")
+    booz_xform_jax = pytest.importorskip("booz_xform_jax")
+
+    enable_x64(True)
+    data_dir = _data_dir()
+    cfg, indata = load_config(str(data_dir / "input.basic_non_stellsym_simsopt"))
+    wout = read_wout(data_dir / "wout_basic_non_stellsym_simsopt.nc")
+    cfg = dc_replace(
+        cfg,
+        ns=int(wout.ns),
+        mpol=int(wout.mpol),
+        ntor=int(wout.ntor),
+        nfp=int(wout.nfp),
+        lasym=bool(wout.lasym),
+        lthreed=bool(int(wout.ntor) > 0),
+    )
+    static = build_static(cfg)
+
+    inputs = booz_xform_inputs_from_state(
+        state=state_from_wout(wout),
+        static=static,
+        indata=indata,
+        signgs=wout.signgs,
+        use_nyq_from_grid=True,
+    )
+    surface_index = int(np.asarray(inputs.rmnc).shape[0]) - 1
+
+    out = booz_xform_jax.booz_xform_jax(
+        rmnc=inputs.rmnc,
+        zmns=inputs.zmns,
+        lmns=inputs.lmns,
+        bmnc=inputs.bmnc,
+        bsubumnc=inputs.bsubumnc,
+        bsubvmnc=inputs.bsubvmnc,
+        iota=inputs.iota,
+        xm=inputs.xm,
+        xn=inputs.xn,
+        xm_nyq=inputs.xm_nyq,
+        xn_nyq=inputs.xn_nyq,
+        nfp=inputs.nfp,
+        mboz=4,
+        nboz=4,
+        asym=True,
+        rmns=inputs.rmns,
+        zmnc=inputs.zmnc,
+        lmnc=inputs.lmnc,
+        bmns=inputs.bmns,
+        bsubumns=inputs.bsubumns,
+        bsubvmns=inputs.bsubvmns,
+        surface_indices=[surface_index],
+    )
+
+    for field_name in ("rmns_b", "zmnc_b", "pmnc_b", "pmns_b", "bmns_b"):
+        field = np.asarray(out[field_name])
+        assert field.shape[0] == 1
+        assert float(np.linalg.norm(field)) > 0.0
 
 
 @pytest.mark.parametrize(

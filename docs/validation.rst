@@ -140,8 +140,9 @@ possible seed.  The fast local QI gate is:
 
 This gate covers smooth Boozer-space QI residuals, the legacy branch/shuffle
 diagnostic used for ranking, mirror-ratio and elongation records, Boozer input
-handling, and synthetic ranking consistency.  It is intentionally cheap enough
-for ordinary development.
+handling, including stellarator-asymmetric geometry and magnetic channels, and
+synthetic ranking consistency.  It is intentionally cheap enough for ordinary
+development.
 
 The current constrained-QI sweep artifacts document one successful bundled
 NFP=2 ``input.nfp2_QI`` lane.  A seed-robust QI claim is deferred until the
@@ -239,7 +240,8 @@ tools.  All of the following fields are written and tested:
 - **Geometry Fourier**: ``rmnc``, ``zmns``, ``lmns`` (and ``rmns``, ``zmnc``,
   ``lmnc`` for lasym).
 - **Nyquist Fourier**: ``gmnc``, ``bmnc``, ``bsupumnc``, ``bsupvmnc``,
-  ``bsubumnc``, ``bsubvmnc``, ``bsubsmns``.
+  ``bsubumnc``, ``bsubvmnc``, ``bsubsmns`` (and ``gmns``, ``bmns``,
+  ``bsupumns``, ``bsupvmns``, ``bsubumns``, ``bsubvmns`` for lasym).
 - **1-D profiles**: ``phi``, ``phipf``, ``phips``, ``chipf``, ``iotas``,
   ``iotaf``, ``pres``, ``presf``, ``vp``.
 - **Scalar diagnostics**: ``wb``, ``wp``, ``volume_p``, ``ctor``,
@@ -264,7 +266,9 @@ Current parity status
   vmec_jax converges to the same tight residuals as lasym=False cases.  No
   VMEC2000 reference files exist for the shipped lasym=True inputs, but
   cross-checks via the manifest sweep confirm per-iteration ``fsq*`` trace
-  alignment.
+  alignment.  The Boozer input adapter is required to preserve the asymmetric
+  geometry/lambda channels (``rmns``, ``zmnc``, ``lmnc``) and magnetic sine
+  channels through ``booz_xform_jax`` for QI and LASYM Boozer diagnostics.
 
 **Free boundary**
   vmec_jax produces converged free-boundary equilibria for the bundled CTH-like
