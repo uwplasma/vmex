@@ -164,6 +164,69 @@ def test_exact_optimizer_b_cartesian_tangent_columns_match_jacobian():
     )
 
 
+def test_exact_optimizer_jacobian_matches_finite_difference_residual():
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import jnp
+    from vmec_jax.boundary import boundary_from_indata
+    from vmec_jax.optimization import FixedBoundaryExactOptimizer, boundary_param_specs
+
+    enable_x64(True)
+
+    input_path, _wout_path = example_paths("circular_tokamak")
+    cfg, indata = load_config(str(input_path))
+    static = build_static(cfg)
+    field_static = _small_static(cfg, ntheta=5, nzeta=4)
+    boundary = boundary_from_indata(indata, static.modes)
+    specs = boundary_param_specs(
+        boundary,
+        static.modes,
+        max_mode=1,
+        min_coeff=0.0,
+        include=("rc", "zs"),
+        fix=("rc00",),
+    )[:2]
+    params = np.zeros(len(specs))
+
+    def residuals_fn(state):
+        field = b_cartesian_from_state(
+            state,
+            field_static,
+            indata=indata,
+            signgs=exact_opt._signgs,
+        )
+        return jnp.ravel(field)
+
+    exact_opt = FixedBoundaryExactOptimizer(
+        static,
+        indata,
+        boundary,
+        specs,
+        residuals_fn,
+        inner_max_iter=2,
+        inner_ftol=1.0e-5,
+        trial_max_iter=2,
+        trial_ftol=1.0e-5,
+    )
+    jacobian = exact_opt.jacobian_fun(params)
+
+    eps = 1.0e-5
+    fd_columns = []
+    for col in range(len(specs)):
+        step = np.zeros_like(params)
+        step[col] = eps
+        plus = exact_opt.residual_fun(params + step)
+        minus = exact_opt.residual_fun(params - step)
+        fd_columns.append((plus - minus) / (2.0 * eps))
+    fd_jacobian = np.stack(fd_columns, axis=1)
+
+    diff = jacobian - fd_jacobian
+    rel_norm = float(np.linalg.norm(diff) / np.linalg.norm(fd_jacobian))
+    max_abs = float(np.max(np.abs(diff)))
+    assert rel_norm < 2.0e-3
+    assert max_abs < 1.2e-2
+
+
 def test_exact_optimizer_scalar_objective_cotangent_matches_dense_jacobian():
     jax = pytest.importorskip("jax")
 
