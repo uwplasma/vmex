@@ -204,6 +204,11 @@ def test_booz_xform_inputs_lasym_exports_asymmetric_geometry_channels():
         np.testing.assert_equal(np.asarray(field).shape, np.asarray(inputs.rmnc).shape)
         assert float(np.linalg.norm(np.asarray(field))) > 0.0
 
+    # Lambda channels are stored on the same half-mesh convention consumed by
+    # booz_xform_jax; exact parity here protects the LASYM Boozer-angle map.
+    np.testing.assert_allclose(np.asarray(inputs.lmns), np.asarray(wout.lmns)[1:], rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(np.asarray(inputs.lmnc), np.asarray(wout.lmnc)[1:], rtol=1.0e-13, atol=1.0e-13)
+
     for field_name in ("bmns", "bsubumns", "bsubvmns"):
         field = getattr(inputs, field_name)
         assert field is not None, f"{field_name} must be exported for LASYM Boozer runs"

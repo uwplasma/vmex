@@ -24,6 +24,7 @@ vmec-jax documentation
       algorithms
       validation
       testing_strategy
+      release_checklist
       optional_validation_plan
       optimization
       optimization_sweep_results

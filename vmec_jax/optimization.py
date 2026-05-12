@@ -1673,7 +1673,7 @@ class FixedBoundaryExactOptimizer:
         residual_arr = np.asarray(residual, dtype=float).reshape(-1)
         if cost is None:
             cost = 0.5 * float(np.dot(residual_arr, residual_arr))
-        if not np.isfinite(float(cost)):
+        if not np.isfinite(float(cost)) or not np.all(np.isfinite(residual_arr)):
             return
         if float(cost) < float(getattr(self, "_best_exact_cost", math.inf)):
             self._best_exact_cost = float(cost)

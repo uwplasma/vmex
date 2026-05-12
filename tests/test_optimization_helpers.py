@@ -380,6 +380,50 @@ def test_best_exact_point_history_guard_tracks_monotone_objectives():
     np.testing.assert_allclose(opt._best_exact_residual, [1.0])
 
 
+def test_best_exact_point_ignores_nonfinite_residuals_and_copies_arrays():
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._best_exact_params = None
+    opt._best_exact_residual = None
+    opt._best_exact_cost = np.inf
+
+    params = np.asarray([1.0, 2.0], dtype=float)
+    residual = np.asarray([0.25, -0.5], dtype=float)
+    opt._remember_best_exact_point(params, residual, cost=0.15625)
+
+    params[:] = 99.0
+    residual[:] = 99.0
+    np.testing.assert_allclose(opt._best_exact_params, [1.0, 2.0])
+    np.testing.assert_allclose(opt._best_exact_residual, [0.25, -0.5])
+    assert opt._best_exact_cost == pytest.approx(0.15625)
+
+    opt._remember_best_exact_point(np.asarray([3.0, 4.0]), np.asarray([np.nan, 0.0]), cost=0.0)
+    opt._remember_best_exact_point(np.asarray([5.0, 6.0]), np.asarray([0.0, 0.0]), cost=np.nan)
+
+    np.testing.assert_allclose(opt._best_exact_params, [1.0, 2.0])
+    np.testing.assert_allclose(opt._best_exact_residual, [0.25, -0.5])
+    assert opt._best_exact_cost == pytest.approx(0.15625)
+
+
+def test_stage_mode_helpers_disable_continuation_for_direct_or_zero_budget():
+    import vmec_jax.optimization_workflow as workflow
+
+    assert workflow.qs_stage_modes(max_mode=3, use_mode_continuation=False, continuation_nfev=5) == [3]
+    assert workflow.qs_stage_modes(max_mode=3, use_mode_continuation=True, continuation_nfev=0) == [3]
+    assert workflow.qs_stage_modes(max_mode=1, use_mode_continuation=True, continuation_nfev=5) == [1]
+
+    assert workflow.repeated_stage_modes(max_mode=3, use_mode_continuation=False, continuation_nfev=5) == [3]
+    assert workflow.repeated_stage_modes(max_mode=3, use_mode_continuation=True, continuation_nfev=0) == [3]
+    assert workflow.repeated_stage_modes(max_mode=3, use_mode_continuation=True, continuation_nfev=5, repeats=4) == [
+        3,
+        3,
+        3,
+        3,
+    ]
+
+    assert workflow.qs_stage_budget(stage_mode=2, max_mode=3, max_nfev=30, continuation_nfev=7) == 7
+    assert workflow.qs_stage_budget(stage_mode=3, max_mode=3, max_nfev=30, continuation_nfev=7) == 30
+
+
 def test_create_x_scale_normalizes_lowest_level_and_decays_high_modes():
     specs = [
         BoundaryParamSpec("rc10", "rc", 0, 1, 0),
