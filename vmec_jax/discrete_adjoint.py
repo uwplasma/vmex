@@ -111,7 +111,16 @@ _DEFAULT_REPLAY_COLUMN_TARGET_MB = 4096.0
 def _dynamic_replay_bucket_size() -> int:
     env = os.getenv("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", "").strip()
     if not env:
-        return 32
+        try:
+            backend = str(jax.default_backend()).lower()
+        except Exception:
+            backend = ""
+        # GPU/XLA currently compiles and replays the basepoint scan faster when
+        # the dynamic tape length is bucketed more coarsely. CPU profiling shows
+        # the smaller bucket is still faster there, so keep the default
+        # backend-sensitive instead of requiring users to tune an environment
+        # variable for normal CPU/GPU optimization runs.
+        return 128 if backend in {"gpu", "cuda", "rocm"} else 32
     try:
         bucket = int(env)
     except Exception:

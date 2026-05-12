@@ -201,6 +201,11 @@ objective improvement, failed and timed-out probes, objective-history
 regressions when compact histories are present, automatic acceptance status,
 and one recommended next probe action.  These summaries are audit aids, not a
 substitute for final QI physics and plot review.
+For tiny smoke probes, automatic acceptance does not require artificial
+movement if the seed is already stable and has low objective: a completed,
+monotone, finite probe with final QI objective at or below ``5e-2`` is marked
+``accepted_stable_low_objective`` rather than rejected for having no measurable
+two-evaluation improvement.
 By default the audit uses ``--phimin-policy well-phase``: each seed is scored at
 both ``phimin=0`` and ``phimin=pi/nfp`` and the better QI well phase is used for
 ranking and prefine planning.  Use ``--phimin-policy fixed --phimin VALUE`` when
