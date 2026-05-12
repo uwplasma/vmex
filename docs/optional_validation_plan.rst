@@ -143,6 +143,10 @@ Continuation probes carry the optimized VMEC input between stages.  In
 particular, a mode-1 projection that zeros higher boundary modes remains the
 seed for the next mode-2 stage unless the stage itself reintroduces those modes
 as active zero-increment degrees of freedom.
+Accepted optimization histories are exact-replay histories, not raw trial-solve
+histories.  If the relaxed trial solve accepts a point that replays worse under
+the exact Jacobian path, the optimizer retains the best exact point as the
+final output and increments ``rejected_trial_exact_history_count``.
 
 Optional external lanes
 -----------------------

@@ -76,6 +76,13 @@ acceptance criteria or evidence changes.
       `qi_omnigenity_nfp1` smoke (`1,1,2`, mode 2) now completes with ESS and
       without ESS; the mode-2 initial exact Jacobian is finite with max entry
       about `3.9e8` instead of the prior `1e120` derivative blow-up.
+- [x] Guard final optimization outputs against relaxed trial-solve acceptance
+      drift: the optimizer now tracks the best exact accepted-point residual,
+      selects it for final outputs when SciPy's last trial-accepted point
+      replays worse, and filters worse exact replay rows out of the accepted
+      objective history. The bounded `qi_omnigenity_nfp1` mode-3 smoke
+      (`1,1,2,2,3`) reached `3.05e-4` final QI objective in about 63 s with
+      monotone exact objective history and one rejected trial-exact replay row.
 
 Acceptance:
 

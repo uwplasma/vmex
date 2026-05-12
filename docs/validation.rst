@@ -215,6 +215,12 @@ rebuilt from the previous stage's optimized VMEC input and starts with a zero
 increment vector.  This is part of the validation contract because lower-mode
 QI probes can intentionally project high-order seed modes out; later stages
 must not silently reintroduce those original high modes from the deck.
+Exact optimizer histories are also filtered through an exact-replay acceptance
+guard.  Trial residuals may use a cheaper VMEC solve for memory/runtime
+reasons, but final outputs and accepted objective histories use the best exact
+accepted-point residual seen by the Jacobian path.  Any trial-accepted point
+that replays worse is counted in ``rejected_trial_exact_history_count`` rather
+than plotted as a monotone accepted step.
 By default the audit uses ``--phimin-policy well-phase``: each seed is scored at
 both ``phimin=0`` and ``phimin=pi/nfp`` and the better QI well phase is used for
 ranking and prefine planning.  Use ``--phimin-policy fixed --phimin VALUE`` when

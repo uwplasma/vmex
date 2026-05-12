@@ -361,6 +361,25 @@ def test_qi_mode_continuation_rebuilds_from_previous_stage_input(monkeypatch, tm
     assert [record[2].tolist() for record in result.stage_records] == [[0.0], [0.0]]
 
 
+def test_best_exact_point_history_guard_tracks_monotone_objectives():
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._best_exact_params = None
+    opt._best_exact_residual = None
+    opt._best_exact_cost = np.inf
+
+    opt._remember_best_exact_point(np.asarray([0.0]), np.asarray([2.0]))
+
+    assert opt._best_exact_cost == pytest.approx(2.0)
+    assert opt._exact_history_accepts(2.0 + 1.0e-12)
+    assert not opt._exact_history_accepts(3.0)
+
+    opt._remember_best_exact_point(np.asarray([1.0]), np.asarray([1.0]))
+
+    assert opt._best_exact_cost == pytest.approx(0.5)
+    np.testing.assert_allclose(opt._best_exact_params, [1.0])
+    np.testing.assert_allclose(opt._best_exact_residual, [1.0])
+
+
 def test_create_x_scale_normalizes_lowest_level_and_decays_high_modes():
     specs = [
         BoundaryParamSpec("rc10", "rc", 0, 1, 0),

@@ -1405,6 +1405,10 @@ class FixedBoundaryExactOptimizer:
         self._wall_t0: float = 0.0
         self._last_jacobian_key: list = [None]
         self._iota_fn = None  # set by run() when iota tracking is requested
+        self._best_exact_params: np.ndarray | None = None
+        self._best_exact_residual: np.ndarray | None = None
+        self._best_exact_cost: float = math.inf
+        self._exact_history_rejected_count: int = 0
 
     # ── private helpers ───────────────────────────────────────────────────────
 
@@ -1658,6 +1662,30 @@ class FixedBoundaryExactOptimizer:
 
     def _remember_exact_residual(self, cache_key: bytes, residual: np.ndarray) -> None:
         self._exact_residual_cache = {cache_key: np.asarray(residual, dtype=float).reshape(-1).copy()}
+
+    def _remember_best_exact_point(self, params, residual: np.ndarray, cost: float | None = None) -> None:
+        """Track the best exact accepted-point residual seen during one run."""
+
+        residual_arr = np.asarray(residual, dtype=float).reshape(-1)
+        if cost is None:
+            cost = 0.5 * float(np.dot(residual_arr, residual_arr))
+        if not np.isfinite(float(cost)):
+            return
+        if float(cost) < float(getattr(self, "_best_exact_cost", math.inf)):
+            self._best_exact_cost = float(cost)
+            self._best_exact_params = np.asarray(params, dtype=float).reshape(-1).copy()
+            self._best_exact_residual = residual_arr.copy()
+
+    def _exact_history_accepts(self, cost: float) -> bool:
+        """Return whether an exact callback row should enter accepted history."""
+
+        if not np.isfinite(float(cost)):
+            return False
+        best_cost = float(getattr(self, "_best_exact_cost", math.inf))
+        if not np.isfinite(best_cost):
+            return True
+        tol = max(1.0e-14, 1.0e-9 * max(1.0, abs(best_cost), abs(float(cost))))
+        return float(cost) <= best_cost + tol
 
     def _cached_exact_residual(
         self,
@@ -2505,40 +2533,42 @@ class FixedBoundaryExactOptimizer:
         self._last_jacobian_residual = None
         jac = self.jacobian_fun(params)
         key = self._last_jacobian_key[0]
+        exact_residual = (
+            np.asarray(self._last_jacobian_residual, dtype=float)
+            if self._last_jacobian_residual is not None
+            else self._cached_exact_residual(cache_key=key)
+        )
         if self._last_jacobian_residual is not None and self._can_build_history_from_residuals():
             entry = self._history_entry_from_residuals(
                 self._last_jacobian_residual,
                 wall_time_s=time.perf_counter() - self._wall_t0,
             )
-            self._history.append(entry)
         elif self._scan_exact_path == "scan" and key is not None and key in self._exact_state_cache:
             cached_state = self._exact_state_cache[key]
-            res = (
-                np.asarray(self._last_jacobian_residual, dtype=float)
-                if self._last_jacobian_residual is not None
-                else self._cached_exact_residual(cache_key=key)
-            )
             entry = self._history_entry_from_state_or_residual(
                 cached_state,
-                res,
+                exact_residual,
                 wall_time_s=time.perf_counter() - self._wall_t0,
                 cache_key=key,
             )
-            self._history.append(entry)
         elif key is not None and key in self._exact_cache:
             cached_state, _ = self._exact_cache[key]
-            res = (
-                np.asarray(self._last_jacobian_residual, dtype=float)
-                if self._last_jacobian_residual is not None
-                else self._cached_exact_residual(cache_key=key)
-            )
             entry = self._history_entry_from_state_or_residual(
                 cached_state,
-                res,
+                exact_residual,
                 wall_time_s=time.perf_counter() - self._wall_t0,
                 cache_key=key,
             )
+        else:
+            entry = None
+        if entry is not None and self._exact_history_accepts(float(entry["cost"])):
             self._history.append(entry)
+            if exact_residual is not None:
+                self._remember_best_exact_point(params, exact_residual, float(entry["cost"]))
+        elif entry is not None:
+            self._exact_history_rejected_count += 1
+        elif exact_residual is not None:
+            self._remember_best_exact_point(params, exact_residual)
         return jac
 
     def _exact_residual_after_jacobian(self):
@@ -2902,6 +2932,10 @@ class FixedBoundaryExactOptimizer:
         self._callback_previous_key = None
         self._wall_t0 = time.perf_counter()
         self._iota_fn = iota_fn  # stored so _jacobian_fun_tracked can use it
+        self._best_exact_params = None
+        self._best_exact_residual = None
+        self._best_exact_cost = math.inf
+        self._exact_history_rejected_count = 0
 
         params0_arr = np.asarray(params0, dtype=float)
 
@@ -2921,6 +2955,7 @@ class FixedBoundaryExactOptimizer:
         qs_total0 = float(entry0["qs_objective"])
         aspect0 = float(entry0["aspect"])
         self._history.append(entry0)
+        self._remember_best_exact_point(params0_arr, res0, cost0)
 
         # ── outer least-squares loop ────────────────────────────────────────
         t_start = time.perf_counter()
@@ -3417,6 +3452,52 @@ class FixedBoundaryExactOptimizer:
         cost_final = float(entry_final["cost"])
         qs_total_final = float(entry_final["qs_objective"])
         aspect_final = float(entry_final["aspect"])
+
+        selected_best_exact = False
+        best_exact_params = getattr(self, "_best_exact_params", None)
+        best_exact_residual = getattr(self, "_best_exact_residual", None)
+        best_exact_cost = float(getattr(self, "_best_exact_cost", math.inf))
+        exact_improvement_tol = max(
+            1.0e-14,
+            1.0e-9
+            * max(
+                1.0,
+                abs(cost_final) if np.isfinite(cost_final) else 1.0,
+                abs(best_exact_cost) if np.isfinite(best_exact_cost) else 1.0,
+            ),
+        )
+        if (
+            best_exact_params is not None
+            and best_exact_residual is not None
+            and np.isfinite(best_exact_cost)
+            and (not np.isfinite(cost_final) or best_exact_cost < cost_final - exact_improvement_tol)
+        ):
+            selected_best_exact = True
+            result["x"] = np.asarray(best_exact_params, dtype=float).copy()
+            final_key = self._exact_cache_key(result["x"])
+            res_final = np.asarray(best_exact_residual, dtype=float).reshape(-1)
+            state_final = self._cached_exact_state(result["x"])
+            if state_final is None:
+                try:
+                    state_final = (
+                        self._solve_scan_exact_state(result["x"])
+                        if self._scan_exact_path == "scan"
+                        else self._solve_exact_with_tape(result["x"])
+                    )
+                except Exception:
+                    state_final = self._solve_forward(result["x"], trial=True)
+            entry_final = self._history_entry_from_state_or_residual(
+                state_final,
+                res_final,
+                wall_time_s=t_total,
+                cache_key=final_key,
+            )
+            cost_final = float(entry_final["cost"])
+            qs_total_final = float(entry_final["qs_objective"])
+            aspect_final = float(entry_final["aspect"])
+
+        result["cost"] = float(cost_final)
+        result["objective"] = float(2.0 * cost_final)
         self._history.append(entry_final)
 
         # ── assemble history dump ───────────────────────────────────────────
@@ -3456,6 +3537,8 @@ class FixedBoundaryExactOptimizer:
             "aspect_final": aspect_final,
             "history": self._history,
             "profile": self._profile_dump(),
+            "selected_best_exact_point": bool(selected_best_exact),
+            "rejected_trial_exact_history_count": int(self._exact_history_rejected_count),
         }
         if iota_fn is not None:
             history_dump["iota_initial"] = float(entry0["iota"])
