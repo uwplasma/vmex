@@ -80,6 +80,9 @@ class BoozXformInputs:
     xm_nyq: Any
     xn_nyq: Any
     nfp: int
+    rmns: Any | None = None
+    zmnc: Any | None = None
+    lmnc: Any | None = None
     bmns: Any | None = None
     bsubumns: Any | None = None
     bsubvmns: Any | None = None
@@ -97,6 +100,9 @@ class BoozXformInputs:
             self.xn,
             self.xm_nyq,
             self.xn_nyq,
+            self.rmns,
+            self.zmnc,
+            self.lmnc,
             self.bmns,
             self.bsubumns,
             self.bsubvmns,
@@ -118,6 +124,9 @@ class BoozXformInputs:
             xn,
             xm_nyq,
             xn_nyq,
+            rmns,
+            zmnc,
+            lmnc,
             bmns,
             bsubumns,
             bsubvmns,
@@ -135,6 +144,9 @@ class BoozXformInputs:
             xm_nyq=xm_nyq,
             xn_nyq=xn_nyq,
             nfp=int(aux),
+            rmns=rmns,
+            zmnc=zmnc,
+            lmnc=lmnc,
             bmns=bmns,
             bsubumns=bsubumns,
             bsubvmns=bsubvmns,
@@ -556,6 +568,9 @@ def booz_xform_inputs_from_state(
     bsubumns = jnp.asarray(bsubumns_full)[1:, :] if bool(cfg.lasym) else None
     bsubvmns = jnp.asarray(bsubvmns_full)[1:, :] if bool(cfg.lasym) else None
     bmns = jnp.asarray(bmns_full)[1:, :] if bool(cfg.lasym) else None
+    rmns = rmns_half if bool(cfg.lasym) else None
+    zmnc = zmnc_half if bool(cfg.lasym) else None
+    lmnc = lmnc_half if bool(cfg.lasym) else None
 
     return BoozXformInputs(
         rmnc=rmnc_half,
@@ -570,6 +585,9 @@ def booz_xform_inputs_from_state(
         xm_nyq=jnp.asarray(nyq_modes.m, dtype=jnp.int32),
         xn_nyq=jnp.asarray(nyq_modes.n * int(cfg.nfp), dtype=jnp.int32),
         nfp=nfp,
+        rmns=rmns,
+        zmnc=zmnc,
+        lmnc=lmnc,
         bmns=bmns,
         bsubumns=bsubumns,
         bsubvmns=bsubvmns,

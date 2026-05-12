@@ -57,8 +57,9 @@ the recommended local escalation path.
        rendering docs.
    * - QI objective checks
      - ``pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_booz_input.py``
-     - After changing QI diagnostics, Boozer input handling, smooth-QI residual
-       settings, or first-class QI diagnostic record fields.
+     - After changing QI diagnostics, Boozer input handling (including LASYM
+       geometry/magnetic channels), smooth-QI residual settings, or first-class
+       QI diagnostic record fields.
    * - QI ranking/report smoke
      - ``pytest -q tests/test_qi_objective_component_report.py tests/test_qi_seed_suitability_audit.py tests/test_qs_ess_render_smoke.py``
      - After changing QI branch-ranking metrics, seed audit/prefine manifests,
