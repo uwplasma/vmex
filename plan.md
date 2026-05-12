@@ -168,6 +168,12 @@ Acceptance:
       favored CPU (`13.80 s` versus `68.86 s` GPU). The next concrete
       performance target is tangent fusion/reuse, not fixed-boundary force
       kernels.
+- [x] Reuse cached affine initial-state tangents in the scalar-gradient path.
+      `objective_and_gradient_fun` now projects the reverse tape cotangent
+      through the same cached tangent map as dense exact Jacobians instead of
+      rebuilding an initial-state VJP each callback. A local QA `max_mode=1`
+      CPU smoke improved the same-branch warm gradient callback from about
+      `0.279 s` to `0.188 s`; dense least-squares Jacobian cost is unchanged.
 
 Acceptance:
 
@@ -186,6 +192,11 @@ Acceptance:
       circular, and finite-beta shaped-tokamak wout fixtures. This locks the
       half-mesh `chipf` convention and the `chips_from_wout_chipf` round-trip
       without running VMEC2000 in required CI.
+- [x] Add a required-tier bundled VMEC2000 stored-field parity gate for QA/QH/QI
+      wout fixtures. The test reconstructs Cartesian `|B|` from stored
+      contravariant `bsup*` fields and checks it against the same wout's
+      `bmnc/bmns` Fourier representation, covering NFP angle handling, Nyquist
+      evaluation, and vector-basis conversion without external executables.
 
 ## Progress Snapshot
 
@@ -196,22 +207,23 @@ Updated 2026-05-12 after the continuation-correctness and validation push:
 - Exact accepted-point history/output correctness: 93%. Best-exact selection is
   implemented and tested; remaining risk is rare exact-state unavailability on
   failed replay paths.
-- Seed-robust QI: 72%. Five-family bounded prefine smoke completed with finite
-  monotone histories, but the budgets were intentionally too small to claim
-  robust convergence from QA/QH/simple seeds.
-- CPU/GPU performance: 67%. Backend-adaptive replay bucketing removed the
-  largest GPU replay regression for small/medium exact optimizations; tangent
-  fusion/reuse and cold GPU solve cost remain open.
-- VMEC parity and physics gates: 79%. Required-tier wout `chipf` parity is now
-  broader; full fixed/free/LASYM/finite-beta converged-equilibrium parity is
-  still open.
+- Seed-robust QI: 75%. The tier-2 bounded QP/NFP2 seed probe improved the QI
+  prefine objective by 42% with monotone history; final mirror/elongation still
+  fail, and QA remained a poor QI seed.
+- CPU/GPU performance: 70%. Backend-adaptive replay bucketing removed the
+  largest GPU replay regression for small/medium exact optimizations, and the
+  scalar-gradient path now reuses cached initial tangents; GPU tape build and
+  dense-Jacobian residual tangent projection remain open.
+- VMEC parity and physics gates: 82%. Required-tier wout `chipf` and stored
+  `B`-field parity are now broader; full fixed/free/LASYM/finite-beta
+  converged-equilibrium parity is still open.
 - Refactor/API/examples: 82%. Examples are SIMSOPT-like and clearer; large
   solver/wout/free-boundary module splits remain deferred behind parity gates.
 - Docs/release hygiene: 78%. Performance/discrete-adjoint docs reflect the
   current replay policy; detailed seed-robust QI and GPU-production guidance
   still need final curated artifacts.
 
-Overall average across these active lanes: about 81%. The continuation lane is
+Overall average across these active lanes: about 83%. The continuation lane is
 near done, but reaching a defensible 90% overall requires the remaining
 performance/QI/parity work, not just more unit tests.
 
@@ -727,3 +739,17 @@ Defer beyond the current cycle:
   CPU versus `68.86 s` GPU), while local exact-Jacobian callback time is
   dominated by replay and tangent construction/projection. The next performance
   patch should target accepted-point tangent fusion/reuse.
+- 2026-05-12: Added the first tangent-reuse performance patch:
+  scalar-gradient callbacks now reuse the cached affine initial-state tangent
+  map and project reverse tape cotangents through it. This reduced one local
+  same-branch warm QA gradient callback from about `0.279 s` to `0.188 s`
+  while preserving dense-Jacobian gradient parity.
+- 2026-05-12: Ran a tier-2 bounded QI seed-robust probe. The promoted QP/NFP2
+  seed improved the prefine objective from `2.4465e-2` to `1.4150e-2`
+  with monotone history, but final-state audit still failed mirror and
+  elongation. The QA low-resolution comparator did not improve and remains a
+  rejected QI seed candidate for this policy.
+- 2026-05-12: Added a required-tier bundled stored-field parity gate:
+  reconstructed Cartesian `|B|` from VMEC2000 `bsup*` fields agrees with
+  bundled `bmnc/bmns` fields for QA, QH, and QI fixtures within a small
+  envelope.

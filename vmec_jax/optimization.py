@@ -2038,10 +2038,8 @@ class FixedBoundaryExactOptimizer:
 
     def _state_and_tangent_columns(self, params, *, profile_prefix: str):
         """Return accepted-point state and packed tangent columns as JAX arrays."""
-        from ._compat import jax, jnp as _jnp
+        from ._compat import jnp as _jnp
         from .discrete_adjoint import checkpoint_tape_state_jvp_columns
-        from .init_guess import initial_guess_from_boundary as _ig
-        from .state import pack_state
 
         params = _jnp.asarray(params, dtype=_jnp.float64)
         state, payload = self._solve_exact_with_tape(params, return_payload=True)
@@ -2049,12 +2047,41 @@ class FixedBoundaryExactOptimizer:
             empty = _jnp.zeros((0, int(self._layout.size)), dtype=_jnp.float64)
             return state, empty
 
+        initial_tangents = self._initial_tangent_columns(
+            params,
+            payload["axis_override"],
+            profile_prefix=profile_prefix,
+        )
+        column_chunk = self._lasym_replay_column_chunk(int(params.size))
+        if column_chunk is not None:
+            self._profile_add(f"{profile_prefix}_replay_column_chunk_{column_chunk}", 0.0)
+        t_replay = time.perf_counter()
+        final_tangents = checkpoint_tape_state_jvp_columns(
+            tape=payload["tape"],
+            static=self._static,
+            initial_tangents=initial_tangents,
+            rebuild_preconditioner=True,
+            column_chunk=column_chunk,
+        )
+        self._profile_add(f"{profile_prefix}_tape_replay", time.perf_counter() - t_replay)
+        return state, final_tangents
+
+    def _initial_tangent_columns(self, params, axis_override, *, profile_prefix: str):
+        """Return cached packed initial-state tangents for boundary parameters."""
+        from ._compat import jax, jnp as _jnp
+        from .init_guess import initial_guess_from_boundary as _ig
+        from .state import pack_state
+
+        params = _jnp.asarray(params, dtype=_jnp.float64)
+        if int(params.size) == 0:
+            return _jnp.zeros((0, int(self._layout.size)), dtype=_jnp.float64)
+
         t_initial = time.perf_counter()
         cache_key = self._initial_tangent_cache_key(params)
         initial_tangents = self._initial_tangent_cache.get(cache_key) if cache_key is not None else None
         if initial_tangents is None:
             axis_override = {
-                key: _jnp.asarray(value, dtype=params.dtype) for key, value in payload["axis_override"].items()
+                key: _jnp.asarray(value, dtype=params.dtype) for key, value in axis_override.items()
             }
 
             def _initial_state_packed(p):
@@ -2079,19 +2106,7 @@ class FixedBoundaryExactOptimizer:
             f"{profile_prefix}_initial_tangents",
             time.perf_counter() - t_initial,
         )
-        column_chunk = self._lasym_replay_column_chunk(int(params.size))
-        if column_chunk is not None:
-            self._profile_add(f"{profile_prefix}_replay_column_chunk_{column_chunk}", 0.0)
-        t_replay = time.perf_counter()
-        final_tangents = checkpoint_tape_state_jvp_columns(
-            tape=payload["tape"],
-            static=self._static,
-            initial_tangents=initial_tangents,
-            rebuild_preconditioner=True,
-            column_chunk=column_chunk,
-        )
-        self._profile_add(f"{profile_prefix}_tape_replay", time.perf_counter() - t_replay)
-        return state, final_tangents
+        return initial_tangents
 
     def _lasym_replay_column_chunk(self, n_params: int) -> int | None:
         """LASYM replay chunk heuristic for large dense exact Jacobians."""
@@ -2287,16 +2302,13 @@ class FixedBoundaryExactOptimizer:
             return self._run_in_solver_device_context(self.objective_and_gradient_fun, params)
         from ._compat import jax, jnp as _jnp
         from .discrete_adjoint import checkpoint_tape_state_vjp
-        from .init_guess import initial_guess_from_boundary as _ig
         from .state import pack_state, unpack_state
 
         t_total = time.perf_counter()
         params = _jnp.asarray(params, dtype=_jnp.float64)
         state, payload = self._solve_exact_with_tape(params, return_payload=True)
         tape = payload["tape"]
-        axis_override = {
-            key: _jnp.asarray(value, dtype=params.dtype) for key, value in payload["axis_override"].items()
-        }
+        axis_override = payload["axis_override"]
         packed_final = _jnp.asarray(pack_state(state), dtype=_jnp.float64)
 
         def _residuals_from_packed(packed):
@@ -2354,24 +2366,18 @@ class FixedBoundaryExactOptimizer:
         initial_cotangent = _jnp.nan_to_num(initial_cotangent, nan=0.0, posinf=0.0, neginf=0.0)
         self._profile_add("gradient_tape_replay", time.perf_counter() - t_replay)
 
-        def _initial_state_packed(p, axis_override_arg):
-            bdy = self._boundary_from_params(p)
-            s0 = _ig(
-                self._static,
-                bdy,
-                self._indata,
-                vmec_project=True,
-                axis_override=axis_override_arg,
-            )
-            return _jnp.asarray(pack_state(s0), dtype=_jnp.float64)
-
         t_initial = time.perf_counter()
-        _, initial_vjp = jax.vjp(
-            lambda p: _initial_state_packed(p, axis_override),
+        initial_tangents = self._initial_tangent_columns(
             params,
+            axis_override,
+            profile_prefix="gradient",
         )
-        grad = initial_vjp(_jnp.asarray(initial_cotangent, dtype=_jnp.float64))[0]
-        self._profile_add("gradient_initial_vjp", time.perf_counter() - t_initial)
+        grad = _jnp.tensordot(
+            _jnp.asarray(initial_tangents, dtype=_jnp.float64),
+            _jnp.asarray(initial_cotangent, dtype=_jnp.float64),
+            axes=([1], [0]),
+        )
+        self._profile_add("gradient_initial_projection", time.perf_counter() - t_initial)
         self._profile_add("gradient_total", time.perf_counter() - t_total)
         return float(np.asarray(cost, dtype=float)), np.asarray(grad, dtype=float)
 
