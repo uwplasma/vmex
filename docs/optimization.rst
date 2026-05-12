@@ -183,7 +183,14 @@ branch-shuffle diagnostic.
        shuffle_profile_weight=1.0,
    )
    qi = vj.QuasiIsodynamicResidual(qi_options)
-   mirror = vj.MirrorRatio(threshold=0.21, ntheta=96, nphi=96, surface_index=0)
+   mirror = vj.MirrorRatio(
+       threshold=0.21,
+       ntheta=96,
+       nphi=96,
+       surface_index=None,       # all QI surfaces
+       smooth_extrema=2.0e-2,    # smoother gradients than hard max/min
+       smooth_penalty=2.0e-2,
+   )
    elongation = vj.MaxElongation(threshold=8.0, ntheta=48, nphi=16)
 
    objective_tuples = [
@@ -696,10 +703,13 @@ Both scripts optimize QI, aspect ratio, and a differentiable
 ``abs(mean_iota) >= 0.41`` floor at ``max_mode = 3``.  On the 2026-05-12 local
 CPU probe, ``QI_optimization.py`` drove ``input.QI_stel_seed_3127`` to
 smooth/legacy QI of about ``9.2e-4``/``4.5e-4`` with
-``abs(mean_iota) = 0.90`` and aspect ratio ``4.99`` in about 93 seconds.  The
-script now prints an independent promotion gate and writes a Boozer-coordinate
-``|B|`` line-contour plot; VMEC-angle contour plots alone are not accepted as a
-QI visual gate.
+``abs(mean_iota) = 0.90`` and aspect ratio ``4.99`` in about 93 seconds.  That
+candidate is not yet an engineering-quality QI surface because its all-surface
+mirror-ratio diagnostic is still about ``0.97`` against a target of ``0.21``.
+The script therefore prints both a ``QI+iota`` gate and a stricter engineering
+gate that also includes mirror ratio and elongation.  It also writes a
+Boozer-coordinate ``|B|`` line-contour plot; VMEC-angle contour plots alone are
+not accepted as a QI visual gate.
 
 The study compared direct versus repeated-stage continuation, QP pre-seeding,
 aspect-ratio weights, mirror/elongation soft-wall weights, QI branch-width
@@ -721,7 +731,9 @@ Two practical lessons from that study are now reflected in the example:
 - ``least_squares_solve`` uses SIMSOPT tuple semantics, so tuple weights are
   ``sqrt(weight)`` residual multipliers.  Mirror/elongation soft-wall weights
   should be strong enough to prevent pathological shapes but not so dominant
-  that they block the lower-QI basin.
+  that they block the lower-QI basin.  ``MirrorRatio`` defaults to all QI
+  surfaces when ``surface_index=None`` and exposes ``smooth_extrema`` and
+  ``smooth_penalty`` to avoid hard max/min gradients during cleanup.
 - The QI branch-width and shuffle-profile terms smooth the well matching
   enough to avoid the noisy objective jumps seen in earlier direct QI attempts,
   while preserving the same design ranking as the legacy branch diagnostic on
@@ -732,8 +744,9 @@ Two practical lessons from that study are now reflected in the example:
   branch/shuffle diagnostic small while leaving ``mean_iota`` near zero.  The
   default examples therefore include the iota floor and only promote a result
   when the independent smooth-QI, legacy-QI, and iota gates all pass.  Mirror
-  ratio is reported separately; the current near-axis seed result is precise
-  QI by the QI+iota gate but still needs a QI-preserving mirror-ratio cleanup.
+  ratio is reported separately and is not yet solved for the current near-axis
+  seed; direct hard mirror penalties reduce mirror but currently destroy QI, so
+  the open lane is a QI-preserving mirror cleanup schedule.
 
 
 QI diagnostics and validation plan

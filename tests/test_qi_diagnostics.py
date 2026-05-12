@@ -164,6 +164,8 @@ def test_qi_diagnostics_from_state_wraps_existing_components_without_solves(monk
     assert record["qi_smooth_total"] == 1.25
     assert record["qi_legacy_total"] == 2.5
     assert record["qi_mirror_ratio_max"] == 0.32
+    assert record["qi_mirror_ratio_by_surface"] == [0.32]
+    assert record["qi_mirror_surface_index"] == 1
     assert record["qi_mirror_excess_max"] == pytest.approx(0.11)
     assert record["qi_max_elongation"] == 9.5
     assert record["qi_elongation_excess"] == 1.5
