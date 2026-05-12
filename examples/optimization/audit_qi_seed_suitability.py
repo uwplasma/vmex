@@ -744,7 +744,10 @@ def _prefine_run_command(record: dict[str, Any], config: QIPrefineProbeConfig, m
         str(config.inner_max_iter),
         "--prefine-trial-max-iter",
         str(config.trial_max_iter),
+        "--prefine-ess-alpha",
+        str(config.ess_alpha),
     ]
+    command.append("--prefine-use-ess" if bool(config.use_ess) else "--no-prefine-use-ess")
     if config.scipy_lsmr_maxiter is not None:
         command.extend(["--prefine-scipy-lsmr-maxiter", str(config.scipy_lsmr_maxiter)])
     command.append(
@@ -1893,6 +1896,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prefine-phimin", type=float, default=0.0)
     parser.add_argument("--prefine-inner-max-iter", type=int, default=20)
     parser.add_argument("--prefine-trial-max-iter", type=int, default=20)
+    parser.add_argument(
+        "--prefine-use-ess",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable/disable ESS parameter scaling in bounded QI prefine probes.",
+    )
+    parser.add_argument("--prefine-ess-alpha", type=float, default=1.2)
     parser.add_argument("--prefine-scipy-lsmr-maxiter", type=int, default=5)
     parser.add_argument(
         "--prefine-fail-on-error",
@@ -1981,6 +1991,8 @@ def main(argv: list[str] | None = None) -> int:
             n_bounce=args.prefine_n_bounce,
             include_bounce_endpoints=prefine_include_bounce_endpoints,
             phimin=args.prefine_phimin,
+            use_ess=args.prefine_use_ess,
+            ess_alpha=args.prefine_ess_alpha,
             inner_max_iter=args.prefine_inner_max_iter,
             trial_max_iter=args.prefine_trial_max_iter,
             scipy_lsmr_maxiter=args.prefine_scipy_lsmr_maxiter,

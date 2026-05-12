@@ -63,6 +63,12 @@ acceptance criteria or evidence changes.
       two-evaluation smoke does not move. Re-summarizing the 2026-05-12
       seven-seed smoke now promotes `qi_omnigenity_nfp1` as the accepted
       stable-low-objective candidate (`objective_final=2.70e-2`).
+- [x] Expose bounded QI-prefine ESS controls in the audit CLI and manifest
+      commands (`--prefine-use-ess/--no-prefine-use-ess`,
+      `--prefine-ess-alpha`). A 2026-05-12 mode-2 continuation ablation on
+      `qi_omnigenity_nfp1` failed with the same NaN error with ESS enabled and
+      disabled, so the next QI bug is in the mode-2 continuation/objective
+      derivative path rather than ESS scaling alone.
 
 Acceptance:
 

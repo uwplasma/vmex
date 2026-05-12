@@ -258,7 +258,11 @@ def test_prefine_probe_manifest_selects_top_rows_and_stays_dry(tmp_path):
     assert manifest["plans"][0]["output_dir"].endswith("01_better_qi")
     assert "--prefine-probes run" in manifest["plans"][0]["run_command"]
     assert "--prefine-reviewed" in manifest["plans"][0]["run_command"]
+    assert "--prefine-use-ess" in manifest["plans"][0]["run_command"]
+    assert "--prefine-ess-alpha 1.2" in manifest["plans"][0]["run_command"]
     assert manifest["plans"][0]["optimization"]["max_nfev"] <= mod.MAX_PREFINE_MAX_NFEV
+    assert manifest["plans"][0]["optimization"]["use_ess"] is True
+    assert manifest["plans"][0]["optimization"]["ess_alpha"] == 1.2
     assert manifest["plans"][0]["optimization"]["stage_modes"] == [1, 1, 2, 2, 3]
     assert manifest["plans"][0]["optimization"]["stage_count"] == 5
     assert manifest["plans"][0]["optimization"]["total_nfev_cap"] == 6
