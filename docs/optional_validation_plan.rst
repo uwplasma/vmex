@@ -107,6 +107,13 @@ Acceptance for this lane:
   normalized level endpoints used by the legacy branch-shuffle diagnostic.
 - No optimization is launched.
 
+Required no-executable CI coverage reads bundled VMEC2000 ``wout`` files for
+the QI, QH, QA, simple, and finite-beta representatives and checks final
+residual, flux, energy, iota-profile, and non-axisymmetric geometry quantities.
+There is still no checked-in QP ``input`` + ``wout`` fixture; QP remains an
+optional ``OMNIGENITY_OPTIMIZATION_ROOT`` lane until a small fixture can be
+added.
+
 Before running even tiny optimizer probes, write a dry-run manifest:
 
 .. code-block:: bash
@@ -122,6 +129,13 @@ mode, and the repeated-stage prefine plan.  The default prefine plan is capped
 at ``--prefine-stage-modes 1,1,2,2,3`` with per-stage and total ``nfev`` caps
 recorded for each selected seed.  Only after review should a local operator use
 ``--prefine-probes run --prefine-reviewed``.
+
+Planned and executed prefine manifests include deterministic compact summaries
+with status counts, completed stage modes, best seed by final objective, best
+objective improvement, failed and timed-out probes, objective-history
+regressions when compact histories are present, acceptance status, and a
+recommended next action.  These summaries are promotion gates for the next
+probe only; longer QI sweeps still require final diagnostics and plot review.
 
 Optional external lanes
 -----------------------

@@ -288,6 +288,10 @@ def test_prefine_probe_manifest_selects_top_rows_and_stays_dry(tmp_path):
     assert manifest["effective_caps"]["per_probe_total_nfev"] == 6
     assert manifest["endpoint_alignment"]["aligned"] is True
     assert manifest["review"]["status"] == "requires_review"
+    assert manifest["summary"]["statuses"] == {"planned": 2}
+    assert manifest["summary"]["recommendation"]["action"] == "review_manifest"
+    assert manifest["summary"]["recommendation"]["label"] == "better qi"
+    assert manifest["summary"]["best_candidate_by_final_objective"] is None
 
     bad_config = mod.QIPrefineProbeConfig(top_n=mod.MAX_PREFINE_TOP_N + 1)
     with pytest.raises(ValueError, match="top_n"):
@@ -452,6 +456,15 @@ def test_run_qi_prefine_probe_dispatches_tiny_qi_solve(tmp_path):
                     "objective_final": 1.0,
                     "qs_final": 0.4,
                     "total_wall_time_s": 0.5,
+                    "nfev": 3,
+                    "njev": 2,
+                    "success": True,
+                    "message": "ok",
+                    "history": [
+                        {"objective": 3.0},
+                        {"objective": 2.0},
+                        {"objective": 1.0},
+                    ],
                 }
             },
             stage_modes=[1, 1, 2, 2, 3],
@@ -474,6 +487,10 @@ def test_run_qi_prefine_probe_dispatches_tiny_qi_solve(tmp_path):
     assert completed["result"]["stage_count_requested"] == 5
     assert completed["result"]["total_nfev_cap"] == 6
     assert completed["result"]["endpoint_mode"] == "include_bounce_endpoints"
+    assert completed["result"]["history_summary"]["history_present"] is True
+    assert completed["result"]["history_summary"]["objective_monotonic_nonincreasing"] is True
+    assert completed["result"]["history_summary"]["objective_regression_count"] == 0
+    assert completed["result"]["nfev"] == 3
     assert calls["qi_options"]["nphi"] == 31
     assert calls["qi_options"]["include_bounce_endpoints"] is True
     assert calls["from_input"]["max_mode"] == 3
@@ -504,3 +521,174 @@ def test_prefine_probe_manifest_run_can_require_review(tmp_path):
 
     with pytest.raises(ValueError, match="reviewed manifest"):
         mod.run_qi_prefine_probe_manifest(manifest, require_review=True, workflow=SimpleNamespace())
+
+
+def test_prefine_probe_summary_ranks_acceptance_failures_and_regressions():
+    mod = _load_module()
+    manifest = {
+        "dry_run": False,
+        "selection": {"planned_rows": 5},
+        "plans": [
+            {
+                "status": "completed",
+                "label": "bigger_improvement_qi",
+                "family": "qi",
+                "audit_rank": 1,
+                "optimization": {"stage_modes": [1, 1, 2, 2, 3]},
+                "result": {
+                    "objective_initial": 10.0,
+                    "objective_final": 3.0,
+                    "requested_stage_modes": [1, 1, 2, 2, 3],
+                    "completed_stage_modes": [1, 1, 2, 2, 3],
+                    "history": [
+                        {"objective": 10.0},
+                        {"objective": 7.0},
+                        {"objective": 3.0},
+                    ],
+                },
+            },
+            {
+                "status": "completed",
+                "label": "best_final_qp",
+                "family": "qp",
+                "audit_rank": 2,
+                "optimization": {"stage_modes": [1, 1, 2, 2, 3]},
+                "result": {
+                    "objective_initial": 5.0,
+                    "objective_final": 2.0,
+                    "requested_stage_modes": [1, 1, 2, 2, 3],
+                    "completed_stage_modes": [1, 1, 2, 2, 3],
+                    "history": [
+                        {"objective": 5.0},
+                        {"objective": 3.0},
+                        {"objective": 4.0},
+                        {"objective": 2.0},
+                    ],
+                },
+            },
+            {
+                "status": "failed",
+                "label": "failed_qh",
+                "family": "qh",
+                "error_type": "RuntimeError",
+                "error": "linear solve failed",
+            },
+            {
+                "status": "failed",
+                "label": "timeout_qa",
+                "family": "qa",
+                "error_type": "TimeoutError",
+                "error": "worker timed out after 1200.0 s",
+            },
+            {
+                "status": "pending",
+                "label": "pending_simple",
+                "family": "simple",
+                "optimization": {"stage_modes": [1, 1, 2, 2, 3]},
+            },
+        ],
+    }
+
+    summary = mod.summarize_qi_prefine_probe_manifest(manifest)
+
+    assert summary["statuses"] == {"completed": 2, "failed": 2, "pending": 1}
+    assert summary["completed_count"] == 2
+    assert summary["completed_stage_modes"][0]["completed_stage_modes"] == [1, 1, 2, 2, 3]
+    assert summary["best_candidate_by_final_objective"]["label"] == "best_final_qp"
+    assert summary["best_improvement"]["label"] == "bigger_improvement_qi"
+    assert summary["failure_count"] == 2
+    assert summary["timeout_count"] == 1
+    assert summary["timeouts"][0]["label"] == "timeout_qa"
+    assert summary["history_regression_plan_count"] == 1
+    assert summary["history_regressions"][0]["label"] == "best_final_qp"
+    assert summary["history_regressions"][0]["history_summary"]["objective_regression_count"] == 1
+    assert summary["accepted_candidate"]["label"] == "bigger_improvement_qi"
+    assert summary["acceptance"]["accepted"] is False
+    assert "timeout" in summary["acceptance"]["blocking_issues"][0]
+    assert summary["recommendation"]["action"] == "inspect_timeout"
+    assert summary["recommendation"]["label"] == "timeout_qa"
+
+
+def test_prefine_result_summary_ranks_and_flags_regressions():
+    mod = _load_module()
+    manifest = {
+        "dry_run": False,
+        "selection": {"planned_rows": 4},
+        "plans": [
+            {
+                "status": "completed",
+                "label": "qi_seed",
+                "family": "qi",
+                "result": {
+                    "objective_initial": 5.0,
+                    "objective_final": 1.0,
+                    "qi_final": 0.2,
+                    "wall_time_s": 3.0,
+                    "requested_stage_modes": [1, 1, 2],
+                    "completed_stage_modes": [1, 1, 2],
+                    "objective_history": [5.0, 2.5, 1.0],
+                },
+            },
+            {
+                "status": "completed",
+                "label": "qp_seed",
+                "family": "qp",
+                "result": {
+                    "objective_initial": 10.0,
+                    "objective_final": 2.0,
+                    "qi_final": 0.3,
+                    "wall_time_s": 2.0,
+                    "requested_stage_modes": [1, 1, 2],
+                    "completed_stage_modes": [1, 1],
+                    "objective_history": [10.0, 7.0, 7.5, 2.0],
+                },
+            },
+            {"status": "failed", "label": "qa_seed", "family": "qa", "error_type": "RuntimeError", "error": "bad"},
+            {"label": "planned_seed", "family": "simple"},
+        ],
+    }
+
+    summary = mod.summarize_qi_prefine_results(manifest)
+
+    assert summary["dry_run"] is False
+    assert summary["planned_rows"] == 4
+    assert summary["completed_count"] == 2
+    assert summary["failure_count"] == 1
+    assert summary["statuses"] == {"completed": 2, "failed": 1, "unknown": 1}
+    assert summary["completed_stage_modes"][0]["completed_stage_modes"] == [1, 1, 2]
+    assert summary["best_candidate_by_final_objective"]["label"] == "qi_seed"
+    assert summary["best_improvement"]["label"] == "qp_seed"
+    assert summary["history_regressions"][0]["label"] == "qp_seed"
+    assert summary["recommendation"]["action"] == "inspect_failure"
+
+
+def test_prefine_manifest_run_attaches_summary_on_success(tmp_path):
+    mod = _load_module()
+    manifest = {
+        "dry_run": False,
+        "review": {"operator_confirmed": True, "status": "reviewed"},
+        "selection": {"planned_rows": 1},
+        "plans": [{"label": "candidate_qi", "family": "qi", "result": {}}],
+    }
+
+    def fake_run(plan, *, workflow=None):
+        del workflow
+        return {
+            **plan,
+            "status": "completed",
+            "result": {
+                "objective_initial": 4.0,
+                "objective_final": 1.0,
+                "completed_stage_modes": [1, 2, 3],
+            },
+        }
+
+    original = mod.run_qi_prefine_probe
+    try:
+        mod.run_qi_prefine_probe = fake_run
+        executed = mod.run_qi_prefine_probe_manifest(manifest, require_review=True, workflow=SimpleNamespace())
+    finally:
+        mod.run_qi_prefine_probe = original
+
+    assert executed["result_summary"]["completed_count"] == 1
+    assert executed["result_summary"]["best_candidate_by_final_objective"]["objective_final"] == 1.0
