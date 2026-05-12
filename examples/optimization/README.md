@@ -84,7 +84,10 @@ remain available for custom inspection.
 - `QH_optimization.py`: recommended quasi-helical fixed-boundary optimization.
 - `QP_optimization.py`: quasi-poloidal fixed-boundary optimization from the NFP=2 QI seed.
 - `QI_optimization.py`: recommended quasi-isodynamic optimization with Boozer-space QI metrics, mirror-ratio and elongation penalties, repeated same-mode continuation, and ESS.
-- `qa_optimization_finite_beta.py`, `qh_optimization_finite_beta.py`, and `qi_optimization_finite_beta.py`: finite-beta stage-1 examples with pressure/current-profile terms.
+- `qa_optimization_finite_beta.py`, `qh_optimization_finite_beta.py`, and `qi_optimization_finite_beta.py`:
+  finite-beta stage-1 examples with pressure/current-profile terms. These intentionally use
+  `FixedBoundaryExactOptimizer` directly because each continuation stage builds custom
+  finite-pressure/current residual closures; the helper only standardizes stage artifacts.
 
 Run one case from the repository root:
 

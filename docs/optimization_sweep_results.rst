@@ -320,6 +320,13 @@ the stage bookkeeping and artifact writing consistent.  The scripts save
 ``input.initial``, ``input.final``, ``wout_initial.nc``, ``wout_final.nc``, and
 ``history.json`` for each run.
 
+These examples deliberately remain one layer lower than
+``least_squares_solve``.  The ordinary QA/QH/QP/QI scripts are the recommended
+objective-tuple API examples; finite-beta stage one keeps direct
+``FixedBoundaryExactOptimizer`` calls visible so users can see the custom
+finite-pressure/current residual closures, stage-local profile data, and
+optional bootstrap-current residual wiring.
+
 All finite-beta controls are plain variables at the top of the scripts.  For
 QI, ``QI_MBOZ``, ``QI_NBOZ``, ``QI_NPHI``, ``QI_NALPHA``, and
 ``QI_N_BOUNCE`` control the Boozer/QI residual grid. ``MAX_MIRROR_RATIO`` and

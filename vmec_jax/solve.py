@@ -9951,9 +9951,13 @@ def solve_fixed_boundary_residual_iter(
 
     timing_env = os.getenv("VMEC_JAX_TIMING", "").strip().lower()
     timing_enabled = timing_env not in ("", "0", "false", "no")
+    timing_detail_env = os.getenv("VMEC_JAX_TIMING_DETAIL", "").strip().lower()
+    timing_detail_enabled = timing_enabled and timing_detail_env not in ("", "0", "false", "no")
     timing_stats = {
         "compute_forces": 0.0,
         "preconditioner": 0.0,
+        "precond_apply": 0.0,
+        "precond_mode_scale": 0.0,
         "update": 0.0,
         "update_state": 0.0,
         "update_trace_build": 0.0,
@@ -11511,6 +11515,7 @@ def solve_fixed_boundary_residual_iter(
                     )
                 if lam_debug is not None:
                     _maybe_dump_lamcal(lam_debug=lam_debug, static=static, iter_idx=int(iter2))
+                t_precond_apply_start = time.perf_counter() if timing_detail_enabled else None
                 frzl_rhs = _apply_vmec_scale_m1_precond_rhs(frzl, mats)
                 from .preconditioner_1d_jax import rz_preconditioner_apply_jit as _rz_apply_jit_1
 
@@ -11564,6 +11569,13 @@ def solve_fixed_boundary_residual_iter(
                         flcc = jnp.asarray(frzl_rz.flcc) * jnp.asarray(lam_prec)
                     if getattr(frzl_rz, "flss", None) is not None:
                         flss = jnp.asarray(frzl_rz.flss) * jnp.asarray(lam_prec)
+                if timing_detail_enabled and t_precond_apply_start is not None:
+                    try:
+                        if has_jax():
+                            jax.block_until_ready(flsc)
+                    except Exception:
+                        pass
+                    timing_stats["precond_apply"] += time.perf_counter() - float(t_precond_apply_start)
             elif not bool(cfg.lthreed):
                 from .preconditioner_1d_jax import (
                     rz_preconditioner_matrices,
@@ -11655,6 +11667,7 @@ def solve_fixed_boundary_residual_iter(
                     )
                 if lam_debug is not None:
                     _maybe_dump_lamcal(lam_debug=lam_debug, static=static, iter_idx=int(iter2))
+                t_precond_apply_start = time.perf_counter() if timing_detail_enabled else None
                 frzl_rhs = _apply_vmec_scale_m1_precond_rhs(frzl, mats) if bool(getattr(cfg, "lasym", False)) else frzl
                 from .preconditioner_1d_jax import rz_preconditioner_apply_jit as _rz_apply_jit_2
 
@@ -11708,7 +11721,15 @@ def solve_fixed_boundary_residual_iter(
                         flcc = jnp.asarray(frzl_rz.flcc) * jnp.asarray(lam_prec)
                     if getattr(frzl_rz, "flss", None) is not None:
                         flss = jnp.asarray(frzl_rz.flss) * jnp.asarray(lam_prec)
+                if timing_detail_enabled and t_precond_apply_start is not None:
+                    try:
+                        if has_jax():
+                            jax.block_until_ready(flsc)
+                    except Exception:
+                        pass
+                    timing_stats["precond_apply"] += time.perf_counter() - float(t_precond_apply_start)
             else:
+                t_precond_apply_start = time.perf_counter() if timing_detail_enabled else None
                 frcc = _apply_radial_tridi(frzl.frcc * rz_scale[:, None, None], precond_radial_alpha)
                 frss = (
                     _apply_radial_tridi(frzl.frss * rz_scale[:, None, None], precond_radial_alpha)
@@ -11757,6 +11778,13 @@ def solve_fixed_boundary_residual_iter(
                     if getattr(frzl, "flss", None) is not None
                     else jnp.zeros_like(flsc)
                 )
+                if timing_detail_enabled and t_precond_apply_start is not None:
+                    try:
+                        if has_jax():
+                            jax.block_until_ready(flsc)
+                    except Exception:
+                        pass
+                    timing_stats["precond_apply"] += time.perf_counter() - float(t_precond_apply_start)
 
             frzl_pre = TomnspsRZL(
                 frcc=frcc,
@@ -11783,6 +11811,7 @@ def solve_fixed_boundary_residual_iter(
             _maybe_dump_gc(frzl=frzl_pre, static=static, iter_idx=int(iter2), label="precond")
 
             # Mode-diagonal preconditioning in (m, n>=0) storage.
+            t_precond_mode_start = time.perf_counter() if timing_detail_enabled else None
             if host_update_assembly:
                 # NumPy path: avoids 36 JAX dispatches (expand_dims + broadcast + mul per array).
                 # _zeros_coeff_np replaces np.zeros_like (pre-allocated, avoids 6+ allocs/iter).
@@ -11813,9 +11842,16 @@ def solve_fixed_boundary_residual_iter(
                 fzss_u = fzss * w_mode_mn[None, :, :]
                 flcc_u = flcc * w_mode_mn[None, :, :]
                 flss_u = flss * w_mode_mn[None, :, :]
-            if timing_enabled:
+            if timing_detail_enabled and t_precond_mode_start is not None:
                 try:
                     if has_jax():
+                        jax.block_until_ready(flsc_u)
+                except Exception:
+                    pass
+                timing_stats["precond_mode_scale"] += time.perf_counter() - float(t_precond_mode_start)
+            if timing_enabled:
+                try:
+                    if has_jax() and not timing_detail_enabled:
                         jax.block_until_ready(flsc_u)
                 except Exception:
                     pass
@@ -13875,14 +13911,30 @@ def solve_fixed_boundary_residual_iter(
             "update_trace_build_per_iter_s": float(timing_stats["update_trace_build"]) / iters,
             "update_trace_finalize_per_iter_s": float(timing_stats["update_trace_finalize"]) / iters,
         }
+        if timing_detail_enabled:
+            timing_report.update(
+                {
+                    "precond_apply_s": float(timing_stats["precond_apply"]),
+                    "precond_mode_scale_s": float(timing_stats["precond_mode_scale"]),
+                    "precond_apply_per_iter_s": float(timing_stats["precond_apply"]) / iters,
+                    "precond_mode_scale_per_iter_s": float(timing_stats["precond_mode_scale"]) / iters,
+                }
+            )
         diag["timing"] = timing_report
         try:
+            detail_text = ""
+            if timing_detail_enabled:
+                detail_text = (
+                    f"precond_apply={timing_report['precond_apply_s']:.3e}s "
+                    f"precond_mode={timing_report['precond_mode_scale_s']:.3e}s "
+                )
             print(
                 "[vmec_jax timing] "
                 f"iters={timing_report['iterations']} "
                 f"compute_forces={timing_report['compute_forces_s']:.3e}s "
                 f"precond={timing_report['preconditioner_s']:.3e}s "
                 f"precond_refresh={timing_report['precond_refresh_s']:.3e}s "
+                f"{detail_text}"
                 f"update={timing_report['update_s']:.3e}s "
                 f"update_state={timing_report['update_state_s']:.3e}s "
                 f"trace_build={timing_report['update_trace_build_s']:.3e}s "

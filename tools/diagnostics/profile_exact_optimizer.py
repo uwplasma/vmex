@@ -165,6 +165,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Enable VMEC_JAX_TIMING so exact tape profiles include solver phase timings.",
     )
     p.add_argument(
+        "--vmec-timing-detail",
+        action="store_true",
+        help=(
+            "Enable detailed VMEC_JAX_TIMING_DETAIL preconditioner subphase timings. "
+            "This adds extra synchronization and is for diagnostics only."
+        ),
+    )
+    p.add_argument(
         "--budget-total-wall-s",
         type=float,
         default=0.0,
@@ -540,8 +548,10 @@ def main() -> int:
     args = _parse_args()
     if args.gradient_only:
         args.callback = "gradient"
-    if args.vmec_timing:
+    if args.vmec_timing or args.vmec_timing_detail:
         os.environ["VMEC_JAX_TIMING"] = "1"
+    if args.vmec_timing_detail:
+        os.environ["VMEC_JAX_TIMING_DETAIL"] = "1"
 
     import vmec_jax as vj
     from vmec_jax._compat import enable_x64

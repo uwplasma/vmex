@@ -119,6 +119,15 @@ class QIPrefineProbeConfig:
     include_bounce_endpoints: bool = True
     phimin: float = 0.0
     qi_weight: float = 1.0
+    mirror_weight: float = 0.0
+    mirror_threshold: float = DEFAULT_MAX_MIRROR_RATIO
+    mirror_ntheta: int = 32
+    mirror_nphi: int = 32
+    mirror_surface_index: int = 0
+    elongation_weight: float = 0.0
+    elongation_threshold: float = DEFAULT_MAX_ELONGATION
+    elongation_ntheta: int = 24
+    elongation_nphi: int = 8
     method: str = "scipy"
     ftol: float = 1.0e-3
     gtol: float = 1.0e-3
@@ -607,6 +616,20 @@ def _validate_prefine_probe_config(config: QIPrefineProbeConfig) -> None:
         (1 <= config.mboz <= MAX_PREFINE_BOOZ_MODE, f"prefine mboz must be in [1, {MAX_PREFINE_BOOZ_MODE}]"),
         (1 <= config.nboz <= MAX_PREFINE_BOOZ_MODE, f"prefine nboz must be in [1, {MAX_PREFINE_BOOZ_MODE}]"),
     ]
+    if config.mirror_weight < 0.0:
+        raise ValueError("prefine mirror_weight must be non-negative")
+    if config.elongation_weight < 0.0:
+        raise ValueError("prefine elongation_weight must be non-negative")
+    if config.mirror_threshold <= 0.0:
+        raise ValueError("prefine mirror_threshold must be positive")
+    if config.elongation_threshold <= 0.0:
+        raise ValueError("prefine elongation_threshold must be positive")
+    if config.mirror_ntheta <= 0 or config.mirror_nphi <= 0:
+        raise ValueError("prefine mirror grid sizes must be positive")
+    if config.elongation_ntheta <= 0 or config.elongation_nphi <= 0:
+        raise ValueError("prefine elongation grid sizes must be positive")
+    if config.mirror_surface_index < 0:
+        raise ValueError("prefine mirror_surface_index must be non-negative")
     for ok, message in checks:
         if not ok:
             raise ValueError(message)
@@ -740,6 +763,24 @@ def _prefine_run_command(record: dict[str, Any], config: QIPrefineProbeConfig, m
         str(config.n_bounce),
         "--prefine-phimin",
         str(selected_phimin),
+        "--prefine-mirror-weight",
+        str(config.mirror_weight),
+        "--prefine-mirror-threshold",
+        str(config.mirror_threshold),
+        "--prefine-mirror-ntheta",
+        str(config.mirror_ntheta),
+        "--prefine-mirror-nphi",
+        str(config.mirror_nphi),
+        "--prefine-mirror-surface-index",
+        str(config.mirror_surface_index),
+        "--prefine-elongation-weight",
+        str(config.elongation_weight),
+        "--prefine-elongation-threshold",
+        str(config.elongation_threshold),
+        "--prefine-elongation-ntheta",
+        str(config.elongation_ntheta),
+        "--prefine-elongation-nphi",
+        str(config.elongation_nphi),
         "--prefine-inner-max-iter",
         str(config.inner_max_iter),
         "--prefine-trial-max-iter",
@@ -869,7 +910,11 @@ def build_qi_prefine_probe_manifest(
                 "failed_constraints": record.get("failed_constraints", []),
             },
             "optimization": {
-                "objective": "qi_only_prefine_probe",
+                "objective": (
+                    "qi_constrained_prefine_probe"
+                    if float(config.mirror_weight) > 0.0 or float(config.elongation_weight) > 0.0
+                    else "qi_only_prefine_probe"
+                ),
                 "max_nfev": int(config.max_nfev),
                 "continuation_nfev": int(config.continuation_nfev),
                 "max_mode": int(config.max_mode),
@@ -903,6 +948,15 @@ def build_qi_prefine_probe_manifest(
                 "phimin": selected_phimin,
                 "phimin_source": phimin_source,
                 "weight": float(config.qi_weight),
+                "mirror_weight": float(config.mirror_weight),
+                "mirror_threshold": float(config.mirror_threshold),
+                "mirror_ntheta": int(config.mirror_ntheta),
+                "mirror_nphi": int(config.mirror_nphi),
+                "mirror_surface_index": int(config.mirror_surface_index),
+                "elongation_weight": float(config.elongation_weight),
+                "elongation_threshold": float(config.elongation_threshold),
+                "elongation_ntheta": int(config.elongation_ntheta),
+                "elongation_nphi": int(config.elongation_nphi),
             },
             "would_write": [
                 str(probe_dir / "input.initial"),
@@ -1509,8 +1563,27 @@ def run_qi_prefine_probe(plan: dict[str, Any], *, workflow: Any | None = None) -
         include_bounce_endpoints=bool(qi_options_raw.get("include_bounce_endpoints", False)),
         phimin=float(qi_options_raw["phimin"]),
     )
+    objective_tuples = []
     qi = workflow.QuasiIsodynamicResidual(qi_options)
-    problem = workflow.LeastSquaresProblem.from_tuples([(qi.J, 0.0, float(qi_options_raw["weight"]))])
+    objective_tuples.append((qi.J, 0.0, float(qi_options_raw["weight"])))
+    if float(qi_options_raw.get("mirror_weight", 0.0)) > 0.0:
+        mirror = workflow.MirrorRatio(
+            threshold=float(qi_options_raw.get("mirror_threshold", DEFAULT_MAX_MIRROR_RATIO)),
+            ntheta=int(qi_options_raw.get("mirror_ntheta", 32)),
+            nphi=int(qi_options_raw.get("mirror_nphi", 32)),
+            surface_index=int(qi_options_raw.get("mirror_surface_index", 0)),
+            qi_options=qi_options,
+        )
+        objective_tuples.append((mirror.J, 0.0, float(qi_options_raw["mirror_weight"])))
+    if float(qi_options_raw.get("elongation_weight", 0.0)) > 0.0:
+        elongation = workflow.MaxElongation(
+            threshold=float(qi_options_raw.get("elongation_threshold", DEFAULT_MAX_ELONGATION)),
+            ntheta=int(qi_options_raw.get("elongation_ntheta", 24)),
+            nphi=int(qi_options_raw.get("elongation_nphi", 8)),
+            qi_options=qi_options,
+        )
+        objective_tuples.append((elongation.J, 0.0, float(qi_options_raw["elongation_weight"])))
+    problem = workflow.LeastSquaresProblem.from_tuples(objective_tuples)
     vmec = workflow.FixedBoundaryVMEC.from_input(
         plan["input"],
         max_mode=int(opt["max_mode"]),
@@ -1894,6 +1967,25 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--prefine-phimin", type=float, default=0.0)
+    parser.add_argument(
+        "--prefine-mirror-weight",
+        type=float,
+        default=0.0,
+        help="Optional mirror-ratio penalty weight for constrained prefine probes. Default 0 keeps QI-only behavior.",
+    )
+    parser.add_argument("--prefine-mirror-threshold", type=float, default=DEFAULT_MAX_MIRROR_RATIO)
+    parser.add_argument("--prefine-mirror-ntheta", type=int, default=32)
+    parser.add_argument("--prefine-mirror-nphi", type=int, default=32)
+    parser.add_argument("--prefine-mirror-surface-index", type=int, default=0)
+    parser.add_argument(
+        "--prefine-elongation-weight",
+        type=float,
+        default=0.0,
+        help="Optional max-elongation penalty weight for constrained prefine probes. Default 0 keeps QI-only behavior.",
+    )
+    parser.add_argument("--prefine-elongation-threshold", type=float, default=DEFAULT_MAX_ELONGATION)
+    parser.add_argument("--prefine-elongation-ntheta", type=int, default=24)
+    parser.add_argument("--prefine-elongation-nphi", type=int, default=8)
     parser.add_argument("--prefine-inner-max-iter", type=int, default=20)
     parser.add_argument("--prefine-trial-max-iter", type=int, default=20)
     parser.add_argument(
@@ -1991,6 +2083,15 @@ def main(argv: list[str] | None = None) -> int:
             n_bounce=args.prefine_n_bounce,
             include_bounce_endpoints=prefine_include_bounce_endpoints,
             phimin=args.prefine_phimin,
+            mirror_weight=args.prefine_mirror_weight,
+            mirror_threshold=args.prefine_mirror_threshold,
+            mirror_ntheta=args.prefine_mirror_ntheta,
+            mirror_nphi=args.prefine_mirror_nphi,
+            mirror_surface_index=args.prefine_mirror_surface_index,
+            elongation_weight=args.prefine_elongation_weight,
+            elongation_threshold=args.prefine_elongation_threshold,
+            elongation_ntheta=args.prefine_elongation_ntheta,
+            elongation_nphi=args.prefine_elongation_nphi,
             use_ess=args.prefine_use_ess,
             ess_alpha=args.prefine_ess_alpha,
             inner_max_iter=args.prefine_inner_max_iter,

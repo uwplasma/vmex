@@ -265,7 +265,8 @@ the old non-scan trial path for diagnostics.  ``solver_device=None``, ``"auto"``
 and ``"default"`` inherit JAX's active backend; pass ``solver_device="cpu"`` or
 ``"gpu"`` only when you want an explicit override.
 
-Representative May 2026 callback timings were:
+Representative May 2026 callback timings after the backend-adaptive replay
+bucket and scalar-gradient tangent-cache changes were:
 
 .. list-table::
    :header-rows: 1
@@ -274,22 +275,31 @@ Representative May 2026 callback timings were:
      - Device/path
      - Budget
      - Wall time
-   * - QA ``max_mode=2`` dense Jacobian callback
+   * - QH ``max_mode=1`` dense Jacobian callback
+     - ``office`` RTX A4000, tape exact
+     - ``inner_max_iter=20``, one cold callback
+     - ``9.29 s``
+   * - QH ``max_mode=1`` dense Jacobian callback
+     - same ``office`` host CPU/JAX stack, tape exact
+     - ``inner_max_iter=20``, one cold callback
+     - ``16.97 s``
+   * - QH ``max_mode=2`` dense Jacobian callbacks
+     - ``office`` RTX A4000, tape exact
+     - ``inner_max_iter=80``, two perturbed callbacks
+     - ``16.48 s``
+   * - QH ``max_mode=2`` dense Jacobian callbacks
      - local CPU, tape exact
-     - ``inner_max_iter=40``, ``trial_max_iter=20``
-     - ``9.54 s``
-   * - QH ``max_mode=1`` dense Jacobian callback
-     - ``office`` RTX A4000, forced tape exact
-     - ``inner_max_iter=20``, ``trial_max_iter=20``
-     - ``36.70 s``
-   * - QH ``max_mode=1`` dense Jacobian callback
-     - ``office`` RTX A4000, forced scan exact
-     - ``inner_max_iter=20``, ``trial_max_iter=20``
-     - ``102.95 s``
+     - ``inner_max_iter=80``, two perturbed callbacks
+     - ``10.34 s``
 
-These short cases are still CPU-faster overall.  The production default is
-therefore the tape exact path on GPU; scan exact remains available through
-``VMEC_JAX_OPT_EXACT_PATH=scan`` for targeted diagnostics.
+These short cases show that GPU is now competitive or faster on some cold
+callbacks, but not uniformly faster for production-like mode-2 dense
+Jacobians.  The production default is therefore still the tape exact path on
+GPU, while CPU remains the conservative recommendation for small dense
+least-squares optimizations.  Forced scan exact remains available through
+``VMEC_JAX_OPT_EXACT_PATH=scan`` for targeted diagnostics; a mode-2 forced-scan
+GPU probe was stopped after the cold compile exceeded the practical profiling
+budget, so it is not a production default.
 
 For same-process warmup studies, repeat a callback at the same point or repeat
 the whole short optimizer run while keeping compiled executables warm:
@@ -318,9 +328,12 @@ trajectory more closely than same-point repeats:
 
 With ``--vmec-timing``, the callback profile also splits
 ``exact_tape_build`` into solver compute-force, preconditioner, update, and
-unattributed tape-building overhead terms.  Use that mode when optimizing the
-accepted-point path; omit it for production sweeps to avoid extra console
-output.
+unattributed tape-building overhead terms.  Add ``--vmec-timing-detail`` when
+the preconditioner bucket is the bottleneck; it further reports
+``exact_tape_solver_preconditioner_apply`` and
+``exact_tape_solver_preconditioner_mode_scale``.  The detailed mode adds extra
+synchronization and should be used for targeted diagnostics, not production
+sweeps.
 
 For production cache-growth audits, use the same accepted-point callback mode
 with JSON output and explicit budgets.  The report records per-repeat phase
