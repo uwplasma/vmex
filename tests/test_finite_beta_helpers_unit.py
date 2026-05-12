@@ -151,6 +151,68 @@ def test_finite_beta_scalars_from_state_uses_iota_and_energy_diagnostics(monkeyp
     assert float(scalars["volume"]) == 4.0
 
 
+def test_finite_beta_scalars_from_state_gradient_matches_finite_difference(monkeypatch):
+    pytest.importorskip("jax")
+    import jax
+
+    static = SimpleNamespace(s=jnp.asarray([0.0, 0.25, 0.75, 1.0]), trig_vmec=object())
+
+    def _state(scale):
+        return SimpleNamespace(scale=jnp.asarray(scale, dtype=jnp.float64))
+
+    def fake_aspect(*, state, **_kwargs):
+        x = jnp.asarray(state.scale, dtype=jnp.float64)
+        return 5.0 + 0.25 * x + 0.03 * x**2
+
+    def fake_iota_profiles(*, state, **_kwargs):
+        x = jnp.asarray(state.scale, dtype=jnp.float64)
+        chips = jnp.asarray([0.0, 0.1 + 0.01 * x, 0.2 + 0.02 * x, 0.3 + 0.03 * x], dtype=jnp.float64)
+        iotas = jnp.asarray([0.0, 0.30 + 0.04 * x, 0.50 + 0.05 * x, 0.70 + 0.06 * x], dtype=jnp.float64)
+        iotaf = jnp.asarray([0.0, 0.40 + 0.02 * x, 0.60 + 0.03 * x, 0.80 + 0.04 * x], dtype=jnp.float64)
+        return chips, iotas, iotaf
+
+    def fake_bcovar(*, state, **_kwargs):
+        return SimpleNamespace(scale=jnp.asarray(state.scale, dtype=jnp.float64))
+
+    def fake_norms(*, bc, **_kwargs):
+        x = jnp.asarray(bc.scale, dtype=jnp.float64)
+        return SimpleNamespace(
+            wb=2.0 + 0.4 * x**2,
+            wp=0.3 + 0.05 * x + 0.02 * x**2,
+            volume=1.5 + 0.1 * x,
+            vp=jnp.asarray([0.0, 1.0 + 0.1 * x, 0.9 + 0.05 * x, 0.8 + 0.02 * x], dtype=jnp.float64),
+        )
+
+    monkeypatch.setattr(finite_beta, "equilibrium_aspect_ratio_from_state", fake_aspect)
+    monkeypatch.setattr(finite_beta, "equilibrium_iota_profiles_from_state", fake_iota_profiles)
+    monkeypatch.setattr(finite_beta, "_wout_like_for_state", lambda **_kwargs: (SimpleNamespace(), jnp.zeros(4)))
+    monkeypatch.setattr(finite_beta, "vmec_bcovar_half_mesh_from_wout", fake_bcovar)
+    monkeypatch.setattr(finite_beta, "vmec_force_norms_from_bcovar_dynamic", fake_norms)
+
+    def objective(scale):
+        scalars = finite_beta.finite_beta_scalars_from_state(
+            state=_state(scale),
+            static=static,
+            indata=object(),
+            signgs=1,
+        )
+        return (
+            scalars["aspect"]
+            + scalars["mean_iota"]
+            + scalars["min_iota"]
+            + scalars["max_iota"]
+            + 0.7 * scalars["volavgB"]
+            + 1.3 * scalars["betatotal"]
+        )
+
+    x0 = 1.2
+    eps = 1.0e-6
+    ad_grad = jax.grad(lambda x: objective(x))(jnp.asarray(x0, dtype=jnp.float64))
+    fd_grad = (float(objective(x0 + eps)) - float(objective(x0 - eps))) / (2.0 * eps)
+
+    np.testing.assert_allclose(np.asarray(ad_grad), fd_grad, rtol=2.0e-6, atol=2.0e-8)
+
+
 def test_magnetic_well_from_vp_uses_vmec_endpoint_extrapolation():
     vp = jnp.asarray([0.0, 2.0, 1.5, 1.0], dtype=jnp.float64)
 

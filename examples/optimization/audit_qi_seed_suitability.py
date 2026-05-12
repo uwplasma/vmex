@@ -76,6 +76,8 @@ MAX_PREFINE_QI_NALPHA = 11
 MAX_PREFINE_QI_N_BOUNCE = 15
 MAX_PREFINE_BOOZ_MODE = 10
 DEFAULT_PREFINE_STAGE_MODES = (1, 1, 2, 2, 3)
+OBJECTIVE_REGRESSION_RTOL = 1.0e-12
+OBJECTIVE_REGRESSION_ATOL = 1.0e-14
 
 
 @dataclass(frozen=True)
@@ -910,7 +912,7 @@ def build_qi_prefine_probe_manifest(
         }
         plans.append(plan)
 
-    return {
+    manifest = {
         "mode": "qi_prefine_probe_manifest",
         "dry_run": bool(dry_run),
         "review": {
@@ -951,6 +953,526 @@ def build_qi_prefine_probe_manifest(
             "planned_rows": len(plans),
         },
         "plans": plans,
+    }
+    manifest["summary"] = summarize_qi_prefine_probe_manifest(manifest)
+    return manifest
+
+
+def _finite_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        out = float(np.asarray(value))
+    except (TypeError, ValueError):
+        return None
+    return out if np.isfinite(out) else None
+
+
+def _int_list(value: Any) -> list[int]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw_items: Any = [item.strip() for item in value.split(",") if item.strip()]
+    elif isinstance(value, np.ndarray):
+        raw_items = value.reshape(-1).tolist()
+    elif isinstance(value, (list, tuple)):
+        raw_items = value
+    else:
+        raw_items = [value]
+    out: list[int] = []
+    for item in raw_items:
+        try:
+            out.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _prefine_objective_regression_tolerance(previous: float, current: float) -> float:
+    scale = max(1.0, abs(float(previous)), abs(float(current)))
+    return max(OBJECTIVE_REGRESSION_ATOL, OBJECTIVE_REGRESSION_RTOL * scale)
+
+
+def _objective_values_from_history_payload(history_payload: Any) -> list[float | None]:
+    if history_payload is None:
+        return []
+    if isinstance(history_payload, dict):
+        for key in ("history", "objective_history", "objective_trace", "objectives"):
+            if key in history_payload:
+                return _objective_values_from_history_payload(history_payload[key])
+        return []
+    if not isinstance(history_payload, (list, tuple, np.ndarray)):
+        return []
+
+    values: list[float | None] = []
+    for entry in history_payload:
+        raw_value: Any = entry
+        if isinstance(entry, dict):
+            raw_value = None
+            for key in ("objective", "total_objective", "objective_total", "cost"):
+                if key in entry:
+                    raw_value = entry[key]
+                    break
+        values.append(_finite_float(raw_value))
+    return values
+
+
+def _prefine_history_summary(
+    history_payload: Any,
+    *,
+    objective_initial: Any = None,
+    objective_final: Any = None,
+) -> dict[str, Any]:
+    raw_values = _objective_values_from_history_payload(history_payload)
+    finite_values = [float(value) for value in raw_values if value is not None]
+    nonfinite_count = len(raw_values) - len(finite_values)
+    summary: dict[str, Any] = {
+        "history_present": bool(raw_values),
+        "objective_sample_count": len(raw_values),
+        "finite_objective_sample_count": len(finite_values),
+        "nonfinite_objective_sample_count": nonfinite_count,
+        "objective_first": finite_values[0] if finite_values else None,
+        "objective_last": finite_values[-1] if finite_values else None,
+        "objective_min": min(finite_values) if finite_values else None,
+        "objective_max": max(finite_values) if finite_values else None,
+        "objective_decrease": (finite_values[0] - finite_values[-1]) if len(finite_values) >= 2 else None,
+        "objective_monotonic_nonincreasing": None,
+        "objective_regression_count": 0,
+        "max_objective_increase": None,
+        "final_worse_than_initial": None,
+    }
+    if len(finite_values) >= 2:
+        increases = []
+        for previous, current in zip(finite_values, finite_values[1:], strict=False):
+            if current > previous + _prefine_objective_regression_tolerance(previous, current):
+                increases.append(current - previous)
+        summary["objective_regression_count"] = len(increases)
+        summary["max_objective_increase"] = max(increases) if increases else 0.0
+        summary["objective_monotonic_nonincreasing"] = bool(not increases and nonfinite_count == 0)
+
+    initial = _finite_float(objective_initial)
+    final = _finite_float(objective_final)
+    if initial is None and finite_values:
+        initial = finite_values[0]
+    if final is None and finite_values:
+        final = finite_values[-1]
+    if initial is not None and final is not None:
+        summary["final_worse_than_initial"] = bool(
+            final > initial + _prefine_objective_regression_tolerance(initial, final)
+        )
+    return summary
+
+
+def _prefine_existing_history_summary(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    summary = dict(value)
+    if "history_present" not in summary:
+        return None
+    for key in (
+        "objective_sample_count",
+        "finite_objective_sample_count",
+        "nonfinite_objective_sample_count",
+        "objective_regression_count",
+    ):
+        if key in summary and summary[key] is not None:
+            summary[key] = int(summary[key])
+    for key in (
+        "objective_first",
+        "objective_last",
+        "objective_min",
+        "objective_max",
+        "objective_decrease",
+        "max_objective_increase",
+    ):
+        summary[key] = _finite_float(summary.get(key))
+    if "objective_monotonic_nonincreasing" in summary and summary["objective_monotonic_nonincreasing"] is not None:
+        summary["objective_monotonic_nonincreasing"] = bool(summary["objective_monotonic_nonincreasing"])
+    if "final_worse_than_initial" in summary and summary["final_worse_than_initial"] is not None:
+        summary["final_worse_than_initial"] = bool(summary["final_worse_than_initial"])
+    return summary
+
+
+def _prefine_history_payload(plan: dict[str, Any], result: dict[str, Any]) -> Any:
+    for payload in (
+        result.get("history_dump"),
+        result.get("_history_dump"),
+        result.get("history"),
+        result.get("objective_history"),
+        result.get("objective_trace"),
+        plan.get("history_dump"),
+        plan.get("_history_dump"),
+        plan.get("history"),
+        plan.get("objective_history"),
+        plan.get("objective_trace"),
+    ):
+        if payload is not None:
+            return payload
+    return None
+
+
+def _prefine_stage_modes_from_plan(plan: dict[str, Any], result: dict[str, Any], key: str) -> list[int]:
+    candidates: list[Any]
+    if key == "requested":
+        candidates = [
+            result.get("requested_stage_modes"),
+            plan.get("requested_stage_modes"),
+            plan.get("optimization", {}).get("stage_modes"),
+            [stage.get("mode") for stage in plan.get("stages", []) if isinstance(stage, dict)],
+        ]
+    else:
+        history_payload = _prefine_history_payload(plan, result)
+        history_modes = history_payload.get("stage_modes") if isinstance(history_payload, dict) else None
+        candidates = [
+            result.get("completed_stage_modes"),
+            plan.get("completed_stage_modes"),
+            history_modes,
+        ]
+    for candidate in candidates:
+        values = _int_list(candidate)
+        if values:
+            return values
+    return []
+
+
+def _prefine_plan_status(plan: dict[str, Any]) -> str:
+    status = plan.get("status")
+    if status is not None:
+        return str(status).strip().lower() or "unknown"
+    if bool(plan.get("crashed", False)):
+        return "failed"
+    if plan.get("success") is True:
+        return "completed"
+    if plan.get("success") is False:
+        return "failed"
+    return "unknown"
+
+
+def _prefine_plan_timed_out(plan: dict[str, Any], result: dict[str, Any], status: str) -> bool:
+    if status in {"timeout", "timed_out"}:
+        return True
+    if bool(plan.get("timed_out", False) or result.get("timed_out", False)):
+        return True
+    pieces = [
+        plan.get("error_type"),
+        plan.get("error"),
+        plan.get("message"),
+        result.get("error_type"),
+        result.get("error"),
+        result.get("message"),
+        result.get("optimizer_message"),
+    ]
+    text = " ".join(str(piece) for piece in pieces if piece is not None).lower()
+    return "timeout" in text or "timed out" in text
+
+
+def _prefine_plan_acceptance(row: dict[str, Any]) -> dict[str, Any]:
+    status = str(row.get("status", "unknown"))
+    reasons: list[str] = []
+    if bool(row.get("timed_out", False)):
+        return {"accepted": False, "decision": "timeout", "reasons": ["probe timed out"]}
+    if bool(row.get("failed", False)):
+        return {"accepted": False, "decision": "failed", "reasons": ["probe failed"]}
+    if status in {"planned", "pending"}:
+        return {"accepted": False, "decision": "not_run", "reasons": [f"probe is {status}"]}
+    if status != "completed":
+        return {"accepted": False, "decision": "unknown_status", "reasons": [f"status is {status}"]}
+
+    if row.get("objective_final") is None:
+        reasons.append("missing finite final objective")
+    if row.get("completed_all_requested_stages") is False:
+        reasons.append("did not complete all requested stage modes")
+    if row.get("objective_final_regressed") is True:
+        reasons.append("final objective is worse than initial objective")
+
+    history = row.get("history_summary", {})
+    if bool(history.get("nonfinite_objective_sample_count", 0)):
+        reasons.append("history contains non-finite objective samples")
+    if int(history.get("objective_regression_count") or 0) > 0:
+        reasons.append("history contains objective regressions")
+
+    improvement = row.get("objective_improvement")
+    if improvement is not None and improvement <= _prefine_objective_regression_tolerance(
+        float(row.get("objective_initial") or 0.0),
+        float(row.get("objective_final") or 0.0),
+    ):
+        reasons.append("no positive objective improvement")
+
+    if reasons:
+        return {"accepted": False, "decision": "needs_review", "reasons": reasons}
+    return {"accepted": True, "decision": "accepted", "reasons": ["completed with finite improved objective"]}
+
+
+def _prefine_plan_result_summary(plan: dict[str, Any], *, index: int) -> dict[str, Any]:
+    result = plan.get("result") if isinstance(plan.get("result"), dict) else {}
+    status = _prefine_plan_status(plan)
+    objective_initial = _finite_float(result.get("objective_initial", plan.get("objective_initial")))
+    objective_final = _finite_float(result.get("objective_final", plan.get("objective_final")))
+    objective_improvement = None
+    objective_relative_improvement = None
+    objective_final_regressed = None
+    if objective_initial is not None and objective_final is not None:
+        objective_improvement = objective_initial - objective_final
+        if abs(objective_initial) > 0.0:
+            objective_relative_improvement = objective_improvement / abs(objective_initial)
+        objective_final_regressed = bool(
+            objective_final > objective_initial + _prefine_objective_regression_tolerance(objective_initial, objective_final)
+        )
+
+    history_summary = _prefine_existing_history_summary(result.get("history_summary"))
+    if history_summary is None:
+        history_summary = _prefine_history_summary(
+            _prefine_history_payload(plan, result),
+            objective_initial=objective_initial,
+            objective_final=objective_final,
+        )
+
+    requested_stage_modes = _prefine_stage_modes_from_plan(plan, result, "requested")
+    completed_stage_modes = _prefine_stage_modes_from_plan(plan, result, "completed")
+    stage_count_requested = int(result.get("stage_count_requested") or len(requested_stage_modes))
+    stage_count_completed = int(result.get("stage_count_completed") or len(completed_stage_modes))
+    completed_all_requested_stages = None
+    if requested_stage_modes and completed_stage_modes:
+        completed_all_requested_stages = completed_stage_modes == requested_stage_modes
+    elif stage_count_requested and stage_count_completed:
+        completed_all_requested_stages = stage_count_completed == stage_count_requested
+
+    timed_out = _prefine_plan_timed_out(plan, result, status)
+    failed = bool(timed_out or status in {"failed", "error", "crashed"} or plan.get("crashed", False))
+    row = {
+        "index": int(index),
+        "label": str(plan.get("label", f"probe_{index}")),
+        "family": plan.get("family"),
+        "audit_rank": plan.get("audit_rank"),
+        "status": status,
+        "failed": failed,
+        "timed_out": timed_out,
+        "error_type": plan.get("error_type", result.get("error_type")),
+        "error": plan.get("error", result.get("error")),
+        "objective_initial": objective_initial,
+        "objective_final": objective_final,
+        "objective_improvement": objective_improvement,
+        "objective_relative_improvement": objective_relative_improvement,
+        "objective_final_regressed": objective_final_regressed,
+        "requested_stage_modes": requested_stage_modes,
+        "completed_stage_modes": completed_stage_modes,
+        "stage_count_requested": stage_count_requested,
+        "stage_count_completed": stage_count_completed,
+        "completed_all_requested_stages": completed_all_requested_stages,
+        "history_summary": history_summary,
+        "output_dir": plan.get("output_dir"),
+        "phimin": result.get("phimin", plan.get("qi_options", {}).get("phimin")),
+        "endpoint_mode": result.get("endpoint_mode", plan.get("endpoint_mode")),
+    }
+    row["acceptance"] = _prefine_plan_acceptance(row)
+    return row
+
+
+def _compact_prefine_summary_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return {
+        "index": row.get("index"),
+        "label": row.get("label"),
+        "family": row.get("family"),
+        "audit_rank": row.get("audit_rank"),
+        "status": row.get("status"),
+        "objective_initial": row.get("objective_initial"),
+        "objective_final": row.get("objective_final"),
+        "objective_improvement": row.get("objective_improvement"),
+        "objective_relative_improvement": row.get("objective_relative_improvement"),
+        "requested_stage_modes": row.get("requested_stage_modes", []),
+        "completed_stage_modes": row.get("completed_stage_modes", []),
+        "completed_all_requested_stages": row.get("completed_all_requested_stages"),
+        "output_dir": row.get("output_dir"),
+        "acceptance": row.get("acceptance"),
+    }
+
+
+def _prefine_best_final_key(row: dict[str, Any]) -> tuple[float, int, str]:
+    return (float(row["objective_final"]), int(row.get("audit_rank") or row.get("index") or 0), str(row.get("label", "")))
+
+
+def _prefine_best_improvement_key(row: dict[str, Any]) -> tuple[float, float, int, str]:
+    final = row.get("objective_final")
+    final_key = float(final) if final is not None else float("inf")
+    return (
+        -float(row["objective_improvement"]),
+        final_key,
+        int(row.get("audit_rank") or row.get("index") or 0),
+        str(row.get("label", "")),
+    )
+
+
+def _prefine_next_pending_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return next((row for row in rows if row.get("status") in {"planned", "pending"}), None)
+
+
+def _prefine_probe_recommendation(
+    manifest: dict[str, Any],
+    *,
+    rows: list[dict[str, Any]],
+    accepted_candidate: dict[str, Any] | None,
+    finite_completed: list[dict[str, Any]],
+    failures: list[dict[str, Any]],
+    timeouts: list[dict[str, Any]],
+    regression_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    pending = _prefine_next_pending_row(rows)
+    if bool(manifest.get("dry_run", True)):
+        label = pending["label"] if pending is not None else None
+        message = (
+            f"Review the manifest, then run the planned probe '{label}' with --prefine-reviewed; keep caps unchanged."
+            if label is not None
+            else "Review the manifest before adding or running prefine probes."
+        )
+        return {"action": "review_manifest", "label": label, "message": message}
+    if timeouts:
+        label = str(timeouts[0]["label"])
+        return {
+            "action": "inspect_timeout",
+            "label": label,
+            "message": f"Inspect timeout '{label}' before expanding the sweep; rerun only with reviewed bounded settings.",
+        }
+    if failures:
+        label = str(failures[0]["label"])
+        return {
+            "action": "inspect_failure",
+            "label": label,
+            "message": f"Inspect failed probe '{label}' before promoting a seed or broadening family coverage.",
+        }
+    if regression_rows:
+        label = str(regression_rows[0]["label"])
+        return {
+            "action": "review_objective_regression",
+            "label": label,
+            "message": f"Review objective history for '{label}' because it contains objective regressions.",
+        }
+    if accepted_candidate is not None:
+        label = str(accepted_candidate["label"])
+        if pending is not None:
+            return {
+                "action": "run_next_pending_probe",
+                "label": str(pending["label"]),
+                "accepted_label": label,
+                "message": (
+                    f"Keep '{label}' as the current accepted prefine candidate; run pending probe "
+                    f"'{pending['label']}' next if family coverage is still required."
+                ),
+            }
+        return {
+            "action": "promote_best_candidate",
+            "label": label,
+            "message": f"Promote '{label}' as the current prefine candidate; do not expand caps without a new reviewed plan.",
+        }
+    if pending is not None:
+        label = str(pending["label"])
+        return {
+            "action": "run_pending_probe",
+            "label": label,
+            "message": f"Run pending probe '{label}' with the reviewed bounded manifest before drawing conclusions.",
+        }
+    if finite_completed:
+        label = str(finite_completed[0]["label"])
+        return {
+            "action": "manual_review",
+            "label": label,
+            "message": f"Review completed probe '{label}' manually; no candidate passed automatic acceptance checks.",
+        }
+    return {
+        "action": "no_actionable_result",
+        "label": None,
+        "message": "No finite completed prefine result is available; keep robustness claims deferred.",
+    }
+
+
+def summarize_qi_prefine_probe_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Summarize bounded prefine probe plans/results without reading large artifacts."""
+
+    rows = [
+        _prefine_plan_result_summary(plan, index=index)
+        for index, plan in enumerate(manifest.get("plans", []), start=1)
+        if isinstance(plan, dict)
+    ]
+    statuses: dict[str, int] = {}
+    for row in rows:
+        status = str(row.get("status", "unknown"))
+        statuses[status] = statuses.get(status, 0) + 1
+
+    completed = [row for row in rows if row.get("status") == "completed"]
+    finite_completed = [row for row in completed if row.get("objective_final") is not None]
+    finite_completed = sorted(finite_completed, key=_prefine_best_final_key)
+    improvement_rows = [row for row in rows if row.get("objective_improvement") is not None]
+    improvement_rows = sorted(improvement_rows, key=_prefine_best_improvement_key)
+    failures = [row for row in rows if bool(row.get("failed", False))]
+    timeouts = [row for row in rows if bool(row.get("timed_out", False))]
+    regression_rows = [
+        row
+        for row in rows
+        if bool(row.get("objective_final_regressed", False))
+        or int(row.get("history_summary", {}).get("objective_regression_count") or 0) > 0
+    ]
+    accepted_rows = [row for row in finite_completed if bool(row.get("acceptance", {}).get("accepted", False))]
+    accepted_candidate = min(accepted_rows, key=_prefine_best_final_key) if accepted_rows else None
+    best_final = finite_completed[0] if finite_completed else None
+    best_improvement = improvement_rows[0] if improvement_rows else None
+    recommendation = _prefine_probe_recommendation(
+        manifest,
+        rows=rows,
+        accepted_candidate=accepted_candidate,
+        finite_completed=finite_completed,
+        failures=failures,
+        timeouts=timeouts,
+        regression_rows=regression_rows,
+    )
+    blocking_issues = []
+    if timeouts:
+        blocking_issues.append(f"{len(timeouts)} timeout(s)")
+    if failures:
+        blocking_issues.append(f"{len(failures)} failed probe(s)")
+    if regression_rows:
+        blocking_issues.append(f"{len(regression_rows)} objective-regression probe(s)")
+
+    return {
+        "schema_version": 1,
+        "dry_run": bool(manifest.get("dry_run", True)),
+        "planned_rows": int(manifest.get("selection", {}).get("planned_rows", len(rows))),
+        "statuses": statuses,
+        "completed_count": len(completed),
+        "completed_stage_modes": [
+            {
+                "label": row["label"],
+                "family": row.get("family"),
+                "requested_stage_modes": row.get("requested_stage_modes", []),
+                "completed_stage_modes": row.get("completed_stage_modes", []),
+                "completed_all_requested_stages": row.get("completed_all_requested_stages"),
+            }
+            for row in completed
+        ],
+        "best_candidate_by_final_objective": _compact_prefine_summary_row(best_final),
+        "best_improvement": _compact_prefine_summary_row(best_improvement),
+        "failure_count": len(failures),
+        "failures": [_compact_prefine_summary_row(row) for row in failures],
+        "timeout_count": len(timeouts),
+        "timeouts": [_compact_prefine_summary_row(row) for row in timeouts],
+        "history_regression_plan_count": len(regression_rows),
+        "history_regressions": [
+            {
+                **(_compact_prefine_summary_row(row) or {}),
+                "history_summary": row.get("history_summary", {}),
+                "objective_final_regressed": row.get("objective_final_regressed"),
+            }
+            for row in regression_rows
+        ],
+        "accepted_candidate": _compact_prefine_summary_row(accepted_candidate),
+        "acceptance": {
+            "decision": "accepted" if accepted_candidate is not None and not blocking_issues else "needs_review",
+            "accepted": bool(accepted_candidate is not None and not blocking_issues),
+            "accepted_candidate": _compact_prefine_summary_row(accepted_candidate),
+            "blocking_issues": blocking_issues,
+        },
+        "recommendation": recommendation,
+        "plan_summaries": rows,
     }
 
 
@@ -1007,6 +1529,8 @@ def run_qi_prefine_probe(plan: dict[str, Any], *, workflow: Any | None = None) -
     )
     history = dict(result.final_result.get("_history_dump", {}))
     completed_stage_modes = [int(mode) for mode in getattr(result, "stage_modes", requested_stage_modes)]
+    objective_initial = history.get("objective_initial")
+    objective_final = history.get("objective_final")
     completed = dict(plan)
     completed["status"] = "completed"
     completed["review"] = {
@@ -1014,10 +1538,14 @@ def run_qi_prefine_probe(plan: dict[str, Any], *, workflow: Any | None = None) -
         "operator_confirmed": bool(plan.get("review", {}).get("operator_confirmed", False)),
     }
     completed["result"] = {
-        "objective_initial": history.get("objective_initial"),
-        "objective_final": history.get("objective_final"),
+        "objective_initial": objective_initial,
+        "objective_final": objective_final,
         "qi_final": history.get("qs_final"),
         "wall_time_s": history.get("total_wall_time_s"),
+        "optimizer_success": history.get("success"),
+        "optimizer_message": history.get("message"),
+        "nfev": history.get("nfev"),
+        "njev": history.get("njev"),
         "requested_stage_modes": list(requested_stage_modes),
         "completed_stage_modes": completed_stage_modes,
         "stage_count_requested": len(requested_stage_modes),
@@ -1031,6 +1559,11 @@ def run_qi_prefine_probe(plan: dict[str, Any], *, workflow: Any | None = None) -
         "phimin": float(qi_options_raw["phimin"]),
         "history_path": str(Path(plan["output_dir"]) / "history.json"),
         "wout_final": str(Path(plan["output_dir"]) / "wout_final.nc"),
+        "history_summary": _prefine_history_summary(
+            history,
+            objective_initial=objective_initial,
+            objective_final=objective_final,
+        ),
     }
     return completed
 
@@ -1066,19 +1599,58 @@ def run_qi_prefine_probe_manifest(
             if fail_on_error:
                 raise
     executed["plans"] = plans
+    executed["summary"] = summarize_qi_prefine_probe_manifest(executed)
+    executed["result_summary"] = summarize_qi_prefine_results(executed)
     return executed
 
 
+def summarize_qi_prefine_results(manifest: dict[str, Any]) -> dict[str, Any]:
+    summary = dict(summarize_qi_prefine_probe_manifest(manifest))
+    stage_coverage: dict[str, int] = {}
+    for row in summary.get("plan_summaries", []):
+        if row.get("status") != "completed":
+            continue
+        for mode in row.get("completed_stage_modes", []):
+            key = str(mode)
+            stage_coverage[key] = stage_coverage.get(key, 0) + 1
+    objective_regressions = [
+        {
+            "index": row.get("index"),
+            "label": row.get("label"),
+            "family": row.get("family"),
+            "checked": bool(row.get("history_summary", {}).get("history_present", False)),
+            "regression_count": int(row.get("history_summary", {}).get("objective_regression_count") or 0),
+            "max_increase": row.get("history_summary", {}).get("max_objective_increase"),
+        }
+        for row in summary.get("plan_summaries", [])
+        if int(row.get("history_summary", {}).get("objective_regression_count") or 0) > 0
+    ]
+    completed_count = int(summary.get("completed_count", 0))
+    failure_count = int(summary.get("failure_count", 0))
+    if completed_count == 0:
+        legacy_recommendation = "run_reviewed_prefine_probes" if manifest.get("plans") else "build_prefine_manifest"
+    elif objective_regressions:
+        legacy_recommendation = "inspect_nonmonotone_histories_before_promoting_seed"
+    elif failure_count:
+        legacy_recommendation = "rerun_failed_probe_or_lower_probe_budget"
+    else:
+        legacy_recommendation = "promote_best_final_objective_seed"
+
+    summary.update(
+        {
+            "executed_rows": completed_count + failure_count,
+            "stage_coverage": stage_coverage,
+            "best_by_final_objective": summary.get("best_candidate_by_final_objective"),
+            "best_by_objective_improvement": summary.get("best_improvement"),
+            "objective_regressions": objective_regressions,
+            "legacy_recommendation": legacy_recommendation,
+        }
+    )
+    return summary
+
+
 def _prefine_probe_summary(manifest: dict[str, Any]) -> dict[str, Any]:
-    statuses: dict[str, int] = {}
-    for plan in manifest.get("plans", []):
-        status = str(plan.get("status", "unknown"))
-        statuses[status] = statuses.get(status, 0) + 1
-    return {
-        "dry_run": bool(manifest.get("dry_run", True)),
-        "planned_rows": int(manifest.get("selection", {}).get("planned_rows", 0)),
-        "statuses": statuses,
-    }
+    return summarize_qi_prefine_probe_manifest(manifest)
 
 
 def build_seed_audit(

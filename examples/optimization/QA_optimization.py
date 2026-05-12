@@ -141,12 +141,12 @@ result = vj.least_squares_solve(
 # Results are plain Python objects.  The solve writes these default artifacts
 # for convenience; the explicit calls below show where to customize filenames
 # or add additional exports in a SIMSOPT-style workflow.
-stage_records = result.stage_records
-_initial_mode, initial_optimizer, initial_params0, initial_result = stage_records[0]
+initial_optimizer = result.initial_optimizer
 final_optimizer = result.final_optimizer
 final_result = result.final_result
-history = final_result["_history_dump"]
-objective_history = np.asarray([entry["objective"] for entry in history["history"]])
+history = result.history
+objective_history = result.objective_history
+timing = result.timing_summary
 
 saved_paths = {
     "initial_input": OUTPUT_DIR / "input.initial",
@@ -156,26 +156,26 @@ saved_paths = {
     "history": OUTPUT_DIR / "history.json",
 }
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-initial_optimizer.save_input(saved_paths["initial_input"], initial_params0)
+initial_optimizer.save_input(saved_paths["initial_input"], result.initial_params)
 initial_optimizer.save_wout(
     saved_paths["initial_wout"],
-    initial_params0,
-    state=initial_result.get("_state_initial"),
+    result.initial_params,
+    state=result.initial_state,
 )
-final_optimizer.save_input(saved_paths["final_input"], final_result["x"])
+final_optimizer.save_input(saved_paths["final_input"], result.final_params)
 final_optimizer.save_wout(
     saved_paths["final_wout"],
-    final_result["x"],
-    state=final_result.get("_state_final"),
+    result.final_params,
+    state=result.final_state,
 )
 final_optimizer.save_history(saved_paths["history"], final_result)
 
-print("\nFinal diagnostics from result.final_result['_history_dump']:")
+print("\nFinal diagnostics from result.history:")
 print(f"  aspect ratio:     {history['aspect_final']:.6g}")
 print(f"  mean iota:        {history['iota_final']:.6g}")
 print(f"  QS objective:     {history['qs_final']:.6e}")
 print(f"  total objective:  {history['objective_final']:.6e}")
-print(f"  wall time:        {history['total_wall_time_s']:.2f} s")
+print(f"  wall time:        {timing['total_wall_time_s']:.2f} s")
 print(f"  objective samples: {objective_history[:5]} ... {objective_history[-3:]}")
 
 print("\nFiles saved from result objects:")

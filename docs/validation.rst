@@ -195,6 +195,12 @@ alignment in the manifest; by default this is
 ``endpoint_mode=include_bounce_endpoints``.  Passing
 ``--no-prefine-include-bounce-endpoints`` is an explicit interior-level
 ablation, not the seed-robustness default.
+The prefine manifest summary is deterministic and JSON-only: it reports status
+counts, completed stage modes, best finite candidate by final objective, best
+objective improvement, failed and timed-out probes, objective-history
+regressions when compact histories are present, automatic acceptance status,
+and one recommended next probe action.  These summaries are audit aids, not a
+substitute for final QI physics and plot review.
 By default the audit uses ``--phimin-policy well-phase``: each seed is scored at
 both ``phimin=0`` and ``phimin=pi/nfp`` and the better QI well phase is used for
 ranking and prefine planning.  Use ``--phimin-policy fixed --phimin VALUE`` when

@@ -36,11 +36,12 @@ instead of relying on hidden plotting or printing helpers:
 ```python
 result = vj.least_squares_solve(vmec, problem, ...)
 
-stage_records = result.stage_records
-_initial_mode, initial_optimizer, initial_params0, initial_result = stage_records[0]
+initial_optimizer = result.initial_optimizer
 final_optimizer = result.final_optimizer
 final_result = result.final_result
-history = final_result["_history_dump"]
+history = result.history
+objective_history = result.objective_history
+timing = result.timing_summary
 
 saved_paths = {
     "initial_input": OUTPUT_DIR / "input.initial",
@@ -49,27 +50,31 @@ saved_paths = {
     "final_wout": OUTPUT_DIR / "wout_final.nc",
     "history": OUTPUT_DIR / "history.json",
 }
-initial_optimizer.save_input(saved_paths["initial_input"], initial_params0)
+initial_optimizer.save_input(saved_paths["initial_input"], result.initial_params)
 initial_optimizer.save_wout(
     saved_paths["initial_wout"],
-    initial_params0,
-    state=initial_result.get("_state_initial"),
+    result.initial_params,
+    state=result.initial_state,
 )
-final_optimizer.save_input(saved_paths["final_input"], final_result["x"])
+final_optimizer.save_input(saved_paths["final_input"], result.final_params)
 final_optimizer.save_wout(
     saved_paths["final_wout"],
-    final_result["x"],
-    state=final_result.get("_state_final"),
+    result.final_params,
+    state=result.final_state,
 )
 final_optimizer.save_history(saved_paths["history"], final_result)
 
 print(history["objective_final"])
+print(timing["total_wall_time_s"])
+print(objective_history[-3:])
 vj.plot_objective_history(saved_paths["history"], outdir=OUTPUT_DIR)
 ```
 
 `least_squares_solve` still writes the default final artifacts for convenience;
 the explicit calls are the editable pattern for custom filenames, extra
-exports, and local diagnostics.
+exports, and local diagnostics.  For continuation details, inspect
+`result.stage_records`, `result.stage_histories`, or
+`result.stage_timing_summaries` directly.
 
 ## Recommended Standalone Examples
 
