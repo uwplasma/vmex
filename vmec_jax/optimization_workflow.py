@@ -501,13 +501,17 @@ class MirrorRatio:
         threshold: float,
         ntheta: int = 96,
         nphi: int = 96,
-        surface_index: int = 0,
+        surface_index: int | None = None,
+        smooth_extrema: float = 0.0,
+        smooth_penalty: float = 0.0,
         qi_options: QuasiIsodynamicOptions | None = None,
     ):
         self.threshold = float(threshold)
         self.ntheta = int(ntheta)
         self.nphi = int(nphi)
-        self.surface_index = int(surface_index)
+        self.surface_index = None if surface_index is None else int(surface_index)
+        self.smooth_extrema = float(smooth_extrema)
+        self.smooth_penalty = float(smooth_penalty)
         self.qi_options = qi_options
 
     def J(self, _ctx: StageContext, _state):
@@ -520,6 +524,8 @@ class MirrorRatio:
             ntheta=self.ntheta,
             nphi=self.nphi,
             surface_index=self.surface_index,
+            smooth_extrema=self.smooth_extrema,
+            smooth_penalty=self.smooth_penalty,
             qi_options=self.qi_options,
         )
 
@@ -1082,19 +1088,23 @@ def qi_mirror_ratio_objective(
     weight: float = 1.0,
     ntheta: int = 96,
     nphi: int = 96,
-    surface_index: int = 0,
+    surface_index: int | None = None,
+    smooth_extrema: float = 0.0,
+    smooth_penalty: float = 0.0,
     qi_options: QuasiIsodynamicOptions | None = None,
 ) -> QIObjectiveTerm:
     """Mirror-ratio upper-bound objective evaluated from Boozer ``|B|`` modes."""
 
     def _evaluate(ctx: StageContext, _state, field: dict):
-        mirror_booz = _slice_boozer_surfaces(field["booz"], int(surface_index))
+        mirror_booz = field["booz"] if surface_index is None else _slice_boozer_surfaces(field["booz"], int(surface_index))
         mirror = mirror_ratio_penalty_from_boozer_output(
             mirror_booz,
             nfp=int(ctx.static.cfg.nfp),
             threshold=float(threshold),
             ntheta=int(ntheta),
             nphi=int(nphi),
+            smooth_extrema=float(smooth_extrema),
+            smooth_penalty=float(smooth_penalty),
         )
         return (
             jnp.asarray(mirror["residuals1d"], dtype=jnp.float64) * float(weight),
