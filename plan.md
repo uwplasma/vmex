@@ -153,6 +153,11 @@ Acceptance:
 ## Milestone 3: Differentiation Architecture
 
 - [ ] Lock AD-vs-finite-difference derivative gates for QA/QH/QP/QI max_mode=1.
+- [x] Add a required-tier accepted-point residual derivative gate for the exact
+      optimizer path. The circular-tokamak max_mode=1 two-parameter boundary
+      test compares the discrete-adjoint Jacobian against central finite
+      differences of the accepted residual and keeps the existing dense
+      Jacobian/state-tangent/scalar-cotangent checks tied together.
 - [ ] Revisit the residual-root implicit layer: reduced state packing, boundary
       control embedding, lambda gauge/branch conditions, and custom VJP/JVP.
 - [ ] Reduce accepted-point replay/Jacobian count in optimization without changing
@@ -257,6 +262,11 @@ and preconditioner-fusion push:
 - Exact accepted-point history/output correctness: 93%. Best-exact selection is
   implemented and tested; remaining risk is rare exact-state unavailability on
   failed replay paths.
+- Differentiation architecture: 74%. Dense exact Jacobians, scalar reverse
+  gradients, state tangents, and now an accepted-residual AD-vs-finite-difference
+  gate are covered on small required-tier cases. Full QA/QH/QP/QI max_mode=1
+  objective derivative gates and matrix-free/scalar-adjoint production paths
+  remain open.
 - Seed-robust QI: 85%. The tier-2 and tier-3 probes are bounded and monotone,
   constrained terms run end-to-end, and manifests now expose QI/engineering
   diagnostic deltas from final artifacts, including scalar-improved but
@@ -282,7 +292,7 @@ and preconditioner-fusion push:
   pushed baseline; final seed-robust QI and GPU-production artifacts remain
   open.
 
-Overall average across these active lanes: about 91%. This crosses the requested
+Overall average across these active lanes: about 92%. This crosses the requested
 90% threshold because the remaining work is now concentrated in known
 production-quality gaps rather than broad missing infrastructure: robust QI
 from diverse seeds, larger-mode GPU replay, and full fixed/free/LASYM/finite-beta
@@ -822,3 +832,8 @@ Defer beyond the current cycle:
   update parity with the unfused path. Verified with
   `pytest -q tests/test_solve_hotpaths.py tests/test_tcon_precondn_diag.py`
   (`15 passed`).
+- 2026-05-12: Added the first required-tier accepted-point AD-vs-finite-
+  difference derivative gate for the exact optimizer. The small circular
+  tokamak max_mode=1 boundary test compares the dense discrete-adjoint Jacobian
+  against central finite differences of `residual_fun`; the focused derivative
+  trio passed in `73.74 s`.
