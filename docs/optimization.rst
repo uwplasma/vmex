@@ -285,11 +285,12 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
        save_stage_wouts=SAVE_STAGE_WOUTS,
    )
 
-   stage_records = result.stage_records
-   _initial_mode, initial_optimizer, initial_params0, initial_result = stage_records[0]
+   initial_optimizer = result.initial_optimizer
    final_optimizer = result.final_optimizer
    final_result = result.final_result
-   history = final_result["_history_dump"]
+   history = result.history
+   objective_history = result.objective_history
+   timing = result.timing_summary
    saved_paths = {
        "initial_input": OUTPUT_DIR / "input.initial",
        "final_input": OUTPUT_DIR / "input.final",
@@ -297,23 +298,25 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
        "final_wout": OUTPUT_DIR / "wout_final.nc",
        "history": OUTPUT_DIR / "history.json",
    }
-   initial_optimizer.save_input(saved_paths["initial_input"], initial_params0)
+   initial_optimizer.save_input(saved_paths["initial_input"], result.initial_params)
    initial_optimizer.save_wout(
        saved_paths["initial_wout"],
-       initial_params0,
-       state=initial_result.get("_state_initial"),
+       result.initial_params,
+       state=result.initial_state,
    )
-   final_optimizer.save_input(saved_paths["final_input"], final_result["x"])
+   final_optimizer.save_input(saved_paths["final_input"], result.final_params)
    final_optimizer.save_wout(
        saved_paths["final_wout"],
-       final_result["x"],
-       state=final_result.get("_state_final"),
+       result.final_params,
+       state=result.final_state,
    )
    final_optimizer.save_history(saved_paths["history"], final_result)
 
    print(f"Final aspect ratio:    {history['aspect_final']:.6g}")
    print(f"Final mean iota:       {history['iota_final']:.6g}")
    print(f"Final field objective: {history['qs_final']:.6e}")
+   print(f"Wall time:             {timing['total_wall_time_s']:.2f} s")
+   print(f"Recent objectives:     {objective_history[-3:]}")
 
    wout_final = vj.load_wout(saved_paths["final_wout"])
    theta, zeta, b_lcfs = vj.vmecplot2_bmag_grid(
@@ -344,6 +347,9 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
    print(plot_paths)
 
 Objective callbacks receive ``(ctx, state)`` and may return a scalar or vector.
+The raw continuation records remain available as ``result.stage_records``;
+``result.stage_histories`` and ``result.stage_timing_summaries`` expose the
+per-stage history/timing data without hiding any saving or plotting decisions.
 The tuple weight follows SIMSOPT semantics: vmec_jax minimizes
 ``sqrt(weight) * (J - target)``.  Problem-specific targets and QI sampling
 options live on the objective objects/problem, while ``least_squares_solve``

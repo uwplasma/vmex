@@ -212,6 +212,22 @@ Accepted-point Jacobian callback cost at realistic new optimizer points:
      --perturb-scale 1e-4 --inner-max-iter 80 --trial-max-iter 40 \
      --solver-device gpu --vmec-timing --json-out /tmp/qh_m2_gpu_jacobian.json
 
+Compare the JSON reports before launching a full sweep or a long GPU run:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python tools/diagnostics/compare_profile_reports.py \
+     /tmp/qh_m2_cpu_jacobian.json /tmp/qh_m2_gpu_jacobian.json \
+     --label cpu --label gpu \
+     --json-out /tmp/qh_m2_cpu_gpu_comparison.json
+
+The comparison table reports ratios for total runtime, compile/replay/cache
+time when those timings exist, callback count, observed RSS peak, solve count,
+accepted-point replay count, and cache growth.  The JSON output is stable enough
+for CI dashboards or follow-up scripts that track whether a GPU regression is
+coming from tape replay, extra callbacks, cache retention, or a cold
+compile-like phase.
+
 Use ``--trace-outdir`` for TensorBoard/XProf traces and
 ``--device-memory-profile-out`` for JAX device-memory snapshots when GPU memory
 or launch overhead is the bottleneck.  Use ``--no-auto-cli-policy`` only when

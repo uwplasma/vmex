@@ -41,10 +41,16 @@ def test_fixed_boundary_qs_examples_are_standalone_workflows() -> None:
         assert "qi_options=" not in text
         assert "plot=" not in text
         assert "print_optimization_outputs" not in text
-        assert "stage_records = result.stage_records" in text
-        assert "_initial_mode, initial_optimizer, initial_params0, initial_result = stage_records[0]" in text
+        assert "initial_optimizer = result.initial_optimizer" in text
         assert "final_optimizer = result.final_optimizer" in text
         assert "result.final_result" in text
+        assert "history = result.history" in text
+        assert "objective_history = result.objective_history" in text
+        assert "timing = result.timing_summary" in text
+        assert "result.initial_params" in text
+        assert "result.initial_state" in text
+        assert "result.final_params" in text
+        assert "result.final_state" in text
         assert "saved_paths = {" in text
         assert "initial_optimizer.save_input(" in text
         assert "initial_optimizer.save_wout(" in text
@@ -79,10 +85,16 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "qi_options=" not in text
     assert "plot=" not in text
     assert "print_optimization_outputs" not in text
-    assert "stage_records = result.stage_records" in text
-    assert "_initial_mode, initial_optimizer, initial_params0, initial_result = stage_records[0]" in text
+    assert "initial_optimizer = result.initial_optimizer" in text
     assert "final_optimizer = result.final_optimizer" in text
     assert "result.final_result" in text
+    assert "history = result.history" in text
+    assert "objective_history = result.objective_history" in text
+    assert "timing = result.timing_summary" in text
+    assert "result.initial_params" in text
+    assert "result.initial_state" in text
+    assert "result.final_params" in text
+    assert "result.final_state" in text
     assert "saved_paths = {" in text
     assert "initial_optimizer.save_input(" in text
     assert "initial_optimizer.save_wout(" in text
@@ -210,6 +222,77 @@ def test_custom_objective_term_residual_shape() -> None:
 
     assert residual.shape == (2,)
     assert [float(x) for x in residual] == [0.0, 4.0]
+
+
+def test_fixed_boundary_result_exposes_teaching_accessors() -> None:
+    from vmec_jax.optimization_workflow import FixedBoundaryOptimizationResult
+
+    initial_state = object()
+    final_state = object()
+    initial_record = (
+        1,
+        "initial_optimizer",
+        np.asarray([0.0, 1.0]),
+        {
+            "_state_initial": initial_state,
+            "_history_dump": {"history": [{"objective": 4.0}], "total_wall_time_s": 0.5},
+        },
+    )
+    final_record = (
+        2,
+        "final_optimizer",
+        np.asarray([2.0, 3.0]),
+        {
+            "x": np.asarray([3.0, 4.0]),
+            "nfev": 7,
+            "njev": 3,
+            "_state_final": final_state,
+            "_history_dump": {
+                "history": [{"objective": 2.0}, {"objective": 0.25}],
+                "total_wall_time_s": 12.5,
+                "nfev": 7,
+                "njev": 3,
+            },
+        },
+    )
+
+    result = FixedBoundaryOptimizationResult(
+        stage_records=[initial_record, final_record],
+        final_optimizer="final_optimizer",
+        final_result=final_record[3],
+        stage_modes=[1, 2],
+    )
+
+    assert result.initial_stage is initial_record
+    assert result.final_stage is final_record
+    assert result.initial_optimizer == "initial_optimizer"
+    assert result.initial_result is initial_record[3]
+    assert result.initial_state is initial_state
+    assert result.final_state is final_state
+    assert result.history is final_record[3]["_history_dump"]
+    np.testing.assert_allclose(result.initial_params, [0.0, 1.0])
+    np.testing.assert_allclose(result.objective_history, [2.0, 0.25])
+    np.testing.assert_allclose(result.final_params, [3.0, 4.0])
+    assert result.stage_histories == (
+        {"history": [{"objective": 4.0}], "total_wall_time_s": 0.5},
+        {
+            "history": [{"objective": 2.0}, {"objective": 0.25}],
+            "total_wall_time_s": 12.5,
+            "nfev": 7,
+            "njev": 3,
+        },
+    )
+    assert result.stage_timing_summaries == (
+        {"total_wall_time_s": 0.5, "nfev": None, "njev": None, "nit": None, "mode": 1},
+        {"total_wall_time_s": 12.5, "nfev": 7, "njev": 3, "nit": None, "mode": 2},
+    )
+    assert result.timing_summary == {
+        "total_wall_time_s": 12.5,
+        "nfev": 7,
+        "njev": 3,
+        "nit": None,
+        "stages": result.stage_timing_summaries,
+    }
 
 
 def test_least_squares_problem_uses_simsopt_weight_semantics() -> None:
@@ -765,6 +848,130 @@ def test_jxbforce_profile_tuple_stays_regular_state_objective() -> None:
         "redl_bootstrap_mismatch",
     ]
     assert len(problem.qi_objective_terms) == 0
+
+
+def test_finite_beta_objective_terms_expose_residuals_totals_and_metadata(monkeypatch) -> None:
+    from vmec_jax._compat import jnp
+    import vmec_jax.optimization_workflow as workflow
+    from vmec_jax.optimization_workflow import (
+        BetaTotal,
+        DMerc,
+        JDotB,
+        JVector,
+        LeastSquaresProblem,
+        MagneticWell,
+        RedlBootstrapMismatch,
+        ToroidalCurrent,
+        ToroidalCurrentGradient,
+        VolavgB,
+        residuals_from_objectives,
+    )
+
+    def fake_scalars_from_state(*, state, **_kwargs):
+        x = jnp.asarray(state, dtype=jnp.float64)
+        return {
+            "volavgB": 2.0 + 0.2 * x,
+            "betatotal": 0.04 + 0.01 * x,
+            "vp": jnp.asarray([0.0, 1.2 + 0.01 * x, 1.0, 0.9], dtype=jnp.float64),
+        }
+
+    def fake_mercier_terms_from_state(*, state, include_channels=False, **_kwargs):
+        x = jnp.asarray(state, dtype=jnp.float64)
+        terms = {
+            "DMerc": jnp.asarray([0.0, -0.20 + 0.01 * x, 0.10 + 0.02 * x, 0.0], dtype=jnp.float64),
+            "jdotb": jnp.asarray([0.0, 10.0 + x, 20.0 + 2.0 * x, 0.0], dtype=jnp.float64),
+            "torcur": jnp.asarray([0.0, 3.0 + 0.3 * x, 5.0 + 0.5 * x, 0.0], dtype=jnp.float64),
+            "ip": jnp.asarray([0.0, 7.0 + 0.7 * x, 11.0 + 1.1 * x, 0.0], dtype=jnp.float64),
+        }
+        if include_channels:
+            terms.update(
+                {
+                    "itheta": x * jnp.ones((4, 2, 3), dtype=jnp.float64),
+                    "izeta": 2.0 * x * jnp.ones((4, 2, 3), dtype=jnp.float64),
+                    "sqrtg": 4.0 * jnp.ones((4, 2, 3), dtype=jnp.float64),
+                }
+            )
+        return terms
+
+    def fake_redl_bootstrap_mismatch_from_state(**_kwargs):
+        residuals = jnp.asarray([0.50, -0.25], dtype=jnp.float64)
+        return {"residuals1d": residuals, "total": jnp.dot(residuals, residuals)}
+
+    monkeypatch.setattr(workflow, "finite_beta_scalars_from_state", fake_scalars_from_state)
+    monkeypatch.setattr(workflow, "mercier_terms_from_state", fake_mercier_terms_from_state)
+    monkeypatch.setattr(workflow, "redl_bootstrap_mismatch_from_state", fake_redl_bootstrap_mismatch_from_state)
+
+    objectives = [
+        VolavgB(),
+        BetaTotal(),
+        MagneticWell(minimum=0.50, softness=0.05),
+        DMerc(minimum=0.0, softness=0.05),
+        JDotB(surfaces=(0.25, 0.75), normalize=10.0),
+        ToroidalCurrent(surfaces=(0.25, 0.75), normalize=2.0),
+        ToroidalCurrentGradient(surfaces=(0.75,), normalize=10.0),
+        JVector(surfaces=(0.25,), normalize=2.0),
+        RedlBootstrapMismatch(
+            helicity_n=0,
+            ne_coeffs=[3.0e20, 0.0, -2.5e20],
+            Te_coeffs=[8.0e3, -6.0e3],
+            surfaces=(0.25, 0.75),
+        ),
+    ]
+    targets = [
+        1.8,
+        0.04,
+        0.0,
+        0.0,
+        np.asarray([1.0, 2.0]),
+        np.asarray([1.5, 2.5]),
+        np.asarray([1.0]),
+        0.0,
+        0.0,
+    ]
+    objective_weights = [4.0, 9.0, 16.0, 25.0, 36.0, 49.0, 64.0, 81.0, 100.0]
+
+    problem = LeastSquaresProblem.from_tuples(
+        [(objective.J, target, weight) for objective, target, weight in zip(objectives, targets, objective_weights)]
+    )
+    ctx = SimpleNamespace(static=SimpleNamespace(s=np.asarray([0.0, 0.25, 0.75, 1.0])), indata=None, signgs=1)
+    state = jnp.asarray(1.0, dtype=jnp.float64)
+
+    assert not problem.is_qi
+    assert problem.metadata == {}
+    assert [term.name for term in problem.objective_terms] == [
+        "volavgB",
+        "betatotal",
+        "magnetic_well",
+        "DMerc",
+        "jdotb",
+        "torcur",
+        "torcur_prime",
+        "J_vector",
+        "redl_bootstrap_mismatch",
+    ]
+    np.testing.assert_allclose([term.weight for term in problem.objective_terms], np.sqrt(objective_weights))
+
+    expected_blocks = []
+    for term, objective, target, weight in zip(problem.objective_terms, objectives, targets, np.sqrt(objective_weights)):
+        raw = workflow._as_vector(objective.J(ctx, state))
+        target_arr = jnp.asarray(target, dtype=jnp.float64)
+        if int(target_arr.ndim) == 0:
+            target_arr = jnp.full_like(raw, target_arr)
+        expected = float(weight) * (raw - jnp.ravel(target_arr))
+        expected_blocks.append(expected)
+        np.testing.assert_allclose(np.asarray(term.residual(ctx, state)), np.asarray(expected), rtol=1e-12, atol=1e-12)
+
+    combined = residuals_from_objectives(problem.objective_terms, ctx)
+    np.testing.assert_allclose(
+        np.asarray(combined(state)),
+        np.asarray(jnp.concatenate(expected_blocks)),
+        rtol=1e-12,
+        atol=1e-12,
+    )
+    redl_term = problem.objective_terms[-1]
+    assert redl_term.total is not None
+    np.testing.assert_allclose(float(redl_term.total(ctx, state)), 100.0 * (0.50**2 + (-0.25) ** 2))
+    np.testing.assert_allclose(float(combined._qs_total_from_state(state)), float(redl_term.total(ctx, state)))
 
 
 def test_finite_beta_workflow_objectives_are_jax_differentiable(monkeypatch) -> None:

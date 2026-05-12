@@ -246,7 +246,8 @@ def _lanes() -> list[ValidationLane]:
                 "--prefine-manifest results/qi_seed_audit/prefine_manifest.json"
             ),
             acceptance=[
-                "Each executed plan reports completed or failed status.",
+                "Each executed plan reports completed, failed, or timed-out status with completed stage modes.",
+                "Manifest summary identifies best final objective, best improvement, objective-history regressions, and next action.",
                 "A family can only support robustness claims after final diagnostics and Boozer contour plots are audited.",
             ],
             artifact_paths=["results/qi_seed_audit/prefine_probes"],

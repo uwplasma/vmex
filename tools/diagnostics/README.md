@@ -29,6 +29,11 @@ Performance profiling:
 - `profile_exact_optimizer.py --callback jacobian --perturb-scale ...`
   measures accepted-point optimizer callback phases, optimizer/global cache
   growth, RSS growth, and JSON budget status for CPU/GPU production profiling.
+- `compare_profile_reports.py cpu.json gpu.json --label cpu --label gpu`
+  compares two or more profiler JSON reports without rerunning VMEC.  It emits
+  text or JSON ratios for total runtime, compile/replay/cache time when present,
+  callback count, observed RSS peak, solve count, accepted-point replay count,
+  and cache growth.
 
 Free-boundary manifest notes:
 
