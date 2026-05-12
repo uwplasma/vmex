@@ -221,7 +221,8 @@ guard.  Trial residuals may use a cheaper VMEC solve for memory/runtime
 reasons, but final outputs and accepted objective histories use the best exact
 accepted-point residual seen by the Jacobian path.  Any trial-accepted point
 that replays worse is counted in ``rejected_trial_exact_history_count`` rather
-than plotted as a monotone accepted step.
+than plotted as a monotone accepted step.  Non-finite exact residuals are
+discarded before they can become the selected final point.
 By default the audit uses ``--phimin-policy well-phase``: each seed is scored at
 both ``phimin=0`` and ``phimin=pi/nfp`` and the better QI well phase is used for
 ranking and prefine planning.  Use ``--phimin-policy fixed --phimin VALUE`` when

@@ -259,14 +259,17 @@ Acceptance:
 
 ## Progress Snapshot
 
-Updated 2026-05-12 after the QI diagnostic, physics-gate, finite-beta adapter,
-and preconditioner-fusion push:
+Updated 2026-05-12 after the continuation/exact-history hardening,
+LASYM-Boozer parity, and release-checklist push:
 
-- Continuation correctness: 98%. Source fix is implemented and covered by
-  synthetic repeated-stage tests plus a real boundary-projection stage test.
-- Exact accepted-point history/output correctness: 93%. Best-exact selection is
-  implemented and tested; remaining risk is rare exact-state unavailability on
-  failed replay paths.
+- Continuation correctness: 100%. Source fix is implemented and covered by
+  synthetic repeated-stage tests, a real boundary-projection stage test, and
+  direct/zero-continuation budget tests that lock the no-continuation policy to
+  a single target-mode stage.
+- Exact accepted-point history/output correctness: 97%. Best-exact selection is
+  implemented and tested; accepted histories remain monotone in exact residuals,
+  final saved inputs/wouts use the selected best exact state, and non-finite
+  exact residuals can no longer be recorded as the best accepted point.
 - Differentiation architecture: 74%. Dense exact Jacobians, scalar reverse
   gradients, state tangents, and now an accepted-residual AD-vs-finite-difference
   gate are covered on small required-tier cases. Full QA/QH/QP/QI max_mode=1
@@ -283,26 +286,29 @@ and preconditioner-fusion push:
   focused CPU-only regressions. Mode-2 GPU tape callbacks are modestly faster
   without regressing the local CPU mode-2 callback; larger-mode replay and
   dense residual-tangent projection remain open.
-- VMEC parity and physics gates: 93%. Required-tier bundled gates now cover
+- VMEC parity and physics gates: 96%. Required-tier bundled gates now cover
   `chipf`, stored `B`, aspect/geometry, Mercier/JXBFORCE profiles, and
   VMEC-to-Boozer input spectra, including asymmetric Boozer geometry-channel
-  propagation for `lasym=True`. Full fixed/free/LASYM/finite-beta
+  propagation for `lasym=True` plus exact LASYM lambda-channel parity into
+  Boozer input objects. Full fixed/free/LASYM/finite-beta
   converged-equilibrium parity is still open.
 - Refactor/API/examples: 90%. Examples are SIMSOPT-like and clearer, finite-beta
   examples expose structured stage/final summaries while preserving direct
   optimizer visibility and have focused adapter coverage; large
   solver/wout/free-boundary splits remain deferred behind parity gates.
-- Docs/release hygiene: 88%. Performance/discrete-adjoint/docs reflect the
-  current replay and finite-beta policies, and diagnostics docs cover detailed
-  preconditioner timing. Full Sphinx and GitHub Actions are green for the latest
-  pushed baseline; final seed-robust QI and GPU-production artifacts remain
-  open.
+- Docs/release hygiene: 95%. Performance/discrete-adjoint/docs reflect the
+  current replay and finite-beta policies, diagnostics docs cover detailed
+  preconditioner timing, and a command-level release checklist now ties local
+  gates, GitHub Actions, artifact hygiene, and optional research-grade checks
+  together. Full Sphinx and GitHub Actions are green for the latest pushed
+  baseline; final seed-robust QI and GPU-production artifacts remain open.
 
-Overall average across these active lanes: about 93%. This crosses the requested
-90% threshold because the remaining work is now concentrated in known
-production-quality gaps rather than broad missing infrastructure: robust QI
-from diverse seeds, larger-mode GPU replay, and full fixed/free/LASYM/finite-beta
-converged-equilibrium parity.
+Release-critical average across the lanes requested in this push
+(continuation, exact accepted-point output, VMEC parity/physics gates, and
+docs/release hygiene): about 97%. Broader roadmap average across all open lanes:
+about 90%, because differentiation architecture, seed-robust QI, and
+larger-mode GPU replay remain real research-grade work rather than release
+hygiene.
 
 Acceptance:
 

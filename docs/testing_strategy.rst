@@ -257,6 +257,16 @@ The current detailed lane list and next parity gates are in
 :doc:`optional_validation_plan`.
 
 
+Release Checklist
+-----------------
+
+Use :doc:`release_checklist` as the command-level gate before tagging.  The
+checklist keeps the release path tied to the same required lanes described
+here: continuation correctness, exact accepted-point history/output selection,
+VMEC residual parity, Boozer/LASYM input spectra, QI diagnostic metadata,
+warning-clean docs, CI status, and artifact hygiene.
+
+
 Coverage Plan to 95%
 --------------------
 
