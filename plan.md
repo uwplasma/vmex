@@ -95,6 +95,18 @@ acceptance criteria or evidence changes.
       These tests verify that later stages rebuild from the previous optimized
       input, restart with zero increments, and do not resurrect high-order seed
       modes that were intentionally projected out.
+- [x] Extend the bounded QI-prefine manifest/probe lane to include optional
+      mirror-ratio and elongation penalties, so seed audits can reject or repair
+      QI-looking seeds that have poor engineering geometry. A 2026-05-12 capped
+      QP/NFP2 mode-1 probe with QI, mirror, and elongation terms reduced the
+      field objective from `3.31` to `0.815` in two function evaluations and
+      completed with monotone accepted history.
+- [x] Run a tier-3 constrained seed probe comparing promoted QP/NFP2 and
+      rejected QA starts. Both histories were monotone, but neither is accepted
+      as robust QI evidence: the QP seed reduced the constrained scalar
+      objective while still failing mirror/elongation audits, and the QA seed
+      passed engineering constraints while remaining poor by smooth/legacy QI.
+      The next QI step is objective/diagnostic decomposition, not larger caps.
 
 Acceptance:
 
@@ -115,9 +127,16 @@ Acceptance:
       accessors with documented normalization.
 - [x] Add differentiable vector `J` and vector `B` objective accessors with
       documented normalization.
-- [ ] Add finite-beta stage-one objectives matching the finite-beta optimization
-      references: pressure/current profiles, beta, volavgB, iota, aspect,
-      Mercier, and quasisymmetry/omnigenity terms.
+- [x] Add differentiable finite-beta stage-one metric/objective coverage for
+      pressure/current-profile-adjacent terms, beta, volavgB, iota, aspect,
+      Mercier, Redl bootstrap-current mismatch, and quasisymmetry/omnigenity
+      residual wiring.  The finite-beta examples intentionally keep direct
+      `FixedBoundaryExactOptimizer` calls visible because their stage-local
+      pressure/current closures do not fit the public objective-tuple wrapper
+      cleanly yet.
+- [ ] Validate the finite-beta stage-one examples against converged
+      reference/SIMSOPT finite-beta equilibria, including publication-quality
+      Redl Boozer-geometry comparisons.
 - [ ] Add physics gates for force residuals, profiles, fluxes, magnetic-field
       reconstruction, Mercier, and Boozer transforms.
 
@@ -174,6 +193,12 @@ Acceptance:
       rebuilding an initial-state VJP each callback. A local QA `max_mode=1`
       CPU smoke improved the same-branch warm gradient callback from about
       `0.279 s` to `0.188 s`; dense least-squares Jacobian cost is unchanged.
+- [x] Add detailed accepted-point preconditioner timing and re-run CPU/GPU
+      exact-optimizer profiles. On `office`, QH mode-1 cold GPU tape callback
+      was `9.29 s` versus `16.97 s` on the same host CPU stack, but QH mode-2
+      two-point GPU tape callbacks were still `16.48 s` versus `10.34 s` on the
+      local CPU. The remaining GPU bottleneck is tape-build preconditioner
+      dispatch plus dense residual-tangent projection, not VMEC convergence.
 
 Acceptance:
 
@@ -200,32 +225,40 @@ Acceptance:
 
 ## Progress Snapshot
 
-Updated 2026-05-12 after the continuation-correctness and validation push:
+Updated 2026-05-12 after the continuation, exact-history, and scalar-gradient
+reuse push:
 
 - Continuation correctness: 98%. Source fix is implemented and covered by
   synthetic repeated-stage tests plus a real boundary-projection stage test.
 - Exact accepted-point history/output correctness: 93%. Best-exact selection is
   implemented and tested; remaining risk is rare exact-state unavailability on
   failed replay paths.
-- Seed-robust QI: 75%. The tier-2 bounded QP/NFP2 seed probe improved the QI
-  prefine objective by 42% with monotone history; final mirror/elongation still
-  fail, and QA remained a poor QI seed.
-- CPU/GPU performance: 70%. Backend-adaptive replay bucketing removed the
-  largest GPU replay regression for small/medium exact optimizations, and the
-  scalar-gradient path now reuses cached initial tangents; GPU tape build and
-  dense-Jacobian residual tangent projection remain open.
-- VMEC parity and physics gates: 82%. Required-tier wout `chipf` and stored
-  `B`-field parity are now broader; full fixed/free/LASYM/finite-beta
+- Seed-robust QI: 78%. The tier-2 bounded QP/NFP2 seed probe improved the QI
+  prefine objective by 42% with monotone history, and the constrained-prefine
+  path now runs QI+mirror+elongation terms end-to-end. A tier-3 constrained
+  audit showed scalar improvement is still not enough to promote a seed; robust
+  multi-seed evidence and polished Boozer contour review remain open.
+- CPU/GPU performance: 73%. Backend-adaptive replay bucketing removed the
+  largest GPU replay regression for small/medium exact optimizations, the
+  scalar-gradient path now reuses cached initial tangents, and detailed
+  preconditioner subphase timing is available for the next replay/tape-build
+  pass. GPU dense-Jacobian residual tangent projection remains open.
+- VMEC parity and physics gates: 86%. Required-tier wout `chipf`, stored
+  `B`-field, geometry/aspect, Mercier decomposition, and JXBFORCE endpoint
+  parity gates now use bundled fixtures; full fixed/free/LASYM/finite-beta
   converged-equilibrium parity is still open.
-- Refactor/API/examples: 82%. Examples are SIMSOPT-like and clearer; large
-  solver/wout/free-boundary module splits remain deferred behind parity gates.
-- Docs/release hygiene: 78%. Performance/discrete-adjoint docs reflect the
-  current replay policy; detailed seed-robust QI and GPU-production guidance
-  still need final curated artifacts.
+- Refactor/API/examples: 83%. Examples are SIMSOPT-like and clearer, and the
+  finite-beta examples now explicitly document why they use direct
+  `FixedBoundaryExactOptimizer`; large solver/wout/free-boundary module splits
+  remain deferred behind parity gates.
+- Docs/release hygiene: 82%. Performance/discrete-adjoint docs reflect the
+  current replay policy, finite-beta examples document their lower-level
+  workflow, and diagnostics docs cover detailed preconditioner timing; final
+  seed-robust QI and GPU-production artifacts remain open.
 
-Overall average across these active lanes: about 83%. The continuation lane is
-near done, but reaching a defensible 90% overall requires the remaining
-performance/QI/parity work, not just more unit tests.
+Overall average across these active lanes: about 85%. The continuation and
+exact-history lanes are near done, but reaching a defensible 90% overall still
+requires real QI robustness and performance progress, not just more tests.
 
 Acceptance:
 
@@ -256,7 +289,7 @@ Acceptance:
 ## Milestone 7: Tests And Coverage
 
 - [ ] Raise required CI coverage from the current fast gate toward 95% in staged
-      steps: 62%, 65%, 75%, 85%, 95%.
+      steps: 65%, 75%, 85%, 95%.
 - [ ] Add targeted tests before coverage-only tests: physics gates first, branch
       logic second, I/O/schema third.
 - [ ] Keep required CI under 10 minutes by using small fixtures and nightly heavy
@@ -310,11 +343,12 @@ Acceptance:
     and output locations via the prefine manifest. Full QI/QP/QH/QA/simple
     optimization rows and Boozer contour curation remain open.
 
-## Reassessment After 2026-05-11 Push
+## Reassessment After 2026-05-12 Push
 
 Realistic next targets for this development cycle:
 
-1. Raise required CI coverage from 63% toward 65% using fast, physics-relevant
+1. Keep the required CI coverage gate at 63% until GitHub has clear margin,
+   then raise toward 65% using fast, physics-relevant
    branch tests in `vmec_bcovar`, `vmec_realspace`, `finite_beta`, `wout`, and
    `optimization_workflow`.  Do not raise the CI floor again until GitHub's
    measured coverage has clear margin above the target.
