@@ -37,10 +37,12 @@ acceptance criteria or evidence changes.
 - Exact-history correctness is now protected against relaxed trial-solve drift:
   final ``input.final`` and ``wout_final.nc`` use the best exact accepted point
   when the last trial-accepted point replays worse.
-- Required CI coverage is 81.10% locally on the Python 3.11 CI-equivalent
-  required suite (`896 passed, 21 skipped, 85 deselected`, 9:46 with compact
-  coverage output), above the raised 80% gate but still below the long-term 95%
-  goal.
+- Required CI coverage is 85.37% locally on the Python 3.11 CI-equivalent
+  required suite (`991 passed, 20 skipped, 95 deselected`, 9:25 with compact
+  coverage output), above the raised 85% gate but still below the long-term 95%
+  goal.  CI now installs the plotting extra for fast-test jobs so the required
+  coverage gate exercises the README/docs plotting helpers instead of skipping
+  them.
 - Full non-VMEC2000 physics coverage with refreshed released assets reaches
   72.35% locally (`74 passed, 4 skipped`, 27:21). This is still short of the
   80% target and is too slow for per-commit required CI without splitting the
@@ -107,6 +109,11 @@ acceptance criteria or evidence changes.
       These tests verify that later stages rebuild from the previous optimized
       input, restart with zero increments, and do not resurrect high-order seed
       modes that were intentionally projected out.
+- [x] Fix the public QI repeated same-mode continuation policy so
+      `CONTINUATION_NFEV = 0` no longer collapses a repeated max-mode cleanup
+      schedule into a single direct stage. This protects the intended QI
+      cleanup workflow where repeated same-mode solves are used without
+      lower-mode continuation stages.
 - [x] Extend the bounded QI-prefine manifest/probe lane to include optional
       mirror-ratio and elongation penalties, so seed audits can reject or repair
       QI-looking seeds that have poor engineering geometry. A 2026-05-12 capped
@@ -292,13 +299,17 @@ Acceptance:
       `rmns`, `zmnc`, and `lmnc` alongside asymmetric magnetic sine channels,
       and the required tests verify both channel presence and propagation into
       `booz_xform_jax` on a bundled `lasym=True` reference.
+- [x] Expand optional reference-code gates beyond a single QH smoke: SIMSOPT
+      formula and state-derived QS residual checks now cover bundled QA and QH
+      fixtures, and VMEC2000 executable end-state validation now covers three
+      bounded converged fixed-boundary cases including a 3D QH input.
 
 ## Progress Snapshot
 
 Updated 2026-05-13 after the bundled profile/current wout parity gates, QI
 selection hardening, exact-Jacobian host-materialization cleanup,
-continuation/exact-history hardening, LASYM-Boozer parity, and release-checklist
-push:
+continuation/exact-history hardening, LASYM-Boozer parity, release-checklist
+push, 85% coverage-gate push, and optional SIMSOPT/VMEC2000 gate expansion:
 
 - Continuation correctness: 100%. Source fix is implemented and covered by
   synthetic repeated-stage tests, a real boundary-projection stage test, and
@@ -310,14 +321,16 @@ push:
   exact residuals can no longer be recorded as the best accepted point. SciPy
   failures after a finite exact point now return that best exact point with an
   explicit abnormal-termination record instead of losing the run.
-- Differentiation architecture: 87%. Dense exact Jacobians, scalar reverse
+- Differentiation architecture: 88%. Dense exact Jacobians, scalar reverse
   gradients, state tangents, accepted-residual AD-vs-finite-difference checks,
   solve-free QS residual JVP/VJP checks, QS objective routing JVP/VJP checks,
   QI shared-field objective JVP/VJP checks, optional Lineax solver seams, and
   fixed-boundary implicit validation/zero-unconverged VJP behavior are covered
-  on small required-tier cases. Full QA/QH/QP/QI max_mode=1 objective derivative
-  gates and matrix-free/scalar-adjoint production paths remain open.
-- Seed-robust QI: 92%. The tier-2 and tier-3 probes are bounded and monotone,
+  on small required-tier cases. Additional lambda-gradient-descent branch gates
+  now cover descent, line-search failure, gauge enforcement, and solver-control
+  validation. Full QA/QH/QP/QI max_mode=1 objective derivative gates and
+  matrix-free/scalar-adjoint production paths remain open.
+- Seed-robust QI: 93%. The tier-2 and tier-3 probes are bounded and monotone,
   constrained terms run end-to-end, and manifests now expose QI/engineering
   diagnostic deltas from final artifacts, including scalar-improved but
   QI-worsened cases. A new bundled near-axis seed, `input.QI_stel_seed_3127`,
@@ -325,23 +338,28 @@ push:
   smooth/legacy QI below `1e-3` while satisfying `abs(mean_iota) >= 0.41` and
   aspect ratio near 5. QI render selection now marks raw-fallback legacy values
   as non-promotable, so panels cannot silently select stale raw-QI evidence.
-  The remaining open cleanup is reducing mirror ratio without destroying the
-  low-QI, high-iota branch.
-- CPU/GPU performance: 84%. Backend-adaptive replay bucketing, scalar-gradient
+  The public QI script now runs the intended repeated same-mode continuation
+  cleanup by default. The remaining open cleanup is reducing mirror ratio
+  without destroying the low-QI, high-iota branch.
+- CPU/GPU performance: 85%. Backend-adaptive replay bucketing, scalar-gradient
   tangent reuse, detailed timing, and GPU-only preconditioner-output fusion are
   in place. Hot-path algebra and CPU/GPU fusion gating are now covered by
   focused CPU-only regressions. The exact-Jacobian residual tangent helper now
   returns the transposed Jacobian on device and blocks before host
-  materialization, removing a hidden GPU host transpose/transfer cost. Larger
-  mode replay and dense residual-tangent projection remain open.
+  materialization, removing a hidden GPU host transpose/transfer cost. The
+  CPU/GPU profiling wrapper now exposes optimizer method, trust-region solver,
+  dynamic replay mode, and child stdout/stderr logs for production GPU matrix
+  diagnosis. Larger mode replay and dense residual-tangent projection remain
+  open.
 - VMEC parity and physics gates: 98%. Required-tier bundled gates now cover
   `chipf`, stored `B`, input flux/profile propagation, finite-beta
   `pres/presf`, VMEC `iotas -> iotaf` smoothing, surface-averaged current
   finite differences, aspect/geometry, Mercier/JXBFORCE profiles, and
   VMEC-to-Boozer input spectra, including asymmetric Boozer geometry-channel
   propagation for `lasym=True` plus exact LASYM lambda-channel parity into
-  Boozer input objects. The manual full non-VMEC2000 physics tier was refreshed
-  locally against the released asset bundle and passed. Full fixed/free/LASYM/finite-beta
+  Boozer input objects. Optional executable-backed converged-wout parity now
+  covers three bounded cases including 3D QH, and optional SIMSOPT QS parity now
+  covers QA and QH formula/state diagnostics. Full fixed/free/LASYM/finite-beta
   converged-equilibrium parity is still open.
 - Refactor/API/examples: 94%. Examples are SIMSOPT-like and clearer, finite-beta
   examples expose structured stage/final summaries while preserving direct
@@ -353,20 +371,21 @@ push:
   implicit optional solvers, wout beta/aspect helpers, and driver serialization
   utilities. Large solver/wout/free-boundary splits remain deferred behind
   parity gates.
-- Docs/release hygiene: 97%. Performance/discrete-adjoint/docs reflect the
+- Docs/release hygiene: 98%. Performance/discrete-adjoint/docs reflect the
   current replay and finite-beta policies, diagnostics docs cover detailed
   preconditioner timing, and a command-level release checklist now ties local
   gates, tools/validation lint/compile checks, GitHub Actions, artifact hygiene,
   and optional research-grade checks together. Full local Sphinx and the
-  required coverage command are green; released reference assets are ignored so
-  local full-tier refreshes cannot accidentally bloat commits. Final
+  required 85% coverage command are green; released reference assets are ignored
+  so local full-tier refreshes cannot accidentally bloat commits. Final
   seed-robust QI and GPU-production artifacts remain open.
 
 Release-critical average across the lanes requested in this push
 (continuation, exact accepted-point output, VMEC parity/physics gates, and
 docs/release hygiene): about 99%. Broader roadmap average across all open lanes:
-about 95%, because code coverage, seed-robust QI mirror cleanup, and larger-mode
-GPU replay remain real research-grade work rather than release hygiene.
+about 96%, because the 85% coverage gate is now locked locally and the remaining
+open work is seed-robust QI mirror cleanup, 90-95% coverage, and larger-mode GPU
+replay.
 
 Acceptance:
 
@@ -399,8 +418,10 @@ Acceptance:
 - [x] Raise required CI coverage to the first 80% target with fast tests that
       exercise solver, driver, optimization, wout, free-boundary,
       quasisymmetry, parity, and constraint branches.
-- [ ] Continue raising required CI coverage toward 95% in staged steps: 85%,
-      90%, then 95%, after additional source refactors and physics gates reduce
+- [x] Raise required CI coverage to 85% with meaningful plotting, solver,
+      optimization, validation-plan, and optional-reference-gate coverage.
+- [ ] Continue raising required CI coverage toward 95% in staged steps: 90%,
+      then 95%, after additional source refactors and physics gates reduce
       runtime pressure.
 - [ ] Add targeted tests before coverage-only tests: physics gates first, branch
       logic second, I/O/schema third.
