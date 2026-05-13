@@ -912,5 +912,9 @@ Defer beyond the current cycle:
   opt-in weighted branch-shuffle path. Offline component ranking now favors the
   reference NFP2 QI candidate over the recent high-mirror candidates, although
   the total branch5 ranking still does not justify enabling the term by
-  default. Keep using the branch-heavy mirror-aware path as the promoted QI
-  example while retaining this term for controlled homotopy/ranking studies.
+  default. A short post-commit NFP2 ESS probe with
+  `weighted_shuffle_profile_weight=1` and `max_nfev=6` reached smooth/legacy QI
+  `4.9e-3`/`4.0e-3`, mirror `0.324`, aspect `5.03`, and `mean_iota=-0.44` in
+  `105 s`, so it remains diagnostic/homotopy-only. Keep using the branch-heavy
+  mirror-aware path as the promoted QI example while retaining this term for
+  controlled homotopy/ranking studies.
