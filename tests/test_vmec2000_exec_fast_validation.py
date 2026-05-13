@@ -13,6 +13,51 @@ from vmec_jax.vmec2000_exec import _patch_indata, find_vmec2000_exec, run_xvmec2
 
 pytestmark = pytest.mark.vmec2000
 
+VMEC2000_STAGE_TRACE_SINGLE_NS = 13
+VMEC2000_STAGE_TRACE_MAX_ITER = 2
+VMEC2000_STAGE_TRACE_TIMEOUT_S = 60.0
+VMEC2000_STAGE_TRACE_CASES = (
+    ("input.circular_tokamak", "1e-3"),
+    ("input.basic_non_stellsym_pressure", "2e-3"),
+)
+
+VMEC2000_CONVERGED_TIMEOUT_S = 120.0
+VMEC2000_CONVERGED_WOUT_CASES = (
+    (
+        "nfp4_QH_warm_start",
+        "input.nfp4_QH_warm_start",
+        {
+            "NITER": "700",
+            "NS_ARRAY": "19",
+            "NITER_ARRAY": "700",
+            "FTOL_ARRAY": "1e-9",
+            "NSTEP": "50",
+        },
+    ),
+    (
+        "circular_tokamak",
+        "input.circular_tokamak",
+        {
+            "NITER": "300",
+            "NS_ARRAY": "13",
+            "NITER_ARRAY": "300",
+            "FTOL_ARRAY": "1e-10",
+            "NSTEP": "50",
+        },
+    ),
+    (
+        "shaped_tokamak_pressure",
+        "input.shaped_tokamak_pressure",
+        {
+            "NITER": "400",
+            "NS_ARRAY": "13",
+            "NITER_ARRAY": "400",
+            "FTOL_ARRAY": "1e-10",
+            "NSTEP": "50",
+        },
+    ),
+)
+
 
 def _vmec2000_exec_or_skip() -> Path:
     if os.environ.get("VMEC2000_INTEGRATION") != "1":
@@ -77,12 +122,9 @@ def test_fast_vmec2000_stage_trace_validation_cases():
     exe = _vmec2000_exec_or_skip()
     repo_root = Path(__file__).resolve().parents[1]
     script = repo_root / "tools" / "diagnostics" / "vmec2000_exec_stage_trace_compare.py"
-    cases = [
-        (repo_root / "examples" / "data" / "input.circular_tokamak", "1e-3"),
-        (repo_root / "examples" / "data" / "input.basic_non_stellsym_pressure", "2e-3"),
-    ]
 
-    for input_path, rtol in cases:
+    for input_name, rtol in VMEC2000_STAGE_TRACE_CASES:
+        input_path = repo_root / "examples" / "data" / input_name
         if not input_path.exists():
             pytest.skip(f"Missing bundled input: {input_path}")
         cmd = [
@@ -93,11 +135,11 @@ def test_fast_vmec2000_stage_trace_validation_cases():
             "--vmec2000",
             str(exe),
             "--single-ns",
-            "13",
+            str(VMEC2000_STAGE_TRACE_SINGLE_NS),
             "--max-iter",
-            "2",
+            str(VMEC2000_STAGE_TRACE_MAX_ITER),
             "--vmec-timeout",
-            "60",
+            f"{VMEC2000_STAGE_TRACE_TIMEOUT_S:.17g}",
             "--dump-level",
             "lite",
             "--rtol",
@@ -110,41 +152,7 @@ def test_fast_vmec2000_stage_trace_validation_cases():
 
 @pytest.mark.parametrize(
     "case,input_name,updates",
-    [
-        (
-            "nfp4_QH_warm_start",
-            "input.nfp4_QH_warm_start",
-            {
-                "NITER": "700",
-                "NS_ARRAY": "19",
-                "NITER_ARRAY": "700",
-                "FTOL_ARRAY": "1e-9",
-                "NSTEP": "50",
-            },
-        ),
-        (
-            "circular_tokamak",
-            "input.circular_tokamak",
-            {
-                "NITER": "300",
-                "NS_ARRAY": "13",
-                "NITER_ARRAY": "300",
-                "FTOL_ARRAY": "1e-10",
-                "NSTEP": "50",
-            },
-        ),
-        (
-            "shaped_tokamak_pressure",
-            "input.shaped_tokamak_pressure",
-            {
-                "NITER": "400",
-                "NS_ARRAY": "13",
-                "NITER_ARRAY": "400",
-                "FTOL_ARRAY": "1e-10",
-                "NSTEP": "50",
-            },
-        ),
-    ],
+    VMEC2000_CONVERGED_WOUT_CASES,
 )
 def test_vmec2000_converged_wout_diagnostics_validation(
     case: str,
@@ -177,7 +185,7 @@ def test_vmec2000_converged_wout_diagnostics_validation(
         patched_input,
         exec_path=exe,
         workdir=tmp_path / "vmec2000" / case,
-        timeout_s=120.0,
+        timeout_s=VMEC2000_CONVERGED_TIMEOUT_S,
         keep_workdir=True,
     )
     wout_vmec_path = vmec.workdir / f"wout_{case}.nc"
