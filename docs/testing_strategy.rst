@@ -12,9 +12,9 @@ Target State
 
 - Required CI wall time: under ten minutes for the required test, docs, and
   build jobs on GitHub-hosted CPU runners.
-- Current ``main`` local CI-equivalent coverage baseline: clean at
-  ``d5a1adf`` on 2026-05-13 with ``623 passed, 21 skipped,
-  85 deselected``, ``67.46%`` coverage, and ``8:37`` runtime.
+- Current local CI-equivalent coverage baseline: clean on 2026-05-13 with
+  ``643 passed, 21 skipped, 85 deselected``, ``66.98%`` coverage, and ``7:50``
+  runtime.
 - Long-term required coverage: 95% line coverage for ``vmec_jax`` package
   code.  The current Python 3.11 required coverage gate is ``63%``.
 - Required local command: ``pytest -q -m "not full and not vmec2000"`` remains
@@ -50,9 +50,8 @@ the recommended local escalation path.
        VMEC2000 trace parser against bundled fixtures.
    * - Coverage gate
      - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000" --cov=vmec_jax --cov-report=xml --cov-report=term-missing:skip-covered --cov-fail-under=63``
-     - Python 3.11 required CI coverage job.  The latest local equivalent on
-       ``d5a1adf`` reported ``67.46%`` coverage while the enforced gate stayed
-       at ``63%``.
+     - Python 3.11 required CI coverage job.  The latest local equivalent
+       reported ``66.98%`` coverage while the enforced gate stayed at ``63%``.
    * - Optimization workflow smoke
      - ``pytest -q tests/test_optimization_examples.py tests/test_qs_ess_render_smoke.py``
      - After changing objective tuple construction, examples, or sweep
@@ -295,7 +294,7 @@ tests execute long workflows incidentally.
    artifacts.
 5. Raise ``--cov-fail-under`` in stages after the corresponding tests are
    merged.  The current required fast-suite gate is ``63%``; the latest local
-   baseline is ``67.46%``.  The next planned ratchets are 70%, 80%, 90%, then
+   baseline is ``66.98%``.  The next planned ratchets are 70%, 80%, 90%, then
    95%.
 
 

@@ -2217,21 +2217,25 @@ class FixedBoundaryExactOptimizer:
         if helper_cache is None:
 
             @jax.jit
-            def _residual_tangent_columns(packed_state, packed_tangents):
+            def _residual_tangent_jacobian(packed_state, packed_tangents):
                 residuals, residual_linear = jax.linearize(_residuals_from_packed, packed_state)
-                return residuals, jax.vmap(residual_linear)(packed_tangents)
+                # Keep the residual Jacobian transpose on device. Materializing
+                # columns on the host and transposing there is especially costly
+                # for GPU exact callbacks.
+                return residuals, jax.vmap(residual_linear)(packed_tangents).T
 
             helper_cache = {
-                "residual_tangent_columns": _residual_tangent_columns,
+                "residual_tangent_jacobian": _residual_tangent_jacobian,
             }
             self._discrete_jacobian_helper_cache[helper_key] = helper_cache
 
         t_res = time.perf_counter()
-        residuals, columns = helper_cache["residual_tangent_columns"](packed_final, final_tangents)
+        residuals, jac = helper_cache["residual_tangent_jacobian"](packed_final, final_tangents)
+        residuals, jac = jax.block_until_ready((residuals, jac))
         self._last_jacobian_residual = np.asarray(residuals, dtype=float)
         self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
         self._profile_add("jacobian_residual_tangents", time.perf_counter() - t_res)
-        out = np.asarray(columns, dtype=float).T
+        out = np.asarray(jac, dtype=float)
         self._profile_add("jacobian_total", time.perf_counter() - t_total)
         return out
 

@@ -14,10 +14,10 @@ Run these checks before pushing a release-candidate commit:
 .. code-block:: bash
 
    git status --short --branch
-   ruff check vmec_jax tests examples
-   python -m compileall -q vmec_jax examples tests
+   ruff check vmec_jax tests examples tools validation
+   python -m compileall -q vmec_jax examples tests tools validation
    pytest -q tests/test_optimization_helpers.py tests/test_continuation_exact_history.py
-   pytest -q tests/test_residue_getfsq_parity.py tests/test_vmec2000_exec_threed1.py
+   pytest -q tests/test_residue_getfsq_parity.py tests/test_wout_profiles_currents_bundled_parity.py tests/test_vmec2000_exec_threed1.py
    pytest -q tests/test_booz_input.py tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_qi_objective_component_report.py
    JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000" --cov=vmec_jax --cov-report=xml --cov-report=term-missing:skip-covered --cov-fail-under=63
    python -m sphinx -W -b html docs docs/_build/html_release
@@ -26,8 +26,8 @@ These tests cover the required local lanes: continuation semantics, exact
 accepted-point history/output selection, no-executable VMEC residual parity,
 Boozer input spectra including ``lasym=True`` channels, QI diagnostic metadata,
 the required Python 3.11 coverage gate, and warning-clean documentation.  The
-current clean ``main`` local CI-equivalent coverage baseline at ``d5a1adf`` is
-``623 passed, 21 skipped, 85 deselected`` with ``67.46%`` coverage in ``8:37``;
+latest local CI-equivalent coverage baseline on 2026-05-13 is
+``643 passed, 21 skipped, 85 deselected`` with ``66.98%`` coverage in ``7:50``;
 the enforced gate remains ``63%`` until the next planned ratchet.
 
 Required GitHub Actions gate

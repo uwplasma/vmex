@@ -316,6 +316,52 @@ class QuasiIsodynamicOptions:
     phimin: float = 0.0
 
 
+@dataclass
+class _LeastSquaresProblemAssembly:
+    """Mutable accumulator for SIMSOPT-style objective tuples."""
+
+    objective_terms: list[ObjectiveTerm] = field(default_factory=list)
+    qi_objective_terms: list[QIObjectiveTerm] = field(default_factory=list)
+    metadata: dict[str, object] = field(default_factory=dict)
+    qi_options: QuasiIsodynamicOptions | None = None
+
+    def add_tuple(self, fn: Callable, target: float | np.ndarray, weight: float) -> None:
+        residual_weight = math.sqrt(float(weight))
+        owner = getattr(fn, "__self__", None)
+        if getattr(owner, "requires_qi_field", False):
+            self._add_qi_field_objective(owner, target, residual_weight)
+        elif hasattr(owner, "to_objective_term"):
+            self._add_state_objective(owner, target, residual_weight)
+        else:
+            self._add_plain_callable(fn, target, residual_weight)
+
+    def _add_qi_field_objective(self, owner, target: float | np.ndarray, residual_weight: float) -> None:
+        if not _target_is_zero(target):
+            raise ValueError("QI field objectives currently require target=0.")
+        qi_term = owner.to_qi_term(residual_weight)
+        if qi_term.qi_options is not None:
+            if self.qi_options is not None and qi_term.qi_options is not self.qi_options:
+                raise ValueError("QI field objectives in one problem must share one QuasiIsodynamicOptions object.")
+            self.qi_options = qi_term.qi_options
+        self.qi_objective_terms.append(qi_term)
+
+    def _add_state_objective(self, owner, target: float | np.ndarray, residual_weight: float) -> None:
+        term = owner.to_objective_term(target=target, residual_weight=residual_weight)
+        self.metadata.update(term.metadata)
+        self.objective_terms.append(term)
+
+    def _add_plain_callable(self, fn: Callable, target: float | np.ndarray, residual_weight: float) -> None:
+        name = getattr(fn, "__name__", "objective")
+        self.objective_terms.append(
+            ObjectiveTerm(
+                name,
+                lambda ctx, state, fn=fn: fn(ctx, state),
+                target=target,
+                weight=residual_weight,
+            )
+        )
+
+
 @dataclass(frozen=True)
 class LeastSquaresProblem:
     """Least-squares objective assembled from ``(function, target, weight)`` tuples.
@@ -333,37 +379,15 @@ class LeastSquaresProblem:
     def from_tuples(cls, tuples: Sequence[tuple[Callable, float | np.ndarray, float]]):
         """Create a problem from ``(callable, target, weight)`` tuples."""
 
-        objective_terms: list[ObjectiveTerm] = []
-        qi_terms: list[QIObjectiveTerm] = []
-        metadata: dict[str, object] = {}
-        qi_options: QuasiIsodynamicOptions | None = None
+        assembly = _LeastSquaresProblemAssembly()
         for fn, target, weight in tuples:
-            residual_weight = math.sqrt(float(weight))
-            owner = getattr(fn, "__self__", None)
-            if getattr(owner, "requires_qi_field", False):
-                if not _target_is_zero(target):
-                    raise ValueError("QI field objectives currently require target=0.")
-                qi_term = owner.to_qi_term(residual_weight)
-                if qi_term.qi_options is not None:
-                    if qi_options is not None and qi_term.qi_options is not qi_options:
-                        raise ValueError("QI field objectives in one problem must share one QuasiIsodynamicOptions object.")
-                    qi_options = qi_term.qi_options
-                qi_terms.append(qi_term)
-            elif hasattr(owner, "to_objective_term"):
-                term = owner.to_objective_term(target=target, residual_weight=residual_weight)
-                metadata.update(term.metadata)
-                objective_terms.append(term)
-            else:
-                name = getattr(fn, "__name__", "objective")
-                objective_terms.append(
-                    ObjectiveTerm(
-                        name,
-                        lambda ctx, state, fn=fn: fn(ctx, state),
-                        target=target,
-                        weight=residual_weight,
-                    )
-                )
-        return cls(tuple(objective_terms), tuple(qi_terms), metadata=metadata, qi_options=qi_options)
+            assembly.add_tuple(fn, target, weight)
+        return cls(
+            tuple(assembly.objective_terms),
+            tuple(assembly.qi_objective_terms),
+            metadata=assembly.metadata,
+            qi_options=assembly.qi_options,
+        )
 
     @property
     def is_qi(self) -> bool:

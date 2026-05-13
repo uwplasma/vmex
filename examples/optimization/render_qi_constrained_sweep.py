@@ -50,6 +50,7 @@ SUMMARY_FIELDS = [
     "objective_final",
     "qi_raw_total",
     "qi_legacy_total",
+    "qi_legacy_source",
     "qi_mirror_ratio_max",
     "qi_mirror_ratio_target",
     "qi_mirror_excess_max",
@@ -97,7 +98,7 @@ def _float_value(value, default: float | None = None) -> float | None:
         return default
 
 
-def _qi_metric(row: dict, default: float | None = None) -> float | None:
+def _qi_metric(row: dict, default: float | None = None, *, require_true_legacy: bool = False) -> float | None:
     """Return the explicitly labeled legacy-ranked QI metric.
 
     Older sweep artifacts used ``qi_raw_total`` for this value.  New artifacts
@@ -106,6 +107,8 @@ def _qi_metric(row: dict, default: float | None = None) -> float | None:
 
     value = row.get("qi_legacy_total")
     if value in (None, ""):
+        if require_true_legacy:
+            return default
         value = row.get("qi_raw_total")
     return _float_value(value, default)
 
@@ -174,6 +177,9 @@ def _discover_qi_results() -> list[dict]:
         row = {field: record.get(field) for field in SUMMARY_FIELDS}
         if row.get("qi_legacy_total") in (None, ""):
             row["qi_legacy_total"] = record.get("qi_raw_total")
+            row["qi_legacy_source"] = "raw_fallback"
+        else:
+            row["qi_legacy_source"] = "legacy"
         row["backend"] = backend
         row["policy"] = policy
         row["qi_qp_preseed"] = bool(qp_preseed)
@@ -431,7 +437,7 @@ def _best_score(row: dict) -> tuple:
     elong_target = _float_value(row.get("qi_elongation_target"), 8.0) or 8.0
     aspect = _float_value(row.get("aspect_final"), np.inf) or np.inf
     iota = abs(_float_value(row.get("iota_final"), 0.0) or 0.0)
-    qi_raw = _qi_metric(row, np.inf) or np.inf
+    qi_raw = _qi_metric(row, np.inf, require_true_legacy=True) or np.inf
     objective = _float_value(row.get("objective_final"), np.inf) or np.inf
     mirror_violation = max(0.0, mirror - mirror_target) / max(mirror_target, 1e-12)
     elong_violation = max(0.0, elong - elong_target) / max(elong_target, 1e-12)
@@ -452,6 +458,7 @@ def _best_score(row: dict) -> tuple:
     total_violation = iota_violation + mirror_violation + elong_violation + 0.25 * aspect_violation
     return (
         failed,
+        1 if row.get("qi_legacy_source") != "legacy" else 0,
         1 - hard_ok,
         qi_raw,
         objective,

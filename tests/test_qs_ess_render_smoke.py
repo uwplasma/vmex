@@ -287,6 +287,69 @@ def test_qi_renderer_plots_only_qi_refinement_after_qp_preseed():
     assert [item["stage"] for item in segments[0]] == ["QI max_mode=1", "QI max_mode=1"]
 
 
+def test_qi_renderer_marks_raw_fallback_legacy_as_nonpromotable(tmp_path, monkeypatch):
+    renderer = _load_qi_renderer_module()
+    monkeypatch.setattr(renderer, "OUTPUT_ROOT", tmp_path)
+    monkeypatch.setattr(renderer, "BEST_JSON", tmp_path / "best.json")
+
+    fallback_dir = tmp_path / "cpu" / "continuation" / "qi" / "mode3" / "ess" / "fallback"
+    legacy_dir = tmp_path / "cpu" / "continuation" / "qi" / "mode2" / "ess" / "legacy"
+    fallback_dir.mkdir(parents=True)
+    legacy_dir.mkdir(parents=True)
+    for case_dir, record in (
+        (
+            fallback_dir,
+            {
+                "qi_raw_total": 1.0e-6,
+                "objective_final": 1.0e-6,
+                "max_mode": 3,
+                "output_dir": str(fallback_dir),
+            },
+        ),
+        (
+            legacy_dir,
+            {
+                "qi_raw_total": 8.0e-3,
+                "qi_legacy_total": 8.0e-3,
+                "objective_final": 8.0e-3,
+                "max_mode": 2,
+                "output_dir": str(legacy_dir),
+            },
+        ),
+    ):
+        (case_dir / "case_result.json").write_text(
+            json.dumps(
+                {
+                    "backend": "cpu",
+                    "policy": "continuation",
+                    "problem": "qi",
+                    "use_ess": True,
+                    "success": True,
+                    "crashed": False,
+                    "message": "ok",
+                    "target_aspect": renderer.TARGET_ASPECT,
+                    "input_nfp": renderer.QI_INPUT_NFP,
+                    "qi_qp_preseed": False,
+                    "qi_mirror_ratio_max": 0.21,
+                    "qi_mirror_ratio_target": 0.21,
+                    "qi_max_elongation": 5.0,
+                    "qi_elongation_target": 8.0,
+                    "aspect_final": renderer.TARGET_ASPECT,
+                    "iota_final": renderer.TARGET_ABS_IOTA_MIN,
+                    **record,
+                }
+            )
+        )
+
+    rows = renderer._discover_qi_results()
+    by_mode = {row["max_mode"]: row for row in rows}
+
+    assert by_mode[3]["qi_legacy_total"] == 1.0e-6
+    assert by_mode[3]["qi_legacy_source"] == "raw_fallback"
+    assert by_mode[2]["qi_legacy_source"] == "legacy"
+    assert renderer._write_best(rows)["max_mode"] == 2
+
+
 def test_qs_ess_renderer_ignores_legacy_backendless_records(tmp_path, monkeypatch):
     renderer = _load_renderer_module()
     monkeypatch.setattr(renderer, "OUTPUT_ROOT", tmp_path)

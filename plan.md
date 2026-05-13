@@ -37,7 +37,7 @@ acceptance criteria or evidence changes.
 - Exact-history correctness is now protected against relaxed trial-solve drift:
   final ``input.final`` and ``wout_final.nc`` use the best exact accepted point
   when the last trial-accepted point replays worse.
-- Required CI coverage is 66.60% locally on the Python 3.11 CI-equivalent
+- Required CI coverage is 66.98% locally on the Python 3.11 CI-equivalent
   required suite, above the current 63% gate but still far below the long-term
   95% goal.
 - `solve.py`, `wout.py`, `free_boundary.py`, `driver.py`, and optimization
@@ -274,7 +274,8 @@ Acceptance:
 
 ## Progress Snapshot
 
-Updated 2026-05-13 after the bundled profile/current wout parity gates,
+Updated 2026-05-13 after the bundled profile/current wout parity gates, QI
+selection hardening, exact-Jacobian host-materialization cleanup,
 continuation/exact-history hardening, LASYM-Boozer parity, and release-checklist
 push:
 
@@ -293,20 +294,23 @@ push:
   gate are covered on small required-tier cases. Full QA/QH/QP/QI max_mode=1
   objective derivative gates and matrix-free/scalar-adjoint production paths
   remain open.
-- Seed-robust QI: 91%. The tier-2 and tier-3 probes are bounded and monotone,
+- Seed-robust QI: 92%. The tier-2 and tier-3 probes are bounded and monotone,
   constrained terms run end-to-end, and manifests now expose QI/engineering
   diagnostic deltas from final artifacts, including scalar-improved but
   QI-worsened cases. A new bundled near-axis seed, `input.QI_stel_seed_3127`,
   is part of the default audit and can be driven by the public QI script to
   smooth/legacy QI below `1e-3` while satisfying `abs(mean_iota) >= 0.41` and
-  aspect ratio near 5. The remaining open cleanup is reducing mirror ratio
-  without destroying the low-QI, high-iota branch.
-- CPU/GPU performance: 82%. Backend-adaptive replay bucketing, scalar-gradient
+  aspect ratio near 5. QI render selection now marks raw-fallback legacy values
+  as non-promotable, so panels cannot silently select stale raw-QI evidence.
+  The remaining open cleanup is reducing mirror ratio without destroying the
+  low-QI, high-iota branch.
+- CPU/GPU performance: 84%. Backend-adaptive replay bucketing, scalar-gradient
   tangent reuse, detailed timing, and GPU-only preconditioner-output fusion are
   in place. Hot-path algebra and CPU/GPU fusion gating are now covered by
-  focused CPU-only regressions. Mode-2 GPU tape callbacks are modestly faster
-  without regressing the local CPU mode-2 callback; larger-mode replay and
-  dense residual-tangent projection remain open.
+  focused CPU-only regressions. The exact-Jacobian residual tangent helper now
+  returns the transposed Jacobian on device and blocks before host
+  materialization, removing a hidden GPU host transpose/transfer cost. Larger
+  mode replay and dense residual-tangent projection remain open.
 - VMEC parity and physics gates: 97%. Required-tier bundled gates now cover
   `chipf`, stored `B`, input flux/profile propagation, finite-beta
   `pres/presf`, VMEC `iotas -> iotaf` smoothing, surface-averaged current
@@ -315,21 +319,24 @@ push:
   propagation for `lasym=True` plus exact LASYM lambda-channel parity into
   Boozer input objects. Full fixed/free/LASYM/finite-beta
   converged-equilibrium parity is still open.
-- Refactor/API/examples: 90%. Examples are SIMSOPT-like and clearer, finite-beta
+- Refactor/API/examples: 92%. Examples are SIMSOPT-like and clearer, finite-beta
   examples expose structured stage/final summaries while preserving direct
-  optimizer visibility and have focused adapter coverage; large
-  solver/wout/free-boundary splits remain deferred behind parity gates.
-- Docs/release hygiene: 95%. Performance/discrete-adjoint/docs reflect the
+  optimizer visibility and have focused adapter coverage. Objective tuple
+  routing is now isolated behind a small assembly helper, reducing the next
+  refactor surface for additional objective types; large solver/wout/free-
+  boundary splits remain deferred behind parity gates.
+- Docs/release hygiene: 96%. Performance/discrete-adjoint/docs reflect the
   current replay and finite-beta policies, diagnostics docs cover detailed
   preconditioner timing, and a command-level release checklist now ties local
-  gates, GitHub Actions, artifact hygiene, and optional research-grade checks
-  together. Full Sphinx and GitHub Actions are green for the latest pushed
-  baseline; final seed-robust QI and GPU-production artifacts remain open.
+  gates, tools/validation lint/compile checks, GitHub Actions, artifact hygiene,
+  and optional research-grade checks together. Full local Sphinx and the
+  required coverage command are green; final seed-robust QI and GPU-production
+  artifacts remain open.
 
 Release-critical average across the lanes requested in this push
 (continuation, exact accepted-point output, VMEC parity/physics gates, and
 docs/release hygiene): about 98%. Broader roadmap average across all open lanes:
-about 92%, because differentiation architecture, seed-robust QI, and
+about 93%, because differentiation architecture, seed-robust QI, and
 larger-mode GPU replay remain real research-grade work rather than release
 hygiene.
 
