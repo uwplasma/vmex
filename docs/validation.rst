@@ -1,8 +1,8 @@
 Validation and parity with VMEC2000
 ====================================
 
-``vmec_jax`` achieves full numerical parity with **VMEC2000** across fixed-boundary
-and free-boundary configurations, including axisymmetric, non-axisymmetric,
+``vmec_jax`` is validated against **VMEC2000** across fixed-boundary and
+free-boundary configurations, including axisymmetric, non-axisymmetric,
 stellarator-symmetric (``lasym=False``) and stellarator-asymmetric
 (``lasym=True``) equilibria.
 
@@ -14,8 +14,12 @@ implementation error).
 Reference data
 --------------
 
-Ten bundled ``wout`` reference files are pre-computed with VMEC2000 and
-shipped in ``examples/data/``:
+Ten bundled ``wout`` reference files are pre-computed with VMEC2000 and shipped
+in ``examples/data/``.  A stable subset is used for strict field-by-field
+end-to-end parity in ``tests/test_wout_comprehensive_parity.py``; the remaining
+references are covered by no-solve profile/current gates, convergence-only
+end-to-end gates, or optional refreshed-reference lanes until their bundled
+references are promoted.
 
 +------------------------------------------+----------------------------------+--------------+---------+
 | Input                                    | Coverage                         | lasym        | bdy     |
@@ -74,14 +78,16 @@ difference of ``bvco/buco`` divided by ``mu0``.  The covered fixtures include
 axisymmetric finite-beta, non-axisymmetric current-driven, 3D finite-beta, and
 ``lasym=True`` solved wouts.
 
-The test suite runs ``vmec_jax`` end-to-end and compares every standard
-``wout`` field against the VMEC2000 references.  Run with:
+The full test tier runs ``vmec_jax`` end-to-end.  For promoted strict-parity
+cases it compares every standard ``wout`` field against the VMEC2000
+references.  Run with:
 
 .. code-block:: bash
 
    RUN_FULL=1 pytest tests/test_wout_comprehensive_parity.py -v
 
-All ten reference cases pass with the following tolerances per field category:
+The promoted strict-parity cases pass with the following tolerances per field
+category:
 
 .. list-table:: Default parity tolerances
    :header-rows: 1
@@ -127,8 +133,7 @@ verifies that ``vmec_jax`` converges and produces finite, physically consistent
 
 - **Stellarator-asymmetric (lasym=True) fixed-boundary**: ``basic_non_stellsym_pressure``,
   ``LandremanSenguptaPlunk_section5p3_low_res``, ``up_down_asymmetric_tokamak``.
-  (Note: ``basic_non_stellsym_simsopt`` now has a VMEC2000 reference and is in
-  the full parity suite.)
+  ``basic_non_stellsym_simsopt``.
 - **Free-boundary**: ``cth_like_free_bdy`` (requires mgrid from ``fetch_assets.py``).
 
 These cases are exercised by:
@@ -172,7 +177,8 @@ with:
 
 The audit performs no optimization.  It reads solved ``input``/``wout`` pairs
 and reports smooth QI, legacy QI, mirror ratio, elongation, aspect ratio, and
-mean iota.  Optional reference cases from ``omnigenity_optimization`` are used
+mean iota.  Mirror ratio is evaluated over all selected Boozer surfaces by
+default.  Optional reference cases from ``omnigenity_optimization`` are used
 when ``OMNIGENITY_OPTIMIZATION_ROOT`` points to that checkout; missing optional
 cases are recorded as skipped rather than failing the audit.
 The bundled default set includes ``input.QI_stel_seed_3127`` when its matching

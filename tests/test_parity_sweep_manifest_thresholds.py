@@ -32,6 +32,33 @@ def test_parity_manifest_smoke_tier_covers_required_physics_classes() -> None:
     assert has_case(lfreeb=True, lasym=False)
 
 
+def test_parity_manifest_has_optional_bounded_freeb_lasym_true_case() -> None:
+    """Keep a self-contained LASYM=true free-boundary case ready for optional parity."""
+
+    _, cases = _parse_manifest(DEFAULT_MANIFEST)
+    case = next(
+        (
+            case
+            for case in cases
+            if case.get("id") == "freeb_nonaxis_lasym_true_cth_like_local"
+        ),
+        None,
+    )
+    assert case is not None
+    assert case.get("enabled") is True
+    assert case.get("tier") == "planning"
+    assert case.get("source") == "vmec_jax/examples"
+    assert case.get("compare") == "freeb_scalpot"
+    assert bool(case.get("lfreeb")) is True
+    assert bool(case.get("lasym")) is True
+    assert bool(case.get("axisymmetric")) is False
+    assert case.get("input") == "examples/data/input.cth_like_free_bdy_lasym_small"
+    assert float(case.get("max_runtime_s", 0.0)) > 0.0
+    assert float(case.get("max_total_runtime_s", 0.0)) > 0.0
+    assert set(case.get("runtime_thresholds_s_by_iter", {})) == {"80", "100"}
+    assert case.get("metric_thresholds_rel_scaled_by_iter", {}).get("80", {}).get("source_sym") == 1.0e-2
+
+
 def test_parity_manifest_smoke_cases_define_accuracy_and_runtime_contracts() -> None:
     """Keep fast parity cases explicit about tolerances, inputs, and cost gates."""
 

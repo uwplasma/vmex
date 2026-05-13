@@ -58,6 +58,8 @@ and nitpicky cross-reference checks::
 
   LANG=C LC_ALL=C python -m sphinx -W -n -b html docs docs/_build/html
 
-Read the Docs intentionally uses the fast landing-page build to keep hosted
-build times short. The full user guide and API reference are checked in GitHub
-Actions.
+Read the Docs builds the full user guide with warnings treated as errors.  For
+local edit cycles where only the landing page is needed, use the explicit fast
+mode::
+
+  SPHINX_FAST=1 LANG=C LC_ALL=C python -m sphinx -b html docs docs/_build/html_fast

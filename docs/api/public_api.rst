@@ -2,8 +2,8 @@ Public API
 ==========
 
 ``vmec_jax.api`` is the recommended import surface for most users. It keeps the
-common solve / I/O / plotting entrypoints stable while the lower-level modules
-continue to evolve.
+common solve, I/O, plotting, diagnostic, and example-level optimization
+entrypoints stable while lower-level numerical kernels continue to evolve.
 
 Typical usage::
 
@@ -12,14 +12,16 @@ Typical usage::
    fixed = vj.run_fixed_boundary("examples/data/input.circular_tokamak")
    freeb = vj.run_free_boundary("examples/data/input.cth_like_free_bdy_lasym_small")
 
-The optimization examples intentionally use the broader top-level import::
+The optimization examples intentionally use the top-level import, which mirrors
+this public surface plus the broader scientific namespace::
 
    import vmec_jax as vj
 
-That exposes the explicit workflow objects used in the scripts, including
-``FixedBoundaryVMEC``, objective wrappers, ``LeastSquaresProblem``, and
-``least_squares_solve``.  Use this path when assembling custom objective
-tuples or reproducing the optimization sweeps.
+Both ``vmec_jax`` and ``vmec_jax.api`` expose the documented workflow objects
+used in the scripts, including ``FixedBoundaryVMEC``, objective wrappers,
+``LeastSquaresProblem``, ``least_squares_solve``, QI diagnostics, and plotting
+helpers.  Lower-level solver kernels, force assembly routines, and replay
+internals remain submodule-level APIs.
 
 The module exports the following user-facing helpers:
 

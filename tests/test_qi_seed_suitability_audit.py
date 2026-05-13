@@ -29,6 +29,8 @@ def test_parse_case_and_default_families_cover_seed_types():
     case = mod.parse_case("candidate_qi:QI:/tmp/input:/tmp/wout.nc")
     families = mod.parse_seed_families("QI,qp,simple")
     stage_modes = mod.parse_stage_modes("1,1,2,2,3")
+    all_surface = mod.parse_optional_surface_index("all")
+    indexed_surface = mod.parse_optional_surface_index("2")
 
     assert case.label == "candidate_qi"
     assert case.family == "qi"
@@ -36,6 +38,10 @@ def test_parse_case_and_default_families_cover_seed_types():
     assert case.wout_path == Path("/tmp/wout.nc")
     assert families == ("qi", "qp", "simple")
     assert stage_modes == (1, 1, 2, 2, 3)
+    assert all_surface is None
+    assert indexed_surface == 2
+    with pytest.raises(Exception, match="surface index"):
+        mod.parse_optional_surface_index("-1")
 
     default_cases, _skipped = mod.default_seed_cases()
     families = {case.family for case in default_cases}
@@ -266,6 +272,7 @@ def test_prefine_probe_manifest_selects_top_rows_and_stays_dry(tmp_path):
     assert "--prefine-reviewed" in manifest["plans"][0]["run_command"]
     assert "--prefine-use-ess" in manifest["plans"][0]["run_command"]
     assert "--prefine-ess-alpha 1.2" in manifest["plans"][0]["run_command"]
+    assert "--prefine-mirror-surface-index all" in manifest["plans"][0]["run_command"]
     assert manifest["plans"][0]["optimization"]["max_nfev"] <= mod.MAX_PREFINE_MAX_NFEV
     assert manifest["plans"][0]["optimization"]["use_ess"] is True
     assert manifest["plans"][0]["optimization"]["ess_alpha"] == 1.2
@@ -276,6 +283,8 @@ def test_prefine_probe_manifest_selects_top_rows_and_stays_dry(tmp_path):
     assert manifest["plans"][0]["qi_options"]["include_bounce_endpoints"] is True
     assert manifest["plans"][0]["qi_options"]["endpoint_mode"] == "include_bounce_endpoints"
     assert manifest["plans"][0]["qi_options"]["phimin"] == 0.5
+    assert manifest["plans"][0]["qi_options"]["mirror_surface_index"] is None
+    assert manifest["plans"][0]["qi_options"]["mirror_surface_mode"] == "all"
     assert manifest["plans"][0]["phimin"] == {
         "value": 0.5,
         "source": "audit_selected_phimin",
@@ -624,6 +633,7 @@ def test_run_qi_prefine_probe_can_dispatch_constrained_qi_terms(tmp_path):
     assert calls["mirror"]["threshold"] == 0.21
     assert calls["mirror"]["ntheta"] == 12
     assert calls["mirror"]["nphi"] == 10
+    assert calls["mirror"]["surface_index"] is None
     assert calls["elongation"]["threshold"] == 8.0
     assert calls["elongation"]["ntheta"] == 14
     assert calls["elongation"]["nphi"] == 6
