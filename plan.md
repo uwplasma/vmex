@@ -37,8 +37,8 @@ acceptance criteria or evidence changes.
 - Exact-history correctness is now protected against relaxed trial-solve drift:
   final ``input.final`` and ``wout_final.nc`` use the best exact accepted point
   when the last trial-accepted point replays worse.
-- Required CI coverage is 85.37% locally on the Python 3.11 CI-equivalent
-  required suite (`991 passed, 20 skipped, 95 deselected`, 9:25 with compact
+- Required CI coverage is 85.52% locally on the Python 3.11 CI-equivalent
+  required suite (`1000 passed, 20 skipped, 95 deselected`, 9:24 with compact
   coverage output), above the raised 85% gate but still below the long-term 95%
   goal.  CI now installs the plotting extra for fast-test jobs so the required
   coverage gate exercises the README/docs plotting helpers instead of skipping
@@ -309,7 +309,8 @@ Acceptance:
 Updated 2026-05-13 after the bundled profile/current wout parity gates, QI
 selection hardening, exact-Jacobian host-materialization cleanup,
 continuation/exact-history hardening, LASYM-Boozer parity, release-checklist
-push, 85% coverage-gate push, and optional SIMSOPT/VMEC2000 gate expansion:
+push, 85% coverage-gate push, optional SIMSOPT/VMEC2000 gate expansion, and
+QI diagnostic/objective branch hardening:
 
 - Continuation correctness: 100%. Source fix is implemented and covered by
   synthetic repeated-stage tests, a real boundary-projection stage test, and
@@ -321,16 +322,17 @@ push, 85% coverage-gate push, and optional SIMSOPT/VMEC2000 gate expansion:
   exact residuals can no longer be recorded as the best accepted point. SciPy
   failures after a finite exact point now return that best exact point with an
   explicit abnormal-termination record instead of losing the run.
-- Differentiation architecture: 88%. Dense exact Jacobians, scalar reverse
+- Differentiation architecture: 89%. Dense exact Jacobians, scalar reverse
   gradients, state tangents, accepted-residual AD-vs-finite-difference checks,
   solve-free QS residual JVP/VJP checks, QS objective routing JVP/VJP checks,
   QI shared-field objective JVP/VJP checks, optional Lineax solver seams, and
   fixed-boundary implicit validation/zero-unconverged VJP behavior are covered
   on small required-tier cases. Additional lambda-gradient-descent branch gates
   now cover descent, line-search failure, gauge enforcement, and solver-control
-  validation. Full QA/QH/QP/QI max_mode=1 objective derivative gates and
+  validation, and QI aligned-profile/mirror smooth branches have direct AD
+  checks. Full QA/QH/QP/QI max_mode=1 objective derivative gates and
   matrix-free/scalar-adjoint production paths remain open.
-- Seed-robust QI: 93%. The tier-2 and tier-3 probes are bounded and monotone,
+- Seed-robust QI: 94%. The tier-2 and tier-3 probes are bounded and monotone,
   constrained terms run end-to-end, and manifests now expose QI/engineering
   diagnostic deltas from final artifacts, including scalar-improved but
   QI-worsened cases. A new bundled near-axis seed, `input.QI_stel_seed_3127`,
@@ -339,8 +341,9 @@ push, 85% coverage-gate push, and optional SIMSOPT/VMEC2000 gate expansion:
   aspect ratio near 5. QI render selection now marks raw-fallback legacy values
   as non-promotable, so panels cannot silently select stale raw-QI evidence.
   The public QI script now runs the intended repeated same-mode continuation
-  cleanup by default. The remaining open cleanup is reducing mirror ratio
-  without destroying the low-QI, high-iota branch.
+  cleanup by default, and seed diagnostics now explicitly test error/fail-fast
+  semantics for missing Boozer/scalar metrics. The remaining open cleanup is
+  reducing mirror ratio without destroying the low-QI, high-iota branch.
 - CPU/GPU performance: 85%. Backend-adaptive replay bucketing, scalar-gradient
   tangent reuse, detailed timing, and GPU-only preconditioner-output fusion are
   in place. Hot-path algebra and CPU/GPU fusion gating are now covered by
@@ -376,7 +379,7 @@ push, 85% coverage-gate push, and optional SIMSOPT/VMEC2000 gate expansion:
   preconditioner timing, and a command-level release checklist now ties local
   gates, tools/validation lint/compile checks, GitHub Actions, artifact hygiene,
   and optional research-grade checks together. Full local Sphinx and the
-  required 85% coverage command are green; released reference assets are ignored
+  required 85% coverage command is green at 85.52%; released reference assets are ignored
   so local full-tier refreshes cannot accidentally bloat commits. Final
   seed-robust QI and GPU-production artifacts remain open.
 

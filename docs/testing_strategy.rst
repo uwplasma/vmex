@@ -15,7 +15,7 @@ Target State
 - Routine local gate:
   ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt"``.
 - Last recorded local CI-equivalent coverage baseline: clean on 2026-05-13 with
-  ``991 passed, 20 skipped, 95 deselected``, ``85.37%`` coverage, and ``9:25``
+  ``1000 passed, 20 skipped, 95 deselected``, ``85.52%`` coverage, and ``9:24``
   runtime using the compact terminal coverage report.
 - Near-term coverage target: keep the required ``85%`` actual line coverage gate
   green with meaningful fast and bounded-physics tests while preserving
