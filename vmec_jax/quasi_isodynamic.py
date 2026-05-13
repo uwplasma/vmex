@@ -828,6 +828,39 @@ def quasi_isodynamic_residual_from_boozer_modes(
 
         left_branch = jnp.maximum.accumulate(left_raw, axis=-1)
         right_branch = jnp.maximum.accumulate(right_raw, axis=-1)
+
+        def _stretch_branches(left, right):
+            """Apply the legacy Goodman squash/stretch endpoint correction."""
+            pmax = jnp.asarray(50.0, dtype=dtype)
+            pmin = jnp.asarray(15.0, dtype=dtype)
+            denom = jnp.maximum(jnp.asarray(nphi - 1, dtype=dtype), jnp.asarray(1.0, dtype=dtype))
+            x = offsets_float / denom
+            window = ((jnp.cos(2.0 * jnp.pi * x) + 1.0) / 2.0)
+
+            # ``left`` is stored from well minimum outward to the left endpoint.
+            # Reverse it to match the legacy left-endpoint -> minimum formula,
+            # then reverse back so downstream crossing distances stay unchanged.
+            left_legacy = jnp.flip(left, axis=-1)
+            left_half = x < 0.5
+            f_left = jnp.where(
+                left_half[None, None, :],
+                (1.0 - left_legacy[..., :1]) * window[None, None, :] ** pmax,
+                (-left_legacy[..., -1:]) * window[None, None, :] ** pmin,
+            )
+            left_stretched = jnp.flip(left_legacy + f_left, axis=-1)
+
+            right_half = x < 0.5
+            f_right = jnp.where(
+                right_half[None, None, :],
+                (-right[..., :1]) * window[None, None, :] ** pmin,
+                (1.0 - right[..., -1:]) * window[None, None, :] ** pmax,
+            )
+            right_stretched = right + f_right
+            return (
+                jnp.maximum.accumulate(left_stretched, axis=-1),
+                jnp.maximum.accumulate(right_stretched, axis=-1),
+            )
+
         if bool(include_bounce_endpoints):
             shuffle_levels = jnp.linspace(0.0, 1.0, n_bounce, endpoint=True, dtype=dtype)
         else:
@@ -867,16 +900,17 @@ def quasi_isodynamic_residual_from_boozer_modes(
         weighted_right_crossing = right_crossing
         weighted_shuffle_branch_widths = shuffle_branch_widths
         if float(weighted_shuffle_profile_weight) != 0.0:
-            weighted_left_crossing = _linear_branch_crossing(left_branch)
-            weighted_right_crossing = _linear_branch_crossing(right_branch)
+            weighted_left_branch, weighted_right_branch = _stretch_branches(left_branch, right_branch)
+            weighted_left_crossing = _linear_branch_crossing(weighted_left_branch)
+            weighted_right_crossing = _linear_branch_crossing(weighted_right_branch)
             weighted_shuffle_branch_widths = weighted_left_crossing + weighted_right_crossing
             valid_count = jnp.maximum(
                 jnp.sum(left_valid.astype(dtype) + right_valid.astype(dtype), axis=-1),
                 jnp.asarray(1.0, dtype=dtype),
             )
             squash_error = jnp.sum(
-                jnp.where(left_valid, (left_raw - left_branch) ** 2, 0.0)
-                + jnp.where(right_valid, (right_raw - right_branch) ** 2, 0.0),
+                jnp.where(left_valid, (left_raw - weighted_left_branch) ** 2, 0.0)
+                + jnp.where(right_valid, (right_raw - weighted_right_branch) ** 2, 0.0),
                 axis=-1,
             ) / valid_count
             # Legacy qi_functions.py uses the inverse squash/stretch error as

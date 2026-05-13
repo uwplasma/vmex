@@ -742,12 +742,13 @@ Two practical lessons from that study are now reflected in the example:
   LgradB remains available as a commented optional shaping term, but it is not
   part of the default best QI lane.
 - ``weighted_shuffle_profile_weight`` enables an opt-in branch-shuffle term
-  that uses monotone linear branch crossings and legacy-inspired field-line
-  weights when computing the mean bounce width.  It is closer to the
-  Goodman-style branch diagnostic than the historical smooth occupancy
-  crossing estimator and is useful for ranking and homotopy experiments.  In
-  the current bounded NFP=2 probe it improved offline ranking but did not beat
-  the default mirror-aware run, so the public example leaves it at ``0.0``.
+  that uses the legacy squash/stretch endpoint correction, monotone linear
+  branch crossings, and differentiable field-line weights when computing the
+  mean bounce width.  It is closer to the Goodman-style branch diagnostic than
+  the historical smooth occupancy crossing estimator and is useful for ranking
+  and homotopy experiments.  In the current bounded NFP=2 probe it improved
+  the isolated branch-shuffle ranking but did not beat the default
+  mirror-aware run, so the public example leaves it at ``0.0``.
 - A QI-only objective is not a robust optimization policy.  It can make the
   branch/shuffle diagnostic small while leaving ``mean_iota`` near zero.  The
   default examples therefore include the iota floor and only promote a result

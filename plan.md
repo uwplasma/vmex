@@ -908,3 +908,9 @@ Defer beyond the current cycle:
   `weighted_shuffle_profile_weight=1` reached legacy QI `6.4e-4` and mirror
   `0.306`, worse than the previous branch-heavy mirror-aware candidate. Keep
   the term available for homotopy/ranking experiments, not enabled by default.
+- 2026-05-13: Added the legacy squash/stretch endpoint correction to the
+  opt-in weighted branch-shuffle path. Offline component ranking now favors the
+  reference NFP2 QI candidate over the recent high-mirror candidates, although
+  the total branch5 ranking still does not justify enabling the term by
+  default. Keep using the branch-heavy mirror-aware path as the promoted QI
+  example while retaining this term for controlled homotopy/ranking studies.
