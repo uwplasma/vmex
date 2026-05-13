@@ -67,6 +67,43 @@ def test_qi_boozer_mode_residual_can_include_legacy_bounce_endpoints():
     assert np.asarray(shuffled["shuffle_profile_residuals1d"]).shape == (9 * 33,)
 
 
+def test_qi_weighted_shuffle_profile_residual_is_finite_and_differentiable():
+    pytest.importorskip("jax")
+
+    import jax
+
+    from vmec_jax._compat import jnp
+    from vmec_jax.quasi_isodynamic import quasi_isodynamic_residual_from_boozer_modes
+
+    xm_b = jnp.asarray([0, 0, 1, 2])
+    xn_b = jnp.asarray([0, 1, 1, 2])
+
+    def objective(coeffs):
+        out = quasi_isodynamic_residual_from_boozer_modes(
+            bmnc_b=coeffs[None, :],
+            xm_b=xm_b,
+            xn_b=xn_b,
+            iota_b=jnp.asarray([0.47]),
+            nfp=2,
+            nphi=33,
+            nalpha=9,
+            n_bounce=7,
+            width_weight=0.0,
+            branch_width_weight=0.0,
+            profile_weight=0.0,
+            shuffle_profile_weight=0.0,
+            weighted_shuffle_profile_weight=1.0,
+            weighted_shuffle_profile_softness=2.0e-2,
+        )
+        return out["total"]
+
+    value, grad = jax.value_and_grad(objective)(jnp.asarray([1.0, 0.09, 0.04, -0.02]))
+
+    assert np.isfinite(float(np.asarray(value)))
+    assert np.all(np.isfinite(np.asarray(grad)))
+    assert np.linalg.norm(np.asarray(grad[1:])) > 0.0
+
+
 def test_qi_boozer_mode_residual_rejects_single_helicity_phase_shift():
     pytest.importorskip("jax")
 

@@ -50,6 +50,8 @@ class QIDiagnosticOptions:
     profile_weight: float = 0.1
     shuffle_profile_weight: float = 1.0
     shuffle_profile_softness: float = 2.0e-2
+    weighted_shuffle_profile_weight: float = 0.0
+    weighted_shuffle_profile_softness: float = 2.0e-2
     aligned_profile_weight: float = 0.0
     aligned_profile_softness: float = 2.0e-2
     aligned_profile_trap_level: float = 0.65
@@ -227,6 +229,8 @@ def _smooth_kwargs(options: QIDiagnosticOptions) -> dict[str, Any]:
         "profile_weight": float(options.profile_weight),
         "shuffle_profile_weight": float(options.shuffle_profile_weight),
         "shuffle_profile_softness": float(options.shuffle_profile_softness),
+        "weighted_shuffle_profile_weight": float(options.weighted_shuffle_profile_weight),
+        "weighted_shuffle_profile_softness": float(options.weighted_shuffle_profile_softness),
         "aligned_profile_weight": float(options.aligned_profile_weight),
         "aligned_profile_softness": float(options.aligned_profile_softness),
         "aligned_profile_trap_level": float(options.aligned_profile_trap_level),

@@ -347,6 +347,8 @@ def test_qi_mode_continuation_rebuilds_from_previous_stage_input(monkeypatch, tm
         profile_weight=0.1,
         shuffle_profile_weight=1.0,
         shuffle_profile_softness=2.0e-2,
+        weighted_shuffle_profile_weight=0.0,
+        weighted_shuffle_profile_softness=2.0e-2,
         aligned_profile_weight=0.0,
         aligned_profile_softness=2.0e-2,
         aligned_profile_trap_level=0.65,
