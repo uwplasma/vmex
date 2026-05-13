@@ -64,6 +64,11 @@ _REPLAY_STEP_TRACE_STATIC_KEYS = (
     "divide_by_scalxc_for_update",
     "signgs",
 )
+_DYNAMIC_REPLAY_SCALAR_TRACE_KEYS = (
+    "lambda_update_scale",
+    "max_coeff_delta_rms_pre",
+    "max_update_rms_pre",
+)
 _CHECKPOINT_TAPE_SCAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
 _CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
 _CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
@@ -913,11 +918,14 @@ def _build_dynamic_replay_payload(
         "wout_like",
         "trig",
         "w_mode_mn",
-        "lambda_update_scale",
-        "max_coeff_delta_rms_pre",
-        "max_update_rms_pre",
     )
-    varying_keys = ["time_step", "flip_sign", "reset_inv_tau", "zero_m1"]
+    varying_keys = [
+        "time_step",
+        "flip_sign",
+        "reset_inv_tau",
+        "zero_m1",
+        *_DYNAMIC_REPLAY_SCALAR_TRACE_KEYS,
+    ]
     for key in constant_candidates:
         first = step_traces[0][key]
         if all(_replay_values_equal(trace[key], first) for trace in step_traces[1:]):

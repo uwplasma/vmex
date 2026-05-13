@@ -142,6 +142,14 @@ def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:
             "40",
             "--budget-cache-entry-growth",
             "8",
+            "--budget-tape-build-wall-s",
+            "5",
+            "--budget-replay-wall-s",
+            "4",
+            "--budget-residual-tangent-wall-s",
+            "3",
+            "--budget-accepted-replays",
+            "2",
             "--budget-action",
             "warn",
             "--vmec-timing-detail",
@@ -156,6 +164,10 @@ def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:
     assert args.budget_rss_growth_mb == 256.0
     assert args.budget_cache_entries == 40
     assert args.budget_cache_entry_growth == 8
+    assert args.budget_tape_build_wall_s == 5.0
+    assert args.budget_replay_wall_s == 4.0
+    assert args.budget_residual_tangent_wall_s == 3.0
+    assert args.budget_accepted_replays == 2
     assert args.budget_action == "warn"
     assert args.vmec_timing_detail is True
 
@@ -232,6 +244,14 @@ def test_exact_optimizer_callback_report_schema_and_budget_status() -> None:
             "1.0",
             "--budget-cache-entry-growth",
             "0",
+            "--budget-tape-build-wall-s",
+            "0.3",
+            "--budget-replay-wall-s",
+            "0.2",
+            "--budget-residual-tangent-wall-s",
+            "0.1",
+            "--budget-accepted-replays",
+            "0",
         ]
     )
     cache_before = {"optimizer": {"exact_cache": 0}, "total_entries": 0}
@@ -252,7 +272,11 @@ def test_exact_optimizer_callback_report_schema_and_budget_status() -> None:
                 "cache_growth": {"total_entries_delta": 2},
             }
         ],
-        profile={"exact_tape_build": {"count": 1, "wall_time_s": 0.4, "mean_wall_time_s": 0.4}},
+        profile={
+            "exact_tape_build": {"count": 1, "wall_time_s": 0.4, "mean_wall_time_s": 0.4},
+            "jacobian_tape_replay": {"count": 1, "wall_time_s": 0.25, "mean_wall_time_s": 0.25},
+            "jacobian_residual_tangents": {"count": 1, "wall_time_s": 0.15, "mean_wall_time_s": 0.15},
+        },
         cache_before=cache_before,
         cache_after=cache_after,
         rss_before_bytes=100 * 1024 * 1024,
@@ -268,4 +292,14 @@ def test_exact_optimizer_callback_report_schema_and_budget_status() -> None:
     assert report["budget_status"]["ok"] is False
     assert {
         item["name"] for item in report["budget_status"]["exceeded"]
-    } == {"total_wall_s", "repeat_wall_s", "rss_growth_mb", "cache_entry_growth"}
+    } == {
+        "total_wall_s",
+        "repeat_wall_s",
+        "rss_growth_mb",
+        "cache_entry_growth",
+        "tape_build_wall_s",
+        "replay_wall_s",
+        "residual_tangent_wall_s",
+        "accepted_replays",
+    }
+    assert report["budget_status"]["measurements"]["accepted_replays"] == 1
