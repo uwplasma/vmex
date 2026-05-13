@@ -37,7 +37,8 @@ dev = ["pytest", "pytest-cov", "ruff", "mypy", "types-setuptools"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-exclude = ["tests*", "docs*", "examples*", "tools*"]
+include = ["vmec_jax*"]
+exclude = ["tests*", "docs*", "examples*", "tools*", "validation*", "results*", "build*", "dist*"]
 
 [tool.pytest.ini_options]
 markers = [

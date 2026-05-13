@@ -127,8 +127,10 @@ This manifest is the review artifact.  It lists selected rows, hard caps,
 expected output files, exact commands, selected ``phimin`` values, endpoint
 mode, and the repeated-stage prefine plan.  The default prefine plan is capped
 at ``--prefine-stage-modes 1,1,2,2,3`` with per-stage and total ``nfev`` caps
-recorded for each selected seed.  Only after review should a local operator use
-``--prefine-probes run --prefine-reviewed``.
+recorded for each selected seed.  Constrained mirror cleanup uses
+``--prefine-mirror-surface-index all`` by default so the acceptance gate cannot
+pass by improving only one Boozer surface.  Only after review should a local
+operator use ``--prefine-probes run --prefine-reviewed``.
 
 Planned and executed prefine manifests include deterministic compact summaries
 with status counts, completed stage modes, best seed by final objective, best
@@ -188,6 +190,20 @@ The next parity gates are:
   simple seeds.
 - Keep VMEC2000 executable smoke green before broadening the executable-backed
   manifest matrix.
+- Run the optional bounded free-boundary ``LASYM=true`` manifest case:
+
+  .. code-block:: bash
+
+     VMEC2000_EXEC=/path/to/xvmec2000 \
+     VMEC2000_INTEGRATION=1 \
+     PYTHONPATH=. python tools/diagnostics/parity_sweep_manifest.py \
+       --case freeb_nonaxis_lasym_true_cth_like_local \
+       --out results/parity/freeb_lasym_true \
+       --manifest tools/diagnostics/parity_manifest.toml
+
+  This self-contained ``vmec_jax/examples`` case exercises
+  ``lfreeb=True``, ``lasym=True``, non-axisymmetric vacuum coupling with
+  explicit per-iteration runtime and ``freeb_scalpot`` accuracy thresholds.
 - Keep SIMSOPT formula-level comparisons green where SIMSOPT is installed.
 
 Deferred validation lanes

@@ -1023,6 +1023,66 @@ def test_magnetic_well_tuple_stays_regular_state_objective(monkeypatch) -> None:
     assert float(term.residual(SimpleNamespace(static="static", indata="indata", signgs=1), "state")[0]) > 0.0
 
 
+def test_public_api_reexports_example_optimization_contract() -> None:
+    import vmec_jax.api as api
+    import vmec_jax.optimization_workflow as workflow
+    import vmec_jax.plotting as plotting
+    import vmec_jax.qi_diagnostics as qi_diagnostics
+    from vmec_jax import finite_beta
+
+    workflow_names = (
+        "FixedBoundaryVMEC",
+        "LeastSquaresProblem",
+        "AspectRatio",
+        "MeanIota",
+        "AbsMeanIotaFloor",
+        "QuasisymmetryRatioResidual",
+        "QuasiIsodynamicOptions",
+        "QuasiIsodynamicResidual",
+        "MirrorRatio",
+        "MaxElongation",
+        "LgradB",
+        "BoozerBTarget",
+        "BetaTotal",
+        "VolavgB",
+        "BDotB",
+        "BDotGradV",
+        "BVector",
+        "JDotB",
+        "JVector",
+        "ToroidalCurrent",
+        "ToroidalCurrentGradient",
+        "RedlBootstrapMismatch",
+        "least_squares_solve",
+        "qs_stage_modes",
+        "repeated_stage_modes",
+    )
+    for name in workflow_names:
+        assert getattr(api, name) is getattr(workflow, name)
+
+    for name in (
+        "FiniteBetaTargets",
+        "finite_beta_global_residuals_from_state",
+        "finite_beta_scalars_from_state",
+    ):
+        assert getattr(api, name) is getattr(finite_beta, name)
+
+    for name in (
+        "QIDiagnosticOptions",
+        "qi_diagnostics_from_boozer_output",
+        "qi_diagnostics_from_state",
+    ):
+        assert getattr(api, name) is getattr(qi_diagnostics, name)
+
+    for name in (
+        "plot_3d_boundary_comparison",
+        "plot_bmag_contours",
+        "plot_boozer_bmag_contours_from_state",
+        "plot_objective_history",
+    ):
+        assert getattr(api, name) is getattr(plotting, name)
+
+
 def test_jxbforce_profile_tuple_stays_regular_state_objective() -> None:
     from vmec_jax.optimization_workflow import (
         BDotB,

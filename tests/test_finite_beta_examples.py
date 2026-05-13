@@ -150,6 +150,62 @@ def test_finite_beta_stage1_result_adapts_raw_stage_tuples() -> None:
     assert result.summary["final"]["selected_best_exact_point"] is True
 
 
+def test_finite_beta_save_final_outputs_uses_selected_best_exact_result(tmp_path) -> None:
+    from examples.optimization.finite_beta_stage1_common import save_final_outputs
+
+    saved = []
+
+    class RecordingOptimizer:
+        def __init__(self, label: str):
+            self.label = label
+
+        def save_input(self, path, params):
+            saved.append((self.label, "input", path.name, np.asarray(params, dtype=float).copy(), None))
+
+        def save_wout(self, path, params, *, state=None):
+            saved.append((self.label, "wout", path.name, np.asarray(params, dtype=float).copy(), state))
+
+        def save_history(self, path, result):
+            saved.append((self.label, "history", path.name, np.asarray(result["x"], dtype=float).copy(), result))
+
+    initial_state = object()
+    final_state = object()
+    initial_optimizer = RecordingOptimizer("initial")
+    final_optimizer = RecordingOptimizer("final")
+    initial_params = np.asarray([0.0, 0.0])
+    final_params = np.asarray([1.0, 1.0e-5])
+    initial_result = {
+        "x": np.asarray([99.0, 99.0]),
+        "_state_initial": initial_state,
+        "_state_final": object(),
+        "_history_dump": {"selected_best_exact_point": False},
+    }
+    final_result = {
+        "x": final_params,
+        "_state_final": final_state,
+        "_history_dump": {"selected_best_exact_point": True},
+    }
+
+    save_final_outputs(
+        output_dir=tmp_path,
+        stage_records=[(1, initial_optimizer, initial_params, initial_result)],
+        final_optimizer=final_optimizer,
+        final_result=final_result,
+    )
+
+    initial_wout = next(item for item in saved if item[:3] == ("initial", "wout", "wout_initial.nc"))
+    final_input = next(item for item in saved if item[:3] == ("final", "input", "input.final"))
+    final_wout = next(item for item in saved if item[:3] == ("final", "wout", "wout_final.nc"))
+    final_history = next(item for item in saved if item[:3] == ("final", "history", "history.json"))
+
+    np.testing.assert_allclose(initial_wout[3], initial_params)
+    assert initial_wout[4] is initial_state
+    np.testing.assert_allclose(final_input[3], final_params)
+    np.testing.assert_allclose(final_wout[3], final_params)
+    assert final_wout[4] is final_state
+    assert final_history[4] is final_result
+
+
 def test_finite_beta_stage_summary_uses_optimizer_result_fallbacks() -> None:
     from examples.optimization.finite_beta_stage1_common import finite_beta_stage_summary
 

@@ -123,7 +123,7 @@ class QIPrefineProbeConfig:
     mirror_threshold: float = DEFAULT_MAX_MIRROR_RATIO
     mirror_ntheta: int = 32
     mirror_nphi: int = 32
-    mirror_surface_index: int = 0
+    mirror_surface_index: int | None = None
     elongation_weight: float = 0.0
     elongation_threshold: float = DEFAULT_MAX_ELONGATION
     elongation_ntheta: int = 24
@@ -256,6 +256,23 @@ def parse_seed_families(raw: str) -> tuple[str, ...]:
             f"seed families must be drawn from {', '.join(SEED_FAMILY_ORDER)}; got {', '.join(unknown)}"
         )
     return families
+
+
+def parse_optional_surface_index(raw: str) -> int | None:
+    value = raw.strip().lower()
+    if value in {"all", "none", "*"}:
+        return None
+    try:
+        index = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("surface index must be a non-negative integer or 'all'") from exc
+    if index < 0:
+        raise argparse.ArgumentTypeError("surface index must be a non-negative integer or 'all'")
+    return index
+
+
+def _surface_index_label(surface_index: int | None) -> str:
+    return "all" if surface_index is None else str(int(surface_index))
 
 
 def _unique_float_sequence(values: tuple[float, ...], *, atol: float = 1.0e-14) -> tuple[float, ...]:
@@ -404,7 +421,7 @@ def evaluate_seed_case(
         mirror_threshold=targets.max_mirror_ratio,
         mirror_ntheta=mirror_ntheta,
         mirror_nphi=mirror_nphi,
-        mirror_surface_index=0,
+        mirror_surface_index=None,
         elongation_threshold=targets.max_elongation,
         elongation_ntheta=elongation_ntheta,
         elongation_nphi=elongation_nphi,
@@ -634,7 +651,7 @@ def _validate_prefine_probe_config(config: QIPrefineProbeConfig) -> None:
         raise ValueError("prefine mirror grid sizes must be positive")
     if config.elongation_ntheta <= 0 or config.elongation_nphi <= 0:
         raise ValueError("prefine elongation grid sizes must be positive")
-    if config.mirror_surface_index < 0:
+    if config.mirror_surface_index is not None and config.mirror_surface_index < 0:
         raise ValueError("prefine mirror_surface_index must be non-negative")
     for ok, message in checks:
         if not ok:
@@ -778,7 +795,7 @@ def _prefine_run_command(record: dict[str, Any], config: QIPrefineProbeConfig, m
         "--prefine-mirror-nphi",
         str(config.mirror_nphi),
         "--prefine-mirror-surface-index",
-        str(config.mirror_surface_index),
+        _surface_index_label(config.mirror_surface_index),
         "--prefine-elongation-weight",
         str(config.elongation_weight),
         "--prefine-elongation-threshold",
@@ -966,7 +983,8 @@ def build_qi_prefine_probe_manifest(
                 "mirror_threshold": float(config.mirror_threshold),
                 "mirror_ntheta": int(config.mirror_ntheta),
                 "mirror_nphi": int(config.mirror_nphi),
-                "mirror_surface_index": int(config.mirror_surface_index),
+                "mirror_surface_index": config.mirror_surface_index,
+                "mirror_surface_mode": _surface_index_label(config.mirror_surface_index),
                 "elongation_weight": float(config.elongation_weight),
                 "elongation_threshold": float(config.elongation_threshold),
                 "elongation_ntheta": int(config.elongation_ntheta),
@@ -1272,7 +1290,11 @@ def _prefine_probe_diagnostic_record_from_files(
         mirror_threshold=float(qi_options_raw.get("mirror_threshold", DEFAULT_MAX_MIRROR_RATIO)),
         mirror_ntheta=int(qi_options_raw.get("mirror_ntheta", 32)),
         mirror_nphi=int(qi_options_raw.get("mirror_nphi", 32)),
-        mirror_surface_index=int(qi_options_raw.get("mirror_surface_index", 0)),
+        mirror_surface_index=(
+            None
+            if qi_options_raw.get("mirror_surface_index", None) is None
+            else int(qi_options_raw.get("mirror_surface_index"))
+        ),
         elongation_threshold=float(qi_options_raw.get("elongation_threshold", DEFAULT_MAX_ELONGATION)),
         elongation_ntheta=int(qi_options_raw.get("elongation_ntheta", 24)),
         elongation_nphi=int(qi_options_raw.get("elongation_nphi", 8)),
@@ -1878,7 +1900,11 @@ def run_qi_prefine_probe(plan: dict[str, Any], *, workflow: Any | None = None) -
             threshold=float(qi_options_raw.get("mirror_threshold", DEFAULT_MAX_MIRROR_RATIO)),
             ntheta=int(qi_options_raw.get("mirror_ntheta", 32)),
             nphi=int(qi_options_raw.get("mirror_nphi", 32)),
-            surface_index=int(qi_options_raw.get("mirror_surface_index", 0)),
+            surface_index=(
+                None
+                if qi_options_raw.get("mirror_surface_index", None) is None
+                else int(qi_options_raw.get("mirror_surface_index"))
+            ),
             qi_options=qi_options,
         )
         objective_tuples.append((mirror.J, 0.0, float(qi_options_raw["mirror_weight"])))
@@ -2316,7 +2342,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prefine-mirror-threshold", type=float, default=DEFAULT_MAX_MIRROR_RATIO)
     parser.add_argument("--prefine-mirror-ntheta", type=int, default=32)
     parser.add_argument("--prefine-mirror-nphi", type=int, default=32)
-    parser.add_argument("--prefine-mirror-surface-index", type=int, default=0)
+    parser.add_argument(
+        "--prefine-mirror-surface-index",
+        type=parse_optional_surface_index,
+        default=None,
+        help="Mirror-ratio surface index for constrained prefine probes, or 'all' to use all Boozer surfaces.",
+    )
     parser.add_argument(
         "--prefine-elongation-weight",
         type=float,
