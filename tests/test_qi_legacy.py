@@ -106,8 +106,28 @@ def test_smooth_qi_residual_preserves_legacy_synthetic_ranking():
         )
         return float(np.asarray(out["total"]))
 
+    def weighted_branch_total(booz):
+        out = quasi_isodynamic_residual_from_boozer_modes(
+            bmnc_b=jnp.asarray(booz["bmnc_b"]),
+            xm_b=jnp.asarray(booz["ixm_b"]),
+            xn_b=jnp.asarray(booz["ixn_b"]),
+            iota_b=jnp.asarray(booz["iota_b"]),
+            nfp=1,
+            nphi=33,
+            nalpha=9,
+            n_bounce=7,
+            width_weight=0.0,
+            branch_width_weight=0.0,
+            profile_weight=0.0,
+            shuffle_profile_weight=0.0,
+            weighted_shuffle_profile_weight=1.0,
+            weighted_shuffle_profile_softness=2.0e-2,
+        )
+        return float(np.asarray(out["total"]))
+
     assert legacy_qh > legacy_qi
     assert smooth_total(qh_like) > smooth_total(qi_like)
+    assert weighted_branch_total(qh_like) > weighted_branch_total(qi_like)
 
 
 def test_qi_boozer_mode_scan_reports_smooth_and_legacy_metrics(monkeypatch):
