@@ -548,7 +548,6 @@ def test_accelerated_multigrid_miss_uses_partial_and_full_parity_fallback(monkey
         input_path,
         solver="vmec2000_iter",
         solver_mode="accelerated",
-        step_size=None,
         verbose=False,
         cli_fixed_boundary_mode=True,
     )
@@ -749,7 +748,6 @@ def test_accelerated_explicit_stage_monitor_switches_to_parity(monkeypatch, tmp_
         input_path,
         solver="vmec2000_iter",
         solver_mode="accelerated",
-        step_size=None,
         verbose=False,
         cli_fixed_boundary_mode=True,
     )
