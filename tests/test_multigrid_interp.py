@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
-from vmec_jax.multigrid import interp_vmec_radial_coeffs
+import vmec_jax.multigrid as multigrid
+from vmec_jax.multigrid import interp_vmec_radial_coeffs, interp_vmec_state
+from vmec_jax.state import StateLayout, VMECState
 
 
 def _scalxc_ref(*, ns: int, m: np.ndarray) -> np.ndarray:
@@ -88,3 +91,66 @@ def test_interp_preserves_boundary_and_zeros_odd_axis():
     odd = (m.astype(int) % 2) == 1
     np.testing.assert_allclose(out[0, odd], 0.0, rtol=0.0, atol=0.0)
 
+
+def test_interp_vmec_radial_coeffs_degenerate_grids_and_shape_errors():
+    x_old = np.arange(9.0).reshape(3, 3)
+    m = np.asarray([0, 1, 2], dtype=np.int32)
+
+    np.testing.assert_allclose(np.asarray(interp_vmec_radial_coeffs(x_old, m=m, ns_new=0)), np.zeros((0, 3)))
+    np.testing.assert_allclose(
+        np.asarray(interp_vmec_radial_coeffs(np.zeros((0, 3)), m=m, ns_new=4)),
+        np.zeros((4, 3)),
+    )
+    np.testing.assert_allclose(np.asarray(interp_vmec_radial_coeffs(x_old, m=m, ns_new=3)), x_old)
+    np.testing.assert_allclose(np.asarray(interp_vmec_radial_coeffs(x_old, m=m, ns_new=1)), x_old[:1])
+    np.testing.assert_allclose(
+        np.asarray(interp_vmec_radial_coeffs(x_old[:1], m=m, ns_new=4)),
+        np.repeat(x_old[:1], 4, axis=0),
+    )
+
+    with pytest.raises(ValueError, match=r"m has shape .* expected"):
+        interp_vmec_radial_coeffs(x_old, m=np.asarray([0, 1], dtype=np.int32), ns_new=5)
+
+
+def test_interp_vmec_radial_coeffs_matches_reference_when_cache_disabled(monkeypatch):
+    rng = np.random.default_rng(2)
+    ns_old = 5
+    ns_new = 8
+    K = 7
+    m = rng.integers(0, 5, size=(K,), dtype=np.int32)
+    x_old = rng.standard_normal((ns_old, K))
+
+    monkeypatch.setattr(multigrid, "_cache_allowed", lambda: False)
+
+    out = np.asarray(interp_vmec_radial_coeffs(x_old, m=m, ns_new=ns_new))
+    ref = _interp_ref(x_old, m=m, ns_new=ns_new)
+    np.testing.assert_allclose(out, ref, rtol=0.0, atol=1.0e-14)
+
+
+def test_interp_vmec_state_empty_stage_and_mode_shape_guards():
+    layout = StateLayout(ns=3, K=3, lasym=False)
+    blocks = [np.arange(9.0).reshape(3, 3) + 10.0 * i for i in range(layout.n_fields)]
+    state = VMECState(
+        layout=layout,
+        Rcos=blocks[0],
+        Rsin=blocks[1],
+        Zcos=blocks[2],
+        Zsin=blocks[3],
+        Lcos=blocks[4],
+        Lsin=blocks[5],
+    )
+
+    empty = interp_vmec_state(state, m=np.asarray([0, 1, 2], dtype=np.int32), ns_new=0)
+    assert empty.layout == StateLayout(ns=0, K=3, lasym=False)
+    for block in empty.tree_flatten()[0]:
+        assert np.asarray(block).shape == (0, 3)
+
+    with pytest.raises(ValueError, match=r"m has shape .* expected"):
+        interp_vmec_state(state, m=np.asarray([0, 1], dtype=np.int32), ns_new=5)
+    with pytest.raises(ValueError, match=r"n has shape .* expected"):
+        interp_vmec_state(
+            state,
+            m=np.asarray([0, 1, 2], dtype=np.int32),
+            n=np.asarray([0, 1], dtype=np.int32),
+            ns_new=5,
+        )

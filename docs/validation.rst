@@ -53,7 +53,7 @@ Required CI includes a no-executable residual parity gate:
 
 .. code-block:: bash
 
-   JAX_ENABLE_X64=1 pytest -q tests/test_residue_getfsq_parity.py tests/test_vmec2000_exec_threed1.py
+   JAX_ENABLE_X64=1 pytest -q tests/test_residue_getfsq_parity.py tests/test_wout_profiles_currents_bundled_parity.py tests/test_vmec2000_exec_threed1.py
 
 ``tests/test_residue_getfsq_parity.py`` reads small bundled VMEC2000 ``wout``
 files, reconstructs the solved state, recomputes the
@@ -63,6 +63,16 @@ covers ``circular_tokamak`` and ``shaped_tokamak_pressure`` without running
 VMEC2000 or a full ``vmec_jax`` solve.  ``tests/test_vmec2000_exec_threed1.py``
 keeps the executable trace parser covered with a bundled ``threed1`` fixture
 when ``xvmec2000`` is absent from CI.
+
+``tests/test_wout_profiles_currents_bundled_parity.py`` is a second required
+no-solve wout-field gate.  It checks converged bundled equilibria directly:
+``phipf`` and ``phi`` follow the input flux profile and VMEC half-mesh
+integration, finite-beta ``pres/presf`` follow the VMEC radial stencil,
+``iotaf`` follows the ``iotas`` full-to-half mesh convention, and the stored
+surface-averaged current profiles ``jcuru/jcurv`` match the VMEC finite
+difference of ``bvco/buco`` divided by ``mu0``.  The covered fixtures include
+axisymmetric finite-beta, non-axisymmetric current-driven, 3D finite-beta, and
+``lasym=True`` solved wouts.
 
 The test suite runs ``vmec_jax`` end-to-end and compares every standard
 ``wout`` field against the VMEC2000 references.  Run with:

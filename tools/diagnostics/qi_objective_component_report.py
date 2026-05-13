@@ -213,13 +213,152 @@ def _smooth_component_record(smooth: dict[str, Any]) -> dict[str, Any]:
         "smooth_branch_width_total": _component_total(smooth, "branch_width_residuals1d"),
         "smooth_profile_total": _component_total(smooth, "profile_residuals1d"),
         "smooth_shuffle_profile_total": _component_total(smooth, "shuffle_profile_residuals1d"),
+        "smooth_weighted_shuffle_profile_total": _component_total(
+            smooth,
+            "weighted_shuffle_profile_residuals1d",
+        ),
         "smooth_aligned_profile_total": _component_total(smooth, "aligned_profile_residuals1d"),
         "smooth_residual_size": _component_size(smooth, "residuals1d"),
         "smooth_width_size": _component_size(smooth, "width_residuals1d"),
         "smooth_branch_width_size": _component_size(smooth, "branch_width_residuals1d"),
         "smooth_profile_size": _component_size(smooth, "profile_residuals1d"),
         "smooth_shuffle_profile_size": _component_size(smooth, "shuffle_profile_residuals1d"),
+        "smooth_weighted_shuffle_profile_size": _component_size(
+            smooth,
+            "weighted_shuffle_profile_residuals1d",
+        ),
         "smooth_aligned_profile_size": _component_size(smooth, "aligned_profile_residuals1d"),
+    }
+
+
+def _mean_iota_from_wout(wout: Any) -> float | None:
+    iotas = getattr(wout, "iotas", None)
+    if iotas is None:
+        return None
+    arr = np.asarray(iotas, dtype=float).ravel()
+    if arr.size <= 1:
+        return 0.0
+    return float(np.mean(arr[1:]))
+
+
+def _passes_leq(value: Any, limit: float) -> bool:
+    if value is None:
+        return False
+    return float(value) <= float(limit)
+
+
+def _passes_abs_geq(value: Any, limit: float) -> bool:
+    if value is None:
+        return False
+    return abs(float(value)) >= float(limit)
+
+
+def _annotate_wout_case_gates(
+    row: dict[str, Any],
+    *,
+    smooth_gate: float,
+    legacy_gate: float,
+    abs_iota_min: float,
+) -> dict[str, Any]:
+    """Attach flat promotion-gate fields used for mirror-cleanup ranking."""
+
+    out = dict(row)
+    mean_iota = out.get("mean_iota")
+    out["abs_mean_iota"] = None if mean_iota is None else abs(float(mean_iota))
+    out["qi_smooth_gate_limit"] = float(smooth_gate)
+    out["qi_legacy_gate_limit"] = float(legacy_gate)
+    out["abs_iota_min"] = float(abs_iota_min)
+
+    smooth_ok = _passes_leq(out.get("smooth_total"), smooth_gate)
+    legacy_ok = _passes_leq(out.get("legacy_total"), legacy_gate)
+    iota_ok = _passes_abs_geq(mean_iota, abs_iota_min)
+    mirror_ok = _passes_leq(out.get("mirror_ratio_max"), out.get("mirror_ratio_target", np.inf))
+    elongation_ok = _passes_leq(out.get("max_elongation"), out.get("elongation_target", np.inf))
+    qi_iota_ok = smooth_ok and legacy_ok and iota_ok
+    engineering_ok = qi_iota_ok and mirror_ok and elongation_ok
+
+    failures = []
+    if not smooth_ok:
+        failures.append("smooth_qi")
+    if not legacy_ok:
+        failures.append("legacy_qi")
+    if not iota_ok:
+        failures.append("abs_iota")
+    if not mirror_ok:
+        failures.append("mirror_ratio")
+    if not elongation_ok:
+        failures.append("elongation")
+
+    out.update(
+        {
+            "qi_smooth_gate_passed": smooth_ok,
+            "qi_legacy_gate_passed": legacy_ok,
+            "qi_iota_gate_passed": qi_iota_ok,
+            "qi_mirror_gate_passed": mirror_ok,
+            "qi_elongation_gate_passed": elongation_ok,
+            "qi_engineering_gate_passed": engineering_ok,
+            "qi_mirror_cleanup_candidate": qi_iota_ok and not engineering_ok,
+            "qi_gate_failures": failures,
+        }
+    )
+    return out
+
+
+def _ranking_row(row: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "case",
+        "smooth_total",
+        "legacy_total",
+        "mirror_ratio_max",
+        "mirror_excess_max",
+        "max_elongation",
+        "aspect",
+        "mean_iota",
+        "abs_mean_iota",
+        "qi_iota_gate_passed",
+        "qi_engineering_gate_passed",
+        "qi_mirror_cleanup_candidate",
+        "qi_gate_failures",
+    )
+    return {key: row.get(key) for key in keys}
+
+
+def _sort_value(value: Any) -> float:
+    if value is None:
+        return float("inf")
+    return float(value)
+
+
+def _wout_rankings(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    mirror_cleanup = sorted(
+        rows,
+        key=lambda row: (
+            not bool(row.get("qi_iota_gate_passed")),
+            _sort_value(row.get("mirror_ratio_max")),
+            _sort_value(row.get("legacy_total")),
+            _sort_value(row.get("smooth_total")),
+        ),
+    )
+    engineering = sorted(
+        (row for row in rows if bool(row.get("qi_engineering_gate_passed"))),
+        key=lambda row: (
+            _sort_value(row.get("mirror_ratio_max")),
+            _sort_value(row.get("legacy_total")),
+            _sort_value(row.get("smooth_total")),
+        ),
+    )
+    qi_iota = sorted(
+        (row for row in rows if bool(row.get("qi_iota_gate_passed"))),
+        key=lambda row: (
+            _sort_value(row.get("legacy_total")),
+            _sort_value(row.get("smooth_total")),
+            _sort_value(row.get("mirror_ratio_max")),
+        ),
+    )
+    return {
+        "mirror_cleanup": [_ranking_row(row) for row in mirror_cleanup],
+        "qi_iota_candidates": [_ranking_row(row) for row in qi_iota],
+        "engineering_candidates": [_ranking_row(row) for row in engineering],
     }
 
 
@@ -322,6 +461,20 @@ def evaluate_wout_case(
     nphi_out: int,
     mboz: int,
     nboz: int,
+    include_bounce_endpoints: bool,
+    softness: float,
+    width_weight: float,
+    branch_width_weight: float,
+    branch_width_softness: float,
+    profile_weight: float,
+    shuffle_profile_weight: float,
+    shuffle_profile_softness: float,
+    weighted_shuffle_profile_weight: float,
+    weighted_shuffle_profile_softness: float,
+    aligned_profile_weight: float,
+    aligned_profile_softness: float,
+    aligned_profile_trap_level: float,
+    aligned_profile_trap_softness: float,
     phimin: float,
     mirror_threshold: float,
     mirror_ntheta: int,
@@ -362,13 +515,20 @@ def evaluate_wout_case(
         nphi=nphi,
         nalpha=nalpha,
         n_bounce=n_bounce,
-        softness=2.0e-2,
-        width_weight=1.0,
-        branch_width_weight=0.5,
-        branch_width_softness=2.0e-2,
-        profile_weight=0.1,
-        shuffle_profile_weight=1.0,
-        shuffle_profile_softness=2.0e-2,
+        include_bounce_endpoints=include_bounce_endpoints,
+        softness=softness,
+        width_weight=width_weight,
+        branch_width_weight=branch_width_weight,
+        branch_width_softness=branch_width_softness,
+        profile_weight=profile_weight,
+        shuffle_profile_weight=shuffle_profile_weight,
+        shuffle_profile_softness=shuffle_profile_softness,
+        weighted_shuffle_profile_weight=weighted_shuffle_profile_weight,
+        weighted_shuffle_profile_softness=weighted_shuffle_profile_softness,
+        aligned_profile_weight=aligned_profile_weight,
+        aligned_profile_softness=aligned_profile_softness,
+        aligned_profile_trap_level=aligned_profile_trap_level,
+        aligned_profile_trap_softness=aligned_profile_trap_softness,
         phimin=phimin,
         flux_local=flux,
     )
@@ -424,10 +584,26 @@ def evaluate_wout_case(
         "ntor": int(wout.ntor),
         "ns": int(wout.ns),
         "signgs": signgs,
+        "aspect": _as_float(getattr(wout, "aspect", None)),
+        "mean_iota": _mean_iota_from_wout(wout),
         "surfaces": [float(s) for s in surfaces],
         "phimin": float(phimin),
         "mboz": int(mboz),
         "nboz": int(nboz),
+        "include_bounce_endpoints": bool(include_bounce_endpoints),
+        "softness": float(softness),
+        "width_weight": float(width_weight),
+        "branch_width_weight": float(branch_width_weight),
+        "branch_width_softness": float(branch_width_softness),
+        "profile_weight": float(profile_weight),
+        "shuffle_profile_weight": float(shuffle_profile_weight),
+        "shuffle_profile_softness": float(shuffle_profile_softness),
+        "weighted_shuffle_profile_weight": float(weighted_shuffle_profile_weight),
+        "weighted_shuffle_profile_softness": float(weighted_shuffle_profile_softness),
+        "aligned_profile_weight": float(aligned_profile_weight),
+        "aligned_profile_softness": float(aligned_profile_softness),
+        "aligned_profile_trap_level": float(aligned_profile_trap_level),
+        "aligned_profile_trap_softness": float(aligned_profile_trap_softness),
         **_smooth_component_record(smooth),
         "legacy_total": float(legacy["total"]),
         "legacy_residual_size": int(legacy.get("residual_size", 0)),
@@ -527,6 +703,20 @@ def build_wout_report(
     nphi_out: int,
     mboz: int,
     nboz: int,
+    include_bounce_endpoints: bool,
+    softness: float,
+    width_weight: float,
+    branch_width_weight: float,
+    branch_width_softness: float,
+    profile_weight: float,
+    shuffle_profile_weight: float,
+    shuffle_profile_softness: float,
+    weighted_shuffle_profile_weight: float,
+    weighted_shuffle_profile_softness: float,
+    aligned_profile_weight: float,
+    aligned_profile_softness: float,
+    aligned_profile_trap_level: float,
+    aligned_profile_trap_softness: float,
     phimin: float,
     mirror_threshold: float,
     mirror_ntheta: int,
@@ -538,9 +728,13 @@ def build_wout_report(
     lgradb_surface_index: int,
     lgradb_ntheta: int,
     lgradb_nphi: int,
+    smooth_gate: float,
+    legacy_gate: float,
+    abs_iota_min: float,
 ) -> dict[str, Any]:
-    rows = [
-        evaluate_wout_case(
+    rows = []
+    for label, input_path, wout_path in cases:
+        row = evaluate_wout_case(
             label,
             input_path,
             wout_path,
@@ -551,6 +745,20 @@ def build_wout_report(
             nphi_out=nphi_out,
             mboz=mboz,
             nboz=nboz,
+            include_bounce_endpoints=include_bounce_endpoints,
+            softness=softness,
+            width_weight=width_weight,
+            branch_width_weight=branch_width_weight,
+            branch_width_softness=branch_width_softness,
+            profile_weight=profile_weight,
+            shuffle_profile_weight=shuffle_profile_weight,
+            shuffle_profile_softness=shuffle_profile_softness,
+            weighted_shuffle_profile_weight=weighted_shuffle_profile_weight,
+            weighted_shuffle_profile_softness=weighted_shuffle_profile_softness,
+            aligned_profile_weight=aligned_profile_weight,
+            aligned_profile_softness=aligned_profile_softness,
+            aligned_profile_trap_level=aligned_profile_trap_level,
+            aligned_profile_trap_softness=aligned_profile_trap_softness,
             phimin=phimin,
             mirror_threshold=mirror_threshold,
             mirror_ntheta=mirror_ntheta,
@@ -563,8 +771,14 @@ def build_wout_report(
             lgradb_ntheta=lgradb_ntheta,
             lgradb_nphi=lgradb_nphi,
         )
-        for label, input_path, wout_path in cases
-    ]
+        rows.append(
+            _annotate_wout_case_gates(
+                row,
+                smooth_gate=smooth_gate,
+                legacy_gate=legacy_gate,
+                abs_iota_min=abs_iota_min,
+            )
+        )
     return {
         "mode": "wout",
         "resolution": {
@@ -575,6 +789,7 @@ def build_wout_report(
             "nalpha": int(nalpha),
             "n_bounce": int(n_bounce),
             "nphi_out": int(nphi_out),
+            "include_bounce_endpoints": bool(include_bounce_endpoints),
             "mirror_ntheta": int(mirror_ntheta),
             "mirror_nphi": int(mirror_nphi),
             "elongation_ntheta": int(elongation_ntheta),
@@ -582,10 +797,28 @@ def build_wout_report(
             "lgradb_ntheta": int(lgradb_ntheta),
             "lgradb_nphi": int(lgradb_nphi),
         },
+        "smooth_qi_settings": {
+            "softness": float(softness),
+            "width_weight": float(width_weight),
+            "branch_width_weight": float(branch_width_weight),
+            "branch_width_softness": float(branch_width_softness),
+            "profile_weight": float(profile_weight),
+            "shuffle_profile_weight": float(shuffle_profile_weight),
+            "shuffle_profile_softness": float(shuffle_profile_softness),
+            "weighted_shuffle_profile_weight": float(weighted_shuffle_profile_weight),
+            "weighted_shuffle_profile_softness": float(weighted_shuffle_profile_softness),
+            "aligned_profile_weight": float(aligned_profile_weight),
+            "aligned_profile_softness": float(aligned_profile_softness),
+            "aligned_profile_trap_level": float(aligned_profile_trap_level),
+            "aligned_profile_trap_softness": float(aligned_profile_trap_softness),
+        },
         "reference_notes": {
             "classic_qi_script": str(DEFAULT_REFERENCE_ROOT / "QI_fixed_resolution.py"),
             "homotopy_qi_script": str(DEFAULT_REFERENCE_ROOT / "homotopy_QI.py"),
             "thresholds": {
+                "smooth_qi": float(smooth_gate),
+                "legacy_qi": float(legacy_gate),
+                "abs_iota_min": float(abs_iota_min),
                 "mirror_ratio": float(mirror_threshold),
                 "elongation": float(elongation_threshold),
                 "lgradb": float(lgradb_threshold),
@@ -599,6 +832,7 @@ def build_wout_report(
         },
         "cases": rows,
         "comparisons_to_first_case": _comparison_rows(rows),
+        "rankings": _wout_rankings(rows),
     }
 
 
@@ -614,11 +848,17 @@ def _json_default(value: Any) -> Any:
 
 def _print_wout_summary(report: dict[str, Any]) -> None:
     for row in report["cases"]:
+        gate = "eng" if row.get("qi_engineering_gate_passed") else "qi" if row.get("qi_iota_gate_passed") else "fail"
         print(
             f"{row['case']}: smooth={row['smooth_total']:.3e} "
             f"legacy={row['legacy_total']:.3e} mirror={row['mirror_ratio_max']:.3f} "
-            f"elong={row['max_elongation']:.3f} lgradb_min={row['lgradb_min']:.3e}"
+            f"elong={row['max_elongation']:.3f} iota={row['mean_iota']:.3f} "
+            f"gate={gate} lgradb_min={row['lgradb_min']:.3e}"
         )
+    ranked = report.get("rankings", {}).get("mirror_cleanup", [])
+    if ranked:
+        labels = ", ".join(row["case"] for row in ranked[:5])
+        print(f"mirror-cleanup ranking: {labels}")
     for row in report["comparisons_to_first_case"]:
         print(f"comparison {row['case']} vs {row['baseline']}: {json.dumps(row, sort_keys=True)}")
 
@@ -641,7 +881,24 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--nalpha", type=int, default=9)
     parser.add_argument("--n-bounce", type=int, default=7)
     parser.add_argument("--nphi-out", type=int, default=101)
+    parser.add_argument("--include-bounce-endpoints", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--softness", type=float, default=2.0e-2)
+    parser.add_argument("--width-weight", type=float, default=1.0)
+    parser.add_argument("--branch-width-weight", type=float, default=0.5)
+    parser.add_argument("--branch-width-softness", type=float, default=2.0e-2)
+    parser.add_argument("--profile-weight", type=float, default=0.1)
+    parser.add_argument("--shuffle-profile-weight", type=float, default=1.0)
+    parser.add_argument("--shuffle-profile-softness", type=float, default=2.0e-2)
+    parser.add_argument("--weighted-shuffle-profile-weight", type=float, default=0.0)
+    parser.add_argument("--weighted-shuffle-profile-softness", type=float, default=2.0e-2)
+    parser.add_argument("--aligned-profile-weight", type=float, default=0.0)
+    parser.add_argument("--aligned-profile-softness", type=float, default=2.0e-2)
+    parser.add_argument("--aligned-profile-trap-level", type=float, default=0.65)
+    parser.add_argument("--aligned-profile-trap-softness", type=float, default=5.0e-2)
     parser.add_argument("--phimin", type=float, default=0.0)
+    parser.add_argument("--smooth-gate", type=float, default=2.0e-3)
+    parser.add_argument("--legacy-gate", type=float, default=1.0e-3)
+    parser.add_argument("--abs-iota-min", type=float, default=0.41)
     parser.add_argument("--mirror-threshold", type=float, default=0.21)
     parser.add_argument("--mirror-ntheta", type=int, default=32)
     parser.add_argument("--mirror-nphi", type=int, default=32)
@@ -672,6 +929,20 @@ def main(argv: list[str] | None = None) -> None:
             nphi_out=args.nphi_out,
             mboz=args.mboz,
             nboz=args.nboz,
+            include_bounce_endpoints=args.include_bounce_endpoints,
+            softness=args.softness,
+            width_weight=args.width_weight,
+            branch_width_weight=args.branch_width_weight,
+            branch_width_softness=args.branch_width_softness,
+            profile_weight=args.profile_weight,
+            shuffle_profile_weight=args.shuffle_profile_weight,
+            shuffle_profile_softness=args.shuffle_profile_softness,
+            weighted_shuffle_profile_weight=args.weighted_shuffle_profile_weight,
+            weighted_shuffle_profile_softness=args.weighted_shuffle_profile_softness,
+            aligned_profile_weight=args.aligned_profile_weight,
+            aligned_profile_softness=args.aligned_profile_softness,
+            aligned_profile_trap_level=args.aligned_profile_trap_level,
+            aligned_profile_trap_softness=args.aligned_profile_trap_softness,
             phimin=args.phimin,
             mirror_threshold=args.mirror_threshold,
             mirror_ntheta=args.mirror_ntheta,
@@ -683,6 +954,9 @@ def main(argv: list[str] | None = None) -> None:
             lgradb_surface_index=args.lgradb_surface_index,
             lgradb_ntheta=args.lgradb_ntheta,
             lgradb_nphi=args.lgradb_nphi,
+            smooth_gate=args.smooth_gate,
+            legacy_gate=args.legacy_gate,
+            abs_iota_min=args.abs_iota_min,
         )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)

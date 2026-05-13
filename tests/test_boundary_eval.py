@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import jax
 import numpy as np
@@ -8,7 +9,13 @@ import numpy as np
 from vmec_jax.namelist import read_indata
 from vmec_jax.modes import vmec_mode_table
 from vmec_jax.grids import make_angle_grid
-from vmec_jax.boundary import boundary_from_indata, boundary_from_input_convention, boundary_input_from_indata
+from vmec_jax.boundary import (
+    boundary_aspect_ratio,
+    boundary_aspect_ratio_from_static,
+    boundary_from_indata,
+    boundary_from_input_convention,
+    boundary_input_from_indata,
+)
 from vmec_jax.fourier import build_helical_basis, eval_fourier
 
 
@@ -43,6 +50,13 @@ def test_circular_boundary(tmp_path: Path):
     theta = grid.theta
     assert np.allclose(R[:, 0], R0 + a * np.cos(theta), atol=1e-12)
     assert np.allclose(Z[:, 0], a * np.sin(theta), atol=1e-12)
+
+    aspect = float(boundary_aspect_ratio(bdy, basis))
+    aspect_from_static = float(
+        boundary_aspect_ratio_from_static(bdy, SimpleNamespace(modes=modes, grid=grid))
+    )
+    np.testing.assert_allclose(aspect, R0 / a, rtol=1.0e-2, atol=0.0)
+    np.testing.assert_allclose(aspect_from_static, aspect, rtol=0.0, atol=1.0e-12)
 
 
 def test_boundary_input_conversion_matches_solver_boundary(tmp_path: Path):
