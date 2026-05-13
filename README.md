@@ -1,6 +1,7 @@
 # vmec-jax
 
 [![PyPI version](https://img.shields.io/pypi/v/vmec-jax.svg)](https://pypi.org/project/vmec-jax/)
+[![Conda Version](https://img.shields.io/conda/vn/conda-forge/vmec-jax.svg)](https://github.com/conda-forge/vmec-jax-feedstock)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://github.com/uwplasma/vmec_jax/blob/main/pyproject.toml)
 [![License](https://img.shields.io/github/license/uwplasma/vmec_jax)](https://github.com/uwplasma/vmec_jax/blob/main/LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/uwplasma/vmec_jax/ci.yml?branch=main&label=ci)](https://github.com/uwplasma/vmec_jax/actions/workflows/ci.yml)
@@ -13,6 +14,8 @@ and free-boundary ideal-MHD equilibria.
 
 ## Install
 
+## From PyPI
+
 ```bash
 pip install vmec-jax
 ```
@@ -22,6 +25,22 @@ QI optimization uses `booz_xform_jax` for the differentiable Boozer transform:
 ```bash
 pip install "vmec-jax[qi]"
 ```
+
+## From conda-forge
+
+`vmec-jax` can be installed as a conda package from [conda-forge](https://github.com/conda-forge/vmec-jax-feedstock) into a particular project with [Pixi](https://pixi.prefix.dev/)
+
+```
+pixi add vmec-jax
+```
+
+or into a conda environment with [conda](https://docs.conda.io/projects/conda/)
+
+```
+conda install --channel conda-forge vmec-jax
+```
+
+## From source
 
 Developer (editable) install:
 
