@@ -2465,7 +2465,7 @@ def strict_update_velocity_state_advance(
     and acceptance/restart logic and is intended as the first local reverse-mode
     target for the discrete-adjoint refactor.
     """
-    from .solve import _enforce_fixed_boundary_and_axis, _enforce_lambda_gauge, _mode00_index
+    from .solve import _enforce_fixed_boundary_and_axis, _mode00_index
     from .vmec_parity import _mn_cos_to_signed_cached, _mn_sin_to_signed_cached, signed_maps_from_modes
     from .vmec_residue import vmec_scalxc_from_s
 
@@ -2519,20 +2519,6 @@ def strict_update_velocity_state_advance(
         enforce_edge=True,
         enforce_lambda_axis=True,
         idx00=idx00,
-    )
-    Lcos, Lsin = _enforce_lambda_gauge(
-        jnp.asarray(state_try.Lcos),
-        jnp.asarray(state_try.Lsin),
-        idx00=idx00,
-    )
-    return type(state_try)(
-        layout=state_try.layout,
-        Rcos=state_try.Rcos,
-        Rsin=state_try.Rsin,
-        Zcos=state_try.Zcos,
-        Zsin=state_try.Zsin,
-        Lcos=Lcos,
-        Lsin=Lsin,
     )
 
 

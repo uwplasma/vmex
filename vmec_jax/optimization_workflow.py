@@ -1337,10 +1337,16 @@ def repeated_stage_modes(
     continuation_nfev: int,
     repeats: int = 5,
 ) -> list[int]:
-    """Same-mode repeated continuation used by the QI example."""
+    """Same-mode repeated continuation used by the QI example.
 
-    if bool(use_mode_continuation) and int(max_mode) > 1 and int(continuation_nfev) > 0:
-        return [int(max_mode)] * int(repeats)
+    Unlike :func:`qs_stage_modes`, repeated same-mode continuation has no
+    lower-mode stages, so a zero ``continuation_nfev`` should not disable the
+    repeated max-mode sequence.
+    """
+
+    del continuation_nfev
+    if bool(use_mode_continuation) and int(max_mode) > 1:
+        return [int(max_mode)] * max(1, int(repeats))
     return [int(max_mode)]
 
 

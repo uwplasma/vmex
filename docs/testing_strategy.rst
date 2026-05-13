@@ -15,7 +15,7 @@ Target State
 - Routine local gate:
   ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt"``.
 - Last recorded local CI-equivalent coverage baseline: clean on 2026-05-13 with
-  ``988 passed, 20 skipped, 90 deselected``, ``85.06%`` coverage, and ``8:32``
+  ``991 passed, 20 skipped, 95 deselected``, ``85.37%`` coverage, and ``9:25``
   runtime using the compact terminal coverage report.
 - Near-term coverage target: keep the required ``85%`` actual line coverage gate
   green with meaningful fast and bounded-physics tests while preserving
@@ -84,7 +84,9 @@ Local Coverage Workflow
 -----------------------
 
 Run coverage from the repository root after installing the development extras
-or at least ``pytest-cov``.
+or at least ``pytest-cov``.  The CI coverage job installs ``.[plots]`` so the
+matplotlib-backed plotting tests contribute to the required line-coverage gate
+instead of being skipped.
 
 Required CI-equivalent coverage:
 

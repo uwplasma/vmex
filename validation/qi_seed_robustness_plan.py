@@ -101,23 +101,63 @@ class OptionalParityCommand:
 def _optional_parity_commands() -> list[OptionalParityCommand]:
     return [
         OptionalParityCommand(
-            command_id="simsopt-qh-formula-smoke",
+            command_id="simsopt-qs-family-formula",
             backend="SIMSOPT",
             required_ci=False,
             env=["RUN_SIMSOPT_VALIDATION=1"],
             command=(
                 "RUN_SIMSOPT_VALIDATION=1 pytest -q "
                 "tests/test_simsopt_optional_validation.py::"
-                "test_qh_quasisymmetry_residual_matches_simsopt_wout_formula"
+                "test_quasisymmetry_residual_family_matches_simsopt_wout_formula"
             ),
             bounded_by=[
-                "uses one bundled QH wout fixture",
+                "uses bundled QA and QH wout fixtures",
                 "uses three radial surfaces and a 15x16 angular grid",
                 "skips unless RUN_SIMSOPT_VALIDATION=1 and SIMSOPT is importable",
             ],
             validates=[
-                "VMEC-only quasisymmetry residual formula matches SIMSOPT diagnostics",
+                "VMEC-only QA/QH quasisymmetry residual formulas match SIMSOPT diagnostics",
                 "formula-level parity remains available without launching optimization",
+            ],
+        ),
+        OptionalParityCommand(
+            command_id="simsopt-qs-family-state",
+            backend="SIMSOPT",
+            required_ci=False,
+            env=["RUN_SIMSOPT_VALIDATION=1"],
+            command=(
+                "RUN_SIMSOPT_VALIDATION=1 pytest -q "
+                "tests/test_simsopt_optional_validation.py::"
+                "test_quasisymmetry_state_diagnostic_family_matches_simsopt_converged_wout"
+            ),
+            bounded_by=[
+                "uses bundled QA and QH converged wout fixtures",
+                "uses the same low angular grid as the formula smoke",
+                "skips unless RUN_SIMSOPT_VALIDATION=1 and SIMSOPT is importable",
+            ],
+            validates=[
+                "State-derived VMEC diagnostics stay consistent with SIMSOPT QS residuals",
+                "QA and QH optimization objectives use the same residual convention as the reference code",
+            ],
+        ),
+        OptionalParityCommand(
+            command_id="vmec2000-converged-wout-smoke",
+            backend="VMEC2000 executable",
+            required_ci=False,
+            env=["VMEC2000_EXEC=/path/to/xvmec2000", "VMEC2000_INTEGRATION=1"],
+            command=(
+                "VMEC2000_EXEC=/path/to/xvmec2000 VMEC2000_INTEGRATION=1 pytest -q "
+                "tests/test_vmec2000_exec_fast_validation.py::"
+                "test_vmec2000_converged_wout_diagnostics_validation"
+            ),
+            bounded_by=[
+                "uses three low-resolution fixed-boundary inputs, including 3D QH",
+                "patches NS/NITER/FTOL to bounded converged end-state runs",
+                "uses a 120s executable timeout per case",
+            ],
+            validates=[
+                "converged wout geometry, profiles, field coefficients, and scalar diagnostics against VMEC2000",
+                "end-state parity remains available without brittle finite-step trace matching",
             ],
         ),
         OptionalParityCommand(
@@ -271,16 +311,16 @@ def _lanes() -> list[ValidationLane]:
         ),
         ValidationLane(
             lane_id="simsopt-optional",
-            title="Optional SIMSOPT formula parity",
+            title="Optional SIMSOPT QA/QH formula and state parity",
             required_ci=False,
             prerequisites=["SIMSOPT installed locally", "RUN_SIMSOPT_VALIDATION=1"],
             command=(
                 "RUN_SIMSOPT_VALIDATION=1 pytest -q "
-                "tests/test_simsopt_optional_validation.py::"
-                "test_qh_quasisymmetry_residual_matches_simsopt_wout_formula"
+                "tests/test_simsopt_optional_validation.py"
             ),
             acceptance=[
-                "VMEC-only QS residuals match SIMSOPT diagnostics on the bundled QH wout.",
+                "VMEC-only QS residuals match SIMSOPT diagnostics on bundled QA and QH wouts.",
+                "State-derived VMEC diagnostics match SIMSOPT on the same converged fixtures.",
                 "The test skips instead of failing when SIMSOPT is unavailable.",
             ],
             artifact_paths=[],
@@ -292,11 +332,10 @@ def _lanes() -> list[ValidationLane]:
             prerequisites=["local VMEC2000 executable", "VMEC2000_EXEC", "VMEC2000_INTEGRATION=1"],
             command=(
                 "VMEC2000_EXEC=/path/to/xvmec2000 VMEC2000_INTEGRATION=1 "
-                "pytest -q tests/test_vmec2000_exec_fast_validation.py::"
-                "test_fast_vmec2000_stage_trace_validation_cases"
+                "pytest -q tests/test_vmec2000_exec_fast_validation.py"
             ),
             acceptance=[
-                "Executable-backed parity checks pass on local VMEC2000 output.",
+                "Executable-backed stage-trace and converged-wout parity checks pass on local VMEC2000 output.",
                 "The broader vmec2000 marker suite remains manual/scheduled, not required PR CI.",
             ],
             artifact_paths=[],

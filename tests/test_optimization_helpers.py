@@ -408,7 +408,7 @@ def test_best_exact_point_ignores_nonfinite_residuals_and_copies_arrays():
     assert opt._best_exact_cost == pytest.approx(0.15625)
 
 
-def test_stage_mode_helpers_disable_continuation_for_direct_or_zero_budget():
+def test_stage_mode_helpers_handle_direct_zero_budget_and_repeated_qi_policy():
     import vmec_jax.optimization_workflow as workflow
 
     assert workflow.qs_stage_modes(max_mode=3, use_mode_continuation=False, continuation_nfev=5) == [3]
@@ -416,7 +416,13 @@ def test_stage_mode_helpers_disable_continuation_for_direct_or_zero_budget():
     assert workflow.qs_stage_modes(max_mode=1, use_mode_continuation=True, continuation_nfev=5) == [1]
 
     assert workflow.repeated_stage_modes(max_mode=3, use_mode_continuation=False, continuation_nfev=5) == [3]
-    assert workflow.repeated_stage_modes(max_mode=3, use_mode_continuation=True, continuation_nfev=0) == [3]
+    assert workflow.repeated_stage_modes(max_mode=3, use_mode_continuation=True, continuation_nfev=0) == [
+        3,
+        3,
+        3,
+        3,
+        3,
+    ]
     assert workflow.repeated_stage_modes(max_mode=3, use_mode_continuation=True, continuation_nfev=5, repeats=4) == [
         3,
         3,

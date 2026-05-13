@@ -37,6 +37,8 @@ def test_performance_matrix_auto_backend_preserves_jax_selection():
             "inherit",
             "--replay-column-chunk",
             "16",
+            "--dynamic-replay-mode",
+            "whole_scan",
         ]
     )
     env = tool.child_env(
@@ -53,6 +55,7 @@ def test_performance_matrix_auto_backend_preserves_jax_selection():
     assert env["JAX_PLATFORMS"] == "cuda"
     assert env["PYTHONPATH"].split(os.pathsep)[0] == str(REPO_ROOT)
     assert env["VMEC_JAX_REPLAY_COLUMN_CHUNK"] == "16"
+    assert env["VMEC_JAX_DYNAMIC_REPLAY_MODE"] == "whole_scan"
     assert "JAX_ENABLE_X64" not in env
 
 
@@ -125,6 +128,13 @@ def test_performance_matrix_exact_command_can_request_memory_profile(tmp_path):
             "3",
             "--callback",
             "gradient",
+            "--method",
+            "scipy_matrix_free",
+            "--scipy-tr-solver",
+            "exact",
+            "--lsmr-maxiter",
+            "5",
+            "--trial-use-scan",
             "--trace",
             "--device-memory-profile",
         ]
@@ -146,6 +156,10 @@ def test_performance_matrix_exact_command_can_request_memory_profile(tmp_path):
     assert command[command.index("--problem") + 1] == "qa"
     assert command[command.index("--max-mode") + 1] == "3"
     assert command[command.index("--callback") + 1] == "gradient"
+    assert command[command.index("--method") + 1] == "scipy_matrix_free"
+    assert command[command.index("--scipy-tr-solver") + 1] == "exact"
+    assert command[command.index("--lsmr-maxiter") + 1] == "5"
+    assert "--trial-use-scan" in command
     assert command[command.index("--trace-outdir") + 1] == str(trace)
     assert command[command.index("--device-memory-profile-out") + 1] == str(memory)
 
@@ -175,3 +189,5 @@ def test_performance_matrix_dry_run_writes_summary(tmp_path):
     assert payload["runs"][0]["backend"] == "auto"
     assert payload["runs"][0]["dry_run"] is True
     assert payload["runs"][0]["exit_code"] is None
+    assert payload["runs"][0]["stdout_path"].endswith(".stdout.log")
+    assert payload["runs"][0]["stderr_path"].endswith(".stderr.log")

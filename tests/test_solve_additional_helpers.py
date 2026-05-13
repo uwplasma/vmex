@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+import vmec_jax.solve as solve_module
 from vmec_jax.solve import (
     _can_reassemble_precond_mats,
     _ForceBlocks,
@@ -59,6 +60,7 @@ from vmec_jax.solve import (
     _zero_coeff_column,
     _zero_coeff_column_np,
     first_step_diagnostics,
+    solve_lambda_gd,
 )
 from vmec_jax.vmec_tomnsp import TomnspsRZL
 from vmec_jax.state import StateLayout, VMECState
@@ -76,6 +78,146 @@ def _state_from_value(value: float, *, ns: int = 3, k: int = 3) -> VMECState:
         Lcos=arr.copy(),
         Lsin=arr.copy(),
     )
+
+
+def _lambda_solver_static(*, ns: int = 2, k: int = 2):
+    return SimpleNamespace(
+        cfg=SimpleNamespace(nfp=1),
+        modes=SimpleNamespace(m=np.arange(k, dtype=int), n=np.zeros(k, dtype=int)),
+        basis=object(),
+        s=np.linspace(0.0, 1.0, ns),
+        grid=SimpleNamespace(theta=np.asarray([0.0, np.pi]), zeta=np.asarray([0.0])),
+    )
+
+
+def _lambda_solver_state(*, ns: int = 2, k: int = 2) -> VMECState:
+    layout = StateLayout(ns=ns, K=k, lasym=False)
+    zeros = np.zeros((ns, k), dtype=float)
+    lcos = np.zeros((ns, k), dtype=float)
+    lsin = np.zeros((ns, k), dtype=float)
+    lcos[:, 1] = np.asarray([0.3, -0.2])[:ns]
+    lsin[:, 1] = np.asarray([-0.4, 0.25])[:ns]
+    return VMECState(
+        layout=layout,
+        Rcos=np.ones((ns, k), dtype=float),
+        Rsin=zeros.copy(),
+        Zcos=zeros.copy(),
+        Zsin=np.ones((ns, k), dtype=float),
+        Lcos=lcos,
+        Lsin=lsin,
+    )
+
+
+def _patch_tiny_lambda_problem(monkeypatch):
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import jnp
+
+    def fake_eval_geom(state, _static):
+        shape = jnp.asarray(state.Lcos).shape
+        return SimpleNamespace(
+            g_tt=jnp.ones(shape),
+            g_tp=jnp.zeros(shape),
+            g_pp=2.0 * jnp.ones(shape),
+            sqrtg=jnp.ones(shape),
+        )
+
+    monkeypatch.setattr(solve_module, "eval_geom", fake_eval_geom)
+    monkeypatch.setattr(
+        solve_module,
+        "eval_fourier_dtheta",
+        lambda Lcos, _Lsin, *_args, **_kwargs: jnp.asarray(Lcos),
+    )
+    monkeypatch.setattr(
+        solve_module,
+        "eval_fourier_dzeta_phys",
+        lambda _Lcos, Lsin, *_args, **_kwargs: jnp.asarray(Lsin),
+    )
+    monkeypatch.setattr(
+        solve_module,
+        "bsup_from_sqrtg_lambda",
+        lambda *, lam_u, lam_v, phipf, chipf, lamscale, **_kwargs: (
+            lam_u + 0.1 * jnp.asarray(phipf)[:, None],
+            lam_v + 0.2 * jnp.asarray(chipf)[:, None] * jnp.asarray(lamscale),
+        ),
+    )
+
+
+def test_solve_lambda_gd_tiny_problem_descends_with_mode_preconditioner(monkeypatch, capsys):
+    _patch_tiny_lambda_problem(monkeypatch)
+    state = _lambda_solver_state()
+    static = _lambda_solver_static()
+
+    res = solve_lambda_gd(
+        state,
+        static,
+        phipf=np.ones(2),
+        chipf=np.asarray([0.3, 0.4]),
+        signgs=1,
+        lamscale=np.asarray([1.0, 1.1]),
+        max_iter=5,
+        step_size=0.2,
+        grad_tol=0.0,
+        max_backtracks=3,
+        jit_grad=True,
+        preconditioner="mode_diag",
+        precond_exponent=1.0,
+        verbose=True,
+    )
+
+    assert res.n_iter >= 1
+    assert np.isfinite(res.wb_history).all()
+    assert np.all(np.diff(res.wb_history) < 0.0)
+    assert float(res.wb_history[-1]) < float(res.wb_history[0])
+    assert res.diagnostics["idx00"] == 0
+    assert res.diagnostics["grad_tol"] == 0.0
+    np.testing.assert_allclose(np.asarray(res.state.Lcos)[:, 0], 0.0)
+    np.testing.assert_allclose(np.asarray(res.state.Lsin)[:, 0], 0.0)
+    assert "[solve_lambda_gd] iter=000" in capsys.readouterr().out
+
+
+def test_solve_lambda_gd_line_search_failure_stops_without_accepting(monkeypatch, capsys):
+    _patch_tiny_lambda_problem(monkeypatch)
+    state = _lambda_solver_state()
+
+    res = solve_lambda_gd(
+        state,
+        _lambda_solver_static(),
+        phipf=np.ones(2),
+        chipf=np.ones(2),
+        signgs=1,
+        lamscale=np.ones(2),
+        max_iter=3,
+        step_size=0.0,
+        grad_tol=0.0,
+        max_backtracks=2,
+        verbose=True,
+    )
+
+    assert res.n_iter == 0
+    assert res.wb_history.shape == (1,)
+    np.testing.assert_allclose(np.asarray(res.state.Lcos), np.asarray(state.Lcos))
+    np.testing.assert_allclose(np.asarray(res.state.Lsin), np.asarray(state.Lsin))
+    np.testing.assert_allclose(res.step_history, [0.0])
+    assert "line search failed" in capsys.readouterr().out
+
+
+def test_solve_lambda_gd_validates_solver_controls(monkeypatch):
+    _patch_tiny_lambda_problem(monkeypatch)
+    state = _lambda_solver_state()
+    static = _lambda_solver_static()
+    common = dict(phipf=np.ones(2), chipf=np.ones(2), signgs=1, lamscale=np.ones(2), verbose=False)
+
+    with pytest.raises(ValueError, match="max_iter"):
+        solve_lambda_gd(state, static, max_iter=0, **common)
+    with pytest.raises(ValueError, match="max_backtracks"):
+        solve_lambda_gd(state, static, max_backtracks=-1, **common)
+    with pytest.raises(ValueError, match="bt_factor"):
+        solve_lambda_gd(state, static, bt_factor=1.0, **common)
+    with pytest.raises(ValueError, match="Unknown preconditioner"):
+        solve_lambda_gd(state, static, preconditioner="bad", **common)
+    with pytest.raises(ValueError, match="precond_exponent"):
+        solve_lambda_gd(state, static, preconditioner="mode_diag", precond_exponent=0.0, **common)
 
 
 def test_jit_cache_limit_put_and_lru_policy(monkeypatch):

@@ -248,6 +248,7 @@ separate CPU/GPU processes.
      --backend cpu --backend gpu --keep-going \
      --problem qh --max-mode 2 --callback jacobian --repeats 3 \
      --perturb-scale 1e-4 --inner-max-iter 80 --trial-max-iter 40 \
+     --method scipy_matrix_free --dynamic-replay-mode whole_scan \
      --vmec-timing \
      --outdir outputs/performance_profiles/qh_m2_cpu_gpu
 
@@ -258,12 +259,17 @@ time, and replay time when the child report exposes it.  The matrix JSON embeds
 the normalized ``compare_profile_reports.py`` summary, so dashboards can track
 ``total_runtime_s``, ``replay_time_s``, ``accepted_point_replay_count``,
 ``cache_entry_growth``, and RSS peak without parsing profiler-specific output
-shapes.
+shapes.  Each child process also writes ``*.stdout.log`` and ``*.stderr.log``
+files next to its JSON report so failed GPU jobs can be diagnosed without
+rerunning the matrix.
 
 Use ``--dry-run`` before scheduling cluster jobs; it prints and records the
 exact child commands and backend environment overrides without importing JAX in
 the child.  Use ``--replay-column-chunk`` or
 ``--dynamic-replay-bucket`` to make tape/replay tuning explicit in the report.
+Use ``--dynamic-replay-mode`` and ``--method`` to compare accepted-point replay
+paths and dense/matrix-free optimizer behavior under the same child-launch
+policy.
 Malformed ``VMEC_JAX_REPLAY_COLUMN_CHUNK`` values now fall back to the automatic
 replay memory guard rather than aborting the Jacobian callback; set
 ``VMEC_JAX_REPLAY_COLUMN_CHUNK=off`` or ``0`` only when chunking should be

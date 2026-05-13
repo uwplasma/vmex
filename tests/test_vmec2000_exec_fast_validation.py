@@ -112,6 +112,17 @@ def test_fast_vmec2000_stage_trace_validation_cases():
     "case,input_name,updates",
     [
         (
+            "nfp4_QH_warm_start",
+            "input.nfp4_QH_warm_start",
+            {
+                "NITER": "700",
+                "NS_ARRAY": "19",
+                "NITER_ARRAY": "700",
+                "FTOL_ARRAY": "1e-9",
+                "NSTEP": "50",
+            },
+        ),
+        (
             "circular_tokamak",
             "input.circular_tokamak",
             {
@@ -200,10 +211,20 @@ def test_vmec2000_converged_wout_diagnostics_validation(
 
     for name in ("rmnc", "zmns", "lmns"):
         _assert_rel_rms(name, getattr(wjax, name), getattr(wref, name), limit=2.5e-4)
+    if bool(wref.lasym):
+        # The asymmetric lambda cosine block is gauge-sensitive across the two
+        # implementations, so keep this end-state gate on geometry and fields.
+        for name in ("rmns", "zmnc"):
+            if hasattr(wjax, name) and hasattr(wref, name):
+                _assert_rel_rms(name, getattr(wjax, name), getattr(wref, name), limit=5.0e-4)
     for name in ("phipf", "chipf", "iotas", "iotaf", "pres", "presf"):
         _assert_rel_rms(name, getattr(wjax, name), getattr(wref, name), limit=2.5e-4, radial_skip=1)
     for name in ("gmnc", "bmnc", "bsupumnc", "bsupvmnc", "bsubumnc", "bsubvmnc"):
         _assert_rel_rms(name, getattr(wjax, name), getattr(wref, name), limit=2.5e-3, radial_skip=1)
+    if bool(wref.lasym):
+        for name in ("gmns", "bmns", "bsupumns", "bsupvmns", "bsubumns", "bsubvmns"):
+            if hasattr(wjax, name) and hasattr(wref, name):
+                _assert_rel_rms(name, getattr(wjax, name), getattr(wref, name), limit=5.0e-3, radial_skip=1)
 
     _assert_scalar_close("wb", wjax.wb, wref.wb, rtol=2.5e-3, atol=1.0e-8)
     _assert_scalar_close("wp", wjax.wp, wref.wp, rtol=2.5e-3, atol=1.0e-8)

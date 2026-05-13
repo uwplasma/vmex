@@ -42,7 +42,9 @@ def test_optional_parity_commands_are_concrete_and_bounded():
 
     assert plan["schema_version"] == 2
     assert {
-        "simsopt-qh-formula-smoke",
+        "simsopt-qs-family-formula",
+        "simsopt-qs-family-state",
+        "vmec2000-converged-wout-smoke",
         "vmec2000-stage-trace-smoke",
         "vmec2000-cli-five-iter",
         "bundled-wout-two-case-smoke",
@@ -56,17 +58,24 @@ def test_optional_parity_commands_are_concrete_and_bounded():
         assert "pytest -q tests/test_" in command["command"]
         assert "-m vmec2000" not in command["command"]
 
-    assert commands["simsopt-qh-formula-smoke"]["env"] == ["RUN_SIMSOPT_VALIDATION=1"]
-    assert "RUN_SIMSOPT_VALIDATION=1" in commands["simsopt-qh-formula-smoke"]["command"]
+    assert commands["simsopt-qs-family-formula"]["env"] == ["RUN_SIMSOPT_VALIDATION=1"]
+    assert "RUN_SIMSOPT_VALIDATION=1" in commands["simsopt-qs-family-formula"]["command"]
     assert (
-        "::test_qh_quasisymmetry_residual_matches_simsopt_wout_formula"
-        in commands["simsopt-qh-formula-smoke"]["command"]
+        "::test_quasisymmetry_residual_family_matches_simsopt_wout_formula"
+        in commands["simsopt-qs-family-formula"]["command"]
+    )
+    assert (
+        "::test_quasisymmetry_state_diagnostic_family_matches_simsopt_converged_wout"
+        in commands["simsopt-qs-family-state"]["command"]
     )
 
+    vmec_converged = commands["vmec2000-converged-wout-smoke"]
+    assert "VMEC2000_INTEGRATION=1" in vmec_converged["command"]
+    assert "::test_vmec2000_converged_wout_diagnostics_validation" in vmec_converged["command"]
+    assert any("converged end-state" in bound for bound in vmec_converged["bounded_by"])
+
     vmec_stage = commands["vmec2000-stage-trace-smoke"]
-    assert "VMEC2000_INTEGRATION=1" in vmec_stage["command"]
     assert "::test_fast_vmec2000_stage_trace_validation_cases" in vmec_stage["command"]
-    assert any("--max-iter 2" in bound for bound in vmec_stage["bounded_by"])
 
     vmec_cli = commands["vmec2000-cli-five-iter"]
     assert "VMEC2000_CLI_NITER=5" in vmec_cli["command"]
@@ -119,5 +128,6 @@ def test_cli_writes_json_and_markdown(tmp_path):
     assert "Fast Diagnostic Artifacts" in markdown
     assert "qi-seed-suitability-annotation" in markdown
     assert "Optional Parity Commands" in markdown
-    assert "simsopt-qh-formula-smoke" in markdown
+    assert "simsopt-qs-family-formula" in markdown
+    assert "vmec2000-converged-wout-smoke" in markdown
     assert "vmec2000-optional" in markdown

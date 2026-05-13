@@ -436,6 +436,7 @@ def test_workflow_stage_policy_helpers_are_explicit() -> None:
     assert qs_stage_modes(max_mode=3, use_mode_continuation=True, continuation_nfev=2) == [1, 1, 2, 2, 2, 3, 3, 3]
     assert qs_stage_modes(max_mode=3, use_mode_continuation=True, continuation_nfev=0) == [3]
     assert qs_stage_modes(max_mode=1, use_mode_continuation=True, continuation_nfev=2) == [1]
+    assert repeated_stage_modes(max_mode=3, use_mode_continuation=True, continuation_nfev=0, repeats=4) == [3, 3, 3, 3]
     assert repeated_stage_modes(max_mode=3, use_mode_continuation=True, continuation_nfev=2, repeats=4) == [3, 3, 3, 3]
     assert repeated_stage_modes(max_mode=3, use_mode_continuation=False, continuation_nfev=2, repeats=4) == [3]
     assert qs_stage_budget(stage_mode=2, max_mode=3, max_nfev=30, continuation_nfev=5) == 5

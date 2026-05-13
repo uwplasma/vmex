@@ -66,6 +66,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional VMEC_JAX_DYNAMIC_REPLAY_BUCKET override for tape replay profiling.",
     )
+    parser.add_argument(
+        "--dynamic-replay-mode",
+        choices=("basepoint", "whole_scan", "scan"),
+        default=None,
+        help="Optional VMEC_JAX_DYNAMIC_REPLAY_MODE override for exact tape replay profiling.",
+    )
     parser.add_argument("--trace", action="store_true", help="Collect TensorBoard/XProf traces where supported.")
     parser.add_argument(
         "--device-memory-profile",
@@ -122,6 +128,24 @@ def _build_parser() -> argparse.ArgumentParser:
     exact.add_argument("--trial-max-iter", type=int, default=40)
     exact.add_argument("--inner-ftol", type=float, default=0.0)
     exact.add_argument("--trial-ftol", type=float, default=1.0e-10)
+    exact.add_argument(
+        "--method",
+        choices=("scipy", "scipy_matrix_free", "gauss_newton", "lbfgs_adjoint", "scalar_trust"),
+        default="scipy",
+        help="Optimizer method for exact-callback --callback run profiling.",
+    )
+    exact.add_argument(
+        "--scipy-tr-solver",
+        choices=("lsmr", "exact", "none"),
+        default="lsmr",
+        help="SciPy trust-region linear solver for method=scipy.",
+    )
+    exact.add_argument("--lsmr-maxiter", type=int, default=0, help="Optional scipy LSMR iteration cap.")
+    exact.add_argument(
+        "--trial-use-scan",
+        action="store_true",
+        help="Forward --trial-use-scan to profile_exact_optimizer for relaxed trial solves.",
+    )
     exact.add_argument("--vmec-timing", action="store_true", help="Enable VMEC_JAX_TIMING in exact profiler.")
     return parser
 
@@ -169,6 +193,8 @@ def child_env(
         env["VMEC_JAX_REPLAY_COLUMN_CHUNK"] = str(args.replay_column_chunk)
     if args.dynamic_replay_bucket is not None:
         env["VMEC_JAX_DYNAMIC_REPLAY_BUCKET"] = str(args.dynamic_replay_bucket)
+    if args.dynamic_replay_mode is not None:
+        env["VMEC_JAX_DYNAMIC_REPLAY_MODE"] = str(args.dynamic_replay_mode)
     return env
 
 
@@ -179,6 +205,7 @@ def env_summary(env: dict[str, str]) -> dict[str, str | None]:
         "JAX_ENABLE_X64",
         "VMEC_JAX_REPLAY_COLUMN_CHUNK",
         "VMEC_JAX_DYNAMIC_REPLAY_BUCKET",
+        "VMEC_JAX_DYNAMIC_REPLAY_MODE",
     )
     return {key: env.get(key) for key in keys if env.get(key) is not None}
 
@@ -190,7 +217,7 @@ def solver_device_for_backend(backend: str) -> str:
 def report_stem(args: argparse.Namespace, backend: str) -> str:
     if args.mode == "fixed-boundary":
         return f"fixed_boundary_{backend}_iters{int(args.iters)}"
-    return f"exact_{args.problem}_m{int(args.max_mode)}_{args.callback}_{backend}"
+    return f"exact_{args.problem}_m{int(args.max_mode)}_{args.callback}_{args.method}_{backend}"
 
 
 def build_child_command(
@@ -253,11 +280,19 @@ def build_child_command(
         f"{float(args.inner_ftol):.17g}",
         "--trial-ftol",
         f"{float(args.trial_ftol):.17g}",
+        "--method",
+        str(args.method),
+        "--scipy-tr-solver",
+        str(args.scipy_tr_solver),
         "--solver-device",
         solver_device,
         "--json-out",
         str(report_path),
     ]
+    if int(args.lsmr_maxiter) > 0:
+        command.extend(["--lsmr-maxiter", str(int(args.lsmr_maxiter))])
+    if args.trial_use_scan:
+        command.append("--trial-use-scan")
     if args.vmec_timing:
         command.append("--vmec-timing")
     if args.trace:
@@ -287,6 +322,8 @@ def run_backend(args: argparse.Namespace, backend: str, outdir: Path) -> dict[st
     stem = report_stem(args, backend)
     report_path = outdir / f"{stem}.json"
     trace_dir = outdir / f"{stem}_trace"
+    stdout_path = outdir / f"{stem}.stdout.log"
+    stderr_path = outdir / f"{stem}.stderr.log"
     memory_profile_path = outdir / f"{stem}.device_memory.prof" if args.device_memory_profile else None
     env = child_env(backend=backend, args=args)
     command = build_child_command(
@@ -302,6 +339,8 @@ def run_backend(args: argparse.Namespace, backend: str, outdir: Path) -> dict[st
         "env": env_summary(env),
         "report_path": str(report_path),
         "trace_dir": str(trace_dir) if args.trace else None,
+        "stdout_path": str(stdout_path),
+        "stderr_path": str(stderr_path),
         "device_memory_profile_path": None if memory_profile_path is None else str(memory_profile_path),
         "dry_run": bool(args.dry_run),
     }
@@ -312,7 +351,8 @@ def run_backend(args: argparse.Namespace, backend: str, outdir: Path) -> dict[st
     report_path.parent.mkdir(parents=True, exist_ok=True)
     trace_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.perf_counter()
-    completed = subprocess.run(command, cwd=str(REPO_ROOT), env=env, check=False)
+    with stdout_path.open("w", encoding="utf-8") as stdout, stderr_path.open("w", encoding="utf-8") as stderr:
+        completed = subprocess.run(command, cwd=str(REPO_ROOT), env=env, stdout=stdout, stderr=stderr, check=False)
     entry["wall_time_s"] = float(time.perf_counter() - t0)
     entry["exit_code"] = int(completed.returncode)
     entry["summary"] = _load_profile_summary(report_path, label=backend)
