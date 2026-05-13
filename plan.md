@@ -376,8 +376,12 @@ hygiene push:
   covers three bounded cases including 3D QH, and optional SIMSOPT QS parity now
   covers QA and QH formula/state diagnostics. The parity manifest now has a
   fast required contract that keeps the self-contained optional free-boundary
-  `LASYM=true` case bounded and ready for executable-backed validation. Full
-  fixed/free/LASYM/finite-beta converged-equilibrium parity is still open.
+  `LASYM=true` case bounded and ready for executable-backed validation; the
+  bundled synthetic mgrid currents are sign/magnitude matched to the plasma
+  current so stock VMEC2000 reaches the vacuum solve instead of aborting with an
+  `I_TOR` mismatch. Full fixed/free/LASYM/finite-beta converged-equilibrium
+  parity is still open, and `freeb_scalpot` remains an instrumented-VMEC2000
+  diagnostic because a stock executable does not emit the required dumps.
 - Refactor/API/examples: 96%. Examples are SIMSOPT-like and clearer, finite-beta
   examples expose structured stage/final summaries while preserving direct
   optimizer visibility and have focused adapter coverage. Objective tuple
@@ -396,8 +400,9 @@ hygiene push:
   and optional research-grade checks together. Read the Docs is configured to
   fail on Sphinx warnings, release docs use the 85% coverage gate, and package
   discovery is locked to the `vmec_jax` namespace. Full local Sphinx and the
-  required 85% coverage command are green at 85.52%; released reference assets
-  are ignored so local full-tier refreshes cannot accidentally bloat commits.
+  required 85% coverage command are green at 85.52%, and the previous `main`
+  CI run after the all-surface QI mirror fix was fully green; released reference
+  assets are ignored so local full-tier refreshes cannot accidentally bloat commits.
   Final seed-robust QI and GPU-production artifacts remain open.
 
 Release-critical average across the lanes requested in this push
