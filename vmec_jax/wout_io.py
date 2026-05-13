@@ -10,6 +10,40 @@ import numpy as np
 from .wout_schema import _nc_scalar
 
 
+# VMEC Nyquist Fourier fields are stored with (radius, mn_mode_nyq) dimensions.
+NYQUIST_FOURIER_FIELD_NAMES: tuple[str, ...] = (
+    "gmnc",
+    "gmns",
+    "bsupumnc",
+    "bsupumns",
+    "bsupvmnc",
+    "bsupvmns",
+    "bsubumnc",
+    "bsubumns",
+    "bsubvmnc",
+    "bsubvmns",
+    "bsubsmns",
+    "bsubsmnc",
+    "bmnc",
+    "bmns",
+)
+
+_REQUIRED_NYQUIST_FOURIER_FIELDS = ("gmnc", "bsupumnc", "bsupvmnc")
+_NYQUIST_DEFAULT_TEMPLATES = {
+    "gmns": "gmnc",
+    "bsupumns": "bsupumnc",
+    "bsupvmns": "bsupvmnc",
+    "bsubumnc": "bsupumnc",
+    "bsubumns": "bsupumnc",
+    "bsubvmnc": "bsupvmnc",
+    "bsubvmns": "bsupvmnc",
+    "bsubsmns": "bsupvmnc",
+    "bsubsmnc": "bsupvmnc",
+    "bmnc": "gmnc",
+    "bmns": "gmnc",
+}
+
+
 def read_mode_table(variables: Any, name: str, *, path: Path) -> np.ndarray:
     """Read a required VMEC mode table and reject fully masked metadata."""
     raw = variables[name][:]
@@ -46,27 +80,25 @@ def read_type_field(variables: Any, name: str) -> str:
 
 
 def read_nyquist_fourier_fields(variables: Any) -> dict[str, np.ndarray]:
-    """Read Nyquist Fourier field groups from a VMEC wout variable mapping."""
-    gmnc = np.asarray(variables["gmnc"][:])
-    bsupumnc = np.asarray(variables["bsupumnc"][:])
-    bsupvmnc = np.asarray(variables["bsupvmnc"][:])
+    """Read Nyquist Fourier field groups from a VMEC wout variable mapping.
 
-    return {
-        "gmnc": gmnc,
-        "gmns": np.asarray(variables.get("gmns", np.zeros_like(gmnc))[:]),
-        "bsupumnc": bsupumnc,
-        "bsupumns": np.asarray(variables.get("bsupumns", np.zeros_like(bsupumnc))[:]),
-        "bsupvmnc": bsupvmnc,
-        "bsupvmns": np.asarray(variables.get("bsupvmns", np.zeros_like(bsupvmnc))[:]),
-        "bsubumnc": np.asarray(variables.get("bsubumnc", np.zeros_like(bsupumnc))[:]),
-        "bsubumns": np.asarray(variables.get("bsubumns", np.zeros_like(bsupumnc))[:]),
-        "bsubvmnc": np.asarray(variables.get("bsubvmnc", np.zeros_like(bsupvmnc))[:]),
-        "bsubvmns": np.asarray(variables.get("bsubvmns", np.zeros_like(bsupvmnc))[:]),
-        "bsubsmns": np.asarray(variables.get("bsubsmns", np.zeros_like(bsupvmnc))[:]),
-        "bsubsmnc": np.asarray(variables.get("bsubsmnc", np.zeros_like(bsupvmnc))[:]),
-        "bmnc": np.asarray(variables.get("bmnc", np.zeros_like(gmnc))[:]),
-        "bmns": np.asarray(variables.get("bmns", np.zeros_like(gmnc))[:]),
-    }
+    VMEC omits sine/asymmetric channels from some stellarator-symmetric output
+    files.  Missing optional channels are returned as zeros shaped like the
+    matching cosine field group so downstream code can treat every field as
+    present.
+    """
+
+    required_fields = {name: np.asarray(variables[name][:]) for name in _REQUIRED_NYQUIST_FOURIER_FIELDS}
+    fields: dict[str, np.ndarray] = {}
+    for name in NYQUIST_FOURIER_FIELD_NAMES:
+        if name in required_fields:
+            fields[name] = required_fields[name]
+            continue
+        if name in variables:
+            fields[name] = np.asarray(variables[name][:])
+            continue
+        fields[name] = np.zeros_like(fields[_NYQUIST_DEFAULT_TEMPLATES[name]])
+    return fields
 
 
 def write_int_variable(ds: Any, name: str, dims: tuple[str, ...], data: Any) -> None:
@@ -98,20 +130,5 @@ def write_fixed_width_string_variable(
 def write_nyquist_fourier_fields(ds: Any, wout: Any) -> None:
     """Write Nyquist Fourier field groups from a WoutData-like object."""
     dims = ("radius", "mn_mode_nyq")
-    for name in (
-        "gmnc",
-        "gmns",
-        "bsupumnc",
-        "bsupumns",
-        "bsupvmnc",
-        "bsupvmns",
-        "bsubumnc",
-        "bsubumns",
-        "bsubvmnc",
-        "bsubvmns",
-        "bsubsmns",
-        "bsubsmnc",
-        "bmnc",
-        "bmns",
-    ):
+    for name in NYQUIST_FOURIER_FIELD_NAMES:
         write_float_variable(ds, name, dims, np.asarray(getattr(wout, name)))
