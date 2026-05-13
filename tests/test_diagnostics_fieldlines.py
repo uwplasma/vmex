@@ -139,6 +139,32 @@ def test_trace_fieldline_on_surface_constant_pitch():
     np.testing.assert_allclose(line.Bmag, 3.0)
 
 
+def test_trace_fieldline_zero_toroidal_component_holds_theta_constant():
+    ntheta, nzeta = 6, 5
+    radius = np.full((ntheta, nzeta), 1.5)
+    z = np.zeros((ntheta, nzeta))
+    bsupu = np.full((ntheta, nzeta), 2.0)
+    bsupv = np.zeros((ntheta, nzeta))
+    bmag = np.full((ntheta, nzeta), 4.0)
+
+    line = trace_fieldline_on_surface(
+        R=radius,
+        Z=z,
+        bsupu=bsupu,
+        bsupv=bsupv,
+        Bmag=bmag,
+        nfp=1,
+        theta0=0.7,
+        phi0=0.2,
+        n_steps=5,
+        dphi=0.15,
+    )
+
+    np.testing.assert_allclose(line.theta, 0.7)
+    np.testing.assert_allclose(line.phi, 0.2 + 0.15 * np.arange(5))
+    np.testing.assert_allclose(line.Bmag, 4.0)
+
+
 @pytest.mark.parametrize(
     "kwargs, message",
     [

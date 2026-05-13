@@ -260,6 +260,12 @@ Acceptance:
       run without external executables and cover aspect reconstruction,
       `DMerc = Dshear + Dcurr + Dwell + Dgeod`, profile extrapolation, mode
       table compatibility, half-mesh `lmns`/`iota`, and QH Nyquist field spectra.
+- [x] Add required-tier bundled wout profile/current gates for converged
+      fixtures. These verify input flux/profile propagation (`phipf`, `phi`,
+      finite-beta `pres/presf`), VMEC `iotas -> iotaf` radial smoothing, and
+      surface-averaged Ampere finite differences from `buco/bvco` to
+      `jcuru/jcurv` across axisymmetric, 3D current-driven, 3D finite-beta, and
+      `lasym=True` wouts without launching a solver.
 - [x] Preserve stellarator-asymmetric geometry through the in-memory
       VMEC-to-Boozer adapter. `booz_xform_inputs_from_state` now exports
       `rmns`, `zmnc`, and `lmnc` alongside asymmetric magnetic sine channels,
@@ -268,8 +274,9 @@ Acceptance:
 
 ## Progress Snapshot
 
-Updated 2026-05-12 after the continuation/exact-history hardening,
-LASYM-Boozer parity, and release-checklist push:
+Updated 2026-05-13 after the bundled profile/current wout parity gates,
+continuation/exact-history hardening, LASYM-Boozer parity, and release-checklist
+push:
 
 - Continuation correctness: 100%. Source fix is implemented and covered by
   synthetic repeated-stage tests, a real boundary-projection stage test, and
@@ -300,8 +307,10 @@ LASYM-Boozer parity, and release-checklist push:
   focused CPU-only regressions. Mode-2 GPU tape callbacks are modestly faster
   without regressing the local CPU mode-2 callback; larger-mode replay and
   dense residual-tangent projection remain open.
-- VMEC parity and physics gates: 96%. Required-tier bundled gates now cover
-  `chipf`, stored `B`, aspect/geometry, Mercier/JXBFORCE profiles, and
+- VMEC parity and physics gates: 97%. Required-tier bundled gates now cover
+  `chipf`, stored `B`, input flux/profile propagation, finite-beta
+  `pres/presf`, VMEC `iotas -> iotaf` smoothing, surface-averaged current
+  finite differences, aspect/geometry, Mercier/JXBFORCE profiles, and
   VMEC-to-Boozer input spectra, including asymmetric Boozer geometry-channel
   propagation for `lasym=True` plus exact LASYM lambda-channel parity into
   Boozer input objects. Full fixed/free/LASYM/finite-beta
@@ -918,3 +927,11 @@ Defer beyond the current cycle:
   `105 s`, so it remains diagnostic/homotopy-only. Keep using the branch-heavy
   mirror-aware path as the promoted QI example while retaining this term for
   controlled homotopy/ranking studies.
+- 2026-05-13: Added required-tier bundled wout profile/current parity gates.
+  The new fast tests verify `phipf`/`phi`, finite-beta `pres/presf`, VMEC
+  `iotas -> iotaf` smoothing, and surface-averaged Ampere finite differences
+  from `buco/bvco` to `jcuru/jcurv` on converged bundled fixtures covering
+  axisymmetric finite-beta, 3D current-driven, 3D finite-beta, and `lasym=True`
+  cases. Verified focused command:
+  `JAX_ENABLE_X64=1 python -m pytest tests/test_wout_profiles_currents_bundled_parity.py -q`
+  (`9 passed`).

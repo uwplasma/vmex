@@ -12,9 +12,9 @@ Target State
 
 - Required CI wall time: under ten minutes for the required test, docs, and
   build jobs on GitHub-hosted CPU runners.
-- Current ``main`` CI baseline: the latest verified run during this update was
-  green on ``2026-05-11T17:14:59Z`` at
-  ``5ca8216699c766621a1fe30e47db9b68befd36c2``.
+- Current ``main`` local CI-equivalent coverage baseline: clean at
+  ``d5a1adf`` on 2026-05-13 with ``623 passed, 21 skipped,
+  85 deselected``, ``67.46%`` coverage, and ``8:37`` runtime.
 - Long-term required coverage: 95% line coverage for ``vmec_jax`` package
   code.  The current Python 3.11 required coverage gate is ``63%``.
 - Required local command: ``pytest -q -m "not full and not vmec2000"`` remains
@@ -43,14 +43,16 @@ the recommended local escalation path.
      - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000"``
      - Before pushing ordinary code or docs-adjacent changes that touch tested
        APIs.
-   * - Bundled residual parity gate
-     - ``JAX_ENABLE_X64=1 pytest -q tests/test_residue_getfsq_parity.py tests/test_vmec2000_exec_threed1.py``
-     - Required no-executable physics gate: recompute VMEC2000 ``fsqr/fsqz/fsql``
-       from bundled solved ``wout`` files and verify the VMEC2000 trace parser
-       against a bundled ``threed1`` fixture.
+   * - Bundled wout parity gate
+     - ``JAX_ENABLE_X64=1 pytest -q tests/test_residue_getfsq_parity.py tests/test_wout_profiles_currents_bundled_parity.py tests/test_vmec2000_exec_threed1.py``
+     - Required no-executable physics gate: recompute VMEC2000 ``fsqr/fsqz/fsql``,
+       verify flux/pressure/iota/current wout-field invariants, and cover the
+       VMEC2000 trace parser against bundled fixtures.
    * - Coverage gate
      - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000" --cov=vmec_jax --cov-report=xml --cov-report=term-missing:skip-covered --cov-fail-under=63``
-     - Python 3.11 required CI coverage job.
+     - Python 3.11 required CI coverage job.  The latest local equivalent on
+       ``d5a1adf`` reported ``67.46%`` coverage while the enforced gate stayed
+       at ``63%``.
    * - Optimization workflow smoke
      - ``pytest -q tests/test_optimization_examples.py tests/test_qs_ess_render_smoke.py``
      - After changing objective tuple construction, examples, or sweep
@@ -168,6 +170,13 @@ VMEC2000 parity gates:
 - Required CI also includes ``tests/test_vmec2000_exec_threed1.py`` so the
   ``threed1`` parser used by executable-backed diagnostics is covered by a
   bundled fixture even when ``xvmec2000`` is unavailable.
+- Required CI includes ``tests/test_wout_profiles_currents_bundled_parity.py``.
+  This no-solve gate reads converged bundled ``wout`` fixtures and verifies
+  input flux profiles, half-mesh ``phi`` integration, finite-beta
+  ``pres/presf`` staggering, ``iotas -> iotaf`` radial smoothing, and the
+  VMEC surface-averaged Ampere relation
+  ``jcuru = -d(bvco)/ds / mu0`` and ``jcurv = d(buco)/ds / mu0`` on interior
+  surfaces.
 - Compare converged equilibria, not arbitrary finite-step transient states,
   unless the test is explicitly a short-trace regression.
 - For each small reference deck, compare key scalars and profiles:
@@ -285,8 +294,9 @@ tests execute long workflows incidentally.
    coverage gates.  Coverage runs should not require downloading presentation
    artifacts.
 5. Raise ``--cov-fail-under`` in stages after the corresponding tests are
-   merged.  The current required fast-suite gate is ``63%``; the next planned
-   ratchets are 70%, 80%, 90%, then 95%.
+   merged.  The current required fast-suite gate is ``63%``; the latest local
+   baseline is ``67.46%``.  The next planned ratchets are 70%, 80%, 90%, then
+   95%.
 
 
 Repository Size Plan

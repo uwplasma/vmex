@@ -202,6 +202,23 @@ branch-shuffle diagnostic.
    ]
    qi_problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
 
+For QI cleanup work, rank solved candidates with the no-solve component report
+before promoting any scalar objective result.  The report records the QI+iota
+gate separately from the full engineering gate and sorts mirror-cleanup
+candidates ahead of low-mirror states that already failed smooth or legacy QI:
+
+.. code-block:: bash
+
+   PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_objective_component_report.py \
+     --output results/diagnostics/qi_mirror_cleanup_rank.json \
+     --include-bounce-endpoints --mboz 18 --nboz 18 --nphi 151 --nalpha 31 \
+     --n-bounce 51 \
+     --case current:results/qi_mirror_probe/input_nfp2_qi_branch5_mode3_nfev12/input.final:results/qi_mirror_probe/input_nfp2_qi_branch5_mode3_nfev12/wout_final.nc \
+     --case cleanup:results/qi_mirror_probe/input_nfp2_qi_light_mirror20_matrixfree_nfev10/input.final:results/qi_mirror_probe/input_nfp2_qi_light_mirror20_matrixfree_nfev10/wout_final.nc
+
+Add ``--branch-width-weight 5.0`` only when reproducing the branch-heavy
+optimization objective components rather than the independent promotion gate.
+
 
 Quasi-helical symmetry example
 --------------------------------
