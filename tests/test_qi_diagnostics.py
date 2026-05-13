@@ -77,6 +77,53 @@ def test_qi_diagnostics_records_legacy_failure_without_losing_smooth_metric(monk
     assert "RuntimeError: legacy unavailable" == record["qi_legacy_error"]
 
 
+def test_qi_diagnostics_fail_on_error_raises_and_records_mirror_subset_error(monkeypatch):
+    pytest.importorskip("jax")
+
+    import vmec_jax.qi_diagnostics as qid
+
+    booz = _booz_like(xm=[0, 0], xn=[0, 2], coeffs=[1.0, 0.1], nfp=2)
+
+    def fake_smooth(*_args, **_kwargs):
+        return {"total": np.asarray(0.0)}
+
+    def fail_mirror(*_args, **_kwargs):
+        raise RuntimeError("mirror unavailable")
+
+    monkeypatch.setattr(qid, "quasi_isodynamic_residual_from_boozer_output", fake_smooth)
+    monkeypatch.setattr(qid, "mirror_ratio_penalty_from_boozer_output", fail_mirror)
+
+    soft_record = qid.qi_diagnostics_from_boozer_output(
+        booz,
+        options=qid.QIDiagnosticOptions(
+            include_legacy=False,
+            mirror_surface_index=3,
+            mirror_threshold=0.2,
+            fail_on_error=False,
+        ),
+    )
+    assert soft_record["qi_smooth_total"] == 0.0
+    assert "ValueError: mirror_surface_index 3 is outside" in soft_record["qi_mirror_error"]
+    assert soft_record["qi_nfp"] == 2
+    assert soft_record["qi_nboz"] == 1
+
+    with pytest.raises(ValueError, match="mirror_surface_index 3 is outside"):
+        qid.qi_diagnostics_from_boozer_output(
+            booz,
+            options=qid.QIDiagnosticOptions(
+                include_legacy=False,
+                mirror_surface_index=3,
+                fail_on_error=True,
+            ),
+        )
+
+    with pytest.raises(RuntimeError, match="mirror unavailable"):
+        qid.qi_diagnostics_from_boozer_output(
+            booz,
+            options=qid.QIDiagnosticOptions(include_legacy=False, fail_on_error=True),
+        )
+
+
 def test_qi_diagnostics_from_state_wraps_existing_components_without_solves(monkeypatch):
     import vmec_jax.qi_diagnostics as qid
 
@@ -198,6 +245,63 @@ def test_qi_diagnostics_from_state_wraps_existing_components_without_solves(monk
     assert record["qi_surface_indices"] == [3]
 
 
+def test_qi_diagnostics_from_state_requires_surfaces_and_records_component_errors(monkeypatch):
+    import vmec_jax.qi_diagnostics as qid
+
+    static = SimpleNamespace(cfg=SimpleNamespace(nfp=2))
+
+    with pytest.raises(ValueError, match="surfaces must be supplied"):
+        qid.qi_diagnostics_from_state(state="state", static=static, indata="indata", signgs=1)
+
+    def fail_smooth(**_kwargs):
+        raise RuntimeError("smooth failed")
+
+    def fail_aspect(**_kwargs):
+        raise RuntimeError("aspect failed")
+
+    def fail_iota(**_kwargs):
+        raise RuntimeError("iota failed")
+
+    def fail_elongation(**_kwargs):
+        raise RuntimeError("elongation failed")
+
+    def fail_lgradb(**_kwargs):
+        raise RuntimeError("lgradb failed")
+
+    monkeypatch.setattr(qid, "quasi_isodynamic_residual_from_state", fail_smooth)
+    monkeypatch.setattr(qid, "equilibrium_aspect_ratio_from_state", fail_aspect)
+    monkeypatch.setattr(qid, "equilibrium_iota_profiles_from_state", fail_iota)
+    monkeypatch.setattr(qid, "max_elongation_penalty_from_state", fail_elongation)
+    monkeypatch.setattr(qid, "lgradb_penalty_from_state", fail_lgradb)
+
+    record = qid.qi_diagnostics_from_state(
+        state="state",
+        static=static,
+        indata="indata",
+        signgs=1,
+        surfaces=[0.5],
+        options=qid.QIDiagnosticOptions(include_lgradb=True, fail_on_error=False),
+    )
+
+    assert record["qi_smooth_error"] == "RuntimeError: smooth failed"
+    assert record["qi_aspect_error"] == "RuntimeError: aspect failed"
+    assert record["qi_iota_error"] == "RuntimeError: iota failed"
+    assert record["qi_elongation_error"] == "RuntimeError: elongation failed"
+    assert record["qi_lgradb_error"] == "RuntimeError: lgradb failed"
+    assert record["qi_diagnostic_source"] == "state"
+    assert record["qi_nfp"] == 2
+
+    with pytest.raises(RuntimeError, match="smooth failed"):
+        qid.qi_diagnostics_from_state(
+            state="state",
+            static=static,
+            indata="indata",
+            signgs=1,
+            surfaces=[0.5],
+            options=qid.QIDiagnosticOptions(fail_on_error=True),
+        )
+
+
 def test_qi_diagnostics_from_bundled_solved_qi_seed_records_state_metrics():
     pytest.importorskip("jax")
     pytest.importorskip("netCDF4")
@@ -306,6 +410,55 @@ def test_qi_seed_suitability_annotation_reports_gate_failures():
         "elongation",
     ]
     assert "mirror ratio=0.25 exceeds target 0.21" in record["qi_failure_reasons"]
+
+
+def test_qi_seed_suitability_annotation_handles_disabled_and_missing_gates():
+    from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_suitability, rank_qi_seed_records
+
+    disabled = QISeedSuitabilityTargets(
+        smooth_qi_max=None,
+        legacy_qi_max=None,
+        target_aspect=None,
+        abs_iota_min=None,
+        mirror_ratio_max=None,
+        max_elongation=None,
+    )
+    pass_record = annotate_qi_seed_suitability(
+        {
+            "label": "diagnostic_only",
+            "qi_smooth_total": np.nan,
+            "qi_legacy_total": None,
+            "qi_smooth_error": "RuntimeError: bad Boozer solve",
+        },
+        targets=disabled,
+    )
+
+    assert pass_record["qi_seed_suitability"] == "needs_attention"
+    assert pass_record["qi_diagnostic_errors"] == ["qi_smooth_error"]
+    assert pass_record["qi_rank_score"] == np.inf
+    assert pass_record["qi_constraint_score"] == 0.0
+    assert "qi_smooth_error: RuntimeError: bad Boozer solve" in pass_record["qi_failure_reasons"]
+
+    ranked = rank_qi_seed_records(
+        [
+            {"label": "missing", "qi_smooth_total": None, "qi_legacy_total": None},
+            {"label": "finite_bad_constraint", "qi_smooth_total": 2.0, "qi_legacy_total": 0.0, "mean_iota": 0.0},
+            {"label": "finite_good", "qi_smooth_total": 1.0, "qi_legacy_total": 0.0, "mean_iota": 0.5},
+        ],
+        targets=QISeedSuitabilityTargets(
+            smooth_qi_max=None,
+            legacy_qi_max=None,
+            target_aspect=None,
+            abs_iota_min=0.41,
+            mirror_ratio_max=None,
+            max_elongation=None,
+        ),
+    )
+
+    assert [row["label"] for row in ranked] == ["finite_good", "finite_bad_constraint", "missing"]
+    assert ranked[0]["qi_iota_gate_passed"] is True
+    assert ranked[1]["qi_iota_gate_passed"] is False
+    assert ranked[2]["qi_rank_score"] == np.inf
 
 
 def test_qi_seed_ranking_tracks_legacy_goodman_order_on_synthetic_modes():
