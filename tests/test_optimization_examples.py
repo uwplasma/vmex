@@ -135,6 +135,24 @@ def test_qs_sweep_reports_true_legacy_qi_metric() -> None:
     assert '"qi_legacy_total": qi_total' not in text
 
 
+def test_qs_sweep_qi_mirror_defaults_to_all_surfaces() -> None:
+    from examples.optimization import generate_qs_ess_sweep as sweep
+
+    assert sweep.PROBLEM_CONFIGS["qi"].qi_mirror_surface_index is None
+    assert sweep.PROBLEM_CONFIGS["qp"].qi_mirror_surface_index is None
+
+    booz = {
+        "bmnc_b": np.arange(6.0).reshape(2, 3),
+        "bmns_b": np.arange(6.0, 12.0).reshape(2, 3),
+        "iota_b": np.asarray([0.4, 0.5]),
+        "s_b": np.asarray([0.25, 0.75]),
+    }
+    assert sweep._mirror_boozer_surfaces(booz, None) is booz
+    sliced = sweep._mirror_boozer_surfaces(booz, 1)
+    np.testing.assert_allclose(sliced["bmnc_b"], booz["bmnc_b"][1:2])
+    np.testing.assert_allclose(sliced["iota_b"], [0.5])
+
+
 def test_policy_matrix_plots_single_problem(tmp_path, monkeypatch) -> None:
     pytest.importorskip("matplotlib")
 

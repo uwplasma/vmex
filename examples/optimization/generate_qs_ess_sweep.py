@@ -250,7 +250,7 @@ class ProblemConfig:
     qi_mirror_weight: float = 10.0
     qi_mirror_ntheta: int = 96
     qi_mirror_nphi: int = 96
-    qi_mirror_surface_index: int = 0
+    qi_mirror_surface_index: int | None = None
     qi_max_elongation: float = 8.0
     qi_elongation_weight: float = 10.0
     qi_elongation_ntheta: int = 48
@@ -713,6 +713,14 @@ def _slice_boozer_surfaces(booz: dict, surface_index: int) -> dict:
     return out
 
 
+def _mirror_boozer_surfaces(booz: dict, surface_index: int | None) -> dict:
+    """Return all Boozer surfaces unless a single-surface ablation is requested."""
+
+    if surface_index is None:
+        return booz
+    return _slice_boozer_surfaces(booz, int(surface_index))
+
+
 def _lgradb_diagnostics_from_state(problem_cfg: ProblemConfig, opt, state) -> dict[str, float | str | None]:
     """Evaluate the independent LgradB diagnostic for QS targets."""
 
@@ -819,7 +827,7 @@ def _qi_diagnostics_from_state(problem_cfg: ProblemConfig, opt, state) -> dict[s
             booz_grids=grids,
             surface_indices=surface_indices,
         )
-        mirror_booz = _slice_boozer_surfaces(qi["booz"], int(problem_cfg.qi_mirror_surface_index))
+        mirror_booz = _mirror_boozer_surfaces(qi["booz"], problem_cfg.qi_mirror_surface_index)
         mirror = mirror_ratio_penalty_from_boozer_output(
             mirror_booz,
             nfp=int(static.cfg.nfp),
@@ -1084,7 +1092,7 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
             )
         ]
         if float(problem_cfg.qi_mirror_weight) != 0.0:
-            mirror_booz = _slice_boozer_surfaces(qi["booz"], int(problem_cfg.qi_mirror_surface_index))
+            mirror_booz = _mirror_boozer_surfaces(qi["booz"], problem_cfg.qi_mirror_surface_index)
             mirror = mirror_ratio_penalty_from_boozer_output(
                 mirror_booz,
                 nfp=int(stage_static.cfg.nfp),
