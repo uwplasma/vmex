@@ -189,7 +189,15 @@ The next parity gates are:
 - Run reviewed repeated-stage family-prefine probes across QI, QP, QH, QA, and
   simple seeds.
 - Keep VMEC2000 executable smoke green before broadening the executable-backed
-  manifest matrix.
+  manifest matrix, including the free-boundary ``LASYM=true`` stock-executable
+  vacuum-entry guard:
+
+  .. code-block:: bash
+
+     VMEC2000_EXEC=/path/to/xvmec2000 \
+     VMEC2000_INTEGRATION=1 \
+     pytest -q tests/test_vmec2000_exec_fast_validation.py::test_vmec2000_free_boundary_lasym_true_reaches_vacuum_solve
+
 - Run the optional bounded free-boundary ``LASYM=true`` manifest case.  The
   ``freeb_scalpot`` comparator needs an instrumented VMEC2000 executable that
   honors the ``VMEC_DUMP_*`` environment variables; a stock ``xvmec2000`` run

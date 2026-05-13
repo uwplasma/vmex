@@ -366,6 +366,17 @@ The fastest executable-backed stage-trace validation is:
 This command uses bundled fixed-boundary inputs, a single ``ns=13`` grid,
 ``max_iter=2``, lite dump output, and a 60 second VMEC2000 timeout per case.
 
+The same optional file includes a stock-executable free-boundary
+``LASYM=true`` smoke that caps the bundled synthetic CTH-like deck at 120
+iterations and verifies VMEC2000 reaches the vacuum solve without an
+``I_TOR`` mismatch:
+
+.. code-block:: bash
+
+   VMEC2000_EXEC=/path/to/xvmec2000 \
+   VMEC2000_INTEGRATION=1 \
+   pytest -q tests/test_vmec2000_exec_fast_validation.py::test_vmec2000_free_boundary_lasym_true_reaches_vacuum_solve
+
 For a short CLI comparison against the executable:
 
 .. code-block:: bash
