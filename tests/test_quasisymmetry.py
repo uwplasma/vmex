@@ -225,6 +225,70 @@ def test_quasisymmetry_ratio_residual_returns_diagnostic_fields():
     )
 
 
+def test_quasisymmetry_wout_residual_gradient_matches_finite_difference():
+    pytest.importorskip("jax")
+
+    import jax
+    import jax.numpy as jnp
+
+    from vmec_jax._compat import enable_x64
+    from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_wout
+
+    enable_x64(True)
+
+    constant_mode = jnp.asarray(
+        [
+            [1.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 0.0],
+        ],
+        dtype=jnp.float64,
+    )
+
+    def objective(alpha):
+        bmnc = jnp.asarray(
+            [
+                [1.0, alpha],
+                [1.0, alpha],
+                [1.0, alpha],
+            ],
+            dtype=jnp.float64,
+        )
+        wout_like = SimpleNamespace(
+            nfp=2,
+            lasym=False,
+            iotas=jnp.asarray([0.0, 0.4, 0.5], dtype=jnp.float64),
+            buco=jnp.asarray([0.0, 0.2, 0.25], dtype=jnp.float64),
+            bvco=jnp.asarray([0.0, 1.0, 1.1], dtype=jnp.float64),
+            gmnc=constant_mode,
+            bmnc=bmnc,
+            bsubumnc=0.2 * constant_mode,
+            bsubvmnc=0.3 * constant_mode,
+            bsupumnc=0.4 * constant_mode,
+            bsupvmnc=0.5 * constant_mode,
+            xm_nyq=jnp.asarray([0.0, 1.0], dtype=jnp.float64),
+            xn_nyq=jnp.asarray([0.0, 2.0], dtype=jnp.float64),
+            phi=jnp.asarray([0.0, 0.5, 1.0], dtype=jnp.float64),
+        )
+        return quasisymmetry_ratio_residual_from_wout(
+            wout_like,
+            surfaces=[0.5],
+            helicity_m=1,
+            helicity_n=-1,
+            ntheta=9,
+            nphi=10,
+        )["total"]
+
+    alpha0 = jnp.asarray(0.08, dtype=jnp.float64)
+    eps = jnp.asarray(1.0e-5, dtype=jnp.float64)
+    value, grad_ad = jax.value_and_grad(objective)(alpha0)
+    grad_fd = (objective(alpha0 + eps) - objective(alpha0 - eps)) / (2.0 * eps)
+
+    assert float(np.asarray(value)) > 0.0
+    assert np.isfinite(float(np.asarray(grad_ad)))
+    np.testing.assert_allclose(np.asarray(grad_ad), np.asarray(grad_fd), rtol=1.0e-7, atol=1.0e-10)
+
+
 def test_quasisymmetry_angle_cache_matches_uncached_wout():
     pytest.importorskip("jax")
 
