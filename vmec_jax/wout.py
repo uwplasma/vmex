@@ -79,6 +79,30 @@ def _pshalf_from_s(s_full: np.ndarray) -> np.ndarray:
     return np.sqrt(np.maximum(p, 0.0))
 
 
+def _bss_should_undo_scalxc() -> bool:
+    """Whether bss parity geometry should undo VMEC's odd-m scalxc scaling."""
+    return os.getenv("VMEC_JAX_BSS_UNDO_SCALXC", "0") not in ("", "0")
+
+
+def _bss_scalxc_undo_factor(s: np.ndarray) -> np.ndarray:
+    """Return the VMEC inverse scalxc factor for bss odd-parity geometry."""
+    s_arr = np.asarray(s, dtype=float)
+    sqrts = np.sqrt(np.maximum(s_arr, 0.0))
+    if s_arr.shape[0] >= 1:
+        sqrts = sqrts.copy()
+        sqrts[-1] = 1.0
+    sq2 = sqrts[1] if s_arr.shape[0] >= 2 else 1.0
+    return np.maximum(sqrts, sq2)[:, None, None]
+
+
+def _undo_bss_scalxc_if_enabled(s: np.ndarray, *arrays: np.ndarray) -> tuple[np.ndarray, ...]:
+    """Undo odd-m scalxc for bss parity arrays when the compatibility flag is set."""
+    if not _bss_should_undo_scalxc():
+        return tuple(arrays)
+    factor = _bss_scalxc_undo_factor(s)
+    return tuple(np.asarray(arr, dtype=float) * factor for arr in arrays)
+
+
 def _safe_divide(num: np.ndarray, den: np.ndarray) -> np.ndarray:
     den_safe = np.where(np.abs(den) > 0.0, den, 1.0)
     return num / den_safe
@@ -816,17 +840,15 @@ def _compute_bsubs_half_mesh(
 
         # The parity fields are built from internal coefficients with VMEC's
         # scalxc applied (odd-m scaled by 1/max(sqrt(s), sqrt(s2))). bss.f
-        # expects the *internal* odd fields (before scalxc), so undo it here.
-        if os.getenv("VMEC_JAX_BSS_UNDO_SCALXC", "0") not in ("", "0"):
-            sqrts = np.sqrt(np.maximum(s, 0.0))
-            if s.shape[0] >= 1:
-                sqrts[-1] = 1.0
-            sq2 = sqrts[1] if s.shape[0] >= 2 else 1.0
-            scalxc_inv = np.maximum(sqrts, sq2)[:, None, None]
-            pr1_odd = pr1_odd * scalxc_inv
-            pz1_odd = pz1_odd * scalxc_inv
-            pru_odd = pru_odd * scalxc_inv
-            pzu_odd = pzu_odd * scalxc_inv
+        # expects the *internal* odd fields (before scalxc), so undo it here
+        # when the compatibility flag is enabled.
+        pr1_odd, pz1_odd, pru_odd, pzu_odd = _undo_bss_scalxc_if_enabled(
+            s,
+            pr1_odd,
+            pz1_odd,
+            pru_odd,
+            pzu_odd,
+        )
 
         ru12 = np.zeros_like(R_even, dtype=float)
         zu12 = np.zeros_like(Z_even, dtype=float)
@@ -875,16 +897,13 @@ def _compute_bsubs_half_mesh(
         pzv_even = np.asarray(geom["pzv_even"], dtype=float)
         pzv_odd = np.asarray(geom["pzv_odd"], dtype=float)
 
-        if os.getenv("VMEC_JAX_BSS_UNDO_SCALXC", "0") not in ("", "0"):
-            sqrts = np.sqrt(np.maximum(s, 0.0))
-            if s.shape[0] >= 1:
-                sqrts[-1] = 1.0
-            sq2 = sqrts[1] if s.shape[0] >= 2 else 1.0
-            scalxc_inv = np.maximum(sqrts, sq2)[:, None, None]
-            pr1_odd = pr1_odd * scalxc_inv
-            pz1_odd = pz1_odd * scalxc_inv
-            prv_odd = prv_odd * scalxc_inv
-            pzv_odd = pzv_odd * scalxc_inv
+        pr1_odd, pz1_odd, prv_odd, pzv_odd = _undo_bss_scalxc_if_enabled(
+            s,
+            pr1_odd,
+            pz1_odd,
+            prv_odd,
+            pzv_odd,
+        )
 
         rv12[1:] = 0.5 * (prv_even[1:] + prv_even[:-1] + sh[1:] * (prv_odd[1:] + prv_odd[:-1]))
         zv12[1:] = 0.5 * (pzv_even[1:] + pzv_even[:-1] + sh[1:] * (pzv_odd[1:] + pzv_odd[:-1]))

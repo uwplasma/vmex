@@ -46,6 +46,7 @@ from .solve import (
     _mask_grad_for_constraints,
     _mode00_index,
     _pressure_half_mesh_from_indata,
+    _zero_edge_rz_force_block,
     _vmec_force_flux_profiles,
     solve_fixed_boundary_gd,
     solve_fixed_boundary_lbfgs,
@@ -113,6 +114,27 @@ def _dense_transpose_lstsq_host(J, b, damping):
         )
     lam_host, *_ = np.linalg.lstsq(A_host, b_host, rcond=None)
     return np.asarray(lam_host, dtype=J_host.dtype)
+
+
+def _pack_named_residual_parts(parts, projector=None):
+    """Flatten named residual blocks, optionally keeping structural indices."""
+    packed = []
+    for name, arr in parts:
+        flat = jnp.ravel(jnp.asarray(arr))
+        if projector is not None:
+            keep = projector.get(name)
+            if keep is not None:
+                flat = jnp.take(flat, keep)
+        packed.append(flat)
+    return jnp.concatenate(packed, axis=0)
+
+
+def _zero_m1_zforce_flag_from_result(res, dtype) -> np.ndarray:
+    """Return the VMEC residual tangent flag used after the host primal solve."""
+    fsqz_hist = np.asarray(getattr(res, "fsqz2_history", []), dtype=float)
+    n_iter = int(getattr(res, "n_iter", 0))
+    enabled = n_iter < 2 or (fsqz_hist.size > 0 and float(fsqz_hist[-1]) < 1.0e-6)
+    return np.asarray(1.0 if enabled else 0.0, dtype=dtype)
 
 
 @dataclass(frozen=True)
@@ -1173,17 +1195,6 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
             idx00=idx00,
         )
 
-    def _pack_residual_parts(parts, projector=None):
-        packed = []
-        for name, arr in parts:
-            flat = jnp.ravel(jnp.asarray(arr))
-            if projector is not None:
-                keep = projector.get(name)
-                if keep is not None:
-                    flat = jnp.take(flat, keep)
-            packed.append(flat)
-        return jnp.concatenate(packed, axis=0)
-
     def _boundary_state_edge_rows(eRcos, eRsin, eZcos, eZsin):
         boundary_state = initial_guess_from_boundary(
             static,
@@ -1220,12 +1231,6 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
     def _project_state(st):
         return _mask_grad_for_constraints(st, static, idx00=idx00, mask_lambda_axis=True)
 
-    def _zero_edge_rz(a):
-        a = jnp.asarray(a)
-        if a.shape[0] < 2:
-            return a
-        return a.at[-1].set(jnp.zeros_like(a[-1]))
-
     def _residual_vec(state, zero_m1_zforce, eRcos, eRsin, eZcos, eZsin, *, project_stellsym: bool = False):
         residual_start = time.perf_counter()
         state = _enforce_state(state, eRcos, eRsin, eZcos, eZsin)
@@ -1257,16 +1262,24 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         frzl = vmec_zero_m1_zforce(frzl=frzl, enabled=zero_m1_zforce)
         frzl = vmec_apply_scalxc_to_tomnsps(frzl=frzl, s=s)
         frzl = TomnspsRZL(
-            frcc=_zero_edge_rz(frzl.frcc),
-            frss=_zero_edge_rz(frzl.frss) if frzl.frss is not None else None,
-            fzsc=_zero_edge_rz(frzl.fzsc),
-            fzcs=_zero_edge_rz(frzl.fzcs) if frzl.fzcs is not None else None,
+            frcc=_zero_edge_rz_force_block(frzl.frcc, preserve_numpy=False),
+            frss=_zero_edge_rz_force_block(frzl.frss, preserve_numpy=False) if frzl.frss is not None else None,
+            fzsc=_zero_edge_rz_force_block(frzl.fzsc, preserve_numpy=False),
+            fzcs=_zero_edge_rz_force_block(frzl.fzcs, preserve_numpy=False) if frzl.fzcs is not None else None,
             flsc=frzl.flsc,
             flcs=frzl.flcs,
-            frsc=_zero_edge_rz(getattr(frzl, "frsc", None)) if getattr(frzl, "frsc", None) is not None else None,
-            frcs=_zero_edge_rz(getattr(frzl, "frcs", None)) if getattr(frzl, "frcs", None) is not None else None,
-            fzcc=_zero_edge_rz(getattr(frzl, "fzcc", None)) if getattr(frzl, "fzcc", None) is not None else None,
-            fzss=_zero_edge_rz(getattr(frzl, "fzss", None)) if getattr(frzl, "fzss", None) is not None else None,
+            frsc=_zero_edge_rz_force_block(getattr(frzl, "frsc", None), preserve_numpy=False)
+            if getattr(frzl, "frsc", None) is not None
+            else None,
+            frcs=_zero_edge_rz_force_block(getattr(frzl, "frcs", None), preserve_numpy=False)
+            if getattr(frzl, "frcs", None) is not None
+            else None,
+            fzcc=_zero_edge_rz_force_block(getattr(frzl, "fzcc", None), preserve_numpy=False)
+            if getattr(frzl, "fzcc", None) is not None
+            else None,
+            fzss=_zero_edge_rz_force_block(getattr(frzl, "fzss", None), preserve_numpy=False)
+            if getattr(frzl, "fzss", None) is not None
+            else None,
             flcc=getattr(frzl, "flcc", None),
             flss=getattr(frzl, "flss", None),
         )
@@ -1298,7 +1311,7 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
                     arr = jnp.asarray(arr) * jnp.asarray(lam_prec)
                 parts.append((name, scale * arr))
         projector = stellsym_residual_projector if bool(project_stellsym) else None
-        packed = _pack_residual_parts(parts, projector=projector)
+        packed = _pack_named_residual_parts(parts, projector=projector)
         _vmec_residual_profile_log("postprocess_done", post_start)
         _vmec_residual_profile_log(
             "residual_done",
@@ -1371,9 +1384,8 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
             jit_forces="auto",
             use_scan=False,
         )
-        fsqz_hist = np.asarray(getattr(res, "fsqz2_history", []), dtype=float)
-        zero_m1 = 1.0 if (int(getattr(res, "n_iter", 0)) < 2 or (fsqz_hist.size > 0 and float(fsqz_hist[-1]) < 1.0e-6)) else 0.0
-        return np.asarray(pack_state(res.state)), np.asarray(zero_m1, dtype=state0_host.Rcos.dtype)
+        zero_m1 = _zero_m1_zforce_flag_from_result(res, dtype=state0_host.Rcos.dtype)
+        return np.asarray(pack_state(res.state)), zero_m1
 
     def _is_traced(*xs):
         return any(isinstance(x, jax.core.Tracer) for x in xs)
