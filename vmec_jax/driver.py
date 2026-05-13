@@ -1431,7 +1431,7 @@ def run_fixed_boundary(
     )
 
     def _resume_step_size_value() -> float:
-        if step_size is not None:
+        if step_size is not _STEP_SIZE_SENTINEL and step_size is not None:
             return float(step_size)
         try:
             return float(indata.get_float("DELT", 5e-3))
