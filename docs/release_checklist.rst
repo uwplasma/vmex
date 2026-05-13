@@ -19,16 +19,24 @@ Run these checks before pushing a release-candidate commit:
    pytest -q tests/test_optimization_helpers.py tests/test_continuation_exact_history.py
    pytest -q tests/test_residue_getfsq_parity.py tests/test_wout_profiles_currents_bundled_parity.py tests/test_vmec2000_exec_threed1.py
    pytest -q tests/test_booz_input.py tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_qi_objective_component_report.py
+   pytest -q tests/test_quasisymmetry.py tests/test_optimization_examples.py tests/test_implicit_helpers.py tests/test_wout_additional_helpers.py tests/test_solve_additional_helpers.py tests/test_free_boundary_additional_helpers.py tests/test_vmec_kernel_additional_helpers.py tests/test_solve_branch_coverage.py tests/test_implicit_wout_driver_branch_coverage.py
    JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000" --cov=vmec_jax --cov-report=xml --cov-report=term-missing:skip-covered --cov-fail-under=63
    python -m sphinx -W -b html docs docs/_build/html_release
 
 These tests cover the required local lanes: continuation semantics, exact
 accepted-point history/output selection, no-executable VMEC residual parity,
-Boozer input spectra including ``lasym=True`` channels, QI diagnostic metadata,
-the required Python 3.11 coverage gate, and warning-clean documentation.  The
-latest local CI-equivalent coverage baseline on 2026-05-13 is
-``643 passed, 21 skipped, 85 deselected`` with ``66.98%`` coverage in ``7:50``;
-the enforced gate remains ``63%`` until the next planned ratchet.
+Boozer input spectra including ``lasym=True`` channels, QI diagnostic metadata
+including the bundled solved-state QI seed gate, solve-free JVP/VJP routing
+checks, pure driver/runtime policy helpers, implicit/wout serialization helpers,
+free-boundary/solver helper branches, VMEC-kernel helper branches, additional
+solve/implicit/wout/driver branch coverage, the required Python 3.11 coverage
+gate, and warning-clean documentation.  The latest local CI-equivalent required
+coverage baseline on 2026-05-13 is ``730 passed, 21 skipped, 85 deselected``
+with ``69.17%`` coverage in ``8:54``.
+A refreshed full non-VMEC2000 physics coverage run reached
+``72.35%`` but took ``27:21``, so it remains a manual/nightly gate until the
+slow full cases are split or accelerated.  The enforced gate remains ``63%``
+until GitHub has stable margin above the next ratchet.
 
 Required GitHub Actions gate
 ----------------------------

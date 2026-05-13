@@ -289,6 +289,81 @@ def test_quasisymmetry_wout_residual_gradient_matches_finite_difference():
     np.testing.assert_allclose(np.asarray(grad_ad), np.asarray(grad_fd), rtol=1.0e-7, atol=1.0e-10)
 
 
+def test_quasisymmetry_wout_residual_jvp_and_vjp_match_finite_difference():
+    pytest.importorskip("jax")
+
+    import jax
+    import jax.numpy as jnp
+
+    from vmec_jax._compat import enable_x64
+    from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_wout
+
+    enable_x64(True)
+
+    constant_mode = jnp.asarray(
+        [
+            [1.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 0.0],
+        ],
+        dtype=jnp.float64,
+    )
+
+    def residuals(alpha):
+        bmnc = jnp.asarray(
+            [
+                [1.0, alpha],
+                [1.0, alpha],
+                [1.0, alpha],
+            ],
+            dtype=jnp.float64,
+        )
+        wout_like = SimpleNamespace(
+            nfp=2,
+            lasym=False,
+            iotas=jnp.asarray([0.0, 0.4, 0.5], dtype=jnp.float64),
+            buco=jnp.asarray([0.0, 0.2, 0.25], dtype=jnp.float64),
+            bvco=jnp.asarray([0.0, 1.0, 1.1], dtype=jnp.float64),
+            gmnc=constant_mode,
+            bmnc=bmnc,
+            bsubumnc=0.2 * constant_mode,
+            bsubvmnc=0.3 * constant_mode,
+            bsupumnc=0.4 * constant_mode,
+            bsupvmnc=0.5 * constant_mode,
+            xm_nyq=jnp.asarray([0.0, 1.0], dtype=jnp.float64),
+            xn_nyq=jnp.asarray([0.0, 2.0], dtype=jnp.float64),
+            phi=jnp.asarray([0.0, 0.5, 1.0], dtype=jnp.float64),
+        )
+        return quasisymmetry_ratio_residual_from_wout(
+            wout_like,
+            surfaces=[0.5],
+            helicity_m=1,
+            helicity_n=-1,
+            ntheta=9,
+            nphi=10,
+        )["residuals1d"]
+
+    alpha0 = jnp.asarray(0.08, dtype=jnp.float64)
+    direction = jnp.asarray(-0.37, dtype=jnp.float64)
+    eps = jnp.asarray(1.0e-5, dtype=jnp.float64)
+
+    residual0, jvp_ad = jax.jvp(residuals, (alpha0,), (direction,))
+    jvp_fd = (residuals(alpha0 + eps * direction) - residuals(alpha0 - eps * direction)) / (2.0 * eps)
+
+    cotangent = jnp.linspace(-0.25, 0.35, int(residual0.size), dtype=jnp.float64)
+    _, pullback = jax.vjp(residuals, alpha0)
+    (vjp_ad,) = pullback(cotangent)
+    vjp_fd = (
+        jnp.vdot(cotangent, residuals(alpha0 + eps))
+        - jnp.vdot(cotangent, residuals(alpha0 - eps))
+    ) / (2.0 * eps)
+
+    assert np.all(np.isfinite(np.asarray(jvp_ad)))
+    assert np.isfinite(float(np.asarray(vjp_ad)))
+    np.testing.assert_allclose(np.asarray(jvp_ad), np.asarray(jvp_fd), rtol=2.0e-6, atol=1.0e-9)
+    np.testing.assert_allclose(np.asarray(vjp_ad), np.asarray(vjp_fd), rtol=2.0e-6, atol=1.0e-9)
+
+
 def test_quasisymmetry_angle_cache_matches_uncached_wout():
     pytest.importorskip("jax")
 

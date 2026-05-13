@@ -13,7 +13,7 @@ Target State
 - Required CI wall time: under ten minutes for the required test, docs, and
   build jobs on GitHub-hosted CPU runners.
 - Current local CI-equivalent coverage baseline: clean on 2026-05-13 with
-  ``643 passed, 21 skipped, 85 deselected``, ``66.98%`` coverage, and ``7:50``
+  ``730 passed, 21 skipped, 85 deselected``, ``69.17%`` coverage, and ``8:54``
   runtime.
 - Long-term required coverage: 95% line coverage for ``vmec_jax`` package
   code.  The current Python 3.11 required coverage gate is ``63%``.
@@ -51,7 +51,7 @@ the recommended local escalation path.
    * - Coverage gate
      - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000" --cov=vmec_jax --cov-report=xml --cov-report=term-missing:skip-covered --cov-fail-under=63``
      - Python 3.11 required CI coverage job.  The latest local equivalent
-       reported ``66.98%`` coverage while the enforced gate stayed at ``63%``.
+       reported ``69.17%`` coverage while the enforced gate stayed at ``63%``.
    * - Optimization workflow smoke
      - ``pytest -q tests/test_optimization_examples.py tests/test_qs_ess_render_smoke.py``
      - After changing objective tuple construction, examples, or sweep
@@ -60,7 +60,10 @@ the recommended local escalation path.
      - ``pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_booz_input.py``
      - After changing QI diagnostics, Boozer input handling (including LASYM
        geometry/magnetic channels), smooth-QI residual settings, or first-class
-       QI diagnostic record fields.
+       QI diagnostic record fields.  This includes a low-resolution
+       ``qi_diagnostics_from_state`` check on the bundled
+       ``input.QI_stel_seed_3127`` solved seed when optional Boozer dependencies
+       are installed.
    * - QI ranking/report smoke
      - ``pytest -q tests/test_qi_objective_component_report.py tests/test_qi_seed_suitability_audit.py tests/test_qs_ess_render_smoke.py``
      - After changing QI branch-ranking metrics, seed audit/prefine manifests,
@@ -75,7 +78,9 @@ the recommended local escalation path.
      - Before merging solver changes that affect fixed/free-boundary physics.
    * - Full physics tier
      - ``python tools/fetch_assets.py`` then ``RUN_FULL=1 JAX_ENABLE_X64=1 pytest -q -m "full and not vmec2000"``
-     - Manual/nightly parity and high-cost physics validation.
+     - Manual/nightly parity and high-cost physics validation.  The latest
+       local coverage-appended run reached ``72.35%`` coverage with
+       ``74 passed, 4 skipped`` in ``27:21`` after refreshing released assets.
    * - External VMEC2000 tier
      - ``VMEC2000_EXEC=/path/to/xvmec2000 VMEC2000_INTEGRATION=1 pytest -q tests/test_vmec2000_exec_fast_validation.py::test_fast_vmec2000_stage_trace_validation_cases``
      - First executable-backed parity gate; broaden to ``pytest -q -m vmec2000``
@@ -221,8 +226,10 @@ Optimization gates:
   enough to run in ordinary PR checks.
 - QI diagnostic-record tests should keep smooth/raw/legacy QI totals,
   mirror-ratio, elongation, optional ``LgradB``, resolution metadata, and
-  diagnostic error fields stable enough for sweep renderers and downstream audit
-  scripts.
+  diagnostic error fields stable enough for sweep renderers and downstream
+  audit scripts.  The bundled solved-seed gate intentionally uses a tiny grid;
+  it is a metadata and sign/range regression, not a replacement for
+  publication-resolution Boozer contour review.
 - GPU optimization tests should assert the device-aware defaults separately:
   accepted-point exact callbacks default to tape on CPU and GPU, while relaxed
   trial residuals default to scan unless ``VMEC_JAX_OPT_TRIAL_SCAN=0`` is set.
@@ -232,13 +239,15 @@ Optimization gates:
 QI seed-robustness gates:
 
 - Required PR tests protect the metric semantics, not global optimizer
-  robustness.  The cheap QI gates use synthetic Boozer spectra and mocked
-  state diagnostics to ensure smooth QI, legacy branch/shuffle QI, mirror
-  ratio, elongation, optional ``LgradB``, and summary metadata stay compatible.
-- The next realistic validation step is a small solved-state diagnostic fixture
-  using ``qi_diagnostics_from_state``.  It should compare smooth QI, legacy QI,
-  mirror ratio, elongation, iota, aspect ratio, and Boozer ``|B|`` contour
-  quality on one bounded case without launching a full optimization sweep.
+  robustness.  The cheap QI gates use synthetic Boozer spectra, mocked state
+  diagnostics, and one bundled solved-state QI seed to ensure smooth QI,
+  legacy branch/shuffle QI, mirror ratio, elongation, optional ``LgradB``, and
+  summary metadata stay compatible.
+- The solved-state diagnostic fixture uses ``qi_diagnostics_from_state`` on
+  ``input.QI_stel_seed_3127``/``wout_QI_stel_seed_3127.nc`` without launching
+  a solve or optimization sweep.  Higher-resolution comparison of smooth QI,
+  legacy QI, mirror ratio, elongation, iota, aspect ratio, and Boozer ``|B|``
+  contour quality remains part of manual/nightly seed-robustness validation.
 - Use ``examples/optimization/audit_qi_seed_suitability.py --quick`` as the
   no-optimization preflight before a multi-seed QI sweep.  It ranks existing
   solved seeds and records missing optional reference checkouts instead of

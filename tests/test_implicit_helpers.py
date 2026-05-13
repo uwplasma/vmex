@@ -3,6 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from vmec_jax.state import StateLayout, VMECState
+
 
 def _mode_index(modes, m: int, n: int) -> int:
     for k, (mm, nn) in enumerate(zip(np.asarray(modes.m), np.asarray(modes.n))):
@@ -239,3 +241,137 @@ def test_fixed_boundary_residual_implicit_primal_matches_default_control_path(lo
     )
 
     assert np.asarray(pack_state(wrapped)) == pytest.approx(np.asarray(pack_state(direct)), rel=0.0, abs=1e-12)
+
+
+def test_implicit_profile_environment_flags_and_logs(monkeypatch, capsys):
+    from vmec_jax.implicit import (
+        _vmec_backward_profile_enabled,
+        _vmec_backward_profile_log,
+        _vmec_disable_reduced_active_enabled,
+        _vmec_keep_all_active_enabled,
+        _vmec_residual_profile_enabled,
+        _vmec_residual_profile_log,
+    )
+
+    for name in (
+        "VMEC_JAX_PROFILE_BACKWARD",
+        "VMEC_JAX_PROFILE_RESIDUAL",
+        "VMEC_JAX_IMPLICIT_KEEP_ALL_ACTIVE",
+        "VMEC_JAX_IMPLICIT_DISABLE_REDUCED_ACTIVE",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    assert _vmec_backward_profile_enabled() is False
+    assert _vmec_residual_profile_enabled() is False
+    assert _vmec_keep_all_active_enabled() is False
+    assert _vmec_disable_reduced_active_enabled() is False
+
+    _vmec_backward_profile_log("silent")
+    assert capsys.readouterr().out == ""
+
+    monkeypatch.setenv("VMEC_JAX_PROFILE_BACKWARD", "1")
+    monkeypatch.setenv("VMEC_JAX_PROFILE_RESIDUAL", "yes")
+    monkeypatch.setenv("VMEC_JAX_IMPLICIT_KEEP_ALL_ACTIVE", "true")
+    monkeypatch.setenv("VMEC_JAX_IMPLICIT_DISABLE_REDUCED_ACTIVE", "TRUE")
+
+    assert _vmec_backward_profile_enabled() is True
+    assert _vmec_residual_profile_enabled() is True
+    assert _vmec_keep_all_active_enabled() is True
+    assert _vmec_disable_reduced_active_enabled() is True
+
+    _vmec_backward_profile_log("unit_backward", count=2)
+    _vmec_residual_profile_log("unit_residual", rows=3)
+    out = capsys.readouterr().out
+    assert "[vmec_jax backward]" in out
+    assert "unit_backward" in out
+    assert "'count': 2" in out
+    assert "[vmec_jax residual]" in out
+    assert "unit_residual" in out
+    assert "'rows': 3" in out
+
+    monkeypatch.setenv("VMEC_JAX_PROFILE_BACKWARD", "False")
+    monkeypatch.setenv("VMEC_JAX_PROFILE_RESIDUAL", "no")
+    monkeypatch.setenv("VMEC_JAX_IMPLICIT_KEEP_ALL_ACTIVE", "0")
+    monkeypatch.setenv("VMEC_JAX_IMPLICIT_DISABLE_REDUCED_ACTIVE", "")
+    assert _vmec_backward_profile_enabled() is False
+    assert _vmec_residual_profile_enabled() is False
+    assert _vmec_keep_all_active_enabled() is False
+    assert _vmec_disable_reduced_active_enabled() is False
+
+
+def test_implicit_linear_algebra_and_state_packing_helpers():
+    pytest.importorskip("jax")
+
+    from vmec_jax._compat import jnp
+    from vmec_jax.implicit import (
+        _cg_solve,
+        _dense_transpose_lstsq_host,
+        _flatten_L,
+        _linear_map_jacobian_columns,
+        _stop_gradient_tree,
+        _unflatten_L,
+        _zero_state_like,
+    )
+
+    layout = StateLayout(ns=2, K=3, lasym=True)
+    state = VMECState(
+        layout=layout,
+        Rcos=jnp.arange(6.0).reshape(2, 3),
+        Rsin=jnp.ones((2, 3)),
+        Zcos=2.0 * jnp.ones((2, 3)),
+        Zsin=3.0 * jnp.ones((2, 3)),
+        Lcos=4.0 * jnp.ones((2, 3)),
+        Lsin=5.0 * jnp.ones((2, 3)),
+    )
+
+    zero = _zero_state_like(state)
+    assert zero.layout == layout
+    for block in (zero.Rcos, zero.Rsin, zero.Zcos, zero.Zsin, zero.Lcos, zero.Lsin):
+        np.testing.assert_allclose(np.asarray(block), np.zeros((2, 3)))
+
+    stopped = _stop_gradient_tree(state)
+    np.testing.assert_allclose(np.asarray(stopped.Rcos), np.asarray(state.Rcos))
+
+    flat = _flatten_L(state.Lcos, state.Lsin)
+    Lcos, Lsin = _unflatten_L(flat, shape=(2, 3))
+    np.testing.assert_allclose(np.asarray(Lcos), np.asarray(state.Lcos))
+    np.testing.assert_allclose(np.asarray(Lsin), np.asarray(state.Lsin))
+
+    mat = np.asarray([[2.0, 0.0], [0.0, 4.0]])
+    rhs = np.asarray([6.0, 8.0])
+    np.testing.assert_allclose(_dense_transpose_lstsq_host(mat, rhs, 0.0), [3.0, 2.0])
+
+    damping = 0.5
+    eye = np.eye(2)
+    expected_damped, *_ = np.linalg.lstsq(
+        np.concatenate([mat.T, np.sqrt(damping) * eye], axis=0),
+        np.concatenate([rhs, np.zeros((2,))], axis=0),
+        rcond=None,
+    )
+    np.testing.assert_allclose(_dense_transpose_lstsq_host(mat, rhs, damping), expected_damped)
+
+    sol = _cg_solve(
+        lambda x: jnp.asarray([4.0 * x[0], 9.0 * x[1]]),
+        jnp.asarray([8.0, 27.0]),
+        tol=1.0e-10,
+        max_iter=5,
+    )
+    np.testing.assert_allclose(np.asarray(sol), [2.0, 3.0], rtol=1e-6, atol=1e-6)
+
+    jac = _linear_map_jacobian_columns(
+        lambda x: jnp.asarray([x[0] + 2.0 * x[1], x[2] - x[0]]),
+        input_size=3,
+        output_size=2,
+        dtype=jnp.float32,
+        chunk_size=2,
+    )
+    np.testing.assert_allclose(np.asarray(jac), [[1.0, 2.0, 0.0], [-1.0, 0.0, 1.0]])
+
+    with pytest.raises(ValueError, match="chunk_size must be positive"):
+        _linear_map_jacobian_columns(
+            lambda x: x,
+            input_size=1,
+            output_size=1,
+            dtype=jnp.float32,
+            chunk_size=0,
+        )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -14,6 +15,10 @@ def _booz_like(*, xm, xn, coeffs, iota=0.4, nfp=1):
         "iota_b": np.asarray([iota], dtype=float),
         "nfp_b": np.asarray(nfp),
     }
+
+
+def _data_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "examples" / "data"
 
 
 def test_qi_diagnostics_from_boozer_output_records_core_metrics():
@@ -177,3 +182,66 @@ def test_qi_diagnostics_from_state_wraps_existing_components_without_solves(monk
     assert record["qi_include_bounce_endpoints"] is True
     assert record["qi_surfaces"] == [0.5]
     assert record["qi_surface_indices"] == [3]
+
+
+def test_qi_diagnostics_from_bundled_solved_qi_seed_records_state_metrics():
+    pytest.importorskip("jax")
+    pytest.importorskip("netCDF4")
+    pytest.importorskip("booz_xform_jax")
+
+    from vmec_jax._compat import enable_x64
+    from vmec_jax.config import load_config
+    from vmec_jax.qi_diagnostics import QIDiagnosticOptions, qi_diagnostics_from_state
+    from vmec_jax.static import build_static
+    from vmec_jax.wout import read_wout, state_from_wout
+
+    enable_x64(True)
+    data_dir = _data_dir()
+    cfg, indata = load_config(str(data_dir / "input.QI_stel_seed_3127"))
+    static = build_static(cfg)
+    wout = read_wout(data_dir / "wout_QI_stel_seed_3127.nc")
+
+    options = QIDiagnosticOptions(
+        surfaces=(0.5,),
+        mboz=4,
+        nboz=4,
+        nphi=17,
+        nalpha=5,
+        n_bounce=5,
+        include_bounce_endpoints=True,
+        legacy_nphi_out=33,
+        mirror_threshold=0.21,
+        mirror_ntheta=12,
+        mirror_nphi=12,
+        mirror_surface_index=0,
+        elongation_threshold=8.0,
+        elongation_ntheta=12,
+        elongation_nphi=6,
+        fail_on_error=True,
+    )
+
+    record = qi_diagnostics_from_state(
+        state=state_from_wout(wout),
+        static=static,
+        indata=indata,
+        signgs=wout.signgs,
+        options=options,
+    )
+
+    assert record["qi_diagnostic_source"] == "state"
+    assert record["qi_nfp"] == 3
+    assert record["qi_mboz"] == 4
+    assert record["qi_nboz"] == 4
+    assert record["qi_include_bounce_endpoints"] is True
+    assert record["qi_surfaces"] == [0.5]
+    assert record["qi_surface_indices"] == [14]
+    assert record["qi_boozer_resolution"] == {"mboz": 4, "nboz": 4}
+    assert record["qi_raw_total"] == record["qi_smooth_total"]
+    assert 0.0 < record["qi_smooth_total"] < 0.05
+    assert 0.0 < record["qi_legacy_total"] < 0.05
+    assert record["qi_legacy_nphi_out"] == 33
+    assert 0.0 < record["qi_mirror_ratio_max"] < record["qi_mirror_ratio_target"]
+    assert record["qi_mirror_excess_max"] == 0.0
+    assert record["qi_max_elongation"] > record["qi_elongation_target"]
+    assert record["qi_elongation_excess"] > 0.0
+    assert record["qi_lgradb_enabled"] is False

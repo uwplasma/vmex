@@ -1,0 +1,316 @@
+from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+from vmec_jax._compat import jnp
+from vmec_jax.integrals import cumrect_s_halfmesh
+from vmec_jax.namelist import InData
+from vmec_jax.vmec_lforbal import MU0 as LFORBAL_MU0
+from vmec_jax.wout import (
+    MU0,
+    WoutData,
+    _compute_equif_wout,
+    equilibrium_iota_profiles_from_state,
+    read_wout,
+    write_wout,
+)
+
+
+def _synthetic_wout(path: Path) -> WoutData:
+    ns = 3
+    mnmax = 2
+    mnmax_nyq = 2
+    profile = np.asarray([0.0, 1.0, 2.0])
+    main = np.arange(ns * mnmax, dtype=float).reshape(ns, mnmax)
+    nyq = np.arange(ns * mnmax_nyq, dtype=float).reshape(ns, mnmax_nyq)
+
+    return WoutData(
+        path=path,
+        ns=ns,
+        mpol=2,
+        ntor=0,
+        nfp=1,
+        lasym=False,
+        signgs=1,
+        mnmax=mnmax,
+        mpol_nyq=1,
+        ntor_nyq=0,
+        mnmax_nyq=mnmax_nyq,
+        xm=np.asarray([0, 1]),
+        xn=np.asarray([0, 0]),
+        xm_nyq=np.asarray([0, 1]),
+        xn_nyq=np.asarray([0, 0]),
+        rmnc=main + 1.0,
+        rmns=np.zeros_like(main),
+        zmnc=np.zeros_like(main),
+        zmns=main + 2.0,
+        lmnc=np.zeros_like(main),
+        lmns=main + 3.0,
+        phipf=profile + 1.0,
+        chipf=profile + 2.0,
+        phips=np.asarray([0.0, 1.5, 2.5]),
+        iotaf=profile + 0.25,
+        iotas=profile + 0.5,
+        gmnc=nyq + 1.0,
+        gmns=nyq + 2.0,
+        bsupumnc=nyq + 3.0,
+        bsupumns=nyq + 4.0,
+        bsupvmnc=nyq + 5.0,
+        bsupvmns=nyq + 6.0,
+        bsubumnc=nyq + 7.0,
+        bsubumns=nyq + 8.0,
+        bsubvmnc=nyq + 9.0,
+        bsubvmns=nyq + 10.0,
+        bsubsmns=nyq + 11.0,
+        bsubsmnc=nyq + 12.0,
+        bmnc=nyq + 13.0,
+        bmns=nyq + 14.0,
+        wb=1.25,
+        volume_p=2.5,
+        gamma=0.0,
+        wp=3.5,
+        vp=profile + 3.0,
+        pres=MU0 * np.asarray([0.0, 4.0, 8.0]),
+        presf=MU0 * np.asarray([1.0, 5.0, 9.0]),
+        fsqr=0.1,
+        fsqz=0.2,
+        fsql=0.3,
+        fsqt=np.asarray([0.4, 0.5]),
+        equif=profile + 4.0,
+        phi=profile + 5.0,
+        buco=profile + 6.0,
+        bvco=profile + 7.0,
+        jcuru=profile + 8.0,
+        jcurv=profile + 9.0,
+        raxis_cc=np.asarray([10.0]),
+        zaxis_cs=np.asarray([11.0]),
+        raxis_cs=np.asarray([12.0]),
+        zaxis_cc=np.asarray([13.0]),
+        Aminor_p=14.0,
+        Rmajor_p=15.0,
+        aspect=16.0,
+        betatotal=17.0,
+        betapol=18.0,
+        betator=19.0,
+        betaxis=20.0,
+        ctor=21.0,
+        DMerc=profile + 10.0,
+        Dshear=profile + 11.0,
+        Dwell=profile + 12.0,
+        Dcurr=profile + 13.0,
+        Dgeod=profile + 14.0,
+        jdotb=profile + 15.0,
+        bdotb=profile + 16.0,
+        bdotgradv=profile + 17.0,
+        ac=np.asarray([]),
+        ac_aux_s=np.asarray([]),
+        ac_aux_f=np.asarray([]),
+        pcurr_type="power_series",
+        piota_type="akima_spline",
+    )
+
+
+def test_write_wout_roundtrips_synthetic_profiles_and_default_aux_arrays(tmp_path: Path) -> None:
+    wout = _synthetic_wout(tmp_path / "synthetic_source.nc")
+    out_path = tmp_path / "wout_synthetic.nc"
+
+    write_wout(out_path, wout)
+    with pytest.raises(FileExistsError, match="overwrite=True"):
+        write_wout(out_path, wout)
+
+    loaded = read_wout(out_path)
+
+    assert loaded.ns == 3
+    assert loaded.mpol == 2
+    assert loaded.ntor == 0
+    assert loaded.pcurr_type == "power_series"
+    assert loaded.piota_type == "akima_spline"
+    np.testing.assert_allclose(loaded.pres, wout.pres)
+    np.testing.assert_allclose(loaded.presf, wout.presf)
+    np.testing.assert_allclose(loaded.rmnc, wout.rmnc)
+    np.testing.assert_allclose(loaded.bmns, wout.bmns)
+    np.testing.assert_allclose(loaded.phi, wout.phi)
+    np.testing.assert_allclose(loaded.ac, np.zeros((21,)))
+    np.testing.assert_allclose(loaded.ac_aux_s, -np.ones((1,)))
+    np.testing.assert_allclose(loaded.ac_aux_f, np.zeros((1,)))
+
+
+def test_read_wout_applies_optional_defaults_and_phi_fallback(tmp_path: Path) -> None:
+    netcdf4 = pytest.importorskip("netCDF4")
+    path = tmp_path / "wout_minimal_optional_defaults.nc"
+    ns = 3
+    mnmax = 2
+    mnmax_nyq = 2
+
+    def write_var(ds, name: str, dims: tuple[str, ...], data, dtype: str = "f8") -> None:
+        var = ds.createVariable(name, dtype, dims)
+        var[...] = np.asarray(data)
+
+    with netcdf4.Dataset(path, mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createDimension("radius", ns)
+        ds.createDimension("mn_mode", mnmax)
+        ds.createDimension("mn_mode_nyq", mnmax_nyq)
+
+        write_var(ds, "ns", (), ns, "i4")
+        write_var(ds, "mpol", (), 2, "i4")
+        write_var(ds, "ntor", (), 0, "i4")
+        write_var(ds, "nfp", (), 1, "i4")
+        write_var(ds, "signgs", (), -1, "i4")
+        write_var(ds, "lasym__logical__", (), 0, "i4")
+        write_var(ds, "xm", ("mn_mode",), [0, 1])
+        write_var(ds, "xn", ("mn_mode",), [0, 0])
+        write_var(ds, "xm_nyq", ("mn_mode_nyq",), [0, 1])
+        write_var(ds, "xn_nyq", ("mn_mode_nyq",), [0, 0])
+
+        coeff = np.arange(ns * mnmax, dtype=float).reshape(ns, mnmax)
+        write_var(ds, "rmnc", ("radius", "mn_mode"), coeff + 1.0)
+        write_var(ds, "zmns", ("radius", "mn_mode"), coeff + 2.0)
+        write_var(ds, "lmns", ("radius", "mn_mode"), coeff + 3.0)
+        phipf = np.asarray([2.0, 4.0, 6.0])
+        write_var(ds, "phipf", ("radius",), phipf)
+        write_var(ds, "chipf", ("radius",), [1.0, 3.0, 5.0])
+        write_var(ds, "phips", ("radius",), [0.0, 4.0, 6.0])
+
+        nyq = np.arange(ns * mnmax_nyq, dtype=float).reshape(ns, mnmax_nyq)
+        write_var(ds, "gmnc", ("radius", "mn_mode_nyq"), nyq + 1.0)
+        write_var(ds, "bsupumnc", ("radius", "mn_mode_nyq"), nyq + 2.0)
+        write_var(ds, "bsupvmnc", ("radius", "mn_mode_nyq"), nyq + 3.0)
+        write_var(ds, "wb", (), 1.5)
+        write_var(ds, "volume_p", (), 2.5)
+
+    wout = read_wout(path)
+    expected_phi = np.asarray(cumrect_s_halfmesh(phipf, np.linspace(0.0, 1.0, ns)))
+
+    assert wout.mnmax == mnmax
+    assert wout.mnmax_nyq == mnmax_nyq
+    assert wout.mpol_nyq == 1
+    assert wout.ntor_nyq == 0
+    assert wout.lasym is False
+    assert wout.signgs == -1
+    np.testing.assert_allclose(wout.phi, expected_phi)
+    np.testing.assert_allclose(wout.rmns, np.zeros((ns, mnmax)))
+    np.testing.assert_allclose(wout.gmns, np.zeros((ns, mnmax_nyq)))
+    np.testing.assert_allclose(wout.bmnc, np.zeros((ns, mnmax_nyq)))
+    np.testing.assert_allclose(wout.pres, np.zeros((ns,)))
+    assert wout.fsqt.shape == (0,)
+    np.testing.assert_allclose(wout.ac_aux_s, -np.ones((101,)))
+
+
+def test_compute_equif_wout_matches_weighted_currents_and_endpoint_rules() -> None:
+    trig = SimpleNamespace(
+        cosmui3=np.full((2, 1), 0.5),
+        mscale=np.asarray([1.0]),
+        cosnv=np.zeros((2, 1)),
+    )
+    ns = 4
+    s = np.linspace(0.0, 1.0, ns)
+    bsubu_levels = np.asarray([0.0, 1.0, 2.0, 4.0])
+    bsubv_levels = np.asarray([0.0, 3.0, 6.0, 10.0])
+    bsubu = np.broadcast_to(bsubu_levels[:, None, None], (ns, 2, 2)).copy()
+    bsubv = np.broadcast_to(bsubv_levels[:, None, None], (ns, 2, 2)).copy()
+    pres = np.asarray([0.0, 3.0, 1.0, 0.0])
+    vp = np.asarray([0.0, 5.0, 7.0, 9.0])
+    phipf = np.asarray([1.0, 2.0, 3.0, 4.0])
+    chipf = np.asarray([0.5, 1.5, 2.5, 3.5])
+
+    buco, bvco, jcuru, jcurv, equif = _compute_equif_wout(
+        bsubu=bsubu,
+        bsubv=bsubv,
+        pres=pres,
+        vp=vp,
+        phipf=phipf,
+        chipf=chipf,
+        signgs=-1,
+        trig=trig,
+        s=s,
+    )
+
+    expected_buco = 2.0 * bsubu_levels
+    expected_bvco = 2.0 * bsubv_levels
+    hs = 1.0 / float(ns - 1)
+    ohs = 1.0 / hs
+    expected_jcuru = np.zeros((ns,))
+    expected_jcurv = np.zeros((ns,))
+    expected_vpphi = np.zeros((ns,))
+    expected_presgrad = np.zeros((ns,))
+    for js in range(1, ns - 1):
+        expected_jcurv[js] = -ohs * (expected_buco[js + 1] - expected_buco[js])
+        expected_jcuru[js] = ohs * (expected_bvco[js + 1] - expected_bvco[js])
+        expected_vpphi[js] = 0.5 * (vp[js + 1] + vp[js])
+        expected_presgrad[js] = (pres[js + 1] - pres[js]) * ohs
+
+    expected_equif = np.zeros((ns,))
+    for js in range(1, ns - 1):
+        denom = (
+            abs(expected_jcurv[js] * chipf[js])
+            + abs(expected_jcuru[js] * phipf[js])
+            + abs(expected_presgrad[js] * expected_vpphi[js])
+        )
+        raw = ((-phipf[js] * expected_jcuru[js] + chipf[js] * expected_jcurv[js]) / expected_vpphi[js]) + (
+            expected_presgrad[js]
+        )
+        expected_equif[js] = raw * expected_vpphi[js] / denom
+
+    for arr in (expected_equif, expected_jcuru, expected_jcurv):
+        arr[0] = 2.0 * arr[1] - arr[2]
+        arr[-1] = 2.0 * arr[-2] - arr[-3]
+
+    np.testing.assert_allclose(buco, expected_buco)
+    np.testing.assert_allclose(bvco, expected_bvco)
+    np.testing.assert_allclose(jcuru, expected_jcuru / LFORBAL_MU0)
+    np.testing.assert_allclose(jcurv, expected_jcurv / LFORBAL_MU0)
+    np.testing.assert_allclose(equif, expected_equif)
+
+    short = _compute_equif_wout(
+        bsubu=bsubu[:2],
+        bsubv=bsubv[:2],
+        pres=pres[:2],
+        vp=vp[:2],
+        phipf=phipf[:2],
+        chipf=chipf[:2],
+        signgs=1,
+        trig=trig,
+        s=s[:2],
+    )
+    for profile in short:
+        np.testing.assert_allclose(profile, np.zeros((2,)))
+
+
+def test_equilibrium_iota_profiles_iota_driven_branch_uses_prescribed_half_mesh_profile() -> None:
+    static = SimpleNamespace(s=jnp.linspace(0.0, 1.0, 4))
+    indata = InData(
+        scalars={
+            "NCURR": 0,
+            "PHIEDGE": float(2.0 * np.pi),
+            "PIOTA_TYPE": "power_series",
+            "AI": [0.5, 0.25],
+        },
+        indexed={},
+    )
+
+    chips, iotas, iotaf = equilibrium_iota_profiles_from_state(
+        state=None,
+        static=static,
+        indata=indata,
+        signgs=1,
+    )
+
+    s_half = np.asarray([0.0, 1.0 / 6.0, 0.5, 5.0 / 6.0])
+    expected_iotas = 0.5 + 0.25 * s_half
+    expected_iotas[0] = 0.0
+    expected_iotaf = np.asarray(
+        [
+            1.5 * expected_iotas[1] - 0.5 * expected_iotas[2],
+            0.5 * (expected_iotas[1] + expected_iotas[2]),
+            0.5 * (expected_iotas[2] + expected_iotas[3]),
+            1.5 * expected_iotas[3] - 0.5 * expected_iotas[2],
+        ]
+    )
+
+    np.testing.assert_allclose(np.asarray(iotas), expected_iotas)
+    np.testing.assert_allclose(np.asarray(chips), expected_iotas)
+    np.testing.assert_allclose(np.asarray(iotaf), expected_iotaf)
