@@ -308,10 +308,13 @@ def test_implicit_linear_algebra_and_state_packing_helpers():
         _dense_transpose_lstsq_host,
         _flatten_L,
         _linear_map_jacobian_columns,
+        _pack_named_residual_parts,
         _stop_gradient_tree,
         _unflatten_L,
+        _zero_m1_zforce_flag_from_result,
         _zero_state_like,
     )
+    from vmec_jax.solve import _zero_edge_rz_force_block
 
     layout = StateLayout(ns=2, K=3, lasym=True)
     state = VMECState(
@@ -375,3 +378,34 @@ def test_implicit_linear_algebra_and_state_packing_helpers():
             dtype=jnp.float32,
             chunk_size=0,
         )
+
+    packed = _pack_named_residual_parts(
+        [
+            ("a", jnp.asarray([[1.0, 2.0], [3.0, 4.0]])),
+            ("b", jnp.asarray([5.0, 6.0, 7.0])),
+        ],
+        projector={"a": jnp.asarray([0, 3], dtype=jnp.int32)},
+    )
+    np.testing.assert_allclose(np.asarray(packed), [1.0, 4.0, 5.0, 6.0, 7.0])
+
+    np_block = np.arange(6.0).reshape(3, 2)
+    np_masked = _zero_edge_rz_force_block(np_block)
+    assert isinstance(np_masked, np.ndarray)
+    assert not np.shares_memory(np_masked, np_block)
+    np.testing.assert_allclose(np_masked, [[0.0, 1.0], [2.0, 3.0], [0.0, 0.0]])
+    np.testing.assert_allclose(np_block[-1], [4.0, 5.0])
+    assert _zero_edge_rz_force_block(None) is None
+    same_short = _zero_edge_rz_force_block(np.ones((1, 2)))
+    np.testing.assert_allclose(same_short, [[1.0, 1.0]])
+
+    jax_masked = _zero_edge_rz_force_block(jnp.asarray(np_block), preserve_numpy=False)
+    np.testing.assert_allclose(np.asarray(jax_masked), [[0.0, 1.0], [2.0, 3.0], [0.0, 0.0]])
+
+    class Result:
+        def __init__(self, n_iter, fsqz2_history):
+            self.n_iter = n_iter
+            self.fsqz2_history = fsqz2_history
+
+    assert float(_zero_m1_zforce_flag_from_result(Result(0, []), dtype=np.float64)) == 1.0
+    assert float(_zero_m1_zforce_flag_from_result(Result(4, [1.0e-8]), dtype=np.float64)) == 1.0
+    assert float(_zero_m1_zforce_flag_from_result(Result(4, [1.0e-3]), dtype=np.float64)) == 0.0

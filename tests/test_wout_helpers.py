@@ -12,6 +12,8 @@ from vmec_jax.wout import (
     _apply_nyquist_half_weight,
     _apply_bsubv_equif_correction,
     _bool_from_nc,
+    _bss_scalxc_undo_factor,
+    _bss_should_undo_scalxc,
     _chipf_from_chips,
     _compute_aspectratio,
     _compute_ctor_from_buco,
@@ -23,6 +25,7 @@ from vmec_jax.wout import (
     _nc_scalar,
     _pshalf_from_s,
     _safe_divide,
+    _undo_bss_scalxc_if_enabled,
     _vmec_symforce_antisym,
     _vmec_symforce_apply,
     _vmec_symoutput_expand,
@@ -120,6 +123,29 @@ def test_mesh_weight_and_safe_divide_helpers():
         _vmec_wint_from_trig_jax(
             SimpleNamespace(cosmui3=np.asarray([[1.0]]), mscale=np.asarray([]), cosnv=np.zeros((1, 1)))
         )
+
+
+def test_bss_scalxc_undo_helpers(monkeypatch):
+    monkeypatch.delenv("VMEC_JAX_BSS_UNDO_SCALXC", raising=False)
+    assert _bss_should_undo_scalxc() is False
+
+    s = np.asarray([0.0, 0.25, 1.0])
+    factor = _bss_scalxc_undo_factor(s)
+    np.testing.assert_allclose(factor[:, 0, 0], [0.5, 0.5, 1.0])
+    assert _bss_scalxc_undo_factor(np.asarray([])).shape == (0, 1, 1)
+    np.testing.assert_allclose(_bss_scalxc_undo_factor(np.asarray([0.04]))[:, 0, 0], [1.0])
+
+    a = np.ones((3, 2, 1))
+    b = 2.0 * np.ones((3, 2, 1))
+    out_a, out_b = _undo_bss_scalxc_if_enabled(s, a, b)
+    assert out_a is a
+    assert out_b is b
+
+    monkeypatch.setenv("VMEC_JAX_BSS_UNDO_SCALXC", "1")
+    assert _bss_should_undo_scalxc() is True
+    out_a, out_b = _undo_bss_scalxc_if_enabled(s, a, b)
+    np.testing.assert_allclose(out_a[:, 0, 0], [0.5, 0.5, 1.0])
+    np.testing.assert_allclose(out_b[:, 0, 0], [1.0, 1.0, 2.0])
 
 
 def test_eqfor_beta_and_aspectratio_helpers_are_finite_and_guard_shapes():

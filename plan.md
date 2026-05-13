@@ -37,8 +37,8 @@ acceptance criteria or evidence changes.
 - Exact-history correctness is now protected against relaxed trial-solve drift:
   final ``input.final`` and ``wout_final.nc`` use the best exact accepted point
   when the last trial-accepted point replays worse.
-- Required CI coverage is 69.17% locally on the Python 3.11 CI-equivalent
-  required suite (`730 passed, 21 skipped, 85 deselected`, 8:54), above the
+- Required CI coverage is 69.30% locally on the Python 3.11 CI-equivalent
+  required suite (`731 passed, 21 skipped, 85 deselected`, 9:07), above the
   current 63% gate but still far below the long-term 95% goal.
 - Full non-VMEC2000 physics coverage with refreshed released assets reaches
   72.35% locally (`74 passed, 4 skipped`, 27:21). This is still short of the
@@ -50,6 +50,9 @@ acceptance criteria or evidence changes.
   optimization sweep.
 - `solve.py`, `wout.py`, `free_boundary.py`, `driver.py`, and optimization
   modules are too large and need staged refactoring after parity gates are locked.
+- The first staged solver/wout refactor has centralized LCFS R/Z residual edge
+  masking, extracted residual-implicit packing/zero-m1 helper seams, and
+  removed duplicated bss scalxc undo logic behind direct unit tests.
 
 ## Milestone 1: QI Truth And Robustness
 
@@ -182,6 +185,10 @@ Acceptance:
       Jacobian/state-tangent/scalar-cotangent checks tied together.
 - [ ] Revisit the residual-root implicit layer: reduced state packing, boundary
       control embedding, lambda gauge/branch conditions, and custom VJP/JVP.
+- [x] Extract and test the first pure residual-root helper seams: named
+      residual packing with structural projectors, zero-m1 host flag selection,
+      and shared R/Z edge-force masking used by GN, residual-iteration,
+      first-step diagnostics, and residual implicit differentiation paths.
 - [ ] Reduce accepted-point replay/Jacobian count in optimization without changing
       accepted equilibria.
 - [ ] Add matrix-free/scalar-adjoint optimizer pathways for larger mode numbers.

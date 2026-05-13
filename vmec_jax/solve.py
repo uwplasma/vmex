@@ -39,6 +39,27 @@ _STRICT_UPDATE_STEP_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 _PRECOND_OUTPUT_SCALE_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 
 
+def _zero_edge_rz_force_block(a, *, preserve_numpy: bool = True):
+    """Zero the LCFS row in an R/Z force block, leaving lambda blocks untouched.
+
+    VMEC excludes the outermost R/Z force row from residual metrics. This
+    helper centralizes that convention while preserving NumPy hot paths when
+    requested.
+    """
+    if a is None:
+        return None
+    if preserve_numpy and isinstance(a, np.ndarray):
+        if a.shape[0] < 2:
+            return a
+        out = a.copy()
+        out[-1] = np.zeros_like(a[-1])
+        return out
+    a = jnp.asarray(a)
+    if a.shape[0] < 2:
+        return a
+    return a.at[-1].set(jnp.zeros_like(a[-1]))
+
+
 def _jit_cache_limit(env_name: str, default: int) -> int:
     """Return a non-negative JIT-cache size limit from an environment variable."""
 
@@ -3917,22 +3938,6 @@ def solve_fixed_boundary_gn_vmec_residual(
             idx00=idx00,
         )
 
-    def _zero_edge_rz(a):
-        if a is None:
-            return None
-        # Preserve NumPy arrays (numpy hot-path) to avoid JAX dispatch.
-        # Only wrap with jnp.asarray when the array is not already a NumPy array.
-        if not isinstance(a, np.ndarray):
-            a = jnp.asarray(a)
-            if a.shape[0] < 2:
-                return a
-            return a.at[-1].set(jnp.zeros_like(a[-1]))
-        if a.shape[0] < 2:
-            return a
-        out = a.copy()
-        out[-1] = np.zeros_like(a[-1])
-        return out
-
     mask_pack = getattr(static, "tomnsps_masks", None)
 
     def _residual_blocks(state: VMECState, zero_m1_zforce: Any):
@@ -3967,16 +3972,16 @@ def solve_fixed_boundary_gn_vmec_residual(
         # VMEC convention: R/Z sums exclude the edge surface; enforce that by
         # zeroing R/Z blocks at js=ns (lambda blocks are left untouched).
         frzl = TomnspsRZL(
-            frcc=_zero_edge_rz(frzl.frcc),
-            frss=_zero_edge_rz(frzl.frss),
-            fzsc=_zero_edge_rz(frzl.fzsc),
-            fzcs=_zero_edge_rz(frzl.fzcs),
+            frcc=_zero_edge_rz_force_block(frzl.frcc),
+            frss=_zero_edge_rz_force_block(frzl.frss),
+            fzsc=_zero_edge_rz_force_block(frzl.fzsc),
+            fzcs=_zero_edge_rz_force_block(frzl.fzcs),
             flsc=frzl.flsc,
             flcs=frzl.flcs,
-            frsc=_zero_edge_rz(getattr(frzl, "frsc", None)),
-            frcs=_zero_edge_rz(getattr(frzl, "frcs", None)),
-            fzcc=_zero_edge_rz(getattr(frzl, "fzcc", None)),
-            fzss=_zero_edge_rz(getattr(frzl, "fzss", None)),
+            frsc=_zero_edge_rz_force_block(getattr(frzl, "frsc", None)),
+            frcs=_zero_edge_rz_force_block(getattr(frzl, "frcs", None)),
+            fzcc=_zero_edge_rz_force_block(getattr(frzl, "fzcc", None)),
+            fzss=_zero_edge_rz_force_block(getattr(frzl, "fzss", None)),
             flcc=getattr(frzl, "flcc", None),
             flss=getattr(frzl, "flss", None),
         )
@@ -5009,22 +5014,6 @@ def solve_fixed_boundary_residual_iter(
         _hash_array_bytes(edge_Zsin),
     )
 
-    def _zero_edge_rz(a):
-        if a is None:
-            return None
-        # Preserve NumPy arrays (numpy hot-path) to avoid JAX dispatch.
-        # Only wrap with jnp.asarray when the array is not already a NumPy array.
-        if not isinstance(a, np.ndarray):
-            a = jnp.asarray(a)
-            if a.shape[0] < 2:
-                return a
-            return a.at[-1].set(jnp.zeros_like(a[-1]))
-        if a.shape[0] < 2:
-            return a
-        out = a.copy()
-        out[-1] = np.zeros_like(a[-1])
-        return out
-
     def _apply_radial_tridi(a, alpha: float):
         if alpha <= 0.0:
             return a
@@ -5740,16 +5729,16 @@ def solve_fixed_boundary_residual_iter(
         # the preconditioner path (VMEC free-boundary parity).
         def _mask_edge(frzl_in: TomnspsRZL) -> TomnspsRZL:
             return TomnspsRZL(
-                frcc=_zero_edge_rz(frzl_in.frcc),
-                frss=_zero_edge_rz(frzl_in.frss),
-                fzsc=_zero_edge_rz(frzl_in.fzsc),
-                fzcs=_zero_edge_rz(frzl_in.fzcs),
+                frcc=_zero_edge_rz_force_block(frzl_in.frcc),
+                frss=_zero_edge_rz_force_block(frzl_in.frss),
+                fzsc=_zero_edge_rz_force_block(frzl_in.fzsc),
+                fzcs=_zero_edge_rz_force_block(frzl_in.fzcs),
                 flsc=frzl_in.flsc,
                 flcs=frzl_in.flcs,
-                frsc=_zero_edge_rz(getattr(frzl_in, "frsc", None)),
-                frcs=_zero_edge_rz(getattr(frzl_in, "frcs", None)),
-                fzcc=_zero_edge_rz(getattr(frzl_in, "fzcc", None)),
-                fzss=_zero_edge_rz(getattr(frzl_in, "fzss", None)),
+                frsc=_zero_edge_rz_force_block(getattr(frzl_in, "frsc", None)),
+                frcs=_zero_edge_rz_force_block(getattr(frzl_in, "frcs", None)),
+                fzcc=_zero_edge_rz_force_block(getattr(frzl_in, "fzcc", None)),
+                fzss=_zero_edge_rz_force_block(getattr(frzl_in, "fzss", None)),
                 flcc=getattr(frzl_in, "flcc", None),
                 flss=getattr(frzl_in, "flss", None),
             )
@@ -14276,12 +14265,6 @@ def first_step_diagnostics(
     if bool(include_constraint_force):
         constraint_tcon0 = float(indata.get_float("TCON0", 1.0))
 
-    def _zero_edge_rz(a):
-        a = None if a is None else jnp.asarray(a)
-        if a is None or a.shape[0] < 2:
-            return a
-        return a.at[-1].set(jnp.zeros_like(a[-1]))
-
     def _apply_radial_tridi(rhs, alpha: float):
         if alpha <= 0.0:
             return rhs
@@ -14442,16 +14425,16 @@ def first_step_diagnostics(
             )
         frzl = vmec_zero_m1_zforce(frzl=frzl, enabled=jnp.asarray(float(bool(zero_m1))))
         frzl = TomnspsRZL(
-            frcc=_zero_edge_rz(frzl.frcc),
-            frss=_zero_edge_rz(frzl.frss),
-            fzsc=_zero_edge_rz(frzl.fzsc),
-            fzcs=_zero_edge_rz(frzl.fzcs),
+            frcc=_zero_edge_rz_force_block(frzl.frcc, preserve_numpy=False),
+            frss=_zero_edge_rz_force_block(frzl.frss, preserve_numpy=False),
+            fzsc=_zero_edge_rz_force_block(frzl.fzsc, preserve_numpy=False),
+            fzcs=_zero_edge_rz_force_block(frzl.fzcs, preserve_numpy=False),
             flsc=frzl.flsc,
             flcs=frzl.flcs,
-            frsc=_zero_edge_rz(getattr(frzl, "frsc", None)),
-            frcs=_zero_edge_rz(getattr(frzl, "frcs", None)),
-            fzcc=_zero_edge_rz(getattr(frzl, "fzcc", None)),
-            fzss=_zero_edge_rz(getattr(frzl, "fzss", None)),
+            frsc=_zero_edge_rz_force_block(getattr(frzl, "frsc", None), preserve_numpy=False),
+            frcs=_zero_edge_rz_force_block(getattr(frzl, "frcs", None), preserve_numpy=False),
+            fzcc=_zero_edge_rz_force_block(getattr(frzl, "fzcc", None), preserve_numpy=False),
+            fzss=_zero_edge_rz_force_block(getattr(frzl, "fzss", None), preserve_numpy=False),
             flcc=getattr(frzl, "flcc", None),
             flss=getattr(frzl, "flss", None),
         )
