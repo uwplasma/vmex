@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from vmec_jax.wout_io import (
+    NYQUIST_FOURIER_FIELD_NAMES,
     read_mode_table,
     read_nyquist_fourier_fields,
     read_optional_int_scalar,
@@ -72,17 +73,23 @@ def test_read_type_field_decodes_fixed_width_character_arrays() -> None:
     variables = {
         "bytes": _FakeReadVar(np.asarray(list("power_series   "), dtype="S1")),
         "unicode": _FakeReadVar(np.asarray(list("akima_spline  "), dtype="U1")),
+        "unicode_scalar": _FakeReadVar(np.asarray("cubic_spline   ", dtype="U16")),
+        "object_chars": _FakeReadVar(np.asarray(list("line_segment  "), dtype=object)),
+        "numeric_fallback": _FakeReadVar(np.asarray([1, 2])),
     }
 
     assert read_type_field(variables, "bytes") == "power_series"
     assert read_type_field(variables, "unicode") == "akima_spline"
+    assert read_type_field(variables, "unicode_scalar") == "cubic_spline"
+    assert read_type_field(variables, "object_chars") == "line_segment"
+    assert read_type_field(variables, "numeric_fallback") == "[1 2]"
     assert read_type_field(variables, "missing") == ""
 
 
 def test_read_nyquist_fourier_fields_uses_same_shape_defaults() -> None:
     gmnc = np.arange(6.0).reshape(2, 3)
-    bsupumnc = gmnc + 10.0
-    bsupvmnc = gmnc + 20.0
+    bsupumnc = np.arange(8.0).reshape(2, 4) + 10.0
+    bsupvmnc = np.arange(10.0).reshape(2, 5) + 20.0
     variables = {
         "gmnc": _FakeReadVar(gmnc),
         "bsupumnc": _FakeReadVar(bsupumnc),
@@ -95,9 +102,12 @@ def test_read_nyquist_fourier_fields_uses_same_shape_defaults() -> None:
     np.testing.assert_array_equal(fields["gmnc"], gmnc)
     np.testing.assert_array_equal(fields["bsupumnc"], bsupumnc)
     np.testing.assert_array_equal(fields["bsupvmnc"], bsupvmnc)
+    assert tuple(fields) == NYQUIST_FOURIER_FIELD_NAMES
     np.testing.assert_array_equal(fields["gmns"], np.zeros_like(gmnc))
     np.testing.assert_array_equal(fields["bsupumns"], np.zeros_like(bsupumnc))
+    np.testing.assert_array_equal(fields["bsubumnc"], np.zeros_like(bsupumnc))
     np.testing.assert_array_equal(fields["bsubvmns"], np.zeros_like(bsupvmnc))
+    np.testing.assert_array_equal(fields["bsubsmns"], np.zeros_like(bsupvmnc))
     np.testing.assert_array_equal(fields["bmnc"], np.zeros_like(gmnc))
     np.testing.assert_array_equal(fields["bmns"], gmnc + 30.0)
 
@@ -121,29 +131,13 @@ def test_write_helpers_create_expected_netcdf_dtypes_and_fixed_width_strings() -
 
 
 def test_write_nyquist_fourier_fields_writes_expected_group() -> None:
-    names = (
-        "gmnc",
-        "gmns",
-        "bsupumnc",
-        "bsupumns",
-        "bsupvmnc",
-        "bsupvmns",
-        "bsubumnc",
-        "bsubumns",
-        "bsubvmnc",
-        "bsubvmns",
-        "bsubsmns",
-        "bsubsmnc",
-        "bmnc",
-        "bmns",
-    )
-    wout = SimpleNamespace(**{name: np.full((2, 3), i, dtype=float) for i, name in enumerate(names)})
+    wout = SimpleNamespace(**{name: np.full((2, 3), i, dtype=float) for i, name in enumerate(NYQUIST_FOURIER_FIELD_NAMES)})
     ds = _FakeDataset()
 
     write_nyquist_fourier_fields(ds, wout)
 
-    assert tuple(ds.variables) == names
-    for i, name in enumerate(names):
+    assert tuple(ds.variables) == NYQUIST_FOURIER_FIELD_NAMES
+    for i, name in enumerate(NYQUIST_FOURIER_FIELD_NAMES):
         assert ds.variables[name].dtype == "f8"
         assert ds.variables[name].dims == ("radius", "mn_mode_nyq")
         np.testing.assert_array_equal(ds.variables[name].value, np.full((2, 3), i, dtype=float))
