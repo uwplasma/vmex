@@ -900,3 +900,11 @@ Defer beyond the current cycle:
   about `7.2`, and all-surface Boozer mirror about `0.30`. Dense stronger
   mirror cleanup was stopped for high memory; a lighter matrix-free cleanup
   preserved QI but only improved mirror from `0.304` to `0.300`.
+- 2026-05-13: Added an opt-in weighted branch-shuffle QI residual component.
+  It uses monotone linear branch crossings plus differentiable alpha weights
+  from squash error, so it is closer to the legacy Goodman branch diagnostic
+  than the smooth occupancy crossing estimator. Offline ranking improved for
+  stored reference/current candidates, but a bounded NFP2 optimization with
+  `weighted_shuffle_profile_weight=1` reached legacy QI `6.4e-4` and mirror
+  `0.306`, worse than the previous branch-heavy mirror-aware candidate. Keep
+  the term available for homotopy/ranking experiments, not enabled by default.

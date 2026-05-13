@@ -546,6 +546,8 @@ def quasi_isodynamic_residual_from_boozer_modes(
     profile_weight: float = 0.1,
     shuffle_profile_weight: float = 1.0,
     shuffle_profile_softness: float = 2.0e-2,
+    weighted_shuffle_profile_weight: float = 0.0,
+    weighted_shuffle_profile_softness: float = 2.0e-2,
     aligned_profile_weight: float = 0.0,
     aligned_profile_softness: float = 2.0e-2,
     aligned_profile_trap_level: float = 0.65,
@@ -604,6 +606,14 @@ def quasi_isodynamic_residual_from_boozer_modes(
     shuffle_profile_softness:
         Logistic smoothing width used to estimate branch crossing locations for
         ``shuffle_profile_weight``.
+    weighted_shuffle_profile_weight:
+        Relative weight for a branch-shuffle profile residual whose mean bounce
+        widths are weighted by a differentiable proxy for the legacy
+        squash/stretch quality weights.  This is useful when the unweighted
+        smooth residual ranks high-mirror false positives ahead of the
+        Goodman-style branch diagnostic.
+    weighted_shuffle_profile_softness:
+        Logistic smoothing width used by ``weighted_shuffle_profile_weight``.
     aligned_profile_weight:
         Relative weight for a differentiable trapped-well profile residual.
         Each field-line profile is circularly shifted by its smooth minimum
@@ -788,9 +798,14 @@ def quasi_isodynamic_residual_from_boozer_modes(
     shuffle_profile_residuals1d = jnp.zeros((0,), dtype=dtype)
     shuffle_profile_residuals3d = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
     shuffle_profile = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
+    weighted_shuffle_profile_residuals1d = jnp.zeros((0,), dtype=dtype)
+    weighted_shuffle_profile_residuals3d = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
+    weighted_shuffle_profile = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
+    weighted_shuffle_alpha_weights = jnp.zeros((nsurf, nalpha), dtype=dtype)
     shuffle_branch_widths = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
     shuffle_branch_widths_mean = jnp.zeros((nsurf, 1, 0), dtype=dtype)
-    if float(shuffle_profile_weight) != 0.0:
+    weighted_shuffle_branch_widths_mean = jnp.zeros((nsurf, 1, 0), dtype=dtype)
+    if float(shuffle_profile_weight) != 0.0 or float(weighted_shuffle_profile_weight) != 0.0:
         if jax is None:  # pragma: no cover - guarded by _require_jax()
             raise ImportError("shuffle-profile QI residual requires JAX")
         b_by_alpha = jnp.swapaxes(bnorm, 1, 2)  # (nsurf, nalpha, nphi)
@@ -831,35 +846,61 @@ def quasi_isodynamic_residual_from_boozer_modes(
             )
             return jnp.sum(occupancy_local * trapz_weights[None, None, :, None], axis=2) * dphi
 
+        def _linear_branch_crossing(branch):
+            distance = offsets_float * dphi
+            branch_ramp = jnp.arange(nphi, dtype=dtype) * jnp.asarray(1.0e-14, dtype=dtype)
+
+            def _interp_branch_one(branch_1d):
+                return jnp.interp(shuffle_levels, branch_1d + branch_ramp, distance)
+
+            return jax.vmap(
+                jax.vmap(_interp_branch_one, in_axes=0, out_axes=0),
+                in_axes=0,
+                out_axes=0,
+            )(branch)
+
         left_crossing = _branch_crossing(left_branch)
         right_crossing = _branch_crossing(right_branch)
         shuffle_branch_widths = left_crossing + right_crossing
         shuffle_branch_widths_mean = jnp.mean(shuffle_branch_widths, axis=1, keepdims=True)
+        weighted_left_crossing = left_crossing
+        weighted_right_crossing = right_crossing
+        weighted_shuffle_branch_widths = shuffle_branch_widths
+        if float(weighted_shuffle_profile_weight) != 0.0:
+            weighted_left_crossing = _linear_branch_crossing(left_branch)
+            weighted_right_crossing = _linear_branch_crossing(right_branch)
+            weighted_shuffle_branch_widths = weighted_left_crossing + weighted_right_crossing
+            valid_count = jnp.maximum(
+                jnp.sum(left_valid.astype(dtype) + right_valid.astype(dtype), axis=-1),
+                jnp.asarray(1.0, dtype=dtype),
+            )
+            squash_error = jnp.sum(
+                jnp.where(left_valid, (left_raw - left_branch) ** 2, 0.0)
+                + jnp.where(right_valid, (right_raw - right_branch) ** 2, 0.0),
+                axis=-1,
+            ) / valid_count
+            # Legacy qi_functions.py uses the inverse squash/stretch error as
+            # alpha weights.  Keep this differentiable and bounded enough for
+            # trust-region linear algebra by using the shuffle softness as the
+            # regularization scale.
+            weighted_eps = jnp.maximum(
+                jnp.asarray(float(weighted_shuffle_profile_softness), dtype=dtype) ** 2,
+                jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype),
+            )
+            inv_error = 1.0 / jnp.maximum(squash_error, weighted_eps)
+            weighted_shuffle_alpha_weights = inv_error / jnp.maximum(
+                jnp.sum(inv_error, axis=1, keepdims=True),
+                jnp.asarray(jnp.finfo(dtype).tiny, dtype=dtype),
+            )
+            weighted_shuffle_branch_widths_mean = jnp.sum(
+                weighted_shuffle_branch_widths * weighted_shuffle_alpha_weights[:, :, None],
+                axis=1,
+                keepdims=True,
+            )
 
-        delta_width = 0.5 * (shuffle_branch_widths - shuffle_branch_widths_mean)
         min_phi = phi0 + jnp.asarray(min_index, dtype=dtype) * dphi
         left_endpoint = jnp.maximum(min_phi - phi0, jnp.asarray(0.0, dtype=dtype))
         right_endpoint = jnp.maximum(phi1 - min_phi, jnp.asarray(0.0, dtype=dtype))
-        left_target = jnp.clip(left_crossing - delta_width, 0.0, left_endpoint[:, :, None])
-        right_target = jnp.clip(right_crossing - delta_width, 0.0, right_endpoint[:, :, None])
-        left_full = jnp.concatenate(
-            [
-                jnp.zeros((nsurf, nalpha, 1), dtype=dtype),
-                left_target,
-                left_endpoint[:, :, None],
-            ],
-            axis=-1,
-        )
-        right_full = jnp.concatenate(
-            [
-                jnp.zeros((nsurf, nalpha, 1), dtype=dtype),
-                right_target,
-                right_endpoint[:, :, None],
-            ],
-            axis=-1,
-        )
-        left_full = jnp.maximum.accumulate(left_full, axis=-1)
-        right_full = jnp.maximum.accumulate(right_full, axis=-1)
         level_full = jnp.concatenate(
             [
                 jnp.zeros((1,), dtype=dtype),
@@ -867,31 +908,76 @@ def quasi_isodynamic_residual_from_boozer_modes(
                 jnp.ones((1,), dtype=dtype),
             ]
         )
-        x_target = jnp.concatenate([-jnp.flip(left_full, axis=-1), right_full[:, :, 1:]], axis=-1)
         y_target = jnp.concatenate([jnp.flip(level_full, axis=0), level_full[1:]], axis=0)
         signed_phi = (offsets_float[None, None, :] - jnp.asarray(min_index[:, :, None], dtype=dtype)) * dphi
-        # ``jnp.interp`` requires strictly increasing xp.  The cumulative-max
-        # monotonicity correction can leave repeated crossings in flat wells, so
-        # add a tiny deterministic ramp that is far below the sampling error.
-        ramp = jnp.arange(x_target.shape[-1], dtype=dtype) * jnp.asarray(1.0e-14, dtype=dtype) * period
-        x_target = x_target + ramp[None, None, :]
 
         def _interp_one(xp, x):
             return jnp.interp(x, xp, y_target)
 
-        shuffle_profile = jax.vmap(
-            jax.vmap(_interp_one, in_axes=(0, 0), out_axes=0),
-            in_axes=(0, 0),
-            out_axes=0,
-        )(x_target, signed_phi)
-        shuffle_profile_residuals3d = (
-            (shuffle_profile - b_by_alpha)
-            * jnp.sqrt(weights_arr)[:, None, None]
-            * jnp.asarray(float(shuffle_profile_weight), dtype=dtype)
-        )
-        shuffle_profile_residuals1d = jnp.ravel(shuffle_profile_residuals3d) / jnp.sqrt(
-            jnp.asarray(nalpha * nphi, dtype=dtype)
-        )
+        def _profile_from_width_mean(left_cross, right_cross, branch_widths, width_mean):
+            delta_width = 0.5 * (branch_widths - width_mean)
+            left_target = jnp.clip(left_cross - delta_width, 0.0, left_endpoint[:, :, None])
+            right_target = jnp.clip(right_cross - delta_width, 0.0, right_endpoint[:, :, None])
+            left_full = jnp.concatenate(
+                [
+                    jnp.zeros((nsurf, nalpha, 1), dtype=dtype),
+                    left_target,
+                    left_endpoint[:, :, None],
+                ],
+                axis=-1,
+            )
+            right_full = jnp.concatenate(
+                [
+                    jnp.zeros((nsurf, nalpha, 1), dtype=dtype),
+                    right_target,
+                    right_endpoint[:, :, None],
+                ],
+                axis=-1,
+            )
+            left_full = jnp.maximum.accumulate(left_full, axis=-1)
+            right_full = jnp.maximum.accumulate(right_full, axis=-1)
+            x_target = jnp.concatenate([-jnp.flip(left_full, axis=-1), right_full[:, :, 1:]], axis=-1)
+            # ``jnp.interp`` requires strictly increasing xp.  The cumulative-
+            # max monotonicity correction can leave repeated crossings in flat
+            # wells, so add a tiny deterministic ramp below the sampling error.
+            ramp = jnp.arange(x_target.shape[-1], dtype=dtype) * jnp.asarray(1.0e-14, dtype=dtype) * period
+            x_target = x_target + ramp[None, None, :]
+            return jax.vmap(
+                jax.vmap(_interp_one, in_axes=(0, 0), out_axes=0),
+                in_axes=(0, 0),
+                out_axes=0,
+            )(x_target, signed_phi)
+
+        if float(shuffle_profile_weight) != 0.0:
+            shuffle_profile = _profile_from_width_mean(
+                left_crossing,
+                right_crossing,
+                shuffle_branch_widths,
+                shuffle_branch_widths_mean,
+            )
+            shuffle_profile_residuals3d = (
+                (shuffle_profile - b_by_alpha)
+                * jnp.sqrt(weights_arr)[:, None, None]
+                * jnp.asarray(float(shuffle_profile_weight), dtype=dtype)
+            )
+            shuffle_profile_residuals1d = jnp.ravel(shuffle_profile_residuals3d) / jnp.sqrt(
+                jnp.asarray(nalpha * nphi, dtype=dtype)
+            )
+        if float(weighted_shuffle_profile_weight) != 0.0:
+            weighted_shuffle_profile = _profile_from_width_mean(
+                weighted_left_crossing,
+                weighted_right_crossing,
+                weighted_shuffle_branch_widths,
+                weighted_shuffle_branch_widths_mean,
+            )
+            weighted_shuffle_profile_residuals3d = (
+                (weighted_shuffle_profile - b_by_alpha)
+                * jnp.sqrt(weights_arr)[:, None, None]
+                * jnp.asarray(float(weighted_shuffle_profile_weight), dtype=dtype)
+            )
+            weighted_shuffle_profile_residuals1d = jnp.ravel(weighted_shuffle_profile_residuals3d) / jnp.sqrt(
+                jnp.asarray(nalpha * nphi, dtype=dtype)
+            )
     residuals1d = jnp.concatenate(
         [
             width_residuals1d,
@@ -899,6 +985,7 @@ def quasi_isodynamic_residual_from_boozer_modes(
             profile_residuals1d,
             aligned_profile_residuals1d,
             shuffle_profile_residuals1d,
+            weighted_shuffle_profile_residuals1d,
         ]
     )
     total = jnp.sum(residuals1d * residuals1d)
@@ -915,6 +1002,8 @@ def quasi_isodynamic_residual_from_boozer_modes(
         "aligned_profile_residuals3d": aligned_profile_residuals3d,
         "shuffle_profile_residuals1d": shuffle_profile_residuals1d,
         "shuffle_profile_residuals3d": shuffle_profile_residuals3d,
+        "weighted_shuffle_profile_residuals1d": weighted_shuffle_profile_residuals1d,
+        "weighted_shuffle_profile_residuals3d": weighted_shuffle_profile_residuals3d,
         "total": total,
         "widths": widths,
         "widths_mean": widths_mean,
@@ -926,8 +1015,11 @@ def quasi_isodynamic_residual_from_boozer_modes(
         "aligned_profile_trap_weight": aligned_profile_trap_weight,
         "aligned_min_phi": aligned_min_phi,
         "shuffle_profile": shuffle_profile,
+        "weighted_shuffle_profile": weighted_shuffle_profile,
+        "weighted_shuffle_alpha_weights": weighted_shuffle_alpha_weights,
         "shuffle_branch_widths": shuffle_branch_widths,
         "shuffle_branch_widths_mean": shuffle_branch_widths_mean,
+        "weighted_shuffle_branch_widths_mean": weighted_shuffle_branch_widths_mean,
         "bmag": bmag,
         "bnorm": bnorm,
         "levels": levels,
@@ -959,6 +1051,8 @@ def quasi_isodynamic_residual_from_boozer_output(
     profile_weight: float = 0.1,
     shuffle_profile_weight: float = 1.0,
     shuffle_profile_softness: float = 2.0e-2,
+    weighted_shuffle_profile_weight: float = 0.0,
+    weighted_shuffle_profile_softness: float = 2.0e-2,
     aligned_profile_weight: float = 0.0,
     aligned_profile_softness: float = 2.0e-2,
     aligned_profile_trap_level: float = 0.65,
@@ -985,6 +1079,8 @@ def quasi_isodynamic_residual_from_boozer_output(
         profile_weight=profile_weight,
         shuffle_profile_weight=shuffle_profile_weight,
         shuffle_profile_softness=shuffle_profile_softness,
+        weighted_shuffle_profile_weight=weighted_shuffle_profile_weight,
+        weighted_shuffle_profile_softness=weighted_shuffle_profile_softness,
         aligned_profile_weight=aligned_profile_weight,
         aligned_profile_softness=aligned_profile_softness,
         aligned_profile_trap_level=aligned_profile_trap_level,
@@ -1014,6 +1110,8 @@ def quasi_isodynamic_residual_from_state(
     profile_weight: float = 0.1,
     shuffle_profile_weight: float = 1.0,
     shuffle_profile_softness: float = 2.0e-2,
+    weighted_shuffle_profile_weight: float = 0.0,
+    weighted_shuffle_profile_softness: float = 2.0e-2,
     aligned_profile_weight: float = 0.0,
     aligned_profile_softness: float = 2.0e-2,
     aligned_profile_trap_level: float = 0.65,
@@ -1092,6 +1190,8 @@ def quasi_isodynamic_residual_from_state(
         profile_weight=profile_weight,
         shuffle_profile_weight=shuffle_profile_weight,
         shuffle_profile_softness=shuffle_profile_softness,
+        weighted_shuffle_profile_weight=weighted_shuffle_profile_weight,
+        weighted_shuffle_profile_softness=weighted_shuffle_profile_softness,
         aligned_profile_weight=aligned_profile_weight,
         aligned_profile_softness=aligned_profile_softness,
         aligned_profile_trap_level=aligned_profile_trap_level,

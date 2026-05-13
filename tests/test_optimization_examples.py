@@ -767,6 +767,8 @@ def test_least_squares_solve_dispatches_qi_problem(monkeypatch, tmp_path) -> Non
         include_bounce_endpoints=True,
         softness=0.03,
         width_weight=2.0,
+        weighted_shuffle_profile_weight=0.7,
+        weighted_shuffle_profile_softness=0.04,
         phimin=0.1,
     )
     vmec = SimpleNamespace(
@@ -811,6 +813,8 @@ def test_least_squares_solve_dispatches_qi_problem(monkeypatch, tmp_path) -> Non
     assert captured["include_bounce_endpoints"] is True
     assert captured["softness"] == 0.03
     assert captured["width_weight"] == 2.0
+    assert captured["weighted_shuffle_profile_weight"] == 0.7
+    assert captured["weighted_shuffle_profile_softness"] == 0.04
     assert captured["phimin"] == 0.1
     assert captured["include"] == ("rc", "zs", "rs", "zc")
     assert captured["project_input_boundary_to_max_mode"] is False

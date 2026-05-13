@@ -109,6 +109,11 @@ QI_OPTIONS = vj.QuasiIsodynamicOptions(
     profile_weight=0.1,
     shuffle_profile_weight=1.0,
     shuffle_profile_softness=2.0e-2,
+    # Optional closer-to-legacy weighted branch-shuffle term.  It is useful for
+    # diagnostics and homotopy experiments, but the current best QI example
+    # keeps it off because it did not improve the mirror-aware NFP=2 run.
+    weighted_shuffle_profile_weight=0.0,
+    weighted_shuffle_profile_softness=2.0e-2,
     aligned_profile_weight=0.0,
     aligned_profile_softness=2.0e-2,
     aligned_profile_trap_level=0.65,
