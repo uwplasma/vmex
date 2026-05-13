@@ -104,6 +104,82 @@ def test_qi_weighted_shuffle_profile_residual_is_finite_and_differentiable():
     assert np.linalg.norm(np.asarray(grad[1:])) > 0.0
 
 
+def test_qi_aligned_profile_branch_is_finite_and_differentiable():
+    pytest.importorskip("jax")
+
+    import jax
+
+    from vmec_jax._compat import jnp
+    from vmec_jax.quasi_isodynamic import quasi_isodynamic_residual_from_boozer_modes
+
+    xm_b = jnp.asarray([0, 0, 1, 2])
+    xn_b = jnp.asarray([0, 1, 1, 2])
+
+    def objective(coeffs):
+        out = quasi_isodynamic_residual_from_boozer_modes(
+            bmnc_b=coeffs[None, :],
+            xm_b=xm_b,
+            xn_b=xn_b,
+            iota_b=jnp.asarray([0.47]),
+            nfp=2,
+            nphi=33,
+            nalpha=9,
+            n_bounce=7,
+            width_weight=0.0,
+            branch_width_weight=0.0,
+            profile_weight=0.0,
+            aligned_profile_weight=1.0,
+            aligned_profile_softness=2.0e-2,
+            aligned_profile_trap_level=0.7,
+            aligned_profile_trap_softness=5.0e-2,
+            shuffle_profile_weight=0.0,
+            weighted_shuffle_profile_weight=0.0,
+        )
+        return out["total"], out
+
+    (value, out), grad = jax.value_and_grad(objective, has_aux=True)(jnp.asarray([1.0, 0.09, 0.04, -0.02]))
+
+    assert np.isfinite(float(np.asarray(value)))
+    assert np.all(np.isfinite(np.asarray(grad)))
+    assert np.linalg.norm(np.asarray(grad[1:])) > 0.0
+    assert np.asarray(out["aligned_profile_residuals1d"]).shape == (32 * 9,)
+    assert np.asarray(out["aligned_profile"]).shape == (1, 32, 9)
+    assert np.all(np.isfinite(np.asarray(out["aligned_min_phi"])))
+    assert np.all((np.asarray(out["aligned_profile_trap_weight"]) >= 0.0))
+
+
+def test_qi_mirror_ratio_smooth_penalty_branch_is_differentiable():
+    pytest.importorskip("jax")
+
+    import jax
+
+    from vmec_jax._compat import jnp
+    from vmec_jax.quasi_isodynamic import mirror_ratio_penalty_from_boozer_modes
+
+    xm_b = jnp.asarray([0, 0, 1])
+    xn_b = jnp.asarray([0, 1, 1])
+
+    def objective(coeffs):
+        out = mirror_ratio_penalty_from_boozer_modes(
+            bmnc_b=coeffs[None, :],
+            xm_b=xm_b,
+            xn_b=xn_b,
+            nfp=2,
+            threshold=0.04,
+            ntheta=24,
+            nphi=24,
+            smooth_extrema=2.0e-2,
+            smooth_penalty=1.0e-2,
+        )
+        return out["total"]
+
+    value, grad = jax.value_and_grad(objective)(jnp.asarray([1.0, 0.1, 0.03]))
+
+    assert np.isfinite(float(np.asarray(value)))
+    assert np.all(np.isfinite(np.asarray(grad)))
+    assert float(np.asarray(value)) > 0.0
+
+
 def test_qi_boozer_mode_residual_rejects_single_helicity_phase_shift():
     pytest.importorskip("jax")
 

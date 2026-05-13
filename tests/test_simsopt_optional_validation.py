@@ -22,6 +22,29 @@ pytestmark = [
     ),
 ]
 
+QS_LOW_GRID = {
+    "n_surfaces": 3,
+    "ntheta": 15,
+    "nphi": 16,
+}
+
+QS_FAMILY_CASES = (
+    {
+        "case": "qh_warm_start",
+        "input_name": "input.nfp4_QH_warm_start",
+        "wout_name": "wout_nfp4_QH_warm_start.nc",
+        "helicity_m": 1,
+        "helicity_n": -1,
+    },
+    {
+        "case": "qa_landreman_paul_lowres",
+        "input_name": "input.LandremanPaul2021_QA_lowres",
+        "wout_name": "wout_LandremanPaul2021_QA_lowres.nc",
+        "helicity_m": 1,
+        "helicity_n": 0,
+    },
+)
+
 
 def _simsopt_qs_modules():
     pytest.importorskip("jax")
@@ -47,23 +70,16 @@ def _qh_warm_start_paths() -> tuple[Path, Path]:
 
 
 def _qs_family_cases():
-    return (
+    return tuple(
         pytest.param(
-            "qh_warm_start",
-            "input.nfp4_QH_warm_start",
-            "wout_nfp4_QH_warm_start.nc",
-            1,
-            -1,
-            id="qh",
-        ),
-        pytest.param(
-            "qa_landreman_paul_lowres",
-            "input.LandremanPaul2021_QA_lowres",
-            "wout_LandremanPaul2021_QA_lowres.nc",
-            1,
-            0,
-            id="qa",
-        ),
+            case["case"],
+            case["input_name"],
+            case["wout_name"],
+            case["helicity_m"],
+            case["helicity_n"],
+            id=case["case"].split("_", 1)[0],
+        )
+        for case in QS_FAMILY_CASES
     )
 
 

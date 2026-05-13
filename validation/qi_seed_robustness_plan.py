@@ -233,7 +233,7 @@ def _lanes() -> list[ValidationLane]:
             title="Required fast semantic gate",
             required_ci=True,
             prerequisites=["standard test dependencies"],
-            command='JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000"',
+            command='JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt"',
             acceptance=[
                 "All required tests pass.",
                 "No VMEC2000 executable, SIMSOPT install, or optimization sweep is required.",
