@@ -58,6 +58,23 @@ QI_FAMILY_REPRESENTATIVES = [
     },
 ]
 
+FAST_QI_DIAGNOSTIC_ARTIFACTS = [
+    {
+        "artifact_id": "qi-seed-suitability-annotation",
+        "required_ci": True,
+        "tests": [
+            "tests/test_qi_diagnostics.py::test_qi_seed_suitability_annotation_reports_gate_failures",
+            "tests/test_qi_diagnostics.py::test_qi_seed_ranking_tracks_legacy_goodman_order_on_synthetic_modes",
+            "tests/test_qi_diagnostics.py::test_qi_diagnostics_from_bundled_solved_qi_seed_records_state_metrics",
+        ],
+        "validates": [
+            "Smooth and legacy Goodman-style QI totals are combined into a deterministic rank score.",
+            "Mirror, iota, aspect, and elongation gates emit explicit failure reasons.",
+            "The bundled solved QI seed fixture records scalar state metrics without launching optimization.",
+        ],
+    }
+]
+
 
 @dataclass(frozen=True)
 class ValidationLane:
@@ -302,15 +319,16 @@ def build_plan(*, ci: dict[str, str] | None = None) -> dict[str, Any]:
             "optional_lanes": [lane.lane_id for lane in lanes if not lane.required_ci],
         },
         "family_representatives": QI_FAMILY_REPRESENTATIVES,
+        "fast_diagnostic_artifacts": FAST_QI_DIAGNOSTIC_ARTIFACTS,
         "lanes": [asdict(lane) for lane in lanes],
         "optional_parity_commands": [asdict(command) for command in optional_parity_commands],
         "next_parity_gates": [
             {
                 "gate": "QI solved-state fixture",
-                "status": "next",
+                "status": "covered-fast-ci",
                 "criterion": (
-                    "Add one small solved-state fixture around qi_diagnostics_from_state "
-                    "before claiming optimizer seed robustness."
+                    "Keep the bundled low-resolution qi_diagnostics_from_state fixture green; "
+                    "add more families before claiming broad optimizer seed robustness."
                 ),
             },
             {
@@ -351,6 +369,10 @@ def render_markdown(plan: dict[str, Any]) -> str:
     for row in plan["family_representatives"]:
         required = "required" if row["required_for_family_probe"] else "optional"
         lines.append(f"- {row['family']}: {row['label']} ({required}; {row['source']})")
+    lines.extend(["", "## Fast Diagnostic Artifacts"])
+    for artifact in plan["fast_diagnostic_artifacts"]:
+        marker = "required CI" if artifact["required_ci"] else "optional"
+        lines.append(f"- {artifact['artifact_id']} ({marker})")
     lines.extend(["", "## Lanes"])
     for lane in plan["lanes"]:
         marker = "required CI" if lane["required_ci"] else "optional"

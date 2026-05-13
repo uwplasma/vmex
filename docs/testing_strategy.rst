@@ -13,18 +13,18 @@ Target State
 - Required CI wall time: under ten minutes for the required test, docs, and
   build jobs on GitHub-hosted CPU runners.
 - Routine local gate:
-  ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000"``.
+  ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt"``.
 - Last recorded local CI-equivalent coverage baseline: clean on 2026-05-13 with
-  ``896 passed, 21 skipped, 85 deselected``, ``81.10%`` coverage, and ``9:46``
+  ``988 passed, 20 skipped, 90 deselected``, ``85.06%`` coverage, and ``8:32``
   runtime using the compact terminal coverage report.
-- Near-term coverage target: keep the required ``80%`` actual line coverage gate
+- Near-term coverage target: keep the required ``85%`` actual line coverage gate
   green with meaningful fast and bounded-physics tests while preserving
   sub-ten-minute coverage runtime.
 - Overall completion target: reach roughly ``90%`` validation-lane coverage by
   ensuring each public workflow has a required fast guard or an explicit
   full/optional parity lane with documented acceptance criteria.
 - Long-term required coverage: 95% line coverage for ``vmec_jax`` package
-  code.  The current Python 3.11 required coverage gate is ``80%``.
+  code.  The current Python 3.11 required coverage gate is ``85%``.
 - Nightly/manual coverage: larger VMEC2000, GPU, and full-resolution physics
   checks run outside the required PR gate.
 - Repository checkout size: keep the tracked source tree small enough that a
@@ -47,7 +47,7 @@ generated artifacts.
      - Local command
      - Purpose
    * - Fast unit tests
-     - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000"``
+     - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt"``
      - Required daily gate for pure kernels, Fourier conventions, namelist
        parsing, boundary helpers, geometry/profile algebra, CLI helpers, and
        small workflow assembly.  These tests should stay deterministic and
@@ -65,14 +65,15 @@ generated artifacts.
        matrices that are too slow for every PR.
    * - Optional VMEC2000 parity
      - ``VMEC2000_EXEC=/path/to/xvmec2000 VMEC2000_INTEGRATION=1 pytest -q -m vmec2000``
-     - Executable-backed comparison against the Fortran code.  Use this to
-       refresh confidence in stored fixtures and stage traces; do not make the
-       required gate depend on a machine-local executable.
+     - Executable-backed comparison against the Fortran code.  Prefer
+       converged final-equilibrium ``wout`` and diagnostic parity; use
+       short-trace regressions only for timestep/stage-trace compatibility.
+       Do not make the required gate depend on a machine-local executable.
    * - Optional SIMSOPT parity
-     - ``RUN_SIMSOPT_VALIDATION=1 pytest -q -m simsopt``
-     - Formula-level and workflow-level parity when SIMSOPT is installed.
-       These tests are useful for release validation but remain optional because
-       dependency availability is machine-specific.
+     - ``RUN_SIMSOPT_VALIDATION=1 JAX_ENABLE_X64=1 pytest -q -m simsopt``
+     - Formula-level and workflow-level diagnostic parity when SIMSOPT is
+       installed.  These tests are useful for release validation but remain
+       optional because dependency availability is machine-specific.
    * - Documentation
      - ``SPHINX_FAST=1 LC_ALL=C.UTF-8 LANG=C.UTF-8 python -m sphinx -W -j auto -b html docs docs/_build/html``
      - Required fast docs build.  Keep it focused on the landing page; full docs
@@ -89,11 +90,11 @@ Required CI-equivalent coverage:
 
 .. code-block:: bash
 
-   JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000" \
+   JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt" \
      --cov=vmec_jax \
      --cov-report=xml \
      --cov-report=term:skip-covered \
-     --cov-fail-under=80
+     --cov-fail-under=85
 
 Full-physics coverage add-on when assets are available:
 
@@ -126,7 +127,7 @@ the recommended local escalation path.
      - Command
      - When to run
    * - Fast local gate
-     - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000"``
+     - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt"``
      - Before pushing ordinary code or docs-adjacent changes that touch tested
        APIs.
    * - Bundled wout parity gate
@@ -135,10 +136,10 @@ the recommended local escalation path.
        verify flux/pressure/iota/current wout-field invariants, and cover the
        VMEC2000 trace parser against bundled fixtures.
    * - Coverage gate
-     - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000" --cov=vmec_jax --cov-report=xml --cov-report=term:skip-covered --cov-fail-under=80``
+     - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt" --cov=vmec_jax --cov-report=xml --cov-report=term:skip-covered --cov-fail-under=85``
      - Python 3.11 required CI coverage job.  The latest local equivalent
-       reported ``81.10%`` coverage while the enforced gate was raised to
-       ``80%``.
+       enforces the 85% coverage gate while keeping optional executable
+       validation in separate opt-in lanes.
    * - Optimization workflow smoke
      - ``pytest -q tests/test_optimization_examples.py tests/test_qs_ess_render_smoke.py``
      - After changing objective tuple construction, examples, or sweep
@@ -169,12 +170,19 @@ the recommended local escalation path.
        local coverage-appended run reached ``72.35%`` coverage with
        ``74 passed, 4 skipped`` in ``27:21`` after refreshing released assets.
    * - External VMEC2000 tier
-     - ``VMEC2000_EXEC=/path/to/xvmec2000 VMEC2000_INTEGRATION=1 pytest -q tests/test_vmec2000_exec_fast_validation.py::test_fast_vmec2000_stage_trace_validation_cases``
-     - First executable-backed parity gate; broaden to ``pytest -q -m vmec2000``
-       only after the bounded smoke is green.
+     - ``VMEC2000_EXEC=/path/to/xvmec2000 VMEC2000_INTEGRATION=1 JAX_ENABLE_X64=1 pytest -q tests/test_vmec2000_exec_fast_validation.py::test_vmec2000_converged_wout_diagnostics_validation``
+     - Preferred executable-backed release gate: run low-resolution bundled
+       inputs to convergence in VMEC2000 and ``vmec_jax``, then compare final
+       ``wout`` geometry, flux/profile, magnetic-field, and scalar diagnostics.
+       Broaden to ``pytest -q -m vmec2000`` only after the bounded smoke is
+       green.  Keep
+       ``tests/test_vmec2000_exec_fast_validation.py::test_fast_vmec2000_stage_trace_validation_cases``
+       for deliberate short-trace regressions.
    * - External SIMSOPT tier
-     - ``RUN_SIMSOPT_VALIDATION=1 pytest -q tests/test_simsopt_optional_validation.py::test_qh_quasisymmetry_residual_matches_simsopt_wout_formula``
-     - Optional formula-level diagnostic parity when SIMSOPT is installed.
+     - ``RUN_SIMSOPT_VALIDATION=1 JAX_ENABLE_X64=1 pytest -q -m simsopt tests/test_simsopt_optional_validation.py tests/test_redl_bootstrap_simsopt_parity.py``
+     - Optional SIMSOPT diagnostic parity on bundled converged ``wout``
+       fixtures: QS formula parity, state-derived QS diagnostics, and Redl
+       bootstrap mismatch normalization.
    * - Docs fast build
      - ``SPHINX_FAST=1 LC_ALL=C.UTF-8 LANG=C.UTF-8 python -m sphinx -W -j auto -b html docs docs/_build/html``
      - Required build job, minimal landing page.
@@ -278,6 +286,18 @@ VMEC2000 parity gates:
   up-down asymmetry, stellarator asymmetry, free boundary, single-grid, and
   multigrid.
 
+SIMSOPT parity gates:
+
+- SIMSOPT checks are always optional: tests are marked ``simsopt`` and require
+  ``RUN_SIMSOPT_VALIDATION=1`` in addition to the importable SIMSOPT package.
+- Use bundled converged ``wout`` fixtures rather than launching external
+  solvers.  The current gate compares the VMEC-only QS formula, the
+  state-derived QS diagnostic path reconstructed from ``wout``, and Redl
+  bootstrap mismatch normalization against SIMSOPT.
+- These tests should skip when SIMSOPT or its optional runtime dependencies are
+  absent; a required CI failure should never depend on a developer-machine
+  SIMSOPT installation.
+
 Numerical-method gates:
 
 - Fourier transforms and inverse transforms are tested against analytic spectra
@@ -371,8 +391,8 @@ VMEC residual parity, Boozer/LASYM input spectra, QI diagnostic metadata,
 warning-clean docs, CI status, and artifact hygiene.
 
 
-Coverage Plan to 80%, 90%, and 95%
------------------------------------
+Coverage Plan to 85%, 90%, and 95%
+----------------------------------
 
 Coverage should rise because core physics code is directly tested, not because
 tests execute long workflows incidentally.
@@ -389,9 +409,9 @@ tests execute long workflows incidentally.
    coverage gates.  Coverage runs should not require downloading presentation
    artifacts.
 5. Raise ``--cov-fail-under`` in stages after the corresponding tests are
-   merged.  The current required fast-suite gate is ``80%``; the last recorded
-   local baseline is ``81.10%``.  The next planned ratchets are 85%, 90%, then
-   95%, after solver/driver refactors reduce runtime and add physics coverage.
+   merged.  The current required fast-suite gate is ``85%``; the last recorded
+   local baseline is ``85.06%``.  The next planned ratchets are 90% and 95%,
+   after solver/driver refactors reduce runtime and add physics coverage.
 
 
 Repository Size Plan

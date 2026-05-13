@@ -830,6 +830,20 @@ def _extent_from_grids(theta: np.ndarray, zeta: np.ndarray) -> tuple[float, floa
     return (z0, z1, t0, t1)
 
 
+def _line_contour_levels(values: np.ndarray, *, count: int = 25) -> np.ndarray:
+    """Return robust line-contour levels for finite, constant, or bad-valued fields."""
+    arr = np.asarray(values, dtype=float)
+    vmin = float(np.nanmin(arr))
+    vmax = float(np.nanmax(arr))
+    if not np.isfinite(vmin) or not np.isfinite(vmax):
+        vmin, vmax = 0.0, 1.0
+    if vmax <= vmin:
+        pad = max(abs(vmin), 1.0) * 1.0e-12
+        vmin -= pad
+        vmax += pad
+    return np.linspace(vmin, vmax, int(count))
+
+
 def write_axisym_overview(case: str, *, outdir: str | Path | None = None) -> Path:
     """Write a quick axisymmetric overview plot from bundled reference wout."""
     plt = _import_matplotlib()
@@ -1168,15 +1182,7 @@ def _plot_bmag_contours(wout_init, wout_final, outdir: Path) -> Path:
     ]:
         # B has shape (ntheta, nzeta); meshgrid for contour
         ZETA, THETA = np.meshgrid(zeta, theta)
-        vmin = float(np.nanmin(B))
-        vmax = float(np.nanmax(B))
-        if not np.isfinite(vmin) or not np.isfinite(vmax):
-            vmin, vmax = 0.0, 1.0
-        if vmax <= vmin:
-            pad = max(abs(vmin), 1.0) * 1e-12
-            vmin -= pad
-            vmax += pad
-        levels = np.linspace(vmin, vmax, 25)
+        levels = _line_contour_levels(B, count=25)
         cs = ax.contour(
             ZETA, THETA, B,
             levels=levels,
@@ -1351,15 +1357,7 @@ def plot_boozer_bmag_contours_from_state(
         phimin=phimin,
     )
     phi2d, theta2d = np.meshgrid(phi, theta)
-    bmin = float(np.nanmin(bmag))
-    bmax = float(np.nanmax(bmag))
-    if not np.isfinite(bmin) or not np.isfinite(bmax):
-        bmin, bmax = 0.0, 1.0
-    if bmax <= bmin:
-        pad = max(abs(bmin), 1.0) * 1.0e-12
-        bmin -= pad
-        bmax += pad
-    levels = np.linspace(bmin, bmax, 25)
+    levels = _line_contour_levels(bmag, count=25)
 
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -1379,6 +1377,34 @@ def plot_boozer_bmag_contours_from_state(
     return out
 
 
+def _objective_iota_series(hist: list[dict]) -> list[float] | None:
+    """Return optional iota trajectory, preserving missing entries as NaN."""
+    if not hist or not any("iota" in h for h in hist):
+        return None
+    return [h.get("iota", np.nan) for h in hist]
+
+
+def _best_so_far_stage_segments(
+    values: Iterable[float],
+    stage_boundaries: Iterable[int],
+    *,
+    floor: float = 1e-16,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Split objective values by stage and return best-so-far traces per stage."""
+    vals = [float(v) for v in values]
+    segments: list[tuple[np.ndarray, np.ndarray]] = []
+    start = 0
+    stops = [int(b) + 1 for b in stage_boundaries if int(b) + 1 < len(vals)]
+    for stop in stops + [len(vals)]:
+        if stop <= start:
+            continue
+        x_segment = np.arange(start, stop, dtype=int)
+        y_segment = np.minimum.accumulate([max(v, floor) for v in vals[start:stop]])
+        segments.append((x_segment, y_segment))
+        start = stop
+    return segments
+
+
 def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
     """Objective value, aspect ratio, and (optionally) iota vs Jacobian evaluation."""
     import json
@@ -1395,7 +1421,7 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
     qs_vals = [h.get("qs_objective", h["objective"]) for h in hist]
     aspects = [h["aspect"] for h in hist]
     # Iota trajectory: present when iota_fn was passed to optimizer
-    iotas = [h.get("iota", np.nan) for h in hist] if hist and any("iota" in h for h in hist) else None
+    iotas = _objective_iota_series(hist)
     target_iota = data.get("target_iota", None)
     iota_abs_min = data.get("iota_abs_min", None)
     # Also show iota panel when target_iota is specified even if trajectory is missing
@@ -1414,14 +1440,8 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
     # example QP preseed -> QI preseed -> full constrained QI). Plot each stage
     # separately and show the best-so-far value within that stage so rejected
     # trial points or objective switches are not drawn as false increases.
-    start = 0
-    for stop in [int(b) + 1 for b in data.get("stage_boundaries", []) if int(b) + 1 < len(hist)] + [len(hist)]:
-        if stop <= start:
-            continue
-        x_segment = np.arange(start, stop, dtype=int)
-        y_segment = np.minimum.accumulate([max(float(v), 1e-16) for v in qs_vals[start:stop]])
+    for x_segment, y_segment in _best_so_far_stage_segments(qs_vals, data.get("stage_boundaries", [])):
         ax1.semilogy(x_segment, y_segment, "o-", color="steelblue", linewidth=2, markersize=6)
-        start = stop
     qs_pos = [max(v, 1e-16) for v in qs_vals]  # avoid log(0)
     ax1.set_ylabel("QS residuals ∑r²", fontsize=11)
     opt_label = data.get("label", "Optimisation")

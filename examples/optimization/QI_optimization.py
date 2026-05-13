@@ -12,11 +12,17 @@ if str(REPO_ROOT) not in sys.path:
 
 import vmec_jax as vj
 from vmec_jax._compat import enable_x64
+from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_suitability
 
 
 enable_x64(True)
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+
+
+def _diagnostic_float(record, key):
+    value = record.get(key)
+    return float(value) if value is not None else float("nan")
 
 # Problem parameters.  The default uses the bundled NFP=2 omnigenity seed
 # because it gives the current best mirror-aware QI result in this repository.
@@ -322,30 +328,40 @@ diagnostics = vj.qi_diagnostics_from_state(
     surfaces=SURFACES,
     options=diagnostic_options,
 )
-smooth_qi = float(diagnostics["qi_smooth_total"])
-legacy_qi = float(diagnostics["qi_legacy_total"])
-abs_iota = abs(float(history.get("iota_final", 0.0)))
-qi_gate_passed = (
-    smooth_qi <= QI_GATE_SMOOTH_MAX
-    and legacy_qi <= QI_GATE_LEGACY_MAX
-    and abs_iota >= TARGET_ABS_IOTA_MIN
+diagnostics = annotate_qi_seed_suitability(
+    diagnostics,
+    targets=QISeedSuitabilityTargets(
+        smooth_qi_max=QI_GATE_SMOOTH_MAX,
+        legacy_qi_max=QI_GATE_LEGACY_MAX,
+        target_aspect=TARGET_ASPECT,
+        abs_iota_min=TARGET_ABS_IOTA_MIN,
+        mirror_ratio_max=MAX_MIRROR_RATIO,
+        max_elongation=MAX_ELONGATION,
+    ),
 )
-mirror_ratio = float(diagnostics["qi_mirror_ratio_max"])
-max_elongation = float(diagnostics["qi_max_elongation"])
-engineering_gate_passed = (
-    qi_gate_passed
-    and mirror_ratio <= MAX_MIRROR_RATIO
-    and max_elongation <= MAX_ELONGATION
-)
+smooth_qi = _diagnostic_float(diagnostics, "qi_smooth_total")
+legacy_qi = _diagnostic_float(diagnostics, "qi_legacy_total")
+aspect_ratio = _diagnostic_float(diagnostics, "aspect")
+mean_iota = _diagnostic_float(diagnostics, "mean_iota")
+abs_iota = abs(mean_iota)
+mirror_ratio = _diagnostic_float(diagnostics, "qi_mirror_ratio_max")
+max_elongation = _diagnostic_float(diagnostics, "qi_max_elongation")
+qi_gate_passed = bool(diagnostics["qi_seed_gate_passed"])
+engineering_gate_passed = bool(diagnostics["qi_engineering_gate_passed"])
 print("\nIndependent QI promotion gate:")
 print(f"  smooth QI:       {smooth_qi:.6e}  (limit {QI_GATE_SMOOTH_MAX:.1e})")
 print(f"  legacy QI:       {legacy_qi:.6e}  (limit {QI_GATE_LEGACY_MAX:.1e})")
+print(f"  aspect ratio:    {aspect_ratio:.6g}  (target {TARGET_ASPECT:.3g})")
 print(f"  abs(mean iota):  {abs_iota:.6g}  (minimum {TARGET_ABS_IOTA_MIN:.3g})")
 print(f"  mirror ratio:    {mirror_ratio:.6g}  (target {MAX_MIRROR_RATIO:.3g})")
 print(f"  mirror by surf:  {diagnostics.get('qi_mirror_ratio_by_surface')}")
 print(f"  max elongation:  {max_elongation:.6g}  (target {MAX_ELONGATION:.3g})")
-print(f"  QI+iota gate:    {qi_gate_passed}")
+print(f"  QI seed gate:    {qi_gate_passed}")
 print(f"  full eng. gate:  {engineering_gate_passed}")
+print(f"  rank score:      {diagnostics['qi_rank_score']:.6e}")
+print(f"  failed gates:    {diagnostics['qi_gate_failures']}")
+for reason in diagnostics["qi_failure_reasons"]:
+    print(f"    - {reason}")
 
 if MAKE_PLOTS:
     plot_paths = {

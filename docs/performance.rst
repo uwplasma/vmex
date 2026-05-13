@@ -228,6 +228,47 @@ for CI dashboards or follow-up scripts that track whether a GPU regression is
 coming from tape replay, extra callbacks, cache retention, or a cold
 compile-like phase.
 
+For repeatable CPU/GPU matrix launches, use the wrapper below.  Its default
+``--backend auto`` does not set ``JAX_PLATFORMS`` or ``JAX_PLATFORM_NAME``; the
+child process inherits the user's active JAX/GPU selection.  Add explicit
+``--backend cpu`` or ``--backend gpu`` only when the comparison should launch
+separate CPU/GPU processes.
+
+.. code-block:: bash
+
+   PYTHONPATH=. python tools/diagnostics/gpu_cpu_performance_matrix.py \
+     --mode fixed-boundary \
+     --backend auto \
+     --input examples/data/input.nfp4_QH_warm_start \
+     --iters 20 \
+     --outdir outputs/performance_profiles/qh20_auto
+
+   PYTHONPATH=. python tools/diagnostics/gpu_cpu_performance_matrix.py \
+     --mode exact-callback \
+     --backend cpu --backend gpu --keep-going \
+     --problem qh --max-mode 2 --callback jacobian --repeats 3 \
+     --perturb-scale 1e-4 --inner-max-iter 80 --trial-max-iter 40 \
+     --vmec-timing \
+     --outdir outputs/performance_profiles/qh_m2_cpu_gpu
+
+The wrapper delegates to ``profile_fixed_boundary.py`` or
+``profile_exact_optimizer.py`` and writes one child JSON per backend plus a
+matrix JSON.  The printed table reports wrapper wall time, child profile wall
+time, and replay time when the child report exposes it.  The matrix JSON embeds
+the normalized ``compare_profile_reports.py`` summary, so dashboards can track
+``total_runtime_s``, ``replay_time_s``, ``accepted_point_replay_count``,
+``cache_entry_growth``, and RSS peak without parsing profiler-specific output
+shapes.
+
+Use ``--dry-run`` before scheduling cluster jobs; it prints and records the
+exact child commands and backend environment overrides without importing JAX in
+the child.  Use ``--replay-column-chunk`` or
+``--dynamic-replay-bucket`` to make tape/replay tuning explicit in the report.
+Malformed ``VMEC_JAX_REPLAY_COLUMN_CHUNK`` values now fall back to the automatic
+replay memory guard rather than aborting the Jacobian callback; set
+``VMEC_JAX_REPLAY_COLUMN_CHUNK=off`` or ``0`` only when chunking should be
+disabled for a targeted profiling run.
+
 Use ``--trace-outdir`` for TensorBoard/XProf traces and
 ``--device-memory-profile-out`` for JAX device-memory snapshots when GPU memory
 or launch overhead is the bottleneck.  Use ``--no-auto-cli-policy`` only when

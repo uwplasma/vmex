@@ -86,6 +86,19 @@ def test_plan_covers_family_representatives_and_next_gates():
     assert {"qi", "qp", "qh", "qa", "simple"} <= families
     assert optional_families == {"qp"}
     assert {"VMEC2000 executable parity", "SIMSOPT diagnostic parity", "Family-prefine probes"} <= gate_names
+    assert plan["next_parity_gates"][0]["status"] == "covered-fast-ci"
+
+
+def test_plan_lists_fast_qi_diagnostic_artifacts():
+    mod = _load_module()
+
+    plan = mod.build_plan()
+    artifacts = {artifact["artifact_id"]: artifact for artifact in plan["fast_diagnostic_artifacts"]}
+
+    artifact = artifacts["qi-seed-suitability-annotation"]
+    assert artifact["required_ci"] is True
+    assert any("test_qi_seed_suitability_annotation_reports_gate_failures" in test for test in artifact["tests"])
+    assert any("legacy Goodman-style QI totals" in item for item in artifact["validates"])
 
 
 def test_cli_writes_json_and_markdown(tmp_path):
@@ -103,6 +116,8 @@ def test_cli_writes_json_and_markdown(tmp_path):
     assert payload["mode"] == "optional_qi_seed_robustness_validation_plan"
     assert payload["required_ci_policy"]["heavy_external_validation_required"] is False
     assert "Optional QI Seed Robustness Validation Plan" in markdown
+    assert "Fast Diagnostic Artifacts" in markdown
+    assert "qi-seed-suitability-annotation" in markdown
     assert "Optional Parity Commands" in markdown
     assert "simsopt-qh-formula-smoke" in markdown
     assert "vmec2000-optional" in markdown

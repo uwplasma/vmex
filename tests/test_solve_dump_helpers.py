@@ -7,14 +7,20 @@ import pytest
 
 from vmec_jax.solve import (
     _HLO_DUMPED_KEYS,
+    _dump_freeb_axis_trace_record,
+    _dump_freeb_control_trace_record,
+    _dump_time_control_trace_record,
     _maybe_dump_bsube,
     _maybe_dump_bsube_terms,
     _maybe_dump_bsubh,
     _maybe_dump_bsubs,
+    _maybe_dump_checkpoint_record,
+    _maybe_dump_evolve_trace_record,
     _maybe_dump_force_kernels,
     _maybe_dump_gcx2,
     _maybe_dump_gmetric,
     _maybe_dump_hlo_kernel,
+    _maybe_dump_jacobian_terms_record,
     _maybe_dump_lam_fsql1,
     _maybe_dump_lam_gcl,
     _maybe_dump_lam_prec,
@@ -23,6 +29,7 @@ from vmec_jax.solve import (
     _maybe_dump_precond_inputs,
     _maybe_dump_precond_mats,
     _maybe_dump_scalars,
+    _maybe_dump_time_control_record,
     _maybe_dump_tomnsps,
     _maybe_dump_xc,
 )
@@ -125,6 +132,167 @@ def test_scalar_and_gcx2_dumps_respect_guards_and_write_rows(tmp_path, monkeypat
     gcx2 = (tmp_path / "gcx2_ns3_iter2.dat").read_text()
     assert "columns: iter include_edge gcr2 gcz2 gcl2" in gcx2
     assert " 1.2500000000000000e+00" in gcx2
+
+
+def test_host_control_dump_records_write_logs_and_axis_payload(tmp_path, monkeypatch):
+    _maybe_dump_time_control_record(iter_idx=1, fsq=1.0, fsq0=2.0, res0=3.0, res1=4.0, time_step=0.5)
+    assert not (tmp_path / "time_control.log").exists()
+
+    monkeypatch.setenv("VMEC_JAX_DUMP_DIR", str(tmp_path))
+    monkeypatch.setenv("VMEC_JAX_DUMP_TIMECONTROL", "1")
+    monkeypatch.setenv("VMEC_JAX_DUMP_CHECKPOINT", "1")
+    monkeypatch.setenv("VMEC_JAX_DUMP_FREEB_CONTROL", "1")
+    monkeypatch.setenv("VMEC_JAX_DUMP_FREEB_AXIS", "1")
+
+    _maybe_dump_time_control_record(iter_idx=2, fsq=1.0, fsq0=2.0, res0=3.0, res1=4.0, time_step=0.5)
+    _dump_time_control_trace_record(
+        stage="restart",
+        iter2=2,
+        iter1=1,
+        fsq=1.0,
+        fsq0=2.0,
+        res0=3.0,
+        res1=4.0,
+        time_step=0.5,
+        irst=2,
+    )
+    _maybe_dump_checkpoint_record(iter_idx=2, fsq=1.0, fsq0=2.0, res0=3.0, res1=4.0)
+    _dump_freeb_control_trace_record(
+        iter2=2,
+        iter1=1,
+        ivac=3,
+        ivacskip=4,
+        nvacskip=5,
+        fsq_rz_prev=0.25,
+        cached=True,
+    )
+    _dump_freeb_axis_trace_record(iter2=2, axis_r=np.array([[1.0, 2.0]]), axis_z=np.array([[3.0, 4.0]]))
+
+    assert "time_step=5.000000e-01" in (tmp_path / "time_control.log").read_text()
+    assert (tmp_path / "time_control_trace.log").read_text().endswith("   2 restart\n")
+    assert "iter=2 fsq=1.000000e+00" in (tmp_path / "checkpoint.log").read_text()
+    assert (tmp_path / "freeb_control_trace.log").read_text().endswith(" 1\n")
+    with np.load(tmp_path / "freeb_axis_iter2.npz") as data:
+        np.testing.assert_allclose(data["axis_r"], [1.0, 2.0])
+        np.testing.assert_allclose(data["axis_z"], [3.0, 4.0])
+
+
+def test_evolve_trace_record_includes_asymmetric_velocity_and_force_norms(tmp_path, monkeypatch):
+    import vmec_jax.diagnostics as diagnostics
+
+    monkeypatch.setenv("VMEC_JAX_DUMP_DIR", str(tmp_path))
+    monkeypatch.setenv("VMEC_JAX_DUMP_EVOLVE", "1")
+
+    layout = StateLayout(ns=2, K=2, lasym=True)
+    state = VMECState(
+        layout=layout,
+        Rcos=np.ones((2, 2)),
+        Rsin=2.0 * np.ones((2, 2)),
+        Zcos=3.0 * np.ones((2, 2)),
+        Zsin=4.0 * np.ones((2, 2)),
+        Lcos=5.0 * np.ones((2, 2)),
+        Lsin=6.0 * np.ones((2, 2)),
+    )
+    static = _static(ns=2, mpol=2, ntor=1, lasym=True)
+
+    def fake_internal_mn_from_state(*args, **kwargs):
+        return {
+            "rcc": np.array([1.0]),
+            "rss": np.array([2.0]),
+            "zsc": np.array([3.0]),
+            "zcs": np.array([4.0]),
+            "lsc": np.array([5.0]),
+            "lcs": np.array([6.0]),
+            "rsc": np.array([7.0]),
+            "rcs": np.array([8.0]),
+            "zcc": np.array([9.0]),
+            "zss": np.array([10.0]),
+            "lcc": np.array([11.0]),
+            "lss": np.array([12.0]),
+        }
+
+    def fake_xc_from_mn_blocks(*, cfg, **kwargs):
+        assert cfg is static.cfg
+        return np.concatenate([np.asarray(value, dtype=float).reshape(-1) for value in kwargs.values() if value is not None])
+
+    monkeypatch.setattr(diagnostics, "vmec_internal_mn_from_state", fake_internal_mn_from_state)
+    monkeypatch.setattr(diagnostics, "vmec_xc_from_mn_blocks", fake_xc_from_mn_blocks)
+
+    _maybe_dump_evolve_trace_record(
+        static=static,
+        iter2=4,
+        iter1=1,
+        stage="post",
+        fsq1_val=1.0,
+        fsq_prev_val=2.0,
+        time_step_val=0.5,
+        dtau_val=0.25,
+        b1_val=0.75,
+        fac_val=0.5,
+        state_val=state,
+        vRcc_val=np.array([1.0]),
+        vRss_val=np.array([2.0]),
+        vZsc_val=np.array([3.0]),
+        vZcs_val=np.array([4.0]),
+        vLsc_val=np.array([5.0]),
+        vLcs_val=np.array([6.0]),
+        vRsc_val=np.array([7.0]),
+        vRcs_val=np.array([8.0]),
+        vZcc_val=np.array([9.0]),
+        vZss_val=np.array([10.0]),
+        vLcc_val=np.array([11.0]),
+        vLss_val=np.array([12.0]),
+        frcc_val=np.array([2.0]),
+        frss_val=np.array([3.0]),
+        fzsc_val=np.array([4.0]),
+        fzcs_val=np.array([5.0]),
+        flsc_val=np.array([6.0]),
+        flcs_val=np.array([7.0]),
+        frsc_val=np.array([8.0]),
+        frcs_val=np.array([9.0]),
+        fzcc_val=np.array([10.0]),
+        fzss_val=np.array([11.0]),
+        flcc_val=np.array([12.0]),
+        flss_val=np.array([13.0]),
+    )
+
+    fields = (tmp_path / "evolve_trace.log").read_text().split()
+    assert fields[:4] == ["4", "1", "2", "post"]
+    assert float(fields[-1]) == pytest.approx(np.linalg.norm(np.arange(2.0, 14.0)))
+
+
+def test_jacobian_terms_dump_record_respects_iter_guard_and_writes_ptau_rows(tmp_path, monkeypatch):
+    arr = np.arange(3.0).reshape(3, 1, 1) + 1.0
+    k = SimpleNamespace(
+        pr1_even=arr,
+        pr1_odd=arr + 1.0,
+        pz1_even=arr + 2.0,
+        pz1_odd=arr + 3.0,
+        pru_even=arr + 4.0,
+        pru_odd=arr + 5.0,
+        pzu_even=arr + 6.0,
+        pzu_odd=arr + 7.0,
+        prv_even=arr + 8.0,
+        prv_odd=arr + 9.0,
+        pzv_even=arr + 10.0,
+        pzv_odd=arr + 11.0,
+    )
+
+    _maybe_dump_jacobian_terms_record(k=k, s=np.array([0.0, 0.5, 1.0]), iter_idx=3)
+    assert not (tmp_path / "jacobian_terms_iter3.dat").exists()
+
+    monkeypatch.setenv("VMEC_JAX_DUMP_DIR", str(tmp_path))
+    monkeypatch.setenv("VMEC_JAX_DUMP_JACOBIAN_TERMS", "1")
+    monkeypatch.setenv("VMEC_JAX_DUMP_ITER", "4")
+    _maybe_dump_jacobian_terms_record(k=k, s=np.array([0.0, 0.5, 1.0]), iter_idx=3)
+    assert not (tmp_path / "jacobian_terms_iter3.dat").exists()
+
+    _maybe_dump_jacobian_terms_record(k=k, s=np.array([0.0, 0.5, 1.0]), iter_idx=4)
+
+    text = (tmp_path / "jacobian_terms_iter4.dat").read_text()
+    assert "ru12 pzs pzu12 prs pr12 ptau" in text
+    data_rows = [line for line in text.splitlines() if line.startswith("     ")]
+    assert len(data_rows) == 2
 
 
 def test_npz_dump_helpers_write_selected_payloads(tmp_path, monkeypatch):

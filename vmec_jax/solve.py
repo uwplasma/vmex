@@ -39,6 +39,33 @@ _STRICT_UPDATE_STEP_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 _PRECOND_OUTPUT_SCALE_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 
 
+class _ForceBlocks(NamedTuple):
+    frcc: Any
+    frss: Any
+    fzsc: Any
+    fzcs: Any
+    flsc: Any
+    flcs: Any
+    frsc: Any
+    frcs: Any
+    fzcc: Any
+    fzss: Any
+    flcc: Any
+    flss: Any
+
+
+class _HostRestartDecision(NamedTuple):
+    fsq: float
+    fsq_res: float
+    res0: float
+    res0_old: float
+    bad_growth_streak: int
+    pre_restart_reason: str
+    huge_initial_forces: bool
+    store_checkpoint: bool
+    vmecpp_bad_progress: bool
+
+
 def _zero_edge_rz_force_block(a, *, preserve_numpy: bool = True):
     """Zero the LCFS row in an R/Z force block, leaving lambda blocks untouched.
 
@@ -295,6 +322,120 @@ def _preconditioner_output_scaling_jit(*, apply_lambda_update_scale: bool):
     )
 
 
+def _preconditioner_output_blocks_np(*, frzl_rz, lam_prec) -> _ForceBlocks:
+    """Apply lambda preconditioner factors to host preconditioner outputs."""
+    lam = np.asarray(lam_prec)
+    return _ForceBlocks(
+        frcc=np.asarray(frzl_rz.frcc),
+        frss=None if frzl_rz.frss is None else np.asarray(frzl_rz.frss),
+        fzsc=np.asarray(frzl_rz.fzsc),
+        fzcs=None if frzl_rz.fzcs is None else np.asarray(frzl_rz.fzcs),
+        flsc=np.asarray(frzl_rz.flsc) * lam,
+        flcs=None if frzl_rz.flcs is None else np.asarray(frzl_rz.flcs) * lam,
+        frsc=None if getattr(frzl_rz, "frsc", None) is None else np.asarray(frzl_rz.frsc),
+        frcs=None if getattr(frzl_rz, "frcs", None) is None else np.asarray(frzl_rz.frcs),
+        fzcc=None if getattr(frzl_rz, "fzcc", None) is None else np.asarray(frzl_rz.fzcc),
+        fzss=None if getattr(frzl_rz, "fzss", None) is None else np.asarray(frzl_rz.fzss),
+        flcc=None if getattr(frzl_rz, "flcc", None) is None else np.asarray(frzl_rz.flcc) * lam,
+        flss=None if getattr(frzl_rz, "flss", None) is None else np.asarray(frzl_rz.flss) * lam,
+    )
+
+
+def _mode_weight_force_blocks_np(
+    blocks: _ForceBlocks,
+    *,
+    w_mode_mn,
+    zeros_coeff,
+) -> _ForceBlocks:
+    """Scale preconditioned host force blocks by mode weights.
+
+    Missing optional blocks intentionally reuse ``zeros_coeff`` so the hot
+    host path avoids repeated zero-array allocations.
+    """
+
+    weight = np.asarray(w_mode_mn)[None, :, :]
+    zero = zeros_coeff
+
+    def _optional_scale(a):
+        return np.asarray(a) * weight if a is not None else zero
+
+    return _ForceBlocks(
+        frcc=np.asarray(blocks.frcc) * weight,
+        frss=_optional_scale(blocks.frss),
+        fzsc=np.asarray(blocks.fzsc) * weight,
+        fzcs=_optional_scale(blocks.fzcs),
+        flsc=np.asarray(blocks.flsc) * weight,
+        flcs=_optional_scale(blocks.flcs),
+        frsc=_optional_scale(blocks.frsc),
+        frcs=_optional_scale(blocks.frcs),
+        fzcc=_optional_scale(blocks.fzcc),
+        fzss=_optional_scale(blocks.fzss),
+        flcc=_optional_scale(blocks.flcc),
+        flss=_optional_scale(blocks.flss),
+    )
+
+
+def _lambda_preconditioned_full_norm(frzl_pre, *, use_jax: bool):
+    """Return VMEC2000 full-mesh lambda preconditioned residual norm."""
+    xp = jnp if bool(use_jax) else np
+    flsc = xp.asarray(frzl_pre.flsc)
+    gcl2_full = xp.sum(flsc[1:] * flsc[1:])
+    if frzl_pre.flcs is not None:
+        flcs = xp.asarray(frzl_pre.flcs)
+        gcl2_full = gcl2_full + xp.sum(flcs[1:] * flcs[1:])
+    if getattr(frzl_pre, "flcc", None) is not None:
+        flcc = xp.asarray(frzl_pre.flcc)
+        gcl2_full = gcl2_full + xp.sum(flcc[1:] * flcc[1:])
+    if getattr(frzl_pre, "flss", None) is not None:
+        flss = xp.asarray(frzl_pre.flss)
+        gcl2_full = gcl2_full + xp.sum(flss[1:] * flss[1:])
+    return gcl2_full
+
+
+def _safe_dt_from_force_blocks(
+    *,
+    dt_nominal: float,
+    max_coeff_delta_rms: float,
+    blocks: _ForceBlocks,
+) -> float:
+    """Limit dt from force RMS when the optional stability guard is enabled."""
+    frcc = jnp.asarray(blocks.frcc)
+    frss = jnp.asarray(blocks.frss) if blocks.frss is not None else jnp.zeros_like(frcc)
+    fzsc = jnp.asarray(blocks.fzsc)
+    fzcs = jnp.asarray(blocks.fzcs) if blocks.fzcs is not None else jnp.zeros_like(fzsc)
+    flsc = jnp.asarray(blocks.flsc)
+    flcs = jnp.asarray(blocks.flcs) if blocks.flcs is not None else jnp.zeros_like(flsc)
+    frsc = jnp.asarray(blocks.frsc) if blocks.frsc is not None else jnp.zeros_like(frcc)
+    frcs = jnp.asarray(blocks.frcs) if blocks.frcs is not None else jnp.zeros_like(frcc)
+    fzcc = jnp.asarray(blocks.fzcc) if blocks.fzcc is not None else jnp.zeros_like(fzsc)
+    fzss = jnp.asarray(blocks.fzss) if blocks.fzss is not None else jnp.zeros_like(fzsc)
+    flcc = jnp.asarray(blocks.flcc) if blocks.flcc is not None else jnp.zeros_like(flsc)
+    flss = jnp.asarray(blocks.flss) if blocks.flss is not None else jnp.zeros_like(flsc)
+    rms = jnp.sqrt(
+        jnp.mean(
+            frcc * frcc
+            + frss * frss
+            + frsc * frsc
+            + frcs * frcs
+            + fzsc * fzsc
+            + fzcs * fzcs
+            + fzcc * fzcc
+            + fzss * fzss
+            + flsc * flsc
+            + flcs * flcs
+            + flcc * flcc
+            + flss * flss
+        )
+    )
+    rms_f = float(np.asarray(rms))
+    if not np.isfinite(rms_f) or rms_f <= 0.0:
+        return max(float(dt_nominal), 1e-12)
+    # With this integrator, first-step coefficient update is O(dt^2 * force).
+    dt_lim = np.sqrt(float(max_coeff_delta_rms) / max(rms_f, 1e-30))
+    dt_eff = min(float(dt_nominal), float(dt_lim))
+    return max(dt_eff, 1e-12)
+
+
 if has_jax():
 
     @jax.jit
@@ -532,6 +673,279 @@ def _format_evolve_trace_row(
     )
 
 
+def _maybe_dump_time_control_record(
+    *,
+    iter_idx: int,
+    fsq: float,
+    fsq0: float,
+    res0: float,
+    res1: float,
+    time_step: float,
+) -> None:
+    if os.getenv("VMEC_JAX_DUMP_TIMECONTROL", "") in ("", "0"):
+        return
+    dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
+    if not dump_dir:
+        return
+    try:
+        path = Path(dump_dir) / "time_control.log"
+        with path.open("a", encoding="utf-8") as f:
+            f.write(
+                _format_time_control_log_row(
+                    iter_idx=iter_idx,
+                    fsq=fsq,
+                    fsq0=fsq0,
+                    res0=res0,
+                    res1=res1,
+                    time_step=time_step,
+                )
+            )
+    except Exception:
+        return
+
+
+def _dump_time_control_trace_record(
+    *,
+    stage: str,
+    iter2: int,
+    iter1: int,
+    fsq: float,
+    fsq0: float,
+    res0: float,
+    res1: float,
+    time_step: float,
+    irst: int,
+) -> None:
+    if os.getenv("VMEC_JAX_DUMP_TIMECONTROL", "") in ("", "0"):
+        return
+    dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
+    if not dump_dir:
+        return
+    try:
+        path = Path(dump_dir) / "time_control_trace.log"
+        with path.open("a", encoding="utf-8") as f:
+            f.write(
+                _format_time_control_trace_row(
+                    stage=stage,
+                    iter2=iter2,
+                    iter1=iter1,
+                    fsq=fsq,
+                    fsq0=fsq0,
+                    res0=res0,
+                    res1=res1,
+                    time_step=time_step,
+                    irst=irst,
+                )
+            )
+    except Exception:
+        return
+
+
+def _maybe_dump_checkpoint_record(*, iter_idx: int, fsq: float, fsq0: float, res0: float, res1: float) -> None:
+    if os.getenv("VMEC_JAX_DUMP_CHECKPOINT", "") in ("", "0"):
+        return
+    dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
+    if not dump_dir:
+        return
+    try:
+        path = Path(dump_dir) / "checkpoint.log"
+        with path.open("a", encoding="utf-8") as f:
+            f.write(_format_checkpoint_log_row(iter_idx=iter_idx, fsq=fsq, fsq0=fsq0, res0=res0, res1=res1))
+    except Exception:
+        return
+
+
+def _dump_freeb_control_trace_record(
+    *,
+    iter2: int,
+    iter1: int,
+    ivac: int,
+    ivacskip: int,
+    nvacskip: int,
+    fsq_rz_prev: float,
+    cached: bool,
+) -> None:
+    if os.getenv("VMEC_JAX_DUMP_FREEB_CONTROL", "") in ("", "0"):
+        return
+    dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
+    if not dump_dir:
+        return
+    try:
+        path = Path(dump_dir) / "freeb_control_trace.log"
+        with path.open("a", encoding="utf-8") as f:
+            f.write(
+                _format_freeb_control_trace_row(
+                    iter2=iter2,
+                    iter1=iter1,
+                    ivac=ivac,
+                    ivacskip=ivacskip,
+                    nvacskip=nvacskip,
+                    fsq_rz_prev=fsq_rz_prev,
+                    cached=cached,
+                )
+            )
+    except Exception:
+        return
+
+
+def _dump_freeb_axis_trace_record(*, iter2: int, axis_r: np.ndarray, axis_z: np.ndarray) -> None:
+    if os.getenv("VMEC_JAX_DUMP_FREEB_AXIS", "") in ("", "0"):
+        return
+    dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
+    if not dump_dir:
+        return
+    try:
+        path = Path(dump_dir) / f"freeb_axis_iter{int(iter2)}.npz"
+        np.savez_compressed(
+            path,
+            iter2=int(iter2),
+            axis_r=np.asarray(axis_r, dtype=float).reshape(-1),
+            axis_z=np.asarray(axis_z, dtype=float).reshape(-1),
+        )
+    except Exception:
+        return
+
+
+def _maybe_dump_evolve_trace_record(
+    *,
+    static,
+    iter2: int,
+    iter1: int,
+    stage: str,
+    fsq1_val: float,
+    fsq_prev_val: float,
+    time_step_val: float,
+    dtau_val: float,
+    b1_val: float,
+    fac_val: float,
+    state_val: VMECState,
+    vRcc_val,
+    vRss_val,
+    vZsc_val,
+    vZcs_val,
+    vLsc_val,
+    vLcs_val,
+    vRsc_val=None,
+    vRcs_val=None,
+    vZcc_val=None,
+    vZss_val=None,
+    vLcc_val=None,
+    vLss_val=None,
+    frcc_val=None,
+    frss_val=None,
+    fzsc_val=None,
+    fzcs_val=None,
+    flsc_val=None,
+    flcs_val=None,
+    frsc_val=None,
+    frcs_val=None,
+    fzcc_val=None,
+    fzss_val=None,
+    flcc_val=None,
+    flss_val=None,
+) -> None:
+    if os.getenv("VMEC_JAX_DUMP_EVOLVE", "") in ("", "0"):
+        return
+    dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
+    if not dump_dir:
+        return
+    try:
+        from .diagnostics import vmec_internal_mn_from_state, vmec_xc_from_mn_blocks
+
+        blocks = vmec_internal_mn_from_state(
+            state_val,
+            static,
+            apply_basis_norm=False,
+            apply_m1_constraint=False,
+        )
+        xc_kwargs = {
+            "rcc": blocks["rcc"],
+            "rss": blocks["rss"],
+            "zsc": blocks["zsc"],
+            "zcs": blocks["zcs"],
+            "lsc": blocks["lsc"],
+            "lcs": blocks["lcs"],
+        }
+        if "rsc" in blocks:
+            xc_kwargs.update(
+                {
+                    "rsc": blocks.get("rsc"),
+                    "rcs": blocks.get("rcs"),
+                    "zcc": blocks.get("zcc"),
+                    "zss": blocks.get("zss"),
+                    "lcc": blocks.get("lcc"),
+                    "lss": blocks.get("lss"),
+                }
+            )
+        xc_vec = np.asarray(vmec_xc_from_mn_blocks(cfg=static.cfg, **xc_kwargs), dtype=float)
+        v_kwargs = {
+            "rcc": np.asarray(vRcc_val, dtype=float),
+            "rss": np.asarray(vRss_val, dtype=float),
+            "zsc": np.asarray(vZsc_val, dtype=float),
+            "zcs": np.asarray(vZcs_val, dtype=float),
+            "lsc": np.asarray(vLsc_val, dtype=float),
+            "lcs": np.asarray(vLcs_val, dtype=float),
+        }
+        if vRsc_val is not None:
+            v_kwargs["rsc"] = np.asarray(vRsc_val, dtype=float)
+        if vRcs_val is not None:
+            v_kwargs["rcs"] = np.asarray(vRcs_val, dtype=float)
+        if vZcc_val is not None:
+            v_kwargs["zcc"] = np.asarray(vZcc_val, dtype=float)
+        if vZss_val is not None:
+            v_kwargs["zss"] = np.asarray(vZss_val, dtype=float)
+        if vLcc_val is not None:
+            v_kwargs["lcc"] = np.asarray(vLcc_val, dtype=float)
+        if vLss_val is not None:
+            v_kwargs["lss"] = np.asarray(vLss_val, dtype=float)
+        v_vec = np.asarray(vmec_xc_from_mn_blocks(cfg=static.cfg, **v_kwargs), dtype=float)
+        gnorm = 0.0
+        if frcc_val is not None:
+            g_kwargs = {
+                "rcc": np.asarray(frcc_val, dtype=float),
+                "rss": np.asarray(frss_val, dtype=float),
+                "zsc": np.asarray(fzsc_val, dtype=float),
+                "zcs": np.asarray(fzcs_val, dtype=float),
+                "lsc": np.asarray(flsc_val, dtype=float),
+                "lcs": np.asarray(flcs_val, dtype=float),
+            }
+            if frsc_val is not None:
+                g_kwargs["rsc"] = np.asarray(frsc_val, dtype=float)
+            if frcs_val is not None:
+                g_kwargs["rcs"] = np.asarray(frcs_val, dtype=float)
+            if fzcc_val is not None:
+                g_kwargs["zcc"] = np.asarray(fzcc_val, dtype=float)
+            if fzss_val is not None:
+                g_kwargs["zss"] = np.asarray(fzss_val, dtype=float)
+            if flcc_val is not None:
+                g_kwargs["lcc"] = np.asarray(flcc_val, dtype=float)
+            if flss_val is not None:
+                g_kwargs["lss"] = np.asarray(flss_val, dtype=float)
+            g_vec = np.asarray(vmec_xc_from_mn_blocks(cfg=static.cfg, **g_kwargs), dtype=float)
+            gnorm = float(np.linalg.norm(g_vec))
+        path = Path(dump_dir) / "evolve_trace.log"
+        with path.open("a", encoding="utf-8") as f:
+            f.write(
+                _format_evolve_trace_row(
+                    iter2=iter2,
+                    iter1=iter1,
+                    ns=int(static.cfg.ns),
+                    stage=stage,
+                    fsq1=fsq1_val,
+                    fsq_prev=fsq_prev_val,
+                    time_step=time_step_val,
+                    dtau=dtau_val,
+                    b1=b1_val,
+                    fac=fac_val,
+                    xc_norm=float(np.linalg.norm(xc_vec)),
+                    v_norm=float(np.linalg.norm(v_vec)),
+                    g_norm=gnorm,
+                )
+            )
+    except Exception:
+        return
+
+
 def _finite_float_or_zero(value: Any) -> float:
     """Return a Python float, replacing NaN/Inf with zero for scalar diagnostics."""
     out = float(np.asarray(value))
@@ -687,6 +1101,119 @@ def _sm_sp_from_s_np(s_arr) -> tuple[np.ndarray, np.ndarray]:
     sp[0] = 0.0
     sp[1] = sm[2] if ns >= 2 else 0.0
     return sm, sp
+
+
+def _maybe_dump_jacobian_terms_record(*, k, s, iter_idx: int) -> None:
+    env = os.getenv("VMEC_JAX_DUMP_JACOBIAN_TERMS", "").strip()
+    if not env or env in ("0", "false", "no", "False"):
+        return
+    dump_iter = os.getenv("VMEC_JAX_DUMP_ITER", "").strip()
+    if dump_iter:
+        try:
+            if int(dump_iter) != int(iter_idx):
+                return
+        except Exception:
+            pass
+    outdir = os.getenv("VMEC_JAX_DUMP_DIR", "").strip() or "."
+    outpath = Path(outdir).expanduser().resolve()
+    outpath.mkdir(parents=True, exist_ok=True)
+    fname = outpath / f"jacobian_terms_iter{int(iter_idx)}.dat"
+
+    pr1_even = np.asarray(getattr(k, "pr1_even"))
+    pr1_odd = np.asarray(getattr(k, "pr1_odd"))
+    pz1_even = np.asarray(getattr(k, "pz1_even"))
+    pz1_odd = np.asarray(getattr(k, "pz1_odd"))
+    pru_even = np.asarray(getattr(k, "pru_even"))
+    pru_odd = np.asarray(getattr(k, "pru_odd"))
+    pzu_even = np.asarray(getattr(k, "pzu_even"))
+    pzu_odd = np.asarray(getattr(k, "pzu_odd"))
+    prv_even = np.asarray(getattr(k, "prv_even"))
+    prv_odd = np.asarray(getattr(k, "prv_odd"))
+    pzv_even = np.asarray(getattr(k, "pzv_even"))
+    pzv_odd = np.asarray(getattr(k, "pzv_odd"))
+
+    ns, ntheta3, nzeta = pr1_even.shape
+    pshalf = _pshalf_from_s_np(np.asarray(s))
+    if pshalf.shape[0] != ns:
+        pshalf = np.resize(pshalf, (ns,))
+    hs = float(np.asarray(s[1] - s[0])) if ns > 1 else 1.0
+    ohs = 1.0 / hs if hs != 0.0 else 0.0
+    dphids = 0.25
+
+    with fname.open("w", encoding="utf-8") as f:
+        f.write("# jacobian term dump\n")
+        f.write(f"ns={ns}\n")
+        f.write(f"ntheta3={ntheta3}\n")
+        f.write(f"nzeta={nzeta}\n")
+        f.write("columns: js lt lz pshalf\n")
+        f.write(" pru_e pru_o pru_e_m1 pru_o_m1\n")
+        f.write(" pz1_e pz1_o pz1_e_m1 pz1_o_m1\n")
+        f.write(" pzu_e pzu_o pzu_e_m1 pzu_o_m1\n")
+        f.write(" pr1_e pr1_o pr1_e_m1 pr1_o_m1\n")
+        f.write(" prv_e prv_o prv_e_m1 prv_o_m1\n")
+        f.write(" pzv_e pzv_o pzv_e_m1 pzv_o_m1\n")
+        f.write(" ru12 pzs pzu12 prs pr12 ptau\n")
+        f.write(" rv12 zv12\n")
+        for lt in range(ntheta3):
+            for lz in range(nzeta):
+                for j in range(1, ns):
+                    jm1 = j - 1
+                    psh = pshalf[j]
+                    psh_safe = psh if psh != 0.0 else 1.0
+                    pru_e = pru_even[j, lt, lz]
+                    pru_o = pru_odd[j, lt, lz]
+                    pru_e_m1 = pru_even[jm1, lt, lz]
+                    pru_o_m1 = pru_odd[jm1, lt, lz]
+                    pz1_e = pz1_even[j, lt, lz]
+                    pz1_o = pz1_odd[j, lt, lz]
+                    pz1_e_m1 = pz1_even[jm1, lt, lz]
+                    pz1_o_m1 = pz1_odd[jm1, lt, lz]
+                    pzu_e = pzu_even[j, lt, lz]
+                    pzu_o = pzu_odd[j, lt, lz]
+                    pzu_e_m1 = pzu_even[jm1, lt, lz]
+                    pzu_o_m1 = pzu_odd[jm1, lt, lz]
+                    pr1_e = pr1_even[j, lt, lz]
+                    pr1_o = pr1_odd[j, lt, lz]
+                    pr1_e_m1 = pr1_even[jm1, lt, lz]
+                    pr1_o_m1 = pr1_odd[jm1, lt, lz]
+                    prv_e = prv_even[j, lt, lz]
+                    prv_o = prv_odd[j, lt, lz]
+                    prv_e_m1 = prv_even[jm1, lt, lz]
+                    prv_o_m1 = prv_odd[jm1, lt, lz]
+                    pzv_e = pzv_even[j, lt, lz]
+                    pzv_o = pzv_odd[j, lt, lz]
+                    pzv_e_m1 = pzv_even[jm1, lt, lz]
+                    pzv_o_m1 = pzv_odd[jm1, lt, lz]
+
+                    ru12 = 0.5 * (pru_e + pru_e_m1 + psh * (pru_o + pru_o_m1))
+                    pzs = ohs * ((pz1_e - pz1_e_m1) + psh * (pz1_o - pz1_o_m1))
+                    ptau = ru12 * pzs + dphids * (
+                        pru_o * pz1_o + pru_o_m1 * pz1_o_m1 + (pru_e * pz1_o + pru_e_m1 * pz1_o_m1) / psh_safe
+                    )
+                    pzu12 = 0.5 * (pzu_e + pzu_e_m1 + psh * (pzu_o + pzu_o_m1))
+                    prs = ohs * ((pr1_e - pr1_e_m1) + psh * (pr1_o - pr1_o_m1))
+                    pr12 = 0.5 * (pr1_e + pr1_e_m1 + psh * (pr1_o + pr1_o_m1))
+                    ptau = (
+                        ptau
+                        - prs * pzu12
+                        - dphids
+                        * (pzu_o * pr1_o + pzu_o_m1 * pr1_o_m1 + (pzu_e * pr1_o + pzu_e_m1 * pr1_o_m1) / psh_safe)
+                    )
+                    rv12 = 0.5 * (prv_e + prv_e_m1 + psh * (prv_o + prv_o_m1))
+                    zv12 = 0.5 * (pzv_e + pzv_e_m1 + psh * (pzv_o + pzv_o_m1))
+
+                    f.write(
+                        f"{j + 1:6d}{lt + 1:6d}{lz + 1:6d}"
+                        f"{psh:24.16E}"
+                        f"{pru_e:24.16E}{pru_o:24.16E}{pru_e_m1:24.16E}{pru_o_m1:24.16E}"
+                        f"{pz1_e:24.16E}{pz1_o:24.16E}{pz1_e_m1:24.16E}{pz1_o_m1:24.16E}"
+                        f"{pzu_e:24.16E}{pzu_o:24.16E}{pzu_e_m1:24.16E}{pzu_o_m1:24.16E}"
+                        f"{pr1_e:24.16E}{pr1_o:24.16E}{pr1_e_m1:24.16E}{pr1_o_m1:24.16E}"
+                        f"{prv_e:24.16E}{prv_o:24.16E}{prv_e_m1:24.16E}{prv_o_m1:24.16E}"
+                        f"{pzv_e:24.16E}{pzv_o:24.16E}{pzv_e_m1:24.16E}{pzv_o_m1:24.16E}"
+                        f"{ru12:24.16E}{pzs:24.16E}{pzu12:24.16E}{prs:24.16E}{pr12:24.16E}{ptau:24.16E}"
+                        f"{rv12:24.16E}{zv12:24.16E}\n"
+                    )
 
 
 def _merge_axis_reset_state(*, st: VMECState, st_axis: VMECState, static, full_reset: bool) -> VMECState:
@@ -905,6 +1432,118 @@ def _free_boundary_should_damp_constraint_baseline(*, freeb_ivac: int, freeb_tur
 def _free_boundary_turnon_resets_iter1_immediately(*, lthreed: bool, lasym: bool) -> bool:
     """Return whether turn-on should immediately reset `iter1` for cadence."""
     return (not bool(lthreed)) or (not bool(lasym))
+
+
+def _host_restart_decision(
+    *,
+    iter2: int,
+    iter1: int,
+    fsqr: float,
+    fsqz: float,
+    fsql: float,
+    fsq1: float,
+    fsq_prev: float,
+    res0: float,
+    bad_growth_streak: int,
+    pre_restart_reason: str,
+    reference_mode: bool,
+    vmec2000_control: bool,
+    bad_jacobian: bool,
+    stage_prev_fsq: float | None,
+    stage_transition_factor: float,
+    lmove_axis: bool,
+    vmecpp_restart: bool,
+    k_preconditioner_update_interval: int,
+) -> _HostRestartDecision:
+    """Evaluate host-loop residual trackers and pre-restart reason."""
+
+    i2 = int(iter2)
+    i1 = int(iter1)
+    fsq = float(fsqr) + float(fsqz) + float(fsql)
+    fsq1_f = float(fsq1)
+    fsq_prev_f = float(fsq_prev)
+    res0_f = float(res0)
+    fsq_res = fsq if bool(reference_mode) else fsq1_f
+
+    if bool(vmec2000_control):
+        if (fsq_res <= fsq_prev_f) and np.isfinite(fsq_res):
+            res0_f = min(res0_f, fsq_res)
+        res0_old = res0_f
+    else:
+        if (i2 == i1) or (res0_f < 0.0):
+            res0_f = fsq_res
+        res0_old = res0_f
+        res0_f = min(res0_f, fsq_res)
+
+    store_checkpoint = (not bool(vmec2000_control)) and (fsq1_f <= res0_old) and ((i2 - i1) > 10)
+    reason = str(pre_restart_reason)
+    if stage_prev_fsq is not None and i2 == 1 and reason == "none":
+        try:
+            prev_stage_fsq_val = float(stage_prev_fsq)
+        except Exception:
+            prev_stage_fsq_val = None
+        if prev_stage_fsq_val is not None and np.isfinite(prev_stage_fsq_val):
+            if fsq > (prev_stage_fsq_val * float(stage_transition_factor)):
+                reason = "stage_transition"
+
+    huge_initial_forces = False
+    if i2 == 1 and bool(lmove_axis):
+        huge_initial_forces = (not np.isfinite(fsq)) or (fsq > 1.0e2)
+
+    if fsq_res > 100.0 * max(res0_f, 1e-30):
+        bad_growth_next = int(bad_growth_streak) + 1
+    else:
+        bad_growth_next = 0
+
+    vmecpp_bad_progress = False
+    k_update = int(k_preconditioner_update_interval)
+    if bool(vmecpp_restart):
+        vmecpp_bad_progress = (
+            (i2 - i1) > (k_update // 2)
+            and (i2 > 2 * k_update)
+            and ((float(fsqr) + float(fsqz)) > 1.0e-2)
+        )
+
+    if bool(reference_mode):
+        if bool(bad_jacobian) and (fsq > 1.0e1):
+            reason = "bad_jacobian"
+        elif (i2 > i1) and (fsq > 100.0 * max(res0_f, 1e-30)):
+            reason = "bad_jacobian"
+        elif (
+            (i2 - i1) > (k_update // 2)
+            and (i2 > 2 * k_update)
+            and ((float(fsqr) + float(fsqz)) > 1.0e-2)
+        ):
+            reason = "bad_progress"
+    elif bool(vmec2000_control):
+        if bool(bad_jacobian) and (i2 > i1):
+            reason = "bad_jacobian"
+        elif vmecpp_bad_progress:
+            reason = "bad_progress_vmecpp"
+    else:
+        if vmecpp_bad_progress:
+            reason = "bad_progress_vmecpp"
+        elif (i2 > (i1 + 8)) and (bad_growth_next >= 2):
+            reason = "bad_jacobian"
+        elif (
+            (i2 - i1) > (k_update // 2)
+            and (i2 > 2 * k_update)
+            and (fsq1_f > 5.0 * max(res0_f, 1e-30))
+            and (fsq1_f > 0.95 * max(fsq_prev_f, 1e-30))
+        ):
+            reason = "bad_progress"
+
+    return _HostRestartDecision(
+        fsq=float(fsq),
+        fsq_res=float(fsq_res),
+        res0=float(res0_f),
+        res0_old=float(res0_old),
+        bad_growth_streak=int(bad_growth_next),
+        pre_restart_reason=reason,
+        huge_initial_forces=bool(huge_initial_forces),
+        store_checkpoint=bool(store_checkpoint),
+        vmecpp_bad_progress=bool(vmecpp_bad_progress),
+    )
 
 
 def _sample_free_boundary_external_field(*, state: VMECState, static) -> dict[str, Any]:
@@ -1381,6 +2020,70 @@ def _vmec_scale_m1_factors_from_mats_np(mats: dict) -> tuple[np.ndarray, np.ndar
     fac_r = np.where(denom != 0.0, sr / np.where(denom != 0.0, denom, 1.0), 1.0)
     fac_z = np.where(denom != 0.0, sz / np.where(denom != 0.0, denom, 1.0), 1.0)
     return fac_r, fac_z
+
+
+def _scale_m1_precond_rhs_from_mats(
+    frzl_in,
+    mats: dict[str, Any],
+    *,
+    lconm1: bool,
+    mpol: int,
+    host_update_assembly: bool,
+):
+    """Apply VMEC `scale_m1_par` factors before the radial preconditioner solve."""
+    if (not bool(lconm1)) or (int(mpol) <= 1):
+        return frzl_in
+
+    from .vmec_tomnsp import TomnspsRZL
+
+    if bool(host_update_assembly):
+        fac_r_arr, fac_z_arr = _vmec_scale_m1_factors_from_mats_np(mats)
+        if fac_r_arr.size == 0:
+            return frzl_in
+        ns_full = int(np.asarray(frzl_in.frcc).shape[0])
+        nsolve = min(ns_full, int(fac_r_arr.shape[0]))
+        if nsolve == ns_full:
+            fac_r_full = fac_r_arr[:nsolve]
+            fac_z_full = fac_z_arr[:nsolve]
+        else:
+            ones = np.ones((ns_full - nsolve,), dtype=fac_r_arr.dtype)
+            fac_r_full = np.concatenate([fac_r_arr[:nsolve], ones])
+            fac_z_full = np.concatenate([fac_z_arr[:nsolve], ones])
+        frss = _scale_mode_slice_np(frzl_in.frss, mode_idx=1, scale=fac_r_full)
+        fzcs = _scale_mode_slice_np(frzl_in.fzcs, mode_idx=1, scale=fac_z_full)
+        frsc = _scale_mode_slice_np(getattr(frzl_in, "frsc", None), mode_idx=1, scale=fac_r_full)
+        fzcc = _scale_mode_slice_np(getattr(frzl_in, "fzcc", None), mode_idx=1, scale=fac_z_full)
+    else:
+        fac_r_jax, fac_z_jax = _vmec_scale_m1_factors_from_mats(mats)
+        if fac_r_jax.size == 0:
+            return frzl_in
+        fac_r = jnp.asarray(fac_r_jax, dtype=jnp.asarray(frzl_in.frcc).dtype)
+        fac_z = jnp.asarray(fac_z_jax, dtype=jnp.asarray(frzl_in.fzsc).dtype)
+        ns_full = int(jnp.asarray(frzl_in.frcc).shape[0])
+        nsolve = min(ns_full, int(fac_r.shape[0]))
+        ones_r = jnp.ones((max(ns_full - nsolve, 0),), dtype=jnp.asarray(frzl_in.frcc).dtype)
+        ones_z = jnp.ones((max(ns_full - nsolve, 0),), dtype=jnp.asarray(frzl_in.fzsc).dtype)
+        fac_r_full = fac_r[:nsolve] if nsolve == ns_full else jnp.concatenate([fac_r[:nsolve], ones_r], axis=0)
+        fac_z_full = fac_z[:nsolve] if nsolve == ns_full else jnp.concatenate([fac_z[:nsolve], ones_z], axis=0)
+        frss = _scale_mode_slice(frzl_in.frss, mode_idx=1, scale=fac_r_full)
+        fzcs = _scale_mode_slice(frzl_in.fzcs, mode_idx=1, scale=fac_z_full)
+        frsc = _scale_mode_slice(getattr(frzl_in, "frsc", None), mode_idx=1, scale=fac_r_full)
+        fzcc = _scale_mode_slice(getattr(frzl_in, "fzcc", None), mode_idx=1, scale=fac_z_full)
+
+    return TomnspsRZL(
+        frcc=frzl_in.frcc,
+        frss=frss,
+        fzsc=frzl_in.fzsc,
+        fzcs=fzcs,
+        flsc=frzl_in.flsc,
+        flcs=frzl_in.flcs,
+        frsc=frsc,
+        frcs=getattr(frzl_in, "frcs", None),
+        fzcc=fzcc,
+        fzss=getattr(frzl_in, "fzss", None),
+        flcc=getattr(frzl_in, "flcc", None),
+        flss=getattr(frzl_in, "flss", None),
+    )
 
 
 def _can_reassemble_precond_mats(mats: Any) -> bool:
@@ -2079,6 +2782,47 @@ def _enforce_lambda_gauge(Lcos, Lsin, *, idx00: Optional[int]):
     Lcos = _zero_coeff_column(Lcos, idx=int(idx00))
     Lsin = _zero_coeff_column(Lsin, idx=int(idx00))
     return Lcos, Lsin
+
+
+def _apply_vmec_lambda_axis_rules_to_state(
+    st: VMECState,
+    *,
+    enforce_vmec_lambda_axis: bool,
+    host_update_assembly: bool,
+    idx00: Optional[int],
+) -> VMECState:
+    """Enforce the VMEC lambda gauge while preserving stored axis coefficients."""
+    if not bool(enforce_vmec_lambda_axis):
+        return st
+    if bool(host_update_assembly):
+        Lcos = np.array(np.asarray(st.Lcos))
+        Lsin = np.array(np.asarray(st.Lsin))
+        if idx00 is not None:
+            ncols = Lcos.shape[1]
+            if 0 <= int(idx00) < ncols:
+                Lcos[:, int(idx00)] = 0.0
+                Lsin[:, int(idx00)] = 0.0
+        return VMECState(
+            layout=st.layout,
+            Rcos=st.Rcos,
+            Rsin=st.Rsin,
+            Zcos=st.Zcos,
+            Zsin=st.Zsin,
+            Lcos=Lcos,
+            Lsin=Lsin,
+        )
+    Lcos = jnp.asarray(st.Lcos)
+    Lsin = jnp.asarray(st.Lsin)
+    Lcos, Lsin = _enforce_lambda_gauge(Lcos, Lsin, idx00=idx00)
+    return VMECState(
+        layout=st.layout,
+        Rcos=st.Rcos,
+        Rsin=st.Rsin,
+        Zcos=st.Zcos,
+        Zsin=st.Zsin,
+        Lcos=Lcos,
+        Lsin=Lsin,
+    )
 
 
 def _axis_m0_mask(static, *, dtype):
@@ -4921,37 +5665,11 @@ def solve_fixed_boundary_residual_iter(
         (totzsps) but does not overwrite the stored `xc` coefficients. Keep
         the state axis row intact and only enforce the (m,n)=(0,0) gauge here.
         """
-        if not enforce_vmec_lambda_axis:
-            return st
-        if host_update_assembly:
-            # NumPy in-place: avoid 4 JAX concatenate dispatches per iter.
-            Lcos = np.array(np.asarray(st.Lcos))
-            Lsin = np.array(np.asarray(st.Lsin))
-            if idx00 is not None:
-                ncols = Lcos.shape[1]
-                if 0 <= int(idx00) < ncols:
-                    Lcos[:, int(idx00)] = 0.0
-                    Lsin[:, int(idx00)] = 0.0
-            return VMECState(
-                layout=st.layout,
-                Rcos=st.Rcos,
-                Rsin=st.Rsin,
-                Zcos=st.Zcos,
-                Zsin=st.Zsin,
-                Lcos=Lcos,
-                Lsin=Lsin,
-            )
-        Lcos = jnp.asarray(st.Lcos)
-        Lsin = jnp.asarray(st.Lsin)
-        Lcos, Lsin = _enforce_lambda_gauge(Lcos, Lsin, idx00=idx00)
-        return VMECState(
-            layout=st.layout,
-            Rcos=st.Rcos,
-            Rsin=st.Rsin,
-            Zcos=st.Zcos,
-            Zsin=st.Zsin,
-            Lcos=Lcos,
-            Lsin=Lsin,
+        return _apply_vmec_lambda_axis_rules_to_state(
+            st,
+            enforce_vmec_lambda_axis=enforce_vmec_lambda_axis,
+            host_update_assembly=host_update_assembly,
+            idx00=idx00,
         )
 
     axis_reset_coeffs = None
@@ -5468,116 +6186,7 @@ def solve_fixed_boundary_residual_iter(
         return _sm_sp_from_s_np(s_arr)
 
     def _maybe_dump_jacobian_terms(*, k, iter_idx: int) -> None:
-        env = os.getenv("VMEC_JAX_DUMP_JACOBIAN_TERMS", "").strip()
-        if not env or env in ("0", "false", "no", "False"):
-            return
-        dump_iter = os.getenv("VMEC_JAX_DUMP_ITER", "").strip()
-        if dump_iter:
-            try:
-                if int(dump_iter) != int(iter_idx):
-                    return
-            except Exception:
-                pass
-        outdir = os.getenv("VMEC_JAX_DUMP_DIR", "").strip() or "."
-        outpath = Path(outdir).expanduser().resolve()
-        outpath.mkdir(parents=True, exist_ok=True)
-        fname = outpath / f"jacobian_terms_iter{int(iter_idx)}.dat"
-
-        pr1_even = np.asarray(getattr(k, "pr1_even"))
-        pr1_odd = np.asarray(getattr(k, "pr1_odd"))
-        pz1_even = np.asarray(getattr(k, "pz1_even"))
-        pz1_odd = np.asarray(getattr(k, "pz1_odd"))
-        pru_even = np.asarray(getattr(k, "pru_even"))
-        pru_odd = np.asarray(getattr(k, "pru_odd"))
-        pzu_even = np.asarray(getattr(k, "pzu_even"))
-        pzu_odd = np.asarray(getattr(k, "pzu_odd"))
-        prv_even = np.asarray(getattr(k, "prv_even"))
-        prv_odd = np.asarray(getattr(k, "prv_odd"))
-        pzv_even = np.asarray(getattr(k, "pzv_even"))
-        pzv_odd = np.asarray(getattr(k, "pzv_odd"))
-
-        ns, ntheta3, nzeta = pr1_even.shape
-        pshalf = _pshalf_from_s(np.asarray(s))
-        if pshalf.shape[0] != ns:
-            pshalf = np.resize(pshalf, (ns,))
-        hs = float(np.asarray(s[1] - s[0])) if ns > 1 else 1.0
-        ohs = 1.0 / hs if hs != 0.0 else 0.0
-        dphids = 0.25
-
-        with fname.open("w", encoding="utf-8") as f:
-            f.write("# jacobian term dump\n")
-            f.write(f"ns={ns}\n")
-            f.write(f"ntheta3={ntheta3}\n")
-            f.write(f"nzeta={nzeta}\n")
-            f.write("columns: js lt lz pshalf\n")
-            f.write(" pru_e pru_o pru_e_m1 pru_o_m1\n")
-            f.write(" pz1_e pz1_o pz1_e_m1 pz1_o_m1\n")
-            f.write(" pzu_e pzu_o pzu_e_m1 pzu_o_m1\n")
-            f.write(" pr1_e pr1_o pr1_e_m1 pr1_o_m1\n")
-            f.write(" prv_e prv_o prv_e_m1 prv_o_m1\n")
-            f.write(" pzv_e pzv_o pzv_e_m1 pzv_o_m1\n")
-            f.write(" ru12 pzs pzu12 prs pr12 ptau\n")
-            f.write(" rv12 zv12\n")
-            for lt in range(ntheta3):
-                for lz in range(nzeta):
-                    for j in range(1, ns):
-                        jm1 = j - 1
-                        psh = pshalf[j]
-                        psh_safe = psh if psh != 0.0 else 1.0
-                        pru_e = pru_even[j, lt, lz]
-                        pru_o = pru_odd[j, lt, lz]
-                        pru_e_m1 = pru_even[jm1, lt, lz]
-                        pru_o_m1 = pru_odd[jm1, lt, lz]
-                        pz1_e = pz1_even[j, lt, lz]
-                        pz1_o = pz1_odd[j, lt, lz]
-                        pz1_e_m1 = pz1_even[jm1, lt, lz]
-                        pz1_o_m1 = pz1_odd[jm1, lt, lz]
-                        pzu_e = pzu_even[j, lt, lz]
-                        pzu_o = pzu_odd[j, lt, lz]
-                        pzu_e_m1 = pzu_even[jm1, lt, lz]
-                        pzu_o_m1 = pzu_odd[jm1, lt, lz]
-                        pr1_e = pr1_even[j, lt, lz]
-                        pr1_o = pr1_odd[j, lt, lz]
-                        pr1_e_m1 = pr1_even[jm1, lt, lz]
-                        pr1_o_m1 = pr1_odd[jm1, lt, lz]
-                        prv_e = prv_even[j, lt, lz]
-                        prv_o = prv_odd[j, lt, lz]
-                        prv_e_m1 = prv_even[jm1, lt, lz]
-                        prv_o_m1 = prv_odd[jm1, lt, lz]
-                        pzv_e = pzv_even[j, lt, lz]
-                        pzv_o = pzv_odd[j, lt, lz]
-                        pzv_e_m1 = pzv_even[jm1, lt, lz]
-                        pzv_o_m1 = pzv_odd[jm1, lt, lz]
-
-                        ru12 = 0.5 * (pru_e + pru_e_m1 + psh * (pru_o + pru_o_m1))
-                        pzs = ohs * ((pz1_e - pz1_e_m1) + psh * (pz1_o - pz1_o_m1))
-                        ptau = ru12 * pzs + dphids * (
-                            pru_o * pz1_o + pru_o_m1 * pz1_o_m1 + (pru_e * pz1_o + pru_e_m1 * pz1_o_m1) / psh_safe
-                        )
-                        pzu12 = 0.5 * (pzu_e + pzu_e_m1 + psh * (pzu_o + pzu_o_m1))
-                        prs = ohs * ((pr1_e - pr1_e_m1) + psh * (pr1_o - pr1_o_m1))
-                        pr12 = 0.5 * (pr1_e + pr1_e_m1 + psh * (pr1_o + pr1_o_m1))
-                        ptau = (
-                            ptau
-                            - prs * pzu12
-                            - dphids
-                            * (pzu_o * pr1_o + pzu_o_m1 * pr1_o_m1 + (pzu_e * pr1_o + pzu_e_m1 * pr1_o_m1) / psh_safe)
-                        )
-                        rv12 = 0.5 * (prv_e + prv_e_m1 + psh * (prv_o + prv_o_m1))
-                        zv12 = 0.5 * (pzv_e + pzv_e_m1 + psh * (pzv_o + pzv_o_m1))
-
-                        f.write(
-                            f"{j + 1:6d}{lt + 1:6d}{lz + 1:6d}"
-                            f"{psh:24.16E}"
-                            f"{pru_e:24.16E}{pru_o:24.16E}{pru_e_m1:24.16E}{pru_o_m1:24.16E}"
-                            f"{pz1_e:24.16E}{pz1_o:24.16E}{pz1_e_m1:24.16E}{pz1_o_m1:24.16E}"
-                            f"{pzu_e:24.16E}{pzu_o:24.16E}{pzu_e_m1:24.16E}{pzu_o_m1:24.16E}"
-                            f"{pr1_e:24.16E}{pr1_o:24.16E}{pr1_e_m1:24.16E}{pr1_o_m1:24.16E}"
-                            f"{prv_e:24.16E}{prv_o:24.16E}{prv_e_m1:24.16E}{prv_o_m1:24.16E}"
-                            f"{pzv_e:24.16E}{pzv_o:24.16E}{pzv_e_m1:24.16E}{pzv_o_m1:24.16E}"
-                            f"{ru12:24.16E}{pzs:24.16E}{pzu12:24.16E}{prs:24.16E}{pr12:24.16E}{ptau:24.16E}"
-                            f"{rv12:24.16E}{zv12:24.16E}\n"
-                        )
+        _maybe_dump_jacobian_terms_record(k=k, s=s, iter_idx=iter_idx)
 
     def _maybe_dump_ptau(
         *,
@@ -7123,48 +7732,12 @@ def solve_fixed_boundary_residual_iter(
             state_checkpoint0 = resume_state.get("state_checkpoint", state_checkpoint0)
 
         def _scale_m1_precond_rhs(frzl_in: TomnspsRZL, mats: dict[str, Any]) -> TomnspsRZL:
-            if (not bool(getattr(cfg, "lconm1", True))) or (int(cfg.mpol) <= 1):
-                return frzl_in
-            fac_r_np, fac_z_np = _vmec_scale_m1_factors_from_mats(mats)
-            if fac_r_np.size == 0:
-                return frzl_in
-            fac_r = jnp.asarray(fac_r_np, dtype=jnp.asarray(frzl_in.frcc).dtype)
-            fac_z = jnp.asarray(fac_z_np, dtype=jnp.asarray(frzl_in.fzsc).dtype)
-
-            ns_full = int(jnp.asarray(frzl_in.frcc).shape[0])
-            nsolve = min(ns_full, int(fac_r.shape[0]))
-            fac_r_full = jnp.ones((ns_full,), dtype=jnp.asarray(frzl_in.frcc).dtype).at[:nsolve].set(fac_r[:nsolve])
-            fac_z_full = jnp.ones((ns_full,), dtype=jnp.asarray(frzl_in.fzsc).dtype).at[:nsolve].set(fac_z[:nsolve])
-
-            frss = frzl_in.frss
-            fzcs = frzl_in.fzcs
-            frsc = getattr(frzl_in, "frsc", None)
-            fzcc = getattr(frzl_in, "fzcc", None)
-            if frss is not None:
-                frss = jnp.asarray(frss)
-                frss = frss.at[:, 1, :].set(frss[:, 1, :] * fac_r_full[:, None])
-            if fzcs is not None:
-                fzcs = jnp.asarray(fzcs)
-                fzcs = fzcs.at[:, 1, :].set(fzcs[:, 1, :] * fac_z_full[:, None])
-            if frsc is not None:
-                frsc = jnp.asarray(frsc)
-                frsc = frsc.at[:, 1, :].set(frsc[:, 1, :] * fac_r_full[:, None])
-            if fzcc is not None:
-                fzcc = jnp.asarray(fzcc)
-                fzcc = fzcc.at[:, 1, :].set(fzcc[:, 1, :] * fac_z_full[:, None])
-            return TomnspsRZL(
-                frcc=frzl_in.frcc,
-                frss=frss,
-                fzsc=frzl_in.fzsc,
-                fzcs=fzcs,
-                flsc=frzl_in.flsc,
-                flcs=frzl_in.flcs,
-                frsc=frsc,
-                frcs=frzl_in.frcs,
-                fzcc=fzcc,
-                fzss=frzl_in.fzss,
-                flcc=getattr(frzl_in, "flcc", None),
-                flss=getattr(frzl_in, "flss", None),
+            return _scale_m1_precond_rhs_from_mats(
+                frzl_in,
+                mats,
+                lconm1=getattr(cfg, "lconm1", True),
+                mpol=int(cfg.mpol),
+                host_update_assembly=False,
             )
 
         # Avoid nested JIT inside the scan by default; allow opt-in for testing.
@@ -10676,105 +11249,32 @@ def solve_fixed_boundary_residual_iter(
         flcc=None,
         flss=None,
     ) -> float:
-        """Optional limiter for dt based on force magnitude.
-
-        The reference iteration uses `time_step` directly (with restart-trigger
-        adjustments) and does not apply a force-based dt limiter. Keep this
-        behavior off by default for parity; enable only as a stability crutch
-        during debugging.
-        """
-        frcc = jnp.asarray(frcc)
-        frss = jnp.asarray(frss) if frss is not None else jnp.zeros_like(frcc)
-        fzsc = jnp.asarray(fzsc)
-        fzcs = jnp.asarray(fzcs) if fzcs is not None else jnp.zeros_like(fzsc)
-        flsc = jnp.asarray(flsc)
-        flcs = jnp.asarray(flcs) if flcs is not None else jnp.zeros_like(flsc)
-        frsc = jnp.asarray(frsc) if frsc is not None else jnp.zeros_like(frcc)
-        frcs = jnp.asarray(frcs) if frcs is not None else jnp.zeros_like(frcc)
-        fzcc = jnp.asarray(fzcc) if fzcc is not None else jnp.zeros_like(fzsc)
-        fzss = jnp.asarray(fzss) if fzss is not None else jnp.zeros_like(fzsc)
-        flcc = jnp.asarray(flcc) if flcc is not None else jnp.zeros_like(flsc)
-        flss = jnp.asarray(flss) if flss is not None else jnp.zeros_like(flsc)
-        rms = jnp.sqrt(
-            jnp.mean(
-                frcc * frcc
-                + frss * frss
-                + frsc * frsc
-                + frcs * frcs
-                + fzsc * fzsc
-                + fzcs * fzcs
-                + fzcc * fzcc
-                + fzss * fzss
-                + flsc * flsc
-                + flcs * flcs
-                + flcc * flcc
-                + flss * flss
-            )
+        return _safe_dt_from_force_blocks(
+            dt_nominal=dt_nominal,
+            max_coeff_delta_rms=max_coeff_delta_rms,
+            blocks=_ForceBlocks(
+                frcc,
+                frss,
+                fzsc,
+                fzcs,
+                flsc,
+                flcs,
+                frsc,
+                frcs,
+                fzcc,
+                fzss,
+                flcc,
+                flss,
+            ),
         )
-        rms_f = float(np.asarray(rms))
-        if not np.isfinite(rms_f) or rms_f <= 0.0:
-            return max(float(dt_nominal), 1e-12)
-        # With this integrator, first-step coefficient update is O(dt^2 * force).
-        dt_lim = np.sqrt(max_coeff_delta_rms / max(rms_f, 1e-30))
-        dt_eff = min(float(dt_nominal), float(dt_lim))
-        return max(dt_eff, 1e-12)
 
     def _apply_vmec_scale_m1_precond_rhs(frzl_in: TomnspsRZL, mats: dict[str, Any]) -> TomnspsRZL:
-        """Apply VMEC `scale_m1_par` factors before the radial preconditioner solve."""
-        if (not bool(getattr(cfg, "lconm1", True))) or (int(cfg.mpol) <= 1):
-            return frzl_in
-        if host_update_assembly:
-            # NumPy path: avoid ~30 JAX eager dispatches (_vmec_scale_m1 + _scale_mode_slice×4).
-            fac_r_arr, fac_z_arr = _vmec_scale_m1_factors_from_mats_np(mats)
-            if fac_r_arr.size == 0:
-                return frzl_in
-        else:
-            fac_r_jax, fac_z_jax = _vmec_scale_m1_factors_from_mats(mats)
-            if fac_r_jax.size == 0:
-                return frzl_in
-
-        if host_update_assembly:
-            ns_full = int(np.asarray(frzl_in.frcc).shape[0])
-            nsolve = min(ns_full, int(fac_r_arr.shape[0]))
-            if nsolve == ns_full:
-                fac_r_full = fac_r_arr[:nsolve]
-                fac_z_full = fac_z_arr[:nsolve]
-            else:
-                ones = np.ones((ns_full - nsolve,), dtype=fac_r_arr.dtype)
-                fac_r_full = np.concatenate([fac_r_arr[:nsolve], ones])
-                fac_z_full = np.concatenate([fac_z_arr[:nsolve], ones])
-            frss = _scale_mode_slice_np(frzl_in.frss, mode_idx=1, scale=fac_r_full)
-            fzcs = _scale_mode_slice_np(frzl_in.fzcs, mode_idx=1, scale=fac_z_full)
-            frsc = _scale_mode_slice_np(getattr(frzl_in, "frsc", None), mode_idx=1, scale=fac_r_full)
-            fzcc = _scale_mode_slice_np(getattr(frzl_in, "fzcc", None), mode_idx=1, scale=fac_z_full)
-            # Keep as NumPy arrays — rz_preconditioner_apply_numpy accepts them directly.
-        else:
-            fac_r = jnp.asarray(fac_r_jax, dtype=jnp.asarray(frzl_in.frcc).dtype)
-            fac_z = jnp.asarray(fac_z_jax, dtype=jnp.asarray(frzl_in.fzsc).dtype)
-            ns_full = int(jnp.asarray(frzl_in.frcc).shape[0])
-            nsolve = min(ns_full, int(fac_r.shape[0]))
-            ones_r = jnp.ones((max(ns_full - nsolve, 0),), dtype=jnp.asarray(frzl_in.frcc).dtype)
-            ones_z = jnp.ones((max(ns_full - nsolve, 0),), dtype=jnp.asarray(frzl_in.fzsc).dtype)
-            fac_r_full = fac_r[:nsolve] if nsolve == ns_full else jnp.concatenate([fac_r[:nsolve], ones_r], axis=0)
-            fac_z_full = fac_z[:nsolve] if nsolve == ns_full else jnp.concatenate([fac_z[:nsolve], ones_z], axis=0)
-            frss = _scale_mode_slice(frzl_in.frss, mode_idx=1, scale=fac_r_full)
-            fzcs = _scale_mode_slice(frzl_in.fzcs, mode_idx=1, scale=fac_z_full)
-            frsc = _scale_mode_slice(getattr(frzl_in, "frsc", None), mode_idx=1, scale=fac_r_full)
-            fzcc = _scale_mode_slice(getattr(frzl_in, "fzcc", None), mode_idx=1, scale=fac_z_full)
-
-        return TomnspsRZL(
-            frcc=frzl_in.frcc,
-            frss=frss,
-            fzsc=frzl_in.fzsc,
-            fzcs=fzcs,
-            flsc=frzl_in.flsc,
-            flcs=frzl_in.flcs,
-            frsc=frsc,
-            frcs=getattr(frzl_in, "frcs", None),
-            fzcc=fzcc,
-            fzss=getattr(frzl_in, "fzss", None),
-            flcc=getattr(frzl_in, "flcc", None),
-            flss=getattr(frzl_in, "flss", None),
+        return _scale_m1_precond_rhs_from_mats(
+            frzl_in,
+            mats,
+            lconm1=getattr(cfg, "lconm1", True),
+            mpol=int(cfg.mpol),
+            host_update_assembly=host_update_assembly,
         )
 
     def _pop_iteration_histories() -> None:
@@ -10834,26 +11334,14 @@ def solve_fixed_boundary_residual_iter(
     def _maybe_dump_time_control(
         *, iter_idx: int, fsq: float, fsq0: float, res0: float, res1: float, time_step: float
     ) -> None:
-        if os.getenv("VMEC_JAX_DUMP_TIMECONTROL", "") in ("", "0"):
-            return
-        dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
-        if not dump_dir:
-            return
-        try:
-            path = Path(dump_dir) / "time_control.log"
-            with path.open("a", encoding="utf-8") as f:
-                f.write(
-                    _format_time_control_log_row(
-                        iter_idx=iter_idx,
-                        fsq=fsq,
-                        fsq0=fsq0,
-                        res0=res0,
-                        res1=res1,
-                        time_step=time_step,
-                    )
-                )
-        except Exception:
-            return
+        _maybe_dump_time_control_record(
+            iter_idx=iter_idx,
+            fsq=fsq,
+            fsq0=fsq0,
+            res0=res0,
+            res1=res1,
+            time_step=time_step,
+        )
 
     def _dump_time_control_trace(
         *,
@@ -10867,42 +11355,20 @@ def solve_fixed_boundary_residual_iter(
         time_step: float,
         irst: int,
     ) -> None:
-        if os.getenv("VMEC_JAX_DUMP_TIMECONTROL", "") in ("", "0"):
-            return
-        dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
-        if not dump_dir:
-            return
-        try:
-            path = Path(dump_dir) / "time_control_trace.log"
-            with path.open("a", encoding="utf-8") as f:
-                f.write(
-                    _format_time_control_trace_row(
-                        stage=stage,
-                        iter2=iter2,
-                        iter1=iter1,
-                        fsq=fsq,
-                        fsq0=fsq0,
-                        res0=res0,
-                        res1=res1,
-                        time_step=time_step,
-                        irst=irst,
-                    )
-                )
-        except Exception:
-            return
+        _dump_time_control_trace_record(
+            stage=stage,
+            iter2=iter2,
+            iter1=iter1,
+            fsq=fsq,
+            fsq0=fsq0,
+            res0=res0,
+            res1=res1,
+            time_step=time_step,
+            irst=irst,
+        )
 
     def _maybe_dump_checkpoint(*, iter_idx: int, fsq: float, fsq0: float, res0: float, res1: float) -> None:
-        if os.getenv("VMEC_JAX_DUMP_CHECKPOINT", "") in ("", "0"):
-            return
-        dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
-        if not dump_dir:
-            return
-        try:
-            path = Path(dump_dir) / "checkpoint.log"
-            with path.open("a", encoding="utf-8") as f:
-                f.write(_format_checkpoint_log_row(iter_idx=iter_idx, fsq=fsq, fsq0=fsq0, res0=res0, res1=res1))
-        except Exception:
-            return
+        _maybe_dump_checkpoint_record(iter_idx=iter_idx, fsq=fsq, fsq0=fsq0, res0=res0, res1=res1)
 
     def _dump_freeb_control_trace(
         *,
@@ -10914,44 +11380,18 @@ def solve_fixed_boundary_residual_iter(
         fsq_rz_prev: float,
         cached: bool,
     ) -> None:
-        if os.getenv("VMEC_JAX_DUMP_FREEB_CONTROL", "") in ("", "0"):
-            return
-        dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
-        if not dump_dir:
-            return
-        try:
-            path = Path(dump_dir) / "freeb_control_trace.log"
-            with path.open("a", encoding="utf-8") as f:
-                f.write(
-                    _format_freeb_control_trace_row(
-                        iter2=iter2,
-                        iter1=iter1,
-                        ivac=ivac,
-                        ivacskip=ivacskip,
-                        nvacskip=nvacskip,
-                        fsq_rz_prev=fsq_rz_prev,
-                        cached=cached,
-                    )
-                )
-        except Exception:
-            return
+        _dump_freeb_control_trace_record(
+            iter2=iter2,
+            iter1=iter1,
+            ivac=ivac,
+            ivacskip=ivacskip,
+            nvacskip=nvacskip,
+            fsq_rz_prev=fsq_rz_prev,
+            cached=cached,
+        )
 
     def _dump_freeb_axis_trace(*, iter2: int, axis_r: np.ndarray, axis_z: np.ndarray) -> None:
-        if os.getenv("VMEC_JAX_DUMP_FREEB_AXIS", "") in ("", "0"):
-            return
-        dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
-        if not dump_dir:
-            return
-        try:
-            path = Path(dump_dir) / f"freeb_axis_iter{int(iter2)}.npz"
-            np.savez_compressed(
-                path,
-                iter2=int(iter2),
-                axis_r=np.asarray(axis_r, dtype=float).reshape(-1),
-                axis_z=np.asarray(axis_z, dtype=float).reshape(-1),
-            )
-        except Exception:
-            return
+        _dump_freeb_axis_trace_record(iter2=iter2, axis_r=axis_r, axis_z=axis_z)
 
     def _dump_evolve_trace(
         *,
@@ -10990,106 +11430,43 @@ def solve_fixed_boundary_residual_iter(
         flcc_val=None,
         flss_val=None,
     ) -> None:
-        if os.getenv("VMEC_JAX_DUMP_EVOLVE", "") in ("", "0"):
-            return
-        dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
-        if not dump_dir:
-            return
-        try:
-            from .diagnostics import vmec_internal_mn_from_state, vmec_xc_from_mn_blocks
-
-            blocks = vmec_internal_mn_from_state(
-                state_val,
-                static,
-                apply_basis_norm=False,
-                apply_m1_constraint=False,
-            )
-            xc_kwargs = {
-                "rcc": blocks["rcc"],
-                "rss": blocks["rss"],
-                "zsc": blocks["zsc"],
-                "zcs": blocks["zcs"],
-                "lsc": blocks["lsc"],
-                "lcs": blocks["lcs"],
-            }
-            if "rsc" in blocks:
-                xc_kwargs.update(
-                    {
-                        "rsc": blocks.get("rsc"),
-                        "rcs": blocks.get("rcs"),
-                        "zcc": blocks.get("zcc"),
-                        "zss": blocks.get("zss"),
-                        "lcc": blocks.get("lcc"),
-                        "lss": blocks.get("lss"),
-                    }
-                )
-            xc_vec = np.asarray(vmec_xc_from_mn_blocks(cfg=static.cfg, **xc_kwargs), dtype=float)
-            v_kwargs = {
-                "rcc": np.asarray(vRcc_val, dtype=float),
-                "rss": np.asarray(vRss_val, dtype=float),
-                "zsc": np.asarray(vZsc_val, dtype=float),
-                "zcs": np.asarray(vZcs_val, dtype=float),
-                "lsc": np.asarray(vLsc_val, dtype=float),
-                "lcs": np.asarray(vLcs_val, dtype=float),
-            }
-            if vRsc_val is not None:
-                v_kwargs["rsc"] = np.asarray(vRsc_val, dtype=float)
-            if vRcs_val is not None:
-                v_kwargs["rcs"] = np.asarray(vRcs_val, dtype=float)
-            if vZcc_val is not None:
-                v_kwargs["zcc"] = np.asarray(vZcc_val, dtype=float)
-            if vZss_val is not None:
-                v_kwargs["zss"] = np.asarray(vZss_val, dtype=float)
-            if vLcc_val is not None:
-                v_kwargs["lcc"] = np.asarray(vLcc_val, dtype=float)
-            if vLss_val is not None:
-                v_kwargs["lss"] = np.asarray(vLss_val, dtype=float)
-            v_vec = np.asarray(vmec_xc_from_mn_blocks(cfg=static.cfg, **v_kwargs), dtype=float)
-            gnorm = 0.0
-            if frcc_val is not None:
-                g_kwargs = {
-                    "rcc": np.asarray(frcc_val, dtype=float),
-                    "rss": np.asarray(frss_val, dtype=float),
-                    "zsc": np.asarray(fzsc_val, dtype=float),
-                    "zcs": np.asarray(fzcs_val, dtype=float),
-                    "lsc": np.asarray(flsc_val, dtype=float),
-                    "lcs": np.asarray(flcs_val, dtype=float),
-                }
-                if frsc_val is not None:
-                    g_kwargs["rsc"] = np.asarray(frsc_val, dtype=float)
-                if frcs_val is not None:
-                    g_kwargs["rcs"] = np.asarray(frcs_val, dtype=float)
-                if fzcc_val is not None:
-                    g_kwargs["zcc"] = np.asarray(fzcc_val, dtype=float)
-                if fzss_val is not None:
-                    g_kwargs["zss"] = np.asarray(fzss_val, dtype=float)
-                if flcc_val is not None:
-                    g_kwargs["lcc"] = np.asarray(flcc_val, dtype=float)
-                if flss_val is not None:
-                    g_kwargs["lss"] = np.asarray(flss_val, dtype=float)
-                g_vec = np.asarray(vmec_xc_from_mn_blocks(cfg=static.cfg, **g_kwargs), dtype=float)
-                gnorm = float(np.linalg.norm(g_vec))
-            path = Path(dump_dir) / "evolve_trace.log"
-            with path.open("a", encoding="utf-8") as f:
-                f.write(
-                    _format_evolve_trace_row(
-                        iter2=iter2,
-                        iter1=iter1,
-                        ns=int(static.cfg.ns),
-                        stage=stage,
-                        fsq1=fsq1_val,
-                        fsq_prev=fsq_prev_val,
-                        time_step=time_step_val,
-                        dtau=dtau_val,
-                        b1=b1_val,
-                        fac=fac_val,
-                        xc_norm=float(np.linalg.norm(xc_vec)),
-                        v_norm=float(np.linalg.norm(v_vec)),
-                        g_norm=gnorm,
-                    )
-                )
-        except Exception:
-            return
+        _maybe_dump_evolve_trace_record(
+            static=static,
+            iter2=iter2,
+            iter1=iter1,
+            stage=stage,
+            fsq1_val=fsq1_val,
+            fsq_prev_val=fsq_prev_val,
+            time_step_val=time_step_val,
+            dtau_val=dtau_val,
+            b1_val=b1_val,
+            fac_val=fac_val,
+            state_val=state_val,
+            vRcc_val=vRcc_val,
+            vRss_val=vRss_val,
+            vZsc_val=vZsc_val,
+            vZcs_val=vZcs_val,
+            vLsc_val=vLsc_val,
+            vLcs_val=vLcs_val,
+            vRsc_val=vRsc_val,
+            vRcs_val=vRcs_val,
+            vZcc_val=vZcc_val,
+            vZss_val=vZss_val,
+            vLcc_val=vLcc_val,
+            vLss_val=vLss_val,
+            frcc_val=frcc_val,
+            frss_val=frss_val,
+            fzsc_val=fzsc_val,
+            fzcs_val=fzcs_val,
+            flsc_val=flsc_val,
+            flcs_val=flcs_val,
+            frsc_val=frsc_val,
+            frcs_val=frcs_val,
+            fzcc_val=fzcc_val,
+            fzss_val=fzss_val,
+            flcc_val=flcc_val,
+            flss_val=flss_val,
+        )
 
     # VMEC `eqsolve`: if the initial Jacobian changes sign, improve the axis
     # guess *before* the first iteration (no extra iter1). This aligns the
@@ -11813,19 +12190,9 @@ def solve_fixed_boundary_residual_iter(
                     # Asymmetric (lasym) components default to None — the downstream
                     # mode-diag scaling uses _z (pre-allocated zeros) for None entries,
                     # avoiding 6 np.zeros_like allocations per iteration (~0.5s saving).
-                    _lp = np.asarray(lam_prec)
-                    frcc = np.asarray(frzl_rz.frcc)
-                    frss = frzl_rz.frss if frzl_rz.frss is None else np.asarray(frzl_rz.frss)
-                    fzsc = np.asarray(frzl_rz.fzsc)
-                    fzcs = frzl_rz.fzcs if frzl_rz.fzcs is None else np.asarray(frzl_rz.fzcs)
-                    flsc = np.asarray(frzl_rz.flsc) * _lp
-                    flcs = None if frzl_rz.flcs is None else (np.asarray(frzl_rz.flcs) * _lp)
-                    frsc = None if getattr(frzl_rz, "frsc", None) is None else np.asarray(frzl_rz.frsc)
-                    frcs = None if getattr(frzl_rz, "frcs", None) is None else np.asarray(frzl_rz.frcs)
-                    fzcc = None if getattr(frzl_rz, "fzcc", None) is None else np.asarray(frzl_rz.fzcc)
-                    fzss = None if getattr(frzl_rz, "fzss", None) is None else np.asarray(frzl_rz.fzss)
-                    flcc = None if getattr(frzl_rz, "flcc", None) is None else (np.asarray(frzl_rz.flcc) * _lp)
-                    flss = None if getattr(frzl_rz, "flss", None) is None else (np.asarray(frzl_rz.flss) * _lp)
+                    (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss) = (
+                        _preconditioner_output_blocks_np(frzl_rz=frzl_rz, lam_prec=lam_prec)
+                    )
                 elif use_fused_precond_output_scaling:
                     scale_outputs = _preconditioner_output_scaling_jit(
                         apply_lambda_update_scale=(lambda_update_scale != 1.0)
@@ -11987,19 +12354,9 @@ def solve_fixed_boundary_residual_iter(
                     # Asymmetric (lasym) components default to None — the downstream
                     # mode-diag scaling uses _z (pre-allocated zeros) for None entries,
                     # avoiding 6 np.zeros_like allocations per iteration (~0.5s saving).
-                    _lp = np.asarray(lam_prec)
-                    frcc = np.asarray(frzl_rz.frcc)
-                    frss = frzl_rz.frss if frzl_rz.frss is None else np.asarray(frzl_rz.frss)
-                    fzsc = np.asarray(frzl_rz.fzsc)
-                    fzcs = frzl_rz.fzcs if frzl_rz.fzcs is None else np.asarray(frzl_rz.fzcs)
-                    flsc = np.asarray(frzl_rz.flsc) * _lp
-                    flcs = None if frzl_rz.flcs is None else (np.asarray(frzl_rz.flcs) * _lp)
-                    frsc = None if getattr(frzl_rz, "frsc", None) is None else np.asarray(frzl_rz.frsc)
-                    frcs = None if getattr(frzl_rz, "frcs", None) is None else np.asarray(frzl_rz.frcs)
-                    fzcc = None if getattr(frzl_rz, "fzcc", None) is None else np.asarray(frzl_rz.fzcc)
-                    fzss = None if getattr(frzl_rz, "fzss", None) is None else np.asarray(frzl_rz.fzss)
-                    flcc = None if getattr(frzl_rz, "flcc", None) is None else (np.asarray(frzl_rz.flcc) * _lp)
-                    flss = None if getattr(frzl_rz, "flss", None) is None else (np.asarray(frzl_rz.flss) * _lp)
+                    (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss) = (
+                        _preconditioner_output_blocks_np(frzl_rz=frzl_rz, lam_prec=lam_prec)
+                    )
                 elif use_fused_precond_output_scaling:
                     scale_outputs = _preconditioner_output_scaling_jit(
                         apply_lambda_update_scale=(lambda_update_scale != 1.0)
@@ -12143,20 +12500,13 @@ def solve_fixed_boundary_residual_iter(
             elif host_update_assembly:
                 # NumPy path: avoids 36 JAX dispatches (expand_dims + broadcast + mul per array).
                 # _zeros_coeff_np replaces np.zeros_like (pre-allocated, avoids 6+ allocs/iter).
-                _w = w_mode_mn_np[None, :, :]
-                _z = _zeros_coeff_np  # shared zero array (read-only, never modified in-place)
-                frcc_u = np.asarray(frcc) * _w
-                frss_u = (np.asarray(frss) * _w) if frss is not None else _z
-                fzsc_u = np.asarray(fzsc) * _w
-                fzcs_u = (np.asarray(fzcs) * _w) if fzcs is not None else _z
-                flsc_u = np.asarray(flsc) * _w
-                flcs_u = (np.asarray(flcs) * _w) if flcs is not None else _z
-                frsc_u = (np.asarray(frsc) * _w) if frsc is not None else _z
-                frcs_u = (np.asarray(frcs) * _w) if frcs is not None else _z
-                fzcc_u = (np.asarray(fzcc) * _w) if fzcc is not None else _z
-                fzss_u = (np.asarray(fzss) * _w) if fzss is not None else _z
-                flcc_u = (np.asarray(flcc) * _w) if flcc is not None else _z
-                flss_u = (np.asarray(flss) * _w) if flss is not None else _z
+                (frcc_u, frss_u, fzsc_u, fzcs_u, flsc_u, flcs_u, frsc_u, frcs_u, fzcc_u, fzss_u, flcc_u, flss_u) = (
+                    _mode_weight_force_blocks_np(
+                        _ForceBlocks(frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss),
+                        w_mode_mn=w_mode_mn_np,
+                        zeros_coeff=_zeros_coeff_np,
+                    )
+                )
             else:
                 frcc_u = frcc * w_mode_mn[None, :, :]
                 frss_u = (frss if frss is not None else jnp.zeros_like(frcc_u)) * w_mode_mn[None, :, :]
@@ -12293,13 +12643,7 @@ def solve_fixed_boundary_residual_iter(
                 fsqz1 = float(gcz2_p) * _f_norm1_np if _finite else 0.0
                 if bool(vmec2000_control):
                     # VMEC2000 `residue.f90`: fsql1 = hs * SUM( (faclam*gcl)**2 ) over all js.
-                    _gcl2_full = np.sum(np.asarray(frzl_pre.flsc)[1:] ** 2)
-                    if frzl_pre.flcs is not None:
-                        _gcl2_full = _gcl2_full + np.sum(np.asarray(frzl_pre.flcs)[1:] ** 2)
-                    if getattr(frzl_pre, "flcc", None) is not None:
-                        _gcl2_full = _gcl2_full + np.sum(np.asarray(frzl_pre.flcc)[1:] ** 2)
-                    if getattr(frzl_pre, "flss", None) is not None:
-                        _gcl2_full = _gcl2_full + np.sum(np.asarray(frzl_pre.flss)[1:] ** 2)
+                    _gcl2_full = _lambda_preconditioned_full_norm(frzl_pre, use_jax=False)
                     fsql1 = _gcl2_full * delta_s
                 else:
                     fsql1 = float(gcl2_p) * delta_s
@@ -12334,17 +12678,7 @@ def solve_fixed_boundary_residual_iter(
                 fsqz1 = jnp.where(finite_fnorm1, gcz2_p * f_norm1, jnp.asarray(0.0, dtype=jnp.asarray(gcz2_p).dtype))
                 if bool(vmec2000_control):
                     # VMEC2000 `residue.f90`: fsql1 = hs * SUM( (faclam*gcl)**2 ) over all js.
-                    flsc_pre = jnp.asarray(frzl_pre.flsc)
-                    gcl2_full = jnp.sum(flsc_pre[1:] * flsc_pre[1:])
-                    if frzl_pre.flcs is not None:
-                        flcs_pre = jnp.asarray(frzl_pre.flcs)
-                        gcl2_full = gcl2_full + jnp.sum(flcs_pre[1:] * flcs_pre[1:])
-                    if getattr(frzl_pre, "flcc", None) is not None:
-                        flcc_pre = jnp.asarray(frzl_pre.flcc)
-                        gcl2_full = gcl2_full + jnp.sum(flcc_pre[1:] * flcc_pre[1:])
-                    if getattr(frzl_pre, "flss", None) is not None:
-                        flss_pre = jnp.asarray(frzl_pre.flss)
-                        gcl2_full = gcl2_full + jnp.sum(flss_pre[1:] * flss_pre[1:])
+                    gcl2_full = _lambda_preconditioned_full_norm(frzl_pre, use_jax=True)
                     fsql1 = gcl2_full * delta_s
                 else:
                     fsql1 = gcl2_p * delta_s
@@ -12777,87 +13111,36 @@ def solve_fixed_boundary_residual_iter(
                     continue
 
             # --- time-step control trackers + optional restart triggers ---
-            fsq = fsqr_f + fsqz_f + fsql_f
-            fsq_res = fsq if bool(reference_mode) else fsq1
-            if bool(vmec2000_control):
-                # VMEC2000 updates res0 only inside TimeStepControl. To keep the
-                # generic tracker from drifting, only tighten res0 when the
-                # preconditioned residual decreases relative to the previous
-                # iteration.
-                if (fsq_res <= fsq_prev) and np.isfinite(fsq_res):
-                    res0 = min(res0, fsq_res)
-                res0_old = res0
-            else:
-                if (iter2 == iter1) or (res0 < 0.0):
-                    res0 = fsq_res
-                res0_old = res0
-                res0 = min(res0, fsq_res)
+            restart_decision = _host_restart_decision(
+                iter2=int(iter2),
+                iter1=int(iter1),
+                fsqr=fsqr_f,
+                fsqz=fsqz_f,
+                fsql=fsql_f,
+                fsq1=fsq1,
+                fsq_prev=fsq_prev,
+                res0=res0,
+                bad_growth_streak=bad_growth_streak,
+                pre_restart_reason=pre_restart_reason,
+                reference_mode=reference_mode,
+                vmec2000_control=vmec2000_control,
+                bad_jacobian=bad_jacobian,
+                stage_prev_fsq=stage_prev_fsq,
+                stage_transition_factor=stage_transition_factor,
+                lmove_axis=lmove_axis,
+                vmecpp_restart=vmecpp_restart,
+                k_preconditioner_update_interval=k_preconditioner_update_interval,
+            )
+            fsq = restart_decision.fsq
+            res0 = restart_decision.res0
+            bad_growth_streak = restart_decision.bad_growth_streak
+            pre_restart_reason = restart_decision.pre_restart_reason
+            huge_initial_forces = restart_decision.huge_initial_forces
 
             # Store a "good" checkpoint once residual has improved for many
             # iterations since the last restart marker.
-            if (not bool(vmec2000_control)) and (fsq1 <= res0_old) and ((iter2 - iter1) > 10):
+            if restart_decision.store_checkpoint:
                 state_checkpoint = state
-
-            # Restart triggers (bad progress / bad Jacobian proxy).
-            # `bad_jacobian` computed above (before TimeStepControl) so that
-            # VMEC's irst=2 restart takes precedence over time-control restarts.
-            if stage_prev_fsq is not None and iter2 == 1 and pre_restart_reason == "none":
-                try:
-                    prev_stage_fsq_val = float(stage_prev_fsq)
-                except Exception:
-                    prev_stage_fsq_val = None
-                if prev_stage_fsq_val is not None and np.isfinite(prev_stage_fsq_val):
-                    if fsq > (prev_stage_fsq_val * stage_transition_factor):
-                        pre_restart_reason = "stage_transition"
-
-            huge_initial_forces = False
-            if iter2 == 1 and lmove_axis:
-                fsq_init = float(fsq)
-                huge_initial_forces = (not np.isfinite(fsq_init)) or (fsq_init > 1.0e2)
-            if fsq_res > 100.0 * max(res0, 1e-30):
-                bad_growth_streak += 1
-            else:
-                bad_growth_streak = 0
-
-            vmecpp_bad_progress = False
-            if vmecpp_restart:
-                vmecpp_bad_progress = (
-                    (iter2 - iter1) > (k_preconditioner_update_interval // 2)
-                    and (iter2 > 2 * k_preconditioner_update_interval)
-                    and ((fsqr_f + fsqz_f) > 1.0e-2)
-                )
-
-            if bool(reference_mode):
-                # Conservative restart logic used in the reference-mode trace.
-                if bad_jacobian and (fsq > 1.0e1):
-                    pre_restart_reason = "bad_jacobian"
-                elif (iter2 > iter1) and (fsq > 100.0 * max(res0, 1e-30)):
-                    pre_restart_reason = "bad_jacobian"
-                elif (
-                    (iter2 - iter1) > (k_preconditioner_update_interval // 2)
-                    and (iter2 > 2 * k_preconditioner_update_interval)
-                    and ((fsqr_f + fsqz_f) > 1.0e-2)
-                ):
-                    pre_restart_reason = "bad_progress"
-            elif bool(vmec2000_control):
-                # VMEC cadence: restart immediately on a Jacobian sign change
-                # (irst=2 path in jacobian.f + TimeStepControl).
-                if bad_jacobian and (iter2 > iter1):
-                    pre_restart_reason = "bad_jacobian"
-                elif vmecpp_bad_progress:
-                    pre_restart_reason = "bad_progress_vmecpp"
-            else:
-                if vmecpp_bad_progress:
-                    pre_restart_reason = "bad_progress_vmecpp"
-                elif (iter2 > (iter1 + 8)) and (bad_growth_streak >= 2):
-                    pre_restart_reason = "bad_jacobian"
-                elif (
-                    (iter2 - iter1) > (k_preconditioner_update_interval // 2)
-                    and (iter2 > 2 * k_preconditioner_update_interval)
-                    and (fsq1 > 5.0 * max(res0, 1e-30))
-                    and (fsq1 > 0.95 * max(fsq_prev, 1e-30))
-                ):
-                    pre_restart_reason = "bad_progress"
 
             if use_restart_triggers and pre_restart_reason != "none":
                 state_before_restart = state

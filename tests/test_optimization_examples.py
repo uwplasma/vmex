@@ -80,10 +80,11 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "SAVE_STAGE_WOUTS = False" in text
     assert "save_stage_inputs=SAVE_STAGE_INPUTS" in text
     assert "save_stage_wouts=SAVE_STAGE_WOUTS" in text
-    assert "target_aspect=" not in text
-    assert "iota_abs_min=" not in text
-    assert "qi_options=" not in text
-    assert "plot=" not in text
+    solve_call = text.split("result = vj.least_squares_solve(", 1)[1].split(")\n", 1)[0]
+    assert "target_aspect=" not in solve_call
+    assert "iota_abs_min=" not in solve_call
+    assert "qi_options=" not in solve_call
+    assert "plot=" not in solve_call
     assert "print_optimization_outputs" not in text
     assert "initial_optimizer = result.initial_optimizer" in text
     assert "final_optimizer = result.final_optimizer" in text

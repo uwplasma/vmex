@@ -21,14 +21,18 @@ from .quasi_isodynamic import (
     quasi_isodynamic_residual_from_boozer_output,
     quasi_isodynamic_residual_from_state,
 )
+from .wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
 QI_DIAGNOSTIC_VERSION = "qi_diagnostics.v1"
 
 __all__ = [
     "QI_DIAGNOSTIC_VERSION",
     "QIDiagnosticOptions",
+    "QISeedSuitabilityTargets",
+    "annotate_qi_seed_suitability",
     "qi_diagnostics_from_boozer_output",
     "qi_diagnostics_from_state",
+    "rank_qi_seed_records",
 ]
 
 
@@ -75,6 +79,24 @@ class QIDiagnosticOptions:
     fail_on_error: bool = False
 
 
+@dataclass(frozen=True)
+class QISeedSuitabilityTargets:
+    """Promotion gates used to compare solved QI seed candidates.
+
+    ``None`` disables a gate.  The defaults match the lightweight QI audit and
+    optimization examples in this repository: smooth/legacy QI first, then
+    nonzero transform, aspect, mirror, and elongation cleanup gates.
+    """
+
+    smooth_qi_max: float | None = 2.0e-3
+    legacy_qi_max: float | None = 1.0e-3
+    target_aspect: float | None = 5.0
+    aspect_relative_tolerance: float = 0.35
+    abs_iota_min: float | None = 0.41
+    mirror_ratio_max: float | None = 0.21
+    max_elongation: float | None = 8.0
+
+
 def _format_error(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"
 
@@ -96,6 +118,19 @@ def _first_float(value: Any) -> float | None:
     if arr.size == 0:
         return None
     return float(arr.ravel()[0])
+
+
+def _finite_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        arr = np.asarray(value, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    if arr.size == 0:
+        return None
+    out = float(arr.ravel()[0])
+    return out if np.isfinite(out) else None
 
 
 def _max_float(value: Any) -> float | None:
@@ -125,6 +160,19 @@ def _list_or_none(value: Any) -> list[Any] | None:
     if np.issubdtype(arr.dtype, np.integer):
         return [int(v) for v in arr.ravel()]
     return [float(v) for v in np.asarray(arr, dtype=float).ravel()]
+
+
+def _mean_nonaxis_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    arr = np.asarray(value, dtype=float)
+    if arr.size == 0:
+        return None
+    values = arr.ravel()[1:] if arr.size > 1 else arr.ravel()
+    if values.size == 0:
+        return None
+    out = float(np.mean(values))
+    return out if np.isfinite(out) else None
 
 
 def _nfp_from_boozer_output(booz: dict[str, Any], nfp: int | None) -> int | None:
@@ -213,6 +261,8 @@ def _base_record(
         "qi_lgradb_nphi": int(options.lgradb_nphi),
         "qi_surfaces": _list_or_none(surfaces if surfaces is not None else options.surfaces),
         "qi_surface_indices": _list_or_none(surface_indices),
+        "aspect": None,
+        "mean_iota": None,
     }
 
 
@@ -376,6 +426,262 @@ def _record_mirror(
         )
 
 
+def _record_scalar_state_metrics(
+    record: dict[str, Any],
+    *,
+    state: Any,
+    static: Any,
+    indata: Any,
+    signgs: int,
+    fail_on_error: bool,
+) -> None:
+    try:
+        record["aspect"] = _first_float(equilibrium_aspect_ratio_from_state(state=state, static=static))
+    except Exception as exc:
+        _handle_error(record, "qi_aspect_error", exc, fail_on_error=fail_on_error)
+
+    try:
+        _chips, iotas, _iotaf = equilibrium_iota_profiles_from_state(
+            state=state,
+            static=static,
+            indata=indata,
+            signgs=int(signgs),
+        )
+        record["mean_iota"] = _mean_nonaxis_float(iotas)
+    except Exception as exc:
+        _handle_error(record, "qi_iota_error", exc, fail_on_error=fail_on_error)
+
+
+def _target_from_record(record: dict[str, Any], key: str, fallback: float | None) -> float | None:
+    if fallback is None:
+        return None
+    value = _finite_float(record.get(key))
+    return fallback if value is None else value
+
+
+def _gate_excess(value: float | None, target: float | None, *, upper: bool) -> float | None:
+    if target is None:
+        return None
+    if value is None:
+        return None
+    if upper:
+        return max(0.0, value - target)
+    return max(0.0, target - abs(value))
+
+
+def _normalized_excess(excess: float | None, target: float | None) -> float | None:
+    if excess is None:
+        return None
+    if target is None or target == 0.0:
+        return float(excess)
+    return float(excess / abs(target))
+
+
+def _failure_message(name: str, value: float | None, target: float | None, *, upper: bool) -> str:
+    if value is None:
+        return f"{name} is unavailable"
+    if target is None:
+        return f"{name} gate is disabled"
+    relation = "exceeds" if upper else "is below"
+    return f"{name}={value:.6g} {relation} target {target:.6g}"
+
+
+def annotate_qi_seed_suitability(
+    record: dict[str, Any],
+    *,
+    targets: QISeedSuitabilityTargets | None = None,
+) -> dict[str, Any]:
+    """Return ``record`` with deterministic QI seed-ranking and gate fields.
+
+    The ranking score intentionally combines the differentiable smooth QI
+    residual with the legacy Goodman-style branch-shuffle diagnostic.  Missing
+    core QI metrics are ranked last and are also reported in
+    ``qi_gate_failures``/``qi_failure_reasons``.
+    """
+
+    targets = QISeedSuitabilityTargets() if targets is None else targets
+    out = dict(record)
+
+    smooth = _finite_float(out.get("qi_smooth_total"))
+    legacy = _finite_float(out.get("qi_legacy_total"))
+    aspect = _finite_float(out.get("aspect"))
+    mean_iota = _finite_float(out.get("mean_iota"))
+    mirror = _finite_float(out.get("qi_mirror_ratio_max"))
+    elongation = _finite_float(out.get("qi_max_elongation"))
+
+    smooth_target = targets.smooth_qi_max
+    legacy_target = targets.legacy_qi_max
+    aspect_target = _target_from_record(out, "target_aspect", targets.target_aspect)
+    iota_target = _target_from_record(out, "abs_iota_min", targets.abs_iota_min)
+    mirror_target = _target_from_record(out, "qi_mirror_ratio_target", targets.mirror_ratio_max)
+    elongation_target = _target_from_record(out, "qi_elongation_target", targets.max_elongation)
+
+    aspect_relative_error = (
+        None
+        if aspect is None or aspect_target is None or aspect_target == 0.0
+        else abs(aspect - aspect_target) / abs(aspect_target)
+    )
+    iota_shortfall = _gate_excess(mean_iota, iota_target, upper=False)
+    smooth_excess = _gate_excess(smooth, smooth_target, upper=True)
+    legacy_excess = _gate_excess(legacy, legacy_target, upper=True)
+    mirror_excess = _gate_excess(mirror, mirror_target, upper=True)
+    elongation_excess = _gate_excess(elongation, elongation_target, upper=True)
+
+    failures: list[str] = []
+    reasons: list[str] = []
+
+    def require_gate(name: str, ok: bool, message: str) -> bool:
+        if not ok:
+            failures.append(name)
+            reasons.append(message)
+        return ok
+
+    smooth_ok = True
+    if smooth_target is not None:
+        smooth_ok = require_gate(
+            "smooth_qi",
+            smooth is not None and smooth_excess == 0.0,
+            _failure_message("smooth QI", smooth, smooth_target, upper=True),
+        )
+    legacy_ok = True
+    if legacy_target is not None:
+        legacy_ok = require_gate(
+            "legacy_qi",
+            legacy is not None and legacy_excess == 0.0,
+            _failure_message("legacy QI", legacy, legacy_target, upper=True),
+        )
+    aspect_ok = True
+    if aspect_target is not None:
+        aspect_ok = require_gate(
+            "aspect",
+            aspect_relative_error is not None and aspect_relative_error <= targets.aspect_relative_tolerance,
+            (
+                "aspect is unavailable"
+                if aspect_relative_error is None
+                else (
+                    f"aspect relative error={aspect_relative_error:.6g} exceeds "
+                    f"tolerance {targets.aspect_relative_tolerance:.6g}"
+                )
+            ),
+        )
+    iota_ok = True
+    if iota_target is not None:
+        iota_ok = require_gate(
+            "iota",
+            mean_iota is not None and iota_shortfall == 0.0,
+            _failure_message("abs(mean iota)", None if mean_iota is None else abs(mean_iota), iota_target, upper=False),
+        )
+    mirror_ok = True
+    if mirror_target is not None:
+        mirror_ok = require_gate(
+            "mirror",
+            mirror is not None and mirror_excess == 0.0,
+            _failure_message("mirror ratio", mirror, mirror_target, upper=True),
+        )
+    elongation_ok = True
+    if elongation_target is not None:
+        elongation_ok = require_gate(
+            "elongation",
+            elongation is not None and elongation_excess == 0.0,
+            _failure_message("max elongation", elongation, elongation_target, upper=True),
+        )
+
+    diagnostic_errors = sorted(key for key in out if key.startswith("qi_") and key.endswith("_error"))
+    for key in diagnostic_errors:
+        failures.append(key)
+        reasons.append(f"{key}: {out[key]}")
+
+    qi_core_complete = smooth is not None and legacy is not None
+    qi_rank_score = float("inf") if not qi_core_complete else float(smooth + legacy)
+    normalized_penalties = [
+        0.0 if smooth_target is None else _normalized_excess(smooth_excess, smooth_target),
+        0.0 if legacy_target is None else _normalized_excess(legacy_excess, legacy_target),
+        0.0
+        if aspect_target is None
+        else None
+        if aspect_relative_error is None
+        else max(0.0, aspect_relative_error - targets.aspect_relative_tolerance),
+        0.0 if iota_target is None else _normalized_excess(iota_shortfall, iota_target),
+        0.0 if mirror_target is None else _normalized_excess(mirror_excess, mirror_target),
+        0.0 if elongation_target is None else _normalized_excess(elongation_excess, elongation_target),
+    ]
+    constraint_penalties = [1.0 if value is None else float(value) for value in normalized_penalties]
+    constraint_score = float(np.dot(constraint_penalties, constraint_penalties))
+
+    out.update(
+        {
+            "target_aspect": aspect_target,
+            "abs_iota_min": iota_target,
+            "qi_smooth_gate": smooth_target,
+            "qi_legacy_gate": legacy_target,
+            "qi_mirror_ratio_target": mirror_target,
+            "qi_elongation_target": elongation_target,
+            "aspect_relative_error": None if aspect_relative_error is None else float(aspect_relative_error),
+            "iota_shortfall": iota_shortfall,
+            "qi_smooth_excess": smooth_excess,
+            "qi_legacy_excess": legacy_excess,
+            "qi_mirror_excess_max": mirror_excess,
+            "qi_elongation_excess": elongation_excess,
+            "qi_diagnostic_errors": diagnostic_errors,
+            "qi_gate_failures": failures,
+            "failed_constraints": failures,
+            "qi_failure_reasons": reasons,
+            "qi_metric_gate_passed": bool(smooth_ok and legacy_ok and not diagnostic_errors),
+            "qi_iota_gate_passed": bool(smooth_ok and legacy_ok and iota_ok and not diagnostic_errors),
+            "qi_aspect_gate_passed": bool(aspect_ok and not diagnostic_errors),
+            "qi_seed_gate_passed": bool(smooth_ok and legacy_ok and aspect_ok and iota_ok and not diagnostic_errors),
+            "qi_mirror_gate_passed": bool(mirror_ok and not diagnostic_errors),
+            "qi_engineering_gate_passed": bool(
+                smooth_ok
+                and legacy_ok
+                and aspect_ok
+                and iota_ok
+                and mirror_ok
+                and elongation_ok
+                and not diagnostic_errors
+            ),
+            "qi_seed_suitability": "pass" if not failures else "needs_attention",
+            "seed_suitability": "pass" if not failures else "needs_attention",
+            "qi_rank_score": qi_rank_score,
+            "qi_seed_score": qi_rank_score,
+            "qi_constraint_score": constraint_score,
+            "constraint_score": constraint_score,
+        }
+    )
+    return out
+
+
+def rank_qi_seed_records(
+    records: Iterable[dict[str, Any]],
+    *,
+    targets: QISeedSuitabilityTargets | None = None,
+) -> list[dict[str, Any]]:
+    """Annotate and rank QI seed records by smooth+legacy QI quality."""
+
+    annotated = [annotate_qi_seed_suitability(record, targets=targets) for record in records]
+    ranked = sorted(
+        annotated,
+        key=lambda row: (
+            not np.isfinite(float(row.get("qi_rank_score", np.inf))),
+            float(row.get("qi_rank_score", np.inf)),
+            len(row.get("qi_gate_failures", [])),
+            float(row.get("qi_constraint_score", np.inf)),
+            str(row.get("label", row.get("case", ""))),
+        ),
+    )
+    for index, row in enumerate(ranked, start=1):
+        row["qi_suitability_rank"] = index
+
+    for key, rank_key in (
+        ("qi_smooth_total", "qi_smooth_rank"),
+        ("qi_legacy_total", "qi_legacy_rank"),
+    ):
+        finite = [row for row in ranked if _finite_float(row.get(key)) is not None]
+        for index, row in enumerate(sorted(finite, key=lambda item: float(item[key])), start=1):
+            row[rank_key] = index
+    return ranked
+
+
 def qi_diagnostics_from_boozer_output(
     booz: dict[str, Any],
     *,
@@ -493,6 +799,15 @@ def qi_diagnostics_from_state(
     if booz is not None:
         _record_mirror(record, booz, options=options, nfp=nfp, weights=weights)
         _record_legacy(record, booz, options=options, nfp=nfp, weights=weights)
+
+    _record_scalar_state_metrics(
+        record,
+        state=state,
+        static=static,
+        indata=indata,
+        signgs=signgs,
+        fail_on_error=bool(options.fail_on_error),
+    )
 
     try:
         elongation = max_elongation_penalty_from_state(

@@ -4209,6 +4209,36 @@ def _icurv_full_mesh_from_indata(*, indata, s_full: np.ndarray, signgs: int) -> 
     return icurv
 
 
+def _read_wout_scalar_metadata(variables, *, path: Path) -> tuple[int, int, int, int, bool, int]:
+    """Extract and validate the scalar metadata needed before reading array fields."""
+    ns = int(_nc_scalar(variables["ns"][:], 0.0, as_int=True))
+    mpol = int(_nc_scalar(variables["mpol"][:], 0.0, as_int=True))
+    ntor = int(_nc_scalar(variables["ntor"][:], 0.0, as_int=True))
+    nfp = int(_nc_scalar(variables["nfp"][:], 0.0, as_int=True))
+
+    lasym_var = variables.get("lasym__logical__")
+    lasym = _bool_from_nc(lasym_var[:] if lasym_var is not None else 0)
+    signgs_var = variables.get("signgs")
+    signgs = int(_nc_scalar(signgs_var[:] if signgs_var is not None else 1.0, 1.0, as_int=True))
+    if ns <= 0 or mpol <= 0 or ntor < 0 or nfp <= 0:
+        raise ValueError(f"Incomplete or masked wout scalar metadata in {path}")
+    return ns, mpol, ntor, nfp, lasym, signgs
+
+
+def _wout_phi_profile_from_variables(variables, *, ns: int, phipf: np.ndarray) -> np.ndarray:
+    """Read ``phi`` or synthesize the VMEC half-mesh toroidal-flux profile."""
+    if "phi" in variables:
+        return np.asarray(variables["phi"][:])
+
+    from .integrals import cumrect_s_halfmesh
+
+    if ns < 2:
+        s = np.zeros((ns,), dtype=float)
+    else:
+        s = np.linspace(0.0, 1.0, ns, dtype=float)
+    return np.asarray(cumrect_s_halfmesh(phipf, s))
+
+
 def read_wout(path: str | Path) -> WoutData:
     """Read a subset of `wout_*.nc` needed for regression comparisons."""
     path = Path(path)
@@ -4218,14 +4248,7 @@ def read_wout(path: str | Path) -> WoutData:
         raise ImportError("netCDF4 is required to read wout files (pip install -e .[netcdf])") from e
 
     with netCDF4.Dataset(path) as ds:
-        ns = int(_nc_scalar(ds.variables["ns"][:], 0.0, as_int=True))
-        mpol = int(_nc_scalar(ds.variables["mpol"][:], 0.0, as_int=True))
-        ntor = int(_nc_scalar(ds.variables["ntor"][:], 0.0, as_int=True))
-        nfp = int(_nc_scalar(ds.variables["nfp"][:], 0.0, as_int=True))
-        lasym = _bool_from_nc(ds.variables.get("lasym__logical__", 0)[:])
-        signgs = int(_nc_scalar(ds.variables["signgs"][:], 1.0, as_int=True))
-        if ns <= 0 or mpol <= 0 or ntor < 0 or nfp <= 0:
-            raise ValueError(f"Incomplete or masked wout scalar metadata in {path}")
+        ns, mpol, ntor, nfp, lasym, signgs = _read_wout_scalar_metadata(ds.variables, path=path)
 
         xm = read_mode_table(ds.variables, "xm", path=path)
         xn = read_mode_table(ds.variables, "xn", path=path)
@@ -4274,16 +4297,7 @@ def read_wout(path: str | Path) -> WoutData:
         equif = np.asarray(ds.variables.get("equif", np.zeros((ns,), dtype=float))[:])
 
         # Additional fields used by vmecPlot2 and diagnostics.
-        if "phi" in ds.variables:
-            phi = np.asarray(ds.variables["phi"][:])
-        else:
-            from .integrals import cumrect_s_halfmesh
-
-            if ns < 2:
-                s = np.zeros((ns,), dtype=float)
-            else:
-                s = np.linspace(0.0, 1.0, ns, dtype=float)
-            phi = np.asarray(cumrect_s_halfmesh(phipf, s))
+        phi = _wout_phi_profile_from_variables(ds.variables, ns=ns, phipf=phipf)
 
         buco = np.asarray(ds.variables.get("buco", np.zeros((ns,), dtype=float))[:])
         bvco = np.asarray(ds.variables.get("bvco", np.zeros((ns,), dtype=float))[:])
