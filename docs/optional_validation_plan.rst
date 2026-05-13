@@ -190,18 +190,24 @@ The next parity gates are:
   simple seeds.
 - Keep VMEC2000 executable smoke green before broadening the executable-backed
   manifest matrix.
-- Run the optional bounded free-boundary ``LASYM=true`` manifest case:
+- Run the optional bounded free-boundary ``LASYM=true`` manifest case.  The
+  ``freeb_scalpot`` comparator needs an instrumented VMEC2000 executable that
+  honors the ``VMEC_DUMP_*`` environment variables; a stock ``xvmec2000`` run
+  can still solve the case, but it will not emit the scalpot/vacuum dumps used
+  for this diagnostic.
 
   .. code-block:: bash
 
      VMEC2000_EXEC=/path/to/xvmec2000 \
      VMEC2000_INTEGRATION=1 \
      PYTHONPATH=. python tools/diagnostics/parity_sweep_manifest.py \
-       --case freeb_nonaxis_lasym_true_cth_like_local \
-       --out results/parity/freeb_lasym_true \
-       --manifest tools/diagnostics/parity_manifest.toml
+       --ids freeb_nonaxis_lasym_true_cth_like_local \
+       --output-root results/parity/freeb_lasym_true \
+       --manifest tools/diagnostics/parity_manifest.toml \
+       --vmec-exec "$VMEC2000_EXEC"
 
-  This self-contained ``vmec_jax/examples`` case exercises
+  This self-contained ``vmec_jax/examples`` case uses a scaled synthetic mgrid
+  with current signs matched to the plasma current. It exercises
   ``lfreeb=True``, ``lasym=True``, non-axisymmetric vacuum coupling with
   explicit per-iteration runtime and ``freeb_scalpot`` accuracy thresholds.
 - Keep SIMSOPT formula-level comparisons green where SIMSOPT is installed.

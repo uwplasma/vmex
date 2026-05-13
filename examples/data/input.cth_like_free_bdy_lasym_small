@@ -2,8 +2,9 @@
 
 ! Bundled free-boundary CTH-like LASYM fixture.
 ! This case is built from the convergent cth_like_free_bdy benchmark with a
-! small but nonzero asymmetric perturbation so both VMEC2000 and vmec_jax
-! converge cleanly while still exercising lasym=True free-boundary control.
+! small but nonzero asymmetric perturbation. It is intended for bounded
+! free-boundary LASYM smoke/parity diagnostics rather than as a high-accuracy
+! production equilibrium.
   MGRID_FILE = 'mgrid_cth_like_lasym_small.nc',
   LFREEB = T,
   DELT = 0.7,
@@ -22,7 +23,10 @@
   LASYM = T,
 
 ! Coil currents. (HF, TVF)
-  EXTCUR = 4700.0, 1000.0,
+! The bundled synthetic mgrid is scaled down from the full CTH-like grid.  Keep
+! the sign and magnitude matched to CURTOR so VMEC2000 turns on the vacuum solve
+! instead of aborting with an I_TOR mismatch.
+  EXTCUR = -12.0, -2.55,
 
 ! Fitting parameters.
   GAMMA = 0.0,
