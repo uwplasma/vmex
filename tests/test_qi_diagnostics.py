@@ -117,11 +117,21 @@ def test_qi_diagnostics_from_state_wraps_existing_components_without_solves(monk
             "excess": np.asarray([[1.0, -0.2]]),
         }
 
+    def fake_aspect(**kwargs):
+        calls["aspect"] = kwargs
+        return np.asarray(5.2)
+
+    def fake_iota_profiles(**kwargs):
+        calls["iota"] = kwargs
+        return None, np.asarray([0.0, -0.4, -0.5]), None
+
     monkeypatch.setattr(qid, "quasi_isodynamic_residual_from_state", fake_smooth)
     monkeypatch.setattr(qid, "mirror_ratio_penalty_from_boozer_output", fake_mirror)
     monkeypatch.setattr(qid, "legacy_qi_branch_shuffle_diagnostic_from_boozer_output", fake_legacy)
     monkeypatch.setattr(qid, "max_elongation_penalty_from_state", fake_elongation)
     monkeypatch.setattr(qid, "lgradb_penalty_from_state", fake_lgradb)
+    monkeypatch.setattr(qid, "equilibrium_aspect_ratio_from_state", fake_aspect)
+    monkeypatch.setattr(qid, "equilibrium_iota_profiles_from_state", fake_iota_profiles)
 
     options = qid.QIDiagnosticOptions(
         surfaces=[0.5],
@@ -164,6 +174,8 @@ def test_qi_diagnostics_from_state_wraps_existing_components_without_solves(monk
     assert calls["mirror"][1]["weights"] == [2.0]
     assert calls["legacy"][1]["nphi_out"] == 61
     assert calls["lgradb"]["flux_local"] == "flux"
+    assert calls["aspect"]["state"] == "state"
+    assert calls["iota"]["signgs"] == -1
 
     assert record["qi_diagnostic_source"] == "state"
     assert record["qi_smooth_total"] == 1.25
@@ -174,6 +186,8 @@ def test_qi_diagnostics_from_state_wraps_existing_components_without_solves(monk
     assert record["qi_mirror_excess_max"] == pytest.approx(0.11)
     assert record["qi_max_elongation"] == 9.5
     assert record["qi_elongation_excess"] == 1.5
+    assert record["aspect"] == 5.2
+    assert record["mean_iota"] == pytest.approx(-0.45)
     assert record["qi_lgradb_enabled"] is True
     assert record["qi_lgradb_min"] == 0.22
     assert record["qi_lgradb_excess_max"] == 1.0
@@ -245,3 +259,102 @@ def test_qi_diagnostics_from_bundled_solved_qi_seed_records_state_metrics():
     assert record["qi_max_elongation"] > record["qi_elongation_target"]
     assert record["qi_elongation_excess"] > 0.0
     assert record["qi_lgradb_enabled"] is False
+    assert record["aspect"] > 0.0
+    assert abs(record["mean_iota"]) > 0.0
+
+
+def test_qi_seed_suitability_annotation_reports_gate_failures():
+    from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_suitability
+
+    targets = QISeedSuitabilityTargets(
+        smooth_qi_max=2.0e-3,
+        legacy_qi_max=1.0e-3,
+        target_aspect=5.0,
+        aspect_relative_tolerance=0.35,
+        abs_iota_min=0.41,
+        mirror_ratio_max=0.21,
+        max_elongation=8.0,
+    )
+    record = annotate_qi_seed_suitability(
+        {
+            "label": "bad_seed",
+            "qi_smooth_total": 5.0e-3,
+            "qi_legacy_total": 2.0e-3,
+            "qi_mirror_ratio_max": 0.25,
+            "qi_max_elongation": 8.5,
+            "aspect": 8.0,
+            "mean_iota": 0.12,
+        },
+        targets=targets,
+    )
+
+    assert record["qi_seed_suitability"] == "needs_attention"
+    assert record["qi_metric_gate_passed"] is False
+    assert record["qi_seed_gate_passed"] is False
+    assert record["qi_engineering_gate_passed"] is False
+    assert record["qi_rank_score"] == pytest.approx(7.0e-3)
+    assert record["qi_mirror_excess_max"] == pytest.approx(0.04)
+    assert record["qi_elongation_excess"] == pytest.approx(0.5)
+    assert record["iota_shortfall"] == pytest.approx(0.29)
+    assert record["aspect_relative_error"] == pytest.approx(0.6)
+    assert record["qi_gate_failures"] == [
+        "smooth_qi",
+        "legacy_qi",
+        "aspect",
+        "iota",
+        "mirror",
+        "elongation",
+    ]
+    assert "mirror ratio=0.25 exceeds target 0.21" in record["qi_failure_reasons"]
+
+
+def test_qi_seed_ranking_tracks_legacy_goodman_order_on_synthetic_modes():
+    pytest.importorskip("jax")
+
+    from vmec_jax.qi_diagnostics import (
+        QIDiagnosticOptions,
+        QISeedSuitabilityTargets,
+        qi_diagnostics_from_boozer_output,
+        rank_qi_seed_records,
+    )
+
+    options = QIDiagnosticOptions(
+        nphi=33,
+        nalpha=9,
+        n_bounce=7,
+        include_bounce_endpoints=True,
+        legacy_nphi_out=101,
+        mirror_threshold=1.0,
+        mirror_ntheta=16,
+        mirror_nphi=16,
+    )
+    targets = QISeedSuitabilityTargets(
+        smooth_qi_max=None,
+        legacy_qi_max=None,
+        target_aspect=None,
+        abs_iota_min=None,
+        mirror_ratio_max=None,
+        max_elongation=None,
+    )
+    cases = [
+        ("qi_like", _booz_like(xm=[0, 0], xn=[0, 1], coeffs=[1.0, 0.1])),
+        ("mixed_qi_helical", _booz_like(xm=[0, 0, 1], xn=[0, 1, 1], coeffs=[1.0, 0.1, 0.04])),
+        ("qh_like", _booz_like(xm=[0, 1], xn=[0, 1], coeffs=[1.0, 0.1])),
+    ]
+
+    records = []
+    for label, booz in cases:
+        record = qi_diagnostics_from_boozer_output(booz, options=options)
+        record["label"] = label
+        records.append(record)
+
+    ranked = rank_qi_seed_records(records, targets=targets)
+
+    assert [record["label"] for record in ranked] == ["qi_like", "mixed_qi_helical", "qh_like"]
+    assert [record["label"] for record in sorted(ranked, key=lambda row: row["qi_legacy_total"])] == [
+        "qi_like",
+        "mixed_qi_helical",
+        "qh_like",
+    ]
+    assert all(record["qi_seed_suitability"] == "pass" for record in ranked)
+    assert ranked[0]["qi_suitability_rank"] == 1

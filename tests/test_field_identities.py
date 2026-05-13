@@ -6,12 +6,15 @@ import numpy as np
 
 from vmec_jax.field import (
     TWOPI,
+    b_cartesian_from_state,
     b2_from_bsup,
     b_cartesian_from_bsup,
     bsub_from_bsup,
     bsup_from_sqrtg_lambda,
     full_mesh_from_half_mesh_avg,
     half_mesh_avg_from_full_mesh,
+    lamscale_from_phips,
+    signgs_from_sqrtg,
 )
 
 
@@ -85,6 +88,37 @@ def test_bsup_from_sqrtg_lambda_applies_vmec_flux_and_lambda_signs():
     np.testing.assert_allclose(np.asarray(bsupv_public), np.asarray(bsupv_internal), rtol=1.0e-13, atol=1.0e-13)
 
 
+def test_field_scalar_helpers_and_edge_cases():
+    assert signgs_from_sqrtg(np.asarray(1.0)) == 1
+    assert signgs_from_sqrtg(np.asarray([[0.0], [-2.0], [-3.0]])) == -1
+    np.testing.assert_allclose(np.asarray(lamscale_from_phips([2.0], [0.0])), 1.0)
+    with np.testing.assert_raises(ValueError):
+        lamscale_from_phips(np.ones((2, 1)), np.ones((2,)))
+    with np.testing.assert_raises(ValueError):
+        lamscale_from_phips(np.ones((2,)), np.ones((3,)))
+
+    with np.testing.assert_raises(ValueError):
+        bsup_from_sqrtg_lambda(
+            sqrtg=np.ones((2, 2)),
+            lam_u=np.ones((2, 2)),
+            lam_v=np.ones((2, 2)),
+            phipf=np.ones((2,)),
+            chipf=np.ones((2,)),
+            signgs=1,
+            lamscale=1.0,
+        )
+    np.testing.assert_allclose(np.asarray(full_mesh_from_half_mesh_avg(np.asarray([]))), [])
+    np.testing.assert_allclose(np.asarray(full_mesh_from_half_mesh_avg(np.asarray([3.0]))), [0.0])
+    np.testing.assert_allclose(np.asarray(full_mesh_from_half_mesh_avg(np.asarray([2.0, 4.0]))), [0.0, 4.0])
+    np.testing.assert_allclose(np.asarray(half_mesh_avg_from_full_mesh(np.asarray([]))), [])
+    np.testing.assert_allclose(np.asarray(half_mesh_avg_from_full_mesh(np.asarray([3.0]))), [0.0])
+    np.testing.assert_allclose(np.asarray(half_mesh_avg_from_full_mesh(np.asarray([2.0, 4.0]))), [4.0, 4.0])
+    with np.testing.assert_raises(ValueError):
+        full_mesh_from_half_mesh_avg(np.ones((2, 2)))
+    with np.testing.assert_raises(ValueError):
+        half_mesh_avg_from_full_mesh(np.ones((2, 2)))
+
+
 def test_cartesian_field_norm_matches_metric_contraction_for_circular_geometry():
     theta = np.linspace(0.0, 2.0 * np.pi, 5, endpoint=False)
     zeta = np.linspace(0.0, 2.0 * np.pi, 4, endpoint=False)
@@ -121,3 +155,10 @@ def test_cartesian_field_norm_matches_metric_contraction_for_circular_geometry()
     np.testing.assert_allclose(np.asarray(bsubu), geom.g_tt * bsupu, rtol=1.0e-13, atol=1.0e-13)
     np.testing.assert_allclose(np.asarray(bsubv), geom.g_pp * bsupv, rtol=1.0e-13, atol=1.0e-13)
     np.testing.assert_allclose(b2_cartesian, np.asarray(b2_metric), rtol=1.0e-13, atol=1.0e-13)
+    with np.testing.assert_raises(ValueError):
+        b_cartesian_from_bsup(geom, bsupu, bsupv, zeta=zeta, nfp=0)
+
+
+def test_b_cartesian_from_state_requires_indata_or_wout():
+    with np.testing.assert_raises(ValueError):
+        b_cartesian_from_state(SimpleNamespace(), SimpleNamespace())

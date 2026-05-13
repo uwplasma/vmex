@@ -8,6 +8,8 @@ import pytest
 
 from vmec_jax.solve import (
     _can_reassemble_precond_mats,
+    _ForceBlocks,
+    _apply_vmec_lambda_axis_rules_to_state,
     _finite_float_or_zero,
     _format_axis_coeff,
     _format_checkpoint_log_row,
@@ -19,22 +21,28 @@ from vmec_jax.solve import (
     _free_boundary_iter_controls,
     _grad_rms_state,
     _half_mesh_from_full_mesh,
+    _host_restart_decision,
     _jit_cache_get,
     _jit_cache_limit,
     _jit_cache_put,
+    _lambda_preconditioned_full_norm,
     _mask_grad_for_constraints,
     _materialize_adjoint_trace_array,
     _merge_axis_reset_state,
     _metric_surface_precond_scales_jax,
     _metric_surface_precond_scales_np,
+    _mode_weight_force_blocks_np,
     _normalize_adjoint_trace_mode,
     _normalize_resume_state_mode,
     _pack_resume_state_record,
+    _preconditioner_output_blocks_np,
     _pshalf_from_s_jax,
     _pshalf_from_s_np,
     _radial_tridi_smooth_dirichlet,
     _replace_mode_slice,
     _replace_mode_slice_np,
+    _safe_dt_from_force_blocks,
+    _scale_m1_precond_rhs_from_mats,
     _resolve_cg_tol,
     _resolve_grad_tol,
     _resolve_lbfgs_curvature_tol,
@@ -455,6 +463,260 @@ def test_vmec_scale_m1_factors_jax_and_reassembly_contract():
         "delta_s",
     )}
     assert _can_reassemble_precond_mats(complete)
+
+
+def test_safe_dt_from_force_blocks_limits_finite_forces_and_preserves_bad_rms_nominal():
+    force = np.full((2, 2), 3.0)
+    blocks = _ForceBlocks(
+        frcc=force,
+        frss=None,
+        fzsc=np.full((2, 2), 4.0),
+        fzcs=None,
+        flsc=np.zeros((2, 2)),
+        flcs=None,
+        frsc=None,
+        frcs=None,
+        fzcc=None,
+        fzss=None,
+        flcc=None,
+        flss=None,
+    )
+
+    dt = _safe_dt_from_force_blocks(dt_nominal=0.1, max_coeff_delta_rms=1.0e-4, blocks=blocks)
+
+    assert dt == pytest.approx(np.sqrt(1.0e-4 / 5.0))
+    zero_dt = _safe_dt_from_force_blocks(
+        dt_nominal=0.25,
+        max_coeff_delta_rms=1.0e-4,
+        blocks=blocks._replace(frcc=np.zeros((2, 2)), fzsc=np.zeros((2, 2))),
+    )
+    assert zero_dt == pytest.approx(0.25)
+    bad_dt = _safe_dt_from_force_blocks(
+        dt_nominal=0.25,
+        max_coeff_delta_rms=1.0e-4,
+        blocks=blocks._replace(frcc=np.full((2, 2), np.inf)),
+    )
+    assert bad_dt == pytest.approx(0.25)
+
+
+def test_apply_vmec_lambda_axis_rules_zeroes_only_gauge_column_and_can_be_disabled():
+    state = _state_from_value(1.0, ns=2, k=3)
+    state = VMECState(
+        layout=state.layout,
+        Rcos=state.Rcos,
+        Rsin=state.Rsin,
+        Zcos=state.Zcos,
+        Zsin=state.Zsin,
+        Lcos=np.arange(6.0).reshape(2, 3) + 10.0,
+        Lsin=np.arange(6.0).reshape(2, 3) + 20.0,
+    )
+
+    assert (
+        _apply_vmec_lambda_axis_rules_to_state(
+            state,
+            enforce_vmec_lambda_axis=False,
+            host_update_assembly=True,
+            idx00=1,
+        )
+        is state
+    )
+
+    host = _apply_vmec_lambda_axis_rules_to_state(
+        state,
+        enforce_vmec_lambda_axis=True,
+        host_update_assembly=True,
+        idx00=1,
+    )
+    np.testing.assert_allclose(np.asarray(host.Lcos)[:, 1], 0.0)
+    np.testing.assert_allclose(np.asarray(host.Lsin)[:, 1], 0.0)
+    np.testing.assert_allclose(np.asarray(host.Lcos)[:, [0, 2]], np.asarray(state.Lcos)[:, [0, 2]])
+    np.testing.assert_allclose(np.asarray(state.Lcos)[:, 1], [11.0, 14.0])
+
+    jax_state = _apply_vmec_lambda_axis_rules_to_state(
+        state,
+        enforce_vmec_lambda_axis=True,
+        host_update_assembly=False,
+        idx00=2,
+    )
+    np.testing.assert_allclose(np.asarray(jax_state.Lcos)[:, 2], 0.0)
+    np.testing.assert_allclose(np.asarray(jax_state.Lsin)[:, 2], 0.0)
+
+
+def test_scale_m1_precond_rhs_from_mats_scales_m1_slice_and_extends_factor_tail():
+    shape = (3, 2, 1)
+    base = np.arange(np.prod(shape), dtype=float).reshape(shape) + 1.0
+    frzl = TomnspsRZL(
+        frcc=base,
+        frss=base + 10.0,
+        fzsc=base + 20.0,
+        fzcs=base + 30.0,
+        flsc=base + 40.0,
+        flcs=base + 50.0,
+        frsc=base + 60.0,
+        frcs=base + 70.0,
+        fzcc=base + 80.0,
+        fzss=base + 90.0,
+        flcc=base + 100.0,
+        flss=base + 110.0,
+    )
+    mats = {
+        "ard_parity": np.array([[0.0, 1.0], [0.0, 3.0]]),
+        "brd_parity": np.array([[0.0, 1.0], [0.0, 1.0]]),
+        "azd_parity": np.array([[0.0, 3.0], [0.0, 2.0]]),
+        "bzd_parity": np.array([[0.0, 3.0], [0.0, 2.0]]),
+    }
+    fac_r = np.array([0.25, 0.5, 1.0])
+    fac_z = np.array([0.75, 0.5, 1.0])
+
+    assert _scale_m1_precond_rhs_from_mats(
+        frzl,
+        mats,
+        lconm1=False,
+        mpol=2,
+        host_update_assembly=True,
+    ) is frzl
+
+    host = _scale_m1_precond_rhs_from_mats(
+        frzl,
+        mats,
+        lconm1=True,
+        mpol=2,
+        host_update_assembly=True,
+    )
+    np.testing.assert_allclose(host.frss[:, 1, 0], frzl.frss[:, 1, 0] * fac_r)
+    np.testing.assert_allclose(host.fzcs[:, 1, 0], frzl.fzcs[:, 1, 0] * fac_z)
+    np.testing.assert_allclose(host.frsc[:, 1, 0], frzl.frsc[:, 1, 0] * fac_r)
+    np.testing.assert_allclose(host.fzcc[:, 1, 0], frzl.fzcc[:, 1, 0] * fac_z)
+    np.testing.assert_allclose(host.frss[:, 0, 0], frzl.frss[:, 0, 0])
+    np.testing.assert_allclose(host.flsc, frzl.flsc)
+
+    pytest.importorskip("jax")
+    jax_scaled = _scale_m1_precond_rhs_from_mats(
+        frzl,
+        mats,
+        lconm1=True,
+        mpol=2,
+        host_update_assembly=False,
+    )
+    np.testing.assert_allclose(np.asarray(jax_scaled.frss)[:, 1, 0], frzl.frss[:, 1, 0] * fac_r)
+    np.testing.assert_allclose(np.asarray(jax_scaled.fzcs)[:, 1, 0], frzl.fzcs[:, 1, 0] * fac_z)
+
+
+def test_host_preconditioner_output_helpers_preserve_optional_blocks_and_zero_reuse():
+    base = np.arange(8.0).reshape(2, 2, 2) + 1.0
+    lam = np.linspace(1.0, 2.0, 8).reshape(2, 2, 2)
+    frzl_rz = SimpleNamespace(
+        frcc=base,
+        frss=None,
+        fzsc=base + 20.0,
+        fzcs=base + 30.0,
+        flsc=base + 40.0,
+        flcs=None,
+        frsc=base + 60.0,
+        frcs=None,
+        fzcc=base + 80.0,
+        fzss=None,
+        flcc=base + 100.0,
+        flss=None,
+    )
+
+    blocks = _preconditioner_output_blocks_np(frzl_rz=frzl_rz, lam_prec=lam)
+
+    assert blocks.frss is None
+    assert blocks.flcs is None
+    assert blocks.frcs is None
+    np.testing.assert_allclose(blocks.frcc, base)
+    np.testing.assert_allclose(blocks.flsc, (base + 40.0) * lam)
+    np.testing.assert_allclose(blocks.flcc, (base + 100.0) * lam)
+
+    zeros = np.zeros_like(base)
+    weight = np.array([[1.0, 2.0], [3.0, 4.0]])
+    weighted = _mode_weight_force_blocks_np(blocks, w_mode_mn=weight, zeros_coeff=zeros)
+
+    assert weighted.frss is zeros
+    assert weighted.flcs is zeros
+    assert weighted.frcs is zeros
+    assert weighted.fzss is zeros
+    np.testing.assert_allclose(weighted.frcc, base * weight[None, :, :])
+    np.testing.assert_allclose(weighted.flsc, (base + 40.0) * lam * weight[None, :, :])
+    np.testing.assert_allclose(weighted.frsc, (base + 60.0) * weight[None, :, :])
+
+
+def test_lambda_preconditioned_full_norm_sums_present_non_axis_rows():
+    flsc = np.arange(12.0).reshape(3, 2, 2)
+    flcs = np.full_like(flsc, 2.0)
+    flcc = np.full_like(flsc, 3.0)
+    frzl_pre = SimpleNamespace(flsc=flsc, flcs=flcs, flcc=flcc, flss=None)
+    expected = np.sum(flsc[1:] * flsc[1:]) + np.sum(flcs[1:] * flcs[1:]) + np.sum(flcc[1:] * flcc[1:])
+
+    assert _lambda_preconditioned_full_norm(frzl_pre, use_jax=False) == pytest.approx(expected)
+
+    pytest.importorskip("jax")
+    assert float(np.asarray(_lambda_preconditioned_full_norm(frzl_pre, use_jax=True))) == pytest.approx(expected)
+
+
+def test_host_restart_decision_covers_stage_growth_progress_and_vmec_paths():
+    base = dict(
+        iter2=12,
+        iter1=1,
+        fsqr=0.0,
+        fsqz=0.0,
+        fsql=0.0,
+        fsq1=1.0,
+        fsq_prev=1.0,
+        res0=1.0,
+        bad_growth_streak=0,
+        pre_restart_reason="none",
+        reference_mode=False,
+        vmec2000_control=False,
+        bad_jacobian=False,
+        stage_prev_fsq=None,
+        stage_transition_factor=50.0,
+        lmove_axis=True,
+        vmecpp_restart=False,
+        k_preconditioner_update_interval=25,
+    )
+
+    store_checkpoint = _host_restart_decision(**{**base, "fsq1": 0.5})
+    assert store_checkpoint.res0 == pytest.approx(0.5)
+    assert store_checkpoint.res0_old == pytest.approx(1.0)
+    assert store_checkpoint.store_checkpoint
+
+    bad_growth = _host_restart_decision(**{**base, "fsq1": 101.0, "fsq_prev": 200.0, "bad_growth_streak": 1})
+    assert bad_growth.bad_growth_streak == 2
+    assert bad_growth.pre_restart_reason == "bad_jacobian"
+
+    bad_progress = _host_restart_decision(**{**base, "iter2": 60, "res0": 10.0, "fsq1": 60.0, "fsq_prev": 61.0})
+    assert bad_progress.bad_growth_streak == 0
+    assert bad_progress.pre_restart_reason == "bad_progress"
+
+    stage_transition = _host_restart_decision(
+        **{**base, "iter2": 1, "iter1": 1, "fsqr": 20.0, "fsqz": 20.0, "fsql": 20.0, "stage_prev_fsq": 1.0}
+    )
+    assert stage_transition.fsq == pytest.approx(60.0)
+    assert stage_transition.pre_restart_reason == "stage_transition"
+    assert not stage_transition.huge_initial_forces
+
+    huge_initial = _host_restart_decision(
+        **{**base, "iter2": 1, "iter1": 1, "fsqr": np.inf, "stage_prev_fsq": 1.0}
+    )
+    assert huge_initial.huge_initial_forces
+
+    reference_bad_jac = _host_restart_decision(**{**base, "iter2": 2, "reference_mode": True, "bad_jacobian": True, "fsqr": 11.0})
+    assert reference_bad_jac.fsq_res == pytest.approx(11.0)
+    assert reference_bad_jac.pre_restart_reason == "bad_jacobian"
+
+    vmec2000_bad_jac = _host_restart_decision(
+        **{**base, "iter2": 2, "vmec2000_control": True, "bad_jacobian": True, "fsq1": 0.5, "res0": 2.0}
+    )
+    assert vmec2000_bad_jac.res0 == pytest.approx(0.5)
+    assert vmec2000_bad_jac.pre_restart_reason == "bad_jacobian"
+
+    vmecpp_progress = _host_restart_decision(
+        **{**base, "iter2": 60, "fsqr": 0.02, "vmecpp_restart": True}
+    )
+    assert vmecpp_progress.vmecpp_bad_progress
+    assert vmecpp_progress.pre_restart_reason == "bad_progress_vmecpp"
 
 
 def test_first_step_diagnostics_synthetic_default_and_axisymmetric_paths(monkeypatch):

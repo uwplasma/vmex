@@ -15,13 +15,23 @@ from vmec_jax.wout import (
     _icurv_full_mesh_from_indata,
     _nc_scalar,
     _pshalf_from_s,
+    _read_wout_scalar_metadata,
     _safe_divide,
+    _wout_phi_profile_from_variables,
     assert_main_modes_match_wout,
 )
 from vmec_jax.wout_schema import WoutData as SchemaWoutData
 from vmec_jax.wout_schema import _bool_from_nc as schema_bool_from_nc
 from vmec_jax.wout_schema import _nc_scalar as schema_nc_scalar
 from vmec_jax.wout_schema import assert_main_modes_match_wout as schema_assert_main_modes_match_wout
+
+
+class _FakeNcVar:
+    def __init__(self, value):
+        self.value = value
+
+    def __getitem__(self, key):
+        return self.value
 
 
 def test_wout_half_mesh_and_flux_derivative_conventions() -> None:
@@ -93,6 +103,40 @@ def test_wout_main_mode_order_contract_detects_mismatches() -> None:
     )
     with pytest.raises(ValueError, match="xn ordering"):
         assert_main_modes_match_wout(wout=bad_order)
+
+
+def test_read_wout_scalar_metadata_defaults_and_validation() -> None:
+    variables = {
+        "ns": _FakeNcVar(np.asarray([3])),
+        "mpol": _FakeNcVar(np.asarray([2])),
+        "ntor": _FakeNcVar(np.asarray([0])),
+        "nfp": _FakeNcVar(np.asarray([1])),
+    }
+
+    assert _read_wout_scalar_metadata(variables, path=Path("wout_minimal.nc")) == (3, 2, 0, 1, False, 1)
+
+    variables["lasym__logical__"] = _FakeNcVar(np.asarray([1]))
+    variables["signgs"] = _FakeNcVar(np.asarray([-1]))
+    assert _read_wout_scalar_metadata(variables, path=Path("wout_asym.nc")) == (3, 2, 0, 1, True, -1)
+
+    bad = {**variables, "ns": _FakeNcVar(np.asarray([0]))}
+    with pytest.raises(ValueError, match="Incomplete or masked wout scalar metadata"):
+        _read_wout_scalar_metadata(bad, path=Path("wout_bad.nc"))
+
+
+def test_wout_phi_profile_uses_explicit_field_or_half_mesh_fallback() -> None:
+    explicit = {"phi": _FakeNcVar(np.asarray([0.0, 0.25, 1.0]))}
+    np.testing.assert_allclose(
+        _wout_phi_profile_from_variables(explicit, ns=3, phipf=np.asarray([2.0, 4.0, 6.0])),
+        [0.0, 0.25, 1.0],
+    )
+
+    phipf = np.asarray([2.0, 4.0, 6.0])
+    np.testing.assert_allclose(
+        _wout_phi_profile_from_variables({}, ns=3, phipf=phipf),
+        [0.0, 2.0, 5.0],
+    )
+    np.testing.assert_allclose(_wout_phi_profile_from_variables({}, ns=1, phipf=np.asarray([2.0])), [0.0])
 
 
 def test_wout_schema_symbols_remain_reexported_from_wout() -> None:

@@ -204,6 +204,30 @@ def _replay_column_chunk_default(*, tape, tangents) -> int | None:
     return int(auto_chunk)
 
 
+def _replay_column_chunk_override(value: str | None) -> tuple[bool, int | None]:
+    """Parse a user replay-column chunk override.
+
+    Returns ``(handled, chunk)``.  ``handled=True, chunk=None`` explicitly
+    disables chunking.  Malformed values are left unhandled so production
+    profiling jobs fall back to the automatic memory guard instead of failing
+    midway through tape replay.
+    """
+    if value is None:
+        return False, None
+    text = str(value).strip().lower()
+    if text in ("", "auto", "default"):
+        return False, None
+    if text in ("0", "none", "off", "false", "no"):
+        return True, None
+    try:
+        chunk = int(text)
+    except (TypeError, ValueError):
+        return False, None
+    if chunk <= 0:
+        return True, None
+    return True, int(chunk)
+
+
 @dataclass(frozen=True)
 class ResidualIterationTrace:
     """Structured view of one fixed-boundary residual solve history."""
@@ -1501,8 +1525,9 @@ def checkpoint_tape_state_jvp_columns(
     tangents = jnp.asarray(initial_tangents)
     if _allow_chunking:
         chunk_env = os.environ.get("VMEC_JAX_REPLAY_COLUMN_CHUNK")
-        if chunk_env is not None:
-            active_column_chunk = max(1, int(chunk_env))
+        env_handled, env_chunk = _replay_column_chunk_override(chunk_env)
+        if env_handled:
+            active_column_chunk = env_chunk
         elif column_chunk is not None:
             active_column_chunk = max(1, int(column_chunk))
         else:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -9,9 +10,19 @@ import vmec_jax as vj
 from vmec_jax.wout import state_from_wout
 
 
+pytestmark = [
+    pytest.mark.simsopt,
+    pytest.mark.skipif(
+        os.environ.get("RUN_SIMSOPT_VALIDATION") != "1",
+        reason="Set RUN_SIMSOPT_VALIDATION=1 to run optional SIMSOPT validation",
+    ),
+]
+
+
 def test_redl_bootstrap_mismatch_matches_simsopt_redlgeomvmec_on_shaped_tokamak():
     """Compare vmec_jax Redl residuals against SIMSOPT on a real wout fixture."""
 
+    pytest.importorskip("netCDF4")
     simsopt_bootstrap = pytest.importorskip("simsopt.mhd.bootstrap")
     simsopt_profiles = pytest.importorskip("simsopt.mhd.profiles")
     simsopt_vmec = pytest.importorskip("simsopt.mhd.vmec")
