@@ -379,9 +379,10 @@ hygiene push:
   `LASYM=true` case bounded and ready for executable-backed validation; the
   bundled synthetic mgrid currents are sign/magnitude matched to the plasma
   current so stock VMEC2000 reaches the vacuum solve instead of aborting with an
-  `I_TOR` mismatch. Full fixed/free/LASYM/finite-beta converged-equilibrium
-  parity is still open, and `freeb_scalpot` remains an instrumented-VMEC2000
-  diagnostic because a stock executable does not emit the required dumps.
+  `I_TOR` mismatch, with an optional executable smoke guarding that behavior.
+  Full fixed/free/LASYM/finite-beta converged-equilibrium parity is still open,
+  and `freeb_scalpot` remains an instrumented-VMEC2000 diagnostic because a
+  stock executable does not emit the required dumps.
 - Refactor/API/examples: 96%. Examples are SIMSOPT-like and clearer, finite-beta
   examples expose structured stage/final summaries while preserving direct
   optimizer visibility and have focused adapter coverage. Objective tuple

@@ -57,6 +57,7 @@ VMEC2000_CONVERGED_WOUT_CASES = (
         },
     ),
 )
+VMEC2000_FREEB_LASYM_TIMEOUT_S = 60.0
 
 
 def _vmec2000_exec_or_skip() -> Path:
@@ -148,6 +149,38 @@ def test_fast_vmec2000_stage_trace_validation_cases():
             "1e-10",
         ]
         subprocess.run(cmd, cwd=repo_root, check=True)
+
+
+def test_vmec2000_free_boundary_lasym_true_reaches_vacuum_solve(tmp_path: Path) -> None:
+    """Optional executable-backed guard for the bundled free-boundary LASYM deck."""
+
+    exe = _vmec2000_exec_or_skip()
+    repo_root = Path(__file__).resolve().parents[1]
+    input_path = repo_root / "examples" / "data" / "input.cth_like_free_bdy_lasym_small"
+    mgrid_path = repo_root / "examples" / "data" / "mgrid_cth_like_lasym_small.nc"
+    if not input_path.exists() or not mgrid_path.exists():
+        pytest.skip("Missing bundled free-boundary LASYM fixture")
+
+    result = run_xvmec2000(
+        input_path,
+        exec_path=exe,
+        workdir=tmp_path / "vmec2000_freeb_lasym",
+        timeout_s=VMEC2000_FREEB_LASYM_TIMEOUT_S,
+        keep_workdir=True,
+        indata_updates={
+            "MGRID_FILE": f"'{mgrid_path}'",
+            "NITER": "120",
+            "NITER_ARRAY": "120",
+        },
+    )
+
+    output = result.stdout + "\n" + result.stderr
+    assert "I_TOR MISMATCH" not in output
+    assert "VACUUM PRESSURE TURNED ON" in output
+    assert result.stages, "VMEC2000 did not emit a parseable threed1 trace"
+    assert result.stages[-1].rows[-1].it >= 100
+    wout_path = result.workdir / "wout_cth_like_free_bdy_lasym_small.nc"
+    assert wout_path.exists(), f"VMEC2000 did not produce {wout_path.name}"
 
 
 @pytest.mark.parametrize(
