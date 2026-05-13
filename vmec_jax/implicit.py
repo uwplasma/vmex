@@ -46,7 +46,7 @@ from .solve import (
     _mask_grad_for_constraints,
     _mode00_index,
     _pressure_half_mesh_from_indata,
-    _zero_edge_rz_force_block,
+    _zero_edge_rz_force_blocks,
     _vmec_force_flux_profiles,
     solve_fixed_boundary_gd,
     solve_fixed_boundary_lbfgs,
@@ -1101,7 +1101,7 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         vmec_force_norms_from_bcovar_dynamic,
         vmec_zero_m1_zforce,
     )
-    from .vmec_tomnsp import TomnspsRZL, vmec_trig_tables
+    from .vmec_tomnsp import vmec_trig_tables
 
     s = jnp.asarray(static.s)
     flux = flux_profiles_from_indata(indata, s, signgs=signgs_i)
@@ -1261,28 +1261,7 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         frzl = vmec_apply_m1_constraints(frzl=frzl, lconm1=bool(getattr(static.cfg, "lconm1", True)))
         frzl = vmec_zero_m1_zforce(frzl=frzl, enabled=zero_m1_zforce)
         frzl = vmec_apply_scalxc_to_tomnsps(frzl=frzl, s=s)
-        frzl = TomnspsRZL(
-            frcc=_zero_edge_rz_force_block(frzl.frcc, preserve_numpy=False),
-            frss=_zero_edge_rz_force_block(frzl.frss, preserve_numpy=False) if frzl.frss is not None else None,
-            fzsc=_zero_edge_rz_force_block(frzl.fzsc, preserve_numpy=False),
-            fzcs=_zero_edge_rz_force_block(frzl.fzcs, preserve_numpy=False) if frzl.fzcs is not None else None,
-            flsc=frzl.flsc,
-            flcs=frzl.flcs,
-            frsc=_zero_edge_rz_force_block(getattr(frzl, "frsc", None), preserve_numpy=False)
-            if getattr(frzl, "frsc", None) is not None
-            else None,
-            frcs=_zero_edge_rz_force_block(getattr(frzl, "frcs", None), preserve_numpy=False)
-            if getattr(frzl, "frcs", None) is not None
-            else None,
-            fzcc=_zero_edge_rz_force_block(getattr(frzl, "fzcc", None), preserve_numpy=False)
-            if getattr(frzl, "fzcc", None) is not None
-            else None,
-            fzss=_zero_edge_rz_force_block(getattr(frzl, "fzss", None), preserve_numpy=False)
-            if getattr(frzl, "fzss", None) is not None
-            else None,
-            flcc=getattr(frzl, "flcc", None),
-            flss=getattr(frzl, "flss", None),
-        )
+        frzl = _zero_edge_rz_force_blocks(frzl, preserve_numpy=False)
         norms = vmec_force_norms_from_bcovar_dynamic(bc=k.bc, trig=trig, s=s, signgs=signgs_i)
         scale_rz = jnp.sqrt(norms.r1 * norms.fnorm)
         scale_l = jnp.sqrt(norms.fnormL)

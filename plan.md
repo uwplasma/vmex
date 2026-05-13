@@ -38,7 +38,7 @@ acceptance criteria or evidence changes.
   final ``input.final`` and ``wout_final.nc`` use the best exact accepted point
   when the last trial-accepted point replays worse.
 - Required CI coverage is 69.30% locally on the Python 3.11 CI-equivalent
-  required suite (`731 passed, 21 skipped, 85 deselected`, 9:07), above the
+  required suite (`731 passed, 21 skipped, 85 deselected`, 8:20), above the
   current 63% gate but still far below the long-term 95% goal.
 - Full non-VMEC2000 physics coverage with refreshed released assets reaches
   72.35% locally (`74 passed, 4 skipped`, 27:21). This is still short of the

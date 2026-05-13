@@ -60,6 +60,26 @@ def _zero_edge_rz_force_block(a, *, preserve_numpy: bool = True):
     return a.at[-1].set(jnp.zeros_like(a[-1]))
 
 
+def _zero_edge_rz_force_blocks(frzl, *, preserve_numpy: bool = True):
+    """Zero LCFS rows for every R/Z block in a ``TomnspsRZL`` container."""
+    from .vmec_tomnsp import TomnspsRZL
+
+    return TomnspsRZL(
+        frcc=_zero_edge_rz_force_block(frzl.frcc, preserve_numpy=preserve_numpy),
+        frss=_zero_edge_rz_force_block(frzl.frss, preserve_numpy=preserve_numpy),
+        fzsc=_zero_edge_rz_force_block(frzl.fzsc, preserve_numpy=preserve_numpy),
+        fzcs=_zero_edge_rz_force_block(frzl.fzcs, preserve_numpy=preserve_numpy),
+        flsc=frzl.flsc,
+        flcs=frzl.flcs,
+        frsc=_zero_edge_rz_force_block(getattr(frzl, "frsc", None), preserve_numpy=preserve_numpy),
+        frcs=_zero_edge_rz_force_block(getattr(frzl, "frcs", None), preserve_numpy=preserve_numpy),
+        fzcc=_zero_edge_rz_force_block(getattr(frzl, "fzcc", None), preserve_numpy=preserve_numpy),
+        fzss=_zero_edge_rz_force_block(getattr(frzl, "fzss", None), preserve_numpy=preserve_numpy),
+        flcc=getattr(frzl, "flcc", None),
+        flss=getattr(frzl, "flss", None),
+    )
+
+
 def _jit_cache_limit(env_name: str, default: int) -> int:
     """Return a non-negative JIT-cache size limit from an environment variable."""
 
@@ -3839,7 +3859,7 @@ def solve_fixed_boundary_gn_vmec_residual(
         vmec_scalxc_from_s,
         vmec_zero_m1_zforce,
     )
-    from .vmec_tomnsp import TomnspsRZL, vmec_trig_tables
+    from .vmec_tomnsp import vmec_trig_tables
 
     try:
         from jax.scipy.sparse.linalg import cg  # type: ignore
@@ -3971,20 +3991,7 @@ def solve_fixed_boundary_gn_vmec_residual(
 
         # VMEC convention: R/Z sums exclude the edge surface; enforce that by
         # zeroing R/Z blocks at js=ns (lambda blocks are left untouched).
-        frzl = TomnspsRZL(
-            frcc=_zero_edge_rz_force_block(frzl.frcc),
-            frss=_zero_edge_rz_force_block(frzl.frss),
-            fzsc=_zero_edge_rz_force_block(frzl.fzsc),
-            fzcs=_zero_edge_rz_force_block(frzl.fzcs),
-            flsc=frzl.flsc,
-            flcs=frzl.flcs,
-            frsc=_zero_edge_rz_force_block(getattr(frzl, "frsc", None)),
-            frcs=_zero_edge_rz_force_block(getattr(frzl, "frcs", None)),
-            fzcc=_zero_edge_rz_force_block(getattr(frzl, "fzcc", None)),
-            fzss=_zero_edge_rz_force_block(getattr(frzl, "fzss", None)),
-            flcc=getattr(frzl, "flcc", None),
-            flss=getattr(frzl, "flss", None),
-        )
+        frzl = _zero_edge_rz_force_blocks(frzl)
 
         gcr2 = jnp.sum(jnp.asarray(frzl.frcc) ** 2)
         gcz2 = jnp.sum(jnp.asarray(frzl.fzsc) ** 2)
@@ -5728,20 +5735,7 @@ def solve_fixed_boundary_residual_iter(
         # before forming physical gcr2/gcz2. Keep the unmasked residual for
         # the preconditioner path (VMEC free-boundary parity).
         def _mask_edge(frzl_in: TomnspsRZL) -> TomnspsRZL:
-            return TomnspsRZL(
-                frcc=_zero_edge_rz_force_block(frzl_in.frcc),
-                frss=_zero_edge_rz_force_block(frzl_in.frss),
-                fzsc=_zero_edge_rz_force_block(frzl_in.fzsc),
-                fzcs=_zero_edge_rz_force_block(frzl_in.fzcs),
-                flsc=frzl_in.flsc,
-                flcs=frzl_in.flcs,
-                frsc=_zero_edge_rz_force_block(getattr(frzl_in, "frsc", None)),
-                frcs=_zero_edge_rz_force_block(getattr(frzl_in, "frcs", None)),
-                fzcc=_zero_edge_rz_force_block(getattr(frzl_in, "fzcc", None)),
-                fzss=_zero_edge_rz_force_block(getattr(frzl_in, "fzss", None)),
-                flcc=getattr(frzl_in, "flcc", None),
-                flss=getattr(frzl_in, "flss", None),
-            )
+            return _zero_edge_rz_force_blocks(frzl_in)
 
         frzl_full = frzl
         frzl_metric = frzl_full
@@ -14424,20 +14418,7 @@ def first_step_diagnostics(
                 lconm1=bool(getattr(cfg, "lconm1", True)),
             )
         frzl = vmec_zero_m1_zforce(frzl=frzl, enabled=jnp.asarray(float(bool(zero_m1))))
-        frzl = TomnspsRZL(
-            frcc=_zero_edge_rz_force_block(frzl.frcc, preserve_numpy=False),
-            frss=_zero_edge_rz_force_block(frzl.frss, preserve_numpy=False),
-            fzsc=_zero_edge_rz_force_block(frzl.fzsc, preserve_numpy=False),
-            fzcs=_zero_edge_rz_force_block(frzl.fzcs, preserve_numpy=False),
-            flsc=frzl.flsc,
-            flcs=frzl.flcs,
-            frsc=_zero_edge_rz_force_block(getattr(frzl, "frsc", None), preserve_numpy=False),
-            frcs=_zero_edge_rz_force_block(getattr(frzl, "frcs", None), preserve_numpy=False),
-            fzcc=_zero_edge_rz_force_block(getattr(frzl, "fzcc", None), preserve_numpy=False),
-            fzss=_zero_edge_rz_force_block(getattr(frzl, "fzss", None), preserve_numpy=False),
-            flcc=getattr(frzl, "flcc", None),
-            flss=getattr(frzl, "flss", None),
-        )
+        frzl = _zero_edge_rz_force_blocks(frzl, preserve_numpy=False)
         gcr2, gcz2, gcl2 = vmec_gcx2_from_tomnsps(
             frzl=frzl,
             lconm1=bool(getattr(cfg, "lconm1", True)),
