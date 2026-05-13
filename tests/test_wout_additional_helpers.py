@@ -200,6 +200,61 @@ def test_read_wout_applies_optional_defaults_and_phi_fallback(tmp_path: Path) ->
     np.testing.assert_allclose(wout.ac_aux_s, -np.ones((101,)))
 
 
+def test_read_wout_rejects_bad_scalars_and_handles_single_surface_phi_fallback(tmp_path: Path) -> None:
+    netcdf4 = pytest.importorskip("netCDF4")
+
+    def write_var(ds, name: str, dims: tuple[str, ...], data, dtype: str = "f8") -> None:
+        var = ds.createVariable(name, dtype, dims)
+        var[...] = np.asarray(data)
+
+    bad_path = tmp_path / "wout_bad_scalars.nc"
+    with netcdf4.Dataset(bad_path, mode="w", format="NETCDF3_CLASSIC") as ds:
+        write_var(ds, "ns", (), 0, "i4")
+        write_var(ds, "mpol", (), 1, "i4")
+        write_var(ds, "ntor", (), 0, "i4")
+        write_var(ds, "nfp", (), 1, "i4")
+        write_var(ds, "signgs", (), 1, "i4")
+        write_var(ds, "lasym__logical__", (), 0, "i4")
+
+    with pytest.raises(ValueError, match="Incomplete or masked wout scalar metadata"):
+        read_wout(bad_path)
+
+    single_path = tmp_path / "wout_single_surface.nc"
+    with netcdf4.Dataset(single_path, mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createDimension("radius", 1)
+        ds.createDimension("mn_mode", 1)
+        ds.createDimension("mn_mode_nyq", 1)
+
+        write_var(ds, "ns", (), 1, "i4")
+        write_var(ds, "mpol", (), 1, "i4")
+        write_var(ds, "ntor", (), 0, "i4")
+        write_var(ds, "nfp", (), 1, "i4")
+        write_var(ds, "signgs", (), 1, "i4")
+        write_var(ds, "lasym__logical__", (), 0, "i4")
+        write_var(ds, "xm", ("mn_mode",), [0.0])
+        write_var(ds, "xn", ("mn_mode",), [0.0])
+        write_var(ds, "xm_nyq", ("mn_mode_nyq",), [0.0])
+        write_var(ds, "xn_nyq", ("mn_mode_nyq",), [0.0])
+        write_var(ds, "rmnc", ("radius", "mn_mode"), [[1.0]])
+        write_var(ds, "zmns", ("radius", "mn_mode"), [[0.0]])
+        write_var(ds, "lmns", ("radius", "mn_mode"), [[0.0]])
+        write_var(ds, "phipf", ("radius",), [2.0])
+        write_var(ds, "chipf", ("radius",), [0.0])
+        write_var(ds, "phips", ("radius",), [0.0])
+        write_var(ds, "gmnc", ("radius", "mn_mode_nyq"), [[1.0]])
+        write_var(ds, "bsupumnc", ("radius", "mn_mode_nyq"), [[0.0]])
+        write_var(ds, "bsupvmnc", ("radius", "mn_mode_nyq"), [[0.0]])
+        write_var(ds, "wb", (), 0.0)
+        write_var(ds, "volume_p", (), 0.0)
+
+    wout = read_wout(single_path)
+
+    assert wout.ns == 1
+    np.testing.assert_allclose(wout.phi, [0.0])
+    np.testing.assert_allclose(wout.rmns, np.zeros((1, 1)))
+    np.testing.assert_allclose(wout.bmnc, np.zeros((1, 1)))
+
+
 def test_compute_equif_wout_matches_weighted_currents_and_endpoint_rules() -> None:
     trig = SimpleNamespace(
         cosmui3=np.full((2, 1), 0.5),

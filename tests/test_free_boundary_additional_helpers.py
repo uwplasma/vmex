@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from vmec_jax.config import FreeBoundaryConfig, VMECConfig
 from vmec_jax.free_boundary import (
+    ExternalBoundarySample,
     MGridData,
     MGridMetadata,
+    VacuumBoundaryFields,
     _as_float_env,
     _as_int_env,
+    _axis_current_field_simple,
+    _axis_current_field_vmec_filament,
     _base_nestor_mode,
     _broadcast_xyz,
+    _build_vmec_mode_basis,
     _decode_char_rows,
     _decode_char_scalar,
     _dense_lu_solve,
@@ -24,11 +30,16 @@ from vmec_jax.free_boundary import (
     _select_nestor_mode,
     _solve_periodic_poisson_fft,
     _spectral_grad,
+    _vacuum_channels_from_sample_phi,
+    _vacuum_channels_from_sample_potvac,
+    _vmec_realspace_synthesis_multi_host,
     boundary_metric_from_rz,
     contravariant_boundary_field_from_covariant,
     covariant_boundary_field_from_cylindrical,
     initial_free_boundary_state,
     interpolate_mgrid_bfield,
+    load_mgrid,
+    sample_external_vacuum_diagnostics,
     validate_free_boundary_config,
     vacuum_boundary_fields_from_cylindrical,
 )
@@ -145,6 +156,40 @@ def test_mgrid_interpolation_clamps_periodizes_and_validates_shapes():
         interpolate_mgrid_bfield(bad_shape, r=1.0, z=0.0, phi=0.0)
 
 
+def test_mgrid_interpolation_uses_unit_current_when_raw_currents_are_absent():
+    meta = MGridMetadata(
+        path="dummy.nc",
+        ir=2,
+        jz=2,
+        kp=1,
+        nfp=1,
+        nextcur=1,
+        rmin=0.0,
+        rmax=1.0,
+        zmin=0.0,
+        zmax=1.0,
+        mgrid_mode="S",
+        coil_groups=("A",),
+        raw_coil_cur=(),
+    )
+    data = MGridData(
+        metadata=meta,
+        br=np.full((1, 1, 2, 2), 4.0),
+        bp=np.full((1, 1, 2, 2), -2.0),
+        bz=np.full((1, 1, 2, 2), 0.5),
+    )
+
+    br, bp, bz = interpolate_mgrid_bfield(data, r=0.5, z=0.5, phi=0.0)
+
+    assert float(br) == pytest.approx(4.0)
+    assert float(bp) == pytest.approx(-2.0)
+    assert float(bz) == pytest.approx(0.5)
+
+    bad_bounds = replace(data, metadata=replace(meta, rmax=meta.rmin))
+    with pytest.raises(ValueError, match="Invalid mgrid bounds"):
+        interpolate_mgrid_bfield(bad_bounds, r=0.5, z=0.5, phi=0.0)
+
+
 def test_boundary_metric_field_projection_and_degenerate_determinant_floor():
     R = np.array([[2.0]])
     Ru = np.array([[1.0]])
@@ -188,6 +233,73 @@ def test_boundary_metric_field_projection_and_degenerate_determinant_floor():
     assert np.isfinite(bsupv_floor).all()
 
 
+def test_host_realspace_synthesis_constant_mode_and_shape_validation():
+    modes = SimpleNamespace(m=np.asarray([0]), n=np.asarray([0]))
+    trig = SimpleNamespace(
+        cosmu=np.ones((3, 1)),
+        sinmu=np.zeros((3, 1)),
+        cosmum=np.zeros((3, 1)),
+        sinmum=np.zeros((3, 1)),
+        cosnv=np.ones((2, 1)),
+        sinnv=np.zeros((2, 1)),
+        cosnvn=np.zeros((2, 1)),
+        sinnvn=np.zeros((2, 1)),
+    )
+
+    base, dtheta, dzeta = _vmec_realspace_synthesis_multi_host(
+        coeff_cos=np.asarray([[2.0]]),
+        coeff_sin=np.asarray([[5.0]]),
+        modes=modes,
+        trig=trig,
+        derivs=("base", "dtheta", "dzeta"),
+    )
+    base_cached, dtheta_cached, dzeta_cached = _vmec_realspace_synthesis_multi_host(
+        coeff_cos=np.asarray([[2.0]]),
+        coeff_sin=np.asarray([[5.0]]),
+        modes=modes,
+        trig=trig,
+        derivs=("base", "dtheta", "dzeta"),
+    )
+
+    assert base.shape == (1, 3, 2)
+    np.testing.assert_allclose(base, 2.0)
+    np.testing.assert_allclose(dtheta, 0.0)
+    np.testing.assert_allclose(dzeta, 0.0)
+    np.testing.assert_allclose(base_cached, base)
+    np.testing.assert_allclose(dtheta_cached, dtheta)
+    np.testing.assert_allclose(dzeta_cached, dzeta)
+
+    with pytest.raises(ValueError, match="same shape"):
+        _vmec_realspace_synthesis_multi_host(
+            coeff_cos=np.asarray([[1.0]]),
+            coeff_sin=np.asarray([[1.0, 2.0]]),
+            modes=modes,
+            trig=trig,
+        )
+
+
+def test_axis_current_helpers_zero_current_and_validation_paths():
+    R = np.full((2, 2), 2.0)
+    Z = np.zeros((2, 2))
+    phi = np.zeros((2, 2))
+    axis_r = np.ones(2)
+    axis_z = np.zeros(2)
+
+    for arr in _axis_current_field_simple(R=R, Z=Z, phi=phi, axis_r=axis_r, axis_z=axis_z, nfp=1, plascur=0.0):
+        np.testing.assert_allclose(arr, 0.0)
+    for arr in _axis_current_field_vmec_filament(R=R, Z=Z, axis_r=axis_r, axis_z=axis_z, nfp=1, plascur=0.0):
+        np.testing.assert_allclose(arr, 0.0)
+
+    with pytest.raises(ValueError, match="R/Z/phi"):
+        _axis_current_field_simple(R=R[0], Z=Z, phi=phi, axis_r=axis_r, axis_z=axis_z, nfp=1, plascur=1.0)
+    with pytest.raises(ValueError, match="axis arrays"):
+        _axis_current_field_simple(R=R, Z=Z, phi=phi, axis_r=axis_r[:1], axis_z=axis_z, nfp=1, plascur=1.0)
+    with pytest.raises(ValueError, match="R/Z"):
+        _axis_current_field_vmec_filament(R=R[0], Z=Z, axis_r=axis_r, axis_z=axis_z, nfp=1, plascur=1.0)
+    with pytest.raises(ValueError, match="axis arrays"):
+        _axis_current_field_vmec_filament(R=R, Z=Z, axis_r=axis_r[:1], axis_z=axis_z, nfp=1, plascur=1.0)
+
+
 def test_env_parsing_mode_selection_and_greenf_policy(monkeypatch):
     monkeypatch.delenv("VMEC_JAX_FREEB_USE_GREENF_SOURCE", raising=False)
     assert _freeb_use_greenf_source(0) is True
@@ -220,6 +332,74 @@ def test_env_parsing_mode_selection_and_greenf_policy(monkeypatch):
     assert _select_nestor_mode(ntheta=2, nzeta=2) == ("vmec2000_like_dense_integral", "auto_vmec_like")
 
 
+def test_vacuum_channel_helpers_apply_scalar_potential_modes():
+    shape = (4, 4)
+    zeros = np.zeros(shape)
+    ones = np.ones(shape)
+    vac_ext = VacuumBoundaryFields(
+        bu=ones.copy(),
+        bv=2.0 * ones,
+        bsupu=ones.copy(),
+        bsupv=2.0 * ones,
+        bsqvac=2.5 * ones,
+        bnormal=zeros.copy(),
+        bnormal_unit=zeros.copy(),
+        g_uu=ones.copy(),
+        g_uv=zeros.copy(),
+        g_vv=ones.copy(),
+        det_guv=ones.copy(),
+    )
+    sample = ExternalBoundarySample(
+        mgrid_path="dummy.nc",
+        R=ones.copy(),
+        Z=zeros.copy(),
+        Ru=ones.copy(),
+        Zu=zeros.copy(),
+        Rv=zeros.copy(),
+        Zv=zeros.copy(),
+        phi=zeros.copy(),
+        br=zeros.copy(),
+        bp=zeros.copy(),
+        bz=zeros.copy(),
+        br_mgrid=zeros.copy(),
+        bp_mgrid=zeros.copy(),
+        bz_mgrid=zeros.copy(),
+        br_axis=zeros.copy(),
+        bp_axis=zeros.copy(),
+        bz_axis=zeros.copy(),
+        axis_r=np.ones(shape[1]),
+        axis_z=np.zeros(shape[1]),
+        vac_ext=vac_ext,
+    )
+
+    unchanged = _vacuum_channels_from_sample_phi(sample, np.full(shape, 3.0))
+    np.testing.assert_allclose(unchanged.bu, vac_ext.bu)
+    np.testing.assert_allclose(unchanged.bv, vac_ext.bv)
+
+    basis = _build_vmec_mode_basis(
+        ntheta=shape[0],
+        nzeta=shape[1],
+        nfp=1,
+        mf=1,
+        nf=0,
+        lasym=True,
+        wint=np.full(shape, 1.0 / float(np.prod(shape))),
+    )
+    mnpd = int(basis["mnpd"])
+    potvac = np.zeros(2 * mnpd)
+    m1_idx = int(np.where(np.asarray(basis["xmpot"]) == 1)[0][0])
+    potvac[m1_idx] = 0.25
+    changed = _vacuum_channels_from_sample_potvac(sample=sample, basis=basis, potvac=potvac)
+
+    assert changed.bu.shape == shape
+    assert changed.bv.shape == shape
+    assert np.max(np.abs(changed.bu - vac_ext.bu)) > 0.0
+    np.testing.assert_allclose(changed.bnormal, vac_ext.bnormal)
+
+    with pytest.raises(ValueError, match="potvac_too_small"):
+        _vacuum_channels_from_sample_potvac(sample=sample, basis=basis, potvac=np.zeros(mnpd - 1))
+
+
 def test_small_numeric_and_decode_helpers():
     rr, zz, pp = _broadcast_xyz(np.array([1.0, 2.0]), 0.5, np.array([[0.0], [1.0]]))
     assert rr.shape == (2, 2)
@@ -244,3 +424,48 @@ def test_small_numeric_and_decode_helpers():
     du, dv = _spectral_grad(np.ones((4, 4)))
     np.testing.assert_allclose(du, 0.0, atol=1.0e-14)
     np.testing.assert_allclose(dv, 0.0, atol=1.0e-14)
+
+
+def test_sample_external_vacuum_diagnostics_reports_sampling_failures():
+    out = sample_external_vacuum_diagnostics(
+        state=SimpleNamespace(),
+        static=SimpleNamespace(mgrid_metadata=None),
+    )
+
+    assert out["enabled"] is False
+    assert out["available"] is False
+    assert out["vacuum_stub"] is True
+    assert out["reason"] == "sample_failed"
+    assert "missing_mgrid_metadata" in out["error"]
+    assert float(out["sample_time_s"]) >= 0.0
+
+
+def test_load_mgrid_reports_missing_metadata_and_bad_field_shape(tmp_path):
+    netCDF4 = pytest.importorskip("netCDF4", reason="netCDF4 required for mgrid loader test")
+
+    missing = tmp_path / "mgrid_missing.nc"
+    with netCDF4.Dataset(str(missing), mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createVariable("ir", "i4", ()).assignValue(2)
+    with pytest.raises(KeyError, match="Missing mgrid variable: jz"):
+        load_mgrid(missing, load_fields=False)
+
+    bad_shape = tmp_path / "mgrid_bad_shape.nc"
+    with netCDF4.Dataset(str(bad_shape), mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createDimension("rad", 2)
+        ds.createDimension("zee", 2)
+        ds.createDimension("phi", 2)
+        ds.createDimension("bad_phi", 3)
+        for name, value in (
+            ("ir", 2),
+            ("jz", 2),
+            ("kp", 2),
+            ("nfp", 1),
+            ("nextcur", 1),
+        ):
+            ds.createVariable(name, "i4", ()).assignValue(value)
+        for name, value in (("rmin", 0.0), ("rmax", 1.0), ("zmin", 0.0), ("zmax", 1.0)):
+            ds.createVariable(name, "f8", ()).assignValue(value)
+        ds.createVariable("br_001", "f8", ("bad_phi", "zee", "rad"))[:] = 0.0
+
+    with pytest.raises(ValueError, match="br_001 shape"):
+        load_mgrid(bad_shape, load_fields=True)

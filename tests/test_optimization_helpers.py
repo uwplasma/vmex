@@ -10,6 +10,8 @@ from vmec_jax.optimization import (
     BoundaryParamSpec,
     FixedBoundaryExactOptimizer,
     _indexed_boundary_maps_from_boundary,
+    _linear_operator_matrix_arg,
+    _linear_operator_vector_arg,
     _pressure_profile_for_static,
     apply_boundary_params,
     boundary_param_names,
@@ -1452,6 +1454,136 @@ def test_fixed_boundary_optimizer_exact_path_is_device_aware(monkeypatch):
 
     monkeypatch.setenv("VMEC_JAX_OPT_EXACT_PATH", "scan")
     assert opt._select_exact_path() == "scan"
+
+
+def test_solver_device_context_wraps_callback_once_and_restores_flag(monkeypatch):
+    import vmec_jax._compat as compat
+
+    events = []
+
+    class FakeDeviceContext:
+        def __init__(self, device):
+            self.device = device
+
+        def __enter__(self):
+            events.append(("enter", self.device))
+            return self
+
+        def __exit__(self, *_exc):
+            events.append(("exit", self.device))
+            return False
+
+    fake_jax = SimpleNamespace(
+        devices=lambda name: [f"{name}:0"],
+        default_device=lambda device: FakeDeviceContext(device),
+    )
+    monkeypatch.setattr(compat, "jax", fake_jax)
+
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._solver_device_name = "gpu"
+    opt._inside_solver_device_context = False
+
+    def callback(value):
+        events.append(("callback", opt._inside_solver_device_context))
+        return opt._run_in_solver_device_context(
+            lambda nested: ("nested", opt._inside_solver_device_context, nested),
+            value + 1,
+        )
+
+    assert opt._run_in_solver_device_context(callback, 2) == ("nested", True, 3)
+    assert events == [("enter", "gpu:0"), ("callback", True), ("exit", "gpu:0")]
+    assert opt._inside_solver_device_context is False
+
+
+def test_scan_exact_helpers_defer_to_solver_device_context_when_outside():
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._solver_device_name = "cpu"
+    opt._inside_solver_device_context = False
+    calls = []
+
+    def run_in_context(fn, *args, **kwargs):
+        calls.append((fn.__name__, args, kwargs))
+        return f"wrapped:{fn.__name__}"
+
+    opt._run_in_solver_device_context = run_in_context
+
+    assert opt._scan_exact_helpers() == "wrapped:_scan_exact_helpers"
+    assert opt._solve_scan_exact_state(np.asarray([1.0])) == "wrapped:_solve_scan_exact_state"
+    assert calls[0] == ("_scan_exact_helpers", (), {})
+    assert calls[1][0] == "_solve_scan_exact_state"
+    np.testing.assert_allclose(calls[1][1][0], [1.0])
+    assert calls[1][2] == {}
+
+
+def test_linear_operator_argument_helpers_validate_vectors_and_matrices():
+    np.testing.assert_allclose(
+        _linear_operator_vector_arg(np.asarray([[1.0], [2.0]]), size=2, name="direction"),
+        [1.0, 2.0],
+    )
+    np.testing.assert_allclose(
+        _linear_operator_matrix_arg(np.arange(6.0), rows=2, name="directions"),
+        np.asarray([[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]]),
+    )
+
+    with pytest.raises(ValueError, match="direction expected 3 entries, got 2"):
+        _linear_operator_vector_arg(np.asarray([1.0, 2.0]), size=3, name="direction")
+    with pytest.raises(ValueError, match="directions with 5 entries cannot be reshaped to 2 rows"):
+        _linear_operator_matrix_arg(np.arange(5.0), rows=2, name="directions")
+    with pytest.raises(ValueError, match="directions expected 3 rows, got 2"):
+        _linear_operator_matrix_arg(np.ones((2, 2)), rows=3, name="directions")
+
+
+def test_residual_linear_operator_matvec_and_matmat_are_shape_checked(monkeypatch):
+    pytest.importorskip("scipy.sparse.linalg")
+    import vmec_jax.discrete_adjoint as discrete_adjoint
+    import vmec_jax.init_guess as init_guess
+    import vmec_jax.state as state_module
+
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._solver_device_name = None
+    opt._inside_solver_device_context = False
+    opt._layout = SimpleNamespace(size=2)
+    opt._static = object()
+    opt._indata = object()
+    opt._profile = {}
+    opt._discrete_jacobian_helper_cache = {}
+    opt._exact_residual_cache = {}
+    opt._exact_cache_key = lambda _params: b"operator"
+    opt._boundary_from_params = lambda params: params
+    opt._lasym_replay_column_chunk = lambda _n_params: None
+    opt._solve_exact_with_tape = lambda _params, return_payload=False: (
+        jnp.asarray([3.0, 4.0], dtype=jnp.float64),
+        {"tape": "tape", "axis_override": {}},
+    )
+    opt._residuals_fn = lambda state: jnp.asarray(
+        [state[0] + state[1], 2.0 * state[0] - state[1]],
+        dtype=jnp.float64,
+    )
+
+    monkeypatch.setattr(init_guess, "initial_guess_from_boundary", lambda _static, boundary, _indata, **_kwargs: boundary)
+    monkeypatch.setattr(state_module, "pack_state", lambda state: jnp.asarray(state, dtype=jnp.float64))
+    monkeypatch.setattr(state_module, "unpack_state", lambda packed, _layout: packed)
+    monkeypatch.setattr(
+        discrete_adjoint,
+        "checkpoint_tape_state_jvp",
+        lambda *, tape, static, initial_tangent, rebuild_preconditioner: initial_tangent * 3.0,
+    )
+    monkeypatch.setattr(
+        discrete_adjoint,
+        "checkpoint_tape_state_jvp_columns",
+        lambda *, tape, static, initial_tangents, rebuild_preconditioner, column_chunk: initial_tangents * 3.0,
+    )
+
+    op = opt.residual_linear_operator(np.asarray([0.0, 0.0]))
+
+    assert op.shape == (2, 2)
+    np.testing.assert_allclose(op.matvec(np.asarray([1.0, 2.0])), [9.0, 0.0])
+    np.testing.assert_allclose(op.matmat(np.asarray([[1.0, 0.0], [0.0, 1.0]])), [[3.0, 3.0], [6.0, -3.0]])
+    np.testing.assert_allclose(opt._exact_residual_cache[b"operator"], [7.0, 2.0])
+    with pytest.raises(ValueError, match="matvec direction expected 2 entries, got 3"):
+        op._matvec(np.ones(3))
+    with pytest.raises(ValueError, match="matmat directions expected 2 rows, got 3"):
+        op._matmat(np.ones((3, 1)))
 
 
 def test_scan_exact_history_can_be_reconstructed_from_residuals():

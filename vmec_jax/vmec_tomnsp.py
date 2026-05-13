@@ -408,9 +408,14 @@ def vmec_angle_grid(*, ntheta: int, nzeta: int, nfp: int, lasym: bool, cache: bo
     """
     ntheta1, ntheta2, ntheta3 = vmec_theta_sizes(ntheta, lasym=lasym)
     nzeta = int(nzeta)
+    nfp = int(nfp)
+    if ntheta1 <= 0 or ntheta2 <= 0 or ntheta3 <= 0:
+        raise ValueError("Invalid theta sizes")
+    if nfp <= 0:
+        raise ValueError("nfp must be positive")
     if nzeta <= 0:
         nzeta = 1
-    cache_key = (int(ntheta), int(nzeta), int(nfp), bool(lasym))
+    cache_key = (int(ntheta), int(nzeta), nfp, bool(lasym))
     if cache:
         cached = _GRID_CACHE.get(cache_key)
         if cached is not None:
@@ -423,7 +428,7 @@ def vmec_angle_grid(*, ntheta: int, nzeta: int, nfp: int, lasym: bool, cache: bo
         theta = (2.0 * np.pi) * i / float(ntheta1)  # includes pi at i=ntheta2-1
     j = np.arange(nzeta, dtype=float)
     zeta = (2.0 * np.pi) * j / float(nzeta)
-    grid = AngleGrid(theta=theta.astype(float), zeta=zeta.astype(float), nfp=int(nfp))
+    grid = AngleGrid(theta=theta.astype(float), zeta=zeta.astype(float), nfp=nfp)
     if cache:
         _GRID_CACHE[cache_key] = grid
     return grid

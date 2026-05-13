@@ -371,6 +371,347 @@ def _scan_chunk_settings(
 _default_scan_core = _solve_runtime._default_scan_core
 
 
+def _normalize_resume_state_mode(resume_state_mode: str | None) -> str:
+    """Normalize resume-state mode aliases used by scan and host solves."""
+    if resume_state_mode is None:
+        resume_state_mode = os.getenv("VMEC_JAX_RESUME_STATE_MODE", "full")
+    mode = str(resume_state_mode).strip().lower() or "full"
+    aliases = {
+        "compact": "minimal",
+        "light": "minimal",
+        "off": "none",
+    }
+    mode = aliases.get(mode, mode)
+    if mode not in ("full", "minimal", "none"):
+        raise ValueError("resume_state_mode must be one of {'full', 'minimal', 'none'}")
+    return mode
+
+
+def _pack_resume_state_record(*, base: dict[str, Any], heavy: dict[str, Any] | None = None, mode: str) -> dict | None:
+    """Build the resume-state payload according to the requested detail level."""
+    mode = _normalize_resume_state_mode(mode)
+    if mode == "none":
+        return None
+    rec = dict(base)
+    if mode == "full" and heavy:
+        rec.update(heavy)
+    return rec
+
+
+def _vmec2000_cadence_selected(*, iter_idx: int, max_iter: int, nstep_screen: int) -> bool:
+    """Return whether a VMEC2000-style row should be sampled on screen cadence."""
+    i = int(iter_idx)
+    if i <= 1:
+        return True
+    if i >= int(max_iter):
+        return True
+    return (i % max(1, int(nstep_screen))) == 0
+
+
+def _should_print_vmec2000_row(
+    *,
+    iter_idx: int,
+    max_iter: int,
+    nstep_screen: int,
+    verbose: bool,
+    vmec2000_control: bool,
+    verbose_vmec2000_table: bool,
+) -> bool:
+    if not (bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table)):
+        return False
+    return _vmec2000_cadence_selected(iter_idx=iter_idx, max_iter=max_iter, nstep_screen=nstep_screen)
+
+
+def _format_vmec2000_iter_row(
+    *,
+    iter_idx: int,
+    fsqr: float,
+    fsqz: float,
+    fsql: float,
+    delt0r: float,
+    r00: float,
+    w_mhd: float,
+    lasym: bool,
+    z00: float | None = None,
+) -> str:
+    if bool(lasym):
+        z_val = float("nan") if z00 is None else float(z00)
+        return (
+            f"{int(iter_idx):5d}"
+            f"{float(fsqr):10.2E}{float(fsqz):10.2E}{float(fsql):10.2E}"
+            f"{float(r00):11.3E}{z_val:11.3E}{float(delt0r):10.2E}{float(w_mhd):12.4E}"
+        )
+    return (
+        f"{int(iter_idx):5d}"
+        f"{float(fsqr):10.2E}{float(fsqz):10.2E}{float(fsql):10.2E}"
+        f"{float(r00):11.3E}{float(delt0r):10.2E}{float(w_mhd):12.4E}"
+    )
+
+
+def _format_axis_coeff(val: float) -> str:
+    text = f"{float(val):.16g}"
+    if "e" in text:
+        text = text.replace("e", "E")
+    return text
+
+
+def _format_time_control_log_row(
+    *, iter_idx: int, fsq: float, fsq0: float, res0: float, res1: float, time_step: float
+) -> str:
+    return (
+        f"iter={int(iter_idx)} fsq={float(fsq):.6e} fsq0={float(fsq0):.6e} "
+        f"res0={float(res0):.6e} res1={float(res1):.6e} time_step={float(time_step):.6e}\n"
+    )
+
+
+def _format_time_control_trace_row(
+    *,
+    stage: str,
+    iter2: int,
+    iter1: int,
+    fsq: float,
+    fsq0: float,
+    res0: float,
+    res1: float,
+    time_step: float,
+    irst: int,
+) -> str:
+    return (
+        f"{int(iter2):8d} {int(iter1):8d} "
+        f"{float(fsq): .16e} {float(fsq0): .16e} "
+        f"{float(res0): .16e} {float(res1): .16e} "
+        f"{float(time_step): .16e} {int(irst):3d} {stage}\n"
+    )
+
+
+def _format_checkpoint_log_row(*, iter_idx: int, fsq: float, fsq0: float, res0: float, res1: float) -> str:
+    return (
+        f"iter={int(iter_idx)} fsq={float(fsq):.6e} fsq0={float(fsq0):.6e} "
+        f"res0={float(res0):.6e} res1={float(res1):.6e}\n"
+    )
+
+
+def _format_freeb_control_trace_row(
+    *,
+    iter2: int,
+    iter1: int,
+    ivac: int,
+    ivacskip: int,
+    nvacskip: int,
+    fsq_rz_prev: float,
+    cached: bool,
+) -> str:
+    return (
+        f"{int(iter2):8d} {int(iter1):8d} {int(ivac):8d} {int(ivacskip):8d} "
+        f"{int(nvacskip):8d} {float(fsq_rz_prev): .16e} {1 if bool(cached) else 0:2d}\n"
+    )
+
+
+def _format_evolve_trace_row(
+    *,
+    iter2: int,
+    iter1: int,
+    ns: int,
+    stage: str,
+    fsq1: float,
+    fsq_prev: float,
+    time_step: float,
+    dtau: float,
+    b1: float,
+    fac: float,
+    xc_norm: float,
+    v_norm: float,
+    g_norm: float,
+) -> str:
+    return (
+        f"{int(iter2):8d} {int(iter1):8d} {int(ns):8d} {stage} "
+        f"{float(fsq1): .16e} {float(fsq_prev): .16e} "
+        f"{float(time_step): .16e} {float(dtau): .16e} "
+        f"{float(b1): .16e} {float(fac): .16e} "
+        f"{float(xc_norm): .16e} {float(v_norm): .16e} {float(g_norm): .16e}\n"
+    )
+
+
+def _finite_float_or_zero(value: Any) -> float:
+    """Return a Python float, replacing NaN/Inf with zero for scalar diagnostics."""
+    out = float(np.asarray(value))
+    return out if np.isfinite(out) else 0.0
+
+
+def _normalize_adjoint_trace_mode(adjoint_trace_mode: str) -> str:
+    mode = str(adjoint_trace_mode).strip().lower() or "full"
+    if mode not in ("full", "dynamic"):
+        raise ValueError("adjoint_trace_mode must be one of {'full', 'dynamic'}")
+    return mode
+
+
+def _materialize_adjoint_trace_array(value, *, mode: str):
+    """Return dynamic trace values as-is, but snapshot full trace arrays on host."""
+    mode = _normalize_adjoint_trace_mode(mode)
+    if mode == "dynamic":
+        return value
+    return np.asarray(value)
+
+
+def _radial_tridi_smooth_dirichlet(
+    rhs,
+    *,
+    alpha: float,
+    skip_nonpositive: bool = False,
+    allow_3d: bool = True,
+):
+    """Solve the Dirichlet tri-diagonal smoothing system along the radial axis."""
+    if skip_nonpositive and alpha <= 0.0:
+        return rhs
+    rhs = jnp.asarray(rhs)
+    if rhs.ndim == 2:
+        rhs2 = rhs
+        orig_shape = None
+    elif rhs.ndim < 2:
+        raise ValueError(f"expected (ns,...) with ndim>=2, got {rhs.shape}")
+    elif allow_3d and rhs.ndim == 3:
+        ns = int(rhs.shape[0])
+        rhs2 = rhs.reshape(ns, -1)
+        orig_shape = rhs.shape
+    elif allow_3d:
+        raise ValueError(f"expected (ns,K) or (ns,M,N), got {rhs.shape}")
+    else:
+        raise ValueError(f"expected (ns,...) with ndim>=2, got {rhs.shape}")
+    ns = int(rhs2.shape[0])
+    if ns < 3:
+        return rhs
+    alpha_arr = jnp.asarray(alpha, dtype=rhs2.dtype)
+    a = -alpha_arr
+    b = 1.0 + 2.0 * alpha_arr
+    c = -alpha_arr
+
+    x0 = rhs2[0]
+    xN = rhs2[-1]
+    d = rhs2[1:-1]
+    d = d.at[0].add(alpha_arr * x0)
+    d = d.at[-1].add(alpha_arr * xN)
+
+    n = int(d.shape[0])
+    if n == 1:
+        x_int = d / b
+    else:
+        cp0 = c / b
+        dp0 = d[0] / b
+
+        def fwd(carry, di):
+            cp_prev, dp_prev = carry
+            denom = b - a * cp_prev
+            cp = c / denom
+            dp = (di - a * dp_prev) / denom
+            return (cp, dp), (cp, dp)
+
+        (_cp_last, dp_last), (cp_rest, dp_rest) = jax.lax.scan(fwd, (cp0, dp0), d[1:])
+        cp = jnp.concatenate([jnp.asarray([cp0]), cp_rest], axis=0)
+        dp = jnp.concatenate([dp0[None, :], dp_rest], axis=0)
+
+        def bwd(x_next, items):
+            cpi, dpi = items
+            xi = dpi - cpi * x_next
+            return xi, xi
+
+        _x0, x_rev = jax.lax.scan(bwd, dp_last, (cp[:-1], dp[:-1]), reverse=True)
+        x_int = jnp.concatenate([x_rev, dp_last[None, :]], axis=0)
+
+    out = jnp.concatenate([x0[None, :], x_int, xN[None, :]], axis=0)
+    if orig_shape is not None:
+        out = out.reshape(orig_shape)
+    return out
+
+
+def _metric_surface_precond_scales_jax(*, guu, r12, bsubu, bsubv, w_ang):
+    """Approximate radial/lambda preconditioner scales with tracer-safe ops."""
+    w3 = jnp.asarray(w_ang, dtype=jnp.asarray(guu).dtype)[None, :, :]
+    rz_denom = jnp.sum((guu * (r12 * r12)) * w3, axis=(1, 2))
+    rz_scale = jnp.where(rz_denom > 0.0, 1.0 / jnp.sqrt(jnp.maximum(rz_denom, 1e-300)), 1.0)
+    l_denom = jnp.sum(((bsubu * bsubu) + (bsubv * bsubv)) * w3, axis=(1, 2))
+    l_scale = jnp.where(l_denom > 0.0, 1.0 / jnp.sqrt(jnp.maximum(l_denom, 1e-300)), 1.0)
+    return jnp.clip(rz_scale, 1e-4, 1e2), jnp.clip(l_scale, 1e-4, 1e2)
+
+
+def _metric_surface_precond_scales_np(*, guu, r12, bsubu, bsubv, w_ang) -> tuple[np.ndarray, np.ndarray]:
+    """Host NumPy variant of the first-step metric preconditioner scales."""
+    guu_arr = np.asarray(guu)
+    r12_arr = np.asarray(r12)
+    bsubu_arr = np.asarray(bsubu)
+    bsubv_arr = np.asarray(bsubv)
+    w3 = np.asarray(w_ang, dtype=guu_arr.dtype)[None, :, :]
+    rz_denom = np.sum((guu_arr * (r12_arr * r12_arr)) * w3, axis=(1, 2))
+    rz_scale = np.where(rz_denom > 0.0, 1.0 / np.sqrt(np.maximum(rz_denom, 1e-300)), 1.0)
+    l_denom = np.sum(((bsubu_arr * bsubu_arr) + (bsubv_arr * bsubv_arr)) * w3, axis=(1, 2))
+    l_scale = np.where(l_denom > 0.0, 1.0 / np.sqrt(np.maximum(l_denom, 1e-300)), 1.0)
+    return np.clip(rz_scale, 1e-4, 1e2), np.clip(l_scale, 1e-4, 1e2)
+
+
+def _pshalf_from_s_np(s_arr) -> np.ndarray:
+    s_arr = np.asarray(s_arr, dtype=float)
+    if s_arr.size < 2:
+        return np.sqrt(np.maximum(s_arr, 0.0))
+    sh = 0.5 * (s_arr[1:] + s_arr[:-1])
+    p = np.concatenate([sh[:1], sh], axis=0)
+    return np.sqrt(np.maximum(p, 0.0))
+
+
+def _pshalf_from_s_jax(s_arr, dtype):
+    s_arr = jnp.asarray(s_arr, dtype=dtype)
+    if int(s_arr.size) < 2:
+        return jnp.sqrt(jnp.maximum(s_arr, jnp.asarray(0.0, dtype=dtype)))
+    sh = 0.5 * (s_arr[1:] + s_arr[:-1])
+    p = jnp.concatenate([sh[:1], sh], axis=0)
+    return jnp.sqrt(jnp.maximum(p, jnp.asarray(0.0, dtype=dtype)))
+
+
+def _sm_sp_from_s_np(s_arr) -> tuple[np.ndarray, np.ndarray]:
+    s_arr = np.asarray(s_arr, dtype=float)
+    ns = int(s_arr.shape[0])
+    if ns < 2:
+        z = np.zeros((ns + 1,), dtype=float)
+        return z, z
+    hs = s_arr[1] - s_arr[0]
+    i = np.arange(ns + 1, dtype=float)
+    psqrts = np.where(i >= 1, np.sqrt(np.maximum(hs * (i - 1.0), 0.0)), 0.0)
+    psqrts[-1] = 1.0
+    pshalf = np.where(i >= 1, np.sqrt(np.maximum(hs * np.abs(i - 1.5), 0.0)), 0.0)
+    sm = np.zeros((ns + 1,), dtype=float)
+    sp = np.zeros((ns + 1,), dtype=float)
+    idx = np.arange(2, ns + 1)
+    sm[idx] = np.where(psqrts[idx] != 0, pshalf[idx] / psqrts[idx], 0.0)
+    sm[1] = 0.0
+    idx2 = np.arange(2, ns)
+    sp[idx2] = np.where(psqrts[idx2] != 0, pshalf[idx2 + 1] / psqrts[idx2], 0.0)
+    sp[ns] = np.where(psqrts[ns] != 0, 1.0 / psqrts[ns], 0.0)
+    sp[0] = 0.0
+    sp[1] = sm[2] if ns >= 2 else 0.0
+    return sm, sp
+
+
+def _merge_axis_reset_state(*, st: VMECState, st_axis: VMECState, static, full_reset: bool) -> VMECState:
+    """Return an axis-reset state, preserving non-axis coefficients unless full reset."""
+    if full_reset:
+        return st_axis
+    if getattr(static, "m_is_m0", None) is None:
+        mask_m0 = jnp.asarray(np.asarray(static.modes.m, dtype=int) == 0, dtype=jnp.asarray(st.Rcos).dtype)
+    else:
+        mask_m0 = jnp.asarray(static.m_is_m0, dtype=jnp.asarray(st.Rcos).dtype)
+    Rcos = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Rcos), jnp.asarray(st.Rcos))
+    Rsin = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Rsin), jnp.asarray(st.Rsin))
+    Zcos = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Zcos), jnp.asarray(st.Zcos))
+    Zsin = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Zsin), jnp.asarray(st.Zsin))
+    return VMECState(
+        layout=st.layout,
+        Rcos=Rcos,
+        Rsin=Rsin,
+        Zcos=Zcos,
+        Zsin=Zsin,
+        Lcos=st.Lcos,
+        Lsin=st.Lsin,
+    )
+
+
 @dataclass(frozen=True)
 class SolveLambdaResult:
     state: VMECState
@@ -2189,81 +2530,15 @@ def _apply_preconditioner(
             Lsin=_scale(g.Lsin),
         )
 
-    def _tridi_smooth_dirichlet(rhs, *, alpha: float):
-        """Solve a simple tri-diagonal smoothing system along s for each mode.
-
-        This applies a Dirichlet-boundary operator in s:
-
-            (-α) x_{i-1} + (1+2α) x_i + (-α) x_{i+1} = rhs_i
-
-        on interior points i=1..ns-2, treating x_0 and x_{ns-1} as fixed to rhs
-        at those endpoints. This preserves any constraint-masked gradients at
-        the endpoints while still coupling interior surfaces.
-        """
-        rhs = jnp.asarray(rhs)
-        if rhs.ndim < 2:
-            raise ValueError(f"expected (ns,...) with ndim>=2, got {rhs.shape}")
-        ns = int(rhs.shape[0])
-        if rhs.ndim == 2:
-            rhs2 = rhs
-            orig_shape = None
-        else:
-            rhs2 = rhs.reshape(ns, -1)
-            orig_shape = rhs.shape
-        ns = int(rhs2.shape[0])
-        if ns < 3:
-            return rhs
-        alpha = jnp.asarray(alpha, dtype=rhs.dtype)
-        a = -alpha
-        b = 1.0 + 2.0 * alpha
-        c = -alpha
-
-        x0 = rhs2[0]
-        xN = rhs2[-1]
-        d = rhs2[1:-1]
-        d = d.at[0].add(alpha * x0)
-        d = d.at[-1].add(alpha * xN)
-
-        n = int(d.shape[0])
-        if n == 1:
-            x_int = d / b
-        else:
-            # Forward sweep (Thomas algorithm), vectorized over modes K.
-            cp0 = c / b
-            dp0 = d[0] / b
-
-            def fwd(carry, di):
-                cp_prev, dp_prev = carry
-                denom = b - a * cp_prev
-                cp = c / denom
-                dp = (di - a * dp_prev) / denom
-                return (cp, dp), (cp, dp)
-
-            (cp_last, dp_last), (cp_rest, dp_rest) = jax.lax.scan(fwd, (cp0, dp0), d[1:])
-            cp = jnp.concatenate([jnp.asarray([cp0]), cp_rest], axis=0)
-            dp = jnp.concatenate([dp0[None, :], dp_rest], axis=0)
-            # Back substitution.
-            x_last = dp_last
-
-            def bwd(x_next, items):
-                cpi, dpi = items
-                xi = dpi - cpi * x_next
-                return xi, xi
-
-            _x0, x_rev = jax.lax.scan(bwd, x_last, (cp[:-1], dp[:-1]), reverse=True)
-            x_int = jnp.concatenate([x_rev, x_last[None, :]], axis=0)
-
-        return jnp.concatenate([x0[None, :], x_int, xN[None, :]], axis=0)
-
     def _apply_radial_tridi(g: VMECState) -> VMECState:
         return VMECState(
             layout=g.layout,
-            Rcos=_tridi_smooth_dirichlet(g.Rcos, alpha=radial_alpha),
-            Rsin=_tridi_smooth_dirichlet(g.Rsin, alpha=radial_alpha),
-            Zcos=_tridi_smooth_dirichlet(g.Zcos, alpha=radial_alpha),
-            Zsin=_tridi_smooth_dirichlet(g.Zsin, alpha=radial_alpha),
-            Lcos=_tridi_smooth_dirichlet(g.Lcos, alpha=radial_alpha),
-            Lsin=_tridi_smooth_dirichlet(g.Lsin, alpha=radial_alpha),
+            Rcos=_radial_tridi_smooth_dirichlet(g.Rcos, alpha=radial_alpha),
+            Rsin=_radial_tridi_smooth_dirichlet(g.Rsin, alpha=radial_alpha),
+            Zcos=_radial_tridi_smooth_dirichlet(g.Zcos, alpha=radial_alpha),
+            Zsin=_radial_tridi_smooth_dirichlet(g.Zsin, alpha=radial_alpha),
+            Lcos=_radial_tridi_smooth_dirichlet(g.Lcos, alpha=radial_alpha),
+            Lsin=_radial_tridi_smooth_dirichlet(g.Lsin, alpha=radial_alpha),
         )
 
     g = grad
@@ -4338,14 +4613,10 @@ def solve_fixed_boundary_residual_iter(
         host_update_assembly = bool(host_update_assembly)
     host_update_assembly = host_update_assembly and (not bool(use_scan)) and (jax.default_backend() == "cpu")
     adjoint_trace = bool(adjoint_trace)
-    adjoint_trace_mode = str(adjoint_trace_mode).strip().lower() or "full"
-    if adjoint_trace_mode not in ("full", "dynamic"):
-        raise ValueError("adjoint_trace_mode must be one of {'full', 'dynamic'}")
+    adjoint_trace_mode = _normalize_adjoint_trace_mode(adjoint_trace_mode)
 
     def _adjoint_trace_array(value):
-        if adjoint_trace_mode == "dynamic":
-            return value
-        return np.asarray(value)
+        return _materialize_adjoint_trace_array(value, mode=adjoint_trace_mode)
 
     signgs = int(signgs)
     fsq_total_target = None if fsq_total_target is None else max(0.0, float(fsq_total_target))
@@ -4364,17 +4635,7 @@ def solve_fixed_boundary_residual_iter(
         light_history = light_hist_env not in ("", "0", "false", "no")
     else:
         light_history = bool(light_history)
-    if resume_state_mode is None:
-        resume_state_mode = os.getenv("VMEC_JAX_RESUME_STATE_MODE", "full")
-    resume_state_mode = str(resume_state_mode).strip().lower() or "full"
-    resume_state_aliases = {
-        "compact": "minimal",
-        "light": "minimal",
-        "off": "none",
-    }
-    resume_state_mode = resume_state_aliases.get(resume_state_mode, resume_state_mode)
-    if resume_state_mode not in ("full", "minimal", "none"):
-        raise ValueError("resume_state_mode must be one of {'full', 'minimal', 'none'}")
+    resume_state_mode = _normalize_resume_state_mode(resume_state_mode)
     badjac_state_probe_env = os.getenv("VMEC_JAX_BADJAC_STATE_PROBE", "0").strip().lower()
     badjac_state_probe = badjac_state_probe_env not in ("", "0", "false", "no")
     ptau_tol_env = os.getenv("VMEC_JAX_PTAU_TOL", "").strip()
@@ -4491,12 +4752,7 @@ def solve_fixed_boundary_residual_iter(
     track_history = not light_history
 
     def _pack_resume_state(base: dict[str, Any], heavy: dict[str, Any] | None = None):
-        if resume_state_mode == "none":
-            return None
-        rec = dict(base)
-        if resume_state_mode == "full" and heavy:
-            rec.update(heavy)
-        return rec
+        return _pack_resume_state_record(base=base, heavy=heavy, mode=resume_state_mode)
 
     from .energy import flux_profiles_from_indata
     from .static import build_static
@@ -4844,27 +5100,7 @@ def solve_fixed_boundary_residual_iter(
             dtype=jnp.asarray(st.Rcos).dtype,
         )
         axis_reset_coeffs = (raxis_cc, raxis_cs, zaxis_cc, zaxis_cs)
-        if full_reset:
-            st_out = st_axis
-        else:
-            # Preserve non-axis coefficients (including lambda) when resetting axis.
-            if getattr(static, "m_is_m0", None) is None:
-                mask_m0 = jnp.asarray(np.asarray(static.modes.m, dtype=int) == 0, dtype=jnp.asarray(st.Rcos).dtype)
-            else:
-                mask_m0 = jnp.asarray(static.m_is_m0, dtype=jnp.asarray(st.Rcos).dtype)
-            Rcos = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Rcos), jnp.asarray(st.Rcos))
-            Rsin = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Rsin), jnp.asarray(st.Rsin))
-            Zcos = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Zcos), jnp.asarray(st.Zcos))
-            Zsin = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Zsin), jnp.asarray(st.Zsin))
-            st_out = VMECState(
-                layout=st.layout,
-                Rcos=Rcos,
-                Rsin=Rsin,
-                Zcos=Zcos,
-                Zsin=Zsin,
-                Lcos=st.Lcos,
-                Lsin=st.Lsin,
-            )
+        st_out = _merge_axis_reset_state(st=st, st_axis=st_axis, static=static, full_reset=full_reset)
         return _apply_vmec_lambda_axis_rules(st_out)
 
     flux = flux_profiles_from_indata(indata, s, signgs=signgs)
@@ -5022,73 +5258,15 @@ def solve_fixed_boundary_residual_iter(
     )
 
     def _apply_radial_tridi(a, alpha: float):
-        if alpha <= 0.0:
-            return a
-        return _tridi_smooth_dirichlet(jnp.asarray(a), alpha=alpha)
+        return _radial_tridi_smooth_dirichlet(a, alpha=alpha, skip_nonpositive=True)
 
     def _apply_radial_tridi_batched(arrs, alpha: float):
         if alpha <= 0.0:
             return tuple(arrs)
         # Stack directly into (ns, B, ...) to avoid swapaxes.
         stack = jnp.stack(arrs, axis=1)
-        smooth = _tridi_smooth_dirichlet(stack, alpha=alpha)
+        smooth = _radial_tridi_smooth_dirichlet(stack, alpha=alpha)
         return tuple(smooth[:, i] for i in range(int(smooth.shape[1])))
-
-    def _tridi_smooth_dirichlet(rhs, *, alpha: float):
-        """Dirichlet tridiagonal smoother along s for fixed-point updates."""
-        rhs = jnp.asarray(rhs)
-        if rhs.ndim < 2:
-            raise ValueError(f"expected (ns,...) with ndim>=2, got {rhs.shape}")
-        ns = int(rhs.shape[0])
-        if rhs.ndim == 2:
-            rhs2 = rhs
-            orig_shape = None
-        else:
-            rhs2 = rhs.reshape(ns, -1)
-            orig_shape = rhs.shape
-        ns = int(rhs2.shape[0])
-        if ns < 3:
-            return rhs
-        alpha = jnp.asarray(alpha, dtype=rhs2.dtype)
-        a = -alpha
-        b = 1.0 + 2.0 * alpha
-        c = -alpha
-
-        x0 = rhs2[0]
-        xN = rhs2[-1]
-        d = rhs2[1:-1]
-        d = d.at[0].add(alpha * x0)
-        d = d.at[-1].add(alpha * xN)
-
-        n = int(d.shape[0])
-        if n == 1:
-            x_int = d / b
-        else:
-            cp0 = c / b
-            dp0 = d[0] / b
-
-            def fwd(carry, di):
-                cp_prev, dp_prev = carry
-                denom = b - a * cp_prev
-                cp = c / denom
-                dp = (di - a * dp_prev) / denom
-                return (cp, dp), (cp, dp)
-
-            (cp_last, dp_last), (cp, dp) = jax.lax.scan(fwd, (cp0, dp0), d[1:])
-
-            def bwd(carry, cp_dp):
-                x_next = carry
-                cp_i, dp_i = cp_dp
-                x_i = dp_i - cp_i * x_next
-                return x_i, x_i
-
-            _, x_rev = jax.lax.scan(bwd, dp_last, (cp, dp), reverse=True)
-            x_int = jnp.concatenate([x_rev, dp_last[None, :]], axis=0)
-
-        out = jnp.concatenate([x0[None, :], x_int, xN[None, :]], axis=0)
-        if orig_shape is not None:
-            out = out.reshape(orig_shape)
-        return out
 
     def _metric_surface_precond_from_bcovar(bc):
         """Approximate radial preconditioner scaling from bcovar metrics.
@@ -5104,36 +5282,10 @@ def solve_fixed_boundary_residual_iter(
         bsubv = bc.bsubv
         nzeta = int(guu.shape[2])
         w_ang = jnp.asarray(vmec_wint_from_trig(trig, nzeta=nzeta), dtype=guu.dtype)
-        w3 = w_ang[None, :, :]
-
-        # R/Z preconditioner proxy: VMEC force-norm denominator integrand.
-        rz_denom = jnp.sum((guu * (r12 * r12)) * w3, axis=(1, 2))
-        rz_scale = jnp.where(rz_denom > 0.0, 1.0 / jnp.sqrt(jnp.maximum(rz_denom, 1e-300)), 1.0)
-
-        # Lambda preconditioner proxy: VMEC lambda norm denominator integrand.
-        l_denom = jnp.sum(((bsubu * bsubu) + (bsubv * bsubv)) * w3, axis=(1, 2))
-        l_scale = jnp.where(l_denom > 0.0, 1.0 / jnp.sqrt(jnp.maximum(l_denom, 1e-300)), 1.0)
-
-        # Keep updates bounded and avoid axis/boundary blowups.
-        rz_scale = jnp.clip(rz_scale, 1e-4, 1e2)
-        l_scale = jnp.clip(l_scale, 1e-4, 1e2)
-        return rz_scale, l_scale
+        return _metric_surface_precond_scales_jax(guu=guu, r12=r12, bsubu=bsubu, bsubv=bsubv, w_ang=w_ang)
 
     def _pshalf_from_s(s_arr):
-        s_arr = np.asarray(s_arr, dtype=float)
-        if s_arr.size < 2:
-            return np.sqrt(np.maximum(s_arr, 0.0))
-        sh = 0.5 * (s_arr[1:] + s_arr[:-1])
-        p = np.concatenate([sh[:1], sh], axis=0)
-        return np.sqrt(np.maximum(p, 0.0))
-
-    def _pshalf_from_s_jax(s_arr, dtype):
-        s_arr = jnp.asarray(s_arr, dtype=dtype)
-        if int(s_arr.size) < 2:
-            return jnp.sqrt(jnp.maximum(s_arr, jnp.asarray(0.0, dtype=dtype)))
-        sh = 0.5 * (s_arr[1:] + s_arr[:-1])
-        p = jnp.concatenate([sh[:1], sh], axis=0)
-        return jnp.sqrt(jnp.maximum(p, jnp.asarray(0.0, dtype=dtype)))
+        return _pshalf_from_s_np(s_arr)
 
     # Precompute pshalf and ohs for the JIT-accelerated ptau check.
     # These are fixed for the lifetime of this NS-stage closure. Keep the
@@ -5313,27 +5465,7 @@ def solve_fixed_boundary_residual_iter(
         return _ptau_minmax_from_k_host(k)
 
     def _sm_sp_from_s(s_arr):
-        s_arr = np.asarray(s_arr, dtype=float)
-        ns = int(s_arr.shape[0])
-        if ns < 2:
-            z = np.zeros((ns + 1,), dtype=float)
-            return z, z
-        hs = s_arr[1] - s_arr[0]
-        i = np.arange(ns + 1, dtype=float)
-        psqrts = np.where(i >= 1, np.sqrt(np.maximum(hs * (i - 1.0), 0.0)), 0.0)
-        psqrts[-1] = 1.0
-        pshalf = np.where(i >= 1, np.sqrt(np.maximum(hs * np.abs(i - 1.5), 0.0)), 0.0)
-        sm = np.zeros((ns + 1,), dtype=float)
-        sp = np.zeros((ns + 1,), dtype=float)
-        idx = np.arange(2, ns + 1)
-        sm[idx] = np.where(psqrts[idx] != 0, pshalf[idx] / psqrts[idx], 0.0)
-        sm[1] = 0.0
-        idx2 = np.arange(2, ns)
-        sp[idx2] = np.where(psqrts[idx2] != 0, pshalf[idx2 + 1] / psqrts[idx2], 0.0)
-        sp[ns] = np.where(psqrts[ns] != 0, 1.0 / psqrts[ns], 0.0)
-        sp[0] = 0.0
-        sp[1] = sm[2] if ns >= 2 else 0.0
-        return sm, sp
+        return _sm_sp_from_s_np(s_arr)
 
     def _maybe_dump_jacobian_terms(*, k, iter_idx: int) -> None:
         env = os.getenv("VMEC_JAX_DUMP_JACOBIAN_TERMS", "").strip()
@@ -6774,13 +6906,14 @@ def solve_fixed_boundary_residual_iter(
             return (fsqr, fsqz, fsql)
 
         def _should_print_vmec2000_local(iter_idx: int, max_iter_local: int) -> bool:
-            if not (bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table)):
-                return False
-            if iter_idx <= 1:
-                return True
-            if iter_idx >= max_iter_local:
-                return True
-            return (iter_idx % nstep_screen) == 0
+            return _should_print_vmec2000_row(
+                iter_idx=iter_idx,
+                max_iter=max_iter_local,
+                nstep_screen=nstep_screen,
+                verbose=bool(verbose),
+                vmec2000_control=bool(vmec2000_control),
+                verbose_vmec2000_table=bool(verbose_vmec2000_table),
+            )
 
         def _print_vmec2000_row_local(
             *,
@@ -6795,27 +6928,23 @@ def solve_fixed_boundary_residual_iter(
         ) -> None:
             if not (bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table)):
                 return
-            if bool(cfg.lasym):
-                z_val = float("nan") if z00 is None else float(z00)
-                print(
-                    f"{int(iter_idx):5d}"
-                    f"{float(fsqr):10.2E}{float(fsqz):10.2E}{float(fsql):10.2E}"
-                    f"{float(r00):11.3E}{z_val:11.3E}{float(delt0r):10.2E}{float(w_mhd):12.4E}",
-                    flush=True,
-                )
-            else:
-                print(
-                    f"{int(iter_idx):5d}"
-                    f"{float(fsqr):10.2E}{float(fsqz):10.2E}{float(fsql):10.2E}"
-                    f"{float(r00):11.3E}{float(delt0r):10.2E}{float(w_mhd):12.4E}",
-                    flush=True,
-                )
+            print(
+                _format_vmec2000_iter_row(
+                    iter_idx=iter_idx,
+                    fsqr=fsqr,
+                    fsqz=fsqz,
+                    fsql=fsql,
+                    delt0r=delt0r,
+                    r00=r00,
+                    w_mhd=w_mhd,
+                    lasym=bool(cfg.lasym),
+                    z00=z00,
+                ),
+                flush=True,
+            )
 
         def _fmt_axis_coeff_local(val: float) -> str:
-            s = f"{float(val):.16g}"
-            if "e" in s:
-                s = s.replace("e", "E")
-            return s
+            return _format_axis_coeff(val)
 
         def _print_axis_guess_local(raxis_cc, zaxis_cs) -> None:
             try:
@@ -6841,10 +6970,17 @@ def solve_fixed_boundary_residual_iter(
                     stage = stage_map.get(int(stage_id_v), "pre")
                     with _timecontrol_path.open("a", encoding="utf-8") as f:
                         f.write(
-                            f"{int(iter2_v):8d} {int(iter1_v):8d} "
-                            f"{float(fsq_v): .16e} {float(fsq0_v): .16e} "
-                            f"{float(res0_v): .16e} {float(res1_v): .16e} "
-                            f"{float(time_step_v): .16e} {int(irst_v):3d} {stage}\n"
+                            _format_time_control_trace_row(
+                                stage=stage,
+                                iter2=int(iter2_v),
+                                iter1=int(iter1_v),
+                                fsq=float(fsq_v),
+                                fsq0=float(fsq0_v),
+                                res0=float(res0_v),
+                                res1=float(res1_v),
+                                time_step=float(time_step_v),
+                                irst=int(irst_v),
+                            )
                         )
                 except Exception:
                     pass
@@ -10229,9 +10365,17 @@ def solve_fixed_boundary_residual_iter(
 
                     def _cb(i, fsqr_v, fsqz_v, fsql_v, r00_v, z00_v, dt_v, w_v):
                         print(
-                            f"{int(i):5d}"
-                            f"{float(fsqr_v):10.2E}{float(fsqz_v):10.2E}{float(fsql_v):10.2E}"
-                            f"{float(r00_v):11.3E}{float(z00_v):11.3E}{float(dt_v):10.2E}{float(w_v):12.4E}",
+                            _format_vmec2000_iter_row(
+                                iter_idx=int(i),
+                                fsqr=float(fsqr_v),
+                                fsqz=float(fsqz_v),
+                                fsql=float(fsql_v),
+                                delt0r=float(dt_v),
+                                r00=float(r00_v),
+                                w_mhd=float(w_v),
+                                lasym=True,
+                                z00=float(z00_v),
+                            ),
                             flush=True,
                         )
                         return None
@@ -10252,9 +10396,17 @@ def solve_fixed_boundary_residual_iter(
 
                     def _cb_io(i, fsqr_v, fsqz_v, fsql_v, r00_v, z00_v, dt_v, w_v):
                         print(
-                            f"{int(i):5d}"
-                            f"{float(fsqr_v):10.2E}{float(fsqz_v):10.2E}{float(fsql_v):10.2E}"
-                            f"{float(r00_v):11.3E}{float(z00_v):11.3E}{float(dt_v):10.2E}{float(w_v):12.4E}",
+                            _format_vmec2000_iter_row(
+                                iter_idx=int(i),
+                                fsqr=float(fsqr_v),
+                                fsqz=float(fsqz_v),
+                                fsql=float(fsql_v),
+                                delt0r=float(dt_v),
+                                r00=float(r00_v),
+                                w_mhd=float(w_v),
+                                lasym=True,
+                                z00=float(z00_v),
+                            ),
                             flush=True,
                         )
                         return ()
@@ -10275,9 +10427,17 @@ def solve_fixed_boundary_residual_iter(
             else:
                 # VMEC screen format (lasym, fixed-boundary): i5,3e10.2,2e11.3,e10.2,e12.4
                 print(
-                    f"{int(iter_idx):5d}"
-                    f"{float(fsqr):10.2E}{float(fsqz):10.2E}{float(fsql):10.2E}"
-                    f"{float(r00):11.3E}{z_val:11.3E}{float(delt0r):10.2E}{float(w_mhd):12.4E}",
+                    _format_vmec2000_iter_row(
+                        iter_idx=iter_idx,
+                        fsqr=fsqr,
+                        fsqz=fsqz,
+                        fsql=fsql,
+                        delt0r=delt0r,
+                        r00=r00,
+                        w_mhd=w_mhd,
+                        lasym=True,
+                        z00=z_val,
+                    ),
                     flush=True,
                 )
         else:
@@ -10298,9 +10458,16 @@ def solve_fixed_boundary_residual_iter(
 
                     def _cb(i, fsqr_v, fsqz_v, fsql_v, r00_v, dt_v, w_v):
                         print(
-                            f"{int(i):5d}"
-                            f"{float(fsqr_v):10.2E}{float(fsqz_v):10.2E}{float(fsql_v):10.2E}"
-                            f"{float(r00_v):11.3E}{float(dt_v):10.2E}{float(w_v):12.4E}",
+                            _format_vmec2000_iter_row(
+                                iter_idx=int(i),
+                                fsqr=float(fsqr_v),
+                                fsqz=float(fsqz_v),
+                                fsql=float(fsql_v),
+                                delt0r=float(dt_v),
+                                r00=float(r00_v),
+                                w_mhd=float(w_v),
+                                lasym=False,
+                            ),
                             flush=True,
                         )
                         return None
@@ -10320,9 +10487,16 @@ def solve_fixed_boundary_residual_iter(
 
                     def _cb_io(i, fsqr_v, fsqz_v, fsql_v, r00_v, dt_v, w_v):
                         print(
-                            f"{int(i):5d}"
-                            f"{float(fsqr_v):10.2E}{float(fsqz_v):10.2E}{float(fsql_v):10.2E}"
-                            f"{float(r00_v):11.3E}{float(dt_v):10.2E}{float(w_v):12.4E}",
+                            _format_vmec2000_iter_row(
+                                iter_idx=int(i),
+                                fsqr=float(fsqr_v),
+                                fsqz=float(fsqz_v),
+                                fsql=float(fsql_v),
+                                delt0r=float(dt_v),
+                                r00=float(r00_v),
+                                w_mhd=float(w_v),
+                                lasym=False,
+                            ),
                             flush=True,
                         )
                         return ()
@@ -10342,9 +10516,16 @@ def solve_fixed_boundary_residual_iter(
             else:
                 # VMEC screen format (fixed-boundary): i5,3e10.2,e11.3,e10.2,e12.4
                 print(
-                    f"{int(iter_idx):5d}"
-                    f"{float(fsqr):10.2E}{float(fsqz):10.2E}{float(fsql):10.2E}"
-                    f"{float(r00):11.3E}{float(delt0r):10.2E}{float(w_mhd):12.4E}",
+                    _format_vmec2000_iter_row(
+                        iter_idx=iter_idx,
+                        fsqr=fsqr,
+                        fsqz=fsqz,
+                        fsql=fsql,
+                        delt0r=delt0r,
+                        r00=r00,
+                        w_mhd=w_mhd,
+                        lasym=False,
+                    ),
                     flush=True,
                 )
 
@@ -10359,21 +10540,22 @@ def solve_fixed_boundary_residual_iter(
         nstep_screen = 1
 
     def _should_print_vmec2000(iter_idx: int, max_iter: int) -> bool:
-        if not (bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table)):
-            return False
-        if iter_idx <= 1:
-            return True
-        if iter_idx >= max_iter:
-            return True
-        return (iter_idx % nstep_screen) == 0
+        return _should_print_vmec2000_row(
+            iter_idx=iter_idx,
+            max_iter=max_iter,
+            nstep_screen=nstep_screen,
+            verbose=bool(verbose),
+            vmec2000_control=bool(vmec2000_control),
+            verbose_vmec2000_table=bool(verbose_vmec2000_table),
+        )
 
     def _should_sample_vmec2000(iter_idx: int, max_iter: int) -> bool:
         """Sample VMEC2000 scalar diagnostics on the screen cadence."""
-        if iter_idx <= 1:
-            return True
-        if iter_idx >= max_iter:
-            return True
-        return (iter_idx % nstep_screen) == 0
+        return _vmec2000_cadence_selected(
+            iter_idx=iter_idx,
+            max_iter=max_iter,
+            nstep_screen=nstep_screen,
+        )
 
     # VMEC2000 caches 1D preconditioner/norm/tcon updates every `ns4` iterations
     # (vmec_params.f: ns4=25), reusing the cached values between refreshes.
@@ -10446,10 +10628,7 @@ def solve_fixed_boundary_residual_iter(
             freeb_last_model = str(resume_state.get("freeb_model", freeb_last_model))
 
     def _fmt_axis_coeff(val: float) -> str:
-        s = f"{float(val):.16g}"
-        if "e" in s:
-            s = s.replace("e", "E")
-        return s
+        return _format_axis_coeff(val)
 
     def _print_axis_guess(raxis_cc, zaxis_cs) -> None:
         try:
@@ -10664,8 +10843,14 @@ def solve_fixed_boundary_residual_iter(
             path = Path(dump_dir) / "time_control.log"
             with path.open("a", encoding="utf-8") as f:
                 f.write(
-                    f"iter={iter_idx} fsq={fsq:.6e} fsq0={fsq0:.6e} "
-                    f"res0={res0:.6e} res1={res1:.6e} time_step={time_step:.6e}\n"
+                    _format_time_control_log_row(
+                        iter_idx=iter_idx,
+                        fsq=fsq,
+                        fsq0=fsq0,
+                        res0=res0,
+                        res1=res1,
+                        time_step=time_step,
+                    )
                 )
         except Exception:
             return
@@ -10691,10 +10876,17 @@ def solve_fixed_boundary_residual_iter(
             path = Path(dump_dir) / "time_control_trace.log"
             with path.open("a", encoding="utf-8") as f:
                 f.write(
-                    f"{int(iter2):8d} {int(iter1):8d} "
-                    f"{float(fsq): .16e} {float(fsq0): .16e} "
-                    f"{float(res0): .16e} {float(res1): .16e} "
-                    f"{float(time_step): .16e} {int(irst):3d} {stage}\n"
+                    _format_time_control_trace_row(
+                        stage=stage,
+                        iter2=iter2,
+                        iter1=iter1,
+                        fsq=fsq,
+                        fsq0=fsq0,
+                        res0=res0,
+                        res1=res1,
+                        time_step=time_step,
+                        irst=irst,
+                    )
                 )
         except Exception:
             return
@@ -10708,7 +10900,7 @@ def solve_fixed_boundary_residual_iter(
         try:
             path = Path(dump_dir) / "checkpoint.log"
             with path.open("a", encoding="utf-8") as f:
-                f.write(f"iter={iter_idx} fsq={fsq:.6e} fsq0={fsq0:.6e} res0={res0:.6e} res1={res1:.6e}\n")
+                f.write(_format_checkpoint_log_row(iter_idx=iter_idx, fsq=fsq, fsq0=fsq0, res0=res0, res1=res1))
         except Exception:
             return
 
@@ -10731,8 +10923,15 @@ def solve_fixed_boundary_residual_iter(
             path = Path(dump_dir) / "freeb_control_trace.log"
             with path.open("a", encoding="utf-8") as f:
                 f.write(
-                    f"{int(iter2):8d} {int(iter1):8d} {int(ivac):8d} {int(ivacskip):8d} "
-                    f"{int(nvacskip):8d} {float(fsq_rz_prev): .16e} {1 if bool(cached) else 0:2d}\n"
+                    _format_freeb_control_trace_row(
+                        iter2=iter2,
+                        iter1=iter1,
+                        ivac=ivac,
+                        ivacskip=ivacskip,
+                        nvacskip=nvacskip,
+                        fsq_rz_prev=fsq_rz_prev,
+                        cached=cached,
+                    )
                 )
         except Exception:
             return
@@ -10873,11 +11072,21 @@ def solve_fixed_boundary_residual_iter(
             path = Path(dump_dir) / "evolve_trace.log"
             with path.open("a", encoding="utf-8") as f:
                 f.write(
-                    f"{int(iter2):8d} {int(iter1):8d} {int(static.cfg.ns):8d} {stage} "
-                    f"{float(fsq1_val): .16e} {float(fsq_prev_val): .16e} "
-                    f"{float(time_step_val): .16e} {float(dtau_val): .16e} "
-                    f"{float(b1_val): .16e} {float(fac_val): .16e} "
-                    f"{float(np.linalg.norm(xc_vec)): .16e} {float(np.linalg.norm(v_vec)): .16e} {float(gnorm): .16e}\n"
+                    _format_evolve_trace_row(
+                        iter2=iter2,
+                        iter1=iter1,
+                        ns=int(static.cfg.ns),
+                        stage=stage,
+                        fsq1=fsq1_val,
+                        fsq_prev=fsq_prev_val,
+                        time_step=time_step_val,
+                        dtau=dtau_val,
+                        b1=b1_val,
+                        fac=fac_val,
+                        xc_norm=float(np.linalg.norm(xc_vec)),
+                        v_norm=float(np.linalg.norm(v_vec)),
+                        g_norm=gnorm,
+                    )
                 )
         except Exception:
             return
@@ -12095,9 +12304,9 @@ def solve_fixed_boundary_residual_iter(
                 else:
                     fsql1 = float(gcl2_p) * delta_s
                 # Safe values: NaN/Inf → 0 (same semantics as jnp.where below).
-                fsqr1_safe = fsqr1 if np.isfinite(fsqr1) else 0.0
-                fsqz1_safe = fsqz1 if np.isfinite(fsqz1) else 0.0
-                fsql1_safe = float(fsql1) if np.isfinite(fsql1) else 0.0
+                fsqr1_safe = _finite_float_or_zero(fsqr1)
+                fsqz1_safe = _finite_float_or_zero(fsqz1)
+                fsql1_safe = _finite_float_or_zero(fsql1)
                 fsq1 = fsqr1_safe + fsqz1_safe + fsql1_safe
                 # host_update_assembly: keep as Python floats — downstream code (history
                 # lists, _precond_diag_floats) handles both float and JAX scalar.
@@ -14258,60 +14467,10 @@ def first_step_diagnostics(
     constraint_tcon0: float | None = None
     if bool(include_constraint_force):
         constraint_tcon0 = float(indata.get_float("TCON0", 1.0))
+    apply_lforbal = bool(indata.get_bool("LFORBAL", False)) if indata is not None else False
 
     def _apply_radial_tridi(rhs, alpha: float):
-        if alpha <= 0.0:
-            return rhs
-        rhs = jnp.asarray(rhs)
-        if rhs.ndim == 2:
-            rhs2 = rhs
-            orig_shape = None
-        elif rhs.ndim == 3:
-            ns = int(rhs.shape[0])
-            rhs2 = rhs.reshape(ns, -1)
-            orig_shape = rhs.shape
-        else:
-            raise ValueError(f"expected (ns,K) or (ns,M,N), got {rhs.shape}")
-        ns = int(rhs2.shape[0])
-        if ns < 3:
-            return rhs
-        alpha = jnp.asarray(alpha, dtype=rhs2.dtype)
-        a = -alpha
-        b = 1.0 + 2.0 * alpha
-        c = -alpha
-        x0 = rhs2[0]
-        xN = rhs2[-1]
-        d = rhs2[1:-1]
-        d = d.at[0].add(alpha * x0)
-        d = d.at[-1].add(alpha * xN)
-        n = int(d.shape[0])
-        if n == 1:
-            x_int = d / b
-        else:
-            cp0 = c / b
-            dp0 = d[0] / b
-
-            def fwd(carry, di):
-                cp_prev, dp_prev = carry
-                denom = b - a * cp_prev
-                cp = c / denom
-                dp = (di - a * dp_prev) / denom
-                return (cp, dp), (cp, dp)
-
-            (cp_last, dp_last), (cp, dp) = jax.lax.scan(fwd, (cp0, dp0), d[1:])
-
-            def bwd(carry, cp_dp):
-                x_next = carry
-                cp_i, dp_i = cp_dp
-                x_i = dp_i - cp_i * x_next
-                return x_i, x_i
-
-            _, x_rev = jax.lax.scan(bwd, dp_last, (cp, dp), reverse=True)
-            x_int = jnp.concatenate([x_rev, dp_last[None, :]], axis=0)
-        out = jnp.concatenate([x0[None, :], x_int, xN[None, :]], axis=0)
-        if orig_shape is not None:
-            out = out.reshape(orig_shape)
-        return out
+        return _radial_tridi_smooth_dirichlet(rhs, alpha=alpha, skip_nonpositive=True)
 
     def _metric_surface_precond_from_bcovar(bc):
         """Approximate radial preconditioner scaling from bcovar metrics.
@@ -14325,45 +14484,13 @@ def first_step_diagnostics(
         bsubv = np.asarray(bc.bsubv)
         nzeta = int(guu.shape[2])
         w_ang = np.asarray(vmec_wint_from_trig(trig, nzeta=nzeta)).astype(guu.dtype)
-        w3 = w_ang[None, :, :]
-        rz_denom = np.sum((guu * (r12 * r12)) * w3, axis=(1, 2))
-        rz_scale = np.where(rz_denom > 0.0, 1.0 / np.sqrt(np.maximum(rz_denom, 1e-300)), 1.0)
-        l_denom = np.sum(((bsubu * bsubu) + (bsubv * bsubv)) * w3, axis=(1, 2))
-        l_scale = np.where(l_denom > 0.0, 1.0 / np.sqrt(np.maximum(l_denom, 1e-300)), 1.0)
-        rz_scale = np.clip(rz_scale, 1e-4, 1e2)
-        l_scale = np.clip(l_scale, 1e-4, 1e2)
-        return rz_scale, l_scale
+        return _metric_surface_precond_scales_np(guu=guu, r12=r12, bsubu=bsubu, bsubv=bsubv, w_ang=w_ang)
 
     def _pshalf_from_s(s_arr):
-        s_arr = np.asarray(s_arr, dtype=float)
-        if s_arr.size < 2:
-            return np.sqrt(np.maximum(s_arr, 0.0))
-        sh = 0.5 * (s_arr[1:] + s_arr[:-1])
-        p = np.concatenate([sh[:1], sh], axis=0)
-        return np.sqrt(np.maximum(p, 0.0))
+        return _pshalf_from_s_np(s_arr)
 
     def _sm_sp_from_s(s_arr):
-        s_arr = np.asarray(s_arr, dtype=float)
-        ns = int(s_arr.shape[0])
-        if ns < 2:
-            z = np.zeros((ns + 1,), dtype=float)
-            return z, z
-        hs = s_arr[1] - s_arr[0]
-        i = np.arange(ns + 1, dtype=float)
-        psqrts = np.where(i >= 1, np.sqrt(np.maximum(hs * (i - 1.0), 0.0)), 0.0)
-        psqrts[-1] = 1.0
-        pshalf = np.where(i >= 1, np.sqrt(np.maximum(hs * np.abs(i - 1.5), 0.0)), 0.0)
-        sm = np.zeros((ns + 1,), dtype=float)
-        sp = np.zeros((ns + 1,), dtype=float)
-        idx = np.arange(2, ns + 1)
-        sm[idx] = np.where(psqrts[idx] != 0, pshalf[idx] / psqrts[idx], 0.0)
-        sm[1] = 0.0
-        idx2 = np.arange(2, ns)
-        sp[idx2] = np.where(psqrts[idx2] != 0, pshalf[idx2 + 1] / psqrts[idx2], 0.0)
-        sp[ns] = np.where(psqrts[ns] != 0, 1.0 / psqrts[ns], 0.0)
-        sp[0] = 0.0
-        sp[1] = sm[2] if ns >= 2 else 0.0
-        return sm, sp
+        return _sm_sp_from_s_np(s_arr)
 
     def _lambda_preconditioner(bc, *, return_faclam: bool = False):
         from .preconditioner_1d_jax import lambda_preconditioner

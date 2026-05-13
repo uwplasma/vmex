@@ -12,18 +12,104 @@ Target State
 
 - Required CI wall time: under ten minutes for the required test, docs, and
   build jobs on GitHub-hosted CPU runners.
-- Current local CI-equivalent coverage baseline: clean on 2026-05-13 with
-  ``730 passed, 21 skipped, 85 deselected``, ``69.17%`` coverage, and ``8:54``
-  runtime.
+- Routine local gate:
+  ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000"``.
+- Last recorded local CI-equivalent coverage baseline: clean on 2026-05-13 with
+  ``896 passed, 21 skipped, 85 deselected``, ``81.10%`` coverage, and ``9:46``
+  runtime using the compact terminal coverage report.
+- Near-term coverage target: keep the required ``80%`` actual line coverage gate
+  green with meaningful fast and bounded-physics tests while preserving
+  sub-ten-minute coverage runtime.
+- Overall completion target: reach roughly ``90%`` validation-lane coverage by
+  ensuring each public workflow has a required fast guard or an explicit
+  full/optional parity lane with documented acceptance criteria.
 - Long-term required coverage: 95% line coverage for ``vmec_jax`` package
-  code.  The current Python 3.11 required coverage gate is ``63%``.
-- Required local command: ``pytest -q -m "not full and not vmec2000"`` remains
-  the routine development gate.
+  code.  The current Python 3.11 required coverage gate is ``80%``.
 - Nightly/manual coverage: larger VMEC2000, GPU, and full-resolution physics
   checks run outside the required PR gate.
 - Repository checkout size: keep the tracked source tree small enough that a
   fresh clone and ``pip install .`` are not dominated by generated figures,
   optimization outputs, or bulky reference ``wout`` files.
+
+
+Testing Layers
+--------------
+
+Run the cheapest layer that can catch the failure mode under review, then
+escalate only when the change affects solver physics, external parity, or
+generated artifacts.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 35 43
+
+   * - Layer
+     - Local command
+     - Purpose
+   * - Fast unit tests
+     - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000"``
+     - Required daily gate for pure kernels, Fourier conventions, namelist
+       parsing, boundary helpers, geometry/profile algebra, CLI helpers, and
+       small workflow assembly.  These tests should stay deterministic and
+       dependency-light.
+   * - Required CI
+     - Fast suite plus the coverage and bundled-parity commands below.
+     - Protects importability, package build, fast docs, line coverage, and
+       no-executable VMEC2000 parity fixtures.  CI should fail on real numerical
+       drift without requiring local VMEC2000, SIMSOPT, GPUs, or large assets.
+   * - Full physics validation
+     - ``python tools/fetch_assets.py`` then
+       ``RUN_FULL=1 JAX_ENABLE_X64=1 pytest -q -m "full and not vmec2000"``
+     - Manual or nightly validation for larger reference assets, multigrid
+       cases, broad fixed/free-boundary parity, and expensive regression
+       matrices that are too slow for every PR.
+   * - Optional VMEC2000 parity
+     - ``VMEC2000_EXEC=/path/to/xvmec2000 VMEC2000_INTEGRATION=1 pytest -q -m vmec2000``
+     - Executable-backed comparison against the Fortran code.  Use this to
+       refresh confidence in stored fixtures and stage traces; do not make the
+       required gate depend on a machine-local executable.
+   * - Optional SIMSOPT parity
+     - ``RUN_SIMSOPT_VALIDATION=1 pytest -q -m simsopt``
+     - Formula-level and workflow-level parity when SIMSOPT is installed.
+       These tests are useful for release validation but remain optional because
+       dependency availability is machine-specific.
+   * - Documentation
+     - ``SPHINX_FAST=1 LC_ALL=C.UTF-8 LANG=C.UTF-8 python -m sphinx -W -j auto -b html docs docs/_build/html``
+     - Required fast docs build.  Keep it focused on the landing page; full docs
+       and API pages remain in the non-fast build.
+
+
+Local Coverage Workflow
+-----------------------
+
+Run coverage from the repository root after installing the development extras
+or at least ``pytest-cov``.
+
+Required CI-equivalent coverage:
+
+.. code-block:: bash
+
+   JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000" \
+     --cov=vmec_jax \
+     --cov-report=xml \
+     --cov-report=term:skip-covered \
+     --cov-fail-under=80
+
+Full-physics coverage add-on when assets are available:
+
+.. code-block:: bash
+
+   python tools/fetch_assets.py
+   RUN_FULL=1 JAX_ENABLE_X64=1 pytest -q -m "full and not vmec2000" \
+     --cov=vmec_jax \
+     --cov-append \
+     --cov-report=term-missing:skip-covered \
+     --cov-report=html
+
+Use ``--cov-report=term-missing:skip-covered`` for small follow-ups and
+``htmlcov/index.html`` for module-level triage.  Coverage ratchets should follow
+real tests for physics kernels and user workflows; do not raise the threshold
+because optional dependency tests happened to run on one developer machine.
 
 
 Current Command Map
@@ -49,9 +135,10 @@ the recommended local escalation path.
        verify flux/pressure/iota/current wout-field invariants, and cover the
        VMEC2000 trace parser against bundled fixtures.
    * - Coverage gate
-     - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000" --cov=vmec_jax --cov-report=xml --cov-report=term-missing:skip-covered --cov-fail-under=63``
+     - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000" --cov=vmec_jax --cov-report=xml --cov-report=term:skip-covered --cov-fail-under=80``
      - Python 3.11 required CI coverage job.  The latest local equivalent
-       reported ``69.17%`` coverage while the enforced gate stayed at ``63%``.
+       reported ``81.10%`` coverage while the enforced gate was raised to
+       ``80%``.
    * - Optimization workflow smoke
      - ``pytest -q tests/test_optimization_examples.py tests/test_qs_ess_render_smoke.py``
      - After changing objective tuple construction, examples, or sweep
@@ -284,8 +371,8 @@ VMEC residual parity, Boozer/LASYM input spectra, QI diagnostic metadata,
 warning-clean docs, CI status, and artifact hygiene.
 
 
-Coverage Plan to 95%
---------------------
+Coverage Plan to 80%, 90%, and 95%
+-----------------------------------
 
 Coverage should rise because core physics code is directly tested, not because
 tests execute long workflows incidentally.
@@ -296,15 +383,15 @@ tests execute long workflows incidentally.
    synthesis, force assembly, residual norms, profile interpolation,
    preconditioner blocks, and wout serialization.
 3. Add low-resolution parity fixtures for each physics class in the manifest.
-   The fixtures should be small enough to run in required CI after
-   ``tools/fetch_assets.py``.
+   The fixtures should be small enough for required CI when bundled, or for the
+   full tier after ``tools/fetch_assets.py`` when they require released assets.
 4. Move large generated data and figures out of the tracked tree before raising
    coverage gates.  Coverage runs should not require downloading presentation
    artifacts.
 5. Raise ``--cov-fail-under`` in stages after the corresponding tests are
-   merged.  The current required fast-suite gate is ``63%``; the latest local
-   baseline is ``66.98%``.  The next planned ratchets are 70%, 80%, 90%, then
-   95%.
+   merged.  The current required fast-suite gate is ``80%``; the last recorded
+   local baseline is ``81.10%``.  The next planned ratchets are 85%, 90%, then
+   95%, after solver/driver refactors reduce runtime and add physics coverage.
 
 
 Repository Size Plan

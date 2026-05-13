@@ -2,16 +2,30 @@ from __future__ import annotations
 
 from dataclasses import replace as dc_replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from vmec_jax.booz_input import booz_xform_inputs_from_state
+from vmec_jax.booz_input import (
+    BoozXformInputs,
+    _equilibrium_flux_profiles,
+    _filter_bsubuv_jxbforce_parity_jax,
+    _jxbforce_nyquist_limits_from_trig,
+    _lambda_wout_from_full_jax,
+    _mode_scale,
+    _safe_sqrt_nonneg,
+    _vmec_full_to_half,
+    booz_xform_inputs_from_state,
+)
 from vmec_jax._compat import enable_x64
 from vmec_jax.driver import example_paths
+from vmec_jax.energy import FluxProfiles
+from vmec_jax.namelist import InData
 from vmec_jax.profiles import eval_profiles
 from vmec_jax.static import build_static
-from vmec_jax.wout import read_wout, state_from_wout
+from vmec_jax.vmec_tomnsp import vmec_trig_tables
+from vmec_jax.wout import _filter_bsubuv_jxbforce_parity, read_wout, state_from_wout
 from vmec_jax.config import load_config
 
 
@@ -75,6 +89,180 @@ def _assert_spectral_field_close(
     max_abs = float(np.max(np.abs(np.asarray(actual, dtype=float) - np.asarray(expected, dtype=float))))
     errors = {"rel_rms": rel_rms, "max_abs": max_abs}
     assert rel_rms < rel_rms_limit and max_abs < max_abs_limit, f"{case_name}.{field_name}: {errors}"
+
+
+def test_booz_inputs_pytree_and_radial_helper_branches() -> None:
+    pytest.importorskip("jax")
+    enable_x64(True)
+
+    children = tuple(np.asarray([float(i)]) for i in range(17))
+    inputs = BoozXformInputs(
+        rmnc=children[0],
+        zmns=children[1],
+        lmns=children[2],
+        bmnc=children[3],
+        bsubumnc=children[4],
+        bsubvmnc=children[5],
+        iota=children[6],
+        xm=children[7],
+        xn=children[8],
+        xm_nyq=children[9],
+        xn_nyq=children[10],
+        nfp=np.int64(5),
+        rmns=children[11],
+        zmnc=children[12],
+        lmnc=children[13],
+        bmns=children[14],
+        bsubumns=children[15],
+        bsubvmns=children[16],
+    )
+
+    flat, aux = inputs.tree_flatten()
+    assert len(flat) == 17
+    assert aux == 5
+    restored = BoozXformInputs.tree_unflatten(aux, flat)
+    assert restored.nfp == 5
+    np.testing.assert_array_equal(restored.bsubvmns, children[16])
+
+    np.testing.assert_allclose(
+        np.asarray(_mode_scale(np.asarray([0, 1, 0, 2]), np.asarray([0, 0, 1, -1]))),
+        [1.0, np.sqrt(2.0), np.sqrt(2.0), 2.0],
+    )
+
+    flux = FluxProfiles(
+        phipf=np.asarray([1.0]),
+        chipf=np.asarray([0.0]),
+        phips=np.asarray([1.0]),
+        signgs=-1,
+        lamscale=2.0,
+    )
+    flux_out, prof_out = _equilibrium_flux_profiles(
+        state=None,
+        static=SimpleNamespace(s=np.asarray([0.25])),
+        indata=InData(scalars={"NCURR": 0}, indexed={}),
+        signgs=-1,
+        flux=flux,
+        profiles_half={"pressure": np.asarray([7.0])},
+    )
+    assert flux_out is flux
+    np.testing.assert_allclose(np.asarray(prof_out["pressure"]), [7.0])
+
+    full_single = np.asarray([[1.0, 2.0]])
+    np.testing.assert_allclose(
+        np.asarray(_vmec_full_to_half(full=full_single, m_modes=np.asarray([0, 1]), s_full=np.asarray([0.0]))),
+        full_single,
+    )
+
+    full = np.asarray(
+        [
+            [2.0, 0.2, 4.0],
+            [4.0, 1.0, 8.0],
+            [8.0, 2.0, 16.0],
+        ]
+    )
+    half = np.asarray(_vmec_full_to_half(full=full, m_modes=np.asarray([0, 1, 2]), s_full=np.asarray([0.0, 0.25, 1.0])))
+    np.testing.assert_allclose(half[:, 0], [3.0, 6.0])
+    np.testing.assert_allclose(half[:, 1], [np.sqrt(0.5), 2.0 * np.sqrt(0.625)])
+    np.testing.assert_allclose(half[:, 2], [6.0, 12.0])
+
+    lam_full = np.asarray([[1.0, 2.0], [3.0, 4.0]])
+    zero_lam = _lambda_wout_from_full_jax(
+        lam_full=lam_full,
+        m_modes=np.asarray([0, 1]),
+        phipf_internal=np.asarray([1.0, 1.0]),
+        lamscale=0.0,
+        s_full=np.asarray([0.0, 1.0]),
+    )
+    np.testing.assert_allclose(np.asarray(zero_lam), 0.0)
+
+    short_lam = _lambda_wout_from_full_jax(
+        lam_full=np.asarray([[1.0, 2.0]]),
+        m_modes=np.asarray([0, 1]),
+        phipf_internal=np.asarray([1.0]),
+        lamscale=1.0,
+        s_full=np.asarray([0.0]),
+    )
+    np.testing.assert_allclose(np.asarray(short_lam), 0.0)
+
+
+def test_booz_safe_sqrt_nonnegative_custom_jvp() -> None:
+    jax_mod = pytest.importorskip("jax")
+    enable_x64(True)
+
+    np.testing.assert_allclose(np.asarray(_safe_sqrt_nonneg(np.asarray([-1.0, 0.0, 4.0]))), [0.0, 0.0, 2.0])
+    grad = jax_mod.grad(lambda x: _safe_sqrt_nonneg(x))(4.0)
+    grad_at_zero = jax_mod.grad(lambda x: _safe_sqrt_nonneg(x))(0.0)
+    grad_negative = jax_mod.grad(lambda x: _safe_sqrt_nonneg(x))(-1.0)
+
+    np.testing.assert_allclose(np.asarray(grad), 0.25)
+    np.testing.assert_allclose(np.asarray(grad_at_zero), 0.0)
+    np.testing.assert_allclose(np.asarray(grad_negative), 0.0)
+
+
+def test_booz_jxbforce_parity_jax_matches_numpy_and_guards() -> None:
+    pytest.importorskip("jax")
+    enable_x64(True)
+
+    trig = vmec_trig_tables(ntheta=4, nzeta=3, nfp=1, mmax=2, nmax=1, lasym=False, cache=False)
+    ns = 2
+    nt2 = int(trig.ntheta2)
+    nzeta = int(np.asarray(trig.cosnv).shape[0])
+    values = np.linspace(-0.4, 0.8, ns * (nt2 + 1) * nzeta).reshape(ns, nt2 + 1, nzeta)
+    bsubu_even = values
+    bsubu_odd = 0.5 * values
+    bsubv_even = np.cos(values)
+    bsubv_odd = 0.25 * np.cos(values)
+    s = np.asarray([0.0, 1.0])
+
+    assert _jxbforce_nyquist_limits_from_trig(trig) == (nt2 - 1, nzeta // 2)
+    with pytest.raises(ValueError, match="smaller"):
+        _filter_bsubuv_jxbforce_parity_jax(
+            bsubu_even=bsubu_even[:, : nt2 - 1],
+            bsubu_odd=bsubu_odd[:, : nt2 - 1],
+            bsubv_even=bsubv_even[:, : nt2 - 1],
+            bsubv_odd=bsubv_odd[:, : nt2 - 1],
+            trig=trig,
+            mmax_force=2,
+            nmax_force=1,
+            s=s,
+        )
+
+    neg_u, neg_v = _filter_bsubuv_jxbforce_parity_jax(
+        bsubu_even=bsubu_even,
+        bsubu_odd=bsubu_odd,
+        bsubv_even=bsubv_even,
+        bsubv_odd=bsubv_odd,
+        trig=trig,
+        mmax_force=-1,
+        nmax_force=1,
+        s=s,
+    )
+    np.testing.assert_allclose(np.asarray(neg_u), bsubu_even[:, :nt2, :])
+    np.testing.assert_allclose(np.asarray(neg_v), bsubv_even[:, :nt2, :])
+
+    actual_u, actual_v = _filter_bsubuv_jxbforce_parity_jax(
+        bsubu_even=bsubu_even,
+        bsubu_odd=bsubu_odd,
+        bsubv_even=bsubv_even,
+        bsubv_odd=bsubv_odd,
+        trig=trig,
+        mmax_force=2,
+        nmax_force=1,
+        s=s,
+    )
+    expected_u, expected_v = _filter_bsubuv_jxbforce_parity(
+        bsubu_even=bsubu_even,
+        bsubu_odd=bsubu_odd,
+        bsubv_even=bsubv_even,
+        bsubv_odd=bsubv_odd,
+        trig=trig,
+        mmax_force=2,
+        nmax_force=1,
+        s=s,
+    )
+
+    np.testing.assert_allclose(np.asarray(actual_u), expected_u, rtol=2.0e-14, atol=2.0e-14)
+    np.testing.assert_allclose(np.asarray(actual_v), expected_v, rtol=2.0e-14, atol=2.0e-14)
 
 
 def test_booz_xform_inputs_from_state_shapes():

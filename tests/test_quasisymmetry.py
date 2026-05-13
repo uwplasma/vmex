@@ -161,6 +161,152 @@ def test_quasisymmetry_coefficient_shape_helpers():
         _radial_mode_matrix(np.ones((4, 4)), radial_count=3, mode_count=2)
 
 
+def test_quasisymmetry_nyquist_coeff_helpers_project_known_modes_and_validate_inputs():
+    pytest.importorskip("jax")
+
+    from vmec_jax.modes import ModeTable
+    from vmec_jax.quasisymmetry import (
+        _as_jax_array,
+        _half_grid,
+        _vmec_symoutput_split_jax,
+        _vmec_wrout_nyquist_cos_coeffs_jax,
+        _vmec_wrout_nyquist_sin_coeffs_jax,
+        quasisymmetry_ratio_residual_from_wout,
+    )
+    from vmec_jax.vmec_tomnsp import vmec_trig_tables
+
+    trig = vmec_trig_tables(ntheta=6, nzeta=5, nfp=1, mmax=2, nmax=2, lasym=False)
+    modes = ModeTable(m=np.array([0, 1, 1, 2]), n=np.array([0, 1, -1, 0]))
+    theta = 2.0 * np.pi * np.arange(int(trig.ntheta3)) / float(trig.ntheta1)
+    zeta = 2.0 * np.pi * np.arange(5) / 5.0
+
+    constant = np.ones((2, int(trig.ntheta3), 5))
+    cos_coeff = np.asarray(_vmec_wrout_nyquist_cos_coeffs_jax(f=constant, modes=modes, trig=trig))
+    sin_coeff = np.asarray(_vmec_wrout_nyquist_sin_coeffs_jax(f=constant, modes=modes, trig=trig))
+    np.testing.assert_allclose(cos_coeff[:, 0], 1.0, rtol=1e-13, atol=1e-13)
+    np.testing.assert_allclose(cos_coeff[:, 1:], 0.0, atol=1e-13)
+    np.testing.assert_allclose(sin_coeff, 0.0, atol=1e-13)
+
+    helical_cos = np.cos(theta[:, None] - zeta[None, :])[None, :, :]
+    helical_sin = np.sin(theta[:, None] - zeta[None, :])[None, :, :]
+    cos_projected = np.asarray(_vmec_wrout_nyquist_cos_coeffs_jax(f=helical_cos, modes=modes, trig=trig))
+    sin_projected = np.asarray(_vmec_wrout_nyquist_sin_coeffs_jax(f=helical_sin, modes=modes, trig=trig))
+    np.testing.assert_allclose(cos_projected[0, 1], 1.0, rtol=1e-13, atol=1e-13)
+    np.testing.assert_allclose(sin_projected[0, 1], 1.0, rtol=1e-13, atol=1e-13)
+
+    empty_modes = ModeTable(m=np.array([], dtype=int), n=np.array([], dtype=int))
+    empty = _vmec_wrout_nyquist_cos_coeffs_jax(f=constant, modes=empty_modes, trig=trig)
+    assert np.asarray(empty).shape == (2, 0)
+
+    np.testing.assert_allclose(np.asarray(_half_grid(1, np.float64)), [])
+    big_endian = np.array([1.0, 2.0], dtype=">f8")
+    np.testing.assert_allclose(np.asarray(_as_jax_array(big_endian)), [1.0, 2.0])
+
+    with pytest.raises(ValueError, match="Expected f with shape"):
+        _vmec_wrout_nyquist_cos_coeffs_jax(f=np.zeros((2, 3)), modes=modes, trig=trig)
+    with pytest.raises(ValueError, match="Expected f with shape"):
+        _vmec_wrout_nyquist_sin_coeffs_jax(f=np.zeros((2, 3)), modes=modes, trig=trig)
+    with pytest.raises(ValueError, match="smaller than VMEC ntheta2"):
+        _vmec_wrout_nyquist_cos_coeffs_jax(f=np.zeros((1, int(trig.ntheta2) - 1, 5)), modes=modes, trig=trig)
+    with pytest.raises(ValueError, match="Input theta grid"):
+        _vmec_symoutput_split_jax(f=np.zeros((1, int(trig.ntheta2) - 1, 5)), trig=trig)
+    with pytest.raises(ValueError, match="Expected f with shape"):
+        _vmec_symoutput_split_jax(f=np.zeros((2, 3)), trig=trig)
+    with pytest.raises(ValueError, match="weights must have the same length"):
+        quasisymmetry_ratio_residual_from_wout(SimpleNamespace(), surfaces=[0.25, 0.5], weights=[1.0])
+
+
+def test_quasisymmetry_diagnostics_from_state_uses_lightweight_vmec_dependencies(monkeypatch):
+    pytest.importorskip("jax")
+
+    import vmec_jax.booz_input as booz_input
+    import vmec_jax.driver as driver
+    import vmec_jax.energy as energy
+    import vmec_jax.profiles as profiles
+    import vmec_jax.vmec_bcovar as vmec_bcovar
+    import vmec_jax.vmec_lforbal as vmec_lforbal
+    from vmec_jax.quasisymmetry import quasisymmetry_diagnostics_from_state
+
+    class InData:
+        def get_bool(self, _name, default=False):
+            return bool(default)
+
+        def get_int(self, name, default=0):
+            return 1 if name == "NCURR" else int(default)
+
+    def eval_profiles(_indata, s):
+        return {"pressure": np.linspace(0.0, 0.3, len(s))}
+
+    def flux_profiles_from_indata(_indata, s, signgs):
+        del signgs
+        return SimpleNamespace(
+            phipf=np.ones(len(s)),
+            chipf=np.linspace(0.0, 0.2, len(s)),
+            phips=np.ones(len(s)),
+        )
+
+    def final_flux_profiles_from_state(**kwargs):
+        s = np.asarray(kwargs["static_in"].s)
+        return flux_profiles_from_indata(None, s, 1), {"pressure": np.linspace(0.0, 0.3, len(s))}
+
+    def vmec_bcovar_half_mesh_from_wout(**kwargs):
+        static = kwargs["static"]
+        trig = kwargs["trig"]
+        ns = len(static.s)
+        shape = (ns, int(trig.ntheta3), int(static.cfg.nzeta))
+        radial = np.arange(ns, dtype=float)[:, None, None]
+        theta = np.arange(shape[1], dtype=float)[None, :, None]
+        zeta = np.arange(shape[2], dtype=float)[None, None, :]
+        field = np.ones(shape) + 0.05 * radial + 0.03 * theta + 0.02 * zeta
+        return SimpleNamespace(
+            jac=SimpleNamespace(sqrtg=field),
+            bsq=2.0 + 0.2 * field,
+            bsubu=0.2 + 0.01 * field,
+            bsubv=0.4 + 0.02 * field,
+            bsupu=0.5 + 0.03 * field,
+            bsupv=0.6 + 0.04 * field,
+        )
+
+    def currents_from_bcovar(**kwargs):
+        ns = len(kwargs["s"])
+        return np.linspace(0.0, 0.1, ns), np.linspace(1.0, 1.2, ns), None, None
+
+    def parity_filter(**kwargs):
+        return kwargs["bsubu_even"], kwargs["bsubv_even"]
+
+    monkeypatch.setattr(profiles, "eval_profiles", eval_profiles)
+    monkeypatch.setattr(energy, "flux_profiles_from_indata", flux_profiles_from_indata)
+    monkeypatch.setattr(driver, "_final_flux_profiles_from_state", final_flux_profiles_from_state)
+    monkeypatch.setattr(vmec_bcovar, "vmec_bcovar_half_mesh_from_wout", vmec_bcovar_half_mesh_from_wout)
+    monkeypatch.setattr(vmec_lforbal, "currents_from_bcovar", currents_from_bcovar)
+    monkeypatch.setattr(booz_input, "_filter_bsubuv_jxbforce_parity_jax", parity_filter)
+
+    from collections import namedtuple
+
+    Cfg = namedtuple("Cfg", "mpol ntor ntheta nzeta nfp lasym lthreed")
+    for lasym in (False, True):
+        cfg = Cfg(mpol=2, ntor=1, ntheta=6, nzeta=4, nfp=1, lasym=lasym, lthreed=True)
+        static = SimpleNamespace(s=np.linspace(0.0, 1.0, 4), cfg=cfg)
+        diag = quasisymmetry_diagnostics_from_state(
+            state=SimpleNamespace(Rcos=np.ones((4, 3))),
+            static=static,
+            indata=InData(),
+            signgs=1,
+        )
+
+        assert diag.lasym is lasym
+        assert np.asarray(diag.buco).shape == (4,)
+        assert np.asarray(diag.bvco).shape == (4,)
+        assert np.asarray(diag.gmnc).shape[0] == 4
+        assert np.asarray(diag.bmnc).shape == np.asarray(diag.gmnc).shape
+        assert np.all(np.isfinite(np.asarray(diag.bsubumnc)))
+        assert np.all(np.isfinite(np.asarray(diag.bsubvmnc)))
+        if lasym:
+            assert np.asarray(diag.bmns).shape == np.asarray(diag.bmnc).shape
+        else:
+            np.testing.assert_allclose(np.asarray(diag.bmns), 0.0)
+
+
 def test_quasisymmetry_symoutput_split_reconstructs_half_grid():
     pytest.importorskip("jax")
 

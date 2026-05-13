@@ -37,9 +37,10 @@ acceptance criteria or evidence changes.
 - Exact-history correctness is now protected against relaxed trial-solve drift:
   final ``input.final`` and ``wout_final.nc`` use the best exact accepted point
   when the last trial-accepted point replays worse.
-- Required CI coverage is 69.30% locally on the Python 3.11 CI-equivalent
-  required suite (`731 passed, 21 skipped, 85 deselected`, 8:20), above the
-  current 63% gate but still far below the long-term 95% goal.
+- Required CI coverage is 81.10% locally on the Python 3.11 CI-equivalent
+  required suite (`896 passed, 21 skipped, 85 deselected`, 9:46 with compact
+  coverage output), above the raised 80% gate but still below the long-term 95%
+  goal.
 - Full non-VMEC2000 physics coverage with refreshed released assets reaches
   72.35% locally (`74 passed, 4 skipped`, 27:21). This is still short of the
   80% target and is too slow for per-commit required CI without splitting the
@@ -395,10 +396,12 @@ Acceptance:
 
 ## Milestone 7: Tests And Coverage
 
-- [ ] Raise required CI coverage from the current fast gate toward 95% in staged
-      steps: 70%, 75%, 85%, 95%. The 80% line-coverage target is not reachable
-      from current tests alone: even the refreshed full non-VMEC2000 physics
-      tier measures 72.35% and takes 27:21 locally.
+- [x] Raise required CI coverage to the first 80% target with fast tests that
+      exercise solver, driver, optimization, wout, free-boundary,
+      quasisymmetry, parity, and constraint branches.
+- [ ] Continue raising required CI coverage toward 95% in staged steps: 85%,
+      90%, then 95%, after additional source refactors and physics gates reduce
+      runtime pressure.
 - [ ] Add targeted tests before coverage-only tests: physics gates first, branch
       logic second, I/O/schema third.
 - [ ] Keep required CI under 10 minutes by using small fixtures and nightly heavy
@@ -456,11 +459,10 @@ Acceptance:
 
 Realistic next targets for this development cycle:
 
-1. Keep the required CI coverage gate at 63% until GitHub has clear margin,
-   then raise toward 65% using fast, physics-relevant
-   branch tests in `vmec_bcovar`, `vmec_realspace`, `finite_beta`, `wout`, and
-   `optimization_workflow`.  Do not raise the CI floor again until GitHub's
-   measured coverage has clear margin above the target.
+1. Keep the required CI coverage gate at 80% and preserve sub-ten-minute py3.11
+   coverage runtime by pruning duplicate helper tests, splitting slow
+   validation into optional tiers, or refactoring the largest modules so fewer
+   synthetic branch tests are required.
 2. Raise the solved-state QI diagnostic from the new low-resolution bundled
    gate to reviewed higher-resolution evidence: smooth QI, legacy QI, mirror
    ratio, elongation, iota, aspect ratio, and Boozer `|B|` contour quality.
@@ -994,3 +996,16 @@ Defer beyond the current cycle:
   Result: `74 passed, 4 skipped`, 27:21, combined line coverage 72.35%. This is
   useful nightly evidence but too slow and still too low for the requested 80%
   per-commit gate without larger `solve.py`/`wout.py`/`implicit.py` refactors.
+- 2026-05-13: Completed a larger parallel coverage push across solve, driver,
+  optimization, wout, free-boundary, tomnsp, preconditioner, quasisymmetry,
+  parity, and constraint lanes. Added fast helper/branch tests plus a few
+  low-risk helper seams and fixed two real free-boundary defects: missing
+  unit-current defaulting for raw-free mgrid data and an undefined
+  `nu_fourp` local in VMEC nonsingular terms. Validation:
+  `ruff check vmec_jax/driver.py vmec_jax/free_boundary.py vmec_jax/optimization.py vmec_jax/solve.py vmec_jax/vmec_tomnsp.py tests`
+  passed; changed-lane pytest passed with `477 passed, 1 skipped, 2 deselected`
+  in `2:51`; fast docs passed; required coverage passed with
+  `896 passed, 21 skipped, 85 deselected`, `81.10%` coverage, and `9:46` using
+  the compact terminal report. Raised the py3.11 CI coverage floor to 80%.
+  The next testing lane is preserving the 80% gate while adding more
+  physics/parity coverage rather than synthetic branch coverage.

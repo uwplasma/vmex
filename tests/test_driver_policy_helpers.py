@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
 
 import numpy as np
@@ -63,6 +64,70 @@ def test_default_non_autodiff_solver_policy_for_backend_uses_input_structure(bac
     assert driver._default_non_autodiff_solver_policy_for_backend(indata, backend) == expected
 
 
+@pytest.mark.parametrize("solver_device", [None, "", " none ", "AUTO", "default"])
+def test_resolve_fixed_boundary_solver_device_inherits_default_for_auto_values(solver_device):
+    assert (
+        driver._resolve_fixed_boundary_solver_device_name(
+            solver_device=solver_device,
+            backend="gpu",
+            cfg=object(),
+            indata=object(),
+            solver_lower="vmec2000_iter",
+            cli_fixed_boundary_mode=True,
+            accelerated_mode=True,
+            ns_list_input=[5, 9],
+            niter_list_input=[10, 20],
+            restart_state_present=True,
+            restart_solver_state_present=True,
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(("solver_device", "expected"), [(" cpu ", "cpu"), ("GPU", "gpu"), ("tpu", "tpu")])
+def test_resolve_fixed_boundary_solver_device_preserves_explicit_names(solver_device, expected):
+    assert (
+        driver._resolve_fixed_boundary_solver_device_name(
+            solver_device=solver_device,
+            backend="cpu",
+            cfg=object(),
+            indata=object(),
+            solver_lower="vmec2000_iter",
+            cli_fixed_boundary_mode=False,
+            accelerated_mode=False,
+            ns_list_input=None,
+            niter_list_input=None,
+            restart_state_present=False,
+            restart_solver_state_present=False,
+        )
+        == expected
+    )
+
+
+def test_dynamic_scan_probe_settings_clamps_single_iteration_probe(monkeypatch):
+    monkeypatch.setattr(driver, "_default_backend_name", lambda: "cpu")
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", "50")
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", "off")
+
+    pre_iters, timed_probe, backend = driver._dynamic_scan_probe_settings(1)
+
+    assert pre_iters == 1
+    assert timed_probe is False
+    assert backend == "cpu"
+
+
+def test_example_paths_reports_missing_wout_as_none(tmp_path):
+    data_dir = tmp_path / "examples" / "data"
+    data_dir.mkdir(parents=True)
+    input_path = data_dir / "input.synthetic"
+    input_path.write_text("&INDATA\n/\n")
+
+    found_input, found_wout = driver.example_paths("synthetic", root=tmp_path)
+
+    assert found_input == input_path
+    assert found_wout is None
+
+
 def test_requested_final_ftol_prefers_last_valid_list_value_and_clamps():
     fallback = _Input(FTOL=4.0e-7)
     negative_fallback = _Input(FTOL=-1.0)
@@ -90,6 +155,171 @@ def test_accelerated_cli_budget_helpers_scale_total_and_weight_stages():
     assert driver._accelerated_cli_budgeted_total_iters(total_budget=0, ns_stages=[4]) == 1
     assert driver._accelerated_cli_budgeted_stage_iters(total_budget=10, ns_stages=[4, 7, 10]) == [5, 3, 2]
     assert driver._accelerated_cli_budgeted_stage_iters(total_budget=0, ns_stages=[]) == [1]
+
+
+def test_distribute_stage_iters_matches_vmec_budget_edges():
+    assert driver._distribute_stage_iters(iters=0, nstep=3) == [0]
+    assert driver._distribute_stage_iters(iters=2, nstep=5) == [2]
+    assert driver._distribute_stage_iters(iters=7, nstep=3) == [3, 2, 2]
+    assert driver._distribute_stage_iters(iters=5, nstep=1) == [5]
+
+
+def test_resume_state_sanitizers_drop_unsafe_payloads_and_clamp_step():
+    resume_state = {
+        "time_step": 0.25,
+        "inv_tau": [1.0, 2.0],
+        "iter_offset": 17,
+        "flip_sign": -1,
+        "vmec2000_cache_valid": True,
+        "cached_arrays": object(),
+    }
+
+    cross_grid = driver._sanitize_resume_state_for_grid_change(resume_state, step_size=0.1)
+    same_grid = driver._sanitize_resume_state_for_same_grid(resume_state, step_size=0.1)
+
+    assert cross_grid["time_step"] == pytest.approx(0.1)
+    assert cross_grid["inv_tau"] == [pytest.approx(1.5)] * 10
+    assert cross_grid["iter_offset"] == 0
+    assert cross_grid["flip_sign"] == -1.0
+    assert cross_grid["vmec2000_cache_valid"] is False
+    assert "cached_arrays" not in cross_grid
+
+    assert same_grid["time_step"] == pytest.approx(0.1)
+    assert same_grid["inv_tau"] == [1.0, 2.0]
+    assert same_grid["iter_offset"] == 17
+    assert same_grid["vmec2000_cache_valid"] is False
+    assert "cached_arrays" not in same_grid
+    assert driver._sanitize_resume_state_for_grid_change({}, step_size=0.1) is None
+    assert driver._sanitize_resume_state_for_same_grid(None, step_size=0.1) is None
+
+
+def _stage_result(label, *, n_iter, w_history, diagnostics=None):
+    zeros = np.zeros((0,), dtype=float)
+    return driver.SolveVmecResidualResult(
+        state=label,
+        n_iter=int(n_iter),
+        w_history=np.asarray(w_history, dtype=float),
+        fsqr2_history=np.asarray(w_history, dtype=float) + 10.0,
+        fsqz2_history=np.asarray(w_history, dtype=float) + 20.0,
+        fsql2_history=np.asarray(w_history, dtype=float) + 30.0,
+        grad_rms_history=zeros,
+        step_history=zeros,
+        diagnostics={} if diagnostics is None else dict(diagnostics),
+    )
+
+
+def test_merge_stage_chunk_results_concatenates_histories_and_diagnostics():
+    first = _stage_result(
+        "first",
+        n_iter=1,
+        w_history=[1.0, 0.5],
+        diagnostics={"step_status_history": np.asarray([1.0]), "first_only": True},
+    )
+    second = _stage_result(
+        "second",
+        n_iter=2,
+        w_history=[0.25, 0.125, 0.0625],
+        diagnostics={"step_status_history": np.asarray([2.0, 3.0]), "time_step_history": np.asarray([0.1])},
+    )
+
+    merged = driver._merge_stage_chunk_results([first, second], mode_i="accelerated")
+
+    assert merged.state == "second"
+    assert merged.n_iter == 4
+    np.testing.assert_allclose(merged.w_history, [1.0, 0.5, 0.25, 0.125, 0.0625])
+    np.testing.assert_allclose(merged.diagnostics["step_status_history"], [1.0, 2.0, 3.0])
+    np.testing.assert_allclose(merged.diagnostics["time_step_history"], [0.1])
+    np.testing.assert_array_equal(merged.diagnostics["accelerated_stage_chunk_iters"], [2, 3])
+    assert merged.diagnostics["accelerated_stage_chunk_count"] == 2
+    assert merged.diagnostics["accelerated_stage_chunked"] is True
+    assert merged.diagnostics["accelerated_stage_effective_mode"] == "accelerated"
+
+
+def test_merge_stage_chunk_results_marks_single_chunk_without_concatenation():
+    result = _stage_result("single", n_iter=0, w_history=[1.0], diagnostics={"kept": "yes"})
+
+    merged = driver._merge_stage_chunk_results([result], mode_i="parity")
+
+    assert merged.state == "single"
+    assert merged.diagnostics["kept"] == "yes"
+    assert merged.diagnostics["accelerated_stage_chunked"] is False
+    assert merged.diagnostics["accelerated_stage_effective_mode"] == "parity"
+
+
+def test_stage_switch_reason_from_progress_reports_only_actionable_misses():
+    assert (
+        driver._stage_switch_reason_from_progress(
+            start_total_fsq=10.0,
+            best_total_fsq=9.0,
+            target_total_fsq=1.0,
+            chunk_iters=2,
+            remaining_budget=0,
+        )
+        is None
+    )
+    assert (
+        driver._stage_switch_reason_from_progress(
+            start_total_fsq=10.0,
+            best_total_fsq=np.inf,
+            target_total_fsq=1.0,
+            chunk_iters=2,
+            remaining_budget=10,
+        )
+        == "nonfinite_total_fsq"
+    )
+    assert (
+        driver._stage_switch_reason_from_progress(
+            start_total_fsq=10.0,
+            best_total_fsq=10.0,
+            target_total_fsq=1.0,
+            chunk_iters=2,
+            remaining_budget=10,
+        )
+        == "nondecreasing_total_fsq"
+    )
+    assert (
+        driver._stage_switch_reason_from_progress(
+            start_total_fsq=100.0,
+            best_total_fsq=10.0,
+            target_total_fsq=1.0,
+            chunk_iters=1,
+            remaining_budget=2,
+        )
+        is None
+    )
+    assert driver._stage_switch_reason_from_progress(
+        start_total_fsq=100.0,
+        best_total_fsq=90.0,
+        target_total_fsq=1.0,
+        chunk_iters=1,
+        remaining_budget=3,
+    ).startswith("projected_budget_miss:")
+
+
+def test_vmec_history_comparison_helpers_cover_mismatch_and_tolerance():
+    lhs = SimpleNamespace(
+        w_history=np.asarray([1.0, 2.0]),
+        fsqr2_history=np.asarray([1.0]),
+        fsqz2_history=np.asarray([2.0]),
+        fsql2_history=np.asarray([3.0]),
+    )
+    rhs = SimpleNamespace(
+        w_history=np.asarray([1.0, 2.0 + 1.0e-7]),
+        fsqr2_history=np.asarray([1.0]),
+        fsqz2_history=np.asarray([2.0]),
+        fsql2_history=np.asarray([3.0]),
+    )
+    wrong_shape = SimpleNamespace(
+        w_history=np.asarray([1.0]),
+        fsqr2_history=np.asarray([1.0]),
+        fsqz2_history=np.asarray([2.0]),
+        fsql2_history=np.asarray([3.0]),
+    )
+
+    assert driver._vmec_history_relerr(np.asarray([1.0]), np.asarray([[1.0]])) == np.inf
+    assert driver._vmec_histories_match(lhs, rhs, rtol=1.0e-5, atol=0.0) is True
+    assert driver._vmec_histories_match(lhs, rhs, rtol=1.0e-10, atol=0.0) is False
+    assert driver._vmec_histories_match(lhs, wrong_shape, rtol=1.0, atol=1.0) is False
 
 
 def test_result_final_residuals_prefers_explicit_diagnostics_over_histories():
@@ -173,3 +403,87 @@ def test_result_hits_total_target_clamps_negative_target_and_handles_none():
     assert driver._result_hits_total_target(zero, fsq_total_target=-1.0) is True
     assert driver._result_hits_total_target(nonzero, fsq_total_target=-1.0) is False
     assert driver._result_hits_total_target(zero, fsq_total_target=None) is False
+
+
+def test_wout_from_fixed_boundary_run_samples_fsqt_and_falls_back_to_residual_recompute(monkeypatch, tmp_path):
+    import vmec_jax.wout as wout_module
+
+    captured = {}
+
+    def _fake_wout_minimal_from_fixed_boundary(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(path=kwargs["path"], marker="wout")
+
+    monkeypatch.setattr(wout_module, "wout_minimal_from_fixed_boundary", _fake_wout_minimal_from_fixed_boundary)
+    monkeypatch.setattr(driver, "residual_scalars_from_state", lambda **_kwargs: (7.0, 8.0, 9.0))
+    monkeypatch.delenv("VMEC_JAX_WOUT_FAST_BCOVAR", raising=False)
+
+    result = SimpleNamespace(
+        diagnostics={"converged": True},
+        fsqr2_history=np.asarray([1.0, 2.0, 3.0]),
+        fsqz2_history=np.asarray([4.0, 5.0, 6.0]),
+    )
+    run = driver.FixedBoundaryRun(
+        cfg=object(),
+        indata=object(),
+        static=object(),
+        state=object(),
+        result=result,
+        flux=None,
+        profiles={},
+        signgs=-1,
+    )
+
+    out = driver.wout_from_fixed_boundary_run(
+        run,
+        include_fsq=True,
+        path=tmp_path / "wout_synthetic.nc",
+        fast_bcovar=True,
+    )
+
+    assert out.marker == "wout"
+    assert captured["fsqr"] == 7.0
+    assert captured["fsqz"] == 8.0
+    assert captured["fsql"] == 9.0
+    assert captured["converged"] is True
+    np.testing.assert_allclose(captured["fsqt"][:3], [5.0, 7.0, 9.0])
+    assert captured["fsqt"].shape == (100,)
+    assert os.getenv("VMEC_JAX_WOUT_FAST_BCOVAR") is None
+
+
+def test_wout_from_fixed_boundary_run_include_fsq_false_restores_existing_fast_env(monkeypatch, tmp_path):
+    import vmec_jax.wout as wout_module
+
+    captured = {}
+
+    def _fake_wout_minimal_from_fixed_boundary(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(path=kwargs["path"])
+
+    monkeypatch.setattr(wout_module, "wout_minimal_from_fixed_boundary", _fake_wout_minimal_from_fixed_boundary)
+    monkeypatch.setattr(driver, "residual_scalars_from_state", lambda **_kwargs: pytest.fail("unexpected recompute"))
+    monkeypatch.setenv("VMEC_JAX_WOUT_FAST_BCOVAR", "original")
+    run = driver.FixedBoundaryRun(
+        cfg=object(),
+        indata=object(),
+        static=object(),
+        state=object(),
+        result=None,
+        flux=None,
+        profiles={},
+        signgs=1,
+    )
+
+    driver.wout_from_fixed_boundary_run(
+        run,
+        include_fsq=False,
+        path=tmp_path / "wout_no_fsq.nc",
+        fast_bcovar=False,
+    )
+
+    assert captured["fsqr"] == 0.0
+    assert captured["fsqz"] == 0.0
+    assert captured["fsql"] == 0.0
+    assert captured["fsqt"] is None
+    assert captured["converged"] is None
+    assert os.environ["VMEC_JAX_WOUT_FAST_BCOVAR"] == "original"

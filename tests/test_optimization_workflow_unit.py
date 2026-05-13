@@ -1,0 +1,807 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+from vmec_jax.optimization import BoundaryParamSpec
+
+
+def test_objective_factory_callbacks_dispatch_to_helpers(monkeypatch) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    ctx = SimpleNamespace(static="static", indata="indata", signgs=-1, flux="flux")
+    monkeypatch.setattr(
+        workflow,
+        "equilibrium_aspect_ratio_from_state",
+        lambda *, state, static: 8.5 if (state, static) == ("state", "static") else -1.0,
+    )
+    monkeypatch.setattr(workflow, "mean_iota", lambda ctx_arg, state: 0.33 if (ctx_arg, state) == (ctx, "state") else -1.0)
+
+    def fake_iota_floor(value, target, *, softness):
+        assert value == 0.33
+        assert target == 0.41
+        assert softness == 0.02
+        return np.asarray([0.08])
+
+    def fake_lgradb_penalty_from_state(**kwargs):
+        assert kwargs == {
+            "state": "state",
+            "static": "static",
+            "indata": "indata",
+            "signgs": -1,
+            "flux_local": "flux",
+            "threshold": 0.25,
+            "s_index": -2,
+            "ntheta": 5,
+            "nphi": 7,
+            "smooth_penalty": 0.03,
+        }
+        return {"residuals1d": np.asarray([2.0, 3.0]), "total": 13.0}
+
+    monkeypatch.setattr(workflow, "smooth_min_abs_iota_residual", fake_iota_floor)
+    monkeypatch.setattr(workflow, "lgradb_penalty_from_state", fake_lgradb_penalty_from_state)
+
+    aspect = workflow.aspect_objective(target=7.0, weight=2.0)
+    iota = workflow.mean_iota_objective(target=0.4, weight=3.0)
+    floor = workflow.abs_mean_iota_floor_objective(target=0.41, weight=4.0, softness=0.02)
+    lgradb = workflow.lgradb_objective(
+        threshold=0.25,
+        weight=5.0,
+        s_index=-2,
+        ntheta=5,
+        nphi=7,
+        smooth_penalty=0.03,
+    )
+
+    np.testing.assert_allclose(aspect.residual(ctx, "state"), [3.0])
+    np.testing.assert_allclose(iota.residual(ctx, "state"), [-0.21])
+    np.testing.assert_allclose(floor.residual(ctx, "state"), [0.32])
+    np.testing.assert_allclose(lgradb.residual(ctx, "state"), [10.0, 15.0])
+    assert lgradb.total(ctx, "state") == 325.0
+
+
+def test_mean_iota_handles_axis_only_and_full_profiles(monkeypatch) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    ctx = SimpleNamespace(static="static", indata="indata", signgs=1)
+    profiles = iter(
+        [
+            (None, np.asarray([0.1]), None),
+            (None, np.asarray([0.0, 0.3, 0.5]), None),
+        ]
+    )
+
+    def fake_iota_profiles_from_state(**kwargs):
+        assert kwargs == {"state": "state", "static": "static", "indata": "indata", "signgs": 1}
+        return next(profiles)
+
+    monkeypatch.setattr(workflow, "equilibrium_iota_profiles_from_state", fake_iota_profiles_from_state)
+
+    assert float(workflow.mean_iota(ctx, "state")) == 0.0
+    assert float(workflow.mean_iota(ctx, "state")) == pytest.approx(0.4)
+
+
+def test_boozer_target_shape_guards_and_qi_runtime_errors() -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    with pytest.raises(RuntimeError, match="inside a QI solve"):
+        workflow.BoozerBTarget(target_bmnc=np.ones((1, 2))).J(None, None)
+
+    with pytest.raises(RuntimeError, match="inside a QI solve"):
+        workflow.MaxElongation(threshold=3.0).J(None, None)
+
+    term = workflow.qi_boozer_b_target_objective(target_bmnc=np.ones((1, 3)))
+    with pytest.raises(ValueError, match="target_bmnc"):
+        term.residual_and_total(None, None, {"booz": {"bmnc_b": np.ones((2, 3))}})
+
+    term = workflow.qi_boozer_b_target_objective(target_bmnc=np.ones((1, 3)), target_bmns=np.ones((1, 2)))
+    with pytest.raises(ValueError, match="target_bmns"):
+        term.residual_and_total(None, None, {"booz": {"bmnc_b": np.ones((1, 3))}})
+
+
+def test_boozer_b_target_from_wout_uses_nearest_surfaces_and_transposes(monkeypatch, tmp_path) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    instances = []
+
+    class FakeBoozXform:
+        def __init__(self, *, verbose):
+            assert verbose == 0
+            self.s_in = np.asarray([0.0, 0.2, 0.7, 1.0])
+            self.bmnc_b = np.asarray([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+            self.bmns_b = np.asarray([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]])
+            self.xm_b = np.asarray([0, 1, 2])
+            self.xn_b = np.asarray([0, -1, 1])
+            self.s_b = np.asarray([0.2, 0.7])
+            self.nfp = 5
+            instances.append(self)
+
+        def read_wout(self, path, *, flux):
+            self.read_args = (path, flux)
+
+        def run(self):
+            self.ran = True
+            self.xm_b = np.asarray([0, 1, 2])
+            self.xn_b = np.asarray([0, -1, 1])
+
+    monkeypatch.setitem(sys.modules, "booz_xform_jax", SimpleNamespace(Booz_xform=FakeBoozXform))
+
+    out = workflow.boozer_b_target_from_wout(tmp_path / "wout_fake.nc", surfaces=[0.18, 0.72], mboz=6, nboz=7)
+
+    bx = instances[0]
+    assert bx.read_args == (str(tmp_path / "wout_fake.nc"), False)
+    assert bx.compute_surfs == [1, 2]
+    assert bx.mboz == 6
+    assert bx.nboz == 7
+    assert bx.mnboz is None
+    assert bx.xm_b is not None
+    assert bx.xn_b is not None
+    assert bx._prepared is False
+    assert bx.ran is True
+    np.testing.assert_allclose(out["bmnc_b"], [[1.0, 3.0, 5.0], [2.0, 4.0, 6.0]])
+    np.testing.assert_allclose(out["bmns_b"], [[0.1, 0.3, 0.5], [0.2, 0.4, 0.6]])
+    np.testing.assert_array_equal(out["xm_b"], [0, 1, 2])
+    assert out["nfp"] == 5
+
+
+def test_boozer_b_target_from_wout_handles_missing_sine_modes(monkeypatch, tmp_path) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    class FakeBoozXform:
+        def __init__(self, *, verbose):
+            self.s_in = np.asarray([0.0, 1.0])
+            self.bmnc_b = np.asarray([[1.0]])
+            self.xm_b = np.asarray([0])
+            self.xn_b = np.asarray([0])
+            self.s_b = np.asarray([1.0])
+            self.nfp = 1
+
+        def read_wout(self, _path, *, flux):
+            assert flux is False
+
+        def run(self):
+            self.xm_b = np.asarray([0])
+            self.xn_b = np.asarray([0])
+
+    monkeypatch.setitem(sys.modules, "booz_xform_jax", SimpleNamespace(Booz_xform=FakeBoozXform))
+
+    out = workflow.boozer_b_target_from_wout(tmp_path / "wout_fake.nc", surfaces=[0.9], mboz=2, nboz=3)
+
+    assert out["bmns_b"] is None
+    np.testing.assert_allclose(out["bmnc_b"], [[1.0]])
+
+
+def test_build_quasi_isodynamic_stage_wires_shared_field_residuals(monkeypatch) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    static = SimpleNamespace(
+        modes="modes",
+        s=np.asarray([0.0, 0.25, 0.5, 0.75, 1.0]),
+        cfg=SimpleNamespace(mpol=2, ntor=1, ntheta=5, nzeta=7, nfp=2, lasym=False),
+    )
+    captured = {}
+
+    class FakeOptimizer:
+        def __init__(
+            self,
+            static_arg,
+            indata_arg,
+            boundary_arg,
+            specs_arg,
+            residuals_from_state,
+            *,
+            boundary_input,
+            inner_max_iter,
+            inner_ftol,
+            trial_max_iter,
+            trial_ftol,
+            solver_device,
+        ):
+            captured.update(
+                {
+                    "static": static_arg,
+                    "indata": indata_arg,
+                    "boundary": boundary_arg,
+                    "specs": specs_arg,
+                    "residuals_from_state": residuals_from_state,
+                    "boundary_input": boundary_input,
+                    "inner_max_iter": inner_max_iter,
+                    "inner_ftol": inner_ftol,
+                    "trial_max_iter": trial_max_iter,
+                    "trial_ftol": trial_ftol,
+                    "solver_device": solver_device,
+                }
+            )
+
+    def fake_prepare_booz_xform_constants(**kwargs):
+        captured["booz_kwargs"] = kwargs
+        return "constants", "grids"
+
+    def fake_quasi_isodynamic_residual_from_state(**kwargs):
+        captured["field_kwargs"] = kwargs
+        return {"value": 3.0, "total": 11.0}
+
+    monkeypatch.setitem(
+        sys.modules,
+        "booz_xform_jax",
+        SimpleNamespace(prepare_booz_xform_constants=fake_prepare_booz_xform_constants),
+    )
+    monkeypatch.setattr(workflow, "truncate_indata_boundary_modes", lambda indata, *, max_mode: f"{indata}-m{max_mode}")
+    monkeypatch.setattr(workflow, "build_static", lambda cfg: static)
+    monkeypatch.setattr(workflow, "boundary_from_indata", lambda indata, modes, *, apply_m1_constraint: f"boundary:{indata}")
+    monkeypatch.setattr(
+        workflow,
+        "extend_boundary_for_max_mode",
+        lambda indata, static_arg, boundary, stage_mode: (f"extended:{indata}", static_arg, f"extended:{boundary}"),
+    )
+    monkeypatch.setattr(workflow, "boundary_input_from_indata", lambda indata, modes: f"boundary_input:{indata}")
+    monkeypatch.setattr(
+        workflow,
+        "boundary_param_specs",
+        lambda *args, **kwargs: [BoundaryParamSpec("rc10", "rc", 0, 1, 0)],
+    )
+    monkeypatch.setattr(workflow, "initial_guess_from_boundary", lambda *args, **kwargs: "guess")
+    monkeypatch.setattr(workflow, "eval_geom", lambda guess, static_arg: SimpleNamespace(sqrtg=np.ones((2, 2))))
+    monkeypatch.setattr(workflow, "signgs_from_sqrtg", lambda sqrtg, *, axis_index: -1)
+    monkeypatch.setattr(workflow, "flux_profiles_from_indata", lambda indata, s, *, signgs: f"flux:{indata}:{signgs}")
+    monkeypatch.setattr(workflow, "quasi_isodynamic_residual_from_state", fake_quasi_isodynamic_residual_from_state)
+    monkeypatch.setattr(workflow, "FixedBoundaryExactOptimizer", FakeOptimizer)
+
+    scalar = workflow.ObjectiveTerm("scalar", lambda _ctx, _state: 2.0, target=0.5, weight=2.0)
+    qi = workflow.QIObjectiveTerm(
+        "qi_fast",
+        lambda _ctx, _state, field: (np.asarray([field["value"], field["value"] + 1.0]), field["total"]),
+    )
+
+    stage = workflow.build_quasi_isodynamic_objective_stage(
+        cfg="cfg",
+        indata="indata",
+        stage_mode=2,
+        scalar_objectives=[scalar],
+        qi_objectives=[qi],
+        surfaces=[0.25, 0.75],
+        mboz=4,
+        nboz=5,
+        nphi=9,
+        nalpha=7,
+        n_bounce=11,
+        include_bounce_endpoints=True,
+        softness=0.03,
+        width_weight=1.5,
+        branch_width_weight=0.6,
+        branch_width_softness=0.04,
+        profile_weight=0.2,
+        shuffle_profile_weight=0.8,
+        shuffle_profile_softness=0.05,
+        weighted_shuffle_profile_weight=0.7,
+        weighted_shuffle_profile_softness=0.06,
+        aligned_profile_weight=0.4,
+        aligned_profile_softness=0.07,
+        aligned_profile_trap_level=0.55,
+        aligned_profile_trap_softness=0.08,
+        phimin=0.1,
+        project_input_boundary_to_max_mode=True,
+        inner_max_iter=3,
+        inner_ftol=1.0e-4,
+        trial_max_iter=5,
+        trial_ftol=2.0e-4,
+        solver_device="cpu",
+    )
+
+    assert stage.mode == 2
+    assert stage.ctx.signgs == -1
+    assert stage.boundary_input == "boundary_input:extended:indata-m2"
+    assert captured["indata"] == "extended:indata-m2"
+    assert captured["boundary"] == "extended:boundary:indata-m2"
+    assert captured["boundary_input"] == "boundary_input:extended:indata-m2"
+    assert captured["inner_max_iter"] == 3
+    assert captured["solver_device"] == "cpu"
+    assert captured["booz_kwargs"]["nfp"] == 2
+    assert captured["booz_kwargs"]["mboz"] == 4
+
+    residuals = captured["residuals_from_state"]("state")
+    np.testing.assert_allclose(residuals, [3.0, 3.0, 4.0])
+    assert captured["residuals_from_state"]._n_non_qs == 1
+    assert captured["residuals_from_state"]._qs_total_from_state("state") == 11.0
+    assert captured["field_kwargs"]["state"] == "state"
+    assert captured["field_kwargs"]["surfaces"] == [0.25, 0.75]
+    assert captured["field_kwargs"]["booz_constants"] == "constants"
+    assert captured["field_kwargs"]["booz_grids"] == "grids"
+
+
+def test_run_fixed_boundary_records_iota_abs_min_on_stage_history(monkeypatch, tmp_path) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    run_kwargs = {}
+
+    class FakeOptimizer:
+        def run(self, params0, **kwargs):
+            run_kwargs.update(kwargs)
+            return {
+                "x": np.asarray([1.0, 2.0]),
+                "message": "ok",
+                "_history_dump": {
+                    "history": [{"objective": 1.0, "wall_time_s": 0.0}],
+                    "nfev": 1,
+                    "njev": 1,
+                    "objective_initial": 1.0,
+                    "objective_final": 0.5,
+                    "qs_initial": 1.0,
+                    "qs_final": 0.5,
+                    "aspect_initial": 4.0,
+                    "aspect_final": 4.5,
+                },
+            }
+
+        def _indata_from_params(self, _params):
+            return "next-indata"
+
+    monkeypatch.setattr(workflow, "build_fixed_boundary_objective_stage", lambda *args, **kwargs: SimpleNamespace(
+        ctx=SimpleNamespace(),
+        optimizer=FakeOptimizer(),
+        specs=[BoundaryParamSpec("rc10", "rc", 0, 1, 0), BoundaryParamSpec("zs10", "zs", 1, 1, 0)],
+    ))
+    monkeypatch.setattr(workflow, "config_from_indata", lambda indata: f"cfg:{indata}")
+    monkeypatch.setattr(workflow, "print_qs_problem_summary", lambda **_kwargs: None)
+    monkeypatch.setattr(workflow, "print_qs_final_summary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(workflow, "save_qs_stage_artifacts", lambda **_kwargs: None)
+    monkeypatch.setattr(workflow, "save_qs_final_outputs", lambda **_kwargs: None)
+
+    result = workflow.run_fixed_boundary_objective_optimization(
+        cfg="cfg",
+        indata="indata",
+        objectives=[],
+        stage_modes=[2],
+        max_mode=2,
+        max_nfev=3,
+        continuation_nfev=1,
+        method="scipy",
+        ftol=1.0e-6,
+        gtol=1.0e-6,
+        xtol=1.0e-6,
+        use_ess=False,
+        ess_alpha=0.0,
+        output_dir=tmp_path,
+        label="fixed",
+        use_mode_continuation=True,
+        iota_abs_min=0.41,
+    )
+
+    assert run_kwargs["iota_fn"] is not None
+    assert result.final_result["_history_dump"]["iota_abs_min"] == 0.41
+
+
+def test_run_qi_records_iota_abs_min_and_prints_qi_terms(monkeypatch, tmp_path, capsys) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    run_kwargs = {}
+
+    class FakeOptimizer:
+        def run(self, params0, **kwargs):
+            run_kwargs.update(kwargs)
+            return {
+                "x": np.asarray([0.0]),
+                "message": "ok",
+                "_history_dump": {
+                    "history": [{"objective": 2.0, "wall_time_s": 0.0}],
+                    "nfev": 1,
+                    "njev": 1,
+                    "objective_initial": 2.0,
+                    "objective_final": 1.0,
+                    "qs_initial": 2.0,
+                    "qs_final": 1.0,
+                    "aspect_initial": 4.0,
+                    "aspect_final": 4.2,
+                },
+            }
+
+        def _indata_from_params(self, _params):
+            return "next-qi-indata"
+
+    monkeypatch.setattr(workflow, "build_quasi_isodynamic_objective_stage", lambda *args, **kwargs: SimpleNamespace(
+        ctx=SimpleNamespace(),
+        optimizer=FakeOptimizer(),
+        specs=[BoundaryParamSpec("rc10", "rc", 0, 1, 0)],
+    ))
+    monkeypatch.setattr(workflow, "config_from_indata", lambda indata: f"cfg:{indata}")
+    monkeypatch.setattr(workflow, "print_qs_problem_summary", lambda **_kwargs: print("summary"))
+    monkeypatch.setattr(workflow, "print_qs_final_summary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(workflow, "save_qs_stage_artifacts", lambda **_kwargs: None)
+    monkeypatch.setattr(workflow, "save_qs_final_outputs", lambda **_kwargs: None)
+
+    result = workflow.run_quasi_isodynamic_objective_optimization(
+        cfg="cfg",
+        indata="indata",
+        scalar_objectives=[],
+        qi_objectives=[workflow.QIObjectiveTerm("qi_one", lambda _ctx, _state, _field: ([0.0], 0.0))],
+        stage_modes=[3],
+        max_mode=3,
+        max_nfev=4,
+        continuation_nfev=1,
+        method="scipy",
+        ftol=1.0e-6,
+        gtol=1.0e-6,
+        xtol=1.0e-6,
+        use_ess=False,
+        ess_alpha=0.0,
+        output_dir=tmp_path,
+        label="qi",
+        use_mode_continuation=True,
+        surfaces=[0.5],
+        mboz=4,
+        nboz=4,
+        nphi=9,
+        nalpha=5,
+        n_bounce=5,
+        include_bounce_endpoints=False,
+        softness=0.02,
+        width_weight=1.0,
+        branch_width_weight=0.5,
+        branch_width_softness=0.02,
+        profile_weight=0.1,
+        shuffle_profile_weight=1.0,
+        shuffle_profile_softness=0.02,
+        weighted_shuffle_profile_weight=0.0,
+        weighted_shuffle_profile_softness=0.02,
+        aligned_profile_weight=0.0,
+        aligned_profile_softness=0.02,
+        aligned_profile_trap_level=0.65,
+        aligned_profile_trap_softness=0.05,
+        phimin=0.0,
+        iota_abs_min=0.52,
+    )
+
+    out = capsys.readouterr().out
+    assert "QI field objectives:" in out
+    assert "  - qi_one" in out
+    assert run_kwargs["iota_fn"] is not None
+    assert result.final_result["_history_dump"]["iota_abs_min"] == 0.52
+
+
+def test_least_squares_solve_rejects_qi_problem_without_options(tmp_path) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    vmec = SimpleNamespace(cfg="cfg", indata="indata", max_mode=1, output_dir=tmp_path)
+    problem = SimpleNamespace(
+        metadata={},
+        is_qi=True,
+        qi_options=None,
+        objective_terms=(),
+        qi_objective_terms=(workflow.QIObjectiveTerm("qi", lambda _ctx, _state, _field: ([0.0], 0.0)),),
+    )
+
+    with pytest.raises(ValueError, match="QI objectives require QuasiIsodynamicOptions"):
+        workflow.least_squares_solve(vmec, problem, stage_modes=[1], max_nfev=1, continuation_nfev=0)
+
+
+def test_problem_and_final_summaries_print_diagnostic_branches(capsys) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    specs = [BoundaryParamSpec("rc10", "rc", 0, 1, 0)]
+    optimizer = SimpleNamespace(
+        aspect_ratio=lambda params: 4.25,
+        quasisymmetry_objective=lambda params: 1.25e-3,
+    )
+    workflow.print_qs_problem_summary(
+        method="scipy",
+        max_nfev=5,
+        use_mode_continuation=True,
+        use_ess=True,
+        ess_alpha=1.5,
+        objectives=[workflow.ObjectiveTerm("aspect", lambda _ctx, _state: 0.0, target=4.0, weight=2.0)],
+        specs=specs,
+        x_scale=np.asarray([0.25]),
+        optimizer=optimizer,
+        params0=np.asarray([0.0]),
+    )
+    summary = capsys.readouterr().out
+    assert "Parameter space (1 DOFs): ['rc10']" in summary
+    assert "ESS scales (alpha=1.5): min=0.250  max=0.250" in summary
+    assert "Field objective (initial):     1.250000e-03" in summary
+
+    workflow.print_qs_final_summary(
+        {
+            "message": "converged",
+            "_history_dump": {
+                "aspect_final": 4.1,
+                "iota_final": 0.42,
+                "qs_final": 0.01,
+                "objective_initial": 4.0,
+                "objective_final": 1.0,
+            },
+        },
+        target_iota=0.43,
+    )
+    target_iota_summary = capsys.readouterr().out
+    assert "Termination: converged" in target_iota_summary
+    assert "Mean iota (final):             0.420000  target=0.430000" in target_iota_summary
+    assert "Objective reduction:           75.0%" in target_iota_summary
+
+    workflow.print_qs_final_summary(
+        {"message": "stopped", "_history_dump": {"iota_final": -0.53}},
+        iota_abs_min=0.5,
+    )
+    floor_summary = capsys.readouterr().out
+    assert "Mean iota (final):             -0.530000  min |iota|=0.500000" in floor_summary
+
+
+def test_save_stage_artifacts_handles_wouts_reruns_and_stale_files(monkeypatch, tmp_path) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    calls = []
+
+    class FakeOptimizer:
+        def save_input(self, path, params):
+            calls.append(("input", path.name, tuple(np.asarray(params))))
+            path.write_text("input")
+
+        def save_wout(self, path, params, *, state=None):
+            calls.append(("wout", path.name, tuple(np.asarray(params)), state))
+            path.write_text("wout")
+
+    monkeypatch.setattr(workflow, "run_fixed_boundary", lambda path, *, verbose: {"path": path, "verbose": verbose})
+    monkeypatch.setattr(
+        workflow,
+        "write_wout_from_fixed_boundary_run",
+        lambda path, run: calls.append(("rerun_wout", Path(path).name, run["path"], run["verbose"])),
+    )
+    stage_dir = tmp_path / "stage"
+
+    workflow.save_qs_stage_artifacts(
+        stage_dir=stage_dir,
+        optimizer=FakeOptimizer(),
+        params_initial=np.asarray([1.0]),
+        params_final=np.asarray([2.0]),
+        result={"_state_initial": "state0", "_state_final": "statef"},
+        save_inputs=True,
+        save_wouts=True,
+        save_rerun_wouts=True,
+    )
+
+    assert ("input", "input.initial", (1.0,)) in calls
+    assert ("wout", "wout_initial.nc", (1.0,), "state0") in calls
+    assert any(call[0] == "rerun_wout" and call[1] == "wout_final_rerun.nc" for call in calls)
+
+    for stale in ("wout_initial.nc", "wout_final.nc", "wout_initial_rerun.nc", "wout_final_rerun.nc"):
+        (stage_dir / stale).write_text("stale")
+
+    workflow.save_qs_stage_artifacts(
+        stage_dir=stage_dir,
+        optimizer=FakeOptimizer(),
+        params_initial=np.asarray([3.0]),
+        params_final=np.asarray([4.0]),
+        result={},
+        save_inputs=False,
+        save_wouts=False,
+        save_rerun_wouts=False,
+    )
+
+    for stale in ("wout_initial.nc", "wout_final.nc", "wout_initial_rerun.nc", "wout_final_rerun.nc"):
+        assert not (stage_dir / stale).exists()
+
+
+def test_save_final_outputs_records_targets_and_reruns(monkeypatch, tmp_path) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    calls = []
+
+    class FakeOptimizer:
+        def __init__(self, label):
+            self.label = label
+            self.saved_history = None
+
+        def save_input(self, path, params):
+            calls.append((self.label, "input", path.name, tuple(np.asarray(params))))
+            path.write_text("input")
+
+        def save_wout(self, path, params, *, state=None):
+            calls.append((self.label, "wout", path.name, tuple(np.asarray(params)), state))
+            path.write_text("wout")
+
+        def save_history(self, path, result):
+            calls.append((self.label, "history", path.name))
+            self.saved_history = result["_history_dump"]
+            path.write_text("history")
+
+    initial_optimizer = FakeOptimizer("initial")
+    final_optimizer = FakeOptimizer("final")
+    monkeypatch.setattr(workflow, "run_fixed_boundary", lambda path, *, verbose: {"path": path, "verbose": verbose})
+    monkeypatch.setattr(
+        workflow,
+        "write_wout_from_fixed_boundary_run",
+        lambda path, run: calls.append(("rerun_wout", Path(path).name, run["path"], run["verbose"])),
+    )
+    final_result = {
+        "x": np.asarray([9.0]),
+        "_state_final": "statef",
+        "_history_dump": {},
+    }
+
+    workflow.save_qs_final_outputs(
+        output_dir=tmp_path,
+        stage_records=[(1, initial_optimizer, np.asarray([1.0]), {"_state_initial": "state0"})],
+        final_optimizer=final_optimizer,
+        final_result=final_result,
+        label="label",
+        target_aspect=4.5,
+        target_iota=0.42,
+        iota_abs_min=0.4,
+        save_rerun_wouts=True,
+    )
+
+    assert ("initial", "input", "input.initial", (1.0,)) in calls
+    assert ("final", "wout", "wout_final.nc", (9.0,), "statef") in calls
+    assert ("rerun_wout", "wout_initial_rerun.nc", str(tmp_path / "input.initial"), False) in calls
+    assert ("rerun_wout", "wout_final_rerun.nc", str(tmp_path / "input.final"), False) in calls
+    assert final_optimizer.saved_history == {
+        "label": "label",
+        "target_aspect": 4.5,
+        "target_iota": 0.42,
+        "iota_abs_min": 0.4,
+    }
+
+
+def test_combine_stage_histories_handles_single_stage_and_iota_boundaries() -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    single = [(1, "optimizer", np.asarray([0.0]), {"_history_dump": {}})]
+    assert workflow.combine_qs_stage_histories(
+        label="single",
+        max_mode=1,
+        max_nfev=3,
+        continuation_nfev=1,
+        stage_modes=[1],
+        stage_records=single,
+    ) is None
+
+    def hist(entries, *, objective_initial, objective_final, qs_initial, qs_final, aspect_initial, aspect_final):
+        return {
+            "history": entries,
+            "nfev": len(entries),
+            "njev": len(entries) + 1,
+            "objective_initial": objective_initial,
+            "objective_final": objective_final,
+            "qs_initial": qs_initial,
+            "qs_final": qs_final,
+            "aspect_initial": aspect_initial,
+            "aspect_final": aspect_final,
+        }
+
+    stage_records = [
+        (
+            1,
+            "opt1",
+            np.asarray([0.0]),
+            {
+                "_history_dump": hist(
+                    [
+                        {"objective": 5.0, "wall_time_s": 1.0, "iota": 0.1},
+                        {"objective": 4.0, "wall_time_s": 2.0, "iota": 0.2},
+                    ],
+                    objective_initial=5.0,
+                    objective_final=4.0,
+                    qs_initial=3.0,
+                    qs_final=2.0,
+                    aspect_initial=6.0,
+                    aspect_final=5.0,
+                )
+            },
+        ),
+        (
+            2,
+            "opt2",
+            np.asarray([0.0]),
+            {
+                "_history_dump": hist(
+                    [
+                        {"objective": 4.0, "wall_time_s": 0.0, "iota": 0.2},
+                        {"objective": 1.0, "wall_time_s": 3.0, "iota": 0.7},
+                    ],
+                    objective_initial=4.0,
+                    objective_final=1.0,
+                    qs_initial=2.0,
+                    qs_final=0.5,
+                    aspect_initial=5.0,
+                    aspect_final=4.0,
+                )
+            },
+        ),
+    ]
+
+    combined = workflow.combine_qs_stage_histories(
+        label="combined",
+        max_mode=2,
+        max_nfev=10,
+        continuation_nfev=2,
+        stage_modes=[1, 2],
+        stage_records=stage_records,
+    )
+
+    assert combined["label"] == "combined"
+    assert combined["max_nfev"] == 12
+    assert combined["nfev"] == 4
+    assert combined["njev"] == 6
+    assert combined["total_wall_time_s"] == 5.0
+    assert combined["stage_boundaries"] == [1, 2]
+    assert combined["iota_initial"] == 0.1
+    assert combined["iota_final"] == 0.7
+    np.testing.assert_allclose([entry["wall_time_s"] for entry in combined["history"]], [1.0, 2.0, 5.0])
+
+
+def test_least_squares_problem_assembly_handles_custom_state_and_qi_owners() -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    class StateOwner:
+        def J(self, ctx, state):
+            return np.asarray([2.0, 4.0])
+
+        def to_objective_term(self, *, target, residual_weight):
+            return workflow.ObjectiveTerm(
+                "state_owner",
+                self.J,
+                target=target,
+                weight=residual_weight,
+                metadata={"target_custom": 3.0},
+            )
+
+    class QIOwner:
+        requires_qi_field = True
+
+        def __init__(self):
+            self.options = workflow.QuasiIsodynamicOptions(surfaces=[0.4])
+
+        def J(self, ctx, state):
+            raise RuntimeError
+
+        def to_qi_term(self, residual_weight):
+            assert residual_weight == 2.0
+            return workflow.QIObjectiveTerm("custom_qi", lambda _ctx, _state, _field: ([0.0], 0.0), self.options)
+
+    state_owner = StateOwner()
+    qi_owner = QIOwner()
+
+    problem = workflow.LeastSquaresProblem.from_tuples(
+        [
+            (state_owner.J, np.asarray([1.0, 1.5]), 9.0),
+            (qi_owner.J, np.asarray([0.0]), 4.0),
+        ]
+    )
+
+    assert problem.metadata == {"target_custom": 3.0}
+    assert problem.qi_options is qi_owner.options
+    np.testing.assert_allclose(problem.objective_terms[0].residual(None, None), [3.0, 7.5])
+    assert [term.name for term in problem.qi_objective_terms] == ["custom_qi"]
+
+
+def test_lgradb_and_redl_object_state_paths_validate_and_scale(monkeypatch) -> None:
+    import vmec_jax.optimization_workflow as workflow
+
+    ctx = SimpleNamespace(static="static", indata="indata", signgs=1, flux="flux")
+
+    def fake_lgradb_penalty_from_state(**kwargs):
+        assert kwargs["threshold"] == 0.2
+        assert kwargs["s_index"] == -1
+        return {"residuals1d": np.asarray([1.5]), "total": 2.25}
+
+    monkeypatch.setattr(workflow, "lgradb_penalty_from_state", fake_lgradb_penalty_from_state)
+    lgradb = workflow.LgradB(threshold=0.2)
+    np.testing.assert_allclose(lgradb.J(ctx, "state"), [1.5])
+    assert lgradb.total(ctx, "state") == 2.25
+    lgradb_term = lgradb.to_objective_term(target=0.0, residual_weight=3.0)
+    np.testing.assert_allclose(lgradb_term.residual(ctx, "state"), [4.5])
+    assert lgradb_term.total(ctx, "state") == 20.25
+
+    redl = workflow.RedlBootstrapMismatch(
+        helicity_n=1,
+        ne_coeffs=[1.0, 2.0],
+        Te_coeffs=[3.0],
+        Ti_coeffs=[4.0, 5.0],
+        Zeff_coeffs=2.0,
+    )
+    assert redl.Ti_coeffs == (4.0, 5.0)
+    with pytest.raises(ValueError, match="target=0"):
+        redl.to_objective_term(target=1.0, residual_weight=1.0)

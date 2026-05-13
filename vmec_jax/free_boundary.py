@@ -510,10 +510,14 @@ def interpolate_mgrid_bfield(
     w0z = 1.0 - wz
     w0k = 1.0 - wk
 
-    cur = _normalize_extcur(
-        tuple(extcur) if extcur is not None else tuple(meta.raw_coil_cur),
-        int(meta.nextcur),
-    )
+    raw_cur = tuple(meta.raw_coil_cur)
+    if extcur is None and len(raw_cur) == 0:
+        cur = tuple(1.0 for _ in range(int(meta.nextcur)))
+    else:
+        cur = _normalize_extcur(
+            tuple(extcur) if extcur is not None else raw_cur,
+            int(meta.nextcur),
+        )
     if len(cur) == 0:
         cur = tuple(1.0 for _ in range(int(meta.nextcur)))
     cur_vec = np.asarray(cur, dtype=float).reshape((-1, 1))
@@ -2073,6 +2077,7 @@ def _vmec_nonsingular_terms_from_bexni(
     sinv_tab = np.asarray(tables["sinv_tab"], dtype=float)
     cosui = np.asarray(tables["cosui"], dtype=float)
     sinui = np.asarray(tables["sinui"], dtype=float)
+    nu_fourp = int(cosui.shape[1])
     rcosuv = R * cosuv
     rsinuv = R * sinuv
 

@@ -12,6 +12,9 @@ from vmec_jax.wout import (
     _apply_nyquist_half_weight,
     _apply_bsubv_equif_correction,
     _bool_from_nc,
+    _bsubuv_parity_from_bcovar,
+    _bsubuv_parity_from_coeffs,
+    _bsubuv_parity_from_realspace_jxbforce,
     _bss_scalxc_undo_factor,
     _bss_should_undo_scalxc,
     _chipf_from_chips,
@@ -19,6 +22,17 @@ from vmec_jax.wout import (
     _compute_ctor_from_buco,
     _compute_eqfor_beta,
     _compute_eqfor_betaxis,
+    _filter_bsubuv_jxbforce,
+    _filter_bsubuv_jxbforce_lasym_loop,
+    _filter_bsubuv_jxbforce_loop,
+    _filter_bsubuv_jxbforce_parity,
+    _filter_bsubuv_jxbforce_parity_loop,
+    _jxbforce_apply_bsubs_correction_lasym_false,
+    _jxbforce_apply_bsubs_correction_lasym_true,
+    _jxbforce_bsubsu_bsubsv_loop,
+    _jxbforce_filter_with_bsubs_derivs_loop,
+    _jxbforce_getbsubs_coeffs_lasym_false,
+    _jxbforce_getbsubs_coeffs_lasym_true,
     _vmec_jxbforce_cos_coeffs,
     _vmec_jxbforce_sin_coeffs,
     _jxbforce_nyquist_limits,
@@ -36,6 +50,7 @@ from vmec_jax.wout import (
     _vmec_wrout_nyquist_sin_coeffs,
     _vmec_wrout_nyquist_sin_coeffs_loop,
     _vmec_wrout_nyquist_synthesis,
+    assert_main_modes_match_wout,
 )
 from vmec_jax.vmec_tomnsp import vmec_trig_tables
 
@@ -418,3 +433,471 @@ def test_wrout_nyquist_synthesis_and_chipf_edges():
     np.testing.assert_allclose(_chipf_from_chips(np.asarray([2.0, 4.0])), [4.0, 5.0])
     np.testing.assert_allclose(_chipf_from_chips(np.asarray([0.0, 2.0, 4.0, 8.0])), [1.0, 3.0, 6.0, 10.0])
     np.testing.assert_allclose(np.asarray(_chipf_from_chips(jnp.asarray([0.0, 2.0, 4.0, 8.0]))), [1.0, 3.0, 6.0, 10.0])
+
+
+def test_schema_scalar_fallbacks_and_xm_mode_mismatch_branch():
+    class BadArray:
+        def __array__(self, dtype=None, copy=None):
+            raise TypeError("not array-like")
+
+        def __bool__(self):
+            return True
+
+    assert _bool_from_nc(BadArray()) is True
+    assert _nc_scalar(np.asarray(["not-int"]), default=6, as_int=True) == 6
+    assert _nc_scalar(np.asarray(["not-float"]), default=2.5) == 2.5
+
+    bad_xm = SimpleNamespace(
+        path="wout_bad_xm.nc",
+        mpol=2,
+        ntor=0,
+        nfp=1,
+        xm=np.asarray([0, 2]),
+        xn=np.asarray([0, 0]),
+    )
+    with pytest.raises(ValueError, match="xm ordering"):
+        assert_main_modes_match_wout(wout=bad_xm)
+
+
+def test_bsubuv_parity_splits_coeffs_realspace_and_bcovar_scaling():
+    trig = vmec_trig_tables(ntheta=4, nzeta=1, nfp=1, mmax=2, nmax=0, lasym=False, cache=False)
+    modes = ModeTable(m=np.asarray([0, 1, 2]), n=np.asarray([0, 0, 0]))
+    coeff_c = np.asarray([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    coeff_s = np.asarray([[0.0, 0.25, 0.5], [0.75, 1.0, 1.25]])
+
+    bsubu_even, bsubu_odd, bsubv_even, bsubv_odd = _bsubuv_parity_from_coeffs(
+        bsubumnc=coeff_c,
+        bsubumns=coeff_s,
+        bsubvmnc=2.0 * coeff_c,
+        bsubvmns=-coeff_s,
+        modes=modes,
+        trig=trig,
+    )
+
+    full_u = _vmec_wrout_nyquist_synthesis(coeff_c=coeff_c, coeff_s=coeff_s, modes=modes, trig=trig)
+    full_v = _vmec_wrout_nyquist_synthesis(coeff_c=2.0 * coeff_c, coeff_s=-coeff_s, modes=modes, trig=trig)
+    np.testing.assert_allclose(bsubu_even + bsubu_odd, full_u, rtol=2.0e-14, atol=2.0e-14)
+    np.testing.assert_allclose(bsubv_even + bsubv_odd, full_v, rtol=2.0e-14, atol=2.0e-14)
+    assert float(np.linalg.norm(bsubu_even)) > 0.0
+    assert float(np.linalg.norm(bsubu_odd)) > 0.0
+
+    constant_u = np.ones((2, int(trig.ntheta2), 1)) * 3.0
+    constant_v = 2.0 * constant_u
+    real_even_u, real_odd_u, real_even_v, real_odd_v = _bsubuv_parity_from_realspace_jxbforce(
+        bsubu=constant_u,
+        bsubv=constant_v,
+        trig=trig,
+    )
+    np.testing.assert_allclose(real_even_u + real_odd_u, constant_u, rtol=2.0e-14, atol=2.0e-14)
+    np.testing.assert_allclose(real_even_v + real_odd_v, constant_v, rtol=2.0e-14, atol=2.0e-14)
+    np.testing.assert_allclose(real_odd_u, 0.0, atol=2.0e-14)
+
+    with pytest.raises(ValueError, match="shape mismatch"):
+        _bsubuv_parity_from_realspace_jxbforce(bsubu=constant_u, bsubv=constant_v[:, :1, :], trig=trig)
+    with pytest.raises(ValueError, match="shape"):
+        _bsubuv_parity_from_realspace_jxbforce(bsubu=constant_u[0], bsubv=constant_v[0], trig=trig)
+    with pytest.raises(ValueError, match="smaller"):
+        _bsubuv_parity_from_realspace_jxbforce(bsubu=constant_u[:, :1, :], bsubv=constant_v[:, :1, :], trig=trig)
+
+    s = np.asarray([0.0, 0.25, 1.0])
+    bsub_even = np.ones((3, 2, 1))
+    _, odd_sqrt, _, odd_v_sqrt = _bsubuv_parity_from_bcovar(
+        bsubu_even=bsub_even,
+        bsubv_even=2.0 * bsub_even,
+        s=s,
+        iequi=0,
+    )
+    np.testing.assert_allclose(odd_sqrt[:, 0, 0], [0.0, 0.5, 1.0])
+    np.testing.assert_allclose(odd_v_sqrt[:, 0, 0], [0.0, 1.0, 2.0])
+
+    _, odd_half, _, _ = _bsubuv_parity_from_bcovar(
+        bsubu_even=bsub_even,
+        bsubv_even=2.0 * bsub_even,
+        s=s,
+        iequi=1,
+    )
+    np.testing.assert_allclose(odd_half[:, 0, 0], np.sqrt([0.125, 0.125, 0.625]))
+
+
+def test_jxbforce_bsub_filters_match_loop_paths_and_guards(monkeypatch):
+    trig = vmec_trig_tables(ntheta=4, nzeta=3, nfp=1, mmax=2, nmax=1, lasym=False, cache=False)
+    ns = 3
+    nt2 = int(trig.ntheta2)
+    nzeta = int(np.asarray(trig.cosnv).shape[0])
+    s = np.linspace(0.0, 1.0, ns)
+    bsubu = np.linspace(-0.4, 0.7, ns * (nt2 + 1) * nzeta).reshape(ns, nt2 + 1, nzeta)
+    bsubv = np.cos(bsubu)
+
+    with pytest.raises(ValueError, match="smaller"):
+        _filter_bsubuv_jxbforce(bsubu=bsubu[:, : nt2 - 1], bsubv=bsubv[:, : nt2 - 1], trig=trig, nfp=1, mmax_force=1, nmax_force=1)
+
+    neg_u, neg_v = _filter_bsubuv_jxbforce(bsubu=bsubu, bsubv=bsubv, trig=trig, nfp=1, mmax_force=-1, nmax_force=1)
+    np.testing.assert_allclose(neg_u, bsubu[:, :nt2, :])
+    np.testing.assert_allclose(neg_v, bsubv[:, :nt2, :])
+
+    vec_u, vec_v = _filter_bsubuv_jxbforce(
+        bsubu=bsubu,
+        bsubv=bsubv,
+        trig=trig,
+        nfp=1,
+        mmax_force=1,
+        nmax_force=1,
+        s=s,
+    )
+    loop_u, loop_v = _filter_bsubuv_jxbforce_loop(
+        bsubu=bsubu,
+        bsubv=bsubv,
+        trig=trig,
+        mmax_force=1,
+        nmax_force=1,
+        s=s,
+    )
+    np.testing.assert_allclose(vec_u, loop_u, rtol=2.0e-14, atol=2.0e-14)
+    np.testing.assert_allclose(vec_v, loop_v, rtol=2.0e-14, atol=2.0e-14)
+
+    full_u, full_v = _filter_bsubuv_jxbforce(
+        bsubu=bsubu,
+        bsubv=bsubv,
+        trig=trig,
+        nfp=1,
+        mmax_force=2,
+        nmax_force=1,
+        s=s,
+    )
+    np.testing.assert_allclose(full_u, bsubu[:, :nt2, :])
+    np.testing.assert_allclose(full_v, bsubv[:, :nt2, :])
+
+    monkeypatch.setenv("VMEC_JAX_BSUB_FILTER_LOOP", "1")
+    env_u, env_v = _filter_bsubuv_jxbforce(
+        bsubu=bsubu,
+        bsubv=bsubv,
+        trig=trig,
+        nfp=1,
+        mmax_force=1,
+        nmax_force=1,
+        s=s,
+    )
+    np.testing.assert_allclose(env_u, loop_u, rtol=2.0e-14, atol=2.0e-14)
+    np.testing.assert_allclose(env_v, loop_v, rtol=2.0e-14, atol=2.0e-14)
+    monkeypatch.delenv("VMEC_JAX_BSUB_FILTER_LOOP", raising=False)
+
+    even_u = bsubu[:, :nt2, :]
+    odd_u = 0.5 * even_u
+    even_v = bsubv[:, :nt2, :]
+    odd_v = 0.25 * even_v
+    with pytest.raises(ValueError, match="shape mismatch"):
+        _filter_bsubuv_jxbforce_parity(
+            bsubu_even=even_u,
+            bsubu_odd=odd_u[:, :1, :],
+            bsubv_even=even_v,
+            bsubv_odd=odd_v,
+            trig=trig,
+            mmax_force=1,
+            nmax_force=1,
+        )
+    with pytest.raises(ValueError, match="smaller"):
+        _filter_bsubuv_jxbforce_parity(
+            bsubu_even=even_u[:, : nt2 - 1],
+            bsubu_odd=odd_u[:, : nt2 - 1],
+            bsubv_even=even_v[:, : nt2 - 1],
+            bsubv_odd=odd_v[:, : nt2 - 1],
+            trig=trig,
+            mmax_force=1,
+            nmax_force=1,
+        )
+
+    neg_pu, neg_pv = _filter_bsubuv_jxbforce_parity(
+        bsubu_even=even_u,
+        bsubu_odd=odd_u,
+        bsubv_even=even_v,
+        bsubv_odd=odd_v,
+        trig=trig,
+        mmax_force=-1,
+        nmax_force=1,
+    )
+    np.testing.assert_allclose(neg_pu, even_u)
+    np.testing.assert_allclose(neg_pv, even_v)
+
+    parity_u, parity_v = _filter_bsubuv_jxbforce_parity(
+        bsubu_even=even_u,
+        bsubu_odd=odd_u,
+        bsubv_even=even_v,
+        bsubv_odd=odd_v,
+        trig=trig,
+        mmax_force=1,
+        nmax_force=1,
+        s=s,
+    )
+    parity_loop_u, parity_loop_v = _filter_bsubuv_jxbforce_parity_loop(
+        bsubu_even=even_u,
+        bsubu_odd=odd_u,
+        bsubv_even=even_v,
+        bsubv_odd=odd_v,
+        trig=trig,
+        mmax_force=1,
+        nmax_force=1,
+        s=s,
+    )
+    np.testing.assert_allclose(parity_u, parity_loop_u, rtol=2.0e-14, atol=2.0e-14)
+    np.testing.assert_allclose(parity_v, parity_loop_v, rtol=2.0e-14, atol=2.0e-14)
+
+    monkeypatch.setenv("VMEC_JAX_BSUB_FILTER_LOOP", "1")
+    env_parity_u, env_parity_v = _filter_bsubuv_jxbforce_parity(
+        bsubu_even=even_u,
+        bsubu_odd=odd_u,
+        bsubv_even=even_v,
+        bsubv_odd=odd_v,
+        trig=trig,
+        mmax_force=1,
+        nmax_force=1,
+        s=s,
+    )
+    np.testing.assert_allclose(env_parity_u, parity_loop_u, rtol=2.0e-14, atol=2.0e-14)
+    np.testing.assert_allclose(env_parity_v, parity_loop_v, rtol=2.0e-14, atol=2.0e-14)
+
+
+def test_jxbforce_bsubs_derivative_filters_and_guards():
+    trig = vmec_trig_tables(ntheta=4, nzeta=3, nfp=1, mmax=2, nmax=1, lasym=False, cache=False)
+    ns = 3
+    nt2 = int(trig.ntheta2)
+    nzeta = int(np.asarray(trig.cosnv).shape[0])
+    s = np.linspace(0.0, 1.0, ns)
+    base = np.linspace(-0.2, 0.6, ns * nt2 * nzeta).reshape(ns, nt2, nzeta)
+    bsubs = np.sin(base)
+    even_u = base
+    odd_u = 0.5 * base
+    even_v = np.cos(base)
+    odd_v = 0.25 * even_v
+
+    outputs = _jxbforce_filter_with_bsubs_derivs_loop(
+        bsubs=bsubs,
+        bsubu_even=even_u,
+        bsubu_odd=odd_u,
+        bsubv_even=even_v,
+        bsubv_odd=odd_v,
+        trig=trig,
+        mmax_force=1,
+        nmax_force=1,
+        s=s,
+    )
+    assert [arr.shape for arr in outputs] == [(ns, nt2, nzeta)] * 4
+    assert all(np.all(np.isfinite(arr)) for arr in outputs)
+
+    neg = _jxbforce_filter_with_bsubs_derivs_loop(
+        bsubs=bsubs,
+        bsubu_even=even_u,
+        bsubu_odd=odd_u,
+        bsubv_even=even_v,
+        bsubv_odd=odd_v,
+        trig=trig,
+        mmax_force=-1,
+        nmax_force=1,
+        s=s,
+    )
+    for arr in neg:
+        np.testing.assert_allclose(arr, 0.0)
+
+    with pytest.raises(ValueError, match="shape mismatch"):
+        _jxbforce_filter_with_bsubs_derivs_loop(
+            bsubs=bsubs,
+            bsubu_even=even_u,
+            bsubu_odd=odd_u[:, :1, :],
+            bsubv_even=even_v,
+            bsubv_odd=odd_v,
+            trig=trig,
+            mmax_force=1,
+            nmax_force=1,
+            s=s,
+        )
+    with pytest.raises(ValueError, match="bsubs and parity"):
+        _jxbforce_filter_with_bsubs_derivs_loop(
+            bsubs=bsubs[:, :1, :],
+            bsubu_even=even_u,
+            bsubu_odd=odd_u,
+            bsubv_even=even_v,
+            bsubv_odd=odd_v,
+            trig=trig,
+            mmax_force=1,
+            nmax_force=1,
+            s=s,
+        )
+    with pytest.raises(ValueError, match="smaller"):
+        _jxbforce_filter_with_bsubs_derivs_loop(
+            bsubs=bsubs[:, : nt2 - 1, :],
+            bsubu_even=even_u[:, : nt2 - 1, :],
+            bsubu_odd=odd_u[:, : nt2 - 1, :],
+            bsubv_even=even_v[:, : nt2 - 1, :],
+            bsubv_odd=odd_v[:, : nt2 - 1, :],
+            trig=trig,
+            mmax_force=1,
+            nmax_force=1,
+            s=s,
+        )
+
+    bsubsu, bsubsv = _jxbforce_bsubsu_bsubsv_loop(bsubs=bsubs, trig=trig, mmax_force=1, nmax_force=1)
+    assert bsubsu.shape == (ns, nt2, nzeta)
+    assert bsubsv.shape == (ns, nt2, nzeta)
+    assert np.all(np.isfinite(bsubsu))
+    assert np.all(np.isfinite(bsubsv))
+
+    zeros_u, zeros_v = _jxbforce_bsubsu_bsubsv_loop(bsubs=bsubs, trig=trig, mmax_force=-1, nmax_force=1)
+    np.testing.assert_allclose(zeros_u, 0.0)
+    np.testing.assert_allclose(zeros_v, 0.0)
+    with pytest.raises(ValueError, match="smaller"):
+        _jxbforce_bsubsu_bsubsv_loop(bsubs=bsubs[:, : nt2 - 1, :], trig=trig, mmax_force=1, nmax_force=1)
+
+
+def test_lasym_filter_getbsubs_and_correction_fast_paths(monkeypatch):
+    import vmec_jax.wout as wout_module
+
+    trig = vmec_trig_tables(ntheta=4, nzeta=3, nfp=1, mmax=2, nmax=1, lasym=True, cache=False)
+    ns = 2
+    nt3 = int(trig.ntheta3)
+    nzeta = int(np.asarray(trig.cosnv).shape[0])
+    s = np.asarray([0.0, 1.0])
+    bsubu = np.linspace(-0.2, 0.8, ns * nt3 * nzeta).reshape(ns, nt3, nzeta)
+    bsubv = np.cos(bsubu)
+
+    with pytest.raises(ValueError, match="shape mismatch"):
+        _filter_bsubuv_jxbforce_lasym_loop(
+            bsubu=bsubu,
+            bsubv=bsubv[:, :1, :],
+            trig=trig,
+            mmax_force=1,
+            nmax_force=1,
+        )
+    with pytest.raises(ValueError, match="parity channel"):
+        _filter_bsubuv_jxbforce_lasym_loop(
+            bsubu=bsubu,
+            bsubv=bsubv,
+            trig=trig,
+            mmax_force=1,
+            nmax_force=1,
+            bsubu_even=bsubu[:, :1, :],
+            bsubu_odd=0.5 * bsubu,
+            bsubv_even=bsubv,
+            bsubv_odd=0.25 * bsubv,
+        )
+    with pytest.raises(ValueError, match="smaller"):
+        _filter_bsubuv_jxbforce_lasym_loop(
+            bsubu=bsubu[:, : int(trig.ntheta3) - 1, :],
+            bsubv=bsubv[:, : int(trig.ntheta3) - 1, :],
+            trig=trig,
+            mmax_force=1,
+            nmax_force=1,
+        )
+
+    neg_u, neg_v = _filter_bsubuv_jxbforce_lasym_loop(
+        bsubu=bsubu,
+        bsubv=bsubv,
+        trig=trig,
+        mmax_force=-1,
+        nmax_force=1,
+    )
+    np.testing.assert_allclose(neg_u, bsubu)
+    np.testing.assert_allclose(neg_v, bsubv)
+
+    filtered_u, filtered_v = _filter_bsubuv_jxbforce_lasym_loop(
+        bsubu=bsubu,
+        bsubv=bsubv,
+        trig=trig,
+        mmax_force=1,
+        nmax_force=1,
+        s=s,
+        bsubu_even=bsubu,
+        bsubu_odd=0.5 * bsubu,
+        bsubv_even=bsubv,
+        bsubv_odd=0.25 * bsubv,
+    )
+    assert filtered_u.shape == bsubu.shape
+    assert filtered_v.shape == bsubv.shape
+    assert np.all(np.isfinite(filtered_u))
+    assert np.all(np.isfinite(filtered_v))
+
+    trig_false = vmec_trig_tables(ntheta=4, nzeta=4, nfp=1, mmax=2, nmax=2, lasym=False, cache=False)
+    nt2 = int(trig_false.ntheta2)
+    nzeta_false = int(np.asarray(trig_false.cosnv).shape[0])
+    grid = np.arange(nt2 * nzeta_false, dtype=float).reshape(nt2, nzeta_false)
+    coeff_false = _jxbforce_getbsubs_coeffs_lasym_false(
+        frho=0.1 + np.sin(grid),
+        bsupu=1.0 + 0.2 * np.cos(grid),
+        bsupv=0.7 + 0.1 * np.sin(2.0 * grid),
+        trig=trig_false,
+        nfp=1,
+    )
+    assert coeff_false is not None
+    assert coeff_false.shape == (nt2, 2 * (nzeta_false // 2) + 1)
+    assert _jxbforce_getbsubs_coeffs_lasym_false(
+        frho=grid[:1],
+        bsupu=np.ones_like(grid),
+        bsupv=np.ones_like(grid),
+        trig=trig_false,
+        nfp=1,
+    ) is None
+
+    trig_true = vmec_trig_tables(ntheta=4, nzeta=1, nfp=1, mmax=2, nmax=0, lasym=True, cache=False)
+    nt3_true = int(trig_true.ntheta3)
+    grid_true = np.arange(nt3_true, dtype=float).reshape(nt3_true, 1)
+    coeff_true = _jxbforce_getbsubs_coeffs_lasym_true(
+        frho=0.1 + np.sin(grid_true),
+        bsupu=1.0 + 0.2 * np.cos(grid_true),
+        bsupv=0.7 + 0.1 * np.sin(2.0 * grid_true),
+        trig=trig_true,
+        nfp=1,
+    )
+    assert coeff_true is not None
+    assert coeff_true.shape == (int(trig_true.ntheta2), 1, 2)
+    assert _jxbforce_getbsubs_coeffs_lasym_true(
+        frho=grid_true[:1],
+        bsupu=np.ones_like(grid_true),
+        bsupv=np.ones_like(grid_true),
+        trig=trig_true,
+        nfp=1,
+    ) is None
+
+    ns_corr = 3
+    shape_false = (ns_corr, nt2, nzeta_false)
+    ones_false = np.ones(shape_false)
+    monkeypatch.setattr(wout_module, "_jxbforce_getbsubs_coeffs_lasym_false", lambda **_: np.ones_like(coeff_false) * 0.05)
+    corr_false = _jxbforce_apply_bsubs_correction_lasym_false(
+        bsubu=ones_false,
+        bsubv=2.0 * ones_false,
+        bsubs=np.zeros(shape_false),
+        bsubsu=np.zeros(shape_false),
+        bsubsv=np.zeros(shape_false),
+        bsupu=0.3 * ones_false,
+        bsupv=0.2 * ones_false,
+        sqrtg=ones_false,
+        pres=np.asarray([0.0, 0.1, 0.2]),
+        vp=np.asarray([1.0, 1.2, 1.4]),
+        hs=0.5,
+        signgs=1.0,
+        trig=trig_false,
+        nfp=1,
+        sum_w=lambda arr: float(np.sum(arr)),
+    )
+    assert [arr.shape for arr in corr_false] == [shape_false] * 3
+    assert float(np.linalg.norm(corr_false[0][1])) > 0.0
+
+    shape_true = (ns_corr, int(trig_true.ntheta2), 1)
+    ones_true = np.ones(shape_true)
+    monkeypatch.setattr(wout_module, "_jxbforce_getbsubs_coeffs_lasym_true", lambda **_: np.ones_like(coeff_true) * 0.05)
+    corr_true = _jxbforce_apply_bsubs_correction_lasym_true(
+        bsubu=ones_true,
+        bsubv=2.0 * ones_true,
+        bsubs=np.zeros(shape_true),
+        bsubsu=np.zeros(shape_true),
+        bsubsv=np.zeros(shape_true),
+        bsupu=0.3 * ones_true,
+        bsupv=0.2 * ones_true,
+        sqrtg=ones_true,
+        pres=np.asarray([0.0, 0.1, 0.2]),
+        vp=np.asarray([1.0, 1.2, 1.4]),
+        hs=0.5,
+        signgs=1.0,
+        trig=trig_true,
+        nfp=1,
+        sum_w=lambda arr: float(np.sum(arr)),
+    )
+    assert [arr.shape for arr in corr_true] == [(ns_corr, int(trig_true.ntheta3), 1)] * 3
+    assert float(np.linalg.norm(corr_true[0][1])) > 0.0

@@ -50,6 +50,29 @@ class FixedBoundaryContext:
     booz_inputs: BoozXformInputs
 
 
+def _linear_operator_vector_arg(value, *, size: int, name: str) -> np.ndarray:
+    arr = np.asarray(value, dtype=float).reshape(-1)
+    if int(arr.size) != int(size):
+        raise ValueError(f"{name} expected {int(size)} entries, got {int(arr.size)}.")
+    return arr
+
+
+def _linear_operator_matrix_arg(value, *, rows: int, name: str) -> np.ndarray:
+    arr = np.asarray(value, dtype=float)
+    rows = int(rows)
+    if arr.ndim != 2:
+        if rows <= 0:
+            if arr.size != 0:
+                raise ValueError(f"{name} expected 0 rows, got {int(arr.size)} entries.")
+            return arr.reshape((0, 0))
+        if int(arr.size) % rows != 0:
+            raise ValueError(f"{name} with {int(arr.size)} entries cannot be reshaped to {rows} rows.")
+        arr = arr.reshape((rows, -1))
+    if int(arr.shape[0]) != rows:
+        raise ValueError(f"{name} expected {rows} rows, got {int(arr.shape[0])}.")
+    return arr
+
+
 def _coeff_label(prefix: str, m: int, n: int) -> str:
     n_str = f"{n:+d}".replace("+", "")
     return f"{prefix}{m}{n_str}"
@@ -2500,7 +2523,10 @@ class FixedBoundaryExactOptimizer:
 
         def _matvec(direction):
             t_mv = time.perf_counter()
-            direction_j = _jnp.asarray(np.asarray(direction, dtype=float).reshape(-1), dtype=params.dtype)
+            direction_j = _jnp.asarray(
+                _linear_operator_vector_arg(direction, size=n_params, name="matvec direction"),
+                dtype=params.dtype,
+            )
             initial_tangent = initial_linear(direction_j)
             final_tangent = checkpoint_tape_state_jvp(
                 tape=tape,
@@ -2514,9 +2540,11 @@ class FixedBoundaryExactOptimizer:
 
         def _matmat(directions):
             t_mm = time.perf_counter()
-            directions_arr = np.asarray(directions, dtype=float)
-            if directions_arr.ndim != 2:
-                directions_arr = directions_arr.reshape((n_params, -1))
+            directions_arr = _linear_operator_matrix_arg(
+                directions,
+                rows=n_params,
+                name="matmat directions",
+            )
             directions_j = _jnp.asarray(directions_arr.T, dtype=params.dtype)
             initial_tangents = jax.vmap(initial_linear)(directions_j)
             final_tangents = checkpoint_tape_state_jvp_columns(
@@ -2532,7 +2560,10 @@ class FixedBoundaryExactOptimizer:
 
         def _rmatvec(cotangent):
             t_rmv = time.perf_counter()
-            cotangent_j = _jnp.asarray(np.asarray(cotangent, dtype=float).reshape(-1), dtype=_jnp.float64)
+            cotangent_j = _jnp.asarray(
+                _linear_operator_vector_arg(cotangent, size=n_res, name="rmatvec cotangent"),
+                dtype=_jnp.float64,
+            )
             t_res_cot = time.perf_counter()
             if residual_cotangent_helper is not None:
                 final_cotangent = residual_cotangent_helper(packed_final, cotangent_j)
@@ -3286,17 +3317,15 @@ class FixedBoundaryExactOptimizer:
                 _record_history_from_cached_state(x)
 
                 def _matvec(v):
-                    v_arr = np.asarray(v, dtype=float).reshape(-1)
+                    v_arr = _linear_operator_vector_arg(v, size=int(scale.size), name="scaled matvec direction")
                     return op_x.matvec(v_arr * scale)
 
                 def _matmat(v):
-                    v_arr = np.asarray(v, dtype=float)
-                    if v_arr.ndim != 2:
-                        v_arr = v_arr.reshape((scale.size, -1))
+                    v_arr = _linear_operator_matrix_arg(v, rows=int(scale.size), name="scaled matmat directions")
                     return op_x.matmat(v_arr * scale[:, None])
 
                 def _rmatvec(w):
-                    w_arr = np.asarray(w, dtype=float).reshape(-1)
+                    w_arr = _linear_operator_vector_arg(w, size=int(op_x.shape[0]), name="scaled rmatvec cotangent")
                     return op_x.rmatvec(w_arr) * scale
 
                 try:
