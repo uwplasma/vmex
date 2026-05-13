@@ -314,7 +314,8 @@ def test_implicit_linear_algebra_and_state_packing_helpers():
         _zero_m1_zforce_flag_from_result,
         _zero_state_like,
     )
-    from vmec_jax.solve import _zero_edge_rz_force_block
+    from vmec_jax.solve import _zero_edge_rz_force_block, _zero_edge_rz_force_blocks
+    from vmec_jax.vmec_tomnsp import TomnspsRZL
 
     layout = StateLayout(ns=2, K=3, lasym=True)
     state = VMECState(
@@ -400,6 +401,22 @@ def test_implicit_linear_algebra_and_state_packing_helpers():
 
     jax_masked = _zero_edge_rz_force_block(jnp.asarray(np_block), preserve_numpy=False)
     np.testing.assert_allclose(np.asarray(jax_masked), [[0.0, 1.0], [2.0, 3.0], [0.0, 0.0]])
+
+    frzl = TomnspsRZL(
+        frcc=np_block,
+        frss=np_block + 10.0,
+        fzsc=np_block + 20.0,
+        fzcs=np_block + 30.0,
+        flsc=np_block + 40.0,
+        flcs=np_block + 50.0,
+    )
+    masked_frzl = _zero_edge_rz_force_blocks(frzl)
+    np.testing.assert_allclose(masked_frzl.frcc[-1], [0.0, 0.0])
+    np.testing.assert_allclose(masked_frzl.frss[-1], [0.0, 0.0])
+    np.testing.assert_allclose(masked_frzl.fzsc[-1], [0.0, 0.0])
+    np.testing.assert_allclose(masked_frzl.fzcs[-1], [0.0, 0.0])
+    np.testing.assert_allclose(masked_frzl.flsc[-1], [44.0, 45.0])
+    np.testing.assert_allclose(masked_frzl.flcs[-1], [54.0, 55.0])
 
     class Result:
         def __init__(self, n_iter, fsqz2_history):
