@@ -48,6 +48,7 @@ import math
 import multiprocessing as mp
 import os
 from pathlib import Path
+import signal
 import sys
 import time
 import traceback
@@ -491,6 +492,57 @@ def _set_missing_wall_time(result: CaseResult, elapsed_s: float) -> bool:
         return False
     result.total_wall_time_s = float(elapsed_s)
     return True
+
+
+def _start_worker_session() -> None:
+    """Put a worker in its own session/process group when the OS supports it."""
+
+    setsid = getattr(os, "setsid", None)
+    if setsid is None:
+        return
+    try:
+        setsid()
+    except OSError:
+        # The worker still runs correctly without a private process group; the
+        # parent falls back to killing the direct child PID if process-group
+        # termination is unavailable.
+        return
+
+
+def _terminate_worker_process(proc: mp.Process, *, terminate_timeout_s: float = 10.0) -> None:
+    """Terminate a worker and its process group without leaving GPU children alive."""
+
+    pid = proc.pid
+
+    def _signal_process_group(sig: int) -> bool:
+        if pid is None or not hasattr(os, "killpg"):
+            return False
+        try:
+            os.killpg(pid, sig)
+            return True
+        except ProcessLookupError:
+            return True
+        except OSError:
+            return False
+
+    if not proc.is_alive():
+        proc.join(timeout=0.0)
+        return
+    if not _signal_process_group(signal.SIGTERM):
+        proc.terminate()
+    proc.join(timeout=float(terminate_timeout_s))
+    if not proc.is_alive():
+        return
+    if not _signal_process_group(signal.SIGKILL):
+        try:
+            proc.kill()
+        except AttributeError:  # pragma: no cover - Python < 3.7 fallback.
+            if pid is not None:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+    proc.join()
 
 
 def _ess_label(use_ess: bool) -> str:
@@ -1813,6 +1865,7 @@ def _worker(
     stellarator_asymmetric: bool,
     qi_qp_preseed: bool | None,
 ):
+    _start_worker_session()
     try:
         case_result = _run_case(
             problem,
@@ -2338,14 +2391,7 @@ def main() -> None:
                     elapsed_s = time.perf_counter() - case_t0
                     timed_out = proc.is_alive()
                     if timed_out:
-                        proc.terminate()
-                        proc.join(timeout=10.0)
-                        if proc.is_alive():
-                            try:
-                                os.kill(proc.pid, 9)
-                            except (OSError, TypeError):
-                                pass
-                            proc.join()
+                        _terminate_worker_process(proc)
 
                     if result_path.exists():
                         result = CaseResult(**json.loads(result_path.read_text()))

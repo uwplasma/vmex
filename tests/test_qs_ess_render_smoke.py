@@ -84,6 +84,98 @@ def test_qs_ess_sweep_sets_missing_wall_time():
     assert result.total_wall_time_s == 12.5
 
 
+def test_qs_ess_sweep_worker_session_best_effort(monkeypatch):
+    sweep = _load_sweep_module()
+    calls = []
+
+    monkeypatch.setattr(sweep.os, "setsid", lambda: calls.append("setsid"))
+    sweep._start_worker_session()
+    assert calls == ["setsid"]
+
+    def fail_setsid():
+        calls.append("fail")
+        raise OSError("already session leader")
+
+    monkeypatch.setattr(sweep.os, "setsid", fail_setsid)
+    sweep._start_worker_session()
+    assert calls == ["setsid", "fail"]
+
+
+def test_qs_ess_sweep_terminates_worker_process_group(monkeypatch):
+    sweep = _load_sweep_module()
+
+    class FakeProcess:
+        pid = 12345
+
+        def __init__(self):
+            self.alive = True
+            self.terminated = False
+            self.killed = False
+            self.joins = []
+
+        def is_alive(self):
+            return self.alive
+
+        def join(self, timeout=None):
+            self.joins.append(timeout)
+
+        def terminate(self):
+            self.terminated = True
+
+        def kill(self):
+            self.killed = True
+            self.alive = False
+
+    signals = []
+    proc = FakeProcess()
+
+    def fake_killpg(pid, sig):
+        signals.append((pid, sig))
+        if sig == sweep.signal.SIGKILL:
+            proc.alive = False
+
+    monkeypatch.setattr(sweep.os, "killpg", fake_killpg)
+    sweep._terminate_worker_process(proc, terminate_timeout_s=0.0)
+
+    assert signals == [(12345, sweep.signal.SIGTERM), (12345, sweep.signal.SIGKILL)]
+    assert proc.terminated is False
+    assert proc.killed is False
+    assert proc.joins == [0.0, None]
+
+
+def test_qs_ess_sweep_terminates_worker_direct_child_when_group_kill_fails(monkeypatch):
+    sweep = _load_sweep_module()
+
+    class FakeProcess:
+        pid = 12345
+
+        def __init__(self):
+            self.alive = True
+            self.terminated = False
+            self.killed = False
+
+        def is_alive(self):
+            return self.alive
+
+        def join(self, timeout=None):
+            if self.terminated or self.killed:
+                self.alive = False
+
+        def terminate(self):
+            self.terminated = True
+
+        def kill(self):
+            self.killed = True
+
+    monkeypatch.setattr(sweep.os, "killpg", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("no pg")))
+    proc = FakeProcess()
+    sweep._terminate_worker_process(proc, terminate_timeout_s=0.0)
+
+    assert proc.terminated is True
+    assert proc.killed is False
+    assert proc.alive is False
+
+
 def test_qs_ess_sweep_lasym_copy_and_zero_asymmetric_seed():
     sweep = _load_sweep_module()
     indata = sweep.InData(
