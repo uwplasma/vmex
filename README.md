@@ -241,12 +241,17 @@ Recreate the four displayed runs:
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa --modes 3 --ess on
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qh --modes 3 --ess on
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qp --modes 3 --ess off
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qi --modes 3 --ess both --qi-qp-preseed both
+PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
 ```
 
 For QI seed-robustness probes, change the top-level `RUN_CASE` in
 `examples/optimization/QI_optimization.py` to `qi_stel_seed_3127`,
 `nfp4_qh_warm_to_qi`, or a new `QI_CASES` entry for another VMEC input deck.
+Before promoting such a result, run
+`examples/optimization/audit_qi_seed_suitability.py --quick` and check the
+legacy QI, mirror ratio, elongation, iota, and Boozer `|B|` line-contour
+diagnostics.
 
 Regenerate the README panels and the compact CSV used for the table:
 

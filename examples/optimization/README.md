@@ -106,13 +106,16 @@ Optimizer and output controls are also top-level variables, including
 Before treating a QI result as a final candidate, audit the smooth objective
 against the legacy branch diagnostics and render the constrained QI matrix.
 The first-class record helpers are `vj.QIDiagnosticOptions`,
-`vj.qi_diagnostics_from_boozer_output`, and `vj.qi_diagnostics_from_state`;
-they return unweighted smooth/raw/legacy QI, mirror-ratio, elongation,
-optional `LgradB`, resolution metadata, and diagnostic error fields.
+`vj.qi_diagnostics_from_boozer_output`, `vj.qi_diagnostics_from_state`, and
+`vj.rank_qi_seed_records`; they return unweighted smooth/raw/legacy QI,
+mirror-ratio, elongation, optional `LgradB`, resolution metadata, and
+diagnostic error fields.
 
 ```bash
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/compare_omnigenity_qi_objective.py
 PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_objective_component_report.py
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/audit_qi_seed_suitability.py --quick \
+  --csv results/qi_seed_audit.csv
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py \
   --backend-label cpu --solver-device cpu --policy continuation \
   --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both
@@ -123,6 +126,10 @@ For publication-quality QI validation, re-run the diagnostic with higher
 `QI_MBOZ`, `QI_NBOZ`, `QI_NPHI`, `QI_NALPHA`, and `QI_N_BOUNCE`, then check
 that the smooth-vs-legacy ranking, component totals, mirror ratio, elongation,
 and LCFS `|B|` contours remain stable.
+
+For seed-robustness experiments, first run the audit, then use
+`audit_qi_seed_suitability.py --prefine-probes plan` to write a reviewed
+manifest before launching expensive prefine probes.
 
 ## Sweep And Rendering Tools
 

@@ -535,6 +535,41 @@ def _run_ready_optimizer_for_method_tests(residual: np.ndarray | None = None) ->
     return opt
 
 
+def _install_exact_point_fallback_fixture(
+    opt: FixedBoundaryExactOptimizer,
+    residual_by_point: dict[float, np.ndarray],
+) -> None:
+    states: dict[float, SimpleNamespace] = {}
+
+    opt._cached_exact_residual = FixedBoundaryExactOptimizer._cached_exact_residual.__get__(
+        opt, FixedBoundaryExactOptimizer
+    )
+    opt._cached_exact_state = FixedBoundaryExactOptimizer._cached_exact_state.__get__(opt, FixedBoundaryExactOptimizer)
+
+    def remember_point(params):
+        point = float(np.asarray(params, dtype=float).reshape(-1)[0])
+        if point not in residual_by_point:
+            raise RuntimeError(f"no exact solve for {point}")
+        state = states.setdefault(point, SimpleNamespace(name=f"state-{point:g}"))
+        key = opt._exact_cache_key(np.asarray([point], dtype=float))
+        opt._exact_cache[key] = (state, {})
+        opt._remember_exact_state(key, state)
+        opt._remember_exact_residual(key, residual_by_point[point])
+        return state
+
+    def solve_exact(params, return_payload=False):
+        state = remember_point(params)
+        return (state, {}) if return_payload else state
+
+    opt._solve_exact_with_tape = solve_exact
+    opt.residual_fun = lambda params: np.asarray(
+        residual_by_point[float(np.asarray(params, dtype=float).reshape(-1)[0])],
+        dtype=float,
+    )
+    opt.forward_residual_fun = lambda _params: np.asarray([99.0], dtype=float)
+    opt._remember_exact_test_point = remember_point
+
+
 def test_run_scipy_exception_returns_best_exact_and_records_iota_targets(monkeypatch) -> None:
     pytest.importorskip("scipy.optimize")
     import scipy.optimize
@@ -597,6 +632,79 @@ def test_run_scipy_final_exact_failure_uses_prior_best_exact_not_trial(monkeypat
 
     np.testing.assert_allclose(result["x"], [0.0])
     assert result["_state_final"] == "best-exact-state"
+    assert result["_history_dump"]["selected_best_exact_point"] is True
+
+
+def test_run_scalar_trust_history_remembers_accepted_exact_point(monkeypatch) -> None:
+    monkeypatch.setattr("vmec_jax.wout.equilibrium_aspect_ratio_from_state", lambda **_kwargs: 7.0)
+
+    opt = _run_ready_optimizer_for_method_tests(np.asarray([2.0]))
+    _install_exact_point_fallback_fixture(
+        opt,
+        {
+            0.0: np.asarray([2.0]),
+            1.0: np.asarray([0.25]),
+        },
+    )
+
+    def objective_and_gradient(params):
+        point = float(np.asarray(params, dtype=float).reshape(-1)[0])
+        opt._remember_exact_test_point(np.asarray([point]))
+        residual = np.asarray({0.0: [2.0], 1.0: [0.25]}[point], dtype=float)
+        gradient = np.asarray([-1.0 if point == 0.0 else 0.0], dtype=float)
+        return 0.5 * float(np.dot(residual, residual)), gradient
+
+    opt.objective_and_gradient_fun = objective_and_gradient
+
+    result = opt.run(np.asarray([0.0]), method="scalar_trust", max_nfev=2, scalar_step_bound=1.0, verbose=0)
+
+    np.testing.assert_allclose(result["x"], [1.0])
+    np.testing.assert_allclose(opt._best_exact_params, [1.0])
+    np.testing.assert_allclose(opt._best_exact_residual, [0.25])
+
+
+def test_run_lbfgs_history_best_exact_drives_final_fallback(monkeypatch) -> None:
+    pytest.importorskip("scipy.optimize")
+    import scipy.optimize
+
+    monkeypatch.setattr("vmec_jax.wout.equilibrium_aspect_ratio_from_state", lambda **_kwargs: 7.0)
+
+    def fake_minimize(fun, y0, *, jac, method, bounds, options):
+        assert jac is True
+        fun(np.asarray(y0, dtype=float))
+        fun(np.asarray([1.0], dtype=float))
+        return SimpleNamespace(
+            x=np.asarray([2.0]),
+            fun=0.0,
+            success=True,
+            status=0,
+            message="lbfgs returned unreplayable final point",
+            nit=1,
+        )
+
+    monkeypatch.setattr(scipy.optimize, "minimize", fake_minimize)
+    opt = _run_ready_optimizer_for_method_tests(np.asarray([2.0]))
+    _install_exact_point_fallback_fixture(
+        opt,
+        {
+            0.0: np.asarray([2.0]),
+            1.0: np.asarray([0.25]),
+        },
+    )
+
+    def objective_and_gradient(params):
+        point = float(np.asarray(params, dtype=float).reshape(-1)[0])
+        opt._remember_exact_test_point(np.asarray([point]))
+        residual = np.asarray({0.0: [2.0], 1.0: [0.25]}[point], dtype=float)
+        gradient = np.asarray([-1.0 if point == 0.0 else 0.0], dtype=float)
+        return 0.5 * float(np.dot(residual, residual)), gradient
+
+    opt.objective_and_gradient_fun = objective_and_gradient
+
+    result = opt.run(np.asarray([0.0]), method="lbfgs_adjoint", max_nfev=3, verbose=0)
+
+    np.testing.assert_allclose(result["x"], [1.0])
+    assert result["_state_final"].name == "state-1"
     assert result["_history_dump"]["selected_best_exact_point"] is True
 
 
@@ -698,6 +806,55 @@ def test_run_matrix_free_residual_callback_uses_state_cache_then_trial(monkeypat
     np.testing.assert_allclose(residual_calls[1], [9.0, 10.0])
     assert result["njev"] == 0
     assert result["_history_dump"]["method"] == "scipy_matrix_free"
+
+
+def test_run_matrix_free_history_best_exact_drives_final_fallback(monkeypatch) -> None:
+    pytest.importorskip("scipy.optimize")
+    import scipy.optimize
+
+    monkeypatch.setattr("vmec_jax.wout.equilibrium_aspect_ratio_from_state", lambda **_kwargs: 7.0)
+
+    class FakeOperator:
+        shape = (1, 1)
+
+        def matvec(self, vector):
+            return np.asarray(vector, dtype=float)
+
+        def matmat(self, matrix):
+            return np.asarray(matrix, dtype=float)
+
+        def rmatvec(self, vector):
+            return np.asarray(vector, dtype=float)
+
+    def fake_least_squares(residuals, y0, *, jac, **kwargs):
+        np.testing.assert_allclose(residuals(y0), [2.0])
+        jac(np.asarray([1.0], dtype=float))
+        return SimpleNamespace(
+            x=np.asarray([2.0]),
+            cost=0.0,
+            nfev=2,
+            njev=1,
+            success=True,
+            status=1,
+            message="matrix-free returned unreplayable final point",
+        )
+
+    monkeypatch.setattr(scipy.optimize, "least_squares", fake_least_squares)
+    opt = _run_ready_optimizer_for_method_tests(np.asarray([2.0]))
+    _install_exact_point_fallback_fixture(
+        opt,
+        {
+            0.0: np.asarray([2.0]),
+            1.0: np.asarray([0.25]),
+        },
+    )
+    opt.residual_linear_operator = lambda params: opt._remember_exact_test_point(params) and FakeOperator()
+
+    result = opt.run(np.asarray([0.0]), method="scipy_matrix_free", max_nfev=3, verbose=0)
+
+    np.testing.assert_allclose(result["x"], [1.0])
+    assert result["_state_final"].name == "state-1"
+    assert result["_history_dump"]["selected_best_exact_point"] is True
 
 
 def test_save_wrappers_write_wout_input_and_history(monkeypatch, tmp_path) -> None:

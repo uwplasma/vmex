@@ -299,6 +299,7 @@ from .qi_diagnostics import (
     qi_diagnostics_from_boozer_output,
     qi_diagnostics_from_state,
     qi_promotion_score,
+    rank_qi_seed_records,
 )
 from .visualization import export_vtk_surface_and_fieldline
 
@@ -575,5 +576,6 @@ __all__ = [
     "qi_diagnostics_from_boozer_output",
     "qi_diagnostics_from_state",
     "qi_promotion_score",
+    "rank_qi_seed_records",
     "export_vtk_surface_and_fieldline",
 ]

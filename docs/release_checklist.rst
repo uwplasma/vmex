@@ -18,7 +18,7 @@ Run these checks before pushing a release-candidate commit:
    python -m compileall -q vmec_jax examples tests tools validation
    pytest -q tests/test_optimization_helpers.py tests/test_continuation_exact_history.py
    pytest -q tests/test_residue_getfsq_parity.py tests/test_wout_profiles_currents_bundled_parity.py tests/test_vmec2000_exec_threed1.py
-   pytest -q tests/test_booz_input.py tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_qi_objective_component_report.py
+   pytest -q tests/test_booz_input.py tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_qi_objective_component_report.py tests/test_qi_seed_suitability_audit.py tests/test_qs_ess_render_smoke.py
    pytest -q tests/test_quasisymmetry.py tests/test_optimization_examples.py tests/test_implicit_helpers.py tests/test_wout_additional_helpers.py tests/test_solve_additional_helpers.py tests/test_free_boundary_additional_helpers.py tests/test_vmec_kernel_additional_helpers.py tests/test_solve_branch_coverage.py tests/test_implicit_wout_driver_branch_coverage.py
    JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt" --cov=vmec_jax --cov-report=xml --cov-report=term-missing:skip-covered --cov-fail-under=85
    python -m sphinx -W -b html docs docs/_build/html_release
@@ -26,8 +26,10 @@ Run these checks before pushing a release-candidate commit:
 These tests cover the required local lanes: continuation semantics, exact
 accepted-point history/output selection, no-executable VMEC residual parity,
 Boozer input spectra including ``lasym=True`` channels, QI diagnostic metadata
-including the bundled solved-state QI seed gate, solve-free JVP/VJP routing
-checks, pure driver/runtime policy helpers, implicit/wout serialization helpers,
+including the bundled solved-state QI seed gate and public
+``rank_qi_seed_records`` export, QI example objective assembly including the
+optional ``BoozerBTarget`` homotopy term, solve-free JVP/VJP routing checks,
+pure driver/runtime policy helpers, implicit/wout serialization helpers,
 free-boundary/solver helper branches, VMEC-kernel helper branches, packaging
 hygiene, additional solve/implicit/wout/driver branch coverage, the required
 Python 3.11 coverage gate, and warning-clean documentation.  The latest local
@@ -95,6 +97,9 @@ claiming a broader physics milestone:
   decks or convergence-policy changes.
 - SIMSOPT comparison scripts for optimization objective and derivative parity.
 - CPU/GPU profiling sweeps for any accepted-point replay, scan, or device
-  default change.
+  default change; verify final artifacts still select the best finite exact
+  accepted point when trial and exact residual histories disagree.
 - Seed-robust QI probes from QI, QP, QH, QA, and non-omnigenous seeds before
-  advertising global QI robustness.
+  advertising global QI robustness.  Far-seed probes should include the
+  optional same-NFP ``BoozerBTarget`` homotopy lane when a solved QI reference
+  wout is available.

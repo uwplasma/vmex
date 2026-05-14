@@ -163,12 +163,15 @@ The current constrained-QI sweep artifacts document one successful bundled
 NFP=2 ``input.nfp2_QI`` lane.  ``examples/optimization/QI_optimization.py`` is
 the bounded multi-seed entry point for extending this to other inputs: set
 ``RUN_CASE = "qi_stel_seed_3127"``, ``RUN_CASE = "nfp4_qh_warm_to_qi"``, or add
-a new ``QI_CASES`` entry for another VMEC deck.  A seed-robust QI claim still
-requires the constrained objective to be run and visually audited from QI, QP,
-QH, QA, and simple non-omnigenous starting boundaries.  Accept a row only when
-the final state satisfies all of: low legacy QI diagnostic, closed-looking
-Boozer ``|B|`` contours, mirror ratio at target, acceptable elongation,
-``abs(mean_iota) >= 0.41``, and aspect ratio near the configured target.
+a new ``QI_CASES`` entry for another VMEC deck.  Far seeds may use a solved
+same-NFP QI wout through ``boozer_target_wout``/``boozer_target_weight`` as an
+opt-in homotopy experiment, but that term is not a final acceptance
+diagnostic.  A seed-robust QI claim still requires the constrained objective to
+be run and visually audited from QI, QP, QH, QA, and simple non-omnigenous
+starting boundaries.  Accept a row only when the final state satisfies all of:
+low legacy QI diagnostic, closed-looking Boozer ``|B|`` contours, mirror ratio
+at target, acceptable elongation, ``abs(mean_iota) >= 0.41``, and aspect ratio
+near the configured target.
 
 Before launching expensive optimization sweeps, rank available solved seeds
 with:
