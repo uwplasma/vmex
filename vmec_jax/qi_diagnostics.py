@@ -32,6 +32,7 @@ __all__ = [
     "annotate_qi_seed_suitability",
     "qi_diagnostics_from_boozer_output",
     "qi_diagnostics_from_state",
+    "qi_promotion_score",
     "rank_qi_seed_records",
 ]
 
@@ -649,6 +650,61 @@ def annotate_qi_seed_suitability(
         }
     )
     return out
+
+
+def _with_result_aliases(record: dict[str, Any]) -> dict[str, Any]:
+    """Return a QI record with common optimizer-summary aliases normalized."""
+
+    out = dict(record)
+    aliases = {
+        "aspect": "aspect_final",
+        "mean_iota": "iota_final",
+        "abs_iota_min": "iota_abs_min",
+        "qi_smooth_total": "qi_raw_total",
+    }
+    for canonical, alias in aliases.items():
+        if canonical not in out and alias in out:
+            out[canonical] = out[alias]
+    return out
+
+
+def qi_promotion_score(
+    record: dict[str, Any],
+    *,
+    targets: QISeedSuitabilityTargets | None = None,
+    require_legacy_source: bool = False,
+    objective_key: str = "objective_final",
+    wall_time_key: str = "total_wall_time_s",
+) -> tuple[object, ...]:
+    """Lexicographic score for promoting final QI optimization candidates.
+
+    Seed audits intentionally rank QI-like starts before engineering cleanup so
+    potentially useful seeds are not hidden.  Final promotion is stricter: a
+    candidate that preserves QI while satisfying aspect/iota/mirror/elongation
+    gates should beat a lower scalar objective that destroys an engineering
+    gate.  Lower tuples are better.
+    """
+
+    row = _with_result_aliases(record)
+    annotated = annotate_qi_seed_suitability(row, targets=targets)
+    crashed = bool(row.get("crashed")) or row.get("success") is False
+    legacy_source = str(row.get("qi_legacy_source", "legacy"))
+    legacy_invalid = bool(require_legacy_source and legacy_source != "legacy")
+    objective = _finite_float(row.get(objective_key))
+    wall_time = _finite_float(row.get(wall_time_key))
+
+    return (
+        int(crashed),
+        int(legacy_invalid),
+        int(not annotated["qi_engineering_gate_passed"]),
+        int(not annotated["qi_seed_gate_passed"]),
+        int(not annotated["qi_metric_gate_passed"]),
+        float(annotated.get("qi_rank_score", np.inf)),
+        float(annotated.get("qi_constraint_score", np.inf)),
+        np.inf if objective is None else float(objective),
+        np.inf if wall_time is None else float(wall_time),
+        str(row.get("label", row.get("case", row.get("output_dir", "")))),
+    )
 
 
 def rank_qi_seed_records(

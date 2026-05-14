@@ -342,7 +342,7 @@ hygiene push, and the custom QI seed audit documentation/regression gate:
   validation, and QI aligned-profile/mirror smooth branches have direct AD
   checks. Full QA/QH/QP/QI max_mode=1 objective derivative gates and
   matrix-free/scalar-adjoint production paths remain open.
-- Seed-robust QI: 96%. The tier-2 and tier-3 probes are bounded and monotone,
+- Seed-robust QI: 96.5%. The tier-2 and tier-3 probes are bounded and monotone,
   constrained terms run end-to-end, and manifests now expose QI/engineering
   diagnostic deltas from final artifacts, including scalar-improved but
   QI-worsened cases. A new bundled near-axis seed, `input.QI_stel_seed_3127`,
@@ -357,8 +357,11 @@ hygiene push, and the custom QI seed audit documentation/regression gate:
   in manifests/run commands. The docs now show the exact `--case
   label:family:input:wout` workflow for arbitrary user VMEC decks, and the audit
   CLI has a fast regression proving the custom-case path works with the bundled
-  `input.QI_stel_seed_3127` fixture. The remaining open cleanup is reducing
-  mirror ratio without destroying the low-QI, high-iota branch.
+  `input.QI_stel_seed_3127` fixture. Final-result promotion now has a reusable
+  `qi_promotion_score` that prevents mirror-clean but non-QI rows or raw-fallback
+  legacy diagnostics from winning README/docs best-row selection. The remaining
+  open cleanup is reducing mirror ratio without destroying the low-QI,
+  high-iota branch.
 - CPU/GPU performance: 85%. Backend-adaptive replay bucketing, scalar-gradient
   tangent reuse, detailed timing, and GPU-only preconditioner-output fusion are
   in place. Hot-path algebra and CPU/GPU fusion gating are now covered by
@@ -414,7 +417,7 @@ hygiene push, and the custom QI seed audit documentation/regression gate:
 Release-critical average across the lanes requested in this push
 (continuation, exact accepted-point output, VMEC parity/physics gates, and
 docs/release hygiene): about 99.5%. Broader roadmap average across all open
-lanes: about 97.2%, because the 85% coverage gate is now locked locally and the
+lanes: about 97.3%, because the 85% coverage gate is now locked locally and the
 remaining open work is seed-robust QI mirror cleanup, 90-95% coverage, and
 larger-mode GPU replay.
 

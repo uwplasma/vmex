@@ -10,6 +10,7 @@
   "objective_final": 0.002172548670637645,
   "qi_raw_total": 0.002168039382721506,
   "qi_legacy_total": 0.002168039382721506,
+  "qi_legacy_source": "legacy",
   "qi_mirror_ratio_max": 0.21062203453310852,
   "qi_mirror_ratio_target": 0.21,
   "qi_mirror_excess_max": 0.0006220345331085231,
@@ -39,10 +40,13 @@
   "selection_score": [
     0,
     0,
-    0.002168039382721506,
-    0.002172548670637645,
+    1,
     0,
-    0.0030020697775378948,
-    680.9204963330412
+    0,
+    0.004336078765443012,
+    8.77385397686028e-06,
+    0.002172548670637645,
+    680.9204963330412,
+    "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/no_qp_preseed/mode3/ess"
   ]
 }

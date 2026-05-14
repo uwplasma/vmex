@@ -217,12 +217,14 @@ Downloadable constrained-QI summaries:
 
 In the current snapshot, the best available constrained QI row is CPU
 repeated-stage continuation, ``max_mode=3``, ESS, without a same-mode QP
-preseed.  It reaches legacy-ranked QI diagnostic ``1.04e-3``, maximum mirror
-ratio ``0.211`` for a target ``0.21``, maximum elongation ``4.78`` for a
-target ``8.0``, aspect ratio ``5.000``, mean iota ``-0.4553``, and total wall
-time ``6.6 min``.  Ranking now prioritizes the legacy QI diagnostic after
-the mirror, elongation, iota, and aspect gates are satisfied; otherwise smooth
-width-only surrogates can win while still looking more QP-like than QI.
+preseed.  It reaches legacy-ranked QI diagnostic ``2.17e-3``, maximum mirror
+ratio ``0.2106`` for a target ``0.21``, maximum elongation ``4.30`` for a
+target ``8.0``, aspect ratio ``5.001``, mean iota ``-0.5494``, and total wall
+time ``11.3 min``.  Best-row selection uses
+``vmec_jax.qi_promotion_score``: raw-fallback legacy diagnostics are rejected,
+rows above the loose ``2e-2`` QI promotion ceiling cannot win solely by having
+good mirror/elongation, and engineering-clean rows are preferred over lower-QI
+rows only when they remain QI-like.
 This is a best-row report for the bundled QI-seeded lane, not evidence that
 the optimizer is seed-robust across unrelated QA/QH/QP/simple starts.
 

@@ -350,6 +350,81 @@ def test_qi_renderer_marks_raw_fallback_legacy_as_nonpromotable(tmp_path, monkey
     assert renderer._write_best(rows)["max_mode"] == 2
 
 
+def test_qi_renderer_prefers_engineering_clean_candidate_over_lower_qi_mirror_failure(tmp_path, monkeypatch):
+    renderer = _load_qi_renderer_module()
+    monkeypatch.setattr(renderer, "OUTPUT_ROOT", tmp_path)
+    monkeypatch.setattr(renderer, "BEST_JSON", tmp_path / "best.json")
+
+    clean_dir = tmp_path / "cpu" / "continuation" / "qi" / "mode2" / "ess" / "clean"
+    low_qi_dir = tmp_path / "cpu" / "continuation" / "qi" / "mode3" / "ess" / "low_qi_bad_mirror"
+    non_qi_dir = tmp_path / "cpu" / "direct" / "qi" / "mode1" / "ess" / "non_qi_good_engineering"
+    clean_dir.mkdir(parents=True)
+    low_qi_dir.mkdir(parents=True)
+    non_qi_dir.mkdir(parents=True)
+
+    base = {
+        "backend": "cpu",
+        "policy": "continuation",
+        "problem": "qi",
+        "use_ess": True,
+        "success": True,
+        "crashed": False,
+        "message": "ok",
+        "target_aspect": renderer.TARGET_ASPECT,
+        "input_nfp": renderer.QI_INPUT_NFP,
+        "qi_qp_preseed": False,
+        "qi_mirror_ratio_target": 0.21,
+        "qi_elongation_target": 8.0,
+        "iota_final": 0.45,
+    }
+    for case_dir, record in (
+        (
+            clean_dir,
+            {
+                "max_mode": 2,
+                "output_dir": str(clean_dir),
+                "objective_final": 2.0e-2,
+                "qi_legacy_total": 2.0e-2,
+                "qi_raw_total": 2.0e-2,
+                "qi_mirror_ratio_max": 0.20,
+                "qi_max_elongation": 7.5,
+                "aspect_final": renderer.TARGET_ASPECT * 1.01,
+            },
+        ),
+        (
+            low_qi_dir,
+            {
+                "max_mode": 3,
+                "output_dir": str(low_qi_dir),
+                "objective_final": 1.0e-3,
+                "qi_legacy_total": 1.0e-3,
+                "qi_raw_total": 1.0e-3,
+                "qi_mirror_ratio_max": 0.50,
+                "qi_max_elongation": 7.0,
+                "aspect_final": renderer.TARGET_ASPECT,
+            },
+        ),
+        (
+            non_qi_dir,
+            {
+                "max_mode": 1,
+                "output_dir": str(non_qi_dir),
+                "objective_final": 1.0e-1,
+                "qi_legacy_total": 1.0e-1,
+                "qi_raw_total": 1.0e-1,
+                "qi_mirror_ratio_max": 0.10,
+                "qi_max_elongation": 4.0,
+                "aspect_final": renderer.TARGET_ASPECT,
+            },
+        ),
+    ):
+        (case_dir / "case_result.json").write_text(json.dumps({**base, **record}))
+
+    rows = renderer._discover_qi_results()
+
+    assert renderer._write_best(rows)["max_mode"] == 2
+
+
 def test_qs_ess_renderer_ignores_legacy_backendless_records(tmp_path, monkeypatch):
     renderer = _load_renderer_module()
     monkeypatch.setattr(renderer, "OUTPUT_ROOT", tmp_path)
