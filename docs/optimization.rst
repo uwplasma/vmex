@@ -795,6 +795,32 @@ Two practical lessons from that study are now reflected in the example:
      )
      objective_tuples.append((b_target.J, 0.0, 100.0))
 
+To try a different VMEC input deck, edit only the top-level variables in
+``examples/optimization/QI_seed_robustness.py`` or ``QI_optimization.py``:
+
+.. code-block:: python
+
+   INPUT_FILE = Path("/absolute/path/to/input.my_seed")
+   OUTPUT_DIR = Path("results/qi_seed_robustness/my_seed")
+   MAX_MODE = 3
+   MIN_VMEC_MODE = max(6, MAX_MODE + 3)
+
+Keep ``project_input_boundary_to_max_mode=True`` in the
+``FixedBoundaryVMEC.from_input`` call so a ``max_mode = 1`` run removes higher
+boundary modes from a richer seed, while ``max_mode = 2`` and ``3`` expose the
+corresponding larger parameter spaces.  The optimization script itself only
+needs the VMEC input file.  If you want to rank the seed before optimizing it,
+first create a matching wout with ``vmec_jax /path/to/input.my_seed`` and then
+run ``examples/optimization/audit_qi_seed_suitability.py --case
+label:qi:input_path:wout_path`` as described in :doc:`validation`.
+
+The bundled ``input.QI_stel_seed_3127`` case can be used directly by setting
+``INPUT_FILE = DATA_DIR / "input.QI_stel_seed_3127"``.  This is a useful
+robustness seed, but arbitrary inputs are not guaranteed to optimize to precise
+QI automatically; the accepted workflow is audit, run the bounded QI script,
+then accept the result only if both the numerical metrics and Boozer ``|B|``
+line-contour plot pass the QI gate.
+
 
 QI diagnostics and validation plan
 ----------------------------------

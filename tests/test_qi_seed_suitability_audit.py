@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import importlib.util
+import json
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -161,6 +162,69 @@ def test_build_seed_audit_ranks_and_writes_csv(monkeypatch, tmp_path):
     assert rows[0]["label"] == "better_qi"
     assert float(rows[0]["qi_seed_score"]) < float(rows[1]["qi_seed_score"])
     assert rows[1]["failed_constraints"] == "mirror"
+
+
+def test_main_accepts_custom_case_with_bundled_qi_seed(monkeypatch, tmp_path):
+    mod = _load_module()
+    input_path = mod.DATA_DIR / "input.QI_stel_seed_3127"
+    wout_path = mod.DATA_DIR / "wout_QI_stel_seed_3127.nc"
+    if not input_path.exists() or not wout_path.exists():
+        pytest.skip("bundled QI seed fixture is not available")
+
+    targets = mod.SuitabilityTargets()
+    seen = {}
+
+    def fake_evaluate(case, **kwargs):
+        seen["case"] = case
+        seen["kwargs"] = kwargs
+        assert case.input_path == input_path
+        assert case.wout_path == wout_path
+        assert case.input_path.exists()
+        assert case.wout_path.exists()
+        record = {
+            "label": case.label,
+            "family": case.family,
+            "input": str(case.input_path),
+            "wout": str(case.wout_path),
+            "aspect": 5.0,
+            "mean_iota": 0.45,
+            "qi_mirror_ratio_max": 0.18,
+            "qi_max_elongation": 7.0,
+            "qi_smooth_total": 0.1,
+            "qi_legacy_total": 0.2,
+        }
+        record.update(mod._constraint_status(record, targets))
+        return record
+
+    monkeypatch.setattr(mod, "evaluate_seed_case", fake_evaluate)
+    output = tmp_path / "summary.json"
+    csv_path = tmp_path / "summary.csv"
+
+    rc = mod.main(
+        [
+            "--quick",
+            "--case",
+            f"custom_qi:qi:{input_path}:{wout_path}",
+            "--output",
+            str(output),
+            "--csv",
+            str(csv_path),
+        ]
+    )
+
+    report = json.loads(output.read_text())
+    rows = list(csv.DictReader(csv_path.open()))
+
+    assert rc == 0
+    assert seen["case"].label == "custom_qi"
+    assert seen["case"].family == "qi"
+    assert seen["kwargs"]["nphi"] == 51
+    assert report["no_optimization"] is True
+    assert report["skipped_defaults"] == []
+    assert report["cases"][0]["label"] == "custom_qi"
+    assert report["cases"][0]["suitability_rank"] == 1
+    assert rows[0]["label"] == "custom_qi"
+    assert rows[0]["seed_suitability"] == "pass"
 
 
 def test_build_seed_audit_can_select_best_well_phase(monkeypatch):

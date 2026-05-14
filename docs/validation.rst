@@ -195,6 +195,25 @@ constraint failures are reported separately so a QI-like seed with a fixable
 mirror/aspect violation is not hidden behind a non-QI seed that merely satisfies
 the engineering constraints.
 
+To audit a new input deck, first run VMEC once so the audit has a matching
+``wout`` file:
+
+.. code-block:: bash
+
+   vmec_jax /path/to/input.my_seed
+   PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py \
+     --quick \
+     --case my_seed:qi:/path/to/input.my_seed:/path/to/wout_my_seed.nc \
+     --output results/qi_seed_audit/my_seed_summary.json \
+     --csv results/qi_seed_audit/my_seed_summary.csv
+
+The ``--case`` format is ``label:family:input_path:wout_path``.  The family is
+one of ``qi``, ``qp``, ``qh``, ``qa``, or ``simple`` and is used only for
+ranking/reporting.  This is the correct first step for arbitrary inputs such as
+``examples/data/input.QI_stel_seed_3127``: audit the solved seed, inspect the
+reported QI and engineering metrics, then launch a bounded QI optimization only
+if the seed is plausible.
+
 To turn the audit into a bounded seed-robustness worklist without launching a
 full sweep, add a dry-run prefine manifest:
 
