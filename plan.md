@@ -977,14 +977,15 @@ Defer beyond the current cycle:
   state (aspect about `5.67`, elongation passing) but only legacy QI about
   `1.5e-2` and a slightly high mirror ratio, so QI-preserving constrained
   cleanup remains the next physics task.
-- 2026-05-12: Fixed the QI example policy after visual review showed that the
-  pure-QI mode-2 branch had too-small iota and misleading VMEC-angle contours.
-  `QI_optimization.py` now defaults to direct mode-3 ESS on
-  `input.QI_stel_seed_3127` with aspect + `abs(mean_iota) >= 0.41` + QI terms,
-  prints an independent smooth/legacy/iota promotion gate, and writes a
-  Boozer-coordinate `|B|` line-contour plot. The local CPU run reached smooth
-  QI `9.15e-4`, legacy QI `4.46e-4`, aspect `4.99`, and `|iota| = 0.897` in
-  about 93 s; mirror ratio remains the next constrained-cleanup target.
+- 2026-05-14: Consolidated `QI_optimization.py` into the single recommended
+  multi-seed entry point. The default `RUN_CASE = "nfp2_qi"` keeps the current
+  best mirror-aware NFP=2 lane, while `RUN_CASE = "qi_stel_seed_3127"` and
+  `RUN_CASE = "nfp4_qh_warm_to_qi"` provide bounded seed-robustness probes
+  from the bundled unrelated stellarator seed and the NFP=4 QH warm start.
+  The script now takes NFP from the selected VMEC input, prints the active
+  policy before the solve, keeps objective tuples visible, writes a
+  Boozer-coordinate `|B|` line-contour plot, and promotes candidates only
+  through independent smooth-QI, legacy-QI, iota, mirror, and elongation gates.
 - 2026-05-12: Confirmed that the near-axis QI candidate fails the engineering
   mirror gate on every sampled surface (`0.94-0.97`, target `0.21`). Added
   all-surface/smoothed `MirrorRatio` support, per-surface mirror diagnostics,

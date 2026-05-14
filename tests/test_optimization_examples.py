@@ -70,9 +70,16 @@ def test_fixed_boundary_qs_examples_are_standalone_workflows() -> None:
 def test_qi_example_uses_qi_problem_api() -> None:
     text = (ROOT / "examples" / "optimization" / "QI_optimization.py").read_text()
     assert "run_quasi_isodynamic_objective_optimization(" not in text
+    assert "QI_CASES = {" in text
+    assert 'RUN_CASE = "nfp2_qi"' in text
+    assert '"qi_stel_seed_3127"' in text
+    assert '"nfp4_qh_warm_to_qi"' in text
+    assert 'DATA_DIR / "input.QI_stel_seed_3127"' in text
+    assert 'DATA_DIR / "input.nfp4_QH_warm_start"' in text
     assert "QuasiIsodynamicOptions(" in text
     assert "QuasiIsodynamicResidual(QI_OPTIONS)" in text
     assert "QuasiIsodynamicResidualCeiling(" in text
+    assert "qi_options=QI_OPTIONS" in text
     assert "objective_tuples = [" in text
     assert "LeastSquaresProblem.from_tuples(" in text
     assert "problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)" in text
