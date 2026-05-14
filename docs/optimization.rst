@@ -736,8 +736,8 @@ aspect-ratio weights, mirror/elongation soft-wall weights, QI branch-width
 weights, the branch-shuffle profile residual, ``phimin`` well-interval choices,
 and termination tolerances against the nfp=2
 ``examples/data/input.nfp2_QI`` seed and the bundled near-axis
-``input.QI_stel_seed_3127`` seed.  The current best mirror-aware lane is direct
-``max_mode = 3`` with ESS, ``target_aspect = 5.0``,
+``input.QI_stel_seed_3127`` seed.  The current best mirror-aware lane is
+repeated same-mode ``max_mode = 3`` with ESS, ``target_aspect = 5.0``,
 ``abs(mean_iota) >= 0.41``, ``QI_WEIGHT = 10``, ``branch_width_weight = 5.0``,
 ``profile_weight = 0.1``, ``shuffle_profile_weight = 1.0``, mirror and
 elongation soft-wall terms enabled, and a tighter ``XTOL = 1e-8``.  The
@@ -808,15 +808,38 @@ Two practical lessons from that study are now reflected in the example:
      )
      objective_tuples.append((b_target.J, 0.0, 100.0))
 
-To try a different VMEC input deck, edit only the top-level variables in
-``examples/optimization/QI_seed_robustness.py`` or ``QI_optimization.py``:
+``QI_optimization.py`` is now the single recommended multi-seed entry point.
+At the top of the file, change ``RUN_CASE`` to one of the bundled cases:
 
 .. code-block:: python
 
-   INPUT_FILE = Path("/absolute/path/to/input.my_seed")
-   OUTPUT_DIR = Path("results/qi_seed_robustness/my_seed")
-   MAX_MODE = 3
-   MIN_VMEC_MODE = max(6, MAX_MODE + 3)
+   RUN_CASE = "nfp2_qi"             # default NFP=2 mirror-aware QI lane
+   RUN_CASE = "qi_stel_seed_3127"   # unrelated stellarator seed robustness lane
+   RUN_CASE = "nfp4_qh_warm_to_qi"  # NFP=4 QH warm start, using the input NFP
+
+The script takes ``nfp`` from the VMEC input file, so the NFP=4 warm-start case
+does not need a separate driver.  To try a different VMEC input deck, add one
+dictionary entry to ``QI_CASES`` in ``QI_optimization.py``:
+
+.. code-block:: python
+
+   QI_CASES["my_seed"] = {
+       "input_file": Path("/absolute/path/to/input.my_seed"),
+       "output_dir": Path("results/qi_opt/ess/my_seed"),
+       "max_mode": 3,
+       "min_vmec_mode": 6,
+       "use_mode_continuation": True,
+       "stage_repeats": 5,
+       "max_nfev": 12,
+       "target_aspect": 5.0,
+       "target_abs_iota_min": 0.41,
+       "branch_width_weight": 0.5,
+       "mirror_weight": 0.0,
+       "elongation_weight": 0.0,
+       "qi_ceiling_weight": 0.0,
+       "shuffle_profile_nphi_out": None,
+   }
+   RUN_CASE = "my_seed"
 
 Keep ``project_input_boundary_to_max_mode=True`` in the
 ``FixedBoundaryVMEC.from_input`` call so a ``max_mode = 1`` run removes higher
@@ -827,12 +850,12 @@ first create a matching wout with ``vmec_jax /path/to/input.my_seed`` and then
 run ``examples/optimization/audit_qi_seed_suitability.py --case
 label:qi:input_path:wout_path`` as described in :doc:`validation`.
 
-The bundled ``input.QI_stel_seed_3127`` case can be used directly by setting
-``INPUT_FILE = DATA_DIR / "input.QI_stel_seed_3127"``.  This is a useful
-robustness seed, but arbitrary inputs are not guaranteed to optimize to precise
-QI automatically; the accepted workflow is audit, run the bounded QI script,
-then accept the result only if both the numerical metrics and Boozer ``|B|``
-line-contour plot pass the QI gate.
+The bundled ``input.QI_stel_seed_3127`` case can be used directly with
+``RUN_CASE = "qi_stel_seed_3127"``.  This is a useful robustness seed, but
+arbitrary inputs are not guaranteed to optimize to precise QI automatically;
+the accepted workflow is audit, run the bounded QI script, then accept the
+result only if both the numerical metrics and Boozer ``|B|`` line-contour plot
+pass the QI gate.
 
 
 QI diagnostics and validation plan

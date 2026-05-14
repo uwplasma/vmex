@@ -563,6 +563,43 @@ def test_run_scipy_exception_returns_best_exact_and_records_iota_targets(monkeyp
     assert "optimizer_exception" in result["_history_dump"]
 
 
+def test_run_scipy_final_exact_failure_uses_prior_best_exact_not_trial(monkeypatch) -> None:
+    pytest.importorskip("scipy.optimize")
+    import scipy.optimize
+
+    monkeypatch.setattr("vmec_jax.wout.equilibrium_aspect_ratio_from_state", lambda **_kwargs: 7.0)
+
+    def fake_least_squares(*args, **kwargs):
+        return SimpleNamespace(
+            x=np.asarray([1.0]),
+            cost=0.0,
+            nfev=2,
+            njev=1,
+            success=True,
+            status=1,
+            message="nominal scipy success",
+        )
+
+    monkeypatch.setattr(scipy.optimize, "least_squares", fake_least_squares)
+    opt = _run_ready_optimizer_for_method_tests(np.asarray([0.5, 0.25]))
+    opt._cached_exact_residual = lambda *args, **kwargs: None
+    opt._cached_exact_state = lambda params: "best-exact-state" if np.allclose(np.asarray(params), [0.0]) else None
+
+    def solve_exact(params, return_payload=False):
+        if np.allclose(np.asarray(params), [0.0]):
+            return ("best-exact-state", {}) if return_payload else "best-exact-state"
+        raise RuntimeError("final exact solve failed")
+
+    opt._solve_exact_with_tape = solve_exact
+    opt._solve_forward = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("trial fallback was used"))
+
+    result = opt.run(np.asarray([0.0]), method="scipy", max_nfev=3, verbose=0)
+
+    np.testing.assert_allclose(result["x"], [0.0])
+    assert result["_state_final"] == "best-exact-state"
+    assert result["_history_dump"]["selected_best_exact_point"] is True
+
+
 def test_run_lbfgs_success_path_uses_scaled_bounds_and_result(monkeypatch) -> None:
     pytest.importorskip("scipy.optimize")
     import scipy.optimize

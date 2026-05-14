@@ -20,7 +20,7 @@ The latest verified ``main`` CI run checked during this update was green:
 The required CI split remains:
 
 - fast tests on Python 3.10, 3.11, and 3.12,
-- Python 3.11 coverage at the current ``63%`` gate,
+- Python 3.11 coverage at the current ``85%`` gate,
 - bounded physics smoke,
 - parity manifest dry-run smoke,
 - wheel/sdist build plus fast docs,
@@ -184,8 +184,8 @@ Next parity gates
 
 The next parity gates are:
 
-- Add one small solved-state QI fixture around ``qi_diagnostics_from_state``
-  before making optimizer seed-robustness claims.
+- Keep the solved-state QI diagnostic fixture green while broadening
+  optimizer seed-robustness claims.
 - Run reviewed repeated-stage family-prefine probes across QI, QP, QH, QA, and
   simple seeds.
 - Keep VMEC2000 executable smoke green before broadening the executable-backed

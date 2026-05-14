@@ -24,26 +24,101 @@ def _diagnostic_float(record, key):
     value = record.get(key)
     return float(value) if value is not None else float("nan")
 
-# Problem parameters.  The default uses the bundled NFP=2 omnigenity seed
+# Seed cases.  Pick one case by changing RUN_CASE; add another dictionary entry
+# to use any external VMEC input deck.  The NFP is taken from the VMEC input
+# file, so the same script can run the bundled NFP=2 QI seed, the stellarator
+# seed, or the NFP=4 QH warm start without hard-coding field period count.
+QI_CASES = {
+    "nfp2_qi": {
+        "input_file": DATA_DIR / "input.nfp2_QI",
+        "output_dir": Path("results/qi_opt/ess/nfp2_qi"),
+        "max_mode": 3,
+        "min_vmec_mode": 6,
+        "use_mode_continuation": True,
+        "stage_repeats": 5,
+        "max_nfev": 12,
+        "target_aspect": 5.0,
+        "target_abs_iota_min": 0.41,
+        "branch_width_weight": 5.0,
+        "mirror_weight": 10.0,
+        "elongation_weight": 10.0,
+        "qi_ceiling_weight": 100.0,
+        "shuffle_profile_nphi_out": None,
+    },
+    "qi_stel_seed_3127": {
+        "input_file": DATA_DIR / "input.QI_stel_seed_3127",
+        "output_dir": Path("results/qi_opt/ess/qi_stel_seed_3127"),
+        "max_mode": 3,
+        "min_vmec_mode": 6,
+        "use_mode_continuation": False,
+        "stage_repeats": 1,
+        "max_nfev": 8,
+        "target_aspect": 5.0,
+        "target_abs_iota_min": 0.41,
+        # First find a low-QI, nonzero-transform basin; add mirror cleanup
+        # after QI/iota pass for this unrelated stellarator seed.
+        "branch_width_weight": 0.5,
+        "mirror_weight": 0.0,
+        "elongation_weight": 0.0,
+        "qi_ceiling_weight": 0.0,
+        "shuffle_profile_nphi_out": None,
+    },
+    "nfp4_qh_warm_to_qi": {
+        "input_file": DATA_DIR / "input.nfp4_QH_warm_start",
+        "output_dir": Path("results/qi_opt/ess/nfp4_qh_warm_to_qi"),
+        "max_mode": 3,
+        "min_vmec_mode": 6,
+        "use_mode_continuation": True,
+        "stage_repeats": 3,
+        "max_nfev": 10,
+        "target_aspect": 5.0,
+        "target_abs_iota_min": 0.41,
+        "branch_width_weight": 0.5,
+        "mirror_weight": 0.0,
+        "elongation_weight": 0.0,
+        "qi_ceiling_weight": 0.0,
+        "shuffle_profile_nphi_out": None,
+    },
+    # Template for an arbitrary VMEC input deck:
+    # "my_seed": {
+    #     "input_file": Path("/absolute/path/to/input.my_seed"),
+    #     "output_dir": Path("results/qi_opt/ess/my_seed"),
+    #     "max_mode": 3,
+    #     "min_vmec_mode": 6,
+    #     "use_mode_continuation": True,
+    #     "stage_repeats": 5,
+    #     "max_nfev": 12,
+    #     "target_aspect": 5.0,
+    #     "target_abs_iota_min": 0.41,
+    #     "branch_width_weight": 0.5,
+    #     "mirror_weight": 0.0,
+    #     "elongation_weight": 0.0,
+    #     "qi_ceiling_weight": 0.0,
+    #     "shuffle_profile_nphi_out": None,
+    # },
+}
+
+RUN_CASE = "nfp2_qi"  # Try "qi_stel_seed_3127" or "nfp4_qh_warm_to_qi".
+CASE = QI_CASES[RUN_CASE]
+
+# Problem parameters.  The default case uses the bundled NFP=2 omnigenity seed
 # because it gives the current best mirror-aware QI result in this repository.
-# Users can point INPUT_FILE to any VMEC input deck and keep the same workflow.
+# Users can change RUN_CASE or add a QI_CASES entry for any VMEC input deck
+# while keeping the same objective-construction workflow below.
 # The smooth metric is calibrated against the Goodman et al. branch-shuffle
 # diagnostic: branch-width tracks bounce-width invariance, shuffle-profile
 # compares against the branch-equalized well, and a small profile term keeps
 # QH/QP-like false positives from ranking too favorably.
-INPUT_FILE = DATA_DIR / "input.nfp2_QI"
-# Alternative bundled near-axis seed.  This reaches a lower smooth QI value, but
-# the current mirror-aware cleanup still needs more work from this basin.
-# INPUT_FILE = DATA_DIR / "input.QI_stel_seed_3127"
-OUTPUT_DIR = Path("results/qi_opt/ess")
-MAX_MODE = 3
-MIN_VMEC_MODE = 6
-USE_MODE_CONTINUATION = True  # True repeats the same max-mode stage for QI cleanup.
-MAX_NFEV = 12
+INPUT_FILE = CASE["input_file"]
+OUTPUT_DIR = CASE["output_dir"]
+MAX_MODE = int(CASE["max_mode"])
+MIN_VMEC_MODE = int(CASE.get("min_vmec_mode", max(6, MAX_MODE + 3)))
+USE_MODE_CONTINUATION = bool(CASE["use_mode_continuation"])  # Repeats the same max-mode stage for QI cleanup.
+MAX_NFEV = int(CASE["max_nfev"])
 CONTINUATION_NFEV = 0
 QI_PREFINE = False
 QI_PREFINE_NFEV = 30
-STAGE_REPEATS = 5
+STAGE_REPEATS = int(CASE["stage_repeats"])
 STAGE_MODES = vj.repeated_stage_modes(
     max_mode=MAX_MODE,
     use_mode_continuation=USE_MODE_CONTINUATION,
@@ -82,8 +157,8 @@ MAKE_PLOTS = True
 # engineering cleanup terms, but they are intentionally staged: the first solve
 # should find a QI+iota basin, and mirror cleanup should then be added without
 # dropping the QI and iota gates.
-TARGET_ASPECT = 5.0
-TARGET_ABS_IOTA_MIN = 0.41
+TARGET_ASPECT = float(CASE["target_aspect"])
+TARGET_ABS_IOTA_MIN = float(CASE["target_abs_iota_min"])
 MAX_MIRROR_RATIO = 0.21
 MAX_ELONGATION = 8.0
 SURFACES = np.linspace(0.1, 1.0, 6)
@@ -91,10 +166,10 @@ ASPECT_WEIGHT = 0.25
 IOTA_FLOOR_WEIGHT = 200.0**2
 QI_WEIGHT = 10.0
 QI_CEILING_MAX = 2.0e-2
-QI_CEILING_WEIGHT = 100.0
+QI_CEILING_WEIGHT = float(CASE["qi_ceiling_weight"])
 QI_CEILING_SMOOTH_PENALTY = 2.0e-3
-MIRROR_WEIGHT = 10.0
-ELONGATION_WEIGHT = 10.0
+MIRROR_WEIGHT = float(CASE["mirror_weight"])
+ELONGATION_WEIGHT = float(CASE["elongation_weight"])
 MIRROR_SMOOTH_EXTREMA = 2.0e-2
 MIRROR_SMOOTH_PENALTY = 2.0e-2
 QI_GATE_SMOOTH_MAX = 2.0e-3
@@ -113,7 +188,7 @@ QI_OPTIONS = vj.QuasiIsodynamicOptions(
     width_weight=1.0,
     # A branch-heavy QI residual tracks the Goodman-style branch diagnostic
     # better for the current mirror-aware QI lane than the historical 0.5 value.
-    branch_width_weight=5.0,
+    branch_width_weight=float(CASE["branch_width_weight"]),
     branch_width_softness=2.0e-2,
     profile_weight=0.1,
     shuffle_profile_weight=1.0,
@@ -122,7 +197,7 @@ QI_OPTIONS = vj.QuasiIsodynamicOptions(
     # omnigenity_optimization arr_out=True objective.  This is useful for
     # homotopy experiments but increases memory and runtime, so the default
     # published example keeps the base nphi grid.
-    # shuffle_profile_nphi_out=501,
+    shuffle_profile_nphi_out=CASE.get("shuffle_profile_nphi_out"),
     # Optional closer-to-legacy weighted branch-shuffle term.  It is useful for
     # diagnostics and homotopy experiments, but the current best QI example
     # keeps it off because it did not improve the mirror-aware NFP=2 run.
@@ -155,11 +230,13 @@ mirror = vj.MirrorRatio(
     surface_index=None,
     smooth_extrema=MIRROR_SMOOTH_EXTREMA,
     smooth_penalty=MIRROR_SMOOTH_PENALTY,
+    qi_options=QI_OPTIONS,
 )
 elongation = vj.MaxElongation(
     threshold=MAX_ELONGATION,
     ntheta=48,
     nphi=16,
+    qi_options=QI_OPTIONS,
 )
 
 qi_only_objective_tuples = [
@@ -171,32 +248,42 @@ objective_tuples = [
     (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
     (iota_floor.J, 0.0, IOTA_FLOOR_WEIGHT),
     (qi.J, 0.0, QI_WEIGHT),
+]
+if QI_CEILING_WEIGHT > 0.0:
     # Soft-wall QI guard: mirror/elongation cleanup may trade scalar objective
     # against QI.  This term is inactive below QI_CEILING_MAX and grows once a
     # trial leaves the accepted QI basin.
-    (qi_ceiling.J, 0.0, QI_CEILING_WEIGHT),
-    # Mirror/shape cleanup.  Keep the QI/iota terms active so mirror does not
-    # destroy QI.  The all-surface Boozer mirror target is stricter than the
-    # legacy single-surface VMEC mirror diagnostic used in older scripts.
-    (mirror.J, 0.0, MIRROR_WEIGHT),
-    (elongation.J, 0.0, ELONGATION_WEIGHT),
-    # (vj.LgradB(threshold=0.30, smooth_penalty=1.0e-3).J, 0.0, 0.001),
-    # (vj.MagneticWell(minimum=0.0).J, 0.0, 1.0),
-    # Finite-beta examples can also add:
-    # (vj.VolavgB().J, TARGET_VOLAVGB, VOLAVGB_WEIGHT),
-    # (vj.BetaTotal().J, TARGET_BETA, BETA_WEIGHT),
-    # (vj.DMerc(minimum=0.0, softness=1.0e-3).J, 0.0, DMERC_WEIGHT),
-    # (vj.JDotB(surfaces=(0.25, 0.50, 0.75)).J, 0.0, JDOTB_WEIGHT),
-    # (vj.BDotB(surfaces=(0.25, 0.50, 0.75)).J, TARGET_BDOTB, BDOTB_WEIGHT),
-    # (vj.BDotGradV(surfaces=(0.25, 0.50, 0.75)).J, TARGET_BDOTGRADV, BDOTGRADV_WEIGHT),
-    # (vj.ToroidalCurrent(surfaces=(0.25, 0.50, 0.75)).J, TARGET_TORCUR, TORCUR_WEIGHT),
-    # (vj.ToroidalCurrentGradient(surfaces=(0.25, 0.50, 0.75)).J, TARGET_TORCUR_PRIME, TORCUR_PRIME_WEIGHT),
-    # (vj.RedlBootstrapMismatch(helicity_n=0, ne_coeffs=NE_COEFFS, Te_coeffs=TE_COEFFS, surfaces=(0.25, 0.50, 0.75)).J, 0.0, BOOTSTRAP_WEIGHT),
-    # (vj.BVector(s_index=-1).J, TARGET_B_VECTOR, B_VECTOR_WEIGHT),
-    # (vj.JVector(surfaces=(0.25, 0.50, 0.75)).J, TARGET_J_VECTOR, J_VECTOR_WEIGHT),
-]
+    objective_tuples.append((qi_ceiling.J, 0.0, QI_CEILING_WEIGHT))
+if MIRROR_WEIGHT > 0.0:
+    # All-surface Boozer mirror cleanup.  Keep QI/iota terms active so this
+    # engineering target cannot silently destroy omnigenity.
+    objective_tuples.append((mirror.J, 0.0, MIRROR_WEIGHT))
+if ELONGATION_WEIGHT > 0.0:
+    objective_tuples.append((elongation.J, 0.0, ELONGATION_WEIGHT))
+# Optional terms users can append in the same tuple style:
+# objective_tuples.append((vj.LgradB(threshold=0.30, smooth_penalty=1.0e-3).J, 0.0, 0.001))
+# objective_tuples.append((vj.MagneticWell(minimum=0.0).J, 0.0, 1.0))
+# objective_tuples.append((vj.DMerc(minimum=0.0, softness=1.0e-3).J, 0.0, DMERC_WEIGHT))
+# Finite-beta examples show VolavgB, BetaTotal, JDotB, RedlBootstrapMismatch,
+# and profile-current targets without making this QI teaching script longer.
 qi_only_problem = vj.LeastSquaresProblem.from_tuples(qi_only_objective_tuples)
 problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
+
+print("\nQI optimization policy:")
+print(f"  case:            {RUN_CASE}")
+print(f"  input file:      {INPUT_FILE}")
+print(f"  output dir:      {OUTPUT_DIR}")
+print(f"  max_mode:        {MAX_MODE}")
+print(f"  min_vmec_mode:   {MIN_VMEC_MODE}")
+print(f"  stage_modes:     {STAGE_MODES}")
+print(f"  max_nfev:        {MAX_NFEV}")
+print(f"  ESS:             {USE_ESS} (alpha={ALPHA})")
+print(f"  target aspect:   {TARGET_ASPECT}")
+print(f"  abs iota floor:  {TARGET_ABS_IOTA_MIN}")
+print(f"  QI branch weight:{QI_OPTIONS.branch_width_weight}")
+print(f"  mirror weight:   {MIRROR_WEIGHT}")
+print(f"  elongation wt:   {ELONGATION_WEIGHT}")
+print(f"  QI ceiling wt:   {QI_CEILING_WEIGHT}")
 
 active_input_file = INPUT_FILE
 if QI_PREFINE:
@@ -327,12 +414,12 @@ print(f"  Bmin/Bmax:  {np.min(b_lcfs):.6g} / {np.max(b_lcfs):.6g}")
 
 diagnostic_options = vj.QIDiagnosticOptions(
     surfaces=SURFACES,
-    mboz=18,
-    nboz=18,
-    nphi=151,
-    nalpha=31,
-    n_bounce=51,
-    include_bounce_endpoints=True,
+    mboz=QI_OPTIONS.mboz,
+    nboz=QI_OPTIONS.nboz,
+    nphi=QI_OPTIONS.nphi,
+    nalpha=QI_OPTIONS.nalpha,
+    n_bounce=QI_OPTIONS.n_bounce,
+    include_bounce_endpoints=QI_OPTIONS.include_bounce_endpoints,
     phimin=float(QI_OPTIONS.phimin),
     mirror_threshold=MAX_MIRROR_RATIO,
     elongation_threshold=MAX_ELONGATION,
@@ -403,8 +490,8 @@ if MAKE_PLOTS:
             signgs=final_optimizer.signgs,
             outdir=OUTPUT_DIR,
             surfaces=(1.0,),
-            mboz=18,
-            nboz=18,
+            mboz=QI_OPTIONS.mboz,
+            nboz=QI_OPTIONS.nboz,
             title=f"{INPUT_FILE.name}: Boozer |B| contours on LCFS",
         ),
     }

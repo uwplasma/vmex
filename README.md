@@ -244,6 +244,10 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_swee
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py
 ```
 
+For QI seed-robustness probes, change the top-level `RUN_CASE` in
+`examples/optimization/QI_optimization.py` to `qi_stel_seed_3127`,
+`nfp4_qh_warm_to_qi`, or a new `QI_CASES` entry for another VMEC input deck.
+
 Regenerate the README panels and the compact CSV used for the table:
 
 ```bash
