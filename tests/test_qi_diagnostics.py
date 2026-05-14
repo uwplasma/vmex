@@ -607,6 +607,38 @@ def test_qi_cleanup_candidate_rejects_worsening_mirror_stage():
     ]
 
 
+def test_qi_cleanup_candidate_can_require_engineering_gate():
+    from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, qi_cleanup_candidate_promotable
+
+    targets = QISeedSuitabilityTargets(
+        smooth_qi_max=2.0e-3,
+        legacy_qi_max=1.0e-3,
+        target_aspect=5.0,
+        abs_iota_min=0.41,
+        mirror_ratio_max=0.30,
+        max_elongation=8.2,
+    )
+    candidate = {
+        "qi_smooth_total": 1.0e-3,
+        "qi_legacy_total": 5.0e-4,
+        "qi_mirror_ratio_max": 0.35,
+        "qi_max_elongation": 7.0,
+        "aspect": 5.1,
+        "mean_iota": -0.45,
+    }
+
+    record = qi_cleanup_candidate_promotable(
+        candidate,
+        targets=targets,
+        require_engineering_gate=True,
+        require_mirror_improvement=False,
+    )
+
+    assert record["qi_seed_gate_passed"] is True
+    assert record["qi_cleanup_promoted"] is False
+    assert record["qi_cleanup_rejection_reasons"] == ["QI engineering gate failed (mirror)"]
+
+
 def test_qi_seed_ranking_tracks_legacy_goodman_order_on_synthetic_modes():
     pytest.importorskip("jax")
 

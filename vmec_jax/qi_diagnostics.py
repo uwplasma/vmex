@@ -719,6 +719,7 @@ def qi_cleanup_candidate_promotable(
     reference: dict[str, Any] | None = None,
     targets: QISeedSuitabilityTargets | None = None,
     require_seed_gate: bool = True,
+    require_engineering_gate: bool = False,
     require_mirror_improvement: bool = True,
     mirror_improvement_min: float = 0.0,
 ) -> dict[str, Any]:
@@ -737,8 +738,23 @@ def qi_cleanup_candidate_promotable(
     reasons = list(out.get("qi_cleanup_rejection_reasons", []))
 
     if require_seed_gate and not bool(out.get("qi_seed_gate_passed")):
-        failures = ", ".join(str(item) for item in out.get("qi_gate_failures", ())) or "unknown"
+        seed_failure_names = {
+            "smooth_qi",
+            "legacy_qi",
+            "aspect",
+            "iota",
+        }
+        seed_failures = [
+            str(item)
+            for item in out.get("qi_gate_failures", ())
+            if str(item) in seed_failure_names or (str(item).startswith("qi_") and str(item).endswith("_error"))
+        ]
+        failures = ", ".join(seed_failures) or "unknown"
         reasons.append(f"QI seed gate failed ({failures})")
+
+    if require_engineering_gate and not bool(out.get("qi_engineering_gate_passed")):
+        engineering_failures = ", ".join(str(item) for item in out.get("qi_gate_failures", ())) or "unknown"
+        reasons.append(f"QI engineering gate failed ({engineering_failures})")
 
     candidate_mirror = _finite_float(out.get("qi_mirror_ratio_max"))
     reference_mirror: float | None = None

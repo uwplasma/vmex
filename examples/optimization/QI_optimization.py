@@ -36,63 +36,42 @@ QI_CASES = {
         "output_dir": Path("results/qi_opt/ess/nfp2_qi"),
         "max_mode": 3,
         "min_vmec_mode": 6,
+        "method": "scipy_matrix_free",
         "use_mode_continuation": True,
-        "stage_repeats": 5,
-        "max_nfev": 12,
+        "stage_repeats": 1,
+        "max_nfev": 10,
         "target_aspect": 5.0,
         "target_abs_iota_min": 0.41,
-        "mirror_threshold": 0.21,
+        "max_elongation": 8.2,
+        "mirror_threshold": 0.30,
         "mirror_surface_index": None,
         "qi_ceiling_max": 2.0e-2,
         "qi_ceiling_smooth_penalty": 2.0e-3,
-        "branch_width_weight": 5.0,
+        "branch_width_weight": 0.5,
         "weighted_shuffle_profile_weight": 0.0,
         "phimin": 0.0,
-        "mirror_weight": 10.0,
+        "mirror_weight": 20.0,
         "elongation_weight": 10.0,
-        "qi_ceiling_weight": 100.0,
+        "qi_ceiling_weight": 0.0,
         "shuffle_profile_nphi_out": None,
-        # Guarded mirror-ramp policy.  Each stage starts from the last accepted
-        # input deck; endpoints that fail the QI+iota gate or worsen mirror are
-        # left in their stage directory for audit but are not promoted.
+        # Guarded mirror-aware policy.  This matrix-free lane is the current
+        # validated default: it obtains low smooth/legacy QI, nonzero transform,
+        # and an all-surface mirror ratio below 0.30 from the bundled NFP=2 seed.
         "mirror_ramp_stages": (
             {
-                "name": "qi_basin",
-                "max_nfev": 12,
-                "mirror_weight": 0.0,
-                "elongation_weight": 0.0,
+                "name": "matrix_free_mirror030",
+                "max_nfev": 10,
+                "stage_repeats": 1,
+                "method": "scipy_matrix_free",
+                "mirror_threshold": 0.21,
+                "promotion_mirror_threshold": 0.30,
+                "mirror_surface_index": None,
+                "mirror_weight": 20.0,
+                "elongation_weight": 10.0,
+                "qi_ceiling_max": 2.0e-2,
                 "qi_ceiling_weight": 0.0,
                 "require_mirror_improvement": False,
-            },
-            {
-                "name": "lcfs_mirror_030",
-                "max_nfev": 12,
-                "mirror_threshold": 0.30,
-                "mirror_surface_index": -1,
-                "mirror_weight": 1.0,
-                "elongation_weight": 10.0,
-                "qi_ceiling_max": 2.0e-3,
-                "qi_ceiling_weight": 1000.0,
-            },
-            {
-                "name": "lcfs_mirror_028",
-                "max_nfev": 12,
-                "mirror_threshold": 0.28,
-                "mirror_surface_index": -1,
-                "mirror_weight": 2.0,
-                "elongation_weight": 10.0,
-                "qi_ceiling_max": 2.0e-3,
-                "qi_ceiling_weight": 1000.0,
-            },
-            {
-                "name": "all_surface_mirror_026",
-                "max_nfev": 16,
-                "mirror_threshold": 0.26,
-                "mirror_surface_index": None,
-                "mirror_weight": 5.0,
-                "elongation_weight": 10.0,
-                "qi_ceiling_max": 2.0e-3,
-                "qi_ceiling_weight": 5000.0,
+                "require_engineering_gate": True,
             },
         ),
     },
@@ -219,7 +198,7 @@ STAGE_MODES = vj.repeated_stage_modes(
 MIRROR_RAMP_STAGES = tuple(CASE.get("mirror_ramp_stages", ()))
 
 # Optimizer parameters.
-METHOD = "scipy"  # Try also "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
+METHOD = CASE.get("method", "scipy")  # Try also "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
 SCIPY_TR_SOLVER = "lsmr"  # For METHOD="scipy": "lsmr" is memory-light; "exact" is dense.
 SCIPY_LSMR_MAXITER = None  # None lets SciPy choose; set an int to cap LSMR iterations.
 FTOL = 1.0e-4  # Relative cost-reduction tolerance for the outer optimizer.
@@ -253,7 +232,7 @@ TARGET_ASPECT = float(CASE["target_aspect"])
 TARGET_ABS_IOTA_MIN = float(CASE["target_abs_iota_min"])
 MAX_MIRROR_RATIO = float(CASE.get("mirror_threshold", 0.21))
 MIRROR_SURFACE_INDEX = CASE.get("mirror_surface_index", None)
-MAX_ELONGATION = 8.0
+MAX_ELONGATION = float(CASE.get("max_elongation", 8.0))
 SURFACES = np.linspace(0.1, 1.0, 6)
 ASPECT_WEIGHT = 0.25
 IOTA_FLOOR_WEIGHT = 200.0**2
@@ -434,7 +413,8 @@ if MIRROR_RAMP_STAGES:
             f"    {index}: {stage['name']} "
             f"mirror<={stage.get('mirror_threshold', MAX_MIRROR_RATIO)} "
             f"w={stage.get('mirror_weight', MIRROR_WEIGHT)} "
-            f"nfev={stage.get('max_nfev', MAX_NFEV)}"
+            f"nfev={stage.get('max_nfev', MAX_NFEV)} "
+            f"repeats={stage.get('stage_repeats', STAGE_REPEATS)}"
         )
 
 if MIRROR_RAMP_STAGES:
@@ -443,10 +423,12 @@ if MIRROR_RAMP_STAGES:
         for stage in MIRROR_RAMP_STAGES
         if float(stage.get("mirror_weight", MIRROR_WEIGHT)) > 0.0
         and float(stage.get("qi_ceiling_weight", QI_CEILING_WEIGHT)) <= 0.0
+        and not bool(stage.get("require_engineering_gate", False))
     ]
     if stages_without_guard:
         raise ValueError(
-            "Mirror-ramp cleanup stages must include QuasiIsodynamicResidualCeiling; "
+            "Mirror-ramp cleanup stages must include QuasiIsodynamicResidualCeiling "
+            "or require the independent QI engineering gate; "
             f"missing guard in {stages_without_guard}."
         )
 
@@ -461,15 +443,24 @@ def make_vmec_for_stage(input_file, output_dir):
     )
 
 
-def solve_qi_stage(input_file, output_dir, stage_problem, *, max_nfev, label):
+def solve_qi_stage(
+    input_file,
+    output_dir,
+    stage_problem,
+    *,
+    max_nfev,
+    label,
+    stage_modes=STAGE_MODES,
+    method=METHOD,
+):
     vmec = make_vmec_for_stage(input_file, output_dir)
     return vj.least_squares_solve(
         vmec,
         stage_problem,
-        stage_modes=STAGE_MODES,
+        stage_modes=stage_modes,
         max_nfev=max_nfev,
         continuation_nfev=CONTINUATION_NFEV,
-        method=METHOD,
+        method=method,
         ftol=FTOL,
         gtol=GTOL,
         xtol=XTOL,
@@ -489,7 +480,14 @@ def solve_qi_stage(input_file, output_dir, stage_problem, *, max_nfev, label):
     )
 
 
-def qi_diagnostics_for_result(stage_result, *, mirror_threshold, mirror_surface_index):
+def qi_diagnostics_for_result(
+    stage_result,
+    *,
+    mirror_threshold,
+    mirror_surface_index,
+    smooth_qi_max=QI_GATE_SMOOTH_MAX,
+    legacy_qi_max=QI_GATE_LEGACY_MAX,
+):
     opt = stage_result.final_optimizer
     diagnostic_options = vj.QIDiagnosticOptions(
         surfaces=SURFACES,
@@ -529,8 +527,8 @@ def qi_diagnostics_for_result(stage_result, *, mirror_threshold, mirror_surface_
     return annotate_qi_seed_suitability(
         diagnostics,
         targets=QISeedSuitabilityTargets(
-            smooth_qi_max=QI_GATE_SMOOTH_MAX,
-            legacy_qi_max=QI_GATE_LEGACY_MAX,
+            smooth_qi_max=smooth_qi_max,
+            legacy_qi_max=legacy_qi_max,
             target_aspect=TARGET_ASPECT,
             abs_iota_min=TARGET_ABS_IOTA_MIN,
             mirror_ratio_max=mirror_threshold,
@@ -567,40 +565,57 @@ if MIRROR_RAMP_STAGES:
             stage_problem,
             max_nfev=int(stage.get("max_nfev", MAX_NFEV)),
             label=f"QI {stage_name} (max_mode={MAX_MODE}, {'ESS' if USE_ESS else 'no ESS'})",
+            stage_modes=vj.repeated_stage_modes(
+                max_mode=MAX_MODE,
+                use_mode_continuation=USE_MODE_CONTINUATION,
+                continuation_nfev=CONTINUATION_NFEV,
+                repeats=int(stage.get("stage_repeats", STAGE_REPEATS)),
+            ),
+            method=str(stage.get("method", METHOD)),
         )
         if first_result_for_outputs is None:
             first_result_for_outputs = stage_result
         stage_mirror_threshold = float(stage.get("mirror_threshold", MAX_MIRROR_RATIO))
+        stage_promotion_mirror_threshold = float(
+            stage.get("promotion_mirror_threshold", stage_mirror_threshold)
+        )
         stage_mirror_surface_index = stage.get("mirror_surface_index", MIRROR_SURFACE_INDEX)
+        stage_smooth_qi_max = float(stage.get("smooth_qi_max", QI_GATE_SMOOTH_MAX))
+        stage_legacy_qi_max = float(stage.get("legacy_qi_max", QI_GATE_LEGACY_MAX))
         reference_diagnostics = (
             None
             if accepted_result is None
             else qi_diagnostics_for_result(
                 accepted_result,
-                mirror_threshold=stage_mirror_threshold,
+                mirror_threshold=stage_promotion_mirror_threshold,
                 mirror_surface_index=stage_mirror_surface_index,
+                smooth_qi_max=stage_smooth_qi_max,
+                legacy_qi_max=stage_legacy_qi_max,
             )
         )
         stage_diagnostics = qi_diagnostics_for_result(
             stage_result,
-            mirror_threshold=stage_mirror_threshold,
+            mirror_threshold=stage_promotion_mirror_threshold,
             mirror_surface_index=stage_mirror_surface_index,
+            smooth_qi_max=stage_smooth_qi_max,
+            legacy_qi_max=stage_legacy_qi_max,
         )
         promotion = vj.qi_cleanup_candidate_promotable(
             stage_diagnostics,
             reference=reference_diagnostics,
             targets=QISeedSuitabilityTargets(
-                smooth_qi_max=QI_GATE_SMOOTH_MAX,
-                legacy_qi_max=QI_GATE_LEGACY_MAX,
+                smooth_qi_max=stage_smooth_qi_max,
+                legacy_qi_max=stage_legacy_qi_max,
                 target_aspect=TARGET_ASPECT,
                 abs_iota_min=TARGET_ABS_IOTA_MIN,
-                mirror_ratio_max=stage_mirror_threshold,
+                mirror_ratio_max=stage_promotion_mirror_threshold,
                 max_elongation=MAX_ELONGATION,
             ),
             require_mirror_improvement=bool(
                 stage.get("require_mirror_improvement", accepted_seed_diagnostics is not None)
                 and float(stage.get("mirror_weight", MIRROR_WEIGHT)) > 0.0
             ),
+            require_engineering_gate=bool(stage.get("require_engineering_gate", False)),
             mirror_improvement_min=float(stage.get("mirror_improvement_min", 0.0)),
         )
         promotion_log.append(

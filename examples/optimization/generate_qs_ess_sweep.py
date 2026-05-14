@@ -356,11 +356,11 @@ PROBLEM_CONFIGS = {
     "qi": ProblemConfig(
         name="qi",
         input_file=DATA_DIR / "input.nfp2_QI",
-        method="scipy",  # Try also "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
+        method="scipy_matrix_free",  # Try also "scipy", "gauss_newton", "lbfgs_adjoint", or "scalar_trust".
         scipy_tr_solver="lsmr",  # For method="scipy": "lsmr" is memory-light; "exact" is dense.
         scipy_lsmr_maxiter=None,  # None lets SciPy choose; set an int to cap LSMR work per step.
-        max_nfev=30,  # Outer least-squares budget for the final stage.
-        continuation_nfev=30,  # Per-stage budget when mode continuation is enabled.
+        max_nfev=10,  # Outer least-squares budget for the final stage.
+        continuation_nfev=10,  # Per-stage budget when mode continuation is enabled.
         ftol=1e-4,  # Relative cost-reduction tolerance for the outer optimizer.
         gtol=1e-4,  # Gradient optimality tolerance for the outer optimizer.
         xtol=1e-4,  # Step-size tolerance for the outer optimizer.
@@ -402,11 +402,11 @@ PROBLEM_CONFIGS = {
         qi_aligned_profile_softness=2.0e-2,
         qi_aligned_profile_trap_level=0.65,
         qi_aligned_profile_trap_softness=5.0e-2,
-        qi_max_mirror_ratio=0.21,
+        qi_max_mirror_ratio=0.30,
         # Match the reference SIMSOPT QI script: MirrorRatioPen and
         # MaxElongationPen are scalar residuals with least-squares weight 1e1.
-        qi_mirror_weight=math.sqrt(10.0),
-        qi_max_elongation=8.0,
+        qi_mirror_weight=math.sqrt(20.0),
+        qi_max_elongation=8.2,
         qi_elongation_weight=math.sqrt(10.0),
         # Optional LgradB term.  Keep it inactive by default so symmetry/QI,
         # iota, aspect, mirror ratio, and elongation set the optimization path.

@@ -78,13 +78,16 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert 'DATA_DIR / "input.nfp4_QH_warm_start"' in text
     assert '"phimin": 0.0' in text
     assert '"weighted_shuffle_profile_weight": 0.0' in text
-    assert '"mirror_threshold": 0.21' in text
+    assert '"method": "scipy_matrix_free"' in text
+    assert '"mirror_threshold": 0.30' in text
     assert '"mirror_surface_index": None' in text
     assert '"qi_ceiling_max": 2.0e-3' in text
     assert '"mirror_ramp_stages": (' in text
-    assert '"name": "qi_basin"' in text
-    assert '"name": "lcfs_mirror_030"' in text
-    assert '"name": "all_surface_mirror_026"' in text
+    assert '"name": "matrix_free_mirror030"' in text
+    assert '"mirror_threshold": 0.21' in text
+    assert '"promotion_mirror_threshold": 0.30' in text
+    assert '"require_engineering_gate": True' in text
+    assert '"stage_repeats": 1' in text
     assert '"boozer_target_wout": None' in text
     assert '"boozer_target_normalize": True' in text
     assert "Optional homotopy target for far seeds" in text
@@ -136,6 +139,7 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "plot_boozer_bmag_contours_from_state(" in text
     assert "qi_diagnostics_from_state(" in text
     assert "qi_cleanup_candidate_promotable(" in text
+    assert "require_engineering_gate=bool(stage.get(\"require_engineering_gate\", False))" in text
     assert "reference_diagnostics = (" in text
     assert "mirror_ramp_promotion_log.json" in text
     assert "qi_gate_passed" in text
@@ -148,18 +152,22 @@ def test_qi_example_uses_qi_problem_api() -> None:
 def test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling() -> None:
     text = (ROOT / "examples" / "optimization" / "QI_optimization.py").read_text()
 
-    assert '"mirror_weight": 10.0' in text
-    assert '"qi_ceiling_weight": 100.0' in text
+    assert '"mirror_weight": 20.0' in text
+    assert '"qi_ceiling_weight": 0.0' in text
     assert '"mirror_ramp_stages": (' in text
-    assert '"name": "qi_basin"' in text
+    assert '"name": "matrix_free_mirror030"' in text
     assert '"require_mirror_improvement": False' in text
-    assert '"name": "lcfs_mirror_030"' in text
-    assert '"qi_ceiling_weight": 1000.0' in text
+    assert "stage_smooth_qi_max = float(stage.get(\"smooth_qi_max\", QI_GATE_SMOOTH_MAX))" in text
+    assert "stage_promotion_mirror_threshold = float(" in text
+    assert "repeats=int(stage.get(\"stage_repeats\", STAGE_REPEATS))" in text
+    assert "method=str(stage.get(\"method\", METHOD))" in text
+    assert '"require_engineering_gate": True' in text
     assert "qi_ceiling = vj.QuasiIsodynamicResidualCeiling(" in text
     assert "qi_options=QI_OPTIONS" in text
     assert "mirror = vj.MirrorRatio(" in text
     assert "surface_index=mirror_surface_index" in text
     assert "Mirror-ramp cleanup stages must include QuasiIsodynamicResidualCeiling" in text
+    assert "or require the independent QI engineering gate" in text
     assert "stage.get(\"qi_ceiling_weight\", QI_CEILING_WEIGHT)" in text
     assert "reference=reference_diagnostics" in text
     assert "objective_tuples.append((qi_ceiling.J, 0.0, qi_ceiling_weight))" in text

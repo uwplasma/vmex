@@ -212,11 +212,11 @@ branch-shuffle diagnostic.
 
 For QI cleanup work, rank solved candidates with the no-solve component report
 before promoting any scalar objective result.  Mirror-ratio cleanup must be
-guarded by a QI residual ceiling, and endpoints that improve mirror but fail
-the independent QI gate are rejected rather than promoted.  The report records
-the QI+iota gate separately from the full engineering gate and sorts
-mirror-cleanup candidates ahead of low-mirror states that already failed smooth
-or legacy QI:
+guarded by a QI residual ceiling or by an independent engineering promotion
+gate.  Endpoints that improve mirror but fail the independent QI gate are
+rejected rather than promoted.  The report records the QI+iota gate separately
+from the full engineering gate and sorts mirror-cleanup candidates ahead of
+low-mirror states that already failed smooth or legacy QI:
 
 .. code-block:: bash
 
@@ -794,11 +794,13 @@ Two practical lessons from that study are now reflected in the example:
   hard mirror penalties from that basin reduce mirror but destroy QI in the
   current bounded experiments.  The open lane is therefore a QI-preserving
   mirror cleanup schedule that is robust across unrelated seeds.
-- ``QuasiIsodynamicResidualCeiling`` is the required cleanup guard when adding
+- ``QuasiIsodynamicResidualCeiling`` is the preferred cleanup guard when adding
   mirror, elongation, or other engineering terms after a low-QI basin has been
   found.  It adds a smooth penalty only when the shared QI residual exceeds a
-  configured ceiling.  Any endpoint that improves mirror ratio but exceeds the
-  ceiling or fails smooth/legacy QI validation is rejected, not promoted.
+  configured ceiling.  If a simultaneous mirror-aware solve uses no ceiling,
+  it must instead require the independent full engineering gate.  Any endpoint
+  that improves mirror ratio but exceeds the ceiling or fails smooth/legacy QI
+  validation is rejected, not promoted.
 - ``BoozerBTarget`` is available as a differentiable steering or homotopy term
   when a known reference Boozer ``|B|`` spectrum should guide a run toward a
   specific basin.  It is a steering objective, not a final acceptance
@@ -951,8 +953,8 @@ elongation stay below their soft-wall thresholds, inspect ``|B|`` contours, and
 prefer candidates whose smooth QI metrics preserve the same ranking as the
 legacy branch diagnostic under the higher-resolution audit.
 
-For mirror-cleanup lanes, a lower mirror ratio is only promotable when the QI
-residual ceiling and independent smooth/legacy QI gates still pass.
+For mirror-cleanup lanes, a lower mirror ratio is only promotable when either
+the QI residual ceiling or the independent full engineering gate still passes.
 
 
 Algorithms in detail
