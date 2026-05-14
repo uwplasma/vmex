@@ -413,7 +413,12 @@ def test_qi_seed_suitability_annotation_reports_gate_failures():
 
 
 def test_qi_seed_suitability_annotation_handles_disabled_and_missing_gates():
-    from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_suitability, rank_qi_seed_records
+    from vmec_jax.qi_diagnostics import (
+        QISeedSuitabilityTargets,
+        annotate_qi_seed_suitability,
+        qi_promotion_score,
+        rank_qi_seed_records,
+    )
 
     disabled = QISeedSuitabilityTargets(
         smooth_qi_max=None,
@@ -459,6 +464,51 @@ def test_qi_seed_suitability_annotation_handles_disabled_and_missing_gates():
     assert ranked[0]["qi_iota_gate_passed"] is True
     assert ranked[1]["qi_iota_gate_passed"] is False
     assert ranked[2]["qi_rank_score"] == np.inf
+
+    promotion_targets = QISeedSuitabilityTargets(
+        smooth_qi_max=None,
+        legacy_qi_max=None,
+        target_aspect=5.0,
+        aspect_relative_tolerance=0.05,
+        abs_iota_min=0.41,
+        mirror_ratio_max=0.21,
+        max_elongation=8.0,
+    )
+    cleaner_engineering = {
+        "label": "cleaner_engineering",
+        "success": True,
+        "qi_raw_total": 2.0e-2,
+        "qi_legacy_total": 2.0e-2,
+        "aspect_final": 5.02,
+        "iota_final": -0.45,
+        "qi_mirror_ratio_max": 0.20,
+        "qi_max_elongation": 7.5,
+        "objective_final": 2.0e-2,
+    }
+    lower_qi_bad_mirror = {
+        "label": "lower_qi_bad_mirror",
+        "success": True,
+        "qi_smooth_total": 1.0e-3,
+        "qi_legacy_total": 1.0e-3,
+        "aspect_final": 5.0,
+        "iota_final": -0.50,
+        "qi_mirror_ratio_max": 0.50,
+        "qi_max_elongation": 7.0,
+        "objective_final": 1.0e-3,
+    }
+    assert qi_promotion_score(cleaner_engineering, targets=promotion_targets) < qi_promotion_score(
+        lower_qi_bad_mirror,
+        targets=promotion_targets,
+    )
+    assert qi_promotion_score(
+        {**cleaner_engineering, "qi_legacy_source": "raw_fallback"},
+        targets=promotion_targets,
+        require_legacy_source=True,
+    ) > qi_promotion_score(
+        {**cleaner_engineering, "qi_legacy_source": "legacy"},
+        targets=promotion_targets,
+        require_legacy_source=True,
+    )
 
 
 def test_qi_seed_ranking_tracks_legacy_goodman_order_on_synthetic_modes():
