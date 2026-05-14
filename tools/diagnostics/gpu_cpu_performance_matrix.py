@@ -20,6 +20,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROFILE_FIXED_BOUNDARY = REPO_ROOT / "tools" / "diagnostics" / "profile_fixed_boundary.py"
 PROFILE_EXACT_OPTIMIZER = REPO_ROOT / "tools" / "diagnostics" / "profile_exact_optimizer.py"
+PROFILE_QI_BOOZER = REPO_ROOT / "tools" / "diagnostics" / "profile_qi_boozer_gpu.py"
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -31,7 +32,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--mode",
-        choices=("fixed-boundary", "exact-callback"),
+        choices=("fixed-boundary", "exact-callback", "qi-boozer"),
         default="fixed-boundary",
         help="Profiler family to run.",
     )
@@ -86,7 +87,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     fixed = parser.add_argument_group("fixed-boundary mode")
-    fixed.add_argument("--input", type=Path, default=Path("examples/data/input.nfp4_QH_warm_start"))
+    fixed.add_argument(
+        "--input",
+        type=Path,
+        default=None,
+        help="Input file. Defaults to QH warm-start for fixed-boundary and nfp2_QI for qi-boozer.",
+    )
     fixed.add_argument("--iters", type=int, default=20)
     fixed.add_argument(
         "--solver-mode",
@@ -147,6 +153,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Forward --trial-use-scan to profile_exact_optimizer for relaxed trial solves.",
     )
     exact.add_argument("--vmec-timing", action="store_true", help="Enable VMEC_JAX_TIMING in exact profiler.")
+
+    qi = parser.add_argument_group("qi-boozer mode")
+    qi.add_argument("--repeat", type=int, default=2, help="QI residual evaluations after the VMEC solve.")
+    qi.add_argument("--mpol", type=int, default=6)
+    qi.add_argument("--ntor", type=int, default=6)
+    qi.add_argument("--mboz", type=int, default=10)
+    qi.add_argument("--nboz", type=int, default=10)
+    qi.add_argument("--nphi", type=int, default=61)
+    qi.add_argument("--nalpha", type=int, default=13)
+    qi.add_argument("--n-bounce", type=int, default=21)
+    qi.add_argument("--surfaces", default="0.1,0.25,0.5,0.75,1.0")
+    qi.add_argument("--jit-booz", action="store_true", help="Use the jitted Boozer path in QI profiling.")
     return parser
 
 
@@ -155,6 +173,14 @@ def _repo_path(path: Path) -> Path:
     if path.is_absolute():
         return path
     return REPO_ROOT / path
+
+
+def _input_for_mode(args: argparse.Namespace) -> Path:
+    if args.input is not None:
+        return Path(args.input)
+    if args.mode == "qi-boozer":
+        return Path("examples/data/input.nfp2_QI")
+    return Path("examples/data/input.nfp4_QH_warm_start")
 
 
 def _prepend_pythonpath(env: dict[str, str]) -> None:
@@ -217,6 +243,9 @@ def solver_device_for_backend(backend: str) -> str:
 def report_stem(args: argparse.Namespace, backend: str) -> str:
     if args.mode == "fixed-boundary":
         return f"fixed_boundary_{backend}_iters{int(args.iters)}"
+    if args.mode == "qi-boozer":
+        jit = "jit" if bool(args.jit_booz) else "nojit"
+        return f"qi_boozer_{backend}_{jit}_repeat{int(args.repeat)}"
     return f"exact_{args.problem}_m{int(args.max_mode)}_{args.callback}_{args.method}_{backend}"
 
 
@@ -234,7 +263,7 @@ def build_child_command(
             str(args.python),
             str(PROFILE_FIXED_BOUNDARY),
             "--input",
-            str(_repo_path(args.input)),
+            str(_repo_path(_input_for_mode(args))),
             "--iters",
             str(int(args.iters)),
             "--outdir",
@@ -256,6 +285,41 @@ def build_child_command(
             command.append("--no-auto-cli-policy")
         if args.single_grid:
             command.append("--no-multigrid")
+        command.extend(str(item) for item in args.extra_arg)
+        return command
+
+    if args.mode == "qi-boozer":
+        qi_solver_device = "none" if solver_device == "auto" else solver_device
+        command = [
+            str(args.python),
+            str(PROFILE_QI_BOOZER),
+            "--input",
+            str(_repo_path(_input_for_mode(args))),
+            "--output",
+            str(report_path),
+            "--solver-device",
+            qi_solver_device,
+            "--mpol",
+            str(int(args.mpol)),
+            "--ntor",
+            str(int(args.ntor)),
+            "--mboz",
+            str(int(args.mboz)),
+            "--nboz",
+            str(int(args.nboz)),
+            "--nphi",
+            str(int(args.nphi)),
+            "--nalpha",
+            str(int(args.nalpha)),
+            "--n-bounce",
+            str(int(args.n_bounce)),
+            "--surfaces",
+            str(args.surfaces),
+            "--repeat",
+            str(int(args.repeat)),
+        ]
+        if args.jit_booz:
+            command.append("--jit-booz")
         command.extend(str(item) for item in args.extra_arg)
         return command
 
@@ -386,11 +450,26 @@ def print_report(payload: dict[str, Any]) -> None:
                 "dry-run" if run.get("dry_run") else str(run.get("exit_code")),
                 run.get("wall_time_s"),
                 _metric(summary, "total_runtime_s"),
+                _metric(summary, "vmec_solve_s"),
+                _metric(summary, "qi_first_call_s"),
+                _metric(summary, "qi_warm_min_s"),
                 _metric(summary, "replay_time_s"),
+                _metric(summary, "contamination_warning_count"),
                 run["report_path"],
             )
         )
-    headers = ("backend", "exit", "wrapper_s", "profile_s", "replay_s", "report")
+    headers = (
+        "backend",
+        "exit",
+        "wrapper_s",
+        "profile_s",
+        "vmec_s",
+        "qi_first_s",
+        "qi_warm_s",
+        "replay_s",
+        "warnings",
+        "report",
+    )
     widths = [
         max(len(headers[col]), *(len(_format_cell(row[col])) for row in rows)) if rows else len(headers[col])
         for col in range(len(headers))

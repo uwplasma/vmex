@@ -514,6 +514,77 @@ def test_qi_seed_suitability_annotation_handles_disabled_and_missing_gates():
     )
 
 
+def test_qi_seed_suitability_accepts_report_and_optimizer_aliases():
+    from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_suitability, rank_qi_seed_records
+
+    targets = QISeedSuitabilityTargets(
+        smooth_qi_max=2.0e-3,
+        legacy_qi_max=1.0e-3,
+        target_aspect=5.0,
+        aspect_relative_tolerance=0.05,
+        abs_iota_min=0.41,
+        mirror_ratio_max=0.21,
+        max_elongation=8.0,
+    )
+    report_style = annotate_qi_seed_suitability(
+        {
+            "case": "report_style",
+            "qi_smooth_total": None,
+            "smooth_total": 1.0e-3,
+            "legacy_total": 4.0e-4,
+            "qi_mirror_ratio_max": np.nan,
+            "mirror_ratio_max": 0.18,
+            "mirror_ratio_target": 0.21,
+            "max_elongation": 7.6,
+            "elongation_target": 8.0,
+            "aspect_final": 5.02,
+            "iota_final": -0.45,
+        },
+        targets=targets,
+    )
+
+    assert report_style["qi_seed_gate_passed"] is True
+    assert report_style["qi_engineering_gate_passed"] is True
+    assert report_style["qi_rank_score"] == pytest.approx(1.4e-3)
+    assert report_style["mean_iota"] == pytest.approx(-0.45)
+    assert report_style["abs_mean_iota"] == pytest.approx(0.45)
+    assert report_style["qi_mirror_ratio_max"] == pytest.approx(0.18)
+    assert report_style["qi_max_elongation"] == pytest.approx(7.6)
+
+    ranked = rank_qi_seed_records(
+        [
+            {
+                "case": "bad_iota_alias",
+                "qi_raw_total": 8.0e-4,
+                "legacy_total": 3.0e-4,
+                "aspect_final": 5.0,
+                "iota_final": 0.05,
+                "mirror_ratio_max": 0.18,
+                "max_elongation": 7.0,
+            },
+            {
+                "case": "good_alias",
+                "qi_raw_total": 9.0e-4,
+                "legacy_total": 3.0e-4,
+                "aspect_final": 5.0,
+                "iota_final": -0.45,
+                "mirror_ratio_max": 0.18,
+                "max_elongation": 7.0,
+            },
+        ],
+        targets=targets,
+    )
+
+    assert ranked[0]["case"] == "bad_iota_alias"
+    assert ranked[0]["qi_iota_gate_passed"] is False
+    assert ranked[0]["iota_shortfall"] == pytest.approx(0.36)
+    assert ranked[1]["qi_iota_gate_passed"] is True
+    assert ranked[0]["qi_iota_rank"] == 2
+    assert ranked[1]["qi_iota_rank"] == 1
+    assert ranked[0]["qi_mirror_rank"] == 1
+    assert ranked[1]["qi_mirror_rank"] == 2
+
+
 def test_qi_cleanup_candidate_promotes_only_seed_gate_safe_mirror_improvements():
     from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, qi_cleanup_candidate_promotable
 

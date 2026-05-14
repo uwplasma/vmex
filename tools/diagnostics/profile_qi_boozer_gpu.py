@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -63,15 +64,74 @@ def _json_default(value: Any):
     return str(value)
 
 
-def _runtime_info() -> dict[str, Any]:
+def _device_info(device: Any) -> dict[str, Any]:
+    return {
+        "repr": str(device),
+        "platform": getattr(device, "platform", None),
+        "device_kind": getattr(device, "device_kind", None),
+        "id": getattr(device, "id", None),
+        "process_index": getattr(device, "process_index", None),
+    }
+
+
+def _is_gpu_platform(value: Any) -> bool:
+    text = str(value or "").strip().lower()
+    return text in {"gpu", "cuda", "rocm"}
+
+
+def _runtime_info(*, requested_solver_device: str | None = None) -> dict[str, Any]:
     if jax is None:
-        return {"jax_available": False}
+        return {"jax_available": False, "requested_solver_device": requested_solver_device}
+    devices = [_device_info(device) for device in jax.devices()]
+    default_backend = jax.default_backend()
     return {
         "jax_available": True,
         "jax_version": getattr(jax, "__version__", None),
-        "default_backend": jax.default_backend(),
+        "default_backend": default_backend,
+        "requested_solver_device": requested_solver_device,
         "devices": [str(device) for device in jax.devices()],
+        "device_details": devices,
+        "active_gpu": _is_gpu_platform(default_backend) or any(
+            _is_gpu_platform(device.get("platform")) for device in devices
+        ),
+        "env": {
+            key: os.environ.get(key)
+            for key in ("JAX_PLATFORM_NAME", "JAX_PLATFORMS", "JAX_ENABLE_X64")
+            if os.environ.get(key) is not None
+        },
     }
+
+
+def _contamination_warnings(runtime: dict[str, Any], *, requested_solver_device: str | None) -> list[str]:
+    warnings: list[str] = []
+    env = runtime.get("env") if isinstance(runtime.get("env"), dict) else {}
+    platform_name = str(env.get("JAX_PLATFORM_NAME") or "").strip().lower()
+    platforms = str(env.get("JAX_PLATFORMS") or "").strip().lower()
+    platform_tokens = {part.strip() for part in platforms.split(",") if part.strip()}
+    default_backend = str(runtime.get("default_backend") or "").strip().lower()
+    device_details = runtime.get("device_details") if isinstance(runtime.get("device_details"), list) else []
+    visible_platforms = {
+        str(device.get("platform") or "").strip().lower()
+        for device in device_details
+        if isinstance(device, dict) and device.get("platform")
+    }
+
+    if platform_name and platforms:
+        warnings.append("Both JAX_PLATFORM_NAME and JAX_PLATFORMS are set; backend selection may be ambiguous.")
+    if "cpu" in platform_tokens and any(_is_gpu_platform(token) for token in platform_tokens):
+        warnings.append("JAX_PLATFORMS includes both CPU and GPU entries; use separate clean processes for timing.")
+    if len(visible_platforms) > 1:
+        warnings.append(
+            "Multiple JAX device platforms are visible in one process; compare CPU/GPU via separate child processes."
+        )
+    if requested_solver_device is not None and _is_gpu_platform(requested_solver_device):
+        if not bool(runtime.get("active_gpu")):
+            warnings.append("GPU solver was requested, but the active/default JAX backend is not GPU.")
+        if default_backend == "cpu":
+            warnings.append("GPU solver request is running with default_backend=cpu.")
+    if requested_solver_device == "cpu" and bool(runtime.get("active_gpu")):
+        warnings.append("CPU solver was requested while a GPU backend/device is active; verify this is intentional.")
+    return warnings
 
 
 def parse_args() -> argparse.Namespace:
@@ -99,12 +159,17 @@ def main() -> None:
     output_path = args.output if args.output.is_absolute() else REPO_ROOT / args.output
     solver_device = None if args.solver_device in (None, "", "none", "None") else str(args.solver_device)
     surfaces = np.asarray([float(item) for item in str(args.surfaces).split(",") if item.strip()], dtype=float)
+    runtime = _runtime_info(requested_solver_device=solver_device)
+    contamination_warnings = _contamination_warnings(runtime, requested_solver_device=solver_device)
 
     print("QI Boozer profiler")
     print(f"  input:         {input_path}")
     print(f"  output:        {output_path}")
     print(f"  solver_device: {solver_device}")
-    print(f"  runtime:       {_runtime_info()}")
+    print(f"  jit_booz:      {bool(args.jit_booz)}")
+    print(f"  runtime:       {runtime}")
+    for warning in contamination_warnings:
+        print(f"  warning:       {warning}", flush=True)
 
     _cfg, indata = vj.load_config(str(input_path))
     indata = rebuild_indata_with_resolution(indata, mpol=int(args.mpol), ntor=int(args.ntor))
@@ -125,7 +190,7 @@ def main() -> None:
     flux = vj.flux_profiles_from_indata(run.indata, run.static.s, signgs=signgs)
     pressure = jnp.zeros_like(jnp.asarray(run.static.s))
 
-    qi_times = []
+    qi_evaluations = []
     qi_last = None
     for index in range(max(1, int(args.repeat))):
         qi_last, wall_s = _timed(
@@ -154,13 +219,30 @@ def main() -> None:
                 jit_booz=bool(args.jit_booz),
             ),
         )
-        qi_times.append(wall_s)
+        qi_evaluations.append(
+            {
+                "index": int(index),
+                "phase": "first_call" if index == 0 else "warm_call",
+                "jit_booz": bool(args.jit_booz),
+                "wall_time_s": float(wall_s),
+            }
+        )
+
+    qi_times = [float(item["wall_time_s"]) for item in qi_evaluations]
+    qi_warm_times = qi_times[1:]
 
     summary = {
-        "runtime": _runtime_info(),
+        "schema_version": 1,
+        "report_kind": "qi_boozer_profile",
+        "total_wall_time_s": float(vmec_wall_s + sum(qi_times)),
+        "runtime": runtime,
+        "contamination_warnings": contamination_warnings,
         "input": str(input_path),
         "rebuilt_input": str(rebuilt_input),
         "solver_device": solver_device,
+        "solver_device_requested": solver_device,
+        "jax_default_backend": runtime.get("default_backend"),
+        "active_gpu": bool(runtime.get("active_gpu")),
         "vmec_resolution": {"mpol": int(args.mpol), "ntor": int(args.ntor)},
         "qi_resolution": {
             "mboz": int(args.mboz),
@@ -171,11 +253,16 @@ def main() -> None:
             "surfaces": surfaces,
             "jit_booz": bool(args.jit_booz),
         },
+        "qi_evaluations": qi_evaluations,
         "wall_time_s": {
             "vmec_solve": float(vmec_wall_s),
             "qi_evaluations": [float(value) for value in qi_times],
             "qi_first": float(qi_times[0]),
-            "qi_warm_min": float(min(qi_times[1:])) if len(qi_times) > 1 else None,
+            "qi_first_call": float(qi_times[0]),
+            "qi_warm_calls": [float(value) for value in qi_warm_times],
+            "qi_warm_min": float(min(qi_warm_times)) if qi_warm_times else None,
+            "qi_warm_last": float(qi_warm_times[-1]) if qi_warm_times else None,
+            "qi_warm_mean": float(np.mean(qi_warm_times)) if qi_warm_times else None,
         },
         "qi_total": None if qi_last is None else float(np.asarray(qi_last["total"])),
         "booz_modes": None if qi_last is None else int(np.asarray(qi_last["booz"]["bmnc_b"]).shape[-1]),

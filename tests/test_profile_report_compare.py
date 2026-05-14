@@ -172,6 +172,42 @@ def test_repeated_run_report_aggregates_runs() -> None:
     assert summary["metrics"]["solve_count"] == 3
 
 
+def test_qi_boozer_report_summary_extracts_phase_metrics() -> None:
+    payload = {
+        "schema_version": 1,
+        "report_kind": "qi_boozer_profile",
+        "total_wall_time_s": 12.5,
+        "solver_device": "gpu",
+        "active_gpu": True,
+        "runtime": {"default_backend": "gpu", "jax_version": "test"},
+        "qi_resolution": {"jit_booz": True},
+        "contamination_warnings": ["mixed visible devices"],
+        "wall_time_s": {
+            "vmec_solve": 4.0,
+            "qi_first_call": 6.0,
+            "qi_warm_min": 1.0,
+            "qi_warm_mean": 1.25,
+        },
+        "qi_evaluations": [
+            {"phase": "first_call", "wall_time_s": 6.0, "jit_booz": True},
+            {"phase": "warm_call", "wall_time_s": 1.0, "jit_booz": True},
+            {"phase": "warm_call", "wall_time_s": 1.5, "jit_booz": True},
+        ],
+    }
+
+    summary = compare_tool.summarize_payload(payload, label="gpu")
+
+    assert summary["metadata"]["source_report_kind"] == "qi_boozer_profile"
+    assert summary["metadata"]["active_gpu"] is True
+    assert summary["metadata"]["jit_booz"] is True
+    assert summary["metrics"]["total_runtime_s"] == 12.5
+    assert summary["metrics"]["vmec_solve_s"] == 4.0
+    assert summary["metrics"]["qi_first_call_s"] == 6.0
+    assert summary["metrics"]["qi_warm_min_s"] == 1.0
+    assert summary["metrics"]["qi_warm_mean_s"] == 1.25
+    assert summary["metrics"]["contamination_warning_count"] == 1
+
+
 def test_cli_prints_text_and_writes_json(tmp_path: Path, capsys) -> None:
     cpu_path = tmp_path / "cpu.json"
     gpu_path = tmp_path / "gpu.json"

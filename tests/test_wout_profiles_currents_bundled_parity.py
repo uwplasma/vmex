@@ -156,6 +156,36 @@ def test_bundled_wout_flux_pressure_iota_profiles_follow_vmec_radial_mesh(
         err_msg=f"{case_name}: presf does not follow VMEC full-to-half radial stencil",
     )
 
+    hs = 1.0 / float(ns - 1)
+    wp_expected = hs * float(np.sum(np.asarray(wout.vp, dtype=float)[1:] * np.asarray(wout.pres, dtype=float)[1:]))
+    np.testing.assert_allclose(
+        float(wout.wp),
+        wp_expected,
+        rtol=1.0e-13,
+        atol=1.0e-14,
+        err_msg=f"{case_name}: wp is not the VMEC half-mesh pressure integral",
+    )
+    assert float(wout.wb) > 0.0, f"{case_name}: bundled fixture lacks positive magnetic energy"
+    np.testing.assert_allclose(
+        float(wout.betatotal),
+        float(wout.wp) / float(wout.wb),
+        rtol=1.0e-13,
+        atol=1.0e-14,
+        err_msg=f"{case_name}: betatotal no longer matches wp / wb",
+    )
+    beta_scalars = np.asarray([wout.betatotal, wout.betapol, wout.betator, wout.betaxis], dtype=float)
+    assert np.all(np.isfinite(beta_scalars)), f"{case_name}: beta scalars must be finite"
+    if expect_pressure:
+        assert np.all(beta_scalars > 0.0), f"{case_name}: finite-pressure fixture lost positive beta scalars"
+    else:
+        np.testing.assert_allclose(
+            beta_scalars,
+            0.0,
+            rtol=0.0,
+            atol=0.0,
+            err_msg=f"{case_name}: zero-pressure fixture gained finite beta scalars",
+        )
+
     iotaf_expected = np.asarray(
         _iotaf_from_iotas(
             np.asarray(wout.iotas, dtype=float),

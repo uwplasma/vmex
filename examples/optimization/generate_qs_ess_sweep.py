@@ -442,6 +442,14 @@ class CaseResult:
     nfev: int | None = None
     njev: int | None = None
     total_wall_time_s: float | None = None
+    profile_wall_time_s: float | None = None
+    profile_top_name: str | None = None
+    profile_top_wall_time_s: float | None = None
+    profile_solve_forward_trial_total_wall_time_s: float | None = None
+    profile_solve_forward_exact_total_wall_time_s: float | None = None
+    profile_exact_tape_build_wall_time_s: float | None = None
+    profile_jacobian_total_wall_time_s: float | None = None
+    profile_write_wout_wall_time_s: float | None = None
     output_dir: str | None = None
     jax_backend: str | None = None
     jax_device_kind: str | None = None
@@ -492,6 +500,64 @@ def _set_missing_wall_time(result: CaseResult, elapsed_s: float) -> bool:
         return False
     result.total_wall_time_s = float(elapsed_s)
     return True
+
+
+def _profile_wall_time(profile: dict, key: str) -> float | None:
+    """Extract one profile bucket wall time from a history profile dictionary."""
+
+    value = profile.get(key)
+    if isinstance(value, dict):
+        wall = value.get("wall_time_s")
+    else:
+        wall = value
+    if wall is None:
+        return None
+    try:
+        wall_f = float(wall)
+    except (TypeError, ValueError):
+        return None
+    return wall_f if math.isfinite(wall_f) else None
+
+
+def _profile_summary_fields(history: dict | None) -> dict[str, object]:
+    """Return compact profile fields suitable for case_result/CSV summaries."""
+
+    profile = history.get("profile") if isinstance(history, dict) else None
+    if not isinstance(profile, dict) or not profile:
+        return {
+            "profile_wall_time_s": None,
+            "profile_top_name": None,
+            "profile_top_wall_time_s": None,
+            "profile_solve_forward_trial_total_wall_time_s": None,
+            "profile_solve_forward_exact_total_wall_time_s": None,
+            "profile_exact_tape_build_wall_time_s": None,
+            "profile_jacobian_total_wall_time_s": None,
+            "profile_write_wout_wall_time_s": None,
+        }
+
+    entries: list[tuple[str, float]] = []
+    for key in sorted(profile):
+        wall = _profile_wall_time(profile, str(key))
+        if wall is not None:
+            entries.append((str(key), wall))
+    top_name = None
+    top_wall = None
+    if entries:
+        top_name, top_wall = max(entries, key=lambda item: item[1])
+    return {
+        "profile_wall_time_s": float(sum(wall for _key, wall in entries)) if entries else 0.0,
+        "profile_top_name": top_name,
+        "profile_top_wall_time_s": top_wall,
+        "profile_solve_forward_trial_total_wall_time_s": _profile_wall_time(
+            profile, "solve_forward_trial_total"
+        ),
+        "profile_solve_forward_exact_total_wall_time_s": _profile_wall_time(
+            profile, "solve_forward_exact_total"
+        ),
+        "profile_exact_tape_build_wall_time_s": _profile_wall_time(profile, "exact_tape_build"),
+        "profile_jacobian_total_wall_time_s": _profile_wall_time(profile, "jacobian_total"),
+        "profile_write_wout_wall_time_s": _profile_wall_time(profile, "write_wout"),
+    }
 
 
 def _start_worker_session() -> None:
@@ -1796,6 +1862,7 @@ def _run_case(
         qp_opt.save_wout(output_dir / "wout_qp_seed.nc", qp_params, state=qp_result.get("_state_final"))
 
     hist = final_result["_history_dump"]
+    profile_summary = _profile_summary_fields(hist)
     final_iota = None
     if (problem_cfg.target_iota is not None or problem_cfg.iota_abs_min is not None) and hist["history"]:
         final_iota = float(hist["history"][-1]["iota"])
@@ -1825,6 +1892,18 @@ def _run_case(
         nfev=int(hist["nfev"]),
         njev=int(hist["njev"]),
         total_wall_time_s=float(hist["total_wall_time_s"]),
+        profile_wall_time_s=profile_summary["profile_wall_time_s"],
+        profile_top_name=profile_summary["profile_top_name"],
+        profile_top_wall_time_s=profile_summary["profile_top_wall_time_s"],
+        profile_solve_forward_trial_total_wall_time_s=profile_summary[
+            "profile_solve_forward_trial_total_wall_time_s"
+        ],
+        profile_solve_forward_exact_total_wall_time_s=profile_summary[
+            "profile_solve_forward_exact_total_wall_time_s"
+        ],
+        profile_exact_tape_build_wall_time_s=profile_summary["profile_exact_tape_build_wall_time_s"],
+        profile_jacobian_total_wall_time_s=profile_summary["profile_jacobian_total_wall_time_s"],
+        profile_write_wout_wall_time_s=profile_summary["profile_write_wout_wall_time_s"],
         output_dir=str(output_dir),
         jax_backend=jax_backend,
         jax_device_kind=jax_device_kind,
@@ -2164,6 +2243,14 @@ def _write_summary_csv(results: list[CaseResult], path: Path) -> None:
                 "nfev",
                 "njev",
                 "total_wall_time_s",
+                "profile_wall_time_s",
+                "profile_top_name",
+                "profile_top_wall_time_s",
+                "profile_solve_forward_trial_total_wall_time_s",
+                "profile_solve_forward_exact_total_wall_time_s",
+                "profile_exact_tape_build_wall_time_s",
+                "profile_jacobian_total_wall_time_s",
+                "profile_write_wout_wall_time_s",
                 "jax_backend",
                 "jax_device_kind",
                 "solver_device",

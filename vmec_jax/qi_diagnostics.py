@@ -507,7 +507,7 @@ def annotate_qi_seed_suitability(
     """
 
     targets = QISeedSuitabilityTargets() if targets is None else targets
-    out = dict(record)
+    out = _with_result_aliases(record)
 
     smooth = _finite_float(out.get("qi_smooth_total"))
     legacy = _finite_float(out.get("qi_legacy_total"))
@@ -623,6 +623,7 @@ def annotate_qi_seed_suitability(
             "qi_legacy_gate": legacy_target,
             "qi_mirror_ratio_target": mirror_target,
             "qi_elongation_target": elongation_target,
+            "abs_mean_iota": None if mean_iota is None else abs(mean_iota),
             "aspect_relative_error": None if aspect_relative_error is None else float(aspect_relative_error),
             "iota_shortfall": iota_shortfall,
             "qi_smooth_excess": smooth_excess,
@@ -662,14 +663,20 @@ def _with_result_aliases(record: dict[str, Any]) -> dict[str, Any]:
     """Return a QI record with common optimizer-summary aliases normalized."""
 
     out = dict(record)
-    aliases = {
-        "aspect": "aspect_final",
-        "mean_iota": "iota_final",
-        "abs_iota_min": "iota_abs_min",
-        "qi_smooth_total": "qi_raw_total",
-    }
-    for canonical, alias in aliases.items():
-        if canonical not in out and alias in out:
+    aliases = (
+        ("aspect", "aspect_final"),
+        ("mean_iota", "iota_final"),
+        ("abs_iota_min", "iota_abs_min"),
+        ("qi_smooth_total", "qi_raw_total"),
+        ("qi_smooth_total", "smooth_total"),
+        ("qi_legacy_total", "legacy_total"),
+        ("qi_mirror_ratio_max", "mirror_ratio_max"),
+        ("qi_mirror_ratio_target", "mirror_ratio_target"),
+        ("qi_max_elongation", "max_elongation"),
+        ("qi_elongation_target", "elongation_target"),
+    )
+    for canonical, alias in aliases:
+        if (canonical not in out or _finite_float(out.get(canonical)) is None) and alias in out:
             out[canonical] = out[alias]
     return out
 
@@ -807,10 +814,15 @@ def rank_qi_seed_records(
     for key, rank_key in (
         ("qi_smooth_total", "qi_smooth_rank"),
         ("qi_legacy_total", "qi_legacy_rank"),
+        ("qi_mirror_ratio_max", "qi_mirror_rank"),
+        ("qi_constraint_score", "qi_constraint_rank"),
     ):
         finite = [row for row in ranked if _finite_float(row.get(key)) is not None]
         for index, row in enumerate(sorted(finite, key=lambda item: float(item[key])), start=1):
             row[rank_key] = index
+    finite_iota = [row for row in ranked if _finite_float(row.get("abs_mean_iota")) is not None]
+    for index, row in enumerate(sorted(finite_iota, key=lambda item: -float(item["abs_mean_iota"])), start=1):
+        row["qi_iota_rank"] = index
     return ranked
 
 

@@ -8,10 +8,19 @@ import vmec_jax.discrete_adjoint as da
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TOOL_PATH = REPO_ROOT / "tools" / "diagnostics" / "gpu_cpu_performance_matrix.py"
+QI_TOOL_PATH = REPO_ROOT / "tools" / "diagnostics" / "profile_qi_boozer_gpu.py"
 
 
 def _load_tool():
     spec = importlib.util.spec_from_file_location("gpu_cpu_performance_matrix", TOOL_PATH)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_qi_tool():
+    spec = importlib.util.spec_from_file_location("profile_qi_boozer_gpu", QI_TOOL_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -162,6 +171,59 @@ def test_performance_matrix_exact_command_can_request_memory_profile(tmp_path):
     assert "--trial-use-scan" in command
     assert command[command.index("--trace-outdir") + 1] == str(trace)
     assert command[command.index("--device-memory-profile-out") + 1] == str(memory)
+
+
+def test_performance_matrix_qi_boozer_command_uses_qi_profiler(tmp_path):
+    tool = _load_tool()
+    args = tool._build_parser().parse_args(
+        [
+            "--mode",
+            "qi-boozer",
+            "--backend",
+            "gpu",
+            "--repeat",
+            "3",
+            "--jit-booz",
+            "--mboz",
+            "8",
+            "--nphi",
+            "17",
+        ]
+    )
+    report = tmp_path / "qi.json"
+    trace = tmp_path / "trace"
+
+    command = tool.build_child_command(
+        args=args,
+        backend="gpu",
+        report_path=report,
+        trace_dir=trace,
+    )
+
+    assert str(tool.PROFILE_QI_BOOZER) in command
+    assert command[command.index("--input") + 1].endswith("examples/data/input.nfp2_QI")
+    assert command[command.index("--solver-device") + 1] == "gpu"
+    assert command[command.index("--output") + 1] == str(report)
+    assert command[command.index("--repeat") + 1] == "3"
+    assert command[command.index("--mboz") + 1] == "8"
+    assert command[command.index("--nphi") + 1] == "17"
+    assert "--jit-booz" in command
+
+
+def test_qi_profiler_contamination_warnings_identify_gpu_request_on_cpu():
+    qi_tool = _load_qi_tool()
+    runtime = {
+        "default_backend": "cpu",
+        "active_gpu": False,
+        "env": {"JAX_PLATFORM_NAME": "gpu", "JAX_PLATFORMS": "cpu,gpu"},
+        "device_details": [{"platform": "cpu", "device_kind": "cpu"}],
+    }
+
+    warnings = qi_tool._contamination_warnings(runtime, requested_solver_device="gpu")
+
+    assert any("Both JAX_PLATFORM_NAME and JAX_PLATFORMS" in warning for warning in warnings)
+    assert any("GPU solver was requested" in warning for warning in warnings)
+    assert any("default_backend=cpu" in warning for warning in warnings)
 
 
 def test_performance_matrix_dry_run_writes_summary(tmp_path):

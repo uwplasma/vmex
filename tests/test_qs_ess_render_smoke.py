@@ -84,6 +84,33 @@ def test_qs_ess_sweep_sets_missing_wall_time():
     assert result.total_wall_time_s == 12.5
 
 
+def test_qs_ess_sweep_profile_summary_fields():
+    sweep = _load_sweep_module()
+    summary = sweep._profile_summary_fields(
+        {
+            "profile": {
+                "jacobian_total": {"count": 2, "wall_time_s": 7.5},
+                "solve_forward_trial_total": {"count": 4, "wall_time_s": 3.0},
+                "exact_tape_build": {"count": 2, "wall_time_s": 2.5},
+                "write_wout": 0.25,
+                "ignored": {"wall_time_s": "not-a-float"},
+            }
+        }
+    )
+
+    assert summary["profile_wall_time_s"] == pytest.approx(13.25)
+    assert summary["profile_top_name"] == "jacobian_total"
+    assert summary["profile_top_wall_time_s"] == pytest.approx(7.5)
+    assert summary["profile_solve_forward_trial_total_wall_time_s"] == pytest.approx(3.0)
+    assert summary["profile_exact_tape_build_wall_time_s"] == pytest.approx(2.5)
+    assert summary["profile_jacobian_total_wall_time_s"] == pytest.approx(7.5)
+    assert summary["profile_write_wout_wall_time_s"] == pytest.approx(0.25)
+
+    empty = sweep._profile_summary_fields({})
+    assert empty["profile_top_name"] is None
+    assert empty["profile_wall_time_s"] is None
+
+
 def test_qs_ess_sweep_worker_session_best_effort(monkeypatch):
     sweep = _load_sweep_module()
     calls = []

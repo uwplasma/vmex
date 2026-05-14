@@ -101,6 +101,11 @@ Optimizer and output controls are also top-level variables, including
 `METHOD`, `SCIPY_TR_SOLVER`, `FTOL`, `GTOL`, `XTOL`, `INNER_MAX_ITER`,
 `TRIAL_MAX_ITER`, `SAVE_STAGE_INPUTS`, `SAVE_STAGE_WOUTS`, and `MAKE_PLOTS`.
 
+For reproducible comparison artifacts, use the sweep driver rather than a
+single edited script.  The current production sweep runs QI directly from its
+bundled seed (`--qi-qp-preseed off`); use `--qi-qp-preseed both` only for the
+focused QI preseed/no-preseed matrix.
+
 ## QI Diagnostics
 
 Before treating a QI result as a final candidate, audit the smooth objective
@@ -121,6 +126,11 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/compare_omnigenity_q
 PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_objective_component_report.py
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/audit_qi_seed_suitability.py --quick \
   --csv results/qi_seed_audit.csv
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/audit_qi_seed_suitability.py --quick \
+  --prefine-probes plan \
+  --prefine-manifest results/qi_seed_audit/prefine_manifest.json \
+  --prefine-output-dir results/qi_seed_audit/prefine_probes
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_seed_robustness.py
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py \
   --backend-label cpu --solver-device cpu --policy continuation \
   --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both
@@ -148,7 +158,7 @@ Example:
 ```bash
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py \
   --backend-label cpu --solver-device cpu --policy continuation \
-  --problems qa,qh,qp,qi --modes 1,2,3 --ess both
+  --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off
 PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 ```
 
@@ -167,6 +177,14 @@ profiling and `tools/diagnostics/profile_fixed_boundary.py` for raw solver
 throughput. Accepted-point exact callbacks default to the tape path on both CPU
 and GPU; use `VMEC_JAX_OPT_EXACT_PATH=scan` only for scan-exact diagnostics.
 CPU/GPU command examples live in `docs/performance.rst`.
+
+For QI-specific GPU diagnostics, isolate the Boozer/QI residual from optimizer
+bookkeeping first:
+
+```bash
+JAX_PLATFORM_NAME=gpu PYTHONPATH=. python tools/diagnostics/profile_qi_boozer_gpu.py \
+  --solver-device gpu --repeat 2 --output results/diagnostics/qi_boozer_gpu.json
+```
 
 Relevant lightweight tests:
 

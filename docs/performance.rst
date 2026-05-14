@@ -151,6 +151,14 @@ timing is cold or warm, the selected JAX backend, JAX/JAXLIB versions, input
 deck, ``max_mode`` or iteration budget, and whether the command is measuring
 raw solver throughput or optimization callback overhead.
 
+For optimization work, keep three measurements separate:
+
+- raw fixed-boundary throughput, measured with ``profile_fixed_boundary.py``;
+- accepted-point exact optimizer callbacks, measured with
+  ``profile_exact_optimizer.py`` or ``gpu_cpu_performance_matrix.py``;
+- QI Boozer/residual cost, measured with ``profile_qi_boozer_gpu.py`` before
+  attributing a slow QI run to VMEC replay or SciPy trust-region behavior.
+
 For CPU-only timings, force a CPU process with ``JAX_PLATFORMS=cpu`` or an
 explicit ``--solver-device cpu``.  For GPU timings, use
 ``JAX_PLATFORM_NAME=gpu`` plus ``--solver-device gpu``.  On NVIDIA-only JAX
@@ -220,6 +228,18 @@ Compare the JSON reports before launching a full sweep or a long GPU run:
      /tmp/qh_m2_cpu_jacobian.json /tmp/qh_m2_gpu_jacobian.json \
      --label cpu --label gpu \
      --json-out /tmp/qh_m2_cpu_gpu_comparison.json
+
+QI Boozer/residual isolation:
+
+.. code-block:: bash
+
+   JAX_PLATFORMS=cpu PYTHONPATH=. python tools/diagnostics/profile_qi_boozer_gpu.py \
+     --solver-device cpu --repeat 2 \
+     --output results/diagnostics/qi_boozer_cpu.json
+
+   JAX_PLATFORM_NAME=gpu PYTHONPATH=. python tools/diagnostics/profile_qi_boozer_gpu.py \
+     --solver-device gpu --repeat 2 \
+     --output results/diagnostics/qi_boozer_gpu.json
 
 The comparison table reports ratios for total runtime, compile/replay/cache
 time when those timings exist, callback count, observed RSS peak, solve count,

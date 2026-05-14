@@ -34,12 +34,20 @@ Performance profiling:
 - `profile_qi_boozer_gpu.py --solver-device gpu --repeat 2`
   isolates the QI/Boozer residual path from the outer optimizer.  Use it before
   launching a full QI sweep on GPU; it reports VMEC solve time, first Boozer/QI
-  evaluation time, warm repeated evaluation time, and the active JAX devices.
+  evaluation time, warm repeated evaluation time, the `--jit-booz` setting,
+  active/default JAX backend, active GPU status, and contamination warnings
+  such as CPU/GPU platform mixing in one process.
+- `gpu_cpu_performance_matrix.py --mode qi-boozer --backend cpu --backend gpu`
+  launches the QI/Boozer profiler in separate child processes and writes one
+  report per backend plus a compact matrix JSON.  Add `--jit-booz` to compare
+  the jitted Boozer path; use `--repeat 3` or higher to separate first-call
+  compilation/staging from warm residual cost.
 - `compare_profile_reports.py cpu.json gpu.json --label cpu --label gpu`
   compares two or more profiler JSON reports without rerunning VMEC.  It emits
   text or JSON ratios for total runtime, compile/replay/cache time when present,
-  callback count, observed RSS peak, solve count, accepted-point replay count,
-  and cache growth.
+  QI VMEC solve / first-call / warm-call timings when present, contamination
+  warning count, callback count, observed RSS peak, solve count,
+  accepted-point replay count, and cache growth.
 
 Free-boundary manifest notes:
 

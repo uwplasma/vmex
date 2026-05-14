@@ -50,9 +50,14 @@ ACCEPTED_REPLAY_PROFILE_NAMES = {
 
 METRIC_ORDER = (
     "total_runtime_s",
+    "vmec_solve_s",
+    "qi_first_call_s",
+    "qi_warm_min_s",
+    "qi_warm_mean_s",
     "compile_time_s",
     "replay_time_s",
     "cache_time_s",
+    "contamination_warning_count",
     "callback_count",
     "rss_peak_mib",
     "solve_count",
@@ -63,9 +68,14 @@ METRIC_ORDER = (
 
 METRIC_LABELS = {
     "total_runtime_s": "total runtime",
+    "vmec_solve_s": "VMEC solve",
+    "qi_first_call_s": "QI first call",
+    "qi_warm_min_s": "QI warm min",
+    "qi_warm_mean_s": "QI warm mean",
     "compile_time_s": "compile time",
     "replay_time_s": "replay time",
     "cache_time_s": "cache time",
+    "contamination_warning_count": "warnings",
     "callback_count": "callbacks",
     "rss_peak_mib": "RSS peak",
     "solve_count": "solves",
@@ -212,6 +222,8 @@ def _source_kind(payload: dict[str, Any]) -> str:
         return "exact_optimizer_run_repeats"
     if "wall_time_sec" in payload and "diagnostics" in payload:
         return "fixed_boundary_profile"
+    if "qi_evaluations" in payload or "qi_resolution" in payload:
+        return "qi_boozer_profile"
     if "history" in payload and "profile" in payload:
         return "exact_optimizer_run_history"
     if "profile" in payload:
@@ -239,6 +251,35 @@ def _total_runtime(payload: dict[str, Any]) -> float | None:
     runs = payload.get("runs")
     if isinstance(runs, list):
         return _sum_optional(_total_runtime(run) for run in runs if isinstance(run, dict))
+    return None
+
+
+def _wall_time_metric(payload: dict[str, Any], key: str) -> float | None:
+    value = _as_float(_get_path(payload, ("wall_time_s", key)))
+    if value is not None:
+        return value
+    runs = payload.get("runs")
+    if isinstance(runs, list):
+        return _sum_optional(_wall_time_metric(run, key) for run in runs if isinstance(run, dict))
+    return None
+
+
+def _contamination_warning_count(payload: dict[str, Any]) -> int | None:
+    warnings = payload.get("contamination_warnings")
+    if isinstance(warnings, list):
+        return len(warnings)
+    runs = payload.get("runs")
+    if isinstance(runs, list):
+        values = [_contamination_warning_count(run) for run in runs if isinstance(run, dict)]
+        if any(value is not None for value in values):
+            return sum(int(value or 0) for value in values)
+    return None
+
+
+def _first_present(*values: float | None) -> float | None:
+    for value in values:
+        if value is not None:
+            return value
     return None
 
 
@@ -476,9 +517,17 @@ def summarize_payload(
     rss_peak = _rss_peak_bytes(payload)
     metrics = {
         "total_runtime_s": _total_runtime(payload),
+        "vmec_solve_s": _wall_time_metric(payload, "vmec_solve"),
+        "qi_first_call_s": _first_present(
+            _wall_time_metric(payload, "qi_first_call"),
+            _wall_time_metric(payload, "qi_first"),
+        ),
+        "qi_warm_min_s": _wall_time_metric(payload, "qi_warm_min"),
+        "qi_warm_mean_s": _wall_time_metric(payload, "qi_warm_mean"),
         "compile_time_s": compile_time,
         "replay_time_s": replay_time,
         "cache_time_s": cache_time,
+        "contamination_warning_count": _contamination_warning_count(payload),
         "callback_count": _callback_count(payload),
         "rss_peak_bytes": rss_peak,
         "rss_peak_mib": None if rss_peak is None else rss_peak / (1024.0 * 1024.0),
@@ -502,6 +551,9 @@ def summarize_payload(
         ),
         "jax_default_backend": payload.get("jax_default_backend") or runtime.get("default_backend"),
         "jax_version": payload.get("jax_version") or runtime.get("jax_version"),
+        "active_gpu": payload.get("active_gpu") if "active_gpu" in payload else runtime.get("active_gpu"),
+        "jit_booz": _get_path(payload, ("qi_resolution", "jit_booz")),
+        "contamination_warnings": payload.get("contamination_warnings"),
         "run_repeats": payload.get("run_repeats"),
     }
     return {
