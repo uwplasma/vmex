@@ -639,6 +639,15 @@ def test_public_api_reexports_run_free_boundary():
     assert vj.run_free_boundary is run_free_boundary
 
 
+def test_public_api_reexports_qi_promotion_helpers():
+    from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, qi_promotion_score
+
+    assert api_module.QISeedSuitabilityTargets is QISeedSuitabilityTargets
+    assert api_module.qi_promotion_score is qi_promotion_score
+    assert vj.QISeedSuitabilityTargets is QISeedSuitabilityTargets
+    assert vj.qi_promotion_score is qi_promotion_score
+
+
 def test_python_default_fixed_boundary_uses_optimized_controller(tmp_path):
     input_path = _write_staged_with_niter_input(tmp_path)
     run = run_fixed_boundary(
