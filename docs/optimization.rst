@@ -712,7 +712,8 @@ mirror-aware QI lane from the bundled NFP=2 ``input.nfp2_QI`` omnigenity seed:
 
    PYTHONPATH=. python examples/optimization/QI_optimization.py
 
-For the same policy in a smaller focused script, run:
+For a smaller focused QI+iota basin probe from the bundled stellarator seed,
+run:
 
 .. code-block:: bash
 
@@ -780,9 +781,10 @@ Two practical lessons from that study are now reflected in the example:
   when the independent smooth-QI, legacy-QI, and iota gates all pass.  Mirror
   ratio is reported separately.  The bundled near-axis
   ``input.QI_stel_seed_3127`` lane reaches low QI and large transform but still
-  has all-surface mirror ratio near ``0.97``; direct hard mirror penalties from
-  that basin reduce mirror but destroy QI.  The open lane is therefore a
-  QI-preserving mirror cleanup schedule that is robust across unrelated seeds.
+  has all-surface mirror ratio near ``0.97``; Boozer-target steering and direct
+  hard mirror penalties from that basin reduce mirror but destroy QI in the
+  current bounded experiments.  The open lane is therefore a QI-preserving
+  mirror cleanup schedule that is robust across unrelated seeds.
 - ``QuasiIsodynamicResidualCeiling`` is the preferred cleanup guard when adding
   mirror, elongation, or other engineering terms after a low-QI basin has been
   found.  It adds a smooth penalty only when the shared QI residual exceeds a
@@ -833,7 +835,19 @@ dictionary entry to ``QI_CASES`` in ``QI_optimization.py``:
        "max_nfev": 12,
        "target_aspect": 5.0,
        "target_abs_iota_min": 0.41,
+       "mirror_threshold": 0.21,
+       "mirror_surface_index": None,
+       "qi_ceiling_max": 2.0e-2,
+       "qi_ceiling_smooth_penalty": 2.0e-3,
        "branch_width_weight": 0.5,
+       "weighted_shuffle_profile_weight": 0.0,
+       "phimin": 0.0,
+       # Optional homotopy target for far seeds.  Use a solved QI wout with
+       # the same NFP to steer the Boozer |B| spectrum before QI cleanup.
+       "boozer_target_wout": None,
+       "boozer_target_weight": 0.0,
+       "boozer_target_normalize": True,
+       "boozer_target_include_b00": False,
        "mirror_weight": 0.0,
        "elongation_weight": 0.0,
        "qi_ceiling_weight": 0.0,
@@ -851,11 +865,14 @@ run ``examples/optimization/audit_qi_seed_suitability.py --case
 label:qi:input_path:wout_path`` as described in :doc:`validation`.
 
 The bundled ``input.QI_stel_seed_3127`` case can be used directly with
-``RUN_CASE = "qi_stel_seed_3127"``.  This is a useful robustness seed, but
-arbitrary inputs are not guaranteed to optimize to precise QI automatically;
-the accepted workflow is audit, run the bounded QI script, then accept the
-result only if both the numerical metrics and Boozer ``|B|`` line-contour plot
-pass the QI gate.
+``RUN_CASE = "qi_stel_seed_3127"``.  This far-from-QI seed is intentionally
+configured as a QI+iota robustness probe, not as a claimed full engineering
+solution: the script should print a passed QI+iota gate and a failed mirror
+gate until the mirror-cleanup lane is solved.  For a new unrelated seed, audit
+the seed first, optionally add a solved same-NFP QI target wout through
+``BoozerBTarget`` as a homotopy experiment, run the bounded QI script, then
+accept the result only if both the numerical metrics and Boozer ``|B|``
+line-contour plot pass the QI gate.
 
 
 QI diagnostics and validation plan
@@ -864,12 +881,12 @@ QI diagnostics and validation plan
 QI optimization has more ways to get a plausible but wrong answer than QA/QH
 because the smooth QI residual is a differentiable proxy for the legacy branch
 diagnostic.  The public audit helpers are ``vj.QIDiagnosticOptions``,
-``vj.qi_diagnostics_from_boozer_output``, and
-``vj.qi_diagnostics_from_state``; they return one unweighted record with smooth
-QI, raw QI, legacy branch, mirror-ratio, elongation, optional ``LgradB``,
-resolution metadata, and diagnostic error fields.  Treat the standalone QI
-script as a candidate generator, then run the following validation ladder before
-promoting a result.
+``vj.qi_diagnostics_from_boozer_output``,
+``vj.qi_diagnostics_from_state``, and ``vj.rank_qi_seed_records``; they return
+and rank unweighted records with smooth QI, raw QI, legacy branch,
+mirror-ratio, elongation, optional ``LgradB``, resolution metadata, and
+diagnostic error fields.  Treat the standalone QI script as a candidate
+generator, then run the following validation ladder before promoting a result.
 
 1. Confirm the objective definition on the seed and any final candidate.  The
    diagnostics compare smooth QI variants, component totals, mirror ratio,

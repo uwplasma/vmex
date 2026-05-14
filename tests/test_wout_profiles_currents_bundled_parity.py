@@ -26,9 +26,21 @@ PROFILE_CASES = (
         False,
     ),
     (
+        "qi_stel_seed_3127",
+        "input.QI_stel_seed_3127",
+        "wout_QI_stel_seed_3127.nc",
+        False,
+    ),
+    (
         "finite_beta_3d",
         "input.li383_low_res",
         "wout_li383_low_res.nc",
+        True,
+    ),
+    (
+        "cth",
+        "input.cth_like_fixed_bdy",
+        "wout_cth_like_fixed_bdy.nc",
         True,
     ),
     (
@@ -43,7 +55,9 @@ CURRENT_CASES = (
     ("axisymmetric", "wout_circular_tokamak.nc"),
     ("axisymmetric_finite_beta", "wout_shaped_tokamak_pressure.nc"),
     ("current_driven_3d", "wout_nfp4_QH_warm_start.nc"),
+    ("qi_stel_seed_3127", "wout_QI_stel_seed_3127.nc"),
     ("finite_beta_3d", "wout_li383_low_res.nc"),
+    ("cth", "wout_cth_like_fixed_bdy.nc"),
     ("lasym_3d", "wout_basic_non_stellsym_simsopt.nc"),
 )
 

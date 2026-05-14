@@ -60,7 +60,9 @@ from .optimization_workflow import (
     ToroidalCurrent,
     ToroidalCurrentGradient,
     VolavgB,
+    boozer_b_target_from_wout,
     least_squares_solve,
+    qi_boozer_b_target_objective,
     qs_stage_modes,
     repeated_stage_modes,
 )
@@ -104,6 +106,7 @@ from .qi_diagnostics import (
     qi_diagnostics_from_boozer_output,
     qi_diagnostics_from_state,
     qi_promotion_score,
+    rank_qi_seed_records,
 )
 from .visualization import export_vtk_surface_and_fieldline
 from .wout import read_wout, state_from_wout
@@ -138,6 +141,7 @@ __all__ = [
     "qi_diagnostics_from_boozer_output",
     "qi_diagnostics_from_state",
     "qi_promotion_score",
+    "rank_qi_seed_records",
     # Optimization workflow helpers used by examples
     "FixedBoundaryVMEC",
     "LeastSquaresProblem",
@@ -152,6 +156,8 @@ __all__ = [
     "MaxElongation",
     "LgradB",
     "BoozerBTarget",
+    "boozer_b_target_from_wout",
+    "qi_boozer_b_target_objective",
     "BetaTotal",
     "VolavgB",
     "BDotB",

@@ -76,10 +76,22 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert '"nfp4_qh_warm_to_qi"' in text
     assert 'DATA_DIR / "input.QI_stel_seed_3127"' in text
     assert 'DATA_DIR / "input.nfp4_QH_warm_start"' in text
+    assert '"phimin": 0.0' in text
+    assert '"weighted_shuffle_profile_weight": 0.0' in text
+    assert '"mirror_threshold": 0.21' in text
+    assert '"mirror_surface_index": None' in text
+    assert '"qi_ceiling_max": 2.0e-3' in text
+    assert '"boozer_target_wout": None' in text
+    assert '"boozer_target_normalize": True' in text
+    assert "Optional homotopy target for far seeds" in text
+    assert "boozer_b_target_from_wout(" in text
+    assert "BoozerBTarget(" in text
     assert "QuasiIsodynamicOptions(" in text
     assert "QuasiIsodynamicResidual(QI_OPTIONS)" in text
     assert "QuasiIsodynamicResidualCeiling(" in text
     assert "qi_options=QI_OPTIONS" in text
+    assert "branch_width_weight=QI_OPTIONS.branch_width_weight" in text
+    assert "weighted_shuffle_profile_weight=QI_OPTIONS.weighted_shuffle_profile_weight" in text
     assert "objective_tuples = [" in text
     assert "LeastSquaresProblem.from_tuples(" in text
     assert "problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)" in text
@@ -1073,6 +1085,7 @@ def test_magnetic_well_tuple_stays_regular_state_objective(monkeypatch) -> None:
 
 
 def test_public_api_reexports_example_optimization_contract() -> None:
+    import vmec_jax as vj
     import vmec_jax.api as api
     import vmec_jax.optimization_workflow as workflow
     import vmec_jax.plotting as plotting
@@ -1092,6 +1105,8 @@ def test_public_api_reexports_example_optimization_contract() -> None:
         "MaxElongation",
         "LgradB",
         "BoozerBTarget",
+        "boozer_b_target_from_wout",
+        "qi_boozer_b_target_objective",
         "BetaTotal",
         "VolavgB",
         "BDotB",
@@ -1120,8 +1135,10 @@ def test_public_api_reexports_example_optimization_contract() -> None:
         "QIDiagnosticOptions",
         "qi_diagnostics_from_boozer_output",
         "qi_diagnostics_from_state",
+        "rank_qi_seed_records",
     ):
         assert getattr(api, name) is getattr(qi_diagnostics, name)
+        assert getattr(vj, name) is getattr(qi_diagnostics, name)
 
     for name in (
         "plot_3d_boundary_comparison",

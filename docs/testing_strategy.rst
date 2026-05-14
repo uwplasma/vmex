@@ -328,20 +328,26 @@ Optimization gates:
 - ``LeastSquaresProblem.from_tuples`` should preserve SIMSOPT weight semantics:
   tuple ``weight`` means a residual multiplier of ``sqrt(weight)``.
 - QI workflow tests should cover routing of ``QuasiIsodynamicResidual`` terms,
-  rejection of invalid nonzero QI targets, and compatibility of smooth QI
-  metrics with the legacy branch-ranking diagnostics.  The cheap synthetic
-  Boozer ranking guard is
+  optional ``BoozerBTarget`` homotopy terms for far seeds, rejection of invalid
+  nonzero QI targets, and compatibility of smooth QI metrics with the legacy
+  branch-ranking diagnostics.  The cheap synthetic Boozer ranking guard is
   ``pytest -q tests/test_qi_objective_component_report.py``; it must stay fast
   enough to run in ordinary PR checks.
 - QI diagnostic-record tests should keep smooth/raw/legacy QI totals,
   mirror-ratio, elongation, optional ``LgradB``, resolution metadata, and
   diagnostic error fields stable enough for sweep renderers and downstream
-  audit scripts.  The bundled solved-seed gate intentionally uses a tiny grid;
-  it is a metadata and sign/range regression, not a replacement for
+  audit scripts.  ``rank_qi_seed_records`` is part of the public API and should
+  remain covered through both ``vmec_jax`` and ``vmec_jax.api`` re-export
+  checks.  The bundled solved-seed gate intentionally uses a tiny grid; it is a
+  metadata and sign/range regression, not a replacement for
   publication-resolution Boozer contour review.
 - GPU optimization tests should assert the device-aware defaults separately:
   accepted-point exact callbacks default to tape on CPU and GPU, while relaxed
   trial residuals default to scan unless ``VMEC_JAX_OPT_TRIAL_SCAN=0`` is set.
+- Exact optimizer tests should preserve final-output correctness: when trial
+  solves and exact accepted-point replays disagree, histories and saved outputs
+  must select the best finite exact accepted point rather than an unreplayed
+  trial point.
 - Full optimization sweeps are not required PR tests; they remain generated
   benchmark artifacts documented in :doc:`optimization_sweep_results`.
 
@@ -359,8 +365,9 @@ QI seed-robustness gates:
   contour quality remains part of manual/nightly seed-robustness validation.
 - Use ``examples/optimization/audit_qi_seed_suitability.py --quick`` as the
   no-optimization preflight before a multi-seed QI sweep.  It ranks existing
-  solved seeds and records missing optional reference checkouts instead of
-  making the default gate machine-specific.  The audit defaults to
+  solved seeds through the public ``rank_qi_seed_records`` helper and records
+  missing optional reference checkouts instead of making the default gate
+  machine-specific.  The audit defaults to
   ``include_bounce_endpoints=True`` so smooth-QI seed ranking uses the same
   normalized level range as the legacy Goodman-style branch/shuffle diagnostic.
 - Use ``--prefine-probes plan`` to write a hard-capped QI-only probe manifest
