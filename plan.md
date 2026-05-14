@@ -1067,3 +1067,11 @@ Defer beyond the current cycle:
   the compact terminal report. Raised the py3.11 CI coverage floor to 80%.
   The next testing lane is preserving the 80% gate while adding more
   physics/parity coverage rather than synthetic branch coverage.
+- 2026-05-14: Validated the new guarded QI cleanup path from the standalone
+  `QI_optimization.py` example on CPU. It completed in `502 s` with monotone
+  accepted objective history, aspect `5.0085`, `mean_iota=-0.4974`, legacy QI
+  `1.98e-4`, smooth QI `2.04e-3`, max elongation `7.93`, and all-surface mirror
+  `0.299`. This is a useful QI-preserving cleanup run but it is not promoted
+  over the documented best because it narrowly misses the smooth-QI gate and
+  still misses the mirror target. The next QI lane remains a mirror-preserving
+  objective/homotopy that lowers mirror below `0.21` without degrading QI.

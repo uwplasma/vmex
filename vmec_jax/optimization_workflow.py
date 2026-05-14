@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 from pathlib import Path
+import sys
 from typing import Callable, Sequence
 
 import numpy as np
@@ -55,6 +56,26 @@ from .wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles
 
 
 enable_x64(True)
+
+
+_LINE_BUFFERING_ENABLED = False
+
+
+def _enable_line_buffered_output() -> None:
+    """Flush optimization progress promptly when examples run through pipes."""
+
+    global _LINE_BUFFERING_ENABLED
+    if _LINE_BUFFERING_ENABLED:
+        return
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(line_buffering=True)
+        except (TypeError, ValueError):
+            pass
+    _LINE_BUFFERING_ENABLED = True
 
 
 @dataclass(frozen=True)
@@ -1597,6 +1618,7 @@ def run_fixed_boundary_objective_optimization(
 ) -> FixedBoundaryOptimizationResult:
     """Run a fixed-boundary objective list through one or more mode stages."""
 
+    _enable_line_buffered_output()
     stage_records: list[tuple[int, FixedBoundaryExactOptimizer, np.ndarray, dict]] = []
     current_cfg = cfg
     current_indata = indata
@@ -1947,6 +1969,7 @@ def run_quasi_isodynamic_objective_optimization(
 ) -> FixedBoundaryOptimizationResult:
     """Run a QI objective list through repeated or direct mode stages."""
 
+    _enable_line_buffered_output()
     stage_records: list[tuple[int, FixedBoundaryExactOptimizer, np.ndarray, dict]] = []
     current_cfg = cfg
     current_indata = indata
@@ -2124,6 +2147,7 @@ def least_squares_solve(
     4. call this function.
     """
 
+    _enable_line_buffered_output()
     metadata = dict(problem.metadata)
     target_aspect = _metadata_float(metadata, "target_aspect")
     target_iota = _metadata_float(metadata, "target_iota")
