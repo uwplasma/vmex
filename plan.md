@@ -313,12 +313,12 @@ Acceptance:
 
 ## Progress Snapshot
 
-Updated 2026-05-13 after the bundled profile/current wout parity gates, QI
+Updated 2026-05-14 after the bundled profile/current wout parity gates, QI
 selection hardening, exact-Jacobian host-materialization cleanup,
 continuation/exact-history hardening, LASYM-Boozer parity, release-checklist
 push, 85% coverage-gate push, optional SIMSOPT/VMEC2000 gate expansion, and
 QI diagnostic/objective branch hardening, plus the exact-output/API/release
-hygiene push:
+hygiene push, and the custom QI seed audit documentation/regression gate:
 
 - Continuation correctness: 100%. Source fix is implemented and covered by
   synthetic repeated-stage tests, a real boundary-projection stage test, and
@@ -342,7 +342,7 @@ hygiene push:
   validation, and QI aligned-profile/mirror smooth branches have direct AD
   checks. Full QA/QH/QP/QI max_mode=1 objective derivative gates and
   matrix-free/scalar-adjoint production paths remain open.
-- Seed-robust QI: 95%. The tier-2 and tier-3 probes are bounded and monotone,
+- Seed-robust QI: 96%. The tier-2 and tier-3 probes are bounded and monotone,
   constrained terms run end-to-end, and manifests now expose QI/engineering
   diagnostic deltas from final artifacts, including scalar-improved but
   QI-worsened cases. A new bundled near-axis seed, `input.QI_stel_seed_3127`,
@@ -354,8 +354,11 @@ hygiene push:
   cleanup by default, and seed diagnostics now explicitly test error/fail-fast
   semantics for missing Boozer/scalar metrics. Audit and prefine mirror cleanup
   now evaluate all sampled Boozer surfaces by default and preserve that contract
-  in manifests/run commands. The remaining open cleanup is reducing mirror ratio
-  without destroying the low-QI, high-iota branch.
+  in manifests/run commands. The docs now show the exact `--case
+  label:family:input:wout` workflow for arbitrary user VMEC decks, and the audit
+  CLI has a fast regression proving the custom-case path works with the bundled
+  `input.QI_stel_seed_3127` fixture. The remaining open cleanup is reducing
+  mirror ratio without destroying the low-QI, high-iota branch.
 - CPU/GPU performance: 85%. Backend-adaptive replay bucketing, scalar-gradient
   tangent reuse, detailed timing, and GPU-only preconditioner-output fusion are
   in place. Hot-path algebra and CPU/GPU fusion gating are now covered by
@@ -394,7 +397,7 @@ hygiene push:
   utilities. `vmec_jax.api` now has a tested public import contract for the
   optimization objects and plotting helpers used by examples. Large
   solver/wout/free-boundary splits remain deferred behind parity gates.
-- Docs/release hygiene: 99%. Performance/discrete-adjoint/docs reflect the
+- Docs/release hygiene: 99.5%. Performance/discrete-adjoint/docs reflect the
   current replay and finite-beta policies, diagnostics docs cover detailed
   preconditioner timing, and a command-level release checklist now ties local
   gates, tools/validation lint/compile checks, GitHub Actions, artifact hygiene,
@@ -404,12 +407,14 @@ hygiene push:
   required 85% coverage command are green at 85.52%, and the previous `main`
   CI run after the all-surface QI mirror fix was fully green; released reference
   assets are ignored so local full-tier refreshes cannot accidentally bloat commits.
-  Final seed-robust QI and GPU-production artifacts remain open.
+  The documented custom QI seed audit command was validated end-to-end on
+  `input.QI_stel_seed_3127`; final seed-robust QI and GPU-production artifacts
+  remain open.
 
 Release-critical average across the lanes requested in this push
 (continuation, exact accepted-point output, VMEC parity/physics gates, and
 docs/release hygiene): about 99.5%. Broader roadmap average across all open
-lanes: about 97%, because the 85% coverage gate is now locked locally and the
+lanes: about 97.2%, because the 85% coverage gate is now locked locally and the
 remaining open work is seed-robust QI mirror cleanup, 90-95% coverage, and
 larger-mode GPU replay.
 
