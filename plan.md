@@ -1075,3 +1075,12 @@ Defer beyond the current cycle:
   over the documented best because it narrowly misses the smooth-QI gate and
   still misses the mirror target. The next QI lane remains a mirror-preserving
   objective/homotopy that lowers mirror below `0.21` without degrading QI.
+- 2026-05-14: Ran two bounded post-cleanup QI mirror probes from that final
+  input. A moderate mirror-weight probe (`MIRROR_WEIGHT=50`) reduced mirror to
+  `0.271` in `97 s` while keeping legacy QI `3.6e-4`, but smooth QI increased
+  to `2.27e-3`. A high mirror-weight/QI-ceiling probe (`MIRROR_WEIGHT=1000`)
+  reduced mirror further to `0.233` in `245 s`, but smooth QI stayed high
+  (`2.51e-3`) and aspect drifted to `5.30`. Conclusion: the current basin has a
+  real QI/mirror tradeoff; simply increasing mirror weights is not enough. The
+  next robust-QI step should be a staged objective design or alternate seed
+  homotopy, not changing the promoted example to these probe settings.
