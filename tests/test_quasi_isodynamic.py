@@ -66,6 +66,16 @@ def test_qi_boozer_mode_residual_can_include_legacy_bounce_endpoints():
     assert np.isfinite(float(np.asarray(shuffled["total"])))
     assert np.asarray(shuffled["shuffle_profile_residuals1d"]).shape == (9 * 33,)
 
+    dense = quasi_isodynamic_residual_from_boozer_modes(
+        **{**kwargs, "shuffle_profile_weight": 1.0},
+        include_bounce_endpoints=True,
+        shuffle_profile_nphi_out=49,
+    )
+    assert np.isfinite(float(np.asarray(dense["total"])))
+    assert np.asarray(dense["shuffle_profile_residuals1d"]).shape == (9 * 49,)
+    assert np.asarray(dense["shuffle_profile"]).shape == (1, 9, 49)
+    assert dense["shuffle_profile_nphi_out"] == 49
+
 
 def test_qi_weighted_shuffle_profile_residual_is_finite_and_differentiable():
     pytest.importorskip("jax")

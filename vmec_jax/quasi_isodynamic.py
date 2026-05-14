@@ -546,6 +546,7 @@ def quasi_isodynamic_residual_from_boozer_modes(
     profile_weight: float = 0.1,
     shuffle_profile_weight: float = 1.0,
     shuffle_profile_softness: float = 2.0e-2,
+    shuffle_profile_nphi_out: int | None = None,
     weighted_shuffle_profile_weight: float = 0.0,
     weighted_shuffle_profile_softness: float = 2.0e-2,
     aligned_profile_weight: float = 0.0,
@@ -606,6 +607,11 @@ def quasi_isodynamic_residual_from_boozer_modes(
     shuffle_profile_softness:
         Logistic smoothing width used to estimate branch crossing locations for
         ``shuffle_profile_weight``.
+    shuffle_profile_nphi_out:
+        Optional dense output grid for the branch-shuffle profile residual.  If
+        set, the shuffled and original wells are compared on this many toroidal
+        samples, matching the legacy ``arr_out=True`` Goodman objective more
+        closely than the default base ``nphi`` grid.
     weighted_shuffle_profile_weight:
         Relative weight for a branch-shuffle profile residual whose mean bounce
         widths are weighted by a differentiable proxy for the legacy
@@ -653,6 +659,8 @@ def quasi_isodynamic_residual_from_boozer_modes(
         raise ValueError("iota_b must have one value per Boozer surface")
     if nphi < 4 or nalpha < 2 or n_bounce < 2:
         raise ValueError("QI residual requires nphi >= 4, nalpha >= 2, and n_bounce >= 2")
+    if shuffle_profile_nphi_out is not None and int(shuffle_profile_nphi_out) < 4:
+        raise ValueError("shuffle_profile_nphi_out must be >= 4 when supplied")
 
     nsurf = int(bmnc_b.shape[0])
     weights_arr = _as_weight_array(weights, nsurf)
@@ -935,6 +943,26 @@ def quasi_isodynamic_residual_from_boozer_modes(
         min_phi = phi0 + jnp.asarray(min_index, dtype=dtype) * dphi
         left_endpoint = jnp.maximum(min_phi - phi0, jnp.asarray(0.0, dtype=dtype))
         right_endpoint = jnp.maximum(phi1 - min_phi, jnp.asarray(0.0, dtype=dtype))
+        signed_phi = (offsets_float[None, None, :] - jnp.asarray(min_index[:, :, None], dtype=dtype)) * dphi
+        shuffle_eval_count = nphi if shuffle_profile_nphi_out is None else int(shuffle_profile_nphi_out)
+        if shuffle_eval_count == nphi:
+            signed_phi_eval = signed_phi
+            b_eval = b_by_alpha
+        else:
+            phi_eval = jnp.linspace(phi0, phi1, shuffle_eval_count, endpoint=True, dtype=dtype)
+            signed_phi_eval = phi_eval[None, None, :] - min_phi[:, :, None]
+            original_ramp = jnp.arange(nphi, dtype=dtype) * jnp.asarray(1.0e-14, dtype=dtype) * period
+            signed_phi_interp = signed_phi + original_ramp[None, None, :]
+
+            def _interp_original_one(xp, fp, x):
+                return jnp.interp(x, xp, fp)
+
+            b_eval = jax.vmap(
+                jax.vmap(_interp_original_one, in_axes=(0, 0, 0), out_axes=0),
+                in_axes=(0, 0, 0),
+                out_axes=0,
+            )(signed_phi_interp, b_by_alpha, signed_phi_eval)
+
         level_full = jnp.concatenate(
             [
                 jnp.zeros((1,), dtype=dtype),
@@ -943,12 +971,11 @@ def quasi_isodynamic_residual_from_boozer_modes(
             ]
         )
         y_target = jnp.concatenate([jnp.flip(level_full, axis=0), level_full[1:]], axis=0)
-        signed_phi = (offsets_float[None, None, :] - jnp.asarray(min_index[:, :, None], dtype=dtype)) * dphi
 
         def _interp_one(xp, x):
             return jnp.interp(x, xp, y_target)
 
-        def _profile_from_width_mean(left_cross, right_cross, branch_widths, width_mean):
+        def _profile_from_width_mean(left_cross, right_cross, branch_widths, width_mean, x_eval):
             delta_width = 0.5 * (branch_widths - width_mean)
             left_target = jnp.clip(left_cross - delta_width, 0.0, left_endpoint[:, :, None])
             right_target = jnp.clip(right_cross - delta_width, 0.0, right_endpoint[:, :, None])
@@ -980,7 +1007,7 @@ def quasi_isodynamic_residual_from_boozer_modes(
                 jax.vmap(_interp_one, in_axes=(0, 0), out_axes=0),
                 in_axes=(0, 0),
                 out_axes=0,
-            )(x_target, signed_phi)
+            )(x_target, x_eval)
 
         if float(shuffle_profile_weight) != 0.0:
             shuffle_profile = _profile_from_width_mean(
@@ -988,14 +1015,15 @@ def quasi_isodynamic_residual_from_boozer_modes(
                 right_crossing,
                 shuffle_branch_widths,
                 shuffle_branch_widths_mean,
+                signed_phi_eval,
             )
             shuffle_profile_residuals3d = (
-                (shuffle_profile - b_by_alpha)
+                (shuffle_profile - b_eval)
                 * jnp.sqrt(weights_arr)[:, None, None]
                 * jnp.asarray(float(shuffle_profile_weight), dtype=dtype)
             )
             shuffle_profile_residuals1d = jnp.ravel(shuffle_profile_residuals3d) / jnp.sqrt(
-                jnp.asarray(nalpha * nphi, dtype=dtype)
+                jnp.asarray(nalpha * shuffle_eval_count, dtype=dtype)
             )
         if float(weighted_shuffle_profile_weight) != 0.0:
             weighted_shuffle_profile = _profile_from_width_mean(
@@ -1003,14 +1031,15 @@ def quasi_isodynamic_residual_from_boozer_modes(
                 weighted_right_crossing,
                 weighted_shuffle_branch_widths,
                 weighted_shuffle_branch_widths_mean,
+                signed_phi_eval,
             )
             weighted_shuffle_profile_residuals3d = (
-                (weighted_shuffle_profile - b_by_alpha)
+                (weighted_shuffle_profile - b_eval)
                 * jnp.sqrt(weights_arr)[:, None, None]
                 * jnp.asarray(float(weighted_shuffle_profile_weight), dtype=dtype)
             )
             weighted_shuffle_profile_residuals1d = jnp.ravel(weighted_shuffle_profile_residuals3d) / jnp.sqrt(
-                jnp.asarray(nalpha * nphi, dtype=dtype)
+                jnp.asarray(nalpha * shuffle_eval_count, dtype=dtype)
             )
     residuals1d = jnp.concatenate(
         [
@@ -1054,6 +1083,7 @@ def quasi_isodynamic_residual_from_boozer_modes(
         "shuffle_branch_widths": shuffle_branch_widths,
         "shuffle_branch_widths_mean": shuffle_branch_widths_mean,
         "weighted_shuffle_branch_widths_mean": weighted_shuffle_branch_widths_mean,
+        "shuffle_profile_nphi_out": shuffle_profile_nphi_out,
         "bmag": bmag,
         "bnorm": bnorm,
         "levels": levels,
@@ -1085,6 +1115,7 @@ def quasi_isodynamic_residual_from_boozer_output(
     profile_weight: float = 0.1,
     shuffle_profile_weight: float = 1.0,
     shuffle_profile_softness: float = 2.0e-2,
+    shuffle_profile_nphi_out: int | None = None,
     weighted_shuffle_profile_weight: float = 0.0,
     weighted_shuffle_profile_softness: float = 2.0e-2,
     aligned_profile_weight: float = 0.0,
@@ -1113,6 +1144,7 @@ def quasi_isodynamic_residual_from_boozer_output(
         profile_weight=profile_weight,
         shuffle_profile_weight=shuffle_profile_weight,
         shuffle_profile_softness=shuffle_profile_softness,
+        shuffle_profile_nphi_out=shuffle_profile_nphi_out,
         weighted_shuffle_profile_weight=weighted_shuffle_profile_weight,
         weighted_shuffle_profile_softness=weighted_shuffle_profile_softness,
         aligned_profile_weight=aligned_profile_weight,
@@ -1144,6 +1176,7 @@ def quasi_isodynamic_residual_from_state(
     profile_weight: float = 0.1,
     shuffle_profile_weight: float = 1.0,
     shuffle_profile_softness: float = 2.0e-2,
+    shuffle_profile_nphi_out: int | None = None,
     weighted_shuffle_profile_weight: float = 0.0,
     weighted_shuffle_profile_softness: float = 2.0e-2,
     aligned_profile_weight: float = 0.0,
@@ -1224,6 +1257,7 @@ def quasi_isodynamic_residual_from_state(
         profile_weight=profile_weight,
         shuffle_profile_weight=shuffle_profile_weight,
         shuffle_profile_softness=shuffle_profile_softness,
+        shuffle_profile_nphi_out=shuffle_profile_nphi_out,
         weighted_shuffle_profile_weight=weighted_shuffle_profile_weight,
         weighted_shuffle_profile_softness=weighted_shuffle_profile_softness,
         aligned_profile_weight=aligned_profile_weight,
