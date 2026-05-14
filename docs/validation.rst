@@ -160,13 +160,15 @@ synthetic ranking consistency.  It is intentionally cheap enough for ordinary
 development.
 
 The current constrained-QI sweep artifacts document one successful bundled
-NFP=2 ``input.nfp2_QI`` lane.  A seed-robust QI claim is deferred until the
-same constrained objective has been run and visually audited from QI, QP, QH,
-QA, and simple non-omnigenous starting boundaries.  For that audit, accept a
-row only when the final state satisfies all of: low legacy QI diagnostic,
-closed-looking Boozer ``|B|`` contours, mirror ratio at target, acceptable
-elongation, ``abs(mean_iota) >= 0.41``, and aspect ratio near the configured
-target.
+NFP=2 ``input.nfp2_QI`` lane.  ``examples/optimization/QI_optimization.py`` is
+the bounded multi-seed entry point for extending this to other inputs: set
+``RUN_CASE = "qi_stel_seed_3127"``, ``RUN_CASE = "nfp4_qh_warm_to_qi"``, or add
+a new ``QI_CASES`` entry for another VMEC deck.  A seed-robust QI claim still
+requires the constrained objective to be run and visually audited from QI, QP,
+QH, QA, and simple non-omnigenous starting boundaries.  Accept a row only when
+the final state satisfies all of: low legacy QI diagnostic, closed-looking
+Boozer ``|B|`` contours, mirror ratio at target, acceptable elongation,
+``abs(mean_iota) >= 0.41``, and aspect ratio near the configured target.
 
 Before launching expensive optimization sweeps, rank available solved seeds
 with:
@@ -183,10 +185,10 @@ when ``OMNIGENITY_OPTIMIZATION_ROOT`` points to that checkout; missing optional
 cases are recorded as skipped rather than failing the audit.
 The bundled default set includes ``input.QI_stel_seed_3127`` when its matching
 ``wout_QI_stel_seed_3127.nc`` fixture is present.  On 2026-05-12 this seed
-audited as a useful near-axis QI start: smooth/legacy QI were about
-``5.0e-2``/``5.0e-2`` before optimization, with mirror ratio close to but
-slightly above the default target and aspect, iota, and elongation still
-requiring optimization.
+audited as a useful but not already-accepted QI robustness start:
+smooth/legacy QI were about ``5.0e-2``/``5.0e-2`` before optimization, with
+mirror ratio far above the default target and aspect, iota, and elongation
+still requiring optimization.
 The smooth QI diagnostic includes normalized bounce endpoints by default so the
 ranked smooth metric samples the same level range as the legacy Goodman-style
 branch-shuffle diagnostic; pass ``--no-include-bounce-endpoints`` only for

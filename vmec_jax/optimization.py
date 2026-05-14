@@ -3518,8 +3518,15 @@ class FixedBoundaryExactOptimizer:
 
         # ── final evaluation ────────────────────────────────────────────────
         # Use the exact cache when available (avoids a fresh full VMEC solve
-        # that can OOM after a long optimization session).  Fall back to the
-        # trial (cheaper) solver when the cache doesn't hold result["x"].
+        # that can OOM after a long optimization session).  If the optimizer's
+        # final point cannot be exactly replayed, prefer a prior exact accepted
+        # point over a relaxed trial solve so final artifacts remain exact.
+        selected_best_exact = bool(result.pop("_selected_best_exact_point", False))
+        optimizer_exception = result.pop("_optimizer_exception", None)
+        best_exact_params = getattr(self, "_best_exact_params", None)
+        best_exact_residual = getattr(self, "_best_exact_residual", None)
+        best_exact_cost = float(getattr(self, "_best_exact_cost", math.inf))
+
         final_key = self._exact_cache_key(result["x"])
         res_final = self._cached_exact_residual(cache_key=final_key)
         state_final = self._cached_exact_state(result["x"])
@@ -3531,7 +3538,24 @@ class FixedBoundaryExactOptimizer:
                     else self._solve_exact_with_tape(result["x"])
                 )
             except Exception:
-                state_final = self._solve_forward(result["x"], trial=True)
+                if (
+                    best_exact_params is not None
+                    and best_exact_residual is not None
+                    and np.isfinite(best_exact_cost)
+                ):
+                    selected_best_exact = True
+                    result["x"] = np.asarray(best_exact_params, dtype=float).copy()
+                    final_key = self._exact_cache_key(result["x"])
+                    res_final = np.asarray(best_exact_residual, dtype=float).reshape(-1)
+                    state_final = self._cached_exact_state(result["x"])
+                    if state_final is None:
+                        state_final = (
+                            self._solve_scan_exact_state(result["x"])
+                            if self._scan_exact_path == "scan"
+                            else self._solve_exact_with_tape(result["x"])
+                        )
+                else:
+                    state_final = self._solve_forward(result["x"], trial=True)
 
         entry_final = self._history_entry_from_state_or_residual(
             state_final,
@@ -3543,11 +3567,6 @@ class FixedBoundaryExactOptimizer:
         qs_total_final = float(entry_final["qs_objective"])
         aspect_final = float(entry_final["aspect"])
 
-        selected_best_exact = bool(result.pop("_selected_best_exact_point", False))
-        optimizer_exception = result.pop("_optimizer_exception", None)
-        best_exact_params = getattr(self, "_best_exact_params", None)
-        best_exact_residual = getattr(self, "_best_exact_residual", None)
-        best_exact_cost = float(getattr(self, "_best_exact_cost", math.inf))
         exact_improvement_tol = max(
             1.0e-14,
             1.0e-9
@@ -3575,8 +3594,11 @@ class FixedBoundaryExactOptimizer:
                         if self._scan_exact_path == "scan"
                         else self._solve_exact_with_tape(result["x"])
                     )
-                except Exception:
-                    state_final = self._solve_forward(result["x"], trial=True)
+                except Exception as exc:
+                    raise RuntimeError(
+                        "Best exact accepted point was selected for final output, "
+                        "but its exact state could not be reconstructed."
+                    ) from exc
             entry_final = self._history_entry_from_state_or_residual(
                 state_final,
                 res_final,
