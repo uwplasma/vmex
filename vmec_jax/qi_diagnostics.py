@@ -55,6 +55,7 @@ class QIDiagnosticOptions:
     profile_weight: float = 0.1
     shuffle_profile_weight: float = 1.0
     shuffle_profile_softness: float = 2.0e-2
+    shuffle_profile_nphi_out: int | None = None
     weighted_shuffle_profile_weight: float = 0.0
     weighted_shuffle_profile_softness: float = 2.0e-2
     aligned_profile_weight: float = 0.0
@@ -249,6 +250,9 @@ def _base_record(
         "qi_nalpha": int(options.nalpha),
         "qi_n_bounce": int(options.n_bounce),
         "qi_include_bounce_endpoints": bool(options.include_bounce_endpoints),
+        "qi_shuffle_profile_nphi_out": None
+        if options.shuffle_profile_nphi_out is None
+        else int(options.shuffle_profile_nphi_out),
         "qi_legacy_nphi_out": None
         if options.legacy_nphi_out is None
         else int(options.legacy_nphi_out),
@@ -280,6 +284,7 @@ def _smooth_kwargs(options: QIDiagnosticOptions) -> dict[str, Any]:
         "profile_weight": float(options.profile_weight),
         "shuffle_profile_weight": float(options.shuffle_profile_weight),
         "shuffle_profile_softness": float(options.shuffle_profile_softness),
+        "shuffle_profile_nphi_out": options.shuffle_profile_nphi_out,
         "weighted_shuffle_profile_weight": float(options.weighted_shuffle_profile_weight),
         "weighted_shuffle_profile_softness": float(options.weighted_shuffle_profile_softness),
         "aligned_profile_weight": float(options.aligned_profile_weight),

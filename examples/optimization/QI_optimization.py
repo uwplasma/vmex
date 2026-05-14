@@ -118,6 +118,11 @@ QI_OPTIONS = vj.QuasiIsodynamicOptions(
     profile_weight=0.1,
     shuffle_profile_weight=1.0,
     shuffle_profile_softness=2.0e-2,
+    # Optional dense branch-shuffle output grid, closer to the legacy
+    # omnigenity_optimization arr_out=True objective.  This is useful for
+    # homotopy experiments but increases memory and runtime, so the default
+    # published example keeps the base nphi grid.
+    # shuffle_profile_nphi_out=501,
     # Optional closer-to-legacy weighted branch-shuffle term.  It is useful for
     # diagnostics and homotopy experiments, but the current best QI example
     # keeps it off because it did not improve the mirror-aware NFP=2 run.
