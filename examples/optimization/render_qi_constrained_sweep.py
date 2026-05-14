@@ -16,6 +16,8 @@ import re
 
 import numpy as np
 
+from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, qi_promotion_score
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parents[1]
@@ -30,6 +32,7 @@ ESS_OPTIONS = (False, True)
 QI_INPUT_NFP = 2
 TARGET_ASPECT = 5.0
 TARGET_ABS_IOTA_MIN = 0.41
+QI_PROMOTION_MAX = 2.0e-2
 
 SUMMARY_CSV = FIGURE_DIR / "qi_constrained_summary.csv"
 SUMMARY_JSON = FIGURE_DIR / "qi_constrained_summary.json"
@@ -430,42 +433,16 @@ def _plot_objective_panel(rows: list[dict]) -> None:
 
 
 def _best_score(row: dict) -> tuple:
-    failed = 1 if _bool_value(row.get("crashed")) or not _bool_value(row.get("success")) else 0
-    mirror = _float_value(row.get("qi_mirror_ratio_max"), np.inf) or np.inf
-    mirror_target = _float_value(row.get("qi_mirror_ratio_target"), 0.21) or 0.21
-    elong = _float_value(row.get("qi_max_elongation"), np.inf) or np.inf
-    elong_target = _float_value(row.get("qi_elongation_target"), 8.0) or 8.0
-    aspect = _float_value(row.get("aspect_final"), np.inf) or np.inf
-    iota = abs(_float_value(row.get("iota_final"), 0.0) or 0.0)
-    qi_raw = _qi_metric(row, np.inf, require_true_legacy=True) or np.inf
-    objective = _float_value(row.get("objective_final"), np.inf) or np.inf
-    mirror_violation = max(0.0, mirror - mirror_target) / max(mirror_target, 1e-12)
-    elong_violation = max(0.0, elong - elong_target) / max(elong_target, 1e-12)
-    iota_violation = max(0.0, TARGET_ABS_IOTA_MIN - iota) / TARGET_ABS_IOTA_MIN
-    aspect_target = TARGET_ASPECT
-    aspect_violation = abs(aspect - aspect_target) / aspect_target
-    hard_ok = int(
-        mirror_violation <= 0.10
-        and elong_violation <= 0.05
-        and iota_violation <= 0.025
-        and aspect_violation <= 0.05
+    targets = QISeedSuitabilityTargets(
+        smooth_qi_max=QI_PROMOTION_MAX,
+        legacy_qi_max=QI_PROMOTION_MAX,
+        target_aspect=TARGET_ASPECT,
+        aspect_relative_tolerance=0.05,
+        abs_iota_min=TARGET_ABS_IOTA_MIN,
+        mirror_ratio_max=_float_value(row.get("qi_mirror_ratio_target"), 0.21),
+        max_elongation=_float_value(row.get("qi_elongation_target"), 8.0),
     )
-    # Rank physically admissible rows by the raw QI residual first.  Mirror,
-    # elongation, iota, and aspect gates reject pathological rows, but using
-    # tiny secondary gate differences ahead of raw QI made the QP-preseeded
-    # cases win even when they were visibly more QP-like than QI.
-    qp_preseed = 1 if _bool_value(row.get("qi_qp_preseed")) else 0
-    total_violation = iota_violation + mirror_violation + elong_violation + 0.25 * aspect_violation
-    return (
-        failed,
-        1 if row.get("qi_legacy_source") != "legacy" else 0,
-        1 - hard_ok,
-        qi_raw,
-        objective,
-        qp_preseed,
-        total_violation,
-        _float_value(row.get("total_wall_time_s"), np.inf),
-    )
+    return qi_promotion_score(row, targets=targets, require_legacy_source=True)
 
 
 def _write_best(rows: list[dict]) -> dict:

@@ -293,8 +293,11 @@ from .qi_legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
 from .qi_diagnostics import (
     QI_DIAGNOSTIC_VERSION,
     QIDiagnosticOptions,
+    QISeedSuitabilityTargets,
+    annotate_qi_seed_suitability,
     qi_diagnostics_from_boozer_output,
     qi_diagnostics_from_state,
+    qi_promotion_score,
 )
 from .visualization import export_vtk_surface_and_fieldline
 
@@ -565,7 +568,10 @@ __all__ = [
     "legacy_qi_branch_shuffle_diagnostic_from_boozer_output",
     "QI_DIAGNOSTIC_VERSION",
     "QIDiagnosticOptions",
+    "QISeedSuitabilityTargets",
+    "annotate_qi_seed_suitability",
     "qi_diagnostics_from_boozer_output",
     "qi_diagnostics_from_state",
+    "qi_promotion_score",
     "export_vtk_surface_and_fieldline",
 ]

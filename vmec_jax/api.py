@@ -98,8 +98,11 @@ from .plotting import (
 )
 from .qi_diagnostics import (
     QIDiagnosticOptions,
+    QISeedSuitabilityTargets,
+    annotate_qi_seed_suitability,
     qi_diagnostics_from_boozer_output,
     qi_diagnostics_from_state,
+    qi_promotion_score,
 )
 from .visualization import export_vtk_surface_and_fieldline
 from .wout import read_wout, state_from_wout
@@ -129,8 +132,11 @@ __all__ = [
     "quasi_isodynamic_residual_from_boozer_output",
     "quasi_isodynamic_residual_from_state",
     "QIDiagnosticOptions",
+    "QISeedSuitabilityTargets",
+    "annotate_qi_seed_suitability",
     "qi_diagnostics_from_boozer_output",
     "qi_diagnostics_from_state",
+    "qi_promotion_score",
     # Optimization workflow helpers used by examples
     "FixedBoundaryVMEC",
     "LeastSquaresProblem",
