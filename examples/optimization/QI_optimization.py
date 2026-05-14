@@ -2,6 +2,7 @@
 """Quasi-isodynamic optimization with vmec_jax and booz_xform_jax."""
 
 from pathlib import Path
+import json
 import sys
 
 import numpy as np
@@ -51,6 +52,49 @@ QI_CASES = {
         "elongation_weight": 10.0,
         "qi_ceiling_weight": 100.0,
         "shuffle_profile_nphi_out": None,
+        # Guarded mirror-ramp policy.  Each stage starts from the last accepted
+        # input deck; endpoints that fail the QI+iota gate or worsen mirror are
+        # left in their stage directory for audit but are not promoted.
+        "mirror_ramp_stages": (
+            {
+                "name": "qi_basin",
+                "max_nfev": 12,
+                "mirror_weight": 0.0,
+                "elongation_weight": 0.0,
+                "qi_ceiling_weight": 0.0,
+                "require_mirror_improvement": False,
+            },
+            {
+                "name": "lcfs_mirror_030",
+                "max_nfev": 12,
+                "mirror_threshold": 0.30,
+                "mirror_surface_index": -1,
+                "mirror_weight": 1.0,
+                "elongation_weight": 10.0,
+                "qi_ceiling_max": 2.0e-3,
+                "qi_ceiling_weight": 1000.0,
+            },
+            {
+                "name": "lcfs_mirror_028",
+                "max_nfev": 12,
+                "mirror_threshold": 0.28,
+                "mirror_surface_index": -1,
+                "mirror_weight": 2.0,
+                "elongation_weight": 10.0,
+                "qi_ceiling_max": 2.0e-3,
+                "qi_ceiling_weight": 1000.0,
+            },
+            {
+                "name": "all_surface_mirror_026",
+                "max_nfev": 16,
+                "mirror_threshold": 0.26,
+                "mirror_surface_index": None,
+                "mirror_weight": 5.0,
+                "elongation_weight": 10.0,
+                "qi_ceiling_max": 2.0e-3,
+                "qi_ceiling_weight": 5000.0,
+            },
+        ),
     },
     "qi_stel_seed_3127": {
         "case_goal": "far-seed QI+iota robustness lane; low-mirror cleanup remains a gated follow-up",
@@ -82,6 +126,7 @@ QI_CASES = {
         "elongation_weight": 0.0,
         "qi_ceiling_weight": 0.0,
         "shuffle_profile_nphi_out": None,
+        "mirror_ramp_stages": (),
     },
     "nfp4_qh_warm_to_qi": {
         "case_goal": "NFP=4 QH-to-QI stress test; audit before promotion",
@@ -109,6 +154,7 @@ QI_CASES = {
         "elongation_weight": 0.0,
         "qi_ceiling_weight": 0.0,
         "shuffle_profile_nphi_out": None,
+        "mirror_ramp_stages": (),
     },
     # Template for an arbitrary VMEC input deck:
     # "my_seed": {
@@ -139,6 +185,7 @@ QI_CASES = {
     #     "elongation_weight": 0.0,
     #     "qi_ceiling_weight": 0.0,
     #     "shuffle_profile_nphi_out": None,
+    #     "mirror_ramp_stages": (),
     # },
 }
 
@@ -169,6 +216,7 @@ STAGE_MODES = vj.repeated_stage_modes(
     continuation_nfev=CONTINUATION_NFEV,
     repeats=STAGE_REPEATS,
 )
+MIRROR_RAMP_STAGES = tuple(CASE.get("mirror_ramp_stages", ()))
 
 # Optimizer parameters.
 METHOD = "scipy"  # Try also "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
@@ -263,28 +311,6 @@ QI_OPTIONS = vj.QuasiIsodynamicOptions(
 aspect = vj.AspectRatio()
 iota_floor = vj.AbsMeanIotaFloor(TARGET_ABS_IOTA_MIN)
 qi = vj.QuasiIsodynamicResidual(QI_OPTIONS)
-qi_ceiling = vj.QuasiIsodynamicResidualCeiling(
-    maximum=QI_CEILING_MAX,
-    smooth_penalty=QI_CEILING_SMOOTH_PENALTY,
-    qi_options=QI_OPTIONS,
-)
-mirror = vj.MirrorRatio(
-    threshold=MAX_MIRROR_RATIO,
-    ntheta=96,
-    nphi=96,
-    # None means "all QI surfaces", matching QIDiagnosticOptions'
-    # mirror-ratio gate.  Set an integer to optimize one surface only.
-    surface_index=MIRROR_SURFACE_INDEX,
-    smooth_extrema=MIRROR_SMOOTH_EXTREMA,
-    smooth_penalty=MIRROR_SMOOTH_PENALTY,
-    qi_options=QI_OPTIONS,
-)
-elongation = vj.MaxElongation(
-    threshold=MAX_ELONGATION,
-    ntheta=48,
-    nphi=16,
-    qi_options=QI_OPTIONS,
-)
 boozer_target = None
 if BOOZER_TARGET_WOUT is not None and BOOZER_TARGET_WEIGHT > 0.0:
     target = vj.boozer_b_target_from_wout(
@@ -306,26 +332,6 @@ qi_only_objective_tuples = [
     # itself: QI-only can converge to a low-QI branch with near-zero iota.
     (qi.J, 0.0, QI_WEIGHT),
 ]
-objective_tuples = [
-    (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
-    (iota_floor.J, 0.0, IOTA_FLOOR_WEIGHT),
-    (qi.J, 0.0, QI_WEIGHT),
-]
-if boozer_target is not None:
-    # Homotopy steering for far seeds: match a solved same-NFP QI Boozer
-    # spectrum while the QI/iota terms keep the solve in a useful basin.
-    objective_tuples.insert(2, (boozer_target.J, 0.0, BOOZER_TARGET_WEIGHT))
-if QI_CEILING_WEIGHT > 0.0:
-    # Soft-wall QI guard: mirror/elongation cleanup may trade scalar objective
-    # against QI.  This term is inactive below QI_CEILING_MAX and grows once a
-    # trial leaves the accepted QI basin.
-    objective_tuples.append((qi_ceiling.J, 0.0, QI_CEILING_WEIGHT))
-if MIRROR_WEIGHT > 0.0:
-    # All-surface Boozer mirror cleanup.  Keep QI/iota terms active so this
-    # engineering target cannot silently destroy omnigenity.
-    objective_tuples.append((mirror.J, 0.0, MIRROR_WEIGHT))
-if ELONGATION_WEIGHT > 0.0:
-    objective_tuples.append((elongation.J, 0.0, ELONGATION_WEIGHT))
 # Optional terms users can append in the same tuple style:
 # objective_tuples.append((vj.LgradB(threshold=0.30, smooth_penalty=1.0e-3).J, 0.0, 0.001))
 # objective_tuples.append((vj.MagneticWell(minimum=0.0).J, 0.0, 1.0))
@@ -333,7 +339,73 @@ if ELONGATION_WEIGHT > 0.0:
 # Finite-beta examples show VolavgB, BetaTotal, JDotB, RedlBootstrapMismatch,
 # and profile-current targets without making this QI teaching script longer.
 qi_only_problem = vj.LeastSquaresProblem.from_tuples(qi_only_objective_tuples)
-problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
+
+
+def _stage_value(stage, key, default):
+    return stage.get(key, CASE.get(key, default))
+
+
+def make_qi_problem(stage=None):
+    """Assemble the QI objective tuples for one optimization stage."""
+
+    stage = {} if stage is None else dict(stage)
+    qi_ceiling_weight = float(_stage_value(stage, "qi_ceiling_weight", QI_CEILING_WEIGHT))
+    mirror_weight = float(_stage_value(stage, "mirror_weight", MIRROR_WEIGHT))
+    elongation_weight = float(_stage_value(stage, "elongation_weight", ELONGATION_WEIGHT))
+    mirror_threshold = float(_stage_value(stage, "mirror_threshold", MAX_MIRROR_RATIO))
+    mirror_surface_index = _stage_value(stage, "mirror_surface_index", MIRROR_SURFACE_INDEX)
+    qi_ceiling_max = float(_stage_value(stage, "qi_ceiling_max", QI_CEILING_MAX))
+    qi_ceiling_smooth_penalty = float(
+        _stage_value(stage, "qi_ceiling_smooth_penalty", QI_CEILING_SMOOTH_PENALTY)
+    )
+
+    qi_ceiling = vj.QuasiIsodynamicResidualCeiling(
+        maximum=qi_ceiling_max,
+        smooth_penalty=qi_ceiling_smooth_penalty,
+        qi_options=QI_OPTIONS,
+    )
+    mirror = vj.MirrorRatio(
+        threshold=mirror_threshold,
+        ntheta=96,
+        nphi=96,
+        # None means "all QI surfaces", matching QIDiagnosticOptions'
+        # mirror-ratio gate.  Set an integer to optimize one surface only.
+        surface_index=mirror_surface_index,
+        smooth_extrema=MIRROR_SMOOTH_EXTREMA,
+        smooth_penalty=MIRROR_SMOOTH_PENALTY,
+        qi_options=QI_OPTIONS,
+    )
+    elongation = vj.MaxElongation(
+        threshold=MAX_ELONGATION,
+        ntheta=48,
+        nphi=16,
+        qi_options=QI_OPTIONS,
+    )
+
+    objective_tuples = [
+        (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
+        (iota_floor.J, 0.0, IOTA_FLOOR_WEIGHT),
+        (qi.J, 0.0, QI_WEIGHT),
+    ]
+    if boozer_target is not None:
+        # Homotopy steering for far seeds: match a solved same-NFP QI Boozer
+        # spectrum while the QI/iota terms keep the solve in a useful basin.
+        objective_tuples.insert(2, (boozer_target.J, 0.0, BOOZER_TARGET_WEIGHT))
+    if qi_ceiling_weight > 0.0:
+        # Soft-wall QI guard: mirror/elongation cleanup may trade scalar
+        # objective against QI.  This term is inactive below qi_ceiling_max and
+        # grows once a trial leaves the accepted QI basin.
+        objective_tuples.append((qi_ceiling.J, 0.0, qi_ceiling_weight))
+    if mirror_weight > 0.0:
+        # Boozer mirror cleanup.  Keep QI/iota terms active so this engineering
+        # target cannot silently destroy omnigenity.
+        objective_tuples.append((mirror.J, 0.0, mirror_weight))
+    if elongation_weight > 0.0:
+        objective_tuples.append((elongation.J, 0.0, elongation_weight))
+    return vj.LeastSquaresProblem.from_tuples(objective_tuples)
+
+
+problem = make_qi_problem()
 
 print("\nQI optimization policy:")
 print(f"  case:            {RUN_CASE}")
@@ -355,30 +427,55 @@ print(f"  mirror target:   {MAX_MIRROR_RATIO} (surface={MIRROR_SURFACE_INDEX})")
 print(f"  mirror weight:   {MIRROR_WEIGHT}")
 print(f"  elongation wt:   {ELONGATION_WEIGHT}")
 print(f"  QI ceiling:      {QI_CEILING_MAX} (weight={QI_CEILING_WEIGHT})")
+if MIRROR_RAMP_STAGES:
+    print("  mirror ramp:     guarded staged cleanup enabled")
+    for index, stage in enumerate(MIRROR_RAMP_STAGES, start=1):
+        print(
+            f"    {index}: {stage['name']} "
+            f"mirror<={stage.get('mirror_threshold', MAX_MIRROR_RATIO)} "
+            f"w={stage.get('mirror_weight', MIRROR_WEIGHT)} "
+            f"nfev={stage.get('max_nfev', MAX_NFEV)}"
+        )
 
-active_input_file = INPUT_FILE
-if QI_PREFINE:
-    preseed_vmec = vj.FixedBoundaryVMEC.from_input(
-        INPUT_FILE,
+if MIRROR_RAMP_STAGES:
+    stages_without_guard = [
+        stage["name"]
+        for stage in MIRROR_RAMP_STAGES
+        if float(stage.get("mirror_weight", MIRROR_WEIGHT)) > 0.0
+        and float(stage.get("qi_ceiling_weight", QI_CEILING_WEIGHT)) <= 0.0
+    ]
+    if stages_without_guard:
+        raise ValueError(
+            "Mirror-ramp cleanup stages must include QuasiIsodynamicResidualCeiling; "
+            f"missing guard in {stages_without_guard}."
+        )
+
+
+def make_vmec_for_stage(input_file, output_dir):
+    return vj.FixedBoundaryVMEC.from_input(
+        input_file,
         max_mode=MAX_MODE,
         min_vmec_mode=MIN_VMEC_MODE,
-        output_dir=OUTPUT_DIR / "qi_preseed",
+        output_dir=output_dir,
         project_input_boundary_to_max_mode=True,
     )
-    print("Running QI-only pre-refinement before applying scalar constraints ...")
-    preseed_result = vj.least_squares_solve(
-        preseed_vmec,
-        qi_only_problem,
+
+
+def solve_qi_stage(input_file, output_dir, stage_problem, *, max_nfev, label):
+    vmec = make_vmec_for_stage(input_file, output_dir)
+    return vj.least_squares_solve(
+        vmec,
+        stage_problem,
         stage_modes=STAGE_MODES,
-        max_nfev=QI_PREFINE_NFEV,
-        continuation_nfev=min(CONTINUATION_NFEV, QI_PREFINE_NFEV),
+        max_nfev=max_nfev,
+        continuation_nfev=CONTINUATION_NFEV,
         method=METHOD,
         ftol=FTOL,
         gtol=GTOL,
         xtol=XTOL,
         use_ess=USE_ESS,
         ess_alpha=ALPHA,
-        label=f"QI-only pre-refinement (max_mode={MAX_MODE})",
+        label=label,
         use_mode_continuation=USE_MODE_CONTINUATION,
         inner_max_iter=INNER_MAX_ITER,
         inner_ftol=INNER_FTOL,
@@ -390,47 +487,173 @@ if QI_PREFINE:
         save_stage_inputs=SAVE_STAGE_INPUTS,
         save_stage_wouts=SAVE_STAGE_WOUTS,
     )
+
+
+def qi_diagnostics_for_result(stage_result, *, mirror_threshold, mirror_surface_index):
+    opt = stage_result.final_optimizer
+    diagnostic_options = vj.QIDiagnosticOptions(
+        surfaces=SURFACES,
+        mboz=QI_OPTIONS.mboz,
+        nboz=QI_OPTIONS.nboz,
+        nphi=QI_OPTIONS.nphi,
+        nalpha=QI_OPTIONS.nalpha,
+        n_bounce=QI_OPTIONS.n_bounce,
+        include_bounce_endpoints=QI_OPTIONS.include_bounce_endpoints,
+        softness=QI_OPTIONS.softness,
+        width_weight=QI_OPTIONS.width_weight,
+        branch_width_weight=QI_OPTIONS.branch_width_weight,
+        branch_width_softness=QI_OPTIONS.branch_width_softness,
+        profile_weight=QI_OPTIONS.profile_weight,
+        shuffle_profile_weight=QI_OPTIONS.shuffle_profile_weight,
+        shuffle_profile_softness=QI_OPTIONS.shuffle_profile_softness,
+        shuffle_profile_nphi_out=QI_OPTIONS.shuffle_profile_nphi_out,
+        weighted_shuffle_profile_weight=QI_OPTIONS.weighted_shuffle_profile_weight,
+        weighted_shuffle_profile_softness=QI_OPTIONS.weighted_shuffle_profile_softness,
+        aligned_profile_weight=QI_OPTIONS.aligned_profile_weight,
+        aligned_profile_softness=QI_OPTIONS.aligned_profile_softness,
+        aligned_profile_trap_level=QI_OPTIONS.aligned_profile_trap_level,
+        aligned_profile_trap_softness=QI_OPTIONS.aligned_profile_trap_softness,
+        phimin=float(QI_OPTIONS.phimin),
+        mirror_threshold=mirror_threshold,
+        mirror_surface_index=mirror_surface_index,
+        elongation_threshold=MAX_ELONGATION,
+    )
+    diagnostics = vj.qi_diagnostics_from_state(
+        state=stage_result.final_state,
+        static=opt.static,
+        indata=opt.indata,
+        signgs=opt.signgs,
+        surfaces=SURFACES,
+        options=diagnostic_options,
+    )
+    return annotate_qi_seed_suitability(
+        diagnostics,
+        targets=QISeedSuitabilityTargets(
+            smooth_qi_max=QI_GATE_SMOOTH_MAX,
+            legacy_qi_max=QI_GATE_LEGACY_MAX,
+            target_aspect=TARGET_ASPECT,
+            abs_iota_min=TARGET_ABS_IOTA_MIN,
+            mirror_ratio_max=mirror_threshold,
+            max_elongation=MAX_ELONGATION,
+        ),
+    )
+
+active_input_file = INPUT_FILE
+if QI_PREFINE:
+    print("Running QI-only pre-refinement before applying scalar constraints ...")
+    preseed_result = solve_qi_stage(
+        INPUT_FILE,
+        OUTPUT_DIR / "qi_preseed",
+        qi_only_problem,
+        max_nfev=QI_PREFINE_NFEV,
+        label=f"QI-only pre-refinement (max_mode={MAX_MODE})",
+    )
     preseed_history = preseed_result.history
     print(f"QI-only pre-refinement final objective: {preseed_history['objective_final']:.6e}")
     active_input_file = OUTPUT_DIR / "qi_preseed" / "input.final"
 
-vmec = vj.FixedBoundaryVMEC.from_input(
-    active_input_file,
-    max_mode=MAX_MODE,
-    min_vmec_mode=MIN_VMEC_MODE,
-    output_dir=OUTPUT_DIR,
-    project_input_boundary_to_max_mode=True,
-)
+first_result_for_outputs = None
+promotion_log = []
+if MIRROR_RAMP_STAGES:
+    accepted_result = None
+    accepted_seed_diagnostics = None
+    for stage_index, stage in enumerate(MIRROR_RAMP_STAGES, start=1):
+        stage_name = stage["name"]
+        stage_output_dir = OUTPUT_DIR / f"mirror_ramp_{stage_index:02d}_{stage_name}"
+        stage_problem = make_qi_problem(stage)
+        stage_result = solve_qi_stage(
+            active_input_file,
+            stage_output_dir,
+            stage_problem,
+            max_nfev=int(stage.get("max_nfev", MAX_NFEV)),
+            label=f"QI {stage_name} (max_mode={MAX_MODE}, {'ESS' if USE_ESS else 'no ESS'})",
+        )
+        if first_result_for_outputs is None:
+            first_result_for_outputs = stage_result
+        stage_mirror_threshold = float(stage.get("mirror_threshold", MAX_MIRROR_RATIO))
+        stage_mirror_surface_index = stage.get("mirror_surface_index", MIRROR_SURFACE_INDEX)
+        reference_diagnostics = (
+            None
+            if accepted_result is None
+            else qi_diagnostics_for_result(
+                accepted_result,
+                mirror_threshold=stage_mirror_threshold,
+                mirror_surface_index=stage_mirror_surface_index,
+            )
+        )
+        stage_diagnostics = qi_diagnostics_for_result(
+            stage_result,
+            mirror_threshold=stage_mirror_threshold,
+            mirror_surface_index=stage_mirror_surface_index,
+        )
+        promotion = vj.qi_cleanup_candidate_promotable(
+            stage_diagnostics,
+            reference=reference_diagnostics,
+            targets=QISeedSuitabilityTargets(
+                smooth_qi_max=QI_GATE_SMOOTH_MAX,
+                legacy_qi_max=QI_GATE_LEGACY_MAX,
+                target_aspect=TARGET_ASPECT,
+                abs_iota_min=TARGET_ABS_IOTA_MIN,
+                mirror_ratio_max=stage_mirror_threshold,
+                max_elongation=MAX_ELONGATION,
+            ),
+            require_mirror_improvement=bool(
+                stage.get("require_mirror_improvement", accepted_seed_diagnostics is not None)
+                and float(stage.get("mirror_weight", MIRROR_WEIGHT)) > 0.0
+            ),
+            mirror_improvement_min=float(stage.get("mirror_improvement_min", 0.0)),
+        )
+        promotion_log.append(
+            {
+                "stage": stage_index,
+                "name": stage_name,
+                "output_dir": str(stage_output_dir),
+                "promoted": bool(promotion["qi_cleanup_promoted"]),
+                "smooth_qi": promotion.get("qi_smooth_total"),
+                "legacy_qi": promotion.get("qi_legacy_total"),
+                "mirror": promotion.get("qi_mirror_ratio_max"),
+                "mean_iota": promotion.get("mean_iota"),
+                "rejection_reasons": promotion.get("qi_cleanup_rejection_reasons", []),
+            }
+        )
+        print(f"\nMirror-ramp stage {stage_index}: {stage_name}")
+        print(f"  smooth QI:    {promotion.get('qi_smooth_total')}")
+        print(f"  legacy QI:    {promotion.get('qi_legacy_total')}")
+        print(f"  mirror ratio: {promotion.get('qi_mirror_ratio_max')}")
+        print(f"  promoted:     {promotion['qi_cleanup_promoted']}")
+        for reason in promotion.get("qi_cleanup_rejection_reasons", []):
+            print(f"    - {reason}")
 
-result = vj.least_squares_solve(
-    vmec,
-    problem,
-    stage_modes=STAGE_MODES,
-    max_nfev=MAX_NFEV,
-    continuation_nfev=CONTINUATION_NFEV,
-    method=METHOD,
-    ftol=FTOL,
-    gtol=GTOL,
-    xtol=XTOL,
-    use_ess=USE_ESS,
-    ess_alpha=ALPHA,
-    label=f"QI optimization (max_mode={MAX_MODE}, {'ESS' if USE_ESS else 'no ESS'})",
-    use_mode_continuation=USE_MODE_CONTINUATION,
-    inner_max_iter=INNER_MAX_ITER,
-    inner_ftol=INNER_FTOL,
-    trial_max_iter=TRIAL_MAX_ITER,
-    trial_ftol=TRIAL_FTOL,
-    solver_device=SOLVER_DEVICE,
-    scipy_tr_solver=SCIPY_TR_SOLVER,
-    scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
-    save_stage_inputs=SAVE_STAGE_INPUTS,
-    save_stage_wouts=SAVE_STAGE_WOUTS,
-)
+        if promotion["qi_cleanup_promoted"]:
+            accepted_result = stage_result
+            accepted_seed_diagnostics = stage_diagnostics
+            active_input_file = stage_output_dir / "input.final"
+        else:
+            if accepted_result is None:
+                raise RuntimeError(
+                    f"Initial QI mirror-ramp stage {stage_name!r} failed the QI promotion gate; "
+                    f"see {stage_output_dir} for diagnostic outputs."
+                )
+            break
+    result = accepted_result
+else:
+    result = solve_qi_stage(
+        active_input_file,
+        OUTPUT_DIR,
+        problem,
+        max_nfev=MAX_NFEV,
+        label=f"QI optimization (max_mode={MAX_MODE}, {'ESS' if USE_ESS else 'no ESS'})",
+    )
+    first_result_for_outputs = result
+
+if result is None:
+    raise RuntimeError("QI optimization did not produce a result.")
 
 # Results are plain Python objects.  The solve writes these default artifacts
 # for convenience; the explicit calls below show where to customize filenames
 # or add additional exports in a SIMSOPT-style workflow.
-initial_optimizer = result.initial_optimizer
+initial_result_for_outputs = first_result_for_outputs if first_result_for_outputs is not None else result
+initial_optimizer = initial_result_for_outputs.initial_optimizer
 final_optimizer = result.final_optimizer
 final_result = result.final_result
 history = result.history
@@ -445,11 +668,11 @@ saved_paths = {
     "history": OUTPUT_DIR / "history.json",
 }
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-initial_optimizer.save_input(saved_paths["initial_input"], result.initial_params)
+initial_optimizer.save_input(saved_paths["initial_input"], initial_result_for_outputs.initial_params)
 initial_optimizer.save_wout(
     saved_paths["initial_wout"],
-    result.initial_params,
-    state=result.initial_state,
+    initial_result_for_outputs.initial_params,
+    state=initial_result_for_outputs.initial_state,
 )
 final_optimizer.save_input(saved_paths["final_input"], result.final_params)
 final_optimizer.save_wout(
@@ -458,6 +681,10 @@ final_optimizer.save_wout(
     state=result.final_state,
 )
 final_optimizer.save_history(saved_paths["history"], final_result)
+if promotion_log:
+    promotion_log_path = OUTPUT_DIR / "mirror_ramp_promotion_log.json"
+    promotion_log_path.write_text(json.dumps(promotion_log, indent=2) + "\n")
+    saved_paths["mirror_ramp_promotion_log"] = promotion_log_path
 
 print("\nFinal diagnostics from result.history:")
 print(f"  aspect ratio:     {history['aspect_final']:.6g}")

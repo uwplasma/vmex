@@ -241,6 +241,9 @@ class ProblemConfig:
     qi_profile_weight: float = 0.1
     qi_shuffle_profile_weight: float = 0.0
     qi_shuffle_profile_softness: float = 2.0e-2
+    qi_ceiling_max: float = 2.0e-3
+    qi_ceiling_weight: float = 0.0
+    qi_ceiling_smooth_penalty: float = 2.0e-3
     qi_aligned_profile_weight: float = 0.0
     qi_aligned_profile_softness: float = 2.0e-2
     qi_aligned_profile_trap_level: float = 0.65
@@ -390,6 +393,11 @@ PROBLEM_CONFIGS = {
         qi_profile_weight=0.1,
         qi_shuffle_profile_weight=1.0,
         qi_shuffle_profile_softness=2.0e-2,
+        # Guard mirror/elongation cleanup so the sweep cannot promote a
+        # mirror-clean state that leaves the accepted low-QI basin.
+        qi_ceiling_max=2.0e-3,
+        qi_ceiling_weight=100.0,
+        qi_ceiling_smooth_penalty=2.0e-3,
         qi_aligned_profile_weight=0.0,
         qi_aligned_profile_softness=2.0e-2,
         qi_aligned_profile_trap_level=0.65,
@@ -1091,6 +1099,16 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
                 problem_cfg.qs_weight**2 * qi["total"],
             )
         ]
+        if float(problem_cfg.qi_ceiling_weight) != 0.0:
+            qi_total = jnp.asarray(qi["total"], dtype=jnp.float64)
+            excess = qi_total - float(problem_cfg.qi_ceiling_max)
+            softness = float(problem_cfg.qi_ceiling_smooth_penalty)
+            if softness > 0.0:
+                excess = softness * jnp.logaddexp(excess / softness, 0.0)
+            else:
+                excess = jnp.maximum(excess, 0.0)
+            residual = jnp.ravel(excess) * float(problem_cfg.qi_ceiling_weight)
+            blocks.append((residual, jnp.sum(residual * residual)))
         if float(problem_cfg.qi_mirror_weight) != 0.0:
             mirror_booz = _mirror_boozer_surfaces(qi["booz"], problem_cfg.qi_mirror_surface_index)
             mirror = mirror_ratio_penalty_from_boozer_output(

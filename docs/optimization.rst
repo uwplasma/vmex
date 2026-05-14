@@ -193,21 +193,30 @@ branch-shuffle diagnostic.
        smooth_extrema=2.0e-2,    # smoother gradients than hard max/min
        smooth_penalty=2.0e-2,
    )
+   qi_ceiling = vj.QuasiIsodynamicResidualCeiling(
+       maximum=2.0e-3,
+       smooth_penalty=2.0e-3,
+       qi_options=qi_options,
+   )
    elongation = vj.MaxElongation(threshold=8.0, ntheta=48, nphi=16)
 
    objective_tuples = [
        (vj.AspectRatio().J, 5.0, 1.0),
        (vj.AbsMeanIotaFloor(0.41).J, 0.0, 200.0**2),
        (qi.J, 0.0, 1.0),
+       (qi_ceiling.J, 0.0, 100.0),
        (mirror.J, 0.0, 10.0),
        (elongation.J, 0.0, 10.0),
    ]
    qi_problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
 
 For QI cleanup work, rank solved candidates with the no-solve component report
-before promoting any scalar objective result.  The report records the QI+iota
-gate separately from the full engineering gate and sorts mirror-cleanup
-candidates ahead of low-mirror states that already failed smooth or legacy QI:
+before promoting any scalar objective result.  Mirror-ratio cleanup must be
+guarded by a QI residual ceiling, and endpoints that improve mirror but fail
+the independent QI gate are rejected rather than promoted.  The report records
+the QI+iota gate separately from the full engineering gate and sorts
+mirror-cleanup candidates ahead of low-mirror states that already failed smooth
+or legacy QI:
 
 .. code-block:: bash
 
@@ -785,11 +794,11 @@ Two practical lessons from that study are now reflected in the example:
   hard mirror penalties from that basin reduce mirror but destroy QI in the
   current bounded experiments.  The open lane is therefore a QI-preserving
   mirror cleanup schedule that is robust across unrelated seeds.
-- ``QuasiIsodynamicResidualCeiling`` is the preferred cleanup guard when adding
+- ``QuasiIsodynamicResidualCeiling`` is the required cleanup guard when adding
   mirror, elongation, or other engineering terms after a low-QI basin has been
   found.  It adds a smooth penalty only when the shared QI residual exceeds a
-  configured ceiling, so cleanup terms can reduce shape metrics without silently
-  promoting a mirror-clean but non-QI field.
+  configured ceiling.  Any endpoint that improves mirror ratio but exceeds the
+  ceiling or fails smooth/legacy QI validation is rejected, not promoted.
 - ``BoozerBTarget`` is available as a differentiable steering or homotopy term
   when a known reference Boozer ``|B|`` spectrum should guide a run toward a
   specific basin.  It is a steering objective, not a final acceptance
@@ -941,6 +950,9 @@ aspect ratio and signed/absolute iota in bounds, verify mirror ratio and LCFS
 elongation stay below their soft-wall thresholds, inspect ``|B|`` contours, and
 prefer candidates whose smooth QI metrics preserve the same ranking as the
 legacy branch diagnostic under the higher-resolution audit.
+
+For mirror-cleanup lanes, a lower mirror ratio is only promotable when the QI
+residual ceiling and independent smooth/legacy QI gates still pass.
 
 
 Algorithms in detail

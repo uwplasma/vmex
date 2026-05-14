@@ -119,6 +119,9 @@ class QIPrefineProbeConfig:
     include_bounce_endpoints: bool = True
     phimin: float = 0.0
     qi_weight: float = 1.0
+    qi_ceiling_weight: float = 100.0
+    qi_ceiling_max: float = 2.0e-3
+    qi_ceiling_smooth_penalty: float = 2.0e-3
     mirror_weight: float = 0.0
     mirror_threshold: float = DEFAULT_MAX_MIRROR_RATIO
     mirror_ntheta: int = 32
@@ -979,6 +982,9 @@ def build_qi_prefine_probe_manifest(
                 "phimin": selected_phimin,
                 "phimin_source": phimin_source,
                 "weight": float(config.qi_weight),
+                "qi_ceiling_weight": float(config.qi_ceiling_weight),
+                "qi_ceiling_max": float(config.qi_ceiling_max),
+                "qi_ceiling_smooth_penalty": float(config.qi_ceiling_smooth_penalty),
                 "mirror_weight": float(config.mirror_weight),
                 "mirror_threshold": float(config.mirror_threshold),
                 "mirror_ntheta": int(config.mirror_ntheta),
@@ -1895,6 +1901,19 @@ def run_qi_prefine_probe(plan: dict[str, Any], *, workflow: Any | None = None) -
     objective_tuples = []
     qi = workflow.QuasiIsodynamicResidual(qi_options)
     objective_tuples.append((qi.J, 0.0, float(qi_options_raw["weight"])))
+    if (
+        float(qi_options_raw.get("qi_ceiling_weight", 0.0)) > 0.0
+        and (
+            float(qi_options_raw.get("mirror_weight", 0.0)) > 0.0
+            or float(qi_options_raw.get("elongation_weight", 0.0)) > 0.0
+        )
+    ):
+        qi_ceiling = workflow.QuasiIsodynamicResidualCeiling(
+            maximum=float(qi_options_raw.get("qi_ceiling_max", 2.0e-3)),
+            smooth_penalty=float(qi_options_raw.get("qi_ceiling_smooth_penalty", 2.0e-3)),
+            qi_options=qi_options,
+        )
+        objective_tuples.append((qi_ceiling.J, 0.0, float(qi_options_raw["qi_ceiling_weight"])))
     if float(qi_options_raw.get("mirror_weight", 0.0)) > 0.0:
         mirror = workflow.MirrorRatio(
             threshold=float(qi_options_raw.get("mirror_threshold", DEFAULT_MAX_MIRROR_RATIO)),
@@ -2334,6 +2353,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--prefine-phimin", type=float, default=0.0)
     parser.add_argument(
+        "--prefine-qi-ceiling-weight",
+        type=float,
+        default=100.0,
+        help=(
+            "QI residual ceiling weight used when mirror or elongation cleanup "
+            "is enabled in constrained prefine probes."
+        ),
+    )
+    parser.add_argument("--prefine-qi-ceiling-max", type=float, default=2.0e-3)
+    parser.add_argument("--prefine-qi-ceiling-smooth-penalty", type=float, default=2.0e-3)
+    parser.add_argument(
         "--prefine-mirror-weight",
         type=float,
         default=0.0,
@@ -2454,6 +2484,9 @@ def main(argv: list[str] | None = None) -> int:
             n_bounce=args.prefine_n_bounce,
             include_bounce_endpoints=prefine_include_bounce_endpoints,
             phimin=args.prefine_phimin,
+            qi_ceiling_weight=args.prefine_qi_ceiling_weight,
+            qi_ceiling_max=args.prefine_qi_ceiling_max,
+            qi_ceiling_smooth_penalty=args.prefine_qi_ceiling_smooth_penalty,
             mirror_weight=args.prefine_mirror_weight,
             mirror_threshold=args.prefine_mirror_threshold,
             mirror_ntheta=args.prefine_mirror_ntheta,

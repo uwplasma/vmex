@@ -514,6 +514,99 @@ def test_qi_seed_suitability_annotation_handles_disabled_and_missing_gates():
     )
 
 
+def test_qi_cleanup_candidate_promotes_only_seed_gate_safe_mirror_improvements():
+    from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, qi_cleanup_candidate_promotable
+
+    targets = QISeedSuitabilityTargets(
+        smooth_qi_max=2.0e-3,
+        legacy_qi_max=1.0e-3,
+        target_aspect=5.0,
+        aspect_relative_tolerance=0.35,
+        abs_iota_min=0.41,
+        mirror_ratio_max=0.21,
+        max_elongation=8.0,
+    )
+    reference = {"qi_mirror_ratio_max": 0.24}
+    candidate = {
+        "label": "guarded_cleanup",
+        "qi_smooth_total": 1.0e-3,
+        "qi_legacy_total": 5.0e-4,
+        "qi_mirror_ratio_max": 0.18,
+        "qi_max_elongation": 7.0,
+        "aspect": 5.1,
+        "mean_iota": -0.45,
+    }
+
+    record = qi_cleanup_candidate_promotable(candidate, reference=reference, targets=targets)
+
+    assert record["qi_cleanup_promoted"] is True
+    assert record["qi_seed_gate_passed"] is True
+    assert record["qi_cleanup_candidate_mirror"] == pytest.approx(0.18)
+    assert record["qi_cleanup_reference_mirror"] == pytest.approx(0.24)
+    assert record["qi_cleanup_rejection_reasons"] == []
+
+
+def test_qi_cleanup_candidate_rejects_mirror_gains_that_break_qi_gate():
+    from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, qi_cleanup_candidate_promotable
+
+    targets = QISeedSuitabilityTargets(
+        smooth_qi_max=2.0e-3,
+        legacy_qi_max=1.0e-3,
+        target_aspect=5.0,
+        aspect_relative_tolerance=0.35,
+        abs_iota_min=0.41,
+        mirror_ratio_max=0.21,
+        max_elongation=8.0,
+    )
+    candidate = {
+        "label": "low_mirror_bad_qi",
+        "qi_smooth_total": 5.0e-3,
+        "qi_legacy_total": 5.0e-4,
+        "qi_mirror_ratio_max": 0.18,
+        "qi_max_elongation": 7.0,
+        "aspect": 5.1,
+        "mean_iota": -0.45,
+    }
+
+    record = qi_cleanup_candidate_promotable(candidate, reference={"qi_mirror_ratio_max": 0.24}, targets=targets)
+
+    assert record["qi_cleanup_promoted"] is False
+    assert record["qi_seed_gate_passed"] is False
+    assert "smooth_qi" in record["qi_gate_failures"]
+    assert record["qi_cleanup_rejection_reasons"] == ["QI seed gate failed (smooth_qi)"]
+
+
+def test_qi_cleanup_candidate_rejects_worsening_mirror_stage():
+    from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, qi_cleanup_candidate_promotable
+
+    targets = QISeedSuitabilityTargets(
+        smooth_qi_max=2.0e-3,
+        legacy_qi_max=1.0e-3,
+        target_aspect=5.0,
+        aspect_relative_tolerance=0.35,
+        abs_iota_min=0.41,
+        mirror_ratio_max=0.30,
+        max_elongation=8.0,
+    )
+    candidate = {
+        "label": "worse_mirror",
+        "qi_smooth_total": 1.0e-3,
+        "qi_legacy_total": 5.0e-4,
+        "qi_mirror_ratio_max": 0.25,
+        "qi_max_elongation": 7.0,
+        "aspect": 5.1,
+        "mean_iota": -0.45,
+    }
+
+    record = qi_cleanup_candidate_promotable(candidate, reference={"qi_mirror_ratio_max": 0.24}, targets=targets)
+
+    assert record["qi_cleanup_promoted"] is False
+    assert record["qi_seed_gate_passed"] is True
+    assert record["qi_cleanup_rejection_reasons"] == [
+        "mirror ratio did not improve: candidate=0.25, reference=0.24"
+    ]
+
+
 def test_qi_seed_ranking_tracks_legacy_goodman_order_on_synthetic_modes():
     pytest.importorskip("jax")
 

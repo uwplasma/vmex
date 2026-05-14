@@ -81,6 +81,10 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert '"mirror_threshold": 0.21' in text
     assert '"mirror_surface_index": None' in text
     assert '"qi_ceiling_max": 2.0e-3' in text
+    assert '"mirror_ramp_stages": (' in text
+    assert '"name": "qi_basin"' in text
+    assert '"name": "lcfs_mirror_030"' in text
+    assert '"name": "all_surface_mirror_026"' in text
     assert '"boozer_target_wout": None' in text
     assert '"boozer_target_normalize": True' in text
     assert "Optional homotopy target for far seeds" in text
@@ -94,26 +98,27 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "weighted_shuffle_profile_weight=QI_OPTIONS.weighted_shuffle_profile_weight" in text
     assert "objective_tuples = [" in text
     assert "LeastSquaresProblem.from_tuples(" in text
-    assert "problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)" in text
+    assert "def make_qi_problem(stage=None):" in text
+    assert "problem = make_qi_problem()" in text
     assert "least_squares_solve(" in text
     assert "SAVE_STAGE_INPUTS = True" in text
     assert "SAVE_STAGE_WOUTS = False" in text
     assert "save_stage_inputs=SAVE_STAGE_INPUTS" in text
     assert "save_stage_wouts=SAVE_STAGE_WOUTS" in text
-    solve_call = text.split("result = vj.least_squares_solve(", 1)[1].split(")\n", 1)[0]
+    solve_call = text.split("return vj.least_squares_solve(", 1)[1].split(")\n", 1)[0]
     assert "target_aspect=" not in solve_call
     assert "iota_abs_min=" not in solve_call
     assert "qi_options=" not in solve_call
     assert "plot=" not in solve_call
     assert "print_optimization_outputs" not in text
-    assert "initial_optimizer = result.initial_optimizer" in text
+    assert "initial_optimizer = initial_result_for_outputs.initial_optimizer" in text
     assert "final_optimizer = result.final_optimizer" in text
     assert "result.final_result" in text
     assert "history = result.history" in text
     assert "objective_history = result.objective_history" in text
     assert "timing = result.timing_summary" in text
-    assert "result.initial_params" in text
-    assert "result.initial_state" in text
+    assert "initial_result_for_outputs.initial_params" in text
+    assert "initial_result_for_outputs.initial_state" in text
     assert "result.final_params" in text
     assert "result.final_state" in text
     assert "saved_paths = {" in text
@@ -130,11 +135,47 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "plot_objective_history(" in text
     assert "plot_boozer_bmag_contours_from_state(" in text
     assert "qi_diagnostics_from_state(" in text
+    assert "qi_cleanup_candidate_promotable(" in text
+    assert "reference_diagnostics = (" in text
+    assert "mirror_ramp_promotion_log.json" in text
     assert "qi_gate_passed" in text
     assert "engineering_gate_passed" in text
     assert "qi_mirror_ratio_by_surface" in text
     assert 'saved_paths["initial_wout"]' in text
     assert 'saved_paths["history"]' in text
+
+
+def test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling() -> None:
+    text = (ROOT / "examples" / "optimization" / "QI_optimization.py").read_text()
+
+    assert '"mirror_weight": 10.0' in text
+    assert '"qi_ceiling_weight": 100.0' in text
+    assert '"mirror_ramp_stages": (' in text
+    assert '"name": "qi_basin"' in text
+    assert '"require_mirror_improvement": False' in text
+    assert '"name": "lcfs_mirror_030"' in text
+    assert '"qi_ceiling_weight": 1000.0' in text
+    assert "qi_ceiling = vj.QuasiIsodynamicResidualCeiling(" in text
+    assert "qi_options=QI_OPTIONS" in text
+    assert "mirror = vj.MirrorRatio(" in text
+    assert "surface_index=mirror_surface_index" in text
+    assert "Mirror-ramp cleanup stages must include QuasiIsodynamicResidualCeiling" in text
+    assert "stage.get(\"qi_ceiling_weight\", QI_CEILING_WEIGHT)" in text
+    assert "reference=reference_diagnostics" in text
+    assert "objective_tuples.append((qi_ceiling.J, 0.0, qi_ceiling_weight))" in text
+    assert "objective_tuples.append((mirror.J, 0.0, mirror_weight))" in text
+    assert text.index("qi_ceiling = vj.QuasiIsodynamicResidualCeiling(") < text.index("mirror = vj.MirrorRatio(")
+    assert text.index("if qi_ceiling_weight > 0.0:") < text.index("if mirror_weight > 0.0:")
+
+
+def test_qi_seed_robustness_optional_mirror_cleanup_contract_keeps_qi_guard() -> None:
+    text = (ROOT / "examples" / "optimization" / "QI_seed_robustness.py").read_text()
+
+    assert "# Optional engineering cleanup.  Mirror/elongation can be included after the" in text
+    assert "# qi_ceiling = vj.QuasiIsodynamicResidualCeiling(" in text
+    assert "#     (qi_ceiling.J, 0.0, 100.0)," in text
+    assert "#     (mirror.J, 0.0, MIRROR_WEIGHT)," in text
+    assert text.index("# qi_ceiling = vj.QuasiIsodynamicResidualCeiling(") < text.index("#     (mirror.J, 0.0, MIRROR_WEIGHT),")
 
 
 def test_qi_objective_comparison_is_top_level_diagnostic() -> None:
@@ -160,6 +201,9 @@ def test_qs_sweep_qi_mirror_defaults_to_all_surfaces() -> None:
 
     assert sweep.PROBLEM_CONFIGS["qi"].qi_mirror_surface_index is None
     assert sweep.PROBLEM_CONFIGS["qp"].qi_mirror_surface_index is None
+    assert sweep.PROBLEM_CONFIGS["qi"].qi_ceiling_weight > 0.0
+    assert sweep.PROBLEM_CONFIGS["qi"].qi_ceiling_max == pytest.approx(2.0e-3)
+    assert "qi_ceiling_weight" in sweep.ProblemConfig.__dataclass_fields__
 
     booz = {
         "bmnc_b": np.arange(6.0).reshape(2, 3),
@@ -1101,6 +1145,7 @@ def test_public_api_reexports_example_optimization_contract() -> None:
         "QuasisymmetryRatioResidual",
         "QuasiIsodynamicOptions",
         "QuasiIsodynamicResidual",
+        "QuasiIsodynamicResidualCeiling",
         "MirrorRatio",
         "MaxElongation",
         "LgradB",
@@ -1123,6 +1168,7 @@ def test_public_api_reexports_example_optimization_contract() -> None:
     )
     for name in workflow_names:
         assert getattr(api, name) is getattr(workflow, name)
+        assert getattr(vj, name) is getattr(workflow, name)
 
     for name in (
         "FiniteBetaTargets",
@@ -1135,6 +1181,7 @@ def test_public_api_reexports_example_optimization_contract() -> None:
         "QIDiagnosticOptions",
         "qi_diagnostics_from_boozer_output",
         "qi_diagnostics_from_state",
+        "qi_cleanup_candidate_promotable",
         "rank_qi_seed_records",
     ):
         assert getattr(api, name) is getattr(qi_diagnostics, name)

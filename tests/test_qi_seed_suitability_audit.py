@@ -619,6 +619,8 @@ def test_run_qi_prefine_probe_can_dispatch_constrained_qi_terms(tmp_path):
     )
     plan = manifest["plans"][0]
     assert plan["optimization"]["objective"] == "qi_constrained_prefine_probe"
+    assert plan["qi_options"]["qi_ceiling_weight"] == 100.0
+    assert plan["qi_options"]["qi_ceiling_max"] == 2.0e-3
     assert plan["qi_options"]["mirror_weight"] == 2.0
     assert plan["qi_options"]["elongation_weight"] == 0.5
 
@@ -641,6 +643,11 @@ def test_run_qi_prefine_probe_can_dispatch_constrained_qi_terms(tmp_path):
     class FakeQuasiIsodynamicResidual(FakeObjective):
         def __init__(self, options):
             super().__init__("qi", options=options)
+
+    class FakeQuasiIsodynamicResidualCeiling(FakeObjective):
+        def __init__(self, **kwargs):
+            super().__init__("qi_ceiling", **kwargs)
+            calls["qi_ceiling"] = kwargs
 
     class FakeMirrorRatio(FakeObjective):
         def __init__(self, **kwargs):
@@ -682,6 +689,7 @@ def test_run_qi_prefine_probe_can_dispatch_constrained_qi_terms(tmp_path):
     fake_workflow = SimpleNamespace(
         QuasiIsodynamicOptions=FakeQuasiIsodynamicOptions,
         QuasiIsodynamicResidual=FakeQuasiIsodynamicResidual,
+        QuasiIsodynamicResidualCeiling=FakeQuasiIsodynamicResidualCeiling,
         MirrorRatio=FakeMirrorRatio,
         MaxElongation=FakeMaxElongation,
         LeastSquaresProblem=FakeLeastSquaresProblem,
@@ -692,8 +700,10 @@ def test_run_qi_prefine_probe_can_dispatch_constrained_qi_terms(tmp_path):
     completed = mod.run_qi_prefine_probe(plan, workflow=fake_workflow)
 
     assert completed["status"] == "completed"
-    assert len(calls["tuples"]) == 3
-    assert [entry[2] for entry in calls["tuples"]] == [1.0, 2.0, 0.5]
+    assert len(calls["tuples"]) == 4
+    assert [entry[2] for entry in calls["tuples"]] == [1.0, 100.0, 2.0, 0.5]
+    assert calls["qi_ceiling"]["maximum"] == 2.0e-3
+    assert calls["qi_ceiling"]["smooth_penalty"] == 2.0e-3
     assert calls["mirror"]["threshold"] == 0.21
     assert calls["mirror"]["ntheta"] == 12
     assert calls["mirror"]["nphi"] == 10
@@ -701,6 +711,58 @@ def test_run_qi_prefine_probe_can_dispatch_constrained_qi_terms(tmp_path):
     assert calls["elongation"]["threshold"] == 8.0
     assert calls["elongation"]["ntheta"] == 14
     assert calls["elongation"]["nphi"] == 6
+
+
+def test_qi_cleanup_candidate_promotion_requires_qi_gate_and_mirror_improvement():
+    import vmec_jax as vj
+
+    targets = vj.QISeedSuitabilityTargets(
+        smooth_qi_max=2.0e-3,
+        legacy_qi_max=1.0e-3,
+        target_aspect=5.0,
+        abs_iota_min=0.41,
+        mirror_ratio_max=0.30,
+        max_elongation=8.0,
+    )
+    reference = {
+        "qi_smooth_total": 1.0e-3,
+        "qi_legacy_total": 5.0e-4,
+        "aspect": 5.0,
+        "mean_iota": -0.50,
+        "qi_mirror_ratio_max": 0.35,
+        "qi_max_elongation": 7.0,
+        "qi_mirror_ratio_target": 0.30,
+        "qi_elongation_target": 8.0,
+    }
+    better_mirror = {**reference, "qi_mirror_ratio_max": 0.29}
+    promoted = vj.qi_cleanup_candidate_promotable(
+        better_mirror,
+        reference=reference,
+        targets=targets,
+    )
+
+    assert promoted["qi_cleanup_promoted"] is True
+    assert promoted["qi_cleanup_rejection_reasons"] == []
+
+    worse_mirror = {**reference, "qi_mirror_ratio_max": 0.36}
+    rejected = vj.qi_cleanup_candidate_promotable(
+        worse_mirror,
+        reference=reference,
+        targets=targets,
+    )
+
+    assert rejected["qi_cleanup_promoted"] is False
+    assert any("mirror ratio did not improve" in reason for reason in rejected["qi_cleanup_rejection_reasons"])
+
+    broken_qi = {**better_mirror, "qi_smooth_total": 1.0e-2}
+    rejected_qi = vj.qi_cleanup_candidate_promotable(
+        broken_qi,
+        reference=reference,
+        targets=targets,
+    )
+
+    assert rejected_qi["qi_cleanup_promoted"] is False
+    assert any("QI seed gate failed" in reason for reason in rejected_qi["qi_cleanup_rejection_reasons"])
 
 
 def test_prefine_probe_manifest_run_can_require_review(tmp_path):

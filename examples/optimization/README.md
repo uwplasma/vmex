@@ -111,6 +111,10 @@ The first-class record helpers are `vj.QIDiagnosticOptions`,
 mirror-ratio, elongation, optional `LgradB`, resolution metadata, and
 diagnostic error fields.
 
+Mirror-ratio cleanup must be guarded by a QI residual ceiling.  Endpoints that
+lower mirror ratio but exceed that ceiling or fail the independent smooth/legacy
+QI gate are rejected and should not be promoted as improved QI candidates.
+
 ```bash
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/compare_omnigenity_qi_objective.py
 PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_objective_component_report.py
