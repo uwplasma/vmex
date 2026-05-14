@@ -1084,3 +1084,14 @@ Defer beyond the current cycle:
   real QI/mirror tradeoff; simply increasing mirror weights is not enough. The
   next robust-QI step should be a staged objective design or alternate seed
   homotopy, not changing the promoted example to these probe settings.
+- 2026-05-14: Tried a gradual mirror-threshold homotopy
+  (`0.28 -> 0.25 -> 0.23 -> 0.21`) followed by a QI re-tightening pass. The
+  staged path reduced mirror from about `0.303` to `0.241`, but smooth QI rose
+  from `2.02e-3` to `2.64e-3`; the re-tightening pass pulled smooth QI down to
+  `2.21e-3` but mirror relaxed back to `0.266`. Auditing the alternate bundled
+  `input.QI_stel_seed_3127` under the current Goodman-style metric gave
+  smooth/legacy QI about `5.0e-2`/`4.7e-2`, so it is not currently a shortcut
+  seed. Do not spend more time on weight-only mirror schedules from this basin;
+  the remaining route is a different QI/mirror objective parameterization,
+  seed homotopy, or importing the stronger legacy omnigenity strategy more
+  directly.
