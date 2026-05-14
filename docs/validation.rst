@@ -184,8 +184,9 @@ cases are recorded as skipped rather than failing the audit.
 The bundled default set includes ``input.QI_stel_seed_3127`` when its matching
 ``wout_QI_stel_seed_3127.nc`` fixture is present.  On 2026-05-12 this seed
 audited as a useful near-axis QI start: smooth/legacy QI were about
-``5.0e-2``/``5.0e-2`` before optimization, with mirror ratio already inside
-the target and aspect, iota, and elongation still requiring optimization.
+``5.0e-2``/``5.0e-2`` before optimization, with mirror ratio close to but
+slightly above the default target and aspect, iota, and elongation still
+requiring optimization.
 The smooth QI diagnostic includes normalized bounce endpoints by default so the
 ranked smooth metric samples the same level range as the legacy Goodman-style
 branch-shuffle diagnostic; pass ``--no-include-bounce-endpoints`` only for
