@@ -1095,3 +1095,11 @@ Defer beyond the current cycle:
   the remaining route is a different QI/mirror objective parameterization,
   seed homotopy, or importing the stronger legacy omnigenity strategy more
   directly.
+- 2026-05-14: Added an opt-in dense branch-shuffle output grid
+  (`shuffle_profile_nphi_out`) to the differentiable QI residual and propagated
+  it through diagnostics and `QuasiIsodynamicOptions`. This brings vmec_jax
+  closer to the legacy `omnigenity_optimization` `arr_out=True` QI objective
+  without changing defaults. Focused tests passed (`60 passed`), and a short
+  production smoke run with `shuffle_profile_nphi_out=301` completed in `41 s`
+  for `max_nfev=3`. This is infrastructure for the next QI objective-design
+  pass, not yet a promoted optimized stellarator.

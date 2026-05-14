@@ -181,6 +181,8 @@ branch-shuffle diagnostic.
        branch_width_weight=0.5,
        profile_weight=0.1,
        shuffle_profile_weight=1.0,
+       # Optional, closer to legacy arr_out=True but more expensive:
+       # shuffle_profile_nphi_out=501,
    )
    qi = vj.QuasiIsodynamicResidual(qi_options)
    mirror = vj.MirrorRatio(
@@ -766,6 +768,12 @@ Two practical lessons from that study are now reflected in the example:
   and homotopy experiments.  In the current bounded NFP=2 probe it improved
   the isolated branch-shuffle ranking but did not beat the default
   mirror-aware run, so the public example leaves it at ``0.0``.
+- ``shuffle_profile_nphi_out`` enables an opt-in dense output grid for the
+  differentiable branch-shuffle profile residual.  This mirrors the legacy
+  ``arr_out=True`` Goodman objective more closely by comparing the shuffled
+  well and original profile on a denser toroidal grid than the base ``nphi``.
+  It is intended for QI homotopy/diagnostic experiments because it increases
+  residual size, memory, and wall time.
 - A QI-only objective is not a robust optimization policy.  It can make the
   branch/shuffle diagnostic small while leaving ``mean_iota`` near zero.  The
   default examples therefore include the iota floor and only promote a result
