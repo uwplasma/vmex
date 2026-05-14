@@ -16,6 +16,7 @@ GEOMETRY_CASES = (
     ("finite_beta", "input.shaped_tokamak_pressure", "wout_shaped_tokamak_pressure.nc"),
     ("qh", "input.nfp4_QH_warm_start", "wout_nfp4_QH_warm_start.nc"),
     ("qi", "input.nfp3_QI_fixed_resolution_final", "wout_nfp3_QI_fixed_resolution_final.nc"),
+    ("qi_stel_seed_3127", "input.QI_stel_seed_3127", "wout_QI_stel_seed_3127.nc"),
     ("dshape", "input.DSHAPE", "wout_DSHAPE.nc"),
     ("cth", "input.cth_like_fixed_bdy", "wout_cth_like_fixed_bdy.nc"),
 )
@@ -26,6 +27,7 @@ JXB_MERCIER_CASES = (
     "wout_nfp4_QH_warm_start.nc",
     "wout_LandremanPaul2021_QA_lowres.nc",
     "wout_nfp3_QI_fixed_resolution_final.nc",
+    "wout_QI_stel_seed_3127.nc",
     "wout_DSHAPE.nc",
     "wout_cth_like_fixed_bdy.nc",
     "wout_li383_low_res.nc",

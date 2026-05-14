@@ -20,9 +20,9 @@ LATEST_GREEN_CI = {
     "workflow": "CI",
     "status": "success",
     "branch": "main",
-    "head_sha": "5ca8216699c766621a1fe30e47db9b68befd36c2",
-    "completed_at_utc": "2026-05-11T17:14:59Z",
-    "url": "https://github.com/uwplasma/vmec_jax/actions/runs/25684339586",
+    "head_sha": "59c7728",
+    "completed_at_utc": "2026-05-14",
+    "url": "https://github.com/uwplasma/vmec_jax/actions/runs/25853220584",
 }
 
 QI_FAMILY_REPRESENTATIVES = [
@@ -31,6 +31,12 @@ QI_FAMILY_REPRESENTATIVES = [
         "label": "qi_nfp3_fixed_resolution",
         "required_for_family_probe": True,
         "source": "bundled examples/data input+wout",
+    },
+    {
+        "family": "qi",
+        "label": "qi_stel_seed_3127",
+        "required_for_family_probe": True,
+        "source": "bundled examples/data input+wout robustness seed",
     },
     {
         "family": "qp",
@@ -299,7 +305,7 @@ def _lanes() -> list[ValidationLane]:
             prerequisites=["reviewed prefine manifest", "deliberate local/manual execution"],
             command=(
                 "PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py "
-                "--quick --prefine-probes run "
+                "--quick --prefine-probes run --prefine-reviewed "
                 "--prefine-manifest results/qi_seed_audit/prefine_manifest.json"
             ),
             acceptance=[
