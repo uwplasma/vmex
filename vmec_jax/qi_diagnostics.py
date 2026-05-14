@@ -30,6 +30,7 @@ __all__ = [
     "QIDiagnosticOptions",
     "QISeedSuitabilityTargets",
     "annotate_qi_seed_suitability",
+    "qi_cleanup_candidate_promotable",
     "qi_diagnostics_from_boozer_output",
     "qi_diagnostics_from_state",
     "qi_promotion_score",
@@ -710,6 +711,60 @@ def qi_promotion_score(
         np.inf if wall_time is None else float(wall_time),
         str(row.get("label", row.get("case", row.get("output_dir", "")))),
     )
+
+
+def qi_cleanup_candidate_promotable(
+    candidate: dict[str, Any],
+    *,
+    reference: dict[str, Any] | None = None,
+    targets: QISeedSuitabilityTargets | None = None,
+    require_seed_gate: bool = True,
+    require_mirror_improvement: bool = True,
+    mirror_improvement_min: float = 0.0,
+) -> dict[str, Any]:
+    """Annotate whether a QI cleanup candidate should replace a reference.
+
+    Mirror-ratio and elongation cleanup terms are engineering constraints, not
+    definitions of QI.  This helper encodes the promotion rule used by the
+    example optimizations: do not promote a candidate that improves mirror by
+    destroying the smooth/legacy QI, aspect, or transform gates, and do not
+    advance a mirror-ramp stage unless the mirror ratio actually decreases
+    relative to the previously accepted state.
+    """
+
+    annotated = annotate_qi_seed_suitability(candidate, targets=targets)
+    out = dict(annotated)
+    reasons = list(out.get("qi_cleanup_rejection_reasons", []))
+
+    if require_seed_gate and not bool(out.get("qi_seed_gate_passed")):
+        failures = ", ".join(str(item) for item in out.get("qi_gate_failures", ())) or "unknown"
+        reasons.append(f"QI seed gate failed ({failures})")
+
+    candidate_mirror = _finite_float(out.get("qi_mirror_ratio_max"))
+    reference_mirror: float | None = None
+    if reference is not None:
+        reference_mirror = _finite_float(reference.get("qi_mirror_ratio_max"))
+
+    if require_mirror_improvement and reference is not None:
+        if candidate_mirror is None:
+            reasons.append("candidate mirror ratio is unavailable")
+        elif reference_mirror is None:
+            reasons.append("reference mirror ratio is unavailable")
+        elif candidate_mirror > reference_mirror - float(mirror_improvement_min):
+            reasons.append(
+                "mirror ratio did not improve: "
+                f"candidate={candidate_mirror:.6g}, reference={reference_mirror:.6g}"
+            )
+
+    out.update(
+        {
+            "qi_cleanup_candidate_mirror": candidate_mirror,
+            "qi_cleanup_reference_mirror": reference_mirror,
+            "qi_cleanup_promoted": not reasons,
+            "qi_cleanup_rejection_reasons": reasons,
+        }
+    )
+    return out
 
 
 def rank_qi_seed_records(
