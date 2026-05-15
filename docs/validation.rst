@@ -170,7 +170,9 @@ then clean mirror ratio and elongation behind a QI ceiling.  Review
 silently promoted.  Far-seed stages may use lower Boozer/QI resolution during
 the optimization and a higher-resolution final audit; both resolutions are
 written to ``diagnostics.json`` so promotion claims can be traced.  Far seeds
-may use a solved same-NFP QI wout through
+may use a phase-specific iota promotion rule that accepts larger transform only
+when smooth and legacy QI remain within a documented relaxation band.  Far
+seeds may use a solved same-NFP QI wout through
 ``boozer_target_wout``/``boozer_target_weight`` as an opt-in homotopy
 experiment, but that term is not a final acceptance diagnostic.  A seed-robust
 QI claim still requires the constrained objective to be run and visually

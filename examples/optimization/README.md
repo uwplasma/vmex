@@ -131,6 +131,9 @@ if no stage passes the promotion gate.  Review
 `mirror_ramp_promotion_log.json` before using a far-seed result in figures.
 Far-seed policies may use a cheaper Boozer/QI grid during optimization and a
 higher-resolution final audit; both grids are written into `diagnostics.json`.
+The iota-ramp phase has its own promotion rule: it can accept a larger
+transform if smooth and legacy QI remain inside a documented relaxation band,
+then later stages try to recover mirror ratio and elongation.
 
 ```bash
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/compare_omnigenity_qi_objective.py
