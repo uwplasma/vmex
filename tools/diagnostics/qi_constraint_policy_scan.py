@@ -69,6 +69,8 @@ class StagePolicy:
     branch_width_weight: float = 0.5
     weighted_shuffle_profile_weight: float = 0.0
     continue_if_qi_aspect_pass: bool = False
+    scalar_step_bound: float | None = None
+    lbfgs_step_bound: float | None = None
 
 
 @dataclass(frozen=True)

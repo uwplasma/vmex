@@ -94,6 +94,7 @@ def default_promotion_policies(*, max_nfev: int = 4) -> tuple[PromotionPolicy, .
                     qi_ceiling_weight=0.0,
                     branch_width_weight=0.5,
                     continue_if_qi_aspect_pass=True,
+                    scalar_step_bound=2.0e-2,
                 ),
                 StagePolicy(
                     "iota_soft_qi_guard",
@@ -108,6 +109,7 @@ def default_promotion_policies(*, max_nfev: int = 4) -> tuple[PromotionPolicy, .
                     qi_ceiling_smooth_penalty=1.0e-3,
                     branch_width_weight=0.5,
                     continue_if_qi_aspect_pass=True,
+                    scalar_step_bound=5.0e-3,
                 ),
                 StagePolicy(
                     "mirror_soft_guard",
@@ -125,6 +127,7 @@ def default_promotion_policies(*, max_nfev: int = 4) -> tuple[PromotionPolicy, .
                     qi_ceiling_max=5.0e-3,
                     qi_ceiling_smooth_penalty=1.0e-3,
                     branch_width_weight=0.5,
+                    scalar_step_bound=5.0e-3,
                 ),
             ),
         ),
@@ -318,6 +321,8 @@ def run_promotion_policy(
             solver_device=solver_device,
             scipy_tr_solver="lsmr",
             scipy_lsmr_maxiter=5,
+            lbfgs_step_bound=stage.lbfgs_step_bound,
+            scalar_step_bound=stage.scalar_step_bound,
             save_stage_inputs=True,
             save_stage_wouts=False,
         )

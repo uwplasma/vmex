@@ -1853,6 +1853,8 @@ def run_fixed_boundary_objective_optimization(
     solver_device: str | None = None,
     scipy_tr_solver: str | None = "lsmr",
     scipy_lsmr_maxiter: int | None = None,
+    lbfgs_step_bound: float | None = None,
+    scalar_step_bound: float | None = None,
     save_stage_inputs: bool = True,
     save_stage_wouts: bool = False,
     save_rerun_wouts: bool = False,
@@ -1931,6 +1933,8 @@ def run_fixed_boundary_objective_optimization(
             target_aspect=target_aspect,
             scipy_tr_solver=scipy_tr_solver,
             scipy_lsmr_maxiter=scipy_lsmr_maxiter,
+            lbfgs_step_bound=lbfgs_step_bound,
+            scalar_step_bound=scalar_step_bound,
         )
         if iota_abs_min is not None:
             result["_history_dump"]["iota_abs_min"] = float(iota_abs_min)
@@ -2210,6 +2214,8 @@ def run_quasi_isodynamic_objective_optimization(
     solver_device: str | None = None,
     scipy_tr_solver: str | None = "lsmr",
     scipy_lsmr_maxiter: int | None = None,
+    lbfgs_step_bound: float | None = None,
+    scalar_step_bound: float | None = None,
     save_stage_inputs: bool = True,
     save_stage_wouts: bool = False,
 ) -> FixedBoundaryOptimizationResult:
@@ -2311,6 +2317,8 @@ def run_quasi_isodynamic_objective_optimization(
             target_aspect=target_aspect,
             scipy_tr_solver=scipy_tr_solver,
             scipy_lsmr_maxiter=scipy_lsmr_maxiter,
+            lbfgs_step_bound=lbfgs_step_bound,
+            scalar_step_bound=scalar_step_bound,
         )
         if iota_abs_min is not None:
             result["_history_dump"]["iota_abs_min"] = float(iota_abs_min)
@@ -2380,6 +2388,8 @@ def least_squares_solve(
     solver_device: str | None = None,
     scipy_tr_solver: str | None = "lsmr",
     scipy_lsmr_maxiter: int | None = None,
+    lbfgs_step_bound: float | None = None,
+    scalar_step_bound: float | None = None,
     save_stage_inputs: bool = True,
     save_stage_wouts: bool = False,
     save_rerun_wouts: bool = False,
@@ -2461,6 +2471,8 @@ def least_squares_solve(
             solver_device=solver_device,
             scipy_tr_solver=scipy_tr_solver,
             scipy_lsmr_maxiter=scipy_lsmr_maxiter,
+            lbfgs_step_bound=lbfgs_step_bound,
+            scalar_step_bound=scalar_step_bound,
             save_stage_inputs=save_stage_inputs,
             save_stage_wouts=save_stage_wouts,
         )
@@ -2495,6 +2507,8 @@ def least_squares_solve(
         solver_device=solver_device,
         scipy_tr_solver=scipy_tr_solver,
         scipy_lsmr_maxiter=scipy_lsmr_maxiter,
+        lbfgs_step_bound=lbfgs_step_bound,
+        scalar_step_bound=scalar_step_bound,
         save_stage_inputs=save_stage_inputs,
         save_stage_wouts=save_stage_wouts,
         save_rerun_wouts=save_rerun_wouts,
