@@ -54,7 +54,7 @@ DEFAULT_OUTPUT = Path("results/qi_seed_audit/summary.json")
 DEFAULT_PREFINE_MANIFEST = Path("results/qi_seed_audit/prefine_manifest.json")
 DEFAULT_PREFINE_OUTPUT_DIR = Path("results/qi_seed_audit/prefine_probes")
 
-DEFAULT_TARGET_ASPECT = 5.0
+DEFAULT_TARGET_ASPECT = 10.0
 DEFAULT_ABS_IOTA_MIN = 0.41
 DEFAULT_MAX_MIRROR_RATIO = 0.21
 DEFAULT_MAX_ELONGATION = 8.0

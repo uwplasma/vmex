@@ -20,6 +20,7 @@ from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_s
 enable_x64(True)
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+DEFAULT_QI_TARGET_ASPECT = 10.0
 
 
 def _diagnostic_float(record, key):
@@ -42,7 +43,7 @@ QI_CASES = {
         "use_mode_continuation": True,
         "stage_repeats": 1,
         "max_nfev": 10,
-        "target_aspect": 5.0,
+        "target_aspect": DEFAULT_QI_TARGET_ASPECT,
         "target_abs_iota_min": 0.41,
         "max_elongation": 8.2,
         "mirror_threshold": 0.30,
@@ -86,7 +87,7 @@ QI_CASES = {
         "use_mode_continuation": False,
         "stage_repeats": 1,
         "max_nfev": 8,
-        "target_aspect": 5.0,
+        "target_aspect": DEFAULT_QI_TARGET_ASPECT,
         "target_abs_iota_min": 0.41,
         "mirror_threshold": 0.21,
         "mirror_surface_index": None,
@@ -118,7 +119,7 @@ QI_CASES = {
         "use_mode_continuation": True,
         "stage_repeats": 3,
         "max_nfev": 10,
-        "target_aspect": 5.0,
+        "target_aspect": DEFAULT_QI_TARGET_ASPECT,
         "target_abs_iota_min": 0.41,
         "mirror_threshold": 0.21,
         "mirror_surface_index": None,
@@ -147,7 +148,7 @@ QI_CASES = {
     #     "use_mode_continuation": True,
     #     "stage_repeats": 5,
     #     "max_nfev": 12,
-    #     "target_aspect": 5.0,
+    #     "target_aspect": DEFAULT_QI_TARGET_ASPECT,
     #     "target_abs_iota_min": 0.41,
     #     "mirror_threshold": 0.21,
     #     "mirror_surface_index": None,

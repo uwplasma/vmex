@@ -200,13 +200,15 @@ This sweep uses NFP=2 seeds for QA/QP/QI and the standard bundled NFP=4 warm
 start for QH.  The current objective priority is primary symmetry/QI quality
 and rotational-transform control.  QA follows the reference omnigenity QA deck
 with aspect ratio near 5 and signed mean iota target 0.42; QH/QP/QI also use
-aspect ratio near 5 and `abs(mean_iota) >= 0.41`.  `LgradB` remains available
-as an optional script-level term, but it is not active in the default README
-examples or best-row selection.
+`abs(mean_iota) >= 0.41`; QI now uses a higher aspect-ratio target of 10 to
+make precise QI with acceptable mirror ratio and elongation less
+overconstrained.  `LgradB` remains available as an optional script-level term,
+but it is not active in the default README examples or best-row selection.
 
 The QP and QI rows both start from the bundled NFP=2 QI seed.  QP is a
 quasi-poloidal-symmetry target using that same input deck; the current best QI
-row uses repeated same-mode continuation at `max_mode=3` without a QP preseed.
+row uses the dedicated mirror-aware `QI_optimization.py` lane at `max_mode=3`
+without a QP preseed.
 The bundled NFP=2 seed is projected to each active `max_mode`, so
 `max_mode=1` zeroes the seed's mode-2 boundary harmonics before optimizing.
 For QI, the listed wall time includes all repeated stages using the same
@@ -217,7 +219,7 @@ constrained least-squares residual definition.
 | QA | CPU | continuation | 3 | yes |  | 2.33e-04 |  |  |  | 5.000 | 0.4200 | 6.3 min |
 | QH | CPU | continuation | 3 | yes |  | 9.68e-03 |  |  |  | 4.999 | -1.6595 | 4.0 min |
 | QP | CPU | continuation | 3 | no |  | 6.76e-02 |  |  |  | 5.019 | -0.6255 | 3.7 min |
-| QI | CPU | continuation | 3 | yes | no | 2.17e-03 | 2.17e-03 | 0.211 | 4.30 | 5.001 | -0.5494 | 11.3 min |
+| QI | CPU | qi_default | 3 | yes | no | 1.17e-02 | 3.09e-04 | 0.225 | 6.43 | 9.999 | -0.5043 | 10.1 min |
 
 <p align="center">
   <img src="docs/_static/figures/readme_best_optimization_qa.png" width="980" />
@@ -241,7 +243,7 @@ Recreate the four displayed runs:
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa --modes 3 --ess on
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qh --modes 3 --ess on
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qp --modes 3 --ess off
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qi --modes 3 --ess both --qi-qp-preseed both
+PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi python examples/optimization/QI_optimization.py
 PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
 ```
 
