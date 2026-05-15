@@ -46,6 +46,7 @@ def test_default_promotion_policies_cover_global_local_lanes() -> None:
 
     assert {
         "guarded_iota_ramp",
+        "iota_seed_qi_cleanup",
         "direct_matrix_free",
         "repeat_continuation",
         "qi_then_al_cleanup",
@@ -56,6 +57,8 @@ def test_default_promotion_policies_cover_global_local_lanes() -> None:
     assert policies["guarded_iota_ramp"].stages[1].iota_weight > 0.0
     assert policies["guarded_iota_ramp"].stages[0].continue_if_qi_aspect_pass is True
     assert policies["direct_matrix_free"].stages[0].stage_modes == (3,)
+    assert policies["iota_seed_qi_cleanup"].stages[0].iota_weight > 0.0
+    assert policies["iota_seed_qi_cleanup"].stages[0].qi_weight > policies["direct_matrix_free"].stages[0].qi_weight
     assert policies["repeat_continuation"].stages[0].stage_modes == (1, 1, 2, 2, 3, 3)
     assert len(policies["qi_then_al_cleanup"].stages) == 2
     assert policies["qi_then_al_cleanup"].stages[1].use_augmented_lagrangian is True
