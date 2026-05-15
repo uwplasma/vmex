@@ -68,6 +68,7 @@ class StagePolicy:
     qi_ceiling_smooth_penalty: float = 2.0e-3
     branch_width_weight: float = 0.5
     weighted_shuffle_profile_weight: float = 0.0
+    continue_if_qi_aspect_pass: bool = False
 
 
 @dataclass(frozen=True)

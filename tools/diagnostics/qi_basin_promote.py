@@ -93,6 +93,7 @@ def default_promotion_policies(*, max_nfev: int = 4) -> tuple[PromotionPolicy, .
                     qi_weight=200.0,
                     qi_ceiling_weight=0.0,
                     branch_width_weight=0.5,
+                    continue_if_qi_aspect_pass=True,
                 ),
                 StagePolicy(
                     "iota_soft_qi_guard",
@@ -106,6 +107,7 @@ def default_promotion_policies(*, max_nfev: int = 4) -> tuple[PromotionPolicy, .
                     qi_ceiling_max=3.0e-3,
                     qi_ceiling_smooth_penalty=1.0e-3,
                     branch_width_weight=0.5,
+                    continue_if_qi_aspect_pass=True,
                 ),
                 StagePolicy(
                     "mirror_soft_guard",
@@ -251,6 +253,17 @@ def _stage_record_from_diagnostics(stage: StagePolicy, diagnostics: dict[str, An
     }
 
 
+def _should_continue_after_stage(stage: StagePolicy, diagnostics: dict[str, Any]) -> bool:
+    if bool(diagnostics.get("qi_seed_gate_passed")):
+        return True
+    if not bool(getattr(stage, "continue_if_qi_aspect_pass", False)):
+        return False
+    failures = set(diagnostics.get("qi_gate_failures", []))
+    # QI-preserve and iota-ramp stages are allowed to leave iota and
+    # engineering gates for later stages, but they must not lose QI/aspect.
+    return bool(failures) and failures <= {"iota", "mirror", "elongation"}
+
+
 def run_promotion_policy(
     *,
     vj: Any,
@@ -334,7 +347,7 @@ def run_promotion_policy(
 
         # Do not spend cleanup budget if the candidate did not first find a
         # QI+iota basin.  Engineering gates are evaluated on the final record.
-        if not bool(diagnostics.get("qi_seed_gate_passed")):
+        if not _should_continue_after_stage(stage, diagnostics):
             break
 
     wall = time.perf_counter() - t0
