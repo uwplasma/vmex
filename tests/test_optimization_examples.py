@@ -551,6 +551,7 @@ def test_workflow_stage_policy_helpers_are_explicit() -> None:
     assert repeated_stage_modes(max_mode=3, use_mode_continuation=False, continuation_nfev=2, repeats=4) == [3]
     assert qs_stage_budget(stage_mode=2, max_mode=3, max_nfev=30, continuation_nfev=5) == 5
     assert qs_stage_budget(stage_mode=3, max_mode=3, max_nfev=30, continuation_nfev=5) == 30
+    assert qs_stage_budget(stage_mode=2, max_mode=3, max_nfev=30, continuation_nfev=0) == 30
 
     plain = ObjectiveTerm("plain", lambda _ctx, _state: 0.0)
     tracked = ObjectiveTerm("iota", lambda _ctx, _state: 0.0, track_iota=True)

@@ -66,6 +66,7 @@ def test_repeated_and_higher_continuation_stages_use_previous_optimized_input(
     build_calls = []
     config_sources = []
     params0_by_stage = []
+    nfev_by_stage = []
 
     class FakeOptimizer:
         def __init__(self, stage_index: int, stage_mode: int, n_params: int):
@@ -73,8 +74,9 @@ def test_repeated_and_higher_continuation_stages_use_previous_optimized_input(
             self.stage_mode = int(stage_mode)
             self.n_params = int(n_params)
 
-        def run(self, params0, **_kwargs):
+        def run(self, params0, **kwargs):
             params0_by_stage.append(np.asarray(params0, dtype=float).copy())
+            nfev_by_stage.append(int(kwargs["max_nfev"]))
             x = np.full(self.n_params, 100.0 * self.stage_index + self.stage_mode, dtype=float)
             return {
                 "x": x,
@@ -153,7 +155,101 @@ def test_repeated_and_higher_continuation_stages_use_previous_optimized_input(
         "optimized-stage3-mode2-302.0,302.0",
     ]
     assert [params.tolist() for params in params0_by_stage] == [[0.0], [0.0], [0.0, 0.0]]
+    assert nfev_by_stage == [1, 1, 3]
     assert [record[0] for record in result.stage_records] == [1, 1, 2]
+
+
+@pytest.mark.parametrize(
+    ("runner", "builder_name", "extra_kwargs"),
+    [
+        ("run_fixed_boundary_objective_optimization", "build_fixed_boundary_objective_stage", {"objectives": []}),
+        (
+            "run_quasi_isodynamic_objective_optimization",
+            "build_quasi_isodynamic_objective_stage",
+            {
+                "scalar_objectives": [],
+                "qi_objectives": [],
+                "surfaces": (0.5,),
+                "mboz": 4,
+                "nboz": 4,
+                "nphi": 9,
+                "nalpha": 5,
+                "n_bounce": 5,
+                "include_bounce_endpoints": True,
+                "softness": 2.0e-2,
+                "width_weight": 1.0,
+                "branch_width_weight": 0.5,
+                "branch_width_softness": 2.0e-2,
+                "profile_weight": 0.1,
+                "shuffle_profile_weight": 1.0,
+                "shuffle_profile_softness": 2.0e-2,
+                "aligned_profile_weight": 0.0,
+                "aligned_profile_softness": 2.0e-2,
+                "aligned_profile_trap_level": 0.65,
+                "aligned_profile_trap_softness": 5.0e-2,
+                "phimin": 0.0,
+            },
+        ),
+    ],
+)
+def test_explicit_lower_mode_stages_get_valid_budget_when_continuation_budget_is_zero(
+    monkeypatch,
+    tmp_path,
+    runner,
+    builder_name,
+    extra_kwargs,
+):
+    import vmec_jax.optimization_workflow as workflow
+
+    nfev_by_stage = []
+
+    class FakeOptimizer:
+        def __init__(self, n_params: int):
+            self.n_params = int(n_params)
+
+        def run(self, params0, **kwargs):
+            nfev_by_stage.append(int(kwargs["max_nfev"]))
+            return {
+                "x": np.ones(self.n_params, dtype=float),
+                "message": "synthetic",
+                "_history_dump": _stage_history(float(len(nfev_by_stage))),
+            }
+
+        def _indata_from_params(self, _params):
+            return InData(scalars={"MPOL": 5, "NTOR": 5}, indexed={"RBC": {(0, 0): 1.0}}, source_path="next")
+
+    def fake_build_stage(_cfg, _indata, *, stage_mode, **_kwargs):
+        specs = [BoundaryParamSpec(f"rc{stage_mode}{idx}", "rc", idx, int(stage_mode), idx) for idx in range(stage_mode)]
+        return SimpleNamespace(ctx=SimpleNamespace(), optimizer=FakeOptimizer(len(specs)), specs=specs)
+
+    monkeypatch.setattr(workflow, "config_from_indata", lambda indata: SimpleNamespace(source_path=indata.source_path))
+    monkeypatch.setattr(workflow, builder_name, fake_build_stage)
+    monkeypatch.setattr(workflow, "print_qs_problem_summary", lambda **_kwargs: None)
+    monkeypatch.setattr(workflow, "print_qs_final_summary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(workflow, "save_qs_stage_artifacts", lambda **_kwargs: None)
+    monkeypatch.setattr(workflow, "save_qs_final_outputs", lambda **_kwargs: None)
+
+    result = getattr(workflow, runner)(
+        cfg=SimpleNamespace(source_path="original-cfg"),
+        indata=InData(scalars={"MPOL": 5, "NTOR": 5}, indexed={"RBC": {(0, 0): 1.0}}, source_path="original"),
+        stage_modes=[2, 2, 3],
+        max_mode=3,
+        max_nfev=4,
+        continuation_nfev=0,
+        method="scipy",
+        ftol=1.0e-6,
+        gtol=1.0e-6,
+        xtol=1.0e-6,
+        use_ess=False,
+        ess_alpha=0.0,
+        output_dir=tmp_path,
+        label="synthetic",
+        use_mode_continuation=True,
+        **extra_kwargs,
+    )
+
+    assert nfev_by_stage == [4, 4, 4]
+    assert result.history["max_nfev"] == 12
 
 
 def test_best_exact_point_is_saved_when_trial_accepted_final_replays_worse(monkeypatch, tmp_path):

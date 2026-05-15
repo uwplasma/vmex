@@ -432,6 +432,9 @@ def test_stage_mode_helpers_handle_direct_zero_budget_and_repeated_qi_policy():
 
     assert workflow.qs_stage_budget(stage_mode=2, max_mode=3, max_nfev=30, continuation_nfev=7) == 7
     assert workflow.qs_stage_budget(stage_mode=3, max_mode=3, max_nfev=30, continuation_nfev=7) == 30
+    assert workflow.qs_stage_budget(stage_mode=2, max_mode=3, max_nfev=30, continuation_nfev=0) == 30
+    with pytest.raises(ValueError, match="max_nfev"):
+        workflow.qs_stage_budget(stage_mode=3, max_mode=3, max_nfev=0, continuation_nfev=0)
 
 
 def test_create_x_scale_normalizes_lowest_level_and_decays_high_modes():

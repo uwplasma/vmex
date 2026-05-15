@@ -1490,7 +1490,15 @@ def qs_stage_budget(
 ) -> int:
     """Outer residual/Jacobian budget for one fixed-boundary stage."""
 
-    return int(max_nfev) if int(stage_mode) == int(max_mode) else int(continuation_nfev)
+    if int(max_nfev) <= 0:
+        raise ValueError("max_nfev must be a positive integer for outer optimization stages.")
+    if int(stage_mode) == int(max_mode):
+        return int(max_nfev)
+    # A zero continuation_nfev disables helper-generated lower-mode stages, but
+    # users may still pass an explicit stage sequence for experiments such as
+    # [2, 2, 3].  SciPy rejects max_nfev=0, so use the final-stage budget for
+    # explicit lower-mode stages when no separate continuation budget is given.
+    return int(continuation_nfev) if int(continuation_nfev) > 0 else int(max_nfev)
 
 
 def rebuild_for_optimization_resolution(indata, *, max_mode: int, min_vmec_mode: int = 5):
@@ -2454,7 +2462,12 @@ def combine_qs_stage_histories(
             "label": label,
             "max_nfev": int(
                 sum(
-                    int(max_nfev) if int(mode) == int(max_mode) else int(continuation_nfev)
+                    qs_stage_budget(
+                        stage_mode=int(mode),
+                        max_mode=int(max_mode),
+                        max_nfev=int(max_nfev),
+                        continuation_nfev=int(continuation_nfev),
+                    )
                     for mode in stage_modes
                 )
             ),
