@@ -30,6 +30,7 @@ SUMMARY_CSV = FIGURE_DIR / "qs_ess_summary_all.csv"
 QI_CONSTRAINED_CSV = FIGURE_DIR / "qi_constrained_summary.csv"
 QI_CONSTRAINED_BEST_JSON = FIGURE_DIR / "qi_constrained_best.json"
 OUT_CSV = FIGURE_DIR / "readme_best_optimizations.csv"
+QI_DEFAULT_RESULT_DIR = REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp2_qi"
 
 PROBLEMS = ("qa", "qh", "qp", "qi")
 PROBLEM_TITLES = {
@@ -39,11 +40,12 @@ PROBLEM_TITLES = {
     "qi": "QI",
 }
 TARGET_ASPECT = 5.0
+QI_TARGET_ASPECT = 10.0
 PROBLEM_TARGET_ASPECT = {
     "qa": TARGET_ASPECT,
     "qh": TARGET_ASPECT,
     "qp": TARGET_ASPECT,
-    "qi": TARGET_ASPECT,
+    "qi": QI_TARGET_ASPECT,
 }
 TARGET_ABS_IOTA_MIN = 0.41
 TARGET_QA_IOTA = 0.42
@@ -208,7 +210,7 @@ def _is_current_qs_row(row: dict[str, str]) -> bool:
 
 def _is_current_qi_row(row: dict[str, str]) -> bool:
     target_aspect = _float_value(row, "target_aspect", None)
-    expected_aspect = TARGET_ASPECT
+    expected_aspect = _target_aspect_for("qi")
     if target_aspect is not None and abs(target_aspect - expected_aspect) > 1.0e-8:
         return False
     target_floor = _float_value(row, "iota_abs_min", None)
@@ -244,6 +246,41 @@ def _run_from_row(row: dict[str, str]) -> BestRun:
     )
 
 
+def _qi_default_row_from_result_dir(result_dir: Path = QI_DEFAULT_RESULT_DIR) -> dict[str, str] | None:
+    diagnostics_path = result_dir / "diagnostics.json"
+    history_path = result_dir / "history.json"
+    if not diagnostics_path.exists() or not history_path.exists():
+        return None
+    diagnostics = json.loads(diagnostics_path.read_text())
+    history = json.loads(history_path.read_text())
+    target_aspect = _float_value(diagnostics, "target_aspect", None)
+    if target_aspect is not None and abs(target_aspect - _target_aspect_for("qi")) > 1.0e-8:
+        return None
+    return {
+        "problem": "qi",
+        "backend": "cpu",
+        "policy": "qi_default",
+        "max_mode": "3",
+        "use_ess": "true",
+        "success": "true",
+        "crashed": "false",
+        "target_aspect": f"{_target_aspect_for('qi'):.16e}",
+        "iota_abs_min": f"{TARGET_ABS_IOTA_MIN:.16e}",
+        "qi_qp_preseed": "false",
+        "objective_final": f"{float(history['objective_final']):.16e}",
+        "aspect_final": f"{float(diagnostics['aspect']):.16e}",
+        "iota_final": f"{float(diagnostics['mean_iota']):.16e}",
+        "total_wall_time_s": f"{float(history['total_wall_time_s']):.16e}",
+        "output_dir": str(result_dir),
+        "qi_raw_total": f"{float(diagnostics['qi_raw_total']):.16e}",
+        "qi_legacy_total": f"{float(diagnostics['qi_legacy_total']):.16e}",
+        "qi_mirror_ratio_max": f"{float(diagnostics['qi_mirror_ratio_max']):.16e}",
+        "qi_mirror_ratio_target": f"{float(diagnostics['qi_mirror_ratio_target']):.16e}",
+        "qi_max_elongation": f"{float(diagnostics['qi_max_elongation']):.16e}",
+        "qi_elongation_target": f"{float(diagnostics['qi_elongation_target']):.16e}",
+    }
+
+
 def _best_runs() -> list[BestRun]:
     rows = [
         row
@@ -270,6 +307,9 @@ def _best_runs() -> list[BestRun]:
         and not _bool_value(row.get("stellarator_asymmetric"))
         and _is_current_qi_row(row)
     ]
+    default_qi_row = _qi_default_row_from_result_dir()
+    if default_qi_row is not None:
+        qi_rows.append(default_qi_row)
     if qi_rows:
         row = min(qi_rows, key=_qi_selection_score)
         best.append(_run_from_row(row))

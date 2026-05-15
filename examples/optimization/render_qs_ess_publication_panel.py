@@ -50,11 +50,12 @@ MODES_BY_POLICY = {
 }
 QI_INPUT_NFP = 2
 TARGET_ASPECT = 5.0
+QI_TARGET_ASPECT = 10.0
 PROBLEM_TARGET_ASPECT = {
     "qa": TARGET_ASPECT,
     "qh": TARGET_ASPECT,
     "qp": TARGET_ASPECT,
-    "qi": TARGET_ASPECT,
+    "qi": QI_TARGET_ASPECT,
 }
 _TIMEOUT_SECONDS_RE = re.compile(r"timed out after\s+([0-9]+(?:\.[0-9]+)?)\s*s")
 _NFP_RE = re.compile(r"^\s*NFP\s*=\s*([0-9]+)", re.IGNORECASE | re.MULTILINE)

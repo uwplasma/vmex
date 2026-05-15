@@ -38,7 +38,7 @@ driver for reproducible comparison tables:
      - NFP=2 QI seed, aspect near 5, ``abs(mean_iota) >= 0.41``, QP residual.
    * - QI
      - ``examples/optimization/QI_optimization.py``
-     - NFP=2 QI default lane with Boozer-space QI, mirror, elongation, QI ceiling, ESS, and repeated same-mode continuation.
+     - NFP=2 QI default lane with aspect target 10, Boozer-space QI, mirror, elongation, QI ceiling, ESS, and repeated same-mode continuation.
 
 For generated comparison artifacts, run QA/QH/QP/QI with the current QI
 default of no same-mode QP preseed, then run the focused QI matrix separately
@@ -524,15 +524,16 @@ The sweep below compares four target objectives:
 - QP: aspect ratio near 5, quasi-poloidal symmetry, and a smooth
   ``abs(mean_iota) >= 0.41`` lower bound, using the same bundled NFP=2 seed as
   the QI runs.
-- QI: aspect ratio near 5, a differentiable smooth Boozer-space quasi-isodynamic
+- QI: aspect ratio near 10, a differentiable smooth Boozer-space quasi-isodynamic
   residual evaluated through ``booz_xform_jax``, maximum mirror-ratio penalty,
   maximum-LCFS-elongation penalty, and the same smooth
   ``abs(mean_iota) >= 0.41`` lower bound.  ``LgradB`` is available as an
   optional commented term in the example scripts.
 
 The current objective priority is primary symmetry/QI quality and rotational
-transform control first.  All four default targets use aspect ratio near 5;
-QA also uses the signed iota-0.42 target, while QH/QP/QI use
+transform control first.  QA/QH/QP use aspect ratio near 5, while QI uses
+aspect ratio near 10 to keep mirror and elongation cleanup from being
+overconstrained.  QA also uses the signed iota-0.42 target, while QH/QP/QI use
 ``abs(mean_iota) >= 0.41``.  ``LgradB`` remains available for users who want
 extra magnetic-gradient regularization, but it is not active in the default
 sweeps or best-row selection.  When enabling ``LgradB`` in an adjoint
@@ -786,25 +787,25 @@ run:
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_seed_robustness.py
 
 Both scripts optimize QI, aspect ratio, and a differentiable
-``abs(mean_iota) >= 0.41`` floor at ``max_mode = 3``.  On the 2026-05-12 local
-CPU probe, the branch-heavy mirror-aware policy drove ``input.nfp2_QI`` to
-smooth/legacy QI of about ``2.0e-3``/``2.7e-4`` with
-``abs(mean_iota) = 0.50``, aspect ratio ``5.00``, maximum elongation ``7.2``,
-and all-surface Boozer mirror ratio about ``0.30``.  A lighter matrix-free
-cleanup preserved QI while only reducing mirror from ``0.304`` to ``0.300``;
-stronger dense cleanups were stopped because they used high memory before
-printing the first optimizer row.  The script therefore prints both a
-``QI+iota`` gate and a stricter engineering gate that also includes mirror
-ratio and elongation.  It also writes a Boozer-coordinate ``|B|`` line-contour
-plot; VMEC-angle contour plots alone are not accepted as a QI visual gate.
+``abs(mean_iota) >= 0.41`` floor at ``max_mode = 3``.  The QI target aspect
+ratio is now 10, which gives the optimizer more geometric room to recover low
+smooth/legacy QI and acceptable elongation before mirror cleanup.  Local probes
+from the ``input.QI_stel_seed_3127`` far seed reached a precise-QI basin with
+aspect ratio around 9.4, ``abs(mean_iota)`` around 0.68, maximum elongation
+below 7, and smooth/legacy QI near ``2e-3``/``1e-3``; mirror cleanup remains
+the active engineering gate for that far seed.  The script therefore prints
+both a ``QI+iota`` gate and a stricter engineering gate that also includes
+mirror ratio and elongation.  It also writes a Boozer-coordinate ``|B|``
+line-contour plot; VMEC-angle contour plots alone are not accepted as a QI
+visual gate.
 
 The study compared direct versus repeated-stage continuation, QP pre-seeding,
 aspect-ratio weights, mirror/elongation soft-wall weights, QI branch-width
 weights, the branch-shuffle profile residual, ``phimin`` well-interval choices,
 and termination tolerances against the nfp=2
 ``examples/data/input.nfp2_QI`` seed and the bundled near-axis
-``input.QI_stel_seed_3127`` seed.  The current best mirror-aware lane is
-repeated same-mode ``max_mode = 3`` with ESS, ``target_aspect = 5.0``,
+``input.QI_stel_seed_3127`` seed.  The current QI default lane is
+repeated same-mode ``max_mode = 3`` with ESS, ``target_aspect = 10.0``,
 ``abs(mean_iota) >= 0.41``, ``QI_WEIGHT = 10``, ``branch_width_weight = 5.0``,
 ``profile_weight = 0.1``, ``shuffle_profile_weight = 1.0``, mirror and
 elongation soft-wall terms enabled, and a tighter ``XTOL = 1e-8``.  The
@@ -909,7 +910,7 @@ dictionary entry to ``QI_CASES`` in ``QI_optimization.py``:
        "use_mode_continuation": True,
        "stage_repeats": 5,
        "max_nfev": 12,
-       "target_aspect": 5.0,
+       "target_aspect": 10.0,
        "target_abs_iota_min": 0.41,
        "mirror_threshold": 0.21,
        "mirror_surface_index": None,

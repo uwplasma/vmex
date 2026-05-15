@@ -349,7 +349,7 @@ def test_problem_configs_follow_current_seed_and_priority_policy():
     assert qp_cfg.lgradb_weight == pytest.approx(0.0)
     assert qp_cfg.project_input_boundary_to_max_mode
     assert qi_cfg.input_file.name == "input.nfp2_QI"
-    assert qi_cfg.target_aspect == pytest.approx(5.0)
+    assert qi_cfg.target_aspect == pytest.approx(10.0)
     assert qi_cfg.iota_abs_min == pytest.approx(0.41)
     assert qi_cfg.iota_weight == pytest.approx(200.0)
     assert qi_cfg.aspect_weight == pytest.approx(1.0)
@@ -723,6 +723,56 @@ def test_readme_renderer_uses_preoptimization_initial_wout(tmp_path):
     assert renderer._preoptimization_wout_path(continuation) == mode1_dir / "wout_initial.nc"
     assert renderer._preoptimization_wout_path(qi) == direct_qi_dir / "wout_original.nc"
     assert renderer._preoptimization_wout_path(qa) == direct_qa_dir / "wout_initial.nc"
+
+
+def test_readme_renderer_filters_qi_rows_by_qi_target_aspect():
+    renderer = _load_readme_renderer_module()
+
+    current_qi = {
+        "target_aspect": "10.0",
+        "iota_abs_min": str(renderer.TARGET_ABS_IOTA_MIN),
+        "aspect_final": "9.9",
+    }
+    legacy_qi = {
+        "target_aspect": "5.0",
+        "iota_abs_min": str(renderer.TARGET_ABS_IOTA_MIN),
+        "aspect_final": "5.0",
+    }
+
+    assert renderer._is_current_qi_row(current_qi)
+    assert not renderer._is_current_qi_row(legacy_qi)
+
+
+def test_readme_renderer_can_use_dedicated_qi_result_dir(tmp_path):
+    renderer = _load_readme_renderer_module()
+
+    result_dir = tmp_path / "results" / "qi_opt" / "ess" / "nfp2_qi"
+    result_dir.mkdir(parents=True)
+    (result_dir / "diagnostics.json").write_text(
+        json.dumps(
+            {
+                "target_aspect": 10.0,
+                "aspect": 9.99,
+                "mean_iota": -0.50,
+                "qi_raw_total": 1.1e-3,
+                "qi_legacy_total": 3.0e-4,
+                "qi_mirror_ratio_max": 0.22,
+                "qi_mirror_ratio_target": 0.30,
+                "qi_max_elongation": 6.4,
+                "qi_elongation_target": 8.2,
+            }
+        )
+    )
+    (result_dir / "history.json").write_text(
+        json.dumps({"objective_final": 1.2e-2, "total_wall_time_s": 600.0})
+    )
+
+    row = renderer._qi_default_row_from_result_dir(result_dir)
+
+    assert row is not None
+    assert row["policy"] == "qi_default"
+    assert float(row["target_aspect"]) == pytest.approx(10.0)
+    assert float(row["qi_legacy_total"]) == pytest.approx(3.0e-4)
 
 
 def test_qs_ess_renderer_keeps_partial_lasym_publication_groups():

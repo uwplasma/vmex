@@ -12,7 +12,7 @@ and QI targets:
 - QP: aspect ratio near 5, quasi-poloidal symmetry, and a smooth
   ``abs(mean_iota) >= 0.41`` lower bound, using the same bundled NFP=2 seed as
   the QI runs.
-- QI: aspect ratio near 5, a differentiable smooth Boozer-space quasi-isodynamic
+- QI: aspect ratio near 10, a differentiable smooth Boozer-space quasi-isodynamic
   residual evaluated through ``booz_xform_jax``, maximum mirror-ratio penalty,
   maximum-LCFS-elongation penalty, and a smooth ``abs(mean_iota) >= 0.41``
   lower bound.  ``LgradB`` is available as an optional commented term in the
@@ -113,8 +113,9 @@ Render the compact README panels from the best stellarator-symmetric rows:
    PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 
 The default per-case timeout is 1200 seconds.  The current science configs use
-NFP=4 for QH, aspect targets near 5 for QA/QH/QP/QI, signed iota 0.42 for QA,
-and high-priority ``abs(mean_iota) >= 0.41`` constraints for QH/QP/QI.
+NFP=4 for QH, aspect targets near 5 for QA/QH/QP, aspect target near 10 for QI,
+signed iota 0.42 for QA, and high-priority ``abs(mean_iota) >= 0.41``
+constraints for QH/QP/QI.
 They use ``inner_max_iter = trial_max_iter = 120`` and
 ``ftol = trial_ftol = 1e-9``; GPU production sweeps cap those values at 180
 if a future problem config requests a larger replay budget.  Add
@@ -199,7 +200,7 @@ matrix under the current objective policy.  For each requested
 The QI objective is intentionally not ranked by scalar objective alone: rows
 are also evaluated by the legacy branch-squash/stretch/shuffle diagnostic,
 raw smooth QI residual, maximum mirror ratio, maximum LCFS elongation,
-``abs(mean_iota) >= 0.41``, and aspect ratio near 5.  The default smooth QI
+``abs(mean_iota) >= 0.41``, and aspect ratio near 10.  The default smooth QI
 objective includes ``shuffle_profile_weight = 1.0`` so the optimizer follows
 the same ranking as the legacy diagnostic on the seed and reference
 omnigenity cases.  Rows that stop at ``max_nfev`` but have valid VMEC solves
