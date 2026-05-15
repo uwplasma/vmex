@@ -150,7 +150,7 @@ QI_CASES = {
                 "name": "iota_ramp_qi_ceiling",
                 "max_nfev": 4,
                 "stage_repeats": 1,
-                "stage_modes": (3,),
+                "stage_modes": (3, 3),
                 "method": "scalar_trust",
                 "scalar_step_bound": 5.0e-3,
                 "aspect_weight": 0.05,
@@ -164,6 +164,9 @@ QI_CASES = {
                 "require_mirror_improvement": False,
                 "require_engineering_gate": False,
                 "accept_if_rank_improves": True,
+                "accept_if_iota_improves": True,
+                "iota_improvement_min": 5.0e-2,
+                "qi_relax_for_iota": 3.0,
             },
             {
                 "name": "mirror_elongation_guard",
@@ -763,6 +766,36 @@ def stage_promotes_candidate(stage, promotion, reference_diagnostics):
     """Apply the script's staged promotion rule to exact diagnostics."""
 
     reasons = list(promotion.get("qi_cleanup_rejection_reasons", []))
+    if bool(stage.get("accept_if_iota_improves", False)) and reference_diagnostics is not None:
+        candidate_iota = abs(_finite_or_inf(promotion.get("mean_iota")))
+        reference_iota = abs(_finite_or_inf(reference_diagnostics.get("mean_iota")))
+        iota_gain = candidate_iota - reference_iota
+        qi_relax = float(stage.get("qi_relax_for_iota", 2.0))
+        smooth_limit = qi_relax * max(
+            QI_GATE_SMOOTH_MAX,
+            _finite_or_inf(reference_diagnostics.get("qi_smooth_total")),
+        )
+        legacy_limit = qi_relax * max(
+            QI_GATE_LEGACY_MAX,
+            _finite_or_inf(reference_diagnostics.get("qi_legacy_total")),
+        )
+        if (
+            iota_gain >= float(stage.get("iota_improvement_min", 0.0))
+            and _finite_or_inf(promotion.get("qi_smooth_total")) <= smooth_limit
+            and _finite_or_inf(promotion.get("qi_legacy_total")) <= legacy_limit
+        ):
+            out = dict(promotion)
+            out["qi_cleanup_promoted"] = True
+            out["qi_cleanup_rejection_reasons"] = []
+            out["qi_iota_promotion_reason"] = (
+                f"iota increased by {iota_gain:.6g} while QI stayed within "
+                f"{qi_relax:.3g}x relaxed smooth/legacy limits"
+            )
+            return out
+        reasons.append(
+            "iota ramp did not satisfy relaxed QI promotion: "
+            f"gain={iota_gain:.6g}, smooth_limit={smooth_limit:.6g}, legacy_limit={legacy_limit:.6g}"
+        )
     if bool(stage.get("accept_if_rank_improves", False)) and reference_diagnostics is not None:
         candidate_score = promotion_score(promotion)
         reference_score = promotion_score(reference_diagnostics)
@@ -882,6 +915,7 @@ if MIRROR_RAMP_STAGES:
                 "mean_iota": promotion.get("mean_iota"),
                 "rank_score": promotion.get("qi_rank_score"),
                 "constraint_score": promotion.get("qi_constraint_score"),
+                "iota_promotion_reason": promotion.get("qi_iota_promotion_reason"),
                 "rejection_reasons": promotion.get("qi_cleanup_rejection_reasons", []),
             }
         )
@@ -893,6 +927,8 @@ if MIRROR_RAMP_STAGES:
         print(f"  mean iota:    {promotion.get('mean_iota')}")
         print(f"  rank score:   {promotion.get('qi_rank_score')}")
         print(f"  promoted:     {promotion['qi_cleanup_promoted']}")
+        if promotion.get("qi_iota_promotion_reason"):
+            print(f"    - {promotion['qi_iota_promotion_reason']}")
         for reason in promotion.get("qi_cleanup_rejection_reasons", []):
             print(f"    - {reason}")
 
@@ -912,7 +948,8 @@ if MIRROR_RAMP_STAGES:
                 )
                 active_input_file = stage_output_dir / "input.final"
                 continue
-            break
+            print("  continuing from the last promoted stage.")
+            continue
     result = accepted_result if accepted_result is not None else best_result
 else:
     result = solve_qi_stage(
