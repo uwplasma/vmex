@@ -635,7 +635,13 @@ def test_run_fixed_boundary_keeps_supporting_free_boundary_inputs():
 
 
 def test_public_api_reexports_run_free_boundary():
+    from vmec_jax.driver import ExampleData
+
+    assert api_module.ExampleData is ExampleData
+    assert api_module.example_paths is example_paths
     assert api_module.run_free_boundary is run_free_boundary
+    assert vj.ExampleData is ExampleData
+    assert vj.example_paths is example_paths
     assert vj.run_free_boundary is run_free_boundary
 
 

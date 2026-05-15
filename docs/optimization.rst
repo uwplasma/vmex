@@ -68,7 +68,9 @@ then run the bounded robustness probe or select a ``RUN_CASE`` in
 The robustness probe is intentionally a QI+iota basin test, not a full
 engineering acceptance claim.  Promote a QI result only after the independent
 smooth-QI, legacy-QI, iota, mirror-ratio, elongation, and Boozer ``|B|``
-contour checks agree.
+contour checks agree.  Landscape and basin-survey diagnostics use fast trial
+solves unless ``--exact-solve`` is passed; use exact solves before treating
+their scalar values as promotion evidence.
 
 Motivation: differentiability without finite differences
 ---------------------------------------------------------
@@ -249,13 +251,19 @@ branch-shuffle diagnostic.
        surface_index=None,       # all QI surfaces
        smooth_extrema=2.0e-2,    # smoother gradients than hard max/min
        smooth_penalty=2.0e-2,
+       qi_options=qi_options,
    )
    qi_ceiling = vj.QuasiIsodynamicResidualCeiling(
        maximum=2.0e-3,
        smooth_penalty=2.0e-3,
        qi_options=qi_options,
    )
-   elongation = vj.MaxElongation(threshold=8.0, ntheta=48, nphi=16)
+   elongation = vj.MaxElongation(
+       threshold=8.0,
+       ntheta=48,
+       nphi=16,
+       qi_options=qi_options,
+   )
 
    objective_tuples = [
        (vj.AspectRatio().J, 5.0, 1.0),

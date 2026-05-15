@@ -97,6 +97,9 @@ class ObjectiveTerm:
 
     The callback receives ``(ctx, state)`` and returns a scalar or vector.  The
     residual minimized by the optimizer is ``weight * (value - target)``.
+    ``weight`` is the internal residual multiplier; public objective tuples use
+    SIMSOPT semantics and are converted to ``sqrt(tuple_weight)`` by
+    :meth:`LeastSquaresProblem.from_tuples`.
     """
 
     name: str
@@ -349,7 +352,10 @@ class _LeastSquaresProblemAssembly:
     qi_options: QuasiIsodynamicOptions | None = None
 
     def add_tuple(self, fn: Callable, target: float | np.ndarray, weight: float) -> None:
-        residual_weight = math.sqrt(float(weight))
+        tuple_weight = float(weight)
+        if not math.isfinite(tuple_weight) or tuple_weight < 0.0:
+            raise ValueError("Least-squares tuple weights must be finite and non-negative.")
+        residual_weight = math.sqrt(tuple_weight)
         owner = getattr(fn, "__self__", None)
         if getattr(owner, "requires_qi_field", False):
             self._add_qi_field_objective(owner, target, residual_weight)

@@ -269,6 +269,21 @@ mirror/elongation cleanup.  A promoted row must pass the independent QI+iota
 gate and the engineering gate; otherwise it remains diagnostic evidence about
 the local basin.
 
+When penalty-based promotion jumps between incompatible basins, use the
+filter-search diagnostic.  It accepts a trial only if the already-satisfied
+gates are preserved while the active failed gate improves:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python tools/diagnostics/qi_filter_search.py \
+     --input results/diagnostics/qi_basin_survey/top_candidate/input.candidate \
+     --output-dir results/diagnostics/qi_filter_search
+
+After reviewing ``plan.json``, add ``--execute``.  The search phase order is
+QI, then iota, then mirror/elongation.  The output history records every
+accepted and rejected trial, making it clear whether the seed has a nearby
+feasible path or whether a broader global/basin method is required.
+
 To audit a new input deck, first run VMEC once so the audit has a matching
 ``wout`` file:
 

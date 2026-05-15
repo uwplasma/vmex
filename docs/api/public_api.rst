@@ -18,10 +18,11 @@ this public surface plus the broader scientific namespace::
    import vmec_jax as vj
 
 Both ``vmec_jax`` and ``vmec_jax.api`` expose the documented workflow objects
-used in the scripts, including ``FixedBoundaryVMEC``, objective wrappers,
+used in the scripts, including ``example_paths``/``load_example`` and
+``ExampleData`` for bundled cases, ``FixedBoundaryVMEC``, objective wrappers,
 ``LeastSquaresProblem``, ``least_squares_solve``, QI diagnostics,
 ``BoozerBTarget``/``boozer_b_target_from_wout`` homotopy helpers, and plotting
-helpers.  Lower-level solver kernels, force assembly routines, and replay
+helpers. Lower-level solver kernels, force assembly routines, and replay
 internals remain submodule-level APIs.
 
 The module exports the following user-facing helpers:

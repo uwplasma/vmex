@@ -32,10 +32,10 @@ optional ``BoozerBTarget`` homotopy term, solve-free JVP/VJP routing checks,
 pure driver/runtime policy helpers, implicit/wout serialization helpers,
 free-boundary/solver helper branches, VMEC-kernel helper branches, packaging
 hygiene, additional solve/implicit/wout/driver branch coverage, the required
-Python 3.11 coverage gate, and warning-clean documentation.  The latest local
-required non-full coverage baseline on 2026-05-13 is ``1000 passed, 20 skipped,
-95 deselected`` with ``85.52%`` coverage in ``9:24``.  The enforced local and CI
-gate is ``85%``.
+Python 3.11 coverage gate, and warning-clean documentation.  A recent recorded
+local required non-full coverage baseline from 2026-05-13 is ``1000 passed, 20
+skipped, 95 deselected`` with ``85.52%`` coverage in ``9:24``.  The enforced
+local and CI gate is ``85%``.
 
 Required GitHub Actions gate
 ----------------------------
@@ -102,4 +102,5 @@ claiming a broader physics milestone:
 - Seed-robust QI probes from QI, QP, QH, QA, and non-omnigenous seeds before
   advertising global QI robustness.  Far-seed probes should include the
   optional same-NFP ``BoozerBTarget`` homotopy lane when a solved QI reference
-  wout is available.
+  wout is available.  Treat trial-solve landscape/basin scans as triage only;
+  use exact-solve diagnostics before promotion claims.

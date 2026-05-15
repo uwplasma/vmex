@@ -137,6 +137,12 @@ the recommended local escalation path.
      - Required no-executable physics gate: recompute VMEC2000 ``fsqr/fsqz/fsql``,
        verify flux/pressure/iota/current wout-field invariants, and cover the
        VMEC2000 trace parser against bundled fixtures.
+   * - Parity manifest guard
+     - ``pytest -q tests/test_parity_sweep_manifest_thresholds.py``
+     - Cheap schema and fixture-path check for the fixed/free-boundary parity
+       sweep manifest.  It does not launch VMEC2000; it protects the bounded
+       optional sweep matrix from stale local inputs, unbounded compare-mode
+       entries, and accidental removal of required physics classes.
    * - Coverage gate
      - ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt" --cov=vmec_jax --cov-report=xml --cov-report=term:skip-covered --cov-fail-under=85``
      - Python 3.11 required CI coverage job.  The latest local equivalent
