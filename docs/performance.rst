@@ -267,6 +267,63 @@ The next GPU work should therefore target fixed-boundary force/update kernel
 launch and tape structure, while keeping Boozer JIT enabled for QI production
 runs.
 
+For raw ``input.nfp2_QI`` follow-up profiling, keep the production-like scan
+measurement separate from phase attribution.  The scan path is best inspected
+with XProf traces because the force/preconditioner/update work is inside one
+``lax.scan`` program.  The non-scan path supports lightweight JSON phase timing
+with ``--vmec-timing``:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python tools/diagnostics/gpu_cpu_performance_matrix.py \
+     --mode fixed-boundary --backend cpu --backend gpu --keep-going \
+     --input examples/data/input.nfp2_QI \
+     --iters 80 \
+     --solver-mode accelerated \
+     --single-grid \
+     --raw-solver-policy \
+     --use-scan \
+     --outdir outputs/performance_profiles/qi_raw_scan80
+
+   JAX_PLATFORMS=cpu JAX_ENABLE_X64=1 PYTHONPATH=. python tools/diagnostics/profile_fixed_boundary.py \
+     --input examples/data/input.nfp2_QI \
+     --iters 20 \
+     --simple-profile \
+     --no-warmup \
+     --no-multigrid \
+     --no-auto-cli-policy \
+     --solver-mode accelerated \
+     --solver-device cpu \
+     --vmec-timing \
+     --vmec-timing-detail \
+     --json-out outputs/performance_profiles/qi_raw_cpu_phase20.json
+
+   JAX_PLATFORM_NAME=gpu JAX_ENABLE_X64=1 PYTHONPATH=. python tools/diagnostics/profile_fixed_boundary.py \
+     --input examples/data/input.nfp2_QI \
+     --iters 20 \
+     --simple-profile \
+     --no-warmup \
+     --no-multigrid \
+     --no-auto-cli-policy \
+     --solver-mode accelerated \
+     --solver-device gpu \
+     --vmec-timing \
+     --vmec-timing-detail \
+     --json-out outputs/performance_profiles/qi_raw_gpu_phase20.json
+
+The fixed-boundary raw-solve source path is:
+``vmec_jax/driver.py::run_fixed_boundary`` for accelerated/single-grid policy,
+``vmec_jax/solve.py::solve_fixed_boundary_residual_iter`` for the VMEC loop and
+``_run_vmec2000_scan`` scan runner, ``vmec_jax/solve.py::_compute_forces`` for
+per-iteration force assembly and residual norms,
+``vmec_jax/vmec_forces.py::vmec_forces_rz_from_wout`` and
+``vmec_residual_internal_from_kernels`` for bcovar/force/tomnsps assembly, and
+``vmec_jax/vmec_tomnsp.py::tomnsps_rzl`` for the Fourier transform hot kernel.
+The fixed-boundary profiler now keeps any ``diagnostics.timing`` block in its
+JSON, and ``compare_profile_reports.py`` / ``gpu_cpu_performance_matrix.py``
+surface ``vmec_compute_forces_s``, ``vmec_preconditioner_s``, and
+``vmec_update_s`` when those timings exist.
+
 The comparison table reports ratios for total runtime, compile/replay/cache
 time when those timings exist, callback count, observed RSS peak, solve count,
 accepted-point replay count, and cache growth.  The JSON output is stable enough

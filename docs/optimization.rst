@@ -55,7 +55,7 @@ when preseed/no-preseed is the experiment:
    PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
 
 For QI seed robustness, first rank solved seed candidates without optimizing,
-then run the bounded robustness probe or switch ``RUN_CASE`` in
+then run the bounded robustness probe or select a ``RUN_CASE`` in
 ``QI_optimization.py``:
 
 .. code-block:: bash
@@ -63,6 +63,7 @@ then run the bounded robustness probe or switch ``RUN_CASE`` in
    PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --csv results/qi_seed_audit.csv
    PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --prefine-probes plan --prefine-manifest results/qi_seed_audit/prefine_manifest.json --prefine-output-dir results/qi_seed_audit/prefine_probes
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_seed_robustness.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 python examples/optimization/QI_optimization.py
 
 The robustness probe is intentionally a QI+iota basin test, not a full
 engineering acceptance claim.  Promote a QI result only after the independent
@@ -878,13 +879,21 @@ Two practical lessons from that study are now reflected in the example:
      objective_tuples.append((b_target.J, 0.0, 100.0))
 
 ``QI_optimization.py`` is now the single recommended multi-seed entry point.
-At the top of the file, change ``RUN_CASE`` to one of the bundled cases:
+Set ``VMEC_JAX_QI_RUN_CASE`` at launch time, or change ``RUN_CASE`` at the top
+of the file, to one of the bundled cases:
 
 .. code-block:: python
 
    RUN_CASE = "nfp2_qi"             # default NFP=2 mirror-aware QI lane
    RUN_CASE = "qi_stel_seed_3127"   # unrelated stellarator seed robustness lane
    RUN_CASE = "nfp4_qh_warm_to_qi"  # NFP=4 QH warm start, using the input NFP
+
+For example, to run the bundled near-axis stellarator seed without editing the
+script:
+
+.. code-block:: bash
+
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 python examples/optimization/QI_optimization.py
 
 The script takes ``nfp`` from the VMEC input file, so the NFP=4 warm-start case
 does not need a separate driver.  To try a different VMEC input deck, add one
@@ -926,12 +935,21 @@ Keep ``project_input_boundary_to_max_mode=True`` in the
 ``FixedBoundaryVMEC.from_input`` call so a ``max_mode = 1`` run removes higher
 boundary modes from a richer seed, while ``max_mode = 2`` and ``3`` expose the
 corresponding larger parameter spaces.  The optimization script itself only
-needs the VMEC input file.  If you want to rank the seed before optimizing it,
-first create a matching wout with ``vmec_jax /path/to/input.my_seed`` and then
-run ``examples/optimization/audit_qi_seed_suitability.py --case
+needs the VMEC input file.  For a one-off external deck using the conservative
+far-seed policy, set ``VMEC_JAX_QI_INPUT`` and optionally
+``VMEC_JAX_QI_OUTPUT_DIR``:
+
+.. code-block:: bash
+
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_INPUT=/path/to/input.my_seed python examples/optimization/QI_optimization.py
+
+If you want to rank the seed before optimizing it, first create a matching
+wout with ``vmec_jax /path/to/input.my_seed`` and then run
+``examples/optimization/audit_qi_seed_suitability.py --case
 label:qi:input_path:wout_path`` as described in :doc:`validation`.
 
 The bundled ``input.QI_stel_seed_3127`` case can be used directly with
+``VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127`` or
 ``RUN_CASE = "qi_stel_seed_3127"``.  This far-from-QI seed is intentionally
 configured as a QI+iota robustness probe, not as a claimed full engineering
 solution: the script should print a passed QI+iota gate and a failed mirror

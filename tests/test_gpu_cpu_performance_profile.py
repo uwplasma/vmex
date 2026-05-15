@@ -8,11 +8,20 @@ import vmec_jax.discrete_adjoint as da
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TOOL_PATH = REPO_ROOT / "tools" / "diagnostics" / "gpu_cpu_performance_matrix.py"
+FIXED_TOOL_PATH = REPO_ROOT / "tools" / "diagnostics" / "profile_fixed_boundary.py"
 QI_TOOL_PATH = REPO_ROOT / "tools" / "diagnostics" / "profile_qi_boozer_gpu.py"
 
 
 def _load_tool():
     spec = importlib.util.spec_from_file_location("gpu_cpu_performance_matrix", TOOL_PATH)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_fixed_tool():
+    spec = importlib.util.spec_from_file_location("profile_fixed_boundary", FIXED_TOOL_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -102,6 +111,7 @@ def test_performance_matrix_fixed_command_uses_backend_solver_device(tmp_path):
             "--iters",
             "7",
             "--no-warmup",
+            "--vmec-timing-detail",
         ]
     )
     report = tmp_path / "report.json"
@@ -121,6 +131,7 @@ def test_performance_matrix_fixed_command_uses_backend_solver_device(tmp_path):
     assert "--use-scan" in command
     assert "--no-auto-cli-policy" in command
     assert "--no-multigrid" in command
+    assert "--vmec-timing-detail" in command
 
 
 def test_performance_matrix_exact_command_can_request_memory_profile(tmp_path):
@@ -146,6 +157,7 @@ def test_performance_matrix_exact_command_can_request_memory_profile(tmp_path):
             "--trial-use-scan",
             "--trace",
             "--device-memory-profile",
+            "--vmec-timing-detail",
         ]
     )
     report = tmp_path / "report.json"
@@ -169,8 +181,35 @@ def test_performance_matrix_exact_command_can_request_memory_profile(tmp_path):
     assert command[command.index("--scipy-tr-solver") + 1] == "exact"
     assert command[command.index("--lsmr-maxiter") + 1] == "5"
     assert "--trial-use-scan" in command
+    assert "--vmec-timing-detail" in command
     assert command[command.index("--trace-outdir") + 1] == str(trace)
     assert command[command.index("--device-memory-profile-out") + 1] == str(memory)
+
+
+def test_fixed_boundary_profiler_compacts_timing_diagnostics():
+    fixed_tool = _load_fixed_tool()
+    compact = fixed_tool._compact_diagnostics(
+        {
+            "solver_mode": "accelerated",
+            "timing": {
+                "iterations": 4,
+                "compute_forces_s": 1.25,
+                "preconditioner_s": 0.5,
+                "update_s": 0.125,
+            },
+            "ignored": "large-history",
+        }
+    )
+
+    assert compact == {
+        "solver_mode": "accelerated",
+        "timing": {
+            "iterations": 4,
+            "compute_forces_s": 1.25,
+            "preconditioner_s": 0.5,
+            "update_s": 0.125,
+        },
+    }
 
 
 def test_performance_matrix_qi_boozer_command_uses_qi_profiler(tmp_path):

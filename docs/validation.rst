@@ -179,6 +179,10 @@ with:
 .. code-block:: bash
 
    PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --csv results/qi_seed_audit.csv
+   PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick \
+     --case qi_stel_seed_3127:qi:examples/data/input.QI_stel_seed_3127:examples/data/wout_QI_stel_seed_3127.nc \
+     --output results/qi_seed_audit/qi_stel_seed_3127.json \
+     --csv results/qi_seed_audit/qi_stel_seed_3127.csv
 
 The audit performs no optimization.  It reads solved ``input``/``wout`` pairs
 and reports smooth QI, legacy QI, mirror ratio, elongation, aspect ratio, and

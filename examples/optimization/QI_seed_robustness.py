@@ -6,6 +6,7 @@ objective tuples, runs the optimizer, then saves/prints/plots the result.
 """
 
 from pathlib import Path
+import os
 import sys
 
 import numpy as np
@@ -22,13 +23,30 @@ enable_x64(True)
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
+
+def _env_path(name, default):
+    value = os.environ.get(name)
+    return Path(value).expanduser() if value else default
+
+
+def _env_int(name, default):
+    value = os.environ.get(name)
+    return int(value) if value else default
+
+
 # Seed and optimizer settings.  This default is the first short policy that
-# gets the bundled seed onto a low-QI, nonzero-iota branch.
-INPUT_FILE = DATA_DIR / "input.QI_stel_seed_3127"
-OUTPUT_DIR = Path("results/qi_seed_robustness/qi_stel_seed_3127/qiiota_aspect_mode3")
+# gets the bundled seed onto a low-QI, nonzero-iota branch.  For a quick probe
+# of another VMEC input deck, set VMEC_JAX_QI_SEED_INPUT and optionally
+# VMEC_JAX_QI_SEED_OUTPUT_DIR; audit solved input/wout pairs first with
+# audit_qi_seed_suitability.py because this script launches an optimization.
+INPUT_FILE = _env_path("VMEC_JAX_QI_SEED_INPUT", DATA_DIR / "input.QI_stel_seed_3127")
+OUTPUT_DIR = _env_path(
+    "VMEC_JAX_QI_SEED_OUTPUT_DIR",
+    Path("results/qi_seed_robustness/qi_stel_seed_3127/qiiota_aspect_mode3"),
+)
 MAX_MODE = 3
 MIN_VMEC_MODE = 6
-MAX_NFEV = 8
+MAX_NFEV = _env_int("VMEC_JAX_QI_SEED_MAX_NFEV", 8)
 METHOD = "scipy"  # Try "scalar_trust" for stricter monotone line-search probes.
 SCIPY_TR_SOLVER = "lsmr"  # For METHOD="scipy": "lsmr" is memory-light; "exact" is dense.
 FTOL = 1.0e-4
@@ -87,6 +105,16 @@ objective_tuples = [
     (iota_floor.J, 0.0, IOTA_FLOOR_WEIGHT),
     (qi.J, 0.0, QI_WEIGHT),
 ]
+
+print("\nQI seed robustness policy:")
+print(f"  input file:      {INPUT_FILE}")
+print(f"  output dir:      {OUTPUT_DIR}")
+print(f"  max_mode:        {MAX_MODE}")
+print(f"  min_vmec_mode:   {MIN_VMEC_MODE}")
+print(f"  max_nfev:        {MAX_NFEV}")
+print(f"  target aspect:   {TARGET_ASPECT}")
+print(f"  abs iota floor:  {TARGET_ABS_IOTA_MIN}")
+print(f"  mirror target:   {MAX_MIRROR_RATIO}")
 
 # Optional engineering cleanup.  Mirror/elongation can be included after the
 # QI+iota branch is established, but too much scalar pressure can destroy QI.

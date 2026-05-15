@@ -208,6 +208,41 @@ def test_qi_boozer_report_summary_extracts_phase_metrics() -> None:
     assert summary["metrics"]["contamination_warning_count"] == 1
 
 
+def test_fixed_boundary_report_summary_extracts_solver_phase_timing() -> None:
+    payload = {
+        "input": "examples/data/input.nfp2_QI",
+        "requested_iters": 5,
+        "wall_time_sec": 2.5,
+        "jax_default_backend": "cpu",
+        "args": {"solver_device": "cpu"},
+        "diagnostics": {
+            "timing": {
+                "iterations": 5,
+                "compute_forces_s": 1.5,
+                "preconditioner_s": 0.6,
+                "precond_refresh_s": 0.2,
+                "precond_apply_s": 0.3,
+                "precond_mode_scale_s": 0.1,
+                "update_s": 0.25,
+                "update_state_s": 0.2,
+            }
+        },
+    }
+
+    summary = compare_tool.summarize_payload(payload, label="cpu")
+    metrics = summary["metrics"]
+
+    assert summary["metadata"]["source_report_kind"] == "fixed_boundary_profile"
+    assert metrics["total_runtime_s"] == 2.5
+    assert metrics["vmec_compute_forces_s"] == 1.5
+    assert metrics["vmec_preconditioner_s"] == 0.6
+    assert metrics["vmec_precond_refresh_s"] == 0.2
+    assert metrics["vmec_precond_apply_s"] == 0.3
+    assert metrics["vmec_precond_mode_scale_s"] == 0.1
+    assert metrics["vmec_update_s"] == 0.25
+    assert metrics["vmec_update_state_s"] == 0.2
+
+
 def test_cli_prints_text_and_writes_json(tmp_path: Path, capsys) -> None:
     cpu_path = tmp_path / "cpu.json"
     gpu_path = tmp_path / "gpu.json"

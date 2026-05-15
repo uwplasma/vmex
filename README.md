@@ -245,10 +245,11 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_swee
 PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
 ```
 
-For QI seed-robustness probes, change the top-level `RUN_CASE` in
-`examples/optimization/QI_optimization.py` to `qi_stel_seed_3127`,
-`nfp4_qh_warm_to_qi`, or a new `QI_CASES` entry for another VMEC input deck.
-Before promoting such a result, run
+For QI seed-robustness probes, set `VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127`
+when running `examples/optimization/QI_optimization.py`, or change the
+top-level `RUN_CASE` to `qi_stel_seed_3127`, `nfp4_qh_warm_to_qi`, or a new
+`QI_CASES` entry for another VMEC input deck. Before promoting such a result,
+run
 `examples/optimization/audit_qi_seed_suitability.py --quick` and check the
 legacy QI, mirror ratio, elongation, iota, and Boozer `|B|` line-contour
 diagnostics.

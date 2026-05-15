@@ -85,7 +85,7 @@ remain available for custom inspection.
 - `QA_optimization.py`: recommended quasi-axisymmetric fixed-boundary optimization.
 - `QH_optimization.py`: recommended quasi-helical fixed-boundary optimization.
 - `QP_optimization.py`: quasi-poloidal fixed-boundary optimization from the NFP=2 QI seed.
-- `QI_optimization.py`: recommended quasi-isodynamic optimization with Boozer-space QI metrics, mirror-ratio and elongation penalties, repeated same-mode continuation, and ESS. Change the top-level `RUN_CASE` to run the bundled `input.nfp2_QI`, `input.QI_stel_seed_3127`, or `input.nfp4_QH_warm_start` seed.
+- `QI_optimization.py`: recommended quasi-isodynamic optimization with Boozer-space QI metrics, mirror-ratio and elongation penalties, repeated same-mode continuation, and ESS. Set `VMEC_JAX_QI_RUN_CASE` or change the top-level `RUN_CASE` to run the bundled `input.nfp2_QI`, `input.QI_stel_seed_3127`, or `input.nfp4_QH_warm_start` seed.
 - `qa_optimization_finite_beta.py`, `qh_optimization_finite_beta.py`, and `qi_optimization_finite_beta.py`:
   finite-beta stage-1 examples with pressure/current-profile terms. These intentionally use
   `FixedBoundaryExactOptimizer` directly because each continuation stage builds custom
@@ -133,6 +133,8 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/audit_qi_seed_suitab
   --prefine-manifest results/qi_seed_audit/prefine_manifest.json \
   --prefine-output-dir results/qi_seed_audit/prefine_probes
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_seed_robustness.py
+PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 \
+  python examples/optimization/QI_optimization.py
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py \
   --backend-label cpu --solver-device cpu --policy continuation \
   --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both
@@ -147,6 +149,14 @@ and LCFS `|B|` contours remain stable.
 For seed-robustness experiments, first run the audit, then use
 `audit_qi_seed_suitability.py --prefine-probes plan` to write a reviewed
 manifest before launching expensive prefine probes.
+
+`QI_optimization.py` also accepts `VMEC_JAX_QI_INPUT=/path/to/input.my_seed`
+for an external VMEC input deck; it will use the same conservative far-seed
+QI+iota policy as `qi_stel_seed_3127` unless you add a custom `QI_CASES` entry.
+`QI_seed_robustness.py` accepts `VMEC_JAX_QI_SEED_INPUT`,
+`VMEC_JAX_QI_SEED_OUTPUT_DIR`, and `VMEC_JAX_QI_SEED_MAX_NFEV` for small local
+probes. These variables are convenience wrappers around the top-level script
+settings, not a replacement for the no-optimization audit.
 
 ## Sweep And Rendering Tools
 

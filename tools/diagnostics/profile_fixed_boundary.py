@@ -33,6 +33,19 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--no-warmup", action="store_true", help="Disable warmup run")
     p.add_argument("--simple-profile", action="store_true", help="Use a timing-only profiler (no TensorBoard trace)")
     p.add_argument("--json-out", type=str, default=None, help="Write a compact JSON timing/solver diagnostic summary.")
+    p.add_argument(
+        "--vmec-timing",
+        action="store_true",
+        help="Enable VMEC_JAX_TIMING so non-scan fixed-boundary runs include solver phase timings in JSON.",
+    )
+    p.add_argument(
+        "--vmec-timing-detail",
+        action="store_true",
+        help=(
+            "Enable detailed VMEC_JAX_TIMING_DETAIL preconditioner subphase timings. "
+            "This adds extra synchronization and is for diagnostics only."
+        ),
+    )
     p.add_argument("--jit-forces", action="store_true", help="Enable jit_forces (default)")
     p.add_argument("--no-jit-forces", action="store_true", help="Disable jit_forces")
     p.add_argument("--use-input-niter", action="store_true", help="Use NITER from input for staging")
@@ -160,6 +173,7 @@ def _compact_diagnostics(diag: dict[str, Any]) -> dict[str, Any]:
         "solver_device",
         "solver_device_auto_reroute",
         "solver_device_requested_backend",
+        "timing",
     )
     return {key: _json_safe(diag[key]) for key in keys if key in diag}
 
@@ -240,6 +254,28 @@ def _print_run_summary(summary: dict[str, Any]) -> None:
             policy_bits.append(f"{key}={diag[key]}")
     if policy_bits:
         print("[profile_fixed_boundary] " + " ".join(policy_bits), flush=True)
+    timing = diag.get("timing")
+    if isinstance(timing, dict):
+        timing_bits = []
+        for key in (
+            "iterations",
+            "compute_forces_s",
+            "preconditioner_s",
+            "precond_refresh_s",
+            "precond_apply_s",
+            "precond_mode_scale_s",
+            "update_s",
+            "update_state_s",
+        ):
+            if key in timing:
+                value = timing[key]
+                if isinstance(value, (int, float)):
+                    if key == "iterations":
+                        timing_bits.append(f"{key}={int(value)}")
+                    else:
+                        timing_bits.append(f"{key}={float(value):.6g}")
+        if timing_bits:
+            print("[profile_fixed_boundary] timing " + " ".join(timing_bits), flush=True)
 
 
 def _dump_tomnsps_hlo(input_path: str, outdir: Path) -> None:
@@ -369,6 +405,10 @@ def main() -> int:
         # requested with --dynamic-scan.
         "VMEC_JAX_DYNAMIC_SCAN": "1" if bool(args.dynamic_scan) else "0",
     }
+    if bool(args.vmec_timing) or bool(args.vmec_timing_detail):
+        env_updates["VMEC_JAX_TIMING"] = "1"
+    if bool(args.vmec_timing_detail):
+        env_updates["VMEC_JAX_TIMING_DETAIL"] = "1"
 
     if bool(args.dump_hlo):
         _dump_tomnsps_hlo(str(args.input), outdir)

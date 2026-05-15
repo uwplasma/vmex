@@ -80,6 +80,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Save JAX device memory profiles for exact-callback runs.",
     )
     parser.add_argument(
+        "--vmec-timing",
+        action="store_true",
+        help="Enable VMEC_JAX_TIMING in child profilers that support solver phase timings.",
+    )
+    parser.add_argument(
+        "--vmec-timing-detail",
+        action="store_true",
+        help=(
+            "Enable detailed VMEC_JAX_TIMING_DETAIL preconditioner subphase timings in child profilers. "
+            "This adds extra synchronization and is for diagnostics only."
+        ),
+    )
+    parser.add_argument(
         "--extra-arg",
         action="append",
         default=[],
@@ -152,8 +165,6 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Forward --trial-use-scan to profile_exact_optimizer for relaxed trial solves.",
     )
-    exact.add_argument("--vmec-timing", action="store_true", help="Enable VMEC_JAX_TIMING in exact profiler.")
-
     qi = parser.add_argument_group("qi-boozer mode")
     qi.add_argument("--repeat", type=int, default=2, help="QI residual evaluations after the VMEC solve.")
     qi.add_argument("--mpol", type=int, default=6)
@@ -285,6 +296,10 @@ def build_child_command(
             command.append("--no-auto-cli-policy")
         if args.single_grid:
             command.append("--no-multigrid")
+        if args.vmec_timing:
+            command.append("--vmec-timing")
+        if args.vmec_timing_detail:
+            command.append("--vmec-timing-detail")
         command.extend(str(item) for item in args.extra_arg)
         return command
 
@@ -359,6 +374,8 @@ def build_child_command(
         command.append("--trial-use-scan")
     if args.vmec_timing:
         command.append("--vmec-timing")
+    if args.vmec_timing_detail:
+        command.append("--vmec-timing-detail")
     if args.trace:
         command.extend(["--trace-outdir", str(trace_dir)])
     if memory_profile_path is not None:
@@ -451,6 +468,9 @@ def print_report(payload: dict[str, Any]) -> None:
                 run.get("wall_time_s"),
                 _metric(summary, "total_runtime_s"),
                 _metric(summary, "vmec_solve_s"),
+                _metric(summary, "vmec_compute_forces_s"),
+                _metric(summary, "vmec_preconditioner_s"),
+                _metric(summary, "vmec_update_s"),
                 _metric(summary, "qi_first_call_s"),
                 _metric(summary, "qi_warm_min_s"),
                 _metric(summary, "replay_time_s"),
@@ -464,6 +484,9 @@ def print_report(payload: dict[str, Any]) -> None:
         "wrapper_s",
         "profile_s",
         "vmec_s",
+        "forces_s",
+        "precond_s",
+        "update_s",
         "qi_first_s",
         "qi_warm_s",
         "replay_s",

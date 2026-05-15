@@ -72,6 +72,10 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "run_quasi_isodynamic_objective_optimization(" not in text
     assert "QI_CASES = {" in text
     assert 'RUN_CASE = "nfp2_qi"' in text
+    assert "VMEC_JAX_QI_RUN_CASE" in text
+    assert "VMEC_JAX_QI_INPUT" in text
+    assert "VMEC_JAX_QI_OUTPUT_DIR" in text
+    assert "Unknown QI RUN_CASE" in text
     assert '"qi_stel_seed_3127"' in text
     assert '"nfp4_qh_warm_to_qi"' in text
     assert 'DATA_DIR / "input.QI_stel_seed_3127"' in text
@@ -142,6 +146,8 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "require_engineering_gate=bool(stage.get(\"require_engineering_gate\", False))" in text
     assert "reference_diagnostics = (" in text
     assert "mirror_ramp_promotion_log.json" in text
+    assert "diagnostics.json" in text
+    assert "json.dumps(diagnostics" in text
     assert "qi_gate_passed" in text
     assert "engineering_gate_passed" in text
     assert "qi_mirror_ratio_by_surface" in text
@@ -179,6 +185,10 @@ def test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling() -> None:
 def test_qi_seed_robustness_optional_mirror_cleanup_contract_keeps_qi_guard() -> None:
     text = (ROOT / "examples" / "optimization" / "QI_seed_robustness.py").read_text()
 
+    assert "VMEC_JAX_QI_SEED_INPUT" in text
+    assert "VMEC_JAX_QI_SEED_OUTPUT_DIR" in text
+    assert "VMEC_JAX_QI_SEED_MAX_NFEV" in text
+    assert "QI seed robustness policy:" in text
     assert "# Optional engineering cleanup.  Mirror/elongation can be included after the" in text
     assert "# qi_ceiling = vj.QuasiIsodynamicResidualCeiling(" in text
     assert "#     (qi_ceiling.J, 0.0, 100.0)," in text

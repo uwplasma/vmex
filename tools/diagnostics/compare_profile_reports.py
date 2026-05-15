@@ -51,6 +51,13 @@ ACCEPTED_REPLAY_PROFILE_NAMES = {
 METRIC_ORDER = (
     "total_runtime_s",
     "vmec_solve_s",
+    "vmec_compute_forces_s",
+    "vmec_preconditioner_s",
+    "vmec_precond_refresh_s",
+    "vmec_precond_apply_s",
+    "vmec_precond_mode_scale_s",
+    "vmec_update_s",
+    "vmec_update_state_s",
     "qi_first_call_s",
     "qi_warm_min_s",
     "qi_warm_mean_s",
@@ -69,6 +76,13 @@ METRIC_ORDER = (
 METRIC_LABELS = {
     "total_runtime_s": "total runtime",
     "vmec_solve_s": "VMEC solve",
+    "vmec_compute_forces_s": "VMEC compute_forces",
+    "vmec_preconditioner_s": "VMEC preconditioner",
+    "vmec_precond_refresh_s": "VMEC precond refresh",
+    "vmec_precond_apply_s": "VMEC precond apply",
+    "vmec_precond_mode_scale_s": "VMEC precond mode scale",
+    "vmec_update_s": "VMEC update",
+    "vmec_update_state_s": "VMEC update state",
     "qi_first_call_s": "QI first call",
     "qi_warm_min_s": "QI warm min",
     "qi_warm_mean_s": "QI warm mean",
@@ -306,6 +320,19 @@ def _direct_time(payload: dict[str, Any], field: str) -> float | None:
     return None
 
 
+def _vmec_timing_metric(payload: dict[str, Any], key: str) -> float | None:
+    value = _as_float(_get_path(payload, ("diagnostics", "timing", key)))
+    if value is not None:
+        return value
+    value = _as_float(_get_path(payload, ("timing", key)))
+    if value is not None:
+        return value
+    runs = payload.get("runs")
+    if isinstance(runs, list):
+        return _sum_optional(_vmec_timing_metric(run, key) for run in runs if isinstance(run, dict))
+    return None
+
+
 def _profile_time(profile: dict[str, dict[str, float | int]], field: str) -> float | None:
     tokens = PROFILE_TIME_GROUPS[field]
     values = [
@@ -518,6 +545,13 @@ def summarize_payload(
     metrics = {
         "total_runtime_s": _total_runtime(payload),
         "vmec_solve_s": _wall_time_metric(payload, "vmec_solve"),
+        "vmec_compute_forces_s": _vmec_timing_metric(payload, "compute_forces_s"),
+        "vmec_preconditioner_s": _vmec_timing_metric(payload, "preconditioner_s"),
+        "vmec_precond_refresh_s": _vmec_timing_metric(payload, "precond_refresh_s"),
+        "vmec_precond_apply_s": _vmec_timing_metric(payload, "precond_apply_s"),
+        "vmec_precond_mode_scale_s": _vmec_timing_metric(payload, "precond_mode_scale_s"),
+        "vmec_update_s": _vmec_timing_metric(payload, "update_s"),
+        "vmec_update_state_s": _vmec_timing_metric(payload, "update_state_s"),
         "qi_first_call_s": _first_present(
             _wall_time_metric(payload, "qi_first_call"),
             _wall_time_metric(payload, "qi_first"),

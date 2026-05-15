@@ -608,6 +608,76 @@ def test_quasisymmetry_ratio_residual_regression_on_bundled_wouts(
     np.testing.assert_allclose(np.asarray(qs["profile"]), expected_profile, rtol=1.0e-7, atol=1.0e-12)
 
 
+def test_accepted_wout_output_preserves_qs_metric_against_bundled_vmec2000(tmp_path):
+    pytest.importorskip("jax")
+    pytest.importorskip("netCDF4")
+
+    from vmec_jax import build_static, load_config, load_wout
+    from vmec_jax.optimization import FixedBoundaryExactOptimizer
+    from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_wout
+    from vmec_jax.wout import state_from_wout
+
+    root = os.path.dirname(os.path.dirname(__file__))
+    input_path = os.path.join(root, "examples", "data", "input.LandremanPaul2021_QA_lowres")
+    wout_path = os.path.join(root, "examples", "data", "wout_LandremanPaul2021_QA_lowres.nc")
+    if not os.path.exists(input_path) or not os.path.exists(wout_path):
+        pytest.skip("Missing bundled QA VMEC2000 fixture")
+
+    cfg, indata = load_config(input_path)
+    static = build_static(cfg)
+    ref_wout = load_wout(wout_path)
+    accepted_state = state_from_wout(ref_wout)
+
+    # Exercise the accepted-state writer used by optimization final artifacts.
+    optimizer = object.__new__(FixedBoundaryExactOptimizer)
+    optimizer._static = static
+    optimizer._indata = indata
+    optimizer._flux = object()
+    optimizer._signgs = int(ref_wout.signgs)
+    optimizer._exact_cache = {}
+    optimizer._exact_state_cache = {}
+    optimizer._profile = {}
+
+    out_path = tmp_path / "wout_accepted.nc"
+    optimizer.save_wout(out_path, state=accepted_state)
+    accepted_wout = load_wout(out_path)
+
+    qs_kwargs = {
+        "surfaces": [0.25, 0.5, 0.75],
+        "helicity_m": 1,
+        "helicity_n": 0,
+        "ntheta": 13,
+        "nphi": 14,
+    }
+    ref_qs = quasisymmetry_ratio_residual_from_wout(ref_wout, **qs_kwargs)
+    accepted_qs = quasisymmetry_ratio_residual_from_wout(accepted_wout, **qs_kwargs)
+
+    np.testing.assert_allclose(
+        np.asarray(accepted_qs["residuals1d"]),
+        np.asarray(ref_qs["residuals1d"]),
+        rtol=1.0e-4,
+        atol=1.0e-7,
+    )
+    np.testing.assert_allclose(
+        np.asarray(accepted_qs["total"]),
+        np.asarray(ref_qs["total"]),
+        rtol=1.0e-4,
+        atol=1.0e-10,
+    )
+    np.testing.assert_allclose(
+        np.asarray(accepted_wout.rmnc),
+        np.asarray(ref_wout.rmnc),
+        rtol=0.0,
+        atol=1.0e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(accepted_wout.zmns),
+        np.asarray(ref_wout.zmns),
+        rtol=0.0,
+        atol=1.0e-12,
+    )
+
+
 def test_quasisymmetry_ratio_residual_supports_lasym_wout():
     pytest.importorskip("jax")
 

@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import json
+import os
 import sys
 
 import numpy as np
@@ -25,8 +26,9 @@ def _diagnostic_float(record, key):
     value = record.get(key)
     return float(value) if value is not None else float("nan")
 
-# Seed cases.  Pick one case by changing RUN_CASE; add another dictionary entry
-# to use any external VMEC input deck.  The NFP is taken from the VMEC input
+# Seed cases.  Pick one case by changing RUN_CASE or setting
+# VMEC_JAX_QI_RUN_CASE; add another dictionary entry, or set VMEC_JAX_QI_INPUT,
+# to use an external VMEC input deck.  The NFP is taken from the VMEC input
 # file, so the same script can run the bundled NFP=2 QI seed, the stellarator
 # seed, or the NFP=4 QH warm start without hard-coding field period count.
 QI_CASES = {
@@ -169,6 +171,27 @@ QI_CASES = {
 }
 
 RUN_CASE = "nfp2_qi"  # Try "qi_stel_seed_3127" or "nfp4_qh_warm_to_qi".
+_EXTERNAL_INPUT = os.environ.get("VMEC_JAX_QI_INPUT")
+if _EXTERNAL_INPUT:
+    _external_label = os.environ.get(
+        "VMEC_JAX_QI_RUN_CASE",
+        os.environ.get("VMEC_JAX_QI_LABEL", Path(_EXTERNAL_INPUT).name.replace("input.", "")),
+    )
+    # External inputs use the far-seed robustness policy by default: first
+    # establish a QI+iota basin, then add guarded engineering cleanup later.
+    QI_CASES[_external_label] = {
+        **QI_CASES["qi_stel_seed_3127"],
+        "case_goal": "external VMEC input using the far-seed QI+iota robustness policy",
+        "input_file": Path(_EXTERNAL_INPUT).expanduser(),
+        "output_dir": Path(
+            os.environ.get("VMEC_JAX_QI_OUTPUT_DIR", f"results/qi_opt/ess/{_external_label}")
+        ).expanduser(),
+    }
+    RUN_CASE = _external_label
+else:
+    RUN_CASE = os.environ.get("VMEC_JAX_QI_RUN_CASE", RUN_CASE)
+if RUN_CASE not in QI_CASES:
+    raise KeyError(f"Unknown QI RUN_CASE {RUN_CASE!r}; available cases: {sorted(QI_CASES)}")
 CASE = QI_CASES[RUN_CASE]
 
 # Problem parameters.  The default case uses the bundled NFP=2 omnigenity seed
@@ -773,6 +796,9 @@ diagnostics = annotate_qi_seed_suitability(
         max_elongation=MAX_ELONGATION,
     ),
 )
+diagnostics_path = OUTPUT_DIR / "diagnostics.json"
+diagnostics_path.write_text(json.dumps(diagnostics, indent=2, sort_keys=True) + "\n")
+saved_paths["diagnostics"] = diagnostics_path
 smooth_qi = _diagnostic_float(diagnostics, "qi_smooth_total")
 legacy_qi = _diagnostic_float(diagnostics, "qi_legacy_total")
 aspect_ratio = _diagnostic_float(diagnostics, "aspect")
@@ -794,6 +820,7 @@ print(f"  QI seed gate:    {qi_gate_passed}")
 print(f"  full eng. gate:  {engineering_gate_passed}")
 print(f"  rank score:      {diagnostics['qi_rank_score']:.6e}")
 print(f"  failed gates:    {diagnostics['qi_gate_failures']}")
+print(f"  diagnostics:     {diagnostics_path}")
 for reason in diagnostics["qi_failure_reasons"]:
     print(f"    - {reason}")
 if engineering_gate_passed:
