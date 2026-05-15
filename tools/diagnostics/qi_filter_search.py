@@ -335,6 +335,8 @@ def run_filter_search(stage, *, args: argparse.Namespace, targets: SurveyTargets
     radius = float(args.radius)
     history: list[dict[str, Any]] = []
     t0 = time.perf_counter()
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     current = evaluate_params(stage, params_current, options=qi_options, exact_solve=bool(args.exact_solve))
     current_metrics = dict(current["metrics"])
@@ -361,6 +363,9 @@ def run_filter_search(stage, *, args: argparse.Namespace, targets: SurveyTargets
             rng=rng,
             direction_families=args.directions,
         )
+        max_trials = int(args.max_trials_per_iteration)
+        if max_trials > 0:
+            directions = directions[:max_trials]
         best: tuple[tuple[float, ...], dict[str, Any], np.ndarray] | None = None
         for label, direction in directions:
             params_trial = params_current + radius * np.asarray(x_scale, dtype=float) * direction
@@ -393,12 +398,22 @@ def run_filter_search(stage, *, args: argparse.Namespace, targets: SurveyTargets
                 }
                 decision = None
             history.append(record)
+            if bool(args.verbose):
+                metrics = record.get("metrics", {})
+                print(
+                    f"iter={iteration} label={label} accepted={record['accepted']} "
+                    f"phase={record['phase']} reason={record['reason']} "
+                    f"QI={metrics.get('qi_smooth_total')} iota={metrics.get('mean_iota')}",
+                    flush=True,
+                )
+            write_history(history, output_dir / "history.json")
             if decision is not None and decision.accepted:
                 candidate_key = tuple(record["candidate_key"])
                 if best is None or candidate_key < best[0]:
                     best = (candidate_key, record, params_trial)
         if best is None:
             radius *= float(args.shrink)
+            write_history(history, output_dir / "history.json")
             if radius < float(args.min_radius):
                 break
             continue
@@ -407,12 +422,11 @@ def run_filter_search(stage, *, args: argparse.Namespace, targets: SurveyTargets
         accepted_count += 1
         if bool(args.save_accepted_inputs):
             stage.optimizer.save_input(Path(args.output_dir) / f"input.accepted_{accepted_count:03d}", params_current)
+        write_history(history, output_dir / "history.json")
         if all(gate_status(current_metrics, targets=targets, options=options).values()):
             break
     final_phase = filter_phase(current_metrics, targets=targets, options=options)
     final_status = gate_status(current_metrics, targets=targets, options=options)
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
     stage.optimizer.save_input(output_dir / "input.final", params_current)
     report = {
         "kind": "qi_filter_search",
@@ -445,6 +459,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-radius", type=float, default=1.0e-3)
     parser.add_argument("--shrink", type=float, default=0.5)
     parser.add_argument("--max-iterations", type=int, default=5)
+    parser.add_argument("--max-trials-per-iteration", type=int, default=0)
     parser.add_argument("--n-random", type=int, default=4)
     parser.add_argument("--axis-count", type=int, default=4)
     parser.add_argument("--rng-seed", type=int, default=20260515)
@@ -485,6 +500,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fix", default="rc00")
     parser.add_argument("--project-input-boundary-to-max-mode", action="store_true")
     parser.add_argument("--save-accepted-inputs", action="store_true")
+    parser.add_argument("--verbose", action="store_true")
     return parser
 
 

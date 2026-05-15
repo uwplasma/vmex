@@ -280,9 +280,11 @@ gates are preserved while the active failed gate improves:
      --output-dir results/diagnostics/qi_filter_search
 
 After reviewing ``plan.json``, add ``--execute``.  The search phase order is
-QI, then iota, then mirror/elongation.  The output history records every
-accepted and rejected trial, making it clear whether the seed has a nearby
-feasible path or whether a broader global/basin method is required.
+QI, then iota, then mirror/elongation.  The output history is checkpointed
+after every evaluated trial, and ``--max-trials-per-iteration`` can bound an
+interactive batch.  This makes it clear whether the seed has a nearby feasible
+path or whether a broader global/basin method is required, even if a long
+diagnostic run is interrupted.
 
 To audit a new input deck, first run VMEC once so the audit has a matching
 ``wout`` file:

@@ -75,7 +75,9 @@ QI landscape diagnostics:
   performs a hard-gated feasibility search when scalar penalties jump between
   incompatible QI/iota basins.  It accepts only trials that preserve previous
   gates while improving the current failed gate, in the order QI, iota, then
-  mirror/elongation.
+  mirror/elongation.  The history file is checkpointed after each trial; use
+  `--max-trials-per-iteration` and `--verbose` for interactive office/GPU
+  debugging.
 
 Free-boundary manifest notes:
 
