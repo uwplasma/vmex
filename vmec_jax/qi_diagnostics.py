@@ -64,6 +64,7 @@ class QIDiagnosticOptions:
     aligned_profile_trap_level: float = 0.65
     aligned_profile_trap_softness: float = 5.0e-2
     phimin: float = 0.0
+    jit_booz: bool = True
     include_legacy: bool = True
     legacy_nphi_out: int | None = None
     mirror_threshold: float = 0.21
@@ -884,7 +885,7 @@ def qi_diagnostics_from_state(
     flux_local: Any = None,
     prof_local: Any = None,
     pressure_local: Any = None,
-    jit_booz: bool = False,
+    jit_booz: bool | None = None,
     booz_constants: Any = None,
     booz_grids: Any = None,
     surface_indices: Any = None,
@@ -892,6 +893,7 @@ def qi_diagnostics_from_state(
     """Evaluate a complete QI diagnostic record from a solved VMEC state."""
 
     options = _as_options(options)
+    jit_booz_local = bool(options.jit_booz if jit_booz is None else jit_booz)
     surfaces_local = surfaces if surfaces is not None else options.surfaces
     if surfaces_local is None:
         raise ValueError("surfaces must be supplied either as an argument or in QIDiagnosticOptions")
@@ -907,6 +909,7 @@ def qi_diagnostics_from_state(
         surfaces=surfaces_local,
         surface_indices=surface_indices,
     )
+    record["qi_jit_booz"] = jit_booz_local
 
     booz = None
     try:
@@ -922,7 +925,7 @@ def qi_diagnostics_from_state(
             flux_local=flux_local,
             prof_local=prof_local,
             pressure_local=pressure_local,
-            jit_booz=bool(jit_booz),
+            jit_booz=jit_booz_local,
             booz_constants=booz_constants,
             booz_grids=booz_grids,
             surface_indices=surface_indices,

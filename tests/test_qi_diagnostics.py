@@ -218,6 +218,7 @@ def test_qi_diagnostics_from_state_wraps_existing_components_without_solves(monk
     assert calls["smooth"]["surfaces"] == [0.5]
     assert calls["smooth"]["surface_indices"] == [3]
     assert calls["smooth"]["flux_local"] == "flux"
+    assert calls["smooth"]["jit_booz"] is True
     assert np.asarray(calls["mirror"][0]["bmnc_b"]).shape == (1, 2)
     np.testing.assert_allclose(calls["mirror"][0]["bmnc_b"], [[1.1, 0.2]])
     assert calls["mirror"][1]["weights"] == [2.0]
@@ -244,6 +245,7 @@ def test_qi_diagnostics_from_state_wraps_existing_components_without_solves(monk
     assert record["qi_mboz"] == 18
     assert record["qi_nboz"] == 19
     assert record["qi_include_bounce_endpoints"] is True
+    assert record["qi_jit_booz"] is True
     assert record["qi_surfaces"] == [0.5]
     assert record["qi_surface_indices"] == [3]
 
