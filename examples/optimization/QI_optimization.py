@@ -106,6 +106,11 @@ QI_CASES = {
         "boozer_target_include_b00": False,
         "mirror_weight": 0.0,
         "elongation_weight": 0.0,
+        "use_augmented_lagrangian_constraints": False,
+        "al_mirror_multiplier": 0.0,
+        "al_mirror_penalty": 1.0,
+        "al_elongation_multiplier": 0.0,
+        "al_elongation_penalty": 1.0,
         "qi_ceiling_weight": 0.0,
         "shuffle_profile_nphi_out": None,
         "mirror_ramp_stages": (),
@@ -357,6 +362,7 @@ def make_qi_problem(stage=None):
     qi_ceiling_weight = float(_stage_value(stage, "qi_ceiling_weight", QI_CEILING_WEIGHT))
     mirror_weight = float(_stage_value(stage, "mirror_weight", MIRROR_WEIGHT))
     elongation_weight = float(_stage_value(stage, "elongation_weight", ELONGATION_WEIGHT))
+    use_al_constraints = bool(_stage_value(stage, "use_augmented_lagrangian_constraints", False))
     mirror_threshold = float(_stage_value(stage, "mirror_threshold", MAX_MIRROR_RATIO))
     mirror_surface_index = _stage_value(stage, "mirror_surface_index", MIRROR_SURFACE_INDEX)
     qi_ceiling_max = float(_stage_value(stage, "qi_ceiling_max", QI_CEILING_MAX))
@@ -385,8 +391,29 @@ def make_qi_problem(stage=None):
         threshold=MAX_ELONGATION,
         ntheta=48,
         nphi=16,
+        smooth_extrema=2.0e-2,
+        smooth_penalty=2.0e-2,
         qi_options=QI_OPTIONS,
     )
+    if use_al_constraints:
+        # Augmented-Lagrangian constraints are useful when plain high weights
+        # on mirror/elongation lower those engineering metrics by destroying QI.
+        # Multipliers should be updated only from exact accepted diagnostics
+        # between explicit stages, never from SciPy trial residuals.
+        mirror = vj.AugmentedLagrangianConstraint(
+            mirror,
+            multiplier=float(_stage_value(stage, "al_mirror_multiplier", 0.0)),
+            penalty=float(_stage_value(stage, "al_mirror_penalty", 1.0)),
+            softness=MIRROR_SMOOTH_PENALTY,
+            name="al_mirror_ratio",
+        )
+        elongation = vj.AugmentedLagrangianConstraint(
+            elongation,
+            multiplier=float(_stage_value(stage, "al_elongation_multiplier", 0.0)),
+            penalty=float(_stage_value(stage, "al_elongation_penalty", 1.0)),
+            softness=2.0e-2,
+            name="al_max_elongation",
+        )
 
     objective_tuples = [
         (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
@@ -433,6 +460,7 @@ print(f"  Boozer target:   {BOOZER_TARGET_WOUT} (weight={BOOZER_TARGET_WEIGHT})"
 print(f"  mirror target:   {MAX_MIRROR_RATIO} (surface={MIRROR_SURFACE_INDEX})")
 print(f"  mirror weight:   {MIRROR_WEIGHT}")
 print(f"  elongation wt:   {ELONGATION_WEIGHT}")
+print(f"  AL constraints:  {CASE.get('use_augmented_lagrangian_constraints', False)}")
 print(f"  QI ceiling:      {QI_CEILING_MAX} (weight={QI_CEILING_WEIGHT})")
 if MIRROR_RAMP_STAGES:
     print("  mirror ramp:     guarded staged cleanup enabled")
