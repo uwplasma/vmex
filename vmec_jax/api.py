@@ -37,6 +37,7 @@ from .finite_beta import (
 from .optimization_workflow import (
     AbsMeanIotaFloor,
     AspectRatio,
+    AugmentedLagrangianConstraint,
     BDotB,
     BDotGradV,
     BVector,
@@ -63,6 +64,8 @@ from .optimization_workflow import (
     boozer_b_target_from_wout,
     least_squares_solve,
     qi_boozer_b_target_objective,
+    qi_max_elongation_constraint,
+    qi_mirror_ratio_constraint,
     qs_stage_modes,
     repeated_stage_modes,
 )
@@ -148,6 +151,7 @@ __all__ = [
     "FixedBoundaryVMEC",
     "LeastSquaresProblem",
     "AspectRatio",
+    "AugmentedLagrangianConstraint",
     "MeanIota",
     "AbsMeanIotaFloor",
     "QuasisymmetryRatioResidual",
@@ -160,6 +164,8 @@ __all__ = [
     "BoozerBTarget",
     "boozer_b_target_from_wout",
     "qi_boozer_b_target_objective",
+    "qi_max_elongation_constraint",
+    "qi_mirror_ratio_constraint",
     "BetaTotal",
     "VolavgB",
     "BDotB",
