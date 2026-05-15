@@ -43,7 +43,16 @@ def _write_candidates(path: Path, input_file: Path) -> None:
 def test_default_promotion_policies_cover_global_local_lanes() -> None:
     policies = {policy.name: policy for policy in default_promotion_policies(max_nfev=2)}
 
-    assert {"direct_matrix_free", "repeat_continuation", "qi_then_al_cleanup", "soft_wall_cleanup"} <= set(policies)
+    assert {
+        "guarded_iota_ramp",
+        "direct_matrix_free",
+        "repeat_continuation",
+        "qi_then_al_cleanup",
+        "soft_wall_cleanup",
+    } <= set(policies)
+    assert policies["guarded_iota_ramp"].stages[0].iota_weight == 0.0
+    assert policies["guarded_iota_ramp"].stages[1].qi_ceiling_weight > 0.0
+    assert policies["guarded_iota_ramp"].stages[1].iota_weight > 0.0
     assert policies["direct_matrix_free"].stages[0].stage_modes == (3,)
     assert policies["repeat_continuation"].stages[0].stage_modes == (1, 1, 2, 2, 3, 3)
     assert len(policies["qi_then_al_cleanup"].stages) == 2

@@ -51,6 +51,9 @@ class StagePolicy:
     method: str = "scipy"
     max_nfev: int = 2
     stage_modes: tuple[int, ...] = (3,)
+    aspect_weight: float = 0.25
+    iota_weight: float = 200.0**2
+    qi_weight: float = 10.0
     mirror_threshold: float = 0.21
     promotion_mirror_threshold: float | None = None
     mirror_weight: float = 0.0
@@ -231,9 +234,9 @@ def _build_qi_options(vj: Any, resolution: ScanResolution, stage: StagePolicy):
 def _make_problem(vj: Any, resolution: ScanResolution, stage: StagePolicy):
     qi_options = _build_qi_options(vj, resolution, stage)
     tuples = [
-        (vj.AspectRatio().J, TARGET_ASPECT, 0.25),
-        (vj.AbsMeanIotaFloor(TARGET_ABS_IOTA_MIN).J, 0.0, 200.0**2),
-        (vj.QuasiIsodynamicResidual(qi_options).J, 0.0, 10.0),
+        (vj.AspectRatio().J, TARGET_ASPECT, float(stage.aspect_weight)),
+        (vj.AbsMeanIotaFloor(TARGET_ABS_IOTA_MIN).J, 0.0, float(stage.iota_weight)),
+        (vj.QuasiIsodynamicResidual(qi_options).J, 0.0, float(stage.qi_weight)),
     ]
     if stage.qi_ceiling_weight > 0.0:
         tuples.append(
