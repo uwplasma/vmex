@@ -164,7 +164,7 @@ QI_CASES = {
                 "name": "prefiltered_qi_iota_cleanup",
                 "max_nfev": 8,
                 "stage_repeats": 1,
-                "stage_modes": (3, 3),
+                "stage_modes": (3,),
                 "method": "scipy_matrix_free",
                 "use_mode_continuation": False,
                 "aspect_weight": 0.05,
