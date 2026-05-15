@@ -80,6 +80,53 @@ def default_promotion_policies(*, max_nfev: int = 4) -> tuple[PromotionPolicy, .
     nfev = max(1, int(max_nfev))
     return (
         PromotionPolicy(
+            "guarded_iota_ramp",
+            "QI-first refinement, then guarded scalar-trust iota ramp before engineering cleanup.",
+            (
+                StagePolicy(
+                    "qi_preserve",
+                    method="scalar_trust",
+                    max_nfev=max(2, nfev),
+                    stage_modes=(3,),
+                    aspect_weight=0.05,
+                    iota_weight=0.0,
+                    qi_weight=200.0,
+                    qi_ceiling_weight=0.0,
+                    branch_width_weight=0.5,
+                ),
+                StagePolicy(
+                    "iota_soft_qi_guard",
+                    method="scalar_trust",
+                    max_nfev=max(2, nfev),
+                    stage_modes=(3, 3),
+                    aspect_weight=0.05,
+                    iota_weight=50.0**2,
+                    qi_weight=200.0,
+                    qi_ceiling_weight=2500.0,
+                    qi_ceiling_max=3.0e-3,
+                    qi_ceiling_smooth_penalty=1.0e-3,
+                    branch_width_weight=0.5,
+                ),
+                StagePolicy(
+                    "mirror_soft_guard",
+                    method="scalar_trust",
+                    max_nfev=max(2, nfev),
+                    stage_modes=(3,),
+                    aspect_weight=0.05,
+                    iota_weight=50.0**2,
+                    qi_weight=200.0,
+                    mirror_threshold=0.35,
+                    promotion_mirror_threshold=0.35,
+                    mirror_weight=2.0,
+                    elongation_weight=1.0,
+                    qi_ceiling_weight=2500.0,
+                    qi_ceiling_max=5.0e-3,
+                    qi_ceiling_smooth_penalty=1.0e-3,
+                    branch_width_weight=0.5,
+                ),
+            ),
+        ),
+        PromotionPolicy(
             "direct_matrix_free",
             "Direct mode-3 matrix-free local QI+iota refinement.",
             (

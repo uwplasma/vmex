@@ -47,6 +47,7 @@ def test_default_policy_matrix_covers_requested_axes():
     assert al_stage.use_augmented_lagrangian is True
     assert al_stage.al_mirror_penalty > 1.0
     assert al_stage.al_elongation_penalty > 1.0
+    assert al_stage.iota_weight > al_stage.qi_weight
 
 
 def test_cli_dry_run_writes_bounded_plan(tmp_path):
