@@ -202,6 +202,48 @@ def default_policies(*, max_nfev: int = 2) -> tuple[Policy, ...]:
             ),
         ),
         Policy(
+            "balanced_qi500_mirror_tight",
+            "Same tight mirror policy with doubled QI weight to test whether the low-mirror basin can pass QI gates.",
+            (
+                StagePolicy(
+                    "balanced_qi500_mirror_tight",
+                    method="scipy_matrix_free",
+                    max_nfev=max_nfev,
+                    aspect_weight=0.25,
+                    iota_weight=50.0**2,
+                    qi_weight=500.0,
+                    mirror_threshold=0.35,
+                    promotion_mirror_threshold=0.50,
+                    mirror_weight=40.0,
+                    elongation_weight=2.0,
+                    qi_ceiling_weight=2500.0,
+                    qi_ceiling_max=6.0e-3,
+                    qi_ceiling_smooth_penalty=2.0e-3,
+                ),
+            ),
+        ),
+        Policy(
+            "balanced_qi1000_mirror_tight",
+            "Same tight mirror policy with quadrupled QI weight for the high-QI/low-mirror tradeoff check.",
+            (
+                StagePolicy(
+                    "balanced_qi1000_mirror_tight",
+                    method="scipy_matrix_free",
+                    max_nfev=max_nfev,
+                    aspect_weight=0.25,
+                    iota_weight=50.0**2,
+                    qi_weight=1000.0,
+                    mirror_threshold=0.35,
+                    promotion_mirror_threshold=0.50,
+                    mirror_weight=40.0,
+                    elongation_weight=2.0,
+                    qi_ceiling_weight=2500.0,
+                    qi_ceiling_max=6.0e-3,
+                    qi_ceiling_smooth_penalty=2.0e-3,
+                ),
+            ),
+        ),
+        Policy(
             "augmented_lagrangian_mirror",
             "Projected augmented-Lagrangian mirror/elongation constraints with a QI ceiling guard.",
             (
