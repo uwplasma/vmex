@@ -58,6 +58,11 @@ QI landscape diagnostics:
   and mean iota, then writes JSON/CSV plus a line or contour-line plot.  The 2D
   view uses `matplotlib.contour` lines rather than filled contours so adjacent
   metric ridges remain visually comparable.
+- `qi_basin_survey.py --input examples/data/input.QI_stel_seed_3127`
+  writes a deterministic large-step basin-survey plan for far-seed QI runs.
+  Add `--execute --save-candidate-inputs` to run bounded VMEC/QI diagnostics,
+  rank candidates by QI/legacy/mirror/elongation/iota/aspect gates, and emit
+  top `input.candidate` files for later differentiable local refinement.
 
 Free-boundary manifest notes:
 

@@ -205,6 +205,46 @@ constraint failures are reported separately so a QI-like seed with a fixable
 mirror/aspect violation is not hidden behind a non-QI seed that merely satisfies
 the engineering constraints.
 
+Far-seed basin survey
+~~~~~~~~~~~~~~~~~~~~~
+
+For inputs that are not already close to the desired QI basin, a purely local
+least-squares run can spend its budget improving the wrong basin.  The intended
+workflow is therefore global-local: first use a bounded basin survey to try
+larger ESS-scaled boundary perturbations, then promote the best candidates into
+the differentiable local QI optimizer.  This is closer to basin-hopping than to
+a replacement optimizer: random/axis-aligned jumps survey basins, while the
+accepted candidates still rely on VMEC/JAX diagnostics and exact local
+derivatives for refinement.
+
+Plan a deterministic survey without running VMEC:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python tools/diagnostics/qi_basin_survey.py \
+     --input examples/data/input.QI_stel_seed_3127 \
+     --output-dir results/diagnostics/qi_basin_survey
+
+Run the bounded survey after reviewing the plan:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python tools/diagnostics/qi_basin_survey.py \
+     --input examples/data/input.QI_stel_seed_3127 \
+     --output-dir results/diagnostics/qi_basin_survey \
+     --execute --save-candidate-inputs
+
+The survey writes ``plan.json``, ``candidates.json``, ``top_candidates.json``,
+and ``candidates.csv``.  Candidates are ranked by smooth QI, legacy QI, mirror
+ratio, elongation, mean-iota floor, and aspect-ratio proximity.  The top
+``input.candidate`` files are not final equilibria; they are starting points for
+short local constrained QI optimizations.  Bayesian optimization and
+population/evolutionary optimizers are useful future lanes, but they are not the
+first production default here because a mode-3 QI boundary has dozens of active
+DOFs and each accepted evaluation is expensive.  A cheap deterministic basin
+survey gives most of the immediate benefit while preserving the differentiable
+local-refinement path.
+
 To audit a new input deck, first run VMEC once so the audit has a matching
 ``wout`` file:
 
