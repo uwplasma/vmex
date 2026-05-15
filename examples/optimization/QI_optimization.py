@@ -132,10 +132,14 @@ QI_CASES = {
             "directions": ("axes", "rademacher"),
             "axis_count": 6,
             "n_random": 4,
-            "max_candidates": 24,
+            "max_candidates": 40,
             "trial_max_iter": 30,
             "trial_ftol": 1.0e-8,
             "top_k": 8,
+            "iota_gap_weight": 120.0,
+            "qi_weight": 1.0,
+            "mirror_weight": 0.10,
+            "elongation_weight": 0.05,
             "save_candidate_inputs": True,
         },
         "boozer_target_wout": None,
@@ -689,7 +693,7 @@ def make_vmec_for_stage(input_file, output_dir):
     )
 
 
-def basin_prefilter_score(metrics, targets):
+def basin_prefilter_score(metrics, targets, config):
     """Rank prefilter candidates by QI/iota first, engineering second."""
 
     smooth = _finite_or_inf(metrics.get("qi_smooth_total"))
@@ -704,7 +708,18 @@ def basin_prefilter_score(metrics, targets):
     mirror_score = max(0.0, mirror - float(targets.mirror_ratio_max)) / max(float(targets.mirror_ratio_max), 1.0e-16)
     elongation_score = max(0.0, elongation - float(targets.max_elongation)) / max(float(targets.max_elongation), 1.0e-16)
     aspect_score = abs(aspect - float(targets.target_aspect)) / max(float(targets.target_aspect), 1.0e-16)
-    return float(smooth_score + legacy_score + 3.0 * iota_score + 0.25 * mirror_score + 0.1 * elongation_score + 0.1 * aspect_score)
+    qi_weight = float(config.get("qi_weight", 1.0))
+    iota_weight = float(config.get("iota_gap_weight", 3.0))
+    mirror_weight = float(config.get("mirror_weight", 0.25))
+    elongation_weight = float(config.get("elongation_weight", 0.1))
+    aspect_weight = float(config.get("aspect_weight", 0.1))
+    return float(
+        qi_weight * (smooth_score + legacy_score)
+        + iota_weight * iota_score
+        + mirror_weight * mirror_score
+        + elongation_weight * elongation_score
+        + aspect_weight * aspect_score
+    )
 
 
 def make_basin_prefilter_options(config):
@@ -797,7 +812,7 @@ def run_basin_prefilter(input_file, output_dir, config):
             }
             record["metrics"] = metrics
             record["diagnostics"] = diagnostics
-            record["prefilter_score"] = basin_prefilter_score(metrics, targets)
+            record["prefilter_score"] = basin_prefilter_score(metrics, targets, config)
             if bool(config.get("save_candidate_inputs", True)):
                 candidate_dir = survey_dir / "candidates" / candidate.label.replace(":", "_")
                 input_out = candidate_dir / "input.candidate"
