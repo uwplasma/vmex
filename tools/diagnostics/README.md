@@ -40,8 +40,9 @@ Performance profiling:
 - `gpu_cpu_performance_matrix.py --mode qi-boozer --backend cpu --backend gpu`
   launches the QI/Boozer profiler in separate child processes and writes one
   report per backend plus a compact matrix JSON.  Add `--jit-booz` to compare
-  the jitted Boozer path; use `--repeat 3` or higher to separate first-call
-  compilation/staging from warm residual cost.
+  the jitted Boozer path used by the public QI optimization helpers; use
+  `--repeat 3` or higher to separate first-call compilation/staging from warm
+  residual cost.
 - `compare_profile_reports.py cpu.json gpu.json --label cpu --label gpu`
   compares two or more profiler JSON reports without rerunning VMEC.  It emits
   text or JSON ratios for total runtime, compile/replay/cache time when present,

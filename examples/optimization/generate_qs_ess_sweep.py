@@ -250,6 +250,7 @@ class ProblemConfig:
     qi_aligned_profile_trap_level: float = 0.65
     qi_aligned_profile_trap_softness: float = 5.0e-2
     qi_phimin: float = 0.0
+    qi_jit_booz: bool = True
     qi_max_mirror_ratio: float = 0.21
     qi_mirror_weight: float = 10.0
     qi_mirror_ntheta: int = 96
@@ -480,6 +481,7 @@ class CaseResult:
     lgradb_diagnostic_error: str | None = None
     qi_qp_preseed: bool | None = None
     qi_qi_preseed: bool | None = None
+    qi_jit_booz: bool | None = None
     qi_raw_total: float | None = None
     qi_legacy_total: float | None = None
     qi_mirror_ratio_max: float | None = None
@@ -948,7 +950,7 @@ def _qi_diagnostics_from_state(problem_cfg: ProblemConfig, opt, state) -> dict[s
             aligned_profile_trap_level=problem_cfg.qi_aligned_profile_trap_level,
             aligned_profile_trap_softness=problem_cfg.qi_aligned_profile_trap_softness,
             phimin=problem_cfg.qi_phimin,
-            jit_booz=False,
+            jit_booz=bool(problem_cfg.qi_jit_booz),
             booz_constants=constants,
             booz_grids=grids,
             surface_indices=surface_indices,
@@ -1177,7 +1179,7 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
                 aligned_profile_trap_level=problem_cfg.qi_aligned_profile_trap_level,
                 aligned_profile_trap_softness=problem_cfg.qi_aligned_profile_trap_softness,
                 phimin=problem_cfg.qi_phimin,
-                jit_booz=False,
+                jit_booz=bool(problem_cfg.qi_jit_booz),
                 booz_constants=qi_booz_constants,
                 booz_grids=qi_booz_grids,
                 surface_indices=qi_surface_indices,
@@ -1706,6 +1708,7 @@ def _run_case(
     diagnostic_budgets: bool = DIAGNOSTIC_BUDGETS,
     stellarator_asymmetric: bool = STELLARATOR_ASYMMETRIC,
     qi_qp_preseed: bool | None = None,
+    qi_jit_booz: bool | None = None,
 ) -> CaseResult:
     problem_cfg = _effective_problem_config(
         PROBLEM_CONFIGS[problem],
@@ -1718,6 +1721,8 @@ def _run_case(
     )
     if problem_cfg.objective_kind == "qi" and qi_qp_preseed is not None:
         problem_cfg = replace(problem_cfg, qi_preseed_qp=bool(qi_qp_preseed))
+    if problem_cfg.objective_kind == "qi" and qi_jit_booz is not None:
+        problem_cfg = replace(problem_cfg, qi_jit_booz=bool(qi_jit_booz))
     if problem_cfg.objective_kind == "qi" and problem_cfg.qi_preseed_qi and not bool(use_ess):
         # The QI-only preseed is an ESS-stabilized helper stage.  Running that
         # hidden stage without ESS can create ill-conditioned LSMR trust-region
@@ -1922,6 +1927,7 @@ def _run_case(
         qi_lgradb_weight=float(problem_cfg.qi_lgradb_weight),
         qi_qp_preseed=(bool(problem_cfg.qi_preseed_qp) if problem_cfg.objective_kind == "qi" else None),
         qi_qi_preseed=(bool(problem_cfg.qi_preseed_qi) if problem_cfg.objective_kind == "qi" else None),
+        qi_jit_booz=(bool(problem_cfg.qi_jit_booz) if problem_cfg.objective_kind == "qi" else None),
         **asym_stats,
         **bmag_stats,
         **lgradb_stats,
@@ -1943,6 +1949,7 @@ def _worker(
     diagnostic_budgets: bool,
     stellarator_asymmetric: bool,
     qi_qp_preseed: bool | None,
+    qi_jit_booz: bool | None,
 ):
     _start_worker_session()
     try:
@@ -1959,6 +1966,7 @@ def _worker(
             diagnostic_budgets=diagnostic_budgets,
             stellarator_asymmetric=stellarator_asymmetric,
             qi_qp_preseed=qi_qp_preseed,
+            qi_jit_booz=qi_jit_booz,
         )
         Path(result_path).write_text(json.dumps(asdict(case_result), indent=2))
         stale_traceback = Path(output_dir) / "traceback.txt"
@@ -1988,6 +1996,7 @@ def _worker(
                 else None
             ),
             qi_qp_preseed=(bool(qi_qp_preseed) if problem == "qi" and qi_qp_preseed is not None else None),
+            qi_jit_booz=(bool(qi_jit_booz) if problem == "qi" and qi_jit_booz is not None else None),
         )
         Path(result_path).write_text(json.dumps(asdict(failed), indent=2))
         Path(output_dir, "traceback.txt").write_text(traceback.format_exc())
@@ -2280,6 +2289,7 @@ def _write_summary_csv(results: list[CaseResult], path: Path) -> None:
                 "lgradb_diagnostic_error",
                 "qi_qp_preseed",
                 "qi_qi_preseed",
+                "qi_jit_booz",
                 "qi_raw_total",
                 "qi_legacy_total",
                 "qi_mirror_ratio_max",
@@ -2325,6 +2335,16 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "For QI cases, choose whether to start from a same-mode QP preseed. "
             "Use 'both' to compare QP-preseed and direct-QI starts."
+        ),
+    )
+    parser.add_argument(
+        "--qi-jit-booz",
+        choices=("on", "off"),
+        default="on",
+        help=(
+            "For QI cases, use the jitted Boozer transform inside the QI "
+            "objective. Default 'on' matches the user-facing QI optimization "
+            "helpers; use 'off' only for diagnostics."
         ),
     )
     parser.add_argument(
@@ -2387,6 +2407,7 @@ def main() -> None:
         "on": (True,),
         "off": (False,),
     }[str(args.qi_qp_preseed)]
+    qi_jit_booz = str(args.qi_jit_booz) == "on"
     symmetry_label = "asymmetric" if bool(args.stellarator_asymmetric) else "symmetric"
     case_timeout_s = None if args.case_timeout_s in (None, 0) else float(args.case_timeout_s)
     worker_jax_platforms_arg = str(args.worker_jax_platforms).strip()
@@ -2426,20 +2447,29 @@ def main() -> None:
                         if "backend" not in record:
                             record["backend"] = backend_label
                         result = CaseResult(**record)
+                        existing_qi_jit_matches = True
+                        if problem == "qi":
+                            existing_qi_jit_matches = record.get("qi_jit_booz") is not None and bool(
+                                record.get("qi_jit_booz")
+                            ) == bool(qi_jit_booz)
                         if not bool(result.crashed):
-                            results.append(result)
+                            if existing_qi_jit_matches:
+                                results.append(result)
+                                print(
+                                    f"[{case_label}] skip existing success={result.success} "
+                                    f"crashed={result.crashed} objective={result.objective_final}",
+                                    flush=True,
+                                )
+                                continue
+                            print(f"[{case_label}] rerun existing result with stale qi_jit_booz", flush=True)
+                            result_path.unlink()
+                        else:
                             print(
-                                f"[{case_label}] skip existing success={result.success} "
-                                f"crashed={result.crashed} objective={result.objective_final}",
+                                f"[{case_label}] rerun crashed existing success={result.success} "
+                                f"crashed={result.crashed}",
                                 flush=True,
                             )
-                            continue
-                        print(
-                            f"[{case_label}] rerun crashed existing success={result.success} "
-                            f"crashed={result.crashed}",
-                            flush=True,
-                        )
-                        result_path.unlink()
+                            result_path.unlink()
                     if result_path.exists() and args.rerun:
                         result_path.unlink()
                     stale_traceback = output_dir / "traceback.txt"
@@ -2461,6 +2491,7 @@ def main() -> None:
                             bool(args.diagnostic_budgets),
                             bool(args.stellarator_asymmetric),
                             qi_qp_preseed,
+                            qi_jit_booz,
                         ),
                     )
                     case_t0 = time.perf_counter()
@@ -2502,6 +2533,7 @@ def main() -> None:
                             qi_qp_preseed=(
                                 bool(qi_qp_preseed) if problem == "qi" and qi_qp_preseed is not None else None
                             ),
+                            qi_jit_booz=(qi_jit_booz if problem == "qi" else None),
                         )
                         result_needs_write = True
                     else:
@@ -2523,6 +2555,7 @@ def main() -> None:
                             qi_qp_preseed=(
                                 bool(qi_qp_preseed) if problem == "qi" and qi_qp_preseed is not None else None
                             ),
+                            qi_jit_booz=(qi_jit_booz if problem == "qi" else None),
                         )
                         result_needs_write = True
                     if proc.exitcode not in (0, None):

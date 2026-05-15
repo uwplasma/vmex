@@ -248,6 +248,7 @@ MIRROR_SMOOTH_EXTREMA = 2.0e-2
 MIRROR_SMOOTH_PENALTY = 2.0e-2
 QI_GATE_SMOOTH_MAX = 2.0e-3
 QI_GATE_LEGACY_MAX = 1.0e-3
+JIT_BOOZ = bool(CASE.get("jit_booz", True))  # Faster QI/Boozer path on current CPU/GPU diagnostics.
 
 # Boozer transform and smooth-QI residual resolution.
 QI_OPTIONS = vj.QuasiIsodynamicOptions(
@@ -282,6 +283,7 @@ QI_OPTIONS = vj.QuasiIsodynamicOptions(
     aligned_profile_trap_level=0.65,
     aligned_profile_trap_softness=5.0e-2,
     phimin=float(CASE.get("phimin", 0.0)),  # Set to np.pi / nfp if auditing a seed whose well starts there.
+    jit_booz=JIT_BOOZ,
 )
 
 
@@ -401,6 +403,7 @@ print(f"  abs iota floor:  {TARGET_ABS_IOTA_MIN}")
 print(f"  QI branch weight:{QI_OPTIONS.branch_width_weight}")
 print(f"  QI weighted shuffle:{QI_OPTIONS.weighted_shuffle_profile_weight}")
 print(f"  QI phimin:       {QI_OPTIONS.phimin}")
+print(f"  JIT Boozer path: {QI_OPTIONS.jit_booz}")
 print(f"  Boozer target:   {BOOZER_TARGET_WOUT} (weight={BOOZER_TARGET_WEIGHT})")
 print(f"  mirror target:   {MAX_MIRROR_RATIO} (surface={MIRROR_SURFACE_INDEX})")
 print(f"  mirror weight:   {MIRROR_WEIGHT}")

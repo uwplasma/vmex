@@ -26,7 +26,9 @@ problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
 `sqrt(weight) * (objective - target)`.  Do not pre-scale callbacks.  QI terms
 use the same tuple form, but encode QI thresholds and smoothing in
 `QuasiIsodynamicOptions`, `MirrorRatio`, and `MaxElongation`; QI tuple targets
-should remain `0.0`.
+should remain `0.0`. `QuasiIsodynamicOptions` defaults to `jit_booz=True`,
+which is currently faster for the Boozer/QI residual phase on both CPU and GPU;
+set it to `False` only for diagnostics or parity isolation.
 
 ## Result Object Pattern
 
@@ -183,7 +185,8 @@ bookkeeping first:
 
 ```bash
 JAX_PLATFORM_NAME=gpu PYTHONPATH=. python tools/diagnostics/profile_qi_boozer_gpu.py \
-  --solver-device gpu --repeat 2 --output results/diagnostics/qi_boozer_gpu.json
+  --solver-device gpu --repeat 2 --jit-booz \
+  --output results/diagnostics/qi_boozer_gpu.json
 ```
 
 Relevant lightweight tests:

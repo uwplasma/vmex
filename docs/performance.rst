@@ -234,12 +234,17 @@ QI Boozer/residual isolation:
 .. code-block:: bash
 
    JAX_PLATFORMS=cpu PYTHONPATH=. python tools/diagnostics/profile_qi_boozer_gpu.py \
-     --solver-device cpu --repeat 2 \
+     --solver-device cpu --repeat 2 --jit-booz \
      --output results/diagnostics/qi_boozer_cpu.json
 
    JAX_PLATFORM_NAME=gpu PYTHONPATH=. python tools/diagnostics/profile_qi_boozer_gpu.py \
-     --solver-device gpu --repeat 2 \
+     --solver-device gpu --repeat 2 --jit-booz \
      --output results/diagnostics/qi_boozer_gpu.json
+
+The user-facing QI optimization helpers default to the jitted Boozer path
+(``QuasiIsodynamicOptions(jit_booz=True)``).  Keep the non-jitted profiler mode
+available for parity isolation; use ``--jit-booz`` for production-like QI
+timings.
 
 The comparison table reports ratios for total runtime, compile/replay/cache
 time when those timings exist, callback count, observed RSS peak, solve count,
