@@ -245,6 +245,30 @@ DOFs and each accepted evaluation is expensive.  A cheap deterministic basin
 survey gives most of the immediate benefit while preserving the differentiable
 local-refinement path.
 
+Promote the top surveyed candidates through bounded differentiable local
+refinements:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python tools/diagnostics/qi_basin_promote.py \
+     --candidates results/diagnostics/qi_basin_survey/top_candidates.json \
+     --out-root results/diagnostics/qi_basin_promotion
+
+After reviewing ``promotion_plan.json``, run:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python tools/diagnostics/qi_basin_promote.py \
+     --candidates results/diagnostics/qi_basin_survey/top_candidates.json \
+     --out-root results/diagnostics/qi_basin_promotion \
+     --execute
+
+The promotion matrix tries direct mode-3 refinement, repeated mode
+continuation, QI-then-augmented-Lagrangian cleanup, and a soft-wall
+mirror/elongation cleanup.  A promoted row must pass the independent QI+iota
+gate and the engineering gate; otherwise it remains diagnostic evidence about
+the local basin.
+
 To audit a new input deck, first run VMEC once so the audit has a matching
 ``wout`` file:
 
