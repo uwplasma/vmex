@@ -88,6 +88,7 @@ def test_callback_report_summary_extracts_bottleneck_metrics() -> None:
     assert metrics["solve_count"] == 3
     assert metrics["accepted_point_replay_count"] == 2
     assert metrics["cache_entry_growth"] == 4
+    assert summary["bottleneck_hint"]["metric"] == "replay_time_s"
     assert summary["top_profile"][0]["name"] == "exact_solve_with_tape_total"
 
 
@@ -133,6 +134,7 @@ def test_comparison_reports_ratios_against_baseline() -> None:
     assert "Profile report comparison" in text
     assert "gpu" in text
     assert "2.500x" in text
+    assert "Bottleneck hints" in text
 
 
 def test_repeated_run_report_aggregates_runs() -> None:
@@ -241,6 +243,26 @@ def test_fixed_boundary_report_summary_extracts_solver_phase_timing() -> None:
     assert metrics["vmec_precond_mode_scale_s"] == 0.1
     assert metrics["vmec_update_s"] == 0.25
     assert metrics["vmec_update_state_s"] == 0.2
+    assert summary["bottleneck_hint"]["metric"] == "vmec_compute_forces_s"
+
+
+def test_summary_bottleneck_hint_uses_qi_phase_when_largest() -> None:
+    payload = {
+        "report_kind": "qi_boozer_profile",
+        "total_wall_time_s": 12.0,
+        "wall_time_s": {
+            "vmec_solve": 3.0,
+            "qi_first_call": 7.0,
+            "qi_warm_mean": 1.0,
+        },
+    }
+
+    summary = compare_tool.summarize_payload(payload, label="qi")
+    hint = summary["bottleneck_hint"]
+
+    assert hint["metric"] == "qi_first_call_s"
+    assert hint["label"] == "QI/Boozer first call"
+    assert hint["share_of_total"] == pytest.approx(7.0 / 12.0)
 
 
 def test_cli_prints_text_and_writes_json(tmp_path: Path, capsys) -> None:

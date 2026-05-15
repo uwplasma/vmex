@@ -14,7 +14,9 @@ from __future__ import annotations
 
 from .namelist import read_indata, write_indata
 from .driver import (
+    ExampleData,
     FixedBoundaryRun,
+    example_paths,
     load_example,
     load_input,
     load_wout,
@@ -117,7 +119,9 @@ from .wout import read_wout, state_from_wout
 
 __all__ = [
     # Driver / solve
+    "ExampleData",
     "FixedBoundaryRun",
+    "example_paths",
     "load_example",
     "load_input",
     "load_wout",

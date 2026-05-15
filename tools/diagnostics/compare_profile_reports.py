@@ -98,6 +98,16 @@ METRIC_LABELS = {
     "cache_entries_after": "cache entries after",
 }
 
+BOTTLENECK_METRICS = (
+    ("qi_first_call_s", "QI/Boozer first call"),
+    ("vmec_compute_forces_s", "VMEC force assembly"),
+    ("vmec_preconditioner_s", "VMEC preconditioner"),
+    ("vmec_update_s", "VMEC state update"),
+    ("replay_time_s", "accepted-point replay"),
+    ("compile_time_s", "compile/JIT"),
+    ("cache_time_s", "cache bookkeeping"),
+)
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -523,6 +533,37 @@ def _top_profile(
     return rows[: max(0, int(limit))]
 
 
+def _bottleneck_hint(metrics: dict[str, Any]) -> dict[str, Any] | None:
+    total = _as_float(metrics.get("total_runtime_s"))
+    candidates: list[tuple[str, str, float]] = []
+    for key, label in BOTTLENECK_METRICS:
+        value = _as_float(metrics.get(key))
+        if value is not None and value > 0.0:
+            candidates.append((key, label, value))
+
+    if not candidates:
+        rss_mib = _as_float(metrics.get("rss_peak_mib"))
+        if rss_mib is not None:
+            return {
+                "metric": "rss_peak_mib",
+                "label": "RSS peak",
+                "value": rss_mib,
+                "share_of_total": None,
+                "note": "no phase timings were present; inspect memory pressure and profiler source output",
+            }
+        return None
+
+    key, label, value = max(candidates, key=lambda item: item[2])
+    share = value / total if total is not None and total > 0.0 else None
+    return {
+        "metric": key,
+        "label": label,
+        "value": value,
+        "share_of_total": share,
+        "note": "largest normalized phase currently exposed by this report",
+    }
+
+
 def summarize_payload(
     payload: dict[str, Any],
     *,
@@ -595,6 +636,7 @@ def summarize_payload(
         "path": None if path is None else str(path),
         "metadata": metadata,
         "metrics": metrics,
+        "bottleneck_hint": _bottleneck_hint(metrics),
         "top_profile": _top_profile(profile, limit=top_profile),
     }
 
@@ -774,6 +816,19 @@ def format_text(comparison: dict[str, Any]) -> str:
             share = "" if total <= 0.0 else f", {100.0 * wall / total:.1f}%"
             formatted.append(f"{entry['name']}={wall:.3f}s{share}")
         lines.append(f"  {report['label']}: " + "; ".join(formatted))
+    hints = []
+    for report in reports:
+        hint = report.get("bottleneck_hint")
+        if not isinstance(hint, dict):
+            continue
+        value = _as_float(hint.get("value"))
+        share = _as_float(hint.get("share_of_total"))
+        value_text = "n/a" if value is None else f"{value:.3f}"
+        share_text = "" if share is None else f", {100.0 * share:.1f}% of total"
+        hints.append(f"  {report['label']}: {hint.get('label')} ({value_text}{share_text})")
+    if hints:
+        lines.extend(["", "Bottleneck hints:"])
+        lines.extend(hints)
     return "\n".join(lines)
 
 

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from tools.diagnostics.parity_sweep_manifest import (
     DEFAULT_MANIFEST,
     _evaluate_freeb_thresholds,
     _evaluate_runtime_thresholds,
     _parse_manifest,
 )
+
+
+REPO_ROOT = DEFAULT_MANIFEST.parents[2]
 
 
 def test_parity_manifest_smoke_tier_covers_required_physics_classes() -> None:
@@ -77,6 +82,57 @@ def test_parity_manifest_smoke_cases_define_accuracy_and_runtime_contracts() -> 
         if bool(case.get("lfreeb")):
             assert float(case.get("max_runtime_s", 0.0)) > 0.0, case["id"]
             assert float(case.get("max_total_runtime_s", 0.0)) > 0.0, case["id"]
+
+
+def test_parity_manifest_enabled_local_inputs_exist() -> None:
+    """Catch stale local manifest paths before optional sweeps are launched."""
+
+    _, cases = _parse_manifest(DEFAULT_MANIFEST)
+    local_cases = [
+        case
+        for case in cases
+        if case.get("enabled", True) and str(case.get("source")) == "vmec_jax/examples"
+    ]
+    assert local_cases
+
+    for case in local_cases:
+        input_path = Path(case["input"])
+        if not input_path.is_absolute():
+            input_path = REPO_ROOT / input_path
+        assert input_path.exists(), case["id"]
+
+
+def test_parity_manifest_compare_modes_have_bounded_schema() -> None:
+    """Keep manifest cases runnable by the sweep driver without broad VMEC runs."""
+
+    _, cases = _parse_manifest(DEFAULT_MANIFEST)
+    enabled_cases = [case for case in cases if case.get("enabled", True)]
+    assert enabled_cases
+
+    for case in enabled_cases:
+        assert case["tier"] in {"smoke", "full", "planning"}, case["id"]
+        assert case["compare"] in {"stage_trace", "freeb_scalpot"}, case["id"]
+        assert isinstance(case.get("lfreeb"), bool), case["id"]
+        assert isinstance(case.get("lasym"), bool), case["id"]
+        assert isinstance(case.get("axisymmetric"), bool), case["id"]
+        assert int(case.get("nfp", 0)) > 0, case["id"]
+        assert int(case.get("ntor", -1)) >= 0, case["id"]
+        assert float(case.get("vmec_timeout", 0.0)) > 0.0, case["id"]
+
+        if case["compare"] == "stage_trace":
+            assert "iter_list" not in case, case["id"]
+            assert float(case.get("rtol", 0.0)) > 0.0, case["id"]
+            assert float(case.get("atol", -1.0)) >= 0.0, case["id"]
+            assert int(case.get("max_iter", 0)) > 0 or case.get("use_input_niter"), case["id"]
+        else:
+            assert bool(case.get("lfreeb")) is True, case["id"]
+            iter_list = case.get("iter_list")
+            assert isinstance(iter_list, list) and iter_list, case["id"]
+            assert all(int(iter_idx) > 0 for iter_idx in iter_list), case["id"]
+            assert int(case.get("max_iter", 0)) >= max(int(iter_idx) for iter_idx in iter_list), case["id"]
+            assert case.get("metric_thresholds_rel_scaled") or case.get("metric_thresholds_rel_scaled_by_iter"), case[
+                "id"
+            ]
 
 
 def test_evaluate_freeb_thresholds_global_pass() -> None:

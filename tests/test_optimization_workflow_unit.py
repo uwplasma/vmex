@@ -64,6 +64,21 @@ def test_objective_factory_callbacks_dispatch_to_helpers(monkeypatch) -> None:
     assert lgradb.total(ctx, "state") == 325.0
 
 
+def test_least_squares_tuple_weights_are_simsopt_style() -> None:
+    from vmec_jax.optimization_workflow import LeastSquaresProblem
+
+    def residual_value(_ctx, _state):
+        return np.asarray([3.0])
+
+    problem = LeastSquaresProblem.from_tuples([(residual_value, 1.0, 4.0)])
+
+    np.testing.assert_allclose(problem.objective_terms[0].residual(None, None), [4.0])
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        LeastSquaresProblem.from_tuples([(residual_value, 0.0, -1.0)])
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        LeastSquaresProblem.from_tuples([(residual_value, 0.0, np.inf)])
+
+
 def test_mean_iota_handles_axis_only_and_full_profiles(monkeypatch) -> None:
     import vmec_jax.optimization_workflow as workflow
 

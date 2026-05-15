@@ -57,17 +57,25 @@ QI landscape diagnostics:
   state, evaluates smooth QI residual, mirror ratio, LCFS elongation, aspect,
   and mean iota, then writes JSON/CSV plus a line or contour-line plot.  The 2D
   view uses `matplotlib.contour` lines rather than filled contours so adjacent
-  metric ridges remain visually comparable.
+  metric ridges remain visually comparable.  By default executed scans use
+  trial solves for speed; add `--exact-solve` before comparing scalar values to
+  promotion gates.
 - `qi_basin_survey.py --input examples/data/input.QI_stel_seed_3127`
   writes a deterministic large-step basin-survey plan for far-seed QI runs.
   Add `--execute --save-candidate-inputs` to run bounded VMEC/QI diagnostics,
   rank candidates by QI/legacy/mirror/elongation/iota/aspect gates, and emit
-  top `input.candidate` files for later differentiable local refinement.
+  top `input.candidate` files for later differentiable local refinement.  Add
+  `--exact-solve` for reviewed acceptance/promotion runs.
 - `qi_basin_promote.py --candidates results/diagnostics/qi_basin_survey/top_candidates.json`
   consumes those top candidate inputs and applies bounded local refinement
   policies: direct mode-3, repeated continuation, QI-then-augmented-Lagrangian
   cleanup, and soft-wall cleanup.  By default it only writes a plan; add
   `--execute` after reviewing the candidate matrix.
+- `qi_filter_search.py --input results/diagnostics/qi_basin_survey/top_candidate/input.candidate`
+  performs a hard-gated feasibility search when scalar penalties jump between
+  incompatible QI/iota basins.  It accepts only trials that preserve previous
+  gates while improving the current failed gate, in the order QI, iota, then
+  mirror/elongation.
 
 Free-boundary manifest notes:
 

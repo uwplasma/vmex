@@ -330,6 +330,11 @@ accepted-point replay count, and cache growth.  The JSON output is stable enough
 for CI dashboards or follow-up scripts that track whether a GPU regression is
 coming from tape replay, extra callbacks, cache retention, or a cold
 compile-like phase.
+It also emits a cheap ``bottleneck_hint`` for each report by selecting the
+largest exposed phase timing (QI/Boozer first call, VMEC force assembly,
+preconditioner/update, accepted-point replay, compile, or cache).  Treat this
+as a triage pointer only: it cannot identify work hidden inside a fused
+``lax.scan`` unless the source profile exported phase timings.
 
 For repeatable CPU/GPU matrix launches, use the wrapper below.  Its default
 ``--backend auto`` does not set ``JAX_PLATFORMS`` or ``JAX_PLATFORM_NAME``; the

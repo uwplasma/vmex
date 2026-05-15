@@ -254,7 +254,8 @@ top-level `RUN_CASE` to `qi_stel_seed_3127`, `nfp4_qh_warm_to_qi`, or a new
 run
 `examples/optimization/audit_qi_seed_suitability.py --quick` and check the
 legacy QI, mirror ratio, elongation, iota, and Boozer `|B|` line-contour
-diagnostics.
+diagnostics. Use the prefine manifest path for reviewed expensive probes rather
+than launching ad hoc far-seed jobs.
 
 The `input.QI_stel_seed_3127` robustness lane is still an active research
 case: the initial deck has low mirror ratio but poor elongation and low
@@ -279,6 +280,10 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_landscape_scan.py \
   --mirror-ntheta 32 --mirror-nphi 32 \
   --elongation-ntheta 24 --elongation-nphi 8
 ```
+
+The landscape command defaults to trial solves for speed. Add `--exact-solve`
+before using the scanned QI, mirror, elongation, or iota values as promotion
+evidence.
 
 Regenerate the README panels and the compact CSV used for the table:
 

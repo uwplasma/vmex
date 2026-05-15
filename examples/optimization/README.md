@@ -85,7 +85,7 @@ remain available for custom inspection.
 - `QA_optimization.py`: recommended quasi-axisymmetric fixed-boundary optimization.
 - `QH_optimization.py`: recommended quasi-helical fixed-boundary optimization.
 - `QP_optimization.py`: quasi-poloidal fixed-boundary optimization from the NFP=2 QI seed.
-- `QI_optimization.py`: recommended quasi-isodynamic optimization with Boozer-space QI metrics, mirror-ratio and elongation penalties, repeated same-mode continuation, and ESS. Set `VMEC_JAX_QI_RUN_CASE` or change the top-level `RUN_CASE` to run the bundled `input.nfp2_QI`, `input.QI_stel_seed_3127`, or `input.nfp4_QH_warm_start` seed.
+- `QI_optimization.py`: recommended quasi-isodynamic optimization with Boozer-space QI metrics, mirror-ratio and elongation penalties, repeated same-mode continuation, and ESS. Set `VMEC_JAX_QI_RUN_CASE` or change the top-level `RUN_CASE` to run the bundled `nfp2_qi`, `qi_stel_seed_3127`, or `nfp4_qh_warm_to_qi` case.
 - `qa_optimization_finite_beta.py`, `qh_optimization_finite_beta.py`, and `qi_optimization_finite_beta.py`:
   finite-beta stage-1 examples with pressure/current-profile terms. These intentionally use
   `FixedBoundaryExactOptimizer` directly because each continuation stage builds custom
@@ -114,7 +114,7 @@ Before treating a QI result as a final candidate, audit the smooth objective
 against the legacy branch diagnostics and render the constrained QI matrix.
 The first-class record helpers are `vj.QIDiagnosticOptions`,
 `vj.qi_diagnostics_from_boozer_output`, `vj.qi_diagnostics_from_state`, and
-`vj.rank_qi_seed_records`; they return unweighted smooth/raw/legacy QI,
+`vj.rank_qi_seed_records`; they return unweighted smooth/raw aliases, legacy QI,
 mirror-ratio, elongation, optional `LgradB`, resolution metadata, and
 diagnostic error fields.
 
@@ -157,6 +157,11 @@ QI+iota policy as `qi_stel_seed_3127` unless you add a custom `QI_CASES` entry.
 `VMEC_JAX_QI_SEED_OUTPUT_DIR`, and `VMEC_JAX_QI_SEED_MAX_NFEV` for small local
 probes. These variables are convenience wrappers around the top-level script
 settings, not a replacement for the no-optimization audit.
+
+`tools/diagnostics/qi_landscape_scan.py` and `qi_basin_survey.py` are useful for
+mapping rugged seed neighborhoods, but their default executed diagnostics use
+trial solves for speed. Add `--exact-solve` before using scan values as
+promotion evidence.
 
 ## Sweep And Rendering Tools
 
