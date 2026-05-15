@@ -236,6 +236,7 @@ branch-shuffle diagnostic.
        branch_width_weight=0.5,
        profile_weight=0.1,
        shuffle_profile_weight=1.0,
+       jit_booz=True,  # default; faster in current CPU/GPU QI diagnostics
        # Optional, closer to legacy arr_out=True but more expensive:
        # shuffle_profile_nphi_out=501,
    )

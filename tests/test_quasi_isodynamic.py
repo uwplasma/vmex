@@ -470,7 +470,7 @@ def test_qi_state_residual_smoke(load_case_qh_warm_start):
 
     _cfg, indata, static, _boundary, state = load_case_qh_warm_start
     signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state, static).sqrtg), axis_index=1))
-    out = quasi_isodynamic_residual_from_state(
+    kwargs = dict(
         state=state,
         static=static,
         indata=indata,
@@ -481,14 +481,16 @@ def test_qi_state_residual_smoke(load_case_qh_warm_start):
         nphi=17,
         nalpha=7,
         n_bounce=5,
-        jit_booz=False,
     )
+    out = quasi_isodynamic_residual_from_state(**kwargs, jit_booz=False)
+    out_jit = quasi_isodynamic_residual_from_state(**kwargs, jit_booz=True)
 
     assert np.asarray(out["width_residuals1d"]).shape == (7 * 5,)
     assert np.asarray(out["profile_residuals1d"]).shape == (17 * 7,)
     assert np.asarray(out["shuffle_profile_residuals1d"]).shape == (17 * 7,)
     assert np.asarray(out["residuals1d"]).shape == (2 * 7 * 5 + 2 * 17 * 7,)
     assert np.isfinite(np.asarray(out["total"]))
+    np.testing.assert_allclose(np.asarray(out_jit["total"]), np.asarray(out["total"]), rtol=1e-10, atol=1e-12)
 
 
 def test_qi_lgradb_penalty_from_state_smoke(load_case_qh_warm_start):

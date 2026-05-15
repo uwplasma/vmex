@@ -1034,6 +1034,7 @@ def test_least_squares_solve_dispatches_qi_problem(monkeypatch, tmp_path) -> Non
         weighted_shuffle_profile_weight=0.7,
         weighted_shuffle_profile_softness=0.04,
         phimin=0.1,
+        jit_booz=False,
     )
     vmec = SimpleNamespace(
         cfg="cfg",
@@ -1081,6 +1082,7 @@ def test_least_squares_solve_dispatches_qi_problem(monkeypatch, tmp_path) -> Non
     assert captured["weighted_shuffle_profile_weight"] == 0.7
     assert captured["weighted_shuffle_profile_softness"] == 0.04
     assert captured["phimin"] == 0.1
+    assert captured["jit_booz"] is False
     assert captured["include"] == ("rc", "zs", "rs", "zc")
     assert captured["project_input_boundary_to_max_mode"] is False
     assert captured["inner_max_iter"] == 0
@@ -1088,6 +1090,12 @@ def test_least_squares_solve_dispatches_qi_problem(monkeypatch, tmp_path) -> Non
     assert captured["trial_max_iter"] == 0
     assert captured["trial_ftol"] == 0.0
     assert captured["solver_device"] == "gpu"
+
+
+def test_quasi_isodynamic_options_default_to_jitted_boozer_path() -> None:
+    from vmec_jax.optimization_workflow import QuasiIsodynamicOptions
+
+    assert QuasiIsodynamicOptions(surfaces=[0.5]).jit_booz is True
 
 
 def test_lgradb_tuple_stays_regular_state_objective() -> None:
