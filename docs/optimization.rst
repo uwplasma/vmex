@@ -66,11 +66,15 @@ then run the bounded robustness probe or select a ``RUN_CASE`` in
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 python examples/optimization/QI_optimization.py
 
 The robustness probe is intentionally a QI+iota basin test, not a full
-engineering acceptance claim.  Promote a QI result only after the independent
-smooth-QI, legacy-QI, iota, mirror-ratio, elongation, and Boozer ``|B|``
-contour checks agree.  Landscape and basin-survey diagnostics use fast trial
-solves unless ``--exact-solve`` is passed; use exact solves before treating
-their scalar values as promotion evidence.
+engineering acceptance claim.  ``QI_optimization.py`` is now the single
+staged driver for the promoted path: it can run a low-QI basin search, an
+iota ramp with a QI ceiling, and guarded mirror/elongation cleanup, with exact
+independent diagnostics deciding which stages are promoted.  Promote a QI
+result only after the independent smooth-QI, legacy-QI, iota, mirror-ratio,
+elongation, and Boozer ``|B|`` contour checks agree.  Landscape and
+basin-survey diagnostics use fast trial solves unless ``--exact-solve`` is
+passed; use exact solves before treating their scalar values as promotion
+evidence.
 
 Motivation: differentiability without finite differences
 ---------------------------------------------------------

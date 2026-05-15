@@ -85,7 +85,7 @@ remain available for custom inspection.
 - `QA_optimization.py`: recommended quasi-axisymmetric fixed-boundary optimization.
 - `QH_optimization.py`: recommended quasi-helical fixed-boundary optimization.
 - `QP_optimization.py`: quasi-poloidal fixed-boundary optimization from the NFP=2 QI seed.
-- `QI_optimization.py`: recommended quasi-isodynamic optimization with Boozer-space QI metrics, mirror-ratio and elongation penalties, repeated same-mode continuation, and ESS. Set `VMEC_JAX_QI_RUN_CASE` or change the top-level `RUN_CASE` to run the bundled `nfp2_qi`, `qi_stel_seed_3127`, or `nfp4_qh_warm_to_qi` case.
+- `QI_optimization.py`: recommended quasi-isodynamic optimization with Boozer-space QI metrics, mirror-ratio and elongation penalties, repeated same-mode continuation, and ESS. It is a staged driver: each phase can change optimizer, mode sequence, weights, and promotion gates, and only exact independent diagnostics decide whether a stage is promoted. Set `VMEC_JAX_QI_RUN_CASE` or change the top-level `RUN_CASE` to run the bundled `nfp2_qi`, `qi_stel_seed_3127`, or `nfp4_qh_warm_to_qi` case.
 - `qa_optimization_finite_beta.py`, `qh_optimization_finite_beta.py`, and `qi_optimization_finite_beta.py`:
   finite-beta stage-1 examples with pressure/current-profile terms. These intentionally use
   `FixedBoundaryExactOptimizer` directly because each continuation stage builds custom
@@ -122,6 +122,13 @@ Mirror-ratio cleanup must be guarded by a QI residual ceiling or by an
 independent engineering promotion gate.  Endpoints that lower mirror ratio but
 fail the independent smooth/legacy QI and engineering gates are rejected and
 should not be promoted as improved QI candidates.
+
+For far seeds, `QI_optimization.py` uses the same single script but a longer
+policy: low-QI basin search, iota ramp with a QI ceiling, then guarded
+mirror/elongation cleanup.  The final files in the top-level output directory
+come from the last promoted stage, or from the best exact-diagnostic candidate
+if no stage passes the promotion gate.  Review
+`mirror_ramp_promotion_log.json` before using a far-seed result in figures.
 
 ```bash
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/compare_omnigenity_qi_objective.py

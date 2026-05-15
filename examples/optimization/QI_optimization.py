@@ -27,6 +27,14 @@ def _diagnostic_float(record, key):
     value = record.get(key)
     return float(value) if value is not None else float("nan")
 
+
+def _finite_or_inf(value):
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return float("inf")
+    return out if np.isfinite(out) else float("inf")
+
 # Seed cases.  Pick one case by changing RUN_CASE or setting
 # VMEC_JAX_QI_RUN_CASE; add another dictionary entry, or set VMEC_JAX_QI_INPUT,
 # to use an external VMEC input deck.  The NFP is taken from the VMEC input
@@ -79,7 +87,7 @@ QI_CASES = {
         ),
     },
     "qi_stel_seed_3127": {
-        "case_goal": "far-seed QI+iota robustness lane; low-mirror cleanup remains a gated follow-up",
+        "case_goal": "far-seed staged QI robustness lane with explicit QI/iota/engineering gates",
         "input_file": DATA_DIR / "input.QI_stel_seed_3127",
         "output_dir": Path("results/qi_opt/ess/qi_stel_seed_3127"),
         "max_mode": 3,
@@ -113,10 +121,73 @@ QI_CASES = {
         "al_elongation_penalty": 1.0,
         "qi_ceiling_weight": 0.0,
         "shuffle_profile_nphi_out": None,
-        "mirror_ramp_stages": (),
+        # Far seeds need more than one scalar least-squares call.  The policy
+        # below first finds a QI-ish basin, then ramps transform with a QI
+        # ceiling, and only then applies mirror/elongation cleanup.  Stages are
+        # promoted by independent diagnostics, not by optimizer success flags.
+        "mirror_ramp_stages": (
+            {
+                "name": "qi_basin_repeat112233",
+                "max_nfev": 8,
+                "stage_repeats": 1,
+                "stage_modes": (1, 1, 2, 2, 3, 3),
+                "method": "scipy_matrix_free",
+                "use_mode_continuation": True,
+                "aspect_weight": 0.05,
+                "iota_floor_weight": 0.0,
+                "qi_weight": 250.0,
+                "qi_ceiling_weight": 0.0,
+                "mirror_weight": 0.0,
+                "elongation_weight": 0.0,
+                "require_seed_gate": False,
+                "require_mirror_improvement": False,
+                "require_engineering_gate": False,
+                "accept_if_rank_improves": True,
+            },
+            {
+                "name": "iota_ramp_qi_ceiling",
+                "max_nfev": 8,
+                "stage_repeats": 2,
+                "stage_modes": (3, 3),
+                "method": "scalar_trust",
+                "scalar_step_bound": 5.0e-3,
+                "aspect_weight": 0.05,
+                "iota_floor_weight": 50.0**2,
+                "qi_weight": 250.0,
+                "qi_ceiling_max": 3.0e-3,
+                "qi_ceiling_weight": 2500.0,
+                "mirror_weight": 0.0,
+                "elongation_weight": 0.0,
+                "require_seed_gate": False,
+                "require_mirror_improvement": False,
+                "require_engineering_gate": False,
+                "accept_if_rank_improves": True,
+            },
+            {
+                "name": "mirror_elongation_guard",
+                "max_nfev": 6,
+                "stage_repeats": 2,
+                "stage_modes": (3, 3),
+                "method": "scalar_trust",
+                "scalar_step_bound": 3.0e-3,
+                "aspect_weight": 0.05,
+                "iota_floor_weight": 50.0**2,
+                "qi_weight": 250.0,
+                "qi_ceiling_max": 5.0e-3,
+                "qi_ceiling_weight": 2500.0,
+                "mirror_threshold": 0.35,
+                "promotion_mirror_threshold": 0.35,
+                "mirror_weight": 2.0,
+                "elongation_weight": 1.0,
+                "require_seed_gate": True,
+                "require_mirror_improvement": False,
+                "require_engineering_gate": False,
+                "accept_if_rank_improves": False,
+            },
+        ),
     },
     "nfp4_qh_warm_to_qi": {
-        "case_goal": "NFP=4 QH-to-QI stress test; audit before promotion",
+        "case_goal": "NFP=4 QH-to-QI staged stress test; audit before promotion",
         "input_file": DATA_DIR / "input.nfp4_QH_warm_start",
         "output_dir": Path("results/qi_opt/ess/nfp4_qh_warm_to_qi"),
         "max_mode": 3,
@@ -141,7 +212,47 @@ QI_CASES = {
         "elongation_weight": 0.0,
         "qi_ceiling_weight": 0.0,
         "shuffle_profile_nphi_out": None,
-        "mirror_ramp_stages": (),
+        "mirror_ramp_stages": (
+            {
+                "name": "qh_warm_qi_repeat112233",
+                "max_nfev": 8,
+                "stage_repeats": 1,
+                "stage_modes": (1, 1, 2, 2, 3, 3),
+                "method": "scipy_matrix_free",
+                "use_mode_continuation": True,
+                "aspect_weight": 0.05,
+                "iota_floor_weight": 50.0**2,
+                "qi_weight": 250.0,
+                "qi_ceiling_weight": 0.0,
+                "mirror_weight": 0.0,
+                "elongation_weight": 0.0,
+                "require_seed_gate": False,
+                "require_mirror_improvement": False,
+                "require_engineering_gate": False,
+                "accept_if_rank_improves": True,
+            },
+            {
+                "name": "qh_warm_engineering_guard",
+                "max_nfev": 6,
+                "stage_repeats": 2,
+                "stage_modes": (3, 3),
+                "method": "scalar_trust",
+                "scalar_step_bound": 3.0e-3,
+                "aspect_weight": 0.05,
+                "iota_floor_weight": 50.0**2,
+                "qi_weight": 250.0,
+                "qi_ceiling_max": 5.0e-3,
+                "qi_ceiling_weight": 2500.0,
+                "mirror_threshold": 0.35,
+                "promotion_mirror_threshold": 0.35,
+                "mirror_weight": 2.0,
+                "elongation_weight": 1.0,
+                "require_seed_gate": True,
+                "require_mirror_improvement": False,
+                "require_engineering_gate": False,
+                "accept_if_rank_improves": False,
+            },
+        ),
     },
     # Template for an arbitrary VMEC input deck:
     # "my_seed": {
@@ -359,6 +470,9 @@ def make_qi_problem(stage=None):
     """Assemble the QI objective tuples for one optimization stage."""
 
     stage = {} if stage is None else dict(stage)
+    aspect_weight = float(_stage_value(stage, "aspect_weight", ASPECT_WEIGHT))
+    iota_floor_weight = float(_stage_value(stage, "iota_floor_weight", IOTA_FLOOR_WEIGHT))
+    qi_weight = float(_stage_value(stage, "qi_weight", QI_WEIGHT))
     qi_ceiling_weight = float(_stage_value(stage, "qi_ceiling_weight", QI_CEILING_WEIGHT))
     mirror_weight = float(_stage_value(stage, "mirror_weight", MIRROR_WEIGHT))
     elongation_weight = float(_stage_value(stage, "elongation_weight", ELONGATION_WEIGHT))
@@ -416,9 +530,9 @@ def make_qi_problem(stage=None):
         )
 
     objective_tuples = [
-        (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
-        (iota_floor.J, 0.0, IOTA_FLOOR_WEIGHT),
-        (qi.J, 0.0, QI_WEIGHT),
+        (aspect.J, TARGET_ASPECT, aspect_weight),
+        (iota_floor.J, 0.0, iota_floor_weight),
+        (qi.J, 0.0, qi_weight),
     ]
     if boozer_target is not None:
         # Homotopy steering for far seeds: match a solved same-NFP QI Boozer
@@ -508,6 +622,9 @@ def solve_qi_stage(
     label,
     stage_modes=STAGE_MODES,
     method=METHOD,
+    use_mode_continuation=USE_MODE_CONTINUATION,
+    scalar_step_bound=None,
+    lbfgs_step_bound=None,
 ):
     vmec = make_vmec_for_stage(input_file, output_dir)
     return vj.least_squares_solve(
@@ -523,7 +640,7 @@ def solve_qi_stage(
         use_ess=USE_ESS,
         ess_alpha=ALPHA,
         label=label,
-        use_mode_continuation=USE_MODE_CONTINUATION,
+        use_mode_continuation=use_mode_continuation,
         inner_max_iter=INNER_MAX_ITER,
         inner_ftol=INNER_FTOL,
         trial_max_iter=TRIAL_MAX_ITER,
@@ -531,6 +648,8 @@ def solve_qi_stage(
         solver_device=SOLVER_DEVICE,
         scipy_tr_solver=SCIPY_TR_SOLVER,
         scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
+        lbfgs_step_bound=lbfgs_step_bound,
+        scalar_step_bound=scalar_step_bound,
         save_stage_inputs=SAVE_STAGE_INPUTS,
         save_stage_wouts=SAVE_STAGE_WOUTS,
     )
@@ -592,6 +711,54 @@ def qi_diagnostics_for_result(
         ),
     )
 
+
+def stage_modes_for(stage):
+    if "stage_modes" in stage:
+        return [int(mode) for mode in stage["stage_modes"]]
+    return vj.repeated_stage_modes(
+        max_mode=MAX_MODE,
+        use_mode_continuation=USE_MODE_CONTINUATION,
+        continuation_nfev=CONTINUATION_NFEV,
+        repeats=int(stage.get("stage_repeats", STAGE_REPEATS)),
+    )
+
+
+def promotion_score(record):
+    """Lower score means a better exact-diagnostic QI candidate."""
+
+    seed_penalty = 0.0 if bool(record.get("qi_seed_gate_passed")) else 100.0
+    engineering_penalty = 0.0 if bool(record.get("qi_engineering_gate_passed")) else 10.0
+    return (
+        seed_penalty
+        + engineering_penalty
+        + _finite_or_inf(record.get("qi_rank_score"))
+        + 0.25 * _finite_or_inf(record.get("qi_constraint_score"))
+    )
+
+
+def stage_promotes_candidate(stage, promotion, reference_diagnostics):
+    """Apply the script's staged promotion rule to exact diagnostics."""
+
+    reasons = list(promotion.get("qi_cleanup_rejection_reasons", []))
+    if bool(stage.get("accept_if_rank_improves", False)) and reference_diagnostics is not None:
+        candidate_score = promotion_score(promotion)
+        reference_score = promotion_score(reference_diagnostics)
+        tolerance = float(stage.get("rank_score_relax", 1.0e-12))
+        if candidate_score >= reference_score - tolerance:
+            reasons.append(
+                "rank score did not improve: "
+                f"candidate={candidate_score:.6g}, reference={reference_score:.6g}"
+            )
+    elif bool(stage.get("accept_if_rank_improves", False)):
+        # The first staged far-seed result is allowed to become the baseline.
+        pass
+    if reasons:
+        out = dict(promotion)
+        out["qi_cleanup_promoted"] = False
+        out["qi_cleanup_rejection_reasons"] = reasons
+        return out
+    return promotion
+
 active_input_file = INPUT_FILE
 if QI_PREFINE:
     print("Running QI-only pre-refinement before applying scalar constraints ...")
@@ -611,23 +778,24 @@ promotion_log = []
 if MIRROR_RAMP_STAGES:
     accepted_result = None
     accepted_seed_diagnostics = None
+    best_result = None
+    best_diagnostics = None
     for stage_index, stage in enumerate(MIRROR_RAMP_STAGES, start=1):
         stage_name = stage["name"]
         stage_output_dir = OUTPUT_DIR / f"mirror_ramp_{stage_index:02d}_{stage_name}"
         stage_problem = make_qi_problem(stage)
+        stage_modes_i = stage_modes_for(stage)
         stage_result = solve_qi_stage(
             active_input_file,
             stage_output_dir,
             stage_problem,
             max_nfev=int(stage.get("max_nfev", MAX_NFEV)),
             label=f"QI {stage_name} (max_mode={MAX_MODE}, {'ESS' if USE_ESS else 'no ESS'})",
-            stage_modes=vj.repeated_stage_modes(
-                max_mode=MAX_MODE,
-                use_mode_continuation=USE_MODE_CONTINUATION,
-                continuation_nfev=CONTINUATION_NFEV,
-                repeats=int(stage.get("stage_repeats", STAGE_REPEATS)),
-            ),
+            stage_modes=stage_modes_i,
             method=str(stage.get("method", METHOD)),
+            use_mode_continuation=bool(stage.get("use_mode_continuation", USE_MODE_CONTINUATION)),
+            scalar_step_bound=stage.get("scalar_step_bound"),
+            lbfgs_step_bound=stage.get("lbfgs_step_bound"),
         )
         if first_result_for_outputs is None:
             first_result_for_outputs = stage_result
@@ -667,6 +835,7 @@ if MIRROR_RAMP_STAGES:
                 mirror_ratio_max=stage_promotion_mirror_threshold,
                 max_elongation=MAX_ELONGATION,
             ),
+            require_seed_gate=bool(stage.get("require_seed_gate", True)),
             require_mirror_improvement=bool(
                 stage.get("require_mirror_improvement", accepted_seed_diagnostics is not None)
                 and float(stage.get("mirror_weight", MIRROR_WEIGHT)) > 0.0
@@ -674,16 +843,22 @@ if MIRROR_RAMP_STAGES:
             require_engineering_gate=bool(stage.get("require_engineering_gate", False)),
             mirror_improvement_min=float(stage.get("mirror_improvement_min", 0.0)),
         )
+        promotion = stage_promotes_candidate(stage, promotion, reference_diagnostics)
         promotion_log.append(
             {
                 "stage": stage_index,
                 "name": stage_name,
                 "output_dir": str(stage_output_dir),
+                "stage_modes": list(stage_modes_i),
+                "method": str(stage.get("method", METHOD)),
                 "promoted": bool(promotion["qi_cleanup_promoted"]),
                 "smooth_qi": promotion.get("qi_smooth_total"),
                 "legacy_qi": promotion.get("qi_legacy_total"),
                 "mirror": promotion.get("qi_mirror_ratio_max"),
+                "elongation": promotion.get("qi_max_elongation"),
                 "mean_iota": promotion.get("mean_iota"),
+                "rank_score": promotion.get("qi_rank_score"),
+                "constraint_score": promotion.get("qi_constraint_score"),
                 "rejection_reasons": promotion.get("qi_cleanup_rejection_reasons", []),
             }
         )
@@ -691,9 +866,16 @@ if MIRROR_RAMP_STAGES:
         print(f"  smooth QI:    {promotion.get('qi_smooth_total')}")
         print(f"  legacy QI:    {promotion.get('qi_legacy_total')}")
         print(f"  mirror ratio: {promotion.get('qi_mirror_ratio_max')}")
+        print(f"  elongation:   {promotion.get('qi_max_elongation')}")
+        print(f"  mean iota:    {promotion.get('mean_iota')}")
+        print(f"  rank score:   {promotion.get('qi_rank_score')}")
         print(f"  promoted:     {promotion['qi_cleanup_promoted']}")
         for reason in promotion.get("qi_cleanup_rejection_reasons", []):
             print(f"    - {reason}")
+
+        if best_diagnostics is None or promotion_score(stage_diagnostics) < promotion_score(best_diagnostics):
+            best_result = stage_result
+            best_diagnostics = stage_diagnostics
 
         if promotion["qi_cleanup_promoted"]:
             accepted_result = stage_result
@@ -701,12 +883,14 @@ if MIRROR_RAMP_STAGES:
             active_input_file = stage_output_dir / "input.final"
         else:
             if accepted_result is None:
-                raise RuntimeError(
-                    f"Initial QI mirror-ramp stage {stage_name!r} failed the QI promotion gate; "
-                    f"see {stage_output_dir} for diagnostic outputs."
+                print(
+                    f"Initial QI staged policy {stage_name!r} failed the promotion gate; "
+                    "continuing with the best exact-diagnostic candidate recorded so far."
                 )
+                active_input_file = stage_output_dir / "input.final"
+                continue
             break
-    result = accepted_result
+    result = accepted_result if accepted_result is not None else best_result
 else:
     result = solve_qi_stage(
         active_input_file,
