@@ -859,6 +859,16 @@ Two practical lessons from that study are now reflected in the example:
   it must instead require the independent full engineering gate.  Any endpoint
   that improves mirror ratio but exceeds the ceiling or fails smooth/legacy QI
   validation is rejected, not promoted.
+- ``AugmentedLagrangianConstraint`` is available for engineering constraints
+  that should be enforced without manually guessing a single enormous weight.
+  It follows the projected Powell-Hestenes-Rockafellar form used in modern
+  constrained stellarator optimization: the wrapped objective provides a signed
+  constraint residual ``g(x) <= 0``, and the optimizer minimizes
+  ``sqrt(mu) * max(g(x) + lambda / mu, 0)``.  Update ``lambda`` and ``mu`` only
+  from exact accepted diagnostics between explicit stages; never update them
+  from relaxed trial residuals.  ``MirrorRatio`` and ``MaxElongation`` expose
+  signed constraint hooks for this wrapper while preserving their ordinary
+  least-squares penalty behavior.
 - ``BoozerBTarget`` is available as a differentiable steering or homotopy term
   when a known reference Boozer ``|B|`` spectrum should guide a run toward a
   specific basin.  It is a steering objective, not a final acceptance

@@ -97,6 +97,9 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "Optional homotopy target for far seeds" in text
     assert "boozer_b_target_from_wout(" in text
     assert "BoozerBTarget(" in text
+    assert '"use_augmented_lagrangian_constraints": False' in text
+    assert "AugmentedLagrangianConstraint(" in text
+    assert "AL constraints:" in text
     assert "QuasiIsodynamicOptions(" in text
     assert "QuasiIsodynamicResidual(QI_OPTIONS)" in text
     assert "QuasiIsodynamicResidualCeiling(" in text
@@ -171,6 +174,8 @@ def test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling() -> None:
     assert "qi_ceiling = vj.QuasiIsodynamicResidualCeiling(" in text
     assert "qi_options=QI_OPTIONS" in text
     assert "mirror = vj.MirrorRatio(" in text
+    assert "AugmentedLagrangianConstraint(" in text
+    assert "use_augmented_lagrangian_constraints" in text
     assert "surface_index=mirror_surface_index" in text
     assert "Mirror-ramp cleanup stages must include QuasiIsodynamicResidualCeiling" in text
     assert "or require the independent QI engineering gate" in text
@@ -930,12 +935,23 @@ def test_qi_objective_factories_apply_weights_and_slice_shared_fields(monkeypatc
     )
     np.testing.assert_allclose(captured_weights["weights"], [0.5, 0.5])
 
-    def fake_max_elongation_penalty_from_state(*, state, static, threshold, ntheta, nphi):
+    def fake_max_elongation_penalty_from_state(
+        *,
+        state,
+        static,
+        threshold,
+        ntheta,
+        nphi,
+        smooth_extrema=0.0,
+        smooth_penalty=0.0,
+    ):
         assert state == "state"
         assert static is ctx.static
         assert threshold == 4.0
         assert ntheta == 10
         assert nphi == 11
+        assert smooth_extrema == 0.0
+        assert smooth_penalty == 0.0
         return {"residuals1d": np.asarray([2.0]), "total": 4.0}
 
     monkeypatch.setattr(workflow, "max_elongation_penalty_from_state", fake_max_elongation_penalty_from_state)
@@ -1211,6 +1227,7 @@ def test_public_api_reexports_example_optimization_contract() -> None:
         "FixedBoundaryVMEC",
         "LeastSquaresProblem",
         "AspectRatio",
+        "AugmentedLagrangianConstraint",
         "MeanIota",
         "AbsMeanIotaFloor",
         "QuasisymmetryRatioResidual",
@@ -1223,6 +1240,8 @@ def test_public_api_reexports_example_optimization_contract() -> None:
         "BoozerBTarget",
         "boozer_b_target_from_wout",
         "qi_boozer_b_target_objective",
+        "qi_max_elongation_constraint",
+        "qi_mirror_ratio_constraint",
         "BetaTotal",
         "VolavgB",
         "BDotB",

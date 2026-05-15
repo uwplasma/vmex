@@ -419,6 +419,125 @@ class LeastSquaresProblem:
         return bool(self.qi_objective_terms)
 
 
+@dataclass(frozen=True)
+class AugmentedLagrangianConstraint:
+    """Wrap a non-negative violation objective as an augmented-Lagrangian term.
+
+    The wrapped objective should expose a signed constraint residual ``g(x)``
+    with feasibility ``g(x) <= 0``.  :class:`MirrorRatio` and
+    :class:`MaxElongation` provide this signed form automatically through their
+    constraint hooks while preserving their usual non-negative penalty behavior
+    when used as ordinary least-squares terms.
+
+    For an inequality constraint ``g(x) <= 0`` this wrapper adds the projected
+    Powell-Hestenes-Rockafellar residual
+
+    ``sqrt(mu) * max(g(x) + lambda / mu, 0)``
+
+    where ``lambda`` is the current multiplier and ``mu`` is the penalty.  The
+    constant term in the augmented Lagrangian is omitted because it does not
+    affect minimizers.  Update multipliers only from exact accepted diagnostics
+    using :meth:`updated`.
+    """
+
+    objective: object
+    multiplier: float = 0.0
+    penalty: float = 1.0
+    softness: float = 0.0
+    name: str | None = None
+
+    @property
+    def requires_qi_field(self) -> bool:
+        return bool(getattr(self.objective, "requires_qi_field", False))
+
+    def J(self, _ctx: StageContext, _state):
+        raise RuntimeError("AugmentedLagrangianConstraint must be assembled through LeastSquaresProblem.")
+
+    def updated(
+        self,
+        violation: float,
+        *,
+        penalty_growth: float = 1.0,
+        max_penalty: float | None = None,
+    ) -> "AugmentedLagrangianConstraint":
+        """Return a copy with the inequality multiplier updated.
+
+        ``violation`` should be ``max(g(x), 0)`` measured from the exact
+        accepted final state, not a trial-point residual.  The multiplier is
+        projected to be non-negative.
+        """
+
+        penalty = float(self.penalty)
+        violation = max(float(violation), 0.0)
+        multiplier = max(0.0, float(self.multiplier) + penalty * violation)
+        new_penalty = penalty * float(penalty_growth)
+        if max_penalty is not None:
+            new_penalty = min(new_penalty, float(max_penalty))
+        return AugmentedLagrangianConstraint(
+            objective=self.objective,
+            multiplier=multiplier,
+            penalty=new_penalty,
+            softness=self.softness,
+            name=self.name,
+        )
+
+    def _projected_residual(self, residual):
+        penalty = max(float(self.penalty), np.finfo(float).tiny)
+        shifted = jnp.asarray(residual, dtype=jnp.float64) + float(self.multiplier) / penalty
+        projected = _smooth_positive_part(shifted, softness=float(self.softness))
+        return jnp.sqrt(jnp.asarray(penalty, dtype=jnp.float64)) * projected
+
+    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        if not _target_is_zero(target):
+            raise ValueError("AugmentedLagrangianConstraint objective tuples require target=0.")
+        if hasattr(self.objective, "to_constraint_term"):
+            base = self.objective.to_constraint_term()
+        elif hasattr(self.objective, "to_objective_term"):
+            # Backward-compatible fallback for objectives that already return a
+            # non-negative violation residual.  New constrained objectives
+            # should prefer a signed ``to_constraint_term`` hook.
+            base = self.objective.to_objective_term(target=0.0, residual_weight=1.0)
+        else:
+            raise ValueError("Wrapped augmented-Lagrangian objective must expose to_objective_term().")
+        name = self.name or f"al_{base.name}"
+
+        def _evaluate(ctx, state, base=base):
+            return self._projected_residual(base.residual(ctx, state)) * float(residual_weight)
+
+        def _total(ctx, state):
+            residual = _evaluate(ctx, state)
+            return jnp.sum(residual * residual)
+
+        return ObjectiveTerm(
+            name,
+            _evaluate,
+            target=0.0,
+            weight=1.0,
+            total=_total,
+            track_iota=base.track_iota,
+            metadata=dict(base.metadata),
+        )
+
+    def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
+        if hasattr(self.objective, "to_constraint_qi_term"):
+            base = self.objective.to_constraint_qi_term()
+        elif hasattr(self.objective, "to_qi_term"):
+            # Backward-compatible fallback for QI objectives that already
+            # return a non-negative violation residual.  New constrained QI
+            # objectives should prefer a signed ``to_constraint_qi_term`` hook.
+            base = self.objective.to_qi_term(1.0)
+        else:
+            raise ValueError("Wrapped augmented-Lagrangian QI objective must expose to_qi_term().")
+        name = self.name or f"al_{base.name}"
+
+        def _evaluate(ctx, state, field, base=base):
+            residual, _total = base.residual_and_total(ctx, state, field)
+            projected = self._projected_residual(residual) * float(residual_weight)
+            return projected, jnp.sum(projected * projected)
+
+        return QIObjectiveTerm(name, _evaluate, qi_options=base.qi_options)
+
+
 class AspectRatio:
     """Aspect-ratio objective object."""
 
@@ -613,6 +732,18 @@ class MirrorRatio:
             qi_options=self.qi_options,
         )
 
+    def to_constraint_qi_term(self) -> QIObjectiveTerm:
+        return qi_mirror_ratio_constraint(
+            threshold=self.threshold,
+            ntheta=self.ntheta,
+            nphi=self.nphi,
+            surface_index=self.surface_index,
+            phimin=self.phimin,
+            smooth_extrema=self.smooth_extrema,
+            normalize_surfaces=self.normalize_surfaces,
+            qi_options=self.qi_options,
+        )
+
 
 class BoozerBTarget:
     """Boozer ``|B|`` spectrum-matching objective for QI steering.
@@ -668,11 +799,15 @@ class MaxElongation:
         threshold: float,
         ntheta: int = 48,
         nphi: int = 16,
+        smooth_extrema: float = 0.0,
+        smooth_penalty: float = 0.0,
         qi_options: QuasiIsodynamicOptions | None = None,
     ):
         self.threshold = float(threshold)
         self.ntheta = int(ntheta)
         self.nphi = int(nphi)
+        self.smooth_extrema = float(smooth_extrema)
+        self.smooth_penalty = float(smooth_penalty)
         self.qi_options = qi_options
 
     def J(self, _ctx: StageContext, _state):
@@ -684,6 +819,17 @@ class MaxElongation:
             weight=residual_weight,
             ntheta=self.ntheta,
             nphi=self.nphi,
+            smooth_extrema=self.smooth_extrema,
+            smooth_penalty=self.smooth_penalty,
+            qi_options=self.qi_options,
+        )
+
+    def to_constraint_qi_term(self) -> QIObjectiveTerm:
+        return qi_max_elongation_constraint(
+            threshold=self.threshold,
+            ntheta=self.ntheta,
+            nphi=self.nphi,
+            smooth_extrema=self.smooth_extrema,
             qi_options=self.qi_options,
         )
 
@@ -1274,6 +1420,47 @@ def qi_mirror_ratio_objective(
     return QIObjectiveTerm("mirror_ratio", _evaluate, qi_options=qi_options)
 
 
+def qi_mirror_ratio_constraint(
+    *,
+    threshold: float,
+    ntheta: int = 96,
+    nphi: int = 96,
+    surface_index: int | None = None,
+    phimin: float = 0.0,
+    smooth_extrema: float = 0.0,
+    normalize_surfaces: bool = True,
+    qi_options: QuasiIsodynamicOptions | None = None,
+) -> QIObjectiveTerm:
+    """Signed mirror-ratio constraint ``mirror_ratio - threshold <= 0``."""
+
+    def _evaluate(ctx: StageContext, _state, field: dict):
+        mirror_booz = field["booz"] if surface_index is None else _slice_boozer_surfaces(field["booz"], int(surface_index))
+        weights = None
+        if bool(normalize_surfaces) and surface_index is None:
+            nsurf = int(jnp.asarray(mirror_booz["bmnc_b"]).shape[0])
+            weights = [1.0 / float(max(nsurf, 1))] * nsurf
+        mirror = mirror_ratio_penalty_from_boozer_output(
+            mirror_booz,
+            nfp=int(ctx.static.cfg.nfp),
+            threshold=float(threshold),
+            weights=weights,
+            ntheta=int(ntheta),
+            nphi=int(nphi),
+            phimin=float(phimin),
+            smooth_extrema=float(smooth_extrema),
+            smooth_penalty=0.0,
+        )
+        weights_arr = jnp.ones_like(jnp.asarray(mirror["mirror_ratio"], dtype=jnp.float64))
+        if weights is not None:
+            weights_arr = jnp.asarray(weights, dtype=jnp.float64)
+        residuals = (jnp.asarray(mirror["mirror_ratio"], dtype=jnp.float64) - float(threshold)) * jnp.sqrt(
+            weights_arr
+        )
+        return residuals, jnp.sum(jnp.maximum(residuals, 0.0) ** 2)
+
+    return QIObjectiveTerm("mirror_ratio_constraint", _evaluate, qi_options=qi_options)
+
+
 def qi_boozer_b_target_objective(
     *,
     target_bmnc,
@@ -1334,6 +1521,8 @@ def qi_max_elongation_objective(
     weight: float = 1.0,
     ntheta: int = 48,
     nphi: int = 16,
+    smooth_extrema: float = 0.0,
+    smooth_penalty: float = 0.0,
     qi_options: QuasiIsodynamicOptions | None = None,
 ) -> QIObjectiveTerm:
     """Boundary elongation upper-bound objective."""
@@ -1345,6 +1534,8 @@ def qi_max_elongation_objective(
             threshold=float(threshold),
             ntheta=int(ntheta),
             nphi=int(nphi),
+            smooth_extrema=float(smooth_extrema),
+            smooth_penalty=float(smooth_penalty),
         )
         return (
             jnp.asarray(elongation["residuals1d"], dtype=jnp.float64) * float(weight),
@@ -1352,6 +1543,32 @@ def qi_max_elongation_objective(
         )
 
     return QIObjectiveTerm("max_elongation", _evaluate, qi_options=qi_options)
+
+
+def qi_max_elongation_constraint(
+    *,
+    threshold: float,
+    ntheta: int = 48,
+    nphi: int = 16,
+    smooth_extrema: float = 0.0,
+    qi_options: QuasiIsodynamicOptions | None = None,
+) -> QIObjectiveTerm:
+    """Signed LCFS elongation constraint ``max_elongation - threshold <= 0``."""
+
+    def _evaluate(ctx: StageContext, state, _field: dict):
+        elongation = max_elongation_penalty_from_state(
+            state=state,
+            static=ctx.static,
+            threshold=float(threshold),
+            ntheta=int(ntheta),
+            nphi=int(nphi),
+            smooth_extrema=float(smooth_extrema),
+            smooth_penalty=0.0,
+        )
+        residuals = jnp.asarray([elongation["max_elongation"] - float(threshold)], dtype=jnp.float64)
+        return residuals, jnp.sum(jnp.maximum(residuals, 0.0) ** 2)
+
+    return QIObjectiveTerm("max_elongation_constraint", _evaluate, qi_options=qi_options)
 
 
 def qi_lgradb_objective(
@@ -2536,6 +2753,7 @@ def _slice_boozer_surfaces(booz: dict, surface_index: int) -> dict:
 __all__ = [
     "AbsMeanIotaFloor",
     "AspectRatio",
+    "AugmentedLagrangianConstraint",
     "BVector",
     "BDotB",
     "BDotGradV",
@@ -2577,8 +2795,10 @@ __all__ = [
     "qs_stage_budget",
     "qs_stage_modes",
     "qi_lgradb_objective",
+    "qi_max_elongation_constraint",
     "qi_boozer_b_target_objective",
     "qi_max_elongation_objective",
+    "qi_mirror_ratio_constraint",
     "qi_mirror_ratio_objective",
     "qi_residual_ceiling_objective",
     "quasi_isodynamic_field_objective",
