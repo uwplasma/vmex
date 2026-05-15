@@ -164,17 +164,14 @@ NFP=2 ``input.nfp2_QI`` lane.  ``examples/optimization/QI_optimization.py`` is
 the bounded multi-seed entry point for extending this to other inputs: set
 ``RUN_CASE = "qi_stel_seed_3127"``, ``RUN_CASE = "nfp4_qh_warm_to_qi"``, or add
 a new ``QI_CASES`` entry for another VMEC deck.  The script's far-seed policy
-is staged: first find a low-QI basin, then ramp transform while preserving QI,
-then clean mirror ratio and elongation behind a QI ceiling.  Far seeds may
-first run a bounded basin prefilter over ESS-scaled boundary jumps; review
+first runs a bounded basin prefilter over ESS-scaled boundary jumps, then uses
+a high-QI-weight mirror/iota cleanup from the selected candidate.  Review
 ``basin_prefilter/top_candidates.json`` to see which large-step seed was
-chosen.  Review ``mirror_ramp_promotion_log.json`` because failed cleanup
+chosen, and review ``mirror_ramp_promotion_log.json`` because failed cleanup
 stages are not silently promoted.  Far-seed stages may use lower Boozer/QI
 resolution during the optimization and a higher-resolution final audit; both
 resolutions are written to ``diagnostics.json`` so promotion claims can be
-traced.  Far seeds may use a phase-specific iota promotion rule that accepts
-larger transform only when smooth and legacy QI remain within a documented
-relaxation band.  Far seeds may use a solved same-NFP QI wout through
+traced.  Far seeds may use a solved same-NFP QI wout through
 ``boozer_target_wout``/``boozer_target_weight`` as an opt-in homotopy
 experiment, but that term is not a final acceptance diagnostic.  A seed-robust
 QI claim still requires the constrained objective to be run and visually
