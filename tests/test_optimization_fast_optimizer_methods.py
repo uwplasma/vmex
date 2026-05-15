@@ -478,3 +478,31 @@ def test_run_scipy_matrix_free_path_wraps_scaled_linear_operator(monkeypatch):
     np.testing.assert_allclose(result["x"], [0.3])
     assert result["_history_dump"]["method"] == "scipy_matrix_free"
     assert result["_history_dump"]["scipy_tr_solver"] == "lsmr"
+
+
+def test_run_scipy_matrix_free_returns_best_exact_point_after_scipy_failure(monkeypatch):
+    pytest.importorskip("scipy.optimize")
+    import scipy.optimize
+
+    def fake_least_squares(residuals, y0, *, jac, **kwargs):
+        np.testing.assert_allclose(residuals(y0), [0.5, 3.0, 4.0])
+        raise ValueError("synthetic non-finite trial Jacobian")
+
+    monkeypatch.setattr(scipy.optimize, "least_squares", fake_least_squares)
+    opt = _run_ready_optimizer()
+
+    result = opt.run(
+        np.asarray([0.0]),
+        method="scipy_matrix_free",
+        max_nfev=4,
+        x_scale=np.asarray([2.0]),
+        scipy_lsmr_maxiter=5,
+        verbose=0,
+    )
+
+    np.testing.assert_allclose(result["x"], [0.0])
+    assert result["success"] is False
+    assert result["status"] == -1
+    assert "scipy matrix-free least_squares failed" in result["message"]
+    assert result["_history_dump"]["selected_best_exact_point"] is True
+    assert "synthetic non-finite trial Jacobian" in result["_history_dump"]["optimizer_exception"]

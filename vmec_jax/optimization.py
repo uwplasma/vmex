@@ -3367,34 +3367,57 @@ class FixedBoundaryExactOptimizer:
                     dtype=np.dtype(float),
                 )
 
-            scipy_result = _scipy_least_squares(
-                _residuals_y,
-                y0,
-                jac=_jacobian_y,
-                method="trf",
-                tr_solver="lsmr",
-                tr_options=({"maxiter": int(scipy_lsmr_maxiter)} if scipy_lsmr_maxiter is not None else None),
-                max_nfev=max_nfev,
-                ftol=ftol,
-                gtol=gtol,
-                xtol=xtol,
-                verbose=2 if int(verbose) > 0 else 0,
-            )
-            x_result = np.asarray(scipy_result.x, dtype=float) * scale - base_params
-            result = {
-                "x": x_result,
-                "cost": float(scipy_result.cost),
-                "objective": float(2.0 * scipy_result.cost),
-                "nfev": int(scipy_result.nfev),
-                "njev": 0 if scipy_result.njev is None else int(scipy_result.njev),
-                "nit": 0,
-                "success": bool(scipy_result.success),
-                "status": int(scipy_result.status),
-                "message": str(scipy_result.message),
-                "step_norm": 0.0,
-                "x_prev": None,
-                "cost_prev": None,
-            }
+            try:
+                scipy_result = _scipy_least_squares(
+                    _residuals_y,
+                    y0,
+                    jac=_jacobian_y,
+                    method="trf",
+                    tr_solver="lsmr",
+                    tr_options=({"maxiter": int(scipy_lsmr_maxiter)} if scipy_lsmr_maxiter is not None else None),
+                    max_nfev=max_nfev,
+                    ftol=ftol,
+                    gtol=gtol,
+                    xtol=xtol,
+                    verbose=2 if int(verbose) > 0 else 0,
+                )
+                x_result = np.asarray(scipy_result.x, dtype=float) * scale - base_params
+                result = {
+                    "x": x_result,
+                    "cost": float(scipy_result.cost),
+                    "objective": float(2.0 * scipy_result.cost),
+                    "nfev": int(scipy_result.nfev),
+                    "njev": 0 if scipy_result.njev is None else int(scipy_result.njev),
+                    "nit": 0,
+                    "success": bool(scipy_result.success),
+                    "status": int(scipy_result.status),
+                    "message": str(scipy_result.message),
+                    "step_norm": 0.0,
+                    "x_prev": None,
+                    "cost_prev": None,
+                }
+            except Exception as exc:
+                best_exact_params = getattr(self, "_best_exact_params", None)
+                best_exact_cost = float(getattr(self, "_best_exact_cost", math.inf))
+                if best_exact_params is None or not np.isfinite(best_exact_cost):
+                    raise
+                x_result = np.asarray(best_exact_params, dtype=float).copy()
+                result = {
+                    "x": x_result,
+                    "cost": best_exact_cost,
+                    "objective": 2.0 * best_exact_cost,
+                    "nfev": max(1, len(getattr(self, "_history", []))),
+                    "njev": max(0, len(getattr(self, "_history", [])) - 1),
+                    "nit": 0,
+                    "success": False,
+                    "status": -1,
+                    "message": f"scipy matrix-free least_squares failed; returning best exact accepted point: {exc}",
+                    "step_norm": float(np.linalg.norm(x_result - params0_arr)),
+                    "x_prev": None,
+                    "cost_prev": None,
+                    "_selected_best_exact_point": True,
+                    "_optimizer_exception": repr(exc),
+                }
         elif method_key == "scipy":
             try:
                 from scipy.optimize import least_squares as _scipy_least_squares
