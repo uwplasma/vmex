@@ -108,6 +108,8 @@ QI_CASES = {
         "branch_width_weight": 0.5,
         "weighted_shuffle_profile_weight": 0.0,
         "phimin": 0.0,
+        "optimization_qi_resolution": {"mboz": 8, "nboz": 8, "nphi": 61, "nalpha": 13, "n_bounce": 21},
+        "audit_qi_resolution": {"mboz": 18, "nboz": 18, "nphi": 151, "nalpha": 31, "n_bounce": 51},
         "boozer_target_wout": None,
         "boozer_target_weight": 0.0,
         "boozer_target_normalize": True,
@@ -204,6 +206,8 @@ QI_CASES = {
         "branch_width_weight": 0.5,
         "weighted_shuffle_profile_weight": 0.0,
         "phimin": 0.0,
+        "optimization_qi_resolution": {"mboz": 8, "nboz": 8, "nphi": 61, "nalpha": 13, "n_bounce": 21},
+        "audit_qi_resolution": {"mboz": 18, "nboz": 18, "nphi": 151, "nalpha": 31, "n_bounce": 51},
         "boozer_target_wout": None,
         "boozer_target_weight": 0.0,
         "boozer_target_normalize": True,
@@ -310,6 +314,11 @@ else:
 if RUN_CASE not in QI_CASES:
     raise KeyError(f"Unknown QI RUN_CASE {RUN_CASE!r}; available cases: {sorted(QI_CASES)}")
 CASE = QI_CASES[RUN_CASE]
+if os.environ.get("VMEC_JAX_QI_OUTPUT_DIR"):
+    CASE = {
+        **CASE,
+        "output_dir": Path(os.environ["VMEC_JAX_QI_OUTPUT_DIR"]).expanduser(),
+    }
 
 # Problem parameters.  The default case uses the bundled NFP=2 omnigenity seed
 # because it gives the current best mirror-aware QI result in this repository.
@@ -390,14 +399,22 @@ QI_GATE_SMOOTH_MAX = 2.0e-3
 QI_GATE_LEGACY_MAX = 1.0e-3
 JIT_BOOZ = bool(CASE.get("jit_booz", True))  # Faster QI/Boozer path on current CPU/GPU diagnostics.
 
+
+def _resolution_value(resolution, key, default):
+    return int(dict(resolution).get(key, default))
+
+
+OPT_QI_RESOLUTION = dict(CASE.get("optimization_qi_resolution", {}))
+AUDIT_QI_RESOLUTION = {**OPT_QI_RESOLUTION, **dict(CASE.get("audit_qi_resolution", {}))}
+
 # Boozer transform and smooth-QI residual resolution.
 QI_OPTIONS = vj.QuasiIsodynamicOptions(
     surfaces=SURFACES,
-    mboz=18,
-    nboz=18,
-    nphi=151,
-    nalpha=31,
-    n_bounce=51,
+    mboz=_resolution_value(OPT_QI_RESOLUTION, "mboz", 18),
+    nboz=_resolution_value(OPT_QI_RESOLUTION, "nboz", 18),
+    nphi=_resolution_value(OPT_QI_RESOLUTION, "nphi", 151),
+    nalpha=_resolution_value(OPT_QI_RESOLUTION, "nalpha", 31),
+    n_bounce=_resolution_value(OPT_QI_RESOLUTION, "n_bounce", 51),
     include_bounce_endpoints=True,  # Matches the legacy Goodman-style QI level sampling.
     softness=2.0e-2,
     width_weight=1.0,
@@ -569,6 +586,12 @@ print(f"  abs iota floor:  {TARGET_ABS_IOTA_MIN}")
 print(f"  QI branch weight:{QI_OPTIONS.branch_width_weight}")
 print(f"  QI weighted shuffle:{QI_OPTIONS.weighted_shuffle_profile_weight}")
 print(f"  QI phimin:       {QI_OPTIONS.phimin}")
+print(
+    "  QI opt grid:     "
+    f"mboz={QI_OPTIONS.mboz}, nboz={QI_OPTIONS.nboz}, "
+    f"nphi={QI_OPTIONS.nphi}, nalpha={QI_OPTIONS.nalpha}, n_bounce={QI_OPTIONS.n_bounce}"
+)
+print(f"  QI audit grid:   {AUDIT_QI_RESOLUTION or 'same as optimization'}")
 print(f"  JIT Boozer path: {QI_OPTIONS.jit_booz}")
 print(f"  Boozer target:   {BOOZER_TARGET_WOUT} (weight={BOOZER_TARGET_WEIGHT})")
 print(f"  mirror target:   {MAX_MIRROR_RATIO} (surface={MIRROR_SURFACE_INDEX})")
@@ -967,11 +990,11 @@ print(f"  Bmin/Bmax:  {np.min(b_lcfs):.6g} / {np.max(b_lcfs):.6g}")
 
 diagnostic_options = vj.QIDiagnosticOptions(
     surfaces=SURFACES,
-    mboz=QI_OPTIONS.mboz,
-    nboz=QI_OPTIONS.nboz,
-    nphi=QI_OPTIONS.nphi,
-    nalpha=QI_OPTIONS.nalpha,
-    n_bounce=QI_OPTIONS.n_bounce,
+    mboz=_resolution_value(AUDIT_QI_RESOLUTION, "mboz", QI_OPTIONS.mboz),
+    nboz=_resolution_value(AUDIT_QI_RESOLUTION, "nboz", QI_OPTIONS.nboz),
+    nphi=_resolution_value(AUDIT_QI_RESOLUTION, "nphi", QI_OPTIONS.nphi),
+    nalpha=_resolution_value(AUDIT_QI_RESOLUTION, "nalpha", QI_OPTIONS.nalpha),
+    n_bounce=_resolution_value(AUDIT_QI_RESOLUTION, "n_bounce", QI_OPTIONS.n_bounce),
     include_bounce_endpoints=QI_OPTIONS.include_bounce_endpoints,
     softness=QI_OPTIONS.softness,
     width_weight=QI_OPTIONS.width_weight,
@@ -1010,6 +1033,20 @@ diagnostics = annotate_qi_seed_suitability(
         max_elongation=MAX_ELONGATION,
     ),
 )
+diagnostics["qi_optimization_resolution"] = {
+    "mboz": QI_OPTIONS.mboz,
+    "nboz": QI_OPTIONS.nboz,
+    "nphi": QI_OPTIONS.nphi,
+    "nalpha": QI_OPTIONS.nalpha,
+    "n_bounce": QI_OPTIONS.n_bounce,
+}
+diagnostics["qi_audit_resolution"] = {
+    "mboz": diagnostic_options.mboz,
+    "nboz": diagnostic_options.nboz,
+    "nphi": diagnostic_options.nphi,
+    "nalpha": diagnostic_options.nalpha,
+    "n_bounce": diagnostic_options.n_bounce,
+}
 diagnostics_path = OUTPUT_DIR / "diagnostics.json"
 diagnostics_path.write_text(json.dumps(diagnostics, indent=2, sort_keys=True) + "\n")
 saved_paths["diagnostics"] = diagnostics_path

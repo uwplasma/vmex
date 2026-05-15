@@ -129,6 +129,8 @@ mirror/elongation cleanup.  The final files in the top-level output directory
 come from the last promoted stage, or from the best exact-diagnostic candidate
 if no stage passes the promotion gate.  Review
 `mirror_ramp_promotion_log.json` before using a far-seed result in figures.
+Far-seed policies may use a cheaper Boozer/QI grid during optimization and a
+higher-resolution final audit; both grids are written into `diagnostics.json`.
 
 ```bash
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/compare_omnigenity_qi_objective.py
