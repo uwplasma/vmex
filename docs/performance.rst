@@ -246,6 +246,27 @@ The user-facing QI optimization helpers default to the jitted Boozer path
 available for parity isolation; use ``--jit-booz`` for production-like QI
 timings.
 
+May 2026 QI Boozer/GPU split
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+On the bundled ``input.nfp2_QI`` low-resolution diagnostic
+(``mpol=ntor=mboz=nboz=3``, one Boozer surface, ``repeat=3``), ``--jit-booz``
+improved the QI/Boozer phase on both backends:
+
+- CPU: total profiler time ``20.17 s`` without Boozer JIT and ``18.73 s`` with
+  Boozer JIT; first QI/Boozer call improved from ``8.38 s`` to ``6.78 s``.
+- ``office`` GPU: total profiler time ``27.39 s`` without Boozer JIT and
+  ``20.88 s`` with Boozer JIT; first QI/Boozer call improved from ``11.01 s``
+  to ``4.98 s``.
+
+The remaining gap in this small case comes from the VMEC solve, not from the QI
+residual itself.  A raw 80-iteration fixed-boundary ``input.nfp2_QI`` profile
+with the accelerated single-grid path measured ``0.65 s`` on CPU and ``3.11 s``
+on GPU; forcing the scan path measured ``0.55 s`` on CPU and ``3.35 s`` on GPU.
+The next GPU work should therefore target fixed-boundary force/update kernel
+launch and tape structure, while keeping Boozer JIT enabled for QI production
+runs.
+
 The comparison table reports ratios for total runtime, compile/replay/cache
 time when those timings exist, callback count, observed RSS peak, solve count,
 accepted-point replay count, and cache growth.  The JSON output is stable enough
