@@ -124,10 +124,11 @@ fail the independent smooth/legacy QI and engineering gates are rejected and
 should not be promoted as improved QI candidates.
 
 For far seeds, `QI_optimization.py` uses the same single script but a longer
-policy: low-QI basin search, iota ramp with a QI ceiling, then guarded
-mirror/elongation cleanup.  The final files in the top-level output directory
-come from the last promoted stage, or from the best exact-diagnostic candidate
-if no stage passes the promotion gate.  Review
+policy: a bounded basin prefilter over ESS-scaled boundary jumps, low-QI basin
+search, iota ramp with a QI ceiling, then guarded mirror/elongation cleanup.
+The final files in the top-level output directory come from the last promoted
+stage, or from the best exact-diagnostic candidate if no stage passes the
+promotion gate.  Review `basin_prefilter/top_candidates.json` and
 `mirror_ramp_promotion_log.json` before using a far-seed result in figures.
 Far-seed policies may use a cheaper Boozer/QI grid during optimization and a
 higher-resolution final audit; both grids are written into `diagnostics.json`.

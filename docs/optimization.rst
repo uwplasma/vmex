@@ -69,11 +69,13 @@ The robustness probe is intentionally a QI+iota basin test, not a full
 engineering acceptance claim.  ``QI_optimization.py`` is now the single
 staged driver for the promoted path: it can run a low-QI basin search, an
 iota ramp with a QI ceiling, and guarded mirror/elongation cleanup, with exact
-independent diagnostics deciding which stages are promoted.  Far-seed stages
-can use a cheaper QI grid for the optimization and a higher-resolution final
-audit recorded in ``diagnostics.json``.  Promote a QI result only after the
-independent smooth-QI, legacy-QI, iota, mirror-ratio, elongation, and Boozer
-``|B|`` contour checks agree.  Landscape and
+independent diagnostics deciding which stages are promoted.  For far seeds it
+can also run a bounded basin prefilter over ESS-scaled boundary jumps before
+local optimization.  Far-seed stages can use a cheaper QI grid for the
+optimization and a higher-resolution final audit recorded in
+``diagnostics.json``.  Promote a QI result only after the independent
+smooth-QI, legacy-QI, iota, mirror-ratio, elongation, and Boozer ``|B|``
+contour checks agree.  Landscape and
 basin-survey diagnostics use fast trial solves unless ``--exact-solve`` is
 passed; use exact solves before treating their scalar values as promotion
 evidence.

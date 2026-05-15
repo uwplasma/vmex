@@ -13,7 +13,15 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import vmec_jax as vj
+from tools.diagnostics.qi_basin_survey import (
+    SurveyTargets,
+    generate_basin_candidates,
+    rank_candidate_records,
+    write_csv,
+)
+from tools.diagnostics.qi_landscape_scan import build_stage as build_diagnostic_stage
 from vmec_jax._compat import enable_x64
+from vmec_jax.optimization import boundary_param_names, create_x_scale
 from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_suitability
 
 
@@ -34,6 +42,14 @@ def _finite_or_inf(value):
     except (TypeError, ValueError):
         return float("inf")
     return out if np.isfinite(out) else float("inf")
+
+
+def _finite_or_none(value):
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if np.isfinite(out) else None
 
 # Seed cases.  Pick one case by changing RUN_CASE or setting
 # VMEC_JAX_QI_RUN_CASE; add another dictionary entry, or set VMEC_JAX_QI_INPUT,
@@ -110,6 +126,18 @@ QI_CASES = {
         "phimin": 0.0,
         "optimization_qi_resolution": {"mboz": 5, "nboz": 5, "nphi": 31, "nalpha": 7, "n_bounce": 9},
         "audit_qi_resolution": {"mboz": 18, "nboz": 18, "nphi": 151, "nalpha": 31, "n_bounce": 51},
+        "basin_prefilter": {
+            "enabled": True,
+            "radii": (0.025, 0.05, 0.1),
+            "directions": ("axes", "rademacher"),
+            "axis_count": 6,
+            "n_random": 4,
+            "max_candidates": 24,
+            "trial_max_iter": 30,
+            "trial_ftol": 1.0e-8,
+            "top_k": 8,
+            "save_candidate_inputs": True,
+        },
         "boozer_target_wout": None,
         "boozer_target_weight": 0.0,
         "boozer_target_normalize": True,
@@ -661,6 +689,149 @@ def make_vmec_for_stage(input_file, output_dir):
     )
 
 
+def basin_prefilter_score(metrics, targets):
+    """Rank prefilter candidates by QI/iota first, engineering second."""
+
+    smooth = _finite_or_inf(metrics.get("qi_smooth_total"))
+    legacy = _finite_or_inf(metrics.get("qi_legacy_total"))
+    mirror = _finite_or_inf(metrics.get("qi_mirror_ratio_max"))
+    elongation = _finite_or_inf(metrics.get("qi_max_elongation"))
+    iota = abs(float(metrics.get("mean_iota") or 0.0))
+    aspect = _finite_or_inf(metrics.get("aspect"))
+    smooth_score = smooth / max(float(targets.smooth_qi_max), 1.0e-16)
+    legacy_score = legacy / max(float(targets.legacy_qi_max), 1.0e-16)
+    iota_score = max(0.0, float(targets.abs_iota_min) - iota) / max(float(targets.abs_iota_min), 1.0e-16)
+    mirror_score = max(0.0, mirror - float(targets.mirror_ratio_max)) / max(float(targets.mirror_ratio_max), 1.0e-16)
+    elongation_score = max(0.0, elongation - float(targets.max_elongation)) / max(float(targets.max_elongation), 1.0e-16)
+    aspect_score = abs(aspect - float(targets.target_aspect)) / max(float(targets.target_aspect), 1.0e-16)
+    return float(smooth_score + legacy_score + 3.0 * iota_score + 0.25 * mirror_score + 0.1 * elongation_score + 0.1 * aspect_score)
+
+
+def make_basin_prefilter_options(config):
+    return vj.QIDiagnosticOptions(
+        surfaces=SURFACES,
+        mboz=_resolution_value(OPT_QI_RESOLUTION, "mboz", QI_OPTIONS.mboz),
+        nboz=_resolution_value(OPT_QI_RESOLUTION, "nboz", QI_OPTIONS.nboz),
+        nphi=_resolution_value(OPT_QI_RESOLUTION, "nphi", QI_OPTIONS.nphi),
+        nalpha=_resolution_value(OPT_QI_RESOLUTION, "nalpha", QI_OPTIONS.nalpha),
+        n_bounce=_resolution_value(OPT_QI_RESOLUTION, "n_bounce", QI_OPTIONS.n_bounce),
+        include_bounce_endpoints=QI_OPTIONS.include_bounce_endpoints,
+        phimin=float(QI_OPTIONS.phimin),
+        jit_booz=JIT_BOOZ,
+        mirror_threshold=float(config.get("mirror_threshold", MAX_MIRROR_RATIO)),
+        mirror_ntheta=int(config.get("mirror_ntheta", 32)),
+        mirror_nphi=int(config.get("mirror_nphi", 32)),
+        mirror_surface_index=config.get("mirror_surface_index", MIRROR_SURFACE_INDEX),
+        elongation_threshold=float(config.get("max_elongation", MAX_ELONGATION)),
+        elongation_ntheta=int(config.get("elongation_ntheta", 24)),
+        elongation_nphi=int(config.get("elongation_nphi", 8)),
+    )
+
+
+def run_basin_prefilter(input_file, output_dir, config):
+    """Run a bounded large-step prefilter and return the selected input deck."""
+
+    if not bool(config.get("enabled", False)):
+        return Path(input_file)
+    survey_dir = Path(output_dir) / "basin_prefilter"
+    survey_dir.mkdir(parents=True, exist_ok=True)
+    stage = build_diagnostic_stage(
+        input_path=Path(input_file),
+        max_mode=MAX_MODE,
+        min_vmec_mode=MIN_VMEC_MODE,
+        include=("rc", "zs"),
+        fix=("rc00",),
+        project_input_boundary_to_max_mode=True,
+        inner_max_iter=int(config.get("inner_max_iter", 30)),
+        inner_ftol=float(config.get("inner_ftol", 1.0e-8)),
+        trial_max_iter=int(config.get("trial_max_iter", 30)),
+        trial_ftol=float(config.get("trial_ftol", 1.0e-8)),
+        solver_device=SOLVER_DEVICE,
+    )
+    names = boundary_param_names(stage.specs)
+    x_scale = create_x_scale(stage.specs, alpha=float(config.get("alpha", ALPHA)))
+    candidates = generate_basin_candidates(
+        names=names,
+        x_scale=x_scale,
+        radii=tuple(float(radius) for radius in config.get("radii", (0.025, 0.05, 0.1))),
+        n_random=int(config.get("n_random", 4)),
+        rng_seed=int(config.get("rng_seed", 20260515)),
+        axis_count=int(config.get("axis_count", 6)),
+        directions=tuple(config.get("directions", ("axes", "rademacher"))),
+        include_zero=True,
+    )[: max(1, int(config.get("max_candidates", 24)))]
+    options = make_basin_prefilter_options(config)
+    targets = SurveyTargets(
+        smooth_qi_max=QI_GATE_SMOOTH_MAX,
+        legacy_qi_max=QI_GATE_LEGACY_MAX,
+        mirror_ratio_max=float(config.get("mirror_threshold", MAX_MIRROR_RATIO)),
+        max_elongation=float(config.get("max_elongation", MAX_ELONGATION)),
+        abs_iota_min=TARGET_ABS_IOTA_MIN,
+        target_aspect=TARGET_ASPECT,
+        aspect_tolerance=2.0,
+    )
+    records = []
+    for candidate in candidates:
+        record = candidate.as_record(names)
+        try:
+            params = np.asarray(candidate.params, dtype=float)
+            state = stage.optimizer._solve_forward(params, trial=True)
+            diagnostics = vj.qi_diagnostics_from_state(
+                state=state,
+                static=stage.ctx.static,
+                indata=stage.ctx.indata,
+                signgs=stage.ctx.signgs,
+                surfaces=options.surfaces,
+                options=options,
+                flux_local=stage.ctx.flux,
+                prof_local={"pressure": stage.ctx.pressure},
+                pressure_local=stage.ctx.pressure,
+            )
+            metrics = {
+                "qi_smooth_total": _finite_or_none(diagnostics.get("qi_smooth_total")),
+                "qi_legacy_total": _finite_or_none(diagnostics.get("qi_legacy_total")),
+                "qi_mirror_ratio_max": _finite_or_none(diagnostics.get("qi_mirror_ratio_max")),
+                "qi_max_elongation": _finite_or_none(diagnostics.get("qi_max_elongation")),
+                "mean_iota": _finite_or_none(diagnostics.get("mean_iota")),
+                "aspect": _finite_or_none(diagnostics.get("aspect")),
+            }
+            record["metrics"] = metrics
+            record["diagnostics"] = diagnostics
+            record["prefilter_score"] = basin_prefilter_score(metrics, targets)
+            if bool(config.get("save_candidate_inputs", True)):
+                candidate_dir = survey_dir / "candidates" / candidate.label.replace(":", "_")
+                input_out = candidate_dir / "input.candidate"
+                stage.optimizer.save_input(input_out, params)
+                record["input_path"] = str(input_out)
+        except Exception as exc:  # noqa: BLE001 - prefilter keeps failures ranked last.
+            record["metrics"] = {}
+            record["diagnostics"] = {}
+            record["prefilter_score"] = float("inf")
+            record["error"] = f"{type(exc).__name__}: {exc}"
+        records.append(record)
+    ranked = sorted(
+        rank_candidate_records(records, targets=targets),
+        key=lambda row: (float(row.get("prefilter_score", float("inf"))), float(row.get("score", float("inf")))),
+    )
+    for rank, record in enumerate(ranked, start=1):
+        record["prefilter_rank"] = rank
+    top = ranked[: max(1, int(config.get("top_k", 8)))]
+    (survey_dir / "candidates.json").write_text(json.dumps(ranked, indent=2, sort_keys=True) + "\n")
+    (survey_dir / "top_candidates.json").write_text(json.dumps(top, indent=2, sort_keys=True) + "\n")
+    write_csv(ranked, survey_dir / "candidates.csv")
+    selected = top[0]
+    selected_input = selected.get("input_path")
+    if not selected_input:
+        selected_input = str(survey_dir / "input.prefilter_selected")
+        stage.optimizer.save_input(selected_input, np.asarray(selected["params"], dtype=float))
+    print("\nBasin prefilter selected:")
+    print(f"  label:          {selected.get('label')}")
+    print(f"  prefilter score:{selected.get('prefilter_score')}")
+    print(f"  metrics:        {selected.get('metrics')}")
+    print(f"  input:          {selected_input}")
+    return Path(selected_input)
+
+
 def solve_qi_stage(
     input_file,
     output_dir,
@@ -838,6 +1009,11 @@ def stage_promotes_candidate(stage, promotion, reference_diagnostics):
     return promotion
 
 active_input_file = INPUT_FILE
+active_input_file = run_basin_prefilter(
+    active_input_file,
+    OUTPUT_DIR,
+    dict(CASE.get("basin_prefilter", {})),
+)
 if QI_PREFINE:
     print("Running QI-only pre-refinement before applying scalar constraints ...")
     preseed_result = solve_qi_stage(
