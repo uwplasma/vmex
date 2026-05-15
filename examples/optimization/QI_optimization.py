@@ -161,16 +161,17 @@ QI_CASES = {
         # promoted by independent diagnostics, not by optimizer success flags.
         "mirror_ramp_stages": (
             {
-                "name": "qi_basin_repeat112233",
-                "max_nfev": 4,
+                "name": "prefiltered_qi_iota_cleanup",
+                "max_nfev": 8,
                 "stage_repeats": 1,
-                "stage_modes": (1, 2, 3),
+                "stage_modes": (3, 3),
                 "method": "scipy_matrix_free",
-                "use_mode_continuation": True,
+                "use_mode_continuation": False,
                 "aspect_weight": 0.05,
-                "iota_floor_weight": 0.0,
+                "iota_floor_weight": 50.0**2,
                 "qi_weight": 250.0,
-                "qi_ceiling_weight": 0.0,
+                "qi_ceiling_max": 6.0e-3,
+                "qi_ceiling_weight": 2500.0,
                 "mirror_weight": 0.0,
                 "elongation_weight": 0.0,
                 "require_seed_gate": False,
