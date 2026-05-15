@@ -807,8 +807,8 @@ Both scripts optimize QI, aspect ratio, and a differentiable
 ratio is now 10, which gives the optimizer more geometric room to recover low
 smooth/legacy QI and acceptable elongation before mirror cleanup.  Local probes
 from the ``input.QI_stel_seed_3127`` far seed now use a bounded basin prefilter
-followed by a high-QI-weight mirror/iota cleanup.  Current bounded probes reach
-the correct transform and acceptable elongation from that unrelated seed, but
+followed by a QI/iota cleanup.  Current bounded probes reach precise QI, the
+correct transform, and acceptable elongation from that unrelated seed, but
 mirror cleanup remains the active engineering gate.  The script therefore
 prints both a ``QI+iota`` gate and a stricter engineering gate that also
 includes mirror ratio and elongation.  It also writes a Boozer-coordinate
@@ -823,7 +823,7 @@ and termination tolerances against the nfp=2
 ``input.QI_stel_seed_3127`` seed.  The current far-seed QI lane uses
 ``max_mode = 3`` with ESS, ``target_aspect = 10.0``,
 ``abs(mean_iota) >= 0.41``, a bounded ESS-scaled basin prefilter, and a
-single high-QI-weight mirror/iota cleanup with a QI ceiling.  The
+single QI/iota cleanup with a QI ceiling.  The
 shuffle-profile term is intentionally retained because width-only and
 branch-width-only smooth surrogates can rank QH/QP-like false positives ahead
 of the branch-squash/stretch/shuffle diagnostic used in the reference Goodman
@@ -863,10 +863,11 @@ Two practical lessons from that study are now reflected in the example:
   when the independent smooth-QI, legacy-QI, and iota gates all pass.  Mirror
   ratio is reported separately.  For ``input.QI_stel_seed_3127``, QI-only
   cleanup recovers precise QI but raises mirror ratio, while mirror-heavy
-  cleanup lowers mirror but damages QI.  The current public lane uses a
-  balanced high-QI/high-mirror stage because it gives the best bounded
-  tradeoff found so far; the open lane is still a fully QI-preserving mirror
-  cleanup schedule that is robust across unrelated seeds.
+  cleanup lowers mirror but damages QI.  The current public lane keeps the
+  reproducible QI/iota result as the promoted output and leaves the balanced
+  mirror policies in ``tools/diagnostics/qi_constraint_policy_scan.py``; the
+  open lane is still a fully QI-preserving mirror cleanup schedule that is
+  robust across unrelated seeds.
 - ``QuasiIsodynamicResidualCeiling`` is the preferred cleanup guard when adding
   mirror, elongation, or other engineering terms after a low-QI basin has been
   found.  It adds a smooth penalty only when the shared QI residual exceeds a

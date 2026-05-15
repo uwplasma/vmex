@@ -155,9 +155,9 @@ QI_CASES = {
         "al_elongation_penalty": 1.0,
         "qi_ceiling_weight": 0.0,
         "shuffle_profile_nphi_out": None,
-        # Far seeds first use a bounded basin prefilter, then a high-QI-weight
-        # mirror/iota cleanup.  Earlier split QI-only then mirror-only stages
-        # reliably jumped between incompatible basins for this seed.
+        # Far seeds first use a bounded basin prefilter, then a QI/iota cleanup.
+        # Mirror-balanced policies remain in tools/diagnostics because the
+        # current all-surface mirror objective trades away the QI gate.
         "mirror_ramp_stages": (
             {
                 "name": "prefiltered_mirror_qi_iota_cleanup",
@@ -168,13 +168,11 @@ QI_CASES = {
                 "use_mode_continuation": False,
                 "aspect_weight": 0.05,
                 "iota_floor_weight": 50.0**2,
-                "qi_weight": 1000.0,
+                "qi_weight": 250.0,
                 "qi_ceiling_max": 6.0e-3,
                 "qi_ceiling_weight": 2500.0,
-                "mirror_threshold": 0.35,
-                "promotion_mirror_threshold": 0.50,
-                "mirror_weight": 40.0,
-                "elongation_weight": 2.0,
+                "mirror_weight": 0.0,
+                "elongation_weight": 0.0,
                 "require_seed_gate": False,
                 "require_mirror_improvement": False,
                 "require_engineering_gate": False,

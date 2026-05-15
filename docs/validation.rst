@@ -165,7 +165,7 @@ the bounded multi-seed entry point for extending this to other inputs: set
 ``RUN_CASE = "qi_stel_seed_3127"``, ``RUN_CASE = "nfp4_qh_warm_to_qi"``, or add
 a new ``QI_CASES`` entry for another VMEC deck.  The script's far-seed policy
 first runs a bounded basin prefilter over ESS-scaled boundary jumps, then uses
-a high-QI-weight mirror/iota cleanup from the selected candidate.  Review
+a QI/iota cleanup from the selected candidate.  Review
 ``basin_prefilter/top_candidates.json`` to see which large-step seed was
 chosen, and review ``mirror_ramp_promotion_log.json`` because failed cleanup
 stages are not silently promoted.  Far-seed stages may use lower Boozer/QI
