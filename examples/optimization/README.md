@@ -125,9 +125,9 @@ should not be promoted as improved QI candidates.
 
 For far seeds, `QI_optimization.py` uses the same single script but a longer
 policy: a bounded basin prefilter over ESS-scaled boundary jumps, followed by a
-single high-QI-weight mirror/iota cleanup.  Split QI-only then mirror-only
-cleanup stages are kept as diagnostics because they jumped between incompatible
-basins for `input.QI_stel_seed_3127`.
+single QI/iota cleanup.  Mirror-balanced cleanup stages are kept in diagnostic
+scripts because the current all-surface mirror objective trades away the QI gate
+for `input.QI_stel_seed_3127`.
 The final files in the top-level output directory come from the last promoted
 stage, or from the best exact-diagnostic candidate if no stage passes the
 promotion gate.  Review `basin_prefilter/top_candidates.json` and
