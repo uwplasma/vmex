@@ -148,6 +148,7 @@ QI_CASES = {
             "legacy_qi_max": 1.0e-3,
             "diagnostic_qi_resolution": {"mboz": 6, "nboz": 6, "nphi": 31, "nalpha": 7, "n_bounce": 9},
             "prefer_non_endpoint": True,
+            "accept_as_baseline": True,
         },
         "basin_prefilter": {
             "enabled": False,
@@ -1173,10 +1174,11 @@ def stage_promotes_candidate(stage, promotion, reference_diagnostics):
     return promotion
 
 active_input_file = INPUT_FILE
+BOUNDARY_REFERENCE_PRECONDITIONER = dict(CASE.get("boundary_reference_preconditioner", {}))
 active_input_file = run_boundary_reference_preconditioner(
     active_input_file,
     OUTPUT_DIR,
-    dict(CASE.get("boundary_reference_preconditioner", {})),
+    BOUNDARY_REFERENCE_PRECONDITIONER,
 )
 active_input_file = run_basin_prefilter(
     active_input_file,
@@ -1203,6 +1205,30 @@ if MIRROR_RAMP_STAGES:
     accepted_seed_diagnostics = None
     best_result = None
     best_diagnostics = None
+    if bool(BOUNDARY_REFERENCE_PRECONDITIONER.get("enabled", False)) and bool(
+        BOUNDARY_REFERENCE_PRECONDITIONER.get("accept_as_baseline", False)
+    ):
+        baseline_output_dir = OUTPUT_DIR / "boundary_reference_baseline"
+        print("\nRecording boundary-reference candidate as accepted baseline ...")
+        accepted_result = solve_qi_stage(
+            active_input_file,
+            baseline_output_dir,
+            make_qi_problem({"qi_weight": QI_WEIGHT, "qi_ceiling_weight": 0.0}),
+            max_nfev=1,
+            label=f"QI boundary-reference baseline (max_mode={MAX_MODE})",
+            stage_modes=(MAX_MODE,),
+            method="scipy_matrix_free",
+            use_mode_continuation=False,
+        )
+        if first_result_for_outputs is None:
+            first_result_for_outputs = accepted_result
+        accepted_seed_diagnostics = qi_diagnostics_for_result(
+            accepted_result,
+            mirror_threshold=MAX_MIRROR_RATIO,
+            mirror_surface_index=MIRROR_SURFACE_INDEX,
+        )
+        best_result = accepted_result
+        best_diagnostics = accepted_seed_diagnostics
     for stage_index, stage in enumerate(MIRROR_RAMP_STAGES, start=1):
         stage_name = stage["name"]
         stage_output_dir = OUTPUT_DIR / f"mirror_ramp_{stage_index:02d}_{stage_name}"

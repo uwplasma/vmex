@@ -812,6 +812,8 @@ local cleanup.  The preconditioner scans interpolation points between the raw
 seed and the bundled NFP=3 QI reference, solves each candidate, ranks them with
 independent smooth/legacy QI, mirror, elongation, aspect, and iota gates, and
 then continues from the best accepted non-endpoint candidate when one exists.
+That preconditioned candidate is also recorded as the accepted baseline, so a
+later cleanup stage cannot overwrite it unless exact diagnostics improve.
 The script therefore prints both a ``QI+iota`` gate and a stricter engineering
 gate that also includes mirror ratio and elongation.  It also writes a
 Boozer-coordinate ``|B|`` line-contour plot; VMEC-angle contour plots alone are
