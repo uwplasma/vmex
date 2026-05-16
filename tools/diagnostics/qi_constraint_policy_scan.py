@@ -52,6 +52,8 @@ class StagePolicy:
     max_nfev: int = 2
     stage_modes: tuple[int, ...] = (3,)
     aspect_weight: float = 0.25
+    target_iota: float | None = None
+    target_iota_weight: float = 0.0
     iota_weight: float = 200.0**2
     iota_abs_max: float | None = None
     iota_ceiling_weight: float = 0.0
@@ -607,6 +609,63 @@ def default_policies(*, max_nfev: int = 2) -> tuple[Policy, ...]:
             ),
         ),
         Policy(
+            "al_lcfs_mirror_iota_target",
+            "LCFS AL mirror recovery with an explicit signed iota target for the known negative-transform QI branch.",
+            (
+                StagePolicy(
+                    "al_lcfs_iota_target",
+                    method="scipy_matrix_free",
+                    max_nfev=max_nfev,
+                    aspect_weight=0.25,
+                    target_iota=-0.41,
+                    target_iota_weight=250.0**2,
+                    iota_weight=50.0**2,
+                    iota_abs_max=0.65,
+                    iota_ceiling_weight=250.0**2,
+                    qi_weight=1500.0,
+                    mirror_threshold=0.50,
+                    promotion_mirror_threshold=0.50,
+                    mirror_surface_index=-1,
+                    mirror_weight=1.0,
+                    elongation_weight=1.0,
+                    use_augmented_lagrangian=True,
+                    al_mirror_multiplier=0.0,
+                    al_mirror_penalty=500.0,
+                    al_elongation_multiplier=0.0,
+                    al_elongation_penalty=50.0,
+                    qi_ceiling_weight=3000.0,
+                    qi_ceiling_max=4.0e-3,
+                    qi_ceiling_smooth_penalty=2.0e-3,
+                ),
+            ),
+        ),
+        Policy(
+            "target_lcfs_mirror_iota_target",
+            "Soft LCFS mirror recovery with an explicit signed iota target for the known negative-transform QI branch.",
+            (
+                StagePolicy(
+                    "target_lcfs_iota_target",
+                    method="scipy_matrix_free",
+                    max_nfev=max_nfev,
+                    aspect_weight=0.25,
+                    target_iota=-0.41,
+                    target_iota_weight=250.0**2,
+                    iota_weight=50.0**2,
+                    iota_abs_max=0.65,
+                    iota_ceiling_weight=250.0**2,
+                    qi_weight=1500.0,
+                    mirror_threshold=0.35,
+                    promotion_mirror_threshold=0.50,
+                    mirror_surface_index=-1,
+                    mirror_weight=40.0,
+                    elongation_weight=2.0,
+                    qi_ceiling_weight=3000.0,
+                    qi_ceiling_max=4.0e-3,
+                    qi_ceiling_smooth_penalty=2.0e-3,
+                ),
+            ),
+        ),
+        Policy(
             "augmented_lagrangian_mirror",
             "Projected augmented-Lagrangian mirror/elongation constraints with a QI ceiling guard.",
             (
@@ -688,6 +747,8 @@ def _make_problem(vj: Any, resolution: ScanResolution, stage: StagePolicy):
         (vj.AbsMeanIotaFloor(TARGET_ABS_IOTA_MIN).J, 0.0, float(stage.iota_weight)),
         (vj.QuasiIsodynamicResidual(qi_options).J, 0.0, float(stage.qi_weight)),
     ]
+    if stage.target_iota is not None and stage.target_iota_weight > 0.0:
+        tuples.append((vj.MeanIota().J, float(stage.target_iota), float(stage.target_iota_weight)))
     if stage.iota_abs_max is not None and stage.iota_ceiling_weight > 0.0:
         tuples.append(
             (
