@@ -811,11 +811,11 @@ uses a deterministic same-NFP reference-family boundary preconditioner before
 local cleanup.  The preconditioner scans interpolation points between the raw
 seed and the bundled NFP=3 QI reference, solves each candidate, ranks them with
 independent smooth/legacy QI, mirror, elongation, aspect, and iota gates, and
-then continues from the best accepted candidate.  The script therefore prints
-both a ``QI+iota`` gate and a stricter engineering gate that also includes
-mirror ratio and elongation.  It also writes a Boozer-coordinate ``|B|``
-line-contour plot; VMEC-angle contour plots alone are not accepted as a QI
-visual gate.
+then continues from the best accepted non-endpoint candidate when one exists.
+The script therefore prints both a ``QI+iota`` gate and a stricter engineering
+gate that also includes mirror ratio and elongation.  It also writes a
+Boozer-coordinate ``|B|`` line-contour plot; VMEC-angle contour plots alone are
+not accepted as a QI visual gate.
 
 The study compared direct versus repeated-stage continuation, QP pre-seeding,
 aspect-ratio weights, mirror/elongation soft-wall weights, QI branch-width
@@ -914,7 +914,8 @@ Two practical lessons from that study are now reflected in the example:
   effective than a local trust-region step because it deliberately crosses
   basins before the differentiable local optimizer starts.  The
   ``qi_stel_seed_3127`` case uses this as a same-NFP reference-family
-  preconditioner.
+  preconditioner and prefers a non-reference endpoint when it passes the
+  independent engineering gate.
 
 ``QI_optimization.py`` is now the single recommended multi-seed entry point.
 Set ``VMEC_JAX_QI_RUN_CASE`` at launch time, or change ``RUN_CASE`` at the top

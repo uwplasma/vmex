@@ -128,9 +128,10 @@ policy.  The `input.QI_stel_seed_3127` case now starts with a deterministic
 same-NFP reference-family preconditioner: it interpolates the raw seed boundary
 toward the bundled NFP=3 QI reference, runs bounded fixed-boundary solves for
 the candidate interpolation points, ranks them with independent QI/mirror/iota
-diagnostics, and only then starts local QI cleanup.  This is a global-to-local
-move; the previous ESS-scaled local basin prefilter remains available but is
-not the default for this seed because it did not enter the precise-QI basin.
+diagnostics, prefers a non-endpoint candidate when one passes the gate, and
+only then starts local QI cleanup.  This is a global-to-local move; the
+previous ESS-scaled local basin prefilter remains available but is not the
+default for this seed because it did not enter the precise-QI basin.
 Mirror-balanced cleanup stages are kept in diagnostic scripts because the
 current all-surface mirror objective trades away the QI gate for purely local
 `input.QI_stel_seed_3127` runs.
