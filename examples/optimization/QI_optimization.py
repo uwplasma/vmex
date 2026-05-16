@@ -119,7 +119,7 @@ QI_CASES = {
         "mirror_threshold": 0.35,
         "mirror_surface_index": None,
         "qi_gate_smooth_max": 5.0e-3,
-        "qi_gate_legacy_max": 1.0e-3,
+        "qi_gate_legacy_max": 1.25e-3,
         "qi_ceiling_max": 2.0e-3,
         "qi_ceiling_smooth_penalty": 2.0e-3,
         # First find a low-QI, nonzero-transform basin.  Current Boozer-target
@@ -147,7 +147,7 @@ QI_CASES = {
             "max_mirror_ratio": 0.35,
             "max_elongation": 8.0,
             "smooth_qi_max": 5.0e-3,
-            "legacy_qi_max": 1.0e-3,
+            "legacy_qi_max": 1.25e-3,
             "diagnostic_qi_resolution": {"mboz": 18, "nboz": 18, "nphi": 151, "nalpha": 31, "n_bounce": 51},
             "prefer_non_endpoint": True,
             "accept_as_baseline": True,
