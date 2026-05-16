@@ -62,6 +62,10 @@ class StagePolicy:
     iota_abs_max: float | None = None
     iota_ceiling_weight: float = 0.0
     qi_weight: float = 10.0
+    boozer_target_wout: str | None = None
+    boozer_target_weight: float = 0.0
+    boozer_target_normalize: bool = True
+    boozer_target_include_b00: bool = False
     mirror_threshold: float = 0.21
     promotion_mirror_threshold: float | None = None
     mirror_surface_index: int | None = None
@@ -995,6 +999,97 @@ def default_policies(*, max_nfev: int = 2) -> tuple[Policy, ...]:
             ),
         ),
         Policy(
+            "nfp3_boozer_target_homotopy",
+            (
+                "Reference-guided homotopy for the NFP=3 seed: first approach "
+                "the known NFP=3 QI Boozer spectrum, then release the target "
+                "and polish QI/mirror with bounded local steps."
+            ),
+            (
+                StagePolicy(
+                    "target_reference_boozer",
+                    method="scalar_trust",
+                    max_nfev=max_nfev,
+                    stage_modes=(4,),
+                    vmec_max_mode=4,
+                    min_vmec_mode=7,
+                    target_aspect=4.0,
+                    aspect_weight=0.25,
+                    iota_abs_min=TARGET_ABS_IOTA_MIN,
+                    iota_weight=50.0**2,
+                    iota_abs_max=1.35,
+                    iota_ceiling_weight=50.0**2,
+                    qi_weight=100.0,
+                    boozer_target_wout="examples/data/wout_nfp3_QI_fixed_resolution_final.nc",
+                    boozer_target_weight=500.0,
+                    mirror_threshold=0.40,
+                    promotion_mirror_threshold=0.50,
+                    mirror_surface_index=None,
+                    mirror_weight=0.0,
+                    elongation_weight=0.0,
+                    qi_ceiling_weight=200.0,
+                    qi_ceiling_max=3.0e-2,
+                    scalar_step_bound=5.0e-3,
+                    continue_on_failure=True,
+                ),
+                StagePolicy(
+                    "mixed_reference_qi_mirror",
+                    method="scalar_trust",
+                    max_nfev=max_nfev,
+                    stage_modes=(4,),
+                    vmec_max_mode=4,
+                    min_vmec_mode=7,
+                    target_aspect=4.0,
+                    aspect_weight=0.50,
+                    iota_abs_min=TARGET_ABS_IOTA_MIN,
+                    iota_weight=75.0**2,
+                    iota_abs_max=1.35,
+                    iota_ceiling_weight=75.0**2,
+                    qi_weight=1000.0,
+                    boozer_target_wout="examples/data/wout_nfp3_QI_fixed_resolution_final.nc",
+                    boozer_target_weight=100.0,
+                    mirror_threshold=0.35,
+                    promotion_mirror_threshold=0.40,
+                    mirror_surface_index=None,
+                    mirror_weight=1.0,
+                    elongation_weight=1.0,
+                    use_augmented_lagrangian=True,
+                    al_mirror_penalty=300.0,
+                    al_elongation_penalty=50.0,
+                    qi_ceiling_weight=1500.0,
+                    qi_ceiling_max=1.0e-2,
+                    scalar_step_bound=3.0e-3,
+                    continue_on_failure=True,
+                ),
+                StagePolicy(
+                    "release_reference_qi_mirror",
+                    method="lbfgs_adjoint",
+                    max_nfev=max_nfev,
+                    stage_modes=(4,),
+                    vmec_max_mode=4,
+                    min_vmec_mode=7,
+                    target_aspect=4.0,
+                    aspect_weight=0.50,
+                    iota_abs_min=TARGET_ABS_IOTA_MIN,
+                    iota_weight=100.0**2,
+                    iota_abs_max=1.35,
+                    iota_ceiling_weight=75.0**2,
+                    qi_weight=2000.0,
+                    mirror_threshold=0.30,
+                    promotion_mirror_threshold=0.35,
+                    mirror_surface_index=None,
+                    mirror_weight=1.0,
+                    elongation_weight=1.0,
+                    use_augmented_lagrangian=True,
+                    al_mirror_penalty=500.0,
+                    al_elongation_penalty=50.0,
+                    qi_ceiling_weight=3000.0,
+                    qi_ceiling_max=4.0e-3,
+                    lbfgs_step_bound=2.0e-3,
+                ),
+            ),
+        ),
+        Policy(
             "augmented_lagrangian_mirror",
             "Projected augmented-Lagrangian mirror/elongation constraints with a QI ceiling guard.",
             (
@@ -1093,6 +1188,30 @@ def _make_problem(vj: Any, resolution: ScanResolution, stage: StagePolicy):
                 0.0,
                 float(stage.iota_ceiling_weight),
             )
+        )
+    if stage.boozer_target_wout is not None and stage.boozer_target_weight > 0.0:
+        target_path = Path(stage.boozer_target_wout)
+        if not target_path.is_absolute():
+            target_path = REPO_ROOT / target_path
+        target = vj.boozer_b_target_from_wout(
+            target_path,
+            surfaces=qi_options.surfaces,
+            mboz=qi_options.mboz,
+            nboz=qi_options.nboz,
+        )
+        tuples.insert(
+            2,
+            (
+                vj.BoozerBTarget(
+                    target_bmnc=target["bmnc_b"],
+                    target_bmns=target["bmns_b"],
+                    normalize=bool(stage.boozer_target_normalize),
+                    include_b00=bool(stage.boozer_target_include_b00),
+                    qi_options=qi_options,
+                ).J,
+                0.0,
+                float(stage.boozer_target_weight),
+            ),
         )
     if stage.qi_ceiling_weight > 0.0:
         tuples.append(
