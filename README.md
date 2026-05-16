@@ -257,12 +257,15 @@ legacy QI, mirror ratio, elongation, iota, and Boozer `|B|` line-contour
 diagnostics. Use the prefine manifest path for reviewed expensive probes rather
 than launching ad hoc far-seed jobs.
 
-The `input.QI_stel_seed_3127` robustness lane is still an active research
-case: the initial deck has low mirror ratio but poor elongation and low
-rotational transform, while local boundary moves that raise transform can
-quickly worsen mirror. The diagnostic below scans two boundary coefficients
-around the seed and shows the multi-objective landscape that the QI optimizer
-must navigate.
+The `input.QI_stel_seed_3127` robustness lane is intentionally harder than the
+default NFP=2 QI seed.  Purely local boundary moves still get trapped, but the
+current `QI_optimization.py` case now includes a deterministic same-NFP
+reference-family preconditioner: it interpolates the seed boundary toward the
+bundled NFP=3 QI reference, audits each candidate with the independent
+smooth/legacy QI, mirror, elongation, aspect, and iota gates, and then starts
+local QI cleanup from the best accepted candidate.  The diagnostic below scans
+two boundary coefficients around the raw seed and shows why this larger
+global-to-local move is needed.
 
 <p align="center">
   <img src="docs/_static/figures/qi_seed3127_landscape_rc01_zs01.png" width="980" />
@@ -284,6 +287,20 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_landscape_scan.py \
 The landscape command defaults to trial solves for speed. Add `--exact-solve`
 before using the scanned QI, mirror, elongation, or iota values as promotion
 evidence.
+
+Run the current reference-family preconditioner directly:
+
+```bash
+PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 \
+  python examples/optimization/QI_optimization.py
+PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_boundary_interpolation_scan.py \
+  --seed-input examples/data/input.QI_stel_seed_3127 \
+  --reference-input examples/data/input.nfp3_QI_fixed_resolution_final \
+  --out-root results/diagnostics/qi_seed3127_boundary_interpolation \
+  --lambdas 0.95,0.975,0.99,0.995,1.0 \
+  --max-mode 4 --max-iter 80 --target-aspect 4.0 \
+  --max-mirror-ratio 0.35 --max-elongation 8.0
+```
 
 Regenerate the README panels and the compact CSV used for the table:
 
