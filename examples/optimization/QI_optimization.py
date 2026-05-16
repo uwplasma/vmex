@@ -703,6 +703,19 @@ def make_vmec_for_stage(input_file, output_dir):
     )
 
 
+def save_raw_seed_initial_artifacts(input_file, input_out, wout_out):
+    """Save the unpreconditioned VMEC input deck and its solved WOUT."""
+
+    input_out = Path(input_out)
+    wout_out = Path(wout_out)
+    input_out.parent.mkdir(parents=True, exist_ok=True)
+    wout_out.parent.mkdir(parents=True, exist_ok=True)
+    vj.write_indata(input_out, vj.read_indata(input_file))
+    run = vj.run_fixed_boundary(input_file, solver_device=SOLVER_DEVICE, verbose=False)
+    vj.write_wout_from_fixed_boundary_run(wout_out, run)
+    return run
+
+
 def basin_prefilter_score(metrics, targets, config):
     """Rank prefilter candidates by QI/iota first, engineering second."""
 
@@ -1292,7 +1305,6 @@ if QI_PREFINE:
     print(f"QI-only pre-refinement final objective: {preseed_history['objective_final']:.6e}")
     active_input_file = OUTPUT_DIR / "qi_preseed" / "input.final"
 
-first_result_for_outputs = None
 promotion_log = []
 if MIRROR_RAMP_STAGES:
     accepted_result = None
@@ -1314,8 +1326,6 @@ if MIRROR_RAMP_STAGES:
             method="scipy_matrix_free",
             use_mode_continuation=False,
         )
-        if first_result_for_outputs is None:
-            first_result_for_outputs = accepted_result
         accepted_seed_diagnostics = qi_diagnostics_for_result(
             accepted_result,
             mirror_threshold=MAX_MIRROR_RATIO,
@@ -1340,8 +1350,6 @@ if MIRROR_RAMP_STAGES:
             scalar_step_bound=stage.get("scalar_step_bound"),
             lbfgs_step_bound=stage.get("lbfgs_step_bound"),
         )
-        if first_result_for_outputs is None:
-            first_result_for_outputs = stage_result
         stage_mirror_threshold = float(stage.get("mirror_threshold", MAX_MIRROR_RATIO))
         stage_promotion_mirror_threshold = float(
             stage.get("promotion_mirror_threshold", stage_mirror_threshold)
@@ -1454,16 +1462,10 @@ else:
         max_nfev=MAX_NFEV,
         label=f"QI optimization (max_mode={MAX_MODE}, {'ESS' if USE_ESS else 'no ESS'})",
     )
-    first_result_for_outputs = result
 
 if result is None:
     raise RuntimeError("QI optimization did not produce a result.")
 
-# Results are plain Python objects.  The solve writes these default artifacts
-# for convenience; the explicit calls below show where to customize filenames
-# or add additional exports in a SIMSOPT-style workflow.
-initial_result_for_outputs = first_result_for_outputs if first_result_for_outputs is not None else result
-initial_optimizer = initial_result_for_outputs.initial_optimizer
 final_optimizer = result.final_optimizer
 final_result = result.final_result
 history = result.history
@@ -1478,11 +1480,11 @@ saved_paths = {
     "history": OUTPUT_DIR / "history.json",
 }
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-initial_optimizer.save_input(saved_paths["initial_input"], initial_result_for_outputs.initial_params)
-initial_optimizer.save_wout(
+print("\nRunning the raw input deck once for initial comparison plots ...")
+raw_initial_run = save_raw_seed_initial_artifacts(
+    INPUT_FILE,
+    saved_paths["initial_input"],
     saved_paths["initial_wout"],
-    initial_result_for_outputs.initial_params,
-    state=initial_result_for_outputs.initial_state,
 )
 final_optimizer.save_input(saved_paths["final_input"], result.final_params)
 final_optimizer.save_wout(
@@ -1504,7 +1506,7 @@ print(f"  total objective:  {history['objective_final']:.6e}")
 print(f"  wall time:        {timing['total_wall_time_s']:.2f} s")
 print(f"  objective samples: {objective_history[:5]} ... {objective_history[-3:]}")
 
-print("\nFiles saved from result objects:")
+print("\nFiles saved for raw-seed/final comparison:")
 for name, path in saved_paths.items():
     print(f"  {name}: {path}")
 
@@ -1635,6 +1637,18 @@ if MAKE_PLOTS:
         "objective_history": vj.plot_objective_history(
             saved_paths["history"],
             outdir=OUTPUT_DIR,
+        ),
+        "boozer_bmag_initial": vj.plot_boozer_bmag_contours_from_state(
+            raw_initial_run.state,
+            static=raw_initial_run.static,
+            indata=raw_initial_run.indata,
+            signgs=raw_initial_run.signgs,
+            outdir=OUTPUT_DIR,
+            filename="boozer_bmag_initial.png",
+            surfaces=(1.0,),
+            mboz=_resolution_value(AUDIT_QI_RESOLUTION, "mboz", QI_OPTIONS.mboz),
+            nboz=_resolution_value(AUDIT_QI_RESOLUTION, "nboz", QI_OPTIONS.nboz),
+            title=f"{INPUT_FILE.name}: initial seed Boozer |B| contours on LCFS",
         ),
         "boozer_bmag_contours": vj.plot_boozer_bmag_contours_from_state(
             result.final_state,

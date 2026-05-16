@@ -121,28 +121,36 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "qi_options=" not in solve_call
     assert "plot=" not in solve_call
     assert "print_optimization_outputs" not in text
-    assert "initial_optimizer = initial_result_for_outputs.initial_optimizer" in text
+    assert "def save_raw_seed_initial_artifacts(input_file, input_out, wout_out):" in text
+    assert "vj.write_indata(input_out, vj.read_indata(input_file))" in text
+    assert "vj.run_fixed_boundary(input_file, solver_device=SOLVER_DEVICE, verbose=False)" in text
+    assert "vj.write_wout_from_fixed_boundary_run(wout_out, run)" in text
+    assert "raw_initial_run = save_raw_seed_initial_artifacts(" in text
+    assert "INPUT_FILE," in text
+    assert 'saved_paths["initial_input"],' in text
+    assert 'saved_paths["initial_wout"],' in text
+    assert "first_result_for_outputs" not in text
+    assert "initial_result_for_outputs" not in text
     assert "final_optimizer = result.final_optimizer" in text
     assert "result.final_result" in text
     assert "history = result.history" in text
     assert "objective_history = result.objective_history" in text
     assert "timing = result.timing_summary" in text
-    assert "initial_result_for_outputs.initial_params" in text
-    assert "initial_result_for_outputs.initial_state" in text
+    assert "Running the raw input deck once for initial comparison plots" in text
     assert "result.final_params" in text
     assert "result.final_state" in text
     assert "saved_paths = {" in text
-    assert "initial_optimizer.save_input(" in text
-    assert "initial_optimizer.save_wout(" in text
     assert "final_optimizer.save_input(" in text
     assert "final_optimizer.save_wout(" in text
     assert "final_optimizer.save_history(" in text
-    assert "Files saved from result objects" in text
+    assert "Files saved for raw-seed/final comparison" in text
     assert 'vj.load_wout(saved_paths["final_wout"])' in text
     assert "vmecplot2_bmag_grid(" in text
     assert "plot_3d_boundary_comparison(" in text
     assert "plot_bmag_contours(" in text
     assert "plot_objective_history(" in text
+    assert '"boozer_bmag_initial": vj.plot_boozer_bmag_contours_from_state(' in text
+    assert "raw_initial_run.state" in text
     assert "plot_boozer_bmag_contours_from_state(" in text
     assert "qi_diagnostics_from_state(" in text
     assert "qi_cleanup_candidate_promotable(" in text
