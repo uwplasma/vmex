@@ -138,7 +138,7 @@ QI_CASES = {
         "boundary_reference_preconditioner": {
             "enabled": True,
             "reference_input": DATA_DIR / "input.nfp3_QI_fixed_resolution_final",
-            "lambdas": (0.998, 1.0, 1.002, 1.004, 1.006, 1.008, 1.01),
+            "lambdas": (0.994, 0.995, 0.996, 0.997, 0.998, 0.999, 1.0, 1.001, 1.002),
             "keys": ("RBC", "ZBS", "RBS", "ZBC"),
             "max_mode": 4,
             "max_iter": 80,
@@ -152,7 +152,7 @@ QI_CASES = {
             # Once a candidate passes the independent QI/iota/mirror/elongation
             # gates, prefer the lower-mirror branch.  This uses the aspect and
             # elongation margin of this seed without promoting non-QI states.
-            "mirror_selection_weight": 2.0,
+            "mirror_selection_weight": 10.0,
             "prefer_non_endpoint": True,
             "accept_as_baseline": True,
         },
@@ -207,6 +207,35 @@ QI_CASES = {
                 "require_mirror_improvement": False,
                 "require_engineering_gate": False,
                 "accept_if_rank_improves": True,
+            },
+            {
+                "name": "nfirst_qi_ceiling_mirror_cleanup",
+                "max_nfev": 6,
+                "stage_repeats": 1,
+                # First unlock toroidal structure at fixed low poloidal
+                # complexity, then unlock the full mode-4 boundary.  This is
+                # cheaper and often safer than immediately moving all mode-4
+                # poloidal/toroidal harmonics.
+                "stage_mode_limits": (
+                    {"mode": 4, "max_m": 1, "max_n": 4, "label": "nfirst"},
+                    {"mode": 4, "max_m": 4, "max_n": 4, "label": "full"},
+                ),
+                "method": "scipy_matrix_free",
+                "use_mode_continuation": True,
+                "aspect_weight": 0.05,
+                "iota_floor_weight": 50.0**2,
+                "qi_weight": 350.0,
+                "qi_ceiling_max": 5.0e-3,
+                "qi_ceiling_weight": 5000.0,
+                "mirror_threshold": 0.30,
+                "promotion_mirror_threshold": 0.35,
+                "mirror_weight": 8.0,
+                "elongation_weight": 0.0,
+                "require_seed_gate": True,
+                "require_mirror_improvement": True,
+                "require_engineering_gate": True,
+                "accept_if_engineering_score_improves": True,
+                "mirror_improvement_min": 1.0e-3,
             },
         ),
     },
@@ -320,8 +349,18 @@ if _EXTERNAL_INPUT:
         "VMEC_JAX_QI_RUN_CASE",
         os.environ.get("VMEC_JAX_QI_LABEL", Path(_EXTERNAL_INPUT).name.replace("input.", "")),
     )
+    _external_reference = os.environ.get("VMEC_JAX_QI_REFERENCE_INPUT")
+    _external_boundary_reference = {"enabled": False}
+    if _external_reference:
+        _external_boundary_reference = {
+            **QI_CASES["qi_stel_seed_3127"]["boundary_reference_preconditioner"],
+            "enabled": True,
+            "reference_input": Path(_external_reference).expanduser(),
+        }
     # External inputs use the far-seed robustness policy by default: first
     # establish a QI+iota basin, then add guarded engineering cleanup later.
+    # If the user supplies VMEC_JAX_QI_REFERENCE_INPUT, the same deterministic
+    # global-to-local reference-family preconditioner is enabled for that seed.
     QI_CASES[_external_label] = {
         **QI_CASES["qi_stel_seed_3127"],
         "case_goal": "external VMEC input using the far-seed QI+iota robustness policy",
@@ -329,7 +368,7 @@ if _EXTERNAL_INPUT:
         "output_dir": Path(
             os.environ.get("VMEC_JAX_QI_OUTPUT_DIR", f"results/qi_opt/ess/{_external_label}")
         ).expanduser(),
-        "boundary_reference_preconditioner": {"enabled": False},
+        "boundary_reference_preconditioner": _external_boundary_reference,
     }
     RUN_CASE = _external_label
 else:
@@ -1118,6 +1157,8 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config):
 
 
 def stage_modes_for(stage):
+    if "stage_mode_limits" in stage:
+        return [vj.normalize_boundary_mode_limits(mode) for mode in stage["stage_mode_limits"]]
     if "stage_modes" in stage:
         return [int(mode) for mode in stage["stage_modes"]]
     return vj.repeated_stage_modes(
@@ -1138,6 +1179,20 @@ def promotion_score(record):
         + engineering_penalty
         + _finite_or_inf(record.get("qi_rank_score"))
         + 0.25 * _finite_or_inf(record.get("qi_constraint_score"))
+    )
+
+
+def engineering_promotion_score(record):
+    """Rank already-gated candidates by QI first and mirror second."""
+
+    seed_penalty = 0.0 if bool(record.get("qi_seed_gate_passed")) else 1000.0
+    engineering_penalty = 0.0 if bool(record.get("qi_engineering_gate_passed")) else 100.0
+    return (
+        seed_penalty
+        + engineering_penalty
+        + _finite_or_inf(record.get("qi_rank_score"))
+        + 0.25 * _finite_or_inf(record.get("qi_constraint_score"))
+        + 2.0 * _finite_or_inf(record.get("qi_mirror_ratio_max"))
     )
 
 
@@ -1186,6 +1241,24 @@ def stage_promotes_candidate(stage, promotion, reference_diagnostics):
             )
     elif bool(stage.get("accept_if_rank_improves", False)):
         # The first staged far-seed result is allowed to become the baseline.
+        pass
+    if bool(stage.get("accept_if_engineering_score_improves", False)) and reference_diagnostics is not None:
+        candidate_score = engineering_promotion_score(promotion)
+        reference_score = engineering_promotion_score(reference_diagnostics)
+        candidate_mirror = _finite_or_inf(promotion.get("qi_mirror_ratio_max"))
+        reference_mirror = _finite_or_inf(reference_diagnostics.get("qi_mirror_ratio_max"))
+        mirror_gain = reference_mirror - candidate_mirror
+        if candidate_score >= reference_score - float(stage.get("engineering_score_relax", 1.0e-12)):
+            reasons.append(
+                "engineering score did not improve: "
+                f"candidate={candidate_score:.6g}, reference={reference_score:.6g}"
+            )
+        if mirror_gain < float(stage.get("mirror_improvement_min", 0.0)):
+            reasons.append(
+                "mirror ratio did not improve enough: "
+                f"gain={mirror_gain:.6g}, required={float(stage.get('mirror_improvement_min', 0.0)):.6g}"
+            )
+    elif bool(stage.get("accept_if_engineering_score_improves", False)):
         pass
     if reasons:
         out = dict(promotion)
@@ -1319,7 +1392,15 @@ if MIRROR_RAMP_STAGES:
                 "stage": stage_index,
                 "name": stage_name,
                 "output_dir": str(stage_output_dir),
-                "stage_modes": list(stage_modes_i),
+                "stage_modes": [
+                    {
+                        "mode": int(vj.normalize_boundary_mode_limits(mode).mode),
+                        "max_m": vj.normalize_boundary_mode_limits(mode).max_m,
+                        "max_n": vj.normalize_boundary_mode_limits(mode).max_n,
+                        "label": vj.normalize_boundary_mode_limits(mode).label,
+                    }
+                    for mode in stage_modes_i
+                ],
                 "method": str(stage.get("method", METHOD)),
                 "promoted": bool(promotion["qi_cleanup_promoted"]),
                 "smooth_qi": promotion.get("qi_smooth_total"),

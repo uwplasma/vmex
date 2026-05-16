@@ -30,7 +30,12 @@ from vmec_jax.optimization import (
     surface_indices_from_static,
     truncate_indata_boundary_modes,
 )
-from vmec_jax.optimization_workflow import interpolate_indata_boundary
+from vmec_jax.optimization_workflow import (
+    BoundaryModeLimits,
+    describe_boundary_mode_limits,
+    interpolate_indata_boundary,
+    normalize_boundary_mode_limits,
+)
 from vmec_jax.state import pack_state
 
 
@@ -261,6 +266,7 @@ def test_qi_mode_continuation_rebuilds_from_previous_stage_input(monkeypatch, tm
     import vmec_jax.optimization_workflow as workflow
 
     calls = []
+    limits = []
 
     class FakeOptimizer:
         def __init__(self, stage_index):
@@ -294,8 +300,9 @@ def test_qi_mode_continuation_rebuilds_from_previous_stage_input(monkeypatch, tm
     def fake_config_from_indata(indata):
         return SimpleNamespace(source_path=indata.source_path)
 
-    def fake_build_stage(cfg, indata, *, stage_mode, **_kwargs):
+    def fake_build_stage(cfg, indata, *, stage_mode, stage_max_m=None, stage_max_n=None, **_kwargs):
         calls.append((cfg.source_path, indata.source_path, int(stage_mode)))
+        limits.append((stage_max_m, stage_max_n))
         spec = BoundaryParamSpec(f"rc{stage_mode}0", "rc", 0, int(stage_mode), 0)
         return SimpleNamespace(
             mode=int(stage_mode),
@@ -323,7 +330,7 @@ def test_qi_mode_continuation_rebuilds_from_previous_stage_input(monkeypatch, tm
         indata=original,
         scalar_objectives=[],
         qi_objectives=[],
-        stage_modes=[1, 2],
+        stage_modes=[1, {"mode": 2, "max_m": 1, "max_n": 2, "label": "nfirst"}],
         max_mode=2,
         max_nfev=3,
         continuation_nfev=1,
@@ -363,6 +370,7 @@ def test_qi_mode_continuation_rebuilds_from_previous_stage_input(monkeypatch, tm
         ("qi-original-cfg", "qi-original-input", 1),
         ("qi-stage-1-final-21.0", "qi-stage-1-final-21.0", 2),
     ]
+    assert limits == [(None, None), (1, 2)]
     assert [record[2].tolist() for record in result.stage_records] == [[0.0], [0.0]]
 
 
@@ -436,6 +444,20 @@ def test_stage_mode_helpers_handle_direct_zero_budget_and_repeated_qi_policy():
     assert workflow.qs_stage_budget(stage_mode=2, max_mode=3, max_nfev=30, continuation_nfev=0) == 30
     with pytest.raises(ValueError, match="max_nfev"):
         workflow.qs_stage_budget(stage_mode=3, max_mode=3, max_nfev=0, continuation_nfev=0)
+
+
+def test_boundary_mode_limits_normalize_anisotropic_stage_descriptors():
+    assert normalize_boundary_mode_limits(3) == BoundaryModeLimits(mode=3)
+    assert normalize_boundary_mode_limits((1, 4)) == BoundaryModeLimits(mode=4, max_m=1, max_n=4)
+    assert normalize_boundary_mode_limits((5, 2, 5)) == BoundaryModeLimits(mode=5, max_m=2, max_n=5)
+    assert normalize_boundary_mode_limits({"mode": 6, "max_m": 1, "max_n": 6, "label": "nfirst"}) == (
+        BoundaryModeLimits(mode=6, max_m=1, max_n=6, label="nfirst")
+    )
+    assert describe_boundary_mode_limits({"mode": 6, "max_m": 1, "max_n": 6, "label": "nfirst"}) == (
+        "mode06_m01_n06_nfirst"
+    )
+    with pytest.raises(ValueError, match="mode/max_mode"):
+        normalize_boundary_mode_limits({})
 
 
 def test_create_x_scale_normalizes_lowest_level_and_decays_high_modes():

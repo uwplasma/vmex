@@ -990,6 +990,16 @@ far-seed policy, set ``VMEC_JAX_QI_INPUT`` and optionally
 
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_INPUT=/path/to/input.my_seed python examples/optimization/QI_optimization.py
 
+If you have a scientifically appropriate same-NFP QI reference input, add it
+without editing the script:
+
+.. code-block:: bash
+
+   PYTHONPATH=. JAX_PLATFORMS=cpu \
+     VMEC_JAX_QI_INPUT=/path/to/input.my_seed \
+     VMEC_JAX_QI_REFERENCE_INPUT=/path/to/input.same_nfp_qi_reference \
+     python examples/optimization/QI_optimization.py
+
 If you want to rank the seed before optimizing it, first create a matching
 wout with ``vmec_jax /path/to/input.my_seed`` and then run
 ``examples/optimization/audit_qi_seed_suitability.py --case
@@ -1006,6 +1016,15 @@ appropriate, run the boundary-interpolation scan, then accept the result only
 if both the numerical metrics and Boozer ``|B|`` line-contour plot pass the QI
 gate.
 
+For local cleanup after a global preconditioner, the script can unlock
+boundary modes anisotropically using ``stage_mode_limits``.  For example,
+``{"mode": 4, "max_m": 1, "max_n": 4, "label": "nfirst"}`` lets toroidal
+harmonics move while keeping poloidal complexity low, then a second
+``{"mode": 4, "max_m": 4, "max_n": 4, "label": "full"}`` stage unlocks the
+full boundary.  Candidate stages are promoted only if independent exact
+diagnostics pass, so a lower-mirror local step cannot overwrite the accepted
+QI baseline if it damages legacy QI or the mirror gate.
+
 To reproduce the same-NFP reference-family scan used by the public
 ``qi_stel_seed_3127`` case:
 
@@ -1015,7 +1034,7 @@ To reproduce the same-NFP reference-family scan used by the public
      --seed-input examples/data/input.QI_stel_seed_3127 \
      --reference-input examples/data/input.nfp3_QI_fixed_resolution_final \
      --out-root results/diagnostics/qi_seed3127_boundary_interpolation \
-     --lambdas 0.998,1.0,1.002,1.004,1.006,1.008,1.01 \
+     --lambdas 0.994,0.995,0.996,0.997,0.998,0.999,1.0,1.001,1.002 \
      --max-mode 4 --max-iter 80 --target-aspect 4.0 \
      --surfaces 0.1,0.28,0.46,0.64,0.82,1.0 \
      --mboz 18 --nboz 18 --nphi 151 --nalpha 31 --n-bounce 51 \

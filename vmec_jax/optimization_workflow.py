@@ -133,6 +133,23 @@ class FixedBoundaryObjectiveStage:
 
 
 @dataclass(frozen=True)
+class BoundaryModeLimits:
+    """Boundary-parameter mode limits for one optimization stage.
+
+    ``mode`` controls VMEC spectral-resolution extension and continuation
+    bookkeeping.  ``max_m`` and ``max_n`` optionally restrict the free boundary
+    coefficients independently, enabling schedules such as toroidal-first
+    stages with ``max_m=1`` and ``max_n=4`` before a full ``max_m=max_n=4``
+    cleanup.
+    """
+
+    mode: int
+    max_m: int | None = None
+    max_n: int | None = None
+    label: str | None = None
+
+
+@dataclass(frozen=True)
 class FixedBoundaryOptimizationResult:
     """Result returned by :func:`run_fixed_boundary_objective_optimization`."""
 
@@ -1783,6 +1800,63 @@ def qs_stage_budget(
     return int(continuation_nfev) if int(continuation_nfev) > 0 else int(max_nfev)
 
 
+def normalize_boundary_mode_limits(stage_mode) -> BoundaryModeLimits:
+    """Normalize an int/tuple/dict stage descriptor into mode limits.
+
+    Accepted forms:
+
+    - ``3``: square stage with ``max_m=max_n=3``.
+    - ``(1, 4)``: anisotropic stage with ``max_m=1``, ``max_n=4`` and
+      ``mode=4`` for VMEC resolution/budgeting.
+    - ``(4, 1, 4)``: explicit ``(mode, max_m, max_n)``.
+    - ``{"mode": 4, "max_m": 1, "max_n": 4, "label": "n-first"}``.
+    """
+
+    if isinstance(stage_mode, BoundaryModeLimits):
+        return stage_mode
+    if isinstance(stage_mode, dict):
+        max_m = stage_mode.get("max_m")
+        max_n = stage_mode.get("max_n")
+        mode_raw = stage_mode.get("mode", stage_mode.get("max_mode"))
+        if mode_raw is None:
+            finite_limits = [value for value in (max_m, max_n) if value is not None]
+            if not finite_limits:
+                raise ValueError("Boundary mode-limit dictionaries require mode/max_mode or max_m/max_n.")
+            mode_raw = max(int(value) for value in finite_limits)
+        return BoundaryModeLimits(
+            mode=int(mode_raw),
+            max_m=None if max_m is None else int(max_m),
+            max_n=None if max_n is None else int(max_n),
+            label=stage_mode.get("label"),
+        )
+    if isinstance(stage_mode, (tuple, list)):
+        if len(stage_mode) == 2:
+            max_m, max_n = (None if value is None else int(value) for value in stage_mode)
+            finite_limits = [value for value in (max_m, max_n) if value is not None]
+            if not finite_limits:
+                raise ValueError("At least one of max_m or max_n must be finite.")
+            return BoundaryModeLimits(mode=max(finite_limits), max_m=max_m, max_n=max_n)
+        if len(stage_mode) == 3:
+            mode, max_m, max_n = stage_mode
+            return BoundaryModeLimits(
+                mode=int(mode),
+                max_m=None if max_m is None else int(max_m),
+                max_n=None if max_n is None else int(max_n),
+            )
+        raise ValueError("Boundary stage tuples must be (max_m, max_n) or (mode, max_m, max_n).")
+    return BoundaryModeLimits(mode=int(stage_mode))
+
+
+def describe_boundary_mode_limits(stage_mode) -> str:
+    """Return a compact label for a boundary-mode stage descriptor."""
+
+    limits = normalize_boundary_mode_limits(stage_mode)
+    max_m = limits.mode if limits.max_m is None else limits.max_m
+    max_n = limits.mode if limits.max_n is None else limits.max_n
+    base = f"mode{limits.mode:02d}_m{int(max_m):02d}_n{int(max_n):02d}"
+    return f"{base}_{limits.label}" if limits.label else base
+
+
 def rebuild_for_optimization_resolution(indata, *, max_mode: int, min_vmec_mode: int = 5):
     """Set VMEC spectral resolution to at least ``max(min_vmec_mode, max_mode+2)``."""
 
@@ -1855,6 +1929,8 @@ def build_fixed_boundary_objective_stage(
     indata,
     *,
     stage_mode: int,
+    stage_max_m: int | None = None,
+    stage_max_n: int | None = None,
     objectives: Sequence[ObjectiveTerm],
     include: Sequence[str] = ("rc", "zs"),
     fix: Sequence[str] = ("rc00",),
@@ -1886,6 +1962,8 @@ def build_fixed_boundary_objective_stage(
         boundary_input,
         static.modes,
         max_mode=stage_mode,
+        max_m=stage_max_m,
+        max_n=stage_max_n,
         min_coeff=float(min_coeff),
         include=tuple(include),
         fix=tuple(fix),
@@ -1991,11 +2069,14 @@ def run_fixed_boundary_objective_optimization(
     current_cfg = cfg
     current_indata = indata
 
-    for stage_index, stage_mode in enumerate(stage_modes, start=1):
+    normalized_stage_modes = [normalize_boundary_mode_limits(stage_mode) for stage_mode in stage_modes]
+    for stage_index, stage_limits in enumerate(normalized_stage_modes, start=1):
         stage = build_fixed_boundary_objective_stage(
             current_cfg,
             current_indata,
-            stage_mode=int(stage_mode),
+            stage_mode=int(stage_limits.mode),
+            stage_max_m=stage_limits.max_m,
+            stage_max_n=stage_limits.max_n,
             objectives=objectives,
             include=include,
             fix=fix,
@@ -2017,7 +2098,7 @@ def run_fixed_boundary_objective_optimization(
         # lower-mode stage intentionally projected them out.
         params0 = np.zeros(len(stage.specs), dtype=float)
         nfev = qs_stage_budget(
-            stage_mode=int(stage_mode),
+            stage_mode=int(stage_limits.mode),
             max_mode=int(max_mode),
             max_nfev=int(max_nfev),
             continuation_nfev=int(continuation_nfev),
@@ -2028,7 +2109,7 @@ def run_fixed_boundary_objective_optimization(
             else None
         )
 
-        if int(stage_mode) == int(max_mode):
+        if int(stage_limits.mode) == int(max_mode):
             print_qs_problem_summary(
                 method=method,
                 max_nfev=nfev,
@@ -2042,7 +2123,11 @@ def run_fixed_boundary_objective_optimization(
                 params0=params0,
             )
         else:
-            print(f"Stage {stage_mode} -> {stage_mode + 1} continuation seed (budget={nfev}) ...")
+            print(
+                "Stage "
+                f"{describe_boundary_mode_limits(stage_limits)} continuation seed "
+                f"(budget={nfev}) ..."
+            )
 
         result = stage.optimizer.run(
             params0,
@@ -2052,7 +2137,7 @@ def run_fixed_boundary_objective_optimization(
             gtol=gtol,
             xtol=xtol,
             x_scale=x_scale,
-            verbose=1 if int(stage_mode) == int(max_mode) else 0,
+            verbose=1 if int(stage_limits.mode) == int(max_mode) else 0,
             iota_fn=iota_fn,
             target_iota=target_iota,
             target_aspect=target_aspect,
@@ -2064,7 +2149,7 @@ def run_fixed_boundary_objective_optimization(
         if iota_abs_min is not None:
             result["_history_dump"]["iota_abs_min"] = float(iota_abs_min)
         save_qs_stage_artifacts(
-            stage_dir=output_dir / f"stage_{stage_index:02d}_mode{int(stage_mode):02d}",
+            stage_dir=output_dir / f"stage_{stage_index:02d}_{describe_boundary_mode_limits(stage_limits)}",
             optimizer=stage.optimizer,
             params_initial=params0,
             params_final=result["x"],
@@ -2073,7 +2158,7 @@ def run_fixed_boundary_objective_optimization(
             save_wouts=save_stage_wouts,
             save_rerun_wouts=save_rerun_wouts,
         )
-        stage_records.append((int(stage_mode), stage.optimizer, params0, result))
+        stage_records.append((int(stage_limits.mode), stage.optimizer, params0, result))
         current_indata = stage.optimizer._indata_from_params(result["x"])
         current_cfg = config_from_indata(current_indata)
 
@@ -2084,7 +2169,7 @@ def run_fixed_boundary_objective_optimization(
         max_mode=max_mode,
         max_nfev=max_nfev,
         continuation_nfev=continuation_nfev,
-        stage_modes=stage_modes,
+        stage_modes=normalized_stage_modes,
         stage_records=stage_records,
     )
     if combined_history is not None:
@@ -2106,7 +2191,7 @@ def run_fixed_boundary_objective_optimization(
         stage_records=stage_records,
         final_optimizer=final_optimizer,
         final_result=final_result,
-        stage_modes=[int(mode) for mode in stage_modes],
+        stage_modes=[int(stage_mode.mode) for stage_mode in normalized_stage_modes],
     )
 
 
@@ -2115,6 +2200,8 @@ def build_quasi_isodynamic_objective_stage(
     indata,
     *,
     stage_mode: int,
+    stage_max_m: int | None = None,
+    stage_max_n: int | None = None,
     scalar_objectives: Sequence[ObjectiveTerm],
     qi_objectives: Sequence[QIObjectiveTerm],
     surfaces,
@@ -2169,6 +2256,8 @@ def build_quasi_isodynamic_objective_stage(
         boundary_input,
         static.modes,
         max_mode=stage_mode,
+        max_m=stage_max_m,
+        max_n=stage_max_n,
         min_coeff=0.0,
         include=tuple(include),
         fix=tuple(fix),
@@ -2351,11 +2440,14 @@ def run_quasi_isodynamic_objective_optimization(
     current_cfg = cfg
     current_indata = indata
 
-    for stage_index, stage_mode in enumerate(stage_modes, start=1):
+    normalized_stage_modes = [normalize_boundary_mode_limits(stage_mode) for stage_mode in stage_modes]
+    for stage_index, stage_limits in enumerate(normalized_stage_modes, start=1):
         stage = build_quasi_isodynamic_objective_stage(
             current_cfg,
             current_indata,
-            stage_mode=int(stage_mode),
+            stage_mode=int(stage_limits.mode),
+            stage_max_m=stage_limits.max_m,
+            stage_max_n=stage_limits.max_n,
             scalar_objectives=scalar_objectives,
             qi_objectives=qi_objectives,
             surfaces=surfaces,
@@ -2400,7 +2492,7 @@ def run_quasi_isodynamic_objective_optimization(
         # projection) and all active coefficients are represented as increments.
         params0 = np.zeros(len(stage.specs), dtype=float)
         nfev = qs_stage_budget(
-            stage_mode=int(stage_mode),
+            stage_mode=int(stage_limits.mode),
             max_mode=int(max_mode),
             max_nfev=int(max_nfev),
             continuation_nfev=int(continuation_nfev),
@@ -2410,7 +2502,7 @@ def run_quasi_isodynamic_objective_optimization(
             if objectives_track_iota(scalar_objectives) or iota_abs_min is not None
             else None
         )
-        if int(stage_mode) == int(max_mode):
+        if int(stage_limits.mode) == int(max_mode):
             print_qs_problem_summary(
                 method=method,
                 max_nfev=nfev,
@@ -2427,7 +2519,11 @@ def run_quasi_isodynamic_objective_optimization(
             for term in qi_objectives:
                 print(f"  - {term.name}")
         else:
-            print(f"Stage {stage_mode} -> {stage_mode + 1} continuation seed (budget={nfev}) ...")
+            print(
+                "Stage "
+                f"{describe_boundary_mode_limits(stage_limits)} continuation seed "
+                f"(budget={nfev}) ..."
+            )
 
         result = stage.optimizer.run(
             params0,
@@ -2437,7 +2533,7 @@ def run_quasi_isodynamic_objective_optimization(
             gtol=gtol,
             xtol=xtol,
             x_scale=x_scale,
-            verbose=1 if int(stage_mode) == int(max_mode) else 0,
+            verbose=1 if int(stage_limits.mode) == int(max_mode) else 0,
             iota_fn=iota_fn,
             target_aspect=target_aspect,
             scipy_tr_solver=scipy_tr_solver,
@@ -2448,7 +2544,7 @@ def run_quasi_isodynamic_objective_optimization(
         if iota_abs_min is not None:
             result["_history_dump"]["iota_abs_min"] = float(iota_abs_min)
         save_qs_stage_artifacts(
-            stage_dir=output_dir / f"stage_{stage_index:02d}_mode{int(stage_mode):02d}",
+            stage_dir=output_dir / f"stage_{stage_index:02d}_{describe_boundary_mode_limits(stage_limits)}",
             optimizer=stage.optimizer,
             params_initial=params0,
             params_final=result["x"],
@@ -2456,7 +2552,7 @@ def run_quasi_isodynamic_objective_optimization(
             save_inputs=save_stage_inputs,
             save_wouts=save_stage_wouts,
         )
-        stage_records.append((int(stage_mode), stage.optimizer, params0, result))
+        stage_records.append((int(stage_limits.mode), stage.optimizer, params0, result))
         current_indata = stage.optimizer._indata_from_params(result["x"])
         current_cfg = config_from_indata(current_indata)
 
@@ -2467,7 +2563,7 @@ def run_quasi_isodynamic_objective_optimization(
         max_mode=max_mode,
         max_nfev=max_nfev,
         continuation_nfev=continuation_nfev,
-        stage_modes=stage_modes,
+        stage_modes=normalized_stage_modes,
         stage_records=stage_records,
     )
     if combined_history is not None:
@@ -2487,7 +2583,7 @@ def run_quasi_isodynamic_objective_optimization(
         stage_records=stage_records,
         final_optimizer=final_optimizer,
         final_result=final_result,
-        stage_modes=[int(mode) for mode in stage_modes],
+        stage_modes=[int(stage_mode.mode) for stage_mode in normalized_stage_modes],
     )
 
 
@@ -2792,6 +2888,7 @@ def combine_qs_stage_histories(
 
     if len(stage_records) <= 1:
         return None
+    normalized_stage_modes = [normalize_boundary_mode_limits(stage_mode) for stage_mode in stage_modes]
 
     combined_entries = []
     stage_boundaries = []
@@ -2819,12 +2916,12 @@ def combine_qs_stage_histories(
             "max_nfev": int(
                 sum(
                     qs_stage_budget(
-                        stage_mode=int(mode),
+                        stage_mode=int(mode.mode),
                         max_mode=int(max_mode),
                         max_nfev=int(max_nfev),
                         continuation_nfev=int(continuation_nfev),
                     )
-                    for mode in stage_modes
+                    for mode in normalized_stage_modes
                 )
             ),
             "total_wall_time_s": float(wall_offset),
@@ -2838,6 +2935,15 @@ def combine_qs_stage_histories(
             "aspect_final": float(final_hist["aspect_final"]),
             "history": combined_entries,
             "stage_boundaries": stage_boundaries,
+            "stage_mode_descriptors": [
+                {
+                    "mode": int(mode.mode),
+                    "max_m": None if mode.max_m is None else int(mode.max_m),
+                    "max_n": None if mode.max_n is None else int(mode.max_n),
+                    "label": mode.label,
+                }
+                for mode in normalized_stage_modes
+            ],
         }
     )
     if combined_entries and "iota" in combined_entries[0] and "iota" in combined_entries[-1]:
@@ -2907,6 +3013,7 @@ __all__ = [
     "BDotGradV",
     "BetaTotal",
     "BoozerBTarget",
+    "BoundaryModeLimits",
     "DMerc",
     "FixedBoundaryVMEC",
     "FixedBoundaryObjectiveStage",
@@ -2936,11 +3043,13 @@ __all__ = [
     "build_fixed_boundary_objective_stage",
     "build_quasi_isodynamic_objective_stage",
     "combine_qs_stage_histories",
+    "describe_boundary_mode_limits",
     "interpolate_indata_boundary",
     "lgradb_objective",
     "least_squares_solve",
     "mean_iota",
     "mean_iota_objective",
+    "normalize_boundary_mode_limits",
     "objectives_track_iota",
     "qs_stage_budget",
     "qs_stage_modes",

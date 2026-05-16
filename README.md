@@ -270,6 +270,11 @@ cannot replace it unless exact diagnostics improve.
 For this far-seed case the legacy Goodman-style QI gate is `1.25e-3`, while
 the smooth differentiable proxy gate is `5e-3` because it is the optimization
 surrogate and is more conservative on the six-surface audit.
+Guarded local cleanup can now use anisotropic boundary stages, for example
+unlocking `max_m=1, max_n=4` before the full `max_m=max_n=4` boundary. The
+script promotes such stages only when independent exact diagnostics improve,
+so a mirror-heavy local solve cannot replace a precise-QI baseline if it
+damages legacy QI.
 The diagnostic below scans two boundary coefficients around the raw seed and
 shows why this larger global-to-local move is needed.
 
@@ -303,7 +308,7 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_boundary_interpolatio
   --seed-input examples/data/input.QI_stel_seed_3127 \
   --reference-input examples/data/input.nfp3_QI_fixed_resolution_final \
   --out-root results/diagnostics/qi_seed3127_boundary_interpolation \
-  --lambdas 0.998,1.0,1.002,1.004,1.006,1.008,1.01 \
+  --lambdas 0.994,0.995,0.996,0.997,0.998,0.999,1.0,1.001,1.002 \
   --max-mode 4 --max-iter 80 --target-aspect 4.0 \
   --surfaces 0.1,0.28,0.46,0.64,0.82,1.0 \
   --mboz 18 --nboz 18 --nphi 151 --nalpha 31 --n-bounce 51 \
