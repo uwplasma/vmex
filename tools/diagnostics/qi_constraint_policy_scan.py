@@ -1278,7 +1278,16 @@ def _make_problem(vj: Any, resolution: ScanResolution, stage: StagePolicy):
     return vj.LeastSquaresProblem.from_tuples(tuples), qi_options
 
 
-def _diagnose(vj: Any, result: Any, resolution: ScanResolution, qi_options: Any, *, mirror_threshold: float) -> dict[str, Any]:
+def _diagnose(
+    vj: Any,
+    result: Any,
+    resolution: ScanResolution,
+    qi_options: Any,
+    *,
+    target_aspect: float,
+    abs_iota_min: float | None,
+    mirror_threshold: float,
+) -> dict[str, Any]:
     from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_suitability
 
     options = vj.QIDiagnosticOptions(
@@ -1317,8 +1326,8 @@ def _diagnose(vj: Any, result: Any, resolution: ScanResolution, qi_options: Any,
         targets=QISeedSuitabilityTargets(
             smooth_qi_max=QI_GATE_SMOOTH_MAX,
             legacy_qi_max=QI_GATE_LEGACY_MAX,
-            target_aspect=TARGET_ASPECT,
-            abs_iota_min=TARGET_ABS_IOTA_MIN,
+            target_aspect=float(target_aspect),
+            abs_iota_min=None if abs_iota_min is None else float(abs_iota_min),
             mirror_ratio_max=float(mirror_threshold),
             max_elongation=MAX_ELONGATION,
         ),
@@ -1400,7 +1409,15 @@ def run_policy(
             if stage.promotion_mirror_threshold is not None
             else float(stage.mirror_threshold)
         )
-        diagnostics = _diagnose(vj, result, resolution, qi_options, mirror_threshold=mirror_gate)
+        diagnostics = _diagnose(
+            vj,
+            result,
+            resolution,
+            qi_options,
+            target_aspect=float(stage.target_aspect),
+            abs_iota_min=stage.iota_abs_min,
+            mirror_threshold=mirror_gate,
+        )
         (stage_dir / "diagnostics.json").write_text(json.dumps(diagnostics, indent=2, sort_keys=True) + "\n")
         stage_selected = bool(diagnostics.get("qi_seed_gate_passed"))
         stage_record = {
