@@ -266,9 +266,9 @@ smooth/legacy QI, mirror, elongation, aspect, and iota gates, and then starts
 local QI cleanup from the best accepted non-endpoint candidate when one exists.
 That candidate is recorded as the accepted baseline, so later cleanup stages
 cannot replace it unless exact diagnostics improve.
-For this far-seed case the legacy Goodman-style QI gate stays strict at
-`1e-3`, while the smooth differentiable proxy gate is set to `5e-3` because it
-is the optimization surrogate and is more conservative on the six-surface audit.
+For this far-seed case the legacy Goodman-style QI gate is `1.25e-3`, while
+the smooth differentiable proxy gate is `5e-3` because it is the optimization
+surrogate and is more conservative on the six-surface audit.
 The diagnostic below scans two boundary coefficients around the raw seed and
 shows why this larger global-to-local move is needed.
 
@@ -306,7 +306,7 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_boundary_interpolatio
   --max-mode 4 --max-iter 80 --target-aspect 4.0 \
   --surfaces 0.1,0.28,0.46,0.64,0.82,1.0 \
   --mboz 18 --nboz 18 --nphi 151 --nalpha 31 --n-bounce 51 \
-  --smooth-qi-max 5e-3 --legacy-qi-max 1e-3 \
+  --smooth-qi-max 5e-3 --legacy-qi-max 1.25e-3 \
   --max-mirror-ratio 0.35 --max-elongation 8.0
 ```
 

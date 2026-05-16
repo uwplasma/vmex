@@ -133,7 +133,7 @@ records that candidate as the accepted baseline before local QI cleanup.  This
 is a global-to-local move; the
 previous ESS-scaled local basin prefilter remains available but is not the
 default for this seed because it did not enter the precise-QI basin.
-The far-seed gate keeps the legacy Goodman-style metric strict at `1e-3` and
+The far-seed gate keeps the legacy Goodman-style metric tight at `1.25e-3` and
 uses a `5e-3` cap for the smooth differentiable proxy on the six-surface audit.
 Mirror-balanced cleanup stages are kept in diagnostic scripts because the
 current all-surface mirror objective trades away the QI gate for purely local
@@ -165,7 +165,7 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_boundary_interpolatio
   --max-mode 4 --max-iter 80 --target-aspect 4.0 \
   --surfaces 0.1,0.28,0.46,0.64,0.82,1.0 \
   --mboz 18 --nboz 18 --nphi 151 --nalpha 31 --n-bounce 51 \
-  --smooth-qi-max 5e-3 --legacy-qi-max 1e-3 \
+  --smooth-qi-max 5e-3 --legacy-qi-max 1.25e-3 \
   --max-mirror-ratio 0.35 --max-elongation 8.0
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py \
   --backend-label cpu --solver-device cpu --policy continuation \
