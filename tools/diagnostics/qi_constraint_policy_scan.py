@@ -51,7 +51,11 @@ class StagePolicy:
     method: str = "scipy"
     max_nfev: int = 2
     stage_modes: tuple[int, ...] = (3,)
+    vmec_max_mode: int | None = None
+    min_vmec_mode: int | None = None
+    target_aspect: float = TARGET_ASPECT
     aspect_weight: float = 0.25
+    iota_abs_min: float | None = TARGET_ABS_IOTA_MIN
     target_iota: float | None = None
     target_iota_weight: float = 0.0
     iota_weight: float = 200.0**2
@@ -76,6 +80,7 @@ class StagePolicy:
     continue_if_qi_aspect_pass: bool = False
     scalar_step_bound: float | None = None
     lbfgs_step_bound: float | None = None
+    continue_on_failure: bool = False
 
 
 @dataclass(frozen=True)
@@ -666,6 +671,205 @@ def default_policies(*, max_nfev: int = 2) -> tuple[Policy, ...]:
             ),
         ),
         Policy(
+            "iota_homotopy_mirror_preserve",
+            (
+                "Exploratory signed-iota homotopy for low-mirror basins: ramp "
+                "the transform toward -0.41 while preserving mirror before the "
+                "final QI/iota cleanup."
+            ),
+            (
+                StagePolicy(
+                    "iota020_mirror",
+                    method="scipy_matrix_free",
+                    max_nfev=max_nfev,
+                    aspect_weight=0.10,
+                    iota_abs_min=0.18,
+                    target_iota=-0.20,
+                    target_iota_weight=75.0**2,
+                    iota_weight=50.0**2,
+                    iota_abs_max=0.35,
+                    iota_ceiling_weight=50.0**2,
+                    qi_weight=300.0,
+                    mirror_threshold=0.45,
+                    promotion_mirror_threshold=0.50,
+                    mirror_surface_index=-1,
+                    mirror_weight=1.0,
+                    elongation_weight=1.0,
+                    use_augmented_lagrangian=True,
+                    al_mirror_penalty=300.0,
+                    al_elongation_penalty=25.0,
+                    qi_ceiling_weight=500.0,
+                    qi_ceiling_max=2.0e-2,
+                    continue_on_failure=True,
+                ),
+                StagePolicy(
+                    "iota030_mirror",
+                    method="scipy_matrix_free",
+                    max_nfev=max_nfev,
+                    aspect_weight=0.10,
+                    iota_abs_min=0.28,
+                    target_iota=-0.30,
+                    target_iota_weight=100.0**2,
+                    iota_weight=75.0**2,
+                    iota_abs_max=0.45,
+                    iota_ceiling_weight=75.0**2,
+                    qi_weight=700.0,
+                    mirror_threshold=0.48,
+                    promotion_mirror_threshold=0.50,
+                    mirror_surface_index=-1,
+                    mirror_weight=1.0,
+                    elongation_weight=1.0,
+                    use_augmented_lagrangian=True,
+                    al_mirror_penalty=400.0,
+                    al_elongation_penalty=35.0,
+                    qi_ceiling_weight=1000.0,
+                    qi_ceiling_max=1.0e-2,
+                    continue_on_failure=True,
+                ),
+                StagePolicy(
+                    "iota041_mirror",
+                    method="scipy_matrix_free",
+                    max_nfev=max_nfev,
+                    aspect_weight=0.10,
+                    iota_abs_min=TARGET_ABS_IOTA_MIN,
+                    target_iota=-0.41,
+                    target_iota_weight=150.0**2,
+                    iota_weight=100.0**2,
+                    iota_abs_max=0.60,
+                    iota_ceiling_weight=125.0**2,
+                    qi_weight=1200.0,
+                    mirror_threshold=0.50,
+                    promotion_mirror_threshold=0.50,
+                    mirror_surface_index=-1,
+                    mirror_weight=1.0,
+                    elongation_weight=1.0,
+                    use_augmented_lagrangian=True,
+                    al_mirror_penalty=500.0,
+                    al_elongation_penalty=50.0,
+                    qi_ceiling_weight=2500.0,
+                    qi_ceiling_max=5.0e-3,
+                    qi_ceiling_smooth_penalty=2.0e-3,
+                    continue_on_failure=True,
+                ),
+                StagePolicy(
+                    "qi_cleanup",
+                    method="scipy_matrix_free",
+                    max_nfev=max_nfev,
+                    aspect_weight=0.10,
+                    iota_abs_min=TARGET_ABS_IOTA_MIN,
+                    target_iota=-0.41,
+                    target_iota_weight=200.0**2,
+                    iota_weight=100.0**2,
+                    iota_abs_max=0.60,
+                    iota_ceiling_weight=125.0**2,
+                    qi_weight=1800.0,
+                    mirror_threshold=0.50,
+                    promotion_mirror_threshold=0.50,
+                    mirror_surface_index=-1,
+                    mirror_weight=1.0,
+                    elongation_weight=1.0,
+                    use_augmented_lagrangian=True,
+                    al_mirror_penalty=500.0,
+                    al_elongation_penalty=50.0,
+                    qi_ceiling_weight=3000.0,
+                    qi_ceiling_max=4.0e-3,
+                    qi_ceiling_smooth_penalty=2.0e-3,
+                ),
+            ),
+        ),
+        Policy(
+            "mode4_iota_homotopy_mirror_preserve",
+            (
+                "Same signed-iota homotopy with mode-4 boundary DOFs enabled, "
+                "used to test whether the QI/mirror tradeoff is a mode-3 "
+                "resolution limit."
+            ),
+            tuple(
+                StagePolicy(
+                    **{
+                        **asdict(stage),
+                        "name": f"mode4_{stage.name}",
+                        "stage_modes": (4,),
+                        "vmec_max_mode": 4,
+                        "min_vmec_mode": 7,
+                    }
+                )
+                for stage in (
+                    StagePolicy(
+                        "iota020_mirror",
+                        method="scipy_matrix_free",
+                        max_nfev=max(1, max_nfev // 2),
+                        aspect_weight=0.10,
+                        iota_abs_min=0.18,
+                        target_iota=-0.20,
+                        target_iota_weight=75.0**2,
+                        iota_weight=50.0**2,
+                        iota_abs_max=0.35,
+                        iota_ceiling_weight=50.0**2,
+                        qi_weight=300.0,
+                        mirror_threshold=0.45,
+                        promotion_mirror_threshold=0.50,
+                        mirror_surface_index=-1,
+                        mirror_weight=1.0,
+                        elongation_weight=1.0,
+                        use_augmented_lagrangian=True,
+                        al_mirror_penalty=300.0,
+                        al_elongation_penalty=25.0,
+                        qi_ceiling_weight=500.0,
+                        qi_ceiling_max=2.0e-2,
+                        continue_on_failure=True,
+                    ),
+                    StagePolicy(
+                        "iota041_mirror",
+                        method="scipy_matrix_free",
+                        max_nfev=max(1, max_nfev // 2),
+                        aspect_weight=0.10,
+                        iota_abs_min=TARGET_ABS_IOTA_MIN,
+                        target_iota=-0.41,
+                        target_iota_weight=150.0**2,
+                        iota_weight=100.0**2,
+                        iota_abs_max=0.60,
+                        iota_ceiling_weight=125.0**2,
+                        qi_weight=1200.0,
+                        mirror_threshold=0.50,
+                        promotion_mirror_threshold=0.50,
+                        mirror_surface_index=-1,
+                        mirror_weight=1.0,
+                        elongation_weight=1.0,
+                        use_augmented_lagrangian=True,
+                        al_mirror_penalty=500.0,
+                        al_elongation_penalty=50.0,
+                        qi_ceiling_weight=2500.0,
+                        qi_ceiling_max=5.0e-3,
+                        continue_on_failure=True,
+                    ),
+                    StagePolicy(
+                        "qi_cleanup",
+                        method="scipy_matrix_free",
+                        max_nfev=max(1, max_nfev // 2),
+                        aspect_weight=0.10,
+                        iota_abs_min=TARGET_ABS_IOTA_MIN,
+                        target_iota=-0.41,
+                        target_iota_weight=200.0**2,
+                        iota_weight=100.0**2,
+                        iota_abs_max=0.60,
+                        iota_ceiling_weight=125.0**2,
+                        qi_weight=1800.0,
+                        mirror_threshold=0.50,
+                        promotion_mirror_threshold=0.50,
+                        mirror_surface_index=-1,
+                        mirror_weight=1.0,
+                        elongation_weight=1.0,
+                        use_augmented_lagrangian=True,
+                        al_mirror_penalty=500.0,
+                        al_elongation_penalty=50.0,
+                        qi_ceiling_weight=3000.0,
+                        qi_ceiling_max=4.0e-3,
+                    ),
+                )
+            ),
+        ),
+        Policy(
             "augmented_lagrangian_mirror",
             "Projected augmented-Lagrangian mirror/elongation constraints with a QI ceiling guard.",
             (
@@ -743,10 +947,18 @@ def _build_qi_options(vj: Any, resolution: ScanResolution, stage: StagePolicy):
 def _make_problem(vj: Any, resolution: ScanResolution, stage: StagePolicy):
     qi_options = _build_qi_options(vj, resolution, stage)
     tuples = [
-        (vj.AspectRatio().J, TARGET_ASPECT, float(stage.aspect_weight)),
-        (vj.AbsMeanIotaFloor(TARGET_ABS_IOTA_MIN).J, 0.0, float(stage.iota_weight)),
+        (vj.AspectRatio().J, float(stage.target_aspect), float(stage.aspect_weight)),
         (vj.QuasiIsodynamicResidual(qi_options).J, 0.0, float(stage.qi_weight)),
     ]
+    if stage.iota_abs_min is not None and stage.iota_weight > 0.0:
+        tuples.insert(
+            1,
+            (
+                vj.AbsMeanIotaFloor(float(stage.iota_abs_min)).J,
+                0.0,
+                float(stage.iota_weight),
+            ),
+        )
     if stage.target_iota is not None and stage.target_iota_weight > 0.0:
         tuples.append((vj.MeanIota().J, float(stage.target_iota), float(stage.target_iota_weight)))
     if stage.iota_abs_max is not None and stage.iota_ceiling_weight > 0.0:
@@ -869,6 +1081,12 @@ def _diagnose(vj: Any, result: Any, resolution: ScanResolution, qi_options: Any,
     )
 
 
+def _stage_vmec_max_mode(stage: StagePolicy) -> int:
+    if stage.vmec_max_mode is not None:
+        return int(stage.vmec_max_mode)
+    return max(int(mode) for mode in stage.stage_modes)
+
+
 def run_policy(
     policy: Policy,
     *,
@@ -896,10 +1114,11 @@ def run_policy(
     for index, stage in enumerate(policy.stages, start=1):
         stage_dir = policy_dir / f"{index:02d}_{stage.name}"
         problem, qi_options = _make_problem(vj, resolution, stage)
+        stage_max_mode = _stage_vmec_max_mode(stage)
         vmec = vj.FixedBoundaryVMEC.from_input(
             active_input,
-            max_mode=3,
-            min_vmec_mode=6,
+            max_mode=stage_max_mode,
+            min_vmec_mode=int(stage.min_vmec_mode) if stage.min_vmec_mode is not None else max(6, stage_max_mode + 3),
             output_dir=stage_dir,
             project_input_boundary_to_max_mode=True,
         )
@@ -943,9 +1162,11 @@ def run_policy(
             "stage_name": stage.name,
             "method": stage.method,
             "stage_modes": list(stage.stage_modes),
+            "vmec_max_mode": stage_max_mode,
             "max_nfev": stage.max_nfev,
             "output_dir": str(stage_dir),
             "selected": stage_selected,
+            "engineering_selected": bool(diagnostics.get("qi_engineering_gate_passed")),
             "smooth_qi": _float_or_none(diagnostics.get("qi_smooth_total")),
             "legacy_qi": _float_or_none(diagnostics.get("qi_legacy_total")),
             "mirror": _float_or_none(diagnostics.get("qi_mirror_ratio_max")),
@@ -963,6 +1184,11 @@ def run_policy(
             selected_output = True
             selected_reason = "QI+iota seed gate passed"
             active_input = stage_dir / "input.final"
+        elif stage.continue_on_failure:
+            selected_output = False
+            selected_reason = "; ".join(diagnostics.get("qi_failure_reasons", [])) or "QI+iota seed gate failed"
+            active_input = stage_dir / "input.final"
+            continue
         else:
             selected_output = False
             selected_reason = "; ".join(diagnostics.get("qi_failure_reasons", [])) or "QI+iota seed gate failed"
@@ -980,6 +1206,9 @@ def run_policy(
         "policy": policy.name,
         "description": policy.description,
         "selected": bool(selected_output),
+        "engineering_selected": bool(
+            final_diagnostics is not None and final_diagnostics.get("qi_engineering_gate_passed")
+        ),
         "selection": "selected" if selected_output else "rejected",
         "selection_reason": selected_reason,
         "smooth_qi": last.get("smooth_qi"),
@@ -1009,6 +1238,7 @@ def write_summary(records: list[dict[str, Any]], out_root: Path) -> None:
         "aspect",
         "wall_time_s",
         "selection",
+        "engineering_selected",
         "selection_reason",
         "output_dir",
     ]
