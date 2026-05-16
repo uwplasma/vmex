@@ -11,7 +11,6 @@ then be passed to ``qi_constraint_policy_scan.py`` for local QI/mirror cleanup.
 from __future__ import annotations
 
 import argparse
-import copy
 import csv
 import json
 from pathlib import Path
@@ -41,42 +40,6 @@ def _parse_lambdas(text: str) -> tuple[float, ...]:
         if not np.isfinite(value):
             raise ValueError(f"Interpolation lambda must be finite, got {value!r}.")
     return values
-
-
-def _coeff(indata: Any, key: str, idx: tuple[int, ...]) -> float:
-    return float(indata.indexed.get(key, {}).get(idx, 0.0))
-
-
-def _copy_scalar_if_present(dst: Any, src: Any, key: str) -> None:
-    if key in src.scalars:
-        dst.scalars[key] = copy.deepcopy(src.scalars[key])
-
-
-def interpolate_indata(seed: Any, reference: Any, lam: float, *, keys: tuple[str, ...], max_mode: int | None) -> Any:
-    """Return a seed/reference boundary interpolation at ``lam``.
-
-    ``lam=0`` returns the seed boundary and ``lam=1`` returns the reference
-    boundary for the selected Fourier coefficients.
-    """
-
-    out = copy.deepcopy(seed)
-    for key in ("NFP", "LASYM"):
-        _copy_scalar_if_present(out, seed, key)
-    for key in ("MPOL", "NTOR"):
-        out.scalars[key] = max(int(seed.get_int(key, 0)), int(reference.get_int(key, 0)))
-
-    for key in keys:
-        seed_coeffs = seed.indexed.get(key, {})
-        ref_coeffs = reference.indexed.get(key, {})
-        indices = set(seed_coeffs) | set(ref_coeffs)
-        out.indexed.setdefault(key, {})
-        for idx in sorted(indices):
-            if max_mode is not None and any(abs(int(i)) > int(max_mode) for i in idx[:2]):
-                continue
-            out.indexed[key][idx] = (1.0 - float(lam)) * _coeff(seed, key, idx) + float(lam) * _coeff(
-                reference, key, idx
-            )
-    return out
 
 
 def _diagnose(vj: Any, run: Any, *, args: argparse.Namespace) -> dict[str, Any]:
@@ -195,7 +158,7 @@ def run_scan(args: argparse.Namespace) -> list[dict[str, Any]]:
         input_path = case_dir / "input.interpolated"
         wout_path = case_dir / "wout_interpolated.nc"
         try:
-            candidate = interpolate_indata(seed, reference, lam, keys=keys, max_mode=args.max_mode)
+            candidate = vj.interpolate_indata_boundary(seed, reference, lam, keys=keys, max_mode=args.max_mode)
             write_indata(input_path, candidate)
             run = vj.run_fixed_boundary(
                 input_path,

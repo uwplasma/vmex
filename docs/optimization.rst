@@ -803,17 +803,19 @@ run:
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_seed_robustness.py
 
 Both scripts optimize QI, aspect ratio, and a differentiable
-``abs(mean_iota) >= 0.41`` floor at ``max_mode = 3``.  The QI target aspect
-ratio is now 10, which gives the optimizer more geometric room to recover low
-smooth/legacy QI and acceptable elongation before mirror cleanup.  Local probes
-from the ``input.QI_stel_seed_3127`` far seed now use a bounded basin prefilter
-followed by a QI/iota cleanup.  Current bounded probes reach precise QI, the
-correct transform, and acceptable elongation from that unrelated seed, but
-mirror cleanup remains the active engineering gate.  The script therefore
-prints both a ``QI+iota`` gate and a stricter engineering gate that also
-includes mirror ratio and elongation.  It also writes a Boozer-coordinate
-``|B|`` line-contour plot; VMEC-angle contour plots alone are not accepted as a
-QI visual gate.
+``abs(mean_iota) >= 0.41`` floor.  The default NFP=2 lane still targets a
+higher aspect ratio to avoid overconstraining the mirror-aware problem.  The
+``input.QI_stel_seed_3127`` far-seed lane is different: the known same-NFP QI
+branch lives near aspect ``3.5``-``4.0`` with ``|iota|≈1``, so that case now
+uses a deterministic same-NFP reference-family boundary preconditioner before
+local cleanup.  The preconditioner scans interpolation points between the raw
+seed and the bundled NFP=3 QI reference, solves each candidate, ranks them with
+independent smooth/legacy QI, mirror, elongation, aspect, and iota gates, and
+then continues from the best accepted candidate.  The script therefore prints
+both a ``QI+iota`` gate and a stricter engineering gate that also includes
+mirror ratio and elongation.  It also writes a Boozer-coordinate ``|B|``
+line-contour plot; VMEC-angle contour plots alone are not accepted as a QI
+visual gate.
 
 The study compared direct versus repeated-stage continuation, QP pre-seeding,
 aspect-ratio weights, mirror/elongation soft-wall weights, QI branch-width
@@ -821,9 +823,9 @@ weights, the branch-shuffle profile residual, ``phimin`` well-interval choices,
 and termination tolerances against the nfp=2
 ``examples/data/input.nfp2_QI`` seed and the bundled near-axis
 ``input.QI_stel_seed_3127`` seed.  The current far-seed QI lane uses
-``max_mode = 3`` with ESS, ``target_aspect = 10.0``,
-``abs(mean_iota) >= 0.41``, a bounded ESS-scaled basin prefilter, and a
-single QI/iota cleanup with a QI ceiling.  The
+``max_mode = 4`` with ESS, ``target_aspect = 4.0``,
+``abs(mean_iota) >= 0.41``, same-NFP reference-family boundary interpolation,
+and a single QI/iota cleanup with a QI ceiling.  The
 shuffle-profile term is intentionally retained because width-only and
 branch-width-only smooth surrogates can rank QH/QP-like false positives ahead
 of the branch-squash/stretch/shuffle diagnostic used in the reference Goodman
@@ -905,6 +907,15 @@ Two practical lessons from that study are now reflected in the example:
      )
      objective_tuples.append((b_target.J, 0.0, 100.0))
 
+- ``vj.interpolate_indata_boundary`` is the lower-level boundary-space
+  counterpart to ``BoozerBTarget``.  It deterministically interpolates selected
+  VMEC boundary coefficient dictionaries, preserving seed-owned scalar
+  metadata such as ``NFP`` and ``LASYM``.  For very far seeds this can be more
+  effective than a local trust-region step because it deliberately crosses
+  basins before the differentiable local optimizer starts.  The
+  ``qi_stel_seed_3127`` case uses this as a same-NFP reference-family
+  preconditioner.
+
 ``QI_optimization.py`` is now the single recommended multi-seed entry point.
 Set ``VMEC_JAX_QI_RUN_CASE`` at launch time, or change ``RUN_CASE`` at the top
 of the file, to one of the bundled cases:
@@ -912,7 +923,7 @@ of the file, to one of the bundled cases:
 .. code-block:: python
 
    RUN_CASE = "nfp2_qi"             # default NFP=2 mirror-aware QI lane
-   RUN_CASE = "qi_stel_seed_3127"   # unrelated stellarator seed robustness lane
+   RUN_CASE = "qi_stel_seed_3127"   # unrelated seed with reference-family preconditioner
    RUN_CASE = "nfp4_qh_warm_to_qi"  # NFP=4 QH warm start, using the input NFP
 
 For example, to run the bundled near-axis stellarator seed without editing the
@@ -977,21 +988,36 @@ label:qi:input_path:wout_path`` as described in :doc:`validation`.
 
 The bundled ``input.QI_stel_seed_3127`` case can be used directly with
 ``VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127`` or
-``RUN_CASE = "qi_stel_seed_3127"``.  This far-from-QI seed is intentionally
-configured as a QI+iota robustness probe, not as a claimed full engineering
-solution: the script should print a passed QI+iota gate and a failed mirror
-gate until the mirror-cleanup lane is solved.  For a new unrelated seed, audit
-the seed first, optionally add a solved same-NFP QI target wout through
-``BoozerBTarget`` as a homotopy experiment, run the bounded QI script, then
-accept the result only if both the numerical metrics and Boozer ``|B|``
-line-contour plot pass the QI gate.
+``RUN_CASE = "qi_stel_seed_3127"``.  This far-from-QI seed is configured as a
+reference-family robustness probe: direct local mirror/QI weighting is not
+enough, but a large deterministic boundary-space move toward the same-NFP QI
+family enters the precise-QI basin.  For a new unrelated seed, audit the seed
+first, prefer a solved same-NFP QI reference if one is scientifically
+appropriate, run the boundary-interpolation scan, then accept the result only
+if both the numerical metrics and Boozer ``|B|`` line-contour plot pass the QI
+gate.
 
-The following local landscape scan illustrates why the ``input.QI_stel_seed_3127``
-case is not yet a solved engineering example.  The seed starts with low mirror
-ratio, but poor elongation and low transform.  Nearby boundary moves in
+To reproduce the same-NFP reference-family scan used by the public
+``qi_stel_seed_3127`` case:
+
+.. code-block:: bash
+
+   PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_boundary_interpolation_scan.py \
+     --seed-input examples/data/input.QI_stel_seed_3127 \
+     --reference-input examples/data/input.nfp3_QI_fixed_resolution_final \
+     --out-root results/diagnostics/qi_seed3127_boundary_interpolation \
+     --lambdas 0.95,0.975,0.99,0.995,1.0 \
+     --max-mode 4 --max-iter 80 --target-aspect 4.0 \
+     --max-mirror-ratio 0.35 --max-elongation 8.0
+
+The following local landscape scan illustrates why the raw
+``input.QI_stel_seed_3127`` neighborhood is hard.  The seed starts with low
+mirror ratio, but poor elongation and low transform.  Nearby boundary moves in
 ``rc01`` and ``zs01`` can keep the mirror low only in a narrow valley and do not
-fix the elongation/transform issue by themselves.  The plot is generated with
-contour lines, not filled contours, so the competing ridges are visible.
+fix the elongation/transform issue by themselves.  This is why the promoted
+robustness lane uses a larger reference-family move before local cleanup.  The
+plot is generated with contour lines, not filled contours, so the competing
+ridges are visible.
 
 .. image:: _static/figures/qi_seed3127_landscape_rc01_zs01.png
    :alt: QI seed 3127 two degree-of-freedom landscape scan

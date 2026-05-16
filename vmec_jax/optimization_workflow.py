@@ -9,6 +9,7 @@ live here instead of being repeated in every example.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 import math
 from pathlib import Path
@@ -1789,6 +1790,66 @@ def rebuild_for_optimization_resolution(indata, *, max_mode: int, min_vmec_mode:
     return rebuild_indata_with_resolution(indata, mpol=vmec_mpol, ntor=vmec_mpol)
 
 
+def interpolate_indata_boundary(
+    seed_indata,
+    reference_indata,
+    lam: float,
+    *,
+    keys: Sequence[str] = ("RBC", "ZBS", "RBS", "ZBC"),
+    max_mode: int | None = None,
+    require_same_nfp: bool = True,
+    preserve_seed_scalars: Sequence[str] = ("NFP", "LASYM"),
+):
+    """Interpolate selected VMEC boundary Fourier coefficients.
+
+    This helper implements a deterministic global-to-local preconditioner for
+    far-seed QI optimization.  ``lam=0`` preserves the seed boundary for the
+    selected keys, while ``lam=1`` uses the reference boundary.  Scalar VMEC
+    metadata remains seed-owned for entries in ``preserve_seed_scalars`` so a
+    reference family can be used without accidentally changing the user's
+    field-period count or symmetry flag.
+
+    If ``max_mode`` is given, selected boundary coefficient dictionaries are
+    projected to modes with ``abs(m) <= max_mode`` and ``abs(n) <= max_mode``.
+    """
+
+    lam = float(lam)
+    if not math.isfinite(lam):
+        raise ValueError("Boundary interpolation lambda must be finite.")
+    if bool(require_same_nfp) and int(seed_indata.get_int("NFP", -1)) != int(reference_indata.get_int("NFP", -2)):
+        raise ValueError(
+            "Boundary interpolation requires same-NFP inputs; "
+            f"got seed NFP={seed_indata.get_int('NFP')} and reference NFP={reference_indata.get_int('NFP')}."
+        )
+
+    out = copy.deepcopy(seed_indata)
+    for key in preserve_seed_scalars:
+        key = key.upper()
+        if key in seed_indata.scalars:
+            out.scalars[key] = copy.deepcopy(seed_indata.scalars[key])
+
+    if "MPOL" in seed_indata.scalars or "MPOL" in reference_indata.scalars:
+        out.scalars["MPOL"] = max(int(seed_indata.get_int("MPOL", 0)), int(reference_indata.get_int("MPOL", 0)))
+    if "NTOR" in seed_indata.scalars or "NTOR" in reference_indata.scalars:
+        out.scalars["NTOR"] = max(int(seed_indata.get_int("NTOR", 0)), int(reference_indata.get_int("NTOR", 0)))
+
+    max_mode_i = None if max_mode is None else int(max_mode)
+    for key in tuple(item.upper() for item in keys):
+        seed_coeffs = seed_indata.indexed.get(key, {})
+        ref_coeffs = reference_indata.indexed.get(key, {})
+        indices = set(seed_coeffs) | set(ref_coeffs)
+        interpolated = {}
+        for idx in sorted(indices):
+            if max_mode_i is not None and any(abs(int(i)) > max_mode_i for i in idx[:2]):
+                continue
+            seed_value = float(seed_coeffs.get(idx, 0.0))
+            reference_value = float(ref_coeffs.get(idx, 0.0))
+            interpolated[idx] = (1.0 - lam) * seed_value + lam * reference_value
+        if interpolated or key in out.indexed:
+            out.indexed[key] = interpolated
+    return out
+
+
 def build_fixed_boundary_objective_stage(
     cfg,
     indata,
@@ -2875,6 +2936,7 @@ __all__ = [
     "build_fixed_boundary_objective_stage",
     "build_quasi_isodynamic_objective_stage",
     "combine_qs_stage_histories",
+    "interpolate_indata_boundary",
     "lgradb_objective",
     "least_squares_solve",
     "mean_iota",

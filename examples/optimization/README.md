@@ -124,10 +124,16 @@ fail the independent smooth/legacy QI and engineering gates are rejected and
 should not be promoted as improved QI candidates.
 
 For far seeds, `QI_optimization.py` uses the same single script but a longer
-policy: a bounded basin prefilter over ESS-scaled boundary jumps, followed by a
-single QI/iota cleanup.  Mirror-balanced cleanup stages are kept in diagnostic
-scripts because the current all-surface mirror objective trades away the QI gate
-for `input.QI_stel_seed_3127`.
+policy.  The `input.QI_stel_seed_3127` case now starts with a deterministic
+same-NFP reference-family preconditioner: it interpolates the raw seed boundary
+toward the bundled NFP=3 QI reference, runs bounded fixed-boundary solves for
+the candidate interpolation points, ranks them with independent QI/mirror/iota
+diagnostics, and only then starts local QI cleanup.  This is a global-to-local
+move; the previous ESS-scaled local basin prefilter remains available but is
+not the default for this seed because it did not enter the precise-QI basin.
+Mirror-balanced cleanup stages are kept in diagnostic scripts because the
+current all-surface mirror objective trades away the QI gate for purely local
+`input.QI_stel_seed_3127` runs.
 The final files in the top-level output directory come from the last promoted
 stage, or from the best exact-diagnostic candidate if no stage passes the
 promotion gate.  Review `basin_prefilter/top_candidates.json` and
@@ -147,6 +153,13 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/audit_qi_seed_suitab
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_seed_robustness.py
 PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 \
   python examples/optimization/QI_optimization.py
+PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_boundary_interpolation_scan.py \
+  --seed-input examples/data/input.QI_stel_seed_3127 \
+  --reference-input examples/data/input.nfp3_QI_fixed_resolution_final \
+  --out-root results/diagnostics/qi_seed3127_boundary_interpolation \
+  --lambdas 0.95,0.975,0.99,0.995,1.0 \
+  --max-mode 4 --max-iter 80 --target-aspect 4.0 \
+  --max-mirror-ratio 0.35 --max-elongation 8.0
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py \
   --backend-label cpu --solver-device cpu --policy continuation \
   --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both

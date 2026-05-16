@@ -103,17 +103,20 @@ QI_CASES = {
         ),
     },
     "qi_stel_seed_3127": {
-        "case_goal": "far-seed staged QI robustness lane with explicit QI/iota/engineering gates",
+        "case_goal": "far-seed staged QI robustness lane with reference-family global preconditioning",
         "input_file": DATA_DIR / "input.QI_stel_seed_3127",
         "output_dir": Path("results/qi_opt/ess/qi_stel_seed_3127"),
-        "max_mode": 3,
+        "max_mode": 4,
         "min_vmec_mode": 6,
         "use_mode_continuation": False,
         "stage_repeats": 1,
         "max_nfev": 8,
-        "target_aspect": DEFAULT_QI_TARGET_ASPECT,
+        # The known NFP=3 QI family reached from this seed lives near aspect
+        # 3.5-4.0 with |iota|~1.0.  Forcing aspect 10 steers local solvers away
+        # from that basin, so this robustness lane targets the actual branch.
+        "target_aspect": 4.0,
         "target_abs_iota_min": 0.41,
-        "mirror_threshold": 0.21,
+        "mirror_threshold": 0.35,
         "mirror_surface_index": None,
         "qi_ceiling_max": 2.0e-3,
         "qi_ceiling_smooth_penalty": 2.0e-3,
@@ -126,8 +129,26 @@ QI_CASES = {
         "phimin": 0.0,
         "optimization_qi_resolution": {"mboz": 5, "nboz": 5, "nphi": 31, "nalpha": 7, "n_bounce": 9},
         "audit_qi_resolution": {"mboz": 18, "nboz": 18, "nphi": 151, "nalpha": 31, "n_bounce": 51},
-        "basin_prefilter": {
+        # Deterministic global-to-local preconditioner.  It makes a small
+        # same-NFP reference-family scan before local optimization.  This is
+        # the current robust path for the unrelated seed: lambda≈0.99 enters
+        # the precise-QI basin, while purely local boundary steps do not.
+        "boundary_reference_preconditioner": {
             "enabled": True,
+            "reference_input": DATA_DIR / "input.nfp3_QI_fixed_resolution_final",
+            "lambdas": (0.95, 0.975, 0.99, 0.995, 1.0),
+            "keys": ("RBC", "ZBS", "RBS", "ZBC"),
+            "max_mode": 4,
+            "max_iter": 80,
+            "target_aspect": 4.0,
+            "abs_iota_min": 0.41,
+            "max_mirror_ratio": 0.35,
+            "max_elongation": 8.0,
+            "smooth_qi_max": 2.0e-3,
+            "legacy_qi_max": 1.0e-3,
+        },
+        "basin_prefilter": {
+            "enabled": False,
             "radii": (0.025, 0.05, 0.1),
             "directions": ("axes", "rademacher"),
             "axis_count": 6,
@@ -299,6 +320,7 @@ if _EXTERNAL_INPUT:
         "output_dir": Path(
             os.environ.get("VMEC_JAX_QI_OUTPUT_DIR", f"results/qi_opt/ess/{_external_label}")
         ).expanduser(),
+        "boundary_reference_preconditioner": {"enabled": False},
     }
     RUN_CASE = _external_label
 else:
@@ -586,6 +608,11 @@ print(
 print(f"  QI audit grid:   {AUDIT_QI_RESOLUTION or 'same as optimization'}")
 print(f"  JIT Boozer path: {QI_OPTIONS.jit_booz}")
 print(f"  Boozer target:   {BOOZER_TARGET_WOUT} (weight={BOOZER_TARGET_WEIGHT})")
+print(
+    "  boundary ref.:   "
+    f"{CASE.get('boundary_reference_preconditioner', {}).get('reference_input')} "
+    f"(enabled={CASE.get('boundary_reference_preconditioner', {}).get('enabled', False)})"
+)
 print(f"  mirror target:   {MAX_MIRROR_RATIO} (surface={MIRROR_SURFACE_INDEX})")
 print(f"  mirror weight:   {MIRROR_WEIGHT}")
 print(f"  elongation wt:   {ELONGATION_WEIGHT}")
@@ -881,6 +908,185 @@ def qi_diagnostics_for_result(
     )
 
 
+def qi_diagnostics_for_run(
+    run,
+    *,
+    mirror_threshold,
+    mirror_surface_index,
+    target_aspect,
+    abs_iota_min,
+    max_elongation,
+    smooth_qi_max=QI_GATE_SMOOTH_MAX,
+    legacy_qi_max=QI_GATE_LEGACY_MAX,
+):
+    """Independent QI diagnostics for a raw fixed-boundary VMEC run."""
+
+    diagnostic_options = vj.QIDiagnosticOptions(
+        surfaces=SURFACES,
+        mboz=QI_OPTIONS.mboz,
+        nboz=QI_OPTIONS.nboz,
+        nphi=QI_OPTIONS.nphi,
+        nalpha=QI_OPTIONS.nalpha,
+        n_bounce=QI_OPTIONS.n_bounce,
+        include_bounce_endpoints=QI_OPTIONS.include_bounce_endpoints,
+        softness=QI_OPTIONS.softness,
+        width_weight=QI_OPTIONS.width_weight,
+        branch_width_weight=QI_OPTIONS.branch_width_weight,
+        branch_width_softness=QI_OPTIONS.branch_width_softness,
+        profile_weight=QI_OPTIONS.profile_weight,
+        shuffle_profile_weight=QI_OPTIONS.shuffle_profile_weight,
+        shuffle_profile_softness=QI_OPTIONS.shuffle_profile_softness,
+        shuffle_profile_nphi_out=QI_OPTIONS.shuffle_profile_nphi_out,
+        weighted_shuffle_profile_weight=QI_OPTIONS.weighted_shuffle_profile_weight,
+        weighted_shuffle_profile_softness=QI_OPTIONS.weighted_shuffle_profile_softness,
+        aligned_profile_weight=QI_OPTIONS.aligned_profile_weight,
+        aligned_profile_softness=QI_OPTIONS.aligned_profile_softness,
+        aligned_profile_trap_level=QI_OPTIONS.aligned_profile_trap_level,
+        aligned_profile_trap_softness=QI_OPTIONS.aligned_profile_trap_softness,
+        phimin=float(QI_OPTIONS.phimin),
+        mirror_threshold=float(mirror_threshold),
+        mirror_surface_index=mirror_surface_index,
+        elongation_threshold=float(max_elongation),
+    )
+    diagnostics = vj.qi_diagnostics_from_state(
+        state=run.state,
+        static=run.static,
+        indata=run.indata,
+        signgs=run.signgs,
+        surfaces=SURFACES,
+        options=diagnostic_options,
+    )
+    return annotate_qi_seed_suitability(
+        diagnostics,
+        targets=QISeedSuitabilityTargets(
+            smooth_qi_max=float(smooth_qi_max),
+            legacy_qi_max=float(legacy_qi_max),
+            target_aspect=float(target_aspect),
+            abs_iota_min=float(abs_iota_min),
+            mirror_ratio_max=float(mirror_threshold),
+            max_elongation=float(max_elongation),
+        ),
+    )
+
+
+def boundary_reference_preconditioner_score(diagnostics):
+    """Rank reference-family candidates by gates first, then exact metrics."""
+
+    engineering_penalty = 0.0 if bool(diagnostics.get("qi_engineering_gate_passed")) else 100.0
+    seed_penalty = 0.0 if bool(diagnostics.get("qi_seed_gate_passed")) else 20.0
+    rank_score = _finite_or_inf(diagnostics.get("qi_rank_score"))
+    constraint_score = _finite_or_inf(diagnostics.get("qi_constraint_score"))
+    mirror = _finite_or_inf(diagnostics.get("qi_mirror_ratio_max"))
+    return float(engineering_penalty + seed_penalty + rank_score + 0.25 * constraint_score + 0.01 * mirror)
+
+
+def run_boundary_reference_preconditioner(input_file, output_dir, config):
+    """Scan same-NFP reference-family boundary jumps and return the selected input."""
+
+    config = dict(config or {})
+    if not bool(config.get("enabled", False)):
+        return Path(input_file)
+
+    pre_dir = Path(output_dir) / "boundary_reference_preconditioner"
+    pre_dir.mkdir(parents=True, exist_ok=True)
+    reference_input = Path(config["reference_input"]).expanduser()
+    seed = vj.read_indata(input_file)
+    reference = vj.read_indata(reference_input)
+    keys = tuple(str(key).upper() for key in config.get("keys", ("RBC", "ZBS", "RBS", "ZBC")))
+    lambdas = tuple(float(value) for value in config.get("lambdas", (0.99, 0.995, 1.0)))
+    max_mode = int(config.get("max_mode", MAX_MODE))
+    records = []
+    print("\nBoundary-reference QI preconditioner:")
+    print(f"  reference input: {reference_input}")
+    print(f"  lambdas:         {lambdas}")
+    for lam in lambdas:
+        case_dir = pre_dir / f"lambda_{lam:.3f}".replace(".", "p").replace("-", "m")
+        case_dir.mkdir(parents=True, exist_ok=True)
+        input_out = case_dir / "input.interpolated"
+        wout_out = case_dir / "wout_interpolated.nc"
+        try:
+            candidate = vj.interpolate_indata_boundary(
+                seed,
+                reference,
+                lam,
+                keys=keys,
+                max_mode=max_mode,
+            )
+            candidate = vj.rebuild_for_optimization_resolution(
+                candidate,
+                max_mode=max_mode,
+                min_vmec_mode=MIN_VMEC_MODE,
+            )
+            vj.write_indata(input_out, candidate)
+            run = vj.run_fixed_boundary(
+                input_out,
+                max_iter=int(config.get("max_iter", INNER_MAX_ITER)),
+                solver_device=SOLVER_DEVICE,
+                verbose=False,
+            )
+            vj.write_wout_from_fixed_boundary_run(wout_out, run)
+            diagnostics = qi_diagnostics_for_run(
+                run,
+                mirror_threshold=float(config.get("max_mirror_ratio", MAX_MIRROR_RATIO)),
+                mirror_surface_index=config.get("mirror_surface_index", MIRROR_SURFACE_INDEX),
+                target_aspect=float(config.get("target_aspect", TARGET_ASPECT)),
+                abs_iota_min=float(config.get("abs_iota_min", TARGET_ABS_IOTA_MIN)),
+                max_elongation=float(config.get("max_elongation", MAX_ELONGATION)),
+                smooth_qi_max=float(config.get("smooth_qi_max", QI_GATE_SMOOTH_MAX)),
+                legacy_qi_max=float(config.get("legacy_qi_max", QI_GATE_LEGACY_MAX)),
+            )
+            score = boundary_reference_preconditioner_score(diagnostics)
+            record = {
+                "lambda": lam,
+                "input": str(input_out),
+                "wout": str(wout_out),
+                "score": score,
+                "selected": False,
+                "smooth_qi": _finite_or_none(diagnostics.get("qi_smooth_total")),
+                "legacy_qi": _finite_or_none(diagnostics.get("qi_legacy_total")),
+                "mirror": _finite_or_none(diagnostics.get("qi_mirror_ratio_max")),
+                "elongation": _finite_or_none(diagnostics.get("qi_max_elongation")),
+                "mean_iota": _finite_or_none(diagnostics.get("mean_iota")),
+                "aspect": _finite_or_none(diagnostics.get("aspect")),
+                "qi_seed_gate_passed": bool(diagnostics.get("qi_seed_gate_passed")),
+                "qi_engineering_gate_passed": bool(diagnostics.get("qi_engineering_gate_passed")),
+                "failure_reasons": list(diagnostics.get("qi_failure_reasons", [])),
+            }
+            (case_dir / "diagnostics.json").write_text(json.dumps(diagnostics, indent=2, sort_keys=True) + "\n")
+        except Exception as exc:  # noqa: BLE001 - keep the candidate scan moving.
+            record = {
+                "lambda": lam,
+                "input": str(input_out),
+                "wout": str(wout_out),
+                "score": float("inf"),
+                "selected": False,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        records.append(record)
+        print(
+            f"  lambda={lam:.3f}: score={record['score']} "
+            f"QI={record.get('legacy_qi')} mirror={record.get('mirror')} "
+            f"iota={record.get('mean_iota')} aspect={record.get('aspect')}"
+        )
+
+    successful = [record for record in records if np.isfinite(float(record.get("score", float("inf"))))]
+    if not successful:
+        (pre_dir / "summary.json").write_text(json.dumps(records, indent=2, sort_keys=True) + "\n")
+        raise RuntimeError("Boundary-reference preconditioner found no successful candidates.")
+
+    passing = [record for record in successful if bool(record.get("qi_engineering_gate_passed"))]
+    selected = min(passing or successful, key=lambda record: float(record["score"]))
+    selected["selected"] = True
+    (pre_dir / "summary.json").write_text(json.dumps(records, indent=2, sort_keys=True) + "\n")
+    print("  selected:       ", selected["input"])
+    print(
+        "  selected metrics:"
+        f" QI={selected.get('legacy_qi')}, mirror={selected.get('mirror')}, "
+        f"iota={selected.get('mean_iota')}, aspect={selected.get('aspect')}"
+    )
+    return Path(selected["input"])
+
+
 def stage_modes_for(stage):
     if "stage_modes" in stage:
         return [int(mode) for mode in stage["stage_modes"]]
@@ -959,6 +1165,11 @@ def stage_promotes_candidate(stage, promotion, reference_diagnostics):
     return promotion
 
 active_input_file = INPUT_FILE
+active_input_file = run_boundary_reference_preconditioner(
+    active_input_file,
+    OUTPUT_DIR,
+    dict(CASE.get("boundary_reference_preconditioner", {})),
+)
 active_input_file = run_basin_prefilter(
     active_input_file,
     OUTPUT_DIR,
@@ -967,7 +1178,7 @@ active_input_file = run_basin_prefilter(
 if QI_PREFINE:
     print("Running QI-only pre-refinement before applying scalar constraints ...")
     preseed_result = solve_qi_stage(
-        INPUT_FILE,
+        active_input_file,
         OUTPUT_DIR / "qi_preseed",
         qi_only_problem,
         max_nfev=QI_PREFINE_NFEV,
