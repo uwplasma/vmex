@@ -263,7 +263,8 @@ current `QI_optimization.py` case now includes a deterministic same-NFP
 reference-family preconditioner: it interpolates the seed boundary toward the
 bundled NFP=3 QI reference, audits each candidate with the independent
 smooth/legacy QI, mirror, elongation, aspect, and iota gates, and then starts
-local QI cleanup from the best accepted non-endpoint candidate when one exists.
+local QI cleanup from the lowest-mirror accepted non-endpoint candidate when
+one exists.
 That candidate is recorded as the accepted baseline, so later cleanup stages
 cannot replace it unless exact diagnostics improve.
 For this far-seed case the legacy Goodman-style QI gate is `1.25e-3`, while
@@ -302,7 +303,7 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_boundary_interpolatio
   --seed-input examples/data/input.QI_stel_seed_3127 \
   --reference-input examples/data/input.nfp3_QI_fixed_resolution_final \
   --out-root results/diagnostics/qi_seed3127_boundary_interpolation \
-  --lambdas 0.99,0.995,1.0,1.005,1.008,1.01,1.012 \
+  --lambdas 0.998,1.0,1.002,1.004,1.006,1.008,1.01 \
   --max-mode 4 --max-iter 80 --target-aspect 4.0 \
   --surfaces 0.1,0.28,0.46,0.64,0.82,1.0 \
   --mboz 18 --nboz 18 --nphi 151 --nalpha 31 --n-bounce 51 \

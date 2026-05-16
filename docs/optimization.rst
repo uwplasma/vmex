@@ -811,7 +811,8 @@ uses a deterministic same-NFP reference-family boundary preconditioner before
 local cleanup.  The preconditioner scans interpolation points between the raw
 seed and the bundled NFP=3 QI reference, solves each candidate, ranks them with
 independent smooth/legacy QI, mirror, elongation, aspect, and iota gates, and
-then continues from the best accepted non-endpoint candidate when one exists.
+then continues from the lowest-mirror accepted non-endpoint candidate when one
+exists.
 That preconditioned candidate is also recorded as the accepted baseline, so a
 later cleanup stage cannot overwrite it unless exact diagnostics improve.
 For this far-seed case, the legacy Goodman-style QI metric uses a tight
@@ -920,8 +921,9 @@ Two practical lessons from that study are now reflected in the example:
   effective than a local trust-region step because it deliberately crosses
   basins before the differentiable local optimizer starts.  The
   ``qi_stel_seed_3127`` case uses this as a same-NFP reference-family
-  preconditioner and prefers a non-reference endpoint when it passes the
-  independent engineering gate.
+  preconditioner and, after the independent engineering gate passes, gives
+  mirror ratio enough selection weight to use aspect/elongation margin instead
+  of always picking the smallest scalar QI residual.
 
 ``QI_optimization.py`` is now the single recommended multi-seed entry point.
 Set ``VMEC_JAX_QI_RUN_CASE`` at launch time, or change ``RUN_CASE`` at the top
@@ -1013,7 +1015,7 @@ To reproduce the same-NFP reference-family scan used by the public
      --seed-input examples/data/input.QI_stel_seed_3127 \
      --reference-input examples/data/input.nfp3_QI_fixed_resolution_final \
      --out-root results/diagnostics/qi_seed3127_boundary_interpolation \
-     --lambdas 0.99,0.995,1.0,1.005,1.008,1.01,1.012 \
+     --lambdas 0.998,1.0,1.002,1.004,1.006,1.008,1.01 \
      --max-mode 4 --max-iter 80 --target-aspect 4.0 \
      --surfaces 0.1,0.28,0.46,0.64,0.82,1.0 \
      --mboz 18 --nboz 18 --nphi 151 --nalpha 31 --n-bounce 51 \

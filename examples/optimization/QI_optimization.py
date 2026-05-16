@@ -138,7 +138,7 @@ QI_CASES = {
         "boundary_reference_preconditioner": {
             "enabled": True,
             "reference_input": DATA_DIR / "input.nfp3_QI_fixed_resolution_final",
-            "lambdas": (0.99, 0.995, 1.0, 1.005, 1.008, 1.01, 1.012),
+            "lambdas": (0.998, 1.0, 1.002, 1.004, 1.006, 1.008, 1.01),
             "keys": ("RBC", "ZBS", "RBS", "ZBC"),
             "max_mode": 4,
             "max_iter": 80,
@@ -149,6 +149,10 @@ QI_CASES = {
             "smooth_qi_max": 5.0e-3,
             "legacy_qi_max": 1.25e-3,
             "diagnostic_qi_resolution": {"mboz": 18, "nboz": 18, "nphi": 151, "nalpha": 31, "n_bounce": 51},
+            # Once a candidate passes the independent QI/iota/mirror/elongation
+            # gates, prefer the lower-mirror branch.  This uses the aspect and
+            # elongation margin of this seed without promoting non-QI states.
+            "mirror_selection_weight": 2.0,
             "prefer_non_endpoint": True,
             "accept_as_baseline": True,
         },
@@ -975,7 +979,12 @@ def qi_diagnostics_for_run(
     )
 
 
-def boundary_reference_preconditioner_score(diagnostics):
+def boundary_reference_preconditioner_score(
+    diagnostics,
+    *,
+    mirror_selection_weight=0.01,
+    constraint_weight=0.25,
+):
     """Rank reference-family candidates by gates first, then exact metrics."""
 
     engineering_penalty = 0.0 if bool(diagnostics.get("qi_engineering_gate_passed")) else 100.0
@@ -983,7 +992,13 @@ def boundary_reference_preconditioner_score(diagnostics):
     rank_score = _finite_or_inf(diagnostics.get("qi_rank_score"))
     constraint_score = _finite_or_inf(diagnostics.get("qi_constraint_score"))
     mirror = _finite_or_inf(diagnostics.get("qi_mirror_ratio_max"))
-    return float(engineering_penalty + seed_penalty + rank_score + 0.25 * constraint_score + 0.01 * mirror)
+    return float(
+        engineering_penalty
+        + seed_penalty
+        + rank_score
+        + float(constraint_weight) * constraint_score
+        + float(mirror_selection_weight) * mirror
+    )
 
 
 def run_boundary_reference_preconditioner(input_file, output_dir, config):
@@ -1042,7 +1057,11 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config):
                 smooth_qi_max=float(config.get("smooth_qi_max", QI_GATE_SMOOTH_MAX)),
                 legacy_qi_max=float(config.get("legacy_qi_max", QI_GATE_LEGACY_MAX)),
             )
-            score = boundary_reference_preconditioner_score(diagnostics)
+            score = boundary_reference_preconditioner_score(
+                diagnostics,
+                mirror_selection_weight=float(config.get("mirror_selection_weight", 0.01)),
+                constraint_weight=float(config.get("constraint_selection_weight", 0.25)),
+            )
             record = {
                 "lambda": lam,
                 "input": str(input_out),
