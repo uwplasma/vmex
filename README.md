@@ -264,6 +264,8 @@ reference-family preconditioner: it interpolates the seed boundary toward the
 bundled NFP=3 QI reference, audits each candidate with the independent
 smooth/legacy QI, mirror, elongation, aspect, and iota gates, and then starts
 local QI cleanup from the best accepted non-endpoint candidate when one exists.
+That candidate is recorded as the accepted baseline, so later cleanup stages
+cannot replace it unless exact diagnostics improve.
 The diagnostic below scans two boundary coefficients around the raw seed and
 shows why this larger global-to-local move is needed.
 

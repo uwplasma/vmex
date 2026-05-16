@@ -129,7 +129,8 @@ same-NFP reference-family preconditioner: it interpolates the raw seed boundary
 toward the bundled NFP=3 QI reference, runs bounded fixed-boundary solves for
 the candidate interpolation points, ranks them with independent QI/mirror/iota
 diagnostics, prefers a non-endpoint candidate when one passes the gate, and
-only then starts local QI cleanup.  This is a global-to-local move; the
+records that candidate as the accepted baseline before local QI cleanup.  This
+is a global-to-local move; the
 previous ESS-scaled local basin prefilter remains available but is not the
 default for this seed because it did not enter the precise-QI basin.
 Mirror-balanced cleanup stages are kept in diagnostic scripts because the
