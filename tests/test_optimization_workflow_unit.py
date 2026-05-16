@@ -48,6 +48,7 @@ def test_objective_factory_callbacks_dispatch_to_helpers(monkeypatch) -> None:
     aspect = workflow.aspect_objective(target=7.0, weight=2.0)
     iota = workflow.mean_iota_objective(target=0.4, weight=3.0)
     floor = workflow.abs_mean_iota_floor_objective(target=0.41, weight=4.0, softness=0.02)
+    ceiling = workflow.abs_mean_iota_ceiling_objective(maximum=0.25, weight=5.0, softness=0.0)
     lgradb = workflow.lgradb_objective(
         threshold=0.25,
         weight=5.0,
@@ -60,6 +61,7 @@ def test_objective_factory_callbacks_dispatch_to_helpers(monkeypatch) -> None:
     np.testing.assert_allclose(aspect.residual(ctx, "state"), [3.0])
     np.testing.assert_allclose(iota.residual(ctx, "state"), [-0.21])
     np.testing.assert_allclose(floor.residual(ctx, "state"), [0.32])
+    np.testing.assert_allclose(ceiling.residual(ctx, "state"), [0.4])
     np.testing.assert_allclose(lgradb.residual(ctx, "state"), [10.0, 15.0])
     assert lgradb.total(ctx, "state") == 325.0
 

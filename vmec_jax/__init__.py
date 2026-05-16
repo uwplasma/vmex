@@ -148,6 +148,7 @@ from .optimization import (
 )
 from .optimization_workflow import (
     AbsMeanIotaFloor,
+    AbsMeanIotaCeiling,
     AspectRatio,
     AugmentedLagrangianConstraint,
     BVector,
@@ -176,6 +177,7 @@ from .optimization_workflow import (
     ToroidalCurrent,
     ToroidalCurrentGradient,
     abs_mean_iota_floor_objective,
+    abs_mean_iota_ceiling_objective,
     aspect_objective,
     boozer_b_target_from_wout,
     lgradb_objective,
@@ -432,6 +434,7 @@ __all__ = [
     "surface_indices_from_static",
     "truncate_indata_boundary_modes",
     "AbsMeanIotaFloor",
+    "AbsMeanIotaCeiling",
     "AspectRatio",
     "AugmentedLagrangianConstraint",
     "BVector",
@@ -460,6 +463,7 @@ __all__ = [
     "ToroidalCurrent",
     "ToroidalCurrentGradient",
     "abs_mean_iota_floor_objective",
+    "abs_mean_iota_ceiling_objective",
     "aspect_objective",
     "boozer_b_target_from_wout",
     "lgradb_objective",

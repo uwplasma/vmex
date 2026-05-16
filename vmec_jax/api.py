@@ -38,6 +38,7 @@ from .finite_beta import (
 )
 from .optimization_workflow import (
     AbsMeanIotaFloor,
+    AbsMeanIotaCeiling,
     AspectRatio,
     AugmentedLagrangianConstraint,
     BDotB,
@@ -158,6 +159,7 @@ __all__ = [
     "AugmentedLagrangianConstraint",
     "MeanIota",
     "AbsMeanIotaFloor",
+    "AbsMeanIotaCeiling",
     "QuasisymmetryRatioResidual",
     "QuasiIsodynamicOptions",
     "QuasiIsodynamicResidual",

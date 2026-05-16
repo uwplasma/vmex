@@ -527,13 +527,14 @@ def test_boozer_b_target_objective_matches_normalized_spectrum() -> None:
 
 
 def test_least_squares_problem_collects_problem_metadata() -> None:
-    from vmec_jax.optimization_workflow import AbsMeanIotaFloor, AspectRatio, LeastSquaresProblem, MeanIota
+    from vmec_jax.optimization_workflow import AbsMeanIotaCeiling, AbsMeanIotaFloor, AspectRatio, LeastSquaresProblem, MeanIota
 
     problem = LeastSquaresProblem.from_tuples(
         [
             (AspectRatio().J, 5.0, 1.0),
             (MeanIota().J, 0.42, 100.0),
             (AbsMeanIotaFloor(0.41).J, 0.0, 1.0),
+            (AbsMeanIotaCeiling(0.65).J, 0.0, 1.0),
         ]
     )
 
@@ -541,6 +542,7 @@ def test_least_squares_problem_collects_problem_metadata() -> None:
         "target_aspect": 5.0,
         "target_iota": 0.42,
         "iota_abs_min": 0.41,
+        "iota_abs_max": 0.65,
     }
 
 

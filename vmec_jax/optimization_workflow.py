@@ -605,6 +605,39 @@ class AbsMeanIotaFloor:
         )
 
 
+class AbsMeanIotaCeiling:
+    """Smooth upper-bound objective for ``abs(mean_iota)``."""
+
+    name = "abs_iota_ceiling"
+
+    def __init__(self, maximum: float, *, softness: float = 1.0e-3):
+        self.maximum = float(maximum)
+        self.softness = float(softness)
+
+    def J(self, ctx: StageContext, state):
+        return abs_mean_iota_ceiling_objective(
+            self.maximum,
+            weight=1.0,
+            softness=self.softness,
+        ).evaluate(ctx, state)
+
+    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        del target
+        term = abs_mean_iota_ceiling_objective(
+            self.maximum,
+            weight=residual_weight,
+            softness=self.softness,
+        )
+        return ObjectiveTerm(
+            self.name,
+            term.evaluate,
+            target=0.0,
+            weight=1.0,
+            track_iota=True,
+            metadata={"iota_abs_max": self.maximum},
+        )
+
+
 class QuasisymmetryRatioResidual:
     """QS residual object for QA/QH/QP objectives."""
 
@@ -1272,6 +1305,31 @@ def abs_mean_iota_floor_objective(
 
     return ObjectiveTerm(
         "abs_iota_floor",
+        _evaluate,
+        target=0.0,
+        weight=weight,
+        track_iota=True,
+    )
+
+
+def abs_mean_iota_ceiling_objective(
+    maximum: float,
+    weight: float = 1.0,
+    *,
+    softness: float = 1.0e-3,
+    abs_epsilon: float = 1.0e-12,
+) -> ObjectiveTerm:
+    """Smooth upper-bound penalty enforcing ``abs(mean_iota) <= maximum``."""
+
+    maximum = float(maximum)
+
+    def _evaluate(ctx: StageContext, state):
+        iota = jnp.asarray(mean_iota(ctx, state), dtype=jnp.float64)
+        smooth_abs_iota = jnp.sqrt(iota * iota + float(abs_epsilon) ** 2)
+        return _smooth_positive_part(smooth_abs_iota - maximum, softness=float(softness))
+
+    return ObjectiveTerm(
+        "abs_iota_ceiling",
         _evaluate,
         target=0.0,
         weight=weight,
@@ -2780,6 +2838,7 @@ def _slice_boozer_surfaces(booz: dict, surface_index: int) -> dict:
 
 __all__ = [
     "AbsMeanIotaFloor",
+    "AbsMeanIotaCeiling",
     "AspectRatio",
     "AugmentedLagrangianConstraint",
     "BVector",
@@ -2810,6 +2869,7 @@ __all__ = [
     "ToroidalCurrent",
     "ToroidalCurrentGradient",
     "abs_mean_iota_floor_objective",
+    "abs_mean_iota_ceiling_objective",
     "aspect_objective",
     "boozer_b_target_from_wout",
     "build_fixed_boundary_objective_stage",
