@@ -146,6 +146,8 @@ QI_CASES = {
             "max_elongation": 8.0,
             "smooth_qi_max": 2.0e-3,
             "legacy_qi_max": 1.0e-3,
+            "diagnostic_qi_resolution": {"mboz": 6, "nboz": 6, "nphi": 31, "nalpha": 7, "n_bounce": 9},
+            "prefer_non_endpoint": True,
         },
         "basin_prefilter": {
             "enabled": False,
@@ -916,6 +918,7 @@ def qi_diagnostics_for_run(
     target_aspect,
     abs_iota_min,
     max_elongation,
+    resolution=None,
     smooth_qi_max=QI_GATE_SMOOTH_MAX,
     legacy_qi_max=QI_GATE_LEGACY_MAX,
 ):
@@ -923,11 +926,11 @@ def qi_diagnostics_for_run(
 
     diagnostic_options = vj.QIDiagnosticOptions(
         surfaces=SURFACES,
-        mboz=QI_OPTIONS.mboz,
-        nboz=QI_OPTIONS.nboz,
-        nphi=QI_OPTIONS.nphi,
-        nalpha=QI_OPTIONS.nalpha,
-        n_bounce=QI_OPTIONS.n_bounce,
+        mboz=_resolution_value(resolution or {}, "mboz", QI_OPTIONS.mboz),
+        nboz=_resolution_value(resolution or {}, "nboz", QI_OPTIONS.nboz),
+        nphi=_resolution_value(resolution or {}, "nphi", QI_OPTIONS.nphi),
+        nalpha=_resolution_value(resolution or {}, "nalpha", QI_OPTIONS.nalpha),
+        n_bounce=_resolution_value(resolution or {}, "n_bounce", QI_OPTIONS.n_bounce),
         include_bounce_endpoints=QI_OPTIONS.include_bounce_endpoints,
         softness=QI_OPTIONS.softness,
         width_weight=QI_OPTIONS.width_weight,
@@ -1032,6 +1035,7 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config):
                 target_aspect=float(config.get("target_aspect", TARGET_ASPECT)),
                 abs_iota_min=float(config.get("abs_iota_min", TARGET_ABS_IOTA_MIN)),
                 max_elongation=float(config.get("max_elongation", MAX_ELONGATION)),
+                resolution=config.get("diagnostic_qi_resolution"),
                 smooth_qi_max=float(config.get("smooth_qi_max", QI_GATE_SMOOTH_MAX)),
                 legacy_qi_max=float(config.get("legacy_qi_max", QI_GATE_LEGACY_MAX)),
             )
@@ -1074,8 +1078,12 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config):
         (pre_dir / "summary.json").write_text(json.dumps(records, indent=2, sort_keys=True) + "\n")
         raise RuntimeError("Boundary-reference preconditioner found no successful candidates.")
 
-    passing = [record for record in successful if bool(record.get("qi_engineering_gate_passed"))]
-    selected = min(passing or successful, key=lambda record: float(record["score"]))
+    candidate_pool = [record for record in successful if bool(record.get("qi_engineering_gate_passed"))] or successful
+    if bool(config.get("prefer_non_endpoint", False)):
+        non_endpoint = [record for record in candidate_pool if abs(float(record["lambda"]) - 1.0) > 1.0e-12]
+        if non_endpoint:
+            candidate_pool = non_endpoint
+    selected = min(candidate_pool, key=lambda record: float(record["score"]))
     selected["selected"] = True
     (pre_dir / "summary.json").write_text(json.dumps(records, indent=2, sort_keys=True) + "\n")
     print("  selected:       ", selected["input"])

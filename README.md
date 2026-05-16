@@ -263,9 +263,9 @@ current `QI_optimization.py` case now includes a deterministic same-NFP
 reference-family preconditioner: it interpolates the seed boundary toward the
 bundled NFP=3 QI reference, audits each candidate with the independent
 smooth/legacy QI, mirror, elongation, aspect, and iota gates, and then starts
-local QI cleanup from the best accepted candidate.  The diagnostic below scans
-two boundary coefficients around the raw seed and shows why this larger
-global-to-local move is needed.
+local QI cleanup from the best accepted non-endpoint candidate when one exists.
+The diagnostic below scans two boundary coefficients around the raw seed and
+shows why this larger global-to-local move is needed.
 
 <p align="center">
   <img src="docs/_static/figures/qi_seed3127_landscape_rc01_zs01.png" width="980" />
