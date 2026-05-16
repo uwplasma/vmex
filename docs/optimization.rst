@@ -814,6 +814,10 @@ independent smooth/legacy QI, mirror, elongation, aspect, and iota gates, and
 then continues from the best accepted non-endpoint candidate when one exists.
 That preconditioned candidate is also recorded as the accepted baseline, so a
 later cleanup stage cannot overwrite it unless exact diagnostics improve.
+For this far-seed case, the legacy Goodman-style QI metric remains strict at
+``1e-3`` while the smooth differentiable proxy uses an explicit ``5e-3`` cap;
+this avoids rejecting a legacy-good state only because the smooth surrogate is
+more conservative on the six-surface high-resolution audit.
 The script therefore prints both a ``QI+iota`` gate and a stricter engineering
 gate that also includes mirror ratio and elongation.  It also writes a
 Boozer-coordinate ``|B|`` line-contour plot; VMEC-angle contour plots alone are
@@ -1009,8 +1013,11 @@ To reproduce the same-NFP reference-family scan used by the public
      --seed-input examples/data/input.QI_stel_seed_3127 \
      --reference-input examples/data/input.nfp3_QI_fixed_resolution_final \
      --out-root results/diagnostics/qi_seed3127_boundary_interpolation \
-     --lambdas 0.95,0.975,0.99,0.995,1.0 \
+     --lambdas 0.99,0.995,1.0,1.005,1.008,1.01,1.012 \
      --max-mode 4 --max-iter 80 --target-aspect 4.0 \
+     --surfaces 0.1,0.28,0.46,0.64,0.82,1.0 \
+     --mboz 18 --nboz 18 --nphi 151 --nalpha 31 --n-bounce 51 \
+     --smooth-qi-max 5e-3 --legacy-qi-max 1e-3 \
      --max-mirror-ratio 0.35 --max-elongation 8.0
 
 The following local landscape scan illustrates why the raw

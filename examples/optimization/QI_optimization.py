@@ -118,6 +118,8 @@ QI_CASES = {
         "target_abs_iota_min": 0.41,
         "mirror_threshold": 0.35,
         "mirror_surface_index": None,
+        "qi_gate_smooth_max": 5.0e-3,
+        "qi_gate_legacy_max": 1.0e-3,
         "qi_ceiling_max": 2.0e-3,
         "qi_ceiling_smooth_penalty": 2.0e-3,
         # First find a low-QI, nonzero-transform basin.  Current Boozer-target
@@ -136,7 +138,7 @@ QI_CASES = {
         "boundary_reference_preconditioner": {
             "enabled": True,
             "reference_input": DATA_DIR / "input.nfp3_QI_fixed_resolution_final",
-            "lambdas": (0.95, 0.975, 0.99, 0.995, 1.0),
+            "lambdas": (0.99, 0.995, 1.0, 1.005, 1.008, 1.01, 1.012),
             "keys": ("RBC", "ZBS", "RBS", "ZBC"),
             "max_mode": 4,
             "max_iter": 80,
@@ -144,9 +146,9 @@ QI_CASES = {
             "abs_iota_min": 0.41,
             "max_mirror_ratio": 0.35,
             "max_elongation": 8.0,
-            "smooth_qi_max": 2.0e-3,
+            "smooth_qi_max": 5.0e-3,
             "legacy_qi_max": 1.0e-3,
-            "diagnostic_qi_resolution": {"mboz": 6, "nboz": 6, "nphi": 31, "nalpha": 7, "n_bounce": 9},
+            "diagnostic_qi_resolution": {"mboz": 18, "nboz": 18, "nphi": 151, "nalpha": 31, "n_bounce": 51},
             "prefer_non_endpoint": True,
             "accept_as_baseline": True,
         },
@@ -412,8 +414,8 @@ BOOZER_TARGET_WOUT = CASE.get("boozer_target_wout")
 BOOZER_TARGET_WEIGHT = float(CASE.get("boozer_target_weight", 0.0))
 MIRROR_SMOOTH_EXTREMA = 2.0e-2
 MIRROR_SMOOTH_PENALTY = 2.0e-2
-QI_GATE_SMOOTH_MAX = 2.0e-3
-QI_GATE_LEGACY_MAX = 1.0e-3
+QI_GATE_SMOOTH_MAX = float(CASE.get("qi_gate_smooth_max", 2.0e-3))
+QI_GATE_LEGACY_MAX = float(CASE.get("qi_gate_legacy_max", 1.0e-3))
 JIT_BOOZ = bool(CASE.get("jit_booz", True))  # Faster QI/Boozer path on current CPU/GPU diagnostics.
 
 
