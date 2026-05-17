@@ -138,9 +138,11 @@ for both bundled QI inputs:
    :alt: QI optimization coverage for NFP=2 QI and seed-3127 inputs
 
 The Boozer ``|B|`` panels in that figure use line contours only.  The staged
-objective panel concatenates every recorded history file, with dashed
-separators where objective definitions or weights change.  Regenerate the
-figure and CSV without launching new optimization jobs with:
+objective panel concatenates every recorded history file and normalizes each
+stage to its first objective, with dashed separators where objective
+definitions or weights change.  For the seed-3127 lane, the inset shows the
+final boundary-reference interpolation scan that selected the promoted result.
+Regenerate the figure and CSV without launching new optimization jobs with:
 
 .. code-block:: bash
 

@@ -260,8 +260,10 @@ constrained least-squares residual definition.
 The dedicated `QI_optimization.py` coverage figure tracks the two bundled QI
 inputs used by the README/docs lane.  It is rendered from existing reviewed
 outputs and uses Boozer `|B|` line contours only.  The objective panel
-concatenates all recorded stages, with dashed separators where the staged
-objective definition or weights changed.
+concatenates all recorded stages using stage-normalized objectives, with
+dashed separators where the objective definition or weights changed.  For the
+seed-3127 lane, the inset shows the final boundary-reference interpolation
+scan that selected the promoted result.
 
 | QI input | Output/provenance | Final J | QI smooth | QI legacy | Mirror | Elong. | Aspect | Iota | CPU time |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|

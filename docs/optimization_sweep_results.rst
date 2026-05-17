@@ -245,9 +245,10 @@ Regenerate these lightweight artifacts with:
    PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 
 The staged objective panel concatenates every recorded history file used by
-the promoted result.  Dashed separators mark objective-definition or weight
-changes between stages, so the plotted value is a stage-local scalar objective
-rather than one globally comparable objective over the full run.
+the promoted result.  It plots each stage normalized to that stage's first
+objective, with dashed separators marking objective-definition or weight
+changes.  For the seed-3127 lane, the inset shows the final
+boundary-reference interpolation scan that selected the promoted result.
 
 Objective Histories
 -------------------

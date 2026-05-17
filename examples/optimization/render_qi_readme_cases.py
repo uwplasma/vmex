@@ -33,6 +33,7 @@ class QICase:
     initial_wout: Path
     note: str
     history_paths: tuple[Path, ...] = ()
+    preconditioner_summary: Path | None = None
 
 
 CASES = (
@@ -83,6 +84,13 @@ CASES = (
             / "mirror_ramp_01_prefiltered_mirror_qi_iota_cleanup"
             / "history.json",
         ),
+        preconditioner_summary=REPO_ROOT
+        / "results"
+        / "qi_opt"
+        / "ess"
+        / "qi_stel_seed_3127_current_public_final"
+        / "boundary_reference_preconditioner"
+        / "summary.json",
     ),
 )
 
@@ -154,10 +162,27 @@ def _history_summary(case: QICase) -> tuple[float, int, int]:
     return total_wall_s, len(segments), total_points
 
 
+def _preconditioner_summary(case: QICase) -> tuple[int, float | None, float | None, float | None]:
+    if case.preconditioner_summary is None:
+        return 0, None, None, None
+    rows = _load_json(case.preconditioner_summary)
+    if not isinstance(rows, list):
+        raise RuntimeError(f"Expected a list in {case.preconditioner_summary}")
+    selected = [row for row in rows if bool(row.get("selected"))]
+    selected_row = selected[-1] if selected else (rows[-1] if rows else {})
+    return (
+        len(rows),
+        None if "lambda" not in selected_row else float(selected_row["lambda"]),
+        None if "legacy_qi" not in selected_row else float(selected_row["legacy_qi"]),
+        None if "mirror" not in selected_row else float(selected_row["mirror"]),
+    )
+
+
 def _case_record(case: QICase) -> dict[str, str | float]:
     diagnostics = _load_json(case.output_dir / "diagnostics.json")
     history = _load_json(case.output_dir / "history.json")
     full_wall_s, history_segment_count, history_point_count = _history_summary(case)
+    preconditioner_points, selected_lambda, selected_lambda_qi, selected_lambda_mirror = _preconditioner_summary(case)
     final_wout = case.output_dir / "wout_final.nc"
     for path in (case.input_file, case.initial_wout, final_wout):
         if not path.exists():
@@ -182,6 +207,10 @@ def _case_record(case: QICase) -> dict[str, str | float]:
         "published_stage_cpu_time_min": float(history["total_wall_time_s"]) / 60.0,
         "history_segments": history_segment_count,
         "history_points": history_point_count,
+        "preconditioner_points": preconditioner_points,
+        "selected_lambda": "" if selected_lambda is None else selected_lambda,
+        "selected_lambda_qi": "" if selected_lambda_qi is None else selected_lambda_qi,
+        "selected_lambda_mirror": "" if selected_lambda_mirror is None else selected_lambda_mirror,
         "final_wout": str(final_wout.relative_to(REPO_ROOT)),
     }
 
@@ -208,6 +237,10 @@ def _write_csv(records: list[dict[str, str | float]]) -> None:
         "published_stage_cpu_time_min",
         "history_segments",
         "history_points",
+        "preconditioner_points",
+        "selected_lambda",
+        "selected_lambda_qi",
+        "selected_lambda_mirror",
         "final_wout",
     ]
     with OUT_CSV.open("w", newline="") as f:
@@ -258,17 +291,41 @@ def _plot_history(ax, case: QICase) -> None:
     for idx, segment in enumerate(_history_segments(case)):
         wall_min = np.asarray(segment["wall_time_s"], dtype=float) / 60.0
         objective = np.asarray(segment["objective"], dtype=float)
+        scale = max(float(objective[0]), 1.0e-16)
+        normalized = np.maximum(objective / scale, 1.0e-16)
         color = colors[idx % len(colors)]
         label = str(segment["label"])
-        ax.semilogy(wall_min, objective, color=color, linewidth=1.35, marker="o", markersize=2.4, label=label)
-        ax.scatter(wall_min[-1], objective[-1], s=16, color=color, zorder=3)
+        ax.semilogy(wall_min, normalized, color=color, linewidth=1.35, marker="o", markersize=2.4, label=label)
+        ax.scatter(wall_min[-1], normalized[-1], s=16, color=color, zorder=3)
         if idx > 0:
             ax.axvline(wall_min[0], color="0.75", linewidth=0.7, linestyle="--", zorder=0)
+    _plot_preconditioner_sweep(ax, case)
     ax.set_title("Full staged objective history", fontsize=8, pad=4)
     ax.set_xlabel("Wall time (min)")
-    ax.set_ylabel("Stage objective")
+    ax.set_ylabel("Objective / stage start")
     ax.grid(True, alpha=0.22, linestyle=":")
-    ax.legend(fontsize=4.8, frameon=False, loc="best", handlelength=1.1, labelspacing=0.25)
+    ax.legend(fontsize=4.8, frameon=False, loc="upper right", handlelength=1.1, labelspacing=0.25)
+
+
+def _plot_preconditioner_sweep(ax, case: QICase) -> None:
+    if case.preconditioner_summary is None:
+        return
+    rows = _load_json(case.preconditioner_summary)
+    if not rows:
+        return
+    lambdas = np.asarray([float(row["lambda"]) for row in rows], dtype=float)
+    legacy_qi = np.asarray([max(float(row["legacy_qi"]), 1.0e-16) for row in rows], dtype=float)
+    selected = np.asarray([bool(row.get("selected")) for row in rows], dtype=bool)
+    inset = ax.inset_axes([0.52, 0.08, 0.43, 0.33])
+    inset.semilogy(lambdas, legacy_qi, color="#6a3d9a", marker="o", markersize=2.0, linewidth=1.0)
+    if np.any(selected):
+        inset.scatter(lambdas[selected], legacy_qi[selected], color="#e31a1c", s=16, zorder=3)
+    inset.axhline(1.0e-3, color="0.55", linestyle=":", linewidth=0.7)
+    inset.set_title("lambda scan QI", fontsize=5.6, pad=1)
+    inset.set_xlabel(r"$\lambda$", fontsize=5.4, labelpad=0)
+    inset.set_ylabel("legacy QI", fontsize=5.4, labelpad=0)
+    inset.tick_params(axis="both", labelsize=4.8, pad=0)
+    inset.grid(True, alpha=0.18, linestyle=":")
 
 
 def _booz_xform_on_outer_surface(wout_path: Path):
