@@ -29,8 +29,10 @@ Performance profiling:
 - `profile_exact_optimizer.py --callback jacobian --perturb-scale ...`
   measures accepted-point optimizer callback phases, optimizer/global cache
   growth, RSS growth, and JSON budget status for CPU/GPU production profiling.
-  Use `--vmec-timing-detail` for targeted preconditioner subphase timing
-  (`apply` vs mode scaling) when `exact_tape_build` is the bottleneck.
+  Initial aspect/QS metrics are skipped by default to avoid an unmeasured exact
+  solve before the profile; add `--initial-metrics` for that sanity check. Use
+  `--vmec-timing-detail` for targeted preconditioner subphase timing (`apply`
+  vs mode scaling) when `exact_tape_build` is the bottleneck.
 - `profile_qi_boozer_gpu.py --solver-device gpu --repeat 2`
   isolates the QI/Boozer residual path from the outer optimizer.  Use it before
   launching a full QI sweep on GPU; it reports VMEC solve time, first Boozer/QI

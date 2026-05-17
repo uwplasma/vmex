@@ -153,6 +153,7 @@ def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:
             "--budget-action",
             "warn",
             "--vmec-timing-detail",
+            "--initial-metrics",
         ]
     )
 
@@ -170,6 +171,13 @@ def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:
     assert args.budget_accepted_replays == 2
     assert args.budget_action == "warn"
     assert args.vmec_timing_detail is True
+    assert args.initial_metrics is True
+
+
+def test_exact_optimizer_profile_skips_initial_metrics_by_default() -> None:
+    args = exact_profile_tool._parse_args(["--callback", "jacobian"])
+
+    assert args.initial_metrics is False
 
 
 def test_exact_optimizer_profile_cache_snapshot_and_delta_schema() -> None:

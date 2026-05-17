@@ -369,11 +369,15 @@ def _dump_tomnsps_hlo(input_path: str, outdir: Path) -> None:
 def main() -> int:
     args = _parse_args()
     try:
-        import jax
+        # Import vmec_jax first so its _compat module can set JAX/XLA import-time
+        # defaults such as GPU demand allocation and the persistent cache dir.
+        import vmec_jax.api as vj
+        from vmec_jax._compat import jax
+
+        if jax is None:
+            raise ImportError("vmec_jax imported without JAX support")
     except Exception as exc:  # pragma: no cover
         raise SystemExit(f"JAX is required for profiling: {exc}") from exc
-
-    import vmec_jax.api as vj
 
     outdir = Path(args.outdir).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)

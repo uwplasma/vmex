@@ -282,9 +282,26 @@ QI_CASES = {
         ),
     },
     "nfp4_qh_warm_to_qi": {
-        "case_goal": "NFP=4 QH-to-QI staged stress test; audit before promotion",
+        "case_goal": "NFP=4 QH-to-QI non-passing stress fixture; audit only",
         "input_file": DATA_DIR / "input.nfp4_QH_warm_start",
         "output_dir": Path("results/qi_opt/ess/nfp4_qh_warm_to_qi"),
+        # This case is intentionally kept as a seed-robustness stress fixture,
+        # not a promoted QI lane.  Bounded May 2026 diagnostics found no local
+        # NFP=4 path satisfying the agreed smooth/legacy QI < 2e-3 gates.
+        "expected_gate_status": "non_passing_stress_fixture",
+        "expected_gate_failures": ("smooth_qi", "legacy_qi", "mirror"),
+        "stress_fixture_notes": (
+            "Bundled QH warm start and QH-to-QI local cleanup remain above the legacy QI gate.",
+            "Archived external NFP=4 QI references improve QI but still miss the 2e-3 smooth/legacy gates.",
+            "Do not promote this case without an independent diagnostics.json gate pass.",
+        ),
+        "known_best_nfp4_quick_audit": {
+            "label": "external_nfp4_qi_wfq0",
+            "smooth_qi": 8.421446105814759e-3,
+            "legacy_qi": 5.205127302950363e-3,
+            "mirror_ratio": 3.133889788613409e-1,
+            "audit_command": "audit_qi_seed_suitability.py --quick --target-aspect 10 --max-mirror-ratio 0.35",
+        },
         "max_mode": 3,
         "min_vmec_mode": 6,
         "use_mode_continuation": True,
@@ -434,6 +451,10 @@ if os.environ.get("VMEC_JAX_QI_OUTPUT_DIR"):
 # QH/QP-like false positives from ranking too favorably.
 INPUT_FILE = CASE["input_file"]
 OUTPUT_DIR = CASE["output_dir"]
+EXPECTED_GATE_STATUS = str(CASE.get("expected_gate_status", "candidate"))
+EXPECTED_GATE_FAILURES = tuple(CASE.get("expected_gate_failures", ()))
+STRESS_FIXTURE_NOTES = tuple(CASE.get("stress_fixture_notes", ()))
+KNOWN_BEST_NFP4_QUICK_AUDIT = dict(CASE.get("known_best_nfp4_quick_audit", {}))
 MAX_MODE = int(CASE["max_mode"])
 MIN_VMEC_MODE = int(CASE.get("min_vmec_mode", max(6, MAX_MODE + 3)))
 USE_MODE_CONTINUATION = bool(CASE["use_mode_continuation"])  # Repeats the same max-mode stage for QI cleanup.
@@ -678,6 +699,7 @@ problem = make_qi_problem()
 print("\nQI optimization policy:")
 print(f"  case:            {RUN_CASE}")
 print(f"  case goal:       {CASE.get('case_goal', 'custom QI candidate')}")
+print(f"  expected gates:  {EXPECTED_GATE_STATUS}")
 print(f"  input file:      {INPUT_FILE}")
 print(f"  output dir:      {OUTPUT_DIR}")
 print(f"  max_mode:        {MAX_MODE}")
@@ -708,6 +730,12 @@ print(f"  mirror weight:   {MIRROR_WEIGHT}")
 print(f"  elongation wt:   {ELONGATION_WEIGHT}")
 print(f"  AL constraints:  {CASE.get('use_augmented_lagrangian_constraints', False)}")
 print(f"  QI ceiling:      {QI_CEILING_MAX} (weight={QI_CEILING_WEIGHT})")
+if STRESS_FIXTURE_NOTES:
+    print("  stress notes:")
+    for note in STRESS_FIXTURE_NOTES:
+        print(f"    - {note}")
+if KNOWN_BEST_NFP4_QUICK_AUDIT:
+    print(f"  best NFP=4 quick audit: {KNOWN_BEST_NFP4_QUICK_AUDIT}")
 if MIRROR_RAMP_STAGES:
     print("  mirror ramp:     guarded staged cleanup enabled")
     for index, stage in enumerate(MIRROR_RAMP_STAGES, start=1):
@@ -925,6 +953,8 @@ def solve_qi_stage(
     scalar_step_bound=None,
     lbfgs_step_bound=None,
 ):
+    # Small stage helper: physics is still assembled explicitly in
+    # make_qi_problem(); this only forwards solve controls for one stage.
     vmec = make_vmec_for_stage(input_file, output_dir)
     return vj.least_squares_solve(
         vmec,
@@ -1623,6 +1653,11 @@ diagnostics["qi_audit_resolution"] = {
     "nalpha": diagnostic_options.nalpha,
     "n_bounce": diagnostic_options.n_bounce,
 }
+diagnostics["qi_case_expected_gate_status"] = EXPECTED_GATE_STATUS
+diagnostics["qi_case_stress_fixture"] = EXPECTED_GATE_STATUS == "non_passing_stress_fixture"
+diagnostics["qi_case_expected_gate_failures"] = list(EXPECTED_GATE_FAILURES)
+diagnostics["qi_case_stress_fixture_notes"] = list(STRESS_FIXTURE_NOTES)
+diagnostics["qi_case_known_best_nfp4_quick_audit"] = KNOWN_BEST_NFP4_QUICK_AUDIT
 diagnostics_path = OUTPUT_DIR / "diagnostics.json"
 diagnostics_path.write_text(json.dumps(diagnostics, indent=2, sort_keys=True) + "\n")
 saved_paths["diagnostics"] = diagnostics_path
@@ -1635,6 +1670,11 @@ mirror_ratio = _diagnostic_float(diagnostics, "qi_mirror_ratio_max")
 max_elongation = _diagnostic_float(diagnostics, "qi_max_elongation")
 qi_gate_passed = bool(diagnostics["qi_seed_gate_passed"])
 engineering_gate_passed = bool(diagnostics["qi_engineering_gate_passed"])
+expected_non_passing_stress = EXPECTED_GATE_STATUS == "non_passing_stress_fixture"
+diagnostics["qi_case_expected_outcome_met"] = (
+    not engineering_gate_passed if expected_non_passing_stress else engineering_gate_passed
+)
+diagnostics_path.write_text(json.dumps(diagnostics, indent=2, sort_keys=True) + "\n")
 print("\nIndependent QI promotion gate:")
 print(f"  smooth QI:       {smooth_qi:.6e}  (limit {QI_GATE_SMOOTH_MAX:.1e})")
 print(f"  legacy QI:       {legacy_qi:.6e}  (limit {QI_GATE_LEGACY_MAX:.1e})")
@@ -1651,7 +1691,20 @@ print(f"  diagnostics:     {diagnostics_path}")
 for reason in diagnostics["qi_failure_reasons"]:
     print(f"    - {reason}")
 if engineering_gate_passed:
-    print("\nVerdict: full QI engineering gate passed for this resolution and policy.")
+    if expected_non_passing_stress:
+        print(
+            "\nVerdict: this NFP=4 stress fixture unexpectedly passed the full engineering "
+            "gate. Treat it as a candidate only after reviewing diagnostics.json and "
+            "updating the case metadata."
+        )
+    else:
+        print("\nVerdict: full QI engineering gate passed for this resolution and policy.")
+elif expected_non_passing_stress:
+    print(
+        "\nVerdict: expected non-passing NFP=4 stress fixture. Keep this result in "
+        "the seed-robustness/audit lane, not the promoted QI lane, until an "
+        "independent smooth/legacy/mirror gate pass is recorded."
+    )
 elif qi_gate_passed:
     print(
         "\nVerdict: QI+iota gate passed, but mirror/elongation/aspect gates are not all "
@@ -1665,6 +1718,8 @@ else:
     )
 
 if MAKE_PLOTS:
+    # Plotting is explicit post-processing.  QI includes Boozer |B| contours
+    # because VMEC-angle contour plots alone are not a QI promotion gate.
     plot_paths = {
         "boundary_comparison": vj.plot_3d_boundary_comparison(
             saved_paths["initial_wout"],
