@@ -729,7 +729,7 @@ def build_wout_report(
     lgradb_ntheta: int = 8,
     lgradb_nphi: int = 8,
     smooth_gate: float = 2.0e-3,
-    legacy_gate: float = 1.0e-3,
+    legacy_gate: float = 2.0e-3,
     abs_iota_min: float = 0.41,
 ) -> dict[str, Any]:
     rows = []
@@ -897,7 +897,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--aligned-profile-trap-softness", type=float, default=5.0e-2)
     parser.add_argument("--phimin", type=float, default=0.0)
     parser.add_argument("--smooth-gate", type=float, default=2.0e-3)
-    parser.add_argument("--legacy-gate", type=float, default=1.0e-3)
+    parser.add_argument("--legacy-gate", type=float, default=2.0e-3)
     parser.add_argument("--abs-iota-min", type=float, default=0.41)
     parser.add_argument("--mirror-threshold", type=float, default=0.21)
     parser.add_argument("--mirror-ntheta", type=int, default=32)

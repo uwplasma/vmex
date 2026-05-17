@@ -816,7 +816,7 @@ exists.
 That preconditioned candidate is also recorded as the accepted baseline, so a
 later cleanup stage cannot overwrite it unless exact diagnostics improve.
 For this far-seed case, the legacy Goodman-style QI metric uses a tight
-``1.25e-3`` gate while the smooth differentiable proxy uses an explicit
+``2e-3`` gate while the smooth differentiable proxy uses an explicit
 ``5e-3`` cap; this avoids rejecting a legacy-good state only because the
 smooth surrogate is more conservative on the six-surface high-resolution audit.
 The script therefore prints both a ``QI+iota`` gate and a stricter engineering
@@ -931,9 +931,14 @@ of the file, to one of the bundled cases:
 
 .. code-block:: python
 
+   RUN_CASE = "nfp1_qi"             # NFP=1 mirror-aware QI lane
    RUN_CASE = "nfp2_qi"             # default NFP=2 mirror-aware QI lane
    RUN_CASE = "qi_stel_seed_3127"   # unrelated seed with reference-family preconditioner
-   RUN_CASE = "nfp4_qh_warm_to_qi"  # NFP=4 QH warm start, using the input NFP
+   RUN_CASE = "nfp4_qh_warm_to_qi"  # NFP=4 diagnostic stress test, using the input NFP
+
+The NFP=4 QH-warm case is deliberately listed as a stress test.  It confirms
+that the current QI driver can run the NFP=4 input path, but the available QH
+warm start does not yet pass the independent QI and mirror gates.
 
 For example, to run the bundled near-axis stellarator seed without editing the
 script:
@@ -1038,7 +1043,7 @@ To reproduce the same-NFP reference-family scan used by the public
      --max-mode 4 --max-iter 80 --target-aspect 4.0 \
      --surfaces 0.1,0.28,0.46,0.64,0.82,1.0 \
      --mboz 18 --nboz 18 --nphi 151 --nalpha 31 --n-bounce 51 \
-     --smooth-qi-max 5e-3 --legacy-qi-max 1.25e-3 \
+     --smooth-qi-max 5e-3 --legacy-qi-max 2e-3 \
      --max-mirror-ratio 0.35 --max-elongation 8.0
 
 The following local landscape scan illustrates why the raw

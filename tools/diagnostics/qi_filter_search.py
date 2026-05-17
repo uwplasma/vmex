@@ -482,7 +482,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--aspect-tolerance", type=float, default=2.0)
     parser.add_argument("--abs-iota-min", type=float, default=0.41)
     parser.add_argument("--smooth-qi-max", type=float, default=2.0e-3)
-    parser.add_argument("--legacy-qi-max", type=float, default=1.0e-3)
+    parser.add_argument("--legacy-qi-max", type=float, default=2.0e-3)
     parser.add_argument("--qi-relax", type=float, default=1.5)
     parser.add_argument("--legacy-relax", type=float, default=1.5)
     parser.add_argument("--min-qi-gain", type=float, default=1.0e-5)

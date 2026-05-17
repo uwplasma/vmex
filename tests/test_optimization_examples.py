@@ -76,10 +76,13 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "VMEC_JAX_QI_INPUT" in text
     assert "VMEC_JAX_QI_OUTPUT_DIR" in text
     assert "Unknown QI RUN_CASE" in text
+    assert '"nfp1_qi"' in text
     assert '"qi_stel_seed_3127"' in text
     assert '"nfp4_qh_warm_to_qi"' in text
+    assert 'DATA_DIR / "input.nfp1_QI"' in text
     assert 'DATA_DIR / "input.QI_stel_seed_3127"' in text
     assert 'DATA_DIR / "input.nfp4_QH_warm_start"' in text
+    assert 'QI_GATE_LEGACY_MAX = float(CASE.get("qi_gate_legacy_max", 2.0e-3))' in text
     assert '"phimin": 0.0' in text
     assert '"weighted_shuffle_profile_weight": 0.0' in text
     assert '"method": "scipy_matrix_free"' in text

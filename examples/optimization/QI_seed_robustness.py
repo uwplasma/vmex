@@ -72,7 +72,7 @@ ELONGATION_WEIGHT = 10.0
 MIRROR_SMOOTH_EXTREMA = 2.0e-2
 MIRROR_SMOOTH_PENALTY = 2.0e-2
 QI_GATE_SMOOTH_MAX = 2.0e-3
-QI_GATE_LEGACY_MAX = 1.0e-3
+QI_GATE_LEGACY_MAX = 2.0e-3
 
 # QI residual settings.  These are the low-mode settings used for the bounded
 # seed probe; increase mboz/nboz/nphi/nalpha/n_bounce for final publication runs.

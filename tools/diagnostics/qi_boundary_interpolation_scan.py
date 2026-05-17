@@ -233,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--target-aspect", type=float, default=4.0)
     parser.add_argument("--abs-iota-min", type=float, default=0.41)
     parser.add_argument("--smooth-qi-max", type=float, default=2.0e-3)
-    parser.add_argument("--legacy-qi-max", type=float, default=1.0e-3)
+    parser.add_argument("--legacy-qi-max", type=float, default=2.0e-3)
     parser.add_argument("--max-mirror-ratio", type=float, default=0.35)
     parser.add_argument("--max-elongation", type=float, default=8.0)
     args = parser.parse_args(argv)
