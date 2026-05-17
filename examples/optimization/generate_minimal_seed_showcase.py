@@ -43,6 +43,7 @@ import json
 import multiprocessing as mp
 import os
 from pathlib import Path
+import shutil
 import sys
 import time
 import traceback
@@ -478,6 +479,14 @@ def _read_result(path: Path) -> sweep.CaseResult:
     return sweep.CaseResult(**json.loads(path.read_text()))
 
 
+def _prepare_output_dir_for_run(output_dir: Path, *, rerun: bool) -> None:
+    """Clear stale per-case artifacts before an explicit rerun."""
+
+    if bool(rerun) and output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+
 def _write_showcase_summary(results: list[sweep.CaseResult], output_root: Path, summary_name: str) -> None:
     output_root.mkdir(parents=True, exist_ok=True)
     records = [asdict(result) for result in results]
@@ -563,8 +572,7 @@ def main() -> None:
             print(f"[{label}] skip existing success={result.success} crashed={result.crashed}", flush=True)
             results.append(result)
             continue
-        if result_path.exists():
-            result_path.unlink()
+        _prepare_output_dir_for_run(output_dir, rerun=bool(args.rerun))
 
         old_platforms = os.environ.get("JAX_PLATFORMS")
         if worker_jax_platforms is not None:

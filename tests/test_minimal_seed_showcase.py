@@ -174,6 +174,26 @@ def test_minimal_seed_physics_gate_rejects_zero_iota_and_bad_qi() -> None:
     assert "mirror" in qi_bad_mirror.message
 
 
+def test_minimal_seed_rerun_clears_stale_case_artifacts(tmp_path: Path) -> None:
+    generator = _load_module("generate_minimal_seed_showcase_prepare", "generate_minimal_seed_showcase.py")
+
+    output_dir = tmp_path / "case"
+    output_dir.mkdir()
+    (output_dir / "case_result.json").write_text("{}")
+    (output_dir / "history.json").write_text("stale")
+    (output_dir / "wout_final.nc").write_text("stale")
+
+    generator._prepare_output_dir_for_run(output_dir, rerun=True)
+
+    assert output_dir.exists()
+    assert list(output_dir.iterdir()) == []
+
+    (output_dir / "history.json").write_text("keep")
+    generator._prepare_output_dir_for_run(output_dir, rerun=False)
+
+    assert (output_dir / "history.json").read_text() == "keep"
+
+
 def test_minimal_seed_renderer_loads_records_and_returns_monotone_segments(tmp_path: Path) -> None:
     generator = _load_module("generate_minimal_seed_showcase_for_renderer", "generate_minimal_seed_showcase.py")
     renderer = _load_module("render_minimal_seed_showcase", "render_minimal_seed_showcase.py")
