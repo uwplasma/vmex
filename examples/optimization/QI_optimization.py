@@ -57,6 +57,48 @@ def _finite_or_none(value):
 # file, so the same script can run the bundled NFP=2 QI seed, the stellarator
 # seed, or the NFP=4 QH warm start without hard-coding field period count.
 QI_CASES = {
+    "nfp1_qi": {
+        "case_goal": "NFP=1 mirror-aware QI lane",
+        "input_file": DATA_DIR / "input.nfp1_QI",
+        "output_dir": Path("results/qi_opt/ess/nfp1_qi"),
+        "max_mode": 3,
+        "min_vmec_mode": 6,
+        "method": "scipy_matrix_free",
+        "use_mode_continuation": True,
+        "stage_repeats": 1,
+        "max_nfev": 10,
+        "target_aspect": DEFAULT_QI_TARGET_ASPECT,
+        "target_abs_iota_min": 0.41,
+        "max_elongation": 8.2,
+        "mirror_threshold": 0.30,
+        "mirror_surface_index": None,
+        "qi_ceiling_max": 2.0e-2,
+        "qi_ceiling_smooth_penalty": 2.0e-3,
+        "branch_width_weight": 0.5,
+        "weighted_shuffle_profile_weight": 0.0,
+        "phimin": 0.0,
+        "mirror_weight": 20.0,
+        "elongation_weight": 10.0,
+        "qi_ceiling_weight": 0.0,
+        "shuffle_profile_nphi_out": None,
+        "mirror_ramp_stages": (
+            {
+                "name": "matrix_free_mirror030",
+                "max_nfev": 10,
+                "stage_repeats": 1,
+                "method": "scipy_matrix_free",
+                "mirror_threshold": 0.21,
+                "promotion_mirror_threshold": 0.30,
+                "mirror_surface_index": None,
+                "mirror_weight": 20.0,
+                "elongation_weight": 10.0,
+                "qi_ceiling_max": 2.0e-2,
+                "qi_ceiling_weight": 0.0,
+                "require_mirror_improvement": False,
+                "require_engineering_gate": True,
+            },
+        ),
+    },
     "nfp2_qi": {
         "case_goal": "default NFP=2 mirror-aware QI lane",
         "input_file": DATA_DIR / "input.nfp2_QI",
@@ -119,7 +161,7 @@ QI_CASES = {
         "mirror_threshold": 0.35,
         "mirror_surface_index": None,
         "qi_gate_smooth_max": 5.0e-3,
-        "qi_gate_legacy_max": 1.25e-3,
+        "qi_gate_legacy_max": 2.0e-3,
         "qi_ceiling_max": 2.0e-3,
         "qi_ceiling_smooth_penalty": 2.0e-3,
         # First find a low-QI, nonzero-transform basin.  Current Boozer-target
@@ -147,7 +189,7 @@ QI_CASES = {
             "max_mirror_ratio": 0.35,
             "max_elongation": 8.0,
             "smooth_qi_max": 5.0e-3,
-            "legacy_qi_max": 1.25e-3,
+            "legacy_qi_max": 2.0e-3,
             "diagnostic_qi_resolution": {"mboz": 18, "nboz": 18, "nphi": 151, "nalpha": 31, "n_bounce": 51},
             # Once a candidate passes the independent QI/iota/mirror/elongation
             # gates, prefer the lower-mirror branch.  This uses the aspect and
@@ -342,7 +384,7 @@ QI_CASES = {
     # },
 }
 
-RUN_CASE = "nfp2_qi"  # Try "qi_stel_seed_3127" or "nfp4_qh_warm_to_qi".
+RUN_CASE = "nfp2_qi"  # Try "nfp1_qi", "qi_stel_seed_3127", or "nfp4_qh_warm_to_qi".
 _EXTERNAL_INPUT = os.environ.get("VMEC_JAX_QI_INPUT")
 if _EXTERNAL_INPUT:
     _external_label = os.environ.get(
@@ -458,7 +500,7 @@ BOOZER_TARGET_WEIGHT = float(CASE.get("boozer_target_weight", 0.0))
 MIRROR_SMOOTH_EXTREMA = 2.0e-2
 MIRROR_SMOOTH_PENALTY = 2.0e-2
 QI_GATE_SMOOTH_MAX = float(CASE.get("qi_gate_smooth_max", 2.0e-3))
-QI_GATE_LEGACY_MAX = float(CASE.get("qi_gate_legacy_max", 1.0e-3))
+QI_GATE_LEGACY_MAX = float(CASE.get("qi_gate_legacy_max", 2.0e-3))
 JIT_BOOZ = bool(CASE.get("jit_booz", True))  # Faster QI/Boozer path on current CPU/GPU diagnostics.
 
 

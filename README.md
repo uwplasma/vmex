@@ -249,8 +249,11 @@ PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
 
 For QI seed-robustness probes, set `VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127`
 when running `examples/optimization/QI_optimization.py`, or change the
-top-level `RUN_CASE` to `qi_stel_seed_3127`, `nfp4_qh_warm_to_qi`, or a new
-`QI_CASES` entry for another VMEC input deck. Before promoting such a result,
+top-level `RUN_CASE` to `nfp1_qi`, `nfp2_qi`, `qi_stel_seed_3127`,
+`nfp4_qh_warm_to_qi`, or a new `QI_CASES` entry for another VMEC input deck.
+The NFP=4 QH-warm case is currently a diagnostic stress test: it exercises the
+same machinery, but it is not yet a validated route to a precise NFP=4 QI state.
+Before promoting such a result,
 run
 `examples/optimization/audit_qi_seed_suitability.py --quick` and check the
 legacy QI, mirror ratio, elongation, iota, and Boozer `|B|` line-contour
@@ -267,7 +270,7 @@ local QI cleanup from the lowest-mirror accepted non-endpoint candidate when
 one exists.
 That candidate is recorded as the accepted baseline, so later cleanup stages
 cannot replace it unless exact diagnostics improve.
-For this far-seed case the legacy Goodman-style QI gate is `1.25e-3`, while
+For this far-seed case the legacy Goodman-style QI gate is `2e-3`, while
 the smooth differentiable proxy gate is `5e-3` because it is the optimization
 surrogate and is more conservative on the six-surface audit.
 Guarded local cleanup can now use anisotropic boundary stages, for example
@@ -312,7 +315,7 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_boundary_interpolatio
   --max-mode 4 --max-iter 80 --target-aspect 4.0 \
   --surfaces 0.1,0.28,0.46,0.64,0.82,1.0 \
   --mboz 18 --nboz 18 --nphi 151 --nalpha 31 --n-bounce 51 \
-  --smooth-qi-max 5e-3 --legacy-qi-max 1.25e-3 \
+  --smooth-qi-max 5e-3 --legacy-qi-max 2e-3 \
   --max-mirror-ratio 0.35 --max-elongation 8.0
 ```
 

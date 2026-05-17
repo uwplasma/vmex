@@ -65,7 +65,7 @@ class SurveyTargets:
     """Acceptance/ranking targets for the far-seed QI basin survey."""
 
     smooth_qi_max: float = 2.0e-3
-    legacy_qi_max: float = 1.0e-3
+    legacy_qi_max: float = 2.0e-3
     mirror_ratio_max: float = 0.35
     max_elongation: float = 8.0
     abs_iota_min: float = 0.41

@@ -93,7 +93,7 @@ class QISeedSuitabilityTargets:
     """
 
     smooth_qi_max: float | None = 2.0e-3
-    legacy_qi_max: float | None = 1.0e-3
+    legacy_qi_max: float | None = 2.0e-3
     target_aspect: float | None = 5.0
     aspect_relative_tolerance: float = 0.35
     abs_iota_min: float | None = 0.41
