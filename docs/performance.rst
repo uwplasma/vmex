@@ -869,6 +869,10 @@ twice that budget and the run reports non-convergence if the cap is exhausted.
 This avoids spending many hidden extra iteration blocks in profiling or sweep
 scripts.  When ``max_iter`` is not overridden, VMEC input-deck budgets retain
 the robust finish behavior needed for parity-oriented production solves.
+On ``office``, the explicit ``max_iter=100`` QH GPU diagnostic now stops after
+two finish blocks (``[100, 100]``) and reports non-convergence at the cap; the
+same low-budget diagnostic previously spent five finish blocks and took about
+``56.2 s``, while the capped source-tree run took about ``42.9 s``.
 
 Earlier April 2026 diagnostics with the scan-heavy GPU policy are retained
 below for historical context:

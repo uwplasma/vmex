@@ -1138,7 +1138,11 @@ Defer beyond the current cycle:
   blocks. Input-deck-driven production runs without an explicit override keep
   the robust finish behavior. Accelerated finish retries also inherit
   `use_scan=False` from the new production auto policy, so GPU/CPU auto paths
-  do not re-enter the slower scan loop during finish attempts.
+  do not re-enter the slower scan loop during finish attempts. On `office`, the
+  explicit `max_iter=100` QH GPU diagnostic now stops after two finish blocks
+  (`[100, 100]`) and reports non-convergence at the cap; the same low-budget
+  diagnostic previously spent five finish blocks and took about `56.2 s`, while
+  the capped source-tree run took about `42.9 s`.
 - 2026-05-14: Added an opt-in dense branch-shuffle output grid
   (`shuffle_profile_nphi_out`) to the differentiable QI residual and propagated
   it through diagnostics and `QuasiIsodynamicOptions`. This brings vmec_jax
