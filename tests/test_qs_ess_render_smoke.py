@@ -55,6 +55,17 @@ def _load_qi_renderer_module():
     return module
 
 
+def _load_qi_readme_cases_module():
+    root = Path(__file__).resolve().parents[1]
+    script = root / "examples" / "optimization" / "render_qi_readme_cases.py"
+    spec = importlib.util.spec_from_file_location("render_qi_readme_cases", script)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_qs_ess_sweep_worker_jax_platform_policy():
     sweep = _load_sweep_module()
 
@@ -404,6 +415,69 @@ def test_qi_renderer_plots_only_qi_refinement_after_qp_preseed():
 
     assert len(segments) == 1
     assert [item["stage"] for item in segments[0]] == ["QI max_mode=1", "QI max_mode=1"]
+
+
+def test_qi_readme_cases_concatenate_histories_and_record_lambda_scan(tmp_path):
+    renderer = _load_qi_readme_cases_module()
+
+    h1 = tmp_path / "stage1" / "history.json"
+    h2 = tmp_path / "stage2" / "history.json"
+    h1.parent.mkdir()
+    h2.parent.mkdir()
+    h1.write_text(
+        json.dumps(
+            {
+                "label": "QI optimization (max_mode=3, ESS)",
+                "history": [
+                    {"wall_time_s": 0.0, "objective": 100.0},
+                    {"wall_time_s": 2.0, "objective": 1.0},
+                ],
+            }
+        )
+    )
+    h2.write_text(
+        json.dumps(
+            {
+                "label": "QI boundary-reference baseline (max_mode=4)",
+                "history": [
+                    {"wall_time_s": 0.0, "objective": 0.5},
+                    {"wall_time_s": 3.0, "objective": 0.4},
+                ],
+            }
+        )
+    )
+    summary = tmp_path / "summary.json"
+    summary.write_text(
+        json.dumps(
+            [
+                {"lambda": 0.99, "legacy_qi": 2.0e-3, "mirror": 0.2, "selected": False},
+                {"lambda": 1.01, "legacy_qi": 5.0e-4, "mirror": 0.3, "selected": True},
+            ]
+        )
+    )
+    case = renderer.QICase(
+        label="synthetic",
+        input_file=tmp_path / "input.synthetic",
+        output_dir=tmp_path,
+        initial_wout=tmp_path / "wout_initial.nc",
+        note="test",
+        history_paths=(h1, h2),
+        preconditioner_summary=summary,
+    )
+
+    segments = renderer._history_segments(case)
+    full_wall_s, stage_count, point_count = renderer._history_summary(case)
+    precond_points, selected_lambda, selected_qi, selected_mirror = renderer._preconditioner_summary(case)
+
+    assert stage_count == 2
+    assert point_count == 4
+    assert full_wall_s == pytest.approx(5.0)
+    assert segments[1]["wall_time_s"][0] == pytest.approx(2.0)
+    assert segments[0]["label"] == "seed solve"
+    assert precond_points == 2
+    assert selected_lambda == pytest.approx(1.01)
+    assert selected_qi == pytest.approx(5.0e-4)
+    assert selected_mirror == pytest.approx(0.3)
 
 
 def test_qi_renderer_marks_raw_fallback_legacy_as_nonpromotable(tmp_path, monkeypatch):
