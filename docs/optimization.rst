@@ -64,6 +64,15 @@ driver for reproducible comparison tables:
      - ``examples/optimization/QI_optimization.py``
      - NFP=2 QI default lane with aspect target 10, Boozer-space QI, mirror, elongation, QI ceiling, ESS, and repeated same-mode continuation.
 
+Minimal far-from-goal seed files are available for NFP=1, 2, 3, and 4:
+``examples/data/input.minimal_seed_nfp1`` through
+``examples/data/input.minimal_seed_nfp4``.  They all come from
+``vj.minimal_fixed_boundary_indata(nfp=...)`` and contain only
+``RBC(0,0)``, ``RBC(0,1)``, and ``ZBS(0,1)`` as nonzero boundary
+coefficients.  Use those inputs to test whether a QA/QH/QP/QI policy can build
+the target field structure from a common seed that does not already encode the
+target helicity.
+
 For generated comparison artifacts, run QA/QH/QP/QI with the current QI
 default of no same-mode QP preseed, then run the focused QI matrix separately
 when preseed/no-preseed is the experiment:
@@ -138,10 +147,11 @@ for both bundled QI inputs:
    :alt: QI optimization coverage for NFP=2 QI and seed-3127 inputs
 
 The Boozer ``|B|`` panels in that figure use line contours only.  The staged
-objective panel concatenates every recorded history file and normalizes each
-stage to its first objective, with dashed separators where objective
-definitions or weights change.  For the seed-3127 lane, the inset shows the
-final boundary-reference interpolation scan that selected the promoted result.
+objective panel concatenates every recorded history file and plots the
+best-so-far value in each stage, normalized to that stage's first objective,
+with dashed separators where objective definitions or weights change.  For the
+seed-3127 lane, the inset is a boundary-reference interpolation scan, not an
+optimizer trajectory.
 Regenerate the figure and CSV without launching new optimization jobs with:
 
 .. code-block:: bash

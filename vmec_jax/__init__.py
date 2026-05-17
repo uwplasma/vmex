@@ -25,7 +25,7 @@ if _jax_cache_dir is not None:
     _jax.config.update("jax_compilation_cache_dir", _jax_cache_dir)
 
 from . import api
-from .namelist import read_indata, write_indata, InData
+from .namelist import read_indata, write_indata, InData, minimal_fixed_boundary_indata
 from .config import FreeBoundaryConfig, VMECConfig, load_config
 from .modes import ModeTable, vmec_mode_table, nyquist_mode_table, default_grid_sizes
 from .grids import AngleGrid, make_angle_grid
@@ -318,6 +318,7 @@ __all__ = [
     "read_indata",
     "write_indata",
     "InData",
+    "minimal_fixed_boundary_indata",
     "FreeBoundaryConfig",
     "VMECConfig",
     "load_config",

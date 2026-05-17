@@ -162,6 +162,17 @@ def _history_summary(case: QICase) -> tuple[float, int, int]:
     return total_wall_s, len(segments), total_points
 
 
+def _stage_normalized_best_so_far(objective: np.ndarray) -> np.ndarray:
+    """Normalize a stage objective and return its monotone best-so-far trace."""
+
+    objective = np.asarray(objective, dtype=float)
+    if objective.size == 0:
+        return objective
+    scale = max(float(objective[0]), 1.0e-16)
+    normalized = np.maximum(objective / scale, 1.0e-16)
+    return np.minimum.accumulate(normalized)
+
+
 def _preconditioner_summary(case: QICase) -> tuple[int, float | None, float | None, float | None]:
     if case.preconditioner_summary is None:
         return 0, None, None, None
@@ -291,18 +302,17 @@ def _plot_history(ax, case: QICase) -> None:
     for idx, segment in enumerate(_history_segments(case)):
         wall_min = np.asarray(segment["wall_time_s"], dtype=float) / 60.0
         objective = np.asarray(segment["objective"], dtype=float)
-        scale = max(float(objective[0]), 1.0e-16)
-        normalized = np.maximum(objective / scale, 1.0e-16)
+        best_so_far = _stage_normalized_best_so_far(objective)
         color = colors[idx % len(colors)]
         label = str(segment["label"])
-        ax.semilogy(wall_min, normalized, color=color, linewidth=1.35, marker="o", markersize=2.4, label=label)
-        ax.scatter(wall_min[-1], normalized[-1], s=16, color=color, zorder=3)
+        ax.semilogy(wall_min, best_so_far, color=color, linewidth=1.35, marker="o", markersize=2.4, label=label)
+        ax.scatter(wall_min[-1], best_so_far[-1], s=16, color=color, zorder=3)
         if idx > 0:
             ax.axvline(wall_min[0], color="0.75", linewidth=0.7, linestyle="--", zorder=0)
     _plot_preconditioner_sweep(ax, case)
-    ax.set_title("Full staged objective history", fontsize=8, pad=4)
+    ax.set_title("Best-so-far staged objective history", fontsize=8, pad=4)
     ax.set_xlabel("Wall time (min)")
-    ax.set_ylabel("Objective / stage start")
+    ax.set_ylabel("Best objective / stage start")
     ax.grid(True, alpha=0.22, linestyle=":")
     ax.legend(fontsize=4.8, frameon=False, loc="upper right", handlelength=1.1, labelspacing=0.25)
 
@@ -321,7 +331,7 @@ def _plot_preconditioner_sweep(ax, case: QICase) -> None:
     if np.any(selected):
         inset.scatter(lambdas[selected], legacy_qi[selected], color="#e31a1c", s=16, zorder=3)
     inset.axhline(1.0e-3, color="0.55", linestyle=":", linewidth=0.7)
-    inset.set_title("lambda scan QI", fontsize=5.6, pad=1)
+    inset.set_title("reference scan QI", fontsize=5.6, pad=1)
     inset.set_xlabel(r"$\lambda$", fontsize=5.4, labelpad=0)
     inset.set_ylabel("legacy QI", fontsize=5.4, labelpad=0)
     inset.tick_params(axis="both", labelsize=4.8, pad=0)

@@ -245,10 +245,10 @@ Regenerate these lightweight artifacts with:
    PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 
 The staged objective panel concatenates every recorded history file used by
-the promoted result.  It plots each stage normalized to that stage's first
-objective, with dashed separators marking objective-definition or weight
-changes.  For the seed-3127 lane, the inset shows the final
-boundary-reference interpolation scan that selected the promoted result.
+the promoted result.  It plots the best-so-far value in each stage, normalized
+to that stage's first objective, with dashed separators marking
+objective-definition or weight changes.  For the seed-3127 lane, the inset is
+a boundary-reference interpolation scan, not an optimizer trajectory.
 
 Objective Histories
 -------------------

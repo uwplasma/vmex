@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vmec_jax.namelist import InData, read_indata, write_indata
+from vmec_jax.namelist import InData, minimal_fixed_boundary_indata, read_indata, write_indata
 
 
 def test_indata_basic(tmp_path: Path):
@@ -76,3 +76,20 @@ def test_write_indata_roundtrips_scalars_lists_and_indexed_values(tmp_path: Path
     assert got.indexed["RBC"][(1, 1)] == 1e-5
     assert got.indexed["ZBS"][(0, 1)] == 0.2
     assert got.indexed["ZBS"][(1, 1)] == 1e-5
+
+
+def test_minimal_fixed_boundary_seed_roundtrips_three_boundary_coefficients(tmp_path: Path):
+    source = minimal_fixed_boundary_indata(nfp=3, r0=1.1, rbc01=0.17, zbs01=0.19)
+    path = tmp_path / "input.minimal_nfp3"
+
+    write_indata(path, source)
+    got = read_indata(path)
+
+    assert got.get_int("NFP") == 3
+    assert got.get_int("MPOL") == 5
+    assert got.get_int("NTOR") == 5
+    assert got.get_bool("LASYM") is False
+    assert got.indexed["RBC"] == {(0, 0): 1.1, (0, 1): 0.17}
+    assert got.indexed["ZBS"] == {(0, 1): 0.19}
+    assert "RBS" not in got.indexed
+    assert "ZBC" not in got.indexed

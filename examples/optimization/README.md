@@ -47,6 +47,24 @@ should remain `0.0`. `QuasiIsodynamicOptions` defaults to `jit_booz=True`,
 which is currently faster for the Boozer/QI residual phase on both CPU and GPU;
 set it to `False` only for diagnostics or parity isolation.
 
+## Minimal Far-From-Goal Seed Inputs
+
+The bundled files `examples/data/input.minimal_seed_nfp1`,
+`examples/data/input.minimal_seed_nfp2`, `examples/data/input.minimal_seed_nfp3`,
+and `examples/data/input.minimal_seed_nfp4` all use the same three-coefficient
+boundary template:
+
+```python
+indata = vj.minimal_fixed_boundary_indata(nfp=2)
+vj.write_indata("input.minimal_seed_nfp2", indata)
+```
+
+Only `RBC(0,0)`, `RBC(0,1)`, and `ZBS(0,1)` are nonzero.  Use these inputs
+when testing whether QA, QH, QP, or QI policies can build the target
+omnigenous structure from a seed that does not already contain the target
+helicity.  Higher Fourier coefficients should be introduced by `max_mode`,
+mode continuation, ESS, or a staged QI policy, not by the seed file itself.
+
 ## Result Object Pattern
 
 The standalone scripts also show how to work from the returned result object
