@@ -2172,15 +2172,13 @@ class FixedBoundaryExactOptimizer:
         return initial_tangents
 
     def _lasym_replay_column_chunk(self, n_params: int) -> int | None:
-        """LASYM replay chunk heuristic for large dense exact Jacobians."""
+        """Replay-column chunk heuristic for dense exact Jacobians."""
 
         env_override = os.environ.get("VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK")
         if env_override is not None:
             requested = int(env_override)
             return None if requested <= 0 else requested
         if os.environ.get("VMEC_JAX_REPLAY_COLUMN_CHUNK") is not None:
-            return None
-        if not bool(getattr(self._static.cfg, "lasym", False)):
             return None
         backend_name = None
         if self._solver_device_name is not None:
@@ -2193,13 +2191,14 @@ class FixedBoundaryExactOptimizer:
             except Exception:
                 backend_name = None
         if backend_name in ("gpu", "cuda", "rocm"):
-            # On current CUDA/XLA, chunking small LASYM Jacobians adds launch and
-            # residual-tangent overhead.  Keep full-column replay through the
-            # common mode-2 case, and only chunk larger mode-3-style matrices
-            # where it avoids excessive peak memory and is neutral-to-slightly
-            # faster in cold GPU profiling.
-            return 8 if int(n_params) >= 96 else None
+            # Cold GPU exact-callback profiling on RTX A4000 shows full-column
+            # replay is dominated by XLA transpose/replay overhead even for the
+            # 24-DOF symmetric mode-2 case.  Chunking at 8 columns keeps launch
+            # count modest while reducing replay/residual-projection wall time.
+            return 8 if int(n_params) >= 24 else None
         if backend_name == "tpu":
+            return None
+        if not bool(getattr(self._static.cfg, "lasym", False)):
             return None
         if int(n_params) >= 64:
             return 8
