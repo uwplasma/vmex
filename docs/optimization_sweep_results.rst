@@ -218,7 +218,7 @@ with line contours only.
      - ``6.43/8.2``
      - ``9.999/10.0``
      - ``-0.5043``
-     - ``9.8``
+     - ``14.7``
    * - ``examples/data/input.QI_stel_seed_3127``
      - ``results/qi_opt/ess/qi_stel_seed_3127_current_public_final``
      - ``1.12e-1``
@@ -228,7 +228,7 @@ with line contours only.
      - ``3.91/8.0``
      - ``3.465/4.0``
      - ``-1.0366``
-     - ``1.4``
+     - ``6.3``
 
 .. image:: _static/figures/readme_qi_optimization_cases.png
    :width: 100%
@@ -243,6 +243,11 @@ Regenerate these lightweight artifacts with:
 .. code-block:: bash
 
    PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
+
+The staged objective panel concatenates every recorded history file used by
+the promoted result.  Dashed separators mark objective-definition or weight
+changes between stages, so the plotted value is a stage-local scalar objective
+rather than one globally comparable objective over the full run.
 
 Objective Histories
 -------------------

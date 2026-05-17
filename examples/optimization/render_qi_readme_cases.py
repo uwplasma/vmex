@@ -32,6 +32,7 @@ class QICase:
     output_dir: Path
     initial_wout: Path
     note: str
+    history_paths: tuple[Path, ...] = ()
 
 
 CASES = (
@@ -41,6 +42,23 @@ CASES = (
         output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp2_qi",
         initial_wout=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp2_qi" / "wout_initial.nc",
         note="default mirror-aware QI lane",
+        history_paths=(
+            REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp2_qi" / "mirror_ramp_01_qi_basin" / "history.json",
+            REPO_ROOT
+            / "results"
+            / "qi_opt"
+            / "ess"
+            / "nfp2_qi"
+            / "mirror_ramp_01_matrix_free_mirror030"
+            / "history.json",
+            REPO_ROOT
+            / "results"
+            / "qi_opt"
+            / "ess"
+            / "nfp2_qi"
+            / "mirror_ramp_02_lcfs_mirror_030"
+            / "history.json",
+        ),
     ),
     QICase(
         label="NFP=3 seed 3127",
@@ -48,6 +66,23 @@ CASES = (
         output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "qi_stel_seed_3127_current_public_final",
         initial_wout=REPO_ROOT / "examples" / "data" / "wout_QI_stel_seed_3127.nc",
         note="curated reference-family baseline",
+        history_paths=(
+            REPO_ROOT / "results" / "qi_opt" / "ess" / "qi_stel_seed_3127" / "history.json",
+            REPO_ROOT
+            / "results"
+            / "qi_opt"
+            / "ess"
+            / "qi_stel_seed_3127_current_public_final"
+            / "boundary_reference_baseline"
+            / "history.json",
+            REPO_ROOT
+            / "results"
+            / "qi_opt"
+            / "ess"
+            / "qi_stel_seed_3127_current_public_final"
+            / "mirror_ramp_01_prefiltered_mirror_qi_iota_cleanup"
+            / "history.json",
+        ),
     ),
 )
 
@@ -58,9 +93,71 @@ def _load_json(path: Path) -> dict:
     return json.loads(path.read_text())
 
 
+def _history_paths(case: QICase) -> tuple[Path, ...]:
+    if case.history_paths:
+        return case.history_paths
+    return (case.output_dir / "history.json",)
+
+
+def _history_value(item: dict) -> float:
+    value = item.get("objective", item.get("cost"))
+    if value is None:
+        return np.nan
+    return float(value)
+
+
+def _short_history_label(label: str) -> str:
+    label = label.removeprefix("QI ")
+    replacements = {
+        "optimization (max_mode=3, ESS)": "seed solve",
+        "qi_basin (max_mode=3, ESS)": "QI basin",
+        "matrix_free_mirror030 (max_mode=3, ESS)": "mirror<=0.30",
+        "lcfs_mirror_030 (max_mode=3, ESS)": "LCFS mirror check",
+        "boundary-reference baseline (max_mode=4)": "boundary baseline",
+        "prefiltered_mirror_qi_iota_cleanup (max_mode=4, ESS)": "rejected cleanup",
+    }
+    return replacements.get(label, label[:34])
+
+
+def _history_segments(case: QICase) -> list[dict[str, np.ndarray | str | Path]]:
+    segments: list[dict[str, np.ndarray | str | Path]] = []
+    offset_s = 0.0
+    for path in _history_paths(case):
+        history = _load_json(path)
+        entries = history.get("history", [])
+        if not entries:
+            raise RuntimeError(f"Missing history entries in {path}")
+        raw_time = np.asarray([float(item.get("wall_time_s", 0.0)) for item in entries], dtype=float)
+        values = np.asarray([max(_history_value(item), 1.0e-16) for item in entries], dtype=float)
+        keep = np.isfinite(raw_time) & np.isfinite(values)
+        raw_time = raw_time[keep]
+        values = values[keep]
+        if raw_time.size == 0:
+            raise RuntimeError(f"No finite history entries in {path}")
+        if np.any(np.diff(raw_time) < 0.0):
+            raw_time = raw_time - float(np.nanmin(raw_time))
+        shifted_time = raw_time + offset_s
+        label = _short_history_label(str(history.get("label") or path.parent.name))
+        segments.append({"path": path, "label": label, "wall_time_s": shifted_time, "objective": values})
+        offset_s = float(shifted_time[-1])
+    return segments
+
+
+def _history_summary(case: QICase) -> tuple[float, int, int]:
+    segments = _history_segments(case)
+    total_wall_s = 0.0
+    total_points = 0
+    for segment in segments:
+        wall_time_s = np.asarray(segment["wall_time_s"], dtype=float)
+        total_wall_s = max(total_wall_s, float(wall_time_s[-1]))
+        total_points += int(wall_time_s.size)
+    return total_wall_s, len(segments), total_points
+
+
 def _case_record(case: QICase) -> dict[str, str | float]:
     diagnostics = _load_json(case.output_dir / "diagnostics.json")
     history = _load_json(case.output_dir / "history.json")
+    full_wall_s, history_segment_count, history_point_count = _history_summary(case)
     final_wout = case.output_dir / "wout_final.nc"
     for path in (case.input_file, case.initial_wout, final_wout):
         if not path.exists():
@@ -81,7 +178,10 @@ def _case_record(case: QICase) -> dict[str, str | float]:
         "target_aspect": float(diagnostics["target_aspect"]),
         "mean_iota": float(diagnostics["mean_iota"]),
         "qi_nfp": int(diagnostics["qi_nfp"]),
-        "cpu_time_min": float(history["total_wall_time_s"]) / 60.0,
+        "cpu_time_min": full_wall_s / 60.0,
+        "published_stage_cpu_time_min": float(history["total_wall_time_s"]) / 60.0,
+        "history_segments": history_segment_count,
+        "history_points": history_point_count,
         "final_wout": str(final_wout.relative_to(REPO_ROOT)),
     }
 
@@ -105,6 +205,9 @@ def _write_csv(records: list[dict[str, str | float]]) -> None:
         "mean_iota",
         "qi_nfp",
         "cpu_time_min",
+        "published_stage_cpu_time_min",
+        "history_segments",
+        "history_points",
         "final_wout",
     ]
     with OUT_CSV.open("w", newline="") as f:
@@ -150,21 +253,22 @@ def _plot_lcfs(ax, wout_path: Path, title: str) -> None:
     fix_matplotlib_3d(ax)
 
 
-def _plot_history(ax, history_path: Path) -> None:
-    history = _load_json(history_path)
-    entries = history.get("history", [])
-    if not entries:
-        raise RuntimeError(f"Missing history entries in {history_path}")
-    wall_min = np.asarray([float(item.get("wall_time_s", 0.0)) / 60.0 for item in entries], dtype=float)
-    objective = np.minimum.accumulate(
-        np.asarray([max(float(item.get("objective", item.get("cost", np.nan))), 1.0e-16) for item in entries])
-    )
-    ax.semilogy(wall_min, objective, color="#1f4e79", linewidth=1.8)
-    ax.scatter(wall_min[-1], objective[-1], s=18, color="#d95f02", zorder=3)
-    ax.set_title("Objective history", fontsize=8, pad=4)
+def _plot_history(ax, case: QICase) -> None:
+    colors = ("#1f4e79", "#d95f02", "#2ca25f", "#756bb1", "#636363")
+    for idx, segment in enumerate(_history_segments(case)):
+        wall_min = np.asarray(segment["wall_time_s"], dtype=float) / 60.0
+        objective = np.asarray(segment["objective"], dtype=float)
+        color = colors[idx % len(colors)]
+        label = str(segment["label"])
+        ax.semilogy(wall_min, objective, color=color, linewidth=1.35, marker="o", markersize=2.4, label=label)
+        ax.scatter(wall_min[-1], objective[-1], s=16, color=color, zorder=3)
+        if idx > 0:
+            ax.axvline(wall_min[0], color="0.75", linewidth=0.7, linestyle="--", zorder=0)
+    ax.set_title("Full staged objective history", fontsize=8, pad=4)
     ax.set_xlabel("Wall time (min)")
-    ax.set_ylabel("Total objective")
+    ax.set_ylabel("Stage objective")
     ax.grid(True, alpha=0.22, linestyle=":")
+    ax.legend(fontsize=4.8, frameon=False, loc="best", handlelength=1.1, labelspacing=0.25)
 
 
 def _booz_xform_on_outer_surface(wout_path: Path):
@@ -283,7 +387,7 @@ def _render(records: list[dict[str, str | float]]) -> None:
         ax3 = fig.add_subplot(gs[row, 3])
         _plot_lcfs(ax0, case.initial_wout, "Raw input LCFS")
         _plot_lcfs(ax1, case.output_dir / "wout_final.nc", "Final LCFS")
-        _plot_history(ax2, case.output_dir / "history.json")
+        _plot_history(ax2, case)
         _plot_boozer_bmag(ax3, case.output_dir / "wout_final.nc", int(record["qi_nfp"]))
         title_y = 0.895 - 0.455 * row
         fig.text(0.045, title_y, _row_title(record), fontsize=10, ha="left", va="bottom")

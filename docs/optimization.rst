@@ -120,7 +120,7 @@ for both bundled QI inputs:
      - ``6.43/8.2``
      - ``9.999/10.0``
      - ``-0.5043``
-     - ``9.8``
+     - ``14.7``
    * - ``examples/data/input.QI_stel_seed_3127``
      - ``results/qi_opt/ess/qi_stel_seed_3127_current_public_final``
      - ``1.12e-1``
@@ -130,15 +130,17 @@ for both bundled QI inputs:
      - ``3.91/8.0``
      - ``3.465/4.0``
      - ``-1.0366``
-     - ``1.4``
+     - ``6.3``
 
 .. image:: _static/figures/readme_qi_optimization_cases.png
    :width: 100%
    :align: center
    :alt: QI optimization coverage for NFP=2 QI and seed-3127 inputs
 
-The Boozer ``|B|`` panels in that figure use line contours only.  Regenerate
-the figure and CSV without launching new optimization jobs with:
+The Boozer ``|B|`` panels in that figure use line contours only.  The staged
+objective panel concatenates every recorded history file, with dashed
+separators where objective definitions or weights change.  Regenerate the
+figure and CSV without launching new optimization jobs with:
 
 .. code-block:: bash
 
