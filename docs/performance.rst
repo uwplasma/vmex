@@ -807,11 +807,63 @@ derivatives are required.
 Fixed-boundary GPU diagnostics
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-For fixed-boundary inputs, the GPU fast path only helps when the scan solver is
-both numerically safe and large enough to amortize XLA compilation.  For small
-example decks, the first GPU process is often slower than CPU; the persistent
-cache improves later processes, but CPU can still win.  April 2026 ``office``
-diagnostics on an NVIDIA RTX A4000 using the public default path:
+For fixed-boundary inputs, the GPU force kernels are fast, but the scan solver
+is not automatically the best end-to-end policy once the solve is required to
+converge to the VMEC input tolerance.  May 2026 ``office`` diagnostics on an
+NVIDIA RTX A4000 showed that the VMEC-control non-scan loop was faster than the
+scan loop for the representative QH, QA, QI, and LASYM fixed-boundary cases.
+The public auto-selected CPU/GPU policy therefore uses the non-scan loop for
+ordinary fixed-boundary production solves.  Explicit fast-mode requests still
+use scan so developers can compare or profile it directly.
+
+Converged QH public default, ``max_iter=500``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 20 20 20
+
+   * - Backend
+     - Policy
+     - Wall time
+     - Final total residual
+   * - CPU
+     - default, non-scan
+     - ``16.65 s``
+     - ``1.11e-13``
+   * - GPU
+     - accelerated, non-scan
+     - ``16.03 s``
+     - ``1.11e-13``
+
+GPU scan/non-scan comparison, same host:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 36 16 16 18
+
+   * - Case
+     - Scan
+     - Non-scan
+     - Result
+   * - ``input.nfp4_QH_warm_start``
+     - ``33.10 s``
+     - ``17.85 s``
+     - non-scan faster
+   * - ``input.LandremanPaul2021_QA_lowres``
+     - ``149.27 s``
+     - ``69.32 s``
+     - non-scan faster
+   * - ``input.up_down_asymmetric_tokamak``
+     - ``164.57 s``
+     - ``140.69 s``
+     - non-scan faster
+   * - ``input.nfp2_QI``
+     - ``108.67 s``
+     - ``50.78 s``
+     - non-scan faster
+
+Earlier April 2026 diagnostics with the scan-heavy GPU policy are retained
+below for historical context:
 
 .. list-table::
    :header-rows: 1
@@ -840,13 +892,16 @@ diagnostics on an NVIDIA RTX A4000 using the public default path:
 
 The current practical policy is therefore:
 
-- keep GPU scan available for larger workloads and explicit experiments,
+- use the non-scan VMEC-control loop for auto-selected production fixed-boundary
+  solves on CPU and GPU,
+- keep GPU scan available for explicit fast-mode experiments and profiler
+  comparisons,
 - keep the persistent cache enabled by default so repeated GPU processes are
   not dominated by recompilation,
 - expose ``--solver-device cpu`` / ``solver_device="cpu"`` for users who want
   to force CPU execution inside a GPU-enabled process,
-- do not promise first-process GPU speedups on small fixed-boundary cases until
-  the scan-safe path is broadened and the GPU compile graph is reduced.
+- do not treat raw scan throughput as production performance unless the run also
+  converges to the requested VMEC tolerance.
 
 Raw solver throughput vs public policy overhead
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

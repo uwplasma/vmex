@@ -113,9 +113,14 @@ def _build_parser() -> argparse.ArgumentParser:
         default="accelerated",
     )
     fixed.add_argument("--no-warmup", action="store_true", help="Skip the fixed-boundary warmup run.")
-    fixed.set_defaults(use_scan=True)
+    fixed.set_defaults(use_scan=False)
     fixed.add_argument("--use-scan", dest="use_scan", action="store_true", help="Use the scan iteration path.")
-    fixed.add_argument("--no-use-scan", dest="use_scan", action="store_false", help="Do not pass --use-scan.")
+    fixed.add_argument(
+        "--no-use-scan",
+        dest="use_scan",
+        action="store_false",
+        help="Use the non-scan fixed-boundary path (default; matches the current production auto policy).",
+    )
     fixed.set_defaults(raw_solver_policy=True)
     fixed.add_argument(
         "--raw-solver-policy",

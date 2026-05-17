@@ -367,7 +367,7 @@ hygiene push, and the custom QI seed audit documentation/regression gate:
   soft-wall guard for mirror/elongation cleanup that preserves an accepted QI
   basin. The remaining open cleanup is running and tuning the guarded mirror
   schedule across unrelated seeds.
-- CPU/GPU performance: 92%. Backend-adaptive replay bucketing, scalar-gradient
+- CPU/GPU performance: 94%. Backend-adaptive replay bucketing, scalar-gradient
   tangent reuse, detailed timing, and GPU-only preconditioner-output fusion are
   in place. Hot-path algebra and CPU/GPU fusion gating are now covered by
   focused CPU-only regressions. The exact-Jacobian residual tangent helper now
@@ -378,7 +378,10 @@ hygiene push, and the custom QI seed audit documentation/regression gate:
   diagnosis. Symmetric GPU exact-Jacobian replay now defaults to 8-column
   chunks for 24+ DOF cases, matching the best bounded `office` profile: QH
   mode-2 exact Jacobian dropped from about `42.0 s` to about `18.0 s`, with
-  tape replay dropping from about `22.2 s` to about `5.3 s`. Larger-mode replay
+  tape replay dropping from about `22.2 s` to about `5.3 s`. Production
+  fixed-boundary auto policy now uses the VMEC-control non-scan loop on CPU and
+  GPU because May 2026 `office` profiles showed converged GPU non-scan solves
+  faster than scan across QH, QA, QI, and LASYM examples. Larger-mode replay
   and dense residual-tangent projection remain open.
 - VMEC parity and physics gates: 99%. Required-tier bundled gates now cover
   `chipf`, stored `B`, input flux/profile propagation, finite-beta
@@ -1118,6 +1121,16 @@ Defer beyond the current cycle:
   that heuristic as the GPU default for 24+ DOF dense exact Jacobians; the same
   default GPU callback then ran in `~18.0 s` with replay `~5.3 s`, faster than
   the bounded CPU callback measured in the same session.
+- 2026-05-17: Re-profiled production fixed-boundary policy on `office`. Raw
+  force kernels were no longer the bottleneck; the scan loop was slower than
+  the VMEC-control non-scan loop once the solve was required to converge. For
+  `input.nfp4_QH_warm_start` with `max_iter=500`, the auto-selected GPU
+  non-scan path converged to `~1.11e-13` in `~16.0 s` versus `~20.6 s` with
+  explicit GPU scan. A four-case GPU scan/non-scan sweep also favored non-scan:
+  QH `33.10 -> 17.85 s`, QA `149.27 -> 69.32 s`, LASYM tokamak
+  `164.57 -> 140.69 s`, and QI `108.67 -> 50.78 s`. The public API/CLI auto
+  policy and fixed-boundary profiler default now match this non-scan production
+  policy; explicit fast/scan modes remain available for experiments.
 - 2026-05-14: Added an opt-in dense branch-shuffle output grid
   (`shuffle_profile_nphi_out`) to the differentiable QI residual and propagated
   it through diagnostics and `QuasiIsodynamicOptions`. This brings vmec_jax

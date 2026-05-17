@@ -485,6 +485,18 @@ def test_default_non_autodiff_solver_policy_matches_fixed_boundary_defaults(tmp_
     assert driver_module.default_non_autodiff_solver_policy(indata_staged) == ("parity", False)
 
 
+def test_default_use_scan_policy_is_backend_and_input_aware():
+    simple_input = Path(__file__).resolve().parents[1] / "examples/data/input.circular_tokamak"
+    _cfg_simple, indata_simple = load_config(simple_input)
+    lasym_input = Path(__file__).resolve().parents[1] / "examples/data/input.up_down_asymmetric_tokamak"
+    _cfg_lasym, indata_lasym = load_config(lasym_input)
+
+    assert driver_module._default_use_scan_for_backend(indata_simple, "cpu", "default") is False
+    assert driver_module._default_use_scan_for_backend(indata_simple, "gpu", "accelerated") is False
+    assert driver_module._default_use_scan_for_backend(indata_lasym, "cpu", "accelerated") is False
+    assert driver_module._default_use_scan_for_backend(indata_simple, "gpu", "parity") is False
+
+
 def test_default_non_autodiff_solver_policy_uses_accelerated_for_gpu(monkeypatch):
     monkeypatch.setattr(driver_module, "_default_backend_name", lambda: "gpu")
     simple_input = Path(__file__).resolve().parents[1] / "examples/data/input.circular_tokamak"
@@ -807,6 +819,7 @@ def test_cli_defaults_to_cpu_default_on_simple_fixed_boundary(monkeypatch, tmp_p
     assert rc == 0
     assert captured["solver_mode"] == "default"
     assert captured["performance_mode"] is True
+    assert captured["use_scan"] is False
 
 
 def test_cli_defaults_to_cpu_default_on_staged_fixed_boundary_with_niter_array(monkeypatch, tmp_path):
@@ -830,6 +843,7 @@ def test_cli_defaults_to_cpu_default_on_staged_fixed_boundary_with_niter_array(m
     assert rc == 0
     assert captured["solver_mode"] == "default"
     assert captured["performance_mode"] is True
+    assert captured["use_scan"] is False
 
 
 def test_cli_solver_device_cpu_uses_cpu_default_policy(monkeypatch, tmp_path):
@@ -862,6 +876,40 @@ def test_cli_solver_device_cpu_uses_cpu_default_policy(monkeypatch, tmp_path):
     assert rc == 0
     assert captured["solver_mode"] == "default"
     assert captured["solver_device"] == "cpu"
+    assert captured["use_scan"] is False
+
+
+def test_cli_solver_device_gpu_uses_gpu_performance_policy(monkeypatch, tmp_path):
+    input_path = Path(__file__).resolve().parents[1] / "examples/data/input.nfp4_QH_warm_start"
+    captured = {}
+
+    def _fake_run_fixed_boundary(input_path_arg, **kwargs):
+        captured["input_path"] = str(input_path_arg)
+        captured.update(kwargs)
+
+        class _Run:
+            state = type("S", (), {"Rcos": np.asarray([0.0])})()
+            result = None
+
+        return _Run()
+
+    monkeypatch.setattr(cli_module, "run_fixed_boundary", _fake_run_fixed_boundary)
+    monkeypatch.setattr(cli_module, "write_wout_from_fixed_boundary_run", lambda *args, **kwargs: None)
+
+    rc = cli_module.main(
+        [
+            str(input_path),
+            "--solver-device",
+            "gpu",
+            "--output",
+            str(tmp_path / "wout_test.nc"),
+            "--quiet",
+        ]
+    )
+    assert rc == 0
+    assert captured["solver_mode"] == "accelerated"
+    assert captured["solver_device"] == "gpu"
+    assert captured["use_scan"] is False
 
 
 def test_cli_defaults_to_parity_on_staged_fixed_boundary_without_niter_array(monkeypatch, tmp_path):
