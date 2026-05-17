@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .driver import (
     _default_non_autodiff_solver_policy_for_backend,
+    _default_use_scan_for_backend,
     default_non_autodiff_solver_policy,
     run_fixed_boundary,
     write_wout_from_fixed_boundary_run,
@@ -190,11 +191,18 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--solver-mode cannot be combined with --parity/--fast")
         return 2
     solver_mode = args.solver_mode
-    if solver_mode is None and (not bool(args.parity)) and (not bool(args.fast)):
+    default_policy = solver_mode is None and (not bool(args.parity)) and (not bool(args.fast))
+    default_policy_backend = None
+    if default_policy:
         solver_device_arg = "" if args.solver_device is None else str(args.solver_device).strip().lower()
         if solver_device_arg == "cpu":
+            default_policy_backend = "cpu"
             solver_mode, performance_mode = _default_non_autodiff_solver_policy_for_backend(indata, "cpu")
+        elif solver_device_arg == "gpu":
+            default_policy_backend = "gpu"
+            solver_mode, performance_mode = _default_non_autodiff_solver_policy_for_backend(indata, "gpu")
         else:
+            default_policy_backend = None
             solver_mode, performance_mode = default_non_autodiff_solver_policy(indata)
     else:
         # Preserve explicit CLI override semantics:
@@ -254,6 +262,19 @@ def main(argv: list[str] | None = None) -> int:
             vmecpp_restart=bool(vmecpp_restart),
             cli_fixed_boundary_mode=True,
         )
+        if default_policy:
+            if default_policy_backend is None:
+                try:
+                    import jax
+
+                    default_policy_backend = str(jax.default_backend()).strip().lower() or "cpu"
+                except Exception:
+                    default_policy_backend = "cpu"
+            run_kwargs["use_scan"] = _default_use_scan_for_backend(
+                indata,
+                str(default_policy_backend),
+                str(solver_mode),
+            )
         if max_iter_arg is not None:
             run_kwargs["max_iter"] = int(max_iter_arg)
         run = run_fixed_boundary(str(input_path), **run_kwargs)

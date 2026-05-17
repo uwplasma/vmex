@@ -128,7 +128,7 @@ def test_performance_matrix_fixed_command_uses_backend_solver_device(tmp_path):
     assert command[command.index("--solver-device") + 1] == "gpu"
     assert command[command.index("--iters") + 1] == "7"
     assert "--simple-profile" in command
-    assert "--use-scan" in command
+    assert "--use-scan" not in command
     assert "--no-auto-cli-policy" in command
     assert "--no-multigrid" in command
     assert "--vmec-timing-detail" in command

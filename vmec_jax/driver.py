@@ -218,6 +218,23 @@ def default_non_autodiff_solver_policy(indata) -> tuple[str, bool]:
     return _default_non_autodiff_solver_policy_for_backend(indata, _default_backend_name())
 
 
+def _default_use_scan_for_backend(indata, backend: str, solver_mode: str | None) -> bool:
+    """Choose the public fixed-boundary iteration loop for ordinary runs.
+
+    Explicit ``solver_mode=...`` callers keep the historical scan default in
+    :func:`run_fixed_boundary`; this helper is for auto-selected API/CLI policy.
+    For ordinary fixed-boundary solves, profiling on CPU and NVIDIA GPUs shows
+    the non-scan VMEC-control loop reaches converged equilibria with lower
+    end-to-end latency than the scan loop.  The scan path remains available for
+    differentiable/experimental workflows and explicit fast-mode requests.
+    """
+
+    # Keep the parameters in the signature because this policy has changed with
+    # backend/input profiling and is intentionally centralized here.
+    _ = (indata, backend, _normalize_solver_mode(solver_mode=solver_mode, performance_mode=True))
+    return False
+
+
 def _result_final_residuals(result) -> tuple[float, float, float] | None:
     if result is None:
         return None
@@ -1054,7 +1071,7 @@ def run_fixed_boundary(
     verbose: bool = True,
     jit_forces: bool | str = True,
     jit_precompile: bool | None = None,
-    use_scan: bool = True,
+    use_scan: bool | None = None,
     performance_mode: bool = True,
     scan_wout_corrector: bool | None = None,
     stage_transition_heuristic: bool | None = None,
@@ -1208,9 +1225,11 @@ def run_fixed_boundary(
         If True (default), JIT the force kernels. If ``"auto"``, disable JIT
         for very small workloads to reduce first-iteration latency.
     performance_mode:
-        If True, force the fast scan-based iteration path (no VMEC2000 control
-        logic). This delivers order-of-magnitude speedups but does not preserve
-        per-iteration VMEC2000 parity.
+        If True, allow the optimized fixed-boundary policy instead of strict
+        VMEC2000 parity. Auto-selected public runs currently use the non-scan
+        VMEC-control loop for converged production performance; explicit
+        accelerated/fast-mode requests keep the scan path unless ``use_scan`` is
+        set to False.
     solver_mode:
         Optional explicit solver policy. Supported values:
         ``"default"`` (current parity-guarded fast path),
@@ -1234,10 +1253,22 @@ def run_fixed_boundary(
     cfg, indata = load_config(str(input_path))
     solver_mode_explicit = solver_mode is not None
     requested_solver_device = "auto" if solver_device is None else str(solver_device).strip().lower()
-    policy_backend = "cpu" if requested_solver_device == "cpu" else _default_backend_name()
+    policy_backend = (
+        requested_solver_device
+        if requested_solver_device in ("cpu", "gpu")
+        else _default_backend_name()
+    )
     if solver_mode is None and bool(performance_mode):
         solver_mode, performance_mode = _default_non_autodiff_solver_policy_for_backend(indata, policy_backend)
     solver_mode_eff = _normalize_solver_mode(solver_mode=solver_mode, performance_mode=bool(performance_mode))
+    if use_scan is None:
+        use_scan = (
+            True
+            if bool(solver_mode_explicit)
+            else _default_use_scan_for_backend(indata, policy_backend, solver_mode_eff)
+        )
+    else:
+        use_scan = bool(use_scan)
     accelerated_mode = solver_mode_eff == "accelerated"
     performance_mode = solver_mode_eff != "parity"
     cli_fixed_boundary_mode = bool(cli_fixed_boundary_mode) or (

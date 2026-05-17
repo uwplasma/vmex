@@ -116,6 +116,7 @@ def test_cli_run_mode_wires_solver_kwargs_and_output(monkeypatch, tmp_path: Path
     assert kwargs["jit_forces"] is False
     assert kwargs["solver_mode"] == "default"
     assert kwargs["performance_mode"] is True
+    assert kwargs["use_scan"] is False
     assert kwargs["cli_fixed_boundary_mode"] is True
     assert (outdir / "wout_case.nc").read_text() == "wout"
 
@@ -131,7 +132,7 @@ def test_cli_run_mode_uses_cpu_default_policy_and_explicit_output(monkeypatch, t
     monkeypatch.setattr(
         cli,
         "_default_non_autodiff_solver_policy_for_backend",
-        lambda _indata, backend: ("cpu_policy", False) if backend == "cpu" else ("wrong", True),
+        lambda _indata, backend: ("default", False) if backend == "cpu" else ("accelerated", True),
     )
 
     def fake_run_fixed_boundary(path: str, **kwargs):
@@ -162,8 +163,9 @@ def test_cli_run_mode_uses_cpu_default_policy_and_explicit_output(monkeypatch, t
     assert rc == 0
     assert calls["wout_path"] == output.resolve()
     assert calls["kwargs"]["solver_device"] == "cpu"
-    assert calls["kwargs"]["solver_mode"] == "cpu_policy"
+    assert calls["kwargs"]["solver_mode"] == "default"
     assert calls["kwargs"]["performance_mode"] is False
+    assert calls["kwargs"]["use_scan"] is False
     assert calls["kwargs"]["max_iter"] == 3
 
 

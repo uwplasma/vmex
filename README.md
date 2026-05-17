@@ -109,6 +109,12 @@ run_gpu = vj.run_fixed_boundary("input.nfp4_QH_warm_start", solver_device="gpu")
 run_cpu = vj.run_fixed_boundary("input.nfp4_QH_warm_start", solver_device="cpu")
 ```
 
+For production fixed-boundary solves, the auto-selected CPU/GPU policy uses the
+VMEC-control non-scan loop because it is faster for converged equilibria on the
+current benchmark set. The scan loop remains available for explicit fast-mode
+experiments with `use_scan=True` from Python or `--fast`/`--solver-mode
+accelerated` from the CLI.
+
 For GPU runs, vmec_jax defaults `XLA_PYTHON_CLIENT_PREALLOCATE=false` before
 JAX import so the allocator grows on demand. This avoids GPU memory contention
 between optimization workers and was faster in the exact-Jacobian GPU profile.
