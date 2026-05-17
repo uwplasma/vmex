@@ -1286,6 +1286,62 @@ def test_run_fixed_boundary_cli_accelerated_finish_respects_use_scan_false(monke
     assert diag["converged"] is True
 
 
+def test_run_fixed_boundary_cli_accelerated_finish_caps_explicit_max_iter(monkeypatch, tmp_path):
+    input_path = _write_single_stage_input(tmp_path)
+    calls = []
+    fsq_values = [1.0e-4, 1.0e-5, 1.0e-6, 1.0e-7]
+
+    def _fake_solver(state, static, **kwargs):
+        idx = min(len(calls), len(fsq_values) - 1)
+        calls.append(
+            {
+                "ns": int(static.cfg.ns),
+                "max_iter": int(kwargs["max_iter"]),
+                "use_scan": bool(kwargs["use_scan"]),
+            }
+        )
+        fsq = float(fsq_values[idx])
+        return SolveVmecResidualResult(
+            state=state,
+            n_iter=max(0, int(kwargs["max_iter"]) - 1),
+            w_history=np.asarray([fsq], dtype=float),
+            fsqr2_history=np.asarray([fsq], dtype=float),
+            fsqz2_history=np.asarray([0.0], dtype=float),
+            fsql2_history=np.asarray([0.0], dtype=float),
+            grad_rms_history=np.asarray([], dtype=float),
+            step_history=np.asarray([], dtype=float),
+            diagnostics={
+                "use_scan": bool(kwargs["use_scan"]),
+                "resume_state": {},
+                "light_history": True,
+                "converged": False,
+            },
+        )
+
+    monkeypatch.setattr(solve_module, "solve_fixed_boundary_residual_iter", _fake_solver)
+    monkeypatch.setattr(driver_module, "solve_fixed_boundary_residual_iter", _fake_solver)
+
+    run = run_fixed_boundary(
+        input_path,
+        solver="vmec2000_iter",
+        solver_mode="accelerated",
+        max_iter=100,
+        use_scan=False,
+        verbose=False,
+        cli_fixed_boundary_mode=True,
+    )
+
+    assert [call["ns"] for call in calls] == [13, 13, 13]
+    assert [call["max_iter"] for call in calls] == [100, 100, 100]
+    assert [call["use_scan"] for call in calls] == [False, False, False]
+    diag = run.result.diagnostics
+    assert np.asarray(diag["cli_fixed_boundary_finish_budgets"]).tolist() == [100, 100]
+    assert np.asarray(diag["cli_fixed_boundary_finish_modes"]).tolist() == ["accelerated", "accelerated"]
+    assert diag["cli_fixed_boundary_finish_budget_cap"] == 200
+    assert diag["cli_fixed_boundary_finish_budget_exhausted"] is True
+    assert diag["converged"] is False
+
+
 def test_run_fixed_boundary_cli_single_grid_requires_strict_ftol(monkeypatch, tmp_path):
     input_path = _write_single_stage_input(tmp_path)
     calls = []
