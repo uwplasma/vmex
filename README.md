@@ -259,12 +259,14 @@ constrained least-squares residual definition.
 
 The dedicated `QI_optimization.py` coverage figure tracks the two bundled QI
 inputs used by the README/docs lane.  It is rendered from existing reviewed
-outputs and uses Boozer `|B|` line contours only.
+outputs and uses Boozer `|B|` line contours only.  The objective panel
+concatenates all recorded stages, with dashed separators where the staged
+objective definition or weights changed.
 
 | QI input | Output/provenance | Final J | QI smooth | QI legacy | Mirror | Elong. | Aspect | Iota | CPU time |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| `examples/data/input.nfp2_QI` | `results/qi_opt/ess/nfp2_qi` | 1.17e-02 | 1.13e-03 | 3.09e-04 | 0.225 / 0.30 | 6.43 / 8.2 | 9.999 / 10.0 | -0.5043 | 9.8 min |
-| `examples/data/input.QI_stel_seed_3127` | `results/qi_opt/ess/qi_stel_seed_3127_current_public_final` | 1.12e-01 | 4.32e-03 | 1.16e-03 | 0.316 / 0.35 | 3.91 / 8.0 | 3.465 / 4.0 | -1.0366 | 1.4 min |
+| `examples/data/input.nfp2_QI` | `results/qi_opt/ess/nfp2_qi` | 1.17e-02 | 1.13e-03 | 3.09e-04 | 0.225 / 0.30 | 6.43 / 8.2 | 9.999 / 10.0 | -0.5043 | 14.7 min |
+| `examples/data/input.QI_stel_seed_3127` | `results/qi_opt/ess/qi_stel_seed_3127_current_public_final` | 1.12e-01 | 4.32e-03 | 1.16e-03 | 0.316 / 0.35 | 3.91 / 8.0 | 3.465 / 4.0 | -1.0366 | 6.3 min |
 
 <p align="center">
   <img src="docs/_static/figures/readme_qi_optimization_cases.png" width="980" />
