@@ -179,6 +179,8 @@ def test_lasym_replay_column_chunk_env_and_backend_branches(monkeypatch) -> None
     assert opt._lasym_replay_column_chunk(12) == 3
     monkeypatch.setenv("VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK", "0")
     assert opt._lasym_replay_column_chunk(12) is None
+    monkeypatch.setenv("VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK", "bad")
+    assert opt._lasym_replay_column_chunk(24) == 8
     monkeypatch.delenv("VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK")
 
     monkeypatch.setenv("VMEC_JAX_REPLAY_COLUMN_CHUNK", "anything")

@@ -1812,6 +1812,19 @@ def test_lasym_replay_chunk_env_override(monkeypatch):
     assert opt._lasym_replay_column_chunk(48) == 4
 
 
+def test_lasym_replay_chunk_bad_env_falls_back_to_auto(monkeypatch):
+    monkeypatch.delenv("VMEC_JAX_REPLAY_COLUMN_CHUNK", raising=False)
+    monkeypatch.setenv("VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK", "bad")
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
+    opt._solver_device_name = "gpu"
+
+    assert opt._lasym_replay_column_chunk(24) == 8
+
+    monkeypatch.setenv("VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK", "off")
+    assert opt._lasym_replay_column_chunk(24) is None
+
+
 def test_fixed_boundary_optimizer_indata_from_params_updates_input_boundary(tmp_path):
     modes = vmec_mode_table(mpol=2, ntor=1)
 

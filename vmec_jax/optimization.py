@@ -2176,8 +2176,11 @@ class FixedBoundaryExactOptimizer:
 
         env_override = os.environ.get("VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK")
         if env_override is not None:
-            requested = int(env_override)
-            return None if requested <= 0 else requested
+            from .discrete_adjoint import _replay_column_chunk_override
+
+            handled, requested = _replay_column_chunk_override(env_override)
+            if handled:
+                return requested
         if os.environ.get("VMEC_JAX_REPLAY_COLUMN_CHUNK") is not None:
             return None
         backend_name = None

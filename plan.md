@@ -2,7 +2,7 @@
 
 Last updated: 2026-05-17
 Primary branch: `main`
-Baseline release: `v0.0.8`
+Baseline release: `v0.0.9`
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -28,10 +28,12 @@ acceptance criteria or evidence changes.
   volavgB, magnetic-well, DMerc, and JXBFORCE profile objectives exist in the
   workflow layer.
 - GPU execution works. Small/medium optimization cases are now much closer to
-  CPU after the backend-adaptive replay-bucket fix. The profiler no longer
-  hides a pre-profile exact solve, malformed replay-bucket environment values
-  fall back to backend-adaptive defaults, and accepted-point tape replay/tape
-  build remain the next GPU optimization target.
+  CPU after the backend-adaptive replay-bucket fix and the post-`v0.0.8`
+  dense-replay chunking profile. The profiler no longer hides a pre-profile
+  exact solve, malformed replay-bucket environment values fall back to
+  backend-adaptive defaults, production fixed-boundary auto policy uses the
+  non-scan VMEC-control loop on CPU/GPU, and larger-mode accepted-point tape
+  replay remains the next GPU optimization target.
 - Continuation correctness is now protected by both synthetic control-flow tests
   and a real projected-boundary stage test. Repeated stage schedules such as
   ``[1, 1, 2]`` carry the optimized VMEC input forward and keep projected
@@ -43,10 +45,16 @@ acceptance criteria or evidence changes.
 - The duplicate finite-beta stage-one output path now has the same
   selected-best-exact-state save contract as the main QS workflow, so
   ``input.final`` and ``wout_final.nc`` cannot drift there either.
-- Required CI coverage is above the 85% gate. The May 17 full local suite passed
-  (`1105 passed, 117 skipped`, 7:57), the optional converged VMEC2000 parity
-  gate passed locally with `VMEC2000_INTEGRATION=1`, and GitHub CI passed on
-  the validation commit.
+- Required CI coverage is above the 85% gate. The May 17 release-candidate
+  local required non-full coverage tier passed (`1111 passed, 20 skipped, 97
+  deselected`) with 85.25% coverage in 10:22, the optional converged VMEC2000
+  parity gate passed locally with `VMEC2000_INTEGRATION=1`, and GitHub CI
+  passed on the validation commit.
+- VMEC2000 converged-wout parity now has a fast bundled matrix gate across
+  fixed/free, axisymmetric/non-axisymmetric, LASYM, and single/multigrid
+  representatives. The executable-backed end-state gate remains opt-in:
+  `VMEC2000_INTEGRATION=1` runs the bounded circular comparison, while
+  `VMEC2000_NIGHTLY=1` adds the slower matrix representatives.
 - Full non-VMEC2000 physics coverage with refreshed released assets reaches
   72.35% locally (`74 passed, 4 skipped`, 27:21). This is still short of the
   80% target and is too slow for per-commit required CI without splitting the
@@ -59,6 +67,13 @@ acceptance criteria or evidence changes.
   default (`--prefine-mirror-surface-index all`), preventing a single-surface
   mirror gate from promoting a candidate whose other surfaces violate the
   mirror target.
+- README/docs QI coverage now has a dedicated two-input figure and CSV rendered
+  from existing `QI_optimization.py` outputs: `input.nfp2_QI` reaches legacy QI
+  `3.09e-4`, mirror `0.225`, elongation `6.43`, aspect `9.999`, iota `-0.5043`
+  in 9.8 CPU minutes; the curated `input.QI_stel_seed_3127` reference-family
+  baseline reaches legacy QI `1.16e-3`, mirror `0.316`, elongation `3.91`,
+  aspect `3.465`, iota `-1.0366` in 1.4 CPU minutes.  The Boozer `|B|` panels
+  use line contours only.
 - `solve.py`, `wout.py`, `free_boundary.py`, `driver.py`, and optimization
   modules are too large and need staged refactoring after parity gates are locked.
 - The first staged solver/wout refactor has centralized LCFS R/Z residual edge
@@ -284,6 +299,16 @@ Acceptance:
       unless the test is explicitly a solver-trace regression.
 - [ ] Add efficient wout-field parity gates for geometry, profiles, B, J, iota,
       aspect, Mercier, and force residuals.
+- [x] Add a required-tier converged-wout matrix gate over bundled VMEC2000
+      outputs. The gate covers representative fixed/free,
+      axisymmetric/non-axisymmetric, `lasym=False`/`lasym=True`, and
+      single-grid/multigrid fixtures without launching VMEC2000.
+- [x] Add an executable-backed converged-wout benchmark regeneration script.
+      `tools/diagnostics/converged_wout_parity_benchmark.py` discovers
+      `$VMEC2000_EXEC`, `~/bin/xvmec2000`, PATH, and adjacent STELLOPT builds,
+      can opt into recursive local executable inventory, de-duplicates symlinks,
+      and records VMEC2000/vmec_jax residual, runtime, scalar, and field
+      relative-RMS metrics.
 - [x] Add a required-tier bundled VMEC2000 `chipf` parity gate for QA/QH/QI,
       circular, and finite-beta shaped-tokamak wout fixtures. This locks the
       half-mesh `chipf` convention and the `chips_from_wout_chipf` round-trip
@@ -316,12 +341,13 @@ Acceptance:
 
 ## Progress Snapshot
 
-Updated 2026-05-14 after the bundled profile/current wout parity gates, QI
+Updated 2026-05-17 after the bundled profile/current wout parity gates, QI
 selection hardening, exact-Jacobian host-materialization cleanup,
 continuation/exact-history hardening, LASYM-Boozer parity, release-checklist
-push, 85% coverage-gate push, optional SIMSOPT/VMEC2000 gate expansion, and
-QI diagnostic/objective branch hardening, plus the exact-output/API/release
-hygiene push, and the custom QI seed audit documentation/regression gate:
+push, 85% coverage-gate push, optional SIMSOPT/VMEC2000 gate expansion, the
+converged-wout parity matrix/benchmark pass, QI diagnostic/objective branch
+hardening, the exact-output/API/release hygiene push, and the custom QI seed
+audit documentation/regression gate:
 
 - Continuation correctness: 100%. Source fix is implemented and covered by
   synthetic repeated-stage tests, a real boundary-projection stage test, and
@@ -389,11 +415,17 @@ hygiene push, and the custom QI seed audit documentation/regression gate:
   finite differences, aspect/geometry, Mercier/JXBFORCE profiles, and
   VMEC-to-Boozer input spectra, including asymmetric Boozer geometry-channel
   propagation for `lasym=True` plus exact LASYM lambda-channel parity into
-  Boozer input objects. Optional executable-backed converged-wout parity now
-  covers three bounded cases including 3D QH, and optional SIMSOPT QS parity now
-  covers QA and QH formula/state diagnostics. The parity manifest now has a
-  fast required contract that keeps the self-contained optional free-boundary
-  `LASYM=true` case bounded and ready for executable-backed validation; the
+  Boozer input objects. A new required-tier converged-wout matrix checks
+  bundled VMEC2000 outputs across fixed/free, axisymmetric/non-axisymmetric,
+  LASYM, and single/multigrid representatives. Optional executable-backed
+  converged-wout parity now runs a bounded circular end-state comparison by
+  default and keeps slower non-axisymmetric, LASYM, multigrid, and
+  free-boundary representatives behind `VMEC2000_NIGHTLY=1`; the regeneration
+  script records the same metrics across discovered VMEC2000 executables.
+  Optional SIMSOPT QS parity covers QA and QH formula/state diagnostics. The
+  parity manifest now has a fast required contract that keeps the
+  self-contained optional free-boundary `LASYM=true` case bounded and ready for
+  executable-backed validation; the
   bundled synthetic mgrid currents are sign/magnitude matched to the plasma
   current so stock VMEC2000 reaches the vacuum solve instead of aborting with an
   `I_TOR` mismatch, with an optional executable smoke guarding that behavior.
@@ -419,7 +451,7 @@ hygiene push, and the custom QI seed audit documentation/regression gate:
   and optional research-grade checks together. Read the Docs is configured to
   fail on Sphinx warnings, release docs use the 85% coverage gate, and package
   discovery is locked to the `vmec_jax` namespace. Full local Sphinx and the
-  required 85% coverage command are green at 85.52%, and the previous `main`
+  required 85% coverage command are green at 85.25%, and the previous `main`
   CI run after the all-surface QI mirror fix was fully green; released reference
   assets are ignored so local full-tier refreshes cannot accidentally bloat commits.
   The documented custom QI seed audit command was validated end-to-end on
@@ -1143,6 +1175,33 @@ Defer beyond the current cycle:
   (`[100, 100]`) and reports non-convergence at the cap; the same low-budget
   diagnostic previously spent five finish blocks and took about `56.2 s`, while
   the capped source-tree run took about `42.9 s`.
+- 2026-05-17: CPU/GPU performance-closure follow-up verified the current
+  policies locally on CPU. A `profile_fixed_boundary.py` QH warm-start run with
+  explicit `--iters 50` used the public non-scan policy, reported finish
+  budgets `[50, 50]` with `cli_fixed_boundary_finish_budget_cap=100`, and
+  stopped as non-converged at `1.876 s` instead of spending unbounded finish
+  attempts. Raw 50-iteration diagnostics were `0.649 s` for non-scan default
+  and `0.414 s` for explicit scan, but both were unconverged, so the production
+  non-scan default remains based on converged CPU/GPU measurements. A local QH
+  `max_mode=1` exact Jacobian callback took `16.115 s`; measured components
+  were `7.428 s` exact solve/tape (`4.130 s` tape build), `3.644 s` replay,
+  `2.736 s` initial tangents, and `2.295 s` residual tangents. No broad replay
+  rewrite was attempted; the safe code change was to make malformed
+  `VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK` values fall back to the measured
+  backend/input auto heuristic instead of aborting exact callbacks.
+- 2026-05-17: Added the converged-wout parity matrix and benchmark
+  regeneration lane. Required CI now has
+  `tests/test_converged_wout_matrix_parity.py`, a no-executable bundled-wout
+  gate covering fixed/free, axisymmetric/non-axisymmetric, LASYM, and
+  single/multigrid representatives. The opt-in executable end-state gate in
+  `tests/test_vmec2000_converged_parity.py` keeps the bounded circular
+  comparison under `VMEC2000_INTEGRATION=1` and moves slower representative
+  cases behind `VMEC2000_NIGHTLY=1`. The new
+  `tools/diagnostics/converged_wout_parity_benchmark.py` discovers
+  `~/bin/xvmec2000` plus STELLOPT/PATH executables by default, can opt into
+  recursive local executable inventory, de-duplicates symlinks, and writes
+  VMEC2000/vmec_jax residual, runtime, scalar, and field rel-RMS summaries for
+  benchmark regeneration.
 - 2026-05-14: Added an opt-in dense branch-shuffle output grid
   (`shuffle_profile_nphi_out`) to the differentiable QI residual and propagated
   it through diagnostics and `QuasiIsodynamicOptions`. This brings vmec_jax
@@ -1151,3 +1210,9 @@ Defer beyond the current cycle:
   production smoke run with `shuffle_profile_nphi_out=301` completed in `41 s`
   for `max_nfev=3`. This is infrastructure for the next QI objective-design
   pass, not yet a promoted optimized stellarator.
+- 2026-05-17: Prepared the `v0.0.9` patch release update. Scope after
+  `v0.0.8`: Node 24 CI action-runtime refresh, fixed-boundary profiler option
+  reporting, GPU exact-Jacobian replay chunking, GPU replay/profile
+  documentation, CPU/GPU non-scan fixed-boundary production policy, explicit
+  finish-budget caps, QI README/docs coverage for the NFP2 and seed-3127 cases,
+  expanded bounded VMEC2000 parity gates, and release/docs hygiene.

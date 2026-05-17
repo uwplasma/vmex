@@ -186,6 +186,64 @@ The source table is also available as
    :align: center
    :alt: Best README QI optimization panel
 
+QI_optimization Input Coverage
+------------------------------
+
+The dedicated QI README/docs renderer covers both bundled QI inputs without
+rerunning optimization jobs.  It reads the existing ``QI_optimization.py``
+outputs, records the final smooth QI metric, legacy QI metric, mirror ratio,
+elongation, iota, aspect, and CPU wall time, and draws final Boozer ``|B|``
+with line contours only.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 27 11 11 11 10 9 9 9 9
+
+   * - Input
+     - Output/provenance
+     - Final J
+     - Smooth QI
+     - Legacy QI
+     - Mirror
+     - Elong.
+     - Aspect
+     - Iota
+     - CPU min
+   * - ``examples/data/input.nfp2_QI``
+     - ``results/qi_opt/ess/nfp2_qi``
+     - ``1.17e-2``
+     - ``1.13e-3``
+     - ``3.09e-4``
+     - ``0.225/0.30``
+     - ``6.43/8.2``
+     - ``9.999/10.0``
+     - ``-0.5043``
+     - ``9.8``
+   * - ``examples/data/input.QI_stel_seed_3127``
+     - ``results/qi_opt/ess/qi_stel_seed_3127_current_public_final``
+     - ``1.12e-1``
+     - ``4.32e-3``
+     - ``1.16e-3``
+     - ``0.316/0.35``
+     - ``3.91/8.0``
+     - ``3.465/4.0``
+     - ``-1.0366``
+     - ``1.4``
+
+.. image:: _static/figures/readme_qi_optimization_cases.png
+   :width: 100%
+   :align: center
+   :alt: QI optimization coverage for NFP=2 QI and seed-3127 inputs
+
+Source table:
+:download:`readme_qi_optimization_cases.csv <_static/figures/readme_qi_optimization_cases.csv>`.
+
+Regenerate these lightweight artifacts with:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
+
 Objective Histories
 -------------------
 

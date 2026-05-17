@@ -210,6 +210,7 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_swee
   --backend-label cpu --solver-device cpu --policy continuation \
   --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both
 PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
+PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 ```
 
 For publication-quality QI validation, re-run the diagnostic with higher
@@ -239,6 +240,7 @@ promotion evidence.
 - `generate_qs_ess_sweep.py`: CPU/GPU QA/QH/QP/QI policy sweep over mode continuation, ESS, and maximum boundary mode.
 - `render_qs_ess_publication_panel.py`: render the large optimization atlas and summary tables from sweep outputs.
 - `render_readme_best_optimizations.py`: render the compact README figures and CSV table.
+- `render_qi_readme_cases.py`: render the two-input QI README/docs coverage figure and CSV from existing `QI_optimization.py` outputs, using Boozer `|B|` line contours only.
 - `render_qi_constrained_sweep.py`: render QI-focused constrained-sweep diagnostics.
 
 Example:

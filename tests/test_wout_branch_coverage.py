@@ -7,7 +7,7 @@ import numpy as np
 from vmec_jax.modes import ModeTable
 from vmec_jax.state import StateLayout, VMECState
 from vmec_jax.vmec_tomnsp import vmec_trig_tables
-from vmec_jax.wout import _compute_bsubs_half_mesh, _vmec_wrout_nyquist_lasym_loop
+from vmec_jax.wout import _bsubuv_parity_from_state, _compute_bsubs_half_mesh, _vmec_wrout_nyquist_lasym_loop
 
 
 def _state_and_modes(ns: int = 3) -> tuple[VMECState, ModeTable]:
@@ -187,3 +187,78 @@ def test_vmec_wrout_nyquist_lasym_loop_covers_symmetric_asymmetric_channels() ->
         trig=trig,
     )
     assert all(value.shape == (ns, 0) for value in empty.values())
+
+
+def test_bsubuv_parity_from_state_flips_only_odd_channel_when_odd_m_geometry_changes_sign() -> None:
+    modes = ModeTable(m=np.asarray([1, 2], dtype=int), n=np.asarray([0, 0], dtype=int))
+    ns = 3
+    layout = StateLayout(ns=ns, K=modes.K, lasym=False)
+    s = np.asarray([0.0, 0.25, 1.0])
+    radial = s[:, None]
+    rcos = np.concatenate([0.2 + 0.05 * radial, 0.1 + 0.03 * radial], axis=1)
+    zsin = np.concatenate([0.3 + 0.04 * radial, 0.15 + 0.02 * radial], axis=1)
+    zeros = np.zeros_like(rcos)
+    state = VMECState(
+        layout=layout,
+        Rcos=rcos,
+        Rsin=zeros.copy(),
+        Zcos=zeros.copy(),
+        Zsin=zsin,
+        Lcos=zeros.copy(),
+        Lsin=zeros.copy(),
+    )
+    flipped_state = VMECState(
+        layout=layout,
+        Rcos=rcos * np.asarray([-1.0, 1.0])[None, :],
+        Rsin=zeros.copy(),
+        Zcos=zeros.copy(),
+        Zsin=zsin * np.asarray([-1.0, 1.0])[None, :],
+        Lcos=zeros.copy(),
+        Lsin=zeros.copy(),
+    )
+    trig = vmec_trig_tables(ntheta=8, nzeta=1, nfp=1, mmax=2, nmax=0, lasym=False, cache=False)
+    shape = (ns, int(trig.ntheta2), int(np.asarray(trig.cosnv).shape[0]))
+    bsupu = np.full(shape, 0.7)
+    bsupv = np.zeros(shape)
+    lambda_u = np.zeros(shape)
+    lambda_v = np.zeros(shape)
+    sqrtg = np.ones(shape)
+
+    bsubu_even, bsubu_odd, bsubv_even, bsubv_odd = _bsubuv_parity_from_state(
+        state=state,
+        geom_modes=modes,
+        trig=trig,
+        s=s,
+        lconm1=False,
+        lthreed=False,
+        lasym=False,
+        bsupu=bsupu,
+        bsupv=bsupv,
+        lu1_full=lambda_u,
+        lv1_full=lambda_v,
+        sqrtg=sqrtg,
+    )
+    flipped_even, flipped_odd, flipped_v_even, flipped_v_odd = _bsubuv_parity_from_state(
+        state=flipped_state,
+        geom_modes=modes,
+        trig=trig,
+        s=s,
+        lconm1=False,
+        lthreed=False,
+        lasym=False,
+        bsupu=bsupu,
+        bsupv=bsupv,
+        lu1_full=lambda_u,
+        lv1_full=lambda_v,
+        sqrtg=sqrtg,
+    )
+
+    # Metric products quadratic in odd-m geometry remain in the even channel,
+    # while even/odd cross-products change sign. This is the parity split VMEC
+    # later filters separately before writing bsubu/bsubv.
+    np.testing.assert_allclose(flipped_even, bsubu_even, rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(flipped_odd, -bsubu_odd, rtol=1.0e-13, atol=1.0e-13)
+    assert float(np.linalg.norm(bsubu_even[1:])) > 0.0
+    assert float(np.linalg.norm(bsubu_odd[1:])) > 0.0
+    np.testing.assert_allclose(flipped_v_even, bsubv_even, atol=1.0e-14)
+    np.testing.assert_allclose(flipped_v_odd, bsubv_odd, atol=1.0e-14)

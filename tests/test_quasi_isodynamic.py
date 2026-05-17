@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import ModuleType, SimpleNamespace
 
 import numpy as np
 import pytest
@@ -31,6 +32,119 @@ def test_qi_boozer_mode_residual_is_zero_for_alpha_independent_wells():
     assert np.asarray(out["profile_residuals1d"]).shape == (33 * 9,)
     assert np.asarray(out["shuffle_profile_residuals1d"]).shape == (0,)
     assert np.asarray(out["residuals1d"]).shape == (2 * 9 * 7 + 33 * 9,)
+
+
+def test_qi_residual_from_boozer_output_handles_surface_weights_and_sine_modes():
+    pytest.importorskip("jax")
+
+    from vmec_jax.quasi_isodynamic import (
+        mirror_ratio_penalty_from_boozer_output,
+        quasi_isodynamic_residual_from_boozer_output,
+    )
+
+    booz = {
+        "bmnc_b": np.asarray([[1.0, 0.08, 0.02], [1.1, 0.04, -0.01]], dtype=float),
+        "bmns_b": np.asarray([[0.0, 0.03, -0.02], [0.0, -0.01, 0.01]], dtype=float),
+        "ixm_b": np.asarray([0, 0, 1], dtype=float),
+        "ixn_b": np.asarray([0, 2, 2], dtype=float),
+        "iota_b": np.asarray([0.42, 0.48], dtype=float),
+        "nfp_b": np.asarray(2),
+    }
+
+    qi = quasi_isodynamic_residual_from_boozer_output(
+        booz,
+        weights=[1.0, 4.0],
+        nphi=25,
+        nalpha=7,
+        n_bounce=5,
+        shuffle_profile_weight=0.0,
+        weighted_shuffle_profile_weight=0.5,
+    )
+    mirror = mirror_ratio_penalty_from_boozer_output(
+        booz,
+        weights=[1.0, 4.0],
+        threshold=0.03,
+        ntheta=16,
+        nphi=16,
+        smooth_extrema=1.0e-2,
+        smooth_penalty=1.0e-2,
+    )
+
+    assert np.isfinite(float(np.asarray(qi["total"])))
+    assert np.isfinite(float(np.asarray(mirror["total"])))
+    assert np.asarray(qi["weighted_shuffle_profile_residuals1d"]).shape == (2 * 7 * 25,)
+    assert np.asarray(qi["weighted_shuffle_alpha_weights"]).shape == (2, 7)
+    np.testing.assert_allclose(np.sum(np.asarray(qi["weighted_shuffle_alpha_weights"]), axis=1), [1.0, 1.0])
+    assert float(np.asarray(mirror["mirror_ratio"][0])) > float(np.asarray(mirror["mirror_ratio"][1]))
+
+
+def test_qi_residual_from_state_uses_nearest_half_mesh_and_boozer_wrapper(monkeypatch):
+    pytest.importorskip("jax")
+
+    import sys
+
+    import vmec_jax.booz_input as booz_input
+    from vmec_jax.quasi_isodynamic import quasi_isodynamic_residual_from_state
+
+    calls = {}
+    fake_booz_module = ModuleType("booz_xform_jax")
+
+    def fake_prepare_booz_xform_constants_from_inputs(*, inputs, mboz, nboz, asym):
+        calls["prepare"] = {"inputs": inputs, "mboz": mboz, "nboz": nboz, "asym": asym}
+        return "constants", "grids"
+
+    def fake_booz_xform_from_inputs(*, inputs, constants, grids, surface_indices, jit):
+        calls["booz"] = {
+            "inputs": inputs,
+            "constants": constants,
+            "grids": grids,
+            "surface_indices": np.asarray(surface_indices),
+            "jit": jit,
+        }
+        return {
+            "bmnc_b": np.asarray([[1.0, 0.08], [1.05, 0.04]], dtype=float),
+            "ixm_b": np.asarray([0, 0], dtype=float),
+            "ixn_b": np.asarray([0, 2], dtype=float),
+            "iota_b": np.asarray([0.41, 0.47], dtype=float),
+            "nfp_b": np.asarray(2),
+        }
+
+    fake_booz_module.prepare_booz_xform_constants_from_inputs = fake_prepare_booz_xform_constants_from_inputs
+    fake_booz_module.booz_xform_from_inputs = fake_booz_xform_from_inputs
+    monkeypatch.setitem(sys.modules, "booz_xform_jax", fake_booz_module)
+    monkeypatch.setattr(
+        booz_input,
+        "booz_xform_inputs_from_state",
+        lambda **_kwargs: SimpleNamespace(rmnc=np.zeros((4, 2)), nfp=2),
+    )
+
+    out = quasi_isodynamic_residual_from_state(
+        state="state",
+        static=SimpleNamespace(cfg=SimpleNamespace(lasym=True)),
+        indata="indata",
+        signgs=-1,
+        surfaces=[0.25, 0.75],
+        weights=[1.0, 2.0],
+        mboz=5,
+        nboz=6,
+        nphi=21,
+        nalpha=5,
+        n_bounce=4,
+        branch_width_weight=0.0,
+        shuffle_profile_weight=0.0,
+        jit_booz=True,
+    )
+
+    assert calls["prepare"]["mboz"] == 5
+    assert calls["prepare"]["nboz"] == 6
+    assert calls["prepare"]["asym"] is True
+    assert calls["booz"]["constants"] == "constants"
+    assert calls["booz"]["grids"] == "grids"
+    assert calls["booz"]["jit"] is True
+    np.testing.assert_array_equal(calls["booz"]["surface_indices"], [0, 2])
+    np.testing.assert_allclose(np.asarray(out["surfaces"]), [0.25, 0.75])
+    np.testing.assert_array_equal(np.asarray(out["surface_indices"]), [0, 2])
+    assert np.isfinite(float(np.asarray(out["total"])))
 
 
 def test_qi_boozer_mode_residual_can_include_legacy_bounce_endpoints():

@@ -44,11 +44,12 @@ warm runtimes competitive with or faster than VMEC2000 on CPU:
   many cases the intermediate stages add overhead without improving convergence.
   Pass ``--parity`` to force the VMEC2000 continuation schedule.
 
-**2. Scan-based iteration (``jax.lax.scan``)**
-  The VMEC iteration loop is lifted into ``jax.lax.scan`` to eliminate Python
-  dispatch overhead.  Each scan chunk compiles to a single XLA program; only
-  scalar convergence scalars are returned to the host (via ``VMEC_JAX_SCAN_PRINT``
-  controls).
+**2. Non-scan production fixed-boundary default**
+  Public fixed-boundary API/CLI runs now default to the VMEC-control non-scan
+  loop on CPU and GPU because converged May 2026 profiles were faster than the
+  scan loop.  The ``jax.lax.scan`` loop remains available for differentiable
+  paths and raw-throughput experiments; each scan chunk compiles to a single
+  XLA program and returns only scalar convergence diagnostics to the host.
 
 **3. Dynamic replay bucketing**
   ``VMEC_JAX_DYNAMIC_REPLAY_BUCKET`` pads nearby exact-adjoint tape lengths so
@@ -381,7 +382,9 @@ policy.
 Malformed ``VMEC_JAX_REPLAY_COLUMN_CHUNK`` values now fall back to the automatic
 replay memory guard rather than aborting the Jacobian callback; set
 ``VMEC_JAX_REPLAY_COLUMN_CHUNK=off`` or ``0`` only when chunking should be
-disabled for a targeted profiling run.
+disabled for a targeted profiling run.  The optimizer-specific
+``VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK`` override follows the same safe parsing
+policy, so malformed values fall back to the backend/input auto heuristic.
 
 Use ``--trace-outdir`` for TensorBoard/XProf traces and
 ``--device-memory-profile-out`` for JAX device-memory snapshots when GPU memory
@@ -425,7 +428,7 @@ and ``"default"`` inherit JAX's active backend; pass ``solver_device="cpu"`` or
 ``"gpu"`` only when you want an explicit override.
 
 Representative May 2026 callback timings after the backend-adaptive replay
-bucket and scalar-gradient tangent-cache changes were:
+bucket, scalar-gradient tangent-cache, and GPU replay-chunk changes were:
 
 .. list-table::
    :header-rows: 1
@@ -450,6 +453,11 @@ bucket and scalar-gradient tangent-cache changes were:
      - local CPU, tape exact
      - ``inner_max_iter=80``, two perturbed callbacks
      - ``10.34 s``
+   * - QH ``max_mode=1`` dense Jacobian callback
+     - local CPU, tape exact
+     - ``inner_max_iter=20``, one cold callback
+     - ``16.115 s`` total; ``7.428 s`` exact solve/tape, ``3.644 s`` replay,
+       ``2.736 s`` initial tangents, ``2.295 s`` residual tangents
 
 These short cases show that GPU is now competitive or faster on some cold
 callbacks, but not uniformly faster for production-like mode-2 dense
@@ -458,7 +466,11 @@ GPU, while CPU remains the conservative recommendation for small dense
 least-squares optimizations.  Forced scan exact remains available through
 ``VMEC_JAX_OPT_EXACT_PATH=scan`` for targeted diagnostics; a mode-2 forced-scan
 GPU probe was stopped after the cold compile exceeded the practical profiling
-budget, so it is not a production default.
+budget, so it is not a production default.  The remaining exact-callback
+bottleneck is still split across accepted-point solve/tape construction,
+checkpoint-tape replay, initial tangent construction, and residual tangent
+projection; further speedups should target reuse/fusion across those stages
+rather than raw force-kernel throughput alone.
 
 For same-process warmup studies, repeat a callback at the same point or repeat
 the whole short optimizer run while keeping compiled executables warm:

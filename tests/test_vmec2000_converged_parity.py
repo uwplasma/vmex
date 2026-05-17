@@ -18,15 +18,21 @@ pytestmark = pytest.mark.vmec2000
 @dataclass(frozen=True)
 class ConvergedParityCase:
     case: str
-    input_name: str
+    input_relpath: str
     updates: dict[str, str]
+    lfreeb: bool
+    axisymmetric: bool
+    lasym: bool
+    multigrid: bool
+    mgrid_relpath: str | None = None
+    nightly: bool = False
     timeout_s: float = 120.0
 
 
 CONVERGED_PARITY_CASES = (
     ConvergedParityCase(
         case="circular_tokamak",
-        input_name="input.circular_tokamak",
+        input_relpath="examples/data/input.circular_tokamak",
         updates={
             "NITER": "300",
             "NS_ARRAY": "13",
@@ -34,6 +40,77 @@ CONVERGED_PARITY_CASES = (
             "FTOL_ARRAY": "1e-10",
             "NSTEP": "50",
         },
+        lfreeb=False,
+        axisymmetric=True,
+        lasym=False,
+        multigrid=False,
+    ),
+    ConvergedParityCase(
+        case="LandremanPaul2021_QA_lowres",
+        input_relpath="examples/data/input.LandremanPaul2021_QA_lowres",
+        updates={
+            "NITER": "1000",
+            "NS_ARRAY": "16, 31, 50",
+            "NITER_ARRAY": "600, 1000, 1000",
+            "FTOL_ARRAY": "1e-10, 1e-10, 1e-10",
+            "NSTEP": "50",
+        },
+        lfreeb=False,
+        axisymmetric=False,
+        lasym=False,
+        multigrid=True,
+        nightly=True,
+        timeout_s=240.0,
+    ),
+    ConvergedParityCase(
+        case="up_down_asymmetric_tokamak",
+        input_relpath="examples_single_grid/data/input.up_down_asymmetric_tokamak",
+        updates={
+            "NITER": "800",
+            "NS_ARRAY": "17",
+            "NITER_ARRAY": "800",
+            "FTOL_ARRAY": "1e-10",
+            "NSTEP": "50",
+        },
+        lfreeb=False,
+        axisymmetric=True,
+        lasym=True,
+        multigrid=False,
+        nightly=True,
+        timeout_s=180.0,
+    ),
+    ConvergedParityCase(
+        case="basic_non_stellsym_pressure",
+        input_relpath="examples_single_grid/data/input.basic_non_stellsym_pressure",
+        updates={
+            "NITER": "1200",
+            "NS_ARRAY": "25",
+            "NITER_ARRAY": "1200",
+            "FTOL_ARRAY": "1e-10",
+            "NSTEP": "50",
+        },
+        lfreeb=False,
+        axisymmetric=False,
+        lasym=True,
+        multigrid=False,
+        nightly=True,
+        timeout_s=240.0,
+    ),
+    ConvergedParityCase(
+        case="cth_like_free_bdy",
+        input_relpath="examples_single_grid/data/input.cth_like_free_bdy",
+        updates={
+            "NITER": "5000",
+            "NITER_ARRAY": "5000",
+            "FTOL_ARRAY": "1e-10",
+        },
+        lfreeb=True,
+        axisymmetric=False,
+        lasym=False,
+        multigrid=False,
+        mgrid_relpath="examples_single_grid/data/mgrid_cth_like.nc",
+        nightly=True,
+        timeout_s=600.0,
     ),
 )
 
@@ -46,6 +123,11 @@ def _vmec2000_exec_or_skip() -> Path:
     if exe is None:
         pytest.skip("xvmec2000 executable not found")
     return exe
+
+
+def _nightly_or_skip(case: ConvergedParityCase) -> None:
+    if case.nightly and os.environ.get("VMEC2000_NIGHTLY", "0") != "1":
+        pytest.skip("Set VMEC2000_NIGHTLY=1 to run slow converged VMEC2000 parity cases")
 
 
 def _write_patched_input(src: Path, dst: Path, *, updates: dict[str, str]) -> Path:
@@ -113,20 +195,28 @@ def test_xvmec2000_converged_wout_matches_vmec_jax(case: ConvergedParityCase, tm
     """Optional executable-backed parity over converged wouts, not short finite-step traces."""
 
     exe = _vmec2000_exec_or_skip()
+    _nightly_or_skip(case)
     pytest.importorskip("jax")
     pytest.importorskip("netCDF4")
 
-    from vmec_jax.driver import run_fixed_boundary, write_wout_from_fixed_boundary_run
+    from vmec_jax.driver import run_fixed_boundary, run_free_boundary, write_wout_from_fixed_boundary_run
 
     repo_root = Path(__file__).resolve().parents[1]
-    input_path = repo_root / "examples" / "data" / case.input_name
+    input_path = repo_root / case.input_relpath
     if not input_path.exists():
         pytest.skip(f"Missing bundled input: {input_path}")
 
+    updates = dict(case.updates)
+    if case.mgrid_relpath is not None:
+        mgrid_path = repo_root / case.mgrid_relpath
+        if not mgrid_path.exists():
+            pytest.skip(f"Missing bundled mgrid: {mgrid_path}")
+        updates["MGRID_FILE"] = f"'{mgrid_path}'"
+
     patched_input = _write_patched_input(
         input_path,
-        tmp_path / "inputs" / case.input_name,
-        updates=case.updates,
+        tmp_path / "inputs" / input_path.name,
+        updates=updates,
     )
 
     vmec = run_xvmec2000(
@@ -139,7 +229,8 @@ def test_xvmec2000_converged_wout_matches_vmec_jax(case: ConvergedParityCase, tm
     wout_vmec_path = vmec.workdir / f"wout_{case.case}.nc"
     assert wout_vmec_path.exists(), f"VMEC2000 did not produce {wout_vmec_path.name}"
 
-    run = run_fixed_boundary(
+    run_fn = run_free_boundary if case.lfreeb else run_fixed_boundary
+    run = run_fn(
         str(patched_input),
         solver="vmec2000_iter",
         solver_mode="parity",
@@ -156,6 +247,11 @@ def test_xvmec2000_converged_wout_matches_vmec_jax(case: ConvergedParityCase, tm
     _assert_wout_physics_consistent(wref, input_path=patched_input)
     _assert_wout_physics_consistent(wjax, input_path=patched_input)
 
+    indata = read_indata(patched_input)
+    assert bool(indata.get_bool("LFREEB", False)) is case.lfreeb
+    assert bool(indata.get_bool("LASYM", False)) is case.lasym
+    assert bool(int(indata.get_int("NTOR", 0)) == 0) is case.axisymmetric
+
     assert int(wjax.ns) == int(wref.ns)
     assert int(wjax.mpol) == int(wref.mpol)
     assert int(wjax.ntor) == int(wref.ntor)
@@ -164,10 +260,16 @@ def test_xvmec2000_converged_wout_matches_vmec_jax(case: ConvergedParityCase, tm
 
     for name in ("rmnc", "zmns", "lmns"):
         _assert_rel_rms(name, getattr(wjax, name), getattr(wref, name), limit=1.0e-3)
+    if case.lasym:
+        for name in ("rmns", "zmnc"):
+            _assert_rel_rms(name, getattr(wjax, name), getattr(wref, name), limit=2.0e-3)
     for name in ("phipf", "chipf", "iotas", "iotaf", "pres", "presf"):
         _assert_rel_rms(name, getattr(wjax, name), getattr(wref, name), limit=1.0e-3, radial_skip=1)
     for name in ("gmnc", "bmnc", "bsupumnc", "bsupvmnc", "bsubumnc", "bsubvmnc"):
         _assert_rel_rms(name, getattr(wjax, name), getattr(wref, name), limit=5.0e-3, radial_skip=1)
+    if case.lasym:
+        for name in ("gmns", "bmns", "bsupumns", "bsupvmns", "bsubumns", "bsubvmns"):
+            _assert_rel_rms(name, getattr(wjax, name), getattr(wref, name), limit=1.0e-2, radial_skip=1)
 
     np.testing.assert_allclose(wjax.wb, wref.wb, rtol=5.0e-3, atol=1.0e-8)
     np.testing.assert_allclose(wjax.wp, wref.wp, rtol=5.0e-3, atol=1.0e-8)

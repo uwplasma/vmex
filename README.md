@@ -12,6 +12,20 @@
 End-to-end differentiable JAX implementation of **VMEC2000** for fixed-boundary
 and free-boundary ideal-MHD equilibria.
 
+## Release notes
+
+### v0.0.9
+
+- Default fixed-boundary production solves now use the VMEC-control non-scan
+  loop on CPU and GPU, matching the latest QH/QA/QI/LASYM profiling results.
+- GPU exact-Jacobian replay uses the profiled dense-column chunking policy for
+  larger fixed-boundary optimizations, reducing the observed QH mode-2 replay
+  callback from about 42 s to about 18 s on the `office` RTX A4000 profile.
+- Fixed-boundary profiling tools now report effective optimizer, solver, replay,
+  and finish-budget settings so CPU/GPU regressions are easier to attribute.
+- CI action versions were refreshed for the Node 24 runtime, and the PyPI
+  release workflow still rejects tags that do not match `pyproject.toml`.
+
 ## Install
 
 ## From PyPI
@@ -243,6 +257,19 @@ constrained least-squares residual definition.
   <img src="docs/_static/figures/readme_best_optimization_qi.png" width="980" />
 </p>
 
+The dedicated `QI_optimization.py` coverage figure tracks the two bundled QI
+inputs used by the README/docs lane.  It is rendered from existing reviewed
+outputs and uses Boozer `|B|` line contours only.
+
+| QI input | Output/provenance | Final J | QI smooth | QI legacy | Mirror | Elong. | Aspect | Iota | CPU time |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `examples/data/input.nfp2_QI` | `results/qi_opt/ess/nfp2_qi` | 1.17e-02 | 1.13e-03 | 3.09e-04 | 0.225 / 0.30 | 6.43 / 8.2 | 9.999 / 10.0 | -0.5043 | 9.8 min |
+| `examples/data/input.QI_stel_seed_3127` | `results/qi_opt/ess/qi_stel_seed_3127_current_public_final` | 1.12e-01 | 4.32e-03 | 1.16e-03 | 0.316 / 0.35 | 3.91 / 8.0 | 3.465 / 4.0 | -1.0366 | 1.4 min |
+
+<p align="center">
+  <img src="docs/_static/figures/readme_qi_optimization_cases.png" width="980" />
+</p>
+
 Recreate the four displayed runs:
 
 ```bash
@@ -251,6 +278,7 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_swee
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qp --modes 3 --ess off
 PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi python examples/optimization/QI_optimization.py
 PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
+PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 ```
 
 For QI seed-robustness probes, set `VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127`

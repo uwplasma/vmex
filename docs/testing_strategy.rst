@@ -14,9 +14,9 @@ Target State
   build jobs on GitHub-hosted CPU runners.
 - Routine local gate:
   ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt"``.
-- Last recorded local CI-equivalent coverage baseline: clean on 2026-05-13 with
-  ``1000 passed, 20 skipped, 95 deselected``, ``85.52%`` coverage, and ``9:24``
-  runtime using the compact terminal coverage report.
+- Last recorded local CI-equivalent coverage baseline: clean on 2026-05-17 with
+  ``1111 passed, 20 skipped, 97 deselected``, ``85.25%`` coverage, and
+  ``10:22`` runtime using the compact terminal coverage report.
 - Near-term coverage target: keep the required ``85%`` actual line coverage gate
   green with meaningful fast and bounded-physics tests while preserving
   sub-ten-minute coverage runtime.
@@ -425,7 +425,7 @@ tests execute long workflows incidentally.
    artifacts.
 5. Raise ``--cov-fail-under`` in stages after the corresponding tests are
    merged.  The current required fast-suite gate is ``85%``; the last recorded
-   local baseline is ``85.06%``.  The next planned ratchets are 90% and 95%,
+   local baseline is ``85.25%``.  The next planned ratchets are 90% and 95%,
    after solver/driver refactors reduce runtime and add physics coverage.
 
 

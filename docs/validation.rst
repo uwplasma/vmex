@@ -57,7 +57,7 @@ Required CI includes a no-executable residual parity gate:
 
 .. code-block:: bash
 
-   JAX_ENABLE_X64=1 pytest -q tests/test_residue_getfsq_parity.py tests/test_wout_profiles_currents_bundled_parity.py tests/test_vmec2000_exec_threed1.py
+   JAX_ENABLE_X64=1 pytest -q tests/test_residue_getfsq_parity.py tests/test_wout_profiles_currents_bundled_parity.py tests/test_converged_wout_matrix_parity.py tests/test_vmec2000_exec_threed1.py
 
 ``tests/test_residue_getfsq_parity.py`` reads small bundled VMEC2000 ``wout``
 files, reconstructs the solved state, recomputes the
@@ -77,6 +77,15 @@ surface-averaged current profiles ``jcuru/jcurv`` match the VMEC finite
 difference of ``bvco/buco`` divided by ``mu0``.  The covered fixtures include
 axisymmetric finite-beta, non-axisymmetric current-driven, 3D finite-beta, and
 ``lasym=True`` solved wouts.
+
+``tests/test_converged_wout_matrix_parity.py`` keeps a CI-safe converged-wout
+matrix over bundled VMEC2000 outputs.  The representative fixtures cover
+fixed-boundary and free-boundary outputs, axisymmetric and non-axisymmetric
+geometry, ``lasym=False`` and ``lasym=True`` channels, and single-grid plus
+multigrid input decks.  The gate checks metadata consistency against the
+``input.*`` files, final residual RSS limits, flux and iota mesh conventions,
+finite stored geometry/field blocks, and the presence or absence of asymmetric
+Fourier channels.
 
 The full test tier runs ``vmec_jax`` end-to-end.  For promoted strict-parity
 cases it compares every standard ``wout`` field against the VMEC2000
@@ -443,6 +452,23 @@ the executable comparator tools:
      --b /path/to/vmec_jax/wout_case.nc \
      --rtol 1e-4 --atol 1e-12
 
+Regenerate converged-wout benchmark summaries with:
+
+.. code-block:: bash
+
+   python tools/diagnostics/converged_wout_parity_benchmark.py --all-discovered-execs
+   python tools/diagnostics/converged_wout_parity_benchmark.py --nightly --all-discovered-execs
+   python tools/diagnostics/converged_wout_parity_benchmark.py --dry-run --scan-local-execs --all-discovered-execs
+
+The first command runs the bounded circular end-state comparison.  The nightly
+variant adds the slower representative non-axisymmetric, ``lasym=True``,
+multigrid, and free-boundary cases.  The runner discovers
+``$VMEC2000_EXEC``, ``~/bin/xvmec2000``, ``xvmec2000`` on ``PATH``, and the
+standard adjacent STELLOPT build path by default, then de-duplicates symlinks
+before running.  Use ``--scan-local-execs`` when you also want to recursively
+inventory older local benchmark-tree executables before deciding which ones are
+safe to run.
+
 Manifest-driven sweep (fixed + free boundary)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -512,6 +538,19 @@ the whole executable-backed suite after the bounded checks are green:
    VMEC2000_EXEC=/path/to/xvmec2000 \
    VMEC2000_INTEGRATION=1 \
    pytest -q -m vmec2000
+
+Converged end-state VMEC2000-vs-``vmec_jax`` comparisons are in
+``tests/test_vmec2000_converged_parity.py``.  By default this runs only the
+bounded fixed-boundary circular case when ``VMEC2000_INTEGRATION=1`` is set.
+Set ``VMEC2000_NIGHTLY=1`` as well to include the slower non-axisymmetric,
+``lasym=True``, multigrid, and free-boundary representatives:
+
+.. code-block:: bash
+
+   VMEC2000_EXEC=/path/to/xvmec2000 \
+   VMEC2000_INTEGRATION=1 \
+   VMEC2000_NIGHTLY=1 \
+   pytest -q tests/test_vmec2000_converged_parity.py
 
 Optional SIMSOPT formula parity is similarly guarded and targeted:
 

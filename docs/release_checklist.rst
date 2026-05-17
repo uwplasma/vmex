@@ -21,6 +21,7 @@ Run these checks before pushing a release-candidate commit:
    pytest -q tests/test_booz_input.py tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_qi_objective_component_report.py tests/test_qi_seed_suitability_audit.py tests/test_qs_ess_render_smoke.py
    pytest -q tests/test_quasisymmetry.py tests/test_optimization_examples.py tests/test_implicit_helpers.py tests/test_wout_additional_helpers.py tests/test_solve_additional_helpers.py tests/test_free_boundary_additional_helpers.py tests/test_vmec_kernel_additional_helpers.py tests/test_solve_branch_coverage.py tests/test_implicit_wout_driver_branch_coverage.py
    JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt" --cov=vmec_jax --cov-report=xml --cov-report=term-missing:skip-covered --cov-fail-under=85
+   python -m build
    python -m sphinx -W -b html docs docs/_build/html_release
 
 These tests cover the required local lanes: continuation semantics, exact
@@ -32,10 +33,16 @@ optional ``BoozerBTarget`` homotopy term, solve-free JVP/VJP routing checks,
 pure driver/runtime policy helpers, implicit/wout serialization helpers,
 free-boundary/solver helper branches, VMEC-kernel helper branches, packaging
 hygiene, additional solve/implicit/wout/driver branch coverage, the required
-Python 3.11 coverage gate, and warning-clean documentation.  A recent recorded
-local required non-full coverage baseline from 2026-05-13 is ``1000 passed, 20
-skipped, 95 deselected`` with ``85.52%`` coverage in ``9:24``.  The enforced
-local and CI gate is ``85%``.
+Python 3.11 coverage gate, and warning-clean documentation.  The 2026-05-17
+release-candidate local required non-full coverage baseline is ``1111 passed,
+20 skipped, 97 deselected`` with ``85.25%`` coverage in ``10:22``.  The
+enforced local and CI gate is ``85%``.
+
+For the ``v0.0.9`` patch release, the package version is ``0.0.9`` and the
+matching tag is ``v0.0.9``.  The patch scope after ``v0.0.8`` is fixed-boundary
+production policy, GPU exact-Jacobian replay profiling/chunking,
+fixed-boundary diagnostics, docs, CI action-runtime hygiene, and expanded
+bounded VMEC2000 parity gates.
 
 Required GitHub Actions gate
 ----------------------------
@@ -56,6 +63,9 @@ The required release baseline is:
 - The bounded physics smoke job succeeds.
 - Manual/nightly physics jobs may be skipped, but must not fail.
 
+The current CI workflow also includes a dedicated full-docs job.  Treat both
+``Build (wheel/sdist + docs)`` and ``Docs (full guide)`` as release blockers.
+
 Artifact hygiene gate
 ---------------------
 
@@ -66,6 +76,7 @@ Before tagging, keep the repository free of transient outputs:
    git status --short
    rm -rf build dist vmec_jax.egg-info
    python tools/diagnostics/repo_size_audit.py --top 40
+   git check-ignore -v docs/_build/html/index.html docs/api/generated/vmec_jax.solve.rst .DS_Store
 
 Do not commit optimization result trees, rerun ``wout`` files, profiler traces,
 or generated PDFs unless a small artifact is explicitly referenced by README or
@@ -81,6 +92,11 @@ Tag only after the local and GitHub gates are green:
    git tag -a vX.Y.Z -m "vmec-jax vX.Y.Z"
    git push origin vX.Y.Z
    gh release create vX.Y.Z --repo uwplasma/vmec_jax --title "vmec-jax vX.Y.Z" --notes-file RELEASE_NOTES.md
+
+For GitHub releases, ``publish-pypi.yml`` validates that the release tag
+matches ``project.version`` in ``pyproject.toml`` after stripping an optional
+leading ``v``.  Do not publish ``v0.0.9`` unless ``pyproject.toml`` still says
+``0.0.9`` and the CI gates above are green.
 
 The release notes should list user-visible changes, validation coverage, known
 limitations, and any optional external validation that was not run.
