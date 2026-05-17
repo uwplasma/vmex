@@ -58,12 +58,26 @@ def test_runtime_compare_exports_vmec2000_vmec_jax_and_vmecpp_rows(tmp_path):
             {"case_id": "case_a", "backend": "vmecpp", "runtime_s": 0.5, "max_rss_bytes": 50},
         ],
     }
-    rows = mod._collect_records([summary])
+    gpu_summary = {
+        "cases": summary["cases"],
+        "results": [
+            {
+                "case_id": "case_a",
+                "backend": "vmec_jax",
+                "runtime_cold_s": 3.0,
+                "runtime_warm_s": 0.25,
+                "peak_footprint_bytes": 300,
+            }
+        ],
+    }
+    rows = mod._collect_records([summary], [gpu_summary])
 
     assert len(rows) == 1
     assert rows[0]["vmec_runtime_s"] == 4.0
     assert rows[0]["cpu_runtime_s"] == 2.0
     assert rows[0]["cpu_warm_runtime_s"] == 1.0
+    assert rows[0]["gpu_runtime_s"] == 3.0
+    assert rows[0]["gpu_warm_runtime_s"] == 0.25
     assert rows[0]["vmecpp_runtime_s"] == 0.5
 
     csv_path = tmp_path / "runtime.csv"
@@ -75,19 +89,22 @@ def test_runtime_compare_exports_vmec2000_vmec_jax_and_vmecpp_rows(tmp_path):
         rows,
         json_path,
         cpu_summary_paths=[Path("cpu_summary.json")],
-        gpu_summary_paths=[],
+        gpu_summary_paths=[Path("gpu_summary.json")],
         figure_path=figure_path,
         table_path=table_path,
     )
 
     csv_text = csv_path.read_text()
     assert "vmec_jax_cold_speedup_vs_vmec2000" in csv_text
+    assert "vmec_jax_gpu_warm_speedup_vs_cpu_warm" in csv_text
     assert "2.0" in csv_text
     payload = json.loads(json_path.read_text())
     record = payload["records"][0]
     assert record["case_id"] == "case_a"
     assert record["vmec_jax_cold_speedup_vs_vmec2000"] == 2.0
     assert record["vmec_jax_warm_speedup_vs_vmec2000"] == 4.0
+    assert record["vmec_jax_gpu_warm_speedup_vs_vmec2000"] == 16.0
+    assert record["vmec_jax_gpu_warm_speedup_vs_cpu_warm"] == 4.0
     assert record["vmecpp_speedup_vs_vmec2000"] == 8.0
 
 

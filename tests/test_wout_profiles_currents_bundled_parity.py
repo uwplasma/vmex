@@ -133,6 +133,13 @@ def test_bundled_wout_flux_pressure_iota_profiles_follow_vmec_radial_mesh(
         atol=1.0e-13,
         err_msg=f"{case_name}: phi is not the VMEC half-mesh integral of phipf",
     )
+    np.testing.assert_allclose(
+        np.asarray(wout.chipf, dtype=float),
+        np.asarray(wout.iotaf, dtype=float) * np.asarray(wout.phipf, dtype=float),
+        rtol=1.0e-13,
+        atol=1.0e-13,
+        err_msg=f"{case_name}: chipf is not consistent with iotaf * phipf on the half mesh",
+    )
 
     profiles = eval_profiles(indata, _s_half(s))
     pressure_expected = np.array(profiles.get("pressure", np.zeros((ns,))), dtype=float, copy=True)
@@ -172,6 +179,14 @@ def test_bundled_wout_flux_pressure_iota_profiles_follow_vmec_radial_mesh(
         rtol=1.0e-13,
         atol=1.0e-14,
         err_msg=f"{case_name}: betatotal no longer matches wp / wb",
+    )
+    volume_expected = 4.0 * np.pi**2 * hs * float(np.sum(np.asarray(wout.vp, dtype=float)[1:]))
+    np.testing.assert_allclose(
+        float(wout.volume_p),
+        volume_expected,
+        rtol=2.0e-6,
+        atol=1.0e-8,
+        err_msg=f"{case_name}: volume_p is not the VMEC radial integral of vp",
     )
     beta_scalars = np.asarray([wout.betatotal, wout.betapol, wout.betator, wout.betaxis], dtype=float)
     assert np.all(np.isfinite(beta_scalars)), f"{case_name}: beta scalars must be finite"

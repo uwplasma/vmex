@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+from dataclasses import fields
 import json
 import sys
 from pathlib import Path
@@ -24,6 +25,8 @@ def _load_module(name: str, script_name: str):
 def test_minimal_seed_showcase_case_map_uses_three_coefficient_inputs() -> None:
     generator = _load_module("generate_minimal_seed_showcase", "generate_minimal_seed_showcase.py")
 
+    case_fields = {field.name for field in fields(generator.MinimalSeedCase)}
+    assert {"default_max_mode", "default_use_ess", "default_policy"}.isdisjoint(case_fields)
     assert generator.DEFAULT_CASE_ORDER == ("qi_nfp1", "qi_nfp2", "qi_nfp3", "qa_nfp2", "qh_nfp4", "qp_nfp2")
     for case_name in generator.DEFAULT_CASE_ORDER:
         case = generator.SHOWCASE_CASES[case_name]
