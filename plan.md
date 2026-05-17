@@ -1,8 +1,8 @@
 # VMEC-JAX Research-Grade Roadmap
 
-Last updated: 2026-05-13
+Last updated: 2026-05-17
 Primary branch: `main`
-Baseline release: `v0.0.7`
+Baseline release: `v0.0.8`
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -28,24 +28,25 @@ acceptance criteria or evidence changes.
   volavgB, magnetic-well, DMerc, and JXBFORCE profile objectives exist in the
   workflow layer.
 - GPU execution works. Small/medium optimization cases are now much closer to
-  CPU after the backend-adaptive replay-bucket fix, but accepted-point tape
-  replay and tape build still dominate on GPU.
+  CPU after the backend-adaptive replay-bucket fix. The profiler no longer
+  hides a pre-profile exact solve, malformed replay-bucket environment values
+  fall back to backend-adaptive defaults, and accepted-point tape replay/tape
+  build remain the next GPU optimization target.
 - Continuation correctness is now protected by both synthetic control-flow tests
   and a real projected-boundary stage test. Repeated stage schedules such as
   ``[1, 1, 2]`` carry the optimized VMEC input forward and keep projected
   high-mode coefficients zero.
 - Exact-history correctness is now protected against relaxed trial-solve drift:
-  final ``input.final`` and ``wout_final.nc`` use the best exact accepted point
-  when the last trial-accepted point replays worse.
+  final ``input.final`` and ``wout_final.nc`` use verified exact accepted
+  states, and persisted WOUT artifacts no longer fall back to relaxed trial
+  solves on cache misses.
 - The duplicate finite-beta stage-one output path now has the same
   selected-best-exact-state save contract as the main QS workflow, so
   ``input.final`` and ``wout_final.nc`` cannot drift there either.
-- Required CI coverage is 85.52% locally on the Python 3.11 CI-equivalent
-  required suite (`1000 passed, 20 skipped, 95 deselected`, 9:24 with compact
-  coverage output), above the raised 85% gate but still below the long-term 95%
-  goal.  CI now installs the plotting extra for fast-test jobs so the required
-  coverage gate exercises the README/docs plotting helpers instead of skipping
-  them.
+- Required CI coverage is above the 85% gate. The May 17 full local suite passed
+  (`1105 passed, 117 skipped`, 7:57), the optional converged VMEC2000 parity
+  gate passed locally with `VMEC2000_INTEGRATION=1`, and GitHub CI passed on
+  the validation commit.
 - Full non-VMEC2000 physics coverage with refreshed released assets reaches
   72.35% locally (`74 passed, 4 skipped`, 27:21). This is still short of the
   80% target and is too slow for per-commit required CI without splitting the
@@ -76,8 +77,10 @@ acceptance criteria or evidence changes.
       visually bad QI fields cannot pass unnoticed.
 - [ ] Prove seed robustness with a curated multi-seed matrix: start QI from QI,
       QP, QH, QA, and a simple non-omnigenous seed; document which policies
-      reliably converge. This is deferred validation, not a required PR gate,
-      until the rows and Boozer contour audits are generated.
+      reliably converge. NFP=1/2/3 are passing under the current gates. NFP=4 is
+      intentionally deferred: bounded May 2026 audits found no passing NFP=4 QI
+      path among the available QH warm start, local QH-to-QI cleanup, and
+      archived same-NFP references.
 - [x] Diagnose remaining QI noisiness by one-DOF scans of Boozer/QI metrics and
       choose default resolutions/weights that preserve ranking while remaining
       differentiable.
