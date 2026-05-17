@@ -5,6 +5,23 @@ workflow is to instantiate a VMEC object, assemble a list of objective tuples
 `(objective_function, target, weight)`, call `least_squares_solve`, and then
 inspect, save, or plot the returned result.
 
+## Editable Workflow Anatomy
+
+The QA/QH/QP scripts are intentionally linear.  Read them as four visible
+blocks, not as wrappers:
+
+| Block | Edit when you want to... | Where to look |
+| --- | --- | --- |
+| VMEC and stage setup | change input deck, active boundary modes, continuation, or device | top-level variables and `FixedBoundaryVMEC.from_input(...)` |
+| Objective assembly | add/remove physics terms or tune targets and weights | `objective_tuples = [...]` and `LeastSquaresProblem.from_tuples(...)` |
+| Solve controls | change optimizer method, tolerances, ESS, or saved stage artifacts | `least_squares_solve(...)` keyword arguments |
+| Outputs and plots | change filenames, add exports, or choose figures | `saved_paths`, `save_input`, `save_wout`, `save_history`, and `vj.plot_*` calls |
+
+`least_squares_solve` receives optimizer, continuation, device, and output
+controls only.  Scientific targets stay in the explicit objective tuple list
+or, for QI field terms, in the shared `QuasiIsodynamicOptions` and objective
+objects.
+
 ## Objective Tuple Pattern
 
 Use explicit SIMSOPT-style tuples and keep the list visible:
@@ -69,7 +86,26 @@ final_optimizer.save_history(saved_paths["history"], final_result)
 print(history["objective_final"])
 print(timing["total_wall_time_s"])
 print(objective_history[-3:])
-vj.plot_objective_history(saved_paths["history"], outdir=OUTPUT_DIR)
+
+wout_final = vj.load_wout(saved_paths["final_wout"])
+theta, zeta, b_lcfs = vj.vmecplot2_bmag_grid(wout_final, s_index=-1)
+
+plot_paths = {
+    "boundary_comparison": vj.plot_3d_boundary_comparison(
+        saved_paths["initial_wout"],
+        saved_paths["final_wout"],
+        outdir=OUTPUT_DIR,
+    ),
+    "bmag_contours": vj.plot_bmag_contours(
+        saved_paths["initial_wout"],
+        saved_paths["final_wout"],
+        outdir=OUTPUT_DIR,
+    ),
+    "objective_history": vj.plot_objective_history(
+        saved_paths["history"],
+        outdir=OUTPUT_DIR,
+    ),
+}
 ```
 
 `least_squares_solve` still writes the default final artifacts for convenience;
@@ -150,6 +186,9 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/compare_omnigenity_q
 PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_objective_component_report.py
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/audit_qi_seed_suitability.py --quick \
   --csv results/qi_seed_audit.csv
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/audit_qi_seed_suitability.py --quick \
+  --smooth-qi-max 5e-3 --legacy-qi-max 2e-3 \
+  --csv results/qi_seed3127_audit.csv
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/audit_qi_seed_suitability.py --quick \
   --prefine-probes plan \
   --prefine-manifest results/qi_seed_audit/prefine_manifest.json \

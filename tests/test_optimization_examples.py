@@ -31,6 +31,7 @@ def test_fixed_boundary_qs_examples_are_standalone_workflows() -> None:
         assert "problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)" in text
         assert "least_squares_solve(" in text
         assert "problem =" in text
+        assert "The solve call only receives optimizer, continuation, device, and output" in text
         assert "SAVE_STAGE_INPUTS = True" in text
         assert "SAVE_STAGE_WOUTS = False" in text
         assert "save_stage_inputs=SAVE_STAGE_INPUTS" in text
@@ -63,8 +64,30 @@ def test_fixed_boundary_qs_examples_are_standalone_workflows() -> None:
         assert "plot_3d_boundary_comparison(" in text
         assert "plot_bmag_contours(" in text
         assert "plot_objective_history(" in text
+        assert "Plotting is a normal post-processing block" in text
         assert 'saved_paths["initial_wout"]' in text
         assert 'saved_paths["history"]' in text
+
+
+def test_optimization_readme_and_docs_teach_visible_workflow_anatomy() -> None:
+    readme = (ROOT / "examples" / "optimization" / "README.md").read_text()
+    docs = (ROOT / "docs" / "optimization.rst").read_text()
+    readme_flat = " ".join(readme.split())
+    docs_flat = " ".join(docs.split())
+
+    assert "Editable Workflow Anatomy" in readme
+    assert "Editable workflow anatomy" in docs
+    assert "`least_squares_solve` receives optimizer, continuation, device, and output controls only." in readme_flat
+    assert "Do not pass physics shortcuts such as ``target_aspect`` or ``qi_options``" in docs_flat
+    assert "Recommended workflow API" in docs
+    assert "FixedBoundaryOptimizationResult" in docs
+    assert "save_input" in readme
+    assert "save_wout" in readme
+    assert "save_history" in readme
+    assert "plot_paths = {" in readme
+    assert "vj.plot_3d_boundary_comparison(" in readme
+    assert "vj.plot_bmag_contours(" in readme
+    assert "vj.plot_objective_history(" in readme
 
 
 def test_qi_example_uses_qi_problem_api() -> None:
@@ -107,6 +130,7 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "QuasiIsodynamicResidual(QI_OPTIONS)" in text
     assert "QuasiIsodynamicResidualCeiling(" in text
     assert "qi_options=QI_OPTIONS" in text
+    assert "Small stage helper: physics is still assembled explicitly" in text
     assert "branch_width_weight=QI_OPTIONS.branch_width_weight" in text
     assert "weighted_shuffle_profile_weight=QI_OPTIONS.weighted_shuffle_profile_weight" in text
     assert "objective_tuples = [" in text
@@ -152,6 +176,7 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "plot_3d_boundary_comparison(" in text
     assert "plot_bmag_contours(" in text
     assert "plot_objective_history(" in text
+    assert "Plotting is explicit post-processing" in text
     assert '"boozer_bmag_initial": vj.plot_boozer_bmag_contours_from_state(' in text
     assert "raw_initial_run.state" in text
     assert "plot_boozer_bmag_contours_from_state(" in text
@@ -196,6 +221,30 @@ def test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling() -> None:
     assert "objective_tuples.append((mirror.J, 0.0, mirror_weight))" in text
     assert text.index("qi_ceiling = vj.QuasiIsodynamicResidualCeiling(") < text.index("mirror = vj.MirrorRatio(")
     assert text.index("if qi_ceiling_weight > 0.0:") < text.index("if mirror_weight > 0.0:")
+
+
+def test_qi_nfp4_case_is_explicit_nonpassing_stress_fixture() -> None:
+    text = (ROOT / "examples" / "optimization" / "QI_optimization.py").read_text()
+    docs = "\n".join(
+        [
+            (ROOT / "docs" / "optimization.rst").read_text(),
+            (ROOT / "docs" / "optimization_sweep_results.rst").read_text(),
+        ]
+    )
+
+    assert '"nfp4_qh_warm_to_qi"' in text
+    assert '"case_goal": "NFP=4 QH-to-QI non-passing stress fixture; audit only"' in text
+    assert '"expected_gate_status": "non_passing_stress_fixture"' in text
+    assert '"expected_gate_failures": ("smooth_qi", "legacy_qi", "mirror")' in text
+    assert '"known_best_nfp4_quick_audit": {' in text
+    assert "external_nfp4_qi_wfq0" in text
+    assert "qi_case_expected_gate_status" in text
+    assert "qi_case_stress_fixture" in text
+    assert "qi_case_expected_outcome_met" in text
+    assert "expected non-passing NFP=4 stress fixture" in text
+    assert "NFP=4 QI" in docs
+    assert "non-passing stress fixture" in docs
+    assert "nfp4_qh_warm_to_qi" in docs
 
 
 def test_qi_seed_robustness_optional_mirror_cleanup_contract_keeps_qi_guard() -> None:

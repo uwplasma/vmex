@@ -154,6 +154,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Force relaxed trial residual solves onto the lax.scan path; exact adjoint solves remain trace-capable non-scan.",
     )
     p.add_argument(
+        "--initial-metrics",
+        action="store_true",
+        help=(
+            "Compute and print initial aspect/QS before profiling. Off by "
+            "default because it performs an exact solve that is immediately "
+            "cleared and otherwise warms/distorts cold callback timings."
+        ),
+    )
+    p.add_argument(
         "--trace-callbacks",
         action="store_true",
         help="Include SciPy residual/Jacobian callback source timings in the JSON history.",
@@ -583,6 +592,7 @@ def _build_callback_payload(
         "perturb_scale": float(args.perturb_scale),
         "perturb_seed": int(args.perturb_seed),
         "clear_between_repeats": bool(args.clear_between_repeats),
+        "initial_metrics": bool(getattr(args, "initial_metrics", False)),
         "solver_device_requested": args.solver_device,
         "solver_device_resolved": solver_device_resolved,
         "runtime": _runtime_info() if runtime is None else runtime,
@@ -702,7 +712,8 @@ def main() -> int:
     runtime_info = _runtime_info()
     print(f"Requested solver_device={args.solver_device} resolved={opt._solver_device_name or 'default'}")
     print(f"Runtime={json.dumps(runtime_info, sort_keys=True)}")
-    print(f"Initial aspect={opt.aspect_ratio(params0):.6f} qs={opt.quasisymmetry_objective(params0):.6e}")
+    if args.initial_metrics:
+        print(f"Initial aspect={opt.aspect_ratio(params0):.6f} qs={opt.quasisymmetry_objective(params0):.6e}")
     opt.clear_caches()
     opt._profile = {}
 
