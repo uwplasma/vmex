@@ -123,6 +123,14 @@ run_gpu = vj.run_fixed_boundary("input.nfp4_QH_warm_start", solver_device="gpu")
 run_cpu = vj.run_fixed_boundary("input.nfp4_QH_warm_start", solver_device="cpu")
 ```
 
+For optimization sweep commands, `--backend-label` is only the output
+directory/table label.  Select the actual JAX process backend with
+`JAX_PLATFORMS=cpu`, `JAX_PLATFORM_NAME=gpu`, or `JAX_PLATFORMS=cuda`, and use
+`--solver-device cpu` / `--solver-device gpu` when a worker should force the
+solver device.  Trust the recorded `jax_backend`, `jax_device_kind`,
+`solver_device`, and `jax_platforms` fields in `case_result.json` or generated
+CSV files over the output directory name.
+
 For production fixed-boundary solves, the auto-selected CPU/GPU policy uses the
 VMEC-control non-scan loop because it is faster for converged equilibria on the
 current benchmark set. The scan loop remains available for explicit fast-mode
@@ -303,6 +311,10 @@ PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi python examples/opti
 PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
 PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 ```
+
+The sweep driver skips existing successful `case_result.json` rows by default;
+append `--rerun` to a sweep command when you need to overwrite local artifacts
+and reproduce a row from scratch.
 
 For QI seed-robustness probes, set `VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127`
 when running `examples/optimization/QI_optimization.py`, or change the

@@ -36,6 +36,9 @@ def _callback_report(
         "profile": {
             "xla_compile": {"count": 1, "wall_time_s": 1.25, "mean_wall_time_s": 1.25},
             "exact_tape_build": {"count": accepted_replays, "wall_time_s": 3.0, "mean_wall_time_s": 1.5},
+            "exact_tape_build_unattributed": {"count": accepted_replays, "wall_time_s": 0.5},
+            "jacobian_initial_tangents": {"count": accepted_replays, "wall_time_s": 0.75},
+            "jacobian_residual_tangents": {"count": accepted_replays, "wall_time_s": 0.6},
             "jacobian_tape_replay": {
                 "count": accepted_replays,
                 "wall_time_s": replay_wall_time_s,
@@ -81,6 +84,12 @@ def test_callback_report_summary_extracts_bottleneck_metrics() -> None:
     metrics = summary["metrics"]
     assert metrics["total_runtime_s"] == 10.0
     assert metrics["compile_time_s"] == 1.25
+    assert metrics["exact_tape_build_s"] == 3.0
+    assert metrics["exact_tape_build_unattributed_s"] == 0.5
+    assert metrics["initial_tangents_s"] == 0.75
+    assert metrics["residual_tangents_s"] == 0.6
+    assert metrics["trial_solve_s"] == 1.0
+    assert metrics["exact_solve_s"] == 3.5
     assert metrics["replay_time_s"] == 2.0
     assert metrics["cache_time_s"] == 0.4
     assert metrics["callback_count"] == 2
@@ -88,7 +97,7 @@ def test_callback_report_summary_extracts_bottleneck_metrics() -> None:
     assert metrics["solve_count"] == 3
     assert metrics["accepted_point_replay_count"] == 2
     assert metrics["cache_entry_growth"] == 4
-    assert summary["bottleneck_hint"]["metric"] == "replay_time_s"
+    assert summary["bottleneck_hint"]["metric"] == "exact_solve_s"
     assert summary["top_profile"][0]["name"] == "exact_solve_with_tape_total"
 
 

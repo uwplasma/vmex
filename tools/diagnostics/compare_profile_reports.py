@@ -40,6 +40,15 @@ SOLVE_PROFILE_NAMES = {
     "scan_exact_state_solve",
 }
 
+EXACT_PROFILE_METRIC_NAMES = {
+    "exact_tape_build_s": ("exact_tape_build",),
+    "exact_tape_build_unattributed_s": ("exact_tape_build_unattributed",),
+    "initial_tangents_s": ("jacobian_initial_tangents",),
+    "residual_tangents_s": ("jacobian_residual_tangents",),
+    "trial_solve_s": ("solve_forward_trial", "solve_forward_trial_total"),
+    "exact_solve_s": ("solve_forward_exact", "solve_forward_exact_total", "exact_solve_with_tape_total"),
+}
+
 ACCEPTED_REPLAY_PROFILE_NAMES = {
     "jacobian_tape_replay",
     "gradient_tape_replay",
@@ -61,6 +70,12 @@ METRIC_ORDER = (
     "qi_first_call_s",
     "qi_warm_min_s",
     "qi_warm_mean_s",
+    "exact_tape_build_s",
+    "exact_tape_build_unattributed_s",
+    "initial_tangents_s",
+    "residual_tangents_s",
+    "trial_solve_s",
+    "exact_solve_s",
     "compile_time_s",
     "replay_time_s",
     "cache_time_s",
@@ -86,6 +101,12 @@ METRIC_LABELS = {
     "qi_first_call_s": "QI first call",
     "qi_warm_min_s": "QI warm min",
     "qi_warm_mean_s": "QI warm mean",
+    "exact_tape_build_s": "exact tape build",
+    "exact_tape_build_unattributed_s": "exact tape build unattributed",
+    "initial_tangents_s": "initial tangents",
+    "residual_tangents_s": "residual tangents",
+    "trial_solve_s": "trial solve",
+    "exact_solve_s": "exact solve",
     "compile_time_s": "compile time",
     "replay_time_s": "replay time",
     "cache_time_s": "cache time",
@@ -103,6 +124,12 @@ BOTTLENECK_METRICS = (
     ("vmec_compute_forces_s", "VMEC force assembly"),
     ("vmec_preconditioner_s", "VMEC preconditioner"),
     ("vmec_update_s", "VMEC state update"),
+    ("exact_tape_build_s", "exact tape build"),
+    ("exact_tape_build_unattributed_s", "unattributed tape build"),
+    ("initial_tangents_s", "initial tangent build"),
+    ("residual_tangents_s", "residual tangent projection"),
+    ("trial_solve_s", "trial solve"),
+    ("exact_solve_s", "accepted exact solve"),
     ("replay_time_s", "accepted-point replay"),
     ("compile_time_s", "compile/JIT"),
     ("cache_time_s", "cache bookkeeping"),
@@ -353,6 +380,18 @@ def _profile_time(profile: dict[str, dict[str, float | int]], field: str) -> flo
     return sum(values) if values else None
 
 
+def _profile_named_time(profile: dict[str, dict[str, float | int]], names: Iterable[str]) -> float | None:
+    """Return summed wall time for exact profile names that are present."""
+
+    name_set = {str(name) for name in names}
+    values = [
+        float(rec.get("wall_time_s", 0.0))
+        for name, rec in profile.items()
+        if str(name) in name_set
+    ]
+    return sum(values) if values else None
+
+
 def _callback_count(payload: dict[str, Any]) -> int | None:
     trace = payload.get("callback_trace")
     if isinstance(trace, dict):
@@ -599,6 +638,10 @@ def summarize_payload(
         ),
         "qi_warm_min_s": _wall_time_metric(payload, "qi_warm_min"),
         "qi_warm_mean_s": _wall_time_metric(payload, "qi_warm_mean"),
+        **{
+            metric: _profile_named_time(profile, names)
+            for metric, names in EXACT_PROFILE_METRIC_NAMES.items()
+        },
         "compile_time_s": compile_time,
         "replay_time_s": replay_time,
         "cache_time_s": cache_time,

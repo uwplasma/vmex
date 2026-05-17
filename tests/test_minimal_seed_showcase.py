@@ -67,6 +67,113 @@ def test_minimal_seed_showcase_config_patch_is_bounded_and_non_mutating() -> Non
     assert patched.qi_preseed_qp is True
 
 
+def test_minimal_seed_worker_logs_and_records_crashes(tmp_path: Path, monkeypatch) -> None:
+    generator = _load_module("generate_minimal_seed_showcase_worker", "generate_minimal_seed_showcase.py")
+
+    started_session = []
+    monkeypatch.setattr(generator.sweep, "_start_worker_session", lambda: started_session.append(True))
+
+    def _raise_after_printing(*_args, **_kwargs):
+        print("stdout marker")
+        print("stderr marker", file=sys.stderr)
+        raise RuntimeError("synthetic worker failure")
+
+    monkeypatch.setattr(generator, "_run_showcase_case", _raise_after_printing)
+    budget = generator.MinimalSeedBudget(
+        max_nfev=1,
+        continuation_nfev=1,
+        inner_max_iter=2,
+        inner_ftol=1.0e-7,
+        trial_max_iter=2,
+        trial_ftol=1.0e-7,
+    )
+    output_dir = tmp_path / "case"
+    result_path = output_dir / "case_result.json"
+
+    generator._worker(
+        "qa_nfp2",
+        str(output_dir),
+        str(result_path),
+        "cpu",
+        "cpu",
+        "cpu",
+        "continuation",
+        1,
+        True,
+        budget.__dict__,
+    )
+
+    assert started_session == [True]
+    record = json.loads(result_path.read_text())
+    assert record["success"] is False
+    assert record["crashed"] is True
+    assert record["message"] == "RuntimeError: synthetic worker failure"
+    assert record["input_nfp"] == 2
+    assert "stdout marker" in (output_dir / "worker_stdout.log").read_text()
+    assert "stderr marker" in (output_dir / "worker_stderr.log").read_text()
+    assert "synthetic worker failure" in (output_dir / "traceback.txt").read_text()
+    assert (output_dir / "showcase_case.json").exists()
+
+
+def test_minimal_seed_physics_gate_rejects_zero_iota_and_bad_qi() -> None:
+    generator = _load_module("generate_minimal_seed_showcase_physics_gate", "generate_minimal_seed_showcase.py")
+
+    qa_result = generator.sweep.CaseResult(
+        backend="cpu",
+        problem="qa",
+        max_mode=3,
+        use_ess=True,
+        success=True,
+        crashed=False,
+        message="optimizer success",
+        objective_final=1764.0,
+        iota_final=0.0,
+    )
+    changed = generator._apply_physics_gate(generator.SHOWCASE_CASES["qa_nfp2"], qa_result)
+
+    assert changed is True
+    assert qa_result.success is False
+    assert "physics gate failed" in qa_result.message
+    assert "iota" in qa_result.message
+
+    qi_result = generator.sweep.CaseResult(
+        backend="cpu",
+        problem="qi",
+        max_mode=3,
+        use_ess=True,
+        success=True,
+        crashed=False,
+        message="optimizer success",
+        objective_final=10.0,
+        iota_final=0.5,
+        qi_legacy_total=1.0e-3,
+        qi_mirror_ratio_max=0.2,
+        qi_max_elongation=6.0,
+    )
+    changed = generator._apply_physics_gate(generator.SHOWCASE_CASES["qi_nfp2"], qi_result)
+
+    assert changed is False
+    assert qi_result.success is True
+
+    qi_bad_mirror = generator.sweep.CaseResult(
+        backend="cpu",
+        problem="qi",
+        max_mode=3,
+        use_ess=True,
+        success=True,
+        crashed=False,
+        message="optimizer success",
+        iota_final=0.5,
+        qi_legacy_total=1.0e-3,
+        qi_mirror_ratio_max=0.8,
+        qi_max_elongation=6.0,
+    )
+
+    assert generator._apply_physics_gate(generator.SHOWCASE_CASES["qi_nfp2"], qi_bad_mirror) is True
+    assert qi_bad_mirror.success is False
+    assert "mirror" in qi_bad_mirror.message
+
+
 def test_minimal_seed_renderer_loads_records_and_returns_monotone_segments(tmp_path: Path) -> None:
     generator = _load_module("generate_minimal_seed_showcase_for_renderer", "generate_minimal_seed_showcase.py")
     renderer = _load_module("render_minimal_seed_showcase", "render_minimal_seed_showcase.py")
