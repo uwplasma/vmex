@@ -276,3 +276,69 @@ def write_indata(path: str | Path, indata: InData) -> None:
 
     lines.append("/")
     path.write_text("\n".join(lines) + "\n")
+
+
+def minimal_fixed_boundary_indata(
+    *,
+    nfp: int,
+    r0: float = 1.0,
+    rbc01: float = 0.2,
+    zbs01: float = 0.2,
+    mpol: int = 5,
+    ntor: int = 5,
+    ns_array: int | list[int] = 35,
+    niter_array: int | list[int] = 1500,
+    ftol_array: float | list[float] = 1.0e-13,
+    phiedge: float = 0.083,
+) -> InData:
+    """Return a minimal fixed-boundary VMEC seed used by optimization examples.
+
+    The boundary has only the circular/elliptic seed coefficients
+    ``RBC(0,0)``, ``RBC(0,1)``, and ``ZBS(0,1)``.  Optimization examples can
+    then activate higher Fourier coefficients through their selected
+    ``max_mode`` and continuation policy, so the same simple template can be
+    used to demonstrate QA, QH, QP, and QI optimization from a seed far from the
+    target magnetic-field structure.
+    """
+
+    def _as_list(value):
+        return list(value) if isinstance(value, list) else value
+
+    scalars: Dict[str, Value] = {
+        "DELT": 0.9,
+        "NITER": 10000,
+        "NSTEP": 200,
+        "TCON0": 2.0,
+        "NS_ARRAY": _as_list(ns_array),
+        "NITER_ARRAY": _as_list(niter_array),
+        "FTOL_ARRAY": _as_list(ftol_array),
+        "PRECON_TYPE": "none",
+        "PREC2D_THRESHOLD": 1.0e-19,
+        "LASYM": False,
+        "NFP": int(nfp),
+        "MPOL": int(mpol),
+        "NTOR": int(ntor),
+        "PHIEDGE": float(phiedge),
+        "LFREEB": False,
+        "NVACSKIP": 6,
+        "GAMMA": 0.0,
+        "BLOAT": 1.0,
+        "SPRES_PED": 1.0,
+        "PRES_SCALE": 1.0,
+        "PMASS_TYPE": "power_series",
+        "AM": 0.0,
+        "CURTOR": 0,
+        "NCURR": 1,
+        "PIOTA_TYPE": "power_series",
+        "PCURR_TYPE": "power_series",
+    }
+    indexed: Dict[str, Dict[Tuple[int, ...], Scalar]] = {
+        "RBC": {
+            (0, 0): float(r0),
+            (0, 1): float(rbc01),
+        },
+        "ZBS": {
+            (0, 1): float(zbs01),
+        },
+    }
+    return InData(scalars=scalars, indexed=indexed)

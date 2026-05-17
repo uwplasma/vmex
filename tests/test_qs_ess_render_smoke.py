@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 
@@ -478,6 +479,8 @@ def test_qi_readme_cases_concatenate_histories_and_record_lambda_scan(tmp_path):
     assert selected_lambda == pytest.approx(1.01)
     assert selected_qi == pytest.approx(5.0e-4)
     assert selected_mirror == pytest.approx(0.3)
+    best_so_far = renderer._stage_normalized_best_so_far(np.asarray([2.0, 3.0, 1.0, 1.5]))
+    assert best_so_far.tolist() == pytest.approx([1.0, 1.0, 0.5, 0.5])
 
 
 def test_qi_renderer_marks_raw_fallback_legacy_as_nonpromotable(tmp_path, monkeypatch):
