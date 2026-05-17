@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import asdict, dataclass, replace
 import json
 import multiprocessing as mp
@@ -45,6 +46,9 @@ from pathlib import Path
 import sys
 import time
 import traceback
+from typing import Any
+
+import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -118,6 +122,13 @@ SHOWCASE_CASES: dict[str, MinimalSeedCase] = {
 
 DEFAULT_CASE_ORDER = ("qi_nfp1", "qi_nfp2", "qi_nfp3", "qa_nfp2", "qh_nfp4", "qp_nfp2")
 
+PHYSICS_IOTA_FLOOR = 0.35
+PHYSICS_QA_IOTA_TARGET = 0.42
+PHYSICS_QA_IOTA_TOL = 0.08
+PHYSICS_QI_LEGACY_MAX = 2.0e-3
+PHYSICS_QI_MIRROR_MAX = 0.40
+PHYSICS_QI_ELONGATION_MAX = 12.0
+
 
 @dataclass(frozen=True)
 class MinimalSeedBudget:
@@ -144,6 +155,56 @@ def _parse_case_names(value: str) -> tuple[str, ...]:
 
 def _bool_from_choice(value: str) -> bool:
     return str(value).strip().lower() in {"on", "true", "1", "yes"}
+
+
+def _finite_float(value: Any) -> float | None:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if np.isfinite(out) else None
+
+
+def _physics_gate_failures(case: MinimalSeedCase, result: sweep.CaseResult) -> list[str]:
+    """Return failed promotion gates for the minimal-seed stress-test lane."""
+
+    failures: list[str] = []
+    iota = _finite_float(result.iota_final)
+    if case.problem == "qa":
+        if iota is None or abs(iota - PHYSICS_QA_IOTA_TARGET) > PHYSICS_QA_IOTA_TOL:
+            failures.append(f"iota={iota!r} outside {PHYSICS_QA_IOTA_TARGET:.2f}+/-{PHYSICS_QA_IOTA_TOL:.2f}")
+    else:
+        if iota is None or abs(iota) < PHYSICS_IOTA_FLOOR:
+            failures.append(f"|iota|={None if iota is None else abs(iota):!r} below {PHYSICS_IOTA_FLOOR:.2f}")
+
+    if case.problem == "qi":
+        qi_legacy = _finite_float(result.qi_legacy_total)
+        mirror = _finite_float(result.qi_mirror_ratio_max)
+        elongation = _finite_float(result.qi_max_elongation)
+        if qi_legacy is None or qi_legacy > PHYSICS_QI_LEGACY_MAX:
+            failures.append(f"legacy QI={qi_legacy!r} above {PHYSICS_QI_LEGACY_MAX:.1e}")
+        if mirror is None or mirror > PHYSICS_QI_MIRROR_MAX:
+            failures.append(f"mirror={mirror!r} above {PHYSICS_QI_MIRROR_MAX:.2f}")
+        if elongation is None or elongation > PHYSICS_QI_ELONGATION_MAX:
+            failures.append(f"elongation={elongation!r} above {PHYSICS_QI_ELONGATION_MAX:.1f}")
+    return failures
+
+
+def _apply_physics_gate(case: MinimalSeedCase, result: sweep.CaseResult) -> bool:
+    """Mark optimizer-success records failed when they miss stress-test physics gates."""
+
+    if not result.success or result.crashed:
+        return False
+    failures = _physics_gate_failures(case, result)
+    if not failures:
+        return False
+    result.success = False
+    message = "; ".join(failures)
+    if result.message:
+        result.message = f"{result.message}; physics gate failed: {message}"
+    else:
+        result.message = f"physics gate failed: {message}"
+    return True
 
 
 def _case_output_dir(
@@ -303,6 +364,77 @@ def _worker(
 ) -> None:
     output_dir = Path(output_dir_str)
     result_path = Path(result_path_str)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    sweep._start_worker_session()
+
+    # Keep per-case logs even if the worker dies before writing case_result.json.
+    # This is especially useful for JAX/XLA crashes, OOM kills, and timeout
+    # diagnostics in the full six-case production run.
+    stdout_path = output_dir / "worker_stdout.log"
+    stderr_path = output_dir / "worker_stderr.log"
+    with stdout_path.open("a", buffering=1) as stdout, stderr_path.open("a", buffering=1) as stderr:
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            _worker_impl(
+                case_name,
+                output_dir,
+                result_path,
+                backend_label,
+                solver_device,
+                worker_jax_platforms,
+                policy,
+                max_mode,
+                use_ess,
+                budget_dict,
+            )
+
+
+def _failure_result(
+    case: MinimalSeedCase,
+    output_dir: Path,
+    *,
+    backend_label: str,
+    solver_device: str | None,
+    worker_jax_platforms: str | None,
+    policy: str,
+    max_mode: int,
+    use_ess: bool,
+    message: str,
+    total_wall_time_s: float | None = None,
+) -> sweep.CaseResult:
+    """Create a consistent failed result record for worker errors/timeouts."""
+
+    return sweep.CaseResult(
+        backend=str(backend_label),
+        problem=case.problem,
+        max_mode=int(max_mode),
+        use_ess=bool(use_ess),
+        success=False,
+        crashed=True,
+        message=str(message),
+        policy=str(policy),
+        total_wall_time_s=total_wall_time_s,
+        output_dir=str(output_dir),
+        solver_device=solver_device,
+        jax_platforms=worker_jax_platforms,
+        input_file=str(case.input_file),
+        input_nfp=int(case.nfp),
+        qi_qp_preseed=case.qi_qp_preseed if case.problem == "qi" else None,
+        qi_jit_booz=case.qi_jit_booz if case.problem == "qi" else None,
+    )
+
+
+def _worker_impl(
+    case_name: str,
+    output_dir: Path,
+    result_path: Path,
+    backend_label: str,
+    solver_device: str | None,
+    worker_jax_platforms: str | None,
+    policy: str,
+    max_mode: int,
+    use_ess: bool,
+    budget_dict: dict,
+) -> None:
     case = SHOWCASE_CASES[case_name]
     budget = MinimalSeedBudget(**budget_dict)
     try:
@@ -325,25 +457,19 @@ def _worker(
             use_ess=use_ess,
             budget=budget,
         )
+        _apply_physics_gate(case, result)
     except Exception as exc:  # pragma: no cover - exercised by integration failures.
-        output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "traceback.txt").write_text(traceback.format_exc())
-        result = sweep.CaseResult(
-            backend=str(backend_label),
-            problem=case.problem,
-            max_mode=int(max_mode),
-            use_ess=bool(use_ess),
-            success=False,
-            crashed=True,
-            message=f"{type(exc).__name__}: {exc}",
-            policy=str(policy),
-            output_dir=str(output_dir),
+        result = _failure_result(
+            case,
+            output_dir,
+            backend_label=backend_label,
             solver_device=solver_device,
-            jax_platforms=worker_jax_platforms,
-            input_file=str(case.input_file),
-            input_nfp=int(case.nfp),
-            qi_qp_preseed=case.qi_qp_preseed if case.problem == "qi" else None,
-            qi_jit_booz=case.qi_jit_booz if case.problem == "qi" else None,
+            worker_jax_platforms=worker_jax_platforms,
+            policy=policy,
+            max_mode=max_mode,
+            use_ess=use_ess,
+            message=f"{type(exc).__name__}: {exc}",
         )
     result_path.write_text(json.dumps(asdict(result), indent=2))
 
@@ -467,59 +593,52 @@ def main() -> None:
             else:
                 os.environ["JAX_PLATFORMS"] = old_platforms
 
-        proc.join(timeout=None if args.case_timeout_s in (None, 0) else float(args.case_timeout_s))
+        case_timeout_s = None if args.case_timeout_s in (None, 0) else float(args.case_timeout_s)
+        proc.join(timeout=case_timeout_s)
         elapsed_s = time.perf_counter() - t0
-        if proc.is_alive():
+        timed_out = proc.is_alive()
+        if timed_out:
             sweep._terminate_worker_process(proc)
-            result = sweep.CaseResult(
-                backend=str(args.backend_label),
-                problem=case.problem,
-                max_mode=max_mode,
-                use_ess=use_ess,
-                success=False,
-                crashed=True,
-                message=f"worker timed out after {float(args.case_timeout_s):.1f} s",
-                policy=str(args.policy),
-                total_wall_time_s=elapsed_s,
-                output_dir=str(output_dir),
-                solver_device=solver_device,
-                jax_platforms=worker_jax_platforms,
-                input_file=str(case.input_file),
-                input_nfp=int(case.nfp),
-                qi_qp_preseed=case.qi_qp_preseed if case.problem == "qi" else None,
-                qi_jit_booz=case.qi_jit_booz if case.problem == "qi" else None,
-            )
-            output_dir.mkdir(parents=True, exist_ok=True)
-            _write_showcase_metadata(
-                output_dir,
-                case=case,
-                policy=str(args.policy),
-                max_mode=max_mode,
-                use_ess=use_ess,
-                budget=budget,
-            )
-            result_path.write_text(json.dumps(asdict(result), indent=2))
-        elif result_path.exists():
+
+        if result_path.exists():
             result = _read_result(result_path)
-        else:
-            result = sweep.CaseResult(
-                backend=str(args.backend_label),
-                problem=case.problem,
+            result_needs_write = sweep._set_missing_wall_time(result, elapsed_s)
+        elif timed_out:
+            result = _failure_result(
+                case,
+                output_dir,
+                backend_label=str(args.backend_label),
+                solver_device=solver_device,
+                worker_jax_platforms=worker_jax_platforms,
+                policy=str(args.policy),
                 max_mode=max_mode,
                 use_ess=use_ess,
-                success=False,
-                crashed=True,
-                message=f"worker exit code {proc.exitcode} without result file",
-                policy=str(args.policy),
+                message=f"worker timed out after {case_timeout_s:.1f} s",
                 total_wall_time_s=elapsed_s,
-                output_dir=str(output_dir),
-                solver_device=solver_device,
-                jax_platforms=worker_jax_platforms,
-                input_file=str(case.input_file),
-                input_nfp=int(case.nfp),
-                qi_qp_preseed=case.qi_qp_preseed if case.problem == "qi" else None,
-                qi_jit_booz=case.qi_jit_booz if case.problem == "qi" else None,
             )
+            result_needs_write = True
+        else:
+            result = _failure_result(
+                case,
+                output_dir,
+                backend_label=str(args.backend_label),
+                solver_device=solver_device,
+                worker_jax_platforms=worker_jax_platforms,
+                policy=str(args.policy),
+                max_mode=max_mode,
+                use_ess=use_ess,
+                message=f"worker exit code {proc.exitcode} without result file",
+                total_wall_time_s=elapsed_s,
+            )
+            result_needs_write = True
+
+        if proc.exitcode not in (0, None):
+            result.crashed = True
+            if "worker exit code" not in result.message and "exit code" not in result.message:
+                result.message = f"exit code {proc.exitcode}; {result.message}"
+            result_needs_write = True
+
+        if result_needs_write or not result_path.exists():
             output_dir.mkdir(parents=True, exist_ok=True)
             _write_showcase_metadata(
                 output_dir,

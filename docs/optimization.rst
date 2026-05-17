@@ -64,6 +64,18 @@ driver for reproducible comparison tables:
      - ``examples/optimization/QI_optimization.py``
      - NFP=2 QI default lane with aspect target 10, Boozer-space QI, mirror, elongation, QI ceiling, ESS, and repeated same-mode continuation.
 
+When using sweep commands, keep backend selection and report labeling separate.
+``--backend-label`` only names output directories and table rows; it does not
+select a JAX backend.  Select the process backend with ``JAX_PLATFORMS=cpu``,
+``JAX_PLATFORM_NAME=gpu``, or ``JAX_PLATFORMS=cuda``, and use
+``--solver-device cpu`` / ``--solver-device gpu`` when the optimizer should
+force one device.  Spawned workers inherit the parent backend unless
+``--worker-jax-platforms`` is set.  Verify reproducibility from
+``case_result.json`` or generated summary fields ``jax_backend``,
+``jax_device_kind``, ``solver_device``, and ``jax_platforms`` rather than from
+the output path alone.  Existing successful ``case_result.json`` files are
+reused unless ``--rerun`` is passed.
+
 Minimal far-from-goal seed files are available for NFP=1, 2, 3, and 4:
 ``examples/data/input.minimal_seed_nfp1`` through
 ``examples/data/input.minimal_seed_nfp4``.  They all come from

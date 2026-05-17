@@ -151,6 +151,10 @@ Use the diagnostics scripts from the repository root.  Always record whether a
 timing is cold or warm, the selected JAX backend, JAX/JAXLIB versions, input
 deck, ``max_mode`` or iteration budget, and whether the command is measuring
 raw solver throughput or optimization callback overhead.
+For sweep and matrix outputs, do not infer the runtime backend from an output
+directory or ``--backend-label`` alone.  Use the JSON/CSV provenance fields
+(``jax_backend``, ``jax_device_kind``, ``solver_device``, ``jax_platforms``)
+and the profiler ``runtime`` block when comparing CPU/GPU results.
 
 For optimization work, keep three measurements separate:
 
@@ -229,6 +233,13 @@ Compare the JSON reports before launching a full sweep or a long GPU run:
      /tmp/qh_m2_cpu_jacobian.json /tmp/qh_m2_gpu_jacobian.json \
      --label cpu --label gpu \
      --json-out /tmp/qh_m2_cpu_gpu_comparison.json
+
+The comparison summary exposes exact optimizer phases separately:
+``exact_tape_build_s``, ``exact_tape_build_unattributed_s``,
+``initial_tangents_s``, ``residual_tangents_s``, ``trial_solve_s``, and
+``exact_solve_s``.  Use these fields before changing solver kernels: in recent
+GPU runs the dominant cost has been accepted-point tape/replay and tangent
+construction, not VMEC force assembly.
 
 QI Boozer/residual isolation:
 

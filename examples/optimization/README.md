@@ -65,6 +65,20 @@ omnigenous structure from a seed that does not already contain the target
 helicity.  Higher Fourier coefficients should be introduced by `max_mode`,
 mode continuation, ESS, or a staged QI policy, not by the seed file itself.
 
+The bounded common-seed showcase is a stress test, not a best-result table.  It
+maps the minimal seeds to QI NFP=1/2/3, QA NFP=2, QH NFP=4, and QP NFP=2, then
+renders the failure-revealing objective panel used by the docs:
+
+```bash
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_minimal_seed_showcase.py \
+  --cases all --backend-label cpu --solver-device cpu --worker-jax-platforms cpu \
+  --policy continuation --max-mode 3 --ess on \
+  --max-nfev 30 --continuation-nfev 20 \
+  --inner-max-iter 120 --trial-max-iter 120 \
+  --inner-ftol 1e-9 --trial-ftol 1e-9 --case-timeout-s 1200
+PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py
+```
+
 ## Result Object Pattern
 
 The standalone scripts also show how to work from the returned result object
@@ -170,6 +184,14 @@ For reproducible comparison artifacts, use the sweep driver rather than a
 single edited script.  The current production sweep runs QI directly from its
 bundled seed (`--qi-qp-preseed off`); use `--qi-qp-preseed both` only for the
 focused QI preseed/no-preseed matrix.
+`--backend-label` is output provenance only; it does not select a backend.
+Select the process backend with `JAX_PLATFORMS=cpu`, `JAX_PLATFORM_NAME=gpu`,
+or `JAX_PLATFORMS=cuda`, and pass matching `--solver-device` when the optimizer
+should force a device.  Spawned workers inherit the parent JAX selection unless
+`--worker-jax-platforms` is set.  Confirm the actual runtime from
+`case_result.json` or summary CSV fields `jax_backend`, `jax_device_kind`,
+`solver_device`, and `jax_platforms`.  Existing successful `case_result.json`
+files are reused; add `--rerun` when you need a fresh local reproduction.
 
 ## QI Diagnostics
 
