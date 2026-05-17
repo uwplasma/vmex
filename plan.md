@@ -1131,6 +1131,14 @@ Defer beyond the current cycle:
   `164.57 -> 140.69 s`, and QI `108.67 -> 50.78 s`. The public API/CLI auto
   policy and fixed-boundary profiler default now match this non-scan production
   policy; explicit fast/scan modes remain available for experiments.
+- 2026-05-17: Tightened the CLI fixed-boundary finish policy for explicit
+  low-budget runs. If a caller supplies `max_iter`, parity finish attempts are
+  capped at `2 * max_iter` and report non-convergence rather than silently
+  spending repeated extra full-budget blocks. Input-deck-driven production
+  runs without an explicit override keep the robust parity finish behavior.
+  Accelerated finish retries also inherit `use_scan=False` from the new
+  production auto policy, so GPU/CPU auto paths do not re-enter the slower scan
+  loop during finish attempts.
 - 2026-05-14: Added an opt-in dense branch-shuffle output grid
   (`shuffle_profile_nphi_out`) to the differentiable QI residual and propagated
   it through diagnostics and `QuasiIsodynamicOptions`. This brings vmec_jax
