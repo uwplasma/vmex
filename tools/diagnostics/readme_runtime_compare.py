@@ -50,11 +50,12 @@ def _format_gib(value: int | None) -> str:
 
 def _collect_records(
     cpu_summaries: list[dict[str, Any]],
-    gpu_summaries: list[dict[str, Any]] | None = None,  # kept for API compat, ignored
+    gpu_summaries: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     cpu_cases: dict[str, dict[str, Any]] = {}
     cpu_results: dict[str, dict[str, Any]] = {}
     cpu_vmecpp: dict[str, dict[str, Any]] = {}
+    gpu_results: dict[str, dict[str, Any]] = {}
 
     for summary in cpu_summaries:
         for rec in summary.get("cases", []):
@@ -68,14 +69,23 @@ def _collect_records(
             elif rec.get("backend") == "vmecpp":
                 cpu_vmecpp[case_id] = rec
 
+    for summary in gpu_summaries or []:
+        for rec in summary.get("cases", []):
+            cpu_cases.setdefault(str(rec["id"]), dict(rec))
+        for rec in summary.get("results", []):
+            if rec.get("backend") == "vmec_jax":
+                gpu_results[str(rec.get("case_id"))] = rec
+
     rows: list[dict[str, Any]] = []
     for case_id in sorted(cpu_cases):
         case = cpu_cases[case_id]
         vmec = cpu_results.get(case_id, {}).get("vmec2000")
         cpu = cpu_results.get(case_id, {}).get("cpu")
+        gpu = gpu_results.get(case_id)
         pp = cpu_vmecpp.get(case_id)
         vmec_ok = bool(vmec is not None and vmec.get("ok", True))
         cpu_ok = bool(cpu is not None and cpu.get("ok", True))
+        gpu_ok = bool(gpu is not None and gpu.get("ok", True))
         pp_ok = bool(pp is not None and pp.get("ok", True))
 
         vmec_rt = None if (vmec is None or not vmec_ok) else float(vmec.get("runtime_s", vmec.get("time_real_s", np.nan)))
@@ -85,9 +95,15 @@ def _collect_records(
         # Warm runtime is only present when --warm-runs >= 1 was passed to the benchmark.
         _cpu_warm_raw = None if (cpu is None or not cpu_ok) else cpu.get("runtime_warm_s")
         cpu_warm_rt = None if _cpu_warm_raw is None else float(_cpu_warm_raw)
+        gpu_cold_rt = None if (gpu is None or not gpu_ok) else float(
+            gpu.get("runtime_cold_s", gpu.get("runtime_s", gpu.get("time_real_s", np.nan)))
+        )
+        _gpu_warm_raw = None if (gpu is None or not gpu_ok) else gpu.get("runtime_warm_s")
+        gpu_warm_rt = None if _gpu_warm_raw is None else float(_gpu_warm_raw)
         pp_rt = None if (pp is None or not pp_ok) else float(pp.get("runtime_s", pp.get("time_real_s", np.nan)))
         vmec_mem = _mem_bytes(vmec) if vmec_ok else None
         cpu_mem = _mem_bytes(cpu) if cpu_ok else None
+        gpu_mem = _mem_bytes(gpu) if gpu_ok else None
         pp_mem = _mem_bytes(pp) if pp_ok else None
         rows.append(
             {
@@ -97,13 +113,17 @@ def _collect_records(
                 "axisymmetric": bool(case.get("axisymmetric", False)),
                 "vmec2000": vmec,
                 "cpu": cpu,
+                "gpu": gpu,
                 "vmecpp": pp,
                 "vmec_runtime_s": vmec_rt,
                 "cpu_runtime_s": cpu_cold_rt,
                 "cpu_warm_runtime_s": cpu_warm_rt,
+                "gpu_runtime_s": gpu_cold_rt,
+                "gpu_warm_runtime_s": gpu_warm_rt,
                 "vmecpp_runtime_s": pp_rt,
                 "vmec_mem_bytes": vmec_mem,
                 "cpu_mem_bytes": cpu_mem,
+                "gpu_mem_bytes": gpu_mem,
                 "vmecpp_mem_bytes": pp_mem,
             }
         )
@@ -129,21 +149,30 @@ def _speedup(value: float | int | None, baseline: float | int | None) -> float |
 def _write_markdown_table(rows: list[dict[str, Any]], outpath: Path) -> None:
     include_vmecpp = any(row.get("vmecpp_runtime_s") is not None or row.get("vmecpp_mem_bytes") is not None for row in rows)
     include_warm = any(row.get("cpu_warm_runtime_s") is not None for row in rows)
+    include_gpu = any(
+        row.get("gpu_runtime_s") is not None
+        or row.get("gpu_warm_runtime_s") is not None
+        or row.get("gpu_mem_bytes") is not None
+        for row in rows
+    )
     if include_vmecpp:
         header = [
-            "| Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax runtime (cold) | vmec_jax runtime (warm) | vmec_jax memory | VMEC++ runtime | VMEC++ memory |",
+            "| Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax CPU runtime (cold) | vmec_jax CPU runtime (warm) | vmec_jax CPU memory | VMEC++ runtime | VMEC++ memory |",
             "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
     elif include_warm:
         header = [
-            "| Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax runtime (cold) | vmec_jax runtime (warm) | vmec_jax memory |",
+            "| Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax CPU runtime (cold) | vmec_jax CPU runtime (warm) | vmec_jax CPU memory |",
             "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
         ]
     else:
         header = [
-            "| Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax runtime (cold) | vmec_jax memory |",
+            "| Example | Boundary | Topology | LASYM | VMEC2000 runtime | VMEC2000 memory | vmec_jax CPU runtime (cold) | vmec_jax CPU memory |",
             "| --- | --- | --- | --- | ---: | ---: | ---: | ---: |",
         ]
+    if include_gpu:
+        header[0] = header[0][:-2] + " | vmec_jax GPU runtime (cold) | vmec_jax GPU runtime (warm) | vmec_jax GPU memory |"
+        header[1] = header[1][:-2] + " | ---: | ---: | ---: |"
     lines = list(header)
     for row in rows:
         boundary = "free" if row["lfreeb"] else "fixed"
@@ -163,6 +192,14 @@ def _write_markdown_table(rows: list[dict[str, Any]], outpath: Path) -> None:
         cols.append(_format_gib(row["cpu_mem_bytes"]))
         if include_vmecpp:
             cols.extend([_format_seconds(row.get("vmecpp_runtime_s")), _format_gib(row.get("vmecpp_mem_bytes"))])
+        if include_gpu:
+            cols.extend(
+                [
+                    _format_seconds(row.get("gpu_runtime_s")),
+                    _format_seconds(row.get("gpu_warm_runtime_s")),
+                    _format_gib(row.get("gpu_mem_bytes")),
+                ]
+            )
         lines.append("| " + " | ".join(cols) + " |")
     outpath.write_text("\n".join(lines) + "\n")
 
@@ -180,12 +217,18 @@ def _export_row(row: dict[str, Any]) -> dict[str, Any]:
         "vmec2000_runtime_s": vmec_rt,
         "vmec_jax_cold_runtime_s": cpu_rt,
         "vmec_jax_warm_runtime_s": warm_rt,
+        "vmec_jax_gpu_cold_runtime_s": row.get("gpu_runtime_s"),
+        "vmec_jax_gpu_warm_runtime_s": row.get("gpu_warm_runtime_s"),
         "vmecpp_runtime_s": pp_rt,
         "vmec_jax_cold_speedup_vs_vmec2000": _speedup(cpu_rt, vmec_rt),
         "vmec_jax_warm_speedup_vs_vmec2000": _speedup(warm_rt, vmec_rt),
+        "vmec_jax_gpu_cold_speedup_vs_vmec2000": _speedup(row.get("gpu_runtime_s"), vmec_rt),
+        "vmec_jax_gpu_warm_speedup_vs_vmec2000": _speedup(row.get("gpu_warm_runtime_s"), vmec_rt),
+        "vmec_jax_gpu_warm_speedup_vs_cpu_warm": _speedup(row.get("gpu_warm_runtime_s"), warm_rt),
         "vmecpp_speedup_vs_vmec2000": _speedup(pp_rt, vmec_rt),
         "vmec2000_memory_bytes": row.get("vmec_mem_bytes"),
         "vmec_jax_memory_bytes": row.get("cpu_mem_bytes"),
+        "vmec_jax_gpu_memory_bytes": row.get("gpu_mem_bytes"),
         "vmecpp_memory_bytes": row.get("vmecpp_mem_bytes"),
     }
 
@@ -201,9 +244,12 @@ def _write_csv(rows: list[dict[str, Any]], outpath: Path) -> None:
         "vmec_runtime_s": None,
         "cpu_runtime_s": None,
         "cpu_warm_runtime_s": None,
+        "gpu_runtime_s": None,
+        "gpu_warm_runtime_s": None,
         "vmecpp_runtime_s": None,
         "vmec_mem_bytes": None,
         "cpu_mem_bytes": None,
+        "gpu_mem_bytes": None,
         "vmecpp_mem_bytes": None,
     }))
     with outpath.open("w", newline="") as f:
@@ -271,11 +317,14 @@ def _write_runtime_figure(rows: list[dict[str, Any]], outpath: Path, *, figure_k
         raise ValueError(f"No rows available for figure_kind={figure_kind!r}.")
     include_vmecpp = any(row.get("vmecpp_runtime_s") is not None for row in rows)
     include_warm = any(row.get("cpu_warm_runtime_s") is not None for row in rows)
+    include_gpu = any(row.get("gpu_runtime_s") is not None or row.get("gpu_warm_runtime_s") is not None for row in rows)
     rows = sorted(
         rows,
         key=lambda row: (
             -max(
                 (_speedup(row["cpu_runtime_s"], row["vmec_runtime_s"]) or 0.0),
+                (_speedup(row.get("gpu_warm_runtime_s"), row["vmec_runtime_s"]) or 0.0),
+                (_speedup(row.get("gpu_runtime_s"), row["vmec_runtime_s"]) or 0.0),
                 (_speedup(row.get("vmecpp_runtime_s"), row["vmec_runtime_s"]) or 0.0),
             ),
             row["id"],
@@ -296,6 +345,13 @@ def _write_runtime_figure(rows: list[dict[str, Any]], outpath: Path, *, figure_k
             [row.get("vmecpp_runtime_s") if row.get("vmecpp_runtime_s") is not None else np.nan for row in rows], dtype=float
         )
         series.append(("#9467bd", "VMEC++", pp))
+    if include_gpu:
+        gpu_key = "gpu_warm_runtime_s" if any(row.get("gpu_warm_runtime_s") is not None for row in rows) else "gpu_runtime_s"
+        gpu = np.array(
+            [row.get(gpu_key) if row.get(gpu_key) is not None else np.nan for row in rows], dtype=float
+        )
+        gpu_label = "vmec_jax GPU (warm)" if gpu_key == "gpu_warm_runtime_s" else "vmec_jax GPU (cold)"
+        series.append(("#d62728", gpu_label, gpu))
     n_series = len(series)
     height = min(0.22, 0.9 / n_series)
     offsets = np.linspace(-(n_series - 1) / 2 * height, (n_series - 1) / 2 * height, n_series)
@@ -310,6 +366,8 @@ def _write_runtime_figure(rows: list[dict[str, Any]], outpath: Path, *, figure_k
     ax.grid(axis="x", alpha=0.18, which="both")
     ax.legend(frameon=False, ncol=n_series, loc="upper right")
     parts = ["VMEC2000", "vmec_jax"]
+    if include_gpu:
+        parts.append("vmec_jax GPU")
     if include_vmecpp:
         parts.append("VMEC++")
     title_str = " vs ".join(parts)

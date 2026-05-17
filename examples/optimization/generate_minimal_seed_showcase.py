@@ -67,9 +67,6 @@ class MinimalSeedCase:
     problem: str
     nfp: int
     input_file: Path
-    default_max_mode: int = 3
-    default_use_ess: bool = True
-    default_policy: str = "continuation"
     qi_qp_preseed: bool | None = None
     qi_jit_booz: bool | None = None
 

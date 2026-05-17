@@ -254,8 +254,9 @@ for an external VMEC input deck; it will use the same conservative far-seed
 QI+iota policy as `qi_stel_seed_3127` unless you add a custom `QI_CASES` entry.
 `QI_seed_robustness.py` accepts `VMEC_JAX_QI_SEED_INPUT`,
 `VMEC_JAX_QI_SEED_OUTPUT_DIR`, and `VMEC_JAX_QI_SEED_MAX_NFEV` for small local
-probes. These variables are convenience wrappers around the top-level script
-settings, not a replacement for the no-optimization audit.
+probes. These variables are environment overrides for the top-level script
+settings, not a separate wrapper API or a replacement for the no-optimization
+audit.
 
 `tools/diagnostics/qi_landscape_scan.py` and `qi_basin_survey.py` are useful for
 mapping rugged seed neighborhoods, but their default executed diagnostics use

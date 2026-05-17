@@ -1164,6 +1164,11 @@ Regenerate the current fixed-boundary plot after a runtime sweep with:
      --figure-kind fixed --plot-mode runtime \
      --figure-out docs/_static/figures/readme_runtime_compare.png
 
+When a same-host GPU sweep is available, add one or more ``--gpu-summary``
+paths from the matching run.  The generated CSV/JSON/table then retain
+separate CPU and GPU ``vmec_jax`` cold/warm runtime and memory columns, which
+keeps the README plot from silently dropping GPU comparison data.
+
 Profiling and diagnostics
 
 Enable float64
