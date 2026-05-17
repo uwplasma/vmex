@@ -212,6 +212,53 @@ def test_fixed_boundary_profiler_compacts_timing_diagnostics():
     }
 
 
+def test_fixed_boundary_profiler_reports_effective_jit_default():
+    fixed_tool = _load_fixed_tool()
+    args = fixed_tool.argparse.Namespace(
+        input="input.test",
+        iters=2,
+        solver_mode="accelerated",
+        solver_device="cpu",
+        multigrid=False,
+        use_input_niter=False,
+        use_scan=True,
+        jit_forces=False,
+        no_jit_forces=False,
+        auto_cli_policy=False,
+        dynamic_scan=False,
+    )
+
+    class Result:
+        diagnostics = {}
+        n_iter = 2
+        w_history = [1.0, 0.5]
+        fsqr2_history = [0.1, 0.05]
+        fsqz2_history = [0.2, 0.1]
+        fsql2_history = [0.3, 0.15]
+
+    class Run:
+        result = Result()
+
+    class JaxModule:
+        __version__ = "test"
+
+        @staticmethod
+        def devices():
+            return ["cpu0"]
+
+        @staticmethod
+        def default_backend():
+            return "cpu"
+
+    summary = fixed_tool._summarize_run(args=args, run=Run(), wall_time=1.25, jax_module=JaxModule)
+
+    assert fixed_tool._effective_jit_forces(args) is True
+    assert summary["args"]["jit_forces"] is True
+
+    args.no_jit_forces = True
+    assert fixed_tool._effective_jit_forces(args) is False
+
+
 def test_performance_matrix_qi_boozer_command_uses_qi_profiler(tmp_path):
     tool = _load_tool()
     args = tool._build_parser().parse_args(
