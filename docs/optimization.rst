@@ -86,6 +86,24 @@ QA NFP=2, QH NFP=4, and QP NFP=2:
      --inner-ftol 1e-9 --trial-ftol 1e-9 --case-timeout-s 1200
    PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py
 
+The current CPU stress-test run is deliberately included as a failure-revealing
+artifact.  With the bounded continuation/mode-3/ESS policy above, only
+``qi_nfp1`` and ``qa_nfp2`` wrote successful records, and neither reached the
+intended physics target: ``qi_nfp1`` ended with low iota and poor mirror/elongation,
+while ``qa_nfp2`` stayed on the zero-iota branch.  ``qi_nfp2`` timed out, and
+``qi_nfp3``, ``qh_nfp4``, and ``qp_nfp2`` exposed worker-exit robustness
+failures before writing useful final histories.  This panel is therefore a
+regression/stress target for the seed-robust optimization lane, not a
+publication-quality optimization result.
+
+.. image:: _static/figures/minimal_seed_showcase_objective_panel.png
+   :width: 100%
+   :align: center
+   :alt: Common minimal-seed optimization stress-test histories
+
+The rendered table is available as
+:download:`minimal_seed_showcase_summary.csv <_static/figures/minimal_seed_showcase_summary.csv>`.
+
 For generated comparison artifacts, run QA/QH/QP/QI with the current QI
 default of no same-mode QP preseed, then run the focused QI matrix separately
 when preseed/no-preseed is the experiment:

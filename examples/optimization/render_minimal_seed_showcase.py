@@ -111,7 +111,7 @@ def load_records(output_root: Path = RESULTS_ROOT) -> list[ShowcaseRecord]:
     return records
 
 
-def best_records(records: list[ShowcaseRecord]) -> list[ShowcaseRecord]:
+def best_records(records: list[ShowcaseRecord], *, successful_only: bool = True) -> list[ShowcaseRecord]:
     """Return one successful lowest-objective record per minimal-seed case."""
 
     selected: list[ShowcaseRecord] = []
@@ -120,13 +120,22 @@ def best_records(records: list[ShowcaseRecord]) -> list[ShowcaseRecord]:
             record
             for record in records
             if record.case_name == case_name
-            and record.success
-            and not record.crashed
-            and record.objective_final is not None
+            and (
+                not successful_only
+                or (record.success and not record.crashed and record.objective_final is not None)
+            )
         ]
         if not candidates:
             continue
-        selected.append(min(candidates, key=lambda record: float(record.objective_final)))
+        selected.append(
+            min(
+                candidates,
+                key=lambda record: (
+                    not (record.success and not record.crashed),
+                    float("inf") if record.objective_final is None else float(record.objective_final),
+                ),
+            )
+        )
     return selected
 
 
@@ -244,7 +253,8 @@ def render_objective_panel(records: list[ShowcaseRecord], out_png: Path) -> Path
         for wall_min, values in segments:
             ax.semilogy(wall_min, values, color="#1f4e79", linewidth=1.8)
             ax.scatter(wall_min[-1], values[-1], s=16, color="#d95f02", zorder=3)
-        title = f"{record.case_name}: {record.policy}, m={record.max_mode}, {'ESS' if record.use_ess else 'no ESS'}"
+        status = "ok" if record.success and not record.crashed else "failed"
+        title = f"{record.case_name}: {record.policy}, m={record.max_mode}, {'ESS' if record.use_ess else 'no ESS'}, {status}"
         ax.set_title(title, fontsize=9)
         ax.set_xlabel("Wall time (min)")
         ax.set_ylabel("Best objective")
@@ -267,16 +277,16 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-    records = best_records(load_records(args.output_root))
-    if not records:
-        print(f"No successful minimal-seed showcase records found under {args.output_root}")
+    all_records = best_records(load_records(args.output_root), successful_only=False)
+    if not all_records:
+        print(f"No minimal-seed showcase records found under {args.output_root}")
         return
     summary_csv = Path(args.figure_dir) / "minimal_seed_showcase_summary.csv"
-    write_summary_csv(records, summary_csv)
+    write_summary_csv(all_records, summary_csv)
     print(f"Wrote {summary_csv}")
     if not bool(args.summary_only):
         out_png = Path(args.figure_dir) / "minimal_seed_showcase_objective_panel.png"
-        rendered = render_objective_panel(records, out_png)
+        rendered = render_objective_panel(all_records, out_png)
         if rendered is not None:
             print(f"Wrote {rendered}")
 

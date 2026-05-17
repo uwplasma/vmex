@@ -1,0 +1,7 @@
+case,problem,nfp,policy,max_mode,ess,success,objective_final,aspect_final,iota_final,wall_time_min,qi_legacy_total,qi_mirror_ratio_max,qi_max_elongation,output_dir
+qi_nfp1,qi,1,continuation,3,yes,yes,2.3334889660331257e+04,5.2958668218368077e+00,1.3815287951033607e-02,16.959495,2.5977002725459939e+00,7.3355594873158936e-01,4.1030787641332395e+01,/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/minimal_seed_showcase/cpu/qi_nfp1/continuation/qp_preseed/mode3/ess
+qi_nfp2,qi,2,continuation,3,yes,no,,,,20.000050,,,,/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/minimal_seed_showcase/cpu/qi_nfp2/continuation/qp_preseed/mode3/ess
+qi_nfp3,qi,3,continuation,3,yes,no,,,,,,,,/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/minimal_seed_showcase/cpu/qi_nfp3/continuation/qp_preseed/mode3/ess
+qa_nfp2,qa,2,continuation,3,yes,yes,1.7640000000000000e+03,4.9999999999999929e+00,6.5643914858081139e-29,1.585679,,,,/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/minimal_seed_showcase/cpu/qa_nfp2/continuation/mode3/ess
+qh_nfp4,qh,4,continuation,3,yes,no,,,,,,,,/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/minimal_seed_showcase/cpu/qh_nfp4/continuation/mode3/ess
+qp_nfp2,qp,2,continuation,3,yes,no,,,,,,,,/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/minimal_seed_showcase/cpu/qp_nfp2/continuation/mode3/ess
