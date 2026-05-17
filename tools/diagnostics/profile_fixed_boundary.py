@@ -155,6 +155,8 @@ def _compact_diagnostics(diag: dict[str, Any]) -> dict[str, Any]:
         "cli_fixed_boundary_finish_modes",
         "cli_fixed_boundary_finish_fsq",
         "cli_fixed_boundary_finish_converged",
+        "cli_fixed_boundary_finish_budget_cap",
+        "cli_fixed_boundary_finish_budget_exhausted",
         "multigrid_user_provided",
         "multigrid_ns_stages",
         "multigrid_niter_stages",
