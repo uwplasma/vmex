@@ -367,7 +367,7 @@ hygiene push, and the custom QI seed audit documentation/regression gate:
   soft-wall guard for mirror/elongation cleanup that preserves an accepted QI
   basin. The remaining open cleanup is running and tuning the guarded mirror
   schedule across unrelated seeds.
-- CPU/GPU performance: 85%. Backend-adaptive replay bucketing, scalar-gradient
+- CPU/GPU performance: 92%. Backend-adaptive replay bucketing, scalar-gradient
   tangent reuse, detailed timing, and GPU-only preconditioner-output fusion are
   in place. Hot-path algebra and CPU/GPU fusion gating are now covered by
   focused CPU-only regressions. The exact-Jacobian residual tangent helper now
@@ -375,8 +375,11 @@ hygiene push, and the custom QI seed audit documentation/regression gate:
   materialization, removing a hidden GPU host transpose/transfer cost. The
   CPU/GPU profiling wrapper now exposes optimizer method, trust-region solver,
   dynamic replay mode, and child stdout/stderr logs for production GPU matrix
-  diagnosis. Larger mode replay and dense residual-tangent projection remain
-  open.
+  diagnosis. Symmetric GPU exact-Jacobian replay now defaults to 8-column
+  chunks for 24+ DOF cases, matching the best bounded `office` profile: QH
+  mode-2 exact Jacobian dropped from about `42.0 s` to about `18.0 s`, with
+  tape replay dropping from about `22.2 s` to about `5.3 s`. Larger-mode replay
+  and dense residual-tangent projection remain open.
 - VMEC parity and physics gates: 99%. Required-tier bundled gates now cover
   `chipf`, stored `B`, input flux/profile propagation, finite-beta
   `pres/presf`, VMEC `iotas -> iotaf` smoothing, surface-averaged current
@@ -1107,6 +1110,14 @@ Defer beyond the current cycle:
   the remaining route is a different QI/mirror objective parameterization,
   seed homotopy, or importing the stronger legacy omnigenity strategy more
   directly.
+- 2026-05-17: Post-`v0.0.8` performance pass on `office` (two RTX A4000 GPUs).
+  A bounded QH mode-2 exact-Jacobian callback showed GPU solving/tape-build was
+  competitive, but full-column GPU tape replay dominated runtime (`~22.2 s`
+  replay, `~42.0 s` callback). Testing replay policies showed `whole_scan` was
+  worse, while 8-column replay chunking was best among tested chunks. Promoted
+  that heuristic as the GPU default for 24+ DOF dense exact Jacobians; the same
+  default GPU callback then ran in `~18.0 s` with replay `~5.3 s`, faster than
+  the bounded CPU callback measured in the same session.
 - 2026-05-14: Added an opt-in dense branch-shuffle output grid
   (`shuffle_profile_nphi_out`) to the differentiable QI residual and propagated
   it through diagnostics and `QuasiIsodynamicOptions`. This brings vmec_jax
