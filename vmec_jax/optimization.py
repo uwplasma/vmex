@@ -1409,6 +1409,7 @@ class FixedBoundaryExactOptimizer:
         # solved state so final metrics/wout writing do not rerun VMEC.
         self._exact_cache: dict = {}
         self._exact_state_cache: dict = {}
+        self._exact_state_key_by_id: dict[int, object] = {}
         self._exact_residual_cache: dict = {}
         self._discrete_jacobian_helper_cache: dict = {}
         self._scan_exact_helper_cache: dict = {}
@@ -1707,9 +1708,18 @@ class FixedBoundaryExactOptimizer:
 
     def _remember_exact_state(self, cache_key: bytes, state: VMECState) -> None:
         self._exact_state_cache = {cache_key: state}
+        if not hasattr(self, "_exact_state_key_by_id"):
+            self._exact_state_key_by_id = {}
+        self._exact_state_key_by_id[id(state)] = cache_key
         residual_cache = getattr(self, "_exact_residual_cache", None)
         if residual_cache is not None and cache_key not in residual_cache:
             residual_cache.clear()
+
+    def _state_matches_params(self, state: VMECState, params) -> bool:
+        """Return true when *state* is a known exact solve for *params*."""
+
+        state_keys = getattr(self, "_exact_state_key_by_id", {})
+        return state_keys.get(id(state)) == self._exact_cache_key(params)
 
     def _remember_exact_residual(self, cache_key: bytes, residual: np.ndarray) -> None:
         self._exact_residual_cache = {cache_key: np.asarray(residual, dtype=float).reshape(-1).copy()}
@@ -1766,7 +1776,9 @@ class FixedBoundaryExactOptimizer:
             return state
         if cache_key in getattr(self, "_exact_state_cache", {}):
             self._profile_add("exact_state_cache_hit", 0.0)
-            return self._exact_state_cache[cache_key]
+            state = self._exact_state_cache[cache_key]
+            self._remember_exact_state(cache_key, state)
+            return state
         return None
 
     def _cached_trial_residual(self, params) -> np.ndarray | None:
@@ -2678,6 +2690,8 @@ class FixedBoundaryExactOptimizer:
         """Release JIT and exact-solve caches."""
         self._exact_cache.clear()
         self._exact_state_cache.clear()
+        if hasattr(self, "_exact_state_key_by_id"):
+            self._exact_state_key_by_id.clear()
         if hasattr(self, "_exact_residual_cache"):
             self._exact_residual_cache.clear()
         self._trial_residual_cache.clear()
@@ -2827,15 +2841,15 @@ class FixedBoundaryExactOptimizer:
             Boundary parameter vector (zeros = reference boundary). Optional
             when ``state`` is provided.
         state:
-            Already-solved VMEC state to write. Passing this avoids rerunning
-            the equilibrium solve and is the preferred path immediately after
-            :meth:`run`.
+            Already-solved exact VMEC state to write. Passing this avoids
+            rerunning the equilibrium solve when the optimizer can verify that
+            the state was solved for ``params``.
 
         Notes
         -----
-        Uses the exact-solve cache when *params* was previously evaluated.
-        On a cache miss the trial solver (slightly relaxed tolerances) is used
-        to avoid OOM after long optimization runs that have filled the JAX heap.
+        Uses the exact-solve cache when *params* was previously evaluated.  On
+        a cache miss the accepted-point solver settings are used; the relaxed
+        trial solver is never used for persisted wout artifacts.
         """
         t0 = time.perf_counter()
         from .driver import FixedBoundaryRun
@@ -2846,11 +2860,17 @@ class FixedBoundaryExactOptimizer:
         if state is None:
             if params is None:
                 raise ValueError("save_wout requires either params or state")
-            # Use cached state when available; fall back to trial solver (cheaper)
-            # to avoid OOM when the JAX heap is saturated after a long run.
             state = self._cached_exact_state(params)
             if state is None:
-                state = self._solve_forward(params, trial=True)
+                state = self._solve_forward(params, trial=False)
+                self._remember_exact_state(self._exact_cache_key(params), state)
+        elif params is not None and not self._state_matches_params(state, params):
+            cached_state = self._cached_exact_state(params)
+            if cached_state is not None:
+                state = cached_state
+            else:
+                state = self._solve_forward(params, trial=False)
+                self._remember_exact_state(self._exact_cache_key(params), state)
         run = FixedBoundaryRun(
             cfg=self._static.cfg,
             indata=self._indata,
@@ -3568,7 +3588,7 @@ class FixedBoundaryExactOptimizer:
         # Use the exact cache when available (avoids a fresh full VMEC solve
         # that can OOM after a long optimization session).  If the optimizer's
         # final point cannot be exactly replayed, prefer a prior exact accepted
-        # point over a relaxed trial solve so final artifacts remain exact.
+        # point; never use a relaxed trial solve for final artifacts.
         selected_best_exact = bool(result.pop("_selected_best_exact_point", False))
         optimizer_exception = result.pop("_optimizer_exception", None)
         best_exact_params = getattr(self, "_best_exact_params", None)
@@ -3585,7 +3605,7 @@ class FixedBoundaryExactOptimizer:
                     if self._scan_exact_path == "scan"
                     else self._solve_exact_with_tape(result["x"])
                 )
-            except Exception:
+            except Exception as exc:
                 if (
                     best_exact_params is not None
                     and best_exact_residual is not None
@@ -3603,7 +3623,10 @@ class FixedBoundaryExactOptimizer:
                             else self._solve_exact_with_tape(result["x"])
                         )
                 else:
-                    state_final = self._solve_forward(result["x"], trial=True)
+                    raise RuntimeError(
+                        "Final exact accepted-point solve failed and no prior exact "
+                        "accepted point is available for final output."
+                    ) from exc
 
         final_wall_time_s = time.perf_counter() - self._wall_t0
         if self._history:

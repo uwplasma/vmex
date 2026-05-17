@@ -72,8 +72,8 @@ def test_constraint_status_flags_seed_quality():
             "mean_iota": -0.45,
             "qi_mirror_ratio_max": 0.18,
             "qi_max_elongation": 7.5,
-            "qi_smooth_total": 0.2,
-            "qi_legacy_total": 0.3,
+            "qi_smooth_total": 1.0e-3,
+            "qi_legacy_total": 1.5e-3,
         },
         targets,
     )
@@ -98,6 +98,22 @@ def test_constraint_status_flags_seed_quality():
     )
     assert poor["constraint_score"] > good["constraint_score"]
 
+    noisy_qi = mod._constraint_status(
+        {
+            "aspect": 5.0,
+            "mean_iota": -0.45,
+            "qi_mirror_ratio_max": 0.18,
+            "qi_max_elongation": 7.5,
+            "qi_smooth_total": 3.0e-3,
+            "qi_legacy_total": 4.0e-3,
+        },
+        targets,
+    )
+    assert noisy_qi["seed_suitability"] == "needs_attention"
+    assert {"smooth_qi", "legacy_qi"}.issubset(set(noisy_qi["failed_constraints"]))
+    assert noisy_qi["smooth_qi_excess"] == pytest.approx(1.0e-3)
+    assert noisy_qi["legacy_qi_excess"] == pytest.approx(2.0e-3)
+
 
 def test_build_seed_audit_ranks_and_writes_csv(monkeypatch, tmp_path):
     mod = _load_module()
@@ -117,12 +133,12 @@ def test_build_seed_audit_ranks_and_writes_csv(monkeypatch, tmp_path):
             "mean_iota": 0.45,
             "qi_mirror_ratio_max": 0.18,
             "qi_max_elongation": 7.0,
-            "qi_legacy_total": 0.4,
+            "qi_legacy_total": 1.0e-3,
         }
         if case.label == "better_qi":
-            base["qi_smooth_total"] = 0.1
+            base["qi_smooth_total"] = 5.0e-4
         else:
-            base["qi_smooth_total"] = 0.5
+            base["qi_smooth_total"] = 1.5e-3
             base["qi_mirror_ratio_max"] = 0.4
         base.update(mod._constraint_status(base, targets))
         return base
@@ -190,8 +206,8 @@ def test_main_accepts_custom_case_with_bundled_qi_seed(monkeypatch, tmp_path):
             "mean_iota": 0.45,
             "qi_mirror_ratio_max": 0.18,
             "qi_max_elongation": 7.0,
-            "qi_smooth_total": 0.1,
-            "qi_legacy_total": 0.2,
+            "qi_smooth_total": 1.0e-3,
+            "qi_legacy_total": 1.0e-3,
         }
         record.update(mod._constraint_status(record, targets))
         return record
@@ -229,7 +245,7 @@ def test_main_accepts_custom_case_with_bundled_qi_seed(monkeypatch, tmp_path):
 
 def test_build_seed_audit_can_select_best_well_phase(monkeypatch):
     mod = _load_module()
-    targets = mod.SuitabilityTargets()
+    targets = mod.SuitabilityTargets(smooth_qi_max=None, legacy_qi_max=None)
     case = mod.SeedCase("phase_sensitive_qi", "qi", Path("/tmp/input_qi"), Path("/tmp/wout_qi.nc"))
 
     monkeypatch.setattr(
