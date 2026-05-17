@@ -173,6 +173,21 @@ def test_minimal_seed_physics_gate_rejects_zero_iota_and_bad_qi() -> None:
     assert qi_bad_mirror.success is False
     assert "mirror" in qi_bad_mirror.message
 
+    qh_zero_iota = generator.sweep.CaseResult(
+        backend="cpu",
+        problem="qh",
+        max_mode=3,
+        use_ess=True,
+        success=True,
+        crashed=False,
+        message="optimizer success",
+        iota_final=0.0,
+    )
+
+    assert generator._apply_physics_gate(generator.SHOWCASE_CASES["qh_nfp4"], qh_zero_iota) is True
+    assert qh_zero_iota.success is False
+    assert "|iota|" in qh_zero_iota.message
+
 
 def test_minimal_seed_rerun_clears_stale_case_artifacts(tmp_path: Path) -> None:
     generator = _load_module("generate_minimal_seed_showcase_prepare", "generate_minimal_seed_showcase.py")

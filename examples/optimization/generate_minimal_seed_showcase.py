@@ -176,7 +176,8 @@ def _physics_gate_failures(case: MinimalSeedCase, result: sweep.CaseResult) -> l
             failures.append(f"iota={iota!r} outside {PHYSICS_QA_IOTA_TARGET:.2f}+/-{PHYSICS_QA_IOTA_TOL:.2f}")
     else:
         if iota is None or abs(iota) < PHYSICS_IOTA_FLOOR:
-            failures.append(f"|iota|={None if iota is None else abs(iota):!r} below {PHYSICS_IOTA_FLOOR:.2f}")
+            abs_iota = None if iota is None else abs(iota)
+            failures.append(f"|iota|={abs_iota!r} below {PHYSICS_IOTA_FLOOR:.2f}")
 
     if case.problem == "qi":
         qi_legacy = _finite_float(result.qi_legacy_total)
