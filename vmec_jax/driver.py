@@ -1990,7 +1990,7 @@ def run_fixed_boundary(
 
         improvement_floor = np.finfo(float).eps * max(1.0, abs(float(best_fsq)), abs(float(target_fsq)))
         finish_budget_cap = int(max_fallback_budget) if bool(max_iter_overridden) else None
-        parity_finish_budget_used = 0
+        finish_budget_used = 0
         accelerated_finish_uses_scan = False if use_scan is False else True
         if (
             bool(accelerated_mode)
@@ -2001,20 +2001,28 @@ def run_fixed_boundary(
             accel_budget_i = int(base_total_budget)
             accel_budget_used = 0
             while int(accel_budget_i) >= 1 and int(accel_budget_used) < int(max_fallback_budget):
+                if finish_budget_cap is not None:
+                    remaining_finish_budget = int(finish_budget_cap) - int(finish_budget_used)
+                    if remaining_finish_budget <= 0:
+                        break
+                    budget_this = min(int(accel_budget_i), int(remaining_finish_budget))
+                else:
+                    budget_this = int(accel_budget_i)
                 prev_best_fsq = float(best_fsq)
                 trial = _run_finish_attempt(
-                    budget_i=accel_budget_i,
+                    budget_i=budget_this,
                     mode_i="accelerated",
                     use_scan_i=bool(accelerated_finish_uses_scan),
                     performance_mode_i=True,
                 )
                 trial_fsq = float(_result_final_fsq(trial.result))
                 trial_conv = bool(_result_meets_requested_ftol(trial.result, ftol=float(requested_ftol)))
-                attempt_budgets.append(int(accel_budget_i))
+                attempt_budgets.append(int(budget_this))
                 attempt_fsq.append(float(trial_fsq))
                 attempt_converged.append(bool(trial_conv))
                 attempt_modes.append("accelerated")
-                accel_budget_used += int(accel_budget_i)
+                accel_budget_used += int(budget_this)
+                finish_budget_used += int(budget_this)
                 improved = trial_conv or (float(trial_fsq) < float(prev_best_fsq - improvement_floor))
                 if improved:
                     best_run = trial
@@ -2032,7 +2040,7 @@ def run_fixed_boundary(
             budget_i = int(base_total_budget)
             while int(budget_i) >= 1:
                 if finish_budget_cap is not None:
-                    remaining_finish_budget = int(finish_budget_cap) - int(parity_finish_budget_used)
+                    remaining_finish_budget = int(finish_budget_cap) - int(finish_budget_used)
                     if remaining_finish_budget <= 0:
                         break
                     budget_this = min(int(budget_i), int(remaining_finish_budget))
@@ -2051,7 +2059,7 @@ def run_fixed_boundary(
                 attempt_fsq.append(float(trial_fsq))
                 attempt_converged.append(bool(trial_conv))
                 attempt_modes.append("parity")
-                parity_finish_budget_used += int(budget_this)
+                finish_budget_used += int(budget_this)
                 improved = trial_conv or (float(trial_fsq) < float(prev_best_fsq - improvement_floor))
                 if improved:
                     best_run = trial
@@ -2130,7 +2138,7 @@ def run_fixed_boundary(
         diag["cli_fixed_boundary_finish_budget_cap"] = -1 if finish_budget_cap is None else int(finish_budget_cap)
         diag["cli_fixed_boundary_finish_budget_exhausted"] = bool(
             (finish_budget_cap is not None)
-            and int(parity_finish_budget_used) >= int(finish_budget_cap)
+            and int(finish_budget_used) >= int(finish_budget_cap)
             and not bool(strict_converged)
         )
         diag["cli_fixed_boundary_full_parity_fallback"] = bool(fallback_used)

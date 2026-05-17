@@ -864,11 +864,11 @@ GPU scan/non-scan comparison, same host:
 
 The finish policy also distinguishes production input-deck runs from
 explicit low-budget diagnostics.  When the user explicitly supplies
-``max_iter``, parity finish attempts are capped at twice that budget and the
-run reports non-convergence if the cap is exhausted.  This avoids spending many
-hidden extra iteration blocks in profiling or sweep scripts.  When ``max_iter``
-is not overridden, VMEC input-deck budgets retain the robust finish behavior
-needed for parity-oriented production solves.
+``max_iter``, all accelerated/parity finish attempts combined are capped at
+twice that budget and the run reports non-convergence if the cap is exhausted.
+This avoids spending many hidden extra iteration blocks in profiling or sweep
+scripts.  When ``max_iter`` is not overridden, VMEC input-deck budgets retain
+the robust finish behavior needed for parity-oriented production solves.
 
 Earlier April 2026 diagnostics with the scan-heavy GPU policy are retained
 below for historical context:
