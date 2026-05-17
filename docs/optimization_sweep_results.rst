@@ -81,9 +81,12 @@ launching that matrix:
 .. code-block:: bash
 
    PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --csv results/qi_seed_audit.csv
+   PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --smooth-qi-max 5e-3 --legacy-qi-max 2e-3 --csv results/qi_seed3127_audit.csv
 
 The preflight ranks seeds by smooth-plus-legacy QI score and leaves mirror,
-elongation, aspect, and iota gates as explicit columns.  This is deliberate:
+elongation, aspect, and iota gates as explicit columns.  The second command
+shows the relaxed smooth-gate convention used by the far-seed
+``qi_stel_seed_3127`` optimization case.  This is deliberate:
 for QI robustness work, a seed that is already QI-like but violates mirror or
 aspect slightly is usually more informative than a non-QI seed that satisfies
 the engineering constraints.
@@ -97,6 +100,15 @@ To review the tiny QI-prefine probes before executing them:
 The dry-run manifest is the intended bridge between seed audit and full
 seed-robust QI sweeps.  It is bounded by design and should be inspected before
 switching to ``--prefine-probes run``.
+
+NFP=4 QI remains a tracked stress case rather than a passing robustness lane.
+Use ``VMEC_JAX_QI_RUN_CASE=nfp4_qh_warm_to_qi`` only as a non-passing stress
+fixture unless its independent ``diagnostics.json`` records a smooth/legacy QI
+and mirror-ratio gate pass.  Local May 2026 quick audits found no passing NFP=4
+path: the best archived same-NFP QI reference was still above the ``2e-3``
+smooth/legacy gates, while the bundled QH warm start and local QH-to-QI cleanup
+were farther from the legacy-QI threshold.  Keep these rows in seed-audit
+tables and do not mix them with promoted QI sweep results.
 
 Run the GPU production sweep on a machine with a working JAX GPU install:
 

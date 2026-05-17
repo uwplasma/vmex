@@ -17,6 +17,30 @@ This page covers:
 Current reproducible workflow
 -----------------------------
 
+Editable workflow anatomy
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The standalone QA/QH/QP scripts are meant to be read top to bottom.  They keep
+the scientific problem visible instead of hiding it behind a large driver:
+
+1. Define VMEC and stage controls with top-level variables, then instantiate
+   ``vj.FixedBoundaryVMEC.from_input(...)``.
+2. Instantiate objective objects and assemble explicit SIMSOPT-style
+   ``objective_tuples = [(objective.J, target, weight), ...]``.
+3. Build ``vj.LeastSquaresProblem.from_tuples(objective_tuples)``.
+4. Call ``vj.least_squares_solve(...)`` with optimizer, continuation, ESS,
+   device, and output controls only.
+5. Unpack the returned ``FixedBoundaryOptimizationResult`` to save inputs,
+   WOUT files, history JSON, diagnostics, and plots with explicit function
+   calls.
+
+Do not pass physics shortcuts such as ``target_aspect`` or ``qi_options`` to
+``least_squares_solve``.  Physics targets live in the objective tuple list, and
+QI sampling/threshold choices live in ``QuasiIsodynamicOptions`` plus the QI
+objective objects.  That separation is the main API hygiene rule: changing the
+science problem means editing the visible objective block; changing the
+optimizer means editing the solve-call keywords.
+
 Use the standalone scripts for editable single-case studies and the sweep
 driver for reproducible comparison tables:
 
@@ -61,9 +85,14 @@ then run the bounded robustness probe or select a ``RUN_CASE`` in
 .. code-block:: bash
 
    PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --csv results/qi_seed_audit.csv
+   PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --smooth-qi-max 5e-3 --legacy-qi-max 2e-3 --csv results/qi_seed3127_audit.csv
    PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --prefine-probes plan --prefine-manifest results/qi_seed_audit/prefine_manifest.json --prefine-output-dir results/qi_seed_audit/prefine_probes
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_seed_robustness.py
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 python examples/optimization/QI_optimization.py
+
+The second audit command uses the far-seed QI gate convention from
+``QI_optimization.py``: legacy QI below ``2e-3`` and smooth differentiable QI
+below ``5e-3``.
 
 The robustness probe is intentionally a QI+iota basin test, not a full
 engineering acceptance claim.  ``QI_optimization.py`` is now the single
@@ -79,6 +108,15 @@ contour checks agree.  Landscape and
 basin-survey diagnostics use fast trial solves unless ``--exact-solve`` is
 passed; use exact solves before treating their scalar values as promotion
 evidence.
+
+Current NFP=4 QI status: ``VMEC_JAX_QI_RUN_CASE=nfp4_qh_warm_to_qi`` is an
+explicit non-passing stress fixture, not a promoted QI path.  Bounded May 2026
+audits of the bundled QH warm start, a local QH-to-QI cleanup, and archived
+same-NFP QI references did not satisfy the agreed smooth/legacy QI ``< 2e-3``
+gates.  The best quick-audited archived NFP=4 QI reference found locally was
+still above the gate (smooth about ``8.4e-3``, legacy about ``5.2e-3``), so the
+example records stress-fixture metadata in ``diagnostics.json`` and should stay
+in the audit lane until a new independent smooth/legacy/mirror pass is added.
 
 Motivation: differentiability without finite differences
 ---------------------------------------------------------
@@ -1217,6 +1255,45 @@ Public API
 ----------
 
 .. currentmodule:: vmec_jax
+
+Recommended workflow API
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+For new examples and user scripts, prefer the small workflow layer that keeps
+the problem assembly in user code and standardizes only the repeated mechanics:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 38 62
+
+   * - Object or function
+     - Role in an editable script
+   * - ``FixedBoundaryVMEC.from_input(...)``
+     - Load the VMEC input deck, choose active boundary modes, apply the
+       resolution policy, and select the output directory.
+   * - ``LeastSquaresProblem.from_tuples(...)``
+     - Convert the visible ``(objective.J, target, weight)`` list into regular
+       and QI residual blocks using SIMSOPT weight semantics.
+   * - ``least_squares_solve(...)``
+     - Run the regular QS or QI least-squares driver.  It should receive
+       optimizer, continuation, ESS, device, and artifact-writing controls, not
+       hidden physics-target keyword arguments.
+   * - ``FixedBoundaryOptimizationResult``
+     - Return object with teaching accessors such as ``initial_optimizer``,
+       ``final_optimizer``, ``initial_params``, ``final_params``,
+       ``initial_state``, ``final_state``, ``history``,
+       ``objective_history``, and ``timing_summary``.
+   * - Objective wrappers such as ``AspectRatio``, ``MeanIota``,
+       ``AbsMeanIotaFloor``, ``QuasisymmetryRatioResidual``,
+       ``QuasiIsodynamicResidual``, ``MirrorRatio``, and ``MaxElongation``
+     - Small objects whose ``.J`` methods are placed directly in
+       ``objective_tuples``.  QI field objectives share one
+       ``QuasiIsodynamicOptions`` object so the Boozer transform is routed
+       through a single QI solve path.
+
+The lower-level optimizer remains public for custom research workflows, but
+the examples should use the workflow API above unless a script truly needs to
+construct residual closures or stage-local finite-beta data itself.
 
 :class:`FixedBoundaryExactOptimizer`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

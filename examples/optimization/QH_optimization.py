@@ -109,6 +109,8 @@ objective_tuples = [
 ]
 problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
 
+# The solve call only receives optimizer, continuation, device, and output
+# controls.  Physics targets stay in objective_tuples above.
 result = vj.least_squares_solve(
     vmec,
     problem,
@@ -191,6 +193,8 @@ print(f"  theta grid: {theta.shape}, zeta grid: {zeta.shape}, B grid: {b_lcfs.sh
 print(f"  Bmin/Bmax:  {np.min(b_lcfs):.6g} / {np.max(b_lcfs):.6g}")
 
 if MAKE_PLOTS:
+    # Plotting is a normal post-processing block; add or remove entries here
+    # instead of relying on hidden plotting side effects from the solve.
     plot_paths = {
         "boundary_comparison": vj.plot_3d_boundary_comparison(
             saved_paths["initial_wout"],

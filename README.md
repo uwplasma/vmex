@@ -256,9 +256,11 @@ same machinery, but it is not yet a validated route to a precise NFP=4 QI state.
 Before promoting such a result,
 run
 `examples/optimization/audit_qi_seed_suitability.py --quick` and check the
-legacy QI, mirror ratio, elongation, iota, and Boozer `|B|` line-contour
-diagnostics. Use the prefine manifest path for reviewed expensive probes rather
-than launching ad hoc far-seed jobs.
+legacy QI, smooth QI, mirror ratio, elongation, iota, and Boozer `|B|`
+line-contour diagnostics. For the `qi_stel_seed_3127` far-seed lane, use the
+same gates as the optimization case: `--smooth-qi-max 5e-3 --legacy-qi-max 2e-3`.
+Use the prefine manifest path for reviewed expensive probes rather than
+launching ad hoc far-seed jobs.
 
 The `input.QI_stel_seed_3127` robustness lane is intentionally harder than the
 default NFP=2 QI seed.  Purely local boundary moves still get trapped, but the

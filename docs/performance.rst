@@ -403,7 +403,11 @@ optimization callback stack:
 
 The callback profile reports separate timings for relaxed trial solves, exact
 tape construction, checkpoint-tape JVP replay, residual tangent projection, and
-``wout`` writing.  On the current exact-adjoint implementation, the dominant
+``wout`` writing.  The profiler does not compute initial aspect/QS metrics by
+default because that requires an exact solve that is immediately cleared before
+the measured callback/run; add ``--initial-metrics`` only when you want that
+sanity check and do not need cold-start timing purity.  On the current
+exact-adjoint implementation, the dominant
 term for ``max_mode=2`` and ``max_mode=3`` is
 ``jacobian_tape_replay``.  Ordinary fixed-boundary solves can benefit from GPU
 ``lax.scan`` after warmup.  For exact optimization, accepted-point Jacobians use
@@ -522,7 +526,9 @@ to keep the run informational:
 Use ``--callback accepted`` when you only want the accepted-point residual/tape
 build without dense Jacobian replay.  Keep ``--clear-between-repeats`` off for
 cache-growth audits; enabling it intentionally drops optimizer/JIT caches
-between repeats and measures cold callback behavior instead.  The
+between repeats and measures cold callback behavior instead.  Malformed
+``VMEC_JAX_DYNAMIC_REPLAY_BUCKET`` values fall back to the backend-adaptive
+default instead of forcing the CPU-sized bucket on GPU diagnostics.  The
 ``--budget-tape-build-wall-s``, ``--budget-replay-wall-s``,
 ``--budget-residual-tangent-wall-s``, and ``--budget-accepted-replays`` limits
 are intended for regression guards around the accepted-point tape/replay lane:
@@ -848,7 +854,9 @@ Raw solver throughput vs public policy overhead
 The fixed-boundary profiler can now separate the requested raw solver path from
 the public CLI-style policy.  This matters because public defaults may add
 dynamic scan probes, staged follow-up, or finish attempts around the requested
-iteration budget.  To benchmark the raw accelerated scan path, use:
+iteration budget.  The profiler imports ``vmec_jax`` before importing JAX
+directly so GPU allocator defaults and the persistent compilation-cache policy
+match normal API/CLI runs.  To benchmark the raw accelerated scan path, use:
 
 .. code-block:: bash
 

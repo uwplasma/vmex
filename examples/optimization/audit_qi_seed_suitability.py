@@ -93,6 +93,8 @@ class SeedCase:
 class SuitabilityTargets:
     target_aspect: float = DEFAULT_TARGET_ASPECT
     abs_iota_min: float = DEFAULT_ABS_IOTA_MIN
+    smooth_qi_max: float | None = 2.0e-3
+    legacy_qi_max: float | None = 2.0e-3
     max_mirror_ratio: float = DEFAULT_MAX_MIRROR_RATIO
     max_elongation: float = DEFAULT_MAX_ELONGATION
 
@@ -344,6 +346,16 @@ def _constraint_status(record: dict[str, Any], targets: SuitabilityTargets) -> d
     iota_shortfall = None if mean_iota is None else max(0.0, targets.abs_iota_min - abs(mean_iota))
     mirror_excess = None if mirror is None else max(0.0, mirror - targets.max_mirror_ratio)
     elongation_excess = None if elongation is None else max(0.0, elongation - targets.max_elongation)
+    smooth_excess = (
+        None
+        if smooth is None or targets.smooth_qi_max is None
+        else max(0.0, smooth - targets.smooth_qi_max)
+    )
+    legacy_excess = (
+        None
+        if legacy is None or targets.legacy_qi_max is None
+        else max(0.0, legacy - targets.legacy_qi_max)
+    )
     diagnostic_errors = sorted(key for key in record if key.endswith("_error"))
 
     penalties = [
@@ -351,6 +363,12 @@ def _constraint_status(record: dict[str, Any], targets: SuitabilityTargets) -> d
         1.0 if iota_shortfall is None else iota_shortfall / targets.abs_iota_min,
         1.0 if mirror_excess is None else mirror_excess / targets.max_mirror_ratio,
         1.0 if elongation_excess is None else elongation_excess / targets.max_elongation,
+        1.0
+        if smooth_excess is None
+        else smooth_excess / max(float(targets.smooth_qi_max), 1.0e-16),
+        1.0
+        if legacy_excess is None
+        else legacy_excess / max(float(targets.legacy_qi_max), 1.0e-16),
     ]
     failed_constraints = []
     if aspect_relative_error is None or aspect_relative_error > 0.35:
@@ -361,9 +379,9 @@ def _constraint_status(record: dict[str, Any], targets: SuitabilityTargets) -> d
         failed_constraints.append("mirror")
     if elongation_excess is None or elongation_excess > 0.0:
         failed_constraints.append("elongation")
-    if smooth is None:
+    if smooth is None or (smooth_excess is not None and smooth_excess > 0.0):
         failed_constraints.append("smooth_qi")
-    if legacy is None:
+    if legacy is None or (legacy_excess is not None and legacy_excess > 0.0):
         failed_constraints.append("legacy_qi")
     failed_constraints.extend(diagnostic_errors)
 
@@ -372,6 +390,8 @@ def _constraint_status(record: dict[str, Any], targets: SuitabilityTargets) -> d
         "iota_shortfall": iota_shortfall,
         "mirror_excess": mirror_excess,
         "elongation_excess": elongation_excess,
+        "smooth_qi_excess": smooth_excess,
+        "legacy_qi_excess": legacy_excess,
         "failed_constraints": failed_constraints,
         "constraint_score": float(np.dot(penalties, penalties)),
         "seed_suitability": "pass" if not failed_constraints else "needs_attention",
@@ -2230,8 +2250,10 @@ def _write_csv(records: list[dict[str, Any]], output: Path) -> None:
         "selected_phimin",
         "qi_smooth_rank",
         "qi_smooth_total",
+        "smooth_qi_excess",
         "qi_legacy_rank",
         "qi_legacy_total",
+        "legacy_qi_excess",
         "qi_mirror_ratio_max",
         "qi_mirror_excess_max",
         "qi_max_elongation",
@@ -2304,6 +2326,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--elongation-nphi", type=int, default=16)
     parser.add_argument("--target-aspect", type=float, default=DEFAULT_TARGET_ASPECT)
     parser.add_argument("--abs-iota-min", type=float, default=DEFAULT_ABS_IOTA_MIN)
+    parser.add_argument(
+        "--smooth-qi-max",
+        type=float,
+        default=2.0e-3,
+        help="Maximum accepted smooth differentiable QI diagnostic; use a negative value to disable this gate.",
+    )
+    parser.add_argument(
+        "--legacy-qi-max",
+        type=float,
+        default=2.0e-3,
+        help="Maximum accepted legacy Goodman-style QI diagnostic; use a negative value to disable this gate.",
+    )
     parser.add_argument("--max-mirror-ratio", type=float, default=DEFAULT_MAX_MIRROR_RATIO)
     parser.add_argument("--max-elongation", type=float, default=DEFAULT_MAX_ELONGATION)
     parser.add_argument("--fail-on-error", action="store_true")
@@ -2435,6 +2469,8 @@ def main(argv: list[str] | None = None) -> int:
     targets = SuitabilityTargets(
         target_aspect=args.target_aspect,
         abs_iota_min=args.abs_iota_min,
+        smooth_qi_max=None if args.smooth_qi_max < 0.0 else args.smooth_qi_max,
+        legacy_qi_max=None if args.legacy_qi_max < 0.0 else args.legacy_qi_max,
         max_mirror_ratio=args.max_mirror_ratio,
         max_elongation=args.max_elongation,
     )

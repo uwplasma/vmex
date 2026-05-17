@@ -907,7 +907,8 @@ def test_save_wrappers_write_wout_input_and_history(monkeypatch, tmp_path) -> No
     opt._profile = {}
     opt._indata_from_params = lambda params: {"params": np.asarray(params, dtype=float).tolist()}
     opt._cached_exact_state = lambda _params: None
-    opt._solve_forward = lambda _params, trial=True: "trial-state"
+    solve_calls = []
+    opt._solve_forward = lambda _params, trial=True: solve_calls.append(bool(trial)) or "exact-state"
 
     captured = {}
     monkeypatch.setattr(
@@ -920,7 +921,8 @@ def test_save_wrappers_write_wout_input_and_history(monkeypatch, tmp_path) -> No
     opt.save_input(tmp_path / "nested" / "input.test", np.asarray([2.0]))
     opt.save_history(tmp_path / "nested" / "history.json", {"_history_dump": {"ok": True}})
 
-    assert captured["run"].state == "trial-state"
+    assert solve_calls == [False]
+    assert captured["run"].state == "exact-state"
     assert captured["wout_kwargs"] == {"include_fsq": False, "fast_bcovar": True}
     assert captured["input"][1] == {"params": [2.0]}
     assert (tmp_path / "nested" / "history.json").read_text().strip() == '{\n  "ok": true\n}'
