@@ -1788,15 +1788,19 @@ def test_run_final_history_reuses_cached_jacobian_residual_metadata():
     assert result["_history_dump"]["history"][-1]["qs_objective"] == pytest.approx(25.0)
 
 
-def test_lasym_gpu_replay_chunk_avoids_mode2_overchunk(monkeypatch):
+def test_gpu_replay_chunk_covers_symmetric_mode2(monkeypatch):
     monkeypatch.delenv("VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK", raising=False)
     monkeypatch.delenv("VMEC_JAX_REPLAY_COLUMN_CHUNK", raising=False)
     opt = object.__new__(FixedBoundaryExactOptimizer)
     opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=True))
     opt._solver_device_name = "gpu"
 
-    assert opt._lasym_replay_column_chunk(48) is None
+    assert opt._lasym_replay_column_chunk(23) is None
+    assert opt._lasym_replay_column_chunk(24) == 8
     assert opt._lasym_replay_column_chunk(96) == 8
+
+    opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
+    assert opt._lasym_replay_column_chunk(24) == 8
 
 
 def test_lasym_replay_chunk_env_override(monkeypatch):
