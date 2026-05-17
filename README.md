@@ -240,6 +240,9 @@ also ships `examples/data/input.minimal_seed_nfp1` through
 `vj.minimal_fixed_boundary_indata(nfp=...)` and contain only `RBC(0,0)`,
 `RBC(0,1)`, and `ZBS(0,1)` as nonzero boundary coefficients; the optimization
 policy, not the seed file, must introduce the QA/QH/QP/QI structure.
+The current bounded common-seed production stress test is documented in the
+[optimization guide](docs/optimization.rst); it intentionally exposes several
+remaining robustness failures and should not be read as the best-row result.
 
 The QP and QI rows both start from the bundled NFP=2 QI seed.  QP is a
 quasi-poloidal-symmetry target using that same input deck; the current best QI

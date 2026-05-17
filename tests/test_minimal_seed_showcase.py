@@ -126,6 +126,40 @@ def test_minimal_seed_renderer_loads_records_and_returns_monotone_segments(tmp_p
     assert len(records) == 1
     assert records[0].case_name == "qa_nfp2"
 
+    failed_dir = tmp_path / "cpu" / "qh_nfp4" / "continuation" / "mode3" / "ess"
+    failed_dir.mkdir(parents=True)
+    (failed_dir / "showcase_case.json").write_text(
+        json.dumps(
+            {
+                "minimal_seed_case": {
+                    "name": "qh_nfp4",
+                    "problem": "qh",
+                    "nfp": 4,
+                    "input_file": "input.minimal_seed_nfp4",
+                },
+                "policy": "continuation",
+                "max_mode": 3,
+                "use_ess": True,
+            }
+        )
+    )
+    (failed_dir / "case_result.json").write_text(
+        json.dumps(
+            {
+                "backend": "cpu",
+                "problem": "qh",
+                "max_mode": 3,
+                "use_ess": True,
+                "success": False,
+                "crashed": True,
+                "policy": "continuation",
+                "output_dir": str(failed_dir),
+            }
+        )
+    )
+    all_records = renderer.best_records(renderer.load_records(tmp_path), successful_only=False)
+    assert [record.case_name for record in all_records] == ["qa_nfp2", "qh_nfp4"]
+
     segments = renderer.objective_segments(records[0])
     assert len(segments) == 2
     np.testing.assert_allclose(segments[0][1], [10.0, 8.0, 8.0])
