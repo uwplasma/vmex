@@ -129,6 +129,17 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
+def _effective_jit_forces(args: argparse.Namespace) -> bool:
+    """Return the production default unless the profiler flag overrides it."""
+    if bool(getattr(args, "jit_forces", False)) and bool(getattr(args, "no_jit_forces", False)):
+        raise ValueError("Specify at most one of --jit-forces or --no-jit-forces.")
+    if bool(getattr(args, "jit_forces", False)):
+        return True
+    if bool(getattr(args, "no_jit_forces", False)):
+        return False
+    return True
+
+
 def _compact_diagnostics(diag: dict[str, Any]) -> dict[str, Any]:
     keys = (
         "solver_mode",
@@ -181,6 +192,9 @@ def _compact_diagnostics(diag: dict[str, Any]) -> dict[str, Any]:
 def _summarize_run(*, args: argparse.Namespace, run: Any, wall_time: float | None, jax_module: Any) -> dict[str, Any]:
     res = getattr(run, "result", None)
     diag = dict(getattr(res, "diagnostics", {}) or {})
+    effective_jit_forces = getattr(args, "effective_jit_forces", None)
+    if effective_jit_forces is None:
+        effective_jit_forces = _effective_jit_forces(args)
     w_hist = np.asarray(getattr(res, "w_history", np.zeros((0,), dtype=float)), dtype=float)
     fsqr_hist = np.asarray(getattr(res, "fsqr2_history", np.zeros((0,), dtype=float)), dtype=float)
     fsqz_hist = np.asarray(getattr(res, "fsqz2_history", np.zeros((0,), dtype=float)), dtype=float)
@@ -206,7 +220,7 @@ def _summarize_run(*, args: argparse.Namespace, run: Any, wall_time: float | Non
             "multigrid": args.multigrid,
             "use_input_niter": bool(args.use_input_niter),
             "use_scan": bool(args.use_scan),
-            "jit_forces": bool(args.jit_forces),
+            "jit_forces": bool(effective_jit_forces),
             "no_jit_forces": bool(args.no_jit_forces),
             "auto_cli_policy": bool(args.auto_cli_policy),
             "dynamic_scan": bool(args.dynamic_scan),
@@ -384,7 +398,8 @@ def main() -> int:
 
     if args.jit_forces and args.no_jit_forces:
         raise SystemExit("Specify at most one of --jit-forces or --no-jit-forces.")
-    jit_forces = True if args.jit_forces else False if args.no_jit_forces else True
+    jit_forces = _effective_jit_forces(args)
+    args.effective_jit_forces = jit_forces
     solver_device = None if str(args.solver_device) == "auto" else str(args.solver_device)
     solver_mode = None if str(args.solver_mode) == "auto" else str(args.solver_mode)
 
