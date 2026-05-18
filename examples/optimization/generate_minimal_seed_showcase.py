@@ -489,10 +489,16 @@ def _run_showcase_case(
     use_ess: bool,
     budget: MinimalSeedBudget,
     input_file: Path | None = None,
+    case_timeout_s: float | None = None,
 ) -> sweep.CaseResult:
     """Run one minimal-seed case with temporary sweep config overrides."""
 
     if case.problem == "qi":
+        # Give the inner QI subprocess room to catch TimeoutExpired, harvest
+        # partial artifacts, and let the outer worker write case_result.json.
+        qi_timeout_s = None
+        if case_timeout_s not in (None, 0):
+            qi_timeout_s = max(1.0, min(0.95 * float(case_timeout_s), float(case_timeout_s) - 30.0))
         return qi_staged_runner.run_qi_staged_case(
             qi_staged_runner.QIStagedCaseConfig(
                 name=case.name,
@@ -512,6 +518,7 @@ def _run_showcase_case(
                 trial_max_iter=int(budget.trial_max_iter),
                 trial_ftol=float(budget.trial_ftol),
                 make_plots=False,
+                timeout_s=qi_timeout_s,
             )
         )
 
@@ -563,6 +570,7 @@ def _worker(
     use_ess: bool,
     budget_dict: dict,
     target_helicity_seed_amplitude: float,
+    case_timeout_s: float | None,
 ) -> None:
     output_dir = Path(output_dir_str)
     result_path = Path(result_path_str)
@@ -588,6 +596,7 @@ def _worker(
                 use_ess,
                 budget_dict,
                 target_helicity_seed_amplitude,
+                case_timeout_s,
             )
 
 
@@ -639,6 +648,7 @@ def _worker_impl(
     use_ess: bool,
     budget_dict: dict,
     target_helicity_seed_amplitude: float,
+    case_timeout_s: float | None,
 ) -> None:
     case = SHOWCASE_CASES[case_name]
     budget = MinimalSeedBudget(**budget_dict)
@@ -684,6 +694,7 @@ def _worker_impl(
             use_ess=use_ess,
             budget=budget,
             input_file=seeded_input_file,
+            case_timeout_s=case_timeout_s,
         )
         _apply_physics_gate(case, result)
     except Exception as exc:  # pragma: no cover - exercised by integration failures.
@@ -807,6 +818,7 @@ def main() -> None:
             results.append(result)
             continue
         _prepare_output_dir_for_run(output_dir, rerun=bool(args.rerun))
+        case_timeout_s = None if args.case_timeout_s in (None, 0) else float(args.case_timeout_s)
 
         old_platforms = os.environ.get("JAX_PLATFORMS")
         if worker_jax_platforms is not None:
@@ -826,6 +838,7 @@ def main() -> None:
                     use_ess,
                     asdict(budget),
                     float(args.target_helicity_seed_amplitude),
+                    case_timeout_s,
                 ),
             )
             t0 = time.perf_counter()
@@ -836,7 +849,6 @@ def main() -> None:
             else:
                 os.environ["JAX_PLATFORMS"] = old_platforms
 
-        case_timeout_s = None if args.case_timeout_s in (None, 0) else float(args.case_timeout_s)
         proc.join(timeout=case_timeout_s)
         elapsed_s = time.perf_counter() - t0
         timed_out = proc.is_alive()

@@ -154,3 +154,66 @@ def test_qi_staged_runner_converts_artifacts_to_case_result(tmp_path: Path, monk
     assert result.qi_legacy_total == pytest.approx(1.5e-3)
     assert result.qi_mirror_ratio_max == pytest.approx(0.28)
     assert result.qi_max_elongation == pytest.approx(6.5)
+
+
+def test_qi_staged_runner_preserves_partial_reference_metrics_on_timeout(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    out = tmp_path / "out"
+    pre_dir = out / "boundary_reference_preconditioner"
+    pre_dir.mkdir(parents=True)
+    (pre_dir / "summary.json").write_text(
+        """
+        [
+          {
+            "lambda": 0.99,
+            "selected": false,
+            "score": 5.0,
+            "smooth_qi": 4.0e-3,
+            "legacy_qi": 3.0e-3,
+            "mirror": 0.34,
+            "elongation": 7.1,
+            "mean_iota": 0.44,
+            "aspect": 8.9
+          },
+          {
+            "lambda": 1.01,
+            "selected": true,
+            "score": 1.0,
+            "smooth_qi": 1.1e-3,
+            "legacy_qi": 1.8e-3,
+            "mirror": 0.29,
+            "elongation": 6.4,
+            "mean_iota": 0.47,
+            "aspect": 9.8
+          }
+        ]
+        """
+    )
+
+    def _timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout"))
+
+    monkeypatch.setattr(runner.subprocess, "run", _timeout)
+    config = runner.QIStagedCaseConfig(
+        name="qi_nfp2",
+        input_file=ROOT / "examples" / "data" / "input.minimal_seed_nfp2",
+        output_dir=out,
+        max_mode=3,
+        policy_case="nfp2_qi",
+        timeout_s=10.0,
+        make_plots=False,
+    )
+
+    result = runner.run_qi_staged_case(config)
+
+    assert result.success is False
+    assert result.crashed is True
+    assert "timed out" in result.message
+    assert "partial boundary-reference metrics recorded" in result.message
+    assert result.qs_final == pytest.approx(1.1e-3)
+    assert result.qi_raw_total == pytest.approx(1.1e-3)
+    assert result.qi_legacy_total == pytest.approx(1.8e-3)
+    assert result.qi_mirror_ratio_max == pytest.approx(0.29)
+    assert result.qi_max_elongation == pytest.approx(6.4)
+    assert result.iota_final == pytest.approx(0.47)
+    assert result.aspect_final == pytest.approx(9.8)

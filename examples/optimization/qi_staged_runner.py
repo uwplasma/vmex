@@ -200,6 +200,74 @@ def _diagnostic_metrics(diagnostics: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _selected_boundary_reference_record(output_dir: Path) -> dict[str, Any]:
+    """Return the selected boundary-reference candidate, if one was written."""
+
+    summary_path = Path(output_dir) / "boundary_reference_preconditioner" / "summary.json"
+    if not summary_path.exists():
+        return {}
+    try:
+        records = json.loads(summary_path.read_text())
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(records, list):
+        return {}
+    selected = [record for record in records if isinstance(record, dict) and bool(record.get("selected"))]
+    if selected:
+        return selected[-1]
+    finite = [
+        record
+        for record in records
+        if isinstance(record, dict) and _finite_float(record.get("score")) is not None
+    ]
+    if not finite:
+        return {}
+    return min(finite, key=lambda record: float(record["score"]))
+
+
+def _boundary_reference_partial_metrics(output_dir: Path) -> dict[str, Any]:
+    """Map partial preconditioner metrics to sweep-result fields.
+
+    A long QI staged solve can time out after the deterministic reference-family
+    scan has already found a physically meaningful candidate but before the
+    final history/diagnostics files are emitted.  Preserve those partial metrics
+    so dashboards show what was achieved instead of a row of ``None`` values.
+    """
+
+    record = _selected_boundary_reference_record(output_dir)
+    if not record:
+        return {}
+    return {
+        "qs_final": _finite_float(record.get("smooth_qi")),
+        "aspect_final": _finite_float(record.get("aspect")),
+        "iota_final": _finite_float(record.get("mean_iota")),
+        "qi_raw_total": _finite_float(record.get("smooth_qi")),
+        "qi_legacy_total": _finite_float(record.get("legacy_qi")),
+        "qi_mirror_ratio_max": _finite_float(record.get("mirror")),
+        "qi_max_elongation": _finite_float(record.get("elongation")),
+    }
+
+
+def annotate_case_result_from_partial_artifacts(result: sweep.CaseResult, output_dir: Path) -> bool:
+    """Fill missing QI fields from partial staged artifacts.
+
+    Returns ``True`` when any result field changed.  The success/crash status is
+    intentionally left untouched: partial metrics explain a timeout but do not
+    promote it to a passing optimization.
+    """
+
+    changed = False
+    for key, value in _boundary_reference_partial_metrics(Path(output_dir)).items():
+        if value is not None and getattr(result, key, None) is None:
+            setattr(result, key, value)
+            changed = True
+    if changed and "partial boundary-reference metrics" not in str(result.message):
+        prefix = str(result.message).strip()
+        suffix = "partial boundary-reference metrics recorded"
+        result.message = f"{prefix}; {suffix}" if prefix else suffix
+    return changed
+
+
 def _success_from_diagnostics(history: dict[str, Any], diagnostics: dict[str, Any], returncode: int) -> bool:
     if returncode != 0:
         return False
@@ -256,10 +324,21 @@ def run_qi_staged_case(config: QIStagedCaseConfig) -> sweep.CaseResult:
     diagnostics = _read_json(output_dir / "diagnostics.json")
     history_metrics = _history_metrics(history)
     diagnostic_metrics = _diagnostic_metrics(diagnostics)
+    partial_metrics = _boundary_reference_partial_metrics(output_dir)
+    for key, value in partial_metrics.items():
+        if value is None:
+            continue
+        if key in history_metrics and history_metrics[key] is None:
+            history_metrics[key] = value
+        if key in diagnostic_metrics and diagnostic_metrics[key] is None:
+            diagnostic_metrics[key] = value
     success = _success_from_diagnostics(history, diagnostics, returncode)
     message = _message_from_artifacts(history, diagnostics, returncode)
     if message_prefix:
         message = f"{message_prefix}; {message}" if message else message_prefix
+    if partial_metrics and not success:
+        suffix = "partial boundary-reference metrics recorded"
+        message = f"{message}; {suffix}" if message else suffix
     if success and not message:
         message = "QI staged subprocess passed engineering gate"
 

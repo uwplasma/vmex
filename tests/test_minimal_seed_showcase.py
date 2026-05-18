@@ -287,6 +287,7 @@ def test_minimal_seed_worker_logs_and_records_crashes(tmp_path: Path, monkeypatc
         True,
         budget.__dict__,
         1.0e-5,
+        None,
     )
 
     assert started_session == [True]
@@ -299,6 +300,50 @@ def test_minimal_seed_worker_logs_and_records_crashes(tmp_path: Path, monkeypatc
     assert "stderr marker" in (output_dir / "worker_stderr.log").read_text()
     assert "synthetic worker failure" in (output_dir / "traceback.txt").read_text()
     assert (output_dir / "showcase_case.json").exists()
+
+
+def test_minimal_seed_showcase_passes_inner_qi_timeout(tmp_path: Path, monkeypatch) -> None:
+    generator = _load_module("generate_minimal_seed_showcase_qi_timeout", "generate_minimal_seed_showcase.py")
+    budget = generator.MinimalSeedBudget(
+        max_nfev=4,
+        continuation_nfev=3,
+        inner_max_iter=11,
+        inner_ftol=1.0e-8,
+        trial_max_iter=12,
+        trial_ftol=2.0e-8,
+    )
+    captured = {}
+
+    def _fake_staged_runner(config):
+        captured["timeout_s"] = config.timeout_s
+        return generator.sweep.CaseResult(
+            backend=config.backend_label,
+            problem="qi",
+            max_mode=config.max_mode,
+            use_ess=config.use_ess,
+            success=False,
+            crashed=True,
+            message="synthetic timeout",
+            policy=config.policy,
+            output_dir=str(config.output_dir),
+        )
+
+    monkeypatch.setattr(generator.qi_staged_runner, "run_qi_staged_case", _fake_staged_runner)
+
+    generator._run_showcase_case(
+        generator.SHOWCASE_CASES["qi_nfp2"],
+        tmp_path / "case",
+        backend_label="cpu",
+        solver_device="cpu",
+        worker_jax_platforms="cpu",
+        policy="continuation",
+        max_mode=3,
+        use_ess=True,
+        budget=budget,
+        case_timeout_s=1200.0,
+    )
+
+    assert captured["timeout_s"] == pytest.approx(1140.0)
 
 
 def test_minimal_seed_physics_gate_rejects_zero_iota_and_bad_qi() -> None:
