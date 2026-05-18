@@ -2194,11 +2194,11 @@ class FixedBoundaryExactOptimizer:
             except Exception:
                 backend_name = None
         if backend_name in ("gpu", "cuda", "rocm"):
-            # Cold GPU exact-callback profiling on RTX A4000 shows full-column
-            # replay is dominated by XLA transpose/replay overhead even for the
-            # 24-DOF symmetric mode-2 case.  Chunking at 8 columns keeps launch
-            # count modest while reducing replay/residual-projection wall time.
-            return 8 if int(n_params) >= 24 else None
+            # GPU exact replay is launch/transpose dominated for the tested
+            # 24-DOF QH path, and full-column replay has been faster than the
+            # old forced chunk-8 default.  Leave explicit env overrides and the
+            # lower-level memory guard to handle genuinely oversized cases.
+            return None
         if backend_name == "tpu":
             return None
         if not bool(getattr(self._static.cfg, "lasym", False)):

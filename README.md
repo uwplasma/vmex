@@ -248,6 +248,15 @@ also ships `examples/data/input.minimal_seed_nfp1` through
 `vj.minimal_fixed_boundary_indata(nfp=...)` and contain only `RBC(0,0)`,
 `RBC(0,1)`, and `ZBS(0,1)` as nonzero boundary coefficients; the optimization
 policy, not the seed file, must introduce the QA/QH/QP/QI structure.
+
+When the common minimal-seed lane uses deterministic target-helicity seeding,
+keep that perturbation in the optimization setup rather than regenerating the
+raw input decks: use tiny `1e-5` `RBC/ZBS` mode-1 hints, leave already
+nonzero minimal modes unchanged, and let the active `max_mode` projection drop
+any inactive hint modes.  The current deterministic hint set is
+`RBC(1,0)`, `ZBS(1,0)`, `RBC(-1,1)`, `ZBS(-1,1)`, `RBC(1,1)`, and
+`ZBS(1,1)` in VMEC input-index convention.
+
 The current bounded common-seed production stress test is documented in the
 [optimization guide](docs/optimization.rst); it intentionally exposes several
 remaining robustness failures and should not be read as the best-row result.

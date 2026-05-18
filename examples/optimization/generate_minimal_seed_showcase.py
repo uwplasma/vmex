@@ -62,6 +62,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import generate_qs_ess_sweep as sweep
+from vmec_jax.namelist import InData, read_indata, write_indata
 
 
 @dataclass(frozen=True)
@@ -129,6 +130,15 @@ PHYSICS_QA_IOTA_TOL = 0.08
 PHYSICS_QI_LEGACY_MAX = 2.0e-3
 PHYSICS_QI_MIRROR_MAX = 0.40
 PHYSICS_QI_ELONGATION_MAX = 12.0
+TARGET_HELICITY_SEED_AMPLITUDE = 1.0e-5
+TARGET_HELICITY_SEED_MODE_TERMS = (
+    ("RBC", (1, 0)),
+    ("ZBS", (1, 0)),
+    ("RBC", (-1, 1)),
+    ("ZBS", (-1, 1)),
+    ("RBC", (1, 1)),
+    ("ZBS", (1, 1)),
+)
 
 
 @dataclass(frozen=True)
@@ -156,6 +166,62 @@ def _parse_case_names(value: str) -> tuple[str, ...]:
 
 def _bool_from_choice(value: str) -> bool:
     return str(value).strip().lower() in {"on", "true", "1", "yes"}
+
+
+def _target_helicity_seed_terms(
+    *,
+    max_mode: int,
+    amplitude: float = TARGET_HELICITY_SEED_AMPLITUDE,
+) -> tuple[tuple[str, tuple[int, int], float], ...]:
+    """Small deterministic boundary terms that avoid the zero-transform branch.
+
+    The common minimal seed intentionally contains only ``RBC(0,0)``,
+    ``RBC(0,1)``, and ``ZBS(0,1)``.  For QA/QH/QP/QI stress tests this can leave
+    target-helicity derivatives exactly zero at the first optimization point.
+    Adding the same tiny mode-1 perturbations used in the QA example keeps the
+    run in the intended differentiable basin without changing the source input
+    fixtures.
+    """
+
+    if float(amplitude) == 0.0 or int(max_mode) < 1:
+        return ()
+    return tuple(
+        (name, index, float(amplitude))
+        for name, index in TARGET_HELICITY_SEED_MODE_TERMS
+        if max(abs(int(index[0])), abs(int(index[1]))) <= int(max_mode)
+    )
+
+
+def _write_target_helicity_seeded_input(
+    source_file: Path,
+    output_dir: Path,
+    *,
+    max_mode: int,
+    amplitude: float = TARGET_HELICITY_SEED_AMPLITUDE,
+) -> tuple[Path, tuple[tuple[str, tuple[int, int], float], ...]]:
+    """Write the per-run seeded input deck and return inserted coefficients."""
+
+    terms = _target_helicity_seed_terms(max_mode=max_mode, amplitude=amplitude)
+    if not terms:
+        return Path(source_file), ()
+    source = read_indata(source_file)
+    indexed = {name: dict(values) for name, values in source.indexed.items()}
+    inserted: list[tuple[str, tuple[int, int], float]] = []
+    for name, index, value in terms:
+        coeffs = indexed.setdefault(name, {})
+        existing = coeffs.get(index)
+        try:
+            existing_abs = abs(float(existing)) if existing is not None else 0.0
+        except (TypeError, ValueError):
+            existing_abs = 0.0
+        if existing_abs == 0.0:
+            coeffs[index] = float(value)
+            inserted.append((name, index, float(value)))
+
+    seeded = InData(scalars=dict(source.scalars), indexed=indexed, source_path=str(source_file))
+    output_path = Path(output_dir) / "input.target_helicity_seed"
+    write_indata(output_path, seeded)
+    return output_path, tuple(inserted)
 
 
 def _finite_float(value: Any) -> float | None:
@@ -236,13 +302,14 @@ def _problem_config_for_case(
     *,
     max_mode: int,
     budget: MinimalSeedBudget,
+    input_file: Path | None = None,
 ) -> sweep.ProblemConfig:
     """Return a sweep config patched to use the common minimal seed."""
 
     base = sweep.PROBLEM_CONFIGS[case.problem]
     min_vmec_mode = max(5, int(max_mode) + 2, int(base.min_vmec_mode))
     updates = {
-        "input_file": case.input_file,
+        "input_file": Path(input_file) if input_file is not None else case.input_file,
         "max_nfev": int(budget.max_nfev),
         "continuation_nfev": int(budget.continuation_nfev),
         "inner_max_iter": int(budget.inner_max_iter),
@@ -265,6 +332,7 @@ def _qp_preseed_config_for_qi_case(
     *,
     max_mode: int,
     budget: MinimalSeedBudget,
+    input_file: Path | None = None,
 ) -> sweep.ProblemConfig:
     """Return a QP preseed config that uses the same NFP/minimal input as QI."""
 
@@ -272,7 +340,7 @@ def _qp_preseed_config_for_qi_case(
     min_vmec_mode = max(5, int(max_mode) + 2, int(base.min_vmec_mode))
     return replace(
         base,
-        input_file=case.input_file,
+        input_file=Path(input_file) if input_file is not None else case.input_file,
         max_nfev=int(budget.max_nfev),
         continuation_nfev=int(budget.continuation_nfev),
         inner_max_iter=int(budget.inner_max_iter),
@@ -292,6 +360,9 @@ def _write_showcase_metadata(
     max_mode: int,
     use_ess: bool,
     budget: MinimalSeedBudget,
+    seeded_input_file: Path | None = None,
+    seed_terms: tuple[tuple[str, tuple[int, int], float], ...] = (),
+    seed_amplitude: float = TARGET_HELICITY_SEED_AMPLITUDE,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     metadata = {
@@ -300,6 +371,15 @@ def _write_showcase_metadata(
         "max_mode": int(max_mode),
         "use_ess": bool(use_ess),
         "budget": asdict(budget),
+        "target_helicity_seed": {
+            "enabled": bool(seed_terms),
+            "amplitude": float(seed_amplitude),
+            "seeded_input_file": None if seeded_input_file is None else str(seeded_input_file),
+            "terms": [
+                {"family": name, "m": int(index[0]), "n": int(index[1]), "value": float(value)}
+                for name, index, value in seed_terms
+            ],
+        },
     }
     (output_dir / "showcase_case.json").write_text(json.dumps(metadata, indent=2))
 
@@ -315,6 +395,7 @@ def _run_showcase_case(
     max_mode: int,
     use_ess: bool,
     budget: MinimalSeedBudget,
+    input_file: Path | None = None,
 ) -> sweep.CaseResult:
     """Run one minimal-seed case with temporary sweep config overrides."""
 
@@ -323,12 +404,14 @@ def _run_showcase_case(
         case,
         max_mode=max_mode,
         budget=budget,
+        input_file=input_file,
     )
     if case.problem == "qi":
         sweep.PROBLEM_CONFIGS["qp"] = _qp_preseed_config_for_qi_case(
             case,
             max_mode=max_mode,
             budget=budget,
+            input_file=input_file,
         )
     try:
         result = sweep._run_case(
@@ -363,6 +446,7 @@ def _worker(
     max_mode: int,
     use_ess: bool,
     budget_dict: dict,
+    target_helicity_seed_amplitude: float,
 ) -> None:
     output_dir = Path(output_dir_str)
     result_path = Path(result_path_str)
@@ -387,6 +471,7 @@ def _worker(
                 max_mode,
                 use_ess,
                 budget_dict,
+                target_helicity_seed_amplitude,
             )
 
 
@@ -402,6 +487,7 @@ def _failure_result(
     use_ess: bool,
     message: str,
     total_wall_time_s: float | None = None,
+    input_file: Path | None = None,
 ) -> sweep.CaseResult:
     """Create a consistent failed result record for worker errors/timeouts."""
 
@@ -418,7 +504,7 @@ def _failure_result(
         output_dir=str(output_dir),
         solver_device=solver_device,
         jax_platforms=worker_jax_platforms,
-        input_file=str(case.input_file),
+        input_file=str(input_file or case.input_file),
         input_nfp=int(case.nfp),
         qi_qp_preseed=case.qi_qp_preseed if case.problem == "qi" else None,
         qi_jit_booz=case.qi_jit_booz if case.problem == "qi" else None,
@@ -436,10 +522,19 @@ def _worker_impl(
     max_mode: int,
     use_ess: bool,
     budget_dict: dict,
+    target_helicity_seed_amplitude: float,
 ) -> None:
     case = SHOWCASE_CASES[case_name]
     budget = MinimalSeedBudget(**budget_dict)
+    seeded_input_file: Path | None = None
+    seed_terms: tuple[tuple[str, tuple[int, int], float], ...] = ()
     try:
+        seeded_input_file, seed_terms = _write_target_helicity_seeded_input(
+            case.input_file,
+            output_dir,
+            max_mode=int(max_mode),
+            amplitude=float(target_helicity_seed_amplitude),
+        )
         _write_showcase_metadata(
             output_dir,
             case=case,
@@ -447,6 +542,9 @@ def _worker_impl(
             max_mode=max_mode,
             use_ess=use_ess,
             budget=budget,
+            seeded_input_file=seeded_input_file,
+            seed_terms=seed_terms,
+            seed_amplitude=float(target_helicity_seed_amplitude),
         )
         result = _run_showcase_case(
             case,
@@ -458,6 +556,7 @@ def _worker_impl(
             max_mode=max_mode,
             use_ess=use_ess,
             budget=budget,
+            input_file=seeded_input_file,
         )
         _apply_physics_gate(case, result)
     except Exception as exc:  # pragma: no cover - exercised by integration failures.
@@ -472,6 +571,7 @@ def _worker_impl(
             max_mode=max_mode,
             use_ess=use_ess,
             message=f"{type(exc).__name__}: {exc}",
+            input_file=seeded_input_file,
         )
     result_path.write_text(json.dumps(asdict(result), indent=2))
 
@@ -530,6 +630,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--trial-max-iter", type=int, default=120)
     parser.add_argument("--trial-ftol", type=float, default=1e-9)
     parser.add_argument("--case-timeout-s", type=float, default=600.0)
+    parser.add_argument(
+        "--target-helicity-seed-amplitude",
+        type=float,
+        default=TARGET_HELICITY_SEED_AMPLITUDE,
+        help="Per-run RBC/ZBS mode-1 seed amplitude; use 0 to disable.",
+    )
     parser.add_argument("--rerun", action="store_true", help="Recompute cases even when case_result.json exists.")
     return parser.parse_args()
 
@@ -592,6 +698,7 @@ def main() -> None:
                     max_mode,
                     use_ess,
                     asdict(budget),
+                    float(args.target_helicity_seed_amplitude),
                 ),
             )
             t0 = time.perf_counter()
@@ -649,14 +756,23 @@ def main() -> None:
 
         if result_needs_write or not result_path.exists():
             output_dir.mkdir(parents=True, exist_ok=True)
-            _write_showcase_metadata(
-                output_dir,
-                case=case,
-                policy=str(args.policy),
-                max_mode=max_mode,
-                use_ess=use_ess,
-                budget=budget,
-            )
+            if not (output_dir / "showcase_case.json").exists():
+                seed_terms = _target_helicity_seed_terms(
+                    max_mode=max_mode,
+                    amplitude=float(args.target_helicity_seed_amplitude),
+                )
+                seeded_input_file = output_dir / "input.target_helicity_seed" if seed_terms else case.input_file
+                _write_showcase_metadata(
+                    output_dir,
+                    case=case,
+                    policy=str(args.policy),
+                    max_mode=max_mode,
+                    use_ess=use_ess,
+                    budget=budget,
+                    seeded_input_file=seeded_input_file,
+                    seed_terms=seed_terms,
+                    seed_amplitude=float(args.target_helicity_seed_amplitude),
+                )
             result_path.write_text(json.dumps(asdict(result), indent=2))
 
         results.append(result)

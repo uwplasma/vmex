@@ -180,7 +180,7 @@ def test_lasym_replay_column_chunk_env_and_backend_branches(monkeypatch) -> None
     monkeypatch.setenv("VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK", "0")
     assert opt._lasym_replay_column_chunk(12) is None
     monkeypatch.setenv("VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK", "bad")
-    assert opt._lasym_replay_column_chunk(24) == 8
+    assert opt._lasym_replay_column_chunk(24) is None
     monkeypatch.delenv("VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK")
 
     monkeypatch.setenv("VMEC_JAX_REPLAY_COLUMN_CHUNK", "anything")
@@ -188,8 +188,8 @@ def test_lasym_replay_column_chunk_env_and_backend_branches(monkeypatch) -> None
     monkeypatch.delenv("VMEC_JAX_REPLAY_COLUMN_CHUNK")
 
     assert opt._lasym_replay_column_chunk(23) is None
-    assert opt._lasym_replay_column_chunk(24) == 8
-    assert opt._lasym_replay_column_chunk(96) == 8
+    assert opt._lasym_replay_column_chunk(24) is None
+    assert opt._lasym_replay_column_chunk(96) is None
 
     opt._solver_device_name = "tpu"
     assert opt._lasym_replay_column_chunk(128) is None
@@ -203,7 +203,7 @@ def test_lasym_replay_column_chunk_env_and_backend_branches(monkeypatch) -> None
     assert opt._lasym_replay_column_chunk(128) is None
 
     opt._solver_device_name = "gpu"
-    assert opt._lasym_replay_column_chunk(24) == 8
+    assert opt._lasym_replay_column_chunk(24) is None
 
 
 def test_cached_exact_residual_none_and_lasym_backend_probe_failure(monkeypatch) -> None:

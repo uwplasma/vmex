@@ -402,6 +402,185 @@ def test_continuation_stage_modes_follow_omnigenity_repeated_policy():
     ) == [3]
 
 
+def test_timed_out_partial_result_preserves_checkpoint_metrics():
+    sweep = _load_sweep_module()
+    result = sweep.CaseResult(
+        backend="cpu",
+        problem="qi",
+        max_mode=3,
+        use_ess=True,
+        success=False,
+        crashed=True,
+        message="partial checkpoint after QI preseed mode 3; case still running",
+        objective_final=1.2e-3,
+        qs_final=1.0e-3,
+        aspect_final=9.5,
+        iota_final=0.43,
+        nfev=17,
+        njev=12,
+        total_wall_time_s=321.0,
+    )
+
+    changed = sweep._mark_timed_out_result(result, elapsed_s=1200.2, case_timeout_s=1200.0)
+
+    assert changed is True
+    assert result.objective_final == pytest.approx(1.2e-3)
+    assert result.qs_final == pytest.approx(1.0e-3)
+    assert result.aspect_final == pytest.approx(9.5)
+    assert result.iota_final == pytest.approx(0.43)
+    assert result.nfev == 17
+    assert result.njev == 12
+    assert result.total_wall_time_s == pytest.approx(1200.2)
+    assert result.crashed is True
+    assert result.message.startswith("worker timed out after 1200.0 s")
+    assert "partial checkpoint after QI preseed mode 3" in result.message
+
+
+def test_stage_checkpoint_writes_partial_case_result_and_history(tmp_path):
+    sweep = _load_sweep_module()
+
+    class FakeOpt:
+        _boundary_input = SimpleNamespace()
+
+        def __init__(self):
+            self.profile = {"exact_tape_build": {"count": 1, "wall_time_s": 0.25, "mean_wall_time_s": 0.25}}
+
+        def save_input(self, path, params):
+            Path(path).write_text(f"params={len(params)}\n")
+
+        def save_wout(self, path, params, state=None):
+            self.profile["write_wout"] = {"count": 1, "wall_time_s": 0.5, "mean_wall_time_s": 0.5}
+            Path(path).write_text("wout\n")
+
+        def _profile_dump(self):
+            return dict(self.profile)
+
+    history = {
+        "history": [
+            {"wall_time_s": 0.0, "objective": 2.0, "qs_objective": 1.5, "aspect": 5.0, "iota": 0.41},
+            {"wall_time_s": 3.0, "objective": 1.0, "qs_objective": 0.8, "aspect": 5.1, "iota": 0.42},
+        ],
+        "nfev": 2,
+        "njev": 1,
+        "success": True,
+        "message": "stage converged",
+        "objective_initial": 2.0,
+        "objective_final": 1.0,
+        "qs_initial": 1.5,
+        "qs_final": 0.8,
+        "aspect_initial": 5.0,
+        "aspect_final": 5.1,
+        "total_wall_time_s": 3.0,
+        "max_nfev": 4,
+    }
+    stage_result = {"x": np.asarray([], dtype=float), "_state_final": object(), "_history_dump": history}
+
+    case_result = sweep._write_case_checkpoint(
+        output_dir=tmp_path,
+        result_path=tmp_path / "case_result.json",
+        stage_results=[("QA mode 1", 1, stage_result)],
+        problem_cfg=sweep.PROBLEM_CONFIGS["qa"],
+        cfg=SimpleNamespace(nfp=2),
+        backend="cpu",
+        problem="qa",
+        max_mode=1,
+        use_ess=False,
+        policy="continuation",
+        solver_device="cpu",
+        jax_platforms="cpu",
+        jax_backend="cpu",
+        jax_device_kind="CPU",
+        stellarator_asymmetric=False,
+        latest_specs=[],
+        latest_opt=FakeOpt(),
+        latest_params_final=np.asarray([], dtype=float),
+        write_artifacts=True,
+        success=False,
+        crashed=True,
+        message="partial checkpoint after QA mode 1; case still running",
+    )
+
+    saved_case = json.loads((tmp_path / "case_result.json").read_text())
+    saved_history = json.loads((tmp_path / "history.json").read_text())
+    saved_checkpoint = json.loads((tmp_path / "stage_checkpoint.json").read_text())
+
+    assert case_result.crashed is True
+    assert case_result.success is False
+    assert case_result.objective_final == pytest.approx(1.0)
+    assert case_result.iota_final == pytest.approx(0.42)
+    assert case_result.profile_write_wout_wall_time_s == pytest.approx(0.5)
+    assert saved_case["objective_final"] == pytest.approx(1.0)
+    assert saved_case["crashed"] is True
+    assert saved_history["stage_labels"] == ["QA mode 1"]
+    assert saved_history["history"][-1]["stage"] == "QA mode 1"
+    assert saved_checkpoint["partial"] is True
+    assert saved_checkpoint["iota_final"] == pytest.approx(0.42)
+    assert saved_checkpoint["history_path"] == "history.json"
+    assert saved_checkpoint["case_result_path"] == "case_result.json"
+    assert (tmp_path / "input.final").exists()
+    assert (tmp_path / "wout_final.nc").exists()
+
+
+def test_run_problem_stages_invokes_stage_checkpoint_callback(monkeypatch):
+    sweep = _load_sweep_module()
+
+    class FakeOpt:
+        def __init__(self, mode):
+            self.mode = mode
+
+        def run(self, params0, **_kwargs):
+            return {
+                "x": np.ones(len(params0), dtype=float) * self.mode,
+                "_history_dump": {
+                    "history": [
+                        {"wall_time_s": 0.0, "objective": 2.0, "qs_objective": 1.0, "aspect": 5.0},
+                        {"wall_time_s": 1.0, "objective": 1.0, "qs_objective": 0.5, "aspect": 5.1},
+                    ],
+                    "nfev": 2,
+                    "njev": 1,
+                    "success": True,
+                    "message": "ok",
+                    "objective_initial": 2.0,
+                    "objective_final": 1.0,
+                    "qs_initial": 1.0,
+                    "qs_final": 0.5,
+                    "aspect_initial": 5.0,
+                    "aspect_final": 5.1,
+                    "total_wall_time_s": 1.0,
+                    "max_nfev": 2,
+                },
+            }
+
+    def fake_build_stage(_problem_cfg, _cfg, _indata, mode, *, solver_device):
+        specs = [SimpleNamespace(kind="rc", index=idx) for idx in range(mode)]
+        return specs, FakeOpt(mode), None, SimpleNamespace()
+
+    callbacks = []
+    monkeypatch.setattr(sweep, "_stage_modes_for_problem", lambda *_args, **_kwargs: [1, 2])
+    monkeypatch.setattr(sweep, "_build_stage", fake_build_stage)
+    monkeypatch.setattr(sweep.vj, "lift_boundary_params", lambda _prev, _params, specs: np.zeros(len(specs)))
+
+    sweep._run_problem_stages(
+        problem_cfg=sweep.PROBLEM_CONFIGS["qa"],
+        problem="qa",
+        max_mode=2,
+        use_ess=False,
+        use_mode_continuation=True,
+        solver_device="cpu",
+        cfg=SimpleNamespace(),
+        indata=SimpleNamespace(),
+        stage_label_prefix="QA",
+        params_stage=None,
+        prev_specs=None,
+        stellarator_asymmetric=False,
+        stage_completed_callback=lambda stage, specs, _opt, _params0, params: callbacks.append(
+            (stage[0], stage[1], len(specs), params.tolist())
+        ),
+    )
+
+    assert callbacks == [("QA mode 1", 1, 1, [1.0]), ("QA mode 2", 2, 2, [2.0, 2.0])]
+
+
 def test_qi_renderer_plots_only_qi_refinement_after_qp_preseed():
     renderer = _load_qi_renderer_module()
 

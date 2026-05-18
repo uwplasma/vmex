@@ -65,6 +65,14 @@ omnigenous structure from a seed that does not already contain the target
 helicity.  Higher Fourier coefficients should be introduced by `max_mode`,
 mode continuation, ESS, or a staged QI policy, not by the seed file itself.
 
+For deterministic target-helicity seeding in this common-minimal-seed lane,
+keep the raw input files exactly as above and add only optimization-time hints:
+tiny `1e-5` `RBC/ZBS` mode-1 terms.  Do not replace an already nonzero
+minimal mode such as `RBC(0,1)`/`ZBS(0,1)`, and let the active `max_mode`
+projection remove hints that are outside the current stage.  The current
+deterministic hint set is `RBC(1,0)`, `ZBS(1,0)`, `RBC(-1,1)`,
+`ZBS(-1,1)`, `RBC(1,1)`, and `ZBS(1,1)` in VMEC input-index convention.
+
 The bounded common-seed showcase is a stress test, not a best-result table.  It
 maps the minimal seeds to QI NFP=1/2/3, QA NFP=2, QH NFP=4, and QP NFP=2, then
 renders the failure-revealing objective panel used by the docs:

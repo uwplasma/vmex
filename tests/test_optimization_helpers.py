@@ -4,7 +4,7 @@ import pytest
 from types import SimpleNamespace
 
 from vmec_jax.namelist import InData
-from vmec_jax.boundary import BoundaryCoeffs
+from vmec_jax.boundary import BoundaryCoeffs, boundary_input_from_indata
 from vmec_jax.modes import ModeTable, vmec_mode_table
 from vmec_jax.optimization import (
     BoundaryParamSpec,
@@ -685,6 +685,45 @@ def test_truncate_indata_boundary_modes_none_returns_original():
     )
 
     assert truncate_indata_boundary_modes(indata, max_mode=None) is indata
+
+
+def test_tiny_target_helicity_seed_terms_survive_active_mode_projection():
+    """Document the optimization-time target-helicity seed convention."""
+
+    amplitude = 1.0e-5
+    indata = InData(
+        scalars={"MPOL": 5, "NTOR": 5, "NFP": 4, "LASYM": False},
+        indexed={
+            "RBC": {
+                (0, 0): 1.0,
+                (0, 1): 0.2,
+                (-1, 1): amplitude,
+                (-2, 2): 9.0 * amplitude,
+            },
+            "ZBS": {
+                (0, 1): 0.2,
+                (-1, 1): -amplitude,
+                (-2, 2): -9.0 * amplitude,
+            },
+        },
+        source_path="input.minimal_seed_nfp4",
+    )
+
+    projected = truncate_indata_boundary_modes(indata, max_mode=1)
+
+    assert projected.indexed["RBC"][(-1, 1)] == pytest.approx(amplitude)
+    assert projected.indexed["ZBS"][(-1, 1)] == pytest.approx(-amplitude)
+    assert (-2, 2) not in projected.indexed["RBC"]
+    assert (-2, 2) not in projected.indexed["ZBS"]
+
+    modes = vmec_mode_table(mpol=5, ntor=5)
+    boundary = boundary_input_from_indata(projected, modes)
+    target_index = next(
+        k for k, (m_i, n_i) in enumerate(zip(modes.m, modes.n)) if int(m_i) == 1 and int(n_i) == -1
+    )
+
+    assert boundary.R_cos[target_index] == pytest.approx(amplitude)
+    assert boundary.Z_sin[target_index] == pytest.approx(-amplitude)
 
 
 def test_extend_boundary_for_max_mode_noops_when_resolution_sufficient():
@@ -1796,11 +1835,11 @@ def test_gpu_replay_chunk_covers_symmetric_mode2(monkeypatch):
     opt._solver_device_name = "gpu"
 
     assert opt._lasym_replay_column_chunk(23) is None
-    assert opt._lasym_replay_column_chunk(24) == 8
-    assert opt._lasym_replay_column_chunk(96) == 8
+    assert opt._lasym_replay_column_chunk(24) is None
+    assert opt._lasym_replay_column_chunk(96) is None
 
     opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
-    assert opt._lasym_replay_column_chunk(24) == 8
+    assert opt._lasym_replay_column_chunk(24) is None
 
 
 def test_lasym_replay_chunk_env_override(monkeypatch):
@@ -1819,7 +1858,7 @@ def test_lasym_replay_chunk_bad_env_falls_back_to_auto(monkeypatch):
     opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
     opt._solver_device_name = "gpu"
 
-    assert opt._lasym_replay_column_chunk(24) == 8
+    assert opt._lasym_replay_column_chunk(24) is None
 
     monkeypatch.setenv("VMEC_JAX_LASYM_REPLAY_COLUMN_CHUNK", "off")
     assert opt._lasym_replay_column_chunk(24) is None

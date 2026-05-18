@@ -41,6 +41,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 import csv
 import json
@@ -504,6 +505,49 @@ def _set_missing_wall_time(result: CaseResult, elapsed_s: float) -> bool:
         return False
     result.total_wall_time_s = float(elapsed_s)
     return True
+
+
+def _mark_timed_out_result(result: CaseResult, *, elapsed_s: float, case_timeout_s: float | None) -> bool:
+    """Mark an existing partial result as timed out without dropping metrics."""
+
+    timeout_s = 0.0 if case_timeout_s is None else float(case_timeout_s)
+    timeout_message = f"worker timed out after {timeout_s:.1f} s"
+    message = str(result.message or "")
+    if timeout_message not in message:
+        result.message = timeout_message if not message else f"{timeout_message}; {message}"
+    result.crashed = True
+    if result.total_wall_time_s is None or float(result.total_wall_time_s) < float(elapsed_s):
+        result.total_wall_time_s = float(elapsed_s)
+    return True
+
+
+def _atomic_write_json(path: Path, payload: object) -> None:
+    """Atomically replace a JSON file so killed workers do not leave torn output."""
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp_path.write_text(json.dumps(payload, indent=2))
+    tmp_path.replace(path)
+
+
+def _float_or_none(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if math.isfinite(out) else None
+
+
+def _int_or_none(value) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _profile_wall_time(profile: dict, key: str) -> float | None:
@@ -1369,6 +1413,7 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
 
 
 StageRecord = tuple[str, int, dict]
+StageCheckpointCallback = Callable[[StageRecord, object, object, object, object], None]
 
 
 def _merge_stage_histories(stage_results: list[StageRecord], *, problem_cfg: ProblemConfig) -> dict:
@@ -1502,6 +1547,287 @@ def _merge_stage_histories(stage_results: list[StageRecord], *, problem_cfg: Pro
     return merged
 
 
+def _sync_result_profile_from_optimizer(result: dict, opt) -> None:
+    """Refresh a result history profile after artifact writes update optimizer timings."""
+
+    history = result.get("_history_dump") if isinstance(result, dict) else None
+    profile_dump = getattr(opt, "_profile_dump", None)
+    if not isinstance(history, dict) or not callable(profile_dump):
+        return
+    if "stage_profiles" in history:
+        return
+    try:
+        history["profile"] = profile_dump()
+    except Exception:
+        return
+
+
+def _input_nfp_or_none(cfg) -> int | None:
+    try:
+        return int(cfg.nfp)
+    except Exception:
+        return None
+
+
+def _checkpoint_asymmetry_stats(
+    *,
+    specs,
+    params_final,
+    opt,
+    stellarator_asymmetric: bool,
+) -> dict[str, float | int | None]:
+    if specs is None or params_final is None:
+        return {}
+    params_initial = np.zeros(len(specs), dtype=float)
+    if bool(stellarator_asymmetric):
+        boundary_input = getattr(opt, "_boundary_input", None)
+        if boundary_input is not None:
+            params_initial = _seed_zero_asymmetric_params(
+                boundary_input=boundary_input,
+                specs=specs,
+                params=params_initial,
+                seed=ASYMMETRIC_SEED,
+            )
+    return _asymmetric_param_stats(specs, params_initial, params_final)
+
+
+def _iota_final_from_history(problem_cfg: ProblemConfig, history: dict) -> float | None:
+    if problem_cfg.target_iota is None and problem_cfg.iota_abs_min is None:
+        return None
+    if history.get("iota_final") is not None:
+        return _float_or_none(history.get("iota_final"))
+    entries = history.get("history")
+    if isinstance(entries, list) and entries and isinstance(entries[-1], dict):
+        return _float_or_none(entries[-1].get("iota"))
+    return None
+
+
+def _case_result_from_history(
+    *,
+    history: dict,
+    problem_cfg: ProblemConfig,
+    cfg,
+    backend: str,
+    problem: str,
+    max_mode: int,
+    use_ess: bool,
+    output_dir: Path,
+    policy: str,
+    solver_device: str | None,
+    jax_platforms: str | None,
+    jax_backend: str | None,
+    jax_device_kind: str | None,
+    stellarator_asymmetric: bool,
+    specs,
+    params_final,
+    opt,
+    success: bool,
+    crashed: bool,
+    message: str,
+    extra_fields: dict | None = None,
+) -> CaseResult:
+    profile_summary = _profile_summary_fields(history)
+    asym_stats = _checkpoint_asymmetry_stats(
+        specs=specs,
+        params_final=params_final,
+        opt=opt,
+        stellarator_asymmetric=stellarator_asymmetric,
+    )
+    fields = {
+        "backend": str(backend),
+        "problem": problem,
+        "max_mode": int(max_mode),
+        "use_ess": bool(use_ess),
+        "success": bool(success),
+        "crashed": bool(crashed),
+        "message": str(message),
+        "policy": str(policy),
+        "objective_final": _float_or_none(history.get("objective_final")),
+        "qs_final": _float_or_none(history.get("qs_final")),
+        "aspect_final": _float_or_none(history.get("aspect_final")),
+        "iota_final": _iota_final_from_history(problem_cfg, history),
+        "nfev": _int_or_none(history.get("nfev")),
+        "njev": _int_or_none(history.get("njev")),
+        "total_wall_time_s": _float_or_none(history.get("total_wall_time_s")),
+        "profile_wall_time_s": profile_summary["profile_wall_time_s"],
+        "profile_top_name": profile_summary["profile_top_name"],
+        "profile_top_wall_time_s": profile_summary["profile_top_wall_time_s"],
+        "profile_solve_forward_trial_total_wall_time_s": profile_summary[
+            "profile_solve_forward_trial_total_wall_time_s"
+        ],
+        "profile_solve_forward_exact_total_wall_time_s": profile_summary[
+            "profile_solve_forward_exact_total_wall_time_s"
+        ],
+        "profile_exact_tape_build_wall_time_s": profile_summary["profile_exact_tape_build_wall_time_s"],
+        "profile_jacobian_total_wall_time_s": profile_summary["profile_jacobian_total_wall_time_s"],
+        "profile_write_wout_wall_time_s": profile_summary["profile_write_wout_wall_time_s"],
+        "output_dir": str(output_dir),
+        "jax_backend": jax_backend,
+        "jax_device_kind": jax_device_kind,
+        "solver_device": solver_device,
+        "jax_platforms": jax_platforms,
+        "stellarator_asymmetric": bool(stellarator_asymmetric),
+        "asymmetry_seed": float(ASYMMETRIC_SEED if stellarator_asymmetric else 0.0),
+        "input_file": str(problem_cfg.input_file),
+        "input_nfp": _input_nfp_or_none(cfg),
+        "project_input_boundary_to_max_mode": bool(problem_cfg.project_input_boundary_to_max_mode),
+        "target_aspect": float(problem_cfg.target_aspect),
+        "target_iota": (None if problem_cfg.target_iota is None else float(problem_cfg.target_iota)),
+        "iota_abs_min": (None if problem_cfg.iota_abs_min is None else float(problem_cfg.iota_abs_min)),
+        "iota_weight": float(problem_cfg.iota_weight),
+        "lgradb_weight": float(problem_cfg.lgradb_weight),
+        "qi_lgradb_weight": float(problem_cfg.qi_lgradb_weight),
+        "qi_qp_preseed": (bool(problem_cfg.qi_preseed_qp) if problem_cfg.objective_kind == "qi" else None),
+        "qi_qi_preseed": (bool(problem_cfg.qi_preseed_qi) if problem_cfg.objective_kind == "qi" else None),
+        "qi_jit_booz": (bool(problem_cfg.qi_jit_booz) if problem_cfg.objective_kind == "qi" else None),
+        **asym_stats,
+    }
+    if extra_fields:
+        fields.update(extra_fields)
+    return CaseResult(**fields)
+
+
+def _stage_checkpoint_payload(
+    *,
+    stage_results: list[StageRecord],
+    history: dict,
+    partial: bool,
+) -> dict[str, object]:
+    latest_label, latest_mode, _latest_result = stage_results[-1]
+    iota_final = _float_or_none(history.get("iota_final"))
+    entries = history.get("history")
+    if iota_final is None and isinstance(entries, list) and entries and isinstance(entries[-1], dict):
+        iota_final = _float_or_none(entries[-1].get("iota"))
+    stages = []
+    for label, mode, result in stage_results:
+        stage_history = result.get("_history_dump", {}) if isinstance(result, dict) else {}
+        stages.append(
+            {
+                "label": str(label),
+                "mode": int(mode),
+                "success": bool(stage_history.get("success", False)),
+                "message": str(stage_history.get("message", "")),
+                "nfev": _int_or_none(stage_history.get("nfev")),
+                "njev": _int_or_none(stage_history.get("njev")),
+                "objective_final": _float_or_none(stage_history.get("objective_final")),
+                "qs_final": _float_or_none(stage_history.get("qs_final")),
+                "aspect_final": _float_or_none(stage_history.get("aspect_final")),
+                "total_wall_time_s": _float_or_none(stage_history.get("total_wall_time_s")),
+            }
+        )
+    return {
+        "schema_version": 1,
+        "partial": bool(partial),
+        "stage_count": len(stage_results),
+        "latest_stage_label": str(latest_label),
+        "latest_stage_mode": int(latest_mode),
+        "last_completed_stage": str(latest_label),
+        "last_completed_stage_mode": int(latest_mode),
+        "completed_stage_count": len(stage_results),
+        "stage_labels": [str(label) for label in history.get("stage_labels", [])],
+        "stage_modes": [int(mode) for mode in history.get("stage_modes", [])],
+        "nfev": _int_or_none(history.get("nfev")),
+        "njev": _int_or_none(history.get("njev")),
+        "objective_final": _float_or_none(history.get("objective_final")),
+        "qs_final": _float_or_none(history.get("qs_final")),
+        "aspect_final": _float_or_none(history.get("aspect_final")),
+        "iota_final": iota_final,
+        "total_wall_time_s": _float_or_none(history.get("total_wall_time_s")),
+        "history_path": "history.json",
+        "case_result_path": "case_result.json",
+        "input_path": "input.final",
+        "wout_path": "wout_final.nc",
+        "artifacts": {
+            "input_final": "input.final",
+            "wout_final": "wout_final.nc",
+        },
+        "stages": stages,
+    }
+
+
+def _write_case_checkpoint(
+    *,
+    output_dir: Path,
+    result_path: Path,
+    stage_results: list[StageRecord],
+    problem_cfg: ProblemConfig,
+    cfg,
+    backend: str,
+    problem: str,
+    max_mode: int,
+    use_ess: bool,
+    policy: str,
+    solver_device: str | None,
+    jax_platforms: str | None,
+    jax_backend: str | None,
+    jax_device_kind: str | None,
+    stellarator_asymmetric: bool,
+    latest_specs,
+    latest_opt,
+    latest_params_final,
+    write_artifacts: bool,
+    success: bool,
+    crashed: bool,
+    message: str,
+    extra_fields: dict | None = None,
+    history_override: dict | None = None,
+) -> CaseResult:
+    """Write the latest bounded stage checkpoint and partial case result."""
+
+    if not stage_results:
+        raise ValueError("stage_results must contain at least one stage")
+    output_dir = Path(output_dir)
+    result_path = Path(result_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    latest_stage_result = stage_results[-1][2]
+
+    if write_artifacts and latest_opt is not None and latest_params_final is not None:
+        latest_opt.save_input(output_dir / "input.final", latest_params_final)
+        latest_opt.save_wout(
+            output_dir / "wout_final.nc",
+            latest_params_final,
+            state=latest_stage_result.get("_state_final"),
+        )
+        _sync_result_profile_from_optimizer(latest_stage_result, latest_opt)
+
+    history = (
+        history_override
+        if history_override is not None
+        else _merge_stage_histories(stage_results, problem_cfg=problem_cfg)
+    )
+    _atomic_write_json(output_dir / "history.json", history)
+    case_result = _case_result_from_history(
+        history=history,
+        problem_cfg=problem_cfg,
+        cfg=cfg,
+        backend=backend,
+        problem=problem,
+        max_mode=max_mode,
+        use_ess=use_ess,
+        output_dir=output_dir,
+        policy=policy,
+        solver_device=solver_device,
+        jax_platforms=jax_platforms,
+        jax_backend=jax_backend,
+        jax_device_kind=jax_device_kind,
+        stellarator_asymmetric=stellarator_asymmetric,
+        specs=latest_specs,
+        params_final=latest_params_final,
+        opt=latest_opt,
+        success=success,
+        crashed=crashed,
+        message=message,
+        extra_fields=extra_fields,
+    )
+    _atomic_write_json(result_path, asdict(case_result))
+    _atomic_write_json(
+        output_dir / "stage_checkpoint.json",
+        _stage_checkpoint_payload(stage_results=stage_results, history=history, partial=bool(crashed)),
+    )
+    print(f"  Wrote checkpoint {result_path}", flush=True)
+    return case_result
+
+
 def _boundary_params_from_indata(
     source_indata: InData,
     *,
@@ -1582,13 +1908,7 @@ def _resume_from_previous_continuation_case(
     return [(f"{problem_cfg.name.upper()} modes 1-{int(max_mode) - 1}", int(max_mode) - 1, {"_history_dump": previous_history})], previous_specs, params_stage
 
 
-def _save_case_outputs(output_dir: Path, opt, params_initial, params_final, result: dict) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    opt.save_input(output_dir / "input.initial", params_initial)
-    opt.save_wout(output_dir / "wout_initial.nc", params_initial, state=result.get("_state_initial"))
-    opt.save_input(output_dir / "input.final", params_final)
-    opt.save_wout(output_dir / "wout_final.nc", params_final, state=result.get("_state_final"))
-    opt.save_history(output_dir / "history.json", result)
+def _plot_case_outputs(output_dir: Path) -> None:
     try:
         vj.plot_3d_boundary_comparison(
             output_dir / "wout_initial.nc",
@@ -1609,6 +1929,58 @@ def _save_case_outputs(output_dir: Path, opt, params_initial, params_final, resu
         print(f"  Skipped case plots: {type(exc).__name__}: {exc}", flush=True)
 
 
+def _save_case_outputs(
+    output_dir: Path,
+    opt,
+    params_initial,
+    params_final,
+    result: dict,
+    *,
+    make_plots: bool = True,
+) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    opt.save_input(output_dir / "input.initial", params_initial)
+    opt.save_wout(output_dir / "wout_initial.nc", params_initial, state=result.get("_state_initial"))
+    opt.save_input(output_dir / "input.final", params_final)
+    opt.save_wout(output_dir / "wout_final.nc", params_final, state=result.get("_state_final"))
+    _sync_result_profile_from_optimizer(result, opt)
+    opt.save_history(output_dir / "history.json", result)
+    if make_plots:
+        _plot_case_outputs(output_dir)
+
+
+def _annotate_result_from_stage_checkpoint(result: CaseResult) -> CaseResult:
+    """Fill failed/timeout result metrics from ``stage_checkpoint.json`` if present."""
+
+    if result.output_dir is None:
+        return result
+    checkpoint_path = Path(result.output_dir) / "stage_checkpoint.json"
+    if not checkpoint_path.exists():
+        return result
+    try:
+        checkpoint = json.loads(checkpoint_path.read_text())
+    except Exception:
+        return result
+
+    mapping = {
+        "objective_final": "objective_final",
+        "qs_final": "qs_final",
+        "aspect_final": "aspect_final",
+        "iota_final": "iota_final",
+        "nfev": "nfev",
+        "njev": "njev",
+    }
+    for checkpoint_key, result_key in mapping.items():
+        if getattr(result, result_key) is None and checkpoint_key in checkpoint:
+            setattr(result, result_key, checkpoint[checkpoint_key])
+    if result.total_wall_time_s is None and "total_wall_time_s" in checkpoint:
+        result.total_wall_time_s = checkpoint["total_wall_time_s"]
+    stage = checkpoint.get("last_completed_stage") or checkpoint.get("latest_stage_label")
+    if stage and "last checkpoint" not in result.message:
+        result.message = f"{result.message}; last checkpoint: {stage}"
+    return result
+
+
 def _run_problem_stages(
     *,
     problem_cfg: ProblemConfig,
@@ -1623,6 +1995,7 @@ def _run_problem_stages(
     params_stage,
     prev_specs,
     stellarator_asymmetric: bool,
+    stage_completed_callback: StageCheckpointCallback | None = None,
 ) -> tuple[list[StageRecord], object, object, object, object, dict]:
     stage_modes = _stage_modes_for_problem(
         problem_cfg,
@@ -1681,7 +2054,10 @@ def _run_problem_stages(
         )
         if problem_cfg.iota_abs_min is not None:
             stage_result["_history_dump"]["iota_abs_min"] = float(problem_cfg.iota_abs_min)
-        stage_results.append((f"{stage_label_prefix} mode {stage_mode}", stage_mode, stage_result))
+        stage_record = (f"{stage_label_prefix} mode {stage_mode}", stage_mode, stage_result)
+        stage_results.append(stage_record)
+        if stage_completed_callback is not None:
+            stage_completed_callback(stage_record, stage_specs, stage_opt, params0_stage, stage_result["x"])
         prev_specs = stage_specs
         params_stage = stage_result["x"]
         final_opt = stage_opt
@@ -1701,6 +2077,7 @@ def _run_case(
     max_mode: int,
     use_ess: bool,
     output_dir: Path,
+    result_path: Path | None = None,
     *,
     use_mode_continuation: bool,
     policy: str,
@@ -1712,6 +2089,7 @@ def _run_case(
     qi_qp_preseed: bool | None = None,
     qi_jit_booz: bool | None = None,
 ) -> CaseResult:
+    result_path = Path(output_dir) / "case_result.json" if result_path is None else Path(result_path)
     problem_cfg = _effective_problem_config(
         PROBLEM_CONFIGS[problem],
         backend=backend,
@@ -1772,6 +2150,47 @@ def _run_case(
             stage_results.extend(resume_stage_results)
             use_mode_continuation_for_main = False
 
+    checkpoint_stage_results: list[StageRecord] = list(stage_results)
+
+    def _checkpoint_completed_stage(
+        stage_record: StageRecord,
+        stage_specs,
+        stage_opt,
+        _params_initial,
+        params_final,
+    ) -> None:
+        checkpoint_stage_results.append(stage_record)
+        stage_label = stage_record[0]
+        try:
+            _write_case_checkpoint(
+                output_dir=output_dir,
+                result_path=result_path,
+                stage_results=checkpoint_stage_results,
+                problem_cfg=problem_cfg,
+                cfg=cfg,
+                backend=backend,
+                problem=problem,
+                max_mode=max_mode,
+                use_ess=use_ess,
+                policy=policy,
+                solver_device=solver_device,
+                jax_platforms=jax_platforms,
+                jax_backend=jax_backend,
+                jax_device_kind=jax_device_kind,
+                stellarator_asymmetric=stellarator_asymmetric,
+                latest_specs=stage_specs,
+                latest_opt=stage_opt,
+                latest_params_final=params_final,
+                write_artifacts=True,
+                success=False,
+                crashed=True,
+                message=f"partial checkpoint after {stage_label}; case still running",
+            )
+        except Exception as exc:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            (output_dir / "checkpoint_error.txt").write_text(f"{type(exc).__name__}: {exc}\n")
+            print(f"  Skipped stage checkpoint after {stage_label}: {type(exc).__name__}: {exc}", flush=True)
+
     original_stage = None
     qp_seed_stage = None
     if problem_cfg.objective_kind == "qi" and problem_cfg.qi_preseed_qp:
@@ -1797,6 +2216,7 @@ def _run_case(
             params_stage=params_stage,
             prev_specs=prev_specs,
             stellarator_asymmetric=stellarator_asymmetric,
+            stage_completed_callback=_checkpoint_completed_stage,
         )
         stage_results.extend(qp_stage_results)
         original_stage = (qp_opt, qp_params0, qp_result)
@@ -1832,6 +2252,7 @@ def _run_case(
                 params_stage=params_stage,
                 prev_specs=prev_specs,
                 stellarator_asymmetric=stellarator_asymmetric,
+                stage_completed_callback=_checkpoint_completed_stage,
             )
         )
         stage_results.extend(qi_seed_stage_results)
@@ -1849,13 +2270,47 @@ def _run_case(
         params_stage=params_stage,
         prev_specs=prev_specs,
         stellarator_asymmetric=stellarator_asymmetric,
+        stage_completed_callback=_checkpoint_completed_stage,
     )
     stage_results.extend(qi_or_qs_stage_results)
 
+    case_output_result = final_result
     if len(stage_results) > 1:
-        final_result["_history_dump"] = _merge_stage_histories(stage_results, problem_cfg=problem_cfg)
+        case_output_result = dict(final_result)
+        case_output_result["_history_dump"] = _merge_stage_histories(stage_results, problem_cfg=problem_cfg)
 
-    _save_case_outputs(output_dir, final_opt, final_params0, final_result["x"], final_result)
+    _save_case_outputs(output_dir, final_opt, final_params0, final_result["x"], case_output_result, make_plots=False)
+    hist = case_output_result["_history_dump"]
+    try:
+        _write_case_checkpoint(
+            output_dir=output_dir,
+            result_path=result_path,
+            stage_results=checkpoint_stage_results,
+            problem_cfg=problem_cfg,
+            cfg=cfg,
+            backend=backend,
+            problem=problem,
+            max_mode=max_mode,
+            use_ess=use_ess,
+            policy=policy,
+            solver_device=solver_device,
+            jax_platforms=jax_platforms,
+            jax_backend=jax_backend,
+            jax_device_kind=jax_device_kind,
+            stellarator_asymmetric=stellarator_asymmetric,
+            latest_specs=prev_specs,
+            latest_opt=final_opt,
+            latest_params_final=final_result["x"],
+            write_artifacts=False,
+            success=bool(hist["success"]),
+            crashed=True,
+            message=f"result metadata checkpoint before diagnostics: {hist['message']}",
+            history_override=hist,
+        )
+    except Exception as exc:
+        (output_dir / "checkpoint_error.txt").write_text(f"{type(exc).__name__}: {exc}\n")
+        print(f"  Skipped result metadata checkpoint: {type(exc).__name__}: {exc}", flush=True)
+    _plot_case_outputs(output_dir)
     bmag_stats = _bmag_lcfs_stats(output_dir / "wout_final.nc")
     lgradb_stats = _lgradb_diagnostics_from_state(problem_cfg, final_opt, final_result.get("_state_final"))
     qi_stats = _qi_diagnostics_from_state(problem_cfg, final_opt, final_result.get("_state_final"))
@@ -1867,73 +2322,36 @@ def _run_case(
         qp_opt, qp_params, qp_result = qp_seed_stage
         qp_opt.save_input(output_dir / "input.qp_seed", qp_params)
         qp_opt.save_wout(output_dir / "wout_qp_seed.nc", qp_params, state=qp_result.get("_state_final"))
-
-    hist = final_result["_history_dump"]
-    profile_summary = _profile_summary_fields(hist)
-    final_iota = None
-    if (problem_cfg.target_iota is not None or problem_cfg.iota_abs_min is not None) and hist["history"]:
-        final_iota = float(hist["history"][-1]["iota"])
-    params_initial_for_stats = np.zeros(len(prev_specs), dtype=float)
-    if bool(stellarator_asymmetric):
-        params_initial_for_stats = _seed_zero_asymmetric_params(
-            boundary_input=final_opt._boundary_input,
-            specs=prev_specs,
-            params=params_initial_for_stats,
-            seed=ASYMMETRIC_SEED,
+    try:
+        _atomic_write_json(
+            output_dir / "stage_checkpoint.json",
+            _stage_checkpoint_payload(stage_results=checkpoint_stage_results, history=hist, partial=False),
         )
-    asym_stats = _asymmetric_param_stats(prev_specs, params_initial_for_stats, final_result["x"])
+    except Exception as exc:
+        (output_dir / "checkpoint_error.txt").write_text(f"{type(exc).__name__}: {exc}\n")
 
-    return CaseResult(
-        backend=str(backend),
+    return _case_result_from_history(
+        history=hist,
+        problem_cfg=problem_cfg,
+        cfg=cfg,
+        backend=backend,
         problem=problem,
         max_mode=max_mode,
-        use_ess=bool(use_ess),
+        use_ess=use_ess,
+        output_dir=output_dir,
+        policy=policy,
+        solver_device=solver_device,
+        jax_platforms=jax_platforms,
+        jax_backend=jax_backend,
+        jax_device_kind=jax_device_kind,
+        stellarator_asymmetric=stellarator_asymmetric,
+        specs=prev_specs,
+        params_final=final_result["x"],
+        opt=final_opt,
         success=bool(hist["success"]),
         crashed=False,
         message=str(hist["message"]),
-        policy=policy,
-        objective_final=float(hist["objective_final"]),
-        qs_final=float(hist["qs_final"]),
-        aspect_final=float(hist["aspect_final"]),
-        iota_final=final_iota,
-        nfev=int(hist["nfev"]),
-        njev=int(hist["njev"]),
-        total_wall_time_s=float(hist["total_wall_time_s"]),
-        profile_wall_time_s=profile_summary["profile_wall_time_s"],
-        profile_top_name=profile_summary["profile_top_name"],
-        profile_top_wall_time_s=profile_summary["profile_top_wall_time_s"],
-        profile_solve_forward_trial_total_wall_time_s=profile_summary[
-            "profile_solve_forward_trial_total_wall_time_s"
-        ],
-        profile_solve_forward_exact_total_wall_time_s=profile_summary[
-            "profile_solve_forward_exact_total_wall_time_s"
-        ],
-        profile_exact_tape_build_wall_time_s=profile_summary["profile_exact_tape_build_wall_time_s"],
-        profile_jacobian_total_wall_time_s=profile_summary["profile_jacobian_total_wall_time_s"],
-        profile_write_wout_wall_time_s=profile_summary["profile_write_wout_wall_time_s"],
-        output_dir=str(output_dir),
-        jax_backend=jax_backend,
-        jax_device_kind=jax_device_kind,
-        solver_device=solver_device,
-        jax_platforms=jax_platforms,
-        stellarator_asymmetric=bool(stellarator_asymmetric),
-        asymmetry_seed=float(ASYMMETRIC_SEED if stellarator_asymmetric else 0.0),
-        input_file=str(problem_cfg.input_file),
-        input_nfp=int(cfg.nfp),
-        project_input_boundary_to_max_mode=bool(problem_cfg.project_input_boundary_to_max_mode),
-        target_aspect=float(problem_cfg.target_aspect),
-        target_iota=(None if problem_cfg.target_iota is None else float(problem_cfg.target_iota)),
-        iota_abs_min=(None if problem_cfg.iota_abs_min is None else float(problem_cfg.iota_abs_min)),
-        iota_weight=float(problem_cfg.iota_weight),
-        lgradb_weight=float(problem_cfg.lgradb_weight),
-        qi_lgradb_weight=float(problem_cfg.qi_lgradb_weight),
-        qi_qp_preseed=(bool(problem_cfg.qi_preseed_qp) if problem_cfg.objective_kind == "qi" else None),
-        qi_qi_preseed=(bool(problem_cfg.qi_preseed_qi) if problem_cfg.objective_kind == "qi" else None),
-        qi_jit_booz=(bool(problem_cfg.qi_jit_booz) if problem_cfg.objective_kind == "qi" else None),
-        **asym_stats,
-        **bmag_stats,
-        **lgradb_stats,
-        **qi_stats,
+        extra_fields={**bmag_stats, **lgradb_stats, **qi_stats},
     )
 
 
@@ -1960,6 +2378,7 @@ def _worker(
             max_mode,
             use_ess,
             Path(output_dir),
+            Path(result_path),
             use_mode_continuation=use_mode_continuation,
             policy=policy,
             backend=backend,
@@ -1970,37 +2389,48 @@ def _worker(
             qi_qp_preseed=qi_qp_preseed,
             qi_jit_booz=qi_jit_booz,
         )
-        Path(result_path).write_text(json.dumps(asdict(case_result), indent=2))
+        _atomic_write_json(Path(result_path), asdict(case_result))
         stale_traceback = Path(output_dir) / "traceback.txt"
         if stale_traceback.exists():
             stale_traceback.unlink()
     except Exception as exc:
         Path(output_dir).mkdir(parents=True, exist_ok=True)
-        failed = CaseResult(
-            backend=str(backend),
-            problem=problem,
-            max_mode=max_mode,
-            use_ess=bool(use_ess),
-            success=False,
-            crashed=True,
-            message=f"{type(exc).__name__}: {exc}",
-            policy=policy,
-            output_dir=str(output_dir),
-            solver_device=solver_device,
-            jax_platforms=jax_platforms,
-            stellarator_asymmetric=bool(stellarator_asymmetric),
-            asymmetry_seed=float(ASYMMETRIC_SEED if stellarator_asymmetric else 0.0),
-            input_file=str(PROBLEM_CONFIGS[problem].input_file) if problem in PROBLEM_CONFIGS else None,
-            input_nfp=None,
-            project_input_boundary_to_max_mode=(
-                bool(PROBLEM_CONFIGS[problem].project_input_boundary_to_max_mode)
-                if problem in PROBLEM_CONFIGS
-                else None
-            ),
-            qi_qp_preseed=(bool(qi_qp_preseed) if problem == "qi" and qi_qp_preseed is not None else None),
-            qi_jit_booz=(bool(qi_jit_booz) if problem == "qi" and qi_jit_booz is not None else None),
-        )
-        Path(result_path).write_text(json.dumps(asdict(failed), indent=2))
+        try:
+            failed = CaseResult(**json.loads(Path(result_path).read_text()))
+            previous_message = str(failed.message or "")
+            failed.message = (
+                f"{type(exc).__name__}: {exc}"
+                if not previous_message
+                else f"{type(exc).__name__}: {exc}; {previous_message}"
+            )
+            failed.crashed = True
+        except Exception:
+            failed = CaseResult(
+                backend=str(backend),
+                problem=problem,
+                max_mode=max_mode,
+                use_ess=bool(use_ess),
+                success=False,
+                crashed=True,
+                message=f"{type(exc).__name__}: {exc}",
+                policy=policy,
+                output_dir=str(output_dir),
+                solver_device=solver_device,
+                jax_platforms=jax_platforms,
+                stellarator_asymmetric=bool(stellarator_asymmetric),
+                asymmetry_seed=float(ASYMMETRIC_SEED if stellarator_asymmetric else 0.0),
+                input_file=str(PROBLEM_CONFIGS[problem].input_file) if problem in PROBLEM_CONFIGS else None,
+                input_nfp=None,
+                project_input_boundary_to_max_mode=(
+                    bool(PROBLEM_CONFIGS[problem].project_input_boundary_to_max_mode)
+                    if problem in PROBLEM_CONFIGS
+                    else None
+                ),
+                qi_qp_preseed=(bool(qi_qp_preseed) if problem == "qi" and qi_qp_preseed is not None else None),
+                qi_jit_booz=(bool(qi_jit_booz) if problem == "qi" and qi_jit_booz is not None else None),
+            )
+        failed = _annotate_result_from_stage_checkpoint(failed)
+        _atomic_write_json(Path(result_path), asdict(failed))
         Path(output_dir, "traceback.txt").write_text(traceback.format_exc())
         raise
 
@@ -2513,9 +2943,11 @@ def main() -> None:
                     if timed_out:
                         _terminate_worker_process(proc)
 
+                    result_loaded_from_path = False
                     if result_path.exists():
                         result = CaseResult(**json.loads(result_path.read_text()))
                         result_needs_write = _set_missing_wall_time(result, elapsed_s)
+                        result_loaded_from_path = True
                     elif timed_out:
                         result = CaseResult(
                             backend=backend_label,
@@ -2560,14 +2992,22 @@ def main() -> None:
                             qi_jit_booz=(qi_jit_booz if problem == "qi" else None),
                         )
                         result_needs_write = True
-                    if proc.exitcode not in (0, None):
+                    if not result_loaded_from_path:
+                        result = _annotate_result_from_stage_checkpoint(result)
+                    if timed_out:
+                        result_needs_write = _mark_timed_out_result(
+                            result,
+                            elapsed_s=elapsed_s,
+                            case_timeout_s=case_timeout_s,
+                        )
+                    elif proc.exitcode not in (0, None):
                         result.crashed = True
                         if "worker exit code" not in result.message:
                             result.message = f"exit code {proc.exitcode}; {result.message}"
                         result_needs_write = True
                     if result_needs_write or not result_path.exists():
                         output_dir.mkdir(parents=True, exist_ok=True)
-                        result_path.write_text(json.dumps(asdict(result), indent=2))
+                        _atomic_write_json(result_path, asdict(result))
                     results.append(result)
                     print(
                         f"[{case_label}] success={result.success} crashed={result.crashed} "

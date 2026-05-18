@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +42,44 @@ def test_minimal_seed_showcase_case_map_uses_three_coefficient_inputs() -> None:
         assert "ZBC(" not in text
 
 
+def test_minimal_seed_showcase_target_helicity_seed_terms_are_deterministic() -> None:
+    generator = _load_module("generate_minimal_seed_showcase_target_seed", "generate_minimal_seed_showcase.py")
+
+    expected = (
+        ("RBC", (1, 0), 1.0e-5),
+        ("ZBS", (1, 0), 1.0e-5),
+        ("RBC", (-1, 1), 1.0e-5),
+        ("ZBS", (-1, 1), 1.0e-5),
+        ("RBC", (1, 1), 1.0e-5),
+        ("ZBS", (1, 1), 1.0e-5),
+    )
+
+    assert generator.TARGET_HELICITY_SEED_AMPLITUDE == pytest.approx(1.0e-5)
+    assert generator._target_helicity_seed_terms(max_mode=0) == ()
+    assert generator._target_helicity_seed_terms(max_mode=1) == expected
+    assert generator._target_helicity_seed_terms(max_mode=1, amplitude=0.0) == ()
+
+
+def test_minimal_seed_showcase_writes_per_run_seeded_input_without_mutating_raw_seed(tmp_path: Path) -> None:
+    generator = _load_module("generate_minimal_seed_showcase_seed_writer", "generate_minimal_seed_showcase.py")
+    case = generator.SHOWCASE_CASES["qh_nfp4"]
+    raw_seed_text = case.input_file.read_text()
+
+    seeded_input, inserted = generator._write_target_helicity_seeded_input(
+        case.input_file,
+        tmp_path,
+        max_mode=1,
+    )
+
+    assert seeded_input == tmp_path / "input.target_helicity_seed"
+    assert case.input_file.read_text() == raw_seed_text
+    assert inserted == generator._target_helicity_seed_terms(max_mode=1)
+
+    got = generator.read_indata(seeded_input)
+    for family, index, value in inserted:
+        assert got.indexed[family][index] == pytest.approx(value)
+
+
 def test_minimal_seed_showcase_config_patch_is_bounded_and_non_mutating() -> None:
     generator = _load_module("generate_minimal_seed_showcase_cfg", "generate_minimal_seed_showcase.py")
     budget = generator.MinimalSeedBudget(
@@ -65,6 +104,39 @@ def test_minimal_seed_showcase_config_patch_is_bounded_and_non_mutating() -> Non
     assert patched.project_input_boundary_to_max_mode is True
     assert patched.min_vmec_mode >= 5
     assert patched.qi_preseed_qp is True
+
+
+def test_minimal_seed_showcase_writes_target_helicity_seed_input(tmp_path: Path) -> None:
+    generator = _load_module("generate_minimal_seed_showcase_seed", "generate_minimal_seed_showcase.py")
+    case = generator.SHOWCASE_CASES["qa_nfp2"]
+
+    seeded, terms = generator._write_target_helicity_seeded_input(
+        case.input_file,
+        tmp_path,
+        max_mode=1,
+        amplitude=1.0e-5,
+    )
+
+    text = seeded.read_text()
+    assert seeded.name == "input.target_helicity_seed"
+    assert len(terms) == 6
+    assert "RBC(1,0)" in text
+    assert "ZBS(1,0)" in text
+    assert "RBC(-1,1)" in text
+    assert "ZBS(-1,1)" in text
+    assert "RBC(1,1)" in text
+    assert "ZBS(1,1)" in text
+    assert text.count("RBC(") == 5
+    assert text.count("ZBS(") == 4
+
+    disabled, disabled_terms = generator._write_target_helicity_seeded_input(
+        case.input_file,
+        tmp_path,
+        max_mode=1,
+        amplitude=0.0,
+    )
+    assert disabled == case.input_file
+    assert disabled_terms == ()
 
 
 def test_minimal_seed_worker_logs_and_records_crashes(tmp_path: Path, monkeypatch) -> None:
@@ -101,6 +173,7 @@ def test_minimal_seed_worker_logs_and_records_crashes(tmp_path: Path, monkeypatc
         1,
         True,
         budget.__dict__,
+        1.0e-5,
     )
 
     assert started_session == [True]

@@ -85,6 +85,15 @@ coefficients.  Use those inputs to test whether a QA/QH/QP/QI policy can build
 the target field structure from a common seed that does not already encode the
 target helicity.
 
+Keep those raw input decks unchanged.  The deterministic target-helicity
+seeding contract for this optimization lane is an optimization-time
+perturbation, not a seed-file change: add only tiny ``1e-5``
+``RBC/ZBS`` mode-1 hints, leave existing minimal modes such as ``RBC(0,1)``
+and ``ZBS(0,1)`` unchanged, and let the active ``max_mode`` projection remove
+hint modes that are not yet active.  The current deterministic hint set is
+``RBC(1,0)``, ``ZBS(1,0)``, ``RBC(-1,1)``, ``ZBS(-1,1)``,
+``RBC(1,1)``, and ``ZBS(1,1)`` in VMEC input-index convention.
+
 The bounded common-seed showcase runner maps those inputs to QI NFP=1/2/3,
 QA NFP=2, QH NFP=4, and QP NFP=2:
 
