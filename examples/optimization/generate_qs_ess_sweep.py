@@ -640,12 +640,19 @@ def _terminate_worker_process(proc: mp.Process, *, terminate_timeout_s: float = 
             return False
 
     if not proc.is_alive():
+        # The direct multiprocessing child can exit while subprocesses it
+        # launched remain alive in its process group.  Still signal the group
+        # before returning so timeout cleanup does not leak GPU jobs.
+        _signal_process_group(signal.SIGTERM)
+        _signal_process_group(signal.SIGKILL)
         proc.join(timeout=0.0)
         return
     if not _signal_process_group(signal.SIGTERM):
         proc.terminate()
     proc.join(timeout=float(terminate_timeout_s))
     if not proc.is_alive():
+        _signal_process_group(signal.SIGTERM)
+        _signal_process_group(signal.SIGKILL)
         return
     if not _signal_process_group(signal.SIGKILL):
         try:
