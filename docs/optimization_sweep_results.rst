@@ -138,6 +138,9 @@ They use ``inner_max_iter = trial_max_iter = 120`` and
 if a future problem config requests a larger replay budget.  Add
 ``--diagnostic-budgets`` only for bounded quick-look GPU diagnostics, and use
 ``--case-timeout-s 0`` only for unbounded local diagnostics.
+On timeout, the sweep driver terminates the worker process group as well as
+direct children, so stale descendant solver or GPU processes should not survive
+after a recorded timeout row.
 
 Run the non-stellarator-symmetric sweep by adding
 ``--stellarator-asymmetric``.  This sets ``LASYM = T`` in memory, includes

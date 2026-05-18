@@ -60,6 +60,26 @@ def test_qi_staged_runner_builds_external_input_environment(tmp_path: Path) -> N
     assert env["VMEC_JAX_QI_TRIAL_FTOL"] == "2e-08"
     assert env["VMEC_JAX_QI_SOLVER_DEVICE"] == "gpu"
     assert env["JAX_PLATFORMS"] == "gpu"
+    lambdas = tuple(float(value) for value in env["VMEC_JAX_QI_REFERENCE_LAMBDAS"].split(","))
+    assert lambdas[:3] == pytest.approx((0.994, 0.995, 0.996))
+    assert lambdas[-1] == pytest.approx(1.010)
+
+
+def test_qi_staged_runner_can_disable_reference_lambda_override(tmp_path: Path) -> None:
+    runner = _load_runner()
+    config = runner.QIStagedCaseConfig(
+        name="qi_nfp2",
+        input_file=ROOT / "examples" / "data" / "input.minimal_seed_nfp2",
+        output_dir=tmp_path / "out",
+        max_mode=3,
+        reference_input=ROOT / "examples" / "data" / "input.nfp2_QI",
+        reference_lambdas=None,
+        make_plots=False,
+    )
+
+    env = runner._build_qi_staged_env(config)
+
+    assert "VMEC_JAX_QI_REFERENCE_LAMBDAS" not in env
 
 
 def test_qi_staged_runner_converts_artifacts_to_case_result(tmp_path: Path, monkeypatch) -> None:

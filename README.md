@@ -319,13 +319,14 @@ an optimizer trajectory.
   <img src="docs/_static/figures/readme_qi_optimization_cases.png" width="980" />
 </p>
 
-Recreate the four displayed runs:
+Recreate the four QS rows and both QI coverage rows:
 
 ```bash
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa --modes 3 --ess on
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qh --modes 3 --ess on
-PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qp --modes 3 --ess off
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa --modes 3 --ess on --rerun
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qh --modes 3 --ess on --rerun
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qp --modes 3 --ess off --rerun
 PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi python examples/optimization/QI_optimization.py
+PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 python examples/optimization/QI_optimization.py
 PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 ```
@@ -333,6 +334,11 @@ PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 The sweep driver skips existing successful `case_result.json` rows by default;
 append `--rerun` to a sweep command when you need to overwrite local artifacts
 and reproduce a row from scratch.
+The minimal-seed renderer skips stale rows by default; use `--rerun` on the
+generator, not `--include-stale` on the renderer, for release figures.
+Long-running sweep workers run in their own process group; when a case hits
+`--case-timeout-s`, the driver terminates the worker and any descendant solver
+or GPU subprocesses before recording the timeout row.
 The constrained-QI matrix is a separate sweep artifact; regenerate it with the
 QI preseed/no-preseed commands in `docs/optimization_sweep_results.rst` before
 running `render_qi_constrained_sweep.py`.

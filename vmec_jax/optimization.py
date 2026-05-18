@@ -1411,6 +1411,7 @@ class FixedBoundaryExactOptimizer:
         self._exact_state_cache: dict = {}
         self._exact_state_key_by_id: dict[int, object] = {}
         self._exact_residual_cache: dict = {}
+        self._exact_jacobian_cache: dict = {}
         self._discrete_jacobian_helper_cache: dict = {}
         self._scan_exact_helper_cache: dict = {}
         self._scan_exact_path = self._select_exact_path()
@@ -1723,6 +1724,16 @@ class FixedBoundaryExactOptimizer:
 
     def _remember_exact_residual(self, cache_key: bytes, residual: np.ndarray) -> None:
         self._exact_residual_cache = {cache_key: np.asarray(residual, dtype=float).reshape(-1).copy()}
+
+    def _remember_exact_jacobian(self, cache_key: bytes, jacobian: np.ndarray, residual: np.ndarray) -> None:
+        """Keep the most recent dense accepted-point Jacobian for same-point callbacks."""
+
+        self._exact_jacobian_cache = {
+            cache_key: (
+                np.asarray(jacobian, dtype=float).copy(),
+                np.asarray(residual, dtype=float).reshape(-1).copy(),
+            )
+        }
 
     def _remember_best_exact_point(self, params, residual: np.ndarray, cost: float | None = None) -> None:
         """Track the best exact accepted-point residual seen during one run."""
@@ -2235,6 +2246,15 @@ class FixedBoundaryExactOptimizer:
         from .state import pack_state, unpack_state
 
         t_total = time.perf_counter()
+        cached_jacobian = getattr(self, "_exact_jacobian_cache", {}).get(exact_param_key)
+        if cached_jacobian is not None:
+            jac_cached, residual_cached = cached_jacobian
+            self._last_jacobian_residual = np.asarray(residual_cached, dtype=float).reshape(-1)
+            self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
+            self._profile_add("jacobian_cache_hit", 0.0)
+            self._profile_add("jacobian_total", time.perf_counter() - t_total)
+            return np.asarray(jac_cached, dtype=float).copy()
+
         params = _jnp.asarray(params, dtype=_jnp.float64)
         state, final_tangents = self._state_and_tangent_columns(
             params,
@@ -2273,6 +2293,7 @@ class FixedBoundaryExactOptimizer:
         self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
         self._profile_add("jacobian_residual_tangents", time.perf_counter() - t_res)
         out = np.asarray(jac, dtype=float)
+        self._remember_exact_jacobian(exact_param_key, out, self._last_jacobian_residual)
         self._profile_add("jacobian_total", time.perf_counter() - t_total)
         return out
 
@@ -2735,6 +2756,8 @@ class FixedBoundaryExactOptimizer:
             self._exact_state_key_by_id.clear()
         if hasattr(self, "_exact_residual_cache"):
             self._exact_residual_cache.clear()
+        if hasattr(self, "_exact_jacobian_cache"):
+            self._exact_jacobian_cache.clear()
         self._trial_residual_cache.clear()
         self._initial_tangent_cache.clear()
         self._last_jacobian_residual = None
@@ -3052,6 +3075,10 @@ class FixedBoundaryExactOptimizer:
         self._history = []
         self._profile = {}
         self._trial_residual_cache.clear()
+        if not hasattr(self, "_exact_jacobian_cache"):
+            self._exact_jacobian_cache = {}
+        else:
+            self._exact_jacobian_cache.clear()
         self._callback_trace_enabled = (
             os.getenv("VMEC_JAX_OPT_TRACE_CALLBACKS", "").strip().lower() in ("1", "true", "yes", "on")
             if trace_callbacks is None

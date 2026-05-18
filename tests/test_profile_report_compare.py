@@ -100,6 +100,8 @@ def test_callback_report_summary_extracts_bottleneck_metrics() -> None:
     assert metrics["accepted_point_replay_count"] == 2
     assert metrics["cache_entry_growth"] == 4
     assert summary["bottleneck_hint"]["metric"] == "exact_solve_s"
+    assert summary["exact_optimizer_patch_target"]["name"] == "jacobian_tape_replay"
+    assert summary["exact_optimizer_patch_target"]["share_of_total"] == pytest.approx(0.2)
     assert summary["top_profile"][0]["name"] == "exact_solve_with_tape_total"
 
 
@@ -146,6 +148,8 @@ def test_comparison_reports_ratios_against_baseline() -> None:
     assert "gpu" in text
     assert "2.500x" in text
     assert "Bottleneck hints" in text
+    assert "Exact optimizer patch targets" in text
+    assert "jacobian_tape_replay" in text
 
 
 def test_repeated_run_report_aggregates_runs() -> None:
@@ -183,6 +187,29 @@ def test_repeated_run_report_aggregates_runs() -> None:
     assert summary["metrics"]["replay_time_s"] == 2.0
     assert summary["metrics"]["accepted_point_replay_count"] == 2
     assert summary["metrics"]["solve_count"] == 3
+    assert summary["exact_optimizer_patch_target"]["name"] == "jacobian_tape_replay"
+
+
+def test_exact_optimizer_patch_target_ignores_container_timers() -> None:
+    payload = {
+        "report_kind": "exact_optimizer_callback_profile",
+        "total_wall_time_s": 20.0,
+        "profile": {
+            "jacobian_total": {"count": 1, "wall_time_s": 20.0},
+            "exact_solve_with_tape_total": {"count": 1, "wall_time_s": 12.0},
+            "exact_tape_build": {"count": 1, "wall_time_s": 9.0},
+            "exact_tape_build_unattributed": {"count": 1, "wall_time_s": 4.0},
+            "jacobian_tape_replay": {"count": 1, "wall_time_s": 5.0},
+            "jacobian_residual_tangents": {"count": 1, "wall_time_s": 3.0},
+        },
+    }
+
+    summary = compare_tool.summarize_payload(payload, label="profile")
+    target = summary["exact_optimizer_patch_target"]
+
+    assert target["name"] == "jacobian_tape_replay"
+    assert target["wall_time_s"] == 5.0
+    assert target["share_of_total"] == pytest.approx(0.25)
 
 
 def test_qi_boozer_report_summary_extracts_phase_metrics() -> None:

@@ -1402,6 +1402,56 @@ def test_tape_jacobian_remembers_residual_under_parameter_cache_key(monkeypatch)
     assert all(not isinstance(key, tuple) for key in opt._exact_residual_cache)
 
 
+def test_tape_jacobian_cache_skips_same_point_replay(monkeypatch):
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._solver_device_name = None
+    opt._inside_solver_device_context = False
+    opt._scan_exact_path = "tape"
+    opt._layout = SimpleNamespace(size=2)
+    opt._discrete_jacobian_helper_cache = {}
+    opt._exact_residual_cache = {}
+    opt._exact_jacobian_cache = {}
+    opt._last_jacobian_key = [b"accepted"]
+    opt._last_jacobian_residual = None
+    opt._profile = {}
+    opt._exact_cache_key = lambda _params: b"accepted"
+    replay_calls = []
+
+    def fake_state_and_tangent_columns(_params, profile_prefix):
+        replay_calls.append(profile_prefix)
+        return (
+            SimpleNamespace(),
+            jnp.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=jnp.float64),
+        )
+
+    opt._state_and_tangent_columns = fake_state_and_tangent_columns
+    opt._residuals_fn = lambda state: jnp.asarray(
+        [state.foo + 1.0, 2.0 * state.bar],
+        dtype=jnp.float64,
+    )
+
+    monkeypatch.setattr(
+        "vmec_jax.state.pack_state",
+        lambda _state: jnp.asarray([3.0, 4.0], dtype=jnp.float64),
+    )
+    monkeypatch.setattr(
+        "vmec_jax.state.unpack_state",
+        lambda packed, _layout: SimpleNamespace(foo=packed[0], bar=packed[1]),
+    )
+
+    params = np.asarray([0.1, 0.2], dtype=float)
+    jac1 = opt.jacobian_fun(params)
+    jac2 = opt.jacobian_fun(params)
+    jac2[0, 0] = 99.0
+    jac3 = opt.jacobian_fun(params)
+
+    assert replay_calls == ["jacobian"]
+    np.testing.assert_allclose(jac1, np.asarray([[1.0, 0.0], [0.0, 2.0]]))
+    np.testing.assert_allclose(jac3, np.asarray([[1.0, 0.0], [0.0, 2.0]]))
+    np.testing.assert_allclose(opt._last_jacobian_residual, [4.0, 8.0])
+    assert opt._profile["jacobian_cache_hit"]["count"] == 2
+
+
 def test_gauss_newton_damped_fallback_recovers_from_oversized_step():
     """Damping should rescue cases where the raw GN step is unusably large."""
 

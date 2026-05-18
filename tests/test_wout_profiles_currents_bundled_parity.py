@@ -15,55 +15,56 @@ from vmec_jax.wout import read_wout
 PROFILE_CASES = (
     (
         "axisymmetric_finite_beta",
-        "input.shaped_tokamak_pressure",
-        "wout_shaped_tokamak_pressure.nc",
+        "examples/data/input.shaped_tokamak_pressure",
+        "examples/data/wout_shaped_tokamak_pressure.nc",
         True,
     ),
     (
         "current_driven_3d",
-        "input.nfp4_QH_warm_start",
-        "wout_nfp4_QH_warm_start.nc",
+        "examples/data/input.nfp4_QH_warm_start",
+        "examples/data/wout_nfp4_QH_warm_start.nc",
         False,
     ),
     (
         "qi_stel_seed_3127",
-        "input.QI_stel_seed_3127",
-        "wout_QI_stel_seed_3127.nc",
+        "examples/data/input.QI_stel_seed_3127",
+        "examples/data/wout_QI_stel_seed_3127.nc",
         False,
     ),
     (
         "finite_beta_3d",
-        "input.li383_low_res",
-        "wout_li383_low_res.nc",
+        "examples/data/input.li383_low_res",
+        "examples/data/wout_li383_low_res.nc",
         True,
     ),
     (
         "cth",
-        "input.cth_like_fixed_bdy",
-        "wout_cth_like_fixed_bdy.nc",
+        "examples/data/input.cth_like_fixed_bdy",
+        "examples/data/wout_cth_like_fixed_bdy.nc",
         True,
     ),
     (
         "lasym_3d",
-        "input.basic_non_stellsym_simsopt",
-        "wout_basic_non_stellsym_simsopt.nc",
+        "examples/data/input.basic_non_stellsym_simsopt",
+        "examples/data/wout_basic_non_stellsym_simsopt.nc",
         False,
     ),
 )
 
 CURRENT_CASES = (
-    ("axisymmetric", "wout_circular_tokamak.nc"),
-    ("axisymmetric_finite_beta", "wout_shaped_tokamak_pressure.nc"),
-    ("current_driven_3d", "wout_nfp4_QH_warm_start.nc"),
-    ("qi_stel_seed_3127", "wout_QI_stel_seed_3127.nc"),
-    ("finite_beta_3d", "wout_li383_low_res.nc"),
-    ("cth", "wout_cth_like_fixed_bdy.nc"),
-    ("lasym_3d", "wout_basic_non_stellsym_simsopt.nc"),
+    ("axisymmetric", "examples/data/wout_circular_tokamak.nc"),
+    ("axisymmetric_finite_beta", "examples/data/wout_shaped_tokamak_pressure.nc"),
+    ("current_driven_3d", "examples/data/wout_nfp4_QH_warm_start.nc"),
+    ("qi_stel_seed_3127", "examples/data/wout_QI_stel_seed_3127.nc"),
+    ("finite_beta_3d", "examples/data/wout_li383_low_res.nc"),
+    ("cth", "examples/data/wout_cth_like_fixed_bdy.nc"),
+    ("lasym_3d", "examples/data/wout_basic_non_stellsym_simsopt.nc"),
+    ("single_grid_lasym_pressure", "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc"),
 )
 
 
-def _data_dir() -> Path:
-    return Path(__file__).resolve().parents[1] / "examples" / "data"
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
 
 
 def _s_full(ns: int) -> np.ndarray:
@@ -109,9 +110,9 @@ def test_bundled_wout_flux_pressure_iota_profiles_follow_vmec_radial_mesh(
 
     enable_x64(True)
 
-    data_dir = _data_dir()
-    _cfg, indata = load_config(str(data_dir / input_name))
-    wout = read_wout(data_dir / wout_name)
+    repo_root = _repo_root()
+    _cfg, indata = load_config(str(repo_root / input_name))
+    wout = read_wout(repo_root / wout_name)
     ns = int(wout.ns)
     s = _s_full(ns)
 
@@ -237,7 +238,7 @@ def test_bundled_wout_surface_averaged_currents_follow_ampere_radial_difference(
     """Stored J profiles should match VMEC's finite-difference of buco/bvco."""
     pytest.importorskip("netCDF4")
 
-    wout = read_wout(_data_dir() / wout_name)
+    wout = read_wout(_repo_root() / wout_name)
     ns = int(wout.ns)
     assert ns >= 4
 

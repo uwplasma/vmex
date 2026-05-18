@@ -16,17 +16,43 @@ from vmec_jax.wout import read_wout, state_from_wout
 
 
 CASES = (
-    ("qh", "input.nfp4_QH_warm_start", "wout_nfp4_QH_warm_start.nc", 3.0e-3),
-    ("qa", "input.LandremanPaul2021_QA_lowres", "wout_LandremanPaul2021_QA_lowres.nc", 3.0e-3),
-    ("qi", "input.nfp3_QI_fixed_resolution_final", "wout_nfp3_QI_fixed_resolution_final.nc", 3.0e-3),
-    ("shaped_pressure", "input.shaped_tokamak_pressure", "wout_shaped_tokamak_pressure.nc", 3.0e-3),
-    ("li383", "input.li383_low_res", "wout_li383_low_res.nc", 5.0e-3),
-    ("basic_non_stellsym", "input.basic_non_stellsym_simsopt", "wout_basic_non_stellsym_simsopt.nc", 1.2e-2),
+    ("qh", "examples/data/input.nfp4_QH_warm_start", "examples/data/wout_nfp4_QH_warm_start.nc", 3.0e-3),
+    (
+        "qa",
+        "examples/data/input.LandremanPaul2021_QA_lowres",
+        "examples/data/wout_LandremanPaul2021_QA_lowres.nc",
+        3.0e-3,
+    ),
+    (
+        "qi",
+        "examples/data/input.nfp3_QI_fixed_resolution_final",
+        "examples/data/wout_nfp3_QI_fixed_resolution_final.nc",
+        3.0e-3,
+    ),
+    (
+        "shaped_pressure",
+        "examples/data/input.shaped_tokamak_pressure",
+        "examples/data/wout_shaped_tokamak_pressure.nc",
+        3.0e-3,
+    ),
+    ("li383", "examples/data/input.li383_low_res", "examples/data/wout_li383_low_res.nc", 5.0e-3),
+    (
+        "basic_non_stellsym",
+        "examples/data/input.basic_non_stellsym_simsopt",
+        "examples/data/wout_basic_non_stellsym_simsopt.nc",
+        1.2e-2,
+    ),
+    (
+        "basic_non_stellsym_pressure_single_grid",
+        "examples_single_grid/data/input.basic_non_stellsym_pressure",
+        "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc",
+        1.2e-2,
+    ),
 )
 
 
-def _data_dir() -> Path:
-    return Path(__file__).resolve().parents[1] / "examples" / "data"
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
 
 
 def _small_static_aligned_to_wout(cfg, wout):
@@ -68,9 +94,9 @@ def test_bundled_wout_stored_bsup_cartesian_magnitude_matches_bmnc(
     pytest.importorskip("jax")
     pytest.importorskip("netCDF4")
 
-    data_dir = _data_dir()
-    cfg, _indata = load_config(str(data_dir / input_name))
-    wout = read_wout(data_dir / wout_name)
+    repo_root = _repo_root()
+    cfg, _indata = load_config(str(repo_root / input_name))
+    wout = read_wout(repo_root / wout_name)
     state = state_from_wout(wout)
     static = _small_static_aligned_to_wout(cfg, wout)
 

@@ -76,6 +76,16 @@ CONVERGED_WOUT_MATRIX_CASES = (
         residual_rss_limit=5.0e-10,
     ),
     ConvergedWoutMatrixCase(
+        case="fixed_nonaxis_lasym_single_basic_non_stellsym_pressure",
+        input_path="examples_single_grid/data/input.basic_non_stellsym_pressure",
+        wout_path="examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc",
+        lfreeb=False,
+        axisymmetric=False,
+        lasym=True,
+        multigrid=False,
+        residual_rss_limit=2.0e-10,
+    ),
+    ConvergedWoutMatrixCase(
         case="free_nonaxis_single_cth_like",
         input_path="examples_single_grid/data/input.cth_like_free_bdy",
         wout_path="examples_single_grid/data/wout_cth_like_free_bdy.nc",

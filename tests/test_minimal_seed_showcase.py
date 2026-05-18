@@ -222,6 +222,36 @@ def test_minimal_seed_showcase_writes_target_helicity_seed_input(tmp_path: Path)
     assert disabled_terms == ()
 
 
+def test_minimal_seed_showcase_metadata_records_seed_indices_as_n_m(tmp_path: Path) -> None:
+    generator = _load_module("generate_minimal_seed_showcase_seed_metadata", "generate_minimal_seed_showcase.py")
+    case = generator.SHOWCASE_CASES["qa_nfp2"]
+    budget = generator.MinimalSeedBudget(
+        max_nfev=1,
+        continuation_nfev=1,
+        inner_max_iter=2,
+        inner_ftol=1.0e-7,
+        trial_max_iter=2,
+        trial_ftol=1.0e-7,
+    )
+    terms = (("RBC", (-1, 1), 1.0e-5),)
+
+    generator._write_showcase_metadata(
+        tmp_path,
+        case=case,
+        policy="continuation",
+        max_mode=1,
+        use_ess=True,
+        budget=budget,
+        seeded_input_file=tmp_path / "input.target_helicity_seed",
+        seed_terms=terms,
+    )
+
+    metadata = json.loads((tmp_path / "showcase_case.json").read_text())
+    assert metadata["target_helicity_seed"]["terms"] == [
+        {"family": "RBC", "n": -1, "m": 1, "value": 1.0e-5}
+    ]
+
+
 def test_minimal_seed_worker_logs_and_records_crashes(tmp_path: Path, monkeypatch) -> None:
     generator = _load_module("generate_minimal_seed_showcase_worker", "generate_minimal_seed_showcase.py")
 
