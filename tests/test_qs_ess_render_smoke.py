@@ -182,6 +182,28 @@ def test_qs_ess_sweep_terminates_worker_process_group(monkeypatch):
     assert proc.joins == [0.0, None]
 
 
+def test_qs_ess_sweep_cleans_group_when_direct_worker_already_exited(monkeypatch):
+    sweep = _load_sweep_module()
+
+    class FakeProcess:
+        pid = 12345
+
+        def is_alive(self):
+            return False
+
+        def join(self, timeout=None):
+            self.join_timeout = timeout
+
+    signals = []
+    proc = FakeProcess()
+    monkeypatch.setattr(sweep.os, "killpg", lambda pid, sig: signals.append((pid, sig)))
+
+    sweep._terminate_worker_process(proc)
+
+    assert signals == [(12345, sweep.signal.SIGTERM), (12345, sweep.signal.SIGKILL)]
+    assert proc.join_timeout == 0.0
+
+
 def test_qs_ess_sweep_terminates_worker_direct_child_when_group_kill_fails(monkeypatch):
     sweep = _load_sweep_module()
 
