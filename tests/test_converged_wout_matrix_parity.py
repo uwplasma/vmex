@@ -205,6 +205,17 @@ def test_bundled_converged_wout_matrix_physics_gates(case: ConvergedWoutMatrixCa
     else:
         assert asymmetric_norm == pytest.approx(0.0, abs=1.0e-14)
 
+    asymmetric_nyquist_norm = 0.0
+    for name in ("gmns", "bmns", "bsupumns", "bsupvmns", "bsubumns", "bsubvmns"):
+        arr = np.asarray(getattr(wout, name), dtype=float)
+        assert arr.shape[0] == int(wout.ns), name
+        assert np.isfinite(arr).all(), name
+        asymmetric_nyquist_norm += float(np.linalg.norm(arr))
+    if case.lasym:
+        assert asymmetric_nyquist_norm > 0.0
+    else:
+        assert asymmetric_nyquist_norm == pytest.approx(0.0, abs=1.0e-14)
+
     assert float(wout.wb) > 0.0
     assert float(wout.wp) >= 0.0
     assert np.isfinite([wout.Aminor_p, wout.Rmajor_p, wout.aspect, wout.volume_p]).all()
