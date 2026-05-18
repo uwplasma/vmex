@@ -156,6 +156,8 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "VMEC_JAX_QI_RUN_CASE" in text
     assert "VMEC_JAX_QI_INPUT" in text
     assert "VMEC_JAX_QI_OUTPUT_DIR" in text
+    assert "VMEC_JAX_QI_MAX_MODE" in text
+    assert "VMEC_JAX_QI_MAX_NFEV" in text
     assert "Unknown QI RUN_CASE" in text
     assert '"nfp1_qi"' in text
     assert '"qi_stel_seed_3127"' in text
@@ -264,6 +266,7 @@ def test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling() -> None:
     assert "stage_promotion_mirror_threshold = float(" in text
     assert "repeats=int(stage.get(\"stage_repeats\", STAGE_REPEATS))" in text
     assert "method=str(stage.get(\"method\", METHOD))" in text
+    assert "\"max_nfev\": min(int(stage.get(\"max_nfev\", MAX_NFEV)), MAX_NFEV)" in text
     assert '"require_engineering_gate": True' in text
     assert "qi_ceiling = vj.QuasiIsodynamicResidualCeiling(" in text
     assert "qi_options=QI_OPTIONS" in text

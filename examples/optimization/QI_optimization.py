@@ -435,6 +435,7 @@ if _EXTERNAL_INPUT:
             "max_elongation": float(_external_base_case.get("max_elongation", 8.2)),
             "smooth_qi_max": float(_external_base_case.get("qi_gate_smooth_max", 5.0e-3)),
             "legacy_qi_max": float(_external_base_case.get("qi_gate_legacy_max", 2.0e-3)),
+            "max_iter": int(os.environ.get("VMEC_JAX_QI_INNER_MAX_ITER", _reference_base.get("max_iter", 80))),
         }
     # External inputs use the far-seed robustness policy by default: first
     # establish a QI+iota basin, then add guarded engineering cleanup later.
@@ -483,7 +484,8 @@ USE_MODE_CONTINUATION = (
     if _USE_MODE_CONTINUATION_ENV is None
     else _USE_MODE_CONTINUATION_ENV.strip().lower() not in {"0", "false", "no", "off"}
 )  # Repeats the same max-mode stage for QI cleanup.
-MAX_NFEV = int(os.environ.get("VMEC_JAX_QI_MAX_NFEV", CASE["max_nfev"]))
+_MAX_NFEV_ENV = os.environ.get("VMEC_JAX_QI_MAX_NFEV")
+MAX_NFEV = int(_MAX_NFEV_ENV if _MAX_NFEV_ENV is not None else CASE["max_nfev"])
 CONTINUATION_NFEV = 0
 QI_PREFINE = False
 QI_PREFINE_NFEV = 30
@@ -495,6 +497,14 @@ STAGE_MODES = vj.repeated_stage_modes(
     repeats=STAGE_REPEATS,
 )
 MIRROR_RAMP_STAGES = tuple(CASE.get("mirror_ramp_stages", ()))
+if _MAX_NFEV_ENV is not None:
+    MIRROR_RAMP_STAGES = tuple(
+        {
+            **stage,
+            "max_nfev": min(int(stage.get("max_nfev", MAX_NFEV)), MAX_NFEV),
+        }
+        for stage in MIRROR_RAMP_STAGES
+    )
 
 # Optimizer parameters.
 METHOD = CASE.get("method", "scipy")  # Try also "gauss_newton", "scipy_matrix_free", "lbfgs_adjoint", or "scalar_trust".
