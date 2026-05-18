@@ -103,7 +103,64 @@ def test_minimal_seed_showcase_config_patch_is_bounded_and_non_mutating() -> Non
     assert patched.trial_max_iter == 12
     assert patched.project_input_boundary_to_max_mode is True
     assert patched.min_vmec_mode >= 5
-    assert patched.qi_preseed_qp is True
+    assert patched.qi_preseed_qp is False
+    assert case.qi_policy_case == "qi_stel_seed_3127"
+    assert case.qi_reference_input.name == "input.nfp3_QI_fixed_resolution_final"
+
+
+def test_minimal_seed_showcase_dispatches_qi_to_staged_runner(tmp_path: Path, monkeypatch) -> None:
+    generator = _load_module("generate_minimal_seed_showcase_qi_staged", "generate_minimal_seed_showcase.py")
+    budget = generator.MinimalSeedBudget(
+        max_nfev=4,
+        continuation_nfev=3,
+        inner_max_iter=11,
+        inner_ftol=1.0e-8,
+        trial_max_iter=12,
+        trial_ftol=2.0e-8,
+    )
+    captured = {}
+
+    def _fake_staged_runner(config):
+        captured["config"] = config
+        return generator.sweep.CaseResult(
+            backend=config.backend_label,
+            problem="qi",
+            max_mode=config.max_mode,
+            use_ess=config.use_ess,
+            success=True,
+            crashed=False,
+            message="synthetic staged result",
+            policy=config.policy,
+            output_dir=str(config.output_dir),
+        )
+
+    monkeypatch.setattr(generator.qi_staged_runner, "run_qi_staged_case", _fake_staged_runner)
+    original_configs = dict(generator.sweep.PROBLEM_CONFIGS)
+    result = generator._run_showcase_case(
+        generator.SHOWCASE_CASES["qi_nfp2"],
+        tmp_path / "case",
+        backend_label="cpu",
+        solver_device="cpu",
+        worker_jax_platforms="cpu",
+        policy="continuation",
+        max_mode=3,
+        use_ess=True,
+        budget=budget,
+        input_file=tmp_path / "input.target_helicity_seed",
+    )
+
+    config = captured["config"]
+    assert result.problem == "qi"
+    assert config.name == "qi_nfp2"
+    assert config.input_file == tmp_path / "input.target_helicity_seed"
+    assert config.max_mode == 3
+    assert config.policy == "continuation"
+    assert config.policy_case == "nfp2_qi"
+    assert config.reference_input.name == "input.nfp2_QI"
+    assert config.max_nfev == 4
+    assert config.inner_max_iter == 11
+    assert config.trial_ftol == pytest.approx(2.0e-8)
+    assert generator.sweep.PROBLEM_CONFIGS == original_configs
 
 
 def test_minimal_seed_showcase_writes_target_helicity_seed_input(tmp_path: Path) -> None:

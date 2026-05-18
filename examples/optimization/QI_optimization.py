@@ -408,20 +408,40 @@ if _EXTERNAL_INPUT:
         "VMEC_JAX_QI_RUN_CASE",
         os.environ.get("VMEC_JAX_QI_LABEL", Path(_EXTERNAL_INPUT).name.replace("input.", "")),
     )
+    _external_policy_case = os.environ.get("VMEC_JAX_QI_POLICY_CASE", "qi_stel_seed_3127")
+    if _external_policy_case not in QI_CASES:
+        raise KeyError(
+            f"Unknown VMEC_JAX_QI_POLICY_CASE {_external_policy_case!r}; available cases: {sorted(QI_CASES)}"
+        )
+    _external_base_case = QI_CASES[_external_policy_case]
     _external_reference = os.environ.get("VMEC_JAX_QI_REFERENCE_INPUT")
     _external_boundary_reference = {"enabled": False}
     if _external_reference:
+        _external_max_mode = int(os.environ.get("VMEC_JAX_QI_MAX_MODE", _external_base_case["max_mode"]))
+        _reference_base = dict(
+            _external_base_case.get(
+                "boundary_reference_preconditioner",
+                QI_CASES["qi_stel_seed_3127"]["boundary_reference_preconditioner"],
+            )
+        )
         _external_boundary_reference = {
-            **QI_CASES["qi_stel_seed_3127"]["boundary_reference_preconditioner"],
+            **_reference_base,
             "enabled": True,
             "reference_input": Path(_external_reference).expanduser(),
+            "max_mode": _external_max_mode,
+            "target_aspect": float(_external_base_case.get("target_aspect", DEFAULT_QI_TARGET_ASPECT)),
+            "abs_iota_min": float(_external_base_case.get("target_abs_iota_min", 0.41)),
+            "max_mirror_ratio": float(_external_base_case.get("mirror_threshold", 0.30)),
+            "max_elongation": float(_external_base_case.get("max_elongation", 8.2)),
+            "smooth_qi_max": float(_external_base_case.get("qi_gate_smooth_max", 5.0e-3)),
+            "legacy_qi_max": float(_external_base_case.get("qi_gate_legacy_max", 2.0e-3)),
         }
     # External inputs use the far-seed robustness policy by default: first
     # establish a QI+iota basin, then add guarded engineering cleanup later.
     # If the user supplies VMEC_JAX_QI_REFERENCE_INPUT, the same deterministic
     # global-to-local reference-family preconditioner is enabled for that seed.
     QI_CASES[_external_label] = {
-        **QI_CASES["qi_stel_seed_3127"],
+        **_external_base_case,
         "case_goal": "external VMEC input using the far-seed QI+iota robustness policy",
         "input_file": Path(_EXTERNAL_INPUT).expanduser(),
         "output_dir": Path(
@@ -455,14 +475,19 @@ EXPECTED_GATE_STATUS = str(CASE.get("expected_gate_status", "candidate"))
 EXPECTED_GATE_FAILURES = tuple(CASE.get("expected_gate_failures", ()))
 STRESS_FIXTURE_NOTES = tuple(CASE.get("stress_fixture_notes", ()))
 KNOWN_BEST_NFP4_QUICK_AUDIT = dict(CASE.get("known_best_nfp4_quick_audit", {}))
-MAX_MODE = int(CASE["max_mode"])
-MIN_VMEC_MODE = int(CASE.get("min_vmec_mode", max(6, MAX_MODE + 3)))
-USE_MODE_CONTINUATION = bool(CASE["use_mode_continuation"])  # Repeats the same max-mode stage for QI cleanup.
-MAX_NFEV = int(CASE["max_nfev"])
+MAX_MODE = int(os.environ.get("VMEC_JAX_QI_MAX_MODE", CASE["max_mode"]))
+MIN_VMEC_MODE = int(os.environ.get("VMEC_JAX_QI_MIN_VMEC_MODE", CASE.get("min_vmec_mode", max(6, MAX_MODE + 3))))
+_USE_MODE_CONTINUATION_ENV = os.environ.get("VMEC_JAX_QI_USE_MODE_CONTINUATION")
+USE_MODE_CONTINUATION = (
+    bool(CASE["use_mode_continuation"])
+    if _USE_MODE_CONTINUATION_ENV is None
+    else _USE_MODE_CONTINUATION_ENV.strip().lower() not in {"0", "false", "no", "off"}
+)  # Repeats the same max-mode stage for QI cleanup.
+MAX_NFEV = int(os.environ.get("VMEC_JAX_QI_MAX_NFEV", CASE["max_nfev"]))
 CONTINUATION_NFEV = 0
 QI_PREFINE = False
 QI_PREFINE_NFEV = 30
-STAGE_REPEATS = int(CASE["stage_repeats"])
+STAGE_REPEATS = int(os.environ.get("VMEC_JAX_QI_STAGE_REPEATS", CASE["stage_repeats"]))
 STAGE_MODES = vj.repeated_stage_modes(
     max_mode=MAX_MODE,
     use_mode_continuation=USE_MODE_CONTINUATION,
@@ -478,13 +503,14 @@ SCIPY_LSMR_MAXITER = None  # None lets SciPy choose; set an int to cap LSMR iter
 FTOL = 1.0e-4  # Relative cost-reduction tolerance for the outer optimizer.
 GTOL = 1.0e-4  # Gradient optimality tolerance for the outer optimizer.
 XTOL = 1.0e-8  # Step-size tolerance; QI often benefits from a tighter value.
-INNER_MAX_ITER = 120  # Accepted-point VMEC iterations; 0 uses NITER from the input deck.
-INNER_FTOL = 1.0e-9  # Accepted-point VMEC tolerance; 0 uses FTOL from the input deck.
-TRIAL_MAX_ITER = 120  # Trial-point VMEC iterations; 0 follows the accepted/input budget.
-TRIAL_FTOL = 1.0e-9  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
-SOLVER_DEVICE = None  # None uses JAX default; set "cpu" or "gpu" to force one backend.
-USE_ESS = True  # Set False for an unscaled trust-region solve.
-ALPHA = 1.2  # ESS high-mode scaling strength.
+INNER_MAX_ITER = int(os.environ.get("VMEC_JAX_QI_INNER_MAX_ITER", 120))  # 0 uses NITER from the input deck.
+INNER_FTOL = float(os.environ.get("VMEC_JAX_QI_INNER_FTOL", 1.0e-9))  # 0 uses FTOL from the input deck.
+TRIAL_MAX_ITER = int(os.environ.get("VMEC_JAX_QI_TRIAL_MAX_ITER", 120))  # 0 follows accepted/input budget.
+TRIAL_FTOL = float(os.environ.get("VMEC_JAX_QI_TRIAL_FTOL", 1.0e-9))  # 0 follows accepted/input tolerance.
+_SOLVER_DEVICE_ENV = os.environ.get("VMEC_JAX_QI_SOLVER_DEVICE")
+SOLVER_DEVICE = None if _SOLVER_DEVICE_ENV in (None, "", "none", "None") else _SOLVER_DEVICE_ENV
+USE_ESS = os.environ.get("VMEC_JAX_QI_USE_ESS", "1").strip().lower() not in {"0", "false", "no", "off"}
+ALPHA = float(os.environ.get("VMEC_JAX_QI_ESS_ALPHA", 1.2))  # ESS high-mode scaling strength.
 # Common alternatives:
 # METHOD = "gauss_newton"
 # METHOD = "lbfgs_adjoint"
@@ -495,7 +521,7 @@ ALPHA = 1.2  # ESS high-mode scaling strength.
 # Output controls.
 SAVE_STAGE_INPUTS = True  # Keep per-stage input decks for continuation/debugging.
 SAVE_STAGE_WOUTS = False  # Set True to also write per-stage WOUT files.
-MAKE_PLOTS = True
+MAKE_PLOTS = os.environ.get("VMEC_JAX_QI_MAKE_PLOTS", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 # Scalar and field-quality targets.  The default objective optimizes QI,
 # aspect, and a nonzero-transform floor.  Mirror/elongation terms are useful

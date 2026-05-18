@@ -257,9 +257,9 @@ any inactive hint modes.  The current deterministic hint set is
 `RBC(1,0)`, `ZBS(1,0)`, `RBC(-1,1)`, `ZBS(-1,1)`, `RBC(1,1)`, and
 `ZBS(1,1)` in VMEC input-index convention.
 
-The current bounded common-seed production stress test is documented in the
-[optimization guide](docs/optimization.rst); it intentionally exposes several
-remaining robustness failures and should not be read as the best-row result.
+The bounded common-seed production stress test is documented in the
+[optimization guide](docs/optimization.rst); the saved panel there is a
+regression/stress artifact and should not be read as the best-row result.
 
 The QP and QI rows both start from the bundled NFP=2 QI seed.  QP is a
 quasi-poloidal-symmetry target using that same input deck; the current best QI

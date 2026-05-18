@@ -1,0 +1,136 @@
+from __future__ import annotations
+
+import importlib.util
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_runner():
+    script = ROOT / "examples" / "optimization" / "qi_staged_runner.py"
+    spec = importlib.util.spec_from_file_location("qi_staged_runner_test", script)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_qi_staged_runner_builds_external_input_environment(tmp_path: Path) -> None:
+    runner = _load_runner()
+    config = runner.QIStagedCaseConfig(
+        name="qi_nfp2",
+        input_file=ROOT / "examples" / "data" / "input.minimal_seed_nfp2",
+        output_dir=tmp_path / "out",
+        max_mode=3,
+        policy="direct",
+        policy_case="nfp2_qi",
+        reference_input=ROOT / "examples" / "data" / "input.nfp2_QI",
+        backend_label="gpu",
+        solver_device="gpu",
+        worker_jax_platforms="gpu",
+        use_ess=False,
+        max_nfev=5,
+        inner_max_iter=21,
+        inner_ftol=1.0e-8,
+        trial_max_iter=22,
+        trial_ftol=2.0e-8,
+        ess_alpha=1.7,
+        make_plots=False,
+    )
+
+    env = runner._build_qi_staged_env(config)
+
+    assert env["VMEC_JAX_QI_INPUT"].endswith("input.minimal_seed_nfp2")
+    assert env["VMEC_JAX_QI_OUTPUT_DIR"] == str(tmp_path / "out")
+    assert env["VMEC_JAX_QI_RUN_CASE"] == "qi_nfp2"
+    assert env["VMEC_JAX_QI_POLICY_CASE"] == "nfp2_qi"
+    assert env["VMEC_JAX_QI_REFERENCE_INPUT"].endswith("input.nfp2_QI")
+    assert env["VMEC_JAX_QI_MAX_MODE"] == "3"
+    assert env["VMEC_JAX_QI_USE_MODE_CONTINUATION"] == "0"
+    assert env["VMEC_JAX_QI_USE_ESS"] == "0"
+    assert env["VMEC_JAX_QI_MAKE_PLOTS"] == "0"
+    assert env["VMEC_JAX_QI_MAX_NFEV"] == "5"
+    assert env["VMEC_JAX_QI_INNER_MAX_ITER"] == "21"
+    assert env["VMEC_JAX_QI_TRIAL_FTOL"] == "2e-08"
+    assert env["VMEC_JAX_QI_SOLVER_DEVICE"] == "gpu"
+    assert env["JAX_PLATFORMS"] == "gpu"
+
+
+def test_qi_staged_runner_converts_artifacts_to_case_result(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "history.json").write_text(
+        """
+        {
+          "success": true,
+          "message": "synthetic optimizer success",
+          "objective_final": 1.5,
+          "qs_final": 2.5e-4,
+          "aspect_final": 9.5,
+          "iota_final": 0.52,
+          "nfev": 7,
+          "njev": 6,
+          "total_wall_time_s": 12.0,
+          "target_aspect": 10.0,
+          "profile": {"jacobian_total_wall_time_s": 3.0}
+        }
+        """
+    )
+    (out / "diagnostics.json").write_text(
+        """
+        {
+          "qi_engineering_gate_passed": true,
+          "qi_smooth_total": 1.0e-3,
+          "qi_legacy_total": 1.5e-3,
+          "qi_mirror_ratio_max": 0.28,
+          "qi_mirror_ratio_target": 0.30,
+          "qi_max_elongation": 6.5,
+          "qi_elongation_target": 8.2
+        }
+        """
+    )
+
+    calls = []
+
+    def _fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args=args[0], returncode=0)
+
+    monkeypatch.setattr(runner.subprocess, "run", _fake_run)
+    config = runner.QIStagedCaseConfig(
+        name="qi_nfp2",
+        input_file=ROOT / "examples" / "data" / "input.minimal_seed_nfp2",
+        output_dir=out,
+        max_mode=3,
+        policy_case="nfp2_qi",
+        solver_device="cpu",
+        worker_jax_platforms="cpu",
+        make_plots=False,
+    )
+
+    result = runner.run_qi_staged_case(config)
+
+    assert calls
+    assert result.success is True
+    assert result.crashed is False
+    assert result.problem == "qi"
+    assert result.max_mode == 3
+    assert result.objective_final == pytest.approx(1.5)
+    assert result.qs_final == pytest.approx(2.5e-4)
+    assert result.aspect_final == pytest.approx(9.5)
+    assert result.iota_final == pytest.approx(0.52)
+    assert result.nfev == 7
+    assert result.total_wall_time_s == pytest.approx(12.0)
+    assert result.profile_jacobian_total_wall_time_s == pytest.approx(3.0)
+    assert result.input_nfp == 2
+    assert result.qi_raw_total == pytest.approx(1.0e-3)
+    assert result.qi_legacy_total == pytest.approx(1.5e-3)
+    assert result.qi_mirror_ratio_max == pytest.approx(0.28)
+    assert result.qi_max_elongation == pytest.approx(6.5)

@@ -95,7 +95,11 @@ hint modes that are not yet active.  The current deterministic hint set is
 ``RBC(1,1)``, and ``ZBS(1,1)`` in VMEC input-index convention.
 
 The bounded common-seed showcase runner maps those inputs to QI NFP=1/2/3,
-QA NFP=2, QH NFP=4, and QP NFP=2:
+QA NFP=2, QH NFP=4, and QP NFP=2.  The QI rows use
+``examples/optimization/qi_staged_runner.py`` to call the standalone
+``QI_optimization.py`` staged/reference-family policy, so they exercise the
+same robust QI machinery used for far-seed examples rather than the simpler
+quasisymmetry sweep path:
 
 .. code-block:: bash
 
@@ -107,14 +111,15 @@ QA NFP=2, QH NFP=4, and QP NFP=2:
      --inner-ftol 1e-9 --trial-ftol 1e-9 --case-timeout-s 1200
    PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py
 
-The current CPU stress-test run is deliberately included as a failure-revealing
-artifact.  With the bounded continuation/mode-3/ESS policy above, only
+The saved CPU stress-test panel below is deliberately included as a
+failure-revealing artifact.  In that bounded continuation/mode-3/ESS run, only
 ``qh_nfp4`` reached the current physics gates.  ``qa_nfp2`` stayed on the
 zero-iota branch, ``qp_nfp2`` reduced the quasisymmetry residual but missed the
 iota floor, ``qi_nfp1`` and ``qi_nfp3`` completed with low transform and poor
 QI/mirror/elongation gates, and ``qi_nfp2`` timed out cleanly at the 20-minute
-case budget.  This panel is therefore a regression/stress target for the
-seed-robust optimization lane, not a publication-quality optimization result.
+case budget.  This panel is therefore a historical regression/stress target for
+the seed-robust optimization lane, not a publication-quality optimization
+result; rerun the command above to regenerate it with the staged QI dispatch.
 
 .. image:: _static/figures/minimal_seed_showcase_objective_panel.png
    :width: 100%

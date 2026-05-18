@@ -75,7 +75,10 @@ deterministic hint set is `RBC(1,0)`, `ZBS(1,0)`, `RBC(-1,1)`,
 
 The bounded common-seed showcase is a stress test, not a best-result table.  It
 maps the minimal seeds to QI NFP=1/2/3, QA NFP=2, QH NFP=4, and QP NFP=2, then
-renders the failure-revealing objective panel used by the docs:
+renders the failure-revealing objective panel used by the docs.  The QI rows
+dispatch through `QI_optimization.py` via `qi_staged_runner.py`, so the common
+minimal seeds use the same staged/reference-family QI policy as the standalone
+QI example instead of the simpler quasisymmetry sweep path.
 
 ```bash
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_minimal_seed_showcase.py \

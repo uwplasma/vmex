@@ -62,6 +62,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import generate_qs_ess_sweep as sweep
+import qi_staged_runner
 from vmec_jax.namelist import InData, read_indata, write_indata
 
 
@@ -75,6 +76,8 @@ class MinimalSeedCase:
     input_file: Path
     qi_qp_preseed: bool | None = None
     qi_jit_booz: bool | None = None
+    qi_policy_case: str | None = None
+    qi_reference_input: Path | None = None
 
 
 SHOWCASE_CASES: dict[str, MinimalSeedCase] = {
@@ -83,24 +86,30 @@ SHOWCASE_CASES: dict[str, MinimalSeedCase] = {
         problem="qi",
         nfp=1,
         input_file=DATA_DIR / "input.minimal_seed_nfp1",
-        qi_qp_preseed=True,
+        qi_qp_preseed=False,
         qi_jit_booz=True,
+        qi_policy_case="nfp1_qi",
+        qi_reference_input=DATA_DIR / "input.nfp1_QI",
     ),
     "qi_nfp2": MinimalSeedCase(
         name="qi_nfp2",
         problem="qi",
         nfp=2,
         input_file=DATA_DIR / "input.minimal_seed_nfp2",
-        qi_qp_preseed=True,
+        qi_qp_preseed=False,
         qi_jit_booz=True,
+        qi_policy_case="nfp2_qi",
+        qi_reference_input=DATA_DIR / "input.nfp2_QI",
     ),
     "qi_nfp3": MinimalSeedCase(
         name="qi_nfp3",
         problem="qi",
         nfp=3,
         input_file=DATA_DIR / "input.minimal_seed_nfp3",
-        qi_qp_preseed=True,
+        qi_qp_preseed=False,
         qi_jit_booz=True,
+        qi_policy_case="qi_stel_seed_3127",
+        qi_reference_input=DATA_DIR / "input.nfp3_QI_fixed_resolution_final",
     ),
     "qa_nfp2": MinimalSeedCase(
         name="qa_nfp2",
@@ -286,7 +295,7 @@ def _case_output_dir(
 ) -> Path:
     qi_part = ""
     if case.problem == "qi":
-        qi_part = "qp_preseed" if bool(case.qi_qp_preseed) else "no_qp_preseed"
+        qi_part = case.qi_policy_case or ("qp_preseed" if bool(case.qi_qp_preseed) else "no_qp_preseed")
     parts = [output_root, backend_label, case.name, policy]
     if qi_part:
         parts.append(qi_part)
@@ -365,8 +374,12 @@ def _write_showcase_metadata(
     seed_amplitude: float = TARGET_HELICITY_SEED_AMPLITUDE,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    case_metadata = asdict(case)
+    case_metadata["input_file"] = str(case.input_file)
+    if case.qi_reference_input is not None:
+        case_metadata["qi_reference_input"] = str(case.qi_reference_input)
     metadata = {
-        "minimal_seed_case": asdict(case) | {"input_file": str(case.input_file)},
+        "minimal_seed_case": case_metadata,
         "policy": str(policy),
         "max_mode": int(max_mode),
         "use_ess": bool(use_ess),
@@ -398,6 +411,29 @@ def _run_showcase_case(
     input_file: Path | None = None,
 ) -> sweep.CaseResult:
     """Run one minimal-seed case with temporary sweep config overrides."""
+
+    if case.problem == "qi":
+        return qi_staged_runner.run_qi_staged_case(
+            qi_staged_runner.QIStagedCaseConfig(
+                name=case.name,
+                input_file=Path(input_file) if input_file is not None else case.input_file,
+                output_dir=output_dir,
+                max_mode=int(max_mode),
+                policy=str(policy),
+                policy_case=case.qi_policy_case or "qi_stel_seed_3127",
+                reference_input=case.qi_reference_input,
+                backend_label=str(backend_label),
+                solver_device=solver_device,
+                worker_jax_platforms=worker_jax_platforms,
+                use_ess=bool(use_ess),
+                max_nfev=int(budget.max_nfev),
+                inner_max_iter=int(budget.inner_max_iter),
+                inner_ftol=float(budget.inner_ftol),
+                trial_max_iter=int(budget.trial_max_iter),
+                trial_ftol=float(budget.trial_ftol),
+                make_plots=False,
+            )
+        )
 
     old_configs = dict(sweep.PROBLEM_CONFIGS)
     sweep.PROBLEM_CONFIGS[case.problem] = _problem_config_for_case(
