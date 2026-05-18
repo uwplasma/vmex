@@ -238,7 +238,11 @@ def test_bundled_wout_surface_averaged_currents_follow_ampere_radial_difference(
     """Stored J profiles should match VMEC's finite-difference of buco/bvco."""
     pytest.importorskip("netCDF4")
 
-    wout = read_wout(_repo_root() / wout_name)
+    wout_path = _repo_root() / wout_name
+    if not wout_path.exists():
+        pytest.skip(f"Missing bundled current-profile fixture: {case_name}")
+
+    wout = read_wout(wout_path)
     ns = int(wout.ns)
     assert ns >= 4
 

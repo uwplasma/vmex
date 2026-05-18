@@ -95,8 +95,13 @@ def test_bundled_wout_stored_bsup_cartesian_magnitude_matches_bmnc(
     pytest.importorskip("netCDF4")
 
     repo_root = _repo_root()
-    cfg, _indata = load_config(str(repo_root / input_name))
-    wout = read_wout(repo_root / wout_name)
+    input_path = repo_root / input_name
+    wout_path = repo_root / wout_name
+    if not input_path.exists() or not wout_path.exists():
+        pytest.skip(f"Missing bundled B-field fixture: {case_name}")
+
+    cfg, _indata = load_config(str(input_path))
+    wout = read_wout(wout_path)
     state = state_from_wout(wout)
     static = _small_static_aligned_to_wout(cfg, wout)
 
