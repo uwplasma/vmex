@@ -212,6 +212,23 @@ def test_exact_optimizer_patch_target_ignores_container_timers() -> None:
     assert target["share_of_total"] == pytest.approx(0.25)
 
 
+def test_exact_optimizer_patch_target_skips_broad_tape_build_when_unattributed_absent() -> None:
+    payload = {
+        "report_kind": "exact_optimizer_callback_profile",
+        "total_wall_time_s": 20.0,
+        "profile": {
+            "jacobian_total": {"count": 1, "wall_time_s": 20.0},
+            "exact_tape_build": {"count": 1, "wall_time_s": 9.0},
+            "jacobian_tape_replay": {"count": 1, "wall_time_s": 5.0},
+            "jacobian_residual_tangents": {"count": 1, "wall_time_s": 3.0},
+        },
+    }
+
+    summary = compare_tool.summarize_payload(payload, label="profile")
+
+    assert summary["exact_optimizer_patch_target"]["name"] == "jacobian_tape_replay"
+
+
 def test_qi_boozer_report_summary_extracts_phase_metrics() -> None:
     payload = {
         "schema_version": 1,

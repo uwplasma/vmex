@@ -626,11 +626,11 @@ def _exact_optimizer_patch_target(
         if name_s in EXACT_OPTIMIZER_CONTAINER_PROFILE_NAMES or name_s.endswith("_total"):
             continue
         if name_s == "exact_tape_build":
-            # Prefer exact_tape_build_unattributed when present; it is the
-            # actionable remainder after named nested tape phases are exposed.
-            if "exact_tape_build_unattributed" in profile:
-                continue
-        elif name_s not in EXACT_OPTIMIZER_PATCH_TARGET_NAMES:
+            # ``exact_tape_build`` encloses named tape phases.  If the profiler
+            # does not expose ``exact_tape_build_unattributed``, prefer the
+            # largest available replay/tangent leaf instead of this broad timer.
+            continue
+        if name_s not in EXACT_OPTIMIZER_PATCH_TARGET_NAMES:
             continue
         wall = float(rec.get("wall_time_s", 0.0))
         if wall <= 0.0:
