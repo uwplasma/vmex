@@ -180,6 +180,18 @@ def test_exact_optimizer_profile_skips_initial_metrics_by_default() -> None:
     assert args.initial_metrics is False
 
 
+def test_exact_optimizer_profile_gradient_alias_preserves_check_gradient() -> None:
+    gradient_only = exact_profile_tool._normalize_callback_args(
+        exact_profile_tool._parse_args(["--gradient-only"])
+    )
+    assert gradient_only.callback == "gradient"
+
+    checked = exact_profile_tool._normalize_callback_args(
+        exact_profile_tool._parse_args(["--gradient-only", "--check-gradient"])
+    )
+    assert checked.callback == "run"
+
+
 def test_exact_optimizer_profile_cache_snapshot_and_delta_schema() -> None:
     opt = FixedBoundaryExactOptimizer.__new__(FixedBoundaryExactOptimizer)
     opt._exact_cache = {"a": object()}

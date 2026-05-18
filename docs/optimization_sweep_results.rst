@@ -52,9 +52,14 @@ Run the CPU production sweep:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --rerun
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --rerun
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
+
+The current QI sweep configuration uses aspect target 10.  If the generated
+``qs_ess_summary_all.csv`` still contains QI rows with ``target_aspect = 5``,
+those rows predate the current QI policy and the sweep summary should be
+regenerated before using the QI entries.
 
 The constrained QI study has one extra axis: whether the QI solve starts from a
 same-mode QP preseed.  The production CLI default is ``--qi-qp-preseed off``;
@@ -62,8 +67,8 @@ regenerate the focused preseed/no-preseed matrix with:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both --rerun
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qi --modes 1,2,3 --ess both --qi-qp-preseed both --rerun
    PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
 
 Seed-robust QI is a larger validation matrix than the tracked constrained-QI
@@ -114,8 +119,8 @@ Run the GPU production sweep on a machine with a working JAX GPU install:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --rerun
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --rerun
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 Render the compact README panels from the best stellarator-symmetric rows:
@@ -142,10 +147,10 @@ asymmetric modes with ``1e-7``, and writes separate outputs under the
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --stellarator-asymmetric
-   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --stellarator-asymmetric
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --stellarator-asymmetric
-   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --stellarator-asymmetric
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --stellarator-asymmetric --rerun
+   PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --stellarator-asymmetric --rerun
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy continuation --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --stellarator-asymmetric --rerun
+   PYTHONPATH=. JAX_PLATFORM_NAME=gpu python examples/optimization/generate_qs_ess_sweep.py --backend-label gpu --solver-device gpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --stellarator-asymmetric --rerun
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 For NVIDIA-only JAX installations, ``JAX_PLATFORMS=cuda`` is also valid.  Do
@@ -157,8 +162,10 @@ README Best Rows
 
 The README intentionally shows only one best ``LASYM = F`` result per target.
 QA/QH/QP are selected from the CPU matrix and filtered against the common
-aspect-5 target.  QI is selected from the constrained QI study using the
-legacy branch diagnostic, mirror-ratio, elongation, iota, and aspect-ratio
+aspect-5 target.  QI candidates are selected from the current constrained-QI
+matrix when target-10 rows exist and from the dedicated staged
+``QI_optimization.py`` default lane otherwise; the selected QI row must satisfy
+the legacy branch diagnostic, mirror-ratio, elongation, iota, and aspect-ratio
 gates.  These panels include the original deck LCFS before any ``max_mode=1``
 optimization work, final LCFS, per-stage objective history, and final
 outer-surface ``|B|`` in Boozer coordinates evaluated with
@@ -267,9 +274,10 @@ Constrained QI Matrix
 The constrained QI renderer compares CPU and available GPU rows for
 ``max_mode = 1, 2, 3``, ESS on/off, continuation/direct, and QP-preseed
 on/off using the bundled NFP=2 ``input.nfp2_QI`` seed.  The current tracked
-snapshot only includes the current CPU continuation ``max_mode=3``
-rows; rerun the commands above to repopulate the full CPU/GPU/direct/asymmetric
-matrix under the current objective policy.  For each requested
+snapshot predates the target-10 QI policy and contains target-5 rows, so it is
+stale for current constrained-QI claims.  Rerun the commands above to populate
+the CPU/GPU/direct/asymmetric matrix under the current objective policy.  For
+each requested
 ``max_mode``, the input boundary is projected onto
 ``max(abs(m), abs(n)) <= max_mode`` before the stage is built, so the
 ``max_mode=1`` rows zero the mode-2 coefficients present in the warm start.
@@ -293,18 +301,18 @@ Downloadable constrained-QI summaries:
 - :download:`qi_constrained_summary.json <_static/figures/qi_constrained_summary.json>`
 - :download:`qi_constrained_best.json <_static/figures/qi_constrained_best.json>`
 
-In the current snapshot, the best available constrained QI row is CPU
-repeated-stage continuation, ``max_mode=3``, ESS, without a same-mode QP
-preseed.  It reaches legacy-ranked QI diagnostic ``2.17e-3``, maximum mirror
-ratio ``0.2106`` for a target ``0.21``, maximum elongation ``4.30`` for a
-target ``8.0``, aspect ratio ``5.001``, mean iota ``-0.5494``, and total wall
-time ``11.3 min``.  Best-row selection uses
+The stale target-5 snapshot reports a CPU repeated-stage continuation,
+``max_mode=3``, ESS row without a same-mode QP preseed: legacy-ranked QI
+diagnostic ``2.17e-3``, maximum mirror ratio ``0.2106`` for a target ``0.21``,
+maximum elongation ``4.30`` for a target ``8.0``, aspect ratio ``5.001``, mean
+iota ``-0.5494``, and total wall time ``11.3 min``.  Do not use that row as a
+current target-10 constrained-QI best case.  Best-row selection uses
 ``vmec_jax.qi_promotion_score``: raw-fallback legacy diagnostics are rejected,
 rows above the loose ``2e-2`` QI promotion ceiling cannot win solely by having
 good mirror/elongation, and engineering-clean rows are preferred over lower-QI
 rows only when they remain QI-like.
-This is a best-row report for the bundled QI-seeded lane, not evidence that
-the optimizer is seed-robust across unrelated QA/QH/QP/simple starts.
+The constrained matrix is a bundled-QI-seeded lane, not evidence that the
+optimizer is seed-robust across unrelated QA/QH/QP/simple starts.
 
 Non-stellarator-symmetric LASYM runs use the same script with
 ``--stellarator-asymmetric``.  The current LASYM artifacts are intentionally

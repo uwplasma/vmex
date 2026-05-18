@@ -316,16 +316,20 @@ def test_tangent_and_b_cartesian_helpers_cover_zero_and_nonzero_columns(monkeypa
 def test_objective_and_gradient_uses_residual_vjp_and_cotangent_factory(monkeypatch) -> None:
     import jax.numpy as jnp
     import vmec_jax.discrete_adjoint as adjoint_module
+    import vmec_jax.init_guess as init_guess_module
 
     opt = _bare_optimizer_for_state_ops()
+    opt._initial_tangent_cache_key = lambda params: ("test-key", np.asarray(params, dtype=float).shape)
     state = _state_from_coeffs(r=2.0, z=3.0)
     opt._solve_exact_with_tape = lambda _params, *, return_payload: (
         state,
         {"tape": "tape", "axis_override": {}},
     )
-    opt._initial_tangent_columns = lambda params, axis_override, *, profile_prefix: jnp.asarray(
-        [[1.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0, 0.0, 0.0]],
-        dtype=jnp.float64,
+    opt._boundary_from_params = lambda params: params
+    monkeypatch.setattr(
+        init_guess_module,
+        "initial_guess_from_boundary",
+        lambda _static, boundary, _indata, **_kwargs: _state_from_coeffs(r=boundary[0], z=boundary[1]),
     )
     monkeypatch.setattr(adjoint_module, "checkpoint_tape_state_vjp", lambda **kwargs: kwargs["final_cotangent"])
 
@@ -347,6 +351,7 @@ def test_objective_and_gradient_uses_residual_vjp_and_cotangent_factory(monkeypa
     cost, grad = opt.objective_and_gradient_fun(np.asarray([0.0, 0.0]))
     assert cost == pytest.approx(5.0)
     np.testing.assert_allclose(grad, [0.5, 0.5])
+    assert opt._profile["gradient_initial_vjp_cache_hit"]["count"] == 1
 
 
 def test_residual_linear_operator_products_use_tape_and_residual_transposes(monkeypatch) -> None:

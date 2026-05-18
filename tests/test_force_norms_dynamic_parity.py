@@ -19,7 +19,7 @@ pytestmark = pytest.mark.full
 
 
 _CASES = [
-    ("circular_tokamak", "examples/data/input.circular_tokamak", "examples/data/wout_circular_tokamak_reference.nc"),
+    ("circular_tokamak", "examples/data/input.circular_tokamak", "examples/data/wout_circular_tokamak.nc"),
 ]
 
 

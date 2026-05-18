@@ -38,6 +38,7 @@ def _callback_report(
             "exact_tape_build": {"count": accepted_replays, "wall_time_s": 3.0, "mean_wall_time_s": 1.5},
             "exact_tape_build_unattributed": {"count": accepted_replays, "wall_time_s": 0.5},
             "jacobian_initial_tangents": {"count": accepted_replays, "wall_time_s": 0.75},
+            "gradient_initial_vjp": {"count": accepted_replays, "wall_time_s": 0.4},
             "jacobian_residual_tangents": {"count": accepted_replays, "wall_time_s": 0.6},
             "jacobian_tape_replay": {
                 "count": accepted_replays,
@@ -87,6 +88,7 @@ def test_callback_report_summary_extracts_bottleneck_metrics() -> None:
     assert metrics["exact_tape_build_s"] == 3.0
     assert metrics["exact_tape_build_unattributed_s"] == 0.5
     assert metrics["initial_tangents_s"] == 0.75
+    assert metrics["initial_projection_s"] == 0.4
     assert metrics["residual_tangents_s"] == 0.6
     assert metrics["trial_solve_s"] == 1.0
     assert metrics["exact_solve_s"] == 3.5

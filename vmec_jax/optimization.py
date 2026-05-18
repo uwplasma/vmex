@@ -2436,17 +2436,56 @@ class FixedBoundaryExactOptimizer:
         self._profile_add("gradient_tape_replay", time.perf_counter() - t_replay)
 
         t_initial = time.perf_counter()
-        initial_tangents = self._initial_tangent_columns(
-            params,
-            axis_override,
-            profile_prefix="gradient",
-        )
-        grad = _jnp.tensordot(
-            _jnp.asarray(initial_tangents, dtype=_jnp.float64),
-            _jnp.asarray(initial_cotangent, dtype=_jnp.float64),
-            axes=([1], [0]),
-        )
-        self._profile_add("gradient_initial_projection", time.perf_counter() - t_initial)
+        cache_key = None
+        initial_tangents = None
+        try:
+            cache_key = self._initial_tangent_cache_key(params)
+            initial_tangents = self._initial_tangent_cache.get(cache_key) if cache_key is not None else None
+        except Exception:
+            cache_key = None
+            initial_tangents = None
+        if initial_tangents is not None:
+            self._profile_add("gradient_initial_tangents_cache_hit", 0.0)
+            grad = _jnp.tensordot(
+                _jnp.asarray(initial_tangents, dtype=_jnp.float64),
+                _jnp.asarray(initial_cotangent, dtype=_jnp.float64),
+                axes=([1], [0]),
+            )
+            self._profile_add("gradient_initial_projection", time.perf_counter() - t_initial)
+        else:
+            # For a fixed axis/flip branch the initial-state map is affine, so
+            # the same cache key used for tangent columns is valid for its VJP.
+            initial_vjp_key = None if cache_key is None else ("gradient_initial_vjp", cache_key)
+            initial_vjp = (
+                self._discrete_jacobian_helper_cache.get(initial_vjp_key)
+                if initial_vjp_key is not None
+                else None
+            )
+            if initial_vjp is not None:
+                self._profile_add("gradient_initial_vjp_cache_hit", 0.0)
+            else:
+                from .init_guess import initial_guess_from_boundary as _ig
+
+                axis_override = {
+                    key: _jnp.asarray(value, dtype=params.dtype) for key, value in axis_override.items()
+                }
+
+                def _initial_state_packed(p):
+                    bdy = self._boundary_from_params(p)
+                    s0 = _ig(
+                        self._static,
+                        bdy,
+                        self._indata,
+                        vmec_project=True,
+                        axis_override=axis_override,
+                    )
+                    return _jnp.asarray(pack_state(s0), dtype=_jnp.float64)
+
+                _, initial_vjp = jax.vjp(_initial_state_packed, params)
+                if initial_vjp_key is not None:
+                    self._discrete_jacobian_helper_cache[initial_vjp_key] = initial_vjp
+            grad = initial_vjp(_jnp.asarray(initial_cotangent, dtype=_jnp.float64))[0]
+            self._profile_add("gradient_initial_vjp", time.perf_counter() - t_initial)
         self._profile_add("gradient_total", time.perf_counter() - t_total)
         return float(np.asarray(cost, dtype=float)), np.asarray(grad, dtype=float)
 

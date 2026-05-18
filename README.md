@@ -256,10 +256,19 @@ nonzero minimal modes unchanged, and let the active `max_mode` projection drop
 any inactive hint modes.  The current deterministic hint set is
 `RBC(1,0)`, `ZBS(1,0)`, `RBC(-1,1)`, `ZBS(-1,1)`, `RBC(1,1)`, and
 `ZBS(1,1)` in VMEC input-index convention.
+QA and QP common-seed production rows also use a per-run reference-family
+preseed, without modifying the raw input decks: QA blends the active low-order
+RBC/ZBS space 25% toward `input.nfp2_QA_omnigenity`, and QP blends 25% toward
+`input.nfp2_QI`.  This is explicit provenance in `showcase_case.json` and is
+used to escape the zero-transform branch before local exact optimization.
 
 The bounded common-seed production stress test is documented in the
 [optimization guide](docs/optimization.rst); the saved panel there is a
-regression/stress artifact and should not be read as the best-row result.
+regression/stress artifact and should not be read as the best-row result.  In
+that lane, QI cases are routed through `examples/optimization/qi_staged_runner.py`
+into the staged `QI_optimization.py` policy; stale pre-dispatch QI rows under
+`.../qi_nfp*/continuation/qp_preseed/...`, and QA/QP rows without reference
+preseed metadata, should be regenerated before use.
 
 The QP and QI rows both start from the bundled NFP=2 QI seed.  QP is a
 quasi-poloidal-symmetry target using that same input deck; the current best QI
@@ -317,13 +326,16 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_swee
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qh --modes 3 --ess on
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qp --modes 3 --ess off
 PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi python examples/optimization/QI_optimization.py
-PYTHONPATH=. python examples/optimization/render_qi_constrained_sweep.py
+PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 ```
 
 The sweep driver skips existing successful `case_result.json` rows by default;
 append `--rerun` to a sweep command when you need to overwrite local artifacts
 and reproduce a row from scratch.
+The constrained-QI matrix is a separate sweep artifact; regenerate it with the
+QI preseed/no-preseed commands in `docs/optimization_sweep_results.rst` before
+running `render_qi_constrained_sweep.py`.
 
 For QI seed-robustness probes, set `VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127`
 when running `examples/optimization/QI_optimization.py`, or change the

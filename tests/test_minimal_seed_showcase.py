@@ -80,6 +80,32 @@ def test_minimal_seed_showcase_writes_per_run_seeded_input_without_mutating_raw_
         assert got.indexed[family][index] == pytest.approx(value)
 
 
+def test_minimal_seed_showcase_reference_preseed_is_per_run_and_bounded(tmp_path: Path) -> None:
+    generator = _load_module("generate_minimal_seed_showcase_reference_preseed", "generate_minimal_seed_showcase.py")
+    case = generator.SHOWCASE_CASES["qa_nfp2"]
+    raw_seed_text = case.input_file.read_text()
+
+    preseeded_input, changes = generator._write_reference_preseeded_input(
+        case.input_file,
+        case.reference_preseed_input,
+        tmp_path,
+        max_mode=1,
+        blend=case.reference_preseed_blend,
+    )
+
+    assert preseeded_input == tmp_path / "input.reference_preseed"
+    assert case.input_file.read_text() == raw_seed_text
+    assert changes
+    assert all(max(abs(change["n"]), abs(change["m"])) <= 1 for change in changes)
+    assert all(not (change["family"] == "RBC" and change["n"] == 0 and change["m"] == 0) for change in changes)
+
+    got = generator.read_indata(preseeded_input)
+    assert got.indexed["RBC"][(0, 0)] == pytest.approx(1.0)
+    assert got.indexed["RBC"][(1, 0)] == pytest.approx(0.25 * 0.009486394873335013)
+    assert got.indexed["ZBS"][(1, 0)] == pytest.approx(0.25 * -0.001583241687798362)
+    assert (2, 0) not in got.indexed.get("RBC", {})
+
+
 def test_minimal_seed_showcase_config_patch_is_bounded_and_non_mutating() -> None:
     generator = _load_module("generate_minimal_seed_showcase_cfg", "generate_minimal_seed_showcase.py")
     budget = generator.MinimalSeedBudget(
@@ -354,6 +380,15 @@ def test_minimal_seed_renderer_loads_records_and_returns_monotone_segments(tmp_p
                     "problem": case.problem,
                     "nfp": case.nfp,
                     "input_file": str(case.input_file),
+                    "reference_preseed_input": str(case.reference_preseed_input),
+                    "reference_preseed_blend": case.reference_preseed_blend,
+                },
+                "reference_preseed": {
+                    "enabled": True,
+                    "blend": case.reference_preseed_blend,
+                    "reference_input": str(case.reference_preseed_input),
+                    "preseeded_input_file": str(output_dir / "input.reference_preseed"),
+                    "changes": [{"family": "RBC", "n": 1, "m": 0, "old": 0.0, "new": 1e-3}],
                 },
                 "policy": "continuation",
                 "max_mode": 3,
@@ -398,6 +433,28 @@ def test_minimal_seed_renderer_loads_records_and_returns_monotone_segments(tmp_p
     assert len(records) == 1
     assert records[0].case_name == "qa_nfp2"
 
+    stale_dir = tmp_path / "cpu" / "qa_nfp2_old" / "continuation" / "mode3" / "ess"
+    stale_dir.mkdir(parents=True)
+    (stale_dir / "showcase_case.json").write_text(
+        json.dumps(
+            {
+                "minimal_seed_case": {
+                    "name": case.name,
+                    "problem": case.problem,
+                    "nfp": case.nfp,
+                    "input_file": str(case.input_file),
+                },
+                "policy": "continuation",
+                "max_mode": 3,
+                "use_ess": True,
+            }
+        )
+    )
+    (stale_dir / "case_result.json").write_text((output_dir / "case_result.json").read_text())
+    stale_records = renderer.load_records(stale_dir)
+    assert stale_records[0].stale_reason is not None
+    assert "reference-family preseed" in stale_records[0].stale_reason
+
     failed_dir = tmp_path / "cpu" / "qh_nfp4" / "continuation" / "mode3" / "ess"
     failed_dir.mkdir(parents=True)
     (failed_dir / "showcase_case.json").write_text(
@@ -408,6 +465,8 @@ def test_minimal_seed_renderer_loads_records_and_returns_monotone_segments(tmp_p
                     "problem": "qh",
                     "nfp": 4,
                     "input_file": "input.minimal_seed_nfp4",
+                    "reference_preseed_input": None,
+                    "reference_preseed_blend": 0.0,
                 },
                 "policy": "continuation",
                 "max_mode": 3,
