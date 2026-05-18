@@ -10,14 +10,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
+import numpy as np
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _pyplot():
+    """Import matplotlib only for the plotting paths."""
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    return plt
 
 
 def _load_summary(path: Path) -> dict[str, Any]:
@@ -309,6 +316,7 @@ def _draw_speedup_panel(
 
 
 def _write_runtime_figure(rows: list[dict[str, Any]], outpath: Path, *, figure_kind: str) -> None:
+    plt = _pyplot()
     if figure_kind == "fixed":
         rows = [row for row in rows if not bool(row["lfreeb"])]
     elif figure_kind == "freeb":
@@ -383,6 +391,7 @@ def _write_runtime_figure(rows: list[dict[str, Any]], outpath: Path, *, figure_k
 
 
 def _write_figure(rows: list[dict[str, Any]], outpath: Path, *, figure_kind: str) -> None:
+    plt = _pyplot()
     if figure_kind == "fixed":
         rows = [row for row in rows if not bool(row["lfreeb"])]
     elif figure_kind == "freeb":

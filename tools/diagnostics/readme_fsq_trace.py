@@ -20,18 +20,25 @@ import time
 from pathlib import Path
 from typing import Final
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import netCDF4  # noqa: E402
-import numpy as np  # noqa: E402
+import netCDF4
+import numpy as np
 
 from vmec_jax.vmec2000_exec import _patch_indata, find_vmec2000_exec, run_xvmec2000
 
 _C_VMEC2000: Final[str] = "#1f77b4"  # blue
 _C_VMEC_JAX: Final[str] = "#ff7f0e"  # orange
 _C_VMECPP: Final[str] = "#2ca02c"  # green
+
+
+def _pyplot():
+    """Import matplotlib only when a figure is actually requested."""
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    return plt
 
 
 def _find_wout(workdir: Path, *, case: str) -> Path:
@@ -446,6 +453,7 @@ def main() -> None:
             it_pp_s, fsq_pp_s, wout_pp_s = None, None, {}
         mismatch_s = _trace_mismatch(it_vmec_s, fsq_vmec_s, it_jax_s, fsq_jax_s)
 
+    plt = _pyplot()
     fig, axes = plt.subplots(1, 2, figsize=(12.5, 4.2))
     _plot_panel(
         axes[0],

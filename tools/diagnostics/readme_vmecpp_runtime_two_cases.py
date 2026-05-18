@@ -29,15 +29,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-
 from vmec_jax.vmec2000_exec import _patch_indata, find_vmec2000_exec, run_xvmec2000
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _pyplot():
+    """Import matplotlib only when the runtime figure is rendered."""
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    return plt
 
 
 def _find_vmecpp_tools(vmecpp_root: Path | None) -> tuple[Path, Path]:
@@ -310,6 +316,7 @@ def main() -> int:
     vmec_jax = [results[k]["vmec_jax_runtime_s"] for k in labels]
     vmecpp = [results[k]["vmecpp_runtime_s"] if results[k].get("vmecpp_runtime_s") is not None else float("nan") for k in labels]
 
+    plt = _pyplot()
     x = list(range(len(labels)))
     w = 0.25
     fig, ax = plt.subplots(1, 1, figsize=(10.5, 3.8))
