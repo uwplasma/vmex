@@ -100,13 +100,12 @@ QA NFP=2, QH NFP=4, and QP NFP=2:
 
 The current CPU stress-test run is deliberately included as a failure-revealing
 artifact.  With the bounded continuation/mode-3/ESS policy above, only
-``qi_nfp1`` and ``qa_nfp2`` wrote successful records, and neither reached the
-intended physics target: ``qi_nfp1`` ended with low iota and poor mirror/elongation,
-while ``qa_nfp2`` stayed on the zero-iota branch.  ``qi_nfp2`` timed out, and
-``qi_nfp3``, ``qh_nfp4``, and ``qp_nfp2`` exposed worker-exit robustness
-failures before writing useful final histories.  This panel is therefore a
-regression/stress target for the seed-robust optimization lane, not a
-publication-quality optimization result.
+``qh_nfp4`` reached the current physics gates.  ``qa_nfp2`` stayed on the
+zero-iota branch, ``qp_nfp2`` reduced the quasisymmetry residual but missed the
+iota floor, ``qi_nfp1`` and ``qi_nfp3`` completed with low transform and poor
+QI/mirror/elongation gates, and ``qi_nfp2`` timed out cleanly at the 20-minute
+case budget.  This panel is therefore a regression/stress target for the
+seed-robust optimization lane, not a publication-quality optimization result.
 
 .. image:: _static/figures/minimal_seed_showcase_objective_panel.png
    :width: 100%
