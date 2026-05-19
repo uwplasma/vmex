@@ -170,10 +170,15 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "Unknown QI RUN_CASE" in cases_text
     assert '"nfp1_qi"' in cases_text
     assert '"qi_stel_seed_3127"' in cases_text
+    assert '"nfp4_qi_finite_beta"' in cases_text
     assert '"nfp4_qh_warm_to_qi"' in cases_text
     assert 'DATA_DIR / "input.nfp1_QI"' in cases_text
     assert 'DATA_DIR / "input.QI_stel_seed_3127"' in cases_text
+    assert 'DATA_DIR / "input.nfp4_QI_finite_beta"' in cases_text
     assert 'DATA_DIR / "input.nfp4_QH_warm_start"' in cases_text
+    assert 'CASE.get("inner_max_iter", 120)' in text
+    assert '"inner_max_iter": 0' in cases_text
+    assert '"trial_max_iter": 0' in cases_text
     assert 'QI_GATE_LEGACY_MAX = float(CASE.get("qi_gate_legacy_max", 2.0e-3))' in text
     assert '"phimin": 0.0' in cases_text
     assert '"weighted_shuffle_profile_weight": 0.0' in cases_text
@@ -317,6 +322,8 @@ def test_qi_nfp4_case_is_explicit_nonpassing_stress_fixture() -> None:
     assert "qi_case_expected_outcome_met" in text
     assert "expected_non_passing_stress" in text
     assert "NFP=4 QI" in docs
+    assert "nfp4_qi_finite_beta" in docs
+    assert "finite-beta NFP=4 verification lane" in docs
     assert "non-passing stress fixture" in docs
     assert "nfp4_qh_warm_to_qi" in docs
 

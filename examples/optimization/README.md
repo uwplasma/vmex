@@ -278,6 +278,9 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_seed_robustness.p
 PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 \
   VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_current_public_final \
   python examples/optimization/QI_optimization.py
+PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta \
+  VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp4_qi_finite_beta \
+  python examples/optimization/QI_optimization.py
 PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_boundary_interpolation_scan.py \
   --seed-input examples/data/input.QI_stel_seed_3127 \
   --reference-input examples/data/input.nfp3_QI_fixed_resolution_final \
