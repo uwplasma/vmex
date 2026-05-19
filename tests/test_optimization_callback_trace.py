@@ -307,6 +307,42 @@ def test_exact_optimizer_profiles_trial_solver_timing_buckets() -> None:
     assert profile["solve_forward_trial_unattributed"]["wall_time_s"] == pytest.approx(0.15)
 
 
+def test_exact_optimizer_profiles_solver_outer_timing_without_double_counting() -> None:
+    opt = FixedBoundaryExactOptimizer.__new__(FixedBoundaryExactOptimizer)
+    opt._profile = {}
+
+    opt._profile_solver_timing(
+        {
+            "timing": {
+                "setup_total_s": 0.20,
+                "setup_axis_reset_s": 0.03,
+                "setup_unattributed_s": 0.17,
+                "iteration_loop_s": 0.70,
+                "iteration_prepare_s": 0.08,
+                "compute_forces_s": 0.20,
+                "iteration_residual_metrics_s": 0.09,
+                "preconditioner_s": 0.15,
+                "update_s": 0.10,
+                "iteration_post_update_s": 0.04,
+                "iteration_loop_unattributed_s": 0.04,
+                "finalize_s": 0.05,
+            }
+        },
+        profile_prefix="exact_tape_solver",
+        phase_wall_s=1.00,
+        unattributed_name="solve_forward_exact_unattributed",
+    )
+    profile = opt._profile_dump()
+
+    assert profile["exact_tape_solver_setup_total"]["wall_time_s"] == 0.20
+    assert profile["exact_tape_solver_setup_axis_reset"]["wall_time_s"] == 0.03
+    assert profile["exact_tape_solver_iteration_loop"]["wall_time_s"] == 0.70
+    assert profile["exact_tape_solver_iteration_residual_metrics"]["wall_time_s"] == 0.09
+    assert profile["exact_tape_solver_iteration_loop_unattributed"]["wall_time_s"] == 0.04
+    assert profile["exact_tape_solver_finalize"]["wall_time_s"] == 0.05
+    assert profile["solve_forward_exact_unattributed"]["wall_time_s"] == pytest.approx(0.05)
+
+
 def test_exact_optimizer_profiles_scan_solver_timing_buckets() -> None:
     opt = FixedBoundaryExactOptimizer.__new__(FixedBoundaryExactOptimizer)
     opt._profile = {}

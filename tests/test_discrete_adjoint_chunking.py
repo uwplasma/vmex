@@ -327,7 +327,14 @@ def test_direct_checkpoint_tape_records_build_leaf_timing(monkeypatch):
         return SimpleNamespace(
             state=state,
             diagnostics={
-                "timing": {"compute_forces_s": 0.1},
+                "timing": {
+                    "setup_total_s": 0.2,
+                    "iteration_loop_s": 0.7,
+                    "compute_forces_s": 0.1,
+                    "iteration_residual_metrics_s": 0.3,
+                    "iteration_loop_unattributed_s": 0.1,
+                    "finalize_s": 0.05,
+                },
                 "adjoint_step_trace": [trace],
                 "converged": True,
             },
@@ -353,7 +360,12 @@ def test_direct_checkpoint_tape_records_build_leaf_timing(monkeypatch):
     )
 
     timing = tape.diagnostics["timing"]
+    assert timing["setup_total_s"] == 0.2
+    assert timing["iteration_loop_s"] == 0.7
     assert timing["compute_forces_s"] == 0.1
+    assert timing["iteration_residual_metrics_s"] == 0.3
+    assert timing["iteration_loop_unattributed_s"] == 0.1
+    assert timing["finalize_s"] == 0.05
     for key in (
         "tape_solve_call_s",
         "tape_final_state_pack_s",

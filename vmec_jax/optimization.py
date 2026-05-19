@@ -1620,7 +1620,14 @@ class FixedBoundaryExactOptimizer:
             return 0.0
         solver_total = 0.0
         timing_keys = (
+            ("solve_total_s", "solve_total"),
+            ("setup_total_s", "setup_total"),
+            ("setup_axis_reset_s", "setup_axis_reset"),
+            ("setup_unattributed_s", "setup_unattributed"),
+            ("iteration_loop_s", "iteration_loop"),
+            ("iteration_prepare_s", "iteration_prepare"),
             ("compute_forces_s", "compute_forces"),
+            ("iteration_residual_metrics_s", "iteration_residual_metrics"),
             ("preconditioner_s", "preconditioner"),
             ("precond_refresh_s", "precond_refresh"),
             ("precond_apply_s", "preconditioner_apply"),
@@ -1629,12 +1636,18 @@ class FixedBoundaryExactOptimizer:
             ("update_state_s", "update_state"),
             ("update_trace_build_s", "update_trace_build"),
             ("update_trace_finalize_s", "update_trace_finalize"),
+            ("iteration_post_update_s", "iteration_post_update"),
+            ("iteration_loop_unattributed_s", "iteration_loop_unattributed"),
+            ("finalize_s", "finalize"),
             ("scan_total_s", "scan_total"),
             ("scan_preflight_s", "scan_preflight"),
             ("scan_device_run_s", "scan_device_run"),
             ("scan_host_materialize_s", "scan_host_materialize"),
             ("scan_postprocess_s", "scan_postprocess"),
         )
+        outer_solver_total_keys = {"setup_total_s", "iteration_loop_s", "finalize_s", "scan_total_s"}
+        fallback_solver_total_keys = {"compute_forces_s", "preconditioner_s", "update_s", "scan_total_s"}
+        has_outer_solver_total = any(key in timing for key in outer_solver_total_keys)
         for key, suffix in timing_keys:
             if key not in timing:
                 continue
@@ -1643,7 +1656,7 @@ class FixedBoundaryExactOptimizer:
             except Exception:
                 continue
             self._profile_add(f"{profile_prefix}_{suffix}", value)
-            if key in ("compute_forces_s", "preconditioner_s", "update_s", "scan_total_s"):
+            if key in (outer_solver_total_keys if has_outer_solver_total else fallback_solver_total_keys):
                 solver_total += max(0.0, value)
         if unattributed_name is not None:
             self._profile_add(unattributed_name, max(0.0, float(phase_wall_s) - solver_total))

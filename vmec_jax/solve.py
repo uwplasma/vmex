@@ -5325,6 +5325,7 @@ def solve_fixed_boundary_residual_iter(
     adjoint_trace_mode: str = "full",
 ) -> SolveVmecResidualResult:
     """VMEC-style fixed-point update loop using preconditioned force residuals."""
+    _solve_wall_start = time.perf_counter()
     if not has_jax():
         raise ImportError("solve_fixed_boundary_residual_iter requires JAX (jax + jaxlib)")
 
@@ -10796,6 +10797,14 @@ def solve_fixed_boundary_residual_iter(
     timing_detail_env = os.getenv("VMEC_JAX_TIMING_DETAIL", "").strip().lower()
     timing_detail_enabled = timing_enabled and timing_detail_env not in ("", "0", "false", "no")
     timing_stats = {
+        "setup_total": 0.0,
+        "setup_axis_reset": 0.0,
+        "iteration_loop": 0.0,
+        "iteration_prepare": 0.0,
+        "iteration_residual_metrics": 0.0,
+        "iteration_post_update": 0.0,
+        "iteration_loop_unattributed": 0.0,
+        "finalize": 0.0,
         "compute_forces": 0.0,
         "preconditioner": 0.0,
         "precond_apply": 0.0,
@@ -11533,6 +11542,7 @@ def solve_fixed_boundary_residual_iter(
     # VMEC `eqsolve`: if the initial Jacobian changes sign, improve the axis
     # guess *before* the first iteration (no extra iter1). This aligns the
     # zero_m1 gating and time-control history with VMEC2000.
+    t_setup_axis_reset_start = time.perf_counter() if timing_enabled else None
     if bool(vmec2000_control) and (not axis_reset_done) and bool(lmove_axis):
         try:
             k0, _frzl0, _gcr2_0, _gcz2_0, _gcl2_0, _rz_scale0, _l_scale0, _norms0 = _compute_forces_iter(
@@ -11658,6 +11668,8 @@ def solve_fixed_boundary_residual_iter(
                 cache_constraint_zcon0 = None
         except Exception:
             pass
+    if timing_enabled and t_setup_axis_reset_start is not None:
+        timing_stats["setup_axis_reset"] += time.perf_counter() - float(t_setup_axis_reset_start)
 
     # Cache os.getenv calls that would otherwise be repeated every iteration
     # in the hot loop below (saves ~9 os.getenv calls × ~2144 iters = ~19k calls).
@@ -11670,6 +11682,9 @@ def solve_fixed_boundary_residual_iter(
     _env_dump_badjac = os.getenv("VMEC_JAX_DUMP_BADJAC", "")
     _env_dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
 
+    if timing_enabled:
+        timing_stats["setup_total"] = time.perf_counter() - float(_solve_wall_start)
+    t_iteration_loop_start = time.perf_counter() if timing_enabled else None
     last_iter2 = 0
     for it in range(max_iter):
         iter2 = it + 1 + int(iter_offset)
@@ -11681,6 +11696,7 @@ def solve_fixed_boundary_residual_iter(
         freeb_turnon_applied = False
         freeb_controls_cached: tuple[int, int, int] | None = None
         while True:
+            t_iteration_prepare_start = time.perf_counter() if timing_enabled else None
             iter_since_restart = iter2 - iter1
             fsq_prev_before = fsq_prev
             fsq0_prev_before = fsq0_prev
@@ -11890,6 +11906,8 @@ def solve_fixed_boundary_residual_iter(
                     except Exception:
                         profile_active = False
 
+            if timing_enabled and t_iteration_prepare_start is not None:
+                timing_stats["iteration_prepare"] += time.perf_counter() - float(t_iteration_prepare_start)
             t_compute_start = time.perf_counter() if timing_enabled else None
             k, frzl, gcr2, gcz2, gcl2, rz_scale, l_scale, norms_current = _compute_forces_iter(
                 state,
@@ -11931,6 +11949,7 @@ def solve_fixed_boundary_residual_iter(
                 except Exception:
                     pass
                 timing_stats["compute_forces"] += time.perf_counter() - float(t_compute_start)
+            t_residual_metrics_start = time.perf_counter() if timing_enabled else None
             norms_used = (
                 cache_norms
                 if (bool(vmec2000_control) and bool(vmec2000_cache_valid) and (not bool(need_bcovar_update)))
@@ -12141,6 +12160,8 @@ def solve_fixed_boundary_residual_iter(
             converged_physical = _converged_residuals_host(fsqr=fsqr_f, fsqz=fsqz_f, fsql=fsql_f)
 
             # Precondition forces.
+            if timing_enabled and t_residual_metrics_start is not None:
+                timing_stats["iteration_residual_metrics"] += time.perf_counter() - float(t_residual_metrics_start)
             t_precond_start = time.perf_counter() if timing_enabled else None
             frzl_lam_pre = None
             preconditioner_outputs_scaled = False
@@ -14368,6 +14389,7 @@ def solve_fixed_boundary_residual_iter(
                 w_try_history.append(float("nan"))
                 w_try_ratio_history.append(float("nan"))
                 restart_path_history.append("non_strict")
+        t_iteration_post_update_start = time.perf_counter() if timing_enabled else None
         _dump_evolve_trace(
             iter2=int(iter2),
             iter1=int(iter1),
@@ -14477,7 +14499,10 @@ def solve_fixed_boundary_residual_iter(
                 print(f"\n  VACUUM PRESSURE TURNED ON AT {int(iter2):4d} ITERATIONS\n", flush=True)
             freeb_ivac = int(freeb_ivac) + 1
         skip_time_control = False
+        if timing_enabled and t_iteration_post_update_start is not None:
+            timing_stats["iteration_post_update"] += time.perf_counter() - float(t_iteration_post_update_start)
 
+    t_finalize_start = time.perf_counter() if timing_enabled else None
     converged_strict_final, converged_total_final, _ = _residual_convergence_flags(
         fsqr=fsqr_f,
         fsqz=fsqz_f,
@@ -14567,22 +14592,57 @@ def solve_fixed_boundary_residual_iter(
         "freeb_nestor_sample_time_history": np.asarray(freeb_nestor_sample_time_history, dtype=float),
     }
     if timing_enabled:
+        if t_iteration_loop_start is not None and t_finalize_start is not None:
+            timing_stats["iteration_loop"] = float(t_finalize_start) - float(t_iteration_loop_start)
+        if t_finalize_start is not None:
+            timing_stats["finalize"] = time.perf_counter() - float(t_finalize_start)
+        setup_unattributed = max(
+            0.0,
+            float(timing_stats["setup_total"]) - float(timing_stats["setup_axis_reset"]),
+        )
+        loop_leaf_total = (
+            float(timing_stats["iteration_prepare"])
+            + float(timing_stats["compute_forces"])
+            + float(timing_stats["iteration_residual_metrics"])
+            + float(timing_stats["preconditioner"])
+            + float(timing_stats["update"])
+            + float(timing_stats["iteration_post_update"])
+        )
+        timing_stats["iteration_loop_unattributed"] = max(
+            0.0,
+            float(timing_stats["iteration_loop"]) - loop_leaf_total,
+        )
         iters = max(int(timing_stats["iterations"]), 1)
         timing_report = {
             "iterations": int(timing_stats["iterations"]),
+            "solve_total_s": float(time.perf_counter() - float(_solve_wall_start)),
+            "setup_total_s": float(timing_stats["setup_total"]),
+            "setup_axis_reset_s": float(timing_stats["setup_axis_reset"]),
+            "setup_unattributed_s": float(setup_unattributed),
+            "iteration_loop_s": float(timing_stats["iteration_loop"]),
+            "iteration_prepare_s": float(timing_stats["iteration_prepare"]),
             "compute_forces_s": float(timing_stats["compute_forces"]),
+            "iteration_residual_metrics_s": float(timing_stats["iteration_residual_metrics"]),
             "preconditioner_s": float(timing_stats["preconditioner"]),
             "precond_refresh_s": float(timing_stats["precond_refresh"]),
             "update_s": float(timing_stats["update"]),
             "update_state_s": float(timing_stats["update_state"]),
             "update_trace_build_s": float(timing_stats["update_trace_build"]),
             "update_trace_finalize_s": float(timing_stats["update_trace_finalize"]),
+            "iteration_post_update_s": float(timing_stats["iteration_post_update"]),
+            "iteration_loop_unattributed_s": float(timing_stats["iteration_loop_unattributed"]),
+            "finalize_s": float(timing_stats["finalize"]),
+            "setup_per_iter_s": float(timing_stats["setup_total"]) / iters,
+            "iteration_prepare_per_iter_s": float(timing_stats["iteration_prepare"]) / iters,
             "compute_forces_per_iter_s": float(timing_stats["compute_forces"]) / iters,
+            "iteration_residual_metrics_per_iter_s": float(timing_stats["iteration_residual_metrics"]) / iters,
             "preconditioner_per_iter_s": float(timing_stats["preconditioner"]) / iters,
             "update_per_iter_s": float(timing_stats["update"]) / iters,
             "update_state_per_iter_s": float(timing_stats["update_state"]) / iters,
             "update_trace_build_per_iter_s": float(timing_stats["update_trace_build"]) / iters,
             "update_trace_finalize_per_iter_s": float(timing_stats["update_trace_finalize"]) / iters,
+            "iteration_post_update_per_iter_s": float(timing_stats["iteration_post_update"]) / iters,
+            "iteration_loop_unattributed_per_iter_s": float(timing_stats["iteration_loop_unattributed"]) / iters,
         }
         if timing_detail_enabled:
             timing_report.update(

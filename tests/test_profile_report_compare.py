@@ -173,6 +173,43 @@ def test_profile_summary_extracts_solver_subphase_buckets() -> None:
     assert summary["metrics"]["exact_tape_solver_update_s"] == 1.50
 
 
+def test_profile_summary_extracts_solve_call_internal_buckets() -> None:
+    report = _callback_report(
+        total_wall_time_s=20.0,
+        samples=2,
+        rss_peak_mib=256,
+        replay_wall_time_s=2.0,
+        accepted_replays=2,
+        solve_count=3,
+        cache_entry_growth=4,
+        solver_device="cpu",
+    )
+    report["profile"]["exact_tape_build_solve_call"] = {"count": 1, "wall_time_s": 4.0}
+    report["profile"]["exact_tape_solver_setup_total"] = {"count": 1, "wall_time_s": 0.8}
+    report["profile"]["exact_tape_solver_setup_axis_reset"] = {"count": 1, "wall_time_s": 0.1}
+    report["profile"]["exact_tape_solver_setup_unattributed"] = {"count": 1, "wall_time_s": 0.7}
+    report["profile"]["exact_tape_solver_iteration_loop"] = {"count": 1, "wall_time_s": 2.8}
+    report["profile"]["exact_tape_solver_iteration_prepare"] = {"count": 1, "wall_time_s": 0.2}
+    report["profile"]["exact_tape_solver_compute_forces"] = {"count": 1, "wall_time_s": 0.5}
+    report["profile"]["exact_tape_solver_iteration_residual_metrics"] = {"count": 1, "wall_time_s": 1.2}
+    report["profile"]["exact_tape_solver_preconditioner"] = {"count": 1, "wall_time_s": 0.3}
+    report["profile"]["exact_tape_solver_update"] = {"count": 1, "wall_time_s": 0.4}
+    report["profile"]["exact_tape_solver_iteration_post_update"] = {"count": 1, "wall_time_s": 0.2}
+    report["profile"]["exact_tape_solver_iteration_loop_unattributed"] = {"count": 1, "wall_time_s": 2.5}
+    report["profile"]["exact_tape_solver_finalize"] = {"count": 1, "wall_time_s": 0.3}
+
+    summary = compare_tool.summarize_payload(report, label="cpu")
+
+    assert summary["metrics"]["exact_tape_build_solve_call_s"] == 4.0
+    assert summary["metrics"]["exact_tape_solver_setup_total_s"] == 0.8
+    assert summary["metrics"]["exact_tape_solver_setup_axis_reset_s"] == 0.1
+    assert summary["metrics"]["exact_tape_solver_iteration_loop_s"] == 2.8
+    assert summary["metrics"]["exact_tape_solver_iteration_residual_metrics_s"] == 1.2
+    assert summary["metrics"]["exact_tape_solver_iteration_loop_unattributed_s"] == 2.5
+    assert summary["metrics"]["exact_tape_solver_finalize_s"] == 0.3
+    assert summary["exact_optimizer_patch_target"]["name"] == "exact_tape_solver_iteration_loop_unattributed"
+
+
 def test_profile_summary_extracts_direct_tape_build_leaf_buckets() -> None:
     report = _callback_report(
         total_wall_time_s=20.0,

@@ -71,9 +71,19 @@ EXACT_PROFILE_METRIC_NAMES = {
     "forward_exact_solver_scan_total_s": ("forward_exact_solver_scan_total",),
     "forward_exact_solver_scan_device_run_s": ("forward_exact_solver_scan_device_run",),
     "forward_exact_solve_unattributed_s": ("solve_forward_exact_unattributed",),
+    "exact_tape_solver_solve_total_s": ("exact_tape_solver_solve_total",),
+    "exact_tape_solver_setup_total_s": ("exact_tape_solver_setup_total",),
+    "exact_tape_solver_setup_axis_reset_s": ("exact_tape_solver_setup_axis_reset",),
+    "exact_tape_solver_setup_unattributed_s": ("exact_tape_solver_setup_unattributed",),
+    "exact_tape_solver_iteration_loop_s": ("exact_tape_solver_iteration_loop",),
+    "exact_tape_solver_iteration_prepare_s": ("exact_tape_solver_iteration_prepare",),
     "exact_tape_solver_compute_forces_s": ("exact_tape_solver_compute_forces",),
+    "exact_tape_solver_iteration_residual_metrics_s": ("exact_tape_solver_iteration_residual_metrics",),
     "exact_tape_solver_preconditioner_s": ("exact_tape_solver_preconditioner",),
     "exact_tape_solver_update_s": ("exact_tape_solver_update",),
+    "exact_tape_solver_iteration_post_update_s": ("exact_tape_solver_iteration_post_update",),
+    "exact_tape_solver_iteration_loop_unattributed_s": ("exact_tape_solver_iteration_loop_unattributed",),
+    "exact_tape_solver_finalize_s": ("exact_tape_solver_finalize",),
 }
 
 EXACT_PROFILE_CONTAINER_PRIORITY = {
@@ -135,9 +145,19 @@ METRIC_ORDER = (
     "forward_exact_solver_scan_total_s",
     "forward_exact_solver_scan_device_run_s",
     "forward_exact_solve_unattributed_s",
+    "exact_tape_solver_solve_total_s",
+    "exact_tape_solver_setup_total_s",
+    "exact_tape_solver_setup_axis_reset_s",
+    "exact_tape_solver_setup_unattributed_s",
+    "exact_tape_solver_iteration_loop_s",
+    "exact_tape_solver_iteration_prepare_s",
     "exact_tape_solver_compute_forces_s",
+    "exact_tape_solver_iteration_residual_metrics_s",
     "exact_tape_solver_preconditioner_s",
     "exact_tape_solver_update_s",
+    "exact_tape_solver_iteration_post_update_s",
+    "exact_tape_solver_iteration_loop_unattributed_s",
+    "exact_tape_solver_finalize_s",
     "compile_time_s",
     "replay_time_s",
     "cache_time_s",
@@ -189,9 +209,19 @@ METRIC_LABELS = {
     "forward_exact_solver_scan_total_s": "forward exact solver scan total",
     "forward_exact_solver_scan_device_run_s": "forward exact solver scan device run",
     "forward_exact_solve_unattributed_s": "forward exact solve unattributed",
+    "exact_tape_solver_solve_total_s": "exact tape solver total",
+    "exact_tape_solver_setup_total_s": "exact tape solver setup total",
+    "exact_tape_solver_setup_axis_reset_s": "exact tape solver setup axis reset",
+    "exact_tape_solver_setup_unattributed_s": "exact tape solver setup unattributed",
+    "exact_tape_solver_iteration_loop_s": "exact tape solver iteration loop",
+    "exact_tape_solver_iteration_prepare_s": "exact tape solver iteration prepare",
     "exact_tape_solver_compute_forces_s": "exact tape solver compute_forces",
+    "exact_tape_solver_iteration_residual_metrics_s": "exact tape solver residual metrics",
     "exact_tape_solver_preconditioner_s": "exact tape solver preconditioner",
     "exact_tape_solver_update_s": "exact tape solver update",
+    "exact_tape_solver_iteration_post_update_s": "exact tape solver post-update",
+    "exact_tape_solver_iteration_loop_unattributed_s": "exact tape solver loop unattributed",
+    "exact_tape_solver_finalize_s": "exact tape solver finalize",
     "compile_time_s": "compile time",
     "replay_time_s": "replay time",
     "cache_time_s": "cache time",
@@ -229,6 +259,16 @@ BOTTLENECK_METRICS = (
     ("forward_exact_solver_compute_forces_s", "forward exact solver force assembly"),
     ("forward_exact_solver_preconditioner_s", "forward exact solver preconditioner"),
     ("forward_exact_solve_unattributed_s", "forward exact solver unattributed"),
+    ("exact_tape_solver_setup_axis_reset_s", "exact tape solver setup axis reset"),
+    ("exact_tape_solver_setup_unattributed_s", "exact tape solver setup unattributed"),
+    ("exact_tape_solver_iteration_prepare_s", "exact tape solver iteration preparation"),
+    ("exact_tape_solver_compute_forces_s", "exact tape solver force assembly"),
+    ("exact_tape_solver_iteration_residual_metrics_s", "exact tape solver residual metrics"),
+    ("exact_tape_solver_preconditioner_s", "exact tape solver preconditioner"),
+    ("exact_tape_solver_update_s", "exact tape solver update"),
+    ("exact_tape_solver_iteration_post_update_s", "exact tape solver post-update"),
+    ("exact_tape_solver_iteration_loop_unattributed_s", "exact tape solver loop unattributed"),
+    ("exact_tape_solver_finalize_s", "exact tape solver finalization"),
     ("replay_time_s", "accepted-point replay"),
     ("compile_time_s", "compile/JIT"),
     ("cache_time_s", "cache bookkeeping"),
@@ -277,10 +317,27 @@ EXACT_OPTIMIZER_PATCH_TARGET_NAMES = {
     "forward_exact_solver_scan_host_materialize",
     "forward_exact_solver_scan_postprocess",
     "solve_forward_exact_unattributed",
+    "exact_tape_solver_setup_axis_reset",
+    "exact_tape_solver_setup_unattributed",
+    "exact_tape_solver_iteration_prepare",
     "exact_tape_solver_compute_forces",
+    "exact_tape_solver_iteration_residual_metrics",
     "exact_tape_solver_preconditioner",
     "exact_tape_solver_update",
     "exact_tape_solver_update_state",
+    "exact_tape_solver_iteration_post_update",
+    "exact_tape_solver_iteration_loop_unattributed",
+    "exact_tape_solver_finalize",
+}
+
+EXACT_TAPE_SOLVE_CALL_DETAIL_NAMES = {
+    "exact_tape_solver_setup_axis_reset",
+    "exact_tape_solver_setup_unattributed",
+    "exact_tape_solver_iteration_prepare",
+    "exact_tape_solver_iteration_residual_metrics",
+    "exact_tape_solver_iteration_post_update",
+    "exact_tape_solver_iteration_loop_unattributed",
+    "exact_tape_solver_finalize",
 }
 
 EXACT_OPTIMIZER_CONTAINER_PROFILE_NAMES = {
@@ -767,6 +824,14 @@ def _exact_optimizer_patch_target(
             # ``exact_tape_build`` encloses named tape phases.  If the profiler
             # does not expose ``exact_tape_build_unattributed``, prefer the
             # largest available replay/tangent leaf instead of this broad timer.
+            continue
+        if name_s == "exact_tape_build_solve_call" and any(
+            float(profile[detail].get("wall_time_s", 0.0)) > 0.0
+            for detail in EXACT_TAPE_SOLVE_CALL_DETAIL_NAMES
+            if detail in profile
+        ):
+            # Once solve-call internals are present, treat the broad external
+            # solve timer as a container and choose a concrete child phase.
             continue
         if name_s not in EXACT_OPTIMIZER_PATCH_TARGET_NAMES:
             continue
