@@ -46,6 +46,7 @@ from vmec_jax.wout import (
     _vmec_symoutput_split,
     _vmec_wint_from_trig,
     _vmec_wint_from_trig_jax,
+    _vmec_wrout_lasym_bsubuv_output_scale,
     _vmec_wrout_nyquist_cos_coeffs,
     _vmec_wrout_nyquist_lasym_loop,
     _vmec_wrout_nyquist_sin_coeffs,
@@ -407,6 +408,15 @@ def test_wrout_nyquist_lasym_half_domain_unit_modes_normalize_to_one():
     )
     for name in ("gmns", "bmns", "bsupumns", "bsupvmns"):
         np.testing.assert_allclose(loop_sin[name][1], [0.0, 1.0], rtol=2.0e-14, atol=2.0e-14)
+
+    scaled = _vmec_wrout_lasym_bsubuv_output_scale(
+        bsubumnc=loop_cos["bsubumnc"],
+        bsubvmnc=loop_cos["bsubvmnc"],
+        bsubumns=loop_sin["bsubumns"],
+        bsubvmns=loop_sin["bsubvmns"],
+    )
+    for coeff in scaled:
+        np.testing.assert_allclose(coeff[1], [0.0, 2.0], rtol=2.0e-14, atol=2.0e-14)
 
 
 def test_jxbforce_coefficients_match_reference_loops():

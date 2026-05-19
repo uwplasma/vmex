@@ -3930,6 +3930,23 @@ def _vmec_wrout_nyquist_lasym_loop(
     )
 
 
+def _vmec_wrout_lasym_bsubuv_output_scale(
+    *,
+    bsubumnc: np.ndarray,
+    bsubvmnc: np.ndarray,
+    bsubumns: np.ndarray,
+    bsubvmns: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Apply VMEC's LASYM `wrout` scaling for covariant bsubu/bsubv coefficients."""
+
+    return (
+        2.0 * np.asarray(bsubumnc, dtype=float),
+        2.0 * np.asarray(bsubvmnc, dtype=float),
+        2.0 * np.asarray(bsubumns, dtype=float),
+        2.0 * np.asarray(bsubvmns, dtype=float),
+    )
+
+
 def _vmec_wrout_nyquist_synthesis(
     *,
     coeff_c: np.ndarray,
@@ -5344,6 +5361,13 @@ def wout_minimal_from_fixed_boundary(
             bsubumns[:, mask_bsub] = 0.0
             bsubvmnc[:, mask_bsub] = 0.0
             bsubvmns[:, mask_bsub] = 0.0
+
+        bsubumnc, bsubvmnc, bsubumns, bsubvmns = _vmec_wrout_lasym_bsubuv_output_scale(
+            bsubumnc=bsubumnc,
+            bsubvmnc=bsubvmnc,
+            bsubumns=bsubumns,
+            bsubvmns=bsubvmns,
+        )
 
         if gmnc.shape[0] > 0:
             gmnc[0, :] = 0.0
