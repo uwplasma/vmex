@@ -139,7 +139,7 @@ Reproduction commands for the QI coverage panel live in
 - Validation and VMEC2000 parity status: `docs/validation.rst`
 - Testing and coverage strategy: `docs/testing_strategy.rst`
 - Release checklist and CI gates: `docs/release_checklist.rst`
-- Latest published release: [`v0.0.10`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.10)
+- Latest published release: [`v0.0.11`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.11)
 
 ## CLI Reference
 

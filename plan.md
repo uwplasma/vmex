@@ -2,7 +2,7 @@
 
 Last updated: 2026-05-19
 Primary branch: `main`
-Baseline release: `v0.0.10`
+Baseline release: `v0.0.11`
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -349,7 +349,8 @@ converged-wout parity matrix/benchmark pass, QI diagnostic/objective branch
 hardening, the exact-output/API/release hygiene push, the custom QI seed audit
 documentation/regression gate, the v0.0.10 release, scan-runner cache reuse
 across boundary trials, detailed scan-timing diagnostics, reference-state wout
-roundtrip diagnostics, and the green `main` CI run for `f5c6d27`:
+roundtrip diagnostics, the green `main` CI run for `f5c6d27`, LASYM bsubv
+wout parity tightening, and QI staged-history provenance cleanup:
 
 - Continuation correctness: 100%. Source fix is implemented and covered by
   synthetic repeated-stage tests, a real boundary-projection stage test, and
