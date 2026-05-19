@@ -366,7 +366,8 @@ def test_run_fixed_boundary_records_iota_abs_min_on_stage_history(monkeypatch, t
     monkeypatch.setattr(workflow, "print_qs_problem_summary", lambda **_kwargs: None)
     monkeypatch.setattr(workflow, "print_qs_final_summary", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(workflow, "save_qs_stage_artifacts", lambda **_kwargs: None)
-    monkeypatch.setattr(workflow, "save_qs_final_outputs", lambda **_kwargs: None)
+    final_save_calls = []
+    monkeypatch.setattr(workflow, "save_qs_final_outputs", lambda **kwargs: final_save_calls.append(kwargs))
 
     result = workflow.run_fixed_boundary_objective_optimization(
         cfg="cfg",
@@ -386,9 +387,12 @@ def test_run_fixed_boundary_records_iota_abs_min_on_stage_history(monkeypatch, t
         label="fixed",
         use_mode_continuation=True,
         iota_abs_min=0.41,
+        save_final_outputs=False,
     )
 
     assert run_kwargs["iota_fn"] is not None
+    assert final_save_calls == []
+    assert result.final_result["_history_dump"]["label"] == "fixed"
     assert result.final_result["_history_dump"]["iota_abs_min"] == 0.41
 
 
@@ -428,7 +432,8 @@ def test_run_qi_records_iota_abs_min_and_prints_qi_terms(monkeypatch, tmp_path, 
     monkeypatch.setattr(workflow, "print_qs_problem_summary", lambda **_kwargs: print("summary"))
     monkeypatch.setattr(workflow, "print_qs_final_summary", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(workflow, "save_qs_stage_artifacts", lambda **_kwargs: None)
-    monkeypatch.setattr(workflow, "save_qs_final_outputs", lambda **_kwargs: None)
+    final_save_calls = []
+    monkeypatch.setattr(workflow, "save_qs_final_outputs", lambda **kwargs: final_save_calls.append(kwargs))
 
     result = workflow.run_quasi_isodynamic_objective_optimization(
         cfg="cfg",
@@ -470,12 +475,15 @@ def test_run_qi_records_iota_abs_min_and_prints_qi_terms(monkeypatch, tmp_path, 
         aligned_profile_trap_softness=0.05,
         phimin=0.0,
         iota_abs_min=0.52,
+        save_final_outputs=False,
     )
 
     out = capsys.readouterr().out
     assert "QI field objectives:" in out
     assert "  - qi_one" in out
     assert run_kwargs["iota_fn"] is not None
+    assert final_save_calls == []
+    assert result.final_result["_history_dump"]["label"] == "qi"
     assert result.final_result["_history_dump"]["iota_abs_min"] == 0.52
 
 

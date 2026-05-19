@@ -117,6 +117,7 @@ def test_optimization_readme_and_docs_teach_visible_workflow_anatomy() -> None:
     assert "save_input" in readme
     assert "save_wout" in readme
     assert "save_history" in readme
+    assert "save_final_outputs=False" in readme
     assert "plot_paths = {" in readme
     assert "vj.plot_3d_boundary_comparison(" in readme
     assert "vj.plot_bmag_contours(" in readme
@@ -146,6 +147,7 @@ def test_primary_example_solve_calls_do_not_take_physics_shortcuts() -> None:
             assert {"max_nfev", "method", "solver_device"} <= keywords
             assert "save_stage_inputs" in keywords
             assert "save_stage_wouts" in keywords
+            assert "save_final_outputs" in keywords
 
 
 def test_qi_example_uses_qi_problem_api() -> None:
@@ -1225,6 +1227,7 @@ def test_least_squares_solve_dispatches_regular_problem(monkeypatch, tmp_path) -
         ess_alpha=2.5,
         solver_device="cpu",
         save_stage_wouts=True,
+        save_final_outputs=False,
     )
 
     assert result == "regular-result"
@@ -1243,6 +1246,7 @@ def test_least_squares_solve_dispatches_regular_problem(monkeypatch, tmp_path) -
     assert captured["fix"] == ("rc00",)
     assert captured["solver_device"] == "cpu"
     assert captured["save_stage_wouts"] is True
+    assert captured["save_final_outputs"] is False
 
 
 def test_least_squares_solve_dispatches_qi_problem(monkeypatch, tmp_path) -> None:
@@ -1295,6 +1299,7 @@ def test_least_squares_solve_dispatches_qi_problem(monkeypatch, tmp_path) -> Non
         trial_max_iter=0,
         trial_ftol=0.0,
         solver_device="gpu",
+        save_final_outputs=False,
     )
 
     assert result == "qi-result"
@@ -1326,6 +1331,7 @@ def test_least_squares_solve_dispatches_qi_problem(monkeypatch, tmp_path) -> Non
     assert captured["trial_max_iter"] == 0
     assert captured["trial_ftol"] == 0.0
     assert captured["solver_device"] == "gpu"
+    assert captured["save_final_outputs"] is False
 
 
 def test_quasi_isodynamic_options_default_to_jitted_boozer_path() -> None:
