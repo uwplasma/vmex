@@ -302,10 +302,12 @@ def test_residual_callbacks_remember_exact_and_trial_residuals():
     np.testing.assert_allclose(opt.residual_fun(np.asarray([0.0])), [1.0])
     opt._scan_exact_path = "tape"
     np.testing.assert_allclose(opt.residual_fun(np.asarray([1.0])), [2.0])
+    np.testing.assert_allclose(opt.forward_residual_fun(np.asarray([1.0])), [2.0])
     np.testing.assert_allclose(opt.forward_residual_fun(np.asarray([2.0])), [3.0])
     np.testing.assert_allclose(opt.forward_residual_fun(np.asarray([2.0])), [3.0])
     assert opt._profile["scan_residual_eval_exact"]["count"] == 1
     assert opt._profile["residual_eval_exact"]["count"] == 1
+    assert opt._profile["trial_residual_exact_cache_hit"]["count"] == 1
     assert opt._profile["residual_eval_trial"]["count"] == 1
     assert opt._profile["trial_residual_cache_hit"]["count"] == 1
 

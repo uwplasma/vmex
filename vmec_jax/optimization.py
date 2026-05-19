@@ -2155,6 +2155,11 @@ class FixedBoundaryExactOptimizer:
         cached = self._cached_trial_residual(params)
         if cached is not None:
             return cached
+        exact_cached = self._cached_exact_residual(params)
+        if exact_cached is not None:
+            self._profile_add("trial_residual_exact_cache_hit", 0.0)
+            self._remember_trial_residual(params, exact_cached)
+            return np.asarray(exact_cached, dtype=float).reshape(-1)
         state = self._solve_forward(params, trial=True)
         t_res = time.perf_counter()
         out = self._evaluate_residuals_from_state(state)
