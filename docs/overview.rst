@@ -70,16 +70,14 @@ The project has now crossed the point where the main questions are less about
 "can it run?" and more about "which path should become the long-term stable
 interface?" The current state is:
 
-- **Parity**: fixed-boundary parity is strong across axisymmetric /
-  non-axisymmetric and ``lasym=False/True`` branches. Free-boundary parity is
-  strong on the main shipped matrix, with the remaining documented work
-  concentrated in non-axisymmetric ``lasym=True`` reuse-step drift and a small
-  number of heavy post-turn-on cases.
-- **Performance**: the fixed-boundary optimized controller is materially
-  faster on most bundled cases while still converging to the requested
-  ``ftol``. The remaining bottlenecks are now mostly control-path overhead,
-  host/device synchronization, and output-generation cost rather than a single
-  obviously wrong kernel.
+- **Parity**: fixed-boundary bundled-reference parity is strong across
+  axisymmetric / non-axisymmetric and ``lasym=False/True`` branches.
+  Free-boundary coverage combines bundled-reference gates, convergence-only
+  end-to-end tests, and optional executable-backed VMEC2000 checks.
+- **Performance**: the fixed-boundary controller now has profiled CPU/GPU
+  policies and lower optimization replay overhead.  Single-solve CPU runtime is
+  still a mixed result versus VMEC2000, so broad runtime wins are not part of
+  the current release claim.
 - **Differentiability**: explicit and implicit differentiation both work
   through the public Python API. The next gap is measurement: optimization /
   gradient cost needs the same benchmark discipline that parity already has.

@@ -131,11 +131,11 @@ solver device.  Trust the recorded `jax_backend`, `jax_device_kind`,
 `solver_device`, and `jax_platforms` fields in `case_result.json` or generated
 CSV files over the output directory name.
 
-For production fixed-boundary solves, the auto-selected CPU/GPU policy uses the
-VMEC-control non-scan loop because it is faster for converged equilibria on the
-current benchmark set. The scan loop remains available for explicit fast-mode
-experiments with `use_scan=True` from Python or `--fast`/`--solver-mode
-accelerated` from the CLI.
+For production fixed-boundary solves, the default policy selects the profiled
+VMEC-control non-scan path.  This is the most stable public path in the current
+validation matrix, not a guarantee that every input is runtime-optimal.  The
+scan loop remains available for explicit fast-mode experiments with
+`use_scan=True` from Python or `--fast`/`--solver-mode accelerated` from the CLI.
 
 For GPU runs, vmec_jax defaults `XLA_PYTHON_CLIENT_PREALLOCATE=false` before
 JAX import so the allocator grows on demand. This avoids GPU memory contention
@@ -270,12 +270,15 @@ PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 
 ## Optimization from Different Initial Conditions
 
-The repository also tracks robustness tests from less tailored seeds. The
-dedicated QI coverage figure below includes the `input.QI_stel_seed_3127`
-far-seed lane; the docs contain the longer discussion, gates, and landscape
-diagnostics. Common minimal-seed QA/QH/QP/QI runs start from
+The repository also tracks stress tests from less tailored seeds. The dedicated
+QI coverage figure below includes the `input.QI_stel_seed_3127` far-seed lane;
+the docs contain the longer discussion, gates, and landscape diagnostics.
+Common minimal-seed QA/QH/QP/QI runs start from
 `examples/data/input.minimal_seed_nfp*`, which contain only `RBC(0,0)`,
 `RBC(0,1)`, and `ZBS(0,1)` before optimization-time helicity hints are added.
+Those common-minimal rows are a failure-revealing regression lane; inspect the
+generated `status`, `success`, `crashed`, and `message` columns before using
+them as optimization evidence.
 
 <p align="center">
   <img src="docs/_static/figures/readme_qi_optimization_cases.png" width="980" />
@@ -294,7 +297,8 @@ PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py
 
 ## Performance vs parity
 
-- Default runs select the fastest stable path for each input automatically.
+- Default runs select the profiled stable path; they do not guarantee the
+  fastest backend or iteration policy for every input.
 - Use `--parity` (or `performance_mode=False` in Python) to force the conservative VMEC2000 loop.
 - Use `--solver-mode accelerated` to force the optimized fixed-boundary controller.
 - For GPU benchmarking, separate raw solver throughput from public policy overhead. For example, use `tools/diagnostics/profile_fixed_boundary.py --no-auto-cli-policy --solver-mode accelerated --no-multigrid --use-scan --solver-device gpu`.

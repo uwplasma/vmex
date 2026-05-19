@@ -1,14 +1,16 @@
 Validation and parity with VMEC2000
 ====================================
 
-``vmec_jax`` is validated against **VMEC2000** across fixed-boundary and
-free-boundary configurations, including axisymmetric, non-axisymmetric,
-stellarator-symmetric (``lasym=False``) and stellarator-asymmetric
-(``lasym=True``) equilibria.
+``vmec_jax`` uses a layered validation matrix.  Required CI validates against
+bundled VMEC2000-produced ``wout`` references, no-solve profile/current gates,
+convergence-only end-to-end gates, and focused physics regressions.  Direct
+comparisons against a local VMEC2000 Fortran executable are opt-in
+``vmec2000`` tests because they require an external executable and are not part
+of the default PR gate.
 
 Parity means: given the same input namelist and convergence settings, the
-``wout_*.nc`` output of ``vmec_jax`` agrees with the output of the VMEC2000
-Fortran executable to within tolerances set by the convergence level (not by
+``wout_*.nc`` output of ``vmec_jax`` agrees with the relevant VMEC2000 reference
+or executable run to within tolerances set by the convergence level (not by
 implementation error).
 
 Reference data
@@ -553,6 +555,15 @@ Set ``VMEC2000_NIGHTLY=1`` as well to include the slower non-axisymmetric,
    VMEC2000_INTEGRATION=1 \
    VMEC2000_NIGHTLY=1 \
    pytest -q tests/test_vmec2000_converged_parity.py
+
+The fetched single-grid ``lasym=True`` finite-beta fixture is currently a
+required bundled-reference physics gate, and the short executable-backed stage
+smoke reaches the corresponding VMEC2000 solve.  The stricter converged
+executable-backed ``basic_non_stellsym_pressure`` comparison remains a known
+optional gap: a local ``~/bin/xvmec2000`` run on 2026-05-19 converged both
+codes but showed order-unity relRMS offsets in ``gmnc`` and magnetic-field
+blocks.  Do not advertise strict external LASYM finite-beta parity until that
+nightly target passes.
 
 Optional SIMSOPT formula parity is similarly guarded and targeted:
 

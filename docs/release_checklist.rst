@@ -33,10 +33,10 @@ optional ``BoozerBTarget`` homotopy term, solve-free JVP/VJP routing checks,
 pure driver/runtime policy helpers, implicit/wout serialization helpers,
 free-boundary/solver helper branches, VMEC-kernel helper branches, packaging
 hygiene, additional solve/implicit/wout/driver branch coverage, the required
-Python 3.11 coverage gate, and warning-clean documentation.  The 2026-05-17
-release-candidate local required non-full coverage baseline is ``1111 passed,
-20 skipped, 97 deselected`` with ``85.25%`` coverage in ``10:22``.  The
-enforced local and CI gate is ``85%``.
+Python 3.11 coverage gate, and warning-clean documentation.  Record the exact
+pass/skip/deselect count and coverage percentage from the release-candidate
+commit in the release notes.  The enforced local and CI coverage gate is
+``85%``.
 
 Before cutting a new release, bump ``project.version`` in ``pyproject.toml``
 and choose the matching tag name:
