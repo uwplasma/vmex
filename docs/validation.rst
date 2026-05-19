@@ -423,12 +423,15 @@ Current parity status
 
 **Stellarator-asymmetric (lasym=True)**
   ``lasym=True`` channels are covered by bundled/fetched reference physics gates
-  and convergence tests, but strict external LASYM finite-beta parity is not yet
-  promoted.  The known ``basic_non_stellsym_pressure`` executable-backed
-  converged comparison gap remains a blocker for that claim.  The Boozer input
-  adapter is required to preserve the asymmetric geometry/lambda channels
-  (``rmns``, ``zmnc``, ``lmnc``) and magnetic sine channels through
-  ``booz_xform_jax`` for QI and LASYM Boozer diagnostics.
+  and convergence tests.  The ``basic_non_stellsym_pressure`` executable-backed
+  finite-beta comparison passed locally after the LASYM covariant-field scaling
+  fix in ``e0b00e7``.  Strict external LASYM parity is still not promoted
+  broadly: the axisymmetric zero-pressure ``up_down_asymmetric_tokamak``
+  nightly comparison remains a known residual gap, led by ``lmns`` and the
+  near-zero ``bsubvmns`` sine covariant channel.  The Boozer input adapter is
+  required to preserve the asymmetric geometry/lambda channels (``rmns``,
+  ``zmnc``, ``lmnc``) and magnetic sine channels through ``booz_xform_jax`` for
+  QI and LASYM Boozer diagnostics.
 
 **Free boundary**
   vmec_jax produces converged free-boundary equilibria for the bundled CTH-like

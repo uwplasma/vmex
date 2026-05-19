@@ -133,7 +133,7 @@ SHOWCASE_CASES: dict[str, MinimalSeedCase] = {
         nfp=2,
         input_file=DATA_DIR / "input.minimal_seed_nfp2",
         reference_preseed_input=DATA_DIR / "input.nfp2_QI",
-        reference_preseed_blend=0.25,
+        reference_preseed_blend=0.10,
     ),
 }
 

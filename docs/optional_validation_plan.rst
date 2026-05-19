@@ -183,6 +183,29 @@ These lanes must remain optional.  They skip or stay unselected unless the
 operator installs the external dependency and exports the required environment
 variables.
 
+Recent bounded parity notes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+On 2026-05-19, after ``e0b00e7``, the no-executable physics gates stayed green:
+
+.. code-block:: bash
+
+   python -m pytest tests/test_wout_physics_gates.py tests/test_vmec_parity_physics_fast_gates.py -q
+
+This covered 13 bundled physics/parity scalar checks in about 2.4 seconds on
+the local machine.
+
+The additional executable-backed
+``up_down_asymmetric_tokamak`` nightly gate did not promote.  VMEC2000 and
+``vmec_jax`` both wrote zero aspect/volume scalars for the low-residual
+zero-pressure end state, so the optional gate now treats aspect as unavailable
+for that specific case and records it as a strict expected gap.  Saved-artifact
+comparison after the physics precheck showed the leading residuals:
+``lmns`` relRMS about ``1.78e-2`` against a ``1e-3`` gate, ``bsupumns`` relRMS
+about ``1.05e-2`` against a ``1e-2`` gate, and ``bsubvmns`` diff RMS about
+``5.72e-4`` against a near-zero VMEC2000 reference.  Geometry, profiles,
+energy, and most magnetic channels stayed within their existing thresholds.
+
 Next parity gates
 -----------------
 

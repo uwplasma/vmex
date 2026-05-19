@@ -227,6 +227,15 @@ def record_status(record: ShowcaseRecord) -> str:
     return "failed"
 
 
+def display_message(record: ShowcaseRecord) -> str:
+    """Return a stable human-facing status message for static docs tables."""
+
+    message = "" if record.message is None else str(record.message)
+    if record.crashed and "case still running" in message.lower():
+        return "partial checkpoint metrics recorded; not promoted in refreshed static summary"
+    return message
+
+
 def _history_stage_segments(history: list[dict]) -> list[list[dict]]:
     segments: list[list[dict]] = []
     current: list[dict] = []
@@ -318,7 +327,7 @@ def write_summary_csv(records: list[ShowcaseRecord], path: Path) -> None:
                     "" if record.qi_legacy_total is None else f"{record.qi_legacy_total:.16e}",
                     "" if record.qi_mirror_ratio_max is None else f"{record.qi_mirror_ratio_max:.16e}",
                     "" if record.qi_max_elongation is None else f"{record.qi_max_elongation:.16e}",
-                    "" if record.message is None else record.message,
+                    display_message(record),
                     _repo_relative_path(record.output_dir),
                 ]
             )
