@@ -13,9 +13,9 @@ The latest verified ``main`` CI run checked during this update was green:
 
 - workflow: ``CI``
 - status: ``success``
-- head SHA: ``5ca8216699c766621a1fe30e47db9b68befd36c2``
-- completed: ``2026-05-11T17:14:59Z``
-- run: https://github.com/uwplasma/vmec_jax/actions/runs/25684339586
+- head SHA: ``5ffaba2263c621e645a242a8b701a7e63519aabc``
+- completed: ``2026-05-19T12:59:32Z``
+- run: https://github.com/uwplasma/vmec_jax/actions/runs/26097684899
 
 The required CI split remains:
 
