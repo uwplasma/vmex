@@ -549,6 +549,31 @@ def test_minimal_seed_renderer_loads_records_and_returns_monotone_segments(tmp_p
             }
         )
     )
+    stage_a = output_dir / "stage_a"
+    stage_b = output_dir / "stage_b"
+    stage_a.mkdir()
+    stage_b.mkdir()
+    (stage_a / "history.json").write_text(
+        json.dumps(
+            {
+                "history": [
+                    {"stage": "QA staged A", "wall_time_s": 0.0, "objective": 6.0},
+                    {"stage": "QA staged A", "wall_time_s": 10.0, "objective": 5.0},
+                    {"stage": "QA staged A", "wall_time_s": 20.0, "objective": 7.0},
+                ]
+            }
+        )
+    )
+    (stage_b / "history.json").write_text(
+        json.dumps(
+            {
+                "history": [
+                    {"stage": "QA staged B", "wall_time_s": 0.0, "objective": 4.0},
+                    {"stage": "QA staged B", "wall_time_s": 10.0, "objective": 3.0},
+                ]
+            }
+        )
+    )
 
     records = renderer.best_records(renderer.load_records(tmp_path))
     assert len(records) == 1
@@ -618,8 +643,9 @@ def test_minimal_seed_renderer_loads_records_and_returns_monotone_segments(tmp_p
 
     segments = renderer.objective_segments(records[0])
     assert len(segments) == 2
-    np.testing.assert_allclose(segments[0][1], [10.0, 8.0, 8.0])
-    np.testing.assert_allclose(segments[1][1], [7.0, 7.0, 4.0])
+    np.testing.assert_allclose(segments[0][1], [6.0, 5.0, 5.0])
+    np.testing.assert_allclose(segments[1][1], [4.0, 3.0])
+    assert segments[1][0][0] == pytest.approx(segments[0][0][-1])
 
     summary = tmp_path / "summary.csv"
     renderer.write_summary_csv(records, summary)

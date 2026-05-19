@@ -648,6 +648,8 @@ def test_qi_readme_cases_concatenate_histories_and_record_lambda_scan(tmp_path):
             }
         )
     )
+    h3 = tmp_path / "history_duplicate.json"
+    h3.write_text(h1.read_text())
     summary = tmp_path / "summary.json"
     summary.write_text(
         json.dumps(
@@ -663,7 +665,7 @@ def test_qi_readme_cases_concatenate_histories_and_record_lambda_scan(tmp_path):
         output_dir=tmp_path,
         initial_wout=tmp_path / "wout_initial.nc",
         note="test",
-        history_paths=(h1, h2),
+        history_paths=(h1, h3, h2),
         preconditioner_summary=summary,
     )
 
@@ -673,6 +675,7 @@ def test_qi_readme_cases_concatenate_histories_and_record_lambda_scan(tmp_path):
 
     assert stage_count == 2
     assert point_count == 4
+    assert [segment["path"] for segment in segments] == [h1, h2]
     assert full_wall_s == pytest.approx(5.0)
     assert segments[1]["wall_time_s"][0] == pytest.approx(2.0)
     assert segments[0]["label"] == "seed solve"
