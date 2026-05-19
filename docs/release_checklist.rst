@@ -38,11 +38,21 @@ release-candidate local required non-full coverage baseline is ``1111 passed,
 20 skipped, 97 deselected`` with ``85.25%`` coverage in ``10:22``.  The
 enforced local and CI gate is ``85%``.
 
-For the ``v0.0.9`` patch release, the package version is ``0.0.9`` and the
-matching tag is ``v0.0.9``.  The patch scope after ``v0.0.8`` is fixed-boundary
-production policy, GPU exact-Jacobian replay profiling/chunking,
-fixed-boundary diagnostics, docs, CI action-runtime hygiene, and expanded
-bounded VMEC2000 parity gates.
+Before cutting a new release, bump ``project.version`` in ``pyproject.toml``
+and choose the matching tag name:
+
+.. code-block:: bash
+
+   python - <<'PY'
+   import tomllib
+   version = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
+   print(f"current project.version = {version}")
+   PY
+   git tag --list 'v*' | tail -20
+   git ls-remote --tags origin 'v*' | tail -20
+
+Do not reuse an existing local or remote tag.  The release scope should be
+summarized in the release notes before tagging.
 
 Required GitHub Actions gate
 ----------------------------
@@ -91,12 +101,22 @@ Tag only after the local and GitHub gates are green:
 
    git tag -a vX.Y.Z -m "vmec-jax vX.Y.Z"
    git push origin vX.Y.Z
-   gh release create vX.Y.Z --repo uwplasma/vmec_jax --title "vmec-jax vX.Y.Z" --notes-file RELEASE_NOTES.md
+   cat > /tmp/vmec_jax_release_notes.md <<'EOF'
+   User-visible changes:
+   - ...
+
+   Validation:
+   - ...
+
+   Known limitations:
+   - ...
+   EOF
+   gh release create vX.Y.Z --repo uwplasma/vmec_jax --title "vmec-jax vX.Y.Z" --notes-file /tmp/vmec_jax_release_notes.md
 
 For GitHub releases, ``publish-pypi.yml`` validates that the release tag
 matches ``project.version`` in ``pyproject.toml`` after stripping an optional
-leading ``v``.  Do not publish ``v0.0.9`` unless ``pyproject.toml`` still says
-``0.0.9`` and the CI gates above are green.
+leading ``v``.  Do not publish a tag unless ``pyproject.toml`` has the same
+version and the CI gates above are green.
 
 The release notes should list user-visible changes, validation coverage, known
 limitations, and any optional external validation that was not run.

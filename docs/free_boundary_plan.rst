@@ -9,8 +9,12 @@ VMEC2000-quality free-boundary capability in ``vmec-jax`` while preserving:
 - high CPU performance (scan fast path + parity fallback),
 - bounded memory usage.
 
-Current Implementation Status (March 2026)
-------------------------------------------
+Implementation status snapshot (March 2026)
+-------------------------------------------
+
+This page records the free-boundary implementation plan and historical
+milestone status.  Use :doc:`validation` and :doc:`quickstart` for the current
+supported free-boundary workflow.
 
 WP0 is implemented:
 

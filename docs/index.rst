@@ -20,19 +20,34 @@ vmec-jax documentation
       quickstart
       optimization
       optimization_sweep_results
+
+   .. toctree::
+      :maxdepth: 2
+      :caption: Physics and algorithms
+
       theory
       equations
       vmec_wiki_primer
       algorithms
+      discrete_adjoint
+      simsopt_comparison
+      jxbforce_mercier
+
+   .. toctree::
+      :maxdepth: 2
+      :caption: Validation and release
+
       validation
       testing_strategy
       release_checklist
       optional_validation_plan
-      discrete_adjoint
-      simsopt_comparison
-      jxbforce_mercier
       free_boundary_plan
       performance
+
+   .. toctree::
+      :maxdepth: 2
+      :caption: Development notes
+
       aggressive_performance_plan
       accelerated_merge_readiness
       code_structure

@@ -28,7 +28,7 @@ and free-boundary ideal-MHD equilibria.
 
 ## Install
 
-## From PyPI
+### From PyPI
 
 ```bash
 pip install vmec-jax
@@ -40,7 +40,7 @@ QI optimization uses `booz_xform_jax` for the differentiable Boozer transform:
 pip install "vmec-jax[qi]"
 ```
 
-## From conda-forge
+### From conda-forge
 
 `vmec-jax` can be installed as a conda package from [conda-forge](https://github.com/conda-forge/vmec-jax-feedstock) into a particular project with [Pixi](https://pixi.prefix.dev/)
 
@@ -54,7 +54,7 @@ or into a conda environment with [conda](https://docs.conda.io/projects/conda/)
 conda install --channel conda-forge vmec-jax
 ```
 
-## From source
+### From source
 
 Developer (editable) install:
 

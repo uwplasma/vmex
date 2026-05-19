@@ -60,8 +60,11 @@ For cancellation-limited diagnostics (notably near-axis channels and
 near-zero denominators), comparisons use the standard axis mask and relaxed
 interpretation documented in :doc:`validation`.
 
-Current project state (March 2026)
-----------------------------------
+Project state snapshot (March 2026)
+-----------------------------------
+
+This section is a historical snapshot.  Use :doc:`validation`,
+:doc:`performance`, and :doc:`release_checklist` for current release claims.
 
 The project has now crossed the point where the main questions are less about
 "can it run?" and more about "which path should become the long-term stable
