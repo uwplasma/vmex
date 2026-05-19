@@ -17,7 +17,7 @@ Run these checks before pushing a release-candidate commit:
    ruff check vmec_jax tests examples tools validation
    python -m compileall -q vmec_jax examples tests tools validation
    pytest -q tests/test_optimization_helpers.py tests/test_continuation_exact_history.py
-   pytest -q tests/test_residue_getfsq_parity.py tests/test_wout_profiles_currents_bundled_parity.py tests/test_vmec2000_exec_threed1.py
+   pytest -q tests/test_residue_getfsq_parity.py tests/test_wout_profiles_currents_bundled_parity.py tests/test_converged_wout_matrix_parity.py tests/test_vmec2000_exec_threed1.py
    pytest -q tests/test_booz_input.py tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_qi_objective_component_report.py tests/test_qi_seed_suitability_audit.py tests/test_qs_ess_render_smoke.py
    pytest -q tests/test_quasisymmetry.py tests/test_optimization_examples.py tests/test_implicit_helpers.py tests/test_wout_additional_helpers.py tests/test_solve_additional_helpers.py tests/test_free_boundary_additional_helpers.py tests/test_vmec_kernel_additional_helpers.py tests/test_solve_branch_coverage.py tests/test_implicit_wout_driver_branch_coverage.py
    JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt" --cov=vmec_jax --cov-report=xml --cov-report=term-missing:skip-covered --cov-fail-under=85
@@ -131,6 +131,8 @@ claiming a broader physics milestone:
   fixed-boundary, finite-beta, and ``lasym`` references.
 - VMEC2000 executable parity with ``~/bin/xvmec2000`` for newly added input
   decks or convergence-policy changes.
+- Do not claim strict external LASYM finite-beta parity until the nightly
+  executable-backed ``basic_non_stellsym_pressure`` converged comparison passes.
 - SIMSOPT comparison scripts for optimization objective and derivative parity.
 - CPU/GPU profiling sweeps for any accepted-point replay, scan, or device
   default change; verify final artifacts still select the best finite exact

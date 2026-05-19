@@ -17,7 +17,8 @@ and free-boundary ideal-MHD equilibria.
 ### v0.0.9
 
 - Default fixed-boundary production solves now use the VMEC-control non-scan
-  loop on CPU and GPU, matching the latest QH/QA/QI/LASYM profiling results.
+  loop on CPU and GPU, matching the profiled QH/QA/QI paths and the available
+  partial LASYM profiling lanes.
 - GPU exact-Jacobian replay uses the profiled dense-column chunking policy for
   larger fixed-boundary optimizations, reducing the observed QH mode-2 replay
   callback from about 42 s to about 18 s on the `office` RTX A4000 profile.
@@ -225,8 +226,8 @@ an open performance lane.  The plotted rows are exported in
 The fixed-boundary examples solve VMEC equilibria and differentiate the
 objective with the exact discrete-adjoint/tape path. The README shows one
 current `LASYM = F` result per target at aspect ratio near 5; the full CPU/GPU
-matrix, LASYM panels, finite-beta examples, QI robustness notes, and detailed
-tables live in the [optimization guide](docs/optimization.rst) and
+matrix, partial LASYM panels, finite-beta examples, QI robustness notes, and
+detailed tables live in the [optimization guide](docs/optimization.rst) and
 [optimization sweep results](docs/optimization_sweep_results.rst).
 
 Each panel shows the original deck LCFS, final LCFS, per-stage objective
@@ -270,9 +271,12 @@ PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 
 ## Optimization from Different Initial Conditions
 
-The repository also tracks stress tests from less tailored seeds. The dedicated
-QI coverage figure below includes the `input.QI_stel_seed_3127` far-seed lane;
-the docs contain the longer discussion, gates, and landscape diagnostics.
+The repository also tracks stress tests from less tailored seeds. These are
+failure-revealing regression artifacts, not seed-robustness evidence. In the
+current checked-in minimal-seed summary, only `qh_nfp4` is `status=ok`; QI rows
+are partial timeout records and QP is incomplete. The dedicated QI coverage
+figure below includes the `input.QI_stel_seed_3127` far-seed lane; the docs
+contain the longer discussion, gates, and landscape diagnostics.
 Common minimal-seed QA/QH/QP/QI runs start from
 `examples/data/input.minimal_seed_nfp*`, which contain only `RBC(0,0)`,
 `RBC(0,1)`, and `ZBS(0,1)` before optimization-time helicity hints are added.
@@ -284,7 +288,7 @@ them as optimization evidence.
   <img src="docs/_static/figures/readme_qi_optimization_cases.png" width="980" />
 </p>
 
-Recreate the seed-robustness artifacts:
+Recreate the seed-stress artifacts:
 
 ```bash
 PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 \

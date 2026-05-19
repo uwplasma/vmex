@@ -1230,25 +1230,25 @@ Scan-mode iteration (fast path)
 -------------------------------
 
 The scan-based loop lifts the VMEC2000 iteration into ``jax.lax.scan`` to reduce
-Python overhead. You can enable it with:
+Python overhead.  It is now an explicit fast/diagnostic path rather than the
+public default.  Public fixed-boundary defaults use the profiled VMEC-control
+non-scan policy unless scan is explicitly requested.  You can enable scan with:
 
 - ``--fast`` on the CLI,
-- ``performance_mode=True`` in ``run_fixed_boundary`` (default),
+- ``use_scan=True`` in ``run_fixed_boundary``,
 - or ``VMEC_JAX_USE_SCAN=1``.
 
 **Important**: scan parity is case-dependent on difficult large-``ns`` stages.
-The runtime uses scan as the default fast path, with a fallback to the
-non-scan parity path when parity guards detect drift. You can always force the
-conservative path with ``--parity``.
+Use scan when profiling a case where the scan loop has been validated. You can
+always force the conservative path with ``--parity``.
 
-For LASYM fixed-boundary stages in ``performance_mode=True``, the default
-selector now uses:
+For LASYM fixed-boundary stages in explicit scan mode, the selector can use:
 
 - a timed scan/non-scan probe on CPU backends,
 - a short parity-only probe on accelerator backends.
 
-This keeps the default GPU path from paying the full warmed non-scan timing
-cost while still rejecting scan when the short parity probe disagrees.
+This keeps explicit GPU scan experiments from paying the full warmed non-scan
+timing cost while still rejecting scan when the short parity probe disagrees.
 
 Controls:
 
@@ -1751,11 +1751,13 @@ Representative same-host CPU/GPU warmed comparisons:
 That makes the current branch state clearer than the earlier stress-case
 benchmark story:
 
-- the optimized fixed-boundary CLI path is now a clean warmed CPU win across
-  the shipped bundled matrix,
-- the GPU path is functional and convergent on the same bundled matrix,
-- automatic backend selection is now the remaining step before the GPU story
-  becomes uniformly stronger than CPU on mixed-size workloads.
+- the optimized fixed-boundary CLI path is a mixed but useful warmed CPU result:
+  faster on 13 of 16 rows versus the prior/default branch path, roughly neutral
+  on 1, and slower on 2,
+- relative to VMEC2000, the current README-facing CPU matrix still wins on only
+  1 of 16 bundled fixed-boundary rows,
+- the GPU path is functional and convergent on the same bundled matrix, but is
+  faster only on selected heavier 3D rows; do not claim uniform GPU superiority.
 
 Exact-optimizer replay profiling on ``f0225ff``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
