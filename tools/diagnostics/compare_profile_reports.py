@@ -230,6 +230,7 @@ EXACT_OPTIMIZER_PATCH_TARGET_NAMES = {
     "initial_guess_trial",
     "initial_guess_forward",
     "initial_guess_exact",
+    "trial_residual_exact_cache_hit",
     "residual_eval_trial",
     "residual_eval_exact",
     "scan_residual_eval_exact",
