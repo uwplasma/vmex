@@ -629,6 +629,8 @@ def _clear_optimizer_point_caches(opt) -> None:
     if hasattr(opt, "_exact_jacobian_cache"):
         opt._exact_jacobian_cache.clear()
     opt._trial_residual_cache.clear()
+    if hasattr(opt, "_initial_state_cache"):
+        opt._initial_state_cache.clear()
     opt._initial_tangent_cache.clear()
     opt._last_jacobian_residual = None
 

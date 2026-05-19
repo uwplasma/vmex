@@ -1415,6 +1415,9 @@ class FixedBoundaryExactOptimizer:
         self._discrete_jacobian_helper_cache: dict = {}
         self._scan_exact_helper_cache: dict = {}
         self._scan_exact_path = self._select_exact_path()
+        self._initial_state_cache: OrderedDict[bytes, VMECState] = OrderedDict()
+        self._initial_state_cache_max = 4
+        self._remember_initial_state(np.zeros(len(self._specs), dtype=float), state0)
         self._initial_tangent_cache: dict = {}
         self._last_jacobian_residual: np.ndarray | None = None
         self._last_jacobian_source = "exact_tape_replay"
@@ -1724,6 +1727,36 @@ class FixedBoundaryExactOptimizer:
     def _exact_cache_key(self, params) -> bytes:
         return np.asarray(params, dtype=float).reshape(-1).tobytes()
 
+    def _remember_initial_state(self, params, state: VMECState) -> None:
+        cache = getattr(self, "_initial_state_cache", None)
+        if cache is None:
+            self._initial_state_cache = OrderedDict()
+            cache = self._initial_state_cache
+        cache_key = self._exact_cache_key(params)
+        cache[cache_key] = state
+        cache.move_to_end(cache_key)
+        max_size = max(0, int(getattr(self, "_initial_state_cache_max", 0)))
+        while max_size and len(cache) > max_size:
+            cache.popitem(last=False)
+        if max_size == 0:
+            cache.clear()
+
+    def _initial_state_from_params(self, params, *, profile_name: str) -> VMECState:
+        cache_key = self._exact_cache_key(params)
+        cache = getattr(self, "_initial_state_cache", None)
+        if cache is not None and cache_key in cache:
+            state0 = cache.pop(cache_key)
+            cache[cache_key] = state0
+            self._profile_add(f"{profile_name}_cache_hit", 0.0)
+            return state0
+
+        t_guess = time.perf_counter()
+        boundary_now = self._boundary_from_params(params)
+        state0 = initial_guess_from_boundary(self._static, boundary_now, self._indata, vmec_project=True)
+        self._remember_initial_state(params, state0)
+        self._profile_add(profile_name, time.perf_counter() - t_guess)
+        return state0
+
     def _remember_exact_state(self, cache_key: bytes, state: VMECState) -> None:
         self._exact_state_cache = {cache_key: state}
         if not hasattr(self, "_exact_state_key_by_id"):
@@ -1924,11 +1957,9 @@ class FixedBoundaryExactOptimizer:
         from .solve import solve_fixed_boundary_residual_iter  # noqa: PLC0415
 
         t_total = time.perf_counter()
-        boundary_now = self._boundary_from_params(params)
-        state0 = initial_guess_from_boundary(self._static, boundary_now, self._indata, vmec_project=True)
-        self._profile_add(
-            "initial_guess_trial" if trial else "initial_guess_forward",
-            time.perf_counter() - t_total,
+        state0 = self._initial_state_from_params(
+            params,
+            profile_name="initial_guess_trial" if trial else "initial_guess_forward",
         )
         t_solve = time.perf_counter()
         if trial:
@@ -2063,11 +2094,8 @@ class FixedBoundaryExactOptimizer:
             return (state, payload) if return_payload else state
 
         t_total = time.perf_counter()
-        t_guess = time.perf_counter()
-        boundary_now = self._boundary_from_params(params)
-        state0 = initial_guess_from_boundary(self._static, boundary_now, self._indata, vmec_project=True)
+        state0 = self._initial_state_from_params(params, profile_name="initial_guess_exact")
         axis_override = extract_axis_override_from_state(state0, self._static)
-        self._profile_add("initial_guess_exact", time.perf_counter() - t_guess)
         t_tape = time.perf_counter()
         tape = build_residual_checkpoint_tape_direct(
             state0,
@@ -2788,6 +2816,8 @@ class FixedBoundaryExactOptimizer:
         if hasattr(self, "_exact_jacobian_cache"):
             self._exact_jacobian_cache.clear()
         self._trial_residual_cache.clear()
+        if hasattr(self, "_initial_state_cache"):
+            self._initial_state_cache.clear()
         self._initial_tangent_cache.clear()
         self._last_jacobian_residual = None
         self._post_jacobian_clear(clear_compiled=True)
