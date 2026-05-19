@@ -176,15 +176,19 @@ The current constrained-QI sweep artifacts document one successful bundled
 NFP=2 ``input.nfp2_QI`` lane.  ``examples/optimization/QI_optimization.py`` is
 the bounded multi-seed entry point for extending this to other inputs: set
 ``RUN_CASE = "qi_stel_seed_3127"``, ``RUN_CASE = "nfp4_qh_warm_to_qi"``, or add
-a new ``QI_CASES`` entry for another VMEC deck.  The script's far-seed policy
-first runs a bounded basin prefilter over ESS-scaled boundary jumps, then uses
-a QI/iota cleanup from the selected candidate.  Review
-``basin_prefilter/top_candidates.json`` to see which large-step seed was
-chosen, and review ``mirror_ramp_promotion_log.json`` because failed cleanup
-stages are not silently promoted.  Far-seed stages may use lower Boozer/QI
-resolution during the optimization and a higher-resolution final audit; both
-resolutions are written to ``diagnostics.json`` so promotion claims can be
-traced.  Far seeds may use a solved same-NFP QI wout through
+a new ``QI_CASES`` entry for another VMEC deck.  The current
+``qi_stel_seed_3127`` far-seed lane first runs a deterministic same-NFP
+reference-family boundary preconditioner, records the selected candidate as an
+accepted baseline when the independent gates pass, and then runs guarded
+QI/iota cleanup.  Review
+``boundary_reference_preconditioner/summary.json`` to see which interpolation
+point was selected, and review ``mirror_ramp_promotion_log.json`` because
+failed cleanup stages are not silently promoted.  The older ESS-scaled basin
+prefilter remains available as an opt-in diagnostic and writes
+``basin_prefilter/top_candidates.json`` when enabled.  Far-seed stages may use
+lower Boozer/QI resolution during the optimization and a higher-resolution
+final audit; both resolutions are written to ``diagnostics.json`` so promotion
+claims can be traced.  Far seeds may use a solved same-NFP QI wout through
 ``boozer_target_wout``/``boozer_target_weight`` as an opt-in homotopy
 experiment, but that term is not a final acceptance diagnostic.  A seed-robust
 QI claim still requires the constrained objective to be run and visually
@@ -564,11 +568,16 @@ Set ``VMEC2000_NIGHTLY=1`` as well to include the slower non-axisymmetric,
 The fetched single-grid ``lasym=True`` finite-beta fixture is currently a
 required bundled-reference physics gate, and the short executable-backed stage
 smoke reaches the corresponding VMEC2000 solve.  The stricter converged
-executable-backed ``basic_non_stellsym_pressure`` comparison remains a known
-optional gap: a local ``~/bin/xvmec2000`` run on 2026-05-19 converged both
-codes but showed order-unity relRMS offsets in ``gmnc`` and magnetic-field
-blocks.  Do not advertise strict external LASYM finite-beta parity until that
-nightly target passes.
+executable-backed ``basic_non_stellsym_pressure`` comparison passed locally
+after the LASYM covariant-field scaling fix in ``e0b00e7``; a 2026-05-19
+bounded rerun found worst relRMS ``bsupumns=3.77e-3``, below the nightly
+``1e-2`` LASYM magnetic tolerance.  The remaining strict external LASYM
+nightly gap is the zero-pressure, axisymmetric
+``up_down_asymmetric_tokamak`` case: a 2026-05-19 rerun still showed
+``lmns=1.78e-2`` relRMS, ``bsupumns=1.05e-2`` relRMS, and ``bsubvmns``
+``diff_rms=5.72e-4`` against a near-zero ``ref_rms=4.10e-5``.  The next
+diagnostic should compare the converged lambda solve state against VMEC2000
+before ``wrout`` synthesis, especially the ``m=1,3,4`` LASYM lambda channels.
 
 Optional SIMSOPT formula parity is similarly guarded and targeted:
 

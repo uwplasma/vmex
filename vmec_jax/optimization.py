@@ -1648,6 +1648,8 @@ class FixedBoundaryExactOptimizer:
             ("scan_axis_reset_compute_forces_s", "scan_axis_reset_compute_forces"),
             ("scan_preflight_s", "scan_preflight"),
             ("scan_device_run_s", "scan_device_run"),
+            ("scan_device_dispatch_s", "scan_device_dispatch"),
+            ("scan_device_ready_s", "scan_device_ready"),
             ("scan_host_materialize_s", "scan_host_materialize"),
             ("scan_postprocess_s", "scan_postprocess"),
             ("scan_unattributed_s", "scan_unattributed"),
@@ -1706,6 +1708,30 @@ class FixedBoundaryExactOptimizer:
                 "mean_wall_time_s": total / count if count else 0.0,
             }
         return out
+
+    def _sync_replay_timing_enabled(self) -> bool:
+        flag = os.getenv("VMEC_JAX_OPT_SYNC_REPLAY_TIMING", "").strip().lower()
+        return flag not in ("", "0", "false", "no", "off")
+
+    def _profile_async_phase(self, name: str, start: float, value):
+        """Record dispatch time, optionally synchronizing for device-ready timing."""
+
+        dispatch_s = time.perf_counter() - float(start)
+        self._profile_add(f"{name}_dispatch", dispatch_s)
+        total_s = dispatch_s
+        if self._sync_replay_timing_enabled():
+            try:
+                from ._compat import jax as _jax
+
+                t_ready = time.perf_counter()
+                value = _jax.block_until_ready(value)
+                ready_s = time.perf_counter() - t_ready
+            except Exception:
+                ready_s = 0.0
+            self._profile_add(f"{name}_ready", ready_s)
+            total_s += ready_s
+        self._profile_add(name, total_s)
+        return value
 
     def _make_residuals_eval_fn(self, residuals_fn: Callable) -> Callable:
         """Return the non-differentiating residual evaluator used by callbacks."""
@@ -2243,7 +2269,11 @@ class FixedBoundaryExactOptimizer:
             rebuild_preconditioner=True,
             column_chunk=column_chunk,
         )
-        self._profile_add(f"{profile_prefix}_tape_replay", time.perf_counter() - t_replay)
+        final_tangents = self._profile_async_phase(
+            f"{profile_prefix}_tape_replay",
+            t_replay,
+            final_tangents,
+        )
         return state, final_tangents
 
     def _initial_tangent_columns(self, params, axis_override, *, profile_prefix: str):
@@ -2292,7 +2322,11 @@ class FixedBoundaryExactOptimizer:
             )
             t_vmap = time.perf_counter()
             initial_tangents = jax.vmap(initial_state_linear)(directions)
-            self._profile_add(f"{profile_prefix}_initial_tangents_vmap", time.perf_counter() - t_vmap)
+            initial_tangents = self._profile_async_phase(
+                f"{profile_prefix}_initial_tangents_vmap",
+                t_vmap,
+                initial_tangents,
+            )
             if cache_key is not None:
                 t_store = time.perf_counter()
                 self._initial_tangent_cache[cache_key] = initial_tangents
@@ -2589,8 +2623,12 @@ class FixedBoundaryExactOptimizer:
             final_cotangent=final_cotangent,
             rebuild_preconditioner=True,
         )
+        initial_cotangent = self._profile_async_phase(
+            "gradient_tape_replay",
+            t_replay,
+            initial_cotangent,
+        )
         initial_cotangent = _jnp.nan_to_num(initial_cotangent, nan=0.0, posinf=0.0, neginf=0.0)
-        self._profile_add("gradient_tape_replay", time.perf_counter() - t_replay)
 
         t_initial = time.perf_counter()
         cache_key = None
@@ -2788,7 +2826,11 @@ class FixedBoundaryExactOptimizer:
                 final_cotangent=final_cotangent,
                 rebuild_preconditioner=True,
             )
-            self._profile_add("linear_operator_tape_vjp", time.perf_counter() - t_tape_vjp)
+            initial_cotangent = self._profile_async_phase(
+                "linear_operator_tape_vjp",
+                t_tape_vjp,
+                initial_cotangent,
+            )
             initial_cotangent = _jnp.nan_to_num(initial_cotangent, nan=0.0, posinf=0.0, neginf=0.0)
             t_initial_vjp = time.perf_counter()
             grad = initial_vjp(_jnp.asarray(initial_cotangent, dtype=_jnp.float64))[0]

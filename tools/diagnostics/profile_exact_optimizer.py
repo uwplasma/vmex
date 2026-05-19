@@ -192,6 +192,14 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--sync-replay-timing",
+        action="store_true",
+        help=(
+            "Enable VMEC_JAX_OPT_SYNC_REPLAY_TIMING so exact callback replay/tangent "
+            "timers split dispatch from device-ready time. Diagnostics only."
+        ),
+    )
+    p.add_argument(
         "--budget-total-wall-s",
         type=float,
         default=0.0,
@@ -603,6 +611,7 @@ def _build_callback_payload(
         "perturb_seed": int(args.perturb_seed),
         "clear_between_repeats": bool(args.clear_between_repeats),
         "initial_metrics": bool(getattr(args, "initial_metrics", False)),
+        "sync_replay_timing": bool(getattr(args, "sync_replay_timing", False)),
         "solver_device_requested": args.solver_device,
         "solver_device_resolved": solver_device_resolved,
         "runtime": _runtime_info() if runtime is None else runtime,
@@ -643,6 +652,8 @@ def main() -> int:
         os.environ["VMEC_JAX_TIMING"] = "1"
     if args.vmec_timing_detail:
         os.environ["VMEC_JAX_TIMING_DETAIL"] = "1"
+    if args.sync_replay_timing:
+        os.environ["VMEC_JAX_OPT_SYNC_REPLAY_TIMING"] = "1"
 
     import vmec_jax as vj
     from vmec_jax._compat import enable_x64

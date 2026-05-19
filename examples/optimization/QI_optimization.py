@@ -214,12 +214,13 @@ QI_CASES = {
         "audit_qi_resolution": {"mboz": 18, "nboz": 18, "nphi": 151, "nalpha": 31, "n_bounce": 51},
         # Deterministic global-to-local preconditioner.  It makes a small
         # same-NFP reference-family scan before local optimization.  This is
-        # the current robust path for the unrelated seed: lambda≈0.99 enters
-        # the precise-QI basin, while purely local boundary steps do not.
+        # the current robust path for the unrelated seed: the reviewed lambda
+        # grid reaches the precise-QI basin, while purely local boundary steps
+        # do not.
         "boundary_reference_preconditioner": {
             "enabled": True,
             "reference_input": DATA_DIR / "input.nfp3_QI_fixed_resolution_final",
-            "lambdas": (0.994, 0.995, 0.996, 0.997, 0.998, 0.999, 1.0, 1.001, 1.002),
+            "lambdas": (0.99, 0.995, 1.0, 1.005, 1.008, 1.01, 1.012),
             "keys": ("RBC", "ZBS", "RBS", "ZBC"),
             "max_mode": 4,
             "max_iter": 80,
@@ -266,7 +267,9 @@ QI_CASES = {
         "al_elongation_penalty": 1.0,
         "qi_ceiling_weight": 0.0,
         "shuffle_profile_nphi_out": None,
-        # Far seeds first use a bounded basin prefilter, then a QI/iota cleanup.
+        # Far seeds can still opt into the bounded basin prefilter above, but
+        # the public seed-3127 lane now starts from the reference-family
+        # preconditioner and only promotes cleanup stages that pass exact gates.
         # Mirror-balanced policies remain in tools/diagnostics because the
         # current all-surface mirror objective trades away the QI gate.
         "mirror_ramp_stages": (

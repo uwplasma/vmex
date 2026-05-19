@@ -74,7 +74,7 @@ deterministic hint set is `RBC(1,0)`, `ZBS(1,0)`, `RBC(-1,1)`,
 `ZBS(-1,1)`, `RBC(1,1)`, and `ZBS(1,1)` in VMEC input-index convention.
 The QA and QP common-minimal rows also use an explicit optimization-time
 reference-family preseed: QA blends active low-order RBC/ZBS terms 25% toward
-`input.nfp2_QA_omnigenity`, and QP blends 25% toward `input.nfp2_QI`.  This is
+`input.nfp2_QA_omnigenity`, and QP blends 10% toward `input.nfp2_QI`.  This is
 recorded in `showcase_case.json`; rows that lack that provenance predate the
 current seed-robustness policy.
 

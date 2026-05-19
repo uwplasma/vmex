@@ -131,8 +131,10 @@ claiming a broader physics milestone:
   fixed-boundary, finite-beta, and ``lasym`` references.
 - VMEC2000 executable parity with ``~/bin/xvmec2000`` for newly added input
   decks or convergence-policy changes.
-- Do not claim strict external LASYM finite-beta parity until the nightly
-  executable-backed ``basic_non_stellsym_pressure`` converged comparison passes.
+- Do not claim broad strict external LASYM parity until the nightly
+  executable-backed ``up_down_asymmetric_tokamak`` residual gap is resolved.
+  ``basic_non_stellsym_pressure`` is the promoted finite-beta LASYM executable
+  check.
 - SIMSOPT comparison scripts for optimization objective and derivative parity.
 - CPU/GPU profiling sweeps for any accepted-point replay, scan, or device
   default change; verify final artifacts still select the best finite exact

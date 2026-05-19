@@ -7321,6 +7321,8 @@ def solve_fixed_boundary_residual_iter(
             "scan_axis_reset_compute_forces_s": 0.0,
             "scan_preflight_s": 0.0,
             "scan_device_run_s": 0.0,
+            "scan_device_dispatch_s": 0.0,
+            "scan_device_ready_s": 0.0,
             "scan_host_materialize_s": 0.0,
             "scan_postprocess_s": 0.0,
         }
@@ -7334,6 +7336,17 @@ def solve_fixed_boundary_residual_iter(
                     lambda a: a.block_until_ready() if hasattr(a, "block_until_ready") else a,
                     value,
                 )
+
+        def _scan_device_run_ready(start: float | None, value):
+            if not scan_timing_enabled or start is None:
+                return value
+            dispatch_done = time.perf_counter()
+            value = _scan_block_until_ready(value)
+            ready_done = time.perf_counter()
+            scan_timing_stats["scan_device_dispatch_s"] += dispatch_done - float(start)
+            scan_timing_stats["scan_device_ready_s"] += ready_done - dispatch_done
+            scan_timing_stats["scan_device_run_s"] += ready_done - float(start)
+            return value
 
         if backtracking or limit_dt_from_force or limit_update_rms or use_direct_fallback or reference_mode:
             raise ValueError(
@@ -9894,8 +9907,7 @@ def solve_fixed_boundary_residual_iter(
                 t_device = time.perf_counter() if scan_timing_enabled else None
                 carry, hist_chunk = runner(carry, it_seq)
                 if scan_timing_enabled and t_device is not None:
-                    carry, hist_chunk = _scan_block_until_ready((carry, hist_chunk))
-                    scan_timing_stats["scan_device_run_s"] += time.perf_counter() - float(t_device)
+                    carry, hist_chunk = _scan_device_run_ready(t_device, (carry, hist_chunk))
                 fsq_min_global_j = jnp.minimum(
                     fsq_min_global_j,
                     jnp.min(hist_chunk[0] + hist_chunk[1] + hist_chunk[2]),
@@ -9976,8 +9988,7 @@ def solve_fixed_boundary_residual_iter(
                     t_device = time.perf_counter() if scan_timing_enabled else None
                     carry_final, hist_tail = runner(carry_pre, it_seq)
                     if scan_timing_enabled and t_device is not None:
-                        carry_final, hist_tail = _scan_block_until_ready((carry_final, hist_tail))
-                        scan_timing_stats["scan_device_run_s"] += time.perf_counter() - float(t_device)
+                        carry_final, hist_tail = _scan_device_run_ready(t_device, (carry_final, hist_tail))
                     hist = jax.tree_util.tree_map(
                         lambda a, b: jnp.concatenate([a[None], b], axis=0),
                         hist_pre,
@@ -9991,8 +10002,7 @@ def solve_fixed_boundary_residual_iter(
                 t_device = time.perf_counter() if scan_timing_enabled else None
                 carry_final, hist = runner(carry_init, it_seq)
                 if scan_timing_enabled and t_device is not None:
-                    carry_final, hist = _scan_block_until_ready((carry_final, hist))
-                    scan_timing_stats["scan_device_run_s"] += time.perf_counter() - float(t_device)
+                    carry_final, hist = _scan_device_run_ready(t_device, (carry_final, hist))
         scan_postprocess_start = time.perf_counter() if scan_timing_enabled else None
         if scan_minimal:
             fsqr_hist, fsqz_hist, fsql_hist = hist
@@ -10362,7 +10372,11 @@ def solve_fixed_boundary_residual_iter(
                 if scan_total_start is not None
                 else sum(scan_timing_stats.values())
             )
-            scan_leaf_total_s = sum(float(value) for value in scan_timing_stats.values())
+            scan_leaf_total_s = sum(
+                float(value)
+                for key, value in scan_timing_stats.items()
+                if key not in ("scan_device_dispatch_s", "scan_device_ready_s")
+            )
             scan_timing_report = {
                 "iterations": int(n_iter_hist),
                 "scan_total_s": float(scan_total_s),

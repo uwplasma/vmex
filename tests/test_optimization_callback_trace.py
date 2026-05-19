@@ -153,6 +153,7 @@ def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:
             "--budget-action",
             "warn",
             "--vmec-timing-detail",
+            "--sync-replay-timing",
             "--initial-metrics",
         ]
     )
@@ -171,6 +172,7 @@ def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:
     assert args.budget_accepted_replays == 2
     assert args.budget_action == "warn"
     assert args.vmec_timing_detail is True
+    assert args.sync_replay_timing is True
     assert args.initial_metrics is True
 
 
@@ -354,6 +356,8 @@ def test_exact_optimizer_profiles_scan_solver_timing_buckets() -> None:
                 "scan_total_s": 0.55,
                 "scan_preflight_s": 0.05,
                 "scan_device_run_s": 0.40,
+                "scan_device_dispatch_s": 0.04,
+                "scan_device_ready_s": 0.36,
                 "scan_host_materialize_s": 0.03,
                 "scan_postprocess_s": 0.07,
             }
@@ -367,6 +371,8 @@ def test_exact_optimizer_profiles_scan_solver_timing_buckets() -> None:
     assert profile["trial_solver_scan_total"]["wall_time_s"] == 0.55
     assert profile["trial_solver_scan_preflight"]["wall_time_s"] == 0.05
     assert profile["trial_solver_scan_device_run"]["wall_time_s"] == 0.40
+    assert profile["trial_solver_scan_device_dispatch"]["wall_time_s"] == 0.04
+    assert profile["trial_solver_scan_device_ready"]["wall_time_s"] == 0.36
     assert profile["trial_solver_scan_host_materialize"]["wall_time_s"] == 0.03
     assert profile["trial_solver_scan_postprocess"]["wall_time_s"] == 0.07
     assert profile["solve_forward_trial_unattributed"]["wall_time_s"] == pytest.approx(0.10)

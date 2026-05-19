@@ -27,7 +27,12 @@ Examples:
   python examples/optimization/generate_minimal_seed_showcase.py --cases qa_nfp2 --max-nfev 2 --continuation-nfev 2
 
   # Full six-case README lane on CPU.
-  python examples/optimization/generate_minimal_seed_showcase.py --cases all --backend-label cpu --solver-device cpu --max-nfev 30 --continuation-nfev 20 --case-timeout-s 1200
+  PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_minimal_seed_showcase.py \\
+    --cases all --backend-label cpu --solver-device cpu --worker-jax-platforms cpu \\
+    --policy continuation --max-mode 3 --ess on \\
+    --max-nfev 30 --continuation-nfev 20 \\
+    --inner-max-iter 120 --trial-max-iter 120 \\
+    --inner-ftol 1e-9 --trial-ftol 1e-9 --case-timeout-s 1200 --rerun
 
   # Render completed cases.
   python examples/optimization/render_minimal_seed_showcase.py

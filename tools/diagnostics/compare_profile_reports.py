@@ -49,18 +49,38 @@ EXACT_PROFILE_METRIC_NAMES = {
     "exact_tape_build_trace_stack_s": ("exact_tape_build_trace_stack",),
     "exact_tape_build_unattributed_s": ("exact_tape_build_unattributed",),
     "initial_tangents_s": ("jacobian_initial_tangents",),
+    "initial_tangents_linearize_s": ("jacobian_initial_tangents_linearize",),
+    "initial_tangents_vmap_s": ("jacobian_initial_tangents_vmap",),
+    "initial_tangents_vmap_dispatch_s": ("jacobian_initial_tangents_vmap_dispatch",),
+    "initial_tangents_vmap_ready_s": ("jacobian_initial_tangents_vmap_ready",),
     "initial_projection_s": (
         "gradient_initial_projection",
         "gradient_initial_vjp",
         "linear_operator_initial_vjp",
     ),
     "residual_tangents_s": ("jacobian_residual_tangents",),
+    "accepted_replay_dispatch_s": (
+        "jacobian_tape_replay_dispatch",
+        "gradient_tape_replay_dispatch",
+        "state_tangent_tape_replay_dispatch",
+        "b_cartesian_tangent_tape_replay_dispatch",
+        "linear_operator_tape_vjp_dispatch",
+    ),
+    "accepted_replay_ready_s": (
+        "jacobian_tape_replay_ready",
+        "gradient_tape_replay_ready",
+        "state_tangent_tape_replay_ready",
+        "b_cartesian_tangent_tape_replay_ready",
+        "linear_operator_tape_vjp_ready",
+    ),
     "trial_solve_s": ("solve_forward_trial", "solve_forward_trial_total"),
     "trial_solver_compute_forces_s": ("trial_solver_compute_forces",),
     "trial_solver_preconditioner_s": ("trial_solver_preconditioner",),
     "trial_solver_update_s": ("trial_solver_update",),
     "trial_solver_scan_total_s": ("trial_solver_scan_total",),
     "trial_solver_scan_device_run_s": ("trial_solver_scan_device_run",),
+    "trial_solver_scan_device_dispatch_s": ("trial_solver_scan_device_dispatch",),
+    "trial_solver_scan_device_ready_s": ("trial_solver_scan_device_ready",),
     "trial_solver_scan_host_materialize_s": ("trial_solver_scan_host_materialize",),
     "trial_solver_scan_postprocess_s": ("trial_solver_scan_postprocess",),
     "trial_solve_unattributed_s": ("solve_forward_trial_unattributed",),
@@ -70,6 +90,8 @@ EXACT_PROFILE_METRIC_NAMES = {
     "forward_exact_solver_update_s": ("forward_exact_solver_update",),
     "forward_exact_solver_scan_total_s": ("forward_exact_solver_scan_total",),
     "forward_exact_solver_scan_device_run_s": ("forward_exact_solver_scan_device_run",),
+    "forward_exact_solver_scan_device_dispatch_s": ("forward_exact_solver_scan_device_dispatch",),
+    "forward_exact_solver_scan_device_ready_s": ("forward_exact_solver_scan_device_ready",),
     "forward_exact_solve_unattributed_s": ("solve_forward_exact_unattributed",),
     "exact_tape_solver_solve_total_s": ("exact_tape_solver_solve_total",),
     "exact_tape_solver_setup_total_s": ("exact_tape_solver_setup_total",),
@@ -105,6 +127,22 @@ ACCEPTED_REPLAY_PROFILE_NAMES = {
     "b_cartesian_tangent_tape_replay",
     "linear_operator_tape_vjp",
 }
+ACCEPTED_REPLAY_DISPATCH_PROFILE_NAMES = {f"{name}_dispatch" for name in ACCEPTED_REPLAY_PROFILE_NAMES}
+ACCEPTED_REPLAY_READY_PROFILE_NAMES = {f"{name}_ready" for name in ACCEPTED_REPLAY_PROFILE_NAMES}
+
+INITIAL_TANGENT_DETAIL_NAMES = {
+    "jacobian_initial_tangents_cache_key",
+    "jacobian_initial_tangents_eye",
+    "jacobian_initial_tangents_linearize",
+    "jacobian_initial_tangents_vmap",
+    "jacobian_initial_tangents_vmap_dispatch",
+    "jacobian_initial_tangents_vmap_ready",
+}
+
+SCAN_DEVICE_RUN_PROFILE_NAMES = {
+    "trial_solver_scan_device_run",
+    "forward_exact_solver_scan_device_run",
+}
 
 METRIC_ORDER = (
     "total_runtime_s",
@@ -127,14 +165,22 @@ METRIC_ORDER = (
     "exact_tape_build_trace_stack_s",
     "exact_tape_build_unattributed_s",
     "initial_tangents_s",
+    "initial_tangents_linearize_s",
+    "initial_tangents_vmap_s",
+    "initial_tangents_vmap_dispatch_s",
+    "initial_tangents_vmap_ready_s",
     "initial_projection_s",
     "residual_tangents_s",
+    "accepted_replay_dispatch_s",
+    "accepted_replay_ready_s",
     "trial_solve_s",
     "trial_solver_compute_forces_s",
     "trial_solver_preconditioner_s",
     "trial_solver_update_s",
     "trial_solver_scan_total_s",
     "trial_solver_scan_device_run_s",
+    "trial_solver_scan_device_dispatch_s",
+    "trial_solver_scan_device_ready_s",
     "trial_solver_scan_host_materialize_s",
     "trial_solver_scan_postprocess_s",
     "trial_solve_unattributed_s",
@@ -144,6 +190,8 @@ METRIC_ORDER = (
     "forward_exact_solver_update_s",
     "forward_exact_solver_scan_total_s",
     "forward_exact_solver_scan_device_run_s",
+    "forward_exact_solver_scan_device_dispatch_s",
+    "forward_exact_solver_scan_device_ready_s",
     "forward_exact_solve_unattributed_s",
     "exact_tape_solver_solve_total_s",
     "exact_tape_solver_setup_total_s",
@@ -191,14 +239,22 @@ METRIC_LABELS = {
     "exact_tape_build_trace_stack_s": "exact tape build trace stack",
     "exact_tape_build_unattributed_s": "exact tape build unattributed",
     "initial_tangents_s": "initial tangents",
+    "initial_tangents_linearize_s": "initial tangents linearize",
+    "initial_tangents_vmap_s": "initial tangents vmap",
+    "initial_tangents_vmap_dispatch_s": "initial tangents vmap dispatch",
+    "initial_tangents_vmap_ready_s": "initial tangents vmap ready",
     "initial_projection_s": "initial VJP/projection",
     "residual_tangents_s": "residual tangents",
+    "accepted_replay_dispatch_s": "accepted replay dispatch",
+    "accepted_replay_ready_s": "accepted replay ready",
     "trial_solve_s": "trial solve",
     "trial_solver_compute_forces_s": "trial solver compute_forces",
     "trial_solver_preconditioner_s": "trial solver preconditioner",
     "trial_solver_update_s": "trial solver update",
     "trial_solver_scan_total_s": "trial solver scan total",
     "trial_solver_scan_device_run_s": "trial solver scan device run",
+    "trial_solver_scan_device_dispatch_s": "trial solver scan device dispatch",
+    "trial_solver_scan_device_ready_s": "trial solver scan device ready",
     "trial_solver_scan_host_materialize_s": "trial solver scan host materialize",
     "trial_solver_scan_postprocess_s": "trial solver scan postprocess",
     "trial_solve_unattributed_s": "trial solve unattributed",
@@ -208,6 +264,8 @@ METRIC_LABELS = {
     "forward_exact_solver_update_s": "forward exact solver update",
     "forward_exact_solver_scan_total_s": "forward exact solver scan total",
     "forward_exact_solver_scan_device_run_s": "forward exact solver scan device run",
+    "forward_exact_solver_scan_device_dispatch_s": "forward exact solver scan device dispatch",
+    "forward_exact_solver_scan_device_ready_s": "forward exact solver scan device ready",
     "forward_exact_solve_unattributed_s": "forward exact solve unattributed",
     "exact_tape_solver_solve_total_s": "exact tape solver total",
     "exact_tape_solver_setup_total_s": "exact tape solver setup total",
@@ -247,12 +305,19 @@ BOTTLENECK_METRICS = (
     ("exact_tape_build_trace_stack_s", "exact tape build trace stacking"),
     ("exact_tape_build_unattributed_s", "unattributed tape build"),
     ("initial_tangents_s", "initial tangent build"),
+    ("initial_tangents_linearize_s", "initial tangent linearize"),
+    ("initial_tangents_vmap_dispatch_s", "initial tangent vmap dispatch"),
+    ("initial_tangents_vmap_ready_s", "initial tangent vmap ready"),
     ("initial_projection_s", "initial VJP/projection"),
     ("residual_tangents_s", "residual tangent projection"),
+    ("accepted_replay_dispatch_s", "accepted-point replay dispatch"),
+    ("accepted_replay_ready_s", "accepted-point replay ready"),
     ("trial_solve_s", "trial solve"),
     ("trial_solver_compute_forces_s", "trial solver force assembly"),
     ("trial_solver_preconditioner_s", "trial solver preconditioner"),
     ("trial_solver_scan_device_run_s", "trial scan device run"),
+    ("trial_solver_scan_device_dispatch_s", "trial scan device dispatch"),
+    ("trial_solver_scan_device_ready_s", "trial scan device ready"),
     ("trial_solver_scan_host_materialize_s", "trial scan host materialize"),
     ("trial_solve_unattributed_s", "trial solver unattributed"),
     ("exact_solve_s", "accepted exact solve"),
@@ -286,7 +351,22 @@ EXACT_OPTIMIZER_PATCH_TARGET_NAMES = {
     "state_tangent_tape_replay",
     "b_cartesian_tangent_tape_replay",
     "linear_operator_tape_vjp",
+    "jacobian_tape_replay_dispatch",
+    "jacobian_tape_replay_ready",
+    "gradient_tape_replay_dispatch",
+    "gradient_tape_replay_ready",
+    "state_tangent_tape_replay_dispatch",
+    "state_tangent_tape_replay_ready",
+    "b_cartesian_tangent_tape_replay_dispatch",
+    "b_cartesian_tangent_tape_replay_ready",
+    "linear_operator_tape_vjp_dispatch",
+    "linear_operator_tape_vjp_ready",
     "jacobian_initial_tangents",
+    "jacobian_initial_tangents_eye",
+    "jacobian_initial_tangents_linearize",
+    "jacobian_initial_tangents_vmap",
+    "jacobian_initial_tangents_vmap_dispatch",
+    "jacobian_initial_tangents_vmap_ready",
     "gradient_initial_vjp",
     "linear_operator_initial_vjp",
     "jacobian_residual_tangents",
@@ -305,6 +385,8 @@ EXACT_OPTIMIZER_PATCH_TARGET_NAMES = {
     "trial_solver_scan_total",
     "trial_solver_scan_preflight",
     "trial_solver_scan_device_run",
+    "trial_solver_scan_device_dispatch",
+    "trial_solver_scan_device_ready",
     "trial_solver_scan_host_materialize",
     "trial_solver_scan_postprocess",
     "solve_forward_trial_unattributed",
@@ -314,6 +396,8 @@ EXACT_OPTIMIZER_PATCH_TARGET_NAMES = {
     "forward_exact_solver_scan_total",
     "forward_exact_solver_scan_preflight",
     "forward_exact_solver_scan_device_run",
+    "forward_exact_solver_scan_device_dispatch",
+    "forward_exact_solver_scan_device_ready",
     "forward_exact_solver_scan_host_materialize",
     "forward_exact_solver_scan_postprocess",
     "solve_forward_exact_unattributed",
@@ -623,6 +707,18 @@ def _profile_metric_time(
     return _profile_named_time(profile, names)
 
 
+def _accepted_replay_profile_time(profile: dict[str, dict[str, float | int]]) -> float | None:
+    """Return accepted replay time without double-counting split child timers."""
+
+    total = _profile_named_time(profile, ACCEPTED_REPLAY_PROFILE_NAMES)
+    if total is not None:
+        return total
+    return _profile_named_time(
+        profile,
+        ACCEPTED_REPLAY_DISPATCH_PROFILE_NAMES | ACCEPTED_REPLAY_READY_PROFILE_NAMES,
+    )
+
+
 def _callback_count(payload: dict[str, Any]) -> int | None:
     trace = payload.get("callback_trace")
     if isinstance(trace, dict):
@@ -833,6 +929,30 @@ def _exact_optimizer_patch_target(
             # Once solve-call internals are present, treat the broad external
             # solve timer as a container and choose a concrete child phase.
             continue
+        if name_s in ACCEPTED_REPLAY_PROFILE_NAMES and any(
+            float(profile[child].get("wall_time_s", 0.0)) > 0.0
+            for child in (f"{name_s}_dispatch", f"{name_s}_ready")
+            if child in profile
+        ):
+            # When dispatch/ready instrumentation is present, the broad replay
+            # timer is a parent of those child buckets.
+            continue
+        if name_s == "jacobian_initial_tangents" and any(
+            float(profile[detail].get("wall_time_s", 0.0)) > 0.0
+            for detail in INITIAL_TANGENT_DETAIL_NAMES
+            if detail in profile
+        ):
+            # Prefer the cold tangent setup subphase over the enclosing tangent
+            # build timer once detailed buckets are present.
+            continue
+        if name_s in SCAN_DEVICE_RUN_PROFILE_NAMES and any(
+            float(profile[child].get("wall_time_s", 0.0)) > 0.0
+            for child in (name_s.replace("_run", "_dispatch"), name_s.replace("_run", "_ready"))
+            if child in profile
+        ):
+            # The split dispatch/ready buckets identify whether this is a
+            # compile/launch issue or actual device-body execution.
+            continue
         if name_s not in EXACT_OPTIMIZER_PATCH_TARGET_NAMES:
             continue
         wall = float(rec.get("wall_time_s", 0.0))
@@ -903,6 +1023,8 @@ def summarize_payload(
     cache_time = _direct_time(payload, "cache_time_s")
     if compile_time is None:
         compile_time = _profile_time(profile, "compile_time_s")
+    if replay_time is None:
+        replay_time = _accepted_replay_profile_time(profile)
     if replay_time is None:
         replay_time = _profile_time(profile, "replay_time_s")
     if cache_time is None:

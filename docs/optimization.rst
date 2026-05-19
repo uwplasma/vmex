@@ -96,7 +96,7 @@ hint modes that are not yet active.  The current deterministic hint set is
 The QA and QP common-minimal rows additionally use an explicit
 optimization-time reference-family preseed without modifying the raw input
 decks: QA blends the active low-order RBC/ZBS space 25% toward
-``input.nfp2_QA_omnigenity``, and QP blends 25% toward ``input.nfp2_QI``.
+``input.nfp2_QA_omnigenity``, and QP blends 10% toward ``input.nfp2_QI``.
 This gives the transform residual a usable derivative before local exact
 optimization and is recorded in ``showcase_case.json``.
 
@@ -1228,7 +1228,7 @@ To reproduce the same-NFP reference-family scan used by the public
      --seed-input examples/data/input.QI_stel_seed_3127 \
      --reference-input examples/data/input.nfp3_QI_fixed_resolution_final \
      --out-root results/diagnostics/qi_seed3127_boundary_interpolation \
-     --lambdas 0.994,0.995,0.996,0.997,0.998,0.999,1.0,1.001,1.002 \
+     --lambdas 0.99,0.995,1.0,1.005,1.008,1.01,1.012 \
      --max-mode 4 --max-iter 80 --target-aspect 4.0 \
      --surfaces 0.1,0.28,0.46,0.64,0.82,1.0 \
      --mboz 18 --nboz 18 --nphi 151 --nalpha 31 --n-bounce 51 \

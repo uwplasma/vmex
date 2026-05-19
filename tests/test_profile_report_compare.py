@@ -252,6 +252,8 @@ def test_profile_summary_extracts_scan_solver_buckets() -> None:
     )
     report["profile"]["trial_solver_scan_total"] = {"count": 1, "wall_time_s": 2.0}
     report["profile"]["trial_solver_scan_device_run"] = {"count": 1, "wall_time_s": 2.5}
+    report["profile"]["trial_solver_scan_device_dispatch"] = {"count": 1, "wall_time_s": 0.4}
+    report["profile"]["trial_solver_scan_device_ready"] = {"count": 1, "wall_time_s": 2.1}
     report["profile"]["trial_solver_scan_host_materialize"] = {"count": 1, "wall_time_s": 0.2}
     report["profile"]["trial_solver_scan_postprocess"] = {"count": 1, "wall_time_s": 0.3}
 
@@ -259,9 +261,41 @@ def test_profile_summary_extracts_scan_solver_buckets() -> None:
 
     assert summary["metrics"]["trial_solver_scan_total_s"] == 2.0
     assert summary["metrics"]["trial_solver_scan_device_run_s"] == 2.5
+    assert summary["metrics"]["trial_solver_scan_device_dispatch_s"] == 0.4
+    assert summary["metrics"]["trial_solver_scan_device_ready_s"] == 2.1
     assert summary["metrics"]["trial_solver_scan_host_materialize_s"] == 0.2
     assert summary["metrics"]["trial_solver_scan_postprocess_s"] == 0.3
-    assert summary["exact_optimizer_patch_target"]["name"] == "trial_solver_scan_device_run"
+    assert summary["exact_optimizer_patch_target"]["name"] == "trial_solver_scan_device_ready"
+
+
+def test_profile_summary_prefers_split_replay_and_tangent_buckets() -> None:
+    report = _callback_report(
+        total_wall_time_s=20.0,
+        samples=2,
+        rss_peak_mib=256,
+        replay_wall_time_s=3.0,
+        accepted_replays=2,
+        solve_count=3,
+        cache_entry_growth=4,
+        solver_device="cpu",
+    )
+    report["profile"]["jacobian_tape_replay_dispatch"] = {"count": 2, "wall_time_s": 0.4}
+    report["profile"]["jacobian_tape_replay_ready"] = {"count": 2, "wall_time_s": 2.6}
+    report["profile"]["jacobian_initial_tangents_linearize"] = {"count": 1, "wall_time_s": 1.4}
+    report["profile"]["jacobian_initial_tangents_vmap"] = {"count": 1, "wall_time_s": 1.0}
+    report["profile"]["jacobian_initial_tangents_vmap_dispatch"] = {"count": 1, "wall_time_s": 0.2}
+    report["profile"]["jacobian_initial_tangents_vmap_ready"] = {"count": 1, "wall_time_s": 0.8}
+
+    summary = compare_tool.summarize_payload(report, label="cpu")
+
+    assert summary["metrics"]["accepted_replay_dispatch_s"] == 0.4
+    assert summary["metrics"]["accepted_replay_ready_s"] == 2.6
+    assert summary["metrics"]["replay_time_s"] == 3.0
+    assert summary["metrics"]["initial_tangents_linearize_s"] == 1.4
+    assert summary["metrics"]["initial_tangents_vmap_s"] == 1.0
+    assert summary["metrics"]["initial_tangents_vmap_dispatch_s"] == 0.2
+    assert summary["metrics"]["initial_tangents_vmap_ready_s"] == 0.8
+    assert summary["exact_optimizer_patch_target"]["name"] == "jacobian_tape_replay_ready"
 
 
 def test_comparison_reports_ratios_against_baseline() -> None:
