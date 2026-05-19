@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
-from dataclasses import fields
+from dataclasses import fields, replace
 import json
 import sys
 from pathlib import Path
@@ -611,6 +611,10 @@ def test_minimal_seed_renderer_loads_records_and_returns_monotone_segments(tmp_p
     )
     all_records = renderer.best_records(renderer.load_records(tmp_path), successful_only=False)
     assert [record.case_name for record in all_records] == ["qa_nfp2", "qh_nfp4"]
+    failed_record = next(record for record in all_records if record.case_name == "qh_nfp4")
+    assert renderer.record_status(failed_record) == "failed"
+    partial_record = replace(failed_record, crashed=True, message="partial checkpoint metrics recorded")
+    assert renderer.record_status(partial_record) == "partial"
 
     segments = renderer.objective_segments(records[0])
     assert len(segments) == 2

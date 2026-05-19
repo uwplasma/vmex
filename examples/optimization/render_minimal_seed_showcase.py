@@ -220,7 +220,7 @@ def record_status(record: ShowcaseRecord) -> str:
         return "stale"
     if record.success and not record.crashed:
         return "ok"
-    if not record.crashed and "partial" in str(record.message or "").lower():
+    if "partial" in str(record.message or "").lower():
         return "partial"
     if not record.crashed:
         return "incomplete"
