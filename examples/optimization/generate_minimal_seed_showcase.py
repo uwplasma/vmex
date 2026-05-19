@@ -570,8 +570,8 @@ def _worker(
     use_ess: bool,
     budget_dict: dict,
     target_helicity_seed_amplitude: float,
-    reference_preseed_blend: float | None,
-    case_timeout_s: float | None,
+    reference_preseed_blend: float | None = None,
+    case_timeout_s: float | None = None,
 ) -> None:
     output_dir = Path(output_dir_str)
     result_path = Path(result_path_str)
@@ -668,8 +668,8 @@ def _worker_impl(
     use_ess: bool,
     budget_dict: dict,
     target_helicity_seed_amplitude: float,
-    reference_preseed_blend: float | None,
-    case_timeout_s: float | None,
+    reference_preseed_blend: float | None = None,
+    case_timeout_s: float | None = None,
 ) -> None:
     case = SHOWCASE_CASES[case_name]
     if reference_preseed_blend is not None and case.reference_preseed_input is not None:
