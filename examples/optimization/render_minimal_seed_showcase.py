@@ -46,6 +46,7 @@ class ShowcaseRecord:
     output_dir: Path
     success: bool
     crashed: bool
+    message: str | None
     objective_final: float | None
     aspect_final: float | None
     iota_final: float | None
@@ -161,6 +162,7 @@ def load_records(output_root: Path = RESULTS_ROOT) -> list[ShowcaseRecord]:
                 output_dir=result_path.parent,
                 success=_bool_value(result.get("success")),
                 crashed=_bool_value(result.get("crashed")),
+                message=None if result.get("message") is None else str(result.get("message")),
                 objective_final=_float_or_none(result.get("objective_final")),
                 aspect_final=_float_or_none(result.get("aspect_final")),
                 iota_final=_float_or_none(result.get("iota_final")),
@@ -209,6 +211,20 @@ def best_records(
             )
         )
     return selected
+
+
+def record_status(record: ShowcaseRecord) -> str:
+    """Compact status label for README/docs tables."""
+
+    if record.stale_reason is not None:
+        return "stale"
+    if record.success and not record.crashed:
+        return "ok"
+    if not record.crashed and "partial" in str(record.message or "").lower():
+        return "partial"
+    if not record.crashed:
+        return "incomplete"
+    return "failed"
 
 
 def _history_stage_segments(history: list[dict]) -> list[list[dict]]:
@@ -269,7 +285,9 @@ def write_summary_csv(records: list[ShowcaseRecord], path: Path) -> None:
                 "policy",
                 "max_mode",
                 "ess",
+                "status",
                 "success",
+                "crashed",
                 "objective_final",
                 "aspect_final",
                 "iota_final",
@@ -277,6 +295,7 @@ def write_summary_csv(records: list[ShowcaseRecord], path: Path) -> None:
                 "qi_legacy_total",
                 "qi_mirror_ratio_max",
                 "qi_max_elongation",
+                "message",
                 "output_dir",
             ]
         )
@@ -289,7 +308,9 @@ def write_summary_csv(records: list[ShowcaseRecord], path: Path) -> None:
                     record.policy,
                     record.max_mode,
                     "yes" if record.use_ess else "no",
+                    record_status(record),
                     "yes" if record.success and not record.crashed else "no",
+                    "yes" if record.crashed else "no",
                     "" if record.objective_final is None else f"{record.objective_final:.16e}",
                     "" if record.aspect_final is None else f"{record.aspect_final:.16e}",
                     "" if record.iota_final is None else f"{record.iota_final:.16e}",
@@ -297,6 +318,7 @@ def write_summary_csv(records: list[ShowcaseRecord], path: Path) -> None:
                     "" if record.qi_legacy_total is None else f"{record.qi_legacy_total:.16e}",
                     "" if record.qi_mirror_ratio_max is None else f"{record.qi_mirror_ratio_max:.16e}",
                     "" if record.qi_max_elongation is None else f"{record.qi_max_elongation:.16e}",
+                    "" if record.message is None else record.message,
                     _repo_relative_path(record.output_dir),
                 ]
             )
@@ -325,7 +347,7 @@ def render_objective_panel(records: list[ShowcaseRecord], out_png: Path) -> Path
         for wall_min, values in segments:
             ax.semilogy(wall_min, values, color="#1f4e79", linewidth=1.8)
             ax.scatter(wall_min[-1], values[-1], s=16, color="#d95f02", zorder=3)
-        status = "ok" if record.success and not record.crashed else "failed"
+        status = record_status(record)
         title = f"{record.case_name}: {record.policy}, m={record.max_mode}, {'ESS' if record.use_ess else 'no ESS'}, {status}"
         ax.set_title(title, fontsize=9)
         ax.set_xlabel("Wall time (min)")

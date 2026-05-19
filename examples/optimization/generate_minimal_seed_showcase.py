@@ -636,6 +636,24 @@ def _failure_result(
     )
 
 
+def _annotate_qi_partial_result(
+    case: MinimalSeedCase,
+    result: sweep.CaseResult,
+    output_dir: Path,
+) -> bool:
+    """Attach QI checkpoint metrics and mark timeout partials as non-crash failures."""
+
+    if case.problem != "qi":
+        return False
+    changed = qi_staged_runner.annotate_case_result_from_partial_artifacts(result, output_dir)
+    message = str(result.message or "").lower()
+    timeout_partial = changed and "partial" in message and ("timeout" in message or "timed out" in message)
+    if timeout_partial and result.crashed:
+        result.crashed = False
+        changed = True
+    return changed
+
+
 def _worker_impl(
     case_name: str,
     output_dir: Path,
@@ -696,6 +714,7 @@ def _worker_impl(
             input_file=seeded_input_file,
             case_timeout_s=case_timeout_s,
         )
+        _annotate_qi_partial_result(case, result, output_dir)
         _apply_physics_gate(case, result)
     except Exception as exc:  # pragma: no cover - exercised by integration failures.
         (output_dir / "traceback.txt").write_text(traceback.format_exc())
@@ -711,6 +730,7 @@ def _worker_impl(
             message=f"{type(exc).__name__}: {exc}",
             input_file=seeded_input_file,
         )
+        _annotate_qi_partial_result(case, result, output_dir)
     result_path.write_text(json.dumps(asdict(result), indent=2))
 
 
@@ -887,11 +907,19 @@ def main() -> None:
             )
             result_needs_write = True
 
-        if proc.exitcode not in (0, None):
-            result.crashed = True
-            if "worker exit code" not in result.message and "exit code" not in result.message:
-                result.message = f"exit code {proc.exitcode}; {result.message}"
+        qi_partial = _annotate_qi_partial_result(case, result, output_dir)
+        if qi_partial:
             result_needs_write = True
+
+        if proc.exitcode not in (0, None):
+            if not (timed_out and qi_partial):
+                result.crashed = True
+                if "worker exit code" not in result.message and "exit code" not in result.message:
+                    result.message = f"exit code {proc.exitcode}; {result.message}"
+                result_needs_write = True
+            elif "partial" not in str(result.message).lower():
+                result.message = f"{result.message}; partial QI stage checkpoint metrics recorded"
+                result_needs_write = True
 
         if result_needs_write or not result_path.exists():
             output_dir.mkdir(parents=True, exist_ok=True)

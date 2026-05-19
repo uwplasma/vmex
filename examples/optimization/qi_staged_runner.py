@@ -299,6 +299,12 @@ def _stage_checkpoint_partial_metrics(output_dir: Path) -> dict[str, Any]:
     }
 
 
+def _has_partial_metrics(metrics: dict[str, Any]) -> bool:
+    """Return True when a partial checkpoint carries at least one finite field."""
+
+    return any(value is not None for value in metrics.values())
+
+
 def annotate_case_result_from_partial_artifacts(result: sweep.CaseResult, output_dir: Path) -> bool:
     """Fill missing QI fields from partial staged artifacts.
 
@@ -402,6 +408,8 @@ def run_qi_staged_case(config: QIStagedCaseConfig) -> sweep.CaseResult:
         message = f"{message}; {suffix}" if message else suffix
     if success and not message:
         message = "QI staged subprocess passed engineering gate"
+    partial_metrics_available = _has_partial_metrics(partial_metrics)
+    crashed = returncode != 0 and not (returncode == 124 and partial_metrics_available)
 
     wall_time_s = history_metrics.pop("total_wall_time_s")
     if wall_time_s is None:
@@ -412,7 +420,7 @@ def run_qi_staged_case(config: QIStagedCaseConfig) -> sweep.CaseResult:
         max_mode=int(config.max_mode),
         use_ess=bool(config.use_ess),
         success=bool(success),
-        crashed=returncode != 0,
+        crashed=crashed,
         message=message,
         policy=str(config.policy),
         total_wall_time_s=wall_time_s,

@@ -207,7 +207,7 @@ def test_qi_staged_runner_preserves_partial_reference_metrics_on_timeout(tmp_pat
     result = runner.run_qi_staged_case(config)
 
     assert result.success is False
-    assert result.crashed is True
+    assert result.crashed is False
     assert "timed out" in result.message
     assert "partial boundary-reference metrics recorded" in result.message
     assert result.qs_final == pytest.approx(1.1e-3)
@@ -289,7 +289,7 @@ def test_qi_staged_runner_prefers_stage_checkpoint_metrics_on_timeout(tmp_path: 
     result = runner.run_qi_staged_case(config)
 
     assert result.success is False
-    assert result.crashed is True
+    assert result.crashed is False
     assert "partial QI stage checkpoint metrics recorded" in result.message
     assert result.objective_final == pytest.approx(2.25)
     assert result.qs_final == pytest.approx(2.0e-3)
