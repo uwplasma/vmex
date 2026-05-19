@@ -166,12 +166,14 @@ README Best Rows
 
 The README intentionally shows only one best ``LASYM = F`` result per target.
 QA/QH/QP/QI are selected from the CPU matrix and filtered against the common
-aspect-5 target.  The selected QI row must satisfy the legacy branch
-diagnostic, mirror-ratio, elongation, iota, and aspect-ratio gates.  These
-panels include the original deck LCFS before any ``max_mode=1`` optimization
-work, final LCFS, per-stage objective history, and initial/final
-outer-surface ``|B|`` line contours in Boozer coordinates evaluated with
-``booz_xform_jax``.
+aspect-5 target.  The selected QI row is chosen with the legacy branch
+diagnostic, mirror-ratio, elongation, iota, and aspect-ratio gates used as
+promotion evidence rather than as exact equality constraints; small numerical
+slack is expected when independent Boozer diagnostics are recomputed after the
+optimization.  These panels include the original deck LCFS before any
+``max_mode=1`` optimization work, final LCFS, per-stage objective history, and
+initial/final outer-surface ``|B|`` line contours in Boozer coordinates
+evaluated with ``booz_xform_jax``.
 The source table is also available as
 :download:`readme_best_optimizations.csv <_static/figures/readme_best_optimizations.csv>`.
 
