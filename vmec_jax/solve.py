@@ -10276,55 +10276,60 @@ def solve_fixed_boundary_residual_iter(
             freeb_ivacskip_full = np.zeros((0,), dtype=int)
             freeb_ivac_full = np.zeros((0,), dtype=int)
 
-        resume_state_scan_base = {
-            "time_step": float(np.asarray(carry_final.time_step)),
-            "inv_tau": np.asarray(carry_final.inv_tau),
-            "fsq_prev": float(np.asarray(carry_final.fsq_prev)),
-            "fsq0_prev": float(np.asarray(carry_final.fsq0_prev)),
-            "flip_sign": float(np.asarray(carry_final.flip_sign)),
-            "iter1": int(np.asarray(carry_final.iter1)),
-            "iter_offset": int(resume_iter_offset),
-            "res0": float(np.asarray(carry_final.res0)),
-            "res1": float(np.asarray(carry_final.res1)),
-            "prev_rz_fsq": float(np.asarray(carry_final.fsqr_prev_phys + carry_final.fsqz_prev_phys)),
-            "vmec2000_cache_valid": bool(np.asarray(carry_final.cache_valid)),
-            "ijacob": int(np.asarray(carry_final.ijacob)),
-            "bad_resets": int(np.asarray(carry_final.bad_resets)),
-            "bad_growth_streak": int(np.asarray(carry_final.bad_growth)),
-            "fsqz_prev": float(np.asarray(carry_final.fsqz_prev)),
-            "r00_prev": float(np.asarray(carry_final.r00_prev)),
-            "z00_prev": float(np.asarray(carry_final.z00_prev)),
-            "w_mhd_prev": float(np.asarray(carry_final.w_mhd_prev)),
-            "force_bcovar_update": bool(np.asarray(carry_final.force_bcovar_update)),
-            "freeb_ivac": int(freeb_ivac_final),
-            "freeb_ivacskip": int(freeb_ivacskip_final),
-            "freeb_nvacskip": int(freeb_nvacskip),
-            "freeb_nvskip0": int(freeb_nvskip0),
-        }
-        resume_state_scan_heavy = {
-            "state_checkpoint": carry_final.state_checkpoint,
-            "vRcc": np.asarray(carry_final.vRcc),
-            "vRss": np.asarray(carry_final.vRss),
-            "vZsc": np.asarray(carry_final.vZsc),
-            "vZcs": np.asarray(carry_final.vZcs),
-            "vLsc": np.asarray(carry_final.vLsc),
-            "vLcs": np.asarray(carry_final.vLcs),
-            "vRsc": np.asarray(carry_final.vRsc),
-            "vRcs": np.asarray(carry_final.vRcs),
-            "vZcc": np.asarray(carry_final.vZcc),
-            "vZss": np.asarray(carry_final.vZss),
-            "vLcc": np.asarray(carry_final.vLcc),
-            "vLss": np.asarray(carry_final.vLss),
-            "cache_precond_diag": carry_final.cache_precond_diag,
-            "cache_tcon": carry_final.cache_tcon,
-            "cache_norms": carry_final.cache_norms,
-            "cache_rz_scale": carry_final.cache_rz_scale,
-            "cache_l_scale": carry_final.cache_l_scale,
-            "cache_rz_norm": np.asarray(carry_final.cache_rz_norm),
-            "cache_f_norm1": np.asarray(carry_final.cache_f_norm1),
-            "cache_prec_rz_mats": carry_final.cache_prec_rz_mats,
-            "cache_prec_lam_prec": np.asarray(carry_final.cache_prec_lam_prec),
-        }
+        resume_state_scan_payload = None
+        if resume_state_mode != "none":
+            resume_state_scan_base = {
+                "time_step": float(np.asarray(carry_final.time_step)),
+                "inv_tau": np.asarray(carry_final.inv_tau),
+                "fsq_prev": float(np.asarray(carry_final.fsq_prev)),
+                "fsq0_prev": float(np.asarray(carry_final.fsq0_prev)),
+                "flip_sign": float(np.asarray(carry_final.flip_sign)),
+                "iter1": int(np.asarray(carry_final.iter1)),
+                "iter_offset": int(resume_iter_offset),
+                "res0": float(np.asarray(carry_final.res0)),
+                "res1": float(np.asarray(carry_final.res1)),
+                "prev_rz_fsq": float(np.asarray(carry_final.fsqr_prev_phys + carry_final.fsqz_prev_phys)),
+                "vmec2000_cache_valid": bool(np.asarray(carry_final.cache_valid)),
+                "ijacob": int(np.asarray(carry_final.ijacob)),
+                "bad_resets": int(np.asarray(carry_final.bad_resets)),
+                "bad_growth_streak": int(np.asarray(carry_final.bad_growth)),
+                "fsqz_prev": float(np.asarray(carry_final.fsqz_prev)),
+                "r00_prev": float(np.asarray(carry_final.r00_prev)),
+                "z00_prev": float(np.asarray(carry_final.z00_prev)),
+                "w_mhd_prev": float(np.asarray(carry_final.w_mhd_prev)),
+                "force_bcovar_update": bool(np.asarray(carry_final.force_bcovar_update)),
+                "freeb_ivac": int(freeb_ivac_final),
+                "freeb_ivacskip": int(freeb_ivacskip_final),
+                "freeb_nvacskip": int(freeb_nvacskip),
+                "freeb_nvskip0": int(freeb_nvskip0),
+            }
+            resume_state_scan_heavy = None
+            if resume_state_mode == "full":
+                resume_state_scan_heavy = {
+                    "state_checkpoint": carry_final.state_checkpoint,
+                    "vRcc": np.asarray(carry_final.vRcc),
+                    "vRss": np.asarray(carry_final.vRss),
+                    "vZsc": np.asarray(carry_final.vZsc),
+                    "vZcs": np.asarray(carry_final.vZcs),
+                    "vLsc": np.asarray(carry_final.vLsc),
+                    "vLcs": np.asarray(carry_final.vLcs),
+                    "vRsc": np.asarray(carry_final.vRsc),
+                    "vRcs": np.asarray(carry_final.vRcs),
+                    "vZcc": np.asarray(carry_final.vZcc),
+                    "vZss": np.asarray(carry_final.vZss),
+                    "vLcc": np.asarray(carry_final.vLcc),
+                    "vLss": np.asarray(carry_final.vLss),
+                    "cache_precond_diag": carry_final.cache_precond_diag,
+                    "cache_tcon": carry_final.cache_tcon,
+                    "cache_norms": carry_final.cache_norms,
+                    "cache_rz_scale": carry_final.cache_rz_scale,
+                    "cache_l_scale": carry_final.cache_l_scale,
+                    "cache_rz_norm": np.asarray(carry_final.cache_rz_norm),
+                    "cache_f_norm1": np.asarray(carry_final.cache_f_norm1),
+                    "cache_prec_rz_mats": carry_final.cache_prec_rz_mats,
+                    "cache_prec_lam_prec": np.asarray(carry_final.cache_prec_lam_prec),
+                }
+            resume_state_scan_payload = _pack_resume_state(resume_state_scan_base, resume_state_scan_heavy)
         scan_timing_report = None
         if scan_timing_enabled:
             if scan_postprocess_start is not None:
@@ -10411,7 +10416,7 @@ def solve_fixed_boundary_residual_iter(
                 "freeb_ivac_full": freeb_ivac_full,
                 "freeb_ivacskip_full": freeb_ivacskip_full,
                 "freeb_full_update_full": (freeb_ivacskip_full == 0).astype(int),
-                "resume_state": _pack_resume_state(resume_state_scan_base, resume_state_scan_heavy),
+                "resume_state": resume_state_scan_payload,
                 **({"timing": scan_timing_report} if scan_timing_report is not None else {}),
             },
         )
@@ -14614,64 +14619,69 @@ def solve_fixed_boundary_residual_iter(
             )
         except Exception:
             pass
-    resume_state_base = {
-        "time_step": float(time_step),
-        "inv_tau": list(inv_tau),
-        "fsq_prev": float(fsq_prev),
-        "fsq0_prev": float(fsq0_prev),
-        "flip_sign": float(flip_sign),
-        "iter1": int(iter1),
-        "iter_offset": int(last_iter2),
-        "ijacob": int(ijacob),
-        "bad_resets": int(bad_resets),
-        "res0": float(res0),
-        "res1": float(res1),
-        "prev_rz_fsq": float(prev_rz_fsq),
-        "bad_growth_streak": int(bad_growth_streak),
-        "huge_force_restart_count": int(huge_force_restart_count),
-        "vmec2000_cache_valid": bool(vmec2000_cache_valid),
-        "freeb_ivac": int(freeb_ivac),
-        "freeb_ivacskip": int(freeb_ivacskip),
-        "freeb_nvacskip": int(freeb_nvacskip),
-        "freeb_nvskip0": int(freeb_nvskip0),
-        "freeb_model": str(freeb_last_model),
-        "freeb_nestor_update_count": (
-            0 if freeb_nestor_runtime is None else int(getattr(freeb_nestor_runtime, "update_count", 0))
-        ),
-        "freeb_nestor_reuse_count": (
-            0 if freeb_nestor_runtime is None else int(getattr(freeb_nestor_runtime, "reuse_count", 0))
-        ),
-    }
-    resume_state_heavy = {
-        "vRcc": np.asarray(vRcc),
-        "vRss": np.asarray(vRss),
-        "vZsc": np.asarray(vZsc),
-        "vZcs": np.asarray(vZcs),
-        "vLsc": np.asarray(vLsc),
-        "vLcs": np.asarray(vLcs),
-        "vRsc": np.asarray(vRsc),
-        "vRcs": np.asarray(vRcs),
-        "vZcc": np.asarray(vZcc),
-        "vZss": np.asarray(vZss),
-        "vLcc": np.asarray(vLcc),
-        "vLss": np.asarray(vLss),
-        "state_checkpoint": state_checkpoint,
-        "cache_precond_diag": cache_precond_diag,
-        "cache_tcon": cache_tcon,
-        "cache_norms": cache_norms,
-        "cache_rz_scale": cache_rz_scale,
-        "cache_l_scale": cache_l_scale,
-        "cache_rz_norm": cache_rz_norm,
-        "cache_f_norm1": cache_f_norm1,
-        "cache_prec_rz_mats": cache_prec_rz_mats,
-        "cache_prec_rz_jmax": cache_prec_rz_jmax,
-        "cache_prec_lam_prec": cache_prec_lam_prec,
-        "cache_prec_faclam": cache_prec_faclam,
-        "cache_prec_lam_debug": cache_prec_lam_debug,
-        "cache_constraint_rcon0": cache_constraint_rcon0,
-        "cache_constraint_zcon0": cache_constraint_zcon0,
-    }
-    diag["resume_state"] = _pack_resume_state(resume_state_base, resume_state_heavy)
+    resume_state_payload = None
+    if resume_state_mode != "none":
+        resume_state_base = {
+            "time_step": float(time_step),
+            "inv_tau": list(inv_tau),
+            "fsq_prev": float(fsq_prev),
+            "fsq0_prev": float(fsq0_prev),
+            "flip_sign": float(flip_sign),
+            "iter1": int(iter1),
+            "iter_offset": int(last_iter2),
+            "ijacob": int(ijacob),
+            "bad_resets": int(bad_resets),
+            "res0": float(res0),
+            "res1": float(res1),
+            "prev_rz_fsq": float(prev_rz_fsq),
+            "bad_growth_streak": int(bad_growth_streak),
+            "huge_force_restart_count": int(huge_force_restart_count),
+            "vmec2000_cache_valid": bool(vmec2000_cache_valid),
+            "freeb_ivac": int(freeb_ivac),
+            "freeb_ivacskip": int(freeb_ivacskip),
+            "freeb_nvacskip": int(freeb_nvacskip),
+            "freeb_nvskip0": int(freeb_nvskip0),
+            "freeb_model": str(freeb_last_model),
+            "freeb_nestor_update_count": (
+                0 if freeb_nestor_runtime is None else int(getattr(freeb_nestor_runtime, "update_count", 0))
+            ),
+            "freeb_nestor_reuse_count": (
+                0 if freeb_nestor_runtime is None else int(getattr(freeb_nestor_runtime, "reuse_count", 0))
+            ),
+        }
+        resume_state_heavy = None
+        if resume_state_mode == "full":
+            resume_state_heavy = {
+                "vRcc": np.asarray(vRcc),
+                "vRss": np.asarray(vRss),
+                "vZsc": np.asarray(vZsc),
+                "vZcs": np.asarray(vZcs),
+                "vLsc": np.asarray(vLsc),
+                "vLcs": np.asarray(vLcs),
+                "vRsc": np.asarray(vRsc),
+                "vRcs": np.asarray(vRcs),
+                "vZcc": np.asarray(vZcc),
+                "vZss": np.asarray(vZss),
+                "vLcc": np.asarray(vLcc),
+                "vLss": np.asarray(vLss),
+                "state_checkpoint": state_checkpoint,
+                "cache_precond_diag": cache_precond_diag,
+                "cache_tcon": cache_tcon,
+                "cache_norms": cache_norms,
+                "cache_rz_scale": cache_rz_scale,
+                "cache_l_scale": cache_l_scale,
+                "cache_rz_norm": cache_rz_norm,
+                "cache_f_norm1": cache_f_norm1,
+                "cache_prec_rz_mats": cache_prec_rz_mats,
+                "cache_prec_rz_jmax": cache_prec_rz_jmax,
+                "cache_prec_lam_prec": cache_prec_lam_prec,
+                "cache_prec_faclam": cache_prec_faclam,
+                "cache_prec_lam_debug": cache_prec_lam_debug,
+                "cache_constraint_rcon0": cache_constraint_rcon0,
+                "cache_constraint_zcon0": cache_constraint_zcon0,
+            }
+        resume_state_payload = _pack_resume_state(resume_state_base, resume_state_heavy)
+    diag["resume_state"] = resume_state_payload
     return _attach_freeb_diag(
         SolveVmecResidualResult(
             state=state,
