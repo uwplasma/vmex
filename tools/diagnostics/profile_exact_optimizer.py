@@ -622,6 +622,8 @@ def _clear_optimizer_point_caches(opt) -> None:
     """Clear solved-state/tape caches without dropping compiled executables."""
     opt._exact_cache.clear()
     opt._exact_state_cache.clear()
+    if hasattr(opt, "_exact_state_key_by_id"):
+        opt._exact_state_key_by_id.clear()
     if hasattr(opt, "_exact_residual_cache"):
         opt._exact_residual_cache.clear()
     if hasattr(opt, "_exact_jacobian_cache"):

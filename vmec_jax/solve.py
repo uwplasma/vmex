@@ -7313,6 +7313,25 @@ def solve_fixed_boundary_residual_iter(
             stage_prev_fsq_j = None
 
     def _run_vmec2000_scan(state_init: VMECState) -> SolveVmecResidualResult:
+        scan_timing_env = os.getenv("VMEC_JAX_TIMING", "").strip().lower()
+        scan_timing_enabled = scan_timing_env not in ("", "0", "false", "no")
+        scan_timing_stats = {
+            "scan_preflight_s": 0.0,
+            "scan_device_run_s": 0.0,
+            "scan_host_materialize_s": 0.0,
+            "scan_postprocess_s": 0.0,
+        }
+        scan_total_start = time.perf_counter() if scan_timing_enabled else None
+
+        def _scan_block_until_ready(value):
+            try:
+                return jax.block_until_ready(value)
+            except Exception:
+                return jax.tree_util.tree_map(
+                    lambda a: a.block_until_ready() if hasattr(a, "block_until_ready") else a,
+                    value,
+                )
+
         if backtracking or limit_dt_from_force or limit_update_rms or use_direct_fallback or reference_mode:
             raise ValueError(
                 "vmec2000 scan requires backtracking=False, limit_dt_from_force=False, "
@@ -9816,6 +9835,7 @@ def solve_fixed_boundary_residual_iter(
                 lthreed=bool(cfg.lthreed),
             )
             if preflight_iters > 0:
+                t_preflight = time.perf_counter() if scan_timing_enabled else None
                 if iter_offset_preflight is not None:
                     carry = carry._replace(iter_offset=jnp.asarray(iter_offset_preflight, dtype=jnp.int32))
                 try:
@@ -9836,6 +9856,8 @@ def solve_fixed_boundary_residual_iter(
                 start_idx = int(preflight_iters)
                 if axis_reset_repeat:
                     carry = carry._replace(iter_offset=jnp.asarray(iter_offset0, dtype=jnp.int32))
+                if scan_timing_enabled and t_preflight is not None:
+                    scan_timing_stats["scan_preflight_s"] += time.perf_counter() - float(t_preflight)
             while start_idx < int(max_iter_scan):
                 # Fixed-length chunk to avoid retracing for varying tail sizes.
                 # On quiet accelerator runs, cap the chunk to the remaining work
@@ -9846,7 +9868,11 @@ def solve_fixed_boundary_residual_iter(
                 chunk_len = min(int(chunk_size), int(remaining)) if chunk_cap_remaining else int(chunk_size)
                 it_seq = jnp.arange(start_idx, start_idx + int(chunk_len), dtype=jnp.int32)
                 runner = _get_scan_runner(int(chunk_len))
+                t_device = time.perf_counter() if scan_timing_enabled else None
                 carry, hist_chunk = runner(carry, it_seq)
+                if scan_timing_enabled and t_device is not None:
+                    carry, hist_chunk = _scan_block_until_ready((carry, hist_chunk))
+                    scan_timing_stats["scan_device_run_s"] += time.perf_counter() - float(t_device)
                 fsq_min_global_j = jnp.minimum(
                     fsq_min_global_j,
                     jnp.min(hist_chunk[0] + hist_chunk[1] + hist_chunk[2]),
@@ -9888,9 +9914,12 @@ def solve_fixed_boundary_residual_iter(
             if need_print:
                 hist = jax.tree_util.tree_map(lambda *parts: np.concatenate(parts, axis=0), *hist_parts)
             else:
+                t_materialize = time.perf_counter() if scan_timing_enabled else None
                 hist = jax.tree_util.tree_map(lambda *parts: jnp.concatenate(parts, axis=0), *hist_parts)
                 if not _tree_has_tracer(hist):
                     hist = jax.tree_util.tree_map(lambda a: np.asarray(a), hist)
+                if scan_timing_enabled and t_materialize is not None:
+                    scan_timing_stats["scan_host_materialize_s"] += time.perf_counter() - float(t_materialize)
             carry_final = carry
             if abort_scan_host:
                 carry_final = carry_final._replace(abort_scan=jnp.asarray(True))
@@ -9899,6 +9928,7 @@ def solve_fixed_boundary_residual_iter(
             if preflight_iters > 0:
                 # Preflight the first iteration outside the jitted scan to avoid
                 # XLA aliasing issues in the initial tomnsps pass.
+                t_preflight = time.perf_counter() if scan_timing_enabled else None
                 carry_pre = carry_init
                 if iter_offset_preflight is not None:
                     carry_pre = carry_pre._replace(iter_offset=jnp.asarray(iter_offset_preflight, dtype=jnp.int32))
@@ -9913,11 +9943,18 @@ def solve_fixed_boundary_residual_iter(
                     and int(preflight_iters) >= int(scan_fallback_iters)
                 ):
                     carry_pre = carry_pre._replace(fallback_active=jnp.asarray(False))
+                if scan_timing_enabled and t_preflight is not None:
+                    carry_pre, hist_pre = _scan_block_until_ready((carry_pre, hist_pre))
+                    scan_timing_stats["scan_preflight_s"] += time.perf_counter() - float(t_preflight)
                 if max_iter_tail > 0:
                     it_seq = jnp.arange(preflight_iters, int(max_iter_scan), dtype=jnp.int32)
                     if axis_reset_repeat:
                         carry_pre = carry_pre._replace(iter_offset=jnp.asarray(iter_offset0, dtype=jnp.int32))
+                    t_device = time.perf_counter() if scan_timing_enabled else None
                     carry_final, hist_tail = runner(carry_pre, it_seq)
+                    if scan_timing_enabled and t_device is not None:
+                        carry_final, hist_tail = _scan_block_until_ready((carry_final, hist_tail))
+                        scan_timing_stats["scan_device_run_s"] += time.perf_counter() - float(t_device)
                     hist = jax.tree_util.tree_map(
                         lambda a, b: jnp.concatenate([a[None], b], axis=0),
                         hist_pre,
@@ -9928,7 +9965,12 @@ def solve_fixed_boundary_residual_iter(
                     hist = jax.tree_util.tree_map(lambda a: a[None], hist_pre)
             else:
                 it_seq = jnp.arange(int(max_iter_scan), dtype=jnp.int32)
+                t_device = time.perf_counter() if scan_timing_enabled else None
                 carry_final, hist = runner(carry_init, it_seq)
+                if scan_timing_enabled and t_device is not None:
+                    carry_final, hist = _scan_block_until_ready((carry_final, hist))
+                    scan_timing_stats["scan_device_run_s"] += time.perf_counter() - float(t_device)
+        scan_postprocess_start = time.perf_counter() if scan_timing_enabled else None
         if scan_minimal:
             fsqr_hist, fsqz_hist, fsql_hist = hist
             accepted = None
@@ -10283,6 +10325,20 @@ def solve_fixed_boundary_residual_iter(
             "cache_prec_rz_mats": carry_final.cache_prec_rz_mats,
             "cache_prec_lam_prec": np.asarray(carry_final.cache_prec_lam_prec),
         }
+        scan_timing_report = None
+        if scan_timing_enabled:
+            if scan_postprocess_start is not None:
+                scan_timing_stats["scan_postprocess_s"] += time.perf_counter() - float(scan_postprocess_start)
+            scan_total_s = (
+                time.perf_counter() - float(scan_total_start)
+                if scan_total_start is not None
+                else sum(scan_timing_stats.values())
+            )
+            scan_timing_report = {
+                "iterations": int(n_iter_hist),
+                "scan_total_s": float(scan_total_s),
+                **{key: float(value) for key, value in scan_timing_stats.items()},
+            }
         res_scan = SolveVmecResidualResult(
             state=carry_final.state,
             n_iter=int(w_hist.shape[0]),
@@ -10356,6 +10412,7 @@ def solve_fixed_boundary_residual_iter(
                 "freeb_ivacskip_full": freeb_ivacskip_full,
                 "freeb_full_update_full": (freeb_ivacskip_full == 0).astype(int),
                 "resume_state": _pack_resume_state(resume_state_scan_base, resume_state_scan_heavy),
+                **({"timing": scan_timing_report} if scan_timing_report is not None else {}),
             },
         )
         return _attach_freeb_diag(res_scan)

@@ -273,6 +273,35 @@ def test_exact_optimizer_profiles_trial_solver_timing_buckets() -> None:
     assert profile["solve_forward_trial_unattributed"]["wall_time_s"] == pytest.approx(0.15)
 
 
+def test_exact_optimizer_profiles_scan_solver_timing_buckets() -> None:
+    opt = FixedBoundaryExactOptimizer.__new__(FixedBoundaryExactOptimizer)
+    opt._profile = {}
+
+    opt._profile_solver_timing(
+        {
+            "timing": {
+                "iterations": 4,
+                "scan_total_s": 0.55,
+                "scan_preflight_s": 0.05,
+                "scan_device_run_s": 0.40,
+                "scan_host_materialize_s": 0.03,
+                "scan_postprocess_s": 0.07,
+            }
+        },
+        profile_prefix="trial_solver",
+        phase_wall_s=0.65,
+        unattributed_name="solve_forward_trial_unattributed",
+    )
+    profile = opt._profile_dump()
+
+    assert profile["trial_solver_scan_total"]["wall_time_s"] == 0.55
+    assert profile["trial_solver_scan_preflight"]["wall_time_s"] == 0.05
+    assert profile["trial_solver_scan_device_run"]["wall_time_s"] == 0.40
+    assert profile["trial_solver_scan_host_materialize"]["wall_time_s"] == 0.03
+    assert profile["trial_solver_scan_postprocess"]["wall_time_s"] == 0.07
+    assert profile["solve_forward_trial_unattributed"]["wall_time_s"] == pytest.approx(0.10)
+
+
 def test_exact_optimizer_callback_report_schema_and_budget_status() -> None:
     args = exact_profile_tool._parse_args(
         [

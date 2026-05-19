@@ -1617,6 +1617,11 @@ class FixedBoundaryExactOptimizer:
             ("update_state_s", "update_state"),
             ("update_trace_build_s", "update_trace_build"),
             ("update_trace_finalize_s", "update_trace_finalize"),
+            ("scan_total_s", "scan_total"),
+            ("scan_preflight_s", "scan_preflight"),
+            ("scan_device_run_s", "scan_device_run"),
+            ("scan_host_materialize_s", "scan_host_materialize"),
+            ("scan_postprocess_s", "scan_postprocess"),
         )
         for key, suffix in timing_keys:
             if key not in timing:
@@ -1626,7 +1631,7 @@ class FixedBoundaryExactOptimizer:
             except Exception:
                 continue
             self._profile_add(f"{profile_prefix}_{suffix}", value)
-            if key in ("compute_forces_s", "preconditioner_s", "update_s"):
+            if key in ("compute_forces_s", "preconditioner_s", "update_s", "scan_total_s"):
                 solver_total += max(0.0, value)
         self._profile_add(unattributed_name, max(0.0, float(phase_wall_s) - solver_total))
 
