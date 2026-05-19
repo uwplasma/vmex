@@ -5119,6 +5119,13 @@ def wout_minimal_from_fixed_boundary(
     bsubv_out = np.asarray(bc.bsubv).copy()
     bsubu_raw = bsubu_out.copy()
     bsubv_raw = bsubv_out.copy()
+    bsubv_lasym_asym_source = None
+    bsubv_lasym_asym_filter_u = None
+    if bool(lasym) and hasattr(bc, "bsubv_e"):
+        # VMEC fileout forces IEQUI=1 before wrout. Diagnostics show only the
+        # LASYM bsubv sine output channel follows this IEQUI source; keep the
+        # existing raw channels for bsubvmnc/bsubu parity.
+        bsubv_lasym_asym_source = np.asarray(getattr(bc, "bsubv_e"), dtype=float).copy()
     if os.getenv("VMEC_JAX_DUMP_BSUB_SOURCES", "") not in ("", "0"):
         tag = os.getenv("VMEC_JAX_DUMP_TAG", "").strip()
         outdir = Path(os.getenv("VMEC_JAX_DUMP_DIR", ".")).expanduser().resolve()
@@ -5238,6 +5245,8 @@ def wout_minimal_from_fixed_boundary(
             bsubu_odd_filter = getattr(bc, "bsubu_parity_odd", None) if use_parity_channels else None
             bsubv_even_filter = getattr(bc, "bsubv_parity_even", None) if use_parity_channels else None
             bsubv_odd_filter = getattr(bc, "bsubv_parity_odd", None) if use_parity_channels else None
+            if bsubv_lasym_asym_source is not None:
+                bsubv_lasym_asym_filter_u = np.asarray(bsubu_out, dtype=float).copy()
             bsubu_out, bsubv_out = _filter_bsubuv_jxbforce_lasym_loop(
                 bsubu=np.asarray(bsubu_out, dtype=float),
                 bsubv=np.asarray(bsubv_out, dtype=float),
@@ -5250,6 +5259,19 @@ def wout_minimal_from_fixed_boundary(
                 bsubv_even=None if bsubv_even_filter is None else np.asarray(bsubv_even_filter, dtype=float),
                 bsubv_odd=None if bsubv_odd_filter is None else np.asarray(bsubv_odd_filter, dtype=float),
             )
+            if bsubv_lasym_asym_source is not None:
+                _, bsubv_lasym_asym_source = _filter_bsubuv_jxbforce_lasym_loop(
+                    bsubu=np.asarray(bsubv_lasym_asym_filter_u, dtype=float),
+                    bsubv=np.asarray(bsubv_lasym_asym_source, dtype=float),
+                    trig=trig,
+                    mmax_force=max(int(mpol) - 1, 0),
+                    nmax_force=int(ntor),
+                    s=np.asarray(s, dtype=float),
+                    bsubu_even=None,
+                    bsubu_odd=None,
+                    bsubv_even=None,
+                    bsubv_odd=None,
+                )
             bsubu_diag = np.asarray(bsubu_out, dtype=float)
             bsubv_diag = np.asarray(bsubv_out, dtype=float)
         pres_h = np.asarray(pres, dtype=float)[:, None, None]
@@ -5288,6 +5310,8 @@ def wout_minimal_from_fixed_boundary(
 
         bsubu_sym, bsubu_asym = _vmec_symoutput_split(f=bsubu_out, trig=trig)
         bsubv_sym, bsubv_asym = _vmec_symoutput_split(f=bsubv_out, trig=trig)
+        if bsubv_lasym_asym_source is not None:
+            _, bsubv_asym = _vmec_symoutput_split(f=bsubv_lasym_asym_source, trig=trig)
         bsupu_sym, bsupu_asym = _vmec_symoutput_split(f=bsupu_out, trig=trig)
         bsupv_sym, bsupv_asym = _vmec_symoutput_split(f=bsupv_out, trig=trig)
         bsubs_sym, bsubs_asym = _vmec_symoutput_split(f=bsubs_full, trig=trig, reversed_sym=True)

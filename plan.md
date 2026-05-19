@@ -348,8 +348,8 @@ push, 85% coverage-gate push, optional SIMSOPT/VMEC2000 gate expansion, the
 converged-wout parity matrix/benchmark pass, QI diagnostic/objective branch
 hardening, the exact-output/API/release hygiene push, the custom QI seed audit
 documentation/regression gate, the v0.0.10 release, scan-runner cache reuse
-across boundary trials, detailed scan-timing diagnostics, and reference-state
-wout roundtrip diagnostics:
+across boundary trials, detailed scan-timing diagnostics, reference-state wout
+roundtrip diagnostics, and the green `main` CI run for `f5c6d27`:
 
 - Continuation correctness: 100%. Source fix is implemented and covered by
   synthetic repeated-stage tests, a real boundary-projection stage test, and
@@ -409,8 +409,11 @@ wout roundtrip diagnostics:
   tape replay dropping from about `22.2 s` to about `5.3 s`. Production
   fixed-boundary auto policy now uses the VMEC-control non-scan loop on CPU and
   GPU because May 2026 `office` profiles showed converged GPU non-scan solves
-  faster than scan across QH, QA, QI, and LASYM examples. Larger-mode replay
-  and dense residual-tangent projection remain open.
+  faster than scan across QH, QA, QI, and LASYM examples. A fused
+  residual-projected replay experiment was profiled and rejected because it was
+  neutral on non-LASYM QH and slower on chunked LASYM CPU callbacks. The next
+  performance blockers remain larger-mode accepted-point replay cost and dense
+  residual-tangent projection.
 - VMEC parity and physics gates: 99%. Required-tier bundled gates now cover
   `chipf`, stored `B`, input flux/profile propagation, finite-beta
   `pres/presf`, VMEC `iotas -> iotaf` smoothing, surface-averaged current
@@ -431,9 +434,13 @@ wout roundtrip diagnostics:
   bundled synthetic mgrid currents are sign/magnitude matched to the plasma
   current so stock VMEC2000 reaches the vacuum solve instead of aborting with an
   `I_TOR` mismatch, with an optional executable smoke guarding that behavior.
-  Full fixed/free/LASYM/finite-beta converged-equilibrium parity is still open,
-  and `freeb_scalpot` remains an instrumented-VMEC2000 diagnostic because a
-  stock executable does not emit the required dumps.
+  Full fixed/free/LASYM/finite-beta converged-equilibrium parity is still open.
+  The near-zero `bsubvmns` sine covariant-channel reference-state gap is now
+  covered by a focused `up_down_asymmetric_tokamak` regression using VMEC's
+  IEQUI/asymmetric `bsubv` source for that output channel only. The remaining
+  LASYM blocker is the solved-state lambda convergence gap on the `m=1,3,4`
+  channels. `freeb_scalpot` remains an instrumented-VMEC2000 diagnostic because
+  a stock executable does not emit the required dumps.
 - Refactor/API/examples: 96.5%. Examples are SIMSOPT-like and clearer, finite-beta
   examples expose structured stage/final summaries while preserving direct
   optimizer visibility and have focused adapter coverage. Objective tuple
@@ -453,9 +460,9 @@ wout roundtrip diagnostics:
   and optional research-grade checks together. Read the Docs is configured to
   fail on Sphinx warnings, release docs use the 85% coverage gate, and package
   discovery is locked to the `vmec_jax` namespace. Full local Sphinx and the
-  required 85% coverage command are green at 85.25%, and the previous `main`
-  CI run after the all-surface QI mirror fix was fully green; released reference
-  assets are ignored so local full-tier refreshes cannot accidentally bloat commits.
+  required 85% coverage command are green at 85.25%, and the `f5c6d27`
+  `main` CI run was green; released reference assets are ignored so local
+  full-tier refreshes cannot accidentally bloat commits.
   The documented custom QI seed audit command was validated end-to-end on
   `input.QI_stel_seed_3127`; final seed-robust QI and GPU-production artifacts
   remain open.
