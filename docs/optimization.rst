@@ -174,6 +174,9 @@ then run the bounded robustness probe or select a ``RUN_CASE`` in
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_current_public_final \
      python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp2_qi \
+     python examples/optimization/QI_optimization.py
 
 The second audit command uses the far-seed QI gate convention from
 ``QI_optimization.py``: legacy QI below ``2e-3`` and smooth differentiable QI
@@ -1132,6 +1135,9 @@ script:
 
 .. code-block:: bash
 
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp2_qi \
+     python examples/optimization/QI_optimization.py
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_current_public_final \
      python examples/optimization/QI_optimization.py

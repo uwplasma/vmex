@@ -141,6 +141,9 @@ using them as promotion evidence.
 Recreate the QI coverage panel:
 
 ```bash
+PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi \
+  VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp2_qi \
+  python examples/optimization/QI_optimization.py
 PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 \
   VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_current_public_final \
   python examples/optimization/QI_optimization.py
@@ -153,6 +156,7 @@ PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 - Validation and VMEC2000 parity status: `docs/validation.rst`
 - Testing and coverage strategy: `docs/testing_strategy.rst`
 - Release checklist and CI gates: `docs/release_checklist.rst`
+- Latest release: [`v0.0.10`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.10)
 
 ## CLI Reference
 
