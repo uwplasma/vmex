@@ -47,6 +47,34 @@ def _hash_array_bytes(a: Any) -> str:
     return h.hexdigest()
 
 
+def _array_signature_key(a: Any) -> tuple[tuple[int, ...], str]:
+    """Return the JIT-relevant shape/dtype signature for an array-like value."""
+    try:
+        arr = np.asarray(a)
+        return tuple(int(v) for v in arr.shape), str(arr.dtype)
+    except Exception:
+        try:
+            typeof = getattr(jax, "typeof", None)
+            aval = typeof(a) if typeof is not None else jax.core.get_aval(a)
+        except Exception:
+            aval = None
+        if aval is None:
+            return (), type(a).__name__
+        shape = tuple(int(v) for v in getattr(aval, "shape", ()))
+        dtype = getattr(aval, "dtype", None)
+        return shape, str(dtype)
+
+
+def _edge_signature_key(*edges: Any) -> tuple[tuple[tuple[int, ...], str], ...]:
+    """Key fixed-boundary edge rows by shape/dtype, not by coefficient values."""
+    return tuple(_array_signature_key(edge) for edge in edges)
+
+
+def _edge_value_key(*edges: Any) -> tuple[str, ...]:
+    """Key fixed-boundary edge rows by values for legacy value-specialized paths."""
+    return tuple(_hash_array_bytes(edge) for edge in edges)
+
+
 def _tree_has_tracer(tree: Any) -> bool:
     if jax is None:
         return False

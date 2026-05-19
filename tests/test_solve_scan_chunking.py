@@ -99,6 +99,8 @@ def test_solve_reexports_runtime_helpers():
     assert solve_module._default_scan_core is solve_runtime._default_scan_core
     assert solve_module._parse_iter_list is solve_runtime._parse_iter_list
     assert solve_module._runtime_env_enabled is solve_runtime._runtime_env_enabled
+    assert solve_module._edge_signature_key is solve_runtime._edge_signature_key
+    assert solve_module._edge_value_key is solve_runtime._edge_value_key
     assert solve_module._scan_fallback_policy is solve_runtime._scan_fallback_policy
     assert solve_module._residual_convergence_flags is solve_runtime._residual_convergence_flags
     assert solve_module._scalar_history_array is solve_runtime._scalar_history_array
@@ -127,6 +129,18 @@ def test_hash_array_bytes_includes_shape_and_dtype():
     assert solve_runtime._hash_array_bytes(a) != solve_runtime._hash_array_bytes(b)
     assert solve_runtime._hash_array_bytes(a) != solve_runtime._hash_array_bytes(c)
     assert solve_runtime._hash_array_bytes(a) == solve_runtime._hash_array_bytes(a.copy())
+
+
+def test_edge_signature_key_ignores_values_but_not_shape_or_dtype():
+    a = np.asarray([1.0, 2.0], dtype=np.float64)
+    b = np.asarray([3.0, 4.0], dtype=np.float64)
+    c = np.asarray([[1.0, 2.0]], dtype=np.float64)
+    d = np.asarray([1.0, 2.0], dtype=np.float32)
+
+    assert solve_runtime._edge_signature_key(a) == solve_runtime._edge_signature_key(b)
+    assert solve_runtime._edge_signature_key(a) != solve_runtime._edge_signature_key(c)
+    assert solve_runtime._edge_signature_key(a) != solve_runtime._edge_signature_key(d)
+    assert solve_runtime._edge_value_key(a) != solve_runtime._edge_value_key(b)
 
 
 def test_runtime_iter_list_parsing_matches_legacy_edges():

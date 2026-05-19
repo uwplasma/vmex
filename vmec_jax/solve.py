@@ -488,6 +488,8 @@ _parse_iter_list = _solve_runtime._parse_iter_list
 _dump_env_enabled = _solve_runtime._dump_env_enabled
 _dump_iter_selected = _solve_runtime._dump_iter_selected
 _runtime_env_enabled = _solve_runtime._runtime_env_enabled
+_edge_signature_key = _solve_runtime._edge_signature_key
+_edge_value_key = _solve_runtime._edge_value_key
 _scan_fallback_policy = _solve_runtime._scan_fallback_policy
 _residual_convergence_flags = _solve_runtime._residual_convergence_flags
 _scalar_history_array = _solve_runtime._scalar_history_array
@@ -1339,6 +1341,10 @@ class _ScanCarry(NamedTuple):
     fsqr1_checkpoint: Any
     fsqz1_checkpoint: Any
     fsql1_checkpoint: Any
+    edge_Rcos: Any
+    edge_Rsin: Any
+    edge_Zcos: Any
+    edge_Zsin: Any
 
 
 def _free_boundary_iter_controls(iter2: int, iter1: int, nvacskip: int) -> tuple[int, int]:
@@ -5969,12 +5975,8 @@ def solve_fixed_boundary_residual_iter(
         _hash_array_bytes(wout_like.icurv) if getattr(wout_like, "icurv", None) is not None else None,
         float(constraint_tcon0) if constraint_tcon0 is not None else None,
     )
-    edge_key = (
-        _hash_array_bytes(edge_Rcos),
-        _hash_array_bytes(edge_Rsin),
-        _hash_array_bytes(edge_Zcos),
-        _hash_array_bytes(edge_Zsin),
-    )
+    edge_signature_key = _edge_signature_key(edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin)
+    edge_value_key = _edge_value_key(edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin)
 
     def _apply_radial_tridi(a, alpha: float):
         return _radial_tridi_smooth_dirichlet(a, alpha=alpha, skip_nonpositive=True)
@@ -9264,10 +9266,10 @@ def solve_fixed_boundary_residual_iter(
                     state_new = _enforce_fixed_boundary_and_axis(
                         state_new,
                         static,
-                        edge_Rcos=edge_Rcos,
-                        edge_Rsin=edge_Rsin,
-                        edge_Zcos=edge_Zcos,
-                        edge_Zsin=edge_Zsin,
+                        edge_Rcos=carry.edge_Rcos,
+                        edge_Rsin=carry.edge_Rsin,
+                        edge_Zcos=carry.edge_Zcos,
+                        edge_Zsin=carry.edge_Zsin,
                         enforce_edge=not bool(free_boundary_enabled),
                         enforce_lambda_axis=True,
                         idx00=idx00,
@@ -9581,6 +9583,10 @@ def solve_fixed_boundary_residual_iter(
                     fsqr1_checkpoint=fsqr1_checkpoint,
                     fsqz1_checkpoint=fsqz1_checkpoint,
                     fsql1_checkpoint=fsql1_checkpoint,
+                    edge_Rcos=carry.edge_Rcos,
+                    edge_Rsin=carry.edge_Rsin,
+                    edge_Zcos=carry.edge_Zcos,
+                    edge_Zsin=carry.edge_Zsin,
                 )
                 if scan_minimal:
                     return new_carry, _scan_hist_min(fsqr_out, fsqz_out, fsql_out)
@@ -9693,6 +9699,10 @@ def solve_fixed_boundary_residual_iter(
             fsqr1_checkpoint=jnp.asarray(0.0, dtype=dtype),
             fsqz1_checkpoint=jnp.asarray(0.0, dtype=dtype),
             fsql1_checkpoint=jnp.asarray(0.0, dtype=dtype),
+            edge_Rcos=jnp.asarray(edge_Rcos, dtype=dtype),
+            edge_Rsin=jnp.asarray(edge_Rsin, dtype=dtype),
+            edge_Zcos=jnp.asarray(edge_Zcos, dtype=dtype),
+            edge_Zsin=jnp.asarray(edge_Zsin, dtype=dtype),
         )
 
         preflight_default = "0" if bool(jit_forces_scan) else "1"
@@ -9731,7 +9741,7 @@ def solve_fixed_boundary_residual_iter(
             "vmec2000_scan_v5",
             static_key,
             wout_key,
-            edge_key,
+            edge_signature_key,
             int(max_iter_tail),
             int(preflight_iters),
             int(iter_offset0),
@@ -10602,7 +10612,7 @@ def solve_fixed_boundary_residual_iter(
                 "scan_v1",
                 static_key,
                 wout_key,
-                edge_key,
+                edge_value_key,
                 int(max_iter),
                 float(step_size),
                 float(initial_flip_sign),
