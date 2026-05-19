@@ -35,8 +35,10 @@ against VMEC2000 runtime.
 Key performance decisions
 --------------------------
 
-The following design choices collectively explain why ``vmec_jax`` achieves
-warm runtimes competitive with or faster than VMEC2000 on CPU:
+The following design choices explain the current performance profile.  They
+reduce warm runtime and are especially useful inside differentiable
+optimization workflows, but the present single-solve CPU matrix should still be
+read as a mixed result rather than a broad VMEC2000 speedup claim:
 
 **1. Single-grid default for fixed-boundary**
   The default CLI path skips staged multi-grid schedules and goes directly to

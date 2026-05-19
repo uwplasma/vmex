@@ -818,7 +818,10 @@ cases, including ``lasym=False`` and ``lasym=True``:
 
 Remaining limitations are mostly *scope* rather than parity gaps:
 
-- **Free-boundary** equilibria are not implemented.
+- **Free-boundary** equilibria are implemented for the documented mgrid-backed
+  CLI/API path and are covered by bundled smoke/parity gates.  The remaining
+  work is broader case coverage, performance tuning, and full VMEC2000 parity
+  on larger free-boundary production decks.
 - Experimental optimization solvers (GD/LBFGS/GN) are **not** VMEC2000 and do
   not reproduce all iteration-dependent logic; they are intended for
   differentiable objectives and regression experiments.
