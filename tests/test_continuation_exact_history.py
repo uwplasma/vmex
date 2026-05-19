@@ -252,6 +252,191 @@ def test_explicit_lower_mode_stages_get_valid_budget_when_continuation_budget_is
     assert result.history["max_nfev"] == 12
 
 
+@pytest.mark.parametrize(
+    ("runner", "builder_name", "extra_kwargs"),
+    [
+        ("run_fixed_boundary_objective_optimization", "build_fixed_boundary_objective_stage", {"objectives": []}),
+        (
+            "run_quasi_isodynamic_objective_optimization",
+            "build_quasi_isodynamic_objective_stage",
+            {
+                "scalar_objectives": [],
+                "qi_objectives": [],
+                "surfaces": (0.5,),
+                "mboz": 4,
+                "nboz": 4,
+                "nphi": 9,
+                "nalpha": 5,
+                "n_bounce": 5,
+                "include_bounce_endpoints": True,
+                "softness": 2.0e-2,
+                "width_weight": 1.0,
+                "branch_width_weight": 0.5,
+                "branch_width_softness": 2.0e-2,
+                "profile_weight": 0.1,
+                "shuffle_profile_weight": 1.0,
+                "shuffle_profile_softness": 2.0e-2,
+                "aligned_profile_weight": 0.0,
+                "aligned_profile_softness": 2.0e-2,
+                "aligned_profile_trap_level": 0.65,
+                "aligned_profile_trap_softness": 5.0e-2,
+                "phimin": 0.0,
+            },
+        ),
+    ],
+)
+def test_final_outputs_use_accepted_result_after_staged_continuation(
+    monkeypatch,
+    tmp_path,
+    runner,
+    builder_name,
+    extra_kwargs,
+):
+    import vmec_jax.optimization_workflow as workflow
+
+    calls = []
+    optimizers = []
+
+    def history(initial_objective: float, final_objective: float) -> dict:
+        return {
+            "history": [
+                {"objective": float(initial_objective), "wall_time_s": 0.0},
+                {"objective": float(final_objective), "wall_time_s": 1.0},
+            ],
+            "nfev": 2,
+            "njev": 1,
+            "objective_initial": float(initial_objective),
+            "objective_final": float(final_objective),
+            "qs_initial": float(initial_objective),
+            "qs_final": float(final_objective),
+            "aspect_initial": float(initial_objective),
+            "aspect_final": float(final_objective),
+        }
+
+    class FakeOptimizer:
+        def __init__(self, stage_index: int, n_params: int):
+            self.stage_index = int(stage_index)
+            self.n_params = int(n_params)
+            self.accepted_params = np.arange(self.n_params, dtype=float) + 10.0 * self.stage_index
+            self.stale_trial_params = np.arange(self.n_params, dtype=float) + 900.0 * self.stage_index
+            self.accepted_state = SimpleNamespace(
+                label=f"accepted-stage-{self.stage_index}",
+                params=self.accepted_params.copy(),
+            )
+            self.stale_trial_state = SimpleNamespace(
+                label=f"stale-trial-stage-{self.stage_index}",
+                params=self.stale_trial_params.copy(),
+            )
+
+        def run(self, params0, **_kwargs):
+            np.testing.assert_allclose(params0, np.zeros(self.n_params, dtype=float))
+            return {
+                "x": self.accepted_params.copy(),
+                "message": "synthetic accepted",
+                "_state_initial": SimpleNamespace(label=f"initial-stage-{self.stage_index}"),
+                "_state_final": self.accepted_state,
+                "_history_dump": history(
+                    initial_objective=10.0 - self.stage_index,
+                    final_objective=4.0 - self.stage_index,
+                ),
+            }
+
+        def _indata_from_params(self, params):
+            params_arr = np.asarray(params, dtype=float)
+            calls.append(("indata", self.stage_index, tuple(params_arr)))
+            np.testing.assert_allclose(params_arr, self.accepted_params)
+            return InData(
+                scalars={"MPOL": 5, "NTOR": 5},
+                indexed={"RBC": {(0, 0): 1.0}},
+                source_path=f"accepted-stage-{self.stage_index}",
+            )
+
+        def save_input(self, path, params):
+            params_arr = np.asarray(params, dtype=float)
+            calls.append(("input", self.stage_index, path.name, tuple(params_arr)))
+            path.write_text("input")
+
+        def save_wout(self, path, params, *, state=None):
+            params_arr = np.asarray(params, dtype=float)
+            calls.append(
+                (
+                    "wout",
+                    self.stage_index,
+                    path.name,
+                    tuple(params_arr),
+                    None if state is None else state.label,
+                )
+            )
+            path.write_text("wout")
+
+        def save_history(self, path, result):
+            hist = result["_history_dump"]
+            calls.append(
+                (
+                    "history",
+                    self.stage_index,
+                    path.name,
+                    float(hist["objective_final"]),
+                    float(hist["history"][-1]["objective"]),
+                    tuple(hist["stage_boundaries"]),
+                )
+            )
+            path.write_text("history")
+
+    def fake_build_stage(_cfg, _indata, *, stage_mode, **_kwargs):
+        stage_index = len(optimizers) + 1
+        specs = [
+            BoundaryParamSpec(f"rc{stage_mode}{idx}", "rc", idx, int(stage_mode), idx)
+            for idx in range(int(stage_mode))
+        ]
+        optimizer = FakeOptimizer(stage_index, len(specs))
+        optimizers.append(optimizer)
+        return SimpleNamespace(ctx=SimpleNamespace(), optimizer=optimizer, specs=specs)
+
+    monkeypatch.setattr(workflow, "config_from_indata", lambda indata: SimpleNamespace(source_path=indata.source_path))
+    monkeypatch.setattr(workflow, builder_name, fake_build_stage)
+    monkeypatch.setattr(workflow, "print_qs_problem_summary", lambda **_kwargs: None)
+    monkeypatch.setattr(workflow, "print_qs_final_summary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(workflow, "save_qs_stage_artifacts", lambda **_kwargs: None)
+
+    result = getattr(workflow, runner)(
+        cfg=SimpleNamespace(source_path="original-cfg"),
+        indata=InData(scalars={"MPOL": 5, "NTOR": 5}, indexed={"RBC": {(0, 0): 1.0}}, source_path="original"),
+        stage_modes=[1, 2],
+        max_mode=2,
+        max_nfev=3,
+        continuation_nfev=1,
+        method="scipy",
+        ftol=1.0e-6,
+        gtol=1.0e-6,
+        xtol=1.0e-6,
+        use_ess=False,
+        ess_alpha=0.0,
+        output_dir=tmp_path,
+        label="synthetic",
+        use_mode_continuation=True,
+        save_final_outputs=True,
+        **extra_kwargs,
+    )
+
+    final_optimizer = optimizers[-1]
+    expected_final = tuple(final_optimizer.accepted_params)
+    unexpected_trial = tuple(final_optimizer.stale_trial_params)
+    final_input = next(call for call in calls if call[:3] == ("input", 2, "input.final"))
+    final_wout = next(call for call in calls if call[:3] == ("wout", 2, "wout_final.nc"))
+    final_history = next(call for call in calls if call[:3] == ("history", 2, "history.json"))
+
+    assert final_input[3] == expected_final
+    assert final_wout[3] == expected_final
+    assert final_wout[4] == "accepted-stage-2"
+    assert final_input[3] != unexpected_trial
+    assert final_wout[3] != unexpected_trial
+    assert final_history[3:] == (2.0, 2.0, (1, 2))
+    np.testing.assert_allclose(result.final_result["x"], final_optimizer.accepted_params)
+    assert result.history["objective_final"] == 2.0
+    assert result.history["history"][-1]["objective"] == 2.0
+
+
 def test_best_exact_point_is_saved_when_trial_accepted_final_replays_worse(monkeypatch, tmp_path):
     import scipy.optimize
     import vmec_jax.optimization_workflow as workflow

@@ -173,7 +173,9 @@ plot_paths = {
 The examples pass `save_final_outputs=False` so the explicit calls are the
 editable pattern for custom filenames, extra exports, and local diagnostics.
 Omit that flag when you want `least_squares_solve` to write the default final
-artifacts for convenience.  For continuation details, start with
+artifacts for convenience. `result.final_params` and `result.final_state` refer
+to the selected exact accepted point, not an unreplayed relaxed trial point.
+For continuation details, start with
 `result.initial_stage` and `result.final_stage`; use
 `result.stage_histories` and `result.stage_timing_summaries` for per-stage
 accepted exact-replay history and timing.  The raw `result.stage_records`

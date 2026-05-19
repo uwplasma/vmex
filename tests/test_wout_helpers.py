@@ -47,6 +47,7 @@ from vmec_jax.wout import (
     _vmec_wint_from_trig,
     _vmec_wint_from_trig_jax,
     _vmec_wrout_nyquist_cos_coeffs,
+    _vmec_wrout_nyquist_lasym_loop,
     _vmec_wrout_nyquist_sin_coeffs,
     _vmec_wrout_nyquist_sin_coeffs_loop,
     _vmec_wrout_nyquist_synthesis,
@@ -349,6 +350,63 @@ def test_wrout_nyquist_coefficients_match_reference_loops():
             modes=ModeTable(m=np.asarray([4]), n=np.asarray([0])),
             trig=trig,
         )
+
+
+def test_wrout_nyquist_lasym_half_domain_unit_modes_normalize_to_one():
+    trig = vmec_trig_tables(ntheta=8, nzeta=7, nfp=1, mmax=3, nmax=2, lasym=True, cache=False)
+    modes = ModeTable(m=np.asarray([0, 1]), n=np.asarray([0, 1]))
+    theta = 2.0 * np.pi * np.arange(int(trig.ntheta3)) / float(trig.ntheta1)
+    zeta = 2.0 * np.pi * np.arange(7) / 7.0
+
+    constant = np.ones((1, int(trig.ntheta3), 7), dtype=float)
+    cos_mode = np.cos(theta[:, None] - zeta[None, :])[None, :, :]
+    sin_mode = np.sin(theta[:, None] - zeta[None, :])[None, :, :]
+
+    constant_sym, constant_asym = _vmec_symoutput_split(f=constant, trig=trig)
+    cos_sym, cos_asym = _vmec_symoutput_split(f=cos_mode, trig=trig)
+    sin_sym, sin_asym = _vmec_symoutput_split(f=sin_mode, trig=trig)
+
+    constant_coeff = _vmec_wrout_nyquist_cos_coeffs(f=constant_sym, modes=modes, trig=trig)
+    cos_coeff = _vmec_wrout_nyquist_cos_coeffs(f=cos_sym, modes=modes, trig=trig)
+    sin_coeff = _vmec_wrout_nyquist_sin_coeffs(f=sin_asym, modes=modes, trig=trig)
+
+    np.testing.assert_allclose(constant_coeff[0], [1.0, 0.0], rtol=2.0e-14, atol=2.0e-14)
+    np.testing.assert_allclose(cos_coeff[0], [0.0, 1.0], rtol=2.0e-14, atol=2.0e-14)
+    np.testing.assert_allclose(sin_coeff[0], [0.0, 1.0], rtol=2.0e-14, atol=2.0e-14)
+    np.testing.assert_allclose(cos_asym, 0.0, atol=2.0e-14)
+    np.testing.assert_allclose(sin_sym, 0.0, atol=2.0e-14)
+    np.testing.assert_allclose(constant_asym, 0.0, atol=2.0e-14)
+
+    def _with_axis(field):
+        return np.concatenate([np.zeros_like(field), field], axis=0)
+
+    loop_cos = _vmec_wrout_nyquist_lasym_loop(
+        bsq=_with_axis(cos_sym),
+        gsqrt=_with_axis(cos_sym),
+        bsubu=_with_axis(cos_sym),
+        bsubv=_with_axis(cos_sym),
+        bsubs=np.zeros((2, int(trig.ntheta2), 7), dtype=float),
+        bsupu=_with_axis(cos_sym),
+        bsupv=_with_axis(cos_sym),
+        modes=modes,
+        trig=trig,
+    )
+    for name in ("gmnc", "bmnc", "bsupumnc", "bsupvmnc"):
+        np.testing.assert_allclose(loop_cos[name][1], [0.0, 1.0], rtol=2.0e-14, atol=2.0e-14)
+
+    loop_sin = _vmec_wrout_nyquist_lasym_loop(
+        bsq=_with_axis(sin_asym),
+        gsqrt=_with_axis(sin_asym),
+        bsubu=_with_axis(sin_asym),
+        bsubv=_with_axis(sin_asym),
+        bsubs=np.zeros((2, int(trig.ntheta2), 7), dtype=float),
+        bsupu=_with_axis(sin_asym),
+        bsupv=_with_axis(sin_asym),
+        modes=modes,
+        trig=trig,
+    )
+    for name in ("gmns", "bmns", "bsupumns", "bsupvmns"):
+        np.testing.assert_allclose(loop_sin[name][1], [0.0, 1.0], rtol=2.0e-14, atol=2.0e-14)
 
 
 def test_jxbforce_coefficients_match_reference_loops():

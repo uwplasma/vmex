@@ -315,6 +315,60 @@ def test_compact_tape_diagnostics_filters_host_only_values():
     }
 
 
+def test_direct_checkpoint_tape_records_build_leaf_timing(monkeypatch):
+    trace = _fake_dynamic_trace()
+    state = trace["state_pre"]
+
+    def fake_solve(state0, static, *, max_iter, adjoint_trace, **kwargs):
+        assert state0 is state
+        assert static == "static"
+        assert max_iter == 3
+        assert adjoint_trace is True
+        return SimpleNamespace(
+            state=state,
+            diagnostics={
+                "timing": {"compute_forces_s": 0.1},
+                "adjoint_step_trace": [trace],
+                "converged": True,
+            },
+        )
+
+    monkeypatch.setattr("vmec_jax.solve.solve_fixed_boundary_residual_iter", fake_solve)
+    monkeypatch.setattr(da, "_dynamic_replay_supported", lambda *, tape, rebuild_preconditioner: True)
+    monkeypatch.setattr(
+        da,
+        "_build_dynamic_replay_payload",
+        lambda step_traces, static_flags: ("dynamic", {"dynamic": True}, "carry0", "base_carries"),
+    )
+    monkeypatch.setattr(da, "_stack_replay_step_traces", lambda step_traces: ("stacked", {"stacked": True}))
+
+    tape = da.build_residual_checkpoint_tape_direct(
+        state,
+        "static",
+        indata={},
+        signgs=1,
+        max_iter=3,
+        ftol=0.0,
+        store_full_step_traces=True,
+    )
+
+    timing = tape.diagnostics["timing"]
+    assert timing["compute_forces_s"] == 0.1
+    for key in (
+        "tape_solve_call_s",
+        "tape_final_state_pack_s",
+        "tape_step_trace_extract_s",
+        "tape_dynamic_payload_build_s",
+        "tape_trace_stack_s",
+    ):
+        assert key in timing
+        assert timing[key] >= 0.0
+    assert tape.dynamic_initial_carry == "carry0"
+    assert tape.dynamic_base_carries_stacked == "base_carries"
+    assert tape.stacked_step_traces == "stacked"
+    assert tape.step_trace_static_flags == {"stacked": True}
+
+
 def test_concat_residual_iteration_traces_empty_is_typed():
     trace = da.concat_residual_iteration_traces([])
 

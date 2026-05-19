@@ -3483,6 +3483,9 @@ def _vmec_wrout_nyquist_cos_coeffs(
     mscale = np.asarray(trig.mscale, dtype=float)
     nscale = np.asarray(trig.nscale, dtype=float)
     tmult = 0.5 / float(getattr(trig, "r0scale", 1.0)) ** 2
+    if int(getattr(trig, "ntheta3", nt2)) > nt2:
+        # VMEC wrout doubles tmult for LASYM after switching to full-grid dnorm.
+        tmult *= 2.0
     dmult = mscale[m] * nscale[n_abs] * tmult
     dmult = np.where((m == 0) | (n == 0), 2.0 * dmult, dmult)
     coeff = coeff * dmult[None, :]
@@ -3717,6 +3720,9 @@ def _vmec_wrout_nyquist_sin_coeffs(
     mscale = np.asarray(trig.mscale, dtype=float)
     nscale = np.asarray(trig.nscale, dtype=float)
     tmult = 0.5 / float(getattr(trig, "r0scale", 1.0)) ** 2
+    if int(getattr(trig, "ntheta3", nt2)) > nt2:
+        # VMEC wrout doubles tmult for LASYM after switching to full-grid dnorm.
+        tmult *= 2.0
     dmult = mscale[m] * nscale[n_abs] * tmult
     dmult = np.where((m == 0) | (n == 0), 2.0 * dmult, dmult)
     coeff = coeff * dmult[None, :]
@@ -3783,6 +3789,18 @@ def _vmec_wrout_nyquist_lasym_loop(
     mscale = np.asarray(trig.mscale, dtype=float)
     nscale = np.asarray(trig.nscale, dtype=float)
     tmult = 0.5 / float(getattr(trig, "r0scale", 1.0)) ** 2
+    if int(getattr(trig, "ntheta3", nt2)) > nt2:
+        # VMEC wrout doubles tmult for LASYM after switching to full-grid dnorm.
+        tmult *= 2.0
+
+    mnyq = cosmui.shape[1] - 1
+    if mnyq > 0:
+        cosmui = cosmui.copy()
+        cosmui[:, mnyq] *= 0.5
+    nnyq = cosnv.shape[1] - 1
+    if nnyq > 0:
+        cosnv = cosnv.copy()
+        cosnv[:, nnyq] *= 0.5
 
     # Output arrays (ns, K).
     K = int(m.size)

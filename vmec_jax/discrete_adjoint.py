@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from collections import OrderedDict
 import os
+import time
 from typing import Any
 
 import numpy as np
@@ -73,6 +74,14 @@ _CHECKPOINT_TAPE_SCAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
 _CHECKPOINT_TAPE_DYNAMIC_SCAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
 _CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_SCAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
 _CHECKPOINT_TAPE_DYNAMIC_BASEPOINT_VJP_SCAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
+
+_DIRECT_TAPE_TIMING_KEYS = (
+    "tape_solve_call_s",
+    "tape_final_state_pack_s",
+    "tape_step_trace_extract_s",
+    "tape_dynamic_payload_build_s",
+    "tape_trace_stack_s",
+)
 
 
 def _scan_cache_limit() -> int:
@@ -561,15 +570,30 @@ def build_residual_checkpoint_tape_direct(
         "full" if bool(store_full_step_traces) else "dynamic",
     )
 
-    result = solve_fixed_boundary_residual_iter(
-        state0,
-        static,
-        max_iter=int(max_iter),
-        adjoint_trace=True,
-        **solve_kwargs,
-    )
+    tape_timing = {key: 0.0 for key in _DIRECT_TAPE_TIMING_KEYS}
+
+    def _record_timing(key: str, start: float) -> None:
+        tape_timing[key] = float(tape_timing.get(key, 0.0)) + (time.perf_counter() - start)
+
+    def _solve_with_timing(current_solve_kwargs):
+        start = time.perf_counter()
+        out = solve_fixed_boundary_residual_iter(
+            state0,
+            static,
+            max_iter=int(max_iter),
+            adjoint_trace=True,
+            **current_solve_kwargs,
+        )
+        _record_timing("tape_solve_call_s", start)
+        return out
+
+    result = _solve_with_timing(solve_kwargs)
+    pack_start = time.perf_counter()
     final_packed_state = np.asarray(pack_state(result.state), dtype=float)
+    _record_timing("tape_final_state_pack_s", pack_start)
+    trace_extract_start = time.perf_counter()
     step_traces = tuple(result.diagnostics.get("adjoint_step_trace", ()))
+    _record_timing("tape_step_trace_extract_s", trace_extract_start)
     compact_diagnostics = _compact_tape_diagnostics(result.diagnostics)
     trace = residual_iteration_trace_from_result(result) if store_trace else _empty_trace()
     stacked_step_traces = None
@@ -589,16 +613,20 @@ def build_residual_checkpoint_tape_direct(
             dynamic_base_carries_stacked=dynamic_base_carries_stacked,
         )
         if _dynamic_replay_supported(tape=tentative_tape, rebuild_preconditioner=True):
+            dynamic_payload_start = time.perf_counter()
             dynamic_stacked, dynamic_static_flags, dynamic_initial_carry, dynamic_base_carries_stacked = _build_dynamic_replay_payload(
                 step_traces,
                 step_trace_static_flags,
             )
+            _record_timing("tape_dynamic_payload_build_s", dynamic_payload_start)
             if not store_full_step_traces:
                 step_traces = ()
                 stacked_step_traces = dynamic_stacked
                 step_trace_static_flags = dynamic_static_flags
             else:
+                trace_stack_start = time.perf_counter()
                 stacked_step_traces, step_trace_static_flags = _stack_replay_step_traces(step_traces)
+                _record_timing("tape_trace_stack_s", trace_stack_start)
         else:
             if solve_kwargs.get("adjoint_trace_mode") == "dynamic":
                 # The compact dynamic trace intentionally omits the large
@@ -607,18 +635,21 @@ def build_residual_checkpoint_tape_direct(
                 # with a full trace to preserve exactness.
                 solve_kwargs_full = dict(solve_kwargs)
                 solve_kwargs_full["adjoint_trace_mode"] = "full"
-                result = solve_fixed_boundary_residual_iter(
-                    state0,
-                    static,
-                    max_iter=int(max_iter),
-                    adjoint_trace=True,
-                    **solve_kwargs_full,
-                )
+                result = _solve_with_timing(solve_kwargs_full)
+                pack_start = time.perf_counter()
                 final_packed_state = np.asarray(pack_state(result.state), dtype=float)
+                _record_timing("tape_final_state_pack_s", pack_start)
+                trace_extract_start = time.perf_counter()
                 step_traces = tuple(result.diagnostics.get("adjoint_step_trace", ()))
+                _record_timing("tape_step_trace_extract_s", trace_extract_start)
                 compact_diagnostics = _compact_tape_diagnostics(result.diagnostics)
                 trace = residual_iteration_trace_from_result(result) if store_trace else _empty_trace()
+            trace_stack_start = time.perf_counter()
             stacked_step_traces, step_trace_static_flags = _stack_replay_step_traces(step_traces)
+            _record_timing("tape_trace_stack_s", trace_stack_start)
+    timing = compact_diagnostics.setdefault("timing", {})
+    for key, value in tape_timing.items():
+        timing[key] = float(timing.get(key, 0.0)) + float(value)
     return ResidualCheckpointTape(
         final_packed_state=final_packed_state,
         packed_states=np.zeros((0, int(state0.layout.size)), dtype=float),

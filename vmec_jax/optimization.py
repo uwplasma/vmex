@@ -50,6 +50,15 @@ class FixedBoundaryContext:
     booz_inputs: BoozXformInputs
 
 
+_EXACT_TAPE_BUILD_TIMING_PROFILE_NAMES = (
+    ("tape_solve_call_s", "exact_tape_build_solve_call"),
+    ("tape_final_state_pack_s", "exact_tape_build_final_state_pack"),
+    ("tape_step_trace_extract_s", "exact_tape_build_step_trace_extract"),
+    ("tape_dynamic_payload_build_s", "exact_tape_build_dynamic_payload"),
+    ("tape_trace_stack_s", "exact_tape_build_trace_stack"),
+)
+
+
 def _linear_operator_vector_arg(value, *, size: int, name: str) -> np.ndarray:
     arr = np.asarray(value, dtype=float).reshape(-1)
     if int(arr.size) != int(size):
@@ -1602,13 +1611,13 @@ class FixedBoundaryExactOptimizer:
         *,
         profile_prefix: str,
         phase_wall_s: float,
-        unattributed_name: str,
-    ) -> None:
+        unattributed_name: str | None,
+    ) -> float:
         if not isinstance(diagnostics, dict):
-            return
+            return 0.0
         timing = diagnostics.get("timing")
         if not isinstance(timing, dict):
-            return
+            return 0.0
         solver_total = 0.0
         timing_keys = (
             ("compute_forces_s", "compute_forces"),
@@ -1636,15 +1645,35 @@ class FixedBoundaryExactOptimizer:
             self._profile_add(f"{profile_prefix}_{suffix}", value)
             if key in ("compute_forces_s", "preconditioner_s", "update_s", "scan_total_s"):
                 solver_total += max(0.0, value)
-        self._profile_add(unattributed_name, max(0.0, float(phase_wall_s) - solver_total))
+        if unattributed_name is not None:
+            self._profile_add(unattributed_name, max(0.0, float(phase_wall_s) - solver_total))
+        return solver_total
 
     def _profile_exact_tape_solver_timing(self, tape, tape_build_wall_s: float) -> None:
-        self._profile_solver_timing(
-            getattr(tape, "diagnostics", None),
+        diagnostics = getattr(tape, "diagnostics", None)
+        solver_total = self._profile_solver_timing(
+            diagnostics,
             profile_prefix="exact_tape_solver",
             phase_wall_s=tape_build_wall_s,
-            unattributed_name="exact_tape_build_unattributed",
+            unattributed_name=None,
         )
+        timing = diagnostics.get("timing") if isinstance(diagnostics, dict) else None
+        build_leaf_total = 0.0
+        has_solve_call_timer = False
+        if isinstance(timing, dict):
+            for key, profile_name in _EXACT_TAPE_BUILD_TIMING_PROFILE_NAMES:
+                if key not in timing:
+                    continue
+                try:
+                    value = float(timing.get(key, 0.0))
+                except Exception:
+                    continue
+                self._profile_add(profile_name, value)
+                build_leaf_total += max(0.0, value)
+                if key == "tape_solve_call_s":
+                    has_solve_call_timer = True
+        attributed = build_leaf_total if has_solve_call_timer else solver_total + build_leaf_total
+        self._profile_add("exact_tape_build_unattributed", max(0.0, float(tape_build_wall_s) - attributed))
 
     def _profile_dump(self) -> dict[str, dict[str, float | int]]:
         out: dict[str, dict[str, float | int]] = {}

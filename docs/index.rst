@@ -9,7 +9,7 @@ vmec-jax documentation
 - axisymmetric and non-axisymmetric ``lasym=False/True`` coverage, including
   convergence/physics gates where strict parity is not yet promoted,
 - end-to-end differentiability (JAX autodiff),
-- performance profiling and tuned default paths, with CPU/GPU speedups
+- performance profiling and tuned default paths, with CPU/GPU benchmark results
   documented per case rather than implied globally,
 - stepwise validation against VMEC2000 output (``wout_*.nc``).
 

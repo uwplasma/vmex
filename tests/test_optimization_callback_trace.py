@@ -251,6 +251,36 @@ def test_exact_optimizer_profile_timing_includes_preconditioner_subphases() -> N
     assert profile["exact_tape_build_unattributed"]["wall_time_s"] == pytest.approx(0.30)
 
 
+def test_exact_optimizer_profile_timing_splits_direct_tape_build_leaves() -> None:
+    opt = FixedBoundaryExactOptimizer.__new__(FixedBoundaryExactOptimizer)
+    opt._profile = {}
+    tape = SimpleNamespace(
+        diagnostics={
+            "timing": {
+                "compute_forces_s": 0.10,
+                "preconditioner_s": 0.40,
+                "update_s": 0.20,
+                "tape_solve_call_s": 0.85,
+                "tape_final_state_pack_s": 0.03,
+                "tape_step_trace_extract_s": 0.04,
+                "tape_dynamic_payload_build_s": 0.05,
+                "tape_trace_stack_s": 0.02,
+            }
+        }
+    )
+
+    opt._profile_exact_tape_solver_timing(tape, tape_build_wall_s=1.20)
+    profile = opt._profile_dump()
+
+    assert profile["exact_tape_build_solve_call"]["wall_time_s"] == 0.85
+    assert profile["exact_tape_build_final_state_pack"]["wall_time_s"] == 0.03
+    assert profile["exact_tape_build_step_trace_extract"]["wall_time_s"] == 0.04
+    assert profile["exact_tape_build_dynamic_payload"]["wall_time_s"] == 0.05
+    assert profile["exact_tape_build_trace_stack"]["wall_time_s"] == 0.02
+    assert profile["exact_tape_solver_compute_forces"]["wall_time_s"] == 0.10
+    assert profile["exact_tape_build_unattributed"]["wall_time_s"] == pytest.approx(0.21)
+
+
 def test_exact_optimizer_profiles_trial_solver_timing_buckets() -> None:
     opt = FixedBoundaryExactOptimizer.__new__(FixedBoundaryExactOptimizer)
     opt._profile = {}

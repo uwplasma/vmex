@@ -6,16 +6,20 @@ required PR CI.  These checks are concrete and reproducible, but they are not
 required for ordinary pull requests because they depend on local VMEC2000,
 SIMSOPT, optional seed repositories, or expensive optimization runs.
 
-Current CI baseline
--------------------
+Current CI verification
+-----------------------
 
-The latest verified ``main`` CI run checked during this update was green:
+Do not treat a checked-in SHA or workflow URL as the current release baseline.
+Before using this plan for release validation, verify the newest ``main`` CI run
+directly:
 
-- workflow: ``CI``
-- status: ``success``
-- head SHA: ``5ffaba2263c621e645a242a8b701a7e63519aabc``
-- completed: ``2026-05-19T12:59:32Z``
-- run: https://github.com/uwplasma/vmec_jax/actions/runs/26097684899
+.. code-block:: bash
+
+   gh run list --repo uwplasma/vmec_jax --branch main --workflow CI --limit 5
+   gh run view RUN_ID --repo uwplasma/vmec_jax --json status,conclusion,jobs
+
+Record the verified run ID, head SHA, conclusion, and completion time in the
+release notes for the candidate commit.
 
 The required CI split remains:
 

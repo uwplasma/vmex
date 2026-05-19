@@ -566,6 +566,7 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
        scipy_tr_solver=SCIPY_TR_SOLVER,
        save_stage_inputs=SAVE_STAGE_INPUTS,
        save_stage_wouts=SAVE_STAGE_WOUTS,
+       save_final_outputs=False,
    )
 
    initial_optimizer = result.initial_optimizer
@@ -636,6 +637,11 @@ for the common endpoints, and ``result.stage_histories`` or
 and timing.  The raw records remain available as ``result.stage_records`` for
 custom inspection, but user scripts do not need to unpack them just to save,
 plot, or report final outputs.
+Set ``save_final_outputs=False`` when demonstrating explicit artifact writes as
+above; omit it when the default ``input.final``, ``wout_final.nc``, and
+``history.json`` filenames are sufficient.  ``result.final_params`` and
+``result.final_state`` refer to the selected exact accepted point, so saved
+final artifacts do not come from an unreplayed relaxed trial point.
 The tuple weight follows SIMSOPT semantics: vmec_jax minimizes
 ``sqrt(weight) * (J - target)``.  Problem-specific targets and QI sampling
 options live on the objective objects/problem, while ``least_squares_solve``

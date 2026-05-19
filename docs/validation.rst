@@ -385,9 +385,9 @@ both ``phimin=0`` and ``phimin=pi/nfp`` and the better QI well phase is used for
 ranking and prefine planning.  Use ``--phimin-policy fixed --phimin VALUE`` when
 you need a strict single-phase comparison against a legacy run.
 
-For the current optional validation plan, including the verified green CI
-baseline, family-representative QI probe workflow, VMEC2000/SIMSOPT optional
-lanes, and deferred parity gates, see :doc:`optional_validation_plan`.
+For the current optional validation plan, including CI verification commands,
+family-representative QI probe workflow, VMEC2000/SIMSOPT optional lanes, and
+deferred parity gates, see :doc:`optional_validation_plan`.
 
 Validated ``wout`` fields
 --------------------------
