@@ -2,11 +2,12 @@ Free-Boundary Plan
 ==================
 
 This document is the implementation and validation summary for
-VMEC2000-quality free-boundary capability in ``vmec-jax`` while preserving:
+VMEC2000-parity-targeted free-boundary capability in ``vmec-jax`` while
+preserving:
 
 - fixed-boundary parity and defaults,
 - end-to-end differentiability,
-- high CPU performance (scan fast path + parity fallback),
+- profiled CPU performance on the supported public paths,
 - bounded memory usage.
 
 Implementation status snapshot (March 2026)
@@ -122,9 +123,10 @@ Current manifest coverage:
 Coverage now includes a bundled free-boundary non-axisymmetric ``lasym=True``
 case (``input.cth_like_free_bdy_lasym_small``), and the preserved
 ``input.cth_like_free_bdy`` smoke fixture now ships with its bundled
-``mgrid`` file. The manifest therefore covers the full fixed/free,
-axisymmetric/non-axisymmetric, and ``lasym`` true/false matrix with
-self-contained repo fixtures.
+``mgrid`` file. The manifest therefore covers the fixed/free,
+axisymmetric/non-axisymmetric, and ``lasym`` true/false branches with
+self-contained repo fixtures, but strict executable-backed parity remains the
+optional VMEC2000 tier described in :doc:`validation`.
 
 The current implementation focus is:
 

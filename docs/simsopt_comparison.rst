@@ -135,8 +135,10 @@ Hardware: Apple M-series CPU (single process, no MPI).
    which limits the Levenberg-Marquardt step quality especially near the optimum.
 
    **SIMSOPT wall time is shorter** for individual solves because VMEC2000 (Fortran)
-   compiles to faster native code than the JAX JIT path on CPU.  On GPU, vmec_jax
-   is competitive or faster due to massive parallelism in the scan loop.
+   compiles to faster native code than the JAX JIT path on CPU.  GPU results are
+   case- and path-dependent in the current profiles; use the performance guide
+   and generated profile reports rather than assuming a universal scan-loop
+   speedup.
 
    **DOF count (vmec_jax vs SIMSOPT)**: vmec_jax's ``boundary_param_specs``
    enumerates modes with :math:`\max(|m|, |n|) \le \text{max\_mode}` and

@@ -183,7 +183,9 @@ the recommended local escalation path.
        inputs to convergence in VMEC2000 and ``vmec_jax``, then compare final
        ``wout`` geometry, flux/profile, magnetic-field, and scalar diagnostics.
        Broaden to ``pytest -q -m vmec2000`` only after the bounded smoke is
-       green.  Keep
+       green.  The ``basic_non_stellsym_pressure`` converged LASYM finite-beta
+       representative is still a tracked optional gap, so keep that claim
+       separate from the required bundled-reference LASYM finite-beta gates. Keep
        ``tests/test_vmec2000_exec_fast_validation.py::test_fast_vmec2000_stage_trace_validation_cases``
        for deliberate short-trace regressions.
    * - External SIMSOPT tier
