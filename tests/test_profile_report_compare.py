@@ -173,6 +173,31 @@ def test_profile_summary_extracts_solver_subphase_buckets() -> None:
     assert summary["metrics"]["exact_tape_solver_update_s"] == 1.50
 
 
+def test_profile_summary_extracts_scan_solver_buckets() -> None:
+    report = _callback_report(
+        total_wall_time_s=20.0,
+        samples=2,
+        rss_peak_mib=256,
+        replay_wall_time_s=2.0,
+        accepted_replays=2,
+        solve_count=3,
+        cache_entry_growth=4,
+        solver_device="cpu",
+    )
+    report["profile"]["trial_solver_scan_total"] = {"count": 1, "wall_time_s": 2.0}
+    report["profile"]["trial_solver_scan_device_run"] = {"count": 1, "wall_time_s": 2.5}
+    report["profile"]["trial_solver_scan_host_materialize"] = {"count": 1, "wall_time_s": 0.2}
+    report["profile"]["trial_solver_scan_postprocess"] = {"count": 1, "wall_time_s": 0.3}
+
+    summary = compare_tool.summarize_payload(report, label="cpu")
+
+    assert summary["metrics"]["trial_solver_scan_total_s"] == 2.0
+    assert summary["metrics"]["trial_solver_scan_device_run_s"] == 2.5
+    assert summary["metrics"]["trial_solver_scan_host_materialize_s"] == 0.2
+    assert summary["metrics"]["trial_solver_scan_postprocess_s"] == 0.3
+    assert summary["exact_optimizer_patch_target"]["name"] == "trial_solver_scan_device_run"
+
+
 def test_comparison_reports_ratios_against_baseline() -> None:
     cpu = compare_tool.summarize_payload(
         _callback_report(
