@@ -25,7 +25,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from vmec_jax.vmec2000_exec import _patch_indata, find_vmec2000_exec, run_xvmec2000
-from vmec_jax.wout import read_wout
+from vmec_jax.wout import read_wout, state_from_wout, wout_minimal_from_fixed_boundary
 
 
 @dataclass(frozen=True)
@@ -325,6 +325,30 @@ def _compare_wout_mode_hotspots(got, ref, *, lasym: bool, top_n: int = 5) -> dic
     }
 
 
+def _reference_state_roundtrip_rel_rms(ref, input_path: Path, *, lasym: bool) -> dict[str, float]:
+    """Rebuild a wout from the reference state to isolate output-path drift."""
+    from vmec_jax.config import config_from_indata
+    from vmec_jax.namelist import read_indata
+    from vmec_jax.static import build_static
+
+    indata = read_indata(input_path)
+    static = build_static(config_from_indata(indata))
+    state = state_from_wout(ref)
+    rebuilt = wout_minimal_from_fixed_boundary(
+        path="reference_state_roundtrip",
+        state=state,
+        static=static,
+        indata=indata,
+        signgs=int(getattr(ref, "signgs", 1)),
+        fsqr=float(getattr(ref, "fsqr", 0.0)),
+        fsqz=float(getattr(ref, "fsqz", 0.0)),
+        fsql=float(getattr(ref, "fsql", 0.0)),
+        fsqt=np.asarray(getattr(ref, "fsqt", np.zeros((1,), dtype=float)), dtype=float),
+        converged=True,
+    )
+    return _compare_wouts(rebuilt, ref, lasym=lasym)
+
+
 def _run_vmec_jax(case: BenchmarkCase, input_path: Path, out_path: Path):
     from vmec_jax.driver import run_fixed_boundary, run_free_boundary, write_wout_from_fixed_boundary_run
 
@@ -423,12 +447,18 @@ def main() -> int:
                 rec["vmec2000_stdout_tail"] = (vmec.stdout + "\n" + vmec.stderr).splitlines()[-20:]
                 if not wout_vmec.exists():
                     raise FileNotFoundError(wout_vmec)
-                rec["vmec2000"] = _wout_metrics(read_wout(wout_vmec))
+                wref = read_wout(wout_vmec)
+                rec["vmec2000"] = _wout_metrics(wref)
+                if not case.lfreeb:
+                    rec["reference_state_roundtrip_rel_rms"] = _reference_state_roundtrip_rel_rms(
+                        wref,
+                        input_path,
+                        lasym=case.lasym,
+                    )
 
                 if not args.skip_vmec_jax:
                     wout_jax_path = case_dir / f"wout_{case.case}_vmec_jax.nc"
                     _run_vmec_jax(case, input_path, wout_jax_path)
-                    wref = read_wout(wout_vmec)
                     wjax = read_wout(wout_jax_path)
                     rec["vmec_jax"] = _wout_metrics(wjax)
                     rec["rel_rms"] = _compare_wouts(wjax, wref, lasym=case.lasym)
