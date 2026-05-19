@@ -184,8 +184,10 @@ the recommended local escalation path.
        ``wout`` geometry, flux/profile, magnetic-field, and scalar diagnostics.
        Broaden to ``pytest -q -m vmec2000`` only after the bounded smoke is
        green.  The ``basic_non_stellsym_pressure`` converged LASYM finite-beta
-       representative is still a tracked optional gap, so keep that claim
-       separate from the required bundled-reference LASYM finite-beta gates. Keep
+       representative passed locally after the LASYM covariant-field scaling
+       fix in ``e0b00e7`` and remained below the nightly LASYM magnetic
+       tolerance in a bounded 2026-05-19 rerun; keep it as a dated optional
+       external gate rather than a required PR check. Keep
        ``tests/test_vmec2000_exec_fast_validation.py::test_fast_vmec2000_stage_trace_validation_cases``
        for deliberate short-trace regressions.
    * - External SIMSOPT tier

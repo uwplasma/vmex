@@ -118,6 +118,14 @@ matches ``project.version`` in ``pyproject.toml`` after stripping an optional
 leading ``v``.  Do not publish a tag unless ``pyproject.toml`` has the same
 version and the CI gates above are green.
 
+Current release note
+--------------------
+
+The latest published release from this checklist is
+`v0.0.10 <https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.10>`_, built
+from commit ``553a864b3c41848aecce8dd250bc65d60288e64c`` and verified on PyPI
+with a no-dependencies wheel download.
+
 The release notes should list user-visible changes, validation coverage, known
 limitations, and any optional external validation that was not run.
 

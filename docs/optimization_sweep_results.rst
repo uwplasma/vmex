@@ -206,6 +206,19 @@ outputs, records the final smooth QI metric, legacy QI metric, mirror ratio,
 elongation, iota, aspect, and CPU wall time, and draws initial and final
 Boozer ``|B|`` with line contours only.
 
+To refresh the inputs used by this panel, run both source optimizations before
+rendering:
+
+.. code-block:: bash
+
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp2_qi \
+     python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_current_public_final \
+     python examples/optimization/QI_optimization.py
+   PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
+
 .. list-table::
    :header-rows: 1
    :widths: 22 27 11 11 11 10 9 9 9 9

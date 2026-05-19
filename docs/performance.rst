@@ -1179,9 +1179,11 @@ Regenerate the current fixed-boundary plot after a runtime sweep with:
 .. code-block:: bash
 
    python tools/diagnostics/readme_runtime_compare.py \
-     --cpu-summary outputs/runtime_cpu_current_full/summary.json \
+     --cpu-summary outputs/fixed_runtime_accel_cpu_bundle_20260406_r2/summary.json \
      --figure-kind fixed --plot-mode runtime \
-     --figure-out docs/_static/figures/readme_runtime_compare.png
+     --figure-out docs/_static/figures/readme_runtime_compare.png \
+     --csv-out docs/_static/figures/readme_runtime_compare.csv \
+     --json-out docs/_static/figures/readme_runtime_compare.json
 
 When a same-host GPU sweep is available, add one or more ``--gpu-summary``
 paths from the matching run.  The generated CSV/JSON/table then retain
@@ -1976,8 +1978,10 @@ solver maturity. You can disable that sampling with:
 WP2 free-boundary runtime controls
 ----------------------------------
 
-Current free-boundary coupling uses a lightweight spectral potential solve.
-To keep runtime bounded:
+Current free-boundary coupling defaults to the VMEC2000-aligned dense vacuum
+operator described in :doc:`free_boundary_plan`.  The earlier lightweight
+spectral solve remains useful for historical context and debugging, but it is
+not the promoted parity path.  To keep dense-coupling runtime bounded:
 
 - mgrid field tensors are cached by path in-process (avoids per-iteration
   NetCDF reloads),
@@ -1997,8 +2001,8 @@ If profiling free-boundary solver-only cost, disable sampling diagnostics:
 
   export VMEC_JAX_FREEB_SAMPLE_EXTERNAL=0
 
-Bundled example runtime/memory matrix (March 2026)
---------------------------------------------------
+Historical bundled example runtime/memory matrix (March 2026)
+-------------------------------------------------------------
 
 For repeatable runtime/memory sweeps across the bundled inputs, use:
 
@@ -2018,7 +2022,7 @@ Recent artifacts from this tool:
   corrected GPU rerun for the bundled free-boundary cases after staging bundled
   ``mgrid`` files in the benchmark clone.
 
-Current snapshot highlights:
+Historical snapshot highlights from this March 2026 matrix:
 
 - Fixed-boundary scan performance on the reference GPU host improved materially
   after the accelerator-aware scan probe and quiet-scan chunking changes:

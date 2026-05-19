@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tomllib
 from datetime import date
 from pathlib import Path
 
@@ -18,6 +19,9 @@ if str(_ROOT) not in sys.path:
 project = "vmec-jax"
 author = "vmec_jax contributors"
 copyright = f"{date.today().year}, {author}"  # noqa: A001
+with (_ROOT / "pyproject.toml").open("rb") as _f:
+    release = tomllib.load(_f)["project"]["version"]
+version = ".".join(release.split(".")[:2])
 
 
 # -- General configuration ------------------------------------------------------
