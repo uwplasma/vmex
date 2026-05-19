@@ -199,6 +199,8 @@ def test_exact_optimizer_profile_cache_snapshot_and_delta_schema() -> None:
     opt._exact_residual_cache = {"a": np.asarray([1.0])}
     opt._exact_jacobian_cache = {"a": np.asarray([[1.0]])}
     opt._trial_residual_cache = OrderedDict([("b", np.asarray([2.0]))])
+    opt._initial_state_cache = OrderedDict([("c", object())])
+    opt._exact_state_key_by_id = {1: "a"}
     opt._initial_tangent_cache = {}
     opt._discrete_jacobian_helper_cache = {"j": object()}
     opt._scan_exact_helper_cache = {}
@@ -207,7 +209,9 @@ def test_exact_optimizer_profile_cache_snapshot_and_delta_schema() -> None:
     assert snapshot["optimizer"]["exact_cache"] == 1
     assert snapshot["optimizer"]["exact_jacobian_cache"] == 1
     assert snapshot["optimizer"]["trial_residual_cache"] == 1
-    assert snapshot["total_entries"] == 5
+    assert snapshot["optimizer"]["initial_state_cache"] == 1
+    assert snapshot["optimizer"]["exact_state_key_by_id"] == 1
+    assert snapshot["total_entries"] == 7
 
     delta = exact_profile_tool._profile_delta(
         {"exact_tape_build": {"count": 1, "wall_time_s": 2.0}},

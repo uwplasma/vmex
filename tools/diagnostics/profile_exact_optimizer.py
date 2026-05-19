@@ -347,6 +347,8 @@ def _cache_snapshot(opt: Any | None = None, *, include_global: bool = True) -> d
             "exact_residual_cache": _cache_len(getattr(opt, "_exact_residual_cache", None)),
             "exact_jacobian_cache": _cache_len(getattr(opt, "_exact_jacobian_cache", None)),
             "trial_residual_cache": _cache_len(getattr(opt, "_trial_residual_cache", None)),
+            "initial_state_cache": _cache_len(getattr(opt, "_initial_state_cache", None)),
+            "exact_state_key_by_id": _cache_len(getattr(opt, "_exact_state_key_by_id", None)),
             "initial_tangent_cache": _cache_len(getattr(opt, "_initial_tangent_cache", None)),
             "discrete_jacobian_helper_cache": _cache_len(
                 getattr(opt, "_discrete_jacobian_helper_cache", None)

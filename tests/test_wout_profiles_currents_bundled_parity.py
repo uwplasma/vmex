@@ -162,8 +162,13 @@ def test_bundled_wout_flux_pressure_iota_profiles_follow_vmec_radial_mesh(
     enable_x64(True)
 
     repo_root = _repo_root()
-    _cfg, indata = load_config(str(repo_root / input_name))
-    wout = read_wout(repo_root / wout_name)
+    input_path = repo_root / input_name
+    wout_path = repo_root / wout_name
+    if not input_path.exists() or not wout_path.exists():
+        pytest.skip(f"Missing bundled profile fixture: {case_name}")
+
+    _cfg, indata = load_config(str(input_path))
+    wout = read_wout(wout_path)
     ns = int(wout.ns)
     s = _s_full(ns)
 
