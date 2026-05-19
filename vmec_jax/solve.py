@@ -7317,6 +7317,8 @@ def solve_fixed_boundary_residual_iter(
         scan_timing_env = os.getenv("VMEC_JAX_TIMING", "").strip().lower()
         scan_timing_enabled = scan_timing_env not in ("", "0", "false", "no")
         scan_timing_stats = {
+            "scan_initial_compute_forces_s": 0.0,
+            "scan_axis_reset_compute_forces_s": 0.0,
             "scan_preflight_s": 0.0,
             "scan_device_run_s": 0.0,
             "scan_host_materialize_s": 0.0,
@@ -7768,6 +7770,7 @@ def solve_fixed_boundary_residual_iter(
         else:
             jit_forces_scan = scan_jit_env.strip().lower() not in ("", "0", "false", "no")
         _compute_forces_scan = _compute_forces if jit_forces_scan else _compute_forces_impl
+        t_scan_initial_force = time.perf_counter() if scan_timing_enabled else None
         with _maybe_trace("scan/compute_forces:init"):
             with _maybe_trace("scan/compute_forces:init"):
                 k0, frzl0, gcr2_0, gcz2_0, gcl2_0, rz_scale0, l_scale0, norms0 = _compute_forces_scan(
@@ -7780,6 +7783,15 @@ def solve_fixed_boundary_residual_iter(
                     constraint_tcon_active=constraint_active_false,
                     iter_idx=None,
                 )
+        if scan_timing_enabled and t_scan_initial_force is not None:
+            try:
+                if has_jax():
+                    _scan_block_until_ready((gcr2_0, gcz2_0, gcl2_0))
+            except Exception:
+                pass
+            scan_timing_stats["scan_initial_compute_forces_s"] += time.perf_counter() - float(
+                t_scan_initial_force
+            )
         fsq_phys0_val = None
         try:
             fsqr0 = norms0.r1 * norms0.fnorm * gcr2_0
@@ -7880,6 +7892,7 @@ def solve_fixed_boundary_residual_iter(
             state_checkpoint0 = state_init
             axis_reset_enabled = False
             axis_reset_repeat = True
+            t_scan_axis_force = time.perf_counter() if scan_timing_enabled else None
             k0, frzl0, gcr2_0, gcz2_0, gcl2_0, rz_scale0, l_scale0, norms0 = _compute_forces_scan(
                 state_init,
                 include_edge=False,
@@ -7890,6 +7903,15 @@ def solve_fixed_boundary_residual_iter(
                 constraint_tcon_active=constraint_active_false,
                 iter_idx=None,
             )
+            if scan_timing_enabled and t_scan_axis_force is not None:
+                try:
+                    if has_jax():
+                        _scan_block_until_ready((gcr2_0, gcz2_0, gcl2_0))
+                except Exception:
+                    pass
+                scan_timing_stats["scan_axis_reset_compute_forces_s"] += time.perf_counter() - float(
+                    t_scan_axis_force
+                )
         # Axis reset handled before scan; avoid per-iteration callbacks.
         axis_reset_enabled = False
         cache_valid0 = jnp.asarray(False)
@@ -10340,10 +10362,12 @@ def solve_fixed_boundary_residual_iter(
                 if scan_total_start is not None
                 else sum(scan_timing_stats.values())
             )
+            scan_leaf_total_s = sum(float(value) for value in scan_timing_stats.values())
             scan_timing_report = {
                 "iterations": int(n_iter_hist),
                 "scan_total_s": float(scan_total_s),
                 **{key: float(value) for key, value in scan_timing_stats.items()},
+                "scan_unattributed_s": max(0.0, float(scan_total_s) - float(scan_leaf_total_s)),
             }
         res_scan = SolveVmecResidualResult(
             state=carry_final.state,
@@ -10799,6 +10823,7 @@ def solve_fixed_boundary_residual_iter(
     timing_stats = {
         "setup_total": 0.0,
         "setup_axis_reset": 0.0,
+        "setup_axis_reset_compute_forces": 0.0,
         "iteration_loop": 0.0,
         "iteration_prepare": 0.0,
         "iteration_residual_metrics": 0.0,
@@ -10806,6 +10831,9 @@ def solve_fixed_boundary_residual_iter(
         "iteration_loop_unattributed": 0.0,
         "finalize": 0.0,
         "compute_forces": 0.0,
+        "compute_forces_first": 0.0,
+        "compute_forces_rest": 0.0,
+        "compute_forces_calls": 0,
         "preconditioner": 0.0,
         "precond_apply": 0.0,
         "precond_mode_scale": 0.0,
@@ -11545,6 +11573,7 @@ def solve_fixed_boundary_residual_iter(
     t_setup_axis_reset_start = time.perf_counter() if timing_enabled else None
     if bool(vmec2000_control) and (not axis_reset_done) and bool(lmove_axis):
         try:
+            t_setup_axis_force_start = time.perf_counter() if timing_enabled else None
             k0, _frzl0, _gcr2_0, _gcz2_0, _gcl2_0, _rz_scale0, _l_scale0, _norms0 = _compute_forces_iter(
                 state,
                 include_edge=False,
@@ -11556,6 +11585,15 @@ def solve_fixed_boundary_residual_iter(
                 iter_idx=None,
                 iter2=1,
             )
+            if timing_enabled and t_setup_axis_force_start is not None:
+                try:
+                    if has_jax():
+                        jax.block_until_ready((_gcr2_0, _gcz2_0, _gcl2_0))
+                except Exception:
+                    pass
+                timing_stats["setup_axis_reset_compute_forces"] += time.perf_counter() - float(
+                    t_setup_axis_force_start
+                )
             ptau_min0, ptau_max0 = _ptau_minmax_from_k_host(k0)
             bad_jacobian_ptau = None
             if (ptau_min0 is not None) and (ptau_max0 is not None):
@@ -11948,7 +11986,13 @@ def solve_fixed_boundary_residual_iter(
                         jax.block_until_ready(gcr2)
                 except Exception:
                     pass
-                timing_stats["compute_forces"] += time.perf_counter() - float(t_compute_start)
+                compute_dt = time.perf_counter() - float(t_compute_start)
+                timing_stats["compute_forces"] += compute_dt
+                if int(timing_stats["compute_forces_calls"]) == 0:
+                    timing_stats["compute_forces_first"] += compute_dt
+                else:
+                    timing_stats["compute_forces_rest"] += compute_dt
+                timing_stats["compute_forces_calls"] = int(timing_stats["compute_forces_calls"]) + 1
             t_residual_metrics_start = time.perf_counter() if timing_enabled else None
             norms_used = (
                 cache_norms
@@ -14600,6 +14644,10 @@ def solve_fixed_boundary_residual_iter(
             0.0,
             float(timing_stats["setup_total"]) - float(timing_stats["setup_axis_reset"]),
         )
+        setup_axis_reset_unattributed = max(
+            0.0,
+            float(timing_stats["setup_axis_reset"]) - float(timing_stats["setup_axis_reset_compute_forces"]),
+        )
         loop_leaf_total = (
             float(timing_stats["iteration_prepare"])
             + float(timing_stats["compute_forces"])
@@ -14618,10 +14666,15 @@ def solve_fixed_boundary_residual_iter(
             "solve_total_s": float(time.perf_counter() - float(_solve_wall_start)),
             "setup_total_s": float(timing_stats["setup_total"]),
             "setup_axis_reset_s": float(timing_stats["setup_axis_reset"]),
+            "setup_axis_reset_compute_forces_s": float(timing_stats["setup_axis_reset_compute_forces"]),
+            "setup_axis_reset_unattributed_s": float(setup_axis_reset_unattributed),
             "setup_unattributed_s": float(setup_unattributed),
             "iteration_loop_s": float(timing_stats["iteration_loop"]),
             "iteration_prepare_s": float(timing_stats["iteration_prepare"]),
             "compute_forces_s": float(timing_stats["compute_forces"]),
+            "compute_forces_first_s": float(timing_stats["compute_forces_first"]),
+            "compute_forces_rest_s": float(timing_stats["compute_forces_rest"]),
+            "compute_forces_calls": int(timing_stats["compute_forces_calls"]),
             "iteration_residual_metrics_s": float(timing_stats["iteration_residual_metrics"]),
             "preconditioner_s": float(timing_stats["preconditioner"]),
             "precond_refresh_s": float(timing_stats["precond_refresh"]),

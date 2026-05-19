@@ -1623,10 +1623,14 @@ class FixedBoundaryExactOptimizer:
             ("solve_total_s", "solve_total"),
             ("setup_total_s", "setup_total"),
             ("setup_axis_reset_s", "setup_axis_reset"),
+            ("setup_axis_reset_compute_forces_s", "setup_axis_reset_compute_forces"),
+            ("setup_axis_reset_unattributed_s", "setup_axis_reset_unattributed"),
             ("setup_unattributed_s", "setup_unattributed"),
             ("iteration_loop_s", "iteration_loop"),
             ("iteration_prepare_s", "iteration_prepare"),
             ("compute_forces_s", "compute_forces"),
+            ("compute_forces_first_s", "compute_forces_first"),
+            ("compute_forces_rest_s", "compute_forces_rest"),
             ("iteration_residual_metrics_s", "iteration_residual_metrics"),
             ("preconditioner_s", "preconditioner"),
             ("precond_refresh_s", "precond_refresh"),
@@ -1640,10 +1644,13 @@ class FixedBoundaryExactOptimizer:
             ("iteration_loop_unattributed_s", "iteration_loop_unattributed"),
             ("finalize_s", "finalize"),
             ("scan_total_s", "scan_total"),
+            ("scan_initial_compute_forces_s", "scan_initial_compute_forces"),
+            ("scan_axis_reset_compute_forces_s", "scan_axis_reset_compute_forces"),
             ("scan_preflight_s", "scan_preflight"),
             ("scan_device_run_s", "scan_device_run"),
             ("scan_host_materialize_s", "scan_host_materialize"),
             ("scan_postprocess_s", "scan_postprocess"),
+            ("scan_unattributed_s", "scan_unattributed"),
         )
         outer_solver_total_keys = {"setup_total_s", "iteration_loop_s", "finalize_s", "scan_total_s"}
         fallback_solver_total_keys = {"compute_forces_s", "preconditioner_s", "update_s", "scan_total_s"}
@@ -2250,9 +2257,15 @@ class FixedBoundaryExactOptimizer:
             return _jnp.zeros((0, int(self._layout.size)), dtype=_jnp.float64)
 
         t_initial = time.perf_counter()
+        t_key = time.perf_counter()
         cache_key = self._initial_tangent_cache_key(params)
+        self._profile_add(
+            f"{profile_prefix}_initial_tangents_cache_key",
+            time.perf_counter() - t_key,
+        )
         initial_tangents = self._initial_tangent_cache.get(cache_key) if cache_key is not None else None
         if initial_tangents is None:
+            self._profile_add(f"{profile_prefix}_initial_tangents_cache_miss", 0.0)
             axis_override = {
                 key: _jnp.asarray(value, dtype=params.dtype) for key, value in axis_override.items()
             }
@@ -2268,11 +2281,25 @@ class FixedBoundaryExactOptimizer:
                 )
                 return _jnp.asarray(pack_state(s0), dtype=_jnp.float64)
 
+            t_eye = time.perf_counter()
             directions = _jnp.eye(int(params.size), dtype=params.dtype)
+            self._profile_add(f"{profile_prefix}_initial_tangents_eye", time.perf_counter() - t_eye)
+            t_linearize = time.perf_counter()
             _, initial_state_linear = jax.linearize(_initial_state_packed, params)
+            self._profile_add(
+                f"{profile_prefix}_initial_tangents_linearize",
+                time.perf_counter() - t_linearize,
+            )
+            t_vmap = time.perf_counter()
             initial_tangents = jax.vmap(initial_state_linear)(directions)
+            self._profile_add(f"{profile_prefix}_initial_tangents_vmap", time.perf_counter() - t_vmap)
             if cache_key is not None:
+                t_store = time.perf_counter()
                 self._initial_tangent_cache[cache_key] = initial_tangents
+                self._profile_add(
+                    f"{profile_prefix}_initial_tangents_cache_store",
+                    time.perf_counter() - t_store,
+                )
         else:
             self._profile_add(f"{profile_prefix}_initial_tangents_cache_hit", 0.0)
         self._profile_add(
@@ -2372,6 +2399,7 @@ class FixedBoundaryExactOptimizer:
             int(self._layout.size),
             id(self._residuals_fn),
         )
+        t_helper = time.perf_counter()
         helper_cache = self._discrete_jacobian_helper_cache.get(helper_key)
         if helper_cache is None:
 
@@ -2387,6 +2415,9 @@ class FixedBoundaryExactOptimizer:
                 "residual_tangent_jacobian": _residual_tangent_jacobian,
             }
             self._discrete_jacobian_helper_cache[helper_key] = helper_cache
+            self._profile_add("jacobian_residual_tangent_helper_build", time.perf_counter() - t_helper)
+        else:
+            self._profile_add("jacobian_residual_tangent_helper_cache_hit", time.perf_counter() - t_helper)
 
         t_res = time.perf_counter()
         residuals, jac = helper_cache["residual_tangent_jacobian"](packed_final, final_tangents)
@@ -2394,7 +2425,9 @@ class FixedBoundaryExactOptimizer:
         self._last_jacobian_residual = np.asarray(residuals, dtype=float)
         self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
         self._profile_add("jacobian_residual_tangents", time.perf_counter() - t_res)
+        t_host = time.perf_counter()
         out = np.asarray(jac, dtype=float)
+        self._profile_add("jacobian_host_materialize", time.perf_counter() - t_host)
         self._remember_exact_jacobian(exact_param_key, out, self._last_jacobian_residual)
         self._last_jacobian_source = "exact_tape_replay"
         self._profile_add("jacobian_total", time.perf_counter() - t_total)
