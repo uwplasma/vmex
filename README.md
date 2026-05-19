@@ -129,15 +129,16 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_swee
 PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 ```
 
-Seed-robust QI and common minimal-seed stress tests are tracked separately.
-These rows are intentionally failure-revealing; inspect the generated `status`,
-`success`, and diagnostic columns before using them as promotion evidence.
+Seed-robust QI coverage is tracked separately below. Common minimal-seed
+stress tests live in the docs and are intentionally failure-revealing; inspect
+their generated `status`, `success`, `crashed`, and diagnostic columns before
+using them as promotion evidence.
 
 <p align="center">
   <img src="docs/_static/figures/readme_qi_optimization_cases.png" width="980" />
 </p>
 
-Recreate the seed-robustness panel:
+Recreate the QI coverage panel:
 
 ```bash
 PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 \

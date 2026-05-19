@@ -130,10 +130,11 @@ not be treated as current staged-QI evidence.  Any QA/QP showcase rows without
 
 The saved CPU stress-test panel below is deliberately included as a
 failure-revealing artifact.  The renderer skips known-stale rows; in this
-checkout only ``qh_nfp4`` currently reaches the active metadata and physics
-gates.  Missing QA/QP/QI rows should be regenerated with the command above
-before using the panel as publication evidence.  Until then it is a compact
-regression target for the seed-robust optimization lane, not a
+checkout ``qi_nfp2`` and ``qh_nfp4`` currently reach the active metadata and
+physics gates.  ``qi_nfp1``, ``qi_nfp3``, ``qa_nfp2``, and ``qp_nfp2`` remain
+non-promoted stress rows in the summary CSV.  Regenerate with the command
+above before changing those promotion claims.  Until more rows pass, this is a
+compact regression target for the seed-robust optimization lane, not a
 publication-quality optimization result.
 
 .. image:: _static/figures/minimal_seed_showcase_objective_panel.png
@@ -212,7 +213,7 @@ for both bundled QI inputs:
      - ``3.91/8.0``
      - ``3.465/4.0``
      - ``-1.0366``
-     - ``6.3``
+     - ``6.2``
 
 .. image:: _static/figures/readme_qi_optimization_cases.png
    :width: 100%

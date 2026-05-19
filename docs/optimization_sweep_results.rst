@@ -239,7 +239,7 @@ Boozer ``|B|`` with line contours only.
      - ``3.91/8.0``
      - ``3.465/4.0``
      - ``-1.0366``
-     - ``6.3``
+     - ``6.2``
 
 .. image:: _static/figures/readme_qi_optimization_cases.png
    :width: 100%
