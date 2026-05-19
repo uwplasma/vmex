@@ -192,14 +192,13 @@ remain available for custom inspection.
   `FixedBoundaryExactOptimizer` directly because each continuation stage builds custom
   finite-pressure/current residual closures; the helper only standardizes stage artifacts.
 
-`QI_optimization.py` is still larger than the QA/QH/QP examples because it
-contains robust-seed policies, independent promotion gates, and optional
-reference-family preconditioning.  The next low-risk source migration is to
-move its pure bookkeeping helpers (`_finite_or_inf`, `_finite_or_none`,
-`_diagnostic_float`, `_resolution_value`, and `_stage_value`) into reusable
-workflow utilities.  The optimization examples deliberately keep scientific
-defaults visible at the top of the script and keep physics terms in objective
-tuples rather than passing physics shortcut arguments into `least_squares_solve`.
+`QI_optimization.py` now keeps the same visible workflow as QA/QH/QP: edit
+top-level controls, construct objective tuples, call `least_squares_solve`,
+then save and plot from the returned result.  Its case catalog lives in
+`qi_optimization_cases.py`, and the seed-robust promotion/checkpoint helpers
+live in `qi_optimization_support.py`.  The scientific defaults remain visible
+in the driver, and physics terms stay in objective tuples rather than being
+passed as shortcut arguments into `least_squares_solve`.
 
 Run one case from the repository root:
 
@@ -315,7 +314,8 @@ manifest before launching expensive prefine probes.
 
 `QI_optimization.py` also accepts `VMEC_JAX_QI_INPUT=/path/to/input.my_seed`
 for an external VMEC input deck; it will use the same conservative far-seed
-QI+iota policy as `qi_stel_seed_3127` unless you add a custom `QI_CASES` entry.
+QI+iota policy as `qi_stel_seed_3127` unless you add a custom `QI_CASES` entry
+in `qi_optimization_cases.py`.
 `QI_seed_robustness.py` accepts `VMEC_JAX_QI_SEED_INPUT`,
 `VMEC_JAX_QI_SEED_OUTPUT_DIR`, and `VMEC_JAX_QI_SEED_MAX_NFEV` for small local
 probes. These variables are environment overrides for the top-level script

@@ -1,0 +1,897 @@
+"""Support routines for the staged QI optimization example.
+
+The public ``QI_optimization.py`` script keeps the user-facing workflow visible:
+configure inputs, construct objective tuples, call ``least_squares_solve``, then
+save/plot outputs.  This module holds the mechanical seed-preconditioning,
+stage-promotion, and checkpoint helpers used by that script and sweep drivers.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import numpy as np
+
+import vmec_jax as vj
+from tools.diagnostics.qi_basin_survey import (
+    SurveyTargets,
+    generate_basin_candidates,
+    rank_candidate_records,
+    write_csv,
+)
+from tools.diagnostics.qi_landscape_scan import build_stage as build_diagnostic_stage
+from vmec_jax.optimization import boundary_param_names, create_x_scale
+from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_suitability
+
+
+def configure(context: dict) -> None:
+    """Install script-level constants used by the staged helper routines."""
+
+    globals().update(context)
+
+
+def _diagnostic_float(record, key):
+    value = record.get(key)
+    return float(value) if value is not None else float("nan")
+
+
+def _finite_or_inf(value):
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return float("inf")
+    return out if np.isfinite(out) else float("inf")
+
+
+def _finite_or_none(value):
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if np.isfinite(out) else None
+
+
+def _parse_float_sequence(value, *, name):
+    """Parse a comma/space separated sequence used by subprocess wrappers."""
+
+    if value in (None, ""):
+        return None
+    pieces = str(value).replace(",", " ").split()
+    if not pieces:
+        return None
+    try:
+        return tuple(float(piece) for piece in pieces)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a comma- or space-separated float list: {value!r}") from exc
+
+
+def _jsonable(value):
+    """Convert NumPy/JAX-like values into JSON-serializable containers."""
+
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if np.isfinite(value) else None
+    if isinstance(value, np.generic):
+        return _jsonable(value.item())
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _jsonable(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    try:
+        arr = np.asarray(value)
+    except Exception:
+        return str(value)
+    if arr.ndim == 0:
+        return _jsonable(arr.item())
+    return _jsonable(arr.tolist())
+
+
+def save_raw_seed_initial_artifacts(input_file, input_out, wout_out):
+    """Save the unpreconditioned VMEC input deck and its solved WOUT."""
+
+    input_out = Path(input_out)
+    wout_out = Path(wout_out)
+    input_out.parent.mkdir(parents=True, exist_ok=True)
+    wout_out.parent.mkdir(parents=True, exist_ok=True)
+    vj.write_indata(input_out, vj.read_indata(input_file))
+    run = vj.run_fixed_boundary(input_file, solver_device=SOLVER_DEVICE, verbose=False)
+    vj.write_wout_from_fixed_boundary_run(wout_out, run)
+    return run
+
+
+def basin_prefilter_score(metrics, targets, config):
+    """Rank prefilter candidates by QI/iota first, engineering second."""
+
+    smooth = _finite_or_inf(metrics.get("qi_smooth_total"))
+    legacy = _finite_or_inf(metrics.get("qi_legacy_total"))
+    mirror = _finite_or_inf(metrics.get("qi_mirror_ratio_max"))
+    elongation = _finite_or_inf(metrics.get("qi_max_elongation"))
+    iota = abs(float(metrics.get("mean_iota") or 0.0))
+    aspect = _finite_or_inf(metrics.get("aspect"))
+    smooth_score = smooth / max(float(targets.smooth_qi_max), 1.0e-16)
+    legacy_score = legacy / max(float(targets.legacy_qi_max), 1.0e-16)
+    iota_score = max(0.0, float(targets.abs_iota_min) - iota) / max(float(targets.abs_iota_min), 1.0e-16)
+    mirror_score = max(0.0, mirror - float(targets.mirror_ratio_max)) / max(float(targets.mirror_ratio_max), 1.0e-16)
+    elongation_score = max(0.0, elongation - float(targets.max_elongation)) / max(float(targets.max_elongation), 1.0e-16)
+    aspect_score = abs(aspect - float(targets.target_aspect)) / max(float(targets.target_aspect), 1.0e-16)
+    qi_weight = float(config.get("qi_weight", 1.0))
+    iota_weight = float(config.get("iota_gap_weight", 3.0))
+    mirror_weight = float(config.get("mirror_weight", 0.25))
+    elongation_weight = float(config.get("elongation_weight", 0.1))
+    aspect_weight = float(config.get("aspect_weight", 0.1))
+    return float(
+        qi_weight * (smooth_score + legacy_score)
+        + iota_weight * iota_score
+        + mirror_weight * mirror_score
+        + elongation_weight * elongation_score
+        + aspect_weight * aspect_score
+    )
+
+
+def make_basin_prefilter_options(config):
+    return vj.QIDiagnosticOptions(
+        surfaces=SURFACES,
+        mboz=_resolution_value(OPT_QI_RESOLUTION, "mboz", QI_OPTIONS.mboz),
+        nboz=_resolution_value(OPT_QI_RESOLUTION, "nboz", QI_OPTIONS.nboz),
+        nphi=_resolution_value(OPT_QI_RESOLUTION, "nphi", QI_OPTIONS.nphi),
+        nalpha=_resolution_value(OPT_QI_RESOLUTION, "nalpha", QI_OPTIONS.nalpha),
+        n_bounce=_resolution_value(OPT_QI_RESOLUTION, "n_bounce", QI_OPTIONS.n_bounce),
+        include_bounce_endpoints=QI_OPTIONS.include_bounce_endpoints,
+        phimin=float(QI_OPTIONS.phimin),
+        jit_booz=JIT_BOOZ,
+        mirror_threshold=float(config.get("mirror_threshold", MAX_MIRROR_RATIO)),
+        mirror_ntheta=int(config.get("mirror_ntheta", 32)),
+        mirror_nphi=int(config.get("mirror_nphi", 32)),
+        mirror_surface_index=config.get("mirror_surface_index", MIRROR_SURFACE_INDEX),
+        elongation_threshold=float(config.get("max_elongation", MAX_ELONGATION)),
+        elongation_ntheta=int(config.get("elongation_ntheta", 24)),
+        elongation_nphi=int(config.get("elongation_nphi", 8)),
+    )
+
+
+def run_basin_prefilter(input_file, output_dir, config):
+    """Run a bounded large-step prefilter and return the selected input deck."""
+
+    if not bool(config.get("enabled", False)):
+        return Path(input_file)
+    survey_dir = Path(output_dir) / "basin_prefilter"
+    survey_dir.mkdir(parents=True, exist_ok=True)
+    stage = build_diagnostic_stage(
+        input_path=Path(input_file),
+        max_mode=MAX_MODE,
+        min_vmec_mode=MIN_VMEC_MODE,
+        include=("rc", "zs"),
+        fix=("rc00",),
+        project_input_boundary_to_max_mode=True,
+        inner_max_iter=int(config.get("inner_max_iter", 30)),
+        inner_ftol=float(config.get("inner_ftol", 1.0e-8)),
+        trial_max_iter=int(config.get("trial_max_iter", 30)),
+        trial_ftol=float(config.get("trial_ftol", 1.0e-8)),
+        solver_device=SOLVER_DEVICE,
+    )
+    names = boundary_param_names(stage.specs)
+    x_scale = create_x_scale(stage.specs, alpha=float(config.get("alpha", ALPHA)))
+    candidates = generate_basin_candidates(
+        names=names,
+        x_scale=x_scale,
+        radii=tuple(float(radius) for radius in config.get("radii", (0.025, 0.05, 0.1))),
+        n_random=int(config.get("n_random", 4)),
+        rng_seed=int(config.get("rng_seed", 20260515)),
+        axis_count=int(config.get("axis_count", 6)),
+        directions=tuple(config.get("directions", ("axes", "rademacher"))),
+        include_zero=True,
+    )[: max(1, int(config.get("max_candidates", 24)))]
+    options = make_basin_prefilter_options(config)
+    targets = SurveyTargets(
+        smooth_qi_max=QI_GATE_SMOOTH_MAX,
+        legacy_qi_max=QI_GATE_LEGACY_MAX,
+        mirror_ratio_max=float(config.get("mirror_threshold", MAX_MIRROR_RATIO)),
+        max_elongation=float(config.get("max_elongation", MAX_ELONGATION)),
+        abs_iota_min=TARGET_ABS_IOTA_MIN,
+        target_aspect=TARGET_ASPECT,
+        aspect_tolerance=2.0,
+    )
+    records = []
+    for candidate in candidates:
+        record = candidate.as_record(names)
+        try:
+            params = np.asarray(candidate.params, dtype=float)
+            state = stage.optimizer._solve_forward(params, trial=True)
+            diagnostics = vj.qi_diagnostics_from_state(
+                state=state,
+                static=stage.ctx.static,
+                indata=stage.ctx.indata,
+                signgs=stage.ctx.signgs,
+                surfaces=options.surfaces,
+                options=options,
+                flux_local=stage.ctx.flux,
+                prof_local={"pressure": stage.ctx.pressure},
+                pressure_local=stage.ctx.pressure,
+            )
+            metrics = {
+                "qi_smooth_total": _finite_or_none(diagnostics.get("qi_smooth_total")),
+                "qi_legacy_total": _finite_or_none(diagnostics.get("qi_legacy_total")),
+                "qi_mirror_ratio_max": _finite_or_none(diagnostics.get("qi_mirror_ratio_max")),
+                "qi_max_elongation": _finite_or_none(diagnostics.get("qi_max_elongation")),
+                "mean_iota": _finite_or_none(diagnostics.get("mean_iota")),
+                "aspect": _finite_or_none(diagnostics.get("aspect")),
+            }
+            record["metrics"] = metrics
+            record["diagnostics"] = diagnostics
+            record["prefilter_score"] = basin_prefilter_score(metrics, targets, config)
+            if bool(config.get("save_candidate_inputs", True)):
+                candidate_dir = survey_dir / "candidates" / candidate.label.replace(":", "_")
+                input_out = candidate_dir / "input.candidate"
+                stage.optimizer.save_input(input_out, params)
+                record["input_path"] = str(input_out)
+        except Exception as exc:  # noqa: BLE001 - prefilter keeps failures ranked last.
+            record["metrics"] = {}
+            record["diagnostics"] = {}
+            record["prefilter_score"] = float("inf")
+            record["error"] = f"{type(exc).__name__}: {exc}"
+        records.append(record)
+    ranked = sorted(
+        rank_candidate_records(records, targets=targets),
+        key=lambda row: (float(row.get("prefilter_score", float("inf"))), float(row.get("score", float("inf")))),
+    )
+    for rank, record in enumerate(ranked, start=1):
+        record["prefilter_rank"] = rank
+    top = ranked[: max(1, int(config.get("top_k", 8)))]
+    (survey_dir / "candidates.json").write_text(json.dumps(ranked, indent=2, sort_keys=True) + "\n")
+    (survey_dir / "top_candidates.json").write_text(json.dumps(top, indent=2, sort_keys=True) + "\n")
+    write_csv(ranked, survey_dir / "candidates.csv")
+    selected = top[0]
+    selected_input = selected.get("input_path")
+    if not selected_input:
+        selected_input = str(survey_dir / "input.prefilter_selected")
+        stage.optimizer.save_input(selected_input, np.asarray(selected["params"], dtype=float))
+    print("\nBasin prefilter selected:")
+    print(f"  label:          {selected.get('label')}")
+    print(f"  prefilter score:{selected.get('prefilter_score')}")
+    print(f"  metrics:        {selected.get('metrics')}")
+    print(f"  input:          {selected_input}")
+    return Path(selected_input)
+
+
+def qi_diagnostics_for_result(
+    stage_result,
+    *,
+    mirror_threshold,
+    mirror_surface_index,
+    smooth_qi_max=None,
+    legacy_qi_max=None,
+):
+    smooth_qi_max = QI_GATE_SMOOTH_MAX if smooth_qi_max is None else float(smooth_qi_max)
+    legacy_qi_max = QI_GATE_LEGACY_MAX if legacy_qi_max is None else float(legacy_qi_max)
+    opt = stage_result.final_optimizer
+    diagnostic_options = vj.QIDiagnosticOptions(
+        surfaces=SURFACES,
+        mboz=QI_OPTIONS.mboz,
+        nboz=QI_OPTIONS.nboz,
+        nphi=QI_OPTIONS.nphi,
+        nalpha=QI_OPTIONS.nalpha,
+        n_bounce=QI_OPTIONS.n_bounce,
+        include_bounce_endpoints=QI_OPTIONS.include_bounce_endpoints,
+        softness=QI_OPTIONS.softness,
+        width_weight=QI_OPTIONS.width_weight,
+        branch_width_weight=QI_OPTIONS.branch_width_weight,
+        branch_width_softness=QI_OPTIONS.branch_width_softness,
+        profile_weight=QI_OPTIONS.profile_weight,
+        shuffle_profile_weight=QI_OPTIONS.shuffle_profile_weight,
+        shuffle_profile_softness=QI_OPTIONS.shuffle_profile_softness,
+        shuffle_profile_nphi_out=QI_OPTIONS.shuffle_profile_nphi_out,
+        weighted_shuffle_profile_weight=QI_OPTIONS.weighted_shuffle_profile_weight,
+        weighted_shuffle_profile_softness=QI_OPTIONS.weighted_shuffle_profile_softness,
+        aligned_profile_weight=QI_OPTIONS.aligned_profile_weight,
+        aligned_profile_softness=QI_OPTIONS.aligned_profile_softness,
+        aligned_profile_trap_level=QI_OPTIONS.aligned_profile_trap_level,
+        aligned_profile_trap_softness=QI_OPTIONS.aligned_profile_trap_softness,
+        phimin=float(QI_OPTIONS.phimin),
+        mirror_threshold=mirror_threshold,
+        mirror_surface_index=mirror_surface_index,
+        elongation_threshold=MAX_ELONGATION,
+    )
+    diagnostics = vj.qi_diagnostics_from_state(
+        state=stage_result.final_state,
+        static=opt.static,
+        indata=opt.indata,
+        signgs=opt.signgs,
+        surfaces=SURFACES,
+        options=diagnostic_options,
+    )
+    return annotate_qi_seed_suitability(
+        diagnostics,
+        targets=QISeedSuitabilityTargets(
+            smooth_qi_max=smooth_qi_max,
+            legacy_qi_max=legacy_qi_max,
+            target_aspect=TARGET_ASPECT,
+            abs_iota_min=TARGET_ABS_IOTA_MIN,
+            mirror_ratio_max=mirror_threshold,
+            max_elongation=MAX_ELONGATION,
+        ),
+    )
+
+
+def qi_diagnostics_for_run(
+    run,
+    *,
+    mirror_threshold,
+    mirror_surface_index,
+    target_aspect,
+    abs_iota_min,
+    max_elongation,
+    resolution=None,
+    smooth_qi_max=None,
+    legacy_qi_max=None,
+):
+    """Independent QI diagnostics for a raw fixed-boundary VMEC run."""
+
+    smooth_qi_max = QI_GATE_SMOOTH_MAX if smooth_qi_max is None else float(smooth_qi_max)
+    legacy_qi_max = QI_GATE_LEGACY_MAX if legacy_qi_max is None else float(legacy_qi_max)
+    diagnostic_options = vj.QIDiagnosticOptions(
+        surfaces=SURFACES,
+        mboz=_resolution_value(resolution or {}, "mboz", QI_OPTIONS.mboz),
+        nboz=_resolution_value(resolution or {}, "nboz", QI_OPTIONS.nboz),
+        nphi=_resolution_value(resolution or {}, "nphi", QI_OPTIONS.nphi),
+        nalpha=_resolution_value(resolution or {}, "nalpha", QI_OPTIONS.nalpha),
+        n_bounce=_resolution_value(resolution or {}, "n_bounce", QI_OPTIONS.n_bounce),
+        include_bounce_endpoints=QI_OPTIONS.include_bounce_endpoints,
+        softness=QI_OPTIONS.softness,
+        width_weight=QI_OPTIONS.width_weight,
+        branch_width_weight=QI_OPTIONS.branch_width_weight,
+        branch_width_softness=QI_OPTIONS.branch_width_softness,
+        profile_weight=QI_OPTIONS.profile_weight,
+        shuffle_profile_weight=QI_OPTIONS.shuffle_profile_weight,
+        shuffle_profile_softness=QI_OPTIONS.shuffle_profile_softness,
+        shuffle_profile_nphi_out=QI_OPTIONS.shuffle_profile_nphi_out,
+        weighted_shuffle_profile_weight=QI_OPTIONS.weighted_shuffle_profile_weight,
+        weighted_shuffle_profile_softness=QI_OPTIONS.weighted_shuffle_profile_softness,
+        aligned_profile_weight=QI_OPTIONS.aligned_profile_weight,
+        aligned_profile_softness=QI_OPTIONS.aligned_profile_softness,
+        aligned_profile_trap_level=QI_OPTIONS.aligned_profile_trap_level,
+        aligned_profile_trap_softness=QI_OPTIONS.aligned_profile_trap_softness,
+        phimin=float(QI_OPTIONS.phimin),
+        mirror_threshold=float(mirror_threshold),
+        mirror_surface_index=mirror_surface_index,
+        elongation_threshold=float(max_elongation),
+    )
+    diagnostics = vj.qi_diagnostics_from_state(
+        state=run.state,
+        static=run.static,
+        indata=run.indata,
+        signgs=run.signgs,
+        surfaces=SURFACES,
+        options=diagnostic_options,
+    )
+    return annotate_qi_seed_suitability(
+        diagnostics,
+        targets=QISeedSuitabilityTargets(
+            smooth_qi_max=float(smooth_qi_max),
+            legacy_qi_max=float(legacy_qi_max),
+            target_aspect=float(target_aspect),
+            abs_iota_min=float(abs_iota_min),
+            mirror_ratio_max=float(mirror_threshold),
+            max_elongation=float(max_elongation),
+        ),
+    )
+
+
+def write_qi_stage_checkpoint(
+    stage_output_dir,
+    *,
+    stage_index,
+    stage_name,
+    stage_modes,
+    stage_result,
+    diagnostics,
+    promotion=None,
+    role="stage",
+):
+    """Persist QI stage metrics before root finalization can be reached."""
+
+    stage_output_dir = Path(stage_output_dir)
+    stage_output_dir.mkdir(parents=True, exist_ok=True)
+    history = dict(stage_result.history)
+    diagnostics = dict(diagnostics)
+    promotion = {} if promotion is None else dict(promotion)
+    checkpoint = {
+        "schema_version": 1,
+        "partial": True,
+        "role": str(role),
+        "stage": None if stage_index is None else int(stage_index),
+        "name": str(stage_name),
+        "stage_modes": _jsonable(
+            [
+                {
+                    "mode": int(vj.normalize_boundary_mode_limits(mode).mode),
+                    "max_m": vj.normalize_boundary_mode_limits(mode).max_m,
+                    "max_n": vj.normalize_boundary_mode_limits(mode).max_n,
+                    "label": vj.normalize_boundary_mode_limits(mode).label,
+                }
+                for mode in stage_modes
+            ]
+        ),
+        "history": _jsonable(history),
+        "diagnostics": _jsonable(diagnostics),
+        "promotion": _jsonable(promotion),
+        "history_path": str(stage_output_dir / "history.json"),
+        "diagnostics_path": str(stage_output_dir / "diagnostics.json"),
+        "input_path": str(stage_output_dir / "input.final"),
+        "wout_path": str(stage_output_dir / "wout_final.nc"),
+    }
+    diagnostics_path = stage_output_dir / "diagnostics.json"
+    checkpoint_path = stage_output_dir / "qi_stage_checkpoint.json"
+    diagnostics_path.write_text(json.dumps(_jsonable(diagnostics), indent=2, sort_keys=True) + "\n")
+    checkpoint_path.write_text(json.dumps(checkpoint, indent=2, sort_keys=True) + "\n")
+    (OUTPUT_DIR / "stage_checkpoint.json").write_text(json.dumps(checkpoint, indent=2, sort_keys=True) + "\n")
+    return checkpoint_path
+
+
+def boundary_reference_preconditioner_score(
+    diagnostics,
+    *,
+    mirror_selection_weight=0.01,
+    constraint_weight=0.25,
+):
+    """Rank reference-family candidates by gates first, then exact metrics."""
+
+    engineering_penalty = 0.0 if bool(diagnostics.get("qi_engineering_gate_passed")) else 100.0
+    seed_penalty = 0.0 if bool(diagnostics.get("qi_seed_gate_passed")) else 20.0
+    rank_score = _finite_or_inf(diagnostics.get("qi_rank_score"))
+    constraint_score = _finite_or_inf(diagnostics.get("qi_constraint_score"))
+    mirror = _finite_or_inf(diagnostics.get("qi_mirror_ratio_max"))
+    return float(
+        engineering_penalty
+        + seed_penalty
+        + rank_score
+        + float(constraint_weight) * constraint_score
+        + float(mirror_selection_weight) * mirror
+    )
+
+
+def run_boundary_reference_preconditioner(input_file, output_dir, config):
+    """Scan same-NFP reference-family boundary jumps and return the selected input."""
+
+    config = dict(config or {})
+    if not bool(config.get("enabled", False)):
+        return Path(input_file)
+
+    pre_dir = Path(output_dir) / "boundary_reference_preconditioner"
+    pre_dir.mkdir(parents=True, exist_ok=True)
+    reference_input = Path(config["reference_input"]).expanduser()
+    seed = vj.read_indata(input_file)
+    reference = vj.read_indata(reference_input)
+    keys = tuple(str(key).upper() for key in config.get("keys", ("RBC", "ZBS", "RBS", "ZBC")))
+    lambdas = tuple(float(value) for value in config.get("lambdas", (0.99, 0.995, 1.0)))
+    max_mode = int(config.get("max_mode", MAX_MODE))
+    records = []
+    print("\nBoundary-reference QI preconditioner:")
+    print(f"  reference input: {reference_input}")
+    print(f"  lambdas:         {lambdas}")
+    for lam in lambdas:
+        case_dir = pre_dir / f"lambda_{lam:.3f}".replace(".", "p").replace("-", "m")
+        case_dir.mkdir(parents=True, exist_ok=True)
+        input_out = case_dir / "input.interpolated"
+        wout_out = case_dir / "wout_interpolated.nc"
+        try:
+            candidate = vj.interpolate_indata_boundary(
+                seed,
+                reference,
+                lam,
+                keys=keys,
+                max_mode=max_mode,
+            )
+            candidate = vj.rebuild_for_optimization_resolution(
+                candidate,
+                max_mode=max_mode,
+                min_vmec_mode=MIN_VMEC_MODE,
+            )
+            vj.write_indata(input_out, candidate)
+            run = vj.run_fixed_boundary(
+                input_out,
+                max_iter=int(config.get("max_iter", INNER_MAX_ITER)),
+                solver_device=SOLVER_DEVICE,
+                verbose=False,
+            )
+            vj.write_wout_from_fixed_boundary_run(wout_out, run)
+            diagnostics = qi_diagnostics_for_run(
+                run,
+                mirror_threshold=float(config.get("max_mirror_ratio", MAX_MIRROR_RATIO)),
+                mirror_surface_index=config.get("mirror_surface_index", MIRROR_SURFACE_INDEX),
+                target_aspect=float(config.get("target_aspect", TARGET_ASPECT)),
+                abs_iota_min=float(config.get("abs_iota_min", TARGET_ABS_IOTA_MIN)),
+                max_elongation=float(config.get("max_elongation", MAX_ELONGATION)),
+                resolution=config.get("diagnostic_qi_resolution"),
+                smooth_qi_max=float(config.get("smooth_qi_max", QI_GATE_SMOOTH_MAX)),
+                legacy_qi_max=float(config.get("legacy_qi_max", QI_GATE_LEGACY_MAX)),
+            )
+            score = boundary_reference_preconditioner_score(
+                diagnostics,
+                mirror_selection_weight=float(config.get("mirror_selection_weight", 0.01)),
+                constraint_weight=float(config.get("constraint_selection_weight", 0.25)),
+            )
+            record = {
+                "lambda": lam,
+                "input": str(input_out),
+                "wout": str(wout_out),
+                "score": score,
+                "selected": False,
+                "smooth_qi": _finite_or_none(diagnostics.get("qi_smooth_total")),
+                "legacy_qi": _finite_or_none(diagnostics.get("qi_legacy_total")),
+                "mirror": _finite_or_none(diagnostics.get("qi_mirror_ratio_max")),
+                "elongation": _finite_or_none(diagnostics.get("qi_max_elongation")),
+                "mean_iota": _finite_or_none(diagnostics.get("mean_iota")),
+                "aspect": _finite_or_none(diagnostics.get("aspect")),
+                "qi_seed_gate_passed": bool(diagnostics.get("qi_seed_gate_passed")),
+                "qi_engineering_gate_passed": bool(diagnostics.get("qi_engineering_gate_passed")),
+                "failure_reasons": list(diagnostics.get("qi_failure_reasons", [])),
+            }
+            (case_dir / "diagnostics.json").write_text(json.dumps(diagnostics, indent=2, sort_keys=True) + "\n")
+        except Exception as exc:  # noqa: BLE001 - keep the candidate scan moving.
+            record = {
+                "lambda": lam,
+                "input": str(input_out),
+                "wout": str(wout_out),
+                "score": float("inf"),
+                "selected": False,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        records.append(record)
+        print(
+            f"  lambda={lam:.3f}: score={record['score']} "
+            f"QI={record.get('legacy_qi')} mirror={record.get('mirror')} "
+            f"iota={record.get('mean_iota')} aspect={record.get('aspect')}"
+        )
+
+    successful = [record for record in records if np.isfinite(float(record.get("score", float("inf"))))]
+    if not successful:
+        (pre_dir / "summary.json").write_text(json.dumps(records, indent=2, sort_keys=True) + "\n")
+        raise RuntimeError("Boundary-reference preconditioner found no successful candidates.")
+
+    candidate_pool = [record for record in successful if bool(record.get("qi_engineering_gate_passed"))] or successful
+    if bool(config.get("prefer_qi_safe_candidates", True)):
+        max_mirror_ratio = float(config.get("max_mirror_ratio", MAX_MIRROR_RATIO))
+        abs_iota_min = float(config.get("abs_iota_min", TARGET_ABS_IOTA_MIN))
+        safe_pool = [
+            record
+            for record in candidate_pool
+            if _finite_or_inf(record.get("qi_mirror_ratio_max")) <= max_mirror_ratio
+            and abs(float(record.get("mean_iota") or 0.0)) >= abs_iota_min
+        ]
+        if safe_pool:
+            candidate_pool = safe_pool
+    if bool(config.get("prefer_non_endpoint", False)):
+        non_endpoint = [record for record in candidate_pool if abs(float(record["lambda"]) - 1.0) > 1.0e-12]
+        if non_endpoint:
+            candidate_pool = non_endpoint
+    selected = min(candidate_pool, key=lambda record: float(record["score"]))
+    selected["selected"] = True
+    (pre_dir / "summary.json").write_text(json.dumps(records, indent=2, sort_keys=True) + "\n")
+    print("  selected:       ", selected["input"])
+    print(
+        "  selected metrics:"
+        f" QI={selected.get('legacy_qi')}, mirror={selected.get('mirror')}, "
+        f"iota={selected.get('mean_iota')}, aspect={selected.get('aspect')}"
+    )
+    return Path(selected["input"])
+
+
+def stage_modes_for(stage):
+    if "stage_mode_limits" in stage:
+        return [vj.normalize_boundary_mode_limits(mode) for mode in stage["stage_mode_limits"]]
+    if "stage_modes" in stage:
+        return [int(mode) for mode in stage["stage_modes"]]
+    return vj.repeated_stage_modes(
+        max_mode=MAX_MODE,
+        use_mode_continuation=USE_MODE_CONTINUATION,
+        continuation_nfev=CONTINUATION_NFEV,
+        repeats=int(stage.get("stage_repeats", STAGE_REPEATS)),
+    )
+
+
+def promotion_score(record):
+    """Lower score means a better exact-diagnostic QI candidate."""
+
+    seed_penalty = 0.0 if bool(record.get("qi_seed_gate_passed")) else 100.0
+    engineering_penalty = 0.0 if bool(record.get("qi_engineering_gate_passed")) else 10.0
+    return (
+        seed_penalty
+        + engineering_penalty
+        + _finite_or_inf(record.get("qi_rank_score"))
+        + 0.25 * _finite_or_inf(record.get("qi_constraint_score"))
+    )
+
+
+def engineering_promotion_score(record):
+    """Rank already-gated candidates by QI first and mirror second."""
+
+    seed_penalty = 0.0 if bool(record.get("qi_seed_gate_passed")) else 1000.0
+    engineering_penalty = 0.0 if bool(record.get("qi_engineering_gate_passed")) else 100.0
+    return (
+        seed_penalty
+        + engineering_penalty
+        + _finite_or_inf(record.get("qi_rank_score"))
+        + 0.25 * _finite_or_inf(record.get("qi_constraint_score"))
+        + 2.0 * _finite_or_inf(record.get("qi_mirror_ratio_max"))
+    )
+
+
+def stage_promotes_candidate(stage, promotion, reference_diagnostics):
+    """Apply the script's staged promotion rule to exact diagnostics."""
+
+    reasons = list(promotion.get("qi_cleanup_rejection_reasons", []))
+    if bool(stage.get("accept_if_iota_improves", False)) and reference_diagnostics is not None:
+        candidate_iota = abs(_finite_or_inf(promotion.get("mean_iota")))
+        reference_iota = abs(_finite_or_inf(reference_diagnostics.get("mean_iota")))
+        iota_gain = candidate_iota - reference_iota
+        qi_relax = float(stage.get("qi_relax_for_iota", 2.0))
+        smooth_limit = qi_relax * max(
+            QI_GATE_SMOOTH_MAX,
+            _finite_or_inf(reference_diagnostics.get("qi_smooth_total")),
+        )
+        legacy_limit = qi_relax * max(
+            QI_GATE_LEGACY_MAX,
+            _finite_or_inf(reference_diagnostics.get("qi_legacy_total")),
+        )
+        if (
+            iota_gain >= float(stage.get("iota_improvement_min", 0.0))
+            and _finite_or_inf(promotion.get("qi_smooth_total")) <= smooth_limit
+            and _finite_or_inf(promotion.get("qi_legacy_total")) <= legacy_limit
+        ):
+            out = dict(promotion)
+            out["qi_cleanup_promoted"] = True
+            out["qi_cleanup_rejection_reasons"] = []
+            out["qi_iota_promotion_reason"] = (
+                f"iota increased by {iota_gain:.6g} while QI stayed within "
+                f"{qi_relax:.3g}x relaxed smooth/legacy limits"
+            )
+            return out
+        reasons.append(
+            "iota ramp did not satisfy relaxed QI promotion: "
+            f"gain={iota_gain:.6g}, smooth_limit={smooth_limit:.6g}, legacy_limit={legacy_limit:.6g}"
+        )
+    if bool(stage.get("accept_if_rank_improves", False)) and reference_diagnostics is not None:
+        candidate_score = promotion_score(promotion)
+        reference_score = promotion_score(reference_diagnostics)
+        tolerance = float(stage.get("rank_score_relax", 1.0e-12))
+        if candidate_score >= reference_score - tolerance:
+            reasons.append(
+                "rank score did not improve: "
+                f"candidate={candidate_score:.6g}, reference={reference_score:.6g}"
+            )
+    elif bool(stage.get("accept_if_rank_improves", False)):
+        # The first staged far-seed result is allowed to become the baseline.
+        pass
+    if bool(stage.get("accept_if_engineering_score_improves", False)) and reference_diagnostics is not None:
+        candidate_score = engineering_promotion_score(promotion)
+        reference_score = engineering_promotion_score(reference_diagnostics)
+        candidate_mirror = _finite_or_inf(promotion.get("qi_mirror_ratio_max"))
+        reference_mirror = _finite_or_inf(reference_diagnostics.get("qi_mirror_ratio_max"))
+        mirror_gain = reference_mirror - candidate_mirror
+        if candidate_score >= reference_score - float(stage.get("engineering_score_relax", 1.0e-12)):
+            reasons.append(
+                "engineering score did not improve: "
+                f"candidate={candidate_score:.6g}, reference={reference_score:.6g}"
+            )
+        if mirror_gain < float(stage.get("mirror_improvement_min", 0.0)):
+            reasons.append(
+                "mirror ratio did not improve enough: "
+                f"gain={mirror_gain:.6g}, required={float(stage.get('mirror_improvement_min', 0.0)):.6g}"
+            )
+    elif bool(stage.get("accept_if_engineering_score_improves", False)):
+        pass
+    if reasons:
+        out = dict(promotion)
+        out["qi_cleanup_promoted"] = False
+        out["qi_cleanup_rejection_reasons"] = reasons
+        return out
+    return promotion
+
+
+def run_qi_stage_policy(
+    active_input_file,
+    output_dir,
+    *,
+    solve_qi_stage,
+    make_qi_problem,
+    boundary_reference_preconditioner,
+    mirror_ramp_stages,
+):
+    """Run the guarded staged QI policy and return ``(result, promotion_log)``.
+
+    The public script still defines the objectives and the solve function. This
+    helper only handles repeated staged promotion, exact diagnostics, and
+    checkpoint bookkeeping.
+    """
+
+    promotion_log = []
+    if not mirror_ramp_stages:
+        result = solve_qi_stage(
+            active_input_file,
+            output_dir,
+            make_qi_problem(),
+            max_nfev=MAX_NFEV,
+            label=f"QI optimization (max_mode={MAX_MODE}, {'ESS' if USE_ESS else 'no ESS'})",
+            save_final_outputs=False,
+        )
+        write_qi_stage_checkpoint(
+            output_dir,
+            stage_index=1,
+            stage_name="qi_optimization",
+            stage_modes=STAGE_MODES,
+            stage_result=result,
+            diagnostics={},
+            promotion={"diagnostics_pending": True},
+            role="stage_pre_diagnostics",
+        )
+        return result, promotion_log
+
+    accepted_result = None
+    accepted_seed_diagnostics = None
+    best_result = None
+    best_diagnostics = None
+    if bool(boundary_reference_preconditioner.get("enabled", False)) and bool(
+        boundary_reference_preconditioner.get("accept_as_baseline", False)
+    ):
+        baseline_output_dir = Path(output_dir) / "boundary_reference_baseline"
+        print("\nRecording boundary-reference candidate as accepted baseline ...")
+        accepted_result = solve_qi_stage(
+            active_input_file,
+            baseline_output_dir,
+            make_qi_problem({"qi_weight": QI_WEIGHT, "qi_ceiling_weight": 0.0}),
+            max_nfev=1,
+            label=f"QI boundary-reference baseline (max_mode={MAX_MODE})",
+            stage_modes=(MAX_MODE,),
+            method="scipy_matrix_free",
+            use_mode_continuation=False,
+        )
+        write_qi_stage_checkpoint(
+            baseline_output_dir,
+            stage_index=0,
+            stage_name="boundary_reference_baseline",
+            stage_modes=(MAX_MODE,),
+            stage_result=accepted_result,
+            diagnostics={},
+            promotion={"qi_cleanup_promoted": True, "baseline": True, "diagnostics_pending": True},
+            role="boundary_reference_baseline_pre_diagnostics",
+        )
+        accepted_seed_diagnostics = qi_diagnostics_for_result(
+            accepted_result,
+            mirror_threshold=MAX_MIRROR_RATIO,
+            mirror_surface_index=MIRROR_SURFACE_INDEX,
+        )
+        write_qi_stage_checkpoint(
+            baseline_output_dir,
+            stage_index=0,
+            stage_name="boundary_reference_baseline",
+            stage_modes=(MAX_MODE,),
+            stage_result=accepted_result,
+            diagnostics=accepted_seed_diagnostics,
+            promotion={"qi_cleanup_promoted": True, "baseline": True},
+            role="boundary_reference_baseline",
+        )
+        best_result = accepted_result
+        best_diagnostics = accepted_seed_diagnostics
+
+    for stage_index, stage in enumerate(mirror_ramp_stages, start=1):
+        stage_name = stage["name"]
+        stage_output_dir = Path(output_dir) / f"mirror_ramp_{stage_index:02d}_{stage_name}"
+        stage_modes_i = stage_modes_for(stage)
+        stage_result = solve_qi_stage(
+            active_input_file,
+            stage_output_dir,
+            make_qi_problem(stage),
+            max_nfev=int(stage.get("max_nfev", MAX_NFEV)),
+            label=f"QI {stage_name} (max_mode={MAX_MODE}, {'ESS' if USE_ESS else 'no ESS'})",
+            stage_modes=stage_modes_i,
+            method=str(stage.get("method", METHOD)),
+            use_mode_continuation=bool(stage.get("use_mode_continuation", USE_MODE_CONTINUATION)),
+            scalar_step_bound=stage.get("scalar_step_bound"),
+            lbfgs_step_bound=stage.get("lbfgs_step_bound"),
+        )
+        write_qi_stage_checkpoint(
+            stage_output_dir,
+            stage_index=stage_index,
+            stage_name=stage_name,
+            stage_modes=stage_modes_i,
+            stage_result=stage_result,
+            diagnostics={},
+            promotion={"diagnostics_pending": True},
+            role="mirror_ramp_pre_diagnostics",
+        )
+        stage_mirror_threshold = float(stage.get("mirror_threshold", MAX_MIRROR_RATIO))
+        stage_promotion_mirror_threshold = float(stage.get("promotion_mirror_threshold", stage_mirror_threshold))
+        stage_mirror_surface_index = stage.get("mirror_surface_index", MIRROR_SURFACE_INDEX)
+        stage_smooth_qi_max = float(stage.get("smooth_qi_max", QI_GATE_SMOOTH_MAX))
+        stage_legacy_qi_max = float(stage.get("legacy_qi_max", QI_GATE_LEGACY_MAX))
+        reference_diagnostics = None if accepted_result is None else qi_diagnostics_for_result(
+            accepted_result,
+            mirror_threshold=stage_promotion_mirror_threshold,
+            mirror_surface_index=stage_mirror_surface_index,
+            smooth_qi_max=stage_smooth_qi_max,
+            legacy_qi_max=stage_legacy_qi_max,
+        )
+        stage_diagnostics = qi_diagnostics_for_result(
+            stage_result,
+            mirror_threshold=stage_promotion_mirror_threshold,
+            mirror_surface_index=stage_mirror_surface_index,
+            smooth_qi_max=stage_smooth_qi_max,
+            legacy_qi_max=stage_legacy_qi_max,
+        )
+        promotion = vj.qi_cleanup_candidate_promotable(
+            stage_diagnostics,
+            reference=reference_diagnostics,
+            targets=QISeedSuitabilityTargets(
+                smooth_qi_max=stage_smooth_qi_max,
+                legacy_qi_max=stage_legacy_qi_max,
+                target_aspect=TARGET_ASPECT,
+                abs_iota_min=TARGET_ABS_IOTA_MIN,
+                mirror_ratio_max=stage_promotion_mirror_threshold,
+                max_elongation=MAX_ELONGATION,
+            ),
+            require_seed_gate=bool(stage.get("require_seed_gate", True)),
+            require_mirror_improvement=bool(
+                stage.get("require_mirror_improvement", accepted_seed_diagnostics is not None)
+                and float(stage.get("mirror_weight", MIRROR_WEIGHT)) > 0.0
+            ),
+            require_engineering_gate=bool(stage.get("require_engineering_gate", False)),
+            mirror_improvement_min=float(stage.get("mirror_improvement_min", 0.0)),
+        )
+        promotion = stage_promotes_candidate(stage, promotion, reference_diagnostics)
+        write_qi_stage_checkpoint(
+            stage_output_dir,
+            stage_index=stage_index,
+            stage_name=stage_name,
+            stage_modes=stage_modes_i,
+            stage_result=stage_result,
+            diagnostics=stage_diagnostics,
+            promotion=promotion,
+            role="mirror_ramp",
+        )
+        promotion_log.append(
+            {
+                "stage": stage_index,
+                "name": stage_name,
+                "output_dir": str(stage_output_dir),
+                "stage_modes": [_jsonable(vj.normalize_boundary_mode_limits(mode).__dict__) for mode in stage_modes_i],
+                "method": str(stage.get("method", METHOD)),
+                "promoted": bool(promotion["qi_cleanup_promoted"]),
+                "smooth_qi": promotion.get("qi_smooth_total"),
+                "legacy_qi": promotion.get("qi_legacy_total"),
+                "mirror": promotion.get("qi_mirror_ratio_max"),
+                "elongation": promotion.get("qi_max_elongation"),
+                "mean_iota": promotion.get("mean_iota"),
+                "rank_score": promotion.get("qi_rank_score"),
+                "constraint_score": promotion.get("qi_constraint_score"),
+                "iota_promotion_reason": promotion.get("qi_iota_promotion_reason"),
+                "rejection_reasons": promotion.get("qi_cleanup_rejection_reasons", []),
+            }
+        )
+        print(f"\nMirror-ramp stage {stage_index}: {stage_name}")
+        print(f"  smooth QI:    {promotion.get('qi_smooth_total')}")
+        print(f"  legacy QI:    {promotion.get('qi_legacy_total')}")
+        print(f"  mirror ratio: {promotion.get('qi_mirror_ratio_max')}")
+        print(f"  elongation:   {promotion.get('qi_max_elongation')}")
+        print(f"  mean iota:    {promotion.get('mean_iota')}")
+        print(f"  promoted:     {promotion['qi_cleanup_promoted']}")
+        for reason in promotion.get("qi_cleanup_rejection_reasons", []):
+            print(f"    - {reason}")
+
+        if best_diagnostics is None or promotion_score(stage_diagnostics) < promotion_score(best_diagnostics):
+            best_result = stage_result
+            best_diagnostics = stage_diagnostics
+        if promotion["qi_cleanup_promoted"]:
+            accepted_result = stage_result
+            accepted_seed_diagnostics = stage_diagnostics
+            active_input_file = stage_output_dir / "input.final"
+        elif accepted_result is None:
+            print(
+                f"Initial QI staged policy {stage_name!r} failed the promotion gate; "
+                "continuing with the best exact-diagnostic candidate recorded so far."
+            )
+            active_input_file = stage_output_dir / "input.final"
+    return (accepted_result if accepted_result is not None else best_result), promotion_log

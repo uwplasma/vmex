@@ -176,7 +176,8 @@ The current constrained-QI sweep artifacts document one successful bundled
 NFP=2 ``input.nfp2_QI`` lane.  ``examples/optimization/QI_optimization.py`` is
 the bounded multi-seed entry point for extending this to other inputs: set
 ``RUN_CASE = "qi_stel_seed_3127"``, ``RUN_CASE = "nfp4_qh_warm_to_qi"``, or add
-a new ``QI_CASES`` entry for another VMEC deck.  The current
+a new ``QI_CASES`` entry in ``examples/optimization/qi_optimization_cases.py``
+for another VMEC deck.  The current
 ``qi_stel_seed_3127`` far-seed lane first runs a deterministic same-NFP
 reference-family boundary preconditioner, records the selected candidate as an
 accepted baseline when the independent gates pass, and then runs guarded
