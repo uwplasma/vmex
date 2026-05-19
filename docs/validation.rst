@@ -416,17 +416,19 @@ Current parity status
 ---------------------
 
 **Fixed boundary**
-  Established for all shipped reference cases.  ``rmnc/zmns`` Fourier
-  coefficients agree at ``rtol=1e-6``; derived magnetic-field quantities at
-  ``5×10⁻⁵``.  MHD stability coefficients (Mercier terms) agree at ``1e-3``.
+  Strict field-by-field parity is established for the promoted comprehensive
+  cases.  Other shipped or fetched references are covered by no-solve profile,
+  current, b-field, converged-wout matrix, or convergence-only gates until they
+  are promoted.
 
 **Stellarator-asymmetric (lasym=True)**
-  vmec_jax converges to the same tight residuals as lasym=False cases.  No
-  VMEC2000 reference files exist for the shipped lasym=True inputs, but
-  cross-checks via the manifest sweep confirm per-iteration ``fsq*`` trace
-  alignment.  The Boozer input adapter is required to preserve the asymmetric
-  geometry/lambda channels (``rmns``, ``zmnc``, ``lmnc``) and magnetic sine
-  channels through ``booz_xform_jax`` for QI and LASYM Boozer diagnostics.
+  ``lasym=True`` channels are covered by bundled/fetched reference physics gates
+  and convergence tests, but strict external LASYM finite-beta parity is not yet
+  promoted.  The known ``basic_non_stellsym_pressure`` executable-backed
+  converged comparison gap remains a blocker for that claim.  The Boozer input
+  adapter is required to preserve the asymmetric geometry/lambda channels
+  (``rmns``, ``zmnc``, ``lmnc``) and magnetic sine channels through
+  ``booz_xform_jax`` for QI and LASYM Boozer diagnostics.
 
 **Free boundary**
   vmec_jax produces converged free-boundary equilibria for the bundled CTH-like

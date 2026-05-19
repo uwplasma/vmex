@@ -3,11 +3,14 @@ vmec-jax documentation
 
 ``vmec-jax`` is an incremental, JAX-based rewrite of **VMEC2000**, targeting:
 
-- bundled-reference parity and optional executable-backed VMEC2000 validation
-  for fixed-boundary and free-boundary solves,
-- axisymmetric and non-axisymmetric configurations with ``lasym=False/True``,
+- bundled-reference validation and optional executable-backed VMEC2000 checks
+  for representative fixed-boundary and free-boundary solves, with strict field
+  parity promoted case-by-case,
+- axisymmetric and non-axisymmetric ``lasym=False/True`` coverage, including
+  convergence/physics gates where strict parity is not yet promoted,
 - end-to-end differentiability (JAX autodiff),
-- laptop-friendly performance (careful JIT boundaries, minimal allocations),
+- performance profiling and tuned default paths, with CPU/GPU speedups
+  documented per case rather than implied globally,
 - stepwise validation against VMEC2000 output (``wout_*.nc``).
 
 .. only:: not fast
