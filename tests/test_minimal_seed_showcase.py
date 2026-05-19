@@ -346,6 +346,52 @@ def test_minimal_seed_showcase_passes_inner_qi_timeout(tmp_path: Path, monkeypat
     assert captured["timeout_s"] == pytest.approx(1140.0)
 
 
+def test_minimal_seed_showcase_marks_qi_timeout_partials_as_non_crash(tmp_path: Path) -> None:
+    generator = _load_module("generate_minimal_seed_showcase_qi_partial_timeout", "generate_minimal_seed_showcase.py")
+    output_dir = tmp_path / "qi_case"
+    stage_dir = output_dir / "cleanup"
+    stage_dir.mkdir(parents=True)
+    (stage_dir / "qi_stage_checkpoint.json").write_text(
+        json.dumps(
+            {
+                "partial": True,
+                "history": {
+                    "objective_final": 3.0,
+                    "qs_final": 1.7e-3,
+                    "aspect_final": 9.2,
+                    "iota_final": 0.46,
+                },
+                "diagnostics": {
+                    "qi_legacy_total": 1.4e-3,
+                    "qi_mirror_ratio_max": 0.31,
+                    "qi_max_elongation": 6.9,
+                },
+            }
+        )
+    )
+    result = generator._failure_result(
+        generator.SHOWCASE_CASES["qi_nfp2"],
+        output_dir,
+        backend_label="cpu",
+        solver_device="cpu",
+        worker_jax_platforms="cpu",
+        policy="continuation",
+        max_mode=3,
+        use_ess=True,
+        message="worker timed out after 1200.0 s",
+    )
+
+    changed = generator._annotate_qi_partial_result(generator.SHOWCASE_CASES["qi_nfp2"], result, output_dir)
+
+    assert changed is True
+    assert result.success is False
+    assert result.crashed is False
+    assert "partial QI stage checkpoint metrics recorded" in result.message
+    assert result.qs_final == pytest.approx(1.7e-3)
+    assert result.qi_legacy_total == pytest.approx(1.4e-3)
+    assert result.qi_mirror_ratio_max == pytest.approx(0.31)
+
+
 def test_minimal_seed_physics_gate_rejects_zero_iota_and_bad_qi() -> None:
     generator = _load_module("generate_minimal_seed_showcase_physics_gate", "generate_minimal_seed_showcase.py")
 
@@ -573,4 +619,8 @@ def test_minimal_seed_renderer_loads_records_and_returns_monotone_segments(tmp_p
 
     summary = tmp_path / "summary.csv"
     renderer.write_summary_csv(records, summary)
-    assert "qa_nfp2" in summary.read_text()
+    summary_text = summary.read_text()
+    assert "status" in summary_text
+    assert "crashed" in summary_text
+    assert "message" in summary_text
+    assert "qa_nfp2" in summary_text
