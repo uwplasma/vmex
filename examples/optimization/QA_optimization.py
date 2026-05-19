@@ -138,11 +138,11 @@ result = vj.least_squares_solve(
     scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
     save_stage_inputs=SAVE_STAGE_INPUTS,
     save_stage_wouts=SAVE_STAGE_WOUTS,
+    save_final_outputs=False,
 )
 
-# Results are plain Python objects.  The solve writes these default artifacts
-# for convenience; the explicit calls below show where to customize filenames
-# or add additional exports in a SIMSOPT-style workflow.
+# Results are plain Python objects.  The explicit calls below show where to
+# customize filenames or add additional exports in a SIMSOPT-style workflow.
 initial_optimizer = result.initial_optimizer
 final_optimizer = result.final_optimizer
 final_result = result.final_result

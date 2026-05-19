@@ -1034,6 +1034,7 @@ def solve_qi_stage(
     use_mode_continuation=USE_MODE_CONTINUATION,
     scalar_step_bound=None,
     lbfgs_step_bound=None,
+    save_final_outputs=True,
 ):
     # Small stage helper: physics is still assembled explicitly in
     # make_qi_problem(); this only forwards solve controls for one stage.
@@ -1063,6 +1064,7 @@ def solve_qi_stage(
         scalar_step_bound=scalar_step_bound,
         save_stage_inputs=SAVE_STAGE_INPUTS,
         save_stage_wouts=SAVE_STAGE_WOUTS,
+        save_final_outputs=save_final_outputs,
     )
 
 
@@ -1697,6 +1699,7 @@ else:
         problem,
         max_nfev=MAX_NFEV,
         label=f"QI optimization (max_mode={MAX_MODE}, {'ESS' if USE_ESS else 'no ESS'})",
+        save_final_outputs=False,
     )
 
 if result is None:

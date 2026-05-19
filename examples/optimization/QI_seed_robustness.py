@@ -162,6 +162,7 @@ result = vj.least_squares_solve(
     trial_ftol=TRIAL_FTOL,
     solver_device=SOLVER_DEVICE,
     scipy_tr_solver=SCIPY_TR_SOLVER,
+    save_final_outputs=False,
 )
 
 history = result.history

@@ -2061,6 +2061,7 @@ def run_fixed_boundary_objective_optimization(
     save_stage_inputs: bool = True,
     save_stage_wouts: bool = False,
     save_rerun_wouts: bool = False,
+    save_final_outputs: bool = True,
 ) -> FixedBoundaryOptimizationResult:
     """Run a fixed-boundary objective list through one or more mode stages."""
 
@@ -2176,17 +2177,26 @@ def run_fixed_boundary_objective_optimization(
         final_result["_history_dump"] = combined_history
 
     print_qs_final_summary(final_result, target_iota=target_iota, iota_abs_min=iota_abs_min)
-    save_qs_final_outputs(
-        output_dir=output_dir,
-        stage_records=stage_records,
-        final_optimizer=final_optimizer,
-        final_result=final_result,
-        label=label,
-        target_aspect=target_aspect,
-        target_iota=target_iota,
-        iota_abs_min=iota_abs_min,
-        save_rerun_wouts=save_rerun_wouts,
-    )
+    if save_final_outputs:
+        save_qs_final_outputs(
+            output_dir=output_dir,
+            stage_records=stage_records,
+            final_optimizer=final_optimizer,
+            final_result=final_result,
+            label=label,
+            target_aspect=target_aspect,
+            target_iota=target_iota,
+            iota_abs_min=iota_abs_min,
+            save_rerun_wouts=save_rerun_wouts,
+        )
+    else:
+        annotate_qs_final_history(
+            final_result,
+            label=label,
+            target_aspect=target_aspect,
+            target_iota=target_iota,
+            iota_abs_min=iota_abs_min,
+        )
     return FixedBoundaryOptimizationResult(
         stage_records=stage_records,
         final_optimizer=final_optimizer,
@@ -2432,6 +2442,7 @@ def run_quasi_isodynamic_objective_optimization(
     scalar_step_bound: float | None = None,
     save_stage_inputs: bool = True,
     save_stage_wouts: bool = False,
+    save_final_outputs: bool = True,
 ) -> FixedBoundaryOptimizationResult:
     """Run a QI objective list through repeated or direct mode stages."""
 
@@ -2570,15 +2581,23 @@ def run_quasi_isodynamic_objective_optimization(
         final_result["_history_dump"] = combined_history
 
     print_qs_final_summary(final_result, iota_abs_min=iota_abs_min)
-    save_qs_final_outputs(
-        output_dir=output_dir,
-        stage_records=stage_records,
-        final_optimizer=final_optimizer,
-        final_result=final_result,
-        label=label,
-        target_aspect=target_aspect,
-        iota_abs_min=iota_abs_min,
-    )
+    if save_final_outputs:
+        save_qs_final_outputs(
+            output_dir=output_dir,
+            stage_records=stage_records,
+            final_optimizer=final_optimizer,
+            final_result=final_result,
+            label=label,
+            target_aspect=target_aspect,
+            iota_abs_min=iota_abs_min,
+        )
+    else:
+        annotate_qs_final_history(
+            final_result,
+            label=label,
+            target_aspect=target_aspect,
+            iota_abs_min=iota_abs_min,
+        )
     return FixedBoundaryOptimizationResult(
         stage_records=stage_records,
         final_optimizer=final_optimizer,
@@ -2614,6 +2633,7 @@ def least_squares_solve(
     save_stage_inputs: bool = True,
     save_stage_wouts: bool = False,
     save_rerun_wouts: bool = False,
+    save_final_outputs: bool = True,
 ) -> FixedBoundaryOptimizationResult:
     """Solve a SIMSOPT-style fixed-boundary least-squares problem.
 
@@ -2696,6 +2716,7 @@ def least_squares_solve(
             scalar_step_bound=scalar_step_bound,
             save_stage_inputs=save_stage_inputs,
             save_stage_wouts=save_stage_wouts,
+            save_final_outputs=save_final_outputs,
         )
 
     return run_fixed_boundary_objective_optimization(
@@ -2733,6 +2754,7 @@ def least_squares_solve(
         save_stage_inputs=save_stage_inputs,
         save_stage_wouts=save_stage_wouts,
         save_rerun_wouts=save_rerun_wouts,
+        save_final_outputs=save_final_outputs,
     )
 
 
@@ -2864,6 +2886,26 @@ def save_qs_final_outputs(
     else:
         _remove_stale(output_dir / "wout_final_rerun.nc")
 
+    annotate_qs_final_history(
+        final_result,
+        label=label,
+        target_aspect=target_aspect,
+        target_iota=target_iota,
+        iota_abs_min=iota_abs_min,
+    )
+    final_optimizer.save_history(output_dir / "history.json", final_result)
+
+
+def annotate_qs_final_history(
+    final_result: dict,
+    *,
+    label: str,
+    target_aspect: float | None = None,
+    target_iota: float | None = None,
+    iota_abs_min: float | None = None,
+) -> None:
+    """Attach final optimization metadata without writing artifacts."""
+
     history = final_result["_history_dump"]
     history["label"] = label
     if target_aspect is not None:
@@ -2872,7 +2914,6 @@ def save_qs_final_outputs(
         history["target_iota"] = float(target_iota)
     if iota_abs_min is not None:
         history["iota_abs_min"] = float(iota_abs_min)
-    final_optimizer.save_history(output_dir / "history.json", final_result)
 
 
 def combine_qs_stage_histories(
