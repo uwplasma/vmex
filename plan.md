@@ -350,7 +350,8 @@ hardening, the exact-output/API/release hygiene push, the custom QI seed audit
 documentation/regression gate, the v0.0.10 release, scan-runner cache reuse
 across boundary trials, detailed scan-timing diagnostics, reference-state wout
 roundtrip diagnostics, the green `main` CI run for `f5c6d27`, LASYM bsubv
-wout parity tightening, and QI staged-history provenance cleanup:
+wout parity tightening, QI staged-history provenance cleanup, the v0.0.11
+release, and the QI optimization driver split:
 
 - Continuation correctness: 100%. Source fix is implemented and covered by
   synthetic repeated-stage tests, a real boundary-projection stage test, and
@@ -442,7 +443,7 @@ wout parity tightening, and QI staged-history provenance cleanup:
   LASYM blocker is the solved-state lambda convergence gap on the `m=1,3,4`
   channels. `freeb_scalpot` remains an instrumented-VMEC2000 diagnostic because
   a stock executable does not emit the required dumps.
-- Refactor/API/examples: 96.5%. Examples are SIMSOPT-like and clearer, finite-beta
+- Refactor/API/examples: 98%. Examples are SIMSOPT-like and clearer, finite-beta
   examples expose structured stage/final summaries while preserving direct
   optimizer visibility and have focused adapter coverage. Objective tuple
   routing is now isolated behind a small assembly helper, reducing the next
@@ -452,9 +453,13 @@ wout parity tightening, and QI staged-history provenance cleanup:
   implicit optional solvers, wout beta/aspect helpers, and driver serialization
   utilities. `vmec_jax.api` now has a tested public import contract for the
   optimization objects, QI promotion helpers, QI cleanup guard, and plotting
-  helpers used by examples. Large
+  helpers used by examples. `QI_optimization.py` is no longer a two-thousand
+  line monolith: it now keeps the visible user workflow in 547 lines, while
+  the bundled case catalog and staged seed-robust promotion/checkpoint
+  mechanics live in `qi_optimization_cases.py` and
+  `qi_optimization_support.py`. Large
   solver/wout/free-boundary splits remain deferred behind parity gates.
-- Docs/release hygiene: 99.5%. Performance/discrete-adjoint/docs reflect the
+- Docs/release hygiene: 99.6%. Performance/discrete-adjoint/docs reflect the
   current replay and finite-beta policies, diagnostics docs cover detailed
   preconditioner timing, and a command-level release checklist now ties local
   gates, tools/validation lint/compile checks, GitHub Actions, artifact hygiene,
@@ -471,7 +476,7 @@ wout parity tightening, and QI staged-history provenance cleanup:
 Release-critical average across the lanes requested in this push
 (continuation, exact accepted-point output, VMEC parity/physics gates, and
 docs/release hygiene): about 99.5%. Broader roadmap average across all open
-lanes: about 97.5%, because the 85% coverage gate is now locked locally and the
+lanes: about 97.7%, because the 85% coverage gate is now locked locally and the
 remaining open work is seed-robust QI mirror cleanup, 90-95% coverage, and
 larger-mode GPU replay.
 
