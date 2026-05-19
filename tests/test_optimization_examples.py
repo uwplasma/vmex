@@ -152,40 +152,47 @@ def test_primary_example_solve_calls_do_not_take_physics_shortcuts() -> None:
 
 def test_qi_example_uses_qi_problem_api() -> None:
     text = (ROOT / "examples" / "optimization" / "QI_optimization.py").read_text()
+    cases_text = (ROOT / "examples" / "optimization" / "qi_optimization_cases.py").read_text()
+    support_text = (ROOT / "examples" / "optimization" / "qi_optimization_support.py").read_text()
+    combined = "\n".join([text, cases_text, support_text])
+
     assert "run_quasi_isodynamic_objective_optimization(" not in text
-    assert "QI_CASES = {" in text
+    assert "QI_CASES = {" in cases_text
+    assert "from qi_optimization_cases import QI_CASES, resolve_qi_case" in text
+    assert "import qi_optimization_support as qis" in text
+    assert len(text.splitlines()) < 600
     assert 'RUN_CASE = "nfp2_qi"' in text
-    assert "VMEC_JAX_QI_RUN_CASE" in text
-    assert "VMEC_JAX_QI_INPUT" in text
-    assert "VMEC_JAX_QI_OUTPUT_DIR" in text
+    assert "VMEC_JAX_QI_RUN_CASE" in cases_text
+    assert "VMEC_JAX_QI_INPUT" in cases_text
+    assert "VMEC_JAX_QI_OUTPUT_DIR" in cases_text
     assert "VMEC_JAX_QI_MAX_MODE" in text
     assert "VMEC_JAX_QI_MAX_NFEV" in text
-    assert "Unknown QI RUN_CASE" in text
-    assert '"nfp1_qi"' in text
-    assert '"qi_stel_seed_3127"' in text
-    assert '"nfp4_qh_warm_to_qi"' in text
-    assert 'DATA_DIR / "input.nfp1_QI"' in text
-    assert 'DATA_DIR / "input.QI_stel_seed_3127"' in text
-    assert 'DATA_DIR / "input.nfp4_QH_warm_start"' in text
+    assert "Unknown QI RUN_CASE" in cases_text
+    assert '"nfp1_qi"' in cases_text
+    assert '"qi_stel_seed_3127"' in cases_text
+    assert '"nfp4_qh_warm_to_qi"' in cases_text
+    assert 'DATA_DIR / "input.nfp1_QI"' in cases_text
+    assert 'DATA_DIR / "input.QI_stel_seed_3127"' in cases_text
+    assert 'DATA_DIR / "input.nfp4_QH_warm_start"' in cases_text
     assert 'QI_GATE_LEGACY_MAX = float(CASE.get("qi_gate_legacy_max", 2.0e-3))' in text
-    assert '"phimin": 0.0' in text
-    assert '"weighted_shuffle_profile_weight": 0.0' in text
-    assert '"method": "scipy_matrix_free"' in text
-    assert '"mirror_threshold": 0.30' in text
-    assert '"mirror_surface_index": None' in text
-    assert '"qi_ceiling_max": 2.0e-3' in text
-    assert '"mirror_ramp_stages": (' in text
-    assert '"name": "matrix_free_mirror030"' in text
-    assert '"mirror_threshold": 0.21' in text
-    assert '"promotion_mirror_threshold": 0.30' in text
-    assert '"require_engineering_gate": True' in text
-    assert '"stage_repeats": 1' in text
-    assert '"boozer_target_wout": None' in text
-    assert '"boozer_target_normalize": True' in text
-    assert "Optional homotopy target for far seeds" in text
+    assert '"phimin": 0.0' in cases_text
+    assert '"weighted_shuffle_profile_weight": 0.0' in cases_text
+    assert '"method": "scipy_matrix_free"' in cases_text
+    assert '"mirror_threshold": 0.30' in cases_text
+    assert '"mirror_surface_index": None' in cases_text
+    assert '"qi_ceiling_max": 2.0e-3' in cases_text
+    assert '"mirror_ramp_stages": (' in cases_text
+    assert '"name": "matrix_free_mirror030"' in cases_text
+    assert '"mirror_threshold": 0.21' in cases_text
+    assert '"promotion_mirror_threshold": 0.30' in cases_text
+    assert '"require_engineering_gate": True' in cases_text
+    assert '"stage_repeats": 1' in cases_text
+    assert '"boozer_target_wout": None' in cases_text
+    assert '"boozer_target_normalize": True' in cases_text
+    assert "Optional homotopy target for far seeds" in cases_text
     assert "boozer_b_target_from_wout(" in text
     assert "BoozerBTarget(" in text
-    assert '"use_augmented_lagrangian_constraints": False' in text
+    assert '"use_augmented_lagrangian_constraints": False' in cases_text
     assert "AugmentedLagrangianConstraint(" in text
     assert "AL constraints:" in text
     assert "QuasiIsodynamicOptions(" in text
@@ -193,8 +200,8 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "QuasiIsodynamicResidualCeiling(" in text
     assert "qi_options=QI_OPTIONS" in text
     assert "Small stage helper: physics is still assembled explicitly" in text
-    assert "branch_width_weight=QI_OPTIONS.branch_width_weight" in text
-    assert "weighted_shuffle_profile_weight=QI_OPTIONS.weighted_shuffle_profile_weight" in text
+    assert "branch_width_weight=QI_OPTIONS.branch_width_weight" in combined
+    assert "weighted_shuffle_profile_weight=QI_OPTIONS.weighted_shuffle_profile_weight" in combined
     assert "objective_tuples = [" in text
     assert "LeastSquaresProblem.from_tuples(" in text
     assert "def make_qi_problem(stage=None):" in text
@@ -210,11 +217,11 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "qi_options=" not in solve_call
     assert "plot=" not in solve_call
     assert "print_optimization_outputs" not in text
-    assert "def save_raw_seed_initial_artifacts(input_file, input_out, wout_out):" in text
-    assert "vj.write_indata(input_out, vj.read_indata(input_file))" in text
-    assert "vj.run_fixed_boundary(input_file, solver_device=SOLVER_DEVICE, verbose=False)" in text
-    assert "vj.write_wout_from_fixed_boundary_run(wout_out, run)" in text
-    assert "raw_initial_run = save_raw_seed_initial_artifacts(" in text
+    assert "def save_raw_seed_initial_artifacts(input_file, input_out, wout_out):" in support_text
+    assert "vj.write_indata(input_out, vj.read_indata(input_file))" in support_text
+    assert "vj.run_fixed_boundary(input_file, solver_device=SOLVER_DEVICE, verbose=False)" in support_text
+    assert "vj.write_wout_from_fixed_boundary_run(wout_out, run)" in support_text
+    assert "raw_initial_run = qis.save_raw_seed_initial_artifacts(" in text
     assert "INPUT_FILE," in text
     assert 'saved_paths["initial_input"],' in text
     assert 'saved_paths["initial_wout"],' in text
@@ -243,13 +250,13 @@ def test_qi_example_uses_qi_problem_api() -> None:
     assert "raw_initial_run.state" in text
     assert "plot_boozer_bmag_contours_from_state(" in text
     assert "qi_diagnostics_from_state(" in text
-    assert "qi_cleanup_candidate_promotable(" in text
-    assert "require_engineering_gate=bool(stage.get(\"require_engineering_gate\", False))" in text
-    assert "reference_diagnostics = (" in text
+    assert "qi_cleanup_candidate_promotable(" in support_text
+    assert "require_engineering_gate=bool(stage.get(\"require_engineering_gate\", False))" in support_text
+    assert "reference_diagnostics = None if accepted_result is None else qi_diagnostics_for_result(" in support_text
     assert "mirror_ramp_promotion_log.json" in text
     assert "diagnostics.json" in text
-    assert "json.dumps(diagnostics" in text
-    assert "qi_gate_passed" in text
+    assert "json.dumps(qis._jsonable(diagnostics)" in text
+    assert "qi_seed_gate_passed" in text
     assert "engineering_gate_passed" in text
     assert "qi_mirror_ratio_by_surface" in text
     assert 'saved_paths["initial_wout"]' in text
@@ -258,28 +265,31 @@ def test_qi_example_uses_qi_problem_api() -> None:
 
 def test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling() -> None:
     text = (ROOT / "examples" / "optimization" / "QI_optimization.py").read_text()
+    cases_text = (ROOT / "examples" / "optimization" / "qi_optimization_cases.py").read_text()
+    support_text = (ROOT / "examples" / "optimization" / "qi_optimization_support.py").read_text()
+    combined = "\n".join([text, cases_text, support_text])
 
-    assert '"mirror_weight": 20.0' in text
-    assert '"qi_ceiling_weight": 0.0' in text
-    assert '"mirror_ramp_stages": (' in text
-    assert '"name": "matrix_free_mirror030"' in text
-    assert '"require_mirror_improvement": False' in text
-    assert "stage_smooth_qi_max = float(stage.get(\"smooth_qi_max\", QI_GATE_SMOOTH_MAX))" in text
-    assert "stage_promotion_mirror_threshold = float(" in text
-    assert "repeats=int(stage.get(\"stage_repeats\", STAGE_REPEATS))" in text
-    assert "method=str(stage.get(\"method\", METHOD))" in text
+    assert '"mirror_weight": 20.0' in cases_text
+    assert '"qi_ceiling_weight": 0.0' in cases_text
+    assert '"mirror_ramp_stages": (' in cases_text
+    assert '"name": "matrix_free_mirror030"' in cases_text
+    assert '"require_mirror_improvement": False' in cases_text
+    assert "stage_smooth_qi_max = float(stage.get(\"smooth_qi_max\", QI_GATE_SMOOTH_MAX))" in support_text
+    assert "stage_promotion_mirror_threshold = float(" in support_text
+    assert "repeats=int(stage.get(\"stage_repeats\", STAGE_REPEATS))" in support_text
+    assert "method=str(stage.get(\"method\", METHOD))" in support_text
     assert "\"max_nfev\": min(int(stage.get(\"max_nfev\", MAX_NFEV)), MAX_NFEV)" in text
-    assert '"require_engineering_gate": True' in text
+    assert '"require_engineering_gate": True' in cases_text
     assert "qi_ceiling = vj.QuasiIsodynamicResidualCeiling(" in text
     assert "qi_options=QI_OPTIONS" in text
     assert "mirror = vj.MirrorRatio(" in text
     assert "AugmentedLagrangianConstraint(" in text
-    assert "use_augmented_lagrangian_constraints" in text
-    assert "surface_index=mirror_surface_index" in text
+    assert "use_augmented_lagrangian_constraints" in combined
+    assert 'surface_index=_stage_value(stage, "mirror_surface_index", MIRROR_SURFACE_INDEX)' in text
     assert "Mirror-ramp cleanup stages must include QuasiIsodynamicResidualCeiling" in text
     assert "or require the independent QI engineering gate" in text
-    assert "stage.get(\"qi_ceiling_weight\", QI_CEILING_WEIGHT)" in text
-    assert "reference=reference_diagnostics" in text
+    assert "_stage_value(stage, \"qi_ceiling_weight\", QI_CEILING_WEIGHT)" in text
+    assert "reference=reference_diagnostics" in support_text
     assert "objective_tuples.append((qi_ceiling.J, 0.0, qi_ceiling_weight))" in text
     assert "objective_tuples.append((mirror.J, 0.0, mirror_weight))" in text
     assert text.index("qi_ceiling = vj.QuasiIsodynamicResidualCeiling(") < text.index("mirror = vj.MirrorRatio(")
@@ -288,6 +298,7 @@ def test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling() -> None:
 
 def test_qi_nfp4_case_is_explicit_nonpassing_stress_fixture() -> None:
     text = (ROOT / "examples" / "optimization" / "QI_optimization.py").read_text()
+    cases_text = (ROOT / "examples" / "optimization" / "qi_optimization_cases.py").read_text()
     docs = "\n".join(
         [
             (ROOT / "docs" / "optimization.rst").read_text(),
@@ -295,16 +306,16 @@ def test_qi_nfp4_case_is_explicit_nonpassing_stress_fixture() -> None:
         ]
     )
 
-    assert '"nfp4_qh_warm_to_qi"' in text
-    assert '"case_goal": "NFP=4 QH-to-QI non-passing stress fixture; audit only"' in text
-    assert '"expected_gate_status": "non_passing_stress_fixture"' in text
-    assert '"expected_gate_failures": ("smooth_qi", "legacy_qi", "mirror")' in text
-    assert '"known_best_nfp4_quick_audit": {' in text
-    assert "external_nfp4_qi_wfq0" in text
+    assert '"nfp4_qh_warm_to_qi"' in cases_text
+    assert '"case_goal": "NFP=4 QH-to-QI non-passing stress fixture; audit only"' in cases_text
+    assert '"expected_gate_status": "non_passing_stress_fixture"' in cases_text
+    assert '"expected_gate_failures": ("smooth_qi", "legacy_qi", "mirror")' in cases_text
+    assert '"known_best_nfp4_quick_audit": {' in cases_text
+    assert "external_nfp4_qi_wfq0" in cases_text
     assert "qi_case_expected_gate_status" in text
     assert "qi_case_stress_fixture" in text
     assert "qi_case_expected_outcome_met" in text
-    assert "expected non-passing NFP=4 stress fixture" in text
+    assert "expected_non_passing_stress" in text
     assert "NFP=4 QI" in docs
     assert "non-passing stress fixture" in docs
     assert "nfp4_qh_warm_to_qi" in docs
