@@ -225,7 +225,7 @@ def _wout_metrics(wout) -> dict[str, Any]:
     }
 
 
-def _compare_wouts(got, ref, *, lasym: bool) -> dict[str, float]:
+def _comparison_fields(*, lasym: bool) -> dict[str, int]:
     fields = {
         "rmnc": 0,
         "zmns": 0,
@@ -256,7 +256,73 @@ def _compare_wouts(got, ref, *, lasym: bool) -> dict[str, float]:
                 "bsubvmns": 1,
             }
         )
-    return {name: _rel_rms(getattr(got, name), getattr(ref, name), radial_skip=skip) for name, skip in fields.items()}
+    return fields
+
+
+def _compare_wouts(got, ref, *, lasym: bool) -> dict[str, float]:
+    return {
+        name: _rel_rms(getattr(got, name), getattr(ref, name), radial_skip=skip)
+        for name, skip in _comparison_fields(lasym=lasym).items()
+    }
+
+
+def _mode_numbers_for_field(wout, field_shape: tuple[int, ...]) -> tuple[np.ndarray, np.ndarray] | None:
+    if len(field_shape) < 2:
+        return None
+    n_modes = int(field_shape[1])
+    xm = np.asarray(getattr(wout, "xm", []), dtype=int)
+    xn = np.asarray(getattr(wout, "xn", []), dtype=int)
+    if n_modes == xm.size:
+        return xm, xn
+    xm_nyq = np.asarray(getattr(wout, "xm_nyq", []), dtype=int)
+    xn_nyq = np.asarray(getattr(wout, "xn_nyq", []), dtype=int)
+    if n_modes == xm_nyq.size:
+        return xm_nyq, xn_nyq
+    return None
+
+
+def _field_mode_hotspots(got, ref, name: str, *, radial_skip: int = 0, top_n: int = 5) -> list[dict[str, Any]]:
+    got_arr = np.asarray(getattr(got, name), dtype=float)
+    ref_arr = np.asarray(getattr(ref, name), dtype=float)
+    if got_arr.shape != ref_arr.shape:
+        return []
+    modes = _mode_numbers_for_field(got, got_arr.shape)
+    if modes is None:
+        return []
+    xm, xn = modes
+    if radial_skip and got_arr.ndim >= 1:
+        got_arr = got_arr[radial_skip:, ...]
+        ref_arr = ref_arr[radial_skip:, ...]
+    if got_arr.size == 0 or (not np.isfinite(got_arr).all()) or (not np.isfinite(ref_arr).all()):
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for idx, (m, n) in enumerate(zip(xm, xn, strict=True)):
+        got_col = got_arr[:, idx]
+        ref_col = ref_arr[:, idx]
+        diff = got_col - ref_col
+        diff_rms = float(np.sqrt(np.mean(diff * diff)))
+        ref_rms = float(np.sqrt(np.mean(ref_col * ref_col)))
+        rows.append(
+            {
+                "index": int(idx),
+                "m": int(m),
+                "n": int(n),
+                "rel_rms": diff_rms / ref_rms if ref_rms > 0.0 else diff_rms,
+                "diff_rms": diff_rms,
+                "ref_rms": ref_rms,
+                "max_abs_diff": float(np.max(np.abs(diff))),
+            }
+        )
+    rows.sort(key=lambda row: (float(row["rel_rms"]), float(row["diff_rms"])), reverse=True)
+    return rows[: int(top_n)]
+
+
+def _compare_wout_mode_hotspots(got, ref, *, lasym: bool, top_n: int = 5) -> dict[str, list[dict[str, Any]]]:
+    return {
+        name: _field_mode_hotspots(got, ref, name, radial_skip=skip, top_n=top_n)
+        for name, skip in _comparison_fields(lasym=lasym).items()
+    }
 
 
 def _run_vmec_jax(case: BenchmarkCase, input_path: Path, out_path: Path):
@@ -366,6 +432,7 @@ def main() -> int:
                     wjax = read_wout(wout_jax_path)
                     rec["vmec_jax"] = _wout_metrics(wjax)
                     rec["rel_rms"] = _compare_wouts(wjax, wref, lasym=case.lasym)
+                    rec["mode_hotspots"] = _compare_wout_mode_hotspots(wjax, wref, lasym=case.lasym)
                 rec["status"] = "pass"
             except Exception as exc:
                 rec["status"] = "fail"
