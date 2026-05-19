@@ -51,7 +51,30 @@ EXACT_PROFILE_METRIC_NAMES = {
     ),
     "residual_tangents_s": ("jacobian_residual_tangents",),
     "trial_solve_s": ("solve_forward_trial", "solve_forward_trial_total"),
+    "trial_solver_compute_forces_s": ("trial_solver_compute_forces",),
+    "trial_solver_preconditioner_s": ("trial_solver_preconditioner",),
+    "trial_solver_update_s": ("trial_solver_update",),
+    "trial_solve_unattributed_s": ("solve_forward_trial_unattributed",),
     "exact_solve_s": ("solve_forward_exact", "solve_forward_exact_total", "exact_solve_with_tape_total"),
+    "forward_exact_solver_compute_forces_s": ("forward_exact_solver_compute_forces",),
+    "forward_exact_solver_preconditioner_s": ("forward_exact_solver_preconditioner",),
+    "forward_exact_solver_update_s": ("forward_exact_solver_update",),
+    "forward_exact_solve_unattributed_s": ("solve_forward_exact_unattributed",),
+    "exact_tape_solver_compute_forces_s": ("exact_tape_solver_compute_forces",),
+    "exact_tape_solver_preconditioner_s": ("exact_tape_solver_preconditioner",),
+    "exact_tape_solver_update_s": ("exact_tape_solver_update",),
+}
+
+EXACT_PROFILE_CONTAINER_PRIORITY = {
+    "trial_solve_s": (
+        ("solve_forward_trial_total",),
+        ("solve_forward_trial",),
+    ),
+    "exact_solve_s": (
+        ("exact_solve_with_tape_total",),
+        ("solve_forward_exact_total",),
+        ("solve_forward_exact",),
+    ),
 }
 
 ACCEPTED_REPLAY_PROFILE_NAMES = {
@@ -81,7 +104,18 @@ METRIC_ORDER = (
     "initial_projection_s",
     "residual_tangents_s",
     "trial_solve_s",
+    "trial_solver_compute_forces_s",
+    "trial_solver_preconditioner_s",
+    "trial_solver_update_s",
+    "trial_solve_unattributed_s",
     "exact_solve_s",
+    "forward_exact_solver_compute_forces_s",
+    "forward_exact_solver_preconditioner_s",
+    "forward_exact_solver_update_s",
+    "forward_exact_solve_unattributed_s",
+    "exact_tape_solver_compute_forces_s",
+    "exact_tape_solver_preconditioner_s",
+    "exact_tape_solver_update_s",
     "compile_time_s",
     "replay_time_s",
     "cache_time_s",
@@ -113,7 +147,18 @@ METRIC_LABELS = {
     "initial_projection_s": "initial VJP/projection",
     "residual_tangents_s": "residual tangents",
     "trial_solve_s": "trial solve",
+    "trial_solver_compute_forces_s": "trial solver compute_forces",
+    "trial_solver_preconditioner_s": "trial solver preconditioner",
+    "trial_solver_update_s": "trial solver update",
+    "trial_solve_unattributed_s": "trial solve unattributed",
     "exact_solve_s": "exact solve",
+    "forward_exact_solver_compute_forces_s": "forward exact solver compute_forces",
+    "forward_exact_solver_preconditioner_s": "forward exact solver preconditioner",
+    "forward_exact_solver_update_s": "forward exact solver update",
+    "forward_exact_solve_unattributed_s": "forward exact solve unattributed",
+    "exact_tape_solver_compute_forces_s": "exact tape solver compute_forces",
+    "exact_tape_solver_preconditioner_s": "exact tape solver preconditioner",
+    "exact_tape_solver_update_s": "exact tape solver update",
     "compile_time_s": "compile time",
     "replay_time_s": "replay time",
     "cache_time_s": "cache time",
@@ -137,7 +182,13 @@ BOTTLENECK_METRICS = (
     ("initial_projection_s", "initial VJP/projection"),
     ("residual_tangents_s", "residual tangent projection"),
     ("trial_solve_s", "trial solve"),
+    ("trial_solver_compute_forces_s", "trial solver force assembly"),
+    ("trial_solver_preconditioner_s", "trial solver preconditioner"),
+    ("trial_solve_unattributed_s", "trial solver unattributed"),
     ("exact_solve_s", "accepted exact solve"),
+    ("forward_exact_solver_compute_forces_s", "forward exact solver force assembly"),
+    ("forward_exact_solver_preconditioner_s", "forward exact solver preconditioner"),
+    ("forward_exact_solve_unattributed_s", "forward exact solver unattributed"),
     ("replay_time_s", "accepted-point replay"),
     ("compile_time_s", "compile/JIT"),
     ("cache_time_s", "cache bookkeeping"),
@@ -156,6 +207,14 @@ EXACT_OPTIMIZER_PATCH_TARGET_NAMES = {
     "jacobian_residual_tangents",
     "gradient_residual_vjp",
     "exact_unpack_cache",
+    "trial_solver_compute_forces",
+    "trial_solver_preconditioner",
+    "trial_solver_update",
+    "solve_forward_trial_unattributed",
+    "forward_exact_solver_compute_forces",
+    "forward_exact_solver_preconditioner",
+    "forward_exact_solver_update",
+    "solve_forward_exact_unattributed",
     "exact_tape_solver_compute_forces",
     "exact_tape_solver_preconditioner",
     "exact_tape_solver_update",
@@ -426,6 +485,23 @@ def _profile_named_time(profile: dict[str, dict[str, float | int]], names: Itera
         if str(name) in name_set
     ]
     return sum(values) if values else None
+
+
+def _profile_metric_time(
+    profile: dict[str, dict[str, float | int]],
+    metric: str,
+    names: Iterable[str],
+) -> float | None:
+    """Return a phase time without double-counting enclosing total timers."""
+
+    priority = EXACT_PROFILE_CONTAINER_PRIORITY.get(metric)
+    if priority is not None:
+        for group in priority:
+            value = _profile_named_time(profile, group)
+            if value is not None:
+                return value
+        return None
+    return _profile_named_time(profile, names)
 
 
 def _callback_count(payload: dict[str, Any]) -> int | None:
@@ -723,7 +799,7 @@ def summarize_payload(
         "qi_warm_min_s": _wall_time_metric(payload, "qi_warm_min"),
         "qi_warm_mean_s": _wall_time_metric(payload, "qi_warm_mean"),
         **{
-            metric: _profile_named_time(profile, names)
+            metric: _profile_metric_time(profile, metric, names)
             for metric, names in EXACT_PROFILE_METRIC_NAMES.items()
         },
         "compile_time_s": compile_time,

@@ -3,10 +3,10 @@
 
 The full optimization matrix lives in the documentation.  This script keeps the
 README focused on one representative stellarator-symmetric result for each
-target and evaluates the final |B| contours in Boozer coordinates through
-``booz_xform_jax``.  QA/QH/QP use the best CPU rows from the all-policy sweep;
-QI uses the constrained QI matrix when available so mirror ratio and elongation
-diagnostics enter the selection.
+target and evaluates the initial/final |B| contours in Boozer coordinates
+through ``booz_xform_jax``.  QA/QH/QP use the best CPU rows from the all-policy
+sweep; QI uses the constrained QI matrix when available so mirror ratio and
+elongation diagnostics enter the selection.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ PROBLEM_TITLES = {
     "qi": "QI",
 }
 TARGET_ASPECT = 5.0
-QI_TARGET_ASPECT = 10.0
+QI_TARGET_ASPECT = TARGET_ASPECT
 PROBLEM_TARGET_ASPECT = {
     "qa": TARGET_ASPECT,
     "qh": TARGET_ASPECT,
@@ -49,6 +49,7 @@ PROBLEM_TARGET_ASPECT = {
 }
 TARGET_ABS_IOTA_MIN = 0.41
 TARGET_QA_IOTA = 0.42
+
 
 @dataclass(frozen=True)
 class BestRun:
@@ -74,6 +75,13 @@ class BestRun:
 def _read_summary_rows() -> list[dict[str, str]]:
     with SUMMARY_CSV.open(newline="") as f:
         return list(csv.DictReader(f))
+
+
+def _repo_relative_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
 
 
 def _read_qi_constrained_rows() -> list[dict[str, str]]:
@@ -271,7 +279,7 @@ def _qi_default_row_from_result_dir(result_dir: Path = QI_DEFAULT_RESULT_DIR) ->
         "aspect_final": f"{float(diagnostics['aspect']):.16e}",
         "iota_final": f"{float(diagnostics['mean_iota']):.16e}",
         "total_wall_time_s": f"{float(history['total_wall_time_s']):.16e}",
-        "output_dir": str(result_dir),
+        "output_dir": _repo_relative_path(result_dir),
         "qi_raw_total": f"{float(diagnostics['qi_raw_total']):.16e}",
         "qi_legacy_total": f"{float(diagnostics['qi_legacy_total']):.16e}",
         "qi_mirror_ratio_max": f"{float(diagnostics['qi_mirror_ratio_max']):.16e}",
@@ -455,8 +463,8 @@ def _booz_xform_on_outer_surface(wout_path: Path):
     bx = Booz_xform(verbose=0)
     bx.read_wout(str(wout_path))
     bx.compute_surfs = [int(bx.ns_in) - 1]
-    bx.mboz = int(bx.mpol)
-    bx.nboz = int(bx.ntor)
+    bx.mboz = max(16, 2 * int(bx.mpol) + 4)
+    bx.nboz = max(16, 2 * int(bx.ntor) + 4)
     bx.run()
     return bx
 
@@ -483,8 +491,8 @@ def _booz_bmag_grid(bx, *, ntheta: int = 128, nphi: int = 192) -> tuple[np.ndarr
     return theta, phi, np.asarray(B)
 
 
-def _plot_boozer_bmag(ax, run: BestRun) -> None:
-    bx = _booz_xform_on_outer_surface(run.output_dir / "wout_final.nc")
+def _plot_boozer_bmag(ax, wout_path: Path, title: str) -> None:
+    bx = _booz_xform_on_outer_surface(wout_path)
     theta, phi, B = _booz_bmag_grid(bx)
     PHI, THETA = np.meshgrid(phi, theta)
     vmin = float(np.nanmin(B))
@@ -495,7 +503,7 @@ def _plot_boozer_bmag(ax, run: BestRun) -> None:
         vmax += pad
     levels = np.linspace(vmin, vmax, 24)
     cs = ax.contour(PHI, THETA, B, levels=levels, cmap="viridis", linewidths=0.9)
-    ax.set_title(r"Final $|B|(\theta_B,\phi_B)$", fontsize=9, pad=4)
+    ax.set_title(title, fontsize=9, pad=4)
     ax.set_xlabel(r"Boozer $\phi_B$ (one field period)")
     ax.set_ylabel(r"Boozer $\theta_B$")
     ax.set_xlim(0.0, 2.0 * np.pi / float(bx.nfp))
@@ -545,7 +553,7 @@ def _write_readme_summary(runs: list[BestRun]) -> None:
                     f"{run.aspect_final:.16e}",
                     f"{run.iota_final:.16e}",
                     f"{run.total_wall_time_s / 60.0:.6f}",
-                    str(run.output_dir),
+                    _repo_relative_path(run.output_dir),
                 ]
             )
 
@@ -584,19 +592,23 @@ def _render_single_run(run: BestRun, out_png: Path) -> None:
     matplotlib.use("Agg")
     from matplotlib import pyplot as plt
 
-    fig = plt.figure(figsize=(18, 4.8), constrained_layout=True)
-    gs = fig.add_gridspec(1, 4, width_ratios=(1.05, 1.05, 1.0, 1.05))
+    fig = plt.figure(figsize=(22, 4.8), constrained_layout=True)
+    gs = fig.add_gridspec(1, 5, width_ratios=(1.05, 1.05, 1.0, 1.05, 1.05))
     ax0 = fig.add_subplot(gs[0, 0], projection="3d")
     ax1 = fig.add_subplot(gs[0, 1], projection="3d")
     ax2 = fig.add_subplot(gs[0, 2])
     ax3 = fig.add_subplot(gs[0, 3])
+    ax4 = fig.add_subplot(gs[0, 4])
 
-    wout_initial = read_wout(_preoptimization_wout_path(run))
-    wout_final = read_wout(run.output_dir / "wout_final.nc")
+    initial_wout_path = _preoptimization_wout_path(run)
+    final_wout_path = run.output_dir / "wout_final.nc"
+    wout_initial = read_wout(initial_wout_path)
+    wout_final = read_wout(final_wout_path)
     _plot_lcfs(ax0, wout_initial, "Initial deck LCFS")
     _plot_lcfs(ax1, wout_final, "Final LCFS")
     _plot_history(ax2, run)
-    _plot_boozer_bmag(ax3, run)
+    _plot_boozer_bmag(ax3, initial_wout_path, r"Initial $|B|(\theta_B,\phi_B)$")
+    _plot_boozer_bmag(ax4, final_wout_path, r"Final $|B|(\theta_B,\phi_B)$")
     fig.suptitle(_run_title(run), fontsize=13, x=0.01, y=1.02, ha="left")
     fig.savefig(out_png, dpi=220, bbox_inches="tight")
     plt.close(fig)

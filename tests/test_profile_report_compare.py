@@ -105,6 +105,74 @@ def test_callback_report_summary_extracts_bottleneck_metrics() -> None:
     assert summary["top_profile"][0]["name"] == "exact_solve_with_tape_total"
 
 
+def test_profile_summary_prefers_total_containers_over_leaf_timers() -> None:
+    report = _callback_report(
+        total_wall_time_s=20.0,
+        samples=2,
+        rss_peak_mib=256,
+        replay_wall_time_s=2.0,
+        accepted_replays=2,
+        solve_count=3,
+        cache_entry_growth=4,
+        solver_device="cpu",
+    )
+    report["profile"]["solve_forward_trial_total"] = {"count": 1, "wall_time_s": 3.0}
+    report["profile"]["solve_forward_trial"] = {"count": 1, "wall_time_s": 1.0}
+    report["profile"]["trial_solver_compute_forces"] = {"count": 1, "wall_time_s": 0.4}
+    report["profile"]["trial_solver_preconditioner"] = {"count": 1, "wall_time_s": 0.5}
+    report["profile"]["trial_solver_update"] = {"count": 1, "wall_time_s": 0.6}
+    report["profile"]["solve_forward_trial_unattributed"] = {"count": 1, "wall_time_s": 1.5}
+    report["profile"]["solve_forward_exact_total"] = {"count": 2, "wall_time_s": 2.5}
+    report["profile"]["solve_forward_exact"] = {"count": 2, "wall_time_s": 1.5}
+    report["profile"]["forward_exact_solver_compute_forces"] = {"count": 2, "wall_time_s": 0.7}
+    report["profile"]["forward_exact_solver_preconditioner"] = {"count": 2, "wall_time_s": 0.8}
+    report["profile"]["forward_exact_solver_update"] = {"count": 2, "wall_time_s": 0.9}
+    report["profile"]["solve_forward_exact_unattributed"] = {"count": 2, "wall_time_s": 0.1}
+
+    summary = compare_tool.summarize_payload(report, label="cpu")
+
+    assert summary["metrics"]["trial_solve_s"] == 3.0
+    assert summary["metrics"]["exact_solve_s"] == 3.5
+    assert summary["metrics"]["trial_solver_compute_forces_s"] == 0.4
+    assert summary["metrics"]["trial_solver_preconditioner_s"] == 0.5
+    assert summary["metrics"]["trial_solver_update_s"] == 0.6
+    assert summary["metrics"]["trial_solve_unattributed_s"] == 1.5
+    assert summary["metrics"]["forward_exact_solver_compute_forces_s"] == 0.7
+    assert summary["metrics"]["forward_exact_solver_preconditioner_s"] == 0.8
+    assert summary["metrics"]["forward_exact_solver_update_s"] == 0.9
+    assert summary["metrics"]["forward_exact_solve_unattributed_s"] == 0.1
+
+
+def test_profile_summary_extracts_solver_subphase_buckets() -> None:
+    report = _callback_report(
+        total_wall_time_s=20.0,
+        samples=2,
+        rss_peak_mib=256,
+        replay_wall_time_s=2.0,
+        accepted_replays=2,
+        solve_count=3,
+        cache_entry_growth=4,
+        solver_device="cpu",
+    )
+    report["profile"]["trial_solver_compute_forces"] = {"count": 1, "wall_time_s": 1.25}
+    report["profile"]["trial_solver_preconditioner"] = {"count": 1, "wall_time_s": 0.75}
+    report["profile"]["trial_solver_update"] = {"count": 1, "wall_time_s": 0.50}
+    report["profile"]["solve_forward_trial_unattributed"] = {"count": 1, "wall_time_s": 0.25}
+    report["profile"]["exact_tape_solver_compute_forces"] = {"count": 1, "wall_time_s": 2.25}
+    report["profile"]["exact_tape_solver_preconditioner"] = {"count": 1, "wall_time_s": 1.75}
+    report["profile"]["exact_tape_solver_update"] = {"count": 1, "wall_time_s": 1.50}
+
+    summary = compare_tool.summarize_payload(report, label="cpu")
+
+    assert summary["metrics"]["trial_solver_compute_forces_s"] == 1.25
+    assert summary["metrics"]["trial_solver_preconditioner_s"] == 0.75
+    assert summary["metrics"]["trial_solver_update_s"] == 0.50
+    assert summary["metrics"]["trial_solve_unattributed_s"] == 0.25
+    assert summary["metrics"]["exact_tape_solver_compute_forces_s"] == 2.25
+    assert summary["metrics"]["exact_tape_solver_preconditioner_s"] == 1.75
+    assert summary["metrics"]["exact_tape_solver_update_s"] == 1.50
+
+
 def test_comparison_reports_ratios_against_baseline() -> None:
     cpu = compare_tool.summarize_payload(
         _callback_report(

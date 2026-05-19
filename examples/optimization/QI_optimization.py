@@ -65,6 +65,31 @@ def _parse_float_sequence(value, *, name):
     except ValueError as exc:
         raise ValueError(f"{name} must be a comma- or space-separated float list: {value!r}") from exc
 
+
+def _jsonable(value):
+    """Convert NumPy/JAX-like values into JSON-serializable containers."""
+
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if np.isfinite(value) else None
+    if isinstance(value, np.generic):
+        return _jsonable(value.item())
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _jsonable(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    try:
+        arr = np.asarray(value)
+    except Exception:
+        return str(value)
+    if arr.ndim == 0:
+        return _jsonable(arr.item())
+    return _jsonable(arr.tolist())
+
+
 # Seed cases.  Pick one case by changing RUN_CASE or setting
 # VMEC_JAX_QI_RUN_CASE; add another dictionary entry, or set VMEC_JAX_QI_INPUT,
 # to use an external VMEC input deck.  The NFP is taken from the VMEC input
@@ -161,7 +186,7 @@ QI_CASES = {
     "qi_stel_seed_3127": {
         "case_goal": "far-seed staged QI robustness lane with reference-family global preconditioning",
         "input_file": DATA_DIR / "input.QI_stel_seed_3127",
-        "output_dir": Path("results/qi_opt/ess/qi_stel_seed_3127"),
+        "output_dir": Path("results/qi_opt/ess/qi_stel_seed_3127_current_public_final"),
         "max_mode": 4,
         "min_vmec_mode": 6,
         "use_mode_continuation": False,
@@ -1160,6 +1185,57 @@ def qi_diagnostics_for_run(
     )
 
 
+def write_qi_stage_checkpoint(
+    stage_output_dir,
+    *,
+    stage_index,
+    stage_name,
+    stage_modes,
+    stage_result,
+    diagnostics,
+    promotion=None,
+    role="stage",
+):
+    """Persist QI stage metrics before root finalization can be reached."""
+
+    stage_output_dir = Path(stage_output_dir)
+    stage_output_dir.mkdir(parents=True, exist_ok=True)
+    history = dict(stage_result.history)
+    diagnostics = dict(diagnostics)
+    promotion = {} if promotion is None else dict(promotion)
+    checkpoint = {
+        "schema_version": 1,
+        "partial": True,
+        "role": str(role),
+        "stage": None if stage_index is None else int(stage_index),
+        "name": str(stage_name),
+        "stage_modes": _jsonable(
+            [
+                {
+                    "mode": int(vj.normalize_boundary_mode_limits(mode).mode),
+                    "max_m": vj.normalize_boundary_mode_limits(mode).max_m,
+                    "max_n": vj.normalize_boundary_mode_limits(mode).max_n,
+                    "label": vj.normalize_boundary_mode_limits(mode).label,
+                }
+                for mode in stage_modes
+            ]
+        ),
+        "history": _jsonable(history),
+        "diagnostics": _jsonable(diagnostics),
+        "promotion": _jsonable(promotion),
+        "history_path": str(stage_output_dir / "history.json"),
+        "diagnostics_path": str(stage_output_dir / "diagnostics.json"),
+        "input_path": str(stage_output_dir / "input.final"),
+        "wout_path": str(stage_output_dir / "wout_final.nc"),
+    }
+    diagnostics_path = stage_output_dir / "diagnostics.json"
+    checkpoint_path = stage_output_dir / "qi_stage_checkpoint.json"
+    diagnostics_path.write_text(json.dumps(_jsonable(diagnostics), indent=2, sort_keys=True) + "\n")
+    checkpoint_path.write_text(json.dumps(checkpoint, indent=2, sort_keys=True) + "\n")
+    (OUTPUT_DIR / "stage_checkpoint.json").write_text(json.dumps(checkpoint, indent=2, sort_keys=True) + "\n")
+    return checkpoint_path
+
+
 def boundary_reference_preconditioner_score(
     diagnostics,
     *,
@@ -1471,6 +1547,16 @@ if MIRROR_RAMP_STAGES:
             mirror_threshold=MAX_MIRROR_RATIO,
             mirror_surface_index=MIRROR_SURFACE_INDEX,
         )
+        write_qi_stage_checkpoint(
+            baseline_output_dir,
+            stage_index=0,
+            stage_name="boundary_reference_baseline",
+            stage_modes=(MAX_MODE,),
+            stage_result=accepted_result,
+            diagnostics=accepted_seed_diagnostics,
+            promotion={"qi_cleanup_promoted": True, "baseline": True},
+            role="boundary_reference_baseline",
+        )
         best_result = accepted_result
         best_diagnostics = accepted_seed_diagnostics
     for stage_index, stage in enumerate(MIRROR_RAMP_STAGES, start=1):
@@ -1535,6 +1621,16 @@ if MIRROR_RAMP_STAGES:
             mirror_improvement_min=float(stage.get("mirror_improvement_min", 0.0)),
         )
         promotion = stage_promotes_candidate(stage, promotion, reference_diagnostics)
+        write_qi_stage_checkpoint(
+            stage_output_dir,
+            stage_index=stage_index,
+            stage_name=stage_name,
+            stage_modes=stage_modes_i,
+            stage_result=stage_result,
+            diagnostics=stage_diagnostics,
+            promotion=promotion,
+            role="mirror_ramp",
+        )
         promotion_log.append(
             {
                 "stage": stage_index,

@@ -140,11 +140,15 @@ jobs:
           JAX_ENABLE_X64: "1"
           RUN_FULL: "1"
         run: |
+          test -s examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc
           pytest -q \
             'tests/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[circular_tokamak]' \
             'tests/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[nfp4_QH_warm_start]' \
             'tests/test_wout_comprehensive_parity.py::test_convergence_only[cth_like_free_bdy]' \
             'tests/test_wout_comprehensive_parity.py::test_convergence_only[nfp2_QA_highres]' \
+            'tests/test_wout_bfield_bundled_parity.py::test_bundled_wout_stored_bsup_cartesian_magnitude_matches_bmnc[basic_non_stellsym_pressure_single_grid-examples_single_grid/data/input.basic_non_stellsym_pressure-examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc-0.012]' \
+            'tests/test_wout_profiles_currents_bundled_parity.py::test_bundled_wout_surface_averaged_currents_follow_ampere_radial_difference[single_grid_lasym_pressure]' \
+            'tests/test_converged_wout_matrix_parity.py::test_bundled_converged_wout_matrix_physics_gates[fixed_nonaxis_lasym_single_basic_non_stellsym_pressure]' \
             tests/test_driver_api.py::test_run_free_boundary_smoke_on_bundled_small_case \
             tests/test_qs_ess_render_smoke.py
 

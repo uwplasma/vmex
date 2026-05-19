@@ -197,6 +197,7 @@ def test_exact_optimizer_profile_cache_snapshot_and_delta_schema() -> None:
     opt._exact_cache = {"a": object()}
     opt._exact_state_cache = {}
     opt._exact_residual_cache = {"a": np.asarray([1.0])}
+    opt._exact_jacobian_cache = {"a": np.asarray([[1.0]])}
     opt._trial_residual_cache = OrderedDict([("b", np.asarray([2.0]))])
     opt._initial_tangent_cache = {}
     opt._discrete_jacobian_helper_cache = {"j": object()}
@@ -204,8 +205,9 @@ def test_exact_optimizer_profile_cache_snapshot_and_delta_schema() -> None:
 
     snapshot = exact_profile_tool._cache_snapshot(opt, include_global=False)
     assert snapshot["optimizer"]["exact_cache"] == 1
+    assert snapshot["optimizer"]["exact_jacobian_cache"] == 1
     assert snapshot["optimizer"]["trial_residual_cache"] == 1
-    assert snapshot["total_entries"] == 4
+    assert snapshot["total_entries"] == 5
 
     delta = exact_profile_tool._profile_delta(
         {"exact_tape_build": {"count": 1, "wall_time_s": 2.0}},
@@ -243,6 +245,32 @@ def test_exact_optimizer_profile_timing_includes_preconditioner_subphases() -> N
     assert profile["exact_tape_solver_preconditioner_mode_scale"]["wall_time_s"] == 0.10
     assert profile["exact_tape_solver_precond_refresh"]["wall_time_s"] == 0.05
     assert profile["exact_tape_build_unattributed"]["wall_time_s"] == pytest.approx(0.30)
+
+
+def test_exact_optimizer_profiles_trial_solver_timing_buckets() -> None:
+    opt = FixedBoundaryExactOptimizer.__new__(FixedBoundaryExactOptimizer)
+    opt._profile = {}
+
+    opt._profile_solver_timing(
+        {
+            "timing": {
+                "compute_forces_s": 0.20,
+                "preconditioner_s": 0.30,
+                "update_s": 0.10,
+                "update_state_s": 0.04,
+            }
+        },
+        profile_prefix="trial_solver",
+        phase_wall_s=0.75,
+        unattributed_name="solve_forward_trial_unattributed",
+    )
+    profile = opt._profile_dump()
+
+    assert profile["trial_solver_compute_forces"]["wall_time_s"] == 0.20
+    assert profile["trial_solver_preconditioner"]["wall_time_s"] == 0.30
+    assert profile["trial_solver_update"]["wall_time_s"] == 0.10
+    assert profile["trial_solver_update_state"]["wall_time_s"] == 0.04
+    assert profile["solve_forward_trial_unattributed"]["wall_time_s"] == pytest.approx(0.15)
 
 
 def test_exact_optimizer_callback_report_schema_and_budget_status() -> None:

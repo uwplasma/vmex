@@ -274,6 +274,7 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/audit_qi_seed_suitab
   --prefine-output-dir results/qi_seed_audit/prefine_probes
 PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_seed_robustness.py
 PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 \
+  VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_current_public_final \
   python examples/optimization/QI_optimization.py
 PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_boundary_interpolation_scan.py \
   --seed-input examples/data/input.QI_stel_seed_3127 \
@@ -296,9 +297,9 @@ PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 ```
 
 The constrained-QI sweep is the compact bundled-seed matrix, not the staged
-far-seed runner.  If its summary still reports `target_aspect=5` for QI rows,
-rerun the two sweep commands above with the current target-10 policy before
-using the rendered matrix.
+far-seed runner.  If its summary reports a stale QI target aspect, rerun the
+two sweep commands above with the current target-5 policy before using the
+rendered matrix.
 
 For publication-quality QI validation, re-run the diagnostic with higher
 `QI_MBOZ`, `QI_NBOZ`, `QI_NPHI`, `QI_NALPHA`, and `QI_N_BOUNCE`, then check

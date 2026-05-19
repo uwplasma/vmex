@@ -12,7 +12,7 @@ and QI targets:
 - QP: aspect ratio near 5, quasi-poloidal symmetry, and a smooth
   ``abs(mean_iota) >= 0.41`` lower bound, using the same bundled NFP=2 seed as
   the QI runs.
-- QI: aspect ratio near 10, a differentiable smooth Boozer-space quasi-isodynamic
+- QI: aspect ratio near 5 in the compact README best-row sweep, a differentiable smooth Boozer-space quasi-isodynamic
   residual evaluated through ``booz_xform_jax``, maximum mirror-ratio penalty,
   maximum-LCFS-elongation penalty, and a smooth ``abs(mean_iota) >= 0.41``
   lower bound.  ``LgradB`` is available as an optional commented term in the
@@ -56,10 +56,11 @@ Run the CPU production sweep:
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy direct --problems qa,qh,qp,qi --modes 1,2,3 --ess both --qi-qp-preseed off --rerun
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
-The current QI sweep configuration uses aspect target 10.  If the generated
-``qs_ess_summary_all.csv`` still contains QI rows with ``target_aspect = 5``,
-those rows predate the current QI policy and the sweep summary should be
-regenerated before using the QI entries.
+The compact README renderer currently filters QI rows against the same
+aspect-5 target as QA/QH/QP.  The standalone ``QI_optimization.py`` robustness
+cases may still use case-specific aspect targets when mirror ratio or far-seed
+basin capture is the experiment; those rows are documented separately and are
+not mixed into the README best-row table.
 
 The constrained QI study has one extra axis: whether the QI solve starts from a
 same-mode QP preseed.  The production CLI default is ``--qi-qp-preseed off``;
@@ -129,10 +130,10 @@ Render the compact README panels from the best stellarator-symmetric rows:
 
    PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 
-The default per-case timeout is 1200 seconds.  The current science configs use
-NFP=4 for QH, aspect targets near 5 for QA/QH/QP, aspect target near 10 for QI,
-signed iota 0.42 for QA, and high-priority ``abs(mean_iota) >= 0.41``
-constraints for QH/QP/QI.
+The default per-case timeout is 1200 seconds.  The current README science
+configs use NFP=4 for QH, aspect targets near 5 for QA/QH/QP/QI, signed iota
+0.42 for QA, and high-priority ``abs(mean_iota) >= 0.41`` constraints for
+QH/QP/QI.
 They use ``inner_max_iter = trial_max_iter = 120`` and
 ``ftol = trial_ftol = 1e-9``; GPU production sweeps cap those values at 180
 if a future problem config requests a larger replay budget.  Add
@@ -164,14 +165,12 @@ README Best Rows
 ----------------
 
 The README intentionally shows only one best ``LASYM = F`` result per target.
-QA/QH/QP are selected from the CPU matrix and filtered against the common
-aspect-5 target.  QI candidates are selected from the current constrained-QI
-matrix when target-10 rows exist and from the dedicated staged
-``QI_optimization.py`` default lane otherwise; the selected QI row must satisfy
-the legacy branch diagnostic, mirror-ratio, elongation, iota, and aspect-ratio
-gates.  These panels include the original deck LCFS before any ``max_mode=1``
-optimization work, final LCFS, per-stage objective history, and final
-outer-surface ``|B|`` in Boozer coordinates evaluated with
+QA/QH/QP/QI are selected from the CPU matrix and filtered against the common
+aspect-5 target.  The selected QI row must satisfy the legacy branch
+diagnostic, mirror-ratio, elongation, iota, and aspect-ratio gates.  These
+panels include the original deck LCFS before any ``max_mode=1`` optimization
+work, final LCFS, per-stage objective history, and initial/final
+outer-surface ``|B|`` line contours in Boozer coordinates evaluated with
 ``booz_xform_jax``.
 The source table is also available as
 :download:`readme_best_optimizations.csv <_static/figures/readme_best_optimizations.csv>`.
@@ -202,8 +201,8 @@ QI_optimization Input Coverage
 The dedicated QI README/docs renderer covers both bundled QI inputs without
 rerunning optimization jobs.  It reads the existing ``QI_optimization.py``
 outputs, records the final smooth QI metric, legacy QI metric, mirror ratio,
-elongation, iota, aspect, and CPU wall time, and draws final Boozer ``|B|``
-with line contours only.
+elongation, iota, aspect, and CPU wall time, and draws initial and final
+Boozer ``|B|`` with line contours only.
 
 .. list-table::
    :header-rows: 1
@@ -275,19 +274,16 @@ Constrained QI Matrix
 ---------------------
 
 The constrained QI renderer compares CPU and available GPU rows for
-``max_mode = 1, 2, 3``, ESS on/off, continuation/direct, and QP-preseed
-on/off using the bundled NFP=2 ``input.nfp2_QI`` seed.  The current tracked
-snapshot predates the target-10 QI policy and contains target-5 rows, so it is
-stale for current constrained-QI claims.  Rerun the commands above to populate
-the CPU/GPU/direct/asymmetric matrix under the current objective policy.  For
-each requested
-``max_mode``, the input boundary is projected onto
+``max_mode = 1, 2, 3``, ESS on/off, continuation/direct, and QP-preseed on/off
+using the bundled NFP=2 ``input.nfp2_QI`` seed.  Rerun the commands above to
+populate the CPU/GPU/direct/asymmetric matrix under the current objective
+policy.  For each requested ``max_mode``, the input boundary is projected onto
 ``max(abs(m), abs(n)) <= max_mode`` before the stage is built, so the
 ``max_mode=1`` rows zero the mode-2 coefficients present in the warm start.
 The QI objective is intentionally not ranked by scalar objective alone: rows
 are also evaluated by the legacy branch-squash/stretch/shuffle diagnostic,
 raw smooth QI residual, maximum mirror ratio, maximum LCFS elongation,
-``abs(mean_iota) >= 0.41``, and aspect ratio near 10.  The default smooth QI
+``abs(mean_iota) >= 0.41``, and the active aspect target.  The default smooth QI
 objective includes ``shuffle_profile_weight = 1.0`` so the optimizer follows
 the same ranking as the legacy diagnostic on the seed and reference
 omnigenity cases.  Rows that stop at ``max_nfev`` but have valid VMEC solves
@@ -304,12 +300,11 @@ Downloadable constrained-QI summaries:
 - :download:`qi_constrained_summary.json <_static/figures/qi_constrained_summary.json>`
 - :download:`qi_constrained_best.json <_static/figures/qi_constrained_best.json>`
 
-The stale target-5 snapshot reports a CPU repeated-stage continuation,
-``max_mode=3``, ESS row without a same-mode QP preseed: legacy-ranked QI
-diagnostic ``2.17e-3``, maximum mirror ratio ``0.2106`` for a target ``0.21``,
-maximum elongation ``4.30`` for a target ``8.0``, aspect ratio ``5.001``, mean
-iota ``-0.5494``, and total wall time ``11.3 min``.  Do not use that row as a
-current target-10 constrained-QI best case.  Best-row selection uses
+The current README QI row is a CPU repeated-stage continuation, ``max_mode=3``,
+ESS row without a same-mode QP preseed: legacy-ranked QI diagnostic
+``2.17e-3``, maximum mirror ratio ``0.2106`` for a target ``0.21``, maximum
+elongation ``4.30`` for a target ``8.0``, aspect ratio ``5.001``, mean iota
+``-0.5494``, and total wall time ``11.3 min``.  Best-row selection uses
 ``vmec_jax.qi_promotion_score``: raw-fallback legacy diagnostics are rejected,
 rows above the loose ``2e-2`` QI promotion ceiling cannot win solely by having
 good mirror/elongation, and engineering-clean rows are preferred over lower-QI
@@ -386,9 +381,9 @@ legacy alias ``publication_panel.png/.pdf``, and
 Finite-beta Stage-One Examples
 ------------------------------
 
-The finite-beta examples mirror the VMEC-only stage-one part of
-``/Users/rogeriojorge/local/single_stage_optimization_finite_beta`` without
-SIMSOPT or coils:
+The finite-beta examples mirror the VMEC-only stage-one reference workflow from
+the separate ``single_stage_optimization_finite_beta`` scripts without SIMSOPT
+or coils:
 
 .. code-block:: bash
 

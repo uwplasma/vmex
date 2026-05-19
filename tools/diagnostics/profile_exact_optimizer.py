@@ -345,6 +345,7 @@ def _cache_snapshot(opt: Any | None = None, *, include_global: bool = True) -> d
             "exact_cache": _cache_len(getattr(opt, "_exact_cache", None)),
             "exact_state_cache": _cache_len(getattr(opt, "_exact_state_cache", None)),
             "exact_residual_cache": _cache_len(getattr(opt, "_exact_residual_cache", None)),
+            "exact_jacobian_cache": _cache_len(getattr(opt, "_exact_jacobian_cache", None)),
             "trial_residual_cache": _cache_len(getattr(opt, "_trial_residual_cache", None)),
             "initial_tangent_cache": _cache_len(getattr(opt, "_initial_tangent_cache", None)),
             "discrete_jacobian_helper_cache": _cache_len(
@@ -623,6 +624,8 @@ def _clear_optimizer_point_caches(opt) -> None:
     opt._exact_state_cache.clear()
     if hasattr(opt, "_exact_residual_cache"):
         opt._exact_residual_cache.clear()
+    if hasattr(opt, "_exact_jacobian_cache"):
+        opt._exact_jacobian_cache.clear()
     opt._trial_residual_cache.clear()
     opt._initial_tangent_cache.clear()
     opt._last_jacobian_residual = None
@@ -732,7 +735,7 @@ def main() -> int:
         total_t0 = time.perf_counter()
         for repeat in range(repeats):
             if repeat > 0 and args.clear_between_repeats:
-                opt.clear_caches()
+                _clear_optimizer_point_caches(opt)
             if perturb_scale > 0.0:
                 params = params0 + perturb_scale * rng.standard_normal(params0.shape)
             else:

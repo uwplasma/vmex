@@ -28,7 +28,7 @@
     "total_wall_time_s": 140.6934483749792,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -37,7 +37,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/qp_preseed/mode1/no_ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/qp_preseed/mode1/no_ess"
   },
   {
     "backend": "cpu",
@@ -68,7 +68,7 @@
     "total_wall_time_s": 142.0776802500477,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -77,7 +77,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/qp_preseed/mode1/ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/qp_preseed/mode1/ess"
   },
   {
     "backend": "cpu",
@@ -108,7 +108,7 @@
     "total_wall_time_s": 301.33625829278026,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -117,7 +117,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/qp_preseed/mode2/no_ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/qp_preseed/mode2/no_ess"
   },
   {
     "backend": "cpu",
@@ -148,7 +148,7 @@
     "total_wall_time_s": 220.95810383209027,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -157,7 +157,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/qp_preseed/mode2/ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/qp_preseed/mode2/ess"
   },
   {
     "backend": "cpu",
@@ -188,7 +188,7 @@
     "total_wall_time_s": 330.63641437597107,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -197,7 +197,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/qp_preseed/mode3/no_ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/qp_preseed/mode3/no_ess"
   },
   {
     "backend": "cpu",
@@ -228,7 +228,7 @@
     "total_wall_time_s": 293.59680970793124,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -237,7 +237,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/qp_preseed/mode3/ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/qp_preseed/mode3/ess"
   },
   {
     "backend": "cpu",
@@ -268,7 +268,7 @@
     "total_wall_time_s": 33.82859462394845,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -277,7 +277,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/no_qp_preseed/mode1/no_ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/no_qp_preseed/mode1/no_ess"
   },
   {
     "backend": "cpu",
@@ -308,7 +308,7 @@
     "total_wall_time_s": 34.303120125085115,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -317,7 +317,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/no_qp_preseed/mode1/ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/no_qp_preseed/mode1/ess"
   },
   {
     "backend": "cpu",
@@ -348,7 +348,7 @@
     "total_wall_time_s": 192.14903170696925,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -357,7 +357,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/no_qp_preseed/mode2/no_ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/no_qp_preseed/mode2/no_ess"
   },
   {
     "backend": "cpu",
@@ -388,7 +388,7 @@
     "total_wall_time_s": 376.13941849884577,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -397,7 +397,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/no_qp_preseed/mode2/ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/no_qp_preseed/mode2/ess"
   },
   {
     "backend": "cpu",
@@ -428,7 +428,7 @@
     "total_wall_time_s": 601.6475754990242,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -437,7 +437,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/no_qp_preseed/mode3/no_ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/no_qp_preseed/mode3/no_ess"
   },
   {
     "backend": "cpu",
@@ -468,7 +468,7 @@
     "total_wall_time_s": 680.9204963330412,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -477,7 +477,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/no_qp_preseed/mode3/ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/no_qp_preseed/mode3/ess"
   },
   {
     "backend": "cpu",
@@ -508,7 +508,7 @@
     "total_wall_time_s": 128.95432150096167,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -517,7 +517,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/direct/qi/qp_preseed/mode1/no_ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/direct/qi/qp_preseed/mode1/no_ess"
   },
   {
     "backend": "cpu",
@@ -548,7 +548,7 @@
     "total_wall_time_s": 130.54493254201952,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -557,7 +557,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/direct/qi/qp_preseed/mode1/ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/direct/qi/qp_preseed/mode1/ess"
   },
   {
     "backend": "cpu",
@@ -588,7 +588,7 @@
     "total_wall_time_s": 167.600735166925,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -597,7 +597,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/direct/qi/qp_preseed/mode2/no_ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/direct/qi/qp_preseed/mode2/no_ess"
   },
   {
     "backend": "cpu",
@@ -628,7 +628,7 @@
     "total_wall_time_s": 220.74740458407905,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -637,7 +637,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/direct/qi/qp_preseed/mode2/ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/direct/qi/qp_preseed/mode2/ess"
   },
   {
     "backend": "cpu",
@@ -668,7 +668,7 @@
     "total_wall_time_s": 134.8043859170284,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -677,7 +677,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/direct/qi/qp_preseed/mode3/no_ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/direct/qi/qp_preseed/mode3/no_ess"
   },
   {
     "backend": "cpu",
@@ -708,7 +708,7 @@
     "total_wall_time_s": 225.37985754094552,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -717,7 +717,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/direct/qi/qp_preseed/mode3/ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/direct/qi/qp_preseed/mode3/ess"
   },
   {
     "backend": "cpu",
@@ -748,7 +748,7 @@
     "total_wall_time_s": 34.30090837494936,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -757,7 +757,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/direct/qi/no_qp_preseed/mode1/no_ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/direct/qi/no_qp_preseed/mode1/no_ess"
   },
   {
     "backend": "cpu",
@@ -788,7 +788,7 @@
     "total_wall_time_s": 34.259313874994405,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -797,7 +797,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "`xtol` termination condition is satisfied.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/direct/qi/no_qp_preseed/mode1/ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/direct/qi/no_qp_preseed/mode1/ess"
   },
   {
     "backend": "cpu",
@@ -828,7 +828,7 @@
     "total_wall_time_s": 165.64349537505768,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -837,7 +837,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "The maximum number of function evaluations is exceeded.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/direct/qi/no_qp_preseed/mode2/no_ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/direct/qi/no_qp_preseed/mode2/no_ess"
   },
   {
     "backend": "cpu",
@@ -868,7 +868,7 @@
     "total_wall_time_s": 167.06919891689904,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -877,7 +877,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "The maximum number of function evaluations is exceeded.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/direct/qi/no_qp_preseed/mode2/ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/direct/qi/no_qp_preseed/mode2/ess"
   },
   {
     "backend": "cpu",
@@ -908,7 +908,7 @@
     "total_wall_time_s": 294.2160916251596,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -917,7 +917,7 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "The maximum number of function evaluations is exceeded.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/direct/qi/no_qp_preseed/mode3/no_ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/direct/qi/no_qp_preseed/mode3/no_ess"
   },
   {
     "backend": "cpu",
@@ -948,7 +948,7 @@
     "total_wall_time_s": 303.5442478338955,
     "jax_backend": "cpu",
     "jax_device_kind": "cpu",
-    "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+    "input_file": "examples/data/input.nfp2_QI",
     "input_nfp": 2,
     "project_input_boundary_to_max_mode": true,
     "target_aspect": 5.0,
@@ -957,6 +957,6 @@
     "iota_weight": 200.0,
     "qi_lgradb_weight": 0.0,
     "message": "The maximum number of function evaluations is exceeded.",
-    "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/direct/qi/no_qp_preseed/mode3/ess"
+    "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/direct/qi/no_qp_preseed/mode3/ess"
   }
 ]

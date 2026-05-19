@@ -62,7 +62,7 @@ driver for reproducible comparison tables:
      - NFP=2 QI seed, aspect near 5, ``abs(mean_iota) >= 0.41``, QP residual.
    * - QI
      - ``examples/optimization/QI_optimization.py``
-     - NFP=2 QI default lane with aspect target 10, Boozer-space QI, mirror, elongation, QI ceiling, ESS, and repeated same-mode continuation.
+     - NFP=2 QI default lane with Boozer-space QI, mirror, elongation, QI ceiling, ESS, and repeated same-mode continuation; the README best-row sweep uses aspect target 5, while seed-robustness cases may choose case-specific aspect targets.
 
 When using sweep commands, keep backend selection and report labeling separate.
 ``--backend-label`` only names output directories and table rows; it does not
@@ -129,17 +129,12 @@ not be treated as current staged-QI evidence.  Any QA/QP showcase rows without
 ``reference_preseed`` provenance also predate the current common-seed policy.
 
 The saved CPU stress-test panel below is deliberately included as a
-failure-revealing artifact.  In that bounded continuation/mode-3/ESS run, only
-``qh_nfp4`` reached the current physics gates.  ``qa_nfp2`` stayed on the
-zero-iota branch, ``qp_nfp2`` reduced the quasisymmetry residual but missed the
-iota floor, ``qi_nfp1`` and ``qi_nfp3`` completed with low transform and poor
-QI/mirror/elongation gates, and ``qi_nfp2`` timed out cleanly at the 20-minute
-case budget.  This panel is therefore a historical regression/stress target for
-the seed-robust optimization lane, not a publication-quality optimization
-result.  In this checkout the tracked panel and CSV still point to the old
-``qp_preseed`` QI directories, so the QI rows are stale until the command above
-is rerun with the staged QI dispatch; QA/QP rows also need regeneration if they
-lack the reference-preseed metadata described above.
+failure-revealing artifact.  The renderer skips known-stale rows; in this
+checkout only ``qh_nfp4`` currently reaches the active metadata and physics
+gates.  Missing QA/QP/QI rows should be regenerated with the command above
+before using the panel as publication evidence.  Until then it is a compact
+regression target for the seed-robust optimization lane, not a
+publication-quality optimization result.
 
 .. image:: _static/figures/minimal_seed_showcase_objective_panel.png
    :width: 100%
@@ -173,7 +168,9 @@ then run the bounded robustness probe or select a ``RUN_CASE`` in
    PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --smooth-qi-max 5e-3 --legacy-qi-max 2e-3 --csv results/qi_seed3127_audit.csv
    PYTHONPATH=. python examples/optimization/audit_qi_seed_suitability.py --quick --prefine-probes plan --prefine-manifest results/qi_seed_audit/prefine_manifest.json --prefine-output-dir results/qi_seed_audit/prefine_probes
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_seed_robustness.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_current_public_final \
+     python examples/optimization/QI_optimization.py
 
 The second audit command uses the far-seed QI gate convention from
 ``QI_optimization.py``: legacy QI below ``2e-3`` and smooth differentiable QI
@@ -222,12 +219,12 @@ for both bundled QI inputs:
    :align: center
    :alt: QI optimization coverage for NFP=2 QI and seed-3127 inputs
 
-The Boozer ``|B|`` panels in that figure use line contours only.  The staged
-objective panel concatenates every recorded history file and plots the
-best-so-far value in each stage, normalized to that stage's first objective,
-with dashed separators where objective definitions or weights change.  For the
-seed-3127 lane, the inset is a boundary-reference interpolation scan, not an
-optimizer trajectory.
+The initial and final Boozer ``|B|`` panels in that figure use line contours
+only.  The staged objective panel concatenates every recorded history file and
+plots the best-so-far value in each stage, normalized to that stage's first
+objective, with dashed separators where objective definitions or weights
+change.  For the seed-3127 lane, the inset is a boundary-reference
+interpolation scan, not an optimizer trajectory.
 Regenerate the figure and CSV without launching new optimization jobs with:
 
 .. code-block:: bash
@@ -718,16 +715,16 @@ The sweep below compares four target objectives:
 - QP: aspect ratio near 5, quasi-poloidal symmetry, and a smooth
   ``abs(mean_iota) >= 0.41`` lower bound, using the same bundled NFP=2 seed as
   the QI runs.
-- QI: aspect ratio near 10, a differentiable smooth Boozer-space quasi-isodynamic
+- QI: aspect ratio near 5, a differentiable smooth Boozer-space quasi-isodynamic
   residual evaluated through ``booz_xform_jax``, maximum mirror-ratio penalty,
   maximum-LCFS-elongation penalty, and the same smooth
   ``abs(mean_iota) >= 0.41`` lower bound.  ``LgradB`` is available as an
   optional commented term in the example scripts.
 
 The current objective priority is primary symmetry/QI quality and rotational
-transform control first.  QA/QH/QP use aspect ratio near 5, while QI uses
-aspect ratio near 10 to keep mirror and elongation cleanup from being
-overconstrained.  QA also uses the signed iota-0.42 target, while QH/QP/QI use
+transform control first.  The published QA/QH/QP/QI sweep uses aspect ratio
+near 5, with case-specific staged QI diagnostics available for harder far
+seeds.  QA also uses the signed iota-0.42 target, while QH/QP/QI use
 ``abs(mean_iota) >= 0.41``.  ``LgradB`` remains available for users who want
 extra magnetic-gradient regularization, but it is not active in the default
 sweeps or best-row selection.  When enabling ``LgradB`` in an adjoint
@@ -1126,7 +1123,9 @@ script:
 
 .. code-block:: bash
 
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_current_public_final \
+     python examples/optimization/QI_optimization.py
 
 The script takes ``nfp`` from the VMEC input file, so the NFP=4 warm-start case
 does not need a separate driver.  To try a different VMEC input deck, add one
@@ -1142,7 +1141,7 @@ dictionary entry to ``QI_CASES`` in ``QI_optimization.py``:
        "use_mode_continuation": True,
        "stage_repeats": 5,
        "max_nfev": 12,
-       "target_aspect": 10.0,
+       "target_aspect": 5.0,
        "target_abs_iota_min": 0.41,
        "mirror_threshold": 0.21,
        "mirror_surface_index": None,

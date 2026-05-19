@@ -90,6 +90,15 @@ def _finite_int(value: Any) -> int | None:
     return out
 
 
+def _profile_wall_time(profile: dict[str, Any], name: str) -> float | None:
+    """Return profile wall time from nested or legacy flattened records."""
+
+    record = profile.get(name)
+    if isinstance(record, dict):
+        return _finite_float(record.get("wall_time_s"))
+    return _finite_float(profile.get(f"{name}_wall_time_s"))
+
+
 def _input_nfp(input_file: Path) -> int | None:
     try:
         return _finite_int(read_indata(input_file).scalars.get("NFP"))
@@ -172,15 +181,11 @@ def _history_metrics(history: dict[str, Any]) -> dict[str, Any]:
         "njev": _finite_int(history.get("njev")),
         "total_wall_time_s": _finite_float(history.get("total_wall_time_s")),
         "profile_wall_time_s": _finite_float(profile.get("total_wall_time_s")),
-        "profile_solve_forward_trial_total_wall_time_s": _finite_float(
-            profile.get("solve_forward_trial_total_wall_time_s")
-        ),
-        "profile_solve_forward_exact_total_wall_time_s": _finite_float(
-            profile.get("solve_forward_exact_total_wall_time_s")
-        ),
-        "profile_exact_tape_build_wall_time_s": _finite_float(profile.get("exact_tape_build_wall_time_s")),
-        "profile_jacobian_total_wall_time_s": _finite_float(profile.get("jacobian_total_wall_time_s")),
-        "profile_write_wout_wall_time_s": _finite_float(profile.get("write_wout_wall_time_s")),
+        "profile_solve_forward_trial_total_wall_time_s": _profile_wall_time(profile, "solve_forward_trial_total"),
+        "profile_solve_forward_exact_total_wall_time_s": _profile_wall_time(profile, "solve_forward_exact_total"),
+        "profile_exact_tape_build_wall_time_s": _profile_wall_time(profile, "exact_tape_build"),
+        "profile_jacobian_total_wall_time_s": _profile_wall_time(profile, "jacobian_total"),
+        "profile_write_wout_wall_time_s": _profile_wall_time(profile, "write_wout"),
     }
 
 
@@ -248,6 +253,52 @@ def _boundary_reference_partial_metrics(output_dir: Path) -> dict[str, Any]:
     }
 
 
+def _stage_checkpoint_record(output_dir: Path) -> dict[str, Any]:
+    """Return the latest QI stage checkpoint record, if available."""
+
+    output_dir = Path(output_dir)
+    root_checkpoint = output_dir / "stage_checkpoint.json"
+    if root_checkpoint.exists():
+        return _read_json(root_checkpoint)
+    candidates = sorted(
+        list(output_dir.glob("**/stage_checkpoint.json")) + list(output_dir.glob("**/qi_stage_checkpoint.json")),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    for path in candidates:
+        record = _read_json(path)
+        if record:
+            return record
+    return {}
+
+
+def _stage_checkpoint_partial_metrics(output_dir: Path) -> dict[str, Any]:
+    """Map the latest per-stage QI checkpoint to sweep-result fields."""
+
+    record = _stage_checkpoint_record(output_dir)
+    if not record:
+        return {}
+    history = record.get("history")
+    diagnostics = record.get("diagnostics")
+    history = history if isinstance(history, dict) else {}
+    diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+    return {
+        "objective_final": _finite_float(history.get("objective_final")),
+        "qs_final": _finite_float(history.get("qs_final") or diagnostics.get("qi_smooth_total")),
+        "aspect_final": _finite_float(history.get("aspect_final") or diagnostics.get("aspect")),
+        "iota_final": _finite_float(history.get("iota_final") or diagnostics.get("mean_iota")),
+        "nfev": _finite_int(history.get("nfev")),
+        "njev": _finite_int(history.get("njev")),
+        "total_wall_time_s": _finite_float(history.get("total_wall_time_s")),
+        "qi_raw_total": _finite_float(diagnostics.get("qi_raw_total") or diagnostics.get("qi_smooth_total")),
+        "qi_legacy_total": _finite_float(diagnostics.get("qi_legacy_total")),
+        "qi_mirror_ratio_max": _finite_float(diagnostics.get("qi_mirror_ratio_max")),
+        "qi_mirror_ratio_target": _finite_float(diagnostics.get("qi_mirror_ratio_target")),
+        "qi_max_elongation": _finite_float(diagnostics.get("qi_max_elongation")),
+        "qi_elongation_target": _finite_float(diagnostics.get("qi_elongation_target")),
+    }
+
+
 def annotate_case_result_from_partial_artifacts(result: sweep.CaseResult, output_dir: Path) -> bool:
     """Fill missing QI fields from partial staged artifacts.
 
@@ -257,13 +308,17 @@ def annotate_case_result_from_partial_artifacts(result: sweep.CaseResult, output
     """
 
     changed = False
-    for key, value in _boundary_reference_partial_metrics(Path(output_dir)).items():
+    partial_metrics = {
+        **_boundary_reference_partial_metrics(Path(output_dir)),
+        **_stage_checkpoint_partial_metrics(Path(output_dir)),
+    }
+    for key, value in partial_metrics.items():
         if value is not None and getattr(result, key, None) is None:
             setattr(result, key, value)
             changed = True
-    if changed and "partial boundary-reference metrics" not in str(result.message):
+    if changed and "partial" not in str(result.message):
         prefix = str(result.message).strip()
-        suffix = "partial boundary-reference metrics recorded"
+        suffix = "partial QI stage checkpoint metrics recorded"
         result.message = f"{prefix}; {suffix}" if prefix else suffix
     return changed
 
@@ -324,7 +379,9 @@ def run_qi_staged_case(config: QIStagedCaseConfig) -> sweep.CaseResult:
     diagnostics = _read_json(output_dir / "diagnostics.json")
     history_metrics = _history_metrics(history)
     diagnostic_metrics = _diagnostic_metrics(diagnostics)
-    partial_metrics = _boundary_reference_partial_metrics(output_dir)
+    stage_partial_metrics = _stage_checkpoint_partial_metrics(output_dir)
+    boundary_partial_metrics = _boundary_reference_partial_metrics(output_dir)
+    partial_metrics = {**boundary_partial_metrics, **stage_partial_metrics}
     for key, value in partial_metrics.items():
         if value is None:
             continue
@@ -337,7 +394,11 @@ def run_qi_staged_case(config: QIStagedCaseConfig) -> sweep.CaseResult:
     if message_prefix:
         message = f"{message_prefix}; {message}" if message else message_prefix
     if partial_metrics and not success:
-        suffix = "partial boundary-reference metrics recorded"
+        suffix = (
+            "partial QI stage checkpoint metrics recorded"
+            if stage_partial_metrics
+            else "partial boundary-reference metrics recorded"
+        )
         message = f"{message}; {suffix}" if message else suffix
     if success and not message:
         message = "QI staged subprocess passed engineering gate"

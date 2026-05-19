@@ -23,6 +23,13 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 RESULTS_ROOT = SCRIPT_DIR / "results" / "minimal_seed_showcase"
 FIGURE_DIR = ROOT / "docs" / "_static" / "figures"
 
+
+def _repo_relative_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -290,7 +297,7 @@ def write_summary_csv(records: list[ShowcaseRecord], path: Path) -> None:
                     "" if record.qi_legacy_total is None else f"{record.qi_legacy_total:.16e}",
                     "" if record.qi_mirror_ratio_max is None else f"{record.qi_mirror_ratio_max:.16e}",
                     "" if record.qi_max_elongation is None else f"{record.qi_max_elongation:.16e}",
-                    str(record.output_dir),
+                    _repo_relative_path(record.output_dir),
                 ]
             )
 

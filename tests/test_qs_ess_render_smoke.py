@@ -383,7 +383,7 @@ def test_problem_configs_follow_current_seed_and_priority_policy():
     assert qp_cfg.lgradb_weight == pytest.approx(0.0)
     assert qp_cfg.project_input_boundary_to_max_mode
     assert qi_cfg.input_file.name == "input.nfp2_QI"
-    assert qi_cfg.target_aspect == pytest.approx(10.0)
+    assert qi_cfg.target_aspect == pytest.approx(5.0)
     assert qi_cfg.iota_abs_min == pytest.approx(0.41)
     assert qi_cfg.iota_weight == pytest.approx(200.0)
     assert qi_cfg.aspect_weight == pytest.approx(1.0)
@@ -1007,14 +1007,14 @@ def test_readme_renderer_filters_qi_rows_by_qi_target_aspect():
     renderer = _load_readme_renderer_module()
 
     current_qi = {
-        "target_aspect": "10.0",
-        "iota_abs_min": str(renderer.TARGET_ABS_IOTA_MIN),
-        "aspect_final": "9.9",
-    }
-    legacy_qi = {
         "target_aspect": "5.0",
         "iota_abs_min": str(renderer.TARGET_ABS_IOTA_MIN),
         "aspect_final": "5.0",
+    }
+    legacy_qi = {
+        "target_aspect": "10.0",
+        "iota_abs_min": str(renderer.TARGET_ABS_IOTA_MIN),
+        "aspect_final": "9.9",
     }
 
     assert renderer._is_current_qi_row(current_qi)
@@ -1029,8 +1029,8 @@ def test_readme_renderer_can_use_dedicated_qi_result_dir(tmp_path):
     (result_dir / "diagnostics.json").write_text(
         json.dumps(
             {
-                "target_aspect": 10.0,
-                "aspect": 9.99,
+                "target_aspect": 5.0,
+                "aspect": 5.01,
                 "mean_iota": -0.50,
                 "qi_raw_total": 1.1e-3,
                 "qi_legacy_total": 3.0e-4,
@@ -1049,7 +1049,7 @@ def test_readme_renderer_can_use_dedicated_qi_result_dir(tmp_path):
 
     assert row is not None
     assert row["policy"] == "qi_default"
-    assert float(row["target_aspect"]) == pytest.approx(10.0)
+    assert float(row["target_aspect"]) == pytest.approx(5.0)
     assert float(row["qi_legacy_total"]) == pytest.approx(3.0e-4)
 
 

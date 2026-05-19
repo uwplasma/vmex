@@ -27,7 +27,7 @@
   "total_wall_time_s": 680.9204963330412,
   "jax_backend": "cpu",
   "jax_device_kind": "cpu",
-  "input_file": "/Users/rogeriojorge/local/vmec_jax/examples/data/input.nfp2_QI",
+  "input_file": "examples/data/input.nfp2_QI",
   "input_nfp": 2,
   "project_input_boundary_to_max_mode": true,
   "target_aspect": 5.0,
@@ -36,7 +36,7 @@
   "iota_weight": 200.0,
   "qi_lgradb_weight": 0.0,
   "message": "`xtol` termination condition is satisfied.",
-  "output_dir": "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/no_qp_preseed/mode3/ess",
+  "output_dir": "examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/no_qp_preseed/mode3/ess",
   "selection_score": [
     0,
     0,
@@ -47,6 +47,6 @@
     8.77385397686028e-06,
     0.002172548670637645,
     680.9204963330412,
-    "/Users/rogeriojorge/local/vmec_jax/examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/no_qp_preseed/mode3/ess"
+    "examples/optimization/results/qs_ess_sweep/cpu/continuation/qi/no_qp_preseed/mode3/ess"
   ]
 }

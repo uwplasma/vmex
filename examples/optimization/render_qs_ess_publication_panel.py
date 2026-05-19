@@ -50,7 +50,7 @@ MODES_BY_POLICY = {
 }
 QI_INPUT_NFP = 2
 TARGET_ASPECT = 5.0
-QI_TARGET_ASPECT = 10.0
+QI_TARGET_ASPECT = TARGET_ASPECT
 PROBLEM_TARGET_ASPECT = {
     "qa": TARGET_ASPECT,
     "qh": TARGET_ASPECT,
@@ -501,6 +501,12 @@ def _summary_record(result: CaseResult) -> dict:
     record = asdict(result)
     if record.get("qi_legacy_total") in (None, ""):
         record["qi_legacy_total"] = record.get("qi_raw_total")
+    input_file = record.get("input_file")
+    if input_file:
+        try:
+            record["input_file"] = str(Path(str(input_file)).resolve().relative_to(REPO_ROOT))
+        except ValueError:
+            record["input_file"] = str(input_file)
     output_dir = record.get("output_dir")
     if output_dir:
         try:

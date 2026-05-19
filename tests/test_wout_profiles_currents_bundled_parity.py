@@ -5,9 +5,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from vmec_jax.boundary import boundary_from_indata
 from vmec_jax.config import load_config
 from vmec_jax.energy import _iotaf_from_iotas, flux_profiles_from_indata
 from vmec_jax.integrals import cumrect_s_halfmesh
+from vmec_jax.modes import vmec_mode_table
 from vmec_jax.profiles import MU0, eval_profiles
 from vmec_jax.wout import read_wout
 
@@ -48,6 +50,12 @@ PROFILE_CASES = (
         "examples/data/input.basic_non_stellsym_simsopt",
         "examples/data/wout_basic_non_stellsym_simsopt.nc",
         False,
+    ),
+    (
+        "single_grid_lasym_pressure",
+        "examples_single_grid/data/input.basic_non_stellsym_pressure",
+        "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc",
+        True,
     ),
 )
 
@@ -90,6 +98,49 @@ def _vmec_half_from_full(values: np.ndarray) -> np.ndarray:
     out[1:-1] = 0.5 * (values[1:-1] + values[2:])
     out[-1] = 1.5 * values[-1] - 0.5 * values[-2]
     return out
+
+
+def _input_r00(indata) -> float:
+    modes = vmec_mode_table(int(indata.get_int("MPOL", 1)), int(indata.get_int("NTOR", 0)))
+    boundary = boundary_from_indata(indata, modes)
+    mask = (np.asarray(modes.m, dtype=int) == 0) & (np.asarray(modes.n, dtype=int) == 0)
+    index = int(np.where(mask)[0][0]) if np.any(mask) else 0
+    return float(np.asarray(boundary.R_cos, dtype=float)[index])
+
+
+def _expected_internal_pressure(indata, wout, s_half: np.ndarray) -> tuple[np.ndarray, np.ndarray | None]:
+    """Return VMEC internal pressure and optional mass expected from input profiles.
+
+    For ``GAMMA = 0`` VMEC writes the pressure profile directly.  For nonzero
+    ``GAMMA`` VMEC stores the mass profile from the input deck and reconstructs
+    pressure using the solved volume derivative, so the profile gate must follow
+    that same convention instead of comparing against the raw ``AM`` polynomial.
+    """
+
+    profiles = eval_profiles(indata, s_half)
+    pressure_pa = np.array(profiles.get("pressure_pa", np.zeros_like(s_half)), dtype=float, copy=True)
+    pressure_internal = np.array(profiles.get("pressure", np.zeros_like(s_half)), dtype=float, copy=True)
+    if pressure_pa.size:
+        pressure_pa[0] = 0.0
+    if pressure_internal.size:
+        pressure_internal[0] = 0.0
+
+    gamma = float(indata.get_float("GAMMA", 0.0))
+    if gamma == 0.0:
+        return pressure_internal, None
+
+    lrfp = bool(indata.get_bool("LRFP", False))
+    vnorm = np.asarray(wout.chipf if lrfp else wout.phips, dtype=float)
+    mass_expected = pressure_pa * (np.abs(vnorm) * _input_r00(indata)) ** gamma
+    if mass_expected.size:
+        mass_expected[0] = 0.0
+    vp = np.asarray(wout.vp, dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        pressure_expected_pa = np.where(vp != 0.0, mass_expected / np.where(vp != 0.0, vp, 1.0) ** gamma, 0.0)
+    pressure_expected = MU0 * pressure_expected_pa
+    if pressure_expected.size:
+        pressure_expected[0] = 0.0
+    return pressure_expected, mass_expected
 
 
 @pytest.mark.parametrize(
@@ -142,13 +193,24 @@ def test_bundled_wout_flux_pressure_iota_profiles_follow_vmec_radial_mesh(
         err_msg=f"{case_name}: chipf is not consistent with iotaf * phipf on the half mesh",
     )
 
-    profiles = eval_profiles(indata, _s_half(s))
-    pressure_expected = np.array(profiles.get("pressure", np.zeros((ns,))), dtype=float, copy=True)
-    if pressure_expected.size:
-        pressure_expected[0] = 0.0
+    s_half = _s_half(s)
+    profiles = eval_profiles(indata, s_half)
+    pressure_expected, mass_expected = _expected_internal_pressure(indata, wout, s_half)
 
     if expect_pressure:
         assert np.max(np.abs(np.asarray(wout.pres, dtype=float))) > 0.0
+    if mass_expected is not None:
+        import netCDF4
+
+        with netCDF4.Dataset(repo_root / wout_name) as ds:
+            if "mass" in ds.variables:
+                np.testing.assert_allclose(
+                    np.asarray(ds.variables["mass"][:], dtype=float),
+                    mass_expected,
+                    rtol=1.0e-12,
+                    atol=1.0e-10,
+                    err_msg=f"{case_name}: mass profile drifted from VMEC input pressure profile",
+                )
     np.testing.assert_allclose(
         np.asarray(wout.pres, dtype=float),
         pressure_expected,

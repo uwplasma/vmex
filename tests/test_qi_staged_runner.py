@@ -99,7 +99,7 @@ def test_qi_staged_runner_converts_artifacts_to_case_result(tmp_path: Path, monk
           "njev": 6,
           "total_wall_time_s": 12.0,
           "target_aspect": 10.0,
-          "profile": {"jacobian_total_wall_time_s": 3.0}
+          "profile": {"jacobian_total": {"count": 2, "wall_time_s": 3.0}}
         }
         """
     )
@@ -217,3 +217,84 @@ def test_qi_staged_runner_preserves_partial_reference_metrics_on_timeout(tmp_pat
     assert result.qi_max_elongation == pytest.approx(6.4)
     assert result.iota_final == pytest.approx(0.47)
     assert result.aspect_final == pytest.approx(9.8)
+
+
+def test_qi_staged_runner_prefers_stage_checkpoint_metrics_on_timeout(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    out = tmp_path / "out"
+    pre_dir = out / "boundary_reference_preconditioner"
+    pre_dir.mkdir(parents=True)
+    (pre_dir / "summary.json").write_text(
+        """
+        [
+          {
+            "lambda": 1.0,
+            "selected": true,
+            "score": 1.0,
+            "smooth_qi": 9.0e-3,
+            "legacy_qi": 8.0e-3,
+            "mirror": 0.41,
+            "elongation": 9.0,
+            "mean_iota": 0.39,
+            "aspect": 7.0
+          }
+        ]
+        """
+    )
+    stage_dir = out / "mirror_ramp_02_cleanup"
+    stage_dir.mkdir(parents=True)
+    (stage_dir / "qi_stage_checkpoint.json").write_text(
+        """
+        {
+          "schema_version": 1,
+          "partial": true,
+          "name": "cleanup",
+          "history": {
+            "objective_final": 2.25,
+            "qs_final": 2.0e-3,
+            "aspect_final": 10.1,
+            "iota_final": 0.51,
+            "nfev": 8,
+            "njev": 7,
+            "total_wall_time_s": 42.0
+          },
+          "diagnostics": {
+            "qi_smooth_total": 1.9e-3,
+            "qi_legacy_total": 1.2e-3,
+            "qi_mirror_ratio_max": 0.27,
+            "qi_mirror_ratio_target": 0.30,
+            "qi_max_elongation": 6.2,
+            "qi_elongation_target": 8.2,
+            "mean_iota": 0.52,
+            "aspect": 10.0
+          }
+        }
+        """
+    )
+
+    def _timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout"))
+
+    monkeypatch.setattr(runner.subprocess, "run", _timeout)
+    config = runner.QIStagedCaseConfig(
+        name="qi_nfp2",
+        input_file=ROOT / "examples" / "data" / "input.minimal_seed_nfp2",
+        output_dir=out,
+        max_mode=3,
+        policy_case="nfp2_qi",
+        timeout_s=10.0,
+        make_plots=False,
+    )
+
+    result = runner.run_qi_staged_case(config)
+
+    assert result.success is False
+    assert result.crashed is True
+    assert "partial QI stage checkpoint metrics recorded" in result.message
+    assert result.objective_final == pytest.approx(2.25)
+    assert result.qs_final == pytest.approx(2.0e-3)
+    assert result.qi_legacy_total == pytest.approx(1.2e-3)
+    assert result.qi_mirror_ratio_max == pytest.approx(0.27)
+    assert result.qi_max_elongation == pytest.approx(6.2)
+    assert result.iota_final == pytest.approx(0.51)
+    assert result.aspect_final == pytest.approx(10.1)

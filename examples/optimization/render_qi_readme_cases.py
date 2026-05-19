@@ -2,7 +2,8 @@
 """Render README/docs coverage for the two promoted QI_optimization inputs.
 
 This renderer intentionally consumes existing reviewed outputs instead of
-launching new optimization jobs.  The Boozer |B| panels use line contours only.
+launching new optimization jobs.  The initial/final Boozer |B| panels use line
+contours only.
 """
 
 from __future__ import annotations
@@ -68,7 +69,12 @@ CASES = (
         initial_wout=REPO_ROOT / "examples" / "data" / "wout_QI_stel_seed_3127.nc",
         note="curated reference-family baseline",
         history_paths=(
-            REPO_ROOT / "results" / "qi_opt" / "ess" / "qi_stel_seed_3127" / "history.json",
+            REPO_ROOT
+            / "results"
+            / "qi_opt"
+            / "ess"
+            / "qi_stel_seed_3127_current_public_final"
+            / "history.json",
             REPO_ROOT
             / "results"
             / "qi_opt"
@@ -350,8 +356,8 @@ def _booz_xform_on_outer_surface(wout_path: Path):
     bx = Booz_xform(verbose=0)
     bx.read_wout(str(wout_path))
     bx.compute_surfs = [int(bx.ns_in) - 1]
-    bx.mboz = int(bx.mpol)
-    bx.nboz = int(bx.ntor)
+    bx.mboz = max(16, 2 * int(bx.mpol) + 4)
+    bx.nboz = max(16, 2 * int(bx.ntor) + 4)
     bx.run()
     return bx
 
@@ -378,8 +384,8 @@ def _booz_bmag_grid(bx, *, ntheta: int = 128, nphi: int = 192) -> tuple[np.ndarr
     return theta, phi, np.asarray(B)
 
 
-def _plot_boozer_bmag(ax, final_wout: Path, nfp: int) -> None:
-    bx = _booz_xform_on_outer_surface(final_wout)
+def _plot_boozer_bmag(ax, wout_path: Path, nfp: int, title: str) -> None:
+    bx = _booz_xform_on_outer_surface(wout_path)
     theta, phi, B = _booz_bmag_grid(bx)
     PHI, THETA = np.meshgrid(phi, theta)
     vmin = float(np.nanmin(B))
@@ -390,7 +396,7 @@ def _plot_boozer_bmag(ax, final_wout: Path, nfp: int) -> None:
         vmax += pad
     levels = np.linspace(vmin, vmax, 24)
     cs = ax.contour(PHI, THETA, B, levels=levels, cmap="viridis", linewidths=0.9)
-    ax.set_title(r"Final Boozer $|B|$ line contours", fontsize=8, pad=4)
+    ax.set_title(title, fontsize=8, pad=4)
     ax.set_xlabel(r"$\phi_B$ (one field period)")
     ax.set_ylabel(r"$\theta_B$")
     ax.set_xlim(0.0, 2.0 * np.pi / float(nfp))
@@ -434,17 +440,17 @@ def _render(records: list[dict[str, str | float]]) -> None:
         }
     )
 
-    fig = plt.figure(figsize=(17.5, 8.6))
+    fig = plt.figure(figsize=(21.5, 8.6))
     gs = fig.add_gridspec(
         len(CASES),
-        4,
+        5,
         left=0.045,
         right=0.975,
         bottom=0.06,
         top=0.82,
         wspace=0.35,
         hspace=0.75,
-        width_ratios=(1.05, 1.05, 1.0, 1.12),
+        width_ratios=(1.05, 1.05, 1.0, 1.08, 1.08),
     )
     fig.suptitle("QI_optimization coverage from bundled QI and seed-3127 inputs", fontsize=13, x=0.02, y=0.985, ha="left")
     for row, (case, record) in enumerate(zip(CASES, records, strict=True)):
@@ -452,10 +458,12 @@ def _render(records: list[dict[str, str | float]]) -> None:
         ax1 = fig.add_subplot(gs[row, 1], projection="3d")
         ax2 = fig.add_subplot(gs[row, 2])
         ax3 = fig.add_subplot(gs[row, 3])
+        ax4 = fig.add_subplot(gs[row, 4])
         _plot_lcfs(ax0, case.initial_wout, "Raw input LCFS")
         _plot_lcfs(ax1, case.output_dir / "wout_final.nc", "Final LCFS")
         _plot_history(ax2, case)
-        _plot_boozer_bmag(ax3, case.output_dir / "wout_final.nc", int(record["qi_nfp"]))
+        _plot_boozer_bmag(ax3, case.initial_wout, int(record["qi_nfp"]), r"Initial Boozer $|B|$")
+        _plot_boozer_bmag(ax4, case.output_dir / "wout_final.nc", int(record["qi_nfp"]), r"Final Boozer $|B|$")
         title_y = 0.895 - 0.455 * row
         fig.text(0.045, title_y, _row_title(record), fontsize=10, ha="left", va="bottom")
         fig.text(

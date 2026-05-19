@@ -21,6 +21,7 @@ class ConvergedWoutMatrixCase:
     axisymmetric: bool
     lasym: bool
     multigrid: bool
+    finite_beta: bool
     residual_rss_limit: float
 
 
@@ -33,6 +34,7 @@ CONVERGED_WOUT_MATRIX_CASES = (
         axisymmetric=True,
         lasym=False,
         multigrid=False,
+        finite_beta=True,
         residual_rss_limit=1.0e-12,
     ),
     ConvergedWoutMatrixCase(
@@ -43,6 +45,7 @@ CONVERGED_WOUT_MATRIX_CASES = (
         axisymmetric=True,
         lasym=False,
         multigrid=True,
+        finite_beta=True,
         residual_rss_limit=1.0e-12,
     ),
     ConvergedWoutMatrixCase(
@@ -53,6 +56,7 @@ CONVERGED_WOUT_MATRIX_CASES = (
         axisymmetric=True,
         lasym=True,
         multigrid=False,
+        finite_beta=False,
         residual_rss_limit=1.0e-10,
     ),
     ConvergedWoutMatrixCase(
@@ -63,6 +67,7 @@ CONVERGED_WOUT_MATRIX_CASES = (
         axisymmetric=False,
         lasym=False,
         multigrid=True,
+        finite_beta=False,
         residual_rss_limit=1.0e-12,
     ),
     ConvergedWoutMatrixCase(
@@ -73,6 +78,7 @@ CONVERGED_WOUT_MATRIX_CASES = (
         axisymmetric=False,
         lasym=True,
         multigrid=True,
+        finite_beta=False,
         residual_rss_limit=5.0e-10,
     ),
     ConvergedWoutMatrixCase(
@@ -83,6 +89,7 @@ CONVERGED_WOUT_MATRIX_CASES = (
         axisymmetric=False,
         lasym=True,
         multigrid=False,
+        finite_beta=True,
         residual_rss_limit=2.0e-10,
     ),
     ConvergedWoutMatrixCase(
@@ -93,6 +100,7 @@ CONVERGED_WOUT_MATRIX_CASES = (
         axisymmetric=False,
         lasym=False,
         multigrid=False,
+        finite_beta=True,
         residual_rss_limit=1.0e-12,
     ),
 )
@@ -134,10 +142,13 @@ def test_converged_wout_matrix_covers_required_vmec2000_classes() -> None:
     assert any(not c.axisymmetric for c in cases)
     assert any(c.lasym for c in cases)
     assert any(not c.lasym for c in cases)
+    assert any(c.finite_beta for c in cases)
+    assert any(not c.finite_beta for c in cases)
     assert any(c.multigrid for c in cases)
     assert any(not c.multigrid for c in cases)
     assert any((not c.lfreeb) and c.axisymmetric and c.lasym for c in cases)
     assert any((not c.lfreeb) and (not c.axisymmetric) and c.lasym for c in cases)
+    assert any((not c.lfreeb) and (not c.axisymmetric) and c.lasym and c.finite_beta for c in cases)
     assert any(c.lfreeb and (not c.axisymmetric) for c in cases)
 
 
@@ -217,5 +228,15 @@ def test_bundled_converged_wout_matrix_physics_gates(case: ConvergedWoutMatrixCa
         assert asymmetric_nyquist_norm == pytest.approx(0.0, abs=1.0e-14)
 
     assert float(wout.wb) > 0.0
-    assert float(wout.wp) >= 0.0
+    pressure_norm = float(np.linalg.norm(np.asarray(wout.pres, dtype=float)))
+    beta_scalars = np.asarray([wout.betatotal, wout.betapol, wout.betator, wout.betaxis], dtype=float)
+    assert np.isfinite(beta_scalars).all()
+    if case.finite_beta:
+        assert pressure_norm > 0.0
+        assert float(wout.wp) > 0.0
+        assert np.all(beta_scalars > 0.0)
+    else:
+        assert pressure_norm == pytest.approx(0.0, abs=1.0e-14)
+        assert float(wout.wp) == pytest.approx(0.0, abs=1.0e-14)
+        np.testing.assert_allclose(beta_scalars, 0.0, rtol=0.0, atol=0.0)
     assert np.isfinite([wout.Aminor_p, wout.Rmajor_p, wout.aspect, wout.volume_p]).all()

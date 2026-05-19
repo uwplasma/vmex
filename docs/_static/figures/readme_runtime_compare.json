@@ -1,15 +1,15 @@
 {
   "metadata": {
     "cpu_summary_paths": [
-      "/Users/rogeriojorge/local/vmec_jax/outputs/fixed_runtime_accel_cpu_bundle_20260406_r2/summary.json"
+      "outputs/fixed_runtime_accel_cpu_bundle_20260406_r2/summary.json"
     ],
-    "figure_path": "/Users/rogeriojorge/local/vmec_jax/docs/_static/figures/readme_runtime_compare.png",
-    "generated_at_utc": "2026-05-17T21:07:47.408360+00:00",
+    "figure_path": "docs/_static/figures/readme_runtime_compare.png",
+    "generated_at_utc": "2026-05-19T09:00:26.703287+00:00",
     "gpu_summary_paths": [],
     "host": "Rogerios-MacBook-Pro.local",
     "platform": "macOS-14.4.1-arm64-arm-64bit",
     "python": "3.11.14",
-    "table_path": "/Users/rogeriojorge/local/vmec_jax/outputs/readme_runtime_table.md"
+    "table_path": "outputs/readme_runtime_table.md"
   },
   "records": [
     {

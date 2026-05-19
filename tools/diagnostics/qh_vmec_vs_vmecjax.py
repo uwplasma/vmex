@@ -152,7 +152,7 @@ def _plot_cross_sections(ax, *, R, Z, Raxis, Zaxis, title: str):
 
 def _plot_bmag_surface(ax, *, B, theta, phi, title: str):
     phi2d, theta2d = np.meshgrid(phi, theta)
-    cf = ax.contourf(phi2d, theta2d, B, levels=20, cmap="viridis")
+    cf = ax.contour(phi2d, theta2d, B, levels=20, cmap="viridis", linewidths=0.9)
     ax.set_xlabel("phi")
     ax.set_ylabel("theta")
     ax.set_title(title)

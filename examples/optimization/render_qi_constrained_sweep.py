@@ -30,7 +30,7 @@ PRESEED_OPTIONS = (True, False)
 MODES = (1, 2, 3)
 ESS_OPTIONS = (False, True)
 QI_INPUT_NFP = 2
-TARGET_ASPECT = 10.0
+TARGET_ASPECT = 5.0
 TARGET_ABS_IOTA_MIN = 0.41
 QI_PROMOTION_MAX = 2.0e-2
 
@@ -124,6 +124,13 @@ def _path_from_record(value: str | None, fallback: Path) -> Path:
     return resolved if resolved.exists() else fallback
 
 
+def _repo_relative_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
 def _input_nfp_from_output_dir(record: dict, path: Path) -> int | None:
     value = record.get("input_nfp")
     if value not in (None, ""):
@@ -190,14 +197,15 @@ def _discover_qi_results() -> list[dict]:
         row["use_ess"] = bool(_bool_value(record.get("use_ess")))
         row["success"] = bool(_bool_value(record.get("success")))
         row["crashed"] = bool(_bool_value(record.get("crashed")))
-        row["input_file"] = row.get("input_file") or "examples/data/input.nfp2_QI"
+        input_file = _path_from_record(row.get("input_file"), REPO_ROOT / "examples" / "data" / "input.nfp2_QI")
+        row["input_file"] = _repo_relative_path(input_file)
         row["input_nfp"] = input_nfp
         row["project_input_boundary_to_max_mode"] = (
             row.get("project_input_boundary_to_max_mode")
             if row.get("project_input_boundary_to_max_mode") not in (None, "")
             else True
         )
-        row["output_dir"] = str(_path_from_record(record.get("output_dir"), path.parent))
+        row["output_dir"] = _repo_relative_path(_path_from_record(record.get("output_dir"), path.parent))
         if int(row["max_mode"]) not in MODES:
             continue
         key = (backend, policy, bool(qp_preseed), int(row["max_mode"]), bool(row["use_ess"]))
@@ -231,7 +239,7 @@ def _write_summaries(rows: list[dict]) -> None:
 
 
 def _history_for(row: dict) -> dict | None:
-    output_dir = Path(str(row["output_dir"]))
+    output_dir = _path_from_record(row["output_dir"], REPO_ROOT)
     path = output_dir / "history.json"
     if not path.exists():
         return None
@@ -459,7 +467,7 @@ def main() -> None:
     rows = _discover_qi_results()
     if not rows:
         raise FileNotFoundError(
-            "No current target-10 constrained QI rows found under "
+            "No current target-5 constrained QI rows found under "
             f"{OUTPUT_ROOT}. Rerun generate_qs_ess_sweep.py for --problems qi "
             "with the current objective policy before rendering."
         )

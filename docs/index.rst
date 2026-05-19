@@ -18,6 +18,8 @@ vmec-jax documentation
       overview
       installation
       quickstart
+      optimization
+      optimization_sweep_results
       theory
       equations
       vmec_wiki_primer
@@ -26,8 +28,6 @@ vmec-jax documentation
       testing_strategy
       release_checklist
       optional_validation_plan
-      optimization
-      optimization_sweep_results
       discrete_adjoint
       simsopt_comparison
       jxbforce_mercier

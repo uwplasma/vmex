@@ -85,7 +85,9 @@ geometry, ``lasym=False`` and ``lasym=True`` channels, and single-grid plus
 multigrid input decks.  The gate checks metadata consistency against the
 ``input.*`` files, final residual RSS limits, flux and iota mesh conventions,
 finite stored geometry/field blocks, and the presence or absence of asymmetric
-Fourier channels.
+Fourier channels.  It also asserts finite-pressure cases have nonzero stored
+pressure, positive pressure energy, and positive beta scalars, including the
+fetched single-grid ``lasym=True`` finite-beta reference.
 
 The full test tier runs ``vmec_jax`` end-to-end.  For promoted strict-parity
 cases it compares every standard ``wout`` field against the VMEC2000

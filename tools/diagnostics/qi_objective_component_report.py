@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
@@ -46,7 +47,9 @@ enable_x64(True)
 DEFAULT_OUTPUT = Path("results/diagnostics/qi_objective_component_report.json")
 DEFAULT_CURRENT_INPUT = REPO_ROOT / "examples/data/input.nfp3_QI_fixed_resolution_final"
 DEFAULT_CURRENT_WOUT = REPO_ROOT / "examples/data/wout_nfp3_QI_fixed_resolution_final.nc"
-DEFAULT_REFERENCE_ROOT = Path("/Users/rogeriojorge/local/omnigenity_optimization")
+DEFAULT_REFERENCE_ROOT = Path(
+    os.environ.get("OMNIGENITY_OPTIMIZATION_ROOT", Path.home() / "local" / "omnigenity_optimization")
+)
 DEFAULT_REFERENCE_INPUT = DEFAULT_REFERENCE_ROOT / "inputs_QI/input.nfp3_QI_fixed_resolution_final"
 DEFAULT_REFERENCE_WOUT = DEFAULT_REFERENCE_ROOT / "wouts_QI/wout_nfp3_QI_fixed_resolution_final.nc"
 

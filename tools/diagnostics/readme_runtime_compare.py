@@ -16,6 +16,13 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _repo_relative_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
 def _pyplot():
     """Import matplotlib only for the plotting paths."""
 
@@ -281,10 +288,10 @@ def _write_json(
             "host": platform.node(),
             "platform": platform.platform(),
             "python": platform.python_version(),
-            "cpu_summary_paths": [str(path) for path in cpu_summary_paths],
-            "gpu_summary_paths": [str(path) for path in gpu_summary_paths],
-            "figure_path": str(figure_path),
-            "table_path": str(table_path),
+            "cpu_summary_paths": [_repo_relative_path(path) for path in cpu_summary_paths],
+            "gpu_summary_paths": [_repo_relative_path(path) for path in gpu_summary_paths],
+            "figure_path": _repo_relative_path(figure_path),
+            "table_path": _repo_relative_path(table_path),
         },
         "records": [_export_row(row) for row in rows],
     }

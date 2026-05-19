@@ -1417,6 +1417,7 @@ class FixedBoundaryExactOptimizer:
         self._scan_exact_path = self._select_exact_path()
         self._initial_tangent_cache: dict = {}
         self._last_jacobian_residual: np.ndarray | None = None
+        self._last_jacobian_source = "exact_tape_replay"
         self._trial_residual_cache: OrderedDict[bytes, np.ndarray] = OrderedDict()
         self._trial_residual_cache_max = 8
         self._profile: dict[str, dict[str, float | int]] = {}
@@ -1592,8 +1593,14 @@ class FixedBoundaryExactOptimizer:
         rec["count"] = int(rec["count"]) + 1
         rec["wall_time_s"] = float(rec["wall_time_s"]) + float(dt)
 
-    def _profile_exact_tape_solver_timing(self, tape, tape_build_wall_s: float) -> None:
-        diagnostics = getattr(tape, "diagnostics", None)
+    def _profile_solver_timing(
+        self,
+        diagnostics,
+        *,
+        profile_prefix: str,
+        phase_wall_s: float,
+        unattributed_name: str,
+    ) -> None:
         if not isinstance(diagnostics, dict):
             return
         timing = diagnostics.get("timing")
@@ -1601,29 +1608,34 @@ class FixedBoundaryExactOptimizer:
             return
         solver_total = 0.0
         timing_keys = (
-            ("compute_forces_s", "exact_tape_solver_compute_forces"),
-            ("preconditioner_s", "exact_tape_solver_preconditioner"),
-            ("precond_refresh_s", "exact_tape_solver_precond_refresh"),
-            ("precond_apply_s", "exact_tape_solver_preconditioner_apply"),
-            ("precond_mode_scale_s", "exact_tape_solver_preconditioner_mode_scale"),
-            ("update_s", "exact_tape_solver_update"),
-            ("update_state_s", "exact_tape_solver_update_state"),
-            ("update_trace_build_s", "exact_tape_solver_update_trace_build"),
-            ("update_trace_finalize_s", "exact_tape_solver_update_trace_finalize"),
+            ("compute_forces_s", "compute_forces"),
+            ("preconditioner_s", "preconditioner"),
+            ("precond_refresh_s", "precond_refresh"),
+            ("precond_apply_s", "preconditioner_apply"),
+            ("precond_mode_scale_s", "preconditioner_mode_scale"),
+            ("update_s", "update"),
+            ("update_state_s", "update_state"),
+            ("update_trace_build_s", "update_trace_build"),
+            ("update_trace_finalize_s", "update_trace_finalize"),
         )
-        for key, profile_name in timing_keys:
+        for key, suffix in timing_keys:
             if key not in timing:
                 continue
             try:
                 value = float(timing.get(key, 0.0))
             except Exception:
                 continue
-            self._profile_add(profile_name, value)
+            self._profile_add(f"{profile_prefix}_{suffix}", value)
             if key in ("compute_forces_s", "preconditioner_s", "update_s"):
                 solver_total += max(0.0, value)
-        self._profile_add(
-            "exact_tape_build_unattributed",
-            max(0.0, float(tape_build_wall_s) - solver_total),
+        self._profile_add(unattributed_name, max(0.0, float(phase_wall_s) - solver_total))
+
+    def _profile_exact_tape_solver_timing(self, tape, tape_build_wall_s: float) -> None:
+        self._profile_solver_timing(
+            getattr(tape, "diagnostics", None),
+            profile_prefix="exact_tape_solver",
+            phase_wall_s=tape_build_wall_s,
+            unattributed_name="exact_tape_build_unattributed",
         )
 
     def _profile_dump(self) -> dict[str, dict[str, float | int]]:
@@ -1930,9 +1942,16 @@ class FixedBoundaryExactOptimizer:
                 ftol=self._inner_ftol,
                 **self._exact_solver_kwargs,
             )
+        solve_wall_s = time.perf_counter() - t_solve
+        self._profile_solver_timing(
+            getattr(result, "diagnostics", None),
+            profile_prefix="trial_solver" if trial else "forward_exact_solver",
+            phase_wall_s=solve_wall_s,
+            unattributed_name="solve_forward_trial_unattributed" if trial else "solve_forward_exact_unattributed",
+        )
         self._profile_add(
             "solve_forward_trial" if trial else "solve_forward_exact",
-            time.perf_counter() - t_solve,
+            solve_wall_s,
         )
         self._profile_add(
             "solve_forward_trial_total" if trial else "solve_forward_exact_total",
@@ -2224,6 +2243,7 @@ class FixedBoundaryExactOptimizer:
         """Exact discrete-adjoint Jacobian at *params*."""
         if self._solver_device_name is not None and not self._inside_solver_device_context:
             return self._run_in_solver_device_context(self.jacobian_fun, params)
+        self._last_jacobian_source = "exact_tape_replay"
         exact_param_key = self._exact_cache_key(params)
         if self._scan_exact_path == "scan":
             from ._compat import jnp as _jnp
@@ -2240,6 +2260,7 @@ class FixedBoundaryExactOptimizer:
             if not self._can_build_history_from_residuals():
                 self._solve_scan_exact_state(params)
             out = np.asarray(jac, dtype=float)
+            self._last_jacobian_source = "scan_exact_replay"
             self._profile_add("scan_jacobian_total", time.perf_counter() - t0)
             return out
         from ._compat import jax, jnp as _jnp
@@ -2251,6 +2272,7 @@ class FixedBoundaryExactOptimizer:
             jac_cached, residual_cached = cached_jacobian
             self._last_jacobian_residual = np.asarray(residual_cached, dtype=float).reshape(-1)
             self._remember_exact_residual(exact_param_key, self._last_jacobian_residual)
+            self._last_jacobian_source = "jacobian_cache_hit"
             self._profile_add("jacobian_cache_hit", 0.0)
             self._profile_add("jacobian_total", time.perf_counter() - t_total)
             return np.asarray(jac_cached, dtype=float).copy()
@@ -2294,6 +2316,7 @@ class FixedBoundaryExactOptimizer:
         self._profile_add("jacobian_residual_tangents", time.perf_counter() - t_res)
         out = np.asarray(jac, dtype=float)
         self._remember_exact_jacobian(exact_param_key, out, self._last_jacobian_residual)
+        self._last_jacobian_source = "exact_tape_replay"
         self._profile_add("jacobian_total", time.perf_counter() - t_total)
         return out
 
@@ -2674,6 +2697,7 @@ class FixedBoundaryExactOptimizer:
     def _jacobian_fun_tracked(self, params):
         self._last_jacobian_key[0] = self._exact_cache_key(params)
         self._last_jacobian_residual = None
+        self._last_jacobian_source = "exact_tape_replay"
         jac = self.jacobian_fun(params)
         key = self._last_jacobian_key[0]
         exact_residual = (
@@ -3574,11 +3598,12 @@ class FixedBoundaryExactOptimizer:
             def _jacobian_y(y):
                 x = np.asarray(y, dtype=float) * scale - base_params
                 t_cb = time.perf_counter()
+                self._last_jacobian_source = "exact_tape_replay"
                 jac = np.asarray(self._jacobian_fun_tracked(x), dtype=float) * scale[None, :]
                 self._trace_callback_event(
                     "jacobian",
                     x,
-                    source="exact_tape_replay",
+                    source=getattr(self, "_last_jacobian_source", "exact_tape_replay"),
                     wall_time_s=time.perf_counter() - t_cb,
                 )
                 # SciPy residual callbacks above no longer consume the exact-tape cache.

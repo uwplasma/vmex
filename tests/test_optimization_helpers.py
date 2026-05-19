@@ -1450,6 +1450,7 @@ def test_tape_jacobian_cache_skips_same_point_replay(monkeypatch):
     np.testing.assert_allclose(jac3, np.asarray([[1.0, 0.0], [0.0, 2.0]]))
     np.testing.assert_allclose(opt._last_jacobian_residual, [4.0, 8.0])
     assert opt._profile["jacobian_cache_hit"]["count"] == 2
+    assert opt._last_jacobian_source == "jacobian_cache_hit"
 
 
 def test_gauss_newton_damped_fallback_recovers_from_oversized_step():
