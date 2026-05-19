@@ -10,7 +10,7 @@ for each field period count:
 
 This script maps that seed family to the requested targets:
 
-- QI with NFP=1, 2, and 3
+- QI with NFP=1, 2, 3, and a finite-beta NFP=4 reference lane
 - QA with NFP=2
 - QH with NFP=4
 - QP with NFP=2
@@ -118,6 +118,16 @@ SHOWCASE_CASES: dict[str, MinimalSeedCase] = {
         qi_policy_case="qi_stel_seed_3127",
         qi_reference_input=DATA_DIR / "input.nfp3_QI_fixed_resolution_final",
     ),
+    "qi_nfp4": MinimalSeedCase(
+        name="qi_nfp4",
+        problem="qi",
+        nfp=4,
+        input_file=DATA_DIR / "input.minimal_seed_nfp4",
+        qi_qp_preseed=False,
+        qi_jit_booz=True,
+        qi_policy_case="nfp4_qi_finite_beta",
+        qi_reference_input=DATA_DIR / "input.nfp4_QI_finite_beta",
+    ),
     "qa_nfp2": MinimalSeedCase(
         name="qa_nfp2",
         problem="qa",
@@ -142,7 +152,7 @@ SHOWCASE_CASES: dict[str, MinimalSeedCase] = {
     ),
 }
 
-DEFAULT_CASE_ORDER = ("qi_nfp1", "qi_nfp2", "qi_nfp3", "qa_nfp2", "qh_nfp4", "qp_nfp2")
+DEFAULT_CASE_ORDER = ("qi_nfp1", "qi_nfp2", "qi_nfp3", "qi_nfp4", "qa_nfp2", "qh_nfp4", "qp_nfp2")
 
 PHYSICS_IOTA_FLOOR = 0.35
 PHYSICS_QA_IOTA_TARGET = 0.42

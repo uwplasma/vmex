@@ -177,13 +177,24 @@ then run the bounded robustness probe or select a ``RUN_CASE`` in
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp2_qi \
      python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp4_qi_finite_beta \
+     python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu \
+     VMEC_JAX_QI_INPUT=examples/data/input.minimal_seed_nfp4 \
+     VMEC_JAX_QI_LABEL=minimal_nfp4_to_qi_finite_beta_reference \
+     VMEC_JAX_QI_POLICY_CASE=nfp4_qi_finite_beta \
+     VMEC_JAX_QI_REFERENCE_INPUT=examples/data/input.nfp4_QI_finite_beta \
+     VMEC_JAX_QI_REFERENCE_LAMBDAS=1.0 \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference \
+     python examples/optimization/QI_optimization.py
 
 The second audit command uses the far-seed QI gate convention from
 ``QI_optimization.py``: legacy QI below ``2e-3`` and smooth differentiable QI
 below ``5e-3``.
 
 The README/docs QI coverage figure is rendered from existing reviewed outputs
-for both bundled QI inputs:
+for the promoted NFP=1, 2, 3, and 4 QI lanes:
 
 .. list-table::
    :header-rows: 1
@@ -199,6 +210,16 @@ for both bundled QI inputs:
      - Aspect
      - Iota
      - CPU min
+   * - ``examples/data/input.nfp1_QI``
+     - ``results/qi_opt/ess/nfp1_qi_direct_office_20260519``
+     - ``1.56e-2``
+     - ``1.48e-3``
+     - ``7.75e-4``
+     - ``0.242/0.30``
+     - ``6.24/8.2``
+     - ``9.999/10.0``
+     - ``0.5369``
+     - ``15.8``
    * - ``examples/data/input.nfp2_QI``
      - ``results/qi_opt/ess/nfp2_qi``
      - ``1.17e-2``
@@ -218,12 +239,22 @@ for both bundled QI inputs:
      - ``3.91/8.0``
      - ``3.465/4.0``
      - ``-1.0366``
-     - ``6.2``
+     - ``4.8``
+   * - ``examples/data/input.minimal_seed_nfp4``
+     - ``results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference``
+     - ``2.52e-2``
+     - ``2.56e-3``
+     - ``2.54e-4``
+     - ``0.287/0.35``
+     - ``4.14/8.2``
+     - ``6.011/6.0``
+     - ``-1.2930``
+     - ``1.2``
 
 .. image:: _static/figures/readme_qi_optimization_cases.png
    :width: 100%
    :align: center
-   :alt: QI optimization coverage for NFP=2 QI and seed-3127 inputs
+   :alt: QI optimization coverage for NFP=1, NFP=2, NFP=3, and NFP=4 inputs
 
 The initial and final Boozer ``|B|`` panels in that figure use line contours
 only.  The staged objective panel concatenates every recorded history file and
@@ -252,14 +283,16 @@ basin-survey diagnostics use fast trial solves unless ``--exact-solve`` is
 passed; use exact solves before treating their scalar values as promotion
 evidence.
 
-Current NFP=4 QI status: ``VMEC_JAX_QI_RUN_CASE=nfp4_qh_warm_to_qi`` is an
-explicit non-passing stress fixture, not a promoted QI path.  Bounded May 2026
-audits of the bundled QH warm start, a local QH-to-QI cleanup, and archived
-same-NFP QI references did not satisfy the agreed smooth/legacy QI ``< 2e-3``
-gates.  The best quick-audited archived NFP=4 QI reference found locally was
-still above the gate (smooth about ``8.4e-3``, legacy about ``5.2e-3``), so the
-example records stress-fixture metadata in ``diagnostics.json`` and should stay
-in the audit lane until a new independent smooth/legacy/mirror pass is added.
+Current NFP=4 QI status: ``VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta`` is the
+promoted finite-beta NFP=4 verification lane.  It preserves the input deck's
+``MPOL=5``, ``NTOR=5``, and VMEC convergence settings because the case is
+already in a good finite-beta QI basin; low-budget local cleanup can otherwise
+damage the tight smooth-QI gate.  The README NFP=4 minimal-seed row uses the
+same case as a policy, starts from ``examples/data/input.minimal_seed_nfp4``,
+and enables ``VMEC_JAX_QI_REFERENCE_INPUT=examples/data/input.nfp4_QI_finite_beta``
+with ``VMEC_JAX_QI_REFERENCE_LAMBDAS=1.0``.  ``VMEC_JAX_QI_RUN_CASE=nfp4_qh_warm_to_qi``
+remains an explicit non-passing stress fixture for QH-to-QI conversion and
+should not be used as a promoted QI result.
 
 Motivation: differentiability without finite differences
 ---------------------------------------------------------
@@ -1128,11 +1161,13 @@ of the file, to one of the bundled cases:
    RUN_CASE = "nfp1_qi"             # NFP=1 mirror-aware QI lane
    RUN_CASE = "nfp2_qi"             # default NFP=2 mirror-aware QI lane
    RUN_CASE = "qi_stel_seed_3127"   # unrelated seed with reference-family preconditioner
+   RUN_CASE = "nfp4_qi_finite_beta" # NFP=4 finite-beta QI verification lane
    RUN_CASE = "nfp4_qh_warm_to_qi"  # NFP=4 diagnostic stress test, using the input NFP
 
-The NFP=4 QH-warm case is deliberately listed as a stress test.  It confirms
-that the current QI driver can run the NFP=4 input path, but the available QH
-warm start does not yet pass the independent QI and mirror gates.
+The NFP=4 finite-beta case is the promoted NFP=4 QI lane.  The NFP=4 QH-warm
+case is deliberately listed as a stress test: it confirms that the current QI
+driver can run the NFP=4 input path, but the available QH warm start does not
+yet pass the independent QI and mirror gates.
 
 For example, to run the bundled near-axis stellarator seed without editing the
 script:
@@ -1145,10 +1180,21 @@ script:
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=qi_stel_seed_3127 \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_current_public_final \
      python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp4_qi_finite_beta \
+     python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu \
+     VMEC_JAX_QI_INPUT=examples/data/input.minimal_seed_nfp4 \
+     VMEC_JAX_QI_LABEL=minimal_nfp4_to_qi_finite_beta_reference \
+     VMEC_JAX_QI_POLICY_CASE=nfp4_qi_finite_beta \
+     VMEC_JAX_QI_REFERENCE_INPUT=examples/data/input.nfp4_QI_finite_beta \
+     VMEC_JAX_QI_REFERENCE_LAMBDAS=1.0 \
+     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference \
+     python examples/optimization/QI_optimization.py
 
-The script takes ``nfp`` from the VMEC input file, so the NFP=4 warm-start case
-does not need a separate driver.  To try a different VMEC input deck, add one
-dictionary entry to ``QI_CASES`` in
+The script takes ``nfp`` from the VMEC input file, so NFP=1/2/3/4 do not need
+separate drivers.  To try a different VMEC input deck, add one dictionary entry
+to ``QI_CASES`` in
 ``examples/optimization/qi_optimization_cases.py``:
 
 .. code-block:: python

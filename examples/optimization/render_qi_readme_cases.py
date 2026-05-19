@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Render README/docs coverage for the two promoted QI_optimization inputs.
+"""Render README/docs coverage for the promoted QI_optimization inputs.
 
 This renderer intentionally consumes existing reviewed outputs instead of
 launching new optimization jobs.  The initial/final Boozer |B| panels use line
@@ -38,6 +38,22 @@ class QICase:
 
 
 CASES = (
+    QICase(
+        label="NFP=1 QI",
+        input_file=REPO_ROOT / "examples" / "data" / "input.nfp1_QI",
+        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp1_qi_direct_office_20260519",
+        initial_wout=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp1_qi_direct_office_20260519" / "wout_initial.nc",
+        note="mirror-aware QI lane",
+        history_paths=(
+            REPO_ROOT
+            / "results"
+            / "qi_opt"
+            / "ess"
+            / "nfp1_qi_direct_office_20260519"
+            / "mirror_ramp_01_matrix_free_mirror030"
+            / "history.json",
+        ),
+    ),
     QICase(
         label="NFP=2 bundled QI",
         input_file=REPO_ROOT / "examples" / "data" / "input.nfp2_QI",
@@ -95,6 +111,41 @@ CASES = (
         / "qi_opt"
         / "ess"
         / "qi_stel_seed_3127_current_public_final"
+        / "boundary_reference_preconditioner"
+        / "summary.json",
+    ),
+    QICase(
+        label="NFP=4 minimal seed",
+        input_file=REPO_ROOT / "examples" / "data" / "input.minimal_seed_nfp4",
+        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "minimal_nfp4_to_qi_finite_beta_reference",
+        initial_wout=REPO_ROOT
+        / "results"
+        / "qi_opt"
+        / "ess"
+        / "minimal_nfp4_to_qi_finite_beta_reference"
+        / "wout_initial.nc",
+        note="minimal seed with same-NFP finite-beta QI reference",
+        history_paths=(
+            REPO_ROOT
+            / "results"
+            / "qi_opt"
+            / "ess"
+            / "minimal_nfp4_to_qi_finite_beta_reference"
+            / "boundary_reference_baseline"
+            / "history.json",
+            REPO_ROOT
+            / "results"
+            / "qi_opt"
+            / "ess"
+            / "minimal_nfp4_to_qi_finite_beta_reference"
+            / "mirror_ramp_01_finite_beta_qi_audit_refine"
+            / "history.json",
+        ),
+        preconditioner_summary=REPO_ROOT
+        / "results"
+        / "qi_opt"
+        / "ess"
+        / "minimal_nfp4_to_qi_finite_beta_reference"
         / "boundary_reference_preconditioner"
         / "summary.json",
     ),
@@ -448,19 +499,20 @@ def _render(records: list[dict[str, str | float]]) -> None:
         }
     )
 
-    fig = plt.figure(figsize=(21.5, 8.6))
+    row_count = len(CASES)
+    fig = plt.figure(figsize=(21.5, 4.15 * row_count + 0.8))
     gs = fig.add_gridspec(
-        len(CASES),
+        row_count,
         5,
         left=0.045,
         right=0.975,
-        bottom=0.06,
-        top=0.82,
+        bottom=0.035,
+        top=0.92,
         wspace=0.35,
         hspace=0.75,
         width_ratios=(1.05, 1.05, 1.0, 1.08, 1.08),
     )
-    fig.suptitle("QI_optimization coverage from bundled QI and seed-3127 inputs", fontsize=13, x=0.02, y=0.985, ha="left")
+    fig.suptitle("QI_optimization coverage for NFP=1, 2, 3, and 4", fontsize=13, x=0.02, y=0.992, ha="left")
     for row, (case, record) in enumerate(zip(CASES, records, strict=True)):
         ax0 = fig.add_subplot(gs[row, 0], projection="3d")
         ax1 = fig.add_subplot(gs[row, 1], projection="3d")
@@ -472,7 +524,10 @@ def _render(records: list[dict[str, str | float]]) -> None:
         _plot_history(ax2, case)
         _plot_boozer_bmag(ax3, case.initial_wout, int(record["qi_nfp"]), r"Initial Boozer $|B|$")
         _plot_boozer_bmag(ax4, case.output_dir / "wout_final.nc", int(record["qi_nfp"]), r"Final Boozer $|B|$")
-        title_y = 0.895 - 0.455 * row
+        top = 0.92
+        bottom = 0.035
+        row_height = (top - bottom) / row_count
+        title_y = top - row * row_height + 0.008
         fig.text(0.045, title_y, _row_title(record), fontsize=10, ha="left", va="bottom")
         fig.text(
             0.045,

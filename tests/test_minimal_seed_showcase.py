@@ -28,7 +28,15 @@ def test_minimal_seed_showcase_case_map_uses_three_coefficient_inputs() -> None:
 
     case_fields = {field.name for field in fields(generator.MinimalSeedCase)}
     assert {"default_max_mode", "default_use_ess", "default_policy"}.isdisjoint(case_fields)
-    assert generator.DEFAULT_CASE_ORDER == ("qi_nfp1", "qi_nfp2", "qi_nfp3", "qa_nfp2", "qh_nfp4", "qp_nfp2")
+    assert generator.DEFAULT_CASE_ORDER == (
+        "qi_nfp1",
+        "qi_nfp2",
+        "qi_nfp3",
+        "qi_nfp4",
+        "qa_nfp2",
+        "qh_nfp4",
+        "qp_nfp2",
+    )
     for case_name in generator.DEFAULT_CASE_ORDER:
         case = generator.SHOWCASE_CASES[case_name]
         text = Path(case.input_file).read_text()

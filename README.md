@@ -122,16 +122,28 @@ tables live in the docs.
 Reproduction commands for these panels live in
 `docs/optimization_sweep_results.rst`.
 
-Seed-robust QI coverage is tracked separately below. Common minimal-seed
-stress tests are documented in `docs/optimization.rst` and are intentionally
-failure-revealing.
+`QI_optimization.py` also has reviewed NFP=1, 2, 3, and 4 QI lanes that use the
+same script with a different input/case selection. The NFP=4 row starts from
+the deliberately simple `input.minimal_seed_nfp4` deck and uses a same-NFP
+finite-beta QI reference preconditioner before the guarded QI audit/refinement
+stage.
 
 <p align="center">
   <img src="docs/_static/figures/readme_qi_optimization_cases.png" width="980" />
 </p>
 
-Reproduction commands for the QI coverage panel live in
-`docs/optimization_sweep_results.rst`.
+Run one of those cases with:
+
+```bash
+PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi python examples/optimization/QI_optimization.py
+```
+
+Use `VMEC_JAX_QI_RUN_CASE=nfp1_qi`, `nfp2_qi`, `qi_stel_seed_3127`, or
+`nfp4_qi_finite_beta`. For a new same-NFP seed, set `VMEC_JAX_QI_INPUT` and,
+when available, `VMEC_JAX_QI_REFERENCE_INPUT`; for example the NFP=4 minimal
+seed row uses `VMEC_JAX_QI_INPUT=examples/data/input.minimal_seed_nfp4` and
+`VMEC_JAX_QI_REFERENCE_INPUT=examples/data/input.nfp4_QI_finite_beta`. Full
+examples and caveats are in `docs/optimization.rst`.
 
 ## Performance, Validation, Release
 

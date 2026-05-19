@@ -32,7 +32,7 @@ import qi_optimization_support as qis
 enable_x64(True)
 
 AVAILABLE_QI_CASES = tuple(sorted(QI_CASES))
-RUN_CASE = "nfp2_qi"  # Try "nfp1_qi", "qi_stel_seed_3127", or "nfp4_qh_warm_to_qi".
+RUN_CASE = "nfp2_qi"  # Try "nfp1_qi", "qi_stel_seed_3127", "nfp4_qi_finite_beta", or "nfp4_qh_warm_to_qi".
 RUN_CASE, CASE = resolve_qi_case()
 
 # Problem parameters.  The default case uses the bundled NFP=2 omnigenity seed
@@ -80,10 +80,10 @@ SCIPY_LSMR_MAXITER = None  # None lets SciPy choose; set an int to cap LSMR iter
 FTOL = 1.0e-4  # Relative cost-reduction tolerance for the outer optimizer.
 GTOL = 1.0e-4  # Gradient optimality tolerance for the outer optimizer.
 XTOL = 1.0e-8  # Step-size tolerance; QI often benefits from a tighter value.
-INNER_MAX_ITER = int(os.environ.get("VMEC_JAX_QI_INNER_MAX_ITER", 120))  # 0 uses NITER from the input deck.
-INNER_FTOL = float(os.environ.get("VMEC_JAX_QI_INNER_FTOL", 1.0e-9))  # 0 uses FTOL from the input deck.
-TRIAL_MAX_ITER = int(os.environ.get("VMEC_JAX_QI_TRIAL_MAX_ITER", 120))  # 0 follows accepted/input budget.
-TRIAL_FTOL = float(os.environ.get("VMEC_JAX_QI_TRIAL_FTOL", 1.0e-9))  # 0 follows accepted/input tolerance.
+INNER_MAX_ITER = int(os.environ.get("VMEC_JAX_QI_INNER_MAX_ITER", CASE.get("inner_max_iter", 120)))  # 0 uses NITER from the input deck.
+INNER_FTOL = float(os.environ.get("VMEC_JAX_QI_INNER_FTOL", CASE.get("inner_ftol", 1.0e-9)))  # 0 uses FTOL from the input deck.
+TRIAL_MAX_ITER = int(os.environ.get("VMEC_JAX_QI_TRIAL_MAX_ITER", CASE.get("trial_max_iter", 120)))  # 0 follows accepted/input budget.
+TRIAL_FTOL = float(os.environ.get("VMEC_JAX_QI_TRIAL_FTOL", CASE.get("trial_ftol", 1.0e-9)))  # 0 follows accepted/input tolerance.
 _SOLVER_DEVICE_ENV = os.environ.get("VMEC_JAX_QI_SOLVER_DEVICE")
 SOLVER_DEVICE = None if _SOLVER_DEVICE_ENV in (None, "", "none", "None") else _SOLVER_DEVICE_ENV  # Set "cpu" or "gpu" to force one backend.
 USE_ESS = os.environ.get("VMEC_JAX_QI_USE_ESS", "1").strip().lower() not in {"0", "false", "no", "off"}
