@@ -27,6 +27,17 @@ import numpy as np
 from ._compat import has_jax, jax, jnp, jit
 from . import _solve_runtime
 from . import solve_residual_iter_policy as _residual_iter_policy
+from .solve_residual_iter_config import (
+    HEAVY_DUMP_ENVS as _HEAVY_DUMP_ENVS,
+    LIGHT_DUMP_ENVS as _LIGHT_DUMP_ENVS,
+    bad_jacobian_tau_tolerance as _bad_jacobian_tau_tolerance,
+    normalize_debug_print_mode as _normalize_debug_print_mode,
+    parse_bad_jacobian_config as _parse_bad_jacobian_config,
+    resolve_chunked_scan_config as _resolve_chunked_scan_config,
+    resolve_debug_print_config as _resolve_debug_print_config,
+    resolve_dump_history_config as _resolve_dump_history_config,
+    resolve_nstep_screen as _resolve_nstep_screen,
+)
 from .solve_residual_iter_policy import (
     append_residual_iter_history_record as _append_residual_iter_history_record,
     append_residual_iter_terminal_history as _append_residual_iter_terminal_history,
@@ -4748,29 +4759,15 @@ def solve_fixed_boundary_residual_iter(
     lambda_update_scale = opts.lambda_update_scale
     enforce_vmec_lambda_axis = opts.enforce_vmec_lambda_axis
     vmec2000_control = opts.vmec2000_control
-    badjac_mode_env = os.getenv("VMEC_JAX_BADJAC_MODE", "ptau").strip().lower()
-    if badjac_mode_env not in ("ptau", "state"):
-        badjac_mode_env = "ptau"
-    badjac_mode = badjac_mode_env
-    badjac_use_state = badjac_mode == "state"
-    dump_ptau_state_env = os.getenv("VMEC_JAX_DUMP_PTAU_STATE", "0").strip().lower()
-    dump_ptau_state = dump_ptau_state_env not in ("", "0", "false", "no")
+    badjac_config = _parse_bad_jacobian_config(os.environ)
+    badjac_mode = badjac_config.mode
+    badjac_use_state = badjac_config.use_state
+    dump_ptau_state = badjac_config.dump_ptau_state
     light_history = _resolve_light_history(light_history, env_value=os.getenv("VMEC_JAX_LIGHT_HISTORY", "0"))
     resume_state_mode = _normalize_resume_state_mode(resume_state_mode)
-    badjac_state_probe_env = os.getenv("VMEC_JAX_BADJAC_STATE_PROBE", "0").strip().lower()
-    badjac_state_probe = badjac_state_probe_env not in ("", "0", "false", "no")
-    ptau_tol_env = os.getenv("VMEC_JAX_PTAU_TOL", "").strip()
-    ptau_tol_rel_env = os.getenv("VMEC_JAX_PTAU_TOL_REL", "1.0e-6").strip()
-    try:
-        ptau_tol = float(ptau_tol_env) if ptau_tol_env else 0.0
-    except Exception:
-        ptau_tol = 0.0
-    try:
-        ptau_tol_rel = float(ptau_tol_rel_env) if ptau_tol_rel_env else 0.0
-    except Exception:
-        ptau_tol_rel = 0.0
-    if ptau_tol_rel < 0.0:
-        ptau_tol_rel = 0.0
+    badjac_state_probe = badjac_config.state_probe
+    ptau_tol = badjac_config.ptau_tol
+    ptau_tol_rel = badjac_config.ptau_tol_rel
     reference_mode = opts.reference_mode
     jit_precompile = opts.jit_precompile
     restart_flags = _resolve_restart_flags(
@@ -4824,52 +4821,33 @@ def solve_fixed_boundary_residual_iter(
     use_scan = bool(use_scan)
     # Default to chunked scan to reduce per-iteration host sync overhead.
     # Respect explicit non-scan requests (e.g., parity comparators).
-    chunked_device_env = os.getenv("VMEC_JAX_VMEC2000_CHUNKED", "1").strip().lower()
-    force_chunked_scan = chunked_device_env not in ("", "0", "false", "no")
-    differentiating_scan = bool(use_scan) and _tree_has_tracer(state0)
-    if force_chunked_scan and (not use_scan):
-        force_chunked_scan = False
-    if differentiating_scan:
-        # Differentiating the scan solve requires a single traceable lax.scan.
-        # Host-side chunking/fallback probes inspect tracer booleans with NumPy
-        # and are therefore only valid for ordinary primal runs.
-        force_chunked_scan = False
-        scan_fallback_enabled = False
+    chunked_scan_config = _resolve_chunked_scan_config(
+        use_scan=bool(use_scan),
+        state_has_tracer=_tree_has_tracer(state0),
+        scan_fallback_enabled=bool(scan_fallback_enabled),
+        chunked_env=os.getenv("VMEC_JAX_VMEC2000_CHUNKED", "1"),
+    )
+    force_chunked_scan = chunked_scan_config.force_chunked_scan
+    scan_fallback_enabled = chunked_scan_config.scan_fallback_enabled
     limit_dt_from_force = opts.limit_dt_from_force
     limit_update_rms = opts.limit_update_rms
     backtracking = opts.backtracking
     strict_update = opts.strict_update
-    light_dump_envs = (
-        "VMEC_JAX_DUMP_SCALARS",
-        "VMEC_JAX_DUMP_GCX2",
-        "VMEC_JAX_DUMP_FSQ1",
-        "VMEC_JAX_DUMP_TIMECONTROL",
-        "VMEC_JAX_DUMP_CHECKPOINT",
+    dump_history_config = _resolve_dump_history_config(
+        env=os.environ,
+        jit_forces=bool(jit_forces),
+        light_history=bool(light_history),
+        heavy_dump_envs=_HEAVY_DUMP_ENVS,
+        light_dump_envs=_LIGHT_DUMP_ENVS,
     )
-    heavy_dump_envs = (
-        "VMEC_JAX_DUMP_TOMNSPS",
-        "VMEC_JAX_DUMP_TOMNSPS_KERNELS",
-        "VMEC_JAX_DUMP_FORCE_KERNELS",
-        "VMEC_JAX_DUMP_GC",
-        "VMEC_JAX_DUMP_BSUBE",
-        "VMEC_JAX_DUMP_BSUBE_TERMS",
-        "VMEC_JAX_DUMP_LULV",
-        "VMEC_JAX_DUMP_XC",
-        "VMEC_JAX_DUMP_LAM",
-        "VMEC_JAX_DUMP_LAMCAL",
-        "VMEC_JAX_DUMP_LAM_FSQL1",
-        "VMEC_JAX_DUMP_LAM_GCL",
-    )
-    dumps_enabled = any(os.getenv(name, "") not in ("", "0") for name in heavy_dump_envs)
-    dump_any = dumps_enabled or any(os.getenv(name, "") not in ("", "0") for name in light_dump_envs)
-    if dumps_enabled and jit_forces:
+    dumps_enabled = dump_history_config.dumps_enabled
+    dump_any = dump_history_config.dump_any
+    if dump_history_config.disabled_jit_for_dumps:
         if verbose:
             print("[solve_fixed_boundary_residual_iter] jit_forces disabled (debug dumps enabled)")
-        jit_forces = False
-    if dump_any:
-        # Force full histories when parity dumps are enabled.
-        light_history = False
-    track_history = not light_history
+    jit_forces = dump_history_config.jit_forces
+    light_history = dump_history_config.light_history
+    track_history = dump_history_config.track_history
 
     def _pack_resume_state(base: dict[str, Any], heavy: dict[str, Any] | None = None):
         return _pack_resume_state_record(base=base, heavy=heavy, mode=resume_state_mode)
@@ -6739,9 +6717,10 @@ def solve_fixed_boundary_residual_iter(
         restart_badprog_factor = 1.03
         vmec2000_fact = 1.0e4
         iter_offset0 = 0
-        nstep_screen = int(indata.get_int("NSTEP", 1)) if indata is not None else 1
-        if nstep_screen < 1:
-            nstep_screen = 1
+        nstep_screen = _resolve_nstep_screen(
+            indata_nstep=int(indata.get_int("NSTEP", 1)) if indata is not None else 1,
+            override_env="",
+        )
         scan_options = _vmec2000_scan_options_from_env(
             verbose=bool(verbose),
             vmec2000_control=bool(vmec2000_control),
@@ -6811,7 +6790,7 @@ def solve_fixed_boundary_residual_iter(
             try:
                 from jax.experimental import io_callback as _io_callback
             except Exception:
-                scan_print_mode = "debug_print"
+                scan_print_mode = _normalize_debug_print_mode("debug_print")
                 _io_callback = None  # type: ignore[assignment]
         scan_trace_ctx = None
         if scan_trace:
@@ -7160,7 +7139,11 @@ def solve_fixed_boundary_residual_iter(
                     min_tau_ptau0 = float(np.asarray(ptau_min0))
                     max_tau_ptau0 = float(np.asarray(ptau_max0))
                     ptau_scale0 = max(abs(min_tau_ptau0), abs(max_tau_ptau0))
-                    tau_tol_ptau0 = max(abs(ptau_tol), ptau_tol_rel * ptau_scale0)
+                    tau_tol_ptau0 = _bad_jacobian_tau_tolerance(
+                        ptau_tol=ptau_tol,
+                        ptau_tol_rel=ptau_tol_rel,
+                        tau_scale=ptau_scale0,
+                    )
                     bad_jacobian_ptau = (min_tau_ptau0 < -tau_tol_ptau0) and (max_tau_ptau0 > tau_tol_ptau0)
                 except Exception:
                     bad_jacobian_ptau = None
@@ -10263,10 +10246,14 @@ def solve_fixed_boundary_residual_iter(
     # iteration initializes forces to 1.0). Track that explicitly.
     prev_rz_fsq = 2.0
 
-    scan_print_env = os.getenv("VMEC_JAX_SCAN_PRINT", "1").strip().lower()
-    scan_print_mode = os.getenv("VMEC_JAX_SCAN_PRINT_MODE", "debug_print").strip().lower()
-    scan_print_ordered = os.getenv("VMEC_JAX_SCAN_PRINT_ORDERED", "0").strip().lower() not in ("", "0", "false", "no")
-    print_live = scan_print_env not in ("", "0", "false", "no")
+    debug_print_config = _resolve_debug_print_config(
+        print_env=os.getenv("VMEC_JAX_SCAN_PRINT", "1"),
+        mode_env=os.getenv("VMEC_JAX_SCAN_PRINT_MODE", "debug_print"),
+        ordered_env=os.getenv("VMEC_JAX_SCAN_PRINT_ORDERED", "0"),
+    )
+    scan_print_mode = debug_print_config.mode
+    scan_print_ordered = debug_print_config.ordered
+    print_live = debug_print_config.print_live
     _jax_debug = None
     _io_callback = None
     if print_live:
@@ -10274,13 +10261,16 @@ def solve_fixed_boundary_residual_iter(
             from jax import debug as _jax_debug  # type: ignore[assignment]
         except Exception:
             _jax_debug = None
-    if scan_print_mode not in ("debug_print", "debug_callback", "io_callback"):
-        scan_print_mode = "debug_print"
     if scan_print_mode == "io_callback":
         try:
             from jax.experimental import io_callback as _io_callback  # type: ignore[assignment]
         except Exception:
-            scan_print_mode = "debug_print"
+            scan_print_mode = _resolve_debug_print_config(
+                print_env="1",
+                mode_env=scan_print_mode,
+                ordered_env="0",
+                io_callback_available=False,
+            ).mode
             _io_callback = None
 
     def _print_vmec2000_iter_row(
@@ -10485,15 +10475,10 @@ def solve_fixed_boundary_residual_iter(
                     flush=True,
                 )
 
-    nstep_screen = int(indata.get_int("NSTEP", 1)) if indata is not None else 1
-    nstep_override = os.getenv("VMEC_JAX_NSTEP_OVERRIDE", "").strip()
-    if nstep_override not in ("", "0"):
-        try:
-            nstep_screen = int(nstep_override)
-        except Exception:
-            pass
-    if nstep_screen < 1:
-        nstep_screen = 1
+    nstep_screen = _resolve_nstep_screen(
+        indata_nstep=int(indata.get_int("NSTEP", 1)) if indata is not None else 1,
+        override_env=os.getenv("VMEC_JAX_NSTEP_OVERRIDE", ""),
+    )
 
     def _should_print_vmec2000(iter_idx: int, max_iter: int) -> bool:
         return _should_print_vmec2000_row(
@@ -12225,7 +12210,11 @@ def solve_fixed_boundary_residual_iter(
                 if ptau_min is not None and ptau_max is not None:
                     min_tau_ptau, max_tau_ptau = _device_get_floats(ptau_min, ptau_max)
                     if bool(vmec2000_control):
-                        tau_tol = max(abs(ptau_tol), 0.0)
+                        tau_tol = _bad_jacobian_tau_tolerance(
+                            ptau_tol=ptau_tol,
+                            ptau_tol_rel=0.0,
+                            tau_scale=0.0,
+                        )
                         bad_jacobian_ptau = (min_tau_ptau < -tau_tol) and (max_tau_ptau > tau_tol)
                     else:
                         tau_scale = max(abs(min_tau_ptau), abs(max_tau_ptau))
@@ -12261,7 +12250,11 @@ def solve_fixed_boundary_residual_iter(
                         max_tau_state = float("nan")
                     if np.isfinite(min_tau_state) and np.isfinite(max_tau_state):
                         if bool(vmec2000_control):
-                            tau_tol = max(abs(ptau_tol), 0.0)
+                            tau_tol = _bad_jacobian_tau_tolerance(
+                                ptau_tol=ptau_tol,
+                                ptau_tol_rel=0.0,
+                                tau_scale=0.0,
+                            )
                             bad_jacobian_state = (min_tau_state < -tau_tol) and (max_tau_state > tau_tol)
                         else:
                             tau_scale = max(abs(min_tau_state), abs(max_tau_state))
