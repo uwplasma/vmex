@@ -4,10 +4,25 @@ from types import SimpleNamespace
 
 import numpy as np
 
+import vmec_jax.wout as wout_module
 from vmec_jax.modes import ModeTable
 from vmec_jax.state import StateLayout, VMECState
 from vmec_jax.vmec_tomnsp import vmec_trig_tables
-from vmec_jax.wout import _bsubuv_parity_from_state, _compute_bsubs_half_mesh, _vmec_wrout_nyquist_lasym_loop
+from vmec_jax.wout import (
+    _bsubuv_parity_from_state,
+    _compute_bsubs_half_mesh,
+    _filter_bsubuv_jxbforce_lasym_loop,
+    _filter_bsubuv_jxbforce_loop,
+    _filter_bsubuv_jxbforce_parity_loop,
+    _jxbforce_apply_bsubs_correction_lasym_false,
+    _jxbforce_apply_bsubs_correction_lasym_true,
+    _jxbforce_bsubsu_bsubsv_loop,
+    _jxbforce_filter_with_bsubs_derivs_loop,
+    _jxbforce_getbsubs_coeffs_lasym_false,
+    _jxbforce_getbsubs_coeffs_lasym_true,
+    _jxbforce_nyquist_limits,
+    _vmec_wrout_nyquist_lasym_loop,
+)
 
 
 def _state_and_modes(ns: int = 3) -> tuple[VMECState, ModeTable]:
@@ -71,8 +86,30 @@ def test_compute_bsubs_half_mesh_covers_parity_force_jacobian_and_dump_paths(mon
         assert dump["bsubs"].shape == shape
         assert dump["gsu"].shape == shape
 
-    monkeypatch.delenv("VMEC_JAX_DUMP_BSS_INPUTS", raising=False)
+    class BadR12:
+        @property
+        def r12(self):
+            raise RuntimeError("synthetic missing r12")
+
     monkeypatch.delenv("VMEC_JAX_DUMP_BSS_TERMS", raising=False)
+    monkeypatch.setenv("VMEC_JAX_DUMP_TAG", "bad_r12")
+    bad_r12_out = _compute_bsubs_half_mesh(
+        state=state,
+        geom_modes=modes,
+        s=s,
+        lconm1=False,
+        lthreed=False,
+        lasym=False,
+        bsupu=bsupu,
+        bsupv=bsupv,
+        trig=trig,
+        geom=parity_geom,
+        jac_half=BadR12(),
+    )
+    assert bad_r12_out.shape == shape
+    assert (tmp_path / "bss_inputs_jax_bad_r12.dat").exists()
+
+    monkeypatch.delenv("VMEC_JAX_DUMP_BSS_INPUTS", raising=False)
 
     force_out = _compute_bsubs_half_mesh(
         state=state,
@@ -129,6 +166,42 @@ def test_compute_bsubs_half_mesh_covers_parity_force_jacobian_and_dump_paths(mon
     )
     assert fallback_out.shape == shape
     assert np.all(np.isfinite(fallback_out))
+
+    single_surface_shape = (1, int(trig.ntheta2), int(np.asarray(trig.cosnv).shape[0]))
+    single_out = _compute_bsubs_half_mesh(
+        state=_state_and_modes(ns=1)[0],
+        geom_modes=modes,
+        s=np.asarray([0.0]),
+        lconm1=False,
+        lthreed=False,
+        lasym=False,
+        bsupu=np.ones(single_surface_shape),
+        bsupv=np.ones(single_surface_shape),
+        trig=trig,
+        geom={},
+    )
+    np.testing.assert_allclose(single_out, 0.0)
+
+
+def test_state_geometry_helpers_cover_inferred_lasym_and_generated_trig_paths() -> None:
+    state, modes = _state_and_modes()
+    trig = vmec_trig_tables(ntheta=4, nzeta=2, nfp=1, mmax=1, nmax=0, lasym=False, cache=False)
+
+    inferred = wout_module._vmec_realspace_geom_light_from_state(
+        state=state,
+        modes=modes,
+        trig=trig,
+        lasym=None,
+    )
+    assert set(inferred) == {"R", "Z", "Zu"}
+    assert inferred["R"].shape == (1, int(trig.ntheta2), int(np.asarray(trig.cosnv).shape[0]))
+
+    static = SimpleNamespace(
+        cfg=SimpleNamespace(ntheta=4, nzeta=2, nfp=1, mpol=1, ntor=0, lasym=False),
+        modes=modes,
+    )
+    aspect = wout_module.equilibrium_aspect_ratio_from_state(state=state, static=static)
+    assert np.isfinite(float(np.asarray(aspect)))
 
 
 def test_vmec_wrout_nyquist_lasym_loop_covers_symmetric_asymmetric_channels() -> None:
@@ -262,3 +335,244 @@ def test_bsubuv_parity_from_state_flips_only_odd_channel_when_odd_m_geometry_cha
     assert float(np.linalg.norm(bsubu_odd[1:])) > 0.0
     np.testing.assert_allclose(flipped_v_even, bsubv_even, atol=1.0e-14)
     np.testing.assert_allclose(flipped_v_odd, bsubv_odd, atol=1.0e-14)
+
+    constrained = _bsubuv_parity_from_state(
+        state=state,
+        geom_modes=modes,
+        trig=trig,
+        s=s,
+        lconm1=True,
+        lthreed=True,
+        lasym=False,
+        bsupu=bsupu,
+        bsupv=bsupv,
+        lu1_full=lambda_u,
+        lv1_full=lambda_v,
+        sqrtg=sqrtg,
+    )
+    assert [arr.shape for arr in constrained] == [shape] * 4
+    assert all(np.all(np.isfinite(arr)) for arr in constrained)
+
+
+def test_jxbforce_loop_filters_cover_single_surface_and_nyquist_weight_branches() -> None:
+    trig = vmec_trig_tables(ntheta=4, nzeta=5, nfp=1, mmax=2, nmax=2, lasym=False, cache=False)
+    ns = 1
+    nt2 = int(trig.ntheta2)
+    nzeta = int(np.asarray(trig.cosnv).shape[0])
+    mnyq, _ = _jxbforce_nyquist_limits(trig)
+    shape = (ns, nt2, nzeta)
+    base = _grid_field(shape, -0.25, scale=0.07)
+    s_single = np.asarray([0.25])
+
+    parity = _filter_bsubuv_jxbforce_parity_loop(
+        bsubu_even=base,
+        bsubu_odd=0.5 * base,
+        bsubv_even=np.cos(base),
+        bsubv_odd=0.25 * np.cos(base),
+        trig=trig,
+        mmax_force=mnyq,
+        nmax_force=1,
+        s=s_single,
+    )
+    assert [arr.shape for arr in parity] == [shape] * 2
+    assert all(np.all(np.isfinite(arr)) for arr in parity)
+
+    coupled = _jxbforce_filter_with_bsubs_derivs_loop(
+        bsubs=np.sin(base),
+        bsubu_even=base,
+        bsubu_odd=0.5 * base,
+        bsubv_even=np.cos(base),
+        bsubv_odd=0.25 * np.cos(base),
+        trig=trig,
+        mmax_force=mnyq,
+        nmax_force=1,
+        s=s_single,
+    )
+    assert [arr.shape for arr in coupled] == [shape] * 4
+    assert all(np.all(np.isfinite(arr)) for arr in coupled)
+
+    loop_u, loop_v = _filter_bsubuv_jxbforce_loop(
+        bsubu=base,
+        bsubv=np.cos(base),
+        trig=trig,
+        mmax_force=mnyq,
+        nmax_force=1,
+        s=s_single,
+    )
+    assert loop_u.shape == shape
+    assert loop_v.shape == shape
+    assert np.all(np.isfinite(loop_u))
+    assert np.all(np.isfinite(loop_v))
+
+    deriv_u, deriv_v = _jxbforce_bsubsu_bsubsv_loop(
+        bsubs=np.sin(base),
+        trig=trig,
+        mmax_force=mnyq,
+        nmax_force=1,
+    )
+    assert deriv_u.shape == shape
+    assert deriv_v.shape == shape
+    assert np.all(np.isfinite(deriv_u))
+    assert np.all(np.isfinite(deriv_v))
+
+
+def test_lasym_filter_loop_covers_fallback_channels_and_nyquist_weight_branch() -> None:
+    trig = vmec_trig_tables(ntheta=4, nzeta=5, nfp=1, mmax=2, nmax=2, lasym=True, cache=False)
+    ns = 1
+    nt3 = int(trig.ntheta3)
+    nzeta = int(np.asarray(trig.cosnv).shape[0])
+    mnyq, _ = _jxbforce_nyquist_limits(trig)
+    shape = (ns, nt3, nzeta)
+    bsubu = _grid_field(shape, 0.15, scale=0.04)
+    bsubv = np.cos(bsubu)
+
+    filtered_u, filtered_v = _filter_bsubuv_jxbforce_lasym_loop(
+        bsubu=bsubu,
+        bsubv=bsubv,
+        trig=trig,
+        mmax_force=mnyq,
+        nmax_force=1,
+        s=np.asarray([0.25]),
+    )
+    assert filtered_u.shape == shape
+    assert filtered_v.shape == shape
+    assert np.all(np.isfinite(filtered_u))
+    assert np.all(np.isfinite(filtered_v))
+
+
+def test_getbsubs_coefficients_use_lstsq_when_direct_solve_fails(monkeypatch) -> None:
+    trig_false = vmec_trig_tables(ntheta=4, nzeta=4, nfp=1, mmax=2, nmax=2, lasym=False, cache=False)
+    nt2 = int(trig_false.ntheta2)
+    nzeta = int(np.asarray(trig_false.cosnv).shape[0])
+    grid = np.arange(nt2 * nzeta, dtype=float).reshape(nt2, nzeta)
+
+    trig_true = vmec_trig_tables(ntheta=4, nzeta=1, nfp=1, mmax=2, nmax=0, lasym=True, cache=False)
+    nt3 = int(trig_true.ntheta3)
+    grid_true = np.arange(nt3, dtype=float).reshape(nt3, 1)
+
+    def fail_solve(*_args, **_kwargs):
+        raise np.linalg.LinAlgError("force least-squares fallback")
+
+    monkeypatch.setattr(wout_module.np.linalg, "solve", fail_solve)
+
+    coeff_false = _jxbforce_getbsubs_coeffs_lasym_false(
+        frho=0.1 + np.sin(grid),
+        bsupu=1.0 + 0.2 * np.cos(grid),
+        bsupv=0.7 + 0.1 * np.sin(2.0 * grid),
+        trig=trig_false,
+        nfp=1,
+    )
+    assert coeff_false is not None
+    assert coeff_false.shape == (nt2, 2 * (nzeta // 2) + 1)
+    assert np.all(np.isfinite(coeff_false))
+
+    coeff_true = _jxbforce_getbsubs_coeffs_lasym_true(
+        frho=0.1 + np.sin(grid_true),
+        bsupu=1.0 + 0.2 * np.cos(grid_true),
+        bsupv=0.7 + 0.1 * np.sin(2.0 * grid_true),
+        trig=trig_true,
+        nfp=1,
+    )
+    assert coeff_true is not None
+    assert coeff_true.shape == (int(trig_true.ntheta2), 1, 2)
+    assert np.all(np.isfinite(coeff_true))
+
+
+def test_bsubs_correction_helpers_keep_inputs_when_coefficients_are_unavailable(monkeypatch) -> None:
+    trig_false = vmec_trig_tables(ntheta=4, nzeta=3, nfp=1, mmax=2, nmax=1, lasym=False, cache=False)
+    ns = 3
+    nt2 = int(trig_false.ntheta2)
+    nzeta = int(np.asarray(trig_false.cosnv).shape[0])
+    shape = (ns, nt2, nzeta)
+    ones = np.ones(shape)
+    bsubs = _grid_field(shape, 0.2, scale=0.03)
+    bsubsu = _grid_field(shape, -0.1, scale=0.02)
+    bsubsv = _grid_field(shape, 0.4, scale=0.01)
+
+    monkeypatch.setattr(wout_module, "_jxbforce_getbsubs_coeffs_lasym_false", lambda **_: None)
+    out_false = _jxbforce_apply_bsubs_correction_lasym_false(
+        bsubu=ones,
+        bsubv=2.0 * ones,
+        bsubs=bsubs.copy(),
+        bsubsu=bsubsu.copy(),
+        bsubsv=bsubsv.copy(),
+        bsupu=0.3 * ones,
+        bsupv=0.2 * ones,
+        sqrtg=ones,
+        pres=np.asarray([0.0, 0.1, 0.2]),
+        vp=np.asarray([1.0, 1.2, 1.4]),
+        hs=0.5,
+        signgs=1.0,
+        trig=trig_false,
+        nfp=1,
+        sum_w=lambda arr: float(np.sum(arr)),
+    )
+    np.testing.assert_allclose(out_false[0][1], bsubs[1])
+    np.testing.assert_allclose(out_false[1], bsubsu)
+    np.testing.assert_allclose(out_false[2], bsubsv)
+
+    early_false = _jxbforce_apply_bsubs_correction_lasym_false(
+        bsubu=ones,
+        bsubv=2.0 * ones,
+        bsubs=bsubs.copy(),
+        bsubsu=bsubsu.copy(),
+        bsubsv=bsubsv.copy(),
+        bsupu=0.3 * ones,
+        bsupv=0.2 * ones,
+        sqrtg=ones,
+        pres=np.asarray([0.0, 0.1, 0.2]),
+        vp=np.asarray([1.0, 1.2, 1.4]),
+        hs=0.0,
+        signgs=1.0,
+        trig=trig_false,
+        nfp=1,
+        sum_w=lambda arr: float(np.sum(arr)),
+    )
+    np.testing.assert_allclose(early_false[0], bsubs)
+
+    trig_true = vmec_trig_tables(ntheta=4, nzeta=1, nfp=1, mmax=2, nmax=0, lasym=True, cache=False)
+    nt3 = int(trig_true.ntheta3)
+    full_shape = (ns, nt3, 1)
+    full_ones = np.ones(full_shape)
+    full_bsubs = _grid_field(full_shape, 0.1, scale=0.05)
+    monkeypatch.setattr(wout_module, "_jxbforce_getbsubs_coeffs_lasym_true", lambda **_: None)
+    out_true = _jxbforce_apply_bsubs_correction_lasym_true(
+        bsubu=full_ones,
+        bsubv=2.0 * full_ones,
+        bsubs=full_bsubs.copy(),
+        bsubsu=np.zeros(full_shape),
+        bsubsv=np.zeros(full_shape),
+        bsupu=0.3 * full_ones,
+        bsupv=0.2 * full_ones,
+        sqrtg=full_ones,
+        pres=np.asarray([0.0, 0.1, 0.2]),
+        vp=np.asarray([1.0, 1.2, 1.4]),
+        hs=0.5,
+        signgs=1.0,
+        trig=trig_true,
+        nfp=1,
+        sum_w=lambda arr: float(np.sum(arr)),
+    )
+    np.testing.assert_allclose(out_true[0][1], full_bsubs[1])
+    np.testing.assert_allclose(out_true[1], 0.0)
+    np.testing.assert_allclose(out_true[2], 0.0)
+
+    short_trig = SimpleNamespace(ntheta1=1, ntheta2=2, ntheta3=1, cosnv=np.ones((1, 1)))
+    early_true = _jxbforce_apply_bsubs_correction_lasym_true(
+        bsubu=ones,
+        bsubv=2.0 * ones,
+        bsubs=bsubs.copy(),
+        bsubsu=bsubsu.copy(),
+        bsubsv=bsubsv.copy(),
+        bsupu=0.3 * ones,
+        bsupv=0.2 * ones,
+        sqrtg=ones,
+        pres=np.asarray([0.0, 0.1, 0.2]),
+        vp=np.asarray([1.0, 1.2, 1.4]),
+        hs=0.0,
+        signgs=1.0,
+        trig=short_trig,
+        nfp=1,
+        sum_w=lambda arr: float(np.sum(arr)),
+    )
+    np.testing.assert_allclose(early_true[0], bsubs)
