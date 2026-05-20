@@ -22,6 +22,46 @@ and QI targets:
   best gated QI row starts the constrained QI refinement directly from the seed
   with ``--qi-qp-preseed off``.
 
+Publication structure
+---------------------
+
+The split between README and docs is deliberate:
+
+- ``README.md`` shows only the best reviewed ``LASYM = F`` QA/QH/QP/QI rows,
+  using the four compact ``readme_best_optimization_*.png`` panels and the
+  short reproduction command.
+- This page is the publication home for full sweeps: every CPU/GPU,
+  continuation/direct, ESS on/off, QI preseed/no-preseed, and LASYM row should
+  be represented here through downloadable CSV/JSON summaries plus generated
+  objective-history panels, final-state atlases, and wall-time summary tables.
+- Additional QI case coverage, including NFP=1/2/3/4 case-gated rows that use
+  case-specific aspect targets, belongs here rather than in the README best-row
+  section.
+
+Every published full-sweep result should provide these assets under
+``docs/_static/figures``:
+
+- ``qs_ess_summary_all.csv`` and ``qs_ess_summary_all.json`` with all row
+  diagnostics, including wall time, backend/device metadata, success/crash
+  status, active policy, and output provenance.
+- Objective history over all stages:
+  ``objective_panel_all_policies.png/.pdf``, CPU/GPU policy subsets, LASYM
+  variants when present, and the legacy ``objective_panel`` aliases.
+- Initial/final 3D and initial/final LCFS ``|B|`` atlases:
+  ``final_state_atlas_*.png/.pdf``.  Boozer-space ``|B|`` must be drawn with
+  line contours, not ``contourf``.
+- Wall-time and status table figures:
+  ``summary_tables_*.png/.pdf`` plus the CSV/JSON downloads above.
+- Optional full report composites:
+  ``publication_panel_full.png/.pdf`` and LASYM variants.
+
+The checked-in source tree currently contains the compact README panels, the
+QI case-coverage panel, the constrained-QI status panel, and CSV/JSON summary
+files.  It does not currently contain the full objective-history panels,
+final-state atlases, summary-table images, or publication-panel composites.
+Those assets must be regenerated or copied into ``docs/_static/figures`` before
+claiming a complete full-sweep docs publication.
+
 Individual Examples
 -------------------
 
@@ -107,7 +147,7 @@ The dry-run manifest is the intended bridge between seed audit and full
 seed-robust QI sweeps.  It is bounded by design and should be inspected before
 switching to ``--prefine-probes run``.
 
-The README NFP=4 QI lane starts from ``examples/data/input.minimal_seed_nfp4``
+The docs NFP=4 QI coverage lane starts from ``examples/data/input.minimal_seed_nfp4``
 with only ``RBC(0,0)``, ``RBC(0,1)``, and ``ZBS(0,1)`` in the source input,
 then applies a same-NFP finite-beta QI reference-family preconditioner before
 bounded local cleanup.  Use ``VMEC_JAX_QI_RUN_CASE=nfp4_qh_warm_to_qi`` and
@@ -199,7 +239,7 @@ The source table is also available as
 QI_optimization Input Coverage
 ------------------------------
 
-The dedicated QI README/docs renderer covers the reviewed NFP=1, 2, 3, and the
+The dedicated QI docs renderer covers the reviewed NFP=1, 2, 3, and the
 NFP=4 minimal-seed QI lanes without rerunning optimization jobs.  It
 reads the existing ``QI_optimization.py`` outputs, records the final smooth QI
 metric, legacy QI metric, mirror ratio,
@@ -388,10 +428,11 @@ published as partial 1200 second lanes.  Timeout and OOM rows are kept because
 they document the current cost envelope of the asymmetric exact/replay path.
 The frozen snapshot has 13 CPU LASYM rows and 61 GPU LASYM rows.
 
-The objective-history figures are generated artifacts.  They are not tracked in
-git; regenerate them with
+The objective-history figures are generated artifacts.  Regenerate them with
 ``PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py``
-after producing or fetching the sweep results.  The renderer writes:
+after producing or fetching the sweep results.  For a complete docs
+publication, copy the reviewed outputs into ``docs/_static/figures`` and keep
+the CSV/JSON summaries in sync.  The renderer writes:
 
 - ``objective_panel_all_policies.png/.pdf``
 - ``objective_panel_cpu_policies.png/.pdf``
@@ -424,8 +465,9 @@ Generated atlas filenames include:
 Summary Tables
 --------------
 
-The summary-table image is intended for reports and presentations.  The CSV and
-JSON are better for analysis scripts.
+The summary-table image is intended for reports and presentations and must
+include wall-time/status fields for full-sweep publication.  The CSV and JSON
+are better for analysis scripts and remain the source of truth.
 
 Downloadable summaries:
 

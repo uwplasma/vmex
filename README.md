@@ -90,11 +90,12 @@ Editable optimization examples live in `examples/optimization/`. Start with
 `docs/optimization_sweep_results.rst` for generated sweep tables/figures, and
 `docs/piecewise_omnigenous_plan.rst` for the pwO planning and acceptance gates.
 
-The panels below show the current stellarator-symmetric examples used for the
-README: initial LCFS, final LCFS, objective history, and initial/final Boozer
-`|B|` contours on the outer surface. Extended policy discussion, LASYM panels,
-finite-beta examples, QI seed robustness, failure modes, and full CPU/GPU sweep
-tables live in the docs.
+The README intentionally shows only the best current stellarator-symmetric
+QA/QH/QP/QI rows. Each panel contains initial and final 3D LCFS views, the
+objective history over all stages, and initial/final outer-LCFS Boozer `|B|`
+line contours. Extended policy discussion, LASYM panels, finite-beta examples,
+QI seed robustness, failure modes, full CPU/GPU sweep tables, and additional
+QI case coverage live in the docs.
 
 | Target | Backend | Policy | max_mode | ESS | Final J | QI legacy | Mirror | Aspect | Iota | Wall time |
 |---|---|---|---:|---|---:|---:|---:|---:|---:|---:|
@@ -119,35 +120,15 @@ tables live in the docs.
   <img src="docs/_static/figures/readme_best_optimization_qi.png" width="980" />
 </p>
 
-Reproduction commands for these panels live in
-`docs/optimization_sweep_results.rst`.
-
-QI multi-NFP coverage is rendered from existing reviewed `QI_optimization.py`
-artifacts. These are case-specific gate checks, not additional aspect-6 README
-best-row promotions: NFP=1/2 use target aspect 10, the seed-3127 NFP=3 lane
-uses target aspect 4, and NFP=4 starts from the common minimal seed
-(`RBC(0,0)`, `RBC(0,1)`, `ZBS(0,1)` only) before a same-NFP reference-family
-QI proposal. Finite-beta NFP=4 remains documented as a separate stress fixture.
-The companion audit table is
-`docs/_static/figures/readme_qi_optimization_cases.csv`; it records the exact
-QI/engineering gate booleans, gate failures, diagnostics, and short proposal
-history used to render the panel.
-
-<p align="center">
-  <img src="docs/_static/figures/readme_qi_optimization_cases.png" width="980" />
-</p>
-
-Run the current four public QI case selectors with:
+Reproduce the compact README rows and panels with:
 
 ```bash
-PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp1_qi python examples/optimization/QI_optimization.py
-PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp2_qi python examples/optimization/QI_optimization.py
-PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp3_qi python examples/optimization/QI_optimization.py
-PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi python examples/optimization/QI_optimization.py
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/generate_qs_ess_sweep.py --backend-label cpu --solver-device cpu --policy continuation --problems qa,qh,qp,qi --modes 3 --ess both --qi-qp-preseed off --rerun
+PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 ```
 
-Full QI metrics, regeneration commands, and caveats are in
-`docs/optimization.rst`.
+Full sweep reproduction, generated result tables, QI multi-NFP coverage, and
+publication asset requirements are in `docs/optimization_sweep_results.rst`.
 
 ## Performance, Validation, Release
 
