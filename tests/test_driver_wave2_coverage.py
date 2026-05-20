@@ -75,7 +75,15 @@ def _patch_lightweight_driver_core(monkeypatch) -> None:
     )
 
 
-def _result(state, *, max_iter: int, fsq: float, converged: bool, diagnostics: dict | None = None):
+def _result(
+    state,
+    *,
+    max_iter: int,
+    fsq: float,
+    converged: bool,
+    diagnostics: dict | None = None,
+    n_iter: int | None = None,
+):
     diag = {
         "converged": bool(converged),
         "resume_state": {
@@ -90,7 +98,7 @@ def _result(state, *, max_iter: int, fsq: float, converged: bool, diagnostics: d
         diag.update(diagnostics)
     return SolveVmecResidualResult(
         state=state,
-        n_iter=max(0, int(max_iter) - 1),
+        n_iter=max(0, int(max_iter) - 1) if n_iter is None else int(n_iter),
         w_history=np.asarray([float(fsq)], dtype=float),
         fsqr2_history=np.asarray([float(fsq)], dtype=float),
         fsqz2_history=np.asarray([0.0], dtype=float),
@@ -177,6 +185,58 @@ def test_non_vmec_verbose_finish_reports_gradient_history(monkeypatch, capsys) -
 
     assert run.result.n_iter == 2
     assert "grad_rms=2.500e-01" in capsys.readouterr().out
+
+
+def test_vmec_verbose_final_summary_reports_exhausted_unconverged_stage(monkeypatch, tmp_path, capsys) -> None:
+    input_path = _write_input(
+        tmp_path,
+        "input.verbose_final",
+        """
+  LFREEB = F
+  NFP = 1
+  MPOL = 5
+  NTOR = 0
+  NS = 7
+  NITER = 1
+  FTOL = 1e-14
+  PHIEDGE = 1.0
+  RBC(0,0) = 1.0
+  ZBS(1,0) = 0.1
+""",
+    )
+
+    def fake_solver(state, static, **kwargs):
+        del static
+        return _result(
+            state,
+            max_iter=int(kwargs["max_iter"]),
+            fsq=1.0e-3,
+            converged=False,
+            diagnostics={"ijacob": 2, "ftol": float(kwargs["ftol"])},
+            n_iter=int(kwargs["max_iter"]),
+        )
+
+    monkeypatch.setenv("VMEC_JAX_DISABLE_JIT_INIT", "1")
+    _patch_lightweight_driver_core(monkeypatch)
+    monkeypatch.setattr(driver, "solve_fixed_boundary_residual_iter", fake_solver)
+    monkeypatch.setattr(solve_module, "solve_fixed_boundary_residual_iter", fake_solver)
+
+    run = run_fixed_boundary(
+        input_path,
+        solver="vmec2000_iter",
+        solver_mode="parity",
+        max_iter=1,
+        verbose=True,
+        multigrid=False,
+        grid=_small_grid(),
+    )
+
+    out = capsys.readouterr().out
+    assert "Try increasing NITER or PRE_NITER if the preconditioner is on." in out
+    assert "EXECUTION TERMINATED NORMALLY" in out
+    assert "FILE : verbose_final" in out
+    assert "NUMBER OF JACOBIAN RESETS =    2" in out
+    assert run.result.diagnostics["converged"] is False
 
 
 def test_run_fixed_boundary_rejects_restart_state_ns_mismatch() -> None:
@@ -737,6 +797,83 @@ def test_accelerated_multigrid_miss_uses_partial_and_full_parity_fallback(monkey
     assert diag["converged"] is True
 
 
+def test_cli_finisher_records_budget_exhaustion_after_accelerated_and_parity_attempts(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    input_path = _write_input(
+        tmp_path,
+        "input.finish_budget_exhausted",
+        """
+  LFREEB = F
+  NFP = 1
+  MPOL = 5
+  NTOR = 0
+  NS = 7
+  NITER = 2
+  FTOL = 1e-10
+  PHIEDGE = 1.0
+  RBC(0,0) = 1.0
+  ZBS(1,0) = 0.1
+""",
+    )
+    calls = []
+
+    def fake_solver(state, static, **kwargs):
+        del static
+        calls.append(
+            {
+                "max_iter": int(kwargs["max_iter"]),
+                "use_scan": bool(kwargs["use_scan"]),
+                "fsq_total_target": kwargs.get("fsq_total_target"),
+                "resume_state_mode": kwargs.get("resume_state_mode"),
+            }
+        )
+        return _result(
+            state,
+            max_iter=int(kwargs["max_iter"]),
+            fsq=1.0e-3,
+            converged=False,
+            diagnostics={
+                "ftol": float(kwargs["ftol"]),
+                "use_scan": bool(kwargs["use_scan"]),
+                "final_fsqr": 1.0e-3,
+                "final_fsqz": 0.0,
+                "final_fsql": 0.0,
+            },
+        )
+
+    monkeypatch.setenv("VMEC_JAX_DISABLE_JIT_INIT", "1")
+    _patch_lightweight_driver_core(monkeypatch)
+    monkeypatch.setattr(driver, "solve_fixed_boundary_residual_iter", fake_solver)
+    monkeypatch.setattr(solve_module, "solve_fixed_boundary_residual_iter", fake_solver)
+
+    run = run_fixed_boundary(
+        input_path,
+        solver="vmec2000_iter",
+        solver_mode="accelerated",
+        max_iter=2,
+        verbose=False,
+        multigrid=False,
+        cli_fixed_boundary_mode=True,
+        grid=_small_grid(),
+    )
+
+    assert calls == [
+        {"max_iter": 2, "use_scan": True, "fsq_total_target": None, "resume_state_mode": "minimal"},
+        {"max_iter": 2, "use_scan": True, "fsq_total_target": pytest.approx(3.0e-10), "resume_state_mode": "minimal"},
+        {"max_iter": 2, "use_scan": False, "fsq_total_target": None, "resume_state_mode": "full"},
+    ]
+    diag = run.result.diagnostics
+    assert np.asarray(diag["cli_fixed_boundary_finish_budgets"]).tolist() == [2, 2]
+    assert np.asarray(diag["cli_fixed_boundary_finish_modes"]).tolist() == ["accelerated", "parity"]
+    assert np.asarray(diag["cli_fixed_boundary_finish_converged"]).tolist() == [False, False]
+    assert diag["cli_fixed_boundary_finish_budget_cap"] == 4
+    assert diag["cli_fixed_boundary_finish_budget_exhausted"] is True
+    assert diag["cli_fixed_boundary_full_parity_fallback"] is False
+    assert diag["converged"] is False
+
+
 def test_default_mode_single_stage_fast_path_uses_fake_solver(monkeypatch) -> None:
     calls = []
 
@@ -931,6 +1068,87 @@ def test_accelerated_explicit_stage_monitor_switches_to_parity(monkeypatch, tmp_
     np.testing.assert_array_equal(diag["accelerated_stage_probe_chunk_iters"], [200])
     assert np.asarray(diag["multigrid_stage_modes"]).tolist() == ["accelerated", "parity"]
     assert diag["converged"] is True
+
+
+def test_dynamic_scan_probe_mismatch_selects_non_scan_stage(monkeypatch, tmp_path, capsys) -> None:
+    input_path = _write_input(
+        tmp_path,
+        "input.dynamic_scan_mismatch",
+        """
+  LFREEB = F
+  LASYM = T
+  NFP = 1
+  MPOL = 5
+  NTOR = 0
+  NS = 7
+  NITER = 3
+  FTOL = 1e-10
+  PHIEDGE = 1.0
+  RBC(0,0) = 1.0
+  ZBS(1,0) = 0.1
+""",
+    )
+    calls = []
+
+    def make_result(state, *, max_iter: int, use_scan: bool, fsq_values):
+        fsq = np.asarray(fsq_values, dtype=float)
+        return SolveVmecResidualResult(
+            state=state,
+            n_iter=max(0, int(max_iter) - 1),
+            w_history=fsq,
+            fsqr2_history=fsq,
+            fsqz2_history=np.zeros_like(fsq),
+            fsql2_history=np.zeros_like(fsq),
+            grad_rms_history=np.asarray([], dtype=float),
+            step_history=np.asarray([], dtype=float),
+            diagnostics={
+                "converged": bool(fsq[-1] <= 1.0e-10),
+                "ftol": 1.0e-10,
+                "use_scan": bool(use_scan),
+                "resume_state": {},
+            },
+        )
+
+    def fake_solver(state, static, **kwargs):
+        del static
+        max_iter_i = int(kwargs["max_iter"])
+        use_scan_i = bool(kwargs["use_scan"])
+        calls.append({"max_iter": max_iter_i, "use_scan": use_scan_i})
+        if max_iter_i == 2:
+            fsq_values = [1.0, 0.75] if use_scan_i else [1.0, 0.25]
+        else:
+            fsq_values = [1.0e-12, 5.0e-13, 1.0e-13]
+        return make_result(state, max_iter=max_iter_i, use_scan=use_scan_i, fsq_values=fsq_values)
+
+    monkeypatch.setenv("VMEC_JAX_DISABLE_JIT_INIT", "1")
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN", "1")
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", "0")
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", "2")
+    monkeypatch.setenv("VMEC_JAX_LASYM_USE_SCAN", "1")
+    _patch_lightweight_driver_core(monkeypatch)
+    monkeypatch.setattr(driver, "solve_fixed_boundary_residual_iter", fake_solver)
+    monkeypatch.setattr(solve_module, "solve_fixed_boundary_residual_iter", fake_solver)
+
+    run = run_fixed_boundary(
+        input_path,
+        solver="vmec2000_iter",
+        solver_mode="default",
+        max_iter=3,
+        verbose=True,
+        multigrid=False,
+        grid=_small_grid(lasym=True),
+    )
+
+    out = capsys.readouterr().out
+    assert calls == [
+        {"max_iter": 2, "use_scan": True},
+        {"max_iter": 2, "use_scan": False},
+        {"max_iter": 3, "use_scan": False},
+    ]
+    assert "[vmec_jax] dynamic scan probe mismatch:" in out
+    assert "[vmec_jax] dynamic scan parity probe:" in out
+    assert "fsq_ok=False -> use_scan=False" in out
+    assert run.result.diagnostics["use_scan"] is False
 
 
 def test_scan_wout_corrector_runs_one_non_scan_step(monkeypatch) -> None:

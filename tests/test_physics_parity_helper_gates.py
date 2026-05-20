@@ -10,7 +10,7 @@ from vmec_jax._compat import enable_x64
 from vmec_jax.booz_input import booz_xform_inputs_from_state
 from vmec_jax.config import load_config
 from vmec_jax.finite_beta import magnetic_well_from_vp
-from vmec_jax.profiles import eval_profiles
+from vmec_jax.profiles import MU0, eval_profiles
 from vmec_jax.static import build_static
 from vmec_jax.wout import read_wout, state_from_wout
 
@@ -24,6 +24,35 @@ def _full_and_half_mesh(ns: int) -> tuple[np.ndarray, np.ndarray]:
     if int(ns) < 2:
         return s_full, s_full
     return s_full, np.concatenate([s_full[:1], 0.5 * (s_full[1:] + s_full[:-1])])
+
+
+def _normalized_equif_from_wout_profiles(wout) -> np.ndarray:
+    """Reconstruct VMEC's normalized radial force-balance profile from wout fields."""
+    ns = int(wout.ns)
+    equif = np.zeros(ns, dtype=float)
+    if ns < 3:
+        return equif
+
+    ohs = float(ns - 1)
+    flux_scale = 2.0 * np.pi * float(wout.signgs)
+    phipf = np.asarray(wout.phipf, dtype=float) / flux_scale
+    chipf = np.asarray(wout.chipf, dtype=float) / flux_scale
+    jcuru = np.asarray(wout.jcuru, dtype=float) * MU0
+    jcurv = np.asarray(wout.jcurv, dtype=float) * MU0
+    pres = np.asarray(wout.pres, dtype=float)
+    vp = np.asarray(wout.vp, dtype=float)
+
+    for js in range(1, ns - 1):
+        vpphi = 0.5 * (vp[js + 1] + vp[js])
+        presgrad = (pres[js + 1] - pres[js]) * ohs
+        denom = abs(jcurv[js] * chipf[js]) + abs(jcuru[js] * phipf[js]) + abs(presgrad * vpphi)
+        if denom != 0.0 and vpphi != 0.0:
+            raw = ((-phipf[js] * jcuru[js] + chipf[js] * jcurv[js]) / vpphi) + presgrad
+            equif[js] = raw * vpphi / denom
+
+    equif[0] = 2.0 * equif[1] - equif[2]
+    equif[-1] = 2.0 * equif[-2] - equif[-3]
+    return equif
 
 
 @pytest.mark.parametrize(
@@ -102,6 +131,43 @@ def test_small_wout_profile_jxbforce_mercier_and_finite_beta_gates(
         rtol=1.0e-13,
         atol=1.0e-13,
     )
+
+
+@pytest.mark.parametrize(
+    ("case_name", "wout_name"),
+    (
+        ("circular", "wout_circular_tokamak.nc"),
+        ("finite_beta_axisym", "wout_shaped_tokamak_pressure.nc"),
+    ),
+)
+def test_small_wout_current_scalar_and_force_balance_gate(case_name: str, wout_name: str) -> None:
+    """Converged fixtures should preserve VMEC current and force-balance scalar identities."""
+    pytest.importorskip("netCDF4")
+
+    wout = read_wout(_data_dir() / wout_name)
+    assert int(wout.ns) >= 3
+
+    buco = np.asarray(wout.buco, dtype=float)
+    ctor_expected = (
+        float(wout.signgs) * (2.0 * np.pi) * (1.5 * float(buco[-1]) - 0.5 * float(buco[-2])) / MU0
+    )
+    np.testing.assert_allclose(
+        float(wout.ctor),
+        ctor_expected,
+        rtol=1.0e-13,
+        atol=1.0e-8,
+        err_msg=f"{case_name}: ctor is not the VMEC edge-current extrapolation from buco",
+    )
+
+    equif_expected = _normalized_equif_from_wout_profiles(wout)
+    np.testing.assert_allclose(
+        np.asarray(wout.equif, dtype=float),
+        equif_expected,
+        rtol=1.0e-12,
+        atol=2.0e-14,
+        err_msg=f"{case_name}: equif no longer matches the normalized radial force-balance identity",
+    )
+    assert np.max(np.abs(np.asarray(wout.equif, dtype=float)[1:-1])) < 0.02, case_name
 
 
 def test_circular_fixture_boozer_inputs_preserve_wout_spectral_conventions() -> None:

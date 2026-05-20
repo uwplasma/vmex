@@ -193,10 +193,11 @@ the recommended local escalation path.
      - Before pushing ordinary code or docs-adjacent changes that touch tested
        APIs.
    * - Bundled wout parity gate
-     - ``JAX_ENABLE_X64=1 pytest -q tests/test_residue_getfsq_parity.py tests/test_wout_profiles_currents_bundled_parity.py tests/test_vmec2000_exec_threed1.py``
+     - ``JAX_ENABLE_X64=1 pytest -q tests/test_residue_getfsq_parity.py tests/test_wout_profiles_currents_bundled_parity.py tests/test_physics_parity_helper_gates.py tests/test_vmec2000_exec_threed1.py``
      - Required no-executable physics gate: recompute VMEC2000 ``fsqr/fsqz/fsql``,
-       verify flux/pressure/iota/current wout-field invariants, and cover the
-       VMEC2000 trace parser against bundled fixtures.
+       verify flux/pressure/iota/current wout-field invariants, protect small
+       Mercier/JXBFORCE/Boozer helper identities, and cover the VMEC2000 trace
+       parser against bundled fixtures.
    * - Parity manifest guard
      - ``pytest -q tests/test_parity_sweep_manifest_thresholds.py``
      - Cheap schema and fixture-path check for the fixed/free-boundary parity
@@ -348,6 +349,12 @@ VMEC2000 parity gates:
   VMEC surface-averaged Ampere relation
   ``jcuru = -d(bvco)/ds / mu0`` and ``jcurv = d(buco)/ds / mu0`` on interior
   surfaces.
+- Required CI includes ``tests/test_physics_parity_helper_gates.py``.  This
+  small no-solve helper gate uses bundled converged ``wout`` fixtures to
+  protect VMEC Mercier decomposition, JXBFORCE ``bdotgradv`` normalization,
+  magnetic-well endpoint extrapolation, Boozer spectral handoff conventions,
+  the edge-current ``ctor`` scalar, and the normalized ``equif`` radial
+  force-balance identity.
 - Compare converged equilibria, not arbitrary finite-step transient states,
   unless the test is explicitly a short-trace regression.
 - For each small reference deck, compare key scalars and profiles:
