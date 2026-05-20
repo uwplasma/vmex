@@ -1427,6 +1427,7 @@ class FixedBoundaryExactOptimizer:
         self._initial_state_cache: OrderedDict[bytes, VMECState] = OrderedDict()
         self._initial_state_cache_max = 4
         self._remember_initial_state(np.zeros(len(self._specs), dtype=float), state0)
+        self._initial_state_packed_helper = None
         self._initial_tangent_cache: dict = {}
         self._last_jacobian_residual: np.ndarray | None = None
         self._last_jacobian_source = "exact_tape_replay"
@@ -1828,11 +1829,53 @@ class FixedBoundaryExactOptimizer:
             return state0
 
         t_guess = time.perf_counter()
-        boundary_now = self._boundary_from_params(params)
-        state0 = initial_guess_from_boundary(self._static, boundary_now, self._indata, vmec_project=True)
+        state0 = self._initial_state_from_params_jit(params)
+        if state0 is None:
+            boundary_now = self._boundary_from_params(params)
+            state0 = initial_guess_from_boundary(self._static, boundary_now, self._indata, vmec_project=True)
         self._remember_initial_state(params, state0)
         self._profile_add(profile_name, time.perf_counter() - t_guess)
         return state0
+
+    def _use_jit_initial_state(self) -> bool:
+        flag = os.getenv("VMEC_JAX_OPT_JIT_INITIAL_STATE", "1").strip().lower()
+        return flag not in ("", "0", "false", "no", "off")
+
+    def _initial_state_from_params_jit(self, params) -> VMECState | None:
+        """Return the projected initial state using a cached JIT helper when safe."""
+
+        if not self._use_jit_initial_state():
+            return None
+        try:
+            from ._compat import jax, jnp as _jnp
+            from .init_guess import initial_guess_from_boundary as _ig
+            from .state import pack_state, unpack_state
+        except Exception:
+            return None
+
+        helper = getattr(self, "_initial_state_packed_helper", None)
+        if helper is None:
+
+            @jax.jit
+            def _packed_initial_state(p):
+                bdy = self._boundary_from_params(p)
+                state = _ig(
+                    self._static,
+                    bdy,
+                    self._indata,
+                    vmec_project=True,
+                )
+                return _jnp.asarray(pack_state(state), dtype=_jnp.float64)
+
+            helper = _packed_initial_state
+            self._initial_state_packed_helper = helper
+
+        try:
+            packed = helper(_jnp.asarray(params, dtype=_jnp.float64))
+            packed = jax.block_until_ready(packed)
+            return unpack_state(packed, self._layout)
+        except Exception:
+            return None
 
     def _remember_exact_state(self, cache_key: bytes, state: VMECState) -> None:
         self._exact_state_cache = {cache_key: state}
@@ -2945,6 +2988,7 @@ class FixedBoundaryExactOptimizer:
         self._trial_residual_cache.clear()
         if hasattr(self, "_initial_state_cache"):
             self._initial_state_cache.clear()
+        self._initial_state_packed_helper = None
         self._initial_tangent_cache.clear()
         self._last_jacobian_residual = None
         self._post_jacobian_clear(clear_compiled=True)

@@ -73,6 +73,91 @@ def test_linear_operator_arg_helpers_validate_vectors_and_matrix_edges() -> None
         _linear_operator_matrix_arg(np.ones((2, 2)), rows=3, name="rows")
 
 
+def test_initial_state_from_params_uses_jit_helper_and_cache(monkeypatch) -> None:
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._initial_state_cache = OrderedDict()
+    opt._initial_state_cache_max = 4
+    opt._profile = {}
+    opt._exact_cache_key = lambda params: np.asarray(params, dtype=float).reshape(-1).tobytes()
+    opt._profile_add = FixedBoundaryExactOptimizer._profile_add.__get__(opt, FixedBoundaryExactOptimizer)
+    opt._remember_initial_state = FixedBoundaryExactOptimizer._remember_initial_state.__get__(
+        opt,
+        FixedBoundaryExactOptimizer,
+    )
+    state = _state_from_coeffs(r=2.0)
+    calls = {"jit": 0}
+
+    def fake_jit(params):
+        calls["jit"] += 1
+        return state
+
+    opt._initial_state_from_params_jit = fake_jit
+    monkeypatch.setattr(
+        opt_module,
+        "initial_guess_from_boundary",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("fallback should not run")),
+    )
+
+    params = np.asarray([1.0, 2.0])
+    assert FixedBoundaryExactOptimizer._initial_state_from_params(opt, params, profile_name="initial") is state
+    assert calls["jit"] == 1
+    assert opt._profile["initial"]["count"] == 1
+
+    assert FixedBoundaryExactOptimizer._initial_state_from_params(opt, params, profile_name="initial") is state
+    assert calls["jit"] == 1
+    assert opt._profile["initial_cache_hit"]["count"] == 1
+
+
+def test_initial_state_from_params_falls_back_when_jit_disabled(monkeypatch) -> None:
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._initial_state_cache = OrderedDict()
+    opt._initial_state_cache_max = 4
+    opt._profile = {}
+    opt._static = object()
+    opt._indata = object()
+    opt._exact_cache_key = lambda params: np.asarray(params, dtype=float).reshape(-1).tobytes()
+    opt._profile_add = FixedBoundaryExactOptimizer._profile_add.__get__(opt, FixedBoundaryExactOptimizer)
+    opt._remember_initial_state = FixedBoundaryExactOptimizer._remember_initial_state.__get__(
+        opt,
+        FixedBoundaryExactOptimizer,
+    )
+    opt._initial_state_from_params_jit = lambda _params: None
+    opt._boundary_from_params = lambda params: ("boundary", tuple(np.asarray(params, dtype=float)))
+    state = _state_from_coeffs(r=3.0)
+    seen = []
+
+    def fake_initial_guess(static, boundary, indata, *, vmec_project):
+        seen.append((static, boundary, indata, vmec_project))
+        return state
+
+    monkeypatch.setattr(opt_module, "initial_guess_from_boundary", fake_initial_guess)
+
+    params = np.asarray([4.0])
+    assert FixedBoundaryExactOptimizer._initial_state_from_params(opt, params, profile_name="initial") is state
+    assert seen == [(opt._static, ("boundary", (4.0,)), opt._indata, True)]
+    assert opt._profile["initial"]["count"] == 1
+
+
+def test_jit_initial_state_env_and_clear_caches(monkeypatch) -> None:
+    opt = _bare_optimizer_for_state_ops()
+    opt._initial_state_packed_helper = object()
+    opt._exact_jacobian_cache = {}
+    opt._trial_residual_cache = OrderedDict()
+    opt._initial_state_cache = OrderedDict()
+    opt._initial_tangent_cache = {}
+    opt._last_jacobian_residual = np.asarray([1.0])
+    opt._post_jacobian_clear = lambda *, clear_compiled=False: None
+
+    monkeypatch.delenv("VMEC_JAX_OPT_JIT_INITIAL_STATE", raising=False)
+    assert FixedBoundaryExactOptimizer._use_jit_initial_state(opt) is True
+    monkeypatch.setenv("VMEC_JAX_OPT_JIT_INITIAL_STATE", "0")
+    assert FixedBoundaryExactOptimizer._use_jit_initial_state(opt) is False
+
+    FixedBoundaryExactOptimizer.clear_caches(opt)
+    assert opt._initial_state_packed_helper is None
+    assert opt._last_jacobian_residual is None
+
+
 def test_solver_device_context_and_trial_scan_env_branches(monkeypatch) -> None:
     import vmec_jax._compat as compat
 
