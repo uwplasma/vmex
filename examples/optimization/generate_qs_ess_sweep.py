@@ -99,7 +99,7 @@ SOLVER_DEVICE: str | None = None  # None uses JAX default; set "cpu" or "gpu" to
 SKIP_EXISTING = True
 CASE_TIMEOUT_S: float | None = 1200.0
 ESS_ALPHA = 1.2  # Try 1.2 for gentle ESS or 2.5 for stronger high-mode scaling.
-TARGET_ASPECT = 5.0
+TARGET_ASPECT = 6.0
 QI_TARGET_ASPECT = TARGET_ASPECT
 TARGET_ABS_IOTA_MIN = 0.41
 HIGH_PRIORITY_IOTA_WEIGHT = 200.0
@@ -369,9 +369,8 @@ PROBLEM_CONFIGS = {
         gtol=1e-4,  # Gradient optimality tolerance for the outer optimizer.
         xtol=1e-4,  # Step-size tolerance for the outer optimizer.
         # The reference omnigenity workflow uses a gentler alpha than the QS
-        # examples.  The QI lane now uses a higher aspect-ratio target than
-        # QA/QH/QP so mirror and elongation cleanup have a less constrained
-        # geometry basin.
+        # examples.  QI shares the common aspect-ratio target with QA/QH/QP so
+        # README and sweep comparisons use the same compactness policy.
         ess_alpha=1.2,
         target_aspect=QI_TARGET_ASPECT,
         aspect_weight=1.0,

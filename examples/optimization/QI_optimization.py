@@ -101,8 +101,16 @@ SAVE_STAGE_WOUTS = False  # Set True to also write per-stage WOUT files.
 MAKE_PLOTS = os.environ.get("VMEC_JAX_QI_MAKE_PLOTS", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 # Physics targets and weights.  Edit these or append objective tuples to explore
-# other QI/engineering tradeoffs.
-TARGET_ASPECT = float(CASE["target_aspect"])
+# other QI/engineering tradeoffs.  The default public QI lane follows the
+# QA/QH/QP examples at aspect 6; non-default robustness cases keep their
+# case-specific target unless VMEC_JAX_QI_TARGET_ASPECT is set.
+DEFAULT_TARGET_ASPECT = 6.0
+_TARGET_ASPECT_ENV = os.environ.get("VMEC_JAX_QI_TARGET_ASPECT")
+TARGET_ASPECT = float(
+    _TARGET_ASPECT_ENV
+    if _TARGET_ASPECT_ENV is not None
+    else (DEFAULT_TARGET_ASPECT if RUN_CASE == "nfp2_qi" else CASE["target_aspect"])
+)
 TARGET_ABS_IOTA_MIN = float(CASE["target_abs_iota_min"])
 MAX_MIRROR_RATIO = float(CASE.get("mirror_threshold", 0.21))
 MIRROR_SURFACE_INDEX = CASE.get("mirror_surface_index", None)

@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
-DEFAULT_QI_TARGET_ASPECT = 10.0
+DEFAULT_QI_TARGET_ASPECT = 6.0
 
 
 def _parse_float_sequence(value, *, name):
@@ -27,7 +27,7 @@ QI_CASES = {
     "nfp1_qi": {
         "case_goal": "NFP=1 mirror-aware QI lane",
         "input_file": DATA_DIR / "input.nfp1_QI",
-        "output_dir": Path("results/qi_opt/ess/nfp1_qi"),
+        "output_dir": Path("results/qi_opt/ess/nfp1_qi_aspect6"),
         "max_mode": 3,
         "min_vmec_mode": 6,
         "method": "scipy_matrix_free",
@@ -69,7 +69,7 @@ QI_CASES = {
     "nfp2_qi": {
         "case_goal": "default NFP=2 mirror-aware QI lane",
         "input_file": DATA_DIR / "input.nfp2_QI",
-        "output_dir": Path("results/qi_opt/ess/nfp2_qi"),
+        "output_dir": Path("results/qi_opt/ess/nfp2_qi_aspect6"),
         "max_mode": 3,
         "min_vmec_mode": 6,
         "method": "scipy_matrix_free",
@@ -114,16 +114,16 @@ QI_CASES = {
     "qi_stel_seed_3127": {
         "case_goal": "far-seed staged QI robustness lane with reference-family global preconditioning",
         "input_file": DATA_DIR / "input.QI_stel_seed_3127",
-        "output_dir": Path("results/qi_opt/ess/qi_stel_seed_3127_current_public_final"),
+        "output_dir": Path("results/qi_opt/ess/qi_stel_seed_3127_aspect6"),
         "max_mode": 4,
         "min_vmec_mode": 6,
         "use_mode_continuation": False,
         "stage_repeats": 1,
         "max_nfev": 8,
-        # The known NFP=3 QI family reached from this seed lives near aspect
-        # 3.5-4.0 with |iota|~1.0.  Forcing aspect 10 steers local solvers away
-        # from that basin, so this robustness lane targets the actual branch.
-        "target_aspect": 4.0,
+        # Keep the public QI lanes on the same aspect target as QA/QH/QP so
+        # README and docs panels compare like with like.  The staged
+        # reference-family preconditioner is responsible for basin capture.
+        "target_aspect": DEFAULT_QI_TARGET_ASPECT,
         "target_abs_iota_min": 0.41,
         "mirror_threshold": 0.35,
         "mirror_surface_index": None,
@@ -152,7 +152,7 @@ QI_CASES = {
             "keys": ("RBC", "ZBS", "RBS", "ZBC"),
             "max_mode": 4,
             "max_iter": 80,
-            "target_aspect": 4.0,
+            "target_aspect": DEFAULT_QI_TARGET_ASPECT,
             "abs_iota_min": 0.41,
             "max_mirror_ratio": 0.35,
             "max_elongation": 8.0,
@@ -266,8 +266,8 @@ QI_CASES = {
         "trial_max_iter": 0,
         "trial_ftol": 0.0,
         # This finite-beta NFP=4 reference is already near its best aspect-ratio
-        # branch.  The audit gate targets the branch actually represented by
-        # the input deck rather than forcing the aspect-10 vacuum QI policy.
+        # branch.  The audit gate targets the aspect-6 branch represented by
+        # the input deck rather than using the older high-aspect vacuum policy.
         "target_aspect": 6.0,
         "target_abs_iota_min": 0.41,
         "max_elongation": 8.2,
@@ -322,7 +322,7 @@ QI_CASES = {
             "smooth_qi": 8.421446105814759e-3,
             "legacy_qi": 5.205127302950363e-3,
             "mirror_ratio": 3.133889788613409e-1,
-            "audit_command": "audit_qi_seed_suitability.py --quick --target-aspect 10 --max-mirror-ratio 0.35",
+            "audit_command": "audit_qi_seed_suitability.py --quick --target-aspect 6 --max-mirror-ratio 0.35",
         },
         "max_mode": 3,
         "min_vmec_mode": 6,

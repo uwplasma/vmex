@@ -61,7 +61,7 @@ MAKE_PLOTS = True
 
 # Physics targets and least-squares objective weights.  These are SIMSOPT-style
 # tuple weights, so vmec_jax minimizes sqrt(weight) * (J - target).
-TARGET_ASPECT = 5.0
+TARGET_ASPECT = 6.0
 TARGET_IOTA = 0.42
 HELICITY_M = 1
 HELICITY_N = 0

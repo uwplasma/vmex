@@ -30,7 +30,7 @@ PRESEED_OPTIONS = (True, False)
 MODES = (1, 2, 3)
 ESS_OPTIONS = (False, True)
 QI_INPUT_NFP = 2
-TARGET_ASPECT = 5.0
+TARGET_ASPECT = 6.0
 TARGET_ABS_IOTA_MIN = 0.41
 QI_PROMOTION_MAX = 2.0e-2
 
@@ -458,8 +458,19 @@ def _write_best(rows: list[dict]) -> dict:
         raise FileNotFoundError("No QI rows available for best-case selection")
     best = min(rows, key=_best_score)
     payload = dict(best)
-    payload["selection_score"] = list(_best_score(best))
-    BEST_JSON.write_text(json.dumps(payload, indent=2) + "\n")
+    score = []
+    for item in _best_score(best):
+        if isinstance(item, float) and not np.isfinite(item):
+            score.append(None)
+        else:
+            score.append(item)
+    payload["selection_score"] = score
+    if not _bool_value(payload.get("success")) or _bool_value(payload.get("crashed")):
+        payload["promotion_note"] = (
+            "No passing target-aspect constrained-QI row was available; this "
+            "record is a status artifact and must not be promoted."
+        )
+    BEST_JSON.write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n")
     return payload
 
 
@@ -467,7 +478,7 @@ def main() -> None:
     rows = _discover_qi_results()
     if not rows:
         raise FileNotFoundError(
-            "No current target-5 constrained QI rows found under "
+            "No current target-6 constrained QI rows found under "
             f"{OUTPUT_ROOT}. Rerun generate_qs_ess_sweep.py for --problems qi "
             "with the current objective policy before rendering."
         )

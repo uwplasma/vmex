@@ -15,6 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
+from vmec_jax.namelist import read_indata
 from vmec_jax.plotting import fix_matplotlib_3d, prepare_matplotlib_3d, vmecplot2_lcfs_3d_grid
 from vmec_jax.wout import read_wout
 
@@ -36,21 +37,22 @@ class QICase:
     validation_status: str = "promoted"
     history_paths: tuple[Path, ...] = ()
     preconditioner_summary: Path | None = None
+    raw_initial_wout_exception: str = ""
 
 
 CASES = (
     QICase(
         label="NFP=1 QI",
         input_file=REPO_ROOT / "examples" / "data" / "input.nfp1_QI",
-        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp1_qi_direct_office_20260519",
-        initial_wout=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp1_qi_direct_office_20260519" / "wout_initial.nc",
+        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp1_qi_aspect6",
+        initial_wout=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp1_qi_aspect6" / "wout_initial.nc",
         note="mirror-aware QI lane",
         history_paths=(
             REPO_ROOT
             / "results"
             / "qi_opt"
             / "ess"
-            / "nfp1_qi_direct_office_20260519"
+            / "nfp1_qi_aspect6"
             / "mirror_ramp_01_matrix_free_mirror030"
             / "history.json",
         ),
@@ -58,31 +60,23 @@ CASES = (
     QICase(
         label="NFP=2 bundled QI",
         input_file=REPO_ROOT / "examples" / "data" / "input.nfp2_QI",
-        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp2_qi",
-        initial_wout=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp2_qi" / "wout_initial.nc",
+        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp2_qi_aspect6",
+        initial_wout=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp2_qi_aspect6" / "wout_initial.nc",
         note="default mirror-aware QI lane",
         history_paths=(
-            REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp2_qi" / "mirror_ramp_01_qi_basin" / "history.json",
             REPO_ROOT
             / "results"
             / "qi_opt"
             / "ess"
-            / "nfp2_qi"
+            / "nfp2_qi_aspect6"
             / "mirror_ramp_01_matrix_free_mirror030"
-            / "history.json",
-            REPO_ROOT
-            / "results"
-            / "qi_opt"
-            / "ess"
-            / "nfp2_qi"
-            / "mirror_ramp_02_lcfs_mirror_030"
             / "history.json",
         ),
     ),
     QICase(
         label="NFP=3 seed 3127",
         input_file=REPO_ROOT / "examples" / "data" / "input.QI_stel_seed_3127",
-        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "qi_stel_seed_3127_mirror_calibrated_20260516",
+        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "qi_stel_seed_3127_aspect6",
         initial_wout=REPO_ROOT / "examples" / "data" / "wout_QI_stel_seed_3127.nc",
         note="passing reference-family QI lane",
         history_paths=(
@@ -90,20 +84,20 @@ CASES = (
             / "results"
             / "qi_opt"
             / "ess"
-            / "qi_stel_seed_3127_mirror_calibrated_20260516"
+            / "qi_stel_seed_3127_aspect6"
             / "history.json",
             REPO_ROOT
             / "results"
             / "qi_opt"
             / "ess"
-            / "qi_stel_seed_3127_mirror_calibrated_20260516"
+            / "qi_stel_seed_3127_aspect6"
             / "boundary_reference_baseline"
             / "history.json",
             REPO_ROOT
             / "results"
             / "qi_opt"
             / "ess"
-            / "qi_stel_seed_3127_mirror_calibrated_20260516"
+            / "qi_stel_seed_3127_aspect6"
             / "mirror_ramp_01_prefiltered_mirror_qi_iota_cleanup"
             / "history.json",
         ),
@@ -111,9 +105,13 @@ CASES = (
         / "results"
         / "qi_opt"
         / "ess"
-        / "qi_stel_seed_3127_mirror_calibrated_20260516"
+        / "qi_stel_seed_3127_aspect6"
         / "boundary_reference_preconditioner"
         / "summary.json",
+        raw_initial_wout_exception=(
+            "Known curated raw wout artifact for the seed-3127 reference family; "
+            "its VMEC boundary phase convention predates the paired input deck."
+        ),
     ),
     QICase(
         label="NFP=4 finite-beta QI",
@@ -139,11 +137,87 @@ CASES = (
     ),
 )
 
+BOUNDARY_FAMILIES = ("RBC", "RBS", "ZBC", "ZBS")
+KNOWN_RAW_WOUT_ARTIFACTS = {
+    (REPO_ROOT / "examples" / "data" / "wout_QI_stel_seed_3127.nc").resolve()
+}
+
 
 def _load_json(path: Path) -> dict:
     if not path.exists():
         raise FileNotFoundError(path)
     return json.loads(path.read_text())
+
+
+def _boundary_maps_from_input(input_file: Path) -> dict[str, dict[tuple[int, int], float]]:
+    indata = read_indata(input_file)
+    return {
+        family: {tuple(key): float(value) for key, value in indata.indexed.get(family, {}).items()}
+        for family in BOUNDARY_FAMILIES
+    }
+
+
+def _boundary_maps_from_wout(wout_path: Path) -> dict[str, dict[tuple[int, int], float]]:
+    wout = read_wout(wout_path)
+    arrays = {
+        "RBC": np.asarray(wout.rmnc[-1], dtype=float),
+        "RBS": np.asarray(wout.rmns[-1], dtype=float),
+        "ZBC": np.asarray(wout.zmnc[-1], dtype=float),
+        "ZBS": np.asarray(wout.zmns[-1], dtype=float),
+    }
+    nfp = int(wout.nfp)
+    maps: dict[str, dict[tuple[int, int], float]] = {family: {} for family in BOUNDARY_FAMILIES}
+    for family, values in arrays.items():
+        for m_i, xn_i, value in zip(np.asarray(wout.xm, dtype=int), np.asarray(wout.xn, dtype=int), values):
+            n_i = int(round(float(xn_i) / float(nfp))) if nfp else int(xn_i)
+            maps[family][(n_i, int(m_i))] = float(value)
+    return maps
+
+
+def _boundary_mismatches(
+    input_file: Path,
+    wout_path: Path,
+    *,
+    abs_tol: float = 5.0e-8,
+    rel_tol: float = 5.0e-8,
+) -> list[str]:
+    expected = _boundary_maps_from_input(input_file)
+    actual = _boundary_maps_from_wout(wout_path)
+    mismatches: list[str] = []
+    for family in BOUNDARY_FAMILIES:
+        keys = set(expected[family]) | {key for key, value in actual[family].items() if abs(value) > abs_tol}
+        for key in sorted(keys):
+            lhs = expected[family].get(key, 0.0)
+            rhs = actual[family].get(key, 0.0)
+            tol = abs_tol + rel_tol * max(abs(lhs), abs(rhs))
+            if abs(lhs - rhs) > tol:
+                mismatches.append(f"{family}{key}: input={lhs:.16e}, wout={rhs:.16e}")
+                if len(mismatches) >= 8:
+                    return mismatches
+    return mismatches
+
+
+def _assert_wout_matches_input_boundary(wout_path: Path, input_file: Path, *, context: str) -> None:
+    mismatches = _boundary_mismatches(input_file, wout_path)
+    if mismatches:
+        joined = "; ".join(mismatches)
+        raise RuntimeError(
+            f"{context} is not the raw input boundary for {input_file}: {joined}. "
+            "Use a raw initial wout or add a named known-artifact exception."
+        )
+
+
+def _validate_case_initial_wout(case: QICase) -> None:
+    try:
+        _assert_wout_matches_input_boundary(
+            case.initial_wout,
+            case.input_file,
+            context=f"{case.label} initial_wout",
+        )
+    except RuntimeError:
+        if case.raw_initial_wout_exception and case.initial_wout.resolve() in KNOWN_RAW_WOUT_ARTIFACTS:
+            return
+        raise
 
 
 def _history_paths(case: QICase) -> tuple[Path, ...]:
@@ -263,6 +337,7 @@ def _case_record(case: QICase) -> dict[str, str | float]:
     for path in (case.input_file, case.initial_wout, final_wout):
         if not path.exists():
             raise FileNotFoundError(path)
+    _validate_case_initial_wout(case)
     stress_fixture = bool(diagnostics.get("qi_case_stress_fixture", False))
     expected_gate_status = str(diagnostics.get("qi_case_expected_gate_status", "candidate"))
     validation_status = "deferred" if case.validation_status == "deferred" or stress_fixture else "promoted"

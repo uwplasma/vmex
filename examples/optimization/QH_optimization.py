@@ -60,7 +60,7 @@ MAKE_PLOTS = True
 
 # Physics targets and least-squares objective weights.  The iota term is a
 # differentiable lower bound on abs(mean_iota), not a target.
-TARGET_ASPECT = 5.0
+TARGET_ASPECT = 6.0
 TARGET_ABS_IOTA_MIN = 0.41
 HELICITY_M = 1
 HELICITY_N = -1

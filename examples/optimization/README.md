@@ -286,7 +286,7 @@ PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi_boundary_interpolatio
   --reference-input examples/data/input.nfp3_QI_fixed_resolution_final \
   --out-root results/diagnostics/qi_seed3127_boundary_interpolation \
   --lambdas 0.99,0.995,1.0,1.005,1.008,1.01,1.012 \
-  --max-mode 4 --max-iter 80 --target-aspect 4.0 \
+  --max-mode 4 --max-iter 80 --target-aspect 6.0 \
   --surfaces 0.1,0.28,0.46,0.64,0.82,1.0 \
   --mboz 18 --nboz 18 --nphi 151 --nalpha 31 --n-bounce 51 \
   --smooth-qi-max 5e-3 --legacy-qi-max 2e-3 \
@@ -303,7 +303,7 @@ PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 
 The constrained-QI sweep is the compact bundled-seed matrix, not the staged
 far-seed runner.  If its summary reports a stale QI target aspect, rerun the
-two sweep commands above with the current target-5 policy before using the
+two sweep commands above with the current target-6 policy before using the
 rendered matrix.
 
 For publication-quality QI validation, re-run the diagnostic with higher

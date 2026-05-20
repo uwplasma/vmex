@@ -364,26 +364,26 @@ def test_problem_configs_follow_current_seed_and_priority_policy():
     qi_cfg = sweep.PROBLEM_CONFIGS["qi"]
 
     assert qa_cfg.input_file.name == "input.nfp2_QA_omnigenity"
-    assert qa_cfg.target_aspect == pytest.approx(5.0)
+    assert qa_cfg.target_aspect == pytest.approx(6.0)
     assert qa_cfg.target_iota == pytest.approx(0.42)
     assert qa_cfg.iota_weight == pytest.approx(100.0)
     assert qa_cfg.lgradb_threshold == pytest.approx(0.30)
     assert qa_cfg.lgradb_weight == pytest.approx(0.0)
     assert qh_cfg.input_file.name == "input.nfp4_QH_warm_start"
-    assert qh_cfg.target_aspect == pytest.approx(5.0)
+    assert qh_cfg.target_aspect == pytest.approx(6.0)
     assert qh_cfg.iota_abs_min == pytest.approx(0.41)
     assert qh_cfg.iota_weight == pytest.approx(200.0)
     assert qh_cfg.lgradb_threshold == pytest.approx(0.30)
     assert qh_cfg.lgradb_weight == pytest.approx(0.0)
     assert qp_cfg.input_file.name == "input.nfp2_QI"
-    assert qp_cfg.target_aspect == pytest.approx(5.0)
+    assert qp_cfg.target_aspect == pytest.approx(6.0)
     assert qp_cfg.iota_abs_min == pytest.approx(0.41)
     assert qp_cfg.iota_weight == pytest.approx(200.0)
     assert qp_cfg.lgradb_threshold == pytest.approx(0.30)
     assert qp_cfg.lgradb_weight == pytest.approx(0.0)
     assert qp_cfg.project_input_boundary_to_max_mode
     assert qi_cfg.input_file.name == "input.nfp2_QI"
-    assert qi_cfg.target_aspect == pytest.approx(5.0)
+    assert qi_cfg.target_aspect == pytest.approx(6.0)
     assert qi_cfg.iota_abs_min == pytest.approx(0.41)
     assert qi_cfg.iota_weight == pytest.approx(200.0)
     assert qi_cfg.aspect_weight == pytest.approx(1.0)
@@ -954,9 +954,18 @@ def test_qs_ess_renderer_separates_lasym_records(tmp_path, monkeypatch):
     assert ("cpu", True, "qa", "continuation") in renderer._available_row_specs(discovered)
 
 
-def test_readme_renderer_uses_preoptimization_initial_wout(tmp_path):
+def test_readme_renderer_uses_preoptimization_initial_wout(tmp_path, monkeypatch):
     renderer = _load_readme_renderer_module()
 
+    input_file = tmp_path / "input.raw"
+    input_file.write_text(
+        "&INDATA\n"
+        "  NFP = 2\n"
+        "  RBC(0,0) = 1.0\n"
+        "  RBC(0,1) = 0.2\n"
+        "  ZBS(0,1) = 0.3\n"
+        "/\n"
+    )
     continuation_dir = tmp_path / "cpu" / "continuation" / "qh" / "mode3" / "ess"
     mode1_dir = tmp_path / "cpu" / "continuation" / "qh" / "mode1" / "ess"
     direct_qi_dir = tmp_path / "cpu" / "direct" / "qi" / "mode2" / "ess"
@@ -967,6 +976,18 @@ def test_readme_renderer_uses_preoptimization_initial_wout(tmp_path):
     (mode1_dir / "wout_initial.nc").write_text("pre-mode-1")
     (direct_qi_dir / "wout_original.nc").write_text("original")
 
+    def fake_read_wout(_path):
+        return SimpleNamespace(
+            nfp=2,
+            xm=np.asarray([0, 1], dtype=int),
+            xn=np.asarray([0, 0], dtype=int),
+            rmnc=np.asarray([[1.0, 0.2]], dtype=float),
+            rmns=np.zeros((1, 2), dtype=float),
+            zmnc=np.zeros((1, 2), dtype=float),
+            zmns=np.asarray([[0.0, 0.3]], dtype=float),
+        )
+
+    monkeypatch.setattr(renderer, "read_wout", fake_read_wout)
     continuation = renderer.BestRun(
         problem="qh",
         policy="continuation",
@@ -977,6 +998,7 @@ def test_readme_renderer_uses_preoptimization_initial_wout(tmp_path):
         iota_final=0.4,
         total_wall_time_s=1.0,
         output_dir=continuation_dir,
+        input_file=input_file,
     )
     qi = renderer.BestRun(
         problem="qi",
@@ -999,6 +1021,7 @@ def test_readme_renderer_uses_preoptimization_initial_wout(tmp_path):
         iota_final=0.4,
         total_wall_time_s=1.0,
         output_dir=direct_qa_dir,
+        input_file=input_file,
     )
 
     assert renderer._preoptimization_wout_path(continuation) == mode1_dir / "wout_initial.nc"
@@ -1006,13 +1029,67 @@ def test_readme_renderer_uses_preoptimization_initial_wout(tmp_path):
     assert renderer._preoptimization_wout_path(qa) == direct_qa_dir / "wout_initial.nc"
 
 
+def test_readme_renderer_derives_raw_wout_for_nonraw_qp_mode1_initial_wout(tmp_path, monkeypatch):
+    renderer = _load_readme_renderer_module()
+
+    input_file = tmp_path / "input.raw_qp"
+    input_file.write_text(
+        "&INDATA\n"
+        "  NFP = 2\n"
+        "  RBC(0,0) = 1.0\n"
+        "  RBC(0,1) = 0.2\n"
+        "  ZBS(0,1) = 0.3\n"
+        "/\n"
+    )
+    continuation_dir = tmp_path / "cpu" / "continuation" / "qp" / "mode3" / "ess"
+    mode1_dir = tmp_path / "cpu" / "continuation" / "qp" / "mode1" / "ess"
+    continuation_dir.mkdir(parents=True)
+    mode1_dir.mkdir(parents=True)
+    (mode1_dir / "wout_initial.nc").write_text("optimized-mode1")
+    derived_wout = continuation_dir / "wout_original.nc"
+
+    def fake_read_wout(_path):
+        return SimpleNamespace(
+            nfp=2,
+            xm=np.asarray([0, 1], dtype=int),
+            xn=np.asarray([0, 0], dtype=int),
+            rmnc=np.asarray([[1.0, 0.95]], dtype=float),
+            rmns=np.zeros((1, 2), dtype=float),
+            zmnc=np.zeros((1, 2), dtype=float),
+            zmns=np.asarray([[0.0, 0.3]], dtype=float),
+        )
+
+    monkeypatch.setattr(renderer, "read_wout", fake_read_wout)
+    derive_calls = []
+    monkeypatch.setattr(
+        renderer,
+        "_derive_raw_initial_wout",
+        lambda raw_input, output_dir: derive_calls.append((raw_input, output_dir)) or derived_wout,
+    )
+    run = renderer.BestRun(
+        problem="qp",
+        policy="continuation",
+        max_mode=3,
+        use_ess=True,
+        objective_final=1.0,
+        aspect_final=5.0,
+        iota_final=0.4,
+        total_wall_time_s=1.0,
+        output_dir=continuation_dir,
+        input_file=input_file,
+    )
+
+    assert renderer._preoptimization_wout_path(run) == derived_wout
+    assert derive_calls == [(input_file, continuation_dir)]
+
+
 def test_readme_renderer_filters_qi_rows_by_qi_target_aspect():
     renderer = _load_readme_renderer_module()
 
     current_qi = {
-        "target_aspect": "5.0",
+        "target_aspect": "6.0",
         "iota_abs_min": str(renderer.TARGET_ABS_IOTA_MIN),
-        "aspect_final": "5.0",
+        "aspect_final": "6.0",
     }
     legacy_qi = {
         "target_aspect": "10.0",
@@ -1032,8 +1109,8 @@ def test_readme_renderer_can_use_dedicated_qi_result_dir(tmp_path):
     (result_dir / "diagnostics.json").write_text(
         json.dumps(
             {
-                "target_aspect": 5.0,
-                "aspect": 5.01,
+                "target_aspect": 6.0,
+                "aspect": 6.01,
                 "mean_iota": -0.50,
                 "qi_raw_total": 1.1e-3,
                 "qi_legacy_total": 3.0e-4,
@@ -1052,7 +1129,7 @@ def test_readme_renderer_can_use_dedicated_qi_result_dir(tmp_path):
 
     assert row is not None
     assert row["policy"] == "qi_default"
-    assert float(row["target_aspect"]) == pytest.approx(5.0)
+    assert float(row["target_aspect"]) == pytest.approx(6.0)
     assert float(row["qi_legacy_total"]) == pytest.approx(3.0e-4)
 
 

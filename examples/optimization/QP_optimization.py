@@ -59,7 +59,7 @@ SAVE_STAGE_INPUTS = True  # Keep per-stage input decks for continuation/debuggin
 SAVE_STAGE_WOUTS = False  # Set True to also write per-stage WOUT files.
 MAKE_PLOTS = True
 
-TARGET_ASPECT = 5.0
+TARGET_ASPECT = 6.0
 TARGET_ABS_IOTA_MIN = 0.41
 HELICITY_M = 0
 HELICITY_N = -1

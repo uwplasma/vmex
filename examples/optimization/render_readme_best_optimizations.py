@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
+from vmec_jax.namelist import read_indata
 from vmec_jax.plotting import fix_matplotlib_3d, prepare_matplotlib_3d, vmecplot2_lcfs_3d_grid
 from vmec_jax.wout import read_wout
 
@@ -30,7 +31,7 @@ SUMMARY_CSV = FIGURE_DIR / "qs_ess_summary_all.csv"
 QI_CONSTRAINED_CSV = FIGURE_DIR / "qi_constrained_summary.csv"
 QI_CONSTRAINED_BEST_JSON = FIGURE_DIR / "qi_constrained_best.json"
 OUT_CSV = FIGURE_DIR / "readme_best_optimizations.csv"
-QI_DEFAULT_RESULT_DIR = REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp2_qi"
+QI_DEFAULT_RESULT_DIR = REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp2_qi_aspect6"
 
 PROBLEMS = ("qa", "qh", "qp", "qi")
 PROBLEM_TITLES = {
@@ -39,7 +40,7 @@ PROBLEM_TITLES = {
     "qp": "QP",
     "qi": "QI",
 }
-TARGET_ASPECT = 5.0
+TARGET_ASPECT = 6.0
 QI_TARGET_ASPECT = TARGET_ASPECT
 PROBLEM_TARGET_ASPECT = {
     "qa": TARGET_ASPECT,
@@ -70,6 +71,7 @@ class BestRun:
     qi_max_elongation: float | None = None
     lgradb_min: float | None = None
     qi_lgradb_min: float | None = None
+    input_file: Path | None = None
 
 
 def _read_summary_rows() -> list[dict[str, str]]:
@@ -231,6 +233,7 @@ def _is_current_qi_row(row: dict[str, str]) -> bool:
 
 
 def _run_from_row(row: dict[str, str]) -> BestRun:
+    input_value = row.get("input_file")
     return BestRun(
         problem=row.get("problem", "qi"),
         backend=row.get("backend", "cpu"),
@@ -251,6 +254,7 @@ def _run_from_row(row: dict[str, str]) -> BestRun:
         qi_max_elongation=_float_value(row, "qi_max_elongation"),
         lgradb_min=_float_value(row, "lgradb_min"),
         qi_lgradb_min=_float_value(row, "qi_lgradb_min"),
+        input_file=_path_from_summary(input_value) if input_value else None,
     )
 
 
@@ -274,6 +278,7 @@ def _qi_default_row_from_result_dir(result_dir: Path = QI_DEFAULT_RESULT_DIR) ->
         "crashed": "false",
         "target_aspect": f"{_target_aspect_for('qi'):.16e}",
         "iota_abs_min": f"{TARGET_ABS_IOTA_MIN:.16e}",
+        "input_file": _repo_relative_path(REPO_ROOT / "examples" / "data" / "input.nfp2_QI"),
         "qi_qp_preseed": "false",
         "objective_final": f"{float(history['objective_final']):.16e}",
         "aspect_final": f"{float(diagnostics['aspect']):.16e}",
@@ -376,22 +381,149 @@ def _plot_lcfs(ax, wout, title: str) -> None:
     )
 
 
+BOUNDARY_FAMILIES = ("RBC", "RBS", "ZBC", "ZBS")
+
+
+def _boundary_maps_from_input(input_file: Path) -> dict[str, dict[tuple[int, int], float]]:
+    indata = read_indata(input_file)
+    return {
+        family: {tuple(key): float(value) for key, value in indata.indexed.get(family, {}).items()}
+        for family in BOUNDARY_FAMILIES
+    }
+
+
+def _boundary_maps_from_wout(wout_path: Path) -> dict[str, dict[tuple[int, int], float]]:
+    wout = read_wout(wout_path)
+    arrays = {
+        "RBC": np.asarray(wout.rmnc[-1], dtype=float),
+        "RBS": np.asarray(wout.rmns[-1], dtype=float),
+        "ZBC": np.asarray(wout.zmnc[-1], dtype=float),
+        "ZBS": np.asarray(wout.zmns[-1], dtype=float),
+    }
+    nfp = int(wout.nfp)
+    maps: dict[str, dict[tuple[int, int], float]] = {family: {} for family in BOUNDARY_FAMILIES}
+    for family, values in arrays.items():
+        for m_i, xn_i, value in zip(np.asarray(wout.xm, dtype=int), np.asarray(wout.xn, dtype=int), values):
+            n_i = int(round(float(xn_i) / float(nfp))) if nfp else int(xn_i)
+            maps[family][(n_i, int(m_i))] = float(value)
+    return maps
+
+
+def _boundary_mismatches(
+    input_file: Path,
+    wout_path: Path,
+    *,
+    abs_tol: float = 5.0e-8,
+    rel_tol: float = 5.0e-8,
+) -> list[str]:
+    expected = _boundary_maps_from_input(input_file)
+    actual = _boundary_maps_from_wout(wout_path)
+    mismatches: list[str] = []
+    for family in BOUNDARY_FAMILIES:
+        keys = set(expected[family]) | {key for key, value in actual[family].items() if abs(value) > abs_tol}
+        for key in sorted(keys):
+            lhs = expected[family].get(key, 0.0)
+            rhs = actual[family].get(key, 0.0)
+            tol = abs_tol + rel_tol * max(abs(lhs), abs(rhs))
+            if abs(lhs - rhs) > tol:
+                mismatches.append(f"{family}{key}: input={lhs:.16e}, wout={rhs:.16e}")
+                if len(mismatches) >= 8:
+                    return mismatches
+    return mismatches
+
+
+def _assert_wout_matches_input_boundary(wout_path: Path, input_file: Path, *, context: str) -> None:
+    mismatches = _boundary_mismatches(input_file, wout_path)
+    if mismatches:
+        joined = "; ".join(mismatches)
+        raise RuntimeError(
+            f"{context} is not the raw input boundary for {input_file}: {joined}. "
+            "Use wout_original.nc or regenerate a raw-input initial wout."
+        )
+
+
+def _input_file_from_case_result(output_dir: Path) -> Path | None:
+    result_path = output_dir / "case_result.json"
+    if not result_path.exists():
+        return None
+    try:
+        record = json.loads(result_path.read_text())
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Cannot parse {result_path}") from exc
+    value = record.get("input_file")
+    if not value:
+        return None
+    return _path_from_summary(str(value))
+
+
+def _raw_input_file_for_run(run: BestRun) -> Path:
+    input_file = run.input_file or _input_file_from_case_result(run.output_dir)
+    if input_file is None:
+        raise RuntimeError(
+            f"Cannot prove raw initial wout provenance for {run.output_dir}: "
+            "missing input_file in summary row and case_result.json"
+        )
+    if not input_file.exists():
+        raise FileNotFoundError(input_file)
+    return input_file
+
+
+def _validated_raw_initial_wout(candidate: Path, input_file: Path, *, context: str) -> Path:
+    if not candidate.exists():
+        raise FileNotFoundError(candidate)
+    _assert_wout_matches_input_boundary(candidate, input_file, context=context)
+    return candidate
+
+
+def _derive_raw_initial_wout(input_file: Path, output_dir: Path) -> Path:
+    """Solve the raw input deck once and persist it as ``wout_original.nc``."""
+
+    from vmec_jax.driver import run_fixed_boundary, write_wout_from_fixed_boundary_run
+
+    derived = output_dir / "wout_original.nc"
+    derived.parent.mkdir(parents=True, exist_ok=True)
+    run = run_fixed_boundary(input_file, verbose=False)
+    write_wout_from_fixed_boundary_run(str(derived), run, include_fsq=False, fast_bcovar=True)
+    _assert_wout_matches_input_boundary(derived, input_file, context="derived wout_original")
+    return derived
+
+
+def _validated_or_derived_raw_initial_wout(candidate: Path, input_file: Path, output_dir: Path, *, context: str) -> Path:
+    try:
+        return _validated_raw_initial_wout(candidate, input_file, context=context)
+    except (FileNotFoundError, RuntimeError):
+        return _derive_raw_initial_wout(input_file, output_dir)
+
+
 def _preoptimization_wout_path(run: BestRun) -> Path:
     """Return the deck state before any mode-1 optimization work.
 
     Continuation case directories store ``wout_initial.nc`` for the final
     continuation stage, not the original deck.  For README panels we want the
     actual user-provided starting equilibrium before the first mode-1 solve.
+    Never use a stage-local ``wout_initial.nc`` unless its boundary matches the
+    raw VMEC input deck.
     """
 
     original = run.output_dir / "wout_original.nc"
     if original.exists():
         return original
+    input_file = _raw_input_file_for_run(run)
     if run.policy == "continuation":
         mode1 = run.output_dir.parent.parent / "mode1" / run.output_dir.name / "wout_initial.nc"
         if mode1.exists():
-            return mode1
-    return run.output_dir / "wout_initial.nc"
+            return _validated_or_derived_raw_initial_wout(
+                mode1,
+                input_file,
+                run.output_dir,
+                context=f"{run.problem} continuation mode1 wout_initial",
+            )
+    return _validated_or_derived_raw_initial_wout(
+        run.output_dir / "wout_initial.nc",
+        input_file,
+        run.output_dir,
+        context=f"{run.problem} {run.policy} wout_initial",
+    )
 
 
 def _plot_history(ax, run: BestRun) -> None:

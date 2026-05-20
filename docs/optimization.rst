@@ -53,16 +53,16 @@ driver for reproducible comparison tables:
      - Notes
    * - QA
      - ``examples/optimization/QA_optimization.py``
-     - NFP=2 QA deck, aspect near 5, signed mean-iota target, QA residual.
+     - NFP=2 QA deck, aspect near 6, signed mean-iota target, QA residual.
    * - QH
      - ``examples/optimization/QH_optimization.py``
-     - NFP=4 warm start, aspect near 5, ``abs(mean_iota) >= 0.41``, QH residual.
+     - NFP=4 warm start, aspect near 6, ``abs(mean_iota) >= 0.41``, QH residual.
    * - QP
      - ``examples/optimization/QP_optimization.py``
-     - NFP=2 QI seed, aspect near 5, ``abs(mean_iota) >= 0.41``, QP residual.
+     - NFP=2 QI seed, aspect near 6, ``abs(mean_iota) >= 0.41``, QP residual.
    * - QI
      - ``examples/optimization/QI_optimization.py``
-     - NFP=2 QI default lane with Boozer-space QI, mirror, elongation, QI ceiling, ESS, and repeated same-mode continuation; the README best-row sweep uses aspect target 5, while seed-robustness cases may choose case-specific aspect targets.
+     - NFP=2 QI default lane with Boozer-space QI, mirror, elongation, QI ceiling, ESS, and repeated same-mode continuation; the README best-row sweep uses aspect target 6, while seed-robustness cases may choose case-specific aspect targets.
 
 When using sweep commands, keep backend selection and report labeling separate.
 ``--backend-label`` only names output directories and table rows; it does not
@@ -489,7 +489,7 @@ branch-shuffle diagnostic.
    )
 
    objective_tuples = [
-       (vj.AspectRatio().J, 5.0, 1.0),
+       (vj.AspectRatio().J, 6.0, 1.0),
        (vj.AbsMeanIotaFloor(0.41).J, 0.0, 200.0**2),
        (qi.J, 0.0, 1.0),
        (qi_ceiling.J, 0.0, 100.0),
@@ -541,7 +541,7 @@ the same setup-and-solve flow used by the QA/QP/QI examples:
    SAVE_STAGE_WOUTS = False    # set True to write per-stage WOUT files
    HELICITY_M = 1
    HELICITY_N = -1
-   TARGET_ASPECT = 5.0
+   TARGET_ASPECT = 6.0
    TARGET_ABS_IOTA_MIN = 0.41
    SURFACES = np.arange(0.0, 1.01, 0.1)
 
@@ -754,14 +754,14 @@ Full QA/QH/QP/QI policy sweep
 
 The sweep below compares four target objectives:
 
-- QA: the reference omnigenity NFP=2 QA deck, aspect ratio near 5,
+- QA: the reference omnigenity NFP=2 QA deck, aspect ratio near 6,
   signed mean iota target 0.42, and quasi-axisymmetry.
-- QH: the bundled NFP=4 warm start, aspect ratio near 5, quasi-helical
+- QH: the bundled NFP=4 warm start, aspect ratio near 6, quasi-helical
   symmetry, and a smooth ``abs(mean_iota) >= 0.41`` lower bound.
-- QP: aspect ratio near 5, quasi-poloidal symmetry, and a smooth
+- QP: aspect ratio near 6, quasi-poloidal symmetry, and a smooth
   ``abs(mean_iota) >= 0.41`` lower bound, using the same bundled NFP=2 seed as
   the QI runs.
-- QI: aspect ratio near 5, a differentiable smooth Boozer-space quasi-isodynamic
+- QI: aspect ratio near 6, a differentiable smooth Boozer-space quasi-isodynamic
   residual evaluated through ``booz_xform_jax``, maximum mirror-ratio penalty,
   maximum-LCFS-elongation penalty, and the same smooth
   ``abs(mean_iota) >= 0.41`` lower bound.  ``LgradB`` is available as an
@@ -769,7 +769,7 @@ The sweep below compares four target objectives:
 
 The current objective priority is primary symmetry/QI quality and rotational
 transform control first.  The published QA/QH/QP/QI sweep uses aspect ratio
-near 5, with case-specific staged QI diagnostics available for harder far
+near 6, with case-specific staged QI diagnostics available for harder far
 seeds.  QA also uses the signed iota-0.42 target, while QH/QP/QI use
 ``abs(mean_iota) >= 0.41``.  ``LgradB`` remains available for users who want
 extra magnetic-gradient regularization, but it is not active in the default
@@ -1027,12 +1027,11 @@ run:
    PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_seed_robustness.py
 
 Both scripts optimize QI, aspect ratio, and a differentiable
-``abs(mean_iota) >= 0.41`` floor.  The default NFP=2 lane still targets a
-higher aspect ratio to avoid overconstraining the mirror-aware problem.  The
-``input.QI_stel_seed_3127`` far-seed lane is different: the known same-NFP QI
-branch lives near aspect ``3.5``-``4.0`` with ``|iota|≈1``, so that case now
-uses a deterministic same-NFP reference-family boundary preconditioner before
-local cleanup.  The preconditioner scans interpolation points between the raw
+``abs(mean_iota) >= 0.41`` floor.  The public QA/QH/QP/QI examples now target
+aspect ratio 6 so their README panels can be compared directly.  The
+``input.QI_stel_seed_3127`` far-seed lane still needs deterministic same-NFP
+reference-family boundary preconditioning before local cleanup.  The
+preconditioner scans interpolation points between the raw
 seed and the bundled NFP=3 QI reference, solves each candidate, ranks them with
 independent smooth/legacy QI, mirror, elongation, aspect, and iota gates, and
 then continues from the lowest-mirror accepted non-endpoint candidate when one
@@ -1053,8 +1052,8 @@ aspect-ratio weights, mirror/elongation soft-wall weights, QI branch-width
 weights, the branch-shuffle profile residual, ``phimin`` well-interval choices,
 and termination tolerances against the nfp=2
 ``examples/data/input.nfp2_QI`` seed and the bundled near-axis
-``input.QI_stel_seed_3127`` seed.  The current far-seed QI lane uses
-``max_mode = 4`` with ESS, ``target_aspect = 4.0``,
+``input.QI_stel_seed_3127`` seed.  The historical far-seed QI lane used
+``max_mode = 4`` with ESS, ``target_aspect = 6.0``,
 ``abs(mean_iota) >= 0.41``, same-NFP reference-family boundary interpolation,
 and a single QI/iota cleanup with a QI ceiling.  The
 shuffle-profile term is intentionally retained because width-only and
@@ -1203,7 +1202,7 @@ to ``QI_CASES`` in
        "use_mode_continuation": True,
        "stage_repeats": 5,
        "max_nfev": 12,
-       "target_aspect": 5.0,
+       "target_aspect": 6.0,
        "target_abs_iota_min": 0.41,
        "mirror_threshold": 0.21,
        "mirror_surface_index": None,
@@ -1265,15 +1264,15 @@ gate.
 
 For local cleanup after a global preconditioner, the script can unlock
 boundary modes anisotropically using ``stage_mode_limits``.  For example,
-``{"mode": 4, "max_m": 1, "max_n": 4, "label": "nfirst"}`` lets toroidal
+``{"mode": 3, "max_m": 1, "max_n": 3, "label": "nfirst"}`` lets toroidal
 harmonics move while keeping poloidal complexity low, then a second
-``{"mode": 4, "max_m": 4, "max_n": 4, "label": "full"}`` stage unlocks the
-full boundary.  Candidate stages are promoted only if independent exact
+``{"mode": 3, "max_m": 3, "max_n": 3, "label": "full"}`` stage unlocks the
+full production boundary.  Candidate stages are promoted only if independent exact
 diagnostics pass, so a lower-mirror local step cannot overwrite the accepted
 QI baseline if it damages legacy QI or the mirror gate.
 
-To reproduce the same-NFP reference-family scan used by the public
-``qi_stel_seed_3127`` case:
+For historical comparison, the earlier same-NFP reference-family scan used by
+the ``qi_stel_seed_3127`` robustness case was:
 
 .. code-block:: bash
 
@@ -1282,7 +1281,7 @@ To reproduce the same-NFP reference-family scan used by the public
      --reference-input examples/data/input.nfp3_QI_fixed_resolution_final \
      --out-root results/diagnostics/qi_seed3127_boundary_interpolation \
      --lambdas 0.99,0.995,1.0,1.005,1.008,1.01,1.012 \
-     --max-mode 4 --max-iter 80 --target-aspect 4.0 \
+     --max-mode 4 --max-iter 80 --target-aspect 6.0 \
      --surfaces 0.1,0.28,0.46,0.64,0.82,1.0 \
      --mboz 18 --nboz 18 --nphi 151 --nalpha 31 --n-bounce 51 \
      --smooth-qi-max 5e-3 --legacy-qi-max 2e-3 \
@@ -1401,7 +1400,7 @@ Least-squares drivers
   which uses ``scipy.optimize.least_squares`` with the same exact residual and
   discrete-adjoint Jacobian callbacks.
 
-The QA fixed-resolution example currently uses the SciPy route because it is
+The QA exact-optimization example currently uses the SciPy route because it is
 more robust on the higher-dimensional QA problem. The custom Gauss-Newton path
 is still available for lower-level experiments and tighter callback control.
 

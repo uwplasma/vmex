@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 import csv
 import json
 from pathlib import Path
@@ -49,7 +49,7 @@ MODES_BY_POLICY = {
     "direct": (1, 2, 3),
 }
 QI_INPUT_NFP = 2
-TARGET_ASPECT = 5.0
+TARGET_ASPECT = 6.0
 QI_TARGET_ASPECT = TARGET_ASPECT
 PROBLEM_TARGET_ASPECT = {
     "qa": TARGET_ASPECT,
@@ -78,6 +78,14 @@ class CaseResult:
     nfev: int | None = None
     njev: int | None = None
     total_wall_time_s: float | None = None
+    profile_wall_time_s: float | None = None
+    profile_top_name: str | None = None
+    profile_top_wall_time_s: float | None = None
+    profile_solve_forward_trial_total_wall_time_s: float | None = None
+    profile_solve_forward_exact_total_wall_time_s: float | None = None
+    profile_exact_tape_build_wall_time_s: float | None = None
+    profile_jacobian_total_wall_time_s: float | None = None
+    profile_write_wout_wall_time_s: float | None = None
     output_dir: str | None = None
     jax_backend: str | None = None
     jax_device_kind: str | None = None
@@ -366,6 +374,7 @@ def _pi_label(v: float) -> str:
 
 def _discover_results() -> list[CaseResult]:
     results_by_key: dict[tuple[str, bool, str, str, int, bool], tuple[int, float, CaseResult]] = {}
+    allowed_case_fields = {field.name for field in fields(CaseResult)}
     for path in sorted(OUTPUT_ROOT.glob("**/case_result.json")):
         raw_record = json.loads(path.read_text())
         problem_name = str(raw_record.get("problem", ""))
@@ -397,6 +406,7 @@ def _discover_results() -> list[CaseResult]:
         output_dir = record.get("output_dir")
         if output_dir is None or not Path(str(output_dir)).exists():
             record["output_dir"] = str(path.parent)
+        record = {key: value for key, value in record.items() if key in allowed_case_fields}
         result = CaseResult(**record)
         key = _result_key(result)
         mtime = path.stat().st_mtime
@@ -472,6 +482,14 @@ def _write_combined_summary(results: list[CaseResult]) -> None:
                 "nfev",
                 "njev",
                 "total_wall_time_s",
+                "profile_wall_time_s",
+                "profile_top_name",
+                "profile_top_wall_time_s",
+                "profile_solve_forward_trial_total_wall_time_s",
+                "profile_solve_forward_exact_total_wall_time_s",
+                "profile_exact_tape_build_wall_time_s",
+                "profile_jacobian_total_wall_time_s",
+                "profile_write_wout_wall_time_s",
                 "jax_backend",
                 "jax_device_kind",
                 "solver_device",
