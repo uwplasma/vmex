@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 TOOL_PATH = REPO_ROOT / "tools" / "diagnostics" / "gpu_cpu_performance_matrix.py"
 FIXED_TOOL_PATH = REPO_ROOT / "tools" / "diagnostics" / "profile_fixed_boundary.py"
 QI_TOOL_PATH = REPO_ROOT / "tools" / "diagnostics" / "profile_qi_boozer_gpu.py"
+COMPARE_TOOL_PATH = REPO_ROOT / "tools" / "diagnostics" / "compare_profile_reports.py"
 
 
 def _load_tool():
@@ -30,6 +31,14 @@ def _load_fixed_tool():
 
 def _load_qi_tool():
     spec = importlib.util.spec_from_file_location("profile_qi_boozer_gpu", QI_TOOL_PATH)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_compare_tool():
+    spec = importlib.util.spec_from_file_location("compare_profile_reports", COMPARE_TOOL_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -57,6 +66,7 @@ def test_performance_matrix_auto_backend_preserves_jax_selection():
             "16",
             "--dynamic-replay-mode",
             "whole_scan",
+            "--sync-replay-timing",
         ]
     )
     env = tool.child_env(
@@ -74,6 +84,7 @@ def test_performance_matrix_auto_backend_preserves_jax_selection():
     assert env["PYTHONPATH"].split(os.pathsep)[0] == str(REPO_ROOT)
     assert env["VMEC_JAX_REPLAY_COLUMN_CHUNK"] == "16"
     assert env["VMEC_JAX_DYNAMIC_REPLAY_MODE"] == "whole_scan"
+    assert env["VMEC_JAX_OPT_SYNC_REPLAY_TIMING"] == "1"
     assert "JAX_ENABLE_X64" not in env
 
 
@@ -158,6 +169,7 @@ def test_performance_matrix_exact_command_can_request_memory_profile(tmp_path):
             "--trace",
             "--device-memory-profile",
             "--vmec-timing-detail",
+            "--sync-replay-timing",
         ]
     )
     report = tmp_path / "report.json"
@@ -182,8 +194,82 @@ def test_performance_matrix_exact_command_can_request_memory_profile(tmp_path):
     assert command[command.index("--lsmr-maxiter") + 1] == "5"
     assert "--trial-use-scan" in command
     assert "--vmec-timing-detail" in command
+    assert "--sync-replay-timing" in command
     assert command[command.index("--trace-outdir") + 1] == str(trace)
     assert command[command.index("--device-memory-profile-out") + 1] == str(memory)
+
+
+def test_exact_callback_summary_preserves_cold_tangent_replay_and_scan_trial_buckets():
+    compare = _load_compare_tool()
+    payload = {
+        "report_kind": "exact_optimizer_callback_profile",
+        "problem": "qh",
+        "max_mode": 2,
+        "callback": "jacobian",
+        "solver_device_resolved": "gpu",
+        "total_wall_time_s": 10.0,
+        "samples": [{"repeat": 0, "wall_time_s": 10.0}],
+        "profile": {
+            "jacobian_total": {"count": 1, "wall_time_s": 9.5},
+            "exact_solve_with_tape_total": {"count": 1, "wall_time_s": 4.0},
+            "exact_tape_build": {"count": 1, "wall_time_s": 3.0},
+            "exact_tape_build_unattributed": {"count": 1, "wall_time_s": 0.7},
+            "jacobian_initial_tangents": {"count": 1, "wall_time_s": 1.4},
+            "jacobian_initial_tangents_linearize": {"count": 1, "wall_time_s": 0.3},
+            "jacobian_initial_tangents_vmap_dispatch": {"count": 1, "wall_time_s": 0.2},
+            "jacobian_initial_tangents_vmap_ready": {"count": 1, "wall_time_s": 0.9},
+            "jacobian_tape_replay": {"count": 1, "wall_time_s": 2.1},
+            "jacobian_tape_replay_dispatch": {"count": 1, "wall_time_s": 0.2},
+            "jacobian_tape_replay_ready": {"count": 1, "wall_time_s": 1.9},
+            "jacobian_residual_tangents": {"count": 1, "wall_time_s": 0.8},
+            "trial_solver_scan_total": {"count": 1, "wall_time_s": 1.2},
+            "trial_solver_scan_setup": {"count": 1, "wall_time_s": 0.1},
+            "trial_solver_scan_run_setup": {"count": 1, "wall_time_s": 0.15},
+            "trial_solver_scan_device_run": {"count": 1, "wall_time_s": 0.75},
+            "trial_solver_scan_device_dispatch": {"count": 1, "wall_time_s": 0.05},
+            "trial_solver_scan_device_ready": {"count": 1, "wall_time_s": 0.7},
+            "trial_solver_scan_host_materialize": {"count": 1, "wall_time_s": 0.1},
+            "trial_solver_scan_postprocess": {"count": 1, "wall_time_s": 0.1},
+        },
+    }
+
+    summary = compare.summarize_payload(payload, label="cold-gpu", top_profile=3)
+    metrics = summary["metrics"]
+
+    assert metrics["replay_time_s"] == 2.1
+    assert metrics["accepted_replay_dispatch_s"] == 0.2
+    assert metrics["accepted_replay_ready_s"] == 1.9
+    assert metrics["initial_tangents_s"] == 1.4
+    assert metrics["initial_tangents_linearize_s"] == 0.3
+    assert metrics["initial_tangents_vmap_dispatch_s"] == 0.2
+    assert metrics["initial_tangents_vmap_ready_s"] == 0.9
+    assert metrics["residual_tangents_s"] == 0.8
+    assert metrics["trial_solver_scan_total_s"] == 1.2
+    assert metrics["trial_solver_scan_run_setup_s"] == 0.15
+    assert metrics["trial_solver_scan_device_run_s"] == 0.75
+    assert metrics["trial_solver_scan_device_dispatch_s"] == 0.05
+    assert metrics["trial_solver_scan_device_ready_s"] == 0.7
+    assert summary["exact_optimizer_patch_target"]["name"] == "jacobian_tape_replay_ready"
+
+
+def test_exact_callback_summary_uses_split_replay_when_total_bucket_is_absent():
+    compare = _load_compare_tool()
+    payload = {
+        "report_kind": "exact_optimizer_callback_profile",
+        "total_wall_time_s": 3.0,
+        "samples": [{"repeat": 0, "wall_time_s": 3.0}],
+        "profile": {
+            "jacobian_tape_replay_dispatch": {"count": 1, "wall_time_s": 0.4},
+            "jacobian_tape_replay_ready": {"count": 1, "wall_time_s": 0.6},
+        },
+    }
+
+    summary = compare.summarize_payload(payload, label="split-only", top_profile=2)
+
+    assert summary["metrics"]["replay_time_s"] == 1.0
+    assert summary["metrics"]["accepted_replay_dispatch_s"] == 0.4
+    assert summary["metrics"]["accepted_replay_ready_s"] == 0.6
+    assert summary["metrics"]["accepted_point_replay_count"] is None
 
 
 def test_fixed_boundary_profiler_compacts_timing_diagnostics():
