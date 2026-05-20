@@ -193,8 +193,10 @@ The second audit command uses the far-seed QI gate convention from
 ``QI_optimization.py``: legacy QI below ``2e-3`` and smooth differentiable QI
 below ``5e-3``.
 
-The README/docs QI coverage figure is rendered from existing reviewed outputs
-for the promoted NFP=1, 2, 3, and 4 QI lanes:
+The README/docs QI coverage figure is rendered from existing reviewed
+``QI_optimization.py`` outputs.  The NFP=1, NFP=2, and seed-3127 rows are
+reviewed QI lanes; the NFP=4 row is retained as a deferred stress/validation
+case and must not be described as completed NFP=4 robustness:
 
 .. list-table::
    :header-rows: 1
@@ -254,7 +256,7 @@ for the promoted NFP=1, 2, 3, and 4 QI lanes:
 .. image:: _static/figures/readme_qi_optimization_cases.png
    :width: 100%
    :align: center
-   :alt: QI optimization coverage for NFP=1, NFP=2, NFP=3, and NFP=4 inputs
+   :alt: QI optimization coverage for reviewed NFP=1, NFP=2, NFP=3, and deferred NFP=4 inputs
 
 The initial and final Boozer ``|B|`` panels in that figure use line contours
 only.  The staged objective panel concatenates every recorded history file and
@@ -283,16 +285,18 @@ basin-survey diagnostics use fast trial solves unless ``--exact-solve`` is
 passed; use exact solves before treating their scalar values as promotion
 evidence.
 
-Current NFP=4 QI status: ``VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta`` is the
-promoted finite-beta NFP=4 verification lane.  It preserves the input deck's
-``MPOL=5``, ``NTOR=5``, and VMEC convergence settings because the case is
-already in a good finite-beta QI basin; low-budget local cleanup can otherwise
-damage the tight smooth-QI gate.  The README NFP=4 minimal-seed row uses the
-same case as a policy, starts from ``examples/data/input.minimal_seed_nfp4``,
-and enables ``VMEC_JAX_QI_REFERENCE_INPUT=examples/data/input.nfp4_QI_finite_beta``
-with ``VMEC_JAX_QI_REFERENCE_LAMBDAS=1.0``.  ``VMEC_JAX_QI_RUN_CASE=nfp4_qh_warm_to_qi``
-remains an explicit non-passing stress fixture for QH-to-QI conversion and
-should not be used as a promoted QI result.
+Current NFP=4 QI status: deferred.  ``VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta``
+is a finite-beta NFP=4 verification/stress lane, not a completed robustness
+claim.  It preserves the input deck's ``MPOL=5``, ``NTOR=5``, and VMEC
+convergence settings because low-budget local cleanup can damage the
+smooth-QI gate.  The README NFP=4 minimal-seed row uses the same case as a
+policy, starts from ``examples/data/input.minimal_seed_nfp4``, and enables
+``VMEC_JAX_QI_REFERENCE_INPUT=examples/data/input.nfp4_QI_finite_beta`` with
+``VMEC_JAX_QI_REFERENCE_LAMBDAS=1.0``.  Treat this as evidence that the driver
+can exercise the NFP=4 path, not as proof of seed-robust NFP=4 QI.
+``VMEC_JAX_QI_RUN_CASE=nfp4_qh_warm_to_qi`` remains an explicit non-passing
+stress fixture for QH-to-QI conversion and should not be used as a promoted QI
+result.
 
 Motivation: differentiability without finite differences
 ---------------------------------------------------------
@@ -1162,13 +1166,12 @@ of the file, to one of the bundled cases:
    RUN_CASE = "nfp2_qi"             # default NFP=2 mirror-aware QI lane
    RUN_CASE = "nfp3_qi"             # NFP=3 alias for qi_stel_seed_3127
    RUN_CASE = "qi_stel_seed_3127"   # descriptive name for the NFP=3 far seed
-   RUN_CASE = "nfp4_qi_finite_beta" # NFP=4 finite-beta QI verification lane
+   RUN_CASE = "nfp4_qi_finite_beta" # NFP=4 finite-beta stress/verification lane
    RUN_CASE = "nfp4_qh_warm_to_qi"  # NFP=4 diagnostic stress test, using the input NFP
 
-The NFP=4 finite-beta case is the promoted NFP=4 QI lane.  The NFP=4 QH-warm
-case is deliberately listed as a stress test: it confirms that the current QI
-driver can run the NFP=4 input path, but the available QH warm start does not
-yet pass the independent QI and mirror gates.
+Both NFP=4 cases are deferred validation lanes.  They confirm that the current
+QI driver can run NFP=4 input paths, but available NFP=4 starts do not yet
+establish independent QI, mirror, and multi-seed robustness gates.
 
 For example, to run the bundled near-axis stellarator seed without editing the
 script:

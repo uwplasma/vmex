@@ -3,6 +3,7 @@
 Last updated: 2026-05-20
 Primary branch: `main`
 Baseline release: `v0.0.11`
+Latest known green `main` CI: `7030eaf`
 
 This is the living execution plan for making `vmec_jax` accurate, fast,
 differentiable, documented, and usable by external researchers. Update it when
@@ -72,12 +73,14 @@ acceptance criteria or evidence changes.
   default (`--prefine-mirror-surface-index all`), preventing a single-surface
   mirror gate from promoting a candidate whose other surfaces violate the
   mirror target.
-- README/docs QI coverage now has a dedicated two-input figure and CSV rendered
-  from existing `QI_optimization.py` outputs: `input.nfp2_QI` reaches legacy QI
+- README/docs QI coverage now has a dedicated figure and CSV rendered
+  from existing `QI_optimization.py` outputs. Reviewed NFP=1/NFP=2/NFP=3 rows
+  are separated from deferred NFP=4 stress evidence: `input.nfp2_QI` reaches legacy QI
   `3.09e-4`, mirror `0.225`, elongation `6.43`, aspect `9.999`, iota `-0.5043`
   in 9.8 CPU minutes; the curated `input.QI_stel_seed_3127` reference-family
   baseline reaches legacy QI `1.16e-3`, mirror `0.316`, elongation `3.91`,
-  aspect `3.465`, iota `-1.0366` in 1.4 CPU minutes.  The Boozer `|B|` panels
+  aspect `3.465`, iota `-1.0366` in 1.4 CPU minutes. NFP=4 remains deferred
+  rather than completed robustness. The Boozer `|B|` panels
   use line contours only.
 - `solve.py`, `wout.py`, `free_boundary.py`, `driver.py`, and optimization
   modules are too large and need staged refactoring after parity gates are locked.
@@ -347,7 +350,7 @@ Acceptance:
 
 ## Progress Snapshot
 
-Updated 2026-05-19 after the bundled profile/current wout parity gates, QI
+Updated 2026-05-20 after the bundled profile/current wout parity gates, QI
 selection hardening, exact-Jacobian host-materialization cleanup,
 continuation/exact-history hardening, LASYM-Boozer parity, release-checklist
 push, 85% coverage-gate push, optional SIMSOPT/VMEC2000 gate expansion, the
@@ -355,7 +358,7 @@ converged-wout parity matrix/benchmark pass, QI diagnostic/objective branch
 hardening, the exact-output/API/release hygiene push, the custom QI seed audit
 documentation/regression gate, the v0.0.10 release, scan-runner cache reuse
 across boundary trials, detailed scan-timing diagnostics, reference-state wout
-roundtrip diagnostics, the green `main` CI run for `f5c6d27`, LASYM bsubv
+roundtrip diagnostics, the green `main` CI run for `7030eaf`, LASYM bsubv
 wout parity tightening, QI staged-history provenance cleanup, the v0.0.11
 release, and the QI optimization driver split:
 
@@ -473,7 +476,9 @@ release, and the QI optimization driver split:
   mechanics live in `qi_optimization_cases.py` and
   `qi_optimization_support.py`. Large
   solver/wout/free-boundary splits remain deferred behind parity gates.
-- Docs/release hygiene: 99.7%. Performance/discrete-adjoint/docs reflect the
+- Docs/release hygiene: current release hygiene baseline is green at `7030eaf`
+  with local required coverage validated at 86.871%.
+  Performance/discrete-adjoint/docs reflect the
   current replay and finite-beta policies, diagnostics docs cover detailed
   preconditioner timing, and a command-level release checklist now ties local
   gates, tools/validation lint/compile checks, GitHub Actions, artifact hygiene,
