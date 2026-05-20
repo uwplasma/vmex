@@ -26,10 +26,48 @@ import numpy as np
 
 from ._compat import has_jax, jax, jnp, jit
 from . import _solve_runtime
+from . import solve_residual_iter_policy as _residual_iter_policy
+from .solve_residual_iter_policy import (
+    append_residual_iter_history_record as _append_residual_iter_history_record,
+    append_residual_iter_terminal_history as _append_residual_iter_terminal_history,
+    host_restart_decision as _host_restart_decision,
+    host_update_assembly_policy as _host_update_assembly_policy,
+    resolve_light_history as _resolve_light_history,
+    resolve_restart_flags as _resolve_restart_flags,
+    residual_iter_history_record as _residual_iter_history_record,
+    scan_fallback_decision as _scan_fallback_decision,
+    vmec2000_scan_options_from_env as _vmec2000_scan_options_from_env,
+    vmec2000_time_control_decision as _vmec2000_time_control_decision,
+)
 from .field import TWOPI, b2_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda, chips_from_wout_chipf
 from .fourier import eval_fourier_dtheta, eval_fourier_dzeta_phys
 from .geom import eval_geom
 from .grids import angle_steps
+from .solve_diagnostics_io import (
+    _dump_freeb_axis_trace_record,
+    _dump_freeb_control_trace_record,
+    _dump_time_control_trace_record,
+    _finite_float_or_zero,
+    _format_axis_coeff,
+    _format_checkpoint_log_row as _format_checkpoint_log_row,
+    _format_evolve_trace_row as _format_evolve_trace_row,
+    _format_freeb_control_trace_row as _format_freeb_control_trace_row,
+    _format_time_control_log_row as _format_time_control_log_row,
+    _format_time_control_trace_row,
+    _format_vmec2000_iter_row,
+    _legacy_dump_record_path as _legacy_dump_record_path,
+    _legacy_single_dump_iter_selected as _legacy_single_dump_iter_selected,
+    _materialize_adjoint_trace_array,
+    _maybe_dump_checkpoint_record,
+    _maybe_dump_evolve_trace_record,
+    _maybe_dump_jacobian_terms_record,
+    _maybe_dump_time_control_record,
+    _normalize_adjoint_trace_mode,
+    _normalize_resume_state_mode,
+    _pack_resume_state_record,
+    _should_print_vmec2000_row,
+    _vmec2000_cadence_selected,
+)
 from .state import VMECState, pack_state, unpack_state
 
 
@@ -37,6 +75,12 @@ _SCAN_RUNNER_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 _COMPUTE_FORCES_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 _STRICT_UPDATE_STEP_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 _PRECOND_OUTPUT_SCALE_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
+
+
+_HostRestartDecision = _residual_iter_policy.HostRestartDecision
+_ResidualIterHistoryRecord = _residual_iter_policy.ResidualIterHistoryRecord
+_Vmec2000ScanOptions = _residual_iter_policy.Vmec2000ScanOptions
+_Vmec2000TimeControlDecision = _residual_iter_policy.Vmec2000TimeControlDecision
 
 
 class _ForceBlocks(NamedTuple):
@@ -52,193 +96,6 @@ class _ForceBlocks(NamedTuple):
     fzss: Any
     flcc: Any
     flss: Any
-
-
-class _HostRestartDecision(NamedTuple):
-    fsq: float
-    fsq_res: float
-    res0: float
-    res0_old: float
-    bad_growth_streak: int
-    pre_restart_reason: str
-    huge_initial_forces: bool
-    store_checkpoint: bool
-    vmecpp_bad_progress: bool
-
-
-class _Vmec2000TimeControlDecision(NamedTuple):
-    fsq: float
-    fsq0: float
-    res0: float
-    res1: float
-    trace_irst: int
-    irst: int
-    initialized: bool
-    store_checkpoint: bool
-    restart: bool
-    pre_restart_reason: str
-
-
-class _ResidualIterHistoryRecord(NamedTuple):
-    step: float
-    dt_eff: float
-    update_rms: Any
-    w_curr: float
-    w_try: float
-    w_try_ratio: float
-    restart_path: str
-    step_status: str
-    restart_reason: str
-    pre_restart_reason: str
-    time_step: float
-    res0: float
-    res1: float
-    fsq_prev: float
-    bad_growth_streak: int
-    iter1: int
-    iter2: int
-    grad_rms: float
-    freeb_ivac: int | None
-    freeb_ivacskip: int | None
-    freeb_full_update: int | None
-
-
-@dataclass(frozen=True)
-class _Vmec2000ScanOptions:
-    scan_print_env: str
-    scan_print_mode: str
-    scan_print_ordered: bool
-    scan_print_chunked: bool
-    scan_light: bool
-    scan_minimal: bool
-    scan_collect_scalars: bool
-    scan_collect_print: bool
-    scan_core: bool
-    scan_trace: bool
-    abort_scan_on_badjac: bool
-    scan_use_precomputed: bool
-    scan_use_lax_tridi: bool
-    scan_use_restart_payload: bool
-    print_in_scan: bool
-    chunked_print: bool
-
-
-def _vmec2000_scan_options_from_env(
-    *,
-    verbose: bool,
-    vmec2000_control: bool,
-    verbose_vmec2000_table: bool,
-    light_history: bool,
-    scan_minimal_default: bool | None,
-    dump_any: bool,
-    fsq_total_target: float | None,
-    backend_name: str,
-    force_chunked_scan_run: bool,
-    scan_print_env: str,
-    scan_print_mode_env: str,
-    scan_print_ordered_env: str,
-    scan_print_chunked_env: str,
-    scan_light_env: str,
-    scan_minimal_env: str,
-    scan_core_env: str,
-    scan_trace_env: str,
-    abort_scan_env: str,
-    scan_precompute_env: str,
-    tridi_precompute_env: str,
-    scan_lax_env: str,
-    tridi_solve_env: str,
-    scan_restart_payload_env: str,
-) -> _Vmec2000ScanOptions:
-    scan_print_env = str(scan_print_env).strip().lower()
-    scan_print_mode = str(scan_print_mode_env).strip().lower()
-    scan_print_ordered = _runtime_env_enabled(scan_print_ordered_env)
-    scan_print_chunked = _runtime_env_enabled(scan_print_chunked_env)
-    scan_light = _runtime_env_enabled(scan_light_env) or bool(light_history)
-    scan_minimal_env_l = str(scan_minimal_env).strip().lower()
-    if scan_minimal_env_l:
-        scan_minimal = _runtime_env_enabled(scan_minimal_env_l)
-    elif scan_minimal_default is not None:
-        scan_minimal = bool(scan_minimal_default)
-    else:
-        # Quiet runs default to the minimal scan history to reduce host traffic.
-        scan_minimal = not bool(verbose)
-    if dump_any:
-        scan_minimal = False
-        scan_light = False
-    scan_collect_scalars = not scan_minimal
-    scan_collect_print = (
-        bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table) and scan_collect_scalars
-    )
-    scan_core = _default_scan_core(
-        scan_core_env=str(scan_core_env).strip().lower(),
-        scan_minimal=bool(scan_minimal),
-        fsq_total_target=fsq_total_target,
-    )
-    scan_trace = _runtime_env_enabled(scan_trace_env)
-    abort_scan_on_badjac = _runtime_env_enabled(abort_scan_env)
-
-    scan_precompute_env_l = str(scan_precompute_env).strip().lower()
-    if scan_precompute_env_l:
-        scan_use_precomputed = _runtime_env_enabled(scan_precompute_env_l)
-    else:
-        scan_use_precomputed = _runtime_env_enabled(tridi_precompute_env)
-    scan_lax_env_l = str(scan_lax_env).strip().lower()
-    if scan_lax_env_l:
-        scan_use_lax_tridi = _runtime_env_enabled(scan_lax_env_l)
-    else:
-        scan_use_lax_tridi = str(tridi_solve_env).strip().lower() in (
-            "1",
-            "true",
-            "yes",
-            "lax",
-            "force",
-        )
-
-    scan_restart_payload_env_l = str(scan_restart_payload_env).strip().lower()
-    if scan_restart_payload_env_l in ("1", "true", "yes"):
-        scan_use_restart_payload = True
-    elif scan_restart_payload_env_l in ("0", "false", "no"):
-        scan_use_restart_payload = False
-    else:
-        scan_use_restart_payload = str(backend_name).strip().lower() == "cpu"
-
-    print_in_scan = (
-        bool(verbose)
-        and bool(vmec2000_control)
-        and bool(verbose_vmec2000_table)
-        and _runtime_env_enabled(scan_print_env)
-    )
-    if scan_minimal:
-        print_in_scan = False
-    chunked_print = False
-    if print_in_scan and scan_print_chunked:
-        # Avoid host callbacks inside the scan: we'll print per chunk on host.
-        chunked_print = True
-        print_in_scan = False
-    if force_chunked_scan_run:
-        chunked_print = True
-        print_in_scan = False
-    if scan_print_mode not in ("debug_print", "debug_callback", "io_callback"):
-        scan_print_mode = "debug_print"
-
-    return _Vmec2000ScanOptions(
-        scan_print_env=scan_print_env,
-        scan_print_mode=scan_print_mode,
-        scan_print_ordered=bool(scan_print_ordered),
-        scan_print_chunked=bool(scan_print_chunked),
-        scan_light=bool(scan_light),
-        scan_minimal=bool(scan_minimal),
-        scan_collect_scalars=bool(scan_collect_scalars),
-        scan_collect_print=bool(scan_collect_print),
-        scan_core=bool(scan_core),
-        scan_trace=bool(scan_trace),
-        abort_scan_on_badjac=bool(abort_scan_on_badjac),
-        scan_use_precomputed=bool(scan_use_precomputed),
-        scan_use_lax_tridi=bool(scan_use_lax_tridi),
-        scan_use_restart_payload=bool(scan_use_restart_payload),
-        print_in_scan=bool(print_in_scan),
-        chunked_print=bool(chunked_print),
-    )
 
 
 def _zero_edge_rz_force_block(a, *, preserve_numpy: bool = True):
@@ -689,453 +546,6 @@ def _scan_chunk_settings(
 _default_scan_core = _solve_runtime._default_scan_core
 
 
-def _normalize_resume_state_mode(resume_state_mode: str | None) -> str:
-    """Normalize resume-state mode aliases used by scan and host solves."""
-    if resume_state_mode is None:
-        resume_state_mode = os.getenv("VMEC_JAX_RESUME_STATE_MODE", "full")
-    mode = str(resume_state_mode).strip().lower() or "full"
-    aliases = {
-        "compact": "minimal",
-        "light": "minimal",
-        "off": "none",
-    }
-    mode = aliases.get(mode, mode)
-    if mode not in ("full", "minimal", "none"):
-        raise ValueError("resume_state_mode must be one of {'full', 'minimal', 'none'}")
-    return mode
-
-
-def _pack_resume_state_record(*, base: dict[str, Any], heavy: dict[str, Any] | None = None, mode: str) -> dict | None:
-    """Build the resume-state payload according to the requested detail level."""
-    mode = _normalize_resume_state_mode(mode)
-    if mode == "none":
-        return None
-    rec = dict(base)
-    if mode == "full" and heavy:
-        rec.update(heavy)
-    return rec
-
-
-def _vmec2000_cadence_selected(*, iter_idx: int, max_iter: int, nstep_screen: int) -> bool:
-    """Return whether a VMEC2000-style row should be sampled on screen cadence."""
-    i = int(iter_idx)
-    if i <= 1:
-        return True
-    if i >= int(max_iter):
-        return True
-    return (i % max(1, int(nstep_screen))) == 0
-
-
-def _should_print_vmec2000_row(
-    *,
-    iter_idx: int,
-    max_iter: int,
-    nstep_screen: int,
-    verbose: bool,
-    vmec2000_control: bool,
-    verbose_vmec2000_table: bool,
-) -> bool:
-    if not (bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table)):
-        return False
-    return _vmec2000_cadence_selected(iter_idx=iter_idx, max_iter=max_iter, nstep_screen=nstep_screen)
-
-
-def _format_vmec2000_iter_row(
-    *,
-    iter_idx: int,
-    fsqr: float,
-    fsqz: float,
-    fsql: float,
-    delt0r: float,
-    r00: float,
-    w_mhd: float,
-    lasym: bool,
-    z00: float | None = None,
-) -> str:
-    if bool(lasym):
-        z_val = float("nan") if z00 is None else float(z00)
-        return (
-            f"{int(iter_idx):5d}"
-            f"{float(fsqr):10.2E}{float(fsqz):10.2E}{float(fsql):10.2E}"
-            f"{float(r00):11.3E}{z_val:11.3E}{float(delt0r):10.2E}{float(w_mhd):12.4E}"
-        )
-    return (
-        f"{int(iter_idx):5d}"
-        f"{float(fsqr):10.2E}{float(fsqz):10.2E}{float(fsql):10.2E}"
-        f"{float(r00):11.3E}{float(delt0r):10.2E}{float(w_mhd):12.4E}"
-    )
-
-
-def _format_axis_coeff(val: float) -> str:
-    text = f"{float(val):.16g}"
-    if "e" in text:
-        text = text.replace("e", "E")
-    return text
-
-
-def _format_time_control_log_row(
-    *, iter_idx: int, fsq: float, fsq0: float, res0: float, res1: float, time_step: float
-) -> str:
-    return (
-        f"iter={int(iter_idx)} fsq={float(fsq):.6e} fsq0={float(fsq0):.6e} "
-        f"res0={float(res0):.6e} res1={float(res1):.6e} time_step={float(time_step):.6e}\n"
-    )
-
-
-def _format_time_control_trace_row(
-    *,
-    stage: str,
-    iter2: int,
-    iter1: int,
-    fsq: float,
-    fsq0: float,
-    res0: float,
-    res1: float,
-    time_step: float,
-    irst: int,
-) -> str:
-    return (
-        f"{int(iter2):8d} {int(iter1):8d} "
-        f"{float(fsq): .16e} {float(fsq0): .16e} "
-        f"{float(res0): .16e} {float(res1): .16e} "
-        f"{float(time_step): .16e} {int(irst):3d} {stage}\n"
-    )
-
-
-def _format_checkpoint_log_row(*, iter_idx: int, fsq: float, fsq0: float, res0: float, res1: float) -> str:
-    return (
-        f"iter={int(iter_idx)} fsq={float(fsq):.6e} fsq0={float(fsq0):.6e} "
-        f"res0={float(res0):.6e} res1={float(res1):.6e}\n"
-    )
-
-
-def _format_freeb_control_trace_row(
-    *,
-    iter2: int,
-    iter1: int,
-    ivac: int,
-    ivacskip: int,
-    nvacskip: int,
-    fsq_rz_prev: float,
-    cached: bool,
-) -> str:
-    return (
-        f"{int(iter2):8d} {int(iter1):8d} {int(ivac):8d} {int(ivacskip):8d} "
-        f"{int(nvacskip):8d} {float(fsq_rz_prev): .16e} {1 if bool(cached) else 0:2d}\n"
-    )
-
-
-def _format_evolve_trace_row(
-    *,
-    iter2: int,
-    iter1: int,
-    ns: int,
-    stage: str,
-    fsq1: float,
-    fsq_prev: float,
-    time_step: float,
-    dtau: float,
-    b1: float,
-    fac: float,
-    xc_norm: float,
-    v_norm: float,
-    g_norm: float,
-) -> str:
-    return (
-        f"{int(iter2):8d} {int(iter1):8d} {int(ns):8d} {stage} "
-        f"{float(fsq1): .16e} {float(fsq_prev): .16e} "
-        f"{float(time_step): .16e} {float(dtau): .16e} "
-        f"{float(b1): .16e} {float(fac): .16e} "
-        f"{float(xc_norm): .16e} {float(v_norm): .16e} {float(g_norm): .16e}\n"
-    )
-
-
-def _legacy_dump_record_path(*, enable_env: str, filename: str) -> Path | None:
-    """Return a dump path for legacy flags that only treat empty/0 as disabled."""
-    if not _dump_env_enabled(os.getenv(enable_env, "")):
-        return None
-    dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
-    if not dump_dir:
-        return None
-    return Path(dump_dir) / filename
-
-
-def _maybe_dump_time_control_record(
-    *,
-    iter_idx: int,
-    fsq: float,
-    fsq0: float,
-    res0: float,
-    res1: float,
-    time_step: float,
-) -> None:
-    path = _legacy_dump_record_path(enable_env="VMEC_JAX_DUMP_TIMECONTROL", filename="time_control.log")
-    if path is None:
-        return
-    try:
-        with path.open("a", encoding="utf-8") as f:
-            f.write(
-                _format_time_control_log_row(
-                    iter_idx=iter_idx,
-                    fsq=fsq,
-                    fsq0=fsq0,
-                    res0=res0,
-                    res1=res1,
-                    time_step=time_step,
-                )
-            )
-    except Exception:
-        return
-
-
-def _dump_time_control_trace_record(
-    *,
-    stage: str,
-    iter2: int,
-    iter1: int,
-    fsq: float,
-    fsq0: float,
-    res0: float,
-    res1: float,
-    time_step: float,
-    irst: int,
-) -> None:
-    path = _legacy_dump_record_path(enable_env="VMEC_JAX_DUMP_TIMECONTROL", filename="time_control_trace.log")
-    if path is None:
-        return
-    try:
-        with path.open("a", encoding="utf-8") as f:
-            f.write(
-                _format_time_control_trace_row(
-                    stage=stage,
-                    iter2=iter2,
-                    iter1=iter1,
-                    fsq=fsq,
-                    fsq0=fsq0,
-                    res0=res0,
-                    res1=res1,
-                    time_step=time_step,
-                    irst=irst,
-                )
-            )
-    except Exception:
-        return
-
-
-def _maybe_dump_checkpoint_record(*, iter_idx: int, fsq: float, fsq0: float, res0: float, res1: float) -> None:
-    path = _legacy_dump_record_path(enable_env="VMEC_JAX_DUMP_CHECKPOINT", filename="checkpoint.log")
-    if path is None:
-        return
-    try:
-        with path.open("a", encoding="utf-8") as f:
-            f.write(_format_checkpoint_log_row(iter_idx=iter_idx, fsq=fsq, fsq0=fsq0, res0=res0, res1=res1))
-    except Exception:
-        return
-
-
-def _dump_freeb_control_trace_record(
-    *,
-    iter2: int,
-    iter1: int,
-    ivac: int,
-    ivacskip: int,
-    nvacskip: int,
-    fsq_rz_prev: float,
-    cached: bool,
-) -> None:
-    path = _legacy_dump_record_path(enable_env="VMEC_JAX_DUMP_FREEB_CONTROL", filename="freeb_control_trace.log")
-    if path is None:
-        return
-    try:
-        with path.open("a", encoding="utf-8") as f:
-            f.write(
-                _format_freeb_control_trace_row(
-                    iter2=iter2,
-                    iter1=iter1,
-                    ivac=ivac,
-                    ivacskip=ivacskip,
-                    nvacskip=nvacskip,
-                    fsq_rz_prev=fsq_rz_prev,
-                    cached=cached,
-                )
-            )
-    except Exception:
-        return
-
-
-def _dump_freeb_axis_trace_record(*, iter2: int, axis_r: np.ndarray, axis_z: np.ndarray) -> None:
-    path = _legacy_dump_record_path(enable_env="VMEC_JAX_DUMP_FREEB_AXIS", filename=f"freeb_axis_iter{int(iter2)}.npz")
-    if path is None:
-        return
-    try:
-        np.savez_compressed(
-            path,
-            iter2=int(iter2),
-            axis_r=np.asarray(axis_r, dtype=float).reshape(-1),
-            axis_z=np.asarray(axis_z, dtype=float).reshape(-1),
-        )
-    except Exception:
-        return
-
-
-def _maybe_dump_evolve_trace_record(
-    *,
-    static,
-    iter2: int,
-    iter1: int,
-    stage: str,
-    fsq1_val: float,
-    fsq_prev_val: float,
-    time_step_val: float,
-    dtau_val: float,
-    b1_val: float,
-    fac_val: float,
-    state_val: VMECState,
-    vRcc_val,
-    vRss_val,
-    vZsc_val,
-    vZcs_val,
-    vLsc_val,
-    vLcs_val,
-    vRsc_val=None,
-    vRcs_val=None,
-    vZcc_val=None,
-    vZss_val=None,
-    vLcc_val=None,
-    vLss_val=None,
-    frcc_val=None,
-    frss_val=None,
-    fzsc_val=None,
-    fzcs_val=None,
-    flsc_val=None,
-    flcs_val=None,
-    frsc_val=None,
-    frcs_val=None,
-    fzcc_val=None,
-    fzss_val=None,
-    flcc_val=None,
-    flss_val=None,
-) -> None:
-    path = _legacy_dump_record_path(enable_env="VMEC_JAX_DUMP_EVOLVE", filename="evolve_trace.log")
-    if path is None:
-        return
-    try:
-        from .diagnostics import vmec_internal_mn_from_state, vmec_xc_from_mn_blocks
-
-        blocks = vmec_internal_mn_from_state(
-            state_val,
-            static,
-            apply_basis_norm=False,
-            apply_m1_constraint=False,
-        )
-        xc_kwargs = {
-            "rcc": blocks["rcc"],
-            "rss": blocks["rss"],
-            "zsc": blocks["zsc"],
-            "zcs": blocks["zcs"],
-            "lsc": blocks["lsc"],
-            "lcs": blocks["lcs"],
-        }
-        if "rsc" in blocks:
-            xc_kwargs.update(
-                {
-                    "rsc": blocks.get("rsc"),
-                    "rcs": blocks.get("rcs"),
-                    "zcc": blocks.get("zcc"),
-                    "zss": blocks.get("zss"),
-                    "lcc": blocks.get("lcc"),
-                    "lss": blocks.get("lss"),
-                }
-            )
-        xc_vec = np.asarray(vmec_xc_from_mn_blocks(cfg=static.cfg, **xc_kwargs), dtype=float)
-        v_kwargs = {
-            "rcc": np.asarray(vRcc_val, dtype=float),
-            "rss": np.asarray(vRss_val, dtype=float),
-            "zsc": np.asarray(vZsc_val, dtype=float),
-            "zcs": np.asarray(vZcs_val, dtype=float),
-            "lsc": np.asarray(vLsc_val, dtype=float),
-            "lcs": np.asarray(vLcs_val, dtype=float),
-        }
-        if vRsc_val is not None:
-            v_kwargs["rsc"] = np.asarray(vRsc_val, dtype=float)
-        if vRcs_val is not None:
-            v_kwargs["rcs"] = np.asarray(vRcs_val, dtype=float)
-        if vZcc_val is not None:
-            v_kwargs["zcc"] = np.asarray(vZcc_val, dtype=float)
-        if vZss_val is not None:
-            v_kwargs["zss"] = np.asarray(vZss_val, dtype=float)
-        if vLcc_val is not None:
-            v_kwargs["lcc"] = np.asarray(vLcc_val, dtype=float)
-        if vLss_val is not None:
-            v_kwargs["lss"] = np.asarray(vLss_val, dtype=float)
-        v_vec = np.asarray(vmec_xc_from_mn_blocks(cfg=static.cfg, **v_kwargs), dtype=float)
-        gnorm = 0.0
-        if frcc_val is not None:
-            g_kwargs = {
-                "rcc": np.asarray(frcc_val, dtype=float),
-                "rss": np.asarray(frss_val, dtype=float),
-                "zsc": np.asarray(fzsc_val, dtype=float),
-                "zcs": np.asarray(fzcs_val, dtype=float),
-                "lsc": np.asarray(flsc_val, dtype=float),
-                "lcs": np.asarray(flcs_val, dtype=float),
-            }
-            if frsc_val is not None:
-                g_kwargs["rsc"] = np.asarray(frsc_val, dtype=float)
-            if frcs_val is not None:
-                g_kwargs["rcs"] = np.asarray(frcs_val, dtype=float)
-            if fzcc_val is not None:
-                g_kwargs["zcc"] = np.asarray(fzcc_val, dtype=float)
-            if fzss_val is not None:
-                g_kwargs["zss"] = np.asarray(fzss_val, dtype=float)
-            if flcc_val is not None:
-                g_kwargs["lcc"] = np.asarray(flcc_val, dtype=float)
-            if flss_val is not None:
-                g_kwargs["lss"] = np.asarray(flss_val, dtype=float)
-            g_vec = np.asarray(vmec_xc_from_mn_blocks(cfg=static.cfg, **g_kwargs), dtype=float)
-            gnorm = float(np.linalg.norm(g_vec))
-        with path.open("a", encoding="utf-8") as f:
-            f.write(
-                _format_evolve_trace_row(
-                    iter2=iter2,
-                    iter1=iter1,
-                    ns=int(static.cfg.ns),
-                    stage=stage,
-                    fsq1=fsq1_val,
-                    fsq_prev=fsq_prev_val,
-                    time_step=time_step_val,
-                    dtau=dtau_val,
-                    b1=b1_val,
-                    fac=fac_val,
-                    xc_norm=float(np.linalg.norm(xc_vec)),
-                    v_norm=float(np.linalg.norm(v_vec)),
-                    g_norm=gnorm,
-                )
-            )
-    except Exception:
-        return
-
-
-def _finite_float_or_zero(value: Any) -> float:
-    """Return a Python float, replacing NaN/Inf with zero for scalar diagnostics."""
-    out = float(np.asarray(value))
-    return out if np.isfinite(out) else 0.0
-
-
-def _normalize_adjoint_trace_mode(adjoint_trace_mode: str) -> str:
-    mode = str(adjoint_trace_mode).strip().lower() or "full"
-    if mode not in ("full", "dynamic"):
-        raise ValueError("adjoint_trace_mode must be one of {'full', 'dynamic'}")
-    return mode
-
-
-def _materialize_adjoint_trace_array(value, *, mode: str):
-    """Return dynamic trace values as-is, but snapshot full trace arrays on host."""
-    mode = _normalize_adjoint_trace_mode(mode)
-    if mode == "dynamic":
-        return value
-    return np.asarray(value)
-
-
 def _radial_tridi_smooth_dirichlet(
     rhs,
     *,
@@ -1270,125 +680,6 @@ def _sm_sp_from_s_np(s_arr) -> tuple[np.ndarray, np.ndarray]:
     sp[0] = 0.0
     sp[1] = sm[2] if ns >= 2 else 0.0
     return sm, sp
-
-
-def _legacy_single_dump_iter_selected(*, dump_iter: str, iter_idx: int) -> bool:
-    """Match legacy single-iteration dump filtering, including invalid-as-all."""
-    if not dump_iter:
-        return True
-    try:
-        return int(dump_iter) == int(iter_idx)
-    except Exception:
-        return True
-
-
-def _maybe_dump_jacobian_terms_record(*, k, s, iter_idx: int) -> None:
-    env = os.getenv("VMEC_JAX_DUMP_JACOBIAN_TERMS", "").strip()
-    if not env or env in ("0", "false", "no", "False"):
-        return
-    dump_iter = os.getenv("VMEC_JAX_DUMP_ITER", "").strip()
-    if not _legacy_single_dump_iter_selected(dump_iter=dump_iter, iter_idx=iter_idx):
-        return
-    outdir = os.getenv("VMEC_JAX_DUMP_DIR", "").strip() or "."
-    outpath = Path(outdir).expanduser().resolve()
-    outpath.mkdir(parents=True, exist_ok=True)
-    fname = outpath / f"jacobian_terms_iter{int(iter_idx)}.dat"
-
-    pr1_even = np.asarray(getattr(k, "pr1_even"))
-    pr1_odd = np.asarray(getattr(k, "pr1_odd"))
-    pz1_even = np.asarray(getattr(k, "pz1_even"))
-    pz1_odd = np.asarray(getattr(k, "pz1_odd"))
-    pru_even = np.asarray(getattr(k, "pru_even"))
-    pru_odd = np.asarray(getattr(k, "pru_odd"))
-    pzu_even = np.asarray(getattr(k, "pzu_even"))
-    pzu_odd = np.asarray(getattr(k, "pzu_odd"))
-    prv_even = np.asarray(getattr(k, "prv_even"))
-    prv_odd = np.asarray(getattr(k, "prv_odd"))
-    pzv_even = np.asarray(getattr(k, "pzv_even"))
-    pzv_odd = np.asarray(getattr(k, "pzv_odd"))
-
-    ns, ntheta3, nzeta = pr1_even.shape
-    pshalf = _pshalf_from_s_np(np.asarray(s))
-    if pshalf.shape[0] != ns:
-        pshalf = np.resize(pshalf, (ns,))
-    hs = float(np.asarray(s[1] - s[0])) if ns > 1 else 1.0
-    ohs = 1.0 / hs if hs != 0.0 else 0.0
-    dphids = 0.25
-
-    with fname.open("w", encoding="utf-8") as f:
-        f.write("# jacobian term dump\n")
-        f.write(f"ns={ns}\n")
-        f.write(f"ntheta3={ntheta3}\n")
-        f.write(f"nzeta={nzeta}\n")
-        f.write("columns: js lt lz pshalf\n")
-        f.write(" pru_e pru_o pru_e_m1 pru_o_m1\n")
-        f.write(" pz1_e pz1_o pz1_e_m1 pz1_o_m1\n")
-        f.write(" pzu_e pzu_o pzu_e_m1 pzu_o_m1\n")
-        f.write(" pr1_e pr1_o pr1_e_m1 pr1_o_m1\n")
-        f.write(" prv_e prv_o prv_e_m1 prv_o_m1\n")
-        f.write(" pzv_e pzv_o pzv_e_m1 pzv_o_m1\n")
-        f.write(" ru12 pzs pzu12 prs pr12 ptau\n")
-        f.write(" rv12 zv12\n")
-        for lt in range(ntheta3):
-            for lz in range(nzeta):
-                for j in range(1, ns):
-                    jm1 = j - 1
-                    psh = pshalf[j]
-                    psh_safe = psh if psh != 0.0 else 1.0
-                    pru_e = pru_even[j, lt, lz]
-                    pru_o = pru_odd[j, lt, lz]
-                    pru_e_m1 = pru_even[jm1, lt, lz]
-                    pru_o_m1 = pru_odd[jm1, lt, lz]
-                    pz1_e = pz1_even[j, lt, lz]
-                    pz1_o = pz1_odd[j, lt, lz]
-                    pz1_e_m1 = pz1_even[jm1, lt, lz]
-                    pz1_o_m1 = pz1_odd[jm1, lt, lz]
-                    pzu_e = pzu_even[j, lt, lz]
-                    pzu_o = pzu_odd[j, lt, lz]
-                    pzu_e_m1 = pzu_even[jm1, lt, lz]
-                    pzu_o_m1 = pzu_odd[jm1, lt, lz]
-                    pr1_e = pr1_even[j, lt, lz]
-                    pr1_o = pr1_odd[j, lt, lz]
-                    pr1_e_m1 = pr1_even[jm1, lt, lz]
-                    pr1_o_m1 = pr1_odd[jm1, lt, lz]
-                    prv_e = prv_even[j, lt, lz]
-                    prv_o = prv_odd[j, lt, lz]
-                    prv_e_m1 = prv_even[jm1, lt, lz]
-                    prv_o_m1 = prv_odd[jm1, lt, lz]
-                    pzv_e = pzv_even[j, lt, lz]
-                    pzv_o = pzv_odd[j, lt, lz]
-                    pzv_e_m1 = pzv_even[jm1, lt, lz]
-                    pzv_o_m1 = pzv_odd[jm1, lt, lz]
-
-                    ru12 = 0.5 * (pru_e + pru_e_m1 + psh * (pru_o + pru_o_m1))
-                    pzs = ohs * ((pz1_e - pz1_e_m1) + psh * (pz1_o - pz1_o_m1))
-                    ptau = ru12 * pzs + dphids * (
-                        pru_o * pz1_o + pru_o_m1 * pz1_o_m1 + (pru_e * pz1_o + pru_e_m1 * pz1_o_m1) / psh_safe
-                    )
-                    pzu12 = 0.5 * (pzu_e + pzu_e_m1 + psh * (pzu_o + pzu_o_m1))
-                    prs = ohs * ((pr1_e - pr1_e_m1) + psh * (pr1_o - pr1_o_m1))
-                    pr12 = 0.5 * (pr1_e + pr1_e_m1 + psh * (pr1_o + pr1_o_m1))
-                    ptau = (
-                        ptau
-                        - prs * pzu12
-                        - dphids
-                        * (pzu_o * pr1_o + pzu_o_m1 * pr1_o_m1 + (pzu_e * pr1_o + pzu_e_m1 * pr1_o_m1) / psh_safe)
-                    )
-                    rv12 = 0.5 * (prv_e + prv_e_m1 + psh * (prv_o + prv_o_m1))
-                    zv12 = 0.5 * (pzv_e + pzv_e_m1 + psh * (pzv_o + pzv_o_m1))
-
-                    f.write(
-                        f"{j + 1:6d}{lt + 1:6d}{lz + 1:6d}"
-                        f"{psh:24.16E}"
-                        f"{pru_e:24.16E}{pru_o:24.16E}{pru_e_m1:24.16E}{pru_o_m1:24.16E}"
-                        f"{pz1_e:24.16E}{pz1_o:24.16E}{pz1_e_m1:24.16E}{pz1_o_m1:24.16E}"
-                        f"{pzu_e:24.16E}{pzu_o:24.16E}{pzu_e_m1:24.16E}{pzu_o_m1:24.16E}"
-                        f"{pr1_e:24.16E}{pr1_o:24.16E}{pr1_e_m1:24.16E}{pr1_o_m1:24.16E}"
-                        f"{prv_e:24.16E}{prv_o:24.16E}{prv_e_m1:24.16E}{prv_o_m1:24.16E}"
-                        f"{pzv_e:24.16E}{pzv_o:24.16E}{pzv_e_m1:24.16E}{pzv_o_m1:24.16E}"
-                        f"{ru12:24.16E}{pzs:24.16E}{pzu12:24.16E}{prs:24.16E}{pr12:24.16E}{ptau:24.16E}"
-                        f"{rv12:24.16E}{zv12:24.16E}\n"
-                    )
 
 
 def _merge_axis_reset_state(*, st: VMECState, st_axis: VMECState, static, full_reset: bool) -> VMECState:
@@ -1611,353 +902,6 @@ def _free_boundary_should_damp_constraint_baseline(*, freeb_ivac: int, freeb_tur
 def _free_boundary_turnon_resets_iter1_immediately(*, lthreed: bool, lasym: bool) -> bool:
     """Return whether turn-on should immediately reset `iter1` for cadence."""
     return (not bool(lthreed)) or (not bool(lasym))
-
-
-def _host_restart_decision(
-    *,
-    iter2: int,
-    iter1: int,
-    fsqr: float,
-    fsqz: float,
-    fsql: float,
-    fsq1: float,
-    fsq_prev: float,
-    res0: float,
-    bad_growth_streak: int,
-    pre_restart_reason: str,
-    reference_mode: bool,
-    vmec2000_control: bool,
-    bad_jacobian: bool,
-    stage_prev_fsq: float | None,
-    stage_transition_factor: float,
-    lmove_axis: bool,
-    vmecpp_restart: bool,
-    k_preconditioner_update_interval: int,
-) -> _HostRestartDecision:
-    """Evaluate host-loop residual trackers and pre-restart reason."""
-
-    i2 = int(iter2)
-    i1 = int(iter1)
-    fsq = float(fsqr) + float(fsqz) + float(fsql)
-    fsq1_f = float(fsq1)
-    fsq_prev_f = float(fsq_prev)
-    res0_f = float(res0)
-    fsq_res = fsq if bool(reference_mode) else fsq1_f
-
-    if bool(vmec2000_control):
-        if (fsq_res <= fsq_prev_f) and np.isfinite(fsq_res):
-            res0_f = min(res0_f, fsq_res)
-        res0_old = res0_f
-    else:
-        if (i2 == i1) or (res0_f < 0.0):
-            res0_f = fsq_res
-        res0_old = res0_f
-        res0_f = min(res0_f, fsq_res)
-
-    store_checkpoint = (not bool(vmec2000_control)) and (fsq1_f <= res0_old) and ((i2 - i1) > 10)
-    reason = str(pre_restart_reason)
-    if stage_prev_fsq is not None and i2 == 1 and reason == "none":
-        try:
-            prev_stage_fsq_val = float(stage_prev_fsq)
-        except Exception:
-            prev_stage_fsq_val = None
-        if prev_stage_fsq_val is not None and np.isfinite(prev_stage_fsq_val):
-            if fsq > (prev_stage_fsq_val * float(stage_transition_factor)):
-                reason = "stage_transition"
-
-    huge_initial_forces = False
-    if i2 == 1 and bool(lmove_axis):
-        huge_initial_forces = (not np.isfinite(fsq)) or (fsq > 1.0e2)
-
-    if fsq_res > 100.0 * max(res0_f, 1e-30):
-        bad_growth_next = int(bad_growth_streak) + 1
-    else:
-        bad_growth_next = 0
-
-    vmecpp_bad_progress = False
-    k_update = int(k_preconditioner_update_interval)
-    if bool(vmecpp_restart):
-        vmecpp_bad_progress = (
-            (i2 - i1) > (k_update // 2)
-            and (i2 > 2 * k_update)
-            and ((float(fsqr) + float(fsqz)) > 1.0e-2)
-        )
-
-    if bool(reference_mode):
-        if bool(bad_jacobian) and (fsq > 1.0e1):
-            reason = "bad_jacobian"
-        elif (i2 > i1) and (fsq > 100.0 * max(res0_f, 1e-30)):
-            reason = "bad_jacobian"
-        elif (
-            (i2 - i1) > (k_update // 2)
-            and (i2 > 2 * k_update)
-            and ((float(fsqr) + float(fsqz)) > 1.0e-2)
-        ):
-            reason = "bad_progress"
-    elif bool(vmec2000_control):
-        if bool(bad_jacobian) and (i2 > i1):
-            reason = "bad_jacobian"
-        elif vmecpp_bad_progress:
-            reason = "bad_progress_vmecpp"
-    else:
-        if vmecpp_bad_progress:
-            reason = "bad_progress_vmecpp"
-        elif (i2 > (i1 + 8)) and (bad_growth_next >= 2):
-            reason = "bad_jacobian"
-        elif (
-            (i2 - i1) > (k_update // 2)
-            and (i2 > 2 * k_update)
-            and (fsq1_f > 5.0 * max(res0_f, 1e-30))
-            and (fsq1_f > 0.95 * max(fsq_prev_f, 1e-30))
-        ):
-            reason = "bad_progress"
-
-    return _HostRestartDecision(
-        fsq=float(fsq),
-        fsq_res=float(fsq_res),
-        res0=float(res0_f),
-        res0_old=float(res0_old),
-        bad_growth_streak=int(bad_growth_next),
-        pre_restart_reason=reason,
-        huge_initial_forces=bool(huge_initial_forces),
-        store_checkpoint=bool(store_checkpoint),
-        vmecpp_bad_progress=bool(vmecpp_bad_progress),
-    )
-
-
-def _vmec2000_time_control_decision(
-    *,
-    iter2: int,
-    iter1: int,
-    fsq_prev: float,
-    fsq0_curr: float,
-    fsq0_prev: float,
-    res0: float,
-    res1: float,
-    bad_jacobian: bool,
-    vmec2000_fact: float,
-) -> _Vmec2000TimeControlDecision:
-    """Return host-side VMEC2000 TimeStepControl scalar decisions."""
-
-    i2 = int(iter2)
-    i1 = int(iter1)
-    fsq = float(fsq_prev)
-    fsq0 = float(fsq0_curr)
-    res0_f = float(res0)
-    res1_f = float(res1)
-
-    irst = 1
-    if bool(bad_jacobian) and (i2 > i1):
-        # VMEC's irst=2 path uses the previous physical residual.
-        irst = 2
-        fsq0 = float(fsq0_prev)
-
-    initialized = (i2 == i1) or (res0_f < 0.0) or (res1_f < 0.0)
-    if initialized:
-        res0_f = fsq
-        res1_f = fsq0
-
-    res0_f = min(res0_f, fsq)
-    res1_f = min(res1_f, fsq0)
-    store_checkpoint = (fsq <= res0_f) and (fsq0 <= res1_f) and (irst == 1)
-    trace_irst = irst
-
-    fact = float(vmec2000_fact)
-    bad_progress = (fsq > fact * max(res0_f, 1e-30)) or (fsq0 > fact * max(res1_f, 1e-30))
-    if (irst == 1) and ((i2 - i1) > 10) and bad_progress:
-        irst = 3
-
-    restart = irst != 1
-    pre_restart_reason = "none"
-    if restart:
-        pre_restart_reason = "bad_jacobian" if irst == 2 else "time_control"
-
-    return _Vmec2000TimeControlDecision(
-        fsq=float(fsq),
-        fsq0=float(fsq0),
-        res0=float(res0_f),
-        res1=float(res1_f),
-        trace_irst=int(trace_irst),
-        irst=int(irst),
-        initialized=bool(initialized),
-        store_checkpoint=bool(store_checkpoint),
-        restart=bool(restart),
-        pre_restart_reason=pre_restart_reason,
-    )
-
-
-def _residual_iter_history_record(
-    *,
-    step: float,
-    dt_eff: float,
-    update_rms: Any,
-    w_curr: float,
-    w_try: float,
-    w_try_ratio: float,
-    restart_path: str,
-    step_status: str,
-    restart_reason: str,
-    pre_restart_reason: str,
-    time_step: float,
-    res0: float,
-    res1: float,
-    fsq_prev: float,
-    bad_growth_streak: int,
-    iter1: int,
-    iter2: int,
-    fsqr: float,
-    fsqz: float,
-    fsql: float,
-    free_boundary_enabled: bool,
-    freeb_ivac: int = 0,
-    freeb_ivacskip: int = 0,
-) -> _ResidualIterHistoryRecord:
-    """Pack one host residual-iteration history row without mutating lists."""
-
-    freeb_ivac_out = None
-    freeb_ivacskip_out = None
-    freeb_full_update = None
-    if bool(free_boundary_enabled):
-        freeb_ivac_out = int(freeb_ivac)
-        freeb_ivacskip_out = int(freeb_ivacskip)
-        freeb_full_update = 1 if (freeb_ivac_out >= 0 and freeb_ivacskip_out == 0) else 0
-
-    return _ResidualIterHistoryRecord(
-        step=float(step),
-        dt_eff=float(dt_eff),
-        update_rms=update_rms,
-        w_curr=float(w_curr),
-        w_try=float(w_try),
-        w_try_ratio=float(w_try_ratio),
-        restart_path=str(restart_path),
-        step_status=str(step_status),
-        restart_reason=str(restart_reason),
-        pre_restart_reason=str(pre_restart_reason),
-        time_step=float(time_step),
-        res0=float(res0),
-        res1=float(res1),
-        fsq_prev=float(fsq_prev),
-        bad_growth_streak=int(bad_growth_streak),
-        iter1=int(iter1),
-        iter2=int(iter2),
-        grad_rms=float(np.sqrt(max(float(fsqr) + float(fsqz) + float(fsql), 0.0))),
-        freeb_ivac=freeb_ivac_out,
-        freeb_ivacskip=freeb_ivacskip_out,
-        freeb_full_update=freeb_full_update,
-    )
-
-
-def _append_residual_iter_history_record(
-    rec: _ResidualIterHistoryRecord,
-    *,
-    step_history: list,
-    dt_eff_history: list,
-    update_rms_history: list,
-    w_curr_history: list,
-    w_try_history: list,
-    w_try_ratio_history: list,
-    restart_path_history: list,
-    step_status_history: list,
-    restart_reason_history: list,
-    pre_restart_reason_history: list,
-    time_step_history: list,
-    res0_history: list,
-    res1_history: list,
-    fsq_prev_history: list,
-    bad_growth_streak_history: list,
-    iter1_history: list,
-    iter2_history: list,
-    grad_rms_history: list,
-    free_boundary_enabled: bool,
-    freeb_ivac_history: list,
-    freeb_ivacskip_history: list,
-    freeb_full_update_history: list,
-) -> None:
-    """Append one residual-iteration history record to aligned host lists."""
-
-    step_history.append(rec.step)
-    dt_eff_history.append(rec.dt_eff)
-    update_rms_history.append(rec.update_rms)
-    w_curr_history.append(rec.w_curr)
-    w_try_history.append(rec.w_try)
-    w_try_ratio_history.append(rec.w_try_ratio)
-    restart_path_history.append(rec.restart_path)
-    step_status_history.append(rec.step_status)
-    restart_reason_history.append(rec.restart_reason)
-    pre_restart_reason_history.append(rec.pre_restart_reason)
-    time_step_history.append(rec.time_step)
-    res0_history.append(rec.res0)
-    res1_history.append(rec.res1)
-    fsq_prev_history.append(rec.fsq_prev)
-    bad_growth_streak_history.append(rec.bad_growth_streak)
-    iter1_history.append(rec.iter1)
-    iter2_history.append(rec.iter2)
-    grad_rms_history.append(rec.grad_rms)
-    if bool(free_boundary_enabled):
-        freeb_ivac_history.append(rec.freeb_ivac)
-        freeb_ivacskip_history.append(rec.freeb_ivacskip)
-        freeb_full_update_history.append(rec.freeb_full_update)
-
-
-def _append_residual_iter_terminal_history(
-    *,
-    step_status: str,
-    restart_reason: str,
-    pre_restart_reason: str,
-    time_step: float,
-    res0: float,
-    res1: float,
-    fsq_prev: float,
-    bad_growth_streak: int,
-    iter1: int,
-    iter2: int,
-    fsqr: float,
-    fsqz: float,
-    fsql: float,
-    step_status_history: list,
-    restart_reason_history: list,
-    pre_restart_reason_history: list,
-    time_step_history: list,
-    res0_history: list,
-    res1_history: list,
-    fsq_prev_history: list,
-    bad_growth_streak_history: list,
-    iter1_history: list,
-    iter2_history: list,
-    grad_rms_history: list,
-    free_boundary_enabled: bool,
-    freeb_ivac: int,
-    freeb_ivacskip: int,
-    freeb_reused: bool,
-    freeb_solve_time: float,
-    freeb_sample_time: float,
-    freeb_ivac_history: list,
-    freeb_ivacskip_history: list,
-    freeb_full_update_history: list,
-    freeb_nestor_reused_history: list,
-    freeb_nestor_solve_time_history: list,
-    freeb_nestor_sample_time_history: list,
-) -> None:
-    """Append per-iteration terminal channels that are aligned with force histories."""
-
-    step_status_history.append(step_status)
-    restart_reason_history.append(restart_reason)
-    pre_restart_reason_history.append(pre_restart_reason)
-    time_step_history.append(float(time_step))
-    res0_history.append(float(res0))
-    res1_history.append(float(res1))
-    fsq_prev_history.append(float(fsq_prev))
-    bad_growth_streak_history.append(int(bad_growth_streak))
-    iter1_history.append(int(iter1))
-    iter2_history.append(int(iter2))
-    if bool(free_boundary_enabled):
-        freeb_ivac_history.append(int(freeb_ivac))
-        freeb_ivacskip_history.append(int(freeb_ivacskip))
-        freeb_full_update_history.append(1 if (int(freeb_ivac) >= 0 and int(freeb_ivacskip) == 0) else 0)
-        freeb_nestor_reused_history.append(1 if bool(freeb_reused) else 0)
-        freeb_nestor_solve_time_history.append(float(freeb_solve_time))
-        freeb_nestor_sample_time_history.append(float(freeb_sample_time))
-    grad_rms_history.append(float(np.sqrt(max(float(fsqr) + float(fsqz) + float(fsql), 0.0))))
 
 
 def _zero_velocity_blocks_like(*blocks):
@@ -5774,15 +4718,12 @@ def solve_fixed_boundary_residual_iter(
     step_size = float(step_size)
     if step_size <= 0.0:
         raise ValueError("step_size must be positive")
-    # Auto-enable host_update_assembly (NumPy-path) for non-scan CPU solves.
-    # This avoids the _mn_sin_to_signed JAX-eager overhead (~2s for circular_tokamak).
-    # When host_update_assembly is explicitly True/False, respect that choice.
-    _auto_host = (not bool(use_scan)) and (jax.default_backend() == "cpu") and (not _tree_has_tracer(state0))
-    if host_update_assembly is None:
-        host_update_assembly = _auto_host
-    else:
-        host_update_assembly = bool(host_update_assembly)
-    host_update_assembly = host_update_assembly and (not bool(use_scan)) and (jax.default_backend() == "cpu")
+    host_update_assembly = _host_update_assembly_policy(
+        requested=host_update_assembly,
+        use_scan=bool(use_scan),
+        backend_name=jax.default_backend(),
+        state_has_tracer=_tree_has_tracer(state0),
+    ).enabled
     adjoint_trace = bool(adjoint_trace)
     adjoint_trace_mode = _normalize_adjoint_trace_mode(adjoint_trace_mode)
 
@@ -5801,11 +4742,7 @@ def solve_fixed_boundary_residual_iter(
     badjac_use_state = badjac_mode == "state"
     dump_ptau_state_env = os.getenv("VMEC_JAX_DUMP_PTAU_STATE", "0").strip().lower()
     dump_ptau_state = dump_ptau_state_env not in ("", "0", "false", "no")
-    if light_history is None:
-        light_hist_env = os.getenv("VMEC_JAX_LIGHT_HISTORY", "0").strip().lower()
-        light_history = light_hist_env not in ("", "0", "false", "no")
-    else:
-        light_history = bool(light_history)
+    light_history = _resolve_light_history(light_history, env_value=os.getenv("VMEC_JAX_LIGHT_HISTORY", "0"))
     resume_state_mode = _normalize_resume_state_mode(resume_state_mode)
     badjac_state_probe_env = os.getenv("VMEC_JAX_BADJAC_STATE_PROBE", "0").strip().lower()
     badjac_state_probe = badjac_state_probe_env not in ("", "0", "false", "no")
@@ -5823,15 +4760,14 @@ def solve_fixed_boundary_residual_iter(
         ptau_tol_rel = 0.0
     reference_mode = bool(reference_mode)
     jit_precompile = bool(jit_precompile)
-    if use_restart_triggers is None:
-        # Restart triggers are generally stabilizing. Keep them on by default
-        # so the fixed-point update loop is robust during parity work.
-        use_restart_triggers = True
-    if use_direct_fallback is None:
-        use_direct_fallback = False
-    use_restart_triggers = bool(use_restart_triggers)
-    use_direct_fallback = bool(use_direct_fallback)
-    vmecpp_restart = bool(vmecpp_restart)
+    restart_flags = _resolve_restart_flags(
+        use_restart_triggers=use_restart_triggers,
+        use_direct_fallback=use_direct_fallback,
+        vmecpp_restart=vmecpp_restart,
+    )
+    use_restart_triggers = restart_flags.use_restart_triggers
+    use_direct_fallback = restart_flags.use_direct_fallback
+    vmecpp_restart = restart_flags.vmecpp_restart
     verbose_vmec2000_table = bool(verbose_vmec2000_table)
     # Allow automatic fallback to the non-scan path when scan diverges.
     # On GPU/TPU, the non-scan fallback uses a Python loop with per-iteration
@@ -10856,94 +9792,24 @@ def solve_fixed_boundary_residual_iter(
         if vmec2000_control:
             scan_result = _run_vmec2000_scan(state)
             if scan_fallback_enabled:
-                try:
-                    bad_jac_full = scan_result.diagnostics.get("bad_jacobian_full", None)
-                except Exception:
-                    bad_jac_full = None
-                try:
-                    abort_scan_flag = bool(scan_result.diagnostics.get("abort_scan", False))
-                except Exception:
-                    abort_scan_flag = False
-                bad_jac_count = 0
-                if bad_jac_full is not None:
-                    try:
-                        bad_jac_arr = np.asarray(bad_jac_full).astype(int)
-                        probe_iters = min(int(max_iter), int(scan_fallback_iters))
-                        if probe_iters > 0:
-                            bad_jac_count = int(np.sum(bad_jac_arr[:probe_iters]))
-                    except Exception:
-                        bad_jac_count = 0
-                accepted_frac = None
-                try:
-                    accepted_mask = scan_result.diagnostics.get("accepted_mask", None)
-                except Exception:
-                    accepted_mask = None
-                if accepted_mask is not None:
-                    try:
-                        accepted_arr = np.asarray(accepted_mask).astype(float)
-                        probe_iters = min(int(max_iter), int(scan_fallback_iters))
-                        if probe_iters > 0 and accepted_arr.size >= probe_iters:
-                            accepted_frac = float(np.mean(accepted_arr[:probe_iters]))
-                    except Exception:
-                        accepted_frac = None
-                fallback_reasons = []
-                fsq_min_full = None
-                fsq_max_full = None
-                fsq_all_finite = True
-                try:
-                    fsqr_diag = scan_result.diagnostics.get("fsqr_full", None)
-                    fsqz_diag = scan_result.diagnostics.get("fsqz_full", None)
-                    fsql_diag = scan_result.diagnostics.get("fsql_full", None)
-                    if fsqr_diag is None or np.asarray(fsqr_diag).size == 0:
-                        fsqr_diag = scan_result.fsqr2_history
-                        fsqz_diag = scan_result.fsqz2_history
-                        fsql_diag = scan_result.fsql2_history
-                    fsq_full_arr = np.asarray(fsqr_diag) + np.asarray(fsqz_diag) + np.asarray(fsql_diag)
-                    fsq_min_full = float(np.min(fsq_full_arr))
-                    fsq_max_full = float(np.max(fsq_full_arr))
-                    fsq_all_finite = bool(np.all(np.isfinite(fsq_full_arr)))
-                except Exception:
-                    fsq_min_full = None
-                    fsq_max_full = None
-                    fsq_all_finite = False
-                fsq_min_ok = True if fsq_min_full is None else bool(fsq_min_full > float(scan_fallback_fsq_abs))
-                fsq_ratio_ok = True
-                if fsq_min_full is not None and fsq_max_full is not None:
-                    if fsq_min_full > 0.0:
-                        fsq_ratio_ok = (fsq_max_full / fsq_min_full) > float(scan_fallback_fsq_factor)
-                if abort_scan_flag and (not fsq_all_finite or fsq_ratio_ok):
-                    fallback_reasons.append("abort_scan")
-
-                if bad_jac_count > scan_fallback_badjac_limit and fsq_min_ok and fsq_ratio_ok:
-                    fallback_reasons.append(f"bad_jac_count={bad_jac_count} > {scan_fallback_badjac_limit}")
-                # Note: ijacob alone is not a reliable failure signal; do not
-                # fall back solely on ijacob growth.
-                if (
-                    accepted_frac is not None
-                    and accepted_frac < scan_fallback_accept_frac
-                    and fsq_min_ok
-                    and fsq_ratio_ok
-                ):
-                    fallback_reasons.append(f"accepted_frac={accepted_frac:.2f} < {scan_fallback_accept_frac:.2f}")
-
-                if fallback_reasons:
+                fallback_decision = _scan_fallback_decision(
+                    diagnostics=scan_result.diagnostics,
+                    fsqr_history=scan_result.fsqr2_history,
+                    fsqz_history=scan_result.fsqz2_history,
+                    fsql_history=scan_result.fsql2_history,
+                    max_iter=int(max_iter),
+                    fallback_iters=int(scan_fallback_iters),
+                    badjac_limit=int(scan_fallback_badjac_limit),
+                    fsq_abs=float(scan_fallback_fsq_abs),
+                    accept_frac=float(scan_fallback_accept_frac),
+                    fsq_factor=float(scan_fallback_fsq_factor),
+                )
+                if fallback_decision.fallback:
                     if verbose:
-                        reason_str = ", ".join(fallback_reasons)
-                        probe_msg = ""
-                        try:
-                            probe_count = int(scan_result.diagnostics.get("probe_count", 0))
-                            if probe_count > 0:
-                                probe_msg = (
-                                    " "
-                                    f"(probe_count={probe_count} "
-                                    f"probe_accept_frac={scan_result.diagnostics.get('probe_accept_frac', float('nan')):.2f} "
-                                    f"probe_ratio={scan_result.diagnostics.get('probe_ratio', float('nan')):.2f} "
-                                    f"probe_fsq_min={scan_result.diagnostics.get('probe_fsq_min', float('nan')):.3e})"
-                                )
-                        except Exception:
-                            probe_msg = ""
                         print(
-                            f"[solve_fixed_boundary_residual_iter] scan fallback -> non-scan ({reason_str}){probe_msg}",
+                            "[solve_fixed_boundary_residual_iter] "
+                            f"scan fallback -> non-scan ({fallback_decision.reason_text})"
+                            f"{fallback_decision.probe_message}",
                             flush=True,
                         )
                     use_scan = False
