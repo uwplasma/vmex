@@ -89,6 +89,12 @@ from .solve_options import (
     validate_residual_lbfgs_options,
 )
 from .solve_scan_output import postprocess_vmec2000_scan_result, unpack_vmec2000_scan_histories
+from .solve_scan_time_control import (
+    scan_restart_decision,
+    scan_restart_transition,
+    scan_stage_spike_post_scalars,
+    scan_time_control_scalars,
+)
 from .state import VMECState, pack_state, unpack_state
 
 
@@ -7842,187 +7848,106 @@ def solve_fixed_boundary_residual_iter(
                     fsq = fsq_res
                 init_mask = (iter2 == carry_adv.iter1) | (carry_adv.res0 < 0.0) | (carry_adv.res1 < 0.0)
 
-                def _timecontrol_update(_):
-                    res0_tc = jnp.where(init_mask, fsq_res, carry_adv.res0)
-                    res1_tc = jnp.where(init_mask, fsq_phys, carry_adv.res1)
-                    # Important for scan performance: avoid element-wise `where`
-                    # over the full state arrays. VMEC-style checkpointing is a
-                    # discrete choice (keep old checkpoint vs overwrite with
-                    # current state), so model it as a conditional.
-                    state_checkpoint_tc = jax.lax.cond(
-                        init_mask,
-                        lambda _: carry_adv.state,
-                        lambda _: carry_adv.state_checkpoint,
-                        operand=None,
-                    )
-                    if bool(vmec2000_control):
-                        res0_tc = jnp.minimum(res0_tc, fsq)
-                    else:
-                        res0_tc = jnp.minimum(res0_tc, fsq_res)
-                    res1_tc = jnp.minimum(res1_tc, fsq_phys)
-                    if dump_timecontrol_scan:
-                        _maybe_dump_timecontrol_scan(
-                            cond=init_mask,
-                            stage_id=jnp.asarray(0, dtype=jnp.int32),
-                            iter2=iter2,
-                            iter1=carry_adv.iter1,
-                            fsq=fsq,
-                            fsq0=fsq_phys,
-                            res0=res0_tc,
-                            res1=res1_tc,
-                            time_step=carry_adv.time_step,
-                            irst=jnp.asarray(1, dtype=jnp.int32),
-                        )
-                        _maybe_dump_timecontrol_scan(
-                            cond=jnp.asarray(True),
-                            stage_id=jnp.asarray(1, dtype=jnp.int32),
-                            iter2=iter2,
-                            iter1=carry_adv.iter1,
-                            fsq=fsq,
-                            fsq0=fsq_phys,
-                            res0=res0_tc,
-                            res1=res1_tc,
-                            time_step=carry_adv.time_step,
-                            irst=jnp.asarray(1, dtype=jnp.int32),
-                        )
-                    checkpoint_mask_tc = (fsq <= res0_tc) & (fsq_phys <= res1_tc) & (~bad_jacobian)
-                    state_checkpoint_tc = jax.lax.cond(
-                        checkpoint_mask_tc,
-                        lambda _: carry_adv.state,
-                        lambda _: state_checkpoint_tc,
-                        operand=None,
-                    )
-                    fsqr_checkpoint_tc = jnp.where(checkpoint_mask_tc, fsqr, carry_adv.fsqr_checkpoint)
-                    fsqz_checkpoint_tc = jnp.where(checkpoint_mask_tc, fsqz, carry_adv.fsqz_checkpoint)
-                    fsql_checkpoint_tc = jnp.where(checkpoint_mask_tc, fsql, carry_adv.fsql_checkpoint)
-                    fsqr1_checkpoint_tc = jnp.where(checkpoint_mask_tc, fsqr1, carry_adv.fsqr1_checkpoint)
-                    fsqz1_checkpoint_tc = jnp.where(checkpoint_mask_tc, fsqz1, carry_adv.fsqz1_checkpoint)
-                    fsql1_checkpoint_tc = jnp.where(checkpoint_mask_tc, fsql1, carry_adv.fsql1_checkpoint)
-                    if dump_timecontrol_scan:
-                        _maybe_dump_timecontrol_scan(
-                            cond=checkpoint_mask_tc,
-                            stage_id=jnp.asarray(2, dtype=jnp.int32),
-                            iter2=iter2,
-                            iter1=carry_adv.iter1,
-                            fsq=fsq,
-                            fsq0=fsq_phys,
-                            res0=res0_tc,
-                            res1=res1_tc,
-                            time_step=carry_adv.time_step,
-                            irst=jnp.asarray(1, dtype=jnp.int32),
-                        )
-                    return (
-                        res0_tc,
-                        res1_tc,
-                        state_checkpoint_tc,
-                        fsqr_checkpoint_tc,
-                        fsqz_checkpoint_tc,
-                        fsql_checkpoint_tc,
-                        fsqr1_checkpoint_tc,
-                        fsqz1_checkpoint_tc,
-                        fsql1_checkpoint_tc,
-                        checkpoint_mask_tc,
-                    )
-
-                def _skip_timecontrol_update(_):
-                    # Mimic the non-scan skip_time_control behavior: keep res1
-                    # and checkpoint, but allow res0 to tighten when fsq1 improves.
-                    res0_tc = jnp.where(
-                        (fsq1 <= fsq_prev_before) & jnp.isfinite(fsq1),
-                        jnp.minimum(carry_adv.res0, fsq1),
-                        carry_adv.res0,
-                    )
-                    return (
-                        res0_tc,
-                        carry_adv.res1,
-                        carry_adv.state_checkpoint,
-                        carry_adv.fsqr_checkpoint,
-                        carry_adv.fsqz_checkpoint,
-                        carry_adv.fsql_checkpoint,
-                        carry_adv.fsqr1_checkpoint,
-                        carry_adv.fsqz1_checkpoint,
-                        carry_adv.fsql1_checkpoint,
-                        jnp.asarray(False),
-                    )
-
-                (
-                    res0,
-                    res1,
-                    state_checkpoint,
-                    fsqr_checkpoint,
-                    fsqz_checkpoint,
-                    fsql_checkpoint,
-                    fsqr1_checkpoint,
-                    fsqz1_checkpoint,
-                    fsql1_checkpoint,
-                    checkpoint_mask,
-                ) = jax.lax.cond(skip_timecontrol, _skip_timecontrol_update, _timecontrol_update, operand=None)
-
-                restart_time = jnp.where(
-                    skip_timecontrol,
-                    jnp.asarray(False),
-                    (~bad_jacobian)
-                    & ((iter2 - carry_adv.iter1) > 10)
-                    & (
-                        (fsq > vmec2000_fact * jnp.maximum(res0, 1.0e-30))
-                        | (fsq_phys > vmec2000_fact * jnp.maximum(res1, 1.0e-30))
-                    ),
+                tc_scalars = scan_time_control_scalars(
+                    skip_timecontrol=skip_timecontrol,
+                    init_mask=init_mask,
+                    fsq=fsq,
+                    fsq_res=fsq_res,
+                    fsq_phys=fsq_phys,
+                    fsq1=fsq1,
+                    fsq_prev_before=fsq_prev_before,
+                    res0_prev=carry_adv.res0,
+                    res1_prev=carry_adv.res1,
+                    bad_jacobian=bad_jacobian,
+                    vmec2000_control=bool(vmec2000_control),
                 )
-                vmecpp_bad_progress = jnp.asarray(False)
-                if vmecpp_restart:
-                    vmecpp_bad_progress = (
-                        ((iter2 - carry_adv.iter1) > (k_preconditioner_update_interval // 2))
-                        & (iter2 > 2 * k_preconditioner_update_interval)
-                        & ((fsqr + fsqz) > 1.0e-2)
-                    )
-                stage_spike = jnp.asarray(False)
-                if stage_prev_fsq_j is not None:
-                    stage_spike = (iter2 == 1) & (fsq_phys > (stage_prev_fsq_j * stage_transition_factor))
+                res0 = tc_scalars.res0
+                res1 = tc_scalars.res1
+                checkpoint_mask = tc_scalars.checkpoint_mask
 
-                RESTART_NONE = jnp.asarray(0, dtype=jnp.int32)
-                RESTART_BADJAC = jnp.asarray(1, dtype=jnp.int32)
-                RESTART_STAGE = jnp.asarray(2, dtype=jnp.int32)
-                RESTART_BADPROG_VMEC = jnp.asarray(3, dtype=jnp.int32)
-                RESTART_TIME = jnp.asarray(4, dtype=jnp.int32)
+                # Important for scan performance: avoid element-wise `where`
+                # over full state arrays. VMEC checkpointing is a discrete
+                # choice, so keep it as conditionals driven by scalar masks.
+                state_checkpoint_init = jax.lax.cond(
+                    (~skip_timecontrol) & init_mask,
+                    lambda _: carry_adv.state,
+                    lambda _: carry_adv.state_checkpoint,
+                    operand=None,
+                )
+                state_checkpoint = jax.lax.cond(
+                    checkpoint_mask,
+                    lambda _: carry_adv.state,
+                    lambda _: state_checkpoint_init,
+                    operand=None,
+                )
+                fsqr_checkpoint = jnp.where(checkpoint_mask, fsqr, carry_adv.fsqr_checkpoint)
+                fsqz_checkpoint = jnp.where(checkpoint_mask, fsqz, carry_adv.fsqz_checkpoint)
+                fsql_checkpoint = jnp.where(checkpoint_mask, fsql, carry_adv.fsql_checkpoint)
+                fsqr1_checkpoint = jnp.where(checkpoint_mask, fsqr1, carry_adv.fsqr1_checkpoint)
+                fsqz1_checkpoint = jnp.where(checkpoint_mask, fsqz1, carry_adv.fsqz1_checkpoint)
+                fsql1_checkpoint = jnp.where(checkpoint_mask, fsql1, carry_adv.fsql1_checkpoint)
 
-                if bool(vmec2000_control):
-                    # Match non-scan VMEC2000 restart logic (pre_restart_reason).
-                    pre_reason = jnp.where(stage_spike, RESTART_STAGE, RESTART_NONE)
-                    pre_reason = jnp.where(
-                        bad_jacobian & (iter2 > carry_adv.iter1),
-                        RESTART_BADJAC,
-                        pre_reason,
-                    )
-                    pre_reason = jnp.where(
-                        (pre_reason == RESTART_NONE) & vmecpp_bad_progress,
-                        RESTART_BADPROG_VMEC,
-                        pre_reason,
-                    )
-                    do_restart = restart_time | (use_restart_triggers & (pre_reason != RESTART_NONE))
-                    restart_reason = jnp.where(restart_time, RESTART_TIME, pre_reason)
-                else:
-                    restart_badjac = use_restart_triggers & bad_jacobian & (iter2 > carry_adv.iter1)
-                    restart_vmecpp = use_restart_triggers & vmecpp_bad_progress
-                    do_restart = restart_time | restart_badjac | restart_vmecpp
-                    restart_reason = jnp.where(
-                        restart_time,
-                        jnp.asarray(4, dtype=jnp.int32),
-                        jnp.where(restart_badjac, jnp.asarray(1, dtype=jnp.int32), jnp.asarray(3, dtype=jnp.int32)),
-                    )
-                # Non-scan VMEC2000 skips all restart logic on the iteration
-                # immediately after a restart. Mirror that behavior here.
-                do_restart = jnp.where(skip_timecontrol, jnp.asarray(False), do_restart)
-                restart_reason = jnp.where(skip_timecontrol, RESTART_NONE, restart_reason)
                 if dump_timecontrol_scan:
-                    irst_restart = jnp.where(
-                        restart_reason == RESTART_BADJAC,
-                        jnp.asarray(2, dtype=jnp.int32),
-                        jnp.where(
-                            (restart_reason == RESTART_TIME) | (restart_reason == RESTART_BADPROG_VMEC),
-                            jnp.asarray(3, dtype=jnp.int32),
-                            jnp.asarray(1, dtype=jnp.int32),
-                        ),
+                    _maybe_dump_timecontrol_scan(
+                        cond=(~skip_timecontrol) & init_mask,
+                        stage_id=jnp.asarray(0, dtype=jnp.int32),
+                        iter2=iter2,
+                        iter1=carry_adv.iter1,
+                        fsq=fsq,
+                        fsq0=fsq_phys,
+                        res0=res0,
+                        res1=res1,
+                        time_step=carry_adv.time_step,
+                        irst=jnp.asarray(1, dtype=jnp.int32),
                     )
+                    _maybe_dump_timecontrol_scan(
+                        cond=~skip_timecontrol,
+                        stage_id=jnp.asarray(1, dtype=jnp.int32),
+                        iter2=iter2,
+                        iter1=carry_adv.iter1,
+                        fsq=fsq,
+                        fsq0=fsq_phys,
+                        res0=res0,
+                        res1=res1,
+                        time_step=carry_adv.time_step,
+                        irst=jnp.asarray(1, dtype=jnp.int32),
+                    )
+                    _maybe_dump_timecontrol_scan(
+                        cond=checkpoint_mask,
+                        stage_id=jnp.asarray(2, dtype=jnp.int32),
+                        iter2=iter2,
+                        iter1=carry_adv.iter1,
+                        fsq=fsq,
+                        fsq0=fsq_phys,
+                        res0=res0,
+                        res1=res1,
+                        time_step=carry_adv.time_step,
+                        irst=jnp.asarray(1, dtype=jnp.int32),
+                    )
+
+                restart_decision = scan_restart_decision(
+                    skip_timecontrol=skip_timecontrol,
+                    iter2=iter2,
+                    iter1=carry_adv.iter1,
+                    fsq=fsq,
+                    fsq_phys=fsq_phys,
+                    res0=res0,
+                    res1=res1,
+                    bad_jacobian=bad_jacobian,
+                    fsqr=fsqr,
+                    fsqz=fsqz,
+                    vmec2000_fact=vmec2000_fact,
+                    use_restart_triggers=bool(use_restart_triggers),
+                    vmecpp_restart=bool(vmecpp_restart),
+                    k_preconditioner_update_interval=k_preconditioner_update_interval,
+                    stage_prev_fsq=stage_prev_fsq_j,
+                    stage_transition_factor=stage_transition_factor,
+                    vmec2000_control=bool(vmec2000_control),
+                )
+                stage_spike = restart_decision.stage_spike
+                do_restart = restart_decision.do_restart
+                restart_reason = restart_decision.restart_reason
+                if dump_timecontrol_scan:
                     _maybe_dump_timecontrol_scan(
                         cond=do_restart,
                         stage_id=jnp.asarray(3, dtype=jnp.int32),
@@ -8033,64 +7958,32 @@ def solve_fixed_boundary_residual_iter(
                         res0=res0,
                         res1=res1,
                         time_step=carry_adv.time_step,
-                        irst=irst_restart,
+                        irst=restart_decision.irst_restart,
                     )
 
                 def _restart_updates(_):
-                    time_step = carry_adv.time_step
-                    if bool(vmec2000_control):
-                        # Map reason -> time-step scaling.
-                        time_step = jnp.where(
-                            restart_reason == RESTART_BADJAC,
-                            restart_badjac_factor * time_step,
-                            time_step,
-                        )
-                        time_step = jnp.where(
-                            (restart_reason == RESTART_TIME) | (restart_reason == RESTART_BADPROG_VMEC),
-                            time_step / restart_badprog_factor,
-                            time_step,
-                        )
-                        time_step = jnp.where(
-                            restart_reason == RESTART_STAGE,
-                            time_step * jnp.asarray(stage_transition_scale, dtype=dtype),
-                            time_step,
-                        )
-                    else:
-                        time_step = jnp.where(
-                            restart_reason == jnp.asarray(1, dtype=jnp.int32),
-                            restart_badjac_factor * time_step,
-                            time_step / restart_badprog_factor,
-                        )
-                    time_step = jnp.maximum(time_step, jnp.asarray(1.0e-12, dtype=dtype))
-                    if bool(vmec2000_control):
-                        iter_offset = carry_adv.iter_offset
-                    else:
-                        iter_offset = carry_adv.iter_offset - jnp.asarray(1, dtype=jnp.int32)
-                    iter1 = iter2
-                    inv_tau = jnp.full((k_ndamp,), jnp.asarray(0.15, dtype=dtype) / time_step)
+                    restart_scalars = scan_restart_transition(
+                        time_step=carry_adv.time_step,
+                        iter_offset=carry_adv.iter_offset,
+                        ijacob=carry_adv.ijacob,
+                        bad_resets=carry_adv.bad_resets,
+                        iter2=iter2,
+                        restart_reason=restart_reason,
+                        vmec2000_control=bool(vmec2000_control),
+                        restart_badjac_factor=restart_badjac_factor,
+                        restart_badprog_factor=restart_badprog_factor,
+                        stage_transition_scale=stage_transition_scale,
+                        step_size=step_size,
+                    )
+                    time_step = restart_scalars.time_step
+                    iter_offset = restart_scalars.iter_offset
+                    iter1 = restart_scalars.iter1
+                    inv_tau = jnp.full((k_ndamp,), jnp.asarray(0.15, dtype=dtype) / restart_scalars.damping_time_step)
                     fsq_prev = fsq_prev_before
-                    if bool(vmec2000_control):
-                        ijacob = jnp.where(restart_reason == RESTART_BADJAC, carry_adv.ijacob + 1, carry_adv.ijacob)
-                        # VMEC2000 special scaling at ijacob 25/50.
-                        ijacob25 = ijacob == jnp.asarray(25, dtype=ijacob.dtype)
-                        ijacob50 = ijacob == jnp.asarray(50, dtype=ijacob.dtype)
-                        time_step = jnp.where(
-                            ijacob25 & (restart_reason == RESTART_BADJAC),
-                            jnp.asarray(0.98, dtype=dtype) * jnp.asarray(float(step_size), dtype=dtype),
-                            time_step,
-                        )
-                        time_step = jnp.where(
-                            ijacob50 & (restart_reason == RESTART_BADJAC),
-                            jnp.asarray(0.96, dtype=dtype) * jnp.asarray(float(step_size), dtype=dtype),
-                            time_step,
-                        )
-                    else:
-                        ijacob = jnp.where(
-                            restart_reason == jnp.asarray(1, dtype=jnp.int32), carry_adv.ijacob + 1, carry_adv.ijacob
-                        )
-                    bad_resets = carry_adv.bad_resets + 1
-                    bad_growth = jnp.asarray(0, dtype=jnp.int32)
-                    force_bcovar_update = jnp.asarray(True)
+                    ijacob = restart_scalars.ijacob
+                    bad_resets = restart_scalars.bad_resets
+                    bad_growth = restart_scalars.bad_growth
+                    force_bcovar_update = restart_scalars.force_bcovar_update
                     vRcc = jnp.zeros_like(carry_adv.vRcc)
                     vRss = jnp.zeros_like(carry_adv.vRss)
                     vZsc = jnp.zeros_like(carry_adv.vZsc)
@@ -8182,15 +8075,14 @@ def solve_fixed_boundary_residual_iter(
 
                 fsq0_prev_post = jnp.where(do_restart, fsq0_prev_before, fsq_phys)
 
+                stage_post_scalars = scan_stage_spike_post_scalars(
+                    time_step=time_step_post,
+                    stage_spike=stage_spike,
+                    stage_prev_fsq=stage_prev_fsq_j,
+                    stage_transition_scale=stage_transition_scale,
+                )
+                time_step_post = stage_post_scalars.time_step
                 if stage_prev_fsq_j is not None:
-                    time_step_post = jnp.where(
-                        stage_spike,
-                        jnp.maximum(
-                            time_step_post * jnp.asarray(stage_transition_scale, dtype=dtype),
-                            jnp.asarray(1.0e-12, dtype=dtype),
-                        ),
-                        time_step_post,
-                    )
                     inv_tau_post = jnp.where(
                         stage_spike,
                         jnp.full((k_ndamp,), jnp.asarray(0.15, dtype=dtype) / time_step_post),
