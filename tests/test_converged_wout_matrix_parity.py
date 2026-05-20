@@ -7,6 +7,8 @@ from typing import Any
 import numpy as np
 import pytest
 
+from vmec_jax.config import load_config
+from vmec_jax.free_boundary import prepare_mgrid_for_config
 from vmec_jax.namelist import read_indata
 from vmec_jax.wout import read_wout
 from vmec_jax.wout_schema import assert_main_modes_match_wout
@@ -168,13 +170,26 @@ def test_bundled_converged_wout_matrix_physics_gates(case: ConvergedWoutMatrixCa
         pytest.skip(f"Missing bundled matrix fixture: {case.case}")
 
     indata = read_indata(input_path)
+    cfg, _ = load_config(input_path)
     wout = read_wout(wout_path)
     assert_main_modes_match_wout(wout=wout)
 
     assert bool(indata.get_bool("LFREEB", False)) is case.lfreeb
+    assert bool(cfg.lfreeb) is case.lfreeb
     assert bool(indata.get_bool("LASYM", False)) is case.lasym
     assert bool(int(indata.get_int("NTOR", 0)) == 0) is case.axisymmetric
     assert _is_multigrid_ns_array(indata) is case.multigrid
+    if case.lfreeb:
+        assert cfg.mgrid_file.upper() != "NONE"
+        assert Path(cfg.mgrid_file).exists()
+        prepared = prepare_mgrid_for_config(cfg, load_fields=False, strict=True)
+        assert prepared is not None
+        assert int(prepared.metadata.nfp) == int(wout.nfp)
+        assert int(prepared.metadata.nextcur) == len(prepared.extcur)
+        assert any(abs(current) > 0.0 for current in prepared.extcur)
+        assert int(indata.get_int("NVACSKIP", 0)) > 0
+    else:
+        assert bool(cfg.lfreeb) is False
 
     assert int(wout.nfp) == int(indata.get_int("NFP", int(wout.nfp)))
     assert int(wout.ntor) == int(indata.get_int("NTOR", int(wout.ntor)))
@@ -231,6 +246,7 @@ def test_bundled_converged_wout_matrix_physics_gates(case: ConvergedWoutMatrixCa
     pressure_norm = float(np.linalg.norm(np.asarray(wout.pres, dtype=float)))
     beta_scalars = np.asarray([wout.betatotal, wout.betapol, wout.betator, wout.betaxis], dtype=float)
     assert np.isfinite(beta_scalars).all()
+    np.testing.assert_allclose(wout.betatotal, wout.wp / wout.wb, rtol=2.0e-13, atol=1.0e-15)
     if case.finite_beta:
         assert pressure_norm > 0.0
         assert float(wout.wp) > 0.0
@@ -240,3 +256,26 @@ def test_bundled_converged_wout_matrix_physics_gates(case: ConvergedWoutMatrixCa
         assert float(wout.wp) == pytest.approx(0.0, abs=1.0e-14)
         np.testing.assert_allclose(beta_scalars, 0.0, rtol=0.0, atol=0.0)
     assert np.isfinite([wout.Aminor_p, wout.Rmajor_p, wout.aspect, wout.volume_p]).all()
+
+    mercier_terms = {
+        "DMerc": np.asarray(wout.DMerc, dtype=float),
+        "Dshear": np.asarray(wout.Dshear, dtype=float),
+        "Dwell": np.asarray(wout.Dwell, dtype=float),
+        "Dcurr": np.asarray(wout.Dcurr, dtype=float),
+        "Dgeod": np.asarray(wout.Dgeod, dtype=float),
+    }
+    for name, values in mercier_terms.items():
+        assert values.shape == (int(wout.ns),), name
+        assert np.isfinite(values).all(), name
+    np.testing.assert_allclose(
+        mercier_terms["DMerc"],
+        mercier_terms["Dshear"] + mercier_terms["Dwell"] + mercier_terms["Dcurr"] + mercier_terms["Dgeod"],
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+
+    for name in ("jdotb", "bdotb", "bdotgradv", "buco", "bvco", "jcuru", "jcurv"):
+        values = np.asarray(getattr(wout, name), dtype=float)
+        assert values.shape == (int(wout.ns),), name
+        assert np.isfinite(values).all(), name
+    assert np.all(np.asarray(wout.bdotb, dtype=float)[1:] > 0.0)

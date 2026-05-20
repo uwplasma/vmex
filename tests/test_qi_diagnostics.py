@@ -56,6 +56,77 @@ def test_qi_diagnostics_from_boozer_output_records_core_metrics():
     assert record["qi_boozer_resolution"] == {"mboz": 0, "nboz": 1}
 
 
+def test_boozer_qi_diagnostic_ranking_prefers_qi_and_flags_mirror_regressions():
+    pytest.importorskip("jax")
+
+    from vmec_jax.qi_diagnostics import (
+        QIDiagnosticOptions,
+        QISeedSuitabilityTargets,
+        qi_diagnostics_from_boozer_output,
+        rank_qi_seed_records,
+    )
+
+    options = QIDiagnosticOptions(
+        nphi=21,
+        nalpha=5,
+        n_bounce=5,
+        legacy_nphi_out=41,
+        mirror_threshold=0.08,
+        mirror_ntheta=12,
+        mirror_nphi=12,
+        fail_on_error=True,
+    )
+    targets = QISeedSuitabilityTargets(
+        smooth_qi_max=0.11,
+        legacy_qi_max=0.10,
+        target_aspect=5.0,
+        aspect_relative_tolerance=0.05,
+        abs_iota_min=0.41,
+        mirror_ratio_max=0.08,
+        max_elongation=None,
+    )
+
+    def record(label: str, *, xm: list[int], xn: list[int], coeffs: list[float]) -> dict[str, object]:
+        out = qi_diagnostics_from_boozer_output(
+            {
+                "bmnc_b": np.asarray([coeffs], dtype=float),
+                "ixm_b": np.asarray(xm, dtype=float),
+                "ixn_b": np.asarray(xn, dtype=float),
+                "iota_b": np.asarray([0.45], dtype=float),
+                "nfp_b": np.asarray(1),
+            },
+            options=options,
+        )
+        out.update({"label": label, "aspect": 5.0, "mean_iota": 0.45})
+        return out
+
+    good = record("n_only_qi", xm=[0, 0], xn=[0, 1], coeffs=[1.0, 0.03])
+    mixed = record("mixed_modes", xm=[0, 0, 1], xn=[0, 1, 0], coeffs=[1.0, 0.03, 0.03])
+    mirror_bad = record("mirror_regression", xm=[0, 0, 1], xn=[0, 1, 0], coeffs=[1.0, 0.03, 0.06])
+    m_mode_bad = record("m_mode_bad_qi", xm=[0, 1], xn=[0, 0], coeffs=[1.0, 0.03])
+
+    assert good["qi_smooth_total"] < mixed["qi_smooth_total"] < m_mode_bad["qi_smooth_total"]
+    assert good["qi_legacy_total"] < mixed["qi_legacy_total"] < m_mode_bad["qi_legacy_total"]
+    assert good["qi_mirror_ratio_max"] < mixed["qi_mirror_ratio_max"] < mirror_bad["qi_mirror_ratio_max"]
+
+    ranked = rank_qi_seed_records([mirror_bad, m_mode_bad, mixed, good], targets=targets)
+    assert [row["label"] for row in ranked] == ["n_only_qi", "mixed_modes", "mirror_regression", "m_mode_bad_qi"]
+    assert ranked[0]["qi_suitability_rank"] == 1
+    assert ranked[0]["qi_mirror_gate_passed"] is True
+    assert ranked[0]["qi_engineering_gate_passed"] is True
+    assert ranked[0]["qi_smooth_rank"] == 1
+    assert ranked[0]["qi_legacy_rank"] == 1
+    assert ranked[0]["qi_mirror_rank"] == 1
+    assert ranked[0]["qi_iota_rank"] == 1
+
+    assert ranked[2]["label"] == "mirror_regression"
+    assert ranked[2]["qi_seed_gate_passed"] is True
+    assert ranked[2]["qi_mirror_gate_passed"] is False
+    assert ranked[2]["qi_engineering_gate_passed"] is False
+    assert "mirror" in ranked[2]["qi_gate_failures"]
+    assert ranked[2]["qi_mirror_excess_max"] == pytest.approx(0.01)
+
+
 def test_qi_diagnostics_records_legacy_failure_without_losing_smooth_metric(monkeypatch):
     pytest.importorskip("jax")
 
