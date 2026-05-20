@@ -335,6 +335,31 @@ def test_compute_equif_wout_matches_weighted_currents_and_endpoint_rules() -> No
         np.testing.assert_allclose(profile, np.zeros((2,)))
 
 
+def test_compute_equif_wout_leaves_zero_denominator_surfaces_finite() -> None:
+    trig = SimpleNamespace(
+        cosmui3=np.ones((2, 1)),
+        mscale=np.asarray([1.0]),
+        cosnv=np.zeros((1, 1)),
+    )
+    ns = 4
+    zeros = np.zeros((ns, 2, 1), dtype=float)
+
+    buco, bvco, jcuru, jcurv, equif = _compute_equif_wout(
+        bsubu=zeros,
+        bsubv=zeros,
+        pres=np.zeros((ns,), dtype=float),
+        vp=np.ones((ns,), dtype=float),
+        phipf=np.ones((ns,), dtype=float),
+        chipf=np.ones((ns,), dtype=float),
+        signgs=1,
+        trig=trig,
+        s=np.linspace(0.0, 1.0, ns),
+    )
+
+    for profile in (buco, bvco, jcuru, jcurv, equif):
+        np.testing.assert_allclose(profile, np.zeros((ns,)))
+
+
 def test_equilibrium_iota_profiles_iota_driven_branch_uses_prescribed_half_mesh_profile() -> None:
     static = SimpleNamespace(s=jnp.linspace(0.0, 1.0, 4))
     indata = InData(

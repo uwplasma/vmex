@@ -482,6 +482,128 @@ def test_run_scipy_matrix_free_path_wraps_scaled_linear_operator(monkeypatch):
     assert result["_history_dump"]["scipy_tr_solver"] == "lsmr"
 
 
+def test_run_scipy_matrix_free_scales_multi_parameter_linear_operator(monkeypatch):
+    pytest.importorskip("scipy.optimize")
+    import scipy.optimize
+
+    class FakeOperator:
+        shape = (2, 2)
+
+        def matvec(self, vector):
+            return np.asarray([vector[0] + 2.0 * vector[1], 3.0 * vector[0] - vector[1]], dtype=float)
+
+        def matmat(self, matrix):
+            return np.vstack(
+                [
+                    matrix[0] + 2.0 * matrix[1],
+                    3.0 * matrix[0] - matrix[1],
+                ]
+            )
+
+        def rmatvec(self, vector):
+            return np.asarray(
+                [
+                    vector[0] + 3.0 * vector[1],
+                    2.0 * vector[0] - vector[1],
+                ],
+                dtype=float,
+            )
+
+    def fake_least_squares(residuals, y0, *, jac, **kwargs):
+        np.testing.assert_allclose(residuals(y0), [1.0, -2.0])
+        op = jac(y0)
+        np.testing.assert_allclose(op.matvec(np.asarray([5.0, 7.0])), [68.0, 46.0])
+        np.testing.assert_allclose(op.matmat(np.asarray([[5.0, 11.0], [7.0, 13.0]])), [[68.0, 124.0], [46.0, 100.0]])
+        np.testing.assert_allclose(op.rmatvec(np.asarray([2.0, -3.0])), [-28.0, 14.0])
+        return SimpleNamespace(
+            x=np.asarray([0.0, 0.0]),
+            cost=0.0,
+            nfev=1,
+            njev=1,
+            success=True,
+            status=1,
+            message="synthetic multi-parameter matrix-free",
+        )
+
+    monkeypatch.setattr(scipy.optimize, "least_squares", fake_least_squares)
+    opt = _run_ready_optimizer(residual=np.asarray([1.0, -2.0]))
+    opt._base_params_vector = lambda: np.zeros(2)
+    opt.residual_linear_operator = lambda _x: FakeOperator()
+    opt._exact_cache_key = lambda params: np.asarray(params, dtype=float).round(12).reshape(-1).tobytes()
+
+    result = opt.run(
+        np.asarray([0.0, 0.0]),
+        method="scipy_matrix_free",
+        x_scale=np.asarray([2.0, 4.0]),
+        verbose=0,
+    )
+
+    np.testing.assert_allclose(result["x"], [0.0, 0.0])
+    assert result["_history_dump"]["method"] == "scipy_matrix_free"
+
+
+def test_run_scipy_residual_callback_prefers_cache_policies_before_trial_solve(monkeypatch):
+    pytest.importorskip("scipy.optimize")
+    import scipy.optimize
+
+    residual_sources = []
+    forward_calls = []
+    state_cache = {"state0": object()}
+    trial_cache = {0.5: np.asarray([5.0, 6.0], dtype=float)}
+
+    def fake_least_squares(residuals, y0, *, jac, **kwargs):
+        np.testing.assert_allclose(residuals(y0), [1.0, 2.0])
+        np.testing.assert_allclose(residuals(np.asarray([0.6])), [5.0, 6.0])
+        np.testing.assert_allclose(residuals(np.asarray([1.1])), [9.0, 10.0])
+        np.testing.assert_allclose(jac(y0), [[0.0], [0.0]])
+        return SimpleNamespace(
+            x=np.asarray(y0, dtype=float),
+            cost=2.5,
+            nfev=3,
+            njev=1,
+            success=True,
+            status=1,
+            message="synthetic cache policy",
+        )
+
+    monkeypatch.setattr(scipy.optimize, "least_squares", fake_least_squares)
+    opt = _run_ready_optimizer(residual=np.asarray([1.0, 2.0]))
+    opt._cached_exact_residual = lambda *args, **kwargs: None
+
+    def cached_state(x):
+        x0 = float(np.asarray(x, dtype=float)[0])
+        if x0 == pytest.approx(0.0):
+            residual_sources.append("exact_state")
+            return state_cache["state0"]
+        return None
+
+    def cached_trial(x):
+        x0 = float(np.asarray(x, dtype=float)[0])
+        if x0 in trial_cache:
+            residual_sources.append("trial_cache")
+            return trial_cache[x0]
+        return None
+
+    def forward_residual(x):
+        forward_calls.append(float(np.asarray(x, dtype=float)[0]))
+        residual_sources.append("trial_solve")
+        return np.asarray([9.0, 10.0], dtype=float)
+
+    opt._cached_exact_state = cached_state
+    opt._cached_trial_residual = cached_trial
+    opt._evaluate_residuals_from_state = lambda state: np.asarray([1.0, 2.0], dtype=float)
+    opt.forward_residual_fun = forward_residual
+    opt._jacobian_fun_tracked = lambda _x: np.zeros((2, 1), dtype=float)
+
+    result = opt.run(np.asarray([0.0]), method="scipy", max_nfev=3, trace_callbacks=True, verbose=0)
+
+    assert residual_sources == ["exact_state", "trial_cache", "trial_solve", "exact_state"]
+    assert forward_calls == [1.0]
+    assert result["_history_dump"]["callback_trace"]["summary"]["residual:exact_state_cache"]["count"] == 1
+    assert result["_history_dump"]["callback_trace"]["summary"]["residual:trial_residual_cache"]["count"] == 1
+    assert result["_history_dump"]["callback_trace"]["summary"]["residual:trial_solve"]["count"] == 1
+
+
 def test_run_scipy_matrix_free_returns_best_exact_point_after_scipy_failure(monkeypatch):
     pytest.importorskip("scipy.optimize")
     import scipy.optimize

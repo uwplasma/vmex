@@ -215,6 +215,173 @@ def test_run_fixed_boundary_restart_wout_path_uses_loaded_state(monkeypatch, tmp
     assert run.cfg.ns == 3
 
 
+def test_restart_solver_state_disables_multigrid_and_passes_resume_state(monkeypatch, tmp_path) -> None:
+    input_path = _write_input(
+        tmp_path,
+        "input.restart_solver_state",
+        """
+  LFREEB = F
+  NFP = 1
+  MPOL = 5
+  NTOR = 0
+  NS = 13
+  NITER = 100
+  FTOL = 1e-14
+  NS_ARRAY = 5 9 13
+  NITER_ARRAY = 10 20 40
+  FTOL_ARRAY = 1e-14 1e-14 1e-14
+  PHIEDGE = 1.0
+  RBC(0,0) = 1.0
+  ZBS(1,0) = 0.1
+""",
+    )
+    restart_solver_state = {"time_step": 0.2, "iter_offset": 9}
+    calls = []
+
+    def fake_solver(state, static, **kwargs):
+        calls.append(
+            {
+                "ns": int(static.cfg.ns),
+                "max_iter": int(kwargs["max_iter"]),
+                "resume_state": kwargs.get("resume_state"),
+            }
+        )
+        return _result(state, max_iter=int(kwargs["max_iter"]), fsq=1.0e-16, converged=True)
+
+    monkeypatch.setenv("VMEC_JAX_DISABLE_JIT_INIT", "1")
+    _patch_lightweight_driver_core(monkeypatch)
+    monkeypatch.setattr(driver, "solve_fixed_boundary_residual_iter", fake_solver)
+    monkeypatch.setattr(solve_module, "solve_fixed_boundary_residual_iter", fake_solver)
+
+    run = run_fixed_boundary(
+        input_path,
+        solver="vmec2000_iter",
+        solver_mode="parity",
+        max_iter=5,
+        restart_solver_state=restart_solver_state,
+        verbose=False,
+    )
+
+    assert calls == [{"ns": 13, "max_iter": 5, "resume_state": restart_solver_state}]
+    assert np.asarray(run.result.diagnostics["multigrid_ns_stages"]).tolist() == [13]
+    assert run.result.diagnostics["multigrid_user_provided"] is False
+
+
+def test_ns_override_disables_input_multigrid_stages(monkeypatch, tmp_path) -> None:
+    input_path = _write_input(
+        tmp_path,
+        "input.ns_override",
+        """
+  LFREEB = F
+  NFP = 1
+  MPOL = 5
+  NTOR = 0
+  NS = 13
+  NITER = 100
+  FTOL = 1e-14
+  NS_ARRAY = 5 9 13
+  PHIEDGE = 1.0
+  RBC(0,0) = 1.0
+  ZBS(1,0) = 0.1
+""",
+    )
+    calls = []
+
+    def fake_solver(state, static, **kwargs):
+        calls.append({"ns": int(static.cfg.ns), "max_iter": int(kwargs["max_iter"])})
+        return _result(state, max_iter=int(kwargs["max_iter"]), fsq=1.0e-16, converged=True)
+
+    monkeypatch.setenv("VMEC_JAX_DISABLE_JIT_INIT", "1")
+    _patch_lightweight_driver_core(monkeypatch)
+    monkeypatch.setattr(driver, "solve_fixed_boundary_residual_iter", fake_solver)
+    monkeypatch.setattr(solve_module, "solve_fixed_boundary_residual_iter", fake_solver)
+
+    run = run_fixed_boundary(
+        input_path,
+        solver="vmec2000_iter",
+        solver_mode="parity",
+        max_iter=4,
+        ns_override=7,
+        verbose=False,
+    )
+
+    assert calls == [{"ns": 7, "max_iter": 4}]
+    assert run.cfg.ns == 7
+    assert run.static.cfg.ns == 7
+    assert np.asarray(run.result.diagnostics["multigrid_ns_stages"]).tolist() == [7]
+
+
+def test_free_boundary_input_passes_prepared_mgrid_to_static(monkeypatch, tmp_path) -> None:
+    input_path = _write_input(
+        tmp_path,
+        "input.free_dispatch",
+        """
+  LFREEB = T
+  MGRID_FILE = 'mgrid_test.nc'
+  NFP = 1
+  MPOL = 2
+  NTOR = 0
+  NS = 5
+  PHIEDGE = 1.0
+  RBC(0,0) = 1.0
+  ZBS(1,0) = 0.1
+""",
+    )
+    metadata = driver.MGridMetadata(
+        path="mgrid_test.nc",
+        ir=2,
+        jz=3,
+        kp=4,
+        nfp=1,
+        nextcur=1,
+        rmin=0.0,
+        rmax=1.0,
+        zmin=-1.0,
+        zmax=1.0,
+        mgrid_mode="R",
+        coil_groups=("coil",),
+        raw_coil_cur=(2.0,),
+    )
+    captured = {}
+
+    def fake_build_static(cfg, **kwargs):
+        captured["build_static"] = {"cfg_lfreeb": bool(cfg.lfreeb), **kwargs}
+        return SimpleNamespace(
+            cfg=cfg,
+            modes=SimpleNamespace(m=np.asarray([0]), n=np.asarray([0]), K=1),
+            grid=SimpleNamespace(theta=np.asarray([0.0]), zeta=np.asarray([0.0]), ntheta=1, nzeta=1),
+            s=np.linspace(0.0, 1.0, int(cfg.ns)),
+            trig_vmec=None,
+        )
+
+    monkeypatch.setenv("VMEC_JAX_DISABLE_JIT_INIT", "1")
+    monkeypatch.setattr(driver, "validate_free_boundary_config", lambda cfg, *, strict: captured.setdefault("strict", strict))
+    monkeypatch.setattr(driver, "prepare_mgrid_for_config", lambda *_args, **_kwargs: driver.PreparedMGrid(metadata, (7.0,)))
+    monkeypatch.setattr(driver, "build_static", fake_build_static)
+    monkeypatch.setattr(driver, "boundary_from_indata", lambda *args, **kwargs: object())
+    monkeypatch.setattr(driver, "initial_guess_from_boundary", lambda static, *_args, **_kwargs: _fake_state(static.cfg.ns))
+    monkeypatch.setattr(
+        driver,
+        "flux_profiles_from_indata",
+        lambda _indata, s, *, signgs: FluxProfiles(
+            phipf=np.ones_like(np.asarray(s, dtype=float)),
+            chipf=np.zeros_like(np.asarray(s, dtype=float)),
+            phips=np.ones_like(np.asarray(s, dtype=float)),
+            signgs=int(signgs),
+            lamscale=np.asarray(1.0),
+        ),
+    )
+    monkeypatch.setattr(driver, "eval_profiles", lambda _indata, s: {"pressure": np.zeros_like(np.asarray(s))})
+
+    run = run_fixed_boundary(input_path, use_initial_guess=True, verbose=False)
+
+    assert run.cfg.lfreeb is True
+    assert captured["strict"] is True
+    assert captured["build_static"]["cfg_lfreeb"] is True
+    assert captured["build_static"]["mgrid_metadata"] is metadata
+    assert captured["build_static"]["free_boundary_extcur"] == (7.0,)
+
+
 def test_solver_device_cpu_reroute_annotates_result_diagnostics(monkeypatch) -> None:
     calls = []
 

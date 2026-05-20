@@ -504,6 +504,25 @@ def test_dense_transpose_lstsq_host_matches_augmented_system_with_damping():
     np.testing.assert_allclose(lam, expected, rtol=1.0e-12, atol=1.0e-12)
 
 
+def test_pack_named_residual_parts_applies_projector_per_block():
+    import vmec_jax.implicit as implicit
+    from vmec_jax._compat import jnp
+
+    packed = implicit._pack_named_residual_parts(
+        (
+            ("r", jnp.asarray([[1.0, 2.0], [3.0, 4.0]])),
+            ("z", jnp.asarray([10.0, 20.0, 30.0])),
+            ("l", jnp.asarray([[100.0], [200.0]])),
+        ),
+        projector={
+            "r": jnp.asarray([3, 1]),
+            "l": jnp.asarray([0]),
+        },
+    )
+
+    np.testing.assert_allclose(np.asarray(packed), [4.0, 2.0, 10.0, 20.0, 30.0, 100.0])
+
+
 def test_linear_map_jacobian_columns_chunks_exactly_and_rejects_bad_chunk():
     pytest.importorskip("jax")
 

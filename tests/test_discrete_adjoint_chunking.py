@@ -613,6 +613,42 @@ def test_jvp_columns_chunks_env_before_dynamic_basepoint_runner(monkeypatch):
     assert calls == [(2, 3), (2, 3), (1, 3)]
 
 
+def test_jvp_columns_auto_chunk_falls_back_when_env_override_invalid(monkeypatch):
+    monkeypatch.delenv("VMEC_JAX_DYNAMIC_REPLAY_MODE", raising=False)
+    monkeypatch.setenv("VMEC_JAX_REPLAY_COLUMN_CHUNK", "not-an-int")
+    monkeypatch.setenv("VMEC_JAX_REPLAY_COLUMN_TARGET_MB", "0.000001")
+    calls = []
+
+    def fake_runner(*, static, stacked, stacked_base_carries, static_flags):
+        def run(carry_tangents0, stacked_base_carries_in, stacked_traces_in):
+            calls.append(np.asarray(carry_tangents0[0]).shape)
+            assert stacked_base_carries_in is stacked_base_carries
+            assert stacked_traces_in is stacked
+            return carry_tangents0
+
+        return run
+
+    monkeypatch.setattr(da, "_checkpoint_tape_dynamic_basepoint_scan_runner", fake_runner)
+    tape = SimpleNamespace(
+        step_traces=(),
+        dynamic_initial_carry=(np.zeros(128, dtype=np.uint8),),
+        dynamic_base_carries_stacked=_fake_carry_stacked(width=128),
+        stacked_step_traces={"active": np.asarray([True])},
+        step_trace_static_flags={"precond_jmax": 1},
+    )
+    tangents = np.arange(384, dtype=float).reshape(3, 128)
+
+    out = da.checkpoint_tape_state_jvp_columns(
+        tape=tape,
+        static="static",
+        initial_tangents=tangents,
+        rebuild_preconditioner=True,
+    )
+
+    np.testing.assert_allclose(np.asarray(out), tangents)
+    assert calls == [(1, 128), (1, 128), (1, 128)]
+
+
 def test_jvp_columns_batches_supported_segments_across_restart(monkeypatch):
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", "1")
     calls = []

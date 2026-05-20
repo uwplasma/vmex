@@ -487,3 +487,43 @@ def test_wout_from_fixed_boundary_run_include_fsq_false_restores_existing_fast_e
     assert captured["fsqt"] is None
     assert captured["converged"] is None
     assert os.environ["VMEC_JAX_WOUT_FAST_BCOVAR"] == "original"
+
+
+def test_wout_from_fixed_boundary_run_uses_complete_result_histories_without_recompute(monkeypatch, tmp_path):
+    import vmec_jax.wout as wout_module
+
+    captured = {}
+
+    def _fake_wout_minimal_from_fixed_boundary(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(path=kwargs["path"], marker="packed")
+
+    monkeypatch.setattr(wout_module, "wout_minimal_from_fixed_boundary", _fake_wout_minimal_from_fixed_boundary)
+    monkeypatch.setattr(driver, "residual_scalars_from_state", lambda **_kwargs: pytest.fail("unexpected recompute"))
+
+    result = SimpleNamespace(
+        diagnostics={"converged": False},
+        fsqr2_history=np.asarray([10.0, 1.0]),
+        fsqz2_history=np.asarray([20.0, 2.0]),
+        fsql2_history=np.asarray([30.0, 3.0]),
+    )
+    run = driver.FixedBoundaryRun(
+        cfg=object(),
+        indata=object(),
+        static=object(),
+        state=object(),
+        result=result,
+        flux=None,
+        profiles={},
+        signgs=1,
+    )
+
+    out = driver.wout_from_fixed_boundary_run(run, include_fsq=True, path=tmp_path / "wout_hist.nc")
+
+    assert out.marker == "packed"
+    assert captured["fsqr"] == 1.0
+    assert captured["fsqz"] == 2.0
+    assert captured["fsql"] == 3.0
+    assert captured["converged"] is False
+    np.testing.assert_allclose(captured["fsqt"][:2], [30.0, 3.0])
+    np.testing.assert_allclose(captured["fsqt"][2:], np.zeros(98))

@@ -211,6 +211,28 @@ def test_configure_compilation_cache_gpu_defaults_and_bad_numeric_env(monkeypatc
     assert not any(key == "jax_explain_cache_misses" for key, _value in calls)
 
 
+def test_configure_compilation_cache_cpu_default_disables_extra_xla_caches(monkeypatch) -> None:
+    calls = []
+
+    class _Config:
+        def update(self, key, value):
+            calls.append((key, value))
+
+    class _Jax:
+        config = _Config()
+
+    monkeypatch.delenv("VMEC_JAX_PERSISTENT_CACHE_XLA_CACHES", raising=False)
+    monkeypatch.delenv("JAX_PLATFORM_NAME", raising=False)
+    monkeypatch.delenv("JAX_PLATFORMS", raising=False)
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+
+    compat._configure_compilation_cache(_Jax(), "/tmp/cache")
+
+    assert ("jax_enable_compilation_cache", True) in calls
+    assert ("jax_compilation_cache_dir", "/tmp/cache") in calls
+    assert not any(key == "jax_persistent_cache_enable_xla_caches" for key, _value in calls)
+
+
 def test_try_import_jax_falls_back_when_import_is_mocked(monkeypatch) -> None:
     real_import = builtins.__import__
 

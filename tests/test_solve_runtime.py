@@ -36,6 +36,33 @@ def test_scan_chunk_settings_printing_uses_screen_budget(monkeypatch):
     assert cap_to_remaining is False
 
 
+def test_scan_chunk_settings_explicit_env_wins_and_cpu_quiet_uses_full_budget(monkeypatch):
+    monkeypatch.setenv("VMEC_JAX_SCAN_CHUNK_SIZE", "3")
+
+    chunk_size, cap_to_remaining = runtime._scan_chunk_settings(
+        max_iter_scan=100,
+        nstep_screen=7,
+        need_print=True,
+        lthreed=False,
+        backend_name="cpu",
+    )
+
+    assert chunk_size == 3
+    assert cap_to_remaining is False
+
+    monkeypatch.delenv("VMEC_JAX_SCAN_CHUNK_SIZE")
+    chunk_size, cap_to_remaining = runtime._scan_chunk_settings(
+        max_iter_scan=100,
+        nstep_screen=7,
+        need_print=False,
+        lthreed=False,
+        backend_name="cpu",
+    )
+
+    assert chunk_size == 100
+    assert cap_to_remaining is True
+
+
 @pytest.mark.parametrize(
     ("scan_core_env", "scan_minimal", "fsq_total_target", "expected"),
     [
@@ -76,6 +103,27 @@ def test_scan_fallback_policy_false_override_and_parse_defaults():
     assert policy.accept_frac == 0.0
     assert policy.fsq_factor == 50.0
     assert policy.improve == 0.9
+
+
+def test_scan_fallback_policy_accelerator_default_and_upper_clamps():
+    policy = runtime._scan_fallback_policy(
+        backend_name="gpu",
+        enabled_env=None,
+        iters_env="4",
+        badjac_limit_env="-1",
+        fsq_abs_env="-3.0",
+        accept_frac_env="1.5",
+        fsq_factor_env="0.25",
+        improve_env="0.5",
+    )
+
+    assert policy.enabled is False
+    assert policy.iters == 4
+    assert policy.badjac_limit == 0
+    assert policy.fsq_abs == 0.0
+    assert policy.accept_frac == 1.0
+    assert policy.fsq_factor == 1.0
+    assert policy.improve == 0.5
 
 
 def test_residual_convergence_flags_use_exact_thresholds_and_total_target():

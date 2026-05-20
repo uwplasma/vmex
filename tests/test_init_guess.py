@@ -284,3 +284,42 @@ def test_initial_guess_can_freeze_zero_axis_and_extract_override():
     override = extract_axis_override_from_state(state, static)
     np.testing.assert_allclose(np.asarray(override["raxis_cc"]), [0.0, 0.0])
     assert set(override) == {"raxis_cc", "raxis_cs", "zaxis_cc", "zaxis_cs"}
+
+
+def test_partial_axis_override_defaults_missing_channels_to_zero():
+    cfg = VMECConfig(mpol=2, ntor=1, ns=3, nfp=1, lasym=True, lconm1=False, lthreed=True, ntheta=6, nzeta=4)
+    static = build_static(cfg)
+    K = static.modes.K
+    k00 = _k_index(static.modes, 0, 0)
+    k01 = _k_index(static.modes, 0, 1)
+    Rcos = np.zeros((K,), dtype=float)
+    Rsin = np.zeros((K,), dtype=float)
+    Zcos = np.zeros((K,), dtype=float)
+    Zsin = np.zeros((K,), dtype=float)
+    Rcos[k00] = 8.0
+    Rsin[k01] = 3.0
+    Zcos[k01] = -4.0
+    Zsin[k01] = 5.0
+    boundary = BoundaryCoeffs(R_cos=Rcos, R_sin=Rsin, Z_cos=Zcos, Z_sin=Zsin)
+    indata = InData(
+        scalars={
+            "RAXIS_CC": [99.0, 99.0],
+            "RAXIS_CS": [99.0, 99.0],
+            "ZAXIS_CC": [99.0, 99.0],
+            "ZAXIS_CS": [99.0, 99.0],
+        },
+        indexed={},
+    )
+
+    state = initial_guess_from_boundary(
+        static,
+        boundary,
+        indata,
+        axis_override={"raxis_cc": np.asarray([6.0, 0.25])},
+    )
+
+    np.testing.assert_allclose(np.asarray(state.Rcos)[:, k00], [6.0, 7.0, 8.0], atol=1e-12)
+    assert np.asarray(state.Rcos)[0, k01] == pytest.approx(0.25, abs=1e-12)
+    assert np.asarray(state.Rsin)[0, k01] == pytest.approx(0.0, abs=1e-12)
+    assert np.asarray(state.Zcos)[0, k01] == pytest.approx(0.0, abs=1e-12)
+    assert np.asarray(state.Zsin)[0, k01] == pytest.approx(0.0, abs=1e-12)

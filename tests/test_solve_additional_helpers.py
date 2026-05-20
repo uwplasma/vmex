@@ -42,6 +42,7 @@ from vmec_jax.solve import (
     _radial_tridi_smooth_dirichlet,
     _replace_mode_slice,
     _replace_mode_slice_np,
+    _residual_iter_history_record,
     _safe_dt_from_force_blocks,
     _scale_m1_precond_rhs_from_mats,
     _resolve_cg_tol,
@@ -1013,6 +1014,91 @@ def test_host_restart_decision_covers_stage_growth_progress_and_vmec_paths():
     )
     assert vmecpp_progress.vmecpp_bad_progress
     assert vmecpp_progress.pre_restart_reason == "bad_progress_vmecpp"
+
+
+def test_residual_iter_history_record_packs_restart_row_with_free_boundary_cadence():
+    rec = _residual_iter_history_record(
+        step=0,
+        dt_eff=0,
+        update_rms=np.asarray(0.25),
+        w_curr=6,
+        w_try=np.nan,
+        w_try_ratio=np.nan,
+        restart_path="pre_restart_trigger",
+        step_status="restart_bad_progress",
+        restart_reason="bad_progress",
+        pre_restart_reason="bad_progress",
+        time_step=0.125,
+        res0=1.5,
+        res1=2.5,
+        fsq_prev=3.5,
+        bad_growth_streak=4,
+        iter1=7,
+        iter2=8,
+        fsqr=1.0,
+        fsqz=2.0,
+        fsql=3.0,
+        free_boundary_enabled=True,
+        freeb_ivac=2,
+        freeb_ivacskip=0,
+    )
+
+    assert rec.step == pytest.approx(0.0)
+    assert rec.dt_eff == pytest.approx(0.0)
+    assert rec.update_rms == pytest.approx(0.25)
+    assert rec.w_curr == pytest.approx(6.0)
+    assert np.isnan(rec.w_try)
+    assert np.isnan(rec.w_try_ratio)
+    assert rec.restart_path == "pre_restart_trigger"
+    assert rec.step_status == "restart_bad_progress"
+    assert rec.restart_reason == "bad_progress"
+    assert rec.pre_restart_reason == "bad_progress"
+    assert rec.time_step == pytest.approx(0.125)
+    assert rec.res0 == pytest.approx(1.5)
+    assert rec.res1 == pytest.approx(2.5)
+    assert rec.fsq_prev == pytest.approx(3.5)
+    assert rec.bad_growth_streak == 4
+    assert rec.iter1 == 7
+    assert rec.iter2 == 8
+    assert rec.grad_rms == pytest.approx(np.sqrt(6.0))
+    assert rec.freeb_ivac == 2
+    assert rec.freeb_ivacskip == 0
+    assert rec.freeb_full_update == 1
+
+
+def test_residual_iter_history_record_clamps_negative_total_and_omits_free_boundary():
+    rec = _residual_iter_history_record(
+        step=0.5,
+        dt_eff=0.25,
+        update_rms=0.125,
+        w_curr=-1.0,
+        w_try=2.0,
+        w_try_ratio=3.0,
+        restart_path="non_strict",
+        step_status="momentum",
+        restart_reason="none",
+        pre_restart_reason="none",
+        time_step=4.0,
+        res0=5.0,
+        res1=6.0,
+        fsq_prev=7.0,
+        bad_growth_streak=8,
+        iter1=9,
+        iter2=10,
+        fsqr=-10.0,
+        fsqz=1.0,
+        fsql=2.0,
+        free_boundary_enabled=False,
+        freeb_ivac=-1,
+        freeb_ivacskip=0,
+    )
+
+    assert rec.step == pytest.approx(0.5)
+    assert rec.dt_eff == pytest.approx(0.25)
+    assert rec.grad_rms == pytest.approx(0.0)
+    assert rec.freeb_ivac is None
+    assert rec.freeb_ivacskip is None
+    assert rec.freeb_full_update is None
 
 
 def test_first_step_diagnostics_synthetic_default_and_axisymmetric_paths(monkeypatch):

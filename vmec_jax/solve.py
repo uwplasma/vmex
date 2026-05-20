@@ -66,6 +66,30 @@ class _HostRestartDecision(NamedTuple):
     vmecpp_bad_progress: bool
 
 
+class _ResidualIterHistoryRecord(NamedTuple):
+    step: float
+    dt_eff: float
+    update_rms: Any
+    w_curr: float
+    w_try: float
+    w_try_ratio: float
+    restart_path: str
+    step_status: str
+    restart_reason: str
+    pre_restart_reason: str
+    time_step: float
+    res0: float
+    res1: float
+    fsq_prev: float
+    bad_growth_streak: int
+    iter1: int
+    iter2: int
+    grad_rms: float
+    freeb_ivac: int | None
+    freeb_ivacskip: int | None
+    freeb_full_update: int | None
+
+
 @dataclass(frozen=True)
 class _Vmec2000ScanOptions:
     scan_print_env: str
@@ -1687,6 +1711,67 @@ def _host_restart_decision(
         huge_initial_forces=bool(huge_initial_forces),
         store_checkpoint=bool(store_checkpoint),
         vmecpp_bad_progress=bool(vmecpp_bad_progress),
+    )
+
+
+def _residual_iter_history_record(
+    *,
+    step: float,
+    dt_eff: float,
+    update_rms: Any,
+    w_curr: float,
+    w_try: float,
+    w_try_ratio: float,
+    restart_path: str,
+    step_status: str,
+    restart_reason: str,
+    pre_restart_reason: str,
+    time_step: float,
+    res0: float,
+    res1: float,
+    fsq_prev: float,
+    bad_growth_streak: int,
+    iter1: int,
+    iter2: int,
+    fsqr: float,
+    fsqz: float,
+    fsql: float,
+    free_boundary_enabled: bool,
+    freeb_ivac: int = 0,
+    freeb_ivacskip: int = 0,
+) -> _ResidualIterHistoryRecord:
+    """Pack one host residual-iteration history row without mutating lists."""
+
+    freeb_ivac_out = None
+    freeb_ivacskip_out = None
+    freeb_full_update = None
+    if bool(free_boundary_enabled):
+        freeb_ivac_out = int(freeb_ivac)
+        freeb_ivacskip_out = int(freeb_ivacskip)
+        freeb_full_update = 1 if (freeb_ivac_out >= 0 and freeb_ivacskip_out == 0) else 0
+
+    return _ResidualIterHistoryRecord(
+        step=float(step),
+        dt_eff=float(dt_eff),
+        update_rms=update_rms,
+        w_curr=float(w_curr),
+        w_try=float(w_try),
+        w_try_ratio=float(w_try_ratio),
+        restart_path=str(restart_path),
+        step_status=str(step_status),
+        restart_reason=str(restart_reason),
+        pre_restart_reason=str(pre_restart_reason),
+        time_step=float(time_step),
+        res0=float(res0),
+        res1=float(res1),
+        fsq_prev=float(fsq_prev),
+        bad_growth_streak=int(bad_growth_streak),
+        iter1=int(iter1),
+        iter2=int(iter2),
+        grad_rms=float(np.sqrt(max(float(fsqr) + float(fsqz) + float(fsql), 0.0))),
+        freeb_ivac=freeb_ivac_out,
+        freeb_ivacskip=freeb_ivacskip_out,
+        freeb_full_update=freeb_full_update,
     )
 
 
@@ -12980,30 +13065,53 @@ def solve_fixed_boundary_residual_iter(
                     # Keep per-iteration history channels length-aligned with
                     # fsqr/fsqz/fsql when convergence happens before the update
                     # block. VMEC's table still reports DELT on this row.
-                    step_history.append(0.0)
-                    dt_eff_history.append(0.0)
-                    update_rms_history.append(0.0)
-                    w_curr_history.append(float(fsqr_f + fsqz_f + fsql_f))
-                    w_try_history.append(float("nan"))
-                    w_try_ratio_history.append(float("nan"))
-                    restart_path_history.append("converged")
-                    step_status_history.append("converged")
-                    restart_reason_history.append("none")
-                    pre_restart_reason_history.append("none")
-                    time_step_history.append(float(time_step))
-                    res0_history.append(float(res0))
-                    res1_history.append(float(res1))
-                    fsq_prev_history.append(float(fsq_prev))
-                    bad_growth_streak_history.append(int(bad_growth_streak))
-                    iter1_history.append(int(iter1))
-                    iter2_history.append(int(iter2))
+                    rec = _residual_iter_history_record(
+                        step=0.0,
+                        dt_eff=0.0,
+                        update_rms=0.0,
+                        w_curr=fsqr_f + fsqz_f + fsql_f,
+                        w_try=float("nan"),
+                        w_try_ratio=float("nan"),
+                        restart_path="converged",
+                        step_status="converged",
+                        restart_reason="none",
+                        pre_restart_reason="none",
+                        time_step=time_step,
+                        res0=res0,
+                        res1=res1,
+                        fsq_prev=fsq_prev,
+                        bad_growth_streak=bad_growth_streak,
+                        iter1=iter1,
+                        iter2=iter2,
+                        fsqr=fsqr_f,
+                        fsqz=fsqz_f,
+                        fsql=fsql_f,
+                        free_boundary_enabled=free_boundary_enabled,
+                        freeb_ivac=freeb_ivac,
+                        freeb_ivacskip=freeb_ivacskip,
+                    )
+                    step_history.append(rec.step)
+                    dt_eff_history.append(rec.dt_eff)
+                    update_rms_history.append(rec.update_rms)
+                    w_curr_history.append(rec.w_curr)
+                    w_try_history.append(rec.w_try)
+                    w_try_ratio_history.append(rec.w_try_ratio)
+                    restart_path_history.append(rec.restart_path)
+                    step_status_history.append(rec.step_status)
+                    restart_reason_history.append(rec.restart_reason)
+                    pre_restart_reason_history.append(rec.pre_restart_reason)
+                    time_step_history.append(rec.time_step)
+                    res0_history.append(rec.res0)
+                    res1_history.append(rec.res1)
+                    fsq_prev_history.append(rec.fsq_prev)
+                    bad_growth_streak_history.append(rec.bad_growth_streak)
+                    iter1_history.append(rec.iter1)
+                    iter2_history.append(rec.iter2)
                     if free_boundary_enabled:
-                        freeb_ivac_history.append(int(freeb_ivac))
-                        freeb_ivacskip_history.append(int(freeb_ivacskip))
-                        freeb_full_update_history.append(
-                            1 if (int(freeb_ivac) >= 0 and int(freeb_ivacskip) == 0) else 0
-                        )
-                    grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
+                        freeb_ivac_history.append(rec.freeb_ivac)
+                        freeb_ivacskip_history.append(rec.freeb_ivacskip)
+                        freeb_full_update_history.append(rec.freeb_full_update)
+                    grad_rms_history.append(rec.grad_rms)
                 if verbose and not (bool(vmec2000_control) and bool(verbose_vmec2000_table)):
                     print(
                         f"[solve_fixed_boundary_residual_iter] converged: "
@@ -13329,32 +13437,53 @@ def solve_fixed_boundary_residual_iter(
                     cache_prec_lam_debug = None
                     force_bcovar_update = True
                     if track_history:
-                        step_history.append(0.0)
-                        dt_eff_history.append(0.0)
-                        update_rms_history.append(0.0)
-                        w_curr_history.append(float(fsqr_f + fsqz_f + fsql_f))
-                        w_try_history.append(float("nan"))
-                        w_try_ratio_history.append(float("nan"))
-                        restart_path_history.append(
-                            "vmec2000_bad_jacobian" if irst_tc == 2 else "vmec2000_time_control"
+                        rec = _residual_iter_history_record(
+                            step=0.0,
+                            dt_eff=0.0,
+                            update_rms=0.0,
+                            w_curr=fsqr_f + fsqz_f + fsql_f,
+                            w_try=float("nan"),
+                            w_try_ratio=float("nan"),
+                            restart_path="vmec2000_bad_jacobian" if irst_tc == 2 else "vmec2000_time_control",
+                            step_status=step_status,
+                            restart_reason=restart_reason,
+                            pre_restart_reason=pre_restart_reason,
+                            time_step=time_step,
+                            res0=res0,
+                            res1=res1,
+                            fsq_prev=fsq_prev,
+                            bad_growth_streak=bad_growth_streak,
+                            iter1=iter1,
+                            iter2=iter2,
+                            fsqr=fsqr_f,
+                            fsqz=fsqz_f,
+                            fsql=fsql_f,
+                            free_boundary_enabled=free_boundary_enabled,
+                            freeb_ivac=freeb_ivac,
+                            freeb_ivacskip=freeb_ivacskip,
                         )
-                        step_status_history.append(step_status)
-                        restart_reason_history.append(restart_reason)
-                        pre_restart_reason_history.append(pre_restart_reason)
-                        time_step_history.append(float(time_step))
-                        res0_history.append(float(res0))
-                        res1_history.append(float(res1))
-                        fsq_prev_history.append(float(fsq_prev))
-                        bad_growth_streak_history.append(int(bad_growth_streak))
-                        iter1_history.append(int(iter1))
-                        iter2_history.append(int(iter2))
+                        step_history.append(rec.step)
+                        dt_eff_history.append(rec.dt_eff)
+                        update_rms_history.append(rec.update_rms)
+                        w_curr_history.append(rec.w_curr)
+                        w_try_history.append(rec.w_try)
+                        w_try_ratio_history.append(rec.w_try_ratio)
+                        restart_path_history.append(rec.restart_path)
+                        step_status_history.append(rec.step_status)
+                        restart_reason_history.append(rec.restart_reason)
+                        pre_restart_reason_history.append(rec.pre_restart_reason)
+                        time_step_history.append(rec.time_step)
+                        res0_history.append(rec.res0)
+                        res1_history.append(rec.res1)
+                        fsq_prev_history.append(rec.fsq_prev)
+                        bad_growth_streak_history.append(rec.bad_growth_streak)
+                        iter1_history.append(rec.iter1)
+                        iter2_history.append(rec.iter2)
                         if free_boundary_enabled:
-                            freeb_ivac_history.append(int(freeb_ivac))
-                            freeb_ivacskip_history.append(int(freeb_ivacskip))
-                            freeb_full_update_history.append(
-                                1 if (int(freeb_ivac) >= 0 and int(freeb_ivacskip) == 0) else 0
-                            )
-                        grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
+                            freeb_ivac_history.append(rec.freeb_ivac)
+                            freeb_ivacskip_history.append(rec.freeb_ivacskip)
+                            freeb_full_update_history.append(rec.freeb_full_update)
+                        grad_rms_history.append(rec.grad_rms)
                     _pop_iteration_histories()
                     prev_rz_fsq = prev_rz_fsq_before
                     skip_time_control = True
@@ -13474,30 +13603,53 @@ def solve_fixed_boundary_residual_iter(
                     cache_prec_lam_debug = None
                     force_bcovar_update = True
                 if track_history:
-                    step_history.append(0.0)
-                    dt_eff_history.append(0.0)
-                    update_rms_history.append(0.0)
-                    w_curr_history.append(float(fsqr_f + fsqz_f + fsql_f))
-                    w_try_history.append(float("nan"))
-                    w_try_ratio_history.append(float("nan"))
-                    restart_path_history.append("pre_restart_trigger")
-                    step_status_history.append(step_status)
-                    restart_reason_history.append(pre_restart_reason)
-                    pre_restart_reason_history.append(pre_restart_reason)
-                    time_step_history.append(time_step_iter)
-                    res0_history.append(float(res0))
-                    res1_history.append(float(res1))
-                    fsq_prev_history.append(float(fsq_prev))
-                    bad_growth_streak_history.append(int(bad_growth_streak))
-                    iter1_history.append(int(iter1))
-                    iter2_history.append(int(iter2))
+                    rec = _residual_iter_history_record(
+                        step=0.0,
+                        dt_eff=0.0,
+                        update_rms=0.0,
+                        w_curr=fsqr_f + fsqz_f + fsql_f,
+                        w_try=float("nan"),
+                        w_try_ratio=float("nan"),
+                        restart_path="pre_restart_trigger",
+                        step_status=step_status,
+                        restart_reason=pre_restart_reason,
+                        pre_restart_reason=pre_restart_reason,
+                        time_step=time_step_iter,
+                        res0=res0,
+                        res1=res1,
+                        fsq_prev=fsq_prev,
+                        bad_growth_streak=bad_growth_streak,
+                        iter1=iter1,
+                        iter2=iter2,
+                        fsqr=fsqr_f,
+                        fsqz=fsqz_f,
+                        fsql=fsql_f,
+                        free_boundary_enabled=free_boundary_enabled,
+                        freeb_ivac=freeb_ivac,
+                        freeb_ivacskip=freeb_ivacskip,
+                    )
+                    step_history.append(rec.step)
+                    dt_eff_history.append(rec.dt_eff)
+                    update_rms_history.append(rec.update_rms)
+                    w_curr_history.append(rec.w_curr)
+                    w_try_history.append(rec.w_try)
+                    w_try_ratio_history.append(rec.w_try_ratio)
+                    restart_path_history.append(rec.restart_path)
+                    step_status_history.append(rec.step_status)
+                    restart_reason_history.append(rec.restart_reason)
+                    pre_restart_reason_history.append(rec.pre_restart_reason)
+                    time_step_history.append(rec.time_step)
+                    res0_history.append(rec.res0)
+                    res1_history.append(rec.res1)
+                    fsq_prev_history.append(rec.fsq_prev)
+                    bad_growth_streak_history.append(rec.bad_growth_streak)
+                    iter1_history.append(rec.iter1)
+                    iter2_history.append(rec.iter2)
                     if free_boundary_enabled:
-                        freeb_ivac_history.append(int(freeb_ivac))
-                        freeb_ivacskip_history.append(int(freeb_ivacskip))
-                        freeb_full_update_history.append(
-                            1 if (int(freeb_ivac) >= 0 and int(freeb_ivacskip) == 0) else 0
-                        )
-                    grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
+                        freeb_ivac_history.append(rec.freeb_ivac)
+                        freeb_ivacskip_history.append(rec.freeb_ivacskip)
+                        freeb_full_update_history.append(rec.freeb_full_update)
+                    grad_rms_history.append(rec.grad_rms)
                 if verbose:
                     if bool(vmec2000_control) and bool(verbose_vmec2000_table):
                         # VMEC does not print rejected restart steps.
