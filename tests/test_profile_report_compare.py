@@ -105,6 +105,26 @@ def test_callback_report_summary_extracts_bottleneck_metrics() -> None:
     assert summary["top_profile"][0]["name"] == "exact_solve_with_tape_total"
 
 
+def test_profile_summary_extracts_linear_operator_transpose_projection() -> None:
+    report = _callback_report(
+        total_wall_time_s=10.0,
+        samples=2,
+        rss_peak_mib=256,
+        replay_wall_time_s=0.2,
+        accepted_replays=2,
+        solve_count=3,
+        cache_entry_growth=4,
+        solver_device="cpu",
+    )
+    del report["profile"]["gradient_initial_vjp"]
+    report["profile"]["linear_operator_initial_transpose"] = {"count": 2, "wall_time_s": 1.4}
+
+    summary = compare_tool.summarize_payload(report, label="cpu")
+
+    assert summary["metrics"]["initial_projection_s"] == 1.4
+    assert summary["exact_optimizer_patch_target"]["name"] == "linear_operator_initial_transpose"
+
+
 def test_profile_summary_prefers_total_containers_over_leaf_timers() -> None:
     report = _callback_report(
         total_wall_time_s=20.0,

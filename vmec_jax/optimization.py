@@ -2740,8 +2740,8 @@ class FixedBoundaryExactOptimizer:
 
         t_setup = time.perf_counter()
         _, initial_linear = jax.linearize(_initial_state_packed, params)
+        initial_transpose = jax.linear_transpose(initial_linear, params)
         residuals, residual_linear = jax.linearize(_residuals_from_packed, packed_final)
-        _, initial_vjp = jax.vjp(_initial_state_packed, params)
         state_cotangent_from_packed = getattr(self._residuals_fn, "_state_cotangent_from_packed", None)
         residual_cotangent_helper = None
         if state_cotangent_from_packed is not None:
@@ -2834,9 +2834,12 @@ class FixedBoundaryExactOptimizer:
                 initial_cotangent,
             )
             initial_cotangent = _jnp.nan_to_num(initial_cotangent, nan=0.0, posinf=0.0, neginf=0.0)
-            t_initial_vjp = time.perf_counter()
-            grad = initial_vjp(_jnp.asarray(initial_cotangent, dtype=_jnp.float64))[0]
-            self._profile_add("linear_operator_initial_vjp", time.perf_counter() - t_initial_vjp)
+            t_initial_transpose = time.perf_counter()
+            # The frozen-axis initial-state map is linear for a fixed flip
+            # branch.  Reuse the transpose of the setup linearization instead
+            # of tracing a second VJP through the same initialization graph.
+            grad = initial_transpose(_jnp.asarray(initial_cotangent, dtype=_jnp.float64))[0]
+            self._profile_add("linear_operator_initial_transpose", time.perf_counter() - t_initial_transpose)
             self._profile_add("linear_operator_rmatvec", time.perf_counter() - t_rmv)
             return np.asarray(grad, dtype=float)
 

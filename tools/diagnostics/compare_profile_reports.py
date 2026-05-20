@@ -57,6 +57,7 @@ EXACT_PROFILE_METRIC_NAMES = {
         "gradient_initial_projection",
         "gradient_initial_vjp",
         "linear_operator_initial_vjp",
+        "linear_operator_initial_transpose",
     ),
     "residual_tangents_s": ("jacobian_residual_tangents",),
     "accepted_replay_dispatch_s": (
@@ -433,6 +434,7 @@ EXACT_OPTIMIZER_PATCH_TARGET_NAMES = {
     "jacobian_initial_tangents_vmap_ready",
     "gradient_initial_vjp",
     "linear_operator_initial_vjp",
+    "linear_operator_initial_transpose",
     "jacobian_residual_tangents",
     "gradient_residual_vjp",
     "exact_unpack_cache",
