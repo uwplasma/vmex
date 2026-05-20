@@ -54,6 +54,7 @@ from vmec_jax.solve import (
     _s_half_from_full_mesh_s,
     _scale_mode_slice,
     _scale_mode_slice_np,
+    _scale_velocity_blocks,
     _sm_sp_from_s_np,
     _update_state_gd,
     _should_print_vmec2000_row,
@@ -64,6 +65,7 @@ from vmec_jax.solve import (
     _vmec2000_cadence_selected,
     _zero_coeff_column,
     _zero_coeff_column_np,
+    _zero_velocity_blocks_like,
     first_step_diagnostics,
     solve_lambda_gd,
     solve_fixed_boundary_gn_vmec_residual,
@@ -1448,6 +1450,23 @@ def test_append_residual_iter_terminal_history_skips_free_boundary_and_clamps_gr
     assert histories["freeb_nestor_reused_history"] == []
     assert histories["freeb_nestor_solve_time_history"] == []
     assert histories["freeb_nestor_sample_time_history"] == []
+
+
+def test_velocity_block_helpers_preserve_shape_dtype_and_scale():
+    a = np.arange(6.0, dtype=np.float64).reshape(2, 3)
+    b = np.arange(6, dtype=np.int32).reshape(2, 3)
+
+    za, zb = _zero_velocity_blocks_like(a, b)
+    assert np.asarray(za).shape == a.shape
+    assert np.asarray(zb).shape == b.shape
+    assert np.asarray(za).dtype == a.dtype
+    assert np.asarray(zb).dtype == b.dtype
+    np.testing.assert_allclose(np.asarray(za), 0.0)
+    np.testing.assert_allclose(np.asarray(zb), 0.0)
+
+    sa, sb = _scale_velocity_blocks(0.5, a, b)
+    np.testing.assert_allclose(np.asarray(sa), 0.5 * a)
+    np.testing.assert_allclose(np.asarray(sb), 0.5 * b)
 
 
 def test_first_step_diagnostics_synthetic_default_and_axisymmetric_paths(monkeypatch):
