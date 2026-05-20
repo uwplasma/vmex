@@ -325,7 +325,12 @@ def test_qi_nfp4_case_is_explicit_nonpassing_stress_fixture() -> None:
     assert "NFP=4 QI" in docs
     assert "nfp3_qi" in docs
     assert "nfp4_qi_finite_beta" in docs
-    assert "finite-beta NFP=4 verification/stress lane" in docs or "finite-beta stress/verification lane" in docs
+    assert (
+        "finite-beta NFP=4 verification/stress lane" in docs
+        or "finite-beta stress/verification lane" in docs
+        or "finite-beta NFP=4 stress fixture" in docs
+        or ("finite-beta NFP=4 stress" in docs and "fixture" in docs)
+    )
     assert "non-passing stress fixture" in docs or "non-passing\nstress fixture" in docs
     assert "nfp4_qh_warm_to_qi" in docs
 

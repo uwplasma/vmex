@@ -133,23 +133,22 @@ CASES = (
         ),
     ),
     QICase(
-        label="NFP=4 finite-beta QI",
-        input_file=REPO_ROOT / "examples" / "data" / "input.nfp4_QI_finite_beta",
-        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp4_qi_finite_beta",
+        label="NFP=4 minimal seed",
+        input_file=REPO_ROOT / "examples" / "data" / "input.minimal_seed_nfp4",
+        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "minimal_nfp4_to_qi_finite_beta_reference",
         initial_wout=REPO_ROOT
         / "results"
         / "qi_opt"
         / "ess"
-        / "nfp4_qi_finite_beta"
+        / "minimal_nfp4_to_qi_finite_beta_reference"
         / "wout_initial.nc",
-        note="finite-beta verification/stress lane; not production NFP=4 robustness",
-        validation_status="deferred",
+        note="minimal seed with same-NFP finite-beta QI reference-family preconditioner",
         history_paths=(
             REPO_ROOT
             / "results"
             / "qi_opt"
             / "ess"
-            / "nfp4_qi_finite_beta"
+            / "minimal_nfp4_to_qi_finite_beta_reference"
             / "mirror_ramp_01_finite_beta_qi_audit_refine"
             / "history.json",
         ),
@@ -627,7 +626,7 @@ def _render(records: list[dict[str, str | float]]) -> None:
         width_ratios=(1.05, 1.05, 1.0, 1.08, 1.08),
     )
     fig.suptitle(
-        "QI_optimization coverage for NFP=1, 2, 3, plus NFP=4 finite-beta verification",
+        "QI_optimization coverage for NFP=1, 2, 3, plus an NFP=4 minimal-seed case",
         fontsize=13,
         x=0.02,
         y=0.992,

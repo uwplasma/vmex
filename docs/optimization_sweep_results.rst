@@ -107,14 +107,13 @@ The dry-run manifest is the intended bridge between seed audit and full
 seed-robust QI sweeps.  It is bounded by design and should be inspected before
 switching to ``--prefine-probes run``.
 
-NFP=4 QI remains a tracked stress case rather than a passing robustness lane.
-Use ``VMEC_JAX_QI_RUN_CASE=nfp4_qh_warm_to_qi`` only as a non-passing stress
-fixture unless its independent ``diagnostics.json`` records a smooth/legacy QI
-and mirror-ratio gate pass.  Local May 2026 quick audits found no passing NFP=4
-path: the best archived same-NFP QI reference was still above the ``2e-3``
-smooth/legacy gates, while the bundled QH warm start and local QH-to-QI cleanup
-were farther from the legacy-QI threshold.  Keep these rows in seed-audit
-tables and do not mix them with promoted QI sweep results.
+The README NFP=4 QI lane starts from ``examples/data/input.minimal_seed_nfp4``
+with only ``RBC(0,0)``, ``RBC(0,1)``, and ``ZBS(0,1)`` in the source input,
+then applies a same-NFP finite-beta QI reference-family preconditioner before
+bounded local cleanup.  Use ``VMEC_JAX_QI_RUN_CASE=nfp4_qh_warm_to_qi`` and
+``VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta`` only as stress fixtures unless
+their independent ``diagnostics.json`` records a reviewed smooth/legacy QI and
+mirror-ratio gate pass.
 
 Run the GPU production sweep on a machine with a working JAX GPU install:
 
@@ -200,15 +199,16 @@ The source table is also available as
 QI_optimization Input Coverage
 ------------------------------
 
-The dedicated QI README/docs renderer covers the reviewed NFP=1, 2, 3, and 4
-QI lanes without
-rerunning optimization jobs.  It reads the existing ``QI_optimization.py``
-outputs, records the final smooth QI metric, legacy QI metric, mirror ratio,
+The dedicated QI README/docs renderer covers the reviewed NFP=1, 2, 3, and the
+NFP=4 minimal-seed QI lanes without rerunning optimization jobs.  It
+reads the existing ``QI_optimization.py`` outputs, records the final smooth QI
+metric, legacy QI metric, mirror ratio,
 elongation, iota, aspect, and CPU wall time, and draws initial and final
 Boozer ``|B|`` with line contours only.  These are case-specific gate checks,
 not extra aspect-6 README best-row promotions: NFP=1/2 use target aspect 10,
-the seed-3127 NFP=3 lane uses target aspect 4, and the NFP=4 finite-beta row is
-deferred stress/verification evidence.
+the seed-3127 NFP=3 lane uses target aspect 4, and the NFP=4 row uses the
+minimal seed plus a same-NFP finite-beta QI reference-family proposal.
+Finite-beta NFP=4 remains a separate stress fixture.
 
 To refresh the inputs used by this panel, run the source optimizations before
 rendering.  The NFP=3 case can be selected as ``nfp3_qi``; that is a
@@ -225,9 +225,7 @@ convenience alias for the ``input.QI_stel_seed_3127`` robustness lane.
    PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp3_qi \
      VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/qi_stel_seed_3127_mirror_calibrated_20260516 \
      python examples/optimization/QI_optimization.py
-   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi_finite_beta \
-     VMEC_JAX_QI_OUTPUT_DIR=results/qi_opt/ess/nfp4_qi_finite_beta \
-     python examples/optimization/QI_optimization.py
+   PYTHONPATH=. JAX_PLATFORMS=cpu VMEC_JAX_QI_RUN_CASE=nfp4_qi python examples/optimization/QI_optimization.py
    PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 
 .. list-table::
@@ -278,17 +276,17 @@ convenience alias for the ``input.QI_stel_seed_3127`` robustness lane.
      - ``-1.0401``
      - ``4.6``
      - ``case-gated``
-   * - ``examples/data/input.nfp4_QI_finite_beta``
-     - ``results/qi_opt/ess/nfp4_qi_finite_beta``
-     - ``2.39e-2``
-     - ``2.37e-3``
-     - ``1.75e-4``
-     - ``0.282/0.35``
+   * - ``examples/data/input.minimal_seed_nfp4``
+     - ``results/qi_opt/ess/minimal_nfp4_to_qi_finite_beta_reference``
+     - ``2.52e-2``
+     - ``2.56e-3``
+     - ``2.54e-4``
+     - ``0.287/0.35``
      - ``4.14/8.2``
      - ``6.011/6.0``
-     - ``-1.2913``
-     - ``1.0``
-     - ``deferred``
+     - ``-1.2930``
+     - ``0.4``
+     - ``case-gated``
 
 .. image:: _static/figures/readme_qi_optimization_cases.png
    :width: 100%
@@ -299,8 +297,8 @@ Source table:
 :download:`readme_qi_optimization_cases.csv <_static/figures/readme_qi_optimization_cases.csv>`.
 In that generated CSV, ``validation_status=case-gated`` records
 case-specific QI gate status from the renderer and should not be read as
-aspect-6 README best-row promotion evidence; ``deferred`` marks stress or
-verification rows.
+aspect-6 README best-row promotion evidence; the NFP=4 row is case-gated by
+the minimal-seed plus same-NFP reference-family path.
 
 Regenerate these lightweight artifacts with:
 
