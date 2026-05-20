@@ -172,12 +172,16 @@ handling, including stellarator-asymmetric geometry and magnetic channels, and
 synthetic ranking consistency.  It is intentionally cheap enough for ordinary
 development.
 
-The current constrained-QI sweep artifacts document one successful bundled
-NFP=2 ``input.nfp2_QI`` lane.  ``examples/optimization/QI_optimization.py`` is
-the bounded multi-seed entry point for extending this to other inputs: set
-``RUN_CASE = "qi_stel_seed_3127"``, ``RUN_CASE = "nfp4_qh_warm_to_qi"``, or add
-a new ``QI_CASES`` entry in ``examples/optimization/qi_optimization_cases.py``
-for another VMEC deck.  The current
+The current constrained-QI sweep artifacts document reviewed NFP=1, NFP=2, and
+seed-3127 lanes, while NFP=4 remains deferred stress/validation evidence rather
+than a completed robustness claim.  ``examples/optimization/QI_optimization.py``
+is the bounded multi-seed entry point for extending this to other inputs: set
+``RUN_CASE = "nfp2_qi"``, ``RUN_CASE = "qi_stel_seed_3127"``, or add a new
+``QI_CASES`` entry in ``examples/optimization/qi_optimization_cases.py`` for
+another VMEC deck.  Use ``RUN_CASE = "nfp4_qi_finite_beta"`` or
+``RUN_CASE = "nfp4_qh_warm_to_qi"`` only as NFP=4 stress lanes until their
+independent diagnostics pass the QI, mirror, engineering, and multi-seed gates.
+The current
 ``qi_stel_seed_3127`` far-seed lane first runs a deterministic same-NFP
 reference-family boundary preconditioner, records the selected candidate as an
 accepted baseline when the independent gates pass, and then runs guarded
