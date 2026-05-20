@@ -174,17 +174,52 @@ def test_small_wout_current_scalar_and_force_balance_gate(case_name: str, wout_n
     assert np.max(np.abs(np.asarray(wout.equif, dtype=float)[1:-1])) < 0.02, case_name
 
 
-def test_finite_beta_state_scalars_match_shaped_wout_energy_gate() -> None:
+@pytest.mark.parametrize(
+    ("case_name", "data_root", "input_name", "wout_name", "wp_rtol", "volume_rtol"),
+    (
+        (
+            "finite_beta_axisym",
+            "examples",
+            "input.shaped_tokamak_pressure",
+            "wout_shaped_tokamak_pressure.nc",
+            1.0e-12,
+            5.0e-9,
+        ),
+        (
+            "finite_beta_lasym",
+            "examples_single_grid",
+            "input.basic_non_stellsym_pressure",
+            "wout_basic_non_stellsym_pressure_reference.nc",
+            5.0e-12,
+            1.0e-8,
+        ),
+    ),
+)
+def test_finite_beta_state_scalars_match_wout_energy_gate(
+    case_name: str,
+    data_root: str,
+    input_name: str,
+    wout_name: str,
+    wp_rtol: float,
+    volume_rtol: float,
+) -> None:
     """Differentiable finite-beta scalars should reproduce bundled VMEC2000 WOUT diagnostics."""
     pytest.importorskip("jax")
     pytest.importorskip("netCDF4")
     enable_x64(True)
 
-    cfg, indata = load_config(str(_data_dir() / "input.shaped_tokamak_pressure"))
-    wout = read_wout(_data_dir() / "wout_shaped_tokamak_pressure.nc")
-    assert int(cfg.ns) == int(wout.ns)
-    assert int(cfg.mpol) == int(wout.mpol)
-    assert int(cfg.ntor) == int(wout.ntor)
+    data_dir = _single_grid_data_dir() if data_root == "examples_single_grid" else _data_dir()
+    cfg, indata = load_config(str(data_dir / input_name))
+    wout = read_wout(data_dir / wout_name)
+    cfg = replace(
+        cfg,
+        ns=int(wout.ns),
+        mpol=int(wout.mpol),
+        ntor=int(wout.ntor),
+        nfp=int(wout.nfp),
+        lasym=bool(wout.lasym),
+        lthreed=bool(int(wout.ntor) > 0),
+    )
 
     scalars = finite_beta_scalars_from_state(
         state=state_from_wout(wout),
@@ -193,35 +228,75 @@ def test_finite_beta_state_scalars_match_shaped_wout_energy_gate() -> None:
         signgs=int(wout.signgs),
     )
 
-    np.testing.assert_allclose(np.asarray(scalars["aspect"]), float(wout.aspect), rtol=1.0e-13, atol=1.0e-13)
-    np.testing.assert_allclose(np.asarray(scalars["iotas"]), np.asarray(wout.iotas), rtol=1.0e-13, atol=1.0e-13)
-    np.testing.assert_allclose(np.asarray(scalars["iotaf"]), np.asarray(wout.iotaf), rtol=1.0e-13, atol=1.0e-13)
-    np.testing.assert_allclose(np.asarray(scalars["vp"]), np.asarray(wout.vp), rtol=1.0e-12, atol=1.0e-11)
-    np.testing.assert_allclose(np.asarray(scalars["wb"]), float(wout.wb), rtol=1.0e-13, atol=1.0e-13)
-    np.testing.assert_allclose(np.asarray(scalars["wp"]), float(wout.wp), rtol=1.0e-12, atol=1.0e-13)
+    np.testing.assert_allclose(
+        np.asarray(scalars["aspect"]),
+        float(wout.aspect),
+        rtol=1.0e-13,
+        atol=1.0e-13,
+        err_msg=case_name,
+    )
+    np.testing.assert_allclose(
+        np.asarray(scalars["iotas"]),
+        np.asarray(wout.iotas),
+        rtol=1.0e-13,
+        atol=1.0e-13,
+        err_msg=case_name,
+    )
+    np.testing.assert_allclose(
+        np.asarray(scalars["iotaf"]),
+        np.asarray(wout.iotaf),
+        rtol=1.0e-13,
+        atol=1.0e-13,
+        err_msg=case_name,
+    )
+    np.testing.assert_allclose(
+        np.asarray(scalars["vp"]),
+        np.asarray(wout.vp),
+        rtol=1.0e-12,
+        atol=1.0e-11,
+        err_msg=case_name,
+    )
+    np.testing.assert_allclose(
+        np.asarray(scalars["wb"]),
+        float(wout.wb),
+        rtol=1.0e-13,
+        atol=1.0e-13,
+        err_msg=case_name,
+    )
+    np.testing.assert_allclose(
+        np.asarray(scalars["wp"]),
+        float(wout.wp),
+        rtol=wp_rtol,
+        atol=1.0e-13,
+        err_msg=case_name,
+    )
     np.testing.assert_allclose(
         np.asarray(scalars["betatotal"]),
         float(wout.wp) / float(wout.wb),
-        rtol=1.0e-12,
+        rtol=wp_rtol,
         atol=1.0e-15,
+        err_msg=case_name,
     )
     np.testing.assert_allclose(
         np.asarray(scalars["volume"]) * (4.0 * np.pi**2),
         float(wout.volume_p),
-        rtol=5.0e-9,
+        rtol=volume_rtol,
         atol=1.0e-12,
+        err_msg=case_name,
     )
     np.testing.assert_allclose(
         np.asarray(scalars["volavgB"]),
         np.sqrt(2.0 * float(wout.wb) / (float(wout.volume_p) / (4.0 * np.pi**2))),
-        rtol=5.0e-9,
+        rtol=volume_rtol,
         atol=1.0e-13,
+        err_msg=case_name,
     )
     np.testing.assert_allclose(
         np.asarray(magnetic_well_from_vp(scalars["vp"])),
         np.asarray(magnetic_well_from_vp(wout.vp)),
         rtol=1.0e-12,
         atol=1.0e-13,
+        err_msg=case_name,
     )
     assert float(np.asarray(scalars["wp"])) > 0.0
     assert 0.0 < float(np.asarray(scalars["betatotal"])) < 1.0e-2
@@ -236,6 +311,9 @@ def test_single_grid_lasym_finite_beta_force_balance_and_asymmetry_gate() -> Non
     assert float(wout.wp) > 0.0
     assert float(wout.wb) > 0.0
     np.testing.assert_allclose(float(wout.betatotal), float(wout.wp) / float(wout.wb), rtol=1.0e-13)
+    residual_scalars = np.asarray([wout.fsqr, wout.fsqz, wout.fsql], dtype=float)
+    assert np.all(np.isfinite(residual_scalars))
+    assert np.max(np.abs(residual_scalars)) < 1.0e-9
 
     dmerc_parts = (
         np.asarray(wout.Dshear)
