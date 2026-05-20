@@ -1401,14 +1401,16 @@ class FixedBoundaryExactOptimizer:
             jit_forces="auto",
             use_scan=False,
             light_history=True,
-            preconditioner_use_precomputed_tridi=self._use_precomputed_tridi_for_exact_tape(),
             # The optimizer only ever consumes `result.state` from these inner
             # solves. Keeping the full resume_state payload alive in diagnostics
             # needlessly retains large cached arrays/checkpoints across SciPy
             # callbacks and is a major source of RSS growth on converged runs.
             resume_state_mode="none",
         )
-        self._exact_solver_kwargs = dict(_base)
+        self._exact_solver_kwargs = dict(
+            _base,
+            preconditioner_use_precomputed_tridi=self._use_precomputed_tridi_for_exact_tape(),
+        )
         self._trial_solver_kwargs = dict(
             _base,
             # Trial-point residuals do not need an adjoint tape. Use the scan

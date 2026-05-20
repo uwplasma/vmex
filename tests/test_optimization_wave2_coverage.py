@@ -278,6 +278,8 @@ def test_optimizer_init_moves_static_boundary_and_boundary_input(monkeypatch) ->
     assert moved == [static, boundary, boundary_input]
     assert opt.static is static
     assert opt.flux == "flux"
+    assert opt._exact_solver_kwargs["preconditioner_use_precomputed_tridi"] is None
+    assert "preconditioner_use_precomputed_tridi" not in opt._trial_solver_kwargs
 
 
 def test_lasym_replay_column_chunk_env_and_backend_branches(monkeypatch) -> None:
