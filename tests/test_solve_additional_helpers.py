@@ -43,6 +43,7 @@ from vmec_jax.solve import (
     _replace_mode_slice,
     _replace_mode_slice_np,
     _append_residual_iter_history_record,
+    _append_residual_iter_terminal_history,
     _residual_iter_history_record,
     _safe_dt_from_force_blocks,
     _scale_m1_precond_rhs_from_mats,
@@ -1341,6 +1342,112 @@ def test_append_residual_iter_history_record_skips_free_boundary_channels_when_d
     assert histories["freeb_ivac_history"] == []
     assert histories["freeb_ivacskip_history"] == []
     assert histories["freeb_full_update_history"] == []
+
+
+def _terminal_histories():
+    return {
+        "step_status_history": [],
+        "restart_reason_history": [],
+        "pre_restart_reason_history": [],
+        "time_step_history": [],
+        "res0_history": [],
+        "res1_history": [],
+        "fsq_prev_history": [],
+        "bad_growth_streak_history": [],
+        "iter1_history": [],
+        "iter2_history": [],
+        "grad_rms_history": [],
+        "freeb_ivac_history": [],
+        "freeb_ivacskip_history": [],
+        "freeb_full_update_history": [],
+        "freeb_nestor_reused_history": [],
+        "freeb_nestor_solve_time_history": [],
+        "freeb_nestor_sample_time_history": [],
+    }
+
+
+def test_append_residual_iter_terminal_history_records_free_boundary_channels():
+    histories = _terminal_histories()
+
+    _append_residual_iter_terminal_history(
+        step_status="momentum",
+        restart_reason="none",
+        pre_restart_reason="none",
+        time_step=0.75,
+        res0=1.0,
+        res1=0.5,
+        fsq_prev=0.25,
+        bad_growth_streak=2,
+        iter1=3,
+        iter2=4,
+        fsqr=9.0,
+        fsqz=16.0,
+        fsql=0.0,
+        free_boundary_enabled=True,
+        freeb_ivac=2,
+        freeb_ivacskip=0,
+        freeb_reused=True,
+        freeb_solve_time=0.125,
+        freeb_sample_time=0.25,
+        **histories,
+    )
+
+    assert histories["step_status_history"] == ["momentum"]
+    assert histories["restart_reason_history"] == ["none"]
+    assert histories["pre_restart_reason_history"] == ["none"]
+    assert histories["time_step_history"] == [pytest.approx(0.75)]
+    assert histories["res0_history"] == [pytest.approx(1.0)]
+    assert histories["res1_history"] == [pytest.approx(0.5)]
+    assert histories["fsq_prev_history"] == [pytest.approx(0.25)]
+    assert histories["bad_growth_streak_history"] == [2]
+    assert histories["iter1_history"] == [3]
+    assert histories["iter2_history"] == [4]
+    assert histories["grad_rms_history"] == [pytest.approx(5.0)]
+    assert histories["freeb_ivac_history"] == [2]
+    assert histories["freeb_ivacskip_history"] == [0]
+    assert histories["freeb_full_update_history"] == [1]
+    assert histories["freeb_nestor_reused_history"] == [1]
+    assert histories["freeb_nestor_solve_time_history"] == [pytest.approx(0.125)]
+    assert histories["freeb_nestor_sample_time_history"] == [pytest.approx(0.25)]
+    assert {len(value) for value in histories.values()} == {1}
+
+
+def test_append_residual_iter_terminal_history_skips_free_boundary_and_clamps_grad():
+    histories = _terminal_histories()
+
+    _append_residual_iter_terminal_history(
+        step_status="rejected",
+        restart_reason="bad_progress",
+        pre_restart_reason="huge_initial_forces",
+        time_step=0.5,
+        res0=3.0,
+        res1=2.0,
+        fsq_prev=1.0,
+        bad_growth_streak=7,
+        iter1=8,
+        iter2=9,
+        fsqr=-10.0,
+        fsqz=1.0,
+        fsql=2.0,
+        free_boundary_enabled=False,
+        freeb_ivac=-1,
+        freeb_ivacskip=99,
+        freeb_reused=True,
+        freeb_solve_time=9.0,
+        freeb_sample_time=8.0,
+        **histories,
+    )
+
+    assert histories["step_status_history"] == ["rejected"]
+    assert histories["restart_reason_history"] == ["bad_progress"]
+    assert histories["pre_restart_reason_history"] == ["huge_initial_forces"]
+    assert histories["grad_rms_history"] == [0.0]
+    assert histories["freeb_ivac_history"] == []
+    assert histories["freeb_ivacskip_history"] == []
+    assert histories["freeb_full_update_history"] == []
+    assert histories["freeb_nestor_reused_history"] == []
+    assert histories["freeb_nestor_solve_time_history"] == []
+    assert histories["freeb_nestor_sample_time_history"] == []
 
 
 def test_first_step_diagnostics_synthetic_default_and_axisymmetric_paths(monkeypatch):

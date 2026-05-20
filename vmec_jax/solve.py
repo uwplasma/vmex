@@ -1901,6 +1901,67 @@ def _append_residual_iter_history_record(
         freeb_full_update_history.append(rec.freeb_full_update)
 
 
+def _append_residual_iter_terminal_history(
+    *,
+    step_status: str,
+    restart_reason: str,
+    pre_restart_reason: str,
+    time_step: float,
+    res0: float,
+    res1: float,
+    fsq_prev: float,
+    bad_growth_streak: int,
+    iter1: int,
+    iter2: int,
+    fsqr: float,
+    fsqz: float,
+    fsql: float,
+    step_status_history: list,
+    restart_reason_history: list,
+    pre_restart_reason_history: list,
+    time_step_history: list,
+    res0_history: list,
+    res1_history: list,
+    fsq_prev_history: list,
+    bad_growth_streak_history: list,
+    iter1_history: list,
+    iter2_history: list,
+    grad_rms_history: list,
+    free_boundary_enabled: bool,
+    freeb_ivac: int,
+    freeb_ivacskip: int,
+    freeb_reused: bool,
+    freeb_solve_time: float,
+    freeb_sample_time: float,
+    freeb_ivac_history: list,
+    freeb_ivacskip_history: list,
+    freeb_full_update_history: list,
+    freeb_nestor_reused_history: list,
+    freeb_nestor_solve_time_history: list,
+    freeb_nestor_sample_time_history: list,
+) -> None:
+    """Append per-iteration terminal channels that are aligned with force histories."""
+
+    step_status_history.append(step_status)
+    restart_reason_history.append(restart_reason)
+    pre_restart_reason_history.append(pre_restart_reason)
+    time_step_history.append(float(time_step))
+    res0_history.append(float(res0))
+    res1_history.append(float(res1))
+    fsq_prev_history.append(float(fsq_prev))
+    bad_growth_streak_history.append(int(bad_growth_streak))
+    iter1_history.append(int(iter1))
+    iter2_history.append(int(iter2))
+    if bool(free_boundary_enabled):
+        freeb_ivac_history.append(int(freeb_ivac))
+        freeb_ivacskip_history.append(int(freeb_ivacskip))
+        freeb_full_update_history.append(1 if (int(freeb_ivac) >= 0 and int(freeb_ivacskip) == 0) else 0)
+        freeb_nestor_reused_history.append(1 if bool(freeb_reused) else 0)
+        freeb_nestor_solve_time_history.append(float(freeb_solve_time))
+        freeb_nestor_sample_time_history.append(float(freeb_sample_time))
+    grad_rms_history.append(float(np.sqrt(max(float(fsqr) + float(fsqz) + float(fsql), 0.0))))
+
+
 def _sample_free_boundary_external_field(*, state: VMECState, static) -> dict[str, Any]:
     """WP2 diagnostic scaffold for external-field boundary channels."""
     from .free_boundary import sample_external_vacuum_diagnostics
@@ -14924,24 +14985,44 @@ def solve_fixed_boundary_residual_iter(
                     flush=True,
                 )
         if track_history:
-            step_status_history.append(step_status)
-            restart_reason_history.append(restart_reason)
-            pre_restart_reason_history.append(pre_restart_reason)
-            time_step_history.append(float(time_step))
-            res0_history.append(float(res0))
-            res1_history.append(float(res1))
-            fsq_prev_history.append(float(fsq_prev))
-            bad_growth_streak_history.append(int(bad_growth_streak))
-            iter1_history.append(int(iter1))
-            iter2_history.append(int(iter2))
-            if free_boundary_enabled:
-                freeb_ivac_history.append(int(freeb_ivac))
-                freeb_ivacskip_history.append(int(freeb_ivacskip))
-                freeb_full_update_history.append(1 if (int(freeb_ivac) >= 0 and int(freeb_ivacskip) == 0) else 0)
-                freeb_nestor_reused_history.append(1 if bool(freeb_reused) else 0)
-                freeb_nestor_solve_time_history.append(float(freeb_solve_time))
-                freeb_nestor_sample_time_history.append(float(freeb_sample_time))
-            grad_rms_history.append(float(np.sqrt(max(fsqr_f + fsqz_f + fsql_f, 0.0))))
+            _append_residual_iter_terminal_history(
+                step_status=step_status,
+                restart_reason=restart_reason,
+                pre_restart_reason=pre_restart_reason,
+                time_step=float(time_step),
+                res0=float(res0),
+                res1=float(res1),
+                fsq_prev=float(fsq_prev),
+                bad_growth_streak=int(bad_growth_streak),
+                iter1=int(iter1),
+                iter2=int(iter2),
+                fsqr=fsqr_f,
+                fsqz=fsqz_f,
+                fsql=fsql_f,
+                step_status_history=step_status_history,
+                restart_reason_history=restart_reason_history,
+                pre_restart_reason_history=pre_restart_reason_history,
+                time_step_history=time_step_history,
+                res0_history=res0_history,
+                res1_history=res1_history,
+                fsq_prev_history=fsq_prev_history,
+                bad_growth_streak_history=bad_growth_streak_history,
+                iter1_history=iter1_history,
+                iter2_history=iter2_history,
+                grad_rms_history=grad_rms_history,
+                free_boundary_enabled=free_boundary_enabled,
+                freeb_ivac=freeb_ivac,
+                freeb_ivacskip=freeb_ivacskip,
+                freeb_reused=freeb_reused,
+                freeb_solve_time=freeb_solve_time,
+                freeb_sample_time=freeb_sample_time,
+                freeb_ivac_history=freeb_ivac_history,
+                freeb_ivacskip_history=freeb_ivacskip_history,
+                freeb_full_update_history=freeb_full_update_history,
+                freeb_nestor_reused_history=freeb_nestor_reused_history,
+                freeb_nestor_solve_time_history=freeb_nestor_solve_time_history,
+                freeb_nestor_sample_time_history=freeb_nestor_sample_time_history,
+            )
         # VMEC eqsolve behavior: when `ivac==1`, print turn-on and promote to
         # `ivac=2` for subsequent iterations.
         if free_boundary_enabled and int(freeb_ivac) == 1:
