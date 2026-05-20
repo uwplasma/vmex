@@ -2102,12 +2102,14 @@ class FixedBoundaryExactOptimizer:
         )
         t_solve = time.perf_counter()
         if trial:
+            trial_solver_kwargs = dict(self._trial_solver_kwargs)
+            trial_solver_kwargs.setdefault("state_only", bool(trial_solver_kwargs.get("use_scan", False)))
             result = solve_fixed_boundary_residual_iter(
                 state0,
                 self._static,
                 max_iter=self._trial_max_iter,
                 ftol=self._trial_ftol,
-                **self._trial_solver_kwargs,
+                **trial_solver_kwargs,
             )
         else:
             result = solve_fixed_boundary_residual_iter(

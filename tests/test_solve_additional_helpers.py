@@ -195,10 +195,8 @@ def test_vmec2000_scan_options_restart_payload_explicit_env_wins():
 
 
 def test_scan_restart_force_payload_zeros_residual_impulse_and_invalidates_cache():
-    force_blocks = (
-        jnp.asarray([[1.0, -2.0], [3.0, -4.0]]),
-        jnp.asarray([[0.5, 1.5], [-2.5, 4.5]]),
-        jnp.asarray([[7.0, -8.0], [9.0, -10.0]]),
+    force_blocks = tuple(
+        jnp.asarray(np.full((2, 2), float(idx + 1))) for idx in range(12)
     )
 
     masked_blocks, cache_valid = _mask_scan_restart_force_payload(
@@ -214,9 +212,9 @@ def test_scan_restart_force_payload_zeros_residual_impulse_and_invalidates_cache
 
 
 def test_scan_restart_force_payload_preserves_current_residuals_without_restart():
-    force_blocks = (
-        jnp.asarray([[1.0, 2.0], [3.0, 4.0]]),
-        jnp.asarray([[5.0, 6.0], [7.0, 8.0]]),
+    force_blocks = tuple(
+        jnp.asarray(np.arange(4, dtype=float).reshape(2, 2) + 10.0 * idx)
+        for idx in range(12)
     )
 
     masked_blocks, cache_valid = _mask_scan_restart_force_payload(

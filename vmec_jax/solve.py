@@ -4731,6 +4731,7 @@ def solve_fixed_boundary_residual_iter(
     host_update_assembly: bool | None = None,
     adjoint_trace: bool = False,
     adjoint_trace_mode: str = "full",
+    state_only: bool = False,
 ) -> SolveVmecResidualResult:
     """VMEC-style fixed-point update loop using preconditioned force residuals."""
     _solve_wall_start = time.perf_counter()
@@ -6734,8 +6735,11 @@ def solve_fixed_boundary_residual_iter(
         if bool(auto_flip_force):
             raise ValueError("vmec2000 scan does not yet support auto_flip_force=True.")
 
+        state_only_scan = bool(state_only)
         scan_differentiated = _tree_has_tracer(state_init)
-        scan_fallback_enabled_run = bool(scan_fallback_enabled) and (not bool(scan_differentiated))
+        scan_fallback_enabled_run = (
+            bool(scan_fallback_enabled) and (not bool(scan_differentiated)) and (not state_only_scan)
+        )
         force_chunked_scan_run = bool(force_chunked_scan) and (not bool(scan_differentiated))
         k_preconditioner_update_interval = 25
         restart_badjac_factor = 0.9
@@ -6802,6 +6806,13 @@ def solve_fixed_boundary_residual_iter(
                 scan_timecontrol_callback = None
         print_in_scan = scan_options.print_in_scan
         chunked_print = scan_options.chunked_print
+        if state_only_scan:
+            scan_light = False
+            scan_minimal = True
+            scan_collect_scalars = False
+            scan_collect_print = False
+            print_in_scan = False
+            chunked_print = False
         _jax_debug = None
         _jax_debug_print = None
         if print_in_scan:
@@ -7373,6 +7384,8 @@ def solve_fixed_boundary_residual_iter(
                 accepted_h = jnp.asarray(False)
                 zero_m1_h = jnp.asarray(0.0, dtype=dtype)
                 include_edge_h = jnp.asarray(False)
+                if state_only_scan:
+                    return carry_hold_out, ()
                 if scan_minimal:
                     return carry_hold_out, _scan_hist_min(fsqr_h, fsqz_h, fsql_h)
                 if scan_light:
@@ -8830,6 +8843,8 @@ def solve_fixed_boundary_residual_iter(
                     edge_Zcos=carry.edge_Zcos,
                     edge_Zsin=carry.edge_Zsin,
                 )
+                if state_only_scan:
+                    return new_carry, ()
                 if scan_minimal:
                     return new_carry, _scan_hist_min(fsqr_out, fsqz_out, fsql_out)
                 if scan_light:
@@ -9141,7 +9156,7 @@ def solve_fixed_boundary_residual_iter(
                     hist_pre_np = jax.tree_util.tree_map(lambda a: np.asarray(a)[None], hist_pre)
                     hist_parts.append(hist_pre_np)
                     _ = _emit_scan_prints(hist_np=hist_pre_np, it_start=0, max_iter_local=int(max_iter))
-                else:
+                elif not state_only_scan:
                     hist_parts.append(jax.tree_util.tree_map(lambda a: a[None], hist_pre))
                 start_idx = int(preflight_iters)
                 if axis_reset_repeat:
@@ -9175,7 +9190,8 @@ def solve_fixed_boundary_residual_iter(
                         max_iter_local=int(max_iter),
                     )
                 else:
-                    hist_parts.append(hist_chunk)
+                    if not state_only_scan:
+                        hist_parts.append(hist_chunk)
                     converged_now = False
                 start_idx = int(start_idx + int(chunk_len))
                 if (
@@ -9200,7 +9216,9 @@ def solve_fixed_boundary_residual_iter(
                     fsq_min_global = None
                 if fsq_min_global is not None and fsq_min_global > float(scan_fallback_fsq_abs):
                     abort_scan_host = True
-            if need_print:
+            if state_only_scan and not need_print:
+                hist = None
+            elif need_print:
                 hist = jax.tree_util.tree_map(lambda *parts: np.concatenate(parts, axis=0), *hist_parts)
             else:
                 t_materialize = time.perf_counter() if scan_timing_enabled else None
@@ -9258,6 +9276,63 @@ def solve_fixed_boundary_residual_iter(
                 if scan_timing_enabled and t_device is not None:
                     carry_final, hist = _scan_device_run_ready(t_device, (carry_final, hist))
         scan_postprocess_start = time.perf_counter() if scan_timing_enabled else None
+        if state_only_scan:
+            traced = _tree_has_tracer(carry_final.state)
+            hist_dtype = jnp.asarray(state0.Rcos).dtype
+            empty = jnp.zeros((0,), dtype=hist_dtype) if traced else np.asarray([], dtype=float)
+            scan_timing_report = None
+            if scan_timing_enabled:
+                if scan_postprocess_start is not None:
+                    scan_timing_stats["scan_postprocess_s"] += time.perf_counter() - float(scan_postprocess_start)
+                scan_total_s = (
+                    time.perf_counter() - float(scan_total_start)
+                    if scan_total_start is not None
+                    else sum(scan_timing_stats.values())
+                )
+                scan_leaf_total_s = sum(
+                    float(value)
+                    for key, value in scan_timing_stats.items()
+                    if key not in ("scan_device_dispatch_s", "scan_device_ready_s")
+                )
+                scan_timing_report = {
+                    "iterations": int(max_iter),
+                    "scan_total_s": float(scan_total_s),
+                    **{key: float(value) for key, value in scan_timing_stats.items()},
+                    "scan_unattributed_s": max(0.0, float(scan_total_s) - float(scan_leaf_total_s)),
+                }
+            diagnostics = {
+                "use_scan": True,
+                "vmec2000_scan": True,
+                "state_only": True,
+                "history_mode": "none",
+                "history_none": True,
+                "ftol": float(ftol),
+                "requested_ftol": float(ftol),
+                "scan_minimal": bool(scan_minimal),
+                "light_history": bool(scan_light),
+                **({"timing": scan_timing_report} if scan_timing_report is not None else {}),
+            }
+            if not traced:
+                diagnostics.update(
+                    {
+                        "abort_scan": bool(np.asarray(carry_final.abort_scan)),
+                        "converged": bool(np.asarray(carry_final.converged)),
+                        "ijacob": int(np.asarray(carry_final.ijacob)),
+                    }
+                )
+            return _attach_freeb_diag(
+                SolveVmecResidualResult(
+                    state=carry_final.state,
+                    n_iter=int(max_iter),
+                    w_history=empty,
+                    fsqr2_history=empty,
+                    fsqz2_history=empty,
+                    fsql2_history=empty,
+                    grad_rms_history=empty,
+                    step_history=empty,
+                    diagnostics=diagnostics,
+                )
+            )
         scan_histories = unpack_vmec2000_scan_histories(
             hist,
             scan_minimal=bool(scan_minimal),
@@ -9441,7 +9516,7 @@ def solve_fixed_boundary_residual_iter(
     if use_scan:
         if vmec2000_control:
             scan_result = _run_vmec2000_scan(state)
-            if scan_fallback_enabled:
+            if scan_fallback_enabled and (not bool(state_only)):
                 fallback_decision = _scan_fallback_decision(
                     diagnostics=scan_result.diagnostics,
                     fsqr_history=scan_result.fsqr2_history,

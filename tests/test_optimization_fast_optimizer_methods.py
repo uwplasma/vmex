@@ -234,7 +234,7 @@ def test_solve_forward_uses_trial_and_exact_solver_kwargs(monkeypatch):
     opt._trial_ftol = 1.0e-4
     opt._inner_max_iter = 9
     opt._inner_ftol = 1.0e-9
-    opt._trial_solver_kwargs = {"trial": True}
+    opt._trial_solver_kwargs = {"trial": True, "use_scan": True}
     opt._exact_solver_kwargs = {"exact": True}
     opt._boundary_from_params = lambda params: ("boundary", tuple(np.asarray(params, dtype=float)))
 
@@ -251,13 +251,44 @@ def test_solve_forward_uses_trial_and_exact_solver_kwargs(monkeypatch):
     assert calls[0][2]["max_iter"] == 3
     assert calls[0][2]["ftol"] == pytest.approx(1.0e-4)
     assert calls[0][2]["trial"] is True
+    assert calls[0][2]["use_scan"] is True
+    assert calls[0][2]["state_only"] is True
     assert calls[1][2]["max_iter"] == 9
     assert calls[1][2]["ftol"] == pytest.approx(1.0e-9)
     assert calls[1][2]["exact"] is True
+    assert "state_only" not in calls[1][2]
     assert opt._profile["initial_guess_trial"]["count"] == 1
     assert opt._profile["initial_guess_forward"]["count"] == 1
     assert opt._profile["solve_forward_trial"]["count"] == 1
     assert opt._profile["solve_forward_exact"]["count"] == 1
+
+
+def test_solve_forward_preserves_explicit_trial_state_only(monkeypatch):
+    import vmec_jax.solve as solve_module
+
+    calls = []
+    opt = object.__new__(FixedBoundaryExactOptimizer)
+    opt._solver_device_name = None
+    opt._inside_solver_device_context = False
+    opt._static = object()
+    opt._indata = object()
+    opt._profile = {}
+    opt._trial_max_iter = 3
+    opt._trial_ftol = 1.0e-4
+    opt._trial_solver_kwargs = {"use_scan": True, "state_only": False}
+    opt._boundary_from_params = lambda params: ("boundary", tuple(np.asarray(params, dtype=float)))
+
+    monkeypatch.setattr(opt_module, "initial_guess_from_boundary", lambda *_args, **_kwargs: "state0")
+
+    def fake_solve(state, static, **kwargs):
+        calls.append((state, static, kwargs))
+        return SimpleNamespace(state="solved")
+
+    monkeypatch.setattr(solve_module, "solve_fixed_boundary_residual_iter", fake_solve)
+
+    assert opt._solve_forward(np.asarray([1.0]), trial=True) == "solved"
+    assert calls[0][2]["use_scan"] is True
+    assert calls[0][2]["state_only"] is False
 
 
 def test_scan_exact_state_cache_miss_and_hit():
