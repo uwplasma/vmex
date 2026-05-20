@@ -38,6 +38,10 @@ def _data_dir() -> Path:
     return Path(__file__).resolve().parents[1] / "examples" / "data"
 
 
+def _single_grid_data_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "examples_single_grid" / "data"
+
+
 def _static_aligned_to_wout(cfg, wout):
     cfg = replace(
         cfg,
@@ -113,3 +117,36 @@ def test_bundled_wout_mercier_and_jxbforce_profile_closures(wout_name: str) -> N
     np.testing.assert_allclose(bdotb[-1], 2.0 * bdotb[-2] - bdotb[-3], rtol=0.0, atol=0.0)
     np.testing.assert_allclose(bdotgradv[0], 2.0 * bdotgradv[1] - bdotgradv[2], rtol=0.0, atol=0.0)
     np.testing.assert_allclose(bdotgradv[-1], 2.0 * bdotgradv[-2] - bdotgradv[-3], rtol=0.0, atol=0.0)
+
+
+def test_single_grid_lasym_finite_beta_wout_diagnostic_closures() -> None:
+    """The bundled LASYM=T finite-beta fixture should exercise asymmetric JXB/Mercier profiles."""
+    pytest.importorskip("netCDF4")
+
+    wout = read_wout(_single_grid_data_dir() / "wout_basic_non_stellsym_pressure_reference.nc")
+    assert bool(wout.lasym)
+    assert float(wout.wp) > 0.0
+    assert float(wout.wb) > 0.0
+    np.testing.assert_allclose(float(wout.betatotal), float(wout.wp) / float(wout.wb), rtol=1.0e-13)
+
+    dmerc = np.asarray(wout.DMerc, dtype=float)
+    dmerc_parts = (
+        np.asarray(wout.Dshear, dtype=float)
+        + np.asarray(wout.Dcurr, dtype=float)
+        + np.asarray(wout.Dwell, dtype=float)
+        + np.asarray(wout.Dgeod, dtype=float)
+    )
+    np.testing.assert_allclose(dmerc, dmerc_parts, rtol=0.0, atol=0.0)
+    assert np.linalg.norm(dmerc[1:-1]) > 0.0
+
+    for name in ("rmns", "zmnc", "lmnc", "bmns", "bsubumns", "bsubvmns"):
+        values = np.asarray(getattr(wout, name), dtype=float)
+        assert values.ndim == 2
+        assert np.all(np.isfinite(values)), name
+        assert np.linalg.norm(values) > 0.0, name
+
+    for name in ("jdotb", "bdotb", "bdotgradv"):
+        profile = np.asarray(getattr(wout, name), dtype=float)
+        assert profile.shape == (int(wout.ns),)
+        assert np.all(np.isfinite(profile))
+        assert np.any(np.abs(profile[1:-1]) > 0.0)
