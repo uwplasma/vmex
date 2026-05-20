@@ -19,7 +19,9 @@ Target State
   release notes or validation artifact for the candidate being checked.
 - Near-term coverage target: keep the required ``85%`` actual line coverage gate
   green with meaningful fast and bounded-physics tests while preserving
-  sub-ten-minute coverage runtime.
+  sub-ten-minute coverage runtime.  The current required fast-suite coverage is
+  about ``86%``: the May 20 local CI-equivalent run measured ``86.04%``, and
+  the appended local coverage database measured ``86.31%``.
 - Next staged coverage target: raise the required Python 3.11 gate to ``90%``
   only after a clean local CI-equivalent run demonstrates at least 90% package
   coverage on the fast suite, the runtime remains acceptable, and the added
@@ -486,9 +488,9 @@ The required CI gate is staged deliberately:
      - CI action
    * - Current
      - ``--cov-fail-under=85``
-     - Fast-suite coverage is green on Python 3.11 with ``.[plots]`` installed,
-       and required CI remains independent of VMEC2000, SIMSOPT, GPUs, and
-       large downloaded assets.
+     - Fast-suite coverage is green on Python 3.11 with ``.[plots]`` installed
+       at about 86% actual package coverage, and required CI remains independent
+       of VMEC2000, SIMSOPT, GPUs, and large downloaded assets.
      - Keep enforced.
    * - 90%
      - ``--cov-fail-under=90``

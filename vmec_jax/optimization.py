@@ -2755,7 +2755,6 @@ class FixedBoundaryExactOptimizer:
             checkpoint_tape_state_jvp_columns,
             checkpoint_tape_state_vjp,
         )
-        from .init_guess import initial_guess_from_boundary as _ig
         from .state import pack_state, unpack_state
 
         t_total = time.perf_counter()
@@ -2767,23 +2766,44 @@ class FixedBoundaryExactOptimizer:
         }
         packed_final = _jnp.asarray(pack_state(state), dtype=_jnp.float64)
 
-        def _initial_state_packed(p):
-            bdy = self._boundary_from_params(p)
-            s0 = _ig(
-                self._static,
-                bdy,
-                self._indata,
-                vmec_project=True,
-                axis_override=axis_override,
-            )
-            return _jnp.asarray(pack_state(s0), dtype=_jnp.float64)
-
         def _residuals_from_packed(packed):
             return self._residuals_fn(unpack_state(packed, self._layout))
 
         t_setup = time.perf_counter()
-        _, initial_linear = jax.linearize(_initial_state_packed, params)
-        initial_transpose = jax.linear_transpose(initial_linear, params)
+        initial_tangent_cache_key = None
+        initial_tangent_columns = None
+        try:
+            initial_tangent_cache_key = self._initial_tangent_cache_key(params)
+            initial_tangent_columns = (
+                self._initial_tangent_cache.get(initial_tangent_cache_key)
+                if initial_tangent_cache_key is not None
+                else None
+            )
+        except Exception:
+            initial_tangent_cache_key = None
+            initial_tangent_columns = None
+        if initial_tangent_columns is not None:
+            initial_tangent_columns = _jnp.asarray(initial_tangent_columns, dtype=_jnp.float64)
+            initial_linear = None
+            initial_transpose = None
+            self._profile_add("linear_operator_initial_tangents_cache_hit", 0.0)
+        else:
+            from .init_guess import initial_guess_from_boundary as _ig
+
+            def _initial_state_packed(p):
+                bdy = self._boundary_from_params(p)
+                s0 = _ig(
+                    self._static,
+                    bdy,
+                    self._indata,
+                    vmec_project=True,
+                    axis_override=axis_override,
+                )
+                return _jnp.asarray(pack_state(s0), dtype=_jnp.float64)
+
+            _, initial_linear = jax.linearize(_initial_state_packed, params)
+            initial_transpose = jax.linear_transpose(initial_linear, params)
+            self._profile_add("linear_operator_initial_tangents_cache_miss", 0.0)
         residuals, residual_linear = jax.linearize(_residuals_from_packed, packed_final)
         state_cotangent_from_packed = getattr(self._residuals_fn, "_state_cotangent_from_packed", None)
         residual_cotangent_helper = None
@@ -2820,7 +2840,10 @@ class FixedBoundaryExactOptimizer:
                 _linear_operator_vector_arg(direction, size=n_params, name="matvec direction"),
                 dtype=params.dtype,
             )
-            initial_tangent = initial_linear(direction_j)
+            if initial_tangent_columns is not None:
+                initial_tangent = _jnp.tensordot(direction_j, initial_tangent_columns, axes=([0], [0]))
+            else:
+                initial_tangent = initial_linear(direction_j)
             final_tangent = checkpoint_tape_state_jvp(
                 tape=tape,
                 static=self._static,
@@ -2839,7 +2862,10 @@ class FixedBoundaryExactOptimizer:
                 name="matmat directions",
             )
             directions_j = _jnp.asarray(directions_arr.T, dtype=params.dtype)
-            initial_tangents = jax.vmap(initial_linear)(directions_j)
+            if initial_tangent_columns is not None:
+                initial_tangents = _jnp.tensordot(directions_j, initial_tangent_columns, axes=([1], [0]))
+            else:
+                initial_tangents = jax.vmap(initial_linear)(directions_j)
             final_tangents = checkpoint_tape_state_jvp_columns(
                 tape=tape,
                 static=self._static,
@@ -2879,9 +2905,13 @@ class FixedBoundaryExactOptimizer:
             initial_cotangent = _jnp.nan_to_num(initial_cotangent, nan=0.0, posinf=0.0, neginf=0.0)
             t_initial_transpose = time.perf_counter()
             # The frozen-axis initial-state map is linear for a fixed flip
-            # branch.  Reuse the transpose of the setup linearization instead
-            # of tracing a second VJP through the same initialization graph.
-            grad = initial_transpose(_jnp.asarray(initial_cotangent, dtype=_jnp.float64))[0]
+            # branch. Reuse cached tangent columns when available; otherwise
+            # reuse the transpose of the setup linearization instead of tracing
+            # a second VJP through the same initialization graph.
+            if initial_tangent_columns is not None:
+                grad = _jnp.tensordot(initial_tangent_columns, initial_cotangent, axes=([1], [0]))
+            else:
+                grad = initial_transpose(_jnp.asarray(initial_cotangent, dtype=_jnp.float64))[0]
             self._profile_add("linear_operator_initial_transpose", time.perf_counter() - t_initial_transpose)
             self._profile_add("linear_operator_rmatvec", time.perf_counter() - t_rmv)
             return np.asarray(grad, dtype=float)
