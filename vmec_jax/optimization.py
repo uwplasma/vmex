@@ -2158,6 +2158,7 @@ class FixedBoundaryExactOptimizer:
         scan_solver_kwargs = dict(self._exact_solver_kwargs)
         scan_solver_kwargs.update(
             use_scan=True,
+            state_only=True,
             light_history=True,
             resume_state_mode="none",
         )

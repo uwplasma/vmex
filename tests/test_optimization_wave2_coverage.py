@@ -353,6 +353,7 @@ def test_scan_exact_helpers_build_cached_state_residual_and_jacobian(monkeypatch
         assert kwargs["max_iter"] == 2
         assert kwargs["ftol"] == pytest.approx(1.0e-6)
         assert kwargs["use_scan"] is True
+        assert kwargs["state_only"] is True
         assert kwargs["resume_state_mode"] == "none"
         return SimpleNamespace(state=state0)
 

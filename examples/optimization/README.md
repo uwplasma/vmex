@@ -101,7 +101,8 @@ disk; the renderer skips known-stale rows by default, and `--include-stale`
 should be reserved for debugging.  Current QI
 showcase outputs should appear under `.../qi_nfp1/continuation/nfp1_qi`,
 `.../qi_nfp2/continuation/nfp2_qi`, and
-`.../qi_nfp3/continuation/qi_stel_seed_3127`; old QI rows under
+`.../qi_nfp3/continuation/qi_stel_seed_3127`, and
+`.../qi_nfp4/continuation/nfp4_qi`; old QI rows under
 `.../continuation/qp_preseed/...` predate the staged dispatch.  Old QA/QP
 rows without `reference_preseed` metadata also predate the current
 reference-family preseed policy.
@@ -305,6 +306,12 @@ The constrained-QI sweep is the compact bundled-seed matrix, not the staged
 far-seed runner.  If its summary reports a stale QI target aspect, rerun the
 two sweep commands above with the current target-6 policy before using the
 rendered matrix.
+Read the README/docs NFP=4 row as a minimal-seed same-NFP reference-family
+proposal with an exact audit, not as a long local descent.  The generated
+`docs/_static/figures/readme_qi_optimization_cases.csv` row should remain
+`case-gated`/`candidate`, with passing `qi_seed_gate_passed` and
+`qi_engineering_gate_passed`, empty `qi_gate_failures`, and short proposal
+history fields before the PNG panel is cited.
 
 For publication-quality QI validation, re-run the diagnostic with higher
 `QI_MBOZ`, `QI_NBOZ`, `QI_NPHI`, `QI_NALPHA`, and `QI_N_BOUNCE`, then check

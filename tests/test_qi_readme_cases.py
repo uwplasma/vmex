@@ -185,6 +185,32 @@ def test_readme_renderer_points_nfp4_row_at_minimal_seed() -> None:
     assert "minimal_nfp4_to_qi_finite_beta_reference" in str(nfp4.output_dir)
     assert "nfp4_qi_finite_beta" not in str(nfp4.output_dir)
     assert nfp4.validation_status == "case-gated"
+    assert nfp4.preconditioner_summary is not None
+    assert nfp4.preconditioner_summary.name == "summary.json"
+
+
+def test_readme_renderer_detects_flat_objective_history() -> None:
+    mod = _load_module()
+
+    flat = [
+        {
+            "objective": np.asarray([1.0, 1.0 - 1.0e-8, 1.0 - 2.0e-8]),
+            "wall_time_s": np.asarray([0.0, 1.0, 2.0]),
+            "label": "flat",
+            "path": Path("flat"),
+        }
+    ]
+    moving = [
+        {
+            "objective": np.asarray([1.0, 0.8, 0.7]),
+            "wall_time_s": np.asarray([0.0, 1.0, 2.0]),
+            "label": "moving",
+            "path": Path("moving"),
+        }
+    ]
+
+    assert mod._history_is_effectively_flat(flat)
+    assert not mod._history_is_effectively_flat(moving)
 
 
 def test_qi_case_catalog_defines_nfp4_minimal_seed_candidate() -> None:
@@ -303,6 +329,9 @@ def test_real_qi_readme_csv_contains_only_clean_case_gated_rows() -> None:
     assert {row["qi_gate_failures"] for row in rows} == {""}
     assert {row["qi_seed_gate_passed"] for row in rows} == {"True"}
     assert {row["qi_engineering_gate_passed"] for row in rows} == {"True"}
+    nfp4 = next(row for row in rows if int(row["qi_nfp"]) == 4)
+    assert int(nfp4["preconditioner_points"]) == 1
+    assert float(nfp4["selected_lambda"]) == pytest.approx(1.0)
 
 
 def test_readme_renderer_rejects_initial_wout_that_does_not_match_input(monkeypatch, tmp_path: Path) -> None:

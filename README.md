@@ -128,6 +128,10 @@ best-row promotions: NFP=1/2 use target aspect 10, the seed-3127 NFP=3 lane
 uses target aspect 4, and NFP=4 starts from the common minimal seed
 (`RBC(0,0)`, `RBC(0,1)`, `ZBS(0,1)` only) before a same-NFP reference-family
 QI proposal. Finite-beta NFP=4 remains documented as a separate stress fixture.
+The companion audit table is
+`docs/_static/figures/readme_qi_optimization_cases.csv`; it records the exact
+QI/engineering gate booleans, gate failures, diagnostics, and short proposal
+history used to render the panel.
 
 <p align="center">
   <img src="docs/_static/figures/readme_qi_optimization_cases.png" width="980" />

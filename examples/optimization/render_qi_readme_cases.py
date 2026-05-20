@@ -152,6 +152,13 @@ CASES = (
             / "mirror_ramp_01_finite_beta_qi_audit_refine"
             / "history.json",
         ),
+        preconditioner_summary=REPO_ROOT
+        / "results"
+        / "qi_opt"
+        / "ess"
+        / "minimal_nfp4_to_qi_finite_beta_reference"
+        / "boundary_reference_preconditioner"
+        / "summary.json",
     ),
 )
 
@@ -318,6 +325,19 @@ def _stage_normalized_best_so_far(objective: np.ndarray) -> np.ndarray:
     return np.minimum.accumulate(normalized)
 
 
+def _history_is_effectively_flat(segments: list[dict[str, np.ndarray | str | Path]]) -> bool:
+    """Return True when normalized objective history has no visible movement."""
+
+    for segment in segments:
+        objective = np.asarray(segment["objective"], dtype=float)
+        if objective.size < 2:
+            continue
+        best_so_far = _stage_normalized_best_so_far(objective)
+        if np.nanmax(best_so_far) - np.nanmin(best_so_far) > 1.0e-4:
+            return False
+    return True
+
+
 def _preconditioner_summary(case: QICase) -> tuple[int, float | None, float | None, float | None]:
     if case.preconditioner_summary is None:
         return 0, None, None, None
@@ -332,6 +352,16 @@ def _preconditioner_summary(case: QICase) -> tuple[int, float | None, float | No
         None if "legacy_qi" not in selected_row else float(selected_row["legacy_qi"]),
         None if "mirror" not in selected_row else float(selected_row["mirror"]),
     )
+
+
+def _selected_preconditioner_row(case: QICase) -> dict | None:
+    if case.preconditioner_summary is None:
+        return None
+    rows = _load_json(case.preconditioner_summary)
+    if not isinstance(rows, list) or not rows:
+        return None
+    selected = [row for row in rows if bool(row.get("selected"))]
+    return dict(selected[-1] if selected else rows[-1])
 
 
 def _optional_bool(diagnostics: dict, key: str) -> str | bool:
@@ -554,7 +584,11 @@ def _plot_lcfs(ax, wout_path: Path, title: str) -> None:
 
 def _plot_history(ax, case: QICase) -> None:
     colors = ("#1f4e79", "#d95f02", "#2ca25f", "#756bb1", "#636363")
-    for idx, segment in enumerate(_history_segments(case)):
+    segments = _history_segments(case)
+    if _history_is_effectively_flat(segments) and case.preconditioner_summary is not None:
+        _plot_reference_transition(ax, case)
+        return
+    for idx, segment in enumerate(segments):
         wall_min = np.asarray(segment["wall_time_s"], dtype=float) / 60.0
         objective = np.asarray(segment["objective"], dtype=float)
         best_so_far = _stage_normalized_best_so_far(objective)
@@ -570,6 +604,56 @@ def _plot_history(ax, case: QICase) -> None:
     ax.set_ylabel("Best objective / stage start")
     ax.grid(True, alpha=0.22, linestyle=":")
     ax.legend(fontsize=4.8, frameon=False, loc="upper right", handlelength=1.1, labelspacing=0.25)
+
+
+def _plot_reference_transition(ax, case: QICase) -> None:
+    """Show reference-family proposal progress when the local audit objective is flat."""
+
+    row = _selected_preconditioner_row(case)
+    diagnostics = _load_json(case.output_dir / "diagnostics.json")
+    segments = _history_segments(case)
+    wall_min = max(float(np.asarray(segment["wall_time_s"], dtype=float)[-1]) for segment in segments) / 60.0
+    x = np.asarray([0.0, max(wall_min, 1.0e-6)], dtype=float)
+    smooth = np.asarray(
+        [
+            max(float(row["smooth_qi"]), 1.0e-16) if row and "smooth_qi" in row else np.nan,
+            max(_qi_smooth_total(diagnostics), 1.0e-16),
+        ],
+        dtype=float,
+    )
+    legacy = np.asarray(
+        [
+            max(float(row["legacy_qi"]), 1.0e-16) if row and "legacy_qi" in row else np.nan,
+            max(float(diagnostics["qi_legacy_total"]), 1.0e-16),
+        ],
+        dtype=float,
+    )
+    mirror = np.asarray(
+        [
+            max(float(row["mirror"]), 1.0e-16) if row and "mirror" in row else np.nan,
+            max(float(diagnostics["qi_mirror_ratio_max"]), 1.0e-16),
+        ],
+        dtype=float,
+    )
+
+    ax.semilogy(x, smooth, color="#1f4e79", linewidth=1.35, marker="o", markersize=2.6, label="smooth QI")
+    ax.semilogy(x, legacy, color="#756bb1", linewidth=1.2, marker="o", markersize=2.4, label="legacy QI")
+    ax2 = ax.twinx()
+    ax2.plot(x, mirror, color="#d95f02", linewidth=1.1, marker="s", markersize=2.4, label="mirror")
+    ax.axhline(float(diagnostics.get("qi_smooth_gate", 3.0e-3)), color="#1f4e79", linewidth=0.7, linestyle=":")
+    ax.axhline(float(diagnostics.get("qi_legacy_gate", 2.0e-3)), color="#756bb1", linewidth=0.7, linestyle=":")
+    ax2.axhline(float(diagnostics["qi_mirror_ratio_target"]), color="#d95f02", linewidth=0.7, linestyle=":")
+    ax.set_xticks(x)
+    ax.set_xticklabels(("reference\nproposal", "final\naudit"), fontsize=5.6)
+    ax.set_title("Reference-family proposal + audit gates", fontsize=8, pad=4)
+    ax.set_xlabel("Stage")
+    ax.set_ylabel("QI residual")
+    ax2.set_ylabel("Mirror ratio", fontsize=7)
+    ax.grid(True, alpha=0.22, linestyle=":")
+    lines, labels = ax.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax.legend(lines + lines2, labels + labels2, fontsize=4.8, frameon=False, loc="upper right", handlelength=1.1)
+    ax2.tick_params(axis="y", labelsize=5.4, pad=1)
 
 
 def _plot_preconditioner_sweep(ax, case: QICase) -> None:

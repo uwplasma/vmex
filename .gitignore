@@ -242,6 +242,7 @@ examples/data/*.nc
 # Allow small bundled VMEC2000 reference wout files (used by parity tests)
 !examples/data/wout_*.nc
 examples_single_grid/data/*.nc
+!examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc
 .assets_installed
 
 # Root-level generated VMEC run artifacts
