@@ -346,6 +346,63 @@ def _qi_smooth_total(diagnostics: dict) -> float:
     return float(diagnostics["qi_raw_total"])
 
 
+def _require_finite_metric(case: QICase, name: str, value: float) -> float:
+    value = float(value)
+    if not np.isfinite(value):
+        raise RuntimeError(f"{case.label} has non-finite {name}: {value!r}")
+    return value
+
+
+def _require_case_gated_diagnostics(
+    case: QICase,
+    diagnostics: dict,
+    *,
+    objective_final: float,
+    qi_smooth_total: float,
+    qi_legacy_total: float,
+    qi_mirror_ratio_max: float,
+    qi_mirror_ratio_target: float,
+    qi_max_elongation: float,
+    qi_elongation_target: float,
+    aspect: float,
+    target_aspect: float,
+    mean_iota: float,
+) -> None:
+    if diagnostics.get("qi_seed_gate_passed") is not True:
+        raise RuntimeError(f"{case.label} is case-gated but failed the QI seed gate")
+    if diagnostics.get("qi_engineering_gate_passed") is not True:
+        raise RuntimeError(f"{case.label} is case-gated but failed the QI engineering gate")
+    gate_failures = diagnostics.get("qi_gate_failures", [])
+    if gate_failures:
+        raise RuntimeError(f"{case.label} is case-gated but has QI gate failures: {gate_failures}")
+
+    metrics = {
+        "objective_final": objective_final,
+        "qi_smooth_total": qi_smooth_total,
+        "qi_legacy_total": qi_legacy_total,
+        "qi_mirror_ratio_max": qi_mirror_ratio_max,
+        "qi_mirror_ratio_target": qi_mirror_ratio_target,
+        "qi_max_elongation": qi_max_elongation,
+        "qi_elongation_target": qi_elongation_target,
+        "aspect": aspect,
+        "target_aspect": target_aspect,
+        "mean_iota": mean_iota,
+    }
+    for name, value in metrics.items():
+        _require_finite_metric(case, name, value)
+
+    if "qi_smooth_gate" in diagnostics and qi_smooth_total > float(diagnostics["qi_smooth_gate"]):
+        raise RuntimeError(f"{case.label} is case-gated but smooth QI exceeds its gate")
+    if "qi_legacy_gate" in diagnostics and qi_legacy_total > float(diagnostics["qi_legacy_gate"]):
+        raise RuntimeError(f"{case.label} is case-gated but legacy QI exceeds its gate")
+    if qi_mirror_ratio_max > qi_mirror_ratio_target:
+        raise RuntimeError(f"{case.label} is case-gated but mirror ratio exceeds its target")
+    if qi_max_elongation > qi_elongation_target:
+        raise RuntimeError(f"{case.label} is case-gated but elongation exceeds its target")
+    if "abs_iota_min" in diagnostics and abs(mean_iota) < float(diagnostics["abs_iota_min"]):
+        raise RuntimeError(f"{case.label} is case-gated but mean iota is below its floor")
+
+
 def _case_record(case: QICase) -> dict[str, str | float]:
     diagnostics = _load_json(case.output_dir / "diagnostics.json")
     history = _load_json(case.output_dir / "history.json")
@@ -361,8 +418,31 @@ def _case_record(case: QICase) -> dict[str, str | float]:
     if case.validation_status not in {"case-gated", "deferred"}:
         raise RuntimeError(f"{case.label} has unsupported validation_status={case.validation_status!r}")
     validation_status = "deferred" if case.validation_status == "deferred" or stress_fixture else "case-gated"
-    if validation_status == "case-gated" and diagnostics.get("qi_engineering_gate_passed") is False:
-        raise RuntimeError(f"{case.label} is case-gated but failed the QI engineering gate")
+    objective_final = float(history["objective_final"])
+    qi_smooth_total = _qi_smooth_total(diagnostics)
+    qi_legacy_total = float(diagnostics["qi_legacy_total"])
+    qi_mirror_ratio_max = float(diagnostics["qi_mirror_ratio_max"])
+    qi_mirror_ratio_target = float(diagnostics["qi_mirror_ratio_target"])
+    qi_max_elongation = float(diagnostics["qi_max_elongation"])
+    qi_elongation_target = float(diagnostics["qi_elongation_target"])
+    aspect = float(diagnostics["aspect"])
+    target_aspect = float(diagnostics["target_aspect"])
+    mean_iota = float(diagnostics["mean_iota"])
+    if validation_status == "case-gated":
+        _require_case_gated_diagnostics(
+            case,
+            diagnostics,
+            objective_final=objective_final,
+            qi_smooth_total=qi_smooth_total,
+            qi_legacy_total=qi_legacy_total,
+            qi_mirror_ratio_max=qi_mirror_ratio_max,
+            qi_mirror_ratio_target=qi_mirror_ratio_target,
+            qi_max_elongation=qi_max_elongation,
+            qi_elongation_target=qi_elongation_target,
+            aspect=aspect,
+            target_aspect=target_aspect,
+            mean_iota=mean_iota,
+        )
     return {
         "case": case.label,
         "input_file": str(case.input_file.relative_to(REPO_ROOT)),
@@ -373,16 +453,16 @@ def _case_record(case: QICase) -> dict[str, str | float]:
         "qi_seed_gate_passed": _optional_bool(diagnostics, "qi_seed_gate_passed"),
         "qi_engineering_gate_passed": _optional_bool(diagnostics, "qi_engineering_gate_passed"),
         "qi_gate_failures": ";".join(str(item) for item in diagnostics.get("qi_gate_failures", [])),
-        "objective_final": float(history["objective_final"]),
-        "qi_smooth_total": _qi_smooth_total(diagnostics),
-        "qi_legacy_total": float(diagnostics["qi_legacy_total"]),
-        "qi_mirror_ratio_max": float(diagnostics["qi_mirror_ratio_max"]),
-        "qi_mirror_ratio_target": float(diagnostics["qi_mirror_ratio_target"]),
-        "qi_max_elongation": float(diagnostics["qi_max_elongation"]),
-        "qi_elongation_target": float(diagnostics["qi_elongation_target"]),
-        "aspect": float(diagnostics["aspect"]),
-        "target_aspect": float(diagnostics["target_aspect"]),
-        "mean_iota": float(diagnostics["mean_iota"]),
+        "objective_final": objective_final,
+        "qi_smooth_total": qi_smooth_total,
+        "qi_legacy_total": qi_legacy_total,
+        "qi_mirror_ratio_max": qi_mirror_ratio_max,
+        "qi_mirror_ratio_target": qi_mirror_ratio_target,
+        "qi_max_elongation": qi_max_elongation,
+        "qi_elongation_target": qi_elongation_target,
+        "aspect": aspect,
+        "target_aspect": target_aspect,
+        "mean_iota": mean_iota,
         "qi_nfp": int(diagnostics["qi_nfp"]),
         "cpu_time_min": full_wall_s / 60.0,
         "published_stage_cpu_time_min": float(history["total_wall_time_s"]) / 60.0,
