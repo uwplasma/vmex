@@ -1108,6 +1108,16 @@ second ``jax.vjp`` through the same initial-state graph.  A cold QA
 remaining first-call cost is in the accepted VMEC tape solve/replay path rather
 than duplicated initial-state autodiff.
 
+The follow-up patch attacks the repeated initial-state construction inside that
+accepted-point path.  ``FixedBoundaryExactOptimizer`` now lazily JITs the
+parameter-to-packed-initial-state map (disable with
+``VMEC_JAX_OPT_JIT_INITIAL_STATE=0`` for diagnostics).  On the same QA
+``max_mode=1`` two-point CPU callback profile, enabling this helper reduced
+total exact callback wall time from ``7.99 s`` to ``6.94 s`` and lowered peak
+RSS from about ``1593 MiB`` to ``1456 MiB``.  The next hot bucket after this
+change is the unattributed compiled work inside the accepted VMEC iteration
+loop, not initialization.
+
 April 2026 local CPU diagnostics with ``inner_max_iter=trial_max_iter=300`` and
 ``max_nfev=2``:
 
