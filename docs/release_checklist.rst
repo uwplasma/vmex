@@ -9,7 +9,20 @@ artifacts.
 Required pre-push gate
 ----------------------
 
-Run these checks before pushing a release-candidate commit:
+Run the opt-in local CI gate before pushing a release-candidate commit:
+
+.. code-block:: bash
+
+   python tools/diagnostics/local_ci_gate.py
+
+This mirrors the hosted CI lanes that should be safe on a normal developer
+machine: CLI smoke, compile check, repository size audit, fast pytest with the
+current ``85%`` coverage fail-under, selected bounded physics smoke, wheel/sdist
+build, fast docs, and full docs.  It is deliberately not a Git hook; use
+``--dry-run``, ``--list``, ``--only STAGE``, and ``--skip STAGE`` when you need
+to inspect or narrow the gate locally.
+
+The expanded command form is:
 
 .. code-block:: bash
 

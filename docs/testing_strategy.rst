@@ -175,6 +175,42 @@ real tests for physics kernels and user workflows; do not raise the threshold
 because optional dependency tests happened to run on one developer machine.
 
 
+Opt-in Local CI Gate
+--------------------
+
+Before pushing a change that is likely to consume GitHub Actions minutes, run
+the local CI gate from the repository root:
+
+.. code-block:: bash
+
+   python tools/diagnostics/local_ci_gate.py
+
+This command is opt-in; it is not installed as a Git hook and it does not run
+automatically on every push.  It mirrors the required hosted CI lanes that are
+safe to run on a normal developer machine:
+
+- CLI smoke via ``vmec_jax --help`` and a two-iteration
+  ``input.circular_tokamak`` solve.
+- Python compile check for package, examples, tests, tools, and validation
+  helpers.
+- Repository size audit using
+  ``tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 60 --max-file-mib 5``.
+- Fast required pytest suite with the current ``85%`` coverage fail-under:
+  ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt"``
+  plus ``--cov=vmec_jax`` and ``--cov-fail-under=85``.
+- Bounded physics smoke after ``python tools/fetch_assets.py``.
+- Wheel/sdist build.
+- Fast Sphinx docs with ``SPHINX_FAST=1``.
+- Full Sphinx docs with warnings as errors.
+
+Use ``python tools/diagnostics/local_ci_gate.py --dry-run`` to inspect the
+commands without running them.  Use ``--list`` to see stage names, ``--only
+STAGE`` to run a single lane, and ``--skip STAGE`` to omit a lane when the
+change scope or local environment makes that appropriate.  Keep VMEC2000,
+SIMSOPT, GPU, and broader full-physics validation in the optional lanes below;
+they remain intentionally outside this local pre-push gate.
+
+
 Current Command Map
 -------------------
 
