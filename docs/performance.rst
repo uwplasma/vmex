@@ -398,6 +398,27 @@ the child.  Use ``--replay-column-chunk`` or
 Use ``--dynamic-replay-mode`` and ``--method`` to compare accepted-point replay
 paths and dense/matrix-free optimizer behavior under the same child-launch
 policy.
+For cold exact-callback bucket audits, start with one perturbed callback and a
+small iteration budget before launching larger GPU sweeps:
+
+.. code-block:: bash
+
+   PYTHONPATH=. python tools/diagnostics/gpu_cpu_performance_matrix.py \
+     --mode exact-callback \
+     --backend cpu --backend gpu --keep-going \
+     --problem qh --max-mode 2 --callback jacobian --repeats 1 \
+     --perturb-scale 1e-4 --inner-max-iter 20 --trial-max-iter 20 \
+     --method scipy_matrix_free --vmec-timing --sync-replay-timing \
+     --outdir outputs/performance_profiles/qh_m2_cold_bucket_smoke
+
+The matrix table surfaces ``exact_s``, ``tape_build_s``,
+``tape_unattr_s``, ``replay_s``, ``replay_dispatch_s``,
+``replay_ready_s``, ``init_tangent_s``, ``resid_tangent_s``, ``callbacks``,
+and ``replays`` when the child exact-callback report exposes those metrics.
+Use ``--sync-replay-timing`` only for targeted cold-bucket diagnostics: it
+adds ``block_until_ready`` synchronization so dispatch and device-ready buckets
+are attributable, but that synchronization is not representative of production
+sweep throughput.
 Malformed ``VMEC_JAX_REPLAY_COLUMN_CHUNK`` values now fall back to the automatic
 replay memory guard rather than aborting the Jacobian callback; set
 ``VMEC_JAX_REPLAY_COLUMN_CHUNK=off`` or ``0`` only when chunking should be
@@ -524,6 +545,13 @@ the preconditioner bucket is the bottleneck; it further reports
 ``exact_tape_solver_preconditioner_mode_scale``.  The detailed mode adds extra
 synchronization and should be used for targeted diagnostics, not production
 sweeps.
+Add ``--sync-replay-timing`` when the question is whether a cold callback is
+spending time in replay dispatch/compile-like overhead or in device-ready
+execution.  This exposes ``*_tape_replay_dispatch``,
+``*_tape_replay_ready``, ``*_initial_tangents_vmap_dispatch``, and
+``*_initial_tangents_vmap_ready`` buckets in the JSON profile.  Keep it off for
+normal CPU/GPU comparison sweeps because the explicit synchronization changes
+the measured workload.
 
 For production cache-growth audits, use the same accepted-point callback mode
 with JSON output and explicit budgets.  The report records per-repeat phase
