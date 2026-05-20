@@ -68,6 +68,15 @@ from .solve_diagnostics_io import (
     _should_print_vmec2000_row,
     _vmec2000_cadence_selected,
 )
+from .solve_options import (
+    validate_fixed_boundary_gd_options,
+    validate_fixed_boundary_lbfgs_options,
+    validate_lambda_gd_options,
+    validate_pressure_shape,
+    validate_residual_gn_options,
+    validate_residual_iteration_options,
+    validate_residual_lbfgs_options,
+)
 from .state import VMECState, pack_state, unpack_state
 
 
@@ -2708,21 +2717,20 @@ def solve_lambda_gd(
     if not has_jax():
         raise ImportError("solve_lambda_gd requires JAX (jax + jaxlib)")
 
-    max_iter = int(max_iter)
-    if max_iter < 1:
-        raise ValueError("max_iter must be >= 1")
-    if max_backtracks < 0:
-        raise ValueError("max_backtracks must be >= 0")
-    if not (0.0 < bt_factor < 1.0):
-        raise ValueError("bt_factor must be in (0, 1)")
+    opts = validate_lambda_gd_options(
+        max_iter=max_iter,
+        max_backtracks=max_backtracks,
+        bt_factor=bt_factor,
+        preconditioner=preconditioner,
+        precond_exponent=precond_exponent,
+    )
+    max_iter = opts.max_iter
+    max_backtracks = opts.max_backtracks
+    bt_factor = opts.bt_factor
+    preconditioner = opts.preconditioner
+    precond_exponent = opts.precond_exponent
 
     idx00 = _mode00_index(static.modes)
-    preconditioner = str(preconditioner).strip().lower()
-    if preconditioner not in ("none", "mode_diag"):
-        raise ValueError(f"Unknown preconditioner kind={preconditioner!r}")
-    precond_exponent = float(precond_exponent)
-    if preconditioner != "none" and precond_exponent <= 0.0:
-        raise ValueError("precond_exponent must be > 0 when using a preconditioner")
 
     # Metric depends only on R/Z, so compute it once.
     g0 = eval_geom(state0, static)
@@ -2912,17 +2920,16 @@ def solve_fixed_boundary_gd(
     if not has_jax():
         raise ImportError("solve_fixed_boundary_gd requires JAX (jax + jaxlib)")
 
-    max_iter = int(max_iter)
-    if max_iter < 1:
-        raise ValueError("max_iter must be >= 1")
-    if max_backtracks < 0:
-        raise ValueError("max_backtracks must be >= 0")
-    if not (0.0 < bt_factor < 1.0):
-        raise ValueError("bt_factor must be in (0, 1)")
-
-    gamma = float(gamma)
-    if abs(gamma - 1.0) < 1e-14:
-        raise ValueError("gamma=1 makes wp/(gamma-1) singular")
+    opts = validate_fixed_boundary_gd_options(
+        max_iter=max_iter,
+        max_backtracks=max_backtracks,
+        bt_factor=bt_factor,
+        gamma=gamma,
+    )
+    max_iter = opts.max_iter
+    max_backtracks = opts.max_backtracks
+    bt_factor = opts.bt_factor
+    gamma = opts.gamma
 
     idx00 = _mode00_index(static.modes)
 
@@ -2947,8 +2954,7 @@ def solve_fixed_boundary_gd(
     if pressure is None:
         pressure = jnp.zeros_like(s)
     pressure = jnp.asarray(pressure)
-    if pressure.shape != s.shape:
-        raise ValueError(f"pressure must have shape {s.shape}, got {pressure.shape}")
+    validate_pressure_shape(tuple(pressure.shape), tuple(s.shape))
 
     edge_Rcos = jnp.asarray(edge_Rcos) if edge_Rcos is not None else jnp.asarray(state0.Rcos)[-1, :]
     edge_Rsin = jnp.asarray(edge_Rsin) if edge_Rsin is not None else jnp.asarray(state0.Rsin)[-1, :]
@@ -3208,20 +3214,18 @@ def solve_fixed_boundary_lbfgs(
     if not has_jax():
         raise ImportError("solve_fixed_boundary_lbfgs requires JAX (jax + jaxlib)")
 
-    history_size = int(history_size)
-    if history_size < 1:
-        raise ValueError("history_size must be >= 1")
-    max_iter = int(max_iter)
-    if max_iter < 1:
-        raise ValueError("max_iter must be >= 1")
-    if max_backtracks < 0:
-        raise ValueError("max_backtracks must be >= 0")
-    if not (0.0 < bt_factor < 1.0):
-        raise ValueError("bt_factor must be in (0, 1)")
-
-    gamma = float(gamma)
-    if abs(gamma - 1.0) < 1e-14:
-        raise ValueError("gamma=1 makes wp/(gamma-1) singular")
+    opts = validate_fixed_boundary_lbfgs_options(
+        history_size=history_size,
+        max_iter=max_iter,
+        max_backtracks=max_backtracks,
+        bt_factor=bt_factor,
+        gamma=gamma,
+    )
+    history_size = opts.history_size
+    max_iter = opts.max_iter
+    max_backtracks = opts.max_backtracks
+    bt_factor = opts.bt_factor
+    gamma = opts.gamma
 
     idx00 = _mode00_index(static.modes)
 
@@ -3246,8 +3250,7 @@ def solve_fixed_boundary_lbfgs(
     if pressure is None:
         pressure = jnp.zeros_like(s)
     pressure = jnp.asarray(pressure)
-    if pressure.shape != s.shape:
-        raise ValueError(f"pressure must have shape {s.shape}, got {pressure.shape}")
+    validate_pressure_shape(tuple(pressure.shape), tuple(s.shape))
 
     edge_Rcos = jnp.asarray(edge_Rcos) if edge_Rcos is not None else jnp.asarray(state0.Rcos)[-1, :]
     edge_Rsin = jnp.asarray(edge_Rsin) if edge_Rsin is not None else jnp.asarray(state0.Rsin)[-1, :]
@@ -3696,27 +3699,26 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
     if not has_jax():
         raise ImportError("solve_fixed_boundary_lbfgs_vmec_residual requires JAX (jax + jaxlib)")
 
-    w_rz = float(w_rz)
-    w_l = float(w_l)
-    if w_rz < 0.0 or w_l < 0.0:
-        raise ValueError("w_rz and w_l must be nonnegative")
-    if objective_scale is not None and float(objective_scale) <= 0.0:
-        raise ValueError("objective_scale must be positive when provided")
-    scale_rz = float(scale_rz)
-    scale_l = float(scale_l)
-    if scale_rz <= 0.0 or scale_l <= 0.0:
-        raise ValueError("scale_rz and scale_l must be positive")
-
-    history_size = int(history_size)
-    if history_size < 1:
-        raise ValueError("history_size must be >= 1")
-    max_iter = int(max_iter)
-    if max_iter < 1:
-        raise ValueError("max_iter must be >= 1")
-    if max_backtracks < 0:
-        raise ValueError("max_backtracks must be >= 0")
-    if not (0.0 < bt_factor < 1.0):
-        raise ValueError("bt_factor must be in (0, 1)")
+    opts = validate_residual_lbfgs_options(
+        w_rz=w_rz,
+        w_l=w_l,
+        objective_scale=objective_scale,
+        scale_rz=scale_rz,
+        scale_l=scale_l,
+        history_size=history_size,
+        max_iter=max_iter,
+        max_backtracks=max_backtracks,
+        bt_factor=bt_factor,
+    )
+    w_rz = opts.w_rz
+    w_l = opts.w_l
+    objective_scale = opts.objective_scale
+    scale_rz = opts.scale_rz
+    scale_l = opts.scale_l
+    history_size = opts.history_size
+    max_iter = opts.max_iter
+    max_backtracks = opts.max_backtracks
+    bt_factor = opts.bt_factor
 
     idx00 = _mode00_index(static.modes)
     signgs = int(signgs)
@@ -4196,35 +4198,36 @@ def solve_fixed_boundary_gn_vmec_residual(
     """
     if not has_jax():
         raise ImportError("solve_fixed_boundary_gn_vmec_residual requires JAX (jax + jaxlib)")
-    damping_increase = float(damping_increase)
-    damping_decrease = float(damping_decrease)
-    max_retries = int(max_retries)
-    if damping_increase <= 1.0:
-        raise ValueError("damping_increase must be > 1")
-    if not (0.0 < damping_decrease <= 1.0):
-        raise ValueError("damping_decrease must be in (0, 1]")
-    max_damping_eff = float("inf") if max_damping is None else float(max_damping)
-    if max_damping_eff <= 0.0:
-        raise ValueError("max_damping must be positive")
-    if max_retries < 0:
-        raise ValueError("max_retries must be >= 0")
-    zero_m1_iters_eff = 0 if zero_m1_iters is None else int(zero_m1_iters)
-    if zero_m1_iters_eff < 0:
-        raise ValueError("zero_m1_iters must be >= 0")
-    if zero_m1_fsqz_thresh is not None and float(zero_m1_fsqz_thresh) < 0.0:
-        raise ValueError("zero_m1_fsqz_thresh must be >= 0")
-    w_rz = float(w_rz)
-    w_l = float(w_l)
-    if w_rz < 0.0 or w_l < 0.0:
-        raise ValueError("w_rz and w_l must be nonnegative")
-    if max_iter < 1:
-        raise ValueError("max_iter must be >= 1")
-    if cg_maxiter < 1:
-        raise ValueError("cg_maxiter must be >= 1")
-    if not (0.0 < bt_factor < 1.0):
-        raise ValueError("bt_factor must be in (0, 1)")
-    if objective_scale is not None and float(objective_scale) <= 0.0:
-        raise ValueError("objective_scale must be positive when provided")
+    opts = validate_residual_gn_options(
+        damping=damping,
+        damping_increase=damping_increase,
+        damping_decrease=damping_decrease,
+        max_damping=max_damping,
+        max_retries=max_retries,
+        zero_m1_iters=zero_m1_iters,
+        zero_m1_fsqz_thresh=zero_m1_fsqz_thresh,
+        w_rz=w_rz,
+        w_l=w_l,
+        max_iter=max_iter,
+        cg_maxiter=cg_maxiter,
+        max_backtracks=max_backtracks,
+        bt_factor=bt_factor,
+        objective_scale=objective_scale,
+    )
+    damping = opts.damping
+    damping_increase = opts.damping_increase
+    damping_decrease = opts.damping_decrease
+    max_damping_eff = opts.max_damping_eff
+    max_retries = opts.max_retries
+    zero_m1_iters_eff = opts.zero_m1_iters_eff
+    zero_m1_fsqz_thresh = opts.zero_m1_fsqz_thresh
+    w_rz = opts.w_rz
+    w_l = opts.w_l
+    max_iter = opts.max_iter
+    cg_maxiter = opts.cg_maxiter
+    max_backtracks = opts.max_backtracks
+    bt_factor = opts.bt_factor
+    objective_scale = opts.objective_scale
 
     constraint_tcon0: float | None = None
     if bool(include_constraint_force):
@@ -4709,18 +4712,28 @@ def solve_fixed_boundary_residual_iter(
 
         return tuple(float(v) for v in jax.device_get(vals))
 
-    max_iter = int(max_iter)
-    precompile_only = bool(precompile_only)
-    if max_iter < 1 and not precompile_only:
-        raise ValueError("max_iter must be >= 1")
-    if max_iter < 1 and precompile_only:
-        max_iter = 1
-    step_size = float(step_size)
-    if step_size <= 0.0:
-        raise ValueError("step_size must be positive")
+    opts = validate_residual_iteration_options(
+        max_iter=max_iter,
+        step_size=step_size,
+        precompile_only=precompile_only,
+        signgs=signgs,
+        lambda_update_scale=lambda_update_scale,
+        enforce_vmec_lambda_axis=enforce_vmec_lambda_axis,
+        vmec2000_control=vmec2000_control,
+        reference_mode=reference_mode,
+        limit_dt_from_force=limit_dt_from_force,
+        limit_update_rms=limit_update_rms,
+        backtracking=backtracking,
+        strict_update=strict_update,
+        jit_precompile=jit_precompile,
+        use_scan=use_scan,
+    )
+    max_iter = opts.max_iter
+    step_size = opts.step_size
+    precompile_only = opts.precompile_only
     host_update_assembly = _host_update_assembly_policy(
         requested=host_update_assembly,
-        use_scan=bool(use_scan),
+        use_scan=opts.use_scan,
         backend_name=jax.default_backend(),
         state_has_tracer=_tree_has_tracer(state0),
     ).enabled
@@ -4730,11 +4743,11 @@ def solve_fixed_boundary_residual_iter(
     def _adjoint_trace_array(value):
         return _materialize_adjoint_trace_array(value, mode=adjoint_trace_mode)
 
-    signgs = int(signgs)
+    signgs = opts.signgs
     fsq_total_target = None if fsq_total_target is None else max(0.0, float(fsq_total_target))
-    lambda_update_scale = float(lambda_update_scale)
-    enforce_vmec_lambda_axis = bool(enforce_vmec_lambda_axis)
-    vmec2000_control = bool(vmec2000_control)
+    lambda_update_scale = opts.lambda_update_scale
+    enforce_vmec_lambda_axis = opts.enforce_vmec_lambda_axis
+    vmec2000_control = opts.vmec2000_control
     badjac_mode_env = os.getenv("VMEC_JAX_BADJAC_MODE", "ptau").strip().lower()
     if badjac_mode_env not in ("ptau", "state"):
         badjac_mode_env = "ptau"
@@ -4758,8 +4771,8 @@ def solve_fixed_boundary_residual_iter(
         ptau_tol_rel = 0.0
     if ptau_tol_rel < 0.0:
         ptau_tol_rel = 0.0
-    reference_mode = bool(reference_mode)
-    jit_precompile = bool(jit_precompile)
+    reference_mode = opts.reference_mode
+    jit_precompile = opts.jit_precompile
     restart_flags = _resolve_restart_flags(
         use_restart_triggers=use_restart_triggers,
         use_direct_fallback=use_direct_fallback,
@@ -4822,10 +4835,10 @@ def solve_fixed_boundary_residual_iter(
         # and are therefore only valid for ordinary primal runs.
         force_chunked_scan = False
         scan_fallback_enabled = False
-    limit_dt_from_force = bool(limit_dt_from_force)
-    limit_update_rms = bool(limit_update_rms)
-    backtracking = bool(backtracking)
-    strict_update = bool(strict_update)
+    limit_dt_from_force = opts.limit_dt_from_force
+    limit_update_rms = opts.limit_update_rms
+    backtracking = opts.backtracking
+    strict_update = opts.strict_update
     light_dump_envs = (
         "VMEC_JAX_DUMP_SCALARS",
         "VMEC_JAX_DUMP_GCX2",
