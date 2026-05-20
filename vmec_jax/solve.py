@@ -1962,6 +1962,18 @@ def _append_residual_iter_terminal_history(
     grad_rms_history.append(float(np.sqrt(max(float(fsqr) + float(fsqz) + float(fsql), 0.0))))
 
 
+def _zero_velocity_blocks_like(*blocks):
+    """Return zeroed velocity blocks with each input block's shape and dtype."""
+
+    return tuple(jnp.zeros_like(block) for block in blocks)
+
+
+def _scale_velocity_blocks(scale: float, *blocks):
+    """Scale velocity blocks uniformly while preserving JAX array semantics."""
+
+    return tuple(float(scale) * block for block in blocks)
+
+
 def _sample_free_boundary_external_field(*, state: VMECState, static) -> dict[str, Any]:
     """WP2 diagnostic scaffold for external-field boundary channels."""
     from .free_boundary import sample_external_vacuum_diagnostics
@@ -13565,18 +13577,20 @@ def solve_fixed_boundary_residual_iter(
                     )
                     pre_restart_reason = tc.pre_restart_reason
                     state = state_checkpoint
-                    vRcc = jnp.zeros_like(vRcc)
-                    vRss = jnp.zeros_like(vRss)
-                    vZsc = jnp.zeros_like(vZsc)
-                    vZcs = jnp.zeros_like(vZcs)
-                    vLsc = jnp.zeros_like(vLsc)
-                    vLcs = jnp.zeros_like(vLcs)
-                    vRsc = jnp.zeros_like(vRsc)
-                    vRcs = jnp.zeros_like(vRcs)
-                    vZcc = jnp.zeros_like(vZcc)
-                    vZss = jnp.zeros_like(vZss)
-                    vLcc = jnp.zeros_like(vLcc)
-                    vLss = jnp.zeros_like(vLss)
+                    (
+                        vRcc,
+                        vRss,
+                        vZsc,
+                        vZcs,
+                        vLsc,
+                        vLcs,
+                        vRsc,
+                        vRcs,
+                        vZcc,
+                        vZss,
+                        vLcc,
+                        vLss,
+                    ) = _zero_velocity_blocks_like(vRcc, vRss, vZsc, vZcs, vLsc, vLcs, vRsc, vRcs, vZcc, vZss, vLcc, vLss)
                     iter1_prev = int(iter1)
                     time_step_prev = float(time_step)
                     _dump_time_control_trace(
@@ -13725,18 +13739,20 @@ def solve_fixed_boundary_residual_iter(
                 vLcc_before = vLcc
                 vLss_before = vLss
                 state = state_checkpoint
-                vRcc = jnp.zeros_like(vRcc)
-                vRss = jnp.zeros_like(vRss)
-                vZsc = jnp.zeros_like(vZsc)
-                vZcs = jnp.zeros_like(vZcs)
-                vLsc = jnp.zeros_like(vLsc)
-                vLcs = jnp.zeros_like(vLcs)
-                vRsc = jnp.zeros_like(vRsc)
-                vRcs = jnp.zeros_like(vRcs)
-                vZcc = jnp.zeros_like(vZcc)
-                vZss = jnp.zeros_like(vZss)
-                vLcc = jnp.zeros_like(vLcc)
-                vLss = jnp.zeros_like(vLss)
+                (
+                    vRcc,
+                    vRss,
+                    vZsc,
+                    vZcs,
+                    vLsc,
+                    vLcs,
+                    vRsc,
+                    vRcs,
+                    vZcc,
+                    vZss,
+                    vLcc,
+                    vLss,
+                ) = _zero_velocity_blocks_like(vRcc, vRss, vZsc, vZcs, vLsc, vLcs, vRsc, vRcs, vZcc, vZss, vLcc, vLss)
                 if pre_restart_reason == "bad_jacobian":
                     time_step = max(restart_badjac_factor * time_step, 1e-12)
                     ijacob += 1
@@ -14552,18 +14568,33 @@ def solve_fixed_boundary_residual_iter(
                     w_dir = float(np.asarray(fsqr_d + fsqz_d + fsql_d))
                     if np.isfinite(w_dir) and (w_dir <= 1.5 * max(w_curr, 1e-30)):
                         state = state_dir
-                        vRcc = jnp.zeros_like(vRcc)
-                        vRss = jnp.zeros_like(vRss)
-                        vZsc = jnp.zeros_like(vZsc)
-                        vZcs = jnp.zeros_like(vZcs)
-                        vLsc = jnp.zeros_like(vLsc)
-                        vLcs = jnp.zeros_like(vLcs)
-                        vRsc = jnp.zeros_like(vRsc)
-                        vRcs = jnp.zeros_like(vRcs)
-                        vZcc = jnp.zeros_like(vZcc)
-                        vZss = jnp.zeros_like(vZss)
-                        vLcc = jnp.zeros_like(vLcc)
-                        vLss = jnp.zeros_like(vLss)
+                        (
+                            vRcc,
+                            vRss,
+                            vZsc,
+                            vZcs,
+                            vLsc,
+                            vLcs,
+                            vRsc,
+                            vRcs,
+                            vZcc,
+                            vZss,
+                            vLcc,
+                            vLss,
+                        ) = _zero_velocity_blocks_like(
+                            vRcc,
+                            vRss,
+                            vZsc,
+                            vZcs,
+                            vLsc,
+                            vLcs,
+                            vRsc,
+                            vRcs,
+                            vZcc,
+                            vZss,
+                            vLcc,
+                            vLss,
+                        )
                         step_status = "fallback_direct"
                         restart_reason = "none"
                         huge_force_restart_count = 0
@@ -14593,12 +14624,9 @@ def solve_fixed_boundary_residual_iter(
                     else:
                         # Roll back state and zero velocity.
                         state = state_backup
-                        vRcc = jnp.zeros_like(vRcc)
-                        vRss = jnp.zeros_like(vRss)
-                        vZsc = jnp.zeros_like(vZsc)
-                        vZcs = jnp.zeros_like(vZcs)
-                        vLsc = jnp.zeros_like(vLsc)
-                        vLcs = jnp.zeros_like(vLcs)
+                        vRcc, vRss, vZsc, vZcs, vLsc, vLcs = _zero_velocity_blocks_like(
+                            vRcc, vRss, vZsc, vZcs, vLsc, vLcs
+                        )
                         # Tighten displacement caps when restarting from
                         # catastrophic growth; otherwise dt_eff can remain
                         # stuck at the same limit.
@@ -14643,12 +14671,9 @@ def solve_fixed_boundary_residual_iter(
                 else:
                     # Roll back state and zero velocity.
                     state = state_backup
-                    vRcc = jnp.zeros_like(vRcc)
-                    vRss = jnp.zeros_like(vRss)
-                    vZsc = jnp.zeros_like(vZsc)
-                    vZcs = jnp.zeros_like(vZcs)
-                    vLsc = jnp.zeros_like(vLsc)
-                    vLcs = jnp.zeros_like(vLcs)
+                    vRcc, vRss, vZsc, vZcs, vLsc, vLcs = _zero_velocity_blocks_like(
+                        vRcc, vRss, vZsc, vZcs, vLsc, vLcs
+                    )
                     # Tighten displacement caps when restarting from catastrophic
                     # growth; otherwise dt_eff can remain stuck at the same limit.
                     max_coeff_delta_rms = max(0.5 * max_coeff_delta_rms, 1e-12)
@@ -14877,18 +14902,20 @@ def solve_fixed_boundary_residual_iter(
             vLcc, vLss = vLcc_best, vLss_best
             if not accepted:
                 # No acceptable update was found; damp velocity to avoid runaway.
-                vRcc = 0.5 * vRcc
-                vRss = 0.5 * vRss
-                vRsc = 0.5 * vRsc
-                vRcs = 0.5 * vRcs
-                vZsc = 0.5 * vZsc
-                vZcs = 0.5 * vZcs
-                vZcc = 0.5 * vZcc
-                vZss = 0.5 * vZss
-                vLsc = 0.5 * vLsc
-                vLcs = 0.5 * vLcs
-                vLcc = 0.5 * vLcc
-                vLss = 0.5 * vLss
+                (
+                    vRcc,
+                    vRss,
+                    vRsc,
+                    vRcs,
+                    vZsc,
+                    vZcs,
+                    vZcc,
+                    vZss,
+                    vLsc,
+                    vLcs,
+                    vLcc,
+                    vLss,
+                ) = _scale_velocity_blocks(0.5, vRcc, vRss, vRsc, vRcs, vZsc, vZcs, vZcc, vZss, vLsc, vLcs, vLcc, vLss)
                 dt_eff = float(step_size * step_factor)
                 update_rms = 0.0
                 step_status = "rejected"
