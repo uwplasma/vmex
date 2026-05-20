@@ -90,6 +90,54 @@ def _jsonable(value):
     return _jsonable(arr.tolist())
 
 
+def _write_json_atomic(path, payload) -> None:
+    """Write a JSON artifact via replace so interrupted writes do not corrupt it."""
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(json.dumps(_jsonable(payload), indent=2, sort_keys=True) + "\n")
+    tmp.replace(path)
+
+
+def _stage_result_history(stage_result) -> dict:
+    """Return the history payload from either workflow results or test doubles."""
+
+    history = getattr(stage_result, "history", None)
+    if history is None and isinstance(stage_result, dict):
+        history = stage_result.get("_history_dump")
+    if history is None:
+        final_result = getattr(stage_result, "final_result", {})
+        if isinstance(final_result, dict):
+            history = final_result.get("_history_dump")
+    return dict(history or {})
+
+
+def _partial_diagnostics_from_history(history: dict, diagnostics: dict) -> dict:
+    """Keep diagnostics.json useful before expensive independent QI diagnostics run."""
+
+    out = dict(diagnostics)
+    if out:
+        return out
+    mapping = {
+        "objective_final": "objective_final",
+        "qs_final": "qs_final",
+        "aspect": "aspect_final",
+        "mean_iota": "iota_final",
+        "nfev": "nfev",
+        "njev": "njev",
+        "total_wall_time_s": "total_wall_time_s",
+    }
+    for out_key, history_key in mapping.items():
+        value = history.get(history_key)
+        if value is not None:
+            out[out_key] = value
+    if out:
+        out["partial"] = True
+        out["diagnostics_pending"] = True
+    return out
+
+
 def save_raw_seed_initial_artifacts(input_file, input_out, wout_out):
     """Save the unpreconditioned VMEC input deck and its solved WOUT."""
 
@@ -395,8 +443,8 @@ def write_qi_stage_checkpoint(
 
     stage_output_dir = Path(stage_output_dir)
     stage_output_dir.mkdir(parents=True, exist_ok=True)
-    history = dict(stage_result.history)
-    diagnostics = dict(diagnostics)
+    history = _stage_result_history(stage_result)
+    diagnostics = _partial_diagnostics_from_history(history, dict(diagnostics))
     promotion = {} if promotion is None else dict(promotion)
     provenance = {
         "stage_output_dir": str(stage_output_dir),
@@ -435,11 +483,14 @@ def write_qi_stage_checkpoint(
         "initial_wout_path": provenance["initial_wout_path"],
         "final_wout_path": provenance["final_wout_path"],
     }
+    history_path = stage_output_dir / "history.json"
     diagnostics_path = stage_output_dir / "diagnostics.json"
     checkpoint_path = stage_output_dir / "qi_stage_checkpoint.json"
-    diagnostics_path.write_text(json.dumps(_jsonable(diagnostics), indent=2, sort_keys=True) + "\n")
-    checkpoint_path.write_text(json.dumps(checkpoint, indent=2, sort_keys=True) + "\n")
-    (OUTPUT_DIR / "stage_checkpoint.json").write_text(json.dumps(checkpoint, indent=2, sort_keys=True) + "\n")
+    if history:
+        _write_json_atomic(history_path, history)
+    _write_json_atomic(diagnostics_path, diagnostics)
+    _write_json_atomic(checkpoint_path, checkpoint)
+    _write_json_atomic(OUTPUT_DIR / "stage_checkpoint.json", checkpoint)
     return checkpoint_path
 
 

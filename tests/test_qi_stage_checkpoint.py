@@ -67,9 +67,12 @@ def test_qi_stage_checkpoint_preserves_partial_metrics_gates_and_provenance(tmp_
 
     checkpoint = json.loads(checkpoint_path.read_text())
     root_checkpoint = json.loads((tmp_path / "stage_checkpoint.json").read_text())
+    stage_history = json.loads((stage_dir / "history.json").read_text())
     stage_diagnostics = json.loads((stage_dir / "diagnostics.json").read_text())
 
     assert root_checkpoint == checkpoint
+    assert stage_history["objective_initial"] == 4.0
+    assert stage_history["objective_final"] == 1.25
     assert stage_diagnostics["qi_engineering_gate_passed"] is True
     assert checkpoint["partial"] is True
     assert checkpoint["role"] == "mirror_ramp"
@@ -90,3 +93,47 @@ def test_qi_stage_checkpoint_preserves_partial_metrics_gates_and_provenance(tmp_
         "initial_wout_path": str(stage_dir / "wout_initial.nc"),
         "final_wout_path": str(stage_dir / "wout_final.nc"),
     }
+
+
+def test_qi_stage_checkpoint_writes_history_and_partial_diagnostics_before_audit(tmp_path: Path) -> None:
+    mod = _load_module()
+    mod.configure({"OUTPUT_DIR": tmp_path})
+    stage_result = SimpleNamespace(
+        history={
+            "history": [
+                {"objective": 3.0, "qs_objective": 2.0e-3, "aspect": 8.8, "iota": 0.41, "wall_time_s": 0.0},
+                {"objective": 1.5, "qs_objective": 1.1e-3, "aspect": 7.2, "iota": 0.46, "wall_time_s": 4.0},
+            ],
+            "objective_final": 1.5,
+            "qs_final": 1.1e-3,
+            "aspect_final": 7.2,
+            "iota_final": 0.46,
+            "nfev": 3,
+            "njev": 2,
+            "total_wall_time_s": 4.0,
+        }
+    )
+
+    checkpoint_path = mod.write_qi_stage_checkpoint(
+        tmp_path,
+        stage_index=1,
+        stage_name="qi_optimization",
+        stage_modes=(3,),
+        stage_result=stage_result,
+        diagnostics={},
+        promotion={"diagnostics_pending": True},
+        role="stage_pre_diagnostics",
+    )
+
+    history = json.loads((tmp_path / "history.json").read_text())
+    diagnostics = json.loads((tmp_path / "diagnostics.json").read_text())
+    checkpoint = json.loads(checkpoint_path.read_text())
+
+    assert history["history"][-1]["objective"] == 1.5
+    assert diagnostics["partial"] is True
+    assert diagnostics["diagnostics_pending"] is True
+    assert diagnostics["objective_final"] == 1.5
+    assert diagnostics["qs_final"] == 1.1e-3
+    assert diagnostics["aspect"] == 7.2
+    assert diagnostics["mean_iota"] == 0.46
+    assert checkpoint["history_path"] == str(tmp_path / "history.json")

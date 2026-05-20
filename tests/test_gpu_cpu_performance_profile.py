@@ -11,6 +11,7 @@ TOOL_PATH = REPO_ROOT / "tools" / "diagnostics" / "gpu_cpu_performance_matrix.py
 FIXED_TOOL_PATH = REPO_ROOT / "tools" / "diagnostics" / "profile_fixed_boundary.py"
 QI_TOOL_PATH = REPO_ROOT / "tools" / "diagnostics" / "profile_qi_boozer_gpu.py"
 COMPARE_TOOL_PATH = REPO_ROOT / "tools" / "diagnostics" / "compare_profile_reports.py"
+EXACT_TOOL_PATH = REPO_ROOT / "tools" / "diagnostics" / "profile_exact_optimizer.py"
 
 
 def _load_tool():
@@ -39,6 +40,14 @@ def _load_qi_tool():
 
 def _load_compare_tool():
     spec = importlib.util.spec_from_file_location("compare_profile_reports", COMPARE_TOOL_PATH)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_exact_tool():
+    spec = importlib.util.spec_from_file_location("profile_exact_optimizer", EXACT_TOOL_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -222,6 +231,9 @@ def test_exact_callback_summary_preserves_cold_tangent_replay_and_scan_trial_buc
             "jacobian_tape_replay_dispatch": {"count": 1, "wall_time_s": 0.2},
             "jacobian_tape_replay_ready": {"count": 1, "wall_time_s": 1.9},
             "jacobian_residual_tangents": {"count": 1, "wall_time_s": 0.8},
+            "exact_tape_solver_compute_forces": {"count": 1, "wall_time_s": 1.7},
+            "exact_tape_solver_compute_forces_first": {"count": 1, "wall_time_s": 0.9},
+            "exact_tape_solver_compute_forces_rest": {"count": 1, "wall_time_s": 0.8},
             "trial_solver_scan_total": {"count": 1, "wall_time_s": 1.2},
             "trial_solver_scan_setup": {"count": 1, "wall_time_s": 0.1},
             "trial_solver_scan_run_setup": {"count": 1, "wall_time_s": 0.15},
@@ -244,12 +256,44 @@ def test_exact_callback_summary_preserves_cold_tangent_replay_and_scan_trial_buc
     assert metrics["initial_tangents_vmap_dispatch_s"] == 0.2
     assert metrics["initial_tangents_vmap_ready_s"] == 0.9
     assert metrics["residual_tangents_s"] == 0.8
+    assert metrics["exact_tape_solver_compute_forces_s"] == 1.7
+    assert metrics["exact_tape_solver_compute_forces_first_s"] == 0.9
+    assert metrics["exact_tape_solver_compute_forces_rest_s"] == 0.8
     assert metrics["trial_solver_scan_total_s"] == 1.2
     assert metrics["trial_solver_scan_run_setup_s"] == 0.15
     assert metrics["trial_solver_scan_device_run_s"] == 0.75
     assert metrics["trial_solver_scan_device_dispatch_s"] == 0.05
     assert metrics["trial_solver_scan_device_ready_s"] == 0.7
     assert summary["exact_optimizer_patch_target"]["name"] == "jacobian_tape_replay_ready"
+
+
+def test_exact_optimizer_point_cache_clear_preserves_initial_tangent_cache():
+    exact_tool = _load_exact_tool()
+
+    class Optimizer:
+        def __init__(self):
+            self._exact_cache = {"point": object()}
+            self._exact_state_cache = {"point": object()}
+            self._exact_state_key_by_id = {1: "point"}
+            self._exact_residual_cache = {"point": object()}
+            self._exact_jacobian_cache = {"point": object()}
+            self._trial_residual_cache = {"point": object()}
+            self._initial_state_cache = {"point": object()}
+            self._initial_tangent_cache = {"branch": object()}
+            self._last_jacobian_residual = object()
+
+    opt = Optimizer()
+    exact_tool._clear_optimizer_point_caches(opt)
+
+    assert opt._exact_cache == {}
+    assert opt._exact_state_cache == {}
+    assert opt._exact_state_key_by_id == {}
+    assert opt._exact_residual_cache == {}
+    assert opt._exact_jacobian_cache == {}
+    assert opt._trial_residual_cache == {}
+    assert opt._initial_state_cache == {}
+    assert set(opt._initial_tangent_cache) == {"branch"}
+    assert opt._last_jacobian_residual is None
 
 
 def test_exact_callback_summary_uses_split_replay_when_total_bucket_is_absent():
