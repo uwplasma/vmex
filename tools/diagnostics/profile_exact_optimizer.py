@@ -125,7 +125,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--clear-between-repeats",
         action="store_true",
-        help="Clear exact optimizer caches between callback repetitions.",
+        help=(
+            "Clear point-specific exact optimizer caches between callback repetitions. "
+            "Shape/branch initial-tangent caches are preserved."
+        ),
     )
     p.add_argument(
         "--gradient-only",
@@ -630,7 +633,7 @@ def _build_callback_payload(
 
 
 def _clear_optimizer_point_caches(opt) -> None:
-    """Clear solved-state/tape caches without dropping compiled executables."""
+    """Clear solved-state/tape caches without dropping structural helpers."""
     opt._exact_cache.clear()
     opt._exact_state_cache.clear()
     if hasattr(opt, "_exact_state_key_by_id"):
@@ -642,7 +645,8 @@ def _clear_optimizer_point_caches(opt) -> None:
     opt._trial_residual_cache.clear()
     if hasattr(opt, "_initial_state_cache"):
         opt._initial_state_cache.clear()
-    opt._initial_tangent_cache.clear()
+    # Initial tangent columns are keyed by structural branch, not by accepted
+    # point. Keep them warm while forcing cold exact accepted-point tapes.
     opt._last_jacobian_residual = None
 
 
@@ -653,6 +657,8 @@ def _install_profile_timing_supplements(opt) -> None:
     supplemental_keys = (
         ("scan_setup_s", "scan_setup"),
         ("scan_run_setup_s", "scan_run_setup"),
+        ("compute_forces_first_s", "compute_forces_first"),
+        ("compute_forces_rest_s", "compute_forces_rest"),
     )
 
     def _profile_solver_timing_with_supplements(
