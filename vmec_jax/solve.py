@@ -4830,6 +4830,7 @@ def solve_fixed_boundary_residual_iter(
     )
     force_chunked_scan = chunked_scan_config.force_chunked_scan
     scan_fallback_enabled = chunked_scan_config.scan_fallback_enabled
+    differentiating_scan = chunked_scan_config.differentiating_scan
     limit_dt_from_force = opts.limit_dt_from_force
     limit_update_rms = opts.limit_update_rms
     backtracking = opts.backtracking
