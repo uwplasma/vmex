@@ -140,7 +140,7 @@ evidence. Full examples and caveats are in `docs/optimization.rst`.
 - Release checklist and CI gates: `docs/release_checklist.rst`
 - Latest published release: [`v0.0.11`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.11)
 - Current release hygiene baseline: latest known green `main` CI at `7030eaf`,
-  validated local required coverage `87.767%` against the `85%` gate; `90%` and
+  validated local required coverage `88.335%` against the `85%` gate; `90%` and
   `95%` coverage ratchets remain future targets.
 
 ## CLI Reference
