@@ -22,20 +22,11 @@ build, fast docs, and full docs.  It is deliberately not a Git hook; use
 ``--dry-run``, ``--list``, ``--only STAGE``, and ``--skip STAGE`` when you need
 to inspect or narrow the gate locally.
 
-The expanded command form is:
+The authoritative expanded command form is printed by:
 
 .. code-block:: bash
 
-   git status --short --branch
-   ruff check vmec_jax tests examples tools validation
-   python -m compileall -q vmec_jax examples tests tools validation
-   pytest -q tests/test_optimization_helpers.py tests/test_continuation_exact_history.py
-   pytest -q tests/test_residue_getfsq_parity.py tests/test_wout_profiles_currents_bundled_parity.py tests/test_converged_wout_matrix_parity.py tests/test_vmec2000_exec_threed1.py
-   pytest -q tests/test_booz_input.py tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_qi_objective_component_report.py tests/test_qi_seed_suitability_audit.py tests/test_qs_ess_render_smoke.py
-   pytest -q tests/test_quasisymmetry.py tests/test_optimization_examples.py tests/test_implicit_helpers.py tests/test_wout_additional_helpers.py tests/test_solve_additional_helpers.py tests/test_free_boundary_additional_helpers.py tests/test_vmec_kernel_additional_helpers.py tests/test_solve_branch_coverage.py tests/test_implicit_wout_driver_branch_coverage.py
-   JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt" --cov=vmec_jax --cov-report=xml --cov-report=term-missing:skip-covered --cov-fail-under=85
-   python -m build
-   python -m sphinx -W -b html docs docs/_build/html_release
+   python tools/diagnostics/local_ci_gate.py --dry-run
 
 These tests cover the required local lanes: continuation semantics, exact
 accepted-point history/output selection, no-executable VMEC residual parity,

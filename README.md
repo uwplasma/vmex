@@ -86,9 +86,9 @@ pass `solver_device="cpu"` / `solver_device="gpu"` explicitly.
 
 Editable optimization examples live in `examples/optimization/`. Start with
 `examples/optimization/README.md` for workflow anatomy, then use
-`docs/optimization.rst` for the full method guide and
-`docs/optimization_sweep_results.rst` for generated sweep tables, figures,
-minimal-seed stress cases, QI robustness notes, and reproduction commands.
+`docs/optimization.rst` for the full method guide,
+`docs/optimization_sweep_results.rst` for generated sweep tables/figures, and
+`docs/piecewise_omnigenous_plan.rst` for the pwO planning and acceptance gates.
 
 The panels below show the current stellarator-symmetric examples used for the
 README: initial LCFS, final LCFS, objective history, and initial/final Boozer

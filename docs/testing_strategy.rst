@@ -267,8 +267,10 @@ the recommended local escalation path.
        lanes and concrete bounded parity commands before a local or scheduled
        validation run.
    * - Bounded physics smoke
-     - ``RUN_FULL=1 pytest -q tests/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[circular_tokamak] tests/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[nfp4_QH_warm_start] tests/test_driver_api.py::test_run_free_boundary_smoke_on_bundled_small_case``
+     - ``python tools/diagnostics/local_ci_gate.py --only fetch-assets --only physics-smoke``
      - Before merging solver changes that affect fixed/free-boundary physics.
+       Use ``--dry-run`` on the same command to print the current expanded
+       fixture list instead of copying a stale hand-maintained command.
    * - Full physics tier
      - ``python tools/fetch_assets.py`` then ``RUN_FULL=1 JAX_ENABLE_X64=1 pytest -q -m "full and not vmec2000"``
      - Manual/nightly parity and high-cost physics validation.  The latest
