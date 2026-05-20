@@ -5,14 +5,14 @@ This page collects the generated optimization sweep artifacts used by the
 README and the main optimization guide.  The current sweep covers QA, QH, QP,
 and QI targets:
 
-- QA: the reference omnigenity NFP=2 QA deck, aspect ratio near 5,
+- QA: the reference omnigenity NFP=2 QA deck, aspect ratio near 6,
   signed mean iota target 0.42, and quasi-axisymmetry.
-- QH: the bundled NFP=4 warm start, aspect ratio near 5, quasi-helical
+- QH: the bundled NFP=4 warm start, aspect ratio near 6, quasi-helical
   symmetry, and a smooth ``abs(mean_iota) >= 0.41`` lower bound.
-- QP: aspect ratio near 5, quasi-poloidal symmetry, and a smooth
+- QP: aspect ratio near 6, quasi-poloidal symmetry, and a smooth
   ``abs(mean_iota) >= 0.41`` lower bound, using the same bundled NFP=2 seed as
   the QI runs.
-- QI: aspect ratio near 5 in the compact README best-row sweep, a differentiable smooth Boozer-space quasi-isodynamic
+- QI: aspect ratio near 6 in the compact README best-row sweep, a differentiable smooth Boozer-space quasi-isodynamic
   residual evaluated through ``booz_xform_jax``, maximum mirror-ratio penalty,
   maximum-LCFS-elongation penalty, and a smooth ``abs(mean_iota) >= 0.41``
   lower bound.  ``LgradB`` is available as an optional commented term in the
@@ -57,7 +57,7 @@ Run the CPU production sweep:
    PYTHONPATH=. python examples/optimization/render_qs_ess_publication_panel.py
 
 The compact README renderer currently filters QI rows against the same
-aspect-5 target as QA/QH/QP.  The standalone ``QI_optimization.py`` robustness
+aspect-6 target as QA/QH/QP.  The standalone ``QI_optimization.py`` robustness
 cases may still use case-specific aspect targets when mirror ratio or far-seed
 basin capture is the experiment; those rows are documented separately and are
 not mixed into the README best-row table.
@@ -131,7 +131,7 @@ Render the compact README panels from the best stellarator-symmetric rows:
    PYTHONPATH=. python examples/optimization/render_readme_best_optimizations.py
 
 The default per-case timeout is 1200 seconds.  The current README science
-configs use NFP=4 for QH, aspect targets near 5 for QA/QH/QP/QI, signed iota
+configs use NFP=4 for QH, aspect targets near 6 for QA/QH/QP/QI, signed iota
 0.42 for QA, and high-priority ``abs(mean_iota) >= 0.41`` constraints for
 QH/QP/QI.
 They use ``inner_max_iter = trial_max_iter = 120`` and
@@ -166,7 +166,7 @@ README Best Rows
 
 The README intentionally shows only one best ``LASYM = F`` result per target.
 QA/QH/QP/QI are selected from the CPU matrix and filtered against the common
-aspect-5 target.  The selected QI row is chosen with the legacy branch
+aspect-6 target.  The selected QI row is chosen with the legacy branch
 diagnostic, mirror-ratio, elongation, iota, and aspect-ratio gates used as
 promotion evidence rather than as exact equality constraints; small numerical
 slack is expected when independent Boozer diagnostics are recomputed after the
@@ -337,6 +337,14 @@ the same ranking as the legacy diagnostic on the seed and reference
 omnigenity cases.  Rows that stop at ``max_nfev`` but have valid VMEC solves
 and satisfy the physics gates are kept as valid stopped rows.
 
+The checked-in target-6 constrained-QI matrix is a transparent status artifact,
+not the promoted QI result.  At the moment it contains the bounded partial
+continuation row that was stopped by the 1200 second checkpoint before full
+diagnostics were available.  The README best QI row therefore comes from the
+standalone ``QI_optimization.py`` target-6 lane until the full constrained
+CPU/GPU matrix is rerun and passes the same QI, mirror, elongation, iota, and
+aspect gates.
+
 .. image:: _static/figures/qi_constrained_objective_panel.png
    :width: 100%
    :align: center
@@ -348,11 +356,12 @@ Downloadable constrained-QI summaries:
 - :download:`qi_constrained_summary.json <_static/figures/qi_constrained_summary.json>`
 - :download:`qi_constrained_best.json <_static/figures/qi_constrained_best.json>`
 
-The current README QI row is a CPU repeated-stage continuation, ``max_mode=3``,
-ESS row without a same-mode QP preseed: legacy-ranked QI diagnostic
-``2.17e-3``, maximum mirror ratio ``0.2106`` for a target ``0.21``, maximum
-elongation ``4.30`` for a target ``8.0``, aspect ratio ``5.001``, mean iota
-``-0.5494``, and total wall time ``11.3 min``.  Best-row selection uses
+The current README QI row is the CPU ``qi_default`` standalone
+``QI_optimization.py`` lane, ``max_mode=3``, ESS row without a same-mode QP
+preseed: legacy-ranked QI diagnostic ``4.31e-4``, smooth QI diagnostic
+``1.32e-3``, maximum mirror ratio ``0.272`` for a target ``0.30``, maximum
+elongation ``6.90`` for a target ``8.2``, aspect ratio ``6.002``, mean iota
+``-0.5690``, and total wall time ``10.9 min``.  Best-row selection uses
 ``vmec_jax.qi_promotion_score``: raw-fallback legacy diagnostics are rejected,
 rows above the loose ``2e-2`` QI promotion ceiling cannot win solely by having
 good mirror/elongation, and engineering-clean rows are preferred over lower-QI

@@ -36,6 +36,7 @@ vmec-jax documentation
       vmec_wiki_primer
       algorithms
       discrete_adjoint
+      piecewise_omnigenous_plan
       simsopt_comparison
       jxbforce_mercier
 

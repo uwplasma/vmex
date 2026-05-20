@@ -98,10 +98,10 @@ tables live in the docs.
 
 | Target | Backend | Policy | max_mode | ESS | Final J | QI legacy | Mirror | Aspect | Iota | Wall time |
 |---|---|---|---:|---|---:|---:|---:|---:|---:|---:|
-| QA | CPU | continuation | 3 | yes | 2.33e-04 |  |  | 5.000 | 0.4200 | 6.3 min |
-| QH | CPU | continuation | 3 | yes | 9.68e-03 |  |  | 4.999 | -1.6595 | 4.0 min |
-| QP | CPU | continuation | 3 | no | 6.76e-02 |  |  | 5.019 | -0.6255 | 3.7 min |
-| QI | CPU | continuation | 3 | yes | 2.17e-03 | 2.17e-03 | 0.211 | 5.001 | -0.5494 | 11.3 min |
+| QA | CPU | continuation | 3 | yes | 4.35e-04 |  |  | 6.000 | 0.4200 | 5.4 min |
+| QH | CPU | continuation | 3 | yes | 1.90e-03 |  |  | 6.000 | -1.2053 | 3.9 min |
+| QP | CPU | continuation | 3 | no | 5.38e-02 |  |  | 6.015 | -0.6724 | 3.9 min |
+| QI | CPU | qi_default | 3 | yes | 1.37e-02 | 4.31e-04 | 0.272 | 6.002 | -0.5690 | 10.9 min |
 
 <p align="center">
   <img src="docs/_static/figures/readme_best_optimization_qa.png" width="980" />
