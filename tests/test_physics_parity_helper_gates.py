@@ -9,7 +9,7 @@ import pytest
 from vmec_jax._compat import enable_x64
 from vmec_jax.booz_input import booz_xform_inputs_from_state
 from vmec_jax.config import load_config
-from vmec_jax.finite_beta import magnetic_well_from_vp
+from vmec_jax.finite_beta import finite_beta_scalars_from_state, magnetic_well_from_vp
 from vmec_jax.profiles import MU0, eval_profiles
 from vmec_jax.static import build_static
 from vmec_jax.wout import read_wout, state_from_wout
@@ -172,6 +172,59 @@ def test_small_wout_current_scalar_and_force_balance_gate(case_name: str, wout_n
         err_msg=f"{case_name}: equif no longer matches the normalized radial force-balance identity",
     )
     assert np.max(np.abs(np.asarray(wout.equif, dtype=float)[1:-1])) < 0.02, case_name
+
+
+def test_finite_beta_state_scalars_match_shaped_wout_energy_gate() -> None:
+    """Differentiable finite-beta scalars should reproduce bundled VMEC2000 WOUT diagnostics."""
+    pytest.importorskip("jax")
+    pytest.importorskip("netCDF4")
+    enable_x64(True)
+
+    cfg, indata = load_config(str(_data_dir() / "input.shaped_tokamak_pressure"))
+    wout = read_wout(_data_dir() / "wout_shaped_tokamak_pressure.nc")
+    assert int(cfg.ns) == int(wout.ns)
+    assert int(cfg.mpol) == int(wout.mpol)
+    assert int(cfg.ntor) == int(wout.ntor)
+
+    scalars = finite_beta_scalars_from_state(
+        state=state_from_wout(wout),
+        static=build_static(cfg),
+        indata=indata,
+        signgs=int(wout.signgs),
+    )
+
+    np.testing.assert_allclose(np.asarray(scalars["aspect"]), float(wout.aspect), rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(np.asarray(scalars["iotas"]), np.asarray(wout.iotas), rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(np.asarray(scalars["iotaf"]), np.asarray(wout.iotaf), rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(np.asarray(scalars["vp"]), np.asarray(wout.vp), rtol=1.0e-12, atol=1.0e-11)
+    np.testing.assert_allclose(np.asarray(scalars["wb"]), float(wout.wb), rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(np.asarray(scalars["wp"]), float(wout.wp), rtol=1.0e-12, atol=1.0e-13)
+    np.testing.assert_allclose(
+        np.asarray(scalars["betatotal"]),
+        float(wout.wp) / float(wout.wb),
+        rtol=1.0e-12,
+        atol=1.0e-15,
+    )
+    np.testing.assert_allclose(
+        np.asarray(scalars["volume"]) * (4.0 * np.pi**2),
+        float(wout.volume_p),
+        rtol=5.0e-9,
+        atol=1.0e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(scalars["volavgB"]),
+        np.sqrt(2.0 * float(wout.wb) / (float(wout.volume_p) / (4.0 * np.pi**2))),
+        rtol=5.0e-9,
+        atol=1.0e-13,
+    )
+    np.testing.assert_allclose(
+        np.asarray(magnetic_well_from_vp(scalars["vp"])),
+        np.asarray(magnetic_well_from_vp(wout.vp)),
+        rtol=1.0e-12,
+        atol=1.0e-13,
+    )
+    assert float(np.asarray(scalars["wp"])) > 0.0
+    assert 0.0 < float(np.asarray(scalars["betatotal"])) < 1.0e-2
 
 
 def test_single_grid_lasym_finite_beta_force_balance_and_asymmetry_gate() -> None:

@@ -175,22 +175,64 @@ def test_profile_summary_extracts_solver_subphase_buckets() -> None:
         solver_device="cpu",
     )
     report["profile"]["trial_solver_compute_forces"] = {"count": 1, "wall_time_s": 1.25}
+    report["profile"]["trial_solver_compute_forces_first"] = {"count": 1, "wall_time_s": 0.45}
+    report["profile"]["trial_solver_compute_forces_rest"] = {"count": 1, "wall_time_s": 0.80}
     report["profile"]["trial_solver_preconditioner"] = {"count": 1, "wall_time_s": 0.75}
+    report["profile"]["trial_solver_precond_refresh"] = {"count": 1, "wall_time_s": 0.15}
+    report["profile"]["trial_solver_preconditioner_apply"] = {"count": 1, "wall_time_s": 0.25}
+    report["profile"]["trial_solver_preconditioner_mode_scale"] = {"count": 1, "wall_time_s": 0.10}
     report["profile"]["trial_solver_update"] = {"count": 1, "wall_time_s": 0.50}
+    report["profile"]["trial_solver_update_state"] = {"count": 1, "wall_time_s": 0.40}
     report["profile"]["solve_forward_trial_unattributed"] = {"count": 1, "wall_time_s": 0.25}
     report["profile"]["exact_tape_solver_compute_forces"] = {"count": 1, "wall_time_s": 2.25}
+    report["profile"]["exact_tape_solver_compute_forces_first"] = {"count": 1, "wall_time_s": 1.00}
+    report["profile"]["exact_tape_solver_compute_forces_rest"] = {"count": 1, "wall_time_s": 1.25}
     report["profile"]["exact_tape_solver_preconditioner"] = {"count": 1, "wall_time_s": 1.75}
+    report["profile"]["exact_tape_solver_precond_refresh"] = {"count": 1, "wall_time_s": 0.35}
+    report["profile"]["exact_tape_solver_preconditioner_apply"] = {"count": 1, "wall_time_s": 0.95}
+    report["profile"]["exact_tape_solver_preconditioner_mode_scale"] = {"count": 1, "wall_time_s": 0.20}
     report["profile"]["exact_tape_solver_update"] = {"count": 1, "wall_time_s": 1.50}
+    report["profile"]["exact_tape_solver_update_state"] = {"count": 1, "wall_time_s": 1.20}
+    report["profile"]["forward_exact_solver_compute_forces"] = {"count": 1, "wall_time_s": 1.35}
+    report["profile"]["forward_exact_solver_compute_forces_first"] = {"count": 1, "wall_time_s": 0.55}
+    report["profile"]["forward_exact_solver_compute_forces_rest"] = {"count": 1, "wall_time_s": 0.80}
+    report["profile"]["forward_exact_solver_preconditioner"] = {"count": 1, "wall_time_s": 0.95}
+    report["profile"]["forward_exact_solver_precond_refresh"] = {"count": 1, "wall_time_s": 0.25}
+    report["profile"]["forward_exact_solver_preconditioner_apply"] = {"count": 1, "wall_time_s": 0.45}
+    report["profile"]["forward_exact_solver_preconditioner_mode_scale"] = {"count": 1, "wall_time_s": 0.15}
+    report["profile"]["forward_exact_solver_update"] = {"count": 1, "wall_time_s": 0.65}
+    report["profile"]["forward_exact_solver_update_state"] = {"count": 1, "wall_time_s": 0.50}
 
     summary = compare_tool.summarize_payload(report, label="cpu")
 
     assert summary["metrics"]["trial_solver_compute_forces_s"] == 1.25
+    assert summary["metrics"]["trial_solver_compute_forces_first_s"] == 0.45
+    assert summary["metrics"]["trial_solver_compute_forces_rest_s"] == 0.80
     assert summary["metrics"]["trial_solver_preconditioner_s"] == 0.75
+    assert summary["metrics"]["trial_solver_precond_refresh_s"] == 0.15
+    assert summary["metrics"]["trial_solver_preconditioner_apply_s"] == 0.25
+    assert summary["metrics"]["trial_solver_preconditioner_mode_scale_s"] == 0.10
     assert summary["metrics"]["trial_solver_update_s"] == 0.50
+    assert summary["metrics"]["trial_solver_update_state_s"] == 0.40
     assert summary["metrics"]["trial_solve_unattributed_s"] == 0.25
     assert summary["metrics"]["exact_tape_solver_compute_forces_s"] == 2.25
+    assert summary["metrics"]["exact_tape_solver_compute_forces_first_s"] == 1.00
+    assert summary["metrics"]["exact_tape_solver_compute_forces_rest_s"] == 1.25
     assert summary["metrics"]["exact_tape_solver_preconditioner_s"] == 1.75
+    assert summary["metrics"]["exact_tape_solver_precond_refresh_s"] == 0.35
+    assert summary["metrics"]["exact_tape_solver_preconditioner_apply_s"] == 0.95
+    assert summary["metrics"]["exact_tape_solver_preconditioner_mode_scale_s"] == 0.20
     assert summary["metrics"]["exact_tape_solver_update_s"] == 1.50
+    assert summary["metrics"]["exact_tape_solver_update_state_s"] == 1.20
+    assert summary["metrics"]["forward_exact_solver_compute_forces_s"] == 1.35
+    assert summary["metrics"]["forward_exact_solver_compute_forces_first_s"] == 0.55
+    assert summary["metrics"]["forward_exact_solver_compute_forces_rest_s"] == 0.80
+    assert summary["metrics"]["forward_exact_solver_preconditioner_s"] == 0.95
+    assert summary["metrics"]["forward_exact_solver_precond_refresh_s"] == 0.25
+    assert summary["metrics"]["forward_exact_solver_preconditioner_apply_s"] == 0.45
+    assert summary["metrics"]["forward_exact_solver_preconditioner_mode_scale_s"] == 0.15
+    assert summary["metrics"]["forward_exact_solver_update_s"] == 0.65
+    assert summary["metrics"]["forward_exact_solver_update_state_s"] == 0.50
 
 
 def test_profile_summary_extracts_solve_call_internal_buckets() -> None:
@@ -452,6 +494,29 @@ def test_exact_optimizer_patch_target_skips_broad_tape_build_when_unattributed_a
     summary = compare_tool.summarize_payload(payload, label="profile")
 
     assert summary["exact_optimizer_patch_target"]["name"] == "jacobian_tape_replay"
+
+
+def test_exact_optimizer_patch_target_prefers_split_solver_leaves() -> None:
+    payload = {
+        "report_kind": "exact_optimizer_callback_profile",
+        "total_wall_time_s": 10.0,
+        "profile": {
+            "trial_solver_compute_forces": {"count": 1, "wall_time_s": 4.0},
+            "trial_solver_compute_forces_first": {"count": 1, "wall_time_s": 2.5},
+            "trial_solver_compute_forces_rest": {"count": 1, "wall_time_s": 1.5},
+            "exact_tape_solver_preconditioner": {"count": 1, "wall_time_s": 3.0},
+            "exact_tape_solver_precond_refresh": {"count": 1, "wall_time_s": 0.8},
+            "exact_tape_solver_preconditioner_apply": {"count": 1, "wall_time_s": 1.9},
+            "exact_tape_solver_preconditioner_mode_scale": {"count": 1, "wall_time_s": 0.3},
+        },
+    }
+
+    summary = compare_tool.summarize_payload(payload, label="profile")
+
+    target = summary["exact_optimizer_patch_target"]
+    assert target["name"] == "trial_solver_compute_forces_first"
+    assert target["wall_time_s"] == 2.5
+    assert target["share_of_total"] == pytest.approx(0.25)
 
 
 def test_qi_boozer_report_summary_extracts_phase_metrics() -> None:
