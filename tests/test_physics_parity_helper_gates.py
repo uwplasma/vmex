@@ -19,6 +19,10 @@ def _data_dir() -> Path:
     return Path(__file__).resolve().parents[1] / "examples" / "data"
 
 
+def _single_grid_data_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "examples_single_grid" / "data"
+
+
 def _full_and_half_mesh(ns: int) -> tuple[np.ndarray, np.ndarray]:
     s_full = np.linspace(0.0, 1.0, int(ns))
     if int(ns) < 2:
@@ -168,6 +172,50 @@ def test_small_wout_current_scalar_and_force_balance_gate(case_name: str, wout_n
         err_msg=f"{case_name}: equif no longer matches the normalized radial force-balance identity",
     )
     assert np.max(np.abs(np.asarray(wout.equif, dtype=float)[1:-1])) < 0.02, case_name
+
+
+def test_single_grid_lasym_finite_beta_force_balance_and_asymmetry_gate() -> None:
+    """LASYM=T finite-beta WOUTs should preserve scalar identities and asymmetric spectra."""
+    pytest.importorskip("netCDF4")
+
+    wout = read_wout(_single_grid_data_dir() / "wout_basic_non_stellsym_pressure_reference.nc")
+    assert bool(wout.lasym)
+    assert float(wout.wp) > 0.0
+    assert float(wout.wb) > 0.0
+    np.testing.assert_allclose(float(wout.betatotal), float(wout.wp) / float(wout.wb), rtol=1.0e-13)
+
+    dmerc_parts = (
+        np.asarray(wout.Dshear)
+        + np.asarray(wout.Dcurr)
+        + np.asarray(wout.Dwell)
+        + np.asarray(wout.Dgeod)
+    )
+    np.testing.assert_allclose(np.asarray(wout.DMerc), dmerc_parts, rtol=0.0, atol=0.0)
+    assert np.linalg.norm(np.asarray(wout.DMerc, dtype=float)[1:-1]) > 0.0
+
+    equif_expected = _normalized_equif_from_wout_profiles(wout)
+    np.testing.assert_allclose(
+        np.asarray(wout.equif, dtype=float),
+        equif_expected,
+        rtol=1.0e-12,
+        atol=2.0e-14,
+    )
+    assert np.max(np.abs(np.asarray(wout.equif, dtype=float)[1:-1])) > 0.1
+
+    bdotgradv = np.zeros(int(wout.ns), dtype=float)
+    bdotgradv[1:-1] = (
+        float(wout.signgs)
+        * (np.asarray(wout.phips)[1:-1] + np.asarray(wout.phips)[2:])
+        / (np.asarray(wout.vp)[1:-1] + np.asarray(wout.vp)[2:])
+    )
+    bdotgradv[0] = 2.0 * bdotgradv[1] - bdotgradv[2]
+    bdotgradv[-1] = 2.0 * bdotgradv[-2] - bdotgradv[-3]
+    np.testing.assert_allclose(np.asarray(wout.bdotgradv), bdotgradv, rtol=1.0e-13, atol=1.0e-13)
+
+    for name in ("rmns", "zmnc", "lmnc", "bmns", "bsubumns", "bsubvmns"):
+        values = np.asarray(getattr(wout, name), dtype=float)
+        assert np.all(np.isfinite(values)), name
+        assert np.linalg.norm(values) > 0.0, name
 
 
 def test_circular_fixture_boozer_inputs_preserve_wout_spectral_conventions() -> None:
