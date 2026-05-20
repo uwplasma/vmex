@@ -133,7 +133,7 @@ with a no-dependencies wheel download after publication.
 The release notes should list user-visible changes, validation coverage, known
 limitations, and any optional external validation that was not run.
 The next release candidate should cite the ``7030eaf``-or-newer green CI run,
-the validated ``86.871%`` local required coverage result, the unchanged
+the validated ``87.314%`` local required coverage result, the unchanged
 ``85%`` enforced coverage gate, and the fact that ``90%``/``95%`` coverage and
 NFP=4 QI robustness are not yet achieved.
 
