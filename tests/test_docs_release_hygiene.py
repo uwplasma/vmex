@@ -63,6 +63,7 @@ def test_qi_case_specific_artifacts_are_not_documented_as_aspect6_promotions() -
     optimization = (ROOT / "docs" / "optimization.rst").read_text()
     sweep_results = (ROOT / "docs" / "optimization_sweep_results.rst").read_text()
     validation = (ROOT / "docs" / "validation.rst").read_text()
+    qi_cases_csv = (ROOT / "docs" / "_static" / "figures" / "readme_qi_optimization_cases.csv").read_text()
 
     for text in (readme, optimization, sweep_results, validation):
         assert "case-specific" in text
@@ -72,3 +73,7 @@ def test_qi_case_specific_artifacts_are_not_documented_as_aspect6_promotions() -
     for text in (readme, optimization, sweep_results):
         assert "NFP=1/2/3 have passing saved diagnostics" not in text
         assert "passing QI lanes" not in text
+        assert "validation_status=promoted" not in text
+
+    assert ",promoted," not in qi_cases_csv
+    assert ",case-gated," in qi_cases_csv

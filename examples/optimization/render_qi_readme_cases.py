@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Render README/docs coverage for the promoted QI_optimization inputs.
+"""Render README/docs coverage for the reviewed QI_optimization inputs.
 
 This renderer intentionally consumes existing reviewed outputs instead of
 launching new optimization jobs.  The initial/final Boozer |B| panels use line
@@ -34,7 +34,7 @@ class QICase:
     output_dir: Path
     initial_wout: Path
     note: str
-    validation_status: str = "promoted"
+    validation_status: str = "case-gated"
     history_paths: tuple[Path, ...] = ()
     preconditioner_summary: Path | None = None
     raw_initial_wout_exception: str = ""
@@ -44,15 +44,20 @@ CASES = (
     QICase(
         label="NFP=1 QI",
         input_file=REPO_ROOT / "examples" / "data" / "input.nfp1_QI",
-        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp1_qi_aspect6",
-        initial_wout=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp1_qi_aspect6" / "wout_initial.nc",
+        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp1_qi_direct_office_20260519",
+        initial_wout=REPO_ROOT
+        / "results"
+        / "qi_opt"
+        / "ess"
+        / "nfp1_qi_direct_office_20260519"
+        / "wout_initial.nc",
         note="mirror-aware QI lane",
         history_paths=(
             REPO_ROOT
             / "results"
             / "qi_opt"
             / "ess"
-            / "nfp1_qi_aspect6"
+            / "nfp1_qi_direct_office_20260519"
             / "mirror_ramp_01_matrix_free_mirror030"
             / "history.json",
         ),
@@ -60,23 +65,37 @@ CASES = (
     QICase(
         label="NFP=2 bundled QI",
         input_file=REPO_ROOT / "examples" / "data" / "input.nfp2_QI",
-        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp2_qi_aspect6",
-        initial_wout=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp2_qi_aspect6" / "wout_initial.nc",
+        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp2_qi",
+        initial_wout=REPO_ROOT / "results" / "qi_opt" / "ess" / "nfp2_qi" / "wout_initial.nc",
         note="default mirror-aware QI lane",
         history_paths=(
             REPO_ROOT
             / "results"
             / "qi_opt"
             / "ess"
-            / "nfp2_qi_aspect6"
+            / "nfp2_qi"
+            / "mirror_ramp_01_qi_basin"
+            / "history.json",
+            REPO_ROOT
+            / "results"
+            / "qi_opt"
+            / "ess"
+            / "nfp2_qi"
             / "mirror_ramp_01_matrix_free_mirror030"
+            / "history.json",
+            REPO_ROOT
+            / "results"
+            / "qi_opt"
+            / "ess"
+            / "nfp2_qi"
+            / "mirror_ramp_02_lcfs_mirror_030"
             / "history.json",
         ),
     ),
     QICase(
         label="NFP=3 seed 3127",
         input_file=REPO_ROOT / "examples" / "data" / "input.QI_stel_seed_3127",
-        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "qi_stel_seed_3127_aspect6",
+        output_dir=REPO_ROOT / "results" / "qi_opt" / "ess" / "qi_stel_seed_3127_mirror_calibrated_20260516",
         initial_wout=REPO_ROOT / "examples" / "data" / "wout_QI_stel_seed_3127.nc",
         note="passing reference-family QI lane",
         history_paths=(
@@ -84,20 +103,20 @@ CASES = (
             / "results"
             / "qi_opt"
             / "ess"
-            / "qi_stel_seed_3127_aspect6"
+            / "qi_stel_seed_3127_mirror_calibrated_20260516"
             / "history.json",
             REPO_ROOT
             / "results"
             / "qi_opt"
             / "ess"
-            / "qi_stel_seed_3127_aspect6"
+            / "qi_stel_seed_3127_mirror_calibrated_20260516"
             / "boundary_reference_baseline"
             / "history.json",
             REPO_ROOT
             / "results"
             / "qi_opt"
             / "ess"
-            / "qi_stel_seed_3127_aspect6"
+            / "qi_stel_seed_3127_mirror_calibrated_20260516"
             / "mirror_ramp_01_prefiltered_mirror_qi_iota_cleanup"
             / "history.json",
         ),
@@ -105,7 +124,7 @@ CASES = (
         / "results"
         / "qi_opt"
         / "ess"
-        / "qi_stel_seed_3127_aspect6"
+        / "qi_stel_seed_3127_mirror_calibrated_20260516"
         / "boundary_reference_preconditioner"
         / "summary.json",
         raw_initial_wout_exception=(
@@ -340,9 +359,11 @@ def _case_record(case: QICase) -> dict[str, str | float]:
     _validate_case_initial_wout(case)
     stress_fixture = bool(diagnostics.get("qi_case_stress_fixture", False))
     expected_gate_status = str(diagnostics.get("qi_case_expected_gate_status", "candidate"))
-    validation_status = "deferred" if case.validation_status == "deferred" or stress_fixture else "promoted"
-    if validation_status == "promoted" and diagnostics.get("qi_engineering_gate_passed") is False:
-        raise RuntimeError(f"{case.label} is promoted but failed the QI engineering gate")
+    if case.validation_status not in {"case-gated", "deferred"}:
+        raise RuntimeError(f"{case.label} has unsupported validation_status={case.validation_status!r}")
+    validation_status = "deferred" if case.validation_status == "deferred" or stress_fixture else "case-gated"
+    if validation_status == "case-gated" and diagnostics.get("qi_engineering_gate_passed") is False:
+        raise RuntimeError(f"{case.label} is case-gated but failed the QI engineering gate")
     return {
         "case": case.label,
         "input_file": str(case.input_file.relative_to(REPO_ROOT)),
@@ -558,7 +579,7 @@ def _plot_boozer_bmag(ax, wout_path: Path, nfp: int, title: str) -> None:
 
 def _row_title(record: dict[str, str | float]) -> str:
     status = str(record["validation_status"])
-    suffix = "" if status == "promoted" else f", status={status}"
+    suffix = f", status={status}"
     return (
         f"{record['case']} | J={record['objective_final']:.2e}, "
         f"QI={record['qi_legacy_total']:.2e}, smooth={record['qi_smooth_total']:.2e}, "
